@@ -124,14 +124,14 @@ class ScreenResources {
 class DesktopResizerLinux : public DesktopResizer {
  public:
   DesktopResizerLinux();
-  virtual ~DesktopResizerLinux();
+  ~DesktopResizerLinux() override;
 
   // DesktopResizer interface
-  virtual ScreenResolution GetCurrentResolution() OVERRIDE;
-  virtual std::list<ScreenResolution> GetSupportedResolutions(
-      const ScreenResolution& preferred) OVERRIDE;
-  virtual void SetResolution(const ScreenResolution& resolution) OVERRIDE;
-  virtual void RestoreResolution(const ScreenResolution& original) OVERRIDE;
+  ScreenResolution GetCurrentResolution() override;
+  std::list<ScreenResolution> GetSupportedResolutions(
+      const ScreenResolution& preferred) override;
+  void SetResolution(const ScreenResolution& resolution) override;
+  void RestoreResolution(const ScreenResolution& original) override;
 
  private:
   // Create a mode, and attach it to the primary output. If the mode already
@@ -324,7 +324,7 @@ void DesktopResizerLinux::SwitchToMode(const char* name) {
 }
 
 scoped_ptr<DesktopResizer> DesktopResizer::Create() {
-  return scoped_ptr<DesktopResizer>(new DesktopResizerLinux);
+  return make_scoped_ptr(new DesktopResizerLinux);
 }
 
 }  // namespace remoting

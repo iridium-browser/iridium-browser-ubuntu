@@ -215,35 +215,6 @@ void RenderDeprecatedFlexibleBox::computeIntrinsicLogicalWidths(LayoutUnit& minL
     minLogicalWidth += scrollbarWidth;
 }
 
-void RenderDeprecatedFlexibleBox::computePreferredLogicalWidths()
-{
-    ASSERT(preferredLogicalWidthsDirty());
-
-    m_minPreferredLogicalWidth = m_maxPreferredLogicalWidth = 0;
-    RenderStyle* styleToUse = style();
-
-    if (styleToUse->width().isFixed() && styleToUse->width().value() > 0)
-        m_minPreferredLogicalWidth = m_maxPreferredLogicalWidth = adjustContentBoxLogicalWidthForBoxSizing(styleToUse->width().value());
-    else
-        computeIntrinsicLogicalWidths(m_minPreferredLogicalWidth, m_maxPreferredLogicalWidth);
-
-    if (styleToUse->minWidth().isFixed() && styleToUse->minWidth().value() > 0) {
-        m_maxPreferredLogicalWidth = std::max(m_maxPreferredLogicalWidth, adjustContentBoxLogicalWidthForBoxSizing(styleToUse->minWidth().value()));
-        m_minPreferredLogicalWidth = std::max(m_minPreferredLogicalWidth, adjustContentBoxLogicalWidthForBoxSizing(styleToUse->minWidth().value()));
-    }
-
-    if (styleToUse->maxWidth().isFixed()) {
-        m_maxPreferredLogicalWidth = std::min(m_maxPreferredLogicalWidth, adjustContentBoxLogicalWidthForBoxSizing(styleToUse->maxWidth().value()));
-        m_minPreferredLogicalWidth = std::min(m_minPreferredLogicalWidth, adjustContentBoxLogicalWidthForBoxSizing(styleToUse->maxWidth().value()));
-    }
-
-    LayoutUnit borderAndPadding = borderAndPaddingLogicalWidth();
-    m_minPreferredLogicalWidth += borderAndPadding;
-    m_maxPreferredLogicalWidth += borderAndPadding;
-
-    clearPreferredLogicalWidthsDirty();
-}
-
 void RenderDeprecatedFlexibleBox::layoutBlock(bool relayoutChildren)
 {
     ASSERT(needsLayout());
@@ -1056,17 +1027,6 @@ const char* RenderDeprecatedFlexibleBox::renderName() const
         return "RenderDeprecatedFlexibleBox (floating)";
     if (isOutOfFlowPositioned())
         return "RenderDeprecatedFlexibleBox (positioned)";
-    // FIXME: Cleanup isPseudoElement duplication with other renderName methods.
-    // crbug.com/415653
-    if (isPseudoElement()) {
-        if (style()->styleType() == BEFORE)
-            return "RenderDeprecatedFlexibleBox (pseudo:before)";
-        if (style()->styleType() == AFTER)
-            return "RenderDeprecatedFlexibleBox (pseudo:after)";
-        if (style()->styleType() == BACKDROP)
-            return "RenderDeprecatedFlexibleBox (pseudo:backdrop)";
-        ASSERT_NOT_REACHED();
-    }
     if (isAnonymous())
         return "RenderDeprecatedFlexibleBox (generated)";
     if (isRelPositioned())

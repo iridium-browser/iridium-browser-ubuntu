@@ -13,9 +13,12 @@
 #include "cc/output/compositor_frame.h"
 #include "cc/output/compositor_frame_metadata.h"
 #include "cc/output/copy_output_request.h"
+#include "cc/surfaces/surface.h"
+#include "cc/surfaces/surface_manager.h"
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/compositor/resize_lock.h"
 #include "content/browser/compositor/test/no_transport_image_transport_factory.h"
+#include "content/browser/frame_host/render_widget_host_view_guest.h"
 #include "content/browser/renderer_host/overscroll_controller.h"
 #include "content/browser/renderer_host/overscroll_controller_delegate.h"
 #include "content/browser/renderer_host/render_widget_host_delegate.h"
@@ -47,12 +50,15 @@
 #include "ui/aura/window_observer.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/compositor/compositor.h"
+#include "ui/compositor/layer_tree_owner.h"
 #include "ui/compositor/test/draw_waiter_for_test.h"
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
-#include "ui/events/gestures/gesture_configuration.h"
+#include "ui/events/gesture_detection/gesture_configuration.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/wm/core/default_activation_client.h"
+#include "ui/wm/core/default_screen_position_client.h"
+#include "ui/wm/core/window_util.h"
 
 using testing::_;
 
@@ -66,35 +72,6 @@ using blink::WebTouchPoint;
 namespace content {
 namespace {
 
-// Simple screen position client to test coordinate system conversion.
-class TestScreenPositionClient
-    : public aura::client::ScreenPositionClient {
- public:
-  TestScreenPositionClient() {}
-  virtual ~TestScreenPositionClient() {}
-
-  // aura::client::ScreenPositionClient overrides:
-  virtual void ConvertPointToScreen(const aura::Window* window,
-      gfx::Point* point) OVERRIDE {
-    point->Offset(-1, -1);
-  }
-
-  virtual void ConvertPointFromScreen(const aura::Window* window,
-      gfx::Point* point) OVERRIDE {
-    point->Offset(1, 1);
-  }
-
-  virtual void ConvertHostPointToScreen(aura::Window* window,
-      gfx::Point* point) OVERRIDE {
-    ConvertPointToScreen(window, point);
-  }
-
-  virtual void SetBounds(aura::Window* window,
-      const gfx::Rect& bounds,
-      const gfx::Display& display) OVERRIDE {
-  }
-};
-
 class TestOverscrollDelegate : public OverscrollControllerDelegate {
  public:
   explicit TestOverscrollDelegate(RenderWidgetHostView* view)
@@ -104,7 +81,7 @@ class TestOverscrollDelegate : public OverscrollControllerDelegate {
         delta_x_(0.f),
         delta_y_(0.f) {}
 
-  virtual ~TestOverscrollDelegate() {}
+  ~TestOverscrollDelegate() override {}
 
   OverscrollMode current_mode() const { return current_mode_; }
   OverscrollMode completed_mode() const { return completed_mode_; }
@@ -119,24 +96,24 @@ class TestOverscrollDelegate : public OverscrollControllerDelegate {
 
  private:
   // Overridden from OverscrollControllerDelegate:
-  virtual gfx::Rect GetVisibleBounds() const OVERRIDE {
+  gfx::Rect GetVisibleBounds() const override {
     return view_->IsShowing() ? view_->GetViewBounds() : gfx::Rect();
   }
 
-  virtual bool OnOverscrollUpdate(float delta_x, float delta_y) OVERRIDE {
+  bool OnOverscrollUpdate(float delta_x, float delta_y) override {
     delta_x_ = delta_x;
     delta_y_ = delta_y;
     return true;
   }
 
-  virtual void OnOverscrollComplete(OverscrollMode overscroll_mode) OVERRIDE {
+  void OnOverscrollComplete(OverscrollMode overscroll_mode) override {
     EXPECT_EQ(current_mode_, overscroll_mode);
     completed_mode_ = overscroll_mode;
     current_mode_ = OVERSCROLL_NONE;
   }
 
-  virtual void OnOverscrollModeChange(OverscrollMode old_mode,
-                                      OverscrollMode new_mode) OVERRIDE {
+  void OnOverscrollModeChange(OverscrollMode old_mode,
+                              OverscrollMode new_mode) override {
     EXPECT_EQ(current_mode_, old_mode);
     current_mode_ = new_mode;
     delta_x_ = delta_y_ = 0.f;
@@ -154,7 +131,7 @@ class TestOverscrollDelegate : public OverscrollControllerDelegate {
 class MockRenderWidgetHostDelegate : public RenderWidgetHostDelegate {
  public:
   MockRenderWidgetHostDelegate() {}
-  virtual ~MockRenderWidgetHostDelegate() {}
+  ~MockRenderWidgetHostDelegate() override {}
 };
 
 // Simple observer that keeps track of changes to a window for tests.
@@ -164,7 +141,7 @@ class TestWindowObserver : public aura::WindowObserver {
       : window_(window_to_observe) {
     window_->AddObserver(this);
   }
-  virtual ~TestWindowObserver() {
+  ~TestWindowObserver() override {
     if (window_)
       window_->RemoveObserver(this);
   }
@@ -172,7 +149,7 @@ class TestWindowObserver : public aura::WindowObserver {
   bool destroyed() const { return destroyed_; }
 
   // aura::WindowObserver overrides:
-  virtual void OnWindowDestroyed(aura::Window* window) OVERRIDE {
+  void OnWindowDestroyed(aura::Window* window) override {
     CHECK_EQ(window, window_);
     destroyed_ = true;
     window_ = NULL;
@@ -193,10 +170,10 @@ class FakeFrameSubscriber : public RenderWidgetHostViewFrameSubscriber {
   FakeFrameSubscriber(gfx::Size size, base::Callback<void(bool)> callback)
       : size_(size), callback_(callback) {}
 
-  virtual bool ShouldCaptureFrame(const gfx::Rect& damage_rect,
-                                  base::TimeTicks present_time,
-                                  scoped_refptr<media::VideoFrame>* storage,
-                                  DeliverFrameCallback* callback) OVERRIDE {
+  bool ShouldCaptureFrame(const gfx::Rect& damage_rect,
+                          base::TimeTicks present_time,
+                          scoped_refptr<media::VideoFrame>* storage,
+                          DeliverFrameCallback* callback) override {
     *storage = media::VideoFrame::CreateFrame(media::VideoFrame::YV12,
                                               size_,
                                               gfx::Rect(size_),
@@ -219,13 +196,14 @@ class FakeFrameSubscriber : public RenderWidgetHostViewFrameSubscriber {
 
 class FakeRenderWidgetHostViewAura : public RenderWidgetHostViewAura {
  public:
-  FakeRenderWidgetHostViewAura(RenderWidgetHost* widget)
-      : RenderWidgetHostViewAura(widget), has_resize_lock_(false) {}
+  FakeRenderWidgetHostViewAura(RenderWidgetHost* widget,
+                               bool is_guest_view_hack)
+      : RenderWidgetHostViewAura(widget, is_guest_view_hack),
+        has_resize_lock_(false) {}
 
-  virtual ~FakeRenderWidgetHostViewAura() {}
+  ~FakeRenderWidgetHostViewAura() override {}
 
-  virtual scoped_ptr<ResizeLock> CreateResizeLock(
-      bool defer_compositor_lock) OVERRIDE {
+  scoped_ptr<ResizeLock> CreateResizeLock(bool defer_compositor_lock) override {
     gfx::Size desired_size = window()->bounds().size();
     return scoped_ptr<ResizeLock>(
         new FakeResizeLock(desired_size, defer_compositor_lock));
@@ -236,12 +214,11 @@ class FakeRenderWidgetHostViewAura : public RenderWidgetHostViewAura {
         window()->GetHost()->compositor());
   }
 
-  virtual bool ShouldCreateResizeLock() OVERRIDE {
+  bool ShouldCreateResizeLock() override {
     return GetDelegatedFrameHost()->ShouldCreateResizeLockForTesting();
   }
 
-  virtual void RequestCopyOfOutput(scoped_ptr<cc::CopyOutputRequest> request)
-      OVERRIDE {
+  void RequestCopyOfOutput(scoped_ptr<cc::CopyOutputRequest> request) override {
     last_copy_request_ = request.Pass();
     if (last_copy_request_->has_texture_mailbox()) {
       // Give the resulting texture a size.
@@ -256,6 +233,14 @@ class FakeRenderWidgetHostViewAura : public RenderWidgetHostViewAura {
 
   cc::DelegatedFrameProvider* frame_provider() const {
     return GetDelegatedFrameHost()->FrameProviderForTesting();
+  }
+
+  cc::SurfaceId surface_id() const {
+    return GetDelegatedFrameHost()->SurfaceIdForTesting();
+  }
+
+  bool HasFrameData() const {
+    return frame_provider() || !surface_id().is_null();
   }
 
   bool released_front_lock_active() const {
@@ -279,24 +264,24 @@ class FakeRenderWidgetHostViewAura : public RenderWidgetHostViewAura {
 class FullscreenLayoutManager : public aura::LayoutManager {
  public:
   explicit FullscreenLayoutManager(aura::Window* owner) : owner_(owner) {}
-  virtual ~FullscreenLayoutManager() {}
+  ~FullscreenLayoutManager() override {}
 
   // Overridden from aura::LayoutManager:
-  virtual void OnWindowResized() OVERRIDE {
+  void OnWindowResized() override {
     aura::Window::Windows::const_iterator i;
     for (i = owner_->children().begin(); i != owner_->children().end(); ++i) {
       (*i)->SetBounds(gfx::Rect());
     }
   }
-  virtual void OnWindowAddedToLayout(aura::Window* child) OVERRIDE {
+  void OnWindowAddedToLayout(aura::Window* child) override {
     child->SetBounds(gfx::Rect());
   }
-  virtual void OnWillRemoveWindowFromLayout(aura::Window* child) OVERRIDE {}
-  virtual void OnWindowRemovedFromLayout(aura::Window* child) OVERRIDE {}
-  virtual void OnChildWindowVisibilityChanged(aura::Window* child,
-                                              bool visible) OVERRIDE {}
-  virtual void SetChildBounds(aura::Window* child,
-                              const gfx::Rect& requested_bounds) OVERRIDE {
+  void OnWillRemoveWindowFromLayout(aura::Window* child) override {}
+  void OnWindowRemovedFromLayout(aura::Window* child) override {}
+  void OnChildWindowVisibilityChanged(aura::Window* child,
+                                      bool visible) override {}
+  void SetChildBounds(aura::Window* child,
+                      const gfx::Rect& requested_bounds) override {
     SetChildBoundsDirect(child, gfx::Rect(owner_->bounds().size()));
   }
 
@@ -315,7 +300,9 @@ class MockWindowObserver : public aura::WindowObserver {
 class RenderWidgetHostViewAuraTest : public testing::Test {
  public:
   RenderWidgetHostViewAuraTest()
-      : browser_thread_for_ui_(BrowserThread::UI, &message_loop_) {}
+      : widget_host_uses_shutdown_to_destroy_(false),
+        is_guest_view_hack_(false),
+        browser_thread_for_ui_(BrowserThread::UI, &message_loop_) {}
 
   void SetUpEnvironment() {
     ImageTransportFactory::InitializeForUnitTests(
@@ -333,7 +320,8 @@ class RenderWidgetHostViewAuraTest : public testing::Test {
 
     parent_host_ = new RenderWidgetHostImpl(
         &delegate_, process_host_, MSG_ROUTING_NONE, false);
-    parent_view_ = new RenderWidgetHostViewAura(parent_host_);
+    parent_view_ = new RenderWidgetHostViewAura(parent_host_,
+                                                is_guest_view_hack_);
     parent_view_->InitAsChild(NULL);
     aura::client::ParentWindowWithContext(parent_view_->GetNativeView(),
                                           aura_test_helper_->root_window(),
@@ -342,7 +330,7 @@ class RenderWidgetHostViewAuraTest : public testing::Test {
     widget_host_ = new RenderWidgetHostImpl(
         &delegate_, process_host_, MSG_ROUTING_NONE, false);
     widget_host_->Init();
-    view_ = new FakeRenderWidgetHostViewAura(widget_host_);
+    view_ = new FakeRenderWidgetHostViewAura(widget_host_, is_guest_view_hack_);
   }
 
   void TearDownEnvironment() {
@@ -350,7 +338,11 @@ class RenderWidgetHostViewAuraTest : public testing::Test {
     process_host_ = NULL;
     if (view_)
       view_->Destroy();
-    delete widget_host_;
+
+    if (widget_host_uses_shutdown_to_destroy_)
+      widget_host_->Shutdown();
+    else
+      delete widget_host_;
 
     parent_view_->Destroy();
     delete parent_host_;
@@ -363,11 +355,20 @@ class RenderWidgetHostViewAuraTest : public testing::Test {
     ImageTransportFactory::Terminate();
   }
 
-  virtual void SetUp() { SetUpEnvironment(); }
+  void SetUp() override { SetUpEnvironment(); }
 
-  virtual void TearDown() { TearDownEnvironment(); }
+  void TearDown() override { TearDownEnvironment(); }
+
+  void set_widget_host_uses_shutdown_to_destroy(bool use) {
+    widget_host_uses_shutdown_to_destroy_ = use;
+  }
 
  protected:
+  // If true, then calls RWH::Shutdown() instead of deleting RWH.
+  bool widget_host_uses_shutdown_to_destroy_;
+
+  bool is_guest_view_hack_;
+
   base::MessageLoopForUI message_loop_;
   BrowserThreadImpl browser_thread_for_ui_;
   scoped_ptr<aura::test::AuraTestHelper> aura_test_helper_;
@@ -391,13 +392,47 @@ class RenderWidgetHostViewAuraTest : public testing::Test {
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewAuraTest);
 };
 
+// Helper class to instantiate RenderWidgetHostViewGuest which is backed
+// by an aura platform view.
+class RenderWidgetHostViewGuestAuraTest : public RenderWidgetHostViewAuraTest {
+ public:
+  RenderWidgetHostViewGuestAuraTest() {
+    // Use RWH::Shutdown to destroy RWH, instead of deleting.
+    // This will ensure that the RenderWidgetHostViewGuest is not leaked and
+    // is deleted properly upon RWH going away.
+    set_widget_host_uses_shutdown_to_destroy(true);
+  }
+
+  // We explicitly invoke SetUp to allow gesture debounce customization.
+  void SetUp() override {
+    is_guest_view_hack_ = true;
+
+    RenderWidgetHostViewAuraTest::SetUp();
+
+    guest_view_weak_ = (new RenderWidgetHostViewGuest(
+        widget_host_, NULL, view_->GetWeakPtr()))->GetWeakPtr();
+  }
+
+  void TearDown() override {
+    // Internal override to do nothing, we clean up ourselves in the test body.
+    // This helps us test that |guest_view_weak_| does not leak.
+  }
+
+ protected:
+  base::WeakPtr<RenderWidgetHostViewBase> guest_view_weak_;
+
+ private:
+
+  DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewGuestAuraTest);
+};
+
 class RenderWidgetHostViewAuraOverscrollTest
     : public RenderWidgetHostViewAuraTest {
  public:
   RenderWidgetHostViewAuraOverscrollTest() {}
 
   // We explicitly invoke SetUp to allow gesture debounce customization.
-  virtual void SetUp() {}
+  void SetUp() override {}
 
  protected:
   void SetUpOverscrollEnvironmentWithDebounce(int debounce_interval_in_ms) {
@@ -407,7 +442,7 @@ class RenderWidgetHostViewAuraOverscrollTest
   void SetUpOverscrollEnvironment() { SetUpOverscrollEnvironmentImpl(0); }
 
   void SetUpOverscrollEnvironmentImpl(int debounce_interval_in_ms) {
-    ui::GestureConfiguration::set_scroll_debounce_interval_in_ms(
+    ui::GestureConfiguration::GetInstance()->set_scroll_debounce_interval_in_ms(
         debounce_interval_in_ms);
 
     RenderWidgetHostViewAuraTest::SetUp();
@@ -617,7 +652,7 @@ class RenderWidgetHostViewAuraShutdownTest
  public:
   RenderWidgetHostViewAuraShutdownTest() {}
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     // No TearDownEnvironment here, we do this explicitly during the test.
   }
 
@@ -645,7 +680,7 @@ TEST_F(RenderWidgetHostViewAuraTest, FocusFullscreen) {
 // Checks that a popup is positioned correctly relative to its parent using
 // screen coordinates.
 TEST_F(RenderWidgetHostViewAuraTest, PositionChildPopup) {
-  TestScreenPositionClient screen_position_client;
+  wm::DefaultScreenPositionClient screen_position_client;
 
   aura::Window* window = parent_view_->GetNativeView();
   aura::Window* root = window->GetRootWindow();
@@ -757,6 +792,60 @@ TEST_F(RenderWidgetHostViewAuraTest, DestroyPopupTapOutsidePopup) {
   view_ = NULL;
 }
 
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+
+// On Desktop Linux, select boxes need mouse capture in order to work. Test that
+// when a select box is opened via a mouse press that it retains mouse capture
+// after the mouse is released.
+TEST_F(RenderWidgetHostViewAuraTest, PopupRetainsCaptureAfterMouseRelease) {
+  parent_view_->SetBounds(gfx::Rect(10, 10, 400, 400));
+  parent_view_->Focus();
+  EXPECT_TRUE(parent_view_->HasFocus());
+
+  ui::test::EventGenerator generator(
+      parent_view_->GetNativeView()->GetRootWindow(), gfx::Point(300, 300));
+  generator.PressLeftButton();
+
+  view_->SetPopupType(blink::WebPopupTypeSelect);
+  view_->InitAsPopup(parent_view_, gfx::Rect(10, 10, 100, 100));
+  ASSERT_TRUE(view_->NeedsMouseCapture());
+  aura::Window* window = view_->GetNativeView();
+  EXPECT_TRUE(window->HasCapture());
+
+  generator.ReleaseLeftButton();
+  EXPECT_TRUE(window->HasCapture());
+}
+#endif
+
+// Test that select boxes close when their parent window loses focus (e.g. due
+// to an alert or system modal dialog).
+TEST_F(RenderWidgetHostViewAuraTest, PopupClosesWhenParentLosesFocus) {
+  parent_view_->SetBounds(gfx::Rect(10, 10, 400, 400));
+  parent_view_->Focus();
+  EXPECT_TRUE(parent_view_->HasFocus());
+
+  view_->SetPopupType(blink::WebPopupTypeSelect);
+  view_->InitAsPopup(parent_view_, gfx::Rect(10, 10, 100, 100));
+
+  aura::Window* popup_window = view_->GetNativeView();
+  TestWindowObserver observer(popup_window);
+
+  aura::test::TestWindowDelegate delegate;
+  scoped_ptr<aura::Window> dialog_window(new aura::Window(&delegate));
+  dialog_window->Init(aura::WINDOW_LAYER_TEXTURED);
+  aura::client::ParentWindowWithContext(
+      dialog_window.get(), popup_window, gfx::Rect());
+  dialog_window->Show();
+  wm::ActivateWindow(dialog_window.get());
+  dialog_window->Focus();
+
+  ASSERT_TRUE(wm::IsActiveWindow(dialog_window.get()));
+  EXPECT_TRUE(observer.destroyed());
+
+  widget_host_ = NULL;
+  view_ = NULL;
+}
+
 // Checks that IME-composition-event state is maintained correctly.
 TEST_F(RenderWidgetHostViewAuraTest, SetCompositionText) {
   view_->InitAsChild(NULL);
@@ -806,6 +895,49 @@ TEST_F(RenderWidgetHostViewAuraTest, SetCompositionText) {
 
   view_->ImeCancelComposition();
   EXPECT_FALSE(view_->has_composition_text_);
+}
+
+// Checks that sequence of IME-composition-event and mouse-event when mouse
+// clicking to cancel the composition.
+TEST_F(RenderWidgetHostViewAuraTest, FinishCompositionByMouse) {
+  view_->InitAsChild(NULL);
+  view_->Show();
+
+  ui::CompositionText composition_text;
+  composition_text.text = base::ASCIIToUTF16("|a|b");
+
+  // Focused segment
+  composition_text.underlines.push_back(
+      ui::CompositionUnderline(0, 3, 0xff000000, true, 0x78563412));
+
+  // Non-focused segment, with different background color.
+  composition_text.underlines.push_back(
+      ui::CompositionUnderline(3, 4, 0xff000000, false, 0xefcdab90));
+
+  // Caret is at the end. (This emulates Japanese MSIME 2007 and later)
+  composition_text.selection = gfx::Range(4);
+
+  view_->SetCompositionText(composition_text);
+  EXPECT_TRUE(view_->has_composition_text_);
+  sink_->ClearMessages();
+
+  // Simulates the mouse press.
+  ui::MouseEvent mouse_event(ui::ET_MOUSE_PRESSED,
+                             gfx::Point(), gfx::Point(),
+                             ui::EF_LEFT_MOUSE_BUTTON, 0);
+  view_->OnMouseEvent(&mouse_event);
+
+  EXPECT_FALSE(view_->has_composition_text_);
+
+  EXPECT_EQ(2U, sink_->message_count());
+
+  if (sink_->message_count() == 2) {
+    // Verify mouse event happens after the confirm-composition event.
+    EXPECT_EQ(InputMsg_ImeConfirmComposition::ID,
+              sink_->GetMessageAt(0)->type());
+    EXPECT_EQ(InputMsg_HandleInputEvent::ID,
+              sink_->GetMessageAt(1)->type());
+  }
 }
 
 // Checks that touch-event state is maintained correctly.
@@ -1252,6 +1384,35 @@ TEST_F(RenderWidgetHostViewAuraTest, SwapNotifiesWindow) {
   view_->window_->RemoveObserver(&observer);
 }
 
+// Recreating the layers for a window should cause Surface destruction to
+// depend on both layers.
+TEST_F(RenderWidgetHostViewAuraTest, RecreateLayers) {
+  gfx::Size view_size(100, 100);
+  gfx::Rect view_rect(view_size);
+
+  view_->InitAsChild(NULL);
+  aura::client::ParentWindowWithContext(
+      view_->GetNativeView(), parent_view_->GetNativeView()->GetRootWindow(),
+      gfx::Rect());
+  view_->SetSize(view_size);
+  view_->WasShown();
+
+  view_->OnSwapCompositorFrame(0,
+                               MakeDelegatedFrame(1.f, view_size, view_rect));
+  scoped_ptr<ui::LayerTreeOwner> cloned_owner(
+      wm::RecreateLayers(view_->GetNativeView()));
+
+  cc::SurfaceId id = view_->GetDelegatedFrameHost()->SurfaceIdForTesting();
+  if (!id.is_null()) {
+    ImageTransportFactory* factory = ImageTransportFactory::GetInstance();
+    cc::SurfaceManager* manager = factory->GetSurfaceManager();
+    cc::Surface* surface = manager->GetSurfaceForId(id);
+    EXPECT_TRUE(surface);
+    // Should be a SurfaceSequence for both the original and new layers.
+    EXPECT_EQ(2u, surface->GetDestructionDependencyCount());
+  }
+}
+
 TEST_F(RenderWidgetHostViewAuraTest, Resize) {
   gfx::Size size1(100, 100);
   gfx::Size size2(200, 200);
@@ -1322,10 +1483,23 @@ TEST_F(RenderWidgetHostViewAuraTest, Resize) {
   ui::DrawWaiterForTest::WaitForCommit(
       root_window->GetHost()->compositor());
   EXPECT_EQ(size3.ToString(), view_->GetRequestedRendererSize().ToString());
+  cc::SurfaceId surface_id = view_->surface_id();
+  int swap_index = 0;
+  int resize_index = 1;
+  if (!surface_id.is_null()) {
+    // Frame ack is sent only due to a draw callback with surfaces.
+    ImageTransportFactory::GetInstance()
+        ->GetSurfaceManager()
+        ->GetSurfaceForId(surface_id)
+        ->RunDrawCallbacks();
+    swap_index = 1;
+    resize_index = 0;
+  }
   EXPECT_EQ(2u, sink_->message_count());
-  EXPECT_EQ(ViewMsg_SwapCompositorFrameAck::ID, sink_->GetMessageAt(0)->type());
+  EXPECT_EQ(ViewMsg_SwapCompositorFrameAck::ID,
+            sink_->GetMessageAt(swap_index)->type());
   {
-    const IPC::Message* msg = sink_->GetMessageAt(1);
+    const IPC::Message* msg = sink_->GetMessageAt(resize_index);
     EXPECT_EQ(ViewMsg_Resize::ID, msg->type());
     ViewMsg_Resize::Param params;
     ViewMsg_Resize::Read(msg, &params);
@@ -1488,7 +1662,7 @@ TEST_F(RenderWidgetHostViewAuraTest, DiscardDelegatedFrames) {
     hosts[i] = new RenderWidgetHostImpl(
         &delegate_, process_host_, MSG_ROUTING_NONE, false);
     hosts[i]->Init();
-    views[i] = new FakeRenderWidgetHostViewAura(hosts[i]);
+    views[i] = new FakeRenderWidgetHostViewAura(hosts[i], false);
     views[i]->InitAsChild(NULL);
     aura::client::ParentWindowWithContext(
         views[i]->GetNativeView(),
@@ -1502,20 +1676,20 @@ TEST_F(RenderWidgetHostViewAuraTest, DiscardDelegatedFrames) {
     views[i]->WasShown();
     views[i]->OnSwapCompositorFrame(
         1, MakeDelegatedFrame(1.f, frame_size, view_rect));
-    EXPECT_TRUE(views[i]->frame_provider());
+    EXPECT_TRUE(views[i]->HasFrameData());
     views[i]->WasHidden();
   }
 
   // There should be max_renderer_frames with a frame in it, and one without it.
   // Since the logic is LRU eviction, the first one should be without.
-  EXPECT_FALSE(views[0]->frame_provider());
+  EXPECT_FALSE(views[0]->HasFrameData());
   for (size_t i = 1; i < renderer_count; ++i)
-    EXPECT_TRUE(views[i]->frame_provider());
+    EXPECT_TRUE(views[i]->HasFrameData());
 
   // LRU renderer is [0], make it visible, it shouldn't evict anything yet.
   views[0]->WasShown();
-  EXPECT_FALSE(views[0]->frame_provider());
-  EXPECT_TRUE(views[1]->frame_provider());
+  EXPECT_FALSE(views[0]->HasFrameData());
+  EXPECT_TRUE(views[1]->HasFrameData());
   // Since [0] doesn't have a frame, it should be waiting for the renderer to
   // give it one.
   EXPECT_TRUE(views[0]->released_front_lock_active());
@@ -1523,8 +1697,8 @@ TEST_F(RenderWidgetHostViewAuraTest, DiscardDelegatedFrames) {
   // Swap a frame on it, it should evict the next LRU [1].
   views[0]->OnSwapCompositorFrame(
       1, MakeDelegatedFrame(1.f, frame_size, view_rect));
-  EXPECT_TRUE(views[0]->frame_provider());
-  EXPECT_FALSE(views[1]->frame_provider());
+  EXPECT_TRUE(views[0]->HasFrameData());
+  EXPECT_FALSE(views[1]->HasFrameData());
   // Now that [0] got a frame, it shouldn't be waiting any more.
   EXPECT_FALSE(views[0]->released_front_lock_active());
   views[0]->WasHidden();
@@ -1533,11 +1707,11 @@ TEST_F(RenderWidgetHostViewAuraTest, DiscardDelegatedFrames) {
   // the next LRU [2].
   views[1]->OnSwapCompositorFrame(
       1, MakeDelegatedFrame(1.f, frame_size, view_rect));
-  EXPECT_TRUE(views[0]->frame_provider());
-  EXPECT_TRUE(views[1]->frame_provider());
-  EXPECT_FALSE(views[2]->frame_provider());
+  EXPECT_TRUE(views[0]->HasFrameData());
+  EXPECT_TRUE(views[1]->HasFrameData());
+  EXPECT_FALSE(views[2]->HasFrameData());
   for (size_t i = 3; i < renderer_count; ++i)
-    EXPECT_TRUE(views[i]->frame_provider());
+    EXPECT_TRUE(views[i]->HasFrameData());
 
   // Make all renderers but [0] visible and swap a frame on them, keep [0]
   // hidden, it becomes the LRU.
@@ -1546,20 +1720,20 @@ TEST_F(RenderWidgetHostViewAuraTest, DiscardDelegatedFrames) {
     // The renderers who don't have a frame should be waiting. The ones that
     // have a frame should not.
     // In practice, [1] has a frame, but anything after has its frame evicted.
-    EXPECT_EQ(!views[i]->frame_provider(),
+    EXPECT_EQ(!views[i]->HasFrameData(),
               views[i]->released_front_lock_active());
     views[i]->OnSwapCompositorFrame(
         1, MakeDelegatedFrame(1.f, frame_size, view_rect));
     // Now everyone has a frame.
     EXPECT_FALSE(views[i]->released_front_lock_active());
-    EXPECT_TRUE(views[i]->frame_provider());
+    EXPECT_TRUE(views[i]->HasFrameData());
   }
-  EXPECT_FALSE(views[0]->frame_provider());
+  EXPECT_FALSE(views[0]->HasFrameData());
 
   // Swap a frame on [0], it should be evicted immediately.
   views[0]->OnSwapCompositorFrame(
       1, MakeDelegatedFrame(1.f, frame_size, view_rect));
-  EXPECT_FALSE(views[0]->frame_provider());
+  EXPECT_FALSE(views[0]->HasFrameData());
 
   // Make [0] visible, and swap a frame on it. Nothing should be evicted
   // although we're above the limit.
@@ -1570,11 +1744,11 @@ TEST_F(RenderWidgetHostViewAuraTest, DiscardDelegatedFrames) {
       1, MakeDelegatedFrame(1.f, frame_size, view_rect));
   EXPECT_FALSE(views[0]->released_front_lock_active());
   for (size_t i = 0; i < renderer_count; ++i)
-    EXPECT_TRUE(views[i]->frame_provider());
+    EXPECT_TRUE(views[i]->HasFrameData());
 
   // Make [0] hidden, it should evict its frame.
   views[0]->WasHidden();
-  EXPECT_FALSE(views[0]->frame_provider());
+  EXPECT_FALSE(views[0]->HasFrameData());
 
   // Make [0] visible, don't give it a frame, it should be waiting.
   views[0]->WasShown();
@@ -1585,10 +1759,10 @@ TEST_F(RenderWidgetHostViewAuraTest, DiscardDelegatedFrames) {
 
   // Make [1] hidden, resize it. It should drop its frame.
   views[1]->WasHidden();
-  EXPECT_TRUE(views[1]->frame_provider());
+  EXPECT_TRUE(views[1]->HasFrameData());
   gfx::Size size2(200, 200);
   views[1]->SetSize(size2);
-  EXPECT_FALSE(views[1]->frame_provider());
+  EXPECT_FALSE(views[1]->HasFrameData());
   // Show it, it should block until we give it a frame.
   views[1]->WasShown();
   EXPECT_TRUE(views[1]->released_front_lock_active());
@@ -1616,9 +1790,9 @@ TEST_F(RenderWidgetHostViewAuraTest, DiscardDelegatedFrames) {
   views[renderer_count - 1]->WasHidden();
   for (size_t i = 0; i < renderer_count; ++i) {
     if (i + 2 < renderer_count)
-      EXPECT_FALSE(views[i]->frame_provider());
+      EXPECT_FALSE(views[i]->HasFrameData());
     else
-      EXPECT_TRUE(views[i]->frame_provider());
+      EXPECT_TRUE(views[i]->HasFrameData());
   }
   HostSharedBitmapManager::current()->ProcessRemoved(
       base::GetCurrentProcessHandle());
@@ -1650,7 +1824,7 @@ TEST_F(RenderWidgetHostViewAuraTest, DiscardDelegatedFramesWithLocking) {
     hosts[i] = new RenderWidgetHostImpl(
         &delegate_, process_host_, MSG_ROUTING_NONE, false);
     hosts[i]->Init();
-    views[i] = new FakeRenderWidgetHostViewAura(hosts[i]);
+    views[i] = new FakeRenderWidgetHostViewAura(hosts[i], false);
     views[i]->InitAsChild(NULL);
     aura::client::ParentWindowWithContext(
         views[i]->GetNativeView(),
@@ -1665,25 +1839,25 @@ TEST_F(RenderWidgetHostViewAuraTest, DiscardDelegatedFramesWithLocking) {
     views[i]->WasShown();
     views[i]->OnSwapCompositorFrame(
         1, MakeDelegatedFrame(1.f, frame_size, view_rect));
-    EXPECT_TRUE(views[i]->frame_provider());
+    EXPECT_TRUE(views[i]->HasFrameData());
   }
 
   // If we hide [0], then [0] should be evicted.
   views[0]->WasHidden();
-  EXPECT_FALSE(views[0]->frame_provider());
+  EXPECT_FALSE(views[0]->HasFrameData());
 
   // If we lock [0] before hiding it, then [0] should not be evicted.
   views[0]->WasShown();
   views[0]->OnSwapCompositorFrame(
         1, MakeDelegatedFrame(1.f, frame_size, view_rect));
-  EXPECT_TRUE(views[0]->frame_provider());
+  EXPECT_TRUE(views[0]->HasFrameData());
   views[0]->GetDelegatedFrameHost()->LockResources();
   views[0]->WasHidden();
-  EXPECT_TRUE(views[0]->frame_provider());
+  EXPECT_TRUE(views[0]->HasFrameData());
 
   // If we unlock [0] now, then [0] should be evicted.
   views[0]->GetDelegatedFrameHost()->UnlockResources();
-  EXPECT_FALSE(views[0]->frame_provider());
+  EXPECT_FALSE(views[0]->HasFrameData());
 
   for (size_t i = 0; i < renderer_count; ++i) {
     views[i]->Destroy();
@@ -1710,6 +1884,7 @@ TEST_F(RenderWidgetHostViewAuraTest, SoftwareDPIChange) {
   // Save the frame provider.
   scoped_refptr<cc::DelegatedFrameProvider> frame_provider =
       view_->frame_provider();
+  cc::SurfaceId surface_id = view_->surface_id();
 
   // This frame will have the same number of physical pixels, but has a new
   // scale on it.
@@ -1719,7 +1894,10 @@ TEST_F(RenderWidgetHostViewAuraTest, SoftwareDPIChange) {
   // When we get a new frame with the same frame size in physical pixels, but a
   // different scale, we should generate a new frame provider, as the final
   // result will need to be scaled differently to the screen.
-  EXPECT_NE(frame_provider.get(), view_->frame_provider());
+  if (frame_provider.get())
+    EXPECT_NE(frame_provider.get(), view_->frame_provider());
+  else
+    EXPECT_NE(surface_id, view_->surface_id());
 }
 
 class RenderWidgetHostViewAuraCopyRequestTest
@@ -1764,8 +1942,7 @@ TEST_F(RenderWidgetHostViewAuraCopyRequestTest, DestroyedAfterCopyRequest) {
   EXPECT_EQ(0, callback_count_);
   EXPECT_FALSE(view_->last_copy_request_);
 
-  view_->BeginFrameSubscription(
-      frame_subscriber.PassAs<RenderWidgetHostViewFrameSubscriber>());
+  view_->BeginFrameSubscription(frame_subscriber.Pass());
   view_->OnSwapCompositorFrame(
       1, MakeDelegatedFrame(1.f, view_rect.size(), gfx::Rect(view_rect)));
 
@@ -2757,6 +2934,13 @@ TEST_F(RenderWidgetHostViewAuraOverscrollTest, OverscrollResetsOnBlur) {
   EXPECT_EQ(OVERSCROLL_NONE, overscroll_delegate()->current_mode());
   EXPECT_EQ(OVERSCROLL_EAST, overscroll_delegate()->completed_mode());
   EXPECT_EQ(3U, sink_->message_count());
+}
+
+// Tests that when view initiated shutdown happens (i.e. RWHView is deleted
+// before RWH), we clean up properly and don't leak the RWHVGuest.
+TEST_F(RenderWidgetHostViewGuestAuraTest, GuestViewDoesNotLeak) {
+  TearDownEnvironment();
+  ASSERT_FALSE(guest_view_weak_.get());
 }
 
 }  // namespace content

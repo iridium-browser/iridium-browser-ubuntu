@@ -82,6 +82,9 @@ class RegWriter(template_writer.TemplateWriter):
 
       list.append('"%s"=%s' % (policy['name'], example_value_str))
 
+  def WriteComment(self, comment):
+    self._prefix.append('; ' + comment)
+
   def WritePolicy(self, policy):
     if self.CanBeMandatory(policy):
       self._WritePolicy(policy,
@@ -103,8 +106,12 @@ class RegWriter(template_writer.TemplateWriter):
     self._mandatory = []
     self._recommended = []
     self._last_key = {}
+    self._prefix = []
 
   def GetTemplateText(self):
-    prefix = ['Windows Registry Editor Version 5.00']
-    all = prefix + self._mandatory + self._recommended
+    self._prefix.append('Windows Registry Editor Version 5.00')
+    if self._GetChromiumVersionString() is not None:
+      self.WriteComment(self.config['build'] + ' version: ' + \
+          self._GetChromiumVersionString())
+    all = self._prefix + self._mandatory + self._recommended
     return self.NEWLINE.join(all)

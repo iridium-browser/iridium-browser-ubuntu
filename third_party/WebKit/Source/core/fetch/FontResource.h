@@ -38,24 +38,22 @@ namespace blink {
 class Document;
 class ResourceFetcher;
 class FontPlatformData;
-class SVGFontElement;
 class FontCustomPlatformData;
 
-class FontResource FINAL : public Resource {
+class FontResource final : public Resource {
 public:
     typedef ResourceClient ClientType;
 
     FontResource(const ResourceRequest&);
     virtual ~FontResource();
-    virtual void trace(Visitor*) OVERRIDE;
 
-    virtual void load(ResourceFetcher*, const ResourceLoaderOptions&) OVERRIDE;
+    virtual void load(ResourceFetcher*, const ResourceLoaderOptions&) override;
 
-    virtual void didAddClient(ResourceClient*) OVERRIDE;
+    virtual void didAddClient(ResourceClient*) override;
 
-    virtual void allClientsRemoved() OVERRIDE;
+    virtual void allClientsRemoved() override;
     void beginLoadIfNeeded(ResourceFetcher* dl);
-    virtual bool stillNeedsLoad() const OVERRIDE { return m_state != LoadInitiated; }
+    virtual bool stillNeedsLoad() const override { return m_state != LoadInitiated; }
     bool exceedsFontLoadWaitLimit() const { return m_exceedsFontLoadWaitLimit; }
 
     bool loadScheduled() const { return m_state != Unloaded; }
@@ -68,16 +66,11 @@ public:
     bool ensureCustomFontData();
     FontPlatformData platformDataFromCustomData(float size, bool bold, bool italic, FontOrientation = Horizontal, FontWidthVariant = RegularWidth);
 
-#if ENABLE(SVG_FONTS)
-    bool ensureSVGFontData();
-    SVGFontElement* getSVGFontById(const String&) const;
-#endif
-
 protected:
-    virtual bool isSafeToUnlock() const OVERRIDE;
+    virtual bool isSafeToUnlock() const override;
 
 private:
-    virtual void checkNotify() OVERRIDE;
+    virtual void checkNotify() override;
     void fontLoadWaitLimitCallback(Timer<FontResource>*);
 
     enum State { Unloaded, LoadScheduled, LoadInitiated };
@@ -88,10 +81,6 @@ private:
     bool m_corsFailed;
     Timer<FontResource> m_fontLoadWaitLimitTimer;
 
-#if ENABLE(SVG_FONTS)
-    RefPtrWillBeMember<Document> m_externalSVGDocument;
-#endif
-
     friend class MemoryCache;
 };
 
@@ -101,7 +90,7 @@ class FontResourceClient : public ResourceClient {
 public:
     virtual ~FontResourceClient() { }
     static ResourceClientType expectedType() { return FontType; }
-    virtual ResourceClientType resourceClientType() const OVERRIDE FINAL { return expectedType(); }
+    virtual ResourceClientType resourceClientType() const override final { return expectedType(); }
     virtual void fontLoaded(FontResource*) { }
     virtual void didStartFontLoad(FontResource*) { }
     virtual void fontLoadWaitLimitExceeded(FontResource*) { }

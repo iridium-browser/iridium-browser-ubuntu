@@ -63,13 +63,13 @@ public:
             m_client->didSendData(bytesSent, totalBytesToBeSent);
     }
 
-    void didReceiveResponse(unsigned long identifier, const ResourceResponse& response)
+    void didReceiveResponse(unsigned long identifier, const ResourceResponse& response, PassOwnPtr<WebDataConsumerHandle> handle)
     {
         if (m_client)
-            m_client->didReceiveResponse(identifier, response);
+            m_client->didReceiveResponse(identifier, response, handle);
     }
 
-    void didReceiveData(const char* data, int dataLength)
+    void didReceiveData(const char* data, unsigned dataLength)
     {
         if (m_client)
             m_client->didReceiveData(data, dataLength);
@@ -115,7 +115,7 @@ public:
     void didReceiveAuthenticationCancellation(unsigned long identifier, const ResourceResponse& response)
     {
         if (m_client)
-            m_client->didReceiveResponse(identifier, response);
+            m_client->didReceiveResponse(identifier, response, nullptr);
     }
 
     void didDownloadData(int dataLength)

@@ -50,7 +50,7 @@ class OAuth2LoginVerifier : public base::SupportsWeakPtr<OAuth2LoginVerifier>,
                       net::URLRequestContextGetter* system_request_context,
                       net::URLRequestContextGetter* user_request_context,
                       const std::string& oauthlogin_access_token);
-  virtual ~OAuth2LoginVerifier();
+  ~OAuth2LoginVerifier() override;
 
   // Initiates verification of GAIA cookies in |profile|'s cookie jar.
   void VerifyUserCookies(Profile* profile);
@@ -66,22 +66,19 @@ class OAuth2LoginVerifier : public base::SupportsWeakPtr<OAuth2LoginVerifier>,
     RESTORE_FROM_OAUTH2_REFRESH_TOKEN = 2,
   };
   // GaiaAuthConsumer overrides.
-  virtual void OnUberAuthTokenSuccess(const std::string& token) OVERRIDE;
-  virtual void OnUberAuthTokenFailure(
-      const GoogleServiceAuthError& error) OVERRIDE;
-  virtual void OnMergeSessionSuccess(const std::string& data) OVERRIDE;
-  virtual void OnMergeSessionFailure(
-      const GoogleServiceAuthError& error) OVERRIDE;
-  virtual void OnListAccountsSuccess(const std::string& data) OVERRIDE;
-  virtual void OnListAccountsFailure(
-      const GoogleServiceAuthError& error) OVERRIDE;
+  void OnUberAuthTokenSuccess(const std::string& token) override;
+  void OnUberAuthTokenFailure(const GoogleServiceAuthError& error) override;
+  void OnMergeSessionSuccess(const std::string& data) override;
+  void OnMergeSessionFailure(const GoogleServiceAuthError& error) override;
+  void OnListAccountsSuccess(const std::string& data) override;
+  void OnListAccountsFailure(const GoogleServiceAuthError& error) override;
 
   // OAuth2TokenService::Consumer overrides.
-  virtual void OnGetTokenSuccess(const OAuth2TokenService::Request* request,
-                                 const std::string& access_token,
-                                 const base::Time& expiration_time) OVERRIDE;
-  virtual void OnGetTokenFailure(const OAuth2TokenService::Request* request,
-                                 const GoogleServiceAuthError& error) OVERRIDE;
+  void OnGetTokenSuccess(const OAuth2TokenService::Request* request,
+                         const std::string& access_token,
+                         const base::Time& expiration_time) override;
+  void OnGetTokenFailure(const OAuth2TokenService::Request* request,
+                         const GoogleServiceAuthError& error) override;
 
   // Starts fetching OAuth1 access token for OAuthLogin call.
   void StartFetchingOAuthLoginAccessToken(Profile* profile);

@@ -121,7 +121,8 @@ const OncFieldSignature openvpn_fields[] = {
     { ::onc::openvpn::kIgnoreDefaultRoute, &kBoolSignature},
     { ::onc::openvpn::kKeyDirection, &kStringSignature},
     { ::onc::openvpn::kNsCertType, &kStringSignature},
-    { ::onc::vpn::kPassword, &kStringSignature},
+    { ::onc::openvpn::kOTP, &kStringSignature},
+    { ::onc::openvpn::kPassword, &kStringSignature},
     { ::onc::openvpn::kPort, &kIntegerSignature},
     { ::onc::openvpn::kProto, &kStringSignature},
     { ::onc::openvpn::kPushPeerInfo, &kBoolSignature},
@@ -142,6 +143,7 @@ const OncFieldSignature openvpn_fields[] = {
     { ::onc::openvpn::kStaticChallenge, &kStringSignature},
     { ::onc::openvpn::kTLSAuthContents, &kStringSignature},
     { ::onc::openvpn::kTLSRemote, &kStringSignature},
+    { ::onc::openvpn::kUserAuthenticationType, &kStringSignature},
     { ::onc::vpn::kUsername, &kStringSignature},
     // Not supported, yet.
     { ::onc::openvpn::kVerb, &kStringSignature},
@@ -201,6 +203,7 @@ const OncFieldSignature proxy_settings_fields[] = {
 
 const OncFieldSignature wifi_fields[] = {
     { ::onc::kRecommended, &kRecommendedSignature},
+    { ::onc::wifi::kAllowGatewayARPPolling, &kBoolSignature},
     { ::onc::wifi::kAutoConnect, &kBoolSignature},
     { ::onc::wifi::kEAP, &kEAPSignature},
     { ::onc::wifi::kHiddenSSID, &kBoolSignature},

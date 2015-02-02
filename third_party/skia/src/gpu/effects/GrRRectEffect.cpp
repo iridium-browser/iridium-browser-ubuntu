@@ -59,14 +59,14 @@ public:
 
     typedef GLCircularRRectEffect GLProcessor;
 
-    virtual void getConstantColorComponents(GrColor* color, uint32_t* validFlags) const SK_OVERRIDE;
-
     virtual const GrBackendFragmentProcessorFactory& getFactory() const SK_OVERRIDE;
 
 private:
     CircularRRectEffect(GrPrimitiveEdgeType, uint32_t circularCornerFlags, const SkRRect&);
 
-    virtual bool onIsEqual(const GrProcessor& other) const SK_OVERRIDE;
+    virtual bool onIsEqual(const GrFragmentProcessor& other) const SK_OVERRIDE;
+
+    virtual void onComputeInvariantOutput(InvariantOutput* inout) const SK_OVERRIDE;
 
     SkRRect                fRRect;
     GrPrimitiveEdgeType    fEdgeType;
@@ -86,8 +86,8 @@ GrFragmentProcessor* CircularRRectEffect::Create(GrPrimitiveEdgeType edgeType,
     return SkNEW_ARGS(CircularRRectEffect, (edgeType, circularCornerFlags, rrect));
 }
 
-void CircularRRectEffect::getConstantColorComponents(GrColor* color, uint32_t* validFlags) const {
-    *validFlags = 0;
+void CircularRRectEffect::onComputeInvariantOutput(InvariantOutput* inout) const {
+    inout->mulByUnknownAlpha();
 }
 
 const GrBackendFragmentProcessorFactory& CircularRRectEffect::getFactory() const {
@@ -102,7 +102,7 @@ CircularRRectEffect::CircularRRectEffect(GrPrimitiveEdgeType edgeType, uint32_t 
     this->setWillReadFragmentPosition();
 }
 
-bool CircularRRectEffect::onIsEqual(const GrProcessor& other) const {
+bool CircularRRectEffect::onIsEqual(const GrFragmentProcessor& other) const {
     const CircularRRectEffect& crre = other.cast<CircularRRectEffect>();
     // The corner flags are derived from fRRect, so no need to check them.
     return fEdgeType == crre.fEdgeType && fRRect == crre.fRRect;
@@ -136,7 +136,7 @@ class GLCircularRRectEffect : public GrGLFragmentProcessor {
 public:
     GLCircularRRectEffect(const GrBackendProcessorFactory&, const GrProcessor&);
 
-    virtual void emitCode(GrGLProgramBuilder* builder,
+    virtual void emitCode(GrGLFPBuilder* builder,
                           const GrFragmentProcessor& fp,
                           const GrProcessorKey& key,
                           const char* outputColor,
@@ -161,7 +161,7 @@ GLCircularRRectEffect::GLCircularRRectEffect(const GrBackendProcessorFactory& fa
     fPrevRRect.setEmpty();
 }
 
-void GLCircularRRectEffect::emitCode(GrGLProgramBuilder* builder,
+void GLCircularRRectEffect::emitCode(GrGLFPBuilder* builder,
                              const GrFragmentProcessor& fp,
                              const GrProcessorKey& key,
                              const char* outputColor,
@@ -184,7 +184,7 @@ void GLCircularRRectEffect::emitCode(GrGLProgramBuilder* builder,
                                                  "radiusPlusHalf",
                                                  &radiusPlusHalfName);
 
-    GrGLFragmentShaderBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+    GrGLFPFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
     const char* fragmentPos = fsBuilder->fragmentPosition();
     // At each quarter-circle corner we compute a vector that is the offset of the fragment position
     // from the circle center. The vector is pinned in x and y to be in the quarter-plane relevant
@@ -399,14 +399,14 @@ public:
 
     typedef GLEllipticalRRectEffect GLProcessor;
 
-    virtual void getConstantColorComponents(GrColor* color, uint32_t* validFlags) const SK_OVERRIDE;
-
     virtual const GrBackendFragmentProcessorFactory& getFactory() const SK_OVERRIDE;
 
 private:
     EllipticalRRectEffect(GrPrimitiveEdgeType, const SkRRect&);
 
-    virtual bool onIsEqual(const GrProcessor& other) const SK_OVERRIDE;
+    virtual bool onIsEqual(const GrFragmentProcessor& other) const SK_OVERRIDE;
+
+    virtual void onComputeInvariantOutput(InvariantOutput* inout) const SK_OVERRIDE;
 
     SkRRect             fRRect;
     GrPrimitiveEdgeType    fEdgeType;
@@ -424,8 +424,8 @@ EllipticalRRectEffect::Create(GrPrimitiveEdgeType edgeType, const SkRRect& rrect
     return SkNEW_ARGS(EllipticalRRectEffect, (edgeType, rrect));
 }
 
-void EllipticalRRectEffect::getConstantColorComponents(GrColor* color, uint32_t* validFlags) const {
-    *validFlags = 0;
+void EllipticalRRectEffect::onComputeInvariantOutput(InvariantOutput* inout) const {
+    inout->mulByUnknownAlpha();
 }
 
 const GrBackendFragmentProcessorFactory& EllipticalRRectEffect::getFactory() const {
@@ -438,7 +438,7 @@ EllipticalRRectEffect::EllipticalRRectEffect(GrPrimitiveEdgeType edgeType, const
     this->setWillReadFragmentPosition();
 }
 
-bool EllipticalRRectEffect::onIsEqual(const GrProcessor& other) const {
+bool EllipticalRRectEffect::onIsEqual(const GrFragmentProcessor& other) const {
     const EllipticalRRectEffect& erre = other.cast<EllipticalRRectEffect>();
     return fEdgeType == erre.fEdgeType && fRRect == erre.fRRect;
 }
@@ -491,7 +491,7 @@ class GLEllipticalRRectEffect : public GrGLFragmentProcessor {
 public:
     GLEllipticalRRectEffect(const GrBackendProcessorFactory&, const GrProcessor&);
 
-    virtual void emitCode(GrGLProgramBuilder* builder,
+    virtual void emitCode(GrGLFPBuilder* builder,
                           const GrFragmentProcessor& effect,
                           const GrProcessorKey& key,
                           const char* outputColor,
@@ -516,7 +516,7 @@ GLEllipticalRRectEffect::GLEllipticalRRectEffect(const GrBackendProcessorFactory
     fPrevRRect.setEmpty();
 }
 
-void GLEllipticalRRectEffect::emitCode(GrGLProgramBuilder* builder,
+void GLEllipticalRRectEffect::emitCode(GrGLFPBuilder* builder,
                                        const GrFragmentProcessor& effect,
                                        const GrProcessorKey& key,
                                        const char* outputColor,
@@ -531,7 +531,7 @@ void GLEllipticalRRectEffect::emitCode(GrGLProgramBuilder* builder,
                                             "innerRect",
                                             &rectName);
 
-    GrGLFragmentShaderBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+    GrGLFPFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
     const char* fragmentPos = fsBuilder->fragmentPosition();
     // At each quarter-ellipse corner we compute a vector that is the offset of the fragment pos
     // to the ellipse center. The vector is pinned in x and y to be in the quarter-plane relevant

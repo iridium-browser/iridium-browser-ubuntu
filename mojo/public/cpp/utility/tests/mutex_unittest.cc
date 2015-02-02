@@ -90,7 +90,8 @@ class Fiddler {
       0,  // Seconds.
       (rand() % 10) * kNanosPerMilli // Nanoseconds.
     };
-    int rv MOJO_ALLOW_UNUSED = nanosleep(&req, NULL);
+    int rv = nanosleep(&req, NULL);
+    MOJO_ALLOW_UNUSED_LOCAL(rv);
     assert(rv == 0);
   }
 
@@ -110,13 +111,9 @@ class FiddlerThread : public Thread {
       : fiddler_(fiddler) {
   }
 
-  virtual ~FiddlerThread() {
-    delete fiddler_;
-  }
+  ~FiddlerThread() override { delete fiddler_; }
 
-  virtual void Run() MOJO_OVERRIDE {
-    fiddler_->Fiddle();
-  }
+  void Run() override { fiddler_->Fiddle(); }
 
  private:
   Fiddler* const fiddler_;
@@ -168,9 +165,9 @@ TEST(MutexTest, ThreadedStress) {
 class TryThread : public Thread {
  public:
   explicit TryThread(Mutex* mutex) : mutex_(mutex), try_lock_succeeded_() {}
-  virtual ~TryThread() {}
+  ~TryThread() override {}
 
-  virtual void Run() MOJO_OVERRIDE {
+  void Run() override {
     try_lock_succeeded_ = mutex_->TryLock();
     if (try_lock_succeeded_)
       mutex_->Unlock();

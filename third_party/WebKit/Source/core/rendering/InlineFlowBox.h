@@ -74,8 +74,8 @@ public:
 #endif
 
 #ifndef NDEBUG
-    virtual void showLineTreeAndMark(const InlineBox* = 0, const char* = 0, const InlineBox* = 0, const char* = 0, const RenderObject* = 0, int = 0) const OVERRIDE;
-    virtual const char* boxName() const OVERRIDE;
+    virtual void showLineTreeAndMark(const InlineBox* = 0, const char* = 0, const InlineBox* = 0, const char* = 0, const RenderObject* = 0, int = 0) const override;
+    virtual const char* boxName() const override;
 #endif
 
     InlineFlowBox* prevLineBox() const { return m_prevLineBox; }
@@ -86,7 +86,7 @@ public:
     InlineBox* firstChild() const { checkConsistency(); return m_firstChild; }
     InlineBox* lastChild() const { checkConsistency(); return m_lastChild; }
 
-    virtual bool isLeaf() const OVERRIDE FINAL { return false; }
+    virtual bool isLeaf() const override final { return false; }
 
     InlineBox* firstLeafChild() const;
     InlineBox* lastLeafChild() const;
@@ -94,7 +94,7 @@ public:
     typedef void (*CustomInlineBoxRangeReverse)(void* userData, Vector<InlineBox*>::iterator first, Vector<InlineBox*>::iterator last);
     void collectLeafBoxesInLogicalOrder(Vector<InlineBox*>&, CustomInlineBoxRangeReverse customReverseImplementation = 0, void* userData = 0) const;
 
-    virtual void setConstructed() OVERRIDE FINAL
+    virtual void setConstructed() override final
     {
         InlineBox::setConstructed();
         for (InlineBox* child = firstChild(); child; child = child->nextOnLine())
@@ -102,21 +102,21 @@ public:
     }
 
     void addToLine(InlineBox* child);
-    virtual void deleteLine() OVERRIDE FINAL;
-    virtual void extractLine() OVERRIDE FINAL;
-    virtual void attachLine() OVERRIDE FINAL;
-    virtual void adjustPosition(float dx, float dy) OVERRIDE;
+    virtual void deleteLine() override final;
+    virtual void extractLine() override final;
+    virtual void attachLine() override final;
+    virtual void adjustPosition(float dx, float dy) override;
 
     virtual void extractLineBoxFromRenderObject();
     virtual void attachLineBoxToRenderObject();
     virtual void removeLineBoxFromRenderObject();
 
-    virtual void clearTruncation() OVERRIDE;
+    virtual void clearTruncation() override;
 
     IntRect roundedFrameRect() const;
 
-    virtual void paint(PaintInfo&, const LayoutPoint&, LayoutUnit lineTop, LayoutUnit lineBottom) OVERRIDE;
-    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, LayoutUnit lineTop, LayoutUnit lineBottom) OVERRIDE;
+    virtual void paint(PaintInfo&, const LayoutPoint&, LayoutUnit lineTop, LayoutUnit lineBottom) override;
+    virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, LayoutUnit lineTop, LayoutUnit lineBottom) override;
 
     bool boxShadowCanBeAppliedToBackground(const FillLayer&) const;
 
@@ -201,14 +201,13 @@ public:
 
     void removeChild(InlineBox* child, MarkLineBoxes);
 
-    virtual RenderObject::SelectionState selectionState() const OVERRIDE;
+    virtual RenderObject::SelectionState selectionState() const override;
 
-    virtual bool canAccommodateEllipsis(bool ltr, int blockEdge, int ellipsisWidth) const OVERRIDE FINAL;
-    virtual float placeEllipsisBox(bool ltr, float blockLeftEdge, float blockRightEdge, float ellipsisWidth, float &truncatedWidth, bool&) OVERRIDE;
+    virtual bool canAccommodateEllipsis(bool ltr, int blockEdge, int ellipsisWidth) const override final;
+    virtual float placeEllipsisBox(bool ltr, float blockLeftEdge, float blockRightEdge, float ellipsisWidth, float &truncatedWidth, bool&) override;
 
     bool hasTextChildren() const { return m_hasTextChildren; }
     bool hasTextDescendants() const { return m_hasTextDescendants; }
-    void setHasTextChildren() { m_hasTextChildren = true; setHasTextDescendants(); }
     void setHasTextDescendants() { m_hasTextDescendants = true; }
 
     void checkConsistency() const;
@@ -220,16 +219,6 @@ public:
     LayoutRect layoutOverflowRect(LayoutUnit lineTop, LayoutUnit lineBottom) const
     {
         return m_overflow ? m_overflow->layoutOverflowRect() : enclosingLayoutRect(frameRectIncludingLineHeight(lineTop, lineBottom));
-    }
-    LayoutUnit logicalLeftLayoutOverflow() const
-    {
-        return m_overflow ? (isHorizontal() ? m_overflow->layoutOverflowRect().x() : m_overflow->layoutOverflowRect().y()) :
-                            static_cast<LayoutUnit>(logicalLeft());
-    }
-    LayoutUnit logicalRightLayoutOverflow() const
-    {
-        return m_overflow ? (isHorizontal() ? m_overflow->layoutOverflowRect().maxX() : m_overflow->layoutOverflowRect().maxY()) :
-                            static_cast<LayoutUnit>(ceilf(logicalRight()));
     }
     LayoutUnit logicalTopLayoutOverflow(LayoutUnit lineTop) const
     {
@@ -305,7 +294,6 @@ private:
     void addOutlineVisualOverflow(LayoutRect& logicalVisualOverflow);
     void addTextBoxVisualOverflow(InlineTextBox*, GlyphOverflowAndFallbackFontsMap&, LayoutRect& logicalVisualOverflow);
     void addReplacedChildOverflow(const InlineBox*, LayoutRect& logicalLayoutOverflow, LayoutRect& logicalVisualOverflow);
-    void constrainToLineTopAndBottomIfNeeded(LayoutRect&) const;
 
     void setLayoutOverflow(const LayoutRect&, const LayoutRect&);
     void setVisualOverflow(const LayoutRect&, const LayoutRect&);
@@ -313,7 +301,7 @@ private:
 protected:
     OwnPtr<RenderOverflow> m_overflow;
 
-    virtual bool isInlineFlowBox() const OVERRIDE FINAL { return true; }
+    virtual bool isInlineFlowBox() const override final { return true; }
 
     InlineBox* m_firstChild;
     InlineBox* m_lastChild;

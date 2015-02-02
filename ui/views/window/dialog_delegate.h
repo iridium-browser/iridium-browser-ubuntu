@@ -30,7 +30,7 @@ class VIEWS_EXPORT DialogDelegate : public ui::DialogModel,
                                     public WidgetDelegate {
  public:
   DialogDelegate();
-  virtual ~DialogDelegate();
+  ~DialogDelegate() override;
 
   // Same as CreateDialogWidgetWithBounds() with an empty |bounds|.
   static Widget* CreateDialogWidget(WidgetDelegate* delegate,
@@ -83,20 +83,18 @@ class VIEWS_EXPORT DialogDelegate : public ui::DialogModel,
   virtual bool Close();
 
   // Overridden from ui::DialogModel:
-  virtual base::string16 GetDialogLabel() const OVERRIDE;
-  virtual base::string16 GetDialogTitle() const OVERRIDE;
-  virtual int GetDialogButtons() const OVERRIDE;
-  virtual int GetDefaultDialogButton() const OVERRIDE;
-  virtual bool ShouldDefaultButtonBeBlue() const OVERRIDE;
-  virtual base::string16 GetDialogButtonLabel(
-      ui::DialogButton button) const OVERRIDE;
-  virtual bool IsDialogButtonEnabled(ui::DialogButton button) const OVERRIDE;
+  base::string16 GetDialogTitle() const override;
+  int GetDialogButtons() const override;
+  int GetDefaultDialogButton() const override;
+  bool ShouldDefaultButtonBeBlue() const override;
+  base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
+  bool IsDialogButtonEnabled(ui::DialogButton button) const override;
 
   // Overridden from WidgetDelegate:
-  virtual View* GetInitiallyFocusedView() OVERRIDE;
-  virtual DialogDelegate* AsDialogDelegate() OVERRIDE;
-  virtual ClientView* CreateClientView(Widget* widget) OVERRIDE;
-  virtual NonClientFrameView* CreateNonClientFrameView(Widget* widget) OVERRIDE;
+  View* GetInitiallyFocusedView() override;
+  DialogDelegate* AsDialogDelegate() override;
+  ClientView* CreateClientView(Widget* widget) override;
+  NonClientFrameView* CreateNonClientFrameView(Widget* widget) override;
 
   // Create a frame view using the new dialog style.
   static NonClientFrameView* CreateDialogFrameView(Widget* widget);
@@ -114,7 +112,7 @@ class VIEWS_EXPORT DialogDelegate : public ui::DialogModel,
 
  protected:
   // Overridden from WidgetDelegate:
-  virtual ui::AXRole GetAccessibleWindowRole() const OVERRIDE;
+  ui::AXRole GetAccessibleWindowRole() const override;
 
  private:
   // A flag indicating whether this dialog supports the new style.
@@ -129,13 +127,18 @@ class VIEWS_EXPORT DialogDelegateView : public DialogDelegate,
                                         public View {
  public:
   DialogDelegateView();
-  virtual ~DialogDelegateView();
+  ~DialogDelegateView() override;
 
   // Overridden from DialogDelegate:
-  virtual void DeleteDelegate() OVERRIDE;
-  virtual Widget* GetWidget() OVERRIDE;
-  virtual const Widget* GetWidget() const OVERRIDE;
-  virtual View* GetContentsView() OVERRIDE;
+  void DeleteDelegate() override;
+  Widget* GetWidget() override;
+  const Widget* GetWidget() const override;
+  View* GetContentsView() override;
+
+  // Overridden from View:
+  void GetAccessibleState(ui::AXViewState* state) override;
+  void ViewHierarchyChanged(
+      const ViewHierarchyChangedDetails& details) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(DialogDelegateView);

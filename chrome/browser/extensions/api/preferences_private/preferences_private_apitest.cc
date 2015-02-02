@@ -52,7 +52,7 @@ class FakeProfileSyncService : public ProfileSyncService {
         sync_initialized_(true),
         initialized_state_violation_(false) {}
 
-  virtual ~FakeProfileSyncService() {}
+  ~FakeProfileSyncService() override {}
 
   static KeyedService* BuildFakeProfileSyncService(
       content::BrowserContext* context) {
@@ -66,12 +66,9 @@ class FakeProfileSyncService : public ProfileSyncService {
   bool initialized_state_violation() { return initialized_state_violation_; }
 
   // ProfileSyncService:
-  virtual bool sync_initialized() const OVERRIDE {
-    return sync_initialized_;
-  }
+  bool SyncActive() const override { return sync_initialized_; }
 
-  virtual void AddObserver(
-      ProfileSyncServiceBase::Observer* observer) OVERRIDE {
+  void AddObserver(ProfileSyncServiceBase::Observer* observer) override {
     if (sync_initialized_)
       initialized_state_violation_ = true;
     // Set sync initialized state to true so the function will run after
@@ -83,7 +80,7 @@ class FakeProfileSyncService : public ProfileSyncService {
                    base::Unretained(observer)));
   }
 
-  virtual syncer::ModelTypeSet GetEncryptedDataTypes() const OVERRIDE {
+  syncer::ModelTypeSet GetEncryptedDataTypes() const override {
     if (!sync_initialized_)
       initialized_state_violation_ = true;
     syncer::ModelTypeSet type_set;
@@ -91,7 +88,7 @@ class FakeProfileSyncService : public ProfileSyncService {
     return type_set;
   }
 
-  virtual syncer::ModelTypeSet GetPreferredDataTypes() const OVERRIDE {
+  syncer::ModelTypeSet GetPreferredDataTypes() const override {
     if (!sync_initialized_)
       initialized_state_violation_ = true;
     syncer::ModelTypeSet preferred_types =
@@ -112,16 +109,16 @@ class FakeProfileSyncService : public ProfileSyncService {
 class PreferencesPrivateApiTest : public ExtensionApiTest {
  public:
   PreferencesPrivateApiTest() : browser_(NULL), service_(NULL) {}
-  virtual ~PreferencesPrivateApiTest() {}
+  ~PreferencesPrivateApiTest() override {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
 #if defined(OS_CHROMEOS)
     command_line->AppendSwitch(
         chromeos::switches::kIgnoreUserProfileMappingForTests);
 #endif
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     ExtensionApiTest::SetUpOnMainThread();
 
     base::FilePath path;

@@ -169,7 +169,7 @@ class GrGLTextureDomainEffect : public GrGLFragmentProcessor {
 public:
     GrGLTextureDomainEffect(const GrBackendProcessorFactory&, const GrProcessor&);
 
-    virtual void emitCode(GrGLProgramBuilder*,
+    virtual void emitCode(GrGLFPBuilder*,
                           const GrFragmentProcessor&,
                           const GrProcessorKey&,
                           const char* outputColor,
@@ -191,7 +191,7 @@ GrGLTextureDomainEffect::GrGLTextureDomainEffect(const GrBackendProcessorFactory
     : INHERITED(factory) {
 }
 
-void GrGLTextureDomainEffect::emitCode(GrGLProgramBuilder* builder,
+void GrGLTextureDomainEffect::emitCode(GrGLFPBuilder* builder,
                                        const GrFragmentProcessor& fp,
                                        const GrProcessorKey& key,
                                        const char* outputColor,
@@ -201,7 +201,7 @@ void GrGLTextureDomainEffect::emitCode(GrGLProgramBuilder* builder,
     const GrTextureDomainEffect& textureDomainEffect = fp.cast<GrTextureDomainEffect>();
     const GrTextureDomain& domain = textureDomainEffect.textureDomain();
 
-    GrGLFragmentShaderBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+    GrGLFPFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
     SkString coords2D = fsBuilder->ensureFSCoords2D(coords, 0);
     fGLDomain.sampleTexture(fsBuilder, domain, outputColor, coords2D, samplers[0], inputColor);
 }
@@ -263,17 +263,16 @@ const GrBackendFragmentProcessorFactory& GrTextureDomainEffect::getFactory() con
     return GrTBackendFragmentProcessorFactory<GrTextureDomainEffect>::getInstance();
 }
 
-bool GrTextureDomainEffect::onIsEqual(const GrProcessor& sBase) const {
+bool GrTextureDomainEffect::onIsEqual(const GrFragmentProcessor& sBase) const {
     const GrTextureDomainEffect& s = sBase.cast<GrTextureDomainEffect>();
-    return this->hasSameTextureParamsMatrixAndSourceCoords(s) &&
-           this->fTextureDomain == s.fTextureDomain;
+    return this->fTextureDomain == s.fTextureDomain;
 }
 
-void GrTextureDomainEffect::getConstantColorComponents(GrColor* color, uint32_t* validFlags) const {
+void GrTextureDomainEffect::onComputeInvariantOutput(InvariantOutput* inout) const {
     if (GrTextureDomain::kDecal_Mode == fTextureDomain.mode()) { // TODO: helper
-        *validFlags = 0;
+        inout->mulByUnknownColor();
     } else {
-        this->updateConstantColorComponentsForModulation(color, validFlags);
+        this->updateInvariantOutputForModulation(inout);
     }
 }
 

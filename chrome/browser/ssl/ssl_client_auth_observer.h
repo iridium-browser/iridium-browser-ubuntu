@@ -22,7 +22,7 @@ class SSLClientAuthObserver : public content::NotificationObserver {
       const net::HttpNetworkSession* network_session,
       const scoped_refptr<net::SSLCertRequestInfo>& cert_request_info,
       const base::Callback<void(net::X509Certificate*)>& callback);
-  virtual ~SSLClientAuthObserver();
+  ~SSLClientAuthObserver() override;
 
   // UI should implement this to close the dialog.
   virtual void OnCertSelectedByNotification() = 0;
@@ -48,9 +48,9 @@ class SSLClientAuthObserver : public content::NotificationObserver {
 
  private:
   // content::NotificationObserver implementation:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   const net::HttpNetworkSession* network_session_;
   scoped_refptr<net::SSLCertRequestInfo> cert_request_info_;

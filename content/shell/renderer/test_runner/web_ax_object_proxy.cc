@@ -34,6 +34,8 @@ std::string RoleToString(blink::WebAXRole role)
       return result.append("Article");
     case blink::WebAXRoleBanner:
       return result.append("Banner");
+    case blink::WebAXRoleBlockquote:
+      return result.append("Blockquote");
     case blink::WebAXRoleBrowser:
       return result.append("Browser");
     case blink::WebAXRoleBusyIndicator:
@@ -58,10 +60,16 @@ std::string RoleToString(blink::WebAXRole role)
       return result.append("Complementary");
     case blink::WebAXRoleContentInfo:
       return result.append("ContentInfo");
+    case blink::WebAXRoleDate:
+      return result.append("DateField");
+    case blink::WebAXRoleDateTime:
+      return result.append("DateTimeField");
     case blink::WebAXRoleDefinition:
       return result.append("Definition");
     case blink::WebAXRoleDescriptionListDetail:
       return result.append("DescriptionListDetail");
+    case blink::WebAXRoleDescriptionList:
+      return result.append("DescriptionList");
     case blink::WebAXRoleDescriptionListTerm:
       return result.append("DescriptionListTerm");
     case blink::WebAXRoleDialog:
@@ -134,8 +142,6 @@ std::string RoleToString(blink::WebAXRole role)
       return result.append("Main");
     case blink::WebAXRoleMarquee:
       return result.append("Marquee");
-    case blink::WebAXRoleMathElement:
-      return result.append("MathElement");
     case blink::WebAXRoleMath:
       return result.append("Math");
     case blink::WebAXRoleMatte:
@@ -146,12 +152,18 @@ std::string RoleToString(blink::WebAXRole role)
       return result.append("MenuButton");
     case blink::WebAXRoleMenuItem:
       return result.append("MenuItem");
+    case blink::WebAXRoleMenuItemCheckBox:
+      return result.append("MenuItemCheckBox");
+    case blink::WebAXRoleMenuItemRadio:
+      return result.append("MenuItemRadio");
     case blink::WebAXRoleMenuListOption:
       return result.append("MenuListOption");
     case blink::WebAXRoleMenuListPopup:
       return result.append("MenuListPopup");
     case blink::WebAXRoleMenu:
       return result.append("Menu");
+    case blink::WebAXRoleMeter:
+      return result.append("Meter");
     case blink::WebAXRoleNavigation:
       return result.append("Navigation");
     case blink::WebAXRoleNone:
@@ -164,6 +176,8 @@ std::string RoleToString(blink::WebAXRole role)
       return result.append("Paragraph");
     case blink::WebAXRolePopUpButton:
       return result.append("PopUpButton");
+    case blink::WebAXRolePre:
+      return result.append("Pre");
     case blink::WebAXRolePresentational:
       return result.append("Presentational");
     case blink::WebAXRoleProgressIndicator:
@@ -230,6 +244,8 @@ std::string RoleToString(blink::WebAXRole role)
       return result.append("TextArea");
     case blink::WebAXRoleTextField:
       return result.append("TextField");
+    case blink::WebAXRoleTime:
+      return result.append("Time");
     case blink::WebAXRoleTimer:
       return result.append("Timer");
     case blink::WebAXRoleToggleButton:
@@ -738,12 +754,17 @@ bool WebAXObjectProxy::IsSelectedOptionActive() {
 
 bool WebAXObjectProxy::IsExpanded() {
   accessibility_object_.updateLayoutAndCheckValidity();
-  return !accessibility_object_.isCollapsed();
+  return accessibility_object_.isExpanded() == blink::WebAXExpandedExpanded;
 }
 
 bool WebAXObjectProxy::IsChecked() {
   accessibility_object_.updateLayoutAndCheckValidity();
   return accessibility_object_.isChecked();
+}
+
+bool WebAXObjectProxy::IsCollapsed() {
+  accessibility_object_.updateLayoutAndCheckValidity();
+  return accessibility_object_.isExpanded() == blink::WebAXExpandedCollapsed;
 }
 
 bool WebAXObjectProxy::IsVisible() {
@@ -754,11 +775,6 @@ bool WebAXObjectProxy::IsVisible() {
 bool WebAXObjectProxy::IsOffScreen() {
   accessibility_object_.updateLayoutAndCheckValidity();
   return accessibility_object_.isOffScreen();
-}
-
-bool WebAXObjectProxy::IsCollapsed() {
-  accessibility_object_.updateLayoutAndCheckValidity();
-  return accessibility_object_.isCollapsed();
 }
 
 bool WebAXObjectProxy::HasPopup() {

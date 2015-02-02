@@ -12,7 +12,7 @@
 #include "components/sync_driver/data_type_error_handler_mock.h"
 #include "components/sync_driver/sync_api_component_factory.h"
 #include "sync/api/attachments/attachment_id.h"
-#include "sync/api/attachments/fake_attachment_store.h"
+#include "sync/api/attachments/attachment_store.h"
 #include "sync/api/fake_syncable_service.h"
 #include "sync/api/sync_change.h"
 #include "sync/api/sync_merge_result.h"
@@ -39,9 +39,9 @@ class MockAttachmentService : public syncer::AttachmentServiceImpl {
  public:
   MockAttachmentService(
       const scoped_refptr<syncer::AttachmentStore>& attachment_store);
-  virtual ~MockAttachmentService();
-  virtual void UploadAttachments(
-      const syncer::AttachmentIdSet& attachment_ids) OVERRIDE;
+  ~MockAttachmentService() override;
+  void UploadAttachments(
+      const syncer::AttachmentIdSet& attachment_ids) override;
   std::vector<syncer::AttachmentIdSet>* attachment_id_sets();
 
  private:
@@ -82,17 +82,17 @@ class MockSyncApiComponentFactory : public SyncApiComponentFactory {
       scoped_ptr<syncer::AttachmentService> attachment_service)
       : attachment_service_(attachment_service.Pass()) {}
 
-  virtual base::WeakPtr<syncer::SyncableService> GetSyncableServiceForType(
-      syncer::ModelType type) OVERRIDE {
+  base::WeakPtr<syncer::SyncableService> GetSyncableServiceForType(
+      syncer::ModelType type) override {
     // Shouldn't be called for this test.
     NOTREACHED();
     return base::WeakPtr<syncer::SyncableService>();
   }
 
-  virtual scoped_ptr<syncer::AttachmentService> CreateAttachmentService(
+  scoped_ptr<syncer::AttachmentService> CreateAttachmentService(
       const scoped_refptr<syncer::AttachmentStore>& attachment_store,
       const syncer::UserShare& user_share,
-      syncer::AttachmentService::Delegate* delegate) OVERRIDE {
+      syncer::AttachmentService::Delegate* delegate) override {
     EXPECT_TRUE(attachment_service_ != NULL);
     return attachment_service_.Pass();
   }
@@ -111,14 +111,14 @@ class SyncGenericChangeProcessorTest : public testing::Test {
       : syncable_service_ptr_factory_(&fake_syncable_service_),
         mock_attachment_service_(NULL) {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     // Use kType by default, but allow test cases to re-initialize with whatever
     // type they choose.  Therefore, it's important that all type dependent
     // initialization occurs in InitializeForType.
     InitializeForType(kType);
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     mock_attachment_service_ = NULL;
     if (test_user_share_) {
       test_user_share_->TearDown();
@@ -147,8 +147,8 @@ class SyncGenericChangeProcessorTest : public testing::Test {
   }
 
   void ConstructGenericChangeProcessor(syncer::ModelType type) {
-    scoped_refptr<syncer::AttachmentStore> attachment_store(
-        new syncer::FakeAttachmentStore(base::MessageLoopProxy::current()));
+    scoped_refptr<syncer::AttachmentStore> attachment_store =
+        syncer::AttachmentStore::CreateInMemoryStore();
     scoped_ptr<MockAttachmentService> mock_attachment_service(
         new MockAttachmentService(attachment_store));
     // GenericChangeProcessor takes ownership of the AttachmentService, but we
@@ -156,8 +156,8 @@ class SyncGenericChangeProcessorTest : public testing::Test {
     // Take a pointer and trust that GenericChangeProcessor does not prematurely
     // destroy it.
     mock_attachment_service_ = mock_attachment_service.get();
-    sync_factory_.reset(new MockSyncApiComponentFactory(
-        mock_attachment_service.PassAs<syncer::AttachmentService>()));
+    sync_factory_.reset(
+        new MockSyncApiComponentFactory(mock_attachment_service.Pass()));
     change_processor_.reset(
         new GenericChangeProcessor(type,
                                    &data_type_error_handler_,

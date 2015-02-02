@@ -24,7 +24,7 @@ import org.apache.http.client.utils.URLEncodedUtils;
 import org.chromium.base.CommandLine;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.JavascriptInterface;
-import org.chromium.content.browser.WebContentsObserverAndroid;
+import org.chromium.content.browser.WebContentsObserver;
 import org.chromium.content.common.ContentSwitches;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -38,7 +38,7 @@ import java.util.List;
 /**
  * Responsible for accessibility injection and management of a {@link ContentViewCore}.
  */
-public class AccessibilityInjector extends WebContentsObserverAndroid {
+public class AccessibilityInjector extends WebContentsObserver {
     private static final String TAG = "AccessibilityInjector";
 
     // The ContentView this injector is responsible for managing.
@@ -74,20 +74,20 @@ public class AccessibilityInjector extends WebContentsObserverAndroid {
             "https://ssl.gstatic.com/accessibility/javascript/android/chromeandroidvox.js";
 
     private static final String ACCESSIBILITY_SCREEN_READER_JAVASCRIPT_TEMPLATE =
-            "(function() {" +
-            "    var chooser = document.createElement('script');" +
-            "    chooser.type = 'text/javascript';" +
-            "    chooser.src = '%1s';" +
-            "    document.getElementsByTagName('head')[0].appendChild(chooser);" +
-            "  })();";
+            "(function() {"
+            + "    var chooser = document.createElement('script');"
+            + "    chooser.type = 'text/javascript';"
+            + "    chooser.src = '%1s';"
+            + "    document.getElementsByTagName('head')[0].appendChild(chooser);"
+            + "  })();";
 
     // JavaScript call to turn ChromeVox on or off.
     private static final String TOGGLE_CHROME_VOX_JAVASCRIPT =
-            "(function() {" +
-            "    if (typeof cvox !== 'undefined') {" +
-            "        cvox.ChromeVox.host.activateOrDeactivateChromeVox(%1s);" +
-            "    }" +
-            "  })();";
+            "(function() {"
+            + "    if (typeof cvox !== 'undefined') {"
+            + "        cvox.ChromeVox.host.activateOrDeactivateChromeVox(%1s);"
+            + "    }"
+            + "  })();";
 
     /**
      * Returns an instance of the {@link AccessibilityInjector} based on the SDK version.
@@ -135,10 +135,10 @@ public class AccessibilityInjector extends WebContentsObserverAndroid {
         }
 
         String js = getScreenReaderInjectingJs();
-        if (mContentViewCore.isDeviceAccessibilityScriptInjectionEnabled() &&
-                js != null && mContentViewCore.isAlive()) {
+        if (mContentViewCore.isDeviceAccessibilityScriptInjectionEnabled()
+                && js != null && mContentViewCore.isAlive()) {
             addOrRemoveAccessibilityApisIfNecessary();
-            mContentViewCore.evaluateJavaScript(js, null);
+            mContentViewCore.getWebContents().evaluateJavaScript(js, null);
             mInjectedScriptEnabled = true;
             mScriptInjected = true;
         }
@@ -167,9 +167,9 @@ public class AccessibilityInjector extends WebContentsObserverAndroid {
      * Checks whether or not touch to explore is enabled on the system.
      */
     public boolean accessibilityIsAvailable() {
-        if (!getAccessibilityManager().isEnabled() ||
-                mContentViewCore.getContentSettings() == null ||
-                !mContentViewCore.getContentSettings().getJavaScriptEnabled()) {
+        if (!getAccessibilityManager().isEnabled()
+                || mContentViewCore.getContentSettings() == null
+                || !mContentViewCore.getContentSettings().getJavaScriptEnabled()) {
             return false;
         }
 
@@ -199,7 +199,7 @@ public class AccessibilityInjector extends WebContentsObserverAndroid {
         if (mContentViewCore.isAlive()) {
             String js = String.format(TOGGLE_CHROME_VOX_JAVASCRIPT, Boolean.toString(
                     mInjectedScriptEnabled));
-            mContentViewCore.evaluateJavaScript(js, null);
+            mContentViewCore.getWebContents().evaluateJavaScript(js, null);
 
             if (!mInjectedScriptEnabled) {
                 // Stop any TTS/Vibration right now.
@@ -336,8 +336,8 @@ public class AccessibilityInjector extends WebContentsObserverAndroid {
 
     private AccessibilityManager getAccessibilityManager() {
         if (mAccessibilityManager == null) {
-            mAccessibilityManager = (AccessibilityManager) mContentViewCore.getContext().
-                    getSystemService(Context.ACCESSIBILITY_SERVICE);
+            mAccessibilityManager = (AccessibilityManager) mContentViewCore.getContext()
+                    .getSystemService(Context.ACCESSIBILITY_SERVICE);
         }
 
         return mAccessibilityManager;

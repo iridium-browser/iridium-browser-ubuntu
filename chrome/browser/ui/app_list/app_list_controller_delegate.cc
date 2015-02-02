@@ -4,18 +4,15 @@
 
 #include "chrome/browser/ui/app_list/app_list_controller_delegate.h"
 
+#include "base/metrics/histogram.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/install_tracker_factory.h"
 #include "chrome/browser/extensions/launch_util.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/app_list/app_list_syncable_service.h"
-#include "chrome/browser/ui/app_list/app_list_syncable_service_factory.h"
 #include "chrome/browser/ui/app_list/extension_uninstaller.h"
 #include "chrome/browser/ui/apps/app_info_dialog.h"
-#include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/common/extensions/extension_constants.h"
-#include "chrome/common/extensions/manifest_url_handler.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
@@ -23,11 +20,13 @@
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_set.h"
 #include "extensions/common/manifest_handlers/options_page_info.h"
+#include "extensions/common/manifest_url_handlers.h"
 #include "net/base/url_util.h"
 #include "ui/app_list/app_list_folder_item.h"
 #include "ui/app_list/app_list_item.h"
 #include "ui/app_list/app_list_model.h"
 #include "ui/app_list/app_list_switches.h"
+#include "ui/gfx/geometry/rect.h"
 
 #if defined(ENABLE_RLZ)
 #include "chrome/browser/rlz/rlz.h"
@@ -104,14 +103,19 @@ void AppListControllerDelegate::DoShowAppInfoFlow(
 
   OnShowChildDialog();
 
+  UMA_HISTOGRAM_ENUMERATION("Apps.AppInfoDialog.Launches",
+                            AppInfoLaunchSource::FROM_APP_LIST,
+                            AppInfoLaunchSource::NUM_LAUNCH_SOURCES);
+
   // Since the AppListControllerDelegate is a leaky singleton, passing its raw
   // pointer around is OK.
-  ShowAppInfoDialog(GetAppListWindow(),
-                    GetAppListBounds(),
-                    profile,
-                    extension,
-                    base::Bind(&AppListControllerDelegate::OnCloseChildDialog,
-                               base::Unretained(this)));
+  ShowAppInfoInAppList(
+      GetAppListWindow(),
+      GetAppListBounds(),
+      profile,
+      extension,
+      base::Bind(&AppListControllerDelegate::OnCloseChildDialog,
+                 base::Unretained(this)));
 }
 
 void AppListControllerDelegate::UninstallApp(Profile* profile,
@@ -144,13 +148,12 @@ void AppListControllerDelegate::ShowAppInWebStore(
       is_search_result ?
           AppListControllerDelegate::LAUNCH_FROM_APP_LIST_SEARCH :
           AppListControllerDelegate::LAUNCH_FROM_APP_LIST);
-  chrome::NavigateParams params(
-      profile,
-      net::AppendQueryParameter(url,
-                                extension_urls::kWebstoreSourceField,
-                                source),
-      ui::PAGE_TRANSITION_LINK);
-  chrome::Navigate(&params);
+  OpenURL(profile,
+          net::AppendQueryParameter(url,
+                                    extension_urls::kWebstoreSourceField,
+                                    source),
+          ui::PAGE_TRANSITION_LINK,
+          CURRENT_TAB);
 }
 
 bool AppListControllerDelegate::HasOptionsPage(
@@ -168,11 +171,10 @@ void AppListControllerDelegate::ShowOptionsPage(
   if (!extension)
     return;
 
-  chrome::NavigateParams params(
-      profile,
-      extensions::OptionsPageInfo::GetOptionsPage(extension),
-      ui::PAGE_TRANSITION_LINK);
-  chrome::Navigate(&params);
+  OpenURL(profile,
+          extensions::OptionsPageInfo::GetOptionsPage(extension),
+          ui::PAGE_TRANSITION_LINK,
+          CURRENT_TAB);
 }
 
 extensions::LaunchType AppListControllerDelegate::GetExtensionLaunchType(

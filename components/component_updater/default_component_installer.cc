@@ -68,7 +68,7 @@ bool DefaultComponentInstaller::InstallHelper(
     return false;
   if (!installer_traits_->OnCustomInstall(manifest, install_path))
     return false;
-  if (!installer_traits_->VerifyInstallation(install_path))
+  if (!installer_traits_->VerifyInstallation(manifest, install_path))
     return false;
   return true;
 }
@@ -131,64 +131,64 @@ void DefaultComponentInstaller::StartRegistration(ComponentUpdateService* cus) {
     return;
   }
 
-  base::FilePath latest_dir;
+  base::FilePath latest_path;
   base::Version latest_version(kNullVersion);
-  std::vector<base::FilePath> older_dirs;
-  bool found = false;
+  scoped_ptr<base::DictionaryValue> latest_manifest;
+
+  std::vector<base::FilePath> older_paths;
   base::FileEnumerator file_enumerator(
       base_dir, false, base::FileEnumerator::DIRECTORIES);
   for (base::FilePath path = file_enumerator.Next();
        !path.value().empty();
        path = file_enumerator.Next()) {
     base::Version version(path.BaseName().MaybeAsASCII());
+
     // Ignore folders that don't have valid version names. These folders are not
     // managed by component installer so do not try to remove them.
     if (!version.IsValid())
       continue;
-    if (!installer_traits_->VerifyInstallation(path)) {
-      older_dirs.push_back(path);
+
+    // |version| not newer than the latest found version (kNullVersion if no
+    // version has been found yet) is marked for removal.
+    if (version.CompareTo(latest_version) <= 0) {
+      older_paths.push_back(path);
       continue;
     }
-    if (found) {
-      if (version.CompareTo(latest_version) > 0) {
-        older_dirs.push_back(latest_dir);
-        latest_dir = path;
-        latest_version = version;
-      } else {
-        older_dirs.push_back(path);
-      }
-    } else {
-      latest_dir = path;
-      latest_version = version;
-      found = true;
+
+    scoped_ptr<base::DictionaryValue> manifest = ReadManifest(path);
+    if (!manifest || !installer_traits_->VerifyInstallation(*manifest, path)) {
+      DLOG(ERROR) << "Failed to read manifest or verify installation for "
+                  << installer_traits_->GetName() << " ("
+                  << path.MaybeAsASCII() << ").";
+      older_paths.push_back(path);
+      continue;
     }
+
+    // New valid |version| folder found!
+
+    if (latest_manifest) {
+      DCHECK(!latest_path.empty());
+      older_paths.push_back(latest_path);
+    }
+
+    latest_path = path;
+    latest_version = version;
+    latest_manifest = manifest.Pass();
   }
 
-  if (found) {
-    current_manifest_ = ReadManifest(latest_dir);
-    if (current_manifest_) {
-      current_version_ = latest_version;
-      // TODO(ddorwin): Remove these members and pass them directly to
-      // FinishRegistration().
-      base::ReadFileToString(latest_dir.AppendASCII("manifest.fingerprint"),
-                             &current_fingerprint_);
-    } else {
-      // If the manifest can't be read, mark the directory for deletion and
-      // continue as if there were no versioned directories at all.
-      DLOG(ERROR) << "Failed to read manifest for "
-                  << installer_traits_->GetName() << " ("
-                  << base_dir.MaybeAsASCII() << ").";
-      older_dirs.push_back(latest_dir);
-    }
+  if (latest_manifest) {
+    current_version_ = latest_version;
+    current_manifest_ = latest_manifest.Pass();
+    // TODO(ddorwin): Remove these members and pass them directly to
+    // FinishRegistration().
+    base::ReadFileToString(latest_path.AppendASCII("manifest.fingerprint"),
+                           &current_fingerprint_);
   }
 
   // Remove older versions of the component. None should be in use during
   // browser startup.
-  for (std::vector<base::FilePath>::iterator iter = older_dirs.begin();
-       iter != older_dirs.end();
-       ++iter) {
-    base::DeleteFile(*iter, true);
-  }
+  for (const auto& older_path : older_paths)
+    base::DeleteFile(older_path, true);
 
   main_task_runner_->PostTask(
       FROM_HERE,
@@ -221,12 +221,13 @@ void DefaultComponentInstaller::FinishRegistration(
     }
   }
 
-  if (current_version_.CompareTo(base::Version(kNullVersion)) > 0) {
-    scoped_ptr<base::DictionaryValue> manifest_copy(
-        current_manifest_->DeepCopy());
-    installer_traits_->ComponentReady(
-        current_version_, GetInstallDirectory(), manifest_copy.Pass());
-  }
+  if (!current_manifest_)
+    return;
+
+  scoped_ptr<base::DictionaryValue> manifest_copy(
+      current_manifest_->DeepCopy());
+  installer_traits_->ComponentReady(
+      current_version_, GetInstallDirectory(), manifest_copy.Pass());
 }
 
 }  // namespace component_updater

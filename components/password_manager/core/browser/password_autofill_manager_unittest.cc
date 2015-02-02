@@ -2,13 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "components/password_manager/core/browser/password_autofill_manager.h"
+
 #include "base/compiler_specific.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/browser/popup_item_ids.h"
 #include "components/autofill/core/browser/test_autofill_client.h"
 #include "components/autofill/core/browser/test_autofill_driver.h"
-#include "components/password_manager/core/browser/password_autofill_manager.h"
+#include "components/autofill/core/common/form_field_data.h"
+#include "components/autofill/core/common/password_form_fill_data.h"
 #include "components/password_manager/core/browser/stub_password_manager_client.h"
 #include "components/password_manager/core/browser/stub_password_manager_driver.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -43,7 +46,7 @@ class MockPasswordManagerDriver : public StubPasswordManagerDriver {
 
 class TestPasswordManagerClient : public StubPasswordManagerClient {
  public:
-  virtual PasswordManagerDriver* GetDriver() OVERRIDE { return &driver_; }
+  PasswordManagerDriver* GetDriver() override { return &driver_; }
 
   MockPasswordManagerDriver* mock_driver() { return &driver_; }
 
@@ -70,13 +73,15 @@ class PasswordAutofillManagerTest : public testing::Test {
  protected:
   PasswordAutofillManagerTest()
       : test_username_(base::ASCIIToUTF16(kAliceUsername)),
-        test_password_(base::ASCIIToUTF16(kAlicePassword)) {}
+        test_password_(base::ASCIIToUTF16(kAlicePassword)),
+        fill_data_id_(0) {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     // Add a preferred login and an additional login to the FillData.
-    username_field_.name = base::ASCIIToUTF16(kUsernameName);
-    username_field_.value = test_username_;
-    fill_data_.basic_data.fields.push_back(username_field_);
+    autofill::FormFieldData username_field;
+    username_field.name = base::ASCIIToUTF16(kUsernameName);
+    username_field.value = test_username_;
+    fill_data_.basic_data.fields.push_back(username_field);
 
     autofill::FormFieldData password_field;
     password_field.name = base::ASCIIToUTF16(kPasswordName);
@@ -89,19 +94,21 @@ class PasswordAutofillManagerTest : public testing::Test {
       autofill::AutofillClient* autofill_client) {
     password_autofill_manager_.reset(
         new PasswordAutofillManager(client, autofill_client));
-    password_autofill_manager_->OnAddPasswordFormMapping(username_field_,
+    password_autofill_manager_->OnAddPasswordFormMapping(fill_data_id_,
                                                          fill_data_);
   }
 
  protected:
+  int fill_data_id() { return fill_data_id_; }
+
   scoped_ptr<PasswordAutofillManager> password_autofill_manager_;
 
-  autofill::FormFieldData username_field_;
   base::string16 test_username_;
   base::string16 test_password_;
 
  private:
   autofill::PasswordFormFillData fill_data_;
+  const int fill_data_id_;
 
   // The TestAutofillDriver uses a SequencedWorkerPool which expects the
   // existence of a MessageLoop.
@@ -115,23 +122,22 @@ TEST_F(PasswordAutofillManagerTest, FillSuggestion) {
   EXPECT_CALL(*client->mock_driver(),
               FillSuggestion(test_username_, test_password_));
   EXPECT_TRUE(password_autofill_manager_->FillSuggestionForTest(
-      username_field_, test_username_));
+      fill_data_id(), test_username_));
   testing::Mock::VerifyAndClearExpectations(client->mock_driver());
 
   EXPECT_CALL(*client->mock_driver(),
               FillSuggestion(_, _)).Times(0);
   EXPECT_FALSE(password_autofill_manager_->FillSuggestionForTest(
-      username_field_, base::ASCIIToUTF16(kInvalidUsername)));
+      fill_data_id(), base::ASCIIToUTF16(kInvalidUsername)));
 
-  autofill::FormFieldData invalid_username_field;
-  invalid_username_field.name = base::ASCIIToUTF16(kInvalidUsername);
+  const int invalid_fill_data_id = fill_data_id() + 1;
 
   EXPECT_FALSE(password_autofill_manager_->FillSuggestionForTest(
-      invalid_username_field, test_username_));
+      invalid_fill_data_id, test_username_));
 
   password_autofill_manager_->Reset();
   EXPECT_FALSE(password_autofill_manager_->FillSuggestionForTest(
-      username_field_, test_username_));
+      fill_data_id(), test_username_));
 }
 
 TEST_F(PasswordAutofillManagerTest, PreviewSuggestion) {
@@ -141,22 +147,21 @@ TEST_F(PasswordAutofillManagerTest, PreviewSuggestion) {
   EXPECT_CALL(*client->mock_driver(),
               PreviewSuggestion(test_username_, test_password_));
   EXPECT_TRUE(password_autofill_manager_->PreviewSuggestionForTest(
-      username_field_, test_username_));
+      fill_data_id(), test_username_));
   testing::Mock::VerifyAndClearExpectations(client->mock_driver());
 
   EXPECT_CALL(*client->mock_driver(), PreviewSuggestion(_, _)).Times(0);
   EXPECT_FALSE(password_autofill_manager_->PreviewSuggestionForTest(
-      username_field_, base::ASCIIToUTF16(kInvalidUsername)));
+      fill_data_id(), base::ASCIIToUTF16(kInvalidUsername)));
 
-  autofill::FormFieldData invalid_username_field;
-  invalid_username_field.name = base::ASCIIToUTF16(kInvalidUsername);
+  const int invalid_fill_data_id = fill_data_id() + 1;
 
   EXPECT_FALSE(password_autofill_manager_->PreviewSuggestionForTest(
-      invalid_username_field, test_username_));
+      invalid_fill_data_id, test_username_));
 
   password_autofill_manager_->Reset();
   EXPECT_FALSE(password_autofill_manager_->PreviewSuggestionForTest(
-      username_field_, test_username_));
+      fill_data_id(), test_username_));
 }
 
 // Test that the popup is marked as visible after recieving password
@@ -167,10 +172,16 @@ TEST_F(PasswordAutofillManagerTest, ExternalDelegatePasswordSuggestions) {
   InitializePasswordAutofillManager(client.get(), autofill_client.get());
 
   gfx::RectF element_bounds;
-  std::vector<base::string16> suggestions;
-  suggestions.push_back(test_username_);
-  std::vector<base::string16> realms;
-  realms.push_back(base::ASCIIToUTF16("http://foo.com/"));
+  autofill::PasswordFormFillData data;
+  data.basic_data.fields.resize(2);
+  data.basic_data.fields[0].value = test_username_;
+  data.basic_data.fields[1].value = test_password_;
+  data.preferred_realm = "http://foo.com/";
+  int dummy_key = 0;
+  password_autofill_manager_->OnAddPasswordFormMapping(dummy_key, data);
+
+  EXPECT_CALL(*client->mock_driver(),
+              FillSuggestion(test_username_, test_password_));
 
   // The enums must be cast to ints to prevent compile errors on linux_rel.
   EXPECT_CALL(*autofill_client,
@@ -183,12 +194,75 @@ TEST_F(PasswordAutofillManagerTest, ExternalDelegatePasswordSuggestions) {
                   testing::ElementsAre(autofill::POPUP_ITEM_ID_PASSWORD_ENTRY),
                   _));
   password_autofill_manager_->OnShowPasswordSuggestions(
-      username_field_, element_bounds, suggestions, realms);
+      dummy_key, base::i18n::RIGHT_TO_LEFT, base::string16(), false,
+      element_bounds);
 
   // Accepting a suggestion should trigger a call to hide the popup.
   EXPECT_CALL(*autofill_client, HideAutofillPopup());
   password_autofill_manager_->DidAcceptSuggestion(
-      suggestions[0], autofill::POPUP_ITEM_ID_PASSWORD_ENTRY);
+      test_username_, autofill::POPUP_ITEM_ID_PASSWORD_ENTRY);
+}
+
+// Test that OnShowPasswordSuggestions correctly matches the given FormFieldData
+// to the known PasswordFormFillData, and extracts the right suggestions.
+TEST_F(PasswordAutofillManagerTest, ExtractSuggestions) {
+  scoped_ptr<TestPasswordManagerClient> client(new TestPasswordManagerClient);
+  scoped_ptr<MockAutofillClient> autofill_client(new MockAutofillClient);
+  InitializePasswordAutofillManager(client.get(), autofill_client.get());
+
+  gfx::RectF element_bounds;
+  autofill::PasswordFormFillData data;
+  data.basic_data.fields.resize(2);
+  data.basic_data.fields[0].value = test_username_;
+  data.basic_data.fields[1].value = test_password_;
+  data.preferred_realm = "http://foo.com/";
+
+  autofill::PasswordAndRealm additional;
+  additional.realm = "https://foobarrealm.org";
+  base::string16 additional_username(base::ASCIIToUTF16("John Foo"));
+  data.additional_logins[additional_username] = additional;
+
+  autofill::UsernamesCollectionKey usernames_key;
+  usernames_key.realm = "http://yetanother.net";
+  std::vector<base::string16> other_names;
+  base::string16 other_username(base::ASCIIToUTF16("John Different"));
+  other_names.push_back(other_username);
+  data.other_possible_usernames[usernames_key] = other_names;
+
+  int dummy_key = 0;
+  password_autofill_manager_->OnAddPasswordFormMapping(dummy_key, data);
+
+  // First, simulate displaying suggestions matching an empty prefix.
+  EXPECT_CALL(*autofill_client,
+              ShowAutofillPopup(
+                  element_bounds, _,
+                  testing::UnorderedElementsAre(
+                      test_username_, additional_username, other_username),
+                  _, _, _, _));
+  password_autofill_manager_->OnShowPasswordSuggestions(
+      dummy_key, base::i18n::RIGHT_TO_LEFT, base::string16(), false,
+      element_bounds);
+
+  // Now simulate displaying suggestions matching "John".
+  EXPECT_CALL(*autofill_client,
+              ShowAutofillPopup(element_bounds, _,
+                                testing::UnorderedElementsAre(
+                                    additional_username, other_username),
+                                _, _, _, _));
+  password_autofill_manager_->OnShowPasswordSuggestions(
+      dummy_key, base::i18n::RIGHT_TO_LEFT, base::ASCIIToUTF16("John"), false,
+      element_bounds);
+
+  // Finally, simulate displaying all suggestions, without any prefix matching.
+  EXPECT_CALL(*autofill_client,
+              ShowAutofillPopup(
+                  element_bounds, _,
+                  testing::UnorderedElementsAre(
+                      test_username_, additional_username, other_username),
+                  _, _, _, _));
+  password_autofill_manager_->OnShowPasswordSuggestions(
+      dummy_key, base::i18n::RIGHT_TO_LEFT, base::ASCIIToUTF16("xyz"), true,
+      element_bounds);
 }
 
 }  // namespace password_manager

@@ -31,11 +31,11 @@ class GamepadControllerBindings
  private:
   explicit GamepadControllerBindings(
       base::WeakPtr<GamepadController> controller);
-  virtual ~GamepadControllerBindings();
+  ~GamepadControllerBindings() override;
 
   // gin::Wrappable.
-  virtual gin::ObjectTemplateBuilder GetObjectTemplateBuilder(
-      v8::Isolate* isolate) OVERRIDE;
+  gin::ObjectTemplateBuilder GetObjectTemplateBuilder(
+      v8::Isolate* isolate) override;
 
   void Connect(int index);
   void DispatchConnected(int index);
@@ -151,7 +151,9 @@ GamepadController::GamepadController()
   Reset();
 }
 
-GamepadController::~GamepadController() {}
+GamepadController::~GamepadController() {
+  StopIfObserving();
+}
 
 void GamepadController::Reset() {
   memset(&gamepads_, 0, sizeof(gamepads_));

@@ -218,7 +218,7 @@ int UseCounter::mapCSSPropertyIdToCSSSampleIdForHistogram(int id)
     case CSSPropertyWebkitAnimationPlayState: return 173;
     case CSSPropertyWebkitAnimationTimingFunction: return 174;
     case CSSPropertyWebkitAppearance: return 175;
-    case CSSPropertyWebkitAspectRatio: return 176;
+    // CSSPropertyWebkitAspectRatio was 176
     case CSSPropertyWebkitBackfaceVisibility: return 177;
     case CSSPropertyWebkitBackgroundClip: return 178;
     case CSSPropertyWebkitBackgroundComposite: return 179;
@@ -236,7 +236,7 @@ int UseCounter::mapCSSPropertyIdToCSSSampleIdForHistogram(int id)
     case CSSPropertyWebkitBorderEndColor: return 191;
     case CSSPropertyWebkitBorderEndStyle: return 192;
     case CSSPropertyWebkitBorderEndWidth: return 193;
-    case CSSPropertyWebkitBorderFit: return 194;
+    // CSSPropertyWebkitBorderFit was 194
     case CSSPropertyWebkitBorderHorizontalSpacing: return 195;
     case CSSPropertyWebkitBorderImage: return 196;
     case CSSPropertyWebkitBorderRadius: return 197;
@@ -506,12 +506,6 @@ int UseCounter::mapCSSPropertyIdToCSSSampleIdForHistogram(int id)
     // 3. Run the update_use_counter_css.py script in
     // chromium/src/tools/metrics/histograms to update the UMA histogram names.
 
-    // Internal properties should not be counted.
-    case CSSPropertyInternalMarqueeDirection:
-    case CSSPropertyInternalMarqueeIncrement:
-    case CSSPropertyInternalMarqueeRepetition:
-    case CSSPropertyInternalMarqueeSpeed:
-    case CSSPropertyInternalMarqueeStyle:
     case CSSPropertyInvalid:
         ASSERT_NOT_REACHED();
         return 0;
@@ -605,6 +599,20 @@ void UseCounter::count(const ExecutionContext* context, Feature feature)
         toWorkerGlobalScope(context)->countFeature(feature);
 }
 
+void UseCounter::countIfNotPrivateScript(v8::Isolate* isolate, const Document& document, Feature feature)
+{
+    if (DOMWrapperWorld::current(isolate).isPrivateScriptIsolatedWorld())
+        return;
+    UseCounter::count(document, feature);
+}
+
+void UseCounter::countIfNotPrivateScript(v8::Isolate* isolate, const ExecutionContext* context, Feature feature)
+{
+    if (DOMWrapperWorld::current(isolate).isPrivateScriptIsolatedWorld())
+        return;
+    UseCounter::count(context, feature);
+}
+
 void UseCounter::countDeprecation(ExecutionContext* context, Feature feature)
 {
     if (!context)
@@ -635,6 +643,13 @@ void UseCounter::countDeprecation(const Document& document, Feature feature)
         ASSERT(!host->useCounter().deprecationMessage(feature).isEmpty());
         frame->console().addMessage(ConsoleMessage::create(DeprecationMessageSource, WarningMessageLevel, host->useCounter().deprecationMessage(feature)));
     }
+}
+
+void UseCounter::countDeprecationIfNotPrivateScript(v8::Isolate* isolate, ExecutionContext* context, Feature feature)
+{
+    if (DOMWrapperWorld::current(isolate).isPrivateScriptIsolatedWorld())
+        return;
+    UseCounter::countDeprecation(context, feature);
 }
 
 // FIXME: Update other UseCounter::deprecationMessage() cases to use this.
@@ -756,9 +771,6 @@ String UseCounter::deprecationMessage(Feature feature)
     case OverflowChangedEvent:
         return "The 'overflowchanged' event is deprecated and may be removed. Please do not use it.";
 
-    case HTMLHeadElementProfile:
-        return "'HTMLHeadElement.profile' is deprecated. The reflected attribute has no effect.";
-
     case ElementSetPrefix:
         return "Setting 'Element.prefix' is deprecated, as it is read-only per DOM (http://dom.spec.whatwg.org/#element).";
 
@@ -791,6 +803,12 @@ String UseCounter::deprecationMessage(Feature feature)
 
     case ConsoleTimelineEnd:
         return "console.timelineEnd is deprecated. Please use the console.timeEnd instead.";
+
+    case XMLHttpRequestSynchronousInNonWorkerOutsideBeforeUnload:
+        return "Synchronous XMLHttpRequest on the main thread is deprecated because of its detrimental effects to the end user's experience. For more help, check http://xhr.spec.whatwg.org/.";
+
+    case FontFaceSetReady:
+        return "document.fonts.ready() method is going to be replaced with document.fonts.ready attribute in future releases. Please be prepared. For more help, check https://code.google.com/p/chromium/issues/detail?id=392077#c3 .";
 
     // Features that aren't deprecated don't have a deprecation message.
     default:

@@ -5,17 +5,16 @@
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/task_manager/task_manager_browsertest_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/test/browser_test_utils.h"
@@ -56,11 +55,11 @@ IN_PROC_BROWSER_TEST_F(PrintPreviewTest, PrintCommands) {
 
   ASSERT_TRUE(chrome::IsCommandEnabled(browser(), IDC_PRINT));
 
-#if defined(DISABLE_BASIC_PRINTING)
-  bool is_basic_print_expected = false;
-#else
+#if defined(ENABLE_BASIC_PRINTING)
   bool is_basic_print_expected = true;
-#endif  // DISABLE_BASIC_PRINTING
+#else
+  bool is_basic_print_expected = false;
+#endif  // ENABLE_BASIC_PRINTING
 
   ASSERT_EQ(is_basic_print_expected,
             chrome::IsCommandEnabled(browser(), IDC_BASIC_PRINT));
@@ -85,7 +84,7 @@ IN_PROC_BROWSER_TEST_F(PrintPreviewTest, PrintCommands) {
 }
 
 // Disable the test for mac, see http://crbug/367665.
-#if defined(OS_MACOSX) && !defined(OS_IOS)
+#if (defined(OS_MACOSX) && !defined(OS_IOS)) || defined(OS_LINUX)
 #define MAYBE_TaskManagerNewPrintPreview DISABLED_TaskManagerNewPrintPreview
 #else
 #define MAYBE_TaskManagerNewPrintPreview TaskManagerNewPrintPreview

@@ -39,20 +39,24 @@ class TestTransport : public Transport,
   void SetRTCPReceiver(RTCPReceiver* rtcp_receiver) {
     rtcp_receiver_ = rtcp_receiver;
   }
-  virtual int SendPacket(int /*ch*/, const void* /*data*/, int /*len*/) {
+  virtual int SendPacket(int /*ch*/,
+                         const void* /*data*/,
+                         int /*len*/) OVERRIDE {
     ADD_FAILURE();  // FAIL() gives a compile error.
     return -1;
   }
 
   // Injects an RTCP packet into the receiver.
-  virtual int SendRTCPPacket(int /* ch */, const void *packet, int packet_len) {
+  virtual int SendRTCPPacket(int /* ch */,
+                             const void *packet,
+                             int packet_len) OVERRIDE {
     ADD_FAILURE();
     return 0;
   }
 
   virtual int OnReceivedPayloadData(const uint8_t* payloadData,
                                     const uint16_t payloadSize,
-                                    const WebRtcRTPHeader* rtpHeader) {
+                                    const WebRtcRTPHeader* rtpHeader) OVERRIDE {
     ADD_FAILURE();
     return 0;
   }
@@ -588,13 +592,6 @@ TEST_F(RtcpReceiverTest, InjectXrPacketWithUnknownReportBlock) {
   EXPECT_FALSE(rtcp_packet_info_.xr_dlrr_item);
 }
 
-TEST(RtcpUtilityTest, MidNtp) {
-  const uint32_t kNtpSec = 0x12345678;
-  const uint32_t kNtpFrac = 0x23456789;
-  const uint32_t kNtpMid = 0x56782345;
-  EXPECT_EQ(kNtpMid, RTCPUtility::MidNtp(kNtpSec, kNtpFrac));
-}
-
 TEST_F(RtcpReceiverTest, TestXrRrRttInitiallyFalse) {
   uint16_t rtt_ms;
   EXPECT_FALSE(rtcp_receiver_->GetAndResetXrRrRtt(&rtt_ms));
@@ -818,7 +815,7 @@ TEST_F(RtcpReceiverTest, Callbacks) {
     virtual ~RtcpCallbackImpl() {}
 
     virtual void StatisticsUpdated(const RtcpStatistics& statistics,
-                                   uint32_t ssrc) {
+                                   uint32_t ssrc) OVERRIDE {
       stats_ = statistics;
       ssrc_ = ssrc;
     }

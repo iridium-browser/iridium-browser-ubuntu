@@ -6,6 +6,8 @@
 
 #include "athena/extensions/shell/athena_shell_app_window_client.h"
 #include "base/macros.h"
+#include "extensions/browser/extension_registry.h"
+#include "extensions/browser/install/extension_install_ui.h"
 #include "extensions/common/extension_set.h"
 #include "extensions/shell/browser/shell_extension_system.h"
 
@@ -21,29 +23,33 @@ class ShellExtensionsDelegate : public ExtensionsDelegate {
     extensions::AppWindowClient::Set(&app_window_client_);
   }
 
-  virtual ~ShellExtensionsDelegate() { extensions::AppWindowClient::Set(NULL); }
+  ~ShellExtensionsDelegate() override {
+    extensions::AppWindowClient::Set(nullptr);
+  }
 
  private:
   // ExtensionsDelegate:
-  virtual content::BrowserContext* GetBrowserContext() const OVERRIDE {
+  content::BrowserContext* GetBrowserContext() const override {
     return context_;
   }
-  virtual const extensions::ExtensionSet& GetInstalledExtensions() OVERRIDE {
-    shell_extensions_.Clear();
-    if (extension_system_->extension().get())
-      shell_extensions_.Insert(extension_system_->extension());
-    return shell_extensions_;
+
+  const extensions::ExtensionSet& GetInstalledExtensions() override {
+    return extensions::ExtensionRegistry::Get(context_)->enabled_extensions();
   }
-  virtual bool LaunchApp(const std::string& app_id) OVERRIDE {
-    extension_system_->LaunchApp();
+  bool LaunchApp(const std::string& app_id) override {
+    extension_system_->LaunchApp(app_id);
     return true;
   }
 
-  virtual bool UnloadApp(const std::string& app_id) OVERRIDE { return false; }
+  bool UnloadApp(const std::string& app_id) override { return false; }
+
+  scoped_ptr<extensions::ExtensionInstallUI> CreateExtensionInstallUI()
+      override {
+    return scoped_ptr<extensions::ExtensionInstallUI>();
+  }
 
   content::BrowserContext* context_;
   extensions::ShellExtensionSystem* extension_system_;
-  extensions::ExtensionSet shell_extensions_;
 
   AthenaShellAppWindowClient app_window_client_;
 
@@ -53,7 +59,7 @@ class ShellExtensionsDelegate : public ExtensionsDelegate {
 }  // namespace
 
 // static
-void ExtensionsDelegate::CreateExtensionsDelegateForShell(
+void ExtensionsDelegate::CreateExtensionsDelegate(
     content::BrowserContext* context) {
   new ShellExtensionsDelegate(context);
 }

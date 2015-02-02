@@ -69,7 +69,6 @@
 <translation id="7267430310003164111">Подкана за изтегляне на приложението от Google Play Магазин.  Име на приложението: <ph name="APP_NAME"/>.  Средна оценка на приложението: <ph name="APP_RATING"/>.</translation>
 <translation id="4148957013307229264">Инсталира се...</translation>
 <translation id="3992315671621218278">Запазване на връзката</translation>
-<translation id="8034522405403831421">Тази страница е на <ph name="SOURCE_LANGUAGE"/>. Да се преведе ли на <ph name="TARGET_LANGUAGE"/>?</translation>
 <translation id="2476578072172137802">Настройки за сайта</translation>
 <translation id="4195643157523330669">Отваряне в нов раздел</translation>
 <translation id="651048280540227067">Отхвърляне на менюто</translation>
@@ -95,6 +94,7 @@
 <translation id="7947953824732555851">Приемам и влизам</translation>
 <translation id="6333140779060797560">Споделяне чрез <ph name="APPLICATION"/></translation>
 <translation id="6040143037577758943">Затваряне</translation>
+<translation id="5138299137310274655">Тази страница е на <ph name="SOURCE_LANGUAGE"/>. Да се преведе ли на <ph name="TARGET_LANGUAGE"/>?</translation>
 <translation id="969096075394517431">Промяна на езиците</translation>
 <translation id="5032574515228824816">Подкана</translation>
 <translation id="7961015016161918242">Никога</translation>

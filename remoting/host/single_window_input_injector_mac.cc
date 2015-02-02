@@ -24,15 +24,14 @@ class SingleWindowInputInjectorMac : public SingleWindowInputInjector {
   SingleWindowInputInjectorMac(
       webrtc::WindowId window_id,
       scoped_ptr<InputInjector> input_injector);
-  virtual ~SingleWindowInputInjectorMac();
+  ~SingleWindowInputInjectorMac() override;
 
   // InputInjector interface.
-  virtual void Start(
-      scoped_ptr<protocol::ClipboardStub> client_clipboard) OVERRIDE;
-  virtual void InjectKeyEvent(const KeyEvent& event) OVERRIDE;
-  virtual void InjectTextEvent(const TextEvent& event) OVERRIDE;
-  virtual void InjectMouseEvent(const MouseEvent& event) OVERRIDE;
-  virtual void InjectClipboardEvent(const ClipboardEvent& event) OVERRIDE;
+  void Start(scoped_ptr<protocol::ClipboardStub> client_clipboard) override;
+  void InjectKeyEvent(const KeyEvent& event) override;
+  void InjectTextEvent(const TextEvent& event) override;
+  void InjectMouseEvent(const MouseEvent& event) override;
+  void InjectClipboardEvent(const ClipboardEvent& event) override;
 
  private:
   CGRect FindCGRectOfWindow();
@@ -160,7 +159,7 @@ scoped_ptr<InputInjector> SingleWindowInputInjector::CreateForWindow(
     scoped_ptr<InputInjector> input_injector) {
   scoped_ptr<SingleWindowInputInjectorMac> injector(
       new SingleWindowInputInjectorMac(window_id, input_injector.Pass()));
-  return injector.PassAs<InputInjector>();
+  return injector.Pass();
 }
 
 }  // namespace remoting

@@ -22,13 +22,13 @@ class DriWindowDelegate;
 class GbmSurfaceless : public SurfaceOzoneEGL {
  public:
   GbmSurfaceless(DriWindowDelegate* window_delegate);
-  virtual ~GbmSurfaceless();
+  ~GbmSurfaceless() override;
 
   // SurfaceOzoneEGL:
-  virtual intptr_t GetNativeWindow() OVERRIDE;
-  virtual bool ResizeNativeWindow(const gfx::Size& viewport_size) OVERRIDE;
-  virtual bool OnSwapBuffers() OVERRIDE;
-  virtual scoped_ptr<gfx::VSyncProvider> CreateVSyncProvider() OVERRIDE;
+  intptr_t GetNativeWindow() override;
+  bool ResizeNativeWindow(const gfx::Size& viewport_size) override;
+  bool OnSwapBuffers() override;
+  scoped_ptr<gfx::VSyncProvider> CreateVSyncProvider() override;
 
  protected:
   DriWindowDelegate* window_delegate_;

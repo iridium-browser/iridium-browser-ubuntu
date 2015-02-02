@@ -38,11 +38,11 @@ class PepperIsolatedFileSystemMessageFilter
       content::BrowserPpapiHost* host);
 
   // ppapi::host::ResourceMessageFilter implementation.
-  virtual scoped_refptr<base::TaskRunner> OverrideTaskRunnerForMessage(
-      const IPC::Message& msg) OVERRIDE;
-  virtual int32_t OnResourceMessageReceived(
+  scoped_refptr<base::TaskRunner> OverrideTaskRunnerForMessage(
+      const IPC::Message& msg) override;
+  int32_t OnResourceMessageReceived(
       const IPC::Message& msg,
-      ppapi::host::HostMessageContext* context) OVERRIDE;
+      ppapi::host::HostMessageContext* context) override;
 
  private:
   PepperIsolatedFileSystemMessageFilter(int render_process_id,
@@ -50,7 +50,7 @@ class PepperIsolatedFileSystemMessageFilter
                                         const GURL& document_url,
                                         ppapi::host::PpapiHost* ppapi_host_);
 
-  virtual ~PepperIsolatedFileSystemMessageFilter();
+  ~PepperIsolatedFileSystemMessageFilter() override;
 
   Profile* GetProfile();
 

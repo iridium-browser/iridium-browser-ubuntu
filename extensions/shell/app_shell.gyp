@@ -31,9 +31,12 @@
         '<(DEPTH)/extensions/extensions.gyp:extensions_common',
         '<(DEPTH)/extensions/extensions.gyp:extensions_renderer',
         '<(DEPTH)/extensions/extensions.gyp:extensions_shell_and_test_pak',
+        '<(DEPTH)/extensions/extensions.gyp:extensions_utility',
         '<(DEPTH)/extensions/extensions_resources.gyp:extensions_resources',
+        '<(DEPTH)/extensions/shell/browser/api/api_registration.gyp:shell_api_registration',
+        '<(DEPTH)/extensions/shell/common/api/api.gyp:shell_api',
+        '<(DEPTH)/mojo/edk/mojo_edk.gyp:mojo_system_impl',
         '<(DEPTH)/mojo/mojo_base.gyp:mojo_environment_chromium',
-        '<(DEPTH)/mojo/mojo_base.gyp:mojo_system_impl',
         '<(DEPTH)/skia/skia.gyp:skia',
         '<(DEPTH)/third_party/WebKit/public/blink.gyp:blink',
         '<(DEPTH)/ui/wm/wm.gyp:wm',
@@ -47,6 +50,14 @@
       'sources': [
         'app/shell_main_delegate.cc',
         'app/shell_main_delegate.h',
+        'browser/api/identity/identity_api.cc',
+        'browser/api/identity/identity_api.h',
+        'browser/api/shell_gcd/shell_gcd_api.cc',
+        'browser/api/shell_gcd/shell_gcd_api.h',
+        'browser/api/shell_window/shell_window_api.cc',
+        'browser/api/shell_window/shell_window_api.h',
+        'browser/shell_browser_context_keyed_service_factories.cc',
+        'browser/shell_browser_context_keyed_service_factories.h',
         'browser/default_shell_browser_main_delegate.cc',
         'browser/default_shell_browser_main_delegate.h',
         'browser/desktop_controller.cc',
@@ -86,23 +97,31 @@
         'browser/shell_native_app_window.h',
         'browser/shell_network_controller_chromeos.cc',
         'browser/shell_network_controller_chromeos.h',
+        'browser/shell_network_delegate.cc',
+        'browser/shell_network_delegate.h',
+        'browser/shell_oauth2_token_service.cc',
+        'browser/shell_oauth2_token_service.h',
         'browser/shell_omaha_query_params_delegate.cc',
         'browser/shell_omaha_query_params_delegate.h',
         'browser/shell_runtime_api_delegate.cc',
         'browser/shell_runtime_api_delegate.h',
         'browser/shell_special_storage_policy.cc',
         'browser/shell_special_storage_policy.h',
+        'browser/shell_url_request_context_getter.cc',
+        'browser/shell_url_request_context_getter.h',
         'browser/shell_web_contents_modal_dialog_manager.cc',
         'common/shell_content_client.cc',
         'common/shell_content_client.h',
         'common/shell_extensions_client.cc',
         'common/shell_extensions_client.h',
-        'common/switches.h',
         'common/switches.cc',
+        'common/switches.h',
         'renderer/shell_content_renderer_client.cc',
         'renderer/shell_content_renderer_client.h',
         'renderer/shell_extensions_renderer_client.cc',
         'renderer/shell_extensions_renderer_client.h',
+        'utility/shell_content_utility_client.cc',
+        'utility/shell_content_utility_client.h',
       ],
       'conditions': [
         ['chromeos==1', {
@@ -157,6 +176,11 @@
             '<(DEPTH)/sandbox/sandbox.gyp:sandbox',
           ],
         }],
+        ['OS=="win" and win_use_allocator_shim==1', {
+          'dependencies': [
+            '<(DEPTH)/base/allocator/allocator.gyp:allocator',
+          ],
+        }],
       ],
     },
     {
@@ -170,6 +194,7 @@
         '<(DEPTH)/content/content_shell_and_tests.gyp:content_browser_test_support',
         '<(DEPTH)/content/content_shell_and_tests.gyp:test_support_content',
         '<(DEPTH)/extensions/extensions.gyp:extensions_test_support',
+        '<(DEPTH)/testing/gmock.gyp:gmock',
         '<(DEPTH)/testing/gtest.gyp:gtest',
       ],
       'defines': [
@@ -180,10 +205,16 @@
         # TODO(yoz): Something is off here; should this .gyp file be
         # in the parent directory? Test target extensions_browsertests?
         '../browser/api/dns/dns_apitest.cc',
+        '../browser/api/hid/hid_apitest.cc',
         '../browser/api/socket/socket_apitest.cc',
         '../browser/api/sockets_tcp/sockets_tcp_apitest.cc',
         '../browser/api/sockets_udp/sockets_udp_apitest.cc',
+        '../browser/api/usb/usb_apitest.cc',
+        '../browser/guest_view/app_view/app_view_apitest.cc',
+        '../browser/guest_view/web_view/web_view_apitest.h',
         '../browser/guest_view/web_view/web_view_apitest.cc',
+        '../browser/guest_view/web_view/web_view_media_access_apitest.cc',
+        '../browser/updater/update_service_browsertest.cc',
         'browser/shell_browsertest.cc',
         'test/shell_apitest.cc',
         'test/shell_apitest.h',
@@ -192,6 +223,13 @@
         'test/shell_test_launcher_delegate.cc',
         'test/shell_test_launcher_delegate.h',
         'test/shell_tests_main.cc',
+      ],
+      'conditions': [
+        ['OS=="win" and win_use_allocator_shim==1', {
+          'dependencies': [
+            '<(DEPTH)/base/allocator/allocator.gyp:allocator',
+          ],
+        }],
       ],
     },
     {
@@ -210,9 +248,13 @@
       ],
       'sources': [
         '../test/extensions_unittests_main.cc',
+        'browser/api/identity/identity_api_unittest.cc',
+        'browser/api/shell_gcd/shell_gcd_api_unittest.cc',
+        'browser/api/shell_window/shell_window_api_unittest.cc',
         'browser/shell_audio_controller_chromeos_unittest.cc',
         'browser/shell_desktop_controller_unittest.cc',
         'browser/shell_nacl_browser_delegate_unittest.cc',
+        'browser/shell_oauth2_token_service_unittest.cc',
         'common/shell_content_client_unittest.cc'
       ],
       'conditions': [
@@ -224,6 +266,11 @@
         ['chromeos==1', {
           'dependencies': [
             '<(DEPTH)/chromeos/chromeos.gyp:chromeos_test_support_without_gmock',
+          ],
+        }],
+        ['OS=="win" and win_use_allocator_shim==1', {
+          'dependencies': [
+            '<(DEPTH)/base/allocator/allocator.gyp:allocator',
           ],
         }],
       ],
@@ -254,8 +301,8 @@
           'action': [
             'python',
             '<(version_py_path)',
-            '-e', 'VERSION_FULL="<(version_full)"',
             '-f', '<(lastchange_path)',
+            '-f', '<(version_path)',
             'common/version.h.in',
             '<@(_outputs)',
           ],

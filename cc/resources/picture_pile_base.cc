@@ -11,10 +11,9 @@
 #include "base/debug/trace_event_argument.h"
 #include "base/logging.h"
 #include "base/values.h"
-#include "cc/base/math_util.h"
 #include "cc/debug/traced_value.h"
 #include "third_party/skia/include/core/SkColor.h"
-#include "ui/gfx/rect_conversions.h"
+#include "ui/gfx/geometry/rect_conversions.h"
 
 namespace {
 // Dimensions of the tiles in this picture pile as well as the dimensions of
@@ -48,7 +47,6 @@ PicturePileBase::PicturePileBase()
       show_debug_picture_borders_(false),
       clear_canvas_with_debug_color_(kDefaultClearCanvasSetting),
       has_any_recordings_(false),
-      has_text_(false),
       is_mask_(false),
       is_solid_color_(false),
       solid_color_(SK_ColorTRANSPARENT) {
@@ -72,7 +70,6 @@ PicturePileBase::PicturePileBase(const PicturePileBase* other)
       show_debug_picture_borders_(other->show_debug_picture_borders_),
       clear_canvas_with_debug_color_(other->clear_canvas_with_debug_color_),
       has_any_recordings_(other->has_any_recordings_),
-      has_text_(other->has_text_),
       is_mask_(other->is_mask_),
       is_solid_color_(other->is_solid_color_),
       solid_color_(other->solid_color_) {
@@ -133,6 +130,8 @@ void PicturePileBase::SetBufferPixels(int new_buffer_pixels) {
 void PicturePileBase::Clear() {
   picture_map_.clear();
   recorded_viewport_ = gfx::Rect();
+  has_any_recordings_ = false;
+  is_solid_color_ = false;
 }
 
 bool PicturePileBase::HasRecordingAt(int x, int y) {
@@ -140,39 +139,6 @@ bool PicturePileBase::HasRecordingAt(int x, int y) {
   if (found == picture_map_.end())
     return false;
   return !!found->second.GetPicture();
-}
-
-bool PicturePileBase::CanRaster(float contents_scale,
-                                const gfx::Rect& content_rect) {
-  if (tiling_.tiling_size().IsEmpty())
-    return false;
-  gfx::Rect layer_rect = gfx::ScaleToEnclosingRect(
-      content_rect, 1.f / contents_scale);
-  layer_rect.Intersect(gfx::Rect(tiling_.tiling_size()));
-
-  // Common case inside of viewport to avoid the slower map lookups.
-  if (recorded_viewport_.Contains(layer_rect)) {
-    // Sanity check that there are no false positives in recorded_viewport_.
-    DCHECK(CanRasterSlowTileCheck(layer_rect));
-    return true;
-  }
-
-  return CanRasterSlowTileCheck(layer_rect);
-}
-
-bool PicturePileBase::CanRasterSlowTileCheck(
-    const gfx::Rect& layer_rect) const {
-  bool include_borders = false;
-  for (TilingData::Iterator tile_iter(&tiling_, layer_rect, include_borders);
-       tile_iter;
-       ++tile_iter) {
-    PictureMap::const_iterator map_iter = picture_map_.find(tile_iter.index());
-    if (map_iter == picture_map_.end())
-      return false;
-    if (!map_iter->second.GetPicture())
-      return false;
-  }
-  return true;
 }
 
 gfx::Rect PicturePileBase::PaddedRect(const PictureMapKey& key) const {
@@ -185,25 +151,6 @@ gfx::Rect PicturePileBase::PadRect(const gfx::Rect& rect) const {
   padded_rect.Inset(
       -buffer_pixels(), -buffer_pixels(), -buffer_pixels(), -buffer_pixels());
   return padded_rect;
-}
-
-void PicturePileBase::AsValueInto(base::debug::TracedValue* pictures) const {
-  gfx::Rect tiling_rect(tiling_.tiling_size());
-  std::set<const void*> appended_pictures;
-  bool include_borders = true;
-  for (TilingData::Iterator tile_iter(&tiling_, tiling_rect, include_borders);
-       tile_iter;
-       ++tile_iter) {
-    PictureMap::const_iterator map_iter = picture_map_.find(tile_iter.index());
-    if (map_iter == picture_map_.end())
-      continue;
-
-    const Picture* picture = map_iter->second.GetPicture();
-    if (picture && (appended_pictures.count(picture) == 0)) {
-      appended_pictures.insert(picture);
-      TracedValue::AppendIDRef(picture, pictures);
-    }
-  }
 }
 
 PicturePileBase::PictureInfo::PictureInfo() : last_frame_number_(0) {}

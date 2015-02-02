@@ -264,6 +264,13 @@ int CBS_get_asn1_element(CBS *cbs, CBS *out, unsigned tag_value) {
   return cbs_get_asn1(cbs, out, tag_value, 0 /* include header */);
 }
 
+int CBS_peek_asn1_tag(const CBS *cbs, unsigned tag_value) {
+  if (CBS_len(cbs) < 1) {
+    return 0;
+  }
+  return CBS_data(cbs)[0] == tag_value;
+}
+
 int CBS_get_asn1_uint64(CBS *cbs, uint64_t *out) {
   CBS bytes;
   const uint8_t *data;
@@ -277,7 +284,12 @@ int CBS_get_asn1_uint64(CBS *cbs, uint64_t *out) {
   data = CBS_data(&bytes);
   len = CBS_len(&bytes);
 
-  if (len > 0 && (data[0] & 0x80) != 0) {
+  if (len == 0) {
+    /* An INTEGER is encoded with at least one octet. */
+    return 0;
+  }
+
+  if ((data[0] & 0x80) != 0) {
     /* negative number */
     return 0;
   }
@@ -291,5 +303,86 @@ int CBS_get_asn1_uint64(CBS *cbs, uint64_t *out) {
     *out |= data[i];
   }
 
+  return 1;
+}
+
+int CBS_get_optional_asn1(CBS *cbs, CBS *out, int *out_present, unsigned tag) {
+  if (CBS_peek_asn1_tag(cbs, tag)) {
+    if (!CBS_get_asn1(cbs, out, tag)) {
+      return 0;
+    }
+    *out_present = 1;
+  } else {
+    *out_present = 0;
+  }
+  return 1;
+}
+
+int CBS_get_optional_asn1_octet_string(CBS *cbs, CBS *out, int *out_present,
+                                       unsigned tag) {
+  CBS child;
+  int present;
+  if (!CBS_get_optional_asn1(cbs, &child, &present, tag)) {
+    return 0;
+  }
+  if (present) {
+    if (!CBS_get_asn1(&child, out, CBS_ASN1_OCTETSTRING) ||
+        CBS_len(&child) != 0) {
+      return 0;
+    }
+  } else {
+    CBS_init(out, NULL, 0);
+  }
+  if (out_present) {
+    *out_present = present;
+  }
+  return 1;
+}
+
+int CBS_get_optional_asn1_uint64(CBS *cbs, uint64_t *out, unsigned tag,
+                                 uint64_t default_value) {
+  CBS child;
+  int present;
+  if (!CBS_get_optional_asn1(cbs, &child, &present, tag)) {
+    return 0;
+  }
+  if (present) {
+    if (!CBS_get_asn1_uint64(&child, out) ||
+        CBS_len(&child) != 0) {
+      return 0;
+    }
+  } else {
+    *out = default_value;
+  }
+  return 1;
+}
+
+int CBS_get_optional_asn1_bool(CBS *cbs, int *out, unsigned tag,
+                               int default_value) {
+  CBS child, child2;
+  int present;
+  if (!CBS_get_optional_asn1(cbs, &child, &present, tag)) {
+    return 0;
+  }
+  if (present) {
+    uint8_t boolean;
+
+    if (!CBS_get_asn1(&child, &child2, CBS_ASN1_BOOLEAN) ||
+        CBS_len(&child2) != 1 ||
+        CBS_len(&child) != 0) {
+      return 0;
+    }
+
+    boolean = CBS_data(&child2)[0];
+    if (boolean == 0) {
+      *out = 0;
+    } else if (boolean == 0xff) {
+      *out = 1;
+    } else {
+      return 0;
+    }
+  } else {
+    *out = default_value;
+  }
   return 1;
 }

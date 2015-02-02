@@ -8,7 +8,6 @@
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
 #include "ash/test/ash_test_base.h"
-#include "ash/wm/lock_state_controller.h"
 #include "ash/wm/resize_shadow.h"
 #include "ash/wm/resize_shadow_controller.h"
 #include "ash/wm/window_state.h"
@@ -48,13 +47,11 @@ class TestWindowDelegate : public aura::test::TestWindowDelegate {
   explicit TestWindowDelegate(int hittest_code) {
     set_window_component(hittest_code);
   }
-  virtual ~TestWindowDelegate() {}
+  ~TestWindowDelegate() override {}
 
  private:
   // Overridden from aura::Test::TestWindowDelegate:
-  virtual void OnWindowDestroyed(aura::Window* window) OVERRIDE {
-    delete this;
-  }
+  void OnWindowDestroyed(aura::Window* window) override { delete this; }
 
   DISALLOW_COPY_AND_ASSIGN(TestWindowDelegate);
 };
@@ -62,7 +59,7 @@ class TestWindowDelegate : public aura::test::TestWindowDelegate {
 class ToplevelWindowEventHandlerTest : public AshTestBase {
  public:
   ToplevelWindowEventHandlerTest() {}
-  virtual ~ToplevelWindowEventHandlerTest() {}
+  ~ToplevelWindowEventHandlerTest() override {}
 
  protected:
   aura::Window* CreateWindow(int hittest_code) {
@@ -468,24 +465,16 @@ TEST_F(ToplevelWindowEventHandlerTest, GestureDrag) {
             window_state->GetRestoreBoundsInScreen().ToString());
 }
 
-// Tests that a gesture cannot minimize a window in login/lock screen.
-TEST_F(ToplevelWindowEventHandlerTest, GestureDragMinimizeLoginScreen) {
-  LockStateController* state_controller =
-      Shell::GetInstance()->lock_state_controller();
-  state_controller->OnLoginStateChanged(user::LOGGED_IN_NONE);
-  state_controller->OnLockStateChanged(false);
-  SetUserLoggedIn(false);
-
+// Tests that a gesture cannot minimize an unminimizeable window.
+TEST_F(ToplevelWindowEventHandlerTest,
+       GestureAttemptMinimizeUnminimizeableWindow) {
   scoped_ptr<aura::Window> target(CreateWindow(HTCAPTION));
-  aura::Window* lock =
-      RootWindowController::ForWindow(target.get())
-          ->GetContainer(kShellWindowId_LockSystemModalContainer);
-  lock->AddChild(target.get());
   ui::test::EventGenerator generator(Shell::GetPrimaryRootWindow(),
                                      target.get());
   gfx::Rect old_bounds = target->bounds();
   gfx::Point location(5, 5);
   target->SetProperty(aura::client::kCanMaximizeKey, true);
+  target->SetProperty(aura::client::kCanMinimizeKey, false);
 
   gfx::Point end = location;
   end.Offset(0, 100);

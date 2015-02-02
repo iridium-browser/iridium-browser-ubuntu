@@ -12,7 +12,6 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
-#include "base/memory/weak_ptr.h"
 #include "chrome/browser/speech/tts_controller.h"
 #include "url/gurl.h"
 
@@ -29,30 +28,29 @@ class TtsControllerImpl : public TtsController {
   static TtsControllerImpl* GetInstance();
 
   // TtsController methods
-  virtual bool IsSpeaking() OVERRIDE;
-  virtual void SpeakOrEnqueue(Utterance* utterance) OVERRIDE;
-  virtual void Stop() OVERRIDE;
-  virtual void Pause() OVERRIDE;
-  virtual void Resume() OVERRIDE;
-  virtual void OnTtsEvent(int utterance_id,
+  bool IsSpeaking() override;
+  void SpeakOrEnqueue(Utterance* utterance) override;
+  void Stop() override;
+  void Pause() override;
+  void Resume() override;
+  void OnTtsEvent(int utterance_id,
                   TtsEventType event_type,
                   int char_index,
-                  const std::string& error_message) OVERRIDE;
-  virtual void GetVoices(content::BrowserContext* browser_context,
-                         std::vector<VoiceData>* out_voices) OVERRIDE;
-  virtual void VoicesChanged() OVERRIDE;
-  virtual void AddVoicesChangedDelegate(
-      VoicesChangedDelegate* delegate) OVERRIDE;
-  virtual void RemoveVoicesChangedDelegate(
-      VoicesChangedDelegate* delegate) OVERRIDE;
-  virtual void SetTtsEngineDelegate(TtsEngineDelegate* delegate) OVERRIDE;
-  virtual TtsEngineDelegate* GetTtsEngineDelegate() OVERRIDE;
-  virtual void SetPlatformImpl(TtsPlatformImpl* platform_impl) OVERRIDE;
-  virtual int QueueSize() OVERRIDE;
+                  const std::string& error_message) override;
+  void GetVoices(content::BrowserContext* browser_context,
+                 std::vector<VoiceData>* out_voices) override;
+  void VoicesChanged() override;
+  void AddVoicesChangedDelegate(VoicesChangedDelegate* delegate) override;
+  void RemoveVoicesChangedDelegate(VoicesChangedDelegate* delegate) override;
+  void RemoveUtteranceEventDelegate(UtteranceEventDelegate* delegate) override;
+  void SetTtsEngineDelegate(TtsEngineDelegate* delegate) override;
+  TtsEngineDelegate* GetTtsEngineDelegate() override;
+  void SetPlatformImpl(TtsPlatformImpl* platform_impl) override;
+  int QueueSize() override;
 
  protected:
   TtsControllerImpl();
-  virtual ~TtsControllerImpl();
+  ~TtsControllerImpl() override;
 
  private:
   // Get the platform TTS implementation (or injected mock).

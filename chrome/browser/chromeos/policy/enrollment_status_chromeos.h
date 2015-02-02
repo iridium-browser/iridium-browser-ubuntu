@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_CHROMEOS_POLICY_ENROLLMENT_STATUS_CHROMEOS_H_
 #define CHROME_BROWSER_CHROMEOS_POLICY_ENROLLMENT_STATUS_CHROMEOS_H_
 
+#include "chrome/browser/chromeos/policy/enterprise_install_attributes.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "components/policy/core/common/cloud/cloud_policy_store.h"
 #include "components/policy/core/common/cloud/cloud_policy_validator.h"
@@ -12,26 +13,32 @@
 namespace policy {
 
 // Describes the result of an enrollment operation, including the relevant error
-// codes received from the involved components.
+// codes received from the involved components.  Note that the component error
+// codes only convey useful information in case |status_| points towards a
+// problem in that specific component.
 class EnrollmentStatus {
  public:
-  // Enrollment status codes.
+  // Enrollment status codes.  Do not change the numeric ids or the meaning of
+  // the existing codes to preserve the interpretability of old logfiles.
   enum Status {
-    STATUS_SUCCESS,                     // Enrollment succeeded.
-    STATUS_NO_STATE_KEYS,               // Server-backed state keys unavailable.
-    STATUS_REGISTRATION_FAILED,         // DM registration failed.
-    STATUS_REGISTRATION_BAD_MODE,       // Bad device mode.
-    STATUS_ROBOT_AUTH_FETCH_FAILED,     // API OAuth2 auth code failure.
-    STATUS_ROBOT_REFRESH_FETCH_FAILED,  // API OAuth2 refresh token failure.
-    STATUS_ROBOT_REFRESH_STORE_FAILED,  // Failed to store API OAuth2 token.
-    STATUS_POLICY_FETCH_FAILED,         // DM policy fetch failed.
-    STATUS_VALIDATION_FAILED,           // Policy validation failed.
-    STATUS_LOCK_ERROR,                  // Cryptohome failed to lock the device.
-    STATUS_LOCK_TIMEOUT,                // Timeout while waiting for the lock.
-    STATUS_LOCK_WRONG_USER,             // Locked to different domain.
-    STATUS_STORE_ERROR,                 // Failed to store the policy.
-    STATUS_STORE_TOKEN_AND_ID_FAILED,   // Failed to store DM token and device
-                                        // ID.
+    STATUS_SUCCESS = 0,                     // Enrollment succeeded.
+    STATUS_NO_STATE_KEYS = 1,               // Server-backed state keys
+                                            // unavailable.
+    STATUS_REGISTRATION_FAILED = 2,         // DM registration failed.
+    STATUS_REGISTRATION_BAD_MODE = 3,       // Bad device mode.
+    STATUS_ROBOT_AUTH_FETCH_FAILED = 4,     // API OAuth2 auth code failure.
+    STATUS_ROBOT_REFRESH_FETCH_FAILED = 5,  // API OAuth2 refresh token failure.
+    STATUS_ROBOT_REFRESH_STORE_FAILED = 6,  // Failed to store API OAuth2 token.
+    STATUS_POLICY_FETCH_FAILED = 7,         // DM policy fetch failed.
+    STATUS_VALIDATION_FAILED = 8,           // Policy validation failed.
+    STATUS_LOCK_ERROR = 9,                  // Cryptohome failed to lock device.
+    /* STATUS_LOCK_TIMEOUT = 10, */         // Unused: Timeout while waiting for
+                                            // the lock.
+    /* STATUS_LOCK_WRONG_USER = 11, */      // Unused: Locked to different
+                                            // domain.
+    STATUS_STORE_ERROR = 12,                // Failed to store the policy.
+    STATUS_STORE_TOKEN_AND_ID_FAILED = 13,  // Failed to store DM token and
+                                            // device ID.
   };
 
   // Helpers for constructing errors for relevant cases.
@@ -47,6 +54,8 @@ class EnrollmentStatus {
   static EnrollmentStatus ForStoreError(
       CloudPolicyStore::Status store_error,
       CloudPolicyValidatorBase::Status validation_status);
+  static EnrollmentStatus ForLockError(
+      EnterpriseInstallAttributes::LockResult lock_status);
 
   Status status() const { return status_; }
   DeviceManagementStatus client_status() const { return client_status_; }
@@ -55,19 +64,24 @@ class EnrollmentStatus {
   CloudPolicyValidatorBase::Status validation_status() const {
     return validation_status_;
   }
+  EnterpriseInstallAttributes::LockResult lock_status() const {
+    return lock_status_;
+  }
 
  private:
   EnrollmentStatus(Status status,
                    DeviceManagementStatus client_status,
                    int http_status,
                    CloudPolicyStore::Status store_status,
-                   CloudPolicyValidatorBase::Status validation_status);
+                   CloudPolicyValidatorBase::Status validation_status,
+                   EnterpriseInstallAttributes::LockResult lock_status);
 
   Status status_;
   DeviceManagementStatus client_status_;
   int http_status_;
   CloudPolicyStore::Status store_status_;
   CloudPolicyValidatorBase::Status validation_status_;
+  EnterpriseInstallAttributes::LockResult lock_status_;
 };
 
 }  // namespace policy

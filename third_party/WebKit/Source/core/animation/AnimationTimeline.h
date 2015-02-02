@@ -69,7 +69,7 @@ public:
     // Creates a player attached to this timeline, but without a start time.
     AnimationPlayer* createAnimationPlayer(AnimationNode*);
     AnimationPlayer* play(AnimationNode*);
-    WillBeHeapVector<RefPtrWillBeMember<AnimationPlayer> > getAnimationPlayers();
+    WillBeHeapVector<RefPtrWillBeMember<AnimationPlayer>> getAnimationPlayers();
 
 #if !ENABLE(OILPAN)
     void playerDestroyed(AnimationPlayer* player)
@@ -107,15 +107,15 @@ private:
     double m_zeroTime;
     // AnimationPlayers which will be updated on the next frame
     // i.e. current, in effect, or had timing changed
-    WillBeHeapHashSet<RefPtrWillBeMember<AnimationPlayer> > m_playersNeedingUpdate;
-    WillBeHeapHashSet<RawPtrWillBeWeakMember<AnimationPlayer> > m_players;
+    WillBeHeapHashSet<RefPtrWillBeMember<AnimationPlayer>> m_playersNeedingUpdate;
+    WillBeHeapHashSet<RawPtrWillBeWeakMember<AnimationPlayer>> m_players;
 
     friend class SMILTimeContainer;
     static const double s_minimumDelay;
 
     OwnPtrWillBeMember<PlatformTiming> m_timing;
 
-    class AnimationTimelineTiming FINAL : public PlatformTiming {
+    class AnimationTimelineTiming final : public PlatformTiming {
     public:
         AnimationTimelineTiming(AnimationTimeline* timeline)
             : m_timeline(timeline)
@@ -124,13 +124,13 @@ private:
             ASSERT(m_timeline);
         }
 
-        virtual void wakeAfter(double duration) OVERRIDE;
-        virtual void cancelWake() OVERRIDE;
-        virtual void serviceOnNextFrame() OVERRIDE;
+        virtual void wakeAfter(double duration) override;
+        virtual void cancelWake() override;
+        virtual void serviceOnNextFrame() override;
 
         void timerFired(Timer<AnimationTimelineTiming>*) { m_timeline->wake(); }
 
-        virtual void trace(Visitor*) OVERRIDE;
+        virtual void trace(Visitor*) override;
 
     private:
         RawPtrWillBeMember<AnimationTimeline> m_timeline;

@@ -60,7 +60,7 @@ gfx::NativeWindow WebContentsViewGuest::GetTopLevelNativeWindow() const {
   return guest_->embedder_web_contents()->GetTopLevelNativeWindow();
 }
 
-void WebContentsViewGuest::OnGuestInitialized(WebContentsView* parent_view) {
+void WebContentsViewGuest::OnGuestAttached(WebContentsView* parent_view) {
 #if defined(USE_AURA)
   // In aura, ScreenPositionClient doesn't work properly if we do
   // not have the native view associated with this WebContentsViewGuest in the
@@ -68,6 +68,13 @@ void WebContentsViewGuest::OnGuestInitialized(WebContentsView* parent_view) {
   // This would go in WebContentsViewGuest::CreateView, but that is too early to
   // access embedder_web_contents(). Therefore, we do it here.
   parent_view->GetNativeView()->AddChild(platform_view_->GetNativeView());
+#endif  // defined(USE_AURA)
+}
+
+void WebContentsViewGuest::OnGuestDetached(WebContentsView* old_parent_view) {
+#if defined(USE_AURA)
+  old_parent_view->GetNativeView()->RemoveChild(
+      platform_view_->GetNativeView());
 #endif  // defined(USE_AURA)
 }
 
@@ -133,7 +140,7 @@ void WebContentsViewGuest::CreateView(const gfx::Size& initial_size,
 }
 
 RenderWidgetHostViewBase* WebContentsViewGuest::CreateViewForWidget(
-    RenderWidgetHost* render_widget_host) {
+    RenderWidgetHost* render_widget_host, bool is_guest_view_hack) {
   if (render_widget_host->GetView()) {
     // During testing, the view will already be set up in most cases to the
     // test view, so we don't want to clobber it with a real one. To verify that
@@ -146,14 +153,11 @@ RenderWidgetHostViewBase* WebContentsViewGuest::CreateViewForWidget(
   }
 
   RenderWidgetHostViewBase* platform_widget =
-      platform_view_->CreateViewForWidget(render_widget_host);
+      platform_view_->CreateViewForWidget(render_widget_host, true);
 
-  RenderWidgetHostViewBase* view = new RenderWidgetHostViewGuest(
-      render_widget_host,
-      guest_,
-      platform_widget);
-
-  return view;
+  return new RenderWidgetHostViewGuest(render_widget_host,
+                                       guest_,
+                                       platform_widget->GetWeakPtr());
 }
 
 RenderWidgetHostViewBase* WebContentsViewGuest::CreateViewForPopupWidget(

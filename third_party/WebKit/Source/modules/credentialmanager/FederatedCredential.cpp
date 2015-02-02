@@ -7,20 +7,31 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "platform/credentialmanager/PlatformFederatedCredential.h"
+#include "public/platform/WebFederatedCredential.h"
 
 namespace blink {
 
-FederatedCredential* FederatedCredential::create(const String& id, const String& name, const String& avatar, const String& federation, ExceptionState& exceptionState)
+FederatedCredential* FederatedCredential::create(WebFederatedCredential* webFederatedCredential)
+{
+    return new FederatedCredential(webFederatedCredential);
+}
+
+FederatedCredential* FederatedCredential::create(const String& id, const String& federation, const String& name, const String& avatar, ExceptionState& exceptionState)
 {
     KURL avatarURL = parseStringAsURL(avatar, exceptionState);
     KURL federationURL = parseStringAsURL(federation, exceptionState);
     if (exceptionState.hadException())
         return nullptr;
-    return new FederatedCredential(id, name, avatarURL, federationURL);
+    return new FederatedCredential(id, federationURL, name, avatarURL);
 }
 
-FederatedCredential::FederatedCredential(const String& id, const String& name, const KURL& avatar, const KURL& federation)
-    : Credential(PlatformFederatedCredential::create(id, name, avatar, federation))
+FederatedCredential::FederatedCredential(WebFederatedCredential* webFederatedCredential)
+    : Credential(webFederatedCredential->platformCredential())
+{
+}
+
+FederatedCredential::FederatedCredential(const String& id, const KURL& federation, const String& name, const KURL& avatar)
+    : Credential(PlatformFederatedCredential::create(id, federation, name, avatar))
 {
 }
 

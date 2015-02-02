@@ -37,16 +37,15 @@
 namespace blink {
 
 class WorkerGlobalScope;
-class WorkerThread;
 class WorkerDebuggerAgent;
 
-class WorkerDebuggerAgent FINAL : public InspectorDebuggerAgent {
+class WorkerDebuggerAgent final : public InspectorDebuggerAgent {
     WTF_MAKE_NONCOPYABLE(WorkerDebuggerAgent);
     WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
 public:
     static PassOwnPtrWillBeRawPtr<WorkerDebuggerAgent> create(WorkerScriptDebugServer*, WorkerGlobalScope*, InjectedScriptManager*);
     virtual ~WorkerDebuggerAgent();
-    virtual void trace(Visitor*) OVERRIDE;
+    virtual void trace(Visitor*) override;
 
     void interruptAndDispatchInspectorCommands();
 
@@ -54,12 +53,12 @@ private:
 
     WorkerDebuggerAgent(WorkerScriptDebugServer*, WorkerGlobalScope*, InjectedScriptManager*);
 
-    virtual void startListeningScriptDebugServer() OVERRIDE;
-    virtual void stopListeningScriptDebugServer() OVERRIDE;
-    virtual WorkerScriptDebugServer& scriptDebugServer() OVERRIDE;
-    virtual InjectedScript injectedScriptForEval(ErrorString*, const int* executionContextId) OVERRIDE;
-    virtual void muteConsole() OVERRIDE;
-    virtual void unmuteConsole() OVERRIDE;
+    virtual void startListeningScriptDebugServer() override;
+    virtual void stopListeningScriptDebugServer() override;
+    virtual WorkerScriptDebugServer& scriptDebugServer() override;
+    virtual InjectedScript injectedScriptForEval(ErrorString*, const int* executionContextId) override;
+    virtual void muteConsole() override;
+    virtual void unmuteConsole() override;
 
     WorkerScriptDebugServer* m_scriptDebugServer;
     RawPtrWillBeMember<WorkerGlobalScope> m_inspectedWorkerGlobalScope;

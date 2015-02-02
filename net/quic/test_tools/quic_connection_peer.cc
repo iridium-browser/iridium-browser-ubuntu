@@ -242,5 +242,17 @@ void QuicConnectionPeer::SetSupportedVersions(QuicConnection* connection,
   connection->framer_.SetSupportedVersions(versions);
 }
 
+// static
+QuicPacketHeader* QuicConnectionPeer::GetLastHeader(
+    QuicConnection* connection) {
+  return &connection->last_header_;
+}
+
+// static
+void QuicConnectionPeer::SetSequenceNumberOfLastSentPacket(
+    QuicConnection* connection, QuicPacketSequenceNumber number) {
+  connection->sequence_number_of_last_sent_packet_ = number;
+}
+
 }  // namespace test
 }  // namespace net

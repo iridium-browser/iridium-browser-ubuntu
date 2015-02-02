@@ -40,7 +40,7 @@ class ExceptionState;
 class MediaStreamComponent;
 class MediaStreamTrackSourcesCallback;
 
-class MediaStreamTrack FINAL
+class MediaStreamTrack final
     : public RefCountedGarbageCollectedWillBeGarbageCollectedFinalized<MediaStreamTrack>
     , public ActiveDOMObject
     , public EventTargetWithInlineData
@@ -55,6 +55,8 @@ public:
     String kind() const;
     String id() const;
     String label() const;
+    bool remote() const;
+    bool readonly() const;
 
     bool enabled() const;
     void setEnabled(bool);
@@ -78,21 +80,21 @@ public:
     void unregisterMediaStream(MediaStream*);
 
     // EventTarget
-    virtual const AtomicString& interfaceName() const OVERRIDE;
-    virtual ExecutionContext* executionContext() const OVERRIDE;
+    virtual const AtomicString& interfaceName() const override;
+    virtual ExecutionContext* executionContext() const override;
 
     // ActiveDOMObject
-    virtual void stop() OVERRIDE;
+    virtual void stop() override;
 
     PassOwnPtr<AudioSourceProvider> createWebAudioSource();
 
-    virtual void trace(Visitor*) OVERRIDE;
+    virtual void trace(Visitor*) override;
 
 private:
     MediaStreamTrack(ExecutionContext*, MediaStreamComponent*);
 
     // MediaStreamSourceObserver
-    virtual void sourceChangedState() OVERRIDE;
+    virtual void sourceChangedState() override;
 
     void propagateTrackEnded();
 

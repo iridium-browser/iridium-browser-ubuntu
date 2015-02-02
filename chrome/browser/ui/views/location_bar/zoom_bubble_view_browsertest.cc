@@ -10,7 +10,6 @@
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "chrome/test/base/ui_test_utils.h"
 
 typedef InProcessBrowserTest ZoomBubbleBrowserTest;
 
@@ -96,7 +95,7 @@ IN_PROC_BROWSER_TEST_F(ZoomBubbleBrowserTest, ImmersiveFullscreen) {
       immersive_controller->GetRevealedLock(
           ImmersiveModeController::ANIMATE_REVEAL_NO));
   ASSERT_TRUE(immersive_controller->IsRevealed());
-  EXPECT_FALSE(ZoomBubbleView::IsShowing());
+  EXPECT_EQ(NULL, ZoomBubbleView::zoom_bubble_);
 
   // The zoom bubble should be anchored when it is shown in immersive fullscreen
   // and the top-of-window views are revealed.

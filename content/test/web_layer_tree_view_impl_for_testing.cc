@@ -11,10 +11,10 @@
 #include "cc/blink/web_layer_impl.h"
 #include "cc/input/input_handler.h"
 #include "cc/layers/layer.h"
-#include "cc/output/output_surface.h"
+#include "cc/test/pixel_test_output_surface.h"
 #include "cc/test/test_context_provider.h"
 #include "cc/trees/layer_tree_host.h"
-#include "content/test/test_webkit_platform_support.h"
+#include "content/test/test_blink_web_unit_test_support.h"
 #include "third_party/WebKit/public/platform/Platform.h"
 #include "third_party/WebKit/public/platform/WebGraphicsContext3D.h"
 #include "third_party/WebKit/public/platform/WebLayer.h"
@@ -43,7 +43,7 @@ void WebLayerTreeViewImplForTesting::Initialize() {
   // Accelerated animations are enabled for unit tests.
   settings.accelerated_animation_enabled = true;
   layer_tree_host_ = cc::LayerTreeHost::CreateSingleThreaded(
-      this, this, NULL, settings, base::MessageLoopProxy::current());
+      this, this, NULL, NULL, settings, base::MessageLoopProxy::current());
   DCHECK(layer_tree_host_);
 }
 
@@ -138,14 +138,22 @@ void WebLayerTreeViewImplForTesting::Layout() {
 }
 
 void WebLayerTreeViewImplForTesting::ApplyViewportDeltas(
+    const gfx::Vector2d& inner_delta,
+    const gfx::Vector2d& outer_delta,
+    float page_scale,
+    float top_controls_delta) {}
+
+void WebLayerTreeViewImplForTesting::ApplyViewportDeltas(
     const gfx::Vector2d& scroll_delta,
     float page_scale,
     float top_controls_delta) {}
 
 void WebLayerTreeViewImplForTesting::RequestNewOutputSurface(
     bool fallback) {
-  layer_tree_host_->SetOutputSurface(make_scoped_ptr(
-      new cc::OutputSurface(cc::TestContextProvider::Create())));
+  bool flipped_output_surface = false;
+  layer_tree_host_->SetOutputSurface(
+      make_scoped_ptr(new cc::PixelTestOutputSurface(
+          cc::TestContextProvider::Create(), flipped_output_surface)));
 }
 
 void WebLayerTreeViewImplForTesting::registerViewportLayers(

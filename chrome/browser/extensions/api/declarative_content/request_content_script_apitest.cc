@@ -20,14 +20,14 @@ namespace extensions {
 namespace {
 
 // Manifest permissions injected into |kManifest|:
-const char* kPermissions[] = {
+const char* const kPermissions[] = {
   "*://*/*",              // ALL
   "http://127.0.0.1/*",   // PARTICULAR
   "http://nowhere.com/*"  // NOWHERE
 };
 
 // Script matchers for injected into |kBackgroundScriptSource|:
-const char* kScriptMatchers[] = {
+const char* const kScriptMatchers[] = {
   "{ pageUrl: { hostContains: '' } }",          // ALL
   "{ pageUrl: { hostEquals: '127.0.0.1' } }",   // PARTICULAR
   "{ pageUrl: { hostEquals: 'nowhere.com' } }"  // NOWHERE
@@ -92,7 +92,7 @@ bool RunAllPendingInRenderer(content::WebContents* web_contents) {
 class RequestContentScriptAPITest : public ExtensionBrowserTest {
  public:
   RequestContentScriptAPITest();
-  virtual ~RequestContentScriptAPITest() {}
+  ~RequestContentScriptAPITest() override {}
 
   // Performs script injection test on a common local URL using the given
   // |manifest_permission| and |script_matcher|. Does not return until
@@ -194,8 +194,9 @@ testing::AssertionResult RequestContentScriptAPITest::CreateAndLoadExtension(
 // Try different permutations of "match all", "match particular domain (that is
 // visited by test)", and "match nonsense domain (not visited by test)" for
 // both manifest permissions and injection matcher conditions.
+// http://crbug.com/421118
 IN_PROC_BROWSER_TEST_F(RequestContentScriptAPITest,
-                       PermissionMatcherAgreementInjection) {
+                       DISABLED_PermissionMatcherAgreementInjection) {
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   // Positive tests: permissions and matcher contain conditions that match URL

@@ -13,8 +13,8 @@
 #include "chrome/browser/ui/webui/downloads_dom_handler.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/test_utils.h"
 
 namespace {
 
@@ -54,7 +54,7 @@ class MockDownloadsDOMHandler : public DownloadsDOMHandler {
       waiting_list_(false),
       waiting_updated_(false) {
   }
-  virtual ~MockDownloadsDOMHandler() {}
+  ~MockDownloadsDOMHandler() override {}
 
   base::ListValue* downloads_list() { return downloads_list_.get(); }
   base::ListValue* download_updated() { return download_updated_.get(); }
@@ -81,11 +81,9 @@ class MockDownloadsDOMHandler : public DownloadsDOMHandler {
   void reset_download_updated() { download_updated_.reset(); }
 
  protected:
-  virtual content::WebContents* GetWebUIWebContents() OVERRIDE {
-    return NULL;
-  }
+  content::WebContents* GetWebUIWebContents() override { return NULL; }
 
-  virtual void CallDownloadsList(const base::ListValue& downloads) OVERRIDE {
+  void CallDownloadsList(const base::ListValue& downloads) override {
     downloads_list_.reset(downloads.DeepCopy());
     if (waiting_list_) {
       content::BrowserThread::PostTask(content::BrowserThread::UI,
@@ -94,7 +92,7 @@ class MockDownloadsDOMHandler : public DownloadsDOMHandler {
     }
   }
 
-  virtual void CallDownloadUpdated(const base::ListValue& download) OVERRIDE {
+  void CallDownloadUpdated(const base::ListValue& download) override {
     download_updated_.reset(download.DeepCopy());
     if (waiting_updated_) {
       content::BrowserThread::PostTask(content::BrowserThread::UI,
@@ -118,9 +116,9 @@ class DownloadsDOMHandlerTest : public InProcessBrowserTest {
  public:
   DownloadsDOMHandlerTest() {}
 
-  virtual ~DownloadsDOMHandlerTest() {}
+  ~DownloadsDOMHandlerTest() override {}
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     mock_handler_.reset(new MockDownloadsDOMHandler(download_manager()));
     CHECK(downloads_directory_.CreateUniqueTempDir());
     browser()->profile()->GetPrefs()->SetFilePath(

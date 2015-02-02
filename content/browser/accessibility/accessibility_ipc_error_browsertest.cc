@@ -52,7 +52,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityIpcErrorBrowserTest,
   // BrowserAccessibilityManager - like if there's no view.
   RenderFrameHostImpl* frame = static_cast<RenderFrameHostImpl*>(
       shell()->web_contents()->GetMainFrame());
-  frame->set_disallow_browser_accessibility_manager_for_testing(true);
+  frame->set_no_create_browser_accessibility_manager_for_testing(true);
   ASSERT_EQ(nullptr, frame->GetOrCreateBrowserAccessibilityManager());
 
   {
@@ -68,10 +68,13 @@ IN_PROC_BROWSER_TEST_F(AccessibilityIpcErrorBrowserTest,
   // This means that at least one accessibility IPC was lost.
   ASSERT_EQ(nullptr, frame->GetOrCreateBrowserAccessibilityManager());
 
-  // Now allow a BrowserAccessibilityManager, simulating what would happen
-  // if the RFH's view is created now.
-  frame->set_disallow_browser_accessibility_manager_for_testing(false);
+  // Now create a BrowserAccessibilityManager, simulating what would happen
+  // if the RFH's view is created now - but then disallow recreating the
+  // BrowserAccessibilityManager so that we can test that this one gets
+  // destroyed.
+  frame->set_no_create_browser_accessibility_manager_for_testing(false);
   ASSERT_TRUE(frame->GetOrCreateBrowserAccessibilityManager() != nullptr);
+  frame->set_no_create_browser_accessibility_manager_for_testing(true);
 
   {
     // Hide one of the elements on the page, and wait for an accessibility
@@ -87,9 +90,12 @@ IN_PROC_BROWSER_TEST_F(AccessibilityIpcErrorBrowserTest,
   // Show that accessibility was reset because the frame doesn't have a
   // BrowserAccessibilityManager anymore.
   ASSERT_EQ(nullptr, frame->browser_accessibility_manager());
+
+  // Finally, allow creating a new accessibility manager and
+  // ensure that we didn't kill the renderer; we can still send it messages.
+  frame->set_no_create_browser_accessibility_manager_for_testing(false);
   const ui::AXTree* tree = nullptr;
   {
-    // Ensure that we didn't kill the renderer; we can still send it messages.
     AccessibilityNotificationWaiter waiter(
         shell(), AccessibilityModeComplete, ui::AX_EVENT_FOCUS);
     ASSERT_TRUE(ExecuteScript(
@@ -174,9 +180,11 @@ IN_PROC_BROWSER_TEST_F(AccessibilityIpcErrorBrowserTest,
   }
 
   // Wait for the renderer to be killed.
-  RenderProcessHostWatcher render_process_watcher(
-      frame->GetProcess(), RenderProcessHostWatcher::WATCH_FOR_PROCESS_EXIT);
-  render_process_watcher.Wait();
+  if (frame->IsRenderFrameLive()) {
+    RenderProcessHostWatcher render_process_watcher(
+        frame->GetProcess(), RenderProcessHostWatcher::WATCH_FOR_PROCESS_EXIT);
+    render_process_watcher.Wait();
+  }
   ASSERT_FALSE(frame->IsRenderFrameLive());
 }
 

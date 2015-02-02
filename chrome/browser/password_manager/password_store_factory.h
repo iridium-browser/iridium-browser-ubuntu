@@ -9,6 +9,7 @@
 #include "base/memory/singleton.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/keyed_service/content/browser_context_keyed_service_factory.h"
+#include "components/keyed_service/core/keyed_service.h"
 
 class Profile;
 
@@ -31,12 +32,12 @@ class PasswordStoreService : public KeyedService {
   // Init() was already called successfully on it.
   explicit PasswordStoreService(
       scoped_refptr<password_manager::PasswordStore> password_store);
-  virtual ~PasswordStoreService();
+  ~PasswordStoreService() override;
 
   scoped_refptr<password_manager::PasswordStore> GetPasswordStore();
 
   // KeyedService implementation.
-  virtual void Shutdown() OVERRIDE;
+  void Shutdown() override;
 
  private:
   scoped_refptr<password_manager::PasswordStore> password_store_;
@@ -57,20 +58,20 @@ class PasswordStoreFactory : public BrowserContextKeyedServiceFactory {
   friend struct DefaultSingletonTraits<PasswordStoreFactory>;
 
   PasswordStoreFactory();
-  virtual ~PasswordStoreFactory();
+  ~PasswordStoreFactory() override;
 
 #if !defined(OS_MACOSX) && !defined(OS_CHROMEOS) && defined(OS_POSIX)
   LocalProfileId GetLocalProfileId(PrefService* prefs) const;
 #endif
 
   // BrowserContextKeyedServiceFactory:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* context) const OVERRIDE;
-  virtual void RegisterProfilePrefs(
-      user_prefs::PrefRegistrySyncable* registry) OVERRIDE;
-  virtual content::BrowserContext* GetBrowserContextToUse(
-      content::BrowserContext* context) const OVERRIDE;
-  virtual bool ServiceIsNULLWhileTesting() const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* context) const override;
+  void RegisterProfilePrefs(
+      user_prefs::PrefRegistrySyncable* registry) override;
+  content::BrowserContext* GetBrowserContextToUse(
+      content::BrowserContext* context) const override;
+  bool ServiceIsNULLWhileTesting() const override;
 
   DISALLOW_COPY_AND_ASSIGN(PasswordStoreFactory);
 };

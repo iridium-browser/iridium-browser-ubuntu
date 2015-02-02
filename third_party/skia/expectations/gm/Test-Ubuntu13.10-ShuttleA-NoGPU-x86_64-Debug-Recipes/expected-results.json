@@ -891,6 +891,33 @@
       ], 
       "reviewed-by-human": false
     }, 
+    "clip_strokerect_565.png": {
+      "allowed-digests": [
+        [
+          "bitmap-64bitMD5", 
+          13890106243991361094
+        ]
+      ], 
+      "reviewed-by-human": true
+    }, 
+    "clip_strokerect_8888.png": {
+      "allowed-digests": [
+        [
+          "bitmap-64bitMD5", 
+          13890106243991361094
+        ]
+      ], 
+      "reviewed-by-human": true
+    }, 
+    "clip_strokerect_pdf-poppler.png": {
+      "allowed-digests": [
+        [
+          "bitmap-64bitMD5", 
+          13890106243991361094
+        ]
+      ], 
+      "reviewed-by-human": true
+    }, 
     "clipped-bitmap-shaders-clamp-hq_565.png": {
       "allowed-digests": [
         [
@@ -2375,6 +2402,33 @@
         ]
       ], 
       "reviewed-by-human": false
+    }, 
+    "emboss_565.png": {
+      "allowed-digests": [
+        [
+          "bitmap-64bitMD5", 
+          8642787233756750706
+        ]
+      ], 
+      "reviewed-by-human": true
+    }, 
+    "emboss_8888.png": {
+      "allowed-digests": [
+        [
+          "bitmap-64bitMD5", 
+          3438144398085081829
+        ]
+      ], 
+      "reviewed-by-human": true
+    }, 
+    "emboss_pdf-poppler.png": {
+      "allowed-digests": [
+        [
+          "bitmap-64bitMD5", 
+          1581455627330343978
+        ]
+      ], 
+      "reviewed-by-human": true
     }, 
     "emptypath_565.png": {
       "allowed-digests": [
@@ -5238,6 +5292,60 @@
       ], 
       "reviewed-by-human": false
     }, 
+    "multipicturedraw_sierpinski_simple_565.png": {
+      "allowed-digests": [
+        [
+          "bitmap-64bitMD5", 
+          1686462708228710717
+        ]
+      ], 
+      "reviewed-by-human": true
+    }, 
+    "multipicturedraw_sierpinski_simple_8888.png": {
+      "allowed-digests": [
+        [
+          "bitmap-64bitMD5", 
+          1307763914269045402
+        ]
+      ], 
+      "reviewed-by-human": true
+    }, 
+    "multipicturedraw_sierpinski_simple_pdf-poppler.png": {
+      "allowed-digests": [
+        [
+          "bitmap-64bitMD5", 
+          6726243405405989115
+        ]
+      ], 
+      "reviewed-by-human": true
+    }, 
+    "multipicturedraw_sierpinski_tiled_565.png": {
+      "allowed-digests": [
+        [
+          "bitmap-64bitMD5", 
+          13056400496713195431
+        ]
+      ], 
+      "reviewed-by-human": true
+    }, 
+    "multipicturedraw_sierpinski_tiled_8888.png": {
+      "allowed-digests": [
+        [
+          "bitmap-64bitMD5", 
+          16172597233376362182
+        ]
+      ], 
+      "reviewed-by-human": true
+    }, 
+    "multipicturedraw_sierpinski_tiled_pdf-poppler.png": {
+      "allowed-digests": [
+        [
+          "bitmap-64bitMD5", 
+          5056350778807811586
+        ]
+      ], 
+      "reviewed-by-human": true
+    }, 
     "nested_aa_565.png": {
       "allowed-digests": [
         [
@@ -7056,6 +7164,33 @@
       ], 
       "reviewed-by-human": false
     }, 
+    "surfaceprops_565.png": {
+      "allowed-digests": [
+        [
+          "bitmap-64bitMD5", 
+          11983820125959634667
+        ]
+      ], 
+      "reviewed-by-human": true
+    }, 
+    "surfaceprops_8888.png": {
+      "allowed-digests": [
+        [
+          "bitmap-64bitMD5", 
+          9635885053518601602
+        ]
+      ], 
+      "reviewed-by-human": true
+    }, 
+    "surfaceprops_pdf-poppler.png": {
+      "allowed-digests": [
+        [
+          "bitmap-64bitMD5", 
+          1534178579295489883
+        ]
+      ], 
+      "reviewed-by-human": true
+    }, 
     "tablecolorfilter_565.png": {
       "allowed-digests": [
         [
@@ -7133,6 +7268,24 @@
         [
           "bitmap-64bitMD5", 
           2298347222358284753
+        ]
+      ], 
+      "reviewed-by-human": true
+    }, 
+    "textblobshader_8888.png": {
+      "allowed-digests": [
+        [
+          "bitmap-64bitMD5", 
+          11189777829522843738
+        ]
+      ], 
+      "reviewed-by-human": true
+    }, 
+    "textblobshader_pdf-poppler.png": {
+      "allowed-digests": [
+        [
+          "bitmap-64bitMD5", 
+          14910827072379393428
         ]
       ], 
       "reviewed-by-human": true

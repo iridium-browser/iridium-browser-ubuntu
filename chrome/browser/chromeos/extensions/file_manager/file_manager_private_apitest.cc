@@ -2,11 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/run_loop.h"
 #include "base/stl_util.h"
+#include "chrome/browser/chromeos/drive/file_change.h"
+#include "chrome/browser/chromeos/extensions/file_manager/event_router.h"
 #include "chrome/browser/chromeos/file_manager/drive_test_util.h"
+#include "chrome/browser/chromeos/file_manager/file_watcher.h"
 #include "chrome/browser/extensions/extension_apitest.h"
+#include "chrome/test/base/testing_profile.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "chromeos/dbus/cros_disks_client.h"
 #include "chromeos/disks/mock_disk_mount_manager.h"
+#include "extensions/common/extension.h"
+#include "extensions/common/install_warning.h"
 
 using ::testing::_;
 using ::testing::ReturnRef;
@@ -64,6 +72,7 @@ TestDiskInfo kTestDisks[] = {
     false,
     false,
     false,
+    false,
     false
   },
   {
@@ -83,6 +92,7 @@ TestDiskInfo kTestDisks[] = {
     true,
     true,
     true,
+    false,
     false
   },
   {
@@ -102,9 +112,21 @@ TestDiskInfo kTestDisks[] = {
     false,
     false,
     true,
+    false,
     false
   }
 };
+
+void DispatchDirectoryChangeEventImpl(
+    int* counter,
+    const base::FilePath& virtual_path,
+    const drive::FileChange* list,
+    bool got_error,
+    const std::vector<std::string>& extension_ids) {
+  ++(*counter);
+}
+
+void AddFileWatchCallback(bool success) {}
 
 }  // namespace
 
@@ -117,19 +139,36 @@ class FileManagerPrivateApiTest : public ExtensionApiTest {
 
   virtual ~FileManagerPrivateApiTest() {
     DCHECK(!disk_mount_manager_mock_);
+    DCHECK(!testing_profile_);
+    DCHECK(!event_router_);
     STLDeleteValues(&volumes_);
   }
 
-  // ExtensionApiTest override
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
-    ExtensionApiTest::SetUpInProcessBrowserTestFixture();
+  virtual void SetUpOnMainThread() override {
+    ExtensionApiTest::SetUpOnMainThread();
 
+    testing_profile_.reset(new TestingProfile());
+    event_router_.reset(new file_manager::EventRouter(testing_profile_.get()));
+  }
+
+  virtual void TearDownOnMainThread() override {
+    event_router_->Shutdown();
+
+    event_router_.reset();
+    testing_profile_.reset();
+
+    ExtensionApiTest::TearDownOnMainThread();
+  }
+
+  // ExtensionApiTest override
+  virtual void SetUpInProcessBrowserTestFixture() override {
+    ExtensionApiTest::SetUpInProcessBrowserTestFixture();
     disk_mount_manager_mock_ = new chromeos::disks::MockDiskMountManager;
     chromeos::disks::DiskMountManager::InitializeForTesting(
         disk_mount_manager_mock_);
     disk_mount_manager_mock_->SetupDefaultReplies();
 
-    // OVERRIDE mock functions.
+    // override mock functions.
     ON_CALL(*disk_mount_manager_mock_, FindDiskBySourcePath(_)).WillByDefault(
         Invoke(this, &FileManagerPrivateApiTest::FindVolumeBySourcePath));
     EXPECT_CALL(*disk_mount_manager_mock_, disks())
@@ -139,7 +178,7 @@ class FileManagerPrivateApiTest : public ExtensionApiTest {
   }
 
   // ExtensionApiTest override
-  virtual void TearDownInProcessBrowserTestFixture() OVERRIDE {
+  virtual void TearDownInProcessBrowserTestFixture() override {
     chromeos::disks::DiskMountManager::Shutdown();
     disk_mount_manager_mock_ = NULL;
 
@@ -239,6 +278,8 @@ class FileManagerPrivateApiTest : public ExtensionApiTest {
   chromeos::disks::MockDiskMountManager* disk_mount_manager_mock_;
   DiskMountManager::DiskMap volumes_;
   DiskMountManager::MountPointMap mount_points_;
+  scoped_ptr<TestingProfile> testing_profile_;
+  scoped_ptr<file_manager::EventRouter> event_router_;
 };
 
 IN_PROC_BROWSER_TEST_F(FileManagerPrivateApiTest, Mount) {
@@ -257,4 +298,89 @@ IN_PROC_BROWSER_TEST_F(FileManagerPrivateApiTest, Mount) {
 
   ASSERT_TRUE(RunComponentExtensionTest("file_browser/mount_test"))
       << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(FileManagerPrivateApiTest, Permissions) {
+  EXPECT_TRUE(
+      RunExtensionTestIgnoreManifestWarnings("file_browser/permissions"));
+  const extensions::Extension* extension = GetSingleLoadedExtension();
+  ASSERT_TRUE(extension);
+  ASSERT_EQ(1u, extension->install_warnings().size());
+  const extensions::InstallWarning& warning = extension->install_warnings()[0];
+  EXPECT_EQ("fileManagerPrivate", warning.key);
+}
+
+IN_PROC_BROWSER_TEST_F(FileManagerPrivateApiTest, OnFileChanged) {
+  // In drive volume, deletion of a directory is notified via OnFileChanged.
+  // Local changes directly come to HandleFileWatchNotification from
+  // FileWatcher.
+  typedef drive::FileChange FileChange;
+  typedef drive::FileChange::FileType FileType;
+  typedef drive::FileChange::ChangeType ChangeType;
+
+  int counter = 0;
+  event_router_->SetDispatchDirectoryChangeEventImplForTesting(
+      base::Bind(&DispatchDirectoryChangeEventImpl, &counter));
+
+  // /a/b/c and /a/d/e are being watched.
+  event_router_->AddFileWatch(
+      base::FilePath(FILE_PATH_LITERAL("/no-existing-fs/root/a/b/c")),
+      base::FilePath(FILE_PATH_LITERAL("/no-existing-fs-virtual/root/a/b/c")),
+      "extension_1", base::Bind(&AddFileWatchCallback));
+
+  event_router_->AddFileWatch(
+      base::FilePath(FILE_PATH_LITERAL("/no-existing-fs/root/a/d/e")),
+      base::FilePath(FILE_PATH_LITERAL("/no-existing-fs-hash/root/a/d/e")),
+      "extension_2", base::Bind(&AddFileWatchCallback));
+
+  event_router_->AddFileWatch(
+      base::FilePath(FILE_PATH_LITERAL("/no-existing-fs/root/aaa")),
+      base::FilePath(FILE_PATH_LITERAL("/no-existing-fs-hash/root/aaa")),
+      "extension_3", base::Bind(&AddFileWatchCallback));
+
+  // event_router->addFileWatch create some tasks which are performed on message
+  // loop of BrowserThread::FILE. Wait until they are done.
+  content::RunAllPendingInMessageLoop(content::BrowserThread::FILE);
+  // We also wait the UI thread here, since some tasks which are performed above
+  // message loop back results to the UI thread.
+  base::RunLoop().RunUntilIdle();
+
+  // When /a is deleted (1 and 2 is notified).
+  FileChange first_change;
+  first_change.Update(
+      base::FilePath(FILE_PATH_LITERAL("/no-existing-fs/root/a")),
+      FileType::FILE_TYPE_DIRECTORY, ChangeType::DELETE);
+  event_router_->OnFileChanged(first_change);
+  EXPECT_EQ(2, counter);
+
+  // When /a/b/c is deleted (1 is notified).
+  FileChange second_change;
+  second_change.Update(
+      base::FilePath(FILE_PATH_LITERAL("/no-existing-fs/root/a/b/c")),
+      FileType::FILE_TYPE_DIRECTORY, ChangeType::DELETE);
+  event_router_->OnFileChanged(second_change);
+  EXPECT_EQ(3, counter);
+
+  // When /z/y is deleted (Not notified).
+  FileChange third_change;
+  third_change.Update(
+      base::FilePath(FILE_PATH_LITERAL("/no-existing-fs/root/z/y")),
+      FileType::FILE_TYPE_DIRECTORY, ChangeType::DELETE);
+  event_router_->OnFileChanged(third_change);
+  EXPECT_EQ(3, counter);
+
+  // Remove file watchers.
+  event_router_->RemoveFileWatch(
+      base::FilePath(FILE_PATH_LITERAL("/no-existing-fs/root/a/b/c")),
+      "extension_1");
+  event_router_->RemoveFileWatch(
+      base::FilePath(FILE_PATH_LITERAL("/no-existing-fs/root/a/d/e")),
+      "extension_2");
+  event_router_->RemoveFileWatch(
+      base::FilePath(FILE_PATH_LITERAL("/no-existing-fs/root/aaa")),
+      "extension_3");
+
+  // event_router->removeFileWatch create some tasks which are performed on
+  // message loop of BrowserThread::FILE. Wait until they are done.
+  content::RunAllPendingInMessageLoop(content::BrowserThread::FILE);
 }

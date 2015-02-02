@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "android_webview/browser/aw_download_manager_delegate.h"
+#include "android_webview/browser/aw_ssl_host_state_delegate.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
@@ -65,6 +66,7 @@ class AwBrowserContext : public content::BrowserContext,
       content::WebContents* web_contents);
 
   static void SetDataReductionProxyEnabled(bool enabled);
+  static void SetLegacyCacheRemovalDelayForTest(int delay_ms);
 
   // Maps to BrowserMainParts::PreMainMessageLoopRun.
   void PreMainMessageLoopRun();
@@ -93,32 +95,36 @@ class AwBrowserContext : public content::BrowserContext,
   void CreateUserPrefServiceIfNecessary();
 
   // content::BrowserContext implementation.
-  virtual base::FilePath GetPath() const OVERRIDE;
-  virtual bool IsOffTheRecord() const OVERRIDE;
-  virtual net::URLRequestContextGetter* GetRequestContext() OVERRIDE;
+  virtual base::FilePath GetPath() const override;
+  virtual bool IsOffTheRecord() const override;
+  virtual net::URLRequestContextGetter* GetRequestContext() override;
   virtual net::URLRequestContextGetter* GetRequestContextForRenderProcess(
-      int renderer_child_id) OVERRIDE;
-  virtual net::URLRequestContextGetter* GetMediaRequestContext() OVERRIDE;
+      int renderer_child_id) override;
+  virtual net::URLRequestContextGetter* GetMediaRequestContext() override;
   virtual net::URLRequestContextGetter* GetMediaRequestContextForRenderProcess(
-      int renderer_child_id) OVERRIDE;
+      int renderer_child_id) override;
   virtual net::URLRequestContextGetter*
       GetMediaRequestContextForStoragePartition(
-          const base::FilePath& partition_path, bool in_memory) OVERRIDE;
-  virtual content::ResourceContext* GetResourceContext() OVERRIDE;
+          const base::FilePath& partition_path, bool in_memory) override;
+  virtual content::ResourceContext* GetResourceContext() override;
   virtual content::DownloadManagerDelegate*
-      GetDownloadManagerDelegate() OVERRIDE;
-  virtual content::BrowserPluginGuestManager* GetGuestManager() OVERRIDE;
-  virtual storage::SpecialStoragePolicy* GetSpecialStoragePolicy() OVERRIDE;
-  virtual content::PushMessagingService* GetPushMessagingService() OVERRIDE;
-  virtual content::SSLHostStateDelegate* GetSSLHostStateDelegate() OVERRIDE;
+      GetDownloadManagerDelegate() override;
+  virtual content::BrowserPluginGuestManager* GetGuestManager() override;
+  virtual storage::SpecialStoragePolicy* GetSpecialStoragePolicy() override;
+  virtual content::PushMessagingService* GetPushMessagingService() override;
+  virtual content::SSLHostStateDelegate* GetSSLHostStateDelegate() override;
 
   // visitedlink::VisitedLinkDelegate implementation.
   virtual void RebuildTable(
-      const scoped_refptr<URLEnumerator>& enumerator) OVERRIDE;
+      const scoped_refptr<URLEnumerator>& enumerator) override;
 
  private:
   void CreateDataReductionProxyStatisticsIfNecessary();
   static bool data_reduction_proxy_enabled_;
+
+  // Delay, in milliseconds, before removing the legacy cache dir.
+  // This is non-const for testing purposes.
+  static int legacy_cache_removal_delay_ms_;
 
   // The file path where data for this context is persisted.
   base::FilePath context_storage_path_;
@@ -142,6 +148,7 @@ class AwBrowserContext : public content::BrowserContext,
       data_reduction_proxy_statistics_;
   scoped_ptr<data_reduction_proxy::DataReductionProxySettings>
       data_reduction_proxy_settings_;
+  scoped_ptr<AwSSLHostStateDelegate> ssl_host_state_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(AwBrowserContext);
 };

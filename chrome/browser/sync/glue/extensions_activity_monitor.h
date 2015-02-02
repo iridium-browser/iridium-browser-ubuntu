@@ -5,7 +5,7 @@
 #ifndef CHROME_BROWSER_SYNC_GLUE_EXTENSIONS_ACTIVITY_MONITOR_H_
 #define CHROME_BROWSER_SYNC_GLUE_EXTENSIONS_ACTIVITY_MONITOR_H_
 
-#include "base/compiler_specific.h"
+#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -20,20 +20,24 @@ namespace browser_sync {
 class ExtensionsActivityMonitor : public content::NotificationObserver {
  public:
   ExtensionsActivityMonitor();
-  virtual ~ExtensionsActivityMonitor();
+  ~ExtensionsActivityMonitor() override;
 
   // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   const scoped_refptr<syncer::ExtensionsActivity>& GetExtensionsActivity();
 
  private:
   scoped_refptr<syncer::ExtensionsActivity> extensions_activity_;
 
+#if defined(ENABLE_EXTENSIONS)
   // Used only on UI loop.
   content::NotificationRegistrar registrar_;
+#endif
+
+  DISALLOW_COPY_AND_ASSIGN(ExtensionsActivityMonitor);
 };
 
 }  // namespace browser_sync

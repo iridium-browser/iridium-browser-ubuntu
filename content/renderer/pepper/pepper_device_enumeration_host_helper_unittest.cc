@@ -30,18 +30,17 @@ class TestDelegate : public PepperDeviceEnumerationHostHelper::Delegate,
  public:
   TestDelegate() : last_used_id_(0) {}
 
-  virtual ~TestDelegate() { CHECK(callbacks_.empty()); }
+  ~TestDelegate() override { CHECK(callbacks_.empty()); }
 
-  virtual int EnumerateDevices(PP_DeviceType_Dev /* type */,
-                               const GURL& /* document_url */,
-                               const EnumerateDevicesCallback& callback)
-      OVERRIDE {
+  int EnumerateDevices(PP_DeviceType_Dev /* type */,
+                       const GURL& /* document_url */,
+                       const EnumerateDevicesCallback& callback) override {
     last_used_id_++;
     callbacks_[last_used_id_] = callback;
     return last_used_id_;
   }
 
-  virtual void StopEnumerateDevices(int request_id) OVERRIDE {
+  void StopEnumerateDevices(int request_id) override {
     std::map<int, EnumerateDevicesCallback>::iterator iter =
         callbacks_.find(request_id);
     CHECK(iter != callbacks_.end());
@@ -82,7 +81,7 @@ class PepperDeviceEnumerationHostHelperTest : public testing::Test {
                             PP_DEVICETYPE_DEV_AUDIOCAPTURE,
                             GURL("http://example.com")) {}
 
-  virtual ~PepperDeviceEnumerationHostHelperTest() {}
+  ~PepperDeviceEnumerationHostHelperTest() override {}
 
   void SimulateMonitorDeviceChangeReceived(uint32_t callback_id) {
     PpapiHostMsg_DeviceEnumeration_MonitorDeviceChange msg(callback_id);

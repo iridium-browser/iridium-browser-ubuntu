@@ -44,28 +44,26 @@ class SegregatedPrefStore : public PersistentPrefStore {
       const std::set<std::string>& selected_pref_names);
 
   // PrefStore implementation
-  virtual void AddObserver(Observer* observer) OVERRIDE;
-  virtual void RemoveObserver(Observer* observer) OVERRIDE;
-  virtual bool HasObservers() const OVERRIDE;
-  virtual bool IsInitializationComplete() const OVERRIDE;
-  virtual bool GetValue(const std::string& key,
-                        const base::Value** result) const OVERRIDE;
+  void AddObserver(Observer* observer) override;
+  void RemoveObserver(Observer* observer) override;
+  bool HasObservers() const override;
+  bool IsInitializationComplete() const override;
+  bool GetValue(const std::string& key,
+                const base::Value** result) const override;
 
   // WriteablePrefStore implementation
-  virtual void SetValue(const std::string& key, base::Value* value) OVERRIDE;
-  virtual void RemoveValue(const std::string& key) OVERRIDE;
+  void SetValue(const std::string& key, base::Value* value) override;
+  void RemoveValue(const std::string& key) override;
 
   // PersistentPrefStore implementation
-  virtual bool GetMutableValue(const std::string& key,
-                               base::Value** result) OVERRIDE;
-  virtual void ReportValueChanged(const std::string& key) OVERRIDE;
-  virtual void SetValueSilently(const std::string& key,
-                                base::Value* value) OVERRIDE;
-  virtual bool ReadOnly() const OVERRIDE;
-  virtual PrefReadError GetReadError() const OVERRIDE;
-  virtual PrefReadError ReadPrefs() OVERRIDE;
-  virtual void ReadPrefsAsync(ReadErrorDelegate* error_delegate) OVERRIDE;
-  virtual void CommitPendingWrite() OVERRIDE;
+  bool GetMutableValue(const std::string& key, base::Value** result) override;
+  void ReportValueChanged(const std::string& key) override;
+  void SetValueSilently(const std::string& key, base::Value* value) override;
+  bool ReadOnly() const override;
+  PrefReadError GetReadError() const override;
+  PrefReadError ReadPrefs() override;
+  void ReadPrefsAsync(ReadErrorDelegate* error_delegate) override;
+  void CommitPendingWrite() override;
 
  private:
   // Aggregates events from the underlying stores and synthesizes external
@@ -75,8 +73,8 @@ class SegregatedPrefStore : public PersistentPrefStore {
     explicit AggregatingObserver(SegregatedPrefStore* outer);
 
     // PrefStore::Observer implementation
-    virtual void OnPrefValueChanged(const std::string& key) OVERRIDE;
-    virtual void OnInitializationCompleted(bool succeeded) OVERRIDE;
+    void OnPrefValueChanged(const std::string& key) override;
+    void OnInitializationCompleted(bool succeeded) override;
 
    private:
     SegregatedPrefStore* outer_;
@@ -86,7 +84,7 @@ class SegregatedPrefStore : public PersistentPrefStore {
     DISALLOW_COPY_AND_ASSIGN(AggregatingObserver);
   };
 
-  virtual ~SegregatedPrefStore();
+  ~SegregatedPrefStore() override;
 
   // Returns |selected_pref_store| if |key| is selected and |default_pref_store|
   // otherwise.

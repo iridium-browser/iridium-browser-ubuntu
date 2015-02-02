@@ -6,9 +6,9 @@
 #include "chrome/browser/download/download_danger_prompt.h"
 #include "chrome/browser/download/download_stats.h"
 #include "chrome/browser/extensions/api/experience_sampling_private/experience_sampling.h"
-#include "chrome/browser/ui/views/constrained_window_views.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/constrained_window/constrained_window_views.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_danger_type.h"
 #include "content/public/browser/download_item.h"
@@ -41,24 +41,23 @@ class DownloadDangerPromptViews : public DownloadDangerPrompt,
                             const OnDone& done);
 
   // DownloadDangerPrompt methods:
-  virtual void InvokeActionForTesting(Action action) OVERRIDE;
+  void InvokeActionForTesting(Action action) override;
 
   // views::DialogDelegate methods:
-  virtual base::string16 GetDialogButtonLabel(
-      ui::DialogButton button) const OVERRIDE;
-  virtual base::string16 GetWindowTitle() const OVERRIDE;
-  virtual void DeleteDelegate() OVERRIDE;
-  virtual ui::ModalType GetModalType() const OVERRIDE;
-  virtual bool Cancel() OVERRIDE;
-  virtual bool Accept() OVERRIDE;
-  virtual bool Close() OVERRIDE;
-  virtual views::View* GetInitiallyFocusedView() OVERRIDE;
-  virtual views::View* GetContentsView() OVERRIDE;
-  virtual views::Widget* GetWidget() OVERRIDE;
-  virtual const views::Widget* GetWidget() const OVERRIDE;
+  base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
+  base::string16 GetWindowTitle() const override;
+  void DeleteDelegate() override;
+  ui::ModalType GetModalType() const override;
+  bool Cancel() override;
+  bool Accept() override;
+  bool Close() override;
+  views::View* GetInitiallyFocusedView() override;
+  views::View* GetContentsView() override;
+  views::Widget* GetWidget() override;
+  const views::Widget* GetWidget() const override;
 
   // content::DownloadItem::Observer:
-  virtual void OnDownloadUpdated(content::DownloadItem* download) OVERRIDE;
+  void OnDownloadUpdated(content::DownloadItem* download) override;
 
  private:
   base::string16 GetAcceptButtonTitle() const;

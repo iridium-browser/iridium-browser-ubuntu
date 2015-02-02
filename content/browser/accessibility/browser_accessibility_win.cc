@@ -2859,35 +2859,38 @@ STDMETHODIMP BrowserAccessibilityWin::GetPropertyValue(PROPERTYID id,
 // CComObjectRootEx methods.
 //
 
+// static
 HRESULT WINAPI BrowserAccessibilityWin::InternalQueryInterface(
     void* this_ptr,
     const _ATL_INTMAP_ENTRY* entries,
     REFIID iid,
     void** object) {
+  int32 ia_role =
+      reinterpret_cast<BrowserAccessibilityWin*>(this_ptr)->ia_role_;
   if (iid == IID_IAccessibleImage) {
-    if (ia_role_ != ROLE_SYSTEM_GRAPHIC) {
+    if (ia_role != ROLE_SYSTEM_GRAPHIC) {
       *object = NULL;
       return E_NOINTERFACE;
     }
   } else if (iid == IID_IAccessibleTable || iid == IID_IAccessibleTable2) {
-    if (ia_role_ != ROLE_SYSTEM_TABLE) {
+    if (ia_role != ROLE_SYSTEM_TABLE) {
       *object = NULL;
       return E_NOINTERFACE;
     }
   } else if (iid == IID_IAccessibleTableCell) {
-    if (ia_role_ != ROLE_SYSTEM_CELL) {
+    if (ia_role != ROLE_SYSTEM_CELL) {
       *object = NULL;
       return E_NOINTERFACE;
     }
   } else if (iid == IID_IAccessibleValue) {
-    if (ia_role_ != ROLE_SYSTEM_PROGRESSBAR &&
-        ia_role_ != ROLE_SYSTEM_SCROLLBAR &&
-        ia_role_ != ROLE_SYSTEM_SLIDER) {
+    if (ia_role != ROLE_SYSTEM_PROGRESSBAR &&
+        ia_role != ROLE_SYSTEM_SCROLLBAR &&
+        ia_role != ROLE_SYSTEM_SLIDER) {
       *object = NULL;
       return E_NOINTERFACE;
     }
   } else if (iid == IID_ISimpleDOMDocument) {
-    if (ia_role_ != ROLE_SYSTEM_DOCUMENT) {
+    if (ia_role != ROLE_SYSTEM_DOCUMENT) {
       *object = NULL;
       return E_NOINTERFACE;
     }
@@ -2909,6 +2912,7 @@ void BrowserAccessibilityWin::OnDataChanged() {
 
   // Expose the "display" and "tag" attributes.
   StringAttributeToIA2(ui::AX_ATTR_DISPLAY, "display");
+  StringAttributeToIA2(ui::AX_ATTR_TEXT_INPUT_TYPE, "text-input-type");
   StringAttributeToIA2(ui::AX_ATTR_HTML_TAG, "tag");
   StringAttributeToIA2(ui::AX_ATTR_ROLE, "xml-roles");
 
@@ -2927,6 +2931,8 @@ void BrowserAccessibilityWin::OnDataChanged() {
 
   if (ia_role_ == ROLE_SYSTEM_CHECKBUTTON ||
       ia_role_ == ROLE_SYSTEM_RADIOBUTTON ||
+      ia2_role_ == IA2_ROLE_CHECK_MENU_ITEM ||
+      ia2_role_ == IA2_ROLE_RADIO_MENU_ITEM ||
       ia2_role_ == IA2_ROLE_TOGGLE_BUTTON) {
     ia2_attributes_.push_back(L"checkable:true");
   }
@@ -3394,6 +3400,14 @@ void BrowserAccessibilityWin::InitRoleAndState() {
       ia_role_ = ROLE_SYSTEM_DOCUMENT;
       ia_state_ |= STATE_SYSTEM_READONLY;
       break;
+    case ui::AX_ROLE_BANNER:
+      ia_role_ = ROLE_SYSTEM_GROUPING;
+      ia2_role_ = IA2_ROLE_HEADER;
+      break;
+    case ui::AX_ROLE_BLOCKQUOTE:
+      role_name_ = html_tag;
+      ia2_role_ = IA2_ROLE_SECTION;
+      break;
     case ui::AX_ROLE_BUSY_INDICATOR:
       ia_role_ = ROLE_SYSTEM_ANIMATION;
       ia_state_ |= STATE_SYSTEM_READONLY;
@@ -3422,6 +3436,7 @@ void BrowserAccessibilityWin::InitRoleAndState() {
       break;
     case ui::AX_ROLE_CHECK_BOX:
       ia_role_ = ROLE_SYSTEM_CHECKBUTTON;
+      ia2_state_ |= IA2_STATE_CHECKABLE;
       break;
     case ui::AX_ROLE_COLOR_WELL:
       ia_role_ = ROLE_SYSTEM_CLIENT;
@@ -3429,17 +3444,32 @@ void BrowserAccessibilityWin::InitRoleAndState() {
       break;
     case ui::AX_ROLE_COLUMN:
       ia_role_ = ROLE_SYSTEM_COLUMN;
-      ia_state_ |= STATE_SYSTEM_READONLY;
       break;
     case ui::AX_ROLE_COLUMN_HEADER:
       ia_role_ = ROLE_SYSTEM_COLUMNHEADER;
-      ia_state_ |= STATE_SYSTEM_READONLY;
       break;
     case ui::AX_ROLE_COMBO_BOX:
       ia_role_ = ROLE_SYSTEM_COMBOBOX;
       break;
+    case ui::AX_ROLE_COMPLEMENTARY:
+      ia_role_ = ROLE_SYSTEM_GROUPING;
+      ia2_role_ = IA2_ROLE_NOTE;
+      break;
+    case ui::AX_ROLE_CONTENT_INFO:
+      ia_role_ = ROLE_SYSTEM_TEXT;
+      ia2_role_ = IA2_ROLE_PARAGRAPH;
+      break;
+    case ui::AX_ROLE_DATE:
+      ia_role_ = ROLE_SYSTEM_DROPLIST;
+      ia2_role_ = IA2_ROLE_DATE_EDITOR;
+      break;
+    case ui::AX_ROLE_DATE_TIME:
+      ia_role_ = ROLE_SYSTEM_DROPLIST;
+      ia2_role_ = IA2_ROLE_DATE_EDITOR;
+      break;
     case ui::AX_ROLE_DIV:
       role_name_ = L"div";
+      ia_role_ = ROLE_SYSTEM_GROUPING;
       ia2_role_ = IA2_ROLE_SECTION;
       break;
     case ui::AX_ROLE_DEFINITION:
@@ -3452,17 +3482,24 @@ void BrowserAccessibilityWin::InitRoleAndState() {
       ia2_role_ = IA2_ROLE_PARAGRAPH;
       ia_state_ |= STATE_SYSTEM_READONLY;
       break;
+    case ui::AX_ROLE_DESCRIPTION_LIST:
+      role_name_ = html_tag;
+      ia_role_ = ROLE_SYSTEM_LIST;
+      ia_state_ |= STATE_SYSTEM_READONLY;
+      break;
     case ui::AX_ROLE_DESCRIPTION_LIST_TERM:
       ia_role_ = ROLE_SYSTEM_LISTITEM;
       ia_state_ |= STATE_SYSTEM_READONLY;
       break;
+    case ui::AX_ROLE_DETAILS:
+      role_name_ = html_tag;
+      ia_role_ = ROLE_SYSTEM_GROUPING;
+      break;
     case ui::AX_ROLE_DIALOG:
       ia_role_ = ROLE_SYSTEM_DIALOG;
-      ia_state_ |= STATE_SYSTEM_READONLY;
       break;
     case ui::AX_ROLE_DISCLOSURE_TRIANGLE:
-      ia_role_ = ROLE_SYSTEM_OUTLINEBUTTON;
-      ia_state_ |= STATE_SYSTEM_READONLY;
+      ia_role_ = ROLE_SYSTEM_PUSHBUTTON;
       break;
     case ui::AX_ROLE_DOCUMENT:
     case ui::AX_ROLE_ROOT_WEB_AREA:
@@ -3504,6 +3541,7 @@ void BrowserAccessibilityWin::InitRoleAndState() {
         ia_role_ = ROLE_SYSTEM_GROUPING;
       } else if (html_tag == L"li") {
         ia_role_ = ROLE_SYSTEM_LISTITEM;
+        ia_state_ |= STATE_SYSTEM_READONLY;
       } else {
         if (html_tag.empty())
           role_name_ = L"div";
@@ -3511,7 +3549,6 @@ void BrowserAccessibilityWin::InitRoleAndState() {
           role_name_ = html_tag;
         ia2_role_ = IA2_ROLE_SECTION;
       }
-      ia_state_ |= STATE_SYSTEM_READONLY;
       break;
     }
     case ui::AX_ROLE_GROW_AREA:
@@ -3521,14 +3558,14 @@ void BrowserAccessibilityWin::InitRoleAndState() {
     case ui::AX_ROLE_HEADING:
       role_name_ = html_tag;
       ia2_role_ = IA2_ROLE_HEADING;
-      ia_state_ |= STATE_SYSTEM_READONLY;
       break;
     case ui::AX_ROLE_HORIZONTAL_RULE:
       ia_role_ = ROLE_SYSTEM_SEPARATOR;
       break;
     case ui::AX_ROLE_IFRAME:
-      ia_role_ = ROLE_SYSTEM_CLIENT;
+      ia_role_ = ROLE_SYSTEM_DOCUMENT;
       ia2_role_ = IA2_ROLE_INTERNAL_FRAME;
+      ia_state_ = STATE_SYSTEM_READONLY;
       break;
     case ui::AX_ROLE_IMAGE:
       ia_role_ = ROLE_SYSTEM_GRAPHIC;
@@ -3548,17 +3585,9 @@ void BrowserAccessibilityWin::InitRoleAndState() {
       ia_role_ = ROLE_SYSTEM_TEXT;
       ia2_role_ = IA2_ROLE_LABEL;
       break;
-    case ui::AX_ROLE_MAIN:
-      ia_role_ = ROLE_SYSTEM_GROUPING;
-      break;
-    case ui::AX_ROLE_BANNER:
-    case ui::AX_ROLE_COMPLEMENTARY:
-    case ui::AX_ROLE_CONTENT_INFO:
-    case ui::AX_ROLE_NAVIGATION:
     case ui::AX_ROLE_SEARCH:
       ia_role_ = ROLE_SYSTEM_GROUPING;
       ia2_role_ = IA2_ROLE_SECTION;
-      ia_state_ |= STATE_SYSTEM_READONLY;
       break;
     case ui::AX_ROLE_LINK:
       ia_role_ = ROLE_SYSTEM_LINK;
@@ -3583,9 +3612,15 @@ void BrowserAccessibilityWin::InitRoleAndState() {
       ia_role_ = ROLE_SYSTEM_LISTITEM;
       ia_state_ |= STATE_SYSTEM_READONLY;
       break;
-    case ui::AX_ROLE_MATH_ELEMENT:
+    case ui::AX_ROLE_MAIN:
+      ia_role_ = ROLE_SYSTEM_GROUPING;
+      ia2_role_ = IA2_ROLE_PARAGRAPH;
+      break;
+    case ui::AX_ROLE_MARQUEE:
+      ia_role_ = ROLE_SYSTEM_ANIMATION;
+      break;
+    case ui::AX_ROLE_MATH:
       ia_role_ = ROLE_SYSTEM_EQUATION;
-      ia_state_ |= STATE_SYSTEM_READONLY;
       break;
     case ui::AX_ROLE_MENU:
     case ui::AX_ROLE_MENU_BUTTON:
@@ -3596,6 +3631,15 @@ void BrowserAccessibilityWin::InitRoleAndState() {
       break;
     case ui::AX_ROLE_MENU_ITEM:
       ia_role_ = ROLE_SYSTEM_MENUITEM;
+      break;
+    case ui::AX_ROLE_MENU_ITEM_CHECK_BOX:
+      ia_role_ = ROLE_SYSTEM_MENUITEM;
+      ia2_role_ = IA2_ROLE_CHECK_MENU_ITEM;
+      ia2_state_ |= IA2_STATE_CHECKABLE;
+      break;
+    case ui::AX_ROLE_MENU_ITEM_RADIO:
+      ia_role_ = ROLE_SYSTEM_MENUITEM;
+      ia2_role_ = IA2_ROLE_RADIO_MENU_ITEM;
       break;
     case ui::AX_ROLE_MENU_LIST_POPUP:
       ia_role_ = ROLE_SYSTEM_CLIENT;
@@ -3608,6 +3652,14 @@ void BrowserAccessibilityWin::InitRoleAndState() {
           ia_state_ |= STATE_SYSTEM_FOCUSED;
       }
       break;
+    case ui::AX_ROLE_METER:
+      role_name_ = html_tag;
+      ia_role_ = ROLE_SYSTEM_PROGRESSBAR;
+      break;
+    case ui::AX_ROLE_NAVIGATION:
+      ia_role_ = ROLE_SYSTEM_GROUPING;
+      ia2_role_ = IA2_ROLE_SECTION;
+      break;
     case ui::AX_ROLE_NOTE:
       ia_role_ = ROLE_SYSTEM_GROUPING;
       ia2_role_ = IA2_ROLE_NOTE;
@@ -3615,7 +3667,6 @@ void BrowserAccessibilityWin::InitRoleAndState() {
       break;
     case ui::AX_ROLE_OUTLINE:
       ia_role_ = ROLE_SYSTEM_OUTLINE;
-      ia_state_ |= STATE_SYSTEM_READONLY;
       break;
     case ui::AX_ROLE_PARAGRAPH:
       role_name_ = L"P";
@@ -3628,6 +3679,11 @@ void BrowserAccessibilityWin::InitRoleAndState() {
         ia_role_ = ROLE_SYSTEM_BUTTONMENU;
       }
       break;
+    case ui::AX_ROLE_PRE:
+      role_name_ = html_tag;
+      ia_role_ = ROLE_SYSTEM_TEXT;
+      ia2_role_ = IA2_ROLE_PARAGRAPH;
+      break;
     case ui::AX_ROLE_PROGRESS_INDICATOR:
       ia_role_ = ROLE_SYSTEM_PROGRESSBAR;
       ia_state_ |= STATE_SYSTEM_READONLY;
@@ -3637,20 +3693,20 @@ void BrowserAccessibilityWin::InitRoleAndState() {
       break;
     case ui::AX_ROLE_RADIO_GROUP:
       ia_role_ = ROLE_SYSTEM_GROUPING;
-      ia2_role_ = IA2_ROLE_SECTION;
       break;
     case ui::AX_ROLE_REGION:
-      ia_role_ = ROLE_SYSTEM_GROUPING;
-      ia2_role_ = IA2_ROLE_SECTION;
-      ia_state_ |= STATE_SYSTEM_READONLY;
+      if (html_tag == L"section") {
+        ia_role_ = ROLE_SYSTEM_GROUPING;
+        ia2_role_ = IA2_ROLE_SECTION;
+      } else {
+        ia_role_ = ROLE_SYSTEM_PANE;
+      }
       break;
     case ui::AX_ROLE_ROW:
       ia_role_ = ROLE_SYSTEM_ROW;
-      ia_state_ |= STATE_SYSTEM_READONLY;
       break;
     case ui::AX_ROLE_ROW_HEADER:
       ia_role_ = ROLE_SYSTEM_ROWHEADER;
-      ia_state_ |= STATE_SYSTEM_READONLY;
       break;
     case ui::AX_ROLE_RULER:
       ia_role_ = ROLE_SYSTEM_CLIENT;
@@ -3705,7 +3761,6 @@ void BrowserAccessibilityWin::InitRoleAndState() {
         ia_role_ = ROLE_SYSTEM_OUTLINE;
       } else {
         ia_role_ = ROLE_SYSTEM_TABLE;
-        ia_state_ |= STATE_SYSTEM_READONLY;
       }
       break;
     }
@@ -3736,6 +3791,9 @@ void BrowserAccessibilityWin::InitRoleAndState() {
       ia2_state_ |= IA2_STATE_EDITABLE;
       ia2_state_ |= IA2_STATE_SELECTABLE_TEXT;
       break;
+    case ui::AX_ROLE_TIME:
+      ia_role_ = ROLE_SYSTEM_SPINBUTTON;
+      break;
     case ui::AX_ROLE_TIMER:
       ia_role_ = ROLE_SYSTEM_CLOCK;
       ia_state_ |= STATE_SYSTEM_READONLY;
@@ -3750,15 +3808,12 @@ void BrowserAccessibilityWin::InitRoleAndState() {
       break;
     case ui::AX_ROLE_TREE:
       ia_role_ = ROLE_SYSTEM_OUTLINE;
-      ia_state_ |= STATE_SYSTEM_READONLY;
       break;
     case ui::AX_ROLE_TREE_GRID:
       ia_role_ = ROLE_SYSTEM_OUTLINE;
-      ia_state_ |= STATE_SYSTEM_READONLY;
       break;
     case ui::AX_ROLE_TREE_ITEM:
       ia_role_ = ROLE_SYSTEM_OUTLINEITEM;
-      ia_state_ |= STATE_SYSTEM_READONLY;
       break;
     case ui::AX_ROLE_WINDOW:
       ia_role_ = ROLE_SYSTEM_WINDOW;
@@ -3772,7 +3827,6 @@ void BrowserAccessibilityWin::InitRoleAndState() {
     case ui::AX_ROLE_IGNORED:
     case ui::AX_ROLE_INCREMENTOR:
     case ui::AX_ROLE_LOG:
-    case ui::AX_ROLE_MARQUEE:
     case ui::AX_ROLE_MATTE:
     case ui::AX_ROLE_NONE:
     case ui::AX_ROLE_PRESENTATIONAL:

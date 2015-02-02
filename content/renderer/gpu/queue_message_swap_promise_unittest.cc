@@ -24,7 +24,7 @@ class TestRenderWidget : public RenderWidget {
   using RenderWidget::QueueMessageImpl;
 
  private:
-  virtual ~TestRenderWidget() {}
+  ~TestRenderWidget() override {}
 
   DISALLOW_COPY_AND_ASSIGN(TestRenderWidget);
 };
@@ -33,7 +33,7 @@ class TestSyncMessageFilter : public IPC::SyncMessageFilter {
  public:
   TestSyncMessageFilter() : IPC::SyncMessageFilter(NULL) {}
 
-  virtual bool Send(IPC::Message* message) OVERRIDE {
+  bool Send(IPC::Message* message) override {
     messages_.push_back(message);
     return true;
   }
@@ -41,7 +41,7 @@ class TestSyncMessageFilter : public IPC::SyncMessageFilter {
   ScopedVector<IPC::Message>& messages() { return messages_; }
 
  private:
-  virtual ~TestSyncMessageFilter() {}
+  ~TestSyncMessageFilter() override {}
 
   ScopedVector<IPC::Message> messages_;
 
@@ -60,7 +60,7 @@ class QueueMessageSwapPromiseTest : public testing::Test {
       : frame_swap_message_queue_(new FrameSwapMessageQueue()),
         sync_message_filter_(new TestSyncMessageFilter()) {}
 
-  virtual ~QueueMessageSwapPromiseTest() {}
+  ~QueueMessageSwapPromiseTest() override {}
 
   scoped_ptr<cc::SwapPromise> QueueMessageImpl(IPC::Message* msg,
                                                MessageDeliveryPolicy policy,

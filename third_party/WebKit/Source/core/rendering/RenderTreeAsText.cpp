@@ -47,7 +47,6 @@
 #include "core/rendering/RenderPart.h"
 #include "core/rendering/RenderTableCell.h"
 #include "core/rendering/RenderView.h"
-#include "core/rendering/RenderWidget.h"
 #include "core/rendering/compositing/CompositedLayerMapping.h"
 #include "core/rendering/svg/RenderSVGContainer.h"
 #include "core/rendering/svg/RenderSVGGradientStop.h"
@@ -175,9 +174,6 @@ void RenderTreeAsText::writeRenderObject(TextStream& ts, const RenderObject& o, 
 
     if (o.node()) {
         String tagName = getTagName(o.node());
-        // FIXME: Temporary hack to make tests pass by simulating the old generated content output.
-        if (o.isPseudoElement() || (o.parent() && o.parent()->isPseudoElement()))
-            tagName = emptyAtom;
         if (!tagName.isEmpty()) {
             ts << " {" << tagName << "}";
             // flag empty or unstyled AppleStyleSpan because we never
@@ -482,8 +478,8 @@ void write(TextStream& ts, const RenderObject& o, int indent, RenderAsTextBehavi
         write(ts, *child, indent + 1, behavior);
     }
 
-    if (o.isWidget()) {
-        Widget* widget = toRenderWidget(o).widget();
+    if (o.isRenderPart()) {
+        Widget* widget = toRenderPart(o).widget();
         if (widget && widget->isFrameView()) {
             FrameView* view = toFrameView(widget);
             RenderView* root = view->renderView();
@@ -560,8 +556,6 @@ static void write(TextStream& ts, RenderLayer& l,
                 << l.compositedLayerMapping()->compositedBounds()
                 << ", drawsContent="
                 << l.compositedLayerMapping()->mainGraphicsLayer()->drawsContent()
-                << ", paints into ancestor="
-                << l.compositedLayerMapping()->paintsIntoCompositedAncestor()
                 << (l.shouldIsolateCompositedDescendants() ? ", isolatesCompositedBlending" : "")
                 << ")";
         }

@@ -21,10 +21,10 @@
 #include "chrome/browser/ui/views/frame/browser_header_painter_ash.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
-#include "chrome/browser/ui/views/profiles/avatar_label.h"
 #include "chrome/browser/ui/views/profiles/avatar_menu_button.h"
 #include "chrome/browser/ui/views/tab_icon_view.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
+#include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/ash_resources.h"
 #include "grit/theme_resources.h"
@@ -44,6 +44,10 @@
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 
+#if defined(ENABLE_MANAGED_USERS)
+#include "chrome/browser/ui/views/profiles/supervised_user_avatar_label.h"
+#endif
+
 namespace {
 
 // The avatar ends 2 px above the bottom of the tabstrip (which, given the
@@ -53,6 +57,8 @@ const int kAvatarBottomSpacing = 2;
 // There are 2 px on each side of the avatar (between the frame border and
 // it on the left, and between it and the tabstrip on the right).
 const int kAvatarSideSpacing = 2;
+// Space between the new avatar button and the minimize button.
+const int kNewAvatarButtonOffset = 5;
 // Space between left edge of window and tabstrip.
 const int kTabstripLeftSpacing = 0;
 // Space between right edge of tabstrip and maximize button.
@@ -111,8 +117,7 @@ BrowserNonClientFrameViewAsh::~BrowserNonClientFrameViewAsh() {
 }
 
 void BrowserNonClientFrameViewAsh::Init() {
-  caption_button_container_ = new ash::FrameCaptionButtonContainerView(frame(),
-      ash::FrameCaptionButtonContainerView::MINIMIZE_ALLOWED);
+  caption_button_container_ = new ash::FrameCaptionButtonContainerView(frame());
   caption_button_container_->UpdateSizeButtonVisibility();
   AddChildView(caption_button_container_);
 
@@ -124,8 +129,12 @@ void BrowserNonClientFrameViewAsh::Init() {
     window_icon_->Update();
   }
 
-  // Create incognito icon if necessary.
-  UpdateAvatarInfo();
+  if (browser_view()->IsRegularOrGuestSession() &&
+      switches::IsNewAvatarMenu()) {
+    UpdateNewStyleAvatarInfo(this, NewAvatarButton::NATIVE_BUTTON);
+  } else {
+    UpdateAvatarInfo();
+  }
 
   // HeaderPainter handles layout.
   if (UsePackagedAppHeaderStyle()) {
@@ -236,9 +245,14 @@ int BrowserNonClientFrameViewAsh::NonClientHitTest(const gfx::Point& point) {
   int hit_test = ash::FrameBorderHitTestController::NonClientHitTest(this,
       caption_button_container_, point);
 
-  // See if the point is actually within the avatar menu button.
+  // See if the point is actually within either of the avatar menu buttons.
   if (hit_test == HTCAPTION && avatar_button() &&
       ConvertedHitTest(this, avatar_button(), point)) {
+    return HTCLIENT;
+  }
+
+  if (hit_test == HTCAPTION && new_avatar_button() &&
+      ConvertedHitTest(this, new_avatar_button(), point)) {
     return HTCLIENT;
   }
 
@@ -247,6 +261,14 @@ int BrowserNonClientFrameViewAsh::NonClientHitTest(const gfx::Point& point) {
       ConvertedHitTest(this, web_app_back_button_, point)) {
     return HTCLIENT;
   }
+
+#if defined(ENABLE_MANAGED_USERS)
+  // ...or within the avatar label, if it's a supervised user.
+  if (hit_test == HTCAPTION && supervised_user_avatar_label() &&
+      ConvertedHitTest(this, supervised_user_avatar_label(), point)) {
+    return HTCLIENT;
+  }
+#endif
 
   // When the window is restored we want a large click target above the tabs
   // to drag the window, so redirect clicks in the tab's shadow to caption.
@@ -339,10 +361,13 @@ void BrowserNonClientFrameViewAsh::Layout() {
     painted_height = GetTopInset();
   }
   header_painter_->SetHeaderHeightForPainting(painted_height);
+
   if (avatar_button()) {
     LayoutAvatar();
     header_painter_->UpdateLeftViewXInset(avatar_button()->bounds().right());
   } else {
+    if (new_avatar_button())
+      LayoutNewStyleAvatar();
     header_painter_->UpdateLeftViewXInset(
         ash::HeaderPainterUtil::GetDefaultLeftViewXInset());
   }
@@ -433,8 +458,12 @@ void BrowserNonClientFrameViewAsh::EnabledStateChangedForCommand(int id,
 
 void BrowserNonClientFrameViewAsh::ButtonPressed(views::Button* sender,
                                                  const ui::Event& event) {
-  DCHECK_EQ(sender, web_app_back_button_);
-  chrome::ExecuteCommand(browser_view()->browser(), IDC_BACK);
+  if (sender == web_app_back_button_)
+    chrome::ExecuteCommand(browser_view()->browser(), IDC_BACK);
+  else if (sender == new_avatar_button())
+    chrome::ExecuteCommand(browser_view()->browser(), IDC_SHOW_AVATAR_MENU);
+  else
+    NOTREACHED();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -477,8 +506,12 @@ int BrowserNonClientFrameViewAsh::GetTabStripLeftInset() const {
 }
 
 int BrowserNonClientFrameViewAsh::GetTabStripRightInset() const {
-  return caption_button_container_->GetPreferredSize().width() +
-      kTabstripRightSpacing;
+  int tabstrip_width = kTabstripRightSpacing +
+      caption_button_container_->GetPreferredSize().width();
+
+  return new_avatar_button() ? kNewAvatarButtonOffset +
+      new_avatar_button()->GetPreferredSize().width() + tabstrip_width :
+      tabstrip_width;
 }
 
 bool BrowserNonClientFrameViewAsh::UseImmersiveLightbarHeaderStyle() const {
@@ -530,6 +563,23 @@ void BrowserNonClientFrameViewAsh::LayoutAvatar() {
                           avatar_height);
   avatar_button()->SetBoundsRect(avatar_bounds);
   avatar_button()->SetVisible(avatar_visible);
+}
+
+void BrowserNonClientFrameViewAsh::LayoutNewStyleAvatar() {
+  DCHECK(switches::IsNewAvatarMenu());
+  if (!new_avatar_button())
+    return;
+
+  gfx::Size button_size = new_avatar_button()->GetPreferredSize();
+  int button_x = width() -
+      caption_button_container_->GetPreferredSize().width() -
+      kNewAvatarButtonOffset - button_size.width();
+
+  new_avatar_button()->SetBounds(
+      button_x,
+      0,
+      button_size.width(),
+      caption_button_container_->GetPreferredSize().height());
 }
 
 bool BrowserNonClientFrameViewAsh::ShouldPaint() const {

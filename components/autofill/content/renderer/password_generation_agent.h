@@ -15,7 +15,6 @@
 #include "url/gurl.h"
 
 namespace blink {
-class WebCString;
 class WebDocument;
 }
 
@@ -30,7 +29,7 @@ struct PasswordForm;
 class PasswordGenerationAgent : public content::RenderViewObserver {
  public:
   explicit PasswordGenerationAgent(content::RenderView* render_view);
-  virtual ~PasswordGenerationAgent();
+  ~PasswordGenerationAgent() override;
 
   // Returns true if the field being changed is one where a generated password
   // is being offered. Updates the state of the popup if necessary.
@@ -38,6 +37,9 @@ class PasswordGenerationAgent : public content::RenderViewObserver {
 
   // Returns true if the newly focused node caused the generation UI to show.
   bool FocusedNodeHasChanged(const blink::WebNode& node);
+
+  // Called when new form controls are inserted.
+  void OnDynamicFormsSeen(blink::WebLocalFrame* frame);
 
   // The length that a password can be before the UI is hidden.
   static const size_t kMaximumOfferSize = 5;
@@ -48,21 +50,25 @@ class PasswordGenerationAgent : public content::RenderViewObserver {
   virtual bool ShouldAnalyzeDocument(const blink::WebDocument& document) const;
 
   // RenderViewObserver:
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& message) override;
 
   // Use to force enable during testing.
   void set_enabled(bool enabled) { enabled_ = enabled; }
 
  private:
   // RenderViewObserver:
-  virtual void DidFinishDocumentLoad(blink::WebLocalFrame* frame) OVERRIDE;
-  virtual void DidFinishLoad(blink::WebLocalFrame* frame) OVERRIDE;
+  void DidFinishDocumentLoad(blink::WebLocalFrame* frame) override;
+  void DidFinishLoad(blink::WebLocalFrame* frame) override;
 
   // Message handlers.
   void OnFormNotBlacklisted(const PasswordForm& form);
   void OnPasswordAccepted(const base::string16& password);
   void OnAccountCreationFormsDetected(
       const std::vector<autofill::FormData>& forms);
+
+  // Helper function that will try and populate |password_elements_| and
+  // |possible_account_creation_form_|.
+  void FindPossibleGenerationForm(blink::WebLocalFrame* frame);
 
   // Helper function to decide if |passwords_| contains password fields for
   // an account creation form. Sets |generation_element_| to the field that
@@ -106,6 +112,16 @@ class PasswordGenerationAgent : public content::RenderViewObserver {
   // True if a password was generated and the user edited it. Used for UMA
   // stats.
   bool password_edited_;
+
+  // True if the generation popup was shown during this navigation. Used to
+  // track UMA stats per page visit rather than per display, since the former
+  // is more interesting.
+  bool generation_popup_shown_;
+
+  // True if the editing popup was shown during this navigation. Used to track
+  // UMA stats per page rather than per display, since the former is more
+  // interesting.
+  bool editing_popup_shown_;
 
   // If this feature is enabled. Controlled by Finch.
   bool enabled_;

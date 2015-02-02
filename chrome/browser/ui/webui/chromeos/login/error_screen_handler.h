@@ -18,7 +18,10 @@ class DictionaryValue;
 
 namespace chromeos {
 
+#if !defined(USE_ATHENA)
 class CaptivePortalWindowProxy;
+#endif
+
 class NativeWindowDelegate;
 class NetworkStateInformer;
 
@@ -31,22 +34,22 @@ class ErrorScreenHandler : public BaseScreenHandler,
   virtual ~ErrorScreenHandler();
 
   // ErrorScreenActor implementation:
-  virtual void SetDelegate(ErrorScreenActorDelegate* delegate) OVERRIDE;
+  virtual void SetDelegate(ErrorScreenActorDelegate* delegate) override;
   virtual void Show(OobeDisplay::Screen parent_screen,
-                    base::DictionaryValue* params) OVERRIDE;
+                    base::DictionaryValue* params) override;
   virtual void Show(OobeDisplay::Screen parent_screen,
                     base::DictionaryValue* params,
-                    const base::Closure& on_hide) OVERRIDE;
-  virtual void Hide() OVERRIDE;
-  virtual void FixCaptivePortal() OVERRIDE;
-  virtual void ShowCaptivePortal() OVERRIDE;
-  virtual void HideCaptivePortal() OVERRIDE;
-  virtual void SetUIState(ErrorScreen::UIState ui_state) OVERRIDE;
+                    const base::Closure& on_hide) override;
+  virtual void Hide() override;
+  virtual void FixCaptivePortal() override;
+  virtual void ShowCaptivePortal() override;
+  virtual void HideCaptivePortal() override;
+  virtual void SetUIState(ErrorScreen::UIState ui_state) override;
   virtual void SetErrorState(ErrorScreen::ErrorState error_state,
-                             const std::string& network) OVERRIDE;
-  virtual void AllowGuestSignin(bool allowed) OVERRIDE;
-  virtual void AllowOfflineLogin(bool allowed) OVERRIDE;
-  virtual void ShowConnectingIndicator(bool show) OVERRIDE;
+                             const std::string& network) override;
+  virtual void AllowGuestSignin(bool allowed) override;
+  virtual void AllowOfflineLogin(bool allowed) override;
+  virtual void ShowConnectingIndicator(bool show) override;
 
  private:
   // Sends notification that error message is shown.
@@ -67,17 +70,19 @@ class ErrorScreenHandler : public BaseScreenHandler,
   void HandleLaunchOobeGuestSession();
 
   // WebUIMessageHandler implementation:
-  virtual void RegisterMessages() OVERRIDE;
+  virtual void RegisterMessages() override;
 
   // BaseScreenHandler implementation:
-  virtual void DeclareLocalizedValues(LocalizedValuesBuilder* builder) OVERRIDE;
-  virtual void Initialize() OVERRIDE;
+  virtual void DeclareLocalizedValues(LocalizedValuesBuilder* builder) override;
+  virtual void Initialize() override;
 
   // Non-owning ptr.
   ErrorScreenActorDelegate* delegate_;
 
+#if !defined(USE_ATHENA)
   // Proxy which manages showing of the window for captive portal entering.
   scoped_ptr<CaptivePortalWindowProxy> captive_portal_window_proxy_;
+#endif
 
   // Network state informer used to keep error screen up.
   scoped_refptr<NetworkStateInformer> network_state_informer_;

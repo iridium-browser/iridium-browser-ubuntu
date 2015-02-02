@@ -7,23 +7,24 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
-#include "sandbox/linux/bpf_dsl/bpf_dsl.h"
+#include "sandbox/linux/bpf_dsl/bpf_dsl_forward.h"
+#include "sandbox/linux/bpf_dsl/policy.h"
 #include "sandbox/linux/seccomp-bpf-helpers/baseline_policy.h"
 
 namespace content {
 
 // The "baseline" BPF policy for content/. Any content/ seccomp-bpf policy
 // should inherit from it.
-// It implements the main SandboxBPFDSLPolicy interface. Due to its nature
+// It implements the main Policy interface. Due to its nature
 // as a "kernel attack surface reduction" layer, it's implementation-defined.
-class SandboxBPFBasePolicy : public sandbox::bpf_dsl::SandboxBPFDSLPolicy {
+class SandboxBPFBasePolicy : public sandbox::bpf_dsl::Policy {
  public:
   SandboxBPFBasePolicy();
-  virtual ~SandboxBPFBasePolicy();
+  ~SandboxBPFBasePolicy() override;
 
-  virtual sandbox::bpf_dsl::ResultExpr EvaluateSyscall(
-      int system_call_number) const OVERRIDE;
-  virtual sandbox::bpf_dsl::ResultExpr InvalidSyscall() const OVERRIDE;
+  sandbox::bpf_dsl::ResultExpr EvaluateSyscall(
+      int system_call_number) const override;
+  sandbox::bpf_dsl::ResultExpr InvalidSyscall() const override;
 
   // A policy can implement this hook to run code right before the policy
   // is passed to the BPF compiler and the sandbox is engaged.
@@ -35,6 +36,8 @@ class SandboxBPFBasePolicy : public sandbox::bpf_dsl::SandboxBPFDSLPolicy {
 
   // Get the errno(3) to return for filesystem errors.
   static int GetFSDeniedErrno();
+
+  pid_t GetPolicyPid() const { return baseline_policy_->policy_pid(); }
 
  private:
   // Compose the BaselinePolicy from sandbox/.

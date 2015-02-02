@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
-
 /**
  * Loads and resizes an image.
  * @constructor
@@ -18,13 +16,13 @@ function ImageLoader() {
 
   /**
    * Manages pending requests and runs them in order of priorities.
-   * @type {Worker}
+   * @type {Scheduler}
    * @private
    */
-  this.worker_ = new Worker();
+  this.scheduler_ = new Scheduler();
 
   // Grant permissions to all volumes, initialize the cache and then start the
-  // worker.
+  // scheduler.
   chrome.fileManagerPrivate.getVolumeMetadataList(function(volumeMetadataList) {
     var initPromises = volumeMetadataList.map(function(volumeMetadata) {
       var requestPromise = new Promise(function(callback) {
@@ -34,10 +32,12 @@ function ImageLoader() {
       });
       return requestPromise;
     });
-    initPromises.push(new Promise(this.cache_.initialize.bind(this.cache_)));
+    initPromises.push(new Promise(function(resolve, reject) {
+      this.cache_.initialize(resolve);
+    }.bind(this)));
 
-    // After all initialization promises are done, start the worker.
-    Promise.all(initPromises).then(this.worker_.start.bind(this.worker_));
+    // After all initialization promises are done, start the scheduler.
+    Promise.all(initPromises).then(this.scheduler_.start.bind(this.scheduler_));
 
     // Listen for mount events, and grant permissions to volumes being mounted.
     chrome.fileManagerPrivate.onMountCompleted.addListener(
@@ -50,7 +50,7 @@ function ImageLoader() {
   }.bind(this));
 
   // Listen for incoming requests.
-  chrome.extension.onMessageExternal.addListener(
+  chrome.runtime.onMessageExternal.addListener(
       function(request, sender, sendResponse) {
         if (ImageLoader.ALLOWED_CLIENTS.indexOf(sender.id) !== -1) {
           // Sending a response may fail if the receiver already went offline.
@@ -63,7 +63,9 @@ function ImageLoader() {
               // Ignore the error.
             }
           };
-          return this.onMessage_(sender.id, request, failSafeSendResponse);
+          return this.onMessage_(sender.id,
+                                 /** @type {LoadImageRequest} */ (request),
+                                 failSafeSendResponse);
         }
       }.bind(this));
 }
@@ -84,8 +86,8 @@ ImageLoader.ALLOWED_CLIENTS = [
  * an image task.
  *
  * @param {string} senderId Sender's extension id.
- * @param {Object} request Request message as a hash array.
- * @param {function} callback Callback to be called to return response.
+ * @param {LoadImageRequest} request Request message as a hash array.
+ * @param {function(Object)} callback Callback to be called to return response.
  * @return {boolean} True if the message channel should stay alive until the
  *     callback is called.
  * @private
@@ -94,12 +96,12 @@ ImageLoader.prototype.onMessage_ = function(senderId, request, callback) {
   var requestId = senderId + ':' + request.taskId;
   if (request.cancel) {
     // Cancel a task.
-    this.worker_.remove(requestId);
+    this.scheduler_.remove(requestId);
     return false;  // No callback calls.
   } else {
-    // Create a request task and add it to the worker (queue).
+    // Create a request task and add it to the scheduler (queue).
     var requestTask = new Request(requestId, this.cache_, request, callback);
-    this.worker_.add(requestTask);
+    this.scheduler_.add(requestTask);
     return true;  // Request will call the callback.
   }
 };

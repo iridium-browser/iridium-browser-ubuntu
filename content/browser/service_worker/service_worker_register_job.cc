@@ -69,8 +69,7 @@ void ServiceWorkerRegisterJob::AddCallback(
     return;
   }
   RunSoon(base::Bind(
-      callback, promise_resolved_status_,
-      promise_resolved_registration_, promise_resolved_version_));
+      callback, promise_resolved_status_, promise_resolved_registration_));
 }
 
 void ServiceWorkerRegisterJob::Start() {
@@ -292,18 +291,23 @@ void ServiceWorkerRegisterJob::ContinueWithRegistrationForSameScriptUrl(
   }
   set_registration(existing_registration);
 
-  // TODO(falken): Follow the spec: resolve the promise
-  // with the newest version.
-
-  if (!existing_registration->active_version()) {
-    UpdateAndContinue();
+  // "If newestWorker is not null, and scriptURL is equal to
+  // newestWorker.scriptURL, then:
+  // Return a promise resolved with registration."
+  // We resolve only if there's an active version. If there's not,
+  // then there is either no version or only a waiting version from
+  // the last browser session; it makes sense to proceed with registration in
+  // either case.
+  DCHECK(!existing_registration->installing_version());
+  if (existing_registration->active_version()) {
+    ResolvePromise(status, existing_registration.get());
+    Complete(SERVICE_WORKER_OK);
     return;
   }
 
-  ResolvePromise(status,
-                 existing_registration.get(),
-                 existing_registration->active_version());
-  Complete(SERVICE_WORKER_OK);
+  // "Return the result of running the [[Update]] algorithm, or its equivalent,
+  // passing registration as the argument."
+  UpdateAndContinue();
 }
 
 // This function corresponds to the spec's [[Update]] algorithm.
@@ -311,12 +315,7 @@ void ServiceWorkerRegisterJob::UpdateAndContinue() {
   SetPhase(UPDATE);
   context_->storage()->NotifyInstallingRegistration(registration());
 
-  // TODO(falken): "If serviceWorkerRegistration.installingWorker is not null.."
-  // then terminate the installing worker. It doesn't make sense to implement
-  // yet since we always activate the worker if install completed, so there can
-  // be no installing worker at this point.
-
-  // "Let serviceWorker be a newly-created ServiceWorker object..." and start
+  // "Let worker be a new ServiceWorker object..." and start
   // the worker.
   set_new_version(new ServiceWorkerVersion(registration(),
                                            script_url_,
@@ -353,11 +352,8 @@ void ServiceWorkerRegisterJob::OnStartWorkerFinished(
       case net::ERR_ABORTED:
         status = SERVICE_WORKER_ERROR_ABORT;
         break;
-      case net::ERR_FAILED:
-        status = SERVICE_WORKER_ERROR_NETWORK;
-        break;
       default:
-        NOTREACHED();
+        status = SERVICE_WORKER_ERROR_NETWORK;
     }
   }
   Complete(status);
@@ -367,20 +363,21 @@ void ServiceWorkerRegisterJob::OnStartWorkerFinished(
 void ServiceWorkerRegisterJob::InstallAndContinue() {
   SetPhase(INSTALL);
 
-  // "2. Set registration.installingWorker to worker."
+  // "Set registration.installingWorker to worker."
+  DCHECK(!registration()->installing_version());
   registration()->SetInstallingVersion(new_version());
 
-  // "3. Resolve promise with registration."
-  ResolvePromise(SERVICE_WORKER_OK, registration(), new_version());
-
-  // "4. Run the [[UpdateState]] algorithm passing registration.installingWorker
-  // and "installing" as the arguments."
+  // "Run the Update State algorithm passing registration's installing worker
+  // and installing as the arguments."
   new_version()->SetStatus(ServiceWorkerVersion::INSTALLING);
 
-  // "5. Fire a simple event named updatefound..."
+  // "Resolve registrationPromise with registration."
+  ResolvePromise(SERVICE_WORKER_OK, registration());
+
+  // "Fire a simple event named updatefound..."
   registration()->NotifyUpdateFound();
 
-  // "6. Fire an event named install..."
+  // "Fire an event named install..."
   new_version()->DispatchInstallEvent(
       -1,
       base::Bind(&ServiceWorkerRegisterJob::OnInstallFinished,
@@ -462,7 +459,7 @@ void ServiceWorkerRegisterJob::CompleteInternal(
       }
     }
     if (!is_promise_resolved_)
-      ResolvePromise(status, NULL, NULL);
+      ResolvePromise(status, NULL);
   }
   DCHECK(callbacks_.empty());
   if (registration()) {
@@ -475,17 +472,15 @@ void ServiceWorkerRegisterJob::CompleteInternal(
 
 void ServiceWorkerRegisterJob::ResolvePromise(
     ServiceWorkerStatusCode status,
-    ServiceWorkerRegistration* registration,
-    ServiceWorkerVersion* version) {
+    ServiceWorkerRegistration* registration) {
   DCHECK(!is_promise_resolved_);
   is_promise_resolved_ = true;
   promise_resolved_status_ = status;
   promise_resolved_registration_ = registration;
-  promise_resolved_version_ = version;
   for (std::vector<RegistrationCallback>::iterator it = callbacks_.begin();
        it != callbacks_.end();
        ++it) {
-    it->Run(status, registration, version);
+    it->Run(status, registration);
   }
   callbacks_.clear();
 }
@@ -498,18 +493,18 @@ void ServiceWorkerRegisterJob::OnPausedAfterDownload() {
           registration()->active_version();
   DCHECK(most_recent_version.get());
   int64 most_recent_script_id =
-      most_recent_version->script_cache_map()->Lookup(script_url_);
+      most_recent_version->script_cache_map()->LookupResourceId(script_url_);
   int64 new_script_id =
-      new_version()->script_cache_map()->Lookup(script_url_);
+      new_version()->script_cache_map()->LookupResourceId(script_url_);
 
   // TODO(michaeln): It would be better to compare as the new resource
   // is being downloaded and to avoid writing it to disk until we know
   // its needed.
   context_->storage()->CompareScriptResources(
-      most_recent_script_id, new_script_id,
+      most_recent_script_id,
+      new_script_id,
       base::Bind(&ServiceWorkerRegisterJob::OnCompareScriptResourcesComplete,
-                 weak_factory_.GetWeakPtr(),
-                 most_recent_version));
+                 weak_factory_.GetWeakPtr()));
 }
 
 bool ServiceWorkerRegisterJob::OnMessageReceived(const IPC::Message& message) {
@@ -526,7 +521,6 @@ void ServiceWorkerRegisterJob::OnRegistrationFinishedUninstalling(
 }
 
 void ServiceWorkerRegisterJob::OnCompareScriptResourcesComplete(
-    ServiceWorkerVersion* most_recent_version,
     ServiceWorkerStatusCode status,
     bool are_equal) {
   if (are_equal) {
@@ -538,7 +532,7 @@ void ServiceWorkerRegisterJob::OnCompareScriptResourcesComplete(
       context_->storage()->UpdateLastUpdateCheckTime(registration());
     }
 
-    ResolvePromise(SERVICE_WORKER_OK, registration(), most_recent_version);
+    ResolvePromise(SERVICE_WORKER_OK, registration());
     Complete(SERVICE_WORKER_ERROR_EXISTS);
     return;
   }

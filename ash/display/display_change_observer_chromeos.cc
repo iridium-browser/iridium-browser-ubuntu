@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <map>
 #include <set>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include "ash/ash_switches.h"
@@ -23,8 +25,8 @@
 #include "ui/display/types/display_mode.h"
 #include "ui/display/types/display_snapshot.h"
 #include "ui/display/util/display_util.h"
-#include "ui/events/device_data_manager.h"
-#include "ui/events/touchscreen_device.h"
+#include "ui/events/devices/device_data_manager.h"
+#include "ui/events/devices/touchscreen_device.h"
 #include "ui/gfx/display.h"
 #include "ui/wm/core/user_activity_detector.h"
 
@@ -134,6 +136,18 @@ std::vector<DisplayMode> DisplayChangeObserver::GetExternalDisplayModeList(
        iter != display_mode_map.end();
        ++iter) {
     display_mode_list.push_back(iter->second);
+  }
+
+  if (output.display->native_mode()) {
+    const std::pair<int, int> size(native_mode.size.width(),
+                                   native_mode.size.height());
+    DisplayModeMap::iterator it = display_mode_map.find(size);
+    DCHECK(it != display_mode_map.end())
+        << "Native mode must be part of the mode list.";
+
+    // If the native mode was replaced re-add it.
+    if (!it->second.native)
+      display_mode_list.push_back(native_mode);
   }
 
   if (native_mode.size.width() >= kMinimumWidthFor4K) {
@@ -253,7 +267,7 @@ void DisplayChangeObserver::OnDisplayModeChanged(
   // For the purposes of user activity detection, ignore synthetic mouse events
   // that are triggered by screen resizes: http://crbug.com/360634
   ::wm::UserActivityDetector* user_activity_detector =
-      Shell::GetInstance()->user_activity_detector();
+      ::wm::UserActivityDetector::Get();
   if (user_activity_detector)
     user_activity_detector->OnDisplayPowerChanging();
 }
@@ -275,9 +289,12 @@ float DisplayChangeObserver::FindDeviceScaleFactor(float dpi) {
   return 1.0f;
 }
 
-void DisplayChangeObserver::OnInputDeviceConfigurationChanged() {
+void DisplayChangeObserver::OnTouchscreenDeviceConfigurationChanged() {
   OnDisplayModeChanged(
       Shell::GetInstance()->display_configurator()->cached_displays());
+}
+
+void DisplayChangeObserver::OnKeyboardDeviceConfigurationChanged() {
 }
 
 }  // namespace ash

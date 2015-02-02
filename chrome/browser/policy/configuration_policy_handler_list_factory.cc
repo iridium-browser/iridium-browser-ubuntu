@@ -27,6 +27,10 @@
 #include "components/translate/core/common/translate_pref_names.h"
 #include "policy/policy_constants.h"
 
+#if defined(OS_ANDROID)
+#include "chrome/browser/search/contextual_search_policy_handler_android.h"
+#endif
+
 #if !defined(OS_IOS)
 #include "chrome/browser/net/disk_cache_dir_policy_handler.h"
 #include "chrome/browser/policy/file_selection_dialogs_policy_handler.h"
@@ -37,11 +41,11 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "ash/magnifier/magnifier_constants.h"
 #include "chrome/browser/chromeos/policy/configuration_policy_handler_chromeos.h"
 #include "chromeos/dbus/power_policy_controller.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
+#include "ui/chromeos/accessibility_types.h"
 #endif
 
 #if !defined(OS_ANDROID) && !defined(OS_IOS)
@@ -336,9 +340,13 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
   { key::kDisableSafeBrowsingProceedAnyway,
     prefs::kSafeBrowsingProceedAnywayDisabled,
     base::Value::TYPE_BOOLEAN },
+
+#if defined(ENABLE_SPELLCHECK)
   { key::kSpellCheckServiceEnabled,
     prefs::kSpellCheckUseSpellingService,
     base::Value::TYPE_BOOLEAN },
+#endif  // defined(ENABLE_SPELLCHECK)
+
   { key::kDisableScreenshots,
     prefs::kDisableScreenshots,
     base::Value::TYPE_BOOLEAN },
@@ -571,6 +579,11 @@ scoped_ptr<ConfigurationPolicyHandlerList> BuildHandlerList(
   handlers->AddHandler(make_scoped_ptr<ConfigurationPolicyHandler>(
       new URLBlacklistPolicyHandler()));
 
+#if defined(OS_ANDROID)
+  handlers->AddHandler(make_scoped_ptr<ConfigurationPolicyHandler>(
+      new ContextualSearchPolicyHandlerAndroid()));
+#endif
+
 #if !defined(OS_IOS)
   handlers->AddHandler(make_scoped_ptr<ConfigurationPolicyHandler>(
       new FileSelectionDialogsPolicyHandler()));
@@ -612,6 +625,8 @@ scoped_ptr<ConfigurationPolicyHandlerList> BuildHandlerList(
           key::kExtensionAllowedTypes,
           extensions::pref_names::kAllowedTypes,
           base::Bind(GetExtensionAllowedTypesMap))));
+  handlers->AddHandler(make_scoped_ptr<ConfigurationPolicyHandler>(
+      new extensions::ExtensionSettingsPolicyHandler(chrome_schema)));
 #endif
 
 #if !defined(OS_CHROMEOS) && !defined(OS_ANDROID) && !defined(OS_IOS)
@@ -771,7 +786,7 @@ scoped_ptr<ConfigurationPolicyHandlerList> BuildHandlerList(
           key::kDeviceLoginScreenDefaultScreenMagnifierType,
           NULL,
           0,
-          ash::MAGNIFIER_FULL,
+          ui::MAGNIFIER_FULL,
           false)));
   // TODO(binjin): Remove LegacyPoliciesDeprecatingPolicyHandler for these two
   // policies once deprecation of legacy power management policies is done.

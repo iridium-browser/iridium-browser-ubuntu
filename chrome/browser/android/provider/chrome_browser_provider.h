@@ -8,10 +8,12 @@
 #include "base/android/jni_weak_ref.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/scoped_observer.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "components/bookmarks/browser/base_bookmark_model_observer.h"
 #include "components/history/core/android/android_history_types.h"
+#include "components/history/core/browser/history_service_observer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
@@ -29,7 +31,8 @@ class Statement;
 
 // This class implements the native methods of ChromeBrowserProvider.java
 class ChromeBrowserProvider : public BaseBookmarkModelObserver,
-                              public content::NotificationObserver {
+                              public content::NotificationObserver,
+                              public history::HistoryServiceObserver {
  public:
   ChromeBrowserProvider(JNIEnv* env, jobject obj);
   void Destroy(JNIEnv*, jobject);
@@ -175,17 +178,32 @@ class ChromeBrowserProvider : public BaseBookmarkModelObserver,
   virtual ~ChromeBrowserProvider();
 
   // Override BaseBookmarkModelObserver.
-  virtual void BookmarkModelChanged() OVERRIDE;
-  virtual void ExtensiveBookmarkChangesBeginning(BookmarkModel* model) OVERRIDE;
-  virtual void ExtensiveBookmarkChangesEnded(BookmarkModel* model) OVERRIDE;
+  virtual void BookmarkModelChanged() override;
+  virtual void ExtensiveBookmarkChangesBeginning(BookmarkModel* model) override;
+  virtual void ExtensiveBookmarkChangesEnded(BookmarkModel* model) override;
+
+  // Deals with updates to the history service.
+  void OnHistoryChanged();
+
+  // Override HistoryServiceObserver.
+  virtual void OnURLVisited(HistoryService* history_service,
+                            ui::PageTransition transition,
+                            const history::URLRow& row,
+                            const history::RedirectList& redirects,
+                            base::Time visit_time) override;
 
   // Override NotificationObserver.
   virtual void Observe(int type,
                        const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+                       const content::NotificationDetails& details) override;
 
   JavaObjectWeakGlobalRef weak_java_provider_;
 
+  // Profile must outlive this object.
+  //
+  // BookmarkModel, HistoryService and history::TopSites lifetime is bound to
+  // the lifetime of Profile, they are safe to use as long as the Profile is
+  // alive.
   Profile* profile_;
   BookmarkModel* bookmark_model_;
   history::TopSites* top_sites_;
@@ -196,6 +214,8 @@ class ChromeBrowserProvider : public BaseBookmarkModelObserver,
 
   // Used to register/unregister notification observer.
   content::NotificationRegistrar notification_registrar_;
+  ScopedObserver<HistoryService, HistoryServiceObserver>
+      history_service_observer_;
 
   bool handling_extensive_changes_;
 

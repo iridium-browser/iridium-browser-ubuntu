@@ -29,6 +29,14 @@ CustomContextMenuProvider::~CustomContextMenuProvider()
 {
 }
 
+void CustomContextMenuProvider::trace(Visitor* visitor)
+{
+    visitor->trace(m_menu);
+    visitor->trace(m_subjectElement);
+    visitor->trace(m_menuItems);
+    ContextMenuProvider::trace(visitor);
+}
+
 void CustomContextMenuProvider::populateContextMenu(ContextMenu* menu)
 {
     populateContextMenuItems(*m_menu, *menu);
@@ -113,7 +121,7 @@ HTMLElement* CustomContextMenuProvider::menuItemAt(unsigned menuId)
 {
     int itemIndex = menuId - ContextMenuItemBaseCustomTag;
     if (itemIndex < 0 || static_cast<unsigned long>(itemIndex) >= m_menuItems.size())
-        return 0;
+        return nullptr;
     return m_menuItems[itemIndex].get();
 }
 

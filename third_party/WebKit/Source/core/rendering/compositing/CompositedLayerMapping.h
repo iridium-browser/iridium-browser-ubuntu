@@ -66,7 +66,7 @@ enum GraphicsLayerUpdateScope {
 //
 // Currently (Oct. 2013) there is one CompositedLayerMapping for each RenderLayer,
 // but this is likely to evolve soon.
-class CompositedLayerMapping FINAL : public GraphicsLayerClient {
+class CompositedLayerMapping final : public GraphicsLayerClient {
     WTF_MAKE_NONCOPYABLE(CompositedLayerMapping); WTF_MAKE_FAST_ALLOCATED;
 public:
     explicit CompositedLayerMapping(RenderLayer&);
@@ -116,23 +116,10 @@ public:
     // Contains the bottommost layer in the hierarchy that can contain the children transform.
     GraphicsLayer* layerForChildrenTransform() const;
 
-    // Returns true for a composited layer that has no backing store of its own, so
-    // paints into some ancestor layer.
-    bool paintsIntoCompositedAncestor() const { return !(m_requiresOwnBackingStoreForAncestorReasons || m_requiresOwnBackingStoreForIntrinsicReasons); }
-
-    // Updates whether a backing store is needed based on the layer's compositing ancestor's
-    // properties; returns true if the need for a backing store for ancestor reasons changed.
-    bool updateRequiresOwnBackingStoreForAncestorReasons(const RenderLayer* compositingAncestor);
-
-    // Updates whether a backing store is needed for intrinsic reasons (that is, based on the
-    // layer's own properties or compositing reasons); returns true if the intrinsic need for
-    // a backing store changed.
-    bool updateRequiresOwnBackingStoreForIntrinsicReasons();
-
     void setSquashingContentsNeedDisplay();
     void setContentsNeedDisplay();
     // r is in the coordinate space of the layer's render object
-    void setContentsNeedDisplayInRect(const LayoutRect&, WebInvalidationDebugAnnotations);
+    void setContentsNeedDisplayInRect(const LayoutRect&, PaintInvalidationReason);
 
     // Notification from the renderer that its content changed.
     void contentChanged(ContentChangeType);
@@ -152,12 +139,12 @@ public:
     void updateShouldFlattenTransform();
 
     // GraphicsLayerClient interface
-    virtual void notifyAnimationStarted(const GraphicsLayer*, double monotonicTime) OVERRIDE;
-    virtual void paintContents(const GraphicsLayer*, GraphicsContext&, GraphicsLayerPaintingPhase, const IntRect& clip) OVERRIDE;
-    virtual bool isTrackingPaintInvalidations() const OVERRIDE;
+    virtual void notifyAnimationStarted(const GraphicsLayer*, double monotonicTime, int group) override;
+    virtual void paintContents(const GraphicsLayer*, GraphicsContext&, GraphicsLayerPaintingPhase, const IntRect& clip) override;
+    virtual bool isTrackingPaintInvalidations() const override;
 
 #if ENABLE(ASSERT)
-    virtual void verifyNotPainting() OVERRIDE;
+    virtual void verifyNotPainting() override;
 #endif
 
     LayoutRect contentsBox() const;
@@ -192,7 +179,7 @@ public:
     void assertNeedsToUpdateGraphicsLayerBitsCleared() {  ASSERT(m_pendingUpdateScope == GraphicsLayerUpdateNone); }
 #endif
 
-    virtual String debugName(const GraphicsLayer*) OVERRIDE;
+    virtual String debugName(const GraphicsLayer*) override;
 
     LayoutSize contentOffsetInCompositingLayer() const;
 
@@ -284,7 +271,7 @@ private:
     void updateBackgroundColor();
     void updateContentsRect();
     void updateContentsOffsetInCompositingLayer(const IntPoint& snappedOffsetFromCompositedAncestor, const IntPoint& graphicsLayerParentLocation);
-    void updateAfterWidgetResize();
+    void updateAfterPartResize();
     void updateCompositingReasons();
 
     static bool hasVisibleNonCompositingDescendant(RenderLayer* parent);
@@ -421,8 +408,7 @@ private:
 
     unsigned m_pendingUpdateScope : 2;
     unsigned m_isMainFrameRenderViewLayer : 1;
-    unsigned m_requiresOwnBackingStoreForIntrinsicReasons : 1;
-    unsigned m_requiresOwnBackingStoreForAncestorReasons : 1;
+
     unsigned m_backgroundLayerPaintsFixedRootBackground : 1;
     unsigned m_scrollingContentsAreEmpty : 1;
 };

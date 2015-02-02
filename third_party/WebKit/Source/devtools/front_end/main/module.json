@@ -226,7 +226,9 @@
         }
     ],
     "dependencies": [
+        "extensions",
         "host",
+        "platform",
         "screencast",
         "sdk",
         "toolbox"
@@ -239,11 +241,15 @@
         "RenderingOptions.js",
         "ScreencastApp.js",
         "SimpleApp.js",
-        "../TestController.js",
-        "../Tests.js",
+        "TestController.js",
+        "Tests.js",
         "Main.js"
     ],
     "skip_compilation": [
-        "../Tests.js"
+        "Tests.js"
+    ],
+    "stylesheets": [
+        "accelerometer.css",
+        "overrides.css"
     ]
 }

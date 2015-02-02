@@ -25,6 +25,8 @@
     'defines': [
       'U_USING_ICU_NAMESPACE=0',
       'HAVE_DLOPEN=0',
+      # Only build encoding coverters and detectors necessary for HTML5.
+      'UCONFIG_NO_NON_HTML5_CONVERSION=1',
     ],
     'conditions': [
       ['component=="static_library"', {
@@ -245,17 +247,6 @@
                 },
               },
             }],
-            ['OS == "android" and use_system_stlport == 1', {
-              'target_conditions': [
-                ['_toolset == "target"', {
-                  # ICU requires RTTI, which is not present in the system's
-                  # stlport, so we have to include gabi++.
-                  'include_dirs': [
-                    '<(android_src)/abi/cpp/include',
-                  ],
-                }],
-              ],
-            }],
           ], # conditions
         },
         {
@@ -352,17 +343,6 @@
                 },
               },
             }],
-            ['OS == "android" and use_system_stlport == 1', {
-              'target_conditions': [
-                ['_toolset == "target"', {
-                  # ICU requires RTTI, which is not present in the system's
-                  # stlport, so we have to include gabi++.
-                  'include_dirs': [
-                    '<(android_src)/abi/cpp/include',
-                  ],
-                }],
-              ],
-            }],
           ], # conditions
         },
       ], # targets
@@ -373,20 +353,6 @@
           'target_name': 'system_icu',
           'type': 'none',
           'conditions': [
-            ['OS=="android"', {
-              'direct_dependent_settings': {
-                'include_dirs': [
-                  '<(android_src)/external/icu/icu4c/source/common',
-                  '<(android_src)/external/icu/icu4c/source/i18n',
-                ],
-              },
-              'link_settings': {
-                'libraries': [
-                  '-licui18n',
-                  '-licuuc',
-                ],
-              },
-            }],
             ['OS=="qnx"', {
               'link_settings': {
                 'libraries': [
@@ -395,7 +361,7 @@
                 ],
               },
             }],
-            ['OS!="android" and OS!="qnx"', {
+            ['OS!="qnx"', {
               'link_settings': {
                 'ldflags': [
                   '<!@(icu-config --ldflags)',

@@ -37,7 +37,8 @@
         layer_quad: Array.<number>,
         draws_content: number,
         transform: Array.<number>,
-        owner_node: number
+        owner_node: number,
+        compositing_reasons: Array.<string>
     }}
 */
 WebInspector.TracingLayerPayload;
@@ -50,7 +51,7 @@ WebInspector.LayerTreeModel = function(target)
 {
     WebInspector.SDKModel.call(this, WebInspector.LayerTreeModel, target);
     target.registerLayerTreeDispatcher(new WebInspector.LayerTreeDispatcher(this));
-    target.domModel.addEventListener(WebInspector.DOMModel.Events.DocumentUpdated, this._onDocumentUpdated, this);
+    WebInspector.targetManager.addEventListener(WebInspector.TargetManager.Events.MainFrameNavigated, this._onMainFrameNavigated, this);
     /** @type {?WebInspector.LayerTreeBase} */
     this._layerTree = null;
 }
@@ -82,6 +83,11 @@ WebInspector.LayerTreeModel.prototype = {
         if (this._enabled)
             return;
         this._enabled = true;
+        this._forceEnable();
+    },
+
+    _forceEnable: function()
+    {
         this._layerTree = new WebInspector.AgentLayerTree(this.target());
         this._lastPaintRectByLayerId = {};
         this.target().layerTreeAgent().enable();
@@ -150,12 +156,10 @@ WebInspector.LayerTreeModel.prototype = {
         this.dispatchEventToListeners(WebInspector.LayerTreeModel.Events.LayerPainted, layer);
     },
 
-    _onDocumentUpdated: function()
+    _onMainFrameNavigated: function()
     {
-        if (!this._enabled)
-            return;
-        this.disable();
-        this.enable();
+        if (this._enabled)
+            this._forceEnable();
     },
 
     __proto__: WebInspector.SDKModel.prototype
@@ -323,11 +327,13 @@ WebInspector.TracingLayerTree.prototype = {
         else
             layer = new WebInspector.TracingLayer(payload);
         this._layersById[payload.layer_id] = layer;
-        if (!this._contentRoot && payload.draws_content)
-            this._contentRoot = layer;
+        if (payload.owner_node) {
+            if (!this._contentRoot && payload.draws_content)
+                this._contentRoot = layer;
 
-        if (payload.owner_node && this._backendNodeIdToNodeId[payload.owner_node])
-            layer._setNode(this._nodeForId(this._backendNodeIdToNodeId[payload.owner_node]));
+            if (this._backendNodeIdToNodeId[payload.owner_node])
+                layer._setNode(this._nodeForId(this._backendNodeIdToNodeId[payload.owner_node]));
+        }
 
         for (var i = 0; payload.children && i < payload.children.length; ++i)
             layer.addChild(this._innerSetLayers(oldLayersById, payload.children[i]));
@@ -883,6 +889,7 @@ WebInspector.TracingLayer.prototype = {
         this._parent = null;
         this._quad = payload.layer_quad || [];
         this._createScrollRects(payload);
+        this._compositingReasons = payload.compositing_reasons || [];
     },
 
     /**
@@ -1085,8 +1092,7 @@ WebInspector.TracingLayer.prototype = {
      */
     requestCompositingReasons: function(callback)
     {
-        var wrappedCallback = InspectorBackend.wrapClientCallback(callback, "LayerTreeAgent.reasonsForCompositingLayer(): ", undefined, []);
-        LayerTreeAgent.compositingReasons(this.id(), wrappedCallback);
+        callback(this._compositingReasons);
     },
 
     /**

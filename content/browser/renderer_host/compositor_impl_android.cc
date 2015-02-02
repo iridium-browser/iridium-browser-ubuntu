@@ -10,6 +10,7 @@
 #include "base/android/jni_android.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/bind.h"
+#include "base/cancelable_callback.h"
 #include "base/command_line.h"
 #include "base/containers/hash_tables.h"
 #include "base/lazy_instance.h"
@@ -25,10 +26,13 @@
 #include "cc/output/compositor_frame.h"
 #include "cc/output/context_provider.h"
 #include "cc/output/output_surface.h"
+#include "cc/output/output_surface_client.h"
 #include "cc/trees/layer_tree_host.h"
 #include "content/browser/android/child_process_launcher_android.h"
 #include "content/browser/gpu/browser_gpu_channel_host_factory.h"
+#include "content/browser/gpu/browser_gpu_memory_buffer_manager.h"
 #include "content/browser/gpu/gpu_surface_tracker.h"
+#include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/common/gpu/client/command_buffer_proxy_impl.h"
 #include "content/common/gpu/client/context_provider_command_buffer.h"
 #include "content/common/gpu/client/gl_helper.h"
@@ -37,6 +41,7 @@
 #include "content/common/gpu/gpu_process_launch_causes.h"
 #include "content/common/host_shared_bitmap_manager.h"
 #include "content/public/browser/android/compositor_client.h"
+#include "gpu/command_buffer/client/context_support.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/khronos/GLES2/gl2ext.h"
@@ -44,10 +49,10 @@
 #include "ui/base/android/window_android.h"
 #include "ui/gfx/android/device_display_info.h"
 #include "ui/gfx/frame_time.h"
-#include "ui/gl/android/surface_texture.h"
-#include "ui/gl/android/surface_texture_tracker.h"
 #include "webkit/common/gpu/context_provider_in_process.h"
 #include "webkit/common/gpu/webgraphicscontext3d_in_process_command_buffer_impl.h"
+
+namespace content {
 
 namespace {
 
@@ -56,115 +61,69 @@ const unsigned int kMaxSwapBuffers = 2U;
 // Used to override capabilities_.adjust_deadline_for_parent to false
 class OutputSurfaceWithoutParent : public cc::OutputSurface {
  public:
-  OutputSurfaceWithoutParent(const scoped_refptr<
-      content::ContextProviderCommandBuffer>& context_provider,
-      base::WeakPtr<content::CompositorImpl> compositor_impl)
-      : cc::OutputSurface(context_provider) {
+  OutputSurfaceWithoutParent(
+      const scoped_refptr<ContextProviderCommandBuffer>& context_provider,
+      base::WeakPtr<CompositorImpl> compositor_impl)
+      : cc::OutputSurface(context_provider),
+        swap_buffers_completion_callback_(
+            base::Bind(&OutputSurfaceWithoutParent::OnSwapBuffersCompleted,
+                       base::Unretained(this))) {
     capabilities_.adjust_deadline_for_parent = false;
     compositor_impl_ = compositor_impl;
     main_thread_ = base::MessageLoopProxy::current();
   }
 
-  virtual void SwapBuffers(cc::CompositorFrame* frame) OVERRIDE {
-    content::ContextProviderCommandBuffer* provider_command_buffer =
-        static_cast<content::ContextProviderCommandBuffer*>(
-            context_provider_.get());
-    content::CommandBufferProxyImpl* command_buffer_proxy =
-        provider_command_buffer->GetCommandBufferProxy();
-    DCHECK(command_buffer_proxy);
-    command_buffer_proxy->SetLatencyInfo(frame->metadata.latency_info);
-
-    OutputSurface::SwapBuffers(frame);
+  virtual void SwapBuffers(cc::CompositorFrame* frame) override {
+    GetCommandBufferProxy()->SetLatencyInfo(frame->metadata.latency_info);
+    DCHECK(frame->gl_frame_data->sub_buffer_rect ==
+           gfx::Rect(frame->gl_frame_data->size));
+    context_provider_->ContextSupport()->Swap();
+    client_->DidSwapBuffers();
   }
 
-  virtual bool BindToClient(cc::OutputSurfaceClient* client) OVERRIDE {
+  virtual bool BindToClient(cc::OutputSurfaceClient* client) override {
     if (!OutputSurface::BindToClient(client))
       return false;
 
+    GetCommandBufferProxy()->SetSwapBuffersCompletionCallback(
+        swap_buffers_completion_callback_.callback());
+
     main_thread_->PostTask(
         FROM_HERE,
-        base::Bind(&content::CompositorImpl::PopulateGpuCapabilities,
+        base::Bind(&CompositorImpl::PopulateGpuCapabilities,
                    compositor_impl_,
                    context_provider_->ContextCapabilities().gpu));
 
     return true;
   }
 
-  scoped_refptr<base::MessageLoopProxy> main_thread_;
-  base::WeakPtr<content::CompositorImpl> compositor_impl_;
-};
-
-class SurfaceTextureTrackerImpl : public gfx::SurfaceTextureTracker {
- public:
-  SurfaceTextureTrackerImpl() : next_surface_texture_id_(1) {
-    thread_checker_.DetachFromThread();
-  }
-
-  // Overridden from gfx::SurfaceTextureTracker:
-  virtual scoped_refptr<gfx::SurfaceTexture> AcquireSurfaceTexture(
-      int primary_id,
-      int secondary_id) OVERRIDE {
-    base::AutoLock lock(surface_textures_lock_);
-    SurfaceTextureMapKey key(primary_id, secondary_id);
-    SurfaceTextureMap::iterator it = surface_textures_.find(key);
-    if (it == surface_textures_.end())
-      return scoped_refptr<gfx::SurfaceTexture>();
-    scoped_refptr<gfx::SurfaceTexture> surface_texture = it->second;
-    surface_textures_.erase(it);
-    return surface_texture;
-  }
-
-  int AddSurfaceTexture(gfx::SurfaceTexture* surface_texture,
-                        int child_process_id) {
-    DCHECK(thread_checker_.CalledOnValidThread());
-    int surface_texture_id = next_surface_texture_id_++;
-    if (next_surface_texture_id_ == INT_MAX)
-      next_surface_texture_id_ = 1;
-
-    base::AutoLock lock(surface_textures_lock_);
-    SurfaceTextureMapKey key(surface_texture_id, child_process_id);
-    DCHECK(surface_textures_.find(key) == surface_textures_.end());
-    surface_textures_[key] = surface_texture;
-    content::RegisterChildProcessSurfaceTexture(
-        surface_texture_id,
-        child_process_id,
-        surface_texture->j_surface_texture().obj());
-    return surface_texture_id;
-  }
-
-  void RemoveAllSurfaceTextures(int child_process_id) {
-    DCHECK(thread_checker_.CalledOnValidThread());
-    base::AutoLock lock(surface_textures_lock_);
-    SurfaceTextureMap::iterator it = surface_textures_.begin();
-    while (it != surface_textures_.end()) {
-      if (it->first.second == child_process_id) {
-        content::UnregisterChildProcessSurfaceTexture(it->first.first,
-                                                      it->first.second);
-        surface_textures_.erase(it++);
-      } else {
-        ++it;
-      }
-    }
-  }
-
  private:
-  typedef std::pair<int, int> SurfaceTextureMapKey;
-  typedef base::hash_map<SurfaceTextureMapKey,
-                         scoped_refptr<gfx::SurfaceTexture> >
-      SurfaceTextureMap;
-  SurfaceTextureMap surface_textures_;
-  mutable base::Lock surface_textures_lock_;
-  int next_surface_texture_id_;
-  base::ThreadChecker thread_checker_;
+  CommandBufferProxyImpl* GetCommandBufferProxy() {
+    ContextProviderCommandBuffer* provider_command_buffer =
+        static_cast<content::ContextProviderCommandBuffer*>(
+            context_provider_.get());
+    CommandBufferProxyImpl* command_buffer_proxy =
+        provider_command_buffer->GetCommandBufferProxy();
+    DCHECK(command_buffer_proxy);
+    return command_buffer_proxy;
+  }
+
+  void OnSwapBuffersCompleted(
+      const std::vector<ui::LatencyInfo>& latency_info) {
+    RenderWidgetHostImpl::CompositorFrameDrawn(latency_info);
+    OutputSurface::OnSwapBuffersComplete();
+  }
+
+  base::CancelableCallback<void(const std::vector<ui::LatencyInfo>&)>
+      swap_buffers_completion_callback_;
+
+  scoped_refptr<base::MessageLoopProxy> main_thread_;
+  base::WeakPtr<CompositorImpl> compositor_impl_;
 };
-base::LazyInstance<SurfaceTextureTrackerImpl> g_surface_texture_tracker =
-    LAZY_INSTANCE_INITIALIZER;
 
 static bool g_initialized = false;
 
 } // anonymous namespace
-
-namespace content {
 
 // static
 Compositor* Compositor::Create(CompositorClient* client,
@@ -175,34 +134,12 @@ Compositor* Compositor::Create(CompositorClient* client,
 // static
 void Compositor::Initialize() {
   DCHECK(!CompositorImpl::IsInitialized());
-  // SurfaceTextureTracker instance must be set before we create a GPU thread
-  // that could be using it to initialize GLImage instances.
-  gfx::SurfaceTextureTracker::InitInstance(g_surface_texture_tracker.Pointer());
   g_initialized = true;
 }
 
 // static
 bool CompositorImpl::IsInitialized() {
   return g_initialized;
-}
-
-// static
-int CompositorImpl::CreateSurfaceTexture(int child_process_id) {
-  // Note: this needs to be 0 as the surface texture implemenation will take
-  // ownership of the texture and call glDeleteTextures when the GPU service
-  // attaches the surface texture to a real texture id. glDeleteTextures
-  // silently ignores 0.
-  const int kDummyTextureId = 0;
-  scoped_refptr<gfx::SurfaceTexture> surface_texture =
-      gfx::SurfaceTexture::Create(kDummyTextureId);
-  return g_surface_texture_tracker.Pointer()->AddSurfaceTexture(
-      surface_texture.get(), child_process_id);
-}
-
-// static
-void CompositorImpl::DestroyAllSurfaceTextures(int child_process_id) {
-  g_surface_texture_tracker.Pointer()->RemoveAllSurfaceTextures(
-      child_process_id);
 }
 
 CompositorImpl::CompositorImpl(CompositorClient* client,
@@ -359,11 +296,11 @@ ui::SystemUIResourceManager& CompositorImpl::GetSystemUIResourceManager() {
 }
 
 void CompositorImpl::SetRootLayer(scoped_refptr<cc::Layer> root_layer) {
-  if (subroot_layer_) {
+  if (subroot_layer_.get()) {
     subroot_layer_->RemoveFromParent();
     subroot_layer_ = NULL;
   }
-  if (root_layer) {
+  if (root_layer.get()) {
     subroot_layer_ = root_layer;
     root_layer_->AddChild(root_layer);
   }
@@ -397,7 +334,7 @@ void CompositorImpl::SetSurface(jobject surface) {
 
   // First, cleanup any existing surface references.
   if (surface_id_)
-    content::UnregisterViewSurface(surface_id_);
+    UnregisterViewSurface(surface_id_);
   SetWindowSurface(NULL);
 
   // Now, set the new surface if we have one.
@@ -412,7 +349,7 @@ void CompositorImpl::SetSurface(jobject surface) {
   if (window) {
     SetWindowSurface(window);
     ANativeWindow_release(window);
-    content::RegisterViewSurface(surface_id_, j_surface.obj());
+    RegisterViewSurface(surface_id_, j_surface.obj());
   }
 }
 
@@ -461,6 +398,7 @@ void CompositorImpl::SetVisible(bool visible) {
         this,
         this,
         HostSharedBitmapManager::current(),
+        BrowserGpuMemoryBufferManager::current(),
         settings,
         base::MessageLoopProxy::current());
     host_->SetRootLayer(root_layer_);
@@ -510,7 +448,7 @@ CreateGpuProcessViewContext(
     const scoped_refptr<GpuChannelHost>& gpu_channel_host,
     const blink::WebGraphicsContext3D::Attributes attributes,
     int surface_id) {
-  DCHECK(gpu_channel_host);
+  DCHECK(gpu_channel_host.get());
 
   GURL url("chrome://gpu/Compositor::createContext3D");
   static const size_t kBytesPerPixel = 4;
@@ -573,7 +511,7 @@ void CompositorImpl::CreateOutputSurface(bool fallback) {
   BrowserGpuChannelHostFactory* factory =
       BrowserGpuChannelHostFactory::instance();
   scoped_refptr<GpuChannelHost> gpu_channel_host = factory->GetGpuChannel();
-  if (gpu_channel_host && !gpu_channel_host->IsLost()) {
+  if (gpu_channel_host.get() && !gpu_channel_host->IsLost()) {
     context_provider = ContextProviderCommandBuffer::Create(
         CreateGpuProcessViewContext(gpu_channel_host, attrs, surface_id_),
         "BrowserCompositor");

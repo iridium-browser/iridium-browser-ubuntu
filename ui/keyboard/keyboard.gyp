@@ -19,7 +19,10 @@
     {
       # GN version: //ui/keyboard:resources
       'target_name': 'keyboard_resources',
-      'dependencies': [ 'keyboard_mojom_bindings', ],
+      'dependencies': [
+        'keyboard_mojom_bindings',
+        '../../third_party/google_input_tools/inputview.gyp:inputview',
+       ],
       'type': 'none',
       'variables': {
         'grit_out_dir': '<(SHARED_INTERMEDIATE_DIR)/ui/keyboard',
@@ -55,10 +58,10 @@
         '../../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         '../../content/content.gyp:content_browser',
         '../../ipc/ipc.gyp:ipc',
-        '../../mojo/mojo_base.gyp:mojo_cpp_bindings',
+        '../../mojo/edk/mojo_edk.gyp:mojo_system_impl',
         '../../mojo/mojo_base.gyp:mojo_environment_chromium',
-        '../../mojo/mojo_base.gyp:mojo_js_bindings',
-        '../../mojo/mojo_base.gyp:mojo_system_impl',
+        '../../mojo/public/mojo_public.gyp:mojo_cpp_bindings',
+        '../../mojo/public/mojo_public.gyp:mojo_js_bindings',
         '../../skia/skia.gyp:skia',
         '../../url/url.gyp:url_lib',
         '../aura/aura.gyp:aura',

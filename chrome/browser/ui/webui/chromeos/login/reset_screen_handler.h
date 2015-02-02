@@ -27,21 +27,21 @@ class ResetScreenHandler : public ResetScreenActor,
   virtual ~ResetScreenHandler();
 
   // ResetScreenActor implementation:
-  virtual void PrepareToShow() OVERRIDE;
-  virtual void Show() OVERRIDE;
-  virtual void Hide() OVERRIDE;
-  virtual void SetDelegate(Delegate* delegate) OVERRIDE;
+  virtual void PrepareToShow() override;
+  virtual void Show() override;
+  virtual void Hide() override;
+  virtual void SetDelegate(Delegate* delegate) override;
 
   // BaseScreenHandler implementation:
-  virtual void DeclareLocalizedValues(LocalizedValuesBuilder* builder) OVERRIDE;
-  virtual void Initialize() OVERRIDE;
+  virtual void DeclareLocalizedValues(LocalizedValuesBuilder* builder) override;
+  virtual void Initialize() override;
 
   // WebUIMessageHandler implementation:
-  virtual void RegisterMessages() OVERRIDE;
+  virtual void RegisterMessages() override;
 
   // UpdateEngineClient::Observer implementation:
   virtual void UpdateStatusChanged(
-      const UpdateEngineClient::Status& status) OVERRIDE;
+      const UpdateEngineClient::Status& status) override;
 
   void OnRollbackCheck(bool can_rollback);
 
@@ -54,8 +54,7 @@ class ResetScreenHandler : public ResetScreenActor,
   void HandleOnRestart();
   void HandleOnPowerwash(bool rollback_checked);
   void HandleOnLearnMore();
-  void HandleOnShowRollback();
-  void HandleOnHideRollback();
+  void HandleOnToggleRollback();
   void HandleOnShowConfirm();
 
   void ChooseAndApplyShowScenario();

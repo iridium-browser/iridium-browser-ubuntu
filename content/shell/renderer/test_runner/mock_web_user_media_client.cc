@@ -46,7 +46,7 @@ class UserMediaRequestTask : public WebMethodTask<MockWebUserMediaClient> {
     DCHECK(!result_.isNull());
   }
 
-  virtual void RunIfValid() OVERRIDE { request_.requestSucceeded(result_); }
+  void RunIfValid() override { request_.requestSucceeded(result_); }
 
  private:
   WebUserMediaRequest request_;
@@ -65,9 +65,7 @@ class UserMediaRequestConstraintFailedTask
         request_(request),
         constraint_(constraint) {}
 
-  virtual void RunIfValid() OVERRIDE {
-    request_.requestFailedConstraint(constraint_);
-  }
+  void RunIfValid() override { request_.requestFailedConstraint(constraint_); }
 
  private:
   WebUserMediaRequest request_;
@@ -84,7 +82,7 @@ class UserMediaRequestPermissionDeniedTask
       : WebMethodTask<MockWebUserMediaClient>(object),
         request_(request) {}
 
-  virtual void RunIfValid() OVERRIDE { request_.requestFailed(); }
+  void RunIfValid() override { request_.requestFailed(); }
 
  private:
   WebUserMediaRequest request_;
@@ -101,7 +99,7 @@ class MediaDevicesRequestTask : public WebMethodTask<MockWebUserMediaClient> {
         request_(request),
         result_(result) {}
 
-  virtual void RunIfValid() OVERRIDE { request_.requestSucceeded(result_); }
+  void RunIfValid() override { request_.requestSucceeded(result_); }
 
  private:
   WebMediaDevicesRequest request_;
@@ -119,7 +117,7 @@ class SourcesRequestTask : public WebMethodTask<MockWebUserMediaClient> {
         request_(request),
         result_(result) {}
 
-  virtual void RunIfValid() OVERRIDE { request_.requestSucceeded(result_); }
+  void RunIfValid() override { request_.requestSucceeded(result_); }
 
  private:
   WebMediaStreamTrackSourcesRequest request_;
@@ -224,8 +222,8 @@ void MockWebUserMediaClient::requestMediaDevices(
     },
   };
 
-  WebVector<WebMediaDeviceInfo> devices(ARRAYSIZE_UNSAFE(test_devices));
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_devices); ++i) {
+  WebVector<WebMediaDeviceInfo> devices(arraysize(test_devices));
+  for (size_t i = 0; i < arraysize(test_devices); ++i) {
     devices[i].initialize(WebString::fromUTF8(test_devices[i].device_id),
                           test_devices[i].kind,
                           WebString::fromUTF8(test_devices[i].label),
@@ -261,8 +259,8 @@ void MockWebUserMediaClient::requestSources(
     },
   };
 
-  WebVector<WebSourceInfo> sources(ARRAYSIZE_UNSAFE(test_sources));
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_sources); ++i) {
+  WebVector<WebSourceInfo> sources(arraysize(test_sources));
+  for (size_t i = 0; i < arraysize(test_sources); ++i) {
   sources[i].initialize(WebString::fromUTF8(test_sources[i].id),
                         test_sources[i].kind,
                         WebString::fromUTF8(test_sources[i].label),

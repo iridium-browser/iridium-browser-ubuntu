@@ -20,6 +20,7 @@ namespace extensions {
 class ExperienceSamplingEvent;
 }
 
+class ExtensionInstallPromptShowParams;
 @class ExtensionInstallViewController;
 
 // Displays an extension install prompt as a tab modal dialog.
@@ -28,18 +29,17 @@ class ExtensionInstallDialogController :
     public ConstrainedWindowMacDelegate {
  public:
   ExtensionInstallDialogController(
-      const ExtensionInstallPrompt::ShowParams& show_params,
+      ExtensionInstallPromptShowParams* show_params,
       ExtensionInstallPrompt::Delegate* delegate,
       scoped_refptr<ExtensionInstallPrompt::Prompt> prompt);
-  virtual ~ExtensionInstallDialogController();
+  ~ExtensionInstallDialogController() override;
 
   // ExtensionInstallPrompt::Delegate implementation.
-  virtual void InstallUIProceed() OVERRIDE;
-  virtual void InstallUIAbort(bool user_initiated) OVERRIDE;
+  void InstallUIProceed() override;
+  void InstallUIAbort(bool user_initiated) override;
 
   // ConstrainedWindowMacDelegate implementation.
-  virtual void OnConstrainedWindowClosed(
-      ConstrainedWindowMac* window) OVERRIDE;
+  void OnConstrainedWindowClosed(ConstrainedWindowMac* window) override;
 
   ConstrainedWindowMac* constrained_window() const {
     return constrained_window_.get();

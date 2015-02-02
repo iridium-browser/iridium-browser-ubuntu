@@ -11,6 +11,10 @@
 #include "base/strings/stringprintf.h"
 #include "base/threading/simple_thread.h"
 #include "cc/base/scoped_ptr_deque.h"
+#include "cc/resources/raster_source.h"
+#include "skia/ext/refptr.h"
+#include "third_party/skia/include/core/SkCanvas.h"
+#include "third_party/skia/include/core/SkSurface.h"
 
 namespace cc {
 namespace {
@@ -35,13 +39,11 @@ class RasterTaskGraphRunner : public TaskGraphRunner,
     }
   }
 
-  virtual ~RasterTaskGraphRunner() { NOTREACHED(); }
+  ~RasterTaskGraphRunner() override { NOTREACHED(); }
 
  private:
   // Overridden from base::DelegateSimpleThread::Delegate:
-  virtual void Run() OVERRIDE {
-    TaskGraphRunner::Run();
-  }
+  void Run() override { TaskGraphRunner::Run(); }
 
   ScopedPtrDeque<base::DelegateSimpleThread> workers_;
 };
@@ -62,18 +64,18 @@ class RasterFinishedTaskImpl : public RasterizerTask {
         on_raster_finished_callback_(on_raster_finished_callback) {}
 
   // Overridden from Task:
-  virtual void RunOnWorkerThread() OVERRIDE {
+  void RunOnWorkerThread() override {
     TRACE_EVENT0("cc", "RasterFinishedTaskImpl::RunOnWorkerThread");
     RasterFinished();
   }
 
   // Overridden from RasterizerTask:
-  virtual void ScheduleOnOriginThread(RasterizerTaskClient* client) OVERRIDE {}
-  virtual void CompleteOnOriginThread(RasterizerTaskClient* client) OVERRIDE {}
-  virtual void RunReplyOnOriginThread() OVERRIDE {}
+  void ScheduleOnOriginThread(RasterizerTaskClient* client) override {}
+  void CompleteOnOriginThread(RasterizerTaskClient* client) override {}
+  void RunReplyOnOriginThread() override {}
 
  protected:
-  virtual ~RasterFinishedTaskImpl() {}
+  ~RasterFinishedTaskImpl() override {}
 
   void RasterFinished() {
     task_runner_->PostTask(FROM_HERE, on_raster_finished_callback_);
@@ -194,51 +196,72 @@ void RasterWorkerPool::InsertNodesForRasterTask(
   InsertNodeForTask(graph, raster_task, priority, dependencies);
 }
 
-// static
-void RasterWorkerPool::AcquireBitmapForBuffer(SkBitmap* bitmap,
-                                              uint8_t* buffer,
-                                              ResourceFormat buffer_format,
-                                              const gfx::Size& size,
-                                              int stride) {
-  switch (buffer_format) {
+static bool IsSupportedPlaybackToMemoryFormat(ResourceFormat format) {
+  switch (format) {
     case RGBA_4444:
-      bitmap->allocN32Pixels(size.width(), size.height());
-      break;
     case RGBA_8888:
-    case BGRA_8888: {
-      SkImageInfo info =
-          SkImageInfo::MakeN32Premul(size.width(), size.height());
-      if (!stride)
-        stride = info.minRowBytes();
-      bitmap->installPixels(info, buffer, stride);
-      break;
-    }
+    case BGRA_8888:
+      return true;
     case ALPHA_8:
     case LUMINANCE_8:
     case RGB_565:
     case ETC1:
-      NOTREACHED();
-      break;
+      return false;
   }
+  NOTREACHED();
+  return false;
 }
 
 // static
-void RasterWorkerPool::ReleaseBitmapForBuffer(SkBitmap* bitmap,
-                                              uint8_t* buffer,
-                                              ResourceFormat buffer_format) {
-  SkColorType buffer_color_type = ResourceFormatToSkColorType(buffer_format);
-  if (buffer_color_type != bitmap->colorType()) {
-    SkImageInfo dst_info = bitmap->info();
-    dst_info.fColorType = buffer_color_type;
-    // TODO(kaanb): The GL pipeline assumes a 4-byte alignment for the
-    // bitmap data. There will be no need to call SkAlign4 once crbug.com/293728
-    // is fixed.
-    const size_t dst_row_bytes = SkAlign4(dst_info.minRowBytes());
-    DCHECK_EQ(0u, dst_row_bytes % 4);
-    bool success = bitmap->readPixels(dst_info, buffer, dst_row_bytes, 0, 0);
-    DCHECK_EQ(true, success);
+void RasterWorkerPool::PlaybackToMemory(void* memory,
+                                        ResourceFormat format,
+                                        const gfx::Size& size,
+                                        int stride,
+                                        const RasterSource* raster_source,
+                                        const gfx::Rect& rect,
+                                        float scale) {
+  DCHECK(IsSupportedPlaybackToMemoryFormat(format)) << format;
+
+  // Uses kPremul_SkAlphaType since the result is not known to be opaque.
+  SkImageInfo info =
+      SkImageInfo::MakeN32(size.width(), size.height(), kPremul_SkAlphaType);
+  SkColorType buffer_color_type = ResourceFormatToSkColorType(format);
+  bool needs_copy = buffer_color_type != info.colorType();
+
+  // TODO(danakj): Make a SkSurfaceProps with an SkPixelGeometry to enable or
+  // disable LCD text.
+  // TODO(danakj): Disable LCD text on Mac during layout tests:
+  // https://cs.chromium.org#chromium/src/third_party/WebKit/Source/platform/fonts/mac/FontPlatformDataMac.mm&l=55
+  // TODO(danakj): On Windows when LCD text is disabled, ask skia to draw LCD
+  // text offscreen and downsample it to AA text.
+  // https://cs.chromium.org#chromium/src/third_party/WebKit/Source/platform/fonts/win/FontPlatformDataWin.cpp&l=86
+  SkSurfaceProps* surface_props = nullptr;
+
+  if (!stride)
+    stride = info.minRowBytes();
+
+  if (!needs_copy) {
+    skia::RefPtr<SkSurface> surface = skia::AdoptRef(
+        SkSurface::NewRasterDirect(info, memory, stride, surface_props));
+    skia::RefPtr<SkCanvas> canvas = skia::SharePtr(surface->getCanvas());
+    raster_source->PlaybackToCanvas(canvas.get(), rect, scale);
+    return;
   }
-  bitmap->reset();
+
+  skia::RefPtr<SkSurface> surface =
+      skia::AdoptRef(SkSurface::NewRaster(info, surface_props));
+  skia::RefPtr<SkCanvas> canvas = skia::SharePtr(surface->getCanvas());
+  raster_source->PlaybackToCanvas(canvas.get(), rect, scale);
+
+  SkImageInfo dst_info = info;
+  dst_info.fColorType = buffer_color_type;
+  // TODO(kaanb): The GL pipeline assumes a 4-byte alignment for the
+  // bitmap data. There will be no need to call SkAlign4 once crbug.com/293728
+  // is fixed.
+  const size_t dst_row_bytes = SkAlign4(dst_info.minRowBytes());
+  DCHECK_EQ(0u, dst_row_bytes % 4);
+  bool success = canvas->readPixels(dst_info, memory, dst_row_bytes, 0, 0);
+  DCHECK_EQ(true, success);
 }
 
 }  // namespace cc

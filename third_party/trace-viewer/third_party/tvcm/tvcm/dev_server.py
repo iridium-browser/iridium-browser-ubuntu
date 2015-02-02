@@ -125,8 +125,8 @@ def send_500(self, msg, ex, log_error=True, path=None):
     <html>
     <body>
     <h1>OMG something is wrong</h1>
-    <b><pre>%s</pre></b></p>
-    <pre>%s</pre>
+    <b><pre><code>%s</code></pre></b></p>
+    <pre><code>%s</code></pre>
     </body>
     </html>
 """ % (ex.message, traceback.format_exc())
@@ -186,13 +186,13 @@ class DevServer(SocketServer.ThreadingMixIn, BaseHTTPServer.HTTPServer):
 
     self.AddPathHandler('/', do_GET_root)
     self.AddPathHandler('', do_GET_root)
-    self.default_path = '/tvcm/tests.html'
+    self.default_path = '/base/tests.html'
     # Redirect old tests.html places to the new location until folks have gotten used to its new
     # location.
-    self.AddPathHandler('/src/tests.html', do_GET_root)
+    self.AddPathHandler('/tvcm/tests.html', do_GET_root)
     self.AddPathHandler('/tests.html', do_GET_root)
 
-    self.AddPathHandler('/tvcm/json/tests', do_GET_json_tests)
+    self.AddPathHandler('/tv/json/tests', do_GET_json_tests)
 
   def AddPathHandler(self, path, handler, supports_get=True, supports_post=False):
     self._path_handlers.append(PathHandler(path, handler, supports_get, supports_post))

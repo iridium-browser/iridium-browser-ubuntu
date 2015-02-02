@@ -13,6 +13,7 @@
 #include "core/fetch/ScriptResource.h"
 #include "core/frame/Settings.h"
 #include "platform/SharedBuffer.h"
+#include "platform/TraceEvent.h"
 #include "public/platform/Platform.h"
 #include "wtf/MainThread.h"
 #include "wtf/text/TextEncodingRegistry.h"
@@ -97,7 +98,7 @@ public:
 
     // Called by V8 on a background thread. Should block until we can return
     // some data.
-    virtual size_t GetMoreData(const uint8_t** src) OVERRIDE
+    virtual size_t GetMoreData(const uint8_t** src) override
     {
         ASSERT(!isMainThread());
         {
@@ -224,9 +225,219 @@ void ScriptStreamer::startStreaming(PendingScript& script, Settings* settings, S
         blink::Platform::current()->histogramEnumeration(startedStreamingHistogramName(scriptType), 0, 2);
 }
 
-void ScriptStreamer::streamingComplete()
+void ScriptStreamer::streamingCompleteOnBackgroundThread()
+{
+    ASSERT(!isMainThread());
+    MutexLocker locker(m_mutex);
+    m_parsingFinished = true;
+    // In the blocking case, the main thread is normally waiting at this
+    // point, but it can also happen that the load is not yet finished
+    // (e.g., a parse error). In that case, notifyFinished will be called
+    // eventually and it will not wait on m_parsingFinishedCondition.
+
+    // In the non-blocking case, notifyFinished might already be called, or it
+    // might be called in the future. In any case, do the cleanup here.
+    if (m_mainThreadWaitingForParserThread) {
+        m_parsingFinishedCondition.signal();
+    } else {
+        callOnMainThread(WTF::bind(&ScriptStreamer::streamingComplete, this));
+    }
+}
+
+void ScriptStreamer::cancel()
 {
     ASSERT(isMainThread());
+    // The upper layer doesn't need the script any more, but streaming might
+    // still be ongoing. Tell SourceStream to try to cancel it whenever it gets
+    // the control the next time. It can also be that V8 has already completed
+    // its operations and streamingComplete will be called soon.
+    m_detached = true;
+    m_resource = 0;
+    if (m_stream)
+        m_stream->cancel();
+}
+
+void ScriptStreamer::suppressStreaming()
+{
+    MutexLocker locker(m_mutex);
+    ASSERT(!m_loadingFinished);
+    // It can be that the parsing task has already finished (e.g., if there was
+    // a parse error).
+    m_streamingSuppressed = true;
+}
+
+unsigned ScriptStreamer::cachedDataType() const
+{
+    if (m_compileOptions == v8::ScriptCompiler::kProduceParserCache) {
+        return V8ScriptRunner::tagForParserCache();
+    }
+    if (m_compileOptions == v8::ScriptCompiler::kProduceCodeCache) {
+        return V8ScriptRunner::tagForCodeCache();
+    }
+    return 0;
+}
+
+void ScriptStreamer::notifyAppendData(ScriptResource* resource)
+{
+    ASSERT(isMainThread());
+    ASSERT(m_resource == resource);
+    {
+        MutexLocker locker(m_mutex);
+        if (m_streamingSuppressed)
+            return;
+    }
+    if (!m_haveEnoughDataForStreaming) {
+        // Even if the first data chunk is small, the script can still be big
+        // enough - wait until the next data chunk comes before deciding whether
+        // to start the streaming.
+        if (resource->resourceBuffer()->size() < kSmallScriptThreshold) {
+            return;
+        }
+        m_haveEnoughDataForStreaming = true;
+        const char* histogramName = startedStreamingHistogramName(m_scriptType);
+
+        // Encoding should be detected only when we have some data. It's
+        // possible that resource->encoding() returns a different encoding
+        // before the loading has started and after we got some data.
+        WTF::TextEncoding textEncoding(resource->encoding());
+        const char* encodingName = textEncoding.name();
+
+        // Here's a list of encodings we can use for streaming. These are
+        // the canonical names.
+        v8::ScriptCompiler::StreamedSource::Encoding encoding;
+        if (strcmp(encodingName, "windows-1252") == 0
+            || strcmp(encodingName, "ISO-8859-1") == 0
+            || strcmp(encodingName, "US-ASCII") == 0) {
+            encoding = v8::ScriptCompiler::StreamedSource::ONE_BYTE;
+        } else if (strcmp(encodingName, "UTF-8") == 0) {
+            encoding = v8::ScriptCompiler::StreamedSource::UTF8;
+        } else {
+            // We don't stream other encodings; especially we don't stream two
+            // byte scripts to avoid the handling of byte order marks. Most
+            // scripts are Latin1 or UTF-8 anyway, so this should be enough for
+            // most real world purposes.
+            suppressStreaming();
+            blink::Platform::current()->histogramEnumeration(histogramName, 0, 2);
+            return;
+        }
+        if (ScriptStreamerThread::shared()->isRunningTask()) {
+            // At the moment we only have one thread for running the tasks. A
+            // new task shouldn't be queued before the running task completes,
+            // because the running task can block and wait for data from the
+            // network.
+            suppressStreaming();
+            blink::Platform::current()->histogramEnumeration(histogramName, 0, 2);
+            return;
+        }
+
+        if (!m_scriptState->contextIsValid()) {
+            suppressStreaming();
+            blink::Platform::current()->histogramEnumeration(histogramName, 0, 2);
+            return;
+        }
+
+        ASSERT(!m_stream);
+        ASSERT(!m_source);
+        m_stream = new SourceStream(this);
+        // m_source takes ownership of m_stream.
+        m_source = adoptPtr(new v8::ScriptCompiler::StreamedSource(m_stream, encoding));
+
+        ScriptState::Scope scope(m_scriptState.get());
+        WTF::OwnPtr<v8::ScriptCompiler::ScriptStreamingTask> scriptStreamingTask(adoptPtr(v8::ScriptCompiler::StartStreamingScript(m_scriptState->isolate(), m_source.get(), m_compileOptions)));
+        if (!scriptStreamingTask) {
+            // V8 cannot stream the script.
+            suppressStreaming();
+            m_stream = 0;
+            m_source.clear();
+            blink::Platform::current()->histogramEnumeration(histogramName, 0, 2);
+            return;
+        }
+
+        // ScriptStreamer needs to stay alive as long as the background task is
+        // running. This is taken care of with a manual ref() & deref() pair;
+        // the corresponding deref() is in streamingComplete or in
+        // notifyFinished.
+        ref();
+        ScriptStreamingTask* task = new ScriptStreamingTask(scriptStreamingTask.release(), this);
+        ScriptStreamerThread::shared()->postTask(task);
+        blink::Platform::current()->histogramEnumeration(histogramName, 1, 2);
+    }
+    if (m_stream)
+        m_stream->didReceiveData();
+}
+
+void ScriptStreamer::notifyFinished(Resource* resource)
+{
+    ASSERT(isMainThread());
+    ASSERT(m_resource == resource);
+    // A special case: empty and small scripts. We didn't receive enough data to
+    // start the streaming before this notification. In that case, there won't
+    // be a "parsing complete" notification either, and we should not wait for
+    // it.
+    if (!m_haveEnoughDataForStreaming) {
+        const char* histogramName = startedStreamingHistogramName(m_scriptType);
+        blink::Platform::current()->histogramEnumeration(histogramName, 0, 2);
+        suppressStreaming();
+    }
+    if (m_stream)
+        m_stream->didFinishLoading();
+    m_loadingFinished = true;
+
+    if (shouldBlockMainThread()) {
+        // Make the main thead wait until the streaming is complete, to make
+        // sure that the script gets the main thread's attention as early as
+        // possible (for possible compiling, if the client wants to do it
+        // right away). Note that blocking here is not any worse than the
+        // non-streaming code path where the main thread eventually blocks
+        // to parse the script.
+        TRACE_EVENT0("v8", "v8.mainThreadWaitingForParserThread");
+        MutexLocker locker(m_mutex);
+        while (!isFinished()) {
+            ASSERT(!m_parsingFinished);
+            ASSERT(!m_streamingSuppressed);
+            m_mainThreadWaitingForParserThread = true;
+            m_parsingFinishedCondition.wait(m_mutex);
+        }
+    }
+
+    // Calling notifyFinishedToClient can result into the upper layers dropping
+    // references to ScriptStreamer. Keep it alive until this function ends.
+    RefPtr<ScriptStreamer> protect(this);
+
+    notifyFinishedToClient();
+
+    if (m_mainThreadWaitingForParserThread) {
+        ASSERT(m_parsingFinished);
+        ASSERT(!m_streamingSuppressed);
+        // streamingComplete won't be called, so do the ramp-down work
+        // here.
+        deref();
+    }
+}
+
+ScriptStreamer::ScriptStreamer(ScriptResource* resource, PendingScript::Type scriptType, ScriptStreamingMode mode, ScriptState* scriptState, v8::ScriptCompiler::CompileOptions compileOptions)
+    : m_resource(resource)
+    , m_detached(false)
+    , m_stream(0)
+    , m_client(0)
+    , m_loadingFinished(false)
+    , m_parsingFinished(false)
+    , m_haveEnoughDataForStreaming(false)
+    , m_streamingSuppressed(false)
+    , m_compileOptions(compileOptions)
+    , m_scriptState(scriptState)
+    , m_scriptType(scriptType)
+    , m_scriptStreamingMode(mode)
+    , m_mainThreadWaitingForParserThread(false)
+{
+}
+
+void ScriptStreamer::streamingComplete()
+{
+    // The background task is completed; do the necessary ramp-down in the main
+    // thread.
+    ASSERT(isMainThread());
+
     // It's possible that the corresponding Resource was deleted before V8
     // finished streaming. In that case, the data or the notification is not
     // needed. In addition, if the streaming is suppressed, the non-streaming
@@ -240,101 +451,10 @@ void ScriptStreamer::streamingComplete()
     // We have now streamed the whole script to V8 and it has parsed the
     // script. We're ready for the next step: compiling and executing the
     // script.
-    m_parsingFinished = true;
-
     notifyFinishedToClient();
 
     // The background thread no longer holds an implicit reference.
     deref();
-}
-
-void ScriptStreamer::cancel()
-{
-    ASSERT(isMainThread());
-    // The upper layer doesn't need the script any more, but streaming might
-    // still be ongoing. Tell SourceStream to try to cancel it whenever it gets
-    // the control the next time. It can also be that V8 has already completed
-    // its operations and streamingComplete will be called soon.
-    m_detached = true;
-    m_resource = 0;
-    m_stream->cancel();
-}
-
-void ScriptStreamer::suppressStreaming()
-{
-    ASSERT(!m_parsingFinished);
-    ASSERT(!m_loadingFinished);
-    m_streamingSuppressed = true;
-}
-
-void ScriptStreamer::notifyAppendData(ScriptResource* resource)
-{
-    ASSERT(isMainThread());
-    ASSERT(m_resource == resource);
-    if (m_streamingSuppressed)
-        return;
-    if (!m_firstDataChunkReceived) {
-        m_firstDataChunkReceived = true;
-        const char* histogramName = startedStreamingHistogramName(m_scriptType);
-        // Check the size of the first data chunk. The expectation is that if
-        // the first chunk is small, there won't be a second one. In those
-        // cases, it doesn't make sense to stream at all.
-        if (resource->resourceBuffer()->size() < kSmallScriptThreshold) {
-            suppressStreaming();
-            blink::Platform::current()->histogramEnumeration(histogramName, 0, 2);
-            return;
-        }
-        if (ScriptStreamerThread::shared()->isRunningTask()) {
-            // At the moment we only have one thread for running the tasks. A
-            // new task shouldn't be queued before the running task completes,
-            // because the running task can block and wait for data from the
-            // network. At the moment we are only streaming parser blocking
-            // scripts, but this code can still be hit when multiple frames are
-            // loading simultaneously.
-            suppressStreaming();
-            blink::Platform::current()->histogramEnumeration(histogramName, 0, 2);
-            return;
-        }
-        ASSERT(m_task);
-        // ScriptStreamer needs to stay alive as long as the background task is
-        // running. This is taken care of with a manual ref() & deref() pair;
-        // the corresponding deref() is in streamingComplete.
-        ref();
-        ScriptStreamingTask* task = new ScriptStreamingTask(m_task, this);
-        ScriptStreamerThread::shared()->postTask(task);
-        m_task = 0;
-        blink::Platform::current()->histogramEnumeration(histogramName, 1, 2);
-    }
-    m_stream->didReceiveData();
-}
-
-void ScriptStreamer::notifyFinished(Resource* resource)
-{
-    ASSERT(isMainThread());
-    ASSERT(m_resource == resource);
-    // A special case: empty scripts. We didn't receive any data before this
-    // notification. In that case, there won't be a "parsing complete"
-    // notification either, and we should not wait for it.
-    if (!m_firstDataChunkReceived)
-        suppressStreaming();
-    m_stream->didFinishLoading();
-    m_loadingFinished = true;
-    notifyFinishedToClient();
-}
-
-ScriptStreamer::ScriptStreamer(ScriptResource* resource, v8::ScriptCompiler::StreamedSource::Encoding encoding, PendingScript::Type scriptType)
-    : m_resource(resource)
-    , m_detached(false)
-    , m_stream(new SourceStream(this))
-    , m_source(m_stream, encoding) // m_source takes ownership of m_stream.
-    , m_client(0)
-    , m_task(0)
-    , m_loadingFinished(false)
-    , m_parsingFinished(false)
-    , m_firstDataChunkReceived(false)
-    , m_streamingSuppressed(false)
-    , m_scriptType(scriptType)
-{
 }
 
 void ScriptStreamer::notifyFinishedToClient()
@@ -348,7 +468,12 @@ void ScriptStreamer::notifyFinishedToClient()
     // function calling notifyFinishedToClient was already scheduled in the task
     // queue and the upper layer decided that it's not interested in the script
     // and called removeClient.
-    if (isFinished() && m_client)
+    {
+        MutexLocker locker(m_mutex);
+        if (!isFinished())
+            return;
+    }
+    if (m_client)
         m_client->notifyFinished(m_resource);
 }
 
@@ -376,8 +501,13 @@ bool ScriptStreamer::startStreamingInternal(PendingScript& script, Settings* set
     ASSERT(isMainThread());
     if (!settings || !settings->v8ScriptStreamingEnabled())
         return false;
+    if (settings->v8ScriptStreamingMode() == ScriptStreamingModeOnlyAsyncAndDefer
+        && scriptType == PendingScript::ParsingBlocking)
+        return false;
+
     ScriptResource* resource = script.resource();
-    ASSERT(!resource->isLoaded());
+    if (resource->isLoaded())
+        return false;
     if (!resource->url().protocolIsInHTTPFamily())
         return false;
     if (resource->resourceToRevalidate()) {
@@ -390,34 +520,8 @@ bool ScriptStreamer::startStreamingInternal(PendingScript& script, Settings* set
     // to arrive. In general, the web servers don't seem to send the
     // Content-Length HTTP header for scripts.
 
-    WTF::TextEncoding textEncoding(resource->encoding());
-    const char* encodingName = textEncoding.name();
-
-    // Here's a list of encodings we can use for streaming. These are
-    // the canonical names.
-    v8::ScriptCompiler::StreamedSource::Encoding encoding;
-    if (strcmp(encodingName, "windows-1252") == 0
-        || strcmp(encodingName, "ISO-8859-1") == 0
-        || strcmp(encodingName, "US-ASCII") == 0) {
-        encoding = v8::ScriptCompiler::StreamedSource::ONE_BYTE;
-    } else if (strcmp(encodingName, "UTF-8") == 0) {
-        encoding = v8::ScriptCompiler::StreamedSource::UTF8;
-    } else {
-        // We don't stream other encodings; especially we don't stream two byte
-        // scripts to avoid the handling of byte order marks. Most scripts are
-        // Latin1 or UTF-8 anyway, so this should be enough for most real world
-        // purposes.
+    if (!scriptState->contextIsValid())
         return false;
-    }
-
-    if (scriptState->contextIsValid())
-        return false;
-    ScriptState::Scope scope(scriptState);
-
-    // The Resource might go out of scope if the script is no longer needed. We
-    // will soon call PendingScript::setStreamer, which makes the PendingScript
-    // notify the ScriptStreamer when it is destroyed.
-    RefPtr<ScriptStreamer> streamer = adoptRef(new ScriptStreamer(resource, encoding, scriptType));
 
     // Decide what kind of cached data we should produce while streaming. By
     // default, we generate the parser cache for streamed scripts, to emulate
@@ -425,14 +529,13 @@ bool ScriptStreamer::startStreamingInternal(PendingScript& script, Settings* set
     v8::ScriptCompiler::CompileOptions compileOption = v8::ScriptCompiler::kProduceParserCache;
     if (settings->v8CacheOptions() == V8CacheOptionsCode)
         compileOption = v8::ScriptCompiler::kProduceCodeCache;
-    v8::ScriptCompiler::ScriptStreamingTask* scriptStreamingTask = v8::ScriptCompiler::StartStreamingScript(scriptState->isolate(), &(streamer->m_source), compileOption);
-    if (scriptStreamingTask) {
-        streamer->m_task = scriptStreamingTask;
-        script.setStreamer(streamer.release());
-        return true;
-    }
-    // Otherwise, V8 cannot stream the script.
-    return false;
+
+    // The Resource might go out of scope if the script is no longer
+    // needed. This makes PendingScript notify the ScriptStreamer when it is
+    // destroyed.
+    script.setStreamer(adoptRef(new ScriptStreamer(resource, scriptType, settings->v8ScriptStreamingMode(), scriptState, compileOption)));
+
+    return true;
 }
 
 } // namespace blink

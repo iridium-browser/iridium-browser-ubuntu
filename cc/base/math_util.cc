@@ -10,12 +10,12 @@
 
 #include "base/debug/trace_event_argument.h"
 #include "base/values.h"
-#include "ui/gfx/quad_f.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/rect_conversions.h"
-#include "ui/gfx/rect_f.h"
+#include "ui/gfx/geometry/quad_f.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/rect_conversions.h"
+#include "ui/gfx/geometry/rect_f.h"
+#include "ui/gfx/geometry/vector2d_f.h"
 #include "ui/gfx/transform.h"
-#include "ui/gfx/vector2d_f.h"
 
 namespace cc {
 
@@ -693,7 +693,7 @@ scoped_ptr<base::Value> MathUtil::AsValue(const gfx::Size& s) {
   scoped_ptr<base::DictionaryValue> res(new base::DictionaryValue());
   res->SetDouble("width", s.width());
   res->SetDouble("height", s.height());
-  return res.PassAs<base::Value>();
+  return res.Pass();
 }
 
 scoped_ptr<base::Value> MathUtil::AsValue(const gfx::Rect& r) {
@@ -702,11 +702,11 @@ scoped_ptr<base::Value> MathUtil::AsValue(const gfx::Rect& r) {
   res->AppendInteger(r.y());
   res->AppendInteger(r.width());
   res->AppendInteger(r.height());
-  return res.PassAs<base::Value>();
+  return res.Pass();
 }
 
 bool MathUtil::FromValue(const base::Value* raw_value, gfx::Rect* out_rect) {
-  const base::ListValue* value = NULL;
+  const base::ListValue* value = nullptr;
   if (!raw_value->GetAsList(&value))
     return false;
 
@@ -730,7 +730,7 @@ scoped_ptr<base::Value> MathUtil::AsValue(const gfx::PointF& pt) {
   scoped_ptr<base::ListValue> res(new base::ListValue());
   res->AppendDouble(pt.x());
   res->AppendDouble(pt.y());
-  return res.PassAs<base::Value>();
+  return res.Pass();
 }
 
 void MathUtil::AddToTracedValue(const gfx::Size& s,
@@ -773,6 +773,12 @@ void MathUtil::AddToTracedValue(const gfx::Vector2d& v,
 }
 
 void MathUtil::AddToTracedValue(const gfx::Vector2dF& v,
+                                base::debug::TracedValue* res) {
+  res->AppendDouble(v.x());
+  res->AppendDouble(v.y());
+}
+
+void MathUtil::AddToTracedValue(const gfx::ScrollOffset& v,
                                 base::debug::TracedValue* res) {
   res->AppendDouble(v.x());
   res->AppendDouble(v.y());

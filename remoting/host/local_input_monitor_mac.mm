@@ -43,7 +43,7 @@ class LocalInputMonitorMac : public base::NonThreadSafe,
       scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
       base::WeakPtr<ClientSessionControl> client_session_control);
-  virtual ~LocalInputMonitorMac();
+  ~LocalInputMonitorMac() override;
 
  private:
   // The actual implementation resides in LocalInputMonitorMac::Core class.
@@ -168,15 +168,14 @@ class LocalInputMonitorMac::Core
 
  private:
   friend class base::RefCountedThreadSafe<Core>;
-  virtual ~Core();
+  ~Core() override;
 
   void StartOnUiThread();
   void StopOnUiThread();
 
   // EventHandler interface.
-  virtual void OnLocalMouseMoved(
-      const webrtc::DesktopVector& position) OVERRIDE;
-  virtual void OnDisconnectShortcut() OVERRIDE;
+  void OnLocalMouseMoved(const webrtc::DesktopVector& position) override;
+  void OnDisconnectShortcut() override;
 
   // Task runner on which public methods of this class must be called.
   scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner_;
@@ -281,10 +280,8 @@ scoped_ptr<LocalInputMonitor> LocalInputMonitor::Create(
     scoped_refptr<base::SingleThreadTaskRunner> input_task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
     base::WeakPtr<ClientSessionControl> client_session_control) {
-  return scoped_ptr<LocalInputMonitor>(
-      new LocalInputMonitorMac(caller_task_runner,
-                               ui_task_runner,
-                               client_session_control));
+  return make_scoped_ptr(new LocalInputMonitorMac(
+      caller_task_runner, ui_task_runner, client_session_control));
 }
 
 }  // namespace remoting

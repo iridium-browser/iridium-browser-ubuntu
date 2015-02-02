@@ -22,7 +22,7 @@
 
 namespace blink {
 
-const WrapperTypeInfo V8TestInterfaceConstructor4::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceConstructor4::domTemplate, V8TestInterfaceConstructor4::refObject, V8TestInterfaceConstructor4::derefObject, V8TestInterfaceConstructor4::createPersistentHandle, 0, 0, 0, V8TestInterfaceConstructor4::installConditionallyEnabledMethods, V8TestInterfaceConstructor4::installConditionallyEnabledProperties, 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::Independent, WrapperTypeInfo::RefCountedObject };
+const WrapperTypeInfo V8TestInterfaceConstructor4::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceConstructor4::domTemplate, V8TestInterfaceConstructor4::refObject, V8TestInterfaceConstructor4::derefObject, V8TestInterfaceConstructor4::trace, 0, 0, 0, V8TestInterfaceConstructor4::installConditionallyEnabledMethods, V8TestInterfaceConstructor4::installConditionallyEnabledProperties, 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::Independent, WrapperTypeInfo::RefCountedObject };
 
 // This static member must be declared by DEFINE_WRAPPERTYPEINFO in TestInterfaceConstructor4.h.
 // For details, see the comment of DEFINE_WRAPPERTYPEINFO in
@@ -30,8 +30,6 @@ const WrapperTypeInfo V8TestInterfaceConstructor4::wrapperTypeInfo = { gin::kEmb
 const WrapperTypeInfo& TestInterfaceConstructor4::s_wrapperTypeInfo = V8TestInterfaceConstructor4::wrapperTypeInfo;
 
 namespace TestInterfaceConstructor4V8Internal {
-
-template <typename T> void V8_USE(T) { }
 
 static void constructor1(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
@@ -48,11 +46,11 @@ static void constructor1(const v8::FunctionCallbackInfo<v8::Value>& info)
 static void constructor2(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     ExceptionState exceptionState(ExceptionState::ConstructionContext, "TestInterfaceConstructor4", info.Holder(), info.GetIsolate());
-    V8StringResource<> scalarValueStringArg;
+    V8StringResource<> usvStringArg;
     {
-        TONATIVE_VOID_EXCEPTIONSTATE_INTERNAL(scalarValueStringArg, toScalarValueString(info[0], exceptionState), exceptionState);
+        TONATIVE_VOID_EXCEPTIONSTATE_INTERNAL(usvStringArg, toUSVString(info[0], exceptionState), exceptionState);
     }
-    RefPtr<TestInterfaceConstructor4> impl = TestInterfaceConstructor4::create(scalarValueStringArg);
+    RefPtr<TestInterfaceConstructor4> impl = TestInterfaceConstructor4::create(usvStringArg);
     v8::Handle<v8::Object> wrapper = info.Holder();
     impl->associateWithWrapper(&V8TestInterfaceConstructor4::wrapperTypeInfo, wrapper, info.GetIsolate());
     v8SetReturnValue(info, wrapper);
@@ -87,7 +85,7 @@ void V8TestInterfaceConstructor4::constructorCallback(const v8::FunctionCallback
 {
     TRACE_EVENT_SCOPED_SAMPLING_STATE("blink", "DOMConstructor");
     if (!info.IsConstructCall()) {
-        V8ThrowException::throwTypeError(ExceptionMessages::constructorNotCallableAsFunction("TestInterfaceConstructor4"), info.GetIsolate());
+        V8ThrowException::throwTypeError(info.GetIsolate(), ExceptionMessages::constructorNotCallableAsFunction("TestInterfaceConstructor4"));
         return;
     }
 
@@ -111,8 +109,10 @@ static void installV8TestInterfaceConstructor4Template(v8::Handle<v8::FunctionTe
         isolate);
     functionTemplate->SetCallHandler(V8TestInterfaceConstructor4::constructorCallback);
     functionTemplate->SetLength(1);
-    v8::Local<v8::ObjectTemplate> instanceTemplate ALLOW_UNUSED = functionTemplate->InstanceTemplate();
-    v8::Local<v8::ObjectTemplate> prototypeTemplate ALLOW_UNUSED = functionTemplate->PrototypeTemplate();
+    v8::Local<v8::ObjectTemplate> instanceTemplate = functionTemplate->InstanceTemplate();
+    ALLOW_UNUSED_LOCAL(instanceTemplate);
+    v8::Local<v8::ObjectTemplate> prototypeTemplate = functionTemplate->PrototypeTemplate();
+    ALLOW_UNUSED_LOCAL(prototypeTemplate);
 
     // Custom toString template
     functionTemplate->Set(v8AtomicString(isolate, "toString"), V8PerIsolateData::from(isolate)->toStringTemplate());
@@ -138,21 +138,14 @@ TestInterfaceConstructor4* V8TestInterfaceConstructor4::toImplWithTypeCheck(v8::
     return hasInstance(value, isolate) ? blink::toScriptWrappableBase(v8::Handle<v8::Object>::Cast(value))->toImpl<TestInterfaceConstructor4>() : 0;
 }
 
-
-void V8TestInterfaceConstructor4::refObject(ScriptWrappableBase* internalPointer)
+void V8TestInterfaceConstructor4::refObject(ScriptWrappableBase* scriptWrappableBase)
 {
-    internalPointer->toImpl<TestInterfaceConstructor4>()->ref();
+    scriptWrappableBase->toImpl<TestInterfaceConstructor4>()->ref();
 }
 
-void V8TestInterfaceConstructor4::derefObject(ScriptWrappableBase* internalPointer)
+void V8TestInterfaceConstructor4::derefObject(ScriptWrappableBase* scriptWrappableBase)
 {
-    internalPointer->toImpl<TestInterfaceConstructor4>()->deref();
-}
-
-WrapperPersistentNode* V8TestInterfaceConstructor4::createPersistentHandle(ScriptWrappableBase* internalPointer)
-{
-    ASSERT_NOT_REACHED();
-    return 0;
+    scriptWrappableBase->toImpl<TestInterfaceConstructor4>()->deref();
 }
 
 template<>

@@ -37,13 +37,15 @@ component("base") {
     "clipboard/clipboard.cc",
     "clipboard/clipboard.h",
     "clipboard/clipboard_android.cc",
-    "clipboard/clipboard_android_initialization.h",
+    "clipboard/clipboard_android.h",
     "clipboard/clipboard_constants.cc",
+    "clipboard/clipboard_mac.h",
     "clipboard/clipboard_mac.mm",
     "clipboard/clipboard_types.h",
     "clipboard/clipboard_util_win.cc",
     "clipboard/clipboard_util_win.h",
     "clipboard/clipboard_win.cc",
+    "clipboard/clipboard_win.h",
     "clipboard/custom_data_helper.cc",
     "clipboard/custom_data_helper.h",
     "clipboard/custom_data_helper_linux.cc",
@@ -236,8 +238,6 @@ component("base") {
     "win/accessibility_misc_utils.cc",
     "win/accessibility_misc_utils.h",
     "win/atl_module.h",
-    "win/dpi_setup.cc",
-    "win/dpi_setup.h",
     "win/foreground_helper.cc",
     "win/foreground_helper.h",
     "win/hidden_window.cc",
@@ -600,6 +600,8 @@ component("base") {
 
   if (is_android) {
     sources -= [
+      "cursor/image_cursors.cc",
+      "cursor/image_cursors.h",
       "default_theme_provider.cc",
       "dragdrop/drag_utils.cc",
       "dragdrop/drag_utils.h",
@@ -701,15 +703,14 @@ if (is_android) {
 
 # TODO(GYP): Make this work on Android and reenable it.
 if (!is_android) {
+# TODO(tfarina): Rename this target to ui_base_unittests.
+# In order to do this we will need to keep this target, add a dummy
+# ui_base_unittests target that just points to ui_unittests, change
+# buildbot code to reference the new 'ui_base_unittests' target.
+# After buildbot is updated, we can make the changes in Chromium and
+# remove 'ui_unittests' target. crbug.com/331829
 # GYP version: ui/base/ui_base_tests.gyp:ui_unittests
-test("unittests") {
-  # TODO(tfarina): Rename this target to ui_base_unittests.
-  # In order to do this we will need to keep this target, add a dummy
-  # ui_base_unittests target that just points to ui_unittests, change
-  # buildbot code to reference the new 'ui_base_unittests' target.
-  # After buildbot is updated, we can make the changes in Chromium and
-  # remove 'ui_unittests' target. crbug.com/331829
-  output_name = "ui_unittests"
+test("ui_unittests") {
   sources = [
     "l10n/l10n_util_mac_unittest.mm",
     "l10n/l10n_util_unittest.cc",
@@ -756,16 +757,6 @@ test("unittests") {
       "webui/web_ui_util_unittest.cc",
       "x/selection_requestor_unittest.cc",
     ]
-
-    if (!use_x11) {
-      if (is_chromeos) {
-        # These were already removed in the chromeos case.
-        sources -= [
-          "ime/chromeos/character_composer_unittest.cc",
-          "ime/input_method_chromeos_unittest.cc",
-        ]
-      }
-    }
   }
 
   if (build_ime) {
@@ -780,6 +771,13 @@ test("unittests") {
     ]
     if (use_x11) {
       sources += [ "ime/composition_text_util_pango_unittest.cc" ]
+    }
+    if (!use_x11 && is_chromeos) {
+      # These were already removed in the non-chromeos case.
+      sources -= [
+        "ime/chromeos/character_composer_unittest.cc",
+        "ime/input_method_chromeos_unittest.cc",
+      ]
     }
   }
 
@@ -886,6 +884,7 @@ test("unittests") {
 
   if (is_chromeos) {
     sources += [
+      "../chromeos/network/network_state_notifier_unittest.cc",
       "../chromeos/touch_exploration_controller_unittest.cc",
     ]
     sources -= [
@@ -893,10 +892,13 @@ test("unittests") {
       "x/selection_requestor_unittest.cc",
     ]
     deps += [
+      "//chromeos",
       "//ui/aura:test_support",
+      "//ui/chromeos/resources",
+      "//ui/chromeos/strings",
+      "//ui/chromeos:ui_chromeos",
       "//ui/events:gesture_detection",
-      #'../chromeos/chromeos.gyp:chromeos',  TODO(GYP)
-      #'chromeos/ui_chromeos.gyp:ui_chromeos',
+      "//ui/message_center:message_center",
     ]
   }
 }

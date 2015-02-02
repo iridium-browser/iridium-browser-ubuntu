@@ -10,7 +10,7 @@ found in the LICENSE file.
 <script>
 'use strict';
 
-tvcm.exportTo('tracing.trace_model', function() {
+tv.exportTo('tracing.trace_model', function() {
   /**
    * A snapshot of an object instance, at a given moment in time.
    *
@@ -60,22 +60,7 @@ tvcm.exportTo('tracing.trace_model', function() {
     }
   };
 
-  ObjectSnapshot.nameToConstructorMap_ = {};
-  ObjectSnapshot.register = function(name, constructor) {
-    if (ObjectSnapshot.nameToConstructorMap_[name])
-      throw new Error('Constructor already registered for ' + name);
-    ObjectSnapshot.nameToConstructorMap_[name] = constructor;
-  };
-
-  ObjectSnapshot.unregister = function(name) {
-    delete ObjectSnapshot.nameToConstructorMap_[name];
-  };
-
-  ObjectSnapshot.getConstructor = function(name) {
-    if (ObjectSnapshot.nameToConstructorMap_[name])
-      return ObjectSnapshot.nameToConstructorMap_[name];
-    return ObjectSnapshot;
-  };
+  tracing.trace_model.Event.decorateSubtype(ObjectSnapshot);
 
   return {
     ObjectSnapshot: ObjectSnapshot

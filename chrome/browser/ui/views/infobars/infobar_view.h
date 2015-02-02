@@ -45,7 +45,7 @@ class InfoBarView : public infobars::InfoBar,
   static const int kButtonButtonSpacing;
   static const int kEndOfLabelSpacing;
 
-  virtual ~InfoBarView();
+  ~InfoBarView() override;
 
   // Creates a label with the appropriate font and color for an infobar.
   views::Label* CreateLabel(const base::string16& text) const;
@@ -67,15 +67,14 @@ class InfoBarView : public infobars::InfoBar,
   static void AssignWidths(Labels* labels, int available_width);
 
   // views::View:
-  virtual void Layout() OVERRIDE;
-  virtual void ViewHierarchyChanged(
-      const ViewHierarchyChangedDetails& details) OVERRIDE;
+  void Layout() override;
+  void ViewHierarchyChanged(
+      const ViewHierarchyChangedDetails& details) override;
 
   // views::ButtonListener:
   // NOTE: This must not be called if we're unowned.  (Subclasses should ignore
   // calls to ButtonPressed() in this case.)
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // Returns the minimum width the content (that is, everything between the icon
   // and the close button) can be shrunk to.  This is used to prevent the close
@@ -108,19 +107,18 @@ class InfoBarView : public infobars::InfoBar,
   static void AssignWidthsSorted(Labels* labels, int available_width);
 
   // InfoBar:
-  virtual void PlatformSpecificShow(bool animate) OVERRIDE;
-  virtual void PlatformSpecificHide(bool animate) OVERRIDE;
-  virtual void PlatformSpecificOnHeightsRecalculated() OVERRIDE;
+  void PlatformSpecificShow(bool animate) override;
+  void PlatformSpecificHide(bool animate) override;
+  void PlatformSpecificOnHeightsRecalculated() override;
 
   // views::View:
-  virtual void GetAccessibleState(ui::AXViewState* state) OVERRIDE;
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
-  virtual void PaintChildren(gfx::Canvas* canvas,
-                             const views::CullSet& cull_set) OVERRIDE;
+  void GetAccessibleState(ui::AXViewState* state) override;
+  gfx::Size GetPreferredSize() const override;
+  void PaintChildren(gfx::Canvas* canvas,
+                     const views::CullSet& cull_set) override;
 
   // views::ExternalFocusTracker:
-  virtual void OnWillChangeFocus(View* focused_before,
-                                 View* focused_now) OVERRIDE;
+  void OnWillChangeFocus(View* focused_before, View* focused_now) override;
 
   // The optional icon at the left edge of the InfoBar.
   views::ImageView* icon_;

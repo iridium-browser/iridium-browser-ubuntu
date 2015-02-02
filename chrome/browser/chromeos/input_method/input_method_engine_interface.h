@@ -63,6 +63,7 @@ class InputMethodEngineInterface : public IMEEngineHandlerInterface {
   enum SegmentStyle {
     SEGMENT_STYLE_UNDERLINE,
     SEGMENT_STYLE_DOUBLE_UNDERLINE,
+    SEGMENT_STYLE_NO_UNDERLINE,
   };
 
   enum CandidateWindowPosition {
@@ -88,6 +89,9 @@ class InputMethodEngineInterface : public IMEEngineHandlerInterface {
   struct InputContext {
     int id;
     std::string type;
+    bool auto_correct;
+    bool auto_complete;
+    bool spell_check;
   };
 
   struct UsageEntry {
@@ -165,6 +169,9 @@ class InputMethodEngineInterface : public IMEEngineHandlerInterface {
                                           const std::string& text,
                                           int cursor_pos,
                                           int anchor_pos) = 0;
+
+    // Called when composition bounds are changed.
+    virtual void OnCompositionBoundsChanged(const gfx::Rect& bounds) = 0;
 
     // Called when Chrome terminates on-going text input session.
     virtual void OnReset(const std::string& engine_id) = 0;

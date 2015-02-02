@@ -51,7 +51,9 @@ public class WindowAndroid {
         @Override
         public void onVSync(VSyncMonitor monitor, long vsyncTimeMicros) {
             if (mNativeWindowAndroid != 0) {
-                nativeOnVSync(mNativeWindowAndroid, vsyncTimeMicros);
+                nativeOnVSync(mNativeWindowAndroid,
+                              vsyncTimeMicros,
+                              mVSyncMonitor.getVSyncPeriodInMicroseconds());
             }
         }
     };
@@ -237,7 +239,7 @@ public class WindowAndroid {
 
     @CalledByNative
     private void requestVSyncUpdate() {
-       mVSyncMonitor.requestUpdate();
+        mVSyncMonitor.requestUpdate();
     }
 
     /**
@@ -282,13 +284,15 @@ public class WindowAndroid {
      */
     public long getNativePointer() {
         if (mNativeWindowAndroid == 0) {
-            mNativeWindowAndroid = nativeInit(mVSyncMonitor.getVSyncPeriodInMicroseconds());
+            mNativeWindowAndroid = nativeInit();
         }
         return mNativeWindowAndroid;
     }
 
-    private native long nativeInit(long vsyncPeriod);
-    private native void nativeOnVSync(long nativeWindowAndroid, long vsyncTimeMicros);
+    private native long nativeInit();
+    private native void nativeOnVSync(long nativeWindowAndroid,
+                                      long vsyncTimeMicros,
+                                      long vsyncPeriodMicros);
     private native void nativeDestroy(long nativeWindowAndroid);
 
 }

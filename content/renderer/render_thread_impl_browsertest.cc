@@ -19,14 +19,12 @@ namespace {
 
 class RenderThreadImplBrowserTest : public testing::Test {
  public:
-  virtual ~RenderThreadImplBrowserTest() {}
+  ~RenderThreadImplBrowserTest() override {}
 };
 
 class DummyListener : public IPC::Listener {
  public:
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE {
-    return true;
-  }
+  bool OnMessageReceived(const IPC::Message& message) override { return true; }
 };
 
 void CheckRenderThreadInputHandlerManager(RenderThreadImpl* thread) {

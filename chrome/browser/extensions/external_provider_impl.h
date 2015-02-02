@@ -41,7 +41,7 @@ class ExternalProviderImpl : public ExternalProviderInterface {
                        Manifest::Location download_location,
                        int creation_flags);
 
-  virtual ~ExternalProviderImpl();
+  ~ExternalProviderImpl() override;
 
   // Populates a list with providers for all known sources.
   static void CreateExternalProviders(
@@ -54,15 +54,14 @@ class ExternalProviderImpl : public ExternalProviderInterface {
   virtual void SetPrefs(base::DictionaryValue* prefs);
 
   // ExternalProvider implementation:
-  virtual void ServiceShutdown() OVERRIDE;
-  virtual void VisitRegisteredExtension() OVERRIDE;
-  virtual bool HasExtension(const std::string& id) const OVERRIDE;
-  virtual bool GetExtensionDetails(
-      const std::string& id,
-      Manifest::Location* location,
-      scoped_ptr<base::Version>* version) const OVERRIDE;
+  void ServiceShutdown() override;
+  void VisitRegisteredExtension() override;
+  bool HasExtension(const std::string& id) const override;
+  bool GetExtensionDetails(const std::string& id,
+                           Manifest::Location* location,
+                           scoped_ptr<base::Version>* version) const override;
 
-  virtual bool IsReady() const OVERRIDE;
+  bool IsReady() const override;
 
   static const char kExternalCrx[];
   static const char kExternalVersion[];

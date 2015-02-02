@@ -1,4 +1,6 @@
-<?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="ko">
+<?xml version="1.0" ?>
+<!DOCTYPE translationbundle>
+<translationbundle lang="ko">
 <translation id="777702478322588152">도</translation>
 <translation id="3713769522066937702">인식할 수 없는 우편번호 형식입니다(올바른 우편번호의 예: <ph name="EXAMPLE"/>). 우편번호를 모르십니까? <ph name="BEGIN_LINK"/>여기<ph name="END_LINK"/>에서 확인하세요.</translation>
 <translation id="7393381084163773901">상세 주소</translation>

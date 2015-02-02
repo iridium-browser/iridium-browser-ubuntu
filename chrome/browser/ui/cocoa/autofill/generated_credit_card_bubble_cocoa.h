@@ -18,12 +18,12 @@ namespace autofill {
 
 class GeneratedCreditCardBubbleCocoa : public GeneratedCreditCardBubbleView {
  public:
-  virtual ~GeneratedCreditCardBubbleCocoa();
+  ~GeneratedCreditCardBubbleCocoa() override;
 
   // GeneratedCreditCardBubbleView interface.
-  virtual void Show() OVERRIDE;
-  virtual void Hide() OVERRIDE;
-  virtual bool IsHiding() const OVERRIDE;
+  void Show() override;
+  void Hide() override;
+  bool IsHiding() const override;
 
   // Callbacks.
   void OnBubbleClosing();

@@ -230,6 +230,16 @@ SHA1HashValue X509Certificate::CalculateFingerprint(OSCertHandle cert) {
 }
 
 // static
+SHA256HashValue X509Certificate::CalculateFingerprint256(OSCertHandle cert) {
+  SHA256HashValue sha256;
+  unsigned int sha256_size = static_cast<unsigned int>(sizeof(sha256.data));
+  int ret = X509_digest(cert, EVP_sha256(), sha256.data, &sha256_size);
+  CHECK(ret);
+  CHECK_EQ(sha256_size, sizeof(sha256.data));
+  return sha256;
+}
+
+// static
 SHA1HashValue X509Certificate::CalculateCAFingerprint(
     const OSCertHandles& intermediates) {
   SHA1HashValue sha1;
@@ -437,6 +447,16 @@ bool X509Certificate::IsIssuedByEncoded(
   }
 
   return false;
+}
+
+// static
+bool X509Certificate::IsSelfSigned(OSCertHandle cert_handle) {
+  crypto::ScopedEVP_PKEY scoped_key(X509_get_pubkey(cert_handle));
+  if (!scoped_key)
+    return false;
+
+  // NOTE: X509_verify() returns 1 in case of success, 0 or -1 on error.
+  return X509_verify(cert_handle, scoped_key.get()) == 1;
 }
 
 }  // namespace net

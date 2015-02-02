@@ -5,11 +5,9 @@
 #ifndef CHROME_BROWSER_NET_SPDYPROXY_DATA_REDUCTION_PROXY_CHROME_SETTINGS_FACTORY_H_
 #define CHROME_BROWSER_NET_SPDYPROXY_DATA_REDUCTION_PROXY_CHROME_SETTINGS_FACTORY_H_
 
-#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings_factory.h"
-
 #include "base/compiler_specific.h"
 #include "base/memory/singleton.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_params.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "components/keyed_service/content/browser_context_keyed_service_factory.h"
 
 class DataReductionProxyChromeSettings;
@@ -36,11 +34,11 @@ class DataReductionProxyChromeSettingsFactory
 
   DataReductionProxyChromeSettingsFactory();
 
-  virtual ~DataReductionProxyChromeSettingsFactory();
+  ~DataReductionProxyChromeSettingsFactory() override;
 
   // BrowserContextKeyedServiceFactory:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* context) const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* context) const override;
 
   DISALLOW_COPY_AND_ASSIGN(DataReductionProxyChromeSettingsFactory);
 };

@@ -48,35 +48,32 @@ class ExtensionStorageMonitor : public KeyedService,
   };
 
   explicit ExtensionStorageMonitor(content::BrowserContext* context);
-  virtual ~ExtensionStorageMonitor();
+  ~ExtensionStorageMonitor() override;
 
  private:
   // content::NotificationObserver overrides:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   // ExtensionRegistryObserver overrides:
-  virtual void OnExtensionLoaded(content::BrowserContext* browser_context,
-                                 const Extension* extension) OVERRIDE;
-  virtual void OnExtensionUnloaded(
-      content::BrowserContext* browser_context,
-      const Extension* extension,
-      UnloadedExtensionInfo::Reason reason) OVERRIDE;
-  virtual void OnExtensionWillBeInstalled(
-      content::BrowserContext* browser_context,
-      const Extension* extension,
-      bool is_update,
-      bool from_ephemeral,
-      const std::string& old_name) OVERRIDE;
-  virtual void OnExtensionUninstalled(
-      content::BrowserContext* browser_context,
-      const Extension* extension,
-      extensions::UninstallReason reason) OVERRIDE;
+  void OnExtensionLoaded(content::BrowserContext* browser_context,
+                         const Extension* extension) override;
+  void OnExtensionUnloaded(content::BrowserContext* browser_context,
+                           const Extension* extension,
+                           UnloadedExtensionInfo::Reason reason) override;
+  void OnExtensionWillBeInstalled(content::BrowserContext* browser_context,
+                                  const Extension* extension,
+                                  bool is_update,
+                                  bool from_ephemeral,
+                                  const std::string& old_name) override;
+  void OnExtensionUninstalled(content::BrowserContext* browser_context,
+                              const Extension* extension,
+                              extensions::UninstallReason reason) override;
 
   // Overridden from ExtensionUninstallDialog::Delegate:
-  virtual void ExtensionUninstallAccepted() OVERRIDE;
-  virtual void ExtensionUninstallCanceled() OVERRIDE;
+  void ExtensionUninstallAccepted() override;
+  void ExtensionUninstallCanceled() override;
 
   std::string GetNotificationId(const std::string& extension_id);
 
@@ -126,9 +123,9 @@ class ExtensionStorageMonitor : public KeyedService,
   int64 initial_extension_threshold_;
   int64 initial_ephemeral_threshold_;
 
-  // The rate (in seconds) at which we would like to receive storage updates
+  // The rate at which we would like to receive storage updates
   // from QuotaManager. Overridden in tests.
-  int observer_rate_;
+  base::TimeDelta observer_rate_;
 
   // IDs of extensions that notifications were shown for.
   std::set<std::string> notified_extension_ids_;

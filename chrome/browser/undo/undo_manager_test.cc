@@ -36,12 +36,12 @@ class TestUndoService {
 class TestUndoOperation : public UndoOperation {
  public:
   explicit TestUndoOperation(TestUndoService* undo_service);
-  virtual ~TestUndoOperation();
+  ~TestUndoOperation() override;
 
   // UndoOperation:
-  virtual void Undo() OVERRIDE;
-  virtual int GetUndoLabelId() const OVERRIDE;
-  virtual int GetRedoLabelId() const OVERRIDE;
+  void Undo() override;
+  int GetUndoLabelId() const override;
+  int GetRedoLabelId() const override;
 
  private:
   TestUndoService* undo_service_;
@@ -85,8 +85,7 @@ void TestUndoService::Redo() {
 }
 
 void TestUndoService::TriggerOperation() {
-  scoped_ptr<TestUndoOperation> op(new TestUndoOperation(this));
-  undo_manager_.AddUndoOperation(op.PassAs<UndoOperation>());
+  undo_manager_.AddUndoOperation(make_scoped_ptr(new TestUndoOperation(this)));
 }
 
 void TestUndoService::RecordUndoCall() {
@@ -104,7 +103,7 @@ class TestObserver : public UndoManagerObserver {
   // Returns the number of state change callbacks
   int state_change_count() { return state_change_count_; }
 
-  virtual void OnUndoManagerStateChange() OVERRIDE { ++state_change_count_; }
+  void OnUndoManagerStateChange() override { ++state_change_count_; }
 
  private:
   int state_change_count_;

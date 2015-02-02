@@ -6,12 +6,6 @@
 
 namespace switches {
 
-// The ImageSkia looks up the resource pack with the closest available scale
-// factor instead of the actual device scale factor and then rescale on
-// ImageSkia side. This switch disables this feature.
-const char kDisableArbitraryScaleFactorInImageSkia[] =
-    "disable-arbitrary-scale-factor-in-image-skia";
-
 // Disables the HarfBuzz port of RenderText on all platforms.
 const char kDisableHarfBuzzRenderText[] = "disable-harfbuzz-rendertext";
 
@@ -25,5 +19,13 @@ const char kEnableWebkitTextSubpixelPositioning[] =
 
 // Overrides the device scale factor for the browser UI and the contents.
 const char kForceDeviceScaleFactor[] = "force-device-scale-factor";
+
+#if defined(OS_WIN)
+// Disables the DirectWrite font rendering system on windows.
+const char kDisableDirectWrite[] = "disable-direct-write";
+
+// Enables DirectWrite font rendering for general UI elements.
+const char kEnableDirectWriteForUI[] = "enable-directwrite-for-ui";
+#endif
 
 }  // namespace switches

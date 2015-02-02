@@ -210,7 +210,7 @@ WebInspector.ScriptSnippetModel.prototype = {
         var breakpointLocations = this._removeBreakpoints(uiSourceCode);
         this._releaseSnippetScript(uiSourceCode);
         this._restoreBreakpoints(uiSourceCode, breakpointLocations);
-        this._mappingForTarget.values().forEach(function(mapping) {mapping._restoreBreakpoints(uiSourceCode, breakpointLocations)});
+        this._mappingForTarget.valuesArray().forEach(function(mapping) {mapping._restoreBreakpoints(uiSourceCode, breakpointLocations)});
     },
 
     /**
@@ -376,7 +376,7 @@ WebInspector.ScriptSnippetModel.prototype = {
      */
     _releaseSnippetScript: function(uiSourceCode)
     {
-        this._mappingForTarget.values().forEach(function(mapping) {mapping._releaseSnippetScript(uiSourceCode)});
+        this._mappingForTarget.valuesArray().forEach(function(mapping) {mapping._releaseSnippetScript(uiSourceCode)});
     },
 
     /**
@@ -636,7 +636,7 @@ WebInspector.SnippetsProjectDelegate.prototype = {
      */
     addSnippet: function(name, contentProvider)
     {
-        return this.addContentProvider("", name, name, contentProvider);
+        return this.addContentProvider("", name, name, name, contentProvider);
     },
 
     /**

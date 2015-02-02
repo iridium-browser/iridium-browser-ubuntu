@@ -64,7 +64,7 @@ class FakeDiskMountManager : public chromeos::disks::MockDiskMountManager {
 
   virtual void UnmountDeviceRecursively(
       const std::string& device_path,
-      const UnmountDeviceRecursivelyCallbackType& callback) OVERRIDE;
+      const UnmountDeviceRecursivelyCallbackType& callback) override;
 
  private:
   DiskMap disks_;
@@ -75,21 +75,21 @@ class FakeImageWriterClient : public ImageWriterUtilityClient {
  public:
   FakeImageWriterClient();
 
-  virtual void Write(const ProgressCallback& progress_callback,
-                     const SuccessCallback& success_callback,
-                     const ErrorCallback& error_callback,
-                     const base::FilePath& source,
-                     const base::FilePath& target) OVERRIDE;
+  void Write(const ProgressCallback& progress_callback,
+             const SuccessCallback& success_callback,
+             const ErrorCallback& error_callback,
+             const base::FilePath& source,
+             const base::FilePath& target) override;
 
-  virtual void Verify(const ProgressCallback& progress_callback,
-                      const SuccessCallback& success_callback,
-                      const ErrorCallback& error_callback,
-                      const base::FilePath& source,
-                      const base::FilePath& target) OVERRIDE;
+  void Verify(const ProgressCallback& progress_callback,
+              const SuccessCallback& success_callback,
+              const ErrorCallback& error_callback,
+              const base::FilePath& source,
+              const base::FilePath& target) override;
 
-  virtual void Cancel(const CancelCallback& cancel_callback) OVERRIDE;
+  void Cancel(const CancelCallback& cancel_callback) override;
 
-  virtual void Shutdown() OVERRIDE;
+  void Shutdown() override;
 
   // Sets a callback for when a Write call is made.
   void SetWriteCallback(const base::Closure& write_callback);
@@ -106,7 +106,7 @@ class FakeImageWriterClient : public ImageWriterUtilityClient {
   void Cancel();
 
  private:
-  virtual ~FakeImageWriterClient();
+  ~FakeImageWriterClient() override;
 
   ProgressCallback progress_callback_;
   SuccessCallback success_callback_;
@@ -167,10 +167,10 @@ class ImageWriterTestUtils {
 class ImageWriterUnitTestBase : public testing::Test {
  protected:
   ImageWriterUnitTestBase();
-  virtual ~ImageWriterUnitTestBase();
+  ~ImageWriterUnitTestBase() override;
 
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
   ImageWriterTestUtils test_utils_;
 

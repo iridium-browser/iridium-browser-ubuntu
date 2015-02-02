@@ -23,21 +23,22 @@ class HidServiceLinux : public HidService,
  public:
   HidServiceLinux(scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner);
 
-  virtual scoped_refptr<HidConnection> Connect(const HidDeviceId& device_id)
-      OVERRIDE;
+  void Connect(const HidDeviceId& device_id,
+               const ConnectCallback& callback) override;
 
   // Implements DeviceMonitorLinux::Observer:
-  virtual void OnDeviceAdded(udev_device* device) OVERRIDE;
-  virtual void OnDeviceRemoved(udev_device* device) OVERRIDE;
+  void OnDeviceAdded(udev_device* device) override;
+  void OnDeviceRemoved(udev_device* device) override;
 
  private:
-  virtual ~HidServiceLinux();
+  ~HidServiceLinux() override;
 
-  void OnRequestAccessComplete(
-      const std::string& path,
-      scoped_ptr<HidDeviceInfo> device_info,
-      bool success);
+  void FinishConnect(const HidDeviceId& device_id,
+                     const std::string device_node,
+                     const ConnectCallback& callback,
+                     bool success);
 
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner_;
 
   base::WeakPtrFactory<HidServiceLinux> weak_factory_;

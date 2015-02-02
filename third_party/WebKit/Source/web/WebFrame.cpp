@@ -5,6 +5,8 @@
 #include "config.h"
 #include "public/web/WebFrame.h"
 
+#include "core/frame/FrameHost.h"
+#include "core/frame/FrameView.h"
 #include "core/frame/RemoteFrame.h"
 #include "core/html/HTMLFrameOwnerElement.h"
 #include "platform/UserGestureIndicator.h"
@@ -41,10 +43,6 @@ bool WebFrame::swap(WebFrame* frame)
     if (!oldFrame->host())
         return false;
 
-    // The frame being swapped in should not have a Frame associated
-    // with it yet.
-    ASSERT(!toCoreFrame(frame));
-
     if (m_parent) {
         if (m_parent->m_firstChild == this)
             m_parent->m_firstChild = frame;
@@ -78,7 +76,15 @@ bool WebFrame::swap(WebFrame* frame)
     // increments of connected subframes.
     FrameOwner* owner = oldFrame->owner();
     oldFrame->disconnectOwnerElement();
-    if (frame->isWebLocalFrame()) {
+    if (Frame* newFrame = toCoreFrame(frame)) {
+        ASSERT(owner == newFrame->owner());
+        if (owner->isLocal()) {
+            HTMLFrameOwnerElement* ownerElement = toHTMLFrameOwnerElement(owner);
+            ownerElement->setContentFrame(*newFrame);
+            if (newFrame->isLocalFrame())
+                ownerElement->setWidget(toLocalFrame(newFrame)->view());
+        }
+    } else if (frame->isWebLocalFrame()) {
         toWebLocalFrameImpl(frame)->initializeCoreFrame(oldFrame->host(), owner, oldFrame->tree().name(), nullAtom);
     } else {
         toWebRemoteFrameImpl(frame)->initializeCoreFrame(oldFrame->host(), owner, oldFrame->tree().name());
@@ -122,6 +128,7 @@ void WebFrame::appendChild(WebFrame* child)
     }
 
     toCoreFrame(this)->tree().invalidateScopedChildCount();
+    toCoreFrame(this)->host()->incrementSubframeCount();
 }
 
 void WebFrame::removeChild(WebFrame* child)
@@ -141,6 +148,12 @@ void WebFrame::removeChild(WebFrame* child)
     child->m_previousSibling = child->m_nextSibling = 0;
 
     toCoreFrame(this)->tree().invalidateScopedChildCount();
+    toCoreFrame(this)->host()->decrementSubframeCount();
+}
+
+void WebFrame::setParent(WebFrame* parent)
+{
+    m_parent = parent;
 }
 
 WebFrame* WebFrame::parent() const
@@ -226,20 +239,44 @@ WebFrame::~WebFrame()
     m_openedFrameTracker.reset(0);
 }
 
-void WebFrame::traceChildren(Visitor* visitor, WebFrame* frame)
-{
 #if ENABLE(OILPAN)
-    // Trace the children frames.
-    WebFrame* child = frame ? frame->firstChild() : 0;
-    while (child) {
-        if (child->isWebLocalFrame())
-            visitor->trace(toWebLocalFrameImpl(child));
-        else
-            visitor->trace(toWebRemoteFrameImpl(child));
+void WebFrame::traceFrame(Visitor* visitor, WebFrame* frame)
+{
+    if (!frame)
+        return;
 
-        child = child->nextSibling();
-    }
-#endif
+    if (frame->isWebLocalFrame())
+        visitor->trace(toWebLocalFrameImpl(frame));
+    else
+        visitor->trace(toWebRemoteFrameImpl(frame));
 }
+
+void WebFrame::traceFrames(Visitor* visitor, WebFrame* frame)
+{
+    ASSERT(frame);
+    traceFrame(visitor, frame->m_parent);
+    for (WebFrame* child = frame->firstChild(); child; child = child->nextSibling())
+        traceFrame(visitor, child);
+    // m_opener is a weak reference.
+    frame->m_openedFrameTracker->traceFrames(visitor);
+}
+
+bool WebFrame::isFrameAlive(Visitor* visitor, const WebFrame* frame)
+{
+    if (!frame)
+        return true;
+
+    if (frame->isWebLocalFrame())
+        return visitor->isAlive(toWebLocalFrameImpl(frame));
+
+    return visitor->isAlive(toWebRemoteFrameImpl(frame));
+}
+
+void WebFrame::clearWeakFrames(Visitor* visitor)
+{
+    if (!isFrameAlive(visitor, m_opener))
+        m_opener = nullptr;
+}
+#endif
 
 } // namespace blink

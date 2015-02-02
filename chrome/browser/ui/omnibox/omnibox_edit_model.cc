@@ -26,7 +26,6 @@
 #include "chrome/browser/command_updater.h"
 #include "chrome/browser/extensions/api/omnibox/omnibox_api.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
-#include "chrome/browser/google/google_url_tracker_factory.h"
 #include "chrome/browser/net/predictor.h"
 #include "chrome/browser/omnibox/omnibox_log.h"
 #include "chrome/browser/predictors/autocomplete_action_predictor.h"
@@ -53,7 +52,6 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "components/bookmarks/browser/bookmark_model.h"
-#include "components/google/core/browser/google_url_tracker.h"
 #include "components/metrics/proto/omnibox_event.pb.h"
 #include "components/omnibox/autocomplete_provider.h"
 #include "components/omnibox/keyword_provider.h"
@@ -583,8 +581,7 @@ void OmniboxEditModel::StartAutocomplete(
       (delegate_->CurrentPageExists() && view_->IsIndicatingQueryRefinement()) ?
       delegate_->GetURL() : GURL();
   input_ = AutocompleteInput(
-      user_text_, cursor_position, base::string16(), current_url,
-      ClassifyPage(),
+      user_text_, cursor_position, std::string(), current_url, ClassifyPage(),
       prevent_inline_autocomplete || just_deleted_text_ ||
           (has_selected_text && inline_autocomplete_text_.empty()) ||
           (paste_state_ != NONE),
@@ -649,7 +646,7 @@ void OmniboxEditModel::AcceptInput(WindowOpenDisposition disposition,
     input_ = AutocompleteInput(
       has_temporary_text_ ?
           UserTextFromDisplayText(view_->GetText())  : input_.text(),
-      input_.cursor_position(), base::ASCIIToUTF16("com"), GURL(),
+      input_.cursor_position(), "com", GURL(),
       input_.current_page_classification(),
       input_.prevent_inline_autocomplete(), input_.prefer_keyword(),
       input_.allow_exact_keyword_match(), input_.want_asynchronous_matches(),
@@ -687,17 +684,6 @@ void OmniboxEditModel::AcceptInput(WindowOpenDisposition disposition,
     // rather than a normal typed URL, so it doesn't get inline autocompleted
     // as aggressively later.
     match.transition = ui::PAGE_TRANSITION_LINK;
-  }
-
-  TemplateURLService* service =
-      TemplateURLServiceFactory::GetForProfile(profile_);
-  const TemplateURL* template_url = match.GetTemplateURL(service, false);
-  if (template_url && template_url->url_ref().HasGoogleBaseURLs(
-          UIThreadSearchTermsData(profile_))) {
-    GoogleURLTracker* tracker =
-        GoogleURLTrackerFactory::GetForProfile(profile_);
-    if (tracker)
-      tracker->SearchCommitted();
   }
 
   DCHECK(popup_model());
@@ -949,7 +935,7 @@ void OmniboxEditModel::OnSetFocus(bool control_down) {
     // the actual underlying current URL, e.g. if we're on the NTP and the
     // |permanent_text_| is empty.
     autocomplete_controller()->StartZeroSuggest(AutocompleteInput(
-        permanent_text_, base::string16::npos, base::string16(),
+        permanent_text_, base::string16::npos, std::string(),
         delegate_->GetURL(), ClassifyPage(), false, false, true, true,
         ChromeAutocompleteSchemeClassifier(profile_)));
   }

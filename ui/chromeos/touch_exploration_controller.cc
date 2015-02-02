@@ -768,8 +768,8 @@ void TouchExplorationController::OnPassthroughTimerFired() {
 }
 
 void TouchExplorationController::DispatchEvent(ui::Event* event) {
-  ui::EventDispatchDetails result ALLOW_UNUSED =
-      root_window_->GetHost()->dispatcher()->OnEventFromSource(event);
+  ignore_result(
+      root_window_->GetHost()->dispatcher()->OnEventFromSource(event));
 }
 
 // This is an override for a function that is only called for timer-based events
@@ -1149,7 +1149,7 @@ void TouchExplorationController::InitializeSwipeGestureMaps() {
       BindKeyEventWithFlags(VKEY_BROWSER_REFRESH, ui::EF_NONE);
 }
 
-const float TouchExplorationController::GetSplitTapTouchSlop() {
+float TouchExplorationController::GetSplitTapTouchSlop() {
   return gesture_detector_config_.touch_slop * 3;
 }
 

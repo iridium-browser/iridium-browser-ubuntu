@@ -7,11 +7,13 @@
 #include <set>
 
 #include "base/basictypes.h"
+#include "base/bind.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/time/clock.h"
 #include "base/time/time.h"
+#include "base/timer/timer.h"
 #include "google_apis/gcm/base/mcs_util.h"
 #include "google_apis/gcm/base/socket_stream.h"
 #include "google_apis/gcm/engine/connection_factory.h"
@@ -157,7 +159,8 @@ MCSClient::MCSClient(const std::string& version_string,
                      base::Clock* clock,
                      ConnectionFactory* connection_factory,
                      GCMStore* gcm_store,
-                     GCMStatsRecorder* recorder)
+                     GCMStatsRecorder* recorder,
+                     scoped_ptr<base::Timer> heartbeat_timer)
     : version_string_(version_string),
       clock_(clock),
       state_(UNINITIALIZED),
@@ -170,6 +173,7 @@ MCSClient::MCSClient(const std::string& version_string,
       stream_id_out_(0),
       stream_id_in_(0),
       gcm_store_(gcm_store),
+      heartbeat_manager_(heartbeat_timer.Pass()),
       recorder_(recorder),
       weak_ptr_factory_(this) {
 }
@@ -565,9 +569,7 @@ void MCSClient::HandleMCSDataMesssage(
   }
 
   if (send) {
-    SendMessage(
-        MCSMessage(kDataMessageStanzaTag,
-                   response.PassAs<const google::protobuf::MessageLite>()));
+    SendMessage(MCSMessage(kDataMessageStanzaTag, response.Pass()));
   }
 }
 
@@ -619,9 +621,7 @@ void MCSClient::HandlePacketFromWire(
 
   if (unacked_server_ids_.size() > 0 &&
       unacked_server_ids_.size() % kUnackedMessageBeforeStreamAck == 0) {
-    SendMessage(MCSMessage(kIqStanzaTag,
-                           BuildStreamAck().
-                               PassAs<const google::protobuf::MessageLite>()));
+    SendMessage(MCSMessage(kIqStanzaTag, BuildStreamAck()));
   }
 
   // The connection is alive, treat this message as a heartbeat ack.
@@ -659,9 +659,7 @@ void MCSClient::HandlePacketFromWire(
       base::MessageLoop::current()->PostTask(
           FROM_HERE,
           base::Bind(message_received_callback_,
-                     MCSMessage(tag,
-                                protobuf.PassAs<
-                                    const google::protobuf::MessageLite>())));
+                     MCSMessage(tag, protobuf.Pass())));
 
       // If there are pending messages, attempt to send one.
       if (!to_send_.empty()) {
@@ -732,9 +730,7 @@ void MCSClient::HandlePacketFromWire(
       base::MessageLoop::current()->PostTask(
           FROM_HERE,
           base::Bind(message_received_callback_,
-                     MCSMessage(tag,
-                                protobuf.PassAs<
-                                    const google::protobuf::MessageLite>())));
+                     MCSMessage(tag, protobuf.Pass())));
       return;
     }
     default:

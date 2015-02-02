@@ -54,6 +54,8 @@ using ui::GetLastEGLErrorString;
 
 namespace gfx {
 
+unsigned int NativeViewGLSurfaceEGL::current_swap_generation_ = 0;
+
 namespace {
 
 EGLConfig g_config;
@@ -74,12 +76,12 @@ class EGLSyncControlVSyncProvider
         surface_(surface) {
   }
 
-  virtual ~EGLSyncControlVSyncProvider() { }
+  ~EGLSyncControlVSyncProvider() override {}
 
  protected:
-  virtual bool GetSyncValues(int64* system_time,
-                             int64* media_stream_counter,
-                             int64* swap_buffer_counter) OVERRIDE {
+  bool GetSyncValues(int64* system_time,
+                     int64* media_stream_counter,
+                     int64* swap_buffer_counter) override {
     uint64 u_system_time, u_media_stream_counter, u_swap_buffer_counter;
     bool result = eglGetSyncValuesCHROMIUM(
         g_display, surface_, &u_system_time,
@@ -92,7 +94,7 @@ class EGLSyncControlVSyncProvider
     return result;
   }
 
-  virtual bool GetMscRate(int32* numerator, int32* denominator) OVERRIDE {
+  bool GetMscRate(int32* numerator, int32* denominator) override {
     return false;
   }
 
@@ -286,7 +288,9 @@ NativeViewGLSurfaceEGL::NativeViewGLSurfaceEGL(EGLNativeWindowType window)
       surface_(NULL),
       supports_post_sub_buffer_(false),
       config_(NULL),
-      size_(1, 1) {
+      size_(1, 1),
+      swap_interval_(1),
+      swap_generation_(0) {
 #if defined(OS_ANDROID)
   if (window)
     ANativeWindow_acquire(window);
@@ -450,11 +454,36 @@ bool NativeViewGLSurfaceEGL::SwapBuffers() {
       "width", GetSize().width(),
       "height", GetSize().height());
 
+#if defined(OS_WIN)
+  bool force_no_vsync = false;
+  if (swap_interval_ != 0) {
+    // This code is a simple way of enforcing that only one surface actually
+    // vsyncs per frame. This provides single window cases a stable refresh
+    // while allowing multi-window cases to not slow down due to multiple syncs
+    // on a single thread. A better way to fix this problem would be to have
+    // each surface present on its own thread.
+    if (current_swap_generation_ == swap_generation_) {
+      current_swap_generation_++;
+    } else {
+      force_no_vsync = true;
+      eglSwapInterval(GetDisplay(), 0);
+    }
+
+    swap_generation_ = current_swap_generation_;
+  }
+#endif
+
   if (!eglSwapBuffers(GetDisplay(), surface_)) {
     DVLOG(1) << "eglSwapBuffers failed with error "
              << GetLastEGLErrorString();
     return false;
   }
+
+#if defined(OS_WIN)
+  if (force_no_vsync) {
+    eglSwapInterval(GetDisplay(), swap_interval_);
+  }
+#endif
 
   return true;
 }
@@ -528,6 +557,10 @@ bool NativeViewGLSurfaceEGL::PostSubBuffer(
 
 VSyncProvider* NativeViewGLSurfaceEGL::GetVSyncProvider() {
   return vsync_provider_.get();
+}
+
+void NativeViewGLSurfaceEGL::SetSwapInterval(int interval) {
+  swap_interval_ = interval;
 }
 
 NativeViewGLSurfaceEGL::~NativeViewGLSurfaceEGL() {
@@ -679,6 +712,10 @@ EGLConfig SurfacelessEGL::GetConfig() {
 }
 
 bool SurfacelessEGL::IsOffscreen() {
+  return true;
+}
+
+bool SurfacelessEGL::IsSurfaceless() const {
   return true;
 }
 

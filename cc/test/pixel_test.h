@@ -8,7 +8,7 @@
 #include "cc/quads/render_pass.h"
 #include "cc/test/pixel_comparator.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/gl/gl_implementation.h"
 
 #ifndef CC_TEST_PIXEL_TEST_H_
@@ -21,7 +21,8 @@ class FakeOutputSurfaceClient;
 class OutputSurface;
 class ResourceProvider;
 class SoftwareRenderer;
-class SharedBitmapManager;
+class TestGpuMemoryBufferManager;
+class TestSharedBitmapManager;
 
 class PixelTest : public testing::Test, RendererClient {
  protected:
@@ -38,13 +39,20 @@ class PixelTest : public testing::Test, RendererClient {
       const base::FilePath& ref_file,
       const PixelComparator& comparator);
 
+  bool RunPixelTestWithReadbackTargetAndArea(RenderPassList* pass_list,
+                                             RenderPass* target,
+                                             const base::FilePath& ref_file,
+                                             const PixelComparator& comparator,
+                                             const gfx::Rect* copy_rect);
+
   LayerTreeSettings settings_;
   gfx::Size device_viewport_size_;
   bool disable_picture_quad_image_filtering_;
   class PixelTestRendererClient;
   scoped_ptr<FakeOutputSurfaceClient> output_surface_client_;
   scoped_ptr<OutputSurface> output_surface_;
-  scoped_ptr<SharedBitmapManager> shared_bitmap_manager_;
+  scoped_ptr<TestSharedBitmapManager> shared_bitmap_manager_;
+  scoped_ptr<TestGpuMemoryBufferManager> gpu_memory_buffer_manager_;
   scoped_ptr<BlockingTaskRunner> main_thread_task_runner_;
   scoped_ptr<ResourceProvider> resource_provider_;
   scoped_ptr<TextureMailboxDeleter> texture_mailbox_deleter_;
@@ -53,7 +61,7 @@ class PixelTest : public testing::Test, RendererClient {
   gfx::Vector2d external_device_viewport_offset_;
   gfx::Rect external_device_clip_rect_;
 
-  void SetUpGLRenderer(bool use_skia_gpu_backend);
+  void SetUpGLRenderer(bool use_skia_gpu_backend, bool flipped_output_surface);
   void SetUpSoftwareRenderer();
 
   void ForceExpandedViewport(const gfx::Size& surface_expansion);
@@ -62,7 +70,7 @@ class PixelTest : public testing::Test, RendererClient {
   void EnableExternalStencilTest();
 
   // RendererClient implementation.
-  virtual void SetFullRootLayerDamage() OVERRIDE {}
+  void SetFullRootLayerDamage() override {}
 
  private:
   void ReadbackResult(base::Closure quit_run_loop,
@@ -85,7 +93,7 @@ class RendererPixelTest : public PixelTest {
   bool ExpandedViewport() const;
 
  protected:
-  virtual void SetUp() OVERRIDE;
+  virtual void SetUp() override;
 };
 
 // Wrappers to differentiate renderers where the the output surface and viewport
@@ -115,9 +123,25 @@ class SoftwareRendererWithExpandedViewport : public SoftwareRenderer {
       : SoftwareRenderer(client, settings, output_surface, resource_provider) {}
 };
 
+class GLRendererWithFlippedSurface : public GLRenderer {
+ public:
+  GLRendererWithFlippedSurface(RendererClient* client,
+                               const LayerTreeSettings* settings,
+                               OutputSurface* output_surface,
+                               ResourceProvider* resource_provider,
+                               TextureMailboxDeleter* texture_mailbox_deleter,
+                               int highp_threshold_min)
+      : GLRenderer(client,
+                   settings,
+                   output_surface,
+                   resource_provider,
+                   texture_mailbox_deleter,
+                   highp_threshold_min) {}
+};
+
 template<>
 inline void RendererPixelTest<GLRenderer>::SetUp() {
-  SetUpGLRenderer(false);
+  SetUpGLRenderer(false, false);
 }
 
 template<>
@@ -132,7 +156,7 @@ inline bool RendererPixelTest<GLRenderer>::ExpandedViewport() const {
 
 template<>
 inline void RendererPixelTest<GLRendererWithExpandedViewport>::SetUp() {
-  SetUpGLRenderer(false);
+  SetUpGLRenderer(false, false);
   ForceExpandedViewport(gfx::Size(50, 50));
   ForceViewportOffset(gfx::Vector2d(10, 20));
 }
@@ -149,7 +173,24 @@ RendererPixelTest<GLRendererWithExpandedViewport>::ExpandedViewport() const {
   return true;
 }
 
-template<>
+template <>
+inline void RendererPixelTest<GLRendererWithFlippedSurface>::SetUp() {
+  SetUpGLRenderer(false, true);
+}
+
+template <>
+inline bool RendererPixelTest<GLRendererWithFlippedSurface>::UseSkiaGPUBackend()
+    const {
+  return false;
+}
+
+template <>
+inline bool RendererPixelTest<GLRendererWithFlippedSurface>::ExpandedViewport()
+    const {
+  return true;
+}
+
+template <>
 inline void RendererPixelTest<SoftwareRenderer>::SetUp() {
   SetUpSoftwareRenderer();
 }

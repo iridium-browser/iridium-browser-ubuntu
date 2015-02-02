@@ -35,7 +35,7 @@
 #include "talk/app/webrtc/mediaconstraintsinterface.h"
 #include "talk/app/webrtc/mediastreamhandler.h"
 #include "talk/app/webrtc/streamcollection.h"
-#include "talk/p2p/client/basicportallocator.h"
+#include "webrtc/p2p/client/basicportallocator.h"
 #include "talk/session/media/channelmanager.h"
 #include "webrtc/base/logging.h"
 #include "webrtc/base/stringencode.h"
@@ -350,9 +350,10 @@ bool PeerConnection::DoInitialize(
 
   // To handle both internal and externally created port allocator, we will
   // enable BUNDLE here.
-  int portallocator_flags = cricket::PORTALLOCATOR_ENABLE_BUNDLE |
-                            cricket::PORTALLOCATOR_ENABLE_SHARED_UFRAG |
-                            cricket::PORTALLOCATOR_ENABLE_SHARED_SOCKET;
+  int portallocator_flags = port_allocator_->flags();
+  portallocator_flags |= cricket::PORTALLOCATOR_ENABLE_BUNDLE |
+                         cricket::PORTALLOCATOR_ENABLE_SHARED_UFRAG |
+                         cricket::PORTALLOCATOR_ENABLE_SHARED_SOCKET;
   bool value;
   // If IPv6 flag was specified, we'll not override it by experiment.
   if (FindConstraint(
@@ -403,8 +404,7 @@ PeerConnection::remote_streams() {
   return mediastream_signaling_->remote_streams();
 }
 
-bool PeerConnection::AddStream(MediaStreamInterface* local_stream,
-                               const MediaConstraintsInterface* constraints) {
+bool PeerConnection::AddStream(MediaStreamInterface* local_stream) {
   if (IsClosed()) {
     return false;
   }
@@ -412,7 +412,6 @@ bool PeerConnection::AddStream(MediaStreamInterface* local_stream,
                               local_stream))
     return false;
 
-  // TODO(perkj): Implement support for MediaConstraints in AddStream.
   if (!mediastream_signaling_->AddLocalStream(local_stream)) {
     return false;
   }

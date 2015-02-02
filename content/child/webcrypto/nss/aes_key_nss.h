@@ -36,35 +36,32 @@ class AesAlgorithm : public AlgorithmImplementation {
   AesAlgorithm(CK_MECHANISM_TYPE import_mechanism,
                const std::string& jwk_suffix);
 
-  virtual Status VerifyKeyUsagesBeforeGenerateKey(
-      blink::WebCryptoKeyUsageMask usage_mask) const OVERRIDE;
+  Status GenerateKey(const blink::WebCryptoAlgorithm& algorithm,
+                     bool extractable,
+                     blink::WebCryptoKeyUsageMask usages,
+                     GenerateKeyResult* result) const override;
 
-  virtual Status GenerateSecretKey(const blink::WebCryptoAlgorithm& algorithm,
-                                   bool extractable,
-                                   blink::WebCryptoKeyUsageMask usage_mask,
-                                   blink::WebCryptoKey* key) const OVERRIDE;
-
-  virtual Status VerifyKeyUsagesBeforeImportKey(
+  Status VerifyKeyUsagesBeforeImportKey(
       blink::WebCryptoKeyFormat format,
-      blink::WebCryptoKeyUsageMask usage_mask) const OVERRIDE;
+      blink::WebCryptoKeyUsageMask usages) const override;
 
-  virtual Status ImportKeyRaw(const CryptoData& key_data,
-                              const blink::WebCryptoAlgorithm& algorithm,
-                              bool extractable,
-                              blink::WebCryptoKeyUsageMask usage_mask,
-                              blink::WebCryptoKey* key) const OVERRIDE;
+  Status ImportKeyRaw(const CryptoData& key_data,
+                      const blink::WebCryptoAlgorithm& algorithm,
+                      bool extractable,
+                      blink::WebCryptoKeyUsageMask usages,
+                      blink::WebCryptoKey* key) const override;
 
-  virtual Status ImportKeyJwk(const CryptoData& key_data,
-                              const blink::WebCryptoAlgorithm& algorithm,
-                              bool extractable,
-                              blink::WebCryptoKeyUsageMask usage_mask,
-                              blink::WebCryptoKey* key) const OVERRIDE;
+  Status ImportKeyJwk(const CryptoData& key_data,
+                      const blink::WebCryptoAlgorithm& algorithm,
+                      bool extractable,
+                      blink::WebCryptoKeyUsageMask usages,
+                      blink::WebCryptoKey* key) const override;
 
-  virtual Status ExportKeyRaw(const blink::WebCryptoKey& key,
-                              std::vector<uint8_t>* buffer) const OVERRIDE;
+  Status ExportKeyRaw(const blink::WebCryptoKey& key,
+                      std::vector<uint8_t>* buffer) const override;
 
-  virtual Status ExportKeyJwk(const blink::WebCryptoKey& key,
-                              std::vector<uint8_t>* buffer) const OVERRIDE;
+  Status ExportKeyJwk(const blink::WebCryptoKey& key,
+                      std::vector<uint8_t>* buffer) const override;
 
  private:
   const CK_MECHANISM_TYPE import_mechanism_;

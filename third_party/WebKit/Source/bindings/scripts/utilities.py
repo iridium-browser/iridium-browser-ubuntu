@@ -17,11 +17,6 @@ import subprocess
 KNOWN_COMPONENTS = frozenset(['core', 'modules'])
 
 
-class IdlBadFilenameError(Exception):
-    """Raised if an IDL filename disagrees with the interface name in the file."""
-    pass
-
-
 def idl_filename_to_interface_name(idl_filename):
     # interface name is the root of the basename: InterfaceName.idl
     return os.path.splitext(os.path.basename(idl_filename))[0]
@@ -31,10 +26,27 @@ def idl_filename_to_component(idl_filename):
     path = os.path.dirname(os.path.realpath(idl_filename))
     while path:
         dirname, basename = os.path.split(path)
+        if not basename:
+            break
         if basename.lower() in KNOWN_COMPONENTS:
             return basename.lower()
         path = dirname
-    raise 'Unknown component type for %s' % idl_filename
+    raise Exception('Unknown component type for %s' % idl_filename)
+
+
+# See whether "component" can depend on "dependency" or not:
+# Suppose that we have interface X and Y:
+# - if X is a partial interface and Y is the original interface,
+#   use is_valid_component_dependency(X, Y).
+# - if X implements Y, use is_valid_component_dependency(X, Y)
+# Suppose that X is a cpp file and Y is a header file:
+# - if X includes Y, use is_valid_component_dependency(X, Y)
+def is_valid_component_dependency(component, dependency):
+    assert component in KNOWN_COMPONENTS
+    assert dependency in KNOWN_COMPONENTS
+    if component == 'core' and dependency == 'modules':
+        return False
+    return True
 
 
 ################################################################################
@@ -104,7 +116,7 @@ def write_pickle_file(pickle_filename, data, only_if_changed):
             try:
                 if pickle.load(pickle_file) == data:
                     return
-            except (EOFError, pickle.UnpicklingError):
+            except Exception:
                 # If trouble unpickling, overwrite
                 pass
     with open(pickle_filename, 'w') as pickle_file:
@@ -119,63 +131,9 @@ def write_pickle_file(pickle_filename, data, only_if_changed):
 # Leading and trailing context (e.g. following '{') used to avoid false matches.
 ################################################################################
 
-def get_partial_interface_name_from_idl(file_contents):
-    match = re.search(r'partial\s+interface\s+(\w+)\s*{', file_contents)
-    return match and match.group(1)
-
-
-def get_implements_from_idl(file_contents, interface_name):
-    """Returns lists of implementing and implemented interfaces.
-
-    Rule is: identifier-A implements identifier-B;
-    i.e., implement*ing* implements implement*ed*;
-    http://www.w3.org/TR/WebIDL/#idl-implements-statements
-
-    Returns two lists of interfaces: identifier-As and identifier-Bs.
-    An 'implements' statements can be present in the IDL file for either the
-    implementing or the implemented interface, but not other files.
-    """
-    implements_re = (r'^\s*'
-                     r'(\w+)\s+'
-                     r'implements\s+'
-                     r'(\w+)\s*'
-                     r';')
-    implements_matches = re.finditer(implements_re, file_contents, re.MULTILINE)
-    implements_pairs = [match.groups() for match in implements_matches]
-
-    foreign_implements = [pair for pair in implements_pairs
-                          if interface_name not in pair]
-    if foreign_implements:
-        left, right = foreign_implements.pop()
-        raise IdlBadFilenameError(
-                'implements statement found in unrelated IDL file.\n'
-                'Statement is:\n'
-                '    %s implements %s;\n'
-                'but filename is unrelated "%s.idl"' %
-                (left, right, interface_name))
-
-    return (
-        [left for left, right in implements_pairs if right == interface_name],
-        [right for left, right in implements_pairs if left == interface_name])
-
-
 def is_callback_interface_from_idl(file_contents):
     match = re.search(r'callback\s+interface\s+\w+\s*{', file_contents)
     return bool(match)
-
-
-def is_dictionary_from_idl(file_contents):
-    match = re.search(r'dictionary\s+\w+\s*{', file_contents)
-    return bool(match)
-
-
-def get_parent_interface(file_contents):
-    match = re.search(r'interface\s+'
-                      r'\w+\s*'
-                      r':\s*(\w+)\s*'
-                      r'{',
-                      file_contents)
-    return match and match.group(1)
 
 
 def get_interface_extended_attributes_from_idl(file_contents):
@@ -208,14 +166,3 @@ def get_interface_extended_attributes_from_idl(file_contents):
         name, _, value = map(string.strip, part.partition('='))
         extended_attributes[name] = value
     return extended_attributes
-
-
-def get_put_forward_interfaces_from_idl(file_contents):
-    put_forwards_pattern = (r'\[[^\]]*PutForwards=[^\]]*\]\s+'
-                            r'readonly\s+'
-                            r'attribute\s+'
-                            r'(\w+)')
-    return sorted(set(match.group(1)
-                      for match in re.finditer(put_forwards_pattern,
-                                               file_contents,
-                                               flags=re.DOTALL)))

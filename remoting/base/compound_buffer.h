@@ -103,15 +103,15 @@ class CompoundBufferInputStream
  public:
   // Caller keeps ownership of |buffer|. |buffer| must be locked.
   explicit CompoundBufferInputStream(const CompoundBuffer* buffer);
-  virtual ~CompoundBufferInputStream();
+  ~CompoundBufferInputStream() override;
 
   int position() const { return position_; }
 
   // google::protobuf::io::ZeroCopyInputStream interface.
-  virtual bool Next(const void** data, int* size) OVERRIDE;
-  virtual void BackUp(int count) OVERRIDE;
-  virtual bool Skip(int count) OVERRIDE;
-  virtual int64 ByteCount() const OVERRIDE;
+  bool Next(const void** data, int* size) override;
+  void BackUp(int count) override;
+  bool Skip(int count) override;
+  int64 ByteCount() const override;
 
  private:
   const CompoundBuffer* buffer_;

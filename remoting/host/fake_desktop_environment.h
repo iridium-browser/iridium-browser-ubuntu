@@ -16,30 +16,28 @@ namespace remoting {
 class FakeInputInjector : public InputInjector {
  public:
   FakeInputInjector();
-  virtual ~FakeInputInjector();
+  ~FakeInputInjector() override;
 
-  virtual void Start(
-      scoped_ptr<protocol::ClipboardStub> client_clipboard) OVERRIDE;
-  virtual void InjectKeyEvent(const protocol::KeyEvent& event) OVERRIDE;
-  virtual void InjectTextEvent(const protocol::TextEvent& event) OVERRIDE;
-  virtual void InjectMouseEvent(const protocol::MouseEvent& event) OVERRIDE;
-  virtual void InjectClipboardEvent(
-      const protocol::ClipboardEvent& event) OVERRIDE;
+  void Start(scoped_ptr<protocol::ClipboardStub> client_clipboard) override;
+  void InjectKeyEvent(const protocol::KeyEvent& event) override;
+  void InjectTextEvent(const protocol::TextEvent& event) override;
+  void InjectMouseEvent(const protocol::MouseEvent& event) override;
+  void InjectClipboardEvent(const protocol::ClipboardEvent& event) override;
 };
 
 class FakeScreenControls : public ScreenControls {
  public:
   FakeScreenControls();
-  virtual ~FakeScreenControls();
+  ~FakeScreenControls() override;
 
   // ScreenControls implementation.
-  virtual void SetScreenResolution(const ScreenResolution& resolution) OVERRIDE;
+  void SetScreenResolution(const ScreenResolution& resolution) override;
 };
 
 class FakeDesktopEnvironment : public DesktopEnvironment {
  public:
   FakeDesktopEnvironment();
-  virtual ~FakeDesktopEnvironment();
+  ~FakeDesktopEnvironment() override;
 
   // Sets frame generator to be used for FakeDesktopCapturer created by
   // FakeDesktopEnvironment.
@@ -49,16 +47,15 @@ class FakeDesktopEnvironment : public DesktopEnvironment {
   }
 
   // DesktopEnvironment implementation.
-  virtual scoped_ptr<AudioCapturer> CreateAudioCapturer() OVERRIDE;
-  virtual scoped_ptr<InputInjector> CreateInputInjector() OVERRIDE;
-  virtual scoped_ptr<ScreenControls> CreateScreenControls() OVERRIDE;
-  virtual scoped_ptr<webrtc::DesktopCapturer> CreateVideoCapturer() OVERRIDE;
-  virtual scoped_ptr<webrtc::MouseCursorMonitor> CreateMouseCursorMonitor()
-      OVERRIDE;
-  virtual std::string GetCapabilities() const OVERRIDE;
-  virtual void SetCapabilities(const std::string& capabilities) OVERRIDE;
-  virtual scoped_ptr<GnubbyAuthHandler> CreateGnubbyAuthHandler(
-      protocol::ClientStub* client_stub) OVERRIDE;
+  scoped_ptr<AudioCapturer> CreateAudioCapturer() override;
+  scoped_ptr<InputInjector> CreateInputInjector() override;
+  scoped_ptr<ScreenControls> CreateScreenControls() override;
+  scoped_ptr<webrtc::DesktopCapturer> CreateVideoCapturer() override;
+  scoped_ptr<webrtc::MouseCursorMonitor> CreateMouseCursorMonitor() override;
+  std::string GetCapabilities() const override;
+  void SetCapabilities(const std::string& capabilities) override;
+  scoped_ptr<GnubbyAuthHandler> CreateGnubbyAuthHandler(
+      protocol::ClientStub* client_stub) override;
 
  private:
   FakeDesktopCapturer::FrameGenerator frame_generator_;
@@ -69,7 +66,7 @@ class FakeDesktopEnvironment : public DesktopEnvironment {
 class FakeDesktopEnvironmentFactory : public DesktopEnvironmentFactory {
  public:
   FakeDesktopEnvironmentFactory();
-  virtual ~FakeDesktopEnvironmentFactory();
+  ~FakeDesktopEnvironmentFactory() override;
 
   // Sets frame generator to be used for FakeDesktopCapturer created by
   // FakeDesktopEnvironment.
@@ -79,11 +76,11 @@ class FakeDesktopEnvironmentFactory : public DesktopEnvironmentFactory {
   }
 
   // DesktopEnvironmentFactory implementation.
-  virtual scoped_ptr<DesktopEnvironment> Create(
-      base::WeakPtr<ClientSessionControl> client_session_control) OVERRIDE;
-  virtual void SetEnableCurtaining(bool enable) OVERRIDE;
-  virtual bool SupportsAudioCapture() const OVERRIDE;
-  virtual void SetEnableGnubbyAuth(bool enable) OVERRIDE;
+  scoped_ptr<DesktopEnvironment> Create(
+      base::WeakPtr<ClientSessionControl> client_session_control) override;
+  void SetEnableCurtaining(bool enable) override;
+  bool SupportsAudioCapture() const override;
+  void SetEnableGnubbyAuth(bool enable) override;
 
  private:
   FakeDesktopCapturer::FrameGenerator frame_generator_;

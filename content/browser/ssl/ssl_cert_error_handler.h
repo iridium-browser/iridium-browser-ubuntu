@@ -20,7 +20,6 @@ class SSLCertErrorHandler : public SSLErrorHandler {
  public:
   // Construct on the IO thread.
   SSLCertErrorHandler(const base::WeakPtr<Delegate>& delegate,
-                      const GlobalRequestID& id,
                       ResourceType resource_type,
                       const GURL& url,
                       int render_process_id,
@@ -28,7 +27,7 @@ class SSLCertErrorHandler : public SSLErrorHandler {
                       const net::SSLInfo& ssl_info,
                       bool fatal);
 
-  virtual SSLCertErrorHandler* AsSSLCertErrorHandler() OVERRIDE;
+  SSLCertErrorHandler* AsSSLCertErrorHandler() override;
 
   // These accessors are available on either thread
   const net::SSLInfo& ssl_info() const { return ssl_info_; }
@@ -37,11 +36,11 @@ class SSLCertErrorHandler : public SSLErrorHandler {
 
  protected:
   // SSLErrorHandler methods
-  virtual void OnDispatchFailed() OVERRIDE;
-  virtual void OnDispatched() OVERRIDE;
+  void OnDispatchFailed() override;
+  void OnDispatched() override;
 
  private:
-  virtual ~SSLCertErrorHandler();
+  ~SSLCertErrorHandler() override;
 
   // These read-only members may be accessed on any thread.
   const net::SSLInfo ssl_info_;

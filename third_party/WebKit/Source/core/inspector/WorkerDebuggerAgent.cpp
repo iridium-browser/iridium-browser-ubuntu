@@ -41,12 +41,12 @@ namespace blink {
 
 namespace {
 
-class RunInspectorCommandsTask FINAL : public ScriptDebugServer::Task {
+class RunInspectorCommandsTask final : public ScriptDebugServer::Task {
 public:
     explicit RunInspectorCommandsTask(WorkerThread* thread)
         : m_thread(thread) { }
     virtual ~RunInspectorCommandsTask() { }
-    virtual void run() OVERRIDE
+    virtual void run() override
     {
         // Process all queued debugger commands. WorkerThread is certainly
         // alive if this task is being executed.
@@ -105,11 +105,13 @@ WorkerScriptDebugServer& WorkerDebuggerAgent::scriptDebugServer()
 
 InjectedScript WorkerDebuggerAgent::injectedScriptForEval(ErrorString* error, const int* executionContextId)
 {
-    if (executionContextId) {
-        *error = "Execution context id is not supported for workers as there is only one execution context.";
-        return InjectedScript();
-    }
-    return injectedScriptManager()->injectedScriptFor(m_inspectedWorkerGlobalScope->script()->scriptState());
+    if (!executionContextId)
+        return injectedScriptManager()->injectedScriptFor(m_inspectedWorkerGlobalScope->script()->scriptState());
+
+    InjectedScript injectedScript = injectedScriptManager()->injectedScriptForId(*executionContextId);
+    if (injectedScript.isEmpty())
+        *error = "Execution context with given id not found.";
+    return injectedScript;
 }
 
 void WorkerDebuggerAgent::muteConsole()

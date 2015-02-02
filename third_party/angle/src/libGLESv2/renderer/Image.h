@@ -4,7 +4,7 @@
 // found in the LICENSE file.
 //
 
-// Image.h: Defines the rx::Image class, an abstract base class for the 
+// Image.h: Defines the rx::Image class, an abstract base class for the
 // renderer-specific classes which will define the interface to the underlying
 // surfaces or resources.
 
@@ -12,18 +12,22 @@
 #define LIBGLESV2_RENDERER_IMAGE_H_
 
 #include "common/debug.h"
+#include "libGLESv2/Error.h"
 
 #include <GLES2/gl2.h>
 
 namespace gl
 {
 class Framebuffer;
+struct Rectangle;
+struct ImageIndex;
 }
 
 namespace rx
 {
-
 class Renderer;
+class RenderTarget;
+class TextureStorage;
 
 class Image
 {
@@ -45,12 +49,15 @@ class Image
 
     virtual bool redefine(Renderer *renderer, GLenum target, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth, bool forceRelease) = 0;
 
-    virtual void loadData(GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth,
-                          GLint unpackAlignment, GLenum type, const void *input) = 0;
-    virtual void loadCompressedData(GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth,
-                                    const void *input) = 0;
+    virtual gl::Error loadData(GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth,
+                               GLint unpackAlignment, GLenum type, const void *input) = 0;
+    virtual gl::Error loadCompressedData(GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth,
+                                         const void *input) = 0;
 
-    virtual void copy(GLint xoffset, GLint yoffset, GLint zoffset, GLint x, GLint y, GLsizei width, GLsizei height, gl::Framebuffer *source) = 0;
+    gl::Error copy(GLint xoffset, GLint yoffset, GLint zoffset, const gl::Rectangle &sourceArea, gl::Framebuffer *source);
+    virtual gl::Error copy(GLint xoffset, GLint yoffset, GLint zoffset, const gl::Rectangle &sourceArea, RenderTarget *source) = 0;
+    virtual gl::Error copy(GLint xoffset, GLint yoffset, GLint zoffset, const gl::Rectangle &sourceArea,
+                           const gl::ImageIndex &sourceIndex, TextureStorage *source) = 0;
 
   protected:
     GLsizei mWidth;

@@ -18,6 +18,7 @@
     <output filename="grit/theme_resources_map.h" type="resource_map_header" context="default_100_percent" />
     <output filename="theme_resources_100_percent.pak" type="data_package" context="default_100_percent" />
     <output filename="theme_resources_200_percent.pak" type="data_package" context="default_200_percent" />
+    <output filename="theme_resources_300_percent.pak" type="data_package" context="default_300_percent" />
   </outputs>
   <release seq="1">
     <structures fallback_to_low_resolution="true">
@@ -192,6 +193,9 @@
       <structure type="chrome_scaled_image" name="IDR_DEVELOPER_MODE_HIGHLIGHT_TOP_LEFT" file="common/developer_mode_highlight_top_left.png" />
       <structure type="chrome_scaled_image" name="IDR_DEVELOPER_MODE_HIGHLIGHT_TOP" file="common/developer_mode_highlight_top.png" />
       <structure type="chrome_scaled_image" name="IDR_DEVELOPER_MODE_HIGHLIGHT_TOP_RIGHT" file="common/developer_mode_highlight_top_right.png" />
+      <if expr="chromeos">
+        <structure type="chrome_scaled_image" name="IDR_DEVICE_DISABLED" file="cros/device_disabled.png" />
+      </if>
       <structure type="chrome_scaled_image" name="IDR_DOWN_ARROW" file="common/down_arrow.png" />
       <structure type="chrome_scaled_image" name="IDR_DOWNLOADS_FAVICON" file="common/favicon_downloads.png" />
       <structure type="chrome_scaled_image" name="IDR_DOWNLOAD_ANIMATION_BEGIN" file="common/download_animation_begin.png" />
@@ -279,6 +283,8 @@
         <structure type="chrome_scaled_image" name="IDR_FILETYPE_GENERIC_WHITE" file="cros/file_types/generic_white.png" />
         <structure type="chrome_scaled_image" name="IDR_FILETYPE_GLINK" file="cros/file_types/glink.png" />
         <structure type="chrome_scaled_image" name="IDR_FILETYPE_GLINK_WHITE" file="cros/file_types/glink_white.png" />
+        <structure type="chrome_scaled_image" name="IDR_FILETYPE_GMAP" file="cros/file_types/gmap.png" />
+        <structure type="chrome_scaled_image" name="IDR_FILETYPE_GMAP_WHITE" file="cros/file_types/gmap_white.png" />
         <structure type="chrome_scaled_image" name="IDR_FILETYPE_GSHEET" file="cros/file_types/gsheet.png" />
         <structure type="chrome_scaled_image" name="IDR_FILETYPE_GSHEET_WHITE" file="cros/file_types/gsheet_white.png" />
         <structure type="chrome_scaled_image" name="IDR_FILETYPE_GSLIDES" file="cros/file_types/gslides.png" />

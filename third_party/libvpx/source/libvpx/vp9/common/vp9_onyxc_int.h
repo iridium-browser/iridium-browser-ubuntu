@@ -143,7 +143,6 @@ typedef struct VP9Common {
   int prev_mi_idx;
   int mi_alloc_size;
   MODE_INFO *mip_array[2];
-  MODE_INFO **mi_grid_base_array[2];
 
   MODE_INFO *mip; /* Base of allocated array */
   MODE_INFO *mi;  /* Corresponds to upper left visible macroblock */
@@ -180,6 +179,7 @@ typedef struct VP9Common {
 
   // VPX_BITS_8 in profile 0 or 1, VPX_BITS_10 or VPX_BITS_12 in profile 2 or 3.
   vpx_bit_depth_t bit_depth;
+  vpx_bit_depth_t dequant_bit_depth;  // bit_depth of current dequantizer
 
 #if CONFIG_VP9_POSTPROC
   struct postproc_state  postproc_state;
@@ -328,11 +328,11 @@ static INLINE int partition_plane_context(const MACROBLOCKD *xd,
   const PARTITION_CONTEXT *above_ctx = xd->above_seg_context + mi_col;
   const PARTITION_CONTEXT *left_ctx = xd->left_seg_context + (mi_row & MI_MASK);
 
-  const int bsl = mi_width_log2(bsize);
+  const int bsl = mi_width_log2_lookup[bsize];
   const int bs = 1 << bsl;
   int above = 0, left = 0, i;
 
-  assert(b_width_log2(bsize) == b_height_log2(bsize));
+  assert(b_width_log2_lookup[bsize] == b_height_log2_lookup[bsize]);
   assert(bsl >= 0);
 
   for (i = 0; i < bs; i++) {

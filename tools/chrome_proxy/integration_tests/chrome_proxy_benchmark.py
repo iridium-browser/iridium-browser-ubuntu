@@ -12,7 +12,6 @@ class ChromeProxyLatency(benchmark.Benchmark):
   tag = 'latency'
   test = measurements.ChromeProxyLatency
   page_set = pagesets.Top20PageSet
-  options = {'pageset_repeat_iters': 2}
 
   def CustomizeBrowserOptions(self, options):
     options.AppendExtraBrowserArgs('--enable-spdy-proxy-auth')
@@ -23,7 +22,6 @@ class ChromeProxyLatencyDirect(benchmark.Benchmark):
   tag = 'latency_direct'
   test = measurements.ChromeProxyLatency
   page_set = pagesets.Top20PageSet
-  options = {'pageset_repeat_iters': 2}
 
 
 @benchmark.Enabled('android')
@@ -41,7 +39,7 @@ class ChromeProxyDataSaving(benchmark.Benchmark):
   tag = 'data_saving'
   test = measurements.ChromeProxyDataSaving
   page_set = pagesets.Top20PageSet
-  options = {'pageset_repeat_iters': 1}
+
   def CustomizeBrowserOptions(self, options):
     options.AppendExtraBrowserArgs('--enable-spdy-proxy-auth')
 
@@ -51,7 +49,6 @@ class ChromeProxyDataSavingDirect(benchmark.Benchmark):
   tag = 'data_saving_direct'
   test = measurements.ChromeProxyDataSaving
   page_set = pagesets.Top20PageSet
-  options = {'pageset_repeat_iters': 2}
 
 
 @benchmark.Enabled('android')
@@ -70,17 +67,41 @@ class ChromeProxyHeaderValidation(benchmark.Benchmark):
   test = measurements.ChromeProxyHeaders
   page_set = pagesets.Top20PageSet
 
+
 @benchmark.Enabled('android')
 class ChromeProxyClientVersion(benchmark.Benchmark):
   tag = 'client_version'
   test = measurements.ChromeProxyClientVersion
   page_set = pagesets.SyntheticPageSet
 
+
+@benchmark.Enabled('android')
+class ChromeProxyClientType(benchmark.Benchmark):
+  tag = 'client_type'
+  test = measurements.ChromeProxyClientType
+  page_set = pagesets.ClientTypePageSet
+
+
 @benchmark.Enabled('android')
 class ChromeProxyBypass(benchmark.Benchmark):
   tag = 'bypass'
   test = measurements.ChromeProxyBypass
   page_set = pagesets.BypassPageSet
+
+
+@benchmark.Enabled('android')
+class ChromeProxyFallback(benchmark.Benchmark):
+  tag = 'fallback'
+  test = measurements.ChromeProxyFallback
+  page_set = pagesets.FallbackPageSet
+
+
+@benchmark.Enabled('android')
+class ChromeProxyCorsBypass(benchmark.Benchmark):
+  tag = 'bypass'
+  test = measurements.ChromeProxyCorsBypass
+  page_set = pagesets.CorsBypassPageSet
+
 
 @benchmark.Enabled('android')
 class ChromeProxyBlockOnce(benchmark.Benchmark):
@@ -108,6 +129,20 @@ class ChromeProxyHTTPFallbackViaHeader(benchmark.Benchmark):
   tag = 'fallback-viaheader'
   test = measurements.ChromeProxyHTTPFallbackViaHeader
   page_set = pagesets.FallbackViaHeaderPageSet
+
+
+@benchmark.Enabled('android')
+class ChromeProxyHTTPToDirectFallback(benchmark.Benchmark):
+  tag = 'http-to-direct-fallback'
+  test = measurements.ChromeProxyHTTPToDirectFallback
+  page_set = pagesets.HTTPToDirectFallbackPageSet
+
+
+@benchmark.Enabled('android')
+class ChromeProxyExplicitBypass(benchmark.Benchmark):
+  tag = 'explicit-bypass'
+  test = measurements.ChromeProxyExplicitBypass
+  page_set = pagesets.ExplicitBypassPageSet
 
 
 @benchmark.Enabled('android')

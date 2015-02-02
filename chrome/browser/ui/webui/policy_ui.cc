@@ -119,7 +119,6 @@ content::WebUIDataSource* CreatePolicyUIHTMLSource() {
   source->AddLocalizedString("unset", IDS_POLICY_UNSET);
   source->AddLocalizedString("unknown", IDS_POLICY_UNKNOWN);
 
-  source->SetUseJsonJSFormatV2();
   source->SetJsonPath("strings.js");
 
   // Add required resources.
@@ -221,7 +220,7 @@ scoped_ptr<base::StringValue> DictionaryToJSONString(
 scoped_ptr<base::Value> CopyAndConvert(const base::Value* value) {
   const base::DictionaryValue* dict = NULL;
   if (value->GetAsDictionary(&dict))
-    return DictionaryToJSONString(dict).PassAs<base::Value>();
+    return DictionaryToJSONString(dict);
 
   scoped_ptr<base::Value> copy(value->DeepCopy());
   base::ListValue* list = NULL;
@@ -266,17 +265,18 @@ class CloudPolicyCoreStatusProvider
       public policy::CloudPolicyStore::Observer {
  public:
   explicit CloudPolicyCoreStatusProvider(policy::CloudPolicyCore* core);
-  virtual ~CloudPolicyCoreStatusProvider();
+  ~CloudPolicyCoreStatusProvider() override;
 
   // policy::CloudPolicyStore::Observer implementation.
-  virtual void OnStoreLoaded(policy::CloudPolicyStore* store) OVERRIDE;
-  virtual void OnStoreError(policy::CloudPolicyStore* store) OVERRIDE;
+  void OnStoreLoaded(policy::CloudPolicyStore* store) override;
+  void OnStoreError(policy::CloudPolicyStore* store) override;
 
  protected:
   // Policy status is read from the CloudPolicyClient, CloudPolicyStore and
   // CloudPolicyRefreshScheduler hosted by this |core_|.
   policy::CloudPolicyCore* core_;
 
+ private:
   DISALLOW_COPY_AND_ASSIGN(CloudPolicyCoreStatusProvider);
 };
 
@@ -284,10 +284,10 @@ class CloudPolicyCoreStatusProvider
 class UserPolicyStatusProvider : public CloudPolicyCoreStatusProvider {
  public:
   explicit UserPolicyStatusProvider(policy::CloudPolicyCore* core);
-  virtual ~UserPolicyStatusProvider();
+  ~UserPolicyStatusProvider() override;
 
   // CloudPolicyCoreStatusProvider implementation.
-  virtual void GetStatus(base::DictionaryValue* dict) OVERRIDE;
+  void GetStatus(base::DictionaryValue* dict) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(UserPolicyStatusProvider);
@@ -302,7 +302,7 @@ class DevicePolicyStatusProvider : public CloudPolicyCoreStatusProvider {
   virtual ~DevicePolicyStatusProvider();
 
   // CloudPolicyCoreStatusProvider implementation.
-  virtual void GetStatus(base::DictionaryValue* dict) OVERRIDE;
+  virtual void GetStatus(base::DictionaryValue* dict) override;
 
  private:
   std::string domain_;
@@ -326,11 +326,11 @@ class DeviceLocalAccountPolicyStatusProvider
   virtual ~DeviceLocalAccountPolicyStatusProvider();
 
   // CloudPolicyStatusProvider implementation.
-  virtual void GetStatus(base::DictionaryValue* dict) OVERRIDE;
+  virtual void GetStatus(base::DictionaryValue* dict) override;
 
   // policy::DeviceLocalAccountPolicyService::Observer implementation.
-  virtual void OnPolicyUpdated(const std::string& user_id) OVERRIDE;
-  virtual void OnDeviceLocalAccountsChanged() OVERRIDE;
+  virtual void OnPolicyUpdated(const std::string& user_id) override;
+  virtual void OnDeviceLocalAccountsChanged() override;
 
  private:
   const std::string user_id_;
@@ -346,20 +346,20 @@ class PolicyUIHandler : public content::NotificationObserver,
                         public policy::PolicyService::Observer {
  public:
   PolicyUIHandler();
-  virtual ~PolicyUIHandler();
+  ~PolicyUIHandler() override;
 
   // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   // content::WebUIMessageHandler implementation.
-  virtual void RegisterMessages() OVERRIDE;
+  void RegisterMessages() override;
 
   // policy::PolicyService::Observer implementation.
-  virtual void OnPolicyUpdated(const policy::PolicyNamespace& ns,
-                               const policy::PolicyMap& previous,
-                               const policy::PolicyMap& current) OVERRIDE;
+  void OnPolicyUpdated(const policy::PolicyNamespace& ns,
+                       const policy::PolicyMap& previous,
+                       const policy::PolicyMap& current) override;
 
  private:
   // Send a dictionary containing the names of all known policies to the UI.
@@ -399,7 +399,9 @@ class PolicyUIHandler : public content::NotificationObserver,
   scoped_ptr<CloudPolicyStatusProvider> user_status_provider_;
   scoped_ptr<CloudPolicyStatusProvider> device_status_provider_;
 
+#if defined(ENABLE_EXTENSIONS)
   content::NotificationRegistrar registrar_;
+#endif
 
   base::WeakPtrFactory<PolicyUIHandler> weak_factory_;
 
@@ -577,12 +579,14 @@ void PolicyUIHandler::RegisterMessages() {
   GetPolicyService()->AddObserver(policy::POLICY_DOMAIN_CHROME, this);
   GetPolicyService()->AddObserver(policy::POLICY_DOMAIN_EXTENSIONS, this);
 
+#if defined(ENABLE_EXTENSIONS)
   registrar_.Add(this,
                  extensions::NOTIFICATION_EXTENSION_LOADED_DEPRECATED,
                  content::NotificationService::AllSources());
   registrar_.Add(this,
                  extensions::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
                  content::NotificationService::AllSources());
+#endif
 
   web_ui()->RegisterMessageCallback(
       "initialized",
@@ -596,10 +600,12 @@ void PolicyUIHandler::RegisterMessages() {
 void PolicyUIHandler::Observe(int type,
                               const content::NotificationSource& source,
                               const content::NotificationDetails& details) {
+#if defined(ENABLE_EXTENSIONS)
   DCHECK(type == extensions::NOTIFICATION_EXTENSION_LOADED_DEPRECATED ||
          type == extensions::NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED);
   SendPolicyNames();
   SendPolicyValues();
+#endif
 }
 
 void PolicyUIHandler::OnPolicyUpdated(const policy::PolicyNamespace& ns,

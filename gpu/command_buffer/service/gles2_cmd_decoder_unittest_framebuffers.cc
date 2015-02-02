@@ -8,7 +8,6 @@
 #include "base/strings/string_number_conversions.h"
 #include "gpu/command_buffer/common/gles2_cmd_format.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
-#include "gpu/command_buffer/common/id_allocator.h"
 #include "gpu/command_buffer/service/async_pixel_transfer_delegate_mock.h"
 #include "gpu/command_buffer/service/async_pixel_transfer_manager.h"
 #include "gpu/command_buffer/service/async_pixel_transfer_manager_mock.h"
@@ -58,7 +57,7 @@ class GLES2DecoderTestWithExtensionsOnGLES2 : public GLES2DecoderTest {
  public:
   GLES2DecoderTestWithExtensionsOnGLES2() {}
 
-  virtual void SetUp() {}
+  void SetUp() override {}
   void Init(const char* extensions) {
     InitState init;
     init.extensions = extensions;
@@ -2023,7 +2022,15 @@ void GLES2DecoderWithShaderTest::CheckTextureChangesMarkFBOAsNotComplete(
       .RetiresOnSaturation();
   CopyTexImage2D cmd;
   cmd.Init(GL_TEXTURE_2D, 0, GL_RGB, 0, 0, 1, 1);
+  // Unbind fbo and bind again after CopyTexImage2D tp avoid feedback loops.
+  if (bound_fbo) {
+    DoBindFramebuffer(GL_FRAMEBUFFER, 0, 0);
+  }
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  if (bound_fbo) {
+    DoBindFramebuffer(
+        GL_FRAMEBUFFER, client_framebuffer_id_, kServiceFramebufferId);
+  }
   EXPECT_FALSE(framebuffer_manager->IsComplete(framebuffer));
 
   // Test deleting texture marks fbo as not complete.

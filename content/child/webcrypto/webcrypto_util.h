@@ -19,14 +19,14 @@ namespace webcrypto {
 
 class Status;
 
-// Composes a Web Crypto usage mask from an array of JWK key_ops values.
-CONTENT_EXPORT Status GetWebCryptoUsagesFromJwkKeyOps(
-    const base::ListValue* jwk_key_ops_value,
-    blink::WebCryptoKeyUsageMask* jwk_key_ops_mask);
+// Converts a JWK "key_ops" array to the corresponding WebCrypto usages.
+CONTENT_EXPORT Status
+    GetWebCryptoUsagesFromJwkKeyOps(const base::ListValue* key_ops,
+                                    blink::WebCryptoKeyUsageMask* usages);
 
 // Composes a JWK key_ops array from a Web Crypto usage mask.
 base::ListValue* CreateJwkKeyOpsFromWebCryptoUsages(
-    blink::WebCryptoKeyUsageMask usage_mask);
+    blink::WebCryptoKeyUsageMask usages);
 
 // Creates a WebCryptoAlgorithm without any parameters.
 CONTENT_EXPORT blink::WebCryptoAlgorithm CreateAlgorithm(
@@ -50,9 +50,6 @@ bool ContainsKeyUsages(blink::WebCryptoKeyUsageMask a,
 
 bool KeyUsageAllows(const blink::WebCryptoKey& key,
                     const blink::WebCryptoKeyUsage usage);
-
-bool IsAlgorithmRsa(blink::WebCryptoAlgorithmId alg_id);
-bool IsAlgorithmAsymmetric(blink::WebCryptoAlgorithmId alg_id);
 
 Status GetAesGcmTagLengthInBits(const blink::WebCryptoAesGcmParams* params,
                                 unsigned int* tag_length_bits);

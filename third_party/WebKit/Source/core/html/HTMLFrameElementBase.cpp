@@ -31,9 +31,9 @@
 #include "core/dom/Document.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/RemoteFrame.h"
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/loader/FrameLoader.h"
-#include "core/page/ChromeClient.h"
 #include "core/page/FocusController.h"
 #include "core/page/Page.h"
 #include "core/rendering/RenderPart.h"
@@ -211,8 +211,8 @@ bool HTMLFrameElementBase::isHTMLContentAttribute(const Attribute& attribute) co
 // process. See http://crbug.com/339659.
 void HTMLFrameElementBase::defaultEventHandler(Event* event)
 {
-    if (contentFrame() && contentFrame()->isRemoteFrameTemporary()) {
-        contentFrame()->chromeClient().forwardInputEvent(contentFrame(), event);
+    if (contentFrame() && contentFrame()->isRemoteFrame()) {
+        toRemoteFrame(contentFrame())->forwardInputEvent(event);
         return;
     }
     HTMLFrameOwnerElement::defaultEventHandler(event);

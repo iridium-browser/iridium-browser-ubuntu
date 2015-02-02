@@ -32,28 +32,28 @@ namespace blink {
 
 class EditingStyle;
 
-class InsertParagraphSeparatorCommand FINAL : public CompositeEditCommand {
+class InsertParagraphSeparatorCommand final : public CompositeEditCommand {
 public:
     static PassRefPtrWillBeRawPtr<InsertParagraphSeparatorCommand> create(Document& document, bool useDefaultParagraphElement = false, bool pasteBlockquoteIntoUnquotedArea = false)
     {
         return adoptRefWillBeNoop(new InsertParagraphSeparatorCommand(document, useDefaultParagraphElement, pasteBlockquoteIntoUnquotedArea));
     }
 
-    virtual void trace(Visitor*) OVERRIDE;
+    virtual void trace(Visitor*) override;
 
 private:
     InsertParagraphSeparatorCommand(Document&, bool useDefaultParagraphElement, bool pasteBlockquoteIntoUnquotedArea);
 
-    virtual void doApply() OVERRIDE;
+    virtual void doApply() override;
 
     void calculateStyleBeforeInsertion(const Position&);
     void applyStyleAfterInsertion(Element* originalEnclosingBlock);
-    void getAncestorsInsideBlock(const Node* insertionNode, Element* outerBlock, WillBeHeapVector<RefPtrWillBeMember<Element> >& ancestors);
-    PassRefPtrWillBeRawPtr<Element> cloneHierarchyUnderNewBlock(const WillBeHeapVector<RefPtrWillBeMember<Element> >& ancestors, PassRefPtrWillBeRawPtr<Element> blockToInsert);
+    void getAncestorsInsideBlock(const Node* insertionNode, Element* outerBlock, WillBeHeapVector<RefPtrWillBeMember<Element>>& ancestors);
+    PassRefPtrWillBeRawPtr<Element> cloneHierarchyUnderNewBlock(const WillBeHeapVector<RefPtrWillBeMember<Element>>& ancestors, PassRefPtrWillBeRawPtr<Element> blockToInsert);
 
     bool shouldUseDefaultParagraphElement(Element*) const;
 
-    virtual bool preservesTypingStyle() const OVERRIDE;
+    virtual bool preservesTypingStyle() const override;
 
     RefPtrWillBeMember<EditingStyle> m_style;
 

@@ -44,23 +44,23 @@ class UbertokenFetcher : public GaiaAuthConsumer,
 
   UbertokenFetcher(OAuth2TokenService* token_service,
                    UbertokenConsumer* consumer,
+                   const std::string& source,
                    net::URLRequestContextGetter* request_context);
-  virtual ~UbertokenFetcher();
+  ~UbertokenFetcher() override;
 
   // Start fetching the token for |account_id|.
   virtual void StartFetchingToken(const std::string& account_id);
 
   // Overriden from GaiaAuthConsumer
-  virtual void OnUberAuthTokenSuccess(const std::string& token) OVERRIDE;
-  virtual void OnUberAuthTokenFailure(
-      const GoogleServiceAuthError& error) OVERRIDE;
+  void OnUberAuthTokenSuccess(const std::string& token) override;
+  void OnUberAuthTokenFailure(const GoogleServiceAuthError& error) override;
 
   // Overriden from OAuth2TokenService::Consumer:
-  virtual void OnGetTokenSuccess(const OAuth2TokenService::Request* request,
-                                 const std::string& access_token,
-                                 const base::Time& expiration_time) OVERRIDE;
-  virtual void OnGetTokenFailure(const OAuth2TokenService::Request* request,
-                                 const GoogleServiceAuthError& error) OVERRIDE;
+  void OnGetTokenSuccess(const OAuth2TokenService::Request* request,
+                         const std::string& access_token,
+                         const base::Time& expiration_time) override;
+  void OnGetTokenFailure(const OAuth2TokenService::Request* request,
+                         const GoogleServiceAuthError& error) override;
 
  private:
   // Request a login-scoped access token from the token service.
@@ -71,6 +71,7 @@ class UbertokenFetcher : public GaiaAuthConsumer,
 
   OAuth2TokenService* token_service_;
   UbertokenConsumer* consumer_;
+  std::string source_;
   net::URLRequestContextGetter* request_context_;
   scoped_ptr<GaiaAuthFetcher> gaia_auth_fetcher_;
   scoped_ptr<OAuth2TokenService::Request> access_token_request_;

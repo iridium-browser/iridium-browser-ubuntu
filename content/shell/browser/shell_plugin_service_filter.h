@@ -14,18 +14,18 @@ namespace content {
 class ShellPluginServiceFilter : public PluginServiceFilter {
  public:
   ShellPluginServiceFilter();
-  virtual ~ShellPluginServiceFilter();
+  ~ShellPluginServiceFilter() override;
 
   // PluginServiceFilter implementation.
-  virtual bool IsPluginAvailable(int render_process_id,
-                                 int render_frame_id,
-                                 const void* context,
-                                 const GURL& url,
-                                 const GURL& policy_url,
-                                 WebPluginInfo* plugin) OVERRIDE;
+  bool IsPluginAvailable(int render_process_id,
+                         int render_frame_id,
+                         const void* context,
+                         const GURL& url,
+                         const GURL& policy_url,
+                         WebPluginInfo* plugin) override;
 
-  virtual bool CanLoadPlugin(int render_process_id,
-                             const base::FilePath& path) OVERRIDE;
+  bool CanLoadPlugin(int render_process_id,
+                     const base::FilePath& path) override;
 
  private:
 

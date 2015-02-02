@@ -37,38 +37,36 @@ class BookmarkMenuBridge : public BookmarkModelObserver,
                            public MainMenuItem {
  public:
   BookmarkMenuBridge(Profile* profile, NSMenu* menu);
-  virtual ~BookmarkMenuBridge();
+  ~BookmarkMenuBridge() override;
 
   // BookmarkModelObserver:
-  virtual void BookmarkModelLoaded(BookmarkModel* model,
-                                   bool ids_reassigned) OVERRIDE;
-  virtual void BookmarkModelBeingDeleted(BookmarkModel* model) OVERRIDE;
-  virtual void BookmarkNodeMoved(BookmarkModel* model,
-                                 const BookmarkNode* old_parent,
-                                 int old_index,
-                                 const BookmarkNode* new_parent,
-                                 int new_index) OVERRIDE;
-  virtual void BookmarkNodeAdded(BookmarkModel* model,
-                                 const BookmarkNode* parent,
-                                 int index) OVERRIDE;
-  virtual void BookmarkNodeRemoved(BookmarkModel* model,
-                                   const BookmarkNode* parent,
-                                   int old_index,
-                                   const BookmarkNode* node,
-                                   const std::set<GURL>& removed_urls) OVERRIDE;
-  virtual void BookmarkAllUserNodesRemoved(
-      BookmarkModel* model,
-      const std::set<GURL>& removed_urls) OVERRIDE;
-  virtual void BookmarkNodeChanged(BookmarkModel* model,
-                                   const BookmarkNode* node) OVERRIDE;
-  virtual void BookmarkNodeFaviconChanged(BookmarkModel* model,
-                                          const BookmarkNode* node) OVERRIDE;
-  virtual void BookmarkNodeChildrenReordered(BookmarkModel* model,
-                                             const BookmarkNode* node) OVERRIDE;
+  void BookmarkModelLoaded(BookmarkModel* model, bool ids_reassigned) override;
+  void BookmarkModelBeingDeleted(BookmarkModel* model) override;
+  void BookmarkNodeMoved(BookmarkModel* model,
+                         const BookmarkNode* old_parent,
+                         int old_index,
+                         const BookmarkNode* new_parent,
+                         int new_index) override;
+  void BookmarkNodeAdded(BookmarkModel* model,
+                         const BookmarkNode* parent,
+                         int index) override;
+  void BookmarkNodeRemoved(BookmarkModel* model,
+                           const BookmarkNode* parent,
+                           int old_index,
+                           const BookmarkNode* node,
+                           const std::set<GURL>& removed_urls) override;
+  void BookmarkAllUserNodesRemoved(BookmarkModel* model,
+                                   const std::set<GURL>& removed_urls) override;
+  void BookmarkNodeChanged(BookmarkModel* model,
+                           const BookmarkNode* node) override;
+  void BookmarkNodeFaviconChanged(BookmarkModel* model,
+                                  const BookmarkNode* node) override;
+  void BookmarkNodeChildrenReordered(BookmarkModel* model,
+                                     const BookmarkNode* node) override;
 
   // MainMenuItem:
-  virtual void ResetMenu() OVERRIDE;
-  virtual void BuildMenu() OVERRIDE;
+  void ResetMenu() override;
+  void BuildMenu() override;
 
   // Rebuilds the main bookmark menu, if it has been marked invalid.
   void UpdateMenu(NSMenu* bookmark_menu);

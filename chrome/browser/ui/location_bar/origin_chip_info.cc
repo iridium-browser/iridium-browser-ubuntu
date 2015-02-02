@@ -71,10 +71,10 @@ int StringForChromeHost(const GURL& url) {
     return IDS_PLUGINS_TITLE;
   if (host == chrome::kChromeUIPolicyHost)
     return IDS_POLICY_TITLE;
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
   if (host == chrome::kChromeUIPrintHost)
     return IDS_PRINT_PREVIEW_TITLE;
-#endif  // ENABLE_FULL_PRINTING
+#endif  // ENABLE_PRINT_PREVIEW
   if (host == chrome::kChromeUISettingsHost)
     return IDS_SETTINGS_TITLE;
   if (host == chrome::kChromeUIVersionHost)
@@ -255,8 +255,9 @@ base::string16 OriginChip::LabelFromURLForProfile(const GURL& provided_url,
 
 #if defined(OS_CHROMEOS)
   if (url.SchemeIs(chrome::kCrosScheme) ||
-      url.SchemeIs(chrome::kExternalFileScheme))
+      url.SchemeIs(content::kExternalFileScheme)) {
     return base::UTF8ToUTF16(url.spec());
+  }
 #endif
 
   // If all else fails, return the hostname.

@@ -23,22 +23,21 @@ const char kQuickTimeType[] = "video/quicktime";
 
 // Arrays containing file extensions connected with specific plugins.
 // Note: THE ARRAYS MUST BE SORTED BECAUSE BINARY SEARCH IS USED ON THEM!
-const char* kWindowsMediaPlayerExtensions[] = {".asx"};
+const char* const kWindowsMediaPlayerExtensions[] = {".asx"};
 
-const char* kRealPlayerExtensions[] = {".ra",  ".ram", ".rm",
-                                       ".rmm", ".rmp", ".rpm"};
+const char* const kRealPlayerExtensions[] = {".ra",  ".ram", ".rm",
+                                             ".rmm", ".rmp", ".rpm"};
 
-const char* kQuickTimeExtensions[] = {".moov", ".mov", ".qif",
-                                      ".qt",   ".qti", ".qtif"};
+const char* const kQuickTimeExtensions[] = {".moov", ".mov", ".qif",
+                                            ".qt",   ".qti", ".qtif"};
 
-const char* kShockwaveFlashExtensions[] = {".spl", ".swf"};
+const char* const kShockwaveFlashExtensions[] = {".spl", ".swf"};
 
 }  // namespace.
 
 class UMASenderImpl : public PluginUMAReporter::UMASender {
-  virtual void SendPluginUMA(
-      PluginUMAReporter::ReportType report_type,
-      PluginUMAReporter::PluginType plugin_type) OVERRIDE;
+  void SendPluginUMA(PluginUMAReporter::ReportType report_type,
+                     PluginUMAReporter::PluginType plugin_type) override;
 };
 
 void UMASenderImpl::SendPluginUMA(PluginUMAReporter::ReportType report_type,
@@ -88,7 +87,7 @@ bool PluginUMAReporter::CompareCStrings(const char* first, const char* second) {
   return strcmp(first, second) < 0;
 }
 
-bool PluginUMAReporter::CStringArrayContainsCString(const char** array,
+bool PluginUMAReporter::CStringArrayContainsCString(const char* const* array,
                                                     size_t array_size,
                                                     const char* str) {
   return std::binary_search(array, array + array_size, str, CompareCStrings);

@@ -26,27 +26,28 @@ class PackExtensionHandler : public content::WebUIMessageHandler,
                              public PackExtensionJob::Client {
  public:
   PackExtensionHandler();
-  virtual ~PackExtensionHandler();
+  ~PackExtensionHandler() override;
 
   void GetLocalizedValues(content::WebUIDataSource* source);
 
   // WebUIMessageHandler implementation.
-  virtual void RegisterMessages() OVERRIDE;
+  void RegisterMessages() override;
 
   // ExtensionPackJob::Client implementation.
-  virtual void OnPackSuccess(const base::FilePath& crx_file,
-                             const base::FilePath& key_file) OVERRIDE;
+  void OnPackSuccess(const base::FilePath& crx_file,
+                     const base::FilePath& key_file) override;
 
-  virtual void OnPackFailure(const std::string& error,
-                             ExtensionCreator::ErrorType) OVERRIDE;
+  void OnPackFailure(const std::string& error,
+                     ExtensionCreator::ErrorType) override;
 
  private:
   // SelectFileDialog::Listener implementation.
-  virtual void FileSelected(const base::FilePath& path,
-                            int index, void* params) OVERRIDE;
-  virtual void MultiFilesSelected(
-      const std::vector<base::FilePath>& files, void* params) OVERRIDE;
-  virtual void FileSelectionCanceled(void* params) OVERRIDE {}
+  void FileSelected(const base::FilePath& path,
+                    int index,
+                    void* params) override;
+  void MultiFilesSelected(const std::vector<base::FilePath>& files,
+                          void* params) override;
+  void FileSelectionCanceled(void* params) override {}
 
   // JavaScript callback to start packing an extension.
   void HandlePackMessage(const base::ListValue* args);

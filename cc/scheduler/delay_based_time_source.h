@@ -42,6 +42,7 @@ class CC_EXPORT DelayBasedTimeSource
   // TimeSource implementation
   virtual void SetTimebaseAndInterval(base::TimeTicks timebase,
                                       base::TimeDelta interval);
+  base::TimeDelta Interval() const { return next_parameters_.interval; }
 
   virtual base::TimeTicks SetActive(bool active);
   virtual bool Active() const;
@@ -100,14 +101,14 @@ class DelayBasedTimeSourceHighRes : public DelayBasedTimeSource {
   static scoped_refptr<DelayBasedTimeSourceHighRes> Create(
         base::TimeDelta interval, base::SingleThreadTaskRunner* task_runner);
 
-  virtual base::TimeTicks Now() const OVERRIDE;
+  base::TimeTicks Now() const override;
 
  protected:
   DelayBasedTimeSourceHighRes(base::TimeDelta interval,
                               base::SingleThreadTaskRunner* task_runner);
-  virtual ~DelayBasedTimeSourceHighRes();
+  ~DelayBasedTimeSourceHighRes() override;
 
-  virtual std::string TypeString() const OVERRIDE;
+  std::string TypeString() const override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(DelayBasedTimeSourceHighRes);

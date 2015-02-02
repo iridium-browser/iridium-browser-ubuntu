@@ -32,19 +32,19 @@ class ServiceDiscoveryClientMac : public ServiceDiscoverySharedClient {
   ServiceDiscoveryClientMac();
 
  private:
-  virtual ~ServiceDiscoveryClientMac();
+  ~ServiceDiscoveryClientMac() override;
 
   // ServiceDiscoveryClient implementation.
-  virtual scoped_ptr<ServiceWatcher> CreateServiceWatcher(
+  scoped_ptr<ServiceWatcher> CreateServiceWatcher(
       const std::string& service_type,
-      const ServiceWatcher::UpdatedCallback& callback) OVERRIDE;
-  virtual scoped_ptr<ServiceResolver> CreateServiceResolver(
+      const ServiceWatcher::UpdatedCallback& callback) override;
+  scoped_ptr<ServiceResolver> CreateServiceResolver(
       const std::string& service_name,
-      const ServiceResolver::ResolveCompleteCallback& callback) OVERRIDE;
-  virtual scoped_ptr<LocalDomainResolver> CreateLocalDomainResolver(
+      const ServiceResolver::ResolveCompleteCallback& callback) override;
+  scoped_ptr<LocalDomainResolver> CreateLocalDomainResolver(
       const std::string& domain,
       net::AddressFamily address_family,
-      const LocalDomainResolver::IPAddressCallback& callback) OVERRIDE;
+      const LocalDomainResolver::IPAddressCallback& callback) override;
 
   void StartThreadIfNotStarted();
 
@@ -100,13 +100,12 @@ class ServiceWatcherImplMac : public ServiceWatcher {
                         const std::string& service);
 
  private:
-  virtual ~ServiceWatcherImplMac();
+  ~ServiceWatcherImplMac() override;
 
-  virtual void Start() OVERRIDE;
-  virtual void DiscoverNewServices(bool force_update) OVERRIDE;
-  virtual void SetActivelyRefreshServices(
-      bool actively_refresh_services) OVERRIDE;
-  virtual std::string GetServiceType() const OVERRIDE;
+  void Start() override;
+  void DiscoverNewServices(bool force_update) override;
+  void SetActivelyRefreshServices(bool actively_refresh_services) override;
+  std::string GetServiceType() const override;
 
   std::string service_type_;
   ServiceWatcher::UpdatedCallback callback_;
@@ -168,10 +167,10 @@ class ServiceResolverImplMac : public ServiceResolver {
   NetServiceContainer* GetContainerForTesting();
 
  private:
-  virtual ~ServiceResolverImplMac();
+  ~ServiceResolverImplMac() override;
 
-  virtual void StartResolving() OVERRIDE;
-  virtual std::string GetName() const OVERRIDE;
+  void StartResolving() override;
+  std::string GetName() const override;
 
   void OnResolveComplete(RequestStatus status,
                          const ServiceDescription& description);

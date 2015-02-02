@@ -34,7 +34,7 @@ using content::WebContents;
 // PageNavigator implementation that records the URL.
 class TestingPageNavigator : public PageNavigator {
  public:
-  virtual WebContents* OpenURL(const OpenURLParams& params) OVERRIDE {
+  WebContents* OpenURL(const OpenURLParams& params) override {
     urls_.push_back(params.url);
     return NULL;
   }
@@ -50,16 +50,16 @@ class BookmarkContextMenuControllerTest : public testing::Test {
         model_(NULL) {
   }
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     TestingProfile::Builder builder;
     profile_ = builder.Build();
     profile_->CreateBookmarkModel(true);
     model_ = BookmarkModelFactory::GetForProfile(profile_.get());
-    test::WaitForBookmarkModelToLoad(model_);
+    bookmarks::test::WaitForBookmarkModelToLoad(model_);
     AddTestData(model_);
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     ui::Clipboard::DestroyClipboardForCurrentThread();
 
     // Flush the message loop to make application verifiers happy.
@@ -245,7 +245,7 @@ TEST_F(BookmarkContextMenuControllerTest, DisableIncognito) {
 
   incognito->CreateBookmarkModel(true);
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(incognito);
-  test::WaitForBookmarkModelToLoad(model);
+  bookmarks::test::WaitForBookmarkModelToLoad(model);
   AddTestData(model);
 
   std::vector<const BookmarkNode*> nodes;

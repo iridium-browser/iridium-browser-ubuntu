@@ -105,9 +105,9 @@ void WebRtcNsx_SpeechNoiseProb(NsxInst_t* inst,
     logLrtTimeAvgKsumFX += r2;
   }
 
-  inst->featureLogLrt = WEBRTC_SPL_RSHIFT_W32(logLrtTimeAvgKsumFX * 5,
-                                              inst->stages + 10);
-                                                  // 5 = BIN_SIZE_LRT / 2
+  inst->featureLogLrt = (logLrtTimeAvgKsumFX * BIN_SIZE_LRT) >>
+      (inst->stages + 11);
+
   // done with computation of LR factor
 
   //
@@ -130,7 +130,7 @@ void WebRtcNsx_SpeechNoiseProb(NsxInst_t* inst,
   }
   tmp32no1 = WEBRTC_SPL_SHIFT_W32(tmp32no1, nShifts); // Q14
   // compute indicator function: sigmoid map
-  tableIndex = (int16_t)WEBRTC_SPL_RSHIFT_W32(tmp32no1, 14);
+  tableIndex = (int16_t)(tmp32no1 >> 14);
   if ((tableIndex < 16) && (tableIndex >= 0)) {
     tmp16no2 = kIndicatorTable[tableIndex];
     tmp16no1 = kIndicatorTable[tableIndex + 1] - kIndicatorTable[tableIndex];
@@ -162,7 +162,7 @@ void WebRtcNsx_SpeechNoiseProb(NsxInst_t* inst,
     // FLOAT code
     // indicator1 = 0.5 * (tanh(sgnMap * widthPrior *
     //                          (threshPrior1 - tmpFloat1)) + 1.0);
-    tableIndex = (int16_t)WEBRTC_SPL_RSHIFT_U32(tmpU32no1, 14);
+    tableIndex = (int16_t)(tmpU32no1 >> 14);
     if (tableIndex < 16) {
       tmp16no2 = kIndicatorTable[tableIndex];
       tmp16no1 = kIndicatorTable[tableIndex + 1] - kIndicatorTable[tableIndex];
@@ -185,8 +185,7 @@ void WebRtcNsx_SpeechNoiseProb(NsxInst_t* inst,
                                WebRtcSpl_NormU32(inst->featureSpecDiff));
       assert(normTmp >= 0);
       tmpU32no1 = inst->featureSpecDiff << normTmp;  // Q(normTmp-2*stages)
-      tmpU32no2 = WEBRTC_SPL_RSHIFT_U32(inst->timeAvgMagnEnergy,
-                                        20 - inst->stages - normTmp);
+      tmpU32no2 = inst->timeAvgMagnEnergy >> (20 - inst->stages - normTmp);
       if (tmpU32no2 > 0) {
         // Q(20 - inst->stages)
         tmpU32no1 /= tmpU32no2;
@@ -205,12 +204,12 @@ void WebRtcNsx_SpeechNoiseProb(NsxInst_t* inst,
       //widthPrior = widthPrior * 2.0;
       nShifts--;
     }
-    tmpU32no1 = WEBRTC_SPL_RSHIFT_U32(tmpU32no2, nShifts);
+    tmpU32no1 = tmpU32no2 >> nShifts;
     // compute indicator function: sigmoid map
     /* FLOAT code
      indicator2 = 0.5 * (tanh(widthPrior * (tmpFloat1 - threshPrior2)) + 1.0);
      */
-    tableIndex = (int16_t)WEBRTC_SPL_RSHIFT_U32(tmpU32no1, 14);
+    tableIndex = (int16_t)(tmpU32no1 >> 14);
     if (tableIndex < 16) {
       tmp16no2 = kIndicatorTable[tableIndex];
       tmp16no1 = kIndicatorTable[tableIndex + 1] - kIndicatorTable[tableIndex];

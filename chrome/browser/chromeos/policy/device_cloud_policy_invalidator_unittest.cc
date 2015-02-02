@@ -65,7 +65,7 @@ KeyedService* BuildProfileInvalidationProvider(
   invalidation_service->SetInvalidatorState(
       syncer::TRANSIENT_INVALIDATION_ERROR);
   return new invalidation::ProfileInvalidationProvider(
-      invalidation_service.PassAs<invalidation::InvalidationService>());
+      invalidation_service.Pass());
 }
 
 }  // namespace
@@ -76,8 +76,8 @@ class DeviceCloudPolicyInvalidatorTest : public testing::Test {
   virtual ~DeviceCloudPolicyInvalidatorTest();
 
   // testing::Test:
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  virtual void SetUp() override;
+  virtual void TearDown() override;
 
   // Ownership is not passed. The Profile is owned by the global ProfileManager.
   Profile *LogInAndReturnProfile(const std::string& user_id);
@@ -100,7 +100,6 @@ class DeviceCloudPolicyInvalidatorTest : public testing::Test {
  private:
   content::TestBrowserThreadBundle thread_bundle_;
   scoped_refptr<net::URLRequestContextGetter> system_request_context_;
-  TestingProfileManager profile_manager_;
   chromeos::FakeUserManager* fake_user_manager_;
   chromeos::ScopedUserManagerEnabler user_manager_enabler_;
   ScopedStubEnterpriseInstallAttributes install_attributes_;
@@ -108,6 +107,7 @@ class DeviceCloudPolicyInvalidatorTest : public testing::Test {
       test_device_settings_service_;
   scoped_ptr<chromeos::ScopedTestCrosSettings> test_cros_settings_;
   chromeos::DeviceSettingsTestHelper device_settings_test_helper_;
+  TestingProfileManager profile_manager_;
 
   scoped_ptr<DeviceCloudPolicyInvalidator> invalidator_;
 };
@@ -116,13 +116,13 @@ DeviceCloudPolicyInvalidatorTest::DeviceCloudPolicyInvalidatorTest()
     : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP),
       system_request_context_(new net::TestURLRequestContextGetter(
           base::MessageLoopProxy::current())),
-      profile_manager_(TestingBrowserProcess::GetGlobal()),
       fake_user_manager_(new chromeos::FakeUserManager),
       user_manager_enabler_(fake_user_manager_),
       install_attributes_("example.com",
                           "user@example.com",
                           "device_id",
-                          DEVICE_MODE_ENTERPRISE) {
+                          DEVICE_MODE_ENTERPRISE),
+      profile_manager_(TestingBrowserProcess::GetGlobal()) {
 }
 
 DeviceCloudPolicyInvalidatorTest::~DeviceCloudPolicyInvalidatorTest() {
@@ -158,7 +158,7 @@ void DeviceCloudPolicyInvalidatorTest::SetUp() {
   CloudPolicyCore* core = TestingBrowserProcess::GetGlobal()->platform_part()->
       browser_policy_connector_chromeos()->GetDeviceCloudPolicyManager()->
           core();
-  core->Connect(policy_client.PassAs<CloudPolicyClient>());
+  core->Connect(policy_client.Pass());
   core->StartRefreshScheduler();
 
   invalidation::ProfileInvalidationProviderFactory::GetInstance()->

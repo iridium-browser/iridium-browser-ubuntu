@@ -19,10 +19,15 @@
         'components.gyp:keyed_service_core',
         'components.gyp:pref_registry',
         'components.gyp:variations',
+        'components.gyp:variations_http_provider',
       ],
       'sources': [
         'suggestions/blacklist_store.cc',
         'suggestions/blacklist_store.h',
+        'suggestions/image_encoder.h',
+        'suggestions/image_fetcher.h',
+        'suggestions/image_fetcher_delegate.h',
+        'suggestions/image_manager.cc',
         'suggestions/image_manager.h',
         'suggestions/proto/suggestions.proto',
         'suggestions/suggestions_pref_names.cc',
@@ -39,6 +44,17 @@
         'proto_out_dir': 'components/suggestions/proto',
       },
       'includes': [ '../build/protoc.gypi' ],
+      'conditions': [
+        ['OS == "ios"', {
+          'sources': [
+            'suggestions/image_encoder_ios.mm',
+          ]
+        }, { # 'OS != "ios"'
+          'sources': [
+            'suggestions/image_encoder.cc',
+          ]
+        }
+      ]]
     },
   ],
 }

@@ -43,7 +43,8 @@ WebInspector.ResourceScriptMapping = function(debuggerModel, workspace, debugger
     this._workspace.addEventListener(WebInspector.Workspace.Events.UISourceCodeAdded, this._uiSourceCodeAdded, this);
     this._workspace.addEventListener(WebInspector.Workspace.Events.UISourceCodeRemoved, this._uiSourceCodeRemoved, this);
     this._debuggerWorkspaceBinding = debuggerWorkspaceBinding;
-    this._boundURLs = new StringSet();
+    /** @type {!Set.<string>} */
+    this._boundURLs = new Set();
 
     /** @type {!Map.<!WebInspector.UISourceCode, !WebInspector.ResourceScriptFile>} */
     this._uiSourceCodeToScriptFile = new Map();
@@ -70,7 +71,7 @@ WebInspector.ResourceScriptMapping.prototype = {
         var columnNumber = debuggerModelLocation.columnNumber || 0;
         if (script.isInlineScriptWithSourceURL() && !lineNumber && columnNumber)
             columnNumber -= script.columnOffset;
-        return uiSourceCode.uiLocation(debuggerModelLocation.lineNumber, debuggerModelLocation.columnNumber || 0);
+        return uiSourceCode.uiLocation(lineNumber, columnNumber);
     },
 
     /**
@@ -252,7 +253,7 @@ WebInspector.ResourceScriptMapping.prototype = {
 
     _debuggerReset: function()
     {
-        var boundURLs = this._boundURLs.values();
+        var boundURLs = this._boundURLs.valuesArray();
         for (var i = 0; i < boundURLs.length; ++i)
         {
             var uiSourceCode = this._workspace.uiSourceCodeForURL(boundURLs[i]);

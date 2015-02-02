@@ -38,6 +38,7 @@
 #include "core/html/HTMLImageElement.h"
 #include "core/html/HTMLInputElement.h"
 #include "core/html/HTMLMapElement.h"
+#include "core/page/Page.h"
 #include "core/paint/ImagePainter.h"
 #include "core/rendering/HitTestResult.h"
 #include "core/rendering/PaintInfo.h"
@@ -49,8 +50,6 @@
 #include "platform/fonts/FontCache.h"
 
 namespace blink {
-
-float deviceScaleFactor(LocalFrame*);
 
 using namespace HTMLNames;
 
@@ -278,6 +277,11 @@ void RenderImage::paintReplaced(PaintInfo& paintInfo, const LayoutPoint& paintOf
 void RenderImage::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
     ImagePainter(*this).paint(paintInfo, paintOffset);
+}
+
+void RenderImage::paintBoxDecorationBackground(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+{
+    ImagePainter(*this).paintBoxDecorationBackground(paintInfo, paintOffset);
 }
 
 void RenderImage::areaElementFocusChanged(HTMLAreaElement* areaElement)

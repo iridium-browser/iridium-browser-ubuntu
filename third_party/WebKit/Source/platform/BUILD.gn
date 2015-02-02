@@ -19,10 +19,6 @@ heap_gypi = exec_script(
 
 blink_platform_neon_files = [
   "graphics/cpu/arm/WebGLImageConversionNEON.h",
-  "graphics/cpu/arm/filters/FEBlendNEON.h",
-  "graphics/cpu/arm/filters/FECompositeArithmeticNEON.h",
-  "graphics/cpu/arm/filters/FEGaussianBlurNEON.h",
-  "graphics/cpu/arm/filters/NEONHelpers.h",
 ]
 
 # blink_common in blink_platform.gyp
@@ -213,15 +209,12 @@ component("platform") {
 
   if (is_mac) {
     sources -= [
-      "fonts/harfbuzz/FontHarfBuzz.cpp",
-      "fonts/harfbuzz/HarfBuzzFaceSkia.cpp",
       "fonts/opentype/OpenTypeTypes.h",
       "fonts/opentype/OpenTypeVerticalData.cpp",
       "fonts/opentype/OpenTypeVerticalData.h",
       # The Mac currently uses FontCustomPlatformDataMac.cpp instead.
       "fonts/skia/FontCustomPlatformDataSkia.cpp",
       "fonts/skia/FontCacheSkia.cpp",
-      "fonts/skia/SimpleFontDataSkia.cpp",
       # Uses LocaleMac instead.
       "text/LocaleICU.cpp",
       "text/LocaleICU.h",
@@ -250,7 +243,6 @@ component("platform") {
     ]
   } else {
     sources -= [
-      "fonts/harfbuzz/HarfBuzzFaceCoreText.cpp",
       "geometry/cg/FloatPointCG.cpp",
       "geometry/cg/FloatRectCG.cpp",
       "geometry/cg/FloatSizeCG.cpp",
@@ -315,8 +307,7 @@ component("platform") {
   }
   if (use_openmax_dl_fft) {
     include_dirs += [ "//third_party/openmax_dl" ]
-    # TODO(GYP)
-    # deps += [ "//third_party/openmax_dl/dl" ]
+    deps += [ "//third_party/openmax_dl/dl" ]
   }
 }
 

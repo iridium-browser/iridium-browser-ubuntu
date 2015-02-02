@@ -16,7 +16,7 @@ class CommandUpdater;
 class StarDecoration : public ImageDecoration {
  public:
   explicit StarDecoration(CommandUpdater* command_updater);
-  virtual ~StarDecoration();
+  ~StarDecoration() override;
 
   // Sets the image and tooltip based on |starred|.
   void SetStarred(bool starred);
@@ -25,10 +25,10 @@ class StarDecoration : public ImageDecoration {
   bool starred() const { return starred_; }
 
   // Implement |LocationBarDecoration|.
-  virtual bool AcceptsMousePress() OVERRIDE;
-  virtual bool OnMousePressed(NSRect frame, NSPoint location) OVERRIDE;
-  virtual NSString* GetToolTip() OVERRIDE;
-  virtual NSPoint GetBubblePointInFrame(NSRect frame) OVERRIDE;
+  bool AcceptsMousePress() override;
+  bool OnMousePressed(NSRect frame, NSPoint location) override;
+  NSString* GetToolTip() override;
+  NSPoint GetBubblePointInFrame(NSRect frame) override;
 
  private:
   // For bringing up bookmark bar.

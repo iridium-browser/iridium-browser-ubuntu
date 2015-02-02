@@ -11,20 +11,38 @@ package content;
 message ServiceWorkerCacheStorageIndex {
   message Cache {
     required string name = 1;
-    optional int32 DEPRECATED_size = 2;
-    optional int64 size = 3;
   }
   repeated Cache cache = 1;
+  optional string origin = 2;
 }
 
-message ServiceWorkerRequestResponseHeaders {
-  message HeaderMap {
-    required string name = 1;
-    required string value = 2;
-  }
+message ServiceWorkerCacheHeaderMap {
+  required string name = 1;
+  required string value = 2;
+}
+
+message ServiceWorkerCacheRequest {
   required string method = 1;
-  required int32 status_code = 2;
-  required string status_text = 3;
-  repeated HeaderMap request_headers = 4;
-  repeated HeaderMap response_headers = 5;
+  repeated ServiceWorkerCacheHeaderMap headers = 2;
+}
+
+message ServiceWorkerCacheResponse {
+  enum ResponseType {
+    BASIC_TYPE = 0;
+    CORS_TYPE = 1;
+    DEFAULT_TYPE = 2;
+    ERROR_TYPE = 3;
+    OPAQUE_TYPE = 4;
+  }
+
+  required int32 status_code = 1;
+  required string status_text = 2;
+  required ResponseType response_type = 3;
+  repeated ServiceWorkerCacheHeaderMap headers = 4;
+  optional string url = 5;
+}
+
+message ServiceWorkerCacheMetadata {
+  required ServiceWorkerCacheRequest request = 1;
+  required ServiceWorkerCacheResponse response = 2;
 }

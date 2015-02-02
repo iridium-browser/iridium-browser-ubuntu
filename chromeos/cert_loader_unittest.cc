@@ -19,6 +19,9 @@
 #include "net/test/cert_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+// http://crbug.com/418369
+#ifdef NDEBUG
+
 namespace chromeos {
 namespace {
 
@@ -50,7 +53,7 @@ class CertLoaderTest : public testing::Test,
 
   virtual ~CertLoaderTest() {}
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     ASSERT_TRUE(primary_user_.constructed_successfully());
     ASSERT_TRUE(
         crypto::GetPublicSlotForChromeOSUser(primary_user_.username_hash()));
@@ -77,7 +80,7 @@ class CertLoaderTest : public testing::Test,
   // CertLoader::Observer:
   // The test keeps count of times the observer method was called.
   virtual void OnCertificatesLoaded(const net::CertificateList& cert_list,
-                                    bool initial_load) OVERRIDE {
+                                    bool initial_load) override {
     EXPECT_TRUE(certificates_loaded_events_count_ == 0 || !initial_load);
     certificates_loaded_events_count_++;
   }
@@ -175,7 +178,6 @@ class CertLoaderTest : public testing::Test,
 TEST_F(CertLoaderTest, Basic) {
   EXPECT_FALSE(cert_loader_->CertificatesLoading());
   EXPECT_FALSE(cert_loader_->certificates_loaded());
-  EXPECT_FALSE(cert_loader_->IsHardwareBacked());
 
   FinishUserInitAndGetDatabase(&primary_user_, &primary_db_);
 
@@ -214,6 +216,8 @@ TEST_F(CertLoaderTest, CertLoaderUpdatesCertListOnNewCert) {
   // The certificate list should be updated now, as the message loop's been run.
   EXPECT_TRUE(
       IsCertInCertificateList(certs[0].get(), cert_loader_->cert_list()));
+
+  EXPECT_FALSE(cert_loader_->IsCertificateHardwareBacked(certs[0].get()));
 }
 
 TEST_F(CertLoaderTest, CertLoaderNoUpdateOnSecondaryDbChanges) {
@@ -315,3 +319,6 @@ TEST_F(CertLoaderTest, UpdatedOnCACertTrustChange) {
 
 }  // namespace
 }  // namespace chromeos
+
+#endif
+

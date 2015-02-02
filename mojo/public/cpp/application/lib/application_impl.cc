@@ -13,14 +13,11 @@ namespace mojo {
 
 class ApplicationImpl::ShellPtrWatcher : public ErrorHandler {
  public:
-  ShellPtrWatcher(ApplicationImpl* impl)
-    : impl_(impl) {}
+  ShellPtrWatcher(ApplicationImpl* impl) : impl_(impl) {}
 
-  virtual ~ShellPtrWatcher() {}
+  ~ShellPtrWatcher() override {}
 
-  virtual void OnConnectionError() MOJO_OVERRIDE {
-    impl_->OnShellError();
-  }
+  void OnConnectionError() override { impl_->OnShellError(); }
 
  private:
   ApplicationImpl* impl_;
@@ -29,22 +26,28 @@ class ApplicationImpl::ShellPtrWatcher : public ErrorHandler {
 
 ApplicationImpl::ApplicationImpl(ApplicationDelegate* delegate,
                                  ScopedMessagePipeHandle shell_handle)
-    : initialized_(false), delegate_(delegate), shell_watch_(NULL) {
+    : initialized_(false), delegate_(delegate), shell_watch_(nullptr) {
   BindShell(shell_handle.Pass());
 }
 
 ApplicationImpl::ApplicationImpl(ApplicationDelegate* delegate,
                                  MojoHandle shell_handle)
-    : initialized_(false), delegate_(delegate), shell_watch_(NULL) {
+    : initialized_(false), delegate_(delegate), shell_watch_(nullptr) {
   BindShell(MakeScopedHandle(MessagePipeHandle(shell_handle)));
+}
+
+bool ApplicationImpl::HasArg(const std::string& arg) const {
+  return std::find(args_.begin(), args_.end(), arg) != args_.end();
 }
 
 void ApplicationImpl::ClearConnections() {
   for (ServiceRegistryList::iterator i(incoming_service_registries_.begin());
-      i != incoming_service_registries_.end(); ++i)
+       i != incoming_service_registries_.end();
+       ++i)
     delete *i;
   for (ServiceRegistryList::iterator i(outgoing_service_registries_.begin());
-      i != outgoing_service_registries_.end(); ++i)
+       i != outgoing_service_registries_.end();
+       ++i)
     delete *i;
   incoming_service_registries_.clear();
   outgoing_service_registries_.clear();
@@ -55,28 +58,38 @@ ApplicationImpl::~ApplicationImpl() {
   delete shell_watch_;
 }
 
-void ApplicationImpl::Initialize(Array<String> args) {
-  MOJO_CHECK(!initialized_);
-  initialized_ = true;
-  args_ = args.Pass();
-  delegate_->Initialize(this);
-}
-
 ApplicationConnection* ApplicationImpl::ConnectToApplication(
     const String& application_url) {
   MOJO_CHECK(initialized_);
   ServiceProviderPtr out_service_provider;
-  shell_->ConnectToApplication(application_url, Get(&out_service_provider));
+  shell_->ConnectToApplication(application_url,
+                               GetProxy(&out_service_provider));
   internal::ServiceRegistry* registry = new internal::ServiceRegistry(
-      this,
-      application_url,
-      out_service_provider.Pass());
+      this, application_url, out_service_provider.Pass());
   if (!delegate_->ConfigureOutgoingConnection(registry)) {
     delete registry;
-    return NULL;
+    return nullptr;
   }
   outgoing_service_registries_.push_back(registry);
   return registry;
+}
+
+bool ApplicationImpl::WaitForInitialize() {
+  MOJO_CHECK(!initialized_);
+  bool result = shell_.WaitForIncomingMethodCall();
+  MOJO_CHECK(initialized_ || !result);
+  return result;
+}
+
+ScopedMessagePipeHandle ApplicationImpl::UnbindShell() {
+  return shell_.PassMessagePipe();
+}
+
+void ApplicationImpl::Initialize(Array<String> args) {
+  MOJO_CHECK(!initialized_);
+  initialized_ = true;
+  args_ = args.To<std::vector<std::string>>();
+  delegate_->Initialize(this);
 }
 
 void ApplicationImpl::BindShell(ScopedMessagePipeHandle shell_handle) {

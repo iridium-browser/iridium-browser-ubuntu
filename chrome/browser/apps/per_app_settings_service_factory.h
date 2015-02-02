@@ -24,14 +24,14 @@ class PerAppSettingsServiceFactory : public BrowserContextKeyedServiceFactory {
   friend struct DefaultSingletonTraits<PerAppSettingsServiceFactory>;
 
   PerAppSettingsServiceFactory();
-  virtual ~PerAppSettingsServiceFactory();
+  ~PerAppSettingsServiceFactory() override;
 
   // BrowserContextKeyedServiceFactory:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* context) const OVERRIDE;
-  virtual bool ServiceIsCreatedWithBrowserContext() const OVERRIDE;
-  virtual content::BrowserContext* GetBrowserContextToUse(
-      content::BrowserContext* context) const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* context) const override;
+  bool ServiceIsCreatedWithBrowserContext() const override;
+  content::BrowserContext* GetBrowserContextToUse(
+      content::BrowserContext* context) const override;
 };
 
 #endif  // CHROME_BROWSER_APPS_PER_APP_SETTINGS_SERVICE_FACTORY_H_

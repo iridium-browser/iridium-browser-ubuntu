@@ -1,9 +1,14 @@
 #include "ANGLETest.h"
 
+// Use this to select which configurations (e.g. which renderer, which GLES major version) these tests should be run against.
+typedef ::testing::Types<TFT<Gles::Two, Rend::D3D11>, TFT<Gles::Two, Rend::D3D9>> TestFixtureTypes;
+TYPED_TEST_CASE(MaxTextureSizeTest, TestFixtureTypes);
+
+template<typename T>
 class MaxTextureSizeTest : public ANGLETest
 {
 protected:
-    MaxTextureSizeTest()
+    MaxTextureSizeTest() : ANGLETest(T::GetGlesMajorVersion(), T::GetRequestedRenderer())
     {
         setWindowWidth(512);
         setWindowHeight(512);
@@ -86,7 +91,7 @@ protected:
     GLint mMaxRenderbufferSize;
 };
 
-TEST_F(MaxTextureSizeTest, SpecificationTexImage)
+TYPED_TEST(MaxTextureSizeTest, SpecificationTexImage)
 {
     GLuint tex;
     glGenTextures(1, &tex);
@@ -105,7 +110,7 @@ TEST_F(MaxTextureSizeTest, SpecificationTexImage)
     {
         for (int x = 0; x < textureWidth; x++)
         {
-            GLubyte* pixel = data.data() + ((y * textureWidth + x) * 4);
+            GLubyte* pixel = &data[0] + ((y * textureWidth + x) * 4);
 
             // Draw a gradient, red in direction, green in y direction
             pixel[0] = static_cast<GLubyte>((float(x) / textureWidth) * 255);
@@ -115,7 +120,7 @@ TEST_F(MaxTextureSizeTest, SpecificationTexImage)
         }
     }
 
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, textureWidth, textureHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, data.data());
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, textureWidth, textureHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, &data[0]);
     EXPECT_GL_NO_ERROR();
 
     glUseProgram(mTextureProgram);
@@ -124,14 +129,14 @@ TEST_F(MaxTextureSizeTest, SpecificationTexImage)
     drawQuad(mTextureProgram, "position", 0.5f);
 
     std::vector<GLubyte> pixels(getWindowWidth() * getWindowHeight() * 4);
-    glReadPixels(0, 0, getWindowWidth(), getWindowHeight(), GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+    glReadPixels(0, 0, getWindowWidth(), getWindowHeight(), GL_RGBA, GL_UNSIGNED_BYTE, &pixels[0]);
 
     for (int y = 1; y < getWindowHeight(); y++)
     {
         for (int x = 1; x < getWindowWidth(); x++)
         {
-            const GLubyte* prevPixel = pixels.data() + (((y - 1) * getWindowWidth() + (x - 1)) * 4);
-            const GLubyte* curPixel = pixels.data() + ((y * getWindowWidth() + x) * 4);
+            const GLubyte* prevPixel = &pixels[0] + (((y - 1) * getWindowWidth() + (x - 1)) * 4);
+            const GLubyte* curPixel = &pixels[0] + ((y * getWindowWidth() + x) * 4);
 
             EXPECT_GE(curPixel[0], prevPixel[0]);
             EXPECT_GE(curPixel[1], prevPixel[1]);
@@ -141,7 +146,7 @@ TEST_F(MaxTextureSizeTest, SpecificationTexImage)
     }
 }
 
-TEST_F(MaxTextureSizeTest, SpecificationTexStorage)
+TYPED_TEST(MaxTextureSizeTest, SpecificationTexStorage)
 {
     if (getClientVersion() < 3 && (!extensionEnabled("GL_EXT_texture_storage") || !extensionEnabled("GL_OES_rgb8_rgba8")))
     {
@@ -165,7 +170,7 @@ TEST_F(MaxTextureSizeTest, SpecificationTexStorage)
     {
         for (int x = 0; x < textureWidth; x++)
         {
-            GLubyte* pixel = data.data() + ((y * textureWidth + x) * 4);
+            GLubyte* pixel = &data[0] + ((y * textureWidth + x) * 4);
 
             // Draw a gradient, red in direction, green in y direction
             pixel[0] = static_cast<GLubyte>((float(x) / textureWidth) * 255);
@@ -185,7 +190,7 @@ TEST_F(MaxTextureSizeTest, SpecificationTexStorage)
     }
     EXPECT_GL_NO_ERROR();
 
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, textureWidth, textureHeight, GL_RGBA, GL_UNSIGNED_BYTE, data.data());
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, textureWidth, textureHeight, GL_RGBA, GL_UNSIGNED_BYTE, &data[0]);
     EXPECT_GL_NO_ERROR();
 
     glUseProgram(mTextureProgram);
@@ -194,14 +199,14 @@ TEST_F(MaxTextureSizeTest, SpecificationTexStorage)
     drawQuad(mTextureProgram, "position", 0.5f);
 
     std::vector<GLubyte> pixels(getWindowWidth() * getWindowHeight() * 4);
-    glReadPixels(0, 0, getWindowWidth(), getWindowHeight(), GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+    glReadPixels(0, 0, getWindowWidth(), getWindowHeight(), GL_RGBA, GL_UNSIGNED_BYTE, &pixels[0]);
 
     for (int y = 1; y < getWindowHeight(); y++)
     {
         for (int x = 1; x < getWindowWidth(); x++)
         {
-            const GLubyte* prevPixel = pixels.data() + (((y - 1) * getWindowWidth() + (x - 1)) * 4);
-            const GLubyte* curPixel = pixels.data() + ((y * getWindowWidth() + x) * 4);
+            const GLubyte* prevPixel = &pixels[0] + (((y - 1) * getWindowWidth() + (x - 1)) * 4);
+            const GLubyte* curPixel = &pixels[0] + ((y * getWindowWidth() + x) * 4);
 
             EXPECT_GE(curPixel[0], prevPixel[0]);
             EXPECT_GE(curPixel[1], prevPixel[1]);
@@ -211,7 +216,7 @@ TEST_F(MaxTextureSizeTest, SpecificationTexStorage)
     }
 }
 
-TEST_F(MaxTextureSizeTest, RenderToTexture)
+TYPED_TEST(MaxTextureSizeTest, RenderToTexture)
 {
     GLuint fbo = 0;
     GLuint textureId = 0;
@@ -227,7 +232,7 @@ TEST_F(MaxTextureSizeTest, RenderToTexture)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_BGRA_EXT, textureHeight, textureWidth, 0, GL_BGRA_EXT, GL_UNSIGNED_BYTE, NULL);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_BGRA_EXT, textureWidth, textureHeight, 0, GL_BGRA_EXT, GL_UNSIGNED_BYTE, NULL);
     EXPECT_GL_NO_ERROR();
 
     // create an FBO and attach the texture

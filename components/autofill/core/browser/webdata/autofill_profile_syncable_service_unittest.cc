@@ -101,23 +101,22 @@ class MockSyncChangeProcessor : public syncer::SyncChangeProcessor {
                syncer::SyncError(const tracked_objects::Location&,
                                  const syncer::SyncChangeList&));
   virtual syncer::SyncDataList GetAllSyncData(syncer::ModelType type)
-      const OVERRIDE { return syncer::SyncDataList(); }
+      const override { return syncer::SyncDataList(); }
 };
 
 class TestSyncChangeProcessor : public syncer::SyncChangeProcessor {
  public:
   TestSyncChangeProcessor() {}
-  virtual ~TestSyncChangeProcessor() {}
+  ~TestSyncChangeProcessor() override {}
 
-  virtual syncer::SyncError ProcessSyncChanges(
+  syncer::SyncError ProcessSyncChanges(
       const tracked_objects::Location& location,
-      const syncer::SyncChangeList& changes) OVERRIDE {
+      const syncer::SyncChangeList& changes) override {
     changes_ = changes;
     return syncer::SyncError();
   }
 
-  virtual syncer::SyncDataList GetAllSyncData(syncer::ModelType type) const
-      OVERRIDE {
+  syncer::SyncDataList GetAllSyncData(syncer::ModelType type) const override {
     return syncer::SyncDataList();
   }
 
@@ -228,9 +227,7 @@ class AutofillProfileSyncableServiceTest : public testing::Test {
  public:
   AutofillProfileSyncableServiceTest() {}
 
-  virtual void SetUp() OVERRIDE {
-    sync_processor_.reset(new MockSyncChangeProcessor);
-  }
+  void SetUp() override { sync_processor_.reset(new MockSyncChangeProcessor); }
 
   // Wrapper around AutofillProfileSyncableService::MergeDataAndStartSyncing()
   // that also verifies expectations.
@@ -259,8 +256,9 @@ class AutofillProfileSyncableServiceTest : public testing::Test {
 
     // Takes ownership of sync_processor_.
     autofill_syncable_service_.MergeDataAndStartSyncing(
-        syncer::AUTOFILL_PROFILE, data_list,
-        sync_processor_.PassAs<syncer::SyncChangeProcessor>(),
+        syncer::AUTOFILL_PROFILE,
+        data_list,
+        sync_processor_.Pass(),
         scoped_ptr<syncer::SyncErrorFactory>(
             new syncer::SyncErrorFactoryMock()));
   }

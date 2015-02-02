@@ -29,7 +29,6 @@
 
 #include "platform/heap/Handle.h"
 #include "wtf/Forward.h"
-#include "wtf/text/WTFString.h"
 
 namespace blink {
 
@@ -37,11 +36,10 @@ class LocalDOMWindow;
 class Database;
 class DatabaseCallback;
 class ExceptionState;
-class LocalFrame;
 
 class DOMWindowWebDatabase {
 public:
-    static PassRefPtrWillBeRawPtr<Database> openDatabase(LocalDOMWindow&, const String& name, const String& version, const String& displayName, unsigned long estimatedSize, DatabaseCallback* creationCallback, ExceptionState&);
+    static Database* openDatabase(LocalDOMWindow&, const String& name, const String& version, const String& displayName, unsigned long estimatedSize, DatabaseCallback* creationCallback, ExceptionState&);
 
 private:
     DOMWindowWebDatabase() { };

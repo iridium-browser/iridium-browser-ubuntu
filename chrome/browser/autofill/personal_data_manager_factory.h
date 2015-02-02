@@ -32,13 +32,13 @@ class PersonalDataManagerFactory : public BrowserContextKeyedServiceFactory {
   friend struct DefaultSingletonTraits<PersonalDataManagerFactory>;
 
   PersonalDataManagerFactory();
-  virtual ~PersonalDataManagerFactory();
+  ~PersonalDataManagerFactory() override;
 
   // BrowserContextKeyedServiceFactory:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* profile) const OVERRIDE;
-  virtual content::BrowserContext* GetBrowserContextToUse(
-      content::BrowserContext* context) const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* profile) const override;
+  content::BrowserContext* GetBrowserContextToUse(
+      content::BrowserContext* context) const override;
 };
 
 }  // namespace autofill

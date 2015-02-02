@@ -30,38 +30,44 @@ class ContentPasswordManagerDriver : public PasswordManagerDriver,
   ContentPasswordManagerDriver(content::WebContents* web_contents,
                                PasswordManagerClient* client,
                                autofill::AutofillClient* autofill_client);
-  virtual ~ContentPasswordManagerDriver();
+  ~ContentPasswordManagerDriver() override;
 
   // PasswordManagerDriver implementation.
-  virtual void FillPasswordForm(const autofill::PasswordFormFillData& form_data)
-      OVERRIDE;
-  virtual bool DidLastPageLoadEncounterSSLErrors() OVERRIDE;
-  virtual bool IsOffTheRecord() OVERRIDE;
-  virtual void AllowPasswordGenerationForForm(
-      const autofill::PasswordForm& form) OVERRIDE;
-  virtual void AccountCreationFormsFound(
-      const std::vector<autofill::FormData>& forms) OVERRIDE;
-  virtual void FillSuggestion(const base::string16& username,
-                              const base::string16& password) OVERRIDE;
-  virtual void PreviewSuggestion(const base::string16& username,
-                                 const base::string16& password) OVERRIDE;
-  virtual void ClearPreviewedForm() OVERRIDE;
+  void FillPasswordForm(
+      const autofill::PasswordFormFillData& form_data) override;
+  bool DidLastPageLoadEncounterSSLErrors() override;
+  bool IsOffTheRecord() override;
+  void AllowPasswordGenerationForForm(
+      const autofill::PasswordForm& form) override;
+  void AccountCreationFormsFound(
+      const std::vector<autofill::FormData>& forms) override;
+  void FillSuggestion(const base::string16& username,
+                      const base::string16& password) override;
+  void PreviewSuggestion(const base::string16& username,
+                         const base::string16& password) override;
+  void ClearPreviewedForm() override;
 
-  virtual PasswordGenerationManager* GetPasswordGenerationManager() OVERRIDE;
-  virtual PasswordManager* GetPasswordManager() OVERRIDE;
-  virtual autofill::AutofillManager* GetAutofillManager() OVERRIDE;
-  virtual PasswordAutofillManager* GetPasswordAutofillManager() OVERRIDE;
+  PasswordGenerationManager* GetPasswordGenerationManager() override;
+  PasswordManager* GetPasswordManager() override;
+  autofill::AutofillManager* GetAutofillManager() override;
+  PasswordAutofillManager* GetPasswordAutofillManager() override;
 
   // content::WebContentsObserver overrides.
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
-  virtual void DidNavigateMainFrame(
+  bool OnMessageReceived(const IPC::Message& message) override;
+  void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
-      const content::FrameNavigateParams& params) OVERRIDE;
+      const content::FrameNavigateParams& params) override;
 
  private:
   PasswordManager password_manager_;
   PasswordGenerationManager password_generation_manager_;
   PasswordAutofillManager password_autofill_manager_;
+
+  // Every instance of PasswordFormFillData created by |*this| and sent to
+  // PasswordAutofillManager and PasswordAutofillAgent is given an ID, so that
+  // the latter two classes can reference to the same instance without sending
+  // it to each other over IPC. The counter below is used to generate new IDs.
+  int next_free_key_;
 
   DISALLOW_COPY_AND_ASSIGN(ContentPasswordManagerDriver);
 };

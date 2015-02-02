@@ -29,12 +29,12 @@ class FaviconServiceFactory : public BrowserContextKeyedServiceFactory {
   friend struct DefaultSingletonTraits<FaviconServiceFactory>;
 
   FaviconServiceFactory();
-  virtual ~FaviconServiceFactory();
+  ~FaviconServiceFactory() override;
 
   // BrowserContextKeyedServiceFactory:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* profile) const OVERRIDE;
-  virtual bool ServiceIsNULLWhileTesting() const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* profile) const override;
+  bool ServiceIsNULLWhileTesting() const override;
 
   DISALLOW_COPY_AND_ASSIGN(FaviconServiceFactory);
 };

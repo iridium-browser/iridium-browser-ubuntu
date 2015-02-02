@@ -42,11 +42,13 @@ const char kPeopleSearchOAuth2Scope[] =
 
 }  // namespace
 
-PeopleProvider::PeopleProvider(Profile* profile)
-  : WebserviceSearchProvider(profile),
-    OAuth2TokenService::Consumer("people_provider"),
-    people_search_url_(kPeopleSearchUrl),
-    skip_request_token_for_test_(false) {
+PeopleProvider::PeopleProvider(Profile* profile,
+                               AppListControllerDelegate* controller)
+    : WebserviceSearchProvider(profile),
+      OAuth2TokenService::Consumer("people_provider"),
+      controller_(controller),
+      people_search_url_(kPeopleSearchUrl),
+      skip_request_token_for_test_(false) {
   oauth2_scope_.insert(kPeopleSearchOAuth2Scope);
 }
 
@@ -118,12 +120,14 @@ void PeopleProvider::RequestAccessToken() {
   if (access_token_request_ != NULL)
     return;
 
-  ProfileOAuth2TokenService* token_service =
-      ProfileOAuth2TokenServiceFactory::GetForProfile(profile_);
   SigninManagerBase* signin_manager =
       SigninManagerFactory::GetInstance()->GetForProfile(profile_);
-  access_token_request_ = token_service->StartRequest(
-      signin_manager->GetAuthenticatedAccountId(), oauth2_scope_, this);
+  if (signin_manager->IsAuthenticated()) {
+    ProfileOAuth2TokenService* token_service =
+        ProfileOAuth2TokenServiceFactory::GetForProfile(profile_);
+    access_token_request_ = token_service->StartRequest(
+        signin_manager->GetAuthenticatedAccountId(), oauth2_scope_, this);
+  }
 }
 
 GURL PeopleProvider::GetQueryUrl(const std::string& query) {
@@ -182,15 +186,15 @@ void PeopleProvider::ProcessPeopleSearchResults(
   }
 }
 
-scoped_ptr<ChromeSearchResult> PeopleProvider::CreateResult(
+scoped_ptr<SearchResult> PeopleProvider::CreateResult(
     const base::DictionaryValue& dict) {
-  scoped_ptr<ChromeSearchResult> result;
+  scoped_ptr<SearchResult> result;
 
   scoped_ptr<Person> person = Person::Create(dict);
   if (!person)
     return result.Pass();
 
-  result.reset(new PeopleResult(profile_, person.Pass()));
+  result.reset(new PeopleResult(profile_, controller_, person.Pass()));
   return result.Pass();
 }
 

@@ -5,12 +5,22 @@
 # This file contains common system config stuff for the Android build.
 
 if (is_android) {
-  declare_args() {
-    # Absolute directory containing the Android source code.
-    android_src = ""
+  has_chrome_android_internal = exec_script("//build/dir_exists.py",
+          [ rebase_path("//clank", root_build_dir) ],
+          "string") == "True"
 
-    android_sdk_root = "//third_party/android_tools/sdk"
-    android_sdk_version = "20"
+  if (has_chrome_android_internal) {
+    import("//clank/config.gni")
+  } else {
+    default_android_sdk_root = "//third_party/android_tools/sdk"
+    default_android_sdk_version = "21"
+    default_android_sdk_build_tools_version = "21.0.1"
+  }
+
+  declare_args() {
+    android_sdk_root = default_android_sdk_root
+    android_sdk_version = default_android_sdk_version
+    android_sdk_build_tools_version = default_android_sdk_build_tools_version
 
     # This is set when building the Android WebView inside the Android build
     # system, using the 'android' gyp backend. The WebView code is still built
@@ -26,12 +36,6 @@ if (is_android) {
     # chrome (e.g. where to find archived symbols).
     android_chrome_build_id = "\"\""
   }
-
-  if (is_android_webview_build) {
-    assert(android_src != "",
-           "You must specify android_src for an Android WebView build.")
-  }
-
 
   # Host stuff -----------------------------------------------------------------
 
@@ -63,11 +67,12 @@ if (is_android) {
 
   # Path to the Android NDK and SDK.
   android_ndk_root = "//third_party/android_tools/ndk"
+  android_ndk_include_dir = "$android_ndk_root/usr/include"
 
   android_sdk = "${android_sdk_root}/platforms/android-${android_sdk_version}"
 
   android_sdk_tools = "${android_sdk_root}/tools"
-  android_sdk_build_tools = "${android_sdk_root}/build-tools/20.0.0"
+  android_sdk_build_tools = "${android_sdk_root}/build-tools/$android_sdk_build_tools_version"
 
   # Path to the SDK's android.jar
   android_sdk_jar = "$android_sdk/android.jar"
@@ -102,7 +107,7 @@ if (is_android) {
     _binary_prefix = "arm-linux-androideabi"
     android_toolchain_root = "$arm_android_toolchain_root"
     android_libgcc_file =
-      "$android_toolchain_root/lib/gcc/arm-linux-androideabi/${_android_toolchain_version}/libgcc.a"
+        "$android_toolchain_root/lib/gcc/arm-linux-androideabi/${_android_toolchain_version}/libgcc.a"
   } else if (cpu_arch == "mipsel") {
     android_prebuilt_arch = "android-mips"
     _binary_prefix = "mipsel-linux-android"
@@ -113,16 +118,14 @@ if (is_android) {
     assert(false, "Need android libgcc support for your target arch.")
   }
 
-  android_readelf = "$android_toolchain_root/bin/$_binary_prefix-readelf"
+  android_tool_prefix = "$android_toolchain_root/bin/$_binary_prefix-"
+  android_readelf = "${android_tool_prefix}readelf"
+  android_objcopy = "${android_tool_prefix}objcopy"
   android_gdbserver = "$android_ndk_root/prebuilt/$android_prebuilt_arch/gdbserver/gdbserver"
 
   # stlport stuff --------------------------------------------------------------
 
-  use_system_stlport = is_android_webview_build
-
-  if (use_system_stlport) {
-    android_stlport_library = "stlport"
-  } else if (component_mode == "shared_library") {
+  if (component_mode == "shared_library") {
     android_stlport_library = "stlport_shared"
   } else {
     android_stlport_library = "stlport_static"
@@ -148,5 +151,4 @@ if (is_android) {
   if (!defined(is_android_webview_build)) {
     is_android_webview_build = false
   }
-  use_system_stlport = false
 }

@@ -5,22 +5,26 @@
 #include "chrome/browser/guest_view/mime_handler_view/chrome_mime_handler_view_guest_delegate.h"
 
 #include "chrome/browser/chrome_page_zoom.h"
+#include "chrome/browser/renderer_context_menu/render_view_context_menu.h"
 #include "chrome/browser/ui/pdf/chrome_pdf_web_contents_helper_client.h"
 #include "components/pdf/browser/pdf_web_contents_helper.h"
+#include "components/renderer_context_menu/context_menu_delegate.h"
 #include "extensions/browser/guest_view/mime_handler_view/mime_handler_view_guest.h"
 
 #if defined(ENABLE_PRINTING)
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
 #include "chrome/browser/printing/print_preview_message_handler.h"
 #include "chrome/browser/printing/print_view_manager.h"
 #else
 #include "chrome/browser/printing/print_view_manager_basic.h"
-#endif  // defined(ENABLE_FULL_PRINTING)
+#endif  // defined(ENABLE_PRINT_PREVIEW)
 #endif  // defined(ENABLE_PRINTING)
 
+namespace extensions {
+
 ChromeMimeHandlerViewGuestDelegate::ChromeMimeHandlerViewGuestDelegate(
-    extensions::MimeHandlerViewGuest* guest)
-    : extensions::MimeHandlerViewGuestDelegate(guest), guest_(guest) {
+    MimeHandlerViewGuest* guest)
+    : MimeHandlerViewGuestDelegate(guest), guest_(guest) {
 }
 
 ChromeMimeHandlerViewGuestDelegate::~ChromeMimeHandlerViewGuestDelegate() {
@@ -30,12 +34,12 @@ ChromeMimeHandlerViewGuestDelegate::~ChromeMimeHandlerViewGuestDelegate() {
 void ChromeMimeHandlerViewGuestDelegate::AttachHelpers() {
   content::WebContents* web_contents = guest_->web_contents();
 #if defined(ENABLE_PRINTING)
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
   printing::PrintViewManager::CreateForWebContents(web_contents);
   printing::PrintPreviewMessageHandler::CreateForWebContents(web_contents);
 #else
   printing::PrintViewManagerBasic::CreateForWebContents(web_contents);
-#endif  // defined(ENABLE_FULL_PRINTING)
+#endif  // defined(ENABLE_PRINT_PREVIEW)
 #endif  // defined(ENABLE_PRINTING)
   pdf::PDFWebContentsHelper::CreateForWebContentsWithClient(
       web_contents,
@@ -50,3 +54,18 @@ void ChromeMimeHandlerViewGuestDelegate::ChangeZoom(bool zoom_in) {
       guest_->embedder_web_contents(),
       zoom_in ? content::PAGE_ZOOM_IN : content::PAGE_ZOOM_OUT);
 }
+
+bool ChromeMimeHandlerViewGuestDelegate::HandleContextMenu(
+    content::WebContents* web_contents,
+    const content::ContextMenuParams& params) {
+  ContextMenuDelegate* menu_delegate =
+      ContextMenuDelegate::FromWebContents(web_contents);
+  DCHECK(menu_delegate);
+
+  scoped_ptr<RenderViewContextMenuBase> menu =
+      menu_delegate->BuildMenu(web_contents, params);
+  menu_delegate->ShowMenu(menu.Pass());
+  return true;
+}
+
+}  // namespace extensions

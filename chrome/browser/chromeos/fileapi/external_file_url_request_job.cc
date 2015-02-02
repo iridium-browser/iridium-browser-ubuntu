@@ -12,12 +12,13 @@
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
+#include "chrome/browser/chromeos/file_manager/fileapi_util.h"
 #include "chrome/browser/chromeos/fileapi/external_file_url_util.h"
 #include "chrome/browser/extensions/api/file_handlers/mime_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
+#include "content/public/common/url_constants.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_byte_range.h"
 #include "net/http/http_request_headers.h"
@@ -25,9 +26,11 @@
 #include "net/http/http_util.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_status.h"
+#include "storage/browser/fileapi/external_mount_points.h"
 #include "storage/browser/fileapi/file_system_backend.h"
 #include "storage/browser/fileapi/file_system_context.h"
 #include "storage/browser/fileapi/file_system_operation_runner.h"
+#include "storage/browser/fileapi/isolated_context.h"
 
 using content::BrowserThread;
 
@@ -79,21 +82,25 @@ class URLHelper {
     const base::FilePath virtual_path = ExternalFileURLToVirtualPath(url_);
 
     // Obtain the file system URL.
-    // TODO(hirono): After removing MHTML support, stop to use the special
-    // drive: scheme and use filesystem: URL directly.  crbug.com/415455
-    file_system_url_ = context->CreateCrackedFileSystemURL(
-        GURL(std::string(chrome::kExternalFileScheme) + ":"),
-        storage::kFileSystemTypeExternal,
-        virtual_path);
+    file_system_url_ = file_manager::util::CreateIsolatedURLFromVirtualPath(
+        *context, /* empty origin */ GURL(), virtual_path);
 
     // Check if the obtained path providing external file URL or not.
-    if (FileSystemURLToExternalFileURL(file_system_url_).is_empty()) {
+    if (!file_system_url_.is_valid()) {
       ReplyResult(net::ERR_INVALID_URL);
       return;
     }
 
-    file_system_context_ = context;
+    isolated_file_system_scope_.reset(
+        new ExternalFileURLRequestJob::IsolatedFileSystemScope(
+            file_system_url_.filesystem_id()));
 
+    if (!IsExternalFileURLType(file_system_url_.type())) {
+      ReplyResult(net::ERR_FAILED);
+      return;
+    }
+
+    file_system_context_ = context;
     extensions::app_file_handler_util::GetMimeTypeForLocalPath(
         profile,
         file_system_url_.path(),
@@ -116,19 +123,23 @@ class URLHelper {
   void ReplyResult(net::Error error) {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-    BrowserThread::PostTask(BrowserThread::IO,
-                            FROM_HERE,
-                            base::Bind(callback_,
-                                       error,
-                                       file_system_context_,
-                                       file_system_url_,
-                                       mime_type_));
+    BrowserThread::PostTask(
+        BrowserThread::IO,
+        FROM_HERE,
+        base::Bind(callback_,
+                   error,
+                   file_system_context_,
+                   base::Passed(&isolated_file_system_scope_),
+                   file_system_url_,
+                   mime_type_));
   }
 
   void* const profile_id_;
   const GURL url_;
   const ExternalFileURLRequestJob::HelperCallback callback_;
   scoped_refptr<storage::FileSystemContext> file_system_context_;
+  scoped_ptr<ExternalFileURLRequestJob::IsolatedFileSystemScope>
+      isolated_file_system_scope_;
   storage::FileSystemURL file_system_url_;
   std::string mime_type_;
 
@@ -136,6 +147,15 @@ class URLHelper {
 };
 
 }  // namespace
+
+ExternalFileURLRequestJob::IsolatedFileSystemScope::IsolatedFileSystemScope(
+    const std::string& file_system_id)
+    : file_system_id_(file_system_id) {
+}
+
+ExternalFileURLRequestJob::IsolatedFileSystemScope::~IsolatedFileSystemScope() {
+  storage::IsolatedContext::GetInstance()->RevokeFileSystem(file_system_id_);
+}
 
 ExternalFileURLRequestJob::ExternalFileURLRequestJob(
     void* profile_id,
@@ -179,7 +199,7 @@ void ExternalFileURLRequestJob::Start() {
   }
 
   // Check if the scheme is correct.
-  if (!request()->url().SchemeIs(chrome::kExternalFileScheme)) {
+  if (!request()->url().SchemeIs(content::kExternalFileScheme)) {
     NotifyStartError(net::URLRequestStatus(net::URLRequestStatus::FAILED,
                                            net::ERR_INVALID_URL));
     return;
@@ -195,6 +215,7 @@ void ExternalFileURLRequestJob::Start() {
 void ExternalFileURLRequestJob::OnHelperResultObtained(
     net::Error error,
     const scoped_refptr<storage::FileSystemContext>& file_system_context,
+    scoped_ptr<IsolatedFileSystemScope> isolated_file_system_scope,
     const storage::FileSystemURL& file_system_url,
     const std::string& mime_type) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
@@ -207,6 +228,7 @@ void ExternalFileURLRequestJob::OnHelperResultObtained(
 
   DCHECK(file_system_context.get());
   file_system_context_ = file_system_context;
+  isolated_file_system_scope_ = isolated_file_system_scope.Pass();
   file_system_url_ = file_system_url;
   mime_type_ = mime_type;
 
@@ -279,6 +301,7 @@ void ExternalFileURLRequestJob::Kill() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   stream_reader_.reset();
+  isolated_file_system_scope_.reset();
   file_system_context_ = NULL;
   net::URLRequestJob::Kill();
   weak_ptr_factory_.InvalidateWeakPtrs();

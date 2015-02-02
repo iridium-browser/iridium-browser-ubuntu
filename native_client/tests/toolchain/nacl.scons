@@ -26,12 +26,20 @@ if env.Bit('bitcode'):
   env.Append(CCFLAGS=['-allow-asm'])
 
 # Test C++11 code with both supported C++ standard libraries.
-cpp11_libs = ['libstdc++', 'libc++']
+cpp11_libs = ['libc++']
+if env.Bit('bitcode'):
+  # PNaCl still supports libstdc++ but nacl-clang does not.
+  cpp11_libs.append('libstdc++')
 cpp11_envs = {}
 for lib in cpp11_libs:
   cpp11_envs[lib] = env.Clone()
   cpp11_envs[lib].Append(CCFLAGS=['-std=c++11', '-stdlib=' + lib])
   cpp11_envs[lib].Append(LINKFLAGS=['-stdlib=' + lib])
+  if lib == 'libstdc++':
+    # c++ is added to NONIRT_LIBS for clang to ensure that its dependence on
+    # pthreads can be satisfied by pthread_private instead of pthread. Filter it
+    # out here to ensure that we use libstdc++.
+    cpp11_envs[lib].FilterOut(NONIRT_LIBS=['c++'])
 
 # All the libraries were already included via -l switches in LINKFLAGS.
 # But we use them again in LIBS so scons knows about the dependencies.
@@ -46,13 +54,7 @@ node = env.CommandValidatorTestNacl('whole_archive_test.out',
                                     image=nexe)
 env.AddNodeToTestSuite(node,
                        ['toolchain_tests', 'small_tests'],
-                       'run_whole_archive_test',
-                       # The old ncval doesn't like the new linker's style
-                       # of padding the code segment.  TODO(mcgrathr):
-                       # Remove this is_broken= when we the old ncval is no
-                       # longer ever built and used for this test.
-                       is_broken=(env.Bit('target_x86') and
-                                  not env.Bit('validator_ragel')))
+                       'run_whole_archive_test')
 
 
 def AddIntrinsicTest(test_env, src, exit_status,
@@ -86,7 +88,7 @@ AddIntrinsicTest(env, 'synchronization_sync.c', '0',
                              not env.Bit('bitcode')) or
                             env.IsRunningUnderValgrind()))
 AddIntrinsicTest(env, 'synchronization_volatile.c', '0')
-if env.Bit('bitcode'):
+if env.Bit('bitcode') or env.Bit('nacl_clang'):
   # The following tests were only made to work on LLVM for
   # PNaCl. Command-line flags and libraries need to be updated for GCC
   # support.
@@ -109,7 +111,7 @@ if env.Bit('bitcode'):
 
 # This test redirects C function calls to llvm instrinsic functions,
 # so they only work w/ PNaCl.
-if env.Bit('bitcode'):
+if env.Bit('bitcode') or env.Bit('nacl_clang'):
   AddIntrinsicTest(env, 'llvm_bitmanip_intrinsics.c', '0',
                    golden_file=env.File('llvm_bitmanip_intrinsics.stdout'))
   AddIntrinsicTest(env, 'llvm_math_intrinsics.c', '0',
@@ -195,6 +197,23 @@ env.AddNodeToTestSuite(node, ['toolchain_tests', 'small_tests'],
                        is_broken=(env.Bit('asan') and env.Bit('host_mac')))
 
 
+nexe = env.ComponentProgram('cpp_threadsafe_static_init',
+                            'cpp_threadsafe_static_init.cc',
+                            EXTRA_LIBS=['${PTHREAD_LIBS}',
+                                        '${NONIRT_LIBS}'])
+node = env.CommandSelLdrTestNacl('cpp_threadsafe_static_init.out', nexe)
+# This test fails with the newlib-based builds of libstdc++ that have
+# multi-threading disabled internally.  In x86 nacl-gcc, libstdc++'s
+# threading works on x86-32 but is disabled on x86-64 via an #ifdef.  In
+# ARM nacl-gcc, libstdc++'s threading isn't enabled at all.
+# See https://code.google.com/p/nativeclient/issues/detail?id=3948
+env.AddNodeToTestSuite(node, ['toolchain_tests', 'small_tests'],
+                       'run_cpp_threadsafe_static_init_test',
+                       is_broken=(not env.Bit('bitcode') and
+                                  not env.Bit('nacl_glibc') and
+                                  not env.Bit('target_x86_32')))
+
+
 # NOTE: the tests below break easily under valgrid and since
 #       they do not exercise malloc/free we exclude
 if env.IsRunningUnderValgrind():
@@ -231,6 +250,7 @@ def MakeEnv(env, use_opts, use_frames):
 EH_ENVIRONMENTS_TO_TRY = []
 
 base_eh_env = env.Clone()
+
 supports_cxx11 = env.Bit('bitcode') or env.Bit('target_arm')
 base_eh_env.Append(CPPDEFINES=[['SUPPORTS_CXX11', str(int(supports_cxx11))]])
 if supports_cxx11:
@@ -244,6 +264,11 @@ if env.Bit('bitcode') and env['TOOLCHAIN_FEATURE_VERSION'] >= 1:
     sjlj_eh_env.Append(LINKFLAGS=['--pnacl-exceptions=sjlj',
                                   '-stdlib=%s' % lib])
     sjlj_eh_env.Append(CCFLAGS=['-stdlib=%s' % lib])
+    # c++ is added to NONIRT_LIBS for clang to ensure that its dependence on
+    # pthreads can be satisfied by pthread_private instead of pthread. Filter it
+    # out here to ensure that we use libstdc++.
+    if lib == 'libstdc++':
+      sjlj_eh_env.FilterOut(NONIRT_LIBS=['c++'])
     EH_ENVIRONMENTS_TO_TRY.append(('sjlj_%s' % lib, sjlj_eh_env))
 
 if env.Bit('bitcode'):

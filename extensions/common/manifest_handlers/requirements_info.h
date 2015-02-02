@@ -17,7 +17,7 @@ namespace extensions {
 // Declared requirements for the extension.
 struct RequirementsInfo : public Extension::ManifestData {
   explicit RequirementsInfo(const Manifest* manifest);
-  virtual ~RequirementsInfo();
+  ~RequirementsInfo() override;
 
   bool webgl;
   bool npapi;
@@ -30,16 +30,16 @@ struct RequirementsInfo : public Extension::ManifestData {
 class RequirementsHandler : public ManifestHandler {
  public:
   RequirementsHandler();
-  virtual ~RequirementsHandler();
+  ~RequirementsHandler() override;
 
-  virtual bool Parse(Extension* extension, base::string16* error) OVERRIDE;
+  bool Parse(Extension* extension, base::string16* error) override;
 
-  virtual bool AlwaysParseForType(Manifest::Type type) const OVERRIDE;
+  bool AlwaysParseForType(Manifest::Type type) const override;
 
-  virtual const std::vector<std::string> PrerequisiteKeys() const OVERRIDE;
+  const std::vector<std::string> PrerequisiteKeys() const override;
 
  private:
-  virtual const std::vector<std::string> Keys() const OVERRIDE;
+  const std::vector<std::string> Keys() const override;
 
   DISALLOW_COPY_AND_ASSIGN(RequirementsHandler);
 };

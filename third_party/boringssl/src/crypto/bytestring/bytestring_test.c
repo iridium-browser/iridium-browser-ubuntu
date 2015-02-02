@@ -19,6 +19,7 @@
 #include <openssl/bytestring.h>
 
 #include "internal.h"
+#include "../internal.h"
 
 
 static int test_skip(void) {
@@ -105,10 +106,20 @@ static int test_get_asn1(void) {
   static const uint8_t kData3[] = {0x30, 0x80};
   static const uint8_t kData4[] = {0x30, 0x81, 1, 1};
   static const uint8_t kData5[] = {0x30, 0x82, 0, 1, 1};
+  static const uint8_t kData6[] = {0xa1, 3, 0x4, 1, 1};
+  static const uint8_t kData7[] = {0xa1, 3, 0x4, 2, 1};
+  static const uint8_t kData8[] = {0xa1, 3, 0x2, 1, 1};
+  static const uint8_t kData9[] = {0xa1, 3, 0x2, 1, 0xff};
 
   CBS data, contents;
+  int present;
+  uint64_t value;
 
   CBS_init(&data, kData1, sizeof(kData1));
+  if (CBS_peek_asn1_tag(&data, 0x1) ||
+      !CBS_peek_asn1_tag(&data, 0x30)) {
+    return 0;
+  }
   if (!CBS_get_asn1(&data, &contents, 0x30) ||
       CBS_len(&contents) != 2 ||
       memcmp(CBS_data(&contents), "\x01\x02", 2) != 0) {
@@ -142,6 +153,107 @@ static int test_get_asn1(void) {
   CBS_init(&data, kData1, sizeof(kData1));
   /* wrong tag. */
   if (CBS_get_asn1(&data, &contents, 0x31)) {
+    return 0;
+  }
+
+  CBS_init(&data, NULL, 0);
+  /* peek at empty data. */
+  if (CBS_peek_asn1_tag(&data, 0x30)) {
+    return 0;
+  }
+
+  CBS_init(&data, NULL, 0);
+  /* optional elements at empty data. */
+  if (!CBS_get_optional_asn1(&data, &contents, &present, 0xa0) ||
+      present ||
+      !CBS_get_optional_asn1_octet_string(&data, &contents, &present, 0xa0) ||
+      present ||
+      CBS_len(&contents) != 0 ||
+      !CBS_get_optional_asn1_octet_string(&data, &contents, NULL, 0xa0) ||
+      CBS_len(&contents) != 0 ||
+      !CBS_get_optional_asn1_uint64(&data, &value, 0xa0, 42) ||
+      value != 42) {
+    return 0;
+  }
+
+  CBS_init(&data, kData6, sizeof(kData6));
+  /* optional element. */
+  if (!CBS_get_optional_asn1(&data, &contents, &present, 0xa0) ||
+      present ||
+      !CBS_get_optional_asn1(&data, &contents, &present, 0xa1) ||
+      !present ||
+      CBS_len(&contents) != 3 ||
+      memcmp(CBS_data(&contents), "\x04\x01\x01", 3) != 0) {
+    return 0;
+  }
+
+  CBS_init(&data, kData6, sizeof(kData6));
+  /* optional octet string. */
+  if (!CBS_get_optional_asn1_octet_string(&data, &contents, &present, 0xa0) ||
+      present ||
+      CBS_len(&contents) != 0 ||
+      !CBS_get_optional_asn1_octet_string(&data, &contents, &present, 0xa1) ||
+      !present ||
+      CBS_len(&contents) != 1 ||
+      CBS_data(&contents)[0] != 1) {
+    return 0;
+  }
+
+  CBS_init(&data, kData7, sizeof(kData7));
+  /* invalid optional octet string. */
+  if (CBS_get_optional_asn1_octet_string(&data, &contents, &present, 0xa1)) {
+    return 0;
+  }
+
+  CBS_init(&data, kData8, sizeof(kData8));
+  /* optional octet string. */
+  if (!CBS_get_optional_asn1_uint64(&data, &value, 0xa0, 42) ||
+      value != 42 ||
+      !CBS_get_optional_asn1_uint64(&data, &value, 0xa1, 42) ||
+      value != 1) {
+    return 0;
+  }
+
+  CBS_init(&data, kData9, sizeof(kData9));
+  /* invalid optional integer. */
+  if (CBS_get_optional_asn1_uint64(&data, &value, 0xa1, 42)) {
+    return 0;
+  }
+
+  return 1;
+}
+
+static int test_get_optional_asn1_bool(void) {
+  CBS data;
+  int val;
+
+  static const uint8_t kTrue[] = {0x0a, 3, CBS_ASN1_BOOLEAN, 1, 0xff};
+  static const uint8_t kFalse[] = {0x0a, 3, CBS_ASN1_BOOLEAN, 1, 0x00};
+  static const uint8_t kInvalid[] = {0x0a, 3, CBS_ASN1_BOOLEAN, 1, 0x01};
+
+  CBS_init(&data, NULL, 0);
+  val = 2;
+  if (!CBS_get_optional_asn1_bool(&data, &val, 0x0a, 0) ||
+      val != 0) {
+    return 0;
+  }
+
+  CBS_init(&data, kTrue, sizeof(kTrue));
+  val = 2;
+  if (!CBS_get_optional_asn1_bool(&data, &val, 0x0a, 0) ||
+      val != 1) {
+    return 0;
+  }
+
+  CBS_init(&data, kFalse, sizeof(kFalse));
+  val = 2;
+  if (!CBS_get_optional_asn1_bool(&data, &val, 0x0a, 1) ||
+      val != 0) {
+    return 0;
+  }
+
+  CBS_init(&data, kInvalid, sizeof(kInvalid));
+  if (CBS_get_optional_asn1_bool(&data, &val, 0x0a, 1)) {
     return 0;
   }
 
@@ -434,6 +546,89 @@ static int test_ber_convert(void) {
                         sizeof(kNSSBER));
 }
 
+typedef struct {
+  uint64_t value;
+  const char *encoding;
+  size_t encoding_len;
+} ASN1_UINT64_TEST;
+
+static const ASN1_UINT64_TEST kAsn1Uint64Tests[] = {
+  {0, "\x02\x01\x00", 3},
+  {1, "\x02\x01\x01", 3},
+  {127, "\x02\x01\x7f", 3},
+  {128, "\x02\x02\x00\x80", 4},
+  {0xdeadbeef, "\x02\x05\x00\xde\xad\xbe\xef", 7},
+  {OPENSSL_U64(0x0102030405060708),
+   "\x02\x08\x01\x02\x03\x04\x05\x06\x07\x08", 10},
+  {OPENSSL_U64(0xffffffffffffffff),
+    "\x02\x09\x00\xff\xff\xff\xff\xff\xff\xff\xff", 11},
+};
+
+typedef struct {
+  const char *encoding;
+  size_t encoding_len;
+} ASN1_INVALID_UINT64_TEST;
+
+static const ASN1_INVALID_UINT64_TEST kAsn1InvalidUint64Tests[] = {
+  /* Bad tag. */
+  {"\x03\x01\x00", 3},
+  /* Empty contents. */
+  {"\x02\x00", 2},
+  /* Negative number. */
+  {"\x02\x01\x80", 3},
+  /* Overflow */
+  {"\x02\x09\x01\x00\x00\x00\x00\x00\x00\x00\x00", 11},
+};
+
+static int test_asn1_uint64(void) {
+  size_t i;
+
+  for (i = 0; i < sizeof(kAsn1Uint64Tests) / sizeof(kAsn1Uint64Tests[0]); i++) {
+    const ASN1_UINT64_TEST *test = &kAsn1Uint64Tests[i];
+    CBS cbs;
+    uint64_t value;
+    CBB cbb;
+    uint8_t *out;
+    size_t len;
+
+    CBS_init(&cbs, (const uint8_t *)test->encoding, test->encoding_len);
+    if (!CBS_get_asn1_uint64(&cbs, &value) ||
+        CBS_len(&cbs) != 0 ||
+        value != test->value) {
+      return 0;
+    }
+
+    if (!CBB_init(&cbb, 0)) {
+      return 0;
+    }
+    if (!CBB_add_asn1_uint64(&cbb, test->value) ||
+        !CBB_finish(&cbb, &out, &len)) {
+      CBB_cleanup(&cbb);
+      return 0;
+    }
+    if (len != test->encoding_len || memcmp(out, test->encoding, len) != 0) {
+      free(out);
+      return 0;
+    }
+    free(out);
+  }
+
+  for (i = 0;
+       i < sizeof(kAsn1InvalidUint64Tests) / sizeof(kAsn1InvalidUint64Tests[0]);
+       i++) {
+    const ASN1_INVALID_UINT64_TEST *test = &kAsn1InvalidUint64Tests[i];
+    CBS cbs;
+    uint64_t value;
+
+    CBS_init(&cbs, (const uint8_t *)test->encoding, test->encoding_len);
+    if (CBS_get_asn1_uint64(&cbs, &value)) {
+      return 0;
+    }
+  }
+
+  return 1;
+}
+
 int main(void) {
   CRYPTO_library_init();
 
@@ -448,7 +643,9 @@ int main(void) {
       !test_cbb_misuse() ||
       !test_cbb_prefixed() ||
       !test_cbb_asn1() ||
-      !test_ber_convert()) {
+      !test_ber_convert() ||
+      !test_asn1_uint64() ||
+      !test_get_optional_asn1_bool()) {
     return 1;
   }
 

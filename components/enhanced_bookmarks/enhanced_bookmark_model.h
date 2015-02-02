@@ -8,6 +8,8 @@
 #include <map>
 #include <string>
 
+#include "base/cancelable_callback.h"
+#include "base/memory/linked_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/strings/string16.h"
@@ -36,9 +38,9 @@ class EnhancedBookmarkModel : public KeyedService,
  public:
   EnhancedBookmarkModel(BookmarkModel* bookmark_model,
                         const std::string& version);
-  virtual ~EnhancedBookmarkModel();
+  ~EnhancedBookmarkModel() override;
 
-  virtual void Shutdown() OVERRIDE;
+  void Shutdown() override;
 
   void AddObserver(EnhancedBookmarkModelObserver* observer);
   void RemoveObserver(EnhancedBookmarkModelObserver* observer);
@@ -127,6 +129,9 @@ class EnhancedBookmarkModel : public KeyedService,
   // Returns true if the enhanced bookmark model is done loading.
   bool loaded() { return loaded_; }
 
+  // Returns the version string to use when setting stars.version.
+  std::string GetVersionString();
+
  private:
   FRIEND_TEST_ALL_PREFIXES(::EnhancedBookmarkModelTest, SetMultipleMetaInfo);
 
@@ -134,24 +139,24 @@ class EnhancedBookmarkModel : public KeyedService,
   typedef std::map<const BookmarkNode*, std::string> NodeToIdMap;
 
   // BaseBookmarkModelObserver:
-  virtual void BookmarkModelChanged() OVERRIDE;
-  virtual void BookmarkModelLoaded(BookmarkModel* model,
-                                   bool ids_reassigned) OVERRIDE;
-  virtual void BookmarkNodeAdded(BookmarkModel* model,
-                                 const BookmarkNode* parent,
-                                 int index) OVERRIDE;
-  virtual void BookmarkNodeRemoved(BookmarkModel* model,
-                                   const BookmarkNode* parent,
-                                   int old_index,
-                                   const BookmarkNode* node,
-                                   const std::set<GURL>& removed_urls) OVERRIDE;
-  virtual void OnWillChangeBookmarkMetaInfo(BookmarkModel* model,
-                                            const BookmarkNode* node) OVERRIDE;
-  virtual void BookmarkMetaInfoChanged(BookmarkModel* model,
-                                       const BookmarkNode* node) OVERRIDE;
-  virtual void BookmarkAllUserNodesRemoved(
-      BookmarkModel* model,
-      const std::set<GURL>& removed_urls) OVERRIDE;
+  void BookmarkModelChanged() override;
+  void BookmarkModelLoaded(BookmarkModel* model, bool ids_reassigned) override;
+  void BookmarkNodeAdded(BookmarkModel* model,
+                         const BookmarkNode* parent,
+                         int index) override;
+  void BookmarkNodeRemoved(BookmarkModel* model,
+                           const BookmarkNode* parent,
+                           int old_index,
+                           const BookmarkNode* node,
+                           const std::set<GURL>& removed_urls) override;
+  void BookmarkNodeChanged(BookmarkModel* model,
+                           const BookmarkNode* node) override;
+  void OnWillChangeBookmarkMetaInfo(BookmarkModel* model,
+                                    const BookmarkNode* node) override;
+  void BookmarkMetaInfoChanged(BookmarkModel* model,
+                               const BookmarkNode* node) override;
+  void BookmarkAllUserNodesRemoved(BookmarkModel* model,
+                                   const std::set<GURL>& removed_urls) override;
 
   // Initialize the mapping from remote ids to nodes.
   void InitializeIdMap();
@@ -160,12 +165,18 @@ class EnhancedBookmarkModel : public KeyedService,
   // by a (Schedule)ResetDuplicateRemoteIds call when done adding nodes.
   void AddToIdMap(const BookmarkNode* node);
 
+  // Recursively removes a node and all its children from the various maps.
+  void RemoveNodeFromMaps(const BookmarkNode* node);
+
   // If there are nodes that needs to reset their remote ids, schedules
   // ResetDuplicateRemoteIds to be run asynchronously.
   void ScheduleResetDuplicateRemoteIds();
 
   // Clears out any duplicate remote ids detected by AddToIdMap calls.
   void ResetDuplicateRemoteIds();
+
+  // Sets the NEEDS_OFFLINE_PROCESSING flag on the given node.
+  void SetNeedsOfflineProcessing(const BookmarkNode* node);
 
   // Helper method for setting a meta info field on a node. Also updates the
   // version field.
@@ -179,24 +190,26 @@ class EnhancedBookmarkModel : public KeyedService,
   void SetMultipleMetaInfo(const BookmarkNode* node,
                            BookmarkNode::MetaInfoMap meta_info);
 
-  // Returns the version string to use when setting stars.version.
-  std::string GetVersionString();
-
   BookmarkModel* bookmark_model_;
   bool loaded_;
 
   ObserverList<EnhancedBookmarkModelObserver> observers_;
 
-  base::WeakPtrFactory<EnhancedBookmarkModel> weak_ptr_factory_;
-
   IdToNodeMap id_map_;
   NodeToIdMap nodes_to_reset_;
+
+  // Pending SetNeedsOfflineProcessing calls are stored here, as they may need
+  // to be cancelled if the node is removed.
+  std::map<const BookmarkNode*, linked_ptr<base::CancelableClosure>>
+      set_needs_offline_processing_tasks_;
 
   // Caches the remote id of a node before its meta info changes.
   std::string prev_remote_id_;
 
   std::string version_;
   std::string version_suffix_;
+
+  base::WeakPtrFactory<EnhancedBookmarkModel> weak_ptr_factory_;
 };
 
 }  // namespace enhanced_bookmarks

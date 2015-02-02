@@ -59,23 +59,17 @@ public:
 
     ResourceRequest()
     {
-        initialize(KURL(), UseProtocolCachePolicy);
+        initialize(KURL());
     }
 
     ResourceRequest(const String& urlString)
     {
-        initialize(KURL(ParsedURLString, urlString), UseProtocolCachePolicy);
+        initialize(KURL(ParsedURLString, urlString));
     }
 
     ResourceRequest(const KURL& url)
     {
-        initialize(url, UseProtocolCachePolicy);
-    }
-
-    ResourceRequest(const KURL& url, const Referrer& referrer, ResourceRequestCachePolicy cachePolicy = UseProtocolCachePolicy)
-    {
-        initialize(url, cachePolicy);
-        setHTTPReferrer(referrer);
+        initialize(url);
     }
 
     static PassOwnPtr<ResourceRequest> adopt(PassOwnPtr<CrossThreadResourceRequestData>);
@@ -119,7 +113,7 @@ public:
 
     const AtomicString& httpReferrer() const { return httpHeaderField("Referer"); }
     ReferrerPolicy referrerPolicy() const { return m_referrerPolicy; }
-    void setHTTPReferrer(const Referrer& httpReferrer) { setHTTPHeaderField("Referer", httpReferrer.referrer); m_referrerPolicy = httpReferrer.referrerPolicy; }
+    void setHTTPReferrer(const Referrer&);
     void clearHTTPReferrer();
 
     const AtomicString& httpOrigin() const { return httpHeaderField("Origin"); }
@@ -185,11 +179,17 @@ public:
     ExtraData* extraData() const { return m_extraData.get(); }
     void setExtraData(PassRefPtr<ExtraData> extraData) { m_extraData = extraData; }
 
-    blink::WebURLRequest::RequestContext requestContext() const { return m_requestContext; }
-    void setRequestContext(blink::WebURLRequest::RequestContext context) { m_requestContext = context; }
+    WebURLRequest::RequestContext requestContext() const { return m_requestContext; }
+    void setRequestContext(WebURLRequest::RequestContext context) { m_requestContext = context; }
 
-    blink::WebURLRequest::FrameType frameType() const { return m_frameType; }
-    void setFrameType(blink::WebURLRequest::FrameType frameType) { m_frameType = frameType; }
+    WebURLRequest::FrameType frameType() const { return m_frameType; }
+    void setFrameType(WebURLRequest::FrameType frameType) { m_frameType = frameType; }
+
+    WebURLRequest::FetchRequestMode fetchRequestMode() const { return m_fetchRequestMode; }
+    void setFetchRequestMode(WebURLRequest::FetchRequestMode mode) { m_fetchRequestMode = mode; }
+
+    WebURLRequest::FetchCredentialsMode fetchCredentialsMode() const { return m_fetchCredentialsMode; }
+    void setFetchCredentialsMode(WebURLRequest::FetchCredentialsMode mode) { m_fetchCredentialsMode = mode; }
 
     bool cacheControlContainsNoCache() const;
     bool cacheControlContainsNoStore() const;
@@ -201,7 +201,7 @@ public:
     static bool compare(const ResourceRequest&, const ResourceRequest&);
 
 private:
-    void initialize(const KURL& url, ResourceRequestCachePolicy cachePolicy);
+    void initialize(const KURL&);
 
     const CacheControlHeader& cacheControlHeader() const;
 
@@ -224,8 +224,10 @@ private:
     int m_requestorProcessID;
     int m_appCacheHostID;
     RefPtr<ExtraData> m_extraData;
-    blink::WebURLRequest::RequestContext m_requestContext;
-    blink::WebURLRequest::FrameType m_frameType;
+    WebURLRequest::RequestContext m_requestContext;
+    WebURLRequest::FrameType m_frameType;
+    WebURLRequest::FetchRequestMode m_fetchRequestMode;
+    WebURLRequest::FetchCredentialsMode m_fetchCredentialsMode;
     ReferrerPolicy m_referrerPolicy;
 
     mutable CacheControlHeader m_cacheControlHeaderCache;
@@ -261,8 +263,10 @@ public:
     int m_requestorID;
     int m_requestorProcessID;
     int m_appCacheHostID;
-    blink::WebURLRequest::RequestContext m_requestContext;
-    blink::WebURLRequest::FrameType m_frameType;
+    WebURLRequest::RequestContext m_requestContext;
+    WebURLRequest::FrameType m_frameType;
+    WebURLRequest::FetchRequestMode m_fetchRequestMode;
+    WebURLRequest::FetchCredentialsMode m_fetchCredentialsMode;
     ReferrerPolicy m_referrerPolicy;
 };
 

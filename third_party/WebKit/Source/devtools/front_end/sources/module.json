@@ -1,11 +1,11 @@
 {
     "extensions": [
         {
-            "type": "@WebInspector.Panel",
+            "type": "@WebInspector.PanelFactory",
             "name": "sources",
             "title": "Sources",
             "order": 2,
-            "className": "WebInspector.SourcesPanel"
+            "className": "WebInspector.SourcesPanelFactory"
         },
         {
             "type": "drawer-view",
@@ -59,6 +59,11 @@
             "type": "@WebInspector.Revealer",
             "contextTypes": ["WebInspector.UISourceCode"],
             "className": "WebInspector.SourcesPanel.UISourceCodeRevealer"
+        },
+        {
+            "type": "@WebInspector.Revealer",
+            "contextTypes": ["WebInspector.DebuggerPausedDetails"],
+            "className": "WebInspector.SourcesPanel.DebuggerPausedDetailsRevealer"
         },
         {
             "type": "@WebInspector.SourcesView.EditorAction",
@@ -178,7 +183,10 @@
             "settingType": "checkbox"
         }
     ],
-    "dependencies": ["source_frame"],
+    "dependencies": [
+        "source_frame",
+        "extensions"
+    ],
     "scripts": [
         "jsdifflib.js",
         "Placard.js",
@@ -207,9 +215,17 @@
         "AdvancedSearchView.js",
         "FileBasedSearchResultsPane.js",
         "SourcesSearchScope.js",
-        "SourcesPanel.js"
+        "SourcesPanel.js",
+        "WorkspaceMappingTip.js"
     ],
     "skip_compilation": [
         "jsdifflib.js"
+    ],
+    "stylesheets": [
+        "filteredItemSelectionDialog.css",
+        "navigatorView.css",
+        "revisionHistory.css",
+        "sourcesPanel.css",
+        "sourcesView.css"
     ]
 }

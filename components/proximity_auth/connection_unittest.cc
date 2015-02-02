@@ -35,12 +35,12 @@ class MockConnection : public Connection {
 
   // Gmock only supports copyable types, so create simple wrapper methods for
   // ease of mocking.
-  virtual void SendMessageImpl(scoped_ptr<WireMessage> message) OVERRIDE {
+  virtual void SendMessageImpl(scoped_ptr<WireMessage> message) override {
     SendMessageImplProxy(message.get());
   }
 
   virtual scoped_ptr<WireMessage> DeserializeWireMessage(
-      bool* is_incomplete_message) OVERRIDE {
+      bool* is_incomplete_message) override {
     return make_scoped_ptr(DeserializeWireMessageProxy(is_incomplete_message));
   }
 
@@ -77,7 +77,7 @@ class MockConnectionObserver : public ConnectionObserver {
 class TestWireMessage : public WireMessage {
  public:
   TestWireMessage() : WireMessage(std::string(), std::string()) {}
-  virtual ~TestWireMessage() {}
+  ~TestWireMessage() override {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestWireMessage);

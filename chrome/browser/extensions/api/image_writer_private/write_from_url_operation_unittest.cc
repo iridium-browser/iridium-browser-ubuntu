@@ -43,7 +43,7 @@ class OperationForTest : public WriteFromUrlOperation {
                               hash,
                               storage_unit_id) {}
 
-  virtual void StartImpl() OVERRIDE {}
+  void StartImpl() override {}
 
   // Expose stages for testing.
   void GetDownloadTarget(const base::Closure& continuation) {
@@ -66,14 +66,14 @@ class OperationForTest : public WriteFromUrlOperation {
   base::FilePath GetImagePath() { return image_path_; }
 
  private:
-  virtual ~OperationForTest() {};
+  ~OperationForTest() override{};
 };
 
 class ImageWriterWriteFromUrlOperationTest : public ImageWriterUnitTestBase {
  protected:
   ImageWriterWriteFromUrlOperationTest() : manager_(&test_profile_) {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ImageWriterUnitTestBase::SetUp();
 
     // Turn on interception and set up our dummy file.
@@ -86,7 +86,7 @@ class ImageWriterWriteFromUrlOperationTest : public ImageWriterUnitTestBase {
                                   test_utils_.GetImagePath());
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     ImageWriterUnitTestBase::TearDown();
 
     // Remember to turn off global interception.

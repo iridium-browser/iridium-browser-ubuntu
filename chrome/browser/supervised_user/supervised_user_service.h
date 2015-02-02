@@ -50,6 +50,10 @@ namespace extensions {
 class ExtensionRegistry;
 }
 
+namespace net {
+class URLRequestContextGetter;
+}
+
 namespace user_prefs {
 class PrefRegistrySyncable;
 }
@@ -69,12 +73,7 @@ class SupervisedUserService : public KeyedService,
   typedef std::vector<base::string16> CategoryList;
   typedef base::Callback<void(content::WebContents*)> NavigationBlockedCallback;
   typedef base::Callback<void(const GoogleServiceAuthError&)> AuthErrorCallback;
-
-  enum ManualBehavior {
-    MANUAL_NONE = 0,
-    MANUAL_ALLOW,
-    MANUAL_BLOCK
-  };
+  typedef base::Callback<void(bool)> SuccessCallback;
 
   class Delegate {
    public:
@@ -84,16 +83,23 @@ class SupervisedUserService : public KeyedService,
     virtual bool SetActive(bool active) = 0;
     // Returns the path to a blacklist file to load, or an empty path to
     // indicate "none".
-    virtual base::FilePath GetBlacklistPath() const = 0;
+    virtual base::FilePath GetBlacklistPath() const;
     // Returns the URL from which to download a blacklist if no local one exists
     // yet. The blacklist file will be stored at |GetBlacklistPath()|.
-    virtual GURL GetBlacklistURL() const = 0;
+    virtual GURL GetBlacklistURL() const;
+    // Returns the identifier ("cx") of the Custom Search Engine to use for the
+    // experimental "SafeSites" feature, or the empty string to disable the
+    // feature.
+    virtual std::string GetSafeSitesCx() const;
+    // Returns a custom Google API key to use for SafeSites, or the empty string
+    // to use the default one.
+    virtual std::string GetSafeSitesApiKey() const;
   };
 
-  virtual ~SupervisedUserService();
+  ~SupervisedUserService() override;
 
   // ProfileKeyedService override:
-  virtual void Shutdown() OVERRIDE;
+  void Shutdown() override;
 
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
@@ -118,12 +124,10 @@ class SupervisedUserService : public KeyedService,
   // Whether the user can request access to blocked URLs.
   bool AccessRequestsEnabled();
 
-  void OnPermissionRequestIssued();
-
   // Adds an access request for the given URL. The requests are stored using
   // a prefix followed by a URIEncoded version of the URL. Each entry contains
   // a dictionary which currently has the timestamp of the request in it.
-  void AddAccessRequest(const GURL& url);
+  void AddAccessRequest(const GURL& url, const SuccessCallback& callback);
 
   // Returns the email address of the custodian.
   std::string GetCustodianEmailAddress() const;
@@ -132,19 +136,13 @@ class SupervisedUserService : public KeyedService,
   // empty.
   std::string GetCustodianName() const;
 
-  // These methods allow querying and modifying the manual filtering behavior.
-  // The manual behavior is set by the user and overrides all other settings
-  // (whitelists or the default behavior).
+  // Returns the email address of the second custodian, or the empty string
+  // if there is no second custodian.
+  std::string GetSecondCustodianEmailAddress() const;
 
-  // Returns the manual behavior for the given host.
-  ManualBehavior GetManualBehaviorForHost(const std::string& hostname);
-
-  // Returns the manual behavior for the given URL.
-  ManualBehavior GetManualBehaviorForURL(const GURL& url);
-
-  // Returns all URLS on the given host that have exceptions.
-  void GetManualExceptionsForHost(const std::string& host,
-                                  std::vector<GURL>* urls);
+  // Returns the name of the second custodian, or the email address if the name
+  // is empty, or the empty string is there is no second custodian.
+  std::string GetSecondCustodianName() const;
 
   // Initializes this object. This method does nothing if the profile is not
   // supervised.
@@ -175,38 +173,44 @@ class SupervisedUserService : public KeyedService,
   void AddObserver(SupervisedUserServiceObserver* observer);
   void RemoveObserver(SupervisedUserServiceObserver* observer);
 
+  // Will take ownership of |creator|.
+  void AddPermissionRequestCreatorForTesting(PermissionRequestCreator* creator);
+
 #if defined(ENABLE_EXTENSIONS)
   // extensions::ManagementPolicy::Provider implementation:
-  virtual std::string GetDebugPolicyProviderName() const OVERRIDE;
-  virtual bool UserMayLoad(const extensions::Extension* extension,
-                           base::string16* error) const OVERRIDE;
-  virtual bool UserMayModifySettings(const extensions::Extension* extension,
-                                     base::string16* error) const OVERRIDE;
+  std::string GetDebugPolicyProviderName() const override;
+  bool UserMayLoad(const extensions::Extension* extension,
+                   base::string16* error) const override;
+  bool UserMayModifySettings(const extensions::Extension* extension,
+                             base::string16* error) const override;
 
   // extensions::ExtensionRegistryObserver implementation.
-  virtual void OnExtensionLoaded(
-      content::BrowserContext* browser_context,
-      const extensions::Extension* extension) OVERRIDE;
-  virtual void OnExtensionUnloaded(
+  void OnExtensionLoaded(content::BrowserContext* browser_context,
+                         const extensions::Extension* extension) override;
+  void OnExtensionUnloaded(
       content::BrowserContext* browser_context,
       const extensions::Extension* extension,
-      extensions::UnloadedExtensionInfo::Reason reason) OVERRIDE;
+      extensions::UnloadedExtensionInfo::Reason reason) override;
 #endif
 
   // SyncTypePreferenceProvider implementation:
-  virtual syncer::ModelTypeSet GetPreferredDataTypes() const OVERRIDE;
+  syncer::ModelTypeSet GetPreferredDataTypes() const override;
 
   // ProfileSyncServiceObserver implementation:
-  virtual void OnStateChanged() OVERRIDE;
+  void OnStateChanged() override;
 
   // chrome::BrowserListObserver implementation:
-  virtual void OnBrowserSetLastActive(Browser* browser) OVERRIDE;
+  void OnBrowserSetLastActive(Browser* browser) override;
 
  private:
   friend class SupervisedUserServiceExtensionTestBase;
   friend class SupervisedUserServiceFactory;
+  FRIEND_TEST_ALL_PREFIXES(SingleClientSupervisedUserSettingsSyncTest, Sanity);
   FRIEND_TEST_ALL_PREFIXES(SupervisedUserServiceTest, ClearOmitOnRegistration);
-
+  FRIEND_TEST_ALL_PREFIXES(SupervisedUserServiceTest,
+                           ChangesIncludedSessionOnChangedSettings);
+  FRIEND_TEST_ALL_PREFIXES(SupervisedUserServiceTest,
+                           ChangesSyncSessionStateOnChangedSettings);
   // A bridge from the UI thread to the SupervisedUserURLFilters, one of which
   // lives on the IO thread. This class mediates access to them and makes sure
   // they are kept in sync.
@@ -224,6 +228,10 @@ class SupervisedUserService : public KeyedService,
     void LoadBlacklist(const base::FilePath& path);
     void SetManualHosts(scoped_ptr<std::map<std::string, bool> > host_map);
     void SetManualURLs(scoped_ptr<std::map<GURL, bool> > url_map);
+
+    void InitAsyncURLChecker(net::URLRequestContextGetter* context,
+                             const std::string& cx,
+                             const std::string& api_key);
 
    private:
     void OnBlacklistLoaded();
@@ -281,6 +289,15 @@ class SupervisedUserService : public KeyedService,
 
   SupervisedUserSettingsService* GetSettingsService();
 
+  size_t FindEnabledPermissionRequestCreator(size_t start);
+  void AddAccessRequestInternal(const GURL& url,
+                                const SuccessCallback& callback,
+                                size_t index);
+  void OnPermissionRequestIssued(const GURL& url,
+                                 const SuccessCallback& callback,
+                                 size_t index,
+                                 bool success);
+
   void OnSupervisedUserIdChanged();
 
   void OnDefaultFilteringBehaviorChanged();
@@ -308,6 +325,19 @@ class SupervisedUserService : public KeyedService,
 
   // Returns the human readable name of the supervised user.
   std::string GetSupervisedUserName() const;
+
+  // Subscribes to the SupervisedUserPrefStore, refreshes
+  // |includes_sync_sessions_type_| and triggers reconfiguring the
+  // ProfileSyncService.
+  void OnHistoryRecordingStateChanged();
+
+  // Returns true if the syncer::SESSIONS type should be included in Sync.
+  bool IncludesSyncSessionsType() const;
+
+  // The option a custodian sets to either record or prevent recording the
+  // supervised user's history. Set by |FetchNewSessionSyncState()| and
+  // defaults to true.
+  bool includes_sync_sessions_type_;
 
   // Owns us via the KeyedService mechanism.
   Profile* profile_;
@@ -343,7 +373,7 @@ class SupervisedUserService : public KeyedService,
   scoped_ptr<SupervisedUserBlacklistDownloader> blacklist_downloader_;
 
   // Used to create permission requests.
-  scoped_ptr<PermissionRequestCreator> permissions_creator_;
+  ScopedVector<PermissionRequestCreator> permissions_creators_;
 
   ObserverList<SupervisedUserServiceObserver> observer_list_;
 

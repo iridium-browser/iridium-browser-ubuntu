@@ -21,7 +21,7 @@
 
 namespace blink {
 
-const WrapperTypeInfo V8TestInterfaceConstructor3::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceConstructor3::domTemplate, V8TestInterfaceConstructor3::refObject, V8TestInterfaceConstructor3::derefObject, V8TestInterfaceConstructor3::createPersistentHandle, 0, 0, 0, V8TestInterfaceConstructor3::installConditionallyEnabledMethods, V8TestInterfaceConstructor3::installConditionallyEnabledProperties, 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::Independent, WrapperTypeInfo::RefCountedObject };
+const WrapperTypeInfo V8TestInterfaceConstructor3::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceConstructor3::domTemplate, V8TestInterfaceConstructor3::refObject, V8TestInterfaceConstructor3::derefObject, V8TestInterfaceConstructor3::trace, 0, 0, 0, V8TestInterfaceConstructor3::installConditionallyEnabledMethods, V8TestInterfaceConstructor3::installConditionallyEnabledProperties, 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::Independent, WrapperTypeInfo::RefCountedObject };
 
 // This static member must be declared by DEFINE_WRAPPERTYPEINFO in TestInterfaceConstructor3.h.
 // For details, see the comment of DEFINE_WRAPPERTYPEINFO in
@@ -30,12 +30,10 @@ const WrapperTypeInfo& TestInterfaceConstructor3::s_wrapperTypeInfo = V8TestInte
 
 namespace TestInterfaceConstructor3V8Internal {
 
-template <typename T> void V8_USE(T) { }
-
 static void constructor(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     if (UNLIKELY(info.Length() < 1)) {
-        V8ThrowException::throwException(createMinimumArityTypeErrorForConstructor("TestInterfaceConstructor3", 1, info.Length(), info.GetIsolate()), info.GetIsolate());
+        V8ThrowException::throwException(createMinimumArityTypeErrorForConstructor(info.GetIsolate(), "TestInterfaceConstructor3", 1, info.Length()), info.GetIsolate());
         return;
     }
     V8StringResource<> stringArg;
@@ -54,7 +52,7 @@ void V8TestInterfaceConstructor3::constructorCallback(const v8::FunctionCallback
 {
     TRACE_EVENT_SCOPED_SAMPLING_STATE("blink", "DOMConstructor");
     if (!info.IsConstructCall()) {
-        V8ThrowException::throwTypeError(ExceptionMessages::constructorNotCallableAsFunction("TestInterfaceConstructor3"), info.GetIsolate());
+        V8ThrowException::throwTypeError(info.GetIsolate(), ExceptionMessages::constructorNotCallableAsFunction("TestInterfaceConstructor3"));
         return;
     }
 
@@ -78,8 +76,10 @@ static void installV8TestInterfaceConstructor3Template(v8::Handle<v8::FunctionTe
         isolate);
     functionTemplate->SetCallHandler(V8TestInterfaceConstructor3::constructorCallback);
     functionTemplate->SetLength(1);
-    v8::Local<v8::ObjectTemplate> instanceTemplate ALLOW_UNUSED = functionTemplate->InstanceTemplate();
-    v8::Local<v8::ObjectTemplate> prototypeTemplate ALLOW_UNUSED = functionTemplate->PrototypeTemplate();
+    v8::Local<v8::ObjectTemplate> instanceTemplate = functionTemplate->InstanceTemplate();
+    ALLOW_UNUSED_LOCAL(instanceTemplate);
+    v8::Local<v8::ObjectTemplate> prototypeTemplate = functionTemplate->PrototypeTemplate();
+    ALLOW_UNUSED_LOCAL(prototypeTemplate);
 
     // Custom toString template
     functionTemplate->Set(v8AtomicString(isolate, "toString"), V8PerIsolateData::from(isolate)->toStringTemplate());
@@ -105,21 +105,14 @@ TestInterfaceConstructor3* V8TestInterfaceConstructor3::toImplWithTypeCheck(v8::
     return hasInstance(value, isolate) ? blink::toScriptWrappableBase(v8::Handle<v8::Object>::Cast(value))->toImpl<TestInterfaceConstructor3>() : 0;
 }
 
-
-void V8TestInterfaceConstructor3::refObject(ScriptWrappableBase* internalPointer)
+void V8TestInterfaceConstructor3::refObject(ScriptWrappableBase* scriptWrappableBase)
 {
-    internalPointer->toImpl<TestInterfaceConstructor3>()->ref();
+    scriptWrappableBase->toImpl<TestInterfaceConstructor3>()->ref();
 }
 
-void V8TestInterfaceConstructor3::derefObject(ScriptWrappableBase* internalPointer)
+void V8TestInterfaceConstructor3::derefObject(ScriptWrappableBase* scriptWrappableBase)
 {
-    internalPointer->toImpl<TestInterfaceConstructor3>()->deref();
-}
-
-WrapperPersistentNode* V8TestInterfaceConstructor3::createPersistentHandle(ScriptWrappableBase* internalPointer)
-{
-    ASSERT_NOT_REACHED();
-    return 0;
+    scriptWrappableBase->toImpl<TestInterfaceConstructor3>()->deref();
 }
 
 template<>

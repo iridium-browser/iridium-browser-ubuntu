@@ -129,7 +129,16 @@ WebInspector.CPUFlameChartDataProvider.prototype = {
     },
 
     /**
-     * @return {?WebInspector.FlameChart.TimelineData}
+     * @param {number} index
+     * @return {boolean}
+     */
+    isTallMarker: function(index)
+    {
+        throw new Error("Unreachable.");
+    },
+
+    /**
+     * @return {!WebInspector.FlameChart.TimelineData}
      */
     _calculateTimelineData: function()
     {
@@ -259,7 +268,7 @@ WebInspector.CPUFlameChartDataProvider.prototype = {
 
     /**
      * @param {number} entryIndex
-     * @return {?string}
+     * @return {string}
      */
     entryTitle: function(entryIndex)
     {
@@ -376,7 +385,6 @@ WebInspector.CPUFlameChartDataProvider.colorGenerator = function()
 WebInspector.CPUProfileFlameChart = function(dataProvider)
 {
     WebInspector.VBox.call(this);
-    this.registerRequiredCSS("flameChart.css");
     this.element.id = "cpu-flame-chart";
 
     this._overviewPane = new WebInspector.CPUProfileFlameChart.OverviewPane(dataProvider);
@@ -389,6 +397,11 @@ WebInspector.CPUProfileFlameChart = function(dataProvider)
 }
 
 WebInspector.CPUProfileFlameChart.prototype = {
+    focus: function()
+    {
+        this._mainPane.focus();
+    },
+
     /**
      * @param {!WebInspector.Event} event
      */
@@ -514,11 +527,11 @@ WebInspector.CPUProfileFlameChart.OverviewCalculator.prototype = {
 WebInspector.CPUProfileFlameChart.OverviewPane = function(dataProvider)
 {
     WebInspector.VBox.call(this);
-    this.element.classList.add("flame-chart-overview-pane");
-    this._overviewContainer = this.element.createChild("div", "overview-container");
-    this._overviewGrid = new WebInspector.OverviewGrid("flame-chart");
+    this.element.classList.add("cpu-profile-flame-chart-overview-pane");
+    this._overviewContainer = this.element.createChild("div", "cpu-profile-flame-chart-overview-container");
+    this._overviewGrid = new WebInspector.OverviewGrid("cpu-profile-flame-chart");
     this._overviewGrid.element.classList.add("fill");
-    this._overviewCanvas = this._overviewContainer.createChild("canvas", "flame-chart-overview-canvas");
+    this._overviewCanvas = this._overviewContainer.createChild("canvas", "cpu-profile-flame-chart-overview-canvas");
     this._overviewContainer.appendChild(this._overviewGrid.element);
     this._overviewCalculator = new WebInspector.CPUProfileFlameChart.OverviewCalculator();
     this._dataProvider = dataProvider;
@@ -533,6 +546,14 @@ WebInspector.CPUProfileFlameChart.OverviewPane.prototype = {
     requestWindowTimes: function(windowStartTime, windowEndTime)
     {
         this._selectRange(windowStartTime, windowEndTime);
+    },
+
+    /**
+     * @param {number} startTime
+     * @param {number} endTime
+     */
+    updateBoxSelection: function(startTime, endTime)
+    {
     },
 
     /**

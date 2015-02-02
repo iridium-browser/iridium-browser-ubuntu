@@ -6,7 +6,6 @@
 
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_util.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_pref_service_syncable.h"
 #include "components/invalidation/unacked_invalidation_set_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -17,7 +16,7 @@ class InvalidatorStorageTest : public testing::Test {
  public:
   InvalidatorStorageTest() {}
 
-  virtual void SetUp() {
+  void SetUp() override {
     InvalidatorStorage::RegisterProfilePrefs(pref_service_.registry());
   }
 

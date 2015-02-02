@@ -57,6 +57,8 @@ IdlDefinitions
 
 TypedObject :: mixin for typedef resolution
 
+IdlArgument is 'picklable', as it is stored in interfaces_info.
+
 Design doc: http://www.chromium.org/developers/design-documents/idl-compiler
 """
 
@@ -105,6 +107,7 @@ class IdlDefinitions(object):
         self.callback_functions = {}
         self.dictionaries = {}
         self.enumerations = {}
+        self.implements = []
         self.interfaces = {}
         self.idl_name = idl_name
 
@@ -136,8 +139,7 @@ class IdlDefinitions(object):
                 callback_function = IdlCallbackFunction(idl_name, child)
                 self.callback_functions[callback_function.name] = callback_function
             elif child_class == 'Implements':
-                # Implements is handled at the interface merging step
-                pass
+                self.implements.append(IdlImplement(child))
             elif child_class == 'Dictionary':
                 dictionary = IdlDictionary(idl_name, child)
                 self.dictionaries[dictionary.name] = dictionary
@@ -275,6 +277,8 @@ class IdlInterface(object):
         self.operations = []
         self.parent = None
         self.stringifier = None
+        self.original_interface = None
+        self.partial_interfaces = []
         if not node:  # Early exit for IdlException.__init__
             return
 
@@ -284,6 +288,7 @@ class IdlInterface(object):
         self.is_partial = node.GetProperty('Partial') or False
         self.idl_name = idl_name
         self.name = node.GetName()
+        self.idl_type = IdlType(self.name)
 
         children = node.GetChildren()
         for child in children:
@@ -350,6 +355,7 @@ class IdlException(IdlInterface):
         self.is_partial = False
         self.idl_name = idl_name
         self.name = node.GetName()
+        self.idl_type = IdlType(self.name)
 
         children = node.GetChildren()
         for child in children:
@@ -586,6 +592,14 @@ class IdlArgument(TypedObject):
             else:
                 raise ValueError('Unrecognized node class: %s' % child_class)
 
+    def __getstate__(self):
+        # FIXME: Return a picklable object which has enough information to
+        # unpickle.
+        return {}
+
+    def __setstate__(self, state):
+        pass
+
 
 def arguments_node_to_arguments(idl_name, node):
     # [Constructor] and [CustomConstructor] without arguments (the bare form)
@@ -627,6 +641,16 @@ class IdlStringifier(object):
         if self.attribute or self.operation:
             (self.attribute or self.operation).extended_attributes.update(
                 self.extended_attributes)
+
+
+################################################################################
+# Implement statements
+################################################################################
+
+class IdlImplement(object):
+    def __init__(self, node):
+        self.left_interface = node.GetName()
+        self.right_interface = node.GetProperty('REFERENCE')
 
 
 ################################################################################
@@ -789,6 +813,8 @@ def type_node_inner_to_type(node):
         return sequence_node_to_type(node)
     elif node_class == 'UnionType':
         return union_type_node_to_idl_union_type(node)
+    elif node_class == 'Promise':
+        return IdlType('Promise')
     raise ValueError('Unrecognized node class: %s' % node_class)
 
 

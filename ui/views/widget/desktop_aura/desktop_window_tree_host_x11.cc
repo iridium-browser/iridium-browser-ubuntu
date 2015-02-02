@@ -24,12 +24,12 @@
 #include "ui/base/dragdrop/os_exchange_data_provider_aurax11.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/x/x11_util.h"
+#include "ui/events/devices/x11/device_data_manager_x11.h"
+#include "ui/events/devices/x11/device_list_cache_x11.h"
+#include "ui/events/devices/x11/touch_factory_x11.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/platform/platform_event_source.h"
 #include "ui/events/platform/x11/x11_event_source.h"
-#include "ui/events/x/device_data_manager_x11.h"
-#include "ui/events/x/device_list_cache_x.h"
-#include "ui/events/x/touch_factory_x11.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_rep.h"
@@ -120,6 +120,9 @@ const char* kAtomsToCache[] = {
   "XdndTypeList",
   NULL
 };
+
+const char kX11WindowRolePopup[] = "popup";
+const char kX11WindowRoleBubble[] = "bubble";
 
 }  // namespace
 
@@ -891,10 +894,6 @@ void DesktopWindowTreeHostX11::SetBounds(const gfx::Rect& requested_bounds) {
   unsigned value_mask = 0;
 
   if (size_changed) {
-    // X11 will send an XError at our process if have a 0 sized window.
-    DCHECK_GT(bounds.width(), 0);
-    DCHECK_GT(bounds.height(), 0);
-
     if (bounds.width() < min_size_.width() ||
         bounds.height() < min_size_.height() ||
         (!max_size_.IsEmpty() &&
@@ -902,6 +901,11 @@ void DesktopWindowTreeHostX11::SetBounds(const gfx::Rect& requested_bounds) {
           bounds.height() > max_size_.height()))) {
       // Update the minimum and maximum sizes in case they have changed.
       UpdateMinAndMaxSize();
+
+      gfx::Size size = bounds.size();
+      size.SetToMin(max_size_);
+      size.SetToMax(min_size_);
+      bounds.set_size(size);
     }
 
     changes.width = bounds.width();
@@ -982,39 +986,6 @@ void DesktopWindowTreeHostX11::MoveCursorToNative(const gfx::Point& location) {
 void DesktopWindowTreeHostX11::OnCursorVisibilityChangedNative(bool show) {
   // TODO(erg): Conditional on us enabling touch on desktop linux builds, do
   // the same tap-to-click disabling here that chromeos does.
-}
-
-void DesktopWindowTreeHostX11::PostNativeEvent(
-    const base::NativeEvent& native_event) {
-  DCHECK(xwindow_);
-  DCHECK(xdisplay_);
-  XEvent xevent = *native_event;
-  xevent.xany.display = xdisplay_;
-  xevent.xany.window = xwindow_;
-
-  switch (xevent.type) {
-    case EnterNotify:
-    case LeaveNotify:
-    case MotionNotify:
-    case KeyPress:
-    case KeyRelease:
-    case ButtonPress:
-    case ButtonRelease: {
-      // The fields used below are in the same place for all of events
-      // above. Using xmotion from XEvent's unions to avoid repeating
-      // the code.
-      xevent.xmotion.root = x_root_window_;
-      xevent.xmotion.time = CurrentTime;
-
-      gfx::Point point(xevent.xmotion.x, xevent.xmotion.y);
-      ConvertPointToNativeScreen(&point);
-      xevent.xmotion.x_root = point.x();
-      xevent.xmotion.y_root = point.y();
-    }
-    default:
-      break;
-  }
-  XSendEvent(xdisplay_, xwindow_, False, 0, &xevent);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1184,12 +1155,26 @@ void DesktopWindowTreeHostX11::InitX11Window(
     ui::SetWindowClassHint(
         xdisplay_, xwindow_, params.wm_class_name, params.wm_class_class);
   }
-  if (!params.wm_role_name.empty() ||
-      params.type == Widget::InitParams::TYPE_POPUP) {
-    const char kX11WindowRolePopup[] = "popup";
-    ui::SetWindowRole(xdisplay_, xwindow_, params.wm_role_name.empty() ?
-                      std::string(kX11WindowRolePopup) : params.wm_role_name);
+
+  const char* wm_role_name = NULL;
+  // If the widget isn't overriding the role, provide a default value for popup
+  // and bubble types.
+  if (!params.wm_role_name.empty()) {
+    wm_role_name = params.wm_role_name.c_str();
+  } else {
+    switch (params.type) {
+      case Widget::InitParams::TYPE_POPUP:
+        wm_role_name = kX11WindowRolePopup;
+        break;
+      case Widget::InitParams::TYPE_BUBBLE:
+        wm_role_name = kX11WindowRoleBubble;
+        break;
+      default:
+        break;
+    }
   }
+  if (wm_role_name)
+    ui::SetWindowRole(xdisplay_, xwindow_, std::string(wm_role_name));
 
   if (params.remove_standard_frame) {
     // Setting _GTK_HIDE_TITLEBAR_WHEN_MAXIMIZED tells gnome-shell to not force
@@ -1231,7 +1216,11 @@ gfx::Size DesktopWindowTreeHostX11::AdjustSize(
                        requested_size.height() - 1);
     }
   }
-  return requested_size;
+
+  // Do not request a 0x0 window size. It causes an XError.
+  gfx::Size size = requested_size;
+  size.SetToMax(gfx::Size(1,1));
+  return size;
 }
 
 void DesktopWindowTreeHostX11::OnWMStateUpdated() {

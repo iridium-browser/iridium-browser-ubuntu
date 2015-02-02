@@ -35,12 +35,12 @@ class MediaGalleriesPermissionsTest : public extensions::ExtensionPrefsTest {
   MediaGalleriesPermissionsTest()
       : file_thread_(content::BrowserThread::FILE) {
   }
-  virtual ~MediaGalleriesPermissionsTest() {}
+  ~MediaGalleriesPermissionsTest() override {}
 
   // This is the same implementation as ExtensionPrefsTest::TearDown(), except
   // for also resetting the ExtensionPrefs used by |gallery_prefs_| after
   // TestExtensionPrefs reconstructs them.
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     Verify();
 
     // Reset ExtensionPrefs, and re-verify.
@@ -57,7 +57,7 @@ class MediaGalleriesPermissionsTest : public extensions::ExtensionPrefsTest {
     testing::Test::TearDown();
   }
 
-  virtual void Initialize() OVERRIDE {
+  void Initialize() override {
     file_thread_.Start();
 
     ASSERT_TRUE(storage_monitor::TestStorageMonitor::CreateAndInstall());
@@ -110,7 +110,7 @@ class MediaGalleriesPermissionsTest : public extensions::ExtensionPrefsTest {
     Verify();
   }
 
-  virtual void Verify() OVERRIDE {
+  void Verify() override {
     struct TestData {
       std::string* id;
       std::vector<MediaGalleryPermission>* expectation;
@@ -120,7 +120,7 @@ class MediaGalleriesPermissionsTest : public extensions::ExtensionPrefsTest {
                                   {&extension2_id_, &extension2_expectation_},
                                   {&extension3_id_, &extension3_expectation_},
                                   {&extension4_id_, &extension4_expectation_}};
-    for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_data); i++) {
+    for (size_t i = 0; i < arraysize(test_data); i++) {
       std::vector<MediaGalleryPermission> actual =
           gallery_prefs_->GetGalleryPermissionsFromPrefs(*test_data[i].id);
       EXPECT_EQ(test_data[i].expectation->size(), actual.size());

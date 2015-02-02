@@ -3,12 +3,17 @@
 // found in the LICENSE file.
 
 #include "ash/shell.h"
+#include "ash/sticky_keys/sticky_keys_controller.h"
+#include "ash/sticky_keys/sticky_keys_overlay.h"
 #include "ash/system/tray/system_tray.h"
 #include "base/command_line.h"
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/location_bar/location_bar.h"
+#include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/common/pref_names.h"
@@ -137,6 +142,74 @@ IN_PROC_BROWSER_TEST_F(StickyKeysBrowserTest, CtrlClickHomeButton) {
   SendKeyPress(ui::VKEY_CONTROL);
   ui_test_utils::ClickOnView(browser(), VIEW_ID_HOME_BUTTON);
   EXPECT_EQ(tab_count, tab_strip_model->count());
+}
+
+IN_PROC_BROWSER_TEST_F(StickyKeysBrowserTest, SearchLeftOmnibox) {
+  EnableStickyKeys();
+
+  OmniboxView* omnibox =
+      browser()->window()->GetLocationBar()->GetOmniboxView();
+
+  // Give the omnibox focus.
+  omnibox->ShowURL();
+
+  // Type 'foo'.
+  SendKeyPress(ui::VKEY_F);
+  SendKeyPress(ui::VKEY_O);
+  SendKeyPress(ui::VKEY_O);
+
+  // Verify the location of the caret.
+  size_t start, end;
+  omnibox->GetSelectionBounds(&start, &end);
+  ASSERT_EQ(3U, start);
+  ASSERT_EQ(3U, end);
+
+  // Hit Home by sequencing Search (left Windows) and Left (arrow).
+  SendKeyPress(ui::VKEY_LWIN);
+  SendKeyPress(ui::VKEY_LEFT);
+
+  // Verify caret moved to the beginning.
+  omnibox->GetSelectionBounds(&start, &end);
+  ASSERT_EQ(0U, start);
+  ASSERT_EQ(0U, end);
+}
+
+IN_PROC_BROWSER_TEST_F(StickyKeysBrowserTest, OverlayShown) {
+  const ui::KeyboardCode modifier_keys[] = { ui::VKEY_CONTROL,
+                                             ui::VKEY_SHIFT,
+                                             ui::VKEY_MENU,
+                                             ui::VKEY_COMMAND };
+
+  // Overlay should not be visible if sticky keys is not enabled.
+  ash::StickyKeysController* controller =
+      ash::Shell::GetInstance()->sticky_keys_controller();
+  EXPECT_FALSE(controller->GetOverlayForTest());
+  for (auto key_code : modifier_keys) {
+    SendKeyPress(key_code);
+    EXPECT_FALSE(controller->GetOverlayForTest());
+  }
+
+  // Cycle through the modifier keys and make sure each gets shown.
+  EnableStickyKeys();
+  ash::StickyKeysOverlay* sticky_keys_overlay = controller->GetOverlayForTest();
+  for (auto key_code : modifier_keys) {
+    SendKeyPress(key_code);
+    EXPECT_TRUE(sticky_keys_overlay->is_visible());
+    SendKeyPress(key_code);
+    EXPECT_TRUE(sticky_keys_overlay->is_visible());
+    SendKeyPress(key_code);
+    EXPECT_FALSE(sticky_keys_overlay->is_visible());
+  }
+
+  // Disabling sticky keys should hide the overlay.
+  SendKeyPress(ui::VKEY_CONTROL);
+  EXPECT_TRUE(sticky_keys_overlay->is_visible());
+  DisableStickyKeys();
+  EXPECT_FALSE(controller->GetOverlayForTest());
+  for (auto key_code : modifier_keys) {
+    SendKeyPress(key_code);
+    EXPECT_FALSE(controller->GetOverlayForTest());
+  }
 }
 
 }  // namespace chromeos

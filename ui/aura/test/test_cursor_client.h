@@ -20,7 +20,7 @@ namespace test {
 class TestCursorClient : public aura::client::CursorClient {
  public:
   explicit TestCursorClient(aura::Window* root_window);
-  virtual ~TestCursorClient();
+  ~TestCursorClient() override;
 
   // Used to track the number of times SetCursor() was called.
   int calls_to_set_cursor() const { return calls_to_set_cursor_; }
@@ -32,26 +32,23 @@ class TestCursorClient : public aura::client::CursorClient {
   }
 
   // Overridden from aura::client::CursorClient:
-  virtual void SetCursor(gfx::NativeCursor cursor) OVERRIDE;
-  virtual gfx::NativeCursor GetCursor() const OVERRIDE;
-  virtual void ShowCursor() OVERRIDE;
-  virtual void HideCursor() OVERRIDE;
-  virtual void SetCursorSet(ui::CursorSetType cursor_set) OVERRIDE;
-  virtual ui::CursorSetType GetCursorSet() const OVERRIDE;
-  virtual bool IsCursorVisible() const OVERRIDE;
-  virtual void EnableMouseEvents() OVERRIDE;
-  virtual void DisableMouseEvents() OVERRIDE;
-  virtual bool IsMouseEventsEnabled() const OVERRIDE;
-  virtual void SetDisplay(const gfx::Display& display) OVERRIDE;
-  virtual void LockCursor() OVERRIDE;
-  virtual void UnlockCursor() OVERRIDE;
-  virtual bool IsCursorLocked() const OVERRIDE;
-  virtual void AddObserver(
-      aura::client::CursorClientObserver* observer) OVERRIDE;
-  virtual void RemoveObserver(
-      aura::client::CursorClientObserver* observer) OVERRIDE;
-  virtual bool ShouldHideCursorOnKeyEvent(
-      const ui::KeyEvent& event) const OVERRIDE;
+  void SetCursor(gfx::NativeCursor cursor) override;
+  gfx::NativeCursor GetCursor() const override;
+  void ShowCursor() override;
+  void HideCursor() override;
+  void SetCursorSet(ui::CursorSetType cursor_set) override;
+  ui::CursorSetType GetCursorSet() const override;
+  bool IsCursorVisible() const override;
+  void EnableMouseEvents() override;
+  void DisableMouseEvents() override;
+  bool IsMouseEventsEnabled() const override;
+  void SetDisplay(const gfx::Display& display) override;
+  void LockCursor() override;
+  void UnlockCursor() override;
+  bool IsCursorLocked() const override;
+  void AddObserver(aura::client::CursorClientObserver* observer) override;
+  void RemoveObserver(aura::client::CursorClientObserver* observer) override;
+  bool ShouldHideCursorOnKeyEvent(const ui::KeyEvent& event) const override;
 
  private:
   bool visible_;

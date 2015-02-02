@@ -20,8 +20,8 @@
 #define NOTIFY_ERROR(error, msg)                         \
   do {                                                   \
     SetState(kError);                                    \
-    DVLOGF(1) << msg;                                    \
-    DVLOGF(1) << "Calling NotifyError(" << error << ")"; \
+    LOG(ERROR) << msg;                                   \
+    LOG(ERROR) << "Calling NotifyError(" << error << ")";\
     NotifyError(error);                                  \
   } while (0)
 
@@ -220,12 +220,12 @@ bool VaapiVideoEncodeAccelerator::Initialize(
                                         x_display_,
                                         base::Bind(&ReportToUMA, VAAPI_ERROR));
   if (!vaapi_wrapper_) {
-    DVLOGF(1) << "Failed initializing VAAPI";
+    LOG(ERROR) << "Failed initializing VAAPI";
     return false;
   }
 
   if (!encoder_thread_.Start()) {
-    DVLOGF(1) << "Failed to start encoder thread";
+    LOG(ERROR) << "Failed to start encoder thread";
     return false;
   }
   encoder_thread_proxy_ = encoder_thread_.message_loop_proxy();
@@ -291,7 +291,7 @@ void VaapiVideoEncodeAccelerator::BeginFrame(bool force_keyframe) {
   else
     current_pic_.type = media::H264SliceHeader::kPSlice;
 
-  if (current_pic_.frame_num % idr_period_ == 0) {
+  if (current_pic_.frame_num % idr_period_ == 0 || force_keyframe) {
     current_pic_.idr = true;
     last_idr_frame_num_ = current_pic_.frame_num;
     ref_pic_list0_.clear();
@@ -304,8 +304,7 @@ void VaapiVideoEncodeAccelerator::BeginFrame(bool force_keyframe) {
   current_pic_.top_field_order_cnt = current_pic_.pic_order_cnt;
   current_pic_.pic_order_cnt_lsb = current_pic_.pic_order_cnt;
 
-  current_encode_job_->keyframe =
-      (current_pic_.type == media::H264SliceHeader::kISlice);
+  current_encode_job_->keyframe = current_pic_.idr;
 
   DVLOGF(4) << "Starting a new frame, type: " << current_pic_.type
             << (force_keyframe ? " (forced keyframe)" : "")

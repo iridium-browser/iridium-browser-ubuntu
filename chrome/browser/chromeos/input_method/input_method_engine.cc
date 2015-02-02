@@ -27,18 +27,24 @@
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/ime/candidate_window.h"
 #include "ui/base/ime/chromeos/ime_keymap.h"
+#include "ui/base/ime/text_input_flags.h"
 #include "ui/events/event.h"
 #include "ui/events/event_processor.h"
 #include "ui/events/keycodes/dom4/keycode_converter.h"
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/keyboard/keyboard_util.h"
 
+#if defined(USE_ATHENA)
+#include "athena/screen/public/screen_manager.h"
+#endif
+
 namespace chromeos {
-const char* kErrorNotActive = "IME is not active";
-const char* kErrorWrongContext = "Context is not active";
-const char* kCandidateNotFound = "Candidate not found";
 
 namespace {
+
+const char kErrorNotActive[] = "IME is not active";
+const char kErrorWrongContext[] = "Context is not active";
+const char kCandidateNotFound[] = "Candidate not found";
 
 // Notifies InputContextHandler that the composition is changed.
 void UpdateComposition(const CompositionText& composition_text,
@@ -214,6 +220,9 @@ bool InputMethodEngine::SetComposition(
       case SEGMENT_STYLE_DOUBLE_UNDERLINE:
         underline.type = CompositionText::COMPOSITION_TEXT_UNDERLINE_DOUBLE;
         break;
+      case SEGMENT_STYLE_NO_UNDERLINE:
+        underline.type = CompositionText::COMPOSITION_TEXT_UNDERLINE_NONE;
+        break;
       default:
         continue;
     }
@@ -280,8 +289,18 @@ bool InputMethodEngine::SendKeyEvents(
     return false;
   }
 
-  ui::EventProcessor* dispatcher =
-      ash::Shell::GetPrimaryRootWindow()->GetHost()->event_processor();
+  // TODO(shuchen): remove the ash/athena dependencies by leveraging
+  // aura::EnvObserver.
+  aura::Window* root_window = NULL;
+#if defined(USE_ATHENA)
+  root_window = athena::ScreenManager::Get()->GetContext()->GetRootWindow();
+#elif defined(USE_ASH)
+  root_window = ash::Shell::GetPrimaryRootWindow();
+#endif
+
+  if (!root_window)
+    return false;
+  ui::EventProcessor* dispatcher = root_window->GetHost()->event_processor();
 
   for (size_t i = 0; i < events.size(); ++i) {
     const KeyboardEvent& event = events[i];
@@ -493,11 +512,24 @@ void InputMethodEngine::HideInputView() {
   }
 }
 
+void InputMethodEngine::SetCompositionBounds(const gfx::Rect& bounds) {
+  observer_->OnCompositionBoundsChanged(bounds);
+}
+
 void InputMethodEngine::EnableInputView() {
+#if defined(USE_ATHENA)
+  // Athena does not currently support an extension-based VK. Blocking the
+  // override forces Athena to use to the system fallback VK, without
+  // interfering with the rest of the IME system.
+  // TODO(shuchen|kevers): Remove override suppression once supported.
+  // See crbug/407579, crbug/414940 and crbug/418078.
+  NOTIMPLEMENTED();
+#else
   keyboard::SetOverrideContentUrl(input_method::InputMethodManager::Get()
                                       ->GetActiveIMEState()
                                       ->GetCurrentInputMethod()
                                       .input_view_url());
+#endif
   keyboard::KeyboardController* keyboard_controller =
       keyboard::KeyboardController::GetInstance();
   if (keyboard_controller)
@@ -540,6 +572,13 @@ void InputMethodEngine::FocusIn(
       break;
   }
 
+  context.auto_correct =
+      !(input_context.flags & ui::TEXT_INPUT_FLAG_AUTOCORRECT_OFF);
+  context.auto_complete =
+      !(input_context.flags & ui::TEXT_INPUT_FLAG_AUTOCOMPLETE_OFF);
+  context.spell_check =
+      !(input_context.flags & ui::TEXT_INPUT_FLAG_SPELLCHECK_OFF);
+
   observer_->OnFocus(context);
 }
 
@@ -559,8 +598,9 @@ void InputMethodEngine::Enable(const std::string& component_id) {
   active_component_id_ = component_id;
   observer_->OnActivate(component_id);
   current_input_type_ = IMEBridge::Get()->GetCurrentTextInputType();
-  FocusIn(IMEEngineHandlerInterface::InputContext(
-      current_input_type_, ui::TEXT_INPUT_MODE_DEFAULT));
+  FocusIn(IMEEngineHandlerInterface::InputContext(current_input_type_,
+                                                  ui::TEXT_INPUT_MODE_DEFAULT,
+                                                  ui::TEXT_INPUT_FLAG_NONE));
   EnableInputView();
 }
 
@@ -581,7 +621,7 @@ void InputMethodEngine::ProcessKeyEvent(
     const ui::KeyEvent& key_event,
     const KeyEventDoneCallback& callback) {
 
-  KeyEventDoneCallback *handler = new KeyEventDoneCallback();
+  KeyEventDoneCallback* handler = new KeyEventDoneCallback();
   *handler = callback;
 
   KeyboardEvent ext_event;

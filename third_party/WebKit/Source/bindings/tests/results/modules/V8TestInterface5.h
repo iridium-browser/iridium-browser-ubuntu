@@ -25,14 +25,16 @@ public:
     static v8::Handle<v8::FunctionTemplate> domTemplate(v8::Isolate*);
     static TestInterface5Implementation* toImpl(v8::Handle<v8::Object> object)
     {
-        return toImpl(blink::toScriptWrappableBase(object));
+        return blink::toScriptWrappableBase(object)->toImpl<TestInterface5Implementation>();
     }
     static TestInterface5Implementation* toImplWithTypeCheck(v8::Isolate*, v8::Handle<v8::Value>);
     static const WrapperTypeInfo wrapperTypeInfo;
-    static void refObject(ScriptWrappableBase* internalPointer);
-    static void derefObject(ScriptWrappableBase* internalPointer);
-    static WrapperPersistentNode* createPersistentHandle(ScriptWrappableBase* internalPointer);
-    static void visitDOMWrapper(ScriptWrappableBase* internalPointer, const v8::Persistent<v8::Object>&, v8::Isolate*);
+    static void refObject(ScriptWrappableBase*);
+    static void derefObject(ScriptWrappableBase*);
+    static void trace(Visitor* visitor, ScriptWrappableBase* scriptWrappableBase)
+    {
+    }
+    static void visitDOMWrapper(v8::Isolate*, ScriptWrappableBase*, const v8::Persistent<v8::Object>&);
     static ActiveDOMObject* toActiveDOMObject(v8::Handle<v8::Object>);
     static void legacyCallCustom(const v8::FunctionCallbackInfo<v8::Value>&);
     static const int internalFieldCount = v8DefaultWrapperInternalFieldCount + 0;
@@ -40,61 +42,31 @@ public:
     {
         return impl->toScriptWrappableBase();
     }
-
-    static inline TestInterface5Implementation* toImpl(ScriptWrappableBase* internalPointer)
-    {
-        return internalPointer->toImpl<TestInterface5Implementation>();
-    }
     static void installConditionallyEnabledProperties(v8::Handle<v8::Object>, v8::Isolate*);
     static void installConditionallyEnabledMethods(v8::Handle<v8::Object>, v8::Isolate*);
-
-private:
 };
 
-class TestInterface5Implementation;
 v8::Handle<v8::Value> toV8(TestInterface5Implementation*, v8::Handle<v8::Object> creationContext, v8::Isolate*);
 
-template<class CallbackInfo>
+template<typename CallbackInfo>
 inline void v8SetReturnValue(const CallbackInfo& callbackInfo, TestInterface5Implementation* impl)
 {
     v8SetReturnValue(callbackInfo, toV8(impl, callbackInfo.Holder(), callbackInfo.GetIsolate()));
 }
 
-template<class CallbackInfo>
+template<typename CallbackInfo>
 inline void v8SetReturnValueForMainWorld(const CallbackInfo& callbackInfo, TestInterface5Implementation* impl)
 {
      v8SetReturnValue(callbackInfo, toV8(impl, callbackInfo.Holder(), callbackInfo.GetIsolate()));
 }
 
-template<class CallbackInfo, class Wrappable>
-inline void v8SetReturnValueFast(const CallbackInfo& callbackInfo, TestInterface5Implementation* impl, Wrappable*)
+template<typename CallbackInfo>
+inline void v8SetReturnValueFast(const CallbackInfo& callbackInfo, TestInterface5Implementation* impl, const ScriptWrappable*)
 {
      v8SetReturnValue(callbackInfo, toV8(impl, callbackInfo.Holder(), callbackInfo.GetIsolate()));
 }
 
-inline v8::Handle<v8::Value> toV8(PassRefPtr<TestInterface5Implementation> impl, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
-{
-    return toV8(impl.get(), creationContext, isolate);
-}
-
-template<class CallbackInfo>
-inline void v8SetReturnValue(const CallbackInfo& callbackInfo, PassRefPtr<TestInterface5Implementation> impl)
-{
-    v8SetReturnValue(callbackInfo, impl.get());
-}
-
-template<class CallbackInfo>
-inline void v8SetReturnValueForMainWorld(const CallbackInfo& callbackInfo, PassRefPtr<TestInterface5Implementation> impl)
-{
-    v8SetReturnValueForMainWorld(callbackInfo, impl.get());
-}
-
-template<class CallbackInfo, class Wrappable>
-inline void v8SetReturnValueFast(const CallbackInfo& callbackInfo, PassRefPtr<TestInterface5Implementation> impl, Wrappable* wrappable)
-{
-    v8SetReturnValueFast(callbackInfo, impl.get(), wrappable);
-}
-
 } // namespace blink
 #endif // ENABLE(CONDITION)
+
 #endif // V8TestInterface5_h

@@ -11,7 +11,9 @@
 #include "cc/output/copy_output_request.h"
 #include "cc/resources/single_release_callback.h"
 #include "cc/resources/texture_mailbox.h"
+#include "cc/surfaces/surface.h"
 #include "cc/surfaces/surface_factory.h"
+#include "cc/surfaces/surface_manager.h"
 #include "content/browser/compositor/resize_lock.h"
 #include "content/browser/gpu/compositor_util.h"
 #include "content/common/gpu/client/gl_helper.h"
@@ -26,6 +28,28 @@
 #include "ui/gfx/frame_time.h"
 
 namespace content {
+
+namespace {
+
+void SatisfyCallback(cc::SurfaceManager* manager,
+                     cc::SurfaceSequence sequence) {
+  std::vector<uint32_t> sequences;
+  sequences.push_back(sequence.sequence);
+  manager->DidSatisfySequences(sequence.id_namespace, &sequences);
+}
+
+void RequireCallback(cc::SurfaceManager* manager,
+                     cc::SurfaceId id,
+                     cc::SurfaceSequence sequence) {
+  cc::Surface* surface = manager->GetSurfaceForId(id);
+  if (!surface) {
+    LOG(ERROR) << "Attempting to require callback on nonexistent surface";
+    return;
+  }
+  surface->AddDestructionDependency(sequence);
+}
+
+}  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
 // DelegatedFrameHostClient
@@ -114,7 +138,7 @@ bool DelegatedFrameHost::ShouldCreateResizeLock() {
   if (resize_lock_)
     return false;
 
-  if (host->should_auto_resize())
+  if (host->auto_resize_enabled())
     return false;
 
   gfx::Size desired_size = client_->DesiredFrameSize();
@@ -130,14 +154,7 @@ bool DelegatedFrameHost::ShouldCreateResizeLock() {
 
 void DelegatedFrameHost::RequestCopyOfOutput(
     scoped_ptr<cc::CopyOutputRequest> request) {
-  if (use_surfaces_) {
-    if (surface_factory_ && !surface_id_.is_null())
-      surface_factory_->RequestCopyOfSurface(surface_id_, request.Pass());
-    else
-      request->SendEmptyResult();
-  } else {
-    client_->GetLayer()->RequestCopyOfOutput(request.Pass());
-  }
+  client_->GetLayer()->RequestCopyOfOutput(request.Pass());
 }
 
 void DelegatedFrameHost::CopyFromCompositingSurface(
@@ -349,6 +366,10 @@ void DelegatedFrameHost::SwapDelegatedFrame(
     // the DelegatedRendererLayer.
     EvictDelegatedFrame();
 
+    surface_factory_.reset();
+    if (!surface_returned_resources_.empty())
+      SendReturnedDelegatedResources(last_output_surface_id_);
+
     // Drop the cc::DelegatedFrameResourceCollection so that we will not return
     // any resources from the old output surface with the new output surface id.
     if (resource_collection_.get()) {
@@ -361,32 +382,33 @@ void DelegatedFrameHost::SwapDelegatedFrame(
     }
     last_output_surface_id_ = output_surface_id;
   }
-  bool modified_layers = false;
   ui::Compositor* compositor = client_->GetCompositor();
   if (frame_size.IsEmpty()) {
     DCHECK(frame_data->resource_list.empty());
     EvictDelegatedFrame();
-    modified_layers = true;
   } else {
     if (use_surfaces_) {
+      ImageTransportFactory* factory = ImageTransportFactory::GetInstance();
+      cc::SurfaceManager* manager = factory->GetSurfaceManager();
       if (!surface_factory_) {
-        ImageTransportFactory* factory = ImageTransportFactory::GetInstance();
-        cc::SurfaceManager* manager = factory->GetSurfaceManager();
-        id_allocator_ = factory->CreateSurfaceIdAllocator();
+        id_allocator_ =
+            factory->GetContextFactory()->CreateSurfaceIdAllocator();
         surface_factory_ =
             make_scoped_ptr(new cc::SurfaceFactory(manager, this));
       }
       if (surface_id_.is_null() || frame_size != current_surface_size_ ||
           frame_size_in_dip != current_frame_size_in_dip_) {
-        // TODO(jbauman): Wait to destroy this surface until the parent has
-        // finished using it.
         if (!surface_id_.is_null())
           surface_factory_->Destroy(surface_id_);
         surface_id_ = id_allocator_->GenerateId();
         surface_factory_->Create(surface_id_, frame_size);
-        client_->GetLayer()->SetShowSurface(surface_id_, frame_size_in_dip);
+        // manager must outlive compositors using it.
+        client_->GetLayer()->SetShowSurface(
+            surface_id_,
+            base::Bind(&SatisfyCallback, base::Unretained(manager)),
+            base::Bind(&RequireCallback, base::Unretained(manager)), frame_size,
+            frame_size_in_dip);
         current_surface_size_ = frame_size;
-        modified_layers = true;
       }
       scoped_ptr<cc::CompositorFrame> compositor_frame =
           make_scoped_ptr(new cc::CompositorFrame());
@@ -426,18 +448,14 @@ void DelegatedFrameHost::SwapDelegatedFrame(
       } else {
         frame_provider_->SetFrameData(frame_data.Pass());
       }
-      modified_layers = true;
     }
   }
   released_front_lock_ = NULL;
   current_frame_size_in_dip_ = frame_size_in_dip;
   CheckResizeLock();
 
-  if (modified_layers && !damage_rect_in_dip.IsEmpty()) {
-    // TODO(jbauman): Need to always tell the window observer about the
-    // damage.
+  if (!damage_rect_in_dip.IsEmpty())
     client_->GetLayer()->OnDelegatedFrameDamage(damage_rect_in_dip);
-  }
 
   pending_delegated_ack_count_++;
 
@@ -457,6 +475,8 @@ void DelegatedFrameHost::SwapDelegatedFrame(
         base::Bind(&DelegatedFrameHost::SendDelegatedFrameAck,
                    AsWeakPtr(),
                    output_surface_id));
+  } else {
+    AddOnCommitCallbackAndDisableLocks(base::Closure());
   }
   DidReceiveFrameFromRenderer(damage_rect);
   if (frame_provider_.get() || !surface_id_.is_null())
@@ -518,7 +538,7 @@ void DelegatedFrameHost::ReturnResources(
 }
 
 void DelegatedFrameHost::EvictDelegatedFrame() {
-  client_->GetLayer()->SetShowPaintedContent();
+  client_->GetLayer()->SetShowSolidColorContent();
   frame_provider_ = NULL;
   if (!surface_id_.is_null()) {
     surface_factory_->Destroy(surface_id_);
@@ -939,7 +959,8 @@ void DelegatedFrameHost::AddOnCommitCallbackAndDisableLocks(
     compositor->AddObserver(this);
 
   can_lock_compositor_ = NO_PENDING_COMMIT;
-  on_compositing_did_commit_callbacks_.push_back(callback);
+  if (!callback.is_null())
+    on_compositing_did_commit_callbacks_.push_back(callback);
 }
 
 void DelegatedFrameHost::AddedToWindow() {
@@ -988,7 +1009,12 @@ void DelegatedFrameHost::OnLayerRecreated(ui::Layer* old_layer,
                                        current_frame_size_in_dip_);
   }
   if (!surface_id_.is_null()) {
-    new_layer->SetShowSurface(surface_id_, current_frame_size_in_dip_);
+    ImageTransportFactory* factory = ImageTransportFactory::GetInstance();
+    cc::SurfaceManager* manager = factory->GetSurfaceManager();
+    new_layer->SetShowSurface(
+        surface_id_, base::Bind(&SatisfyCallback, base::Unretained(manager)),
+        base::Bind(&RequireCallback, base::Unretained(manager)),
+        current_surface_size_, current_frame_size_in_dip_);
   }
 }
 

@@ -45,6 +45,7 @@ const char kCroshBuiltinAppId[] = "nkoccljplnhpfnfiajclkommnmllphnl";
 const char kHotwordAudioVerificationAppId[] =
     "abjokfonkihficiokmkfboogholifghn";
 const char kHotwordExtensionId[] = "bepbmhgboaologfdajaanbcjmnhjmhfn";
+const char kHotwordNewExtensionId[] = "nbpagnldghgfoolbancepceaanlmhfmd";
 const char kHotwordSharedModuleId[] = "lccekmodgklaepjeofjdjpbminllajkg";
 const char kPdfExtensionId[] = "mhjfbmdgcfjbbpaeojofohoefgiehjai";
 const char kQuickOfficeComponentExtensionId[] =
@@ -87,6 +88,7 @@ const char kSpeechSynthesisExtensionId[] =
     "gjjabgpgjpampikjhjpfhneeoapjbjaf";
 const char kWallpaperManagerId[] = "obklkkbkpaoaejdabbfldmcfplpdgolj";
 const char kFirstRunDialogId[] = "jdgcneonijmofocbhmijhacgchbihela";
+const char kZIPUnpackerExtensionId[] = "oedeeodfidgoollimchfdnbmhcpnklnd";
 #else
 // The extension id for the web store extension.
 const char kChromeVoxExtensionId[] =

@@ -32,6 +32,7 @@
 #include "core/rendering/style/ContentData.h"
 #include "core/rendering/style/DataEquivalency.h"
 #include "core/rendering/style/QuotesData.h"
+#include "core/rendering/style/RenderStyleConstants.h"
 #include "core/rendering/style/ShadowList.h"
 #include "core/rendering/style/StyleImage.h"
 #include "core/rendering/style/StyleInheritedData.h"
@@ -123,7 +124,6 @@ ALWAYS_INLINE RenderStyle::RenderStyle(DefaultStyleTag)
     rareNonInheritedData.init();
     rareNonInheritedData.access()->m_deprecatedFlexibleBox.init();
     rareNonInheritedData.access()->m_flexibleBox.init();
-    rareNonInheritedData.access()->m_marquee.init();
     rareNonInheritedData.access()->m_multiCol.init();
     rareNonInheritedData.access()->m_transform.init();
     rareNonInheritedData.access()->m_willChange.init();
@@ -195,6 +195,21 @@ StyleRecalcChange RenderStyle::stylePropagationDiff(const RenderStyle* oldStyle,
         return Inherit;
 
     return NoInherit;
+}
+
+ItemPosition RenderStyle::resolveAlignment(const RenderStyle* parentStyle, const RenderStyle* childStyle, ItemPosition resolvedAutoPositionForRenderer)
+{
+    // The auto keyword computes to the parent's align-items computed value, or to "stretch", if not set or "auto".
+    if (childStyle->alignSelf() == ItemPositionAuto)
+        return (parentStyle->alignItems() == ItemPositionAuto) ? resolvedAutoPositionForRenderer : parentStyle->alignItems();
+    return childStyle->alignSelf();
+}
+
+ItemPosition RenderStyle::resolveJustification(const RenderStyle* parentStyle, const RenderStyle* childStyle, ItemPosition resolvedAutoPositionForRenderer)
+{
+    if (childStyle->justifySelf() == ItemPositionAuto)
+        return (parentStyle->justifyItems() == ItemPositionAuto) ? resolvedAutoPositionForRenderer : parentStyle->justifyItems();
+    return childStyle->justifySelf();
 }
 
 void RenderStyle::inheritFrom(const RenderStyle* inheritParent, IsAtShadowBoundary isAtShadowBoundary)
@@ -384,6 +399,14 @@ StyleDifference RenderStyle::visualInvalidationDiff(const RenderStyle& other) co
 
     if (!diff.needsFullLayout() && diffNeedsFullLayout(other))
         diff.setNeedsFullLayout();
+
+    if (!diff.needsFullLayout() && surround->margin != other.surround->margin) {
+        // Relative-positioned elements collapse their margins so need a full layout.
+        if (position() == AbsolutePosition || position() == FixedPosition)
+            diff.setNeedsPositionedMovementLayout();
+        else
+            diff.setNeedsFullLayout();
+    }
 
     if (!diff.needsFullLayout() && position() != StaticPosition && surround->offset != other.surround->offset) {
         // Optimize for the case where a positioned layer is moving but not changing size.
@@ -603,9 +626,6 @@ bool RenderStyle::diffNeedsFullLayout(const RenderStyle& other) const
         return true;
 
     if (surround.get() != other.surround.get()) {
-        if (surround->margin != other.surround->margin)
-            return true;
-
         if (surround->padding != other.surround->padding)
             return true;
     }
@@ -657,13 +677,15 @@ bool RenderStyle::diffNeedsPaintInvalidationObject(const RenderStyle& other) con
 
     if (rareNonInheritedData.get() != other.rareNonInheritedData.get()) {
         if (rareNonInheritedData->userDrag != other.rareNonInheritedData->userDrag
-            || rareNonInheritedData->m_borderFit != other.rareNonInheritedData->m_borderFit
             || rareNonInheritedData->m_objectFit != other.rareNonInheritedData->m_objectFit
             || rareNonInheritedData->m_objectPosition != other.rareNonInheritedData->m_objectPosition
-            || !dataEquivalent(rareNonInheritedData->m_shapeOutside, other.rareNonInheritedData->m_shapeOutside)
-            || !dataEquivalent(rareNonInheritedData->m_clipPath, other.rareNonInheritedData->m_clipPath))
+            || !rareNonInheritedData->shapeOutsideDataEquivalent(*other.rareNonInheritedData.get())
+            || !rareNonInheritedData->clipPathDataEquivalent(*other.rareNonInheritedData.get()))
             return true;
     }
+
+    if (resize() != other.resize())
+        return true;
 
     return false;
 }

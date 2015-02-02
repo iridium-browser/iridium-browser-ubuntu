@@ -17,6 +17,7 @@
 #include "base/values.h"
 #include "content/public/browser/certificate_request_result_type.h"
 #include "content/public/browser/desktop_notification_delegate.h"
+#include "content/public/browser/permission_type.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/media_stream_request.h"
 #include "content/public/common/resource_type.h"
@@ -274,6 +275,13 @@ class CONTENT_EXPORT ContentBrowserClient {
                              const GURL& first_party,
                              ResourceContext* context);
 
+  // Allow the embedder to control if a Service Worker can be associated
+  // with the given scope.
+  // This is called on the IO thread.
+  virtual bool AllowServiceWorker(const GURL& scope,
+                                  const GURL& first_party,
+                                  content::ResourceContext* context);
+
   // Allow the embedder to control if the given cookie can be read.
   // This is called on the IO thread.
   virtual bool AllowGetCookie(const GURL& url,
@@ -412,13 +420,6 @@ class CONTENT_EXPORT ContentBrowserClient {
   // return NULL if they're not interested.
   virtual MediaObserver* GetMediaObserver();
 
-  // Asks permission to show desktop notifications. |callback| needs to be run
-  // when the user approves the request.
-  virtual void RequestDesktopNotificationPermission(
-      const GURL& source_origin,
-      RenderFrameHost* render_frame_host,
-      const base::Callback<void(blink::WebNotificationPermission)>& callback) {}
-
   // Checks if the given page has permission to show desktop notifications.
   // This is called on the IO thread.
   virtual blink::WebNotificationPermission
@@ -431,47 +432,28 @@ class CONTENT_EXPORT ContentBrowserClient {
   // a callback which can be used to cancel the notification.
   virtual void ShowDesktopNotification(
       const ShowDesktopNotificationHostMsgParams& params,
-      RenderFrameHost* render_frame_host,
+      BrowserContext* browser_context,
+      int render_process_id,
       scoped_ptr<DesktopNotificationDelegate> delegate,
       base::Closure* cancel_callback) {}
 
-  // The renderer is requesting permission to use Geolocation. When the answer
-  // to a permission request has been determined, |result_callback| should be
-  // called with the result. If |cancel_callback| is non-null, it's set to a
-  // callback which can be used to cancel the permission request.
-  virtual void RequestGeolocationPermission(
+  virtual void RequestPermission(
+      PermissionType permission,
       WebContents* web_contents,
       int bridge_id,
       const GURL& requesting_frame,
       bool user_gesture,
-      base::Callback<void(bool)> result_callback,
-      base::Closure* cancel_callback);
+      const base::Callback<void(bool)>& result_callback);
 
-  // Invoked when the Geolocation API uses its permission.
-  virtual void DidUseGeolocationPermission(WebContents* web_contents,
-                                           const GURL& frame_url,
-                                           const GURL& main_frame_url) {}
+  virtual void CancelPermissionRequest(PermissionType permission,
+                                       WebContents* web_contents,
+                                       int bridge_id,
+                                       const GURL& requesting_frame) {}
 
-  // Requests a permission to use system exclusive messages in MIDI events.
-  // |result_callback| will be invoked when the request is resolved. If
-  // |cancel_callback| is non-null, it's set to a callback which can be used to
-  // cancel the permission request.
-  virtual void RequestMidiSysExPermission(
-      WebContents* web_contents,
-      int bridge_id,
-      const GURL& requesting_frame,
-      bool user_gesture,
-      base::Callback<void(bool)> result_callback,
-      base::Closure* cancel_callback);
-
-  // Request permission to access protected media identifier. |result_callback
-  // will tell whether it's permitted. If |cancel_callback| is non-null, it's
-  // set to a callback which can be used to cancel the permission request.
-  virtual void RequestProtectedMediaIdentifierPermission(
-      WebContents* web_contents,
-      const GURL& origin,
-      base::Callback<void(bool)> result_callback,
-      base::Closure* cancel_callback);
+  virtual void RegisterPermissionUsage(PermissionType permission,
+                                       WebContents* web_contents,
+                                       const GURL& frame_url,
+                                       const GURL& main_frame_url) {}
 
   // Returns true if the given page is allowed to open a window of the given
   // type. If true is returned, |no_javascript_access| will indicate whether
@@ -618,7 +600,7 @@ class CONTENT_EXPORT ContentBrowserClient {
   virtual void GetAdditionalMappedFilesForChildProcess(
       const base::CommandLine& command_line,
       int child_process_id,
-      std::vector<FileDescriptorInfo>* mappings) {}
+      FileDescriptorInfo* mappings) {}
 #endif
 
 #if defined(OS_WIN)

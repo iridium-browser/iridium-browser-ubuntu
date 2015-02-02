@@ -154,12 +154,17 @@ GpuPerformanceStats RetrieveGpuPerformanceStatsWithHistograms() {
 
   UMA_HISTOGRAM_TIMES("GPU.WinSAT.ReadResultsFileTime",
                       base::TimeTicks::Now() - start_time);
-  UMA_HISTOGRAM_CUSTOM_COUNTS("GPU.WinSAT.OverallScore2",
-                              stats.overall * 10, 10, 200, 50);
-  UMA_HISTOGRAM_CUSTOM_COUNTS("GPU.WinSAT.GraphicsScore2",
-                              stats.graphics * 10, 10, 200, 50);
-  UMA_HISTOGRAM_CUSTOM_COUNTS("GPU.WinSAT.GamingScore2",
-                              stats.gaming * 10, 10, 200, 50);
+  UMA_HISTOGRAM_CUSTOM_COUNTS(
+      "GPU.WinSAT.OverallScore2",
+      static_cast<base::HistogramBase::Sample>(stats.overall * 10), 10, 200,
+      50);
+  UMA_HISTOGRAM_CUSTOM_COUNTS(
+      "GPU.WinSAT.GraphicsScore2",
+      static_cast<base::HistogramBase::Sample>(stats.graphics * 10), 10, 200,
+      50);
+  UMA_HISTOGRAM_CUSTOM_COUNTS(
+      "GPU.WinSAT.GamingScore2",
+      static_cast<base::HistogramBase::Sample>(stats.gaming * 10), 10, 200, 50);
   UMA_HISTOGRAM_BOOLEAN(
       "GPU.WinSAT.HasResults",
       stats.overall != 0.0 && stats.graphics != 0.0 && stats.gaming != 0.0);
@@ -658,6 +663,45 @@ void MergeGPUInfo(GPUInfo* basic_gpu_info,
   if (context_gpu_info.software_rendering) {
     basic_gpu_info->software_rendering = true;
     return;
+  }
+
+  // Track D3D Shader Model (if available)
+  const std::string& shader_version =
+      context_gpu_info.vertex_shader_version;
+
+  // Only gather if this is the first time we're seeing
+  // a non-empty shader version string.
+  if (!shader_version.empty() &&
+      basic_gpu_info->vertex_shader_version.empty()) {
+
+    // Note: do not reorder, used by UMA_HISTOGRAM below
+    enum ShaderModel {
+      SHADER_MODEL_UNKNOWN,
+      SHADER_MODEL_2_0,
+      SHADER_MODEL_3_0,
+      SHADER_MODEL_4_0,
+      SHADER_MODEL_4_1,
+      SHADER_MODEL_5_0,
+      NUM_SHADER_MODELS
+    };
+
+    ShaderModel shader_model = SHADER_MODEL_UNKNOWN;
+
+    if (shader_version == "5.0") {
+      shader_model = SHADER_MODEL_5_0;
+    } else if (shader_version == "4.1") {
+      shader_model = SHADER_MODEL_4_1;
+    } else if (shader_version == "4.0") {
+      shader_model = SHADER_MODEL_4_0;
+    } else if (shader_version == "3.0") {
+      shader_model = SHADER_MODEL_3_0;
+    } else if (shader_version == "2.0") {
+      shader_model = SHADER_MODEL_2_0;
+    }
+
+    UMA_HISTOGRAM_ENUMERATION("GPU.D3DShaderModel",
+                              shader_model,
+                              NUM_SHADER_MODELS);
   }
 
   MergeGPUInfoGL(basic_gpu_info, context_gpu_info);

@@ -8,6 +8,7 @@
 #include "base/i18n/number_formatting.h"
 #include "base/i18n/rtl.h"
 #include "base/prefs/pref_registry_simple.h"
+#include "base/prefs/pref_service.h"
 #include "base/process/process_metrics.h"
 #include "base/stl_util.h"
 #include "base/strings/string16.h"
@@ -16,6 +17,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/profiles/profile_window.h"
 #include "chrome/browser/task_manager/background_information.h"
 #include "chrome/browser/task_manager/browser_process_resource_provider.h"
 #include "chrome/browser/task_manager/child_process_resource_provider.h"
@@ -27,6 +29,7 @@
 #include "chrome/browser/task_manager/tab_contents_information.h"
 #include "chrome/browser/task_manager/web_contents_resource_provider.h"
 #include "chrome/browser/ui/browser_navigator.h"
+#include "chrome/browser/ui/user_manager.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
@@ -165,7 +168,7 @@ class TaskManagerModelGpuDataManagerObserver
     content::GpuDataManager::GetInstance()->AddObserver(this);
   }
 
-  virtual ~TaskManagerModelGpuDataManagerObserver() {
+  ~TaskManagerModelGpuDataManagerObserver() override {
     content::GpuDataManager::GetInstance()->RemoveObserver(this);
   }
 
@@ -175,9 +178,8 @@ class TaskManagerModelGpuDataManagerObserver
         video_memory_usage_stats);
   }
 
-  virtual void OnVideoMemoryUsageStatsUpdate(
-      const content::GPUVideoMemoryUsageStats& video_memory_usage_stats)
-          OVERRIDE {
+  void OnVideoMemoryUsageStatsUpdate(const content::GPUVideoMemoryUsageStats&
+                                         video_memory_usage_stats) override {
     if (BrowserThread::CurrentlyOn(BrowserThread::UI)) {
       NotifyVideoMemoryUsageStats(video_memory_usage_stats);
     } else {
@@ -249,12 +251,12 @@ TaskManagerModel::TaskManagerModel(TaskManager* task_manager)
       task_manager,
       scoped_ptr<WebContentsInformation>(
           new task_manager::TabContentsInformation())));
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
   AddResourceProvider(new task_manager::WebContentsResourceProvider(
       task_manager,
       scoped_ptr<WebContentsInformation>(
           new task_manager::PrintingInformation())));
-#endif  // ENABLE_FULL_PRINTING
+#endif  // ENABLE_PRINT_PREVIEW
   AddResourceProvider(new task_manager::WebContentsResourceProvider(
       task_manager,
       scoped_ptr<WebContentsInformation>(
@@ -1527,10 +1529,17 @@ TaskManager* TaskManager::GetInstance() {
 }
 
 void TaskManager::OpenAboutMemory(chrome::HostDesktopType desktop_type) {
+  Profile* profile = ProfileManager::GetLastUsedProfileAllowedByPolicy();
+  if (profile->IsGuestSession() && !g_browser_process->local_state()->
+      GetBoolean(prefs::kBrowserGuestModeEnabled)) {
+    UserManager::Show(base::FilePath(),
+                      profiles::USER_MANAGER_NO_TUTORIAL,
+                      profiles::USER_MANAGER_SELECT_PROFILE_CHROME_MEMORY);
+    return;
+  }
+
   chrome::NavigateParams params(
-      ProfileManager::GetLastUsedProfileAllowedByPolicy(),
-      GURL(chrome::kChromeUIMemoryURL),
-      ui::PAGE_TRANSITION_LINK);
+      profile, GURL(chrome::kChromeUIMemoryURL), ui::PAGE_TRANSITION_LINK);
   params.disposition = NEW_FOREGROUND_TAB;
   params.host_desktop_type = desktop_type;
   chrome::Navigate(&params);

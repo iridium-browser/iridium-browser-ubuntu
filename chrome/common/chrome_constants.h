@@ -109,11 +109,6 @@ extern const wchar_t kUserDataDirname[];
 
 extern const bool kRecordModeEnabled;
 
-// If a WebContents is impolite and displays a second JavaScript alert within
-// kJavaScriptMessageExpectedDelay of a previous JavaScript alert being
-// dismissed, display an option to suppress future alerts from this WebContents.
-extern const int kJavaScriptMessageExpectedDelay;
-
 // Are touch icons enabled? False by default.
 extern const bool kEnableTouchIcon;
 
@@ -123,9 +118,6 @@ extern const bool kEnableTouchIcon;
 // enough render processes and not be starved when a lot of extensions are
 // installed.
 extern const float kMaxShareOfExtensionProcesses;
-
-// This is used by the PreRead experiment.
-extern const char kPreReadEnvironmentVariable[];
 
 #if defined(OS_LINUX)
 // The highest and lowest assigned OOM score adjustment

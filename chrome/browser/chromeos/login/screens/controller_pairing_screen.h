@@ -7,22 +7,31 @@
 
 #include "base/macros.h"
 
+#include "chrome/browser/chromeos/login/screens/base_screen.h"
 #include "chrome/browser/chromeos/login/screens/controller_pairing_screen_actor.h"
-#include "chrome/browser/chromeos/login/screens/screen_context.h"
-#include "chrome/browser/chromeos/login/screens/wizard_screen.h"
+#include "components/login/screens/screen_context.h"
 #include "components/pairing/controller_pairing_controller.h"
 
 namespace chromeos {
 
-class ControllerPairingScreen :
-  public WizardScreen,
-  public pairing_chromeos::ControllerPairingController::Observer,
-  public ControllerPairingScreenActor::Delegate {
+class ControllerPairingScreen
+    : public BaseScreen,
+      public pairing_chromeos::ControllerPairingController::Observer,
+      public ControllerPairingScreenActor::Delegate {
  public:
+  class Delegate {
+   public:
+    virtual ~Delegate() {}
+
+    // Set remora configuration from shark.
+    virtual void SetHostConfiguration() = 0;
+  };
+
   ControllerPairingScreen(
-      ScreenObserver* observer,
+      BaseScreenDelegate* base_screen_delegate,
+      Delegate* delegate,
       ControllerPairingScreenActor* actor,
-      pairing_chromeos::ControllerPairingController* controller);
+      pairing_chromeos::ControllerPairingController* shark_controller);
   virtual ~ControllerPairingScreen();
 
  private:
@@ -31,30 +40,32 @@ class ControllerPairingScreen :
   void CommitContextChanges();
   bool ExpectStageIs(Stage stage) const;
 
-  // Overridden from WizardScreen:
-  virtual void PrepareToShow() OVERRIDE;
-  virtual void Show() OVERRIDE;
-  virtual void Hide() OVERRIDE;
-  virtual std::string GetName() const OVERRIDE;
+  // Overridden from BaseScreen:
+  virtual void PrepareToShow() override;
+  virtual void Show() override;
+  virtual void Hide() override;
+  virtual std::string GetName() const override;
 
   // Overridden from pairing_chromeos::ControllerPairingController::Observer:
-  virtual void PairingStageChanged(Stage new_stage) OVERRIDE;
-  virtual void DiscoveredDevicesListChanged() OVERRIDE;
+  virtual void PairingStageChanged(Stage new_stage) override;
+  virtual void DiscoveredDevicesListChanged() override;
 
   // Overridden from ControllerPairingView::Delegate:
-  virtual void OnActorDestroyed(ControllerPairingScreenActor* actor) OVERRIDE;
+  virtual void OnActorDestroyed(ControllerPairingScreenActor* actor) override;
   virtual void OnScreenContextChanged(
-      const base::DictionaryValue& diff) OVERRIDE;
-  virtual void OnUserActed(const std::string& action) OVERRIDE;
+      const base::DictionaryValue& diff) override;
+  virtual void OnUserActed(const std::string& action) override;
 
   // Context for sharing data between C++ and JS.
   // TODO(dzhioev): move to BaseScreen when possible.
-  ScreenContext context_;
+  ::login::ScreenContext context_;
+
+  Delegate* delegate_;
 
   ControllerPairingScreenActor* actor_;
 
   // Controller performing pairing. Owned by the wizard controller.
-  pairing_chromeos::ControllerPairingController* controller_;
+  pairing_chromeos::ControllerPairingController* shark_controller_;
 
   // Current stage of pairing process.
   Stage current_stage_;

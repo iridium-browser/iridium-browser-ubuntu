@@ -37,8 +37,9 @@ class ImmediatePollPolicy : public ProxyService::PacPollPolicy {
  public:
   ImmediatePollPolicy() {}
 
-  virtual Mode GetNextDelay(int error, base::TimeDelta current_delay,
-                            base::TimeDelta* next_delay) const OVERRIDE {
+  Mode GetNextDelay(int error,
+                    base::TimeDelta current_delay,
+                    base::TimeDelta* next_delay) const override {
     *next_delay = base::TimeDelta::FromMilliseconds(1);
     return MODE_USE_TIMER;
   }
@@ -53,8 +54,9 @@ class NeverPollPolicy : public ProxyService::PacPollPolicy {
  public:
   NeverPollPolicy() {}
 
-  virtual Mode GetNextDelay(int error, base::TimeDelta current_delay,
-                            base::TimeDelta* next_delay) const OVERRIDE {
+  Mode GetNextDelay(int error,
+                    base::TimeDelta current_delay,
+                    base::TimeDelta* next_delay) const override {
     *next_delay = base::TimeDelta::FromDays(60);
     return MODE_USE_TIMER;
   }
@@ -68,8 +70,9 @@ class ImmediateAfterActivityPollPolicy : public ProxyService::PacPollPolicy {
  public:
   ImmediateAfterActivityPollPolicy() {}
 
-  virtual Mode GetNextDelay(int error, base::TimeDelta current_delay,
-                            base::TimeDelta* next_delay) const OVERRIDE {
+  Mode GetNextDelay(int error,
+                    base::TimeDelta current_delay,
+                    base::TimeDelta* next_delay) const override {
     *next_delay = base::TimeDelta();
     return MODE_START_AFTER_ACTIVITY;
   }
@@ -95,13 +98,13 @@ class ImmediateAfterActivityPollPolicy : public ProxyService::PacPollPolicy {
 // are careful to avoid timing problems.
 class ProxyServiceTest : public testing::Test {
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     testing::Test::SetUp();
     previous_policy_ =
         ProxyService::set_pac_script_poll_policy(&never_poll_policy_);
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     // Restore the original policy.
     ProxyService::set_pac_script_poll_policy(previous_policy_);
     testing::Test::TearDown();
@@ -127,16 +130,15 @@ class MockProxyConfigService: public ProxyConfigService {
         config_(ProxyConfig::CreateFromCustomPacURL(GURL(pac_url))) {
   }
 
-  virtual void AddObserver(Observer* observer) OVERRIDE {
+  void AddObserver(Observer* observer) override {
     observers_.AddObserver(observer);
   }
 
-  virtual void RemoveObserver(Observer* observer) OVERRIDE {
+  void RemoveObserver(Observer* observer) override {
     observers_.RemoveObserver(observer);
   }
 
-  virtual ConfigAvailability GetLatestProxyConfig(ProxyConfig* results)
-      OVERRIDE {
+  ConfigAvailability GetLatestProxyConfig(ProxyConfig* results) override {
     if (availability_ == CONFIG_VALID)
       *results = config_;
     return availability_;
@@ -165,10 +167,10 @@ class TestResolveProxyNetworkDelegate : public NetworkDelegate {
         proxy_service_(NULL) {
   }
 
-  virtual void OnResolveProxy(const GURL& url,
-                              int load_flags,
-                              const ProxyService& proxy_service,
-                              ProxyInfo* result) OVERRIDE {
+  void OnResolveProxy(const GURL& url,
+                      int load_flags,
+                      const ProxyService& proxy_service,
+                      ProxyInfo* result) override {
     on_resolve_proxy_called_ = true;
     proxy_service_ = &proxy_service;
     DCHECK(!add_proxy_ || !remove_proxy_);
@@ -210,8 +212,8 @@ class TestProxyFallbackNetworkDelegate : public NetworkDelegate {
         proxy_fallback_net_error_(OK) {
   }
 
-  virtual void OnProxyFallback(const ProxyServer& proxy_server,
-                               int net_error) OVERRIDE {
+  void OnProxyFallback(const ProxyServer& proxy_server,
+                       int net_error) override {
     proxy_server_ = proxy_server;
     proxy_fallback_net_error_ = net_error;
     on_proxy_fallback_called_ = true;
@@ -3079,6 +3081,58 @@ TEST_F(ProxyServiceTest, PACScriptRefetchAfterActivity) {
       NULL, NULL, BoundNetLog());
   EXPECT_EQ(OK, rv);
   EXPECT_TRUE(info3.is_direct());
+}
+
+// Test that the synchronous resolution fails when a PAC script is active.
+TEST_F(ProxyServiceTest, SynchronousWithPAC) {
+  MockProxyConfigService* config_service =
+      new MockProxyConfigService("http://foopy/proxy.pac");
+
+  MockAsyncProxyResolver* resolver = new MockAsyncProxyResolver();
+
+  ProxyService service(config_service, resolver, NULL);
+
+  GURL url("http://www.google.com/");
+
+  ProxyInfo info;
+  info.UseDirect();
+  CapturingBoundNetLog log;
+
+  bool synchronous_success = service.TryResolveProxySynchronously(
+      url, net::LOAD_NORMAL, &info, NULL, log.bound());
+  EXPECT_FALSE(synchronous_success);
+
+  // No request should have been queued.
+  EXPECT_EQ(0u, resolver->pending_requests().size());
+
+  // |info| should not have been modified.
+  EXPECT_TRUE(info.is_direct());
+}
+
+// Test that synchronous results are returned correctly if a fixed proxy
+// configuration is active.
+TEST_F(ProxyServiceTest, SynchronousWithFixedConfiguration) {
+  ProxyConfig config;
+  config.proxy_rules().ParseFromString("foopy1:8080");
+  config.set_auto_detect(false);
+
+  MockAsyncProxyResolver* resolver = new MockAsyncProxyResolver();
+
+  ProxyService service(new MockProxyConfigService(config), resolver, NULL);
+
+  GURL url("http://www.google.com/");
+
+  ProxyInfo info;
+  CapturingBoundNetLog log;
+
+  bool synchronous_success = service.TryResolveProxySynchronously(
+      url, net::LOAD_NORMAL, &info, NULL, log.bound());
+  EXPECT_TRUE(synchronous_success);
+  EXPECT_FALSE(info.is_direct());
+  EXPECT_EQ("foopy1", info.proxy_server().host_port_pair().host());
+
+  // No request should have been queued.
+  EXPECT_EQ(0u, resolver->pending_requests().size());
 }
 
 }  // namespace net

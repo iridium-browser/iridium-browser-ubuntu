@@ -12,6 +12,7 @@
 #include "base/metrics/field_trial.h"
 #include "base/path_service.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/search/hotword_service.h"
 #include "chrome/browser/search/hotword_service_factory.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -288,6 +289,13 @@ void ComponentLoader::AddVideoPlayerExtension() {
 #endif  // defined(OS_CHROMEOS)
 }
 
+void ComponentLoader::AddAudioPlayerExtension() {
+#if defined(OS_CHROMEOS)
+  Add(IDR_AUDIO_PLAYER_MANIFEST,
+      base::FilePath(FILE_PATH_LITERAL("audio_player")));
+#endif  // defined(OS_CHROMEOS)
+}
+
 void ComponentLoader::AddGalleryExtension() {
 #if defined(OS_CHROMEOS)
   Add(IDR_GALLERY_MANIFEST, base::FilePath(FILE_PATH_LITERAL("gallery")));
@@ -302,8 +310,7 @@ void ComponentLoader::AddHangoutServicesExtension() {
 }
 
 void ComponentLoader::AddHotwordAudioVerificationApp() {
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kEnableExperimentalHotwording)) {
+  if (HotwordService::IsExperimentalHotwordingEnabled()) {
     Add(IDR_HOTWORD_AUDIO_VERIFICATION_MANIFEST,
         base::FilePath(FILE_PATH_LITERAL("hotword_audio_verification")));
   }
@@ -311,8 +318,7 @@ void ComponentLoader::AddHotwordAudioVerificationApp() {
 
 void ComponentLoader::AddHotwordHelperExtension() {
   if (HotwordServiceFactory::IsHotwordAllowed(browser_context_)) {
-    CommandLine* command_line = CommandLine::ForCurrentProcess();
-    if (command_line->HasSwitch(switches::kEnableExperimentalHotwording)) {
+    if (HotwordService::IsExperimentalHotwordingEnabled()) {
       Add(IDR_HOTWORD_MANIFEST,
           base::FilePath(FILE_PATH_LITERAL("hotword")));
     } else {
@@ -520,6 +526,7 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
 
   if (!skip_session_components) {
     AddVideoPlayerExtension();
+    AddAudioPlayerExtension();
     AddFileManagerExtension();
     AddGalleryExtension();
 
@@ -528,20 +535,18 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
     AddHotwordHelperExtension();
     AddImageLoaderExtension();
 
+    bool install_feedback = enable_background_extensions_during_testing;
+#if defined(GOOGLE_CHROME_BUILD)
+    install_feedback = true;
+#endif  // defined(GOOGLE_CHROME_BUILD)
+    if (install_feedback)
+      Add(IDR_FEEDBACK_MANIFEST, base::FilePath(FILE_PATH_LITERAL("feedback")));
+
 #if defined(ENABLE_SETTINGS_APP)
     Add(IDR_SETTINGS_APP_MANIFEST,
         base::FilePath(FILE_PATH_LITERAL("settings_app")));
 #endif
   }
-
-  // If (!enable_background_extensions_during_testing || this isn't a test)
-  //   install_feedback = false;
-  bool install_feedback = enable_background_extensions_during_testing;
-#if defined(GOOGLE_CHROME_BUILD)
-  install_feedback = true;
-#endif  // defined(GOOGLE_CHROME_BUILD)
-  if (install_feedback)
-    Add(IDR_FEEDBACK_MANIFEST, base::FilePath(FILE_PATH_LITERAL("feedback")));
 
 #if defined(OS_CHROMEOS)
   if (!skip_session_components) {

@@ -105,7 +105,8 @@ def GetRequiredLibrariesForPerfProfile(profile_file):
     A set of required library file names.
   """
   with open(os.devnull, 'w') as dev_null:
-    perfhost_path = support_binaries.FindPath(GetPerfhostName(), 'linux')
+    perfhost_path = support_binaries.FindPath(
+        GetPerfhostName(), 'x86_64', 'linux')
     perf = subprocess.Popen([perfhost_path, 'script', '-i', profile_file],
                              stdout=dev_null, stderr=subprocess.PIPE)
     _, output = perf.communicate()
@@ -117,8 +118,9 @@ def GetRequiredLibrariesForPerfProfile(profile_file):
     if lib:
       lib = lib.group(1)
       path = os.path.dirname(lib)
-      if any(path.startswith(ignored_path)
-             for ignored_path in _IGNORED_LIB_PATHS) or path == '/':
+      if (any(path.startswith(ignored_path)
+              for ignored_path in _IGNORED_LIB_PATHS)
+          or path == '/' or not path):
         continue
       libs.add(lib)
   return libs

@@ -15,7 +15,6 @@
 namespace net {
 class URLFetcher;
 class URLRequestContextGetter;
-class URLRequestStatus;
 }
 
 class GoogleServiceAuthError;
@@ -36,7 +35,7 @@ class WalletSigninHelper : public net::URLFetcherDelegate {
   WalletSigninHelper(WalletSigninHelperDelegate* delegate,
                      net::URLRequestContextGetter* getter);
 
-  virtual ~WalletSigninHelper();
+  ~WalletSigninHelper() override;
 
   // Initiates an attempt to passively sign the user into the Online Wallet.
   // A passive sign-in is a non-interactive refresh of content area cookies,
@@ -58,7 +57,7 @@ class WalletSigninHelper : public net::URLFetcherDelegate {
   void OnOtherError();
 
   // URLFetcherDelegate implementation.
-  virtual void OnURLFetchComplete(const net::URLFetcher* fetcher) OVERRIDE;
+  void OnURLFetchComplete(const net::URLFetcher* fetcher) override;
 
   // Callback for when the Google Wallet cookie has been retrieved.
   void ReturnWalletCookieValue(const std::string& cookie_value);

@@ -16,8 +16,10 @@ namespace proxy {
 PpapiCommandBufferProxy::PpapiCommandBufferProxy(
     const ppapi::HostResource& resource,
     ProxyChannel* channel,
+    const gpu::Capabilities& capabilities,
     const SerializedHandle& shared_state)
-    : resource_(resource),
+    : capabilities_(capabilities),
+      resource_(resource),
       channel_(channel) {
   shared_state_shm_.reset(
       new base::SharedMemory(shared_state.shmem(), false));
@@ -145,10 +147,6 @@ void PpapiCommandBufferProxy::DestroyTransferBuffer(int32 id) {
       ppapi::API_ID_PPB_GRAPHICS_3D, resource_, id));
 }
 
-void PpapiCommandBufferProxy::Echo(const base::Closure& callback) {
-  NOTREACHED();
-}
-
 uint32 PpapiCommandBufferProxy::CreateStreamTexture(uint32 texture_id) {
   NOTREACHED();
   return 0;
@@ -194,23 +192,28 @@ void PpapiCommandBufferProxy::SetSurfaceVisible(bool visible) {
 }
 
 gpu::Capabilities PpapiCommandBufferProxy::GetCapabilities() {
-  // TODO(boliu): Need to implement this to use cc in Pepper. Tracked in
-  // crbug.com/325391.
-  return gpu::Capabilities();
+  return capabilities_;
 }
 
-gfx::GpuMemoryBuffer* PpapiCommandBufferProxy::CreateGpuMemoryBuffer(
+int32 PpapiCommandBufferProxy::CreateImage(ClientBuffer buffer,
+                                           size_t width,
+                                           size_t height,
+                                           unsigned internalformat) {
+  NOTREACHED();
+  return -1;
+}
+
+void PpapiCommandBufferProxy::DestroyImage(int32 id) {
+  NOTREACHED();
+}
+
+int32 PpapiCommandBufferProxy::CreateGpuMemoryBufferImage(
     size_t width,
     size_t height,
     unsigned internalformat,
-    unsigned usage,
-    int32* id) {
+    unsigned usage) {
   NOTREACHED();
-  return NULL;
-}
-
-void PpapiCommandBufferProxy::DestroyGpuMemoryBuffer(int32 id) {
-  NOTREACHED();
+  return -1;
 }
 
 bool PpapiCommandBufferProxy::Send(IPC::Message* msg) {

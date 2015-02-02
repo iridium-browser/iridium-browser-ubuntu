@@ -5,15 +5,16 @@
 /**
  * @constructor
  * @param {!WebInspector.ActionRegistry} actionRegistry
+ * @param {!Document} document
  */
-WebInspector.ShortcutRegistry = function(actionRegistry)
+WebInspector.ShortcutRegistry = function(actionRegistry, document)
 {
     this._actionRegistry = actionRegistry;
     /** @type {!StringMultimap.<string>} */
     this._defaultKeyToActions = new StringMultimap();
     /** @type {!StringMultimap.<!WebInspector.KeyboardShortcut.Descriptor>} */
     this._defaultActionToShortcut = new StringMultimap();
-    this._registerBindings();
+    this._registerBindings(document);
 }
 
 WebInspector.ShortcutRegistry.prototype = {
@@ -23,22 +24,7 @@ WebInspector.ShortcutRegistry.prototype = {
      */
     applicableActions: function(key)
     {
-        return this._actionRegistry.applicableActions(this._actionIdsForKey(key), WebInspector.context);
-    },
-
-    /**
-     * @param {number} key
-     * @return {!Array.<string>}
-     */
-    _actionIdsForKey: function(key)
-    {
-        var result = new StringSet();
-        var defaults = this._defaultActionsForKey(key);
-        defaults.values().forEach(function(actionId) {
-            result.add(actionId);
-        }, this);
-
-        return result.values();
+        return this._actionRegistry.applicableActions(this._defaultActionsForKey(key).valuesArray(), WebInspector.context);
     },
 
     /**
@@ -56,7 +42,7 @@ WebInspector.ShortcutRegistry.prototype = {
      */
     shortcutDescriptorsForAction: function(actionId)
     {
-        return this._defaultActionToShortcut.get(actionId).values();
+        return this._defaultActionToShortcut.get(actionId).valuesArray();
     },
 
     /**
@@ -91,19 +77,42 @@ WebInspector.ShortcutRegistry.prototype = {
     {
         var keyModifiers = key >> 8;
         var actionIds = this.applicableActions(key);
+        if (!actionIds.length)
+            return;
         if (WebInspector.GlassPane.DefaultFocusedViewStack.length > 1) {
-            if (actionIds.length && !isPossiblyInputKey())
+            if (event && !isPossiblyInputKey())
                 event.consume(true);
             return;
         }
 
-        for (var i = 0; i < actionIds.length; ++i) {
-            if (!isPossiblyInputKey()) {
-                if (handler.call(this, actionIds[i]))
-                    break;
-            } else {
-                this._pendingActionTimer = setTimeout(handler.bind(this, actionIds[i]), 0);
-                break;
+        if (!isPossiblyInputKey()) {
+            if (event)
+                event.consume(true);
+            processActionIdsSequentially.call(this);
+        } else {
+            this._pendingActionTimer = setTimeout(processActionIdsSequentially.bind(this), 0);
+        }
+
+        /**
+         * @this {WebInspector.ShortcutRegistry}
+         */
+        function processActionIdsSequentially()
+        {
+            delete this._pendingActionTimer;
+            var actionId = actionIds.shift();
+            if (!actionId)
+                return;
+
+            this._actionRegistry.execute(actionId).then(continueIfNecessary.bind(this));
+
+            /**
+             * @this {WebInspector.ShortcutRegistry}
+             */
+            function continueIfNecessary(result)
+            {
+                if (result)
+                    return;
+                processActionIdsSequentially.call(this);
             }
         }
 
@@ -112,7 +121,7 @@ WebInspector.ShortcutRegistry.prototype = {
          */
         function isPossiblyInputKey()
         {
-            if (!event || !WebInspector.isBeingEdited(/** @type {!Node} */ (event.target)) || /^F\d+|Control|Shift|Alt|Meta|Win|U\+001B$/.test(keyIdentifier))
+            if (!event || !WebInspector.isEditing() || /^F\d+|Control|Shift|Alt|Meta|Win|U\+001B$/.test(keyIdentifier))
                 return false;
 
             if (!keyModifiers)
@@ -132,20 +141,6 @@ WebInspector.ShortcutRegistry.prototype = {
         function hasModifier(mod)
         {
             return !!(keyModifiers & mod);
-        }
-
-        /**
-         * @param {string} actionId
-         * @return {boolean}
-         * @this {WebInspector.ShortcutRegistry}
-         */
-        function handler(actionId)
-        {
-            var result = this._actionRegistry.execute(actionId);
-            if (result && event)
-                event.consume(true);
-            delete this._pendingActionTimer;
-            return result;
         }
     },
 
@@ -170,7 +165,10 @@ WebInspector.ShortcutRegistry.prototype = {
         }
     },
 
-    _registerBindings: function()
+    /**
+     * @param {!Document} document
+     */
+    _registerBindings: function(document)
     {
         document.addEventListener("input", this.dismissPendingShortcutAction.bind(this), true);
         var extensions = self.runtime.extensions(WebInspector.ActionDelegate);

@@ -18,7 +18,7 @@ class URLRequestContext;
 class MockFilterContext : public FilterContext {
  public:
   MockFilterContext();
-  virtual ~MockFilterContext();
+  ~MockFilterContext() override;
 
   void SetMimeType(const std::string& mime_type) { mime_type_ = mime_type; }
   void SetURL(const GURL& gurl) { gurl_ = gurl; }
@@ -41,37 +41,37 @@ class MockFilterContext : public FilterContext {
   // of those interfaces as coding errors.
   void NukeUnstableInterfaces();
 
-  virtual bool GetMimeType(std::string* mime_type) const OVERRIDE;
+  bool GetMimeType(std::string* mime_type) const override;
 
   // What URL was used to access this data?
   // Return false if gurl is not present.
-  virtual bool GetURL(GURL* gurl) const OVERRIDE;
+  bool GetURL(GURL* gurl) const override;
 
   // What Content-Disposition did the server supply for this data?
   // Return false if Content-Disposition was not present.
-  virtual bool GetContentDisposition(std::string* disposition) const OVERRIDE;
+  bool GetContentDisposition(std::string* disposition) const override;
 
   // What was this data requested from a server?
-  virtual base::Time GetRequestTime() const OVERRIDE;
+  base::Time GetRequestTime() const override;
 
   // Is data supplied from cache, or fresh across the net?
-  virtual bool IsCachedContent() const OVERRIDE;
+  bool IsCachedContent() const override;
 
   // Is this a download?
-  virtual bool IsDownload() const OVERRIDE;
+  bool IsDownload() const override;
 
   // Was this data flagged as a response to a request with an SDCH dictionary?
-  virtual bool SdchResponseExpected() const OVERRIDE;
+  bool SdchResponseExpected() const override;
 
   // How many bytes were fed to filter(s) so far?
-  virtual int64 GetByteReadCount() const OVERRIDE;
+  int64 GetByteReadCount() const override;
 
-  virtual int GetResponseCode() const OVERRIDE;
+  int GetResponseCode() const override;
 
   // The URLRequestContext associated with the request.
-  virtual const URLRequestContext* GetURLRequestContext() const OVERRIDE;
+  const URLRequestContext* GetURLRequestContext() const override;
 
-  virtual void RecordPacketStats(StatisticSelector statistic) const OVERRIDE {}
+  void RecordPacketStats(StatisticSelector statistic) const override {}
 
  private:
   int buffer_size_;

@@ -39,7 +39,7 @@ class APP_LIST_EXPORT AppListItemView : public views::CustomButton,
   static const char kViewClassName[];
 
   AppListItemView(AppsGridView* apps_grid_view, AppListItem* item);
-  virtual ~AppListItemView();
+  ~AppListItemView() override;
 
   // Set the icon of this image, adding a drop shadow if |has_shadow|.
   void SetIcon(const gfx::ImageSkia& icon, bool has_shadow);
@@ -107,37 +107,36 @@ class APP_LIST_EXPORT AppListItemView : public views::CustomButton,
   void SetTitleSubpixelAA();
 
   // views::View overrides:
-  virtual const char* GetClassName() const OVERRIDE;
-  virtual void Layout() OVERRIDE;
-  virtual void SchedulePaintInRect(const gfx::Rect& r) OVERRIDE;
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
+  const char* GetClassName() const override;
+  void Layout() override;
+  void SchedulePaintInRect(const gfx::Rect& r) override;
+  void OnPaint(gfx::Canvas* canvas) override;
 
   // views::ContextMenuController overrides:
-  virtual void ShowContextMenuForView(views::View* source,
-                                      const gfx::Point& point,
-                                      ui::MenuSourceType source_type) OVERRIDE;
+  void ShowContextMenuForView(views::View* source,
+                              const gfx::Point& point,
+                              ui::MenuSourceType source_type) override;
 
   // views::CustomButton overrides:
-  virtual void StateChanged() OVERRIDE;
-  virtual bool ShouldEnterPushedState(const ui::Event& event) OVERRIDE;
+  void StateChanged() override;
+  bool ShouldEnterPushedState(const ui::Event& event) override;
 
   // views::View overrides:
-  virtual bool OnKeyPressed(const ui::KeyEvent& event) OVERRIDE;
-  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseCaptureLost() OVERRIDE;
-  virtual bool OnMouseDragged(const ui::MouseEvent& event) OVERRIDE;
+  bool OnKeyPressed(const ui::KeyEvent& event) override;
+  bool OnMousePressed(const ui::MouseEvent& event) override;
+  void OnMouseReleased(const ui::MouseEvent& event) override;
+  void OnMouseCaptureLost() override;
+  bool OnMouseDragged(const ui::MouseEvent& event) override;
 
   // ui::EventHandler overrides:
-  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
+  void OnGestureEvent(ui::GestureEvent* event) override;
 
   // AppListItemObserver overrides:
-  virtual void ItemIconChanged() OVERRIDE;
-  virtual void ItemNameChanged() OVERRIDE;
-  virtual void ItemHighlightedChanged() OVERRIDE;
-  virtual void ItemIsInstallingChanged() OVERRIDE;
-  virtual void ItemPercentDownloadedChanged() OVERRIDE;
-  virtual void ItemBeingDestroyed() OVERRIDE;
+  void ItemIconChanged() override;
+  void ItemNameChanged() override;
+  void ItemIsInstallingChanged() override;
+  void ItemPercentDownloadedChanged() override;
+  void ItemBeingDestroyed() override;
 
   const bool is_folder_;
   const bool is_in_folder_;

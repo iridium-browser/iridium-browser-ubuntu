@@ -33,9 +33,9 @@
 #include "ui/compositor/layer_animator.h"
 #include "ui/compositor/layer_tree_owner.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
+#include "ui/gfx/geometry/vector3d_f.h"
 #include "ui/gfx/interpolated_transform.h"
 #include "ui/gfx/screen.h"
-#include "ui/gfx/vector3d_f.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
 #include "ui/wm/core/window_util.h"
@@ -67,12 +67,12 @@ int64 Round64(float f) {
 }
 
 base::TimeDelta GetCrossFadeDuration(aura::Window* window,
-                                     const gfx::Rect& old_bounds,
+                                     const gfx::RectF& old_bounds,
                                      const gfx::Rect& new_bounds) {
   if (::wm::WindowAnimationsDisabled(window))
     return base::TimeDelta();
 
-  int old_area = old_bounds.width() * old_bounds.height();
+  int old_area = static_cast<int>(old_bounds.width() * old_bounds.height());
   int new_area = new_bounds.width() * new_bounds.height();
   int max_area = std::max(old_area, new_area);
   // Avoid divide by zero.
@@ -277,42 +277,35 @@ class CrossFadeObserver : public ui::CompositorObserver,
     window_->AddObserver(this);
     layer_owner_->root()->GetCompositor()->AddObserver(this);
   }
-  virtual ~CrossFadeObserver() {
+  ~CrossFadeObserver() override {
     window_->RemoveObserver(this);
     window_ = NULL;
     layer_owner_->root()->GetCompositor()->RemoveObserver(this);
   }
 
   // ui::CompositorObserver overrides:
-  virtual void OnCompositingDidCommit(ui::Compositor* compositor) OVERRIDE {
-  }
-  virtual void OnCompositingStarted(ui::Compositor* compositor,
-                                    base::TimeTicks start_time) OVERRIDE {
-  }
-  virtual void OnCompositingEnded(ui::Compositor* compositor) OVERRIDE {
-  }
-  virtual void OnCompositingAborted(ui::Compositor* compositor) OVERRIDE {
+  void OnCompositingDidCommit(ui::Compositor* compositor) override {}
+  void OnCompositingStarted(ui::Compositor* compositor,
+                            base::TimeTicks start_time) override {}
+  void OnCompositingEnded(ui::Compositor* compositor) override {}
+  void OnCompositingAborted(ui::Compositor* compositor) override {
     // Triggers OnImplicitAnimationsCompleted() to be called and deletes us.
     layer_owner_->root()->GetAnimator()->StopAnimating();
   }
-  virtual void OnCompositingLockStateChanged(
-      ui::Compositor* compositor) OVERRIDE {
-  }
+  void OnCompositingLockStateChanged(ui::Compositor* compositor) override {}
 
   // aura::WindowObserver overrides:
-  virtual void OnWindowDestroying(aura::Window* window) OVERRIDE {
+  void OnWindowDestroying(aura::Window* window) override {
     // Triggers OnImplicitAnimationsCompleted() to be called and deletes us.
     layer_owner_->root()->GetAnimator()->StopAnimating();
   }
-  virtual void OnWindowRemovingFromRootWindow(aura::Window* window,
-                                              aura::Window* new_root) OVERRIDE {
+  void OnWindowRemovingFromRootWindow(aura::Window* window,
+                                      aura::Window* new_root) override {
     layer_owner_->root()->GetAnimator()->StopAnimating();
   }
 
   // ui::ImplicitAnimationObserver overrides:
-  virtual void OnImplicitAnimationsCompleted() OVERRIDE {
-    delete this;
-  }
+  void OnImplicitAnimationsCompleted() override { delete this; }
 
  private:
   aura::Window* window_;  // not owned
@@ -327,17 +320,25 @@ base::TimeDelta CrossFadeAnimation(
     gfx::Tween::Type tween_type) {
   DCHECK(old_layer_owner->root());
   const gfx::Rect old_bounds(old_layer_owner->root()->bounds());
+  gfx::RectF old_transformed_bounds(old_bounds);
+  gfx::Transform old_transform(old_layer_owner->root()->transform());
+  gfx::Transform old_transform_in_root;
+  old_transform_in_root.Translate(old_bounds.x(), old_bounds.y());
+  old_transform_in_root.PreconcatTransform(old_transform);
+  old_transform_in_root.Translate(-old_bounds.x(), -old_bounds.y());
+  old_transform_in_root.TransformRect(&old_transformed_bounds);
   const gfx::Rect new_bounds(window->bounds());
   const bool old_on_top = (old_bounds.width() > new_bounds.width());
 
   // Shorten the animation if there's not much visual movement.
   const base::TimeDelta duration = GetCrossFadeDuration(window,
-                                                        old_bounds, new_bounds);
+      old_transformed_bounds, new_bounds);
 
   // Scale up the old layer while translating to new position.
   {
     ui::Layer* old_layer = old_layer_owner->root();
     old_layer->GetAnimator()->StopAnimating();
+    old_layer->SetTransform(old_transform);
     ui::ScopedLayerAnimationSettings settings(old_layer->GetAnimator());
 
     // Animation observer owns the old layer and deletes itself.
@@ -365,12 +366,12 @@ base::TimeDelta CrossFadeAnimation(
   // Set the new layer's current transform, such that the user sees a scaled
   // version of the window with the original bounds at the original position.
   gfx::Transform in_transform;
-  const float scale_x = static_cast<float>(old_bounds.width()) /
+  const float scale_x = old_transformed_bounds.width() /
       static_cast<float>(new_bounds.width());
-  const float scale_y = static_cast<float>(old_bounds.height()) /
+  const float scale_y = old_transformed_bounds.height() /
       static_cast<float>(new_bounds.height());
-  in_transform.Translate(old_bounds.x() - new_bounds.x(),
-                               old_bounds.y() - new_bounds.y());
+  in_transform.Translate(old_transformed_bounds.x() - new_bounds.x(),
+                         old_transformed_bounds.y() - new_bounds.y());
   in_transform.Scale(scale_x, scale_y);
   window->layer()->SetTransform(in_transform);
   if (!old_on_top) {

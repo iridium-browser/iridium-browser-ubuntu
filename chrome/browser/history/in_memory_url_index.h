@@ -21,11 +21,13 @@
 #include "chrome/browser/history/history_db_task.h"
 #include "chrome/browser/history/in_memory_url_index_types.h"
 #include "chrome/browser/history/scored_history_match.h"
+#include "components/history/core/browser/history_service_observer.h"
 #include "components/history/core/browser/history_types.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "sql/connection.h"
 
+class HistoryService;
 class HistoryQuickProviderTest;
 class Profile;
 
@@ -46,7 +48,6 @@ class HistoryDatabase;
 class URLIndexPrivateData;
 struct URLsDeletedDetails;
 struct URLsModifiedDetails;
-struct URLVisitedDetails;
 
 // The URL history source.
 // Holds portions of the URL database in memory in an indexed form.  Used to
@@ -67,7 +68,8 @@ struct URLVisitedDetails;
 // will eliminate such words except in the case where a single character
 // is being searched on and which character occurs as the second char16 of a
 // multi-char16 instance.
-class InMemoryURLIndex : public content::NotificationObserver,
+class InMemoryURLIndex : public HistoryServiceObserver,
+                         public content::NotificationObserver,
                          public base::SupportsWeakPtr<InMemoryURLIndex> {
  public:
   // Defines an abstract class which is notified upon completion of restoring
@@ -100,10 +102,11 @@ class InMemoryURLIndex : public content::NotificationObserver,
   // journals will be stored. |languages| gives a list of language encodings by
   // which URLs and omnibox searches are broken down into words and characters.
   InMemoryURLIndex(Profile* profile,
+                   HistoryService* history_service,
                    const base::FilePath& history_dir,
                    const std::string& languages,
                    HistoryClient* client);
-  virtual ~InMemoryURLIndex();
+  ~InMemoryURLIndex() override;
 
   // Opens and prepares the index of historical URL visits. If the index private
   // data cannot be restored from its cache file then it is rebuilt from the
@@ -160,12 +163,12 @@ class InMemoryURLIndex : public content::NotificationObserver,
         const std::string& languages,
         const std::set<std::string>& scheme_whitelist);
 
-    virtual bool RunOnDBThread(HistoryBackend* backend,
-                               history::HistoryDatabase* db) OVERRIDE;
-    virtual void DoneRunOnMainThread() OVERRIDE;
+    bool RunOnDBThread(HistoryBackend* backend,
+                       history::HistoryDatabase* db) override;
+    void DoneRunOnMainThread() override;
 
    private:
-    virtual ~RebuildPrivateDataFromHistoryDBTask();
+    ~RebuildPrivateDataFromHistoryDBTask() override;
 
     InMemoryURLIndex* index_;  // Call back to this index at completion.
     std::string languages_;  // Languages for word-breaking.
@@ -232,12 +235,18 @@ class InMemoryURLIndex : public content::NotificationObserver,
   void OnCacheSaveDone(bool succeeded);
 
   // Handles notifications of history changes.
-  virtual void Observe(int notification_type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int notification_type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
+
+  // HistoryServiceObserver:
+  void OnURLVisited(HistoryService* history_service,
+                    ui::PageTransition transition,
+                    const URLRow& row,
+                    const RedirectList& redirects,
+                    base::Time visit_time) override;
 
   // Notification handlers.
-  void OnURLVisited(const URLVisitedDetails* details);
   void OnURLsModified(const URLsModifiedDetails* details);
   void OnURLsDeleted(const URLsDeletedDetails* details);
 
@@ -261,6 +270,7 @@ class InMemoryURLIndex : public content::NotificationObserver,
 
   // The profile, may be null when testing.
   Profile* profile_;
+  HistoryService* history_service_;
 
   // The HistoryClient; may be NULL when testing.
   HistoryClient* history_client_;

@@ -90,13 +90,13 @@ class AutocompleteActionPredictorTest : public testing::Test {
         predictor_(new AutocompleteActionPredictor(profile_.get())) {
   }
 
-  virtual ~AutocompleteActionPredictorTest() {
+  ~AutocompleteActionPredictorTest() override {
     predictor_.reset(NULL);
     profile_.reset(NULL);
     loop_.RunUntilIdle();
   }
 
-  virtual void SetUp() {
+  void SetUp() override {
     CommandLine::ForCurrentProcess()->AppendSwitchASCII(
         switches::kPrerenderFromOmnibox,
         switches::kPrerenderFromOmniboxSwitchValueEnabled);
@@ -110,7 +110,7 @@ class AutocompleteActionPredictorTest : public testing::Test {
     ASSERT_TRUE(db_id_cache()->empty());
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     profile_->DestroyHistoryService();
     predictor_->Shutdown();
   }
@@ -354,7 +354,7 @@ TEST_F(AutocompleteActionPredictorTest, RecommendActionURL) {
   AutocompleteMatch match;
   match.type = AutocompleteMatchType::HISTORY_URL;
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_url_db); ++i) {
+  for (size_t i = 0; i < arraysize(test_url_db); ++i) {
     match.destination_url = GURL(test_url_db[i].url);
     EXPECT_EQ(test_url_db[i].expected_action,
               predictor()->RecommendAction(test_url_db[i].user_text, match))

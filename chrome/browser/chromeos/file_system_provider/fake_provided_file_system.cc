@@ -321,6 +321,27 @@ ProvidedFileSystemInterface::AbortCallback FakeProvidedFileSystem::WriteFile(
   return PostAbortableTask(base::Bind(callback, base::File::FILE_OK));
 }
 
+ProvidedFileSystemInterface::AbortCallback FakeProvidedFileSystem::AddWatcher(
+    const GURL& origin,
+    const base::FilePath& entry_watcher,
+    bool recursive,
+    bool persistent,
+    const storage::AsyncFileUtil::StatusCallback& callback,
+    const storage::WatcherManager::NotificationCallback&
+        notification_callback) {
+  // TODO(mtomasz): Implement it once needed.
+  return PostAbortableTask(base::Bind(callback, base::File::FILE_OK));
+}
+
+void FakeProvidedFileSystem::RemoveWatcher(
+    const GURL& origin,
+    const base::FilePath& entry_path,
+    bool recursive,
+    const storage::AsyncFileUtil::StatusCallback& callback) {
+  // TODO(mtomasz): Implement it once needed.
+  callback.Run(base::File::FILE_OK);
+}
+
 const ProvidedFileSystemInfo& FakeProvidedFileSystem::GetFileSystemInfo()
     const {
   return file_system_info_;
@@ -329,6 +350,31 @@ const ProvidedFileSystemInfo& FakeProvidedFileSystem::GetFileSystemInfo()
 RequestManager* FakeProvidedFileSystem::GetRequestManager() {
   NOTREACHED();
   return NULL;
+}
+
+Watchers* FakeProvidedFileSystem::GetWatchers() {
+  return &watchers_;
+}
+
+void FakeProvidedFileSystem::AddObserver(ProvidedFileSystemObserver* observer) {
+  DCHECK(observer);
+  observers_.AddObserver(observer);
+}
+
+void FakeProvidedFileSystem::RemoveObserver(
+    ProvidedFileSystemObserver* observer) {
+  DCHECK(observer);
+  observers_.RemoveObserver(observer);
+}
+
+bool FakeProvidedFileSystem::Notify(
+    const base::FilePath& entry_path,
+    bool recursive,
+    storage::WatcherManager::ChangeType change_type,
+    scoped_ptr<ProvidedFileSystemObserver::Changes> changes,
+    const std::string& tag) {
+  NOTREACHED();
+  return false;
 }
 
 ProvidedFileSystemInterface* FakeProvidedFileSystem::Create(

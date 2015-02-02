@@ -1,4 +1,6 @@
-<?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="ru">
+<?xml version="1.0" ?>
+<!DOCTYPE translationbundle>
+<translationbundle lang="ru">
 <translation id="777702478322588152">Префектура</translation>
 <translation id="3713769522066937702">Недопустимый формат почтового индекса. Пример корректного написания: <ph name="EXAMPLE"/>. Забыли свой индекс? Нажмите<ph name="BEGIN_LINK"/>здесь<ph name="END_LINK"/>.</translation>
 <translation id="7393381084163773901">Адрес</translation>

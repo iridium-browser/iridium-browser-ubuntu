@@ -49,18 +49,18 @@ class FocusNavigationScope {
 public:
     Node* rootNode() const;
     Element* owner() const;
-    static FocusNavigationScope focusNavigationScopeOf(Node*);
-    static FocusNavigationScope ownedByNonFocusableFocusScopeOwner(Node*);
-    static FocusNavigationScope ownedByShadowHost(Node*);
-    static FocusNavigationScope ownedByShadowInsertionPoint(HTMLShadowElement*);
-    static FocusNavigationScope ownedByIFrame(HTMLFrameOwnerElement*);
+    static FocusNavigationScope focusNavigationScopeOf(Node&);
+    static FocusNavigationScope ownedByNonFocusableFocusScopeOwner(Node&);
+    static FocusNavigationScope ownedByShadowHost(Node&);
+    static FocusNavigationScope ownedByShadowInsertionPoint(HTMLShadowElement&);
+    static FocusNavigationScope ownedByIFrame(HTMLFrameOwnerElement&);
 
 private:
     explicit FocusNavigationScope(TreeScope*);
     RawPtrWillBeMember<TreeScope> m_rootTreeScope;
 };
 
-class FocusController FINAL : public NoBaseWillBeGarbageCollectedFinalized<FocusController> {
+class FocusController final : public NoBaseWillBeGarbageCollectedFinalized<FocusController> {
     WTF_MAKE_NONCOPYABLE(FocusController); WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
 public:
     static PassOwnPtrWillBeRawPtr<FocusController> create(Page*);

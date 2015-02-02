@@ -68,29 +68,29 @@ class IncidentReportingServiceTest : public testing::Test {
       test_instance_.Get().Set(this);
     }
 
-    virtual ~TestIncidentReportingService() { test_instance_.Get().Set(NULL); }
+    ~TestIncidentReportingService() override { test_instance_.Get().Set(NULL); }
 
     bool IsProcessingReport() const {
       return IncidentReportingService::IsProcessingReport();
     }
 
    protected:
-    virtual void OnProfileAdded(Profile* profile) OVERRIDE {
+    void OnProfileAdded(Profile* profile) override {
       pre_profile_add_callback_.Run(profile);
       safe_browsing::IncidentReportingService::OnProfileAdded(profile);
     }
 
-    virtual scoped_ptr<safe_browsing::LastDownloadFinder> CreateDownloadFinder(
+    scoped_ptr<safe_browsing::LastDownloadFinder> CreateDownloadFinder(
         const safe_browsing::LastDownloadFinder::LastDownloadCallback& callback)
-        OVERRIDE {
+        override {
       return create_download_finder_callback_.Run(callback);
     }
 
-    virtual scoped_ptr<safe_browsing::IncidentReportUploader> StartReportUpload(
+    scoped_ptr<safe_browsing::IncidentReportUploader> StartReportUpload(
         const safe_browsing::IncidentReportUploader::OnResultCallback& callback,
         const scoped_refptr<net::URLRequestContextGetter>&
             request_context_getter,
-        const safe_browsing::ClientIncidentReport& report) OVERRIDE {
+        const safe_browsing::ClientIncidentReport& report) override {
       return start_upload_callback_.Run(callback, report);
     }
 
@@ -175,7 +175,7 @@ class IncidentReportingServiceTest : public testing::Test {
         uploader_destroyed_(),
         delayed_analysis_ran_() {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     testing::Test::SetUp();
     ASSERT_TRUE(profile_manager_.SetUp());
   }
@@ -205,7 +205,7 @@ class IncidentReportingServiceTest : public testing::Test {
     // Boom (or fizzle).
     return profile_manager_.CreateTestingProfile(
         profile_name,
-        prefs.PassAs<PrefServiceSyncable>(),
+        prefs.Pass(),
         base::ASCIIToUTF16(profile_name),
         0,              // avatar_id (unused)
         std::string(),  // supervised_user_id (unused)
@@ -315,7 +315,7 @@ class IncidentReportingServiceTest : public testing::Test {
           FROM_HERE,
           base::Bind(&FakeUploader::FinishUpload, base::Unretained(this)));
     }
-    virtual ~FakeUploader() { on_deleted_.Run(); }
+    ~FakeUploader() override { on_deleted_.Run(); }
 
    private:
     void FinishUpload() {
@@ -346,7 +346,7 @@ class IncidentReportingServiceTest : public testing::Test {
           new FakeDownloadFinder(on_deleted));
     }
 
-    virtual ~FakeDownloadFinder() { on_deleted_.Run(); }
+    ~FakeDownloadFinder() override { on_deleted_.Run(); }
 
    private:
     explicit FakeDownloadFinder(const base::Closure& on_deleted)

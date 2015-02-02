@@ -37,9 +37,7 @@
 
 namespace blink {
 
-class ExecutionContext;
-
-class InstallEvent FINAL : public ExtendableEvent {
+class InstallEvent final : public ExtendableEvent {
     DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<InstallEvent> create();
@@ -47,11 +45,9 @@ public:
 
     void replace();
 
-    ScriptPromise reloadAll(ScriptState*);
+    virtual const AtomicString& interfaceName() const override;
 
-    virtual const AtomicString& interfaceName() const OVERRIDE;
-
-    virtual void trace(Visitor*) OVERRIDE;
+    virtual void trace(Visitor*) override;
 
 private:
     InstallEvent();

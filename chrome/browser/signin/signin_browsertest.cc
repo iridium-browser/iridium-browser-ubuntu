@@ -36,7 +36,7 @@ const char kNonSigninURL[] = "http://www.google.com";
 
 class SigninBrowserTest : public InProcessBrowserTest {
  public:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     https_server_.reset(new net::SpawnedTestServer(
         net::SpawnedTestServer::TYPE_HTTPS,
         net::SpawnedTestServer::kLocalhost,
@@ -56,7 +56,7 @@ class SigninBrowserTest : public InProcessBrowserTest {
     command_line->AppendSwitch(switches::kEnableWebBasedSignin);
   }
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     factory_.reset(new net::URLFetcherImplFactory());
     fake_factory_.reset(new net::FakeURLFetcherFactory(factory_.get()));
     fake_factory_->SetFakeResponse(
@@ -69,7 +69,7 @@ class SigninBrowserTest : public InProcessBrowserTest {
     InProcessBrowserTest::SetUp();
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     if (fake_factory_.get()) {
       fake_factory_->ClearFakeResponses();
       fake_factory_.reset();
@@ -183,10 +183,10 @@ class BackOnNTPCommitObserver : public content::WebContentsObserver {
       : content::WebContentsObserver(web_contents) {
   }
 
-  virtual void DidCommitProvisionalLoadForFrame(
+  void DidCommitProvisionalLoadForFrame(
       content::RenderFrameHost* render_frame_host,
       const GURL& url,
-      ui::PageTransition transition_type) OVERRIDE {
+      ui::PageTransition transition_type) override {
     if (url == GURL(chrome::kChromeUINewTabURL) ||
         url == GURL(chrome::kChromeSearchLocalNtpUrl)) {
       content::WindowedNotificationObserver observer(

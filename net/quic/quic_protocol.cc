@@ -105,7 +105,7 @@ QuicStreamFrame::QuicStreamFrame()
     : stream_id(0),
       fin(false),
       offset(0),
-      notifier(NULL) {}
+      notifier(nullptr) {}
 
 QuicStreamFrame::QuicStreamFrame(const QuicStreamFrame& frame)
     : stream_id(frame.stream_id),
@@ -123,8 +123,7 @@ QuicStreamFrame::QuicStreamFrame(QuicStreamId stream_id,
       fin(fin),
       offset(offset),
       data(data),
-      notifier(NULL) {
-}
+      notifier(nullptr) {}
 
 string* QuicStreamFrame::GetDataAsString() const {
   string* data_string = new string();
@@ -159,10 +158,6 @@ QuicVersionVector QuicSupportedVersions() {
 
 QuicTag QuicVersionToQuicTag(const QuicVersion version) {
   switch (version) {
-    case QUIC_VERSION_16:
-      return MakeQuicTag('Q', '0', '1', '6');
-    case QUIC_VERSION_18:
-      return MakeQuicTag('Q', '0', '1', '8');
     case QUIC_VERSION_19:
       return MakeQuicTag('Q', '0', '1', '9');
     case QUIC_VERSION_21:
@@ -197,8 +192,6 @@ return #x
 
 string QuicVersionToString(const QuicVersion version) {
   switch (version) {
-    RETURN_STRING_LITERAL(QUIC_VERSION_16);
-    RETURN_STRING_LITERAL(QUIC_VERSION_18);
     RETURN_STRING_LITERAL(QUIC_VERSION_19);
     RETURN_STRING_LITERAL(QUIC_VERSION_21);
     RETURN_STRING_LITERAL(QUIC_VERSION_22);
@@ -281,15 +274,6 @@ QuicCongestionFeedbackFrame::~QuicCongestionFeedbackFrame() {}
 QuicRstStreamErrorCode AdjustErrorForVersion(
     QuicRstStreamErrorCode error_code,
     QuicVersion version) {
-  switch (error_code) {
-    case QUIC_RST_FLOW_CONTROL_ACCOUNTING:
-      if (version < QUIC_VERSION_18) {
-        return QUIC_STREAM_NO_ERROR;
-      }
-      break;
-    default:
-      return error_code;
-  }
   return error_code;
 }
 
@@ -712,26 +696,13 @@ ostream& operator<<(ostream& os, const QuicEncryptedPacket& s) {
 }
 
 TransmissionInfo::TransmissionInfo()
-    : retransmittable_frames(NULL),
+    : retransmittable_frames(nullptr),
       sequence_number_length(PACKET_1BYTE_SEQUENCE_NUMBER),
       sent_time(QuicTime::Zero()),
       bytes_sent(0),
       nack_count(0),
       transmission_type(NOT_RETRANSMISSION),
-      all_transmissions(NULL),
-      in_flight(false),
-      is_unackable(false) {}
-
-TransmissionInfo::TransmissionInfo(
-    RetransmittableFrames* retransmittable_frames,
-    QuicSequenceNumberLength sequence_number_length)
-    : retransmittable_frames(retransmittable_frames),
-      sequence_number_length(sequence_number_length),
-      sent_time(QuicTime::Zero()),
-      bytes_sent(0),
-      nack_count(0),
-      transmission_type(NOT_RETRANSMISSION),
-      all_transmissions(NULL),
+      all_transmissions(nullptr),
       in_flight(false),
       is_unackable(false) {}
 
@@ -739,14 +710,14 @@ TransmissionInfo::TransmissionInfo(
     RetransmittableFrames* retransmittable_frames,
     QuicSequenceNumberLength sequence_number_length,
     TransmissionType transmission_type,
-    SequenceNumberList* all_transmissions)
+    QuicTime sent_time)
     : retransmittable_frames(retransmittable_frames),
       sequence_number_length(sequence_number_length),
-      sent_time(QuicTime::Zero()),
+      sent_time(sent_time),
       bytes_sent(0),
       nack_count(0),
       transmission_type(transmission_type),
-      all_transmissions(all_transmissions),
+      all_transmissions(nullptr),
       in_flight(false),
       is_unackable(false) {}
 

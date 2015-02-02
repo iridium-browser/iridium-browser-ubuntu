@@ -83,14 +83,14 @@ class NativeDisplayDelegateX11::HelperDelegateX11
 
   // NativeDisplayDelegateX11::HelperDelegate overrides:
   virtual void UpdateXRandRConfiguration(const base::NativeEvent& event)
-      OVERRIDE {
+      override {
     XRRUpdateConfiguration(event);
   }
   virtual const std::vector<DisplaySnapshot*>& GetCachedDisplays() const
-      OVERRIDE {
+      override {
     return delegate_->cached_outputs_.get();
   }
-  virtual void NotifyDisplayObservers() OVERRIDE {
+  virtual void NotifyDisplayObservers() override {
     FOR_EACH_OBSERVER(
         NativeDisplayObserver, delegate_->observers_, OnConfigurationChanged());
   }
@@ -148,6 +148,16 @@ void NativeDisplayDelegateX11::UngrabServer() {
   XUngrabServer(display_);
   // crbug.com/366125
   XFlush(display_);
+}
+
+bool NativeDisplayDelegateX11::TakeDisplayControl() {
+  NOTIMPLEMENTED();
+  return false;
+}
+
+bool NativeDisplayDelegateX11::RelinquishDisplayControl() {
+  NOTIMPLEMENTED();
+  return false;
 }
 
 void NativeDisplayDelegateX11::SyncWithServer() { XSync(display_, 0); }
@@ -308,8 +318,8 @@ DisplaySnapshotX11* NativeDisplayDelegateX11::InitDisplaySnapshot(
     RRCrtc* last_used_crtc,
     int index) {
   int64_t display_id = 0;
-  bool has_display_id = GetDisplayId(
-      output, static_cast<uint8_t>(index), &display_id);
+  if (!GetDisplayId(output, static_cast<uint8_t>(index), &display_id))
+    display_id = index;
 
   bool has_overscan = false;
   GetOutputOverscanFlag(output, &has_overscan);
@@ -317,17 +327,6 @@ DisplaySnapshotX11* NativeDisplayDelegateX11::InitDisplaySnapshot(
   DisplayConnectionType type = GetDisplayConnectionTypeFromName(info->name);
   if (type == DISPLAY_CONNECTION_TYPE_UNKNOWN)
     LOG(ERROR) << "Unknown link type: " << info->name;
-
-  // Use the index as a valid display ID even if the internal
-  // display doesn't have valid EDID because the index
-  // will never change.
-  if (!has_display_id) {
-    if (type == DISPLAY_CONNECTION_TYPE_INTERNAL)
-      has_display_id = true;
-
-    // Fallback to output index.
-    display_id = index;
-  }
 
   RRMode native_mode_id = GetOutputNativeMode(info);
   RRMode current_mode_id = None;
@@ -369,7 +368,6 @@ DisplaySnapshotX11* NativeDisplayDelegateX11::InitDisplaySnapshot(
 
   DisplaySnapshotX11* display_snapshot =
       new DisplaySnapshotX11(display_id,
-                             has_display_id,
                              origin,
                              gfx::Size(info->mm_width, info->mm_height),
                              type,

@@ -35,7 +35,7 @@ class ChromeDesktopImpl : public ChromeImpl {
       const base::CommandLine& command,
       base::ScopedTempDir* user_data_dir,
       base::ScopedTempDir* extension_dir);
-  virtual ~ChromeDesktopImpl();
+  ~ChromeDesktopImpl() override;
 
   // Waits for a page with the given URL to appear and finish loading.
   // Returns an error if the timeout is exceeded.
@@ -47,12 +47,12 @@ class ChromeDesktopImpl : public ChromeImpl {
   Status GetAutomationExtension(AutomationExtension** extension);
 
   // Overridden from Chrome:
-  virtual ChromeDesktopImpl* GetAsDesktop() OVERRIDE;
-  virtual std::string GetOperatingSystemName() OVERRIDE;
+  ChromeDesktopImpl* GetAsDesktop() override;
+  std::string GetOperatingSystemName() override;
 
   // Overridden from ChromeImpl:
-  virtual bool IsMobileEmulationEnabled() const OVERRIDE;
-  virtual Status QuitImpl() OVERRIDE;
+  bool IsMobileEmulationEnabled() const override;
+  Status QuitImpl() override;
 
   const base::CommandLine& command() const;
 

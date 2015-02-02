@@ -9,8 +9,8 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/timer/timer.h"
+#include "chrome/browser/chromeos/login/screens/base_screen.h"
 #include "chrome/browser/chromeos/login/screens/terms_of_service_screen_actor.h"
-#include "chrome/browser/chromeos/login/screens/wizard_screen.h"
 #include "net/url_request/url_fetcher_delegate.h"
 
 namespace net {
@@ -19,30 +19,30 @@ class URLFetcher;
 
 namespace chromeos {
 
-class ScreenObserver;
+class BaseScreenDelegate;
 
 // A screen that shows Terms of Service which have been configured through
 // policy. The screen is shown during login and requires the user to accept the
 // Terms of Service before proceeding. Currently, Terms of Service are available
 // for public sessions only.
-class TermsOfServiceScreen : public WizardScreen,
+class TermsOfServiceScreen : public BaseScreen,
                              public TermsOfServiceScreenActor::Delegate,
                              public net::URLFetcherDelegate {
  public:
-  TermsOfServiceScreen(ScreenObserver* screen_observer,
+  TermsOfServiceScreen(BaseScreenDelegate* base_screen_delegate,
                        TermsOfServiceScreenActor* actor);
   virtual ~TermsOfServiceScreen();
 
-  // WizardScreen:
-  virtual void PrepareToShow() OVERRIDE;
-  virtual void Show() OVERRIDE;
-  virtual void Hide() OVERRIDE;
-  virtual std::string GetName() const OVERRIDE;
+  // BaseScreen:
+  virtual void PrepareToShow() override;
+  virtual void Show() override;
+  virtual void Hide() override;
+  virtual std::string GetName() const override;
 
   // TermsOfServiceScreenActor::Delegate:
-  virtual void OnDecline() OVERRIDE;
-  virtual void OnAccept() OVERRIDE;
-  virtual void OnActorDestroyed(TermsOfServiceScreenActor* actor) OVERRIDE;
+  virtual void OnDecline() override;
+  virtual void OnAccept() override;
+  virtual void OnActorDestroyed(TermsOfServiceScreenActor* actor) override;
 
  private:
   // Start downloading the Terms of Service.
@@ -52,7 +52,7 @@ class TermsOfServiceScreen : public WizardScreen,
   void OnDownloadTimeout();
 
   // net::URLFetcherDelegate:
-  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
+  virtual void OnURLFetchComplete(const net::URLFetcher* source) override;
 
   TermsOfServiceScreenActor* actor_;
 

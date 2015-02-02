@@ -29,9 +29,10 @@
 #include "third_party/skia/include/core/SkImageFilter.h"
 #include "third_party/skia/include/core/SkPicture.h"
 #include "third_party/skia/include/core/SkXfermode.h"
-#include "ui/gfx/point3_f.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/rect_f.h"
+#include "ui/gfx/geometry/point3_f.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/rect_f.h"
+#include "ui/gfx/geometry/scroll_offset.h"
 #include "ui/gfx/transform.h"
 
 namespace gfx {
@@ -99,7 +100,7 @@ class CC_EXPORT Layer : public base::RefCounted<Layer>,
 
   // This requests the layer and its subtree be rendered and given to the
   // callback. If the copy is unable to be produced (the layer is destroyed
-  // first), then the callback is called with a NULL/empty result.
+  // first), then the callback is called with a nullptr/empty result.
   void RequestCopyOfOutput(scoped_ptr<CopyOutputRequest> request);
   bool HasCopyRequest() const {
     return !copy_requests_.empty();
@@ -123,8 +124,8 @@ class CC_EXPORT Layer : public base::RefCounted<Layer>,
   Layer* mask_layer() { return mask_layer_.get(); }
   const Layer* mask_layer() const { return mask_layer_.get(); }
 
-  virtual void SetNeedsDisplayRect(const gfx::RectF& dirty_rect);
-  void SetNeedsDisplay() { SetNeedsDisplayRect(gfx::RectF(bounds())); }
+  virtual void SetNeedsDisplayRect(const gfx::Rect& dirty_rect);
+  void SetNeedsDisplay() { SetNeedsDisplayRect(gfx::Rect(bounds())); }
 
   void SetOpacity(float opacity);
   float opacity() const { return opacity_; }
@@ -261,9 +262,9 @@ class CC_EXPORT Layer : public base::RefCounted<Layer>,
     return draw_properties_.num_unclipped_descendants;
   }
 
-  void SetScrollOffset(gfx::Vector2d scroll_offset);
-  gfx::Vector2d scroll_offset() const { return scroll_offset_; }
-  void SetScrollOffsetFromImplSide(const gfx::Vector2d& scroll_offset);
+  void SetScrollOffset(const gfx::ScrollOffset& scroll_offset);
+  gfx::ScrollOffset scroll_offset() const { return scroll_offset_; }
+  void SetScrollOffsetFromImplSide(const gfx::ScrollOffset& scroll_offset);
 
   void SetScrollClipLayerId(int clip_layer_id);
   bool scrollable() const { return scroll_clip_layer_id_ != INVALID_ID; }
@@ -309,10 +310,9 @@ class CC_EXPORT Layer : public base::RefCounted<Layer>,
   void SetForceRenderSurface(bool force_render_surface);
   bool force_render_surface() const { return force_render_surface_; }
 
-  gfx::Vector2d ScrollDelta() const { return gfx::Vector2d(); }
-  gfx::Vector2dF TotalScrollOffset() const {
-    // Floating point to match the LayerImpl version.
-    return scroll_offset() + ScrollDelta();
+  gfx::Vector2dF ScrollDelta() const { return gfx::Vector2dF(); }
+  gfx::ScrollOffset TotalScrollOffset() const {
+    return ScrollOffsetWithDelta(scroll_offset(), ScrollDelta());
   }
 
   void SetDoubleSided(bool double_sided);
@@ -422,7 +422,7 @@ class CC_EXPORT Layer : public base::RefCounted<Layer>,
 
   virtual ScrollbarLayerInterface* ToScrollbarLayer();
 
-  gfx::Rect LayerRectToContentRect(const gfx::RectF& layer_rect) const;
+  gfx::Rect LayerRectToContentRect(const gfx::Rect& layer_rect) const;
 
   virtual skia::RefPtr<SkPicture> GetPicture() const;
 
@@ -430,7 +430,7 @@ class CC_EXPORT Layer : public base::RefCounted<Layer>,
   virtual scoped_ptr<LayerImpl> CreateLayerImpl(LayerTreeImpl* tree_impl);
 
   bool NeedsDisplayForTesting() const { return !update_rect_.IsEmpty(); }
-  void ResetNeedsDisplayForTesting() { update_rect_ = gfx::RectF(); }
+  void ResetNeedsDisplayForTesting() { update_rect_ = gfx::Rect(); }
 
   RenderingStatsInstrumentation* rendering_stats_instrumentation() const;
 
@@ -465,7 +465,7 @@ class CC_EXPORT Layer : public base::RefCounted<Layer>,
  protected:
   friend class LayerImpl;
   friend class TreeSynchronizer;
-  virtual ~Layer();
+  ~Layer() override;
 
   Layer();
 
@@ -524,7 +524,7 @@ class CC_EXPORT Layer : public base::RefCounted<Layer>,
   // outside the compositor's control (i.e. plugin layers), this information
   // is not available and the update rect will remain empty.
   // Note this rect is in layer space (not content space).
-  gfx::RectF update_rect_;
+  gfx::Rect update_rect_;
 
   scoped_refptr<Layer> mask_layer_;
 
@@ -552,16 +552,15 @@ class CC_EXPORT Layer : public base::RefCounted<Layer>,
   void RemoveChildOrDependent(Layer* child);
 
   // LayerAnimationValueProvider implementation.
-  virtual gfx::Vector2dF ScrollOffsetForAnimation() const OVERRIDE;
+  gfx::ScrollOffset ScrollOffsetForAnimation() const override;
 
   // LayerAnimationValueObserver implementation.
-  virtual void OnFilterAnimated(const FilterOperations& filters) OVERRIDE;
-  virtual void OnOpacityAnimated(float opacity) OVERRIDE;
-  virtual void OnTransformAnimated(const gfx::Transform& transform) OVERRIDE;
-  virtual void OnScrollOffsetAnimated(
-      const gfx::Vector2dF& scroll_offset) OVERRIDE;
-  virtual void OnAnimationWaitingForDeletion() OVERRIDE;
-  virtual bool IsActive() const OVERRIDE;
+  void OnFilterAnimated(const FilterOperations& filters) override;
+  void OnOpacityAnimated(float opacity) override;
+  void OnTransformAnimated(const gfx::Transform& transform) override;
+  void OnScrollOffsetAnimated(const gfx::ScrollOffset& scroll_offset) override;
+  void OnAnimationWaitingForDeletion() override;
+  bool IsActive() const override;
 
   // If this layer has a scroll parent, it removes |this| from its list of
   // scroll children.
@@ -584,7 +583,7 @@ class CC_EXPORT Layer : public base::RefCounted<Layer>,
   // Layer properties.
   gfx::Size bounds_;
 
-  gfx::Vector2d scroll_offset_;
+  gfx::ScrollOffset scroll_offset_;
   // This variable indicates which ancestor layer (if any) whose size,
   // transformed relative to this layer, defines the maximum scroll offset for
   // this layer.
@@ -618,10 +617,10 @@ class CC_EXPORT Layer : public base::RefCounted<Layer>,
   FilterOperations background_filters_;
   LayerPositionConstraint position_constraint_;
   Layer* scroll_parent_;
-  scoped_ptr<std::set<Layer*> > scroll_children_;
+  scoped_ptr<std::set<Layer*>> scroll_children_;
 
   Layer* clip_parent_;
-  scoped_ptr<std::set<Layer*> > clip_children_;
+  scoped_ptr<std::set<Layer*>> clip_children_;
 
   gfx::Transform transform_;
   gfx::Point3F transform_origin_;

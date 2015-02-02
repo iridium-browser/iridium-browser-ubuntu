@@ -85,6 +85,8 @@ public:
 
     void setIsHidden(bool hidden) { m_surface->setIsHidden(hidden); }
 
+    void willDrawVideo() { m_surface->willDrawVideo(); }
+
     GraphicsContext* context() const;
 
     // Called at the end of a task that rendered a whole frame
@@ -123,6 +125,8 @@ public:
     void flush();
 
     void notifySurfaceInvalid();
+
+    PassRefPtr<SkImage> newImageSnapshot() const;
 
 private:
     ImageBuffer(PassOwnPtr<ImageBufferSurface>);

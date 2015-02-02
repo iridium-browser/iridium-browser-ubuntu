@@ -146,9 +146,9 @@ class ExtensionImpl : public v8::Extension {
   ExtensionImpl() : v8::Extension(kClassName, kScript) {}
 
  private:
-  virtual v8::Handle<v8::FunctionTemplate> GetNativeFunctionTemplate(
+  v8::Handle<v8::FunctionTemplate> GetNativeFunctionTemplate(
       v8::Isolate* isolate,
-      v8::Handle<v8::String> name) OVERRIDE {
+      v8::Handle<v8::String> name) override {
     if (name->Equals(v8::String::NewFromUtf8(isolate, "Apply")))
       return v8::FunctionTemplate::New(isolate, Apply);
     if (name->Equals(v8::String::NewFromUtf8(isolate, "Save")))

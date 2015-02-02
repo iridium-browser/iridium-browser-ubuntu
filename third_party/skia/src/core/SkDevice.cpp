@@ -62,7 +62,7 @@ const SkBitmap& SkBaseDevice::accessBitmap(bool changePixels) {
 }
 
 void SkBaseDevice::setPixelGeometry(SkPixelGeometry geo) {
-    fLeakyProperties->fPixelGeometry = geo;
+    fLeakyProperties->setPixelGeometry(geo);
 }
 
 SkSurface* SkBaseDevice::newSurface(const SkImageInfo&, const SkSurfaceProps&) { return NULL; }
@@ -100,27 +100,6 @@ void SkBaseDevice::drawTextBlob(const SkDraw& draw, const SkTextBlob* blob, SkSc
                                 const SkPaint &paint) {
 
     SkPaint runPaint = paint;
-    SkMatrix localMatrix;
-    SkDraw localDraw(draw);
-
-    if (x || y) {
-        localMatrix = *draw.fMatrix;
-        localMatrix.preTranslate(x, y);
-        localDraw.fMatrix = &localMatrix;
-
-        if (paint.getShader()) {
-            // FIXME: We need to compensate for the translate above. This is suboptimal but
-            // temporary -- until we get proper derived class drawTextBlob implementations.
-
-            // TODO: pass x,y down to the other methods so they can handle the additional
-            // translate without needing to allocate a new shader.
-            SkMatrix shaderMatrix;
-            shaderMatrix.setTranslate(-x, -y);
-            SkAutoTUnref<SkShader> wrapper(
-                SkShader::CreateLocalMatrixShader(paint.getShader(), shaderMatrix));
-            runPaint.setShader(wrapper);
-        }
-    }
 
     SkTextBlob::RunIterator it(blob);
     while (!it.done()) {
@@ -132,12 +111,15 @@ void SkBaseDevice::drawTextBlob(const SkDraw& draw, const SkTextBlob* blob, SkSc
 
         switch (it.positioning()) {
         case SkTextBlob::kDefault_Positioning:
-            this->drawText(localDraw, it.glyphs(), textLen, offset.x(), offset.y(), runPaint);
+            this->drawText(draw, it.glyphs(), textLen, x + offset.x(), y + offset.y(), runPaint);
             break;
         case SkTextBlob::kHorizontal_Positioning:
+            this->drawPosText(draw, it.glyphs(), textLen, it.pos(), 1,
+                              SkPoint::Make(x, y + offset.y()), runPaint);
+            break;
         case SkTextBlob::kFull_Positioning:
-            this->drawPosText(localDraw, it.glyphs(), textLen, it.pos(), offset.y(),
-                              SkTextBlob::ScalarsPerGlyph(it.positioning()), runPaint);
+            this->drawPosText(draw, it.glyphs(), textLen, it.pos(), 2,
+                              SkPoint::Make(x, y), runPaint);
             break;
         default:
             SkFAIL("unhandled positioning mode");

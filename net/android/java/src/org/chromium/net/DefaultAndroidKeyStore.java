@@ -83,7 +83,7 @@ public class DefaultAndroidKeyStore implements AndroidKeyStore {
         return null;
     }
 
-   @Override
+    @Override
     public byte[] getPrivateKeyEncodedBytes(AndroidPrivateKey key) {
         PrivateKey javaKey = ((DefaultAndroidPrivateKey) key).getJavaKey();
         return javaKey.getEncoded();
@@ -109,7 +109,7 @@ public class DefaultAndroidKeyStore implements AndroidKeyStore {
                 signature = Signature.getInstance("NONEwithECDSA");
             }
         } catch (NoSuchAlgorithmException e) {
-            ;
+            // Intentionally do nothing.
         }
 
         if (signature == null) {

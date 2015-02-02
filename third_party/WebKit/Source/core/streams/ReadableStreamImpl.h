@@ -9,11 +9,9 @@
 #include "bindings/core/v8/ScriptState.h"
 #include "bindings/core/v8/ScriptValue.h"
 #include "bindings/core/v8/V8Binding.h"
+#include "core/dom/DOMArrayBuffer.h"
 #include "core/streams/ReadableStream.h"
-#include "wtf/ArrayBuffer.h"
 #include "wtf/Deque.h"
-#include "wtf/Forward.h"
-#include "wtf/OwnPtr.h"
 #include "wtf/RefPtr.h"
 #include "wtf/text/WTFString.h"
 
@@ -37,10 +35,10 @@ public:
 };
 
 template<>
-class ReadableStreamChunkTypeTraits<ArrayBuffer> {
+class ReadableStreamChunkTypeTraits<DOMArrayBuffer> {
 public:
-    typedef RefPtr<ArrayBuffer> HoldType;
-    typedef PassRefPtr<ArrayBuffer> PassType;
+    typedef RefPtr<DOMArrayBuffer> HoldType;
+    typedef PassRefPtr<DOMArrayBuffer> PassType;
 
     static size_t size(const PassType& value) { return value->byteLength(); }
     static size_t size(const HoldType& value) { return value->byteLength(); }
@@ -62,19 +60,19 @@ public:
     virtual ~ReadableStreamImpl() { }
 
     // ReadableStream methods
-    virtual ScriptValue read(ScriptState*, ExceptionState&) OVERRIDE;
+    virtual ScriptValue read(ScriptState*, ExceptionState&) override;
 
     bool enqueue(typename ChunkTypeTraits::PassType);
 
-    virtual void trace(Visitor* visitor) OVERRIDE
+    virtual void trace(Visitor* visitor) override
     {
         ReadableStream::trace(visitor);
     }
 
 private:
     // ReadableStream methods
-    virtual bool isQueueEmpty() const OVERRIDE { return m_queue.isEmpty(); }
-    virtual void clearQueue() OVERRIDE
+    virtual bool isQueueEmpty() const override { return m_queue.isEmpty(); }
+    virtual void clearQueue() override
     {
         m_queue.clear();
         m_totalQueueSize = 0;
@@ -112,4 +110,3 @@ ScriptValue ReadableStreamImpl<ChunkTypeTraits>::read(ScriptState* scriptState, 
 } // namespace blink
 
 #endif // ReadableStreamImpl_h
-

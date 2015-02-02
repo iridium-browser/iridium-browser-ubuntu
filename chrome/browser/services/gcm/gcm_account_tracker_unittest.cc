@@ -8,7 +8,7 @@
 #include <string>
 
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop.h"
+#include "components/gcm_driver/fake_gcm_driver.h"
 #include "google_apis/gaia/fake_identity_provider.h"
 #include "google_apis/gaia/fake_oauth2_token_service.h"
 #include "google_apis/gaia/google_service_auth_error.h"
@@ -37,15 +37,126 @@ std::string MakeAccessToken(const std::string& account_key) {
   return "access_token-" + account_key;
 }
 
+GCMClient::AccountTokenInfo MakeAccountToken(const std::string& account_key) {
+  GCMClient::AccountTokenInfo token_info;
+  token_info.account_id = account_key;
+  token_info.email = account_key;
+  token_info.access_token = MakeAccessToken(account_key);
+  return token_info;
+}
+
+void VerifyAccountTokens(
+    const std::vector<GCMClient::AccountTokenInfo>& expected_tokens,
+    const std::vector<GCMClient::AccountTokenInfo>& actual_tokens) {
+  EXPECT_EQ(expected_tokens.size(), actual_tokens.size());
+  for (std::vector<GCMClient::AccountTokenInfo>::const_iterator
+           expected_iter = expected_tokens.begin(),
+           actual_iter = actual_tokens.begin();
+       expected_iter != expected_tokens.end() &&
+           actual_iter != actual_tokens.end();
+       ++expected_iter, ++actual_iter) {
+    EXPECT_EQ(expected_iter->account_id, actual_iter->account_id);
+    EXPECT_EQ(expected_iter->email, actual_iter->email);
+    EXPECT_EQ(expected_iter->access_token, actual_iter->access_token);
+  }
+}
+
+// This version of FakeGCMDriver is customized around handling accounts and
+// connection events for testing GCMAccountTracker.
+class CustomFakeGCMDriver : public FakeGCMDriver {
+ public:
+  CustomFakeGCMDriver();
+  ~CustomFakeGCMDriver() override;
+
+  // GCMDriver overrides:
+  void SetAccountTokens(
+      const std::vector<GCMClient::AccountTokenInfo>& account_tokens) override;
+  void AddConnectionObserver(GCMConnectionObserver* observer) override;
+  void RemoveConnectionObserver(GCMConnectionObserver* observer) override;
+  bool IsConnected() const override { return connected_; }
+  base::Time GetLastTokenFetchTime() override;
+  void SetLastTokenFetchTime(const base::Time& time) override;
+
+  // Test results and helpers.
+  void SetConnected(bool connected);
+  void ResetResults();
+  bool update_accounts_called() const { return update_accounts_called_; }
+  const std::vector<GCMClient::AccountTokenInfo>& accounts() const {
+    return accounts_;
+  }
+  const GCMConnectionObserver* last_connection_observer() const {
+    return last_connection_observer_;
+  }
+  const GCMConnectionObserver* last_removed_connection_observer() const {
+    return removed_connection_observer_;
+  }
+
+ private:
+  bool connected_;
+  std::vector<GCMClient::AccountTokenInfo> accounts_;
+  bool update_accounts_called_;
+  GCMConnectionObserver* last_connection_observer_;
+  GCMConnectionObserver* removed_connection_observer_;
+  net::IPEndPoint ip_endpoint_;
+  base::Time last_token_fetch_time_;
+
+  DISALLOW_COPY_AND_ASSIGN(CustomFakeGCMDriver);
+};
+
+CustomFakeGCMDriver::CustomFakeGCMDriver()
+    : connected_(true),
+      update_accounts_called_(false),
+      last_connection_observer_(NULL),
+      removed_connection_observer_(NULL) {
+}
+
+CustomFakeGCMDriver::~CustomFakeGCMDriver() {
+}
+
+void CustomFakeGCMDriver::SetAccountTokens(
+    const std::vector<GCMClient::AccountTokenInfo>& accounts) {
+  update_accounts_called_ = true;
+  accounts_ = accounts;
+}
+
+void CustomFakeGCMDriver::AddConnectionObserver(
+    GCMConnectionObserver* observer) {
+  last_connection_observer_ = observer;
+}
+
+void CustomFakeGCMDriver::RemoveConnectionObserver(
+    GCMConnectionObserver* observer) {
+  removed_connection_observer_ = observer;
+}
+
+void CustomFakeGCMDriver::SetConnected(bool connected) {
+  connected_ = connected;
+  if (connected && last_connection_observer_)
+    last_connection_observer_->OnConnected(ip_endpoint_);
+}
+
+void CustomFakeGCMDriver::ResetResults() {
+  accounts_.clear();
+  update_accounts_called_ = false;
+  last_connection_observer_ = NULL;
+  removed_connection_observer_ = NULL;
+}
+
+
+base::Time CustomFakeGCMDriver::GetLastTokenFetchTime() {
+  return last_token_fetch_time_;
+}
+
+void CustomFakeGCMDriver::SetLastTokenFetchTime(const base::Time& time) {
+  last_token_fetch_time_ = time;
+}
+
 }  // namespace
 
 class GCMAccountTrackerTest : public testing::Test {
  public:
   GCMAccountTrackerTest();
-  virtual ~GCMAccountTrackerTest();
-
-  // Callback for the account tracker.
-  void UpdateAccounts(const std::map<std::string, std::string>& accounts);
+  ~GCMAccountTrackerTest() override;
 
   // Helpers to pass fake events to the tracker. Tests should have either a pair
   // of Start/FinishAccountSignIn or SignInAccount per account. Don't mix.
@@ -57,21 +168,20 @@ class GCMAccountTrackerTest : public testing::Test {
 
   // Helpers for dealing with OAuth2 access token requests.
   void IssueAccessToken(const std::string& account_key);
+  void IssueExpiredAccessToken(const std::string& account_key);
   void IssueError(const std::string& account_key);
 
-  // Test results and helpers.
-  void ResetResults();
-  bool update_accounts_called() const { return update_accounts_called_; }
-  const std::map<std::string, std::string>& accounts() const {
-    return accounts_;
-  }
-
-  // Accessor to account tracker.
+  // Accessors to account tracker and gcm driver.
   GCMAccountTracker* tracker() { return tracker_.get(); }
+  CustomFakeGCMDriver* driver() { return &driver_; }
+
+  // Accessors to private methods of account tracker.
+  bool IsFetchingRequired() const;
+  bool IsTokenReportingRequired() const;
+  base::TimeDelta GetTimeToNextTokenReporting() const;
 
  private:
-  std::map<std::string, std::string> accounts_;
-  bool update_accounts_called_;
+  CustomFakeGCMDriver driver_;
 
   base::MessageLoop message_loop_;
   net::TestURLFetcherFactory test_fetcher_factory_;
@@ -80,8 +190,7 @@ class GCMAccountTrackerTest : public testing::Test {
   scoped_ptr<GCMAccountTracker> tracker_;
 };
 
-GCMAccountTrackerTest::GCMAccountTrackerTest()
-    : update_accounts_called_(false) {
+GCMAccountTrackerTest::GCMAccountTrackerTest() {
   fake_token_service_.reset(new FakeOAuth2TokenService());
 
   fake_identity_provider_.reset(
@@ -92,26 +201,12 @@ GCMAccountTrackerTest::GCMAccountTrackerTest()
                                new net::TestURLRequestContextGetter(
                                    message_loop_.message_loop_proxy())));
 
-  tracker_.reset(new GCMAccountTracker(
-      gaia_account_tracker.Pass(),
-      base::Bind(&GCMAccountTrackerTest::UpdateAccounts,
-                 base::Unretained(this))));
+  tracker_.reset(new GCMAccountTracker(gaia_account_tracker.Pass(), &driver_));
 }
 
 GCMAccountTrackerTest::~GCMAccountTrackerTest() {
   if (tracker_)
     tracker_->Shutdown();
-}
-
-void GCMAccountTrackerTest::UpdateAccounts(
-    const std::map<std::string, std::string>& accounts) {
-  update_accounts_called_ = true;
-  accounts_ = accounts;
-}
-
-void GCMAccountTrackerTest::ResetResults() {
-  accounts_.clear();
-  update_accounts_called_ = false;
 }
 
 void GCMAccountTrackerTest::StartAccountSignIn(const std::string& account_key) {
@@ -145,19 +240,36 @@ void GCMAccountTrackerTest::IssueAccessToken(const std::string& account_key) {
       account_key, MakeAccessToken(account_key), base::Time::Max());
 }
 
+void GCMAccountTrackerTest::IssueExpiredAccessToken(
+    const std::string& account_key) {
+  fake_token_service_->IssueAllTokensForAccount(
+      account_key, MakeAccessToken(account_key), base::Time::Now());
+}
+
 void GCMAccountTrackerTest::IssueError(const std::string& account_key) {
   fake_token_service_->IssueErrorForAllPendingRequestsForAccount(
       account_key,
       GoogleServiceAuthError(GoogleServiceAuthError::SERVICE_UNAVAILABLE));
 }
 
+bool GCMAccountTrackerTest::IsFetchingRequired() const {
+  return tracker_->IsTokenFetchingRequired();
+}
+
+bool GCMAccountTrackerTest::IsTokenReportingRequired() const {
+  return tracker_->IsTokenReportingRequired();
+}
+
+base::TimeDelta GCMAccountTrackerTest::GetTimeToNextTokenReporting() const {
+  return tracker_->GetTimeToNextTokenReporting();
+}
+
 TEST_F(GCMAccountTrackerTest, NoAccounts) {
-  EXPECT_FALSE(update_accounts_called());
+  EXPECT_FALSE(driver()->update_accounts_called());
   tracker()->Start();
   // Callback should not be called if there where no accounts provided.
-  EXPECT_FALSE(update_accounts_called());
-  EXPECT_TRUE(accounts().empty());
-  tracker()->Stop();
+  EXPECT_FALSE(driver()->update_accounts_called());
+  EXPECT_TRUE(driver()->accounts().empty());
 }
 
 // Verifies that callback is called after a token is issued for a single account
@@ -169,18 +281,17 @@ TEST_F(GCMAccountTrackerTest, SingleAccount) {
   tracker()->Start();
   // We don't have any accounts to report, but given the inner account tracker
   // is still working we don't make a call with empty accounts list.
-  EXPECT_FALSE(update_accounts_called());
+  EXPECT_FALSE(driver()->update_accounts_called());
 
   // This concludes the work of inner account tracker.
   FinishAccountSignIn(kAccountId1);
   IssueAccessToken(kAccountId1);
 
-  EXPECT_TRUE(update_accounts_called());
+  EXPECT_TRUE(driver()->update_accounts_called());
 
-  std::map<std::string, std::string> expected_accounts;
-  expected_accounts[kAccountId1] = MakeAccessToken(kAccountId1);
-  EXPECT_EQ(expected_accounts, accounts());
-  tracker()->Stop();
+  std::vector<GCMClient::AccountTokenInfo> expected_accounts;
+  expected_accounts.push_back(MakeAccountToken(kAccountId1));
+  VerifyAccountTokens(expected_accounts, driver()->accounts());
 }
 
 TEST_F(GCMAccountTrackerTest, MultipleAccounts) {
@@ -188,39 +299,35 @@ TEST_F(GCMAccountTrackerTest, MultipleAccounts) {
   StartAccountSignIn(kAccountId2);
 
   tracker()->Start();
-  EXPECT_FALSE(update_accounts_called());
+  EXPECT_FALSE(driver()->update_accounts_called());
 
   FinishAccountSignIn(kAccountId1);
   IssueAccessToken(kAccountId1);
-  EXPECT_FALSE(update_accounts_called());
+  EXPECT_FALSE(driver()->update_accounts_called());
 
   FinishAccountSignIn(kAccountId2);
   IssueAccessToken(kAccountId2);
-  EXPECT_TRUE(update_accounts_called());
+  EXPECT_TRUE(driver()->update_accounts_called());
 
-  std::map<std::string, std::string> expected_accounts;
-  expected_accounts[kAccountId1] = MakeAccessToken(kAccountId1);
-  expected_accounts[kAccountId2] = MakeAccessToken(kAccountId2);
-  EXPECT_EQ(expected_accounts, accounts());
-
-  tracker()->Stop();
+  std::vector<GCMClient::AccountTokenInfo> expected_accounts;
+  expected_accounts.push_back(MakeAccountToken(kAccountId1));
+  expected_accounts.push_back(MakeAccountToken(kAccountId2));
+  VerifyAccountTokens(expected_accounts, driver()->accounts());
 }
 
 TEST_F(GCMAccountTrackerTest, AccountAdded) {
   tracker()->Start();
-  ResetResults();
+  driver()->ResetResults();
 
   SignInAccount(kAccountId1);
-  EXPECT_FALSE(update_accounts_called());
+  EXPECT_FALSE(driver()->update_accounts_called());
 
   IssueAccessToken(kAccountId1);
-  EXPECT_TRUE(update_accounts_called());
+  EXPECT_TRUE(driver()->update_accounts_called());
 
-  std::map<std::string, std::string> expected_accounts;
-  expected_accounts[kAccountId1] = MakeAccessToken(kAccountId1);
-  EXPECT_EQ(expected_accounts, accounts());
-
-  tracker()->Stop();
+  std::vector<GCMClient::AccountTokenInfo> expected_accounts;
+  expected_accounts.push_back(MakeAccountToken(kAccountId1));
+  VerifyAccountTokens(expected_accounts, driver()->accounts());
 }
 
 TEST_F(GCMAccountTrackerTest, AccountRemoved) {
@@ -230,19 +337,17 @@ TEST_F(GCMAccountTrackerTest, AccountRemoved) {
   tracker()->Start();
   IssueAccessToken(kAccountId1);
   IssueAccessToken(kAccountId2);
-  EXPECT_TRUE(update_accounts_called());
+  EXPECT_TRUE(driver()->update_accounts_called());
 
-  ResetResults();
-  EXPECT_FALSE(update_accounts_called());
+  driver()->ResetResults();
+  EXPECT_FALSE(driver()->update_accounts_called());
 
   SignOutAccount(kAccountId2);
-  EXPECT_TRUE(update_accounts_called());
+  EXPECT_TRUE(driver()->update_accounts_called());
 
-  std::map<std::string, std::string> expected_accounts;
-  expected_accounts[kAccountId1] = MakeAccessToken(kAccountId1);
-  EXPECT_EQ(expected_accounts, accounts());
-
-  tracker()->Stop();
+  std::vector<GCMClient::AccountTokenInfo> expected_accounts;
+  expected_accounts.push_back(MakeAccountToken(kAccountId1));
+  VerifyAccountTokens(expected_accounts, driver()->accounts());
 }
 
 TEST_F(GCMAccountTrackerTest, GetTokenFailed) {
@@ -251,16 +356,20 @@ TEST_F(GCMAccountTrackerTest, GetTokenFailed) {
 
   tracker()->Start();
   IssueAccessToken(kAccountId1);
-  EXPECT_FALSE(update_accounts_called());
+  EXPECT_FALSE(driver()->update_accounts_called());
 
   IssueError(kAccountId2);
-  EXPECT_TRUE(update_accounts_called());
+  EXPECT_FALSE(driver()->update_accounts_called());
 
-  std::map<std::string, std::string> expected_accounts;
-  expected_accounts[kAccountId1] = MakeAccessToken(kAccountId1);
-  EXPECT_EQ(expected_accounts, accounts());
+  EXPECT_EQ(1UL, tracker()->get_pending_token_request_count());
 
-  tracker()->Stop();
+  IssueAccessToken(kAccountId2);
+  EXPECT_TRUE(driver()->update_accounts_called());
+
+  std::vector<GCMClient::AccountTokenInfo> expected_accounts;
+  expected_accounts.push_back(MakeAccountToken(kAccountId1));
+  expected_accounts.push_back(MakeAccountToken(kAccountId2));
+  VerifyAccountTokens(expected_accounts, driver()->accounts());
 }
 
 TEST_F(GCMAccountTrackerTest, GetTokenFailedAccountRemoved) {
@@ -271,15 +380,15 @@ TEST_F(GCMAccountTrackerTest, GetTokenFailedAccountRemoved) {
   IssueAccessToken(kAccountId1);
   IssueError(kAccountId2);
 
-  ResetResults();
+  driver()->ResetResults();
   SignOutAccount(kAccountId2);
-  EXPECT_TRUE(update_accounts_called());
+  IssueError(kAccountId2);
 
-  std::map<std::string, std::string> expected_accounts;
-  expected_accounts[kAccountId1] = MakeAccessToken(kAccountId1);
-  EXPECT_EQ(expected_accounts, accounts());
+  EXPECT_TRUE(driver()->update_accounts_called());
 
-  tracker()->Stop();
+  std::vector<GCMClient::AccountTokenInfo> expected_accounts;
+  expected_accounts.push_back(MakeAccountToken(kAccountId1));
+  VerifyAccountTokens(expected_accounts, driver()->accounts());
 }
 
 TEST_F(GCMAccountTrackerTest, AccountRemovedWhileRequestsPending) {
@@ -288,17 +397,112 @@ TEST_F(GCMAccountTrackerTest, AccountRemovedWhileRequestsPending) {
 
   tracker()->Start();
   IssueAccessToken(kAccountId1);
-  EXPECT_FALSE(update_accounts_called());
+  EXPECT_FALSE(driver()->update_accounts_called());
 
   SignOutAccount(kAccountId2);
   IssueAccessToken(kAccountId2);
-  EXPECT_TRUE(update_accounts_called());
+  EXPECT_TRUE(driver()->update_accounts_called());
 
-  std::map<std::string, std::string> expected_accounts;
-  expected_accounts[kAccountId1] = MakeAccessToken(kAccountId1);
-  EXPECT_EQ(expected_accounts, accounts());
+  std::vector<GCMClient::AccountTokenInfo> expected_accounts;
+  expected_accounts.push_back(MakeAccountToken(kAccountId1));
+  VerifyAccountTokens(expected_accounts, driver()->accounts());
+}
 
-  tracker()->Stop();
+// Makes sure that tracker observes GCM connection when running.
+TEST_F(GCMAccountTrackerTest, TrackerObservesConnection) {
+  EXPECT_EQ(NULL, driver()->last_connection_observer());
+  tracker()->Start();
+  EXPECT_EQ(tracker(), driver()->last_connection_observer());
+  tracker()->Shutdown();
+  EXPECT_EQ(tracker(), driver()->last_removed_connection_observer());
+}
+
+// Makes sure that token fetching happens only after connection is established.
+TEST_F(GCMAccountTrackerTest, PostponeTokenFetchingUntilConnected) {
+  driver()->SetConnected(false);
+  StartAccountSignIn(kAccountId1);
+  tracker()->Start();
+  FinishAccountSignIn(kAccountId1);
+
+  EXPECT_EQ(0UL, tracker()->get_pending_token_request_count());
+  driver()->SetConnected(true);
+
+  EXPECT_EQ(1UL, tracker()->get_pending_token_request_count());
+}
+
+TEST_F(GCMAccountTrackerTest, InvalidateExpiredTokens) {
+  StartAccountSignIn(kAccountId1);
+  StartAccountSignIn(kAccountId2);
+  tracker()->Start();
+  FinishAccountSignIn(kAccountId1);
+  FinishAccountSignIn(kAccountId2);
+
+  EXPECT_EQ(2UL, tracker()->get_pending_token_request_count());
+
+  IssueExpiredAccessToken(kAccountId1);
+  IssueAccessToken(kAccountId2);
+  // Because the first token is expired, we expect the sanitize to kick in and
+  // clean it up before the SetAccessToken is called. This also means a new
+  // token request will be issued
+  EXPECT_FALSE(driver()->update_accounts_called());
+  EXPECT_EQ(1UL, tracker()->get_pending_token_request_count());
+}
+
+// Testing for whether there are still more tokens to be fetched. Typically the
+// need for token fetching triggers immediate request, unless there is no
+// connection, that is why connection is set on and off in this test.
+TEST_F(GCMAccountTrackerTest, IsTokenFetchingRequired) {
+  tracker()->Start();
+  driver()->SetConnected(false);
+  EXPECT_FALSE(IsFetchingRequired());
+  StartAccountSignIn(kAccountId1);
+  FinishAccountSignIn(kAccountId1);
+  EXPECT_TRUE(IsFetchingRequired());
+
+  driver()->SetConnected(true);
+  EXPECT_FALSE(IsFetchingRequired());  // Indicates that fetching has started.
+  IssueAccessToken(kAccountId1);
+  EXPECT_FALSE(IsFetchingRequired());
+
+  driver()->SetConnected(false);
+  StartAccountSignIn(kAccountId2);
+  FinishAccountSignIn(kAccountId2);
+  EXPECT_TRUE(IsFetchingRequired());
+
+  IssueExpiredAccessToken(kAccountId2);
+  // Make sure that if the token was expired it is still needed.
+  EXPECT_TRUE(IsFetchingRequired());
+}
+
+// Tests what is the expected time to the next token fetching.
+TEST_F(GCMAccountTrackerTest, GetTimeToNextTokenReporting) {
+  tracker()->Start();
+  // At this point the last token fetch time is never.
+  EXPECT_EQ(base::TimeDelta(), GetTimeToNextTokenReporting());
+
+  driver()->SetLastTokenFetchTime(base::Time::Now());
+  EXPECT_TRUE(GetTimeToNextTokenReporting() <=
+                  base::TimeDelta::FromSeconds(12 * 60 * 60));
+}
+
+// Tests conditions when token reporting is required.
+TEST_F(GCMAccountTrackerTest, IsTokenReportingRequired) {
+  tracker()->Start();
+  // Required because it is overdue.
+  EXPECT_TRUE(IsTokenReportingRequired());
+
+  // Not required because it just happened.
+  driver()->SetLastTokenFetchTime(base::Time::Now());
+  EXPECT_FALSE(IsTokenReportingRequired());
+
+  SignInAccount(kAccountId1);
+  IssueAccessToken(kAccountId1);
+  driver()->ResetResults();
+  // Reporting was triggered, which means testing for required will give false,
+  // but we have the update call.
+  SignOutAccount(kAccountId1);
+  EXPECT_TRUE(driver()->update_accounts_called());
+  EXPECT_FALSE(IsTokenReportingRequired());
 }
 
 // TODO(fgorski): Add test for adding account after removal >> make sure it does

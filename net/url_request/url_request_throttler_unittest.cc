@@ -63,13 +63,11 @@ class MockURLRequestThrottlerEntry : public URLRequestThrottlerEntry {
     backoff_policy_.num_errors_to_ignore = 0;
   }
 
-  virtual const BackoffEntry* GetBackoffEntry() const OVERRIDE {
+  const BackoffEntry* GetBackoffEntry() const override {
     return &mock_backoff_entry_;
   }
 
-  virtual BackoffEntry* GetBackoffEntry() OVERRIDE {
-    return &mock_backoff_entry_;
-  }
+  BackoffEntry* GetBackoffEntry() override { return &mock_backoff_entry_; }
 
   static bool ExplicitUserRequest(int load_flags) {
     return URLRequestThrottlerEntry::ExplicitUserRequest(load_flags);
@@ -85,7 +83,7 @@ class MockURLRequestThrottlerEntry : public URLRequestThrottlerEntry {
   }
 
   // Overridden for tests.
-  virtual TimeTicks ImplGetTimeNow() const OVERRIDE { return fake_time_now_; }
+  TimeTicks ImplGetTimeNow() const override { return fake_time_now_; }
 
   void set_exponential_backoff_release_time(
       const base::TimeTicks& release_time) {
@@ -106,7 +104,7 @@ class MockURLRequestThrottlerEntry : public URLRequestThrottlerEntry {
   MockBackoffEntry mock_backoff_entry_;
 
  protected:
-  virtual ~MockURLRequestThrottlerEntry() {}
+  ~MockURLRequestThrottlerEntry() override {}
 };
 
 class MockURLRequestThrottlerManager : public URLRequestThrottlerManager {
@@ -174,7 +172,7 @@ class URLRequestThrottlerEntryTest : public testing::Test {
       : request_(context_.CreateRequest(GURL(), DEFAULT_PRIORITY, NULL, NULL)) {
   }
 
-  virtual void SetUp();
+  void SetUp() override;
 
   TimeTicks now_;
   MockURLRequestThrottlerManager manager_;  // Dummy object, not used.
@@ -357,9 +355,7 @@ class URLRequestThrottlerManagerTest : public testing::Test {
       : request_(context_.CreateRequest(GURL(), DEFAULT_PRIORITY, NULL, NULL)) {
   }
 
-  virtual void SetUp() {
-    request_->SetLoadFlags(0);
-  }
+  void SetUp() override { request_->SetLoadFlags(0); }
 
   void ExpectEntryAllowsAllOnErrorIfOptedOut(
       URLRequestThrottlerEntryInterface* entry,

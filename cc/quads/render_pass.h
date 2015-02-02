@@ -15,8 +15,8 @@
 #include "cc/quads/list_container.h"
 #include "cc/quads/render_pass_id.h"
 #include "skia/ext/refptr.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/rect_f.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/transform.h"
 
 namespace base {
@@ -47,7 +47,7 @@ class QuadList : public ListContainer<DrawQuad> {
   inline ConstBackToFrontIterator BackToFrontEnd() const { return rend(); }
 };
 
-typedef ScopedPtrVector<SharedQuadState> SharedQuadStateList;
+typedef ListContainer<SharedQuadState> SharedQuadStateList;
 
 class CC_EXPORT RenderPass {
  public:
@@ -55,6 +55,8 @@ class CC_EXPORT RenderPass {
 
   static scoped_ptr<RenderPass> Create();
   static scoped_ptr<RenderPass> Create(size_t num_layers);
+  static scoped_ptr<RenderPass> Create(size_t shared_quad_state_list_size,
+                                       size_t quad_list_size);
 
   // A shallow copy of the render pass, which does not include its quads or copy
   // requests.
@@ -117,6 +119,7 @@ class CC_EXPORT RenderPass {
  protected:
   explicit RenderPass(size_t num_layers);
   RenderPass();
+  RenderPass(size_t shared_quad_state_list_size, size_t quad_list_size);
 
  private:
   template <typename DrawQuadType>
@@ -130,20 +133,12 @@ class CC_EXPORT RenderPass {
 }  // namespace cc
 
 namespace BASE_HASH_NAMESPACE {
-#if defined(COMPILER_MSVC)
-inline size_t hash_value(const cc::RenderPassId& key) {
-  return base::HashPair(key.layer_id, key.index);
-}
-#elif defined(COMPILER_GCC)
 template <>
 struct hash<cc::RenderPassId> {
   size_t operator()(cc::RenderPassId key) const {
     return base::HashPair(key.layer_id, key.index);
   }
 };
-#else
-#error define a hash function for your compiler
-#endif  // COMPILER
 }  // namespace BASE_HASH_NAMESPACE
 
 namespace cc {

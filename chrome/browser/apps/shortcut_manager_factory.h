@@ -27,13 +27,13 @@ class AppShortcutManagerFactory : public BrowserContextKeyedServiceFactory {
   friend struct DefaultSingletonTraits<AppShortcutManagerFactory>;
 
   AppShortcutManagerFactory();
-  virtual ~AppShortcutManagerFactory();
+  ~AppShortcutManagerFactory() override;
 
   // BrowserContextKeyedServiceFactory:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* profile) const OVERRIDE;
-  virtual bool ServiceIsCreatedWithBrowserContext() const OVERRIDE;
-  virtual bool ServiceIsNULLWhileTesting() const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* profile) const override;
+  bool ServiceIsCreatedWithBrowserContext() const override;
+  bool ServiceIsNULLWhileTesting() const override;
 };
 
 #endif  // CHROME_BROWSER_APPS_SHORTCUT_MANAGER_FACTORY_H_

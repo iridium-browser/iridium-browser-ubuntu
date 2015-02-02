@@ -17,6 +17,7 @@
 #include "ash/test/shelf_view_test_api.h"
 #include "ash/test/shell_test_api.h"
 #include "ash/test/test_shelf_delegate.h"
+#include "ash/wm/maximize_mode/maximize_mode_controller.h"
 #include "ash/wm/mru_window_tracker.h"
 #include "ash/wm/overview/window_grid.h"
 #include "ash/wm/overview/window_selector.h"
@@ -55,9 +56,7 @@ namespace {
 class NonActivatableActivationDelegate
     : public aura::client::ActivationDelegate {
  public:
-  virtual bool ShouldActivate() const OVERRIDE {
-    return false;
-  }
+  bool ShouldActivate() const override { return false; }
 };
 
 void CancelDrag(DragDropController* controller, bool* canceled) {
@@ -72,9 +71,9 @@ void CancelDrag(DragDropController* controller, bool* canceled) {
 class WindowSelectorTest : public test::AshTestBase {
  public:
   WindowSelectorTest() {}
-  virtual ~WindowSelectorTest() {}
+  ~WindowSelectorTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     test::AshTestBase::SetUp();
     ASSERT_TRUE(test::TestShelfDelegate::instance());
 
@@ -269,10 +268,10 @@ TEST_F(WindowSelectorTest, A11yAlertOnOverviewMode) {
       ash::Shell::GetInstance()->accessibility_delegate();
   scoped_ptr<aura::Window> window1(CreateWindow(bounds));
   EXPECT_NE(delegate->GetLastAccessibilityAlert(),
-            A11Y_ALERT_WINDOW_OVERVIEW_MODE_ENTERED);
+            ui::A11Y_ALERT_WINDOW_OVERVIEW_MODE_ENTERED);
   ToggleOverview();
   EXPECT_EQ(delegate->GetLastAccessibilityAlert(),
-            A11Y_ALERT_WINDOW_OVERVIEW_MODE_ENTERED);
+            ui::A11Y_ALERT_WINDOW_OVERVIEW_MODE_ENTERED);
 }
 
 // Tests entering overview mode with two windows and selecting one by clicking.
@@ -328,6 +327,39 @@ TEST_F(WindowSelectorTest, BasicGesture) {
   EXPECT_EQ(window2.get(), GetFocusedWindow());
 }
 
+// Tests that we do not crash and overview mode remains engaged if the desktop
+// is tapped while a finger is already down over a window.
+TEST_F(WindowSelectorTest, NoCrashWithDesktopTap) {
+  scoped_ptr<aura::Window> window(CreateWindow(gfx::Rect(200, 300, 250, 450)));
+
+  // We need a widget for the close button to work, a bare window will crash.
+  scoped_ptr<views::Widget> widget(new views::Widget);
+  views::Widget::InitParams params;
+  params.bounds = gfx::Rect(0, 0, 400, 400);
+  params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  params.parent = window->parent();
+  widget->Init(params);
+  widget->Show();
+
+  ToggleOverview();
+
+  gfx::Rect bounds =
+      gfx::ToEnclosingRect(GetTransformedBoundsInRootWindow(window.get()));
+  ui::test::EventGenerator event_generator(window->GetRootWindow(),
+                                           bounds.CenterPoint());
+
+  // Press down on the window.
+  const int kTouchId = 19;
+  event_generator.PressTouchId(kTouchId);
+
+  // Tap on the desktop, which should not cause a crash. Overview mode should
+  // remain engaged because the transparent widget over the window has capture.
+  event_generator.GestureTapAt(gfx::Point(0, 0));
+  EXPECT_TRUE(IsSelecting());
+
+  event_generator.ReleaseTouchId(kTouchId);
+}
+
 // Tests that a window does not receive located events when in overview mode.
 TEST_F(WindowSelectorTest, WindowDoesNotReceiveEvents) {
   gfx::Rect window_bounds(20, 10, 200, 300);
@@ -364,7 +396,7 @@ TEST_F(WindowSelectorTest, WindowDoesNotReceiveEvents) {
 TEST_F(WindowSelectorTest, CloseButton) {
   scoped_ptr<aura::Window> window1(CreateWindow(gfx::Rect(200, 300, 250, 450)));
 
-  // We need a widget for the close button the work, a bare window will crash.
+  // We need a widget for the close button to work, a bare window will crash.
   scoped_ptr<views::Widget> widget(new views::Widget);
   views::Widget::InitParams params;
   params.bounds = gfx::Rect(0, 0, 400, 400);
@@ -432,6 +464,46 @@ TEST_F(WindowSelectorTest, OverviewUndimsShelf) {
   EXPECT_FALSE(shelf->GetDimsShelf());
   ToggleOverview();
   EXPECT_TRUE(shelf->GetDimsShelf());
+}
+
+// Tests that entering overview when a fullscreen window is active in maximized
+// mode correctly applies the transformations to the window and correctly
+// updates the window bounds on exiting overview mode: http://crbug.com/401664.
+TEST_F(WindowSelectorTest, FullscreenWindowMaximizeMode) {
+  gfx::Rect bounds(0, 0, 400, 400);
+  scoped_ptr<aura::Window> window1(CreateWindow(bounds));
+  scoped_ptr<aura::Window> window2(CreateWindow(bounds));
+  Shell::GetInstance()->maximize_mode_controller()->
+      EnableMaximizeModeWindowManager(true);
+  wm::ActivateWindow(window2.get());
+  wm::ActivateWindow(window1.get());
+  gfx::Rect normal_window_bounds(window1->bounds());
+  const wm::WMEvent toggle_fullscreen_event(wm::WM_EVENT_TOGGLE_FULLSCREEN);
+  wm::GetWindowState(window1.get())->OnWMEvent(&toggle_fullscreen_event);
+  gfx::Rect fullscreen_window_bounds(window1->bounds());
+  EXPECT_NE(normal_window_bounds.ToString(),
+            fullscreen_window_bounds.ToString());
+  EXPECT_EQ(fullscreen_window_bounds.ToString(),
+            window2->GetTargetBounds().ToString());
+  ToggleOverview();
+  // Window 2 would normally resize to normal window bounds on showing the shelf
+  // for overview but this is deferred until overview is exited.
+  EXPECT_EQ(fullscreen_window_bounds.ToString(),
+            window2->GetTargetBounds().ToString());
+  EXPECT_FALSE(WindowsOverlapping(window1.get(), window2.get()));
+  ToggleOverview();
+
+  // Since the fullscreen window is still active, window2 will still have the
+  // larger bounds.
+  EXPECT_EQ(fullscreen_window_bounds.ToString(),
+            window2->GetTargetBounds().ToString());
+
+  // Enter overview again and select window 2. Selecting window 2 should show
+  // the shelf bringing window2 back to the normal bounds.
+  ToggleOverview();
+  ClickWindow(window2.get());
+  EXPECT_EQ(normal_window_bounds.ToString(),
+            window2->GetTargetBounds().ToString());
 }
 
 // Tests that beginning window selection hides the app list.

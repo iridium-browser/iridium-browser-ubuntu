@@ -50,16 +50,16 @@ namespace blink {
 //
 // Column spans result in the creation of new column sets, since a spanning renderer has to be
 // placed in between the column sets that come before and after the span.
-class RenderMultiColumnSet FINAL : public RenderRegion {
+class RenderMultiColumnSet : public RenderRegion {
 public:
     enum BalancedHeightCalculation { GuessFromFlowThreadPortion, StretchBySpaceShortage };
 
     static RenderMultiColumnSet* createAnonymous(RenderFlowThread*, RenderStyle* parentStyle);
 
-    virtual bool isRenderMultiColumnSet() const OVERRIDE { return true; }
+    virtual bool isOfType(RenderObjectType type) const override { return type == RenderObjectRenderMultiColumnSet || RenderRegion::isOfType(type); }
 
-    virtual LayoutUnit pageLogicalWidth() const OVERRIDE FINAL { return flowThread()->logicalWidth(); }
-    virtual LayoutUnit pageLogicalHeight() const OVERRIDE FINAL { return m_columnHeight; }
+    virtual LayoutUnit pageLogicalWidth() const override final { return flowThread()->logicalWidth(); }
+    virtual LayoutUnit pageLogicalHeight() const override final { return m_columnHeight; }
 
     RenderBlockFlow* multiColumnBlockFlow() const { return toRenderBlockFlow(parent()); }
     RenderMultiColumnFlowThread* multiColumnFlowThread() const
@@ -95,7 +95,7 @@ public:
     void addContentRun(LayoutUnit endOffsetFromFirstPage);
 
     // (Re-)calculate the column height if it's auto.
-    bool recalculateColumnHeight(BalancedHeightCalculation);
+    virtual bool recalculateColumnHeight(BalancedHeightCalculation);
 
     // Record space shortage (the amount of space that would have been enough to prevent some
     // element from being moved to the next column) at a column break. The smallest amount of space
@@ -113,11 +113,6 @@ public:
     void attachRegion();
     void detachRegion();
 
-    // This method represents the logical height of the entire flow thread portion used by the region or set.
-    // For RenderRegions it matches logicalPaginationHeight(), but for sets it is the height of all the pages
-    // or columns added together.
-    LayoutUnit logicalHeightOfAllFlowThreadContent() const { return logicalHeightInFlowThread(); }
-
     void paintInvalidationForFlowThreadContent(const LayoutRect& paintInvalidationRect) const;
 
     // The top of the nearest page inside the region. For RenderRegions, this is just the logical top of the
@@ -132,19 +127,20 @@ public:
     // The "CSS actual" value of column-count. This includes overflowing columns, if any.
     unsigned actualColumnCount() const;
 
-private:
+protected:
     RenderMultiColumnSet(RenderFlowThread*);
 
-    virtual void insertedIntoTree() OVERRIDE FINAL;
-    virtual void willBeRemovedFromTree() OVERRIDE FINAL;
+private:
+    virtual void insertedIntoTree() override final;
+    virtual void willBeRemovedFromTree() override final;
 
-    virtual void computeLogicalHeight(LayoutUnit logicalHeight, LayoutUnit logicalTop, LogicalExtentComputedValues&) const OVERRIDE;
+    virtual void computeLogicalHeight(LayoutUnit logicalHeight, LayoutUnit logicalTop, LogicalExtentComputedValues&) const override;
 
-    virtual void paintObject(PaintInfo&, const LayoutPoint& paintOffset) OVERRIDE;
+    virtual void paintObject(PaintInfo&, const LayoutPoint& paintOffset) override;
 
-    virtual void addOverflowFromChildren() OVERRIDE;
+    virtual void addOverflowFromChildren() override;
 
-    virtual const char* renderName() const OVERRIDE;
+    virtual const char* renderName() const override;
 
     LayoutUnit calculateMaxColumnHeight() const;
     LayoutRect columnRectAt(unsigned index) const;

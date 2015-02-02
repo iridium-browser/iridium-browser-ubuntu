@@ -157,6 +157,7 @@ class KernelProxy : protected KernelObject {
   virtual int sigaction(int signum,
                         const struct sigaction* action,
                         struct sigaction* oaction);
+  virtual mode_t umask(mode_t);
 
 #ifdef PROVIDES_SOCKET_API
   virtual int select(int nfds,
@@ -226,6 +227,9 @@ class KernelProxy : protected KernelObject {
                       const void* data,
                       bool create_fs_node,
                       ScopedFilesystem* out_filesystem);
+
+  Error FutimensInternal(const ScopedNode& node,
+                         const struct timespec times[2]);
 
   Error CreateFsNode(const ScopedFilesystem& fs);
 

@@ -25,7 +25,7 @@ from auto_bisect import math_utils
 CROS_BOARD_ENV = 'BISECT_CROS_BOARD'
 CROS_IP_ENV = 'BISECT_CROS_IP'
 
-SCRIPT_DIR = os.path.dirname(__file__)
+SCRIPT_DIR = os.path.abspath(os.path.dirname(__file__))
 SRC_DIR = os.path.join(SCRIPT_DIR, os.path.pardir)
 BISECT_CONFIG_PATH = os.path.join(SCRIPT_DIR, 'auto_bisect', 'bisect.cfg')
 RUN_TEST_CONFIG_PATH = os.path.join(SCRIPT_DIR, 'run-perf-test.cfg')
@@ -111,18 +111,18 @@ def _LoadConfigFile(config_file_path):
     return {}
 
 
-def _ValidateConfigFile(config_contents, valid_parameters):
+def _ValidateConfigFile(config_contents, required_parameters):
   """Validates the config file contents, checking whether all values are
   non-empty.
 
   Args:
     config_contents: A config dictionary.
-    valid_parameters: A list of parameters to check for.
+    required_parameters: A list of parameters to check for.
 
   Returns:
     True if valid.
   """
-  for parameter in valid_parameters:
+  for parameter in required_parameters:
     if parameter not in config_contents:
       return False
     value = config_contents[parameter]
@@ -146,13 +146,13 @@ def _ValidatePerfConfigFile(config_contents):
   Returns:
     True if valid.
   """
-  valid_parameters = [
+  required_parameters = [
       'command',
       'repeat_count',
       'truncate_percent',
       'max_time_minutes',
   ]
-  return _ValidateConfigFile(config_contents, valid_parameters)
+  return _ValidateConfigFile(config_contents, required_parameters)
 
 
 def _ValidateBisectConfigFile(config_contents):
@@ -167,7 +167,7 @@ def _ValidateBisectConfigFile(config_contents):
   Returns:
     True if valid.
   """
-  valid_params = [
+  required_params = [
       'command',
       'good_revision',
       'bad_revision',
@@ -176,7 +176,7 @@ def _ValidateBisectConfigFile(config_contents):
       'truncate_percent',
       'max_time_minutes',
   ]
-  return _ValidateConfigFile(config_contents, valid_params)
+  return _ValidateConfigFile(config_contents, required_params)
 
 
 def _OutputFailedResults(text_to_print):
@@ -206,6 +206,12 @@ def _CreateBisectOptionsFromConfig(config):
     opts_dict['use_goma'] = config['use_goma']
   if config.has_key('goma_dir'):
     opts_dict['goma_dir'] = config['goma_dir']
+
+  if config.has_key('improvement_direction'):
+    opts_dict['improvement_direction'] = int(config['improvement_direction'])
+
+  if config.has_key('bug_id') and str(config['bug_id']).isdigit():
+    opts_dict['bug_id'] = config['bug_id']
 
   opts_dict['build_preference'] = 'ninja'
   opts_dict['output_buildbot_annotations'] = True
@@ -245,12 +251,12 @@ def _RunPerformanceTest(config):
   bisect_utils.OutputAnnotationStepStart('Building With Patch')
 
   opts = _CreateBisectOptionsFromConfig(config)
-  b = bisect_perf_regression.BisectPerformanceMetrics(None, opts)
+  b = bisect_perf_regression.BisectPerformanceMetrics(opts, os.getcwd())
 
   if bisect_utils.RunGClient(['runhooks']):
     raise RuntimeError('Failed to run gclient runhooks')
 
-  if not b.BuildCurrentRevision('chromium'):
+  if not b.ObtainBuild('chromium'):
     raise RuntimeError('Patched version failed to build.')
 
   bisect_utils.OutputAnnotationStepClosed()
@@ -279,7 +285,7 @@ def _RunPerformanceTest(config):
   if bisect_utils.RunGClient(['runhooks']):
     raise RuntimeError('Failed to run gclient runhooks')
 
-  if not b.BuildCurrentRevision('chromium'):
+  if not b.ObtainBuild('chromium'):
     raise RuntimeError('Unpatched version failed to build.')
 
   bisect_utils.OutputAnnotationStepClosed()
@@ -402,6 +408,12 @@ def _RunBisectionScript(
 
   if config.has_key('bisect_mode'):
     cmd.extend(['--bisect_mode', config['bisect_mode']])
+
+  if config.has_key('improvement_direction'):
+    cmd.extend(['-d', config['improvement_direction']])
+
+  if config.has_key('bug_id'):
+    cmd.extend(['--bug_id', config['bug_id']])
 
   cmd.extend(['--build_preference', 'ninja'])
 

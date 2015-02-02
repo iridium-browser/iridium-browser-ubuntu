@@ -27,10 +27,10 @@ namespace extensions {
 
 class DebuggerApiTest : public ExtensionApiTest {
  protected:
-  virtual ~DebuggerApiTest() {}
+  ~DebuggerApiTest() override {}
 
-  virtual void SetUpCommandLine(base::CommandLine* command_line) OVERRIDE;
-  virtual void SetUpOnMainThread() OVERRIDE;
+  void SetUpCommandLine(base::CommandLine* command_line) override;
+  void SetUpOnMainThread() override;
 
   // Run the attach function. If |expected_error| is not empty, then the
   // function should fail with the error. Otherwise, the function is expected

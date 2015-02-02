@@ -20,19 +20,18 @@ const char kStubVerificationCode[] = "SAMPLE";
 class PrivetV3CryptoProviderEmpty : public PrivetV3CryptoProvider {
  public:
   PrivetV3CryptoProviderEmpty();
-  virtual ~PrivetV3CryptoProviderEmpty();
+  ~PrivetV3CryptoProviderEmpty() override;
 
   // PrivetV3CryptoProvider implementation.
-  virtual HandshakeState GetState() OVERRIDE;
-  virtual std::string GetAuthMethod() OVERRIDE;
-  virtual HandshakeState GetNextStep(int* step, std::string* package) OVERRIDE;
-  virtual HandshakeState SetStepResponse(int step,
-                                         const std::string& state,
-                                         const std::string& package) OVERRIDE;
-  virtual std::string GetVerificationCode() OVERRIDE;
-  virtual HandshakeState AcceptVerificationCode() OVERRIDE;
-  virtual bool EncryptData(const std::string& input,
-                           std::string* output) OVERRIDE;
+  HandshakeState GetState() override;
+  std::string GetAuthMethod() override;
+  HandshakeState GetNextStep(int* step, std::string* package) override;
+  HandshakeState SetStepResponse(int step,
+                                 const std::string& state,
+                                 const std::string& package) override;
+  std::string GetVerificationCode() override;
+  HandshakeState AcceptVerificationCode() override;
+  bool EncryptData(const std::string& input, std::string* output) override;
 
  private:
   HandshakeState state_;

@@ -49,25 +49,25 @@ class CONTENT_EXPORT ServiceWorkerCacheStorage {
   typedef base::Callback<void(const StringVector&, CacheStorageError)>
       StringsAndErrorCallback;
 
+  static const char kIndexFileName[];
+
   ServiceWorkerCacheStorage(
       const base::FilePath& origin_path,
       bool memory_only,
       base::SequencedTaskRunner* cache_task_runner,
       net::URLRequestContext* request_context,
-      base::WeakPtr<storage::BlobStorageContext> blob_context);
+      const scoped_refptr<storage::QuotaManagerProxy>& quota_manager_proxy,
+      base::WeakPtr<storage::BlobStorageContext> blob_context,
+      const GURL& origin);
 
+  // Any unfinished asynchronous operations may not complete or call their
+  // callbacks.
   virtual ~ServiceWorkerCacheStorage();
 
-  // Create a ServiceWorkerCache if it doesn't already exist and call the
-  // callback with the cache's id. If it already
-  // exists the callback is called with CACHE_STORAGE_ERROR_EXISTS.
-  void CreateCache(const std::string& cache_name,
-                   const CacheAndErrorCallback& callback);
-
-  // Get the cache id for the given key. If not found returns
-  // CACHE_STORAGE_ERROR_NOT_FOUND.
-  void GetCache(const std::string& cache_name,
-                const CacheAndErrorCallback& callback);
+  // Get the cache for the given key. If the cache is not found it is
+  // created.
+  void OpenCache(const std::string& cache_name,
+                 const CacheAndErrorCallback& callback);
 
   // Calls the callback with whether or not the cache exists.
   void HasCache(const std::string& cache_name,
@@ -82,6 +82,12 @@ class CONTENT_EXPORT ServiceWorkerCacheStorage {
   void EnumerateCaches(const StringsAndErrorCallback& callback);
 
   // TODO(jkarlin): Add match() function.
+
+  void CloseAllCaches(const base::Closure& callback);
+
+  // The size of all of the origin's contents in memory. Returns 0 if the cache
+  // backend is not a memory backend.
+  int64 MemoryBackedSize() const;
 
  private:
   class MemoryLoader;
@@ -115,6 +121,10 @@ class CONTENT_EXPORT ServiceWorkerCacheStorage {
                                 bool success);
 
   // The DeleteCache callbacks are below.
+  void DeleteCacheDidClose(const std::string& cache_name,
+                           const BoolAndErrorCallback& callback,
+                           const StringVector& ordered_cache_names,
+                           const scoped_refptr<ServiceWorkerCache>& cache);
   void DeleteCacheDidWriteIndex(const std::string& cache_name,
                                 const BoolAndErrorCallback& callback,
                                 bool success);

@@ -34,19 +34,19 @@ class MockSandboxedUnpackerClient : public SandboxedUnpackerClient {
   base::FilePath temp_dir() const { return temp_dir_; }
 
  private:
-  virtual ~MockSandboxedUnpackerClient() {}
+  ~MockSandboxedUnpackerClient() override {}
 
-  virtual void OnUnpackSuccess(const base::FilePath& temp_dir,
-                               const base::FilePath& extension_root,
-                               const base::DictionaryValue* original_manifest,
-                               const Extension* extension,
-                               const SkBitmap& install_icon) OVERRIDE {
+  void OnUnpackSuccess(const base::FilePath& temp_dir,
+                       const base::FilePath& extension_root,
+                       const base::DictionaryValue* original_manifest,
+                       const Extension* extension,
+                       const SkBitmap& install_icon) override {
     temp_dir_ = temp_dir;
     quit_closure_.Run();
 
   }
 
-  virtual void OnUnpackFailure(const base::string16& error) OVERRIDE {
+  void OnUnpackFailure(const base::string16& error) override {
     ASSERT_TRUE(false);
   }
 
@@ -56,7 +56,7 @@ class MockSandboxedUnpackerClient : public SandboxedUnpackerClient {
 
 class SandboxedUnpackerTest : public testing::Test {
  public:
-  virtual void SetUp() {
+  void SetUp() override {
    ASSERT_TRUE(extensions_dir_.CreateUniqueTempDir());
     browser_threads_.reset(new content::TestBrowserThreadBundle(
         content::TestBrowserThreadBundle::IO_MAINLOOP));
@@ -66,7 +66,7 @@ class SandboxedUnpackerTest : public testing::Test {
     client_ = new MockSandboxedUnpackerClient;
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     // Need to destruct SandboxedUnpacker before the message loop since
     // it posts a task to it.
     sandboxed_unpacker_ = NULL;

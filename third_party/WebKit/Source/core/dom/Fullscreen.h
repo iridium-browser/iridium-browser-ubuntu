@@ -43,7 +43,7 @@ namespace blink {
 class RenderFullScreen;
 class RenderStyle;
 
-class Fullscreen FINAL
+class Fullscreen final
     : public NoBaseWillBeGarbageCollectedFinalized<Fullscreen>
     , public DocumentSupplement
     , public DocumentLifecycleObserver {
@@ -86,12 +86,12 @@ public:
     bool webkitFullScreenKeyboardInputAllowed() const { return m_fullScreenElement.get() && m_areKeysEnabledInFullScreen; }
     Element* webkitCurrentFullScreenElement() const { return m_fullScreenElement.get(); }
 
-    virtual void documentWasDetached() OVERRIDE;
+    virtual void documentWasDetached() override;
 #if !ENABLE(OILPAN)
-    virtual void documentWasDisposed() OVERRIDE;
+    virtual void documentWasDisposed() override;
 #endif
 
-    virtual void trace(Visitor*) OVERRIDE;
+    virtual void trace(Visitor*) override;
 
 private:
     static Fullscreen* fromIfExistsSlow(Document&);
@@ -134,14 +134,5 @@ inline Fullscreen* Fullscreen::fromIfExists(Document& document)
 }
 
 } // namespace blink
-
-// Needed by the HeapVector<> element stack.
-namespace WTF {
-
-template<>struct IsPod<blink::Fullscreen::RequestType> {
-    static const bool value = true;
-};
-
-} // namespace WTF
 
 #endif // Fullscreen_h

@@ -22,13 +22,11 @@ class TestBrowserWindowOwner : public chrome::BrowserListObserver {
   explicit TestBrowserWindowOwner(TestBrowserWindow* window) : window_(window) {
     BrowserList::AddObserver(this);
   }
-  virtual ~TestBrowserWindowOwner() {
-    BrowserList::RemoveObserver(this);
-  }
+  ~TestBrowserWindowOwner() override { BrowserList::RemoveObserver(this); }
 
  private:
   // Overridden from BrowserListObserver:
-  virtual void OnBrowserRemoved(Browser* browser) OVERRIDE {
+  void OnBrowserRemoved(Browser* browser) override {
     if (browser->window() == window_.get())
       delete this;
   }
@@ -99,7 +97,7 @@ bool TestBrowserWindow::IsAlwaysOnTop() const {
   return false;
 }
 
-gfx::NativeWindow TestBrowserWindow::GetNativeWindow() {
+gfx::NativeWindow TestBrowserWindow::GetNativeWindow() const {
   return NULL;
 }
 

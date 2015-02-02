@@ -145,6 +145,14 @@ class DISPLAY_EXPORT DisplayConfigurator : public NativeDisplayObserver {
     return cached_displays_;
   }
 
+  // Called when an external process no longer needs to control the display
+  // and Chrome can take control.
+  void TakeControl();
+
+  // Called when an external process needs to control the display and thus
+  // Chrome should relinquish it.
+  void RelinquishControl();
+
   void set_state_controller(StateController* controller) {
     state_controller_ = controller;
   }
@@ -186,7 +194,7 @@ class DISPLAY_EXPORT DisplayConfigurator : public NativeDisplayObserver {
   bool SetDisplayMode(MultipleDisplayState new_state);
 
   // NativeDisplayDelegate::Observer overrides:
-  virtual void OnConfigurationChanged() OVERRIDE;
+  virtual void OnConfigurationChanged() override;
 
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
@@ -267,8 +275,12 @@ class DISPLAY_EXPORT DisplayConfigurator : public NativeDisplayObserver {
                       bool try_panel_fitting,
                       bool preserve_aspect);
 
-  // Configures displays.
+  // Configures displays. Invoked by |configure_timer_|.
   void ConfigureDisplays();
+
+  // Restores |requested_power_state_| after the system has resumed,
+  // additionally forcing a probe. Invoked by |configure_timer_|.
+  void RestoreRequestedPowerStateAfterResume();
 
   // Notifies observers about an attempted state change.
   void NotifyObservers(bool success, MultipleDisplayState attempted_state);
@@ -345,6 +357,9 @@ class DISPLAY_EXPORT DisplayConfigurator : public NativeDisplayObserver {
 
   // Display protection requests of each client.
   ProtectionRequests client_protection_requests_;
+
+  // Display controlled by an external entity.
+  bool display_externally_controlled_;
 
   DISALLOW_COPY_AND_ASSIGN(DisplayConfigurator);
 };

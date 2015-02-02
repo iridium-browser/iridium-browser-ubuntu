@@ -37,6 +37,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/page_navigator.h"
+#include "crypto/sha2.h"
 #include "google_apis/google_api_keys.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
@@ -138,6 +139,22 @@ enum SBStatsType {
   // ALWAYS ADD NEW VALUES BEFORE THIS ONE.
   DOWNLOAD_CHECKS_MAX
 };
+
+// Prepares URLs to be put into a ping message. Currently this just shortens
+// data: URIs, other URLs are included verbatim.
+std::string SanitizeUrl(const GURL& url) {
+  std::string spec = url.spec();
+  if (url.SchemeIs(url::kDataScheme)) {
+    size_t comma_pos = spec.find(',');
+    if (comma_pos != std::string::npos && comma_pos != spec.size() - 1) {
+      std::string hash_value = crypto::SHA256HashString(spec);
+      spec.erase(comma_pos + 1);
+      spec += base::HexEncode(hash_value.data(), hash_value.size());
+    }
+  }
+  return spec;
+}
+
 }  // namespace
 
 // Parent SafeBrowsing::Client class used to lookup the bad binary
@@ -166,7 +183,7 @@ class DownloadSBClient
 
  protected:
   friend class base::RefCountedThreadSafe<DownloadSBClient>;
-  virtual ~DownloadSBClient() {}
+  ~DownloadSBClient() override {}
 
   void CheckDone(SBThreatType threat_type) {
     DownloadProtectionService::DownloadCheckResult result =
@@ -236,7 +253,7 @@ class DownloadUrlSBClient : public DownloadSBClient {
                          DOWNLOAD_URL_CHECKS_MALWARE),
         database_manager_(database_manager) { }
 
-  virtual void StartCheck() OVERRIDE {
+  void StartCheck() override {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
     if (!database_manager_.get() ||
         database_manager_->CheckDownloadUrl(url_chain_, this)) {
@@ -246,12 +263,12 @@ class DownloadUrlSBClient : public DownloadSBClient {
     }
   }
 
-  virtual bool IsDangerous(SBThreatType threat_type) const OVERRIDE {
+  bool IsDangerous(SBThreatType threat_type) const override {
     return threat_type == SB_THREAT_TYPE_BINARY_MALWARE_URL;
   }
 
-  virtual void OnCheckDownloadUrlResult(const std::vector<GURL>& url_chain,
-                                        SBThreatType threat_type) OVERRIDE {
+  void OnCheckDownloadUrlResult(const std::vector<GURL>& url_chain,
+                                SBThreatType threat_type) override {
     CheckDone(threat_type);
     UMA_HISTOGRAM_TIMES("SB2.DownloadUrlCheckDuration",
                         base::TimeTicks::Now() - start_time_);
@@ -259,7 +276,7 @@ class DownloadUrlSBClient : public DownloadSBClient {
   }
 
  protected:
-  virtual ~DownloadUrlSBClient() {}
+  ~DownloadUrlSBClient() override {}
 
  private:
   scoped_refptr<SafeBrowsingDatabaseManager> database_manager_;
@@ -300,8 +317,8 @@ class DownloadProtectionService::CheckClientDownloadRequest
   }
 
   void Start() {
-    VLOG(2) << "Starting SafeBrowsing download check for: "
-            << item_->DebugString(true);
+    DVLOG(2) << "Starting SafeBrowsing download check for: "
+             << item_->DebugString(true);
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     // TODO(noelutz): implement some cache to make sure we don't issue the same
     // request over and over again if a user downloads the same binary multiple
@@ -312,6 +329,7 @@ class DownloadProtectionService::CheckClientDownloadRequest
       switch (reason) {
         case REASON_EMPTY_URL_CHAIN:
         case REASON_INVALID_URL:
+        case REASON_UNSUPPORTED_URL_SCHEME:
           PostFinishTask(UNKNOWN, reason);
           return;
 
@@ -378,19 +396,19 @@ class DownloadProtectionService::CheckClientDownloadRequest
   }
 
   // content::DownloadItem::Observer implementation.
-  virtual void OnDownloadDestroyed(content::DownloadItem* download) OVERRIDE {
+  void OnDownloadDestroyed(content::DownloadItem* download) override {
     Cancel();
     DCHECK(item_ == NULL);
   }
 
   // From the net::URLFetcherDelegate interface.
-  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE {
+  void OnURLFetchComplete(const net::URLFetcher* source) override {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     DCHECK_EQ(source, fetcher_.get());
-    VLOG(2) << "Received a response for URL: "
-            << item_->GetUrlChain().back() << ": success="
-            << source->GetStatus().is_success() << " response_code="
-            << source->GetResponseCode();
+    DVLOG(2) << "Received a response for URL: "
+             << item_->GetUrlChain().back() << ": success="
+             << source->GetStatus().is_success() << " response_code="
+             << source->GetResponseCode();
     if (source->GetStatus().is_success()) {
       UMA_HISTOGRAM_SPARSE_SLOWLY(
           "SBClientDownload.DownloadRequestResponseCode",
@@ -462,9 +480,14 @@ class DownloadProtectionService::CheckClientDownloadRequest
       return false;
     }
     const GURL& final_url = item.GetUrlChain().back();
-    if (!final_url.is_valid() || final_url.is_empty() ||
-        !final_url.IsStandard() || final_url.SchemeIsFile()) {
+    if (!final_url.is_valid() || final_url.is_empty()) {
       *reason = REASON_INVALID_URL;
+      return false;
+    }
+    if ((!final_url.IsStandard() && !final_url.SchemeIsBlob() &&
+         !final_url.SchemeIs(url::kDataScheme)) ||
+        final_url.SchemeIsFile()) {
+      *reason = REASON_UNSUPPORTED_URL_SCHEME;
       return false;
     }
     if (!download_protection_util::IsBinaryFile(target_path)) {
@@ -479,7 +502,7 @@ class DownloadProtectionService::CheckClientDownloadRequest
   friend struct BrowserThread::DeleteOnThread<BrowserThread::UI>;
   friend class base::DeleteHelper<CheckClientDownloadRequest>;
 
-  virtual ~CheckClientDownloadRequest() {
+  ~CheckClientDownloadRequest() override {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     DCHECK(item_ == NULL);
   }
@@ -521,10 +544,10 @@ class DownloadProtectionService::CheckClientDownloadRequest
     binary_feature_extractor_->CheckSignature(file_path, &signature_info_);
     bool is_signed = (signature_info_.certificate_chain_size() > 0);
     if (is_signed) {
-      VLOG(2) << "Downloaded a signed binary: " << file_path.value();
+      DVLOG(2) << "Downloaded a signed binary: " << file_path.value();
     } else {
-      VLOG(2) << "Downloaded an unsigned binary: "
-              << file_path.value();
+      DVLOG(2) << "Downloaded an unsigned binary: "
+               << file_path.value();
     }
     UMA_HISTOGRAM_BOOLEAN("SBClientDownload.SignedBinaryDownload", is_signed);
     UMA_HISTOGRAM_TIMES("SBClientDownload.ExtractSignatureFeaturesTime",
@@ -557,11 +580,11 @@ class DownloadProtectionService::CheckClientDownloadRequest
       return;
     if (results.success) {
       zipped_executable_ = results.has_executable;
-      VLOG(1) << "Zip analysis finished for " << item_->GetFullPath().value()
-              << ", has_executable=" << results.has_executable
-              << " has_archive=" << results.has_archive;
+      DVLOG(1) << "Zip analysis finished for " << item_->GetFullPath().value()
+               << ", has_executable=" << results.has_executable
+               << " has_archive=" << results.has_archive;
     } else {
-      VLOG(1) << "Zip analysis failed for " << item_->GetFullPath().value();
+      DVLOG(1) << "Zip analysis failed for " << item_->GetFullPath().value();
     }
     UMA_HISTOGRAM_BOOLEAN("SBClientDownload.ZipFileHasExecutable",
                           zipped_executable_);
@@ -591,8 +614,11 @@ class DownloadProtectionService::CheckClientDownloadRequest
 
     const GURL& url = url_chain_.back();
     if (url.is_valid() && database_manager_->MatchDownloadWhitelistUrl(url)) {
-      VLOG(2) << url << " is on the download whitelist.";
+      DVLOG(2) << url << " is on the download whitelist.";
       RecordCountOfSignedOrWhitelistedDownload();
+      // TODO(grt): Continue processing without uploading so that
+      // ClientDownloadRequest callbacks can be run even for this type of safe
+      // download.
       PostFinishTask(SAFE, REASON_WHITELISTED_URL);
       return;
     }
@@ -602,6 +628,9 @@ class DownloadProtectionService::CheckClientDownloadRequest
       for (int i = 0; i < signature_info_.certificate_chain_size(); ++i) {
         if (CertificateChainIsWhitelisted(
                 signature_info_.certificate_chain(i))) {
+          // TODO(grt): Continue processing without uploading so that
+          // ClientDownloadRequest callbacks can be run even for this type of
+          // safe download.
           PostFinishTask(SAFE, REASON_TRUSTED_EXECUTABLE);
           return;
         }
@@ -638,6 +667,9 @@ class DownloadProtectionService::CheckClientDownloadRequest
 
   void GetTabRedirects() {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    if (!service_)
+      return;
+
     if (!tab_url_.is_valid()) {
       SendRequest();
       return;
@@ -663,6 +695,8 @@ class DownloadProtectionService::CheckClientDownloadRequest
                          const history::RedirectList* redirect_list) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     DCHECK_EQ(url, tab_url_);
+    if (!service_)
+      return;
 
     if (!redirect_list->empty()) {
       tab_redirects_.insert(
@@ -681,16 +715,16 @@ class DownloadProtectionService::CheckClientDownloadRequest
       return;
 
     ClientDownloadRequest request;
-    request.set_url(item_->GetUrlChain().back().spec());
+    request.set_url(SanitizeUrl(item_->GetUrlChain().back()));
     request.mutable_digests()->set_sha256(item_->GetHash());
     request.set_length(item_->GetReceivedBytes());
     for (size_t i = 0; i < item_->GetUrlChain().size(); ++i) {
       ClientDownloadRequest::Resource* resource = request.add_resources();
-      resource->set_url(item_->GetUrlChain()[i].spec());
+      resource->set_url(SanitizeUrl(item_->GetUrlChain()[i]));
       if (i == item_->GetUrlChain().size() - 1) {
         // The last URL in the chain is the download URL.
         resource->set_type(ClientDownloadRequest::DOWNLOAD_URL);
-        resource->set_referrer(item_->GetReferrerUrl().spec());
+        resource->set_referrer(SanitizeUrl(item_->GetReferrerUrl()));
         DVLOG(2) << "dl url " << resource->url();
         if (!item_->GetRemoteAddress().empty()) {
           resource->set_remote_ip(item_->GetRemoteAddress());
@@ -707,16 +741,16 @@ class DownloadProtectionService::CheckClientDownloadRequest
     for (size_t i = 0; i < tab_redirects_.size(); ++i) {
       ClientDownloadRequest::Resource* resource = request.add_resources();
       DVLOG(2) << "tab redirect " << i << " " << tab_redirects_[i].spec();
-      resource->set_url(tab_redirects_[i].spec());
+      resource->set_url(SanitizeUrl(tab_redirects_[i]));
       resource->set_type(ClientDownloadRequest::TAB_REDIRECT);
     }
     if (tab_url_.is_valid()) {
       ClientDownloadRequest::Resource* resource = request.add_resources();
-      resource->set_url(tab_url_.spec());
+      resource->set_url(SanitizeUrl(tab_url_));
       DVLOG(2) << "tab url " << resource->url();
       resource->set_type(ClientDownloadRequest::TAB_URL);
       if (tab_referrer_url_.is_valid()) {
-        resource->set_referrer(tab_referrer_url_.spec());
+        resource->set_referrer(SanitizeUrl(tab_referrer_url_));
         DVLOG(2) << "tab referrer " << resource->referrer();
       }
     }
@@ -732,8 +766,10 @@ class DownloadProtectionService::CheckClientDownloadRequest
       return;
     }
 
-    VLOG(2) << "Sending a request for URL: "
-            << item_->GetUrlChain().back();
+    service_->client_download_request_callbacks_.Notify(item_, &request);
+
+    DVLOG(2) << "Sending a request for URL: "
+             << item_->GetUrlChain().back();
     fetcher_.reset(net::URLFetcher::Create(0 /* ID used for testing */,
                                            GetDownloadRequestUrl(),
                                            net::URLFetcher::POST,
@@ -782,10 +818,19 @@ class DownloadProtectionService::CheckClientDownloadRequest
                             base::TimeTicks::Now() - timeout_start_time_);
       }
     }
+    if (result == SAFE && (reason == REASON_WHITELISTED_URL ||
+                           reason == REASON_TRUSTED_EXECUTABLE)) {
+      // Due to the short-circuit logic in CheckWhitelists (see TODOs there), a
+      // ClientDownloadRequest was not generated for this download and callbacks
+      // were not run. Run them now with null to indicate that a download has
+      // taken place.
+      // TODO(grt): persist metadata for these downloads as well.
+      service_->client_download_request_callbacks_.Notify(item_, nullptr);
+    }
     if (service_) {
-      VLOG(2) << "SafeBrowsing download verdict for: "
-              << item_->DebugString(true) << " verdict:" << reason
-              << " result:" << result;
+      DVLOG(2) << "SafeBrowsing download verdict for: "
+               << item_->DebugString(true) << " verdict:" << reason
+               << " result:" << result;
       UMA_HISTOGRAM_ENUMERATION("SBClientDownload.CheckDownloadStats",
                                 reason,
                                 REASON_MAX);
@@ -839,9 +884,9 @@ class DownloadProtectionService::CheckClientDownloadRequest
       for (size_t j = 0; j < whitelist_strings.size(); ++j) {
         if (database_manager_->MatchDownloadWhitelistString(
                 whitelist_strings[j])) {
-          VLOG(2) << "Certificate matched whitelist, cert="
-                  << cert->subject().GetDisplayName()
-                  << " issuer=" << issuer->subject().GetDisplayName();
+          DVLOG(2) << "Certificate matched whitelist, cert="
+                   << cert->subject().GetDisplayName()
+                   << " issuer=" << issuer->subject().GetDisplayName();
           return true;
         }
       }
@@ -959,6 +1004,13 @@ bool DownloadProtectionService::IsSupportedDownload(
 #else
   return false;
 #endif
+}
+
+DownloadProtectionService::ClientDownloadRequestSubscription
+DownloadProtectionService::RegisterClientDownloadRequestCallback(
+    const ClientDownloadRequestCallback& callback) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  return client_download_request_callbacks_.Add(callback);
 }
 
 void DownloadProtectionService::CancelPendingRequests() {

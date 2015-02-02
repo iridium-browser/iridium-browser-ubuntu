@@ -16,6 +16,7 @@
 #include "content/browser/service_worker/service_worker_version.h"
 #include "content/common/resource_request_body.h"
 #include "content/common/service_worker/service_worker_messages.h"
+#include "content/common/service_worker/service_worker_types.h"
 
 namespace content {
 
@@ -57,6 +58,10 @@ void ServiceWorkerProviderHost::OnRegistrationFailed(
 void ServiceWorkerProviderHost::SetDocumentUrl(const GURL& url) {
   DCHECK(!url.has_ref());
   document_url_ = url;
+}
+
+void ServiceWorkerProviderHost::SetTopmostFrameUrl(const GURL& url) {
+  topmost_frame_url_ = url;
 }
 
 void ServiceWorkerProviderHost::SetControllerVersionAttribute(
@@ -145,7 +150,11 @@ void ServiceWorkerProviderHost::DisassociateRegistration() {
 
 scoped_ptr<ServiceWorkerRequestHandler>
 ServiceWorkerProviderHost::CreateRequestHandler(
+    FetchRequestMode request_mode,
+    FetchCredentialsMode credentials_mode,
     ResourceType resource_type,
+    RequestContextType request_context_type,
+    RequestContextFrameType frame_type,
     base::WeakPtr<storage::BlobStorageContext> blob_storage_context,
     scoped_refptr<ResourceRequestBody> body) {
   if (IsHostToRunningServiceWorker()) {
@@ -156,8 +165,15 @@ ServiceWorkerProviderHost::CreateRequestHandler(
   if (ServiceWorkerUtils::IsMainResourceType(resource_type) ||
       controlling_version()) {
     return scoped_ptr<ServiceWorkerRequestHandler>(
-        new ServiceWorkerControlleeRequestHandler(
-            context_, AsWeakPtr(), blob_storage_context, resource_type, body));
+        new ServiceWorkerControlleeRequestHandler(context_,
+                                                  AsWeakPtr(),
+                                                  blob_storage_context,
+                                                  request_mode,
+                                                  credentials_mode,
+                                                  resource_type,
+                                                  request_context_type,
+                                                  frame_type,
+                                                  body));
   }
   return scoped_ptr<ServiceWorkerRequestHandler>();
 }

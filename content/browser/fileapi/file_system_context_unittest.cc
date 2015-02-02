@@ -49,7 +49,7 @@ class FileSystemContextTest : public testing::Test {
  public:
   FileSystemContextTest() {}
 
-  virtual void SetUp() {
+  void SetUp() override {
     ASSERT_TRUE(data_dir_.CreateUniqueTempDir());
 
     storage_policy_ = new MockSpecialStoragePolicy();
@@ -290,7 +290,7 @@ TEST_F(FileSystemContextTest, CrackFileSystemURL) {
        FPL(""), std::string()},
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTestCases); ++i) {
+  for (size_t i = 0; i < arraysize(kTestCases); ++i) {
     const base::FilePath virtual_path =
         base::FilePath::FromUTF8Unsafe(
             kTestCases[i].root).Append(kVirtualPathNoRoot);

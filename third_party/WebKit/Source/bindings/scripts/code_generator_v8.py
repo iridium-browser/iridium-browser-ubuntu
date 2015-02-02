@@ -77,23 +77,40 @@ import v8_dictionary
 from v8_globals import includes, interfaces
 import v8_interface
 import v8_types
+import v8_union
 from v8_utilities import capitalize, cpp_name, conditional_string, v8_class_name
-from utilities import KNOWN_COMPONENTS
+from utilities import KNOWN_COMPONENTS, idl_filename_to_component, is_valid_component_dependency
 
 
-def render_template(interface_info, header_template, cpp_template,
-                    template_context):
+def render_template(include_paths, header_template, cpp_template,
+                    template_context, component=None):
     template_context['code_generator'] = module_pyname
 
     # Add includes for any dependencies
     template_context['header_includes'] = sorted(
         template_context['header_includes'])
-    includes.update(interface_info.get('dependencies_include_paths', []))
+
+    for include_path in include_paths:
+        if component:
+            dependency = idl_filename_to_component(include_path)
+            assert is_valid_component_dependency(component, dependency)
+        includes.add(include_path)
+
     template_context['cpp_includes'] = sorted(includes)
 
     header_text = header_template.render(template_context)
     cpp_text = cpp_template.render(template_context)
     return header_text, cpp_text
+
+
+def set_global_type_info(interfaces_info):
+    idl_types.set_ancestors(interfaces_info['ancestors'])
+    IdlType.set_callback_interfaces(interfaces_info['callback_interfaces'])
+    IdlType.set_dictionaries(interfaces_info['dictionaries'])
+    IdlType.set_implemented_as_interfaces(interfaces_info['implemented_as_interfaces'])
+    IdlType.set_garbage_collected_types(interfaces_info['garbage_collected_interfaces'])
+    IdlType.set_will_be_garbage_collected_types(interfaces_info['will_be_garbage_collected_interfaces'])
+    v8_types.set_component_dirs(interfaces_info['component_dirs'])
 
 
 class CodeGeneratorBase(object):
@@ -104,15 +121,7 @@ class CodeGeneratorBase(object):
         self.interfaces_info = interfaces_info
         self.jinja_env = initialize_jinja_env(cache_dir)
         self.output_dir = output_dir
-
-        # Set global type info
-        idl_types.set_ancestors(interfaces_info['ancestors'])
-        IdlType.set_callback_interfaces(interfaces_info['callback_interfaces'])
-        IdlType.set_dictionaries(interfaces_info['dictionaries'])
-        IdlType.set_implemented_as_interfaces(interfaces_info['implemented_as_interfaces'])
-        IdlType.set_garbage_collected_types(interfaces_info['garbage_collected_interfaces'])
-        IdlType.set_will_be_garbage_collected_types(interfaces_info['will_be_garbage_collected_interfaces'])
-        v8_types.set_component_dirs(interfaces_info['component_dirs'])
+        set_global_type_info(interfaces_info)
 
     def generate_code(self, definitions, definition_name):
         """Returns .h/.cpp code as ((path, content)...)."""
@@ -152,11 +161,24 @@ class CodeGeneratorV8(CodeGeneratorBase):
         # Store other interfaces for introspection
         interfaces.update(definitions.interfaces)
 
+        interface_info = self.interfaces_info[interface_name]
+        component = idl_filename_to_component(
+            interface_info.get('full_path'))
+        include_paths = interface_info.get('dependencies_include_paths')
+
         # Select appropriate Jinja template and contents function
         if interface.is_callback:
             header_template_filename = 'callback_interface.h'
             cpp_template_filename = 'callback_interface.cpp'
             interface_context = v8_callback_interface.callback_interface_context
+        elif interface.is_partial:
+            interface_context = v8_interface.interface_context
+            header_template_filename = 'partial_interface.h'
+            cpp_template_filename = 'partial_interface.cpp'
+            interface_name += 'Partial'
+            assert component == 'core'
+            component = 'modules'
+            include_paths = interface_info.get('dependencies_other_component_include_paths')
         else:
             header_template_filename = 'interface.h'
             cpp_template_filename = 'interface.cpp'
@@ -164,13 +186,15 @@ class CodeGeneratorV8(CodeGeneratorBase):
         header_template = self.jinja_env.get_template(header_template_filename)
         cpp_template = self.jinja_env.get_template(cpp_template_filename)
 
-        interface_info = self.interfaces_info[interface_name]
-
         template_context = interface_context(interface)
         # Add the include for interface itself
-        template_context['header_includes'].add(interface_info['include_path'])
+        if IdlType(interface_name).is_typed_array:
+            template_context['header_includes'].add('core/dom/DOMTypedArray.h')
+        else:
+            template_context['header_includes'].add(interface_info['include_path'])
         header_text, cpp_text = render_template(
-            interface_info, header_template, cpp_template, template_context)
+            include_paths, header_template, cpp_template, template_context,
+            component)
         header_path, cpp_path = self.output_paths(interface_name)
         return (
             (header_path, header_text),
@@ -183,10 +207,11 @@ class CodeGeneratorV8(CodeGeneratorBase):
         cpp_template = self.jinja_env.get_template('dictionary_v8.cpp')
         template_context = v8_dictionary.dictionary_context(dictionary)
         interface_info = self.interfaces_info[dictionary_name]
+        include_paths = interface_info.get('dependencies_include_paths')
         # Add the include for interface itself
         template_context['header_includes'].add(interface_info['include_path'])
         header_text, cpp_text = render_template(
-            interface_info, header_template, cpp_template, template_context)
+            include_paths, header_template, cpp_template, template_context)
         header_path, cpp_path = self.output_paths(dictionary_name)
         return (
             (header_path, header_text),
@@ -214,10 +239,49 @@ class CodeGeneratorDictionaryImpl(CodeGeneratorBase):
         cpp_template = self.jinja_env.get_template('dictionary_impl.cpp')
         template_context = v8_dictionary.dictionary_impl_context(
             dictionary, self.interfaces_info)
+        include_paths = interface_info.get('dependencies_include_paths')
         header_text, cpp_text = render_template(
-            interface_info, header_template, cpp_template, template_context)
+            include_paths, header_template, cpp_template, template_context)
         header_path, cpp_path = self.output_paths(
             definition_name, interface_info)
+        return (
+            (header_path, header_text),
+            (cpp_path, cpp_text),
+        )
+
+
+class CodeGeneratorUnionType(object):
+    """Generates union type container classes.
+    This generator is different from CodeGeneratorV8 and
+    CodeGeneratorDictionaryImpl. It assumes that all union types are already
+    collected. It doesn't process idl files directly.
+    """
+    def __init__(self, interfaces_info, cache_dir, output_dir, target_component):
+        self.interfaces_info = interfaces_info
+        self.jinja_env = initialize_jinja_env(cache_dir)
+        self.output_dir = output_dir
+        self.target_component = target_component
+        set_global_type_info(interfaces_info)
+
+    def generate_code(self, union_types):
+        if not union_types:
+            return ()
+        header_template = self.jinja_env.get_template('union.h')
+        cpp_template = self.jinja_env.get_template('union.cpp')
+        template_context = v8_union.union_context(
+            sorted(union_types, key=lambda union_type: union_type.name),
+            self.interfaces_info)
+        template_context['code_generator'] = module_pyname
+        capitalized_component = self.target_component.capitalize()
+        template_context['header_filename'] = 'bindings/%s/v8/UnionTypes%s.h' % (
+            self.target_component, capitalized_component)
+        template_context['macro_guard'] = 'UnionType%s_h' % capitalized_component
+        header_text = header_template.render(template_context)
+        cpp_text = cpp_template.render(template_context)
+        header_path = posixpath.join(self.output_dir,
+                                     'UnionTypes%s.h' % capitalized_component)
+        cpp_path = posixpath.join(self.output_dir,
+                                  'UnionTypes%s.cpp' % capitalized_component)
         return (
             (header_path, header_text),
             (cpp_path, cpp_text),

@@ -44,9 +44,9 @@ public class NavigationHistoryTest extends AwTestBase {
         AwContents.setShouldDownloadFavicons();
         mContentsClient = new TestAwContentsClient();
         final AwTestContainerView testContainerView =
-            createAwTestContainerViewOnMainSync(mContentsClient);
+                createAwTestContainerViewOnMainSync(mContentsClient);
         mAwContents = testContainerView.getAwContents();
-        mWebServer = new TestWebServer(false);
+        mWebServer = TestWebServer.start();
     }
 
     @Override

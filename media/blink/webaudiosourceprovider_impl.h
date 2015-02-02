@@ -41,13 +41,13 @@ class MEDIA_EXPORT WebAudioSourceProviderImpl
                             size_t number_of_frames);
 
   // AudioRendererSink implementation.
-  virtual void Start() OVERRIDE;
-  virtual void Stop() OVERRIDE;
-  virtual void Play() OVERRIDE;
-  virtual void Pause() OVERRIDE;
-  virtual bool SetVolume(double volume) OVERRIDE;
-  virtual void Initialize(const AudioParameters& params,
-                          RenderCallback* renderer) OVERRIDE;
+  void Start() override;
+  void Stop() override;
+  void Play() override;
+  void Pause() override;
+  bool SetVolume(double volume) override;
+  void Initialize(const AudioParameters& params,
+                  RenderCallback* renderer) override;
 
  protected:
   virtual ~WebAudioSourceProviderImpl();

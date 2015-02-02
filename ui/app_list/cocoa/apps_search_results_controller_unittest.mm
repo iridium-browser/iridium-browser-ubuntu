@@ -10,8 +10,8 @@
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #import "testing/gtest_mac.h"
-#include "ui/app_list/search_result.h"
 #include "ui/app_list/test/app_list_test_model.h"
+#include "ui/app_list/test/test_search_result.h"
 #include "ui/base/models/simple_menu_model.h"
 #import "ui/events/test/cocoa_test_event_utils.h"
 #include "ui/gfx/image/image_skia_util_mac.h"
@@ -60,7 +60,7 @@ namespace {
 
 const int kDefaultResultsCount = 3;
 
-class SearchResultWithMenu : public SearchResult {
+class SearchResultWithMenu : public TestSearchResult {
  public:
   SearchResultWithMenu(const std::string& title, const std::string& details)
       : menu_model_(NULL),
@@ -74,7 +74,7 @@ class SearchResultWithMenu : public SearchResult {
     menu_ready_ = ready;
   }
 
-  virtual ui::MenuModel* GetContextMenuModel() OVERRIDE {
+  ui::MenuModel* GetContextMenuModel() override {
     if (!menu_ready_)
       return NULL;
 
@@ -123,8 +123,8 @@ class AppsSearchResultsControllerTest : public ui::CocoaTest {
   void ExpectConsistent();
 
   // ui::CocoaTest overrides:
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  virtual void SetUp() override;
+  virtual void TearDown() override;
 
  protected:
   base::scoped_nsobject<TestAppsSearchResultsDelegate> delegate_;

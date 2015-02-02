@@ -118,7 +118,7 @@ public interface TabObserver {
      */
     void onToggleFullscreenMode(Tab tab, boolean enable);
 
-    // WebContentsObserverAndroid methods ---------------------------------------------------------
+    // WebContentsObserver methods ---------------------------------------------------------
 
     /**
      * Called when an error occurs while loading a page and/or the page fails to load.
@@ -149,6 +149,20 @@ public interface TabObserver {
             boolean isErrorPage, boolean isIframeSrcdoc);
 
     /**
+     * Notifies that the provisional load was successfully committed. The RenderViewHost is now
+     * the current RenderViewHost of the WebContents.
+     *
+     * @param tab            The notifying {@link Tab}.
+     * @param frameId        A positive, non-zero integer identifying the navigating frame.
+     * @param isMainFrame    Whether the load is happening for the main frame.
+     * @param url            The committed URL being navigated to.
+     * @param transitionType The transition type as defined in
+     *                       {@link org.chromium.ui.base.PageTransitionTypes} for the load.
+     */
+    public void onDidCommitProvisionalLoadForFrame(
+            Tab tab, long frameId, boolean isMainFrame, String url, int transitionType);
+
+    /**
      * Called when the main frame of the page has committed.
      *
      * @param tab                         The notifying {@link Tab}.
@@ -168,4 +182,16 @@ public interface TabObserver {
      * @param color the new color in ARGB format.
      */
     public void onDidChangeThemeColor(int color);
+
+    /**
+     * Called when an interstitial page gets attached to the tab content.
+     * @param tab The notifying {@link Tab}.
+     */
+    public void onDidAttachInterstitialPage(Tab tab);
+
+    /**
+     * Called when an interstitial page gets detached from the tab content.
+     * @param tab The notifying {@link Tab}.
+     */
+    public void onDidDetachInterstitialPage(Tab tab);
 }

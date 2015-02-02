@@ -64,7 +64,7 @@ private:
     { }
 };
 
-class XSSAuditorDelegate FINAL {
+class XSSAuditorDelegate final {
     DISALLOW_ALLOCATION();
     WTF_MAKE_NONCOPYABLE(XSSAuditorDelegate);
 public:
@@ -82,7 +82,7 @@ private:
     KURL m_reportURL;
 };
 
-typedef Vector<OwnPtr<XSSInfo> > XSSInfoStream;
+typedef Vector<OwnPtr<XSSInfo>> XSSInfoStream;
 
 }
 

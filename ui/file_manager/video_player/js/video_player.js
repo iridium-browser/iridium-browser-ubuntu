@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
-
 /**
  * @param {Element} playerContainer Main container.
  * @param {Element} videoContainer Container for the video element.
@@ -111,10 +109,10 @@ FullWindowVideoControls.prototype.onPlaybackError_ = function(error) {
     if (this.casting)
       this.showErrorMessage('VIDEO_PLAYER_VIDEO_FILE_UNSUPPORTED_FOR_CAST');
     else
-      this.showErrorMessage('GALLERY_VIDEO_ERROR');
+      this.showErrorMessage('VIDEO_PLAYER_VIDEO_FILE_UNSUPPORTED');
     this.decodeErrorOccured = false;
   } else {
-    this.showErrorMessage('GALLERY_VIDEO_DECODING_ERROR');
+    this.showErrorMessage('VIDEO_PLAYER_PLAYBACK_ERROR');
     this.decodeErrorOccured = true;
   }
 
@@ -320,6 +318,8 @@ VideoPlayer.prototype.loadVideo_ = function(video, opt_callback) {
 
     var videoElementInitializePromise;
     if (this.currentCast_) {
+      metrics.recordPlayType(metrics.PLAY_TYPE.CAST);
+
       videoPlayerElement.setAttribute('casting', true);
 
       document.querySelector('#cast-name').textContent =
@@ -344,6 +344,7 @@ VideoPlayer.prototype.loadVideo_ = function(video, opt_callback) {
             }.bind(this));
           }.bind(this));
     } else {
+      metrics.recordPlayType(metrics.PLAY_TYPE.LOCAL);
       videoPlayerElement.removeAttribute('casting');
 
       this.videoElement_ = document.createElement('video');
@@ -392,10 +393,14 @@ VideoPlayer.prototype.loadVideo_ = function(video, opt_callback) {
         }.bind(this))
         // In case of error.
         .catch(function(error) {
+          if (this.currentCast_)
+            metrics.recordCastVideoErrorAction();
+
           videoPlayerElement.removeAttribute('loading');
           console.error('Failed to initialize the video element.',
                         error.stack || error);
-          this.controls_.showErrorMessage('GALLERY_VIDEO_ERROR');
+          this.controls_.showErrorMessage(
+              'VIDEO_PLAYER_VIDEO_FILE_UNSUPPORTED');
           callback();
         }.bind(this));
   }.wrap(this));
@@ -613,7 +618,7 @@ VideoPlayer.prototype.onCurrentCastDisappear_ = function() {
     this.currentSession_.removeUpdateListener(this.onCastSessionUpdateBound_);
     this.currentSession_ = null;
   }
-  this.controls.showErrorMessage('GALLERY_VIDEO_DECODING_ERROR');
+  this.controls.showErrorMessage('VIDEO_PLAYER_PLAYBACK_ERROR');
   this.unloadVideo();
 };
 
@@ -669,6 +674,10 @@ var initPromise = Promise.all(
 
 initPromise.then(function(results) {
   var videos = results[0];
+
+  metrics.recordOpenVideoPlayerAction();
+  metrics.recordNumberOfOpenedFiles(videos.length);
+
   player.prepare(videos);
   return new Promise(player.playFirstVideo.wrap(player));
 }.wrap(null));

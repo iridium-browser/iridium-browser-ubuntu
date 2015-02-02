@@ -41,17 +41,17 @@ class GFX_EXPORT PlatformFontPango : public PlatformFont {
 #endif
 
   // Overridden from PlatformFont:
-  virtual Font DeriveFont(int size_delta, int style) const OVERRIDE;
-  virtual int GetHeight() const OVERRIDE;
-  virtual int GetBaseline() const OVERRIDE;
-  virtual int GetCapHeight() const OVERRIDE;
-  virtual int GetExpectedTextWidth(int length) const OVERRIDE;
-  virtual int GetStyle() const OVERRIDE;
-  virtual std::string GetFontName() const OVERRIDE;
-  virtual std::string GetActualFontNameForTesting() const OVERRIDE;
-  virtual int GetFontSize() const OVERRIDE;
-  virtual const FontRenderParams& GetFontRenderParams() const OVERRIDE;
-  virtual NativeFont GetNativeFont() const OVERRIDE;
+  Font DeriveFont(int size_delta, int style) const override;
+  int GetHeight() const override;
+  int GetBaseline() const override;
+  int GetCapHeight() const override;
+  int GetExpectedTextWidth(int length) const override;
+  int GetStyle() const override;
+  std::string GetFontName() const override;
+  std::string GetActualFontNameForTesting() const override;
+  int GetFontSize() const override;
+  const FontRenderParams& GetFontRenderParams() const override;
+  NativeFont GetNativeFont() const override;
 
  private:
   // Create a new instance of this object with the specified properties. Called
@@ -61,7 +61,7 @@ class GFX_EXPORT PlatformFontPango : public PlatformFont {
                     int size_pixels,
                     int style,
                     const FontRenderParams& params);
-  virtual ~PlatformFontPango();
+  ~PlatformFontPango() override;
 
   // Initializes this object based on the passed-in details. If |typeface| is
   // empty, a new typeface will be loaded.

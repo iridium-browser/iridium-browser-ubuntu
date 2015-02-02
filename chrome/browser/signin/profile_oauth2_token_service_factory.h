@@ -54,11 +54,11 @@ class ProfileOAuth2TokenServiceFactory
 #endif
 
   ProfileOAuth2TokenServiceFactory();
-  virtual ~ProfileOAuth2TokenServiceFactory();
+  ~ProfileOAuth2TokenServiceFactory() override;
 
   // BrowserContextKeyedServiceFactory implementation.
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* context) const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* context) const override;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileOAuth2TokenServiceFactory);
 };

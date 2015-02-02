@@ -54,10 +54,9 @@ class NetworkPortalNotificationControllerDelegate
   NetworkPortalNotificationControllerDelegate(): clicked_(false) {}
 
   // Overridden from message_center::NotificationDelegate:
-  virtual void Display() OVERRIDE;
-  virtual void Error() OVERRIDE;
-  virtual void Close(bool by_user) OVERRIDE;
-  virtual void Click() OVERRIDE;
+  virtual void Display() override;
+  virtual void Close(bool by_user) override;
+  virtual void Click() override;
 
  private:
   virtual ~NetworkPortalNotificationControllerDelegate() {}
@@ -71,13 +70,6 @@ void NetworkPortalNotificationControllerDelegate::Display() {
   UMA_HISTOGRAM_ENUMERATION(
       NetworkPortalNotificationController::kNotificationMetric,
       NetworkPortalNotificationController::NOTIFICATION_METRIC_DISPLAYED,
-      NetworkPortalNotificationController::NOTIFICATION_METRIC_COUNT);
-}
-
-void NetworkPortalNotificationControllerDelegate::Error() {
-  UMA_HISTOGRAM_ENUMERATION(
-      NetworkPortalNotificationController::kNotificationMetric,
-      NetworkPortalNotificationController::NOTIFICATION_METRIC_ERROR,
       NetworkPortalNotificationController::NOTIFICATION_METRIC_COUNT);
 }
 

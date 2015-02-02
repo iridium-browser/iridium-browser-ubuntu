@@ -30,14 +30,16 @@
 
 namespace blink {
 
-class HTMLAllCollection FINAL : public HTMLCollection {
+class NodeListOrElement;
+
+class HTMLAllCollection final : public HTMLCollection {
     DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<HTMLAllCollection> create(ContainerNode&, CollectionType);
     virtual ~HTMLAllCollection();
 
     Element* namedItemWithIndex(const AtomicString& name, unsigned index) const;
-    void namedGetter(const AtomicString& name, RefPtrWillBeRawPtr<NodeList>&, RefPtrWillBeRawPtr<Element>&);
+    void namedGetter(const AtomicString& name, NodeListOrElement&);
 
 private:
     explicit HTMLAllCollection(ContainerNode&);

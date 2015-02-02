@@ -17,7 +17,7 @@
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/chromeos/input_method/input_method_configuration.h"
 #include "chrome/browser/chromeos/input_method/mock_input_method_manager.h"
-#include "chrome/browser/chromeos/login/users/mock_user_manager.h"
+#include "chrome/browser/chromeos/login/users/fake_user_manager.h"
 #include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
 #include "chrome/browser/chromeos/preferences.h"
 #include "chrome/common/pref_names.h"
@@ -35,9 +35,9 @@
 #if defined(USE_X11)
 #include <X11/keysym.h>
 
+#include "ui/events/devices/x11/touch_factory_x11.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/test/events_test_utils_x11.h"
-#include "ui/events/x/touch_factory_x11.h"
 #include "ui/gfx/x/x11_types.h"
 #endif
 
@@ -222,15 +222,12 @@ namespace chromeos {
 class EventRewriterTest : public ash::test::AshTestBase {
  public:
   EventRewriterTest()
-      : mock_user_manager_(new chromeos::MockUserManager),
-        user_manager_enabler_(mock_user_manager_),
+      : fake_user_manager_(new chromeos::FakeUserManager),
+        user_manager_enabler_(fake_user_manager_),
         input_method_manager_mock_(NULL) {}
   virtual ~EventRewriterTest() {}
 
   virtual void SetUp() {
-    // Mocking user manager because the real one needs to be called on UI thread
-    EXPECT_CALL(*mock_user_manager_, IsLoggedInAsGuest())
-        .WillRepeatedly(testing::Return(false));
     input_method_manager_mock_ =
         new chromeos::input_method::MockInputMethodManager;
     chromeos::input_method::InitializeForTesting(
@@ -258,7 +255,7 @@ class EventRewriterTest : public ash::test::AshTestBase {
                       : &event;
   }
 
-  chromeos::MockUserManager* mock_user_manager_;  // Not owned.
+  chromeos::FakeUserManager* fake_user_manager_;  // Not owned.
   chromeos::ScopedUserManagerEnabler user_manager_enabler_;
   chromeos::input_method::MockInputMethodManager* input_method_manager_mock_;
 };
@@ -392,6 +389,7 @@ TEST_F(EventRewriterTest, TestRewriteCommandToControlWithControlRemapped) {
 void EventRewriterTest::TestRewriteNumPadKeys() {
   TestingPrefServiceSyncable prefs;
   EventRewriter rewriter(NULL);
+  rewriter.KeyboardDeviceAddedForTesting(kKeyboardDeviceId, "PC Keyboard");
   rewriter.set_last_keyboard_device_id_for_testing(kKeyboardDeviceId);
   rewriter.set_pref_service_for_testing(&prefs);
 
@@ -1787,7 +1785,7 @@ class EventBuffer : public ui::test::TestEventProcessor {
  private:
   // ui::EventProcessor overrides:
   virtual ui::EventDispatchDetails OnEventFromSource(
-      ui::Event* event) OVERRIDE {
+      ui::Event* event) override {
     if (event->IsKeyEvent()) {
       events_.push_back(new ui::KeyEvent(*static_cast<ui::KeyEvent*>(event)));
     } else if (event->IsMouseWheelEvent()) {
@@ -1810,7 +1808,7 @@ class TestEventSource : public ui::EventSource {
  public:
   explicit TestEventSource(ui::EventProcessor* processor)
       : processor_(processor) {}
-  virtual ui::EventProcessor* GetEventProcessor() OVERRIDE {
+  virtual ui::EventProcessor* GetEventProcessor() override {
     return processor_;
   }
   ui::EventDispatchDetails Send(ui::Event* event) {
@@ -1826,8 +1824,8 @@ class EventRewriterAshTest : public ash::test::AshTestBase {
  public:
   EventRewriterAshTest()
       : source_(&buffer_),
-        mock_user_manager_(new chromeos::MockUserManager),
-        user_manager_enabler_(mock_user_manager_) {}
+        fake_user_manager_(new chromeos::FakeUserManager),
+        user_manager_enabler_(fake_user_manager_) {}
   virtual ~EventRewriterAshTest() {}
 
   bool RewriteFunctionKeys(const ui::Event& event,
@@ -1857,7 +1855,7 @@ class EventRewriterAshTest : public ash::test::AshTestBase {
     buffer_.PopEvents(events);
   }
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     AshTestBase::SetUp();
     sticky_keys_controller_ =
         ash::Shell::GetInstance()->sticky_keys_controller();
@@ -1871,7 +1869,7 @@ class EventRewriterAshTest : public ash::test::AshTestBase {
     sticky_keys_controller_->Enable(true);
   }
 
-  virtual void TearDown() OVERRIDE {
+  virtual void TearDown() override {
     rewriter_.reset();
     AshTestBase::TearDown();
   }
@@ -1885,7 +1883,7 @@ class EventRewriterAshTest : public ash::test::AshTestBase {
   EventBuffer buffer_;
   TestEventSource source_;
 
-  chromeos::MockUserManager* mock_user_manager_;  // Not owned.
+  chromeos::FakeUserManager* fake_user_manager_;  // Not owned.
   chromeos::ScopedUserManagerEnabler user_manager_enabler_;
   TestingPrefServiceSyncable prefs_;
 
@@ -2311,7 +2309,7 @@ class StickyKeysOverlayTest : public EventRewriterAshTest {
 
   virtual ~StickyKeysOverlayTest() {}
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     EventRewriterAshTest::SetUp();
     overlay_ = sticky_keys_controller_->GetOverlayForTest();
     ASSERT_TRUE(overlay_);
@@ -2421,12 +2419,16 @@ TEST_F(StickyKeysOverlayTest, ModifiersDisabled) {
             overlay_->GetModifierKeyState(ui::EF_SHIFT_DOWN));
   EXPECT_EQ(ash::STICKY_KEY_STATE_DISABLED,
             overlay_->GetModifierKeyState(ui::EF_ALT_DOWN));
+  EXPECT_EQ(ash::STICKY_KEY_STATE_DISABLED,
+            overlay_->GetModifierKeyState(ui::EF_COMMAND_DOWN));
 
   // Enable modifiers.
   SendActivateStickyKeyPattern(ui::VKEY_CONTROL);
   SendActivateStickyKeyPattern(ui::VKEY_SHIFT);
   SendActivateStickyKeyPattern(ui::VKEY_SHIFT);
   SendActivateStickyKeyPattern(ui::VKEY_LMENU);
+  SendActivateStickyKeyPattern(ui::VKEY_COMMAND);
+  SendActivateStickyKeyPattern(ui::VKEY_COMMAND);
 
   EXPECT_TRUE(overlay_->is_visible());
   EXPECT_EQ(ash::STICKY_KEY_STATE_ENABLED,
@@ -2435,6 +2437,8 @@ TEST_F(StickyKeysOverlayTest, ModifiersDisabled) {
             overlay_->GetModifierKeyState(ui::EF_SHIFT_DOWN));
   EXPECT_EQ(ash::STICKY_KEY_STATE_ENABLED,
             overlay_->GetModifierKeyState(ui::EF_ALT_DOWN));
+  EXPECT_EQ(ash::STICKY_KEY_STATE_LOCKED,
+            overlay_->GetModifierKeyState(ui::EF_COMMAND_DOWN));
 
   // Disable modifiers and overlay should be hidden.
   SendActivateStickyKeyPattern(ui::VKEY_CONTROL);
@@ -2442,6 +2446,7 @@ TEST_F(StickyKeysOverlayTest, ModifiersDisabled) {
   SendActivateStickyKeyPattern(ui::VKEY_SHIFT);
   SendActivateStickyKeyPattern(ui::VKEY_LMENU);
   SendActivateStickyKeyPattern(ui::VKEY_LMENU);
+  SendActivateStickyKeyPattern(ui::VKEY_COMMAND);
 
   EXPECT_FALSE(overlay_->is_visible());
   EXPECT_EQ(ash::STICKY_KEY_STATE_DISABLED,
@@ -2450,6 +2455,8 @@ TEST_F(StickyKeysOverlayTest, ModifiersDisabled) {
             overlay_->GetModifierKeyState(ui::EF_SHIFT_DOWN));
   EXPECT_EQ(ash::STICKY_KEY_STATE_DISABLED,
             overlay_->GetModifierKeyState(ui::EF_ALT_DOWN));
+  EXPECT_EQ(ash::STICKY_KEY_STATE_DISABLED,
+            overlay_->GetModifierKeyState(ui::EF_COMMAND_DOWN));
 }
 
 TEST_F(StickyKeysOverlayTest, ModifierVisibility) {
@@ -2457,6 +2464,7 @@ TEST_F(StickyKeysOverlayTest, ModifierVisibility) {
   EXPECT_TRUE(overlay_->GetModifierVisible(ui::EF_CONTROL_DOWN));
   EXPECT_TRUE(overlay_->GetModifierVisible(ui::EF_SHIFT_DOWN));
   EXPECT_TRUE(overlay_->GetModifierVisible(ui::EF_ALT_DOWN));
+  EXPECT_TRUE(overlay_->GetModifierVisible(ui::EF_COMMAND_DOWN));
   EXPECT_FALSE(overlay_->GetModifierVisible(ui::EF_ALTGR_DOWN));
   EXPECT_FALSE(overlay_->GetModifierVisible(ui::EF_MOD3_DOWN));
 
@@ -2465,6 +2473,7 @@ TEST_F(StickyKeysOverlayTest, ModifierVisibility) {
   EXPECT_TRUE(overlay_->GetModifierVisible(ui::EF_CONTROL_DOWN));
   EXPECT_TRUE(overlay_->GetModifierVisible(ui::EF_SHIFT_DOWN));
   EXPECT_TRUE(overlay_->GetModifierVisible(ui::EF_ALT_DOWN));
+  EXPECT_TRUE(overlay_->GetModifierVisible(ui::EF_COMMAND_DOWN));
   EXPECT_TRUE(overlay_->GetModifierVisible(ui::EF_ALTGR_DOWN));
   EXPECT_TRUE(overlay_->GetModifierVisible(ui::EF_MOD3_DOWN));
 

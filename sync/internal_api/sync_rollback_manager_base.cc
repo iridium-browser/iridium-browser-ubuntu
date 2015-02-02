@@ -19,18 +19,15 @@ const char kBookmarkBarTag[] = "bookmark_bar";
 const char kOtherBookmarksTag[] = "other_bookmarks";
 
 class DummyEntryptionHandler : public syncer::SyncEncryptionHandler {
-  virtual void AddObserver(Observer* observer) OVERRIDE {}
-  virtual void RemoveObserver(Observer* observer) OVERRIDE {}
-  virtual void Init() OVERRIDE {}
-  virtual void SetEncryptionPassphrase(const std::string& passphrase,
-                                       bool is_explicit) OVERRIDE {}
-  virtual void SetDecryptionPassphrase(const std::string& passphrase)
-      OVERRIDE {}
-  virtual void EnableEncryptEverything() OVERRIDE {}
-  virtual bool EncryptEverythingEnabled() const OVERRIDE {
-    return false;
-  }
-  virtual syncer::PassphraseType GetPassphraseType() const OVERRIDE {
+  void AddObserver(Observer* observer) override {}
+  void RemoveObserver(Observer* observer) override {}
+  void Init() override {}
+  void SetEncryptionPassphrase(const std::string& passphrase,
+                               bool is_explicit) override {}
+  void SetDecryptionPassphrase(const std::string& passphrase) override {}
+  void EnableEncryptEverything() override {}
+  bool EncryptEverythingEnabled() const override { return false; }
+  syncer::PassphraseType GetPassphraseType() const override {
     return syncer::KEYSTORE_PASSPHRASE;
   }
 };

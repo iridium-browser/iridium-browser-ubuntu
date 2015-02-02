@@ -46,19 +46,18 @@ class IpcDesktopEnvironment : public DesktopEnvironment {
       base::WeakPtr<ClientSessionControl> client_session_control,
       base::WeakPtr<DesktopSessionConnector> desktop_session_connector,
       bool virtual_terminal);
-  virtual ~IpcDesktopEnvironment();
+  ~IpcDesktopEnvironment() override;
 
   // DesktopEnvironment implementation.
-  virtual scoped_ptr<AudioCapturer> CreateAudioCapturer() OVERRIDE;
-  virtual scoped_ptr<InputInjector> CreateInputInjector() OVERRIDE;
-  virtual scoped_ptr<ScreenControls> CreateScreenControls() OVERRIDE;
-  virtual scoped_ptr<webrtc::DesktopCapturer> CreateVideoCapturer() OVERRIDE;
-  virtual scoped_ptr<webrtc::MouseCursorMonitor> CreateMouseCursorMonitor()
-      OVERRIDE;
-  virtual std::string GetCapabilities() const OVERRIDE;
-  virtual void SetCapabilities(const std::string& capabilities) OVERRIDE;
-  virtual scoped_ptr<GnubbyAuthHandler> CreateGnubbyAuthHandler(
-      protocol::ClientStub* client_stub) OVERRIDE;
+  scoped_ptr<AudioCapturer> CreateAudioCapturer() override;
+  scoped_ptr<InputInjector> CreateInputInjector() override;
+  scoped_ptr<ScreenControls> CreateScreenControls() override;
+  scoped_ptr<webrtc::DesktopCapturer> CreateVideoCapturer() override;
+  scoped_ptr<webrtc::MouseCursorMonitor> CreateMouseCursorMonitor() override;
+  std::string GetCapabilities() const override;
+  void SetCapabilities(const std::string& capabilities) override;
+  scoped_ptr<GnubbyAuthHandler> CreateGnubbyAuthHandler(
+      protocol::ClientStub* client_stub) override;
 
  private:
   scoped_refptr<DesktopSessionProxy> desktop_session_proxy_;
@@ -80,29 +79,26 @@ class IpcDesktopEnvironmentFactory
       scoped_refptr<base::SingleThreadTaskRunner> capture_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
       IPC::Sender* daemon_channel);
-  virtual ~IpcDesktopEnvironmentFactory();
+  ~IpcDesktopEnvironmentFactory() override;
 
   // DesktopEnvironmentFactory implementation.
-  virtual scoped_ptr<DesktopEnvironment> Create(
-      base::WeakPtr<ClientSessionControl> client_session_control) OVERRIDE;
-  virtual void SetEnableCurtaining(bool enable) OVERRIDE;
-  virtual bool SupportsAudioCapture() const OVERRIDE;
+  scoped_ptr<DesktopEnvironment> Create(
+      base::WeakPtr<ClientSessionControl> client_session_control) override;
+  void SetEnableCurtaining(bool enable) override;
+  bool SupportsAudioCapture() const override;
 
   // DesktopSessionConnector implementation.
-  virtual void ConnectTerminal(
-      DesktopSessionProxy* desktop_session_proxy,
-      const ScreenResolution& resolution,
-      bool virtual_terminal) OVERRIDE;
-  virtual void DisconnectTerminal(
-      DesktopSessionProxy* desktop_session_proxy) OVERRIDE;
-  virtual void SetScreenResolution(
-      DesktopSessionProxy* desktop_session_proxy,
-      const ScreenResolution& resolution) OVERRIDE;
-  virtual void OnDesktopSessionAgentAttached(
+  void ConnectTerminal(DesktopSessionProxy* desktop_session_proxy,
+                       const ScreenResolution& resolution,
+                       bool virtual_terminal) override;
+  void DisconnectTerminal(DesktopSessionProxy* desktop_session_proxy) override;
+  void SetScreenResolution(DesktopSessionProxy* desktop_session_proxy,
+                           const ScreenResolution& resolution) override;
+  void OnDesktopSessionAgentAttached(
       int terminal_id,
       base::ProcessHandle desktop_process,
-      IPC::PlatformFileForTransit desktop_pipe) OVERRIDE;
-  virtual void OnTerminalDisconnected(int terminal_id) OVERRIDE;
+      IPC::PlatformFileForTransit desktop_pipe) override;
+  void OnTerminalDisconnected(int terminal_id) override;
 
  private:
   // Used to run the audio capturer.

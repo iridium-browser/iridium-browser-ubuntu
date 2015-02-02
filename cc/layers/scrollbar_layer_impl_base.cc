@@ -6,7 +6,7 @@
 
 #include <algorithm>
 #include "cc/trees/layer_tree_impl.h"
-#include "ui/gfx/rect_conversions.h"
+#include "ui/gfx/geometry/rect_conversions.h"
 
 namespace cc {
 
@@ -17,8 +17,8 @@ ScrollbarLayerImplBase::ScrollbarLayerImplBase(
     bool is_left_side_vertical_scrollbar,
     bool is_overlay)
     : LayerImpl(tree_impl, id),
-      scroll_layer_(NULL),
-      clip_layer_(NULL),
+      scroll_layer_(nullptr),
+      clip_layer_(nullptr),
       is_overlay_scrollbar_(is_overlay),
       thumb_thickness_scale_factor_(1.f),
       current_pos_(0.f),
@@ -26,7 +26,8 @@ ScrollbarLayerImplBase::ScrollbarLayerImplBase(
       orientation_(orientation),
       is_left_side_vertical_scrollbar_(is_left_side_vertical_scrollbar),
       vertical_adjust_(0.f),
-      visible_to_total_length_ratio_(1.f) {}
+      visible_to_total_length_ratio_(1.f) {
+}
 
 ScrollbarLayerImplBase::~ScrollbarLayerImplBase() {}
 
@@ -92,7 +93,7 @@ void ScrollbarLayerImplBase::SetScrollLayerAndClipLayerByIds(
   RegisterScrollbarWithLayers(
       this, clip_layer_, scroll_layer_, &LayerImpl::AddScrollbar);
 
-  ScrollbarParametersDidChange();
+  ScrollbarParametersDidChange(false);
 }
 
 gfx::Rect ScrollbarLayerImplBase::ScrollbarLayerRectToContentRect(
@@ -119,6 +120,12 @@ bool ScrollbarLayerImplBase::SetMaximum(int maximum) {
   maximum_ = maximum;
   NoteLayerPropertyChanged();
   return true;
+}
+
+bool ScrollbarLayerImplBase::CanScrollOrientation() const {
+  if (!scroll_layer_)
+    return false;
+  return scroll_layer_->user_scrollable(orientation()) && (0 < maximum());
 }
 
 bool ScrollbarLayerImplBase::SetVerticalAdjust(float vertical_adjust) {
@@ -247,11 +254,11 @@ gfx::Rect ScrollbarLayerImplBase::ComputeThumbQuadRect() const {
   return ScrollbarLayerRectToContentRect(thumb_rect);
 }
 
-void ScrollbarLayerImplBase::ScrollbarParametersDidChange() {
+void ScrollbarLayerImplBase::ScrollbarParametersDidChange(bool on_resize) {
   if (!clip_layer_ || !scroll_layer_)
     return;
 
-  scroll_layer_->SetScrollbarPosition(this, clip_layer_);
+  scroll_layer_->SetScrollbarPosition(this, clip_layer_, on_resize);
 }
 
 }  // namespace cc

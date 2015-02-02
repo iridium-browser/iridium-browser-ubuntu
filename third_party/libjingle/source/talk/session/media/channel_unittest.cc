@@ -31,7 +31,7 @@
 #include "talk/media/base/rtpdump.h"
 #include "talk/media/base/screencastid.h"
 #include "talk/media/base/testutils.h"
-#include "talk/p2p/base/fakesession.h"
+#include "webrtc/p2p/base/fakesession.h"
 #include "talk/session/media/channel.h"
 #include "talk/session/media/mediamessages.h"
 #include "talk/session/media/mediarecorder.h"
@@ -141,14 +141,6 @@ class ChannelTest : public testing::Test, public sigslot::has_slots<> {
         mute_callback_value_(false),
         ssrc_(0),
         error_(T::MediaChannel::ERROR_NONE) {
-  }
-
-  static void SetUpTestCase() {
-    rtc::InitializeSSL();
-  }
-
-  static void TearDownTestCase() {
-    rtc::CleanupSSL();
   }
 
   void CreateChannels(int flags1, int flags2) {
@@ -1989,7 +1981,7 @@ class VideoChannelTest
     EXPECT_TRUE(media_channel2_->GetOptions(&o2));
     EXPECT_EQ(o1, o2);
 
-    o1.video_leaky_bucket.Set(true);
+    o1.video_start_bitrate.Set(123);
     channel1_->SetChannelOptions(o1);
     channel2_->SetChannelOptions(o1);
     EXPECT_TRUE(media_channel1_->GetOptions(&o2));

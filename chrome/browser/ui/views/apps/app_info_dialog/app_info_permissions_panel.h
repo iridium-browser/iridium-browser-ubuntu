@@ -9,7 +9,6 @@
 
 #include "chrome/browser/ui/views/apps/app_info_dialog/app_info_panel.h"
 #include "ui/gfx/text_constants.h"
-#include "ui/views/controls/button/button.h"
 
 class Profile;
 
@@ -22,19 +21,20 @@ class Event;
 }
 
 namespace views {
-class Label;
-class LabelButton;
+class GridLayout;
 class View;
 }
 
+typedef std::pair<base::string16, std::vector<base::string16>>
+    PermissionStringAndDetailsPair;
+
 // The summary panel of the app info dialog, which provides basic information
 // and controls related to the app.
-class AppInfoPermissionsPanel : public AppInfoPanel,
-                                public views::ButtonListener {
+class AppInfoPermissionsPanel : public AppInfoPanel {
  public:
   AppInfoPermissionsPanel(Profile* profile, const extensions::Extension* app);
 
-  virtual ~AppInfoPermissionsPanel();
+  ~AppInfoPermissionsPanel() override;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(AppInfoPermissionsPanelTest,
@@ -46,36 +46,28 @@ class AppInfoPermissionsPanel : public AppInfoPanel,
   FRIEND_TEST_ALL_PREFIXES(AppInfoPermissionsPanelTest,
                            RetainedFilePermissionsObtainedCorrectly);
 
-  // Given a list of strings, returns a view containing a list of these strings
-  // as bulleted items with the given |elide_behavior|. If |allow_multiline| is
-  // true, allow multi-lined bulleted items and ignore the |elide_behavior|.
-  views::View* CreateBulletedListView(
-      const std::vector<base::string16>& messages,
-      bool allow_multiline,
-      gfx::ElideBehavior elide_behavior);
+  // Called in this order, these methods set-up, add permissions to, and layout
+  // the list of permissions.
+  void CreatePermissionsList();
+  void FillPermissionsList();
+  void LayoutPermissionsList();
 
-  // Internal initialisation methods.
-  void CreateActivePermissionsControl();
-  void CreateRetainedFilesControl();
+  bool HasActivePermissionMessages() const;
+  // Returns a list of active permission messages. The first entry is the title
+  // of the permission; the second is any sub-messages (such as host
+  // permissions) to be listed underneath that permission.
+  const std::vector<PermissionStringAndDetailsPair>
+  GetActivePermissionMessages() const;
 
-  void LayoutActivePermissionsControl();
-  void LayoutRetainedFilesControl();
-
-  // Overridden from views::ButtonListener.
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
-
-  const std::vector<base::string16> GetActivePermissionMessages() const;
+  int GetRetainedFileCount() const;
+  base::string16 GetRetainedFileHeading() const;
   const std::vector<base::string16> GetRetainedFilePaths() const;
   void RevokeFilePermissions();
 
-  // UI elements on the dialog.
-  views::Label* active_permissions_heading_;
-  views::View* active_permissions_list_;
-
-  views::Label* retained_files_heading_;
-  views::View* retained_files_list_;
-  views::LabelButton* revoke_file_permissions_button_;
+  int GetRetainedDeviceCount() const;
+  base::string16 GetRetainedDeviceHeading() const;
+  const std::vector<base::string16> GetRetainedDevices() const;
+  void RevokeDevicePermissions();
 
   DISALLOW_COPY_AND_ASSIGN(AppInfoPermissionsPanel);
 };

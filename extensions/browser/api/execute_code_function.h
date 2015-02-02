@@ -19,11 +19,11 @@ class ExecuteCodeFunction : public AsyncExtensionFunction {
   ExecuteCodeFunction();
 
  protected:
-  virtual ~ExecuteCodeFunction();
+  ~ExecuteCodeFunction() override;
 
   // ExtensionFunction implementation.
-  virtual bool HasPermission() OVERRIDE;
-  virtual bool RunAsync() OVERRIDE;
+  bool HasPermission() override;
+  bool RunAsync() override;
 
   // Initialize |details_| if it hasn't already been.
   virtual bool Init() = 0;

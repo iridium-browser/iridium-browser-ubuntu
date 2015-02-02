@@ -34,8 +34,6 @@ class URLRequestContextGetter;
 
 namespace content {
 
-class DevToolsBrowserTarget;
-
 class DevToolsHttpHandlerImpl
     : public DevToolsHttpHandler,
       public base::RefCountedThreadSafe<DevToolsHttpHandlerImpl>,
@@ -44,27 +42,27 @@ class DevToolsHttpHandlerImpl
   friend class base::RefCountedThreadSafe<DevToolsHttpHandlerImpl>;
   friend class DevToolsHttpHandler;
 
+  class BrowserTarget;
+
   DevToolsHttpHandlerImpl(scoped_ptr<ServerSocketFactory> server_socket_factory,
                           const std::string& frontend_url,
                           DevToolsHttpHandlerDelegate* delegate,
                           const base::FilePath& active_port_output_directory);
-  virtual ~DevToolsHttpHandlerImpl();
+  ~DevToolsHttpHandlerImpl() override;
   void Start();
 
   // DevToolsHttpHandler implementation.
-  virtual void Stop() OVERRIDE;
-  virtual GURL GetFrontendURL() OVERRIDE;
+  void Stop() override;
+  GURL GetFrontendURL() override;
 
   // net::HttpServer::Delegate implementation.
-  virtual void OnConnect(int connection_id) OVERRIDE {}
-  virtual void OnHttpRequest(int connection_id,
-                             const net::HttpServerRequestInfo& info) OVERRIDE;
-  virtual void OnWebSocketRequest(
-      int connection_id,
-      const net::HttpServerRequestInfo& info) OVERRIDE;
-  virtual void OnWebSocketMessage(int connection_id,
-                                  const std::string& data) OVERRIDE;
-  virtual void OnClose(int connection_id) OVERRIDE;
+  void OnConnect(int connection_id) override {}
+  void OnHttpRequest(int connection_id,
+                     const net::HttpServerRequestInfo& info) override;
+  void OnWebSocketRequest(int connection_id,
+                          const net::HttpServerRequestInfo& info) override;
+  void OnWebSocketMessage(int connection_id, const std::string& data) override;
+  void OnClose(int connection_id) override;
 
   void OnJsonRequestUI(int connection_id,
                        const net::HttpServerRequestInfo& info);
@@ -83,6 +81,8 @@ class DevToolsHttpHandlerImpl
       int connection_id,
       const std::string& host,
       const DevToolsManagerDelegate::TargetList& targets);
+
+  void OnHttpServerInitialized(const net::IPEndPoint& ip_address);
 
   DevToolsTarget* GetTarget(const std::string& id);
 
@@ -121,13 +121,14 @@ class DevToolsHttpHandlerImpl
   std::string frontend_url_;
   const scoped_ptr<ServerSocketFactory> server_socket_factory_;
   scoped_ptr<net::HttpServer> server_;
+  scoped_ptr<net::IPEndPoint> server_ip_address_;
   typedef std::map<int, DevToolsAgentHostClient*> ConnectionToClientMap;
   ConnectionToClientMap connection_to_client_ui_;
   const scoped_ptr<DevToolsHttpHandlerDelegate> delegate_;
   const base::FilePath active_port_output_directory_;
   typedef std::map<std::string, DevToolsTarget*> TargetMap;
   TargetMap target_map_;
-  typedef std::map<int, scoped_refptr<DevToolsBrowserTarget> > BrowserTargets;
+  typedef std::map<int, BrowserTarget*> BrowserTargets;
   BrowserTargets browser_targets_;
   DISALLOW_COPY_AND_ASSIGN(DevToolsHttpHandlerImpl);
 };

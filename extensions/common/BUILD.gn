@@ -3,6 +3,31 @@
 # found in the LICENSE file.
 
 import("//build/config/features.gni")
+import("//mojo/public/tools/bindings/mojom.gni")
+
+# GYP version: extensions/extensions.gyp:extensions_common_constants
+source_set("common_constants") {
+  sources = [
+    "constants.cc",
+    "constants.h",
+  ]
+
+  if (is_win) {
+    cflags = [
+      "/wd4267", # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+    ]
+  }
+}
+
+if (enable_extensions) {
+
+mojom("mojo") {
+  sources = [
+    "mojo/keep_alive.mojom",
+    "mojo/stash.mojom",
+  ]
+}
+
 
 # GYP version: extensions/extensions.gyp:extensions_common
 source_set("common") {
@@ -22,8 +47,6 @@ source_set("common") {
     "api/sockets/sockets_manifest_permission.h",
     "common_manifest_handlers.cc",
     "common_manifest_handlers.h",
-    "constants.cc",
-    "constants.h",
     "csp_validator.cc",
     "csp_validator.h",
     "dom_action_types.h",
@@ -41,7 +64,6 @@ source_set("common") {
     "extension.h",
     "extension_api.cc",
     "extension_api.h",
-    "extension_api_stub.cc",
     "extension_icon_set.cc",
     "extension_icon_set.h",
     "extension_l10n_util.cc",
@@ -112,6 +134,8 @@ source_set("common") {
     "manifest_handlers/kiosk_mode_info.h",
     "manifest_handlers/launcher_page_info.cc",
     "manifest_handlers/launcher_page_info.h",
+    "manifest_handlers/oauth2_manifest_handler.cc",
+    "manifest_handlers/oauth2_manifest_handler.h",
     "manifest_handlers/offline_enabled_info.cc",
     "manifest_handlers/offline_enabled_info.h",
     "manifest_handlers/options_page_info.cc",
@@ -128,6 +152,8 @@ source_set("common") {
     "manifest_handlers/web_accessible_resources_info.h",
     "manifest_handlers/webview_info.cc",
     "manifest_handlers/webview_info.h",
+    "manifest_url_handlers.cc",
+    "manifest_url_handlers.h",
     "message_bundle.cc",
     "message_bundle.h",
     "one_shot_event.cc",
@@ -192,6 +218,8 @@ source_set("common") {
   ]
 
   deps = [
+    ":common_constants",
+    ":mojo",
     # TODO(benwells): figure out what to do with the api target and
     # api resources compiled into the chrome resource bundle.
     # http://crbug.com/162530
@@ -200,7 +228,11 @@ source_set("common") {
     "//components/url_matcher",
     "//content/public/common",
     "//crypto",
+    "//device/bluetooth",
+    "//device/usb",
+    "//extensions/common/api",
     "//extensions/strings",
+    "//extensions:extensions_resources",
     "//ipc",
     "//net",
     "//third_party/icu",
@@ -211,39 +243,6 @@ source_set("common") {
     "//ui/gfx/ipc",
     "//url",
   ]
-
-  if (enable_extensions) {
-    sources -= [
-      "extension_api_stub.cc",
-    ]
-
-    deps += [
-      "//device/bluetooth",
-      "//device/usb",
-      "//extensions/common/api",
-    ]
-  } else {
-    sources -= [
-      "api/bluetooth/bluetooth_manifest_data.cc",
-      "api/bluetooth/bluetooth_manifest_data.h",
-      "api/bluetooth/bluetooth_manifest_handler.cc",
-      "api/bluetooth/bluetooth_manifest_handler.h",
-      "api/bluetooth/bluetooth_manifest_permission.cc",
-      "api/bluetooth/bluetooth_manifest_permission.h",
-      "api/messaging/message.h",
-      "api/sockets/sockets_manifest_data.cc",
-      "api/sockets/sockets_manifest_data.h",
-      "api/sockets/sockets_manifest_handler.cc",
-      "api/sockets/sockets_manifest_handler.h",
-      "api/sockets/sockets_manifest_permission.cc",
-      "api/sockets/sockets_manifest_permission.h",
-      "extension_api.cc",
-      "manifest_handlers/externally_connectable.cc",
-      "manifest_handlers/externally_connectable.h",
-      "manifest_handlers/options_page_info.cc",
-      "manifest_handlers/options_page_info.h",
-    ]
-  }
 
   if (enable_nacl) {
     sources += [
@@ -258,3 +257,5 @@ source_set("common") {
     ]
   }
 }
+
+} # enable_extensions

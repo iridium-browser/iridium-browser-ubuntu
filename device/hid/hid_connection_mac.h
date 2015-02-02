@@ -32,20 +32,19 @@ class HidConnectionMac : public HidConnection {
       scoped_refptr<base::SingleThreadTaskRunner> file_task_runner);
 
  private:
-  virtual ~HidConnectionMac();
+  ~HidConnectionMac() override;
 
   // HidConnection implementation.
-  virtual void PlatformClose() OVERRIDE;
-  virtual void PlatformRead(const ReadCallback& callback) OVERRIDE;
-  virtual void PlatformWrite(scoped_refptr<net::IOBuffer> buffer,
-                             size_t size,
-                             const WriteCallback& callback) OVERRIDE;
-  virtual void PlatformGetFeatureReport(uint8_t report_id,
-                                        const ReadCallback& callback) OVERRIDE;
-  virtual void PlatformSendFeatureReport(
-      scoped_refptr<net::IOBuffer> buffer,
-      size_t size,
-      const WriteCallback& callback) OVERRIDE;
+  void PlatformClose() override;
+  void PlatformRead(const ReadCallback& callback) override;
+  void PlatformWrite(scoped_refptr<net::IOBuffer> buffer,
+                     size_t size,
+                     const WriteCallback& callback) override;
+  void PlatformGetFeatureReport(uint8_t report_id,
+                                const ReadCallback& callback) override;
+  void PlatformSendFeatureReport(scoped_refptr<net::IOBuffer> buffer,
+                                 size_t size,
+                                 const WriteCallback& callback) override;
 
   static void InputReportCallback(void* context,
                                   IOReturn result,

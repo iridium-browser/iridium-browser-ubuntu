@@ -11,11 +11,13 @@
 package org.webrtc.videoengine;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.concurrent.Exchanger;
 
 import android.content.Context;
 import android.graphics.ImageFormat;
 import android.graphics.SurfaceTexture;
+import android.hardware.Camera.Parameters;
 import android.hardware.Camera.PreviewCallback;
 import android.hardware.Camera;
 import android.opengl.GLES11Ext;
@@ -24,9 +26,10 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.util.Log;
-import android.view.OrientationEventListener;
+import android.view.Surface;
 import android.view.SurfaceHolder.Callback;
 import android.view.SurfaceHolder;
+import android.view.WindowManager;
 
 // Wrapper for android Camera, with support for direct local preview rendering.
 // Threading notes: this class is called from ViE C++ code, and from Camera &
@@ -44,10 +47,9 @@ public class VideoCaptureAndroid implements PreviewCallback, Callback {
   private Camera camera;  // Only non-null while capturing.
   private CameraThread cameraThread;
   private Handler cameraThreadHandler;
+  private Context context;
   private final int id;
   private final Camera.CameraInfo info;
-  private final OrientationEventListener orientationListener;
-  private boolean orientationListenerEnabled;
   private final long native_capturer;  // |VideoCaptureAndroid*| in C++.
   private SurfaceTexture cameraSurfaceTexture;
   private int[] cameraGlTextures = null;
@@ -58,6 +60,7 @@ public class VideoCaptureAndroid implements PreviewCallback, Callback {
   private double averageDurationMs;
   private long lastCaptureTimeMs;
   private int frameCount;
+  private int frameDropRatio;
 
   // Requests future capturers to send their frames to |localPreview| directly.
   public static void setLocalPreview(SurfaceHolder localPreview) {
@@ -70,34 +73,13 @@ public class VideoCaptureAndroid implements PreviewCallback, Callback {
   public VideoCaptureAndroid(int id, long native_capturer) {
     this.id = id;
     this.native_capturer = native_capturer;
+    this.context = GetContext();
     this.info = new Camera.CameraInfo();
     Camera.getCameraInfo(id, info);
-
-    // Must be the last thing in the ctor since we pass a reference to |this|!
-    final VideoCaptureAndroid self = this;
-    orientationListener = new OrientationEventListener(GetContext()) {
-        @Override public void onOrientationChanged(int degrees) {
-          if (!self.orientationListenerEnabled) {
-            return;
-          }
-          if (degrees == OrientationEventListener.ORIENTATION_UNKNOWN) {
-            return;
-          }
-          if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
-            degrees = (info.orientation - degrees + 360) % 360;
-          } else {  // back-facing
-            degrees = (info.orientation + degrees) % 360;
-          }
-          self.OnOrientationChanged(self.native_capturer, degrees);
-        }
-      };
-    // Don't add any code here; see the comment above |self| above!
   }
 
   // Return the global application context.
   private static native Context GetContext();
-  // Request frame rotation post-capture.
-  private native void OnOrientationChanged(long captureObject, int degrees);
 
   private class CameraThread extends Thread {
     private Exchanger<Handler> handlerExchanger;
@@ -137,8 +119,6 @@ public class VideoCaptureAndroid implements PreviewCallback, Callback {
         }
       });
     boolean startResult = exchange(result, false); // |false| is a dummy value.
-    orientationListenerEnabled = true;
-    orientationListener.enable();
     return startResult;
   }
 
@@ -184,14 +164,48 @@ public class VideoCaptureAndroid implements PreviewCallback, Callback {
         }
       }
 
+      Log.d(TAG, "Camera orientation: " + info.orientation +
+          " .Device orientation: " + getDeviceOrientation());
       Camera.Parameters parameters = camera.getParameters();
       Log.d(TAG, "isVideoStabilizationSupported: " +
           parameters.isVideoStabilizationSupported());
       if (parameters.isVideoStabilizationSupported()) {
         parameters.setVideoStabilization(true);
       }
+      parameters.setPictureSize(width, height);
       parameters.setPreviewSize(width, height);
+
+      // Check if requested fps range is supported by camera,
+      // otherwise calculate frame drop ratio.
+      List<int[]> supportedFpsRanges = parameters.getSupportedPreviewFpsRange();
+      frameDropRatio = Integer.MAX_VALUE;
+      for (int i = 0; i < supportedFpsRanges.size(); i++) {
+        int[] range = supportedFpsRanges.get(i);
+        if (range[Parameters.PREVIEW_FPS_MIN_INDEX] == min_mfps &&
+            range[Parameters.PREVIEW_FPS_MAX_INDEX] == max_mfps) {
+          frameDropRatio = 1;
+          break;
+        }
+        if (range[Parameters.PREVIEW_FPS_MIN_INDEX] % min_mfps == 0 &&
+            range[Parameters.PREVIEW_FPS_MAX_INDEX] % max_mfps == 0) {
+          int dropRatio = range[Parameters.PREVIEW_FPS_MAX_INDEX] / max_mfps;
+          frameDropRatio = Math.min(dropRatio, frameDropRatio);
+        }
+      }
+      if (frameDropRatio == Integer.MAX_VALUE) {
+        Log.e(TAG, "Can not find camera fps range");
+        error = new RuntimeException("Can not find camera fps range");
+        exchange(result, false);
+        return;
+      }
+      if (frameDropRatio > 1) {
+        Log.d(TAG, "Frame dropper is enabled. Ratio: " + frameDropRatio);
+      }
+      min_mfps *= frameDropRatio;
+      max_mfps *= frameDropRatio;
+      Log.d(TAG, "Camera preview mfps range: " + min_mfps + " - " + max_mfps);
       parameters.setPreviewFpsRange(min_mfps, max_mfps);
+
       int format = ImageFormat.NV21;
       parameters.setPreviewFormat(format);
       camera.setParameters(parameters);
@@ -201,7 +215,7 @@ public class VideoCaptureAndroid implements PreviewCallback, Callback {
       }
       camera.setPreviewCallbackWithBuffer(this);
       frameCount = 0;
-      averageDurationMs = 1000 / max_mfps;
+      averageDurationMs = 1000000.0f / (max_mfps / frameDropRatio);
       camera.startPreview();
       exchange(result, true);
       return;
@@ -223,8 +237,6 @@ public class VideoCaptureAndroid implements PreviewCallback, Callback {
   // Called by native code.  Returns true when camera is known to be stopped.
   private synchronized boolean stopCapture() {
     Log.d(TAG, "stopCapture");
-    orientationListener.disable();
-    orientationListenerEnabled = false;
     final Exchanger<Boolean> result = new Exchanger<Boolean>();
     cameraThreadHandler.post(new Runnable() {
         @Override public void run() {
@@ -279,8 +291,32 @@ public class VideoCaptureAndroid implements PreviewCallback, Callback {
     return;
   }
 
+  private int getDeviceOrientation() {
+    int orientation = 0;
+    if (context != null) {
+      WindowManager wm = (WindowManager) context.getSystemService(
+          Context.WINDOW_SERVICE);
+      switch(wm.getDefaultDisplay().getRotation()) {
+        case Surface.ROTATION_90:
+          orientation = 90;
+          break;
+        case Surface.ROTATION_180:
+          orientation = 180;
+          break;
+        case Surface.ROTATION_270:
+          orientation = 270;
+          break;
+        case Surface.ROTATION_0:
+        default:
+          orientation = 0;
+          break;
+      }
+    }
+    return orientation;
+  }
+
   private native void ProvideCameraFrame(
-      byte[] data, int length, long timeStamp, long captureObject);
+      byte[] data, int length, int rotation, long timeStamp, long captureObject);
 
   // Called on cameraThread so must not "synchronized".
   @Override
@@ -295,8 +331,13 @@ public class VideoCaptureAndroid implements PreviewCallback, Callback {
       throw new RuntimeException("Unexpected camera in callback!");
     }
     frameCount++;
+    // Check if frame needs to be dropped.
+    if ((frameDropRatio > 1) && (frameCount % frameDropRatio) > 0) {
+      camera.addCallbackBuffer(data);
+      return;
+    }
     long captureTimeMs = SystemClock.elapsedRealtime();
-    if (frameCount > 1) {
+    if (frameCount > frameDropRatio) {
       double durationMs = captureTimeMs - lastCaptureTimeMs;
       averageDurationMs = 0.9 * averageDurationMs + 0.1 * durationMs;
       if ((frameCount % 30) == 0) {
@@ -306,7 +347,15 @@ public class VideoCaptureAndroid implements PreviewCallback, Callback {
       }
     }
     lastCaptureTimeMs = captureTimeMs;
-    ProvideCameraFrame(data, data.length, captureTimeMs, native_capturer);
+
+    int rotation = getDeviceOrientation();
+    if (info.facing == Camera.CameraInfo.CAMERA_FACING_BACK) {
+      rotation = 360 - rotation;
+    }
+    rotation = (info.orientation + rotation) % 360;
+
+    ProvideCameraFrame(data, data.length, rotation,
+        captureTimeMs, native_capturer);
     camera.addCallbackBuffer(data);
   }
 

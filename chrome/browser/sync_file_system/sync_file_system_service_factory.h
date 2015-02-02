@@ -37,11 +37,11 @@ class SyncFileSystemServiceFactory : public BrowserContextKeyedServiceFactory {
  private:
   friend struct DefaultSingletonTraits<SyncFileSystemServiceFactory>;
   SyncFileSystemServiceFactory();
-  virtual ~SyncFileSystemServiceFactory();
+  ~SyncFileSystemServiceFactory() override;
 
   // BrowserContextKeyedServiceFactory overrides.
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* context) const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* context) const override;
 
   mutable scoped_ptr<LocalFileSyncService> mock_local_file_service_;
   mutable scoped_ptr<RemoteFileSyncService> mock_remote_file_service_;

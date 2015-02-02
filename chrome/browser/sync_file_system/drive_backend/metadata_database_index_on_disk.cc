@@ -154,7 +154,7 @@ void RemoveUnreachableItems(LevelDBWrapper* db, int64 sync_root_tracker_id) {
     std::set<int64> inactive_trackers;
     scoped_ptr<LevelDBWrapper::Iterator> itr = db->NewIterator();
     for (itr->Seek(kFileTrackerKeyPrefix); itr->Valid(); itr->Next()) {
-      if (!RemovePrefix(itr->key().ToString(), kFileTrackerKeyPrefix, NULL))
+      if (!RemovePrefix(itr->key().ToString(), kFileTrackerKeyPrefix, nullptr))
         break;
 
       scoped_ptr<FileTracker> tracker(new FileTracker);
@@ -207,7 +207,7 @@ void RemoveUnreachableItems(LevelDBWrapper* db, int64 sync_root_tracker_id) {
   {
     scoped_ptr<LevelDBWrapper::Iterator> itr = db->NewIterator();
     for (itr->Seek(kFileTrackerKeyPrefix); itr->Valid(); itr->Next()) {
-      if (!RemovePrefix(itr->key().ToString(), kFileTrackerKeyPrefix, NULL))
+      if (!RemovePrefix(itr->key().ToString(), kFileTrackerKeyPrefix, nullptr))
         break;
 
       scoped_ptr<FileTracker> tracker(new FileTracker);
@@ -229,7 +229,7 @@ void RemoveUnreachableItems(LevelDBWrapper* db, int64 sync_root_tracker_id) {
   {
     scoped_ptr<LevelDBWrapper::Iterator> itr = db->NewIterator();
     for (itr->Seek(kFileMetadataKeyPrefix); itr->Valid(); itr->Next()) {
-      if (!RemovePrefix(itr->key().ToString(), kFileMetadataKeyPrefix, NULL))
+      if (!RemovePrefix(itr->key().ToString(), kFileMetadataKeyPrefix, nullptr))
         break;
 
       scoped_ptr<FileMetadata> metadata(new FileMetadata);
@@ -254,7 +254,7 @@ MetadataDatabaseIndexOnDisk::Create(LevelDBWrapper* db) {
 
   scoped_ptr<ServiceMetadata> service_metadata = InitializeServiceMetadata(db);
   if (!service_metadata)
-    return scoped_ptr<MetadataDatabaseIndexOnDisk>();
+    return nullptr;
 
   PutVersionToDB(kDatabaseOnDiskVersion, db);
   RemoveUnreachableItems(db, service_metadata->sync_root_tracker_id());
@@ -353,7 +353,6 @@ void MetadataDatabaseIndexOnDisk::StoreFileTracker(
     UpdateInFileIDIndexes(old_tracker, *tracker);
     UpdateInPathIndexes(old_tracker, *tracker);
     UpdateInDirtyTrackerIndexes(old_tracker, *tracker);
-
   }
 
   PutFileTrackerToDB(*tracker, db_);
@@ -526,6 +525,11 @@ bool MetadataDatabaseIndexOnDisk::HasDemotedDirtyTracker() const {
   return StartsWithASCII(itr->key().ToString(), kDemotedDirtyIDKeyPrefix, true);
 }
 
+bool MetadataDatabaseIndexOnDisk::IsDemotedDirtyTracker(
+    int64 tracker_id) const {
+  return DBHasKey(GenerateDemotedDirtyIDKey(tracker_id));
+}
+
 void MetadataDatabaseIndexOnDisk::PromoteDemotedDirtyTracker(int64 tracker_id) {
   std::string demoted_key = GenerateDemotedDirtyIDKey(tracker_id);
 
@@ -668,7 +672,7 @@ int64 MetadataDatabaseIndexOnDisk::BuildTrackerIndexes() {
 
   scoped_ptr<LevelDBWrapper::Iterator> itr(db_->NewIterator());
   for (itr->Seek(kFileTrackerKeyPrefix); itr->Valid(); itr->Next()) {
-    if (!RemovePrefix(itr->key().ToString(), kFileTrackerKeyPrefix, NULL))
+    if (!RemovePrefix(itr->key().ToString(), kFileTrackerKeyPrefix, nullptr))
       break;
 
     FileTracker tracker;
@@ -1128,7 +1132,7 @@ void MetadataDatabaseIndexOnDisk::DeactivateInTrackerIDSetWithPrefix(
   }
 }
 
-bool MetadataDatabaseIndexOnDisk::DBHasKey(const std::string& key) {
+bool MetadataDatabaseIndexOnDisk::DBHasKey(const std::string& key) const {
   scoped_ptr<LevelDBWrapper::Iterator> itr(db_->NewIterator());
   itr->Seek(key);
   return itr->Valid() && (itr->key() == key);

@@ -29,8 +29,8 @@ class EGLWindow
 {
   public:
     EGLWindow(size_t width, size_t height,
-              EGLint glesMajorVersion = 2,
-              EGLint requestedRenderer = EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE);
+              EGLint glesMajorVersion,
+              EGLint requestedRenderer);
 
     ~EGLWindow();
 
@@ -49,6 +49,7 @@ class EGLWindow
     void swap();
 
     GLuint getClientVersion() const { return mClientVersion; }
+    EGLint getRequestedRenderer() const { return mRequestedRenderer; }
     EGLConfig getConfig() const;
     EGLDisplay getDisplay() const;
     EGLSurface getSurface() const;
@@ -64,7 +65,7 @@ class EGLWindow
     bool isMultisample() const { return mMultisample; }
     EGLint getSwapInterval() const { return mSwapInterval; }
 
-    bool initializeGL(const OSWindow *osWindow);
+    bool initializeGL(OSWindow *osWindow);
     void destroyGL();
 
   private:

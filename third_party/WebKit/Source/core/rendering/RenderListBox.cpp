@@ -51,7 +51,6 @@
 #include "core/page/SpatialNavigation.h"
 #include "core/rendering/HitTestResult.h"
 #include "core/rendering/PaintInfo.h"
-#include "core/rendering/RenderScrollbar.h"
 #include "core/rendering/RenderLayer.h"
 #include "core/rendering/RenderText.h"
 #include "core/rendering/RenderTheme.h"
@@ -59,7 +58,6 @@
 #include "core/rendering/TextRunConstructor.h"
 #include "platform/fonts/FontCache.h"
 #include "platform/graphics/GraphicsContext.h"
-#include "platform/scroll/Scrollbar.h"
 #include "platform/text/BidiTextRun.h"
 #include <math.h>
 

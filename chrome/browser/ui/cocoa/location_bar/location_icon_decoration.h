@@ -17,19 +17,19 @@ class LocationBarViewMac;
 class LocationIconDecoration : public ImageDecoration {
  public:
   explicit LocationIconDecoration(LocationBarViewMac* owner);
-  virtual ~LocationIconDecoration();
+  ~LocationIconDecoration() override;
 
   // Allow dragging the current URL.
-  virtual bool IsDraggable() OVERRIDE;
-  virtual NSPasteboard* GetDragPasteboard() OVERRIDE;
-  virtual NSImage* GetDragImage() OVERRIDE;
-  virtual NSRect GetDragImageFrame(NSRect frame) OVERRIDE;
+  bool IsDraggable() override;
+  NSPasteboard* GetDragPasteboard() override;
+  NSImage* GetDragImage() override;
+  NSRect GetDragImageFrame(NSRect frame) override;
 
   // Show the page info panel on click.
-  virtual bool OnMousePressed(NSRect frame, NSPoint location) OVERRIDE;
-  virtual bool AcceptsMousePress() OVERRIDE;
-  virtual NSString* GetToolTip() OVERRIDE;
-  virtual NSPoint GetBubblePointInFrame(NSRect frame) OVERRIDE;
+  bool OnMousePressed(NSRect frame, NSPoint location) override;
+  bool AcceptsMousePress() override;
+  NSString* GetToolTip() override;
+  NSPoint GetBubblePointInFrame(NSRect frame) override;
 
  private:
   NSRect drag_frame_;

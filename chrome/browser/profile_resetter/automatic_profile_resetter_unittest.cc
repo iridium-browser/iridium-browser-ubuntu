@@ -100,26 +100,26 @@ class MockProfileResetterDelegate : public AutomaticProfileResetterDelegate {
   MOCK_METHOD0(DismissPrompt, void());
 
   virtual scoped_ptr<base::ListValue>
-      GetLoadedModuleNameDigests() const OVERRIDE {
+      GetLoadedModuleNameDigests() const override {
     OnGetLoadedModuleNameDigestsCalled();
     return scoped_ptr<base::ListValue>(
         emulated_loaded_module_digests_.DeepCopy());
   }
 
   virtual scoped_ptr<base::DictionaryValue>
-      GetDefaultSearchProviderDetails() const OVERRIDE {
+      GetDefaultSearchProviderDetails() const override {
     OnGetDefaultSearchProviderDetailsCalled();
     return scoped_ptr<base::DictionaryValue>(
         emulated_default_search_provider_details_.DeepCopy());
   }
 
-  virtual bool IsDefaultSearchProviderManaged() const OVERRIDE {
+  virtual bool IsDefaultSearchProviderManaged() const override {
     OnIsDefaultSearchProviderManagedCalled();
     return emulated_is_default_search_provider_managed_;
   }
 
   virtual scoped_ptr<base::ListValue>
-      GetPrepopulatedSearchProvidersDetails() const OVERRIDE {
+      GetPrepopulatedSearchProvidersDetails() const override {
     OnGetPrepopulatedSearchProvidersDetailsCalled();
     return scoped_ptr<base::ListValue>(
         emulated_search_providers_details_.DeepCopy());
@@ -515,7 +515,7 @@ class AutomaticProfileResetterTestBase : public testing::Test {
         user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
   }
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     variations::testing::ClearAllVariationParams();
     base::FieldTrialList::CreateFieldTrial(kAutomaticProfileResetStudyName,
                                            experiment_group_name_);
@@ -557,8 +557,7 @@ class AutomaticProfileResetterTestBase : public testing::Test {
           variation_params));
     }
     resetter_->Initialize();
-    resetter_->SetDelegateForTesting(
-        mock_delegate_owned_.PassAs<AutomaticProfileResetterDelegate>());
+    resetter_->SetDelegateForTesting(mock_delegate_owned_.Pass());
     resetter_->SetTaskRunnerForWaitingForTesting(waiting_task_runner_);
     if (!inject_data_through_variation_params_) {
       resetter_->SetProgramForTesting(testing_program_);

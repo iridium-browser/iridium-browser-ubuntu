@@ -54,10 +54,10 @@ class PolicyWatcherLinux : public PolicyWatcher {
         weak_factory_(this) {
   }
 
-  virtual ~PolicyWatcherLinux() {}
+  ~PolicyWatcherLinux() override {}
 
  protected:
-  virtual void StartWatchingInternal() OVERRIDE {
+  void StartWatchingInternal() override {
     DCHECK(OnPolicyWatcherThread());
     watcher_.reset(new base::FilePathWatcher());
 
@@ -77,7 +77,7 @@ class PolicyWatcherLinux : public PolicyWatcher {
     ScheduleFallbackReloadTask();
   }
 
-  virtual void StopWatchingInternal() OVERRIDE {
+  void StopWatchingInternal() override {
     DCHECK(OnPolicyWatcherThread());
 
     // Stop watching for changes to files in the policies directory.
@@ -149,12 +149,12 @@ class PolicyWatcherLinux : public PolicyWatcher {
       if (!value.get()) {
         LOG(WARNING) << "Failed to read configuration file "
                      << config_file_iter->value() << ": " << error_msg;
-        return scoped_ptr<base::DictionaryValue>();
+        return nullptr;
       }
       if (!value->IsType(base::Value::TYPE_DICTIONARY)) {
         LOG(WARNING) << "Expected JSON dictionary in configuration file "
                      << config_file_iter->value();
-        return scoped_ptr<base::DictionaryValue>();
+        return nullptr;
       }
       policy->MergeDictionary(static_cast<base::DictionaryValue*>(value.get()));
     }
@@ -162,7 +162,7 @@ class PolicyWatcherLinux : public PolicyWatcher {
     return policy.Pass();
   }
 
-  virtual void Reload() OVERRIDE {
+  void Reload() override {
     DCHECK(OnPolicyWatcherThread());
     // Check the directory time in order to see whether a reload is required.
     base::TimeDelta delay;
@@ -244,10 +244,11 @@ class PolicyWatcherLinux : public PolicyWatcher {
   base::WeakPtrFactory<PolicyWatcherLinux> weak_factory_;
 };
 
-PolicyWatcher* PolicyWatcher::Create(
+scoped_ptr<PolicyWatcher> PolicyWatcher::Create(
+    policy::PolicyService* policy_service,
     scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
   base::FilePath policy_dir(kPolicyDir);
-  return new PolicyWatcherLinux(task_runner, policy_dir);
+  return make_scoped_ptr(new PolicyWatcherLinux(task_runner, policy_dir));
 }
 
 }  // namespace policy_hack

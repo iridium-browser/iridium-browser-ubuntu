@@ -734,7 +734,7 @@ void HWNDMessageHandler::FlashFrame(bool flash) {
   fwi.cbSize = sizeof(fwi);
   fwi.hwnd = hwnd();
   if (flash) {
-    fwi.dwFlags = FLASHW_ALL;
+    fwi.dwFlags = custom_window_region_ ? FLASHW_TRAY : FLASHW_ALL;
     fwi.uCount = 4;
     fwi.dwTimeout = 0;
   } else {
@@ -1219,7 +1219,7 @@ void HWNDMessageHandler::RedrawLayeredWindowContents() {
 
   // We need to clip to the dirty rect ourselves.
   layered_window_contents_->sk_canvas()->save();
-  double scale = gfx::win::GetDeviceScaleFactor();
+  double scale = gfx::GetDPIScale();
   layered_window_contents_->sk_canvas()->scale(
       SkScalar(scale),SkScalar(scale));
   layered_window_contents_->ClipRect(invalid_rect_);
@@ -1431,10 +1431,11 @@ void HWNDMessageHandler::OnGetMinMaxInfo(MINMAXINFO* minmax_info) {
     CR_DEFLATE_RECT(&window_rect, &client_rect);
     min_window_size.Enlarge(window_rect.right - window_rect.left,
                             window_rect.bottom - window_rect.top);
-    if (!max_window_size.IsEmpty()) {
-      max_window_size.Enlarge(window_rect.right - window_rect.left,
-                              window_rect.bottom - window_rect.top);
-    }
+    // Either axis may be zero, so enlarge them independently.
+    if (max_window_size.width())
+      max_window_size.Enlarge(window_rect.right - window_rect.left, 0);
+    if (max_window_size.height())
+      max_window_size.Enlarge(0, window_rect.bottom - window_rect.top);
   }
   minmax_info->ptMinTrackSize.x = min_window_size.width();
   minmax_info->ptMinTrackSize.y = min_window_size.height();
@@ -1549,8 +1550,15 @@ LRESULT HWNDMessageHandler::OnMouseActivate(UINT message,
   POINT cursor_pos = {0};
   ::GetCursorPos(&cursor_pos);
   ::ScreenToClient(hwnd(), &cursor_pos);
+  // The code below exists for child windows like NPAPI plugins etc which need
+  // to be activated whenever we receive a WM_MOUSEACTIVATE message. Don't put
+  // transparent child windows in this bucket as they are not supposed to grab
+  // activation.
+  // TODO(ananta)
+  // Get rid of this code when we deprecate NPAPI plugins.
   HWND child = ::RealChildWindowFromPoint(hwnd(), cursor_pos);
-  if (::IsWindow(child) && child != hwnd() && ::IsWindowVisible(child))
+  if (::IsWindow(child) && child != hwnd() && ::IsWindowVisible(child) &&
+      !(::GetWindowLong(child, GWL_EXSTYLE) & WS_EX_TRANSPARENT))
     PostProcessActivateMessage(WA_INACTIVE, false);
 
   // TODO(beng): resolve this with the GetWindowLong() check on the subsequent

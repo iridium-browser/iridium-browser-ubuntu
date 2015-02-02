@@ -2,10 +2,13 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import logging
 import os
 import tempfile
 import unittest
+import shutil
+import StringIO
+import sys
+import tempfile
 
 from telemetry import benchmark
 from telemetry import decorators
@@ -13,6 +16,7 @@ from telemetry.core import browser_finder
 from telemetry.core import exceptions
 from telemetry.core import user_agent
 from telemetry.core import util
+from telemetry.core import wpr_modes
 from telemetry.page import page as page_module
 from telemetry.page import page_runner
 from telemetry.page import page_set
@@ -20,6 +24,8 @@ from telemetry.page import page_test
 from telemetry.page import test_expectations
 from telemetry.results import results_options
 from telemetry.unittest import options_for_unittests
+from telemetry.unittest import system_stub
+from telemetry.util import exception_formatter as exception_formatter_module
 from telemetry.value import scalar
 from telemetry.value import string
 
@@ -32,6 +38,9 @@ SIMPLE_CREDENTIALS_STRING = """
   }
 }
 """
+class DummyTest(page_test.PageTest):
+  def ValidatePage(self, *_):
+    pass
 
 
 def SetUpPageRunnerArguments(options):
@@ -66,11 +75,36 @@ def GetSuccessfulPageRuns(results):
   return [run for run in results.all_page_runs if run.ok or run.skipped]
 
 
+class FakeExceptionFormatterModule(object):
+  @staticmethod
+  def PrintFormattedException(
+      exception_class=None, exception=None, tb=None, msg=None):
+    pass
+
+
 class PageRunnerTests(unittest.TestCase):
   # TODO(nduca): Move the basic "test failed, test succeeded" tests from
   # page_test_unittest to here.
 
+  def setUp(self):
+    self._page_runner_logging_stub = None
+
+  def SuppressExceptionFormatting(self):
+    page_runner.exception_formatter = FakeExceptionFormatterModule
+    self._page_runner_logging_stub = system_stub.Override(
+      page_runner, ['logging'])
+
+  def RestoreExceptionFormatter(self):
+    page_runner.exception_formatter = exception_formatter_module
+    if self._page_runner_logging_stub:
+      self._page_runner_logging_stub.Restore()
+      self._page_runner_logging_stub = None
+
+  def tearDown(self):
+    self.RestoreExceptionFormatter()
+
   def testHandlingOfCrashedTab(self):
+    self.SuppressExceptionFormatting()
     ps = page_set.PageSet()
     expectations = test_expectations.TestExpectations()
     page1 = page_module.Page('chrome://crash', ps)
@@ -90,6 +124,7 @@ class PageRunnerTests(unittest.TestCase):
     self.assertEquals(1, len(results.failures))
 
   def testHandlingOfTestThatRaisesWithNonFatalUnknownExceptions(self):
+    self.SuppressExceptionFormatting()
     ps = page_set.PageSet()
     expectations = test_expectations.TestExpectations()
     ps.pages.append(page_module.Page(
@@ -121,56 +156,83 @@ class PageRunnerTests(unittest.TestCase):
     self.assertEquals(1, len(GetSuccessfulPageRuns(results)))
     self.assertEquals(1, len(results.failures))
 
+  def testRaiseBrowserGoneExceptionFromValidatePage(self):
+    self.SuppressExceptionFormatting()
+    ps = page_set.PageSet()
+    expectations = test_expectations.TestExpectations()
+    ps.pages.append(page_module.Page(
+        'file://blank.html', ps, base_dir=util.GetUnittestDataDir()))
+    ps.pages.append(page_module.Page(
+        'file://blank.html', ps, base_dir=util.GetUnittestDataDir()))
+
+    class Test(page_test.PageTest):
+      def __init__(self, *args):
+        super(Test, self).__init__(*args)
+        self.run_count = 0
+      def ValidatePage(self, *_):
+        old_run_count = self.run_count
+        self.run_count += 1
+        if old_run_count == 0:
+          raise exceptions.BrowserGoneException()
+
+    options = options_for_unittests.GetCopy()
+    options.output_formats = ['none']
+    options.suppress_gtest_report = True
+    test = Test()
+    SetUpPageRunnerArguments(options)
+    results = results_options.CreateResults(EmptyMetadataForTest(), options)
+    page_runner.Run(test, ps, expectations, options, results)
+    self.assertEquals(2, test.run_count)
+    self.assertEquals(1, len(GetSuccessfulPageRuns(results)))
+    self.assertEquals(1, len(results.failures))
+
+  def testRaiseBrowserGoneExceptionFromRestartBrowserBeforeEachPage(self):
+    self.SuppressExceptionFormatting()
+    ps = page_set.PageSet()
+    expectations = test_expectations.TestExpectations()
+    ps.pages.append(page_module.Page(
+        'file://blank.html', ps, base_dir=util.GetUnittestDataDir()))
+    ps.pages.append(page_module.Page(
+        'file://blank.html', ps, base_dir=util.GetUnittestDataDir()))
+
+    class Test(page_test.PageTest):
+      def __init__(self, *args):
+        super(Test, self).__init__(*args)
+        self.run_count = 0
+      def RestartBrowserBeforeEachPage(self):
+        old_run_count = self.run_count
+        self.run_count += 1
+        if old_run_count == 0:
+          raise exceptions.BrowserGoneException(None)
+        return self._needs_browser_restart_after_each_page
+
+    options = options_for_unittests.GetCopy()
+    options.output_formats = ['none']
+    options.suppress_gtest_report = True
+    test = Test()
+    SetUpPageRunnerArguments(options)
+    results = results_options.CreateResults(EmptyMetadataForTest(), options)
+    page_runner.Run(test, ps, expectations, options, results)
+    self.assertEquals(2, test.run_count)
+    self.assertEquals(1, len(GetSuccessfulPageRuns(results)))
+    self.assertEquals(1, len(results.failures))
+
   def testHandlingOfCrashedTabWithExpectedFailure(self):
+    self.SuppressExceptionFormatting()
     ps = page_set.PageSet()
     expectations = test_expectations.TestExpectations()
     expectations.Fail('chrome://crash')
     page1 = page_module.Page('chrome://crash', ps)
     ps.pages.append(page1)
 
-    class Test(page_test.PageTest):
-      def ValidatePage(self, *_):
-        pass
-
     options = options_for_unittests.GetCopy()
     options.output_formats = ['none']
     options.suppress_gtest_report = True
     SetUpPageRunnerArguments(options)
     results = results_options.CreateResults(EmptyMetadataForTest(), options)
-    page_runner.Run(Test(), ps, expectations, options, results)
+    page_runner.Run(DummyTest(), ps, expectations, options, results)
     self.assertEquals(1, len(GetSuccessfulPageRuns(results)))
     self.assertEquals(0, len(results.failures))
-
-  def testRetryOnBrowserCrash(self):
-    ps = page_set.PageSet()
-    expectations = test_expectations.TestExpectations()
-    ps.pages.append(page_module.Page(
-        'file://blank.html', ps, base_dir=util.GetUnittestDataDir()))
-
-    class CrashyMeasurement(page_test.PageTest):
-      has_crashed = False
-      def ValidateAndMeasurePage(self, page, tab, results):
-        # This value should be discarded on the first run when the
-        # browser crashed.
-        results.AddValue(
-            string.StringValue(page, 'test', 't', str(self.has_crashed)))
-        if not self.has_crashed:
-          self.has_crashed = True
-          raise exceptions.BrowserGoneException(tab.browser)
-
-    options = options_for_unittests.GetCopy()
-    options.output_formats = ['csv']
-    options.suppress_gtest_report = True
-
-    SetUpPageRunnerArguments(options)
-    results = results_options.CreateResults(EmptyMetadataForTest(), options)
-    page_runner.Run(CrashyMeasurement(), ps, expectations, options, results)
-
-    self.assertEquals(1, len(GetSuccessfulPageRuns(results)))
-    self.assertEquals(0, len(results.failures))
-    self.assertEquals(1, len(results.all_page_specific_values))
-    self.assertEquals(
-        'True', results.all_page_specific_values[0].GetRepresentativeString())
 
   @decorators.Disabled('xp')  # Flaky, http://crbug.com/390079.
   def testDiscardFirstResult(self):
@@ -250,38 +312,34 @@ class PageRunnerTests(unittest.TestCase):
         results.AddValue(scalar.ScalarValue(
             page, 'metric', 'unit', self.i))
 
-    output_file = tempfile.NamedTemporaryFile(delete=False).name
-    try:
-      options = options_for_unittests.GetCopy()
-      options.output_formats = ['buildbot']
-      options.output_file = output_file
-      options.suppress_gtest_report = True
-      options.reset_results = None
-      options.upload_results = None
-      options.results_label = None
+    options = options_for_unittests.GetCopy()
+    options.output_formats = ['buildbot']
+    options.suppress_gtest_report = True
+    options.reset_results = None
+    options.upload_results = None
+    options.results_label = None
+    options.page_repeat = 1
+    options.pageset_repeat = 2
+    SetUpPageRunnerArguments(options)
 
-      options.page_repeat = 1
-      options.pageset_repeat = 2
-      SetUpPageRunnerArguments(options)
+    output = StringIO.StringIO()
+    real_stdout = sys.stdout
+    sys.stdout = output
+    try:
       results = results_options.CreateResults(EmptyMetadataForTest(), options)
       page_runner.Run(Measurement(), ps, expectations, options, results)
       results.PrintSummary()
+      contents = output.getvalue()
       self.assertEquals(4, len(GetSuccessfulPageRuns(results)))
       self.assertEquals(0, len(results.failures))
-      with open(output_file) as f:
-        stdout = f.read()
-      self.assertIn('RESULT metric: blank.html= [1,3] unit', stdout)
-      self.assertIn('RESULT metric: green_rect.html= [2,4] unit', stdout)
-      self.assertIn('*RESULT metric: metric= [1,2,3,4] unit', stdout)
+      self.assertIn('RESULT metric: blank.html= [1,3] unit', contents)
+      self.assertIn('RESULT metric: green_rect.html= [2,4] unit', contents)
+      self.assertIn('*RESULT metric: metric= [1,2,3,4] unit', contents)
     finally:
-      # TODO(chrishenry): This is a HACK!!1 Really, the right way to
-      # do this is for page_runner (or output formatter) to close any
-      # files it has opened.
-      for formatter in results._output_formatters:  # pylint: disable=W0212
-        formatter.output_stream.close()
-      os.remove(output_file)
+      sys.stdout = real_stdout
 
   def testCredentialsWhenLoginFails(self):
+    self.SuppressExceptionFormatting()
     credentials_backend = StubCredentialsBackend(login_return_value=False)
     did_run = self.runCredentialsTest(credentials_backend)
     assert credentials_backend.did_get_login == True
@@ -298,17 +356,17 @@ class PageRunnerTests(unittest.TestCase):
   def runCredentialsTest(self, credentials_backend):
     ps = page_set.PageSet()
     expectations = test_expectations.TestExpectations()
-    page = page_module.Page(
-        'file://blank.html', ps, base_dir=util.GetUnittestDataDir())
-    page.credentials = "test"
-    ps.pages.append(page)
-
     did_run = [False]
 
     try:
       with tempfile.NamedTemporaryFile(delete=False) as f:
+        page = page_module.Page(
+        'file://blank.html', ps, base_dir=util.GetUnittestDataDir(),
+        credentials_path=f.name)
+        page.credentials = "test"
+        ps.pages.append(page)
+
         f.write(SIMPLE_CREDENTIALS_STRING)
-        ps.credentials_path = f.name
 
       class TestThatInstallsCredentialsBackend(page_test.PageTest):
         def __init__(self, credentials_backend):
@@ -528,60 +586,8 @@ class PageRunnerTests(unittest.TestCase):
     self.assertEquals(0, len(GetSuccessfulPageRuns(results)))
     self.assertEquals(0, len(results.failures))
 
-  def TestUseLiveSitesFlag(self, options, expect_from_archive):
-    ps = page_set.PageSet(
-      file_path=util.GetUnittestDataDir(),
-      archive_data_file='data/archive_blank.json')
-    ps.pages.append(page_module.Page(
-      'file://blank.html', ps, base_dir=ps.base_dir))
-    expectations = test_expectations.TestExpectations()
-
-    class ArchiveTest(page_test.PageTest):
-      def __init__(self):
-        super(ArchiveTest, self).__init__()
-        self.is_page_from_archive = False
-        self.archive_path_exist = True
-
-      def WillNavigateToPage(self, page, tab):
-        self.archive_path_exist = (page.archive_path
-                                   and os.path.isfile(page.archive_path))
-        self.is_page_from_archive = (
-          tab.browser._wpr_server is not None) # pylint: disable=W0212
-
-      def ValidateAndMeasurePage(self, _, __, results):
-        pass
-
-    test = ArchiveTest()
-    results = results_options.CreateResults(EmptyMetadataForTest(), options)
-    try:
-      page_runner.Run(test, ps, expectations, options, results)
-      if expect_from_archive and not test.archive_path_exist:
-        logging.warning('archive path did not exist, asserting that page '
-                        'is from archive is skipped.')
-        return
-      self.assertEquals(expect_from_archive, test.is_page_from_archive)
-    finally:
-      for p in ps:
-        if os.path.isfile(p.archive_path):
-          os.remove(p.archive_path)
-
-
-  def testUseLiveSitesFlagSet(self):
-    options = options_for_unittests.GetCopy()
-    options.output_formats = ['none']
-    options.suppress_gtest_report = True
-    options.use_live_sites = True
-    SetUpPageRunnerArguments(options)
-    self.TestUseLiveSitesFlag(options, expect_from_archive=False)
-
-  def testUseLiveSitesFlagUnset(self):
-    options = options_for_unittests.GetCopy()
-    options.output_formats = ['none']
-    options.suppress_gtest_report = True
-    SetUpPageRunnerArguments(options)
-    self.TestUseLiveSitesFlag(options, expect_from_archive=True)
-
   def _testMaxFailuresOptionIsRespectedAndOverridable(self, max_failures=None):
+    self.SuppressExceptionFormatting()
     class TestPage(page_module.Page):
       def __init__(self, *args, **kwargs):
         super(TestPage, self).__init__(*args, **kwargs)
@@ -628,3 +634,70 @@ class PageRunnerTests(unittest.TestCase):
 
   def testMaxFailuresOptionIsOverridable(self):
     self._testMaxFailuresOptionIsRespectedAndOverridable(1)
+
+  def testRunPageWithProfilingFlag(self):
+    ps = page_set.PageSet()
+    expectations = test_expectations.TestExpectations()
+    ps.pages.append(page_module.Page(
+        'file://blank.html', ps, base_dir=util.GetUnittestDataDir()))
+
+    class Measurement(page_test.PageTest):
+      pass
+
+    options = options_for_unittests.GetCopy()
+    options.output_formats = ['none']
+    options.suppress_gtest_report = True
+    options.reset_results = None
+    options.upload_results = None
+    options.results_label = None
+    options.output_dir = tempfile.mkdtemp()
+    options.profiler = 'trace'
+    try:
+      SetUpPageRunnerArguments(options)
+      results = results_options.CreateResults(EmptyMetadataForTest(), options)
+      page_runner.Run(Measurement(), ps, expectations, options, results)
+      self.assertEquals(1, len(GetSuccessfulPageRuns(results)))
+      self.assertEquals(0, len(results.failures))
+      self.assertEquals(0, len(results.all_page_specific_values))
+      self.assertTrue(os.path.isfile(
+          os.path.join(options.output_dir, 'blank_html.json')))
+    finally:
+      shutil.rmtree(options.output_dir)
+
+
+class FakeNetworkController(object):
+  def __init__(self):
+    self.archive_path = None
+    self.wpr_mode = None
+
+  def SetReplayArgs(self, archive_path, wpr_mode, _netsim, _extra_wpr_args,
+                    _make_javascript_deterministic=False):
+    self.archive_path = archive_path
+    self.wpr_mode = wpr_mode
+
+
+class RunStateTest(unittest.TestCase):
+
+  # pylint: disable=W0212
+  def TestUseLiveSitesFlag(self, options, expected_wpr_mode):
+    with tempfile.NamedTemporaryFile() as f:
+      run_state = page_runner._RunState(DummyTest(), options)
+      fake_network_controller = FakeNetworkController()
+      run_state._PrepareWpr(fake_network_controller, f.name, None)
+      self.assertEquals(fake_network_controller.wpr_mode, expected_wpr_mode)
+      self.assertEquals(fake_network_controller.archive_path, f.name)
+
+  def testUseLiveSitesFlagSet(self):
+    options = options_for_unittests.GetCopy()
+    options.output_formats = ['none']
+    options.suppress_gtest_report = True
+    options.use_live_sites = True
+    SetUpPageRunnerArguments(options)
+    self.TestUseLiveSitesFlag(options, expected_wpr_mode=wpr_modes.WPR_OFF)
+
+  def testUseLiveSitesFlagUnset(self):
+    options = options_for_unittests.GetCopy()
+    options.output_formats = ['none']
+    options.suppress_gtest_report = True
+    SetUpPageRunnerArguments(options)
+    self.TestUseLiveSitesFlag(options, expected_wpr_mode=wpr_modes.WPR_REPLAY)

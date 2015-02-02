@@ -16,7 +16,6 @@
 #include "base/observer_list.h"
 #include "base/threading/non_thread_safe.h"
 #include "base/time/time.h"
-#include "base/timer/timer.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "google_apis/gaia/oauth2_access_token_consumer.h"
 #include "google_apis/gaia/oauth2_access_token_fetcher.h"
@@ -69,7 +68,7 @@ class OAuth2TokenService : public base::NonThreadSafe {
   // which will be called back when the request completes.
   class Consumer {
    public:
-    Consumer(const std::string& id);
+    explicit Consumer(const std::string& id);
     virtual ~Consumer();
 
     std::string id() const { return id_; }
@@ -147,10 +146,10 @@ class OAuth2TokenService : public base::NonThreadSafe {
   // |account_id|. The caller owns the returned Request.
   // |scopes| is the set of scopes to get an access token for, |consumer| is
   // the object that will be called back with results if the returned request
-  // is not deleted.
-  scoped_ptr<Request> StartRequest(const std::string& account_id,
-                                   const ScopeSet& scopes,
-                                   Consumer* consumer);
+  // is not deleted. Virtual for mocking.
+  virtual scoped_ptr<Request> StartRequest(const std::string& account_id,
+                                           const ScopeSet& scopes,
+                                           Consumer* consumer);
 
   // This method does the same as |StartRequest| except it uses |client_id| and
   // |client_secret| to identify OAuth client app instead of using
@@ -214,11 +213,11 @@ class OAuth2TokenService : public base::NonThreadSafe {
                       public Request {
    public:
     // |consumer| is required to outlive this.
-    explicit RequestImpl(const std::string& account_id, Consumer* consumer);
-    virtual ~RequestImpl();
+    RequestImpl(const std::string& account_id, Consumer* consumer);
+    ~RequestImpl() override;
 
     // Overridden from Request:
-    virtual std::string GetAccountId() const OVERRIDE;
+    std::string GetAccountId() const override;
 
     std::string GetConsumerId() const;
 
@@ -234,13 +233,13 @@ class OAuth2TokenService : public base::NonThreadSafe {
   };
 
   // Helper class to scope batch changes.
-  class ScopedBacthChange {
+  class ScopedBatchChange {
    public:
-    ScopedBacthChange(OAuth2TokenService* token_service);
-    ~ScopedBacthChange();
+    explicit ScopedBatchChange(OAuth2TokenService* token_service);
+    ~ScopedBatchChange();
    private:
     OAuth2TokenService* token_service_;  // Weak.
-    DISALLOW_COPY_AND_ASSIGN(ScopedBacthChange);
+    DISALLOW_COPY_AND_ASSIGN(ScopedBatchChange);
   };
 
   // Subclasses can override if they want to report errors to the user.

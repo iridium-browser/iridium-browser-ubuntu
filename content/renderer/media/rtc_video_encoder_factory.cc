@@ -38,24 +38,6 @@ void VEAToWebRTCCodecs(
       codecs->push_back(cricket::WebRtcVideoEncoderFactory::VideoCodec(
           webrtc::kVideoCodecH264, "H264", width, height, fps));
     }
-    // TODO(hshi): remove the generic codec type after CASTv1 deprecation.
-    codecs->push_back(cricket::WebRtcVideoEncoderFactory::VideoCodec(
-        webrtc::kVideoCodecGeneric, "CAST1", width, height, fps));
-  }
-}
-
-// Translate from cricket::WebRtcVideoEncoderFactory::VideoCodec to
-// media::VideoCodecProfile.  Pick a default profile for each codec type.
-media::VideoCodecProfile WebRTCCodecToVideoCodecProfile(
-    webrtc::VideoCodecType type) {
-  switch (type) {
-    case webrtc::kVideoCodecVP8:
-      return media::VP8PROFILE_ANY;
-    case webrtc::kVideoCodecH264:
-    case webrtc::kVideoCodecGeneric:
-      return media::H264PROFILE_MAIN;
-    default:
-      return media::VIDEO_CODEC_PROFILE_UNKNOWN;
   }
 }
 
@@ -83,15 +65,8 @@ webrtc::VideoEncoder* RTCVideoEncoderFactory::CreateVideoEncoder(
   }
   if (!found)
     return NULL;
-  return new RTCVideoEncoder(
-      type, WebRTCCodecToVideoCodecProfile(type), gpu_factories_);
+  return new RTCVideoEncoder(type, gpu_factories_);
 }
-
-void RTCVideoEncoderFactory::AddObserver(Observer* observer) {
-  // No-op: our codec list is populated on installation.
-}
-
-void RTCVideoEncoderFactory::RemoveObserver(Observer* observer) {}
 
 const std::vector<cricket::WebRtcVideoEncoderFactory::VideoCodec>&
 RTCVideoEncoderFactory::codecs() const {

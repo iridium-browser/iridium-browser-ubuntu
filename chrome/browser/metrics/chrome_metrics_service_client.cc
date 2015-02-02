@@ -45,7 +45,7 @@
 #include "chrome/browser/metrics/android_metrics_provider.h"
 #endif
 
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
 #include "chrome/browser/service_process/service_process_control.h"
 #endif
 
@@ -106,12 +106,12 @@ class MetricsMemoryDetails : public MemoryDetails {
     SetMemoryGrowthTracker(memory_growth_tracker);
   }
 
-  virtual void OnDetailsAvailable() OVERRIDE {
+  void OnDetailsAvailable() override {
     base::MessageLoop::current()->PostTask(FROM_HERE, callback_);
   }
 
  private:
-  virtual ~MetricsMemoryDetails() {}
+  ~MetricsMemoryDetails() override {}
 
   base::Closure callback_;
 
@@ -179,6 +179,10 @@ bool ChromeMetricsServiceClient::IsOffTheRecordSessionActive() {
   return chrome::IsOffTheRecordSessionActive();
 }
 
+int32 ChromeMetricsServiceClient::GetProduct() {
+  return metrics::ChromeUserMetricsExtension::CHROME;
+}
+
 std::string ChromeMetricsServiceClient::GetApplicationLocale() {
   return g_browser_process->GetApplicationLocale();
 }
@@ -193,11 +197,6 @@ metrics::SystemProfileProto::Channel ChromeMetricsServiceClient::GetChannel() {
 
 std::string ChromeMetricsServiceClient::GetVersionString() {
   chrome::VersionInfo version_info;
-  if (!version_info.is_valid()) {
-    NOTREACHED();
-    return std::string();
-  }
-
   std::string version = version_info.Version();
 #if defined(ARCH_CPU_64_BITS)
   version += "-64";
@@ -295,7 +294,7 @@ void ChromeMetricsServiceClient::Initialize() {
           new ExtensionsMetricsProvider(metrics_state_manager_)));
 #endif
   metrics_service_->RegisterMetricsProvider(
-      scoped_ptr<metrics::MetricsProvider>(new NetworkMetricsProvider(
+      scoped_ptr<metrics::MetricsProvider>(new metrics::NetworkMetricsProvider(
           content::BrowserThread::GetBlockingPool())));
   metrics_service_->RegisterMetricsProvider(
       scoped_ptr<metrics::MetricsProvider>(new OmniboxMetricsProvider));
@@ -399,9 +398,9 @@ void ChromeMetricsServiceClient::OnMemoryDetailCollectionDone() {
 
   DCHECK_EQ(num_async_histogram_fetches_in_progress_, 0);
 
-#if !defined(ENABLE_FULL_PRINTING)
+#if !defined(ENABLE_PRINT_PREVIEW)
   num_async_histogram_fetches_in_progress_ = 1;
-#else  // !ENABLE_FULL_PRINTING
+#else   // !ENABLE_PRINT_PREVIEW
   num_async_histogram_fetches_in_progress_ = 2;
   // Run requests to service and content in parallel.
   if (!ServiceProcessControl::GetInstance()->GetHistograms(callback, timeout)) {
@@ -412,7 +411,7 @@ void ChromeMetricsServiceClient::OnMemoryDetailCollectionDone() {
     // here to make code work even if |GetHistograms()| fired |callback|.
     --num_async_histogram_fetches_in_progress_;
   }
-#endif  // !ENABLE_FULL_PRINTING
+#endif  // !ENABLE_PRINT_PREVIEW
 
   // Set up the callback to task to call after we receive histograms from all
   // child processes. |timeout| specifies how long to wait before absolutely

@@ -32,9 +32,12 @@
 #include "content/app/strings/grit/content_strings.h"
 #include "content/child/child_thread.h"
 #include "content/child/content_child_helpers.h"
-#include "content/child/touch_fling_gesture_curve.h"
+#include "content/child/geofencing/web_geofencing_provider_impl.h"
+#include "content/child/notifications/notification_dispatcher.h"
+#include "content/child/notifications/notification_manager.h"
+#include "content/child/thread_safe_sender.h"
 #include "content/child/web_discardable_memory_impl.h"
-#include "content/child/web_socket_stream_handle_impl.h"
+#include "content/child/web_gesture_curve_impl.h"
 #include "content/child/web_url_loader_impl.h"
 #include "content/child/websocket_bridge.h"
 #include "content/child/webthread_impl.h"
@@ -46,15 +49,12 @@
 #include "net/base/net_util.h"
 #include "third_party/WebKit/public/platform/WebConvertableToTraceFormat.h"
 #include "third_party/WebKit/public/platform/WebData.h"
+#include "third_party/WebKit/public/platform/WebFloatPoint.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/platform/WebWaitableEvent.h"
 #include "third_party/WebKit/public/web/WebSecurityOrigin.h"
 #include "ui/base/layout.h"
-
-#if defined(OS_ANDROID)
-#include "content/child/fling_animator_impl_android.h"
-#endif
 
 #if !defined(NO_TCMALLOC) && defined(USE_TCMALLOC) && !defined(OS_WIN)
 #include "third_party/tcmalloc/chromium/src/gperftools/heap-profiler.h"
@@ -64,7 +64,6 @@ using blink::WebData;
 using blink::WebFallbackThemeEngine;
 using blink::WebLocalizedString;
 using blink::WebString;
-using blink::WebSocketStreamHandle;
 using blink::WebThemeEngine;
 using blink::WebURL;
 using blink::WebURLError;
@@ -145,12 +144,12 @@ class ConvertableToTraceFormatWrapper
   explicit ConvertableToTraceFormatWrapper(
       const blink::WebConvertableToTraceFormat& convertable)
       : convertable_(convertable) {}
-  virtual void AppendAsTraceFormat(std::string* out) const OVERRIDE {
+  void AppendAsTraceFormat(std::string* out) const override {
     *out += convertable_.asTraceFormat().utf8();
   }
 
  private:
-  virtual ~ConvertableToTraceFormatWrapper() {}
+  ~ConvertableToTraceFormatWrapper() override {}
 
   blink::WebConvertableToTraceFormat convertable_;
 };
@@ -368,6 +367,8 @@ static int ToMessageID(WebLocalizedString::Name name) {
       return IDS_FORM_VALIDATION_STEP_MISMATCH_CLOSE_TO_LIMIT;
     case WebLocalizedString::ValidationTooLong:
       return IDS_FORM_VALIDATION_TOO_LONG;
+    case WebLocalizedString::ValidationTooShort:
+      return IDS_FORM_VALIDATION_TOO_SHORT;
     case WebLocalizedString::ValidationTypeMismatch:
       return IDS_FORM_VALIDATION_TYPE_MISMATCH;
     case WebLocalizedString::ValidationTypeMismatchForEmail:
@@ -422,7 +423,16 @@ BlinkPlatformImpl::BlinkPlatformImpl()
       shared_timer_fire_time_(0.0),
       shared_timer_fire_time_was_set_while_suspended_(false),
       shared_timer_suspended_(0),
-      current_thread_slot_(&DestroyCurrentThread) {}
+      current_thread_slot_(&DestroyCurrentThread) {
+  // ChildThread may not exist in some tests.
+  if (ChildThread::current()) {
+    geofencing_provider_.reset(new WebGeofencingProviderImpl(
+        ChildThread::current()->thread_safe_sender()));
+    thread_safe_sender_ = ChildThread::current()->thread_safe_sender();
+    notification_dispatcher_ =
+        ChildThread::current()->notification_dispatcher();
+  }
+}
 
 BlinkPlatformImpl::~BlinkPlatformImpl() {
 }
@@ -433,10 +443,6 @@ WebURLLoader* BlinkPlatformImpl::createURLLoader() {
   // data URLs to bypass the ResourceDispatcher.
   return new WebURLLoaderImpl(
       child_thread ? child_thread->resource_dispatcher() : NULL);
-}
-
-WebSocketStreamHandle* BlinkPlatformImpl::createSocketStreamHandle() {
-  return new WebSocketStreamHandleImpl;
 }
 
 blink::WebSocketHandle* BlinkPlatformImpl::createWebSocketHandle() {
@@ -780,6 +786,8 @@ const DataResource kDataResources[] = {
     IDR_MEDIAPLAYER_CAST_BUTTON_ON, ui::SCALE_FACTOR_100P },
   { "mediaplayerFullscreenDisabled",
     IDR_MEDIAPLAYER_FULLSCREEN_BUTTON_DISABLED, ui::SCALE_FACTOR_100P },
+  { "mediaplayerOverlayCastOff",
+    IDR_MEDIAPLAYER_OVERLAY_CAST_BUTTON_OFF, ui::SCALE_FACTOR_100P },
   { "mediaplayerOverlayPlay",
     IDR_MEDIAPLAYER_OVERLAY_PLAY_BUTTON, ui::SCALE_FACTOR_100P },
 #if defined(OS_MACOSX)
@@ -840,6 +848,8 @@ const DataResource kDataResources[] = {
   { "InjectedScriptSource.js", IDR_INSPECTOR_INJECTED_SCRIPT_SOURCE_JS,
     ui::SCALE_FACTOR_NONE },
   { "DebuggerScriptSource.js", IDR_INSPECTOR_DEBUGGER_SCRIPT_SOURCE_JS,
+    ui::SCALE_FACTOR_NONE },
+  { "DocumentExecCommand.js", IDR_PRIVATE_SCRIPT_DOCUMENTEXECCOMMAND_JS,
     ui::SCALE_FACTOR_NONE },
   { "DocumentXMLTreeViewer.js", IDR_PRIVATE_SCRIPT_DOCUMENTXMLTREEVIEWER_JS,
     ui::SCALE_FACTOR_NONE },
@@ -991,13 +1001,10 @@ blink::WebGestureCurve* BlinkPlatformImpl::createFlingAnimationCurve(
     blink::WebGestureDevice device_source,
     const blink::WebFloatPoint& velocity,
     const blink::WebSize& cumulative_scroll) {
-#if defined(OS_ANDROID)
-  return FlingAnimatorImpl::CreateAndroidGestureCurve(
-      velocity,
-      cumulative_scroll);
-#endif
-
-  return TouchFlingGestureCurve::Create(velocity, cumulative_scroll);
+  auto curve = WebGestureCurveImpl::CreateFromDefaultPlatformCurve(
+      gfx::Vector2dF(velocity.x, velocity.y),
+      gfx::Vector2dF(cumulative_scroll.width, cumulative_scroll.height));
+  return curve.release();
 }
 
 void BlinkPlatformImpl::didStartWorkerRunLoop(
@@ -1016,6 +1023,19 @@ blink::WebCrypto* BlinkPlatformImpl::crypto() {
   return &web_crypto_;
 }
 
+blink::WebGeofencingProvider* BlinkPlatformImpl::geofencingProvider() {
+  return geofencing_provider_.get();
+}
+
+blink::WebNotificationManager*
+BlinkPlatformImpl::notificationManager() {
+  if (!thread_safe_sender_.get() || !notification_dispatcher_.get())
+    return nullptr;
+
+  return NotificationManager::ThreadSpecificInstance(
+      thread_safe_sender_.get(),
+      notification_dispatcher_.get());
+}
 
 WebThemeEngine* BlinkPlatformImpl::themeEngine() {
   return &native_theme_engine_;

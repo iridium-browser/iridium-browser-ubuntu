@@ -15,14 +15,14 @@ class ActiveDesktopMonitor;
 class ChromeBrowserMainExtraPartsAura : public ChromeBrowserMainExtraParts {
  public:
   ChromeBrowserMainExtraPartsAura();
-  virtual ~ChromeBrowserMainExtraPartsAura();
+  ~ChromeBrowserMainExtraPartsAura() override;
 
   // Overridden from ChromeBrowserMainExtraParts:
-  virtual void PreEarlyInitialization() OVERRIDE;
-  virtual void ToolkitInitialized() OVERRIDE;
-  virtual void PreCreateThreads() OVERRIDE;
-  virtual void PreProfileInit() OVERRIDE;
-  virtual void PostMainMessageLoopRun() OVERRIDE;
+  void PreEarlyInitialization() override;
+  void ToolkitInitialized() override;
+  void PreCreateThreads() override;
+  void PreProfileInit() override;
+  void PostMainMessageLoopRun() override;
 
  private:
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)

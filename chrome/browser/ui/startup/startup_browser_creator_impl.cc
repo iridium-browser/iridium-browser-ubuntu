@@ -18,7 +18,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/statistics_recorder.h"
-#include "base/path_service.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
@@ -77,7 +76,6 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/extensions/extension_constants.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/locale_settings.h"
 #include "chrome/installer/util/browser_distribution.h"
@@ -246,7 +244,7 @@ void RecordAppLaunches(Profile* profile,
 class WebContentsCloseObserver : public content::NotificationObserver {
  public:
   WebContentsCloseObserver() : contents_(NULL) {}
-  virtual ~WebContentsCloseObserver() {}
+  ~WebContentsCloseObserver() override {}
 
   void SetContents(content::WebContents* contents) {
     DCHECK(!contents_);
@@ -261,9 +259,9 @@ class WebContentsCloseObserver : public content::NotificationObserver {
 
  private:
   // content::NotificationObserver overrides:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE {
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override {
     DCHECK_EQ(type, content::NOTIFICATION_WEB_CONTENTS_DESTROYED);
     contents_ = NULL;
   }

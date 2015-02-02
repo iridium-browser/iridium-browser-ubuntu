@@ -34,46 +34,42 @@ class InProcessImporterBridge : public ImporterBridge {
                           base::WeakPtr<ExternalProcessImporterHost> host);
 
   // Begin ImporterBridge implementation:
-  virtual void AddBookmarks(
-      const std::vector<ImportedBookmarkEntry>& bookmarks,
-      const base::string16& first_folder_name) OVERRIDE;
+  void AddBookmarks(const std::vector<ImportedBookmarkEntry>& bookmarks,
+                    const base::string16& first_folder_name) override;
 
-  virtual void AddHomePage(const GURL& home_page) OVERRIDE;
+  void AddHomePage(const GURL& home_page) override;
 
 #if defined(OS_WIN)
   virtual void AddIE7PasswordInfo(
-      const importer::ImporterIE7PasswordInfo& password_info) OVERRIDE;
+      const importer::ImporterIE7PasswordInfo& password_info) override;
 #endif
 
-  virtual void SetFavicons(
-      const std::vector<ImportedFaviconUsage>& favicons) OVERRIDE;
+  void SetFavicons(const std::vector<ImportedFaviconUsage>& favicons) override;
 
-  virtual void SetHistoryItems(const std::vector<ImporterURLRow>& rows,
-                               importer::VisitSource visit_source) OVERRIDE;
+  void SetHistoryItems(const std::vector<ImporterURLRow>& rows,
+                       importer::VisitSource visit_source) override;
 
-  virtual void SetKeywords(
-      const std::vector<importer::URLKeywordInfo>& url_keywords,
-      bool unique_on_host_and_path) OVERRIDE;
+  void SetKeywords(const std::vector<importer::URLKeywordInfo>& url_keywords,
+                   bool unique_on_host_and_path) override;
 
-  virtual void SetFirefoxSearchEnginesXMLData(
-      const std::vector<std::string>& search_engine_data) OVERRIDE;
+  void SetFirefoxSearchEnginesXMLData(
+      const std::vector<std::string>& search_engine_data) override;
 
-  virtual void SetPasswordForm(
-      const autofill::PasswordForm& form) OVERRIDE;
+  void SetPasswordForm(const autofill::PasswordForm& form) override;
 
-  virtual void SetAutofillFormData(
-      const std::vector<ImporterAutofillFormDataEntry>& entries) OVERRIDE;
+  void SetAutofillFormData(
+      const std::vector<ImporterAutofillFormDataEntry>& entries) override;
 
-  virtual void NotifyStarted() OVERRIDE;
-  virtual void NotifyItemStarted(importer::ImportItem item) OVERRIDE;
-  virtual void NotifyItemEnded(importer::ImportItem item) OVERRIDE;
-  virtual void NotifyEnded() OVERRIDE;
+  void NotifyStarted() override;
+  void NotifyItemStarted(importer::ImportItem item) override;
+  void NotifyItemEnded(importer::ImportItem item) override;
+  void NotifyEnded() override;
 
-  virtual base::string16 GetLocalizedString(int message_id) OVERRIDE;
+  base::string16 GetLocalizedString(int message_id) override;
   // End ImporterBridge implementation.
 
  private:
-  virtual ~InProcessImporterBridge();
+  ~InProcessImporterBridge() override;
 
   ProfileWriter* const writer_;  // weak
   const base::WeakPtr<ExternalProcessImporterHost> host_;

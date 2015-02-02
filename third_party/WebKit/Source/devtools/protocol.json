@@ -447,18 +447,18 @@
             },
             {
                 "name": "setGeolocationOverride",
-                "description": "Overrides the Geolocation Position or Error.",
+                "description": "Overrides the Geolocation Position or Error. Omitting any of the parameters emulates position unavailable.",
                 "parameters": [
                     { "name": "latitude", "type": "number", "optional": true, "description": "Mock latitude"},
                     { "name": "longitude", "type": "number", "optional": true, "description": "Mock longitude"},
                     { "name": "accuracy", "type": "number", "optional": true, "description": "Mock accuracy"}
                 ],
-                "redirect": "Geolocation"
+                "handlers": ["browser"]
             },
             {
                 "name": "clearGeolocationOverride",
                 "description": "Clears the overriden Geolocation Position and Error.",
-                "redirect": "Geolocation"
+                "handlers": ["browser"]
             },
             {
                 "name": "setDeviceOrientationOverride",
@@ -1051,6 +1051,14 @@
                     { "name": "enabled", "type": "boolean", "description": "Switch console.timeline to tracing based." }
                 ],
                 "hidden": true
+            },
+            {
+                "name": "setLastEvaluationResult",
+                "parameters": [
+                    { "name": "objectId", "$ref": "Runtime.RemoteObjectId", "description": "Identifier of the object to set as last evaluation result." }
+                ],
+                "hidden": true,
+                "description": "Sets last evaluation result in console. Can be accessed via <code>$_</code> command line API."
             }
         ],
         "events": [
@@ -1337,7 +1345,8 @@
                     { "name": "request", "$ref": "Request", "description": "Request data." },
                     { "name": "timestamp", "$ref": "Timestamp", "description": "Timestamp." },
                     { "name": "initiator", "$ref": "Initiator", "description": "Request initiator." },
-                    { "name": "redirectResponse", "optional": true, "$ref": "Response", "description": "Redirect response data." }
+                    { "name": "redirectResponse", "optional": true, "$ref": "Response", "description": "Redirect response data." },
+                    { "name": "type", "$ref": "Page.ResourceType", "optional": true, "hidden": true, "description": "Type of this resource." }
                 ]
             },
             {
@@ -2761,6 +2770,7 @@
                     { "name": "value", "type": "number", "description": "Media query expression value."},
                     { "name": "unit", "type": "string", "description": "Media query expression units."},
                     { "name": "feature", "type": "string", "description": "Media query expression feature."},
+                    { "name": "valueRange", "$ref": "SourceRange", "optional": true, "description": "The associated range of the value text in the enclosing stylesheet (if available)." },
                     { "name": "computedLength", "type": "number", "optional": true, "description": "Computed length of media query expression (if applicable)."}
                 ],
                 "description": "Media query expression descriptor.",
@@ -3126,6 +3136,7 @@
                 "properties": [
                     { "name": "text", "type": "string", "description": "Exception text." },
                     { "name": "url", "type": "string", "optional": true, "description": "URL of the message origin." },
+                    { "name": "scriptId", "type": "string", "optional": true, "description": "Script ID of the message origin." },
                     { "name": "line", "type": "integer", "optional": true, "description": "Line number in the resource that generated this message." },
                     { "name": "column", "type": "integer", "optional": true, "description": "Column number in the resource that generated this message." },
                     { "name": "stackTrace", "$ref": "Console.StackTrace", "optional": true, "description": "JavaScript stack trace for assertions and error messages." }
@@ -3154,7 +3165,9 @@
                     { "name": "id", "type": "integer", "description": "Unique id of the promise." },
                     { "name": "status", "type": "string", "enum": ["pending", "resolved", "rejected"], "description": "Status of the promise." },
                     { "name": "parentId", "type": "integer", "optional": true, "description": "Id of the parent promise." },
-                    { "name": "callFrame", "$ref": "Console.CallFrame", "optional": true, "description": "Top call frame on promise creation."}
+                    { "name": "callFrame", "$ref": "Console.CallFrame", "optional": true, "description": "Top call frame on promise creation."},
+                    { "name": "creationTime", "type": "number", "optional": true, "description": "Creation time of the promise." },
+                    { "name": "settlementTime", "type": "number", "optional": true, "description": "Settlement time of the promise." }
                 ],
                 "hidden": true
             }
@@ -3518,7 +3531,7 @@
                 "name": "paused",
                 "parameters": [
                     { "name": "callFrames", "type": "array", "items": { "$ref": "CallFrame" }, "description": "Call stack the virtual machine stopped on." },
-                    { "name": "reason", "type": "string", "enum": [ "XHR", "DOM", "EventListener", "exception", "assert", "CSPViolation", "debugCommand", "other" ], "description": "Pause reason." },
+                    { "name": "reason", "type": "string", "enum": [ "XHR", "DOM", "EventListener", "exception", "assert", "CSPViolation", "debugCommand", "promiseRejection", "other" ], "description": "Pause reason." },
                     { "name": "data", "type": "object", "optional": true, "description": "Object containing break-specific auxiliary properties." },
                     { "name": "hitBreakpoints", "type": "array", "optional": true, "items": { "type": "string" }, "description": "Hit breakpoints IDs", "hidden": true },
                     { "name": "asyncStackTrace", "$ref": "StackTrace", "optional": true, "description": "Async stack trace, if any.", "hidden": true }
@@ -4280,25 +4293,6 @@
         ]
     },
     {
-        "domain": "Geolocation",
-        "hidden": true,
-        "commands": [
-            {
-                "name": "setGeolocationOverride",
-                "description": "Overrides the Geolocation Position or Error.",
-                "parameters": [
-                    { "name": "latitude", "type": "number", "optional": true, "description": "Mock latitude"},
-                    { "name": "longitude", "type": "number", "optional": true, "description": "Mock longitude"},
-                    { "name": "accuracy", "type": "number", "optional": true, "description": "Mock accuracy"}
-                ]
-            },
-            {
-                "name": "clearGeolocationOverride",
-                "description": "Clears the overriden Geolocation Position and Error."
-            }
-        ]
-    },
-    {
         "domain": "DeviceOrientation",
         "hidden": true,
         "commands": [
@@ -4323,18 +4317,20 @@
         "commands": [
             {
                 "name": "start",
+                "async": true,
                 "description": "Start trace events collection.",
                 "parameters": [
-                    { "name": "categories", "type": "string", "description": "Category/tag filter" },
-                    { "name": "options", "type": "string", "description": "Tracing options" },
+                    { "name": "categories", "type": "string", "optional": true, "description": "Category/tag filter" },
+                    { "name": "options", "type": "string", "optional": true, "description": "Tracing options" },
                     { "name": "bufferUsageReportingInterval", "type": "number", "optional": true, "description": "If set, the agent will issue bufferUsage events at this interval, specified in milliseconds" }
                 ],
-                "handlers": ["browser", "renderer", "frontend"]
+                "handlers": ["browser", "renderer"]
             },
             {
                 "name": "end",
+                "async": true,
                 "description": "Stop trace events collection.",
-                "handlers": ["browser", "renderer", "frontend"]
+                "handlers": ["browser", "renderer"]
             },
             {
                 "name": "getCategories",
@@ -4343,35 +4339,29 @@
                 "returns": [
                     { "name": "categories", "type": "array", "items": { "type": "string" }, "description": "A list of supported tracing categories." }
                 ],
-                "handlers": ["browser", "frontend"]
+                "handlers": ["browser"]
             }
         ],
         "events": [
-            {
-                "name": "started",
-                "description": "Fired when tracing is started.",
-                "handlers": ["browser", "frontend"],
-                "hidden": true
-            },
             {
                 "name": "dataCollected",
                 "parameters": [
                     { "name": "value", "type": "array", "items": { "type": "object" } }
                 ],
                 "description": "Contains an bucket of collected trace events. When tracing is stopped collected events will be send as a sequence of dataCollected events followed by tracingComplete event.",
-                "handlers": ["browser", "frontend"]
+                "handlers": ["browser"]
             },
             {
                 "name": "tracingComplete",
                 "description": "Signals that tracing is stopped and there is no trace buffers pending flush, all data were delivered via dataCollected events.",
-                "handlers": ["browser", "frontend"]
+                "handlers": ["browser"]
             },
             {
                 "name": "bufferUsage",
                 "parameters": [
                     { "name": "value", "type": "number", "description": "A number in range [0..1] that indicates the used size of event buffer as a fraction of its total size." }
                 ],
-                "handlers": ["browser", "frontend"]
+                "handlers": ["browser"]
             }
         ]
     },
@@ -4429,6 +4419,124 @@
                 ],
                 "handlers": ["browser", "frontend"]
             }
+        ]
+    },
+    {
+        "domain": "Animation",
+        "hidden": true,
+        "types": [
+            {
+                "id": "AnimationPlayer",
+                "type": "object",
+                "hidden": true,
+                "properties": [
+                    { "name": "id", "type": "string", "description": "<code>AnimationPlayer</code>'s id." },
+                    { "name": "pausedState", "type": "boolean", "hidden": "true", "description": "<code>AnimationPlayer</code>'s internal paused state." },
+                    { "name": "playState", "type": "string", "description": "<code>AnimationPlayer</code>'s play state." },
+                    { "name": "playbackRate", "type": "number", "description": "<code>AnimationPlayer</code>'s playback rate." },
+                    { "name": "startTime", "type": "number", "description": "<code>AnimationPlayer</code>'s start time." },
+                    { "name": "currentTime", "type": "number", "description": "<code>AnimationPlayer</code>'s current time." },
+                    { "name": "source", "$ref": "AnimationNode", "description": "<code>AnimationPlayer</code>'s source animation node." }
+                ],
+                "description": "AnimationPlayer instance."
+            },
+            {
+                "id": "AnimationNode",
+                "type": "object",
+                "hidden": true,
+                "properties": [
+                    { "name": "startDelay", "type": "number", "description": "<code>AnimationNode</code>'s start delay." },
+                    { "name": "playbackRate", "type": "number", "description": "<code>AnimationNode</code>'s playbackRate." },
+                    { "name": "iterationStart", "type": "number", "description": "<code>AnimationNode</code>'s iteration start." },
+                    { "name": "iterationCount", "type": "number", "description": "<code>AnimationNode</code>'s iteration count." },
+                    { "name": "duration", "type": "number", "description": "<code>AnimationNode</code>'s iteration duration." },
+                    { "name": "direction", "type": "number", "description": "<code>AnimationNode</code>'s playback direction." },
+                    { "name": "fillMode", "type": "number", "description": "<code>AnimationNode</code>'s fill mode." },
+                    { "name": "timeFraction", "type": "number", "description": "<code>AnimationNode</code>'s time fraction." },
+                    { "name": "name", "type": "string", "description": "<code>AnimationNode</code>'s name." },
+                    { "name": "keyframesRule", "$ref": "KeyframesRule", "optional": true, "description": "<code>AnimationNode</code>'s keyframes." }
+                ],
+                "description": "AnimationNode instance"
+            },
+            {
+                "id": "KeyframesRule",
+                "type": "object",
+                "properties": [
+                    { "name": "name", "type": "string", "optional": true, "description": "CSS keyframed animation's name." },
+                    { "name": "keyframes", "type": "array", "items": { "$ref": "KeyframeStyle" }, "description": "List of animation keyframes." }
+                ],
+                "description": "Keyframes Rule"
+            },
+            {
+                "id": "KeyframeStyle",
+                "type": "object",
+                "properties": [
+                    { "name": "offset", "type": "string", "description": "Keyframe's time offset." },
+                    { "name": "style", "$ref": "CSS.CSSStyle", "description": "Keyframe's associated CSS style declaration." }
+                ],
+                "description": "Keyframe Style"
+            }
+        ],
+        "commands": [
+            {
+                "name": "getAnimationPlayersForNode",
+                "parameters": [
+                    { "name": "nodeId", "$ref": "DOM.NodeId", "description": "Id of the node to get animation players for." }
+                ],
+                "returns": [
+                    { "name": "animationPlayers", "type": "array", "items": { "$ref": "AnimationPlayer" }, "description": "Array of animation players." }
+                ],
+                "description": "Returns animation players relevant to the node.",
+                "hidden": true
+            },
+            {
+                "name": "pauseAnimationPlayer",
+                "parameters": [
+                    { "name": "id", "type": "string", "description": "Id of the animation player." }
+                ],
+                "returns": [
+                    { "name": "animationPlayer", "$ref": "AnimationPlayer", "description": "Animation Player with current time set." }
+                ],
+                "description": "Pauses animations relevant to the node.",
+                "hidden": true
+            },
+            {
+                "name": "playAnimationPlayer",
+                "parameters": [
+                    { "name": "id", "type": "string", "description": "Id of the animation player." }
+                ],
+                "returns": [
+                    { "name": "animationPlayer", "$ref": "AnimationPlayer", "description": "Animation Player with current time set." }
+                ],
+                "description": "Plays animations relevant to the node.",
+                "hidden": true
+            },
+            {
+                "name": "setAnimationPlayerCurrentTime",
+                "parameters": [
+                    { "name": "id", "type": "string", "description": "Id of the animation player." },
+                    { "name": "currentTime", "type": "number", "description": "Current time to set animation to"}
+                ],
+                "returns": [
+                    { "name": "animationPlayer", "$ref": "AnimationPlayer", "description": "Animation Player with current time set." }
+                ],
+                "description": "Sets the current time on given AnimationPlayer.",
+                "hidden": true
+            },
+            {
+                "name": "getAnimationPlayerState",
+                "parameters": [
+                    { "name": "id", "type": "string", "description": "Id of the animation player." }
+                ],
+                "returns": [
+                    { "name": "currentTime", "type": "number", "description": "Current time of the animation player." },
+                    { "name": "isRunning", "type": "boolean", "description": "If the animation player is still running." }
+                ],
+                "description": "Gets the state of an AnimationPlayer.",
+                "hidden": true
+            }
+        ],
+        "events": [
         ]
     }]
 }

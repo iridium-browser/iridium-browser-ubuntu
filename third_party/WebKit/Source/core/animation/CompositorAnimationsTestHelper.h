@@ -75,6 +75,7 @@ public:
     virtual WebCompositorAnimation::TargetProperty targetProperty() const { return m_property; };
 
     MOCK_METHOD0(id, int());
+    MOCK_METHOD0(group, int());
 
     MOCK_CONST_METHOD0(iterations, double());
     MOCK_METHOD1(setIterations, void(double));
@@ -116,7 +117,7 @@ public:
     ~WebCompositorAnimationCurveMock() { delete_(); }
 };
 
-typedef WebCompositorAnimationCurveMock<WebFloatAnimationCurve, WebCompositorAnimationCurve::AnimationCurveTypeFloat, WebFloatKeyframe> WebFloatAnimationCurveMock;
+using WebFloatAnimationCurveMock = WebCompositorAnimationCurveMock<WebFloatAnimationCurve, WebCompositorAnimationCurve::AnimationCurveTypeFloat, WebFloatKeyframe>;
 
 } // namespace blink
 
@@ -128,7 +129,7 @@ public:
 
     class WebCompositorSupportMock : public WebCompositorSupport {
     public:
-        MOCK_METHOD3(createAnimation, WebCompositorAnimation*(const WebCompositorAnimationCurve& curve, WebCompositorAnimation::TargetProperty target, int animationId));
+        MOCK_METHOD4(createAnimation, WebCompositorAnimation*(const WebCompositorAnimationCurve& curve, WebCompositorAnimation::TargetProperty target, int groupId, int animationId));
         MOCK_METHOD0(createFloatAnimationCurve, WebFloatAnimationCurve*());
     };
 
@@ -140,7 +141,7 @@ private:
         virtual void cryptographicallyRandomValues(unsigned char* buffer, size_t length) { ASSERT_NOT_REACHED(); }
     private:
         WebCompositorSupportMock** m_compositor;
-        virtual WebCompositorSupport* compositorSupport() OVERRIDE { return *m_compositor; }
+        virtual WebCompositorSupport* compositorSupport() override { return *m_compositor; }
     };
 
     WebCompositorSupportMock* m_mockCompositor;

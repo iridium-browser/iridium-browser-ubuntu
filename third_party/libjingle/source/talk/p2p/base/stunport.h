@@ -25,13 +25,13 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef TALK_P2P_BASE_STUNPORT_H_
-#define TALK_P2P_BASE_STUNPORT_H_
+#ifndef WEBRTC_P2P_BASE_STUNPORT_H_
+#define WEBRTC_P2P_BASE_STUNPORT_H_
 
 #include <string>
 
-#include "talk/p2p/base/port.h"
-#include "talk/p2p/base/stunrequest.h"
+#include "webrtc/p2p/base/port.h"
+#include "webrtc/p2p/base/stunrequest.h"
 #include "webrtc/base/asyncpacketsocket.h"
 
 // TODO(mallinath) - Rename stunport.cc|h to udpport.cc|h.
@@ -194,6 +194,8 @@ class UDPPort : public Port {
   // changed to SignalPortReady.
   void MaybeSetPortCompleteOrError();
 
+  bool HasCandidateWithAddress(const rtc::SocketAddress& addr) const;
+
   ServerAddresses server_addresses_;
   ServerAddresses bind_request_succeeded_servers_;
   ServerAddresses bind_request_failed_servers_;
@@ -250,4 +252,4 @@ class StunPort : public UDPPort {
 
 }  // namespace cricket
 
-#endif  // TALK_P2P_BASE_STUNPORT_H_
+#endif  // WEBRTC_P2P_BASE_STUNPORT_H_

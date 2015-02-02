@@ -27,6 +27,9 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
+// http://crbug.com/418369
+#ifdef NDEBUG
+
 namespace chromeos {
 
 namespace {
@@ -47,7 +50,7 @@ class NetworkCertMigratorTest : public testing::Test {
   }
   virtual ~NetworkCertMigratorTest() {}
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     // Initialize NSS db for the user.
     ASSERT_TRUE(user_.constructed_successfully());
     user_.FinishInit();
@@ -74,7 +77,7 @@ class NetworkCertMigratorTest : public testing::Test {
     cert_loader_->StartWithNSSDB(test_nssdb_.get());
   }
 
-  virtual void TearDown() OVERRIDE {
+  virtual void TearDown() override {
     network_cert_migrator_.reset();
     network_state_handler_.reset();
     CertLoader::Shutdown();
@@ -505,3 +508,5 @@ TEST_F(NetworkCertMigratorTest, MigrateIpsecCertIdWrongSlotId) {
 }
 
 }  // namespace chromeos
+
+#endif

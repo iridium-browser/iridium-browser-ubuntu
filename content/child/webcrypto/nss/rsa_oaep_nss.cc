@@ -168,29 +168,28 @@ class RsaOaepImplementation : public RsaHashedAlgorithm {
             blink::WebCryptoKeyUsageDecrypt |
                 blink::WebCryptoKeyUsageUnwrapKey) {}
 
-  virtual Status VerifyKeyUsagesBeforeGenerateKeyPair(
-      blink::WebCryptoKeyUsageMask combined_usage_mask,
-      blink::WebCryptoKeyUsageMask* public_usage_mask,
-      blink::WebCryptoKeyUsageMask* private_usage_mask) const OVERRIDE {
+  Status GenerateKey(const blink::WebCryptoAlgorithm& algorithm,
+                     bool extractable,
+                     blink::WebCryptoKeyUsageMask usages,
+                     GenerateKeyResult* result) const override {
     Status status = NssSupportsRsaOaep();
     if (status.IsError())
       return status;
-    return RsaHashedAlgorithm::VerifyKeyUsagesBeforeGenerateKeyPair(
-        combined_usage_mask, public_usage_mask, private_usage_mask);
+    return RsaHashedAlgorithm::GenerateKey(
+        algorithm, extractable, usages, result);
   }
 
-  virtual Status VerifyKeyUsagesBeforeImportKey(
+  Status VerifyKeyUsagesBeforeImportKey(
       blink::WebCryptoKeyFormat format,
-      blink::WebCryptoKeyUsageMask usage_mask) const OVERRIDE {
+      blink::WebCryptoKeyUsageMask usages) const override {
     Status status = NssSupportsRsaOaep();
     if (status.IsError())
       return status;
-    return RsaHashedAlgorithm::VerifyKeyUsagesBeforeImportKey(format,
-                                                              usage_mask);
+    return RsaHashedAlgorithm::VerifyKeyUsagesBeforeImportKey(format, usages);
   }
 
-  virtual const char* GetJwkAlgorithm(
-      const blink::WebCryptoAlgorithmId hash) const OVERRIDE {
+  const char* GetJwkAlgorithm(
+      const blink::WebCryptoAlgorithmId hash) const override {
     switch (hash) {
       case blink::WebCryptoAlgorithmIdSha1:
         return "RSA-OAEP";
@@ -205,10 +204,10 @@ class RsaOaepImplementation : public RsaHashedAlgorithm {
     }
   }
 
-  virtual Status Encrypt(const blink::WebCryptoAlgorithm& algorithm,
-                         const blink::WebCryptoKey& key,
-                         const CryptoData& data,
-                         std::vector<uint8_t>* buffer) const OVERRIDE {
+  Status Encrypt(const blink::WebCryptoAlgorithm& algorithm,
+                 const blink::WebCryptoKey& key,
+                 const CryptoData& data,
+                 std::vector<uint8_t>* buffer) const override {
     if (key.type() != blink::WebCryptoKeyTypePublic)
       return Status::ErrorUnexpectedKeyType();
 
@@ -220,10 +219,10 @@ class RsaOaepImplementation : public RsaHashedAlgorithm {
         buffer);
   }
 
-  virtual Status Decrypt(const blink::WebCryptoAlgorithm& algorithm,
-                         const blink::WebCryptoKey& key,
-                         const CryptoData& data,
-                         std::vector<uint8_t>* buffer) const OVERRIDE {
+  Status Decrypt(const blink::WebCryptoAlgorithm& algorithm,
+                 const blink::WebCryptoKey& key,
+                 const CryptoData& data,
+                 std::vector<uint8_t>* buffer) const override {
     if (key.type() != blink::WebCryptoKeyTypePrivate)
       return Status::ErrorUnexpectedKeyType();
 

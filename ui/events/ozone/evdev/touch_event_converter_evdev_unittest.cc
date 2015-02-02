@@ -39,14 +39,19 @@ namespace ui {
 class MockTouchEventConverterEvdev : public TouchEventConverterEvdev {
  public:
   MockTouchEventConverterEvdev(int fd, base::FilePath path);
-  virtual ~MockTouchEventConverterEvdev() {};
+  ~MockTouchEventConverterEvdev() override {}
 
   void ConfigureReadMock(struct input_event* queue,
                          long read_this_many,
                          long queue_index);
 
   unsigned size() { return dispatched_events_.size(); }
-  TouchEvent* event(unsigned index) { return dispatched_events_[index]; }
+  TouchEvent* event(unsigned index) {
+    DCHECK_GT(dispatched_events_.size(), index);
+    Event* ev = dispatched_events_[index];
+    DCHECK(ev->IsTouchEvent());
+    return static_cast<TouchEvent*>(ev);
+  }
 
   // Actually dispatch the event reader code.
   void ReadNow() {
@@ -54,18 +59,17 @@ class MockTouchEventConverterEvdev : public TouchEventConverterEvdev {
     base::RunLoop().RunUntilIdle();
   }
 
-  void DispatchCallback(Event* event) {
-    dispatched_events_.push_back(
-        new TouchEvent(*static_cast<TouchEvent*>(event)));
+  void DispatchCallback(scoped_ptr<Event> event) {
+    dispatched_events_.push_back(event.release());
   }
 
-  virtual bool Reinitialize() OVERRIDE { return true; }
+  bool Reinitialize() override { return true; }
 
  private:
   int read_pipe_;
   int write_pipe_;
 
-  ScopedVector<TouchEvent> dispatched_events_;
+  ScopedVector<Event> dispatched_events_;
 
   DISALLOW_COPY_AND_ASSIGN(MockTouchEventConverterEvdev);
 };
@@ -75,6 +79,7 @@ MockTouchEventConverterEvdev::MockTouchEventConverterEvdev(int fd,
     : TouchEventConverterEvdev(
           fd,
           path,
+          1,
           EventDeviceInfo(),
           base::Bind(&MockTouchEventConverterEvdev::DispatchCallback,
                      base::Unretained(this))) {
@@ -119,7 +124,7 @@ class TouchEventConverterEvdevTest : public testing::Test {
   TouchEventConverterEvdevTest() {}
 
   // Overridden from testing::Test:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     // Set up pipe to satisfy message pump (unused).
     int evdev_io[2];
     if (pipe(evdev_io))
@@ -132,7 +137,7 @@ class TouchEventConverterEvdevTest : public testing::Test {
         events_in_, base::FilePath(kTestDevicePath));
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     delete device_;
     delete loop_;
   }

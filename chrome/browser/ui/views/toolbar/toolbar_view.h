@@ -57,7 +57,7 @@ class ToolbarView : public views::AccessiblePaneView,
   static const char kViewClassName[];
 
   explicit ToolbarView(Browser* browser);
-  virtual ~ToolbarView();
+  ~ToolbarView() override;
 
   // Create the contents of the Browser Toolbar.
   void Init();
@@ -107,58 +107,56 @@ class ToolbarView : public views::AccessiblePaneView,
   HomeButton* home_button() const { return home_; }
 
   // AccessiblePaneView:
-  virtual bool SetPaneFocus(View* initial_focus) OVERRIDE;
-  virtual void GetAccessibleState(ui::AXViewState* state) OVERRIDE;
+  bool SetPaneFocus(View* initial_focus) override;
+  void GetAccessibleState(ui::AXViewState* state) override;
 
   // views::MenuButtonListener:
-  virtual void OnMenuButtonClicked(views::View* source,
-                                   const gfx::Point& point) OVERRIDE;
+  void OnMenuButtonClicked(views::View* source,
+                           const gfx::Point& point) override;
 
   // LocationBarView::Delegate:
-  virtual content::WebContents* GetWebContents() OVERRIDE;
-  virtual ToolbarModel* GetToolbarModel() OVERRIDE;
-  virtual const ToolbarModel* GetToolbarModel() const OVERRIDE;
-  virtual InstantController* GetInstant() OVERRIDE;
-  virtual views::Widget* CreateViewsBubble(
-      views::BubbleDelegateView* bubble_delegate) OVERRIDE;
-  virtual PageActionImageView* CreatePageActionImageView(
-      LocationBarView* owner, ExtensionAction* action) OVERRIDE;
-  virtual ContentSettingBubbleModelDelegate*
-      GetContentSettingBubbleModelDelegate() OVERRIDE;
-  virtual void ShowWebsiteSettings(content::WebContents* web_contents,
-                                   const GURL& url,
-                                   const content::SSLStatus& ssl) OVERRIDE;
+  content::WebContents* GetWebContents() override;
+  ToolbarModel* GetToolbarModel() override;
+  const ToolbarModel* GetToolbarModel() const override;
+  InstantController* GetInstant() override;
+  views::Widget* CreateViewsBubble(
+      views::BubbleDelegateView* bubble_delegate) override;
+  PageActionImageView* CreatePageActionImageView(
+      LocationBarView* owner,
+      ExtensionAction* action) override;
+  ContentSettingBubbleModelDelegate* GetContentSettingBubbleModelDelegate()
+      override;
+  void ShowWebsiteSettings(content::WebContents* web_contents,
+                           const GURL& url,
+                           const content::SSLStatus& ssl) override;
 
   // CommandObserver:
-  virtual void EnabledStateChangedForCommand(int id, bool enabled) OVERRIDE;
+  void EnabledStateChangedForCommand(int id, bool enabled) override;
 
   // views::ButtonListener:
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // views::WidgetObserver:
-  virtual void OnWidgetVisibilityChanged(views::Widget* widget,
-                                         bool visible) OVERRIDE;
-  virtual void OnWidgetActivationChanged(views::Widget* widget,
-                                         bool active) OVERRIDE;
+  void OnWidgetVisibilityChanged(views::Widget* widget, bool visible) override;
+  void OnWidgetActivationChanged(views::Widget* widget, bool active) override;
 
   // content::NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   // ui::AcceleratorProvider:
-  virtual bool GetAcceleratorForCommandId(
-      int command_id, ui::Accelerator* accelerator) OVERRIDE;
+  bool GetAcceleratorForCommandId(int command_id,
+                                  ui::Accelerator* accelerator) override;
 
   // views::View:
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
-  virtual gfx::Size GetMinimumSize() const OVERRIDE;
-  virtual void Layout() OVERRIDE;
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
-  virtual void OnThemeChanged() OVERRIDE;
-  virtual const char* GetClassName() const OVERRIDE;
-  virtual bool AcceleratorPressed(const ui::Accelerator& acc) OVERRIDE;
+  gfx::Size GetPreferredSize() const override;
+  gfx::Size GetMinimumSize() const override;
+  void Layout() override;
+  void OnPaint(gfx::Canvas* canvas) override;
+  void OnThemeChanged() override;
+  const char* GetClassName() const override;
+  bool AcceleratorPressed(const ui::Accelerator& acc) override;
 
   // Whether the wrench/hotdogs menu is currently showing.
   bool IsWrenchMenuShowing() const;
@@ -179,8 +177,8 @@ class ToolbarView : public views::AccessiblePaneView,
 
  protected:
   // AccessiblePaneView:
-  virtual bool SetPaneFocusAndFocusDefault() OVERRIDE;
-  virtual void RemovePaneFocus() OVERRIDE;
+  bool SetPaneFocusAndFocusDefault() override;
+  void RemovePaneFocus() override;
 
  private:
   // Types of display mode this toolbar can have.
@@ -191,13 +189,13 @@ class ToolbarView : public views::AccessiblePaneView,
   };
 
   // views::ViewTargeterDelegate:
-  virtual bool DoesIntersectRect(const views::View* target,
-                                 const gfx::Rect& rect) const OVERRIDE;
+  bool DoesIntersectRect(const views::View* target,
+                         const gfx::Rect& rect) const override;
 
   // WrenchMenuBadgeController::Delegate:
-  virtual void UpdateBadgeSeverity(WrenchMenuBadgeController::BadgeType type,
-                                   WrenchIconPainter::Severity severity,
-                                   bool animate) OVERRIDE;
+  void UpdateBadgeSeverity(WrenchMenuBadgeController::BadgeType type,
+                           WrenchIconPainter::Severity severity,
+                           bool animate) override;
 
   // Returns the number of pixels above the location bar in non-normal display.
   int PopupTopSpacing() const;

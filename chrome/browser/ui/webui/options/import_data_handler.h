@@ -24,16 +24,15 @@ class ImportDataHandler : public OptionsPageUIHandler,
                           public ui::SelectFileDialog::Listener {
  public:
   ImportDataHandler();
-  virtual ~ImportDataHandler();
+  ~ImportDataHandler() override;
 
   // OptionsPageUIHandler:
-  virtual void GetLocalizedValues(
-      base::DictionaryValue* localized_strings) OVERRIDE;
-  virtual void InitializeHandler() OVERRIDE;
-  virtual void InitializePage() OVERRIDE;
+  void GetLocalizedValues(base::DictionaryValue* localized_strings) override;
+  void InitializeHandler() override;
+  void InitializePage() override;
 
   // content::WebUIMessageHandler:
-  virtual void RegisterMessages() OVERRIDE;
+  void RegisterMessages() override;
 
  private:
   void StartImport(const importer::SourceProfile& source_profile,
@@ -42,15 +41,15 @@ class ImportDataHandler : public OptionsPageUIHandler,
   void ImportData(const base::ListValue* args);
 
   // importer::ImporterProgressObserver:
-  virtual void ImportStarted() OVERRIDE;
-  virtual void ImportItemStarted(importer::ImportItem item) OVERRIDE;
-  virtual void ImportItemEnded(importer::ImportItem item) OVERRIDE;
-  virtual void ImportEnded() OVERRIDE;
+  void ImportStarted() override;
+  void ImportItemStarted(importer::ImportItem item) override;
+  void ImportItemEnded(importer::ImportItem item) override;
+  void ImportEnded() override;
 
   // ui::SelectFileDialog::Listener:
-  virtual void FileSelected(const base::FilePath& path,
-                            int index,
-                            void* params) OVERRIDE;
+  void FileSelected(const base::FilePath& path,
+                    int index,
+                    void* params) override;
 
   // Opens a file selection dialog to choose the bookmarks HTML file.
   void HandleChooseBookmarksFile(const base::ListValue* args);

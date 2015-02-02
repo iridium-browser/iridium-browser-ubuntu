@@ -37,43 +37,41 @@ public:
                                 content::BrowserContext* context,
                                 WebDialogDelegate* delegate);
 
-  virtual ~WebDialogWindowDelegateBridge();
+  ~WebDialogWindowDelegateBridge() override;
 
   // Called when the window is directly closed, e.g. from the close
   // button or from an accelerator.
   void WindowControllerClosed();
 
   // WebDialogDelegate declarations.
-  virtual ui::ModalType GetDialogModalType() const OVERRIDE;
-  virtual base::string16 GetDialogTitle() const OVERRIDE;
-  virtual GURL GetDialogContentURL() const OVERRIDE;
-  virtual void GetWebUIMessageHandlers(
-      std::vector<WebUIMessageHandler*>* handlers) const OVERRIDE;
-  virtual void GetDialogSize(gfx::Size* size) const OVERRIDE;
-  virtual void GetMinimumDialogSize(gfx::Size* size) const OVERRIDE;
-  virtual std::string GetDialogArgs() const OVERRIDE;
-  virtual void OnDialogClosed(const std::string& json_retval) OVERRIDE;
-  virtual void OnCloseContents(WebContents* source,
-                               bool* out_close_dialog) OVERRIDE;
-  virtual bool ShouldShowDialogTitle() const OVERRIDE { return true; }
+  ui::ModalType GetDialogModalType() const override;
+  base::string16 GetDialogTitle() const override;
+  GURL GetDialogContentURL() const override;
+  void GetWebUIMessageHandlers(
+      std::vector<WebUIMessageHandler*>* handlers) const override;
+  void GetDialogSize(gfx::Size* size) const override;
+  void GetMinimumDialogSize(gfx::Size* size) const override;
+  std::string GetDialogArgs() const override;
+  void OnDialogClosed(const std::string& json_retval) override;
+  void OnCloseContents(WebContents* source, bool* out_close_dialog) override;
+  bool ShouldShowDialogTitle() const override { return true; }
 
   // WebDialogWebContentsDelegate declarations.
-  virtual void MoveContents(WebContents* source, const gfx::Rect& pos) OVERRIDE;
-  virtual void HandleKeyboardEvent(
+  void MoveContents(WebContents* source, const gfx::Rect& pos) override;
+  void HandleKeyboardEvent(content::WebContents* source,
+                           const NativeWebKeyboardEvent& event) override;
+  void CloseContents(WebContents* source) override;
+  content::WebContents* OpenURLFromTab(
       content::WebContents* source,
-      const NativeWebKeyboardEvent& event) OVERRIDE;
-  virtual void CloseContents(WebContents* source) OVERRIDE;
-  virtual content::WebContents* OpenURLFromTab(
-      content::WebContents* source,
-      const content::OpenURLParams& params) OVERRIDE;
-  virtual void AddNewContents(content::WebContents* source,
-                              content::WebContents* new_contents,
-                              WindowOpenDisposition disposition,
-                              const gfx::Rect& initial_pos,
-                              bool user_gesture,
-                              bool* was_blocked) OVERRIDE;
-  virtual void LoadingStateChanged(content::WebContents* source,
-                                   bool to_different_document) OVERRIDE;
+      const content::OpenURLParams& params) override;
+  void AddNewContents(content::WebContents* source,
+                      content::WebContents* new_contents,
+                      WindowOpenDisposition disposition,
+                      const gfx::Rect& initial_pos,
+                      bool user_gesture,
+                      bool* was_blocked) override;
+  void LoadingStateChanged(content::WebContents* source,
+                           bool to_different_document) override;
 
 private:
   WebDialogWindowController* controller_;  // weak

@@ -35,15 +35,15 @@ class AwNetworkDelegate;
 class AwURLRequestContextGetter : public net::URLRequestContextGetter {
  public:
   AwURLRequestContextGetter(
-      const base::FilePath& partition_path,
+      const base::FilePath& cache_path,
       net::CookieStore* cookie_store,
       scoped_ptr<data_reduction_proxy::DataReductionProxyConfigService>
           config_service);
 
   // net::URLRequestContextGetter implementation.
-  virtual net::URLRequestContext* GetURLRequestContext() OVERRIDE;
+  virtual net::URLRequestContext* GetURLRequestContext() override;
   virtual scoped_refptr<base::SingleThreadTaskRunner>
-      GetNetworkTaskRunner() const OVERRIDE;
+      GetNetworkTaskRunner() const override;
 
   data_reduction_proxy::DataReductionProxyAuthRequestHandler*
       GetDataReductionProxyAuthRequestHandler() const;
@@ -72,7 +72,7 @@ class AwURLRequestContextGetter : public net::URLRequestContextGetter {
 
   void InitializeURLRequestContext();
 
-  const base::FilePath partition_path_;
+  const base::FilePath cache_path_;
   scoped_refptr<net::CookieStore> cookie_store_;
   scoped_ptr<net::NetLog> net_log_;
   scoped_ptr<net::URLRequestContext> url_request_context_;

@@ -13,7 +13,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/non_thread_safe.h"
-#include "talk/xmpp/xmppclient.h"
+#include "webrtc/libjingle/xmpp/xmppclient.h"
 
 namespace rtc {
 class TaskParent;
@@ -28,7 +28,7 @@ class WeakXmppClient : public buzz::XmppClient, public base::NonThreadSafe {
  public:
   explicit WeakXmppClient(rtc::TaskParent* parent);
 
-  virtual ~WeakXmppClient();
+  ~WeakXmppClient() override;
 
   // Returns a weak pointer that is invalidated when the XmppClient
   // becomes invalid to use.
@@ -40,7 +40,7 @@ class WeakXmppClient : public buzz::XmppClient, public base::NonThreadSafe {
   void Invalidate();
 
  protected:
-  virtual void Stop() OVERRIDE;
+  void Stop() override;
 
  private:
   // We use our own WeakPtrFactory instead of inheriting from

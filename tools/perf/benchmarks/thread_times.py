@@ -14,19 +14,6 @@ class ThreadTimesKeySilkCases(benchmark.Benchmark):
   cases."""
   test = thread_times.ThreadTimes
   page_set = page_sets.KeySilkCasesPageSet
-  options = {"report_silk_results": True}
-
-
-@benchmark.Enabled('android')
-class ThreadTimesFastPathKeySilkCases(benchmark.Benchmark):
-  """Measures timeline metrics while performing smoothness action on key silk
-  cases using bleeding edge rendering fast paths."""
-  tag = 'fast_path'
-  test = thread_times.ThreadTimes
-  page_set = page_sets.KeySilkCasesPageSet
-  options = {"report_silk_results": True}
-  def CustomizeBrowserOptions(self, options):
-    silk_flags.CustomizeBrowserOptionsForFastPath(options)
 
 
 @benchmark.Disabled
@@ -47,7 +34,7 @@ class ThreadTimesFastPathMobileSites(benchmark.Benchmark):
   options = {'page_label_filter' : 'fastpath'}
 
 
-@benchmark.Disabled  # crbug.com/400922
+@benchmark.Enabled('android')
 class ThreadTimesSimpleMobileSites(benchmark.Benchmark):
   """Measures timeline metric using smoothness action on simple mobile sites
   http://www.chromium.org/developers/design-documents/rendering-benchmarks"""
@@ -71,4 +58,3 @@ class ThreadTimesPolymer(benchmark.Benchmark):
   Polymer cases."""
   test = thread_times.ThreadTimes
   page_set = page_sets.PolymerPageSet
-  options = { 'report_silk_results': True }

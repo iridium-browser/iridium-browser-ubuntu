@@ -40,15 +40,16 @@ class MediaSourceTest : public content::MediaBrowserTest {
       return;
     }
 
-    media::QueryParams query_params;
+    base::StringPairs query_params;
     query_params.push_back(std::make_pair("mediaFile", media_file));
     query_params.push_back(std::make_pair("mediaType", media_type));
+    query_params.push_back(std::make_pair("usePrefixedEME", "1"));
     RunMediaTestPage("media_source_player.html", query_params, expectation,
                      true);
   }
 
 #if defined(OS_ANDROID)
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  virtual void SetUpCommandLine(CommandLine* command_line) override {
     command_line->AppendSwitch(
         switches::kDisableGestureRequirementForMediaPlayback);
   }
@@ -85,10 +86,9 @@ IN_PROC_BROWSER_TEST_F(MediaSourceTest, ConfigChangeVideo) {
     VLOG(0) << "Skipping test - MSE not supported.";
     return;
   }
-  RunMediaTestPage("mse_config_change.html",
-                   media::QueryParams(),
-                   kEnded,
-                   true);
+  base::StringPairs query_params;
+  query_params.push_back(std::make_pair("usePrefixedEME", "1"));
+  RunMediaTestPage("mse_config_change.html", query_params, kEnded, true);
 }
 
 }  // namespace content

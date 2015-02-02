@@ -8,8 +8,8 @@ from telemetry.page import page_set as page_set_module
 class MobileMemoryPage(page_module.Page):
 
   def __init__(self, url, page_set):
-    super(MobileMemoryPage, self).__init__(url=url, page_set=page_set)
-    self.credentials_path = 'data/credentials.json'
+    super(MobileMemoryPage, self).__init__(
+        url=url, page_set=page_set, credentials_path = 'data/credentials.json')
     self.user_agent_type = 'mobile'
     self.archive_data_file = 'data/mobile_memory.json'
 
@@ -32,7 +32,7 @@ class GmailPage(MobileMemoryPage):
     action_runner.Wait(15)
     action_runner.ForceGarbageCollection()
 
-  def RunStressMemory(self, action_runner):
+  def RunPageInteractions(self, action_runner):
     for _ in xrange(3):
       self.ReloadAndGc(action_runner)
 
@@ -46,7 +46,7 @@ class GoogleSearchPage(MobileMemoryPage):
         url='https://www.google.com/search?site=&tbm=isch&q=google',
         page_set=page_set)
 
-  def RunStressMemory(self, action_runner):
+  def RunPageInteractions(self, action_runner):
     interaction = action_runner.BeginGestureInteraction(
         'ScrollAction', is_smooth=True)
     action_runner.ScrollPage()
@@ -75,7 +75,7 @@ class ScrollPage(MobileMemoryPage):
   def __init__(self, url, page_set):
     super(ScrollPage, self).__init__(url=url, page_set=page_set)
 
-  def RunStressMemory(self, action_runner):
+  def RunPageInteractions(self, action_runner):
     interaction = action_runner.BeginGestureInteraction(
         'ScrollAction', is_smooth=True)
     action_runner.ScrollPage()
@@ -88,7 +88,6 @@ class MobileMemoryPageSet(page_set_module.PageSet):
 
   def __init__(self):
     super(MobileMemoryPageSet, self).__init__(
-        credentials_path='data/credentials.json',
         user_agent_type='mobile',
         archive_data_file='data/mobile_memory.json',
         bucket=page_set_module.PARTNER_BUCKET)

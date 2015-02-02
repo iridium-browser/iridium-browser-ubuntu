@@ -9,19 +9,19 @@ namespace extensions {
 class AudioServiceImpl : public AudioService {
  public:
   AudioServiceImpl() {}
-  virtual ~AudioServiceImpl() {}
+  ~AudioServiceImpl() override {}
 
   // Called by listeners to this service to add/remove themselves as observers.
-  virtual void AddObserver(Observer* observer) OVERRIDE;
-  virtual void RemoveObserver(Observer* observer) OVERRIDE;
+  void AddObserver(Observer* observer) override;
+  void RemoveObserver(Observer* observer) override;
 
   // Start to query audio device information.
-  virtual void StartGetInfo(const GetInfoCallback& callback) OVERRIDE;
-  virtual void SetActiveDevices(const DeviceIdList& device_list) OVERRIDE;
-  virtual bool SetDeviceProperties(const std::string& device_id,
-                                   bool muted,
-                                   int volume,
-                                   int gain) OVERRIDE;
+  void StartGetInfo(const GetInfoCallback& callback) override;
+  void SetActiveDevices(const DeviceIdList& device_list) override;
+  bool SetDeviceProperties(const std::string& device_id,
+                           bool muted,
+                           int volume,
+                           int gain) override;
 };
 
 void AudioServiceImpl::AddObserver(Observer* observer) {

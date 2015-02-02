@@ -6,6 +6,12 @@ a {
   color: #585858;
 }
 
+.bad-clock .icon {
+  background-image: -webkit-image-set(
+      url(images/1x/clock.png) 1x,
+      url(images/2x/clock.png) 2x);
+}
+
 body {
   background-color: #f7f7f7;
   color: #585858;
@@ -75,11 +81,11 @@ button:hover {
 }
 
 h1 {
-  -webkit-margin-after: 16px;
   color: #585858;
   font-size: 1.6em;
   font-weight: normal;
   line-height: 1.25em;
+  margin-bottom: 16px;
 }
 
 h2 {

@@ -76,20 +76,18 @@ class GpuVideoDecodeAccelerator::MessageFilter : public IPC::MessageFilter {
   MessageFilter(GpuVideoDecodeAccelerator* owner, int32 host_route_id)
       : owner_(owner), host_route_id_(host_route_id) {}
 
-  virtual void OnChannelError() OVERRIDE { sender_ = NULL; }
+  void OnChannelError() override { sender_ = NULL; }
 
-  virtual void OnChannelClosing() OVERRIDE { sender_ = NULL; }
+  void OnChannelClosing() override { sender_ = NULL; }
 
-  virtual void OnFilterAdded(IPC::Sender* sender) OVERRIDE {
-    sender_ = sender;
-  }
+  void OnFilterAdded(IPC::Sender* sender) override { sender_ = sender; }
 
-  virtual void OnFilterRemoved() OVERRIDE {
+  void OnFilterRemoved() override {
     // This will delete |owner_| and |this|.
     owner_->OnFilterRemoved();
   }
 
-  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE {
+  bool OnMessageReceived(const IPC::Message& msg) override {
     if (msg.routing_id() != host_route_id_)
       return false;
 
@@ -111,7 +109,7 @@ class GpuVideoDecodeAccelerator::MessageFilter : public IPC::MessageFilter {
   }
 
  protected:
-  virtual ~MessageFilter() {}
+  ~MessageFilter() override {}
 
  private:
   GpuVideoDecodeAccelerator* owner_;
@@ -259,7 +257,8 @@ void GpuVideoDecodeAccelerator::Initialize(
 #elif defined(OS_MACOSX)
   video_decode_accelerator_.reset(new VTVideoDecodeAccelerator(
       static_cast<CGLContextObj>(
-          stub_->decoder()->GetGLContext()->GetHandle())));
+          stub_->decoder()->GetGLContext()->GetHandle()),
+      make_context_current_));
 #elif defined(OS_CHROMEOS) && defined(ARCH_CPU_ARMEL) && defined(USE_X11)
   scoped_ptr<V4L2Device> device = V4L2Device::Create(V4L2Device::kDecoder);
   if (!device.get()) {
@@ -378,12 +377,12 @@ void GpuVideoDecodeAccelerator::OnAssignPictureBuffers(
       texture_manager->SetLevelInfo(texture_ref,
                                     texture_target_,
                                     0,
-                                    0,
+                                    GL_RGBA,
                                     texture_dimensions_.width(),
                                     texture_dimensions_.height(),
                                     1,
                                     0,
-                                    0,
+                                    GL_RGBA,
                                     0,
                                     false);
     } else {

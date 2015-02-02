@@ -28,9 +28,9 @@ class NewTrackTask : public WebMethodTask<MockWebMediaStreamCenter> {
     DCHECK(!stream_.isNull());
   }
 
-  virtual ~NewTrackTask() {}
+  ~NewTrackTask() override {}
 
-  virtual void RunIfValid() OVERRIDE {
+  void RunIfValid() override {
     blink::WebMediaStreamSource source;
     blink::WebMediaStreamTrack track;
     source.initialize("MagicVideoDevice#1",
@@ -67,22 +67,6 @@ MockWebMediaStreamCenter::MockWebMediaStreamCenter(
 }
 
 MockWebMediaStreamCenter::~MockWebMediaStreamCenter() {
-}
-
-bool MockWebMediaStreamCenter::getMediaStreamTrackSources(
-    const blink::WebMediaStreamTrackSourcesRequest& request) {
-  size_t size = 2;
-  blink::WebVector<blink::WebSourceInfo> results(size);
-  results[0].initialize("MockAudioDevice#1",
-                        blink::WebSourceInfo::SourceKindAudio,
-                        "Mock audio device",
-                        blink::WebSourceInfo::VideoFacingModeNone);
-  results[1].initialize("MockVideoDevice#1",
-                        blink::WebSourceInfo::SourceKindVideo,
-                        "Mock video device",
-                        blink::WebSourceInfo::VideoFacingModeEnvironment);
-  request.requestSucceeded(results);
-  return true;
 }
 
 void MockWebMediaStreamCenter::didEnableMediaStreamTrack(

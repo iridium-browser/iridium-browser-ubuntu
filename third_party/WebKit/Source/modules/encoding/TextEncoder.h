@@ -32,9 +32,8 @@
 #define TextEncoder_h
 
 #include "bindings/core/v8/ScriptWrappable.h"
+#include "core/dom/DOMTypedArray.h"
 #include "platform/heap/Handle.h"
-#include "wtf/ArrayBufferView.h"
-#include "wtf/Uint8Array.h"
 #include "wtf/text/TextCodec.h"
 #include "wtf/text/TextEncoding.h"
 #include "wtf/text/WTFString.h"
@@ -43,7 +42,7 @@ namespace blink {
 
 class ExceptionState;
 
-class TextEncoder FINAL : public GarbageCollectedFinalized<TextEncoder>, public ScriptWrappable {
+class TextEncoder final : public GarbageCollectedFinalized<TextEncoder>, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
 public:
     static TextEncoder* create(const String& utfLabel, ExceptionState&);
@@ -51,7 +50,7 @@ public:
 
     // Implement the IDL
     String encoding() const;
-    PassRefPtr<Uint8Array> encode(const String&);
+    PassRefPtr<DOMUint8Array> encode(const String&);
 
     void trace(Visitor*) { }
 

@@ -4,8 +4,10 @@
       <img class="user-image" alt>
     </div>
     <div class="signed-in-indicator" i18n-content="signedIn"></div>
-    <div class="locked-indicator"></div>
-    <div class="supervised-indicator"></div>
+    <div class="indicator-container">
+      <div class="indicator supervised-indicator"></div>
+      <div class="indicator locked-indicator"></div>
+    </div>
   </div>
   <div class="main-pane">
     <div class="name-container">
@@ -28,12 +30,6 @@
       </div>
       <!-- User Click Authentication -->
       <div class="password-label"></div>
-      <div class="signin-transition-container">
-        <span class="signing-in-label" i18n-content="signingIn"></span>
-        <span class="animated-ellipsis-component0">.</span>
-        <span class="animated-ellipsis-component1">.</span>
-        <span class="animated-ellipsis-component2">.</span>
-      </div>
       <div class="custom-icon-container" hidden></div>
       <div class="signin-button-container">
         <button class="signin-button" i18n-content="signinButton"></button>

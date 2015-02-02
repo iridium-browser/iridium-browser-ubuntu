@@ -29,7 +29,10 @@ struct WebViewInfo {
     kBackgroundPage,
     kPage,
     kWorker,
-    kOther
+    kWebView,
+    kIFrame,
+    kOther,
+    kServiceWorker
   };
 
   WebViewInfo(const std::string& id,
@@ -99,8 +102,8 @@ class DevToolsHttpClient {
 };
 
 namespace internal {
-Status ParseWebViewsInfo(const std::string& data,
-                         WebViewsInfo* views_info);
+Status ParseWebViewsInfo(const std::string& data, WebViewsInfo* views_info);
+Status ParseType(const std::string& data, WebViewInfo::Type* type);
 }  // namespace internal
 
 #endif  // CHROME_TEST_CHROMEDRIVER_CHROME_DEVTOOLS_HTTP_CLIENT_H_

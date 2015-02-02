@@ -20,13 +20,13 @@ class SyncErrorNotifier : public SyncErrorController::Observer,
                           public KeyedService {
  public:
   SyncErrorNotifier(SyncErrorController* controller, Profile* profile);
-  virtual ~SyncErrorNotifier();
+  ~SyncErrorNotifier() override;
 
   // KeyedService:
-  virtual void Shutdown() OVERRIDE;
+  void Shutdown() override;
 
   // SyncErrorController::Observer:
-  virtual void OnErrorChanged() OVERRIDE;
+  void OnErrorChanged() override;
 
  private:
   // The error controller to query for error details.

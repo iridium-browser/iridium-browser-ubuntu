@@ -24,8 +24,8 @@ namespace test {
 class PeopleProviderTest;
 }
 
-class ChromeSearchResult;
 class JSONResponseFetcher;
+class SearchResult;
 
 // PeopleProvider fetches search results from the web store server.
 // A "Search in web store" result will be returned if the server does not
@@ -33,21 +33,19 @@ class JSONResponseFetcher;
 class PeopleProvider : public WebserviceSearchProvider,
                        public OAuth2TokenService::Consumer {
  public:
-  explicit PeopleProvider(Profile* profile);
-  virtual ~PeopleProvider();
+  PeopleProvider(Profile* profile, AppListControllerDelegate* controller);
+  ~PeopleProvider() override;
 
   // SearchProvider overrides:
-  virtual void Start(const base::string16& query) OVERRIDE;
-  virtual void Stop() OVERRIDE;
+  void Start(const base::string16& query) override;
+  void Stop() override;
 
   // OAuth2TokenService::Consumer overrides:
-  virtual void OnGetTokenSuccess(
-      const OAuth2TokenService::Request* request,
-      const std::string& access_token,
-      const base::Time& expiration_time) OVERRIDE;
-  virtual void OnGetTokenFailure(
-      const OAuth2TokenService::Request* request,
-      const GoogleServiceAuthError& error) OVERRIDE;
+  void OnGetTokenSuccess(const OAuth2TokenService::Request* request,
+                         const std::string& access_token,
+                         const base::Time& expiration_time) override;
+  void OnGetTokenFailure(const OAuth2TokenService::Request* request,
+                         const GoogleServiceAuthError& error) override;
 
  private:
   friend class app_list::test::PeopleProviderTest;
@@ -67,13 +65,13 @@ class PeopleProvider : public WebserviceSearchProvider,
   // Callback for people search results being fetched.
   void OnPeopleSearchFetched(scoped_ptr<base::DictionaryValue> json);
   void ProcessPeopleSearchResults(const base::DictionaryValue* json);
-  scoped_ptr<ChromeSearchResult> CreateResult(
-      const base::DictionaryValue& dict);
+  scoped_ptr<SearchResult> CreateResult(const base::DictionaryValue& dict);
 
   // Setup the various variables that we override for testing.
   void SetupForTest(const base::Closure& people_search_fetched_callback,
                     const GURL& people_search_url);
 
+  AppListControllerDelegate* controller_;
   scoped_ptr<JSONResponseFetcher> people_search_;
   base::Closure people_search_fetched_callback_;
 

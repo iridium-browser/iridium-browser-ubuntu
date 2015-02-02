@@ -63,18 +63,31 @@ class TestProxyDelegate : public ProxyDelegate {
  public:
   TestProxyDelegate()
       : on_before_tunnel_request_called_(false),
+        on_tunnel_request_completed_called_(false),
         on_tunnel_headers_received_called_(false) {
   }
 
-  virtual ~TestProxyDelegate() OVERRIDE {
-  }
+  ~TestProxyDelegate() override {}
 
   bool on_before_tunnel_request_called() const {
     return on_before_tunnel_request_called_;
   }
 
+  bool on_tunnel_request_completed_called() const {
+    return on_tunnel_request_completed_called_;
+  }
+
   bool on_tunnel_headers_received_called() const {
     return on_tunnel_headers_received_called_;
+  }
+
+  void VerifyOnTunnelRequestCompleted(const std::string& endpoint,
+                                      const std::string& proxy_server) const {
+    EXPECT_TRUE(on_tunnel_request_completed_called_);
+    EXPECT_TRUE(HostPortPair::FromString(endpoint).Equals(
+        on_tunnel_request_completed_endpoint_));
+    EXPECT_TRUE(HostPortPair::FromString(proxy_server).Equals(
+        on_tunnel_request_completed_proxy_server_));
   }
 
   void VerifyOnTunnelHeadersReceived(const std::string& origin,
@@ -89,34 +102,37 @@ class TestProxyDelegate : public ProxyDelegate {
   }
 
   // ProxyDelegate:
-  virtual void OnResolveProxy(const GURL& url,
-                              int load_flags,
-                              const ProxyService& proxy_service,
-                              ProxyInfo* result) OVERRIDE {
+  void OnResolveProxy(const GURL& url,
+                      int load_flags,
+                      const ProxyService& proxy_service,
+                      ProxyInfo* result) override {}
+
+  void OnTunnelConnectCompleted(const HostPortPair& endpoint,
+                                const HostPortPair& proxy_server,
+                                int net_error) override {
+    on_tunnel_request_completed_called_ = true;
+    on_tunnel_request_completed_endpoint_ = endpoint;
+    on_tunnel_request_completed_proxy_server_ = proxy_server;
   }
 
-  virtual void OnFallback(const ProxyServer& bad_proxy,
-                          int net_error) OVERRIDE {
-  }
+  void OnFallback(const ProxyServer& bad_proxy, int net_error) override {}
 
-  virtual void OnBeforeSendHeaders(URLRequest* request,
-                                   const ProxyInfo& proxy_info,
-                                   HttpRequestHeaders* headers) OVERRIDE {
-  }
+  void OnBeforeSendHeaders(URLRequest* request,
+                           const ProxyInfo& proxy_info,
+                           HttpRequestHeaders* headers) override {}
 
-  virtual void OnBeforeTunnelRequest(
-      const net::HostPortPair& proxy_server,
-      net::HttpRequestHeaders* extra_headers) OVERRIDE {
+  void OnBeforeTunnelRequest(const net::HostPortPair& proxy_server,
+                             net::HttpRequestHeaders* extra_headers) override {
     on_before_tunnel_request_called_ = true;
     if (extra_headers) {
       extra_headers->SetHeader("Foo", proxy_server.ToString());
     }
   }
 
-  virtual void OnTunnelHeadersReceived(
+  void OnTunnelHeadersReceived(
       const net::HostPortPair& origin,
       const net::HostPortPair& proxy_server,
-      const net::HttpResponseHeaders& response_headers) OVERRIDE {
+      const net::HttpResponseHeaders& response_headers) override {
     on_tunnel_headers_received_called_ = true;
     on_tunnel_headers_received_origin_ = origin;
     on_tunnel_headers_received_proxy_server_ = proxy_server;
@@ -125,7 +141,10 @@ class TestProxyDelegate : public ProxyDelegate {
 
  private:
   bool on_before_tunnel_request_called_;
+  bool on_tunnel_request_completed_called_;
   bool on_tunnel_headers_received_called_;
+  HostPortPair on_tunnel_request_completed_endpoint_;
+  HostPortPair on_tunnel_request_completed_proxy_server_;
   HostPortPair on_tunnel_headers_received_origin_;
   HostPortPair on_tunnel_headers_received_proxy_server_;
   std::string on_tunnel_headers_received_status_line_;
@@ -350,6 +369,7 @@ TEST_P(HttpProxyClientSocketPoolTest, NoTunnel) {
   EXPECT_TRUE(tunnel_socket->IsConnected());
   EXPECT_FALSE(proxy_delegate->on_before_tunnel_request_called());
   EXPECT_FALSE(proxy_delegate->on_tunnel_headers_received_called());
+  EXPECT_TRUE(proxy_delegate->on_tunnel_request_completed_called());
 }
 
 // Make sure that HttpProxyConnectJob passes on its priority to its
@@ -460,14 +480,24 @@ TEST_P(HttpProxyClientSocketPoolTest, HaveAuth) {
       "www.google.com:443",
       proxy_host_port.c_str(),
       "HTTP/1.1 200 Connection Established");
+  proxy_delegate->VerifyOnTunnelRequestCompleted(
+      "www.google.com:443",
+      proxy_host_port.c_str());
 }
 
 TEST_P(HttpProxyClientSocketPoolTest, AsyncHaveAuth) {
+  std::string proxy_host_port =
+      GetParam().proxy_type == HTTP ?
+          (kHttpProxyHost + std::string(":80")) :
+          (kHttpsProxyHost + std::string(":443"));
+  std::string request =
+      "CONNECT www.google.com:443 HTTP/1.1\r\n"
+      "Host: www.google.com\r\n"
+      "Proxy-Connection: keep-alive\r\n"
+      "Proxy-Authorization: Basic Zm9vOmJhcg==\r\n"
+      "Foo: " + proxy_host_port + "\r\n\r\n";
   MockWrite writes[] = {
-    MockWrite(ASYNC, 0, "CONNECT www.google.com:443 HTTP/1.1\r\n"
-              "Host: www.google.com\r\n"
-              "Proxy-Connection: keep-alive\r\n"
-              "Proxy-Authorization: Basic Zm9vOmJhcg==\r\n\r\n"),
+    MockWrite(ASYNC, 0, request.c_str()),
   };
   MockRead reads[] = {
     MockRead(ASYNC, 1, "HTTP/1.1 200 Connection Established\r\n\r\n"),
@@ -489,7 +519,8 @@ TEST_P(HttpProxyClientSocketPoolTest, AsyncHaveAuth) {
              arraysize(spdy_writes));
   AddAuthToCache();
 
-  int rv = handle_.Init("a", CreateTunnelParams(NULL), LOW,
+  scoped_ptr<TestProxyDelegate> proxy_delegate(new TestProxyDelegate());
+  int rv = handle_.Init("a", CreateTunnelParams(proxy_delegate.get()), LOW,
                         callback_.callback(), &pool_, BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_FALSE(handle_.is_initialized());
@@ -502,6 +533,9 @@ TEST_P(HttpProxyClientSocketPoolTest, AsyncHaveAuth) {
   HttpProxyClientSocket* tunnel_socket =
           static_cast<HttpProxyClientSocket*>(handle_.socket());
   EXPECT_TRUE(tunnel_socket->IsConnected());
+  proxy_delegate->VerifyOnTunnelRequestCompleted(
+      "www.google.com:443",
+      proxy_host_port.c_str());
 }
 
 // Make sure that HttpProxyConnectJob passes on its priority to its

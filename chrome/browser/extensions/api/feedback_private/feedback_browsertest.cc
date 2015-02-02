@@ -12,8 +12,8 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/extensions/api/feedback_private.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/test/test_utils.h"
 #include "extensions/browser/app_window/app_window.h"
 #include "extensions/browser/app_window/app_window_registry.h"
 #include "extensions/browser/event_router.h"
@@ -31,12 +31,12 @@ namespace extensions {
 
 class FeedbackTest : public ExtensionBrowserTest {
  public:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     extensions::ComponentLoader::EnableBackgroundExtensionsForTesting();
     InProcessBrowserTest::SetUp();
   }
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     command_line->AppendSwitch(::switches::kEnableUserMediaScreenCapturing);
     InProcessBrowserTest::SetUpCommandLine(command_line);
   }

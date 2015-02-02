@@ -26,14 +26,14 @@ class VKMojoHandler;
 class VKWebUIController : public content::WebUIController {
  public:
   explicit VKWebUIController(content::WebUI* web_ui);
-  virtual ~VKWebUIController();
+  ~VKWebUIController() override;
 
  private:
   void CreateAndStoreUIHandler(
       mojo::InterfaceRequest<KeyboardUIHandlerMojo> request);
 
   // content::WebUIController:
-  virtual void RenderViewCreated(content::RenderViewHost* host) OVERRIDE;
+  void RenderViewCreated(content::RenderViewHost* host) override;
 
   scoped_ptr<VKMojoHandler> ui_handler_;
   base::WeakPtrFactory<VKWebUIController> weak_factory_;
@@ -45,22 +45,21 @@ class KEYBOARD_EXPORT VKWebUIControllerFactory
     : public content::WebUIControllerFactory {
  public:
   // WebUIControllerFactory:
-  virtual content::WebUI::TypeID GetWebUIType(
-      content::BrowserContext* browser_context,
-      const GURL& url) const OVERRIDE;
-  virtual bool UseWebUIForURL(content::BrowserContext* browser_context,
-                              const GURL& url) const OVERRIDE;
-  virtual bool UseWebUIBindingsForURL(content::BrowserContext* browser_context,
-                                      const GURL& url) const OVERRIDE;
-  virtual content::WebUIController* CreateWebUIControllerForURL(
+  content::WebUI::TypeID GetWebUIType(content::BrowserContext* browser_context,
+                                      const GURL& url) const override;
+  bool UseWebUIForURL(content::BrowserContext* browser_context,
+                      const GURL& url) const override;
+  bool UseWebUIBindingsForURL(content::BrowserContext* browser_context,
+                              const GURL& url) const override;
+  content::WebUIController* CreateWebUIControllerForURL(
       content::WebUI* web_ui,
-      const GURL& url) const OVERRIDE;
+      const GURL& url) const override;
 
   static VKWebUIControllerFactory* GetInstance();
 
  protected:
   VKWebUIControllerFactory();
-  virtual ~VKWebUIControllerFactory();
+  ~VKWebUIControllerFactory() override;
 
  private:
   friend struct DefaultSingletonTraits<VKWebUIControllerFactory>;

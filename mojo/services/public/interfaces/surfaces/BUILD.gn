@@ -13,8 +13,9 @@ mojom("surfaces") {
   ]
 
   deps = [
-    "//mojo/services/gles2:interfaces",
+    ":surface_id",
     "//mojo/services/public/interfaces/geometry",
+    "//mojo/services/public/interfaces/gpu",
     "//mojo/services/public/interfaces/native_viewport",
   ]
 }

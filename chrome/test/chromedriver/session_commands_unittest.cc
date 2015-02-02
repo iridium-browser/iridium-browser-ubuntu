@@ -27,7 +27,7 @@ TEST(SessionCommandTest, FileUpload) {
   scoped_ptr<base::Value> value;
   // Zip file entry that contains a single file with contents 'COW\n', base64
   // encoded following RFC 1521.
-  const char* kBase64ZipEntry =
+  const char kBase64ZipEntry[] =
       "UEsDBBQAAAAAAMROi0K/wAzGBAAAAAQAAAADAAAAbW9vQ09XClBLAQIUAxQAAAAAAMROi0K/"
       "wAzG\nBAAAAAQAAAADAAAAAAAAAAAAAACggQAAAABtb29QSwUGAAAAAAEAAQAxAAAAJQAAAA"
       "AA\n";
@@ -47,10 +47,10 @@ namespace {
 class DetachChrome : public StubChrome {
  public:
   DetachChrome() : quit_called_(false) {}
-  virtual ~DetachChrome() {}
+  ~DetachChrome() override {}
 
   // Overridden from Chrome:
-  virtual Status Quit() OVERRIDE {
+  Status Quit() override {
     quit_called_ = true;
     return Status(kOk);
   }
@@ -95,12 +95,10 @@ namespace {
 class FailsToQuitChrome : public StubChrome {
  public:
   FailsToQuitChrome() {}
-  virtual ~FailsToQuitChrome() {}
+  ~FailsToQuitChrome() override {}
 
   // Overridden from Chrome:
-  virtual Status Quit() OVERRIDE {
-    return Status(kUnknownError);
-  }
+  Status Quit() override { return Status(kUnknownError); }
 };
 
 }  // namespace

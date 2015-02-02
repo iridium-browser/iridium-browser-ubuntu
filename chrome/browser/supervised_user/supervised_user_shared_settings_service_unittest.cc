@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <string>
+
 #include "base/bind.h"
 #include "base/json/json_writer.h"
 #include "base/prefs/pref_service.h"
@@ -36,12 +38,12 @@ namespace {
 class MockSyncErrorFactory : public syncer::SyncErrorFactory {
  public:
   explicit MockSyncErrorFactory(syncer::ModelType type);
-  virtual ~MockSyncErrorFactory();
+  ~MockSyncErrorFactory() override;
 
   // SyncErrorFactory implementation:
-  virtual syncer::SyncError CreateAndUploadError(
+  syncer::SyncError CreateAndUploadError(
       const tracked_objects::Location& location,
-      const std::string& message) OVERRIDE;
+      const std::string& message) override;
 
  private:
   syncer::ModelType type_;
@@ -79,7 +81,7 @@ class SupervisedUserSharedSettingsServiceTest : public ::testing::Test {
 
   SupervisedUserSharedSettingsServiceTest()
       : settings_service_(profile_.GetPrefs()) {}
-  virtual ~SupervisedUserSharedSettingsServiceTest() {}
+  ~SupervisedUserSharedSettingsServiceTest() override {}
 
   void StartSyncing(const syncer::SyncDataList& initial_sync_data) {
     sync_processor_.reset(new syncer::FakeSyncChangeProcessor);
@@ -101,11 +103,9 @@ class SupervisedUserSharedSettingsServiceTest : public ::testing::Test {
 
   void VerifySyncChangesAndClear() {
     SyncChangeList& changes = sync_processor_->changes();
-    for (SyncChangeList::const_iterator it = changes.begin();
-         it != changes.end();
-         ++it) {
+    for (const SyncChange& sync_change : changes) {
       const sync_pb::ManagedUserSharedSettingSpecifics& setting =
-          it->sync_data().GetSpecifics().managed_user_shared_setting();
+          sync_change.sync_data().GetSpecifics().managed_user_shared_setting();
       EXPECT_EQ(
           setting.value(),
           ToJson(settings_service_.GetValue(setting.mu_id(), setting.key())));
@@ -114,13 +114,13 @@ class SupervisedUserSharedSettingsServiceTest : public ::testing::Test {
   }
 
   // testing::Test overrides:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     subscription_ = settings_service_.Subscribe(
         base::Bind(&SupervisedUserSharedSettingsServiceTest::OnSettingChanged,
                    base::Unretained(this)));
   }
 
-  virtual void TearDown() OVERRIDE { settings_service_.Shutdown(); }
+  void TearDown() override { settings_service_.Shutdown(); }
 
   void OnSettingChanged(const std::string& su_id, const std::string& key) {
     const Value* value = settings_service_.GetValue(su_id, key);

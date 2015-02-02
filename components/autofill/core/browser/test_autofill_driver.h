@@ -20,29 +20,28 @@ namespace autofill {
 class TestAutofillDriver : public AutofillDriver {
  public:
   TestAutofillDriver();
-  virtual ~TestAutofillDriver();
+  ~TestAutofillDriver() override;
 
   // AutofillDriver implementation.
-  virtual bool IsOffTheRecord() const OVERRIDE;
+  bool IsOffTheRecord() const override;
   // Returns the value passed in to the last call to |SetURLRequestContext()|
   // or NULL if that method has never been called.
-  virtual net::URLRequestContextGetter* GetURLRequestContext() OVERRIDE;
-  virtual base::SequencedWorkerPool* GetBlockingPool() OVERRIDE;
-  virtual bool RendererIsAvailable() OVERRIDE;
-  virtual void SendFormDataToRenderer(int query_id,
-                                      RendererFormDataAction action,
-                                      const FormData& data) OVERRIDE;
-  virtual void PingRenderer() OVERRIDE;
-  virtual void SendAutofillTypePredictionsToRenderer(
-      const std::vector<FormStructure*>& forms) OVERRIDE;
-  virtual void RendererShouldAcceptDataListSuggestion(
-      const base::string16& value) OVERRIDE;
-  virtual void RendererShouldClearFilledForm() OVERRIDE;
-  virtual void RendererShouldClearPreviewedForm() OVERRIDE;
-  virtual void RendererShouldFillFieldWithValue(
-      const base::string16& value) OVERRIDE;
-  virtual void RendererShouldPreviewFieldWithValue(
-      const base::string16& value) OVERRIDE;
+  net::URLRequestContextGetter* GetURLRequestContext() override;
+  base::SequencedWorkerPool* GetBlockingPool() override;
+  bool RendererIsAvailable() override;
+  void SendFormDataToRenderer(int query_id,
+                              RendererFormDataAction action,
+                              const FormData& data) override;
+  void PingRenderer() override;
+  void SendAutofillTypePredictionsToRenderer(
+      const std::vector<FormStructure*>& forms) override;
+  void RendererShouldAcceptDataListSuggestion(
+      const base::string16& value) override;
+  void RendererShouldClearFilledForm() override;
+  void RendererShouldClearPreviewedForm() override;
+  void RendererShouldFillFieldWithValue(const base::string16& value) override;
+  void RendererShouldPreviewFieldWithValue(
+      const base::string16& value) override;
 
   // Methods that tests can use to specialize functionality.
 

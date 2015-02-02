@@ -35,7 +35,7 @@ class AudioSender : public FrameSender,
               const AudioSenderConfig& audio_config,
               CastTransportSender* const transport_sender);
 
-  virtual ~AudioSender();
+  ~AudioSender() override;
 
   CastInitializationStatus InitializationResult() const {
     return cast_initialization_status_;
@@ -51,9 +51,9 @@ class AudioSender : public FrameSender,
                    const base::TimeTicks& recorded_time);
 
  protected:
-  virtual int GetNumberOfFramesInEncoder() const OVERRIDE;
-  virtual base::TimeDelta GetInFlightMediaDuration() const OVERRIDE;
-  virtual void OnAck(uint32 frame_id) OVERRIDE;
+  int GetNumberOfFramesInEncoder() const override;
+  base::TimeDelta GetInFlightMediaDuration() const override;
+  void OnAck(uint32 frame_id) override;
 
  private:
   // Called by the |audio_encoder_| with the next EncodedFrame to send.

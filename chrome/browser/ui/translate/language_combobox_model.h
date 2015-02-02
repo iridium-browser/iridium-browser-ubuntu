@@ -19,12 +19,12 @@ class LanguageComboboxModel : public ui::ComboboxModel {
  public:
   LanguageComboboxModel(int default_index,
                         TranslateBubbleModel* model);
-  virtual ~LanguageComboboxModel();
+  ~LanguageComboboxModel() override;
 
   // Overridden from ui::ComboboxModel:
-  virtual int GetItemCount() const OVERRIDE;
-  virtual base::string16 GetItemAt(int index) OVERRIDE;
-  virtual int GetDefaultIndex() const OVERRIDE;
+  int GetItemCount() const override;
+  base::string16 GetItemAt(int index) override;
+  int GetDefaultIndex() const override;
 
  private:
   const int default_index_;

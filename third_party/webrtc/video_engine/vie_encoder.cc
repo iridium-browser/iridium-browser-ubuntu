@@ -26,6 +26,7 @@
 #include "webrtc/system_wrappers/interface/clock.h"
 #include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
 #include "webrtc/system_wrappers/interface/logging.h"
+#include "webrtc/system_wrappers/interface/metrics.h"
 #include "webrtc/system_wrappers/interface/tick_util.h"
 #include "webrtc/system_wrappers/interface/trace_event.h"
 #include "webrtc/video_engine/include/vie_codec.h"
@@ -109,8 +110,10 @@ class ViEPacedSenderCallback : public PacedSender::Callback {
       : owner_(owner) {
   }
   virtual ~ViEPacedSenderCallback() {}
-  virtual bool TimeToSendPacket(uint32_t ssrc, uint16_t sequence_number,
-                                int64_t capture_time_ms, bool retransmission) {
+  virtual bool TimeToSendPacket(uint32_t ssrc,
+                                uint16_t sequence_number,
+                                int64_t capture_time_ms,
+                                bool retransmission) {
     return owner_->TimeToSendPacket(ssrc, sequence_number, capture_time_ms,
                                     retransmission);
   }
@@ -154,7 +157,8 @@ ViEEncoder::ViEEncoder(int32_t engine_id,
     picture_id_rpsi_(0),
     qm_callback_(NULL),
     video_suspended_(false),
-    pre_encode_callback_(NULL) {
+    pre_encode_callback_(NULL),
+    start_ms_(Clock::GetRealTimeClock()->TimeInMilliseconds()) {
   RtpRtcp::Configuration configuration;
   configuration.id = ViEModuleId(engine_id_, channel_id_);
   configuration.audio = false;  // Video.
@@ -162,9 +166,12 @@ ViEEncoder::ViEEncoder(int32_t engine_id,
   default_rtp_rtcp_.reset(RtpRtcp::CreateRtpRtcp(configuration));
   bitrate_observer_.reset(new ViEBitrateObserver(this));
   pacing_callback_.reset(new ViEPacedSenderCallback(this));
-  paced_sender_.reset(
-      new PacedSender(Clock::GetRealTimeClock(), pacing_callback_.get(),
-                      PacedSender::kDefaultInitialPaceKbps, 0));
+  paced_sender_.reset(new PacedSender(
+      Clock::GetRealTimeClock(),
+      pacing_callback_.get(),
+      kDefaultStartBitrateKbps,
+      PacedSender::kDefaultPaceMultiplier * kDefaultStartBitrateKbps,
+      0));
 }
 
 bool ViEEncoder::Init() {
@@ -220,6 +227,7 @@ bool ViEEncoder::Init() {
 }
 
 ViEEncoder::~ViEEncoder() {
+  UpdateHistograms();
   if (bitrate_controller_) {
     bitrate_controller_->RemoveBitrateObserver(bitrate_observer_.get());
   }
@@ -230,6 +238,25 @@ ViEEncoder::~ViEEncoder() {
   VideoCodingModule::Destroy(&vcm_);
   VideoProcessingModule::Destroy(&vpm_);
   delete qm_callback_;
+}
+
+void ViEEncoder::UpdateHistograms() {
+  const float kMinCallLengthInMinutes = 0.5f;
+  float elapsed_minutes =
+      (Clock::GetRealTimeClock()->TimeInMilliseconds() - start_ms_) / 60000.0f;
+  if (elapsed_minutes < kMinCallLengthInMinutes) {
+    return;
+  }
+  webrtc::VCMFrameCount frames;
+  if (vcm_.SentFrameCount(frames) != VCM_OK) {
+    return;
+  }
+  uint32_t total_frames = frames.numKeyFrames + frames.numDeltaFrames;
+  if (total_frames > 0) {
+    RTC_HISTOGRAM_COUNTS_1000("WebRTC.Video.KeyFramesSentInPermille",
+        static_cast<int>(
+            (frames.numKeyFrames * 1000.0f / total_frames) + 0.5f));
+  }
 }
 
 int ViEEncoder::Owner() const {
@@ -368,6 +395,7 @@ int32_t ViEEncoder::SetEncoder(const webrtc::VideoCodec& video_codec) {
     pad_up_to_bitrate_kbps = min_transmit_bitrate_kbps_;
 
   paced_sender_->UpdateBitrate(
+      video_codec.startBitrate,
       PacedSender::kDefaultPaceMultiplier * video_codec.startBitrate,
       pad_up_to_bitrate_kbps);
 
@@ -442,7 +470,29 @@ bool ViEEncoder::EncoderPaused() const {
         std::max(static_cast<int>(target_delay_ms_ * kEncoderPausePacerMargin),
                  kMinPacingDelayMs);
   }
+  if (paced_sender_->ExpectedQueueTimeMs() >
+      PacedSender::kDefaultMaxQueueLengthMs) {
+    // Too much data in pacer queue, drop frame.
+    return true;
+  }
   return !network_is_transmitting_;
+}
+
+void ViEEncoder::TraceFrameDropStart() {
+  // Start trace event only on the first frame after encoder is paused.
+  if (!encoder_paused_and_dropped_frame_) {
+    TRACE_EVENT_ASYNC_BEGIN0("webrtc", "EncoderPaused", this);
+  }
+  encoder_paused_and_dropped_frame_ = true;
+  return;
+}
+
+void ViEEncoder::TraceFrameDropEnd() {
+  // End trace event on first frame after encoder resumes, if frame was dropped.
+  if (encoder_paused_and_dropped_frame_) {
+    TRACE_EVENT_ASYNC_END0("webrtc", "EncoderPaused", this);
+  }
+  encoder_paused_and_dropped_frame_ = false;
 }
 
 RtpRtcp* ViEEncoder::SendRtpRtcpModule() {
@@ -461,16 +511,10 @@ void ViEEncoder::DeliverFrame(int id,
     CriticalSectionScoped cs(data_cs_.get());
     time_of_last_incoming_frame_ms_ = TickTime::MillisecondTimestamp();
     if (EncoderPaused()) {
-      if (!encoder_paused_and_dropped_frame_) {
-        TRACE_EVENT_ASYNC_BEGIN0("webrtc", "EncoderPaused", this);
-      }
-      encoder_paused_and_dropped_frame_ = true;
+      TraceFrameDropStart();
       return;
     }
-    if (encoder_paused_and_dropped_frame_) {
-      TRACE_EVENT_ASYNC_END0("webrtc", "EncoderPaused", this);
-    }
-    encoder_paused_and_dropped_frame_ = false;
+    TraceFrameDropEnd();
   }
 
   // Convert render time, in ms, to RTP timestamp.
@@ -674,15 +718,10 @@ void ViEEncoder::SetSenderBufferingMode(int target_delay_ms) {
     // Disable external frame-droppers.
     vcm_.EnableFrameDropper(false);
     vpm_.EnableTemporalDecimation(false);
-    // We don't put any limits on the pacer queue when running in buffered mode
-    // since the encoder will be paused if the queue grow too large.
-    paced_sender_->set_max_queue_length_ms(-1);
   } else {
     // Real-time mode - enable frame droppers.
     vpm_.EnableTemporalDecimation(true);
     vcm_.EnableFrameDropper(true);
-    paced_sender_->set_max_queue_length_ms(
-        PacedSender::kDefaultMaxQueueLengthMs);
   }
 }
 
@@ -885,6 +924,7 @@ void ViEEncoder::OnNetworkChanged(const uint32_t bitrate_bps,
       pad_up_to_bitrate_kbps = bitrate_kbps;
 
     paced_sender_->UpdateBitrate(
+        bitrate_kbps,
         PacedSender::kDefaultPaceMultiplier * bitrate_kbps,
         pad_up_to_bitrate_kbps);
     default_rtp_rtcp_->SetTargetSendBitrate(stream_bitrates);

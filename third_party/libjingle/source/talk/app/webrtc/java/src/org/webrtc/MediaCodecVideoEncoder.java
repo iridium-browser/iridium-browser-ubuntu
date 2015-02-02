@@ -43,7 +43,7 @@ import java.nio.ByteBuffer;
 // This class is an implementation detail of the Java PeerConnection API.
 // MediaCodec is thread-hostile so this class must be operated on a single
 // thread.
-class MediaCodecVideoEncoder {
+public class MediaCodecVideoEncoder {
   // This class is constructed, operated, and destroyed by its C++ incarnation,
   // so the class and its methods have non-public visibility.  The API this
   // class exposes aims to mimic the webrtc::VideoEncoder API as closely as
@@ -140,7 +140,7 @@ class MediaCodecVideoEncoder {
     return null;  // No HW VP8 encoder.
   }
 
-  private static boolean isPlatformSupported() {
+  public static boolean isPlatformSupported() {
     return findVp8HwEncoder() != null;
   }
 
@@ -149,6 +149,16 @@ class MediaCodecVideoEncoder {
       throw new RuntimeException(
           "MediaCodecVideoEncoder previously operated on " + mediaCodecThread +
           " but is now called on " + Thread.currentThread());
+    }
+  }
+
+  static MediaCodec createByCodecName(String codecName) {
+    try {
+      // In the L-SDK this call can throw IOException so in order to work in
+      // both cases catch an exception.
+      return MediaCodec.createByCodecName(codecName);
+    } catch (Exception e) {
+      return null;
     }
   }
 
@@ -175,7 +185,7 @@ class MediaCodecVideoEncoder {
       format.setInteger(MediaFormat.KEY_FRAME_RATE, fps);
       format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 100);
       Log.d(TAG, "  Format: " + format);
-      mediaCodec = MediaCodec.createByCodecName(properties.codecName);
+      mediaCodec = createByCodecName(properties.codecName);
       if (mediaCodec == null) {
         return null;
       }

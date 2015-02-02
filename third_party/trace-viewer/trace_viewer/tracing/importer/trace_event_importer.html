@@ -5,13 +5,14 @@ Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
 
+<link rel="import" href="/base/quad.html">
 <link rel="import" href="/tracing/trace_model.html">
 <link rel="import" href="/tracing/color_scheme.html">
 <link rel="import" href="/tracing/importer/importer.html">
-<link rel="import" href="/tvcm/quad.html">
 <link rel="import" href="/tracing/trace_model/instant_event.html">
 <link rel="import" href="/tracing/trace_model/flow_event.html">
 <link rel="import" href="/tracing/trace_model/counter_series.html">
+<link rel="import" href="/tracing/trace_model/slice_group.html">
 
 <script>
 'use strict';
@@ -20,7 +21,7 @@ found in the LICENSE file.
  * @fileoverview TraceEventImporter imports TraceEvent-formatted data
  * into the provided model.
  */
-tvcm.exportTo('tracing.importer', function() {
+tv.exportTo('tracing.importer', function() {
 
   var Importer = tracing.importer.Importer;
 
@@ -206,7 +207,7 @@ tvcm.exportTo('tracing.importer', function() {
       if (ctr.numSeries === 0) {
         for (var seriesName in event.args) {
           ctr.addSeries(new tracing.trace_model.CounterSeries(seriesName,
-              tvcm.ui.getStringColorId(ctr.name + '.' + seriesName)));
+              tv.ui.getStringColorId(ctr.name + '.' + seriesName)));
         }
 
         if (ctr.numSeries === 0) {
@@ -352,7 +353,7 @@ tvcm.exportTo('tracing.importer', function() {
           break;
       }
 
-      var colorId = tvcm.ui.getStringColorId(event.name);
+      var colorId = tv.ui.getStringColorId(event.name);
       var instantEvent = new constructor(event.cat, event.name,
           colorId, event.ts / 1000, this.deepCopyIfNeeded_(event.args));
 
@@ -381,11 +382,11 @@ tvcm.exportTo('tracing.importer', function() {
       var thread = this.model_.getOrCreateProcess(event.pid)
         .getOrCreateThread(event.tid);
 
-      var id = 'te-' + tvcm.GUID.allocate();
+      var id = 'te-' + tv.GUID.allocate();
       var stackFrame = new tracing.trace_model.StackFrame(
           undefined, id,
           event.cat, event.name,
-          tvcm.ui.getStringColorId(event.name));
+          tv.ui.getStringColorId(event.name));
       this.model_.addStackFrame(stackFrame);
 
       var sample = new tracing.trace_model.Sample(
@@ -409,7 +410,8 @@ tvcm.exportTo('tracing.importer', function() {
         } else if (event.ph === 'X') {
           this.processCompleteEvent(event);
 
-        } else if (event.ph === 'S' || event.ph === 'F' || event.ph === 'T' ||
+        } else if (event.ph === 'b' || event.ph === 'e' || event.ph === 'n' ||
+                   event.ph === 'S' || event.ph === 'F' || event.ph === 'T' ||
                    event.ph === 'p') {
           this.processAsyncEvent(event);
 
@@ -455,7 +457,7 @@ tvcm.exportTo('tracing.importer', function() {
         var frame = new tracing.trace_model.StackFrame(
             undefined, id,
             event.category, event.name,
-            tvcm.ui.getStringColorId(textForColor));
+            tv.ui.getStringColorId(textForColor));
         m.addStackFrame(frame);
       }
       for (var id in events) {
@@ -559,6 +561,187 @@ tvcm.exportTo('tracing.importer', function() {
 
       this.allAsyncEvents_.sort(function(x, y) {
         var d = x.event.ts - y.event.ts;
+        if (d !== 0)
+          return d;
+        return x.sequenceNumber - y.sequenceNumber;
+      });
+
+      var legacyEvents = [];
+      // Group nestable async events by ID. Events with the same ID should
+      // belong to the same parent async event.
+      var nestableAsyncEventsByID = {};
+      for (var i = 0; i < this.allAsyncEvents_.length; i++) {
+        var asyncEventState = this.allAsyncEvents_[i];
+        var event = asyncEventState.event;
+        if (event.ph === 'S' || event.ph === 'F' || event.ph === 'T' ||
+            event.ph === 'p') {
+          legacyEvents.push(asyncEventState);
+          continue;
+        }
+        if (event.name === undefined) {
+          this.model_.importWarning({
+            type: 'async_slice_parse_error',
+            message: 'Nestable async events (ph: b, e, or n) require a ' +
+                'name parameter.'
+          });
+          continue;
+        }
+
+        var id = event.id;
+        if (id === undefined) {
+          this.model_.importWarning({
+            type: 'async_slice_parse_error',
+            message: 'Nestable async events (ph: b, e, or n) require an ' +
+                'id parameter.'
+          });
+          continue;
+        }
+        if (nestableAsyncEventsByID[id] === undefined)
+           nestableAsyncEventsByID[id] = [];
+        nestableAsyncEventsByID[id].push(asyncEventState);
+      }
+      // Handle legacy async events.
+      this.createLegacyAsyncSlices_(legacyEvents);
+
+      // Parse nestable async events into AsyncSlices.
+      for (var id in nestableAsyncEventsByID) {
+        var eventStateEntries = nestableAsyncEventsByID[id];
+        // Stack of enclosing BEGIN events.
+        var parentStack = [];
+        for (var i = 0; i < eventStateEntries.length; ++i) {
+          var eventStateEntry = eventStateEntries[i];
+          // If this is the end of an event, match it to the start.
+          if (eventStateEntry.event.ph === 'e') {
+            // Walk up the parent stack to find the corresponding BEGIN for
+            // this END.
+            var parentIndex = -1;
+            for (var k = parentStack.length - 1; k >= 0; --k) {
+              if (parentStack[k].event.name === eventStateEntry.event.name) {
+                parentIndex = k;
+                break;
+              }
+            }
+            if (parentIndex === -1) {
+              // Unmatched end.
+              eventStateEntry.finished = false;
+            } else {
+              parentStack[parentIndex].end = eventStateEntry;
+              // Pop off all enclosing unmatched BEGINs util parentIndex.
+              while (parentIndex < parentStack.length) {
+                parentStack.pop();
+              }
+            }
+          }
+          // Inherit the current parent.
+          if (parentStack.length > 0)
+            eventStateEntry.parentEntry = parentStack[parentStack.length - 1];
+          if (eventStateEntry.event.ph === 'b')
+            parentStack.push(eventStateEntry);
+        }
+        var topLevelSlices = [];
+        for (var i = 0; i < eventStateEntries.length; ++i) {
+          var eventStateEntry = eventStateEntries[i];
+          // Skip matched END, as its slice will be created when we
+          // encounter its corresponding BEGIN.
+          if (eventStateEntry.event.ph === 'e' &&
+              eventStateEntry.finished === undefined) {
+            continue;
+          }
+          var startState = undefined;
+          var endState = undefined;
+          var sliceArgs = undefined;
+          var sliceError = undefined;
+          if (eventStateEntry.event.ph === 'n') {
+            startState = eventStateEntry;
+            endState = eventStateEntry;
+            sliceArgs = eventStateEntry.event.args;
+          } else if (eventStateEntry.event.ph === 'b'){
+            if (eventStateEntry.end === undefined) {
+              // Unmatched BEGIN. End it when last event with this ID ends.
+              eventStateEntry.end =
+                  eventStateEntries[eventStateEntries.length - 1];
+              sliceError =
+                  "Slice has no matching END. End time has been adjusted.";
+              this.model_.importWarning({
+                type: 'async_slice_parse_error',
+                message: 'Nestable async BEGIN event at ' +
+                    eventStateEntry.event.ts + ' with name=' +
+                    eventStateEntry.event.name +
+                    ' and id=' + eventStateEntry.event.id + ' was unmatched.'
+              });
+              sliceArgs = eventStateEntry.event.args;
+            } else {
+              // Include args for both END and BEGIN for a matched pair.
+              var concatenateArguments = function(args1, args2) {
+                if (args1.params === undefined || args2.params === undefined)
+                  return tv.concatenateObjects(args1, args2);
+                // Make an argument object to hold the combined params.
+                var args3 = {};
+                args3.params = tv.concatenateObjects(args1.params, args2.params);
+                return tv.concatenateObjects(args1, args2, args3);
+              }
+              sliceArgs = concatenateArguments(eventStateEntry.event.args,
+                                               eventStateEntry.end.event.args);
+            }
+            startState = eventStateEntry;
+            endState = eventStateEntry.end;
+          } else {
+            // Unmatched END. Start it at the first event with this ID starts.
+            sliceError =
+                "Slice has no matching BEGIN. Start time has been adjusted.";
+            this.model_.importWarning({
+              type: 'async_slice_parse_error',
+              message: 'Nestable async END event at ' +
+                  eventStateEntry.event.ts + ' with name=' +
+                  eventStateEntry.event.name +
+                  ' and id=' + eventStateEntry.event.id + ' was unmatched.'
+            });
+            startState = eventStateEntries[0];
+            endState = eventStateEntry;
+            sliceArgs = eventStateEntry.event.args;
+          }
+
+          var asyncSliceConstructor =
+             tracing.trace_model.AsyncSlice.getConstructor(
+                eventStateEntry.event.cat,
+                eventStateEntry.event.name);
+          var slice = new asyncSliceConstructor(
+              eventStateEntry.event.cat,
+              eventStateEntry.event.name,
+              tv.ui.getStringColorId(eventStateEntry.event.name),
+              startState.event.ts / 1000,
+              sliceArgs,
+              (endState.event.ts - startState.event.ts) / 1000);
+
+          slice.startThread = startState.thread;
+          slice.endThread = endState.thread;
+          slice.id = id;
+          if (sliceError !== undefined)
+            slice.error = sliceError;
+          eventStateEntry.slice = slice;
+          // Add slice to parent slice if there is a parent. Otherwise threat
+          // it as a top level slice.
+          if (eventStateEntry.parentEntry !== undefined &&
+              eventStateEntry.parentEntry.slice !== undefined) {
+            if (eventStateEntry.parentEntry.slice.subSlices === undefined)
+              eventStateEntry.parentEntry.slice.subSlices = [];
+            eventStateEntry.parentEntry.slice.subSlices.push(slice);
+          } else {
+            topLevelSlices.push(slice);
+          }
+        }
+        for (var si = 0; si < topLevelSlices.length; si++) {
+          topLevelSlices[si].startThread.asyncSliceGroup.push(topLevelSlices[si]);
+        }
+      }
+    },
+
+    createLegacyAsyncSlices_: function(legacyEvents) {
+      if (legacyEvents.length === 0)
+        return;
+
+      legacyEvents.sort(function(x, y) {
+        var d = x.event.ts - y.event.ts;
         if (d != 0)
           return d;
         return x.sequenceNumber - y.sequenceNumber;
@@ -566,9 +749,8 @@ tvcm.exportTo('tracing.importer', function() {
 
       var asyncEventStatesByNameThenID = {};
 
-      var allAsyncEvents = this.allAsyncEvents_;
-      for (var i = 0; i < allAsyncEvents.length; i++) {
-        var asyncEventState = allAsyncEvents[i];
+      for (var i = 0; i < legacyEvents.length; i++) {
+        var asyncEventState = legacyEvents[i];
 
         var event = asyncEventState.event;
         var name = event.name;
@@ -627,10 +809,14 @@ tvcm.exportTo('tracing.importer', function() {
 
           if (event.ph === 'F') {
             // Create a slice from start to end.
-            var slice = new tracing.trace_model.AsyncSlice(
+            var asyncSliceConstructor =
+               tracing.trace_model.AsyncSlice.getConstructor(
+                  events[0].event.cat,
+                  name);
+            var slice = new asyncSliceConstructor(
                 events[0].event.cat,
                 name,
-                tvcm.ui.getStringColorId(name),
+                tv.ui.getStringColorId(name),
                 events[0].event.ts / 1000,
                 this.deepCopyIfNeeded_(events[0].event.args),
                 (event.ts - events[0].event.ts) / 1000);
@@ -662,12 +848,16 @@ tvcm.exportTo('tracing.importer', function() {
               if (targetEvent.event.ph == 'T' || targetEvent.event.ph == 'p')
                 subName = subName + ':' + targetEvent.event.args.step;
 
-              var subSlice = new tracing.trace_model.AsyncSlice(
+              var asyncSliceConstructor =
+                 tracing.trace_model.AsyncSlice.getConstructor(
+                    events[0].event.cat,
+                    subName);
+              var subSlice = new asyncSliceConstructor(
                   events[0].event.cat,
                   subName,
-                  tvcm.ui.getStringColorId(subName + j),
+                  tv.ui.getStringColorId(subName + j),
                   events[j - 1].event.ts / 1000,
-                  tvcm.concatenateObjects(events[0].event.args,
+                  tv.concatenateObjects(events[0].event.args,
                                           targetEvent.event.args),
                   (events[j].event.ts - events[j - 1].event.ts) / 1000);
               subSlice.startThread = events[j - 1].thread;
@@ -679,7 +869,7 @@ tvcm.exportTo('tracing.importer', function() {
               if (events[j].event.ph == 'F' && stepType == 'T') {
                 // The args for the finish event go in the last subSlice.
                 var lastSlice = slice.subSlices[slice.subSlices.length - 1];
-                lastSlice.args = tvcm.concatenateObjects(lastSlice.args,
+                lastSlice.args = tv.concatenateObjects(lastSlice.args,
                                                          event.args);
               }
             }
@@ -745,7 +935,7 @@ tvcm.exportTo('tracing.importer', function() {
             event.cat,
             event.id,
             event.name,
-            tvcm.ui.getStringColorId(event.name),
+            tv.ui.getStringColorId(event.name),
             event.ts / 1000,
             this.deepCopyIfNeeded_(event.args));
         thread.sliceGroup.pushSlice(slice);
@@ -882,7 +1072,7 @@ tvcm.exportTo('tracing.importer', function() {
         }
 
         if (instance)
-          instance.colorId = tvcm.ui.getStringColorId(instance.typeName);
+          instance.colorId = tv.ui.getStringColorId(instance.typeName);
       }
 
       this.allObjectEvents_.sort(function(x, y) {
@@ -907,7 +1097,7 @@ tvcm.exportTo('tracing.importer', function() {
     },
 
     createImplicitObjects_: function() {
-      tvcm.iterItems(this.model_.processes, function(pid, process) {
+      tv.iterItems(this.model_.processes, function(pid, process) {
         this.createImplicitObjectsForProcess_(process);
       }, this);
     },
@@ -1026,7 +1216,7 @@ tvcm.exportTo('tracing.importer', function() {
     },
 
     joinObjectRefs_: function() {
-      tvcm.iterItems(this.model_.processes, function(pid, process) {
+      tv.iterItems(this.model_.processes, function(pid, process) {
         this.joinObjectRefsForProcess_(process);
       }, this);
     },
@@ -1034,7 +1224,7 @@ tvcm.exportTo('tracing.importer', function() {
     joinObjectRefsForProcess_: function(process) {
       // Iterate the world, looking for id_refs
       var patchupsToApply = [];
-      tvcm.iterItems(process.threads, function(tid, thread) {
+      tv.iterItems(process.threads, function(tid, thread) {
         thread.asyncSliceGroup.slices.forEach(function(item) {
           this.searchItemForIDRefs_(
               patchupsToApply, process.objects, 'start', item);
@@ -1085,7 +1275,7 @@ tvcm.exportTo('tracing.importer', function() {
 
         if ((object instanceof tracing.trace_model.ObjectSnapshot) ||
             (object instanceof Float32Array) ||
-            (object instanceof tvcm.Quad))
+            (object instanceof tv.Quad))
           return;
 
         if (object instanceof Array) {

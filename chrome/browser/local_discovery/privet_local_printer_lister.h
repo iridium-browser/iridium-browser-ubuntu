@@ -45,11 +45,11 @@ class PrivetLocalPrinterLister : PrivetDeviceLister::Delegate {
   const DeviceDescription* GetDeviceDescription(const std::string& name);
 
   // PrivetDeviceLister::Delegate implementation.
-  virtual void DeviceChanged(bool added,
-                             const std::string& name,
-                             const DeviceDescription& description) OVERRIDE;
-  virtual void DeviceRemoved(const std::string& name) OVERRIDE;
-  virtual void DeviceCacheFlushed() OVERRIDE;
+  void DeviceChanged(bool added,
+                     const std::string& name,
+                     const DeviceDescription& description) override;
+  void DeviceRemoved(const std::string& name) override;
+  void DeviceCacheFlushed() override;
 
  private:
   struct DeviceContext;

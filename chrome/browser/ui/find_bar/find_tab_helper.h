@@ -19,7 +19,7 @@ class RectF;
 class FindTabHelper : public content::WebContentsObserver,
                       public content::WebContentsUserData<FindTabHelper> {
  public:
-  virtual ~FindTabHelper();
+  ~FindTabHelper() override;
 
   // Starts the Find operation by calling StartFinding on the Tab. This function
   // can be called from the outside as a result of hot-keys, so it uses the
@@ -33,6 +33,10 @@ class FindTabHelper : public content::WebContentsObserver,
 
   // Stops the current Find operation.
   void StopFinding(FindBarController::SelectionAction selection_action);
+
+  // When the user commits to a search query or jumps from one result
+  // to the next, move accessibility focus to the next find result.
+  void ActivateFindInPageResultForAccessibility();
 
   // Accessors/Setters for find_ui_active_.
   bool find_ui_active() const { return find_ui_active_; }

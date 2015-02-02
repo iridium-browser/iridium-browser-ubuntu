@@ -8,7 +8,8 @@
 
 
 #include "GrResourceCache2.h"
-#include "GrGpuResource.h"
+#include "GrGpuResource.h"  
+#include "SkRefCnt.h"
 
 GrResourceCache2::~GrResourceCache2() {
     this->releaseAll();
@@ -54,4 +55,37 @@ void GrResourceCache2::releaseAll() {
     }
     SkASSERT(!fScratchMap.count());
     SkASSERT(!fCount);
+}
+
+class GrResourceCache2::AvailableForScratchUse {
+public:
+    AvailableForScratchUse(bool rejectPendingIO) : fRejectPendingIO(rejectPendingIO) { }
+
+    bool operator()(const GrGpuResource* resource) const {
+        if (!resource->reffedOnlyByCache() || !resource->isScratch()) {
+            return false;
+        }
+
+        return !fRejectPendingIO || !resource->internalHasPendingIO();
+    }
+
+private:
+    bool fRejectPendingIO;
+};
+
+GrGpuResource* GrResourceCache2::findAndRefScratchResource(const GrResourceKey& scratchKey,
+                                                           uint32_t flags) {
+    SkASSERT(scratchKey.isScratch());
+
+    if (flags & (kPreferNoPendingIO_ScratchFlag | kRequireNoPendingIO_ScratchFlag)) {
+        GrGpuResource* resource = fScratchMap.find(scratchKey, AvailableForScratchUse(true));
+        if (resource) {
+            return SkRef(resource);
+        } else if (flags & kRequireNoPendingIO_ScratchFlag) {
+            return NULL;
+        }
+        // TODO: fail here when kPrefer is specified, we didn't find a resource without pending io,
+        // but there is still space in our budget for the resource.
+    }
+    return SkSafeRef(fScratchMap.find(scratchKey, AvailableForScratchUse(false)));
 }

@@ -238,7 +238,7 @@ TEST_F(QuicReceivedPacketManagerTest, ReceivedPacketEntropyHash) {
   }
   // Reorder by 5 when 2 is received after 7.
   EXPECT_EQ(5u, stats_.max_sequence_reordering);
-  EXPECT_EQ(0u, stats_.max_time_reordering_us);
+  EXPECT_EQ(0, stats_.max_time_reordering_us);
   EXPECT_EQ(2u, stats_.packets_reordered);
 }
 
@@ -285,7 +285,7 @@ TEST_F(QuicReceivedPacketManagerTest, SetCumulativeEntropyUpTo) {
 
   // No reordering.
   EXPECT_EQ(0u, stats_.max_sequence_reordering);
-  EXPECT_EQ(0u, stats_.max_time_reordering_us);
+  EXPECT_EQ(0, stats_.max_time_reordering_us);
   EXPECT_EQ(0u, stats_.packets_reordered);
 }
 
@@ -314,6 +314,7 @@ TEST_F(QuicReceivedPacketManagerTest, UpdateReceivedPacketInfo) {
   // When UpdateReceivedPacketInfo with a time earlier than the time of the
   // largest observed packet, make sure that the delta is 0, not negative.
   EXPECT_EQ(QuicTime::Delta::Zero(), ack.delta_time_largest_observed);
+  EXPECT_FALSE(ack.received_packet_times.empty());
 
   QuicTime four_ms = QuicTime::Zero().Add(QuicTime::Delta::FromMilliseconds(4));
   received_manager_.UpdateReceivedPacketInfo(&ack, four_ms);
@@ -330,7 +331,7 @@ TEST_F(QuicReceivedPacketManagerTest, UpdateReceivedConnectionStats) {
       2, 0, QuicTime::Zero().Add(QuicTime::Delta::FromMilliseconds(1)));
 
   EXPECT_EQ(4u, stats_.max_sequence_reordering);
-  EXPECT_EQ(1000u, stats_.max_time_reordering_us);
+  EXPECT_EQ(1000, stats_.max_time_reordering_us);
   EXPECT_EQ(1u, stats_.packets_reordered);
 }
 

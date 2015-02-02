@@ -32,15 +32,26 @@ std::vector<APIPermissionInfo*> ExtensionsAPIPermissions::GetAllPermissions()
   APIPermissionInfo::InitInfo permissions_to_register[] = {
       {APIPermission::kAlphaEnabled, "app.window.alpha"},
       {APIPermission::kAlwaysOnTopWindows, "app.window.alwaysOnTop"},
+      {APIPermission::kAppView, "appview",
+        APIPermissionInfo::kFlagCannotBeOptional},
       {APIPermission::kAudioCapture, "audioCapture",
        APIPermissionInfo::kFlagNone, IDS_EXTENSION_PROMPT_WARNING_AUDIO_CAPTURE,
        PermissionMessage::kAudioCapture},
+      {APIPermission::kBluetoothPrivate, "bluetoothPrivate",
+       APIPermissionInfo::kFlagCannotBeOptional,
+       IDS_EXTENSION_PROMPT_WARNING_BLUETOOTH_PRIVATE,
+       PermissionMessage::kBluetoothPrivate},
+      {APIPermission::kDeclarativeWebRequest, "declarativeWebRequest",
+       APIPermissionInfo::kFlagNone,
+       IDS_EXTENSION_PROMPT_WARNING_DECLARATIVE_WEB_REQUEST,
+       PermissionMessage::kDeclarativeWebRequest},
       {APIPermission::kDns, "dns"},
       {APIPermission::kExternallyConnectableAllUrls,
        "externally_connectable.all_urls"},
       {APIPermission::kFullscreen, "app.window.fullscreen"},
       {APIPermission::kHid, "hid", APIPermissionInfo::kFlagNone,
        IDS_EXTENSION_PROMPT_WARNING_HID, PermissionMessage::kHid},
+      {APIPermission::kImeWindowEnabled, "app.window.ime"},
       {APIPermission::kOverrideEscFullscreen,
        "app.window.fullscreen.overrideEsc"},
       {APIPermission::kPower, "power"},
@@ -69,6 +80,9 @@ std::vector<APIPermissionInfo*> ExtensionsAPIPermissions::GetAllPermissions()
       {APIPermission::kVideoCapture, "videoCapture",
        APIPermissionInfo::kFlagNone, IDS_EXTENSION_PROMPT_WARNING_VIDEO_CAPTURE,
        PermissionMessage::kVideoCapture},
+      {APIPermission::kVpnProvider, "vpnProvider",
+       APIPermissionInfo::kFlagCannotBeOptional,
+       IDS_EXTENSION_PROMPT_WARNING_VPN, PermissionMessage::kVpnProvider},
       // NOTE(kalman): This is provided by a manifest property but needs to
       // appear in the install permission dialogue, so we need a fake
       // permission for it. See http://crbug.com/247857.
@@ -77,13 +91,15 @@ std::vector<APIPermissionInfo*> ExtensionsAPIPermissions::GetAllPermissions()
            APIPermissionInfo::kFlagInternal,
        IDS_EXTENSION_PROMPT_WARNING_WEB_CONNECTABLE,
        PermissionMessage::kWebConnectable},
+      {APIPermission::kWebRequest, "webRequest"},
+      {APIPermission::kWebRequestBlocking, "webRequestBlocking"},
       {APIPermission::kWebView, "webview",
        APIPermissionInfo::kFlagCannotBeOptional},
       {APIPermission::kWindowShape, "app.window.shape"},
   };
 
   std::vector<APIPermissionInfo*> permissions;
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(permissions_to_register); ++i)
+  for (size_t i = 0; i < arraysize(permissions_to_register); ++i)
     permissions.push_back(new APIPermissionInfo(permissions_to_register[i]));
   return permissions;
 }

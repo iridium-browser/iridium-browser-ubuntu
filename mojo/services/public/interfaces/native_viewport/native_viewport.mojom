@@ -2,40 +2,33 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import "mojo/services/gles2/command_buffer.mojom"
-import "mojo/services/public/interfaces/geometry/geometry.mojom"
-import "mojo/services/public/interfaces/input_events/input_events.mojom"
-import "mojo/services/public/interfaces/surfaces/surface_id.mojom"
+module mojo;
 
-module mojo {
+import "mojo/services/public/interfaces/geometry/geometry.mojom";
+import "mojo/services/public/interfaces/gpu/command_buffer.mojom";
+import "mojo/services/public/interfaces/input_events/input_events.mojom";
+import "mojo/services/public/interfaces/surfaces/surface_id.mojom";
 
 [Client=NativeViewportClient]
 interface NativeViewport {
-  Create(Size size);
+  // TODO(sky): having a create function is awkward. Should there be a factory
+  // to create the NativeViewport that takes the size?
+  Create(Size size) => (uint64 native_viewport_id);
   Show();
   Hide();
   Close();
-  SetBounds(Size size);
+  SetSize(Size size);
   SubmittedFrame(SurfaceId surface_id);
+  SetEventDispatcher(NativeViewportEventDispatcher dispatcher);
 };
 
-interface NativeViewportClient {
-  OnCreated(uint64 native_viewport_id);
-  OnBoundsChanged(Size size);
-  OnDestroyed();
+interface NativeViewportEventDispatcher {
   OnEvent(Event event) => ();
 };
 
-// Connect to this interface before any other connections are made to configure
-// the NativeViewport service.
-interface NativeViewportConfig {
-  // Call UseTestConfig() and block on the reply. This will ensure that the
-  // correct global initialization is done before subsequent connections.
-  UseTestConfig() => ();
-
-  // Call UseHeadlessConfig() and block on the reply. This will ensure that
-  // the native viewport is later created in headless mode.
-  UseHeadlessConfig() => ();
+interface NativeViewportClient {
+  // OnSizeChanged() is sent at least once after the callback from Create() is
+  // called.
+  OnSizeChanged(Size size);
+  OnDestroyed();
 };
-
-}

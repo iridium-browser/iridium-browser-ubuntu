@@ -5,7 +5,6 @@
 #include "base/files/file_path.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/memory/ref_counted.h"
-#include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
@@ -127,9 +126,9 @@ class PermissionsUpdaterListener : public content::NotificationObserver {
   UpdatedExtensionPermissionsInfo::Reason reason() const { return reason_; }
 
  private:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE {
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override {
     received_notification_ = true;
     UpdatedExtensionPermissionsInfo* info =
         content::Details<UpdatedExtensionPermissionsInfo>(details).ptr();

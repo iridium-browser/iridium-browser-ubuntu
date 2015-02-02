@@ -11,7 +11,6 @@
 #include "chrome/browser/download/download_shelf.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_navigator.h"
@@ -24,7 +23,6 @@
 #include "chrome/browser/ui/webui/options/content_settings_handler.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
-#include "components/signin/core/browser/signin_manager.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "google_apis/gaia/gaia_urls.h"
@@ -37,6 +35,11 @@
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/genius_app/app_id.h"
 #include "extensions/browser/extension_registry.h"
+#endif
+
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#include "chrome/browser/signin/signin_manager_factory.h"
+#include "components/signin/core/browser/signin_manager.h"
 #endif
 
 using base::UserMetricsAction;
@@ -79,7 +82,19 @@ void ShowHelpImpl(Browser* browser,
       extensions::ExtensionRegistry::Get(profile)->GetExtensionById(
           genius_app::kGeniusAppId,
           extensions::ExtensionRegistry::EVERYTHING);
-  OpenApplication(AppLaunchParams(profile, extension, 0, host_desktop_type));
+  AppLaunchParams params(profile, extension, 0, host_desktop_type);
+  switch (source) {
+    case HELP_SOURCE_KEYBOARD:
+      params.source = extensions::SOURCE_KEYBOARD;
+      break;
+    case HELP_SOURCE_MENU:
+      params.source = extensions::SOURCE_SYSTEM_TRAY;
+      break;
+    case HELP_SOURCE_WEBUI:
+      params.source = extensions::SOURCE_ABOUT_PAGE;
+      break;
+  }
+  OpenApplication(params);
 #else
   GURL url;
   switch (source) {
@@ -194,6 +209,10 @@ void ShowSlow(Browser* browser) {
 #endif
 }
 
+void ShowMemory(Browser* browser) {
+  ShowSingletonTab(browser, GURL(kChromeUIMemoryURL));
+}
+
 GURL GetSettingsUrl(const std::string& sub_page) {
   std::string url = std::string(kChromeUISettingsURL) + sub_page;
 #if defined(OS_CHROMEOS)
@@ -301,6 +320,7 @@ void ShowSearchEngineSettings(Browser* browser) {
   ShowSettingsSubPage(browser, kSearchEnginesSubPage);
 }
 
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
 void ShowBrowserSignin(Browser* browser, signin::Source source) {
   Profile* original_profile = browser->profile()->GetOriginalProfile();
   SigninManagerBase* manager =
@@ -324,5 +344,6 @@ void ShowBrowserSignin(Browser* browser, signin::Source source) {
     DCHECK_GT(browser->tab_strip_model()->count(), 0);
   }
 }
+#endif
 
 }  // namespace chrome

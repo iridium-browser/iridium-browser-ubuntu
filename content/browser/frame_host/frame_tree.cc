@@ -47,19 +47,23 @@ bool FrameTreeNodeForId(int64 frame_tree_node_id,
 // given RenderViewHost's process.
 bool ResetNodesForNewProcess(RenderViewHost* render_view_host,
                              FrameTreeNode* node) {
-  if (render_view_host == node->current_frame_host()->render_view_host())
+  if (render_view_host == node->current_frame_host()->render_view_host()) {
+    // Ensure that if the frame host is reused for a new RenderFrame, it will
+    // set up the Mojo connection with that frame.
+    node->current_frame_host()->InvalidateMojoConnection();
     node->ResetForNewProcess();
+  }
   return true;
 }
 
-bool CreateProxyForSiteInstance(FrameTreeNode* source_node,
-                                const scoped_refptr<SiteInstance>& instance,
+bool CreateProxyForSiteInstance(const scoped_refptr<SiteInstance>& instance,
                                 FrameTreeNode* node) {
-  // Skip the node that initiated the creation.
-  if (source_node == node)
-    return true;
-
-  node->render_manager()->CreateRenderFrameProxy(instance.get());
+  // If a new frame is created in the current SiteInstance, other frames in
+  // that SiteInstance don't need a proxy for the new frame.
+  SiteInstance* current_instance =
+      node->render_manager()->current_frame_host()->GetSiteInstance();
+  if (current_instance != instance.get())
+    node->render_manager()->CreateRenderFrameProxy(instance.get());
   return true;
 }
 
@@ -128,12 +132,21 @@ FrameTreeNode* FrameTree::FindByRoutingID(int routing_id, int process_id) {
 
 void FrameTree::ForEach(
     const base::Callback<bool(FrameTreeNode*)>& on_node) const {
+  ForEach(on_node, NULL);
+}
+
+void FrameTree::ForEach(
+    const base::Callback<bool(FrameTreeNode*)>& on_node,
+    FrameTreeNode* skip_this_subtree) const {
   std::queue<FrameTreeNode*> queue;
   queue.push(root_.get());
 
   while (!queue.empty()) {
     FrameTreeNode* node = queue.front();
     queue.pop();
+    if (skip_this_subtree == node)
+      continue;
+
     if (!on_node.Run(node))
       break;
 
@@ -201,7 +214,11 @@ void FrameTree::CreateProxiesForSiteInstance(
   }
 
   scoped_refptr<SiteInstance> instance(site_instance);
-  ForEach(base::Bind(&CreateProxyForSiteInstance, source, instance));
+
+  // Proxies are created in the FrameTree in response to a node navigating to a
+  // new SiteInstance. Since |source|'s navigation will replace the currently
+  // loaded document, the entire subtree under |source| will be removed.
+  ForEach(base::Bind(&CreateProxyForSiteInstance, instance), source);
 }
 
 void FrameTree::ResetForMainFrameSwap() {
@@ -245,11 +262,13 @@ RenderViewHostImpl* FrameTree::CreateRenderViewHost(SiteInstance* site_instance,
   RenderViewHostMap::iterator iter =
       render_view_host_map_.find(site_instance->GetId());
   if (iter != render_view_host_map_.end()) {
-    // If a RenderViewHost is pending shutdown for this |site_instance|, put it
-    // in the map of RenderViewHosts pending shutdown. Otherwise return the
-    // existing RenderViewHost for the SiteInstance.
-    if (iter->second->rvh_state() ==
-        RenderViewHostImpl::STATE_PENDING_SHUTDOWN) {
+    // If a RenderViewHost's main frame is pending deletion for this
+    // |site_instance|, put it in the map of RenderViewHosts pending shutdown.
+    // Otherwise return the existing RenderViewHost for the SiteInstance.
+    RenderFrameHostImpl* main_frame = static_cast<RenderFrameHostImpl*>(
+        iter->second->GetMainFrame());
+    if (main_frame->frame_tree_node()->render_manager()->IsPendingDeletion(
+            main_frame)) {
       render_view_host_pending_shutdown_map_.insert(
           std::pair<int, RenderViewHostImpl*>(site_instance->GetId(),
                                               iter->second));

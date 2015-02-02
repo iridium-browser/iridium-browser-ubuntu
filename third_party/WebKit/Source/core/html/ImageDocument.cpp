@@ -43,6 +43,7 @@
 #include "core/loader/FrameLoader.h"
 #include "core/loader/FrameLoaderClient.h"
 #include "wtf/text/StringBuilder.h"
+#include <limits>
 
 using std::min;
 
@@ -92,7 +93,7 @@ private:
     {
     }
 
-    virtual void appendBytes(const char*, size_t) OVERRIDE;
+    virtual void appendBytes(const char*, size_t) override;
     virtual void finish();
 };
 
@@ -128,8 +129,10 @@ void ImageDocumentParser::appendBytes(const char* data, size_t length)
     if (!frame->loader().client()->allowImage(!settings || settings->imagesEnabled(), document()->url()))
         return;
 
-    if (document()->cachedImage())
+    if (document()->cachedImage()) {
+        RELEASE_ASSERT(length <= std::numeric_limits<unsigned>::max());
         document()->cachedImage()->appendData(data, length);
+    }
     // Make sure the image renderer gets created because we need the renderer
     // to read the aspect ratio. See crbug.com/320244
     document()->updateRenderTreeIfNeeded();
@@ -261,12 +264,12 @@ void ImageDocument::imageClicked(int x, int y)
 
         updateLayout();
 
-        float scale = this->scale();
+        double scale = this->scale();
 
-        int scrollX = static_cast<int>(x / scale - (float)frame()->view()->width() / 2);
-        int scrollY = static_cast<int>(y / scale - (float)frame()->view()->height() / 2);
+        double scrollX = x / scale - static_cast<double>(frame()->view()->width()) / 2;
+        double scrollY = y / scale - static_cast<double>(frame()->view()->height()) / 2;
 
-        frame()->view()->setScrollPosition(IntPoint(scrollX, scrollY));
+        frame()->view()->setScrollPosition(DoublePoint(scrollX, scrollY));
     }
 }
 

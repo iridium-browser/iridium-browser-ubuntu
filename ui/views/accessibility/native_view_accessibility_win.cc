@@ -1331,6 +1331,8 @@ int32 NativeViewAccessibilityWin::MSAARole(ui::AXRole role) {
       return ROLE_SYSTEM_TITLEBAR;
     case ui::AX_ROLE_TOOLBAR:
       return ROLE_SYSTEM_TOOLBAR;
+    case ui::AX_ROLE_WEB_VIEW:
+      return ROLE_SYSTEM_GROUPING;
     case ui::AX_ROLE_WINDOW:
       return ROLE_SYSTEM_WINDOW;
     case ui::AX_ROLE_CLIENT:
@@ -1491,13 +1493,11 @@ void NativeViewAccessibilityWin::PopulateChildWidgetVector(
     return;
 
   std::set<Widget*> child_widgets;
-  Widget::GetAllChildWidgets(widget->GetNativeView(), &child_widgets);
   Widget::GetAllOwnedWidgets(widget->GetNativeView(), &child_widgets);
   for (std::set<Widget*>::const_iterator iter = child_widgets.begin();
            iter != child_widgets.end(); ++iter) {
     Widget* child_widget = *iter;
-    if (child_widget == widget)
-      continue;
+    DCHECK_NE(widget, child_widget);
 
     if (!child_widget->IsVisible())
       continue;

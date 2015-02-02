@@ -84,29 +84,14 @@ void HTMLStyleElement::finishParsingChildren()
 Node::InsertionNotificationRequest HTMLStyleElement::insertedInto(ContainerNode* insertionPoint)
 {
     HTMLElement::insertedInto(insertionPoint);
-    if (insertionPoint->inDocument() && isInShadowTree()) {
-        if (ShadowRoot* scope = containingShadowRoot())
-            scope->registerScopedHTMLStyleChild();
-    }
+    StyleElement::insertedInto(this, insertionPoint);
     return InsertionShouldCallDidNotifySubtreeInsertions;
 }
 
 void HTMLStyleElement::removedFrom(ContainerNode* insertionPoint)
 {
     HTMLElement::removedFrom(insertionPoint);
-
-    if (!insertionPoint->inDocument())
-        return;
-
-    ShadowRoot* scopingNode = containingShadowRoot();
-    if (!scopingNode)
-        scopingNode = insertionPoint->containingShadowRoot();
-
-    if (scopingNode)
-        scopingNode->unregisterScopedHTMLStyleChild();
-
-    TreeScope* containingScope = containingShadowRoot();
-    StyleElement::removedFromDocument(document(), this, scopingNode, containingScope ? *containingScope : insertionPoint->treeScope());
+    StyleElement::removedFrom(this, insertionPoint);
 }
 
 void HTMLStyleElement::didNotifySubtreeInsertionsToDocument()
@@ -133,7 +118,7 @@ const AtomicString& HTMLStyleElement::type() const
 ContainerNode* HTMLStyleElement::scopingNode()
 {
     if (!inDocument())
-        return 0;
+        return nullptr;
 
     if (isInShadowTree())
         return containingShadowRoot();

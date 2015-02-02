@@ -37,6 +37,7 @@ class URLRequestContextGetter;
 
 namespace gcm {
 
+class GCMAccountMapper;
 class GCMAppHandler;
 class GCMClientFactory;
 class GCMDelayedTaskController;
@@ -55,40 +56,33 @@ class GCMDriverDesktop : public GCMDriver {
       const scoped_refptr<base::SequencedTaskRunner>& ui_thread,
       const scoped_refptr<base::SequencedTaskRunner>& io_thread,
       const scoped_refptr<base::SequencedTaskRunner>& blocking_task_runner);
-  virtual ~GCMDriverDesktop();
+  ~GCMDriverDesktop() override;
 
   // GCMDriver overrides:
-  virtual void Shutdown() OVERRIDE;
-  virtual void OnSignedIn() OVERRIDE;
-  virtual void OnSignedOut() OVERRIDE;
-  virtual void Purge() OVERRIDE;
-  virtual void AddAppHandler(const std::string& app_id,
-                             GCMAppHandler* handler) OVERRIDE;
-  virtual void RemoveAppHandler(const std::string& app_id) OVERRIDE;
-  virtual void AddConnectionObserver(GCMConnectionObserver* observer) OVERRIDE;
-  virtual void RemoveConnectionObserver(
-      GCMConnectionObserver* observer) OVERRIDE;
-  virtual void Enable() OVERRIDE;
-  virtual void Disable() OVERRIDE;
-  virtual GCMClient* GetGCMClientForTesting() const OVERRIDE;
-  virtual bool IsStarted() const OVERRIDE;
-  virtual bool IsConnected() const OVERRIDE;
-  virtual void GetGCMStatistics(const GetGCMStatisticsCallback& callback,
-                                bool clear_logs) OVERRIDE;
-  virtual void SetGCMRecording(const GetGCMStatisticsCallback& callback,
-                               bool recording) OVERRIDE;
-  virtual void UpdateAccountMapping(
-      const AccountMapping& account_mapping) OVERRIDE;
-  virtual void RemoveAccountMapping(const std::string& account_id) OVERRIDE;
-
-  // GCMDriverDesktop specific implementation.
-  // Sets a list of accounts with OAuth2 tokens for the next checkin.
-  // |account_tokens| maps email addresses to OAuth2 access tokens.
-  // |account_removed| indicates that an account has been removed since the
-  //     last time the callback was called, which triggers an immediate checkin,
-  //     to ensure that association between device and account is removed.
-  void SetAccountsForCheckin(
-      const std::map<std::string, std::string>& account_tokens);
+  void Shutdown() override;
+  void OnSignedIn() override;
+  void OnSignedOut() override;
+  void Purge() override;
+  void AddAppHandler(const std::string& app_id,
+                     GCMAppHandler* handler) override;
+  void RemoveAppHandler(const std::string& app_id) override;
+  void AddConnectionObserver(GCMConnectionObserver* observer) override;
+  void RemoveConnectionObserver(GCMConnectionObserver* observer) override;
+  void Enable() override;
+  void Disable() override;
+  GCMClient* GetGCMClientForTesting() const override;
+  bool IsStarted() const override;
+  bool IsConnected() const override;
+  void GetGCMStatistics(const GetGCMStatisticsCallback& callback,
+                        bool clear_logs) override;
+  void SetGCMRecording(const GetGCMStatisticsCallback& callback,
+                       bool recording) override;
+  void SetAccountTokens(
+      const std::vector<GCMClient::AccountTokenInfo>& account_tokens) override;
+  void UpdateAccountMapping(const AccountMapping& account_mapping) override;
+  void RemoveAccountMapping(const std::string& account_id) override;
+  base::Time GetLastTokenFetchTime() override;
+  void SetLastTokenFetchTime(const base::Time& time) override;
 
   // Exposed for testing purpose.
   bool gcm_enabled() const { return gcm_enabled_; }
@@ -98,14 +92,13 @@ class GCMDriverDesktop : public GCMDriver {
 
  protected:
   // GCMDriver implementation:
-  virtual GCMClient::Result EnsureStarted() OVERRIDE;
-  virtual void RegisterImpl(
-      const std::string& app_id,
-      const std::vector<std::string>& sender_ids) OVERRIDE;
-  virtual void UnregisterImpl(const std::string& app_id) OVERRIDE;
-  virtual void SendImpl(const std::string& app_id,
-                        const std::string& receiver_id,
-                        const GCMClient::OutgoingMessage& message) OVERRIDE;
+  GCMClient::Result EnsureStarted() override;
+  void RegisterImpl(const std::string& app_id,
+                    const std::vector<std::string>& sender_ids) override;
+  void UnregisterImpl(const std::string& app_id) override;
+  void SendImpl(const std::string& app_id,
+                const std::string& receiver_id,
+                const GCMClient::OutgoingMessage& message) override;
 
  private:
   class IOWorker;
@@ -131,8 +124,8 @@ class GCMDriverDesktop : public GCMDriver {
                         const GCMClient::SendErrorDetails& send_error_details);
   void SendAcknowledged(const std::string& app_id,
                         const std::string& message_id);
-  void GCMClientReady(
-      const std::vector<AccountMapping>& account_mappings);
+  void GCMClientReady(const std::vector<AccountMapping>& account_mappings,
+                      const base::Time& last_token_fetch_time);
   void OnConnected(const net::IPEndPoint& ip_endpoint);
   void OnDisconnected();
 
@@ -159,6 +152,12 @@ class GCMDriverDesktop : public GCMDriver {
   // List of observers to notify when connection state changes.
   // Makes sure list is empty on destruction.
   ObserverList<GCMConnectionObserver, true> connection_observer_list_;
+
+  // Account mapper. Only works when user is signed in.
+  scoped_ptr<GCMAccountMapper> account_mapper_;
+
+  // Time of last token fetching.
+  base::Time last_token_fetch_time_;
 
   scoped_refptr<base::SequencedTaskRunner> ui_thread_;
   scoped_refptr<base::SequencedTaskRunner> io_thread_;

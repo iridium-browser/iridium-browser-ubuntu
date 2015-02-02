@@ -8,7 +8,9 @@
 #include "chrome/browser/ui/views/profiles/new_avatar_button.h"
 #include "ui/views/window/non_client_view.h"
 
-class AvatarLabel;
+#if defined(ENABLE_MANAGED_USERS)
+class SupervisedUserAvatarLabel;
+#endif
 class AvatarMenuButton;
 class BrowserFrame;
 class BrowserView;
@@ -16,16 +18,23 @@ class NewAvatarButton;
 
 // A specialization of the NonClientFrameView object that provides additional
 // Browser-specific methods.
-class BrowserNonClientFrameView : public views::NonClientFrameView {
+class BrowserNonClientFrameView : public views::NonClientFrameView,
+                                  public ProfileInfoCacheObserver {
  public:
   BrowserNonClientFrameView(BrowserFrame* frame, BrowserView* browser_view);
-  virtual ~BrowserNonClientFrameView();
+  ~BrowserNonClientFrameView() override;
 
   AvatarMenuButton* avatar_button() const { return avatar_button_; }
 
   NewAvatarButton* new_avatar_button() const { return new_avatar_button_; }
 
-  AvatarLabel* avatar_label() const { return avatar_label_; }
+#if defined(ENABLE_MANAGED_USERS)
+  SupervisedUserAvatarLabel* supervised_user_avatar_label() const {
+    return supervised_user_avatar_label_;
+  }
+
+  void OnThemeChanged() override;
+#endif
 
   // Retrieves the bounds, in non-client view coordinates within which the
   // TabStrip should be laid out.
@@ -44,9 +53,7 @@ class BrowserNonClientFrameView : public views::NonClientFrameView {
   virtual void UpdateThrobber(bool running) = 0;
 
   // Overriden from views::View.
-  virtual void VisibilityChanged(views::View* starting_from,
-                                 bool is_visible) OVERRIDE;
-  virtual void OnThemeChanged() OVERRIDE;
+  void VisibilityChanged(views::View* starting_from, bool is_visible) override;
 
  protected:
   BrowserView* browser_view() const { return browser_view_; }
@@ -62,6 +69,17 @@ class BrowserNonClientFrameView : public views::NonClientFrameView {
                                 const NewAvatarButton::AvatarButtonStyle style);
 
  private:
+  // Draws a taskbar icon if avatar are enabled, erases it otherwise.  If
+  // |taskbar_badge_avatar| is NULL, then |avatar| is used.
+  void DrawTaskbarDecoration(const gfx::Image& avatar,
+                             const gfx::Image& taskbar_badge_avatar);
+
+  // Overriden from ProfileInfoCacheObserver.
+  void OnProfileAdded(const base::FilePath& profile_path) override;
+  void OnProfileWasRemoved(const base::FilePath& profile_path,
+                           const base::string16& profile_name) override;
+  void OnProfileAvatarChanged(const base::FilePath& profile_path) override;
+
   // The frame that hosts this view.
   BrowserFrame* frame_;
 
@@ -72,8 +90,9 @@ class BrowserNonClientFrameView : public views::NonClientFrameView {
   // icon.  May be NULL for some frame styles.
   AvatarMenuButton* avatar_button_;
 
-  // Avatar label that is used for a supervised user.
-  AvatarLabel* avatar_label_;
+#if defined(ENABLE_MANAGED_USERS)
+  SupervisedUserAvatarLabel* supervised_user_avatar_label_;
+#endif
 
   // Menu button that displays the name of the active or guest profile.
   // May be NULL and will not be displayed for off the record profiles.

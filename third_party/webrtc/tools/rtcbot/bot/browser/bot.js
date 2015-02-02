@@ -25,10 +25,10 @@ function getUserMedia(constraints, onSuccessCallback, onFailCallback){
   }
 }
 
-function createPeerConnection(doneCallback, failCallback) {
+function createPeerConnection(config, doneCallback, failCallback) {
   console.log("Creating peer connection");
   var obj = {};
-  var pc = new webkitRTCPeerConnection(null);
+  var pc = new webkitRTCPeerConnection(config);
 
   expose(obj, pc, "close");
   expose(obj, pc, "createOffer");
@@ -48,12 +48,49 @@ function createPeerConnection(doneCallback, failCallback) {
     pc.addStream(tempStream);
   };
 
+  // Return an array of Objects, each Object is a copy of RTCStateReport
+  // and has the following attributes (id, type, names, and stats).
+  // names: array originaly returned by calling RTCStateReport.names().
+  // stats: dictionary of stat name as key and stat value as dictionary
+  // value.
+  obj.getStats = function(callback, mediaTrack) {
+    pc.getStats(onStatsReady, mediaTrack);
+
+    function onStatsReady(stateResponse) {
+      var outputReports = [];
+      var reports = stateResponse.result();
+      for (index in reports) {
+        var report = {};
+        report.id = reports[index].id;
+        report.type = reports[index].type;
+        report.names = reports[index].names();
+        report.stats = [];
+        populateStats(reports[index], report.stats);
+
+        outputReports.push(report);
+      }
+
+      callback(outputReports);
+    }
+
+    function populateStats(report, stats) {
+      var names = report.names();
+      for (index in names) {
+        stats.push({
+           name: names[index],
+           stat: report.stat(names[index]),
+          });
+      }
+
+    }
+  };
+
   pc.addEventListener('addstream', function(event) {
     remoteStreams[event.stream.id] = event.stream;
   });
 
   doneCallback(obj);
-}
+};
 
 function showStream(streamId, autoplay, muted) {
   var stream = getStreamFromIdentifier_(streamId);
@@ -74,11 +111,30 @@ function getStreamFromIdentifier_(id) {
     return tempStream;
   console.log(id + " is not id for stream.");
   return null;
-}
+};
+
+function downloadFile(path, onSuccess, onError) {
+  var xhr = new XMLHttpRequest();
+  function onResult() {
+    if (xhr.readyState != 4)
+      return;
+
+    if (xhr.status != 200) {
+      onError("Download request failed!");
+      return;
+    }
+    onSuccess(xhr.responseText);
+  }
+
+  xhr.onreadystatechange = onResult;
+  xhr.open('GET', path, true);
+  xhr.send();
+};
 
 connectToServer({
   ping: ping,
   getUserMedia: getUserMedia,
   createPeerConnection: createPeerConnection,
   showStream: showStream,
+  downloadFile: downloadFile,
 });

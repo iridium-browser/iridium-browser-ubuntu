@@ -24,6 +24,8 @@ grit("resources") {
 
 # GYP version: chrome/chrome_resources.gyp:chrome_resources
 #              (generate_extensions_api_resources action)
+if (enable_extensions) {
+
 grit("extensions_api_resources") {
   source = "extensions_api_resources.grd"
   output_dir = "$root_gen_dir/chrome"
@@ -31,6 +33,8 @@ grit("extensions_api_resources") {
     "grit/extensions_api_resources.h",
     "extensions_api_resources.pak",
   ]
+}
+
 }
 
 # GYP version: chrome/chrome_common.gyp:common
@@ -62,6 +66,7 @@ static_library("common") {
     "//components/variations",
     "//content/public/common",
     "//crypto",
+    "//extensions/common:common_constants",
     "//media/cast:net",
     "//net",
     "//skia",
@@ -99,13 +104,12 @@ static_library("common") {
         gypi_values.chrome_common_extensions_sources,
         ".", "//chrome")
     deps += [
-      "//device/bluetooth",  # TODO(thestig) Still needed? Not in gyp version.
       "//device/usb",
       "//chrome/common/extensions/api",
       "//extensions/common",
       "//extensions/common/api",
-      "//extensions/strings",
       "//extensions:extensions_resources",
+      "//extensions/strings",
     ]
   }
 
@@ -141,14 +145,14 @@ static_library("common") {
   }
 
   # Printing.
-  if (printing_mode == 0) {
+  if (!enable_basic_printing && !enable_print_preview) {
     sources -= [
       "print_messages.cc",
       "print_messages.h",
     ]
   } else {
     deps += [ "//printing" ]
-    if (printing_mode == 1) {
+    if (enable_print_preview) {
       # Full printing support.
       sources += rebase_path(
           gypi_values.chrome_common_service_process_sources,
@@ -173,7 +177,6 @@ static_library("common") {
     sources -= [
       "badge_util.cc",
       "chrome_version_info_posix.cc",
-      "extensions/manifest_handlers/minimum_chrome_version_checker.cc",
       "icon_with_badge_image_source.cc",
       "media_galleries/metadata_types.h",
       "spellcheck_common.cc",
@@ -183,6 +186,10 @@ static_library("common") {
     sources += rebase_path(
         gypi_values.chrome_common_importer_sources,
         ".", "//chrome")
+  }
+
+  if (is_chromeos) {
+    sources -= [ "chrome_version_info_posix.cc" ]
   }
 
   if (is_win) {
@@ -235,19 +242,11 @@ static_library("common") {
   }
 }
 
-if (is_linux || is_android) {
-  # TODO(brettw) this duplicates "//chrome/common:version" which applies to
-  # Windows.
-  import("//chrome/version.gni")
-  process_version("version") {
-    visibility = [ ":common" ]
-    source = "chrome_version_info_posix.h.version"
-    output = "$target_gen_dir/chrome_version_info_posix.h"
-  }
-} else {
-  # Other platforms have a different way to do versioning.
-  group("version") {
-  }
+import("//chrome/version.gni")
+process_version("version") {
+  visibility = [ ":common" ]
+  source = "chrome_version_info_values.h.version"
+  output = "$target_gen_dir/chrome_version_info_values.h"
 }
 
 # GN version: chrome/common_constants.gyp:common_constants
@@ -297,8 +296,6 @@ source_set("test_support") {
   visibility = [ "//chrome/test:test_support" ]
 
   sources = [
-    "extensions/extension_test_util.cc",
-    "extensions/extension_test_util.h",
   ]
 
   deps = [
@@ -313,6 +310,13 @@ source_set("test_support") {
       "media_galleries/picasa_test_util.h",
       "media_galleries/pmp_test_util.cc",
       "media_galleries/pmp_test_util.h",
+    ]
+  }
+
+  if (enable_extensions) {
+    sources += [
+      "extensions/extension_test_util.cc",
+      "extensions/extension_test_util.h",
     ]
   }
 

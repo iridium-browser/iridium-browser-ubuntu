@@ -61,7 +61,7 @@
           'type': 'executable',
           'dependencies': [
             '../base/base.gyp:base',
-            'mojo_base.gyp:mojo_system_impl',
+            'edk/mojo_edk.gyp:mojo_system_impl',
             'monacl_sel',
           ],
           'sources': [
@@ -74,8 +74,8 @@
           'variables': {
             'nlib_target': 'libmojo.a',
             'build_glibc': 0,
-            'build_newlib': 1,
-            'build_pnacl_newlib': 0,
+            'build_newlib': 0,
+            'build_pnacl_newlib': 1,
           },
           'defines': [
             '<@(nacl_defines)',
@@ -92,7 +92,9 @@
           'type': 'none',
           'variables': {
             'nexe_target': 'monacl_test',
-            'build_newlib': 1,
+            'build_newlib': 0,
+            'build_pnacl_newlib': 1,
+            'translate_pexe_with_build': 1,
             'link_flags': [
               '-pthread',
               '-lmojo',

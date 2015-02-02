@@ -52,6 +52,7 @@ public:
     BLINK_EXPORT static void enableDecodeToYUV(bool);
 
     BLINK_EXPORT static void enableDisplayList2dCanvas(bool);
+    BLINK_EXPORT static void forceDisplayList2dCanvas(bool);
 
     BLINK_EXPORT static void enableEncryptedMedia(bool);
     BLINK_EXPORT static bool isEncryptedMediaEnabled();
@@ -61,13 +62,15 @@ public:
 
     BLINK_EXPORT static void enableBleedingEdgeFastPaths(bool);
 
+    BLINK_EXPORT static void enableBlinkScheduler(bool);
+
     BLINK_EXPORT static void enableExperimentalCanvasFeatures(bool);
 
     BLINK_EXPORT static void enableFastMobileScrolling(bool);
 
     BLINK_EXPORT static void enableFileSystem(bool);
 
-    BLINK_EXPORT static void enableGamepad(bool);
+    BLINK_EXPORT static void enableImageColorProfiles(bool);
 
     BLINK_EXPORT static void enableLocalStorage(bool);
 
@@ -78,8 +81,6 @@ public:
     BLINK_EXPORT static void enableMediaCapture(bool);
 
     BLINK_EXPORT static void enableMediaSource(bool);
-
-    BLINK_EXPORT static void enableMediaStream(bool);
 
     BLINK_EXPORT static void enableNotifications(bool);
 
@@ -104,6 +105,8 @@ public:
     BLINK_EXPORT static void enableServiceWorker(bool);
 
     BLINK_EXPORT static void enableSessionStorage(bool);
+
+    BLINK_EXPORT static void enableSlimmingPaint(bool);
 
     BLINK_EXPORT static void enableTouch(bool);
 
@@ -132,6 +135,16 @@ public:
     BLINK_EXPORT static void enableShowModalDialog(bool);
 
     BLINK_EXPORT static void enableLaxMixedContentChecking(bool);
+
+    BLINK_EXPORT static void enableCredentialManagerAPI(bool);
+
+    BLINK_EXPORT static void enableTextBlobs(bool);
+
+    BLINK_EXPORT static void enableCSSViewport(bool);
+
+    BLINK_EXPORT static void enableV8IdleTasks(bool);
+
+    BLINK_EXPORT static void enableSVG1DOM(bool);
 
 private:
     WebRuntimeFeatures();

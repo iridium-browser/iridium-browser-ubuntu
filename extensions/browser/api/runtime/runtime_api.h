@@ -14,6 +14,7 @@
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "extensions/browser/extension_function.h"
 #include "extensions/browser/extension_registry_observer.h"
+#include "extensions/browser/process_manager.h"
 #include "extensions/browser/process_manager_observer.h"
 #include "extensions/browser/update_observer.h"
 #include "extensions/common/api/runtime.h"
@@ -50,12 +51,12 @@ class RuntimeAPI : public BrowserContextKeyedAPI,
   static BrowserContextKeyedAPIFactory<RuntimeAPI>* GetFactoryInstance();
 
   explicit RuntimeAPI(content::BrowserContext* context);
-  virtual ~RuntimeAPI();
+  ~RuntimeAPI() override;
 
   // content::NotificationObserver overrides:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   void ReloadExtension(const std::string& extension_id);
   bool CheckForUpdates(const std::string& extension_id,
@@ -68,30 +69,29 @@ class RuntimeAPI : public BrowserContextKeyedAPI,
   friend class BrowserContextKeyedAPIFactory<RuntimeAPI>;
 
   // ExtensionRegistryObserver implementation.
-  virtual void OnExtensionLoaded(content::BrowserContext* browser_context,
-                                 const Extension* extension) OVERRIDE;
-  virtual void OnExtensionWillBeInstalled(
-      content::BrowserContext* browser_context,
-      const Extension* extension,
-      bool is_update,
-      bool from_ephemeral,
-      const std::string& old_name) OVERRIDE;
-  virtual void OnExtensionUninstalled(content::BrowserContext* browser_context,
-                                      const Extension* extension,
-                                      UninstallReason reason) OVERRIDE;
+  void OnExtensionLoaded(content::BrowserContext* browser_context,
+                         const Extension* extension) override;
+  void OnExtensionWillBeInstalled(content::BrowserContext* browser_context,
+                                  const Extension* extension,
+                                  bool is_update,
+                                  bool from_ephemeral,
+                                  const std::string& old_name) override;
+  void OnExtensionUninstalled(content::BrowserContext* browser_context,
+                              const Extension* extension,
+                              UninstallReason reason) override;
 
   // BrowserContextKeyedAPI implementation:
   static const char* service_name() { return "RuntimeAPI"; }
   static const bool kServiceRedirectedInIncognito = true;
   static const bool kServiceIsNULLWhileTesting = true;
-  virtual void Shutdown() OVERRIDE;
+  void Shutdown() override;
 
   // extensions::UpdateObserver overrides:
-  virtual void OnAppUpdateAvailable(const Extension* extension) OVERRIDE;
-  virtual void OnChromeUpdateAvailable() OVERRIDE;
+  void OnAppUpdateAvailable(const Extension* extension) override;
+  void OnChromeUpdateAvailable() override;
 
   // ProcessManagerObserver implementation:
-  virtual void OnBackgroundHostStartup(const Extension* extension) OVERRIDE;
+  void OnBackgroundHostStartup(const Extension* extension) override;
 
   scoped_ptr<RuntimeAPIDelegate> delegate_;
 
@@ -106,9 +106,14 @@ class RuntimeAPI : public BrowserContextKeyedAPI,
   // Listen to extension notifications.
   ScopedObserver<ExtensionRegistry, ExtensionRegistryObserver>
       extension_registry_observer_;
+  ScopedObserver<ProcessManager, ProcessManagerObserver>
+      process_manager_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(RuntimeAPI);
 };
+
+template <>
+void BrowserContextKeyedAPIFactory<RuntimeAPI>::DeclareFactoryDependencies();
 
 class RuntimeEventRouter {
  public:
@@ -150,8 +155,8 @@ class RuntimeGetBackgroundPageFunction : public UIThreadExtensionFunction {
                              RUNTIME_GETBACKGROUNDPAGE)
 
  protected:
-  virtual ~RuntimeGetBackgroundPageFunction() {}
-  virtual ResponseAction Run() OVERRIDE;
+  ~RuntimeGetBackgroundPageFunction() override {}
+  ResponseAction Run() override;
 
  private:
   void OnPageLoaded(ExtensionHost*);
@@ -162,8 +167,8 @@ class RuntimeSetUninstallURLFunction : public UIThreadExtensionFunction {
   DECLARE_EXTENSION_FUNCTION("runtime.setUninstallURL", RUNTIME_SETUNINSTALLURL)
 
  protected:
-  virtual ~RuntimeSetUninstallURLFunction() {}
-  virtual ResponseAction Run() OVERRIDE;
+  ~RuntimeSetUninstallURLFunction() override {}
+  ResponseAction Run() override;
 };
 
 class RuntimeReloadFunction : public UIThreadExtensionFunction {
@@ -171,8 +176,8 @@ class RuntimeReloadFunction : public UIThreadExtensionFunction {
   DECLARE_EXTENSION_FUNCTION("runtime.reload", RUNTIME_RELOAD)
 
  protected:
-  virtual ~RuntimeReloadFunction() {}
-  virtual ResponseAction Run() OVERRIDE;
+  ~RuntimeReloadFunction() override {}
+  ResponseAction Run() override;
 };
 
 class RuntimeRequestUpdateCheckFunction : public UIThreadExtensionFunction {
@@ -181,8 +186,8 @@ class RuntimeRequestUpdateCheckFunction : public UIThreadExtensionFunction {
                              RUNTIME_REQUESTUPDATECHECK)
 
  protected:
-  virtual ~RuntimeRequestUpdateCheckFunction() {}
-  virtual ResponseAction Run() OVERRIDE;
+  ~RuntimeRequestUpdateCheckFunction() override {}
+  ResponseAction Run() override;
 
  private:
   void CheckComplete(const RuntimeAPIDelegate::UpdateCheckResult& result);
@@ -193,8 +198,8 @@ class RuntimeRestartFunction : public UIThreadExtensionFunction {
   DECLARE_EXTENSION_FUNCTION("runtime.restart", RUNTIME_RESTART)
 
  protected:
-  virtual ~RuntimeRestartFunction() {}
-  virtual ResponseAction Run() OVERRIDE;
+  ~RuntimeRestartFunction() override {}
+  ResponseAction Run() override;
 };
 
 class RuntimeGetPlatformInfoFunction : public UIThreadExtensionFunction {
@@ -203,8 +208,8 @@ class RuntimeGetPlatformInfoFunction : public UIThreadExtensionFunction {
                              RUNTIME_GETPLATFORMINFO);
 
  protected:
-  virtual ~RuntimeGetPlatformInfoFunction() {}
-  virtual ResponseAction Run() OVERRIDE;
+  ~RuntimeGetPlatformInfoFunction() override {}
+  ResponseAction Run() override;
 };
 
 class RuntimeGetPackageDirectoryEntryFunction
@@ -214,8 +219,8 @@ class RuntimeGetPackageDirectoryEntryFunction
                              RUNTIME_GETPACKAGEDIRECTORYENTRY)
 
  protected:
-  virtual ~RuntimeGetPackageDirectoryEntryFunction() {}
-  virtual ResponseAction Run() OVERRIDE;
+  ~RuntimeGetPackageDirectoryEntryFunction() override {}
+  ResponseAction Run() override;
 };
 
 }  // namespace extensions

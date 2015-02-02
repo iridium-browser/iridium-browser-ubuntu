@@ -12,7 +12,6 @@
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observer.h"
 #include "base/stl_util.h"
-#include "base/timer/timer.h"
 #include "chrome/browser/extensions/api/image_writer_private/image_writer_private_api.h"
 #include "chrome/browser/extensions/api/image_writer_private/operation.h"
 #include "chrome/common/extensions/api/image_writer_private.h"
@@ -47,9 +46,9 @@ class OperationManager : public BrowserContextKeyedAPI,
   typedef std::string ExtensionId;
 
   explicit OperationManager(content::BrowserContext* context);
-  virtual ~OperationManager();
+  ~OperationManager() override;
 
-  virtual void Shutdown() OVERRIDE;
+  void Shutdown() override;
 
   // Starts a WriteFromUrl operation.
   void StartWriteFromUrl(const ExtensionId& extension_id,
@@ -97,15 +96,14 @@ class OperationManager : public BrowserContextKeyedAPI,
   }
 
   // NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   // ExtensionRegistryObserver implementation.
-  virtual void OnExtensionUnloaded(
-      content::BrowserContext* browser_context,
-      const Extension* extension,
-      UnloadedExtensionInfo::Reason reason) OVERRIDE;
+  void OnExtensionUnloaded(content::BrowserContext* browser_context,
+                           const Extension* extension,
+                           UnloadedExtensionInfo::Reason reason) override;
 
   Operation* GetOperation(const ExtensionId& extension_id);
   void DeleteOperation(const ExtensionId& extension_id);

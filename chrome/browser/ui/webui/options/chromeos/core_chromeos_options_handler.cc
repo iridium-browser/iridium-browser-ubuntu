@@ -6,8 +6,6 @@
 
 #include <string>
 
-#include "ash/session/session_state_delegate.h"
-#include "ash/shell.h"
 #include "base/bind.h"
 #include "base/prefs/pref_change_registrar.h"
 #include "base/strings/string_number_conversions.h"
@@ -16,6 +14,8 @@
 #include "base/sys_info.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/chromeos/ownership/owner_settings_service_chromeos.h"
+#include "chrome/browser/chromeos/ownership/owner_settings_service_chromeos_factory.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/proxy_cros_settings_parser.h"
@@ -30,6 +30,11 @@
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_ui.h"
 #include "ui/base/l10n/l10n_util.h"
+
+#if !defined(USE_ATHENA)
+#include "ash/session/session_state_delegate.h"
+#include "ash/shell.h"
+#endif
 
 namespace chromeos {
 namespace options {
@@ -223,7 +228,14 @@ void CoreChromeOSOptionsHandler::SetPref(const std::string& pref_name,
   }
   if (!CrosSettings::IsCrosSettings(pref_name))
     return ::options::CoreOptionsHandler::SetPref(pref_name, value, metric);
-  CrosSettings::Get()->Set(pref_name, *value);
+  Profile* profile = Profile::FromWebUI(web_ui());
+  OwnerSettingsServiceChromeOS* service =
+      profile ? OwnerSettingsServiceChromeOSFactory::GetForProfile(profile)
+              : nullptr;
+  if (service && service->HandlesSetting(pref_name))
+    service->Set(pref_name, *value);
+  else
+    CrosSettings::Get()->Set(pref_name, *value);
 
   ProcessUserMetric(value, metric);
 }

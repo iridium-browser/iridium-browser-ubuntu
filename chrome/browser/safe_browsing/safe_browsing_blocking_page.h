@@ -65,7 +65,7 @@ class SafeBrowsingBlockingPage : public content::InterstitialPageDelegate {
   typedef std::vector<UnsafeResource> UnsafeResourceList;
   typedef std::map<content::WebContents*, UnsafeResourceList> UnsafeResourceMap;
 
-  virtual ~SafeBrowsingBlockingPage();
+  ~SafeBrowsingBlockingPage() override;
 
   // Creates a blocking page. Use ShowBlockingPage if you don't need to access
   // the blocking page directly.
@@ -89,12 +89,11 @@ class SafeBrowsingBlockingPage : public content::InterstitialPageDelegate {
   }
 
   // InterstitialPageDelegate method:
-  virtual std::string GetHTMLContents() OVERRIDE;
-  virtual void OnProceed() OVERRIDE;
-  virtual void OnDontProceed() OVERRIDE;
-  virtual void CommandReceived(const std::string& command) OVERRIDE;
-  virtual void OverrideRendererPrefs(
-      content::RendererPreferences* prefs) OVERRIDE;
+  std::string GetHTMLContents() override;
+  void OnProceed() override;
+  void OnDontProceed() override;
+  void CommandReceived(const std::string& command) override;
+  void OverrideRendererPrefs(content::RendererPreferences* prefs) override;
 
  protected:
   friend class SafeBrowsingBlockingPageTest;

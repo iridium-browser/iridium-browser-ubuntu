@@ -25,20 +25,19 @@ public class ActivityContentVideoViewClient implements ContentVideoViewClient {
     }
 
     @Override
-    public boolean onShowCustomView(View view) {
+    public void enterFullscreenVideo(View view) {
         FrameLayout decor = (FrameLayout) mActivity.getWindow().getDecorView();
         decor.addView(view, 0,
-            new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    Gravity.CENTER));
+                new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        Gravity.CENTER));
         setSystemUiVisibility(decor, true);
         mView = view;
-        return true;
     }
 
     @Override
-    public void onDestroyContentVideoView() {
+    public void exitFullscreenVideo() {
         FrameLayout decor = (FrameLayout) mActivity.getWindow().getDecorView();
         decor.removeView(mView);
         setSystemUiVisibility(decor, false);

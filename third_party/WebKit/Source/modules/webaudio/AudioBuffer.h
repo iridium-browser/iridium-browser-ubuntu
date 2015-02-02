@@ -30,6 +30,7 @@
 #define AudioBuffer_h
 
 #include "bindings/core/v8/ScriptWrappable.h"
+#include "core/dom/DOMTypedArray.h"
 #include "wtf/Float32Array.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/RefPtr.h"
@@ -58,13 +59,13 @@ public:
 
     // Channel data access
     unsigned numberOfChannels() const { return m_channels.size(); }
-    PassRefPtr<Float32Array> getChannelData(unsigned channelIndex, ExceptionState&);
+    PassRefPtr<DOMFloat32Array> getChannelData(unsigned channelIndex, ExceptionState&);
     Float32Array* getChannelData(unsigned channelIndex);
     void zero();
 
     void trace(Visitor*) { }
 
-    virtual v8::Handle<v8::Object> associateWithWrapper(const WrapperTypeInfo*, v8::Handle<v8::Object> wrapper, v8::Isolate*) OVERRIDE;
+    virtual v8::Handle<v8::Object> associateWithWrapper(const WrapperTypeInfo*, v8::Handle<v8::Object> wrapper, v8::Isolate*) override;
 
 protected:
     AudioBuffer(unsigned numberOfChannels, size_t numberOfFrames, float sampleRate);

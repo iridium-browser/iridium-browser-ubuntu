@@ -17,9 +17,10 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/worker_pool.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_auth_request_handler.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_config_service.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_settings.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_auth_request_handler.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config_service.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_interceptor.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/cookie_store_factory.h"
@@ -52,7 +53,8 @@ namespace {
 
 void ApplyCmdlineOverridesToURLRequestContextBuilder(
     net::URLRequestContextBuilder* builder) {
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch(switches::kHostResolverRules)) {
     // If hostname remappings were specified on the command-line, layer these
     // rules on top of the real host resolver. This allows forwarding all
@@ -69,7 +71,8 @@ void ApplyCmdlineOverridesToURLRequestContextBuilder(
 void ApplyCmdlineOverridesToNetworkSessionParams(
     net::HttpNetworkSession::Params* params) {
   int value;
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch(switches::kTestingFixedHttpPort)) {
     base::StringToInt(command_line.GetSwitchValueASCII(
         switches::kTestingFixedHttpPort), &value);
@@ -172,10 +175,10 @@ scoped_ptr<net::URLRequestJobFactory> CreateJobFactory(
 }  // namespace
 
 AwURLRequestContextGetter::AwURLRequestContextGetter(
-    const base::FilePath& partition_path, net::CookieStore* cookie_store,
+    const base::FilePath& cache_path, net::CookieStore* cookie_store,
     scoped_ptr<data_reduction_proxy::DataReductionProxyConfigService>
         config_service)
-    : partition_path_(partition_path),
+    : cache_path_(cache_path),
       cookie_store_(cookie_store),
       net_log_(new net::NetLog()) {
   data_reduction_proxy_config_service_ = config_service.Pass();
@@ -197,17 +200,18 @@ void AwURLRequestContextGetter::InitializeURLRequestContext() {
 #if !defined(DISABLE_FTP_SUPPORT)
   builder.set_ftp_enabled(false);  // Android WebView does not support ftp yet.
 #endif
-  if (data_reduction_proxy_config_service_.get()) {
-    builder.set_proxy_config_service(
-        data_reduction_proxy_config_service_.release());
-  } else {
-    builder.set_proxy_config_service(
-        net::ProxyService::CreateSystemProxyConfigService(
-            GetNetworkTaskRunner(), NULL /* Ignored on Android */ ));
-  }
+  DCHECK(data_reduction_proxy_config_service_.get());
+  // Android provides a local HTTP proxy that handles all the proxying.
+  // Create the proxy without a resolver since we rely on this local HTTP proxy.
+  // TODO(sgurun) is this behavior guaranteed through SDK?
+  builder.set_proxy_service(
+      net::ProxyService::CreateWithoutProxyResolver(
+          data_reduction_proxy_config_service_.release(),
+          net_log_.get()));
   builder.set_accept_language(net::HttpUtil::GenerateAcceptLanguageHeader(
       AwContentBrowserClient::GetAcceptLangsImpl()));
   builder.set_net_log(net_log_.get());
+  builder.set_channel_id_enabled(false);
   ApplyCmdlineOverridesToURLRequestContextBuilder(&builder);
 
   url_request_context_.reset(builder.Build());
@@ -222,7 +226,7 @@ void AwURLRequestContextGetter::InitializeURLRequestContext() {
       new net::HttpCache::DefaultBackend(
           net::DISK_CACHE,
           net::CACHE_BACKEND_SIMPLE,
-          partition_path_.Append(FILE_PATH_LITERAL("Cache")),
+          cache_path_,
           20 * 1024 * 1024,  // 20M
           BrowserThread::GetMessageLoopProxyForThread(BrowserThread::CACHE)));
 
@@ -233,7 +237,7 @@ void AwURLRequestContextGetter::InitializeURLRequestContext() {
   DCHECK(data_reduction_proxy_settings);
   data_reduction_proxy_auth_request_handler_.reset(
       new data_reduction_proxy::DataReductionProxyAuthRequestHandler(
-          data_reduction_proxy::kClientAndroidWebview,
+          data_reduction_proxy::Client::WEBVIEW_ANDROID,
           data_reduction_proxy_settings->params(),
           BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)));
 
@@ -247,10 +251,15 @@ void AwURLRequestContextGetter::InitializeURLRequestContext() {
 
   main_http_factory_.reset(main_cache);
   url_request_context_->set_http_transaction_factory(main_cache);
-  url_request_context_->set_cookie_store(cookie_store_);
+  url_request_context_->set_cookie_store(cookie_store_.get());
 
   job_factory_ = CreateJobFactory(&protocol_handlers_,
                                   request_interceptors_.Pass());
+
+  job_factory_.reset(new net::URLRequestInterceptingJobFactory(
+      job_factory_.Pass(), make_scoped_ptr(
+          new data_reduction_proxy::DataReductionProxyInterceptor(
+              data_reduction_proxy_settings->params(), NULL))));
   url_request_context_->set_job_factory(job_factory_.get());
 }
 

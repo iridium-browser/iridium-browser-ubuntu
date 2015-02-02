@@ -2,11 +2,12 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/linux/pkg_config.gni")
 import("//media/media_options.gni")
 
 # When libpulse is not directly linked, use stubs to allow for dlopening of the
 # binary.
-if (!linux_link_pulseaudio) {
+if (!link_pulseaudio) {
   action("pulse_generate_stubs") {
     extra_header = "pulse/pulse_stub_header.fragment"
 
@@ -34,10 +35,9 @@ if (!linux_link_pulseaudio) {
 }
 
 source_set("audio") {
+  visibility = [ "//media/*" ]
   sources = [
     "agc_audio_stream.h",
-    "audio_buffers_state.cc",
-    "audio_buffers_state.h",
     "audio_device_name.cc",
     "audio_device_name.h",
     "audio_device_thread.cc",
@@ -67,6 +67,8 @@ source_set("audio") {
     "audio_output_proxy.h",
     "audio_output_resampler.cc",
     "audio_output_resampler.h",
+    "audio_output_stream_sink.cc",
+    "audio_output_stream_sink.h",
     "audio_power_monitor.cc",
     "audio_power_monitor.h",
     "audio_source_diverter.h",
@@ -206,7 +208,7 @@ source_set("audio") {
     pkg_config("libcras") {
       packages = [ "libcras" ]
     }
-    configs += [ "libcras" ]
+    configs += [ ":libcras" ]
   }
 
   if (use_pulseaudio) {
@@ -221,7 +223,7 @@ source_set("audio") {
       "pulse/pulse_util.h",
     ]
 
-    if (linux_link_pulseaudio) {
+    if (link_pulseaudio) {
       pkg_config("libpulse") {
         packages = [ "libpulse" ]
       }

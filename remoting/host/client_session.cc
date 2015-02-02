@@ -228,7 +228,7 @@ void ClientSession::DeliverClientMessage(
       }
       return;
     } else {
-      if (!extension_manager_->OnExtensionMessage(message))
+      if (extension_manager_->OnExtensionMessage(message))
         return;
 
       DLOG(INFO) << "Unexpected message received: "
@@ -481,10 +481,9 @@ void ClientSession::SetGnubbyAuthHandlerForTesting(
 scoped_ptr<protocol::ClipboardStub> ClientSession::CreateClipboardProxy() {
   DCHECK(CalledOnValidThread());
 
-  return scoped_ptr<protocol::ClipboardStub>(
-      new protocol::ClipboardThreadProxy(
-          client_clipboard_factory_.GetWeakPtr(),
-          base::MessageLoopProxy::current()));
+  return make_scoped_ptr(
+      new protocol::ClipboardThreadProxy(client_clipboard_factory_.GetWeakPtr(),
+                                         base::MessageLoopProxy::current()));
 }
 
 // TODO(sergeyu): Move this to SessionManager?
@@ -494,15 +493,15 @@ scoped_ptr<VideoEncoder> ClientSession::CreateVideoEncoder(
   const protocol::ChannelConfig& video_config = config.video_config();
 
   if (video_config.codec == protocol::ChannelConfig::CODEC_VP8) {
-    return remoting::VideoEncoderVpx::CreateForVP8().PassAs<VideoEncoder>();
+    return remoting::VideoEncoderVpx::CreateForVP8().Pass();
   } else if (video_config.codec == protocol::ChannelConfig::CODEC_VP9) {
-    return remoting::VideoEncoderVpx::CreateForVP9().PassAs<VideoEncoder>();
+    return remoting::VideoEncoderVpx::CreateForVP9().Pass();
   } else if (video_config.codec == protocol::ChannelConfig::CODEC_VERBATIM) {
-    return scoped_ptr<VideoEncoder>(new remoting::VideoEncoderVerbatim());
+    return make_scoped_ptr(new remoting::VideoEncoderVerbatim());
   }
 
   NOTREACHED();
-  return scoped_ptr<VideoEncoder>();
+  return nullptr;
 }
 
 // static
@@ -511,13 +510,13 @@ scoped_ptr<AudioEncoder> ClientSession::CreateAudioEncoder(
   const protocol::ChannelConfig& audio_config = config.audio_config();
 
   if (audio_config.codec == protocol::ChannelConfig::CODEC_VERBATIM) {
-    return scoped_ptr<AudioEncoder>(new AudioEncoderVerbatim());
+    return make_scoped_ptr(new AudioEncoderVerbatim());
   } else if (audio_config.codec == protocol::ChannelConfig::CODEC_OPUS) {
-    return scoped_ptr<AudioEncoder>(new AudioEncoderOpus());
+    return make_scoped_ptr(new AudioEncoderOpus());
   }
 
   NOTREACHED();
-  return scoped_ptr<AudioEncoder>();
+  return nullptr;
 }
 
 }  // namespace remoting

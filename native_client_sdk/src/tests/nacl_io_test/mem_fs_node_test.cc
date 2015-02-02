@@ -62,7 +62,9 @@ class MemFsNodeForTesting : public MemFsNode {
 
 class DirNodeForTesting : public DirNode {
  public:
-  DirNodeForTesting() : DirNode(NULL) { s_alloc_num++; }
+  DirNodeForTesting() : DirNode(NULL, S_IRALL | S_IWALL | S_IXALL) {
+    s_alloc_num++;
+  }
 
   ~DirNodeForTesting() { s_alloc_num--; }
 
@@ -135,7 +137,8 @@ TEST(MemFsNodeTest, Fchmod) {
 
   struct stat s;
   ASSERT_EQ(0, file.GetStat(&s));
-  EXPECT_EQ(S_IFREG | S_IRALL | S_IWALL, s.st_mode);
+  EXPECT_TRUE(S_ISREG(s.st_mode));
+  EXPECT_EQ(S_IRALL | S_IWALL, s.st_mode & S_MODEBITS);
 
   // Change to read-only.
   EXPECT_EQ(0, file.Fchmod(S_IRALL));

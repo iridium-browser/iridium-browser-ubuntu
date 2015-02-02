@@ -19,7 +19,7 @@ class FileHostTestNaClBrowserDelegate : public TestNaClBrowserDelegate {
  public:
   FileHostTestNaClBrowserDelegate() {}
 
-  virtual bool GetPnaclDirectory(base::FilePath* pnacl_dir) OVERRIDE {
+  bool GetPnaclDirectory(base::FilePath* pnacl_dir) override {
     *pnacl_dir = pnacl_path_;
     return true;
   }
@@ -35,14 +35,14 @@ class FileHostTestNaClBrowserDelegate : public TestNaClBrowserDelegate {
 class NaClFileHostTest : public testing::Test {
  protected:
   NaClFileHostTest();
-  virtual ~NaClFileHostTest();
+  ~NaClFileHostTest() override;
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     nacl_browser_delegate_ = new FileHostTestNaClBrowserDelegate;
     nacl::NaClBrowser::SetDelegate(nacl_browser_delegate_);
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     // This deletes nacl_browser_delegate_.
     nacl::NaClBrowser::SetDelegate(NULL);
   }

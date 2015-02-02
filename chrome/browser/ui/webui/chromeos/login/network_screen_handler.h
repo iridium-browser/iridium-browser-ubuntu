@@ -32,38 +32,41 @@ class NetworkScreenHandler : public NetworkScreenActor,
   explicit NetworkScreenHandler(CoreOobeActor* core_oobe_actor);
   virtual ~NetworkScreenHandler();
 
+ private:
   // NetworkScreenActor implementation:
-  virtual void SetDelegate(NetworkScreenActor::Delegate* screen) OVERRIDE;
-  virtual void PrepareToShow() OVERRIDE;
-  virtual void Show() OVERRIDE;
-  virtual void Hide() OVERRIDE;
-  virtual void ShowError(const base::string16& message) OVERRIDE;
-  virtual void ClearErrors() OVERRIDE;
+  virtual void SetDelegate(NetworkScreenActor::Delegate* screen) override;
+  virtual void PrepareToShow() override;
+  virtual void Show() override;
+  virtual void Hide() override;
+  virtual void ShowError(const base::string16& message) override;
+  virtual void ClearErrors() override;
   virtual void ShowConnectingStatus(bool connecting,
-                                    const base::string16& network_id) OVERRIDE;
-  virtual void EnableContinue(bool enabled) OVERRIDE;
+                                    const base::string16& network_id) override;
+  virtual void EnableContinue(bool enabled) override;
+  virtual std::string GetApplicationLocale() const override;
+  virtual std::string GetInputMethod() const override;
+  virtual std::string GetTimezone() const override;
+  virtual void SetApplicationLocale(const std::string& locale) override;
+  virtual void SetInputMethod(const std::string& input_method) override;
+  virtual void SetTimezone(const std::string& timezone) override;
 
   // BaseScreenHandler implementation:
-  virtual void DeclareLocalizedValues(LocalizedValuesBuilder* builder) OVERRIDE;
-  virtual void GetAdditionalParameters(base::DictionaryValue* dict) OVERRIDE;
-  virtual void Initialize() OVERRIDE;
+  virtual void DeclareLocalizedValues(LocalizedValuesBuilder* builder) override;
+  virtual void GetAdditionalParameters(base::DictionaryValue* dict) override;
+  virtual void Initialize() override;
 
   // WebUIMessageHandler implementation:
-  virtual void RegisterMessages() OVERRIDE;
+  virtual void RegisterMessages() override;
 
   // InputMethodManager::Observer implementation:
   virtual void InputMethodChanged(input_method::InputMethodManager* manager,
-                                  bool show_message) OVERRIDE;
+                                  bool show_message) override;
 
   // Reloads localized contents.
   void ReloadLocalizedContent();
 
- private:
   // Handles moving off the screen.
   void HandleOnExit();
-
-  // Handles change of the language.
-  void HandleOnLanguageChanged(const std::string& locale);
 
   // Async callback after ReloadResourceBundle(locale) completed.
   static void OnLanguageChangedCallback(
@@ -71,12 +74,6 @@ class NetworkScreenHandler : public NetworkScreenActor,
       const std::string& requested_locale,
       const std::string& loaded_locale,
       const bool success);
-
-  // Handles change of the input method.
-  void HandleOnInputMethodChanged(const std::string& id);
-
-  // Handles change of the time zone
-  void HandleOnTimezoneChanged(const std::string& timezone);
 
   // Callback when the system timezone settings is changed.
   void OnSystemTimezoneChanged();
@@ -99,6 +96,10 @@ class NetworkScreenHandler : public NetworkScreenActor,
 
   // The exact language code selected by user in the menu.
   std::string selected_language_code_;
+
+  std::string locale_;
+  std::string input_method_;
+  std::string timezone_;
 
   base::WeakPtrFactory<NetworkScreenHandler> weak_ptr_factory_;
 

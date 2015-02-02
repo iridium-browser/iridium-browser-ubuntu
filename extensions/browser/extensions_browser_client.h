@@ -38,6 +38,7 @@ class ApiActivityMonitor;
 class AppSorting;
 class ComponentExtensionResourceManager;
 class Extension;
+class ExtensionCache;
 class ExtensionHostDelegate;
 class ExtensionPrefsObserver;
 class ExtensionSystem;
@@ -186,6 +187,18 @@ class ExtensionsBrowserClient {
 
   // Returns the embedder's net::NetLog.
   virtual net::NetLog* GetNetLog() = 0;
+
+  // Gets the single ExtensionCache instance shared across the browser process.
+  virtual ExtensionCache* GetExtensionCache() = 0;
+
+  // Indicates whether extension update checks should be allowed.
+  virtual bool IsBackgroundUpdateAllowed() = 0;
+
+  // Indicates whether an extension update which specifies its minimum browser
+  // version as |min_version| can be installed by the client. Not all extensions
+  // embedders share the same versioning model, so interpretation of the string
+  // is left up to the embedder.
+  virtual bool IsMinBrowserVersionSupported(const std::string& min_version) = 0;
 
   // Returns the single instance of |this|.
   static ExtensionsBrowserClient* Get();

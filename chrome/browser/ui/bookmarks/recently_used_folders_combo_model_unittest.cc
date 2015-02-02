@@ -22,7 +22,7 @@ using content::BrowserThread;
 class TestComboboxModelObserver : public ui::ComboboxModelObserver {
  public:
   TestComboboxModelObserver() : changed_(false) {}
-  virtual ~TestComboboxModelObserver() {}
+  ~TestComboboxModelObserver() override {}
 
   // Returns whether the model changed and clears changed state.
   bool GetAndClearChanged() {
@@ -32,7 +32,7 @@ class TestComboboxModelObserver : public ui::ComboboxModelObserver {
   }
 
   // ComboboxModelObserver:
-  virtual void OnComboboxModelChanged(ui::ComboboxModel* model) OVERRIDE {
+  void OnComboboxModelChanged(ui::ComboboxModel* model) override {
     changed_ = true;
   }
 
@@ -46,8 +46,8 @@ class RecentlyUsedFoldersComboModelTest : public testing::Test {
  public:
   RecentlyUsedFoldersComboModelTest();
 
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
  protected:
   BookmarkModel* GetModel();
@@ -69,7 +69,7 @@ RecentlyUsedFoldersComboModelTest::RecentlyUsedFoldersComboModelTest()
 void RecentlyUsedFoldersComboModelTest::SetUp() {
   profile_.reset(new TestingProfile());
   profile_->CreateBookmarkModel(true);
-  test::WaitForBookmarkModelToLoad(GetModel());
+  bookmarks::test::WaitForBookmarkModelToLoad(GetModel());
 }
 
 void RecentlyUsedFoldersComboModelTest::TearDown() {

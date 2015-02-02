@@ -25,7 +25,7 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "talk/p2p/base/stunrequest.h"
+#include "webrtc/p2p/base/stunrequest.h"
 #include "webrtc/base/gunit.h"
 #include "webrtc/base/helpers.h"
 #include "webrtc/base/logging.h"
@@ -37,14 +37,6 @@ using namespace cricket;
 class StunRequestTest : public testing::Test,
                         public sigslot::has_slots<> {
  public:
-  static void SetUpTestCase() {
-    rtc::InitializeSSL();
-  }
-
-  static void TearDownTestCase() {
-    rtc::CleanupSSL();
-  }
-
   StunRequestTest()
       : manager_(rtc::Thread::Current()),
         request_count_(0), response_(NULL),

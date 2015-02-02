@@ -26,10 +26,9 @@ namespace {
 class SingleOverlay : public OverlayCandidatesOzone {
  public:
   SingleOverlay() {}
-  virtual ~SingleOverlay() {}
+  ~SingleOverlay() override {}
 
-  virtual void CheckOverlaySupport(
-      OverlaySurfaceCandidateList* candidates) OVERRIDE {
+  void CheckOverlaySupport(OverlaySurfaceCandidateList* candidates) override {
     if (candidates->size() == 2) {
       OverlayCandidatesOzone::OverlaySurfaceCandidate* first =
           &(*candidates)[0];
@@ -153,9 +152,9 @@ scoped_ptr<SurfaceOzoneEGL> GbmSurfaceFactory::CreateEGLSurfaceForWidget(
 
   scoped_ptr<GbmSurface> surface(new GbmSurface(delegate, device_, drm_));
   if (!surface->Initialize())
-    return scoped_ptr<SurfaceOzoneEGL>();
+    return nullptr;
 
-  return surface.PassAs<SurfaceOzoneEGL>();
+  return surface.Pass();
 }
 
 scoped_ptr<SurfaceOzoneEGL>
@@ -176,7 +175,11 @@ scoped_refptr<ui::NativePixmap> GbmSurfaceFactory::CreateNativePixmap(
   if (!buffer.get())
     return NULL;
 
-  return scoped_refptr<GbmPixmap>(new GbmPixmap(buffer));
+  scoped_refptr<GbmPixmap> pixmap(new GbmPixmap(buffer));
+  if (!pixmap->Initialize(drm_))
+    return NULL;
+
+  return pixmap;
 }
 
 OverlayCandidatesOzone* GbmSurfaceFactory::GetOverlayCandidates(

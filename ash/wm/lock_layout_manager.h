@@ -51,35 +51,35 @@ class ASH_EXPORT LockLayoutManager
       public keyboard::KeyboardControllerObserver {
  public:
   explicit LockLayoutManager(aura::Window* window);
-  virtual ~LockLayoutManager();
+  ~LockLayoutManager() override;
 
   // Overridden from aura::LayoutManager:
-  virtual void OnWindowResized() OVERRIDE;
-  virtual void OnWindowAddedToLayout(aura::Window* child) OVERRIDE;
-  virtual void OnWillRemoveWindowFromLayout(aura::Window* child) OVERRIDE;
-  virtual void OnWindowRemovedFromLayout(aura::Window* child) OVERRIDE;
-  virtual void OnChildWindowVisibilityChanged(aura::Window* child,
-                                              bool visibile) OVERRIDE;
-  virtual void SetChildBounds(aura::Window* child,
-                              const gfx::Rect& requested_bounds) OVERRIDE;
+  void OnWindowResized() override;
+  void OnWindowAddedToLayout(aura::Window* child) override;
+  void OnWillRemoveWindowFromLayout(aura::Window* child) override;
+  void OnWindowRemovedFromLayout(aura::Window* child) override;
+  void OnChildWindowVisibilityChanged(aura::Window* child,
+                                      bool visibile) override;
+  void SetChildBounds(aura::Window* child,
+                      const gfx::Rect& requested_bounds) override;
 
   // Overriden from aura::WindowObserver:
-  virtual void OnWindowHierarchyChanged(
-      const WindowObserver::HierarchyChangeParams& params) OVERRIDE;
-  virtual void OnWindowPropertyChanged(aura::Window* window,
-                                       const void* key,
-                                       intptr_t old) OVERRIDE;
-  virtual void OnWindowStackingChanged(aura::Window* window) OVERRIDE;
-  virtual void OnWindowDestroying(aura::Window* window) OVERRIDE;
-  virtual void OnWindowBoundsChanged(aura::Window* window,
-                                     const gfx::Rect& old_bounds,
-                                     const gfx::Rect& new_bounds) OVERRIDE;
+  void OnWindowHierarchyChanged(
+      const WindowObserver::HierarchyChangeParams& params) override;
+  void OnWindowPropertyChanged(aura::Window* window,
+                               const void* key,
+                               intptr_t old) override;
+  void OnWindowStackingChanged(aura::Window* window) override;
+  void OnWindowDestroying(aura::Window* window) override;
+  void OnWindowBoundsChanged(aura::Window* window,
+                             const gfx::Rect& old_bounds,
+                             const gfx::Rect& new_bounds) override;
 
   // VirtualKeyboardStateObserver overrides:
-  virtual void OnVirtualKeyboardStateChanged(bool activated) OVERRIDE;
+  void OnVirtualKeyboardStateChanged(bool activated) override;
 
   // keyboard::KeyboardControllerObserver overrides:
-  virtual void OnKeyboardBoundsChanging(const gfx::Rect& new_bounds) OVERRIDE;
+  void OnKeyboardBoundsChanging(const gfx::Rect& new_bounds) override;
 
  private:
   // Adjusts the bounds of all managed windows when the display area changes.

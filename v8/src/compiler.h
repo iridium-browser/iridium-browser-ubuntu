@@ -84,7 +84,8 @@ class CompilationInfo {
     kContextSpecializing = 1 << 16,
     kInliningEnabled = 1 << 17,
     kTypingEnabled = 1 << 18,
-    kDisableFutureOptimization = 1 << 19
+    kDisableFutureOptimization = 1 << 19,
+    kToplevel = 1 << 20
   };
 
   CompilationInfo(Handle<JSFunction> closure, Zone* zone);
@@ -206,6 +207,10 @@ class CompilationInfo {
   void MarkAsTypingEnabled() { SetFlag(kTypingEnabled); }
 
   bool is_typing_enabled() const { return GetFlag(kTypingEnabled); }
+
+  void MarkAsToplevel() { SetFlag(kToplevel); }
+
+  bool is_toplevel() const { return GetFlag(kToplevel); }
 
   bool IsCodePreAgingActive() const {
     return FLAG_optimize_for_size && FLAG_age_code && !will_serialize() &&
@@ -386,8 +391,6 @@ class CompilationInfo {
     ast_value_factory_owned_ = owned;
   }
 
-  AstNode::IdGen* ast_node_id_gen() { return &ast_node_id_gen_; }
-
  protected:
   CompilationInfo(Handle<Script> script,
                   Zone* zone);
@@ -507,7 +510,6 @@ class CompilationInfo {
 
   AstValueFactory* ast_value_factory_;
   bool ast_value_factory_owned_;
-  AstNode::IdGen ast_node_id_gen_;
 
   // This flag is used by the main thread to track whether this compilation
   // should be abandoned due to dependency change.
@@ -673,10 +675,15 @@ class Compiler : public AllStatic {
   MUST_USE_RESULT static MaybeHandle<Code> GetDebugCode(
       Handle<JSFunction> function);
 
+  // Parser::Parse, then Compiler::Analyze.
+  static bool ParseAndAnalyze(CompilationInfo* info);
+  // Rewrite, analyze scopes, and renumber.
+  static bool Analyze(CompilationInfo* info);
+  // Adds deoptimization support, requires ParseAndAnalyze.
+  static bool EnsureDeoptimizationSupport(CompilationInfo* info);
+
   static bool EnsureCompiled(Handle<JSFunction> function,
                              ClearExceptionFlag flag);
-
-  static bool EnsureDeoptimizationSupport(CompilationInfo* info);
 
   static void CompileForLiveEdit(Handle<Script> script);
 

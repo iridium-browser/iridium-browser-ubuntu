@@ -389,6 +389,11 @@ void RenderTable::distributeExtraLogicalHeight(int extraLogicalHeight)
 
 void RenderTable::simplifiedNormalFlowLayout()
 {
+    // FIXME: We should walk through the items in the tree in tree order to do the layout here
+    // instead of walking through individual parts of the tree. crbug.com/442737
+    for (auto& caption : m_captions)
+        caption->layoutIfNeeded();
+
     for (RenderTableSection* section = topSection(); section; section = sectionBelow(section)) {
         section->layoutIfNeeded();
         section->computeOverflowFromCells();
@@ -627,7 +632,7 @@ void RenderTable::subtractCaptionRect(LayoutRect& rect) const
 {
     for (unsigned i = 0; i < m_captions.size(); i++) {
         LayoutUnit captionLogicalHeight = m_captions[i]->logicalHeight() + m_captions[i]->marginBefore() + m_captions[i]->marginAfter();
-        bool captionIsBefore = (m_captions[i]->style()->captionSide() != CAPBOTTOM) ^ style()->isFlippedBlocksWritingMode();
+        bool captionIsBefore = (m_captions[i]->style()->captionSide() != CAPBOTTOM) ^ style()->slowIsFlippedBlocksWritingMode();
         if (style()->isHorizontalWritingMode()) {
             rect.setHeight(rect.height() - captionLogicalHeight);
             if (captionIsBefore)

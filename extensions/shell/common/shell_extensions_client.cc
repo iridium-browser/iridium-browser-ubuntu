@@ -20,6 +20,8 @@
 #include "extensions/common/permissions/permissions_info.h"
 #include "extensions/common/permissions/permissions_provider.h"
 #include "extensions/common/url_pattern_set.h"
+#include "extensions/shell/common/api/generated_schemas.h"
+#include "grit/app_shell_resources.h"
 #include "grit/extensions_resources.h"
 
 namespace extensions {
@@ -36,31 +38,30 @@ SimpleFeature* CreateFeature() {
 class ShellPermissionMessageProvider : public PermissionMessageProvider {
  public:
   ShellPermissionMessageProvider() {}
-  virtual ~ShellPermissionMessageProvider() {}
+  ~ShellPermissionMessageProvider() override {}
 
   // PermissionMessageProvider implementation.
-  virtual PermissionMessages GetPermissionMessages(
+  PermissionMessages GetPermissionMessages(
       const PermissionSet* permissions,
-      Manifest::Type extension_type) const OVERRIDE {
+      Manifest::Type extension_type) const override {
     return PermissionMessages();
   }
 
-  virtual std::vector<base::string16> GetWarningMessages(
+  std::vector<base::string16> GetWarningMessages(
       const PermissionSet* permissions,
-      Manifest::Type extension_type) const OVERRIDE {
+      Manifest::Type extension_type) const override {
     return std::vector<base::string16>();
   }
 
-  virtual std::vector<base::string16> GetWarningMessagesDetails(
+  std::vector<base::string16> GetWarningMessagesDetails(
       const PermissionSet* permissions,
-      Manifest::Type extension_type) const OVERRIDE {
+      Manifest::Type extension_type) const override {
     return std::vector<base::string16>();
   }
 
-  virtual bool IsPrivilegeIncrease(
-      const PermissionSet* old_permissions,
-      const PermissionSet* new_permissions,
-      Manifest::Type extension_type) const OVERRIDE {
+  bool IsPrivilegeIncrease(const PermissionSet* old_permissions,
+                           const PermissionSet* new_permissions,
+                           Manifest::Type extension_type) const override {
     // Ensure we implement this before shipping.
     CHECK(false);
     return false;
@@ -127,6 +128,7 @@ ShellExtensionsClient::CreateFeatureProviderSource(
       new JSONFeatureProviderSource(name));
   if (name == "api") {
     source->LoadJSON(IDR_EXTENSION_API_FEATURES);
+    source->LoadJSON(IDR_SHELL_EXTENSION_API_FEATURES);
   } else if (name == "manifest") {
     source->LoadJSON(IDR_EXTENSION_MANIFEST_FEATURES);
   } else if (name == "permission") {
@@ -171,11 +173,17 @@ bool ShellExtensionsClient::IsScriptableURL(const GURL& url,
 
 bool ShellExtensionsClient::IsAPISchemaGenerated(
     const std::string& name) const {
-  return core_api::GeneratedSchemas::IsGenerated(name);
+  return core_api::GeneratedSchemas::IsGenerated(name) ||
+         shell::api::GeneratedSchemas::IsGenerated(name);
 }
 
 base::StringPiece ShellExtensionsClient::GetAPISchema(
     const std::string& name) const {
+  // Schema for app_shell-only APIs.
+  if (shell::api::GeneratedSchemas::IsGenerated(name))
+    return shell::api::GeneratedSchemas::Get(name);
+
+  // Core extensions APIs.
   return core_api::GeneratedSchemas::Get(name);
 }
 

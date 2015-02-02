@@ -463,6 +463,13 @@
             'src/client/linux/handler/minidump_descriptor.h',
             'src/client/linux/log/log.cc',
             'src/client/linux/log/log.h',
+            'src/client/linux/dump_writer_common/mapping_info.h',
+            'src/client/linux/dump_writer_common/seccomp_unwinder.cc',
+            'src/client/linux/dump_writer_common/seccomp_unwinder.h',
+            'src/client/linux/dump_writer_common/thread_info.cc',
+            'src/client/linux/dump_writer_common/thread_info.h',
+            'src/client/linux/dump_writer_common/ucontext_reader.cc',
+            'src/client/linux/dump_writer_common/ucontext_reader.h',
             'src/client/linux/minidump_writer/cpu_set.h',
             'src/client/linux/minidump_writer/directory_reader.h',
             'src/client/linux/minidump_writer/line_reader.h',
@@ -890,6 +897,24 @@
             'outputs': [ '<(PRODUCT_DIR)/breakpad_unittests_stripped' ],
             'action': [ '<(android_strip)', '<@(_inputs)', '-o', '<@(_outputs)' ],
           }],
+        },
+        {
+          'target_name': 'breakpad_unittests_deps',
+          'type': 'none',
+          'dependencies': [
+            'breakpad_unittests_stripped',
+          ],
+          # For the component build, ensure dependent shared libraries are
+          # stripped and put alongside breakpad_unittest to simplify pushing to
+          # the device.
+          'variables': {
+             'output_dir': '<(PRODUCT_DIR)/breakpad_unittests_deps/',
+             'native_binary': '<(PRODUCT_DIR)/breakpad_unittests_stripped',
+             'include_main_binary': 0,
+          },
+          'includes': [
+            '../build/android/native_app_dependencies.gypi'
+          ],
         }
       ],
     }],

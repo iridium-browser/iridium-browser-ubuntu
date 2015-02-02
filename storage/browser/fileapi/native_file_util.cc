@@ -81,12 +81,12 @@ class NativeFileEnumerator : public FileSystemFileUtil::AbstractFileEnumerator {
     : file_enum_(root_path, recursive, file_type) {
   }
 
-  virtual ~NativeFileEnumerator() {}
+  ~NativeFileEnumerator() override {}
 
-  virtual base::FilePath Next() OVERRIDE;
-  virtual int64 Size() OVERRIDE;
-  virtual base::Time LastModifiedTime() OVERRIDE;
-  virtual bool IsDirectory() OVERRIDE;
+  base::FilePath Next() override;
+  int64 Size() override;
+  base::Time LastModifiedTime() override;
+  bool IsDirectory() override;
 
  private:
   base::FileEnumerator file_enum_;
@@ -206,9 +206,9 @@ scoped_ptr<FileSystemFileUtil::AbstractFileEnumerator>
     NativeFileUtil::CreateFileEnumerator(const base::FilePath& root_path,
                                          bool recursive) {
   return make_scoped_ptr(new NativeFileEnumerator(
-      root_path, recursive,
-      base::FileEnumerator::FILES | base::FileEnumerator::DIRECTORIES))
-      .PassAs<FileSystemFileUtil::AbstractFileEnumerator>();
+      root_path,
+      recursive,
+      base::FileEnumerator::FILES | base::FileEnumerator::DIRECTORIES));
 }
 
 base::File::Error NativeFileUtil::Touch(

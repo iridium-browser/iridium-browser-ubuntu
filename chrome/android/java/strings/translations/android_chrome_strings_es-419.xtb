@@ -69,7 +69,6 @@ Vas a acceder con una cuenta administrada, lo que significa que proporcionarás 
 <translation id="7267430310003164111">Mensaje para descargar la aplicación desde Google Play Store  Nombre de la aplicación: <ph name="APP_NAME"/>  Clasificación promedio de la aplicación: <ph name="APP_RATING"/></translation>
 <translation id="4148957013307229264">Instalando...</translation>
 <translation id="3992315671621218278">Guardar vínculo</translation>
-<translation id="8034522405403831421">Esta página está en <ph name="SOURCE_LANGUAGE"/>. ¿Quieres traducirla al <ph name="TARGET_LANGUAGE"/>?</translation>
 <translation id="2476578072172137802">Configuración del sitio</translation>
 <translation id="4195643157523330669">Abrir en una pestaña nueva</translation>
 <translation id="651048280540227067">Descartar el menú</translation>
@@ -95,6 +94,7 @@ Vas a acceder con una cuenta administrada, lo que significa que proporcionarás 
 <translation id="7947953824732555851">Aceptar y acceder</translation>
 <translation id="6333140779060797560">Compartir mediante <ph name="APPLICATION"/></translation>
 <translation id="6040143037577758943">Cerrar</translation>
+<translation id="5138299137310274655">Esta página está en <ph name="SOURCE_LANGUAGE"/>. ¿Quieres traducirla al <ph name="TARGET_LANGUAGE"/>?</translation>
 <translation id="969096075394517431">Cambiar idiomas</translation>
 <translation id="5032574515228824816">Solicitud</translation>
 <translation id="7961015016161918242">Nunca</translation>

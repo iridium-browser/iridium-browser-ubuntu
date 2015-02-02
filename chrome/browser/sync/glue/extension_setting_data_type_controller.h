@@ -33,17 +33,16 @@ class ExtensionSettingDataTypeController
       Profile* profile);
 
   // NonFrontendDataTypeController implementation
-  virtual syncer::ModelType type() const OVERRIDE;
-  virtual syncer::ModelSafeGroup model_safe_group() const OVERRIDE;
+  syncer::ModelType type() const override;
+  syncer::ModelSafeGroup model_safe_group() const override;
 
  private:
-  virtual ~ExtensionSettingDataTypeController();
+  ~ExtensionSettingDataTypeController() override;
 
   // NonFrontendDataTypeController implementation.
-  virtual bool PostTaskOnBackendThread(
-      const tracked_objects::Location& from_here,
-      const base::Closure& task) OVERRIDE;
-  virtual bool StartModels() OVERRIDE;
+  bool PostTaskOnBackendThread(const tracked_objects::Location& from_here,
+                               const base::Closure& task) override;
+  bool StartModels() override;
 
   // Either EXTENSION_SETTINGS or APP_SETTINGS.
   syncer::ModelType type_;

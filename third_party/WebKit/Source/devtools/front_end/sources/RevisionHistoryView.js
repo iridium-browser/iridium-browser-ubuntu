@@ -35,7 +35,7 @@
 WebInspector.RevisionHistoryView = function()
 {
     WebInspector.VBox.call(this);
-    this.registerRequiredCSS("revisionHistory.css");
+    this.registerRequiredCSS("sources/revisionHistory.css");
     this.element.classList.add("revision-history-drawer");
     this.element.classList.add("outline-disclosure");
     this._uiSourceCodeItems = new Map();
@@ -209,7 +209,7 @@ WebInspector.RevisionHistoryTreeElement = function(revision, baseRevision, allow
     this._revision = revision;
     this._baseRevision = baseRevision;
 
-    this._revertElement = document.createElement("span");
+    this._revertElement = createElement("span");
     this._revertElement.className = "revision-history-link";
     this._revertElement.textContent = WebInspector.UIString("apply revision content");
     this._revertElement.addEventListener("click", this._revision.revertToThis.bind(this._revision), false);
@@ -310,12 +310,12 @@ WebInspector.RevisionHistoryTreeElement.prototype = {
         var child = new TreeElement("", null, false);
         child.selectable = false;
         this.appendChild(child);
-        var lineElement = document.createElement("span");
+        var lineElement = createElement("span");
 
         function appendLineNumber(lineNumber)
         {
             var numberString = lineNumber !== null ? numberToStringWithSpacesPadding(lineNumber + 1, 4) : spacesPadding(4);
-            var lineNumberSpan = document.createElement("span");
+            var lineNumberSpan = createElement("span");
             lineNumberSpan.classList.add("webkit-line-number");
             lineNumberSpan.textContent = numberString;
             child.listItemElement.appendChild(lineNumberSpan);
@@ -324,7 +324,7 @@ WebInspector.RevisionHistoryTreeElement.prototype = {
         appendLineNumber(baseLineNumber);
         appendLineNumber(newLineNumber);
 
-        var contentSpan = document.createElement("span");
+        var contentSpan = createElement("span");
         contentSpan.textContent = lineContent;
         child.listItemElement.appendChild(contentSpan);
         child.listItemElement.classList.add("revision-history-line");

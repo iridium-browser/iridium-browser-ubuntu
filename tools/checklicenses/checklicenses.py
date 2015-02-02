@@ -290,9 +290,6 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     'third_party/molokocacao': [  # http://crbug.com/98453
         'UNKNOWN',
     ],
-    'third_party/npapi/npspy': [
-        'UNKNOWN',
-    ],
     'third_party/ocmock/OCMock': [  # http://crbug.com/98454
         'UNKNOWN',
     ],
@@ -399,6 +396,11 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
         'UNKNOWN',
     ],
     'tools/symsrc/pefile.py': [
+        'UNKNOWN',
+    ],
+    # Not shipped, downloaded on trybots sometimes.
+    'tools/telemetry/third_party/gsutil': [
+        'BSD MIT/X11 (BSD like)',
         'UNKNOWN',
     ],
     'tools/telemetry/third_party/pyserial': [

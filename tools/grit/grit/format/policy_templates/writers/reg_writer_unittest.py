@@ -48,6 +48,20 @@ class RegWriterUnittest(writer_unittest_common.WriterUnittestCommon):
     expected_output = 'Windows Registry Editor Version 5.00'
     self.CompareOutputs(output, expected_output)
 
+  def testEmptyVersion(self):
+    # Test the handling of an empty policy list.
+    grd = self.PrepareTest(
+        '{'
+        '  "policy_definitions": [],'
+        '  "placeholders": [],'
+        '  "messages": {}'
+        '}')
+    output = self.GetOutput(
+        grd, 'fr', {'_chromium': '1', 'version': '39.0.0.0' }, 'reg', 'en')
+    expected_output = ('Windows Registry Editor Version 5.00\r\n'
+                       '; chromium version: 39.0.0.0\r\n')
+    self.CompareOutputs(output, expected_output)
+
   def testMainPolicy(self):
     # Tests a policy group with a single policy of type 'main'.
     grd = self.PrepareTest(

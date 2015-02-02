@@ -6,7 +6,6 @@
 #include "base/scoped_observer.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
-#include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/startup_helper.h"
 #include "chrome/browser/extensions/webstore_installer_test.h"
@@ -15,7 +14,6 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -28,6 +26,7 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_registry_observer.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/install/extension_install_ui.h"
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/value_builder.h"
 #include "net/dns/mock_host_resolver.h"
@@ -178,7 +177,7 @@ class WebstoreStartupInstallerSupervisedUsersTest
     : public WebstoreStartupInstallerTest {
  public:
   // InProcessBrowserTest overrides:
-  virtual void SetUpCommandLine(base::CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     WebstoreStartupInstallerTest::SetUpCommandLine(command_line);
     command_line->AppendSwitchASCII(switches::kSupervisedUserId, "asdf");
   }
@@ -212,7 +211,7 @@ IN_PROC_BROWSER_TEST_F(WebstoreStartupInstallerSupervisedUsersTest,
 class WebstoreStartupInstallUnpackFailureTest
     : public WebstoreStartupInstallerTest {
  public:
-  virtual void SetUpCommandLine(base::CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     WebstoreStartupInstallerTest::SetUpCommandLine(command_line);
 
     GURL crx_url = GenerateTestServerUrl(
@@ -221,9 +220,9 @@ class WebstoreStartupInstallUnpackFailureTest
         switches::kAppsGalleryUpdateURL, crx_url.spec());
   }
 
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
+  void SetUpInProcessBrowserTestFixture() override {
     WebstoreStartupInstallerTest::SetUpInProcessBrowserTestFixture();
-    ExtensionInstallUI::set_disable_failure_ui_for_tests();
+    extensions::ExtensionInstallUI::set_disable_failure_ui_for_tests();
   }
 };
 
@@ -244,16 +243,16 @@ class CommandLineWebstoreInstall
       public extensions::ExtensionRegistryObserver {
  public:
   CommandLineWebstoreInstall() : saw_install_(false), browser_open_count_(0) {}
-  virtual ~CommandLineWebstoreInstall() {}
+  ~CommandLineWebstoreInstall() override {}
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     WebstoreStartupInstallerTest::SetUpOnMainThread();
     extensions::ExtensionRegistry::Get(browser()->profile())->AddObserver(this);
     registrar_.Add(this, chrome::NOTIFICATION_BROWSER_OPENED,
                    content::NotificationService::AllSources());
   }
 
-  virtual void TearDownOnMainThread() OVERRIDE {
+  void TearDownOnMainThread() override {
     extensions::ExtensionRegistry::Get(browser()->profile())
         ->RemoveObserver(this);
     WebstoreStartupInstallerTest::TearDownOnMainThread();
@@ -264,19 +263,18 @@ class CommandLineWebstoreInstall
   int browser_open_count() { return browser_open_count_; }
 
   // NotificationObserver interface.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE {
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override {
     DCHECK_EQ(type, chrome::NOTIFICATION_BROWSER_OPENED);
     ++browser_open_count_;
   }
 
-  virtual void OnExtensionWillBeInstalled(
-      content::BrowserContext* browser_context,
-      const extensions::Extension* extension,
-      bool is_update,
-      bool from_ephemeral,
-      const std::string& old_name) OVERRIDE {
+  void OnExtensionWillBeInstalled(content::BrowserContext* browser_context,
+                                  const extensions::Extension* extension,
+                                  bool is_update,
+                                  bool from_ephemeral,
+                                  const std::string& old_name) override {
     EXPECT_EQ(extension->id(), kTestExtensionId);
     saw_install_ = true;
   }

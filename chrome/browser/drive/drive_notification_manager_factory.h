@@ -37,11 +37,11 @@ class DriveNotificationManagerFactory
   friend struct DefaultSingletonTraits<DriveNotificationManagerFactory>;
 
   DriveNotificationManagerFactory();
-  virtual ~DriveNotificationManagerFactory();
+  ~DriveNotificationManagerFactory() override;
 
   // BrowserContextKeyedServiceFactory implementation.
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* context) const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* context) const override;
 };
 
 }  // namespace drive

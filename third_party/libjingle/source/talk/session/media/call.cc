@@ -28,7 +28,7 @@
 #include <string>
 #include "talk/media/base/constants.h"
 #include "talk/media/base/screencastid.h"
-#include "talk/p2p/base/parsing.h"
+#include "webrtc/p2p/base/parsing.h"
 #include "talk/session/media/call.h"
 #include "talk/session/media/currentspeakermonitor.h"
 #include "talk/session/media/mediasessionclient.h"
@@ -282,7 +282,11 @@ bool Call::AddSession(Session* session, const SessionDescription* offer) {
   if (has_video_ && succeeded) {
     media_session.video_channel =
         session_client_->channel_manager()->CreateVideoChannel(
-            session, video_offer->name, true, media_session.voice_channel);
+            session,
+            video_offer->name,
+            true,
+            VideoOptions(),
+            media_session.voice_channel);
     // video_channel can be NULL in case of NullVideoEngine.
     if (media_session.video_channel) {
       media_session.video_channel->SignalMediaMonitor.connect(

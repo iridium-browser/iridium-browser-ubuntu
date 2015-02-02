@@ -4,14 +4,14 @@
 
 #include "chrome/browser/extensions/api/hotword_private/hotword_private_api.h"
 
-#include "base/command_line.h"
 #include "base/lazy_instance.h"
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/hotword_client.h"
 #include "chrome/browser/search/hotword_service.h"
 #include "chrome/browser/search/hotword_service_factory.h"
-#include "chrome/common/chrome_switches.h"
+#include "chrome/browser/ui/app_list/app_list_service.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/common/pref_names.h"
 #include "extensions/browser/event_router.h"
 
@@ -62,7 +62,9 @@ const char* HotwordPrivateEventService::service_name() {
 void HotwordPrivateEventService::OnEnabledChanged(
     const std::string& pref_name) {
   DCHECK(pref_name == std::string(prefs::kHotwordSearchEnabled) ||
-         pref_name == std::string(prefs::kHotwordAlwaysOnSearchEnabled));
+         pref_name == std::string(prefs::kHotwordAlwaysOnSearchEnabled) ||
+         pref_name == std::string(
+             hotword_internal::kHotwordTrainingEnabled));
   SignalEvent(OnEnabledChanged::kEventName);
 }
 
@@ -72,6 +74,14 @@ void HotwordPrivateEventService::OnHotwordSessionRequested() {
 
 void HotwordPrivateEventService::OnHotwordSessionStopped() {
   SignalEvent(api::hotword_private::OnHotwordSessionStopped::kEventName);
+}
+
+void HotwordPrivateEventService::OnFinalizeSpeakerModel() {
+  SignalEvent(api::hotword_private::OnFinalizeSpeakerModel::kEventName);
+}
+
+void HotwordPrivateEventService::OnHotwordTriggered() {
+  SignalEvent(api::hotword_private::OnHotwordTriggered::kEventName);
 }
 
 void HotwordPrivateEventService::SignalEvent(const std::string& event_name) {
@@ -121,10 +131,13 @@ bool HotwordPrivateGetStatusFunction::RunSync() {
 
   HotwordService* hotword_service =
       HotwordServiceFactory::GetForProfile(GetProfile());
-  if (!hotword_service)
+  if (!hotword_service) {
     result.available = false;
-  else
+  } else {
     result.available = hotword_service->IsServiceAvailable();
+    result.audio_logging_enabled = hotword_service->IsOptedIntoAudioLogging();
+    result.training_enabled = hotword_service->IsTraining();
+  }
 
   PrefService* prefs = GetProfile()->GetPrefs();
   result.enabled_set = prefs->HasPrefPath(prefs::kHotwordSearchEnabled);
@@ -132,11 +145,8 @@ bool HotwordPrivateGetStatusFunction::RunSync() {
   result.always_on_enabled =
       prefs->GetBoolean(prefs::kHotwordAlwaysOnSearchEnabled);
   result.audio_logging_enabled = false;
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
-  result.experimental_hotword_enabled = command_line->HasSwitch(
-      switches::kEnableExperimentalHotwording);
-  if (hotword_service)
-    result.audio_logging_enabled = hotword_service->IsOptedIntoAudioLogging();
+  result.experimental_hotword_enabled =
+      HotwordService::IsExperimentalHotwordingEnabled();
 
   SetResult(result.ToValue().release());
   return true;
@@ -149,7 +159,9 @@ bool HotwordPrivateSetHotwordSessionStateFunction::RunSync() {
 
   HotwordService* hotword_service =
       HotwordServiceFactory::GetForProfile(GetProfile());
-  if (hotword_service && hotword_service->client())
+  if (hotword_service &&
+      hotword_service->client() &&
+      !hotword_service->IsTraining())
     hotword_service->client()->OnHotwordStateChanged(params->started);
   return true;
 }
@@ -157,25 +169,73 @@ bool HotwordPrivateSetHotwordSessionStateFunction::RunSync() {
 bool HotwordPrivateNotifyHotwordRecognitionFunction::RunSync() {
   HotwordService* hotword_service =
       HotwordServiceFactory::GetForProfile(GetProfile());
-  if (hotword_service && hotword_service->client())
-    hotword_service->client()->OnHotwordRecognized();
+  if (hotword_service) {
+    if (hotword_service->IsTraining()) {
+      hotword_service->NotifyHotwordTriggered();
+    } else if (hotword_service->client()) {
+      hotword_service->client()->OnHotwordRecognized();
+    } else if (HotwordService::IsExperimentalHotwordingEnabled() &&
+               hotword_service->IsAlwaysOnEnabled()) {
+      Browser* browser = GetCurrentBrowser();
+      // If a Browser does not exist, fall back to the universally available,
+      // but not recommended, way.
+      AppListService* app_list_service = AppListService::Get(
+          browser ? browser->host_desktop_type() : chrome::GetActiveDesktop());
+      CHECK(app_list_service);
+      app_list_service->ShowForVoiceSearch(GetProfile());
+    }
+  }
   return true;
 }
 
 bool HotwordPrivateGetLaunchStateFunction::RunSync() {
-  api::hotword_private::LaunchState result;
-
   HotwordService* hotword_service =
       HotwordServiceFactory::GetForProfile(GetProfile());
   if (!hotword_service) {
     error_ = hotword_private_constants::kHotwordServiceUnavailable;
     return false;
-  } else {
-    result.launch_mode =
-        hotword_service->GetHotwordAudioVerificationLaunchMode();
   }
 
+  api::hotword_private::LaunchState result;
+  result.launch_mode =
+      hotword_service->GetHotwordAudioVerificationLaunchMode();
   SetResult(result.ToValue().release());
+  return true;
+}
+
+bool HotwordPrivateStartTrainingFunction::RunSync() {
+  HotwordService* hotword_service =
+      HotwordServiceFactory::GetForProfile(GetProfile());
+  if (!hotword_service) {
+    error_ = hotword_private_constants::kHotwordServiceUnavailable;
+    return false;
+  }
+
+  hotword_service->StartTraining();
+  return true;
+}
+
+bool HotwordPrivateFinalizeSpeakerModelFunction::RunSync() {
+  HotwordService* hotword_service =
+      HotwordServiceFactory::GetForProfile(GetProfile());
+  if (!hotword_service) {
+    error_ = hotword_private_constants::kHotwordServiceUnavailable;
+    return false;
+  }
+
+  hotword_service->FinalizeSpeakerModel();
+  return true;
+}
+
+bool HotwordPrivateStopTrainingFunction::RunSync() {
+  HotwordService* hotword_service =
+      HotwordServiceFactory::GetForProfile(GetProfile());
+  if (!hotword_service) {
+    error_ = hotword_private_constants::kHotwordServiceUnavailable;
+    return false;
+  }
+
+  hotword_service->StopTraining();
   return true;
 }
 

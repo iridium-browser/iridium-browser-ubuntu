@@ -10,7 +10,7 @@
 
 #include "GrSingleTextureEffect.h"
 
-class GrProcessorStage;
+class GrFragmentStage;
 class GrGLConfigConversionEffect;
 
 /**
@@ -43,8 +43,6 @@ public:
 
     virtual const GrBackendFragmentProcessorFactory& getFactory() const SK_OVERRIDE;
 
-    virtual void getConstantColorComponents(GrColor* color, uint32_t* validFlags) const SK_OVERRIDE;
-
     bool swapsRedAndBlue() const { return fSwapRedAndBlue; }
     PMConversion  pmConversion() const { return fPMConversion; }
 
@@ -63,7 +61,9 @@ private:
                             PMConversion pmConversion,
                             const SkMatrix& matrix);
 
-    virtual bool onIsEqual(const GrProcessor&) const SK_OVERRIDE;
+    virtual bool onIsEqual(const GrFragmentProcessor&) const SK_OVERRIDE;
+
+    virtual void onComputeInvariantOutput(InvariantOutput* inout) const SK_OVERRIDE;
 
     bool            fSwapRedAndBlue;
     PMConversion    fPMConversion;

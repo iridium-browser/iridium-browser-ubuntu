@@ -29,7 +29,7 @@ class MockWebBlobRegistryImpl : public blink::WebBlobRegistry {
   virtual void registerStreamURL(const blink::WebURL& url,
                                  const blink::WebURL& src_url);
   virtual void addDataToStream(const blink::WebURL& url,
-                               blink::WebThreadSafeData& data);
+                               const char* data, size_t length);
   virtual void finalizeStream(const blink::WebURL& url);
   virtual void abortStream(const blink::WebURL& url);
   virtual void unregisterStreamURL(const blink::WebURL& url);

@@ -53,18 +53,13 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
  public:
   explicit MenuDelegate(PermissionBubbleController* bubble)
       : bubble_controller_(bubble) {}
-  virtual bool IsCommandIdChecked(int command_id) const OVERRIDE {
+  bool IsCommandIdChecked(int command_id) const override { return false; }
+  bool IsCommandIdEnabled(int command_id) const override { return true; }
+  bool GetAcceleratorForCommandId(int command_id,
+                                  ui::Accelerator* accelerator) override {
     return false;
   }
-  virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE {
-    return true;
-  }
-  virtual bool GetAcceleratorForCommandId(
-      int command_id,
-      ui::Accelerator* accelerator) OVERRIDE {
-    return false;
-  }
-  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE {
+  void ExecuteCommand(int command_id, int event_flags) override {
     [bubble_controller_ onMenuItemClicked:command_id];
   }
  private:

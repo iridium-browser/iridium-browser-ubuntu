@@ -19,11 +19,17 @@
 //
 // These classes are represented as only a 64-bit value, so they can be
 // efficiently passed by value.
+//
+// Definitions of operator<< are provided to make these types work with
+// DCHECK_EQ() and other log macros. For human-readable formatting, see
+// "base/i18n/time_formatting.h".
 
 #ifndef BASE_TIME_TIME_H_
 #define BASE_TIME_TIME_H_
 
 #include <time.h>
+
+#include <iosfwd>
 
 #include "base/base_export.h"
 #include "base/basictypes.h"
@@ -206,6 +212,9 @@ inline TimeDelta operator*(int64 a, TimeDelta td) {
   return TimeDelta(a * td.delta_);
 }
 
+// For logging use only.
+BASE_EXPORT std::ostream& operator<<(std::ostream& os, TimeDelta time_delta);
+
 // Time -----------------------------------------------------------------------
 
 // Represents a wall clock time in UTC.
@@ -222,6 +231,10 @@ class BASE_EXPORT Time {
   static const int64 kNanosecondsPerMicrosecond = 1000;
   static const int64 kNanosecondsPerSecond = kNanosecondsPerMicrosecond *
                                              kMicrosecondsPerSecond;
+
+  // The representation of Jan 1, 1970 UTC in microseconds since the
+  // platform-dependent epoch.
+  static const int64 kTimeTToMicrosecondsOffset;
 
 #if !defined(OS_WIN)
   // On Mac & Linux, this value is the delta from the Windows epoch of 1601 to
@@ -483,10 +496,6 @@ class BASE_EXPORT Time {
                                  bool is_local,
                                  Time* parsed_time);
 
-  // The representation of Jan 1, 1970 UTC in microseconds since the
-  // platform-dependent epoch.
-  static const int64 kTimeTToMicrosecondsOffset;
-
   // Time in microseconds in UTC.
   int64 us_;
 };
@@ -538,7 +547,7 @@ inline TimeDelta TimeDelta::FromSecondsD(double secs) {
   // Preserve max to prevent overflow.
   if (secs == std::numeric_limits<double>::infinity())
     return Max();
-  return TimeDelta(secs * Time::kMicrosecondsPerSecond);
+  return TimeDelta(static_cast<int64>(secs * Time::kMicrosecondsPerSecond));
 }
 
 // static
@@ -546,7 +555,7 @@ inline TimeDelta TimeDelta::FromMillisecondsD(double ms) {
   // Preserve max to prevent overflow.
   if (ms == std::numeric_limits<double>::infinity())
     return Max();
-  return TimeDelta(ms * Time::kMicrosecondsPerMillisecond);
+  return TimeDelta(static_cast<int64>(ms * Time::kMicrosecondsPerMillisecond));
 }
 
 // static
@@ -560,6 +569,9 @@ inline TimeDelta TimeDelta::FromMicroseconds(int64 us) {
 inline Time TimeDelta::operator+(Time t) const {
   return Time(t.us_ + delta_);
 }
+
+// For logging use only.
+BASE_EXPORT std::ostream& operator<<(std::ostream& os, Time time);
 
 // TimeTicks ------------------------------------------------------------------
 
@@ -722,6 +734,9 @@ class BASE_EXPORT TimeTicks {
 inline TimeTicks TimeDelta::operator+(TimeTicks t) const {
   return TimeTicks(t.ticks_ + delta_);
 }
+
+// For logging use only.
+BASE_EXPORT std::ostream& operator<<(std::ostream& os, TimeTicks time_ticks);
 
 }  // namespace base
 

@@ -50,7 +50,7 @@ class RenderListMarker;
 // Single-pass text autosizer. Documentation at:
 // http://tinyurl.com/TextAutosizer
 
-class TextAutosizer FINAL : public NoBaseWillBeGarbageCollectedFinalized<TextAutosizer> {
+class TextAutosizer final : public NoBaseWillBeGarbageCollectedFinalized<TextAutosizer> {
     WTF_MAKE_NONCOPYABLE(TextAutosizer);
 public:
     static PassOwnPtrWillBeRawPtr<TextAutosizer> create(const Document* document)
@@ -255,6 +255,7 @@ private:
     void inflateAutoTable(RenderTable*);
     float inflate(RenderObject*, InflateBehavior = ThisBlockOnly, float multiplier = 0);
     bool shouldHandleLayout() const;
+    IntSize windowSize() const;
     void setAllTextNeedsLayout();
     void resetMultipliers();
     BeginLayoutBehavior prepareForLayout(const RenderBlock*);

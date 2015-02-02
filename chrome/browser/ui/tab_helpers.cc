@@ -6,6 +6,7 @@
 
 #include "base/command_line.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/content_settings/chrome_content_settings_client.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/history/history_tab_helper.h"
@@ -32,6 +33,7 @@
 #include "components/autofill/core/browser/autofill_manager.h"
 #include "components/dom_distiller/content/web_contents_main_frame_observer.h"
 #include "components/password_manager/core/browser/password_manager.h"
+#include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/web_contents.h"
 
 #if defined(OS_ANDROID)
@@ -75,12 +77,12 @@
 #endif
 
 #if defined(ENABLE_PRINTING)
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
 #include "chrome/browser/printing/print_preview_message_handler.h"
 #include "chrome/browser/printing/print_view_manager.h"
 #else
 #include "chrome/browser/printing/print_view_manager_basic.h"
-#endif  // defined(ENABLE_FULL_PRINTING)
+#endif  // defined(ENABLE_PRINT_PREVIEW)
 #endif  // defined(ENABLE_PRINTING)
 
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
@@ -150,7 +152,10 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
       web_contents,
       ChromePasswordManagerClient::GetManagerFromWebContents(web_contents));
   SearchTabHelper::CreateForWebContents(web_contents);
+  // TODO(vabr): Remove TabSpecificContentSettings from here once their function
+  // is taken over by ChromeContentSettingsClient. http://crbug.com/387075
   TabSpecificContentSettings::CreateForWebContents(web_contents);
+  ChromeContentSettingsClient::CreateForWebContents(web_contents);
   ChromeTranslateClient::CreateForWebContents(web_contents);
 
   // --- Platform-specific tab helpers ---
@@ -200,12 +205,12 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
 #endif
 
 #if defined(ENABLE_PRINTING) && !defined(OS_ANDROID)
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
   printing::PrintViewManager::CreateForWebContents(web_contents);
   printing::PrintPreviewMessageHandler::CreateForWebContents(web_contents);
 #else
   printing::PrintViewManagerBasic::CreateForWebContents(web_contents);
-#endif  // defined(ENABLE_FULL_PRINTING)
+#endif  // defined(ENABLE_PRINT_PREVIEW)
 #endif  // defined(ENABLE_PRINTING) && !defined(OS_ANDROID)
 
   if (CommandLine::ForCurrentProcess()->HasSwitch(
@@ -220,7 +225,8 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
   // because the connected state may change while this tab is open.  Having a
   // one-click signin helper attached does not cause problems if the profile
   // happens to be already connected.
-  if (OneClickSigninHelper::CanOffer(web_contents,
+  if (switches::IsEnableWebBasedSignin() &&
+      OneClickSigninHelper::CanOffer(web_contents,
                                      OneClickSigninHelper::CAN_OFFER_FOR_ALL,
                                      std::string(),
                                      NULL)) {

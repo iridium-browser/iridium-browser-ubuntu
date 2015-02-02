@@ -24,7 +24,7 @@ class BookmarkExpandedStateTracker : public BaseBookmarkModelObserver {
 
   BookmarkExpandedStateTracker(BookmarkModel* bookmark_model,
                                PrefService* pref_service);
-  virtual ~BookmarkExpandedStateTracker();
+  ~BookmarkExpandedStateTracker() override;
 
   // The set of expanded nodes.
   void SetExpandedNodes(const Nodes& nodes);
@@ -32,18 +32,16 @@ class BookmarkExpandedStateTracker : public BaseBookmarkModelObserver {
 
  private:
   // BaseBookmarkModelObserver:
-  virtual void BookmarkModelLoaded(BookmarkModel* model,
-                                   bool ids_reassigned) OVERRIDE;
-  virtual void BookmarkModelChanged() OVERRIDE;
-  virtual void BookmarkModelBeingDeleted(BookmarkModel* model) OVERRIDE;
-  virtual void BookmarkNodeRemoved(BookmarkModel* model,
-                                   const BookmarkNode* parent,
-                                   int old_index,
-                                   const BookmarkNode* node,
-                                   const std::set<GURL>& removed_urls) OVERRIDE;
-  virtual void BookmarkAllUserNodesRemoved(
-      BookmarkModel* model,
-      const std::set<GURL>& removed_urls) OVERRIDE;
+  void BookmarkModelLoaded(BookmarkModel* model, bool ids_reassigned) override;
+  void BookmarkModelChanged() override;
+  void BookmarkModelBeingDeleted(BookmarkModel* model) override;
+  void BookmarkNodeRemoved(BookmarkModel* model,
+                           const BookmarkNode* parent,
+                           int old_index,
+                           const BookmarkNode* node,
+                           const std::set<GURL>& removed_urls) override;
+  void BookmarkAllUserNodesRemoved(BookmarkModel* model,
+                                   const std::set<GURL>& removed_urls) override;
 
   // Updates the value for |prefs::kBookmarkEditorExpandedNodes| from
   // GetExpandedNodes().

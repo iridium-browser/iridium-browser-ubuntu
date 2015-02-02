@@ -12,8 +12,6 @@
 #include "base/observer_list.h"
 #include "base/strings/string16.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
-#include "chrome/browser/extensions/context_menu_matcher.h"
-#include "chrome/browser/extensions/menu_manager.h"
 #include "components/renderer_context_menu/context_menu_content_type.h"
 #include "components/renderer_context_menu/render_view_context_menu_base.h"
 #include "components/renderer_context_menu/render_view_context_menu_observer.h"
@@ -21,6 +19,11 @@
 #include "content/public/common/context_menu_params.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/base/window_open_disposition.h"
+
+#if defined(ENABLE_EXTENSIONS)
+#include "chrome/browser/extensions/context_menu_matcher.h"
+#include "chrome/browser/extensions/menu_manager.h"
+#endif
 
 class PrintPreviewContextMenuObserver;
 class Profile;
@@ -51,16 +54,19 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   RenderViewContextMenu(content::RenderFrameHost* render_frame_host,
                         const content::ContextMenuParams& params);
 
-  virtual ~RenderViewContextMenu();
+  ~RenderViewContextMenu() override;
 
   // SimpleMenuModel::Delegate:
-  virtual bool IsCommandIdChecked(int command_id) const OVERRIDE;
-  virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE;
-  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE;
+  bool IsCommandIdChecked(int command_id) const override;
+  bool IsCommandIdEnabled(int command_id) const override;
+  void ExecuteCommand(int command_id, int event_flags) override;
 
  protected:
   Profile* GetProfile();
+
+#if defined(ENABLE_EXTENSIONS)
   extensions::ContextMenuMatcher extension_items_;
+#endif
 
  private:
   friend class RenderViewContextMenuTest;
@@ -68,23 +74,25 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
 
   static bool IsDevToolsURL(const GURL& url);
   static bool IsInternalResourcesURL(const GURL& url);
+#if defined(ENABLE_EXTENSIONS)
   static bool ExtensionContextAndPatternMatch(
       const content::ContextMenuParams& params,
       const extensions::MenuItem::ContextList& contexts,
       const extensions::URLPatternSet& target_url_patterns);
   static bool MenuItemMatchesParams(const content::ContextMenuParams& params,
                                     const extensions::MenuItem* item);
+#endif
 
   // RenderViewContextMenuBase:
-  virtual void InitMenu() OVERRIDE;
-  virtual void RecordShownItem(int id) OVERRIDE;
-  virtual void RecordUsedItem(int id) OVERRIDE;
+  void InitMenu() override;
+  void RecordShownItem(int id) override;
+  void RecordUsedItem(int id) override;
 #if defined(ENABLE_PLUGINS)
-  virtual void HandleAuthorizeAllPlugins() OVERRIDE;
+  void HandleAuthorizeAllPlugins() override;
 #endif
-  virtual void NotifyMenuShown() OVERRIDE;
-  virtual void NotifyURLOpened(const GURL& url,
-                               content::WebContents* new_contents) OVERRIDE;
+  void NotifyMenuShown() override;
+  void NotifyURLOpened(const GURL& url,
+                       content::WebContents* new_contents) override;
 
   // Gets the extension (if any) associated with the WebContents that we're in.
   const extensions::Extension* GetExtension() const;
@@ -102,10 +110,13 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   void AppendFrameItems();
   void AppendCopyItem();
   void AppendPrintItem();
+  void AppendRotationItems();
   void AppendEditableItems();
   void AppendSearchProvider();
+#if defined(ENABLE_EXTENSIONS)
   void AppendAllExtensionItems();
   void AppendCurrentExtensionItems();
+#endif
   void AppendPrintPreviewItems();
   void AppendSearchWebForImageItems();
   void AppendSpellingSuggestionsSubMenu();
@@ -152,7 +163,7 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   // An observer that handles a 'spell-checker options' submenu.
   scoped_ptr<SpellCheckerSubMenuObserver> spellchecker_submenu_observer_;
 
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
   // An observer that disables menu items when print preview is active.
   scoped_ptr<PrintPreviewContextMenuObserver> print_preview_menu_observer_;
 #endif

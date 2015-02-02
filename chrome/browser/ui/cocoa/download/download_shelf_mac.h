@@ -22,14 +22,14 @@ class DownloadShelfMac : public DownloadShelf {
   DownloadShelfMac(Browser* browser, DownloadShelfController* controller);
 
   // DownloadShelf implementation.
-  virtual bool IsShowing() const OVERRIDE;
-  virtual bool IsClosing() const OVERRIDE;
-  virtual Browser* browser() const OVERRIDE;
+  bool IsShowing() const override;
+  bool IsClosing() const override;
+  Browser* browser() const override;
 
  protected:
-  virtual void DoAddDownload(content::DownloadItem* download) OVERRIDE;
-  virtual void DoShow() OVERRIDE;
-  virtual void DoClose(CloseReason reason) OVERRIDE;
+  void DoAddDownload(content::DownloadItem* download) override;
+  void DoShow() override;
+  void DoClose(CloseReason reason) override;
 
  private:
   // The browser that owns this shelf.

@@ -11,9 +11,11 @@
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/sequenced_task_runner.h"
+#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/default_clock.h"
+#include "base/timer/timer.h"
 #include "components/gcm_driver/gcm_backoff_policy.h"
 #include "google_apis/gcm/base/encryptor.h"
 #include "google_apis/gcm/base/mcs_message.h"
@@ -191,12 +193,10 @@ scoped_ptr<MCSClient> GCMInternalsBuilder::BuildMCSClient(
     ConnectionFactory* connection_factory,
     GCMStore* gcm_store,
     GCMStatsRecorder* recorder) {
-  return make_scoped_ptr<MCSClient>(
-      new MCSClient(version,
-                    clock,
-                    connection_factory,
-                    gcm_store,
-                    recorder));
+  return scoped_ptr<MCSClient>(new MCSClient(
+      version, clock, connection_factory, gcm_store, recorder,
+      make_scoped_ptr(new base::Timer(true, /* retain user task */
+                                      false /* non-repeating */))));
 }
 
 scoped_ptr<ConnectionFactory> GCMInternalsBuilder::BuildConnectionFactory(
@@ -321,12 +321,13 @@ void GCMClientImpl::OnLoadCompleted(scoped_ptr<GCMStore::LoadResult> result) {
   // load result to InitializeMCSClient.
   std::vector<AccountMapping> account_mappings;
   account_mappings.swap(result->account_mappings);
+  base::Time last_token_fetch_time = result->last_token_fetch_time;
 
   InitializeMCSClient(result.Pass());
 
   if (device_checkin_info_.IsValid()) {
     SchedulePeriodicCheckin();
-    OnReady(account_mappings);
+    OnReady(account_mappings, last_token_fetch_time);
     return;
   }
 
@@ -380,15 +381,15 @@ void GCMClientImpl::OnFirstTimeDeviceCheckinCompleted(
       base::Bind(&GCMClientImpl::SetDeviceCredentialsCallback,
                  weak_ptr_factory_.GetWeakPtr()));
 
-  OnReady(std::vector<AccountMapping>());
+  OnReady(std::vector<AccountMapping>(), base::Time());
 }
 
-void GCMClientImpl::OnReady(
-    const std::vector<AccountMapping>& account_mappings) {
+void GCMClientImpl::OnReady(const std::vector<AccountMapping>& account_mappings,
+                            const base::Time& last_token_fetch_time) {
   state_ = READY;
   StartMCSLogin();
 
-  delegate_->OnGCMReady(account_mappings);
+  delegate_->OnGCMReady(account_mappings, last_token_fetch_time);
 }
 
 void GCMClientImpl::StartMCSLogin() {
@@ -403,10 +404,17 @@ void GCMClientImpl::ResetState() {
   // TODO(fgorski): reset all of the necessart objects and start over.
 }
 
-void GCMClientImpl::SetAccountsForCheckin(
-    const std::map<std::string, std::string>& account_tokens) {
+void GCMClientImpl::SetAccountTokens(
+    const std::vector<AccountTokenInfo>& account_tokens) {
+  device_checkin_info_.account_tokens.clear();
+  for (std::vector<AccountTokenInfo>::const_iterator iter =
+           account_tokens.begin();
+       iter != account_tokens.end();
+       ++iter) {
+    device_checkin_info_.account_tokens[iter->email] = iter->access_token;
+  }
+
   bool accounts_set_before = device_checkin_info_.accounts_set;
-  device_checkin_info_.account_tokens = account_tokens;
   device_checkin_info_.accounts_set = true;
 
   DVLOG(1) << "Set account called with: " << account_tokens.size()
@@ -420,8 +428,10 @@ void GCMClientImpl::SetAccountsForCheckin(
            device_checkin_info_.last_checkin_accounts.begin();
        iter != device_checkin_info_.last_checkin_accounts.end();
        ++iter) {
-    if (account_tokens.find(*iter) == account_tokens.end())
+    if (device_checkin_info_.account_tokens.find(*iter) ==
+            device_checkin_info_.account_tokens.end()) {
       account_removed = true;
+    }
   }
 
   // Checkin will be forced when any of the accounts was removed during the
@@ -451,6 +461,13 @@ void GCMClientImpl::RemoveAccountMapping(const std::string& account_id) {
   gcm_store_->RemoveAccountMapping(
       account_id,
       base::Bind(&GCMClientImpl::DefaultStoreCallback,
+                 weak_ptr_factory_.GetWeakPtr()));
+}
+
+void GCMClientImpl::SetLastTokenFetchTime(const base::Time& time) {
+  gcm_store_->SetLastTokenFetchTime(
+      time,
+      base::Bind(&GCMClientImpl::IgnoreWriteResultCallback,
                  weak_ptr_factory_.GetWeakPtr()));
 }
 
@@ -573,14 +590,25 @@ void GCMClientImpl::DefaultStoreCallback(bool success) {
   DCHECK(success);
 }
 
+void GCMClientImpl::IgnoreWriteResultCallback(bool success) {
+  // TODO(fgorski): Ignoring the write result for now to make sure
+  // sync_intergration_tests are not broken.
+}
+
 void GCMClientImpl::Stop() {
+  // TODO(fgorski): Perhaps we should make a distinction between a Stop and a
+  // Shutdown.
+  DVLOG(1) << "Stopping the GCM Client";
   weak_ptr_factory_.InvalidateWeakPtrs();
+  periodic_checkin_ptr_factory_.InvalidateWeakPtrs();
   device_checkin_info_.Reset();
   connection_factory_.reset();
   delegate_->OnDisconnected();
   mcs_client_.reset();
   checkin_request_.reset();
-  pending_registration_requests_.clear();
+  // Delete all of the pending registration and unregistration requests.
+  STLDeleteValues(&pending_registration_requests_);
+  STLDeleteValues(&pending_unregistration_requests_);
   state_ = INITIALIZED;
   gcm_store_->Close();
 }

@@ -30,7 +30,7 @@ class PanelFrameView : public views::NonClientFrameView,
   };
 
   explicit PanelFrameView(PanelView* panel_view);
-  virtual ~PanelFrameView();
+  ~PanelFrameView() override;
 
   void Init();
   void UpdateTitle();
@@ -56,36 +56,34 @@ class PanelFrameView : public views::NonClientFrameView,
 
  private:
   // Overridden from views::NonClientFrameView:
-  virtual gfx::Rect GetBoundsForClientView() const OVERRIDE;
-  virtual gfx::Rect GetWindowBoundsForClientBounds(
-      const gfx::Rect& client_bounds) const OVERRIDE;
-  virtual int NonClientHitTest(const gfx::Point& point) OVERRIDE;
-  virtual void GetWindowMask(const gfx::Size& size,
-                             gfx::Path* window_mask) OVERRIDE;
-  virtual void ResetWindowControls() OVERRIDE;
-  virtual void UpdateWindowIcon() OVERRIDE;
-  virtual void UpdateWindowTitle() OVERRIDE;
-  virtual void SizeConstraintsChanged() OVERRIDE;
+  gfx::Rect GetBoundsForClientView() const override;
+  gfx::Rect GetWindowBoundsForClientBounds(
+      const gfx::Rect& client_bounds) const override;
+  int NonClientHitTest(const gfx::Point& point) override;
+  void GetWindowMask(const gfx::Size& size, gfx::Path* window_mask) override;
+  void ResetWindowControls() override;
+  void UpdateWindowIcon() override;
+  void UpdateWindowTitle() override;
+  void SizeConstraintsChanged() override;
 
   // Overridden from views::View:
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
-  virtual const char* GetClassName() const OVERRIDE;
-  virtual gfx::Size GetMinimumSize() const OVERRIDE;
-  virtual gfx::Size GetMaximumSize() const OVERRIDE;
-  virtual void Layout() OVERRIDE;
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
-  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
-  virtual bool OnMouseDragged(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseCaptureLost() OVERRIDE;
+  gfx::Size GetPreferredSize() const override;
+  const char* GetClassName() const override;
+  gfx::Size GetMinimumSize() const override;
+  gfx::Size GetMaximumSize() const override;
+  void Layout() override;
+  void OnPaint(gfx::Canvas* canvas) override;
+  bool OnMousePressed(const ui::MouseEvent& event) override;
+  bool OnMouseDragged(const ui::MouseEvent& event) override;
+  void OnMouseReleased(const ui::MouseEvent& event) override;
+  void OnMouseCaptureLost() override;
 
   // Overridden from views::ButtonListener:
-  virtual void ButtonPressed(views::Button* sender, const ui::Event& event)
-      OVERRIDE;
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // Overridden from chrome::TabIconViewModel:
-  virtual bool ShouldTabIconViewAnimate() const OVERRIDE;
-  virtual gfx::ImageSkia GetFaviconForTabIconView() OVERRIDE;
+  bool ShouldTabIconViewAnimate() const override;
+  gfx::ImageSkia GetFaviconForTabIconView() override;
 
   int TitlebarHeight() const;
 

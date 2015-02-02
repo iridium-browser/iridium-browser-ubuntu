@@ -24,9 +24,8 @@ def RunSconsTests(status, context):
   # Trusted tests get plenty of coverage by other bots, e.g. nacl-gcc bots.
   # We make the assumption here that there are no "exotic tests" which
   # are trusted in nature but are somehow depedent on the untrusted TC.
-  flags_build = ['skip_trusted_tests=1', 'do_not_run_tests=1',
-                 'naclsdk_validate=0']
-  flags_run = ['skip_trusted_tests=1', 'naclsdk_validate=0']
+  flags_build = ['skip_trusted_tests=1', 'do_not_run_tests=1']
+  flags_run = ['skip_trusted_tests=1']
   smoke_tests = ['small_tests', 'medium_tests']
 
   arch = context['default_scons_platform']
@@ -55,6 +54,22 @@ def RunSconsTests(status, context):
   with Step('smoke_tests_irt ' + arch, status, halt_on_fail=False):
     SCons(context, parallel=True, mode=irt_mode,
           args=flags_run + smoke_tests_irt)
+
+  if arch != 'arm' and not context.Windows():
+    # Run a some nacl_clang tests. Eventually we will have bots that just run
+    # buildbot_standard with nacl_clang and this can be split out.
+    context['pnacl'] = False
+    context['nacl_clang'] = True
+    with Step('build_nacl_clang ' + arch, status, halt_on_fail=False):
+      SCons(context, parallel=True, args=flags_build)
+    with Step('smoke_tests_nacl_clang ' + arch, status, halt_on_fail=False):
+      SCons(context, parallel=True,
+            args=flags_run + ['small_tests', 'medium_tests'])
+    with Step('large_tests_nacl_clang ' + arch, status, halt_on_fail=False):
+      SCons(context, parallel=False,
+            args=flags_run + ['large_tests'])
+    context['pnacl'] = True
+    context['nacl_clang'] = False
 
   # Test sandboxed translation
   if not context.Windows() and not context.Mac():
@@ -94,6 +109,16 @@ def RunSconsTests(status, context):
                 ['nonsfi_nacl=1',
                  'nonsfi_tests',
                  'nonsfi_tests_irt'])
+
+    # Build with pnacl_generate_pexe=0 to allow using pnacl-clang with
+    # direct-to-native mode. This allows assembly to be used in tests.
+    with Step('nonsfi_tests_nopnacl_generate_pexe ' + arch,
+              status, halt_on_fail=False):
+      SCons(context, parallel=True, mode=irt_mode,
+            args=flags_run +
+                ['nonsfi_nacl=1',
+                 'pnacl_generate_pexe=0',
+                 'nonsfi_tests'])
 
     # Test nonsfi_loader linked against host's libc.
     with Step('nonsfi_tests_host_libc ' + arch, status, halt_on_fail=False):

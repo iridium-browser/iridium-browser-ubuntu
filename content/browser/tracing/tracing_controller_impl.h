@@ -27,32 +27,28 @@ class TracingControllerImpl : public TracingController {
   static TracingControllerImpl* GetInstance();
 
   // TracingController implementation.
-  virtual bool GetCategories(
-      const GetCategoriesDoneCallback& callback) OVERRIDE;
-  virtual bool EnableRecording(
-      const base::debug::CategoryFilter& category_filter,
-      const base::debug::TraceOptions& trace_options,
-      const EnableRecordingDoneCallback& callback) OVERRIDE;
-  virtual bool DisableRecording(
-      const scoped_refptr<TraceDataSink>& sink) OVERRIDE;
-  virtual bool EnableMonitoring(
-      const base::debug::CategoryFilter& category_filter,
-      const base::debug::TraceOptions& trace_options,
-      const EnableMonitoringDoneCallback& callback) OVERRIDE;
-  virtual bool DisableMonitoring(
-      const DisableMonitoringDoneCallback& callback) OVERRIDE;
-  virtual void GetMonitoringStatus(
+  bool GetCategories(const GetCategoriesDoneCallback& callback) override;
+  bool EnableRecording(const base::debug::CategoryFilter& category_filter,
+                       const base::debug::TraceOptions& trace_options,
+                       const EnableRecordingDoneCallback& callback) override;
+  bool DisableRecording(const scoped_refptr<TraceDataSink>& sink) override;
+  bool EnableMonitoring(const base::debug::CategoryFilter& category_filter,
+                        const base::debug::TraceOptions& trace_options,
+                        const EnableMonitoringDoneCallback& callback) override;
+  bool DisableMonitoring(
+      const DisableMonitoringDoneCallback& callback) override;
+  void GetMonitoringStatus(
       bool* out_enabled,
       base::debug::CategoryFilter* out_category_filter,
-      base::debug::TraceOptions* out_trace_options) OVERRIDE;
-  virtual bool CaptureMonitoringSnapshot(
-      const scoped_refptr<TraceDataSink>& sink) OVERRIDE;
-  virtual bool GetTraceBufferPercentFull(
-      const GetTraceBufferPercentFullCallback& callback) OVERRIDE;
-  virtual bool SetWatchEvent(const std::string& category_name,
-                             const std::string& event_name,
-                             const WatchEventCallback& callback) OVERRIDE;
-  virtual bool CancelWatchEvent() OVERRIDE;
+      base::debug::TraceOptions* out_trace_options) override;
+  bool CaptureMonitoringSnapshot(
+      const scoped_refptr<TraceDataSink>& sink) override;
+  bool GetTraceBufferPercentFull(
+      const GetTraceBufferPercentFullCallback& callback) override;
+  bool SetWatchEvent(const std::string& category_name,
+                     const std::string& event_name,
+                     const WatchEventCallback& callback) override;
+  bool CancelWatchEvent() override;
 
   void RegisterTracingUI(TracingUI* tracing_ui);
   void UnregisterTracingUI(TracingUI* tracing_ui);
@@ -64,7 +60,7 @@ class TracingControllerImpl : public TracingController {
   friend class TraceMessageFilter;
 
   TracingControllerImpl();
-  virtual ~TracingControllerImpl();
+  ~TracingControllerImpl() override;
 
   bool can_enable_recording() const {
     return !is_recording_;

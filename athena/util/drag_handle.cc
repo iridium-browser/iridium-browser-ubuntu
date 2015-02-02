@@ -20,7 +20,7 @@ class DragHandleView : public views::View {
                  DragHandleScrollDelegate* delegate,
                  int preferred_width,
                  int preferred_height);
-  virtual ~DragHandleView();
+  ~DragHandleView() override;
 
  private:
   void SetColor(SkColor color);
@@ -28,8 +28,8 @@ class DragHandleView : public views::View {
   void SetIsScrolling(bool scrolling);
 
   // views::View:
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
-  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
+  virtual gfx::Size GetPreferredSize() const override;
+  virtual void OnGestureEvent(ui::GestureEvent* event) override;
 
   bool scroll_in_progress_;
   DragHandleScrollDelegate* delegate_;
@@ -113,7 +113,10 @@ void DragHandleView::OnGestureEvent(ui::GestureEvent* event) {
              event->type() == ui::ET_SCROLL_FLING_START) {
     if (!scroll_in_progress_)
       return;
-    delegate_->HandleScrollEnd();
+    float velocity = 0.0f;
+    if (event->type() == ui::ET_SCROLL_FLING_START)
+      velocity = event->details().velocity_x();
+    delegate_->HandleScrollEnd(velocity);
     SetColor(kDragHandleColorNormal);
     SetIsScrolling(false);
     event->SetHandled();

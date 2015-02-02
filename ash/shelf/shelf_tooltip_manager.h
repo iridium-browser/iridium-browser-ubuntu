@@ -40,7 +40,7 @@ class ASH_EXPORT ShelfTooltipManager : public ui::EventHandler,
  public:
   ShelfTooltipManager(ShelfLayoutManager* shelf_layout_manager,
                       ShelfView* shelf_view);
-  virtual ~ShelfTooltipManager();
+  ~ShelfTooltipManager() override;
 
   ShelfLayoutManager* shelf_layout_manager() { return shelf_layout_manager_; }
 
@@ -78,16 +78,15 @@ class ASH_EXPORT ShelfTooltipManager : public ui::EventHandler,
 
 protected:
   // ui::EventHandler overrides:
-  virtual void OnMouseEvent(ui::MouseEvent* event) OVERRIDE;
-  virtual void OnTouchEvent(ui::TouchEvent* event) OVERRIDE;
-  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
-  virtual void OnCancelMode(ui::CancelModeEvent* event) OVERRIDE;
+ void OnMouseEvent(ui::MouseEvent* event) override;
+ void OnTouchEvent(ui::TouchEvent* event) override;
+ void OnGestureEvent(ui::GestureEvent* event) override;
+ void OnCancelMode(ui::CancelModeEvent* event) override;
 
   // ShelfLayoutManagerObserver overrides:
-  virtual void WillDeleteShelf() OVERRIDE;
-  virtual void WillChangeVisibilityState(
-      ShelfVisibilityState new_state) OVERRIDE;
-  virtual void OnAutoHideStateChanged(ShelfAutoHideState new_state) OVERRIDE;
+ void WillDeleteShelf() override;
+ void WillChangeVisibilityState(ShelfVisibilityState new_state) override;
+ void OnAutoHideStateChanged(ShelfAutoHideState new_state) override;
 
  private:
   class ShelfTooltipBubble;

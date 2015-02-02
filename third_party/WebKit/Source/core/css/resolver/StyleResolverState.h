@@ -60,7 +60,12 @@ public:
 
     const ElementResolveContext& elementContext() const { return m_elementContext; }
 
-    void setStyle(PassRefPtr<RenderStyle> style) { m_style = style; m_cssToLengthConversionData.setStyle(m_style.get()); }
+    void setStyle(PassRefPtr<RenderStyle> style)
+    {
+        m_style = style;
+        m_cssToLengthConversionData.setStyle(m_style.get());
+        m_fontBuilder.setStyle(m_style.get());
+    }
     const RenderStyle* style() const { return m_style.get(); }
     RenderStyle* style() { return m_style.get(); }
     PassRefPtr<RenderStyle> takeStyle() { return m_style.release(); }
@@ -87,9 +92,6 @@ public:
 
     // Holds all attribute names found while applying "content" properties that contain an "attr()" value.
     Vector<AtomicString>& contentAttrValues() { return m_contentAttrValues; }
-
-    void setLineHeightValue(CSSValue* value) { m_lineHeightValue = value; }
-    CSSValue* lineHeightValue() { return m_lineHeightValue; }
 
     void cacheUserAgentBorderAndBackground()
     {
@@ -147,8 +149,6 @@ private:
 
     bool m_applyPropertyToRegularStyle;
     bool m_applyPropertyToVisitedLinkStyle;
-
-    RawPtrWillBeMember<CSSValue> m_lineHeightValue;
 
     FontBuilder m_fontBuilder;
 

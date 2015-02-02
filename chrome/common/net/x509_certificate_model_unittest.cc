@@ -5,7 +5,6 @@
 #include "chrome/common/net/x509_certificate_model.h"
 
 #include "base/files/file_path.h"
-#include "base/path_service.h"
 #include "net/base/test_data_directory.h"
 #include "net/test/cert_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -318,7 +317,7 @@ TEST(X509CertificateModelTest, GetCMSString) {
     ASSERT_EQ(certs.size(), decoded_certs.size());
 #if defined(USE_OPENSSL)
     for (size_t i = 0; i < certs.size(); ++i)
-      EXPECT_TRUE(certs[i]->Equals(decoded_certs[i]));
+      EXPECT_TRUE(certs[i]->Equals(decoded_certs[i].get()));
 #else
     // NSS sorts the certs before writing the file.
     EXPECT_TRUE(certs[0]->Equals(decoded_certs.back().get()));

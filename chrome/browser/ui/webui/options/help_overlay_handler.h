@@ -16,14 +16,13 @@ namespace options {
 class HelpOverlayHandler : public ::options::OptionsPageUIHandler {
  public:
   HelpOverlayHandler();
-  virtual ~HelpOverlayHandler();
+  ~HelpOverlayHandler() override;
 
   // OptionsPageUIHandler implementation.
-  virtual void GetLocalizedValues(
-      base::DictionaryValue* localized_strings) OVERRIDE;
+  void GetLocalizedValues(base::DictionaryValue* localized_strings) override;
 
   // WebUIMessageHandler implementation.
-  virtual void RegisterMessages() OVERRIDE;
+  void RegisterMessages() override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(HelpOverlayHandler);

@@ -12,7 +12,7 @@
 #include "cc/debug/traced_value.h"
 #include "cc/resources/raster_buffer.h"
 #include "cc/resources/resource.h"
-#include "third_party/skia/include/utils/SkNullCanvas.h"
+#include "ui/gfx/gpu_memory_buffer.h"
 
 namespace cc {
 namespace {
@@ -21,43 +21,25 @@ class RasterBufferImpl : public RasterBuffer {
  public:
   RasterBufferImpl(ResourceProvider* resource_provider,
                    const Resource* resource)
-      : resource_provider_(resource_provider),
-        resource_(resource),
-        stride_(0),
-        buffer_(resource_provider->MapImage(resource->id(), &stride_)) {}
-
-  virtual ~RasterBufferImpl() {
-    resource_provider_->UnmapImage(resource_->id());
-
-    // This RasterBuffer implementation provides direct access to the memory
-    // used by the GPU. Read lock fences are required to ensure that we're not
-    // trying to map a resource that is currently in-use by the GPU.
-    resource_provider_->EnableReadLockFences(resource_->id());
-  }
+      : lock_(resource_provider, resource->id()), resource_(resource) {}
 
   // Overridden from RasterBuffer:
-  virtual skia::RefPtr<SkCanvas> AcquireSkCanvas() OVERRIDE {
-    if (!buffer_)
-      return skia::AdoptRef(SkCreateNullCanvas());
-
-    RasterWorkerPool::AcquireBitmapForBuffer(
-        &bitmap_, buffer_, resource_->format(), resource_->size(), stride_);
-    return skia::AdoptRef(new SkCanvas(bitmap_));
-  }
-  virtual void ReleaseSkCanvas(const skia::RefPtr<SkCanvas>& canvas) OVERRIDE {
-    if (!buffer_)
+  void Playback(const RasterSource* raster_source,
+                const gfx::Rect& rect,
+                float scale) override {
+    gfx::GpuMemoryBuffer* gpu_memory_buffer = lock_.GetGpuMemoryBuffer();
+    if (!gpu_memory_buffer)
       return;
 
-    RasterWorkerPool::ReleaseBitmapForBuffer(
-        &bitmap_, buffer_, resource_->format());
+    RasterWorkerPool::PlaybackToMemory(
+        gpu_memory_buffer->Map(), resource_->format(), resource_->size(),
+        gpu_memory_buffer->GetStride(), raster_source, rect, scale);
+    gpu_memory_buffer->Unmap();
   }
 
  private:
-  ResourceProvider* resource_provider_;
+  ResourceProvider::ScopedWriteLockGpuMemoryBuffer lock_;
   const Resource* resource_;
-  int stride_;
-  uint8_t* buffer_;
-  SkBitmap bitmap_;
 
   DISALLOW_COPY_AND_ASSIGN(RasterBufferImpl);
 };
@@ -190,10 +172,6 @@ void ZeroCopyRasterWorkerPool::CheckForCompletedTasks() {
 
 scoped_ptr<RasterBuffer> ZeroCopyRasterWorkerPool::AcquireBufferForRaster(
     const Resource* resource) {
-  // RasterBuffer implementation depends on an image having been acquired for
-  // the resource.
-  resource_provider_->AcquireImage(resource->id());
-
   return make_scoped_ptr<RasterBuffer>(
       new RasterBufferImpl(resource_provider_, resource));
 }

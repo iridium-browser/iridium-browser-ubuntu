@@ -9,10 +9,6 @@ for more details about the presubmit API built into gcl.
 """
 
 
-import re
-import sys
-
-
 _EXCLUDED_PATHS = (
     r"^breakpad[\\\/].*",
     r"^native_client_sdk[\\\/]src[\\\/]build_tools[\\\/]make_rules.py",
@@ -172,7 +168,8 @@ _BANNED_CPP_FUNCTIONS = (
         r"^components[\\\/]crash[\\\/]app[\\\/]breakpad_mac\.mm$",
         r"^content[\\\/]shell[\\\/]browser[\\\/]shell_browser_main\.cc$",
         r"^content[\\\/]shell[\\\/]browser[\\\/]shell_message_filter\.cc$",
-        r"^mojo[\\\/]system[\\\/]raw_shared_buffer_posix\.cc$",
+        r"^mojo[\\\/]edk[\\\/]embedder[\\\/]" +
+            r"simple_platform_shared_buffer_posix\.cc$",
         r"^net[\\\/]disk_cache[\\\/]cache_util\.cc$",
         r"^net[\\\/]url_request[\\\/]test_url_fetcher_factory\.cc$",
       ),
@@ -268,6 +265,8 @@ _VALID_OS_MACROS = (
     'OS_LINUX',
     'OS_MACOSX',
     'OS_NACL',
+    'OS_NACL_NONSFI',
+    'OS_NACL_SFI',
     'OS_OPENBSD',
     'OS_POSIX',
     'OS_QNX',
@@ -362,7 +361,8 @@ def _CheckNoNewWStrings(input_api, output_api):
   problems = []
   for f in input_api.AffectedFiles():
     if (not f.LocalPath().endswith(('.cc', '.h')) or
-        f.LocalPath().endswith(('test.cc', '_win.cc', '_win.h'))):
+        f.LocalPath().endswith(('test.cc', '_win.cc', '_win.h')) or
+        '/win/' in f.LocalPath()):
       continue
 
     allowWString = False
@@ -516,6 +516,7 @@ def _CheckUnwantedDependencies(input_api, output_api):
   change. Breaking - rules is an error, breaking ! rules is a
   warning.
   """
+  import sys
   # We need to wait until we have an input_api object and use this
   # roundabout construct to import checkdeps because this file is
   # eval-ed and thus doesn't have __file__.
@@ -568,8 +569,8 @@ def _CheckFilePermissions(input_api, output_api):
   """Check that all files have their permissions properly set."""
   if input_api.platform == 'win32':
     return []
-  args = [sys.executable, 'tools/checkperms/checkperms.py', '--root',
-          input_api.change.RepositoryRoot()]
+  args = [input_api.python_executable, 'tools/checkperms/checkperms.py',
+          '--root', input_api.change.RepositoryRoot()]
   for f in input_api.AffectedFiles():
     args += ['--file', f.LocalPath()]
   checkperms = input_api.subprocess.Popen(args,
@@ -968,14 +969,14 @@ def _CheckSpamLogging(input_api, output_api):
 
   for f in input_api.AffectedSourceFiles(source_file_filter):
     contents = input_api.ReadFile(f, 'rb')
-    if re.search(r"\bD?LOG\s*\(\s*INFO\s*\)", contents):
+    if input_api.re.search(r"\bD?LOG\s*\(\s*INFO\s*\)", contents):
       log_info.append(f.LocalPath())
-    elif re.search(r"\bD?LOG_IF\s*\(\s*INFO\s*,", contents):
+    elif input_api.re.search(r"\bD?LOG_IF\s*\(\s*INFO\s*,", contents):
       log_info.append(f.LocalPath())
 
-    if re.search(r"\bprintf\(", contents):
+    if input_api.re.search(r"\bprintf\(", contents):
       printf.append(f.LocalPath())
-    elif re.search(r"\bfprintf\((stdout|stderr)", contents):
+    elif input_api.re.search(r"\bfprintf\((stdout|stderr)", contents):
       printf.append(f.LocalPath())
 
   if log_info:
@@ -1197,6 +1198,7 @@ def _CheckParseErrors(input_api, output_api):
 
 def _CheckJavaStyle(input_api, output_api):
   """Runs checkstyle on changed java files and returns errors if any exist."""
+  import sys
   original_sys_path = sys.path
   try:
     sys.path = sys.path + [input_api.os_path.join(
@@ -1240,7 +1242,7 @@ def _CheckNoDeprecatedCSS(input_api, output_api):
       documentation is ignored by the hooks as it
       needs to be consumed by WebKit. """
   results = []
-  file_inclusion_pattern = (r".+\.css$")
+  file_inclusion_pattern = (r".+\.css$",)
   black_list = (_EXCLUDED_PATHS +
                 _TEST_CODE_EXCLUDED_PATHS +
                 input_api.DEFAULT_BLACK_LIST +
@@ -1252,11 +1254,36 @@ def _CheckNoDeprecatedCSS(input_api, output_api):
   for fpath in input_api.AffectedFiles(file_filter=file_filter):
     for line_num, line in fpath.ChangedContents():
       for (deprecated_value, value) in _DEPRECATED_CSS:
-        if input_api.re.search(deprecated_value, line):
+        if deprecated_value in line:
           results.append(output_api.PresubmitError(
               "%s:%d: Use of deprecated CSS %s, use %s instead" %
               (fpath.LocalPath(), line_num, deprecated_value, value)))
   return results
+
+
+_DEPRECATED_JS = [
+  ( "__lookupGetter__", "Object.getOwnPropertyDescriptor" ),
+  ( "__defineGetter__", "Object.defineProperty" ),
+  ( "__defineSetter__", "Object.defineProperty" ),
+]
+
+def _CheckNoDeprecatedJS(input_api, output_api):
+  """Make sure that we don't use deprecated JS in Chrome code."""
+  results = []
+  file_inclusion_pattern = (r".+\.js$",)  # TODO(dbeam): .html?
+  black_list = (_EXCLUDED_PATHS + _TEST_CODE_EXCLUDED_PATHS +
+                input_api.DEFAULT_BLACK_LIST)
+  file_filter = lambda f: input_api.FilterSourceFile(
+      f, white_list=file_inclusion_pattern, black_list=black_list)
+  for fpath in input_api.AffectedFiles(file_filter=file_filter):
+    for lnum, line in fpath.ChangedContents():
+      for (deprecated, replacement) in _DEPRECATED_JS:
+        if deprecated in line:
+          results.append(output_api.PresubmitError(
+              "%s:%d: Use of deprecated JS %s, use %s instead" %
+              (fpath.LocalPath(), lnum, deprecated, replacement)))
+  return results
+
 
 def _CommonChecks(input_api, output_api):
   """Checks common to both upload and commit."""
@@ -1283,6 +1310,9 @@ def _CommonChecks(input_api, output_api):
   results.extend(_CheckHardcodedGoogleHostsInLowerLayers(input_api, output_api))
   results.extend(_CheckNoAbbreviationInPngFileName(input_api, output_api))
   results.extend(_CheckForInvalidOSMacros(input_api, output_api))
+  results.extend(_CheckForInvalidIfDefinedMacros(input_api, output_api))
+  # TODO(danakj): Remove this when base/move.h is removed.
+  results.extend(_CheckForUsingSideEffectsOfPass(input_api, output_api))
   results.extend(_CheckAddedDepsHaveTargetApprovals(input_api, output_api))
   results.extend(
       input_api.canned_checks.CheckChangeHasNoTabs(
@@ -1294,6 +1324,7 @@ def _CommonChecks(input_api, output_api):
   results.extend(_CheckCygwinShell(input_api, output_api))
   results.extend(_CheckUserActionUpdate(input_api, output_api))
   results.extend(_CheckNoDeprecatedCSS(input_api, output_api))
+  results.extend(_CheckNoDeprecatedJS(input_api, output_api))
   results.extend(_CheckParseErrors(input_api, output_api))
   results.extend(_CheckForIPCRules(input_api, output_api))
 
@@ -1392,6 +1423,69 @@ def _CheckForInvalidOSMacros(input_api, output_api):
   return [output_api.PresubmitError(
       'Possibly invalid OS macro[s] found. Please fix your code\n'
       'or add your macro to src/PRESUBMIT.py.', bad_macros)]
+
+
+def _CheckForInvalidIfDefinedMacrosInFile(input_api, f):
+  """Check all affected files for invalid "if defined" macros."""
+  ALWAYS_DEFINED_MACROS = (
+      "TARGET_CPU_PPC",
+      "TARGET_CPU_PPC64",
+      "TARGET_CPU_68K",
+      "TARGET_CPU_X86",
+      "TARGET_CPU_ARM",
+      "TARGET_CPU_MIPS",
+      "TARGET_CPU_SPARC",
+      "TARGET_CPU_ALPHA",
+      "TARGET_IPHONE_SIMULATOR",
+      "TARGET_OS_EMBEDDED",
+      "TARGET_OS_IPHONE",
+      "TARGET_OS_MAC",
+      "TARGET_OS_UNIX",
+      "TARGET_OS_WIN32",
+  )
+  ifdef_macro = input_api.re.compile(r'^\s*#.*(?:ifdef\s|defined\()([^\s\)]+)')
+  results = []
+  for lnum, line in f.ChangedContents():
+    for match in ifdef_macro.finditer(line):
+      if match.group(1) in ALWAYS_DEFINED_MACROS:
+        always_defined = ' %s is always defined. ' % match.group(1)
+        did_you_mean = 'Did you mean \'#if %s\'?' % match.group(1)
+        results.append('    %s:%d %s\n\t%s' % (f.LocalPath(),
+                                               lnum,
+                                               always_defined,
+                                               did_you_mean))
+  return results
+
+
+def _CheckForInvalidIfDefinedMacros(input_api, output_api):
+  """Check all affected files for invalid "if defined" macros."""
+  bad_macros = []
+  for f in input_api.AffectedFiles():
+    if f.LocalPath().endswith(('.h', '.c', '.cc', '.m', '.mm')):
+      bad_macros.extend(_CheckForInvalidIfDefinedMacrosInFile(input_api, f))
+
+  if not bad_macros:
+    return []
+
+  return [output_api.PresubmitError(
+      'Found ifdef check on always-defined macro[s]. Please fix your code\n'
+      'or check the list of ALWAYS_DEFINED_MACROS in src/PRESUBMIT.py.',
+      bad_macros)]
+
+
+def _CheckForUsingSideEffectsOfPass(input_api, output_api):
+  """Check all affected files for using side effects of Pass."""
+  errors = []
+  for f in input_api.AffectedFiles():
+    if f.LocalPath().endswith(('.h', '.c', '.cc', '.m', '.mm')):
+      for lnum, line in f.ChangedContents():
+        # Disallow Foo(*my_scoped_thing.Pass()); See crbug.com/418297.
+        if input_api.re.search(r'\*[a-zA-Z0-9_]+\.Pass\(\)', line):
+          errors.append(output_api.PresubmitError(
+            ('%s:%d uses *foo.Pass() to delete the contents of scoped_ptr. ' +
+             'See crbug.com/418297.') % (f.LocalPath(), lnum)))
+  return errors
+
 
 def _CheckForIPCRules(input_api, output_api):
   """Check for same IPC rules described in
@@ -1513,32 +1607,36 @@ def GetDefaultTryConfigs(bots=None):
           'url_unittests',
           'net_unittests',
           'sql_unittests',
+          'ui_base_unittests',
           'ui_unittests',
       ],
       'ios_rel_device': ['compile'],
       'ios_rel_device_ninja': ['compile'],
-      'linux_asan': ['compile'],
       'mac_asan': ['compile'],
       #TODO(stip): Change the name of this builder to reflect that it's release.
       'linux_gtk': standard_tests,
       'linux_chromeos_asan': ['compile'],
       'linux_chromium_chromeos_clang_dbg': ['defaulttests'],
-      'linux_chromium_chromeos_rel_swarming': ['defaulttests'],
+      'linux_chromium_chromeos_rel': ['defaulttests'],
       'linux_chromium_compile_dbg': ['defaulttests'],
       'linux_chromium_gn_dbg': ['compile'],
       'linux_chromium_gn_rel': ['defaulttests'],
-      'linux_chromium_rel_swarming': ['defaulttests'],
+      'linux_chromium_rel': ['defaulttests'],
+      'linux_chromium_rel_ng': ['defaulttests'],
       'linux_chromium_clang_dbg': ['defaulttests'],
       'linux_gpu': ['defaulttests'],
       'linux_nacl_sdk_build': ['compile'],
       'mac_chromium_compile_dbg': ['defaulttests'],
-      'mac_chromium_rel_swarming': ['defaulttests'],
+      'mac_chromium_rel': ['defaulttests'],
+      'mac_chromium_rel_ng': ['defaulttests'],
       'mac_gpu': ['defaulttests'],
       'mac_nacl_sdk_build': ['compile'],
       'win_chromium_compile_dbg': ['defaulttests'],
       'win_chromium_dbg': ['defaulttests'],
-      'win_chromium_rel_swarming': ['defaulttests'],
-      'win_chromium_x64_rel_swarming': ['defaulttests'],
+      'win_chromium_rel': ['defaulttests'],
+      'win_chromium_rel_ng': ['defaulttests'],
+      'win_chromium_x64_rel': ['defaulttests'],
+      'win_chromium_x64_rel_ng': ['defaulttests'],
       'win_gpu': ['defaulttests'],
       'win_nacl_sdk_build': ['compile'],
       'win8_chromium_rel': ['defaulttests'],
@@ -1579,6 +1677,7 @@ def CheckChangeOnCommit(input_api, output_api):
 
 
 def GetPreferredTryMasters(project, change):
+  import re
   files = change.LocalPaths()
 
   if not files or all(re.search(r'[\\\/]OWNERS$', f) for f in files):
@@ -1587,12 +1686,12 @@ def GetPreferredTryMasters(project, change):
   if all(re.search(r'\.(m|mm)$|(^|[\\\/_])mac[\\\/_.]', f) for f in files):
     return GetDefaultTryConfigs([
         'mac_chromium_compile_dbg',
-        'mac_chromium_rel_swarming',
+        'mac_chromium_rel_ng',
     ])
   if all(re.search('(^|[/_])win[/_.]', f) for f in files):
     return GetDefaultTryConfigs([
         'win_chromium_dbg',
-        'win_chromium_rel_swarming',
+        'win_chromium_rel_ng',
         'win8_chromium_rel',
     ])
   if all(re.search(r'(^|[\\\/_])android[\\\/_.]', f) for f in files):
@@ -1614,18 +1713,17 @@ def GetPreferredTryMasters(project, change):
       'ios_dbg_simulator',
       'ios_rel_device',
       'ios_rel_device_ninja',
-      'linux_chromium_chromeos_rel_swarming',
-      'linux_chromium_clang_dbg',
+      'linux_chromium_chromeos_rel',
       'linux_chromium_gn_dbg',
       'linux_chromium_gn_rel',
-      'linux_chromium_rel_swarming',
+      'linux_chromium_rel_ng',
       'linux_gpu',
       'mac_chromium_compile_dbg',
-      'mac_chromium_rel_swarming',
+      'mac_chromium_rel_ng',
       'mac_gpu',
       'win_chromium_compile_dbg',
-      'win_chromium_rel_swarming',
-      'win_chromium_x64_rel_swarming',
+      'win_chromium_rel_ng',
+      'win_chromium_x64_rel_ng',
       'win_gpu',
       'win8_chromium_rel',
   ]
@@ -1635,7 +1733,6 @@ def GetPreferredTryMasters(project, change):
   if any(re.search(r'[\\\/_](aura|chromeos)', f) for f in files):
     builders.extend([
         'linux_chromeos_asan',
-        'linux_chromium_chromeos_clang_dbg'
     ])
 
   # If there are gyp changes to base, build, or chromeos, run a full cros build

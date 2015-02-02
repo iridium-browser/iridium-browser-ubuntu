@@ -36,15 +36,14 @@ namespace blink {
 
 class SQLErrorData;
 
-class ChangeVersionWrapper FINAL : public SQLTransactionWrapper {
+class ChangeVersionWrapper final : public SQLTransactionWrapper {
 public:
-    static PassRefPtrWillBeRawPtr<ChangeVersionWrapper> create(const String& oldVersion, const String& newVersion) { return adoptRefWillBeNoop(new ChangeVersionWrapper(oldVersion, newVersion)); }
+    static ChangeVersionWrapper* create(const String& oldVersion, const String& newVersion) { return new ChangeVersionWrapper(oldVersion, newVersion); }
 
-    virtual void trace(Visitor* visitor) OVERRIDE { SQLTransactionWrapper::trace(visitor); }
-    virtual bool performPreflight(SQLTransactionBackend*) OVERRIDE;
-    virtual bool performPostflight(SQLTransactionBackend*) OVERRIDE;
-    virtual SQLErrorData* sqlError() const OVERRIDE { return m_sqlError.get(); }
-    virtual void handleCommitFailedAfterPostflight(SQLTransactionBackend*) OVERRIDE;
+    virtual bool performPreflight(SQLTransactionBackend*) override;
+    virtual bool performPostflight(SQLTransactionBackend*) override;
+    virtual SQLErrorData* sqlError() const override { return m_sqlError.get(); }
+    virtual void handleCommitFailedAfterPostflight(SQLTransactionBackend*) override;
 
 private:
     ChangeVersionWrapper(const String& oldVersion, const String& newVersion);

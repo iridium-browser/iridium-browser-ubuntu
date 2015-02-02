@@ -24,7 +24,7 @@ namespace test {
 class TestEventTarget : public EventTarget {
  public:
   TestEventTarget();
-  virtual ~TestEventTarget();
+  ~TestEventTarget() override;
 
   void AddChild(scoped_ptr<TestEventTarget> child);
   scoped_ptr<TestEventTarget> RemoveChild(TestEventTarget* child);
@@ -54,13 +54,13 @@ class TestEventTarget : public EventTarget {
   bool Contains(TestEventTarget* target) const;
 
   // EventTarget:
-  virtual bool CanAcceptEvent(const ui::Event& event) OVERRIDE;
-  virtual EventTarget* GetParentTarget() OVERRIDE;
-  virtual scoped_ptr<EventTargetIterator> GetChildIterator() const OVERRIDE;
-  virtual EventTargeter* GetEventTargeter() OVERRIDE;
+  bool CanAcceptEvent(const ui::Event& event) override;
+  EventTarget* GetParentTarget() override;
+  scoped_ptr<EventTargetIterator> GetChildIterator() const override;
+  EventTargeter* GetEventTargeter() override;
 
   // EventHandler:
-  virtual void OnEvent(Event* event) OVERRIDE;
+  void OnEvent(Event* event) override;
 
  private:
   void set_parent(TestEventTarget* parent) { parent_ = parent; }

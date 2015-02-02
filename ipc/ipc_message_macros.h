@@ -600,7 +600,7 @@
     typedef Schema::Param Param;                                              \
     enum { ID = IPC_MESSAGE_ID() };                                           \
     msg_class(IPC_TYPE_IN_##in_cnt in_list);                                  \
-    virtual ~msg_class();                                                     \
+    ~msg_class() override;                                                    \
     static bool Read(const Message* msg, Schema::Param* p);                   \
     static void Log(std::string* name, const Message* msg, std::string* l);   \
     IPC_ASYNC_MESSAGE_METHODS_##in_cnt                                        \
@@ -614,7 +614,7 @@
     enum { ID = IPC_MESSAGE_ID() };                                           \
     msg_class(int32 routing_id IPC_COMMA_##in_cnt                             \
               IPC_TYPE_IN_##in_cnt in_list);                                  \
-    virtual ~msg_class();                                                     \
+    ~msg_class() override;                                                    \
     static bool Read(const Message* msg, Schema::Param* p);                   \
     static void Log(std::string* name, const Message* msg, std::string* l);   \
     IPC_ASYNC_MESSAGE_METHODS_##in_cnt                                        \
@@ -631,7 +631,7 @@
     msg_class(IPC_TYPE_IN_##in_cnt in_list                                    \
               IPC_COMMA_AND_##in_cnt(IPC_COMMA_##out_cnt)                     \
               IPC_TYPE_OUT_##out_cnt out_list);                               \
-    virtual ~msg_class();                                                     \
+    ~msg_class() override;                                                    \
     static bool ReadSendParam(const Message* msg, Schema::SendParam* p);      \
     static bool ReadReplyParam(                                               \
         const Message* msg,                                                   \
@@ -653,7 +653,7 @@
               IPC_TYPE_IN_##in_cnt in_list                                    \
               IPC_COMMA_AND_##in_cnt(IPC_COMMA_##out_cnt)                     \
               IPC_TYPE_OUT_##out_cnt out_list);                               \
-    virtual ~msg_class();                                                     \
+    ~msg_class() override;                                                    \
     static bool ReadSendParam(const Message* msg, Schema::SendParam* p);      \
     static bool ReadReplyParam(                                               \
         const Message* msg,                                                   \
@@ -892,24 +892,16 @@
 
 #define IPC_BEGIN_MESSAGE_MAP(class_name, msg) \
   { \
-    typedef class_name _IpcMessageHandlerClass ALLOW_UNUSED; \
+    typedef class_name _IpcMessageHandlerClass ALLOW_UNUSED_TYPE; \
     void* param__ = NULL; \
     const IPC::Message& ipc_message__ = msg; \
     switch (ipc_message__.type()) {
 
-// gcc gives the following error now when using decltype so type typeof there:
-//   error: identifier 'decltype' will become a keyword in C++0x [-Werror=c++0x-compat]
-#if defined(OS_WIN)
-#define IPC_DECLTYPE decltype
-#else
-#define IPC_DECLTYPE typeof
-#endif
-
-#define IPC_BEGIN_MESSAGE_MAP_WITH_PARAM(class_name, msg, param) \
-  {                                                              \
-    typedef class_name _IpcMessageHandlerClass ALLOW_UNUSED;     \
-    IPC_DECLTYPE(param) param__ = param;                         \
-    const IPC::Message& ipc_message__ = msg;                     \
+#define IPC_BEGIN_MESSAGE_MAP_WITH_PARAM(class_name, msg, param)  \
+  {                                                               \
+    typedef class_name _IpcMessageHandlerClass ALLOW_UNUSED_TYPE; \
+    decltype(param) param__ = param;                              \
+    const IPC::Message& ipc_message__ = msg;                      \
     switch (ipc_message__.type()) {
 
 #define IPC_MESSAGE_FORWARD(msg_class, obj, member_func)                       \

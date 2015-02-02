@@ -26,15 +26,12 @@
 #include "gpu/config/gpu_info.h"
 #include "ipc/ipc_sender.h"
 #include "ipc/message_filter.h"
+#include "ui/gfx/gpu_memory_buffer.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/size.h"
 #include "url/gurl.h"
 
 struct GPUCreateCommandBufferConfig;
-
-namespace gfx {
-struct GpuMemoryBufferHandle;
-}
 
 namespace IPC {
 struct ChannelHandle;
@@ -98,7 +95,7 @@ class GpuProcessHost : public BrowserChildProcessHostDelegate,
   int host_id() const { return host_id_; }
 
   // IPC::Sender implementation.
-  virtual bool Send(IPC::Message* msg) OVERRIDE;
+  bool Send(IPC::Message* msg) override;
 
   // Adds a message filter to the GpuProcessHost's channel.
   void AddFilter(IPC::MessageFilter* filter);
@@ -121,16 +118,19 @@ class GpuProcessHost : public BrowserChildProcessHostDelegate,
       int route_id,
       const CreateCommandBufferCallback& callback);
 
-  // Tells the GPU process to create a new GPU memory buffer using the given
-  // handle.
-  void CreateGpuMemoryBuffer(const gfx::GpuMemoryBufferHandle& handle,
+  // Tells the GPU process to create a new GPU memory buffer.
+  void CreateGpuMemoryBuffer(gfx::GpuMemoryBufferType type,
+                             gfx::GpuMemoryBufferId id,
                              const gfx::Size& size,
-                             unsigned internalformat,
-                             unsigned usage,
+                             gfx::GpuMemoryBuffer::Format format,
+                             gfx::GpuMemoryBuffer::Usage usage,
+                             int client_id,
                              const CreateGpuMemoryBufferCallback& callback);
 
   // Tells the GPU process to destroy GPU memory buffer.
-  void DestroyGpuMemoryBuffer(const gfx::GpuMemoryBufferHandle& handle,
+  void DestroyGpuMemoryBuffer(gfx::GpuMemoryBufferType type,
+                              gfx::GpuMemoryBufferId id,
+                              int client_id,
                               int sync_point);
 
   // What kind of GPU process, e.g. sandboxed or unsandboxed.
@@ -148,7 +148,7 @@ class GpuProcessHost : public BrowserChildProcessHostDelegate,
   static bool ValidateHost(GpuProcessHost* host);
 
   GpuProcessHost(int host_id, GpuProcessKind kind);
-  virtual ~GpuProcessHost();
+  ~GpuProcessHost() override;
 
   bool Init();
 
@@ -156,10 +156,10 @@ class GpuProcessHost : public BrowserChildProcessHostDelegate,
   void RouteOnUIThread(const IPC::Message& message);
 
   // BrowserChildProcessHostDelegate implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
-  virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
-  virtual void OnProcessLaunched() OVERRIDE;
-  virtual void OnProcessCrashed(int exit_code) OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& message) override;
+  void OnChannelConnected(int32 peer_pid) override;
+  void OnProcessLaunched() override;
+  void OnProcessCrashed(int exit_code) override;
 
   // Message handlers.
   void OnInitialized(bool result, const gpu::GPUInfo& gpu_info);

@@ -28,25 +28,23 @@ class OmniboxPopupViewMac : public OmniboxPopupView,
   OmniboxPopupViewMac(OmniboxView* omnibox_view,
                       OmniboxEditModel* edit_model,
                       NSTextField* field);
-  virtual ~OmniboxPopupViewMac();
+  ~OmniboxPopupViewMac() override;
 
   // Overridden from OmniboxPopupView:
-  virtual bool IsOpen() const OVERRIDE;
-  virtual void InvalidateLine(size_t line) OVERRIDE {}
-  virtual void UpdatePopupAppearance() OVERRIDE;
-  virtual gfx::Rect GetTargetBounds() OVERRIDE;
+  bool IsOpen() const override;
+  void InvalidateLine(size_t line) override {}
+  void UpdatePopupAppearance() override;
+  gfx::Rect GetTargetBounds() override;
   // This is only called by model in SetSelectedLine() after updating
   // everything.  Popup should already be visible.
-  virtual void PaintUpdatesNow() OVERRIDE;
-  virtual void OnDragCanceled() OVERRIDE {}
+  void PaintUpdatesNow() override;
+  void OnDragCanceled() override {}
 
   // Overridden from OmniboxPopupMatrixDelegate:
-  virtual void OnMatrixRowSelected(OmniboxPopupMatrix* matrix,
-                                   size_t row) OVERRIDE;
-  virtual void OnMatrixRowClicked(OmniboxPopupMatrix* matrix,
-                                  size_t row) OVERRIDE;
-  virtual void OnMatrixRowMiddleClicked(OmniboxPopupMatrix* matrix,
-                                        size_t row) OVERRIDE;
+  void OnMatrixRowSelected(OmniboxPopupMatrix* matrix, size_t row) override;
+  void OnMatrixRowClicked(OmniboxPopupMatrix* matrix, size_t row) override;
+  void OnMatrixRowMiddleClicked(OmniboxPopupMatrix* matrix,
+                                size_t row) override;
 
   OmniboxPopupMatrix* matrix() { return matrix_; }
 

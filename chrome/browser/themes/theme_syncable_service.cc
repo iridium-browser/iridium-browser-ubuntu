@@ -8,11 +8,11 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_service.h"
-#include "chrome/common/extensions/manifest_url_handler.h"
 #include "chrome/common/extensions/sync_helper.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/manifest_url_handlers.h"
 #include "sync/protocol/sync.pb.h"
 #include "sync/protocol/theme_specifics.pb.h"
 
@@ -227,14 +227,12 @@ void ThemeSyncableService::SetCurrentThemeFromThemeSpecifics(
       // No extension with this id exists -- we must install it; we do
       // so by adding it as a pending extension and then triggering an
       // auto-update cycle.
-      const bool kInstallSilently = true;
       const bool kRemoteInstall = false;
       const bool kInstalledByCustodian = false;
       if (!extensions_service->pending_extension_manager()->AddFromSync(
               id,
               update_url,
               &IsTheme,
-              kInstallSilently,
               kRemoteInstall,
               kInstalledByCustodian)) {
         LOG(WARNING) << "Could not add pending extension for " << id;

@@ -91,11 +91,12 @@ class ScreenMac : public gfx::Screen {
         ScreenMac::DisplayReconfigurationCallBack, this);
   }
 
-  virtual bool IsDIPEnabled() OVERRIDE {
-    return true;
+  virtual ~ScreenMac() {
+    CGDisplayRemoveReconfigurationCallback(
+        ScreenMac::DisplayReconfigurationCallBack, this);
   }
 
-  virtual gfx::Point GetCursorScreenPoint() OVERRIDE {
+  gfx::Point GetCursorScreenPoint() override {
     NSPoint mouseLocation  = [NSEvent mouseLocation];
     // Flip coordinates to gfx (0,0 in top-left corner) using primary screen.
     NSScreen* screen = [[NSScreen screens] objectAtIndex:0];
@@ -103,31 +104,27 @@ class ScreenMac : public gfx::Screen {
     return gfx::Point(mouseLocation.x, mouseLocation.y);
   }
 
-  virtual gfx::NativeWindow GetWindowUnderCursor() OVERRIDE {
+  gfx::NativeWindow GetWindowUnderCursor() override {
     NOTIMPLEMENTED();
     return gfx::NativeWindow();
   }
 
-  virtual gfx::NativeWindow GetWindowAtScreenPoint(const gfx::Point& point)
-      OVERRIDE {
+  gfx::NativeWindow GetWindowAtScreenPoint(const gfx::Point& point) override {
     NOTIMPLEMENTED();
     return gfx::NativeWindow();
   }
 
-  virtual int GetNumDisplays() const OVERRIDE {
-    return GetAllDisplays().size();
+  int GetNumDisplays() const override { return GetAllDisplays().size(); }
 
-  }
-
-  virtual std::vector<gfx::Display> GetAllDisplays() const OVERRIDE {
+  std::vector<gfx::Display> GetAllDisplays() const override {
     return displays_;
   }
 
-  virtual gfx::Display GetDisplayNearestWindow(
-      gfx::NativeView view) const OVERRIDE {
+  gfx::Display GetDisplayNearestWindow(gfx::NativeView view) const override {
     NSWindow* window = nil;
 #if !defined(USE_AURA)
-    window = [view window];
+    if (view)
+      window = [view window];
 #endif
     if (!window)
       return GetPrimaryDisplay();
@@ -137,8 +134,7 @@ class ScreenMac : public gfx::Screen {
     return GetDisplayForScreen(match_screen);
   }
 
-  virtual gfx::Display GetDisplayNearestPoint(
-      const gfx::Point& point) const OVERRIDE {
+  gfx::Display GetDisplayNearestPoint(const gfx::Point& point) const override {
     NSPoint ns_point = NSPointFromCGPoint(point.ToCGPoint());
 
     NSArray* screens = [NSScreen screens];
@@ -152,14 +148,13 @@ class ScreenMac : public gfx::Screen {
   }
 
   // Returns the display that most closely intersects the provided bounds.
-  virtual gfx::Display GetDisplayMatching(
-      const gfx::Rect& match_rect) const OVERRIDE {
+  gfx::Display GetDisplayMatching(const gfx::Rect& match_rect) const override {
     NSScreen* match_screen = GetMatchingScreen(match_rect);
     return GetDisplayForScreen(match_screen);
   }
 
   // Returns the primary display.
-  virtual gfx::Display GetPrimaryDisplay() const OVERRIDE {
+  gfx::Display GetPrimaryDisplay() const override {
     // Primary display is defined as the display with the menubar,
     // which is always at index 0.
     NSScreen* primary = [[NSScreen screens] objectAtIndex:0];
@@ -167,11 +162,11 @@ class ScreenMac : public gfx::Screen {
     return display;
   }
 
-  virtual void AddObserver(gfx::DisplayObserver* observer) OVERRIDE {
+  void AddObserver(gfx::DisplayObserver* observer) override {
     change_notifier_.AddObserver(observer);
   }
 
-  virtual void RemoveObserver(gfx::DisplayObserver* observer) OVERRIDE {
+  void RemoveObserver(gfx::DisplayObserver* observer) override {
     change_notifier_.RemoveObserver(observer);
   }
 

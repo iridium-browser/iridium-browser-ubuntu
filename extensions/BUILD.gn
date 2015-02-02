@@ -5,6 +5,8 @@
 import("//tools/grit/grit_rule.gni")
 import("//tools/grit/repack.gni")
 
+assert(enable_extensions)
+
 # GYP version: extensions/extensions_resources.gyp:extensions_resources
 group("extensions_resources") {
   deps = [
@@ -47,11 +49,10 @@ grit("extensions_renderer_resources") {
     "extensions_renderer_resources.pak",
   ]
   grit_flags = [ "-E", "mojom_root=" + rebase_path(root_gen_dir) ]
-  if (enable_extensions) {
-    deps = [
-      "//device/serial:serial_mojo",
-    ]
-  }
+
+  deps = [
+    "//device/serial:serial_mojo",
+  ]
 }
 
 source_set("test_support") {
@@ -63,6 +64,8 @@ source_set("test_support") {
     "browser/api/storage/settings_test_util.h",
     "browser/api_test_utils.cc",
     "browser/api_test_utils.h",
+    "browser/api_unittest.cc",
+    "browser/api_unittest.h",
     "browser/extensions_test.cc",
     "browser/extensions_test.h",
     "browser/mock_extension_system.cc",
@@ -89,11 +92,16 @@ source_set("test_support") {
     "test/test_extensions_client.h",
     "test/test_permission_message_provider.cc",
     "test/test_permission_message_provider.h",
+    "test/test_service_registration_manager.cc",
+    "test/test_service_registration_manager.h",
    ]
 
   deps = [
     ":extensions_resources",
     "//base",
+    "//content/public/browser",
+    "//content/public/common",
+    "//content/test:test_support",
     "//extensions/browser",
     "//extensions/common",
     "//extensions/common/api",
@@ -125,6 +133,7 @@ repack("shell_and_test_pak") {
     "$root_gen_dir/content/shell/shell_resources.pak",
     "$root_gen_dir/extensions/extensions_renderer_resources.pak",
     "$root_gen_dir/extensions/extensions_resources.pak",
+    "$root_gen_dir/extensions/shell/app_shell_resources.pak",
     "$root_gen_dir/extensions/strings/extensions_strings_en-US.pak",
     "$root_gen_dir/ui/resources/ui_resources_100_percent.pak",
     "$root_gen_dir/ui/strings/app_locale_settings_en-US.pak",
@@ -144,6 +153,7 @@ repack("shell_and_test_pak") {
     "//content/browser/devtools:resources",
     "//content/shell:resources",
     "//content:resources",
+    "//extensions/shell:resources",
     "//extensions/strings",
     "//ui/resources",
     "//ui/strings",
@@ -156,9 +166,7 @@ repack("shell_and_test_pak") {
 # does not have a reference to CreateNativeWebModalManager but it still links.
 # The GN build fails with this symbol being undefined.
 if (false) {
-test("unittests") {
-  output_name = "extensions_unittests"
-
+test("extensions_unittests") {
   sources = [
     "browser/admin_policy_unittest.cc",
     "browser/api/api_resource_manager_unittest.cc",
@@ -173,12 +181,17 @@ test("unittests") {
     "browser/api/web_request/form_data_parser_unittest.cc",
     "browser/api/web_request/upload_data_presenter_unittest.cc",
     "browser/api/web_request/web_request_time_tracker_unittest.cc",
+    "browser/api/cast_channel/cast_auth_ica_unittest.cc",
+    "browser/api/cast_channel/cast_auth_util_unittest.cc",
+    "browser/api/cast_channel/cast_channel_api_unittest.cc",
+    "browser/api/cast_channel/cast_framer_unittest.cc",
+    "browser/api/cast_channel/cast_socket_unittest.cc",
+    "browser/api/cast_channel/cast_transport_unittest.cc",
+    "browser/api/cast_channel/logger_unittest.cc",
     "browser/computed_hashes_unittest.cc",
     "browser/content_hash_tree_unittest.cc",
     "browser/event_listener_map_unittest.cc",
     "browser/event_router_unittest.cc",
-    "browser/api_unittest.cc",
-    "browser/api_unittest.h",
     "browser/extension_pref_value_map_unittest.cc",
     "browser/extension_registry_unittest.cc",
     "browser/file_highlighter_unittest.cc",
@@ -189,6 +202,7 @@ test("unittests") {
     "browser/info_map_unittest.cc",
     "browser/lazy_background_task_queue_unittest.cc",
     "browser/management_policy_unittest.cc",
+    "browser/mojo/keep_alive_impl_unittest.cc",
     "browser/process_manager_unittest.cc",
     "browser/process_map_unittest.cc",
     "browser/quota_service_unittest.cc",
@@ -209,6 +223,7 @@ test("unittests") {
     "common/extension_set_unittest.cc",
     "common/file_util_unittest.cc",
     "common/manifest_handler_unittest.cc",
+    "common/manifest_handlers/oauth2_manifest_unittest.cc",
     "common/manifest_handlers/shared_module_manifest_unittest.cc",
     "common/message_bundle_unittest.cc",
     "common/one_shot_event_unittest.cc",
@@ -230,6 +245,7 @@ test("unittests") {
     "renderer/module_system_test.cc",
     "renderer/module_system_test.h",
     "renderer/module_system_unittest.cc",
+    "renderer/mojo/keep_alive_client_unittest.cc",
     "renderer/safe_builtins_unittest.cc",
     "renderer/script_context_set_unittest.cc",
     "renderer/utils_unittest.cc",
@@ -250,10 +266,10 @@ test("unittests") {
     "//extensions/common",
     "//extensions/renderer",
     "//extensions/strings",
+    "//mojo/edk/js",
+    "//mojo/edk/system",
     "//mojo/environment:chromium",
     "//mojo/public/cpp/bindings",
-    "//mojo/bindings/js",
-    "//mojo/system",
     "//testing/gmock",
     "//testing/gtest",
     "//third_party/leveldatabase",

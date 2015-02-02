@@ -32,13 +32,13 @@ class CastExtension : public HostExtension {
       scoped_refptr<base::SingleThreadTaskRunner> network_task_runner,
       scoped_refptr<net::URLRequestContextGetter> url_request_context_getter,
       const protocol::NetworkSettings& network_settings);
-  virtual ~CastExtension();
+  ~CastExtension() override;
 
   // HostExtension interface.
-  virtual std::string capability() const OVERRIDE;
-  virtual scoped_ptr<HostExtensionSession> CreateExtensionSession(
+  std::string capability() const override;
+  scoped_ptr<HostExtensionSession> CreateExtensionSession(
       ClientSessionControl* client_session_control,
-      protocol::ClientStub* client_stub) OVERRIDE;
+      protocol::ClientStub* client_stub) override;
 
  private:
   scoped_refptr<base::SingleThreadTaskRunner> network_task_runner_;

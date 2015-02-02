@@ -73,10 +73,19 @@ Make
   <https://github.com/kennethreitz/osx-gcc-installer>`_.
 * On Windows, the Native Client SDK includes a copy of GNU Make.
 
+.. _platforms:
+
+Platforms
+---------
+
+Native Client supports several operating systems, including Windows, Linux, OSX,
+and ChromeOS. It supports several architectures including on x86-32, x86-64,
+ARM, and MIPS.
+
 .. _versioning:
 
-Versioning
-----------
+Versions
+--------
 
 Chrome is released on a six week cycle, and developer versions of Chrome are
 pushed to the public beta channel three weeks before each release. As with any
@@ -165,8 +174,8 @@ Installing the stable bundle
    usually correspond to the current versions of Chrome. We recommend that you
    develop against a "stable" bundle, because such bundles can be used by all
    current Chrome users. Native Client is designed to be backward-compatible.For
-   example, applications developed with the ``pepper_31`` bundle can run in
-   Chrome 31, Chrome 32, etc..
+   example, applications developed with the ``pepper_37`` bundle can run in
+   Chrome 37, Chrome 38, etc..
 
 #. Run ``naclsdk`` with the ``update`` command to download recommended bundles,
    including the current "stable" bundle.

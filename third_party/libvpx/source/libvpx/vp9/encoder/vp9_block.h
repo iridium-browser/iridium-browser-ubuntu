@@ -13,8 +13,6 @@
 
 #include "vp9/common/vp9_entropymv.h"
 #include "vp9/common/vp9_entropy.h"
-#include "vpx_ports/mem.h"
-#include "vp9/common/vp9_onyxc_int.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -122,8 +120,8 @@ struct macroblock {
   void (*fwd_txm4x4)(const int16_t *input, tran_low_t *output, int stride);
   void (*itxm_add)(const tran_low_t *input, uint8_t *dest, int stride, int eob);
 #if CONFIG_VP9_HIGHBITDEPTH
-  void (*high_itxm_add)(const tran_low_t *input, uint8_t *dest, int stride,
-                        int eob, int bd);
+  void (*highbd_itxm_add)(const tran_low_t *input, uint8_t *dest, int stride,
+                          int eob, int bd);
 #endif
 };
 

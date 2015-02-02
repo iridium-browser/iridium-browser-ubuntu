@@ -37,7 +37,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
 #include "chrome/browser/printing/background_printing_manager.h"
 #endif
 
@@ -53,14 +53,14 @@ class ProcessDetails : public MemoryDetails {
   explicit ProcessDetails(const DataCallback& callback)
       : callback_(callback) {}
   // MemoryDetails:
-  virtual void OnDetailsAvailable() OVERRIDE {
+  void OnDetailsAvailable() override {
     const std::vector<ProcessData>& browser_processes = processes();
     // [0] means Chrome.
     callback_.Run(browser_processes[0]);
   }
 
  private:
-  virtual ~ProcessDetails() {}
+  ~ProcessDetails() override {}
 
   DataCallback callback_;
 
@@ -109,7 +109,7 @@ void GetAllWebContents(std::set<content::WebContents*>* web_contents) {
         prerender_manager->GetAllPrerenderingContents();
     web_contents->insert(contentses.begin(), contentses.end());
   }
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
   // Add all the pages being background printed.
   printing::BackgroundPrintingManager* printing_manager =
       g_browser_process->background_printing_manager();
@@ -132,7 +132,7 @@ class RendererDetails : public content::NotificationObserver {
     registrar_.Add(this, chrome::NOTIFICATION_RENDERER_V8_HEAP_STATS_COMPUTED,
                    content::NotificationService::AllSources());
   }
-  virtual ~RendererDetails() {}
+  ~RendererDetails() override {}
 
   void Request() {
     for (std::set<content::WebContents*>::iterator iter = web_contents_.begin();
@@ -160,9 +160,9 @@ class RendererDetails : public content::NotificationObserver {
 
  private:
   // NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE {
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override {
     const base::ProcessId* pid =
         content::Source<const base::ProcessId>(source).ptr();
     const ChromeRenderMessageFilter::V8HeapStatsDetails* v8_heap =

@@ -36,6 +36,7 @@
 #include <algorithm>
 #include "platform/TraceEvent.h"
 #include "platform/graphics/GraphicsLayer.h"
+#include "platform/graphics/ImageBuffer.h"
 #include "platform/graphics/gpu/Extensions3DUtil.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebCompositorSupport.h"
@@ -93,17 +94,24 @@ PassRefPtr<DrawingBuffer> DrawingBuffer::create(PassOwnPtr<WebGraphicsContext3D>
         // This might be the first time we notice that the WebGraphicsContext3D is lost.
         return nullptr;
     }
-    bool multisampleSupported = extensionsUtil->supportsExtension("GL_CHROMIUM_framebuffer_multisample")
+    bool multisampleSupported = (extensionsUtil->supportsExtension("GL_CHROMIUM_framebuffer_multisample")
+        || extensionsUtil->supportsExtension("GL_EXT_multisampled_render_to_texture"))
         && extensionsUtil->supportsExtension("GL_OES_rgb8_rgba8");
     if (multisampleSupported) {
-        extensionsUtil->ensureExtensionEnabled("GL_CHROMIUM_framebuffer_multisample");
         extensionsUtil->ensureExtensionEnabled("GL_OES_rgb8_rgba8");
+        if (extensionsUtil->supportsExtension("GL_CHROMIUM_framebuffer_multisample"))
+            extensionsUtil->ensureExtensionEnabled("GL_CHROMIUM_framebuffer_multisample");
+        else
+            extensionsUtil->ensureExtensionEnabled("GL_EXT_multisampled_render_to_texture");
     }
     bool packedDepthStencilSupported = extensionsUtil->supportsExtension("GL_OES_packed_depth_stencil");
     if (packedDepthStencilSupported)
         extensionsUtil->ensureExtensionEnabled("GL_OES_packed_depth_stencil");
+    bool discardFramebufferSupported = extensionsUtil->supportsExtension("GL_EXT_discard_framebuffer");
+    if (discardFramebufferSupported)
+        extensionsUtil->ensureExtensionEnabled("GL_EXT_discard_framebuffer");
 
-    RefPtr<DrawingBuffer> drawingBuffer = adoptRef(new DrawingBuffer(context, extensionsUtil.release(), multisampleSupported, packedDepthStencilSupported, preserve, requestedAttributes, contextEvictionManager));
+    RefPtr<DrawingBuffer> drawingBuffer = adoptRef(new DrawingBuffer(context, extensionsUtil.release(), multisampleSupported, packedDepthStencilSupported, discardFramebufferSupported, preserve, requestedAttributes, contextEvictionManager));
     if (!drawingBuffer->initialize(size)) {
         drawingBuffer->beginDestruction();
         return PassRefPtr<DrawingBuffer>();
@@ -115,6 +123,7 @@ DrawingBuffer::DrawingBuffer(PassOwnPtr<WebGraphicsContext3D> context,
     PassOwnPtr<Extensions3DUtil> extensionsUtil,
     bool multisampleExtensionSupported,
     bool packedDepthStencilExtensionSupported,
+    bool discardFramebufferSupported,
     PreserveDrawingBuffer preserve,
     WebGraphicsContext3D::Attributes requestedAttributes,
     PassRefPtr<ContextEvictionManager> contextEvictionManager)
@@ -129,6 +138,7 @@ DrawingBuffer::DrawingBuffer(PassOwnPtr<WebGraphicsContext3D> context,
     , m_requestedAttributes(requestedAttributes)
     , m_multisampleExtensionSupported(multisampleExtensionSupported)
     , m_packedDepthStencilExtensionSupported(packedDepthStencilExtensionSupported)
+    , m_discardFramebufferSupported(discardFramebufferSupported)
     , m_fbo(0)
     , m_depthStencilBuffer(0)
     , m_depthBuffer(0)
@@ -264,6 +274,12 @@ bool DrawingBuffer::prepareMailbox(WebExternalTextureMailbox* outMailbox, WebExt
             m_context->framebufferTexture2DMultisampleEXT(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_colorBuffer.textureId, 0, m_sampleCount);
         else
             m_context->framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_colorBuffer.textureId, 0);
+
+        if (m_discardFramebufferSupported) {
+            // Explicitly discard framebuffer to save GPU memory bandwidth for tile-based GPU arch.
+            const WGC3Denum attachments[3] = { GL_COLOR_ATTACHMENT0, GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT};
+            m_context->discardFramebufferEXT(GL_FRAMEBUFFER, 3, attachments);
+        }
     } else {
         m_context->copyTextureCHROMIUM(GL_TEXTURE_2D, m_colorBuffer.textureId, frontColorBufferMailbox->textureInfo.textureId, 0, GL_RGBA, GL_UNSIGNED_BYTE);
     }
@@ -285,7 +301,7 @@ bool DrawingBuffer::prepareMailbox(WebExternalTextureMailbox* outMailbox, WebExt
     ASSERT(!frontColorBufferMailbox->m_parentDrawingBuffer);
     frontColorBufferMailbox->m_parentDrawingBuffer = this;
     *outMailbox = frontColorBufferMailbox->mailbox;
-    m_frontColorBuffer = frontColorBufferMailbox->textureInfo;
+    m_frontColorBuffer = { frontColorBufferMailbox->textureInfo, frontColorBufferMailbox->mailbox };
     return true;
 }
 
@@ -442,12 +458,9 @@ bool DrawingBuffer::initialize(const IntSize& size)
     return true;
 }
 
-bool DrawingBuffer::copyToPlatformTexture(WebGraphicsContext3D* context, Platform3DObject texture, GLenum internalFormat, GLenum destType, GLint level, bool premultiplyAlpha, bool flipY, bool fromFrontBuffer)
+bool DrawingBuffer::copyToPlatformTexture(WebGraphicsContext3D* context, Platform3DObject texture, GLenum internalFormat,
+    GLenum destType, GLint level, bool premultiplyAlpha, bool flipY, SourceBuffer source)
 {
-    GLint textureId = m_colorBuffer.textureId;
-    if (fromFrontBuffer && m_frontColorBuffer.textureId)
-        textureId = m_frontColorBuffer.textureId;
-
     if (m_contentsChanged) {
         if (m_multisampleMode != None) {
             commit();
@@ -463,15 +476,21 @@ bool DrawingBuffer::copyToPlatformTexture(WebGraphicsContext3D* context, Platfor
         return false;
 
     // Contexts may be in a different share group. We must transfer the texture through a mailbox first
-    RefPtr<MailboxInfo> bufferMailbox = adoptRef(new MailboxInfo());
-    m_context->genMailboxCHROMIUM(bufferMailbox->mailbox.name);
-    m_context->produceTextureDirectCHROMIUM(textureId, GL_TEXTURE_2D, bufferMailbox->mailbox.name);
-    m_context->flush();
+    WebExternalTextureMailbox mailbox;
+    GLint textureId = 0;
+    if (source == Front && m_frontColorBuffer.texInfo.textureId) {
+        textureId = m_frontColorBuffer.texInfo.textureId;
+        mailbox = m_frontColorBuffer.mailbox;
+    } else {
+        textureId = m_colorBuffer.textureId;
+        m_context->genMailboxCHROMIUM(mailbox.name);
+        m_context->produceTextureDirectCHROMIUM(textureId, GL_TEXTURE_2D, mailbox.name);
+        m_context->flush();
+        mailbox.syncPoint = m_context->insertSyncPoint();
+    }
 
-    bufferMailbox->mailbox.syncPoint = m_context->insertSyncPoint();
-
-    context->waitSyncPoint(bufferMailbox->mailbox.syncPoint);
-    Platform3DObject sourceTexture = context->createAndConsumeTextureCHROMIUM(GL_TEXTURE_2D, bufferMailbox->mailbox.name);
+    context->waitSyncPoint(mailbox.syncPoint);
+    Platform3DObject sourceTexture = context->createAndConsumeTextureCHROMIUM(GL_TEXTURE_2D, mailbox.name);
 
     bool unpackPremultiplyAlphaNeeded = false;
     bool unpackUnpremultiplyAlphaNeeded = false;
@@ -513,52 +532,6 @@ WebLayer* DrawingBuffer::platformLayer()
     }
 
     return m_layer->layer();
-}
-
-void DrawingBuffer::paintCompositedResultsToCanvas(ImageBuffer* imageBuffer)
-{
-    if (m_context->getGraphicsResetStatusARB() != GL_NO_ERROR)
-        return;
-
-    if (!imageBuffer)
-        return;
-    Platform3DObject tex = imageBuffer->getBackingTexture();
-    if (tex) {
-        RefPtr<MailboxInfo> bufferMailbox = adoptRef(new MailboxInfo());
-        m_context->genMailboxCHROMIUM(bufferMailbox->mailbox.name);
-        m_context->produceTextureDirectCHROMIUM(m_frontColorBuffer.textureId, GL_TEXTURE_2D, bufferMailbox->mailbox.name);
-        m_context->flush();
-
-        bufferMailbox->mailbox.syncPoint = m_context->insertSyncPoint();
-        OwnPtr<WebGraphicsContext3DProvider> provider =
-            adoptPtr(Platform::current()->createSharedOffscreenGraphicsContext3DProvider());
-        if (!provider)
-            return;
-        WebGraphicsContext3D* context = provider->context3d();
-        if (!context)
-            return;
-
-        context->waitSyncPoint(bufferMailbox->mailbox.syncPoint);
-        Platform3DObject sourceTexture = context->createAndConsumeTextureCHROMIUM(GL_TEXTURE_2D, bufferMailbox->mailbox.name);
-        context->copyTextureCHROMIUM(GL_TEXTURE_2D, sourceTexture,
-            tex, 0, GL_RGBA, GL_UNSIGNED_BYTE);
-        context->deleteTexture(sourceTexture);
-        context->flush();
-        m_context->waitSyncPoint(context->insertSyncPoint());
-        imageBuffer->didModifyBackingTexture();
-
-        return;
-    }
-
-    Platform3DObject framebuffer = m_context->createFramebuffer();
-    m_context->bindFramebuffer(GL_FRAMEBUFFER, framebuffer);
-    // We don't need to bind a copy of m_frontColorBuffer since the texture parameters are untouched.
-    m_context->framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_frontColorBuffer.textureId, 0);
-
-    paintFramebufferToCanvas(framebuffer, size().width(), size().height(), !m_actualAttributes.premultipliedAlpha, imageBuffer);
-    m_context->deleteFramebuffer(framebuffer);
-    // Since we're using the same context as WebGL, we have to restore any state we change (in this case, just the framebuffer binding).
-    restoreFramebufferBinding();
 }
 
 void DrawingBuffer::clearPlatformLayer()
@@ -605,7 +578,7 @@ void DrawingBuffer::beginDestruction()
     setSize(IntSize());
 
     m_colorBuffer = TextureInfo();
-    m_frontColorBuffer = TextureInfo();
+    m_frontColorBuffer = FrontBufferInfo();
     m_multisampleColorBuffer = 0;
     m_depthStencilBuffer = 0;
     m_depthBuffer = 0;
@@ -1035,7 +1008,7 @@ void DrawingBuffer::allocateTextureMemory(TextureInfo* info, const IntSize& size
     if (RuntimeEnabledFeatures::webGLImageChromiumEnabled()) {
         deleteChromiumImageForTexture(info);
 
-        info->imageId = m_context->createImageCHROMIUM(size.width(), size.height(), GL_RGBA8_OES, GC3D_IMAGE_SCANOUT_CHROMIUM);
+        info->imageId = m_context->createGpuMemoryBufferImageCHROMIUM(size.width(), size.height(), GL_RGBA, GC3D_SCANOUT_CHROMIUM);
         if (info->imageId) {
             m_context->bindTexImage2DCHROMIUM(GL_TEXTURE_2D, info->imageId);
             return;

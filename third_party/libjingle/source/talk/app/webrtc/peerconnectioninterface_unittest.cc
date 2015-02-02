@@ -132,7 +132,6 @@ class MockPeerConnectionObserver : public PeerConnectionObserver {
       state_ = pc_->signaling_state();
     }
   }
-  virtual void OnError() {}
   virtual void OnSignalingChange(
       PeerConnectionInterface::SignalingState new_state) {
     EXPECT_EQ(pc_->signaling_state(), new_state);
@@ -229,15 +228,10 @@ class MockPeerConnectionObserver : public PeerConnectionObserver {
 class PeerConnectionInterfaceTest : public testing::Test {
  protected:
   virtual void SetUp() {
-    rtc::InitializeSSL(NULL);
     pc_factory_ = webrtc::CreatePeerConnectionFactory(
         rtc::Thread::Current(), rtc::Thread::Current(), NULL, NULL,
         NULL);
     ASSERT_TRUE(pc_factory_.get() != NULL);
-  }
-
-  virtual void TearDown() {
-    rtc::CleanupSSL();
   }
 
   void CreatePeerConnection() {
@@ -325,7 +319,7 @@ class PeerConnectionInterfaceTest : public testing::Test {
     scoped_refptr<VideoTrackInterface> video_track(
         pc_factory_->CreateVideoTrack(label + "v0", video_source));
     stream->AddTrack(video_track.get());
-    EXPECT_TRUE(pc_->AddStream(stream, NULL));
+    EXPECT_TRUE(pc_->AddStream(stream));
     EXPECT_TRUE_WAIT(observer_.renegotiation_needed_, kTimeout);
     observer_.renegotiation_needed_ = false;
   }
@@ -337,7 +331,7 @@ class PeerConnectionInterfaceTest : public testing::Test {
     scoped_refptr<AudioTrackInterface> audio_track(
         pc_factory_->CreateAudioTrack(label + "a0", NULL));
     stream->AddTrack(audio_track.get());
-    EXPECT_TRUE(pc_->AddStream(stream, NULL));
+    EXPECT_TRUE(pc_->AddStream(stream));
     EXPECT_TRUE_WAIT(observer_.renegotiation_needed_, kTimeout);
     observer_.renegotiation_needed_ = false;
   }
@@ -355,7 +349,7 @@ class PeerConnectionInterfaceTest : public testing::Test {
     scoped_refptr<VideoTrackInterface> video_track(
         pc_factory_->CreateVideoTrack(video_track_label, NULL));
     stream->AddTrack(video_track.get());
-    EXPECT_TRUE(pc_->AddStream(stream, NULL));
+    EXPECT_TRUE(pc_->AddStream(stream));
     EXPECT_TRUE_WAIT(observer_.renegotiation_needed_, kTimeout);
     observer_.renegotiation_needed_ = false;
   }
@@ -579,7 +573,7 @@ TEST_F(PeerConnectionInterfaceTest, AddStreams) {
       pc_factory_->CreateAudioTrack(
           kStreamLabel3, static_cast<AudioSourceInterface*>(NULL)));
   stream->AddTrack(audio_track.get());
-  EXPECT_TRUE(pc_->AddStream(stream, NULL));
+  EXPECT_TRUE(pc_->AddStream(stream));
   EXPECT_EQ(3u, pc_->local_streams()->count());
 
   // Remove the third stream.
@@ -1185,7 +1179,7 @@ TEST_F(PeerConnectionInterfaceTest, CloseAndTestMethods) {
   pc_->Close();
 
   pc_->RemoveStream(local_stream);
-  EXPECT_FALSE(pc_->AddStream(local_stream, NULL));
+  EXPECT_FALSE(pc_->AddStream(local_stream));
 
   ASSERT_FALSE(local_stream->GetAudioTracks().empty());
   rtc::scoped_refptr<webrtc::DtmfSenderInterface> dtmf_sender(

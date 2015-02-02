@@ -1,4 +1,6 @@
-<?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="sl">
+<?xml version="1.0" ?>
+<!DOCTYPE translationbundle>
+<translationbundle lang="sl">
 <translation id="777702478322588152">Prefektura</translation>
 <translation id="3713769522066937702">Te oblike poštne številke ni mogoče prepoznati. Primer veljavne poštne številke: <ph name="EXAMPLE"/>. Ali ne veste, katero poštno številko imate? Preverite <ph name="BEGIN_LINK"/>tukaj<ph name="END_LINK"/>.</translation>
 <translation id="7393381084163773901">Ulični naslov</translation>

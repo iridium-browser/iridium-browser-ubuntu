@@ -118,6 +118,7 @@ protected:
     explicit ScrollingCoordinator(Page*);
 
     bool isForMainFrame(ScrollableArea*) const;
+    bool isForViewport(ScrollableArea*) const;
 
     Page* m_page;
 
@@ -143,7 +144,7 @@ private:
 
     bool frameViewIsDirty() const;
 
-    typedef HashMap<ScrollableArea*, OwnPtr<blink::WebScrollbarLayer> > ScrollbarMap;
+    using ScrollbarMap = HashMap<ScrollableArea*, OwnPtr<blink::WebScrollbarLayer>>;
     ScrollbarMap m_horizontalScrollbars;
     ScrollbarMap m_verticalScrollbars;
     HashSet<const RenderLayer*> m_layersWithTouchRects;

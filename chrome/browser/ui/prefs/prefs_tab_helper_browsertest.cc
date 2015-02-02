@@ -25,7 +25,7 @@ class PrefsTabHelperBrowserTest : public InProcessBrowserTest {
         .Append(chrome::kPreferencesFilename);
   }
 
-  virtual bool SetUpUserDataDirectory() OVERRIDE {
+  bool SetUpUserDataDirectory() override {
     base::FilePath user_data_directory;
     PathService::Get(chrome::DIR_USER_DATA, &user_data_directory);
     base::FilePath default_profile =
@@ -69,7 +69,7 @@ IN_PROC_BROWSER_TEST_F(PrefsTabHelperBrowserTest, WebPrefs) {
   EXPECT_TRUE(prefs->FindPreference(
       prefs::kWebKitSerifFontFamilyJapanese)->IsDefaultValue());
 
-  EXPECT_EQ("ISO-8859-1", prefs->GetString(prefs::kDefaultCharset));
+  EXPECT_EQ("windows-1251", prefs->GetString(prefs::kDefaultCharset));
   EXPECT_EQ(16, prefs->GetInteger(prefs::kWebKitDefaultFontSize));
   EXPECT_EQ("Nanum Gothic",
             prefs->GetString(prefs::kWebKitStandardFontFamilyKorean));

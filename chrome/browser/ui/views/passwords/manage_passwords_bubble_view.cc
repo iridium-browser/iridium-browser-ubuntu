@@ -4,8 +4,10 @@
 
 #include "chrome/browser/ui/views/passwords/manage_passwords_bubble_view.h"
 
+#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/fullscreen/fullscreen_controller.h"
 #include "chrome/browser/ui/passwords/manage_passwords_bubble_model.h"
 #include "chrome/browser/ui/passwords/manage_passwords_ui_controller.h"
 #include "chrome/browser/ui/passwords/save_password_refusal_combobox_model.h"
@@ -14,6 +16,7 @@
 #include "chrome/browser/ui/views/passwords/manage_password_item_view.h"
 #include "chrome/browser/ui/views/passwords/manage_passwords_icon_view.h"
 #include "chrome/grit/generated_resources.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/aura/window.h"
@@ -30,6 +33,7 @@
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_constants.h"
+#include "ui/views/widget/widget.h"
 
 
 // Helpers --------------------------------------------------------------------
@@ -177,15 +181,14 @@ class ManagePasswordsBubbleView::PendingView : public views::View,
                                                public views::ComboboxListener {
  public:
   explicit PendingView(ManagePasswordsBubbleView* parent);
-  virtual ~PendingView();
+  ~PendingView() override;
 
  private:
   // views::ButtonListener:
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // Handles the event when the user changes an index of a combobox.
-  virtual void OnPerformAction(views::Combobox* source) OVERRIDE;
+  void OnPerformAction(views::Combobox* source) override;
 
   ManagePasswordsBubbleView* parent_;
 
@@ -277,12 +280,11 @@ class ManagePasswordsBubbleView::ConfirmNeverView
       public views::ButtonListener {
  public:
   explicit ConfirmNeverView(ManagePasswordsBubbleView* parent);
-  virtual ~ConfirmNeverView();
+  ~ConfirmNeverView() override;
 
  private:
   // views::ButtonListener:
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   ManagePasswordsBubbleView* parent_;
 
@@ -372,15 +374,14 @@ class ManagePasswordsBubbleView::ManageView : public views::View,
                                               public views::LinkListener {
  public:
   explicit ManageView(ManagePasswordsBubbleView* parent);
-  virtual ~ManageView();
+  ~ManageView() override;
 
  private:
   // views::ButtonListener:
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // views::LinkListener:
-  virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
+  void LinkClicked(views::Link* source, int event_flags) override;
 
   ManagePasswordsBubbleView* parent_;
 
@@ -484,12 +485,11 @@ class ManagePasswordsBubbleView::BlacklistedView
       public views::ButtonListener {
  public:
   explicit BlacklistedView(ManagePasswordsBubbleView* parent);
-  virtual ~BlacklistedView();
+  ~BlacklistedView() override;
 
  private:
   // views::ButtonListener:
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   ManagePasswordsBubbleView* parent_;
 
@@ -567,16 +567,15 @@ class ManagePasswordsBubbleView::SaveConfirmationView
       public views::StyledLabelListener {
  public:
   explicit SaveConfirmationView(ManagePasswordsBubbleView* parent);
-  virtual ~SaveConfirmationView();
+  ~SaveConfirmationView() override;
 
  private:
   // views::ButtonListener:
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // views::StyledLabelListener implementation
-  virtual void StyledLabelLinkClicked(const gfx::Range& range,
-                                      int event_flags) OVERRIDE;
+  void StyledLabelLinkClicked(const gfx::Range& range,
+                              int event_flags) override;
 
   ManagePasswordsBubbleView* parent_;
 
@@ -646,10 +645,10 @@ class ManagePasswordsBubbleView::WebContentMouseHandler
     : public ui::EventHandler {
  public:
   explicit WebContentMouseHandler(ManagePasswordsBubbleView* bubble);
-  virtual ~WebContentMouseHandler();
+  ~WebContentMouseHandler() override;
 
-  virtual void OnKeyEvent(ui::KeyEvent* event) OVERRIDE;
-  virtual void OnMouseEvent(ui::MouseEvent* event) OVERRIDE;
+  void OnKeyEvent(ui::KeyEvent* event) override;
+  void OnMouseEvent(ui::MouseEvent* event) override;
 
  private:
   aura::Window* GetWebContentsWindow();
@@ -775,6 +774,13 @@ ManagePasswordsBubbleView::ManagePasswordsBubbleView(
   if (anchor_view)
     anchor_view->SetActive(true);
   mouse_handler_.reset(new WebContentMouseHandler(this));
+
+  // Add observers to close the bubble if the fullscreen state changes.
+  Browser* browser = chrome::FindBrowserWithWebContents(web_contents);
+  registrar_.Add(
+      this,
+      chrome::NOTIFICATION_FULLSCREEN_CHANGED,
+      content::Source<FullscreenController>(browser->fullscreen_controller()));
 }
 
 ManagePasswordsBubbleView::~ManagePasswordsBubbleView() {
@@ -855,4 +861,13 @@ void ManagePasswordsBubbleView::WindowClosing() {
 
 views::View* ManagePasswordsBubbleView::GetInitiallyFocusedView() {
   return initially_focused_view_;
+}
+
+void ManagePasswordsBubbleView::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
+  DCHECK_EQ(type, chrome::NOTIFICATION_FULLSCREEN_CHANGED);
+  GetWidget()->SetVisibilityAnimationTransition(views::Widget::ANIMATE_NONE);
+  CloseBubble();
 }

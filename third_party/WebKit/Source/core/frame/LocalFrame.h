@@ -51,6 +51,7 @@ namespace blink {
     class FrameDestructionObserver;
     class FrameSelection;
     class FrameView;
+    class HTMLPlugInElement;
     class InputMethodController;
     class IntPoint;
     class IntSize;
@@ -63,32 +64,32 @@ namespace blink {
     class TreeScope;
     class VisiblePosition;
 
-    class LocalFrame : public Frame, public WillBeHeapSupplementable<LocalFrame>  {
+    class LocalFrame : public Frame, public WillBeHeapSupplementable<LocalFrame> {
+        WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(LocalFrame);
     public:
         static PassRefPtrWillBeRawPtr<LocalFrame> create(FrameLoaderClient*, FrameHost*, FrameOwner*);
 
-        virtual bool isLocalFrame() const OVERRIDE { return true; }
-
         void init();
-        void setView(PassRefPtr<FrameView>);
+        void setView(PassRefPtrWillBeRawPtr<FrameView>);
         void createView(const IntSize&, const Color&, bool,
             ScrollbarMode = ScrollbarAuto, bool horizontalLock = false,
             ScrollbarMode = ScrollbarAuto, bool verticalLock = false);
 
+        // Frame overrides:
         virtual ~LocalFrame();
-        virtual void trace(Visitor*) OVERRIDE;
-
-        virtual void detach() OVERRIDE;
+        virtual void trace(Visitor*) override;
+        virtual bool isLocalFrame() const override { return true; }
+        virtual LocalDOMWindow* domWindow() const override;
+        virtual void navigate(Document& originDocument, const KURL&, bool lockBackForwardList) override;
+        virtual void detach() override;
+        virtual void disconnectOwnerElement() override;
 
         void addDestructionObserver(FrameDestructionObserver*);
         void removeDestructionObserver(FrameDestructionObserver*);
 
         void willDetachFrameHost();
-        void detachFromFrameHost();
 
-        virtual void disconnectOwnerElement() OVERRIDE;
-
-        virtual void setDOMWindow(PassRefPtrWillBeRawPtr<LocalDOMWindow>) OVERRIDE;
+        void setDOMWindow(PassRefPtrWillBeRawPtr<LocalDOMWindow>);
         FrameView* view() const;
         Document* document() const;
         void setPagePopupOwner(Element&);
@@ -103,15 +104,16 @@ namespace blink {
         FrameSelection& selection() const;
         InputMethodController& inputMethodController() const;
         FetchContext& fetchContext() const { return loader().fetchContext(); }
-        ScriptController& script();
+        ScriptController& script() const;
         SpellChecker& spellChecker() const;
         FrameConsole& console() const;
 
         void didChangeVisibilityState();
 
-        // FIXME: This method is only used by EventHandler to get the highest level
-        // LocalFrame in this frame's in-process subtree. When user gesture tokens
-        // are synchronized across processes this method should be removed.
+        // This method is used to get the highest level LocalFrame in this
+        // frame's in-process subtree.
+        // FIXME: This is a temporary hack to support RemoteFrames, and callers
+        // should be updated to avoid storing things on the main frame.
         LocalFrame* localFrameRoot();
 
     // ======== All public functions below this point are candidates to move out of LocalFrame into another class. ========
@@ -155,6 +157,12 @@ namespace blink {
         bool shouldReuseDefaultView(const KURL&) const;
         void removeSpellingMarkersUnderWords(const Vector<String>& words);
 
+#if ENABLE(OILPAN)
+        void registerPluginElement(HTMLPlugInElement*);
+        void unregisterPluginElement(HTMLPlugInElement*);
+        void clearWeakMembers(Visitor*);
+#endif
+
     // ========
 
     private:
@@ -168,17 +176,35 @@ namespace blink {
         mutable FrameLoader m_loader;
         mutable NavigationScheduler m_navigationScheduler;
 
-        RefPtr<FrameView> m_view;
+        RefPtrWillBeMember<FrameView> m_view;
+        RefPtrWillBeMember<LocalDOMWindow> m_domWindow;
         // Usually 0. Non-null if this is the top frame of PagePopup.
         RefPtrWillBeMember<Element> m_pagePopupOwner;
 
-        OwnPtr<ScriptController> m_script;
+        const OwnPtrWillBeMember<ScriptController> m_script;
         const OwnPtrWillBeMember<Editor> m_editor;
         const OwnPtrWillBeMember<SpellChecker> m_spellChecker;
         const OwnPtrWillBeMember<FrameSelection> m_selection;
         const OwnPtrWillBeMember<EventHandler> m_eventHandler;
         const OwnPtrWillBeMember<FrameConsole> m_console;
-        OwnPtrWillBeMember<InputMethodController> m_inputMethodController;
+        const OwnPtrWillBeMember<InputMethodController> m_inputMethodController;
+
+#if ENABLE(OILPAN)
+        // Oilpan: in order to reliably finalize plugin elements with
+        // renderer-less plugins, the frame keeps track of them. When
+        // the frame is detached and disposed, these will be disposed
+        // of in the process. This is needed as the plugin element
+        // might not itself be attached to a DOM tree and be
+        // explicitly detached&disposed of.
+        //
+        // A weak reference is all wanted; the plugin element must
+        // otherwise be referenced and kept alive. So as to be able
+        // to process the set of weak references during the LocalFrame's
+        // weak callback, the set itself is not on the heap and the
+        // references are bare pointers (rather than WeakMembers.)
+        // See LocalFrame::clearWeakMembers().
+        HashSet<HTMLPlugInElement*> m_pluginElements;
+#endif
 
         float m_pageZoomFactor;
         float m_textZoomFactor;
@@ -206,7 +232,7 @@ namespace blink {
         return m_view.get();
     }
 
-    inline ScriptController& LocalFrame::script()
+    inline ScriptController& LocalFrame::script() const
     {
         return *m_script;
     }

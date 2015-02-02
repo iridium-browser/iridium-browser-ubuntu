@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-#include "components/bookmarks/browser/base_bookmark_model_observer.h"
+#include "base/containers/mru_cache.h"
 #include "components/enhanced_bookmarks/bookmark_server_service.h"
 #include "net/url_request/url_fetcher.h"
 
@@ -25,40 +25,48 @@ class BookmarkServerSearchService : public BookmarkServerService {
       ProfileOAuth2TokenService* token_service,
       SigninManagerBase* signin_manager,
       EnhancedBookmarkModel* bookmark_model);
-  virtual ~BookmarkServerSearchService();
+  ~BookmarkServerSearchService() override;
 
   // Triggers a search. The query must not be empty. A call to this method
-  // cancels any previous searches. OnChange() is garanteed to be called once
-  // per query.
+  // cancels any previous searches. If there have been multiple queries in
+  // between, onChange will only be called for the last query.
+  // Note this method will be synchronous if query hits the cache.
   void Search(const std::string& query);
 
-  // Returns the search results. The results are only available after the
-  // OnChange() observer methods has been sent. This method will return an empty
-  // result otherwise. query should be a string passed to Search() previously.
-  std::vector<const BookmarkNode*> ResultForQuery(const std::string& query);
+  // Returns search results for a query. Results for a query are only available
+  // after Search() is called and after then OnChange() observer methods has
+  // been sent.This method might return an empty vector, meaning there are no
+  // bookmarks matching the given query. Returning null means we are still
+  // loading and no results have come to the client. Previously cancelled
+  // queries will not trigger onChange(), and this method will also return null
+  // for queries that have never been passed to Search() before.
+  scoped_ptr<std::vector<const BookmarkNode*>> ResultForQuery(
+      const std::string& query);
 
  protected:
+  scoped_ptr<net::URLFetcher> CreateFetcher() override;
 
-  virtual net::URLFetcher* CreateFetcher() OVERRIDE;
+  bool ProcessResponse(const std::string& response,
+                       bool* should_notify) override;
 
-  virtual bool ProcessResponse(const std::string& response,
-                               bool* should_notify) OVERRIDE;
-
-  virtual void CleanAfterFailure() OVERRIDE;
+  void CleanAfterFailure() override;
 
   // EnhancedBookmarkModelObserver methods.
-  virtual void EnhancedBookmarkModelLoaded() OVERRIDE{};
-  virtual void EnhancedBookmarkAdded(const BookmarkNode* node) OVERRIDE;
-  virtual void EnhancedBookmarkRemoved(const BookmarkNode* node) OVERRIDE{};
-  virtual void EnhancedBookmarkAllUserNodesRemoved() OVERRIDE;
-  virtual void EnhancedBookmarkRemoteIdChanged(
-      const BookmarkNode* node,
-      const std::string& old_remote_id,
-      const std::string& remote_id) OVERRIDE;
+  void EnhancedBookmarkModelLoaded() override{};
+  void EnhancedBookmarkAdded(const BookmarkNode* node) override;
+  void EnhancedBookmarkRemoved(const BookmarkNode* node) override{};
+  void EnhancedBookmarkNodeChanged(const BookmarkNode* node) override{};
+  void EnhancedBookmarkAllUserNodesRemoved() override;
+  void EnhancedBookmarkRemoteIdChanged(const BookmarkNode* node,
+                                       const std::string& old_remote_id,
+                                       const std::string& remote_id) override;
 
  private:
-  // The search data, a map from query to a vector of stars.id.
-  std::map<std::string, std::vector<std::string> > searches_;
+  // Cache for previous search result, a map from a query string to vector of
+  // star_ids.
+  base::MRUCache<std::string, std::vector<std::string>> cache_;
+  // The query currently on the fly, and is cleared as soon as the result is
+  // available.
   std::string current_query_;
   DISALLOW_COPY_AND_ASSIGN(BookmarkServerSearchService);
 };

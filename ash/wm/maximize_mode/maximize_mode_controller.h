@@ -35,6 +35,7 @@ class MaximizeModeWindowManager;
 class MaximizeModeWindowManagerTest;
 namespace test {
 class MultiUserWindowManagerChromeOSTest;
+class VirtualKeyboardControllerTest;
 }
 
 // MaximizeModeController listens to accelerometer events and automatically
@@ -60,7 +61,7 @@ class ASH_EXPORT MaximizeModeController
   };
 
   MaximizeModeController();
-  virtual ~MaximizeModeController();
+  ~MaximizeModeController() override;
 
   bool ignore_display_configuration_updates() const {
     return ignore_display_configuration_updates_;
@@ -109,29 +110,29 @@ class ASH_EXPORT MaximizeModeController
   void Shutdown();
 
   // AccelerometerObserver:
-  virtual void OnAccelerometerUpdated(
-      const ui::AccelerometerUpdate& update) OVERRIDE;
+  void OnAccelerometerUpdated(const ui::AccelerometerUpdate& update) override;
 
   // ShellObserver:
-  virtual void OnAppTerminating() OVERRIDE;
-  virtual void OnMaximizeModeStarted() OVERRIDE;
-  virtual void OnMaximizeModeEnded() OVERRIDE;
+  void OnAppTerminating() override;
+  void OnMaximizeModeStarted() override;
+  void OnMaximizeModeEnded() override;
 
   // DisplayController::Observer:
-  virtual void OnDisplayConfigurationChanged() OVERRIDE;
+  void OnDisplayConfigurationChanged() override;
 
 #if defined(OS_CHROMEOS)
   // PowerManagerClient::Observer:
   virtual void LidEventReceived(bool open,
-                                const base::TimeTicks& time) OVERRIDE;
-  virtual void SuspendImminent() OVERRIDE;
-  virtual void SuspendDone(const base::TimeDelta& sleep_duration) OVERRIDE;
+                                const base::TimeTicks& time) override;
+  virtual void SuspendImminent() override;
+  virtual void SuspendDone(const base::TimeDelta& sleep_duration) override;
 #endif  // OS_CHROMEOS
 
  private:
   friend class MaximizeModeControllerTest;
   friend class MaximizeModeWindowManagerTest;
   friend class test::MultiUserWindowManagerChromeOSTest;
+  friend class test::VirtualKeyboardControllerTest;
 
   // Set the TickClock. This is only to be used by tests that need to
   // artificially and deterministically control the current time.
@@ -184,6 +185,9 @@ class ASH_EXPORT MaximizeModeController
   // True when changes being applied cause OnDisplayConfigurationChanged() to be
   // called, and for which these changes should be ignored.
   bool ignore_display_configuration_updates_;
+
+  // True when the hinge angle has been detected past 180 degrees.
+  bool lid_open_past_180_;
 
   // True when Shutdown has been called. When shutting down the non maximize
   // mode state should be restored, however user preferences should not be

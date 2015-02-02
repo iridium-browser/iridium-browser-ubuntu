@@ -4,9 +4,7 @@
 
 enum TestEnum { "foo", "bar", "baz" };
 
-[
-    GarbageCollected,
-] dictionary TestDictionary {
+dictionary TestDictionary {
     boolean booleanMember;
     long longMember = 1;
     DOMString stringMember;
@@ -24,4 +22,5 @@ enum TestEnum { "foo", "bar", "baz" };
     Element? elementOrNullMember;
     object objectMember;
     object? objectOrNullMember;
+    [ImplementedAs=createMember] boolean create;
 };

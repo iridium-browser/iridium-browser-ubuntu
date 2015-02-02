@@ -33,9 +33,9 @@ void SkImage::draw(SkCanvas* canvas, SkScalar x, SkScalar y, const SkPaint* pain
     as_IB(this)->onDraw(canvas, x, y, paint);
 }
 
-void SkImage::draw(SkCanvas* canvas, const SkRect* src, const SkRect& dst,
+void SkImage::drawRect(SkCanvas* canvas, const SkRect* src, const SkRect& dst,
                    const SkPaint* paint) const {
-    as_IB(this)->onDrawRectToRect(canvas, src, dst, paint);
+    as_IB(this)->onDrawRect(canvas, src, dst, paint);
 }
 
 const void* SkImage::peekPixels(SkImageInfo* info, size_t* rowBytes) const {
@@ -135,6 +135,6 @@ bool SkImage_Base::onReadPixels(SkBitmap* bitmap, const SkIRect& subset) const {
     paint.setXfermodeMode(SkXfermode::kClear_Mode);
     canvas.drawRect(dstR, paint);
 
-    const_cast<SkImage_Base*>(this)->onDrawRectToRect(&canvas, &srcR, dstR, NULL);
+    canvas.drawImageRect(this, &srcR, dstR);
     return true;
 }

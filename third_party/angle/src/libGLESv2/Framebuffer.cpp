@@ -16,13 +16,14 @@
 #include "libGLESv2/FramebufferAttachment.h"
 #include "libGLESv2/renderer/Renderer.h"
 #include "libGLESv2/renderer/RenderTarget.h"
+#include "libGLESv2/renderer/Workarounds.h"
 #include "libGLESv2/renderer/d3d/TextureD3D.h"
 
 #include "common/utilities.h"
 
 namespace rx
 {
-RenderTarget *GetAttachmentRenderTarget(gl::FramebufferAttachment *attachment)
+gl::Error GetAttachmentRenderTarget(gl::FramebufferAttachment *attachment, RenderTarget **outRT)
 {
     if (attachment->isTexture())
     {
@@ -31,14 +32,17 @@ RenderTarget *GetAttachmentRenderTarget(gl::FramebufferAttachment *attachment)
         TextureD3D *textureD3D = TextureD3D::makeTextureD3D(texture->getImplementation());
         const gl::ImageIndex *index = attachment->getTextureImageIndex();
         ASSERT(index);
-        return textureD3D->getRenderTarget(*index);
+        return textureD3D->getRenderTarget(*index, outRT);
     }
+    else
+    {
+        gl::Renderbuffer *renderbuffer = attachment->getRenderbuffer();
+        ASSERT(renderbuffer);
 
-    gl::Renderbuffer *renderbuffer = attachment->getRenderbuffer();
-    ASSERT(renderbuffer);
-
-    // TODO: cast to RenderbufferD3D
-    return renderbuffer->getStorage()->getRenderTarget();
+        // TODO: cast to RenderbufferD3D
+        *outRT = renderbuffer->getStorage()->getRenderTarget();
+        return gl::Error(GL_NO_ERROR);
+    }
 }
 
 // Note: RenderTarget serials should ideally be in the RenderTargets themselves.
@@ -602,33 +606,36 @@ GLenum Framebuffer::completeness() const
     return GL_FRAMEBUFFER_COMPLETE;
 }
 
-void Framebuffer::invalidate(const Caps &caps, GLsizei numAttachments, const GLenum *attachments)
+Error Framebuffer::invalidate(const Caps &caps, GLsizei numAttachments, const GLenum *attachments)
 {
     GLuint maxDimension = caps.maxRenderbufferSize;
-    invalidateSub(caps, numAttachments, attachments, 0, 0, maxDimension, maxDimension);
+    return invalidateSub(numAttachments, attachments, 0, 0, maxDimension, maxDimension);
 }
 
-void Framebuffer::invalidateSub(const Caps &caps, GLsizei numAttachments, const GLenum *attachments,
-                                GLint x, GLint y, GLsizei width, GLsizei height)
+Error Framebuffer::invalidateSub(GLsizei numAttachments, const GLenum *attachments, GLint x, GLint y, GLsizei width, GLsizei height)
 {
     ASSERT(completeness() == GL_FRAMEBUFFER_COMPLETE);
     for (GLsizei attachIndex = 0; attachIndex < numAttachments; ++attachIndex)
     {
         GLenum attachmentTarget = attachments[attachIndex];
 
-        gl::FramebufferAttachment *attachment =
-            (attachmentTarget == GL_DEPTH_STENCIL_ATTACHMENT) ? getDepthOrStencilbuffer() :
-                                                                getAttachment(attachmentTarget);
+        FramebufferAttachment *attachment = (attachmentTarget == GL_DEPTH_STENCIL_ATTACHMENT) ? getDepthOrStencilbuffer()
+                                                                                              : getAttachment(attachmentTarget);
 
         if (attachment)
         {
-            rx::RenderTarget *renderTarget = rx::GetAttachmentRenderTarget(attachment);
-            if (renderTarget)
+            rx::RenderTarget *renderTarget = NULL;
+            Error error = rx::GetAttachmentRenderTarget(attachment, &renderTarget);
+            if (error.isError())
             {
-                renderTarget->invalidate(x, y, width, height);
+                return error;
             }
+
+            renderTarget->invalidate(x, y, width, height);
         }
     }
+
+    return Error(GL_NO_ERROR);
 }
 
 DefaultFramebuffer::DefaultFramebuffer(rx::Renderer *renderer, Colorbuffer *colorbuffer, DepthStencilbuffer *depthStencil)
@@ -700,12 +707,10 @@ ColorbufferInfo Framebuffer::getColorbuffersForRender() const
             ASSERT(drawBufferState == GL_BACK || drawBufferState == (GL_COLOR_ATTACHMENT0_EXT + colorAttachment));
             colorbuffersForRender.push_back(colorbuffer);
         }
-#if (ANGLE_MRT_PERF_WORKAROUND == ANGLE_WORKAROUND_DISABLED)
-        else
+        else if (!mRenderer->getWorkarounds().mrtPerfWorkaround)
         {
             colorbuffersForRender.push_back(NULL);
         }
-#endif
     }
 
     return colorbuffersForRender;

@@ -6,31 +6,25 @@
 #include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/testing_pref_service.h"
-#include "chrome/browser/content_settings/content_settings_default_provider.h"
 #include "chrome/browser/content_settings/content_settings_mock_observer.h"
-#include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/public/test/test_browser_thread.h"
+#include "components/content_settings/core/browser/content_settings_default_provider.h"
+#include "components/content_settings/core/browser/content_settings_utils.h"
+#include "components/content_settings/core/test/content_settings_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
 using ::testing::_;
-using content::BrowserThread;
 
 class DefaultProviderTest : public testing::Test {
  public:
   DefaultProviderTest()
-      : ui_thread_(BrowserThread::UI, &message_loop_),
-        provider_(profile_.GetPrefs(), false) {
+      : provider_(profile_.GetPrefs(), false) {
   }
-  virtual ~DefaultProviderTest() {
-    provider_.ShutdownOnUIThread();
-  }
+  ~DefaultProviderTest() override { provider_.ShutdownOnUIThread(); }
 
  protected:
-  base::MessageLoop message_loop_;
-  content::TestBrowserThread ui_thread_;
   TestingProfile profile_;
   content_settings::DefaultProvider provider_;
 };

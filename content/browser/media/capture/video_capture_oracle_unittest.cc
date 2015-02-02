@@ -497,9 +497,9 @@ TEST(SmoothEventSamplerTest, DrawingAt60FpsWith60HzVsyncSampledAt30Hertz) {
 class AnimatedContentSamplerTest : public ::testing::Test {
  public:
   AnimatedContentSamplerTest() {}
-  virtual ~AnimatedContentSamplerTest() {}
+  ~AnimatedContentSamplerTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     const base::TimeDelta since_epoch =
         InitialTestTimeTicks() - base::TimeTicks::UnixEpoch();
     rand_seed_ = abs(static_cast<int>(since_epoch.InMicroseconds()));
@@ -672,7 +672,7 @@ class AnimatedContentSamplerParameterizedTest
  protected:
   typedef std::pair<gfx::Rect, base::TimeTicks> Event;
 
-  virtual base::TimeDelta GetMinCapturePeriod() const OVERRIDE {
+  base::TimeDelta GetMinCapturePeriod() const override {
     return GetParam().min_capture_period;
   }
 

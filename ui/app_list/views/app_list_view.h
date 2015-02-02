@@ -34,6 +34,7 @@ class AppListViewDelegate;
 class AppListViewObserver;
 class HideViewAnimationObserver;
 class PaginationModel;
+class SearchBoxView;
 class SpeechView;
 
 // AppListView is the top-level view and controller of app list UI. It creates
@@ -44,7 +45,7 @@ class APP_LIST_EXPORT AppListView : public views::BubbleDelegateView,
  public:
   // Does not take ownership of |delegate|.
   explicit AppListView(AppListViewDelegate* delegate);
-  virtual ~AppListView();
+  ~AppListView() override;
 
   // Initializes the widget and use a given |anchor| plus an |anchor_offset| for
   // positioning.
@@ -90,17 +91,16 @@ class APP_LIST_EXPORT AppListView : public views::BubbleDelegateView,
   bool ShouldCenterWindow() const;
 
   // Overridden from views::View:
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
-  virtual void Paint(gfx::Canvas* canvas,
-                     const views::CullSet& cull_set) OVERRIDE;
-  virtual void OnThemeChanged() OVERRIDE;
+  gfx::Size GetPreferredSize() const override;
+  void Paint(gfx::Canvas* canvas, const views::CullSet& cull_set) override;
+  void OnThemeChanged() override;
 
   // WidgetDelegate overrides:
-  virtual bool ShouldHandleSystemCommands() const OVERRIDE;
+  bool ShouldHandleSystemCommands() const override;
 
   // Overridden from AppListViewDelegateObserver:
-  virtual void OnProfilesChanged() OVERRIDE;
-  virtual void OnShutdown() OVERRIDE;
+  void OnProfilesChanged() override;
+  void OnShutdown() override;
 
   void Prerender();
 
@@ -131,35 +131,33 @@ class APP_LIST_EXPORT AppListView : public views::BubbleDelegateView,
                             const gfx::Vector2d& anchor_offset);
 
   // Overridden from views::BubbleDelegateView:
-  virtual void OnBeforeBubbleWidgetInit(
-      views::Widget::InitParams* params,
-      views::Widget* widget) const OVERRIDE;
+  void OnBeforeBubbleWidgetInit(views::Widget::InitParams* params,
+                                views::Widget* widget) const override;
 
   // Overridden from views::WidgetDelegateView:
-  virtual views::View* GetInitiallyFocusedView() OVERRIDE;
-  virtual gfx::ImageSkia GetWindowIcon() OVERRIDE;
-  virtual bool WidgetHasHitTestMask() const OVERRIDE;
-  virtual void GetWidgetHitTestMask(gfx::Path* mask) const OVERRIDE;
+  views::View* GetInitiallyFocusedView() override;
+  gfx::ImageSkia GetWindowIcon() override;
+  bool WidgetHasHitTestMask() const override;
+  void GetWidgetHitTestMask(gfx::Path* mask) const override;
 
   // Overridden from views::View:
-  virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
-  virtual void Layout() OVERRIDE;
-  virtual void SchedulePaintInRect(const gfx::Rect& rect) OVERRIDE;
+  bool AcceleratorPressed(const ui::Accelerator& accelerator) override;
+  void Layout() override;
+  void SchedulePaintInRect(const gfx::Rect& rect) override;
 
   // Overridden from views::WidgetObserver:
-  virtual void OnWidgetDestroying(views::Widget* widget) OVERRIDE;
-  virtual void OnWidgetVisibilityChanged(
-      views::Widget* widget, bool visible) OVERRIDE;
-  virtual void OnWidgetActivationChanged(
-      views::Widget* widget, bool active) OVERRIDE;
+  void OnWidgetDestroying(views::Widget* widget) override;
+  void OnWidgetVisibilityChanged(views::Widget* widget, bool visible) override;
+  void OnWidgetActivationChanged(views::Widget* widget, bool active) override;
 
   // Overridden from SpeechUIModelObserver:
-  virtual void OnSpeechRecognitionStateChanged(
-      SpeechRecognitionState new_state) OVERRIDE;
+  void OnSpeechRecognitionStateChanged(
+      SpeechRecognitionState new_state) override;
 
   AppListViewDelegate* delegate_;  // Weak. Owned by AppListService.
 
   AppListMainView* app_list_main_view_;
+  SearchBoxView* search_box_view_;
   SpeechView* speech_view_;
 
   // The red "experimental" banner for the experimental app list.

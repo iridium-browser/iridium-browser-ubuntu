@@ -16,30 +16,28 @@ class TestLayerAnimationDelegate : public LayerAnimationDelegate {
  public:
   TestLayerAnimationDelegate();
   explicit TestLayerAnimationDelegate(const LayerAnimationDelegate& other);
-  virtual ~TestLayerAnimationDelegate();
+  ~TestLayerAnimationDelegate() override;
 
   // Implementation of LayerAnimationDelegate
-  virtual void SetBoundsFromAnimation(const gfx::Rect& bounds) OVERRIDE;
-  virtual void SetTransformFromAnimation(
-      const gfx::Transform& transform) OVERRIDE;
-  virtual void SetOpacityFromAnimation(float opacity) OVERRIDE;
-  virtual void SetVisibilityFromAnimation(bool visibility) OVERRIDE;
-  virtual void SetBrightnessFromAnimation(float brightness) OVERRIDE;
-  virtual void SetGrayscaleFromAnimation(float grayscale) OVERRIDE;
-  virtual void SetColorFromAnimation(SkColor color) OVERRIDE;
-  virtual void ScheduleDrawForAnimation() OVERRIDE;
-  virtual const gfx::Rect& GetBoundsForAnimation() const OVERRIDE;
-  virtual gfx::Transform GetTransformForAnimation() const OVERRIDE;
-  virtual float GetOpacityForAnimation() const OVERRIDE;
-  virtual bool GetVisibilityForAnimation() const OVERRIDE;
-  virtual float GetBrightnessForAnimation() const OVERRIDE;
-  virtual float GetGrayscaleForAnimation() const OVERRIDE;
-  virtual SkColor GetColorForAnimation() const OVERRIDE;
-  virtual float GetDeviceScaleFactor() const OVERRIDE;
-  virtual void AddThreadedAnimation(
-      scoped_ptr<cc::Animation> animation) OVERRIDE;
-  virtual void RemoveThreadedAnimation(int animation_id) OVERRIDE;
-  virtual LayerAnimatorCollection* GetLayerAnimatorCollection() OVERRIDE;
+  void SetBoundsFromAnimation(const gfx::Rect& bounds) override;
+  void SetTransformFromAnimation(const gfx::Transform& transform) override;
+  void SetOpacityFromAnimation(float opacity) override;
+  void SetVisibilityFromAnimation(bool visibility) override;
+  void SetBrightnessFromAnimation(float brightness) override;
+  void SetGrayscaleFromAnimation(float grayscale) override;
+  void SetColorFromAnimation(SkColor color) override;
+  void ScheduleDrawForAnimation() override;
+  const gfx::Rect& GetBoundsForAnimation() const override;
+  gfx::Transform GetTransformForAnimation() const override;
+  float GetOpacityForAnimation() const override;
+  bool GetVisibilityForAnimation() const override;
+  float GetBrightnessForAnimation() const override;
+  float GetGrayscaleForAnimation() const override;
+  SkColor GetColorForAnimation() const override;
+  float GetDeviceScaleFactor() const override;
+  void AddThreadedAnimation(scoped_ptr<cc::Animation> animation) override;
+  void RemoveThreadedAnimation(int animation_id) override;
+  LayerAnimatorCollection* GetLayerAnimatorCollection() override;
 
  private:
   gfx::Rect bounds_;

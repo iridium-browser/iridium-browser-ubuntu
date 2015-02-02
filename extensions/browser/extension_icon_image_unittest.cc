@@ -55,9 +55,9 @@ class MockImageSkiaSource : public gfx::ImageSkiaSource {
   explicit MockImageSkiaSource(const gfx::ImageSkia& image)
       : image_(image) {
   }
-  virtual ~MockImageSkiaSource() {}
+  ~MockImageSkiaSource() override {}
 
-  virtual gfx::ImageSkiaRep GetImageForScale(float scale) OVERRIDE {
+  gfx::ImageSkiaRep GetImageForScale(float scale) override {
     return image_.GetRepresentation(scale);
   }
 
@@ -125,7 +125,7 @@ class ExtensionIconImageTest : public ExtensionsTest,
         io_thread_(BrowserThread::IO),
         notification_service_(content::NotificationService::Create()) {}
 
-  virtual ~ExtensionIconImageTest() {}
+  ~ExtensionIconImageTest() override {}
 
   void WaitForImageLoad() {
     quit_in_image_loaded_ = true;
@@ -167,13 +167,13 @@ class ExtensionIconImageTest : public ExtensionsTest,
   }
 
   // testing::Test overrides:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     file_thread_.Start();
     io_thread_.Start();
   }
 
   // IconImage::Delegate overrides:
-  virtual void OnExtensionIconImageChanged(IconImage* image) OVERRIDE {
+  void OnExtensionIconImageChanged(IconImage* image) override {
     image_loaded_count_++;
     if (quit_in_image_loaded_)
       base::MessageLoop::current()->Quit();

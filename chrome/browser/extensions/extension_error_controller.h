@@ -32,12 +32,12 @@ class ExtensionErrorController : public ExtensionErrorUI::Delegate {
 
  private:
   // ExtensionErrorUI::Delegate implementation:
-  virtual content::BrowserContext* GetContext() OVERRIDE;
-  virtual const ExtensionSet& GetExternalExtensions() OVERRIDE;
-  virtual const ExtensionSet& GetBlacklistedExtensions() OVERRIDE;
-  virtual void OnAlertDetails() OVERRIDE;
-  virtual void OnAlertAccept() OVERRIDE;
-  virtual void OnAlertClosed() OVERRIDE;
+  content::BrowserContext* GetContext() override;
+  const ExtensionSet& GetExternalExtensions() override;
+  const ExtensionSet& GetBlacklistedExtensions() override;
+  void OnAlertDetails() override;
+  void OnAlertAccept() override;
+  void OnAlertClosed() override;
 
   // Find any extensions that the user should be alerted about (like blacklisted
   // extensions).

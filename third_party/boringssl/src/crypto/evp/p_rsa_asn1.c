@@ -583,21 +583,19 @@ err:
   return NULL;
 }
 
-/* From PSS AlgorithmIdentifier set public key parameters. If pkey
- * isn't NULL then the EVP_MD_CTX is setup and initalised. If it
- * is NULL parameters are passed to pkctx instead. */
-static int rsa_pss_to_ctx(EVP_MD_CTX *ctx, EVP_PKEY_CTX *pkctx,
-                          X509_ALGOR *sigalg, EVP_PKEY *pkey) {
-  int ret = -1;
+/* From PSS AlgorithmIdentifier set public key parameters. */
+static int rsa_pss_to_ctx(EVP_MD_CTX *ctx, X509_ALGOR *sigalg, EVP_PKEY *pkey) {
+  int ret = 0;
   int saltlen;
   const EVP_MD *mgf1md = NULL, *md = NULL;
   RSA_PSS_PARAMS *pss;
   X509_ALGOR *maskHash;
+  EVP_PKEY_CTX *pkctx;
 
   /* Sanity check: make sure it is PSS */
   if (OBJ_obj2nid(sigalg->algorithm) != NID_rsassaPss) {
     OPENSSL_PUT_ERROR(EVP, rsa_pss_to_ctx, EVP_R_UNSUPPORTED_SIGNATURE_TYPE);
-    return -1;
+    return 0;
   }
   /* Decode PSS parameters */
   pss = rsa_pss_decode(sigalg, &maskHash);
@@ -634,22 +632,8 @@ static int rsa_pss_to_ctx(EVP_MD_CTX *ctx, EVP_PKEY_CTX *pkctx,
     goto err;
   }
 
-  if (pkey) {
-    if (!EVP_DigestVerifyInit(ctx, &pkctx, md, NULL, pkey)) {
-      goto err;
-    }
-  } else {
-    const EVP_MD *checkmd;
-    if (EVP_PKEY_CTX_get_signature_md(pkctx, &checkmd) <= 0) {
-      goto err;
-    }
-    if (EVP_MD_type(md) != EVP_MD_type(checkmd)) {
-      OPENSSL_PUT_ERROR(EVP, rsa_pss_to_ctx, EVP_R_DIGEST_DOES_NOT_MATCH);
-      goto err;
-    }
-  }
-
-  if (EVP_PKEY_CTX_set_rsa_padding(pkctx, RSA_PKCS1_PSS_PADDING) <= 0 ||
+  if (!EVP_DigestVerifyInit(ctx, &pkctx, md, NULL, pkey) ||
+      EVP_PKEY_CTX_set_rsa_padding(pkctx, RSA_PKCS1_PSS_PADDING) <= 0 ||
       EVP_PKEY_CTX_set_rsa_pss_saltlen(pkctx, saltlen) <= 0 ||
       EVP_PKEY_CTX_set_rsa_mgf1_md(pkctx, mgf1md) <= 0) {
     goto err;
@@ -665,54 +649,38 @@ err:
   return ret;
 }
 
-/* Customised RSA item verification routine. This is called
- * when a signature is encountered requiring special handling. We
- * currently only handle PSS. */
-static int rsa_item_verify(EVP_MD_CTX *ctx, const ASN1_ITEM *it, void *asn,
-                           X509_ALGOR *sigalg, ASN1_BIT_STRING *sig,
-                           EVP_PKEY *pkey) {
+/* Customised RSA AlgorithmIdentifier handling. This is called when a signature
+ * is encountered requiring special handling. We currently only handle PSS. */
+static int rsa_digest_verify_init_from_algorithm(EVP_MD_CTX *ctx,
+                                                 X509_ALGOR *sigalg,
+                                                 EVP_PKEY *pkey) {
   /* Sanity check: make sure it is PSS */
   if (OBJ_obj2nid(sigalg->algorithm) != NID_rsassaPss) {
-    OPENSSL_PUT_ERROR(EVP, rsa_item_verify, EVP_R_UNSUPPORTED_SIGNATURE_TYPE);
-    return -1;
+    OPENSSL_PUT_ERROR(EVP, rsa_digest_verify_init_from_algorithm,
+                      EVP_R_UNSUPPORTED_SIGNATURE_TYPE);
+    return 0;
   }
-  if (rsa_pss_to_ctx(ctx, NULL, sigalg, pkey)) {
-    /* Carry on */
-    return 2;
-  }
-
-  return -1;
+  return rsa_pss_to_ctx(ctx, sigalg, pkey);
 }
 
-static int rsa_item_sign(EVP_MD_CTX *ctx, const ASN1_ITEM *it, void *asn,
-                         X509_ALGOR *alg1, X509_ALGOR *alg2,
-                         ASN1_BIT_STRING *sig) {
+static evp_digest_sign_algorithm_result_t rsa_digest_sign_algorithm(
+    EVP_MD_CTX *ctx, X509_ALGOR *sigalg) {
   int pad_mode;
   EVP_PKEY_CTX *pkctx = ctx->pctx;
   if (EVP_PKEY_CTX_get_rsa_padding(pkctx, &pad_mode) <= 0) {
-    return 0;
-  }
-  if (pad_mode == RSA_PKCS1_PADDING) {
-    return 2;
+    return EVP_DIGEST_SIGN_ALGORITHM_ERROR;
   }
   if (pad_mode == RSA_PKCS1_PSS_PADDING) {
     ASN1_STRING *os1 = rsa_ctx_to_pss(pkctx);
     if (!os1) {
-      return 0;
+      return EVP_DIGEST_SIGN_ALGORITHM_ERROR;
     }
-    /* Duplicate parameters if we have to */
-    if (alg2) {
-      ASN1_STRING *os2 = ASN1_STRING_dup(os1);
-      if (!os2) {
-        ASN1_STRING_free(os1);
-        return 0;
-      }
-      X509_ALGOR_set0(alg2, OBJ_nid2obj(NID_rsassaPss), V_ASN1_SEQUENCE, os2);
-    }
-    X509_ALGOR_set0(alg1, OBJ_nid2obj(NID_rsassaPss), V_ASN1_SEQUENCE, os1);
-    return 3;
+    X509_ALGOR_set0(sigalg, OBJ_nid2obj(NID_rsassaPss), V_ASN1_SEQUENCE, os1);
+    return EVP_DIGEST_SIGN_ALGORITHM_SUCCESS;
   }
-  return 2;
+
+  /* Other padding schemes use the default behavior. */
+  return EVP_DIGEST_SIGN_ALGORITHM_DEFAULT;
 }
 
 const EVP_PKEY_ASN1_METHOD rsa_asn1_meth = {
@@ -746,12 +714,6 @@ const EVP_PKEY_ASN1_METHOD rsa_asn1_meth = {
   old_rsa_priv_decode,
   old_rsa_priv_encode,
 
-  rsa_item_verify,
-  rsa_item_sign,
-};
-
-const EVP_PKEY_ASN1_METHOD rsa_asn1_meth_2 = {
-  EVP_PKEY_RSA2,
-  EVP_PKEY_RSA,
-  ASN1_PKEY_ALIAS,
+  rsa_digest_verify_init_from_algorithm,
+  rsa_digest_sign_algorithm,
 };

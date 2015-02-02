@@ -8,7 +8,7 @@
 #include "chrome/browser/extensions/api/identity/extension_token_key.h"
 #include "chrome/browser/extensions/api/identity/web_auth_flow.h"
 #include "chrome/browser/ui/host_desktop.h"
-#include "chrome/common/extensions/api/identity/oauth2_manifest_handler.h"
+#include "extensions/common/manifest_handlers/oauth2_manifest_handler.h"
 #include "google_apis/gaia/ubertoken_fetcher.h"
 
 namespace extensions {
@@ -64,19 +64,19 @@ class GaiaWebAuthFlow : public UbertokenConsumer, public WebAuthFlow::Delegate {
                   const ExtensionTokenKey* token_key,
                   const std::string& oauth2_client_id,
                   const std::string& locale);
-  virtual ~GaiaWebAuthFlow();
+  ~GaiaWebAuthFlow() override;
 
   // Starts the flow by fetching an ubertoken. Can override for testing.
   virtual void Start();
 
   // UbertokenConsumer implementation:
-  virtual void OnUbertokenSuccess(const std::string& token) OVERRIDE;
-  virtual void OnUbertokenFailure(const GoogleServiceAuthError& error) OVERRIDE;
+  void OnUbertokenSuccess(const std::string& token) override;
+  void OnUbertokenFailure(const GoogleServiceAuthError& error) override;
 
   // WebAuthFlow::Delegate implementation.
-  virtual void OnAuthFlowFailure(WebAuthFlow::Failure failure) OVERRIDE;
-  virtual void OnAuthFlowURLChange(const GURL& redirect_url) OVERRIDE;
-  virtual void OnAuthFlowTitleChange(const std::string& title) OVERRIDE;
+  void OnAuthFlowFailure(WebAuthFlow::Failure failure) override;
+  void OnAuthFlowURLChange(const GURL& redirect_url) override;
+  void OnAuthFlowTitleChange(const std::string& title) override;
 
  private:
   // Creates a WebAuthFlow, which will navigate to |url|. Can override

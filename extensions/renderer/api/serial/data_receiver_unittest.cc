@@ -16,19 +16,13 @@ class DataReceiverTest : public ApiTestBase {
  public:
   DataReceiverTest() {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ApiTestBase::SetUp();
-    env()->RegisterModule("async_waiter", IDR_ASYNC_WAITER_JS);
-    env()->RegisterModule("data_receiver", IDR_DATA_RECEIVER_JS);
-    env()->RegisterModule("device/serial/data_stream.mojom",
-                          IDR_DATA_STREAM_MOJOM_JS);
-    env()->RegisterModule("device/serial/data_stream_serialization.mojom",
-                          IDR_DATA_STREAM_SERIALIZATION_MOJOM_JS);
     service_provider()->AddService(base::Bind(
         &DataReceiverTest::CreateDataSource, base::Unretained(this)));
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     if (sender_.get()) {
       sender_->ShutDown();
       sender_ = NULL;
@@ -62,11 +56,6 @@ class DataReceiverTest : public ApiTestBase {
     if (!error_to_send_.empty()) {
       error = error_to_send_.front();
       error_to_send_.pop();
-    }
-    if (error == 2) {
-      sender_->ShutDown();
-      sender_ = NULL;
-      return;
     }
     DCHECK(buffer->GetSize() >= static_cast<uint32_t>(data.size()));
     memcpy(buffer->GetData(), data.c_str(), data.size());
@@ -134,11 +123,6 @@ TEST_F(DataReceiverTest, SerializeDuringReceive) {
 TEST_F(DataReceiverTest, SerializeAfterClose) {
   data_to_send_.push("a");
   RunTest("data_receiver_unittest.js", "testSerializeAfterClose");
-}
-
-TEST_F(DataReceiverTest, SourceShutdown) {
-  error_to_send_.push(2);
-  RunTest("data_receiver_unittest.js", "testSourceShutdown");
 }
 
 }  // namespace extensions

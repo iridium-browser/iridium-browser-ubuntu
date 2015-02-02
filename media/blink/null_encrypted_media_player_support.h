@@ -19,53 +19,51 @@ class MEDIA_EXPORT NullEncryptedMediaPlayerSupport
   static scoped_ptr<EncryptedMediaPlayerSupport> Create(
       blink::WebMediaPlayerClient* client);
 
-  virtual ~NullEncryptedMediaPlayerSupport();
+  ~NullEncryptedMediaPlayerSupport() override;
 
   // Prefixed API methods.
-  virtual blink::WebMediaPlayer::MediaKeyException GenerateKeyRequest(
+  blink::WebMediaPlayer::MediaKeyException GenerateKeyRequest(
       blink::WebLocalFrame* frame,
       const blink::WebString& key_system,
       const unsigned char* init_data,
-      unsigned init_data_length) OVERRIDE;
+      unsigned init_data_length) override;
 
-  virtual blink::WebMediaPlayer::MediaKeyException AddKey(
+  blink::WebMediaPlayer::MediaKeyException AddKey(
       const blink::WebString& key_system,
       const unsigned char* key,
       unsigned key_length,
       const unsigned char* init_data,
       unsigned init_data_length,
-      const blink::WebString& session_id) OVERRIDE;
+      const blink::WebString& session_id) override;
 
-  virtual blink::WebMediaPlayer::MediaKeyException CancelKeyRequest(
+  blink::WebMediaPlayer::MediaKeyException CancelKeyRequest(
       const blink::WebString& key_system,
-      const blink::WebString& session_id) OVERRIDE;
-
+      const blink::WebString& session_id) override;
 
   // Unprefixed API methods.
-  virtual void SetInitialContentDecryptionModule(
-      blink::WebContentDecryptionModule* initial_cdm) OVERRIDE;
-  virtual void SetContentDecryptionModule(
-      blink::WebContentDecryptionModule* cdm) OVERRIDE;
-  virtual void SetContentDecryptionModule(
+  void SetInitialContentDecryptionModule(
+      blink::WebContentDecryptionModule* initial_cdm) override;
+  void SetContentDecryptionModule(
+      blink::WebContentDecryptionModule* cdm) override;
+  void SetContentDecryptionModule(
       blink::WebContentDecryptionModule* cdm,
-      blink::WebContentDecryptionModuleResult result) OVERRIDE;
-
+      blink::WebContentDecryptionModuleResult result) override;
 
   // Callback factory and notification methods used by WebMediaPlayerImpl.
 
   // Creates a callback that Demuxers can use to signal that the content
   // requires a key. This method makes sure the callback returned can be safely
   // invoked from any thread.
-  virtual Demuxer::NeedKeyCB CreateNeedKeyCB() OVERRIDE;
+  Demuxer::NeedKeyCB CreateNeedKeyCB() override;
 
   // Creates a callback that renderers can use to set decryptor
   // ready callback. This method makes sure the callback returned can be safely
   // invoked from any thread.
-  virtual SetDecryptorReadyCB CreateSetDecryptorReadyCB() OVERRIDE;
+  SetDecryptorReadyCB CreateSetDecryptorReadyCB() override;
 
   // Called to inform this object that the media pipeline encountered
   // and handled a decryption error.
-  virtual void OnPipelineDecryptError() OVERRIDE;
+  void OnPipelineDecryptError() override;
 
  private:
   NullEncryptedMediaPlayerSupport();

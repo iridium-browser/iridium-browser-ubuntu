@@ -65,7 +65,7 @@ class CacheFileSaverObserver : public InMemoryURLIndex::SaveCacheObserver {
 
  private:
   // SaveCacheObserver implementation.
-  virtual void OnCacheSaveFinished(bool succeeded) OVERRIDE;
+  void OnCacheSaveFinished(bool succeeded) override;
 
   base::Closure task_;
   bool succeeded_;
@@ -91,7 +91,7 @@ class InMemoryURLIndexTest : public testing::Test {
 
  protected:
   // Test setup.
-  virtual void SetUp();
+  void SetUp() override;
 
   // Allows the database containing the test data to be customized by
   // subclasses.
@@ -203,7 +203,7 @@ void InMemoryURLIndexTest::SetUp() {
   // We cannot access the database until the backend has been loaded.
   ASSERT_TRUE(profile_.CreateHistoryService(true, false));
   profile_.CreateBookmarkModel(true);
-  test::WaitForBookmarkModelToLoad(
+  bookmarks::test::WaitForBookmarkModelToLoad(
       BookmarkModelFactory::GetForProfile(&profile_));
   profile_.BlockUntilHistoryProcessesPendingRequests();
   profile_.BlockUntilHistoryIndexIsRefreshed();
@@ -287,9 +287,11 @@ void InMemoryURLIndexTest::SetUp() {
     transaction.Commit();
   }
 
-  url_index_.reset(new InMemoryURLIndex(
-      &profile_, base::FilePath(), "en,ja,hi,zh",
-      history_service_->history_client()));
+  url_index_.reset(new InMemoryURLIndex(&profile_,
+                                        history_service_,
+                                        base::FilePath(),
+                                        "en,ja,hi,zh",
+                                        history_service_->history_client()));
   url_index_->Init();
   url_index_->RebuildFromHistory(history_database_);
 }
@@ -431,7 +433,7 @@ void InMemoryURLIndexTest::ExpectPrivateDataEqual(
 
 class LimitedInMemoryURLIndexTest : public InMemoryURLIndexTest {
  protected:
-  virtual base::FilePath::StringType TestDBName() const OVERRIDE;
+  base::FilePath::StringType TestDBName() const override;
 };
 
 base::FilePath::StringType LimitedInMemoryURLIndexTest::TestDBName() const {
@@ -446,9 +448,11 @@ TEST_F(LimitedInMemoryURLIndexTest, Initialization) {
   uint64 row_count = 0;
   while (statement.Step()) ++row_count;
   EXPECT_EQ(1U, row_count);
-  url_index_.reset(new InMemoryURLIndex(
-      &profile_, base::FilePath(), "en,ja,hi,zh",
-      history_service_->history_client()));
+  url_index_.reset(new InMemoryURLIndex(&profile_,
+                                        history_service_,
+                                        base::FilePath(),
+                                        "en,ja,hi,zh",
+                                        history_service_->history_client()));
   url_index_->Init();
   url_index_->RebuildFromHistory(history_database_);
   URLIndexPrivateData& private_data(*GetPrivateData());
@@ -981,7 +985,7 @@ TEST_F(InMemoryURLIndexTest, WhitelistedURLs) {
 
   URLIndexPrivateData& private_data(*GetPrivateData());
   const std::set<std::string>& whitelist(scheme_whitelist());
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(data); ++i) {
+  for (size_t i = 0; i < arraysize(data); ++i) {
     GURL url(data[i].url_spec);
     EXPECT_EQ(data[i].expected_is_whitelisted,
               private_data.URLSchemeIsWhitelisted(url, whitelist));
@@ -1185,7 +1189,7 @@ class InMemoryURLIndexCacheTest : public testing::Test {
   InMemoryURLIndexCacheTest() {}
 
  protected:
-  virtual void SetUp() OVERRIDE;
+  void SetUp() override;
 
   // Pass-through functions to simplify our friendship with InMemoryURLIndex.
   void set_history_dir(const base::FilePath& dir_path);
@@ -1200,7 +1204,7 @@ void InMemoryURLIndexCacheTest::SetUp() {
   HistoryClient history_client;
   base::FilePath path(temp_dir_.path());
   url_index_.reset(new InMemoryURLIndex(
-      NULL, path, "en,ja,hi,zh", &history_client));
+      NULL, nullptr, path, "en,ja,hi,zh", &history_client));
 }
 
 void InMemoryURLIndexCacheTest::set_history_dir(

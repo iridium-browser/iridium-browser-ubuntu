@@ -76,13 +76,11 @@ class FileSystemProviderOperationsReadFileTest : public testing::Test {
   FileSystemProviderOperationsReadFileTest() {}
   virtual ~FileSystemProviderOperationsReadFileTest() {}
 
-  virtual void SetUp() OVERRIDE {
-    file_system_info_ =
-        ProvidedFileSystemInfo(kExtensionId,
-                               kFileSystemId,
-                               "" /* display_name */,
-                               false /* writable */,
-                               base::FilePath() /* mount_path */);
+  virtual void SetUp() override {
+    file_system_info_ = ProvidedFileSystemInfo(
+        kExtensionId,
+        MountOptions(kFileSystemId, "" /* display_name */),
+        base::FilePath());
     io_buffer_ = make_scoped_refptr(new net::IOBuffer(kOffset + kLength));
   }
 

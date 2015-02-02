@@ -14,6 +14,7 @@
 #include "base/task_runner_util.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "content/browser/media/capture/web_contents_video_capture_device.h"
+#include "content/browser/media/media_internals.h"
 #include "content/browser/renderer_host/media/video_capture_controller.h"
 #include "content/browser/renderer_host/media/video_capture_controller_event_handler.h"
 #include "content/public/browser/browser_thread.h"
@@ -79,9 +80,11 @@ const int kMaxNumberOfBuffersForTabCapture = 5;
 // Elements in this enum should not be deleted or rearranged; the only
 // permitted operation is to add new elements before NUM_VIDEO_CAPTURE_EVENT.
 enum VideoCaptureEvent {
-  VIDEO_CAPTURE_EVENT_START_CAPTURE = 0,
-  VIDEO_CAPTURE_EVENT_STOP_CAPTURE_NORMAL = 1,
-  VIDEO_CAPTURE_EVENT_STOP_CAPTURE_DUE_TO_ERROR = 2,
+  VIDEO_CAPTURE_START_CAPTURE = 0,
+  VIDEO_CAPTURE_STOP_CAPTURE_OK = 1,
+  VIDEO_CAPTURE_STOP_CAPTURE_DUE_TO_ERROR = 2,
+  VIDEO_CAPTURE_STOP_CAPTURE_OK_NO_FRAMES_PRODUCED_BY_DEVICE = 3,
+  VIDEO_CAPTURE_STOP_CAPTURE_OK_NO_FRAMES_PRODUCED_BY_DESKTOP_OR_TAB = 4,
   NUM_VIDEO_CAPTURE_EVENT
 };
 
@@ -105,15 +108,6 @@ VideoCaptureManager::DeviceEntry::DeviceEntry(
 
 VideoCaptureManager::DeviceEntry::~DeviceEntry() {}
 
-VideoCaptureManager::DeviceInfo::DeviceInfo() {}
-
-VideoCaptureManager::DeviceInfo::DeviceInfo(
-    const media::VideoCaptureDevice::Name& name,
-    const media::VideoCaptureFormats& supported_formats)
-    : name(name),
-      supported_formats(supported_formats) {}
-
-VideoCaptureManager::DeviceInfo::~DeviceInfo() {}
 
 VideoCaptureManager::VideoCaptureManager(
     scoped_ptr<media::VideoCaptureDeviceFactory> factory)
@@ -236,7 +230,8 @@ void VideoCaptureManager::DoStartDeviceOnDeviceThread(
       // We look up the device id from the renderer in our local enumeration
       // since the renderer does not have all the information that might be
       // held in the browser-side VideoCaptureDevice::Name structure.
-      DeviceInfo* found = FindDeviceInfoById(entry->id, devices_info_cache_);
+      media::VideoCaptureDeviceInfo* found =
+          FindDeviceInfoById(entry->id, devices_info_cache_);
       if (found) {
         video_capture_device =
             video_capture_device_factory_->Create(found->name);
@@ -305,7 +300,7 @@ void VideoCaptureManager::StartCaptureForClient(
 
   DCHECK(entry->video_capture_controller);
 
-  LogVideoCaptureEvent(VIDEO_CAPTURE_EVENT_START_CAPTURE);
+  LogVideoCaptureEvent(VIDEO_CAPTURE_START_CAPTURE);
 
   // First client starts the device.
   if (entry->video_capture_controller->GetActiveClientCount() == 0) {
@@ -337,16 +332,23 @@ void VideoCaptureManager::StopCaptureForClient(
   DCHECK(controller);
   DCHECK(client_handler);
 
-  LogVideoCaptureEvent(aborted_due_to_error ?
-      VIDEO_CAPTURE_EVENT_STOP_CAPTURE_DUE_TO_ERROR :
-      VIDEO_CAPTURE_EVENT_STOP_CAPTURE_NORMAL);
-
   DeviceEntry* entry = GetDeviceEntryForController(controller);
   if (!entry) {
     NOTREACHED();
     return;
   }
-  if (aborted_due_to_error) {
+  if (!aborted_due_to_error) {
+    if (controller->has_received_frames()) {
+      LogVideoCaptureEvent(VIDEO_CAPTURE_STOP_CAPTURE_OK);
+    } else if (entry->stream_type == MEDIA_DEVICE_VIDEO_CAPTURE) {
+      LogVideoCaptureEvent(
+          VIDEO_CAPTURE_STOP_CAPTURE_OK_NO_FRAMES_PRODUCED_BY_DEVICE);
+    } else {
+      LogVideoCaptureEvent(
+          VIDEO_CAPTURE_STOP_CAPTURE_OK_NO_FRAMES_PRODUCED_BY_DESKTOP_OR_TAB);
+    }
+  } else {
+    LogVideoCaptureEvent(VIDEO_CAPTURE_STOP_CAPTURE_DUE_TO_ERROR);
     SessionMap::iterator it;
     for (it = sessions_.begin(); it != sessions_.end(); ++it) {
       if (it->second.type == entry->stream_type &&
@@ -444,7 +446,7 @@ bool VideoCaptureManager::GetDeviceSupportedFormats(
   DVLOG(1) << "GetDeviceSupportedFormats for device: " << it->second.name;
 
   // Return all available formats of the device, regardless its started state.
-  DeviceInfo* existing_device =
+  media::VideoCaptureDeviceInfo* existing_device =
       FindDeviceInfoById(it->second.id, devices_info_cache_);
   if (existing_device)
     *supported_formats = existing_device->supported_formats;
@@ -549,7 +551,7 @@ void VideoCaptureManager::OnClosed(
 void VideoCaptureManager::OnDevicesInfoEnumerated(
     MediaStreamType stream_type,
     base::ElapsedTimer* timer,
-    const DeviceInfos& new_devices_info_cache) {
+    const media::VideoCaptureDeviceInfos& new_devices_info_cache) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   UMA_HISTOGRAM_TIMES(
       "Media.VideoCaptureManager.GetAvailableDevicesInfoOnDeviceThreadTime",
@@ -560,13 +562,15 @@ void VideoCaptureManager::OnDevicesInfoEnumerated(
   }
   devices_info_cache_ = new_devices_info_cache;
 
+  MediaInternals::GetInstance()->UpdateVideoCaptureDeviceCapabilities(
+      devices_info_cache_);
+
   // Walk the |devices_info_cache_| and transform from VCD::Name to
   // StreamDeviceInfo for return purposes.
   StreamDeviceInfoArray devices;
-  for (DeviceInfos::const_iterator it = devices_info_cache_.begin();
-       it != devices_info_cache_.end(); ++it) {
+  for (const auto& it : devices_info_cache_) {
     devices.push_back(StreamDeviceInfo(
-        stream_type, it->name.GetNameAndModel(), it->name.id()));
+        stream_type, it.name.GetNameAndModel(), it.name.id()));
   }
   listener_->DevicesEnumerated(stream_type, devices);
 }
@@ -576,23 +580,21 @@ bool VideoCaptureManager::IsOnDeviceThread() const {
 }
 
 void VideoCaptureManager::ConsolidateDevicesInfoOnDeviceThread(
-    base::Callback<void(const DeviceInfos&)> on_devices_enumerated_callback,
+    base::Callback<void(const media::VideoCaptureDeviceInfos&)>
+        on_devices_enumerated_callback,
     MediaStreamType stream_type,
-    const DeviceInfos& old_device_info_cache,
+    const media::VideoCaptureDeviceInfos& old_device_info_cache,
     scoped_ptr<media::VideoCaptureDevice::Names> names_snapshot) {
   DCHECK(IsOnDeviceThread());
   // Construct |new_devices_info_cache| with the cached devices that are still
   // present in the system, and remove their names from |names_snapshot|, so we
   // keep there the truly new devices.
-  DeviceInfos new_devices_info_cache;
-  for (DeviceInfos::const_iterator it_device_info =
-           old_device_info_cache.begin();
-       it_device_info != old_device_info_cache.end(); ++it_device_info) {
+  media::VideoCaptureDeviceInfos new_devices_info_cache;
+  for (const auto& device_info : old_device_info_cache) {
      for (media::VideoCaptureDevice::Names::iterator it =
-         names_snapshot->begin();
-          it != names_snapshot->end(); ++it) {
-      if (it_device_info->name.id() == it->id()) {
-        new_devices_info_cache.push_back(*it_device_info);
+         names_snapshot->begin(); it != names_snapshot->end(); ++it) {
+      if (device_info.name.id() == it->id()) {
+        new_devices_info_cache.push_back(device_info);
         names_snapshot->erase(it);
         break;
       }
@@ -600,13 +602,10 @@ void VideoCaptureManager::ConsolidateDevicesInfoOnDeviceThread(
   }
 
   // Get the supported capture formats for the new devices in |names_snapshot|.
-  for (media::VideoCaptureDevice::Names::const_iterator it =
-      names_snapshot->begin();
-       it != names_snapshot->end(); ++it) {
-    media::VideoCaptureFormats supported_formats;
-    DeviceInfo device_info(*it, media::VideoCaptureFormats());
+  for (const auto& it : *names_snapshot) {
+    media::VideoCaptureDeviceInfo device_info(it, media::VideoCaptureFormats());
     video_capture_device_factory_->GetDeviceSupportedFormats(
-        *it, &(device_info.supported_formats));
+        it, &(device_info.supported_formats));
     ConsolidateCaptureFormats(&device_info.supported_formats);
     new_devices_info_cache.push_back(device_info);
   }
@@ -693,13 +692,12 @@ VideoCaptureManager::DeviceEntry* VideoCaptureManager::GetOrCreateDeviceEntry(
   return new_device;
 }
 
-VideoCaptureManager::DeviceInfo* VideoCaptureManager::FindDeviceInfoById(
+media::VideoCaptureDeviceInfo* VideoCaptureManager::FindDeviceInfoById(
     const std::string& id,
-    DeviceInfos& device_vector) {
-  for (DeviceInfos::iterator it = device_vector.begin();
-       it != device_vector.end(); ++it) {
-    if (it->name.id() == id)
-      return &(*it);
+    media::VideoCaptureDeviceInfos& device_vector) {
+  for (auto& it : device_vector) {
+    if (it.name.id() == id)
+      return &(it);
   }
   return NULL;
 }

@@ -5,7 +5,6 @@
 #include "mojo/services/public/cpp/view_manager/lib/view_manager_client_impl.h"
 
 #include "base/bind.h"
-#include "base/command_line.h"
 #include "base/message_loop/message_loop.h"
 #include "base/stl_util.h"
 #include "mojo/public/cpp/application/application_impl.h"
@@ -17,9 +16,6 @@
 #include "mojo/services/public/cpp/view_manager/util.h"
 #include "mojo/services/public/cpp/view_manager/view_manager_delegate.h"
 #include "mojo/services/public/cpp/view_manager/view_observer.h"
-#include "mojo/services/public/cpp/view_manager/window_manager_delegate.h"
-#include "third_party/skia/include/core/SkBitmap.h"
-#include "ui/gfx/codec/png_codec.h"
 
 namespace mojo {
 
@@ -31,16 +27,19 @@ Id MakeTransportId(ConnectionSpecificId connection_id,
 // Helper called to construct a local view object from transport data.
 View* AddViewToViewManager(ViewManagerClientImpl* client,
                            View* parent,
-                           Id view_id,
-                           const gfx::Rect& bounds) {
+                           const ViewDataPtr& view_data) {
   // We don't use the ctor that takes a ViewManager here, since it will call
   // back to the service and attempt to create a new view.
   View* view = ViewPrivate::LocalCreate();
   ViewPrivate private_view(view);
   private_view.set_view_manager(client);
-  private_view.set_id(view_id);
+  private_view.set_id(view_data->view_id);
+  private_view.set_visible(view_data->visible);
+  private_view.set_drawn(view_data->drawn);
+  private_view.set_properties(
+      view_data->properties.To<std::map<std::string, std::vector<uint8_t>>>());
   client->AddView(view);
-  private_view.LocalSetBounds(gfx::Rect(), bounds);
+  private_view.LocalSetBounds(Rect(), *view_data->bounds);
   if (parent)
     ViewPrivate(parent).LocalAddChild(view);
   return view;
@@ -62,10 +61,7 @@ View* BuildViewTree(ViewManagerClientImpl* client,
         parents.pop_back();
     }
     View* view = AddViewToViewManager(
-        client,
-        !parents.empty() ? parents.back() : NULL,
-        views[i]->view_id,
-        views[i]->bounds.To<gfx::Rect>());
+        client, !parents.empty() ? parents.back() : NULL, views[i]);
     if (!last_view)
       root = view;
     last_view = view;
@@ -78,11 +74,11 @@ View* BuildViewTree(ViewManagerClientImpl* client,
 class RootObserver : public ViewObserver {
  public:
   explicit RootObserver(View* root) : root_(root) {}
-  virtual ~RootObserver() {}
+  ~RootObserver() override {}
 
  private:
   // Overridden from ViewObserver:
-  virtual void OnViewDestroyed(View* view) OVERRIDE {
+  void OnViewDestroyed(View* view) override {
     DCHECK_EQ(view, root_);
     static_cast<ViewManagerClientImpl*>(
         ViewPrivate(root_).view_manager())->RemoveRoot(root_);
@@ -97,24 +93,7 @@ class RootObserver : public ViewObserver {
 
 ViewManagerClientImpl::ViewManagerClientImpl(ViewManagerDelegate* delegate,
                                              Shell* shell)
-    : connected_(false),
-      connection_id_(0),
-      next_id_(1),
-      delegate_(delegate),
-      window_manager_delegate_(NULL),
-      shell_(shell) {
-  // TODO(beng): Come up with a better way of establishing a configuration for
-  //             what the active window manager is.
-  std::string window_manager_url = "mojo:mojo_window_manager";
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch("window-manager")) {
-    window_manager_url =
-        base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-            "window-manager");
-  }
-  InterfacePtr<ServiceProvider> sp;
-  shell->ConnectToApplication(window_manager_url, Get(&sp));
-  ConnectToService(sp.get(), &window_manager_);
-  window_manager_.set_client(this);
+    : connected_(false), connection_id_(0), next_id_(1), delegate_(delegate) {
 }
 
 ViewManagerClientImpl::~ViewManagerClientImpl() {
@@ -173,10 +152,9 @@ bool ViewManagerClientImpl::OwnsView(Id id) const {
   return HiWord(id) == connection_id_;
 }
 
-void ViewManagerClientImpl::SetBounds(Id view_id, const gfx::Rect& bounds) {
+void ViewManagerClientImpl::SetBounds(Id view_id, const Rect& bounds) {
   DCHECK(connected_);
-  service_->SetViewBounds(view_id, Rect::From(bounds),
-                          ActionCompletedCallback());
+  service_->SetViewBounds(view_id, bounds.Clone(), ActionCompletedCallback());
 }
 
 void ViewManagerClientImpl::SetSurfaceId(Id view_id, SurfaceIdPtr surface_id) {
@@ -188,12 +166,26 @@ void ViewManagerClientImpl::SetSurfaceId(Id view_id, SurfaceIdPtr surface_id) {
 }
 
 void ViewManagerClientImpl::SetFocus(Id view_id) {
+  // In order for us to get here we had to have exposed a view, which implies we
+  // got a connection.
+  DCHECK(window_manager_.get());
   window_manager_->FocusWindow(view_id, ActionCompletedCallback());
 }
 
 void ViewManagerClientImpl::SetVisible(Id view_id, bool visible) {
   DCHECK(connected_);
   service_->SetViewVisibility(view_id, visible, ActionCompletedCallback());
+}
+
+void ViewManagerClientImpl::SetProperty(
+    Id view_id,
+    const std::string& name,
+    const std::vector<uint8_t>& data) {
+  DCHECK(connected_);
+  service_->SetViewProperty(view_id,
+                            String(name),
+                            Array<uint8_t>::From(data),
+                            ActionCompletedCallback());
 }
 
 void ViewManagerClientImpl::Embed(const String& url, Id view_id) {
@@ -225,18 +217,6 @@ void ViewManagerClientImpl::RemoveView(Id view_id) {
 ////////////////////////////////////////////////////////////////////////////////
 // ViewManagerClientImpl, ViewManager implementation:
 
-void ViewManagerClientImpl::SetWindowManagerDelegate(
-    WindowManagerDelegate* window_manager_delegate) {
-  CHECK(NULL != GetViewById(1));
-  CHECK(!window_manager_delegate_);
-  window_manager_delegate_ = window_manager_delegate;
-}
-
-void ViewManagerClientImpl::DispatchEvent(View* target, EventPtr event) {
-  CHECK(window_manager_delegate_);
-  service_->DispatchOnViewInputEvent(target->id(), event.Pass());
-}
-
 const std::string& ViewManagerClientImpl::GetEmbedderURL() const {
   return creator_url_;
 }
@@ -264,7 +244,8 @@ void ViewManagerClientImpl::OnEmbed(
     ConnectionSpecificId connection_id,
     const String& creator_url,
     ViewDataPtr root_data,
-    InterfaceRequest<ServiceProvider> service_provider) {
+    InterfaceRequest<ServiceProvider> parent_services,
+    ScopedMessagePipeHandle window_manager_pipe) {
   if (!connected_) {
     connected_ = true;
     connection_id_ = connection_id;
@@ -276,25 +257,37 @@ void ViewManagerClientImpl::OnEmbed(
 
   // A new root must not already exist as a root or be contained by an existing
   // hierarchy visible to this view manager.
-  View* root = AddViewToViewManager(this, NULL, root_data->view_id,
-                                    root_data->bounds.To<gfx::Rect>());
+  View* root = AddViewToViewManager(this, NULL, root_data);
   roots_.push_back(root);
   root->AddObserver(new RootObserver(root));
 
-  // BindToRequest() binds the lifetime of |exported_services| to the pipe.
-  ServiceProviderImpl* exported_services = new ServiceProviderImpl;
-  BindToRequest(exported_services, &service_provider);
-  scoped_ptr<ServiceProvider> remote(
-      exported_services->CreateRemoteServiceProvider());
+  ServiceProviderImpl* exported_services = nullptr;
+  scoped_ptr<ServiceProvider> remote;
+
+  if (parent_services.is_pending()) {
+    // BindToRequest() binds the lifetime of |exported_services| to the pipe.
+    exported_services = new ServiceProviderImpl;
+    BindToRequest(exported_services, &parent_services);
+    remote.reset(exported_services->CreateRemoteServiceProvider());
+  }
+  window_manager_.Bind(window_manager_pipe.Pass());
+  window_manager_.set_client(this);
   delegate_->OnEmbed(this, root, exported_services, remote.Pass());
+}
+
+void ViewManagerClientImpl::OnEmbeddedAppDisconnected(Id view_id) {
+  View* view = GetViewById(view_id);
+  if (view) {
+    FOR_EACH_OBSERVER(ViewObserver, *ViewPrivate(view).observers(),
+                      OnViewEmbeddedAppDisconnected(view));
+  }
 }
 
 void ViewManagerClientImpl::OnViewBoundsChanged(Id view_id,
                                                 RectPtr old_bounds,
                                                 RectPtr new_bounds) {
   View* view = GetViewById(view_id);
-  ViewPrivate(view).LocalSetBounds(old_bounds.To<gfx::Rect>(),
-                                   new_bounds.To<gfx::Rect>());
+  ViewPrivate(view).LocalSetBounds(*old_bounds, *new_bounds);
 }
 
 void ViewManagerClientImpl::OnViewHierarchyChanged(
@@ -332,13 +325,35 @@ void ViewManagerClientImpl::OnViewDeleted(Id view_id) {
 }
 
 void ViewManagerClientImpl::OnViewVisibilityChanged(Id view_id, bool visible) {
-  // TODO(sky): implement me.
-  NOTIMPLEMENTED();
+  // TODO(sky): there is a race condition here. If this client and another
+  // client change the visibility at the same time the wrong value may be set.
+  // Deal with this some how.
+  View* view = GetViewById(view_id);
+  if (view)
+    view->SetVisible(visible);
 }
 
 void ViewManagerClientImpl::OnViewDrawnStateChanged(Id view_id, bool drawn) {
-  // TODO(sky): implement me.
-  NOTIMPLEMENTED();
+  View* view = GetViewById(view_id);
+  if (view)
+    ViewPrivate(view).LocalSetDrawn(drawn);
+}
+
+void ViewManagerClientImpl::OnViewPropertyChanged(
+    Id view_id,
+    const String& name,
+    Array<uint8_t> new_data) {
+  View* view = GetViewById(view_id);
+  if (view) {
+    std::vector<uint8_t> data;
+    std::vector<uint8_t>* data_ptr = NULL;
+    if (!new_data.is_null()) {
+      data = new_data.To<std::vector<uint8_t>>();
+      data_ptr = &data;
+    }
+
+    view->SetProperty(name, data_ptr);
+  }
 }
 
 void ViewManagerClientImpl::OnViewInputEvent(
@@ -354,22 +369,8 @@ void ViewManagerClientImpl::OnViewInputEvent(
   ack_callback.Run();
 }
 
-void ViewManagerClientImpl::Embed(
-    const String& url,
-    InterfaceRequest<ServiceProvider> service_provider) {
-  if (window_manager_delegate_)
-    window_manager_delegate_->Embed(url, service_provider.Pass());
-}
-
-void ViewManagerClientImpl::DispatchOnViewInputEvent(EventPtr event) {
-  if (window_manager_delegate_)
-    window_manager_delegate_->DispatchEvent(event.Pass());
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // ViewManagerClientImpl, WindowManagerClient implementation:
-
-void ViewManagerClientImpl::OnWindowManagerReady() {}
 
 void ViewManagerClientImpl::OnCaptureChanged(Id old_capture_view_id,
                                              Id new_capture_view_id) {}

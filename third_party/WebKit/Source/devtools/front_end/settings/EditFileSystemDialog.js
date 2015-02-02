@@ -38,7 +38,7 @@ WebInspector.EditFileSystemDialog = function(fileSystemPath)
     WebInspector.DialogDelegate.call(this);
     this._fileSystemPath = fileSystemPath;
 
-    this.element = document.createElementWithClass("div", "dialog-contents");
+    this.element = createElementWithClass("div", "dialog-contents");
 
     var header = this.element.createChild("div", "header");
     var headerText = header.createChild("span");
@@ -83,7 +83,7 @@ WebInspector.EditFileSystemDialog = function(fileSystemPath)
     this._excludedFolderList.addEventListener(WebInspector.SettingsList.Events.Removed, this._excludedFolderRemovedfromList.bind(this));
     this._excludedFolderList.element.classList.add("excluded-folders-list");
     this._excludedFolderListContainer.appendChild(this._excludedFolderList.element);
-    this._excludedFolderEntries = new StringMap();
+    this._excludedFolderEntries = new Map();
     for (var i = 0; i < excludedFolderEntries.length; ++i)
         this._addExcludedFolderRow(excludedFolderEntries[i]);
 
@@ -93,8 +93,9 @@ WebInspector.EditFileSystemDialog = function(fileSystemPath)
 
 WebInspector.EditFileSystemDialog.show = function(element, fileSystemPath)
 {
-    WebInspector.Dialog.show(element, new WebInspector.EditFileSystemDialog(fileSystemPath));
-    var glassPane = document.getElementById("glass-pane");
+    var dialog = new WebInspector.EditFileSystemDialog(fileSystemPath);
+    WebInspector.Dialog.show(element, dialog);
+    var glassPane = dialog.element.ownerDocument.getElementById("glass-pane");
     glassPane.classList.add("settings-glass-pane");
 }
 

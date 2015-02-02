@@ -143,7 +143,7 @@ DECLARE_STACK_OF(X509_NAME_ENTRY)
 DECLARE_ASN1_SET_OF(X509_NAME_ENTRY)
 
 /* we always keep X509_NAMEs in 2 forms. */
-struct X509_name_st
+typedef struct X509_name_st
 	{
 	STACK_OF(X509_NAME_ENTRY) *entries;
 	int modified;	/* true if 'bytes' needs to be built */
@@ -155,7 +155,7 @@ struct X509_name_st
 /*	unsigned long hash; Keep the hash around for lookups */
 	unsigned char *canon_enc;
 	int canon_enclen;
-	} /* X509_NAME */;
+	} X509_NAME;
 
 DECLARE_STACK_OF(X509_NAME)
 
@@ -844,10 +844,6 @@ OPENSSL_EXPORT int ASN1_verify(i2d_of_void *i2d, X509_ALGOR *algor1,
 OPENSSL_EXPORT int ASN1_digest(i2d_of_void *i2d,const EVP_MD *type,char *data,
 		unsigned char *md,unsigned int *len);
 
-OPENSSL_EXPORT int ASN1_sign(i2d_of_void *i2d, X509_ALGOR *algor1,
-	      X509_ALGOR *algor2, ASN1_BIT_STRING *signature,
-	      char *data,EVP_PKEY *pkey, const EVP_MD *type);
-
 OPENSSL_EXPORT int ASN1_item_digest(const ASN1_ITEM *it,const EVP_MD *type,void *data,
 	unsigned char *md,unsigned int *len);
 
@@ -1298,7 +1294,6 @@ OPENSSL_EXPORT int PKCS7_bundle_certificates(
 #define X509_R_UNKNOWN_PURPOSE_ID 116
 #define X509_R_NEWER_CRL_NOT_NEWER 117
 #define X509_R_UNKNOWN_TRUST_ID 118
-#define X509_R_DIGEST_AND_KEY_TYPE_NOT_SUPPORTED 119
 #define X509_R_KEY_TYPE_MISMATCH 120
 #define X509_R_UNKNOWN_KEY_TYPE 121
 #define X509_R_BAD_X509_FILETYPE 122

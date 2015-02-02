@@ -8,7 +8,6 @@
 
 #include "base/callback_forward.h"
 #include "base/files/file_util.h"
-#include "base/i18n/time_formatting.h"
 #include "base/logging.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task_runner_util.h"
@@ -23,29 +22,31 @@
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest.h"
+#include "extensions/common/manifest_handlers/shared_module_info.h"
+#include "extensions/common/manifest_url_handlers.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/combobox_model.h"
 #include "ui/base/text/bytes_formatting.h"
 #include "ui/views/controls/combobox/combobox.h"
 #include "ui/views/controls/label.h"
+#include "ui/views/controls/link.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/layout/layout_constants.h"
 #include "ui/views/view.h"
-#include "ui/views/widget/widget.h"
 
 // A model for a combobox selecting the launch options for a hosted app.
 // Displays different options depending on the host OS.
 class LaunchOptionsComboboxModel : public ui::ComboboxModel {
  public:
   LaunchOptionsComboboxModel();
-  virtual ~LaunchOptionsComboboxModel();
+  ~LaunchOptionsComboboxModel() override;
 
   extensions::LaunchType GetLaunchTypeAtIndex(int index) const;
   int GetIndexForLaunchType(extensions::LaunchType launch_type) const;
 
   // Overridden from ui::ComboboxModel:
-  virtual int GetItemCount() const OVERRIDE;
-  virtual base::string16 GetItemAt(int index) OVERRIDE;
+  int GetItemCount() const override;
+  base::string16 GetItemAt(int index) override;
 
  private:
   // A list of the launch types available in the combobox, in order.
@@ -129,36 +130,17 @@ base::string16 LaunchOptionsComboboxModel::GetItemAt(int index) {
 AppInfoSummaryPanel::AppInfoSummaryPanel(Profile* profile,
                                          const extensions::Extension* app)
     : AppInfoPanel(profile, app),
-      description_heading_(NULL),
-      description_label_(NULL),
-      details_heading_(NULL),
-      size_title_(NULL),
       size_value_(NULL),
-      version_title_(NULL),
-      version_value_(NULL),
-      installed_time_title_(NULL),
-      installed_time_value_(NULL),
-      last_run_time_title_(NULL),
-      last_run_time_value_(NULL),
+      homepage_link_(NULL),
+      licenses_link_(NULL),
       launch_options_combobox_(NULL),
       weak_ptr_factory_(this) {
-  // Create UI elements.
-  CreateDescriptionControl();
-  CreateDetailsControl();
-  CreateLaunchOptionControl();
+  SetLayoutManager(new views::BoxLayout(views::BoxLayout::kVertical,
+                                        0,
+                                        0,
+                                        views::kRelatedControlVerticalSpacing));
 
-  // Layout elements.
-  SetLayoutManager(
-      new views::BoxLayout(views::BoxLayout::kVertical,
-                           0,
-                           0,
-                           views::kUnrelatedControlVerticalSpacing));
-
-  LayoutDescriptionControl();
-  LayoutDetailsControl();
-
-  if (launch_options_combobox_)
-    AddChildView(launch_options_combobox_);
+  AddSubviews();
 }
 
 AppInfoSummaryPanel::~AppInfoSummaryPanel() {
@@ -166,149 +148,128 @@ AppInfoSummaryPanel::~AppInfoSummaryPanel() {
   RemoveAllChildViews(true);
 }
 
-void AppInfoSummaryPanel::CreateDescriptionControl() {
-  if (!app_->description().empty()) {
-    const size_t kMaxLength = 400;
+void AppInfoSummaryPanel::AddDescriptionAndLinksControl(
+    views::View* vertical_stack) {
+  views::View* description_and_labels_stack = new views::View();
+  description_and_labels_stack->SetLayoutManager(
+      new views::BoxLayout(views::BoxLayout::kVertical,
+                           0,
+                           0,
+                           views::kRelatedControlSmallVerticalSpacing));
 
+  if (!app_->description().empty()) {
+    // TODO(sashab): Clip the app's description to 4 lines, and use Label's
+    // built-in elide behavior to add ellipses at the end: crbug.com/358053
+    const size_t max_length = 400;
     base::string16 text = base::UTF8ToUTF16(app_->description());
-    if (text.length() > kMaxLength) {
-      text = text.substr(0, kMaxLength);
+    if (text.length() > max_length) {
+      text = text.substr(0, max_length);
       text += base::ASCIIToUTF16(" ... ");
     }
 
-    description_heading_ = CreateHeading(
-        l10n_util::GetStringUTF16(IDS_APPLICATION_INFO_DESCRIPTION_TITLE));
-    description_label_ = new views::Label(text);
-    description_label_->SetMultiLine(true);
-    description_label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+    views::Label* description_label = new views::Label(text);
+    description_label->SetMultiLine(true);
+    description_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+    description_and_labels_stack->AddChildView(description_label);
   }
+
+  if (CanShowAppHomePage()) {
+    homepage_link_ = new views::Link(
+        l10n_util::GetStringUTF16(IDS_APPLICATION_INFO_HOMEPAGE_LINK));
+    homepage_link_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+    homepage_link_->set_listener(this);
+    description_and_labels_stack->AddChildView(homepage_link_);
+  }
+
+  if (CanDisplayLicenses()) {
+    licenses_link_ = new views::Link(
+        l10n_util::GetStringUTF16(IDS_APPLICATION_INFO_LICENSES_BUTTON_TEXT));
+    licenses_link_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+    licenses_link_->set_listener(this);
+    description_and_labels_stack->AddChildView(licenses_link_);
+  }
+
+  vertical_stack->AddChildView(description_and_labels_stack);
 }
 
-void AppInfoSummaryPanel::CreateDetailsControl() {
-  // The size doesn't make sense for component apps.
-  if (app_->location() != extensions::Manifest::COMPONENT) {
-    size_title_ = new views::Label(
-        l10n_util::GetStringUTF16(IDS_APPLICATION_INFO_SIZE_LABEL));
-    size_title_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+void AppInfoSummaryPanel::AddDetailsControl(views::View* vertical_stack) {
+  // Component apps have no details.
+  if (app_->location() == extensions::Manifest::COMPONENT)
+    return;
 
-    size_value_ = new views::Label(
-        l10n_util::GetStringUTF16(IDS_APPLICATION_INFO_SIZE_LOADING_LABEL));
-    size_value_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+  views::View* details_list =
+      CreateVerticalStack(views::kRelatedControlSmallVerticalSpacing);
 
-    StartCalculatingAppSize();
-  }
+  // Add the size.
+  views::Label* size_title = new views::Label(
+      l10n_util::GetStringUTF16(IDS_APPLICATION_INFO_SIZE_LABEL));
+  size_title->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+
+  size_value_ = new views::Label(
+      l10n_util::GetStringUTF16(IDS_APPLICATION_INFO_SIZE_LOADING_LABEL));
+  size_value_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+  StartCalculatingAppSize();
+
+  details_list->AddChildView(CreateKeyValueField(size_title, size_value_));
 
   // The version doesn't make sense for bookmark apps.
   if (!app_->from_bookmark()) {
-    // Display 'Version: Built-in' for component apps.
-    base::string16 version_str = base::ASCIIToUTF16(app_->VersionString());
-    if (app_->location() == extensions::Manifest::COMPONENT)
-      version_str = l10n_util::GetStringUTF16(
-          IDS_APPLICATION_INFO_VERSION_BUILT_IN_LABEL);
-
-    version_title_ = new views::Label(
+    views::Label* version_title = new views::Label(
         l10n_util::GetStringUTF16(IDS_APPLICATION_INFO_VERSION_LABEL));
-    version_title_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+    version_title->SetHorizontalAlignment(gfx::ALIGN_LEFT);
 
-    version_value_ = new views::Label(version_str);
-    version_value_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+    views::Label* version_value =
+        new views::Label(base::UTF8ToUTF16(app_->VersionString()));
+    version_value->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+
+    details_list->AddChildView(
+        CreateKeyValueField(version_title, version_value));
   }
 
-  // The install date doesn't make sense for component apps.
-  if (app_->location() != extensions::Manifest::COMPONENT) {
-    installed_time_title_ = new views::Label(
-        l10n_util::GetStringUTF16(IDS_APPLICATION_INFO_INSTALLED_LABEL));
-    installed_time_title_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-
-    installed_time_value_ =
-        new views::Label(base::TimeFormatShortDate(GetInstalledTime()));
-    installed_time_value_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-  }
-
-  // The last run time is currently incorrect for component and hosted apps,
-  // since it is not updated when they are accessed outside of their shortcuts.
-  // TODO(sashab): Update the run time for these correctly: crbug.com/398716
-  if (app_->location() != extensions::Manifest::COMPONENT &&
-      !app_->is_hosted_app()) {
-    last_run_time_title_ = new views::Label(
-        l10n_util::GetStringUTF16(IDS_APPLICATION_INFO_LAST_RUN_LABEL));
-    last_run_time_title_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-
-    // Display 'Never' if the app has never been run.
-    base::string16 last_run_value_str =
-        l10n_util::GetStringUTF16(IDS_APPLICATION_INFO_LAST_RUN_NEVER_LABEL);
-    if (GetLastLaunchedTime() != base::Time())
-      last_run_value_str = base::TimeFormatShortDate(GetLastLaunchedTime());
-
-    last_run_time_value_ = new views::Label(last_run_value_str);
-    last_run_time_value_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-  }
-
-  // Only generate the heading if we have at least one field to display.
-  if (version_title_ || installed_time_title_ || last_run_time_title_) {
-    details_heading_ = CreateHeading(
-        l10n_util::GetStringUTF16(IDS_APPLICATION_INFO_DETAILS_TITLE));
-  }
+  vertical_stack->AddChildView(details_list);
 }
 
-void AppInfoSummaryPanel::CreateLaunchOptionControl() {
-  if (CanSetLaunchType()) {
-    launch_options_combobox_model_.reset(new LaunchOptionsComboboxModel());
-    launch_options_combobox_ =
-        new views::Combobox(launch_options_combobox_model_.get());
+void AppInfoSummaryPanel::AddLaunchOptionControl(views::View* vertical_stack) {
+  if (!CanSetLaunchType())
+    return;
 
-    launch_options_combobox_->set_listener(this);
-    launch_options_combobox_->SetSelectedIndex(
-        launch_options_combobox_model_->GetIndexForLaunchType(GetLaunchType()));
-  }
+  launch_options_combobox_model_.reset(new LaunchOptionsComboboxModel());
+  launch_options_combobox_ =
+      new views::Combobox(launch_options_combobox_model_.get());
+  launch_options_combobox_->set_listener(this);
+  launch_options_combobox_->SetSelectedIndex(
+      launch_options_combobox_model_->GetIndexForLaunchType(GetLaunchType()));
+
+  vertical_stack->AddChildView(launch_options_combobox_);
 }
 
-void AppInfoSummaryPanel::LayoutDescriptionControl() {
-  if (description_label_) {
-    DCHECK(description_heading_);
-    views::View* vertical_stack = CreateVerticalStack();
-    vertical_stack->AddChildView(description_heading_);
-    vertical_stack->AddChildView(description_label_);
-    AddChildView(vertical_stack);
-  }
-}
+void AppInfoSummaryPanel::AddSubviews() {
+  AddChildView(CreateHeading(
+      l10n_util::GetStringUTF16(IDS_APPLICATION_INFO_APP_OVERVIEW_TITLE)));
 
-void AppInfoSummaryPanel::LayoutDetailsControl() {
-  if (details_heading_) {
-    views::View* details_stack =
-        CreateVerticalStack(views::kRelatedControlSmallVerticalSpacing);
+  views::View* vertical_stack =
+      CreateVerticalStack(views::kUnrelatedControlVerticalSpacing);
+  AddChildView(vertical_stack);
 
-    if (version_title_ && version_value_) {
-      details_stack->AddChildView(
-          CreateKeyValueField(version_title_, version_value_));
-    }
-
-    if (installed_time_title_ && installed_time_value_) {
-      details_stack->AddChildView(
-          CreateKeyValueField(installed_time_title_, installed_time_value_));
-    }
-
-    if (last_run_time_title_ && last_run_time_value_) {
-      details_stack->AddChildView(
-          CreateKeyValueField(last_run_time_title_, last_run_time_value_));
-    }
-
-    if (size_title_ && size_value_) {
-      details_stack->AddChildView(
-          CreateKeyValueField(size_title_, size_value_));
-    }
-
-    views::View* vertical_stack = CreateVerticalStack();
-    vertical_stack->AddChildView(details_heading_);
-    vertical_stack->AddChildView(details_stack);
-    AddChildView(vertical_stack);
-  }
+  AddDescriptionAndLinksControl(vertical_stack);
+  AddDetailsControl(vertical_stack);
+  AddLaunchOptionControl(vertical_stack);
 }
 
 void AppInfoSummaryPanel::OnPerformAction(views::Combobox* combobox) {
   if (combobox == launch_options_combobox_) {
     SetLaunchType(launch_options_combobox_model_->GetLaunchTypeAtIndex(
         launch_options_combobox_->selected_index()));
+  } else {
+    NOTREACHED();
+  }
+}
+
+void AppInfoSummaryPanel::LinkClicked(views::Link* source, int event_flags) {
+  if (source == homepage_link_) {
+    ShowAppHomePage();
+  } else if (source == licenses_link_) {
+    DisplayLicenses();
   } else {
     NOTREACHED();
   }
@@ -323,16 +284,14 @@ void AppInfoSummaryPanel::StartCalculatingAppSize() {
 }
 
 void AppInfoSummaryPanel::OnAppSizeCalculated(int64 app_size_in_bytes) {
-  size_value_->SetText(ui::FormatBytes(app_size_in_bytes));
-}
-
-base::Time AppInfoSummaryPanel::GetInstalledTime() const {
-  return extensions::ExtensionPrefs::Get(profile_)->GetInstallTime(app_->id());
-}
-
-base::Time AppInfoSummaryPanel::GetLastLaunchedTime() const {
-  return extensions::ExtensionPrefs::Get(profile_)
-      ->GetLastLaunchTime(app_->id());
+  const int one_mebibyte_in_bytes = 1024 * 1024;
+  if (app_size_in_bytes < one_mebibyte_in_bytes) {
+    size_value_->SetText(
+        l10n_util::GetStringUTF16(IDS_APPLICATION_INFO_SIZE_SMALL_LABEL));
+  } else {
+    size_value_->SetText(ui::FormatBytesWithUnits(
+        app_size_in_bytes, ui::DATA_UNITS_MEBIBYTE, true));
+  }
 }
 
 extensions::LaunchType AppInfoSummaryPanel::GetLaunchType() const {
@@ -349,6 +308,51 @@ void AppInfoSummaryPanel::SetLaunchType(
 }
 
 bool AppInfoSummaryPanel::CanSetLaunchType() const {
-  // V2 apps don't have a launch type, and neither does the Chrome app.
-  return app_->id() != extension_misc::kChromeAppId && !app_->is_platform_app();
+  // V2 apps and extensions don't have a launch type, and neither does the
+  // Chrome app.
+  return !app_->is_platform_app() && !app_->is_extension() &&
+         app_->id() != extension_misc::kChromeAppId;
+}
+void AppInfoSummaryPanel::ShowAppHomePage() {
+  DCHECK(CanShowAppHomePage());
+  OpenLink(extensions::ManifestURL::GetHomepageURL(app_));
+  Close();
+}
+
+bool AppInfoSummaryPanel::CanShowAppHomePage() const {
+  return extensions::ManifestURL::SpecifiedHomepageURL(app_);
+}
+
+void AppInfoSummaryPanel::DisplayLicenses() {
+  DCHECK(CanDisplayLicenses());
+  for (const auto& license_url : GetLicenseUrls())
+    OpenLink(license_url);
+  Close();
+}
+
+bool AppInfoSummaryPanel::CanDisplayLicenses() const {
+  return !GetLicenseUrls().empty();
+}
+
+const std::vector<GURL> AppInfoSummaryPanel::GetLicenseUrls() const {
+  if (!extensions::SharedModuleInfo::ImportsModules(app_))
+    return std::vector<GURL>();
+
+  std::vector<GURL> license_urls;
+  ExtensionService* service =
+      extensions::ExtensionSystem::Get(profile_)->extension_service();
+  DCHECK(service);
+  const std::vector<extensions::SharedModuleInfo::ImportInfo>& imports =
+      extensions::SharedModuleInfo::GetImports(app_);
+
+  for (const auto& shared_module : imports) {
+    const extensions::Extension* imported_module =
+        service->GetExtensionById(shared_module.extension_id, true);
+    DCHECK(imported_module);
+
+    GURL about_page = extensions::ManifestURL::GetAboutPage(imported_module);
+    if (about_page != GURL::EmptyGURL())
+      license_urls.push_back(about_page);
+  }
+  return license_urls;
 }

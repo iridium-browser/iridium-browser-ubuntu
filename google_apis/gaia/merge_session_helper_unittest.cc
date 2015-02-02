@@ -33,6 +33,8 @@ class MockObserver : public MergeSessionHelper::Observer {
   MOCK_METHOD2(MergeSessionCompleted,
                void(const std::string&,
                     const GoogleServiceAuthError& ));
+  MOCK_METHOD1(GetCheckConnectionInfoCompleted, void(bool));
+
  private:
   MergeSessionHelper* helper_;
 
@@ -50,7 +52,8 @@ class InstrumentedMergeSessionHelper : public MergeSessionHelper {
   InstrumentedMergeSessionHelper(
       OAuth2TokenService* token_service,
       net::URLRequestContextGetter* request_context) :
-    MergeSessionHelper(token_service, request_context, NULL) {
+    MergeSessionHelper(token_service, GaiaConstants::kChromeSource,
+                       request_context, NULL) {
     total++;
   }
 
@@ -331,6 +334,8 @@ TEST_F(MergeSessionHelperTest, DoubleSignout) {
 TEST_F(MergeSessionHelperTest, ExternalCcResultFetcher) {
   InstrumentedMergeSessionHelper helper(token_service(), request_context());
   MergeSessionHelper::ExternalCcResultFetcher result_fetcher(&helper);
+  MockObserver observer(&helper);
+  EXPECT_CALL(observer, GetCheckConnectionInfoCompleted(true));
   result_fetcher.Start();
 
   // Simulate a successful completion of GetCheckConnctionInfo.
@@ -359,6 +364,8 @@ TEST_F(MergeSessionHelperTest, ExternalCcResultFetcher) {
 TEST_F(MergeSessionHelperTest, ExternalCcResultFetcherTimeout) {
   InstrumentedMergeSessionHelper helper(token_service(), request_context());
   MergeSessionHelper::ExternalCcResultFetcher result_fetcher(&helper);
+  MockObserver observer(&helper);
+  EXPECT_CALL(observer, GetCheckConnectionInfoCompleted(false));
   result_fetcher.Start();
 
   // Simulate a successful completion of GetCheckConnctionInfo.

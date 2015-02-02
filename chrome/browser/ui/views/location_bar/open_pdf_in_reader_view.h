@@ -23,7 +23,7 @@ class OpenPDFInReaderView : public views::ImageView,
                             public views::WidgetObserver {
  public:
   OpenPDFInReaderView();
-  virtual ~OpenPDFInReaderView();
+  ~OpenPDFInReaderView() override;
 
   void Update(content::WebContents* web_contents);
 
@@ -31,13 +31,13 @@ class OpenPDFInReaderView : public views::ImageView,
   void ShowBubble();
 
   // views::ImageView:
-  virtual void GetAccessibleState(ui::AXViewState* state) OVERRIDE;
-  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
-  virtual bool OnKeyPressed(const ui::KeyEvent& event) OVERRIDE;
+  void GetAccessibleState(ui::AXViewState* state) override;
+  bool OnMousePressed(const ui::MouseEvent& event) override;
+  void OnMouseReleased(const ui::MouseEvent& event) override;
+  bool OnKeyPressed(const ui::KeyEvent& event) override;
 
   // views::WidgetObserver:
-  virtual void OnWidgetDestroying(views::Widget* widget) OVERRIDE;
+  void OnWidgetDestroying(views::Widget* widget) override;
 
   OpenPDFInReaderBubbleView* bubble_;
 

@@ -160,10 +160,14 @@
           'msvs_settings': {
             'VCLinkerTool': {
               'DelayLoadDLLs': [
+                'cfgmgr32.dll',
                 'powrprof.dll',
+                'setupapi.dll',
               ],
               'AdditionalDependencies': [
+                'cfgmgr32.lib',
                 'powrprof.lib',
+                'setupapi.lib',
               ],
             },
           },
@@ -172,10 +176,14 @@
             'msvs_settings': {
               'VCLinkerTool': {
                 'DelayLoadDLLs': [
+                  'cfgmgr32.dll',
                   'powrprof.dll',
+                  'setupapi.dll',
                 ],
                 'AdditionalDependencies': [
+                  'cfgmgr32.lib',
                   'powrprof.lib',
+                  'setupapi.lib',
                 ],
               },
             },
@@ -208,7 +216,7 @@
             ],
           },
         }],
-        ['OS != "win" and OS != "ios"', {
+        ['OS != "win" and (OS != "ios" or _toolset == "host")', {
             'dependencies': ['../third_party/libevent/libevent.gyp:libevent'],
         },],
         ['component=="shared_library"', {
@@ -286,6 +294,9 @@
               'defines': ['ICU_UTIL_DATA_IMPL=ICU_UTIL_DATA_STATIC'],
             }],
           ],
+        }],
+        ['OS == "ios"', {
+          'toolsets': ['host', 'target'],
         }],
       ],
       'export_dependent_settings': [
@@ -447,6 +458,7 @@
         'callback_unittest.nc',
         'cancelable_callback_unittest.cc',
         'command_line_unittest.cc',
+        'containers/adapters_unittest.cc',
         'containers/hash_tables_unittest.cc',
         'containers/linked_list_unittest.cc',
         'containers/mru_cache_unittest.cc',
@@ -513,6 +525,7 @@
         'memory/aligned_memory_unittest.cc',
         'memory/discardable_memory_manager_unittest.cc',
         'memory/discardable_memory_unittest.cc',
+        'memory/discardable_shared_memory_unittest.cc',
         'memory/linked_ptr_unittest.cc',
         'memory/ref_counted_memory_unittest.cc',
         'memory/ref_counted_unittest.cc',
@@ -563,6 +576,7 @@
         'process/memory_unittest_mac.mm',
         'process/process_metrics_unittest.cc',
         'process/process_metrics_unittest_ios.cc',
+        'process/process_unittest.cc',
         'process/process_util_unittest.cc',
         'profiler/tracked_time_unittest.cc',
         'rand_util_unittest.cc',
@@ -682,6 +696,7 @@
           'sources/': [
             # Only test the iOS-meaningful portion of process_utils.
             ['exclude', '^process/memory_unittest'],
+            ['exclude', '^process/process_unittest\\.cc$'],
             ['exclude', '^process/process_util_unittest\\.cc$'],
             ['include', '^process/process_util_unittest_ios\\.cc$'],
             # Requires spawning processes.
@@ -815,6 +830,7 @@
       ],
       'sources': [
         'threading/thread_perftest.cc',
+        'message_loop/message_pump_perftest.cc',
         'test/run_all_unittests.cc',
         '../testing/perf/perf_test.cc'
       ],
@@ -874,6 +890,9 @@
             'base_java_unittest_support',
           ],
         }],
+        ['OS == "ios"', {
+          'toolsets': ['host', 'target'],
+        }],
       ],
       'sources': [
         'test/expectations/expectation.cc',
@@ -902,6 +921,8 @@
         'test/multiprocess_test_android.cc',
         'test/null_task_runner.cc',
         'test/null_task_runner.h',
+        'test/opaque_ref_counted.cc',
+        'test/opaque_ref_counted.h',
         'test/perf_log.cc',
         'test/perf_log.h',
         'test/perf_test_suite.cc',
@@ -971,9 +992,18 @@
             # by file name rules).
             ['include', '^test/test_file_util_mac\\.cc$'],
           ],
+        }],
+        ['OS == "ios" and _toolset == "target"', {
           'sources!': [
             # iOS uses its own unit test launcher.
             'test/launcher/unit_test_launcher.cc',
+          ],
+        }],
+        ['OS == "ios" and _toolset == "host"', {
+          'sources!': [
+            'test/launcher/unit_test_launcher_ios.cc',
+            'test/test_support_ios.h',
+            'test/test_support_ios.mm',
           ],
         }],
       ],  # target_conditions
@@ -997,6 +1027,21 @@
     },
   ],
   'conditions': [
+    ['OS=="ios" and "<(GENERATOR)"=="ninja"', {
+      'targets': [
+        {
+          'target_name': 'test_launcher',
+          'toolsets': ['host'],
+          'type': 'executable',
+          'dependencies': [
+            'test_support_base',
+          ],
+          'sources': [
+            'test/launcher/test_launcher_ios.cc',
+          ],
+        },
+      ],
+    }],
     ['OS!="ios"', {
       'targets': [
         {
@@ -1066,10 +1111,14 @@
           'msvs_settings': {
             'VCLinkerTool': {
               'DelayLoadDLLs': [
+                'cfgmgr32.dll',
                 'powrprof.dll',
+                'setupapi.dll',
               ],
               'AdditionalDependencies': [
+                'cfgmgr32.lib',
                 'powrprof.lib',
+                'setupapi.lib',
               ],
             },
           },
@@ -1078,10 +1127,14 @@
             'msvs_settings': {
               'VCLinkerTool': {
                 'DelayLoadDLLs': [
+                  'cfgmgr32.dll',
                   'powrprof.dll',
+                  'setupapi.dll',
                 ],
                 'AdditionalDependencies': [
+                  'cfgmgr32.lib',
                   'powrprof.lib',
+                  'setupapi.lib',
                 ],
               },
             },
@@ -1270,6 +1323,7 @@
             'android/java/src/org/chromium/base/ImportantFileWriterAndroid.java',
             'android/java/src/org/chromium/base/JNIUtils.java',
             'android/java/src/org/chromium/base/library_loader/LibraryLoader.java',
+            'android/java/src/org/chromium/base/LocaleUtils.java',
             'android/java/src/org/chromium/base/MemoryPressureListener.java',
             'android/java/src/org/chromium/base/JavaHandlerThread.java',
             'android/java/src/org/chromium/base/PathService.java',
@@ -1320,7 +1374,8 @@
           },
           'dependencies': [
             'base_java_application_state',
-            'base_java_memory_pressure_level_list',
+            'base_java_library_load_from_apk_status_codes',
+            'base_java_memory_pressure_level',
             'base_native_libraries_gen',
           ],
           'includes': [ '../build/java.gypi' ],
@@ -1345,34 +1400,31 @@
           'includes': [ '../build/java.gypi' ],
         },
         {
-          # GN: //base:base_java_application_state
+          # GN: //base:base_android_java_enums_srcjar
           'target_name': 'base_java_application_state',
           'type': 'none',
-          # This target is used to auto-generate ApplicationState.java
-          # from a template file. The source file contains a list of
-          # Java constant declarations matching the ones in
-          # android/application_state_list.h.
-          'sources': [
-            'android/java/src/org/chromium/base/ApplicationState.template',
-          ],
           'variables': {
-            'package_name': 'org/chromium/base',
-            'template_deps': ['android/application_state_list.h'],
+            'source_file': 'android/application_status_listener.h',
           },
-          'includes': [ '../build/android/java_cpp_template.gypi' ],
+          'includes': [ '../build/android/java_cpp_enum.gypi' ],
         },
         {
-          # GN: //base:base_java_memory_pressure_level_list
-          'target_name': 'base_java_memory_pressure_level_list',
+          # GN: //base:base_android_java_enums_srcjar
+          'target_name': 'base_java_library_load_from_apk_status_codes',
           'type': 'none',
-          'sources': [
-            'android/java/src/org/chromium/base/MemoryPressureLevelList.template',
-          ],
           'variables': {
-            'package_name': 'org/chromium/base',
-            'template_deps': ['memory/memory_pressure_level_list.h'],
+            'source_file': 'android/library_loader/library_load_from_apk_status_codes.h'
           },
-          'includes': [ '../build/android/java_cpp_template.gypi' ],
+          'includes': [ '../build/android/java_cpp_enum.gypi' ],
+        },
+        {
+          # GN: //base:base_android_java_enums_srcjar
+          'target_name': 'base_java_memory_pressure_level',
+          'type': 'none',
+          'variables': {
+            'source_file': 'memory/memory_pressure_listener.h',
+          },
+          'includes': [ '../build/android/java_cpp_enum.gypi' ],
         },
         {
           # GN: //base:base_java_test_support
@@ -1400,7 +1452,7 @@
           'includes': [ '../build/java.gypi' ],
         },
         {
-          # TODO(GN)
+          # GN: //base/android/linker:chromium_android_linker
           'target_name': 'chromium_android_linker',
           'type': 'shared_library',
           'conditions': [
@@ -1477,7 +1529,6 @@
           ],
           'includes': [
             '../build/isolate.gypi',
-            'base_unittests.isolate',
           ],
           'sources': [
             'base_unittests.isolate',

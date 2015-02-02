@@ -84,16 +84,14 @@ class FileMediaEngine : public MediaEngineInterface {
   virtual void Terminate() {}
   virtual int GetCapabilities();
   virtual VoiceMediaChannel* CreateChannel();
-  virtual VideoMediaChannel* CreateVideoChannel(VoiceMediaChannel* voice_ch);
+  virtual VideoMediaChannel* CreateVideoChannel(const VideoOptions& options,
+                                                VoiceMediaChannel* voice_ch);
   virtual SoundclipMedia* CreateSoundclip() { return NULL; }
   virtual AudioOptions GetAudioOptions() const { return AudioOptions(); }
   virtual bool SetAudioOptions(const AudioOptions& options) { return true; }
   virtual bool SetAudioDelayOffset(int offset) { return true; }
   virtual bool SetDefaultVideoEncoderConfig(const VideoEncoderConfig& config) {
     return true;
-  }
-  virtual VideoEncoderConfig GetDefaultVideoEncoderConfig() const {
-    return VideoEncoderConfig();
   }
   virtual bool SetSoundDevices(const Device* in_dev, const Device* out_dev) {
     return true;
@@ -241,7 +239,6 @@ class FileVoiceChannel : public VoiceMediaChannel {
   virtual bool AddRecvStream(const StreamParams& sp) { return true; }
   virtual bool RemoveRecvStream(uint32 ssrc) { return true; }
   virtual bool MuteStream(uint32 ssrc, bool on) { return false; }
-  virtual bool SetStartSendBandwidth(int bps) { return true; }
   virtual bool SetMaxSendBandwidth(int bps) { return true; }
   virtual bool SetOptions(const AudioOptions& options) {
     options_ = options;
@@ -312,7 +309,6 @@ class FileVideoChannel : public VideoMediaChannel {
   virtual bool AddRecvStream(const StreamParams& sp) { return true; }
   virtual bool RemoveRecvStream(uint32 ssrc) { return true; }
   virtual bool MuteStream(uint32 ssrc, bool on) { return false; }
-  virtual bool SetStartSendBandwidth(int bps) { return true; }
   virtual bool SetMaxSendBandwidth(int bps) { return true; }
   virtual bool SetOptions(const VideoOptions& options) {
     options_ = options;

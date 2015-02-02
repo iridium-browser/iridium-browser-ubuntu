@@ -80,23 +80,34 @@ class FileSystemDirURLRequestJobFactory : public net::URLRequestJobFactory {
       : storage_domain_(storage_domain), file_system_context_(context) {
   }
 
-  virtual net::URLRequestJob* MaybeCreateJobWithProtocolHandler(
+  net::URLRequestJob* MaybeCreateJobWithProtocolHandler(
       const std::string& scheme,
       net::URLRequest* request,
-      net::NetworkDelegate* network_delegate) const OVERRIDE {
+      net::NetworkDelegate* network_delegate) const override {
     return new storage::FileSystemDirURLRequestJob(
         request, network_delegate, storage_domain_, file_system_context_);
   }
 
-  virtual bool IsHandledProtocol(const std::string& scheme) const OVERRIDE {
+  net::URLRequestJob* MaybeInterceptRedirect(
+      net::URLRequest* request,
+      net::NetworkDelegate* network_delegate,
+      const GURL& location) const override {
+    return nullptr;
+  }
+
+  net::URLRequestJob* MaybeInterceptResponse(
+      net::URLRequest* request,
+      net::NetworkDelegate* network_delegate) const override {
+    return nullptr;
+  }
+
+  bool IsHandledProtocol(const std::string& scheme) const override {
     return true;
   }
 
-  virtual bool IsHandledURL(const GURL& url) const OVERRIDE {
-    return true;
-  }
+  bool IsHandledURL(const GURL& url) const override { return true; }
 
-  virtual bool IsSafeRedirectTarget(const GURL& location) const OVERRIDE {
+  bool IsSafeRedirectTarget(const GURL& location) const override {
     return false;
   }
 
@@ -114,7 +125,7 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
     : weak_factory_(this) {
   }
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
 
     special_storage_policy_ = new MockSpecialStoragePolicy;
@@ -130,7 +141,7 @@ class FileSystemDirURLRequestJobTest : public testing::Test {
     base::RunLoop().RunUntilIdle();
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     // NOTE: order matters, request must die before delegate
     request_.reset(NULL);
     delegate_.reset(NULL);

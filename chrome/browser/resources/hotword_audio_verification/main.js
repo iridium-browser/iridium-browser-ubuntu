@@ -8,58 +8,25 @@ document.addEventListener('DOMContentLoaded', function() {
   var flow = new Flow();
   flow.startFlow();
 
-  // Make the close buttons close the app window.
-  var closeButtons = document.getElementsByClassName('close');
-  for (var i = 0; i < closeButtons.length; ++i) {
-    var closeButton = closeButtons[i];
-    closeButton.addEventListener('click', function(e) {
+  var closeAppWindow = function(e) {
+    var classes = e.target.classList;
+    if (classes.contains('close') || classes.contains('finish-button')) {
+      flow.stopTraining();
       appWindow.close();
-      e.stopPropagation();
-    });
-  }
+      e.preventDefault();
+    }
+  };
 
-  $('ah-cancel-button').addEventListener('click', function(e) {
-    appWindow.close();
-    e.stopPropagation();
-  });
-
-  $('hw-cancel-button').addEventListener('click', function(e) {
-    appWindow.close();
-    e.stopPropagation();
-  });
-
-  $('st-cancel-button').addEventListener('click', function(e) {
-    appWindow.close();
-    e.stopPropagation();
-  });
-
-  $('ah-agree-button').addEventListener('click', function(e) {
-    // TODO(kcarattini): Set the Audio History setting.
-    appWindow.close();
-    e.stopPropagation();
-  });
+  $('steps').addEventListener('click', closeAppWindow);
 
   $('hw-agree-button').addEventListener('click', function(e) {
     flow.advanceStep();
-    e.stopPropagation();
+    flow.startTraining();
+    e.preventDefault();
   });
 
-  // TODO(kcarattini): Remove this once speech training is implemented. The
-  // way to get to the next page will be to complete the speech training.
-  $('training').addEventListener('click', function(e) {
-    if (chrome.hotwordPrivate.setAudioLoggingEnabled)
-      chrome.hotwordPrivate.setAudioLoggingEnabled(true, function() {});
-
-    if (chrome.hotwordPrivate.setHotwordAlwaysOnSearchEnabled) {
-      chrome.hotwordPrivate.setHotwordAlwaysOnSearchEnabled(true,
-          flow.advanceStep.bind(flow));
-    }
-    e.stopPropagation();
-  });
-
-  $('try-now-button').addEventListener('click', function(e) {
-    // TODO(kcarattini): Figure out what happens when you click this button.
-    appWindow.close();
-    e.stopPropagation();
+  $('settings-link').addEventListener('click', function(e) {
+    chrome.browser.openTab({'url': 'chrome://settings'}, function() {});
+    e.preventDefault();
   });
 });

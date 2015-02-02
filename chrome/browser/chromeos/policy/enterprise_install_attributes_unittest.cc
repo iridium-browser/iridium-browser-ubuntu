@@ -43,7 +43,7 @@ class EnterpriseInstallAttributesTest : public testing::Test {
  protected:
   EnterpriseInstallAttributesTest() {}
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     ASSERT_TRUE(PathService::OverrideAndCreateIfNeeded(
         chromeos::FILE_INSTALL_ATTRIBUTES, GetTempPath(), true, false));
@@ -52,7 +52,7 @@ class EnterpriseInstallAttributesTest : public testing::Test {
         chromeos::DBusThreadManager::Get()->GetCryptohomeClient()));
   }
 
-  virtual void TearDown() OVERRIDE {
+  virtual void TearDown() override {
     chromeos::DBusThreadManager::Shutdown();
   }
 
@@ -110,7 +110,7 @@ TEST_F(EnterpriseInstallAttributesTest, Lock) {
                 DEVICE_MODE_ENTERPRISE,
                 kTestDeviceId));
   // But another domain should fail.
-  EXPECT_EQ(EnterpriseInstallAttributes::LOCK_WRONG_USER,
+  EXPECT_EQ(EnterpriseInstallAttributes::LOCK_WRONG_DOMAIN,
             LockDeviceAndWaitForResult(
                 "test@bluebears.com",
                 DEVICE_MODE_ENTERPRISE,

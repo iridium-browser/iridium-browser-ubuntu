@@ -36,7 +36,7 @@ class ConstrainedWebDialogDelegateUserData
  public:
   explicit ConstrainedWebDialogDelegateUserData(
       ConstrainedWebDialogDelegate* delegate) : delegate_(delegate) {}
-  virtual ~ConstrainedWebDialogDelegateUserData() {}
+  ~ConstrainedWebDialogDelegateUserData() override {}
 
   ConstrainedWebDialogDelegate* delegate() { return delegate_; }
 
@@ -60,6 +60,11 @@ ConstrainedWebDialogUI::~ConstrainedWebDialogUI() {
 
 void ConstrainedWebDialogUI::RenderViewCreated(
     RenderViewHost* render_view_host) {
+  // Add a "dialogClose" callback which matches WebDialogUI behavior.
+  web_ui()->RegisterMessageCallback("dialogClose",
+      base::Bind(&ConstrainedWebDialogUI::OnDialogCloseMessage,
+                 base::Unretained(this)));
+
   ConstrainedWebDialogDelegate* delegate = GetConstrainedDelegate();
   if (!delegate)
     return;
@@ -73,11 +78,6 @@ void ConstrainedWebDialogUI::RenderViewCreated(
        it != handlers.end(); ++it) {
     web_ui()->AddMessageHandler(*it);
   }
-
-  // Add a "dialogClose" callback which matches WebDialogUI behavior.
-  web_ui()->RegisterMessageCallback("dialogClose",
-      base::Bind(&ConstrainedWebDialogUI::OnDialogCloseMessage,
-                 base::Unretained(this)));
 
   dialog_delegate->OnDialogShown(web_ui(), render_view_host);
 }

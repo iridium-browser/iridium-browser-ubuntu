@@ -6,6 +6,7 @@
 
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
+#include <GLES2/gl2extchromium.h>
 
 #include <vector>
 
@@ -23,7 +24,7 @@
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
 #include "gpu/command_buffer/service/gpu_scheduler.h"
 #include "gpu/command_buffer/service/image_manager.h"
-#include "gpu/command_buffer/service/mailbox_manager.h"
+#include "gpu/command_buffer/service/mailbox_manager_impl.h"
 #include "gpu/command_buffer/service/memory_tracking.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/gpu_memory_buffer.h"
@@ -35,45 +36,56 @@
 namespace gpu {
 namespace {
 
-int BytesPerPixel(unsigned internalformat) {
-  switch (internalformat) {
-    case GL_RGBA8_OES:
+size_t BytesPerPixel(gfx::GpuMemoryBuffer::Format format) {
+  switch (format) {
+    case gfx::GpuMemoryBuffer::RGBA_8888:
+    case gfx::GpuMemoryBuffer::BGRA_8888:
       return 4;
-    default:
+    case gfx::GpuMemoryBuffer::RGBX_8888:
       NOTREACHED();
       return 0;
   }
+
+  NOTREACHED();
+  return 0;
 }
 
 class GpuMemoryBufferImpl : public gfx::GpuMemoryBuffer {
  public:
   GpuMemoryBufferImpl(base::RefCountedBytes* bytes,
                       const gfx::Size& size,
-                      unsigned internalformat)
-      : bytes_(bytes),
-        size_(size),
-        internalformat_(internalformat),
-        mapped_(false) {}
+                      gfx::GpuMemoryBuffer::Format format)
+      : bytes_(bytes), size_(size), format_(format), mapped_(false) {}
+
+  static GpuMemoryBufferImpl* FromClientBuffer(ClientBuffer buffer) {
+    return reinterpret_cast<GpuMemoryBufferImpl*>(buffer);
+  }
 
   // Overridden from gfx::GpuMemoryBuffer:
-  virtual void* Map() OVERRIDE {
+  void* Map() override {
     mapped_ = true;
     return &bytes_->data().front();
   }
-  virtual void Unmap() OVERRIDE { mapped_ = false; }
-  virtual bool IsMapped() const OVERRIDE { return mapped_; }
-  virtual uint32 GetStride() const OVERRIDE {
-    return size_.width() * BytesPerPixel(internalformat_);
+  void Unmap() override { mapped_ = false; }
+  bool IsMapped() const override { return mapped_; }
+  Format GetFormat() const override { return format_; }
+  uint32 GetStride() const override {
+    return size_.width() * BytesPerPixel(format_);
   }
-  virtual gfx::GpuMemoryBufferHandle GetHandle() const OVERRIDE {
+  gfx::GpuMemoryBufferHandle GetHandle() const override {
     NOTREACHED();
     return gfx::GpuMemoryBufferHandle();
   }
+  ClientBuffer AsClientBuffer() override {
+    return reinterpret_cast<ClientBuffer>(this);
+  }
+
+  base::RefCountedBytes* bytes() { return bytes_.get(); }
 
  private:
   scoped_refptr<base::RefCountedBytes> bytes_;
   const gfx::Size size_;
-  unsigned internalformat_;
+  gfx::GpuMemoryBuffer::Format format_;
   bool mapped_;
 };
 
@@ -116,6 +128,16 @@ GLManager::~GLManager() {
   }
 }
 
+// static
+scoped_ptr<gfx::GpuMemoryBuffer> GLManager::CreateGpuMemoryBuffer(
+    const gfx::Size& size,
+    gfx::GpuMemoryBuffer::Format format) {
+  std::vector<unsigned char> data(size.GetArea() * BytesPerPixel(format), 0);
+  scoped_refptr<base::RefCountedBytes> bytes(new base::RefCountedBytes(data));
+  return make_scoped_ptr<gfx::GpuMemoryBuffer>(
+      new GpuMemoryBufferImpl(bytes.get(), size, format));
+}
+
 void GLManager::Initialize(const GLManager::Options& options) {
   const int32 kCommandBufferSize = 1024 * 1024;
   const size_t kStartTransferBufferSize = 4 * 1024 * 1024;
@@ -152,7 +174,7 @@ void GLManager::Initialize(const GLManager::Options& options) {
   }
 
   mailbox_manager_ =
-      mailbox_manager ? mailbox_manager : new gles2::MailboxManager;
+      mailbox_manager ? mailbox_manager : new gles2::MailboxManagerImpl;
   share_group_ =
       share_group ? share_group : new gfx::GLShareGroup;
 
@@ -233,12 +255,14 @@ void GLManager::Initialize(const GLManager::Options& options) {
   transfer_buffer_.reset(new TransferBuffer(gles2_helper_.get()));
 
   // Create the object exposing the OpenGL API.
+  const bool support_client_side_arrays = true;
   gles2_implementation_.reset(
       new gles2::GLES2Implementation(gles2_helper_.get(),
                                      client_share_group,
                                      transfer_buffer_.get(),
                                      options.bind_generates_resource,
                                      options.lose_context_when_out_of_memory,
+                                     support_client_side_arrays,
                                      this));
 
   ASSERT_TRUE(gles2_implementation_->Initialize(
@@ -315,45 +339,44 @@ Capabilities GLManager::GetCapabilities() {
   return decoder_->GetCapabilities();
 }
 
-gfx::GpuMemoryBuffer* GLManager::CreateGpuMemoryBuffer(
-    size_t width,
-    size_t height,
-    unsigned internalformat,
-    unsigned usage,
-    int32* id) {
-  gfx::Size size(width, height);
+int32 GLManager::CreateImage(ClientBuffer buffer,
+                             size_t width,
+                             size_t height,
+                             unsigned internalformat) {
+  GpuMemoryBufferImpl* gpu_memory_buffer =
+      GpuMemoryBufferImpl::FromClientBuffer(buffer);
 
-  *id = -1;
-
-  std::vector<unsigned char> data(
-      size.GetArea() * BytesPerPixel(internalformat), 0);
-  scoped_refptr<base::RefCountedBytes> bytes(new base::RefCountedBytes(data));
-  scoped_ptr<gfx::GpuMemoryBuffer> buffer(
-      new GpuMemoryBufferImpl(bytes.get(), size, internalformat));
+  scoped_refptr<gfx::GLImageRefCountedMemory> image(
+      new gfx::GLImageRefCountedMemory(gfx::Size(width, height),
+                                       internalformat));
+  if (!image->Initialize(gpu_memory_buffer->bytes(),
+                         gpu_memory_buffer->GetFormat())) {
+    return -1;
+  }
 
   static int32 next_id = 1;
   int32 new_id = next_id++;
 
-  scoped_refptr<gfx::GLImageRefCountedMemory> image(
-      new gfx::GLImageRefCountedMemory(size, internalformat));
-  if (!image->Initialize(bytes.get()))
-    return NULL;
-
   gpu::gles2::ImageManager* image_manager = decoder_->GetImageManager();
   DCHECK(image_manager);
   image_manager->AddImage(image.get(), new_id);
-
-  *id = new_id;
-  DCHECK(gpu_memory_buffers_.find(new_id) == gpu_memory_buffers_.end());
-  return gpu_memory_buffers_.add(new_id, buffer.Pass()).first->second;
+  return new_id;
 }
 
-void GLManager::DestroyGpuMemoryBuffer(int32 id) {
+int32 GLManager::CreateGpuMemoryBufferImage(size_t width,
+                                            size_t height,
+                                            unsigned internalformat,
+                                            unsigned usage) {
+  DCHECK_EQ(usage, static_cast<unsigned>(GL_MAP_CHROMIUM));
+  scoped_ptr<gfx::GpuMemoryBuffer> buffer = GLManager::CreateGpuMemoryBuffer(
+      gfx::Size(width, height), gfx::GpuMemoryBuffer::RGBA_8888);
+  return CreateImage(buffer->AsClientBuffer(), width, height, internalformat);
+}
+
+void GLManager::DestroyImage(int32 id) {
   gpu::gles2::ImageManager* image_manager = decoder_->GetImageManager();
   DCHECK(image_manager);
   image_manager->RemoveImage(id);
-
-  gpu_memory_buffers_.erase(id);
 }
 
 uint32 GLManager::InsertSyncPoint() {
@@ -380,10 +403,6 @@ void GLManager::SignalQuery(uint32 query, const base::Closure& callback) {
 }
 
 void GLManager::SetSurfaceVisible(bool visible) {
-  NOTIMPLEMENTED();
-}
-
-void GLManager::Echo(const base::Closure& callback) {
   NOTIMPLEMENTED();
 }
 

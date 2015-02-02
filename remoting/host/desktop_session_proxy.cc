@@ -124,31 +124,30 @@ DesktopSessionProxy::DesktopSessionProxy(
 scoped_ptr<AudioCapturer> DesktopSessionProxy::CreateAudioCapturer() {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
-  return scoped_ptr<AudioCapturer>(new IpcAudioCapturer(this));
+  return make_scoped_ptr(new IpcAudioCapturer(this));
 }
 
 scoped_ptr<InputInjector> DesktopSessionProxy::CreateInputInjector() {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
-  return scoped_ptr<InputInjector>(new IpcInputInjector(this));
+  return make_scoped_ptr(new IpcInputInjector(this));
 }
 
 scoped_ptr<ScreenControls> DesktopSessionProxy::CreateScreenControls() {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
-  return scoped_ptr<ScreenControls>(new IpcScreenControls(this));
+  return make_scoped_ptr(new IpcScreenControls(this));
 }
 
 scoped_ptr<webrtc::DesktopCapturer> DesktopSessionProxy::CreateVideoCapturer() {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
 
-  return scoped_ptr<webrtc::DesktopCapturer>(new IpcVideoFrameCapturer(this));
+  return make_scoped_ptr(new IpcVideoFrameCapturer(this));
 }
 
 scoped_ptr<webrtc::MouseCursorMonitor>
     DesktopSessionProxy::CreateMouseCursorMonitor() {
-  return scoped_ptr<webrtc::MouseCursorMonitor>(
-      new IpcMouseCursorMonitor(this));
+  return make_scoped_ptr(new IpcMouseCursorMonitor(this));
 }
 
 std::string DesktopSessionProxy::GetCapabilities() const {
@@ -291,7 +290,7 @@ void DesktopSessionProxy::DetachFromDesktop() {
   // Generate fake responses to keep the video capturer in sync.
   while (pending_capture_frame_requests_) {
     --pending_capture_frame_requests_;
-    PostCaptureCompleted(scoped_ptr<webrtc::DesktopFrame>());
+    PostCaptureCompleted(nullptr);
   }
 }
 
@@ -313,7 +312,7 @@ void DesktopSessionProxy::CaptureFrame() {
     ++pending_capture_frame_requests_;
     SendToDesktop(new ChromotingNetworkDesktopMsg_CaptureFrame());
   } else {
-    PostCaptureCompleted(scoped_ptr<webrtc::DesktopFrame>());
+    PostCaptureCompleted(nullptr);
   }
 }
 
@@ -520,9 +519,7 @@ void DesktopSessionProxy::OnCaptureCompleted(
 void DesktopSessionProxy::OnMouseCursor(
     const webrtc::MouseCursor& mouse_cursor) {
   DCHECK(caller_task_runner_->BelongsToCurrentThread());
-  scoped_ptr<webrtc::MouseCursor> cursor(
-      webrtc::MouseCursor::CopyOf(mouse_cursor));
-  PostMouseCursor(cursor.Pass());
+  PostMouseCursor(make_scoped_ptr(webrtc::MouseCursor::CopyOf(mouse_cursor)));
 }
 
 void DesktopSessionProxy::OnInjectClipboardEvent(

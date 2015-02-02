@@ -79,6 +79,8 @@ class HttpUrlConnectionUrlRequest implements HttpUrlRequest {
 
     private int mHttpStatusCode;
 
+    private String mHttpStatusText;
+
     private boolean mStarted;
 
     private boolean mCanceled;
@@ -126,8 +128,8 @@ class HttpUrlConnectionUrlRequest implements HttpUrlRequest {
                         @Override
                     public Thread newThread(Runnable r) {
                         Thread thread = new Thread(r,
-                                "HttpUrlConnection #" +
-                                mCount.getAndIncrement());
+                                "HttpUrlConnection #"
+                                + mCount.getAndIncrement());
                         // Note that this thread is not doing actual networking.
                         // It's only a controller.
                         thread.setPriority(Thread.NORM_PRIORITY);
@@ -183,6 +185,12 @@ class HttpUrlConnectionUrlRequest implements HttpUrlRequest {
     public void setHttpMethod(String method) {
         validateNotStarted();
         mMethod = method;
+    }
+
+    @Override
+    public void disableRedirects() {
+        validateNotStarted();
+        mConnection.setFollowRedirects(false);
     }
 
     @Override
@@ -250,6 +258,7 @@ class HttpUrlConnectionUrlRequest implements HttpUrlRequest {
             }
 
             mHttpStatusCode = mConnection.getResponseCode();
+            mHttpStatusText = mConnection.getResponseMessage();
             mContentType = mConnection.getContentType();
             mContentLength = mConnection.getContentLength();
             if (mContentLengthLimit > 0 && mContentLength > mContentLengthLimit
@@ -435,6 +444,11 @@ class HttpUrlConnectionUrlRequest implements HttpUrlRequest {
             httpStatusCode = HttpStatus.SC_OK;
         }
         return httpStatusCode;
+    }
+
+    @Override
+    public String getHttpStatusText() {
+        return mHttpStatusText;
     }
 
     @Override

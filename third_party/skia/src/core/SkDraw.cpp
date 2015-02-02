@@ -595,12 +595,13 @@ void SkDraw::drawPoints(SkCanvas::PointMode mode, size_t count,
                 if (newPaint.getStrokeCap() == SkPaint::kRound_Cap) {
                     SkPath      path;
                     SkMatrix    preMatrix;
-
+                    
                     path.addCircle(0, 0, radius);
                     for (size_t i = 0; i < count; i++) {
                         preMatrix.setTranslate(pts[i].fX, pts[i].fY);
                         // pass true for the last point, since we can modify
                         // then path then
+                        path.setIsVolatile((count-1) == i);
                         if (fDevice) {
                             fDevice->drawPath(*this, path, newPaint, &preMatrix,
                                               (count-1) == i);
@@ -627,7 +628,6 @@ void SkDraw::drawPoints(SkCanvas::PointMode mode, size_t count,
                 break;
             }
             case SkCanvas::kLines_PointMode:
-#ifndef SK_DISABLE_DASHING_OPTIMIZATION
                 if (2 == count && paint.getPathEffect()) {
                     // most likely a dashed line - see if it is one of the ones
                     // we can accelerate
@@ -711,7 +711,6 @@ void SkDraw::drawPoints(SkCanvas::PointMode mode, size_t count,
                         break;
                     }
                 }
-#endif // DISABLE_DASHING_OPTIMIZATION
                 // couldn't take fast path so fall through!
             case SkCanvas::kPolygon_PointMode: {
                 count -= 1;
@@ -719,6 +718,7 @@ void SkDraw::drawPoints(SkCanvas::PointMode mode, size_t count,
                 SkPaint p(paint);
                 p.setStyle(SkPaint::kStroke_Style);
                 size_t inc = (SkCanvas::kLines_PointMode == mode) ? 2 : 1;
+                path.setIsVolatile(true);
                 for (size_t i = 0; i < count; i += inc) {
                     path.moveTo(pts[i]);
                     path.lineTo(pts[i+1]);
@@ -1011,6 +1011,7 @@ void SkDraw::drawPath(const SkPath& origSrcPath, const SkPaint& origPaint,
     SkPath          tmpPath;
     SkMatrix        tmpMatrix;
     const SkMatrix* matrix = fMatrix;
+    tmpPath.setIsVolatile(true);
 
     if (prePathMatrix) {
         if (origPaint.getPathEffect() || origPaint.getStyle() != SkPaint::kFill_Style ||
@@ -1655,9 +1656,8 @@ void SkDraw::drawText(const char text[], size_t byteLength,
 //////////////////////////////////////////////////////////////////////////////
 
 void SkDraw::drawPosText_asPaths(const char text[], size_t byteLength,
-                                 const SkScalar pos[], SkScalar constY,
-                                 int scalarsPerPosition,
-                                 const SkPaint& origPaint) const {
+                                 const SkScalar pos[], int scalarsPerPosition,
+                                 const SkPoint& offset, const SkPaint& origPaint) const {
     // setup our std paint, in hopes of getting hits in the cache
     SkPaint paint(origPaint);
     SkScalar matrixScale = paint.setupForAsPaths();
@@ -1675,7 +1675,7 @@ void SkDraw::drawPosText_asPaths(const char text[], size_t byteLength,
 
     const char*        stop = text + byteLength;
     SkTextAlignProcScalar alignProc(paint.getTextAlign());
-    SkTextMapStateProc tmsProc(SkMatrix::I(), constY, scalarsPerPosition);
+    SkTextMapStateProc tmsProc(SkMatrix::I(), offset, scalarsPerPosition);
 
     // Now restore the original settings, so we "draw" with whatever style/stroking.
     paint.setStyle(origPaint.getStyle());
@@ -1705,8 +1705,8 @@ void SkDraw::drawPosText_asPaths(const char text[], size_t byteLength,
 }
 
 void SkDraw::drawPosText(const char text[], size_t byteLength,
-                         const SkScalar pos[], SkScalar constY,
-                         int scalarsPerPosition, const SkPaint& paint) const {
+                         const SkScalar pos[], int scalarsPerPosition,
+                         const SkPoint& offset, const SkPaint& paint) const {
     SkASSERT(byteLength == 0 || text != NULL);
     SkASSERT(1 == scalarsPerPosition || 2 == scalarsPerPosition);
 
@@ -1718,8 +1718,7 @@ void SkDraw::drawPosText(const char text[], size_t byteLength,
     }
 
     if (ShouldDrawTextAsPaths(paint, *fMatrix)) {
-        this->drawPosText_asPaths(text, byteLength, pos, constY,
-                                  scalarsPerPosition, paint);
+        this->drawPosText_asPaths(text, byteLength, pos, scalarsPerPosition, offset, paint);
         return;
     }
 
@@ -1743,7 +1742,7 @@ void SkDraw::drawPosText(const char text[], size_t byteLength,
     SkTextAlignProc    alignProc(paint.getTextAlign());
     SkDraw1Glyph       d1g;
     SkDraw1Glyph::Proc proc = d1g.init(this, blitter, cache, paint);
-    SkTextMapStateProc tmsProc(*fMatrix, constY, scalarsPerPosition);
+    SkTextMapStateProc tmsProc(*fMatrix, offset, scalarsPerPosition);
 
     if (cache->isSubpixel()) {
         // maybe we should skip the rounding if linearText is set
@@ -1964,7 +1963,8 @@ void SkDraw::drawTextOnPath(const char text[], size_t byteLength,
         if (iterPath) {
             SkPath      tmp;
             SkMatrix    m(scaledMatrix);
-
+            
+            tmp.setIsVolatile(true);
             m.postTranslate(xpos + hOffset, 0);
             if (matrix) {
                 m.postConcat(*matrix);

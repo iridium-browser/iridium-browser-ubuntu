@@ -73,8 +73,6 @@ private:
     int m_x;
 };
 
-USED_FROM_MULTIPLE_THREADS(IntWrapper);
-
 class ThreadMarker {
 public:
     ThreadMarker() : m_creatingThread(reinterpret_cast<ThreadState*>(0)), m_num(0) { }
@@ -228,16 +226,16 @@ static void getHeapStats(HeapStats* stats)
 {
     TestGCScope scope(ThreadState::NoHeapPointersOnStack);
     EXPECT_TRUE(scope.allThreadsParked());
-    Heap::getStats(stats);
+    Heap::getStatsForTesting(stats);
 }
 
 #define DEFINE_VISITOR_METHODS(Type)                                       \
-    virtual void mark(const Type* object, TraceCallback callback) OVERRIDE \
+    virtual void mark(const Type* object, TraceCallback callback) override \
     {                                                                      \
         if (object)                                                        \
             m_count++;                                                     \
     }                                                                      \
-    virtual bool isMarked(const Type*) OVERRIDE { return false; }
+    virtual bool isMarked(const Type*) override { return false; }
 
 class CountingVisitor : public Visitor {
 public:
@@ -246,32 +244,32 @@ public:
     {
     }
 
-    virtual void mark(const void* object, TraceCallback) OVERRIDE
+    virtual void mark(const void* object, TraceCallback) override
     {
         if (object)
             m_count++;
     }
 
-    virtual void mark(HeapObjectHeader* header, TraceCallback callback) OVERRIDE
+    virtual void mark(HeapObjectHeader* header, TraceCallback callback) override
     {
         ASSERT(header->payload());
         m_count++;
     }
 
-    virtual void mark(FinalizedHeapObjectHeader* header, TraceCallback callback) OVERRIDE
+    virtual void mark(FinalizedHeapObjectHeader* header, TraceCallback callback) override
     {
         ASSERT(header->payload());
         m_count++;
     }
 
-    virtual void registerDelayedMarkNoTracing(const void*) OVERRIDE { }
-    virtual void registerWeakMembers(const void*, const void*, WeakPointerCallback) OVERRIDE { }
-    virtual void registerWeakTable(const void*, EphemeronCallback, EphemeronCallback) OVERRIDE { }
+    virtual void registerDelayedMarkNoTracing(const void*) override { }
+    virtual void registerWeakMembers(const void*, const void*, WeakPointerCallback) override { }
+    virtual void registerWeakTable(const void*, EphemeronCallback, EphemeronCallback) override { }
 #if ENABLE(ASSERT)
-    virtual bool weakTableRegistered(const void*) OVERRIDE { return false; }
+    virtual bool weakTableRegistered(const void*) override { return false; }
 #endif
-    virtual void registerWeakCell(void**, WeakPointerCallback) OVERRIDE { }
-    virtual bool isMarked(const void*) OVERRIDE { return false; }
+    virtual void registerWeakCell(void**, WeakPointerCallback) override { }
+    virtual bool isMarked(const void*) override { return false; }
 
     FOR_EACH_TYPED_HEAP(DEFINE_VISITOR_METHODS)
 
@@ -466,7 +464,7 @@ public:
     }
 
 protected:
-    virtual void runThread() OVERRIDE
+    virtual void runThread() override
     {
         ThreadState::attach();
 
@@ -514,7 +512,7 @@ public:
     }
 
 private:
-    virtual void runThread() OVERRIDE
+    virtual void runThread() override
     {
         ThreadState::attach();
 
@@ -718,7 +716,7 @@ public:
         return new Foo(foo);
     }
 
-    virtual void trace(Visitor* visitor) OVERRIDE
+    virtual void trace(Visitor* visitor) override
     {
         if (m_pointsToFoo)
             visitor->mark(static_cast<Foo*>(m_bar));
@@ -752,7 +750,7 @@ public:
         return new Bars();
     }
 
-    virtual void trace(Visitor* visitor) OVERRIDE
+    virtual void trace(Visitor* visitor) override
     {
         for (unsigned i = 0; i < m_width; i++)
             visitor->trace(m_bars[i]);
@@ -822,9 +820,9 @@ int LargeObject::s_destructorCalls = 0;
 
 class RefCountedAndGarbageCollected : public RefCountedGarbageCollected<RefCountedAndGarbageCollected> {
 public:
-    static PassRefPtr<RefCountedAndGarbageCollected> create()
+    static RefCountedAndGarbageCollected* create()
     {
-        return adoptRef(new RefCountedAndGarbageCollected());
+        return new RefCountedAndGarbageCollected();
     }
 
     ~RefCountedAndGarbageCollected()
@@ -853,7 +851,7 @@ class RefCountedAndGarbageCollected2 : public HeapTestOtherSuperClass, public Re
 public:
     static RefCountedAndGarbageCollected2* create()
     {
-        return adoptRefCountedGarbageCollected(new RefCountedAndGarbageCollected2());
+        return new RefCountedAndGarbageCollected2();
     }
 
     ~RefCountedAndGarbageCollected2()
@@ -874,7 +872,7 @@ private:
 int RefCountedAndGarbageCollected2::s_destructorCalls = 0;
 
 #define DEFINE_VISITOR_METHODS(Type)                                       \
-    virtual void mark(const Type* object, TraceCallback callback) OVERRIDE \
+    virtual void mark(const Type* object, TraceCallback callback) override \
     {                                                                      \
         mark(object);                                                      \
     }                                                                      \
@@ -901,17 +899,17 @@ public:
         m_count++;
     }
 
-    virtual void mark(const void* ptr, TraceCallback) OVERRIDE
+    virtual void mark(const void* ptr, TraceCallback) override
     {
         mark(ptr);
     }
 
-    virtual void mark(HeapObjectHeader* header, TraceCallback callback) OVERRIDE
+    virtual void mark(HeapObjectHeader* header, TraceCallback callback) override
     {
         mark(header->payload());
     }
 
-    virtual void mark(FinalizedHeapObjectHeader* header, TraceCallback callback) OVERRIDE
+    virtual void mark(FinalizedHeapObjectHeader* header, TraceCallback callback) override
     {
         mark(header->payload());
     }
@@ -945,7 +943,7 @@ public:
         return new Weak(strong, weak);
     }
 
-    virtual void trace(Visitor* visitor) OVERRIDE
+    virtual void trace(Visitor* visitor) override
     {
         visitor->trace(m_strongBar);
         visitor->registerWeakMembers(this, zapWeakMembers);
@@ -984,7 +982,7 @@ public:
         return new WithWeakMember(strong, weak);
     }
 
-    virtual void trace(Visitor* visitor) OVERRIDE
+    virtual void trace(Visitor* visitor) override
     {
         visitor->trace(m_strongBar);
         visitor->trace(m_weakBar);
@@ -1006,6 +1004,7 @@ private:
 };
 
 class Observable : public GarbageCollectedFinalized<Observable> {
+    USING_PRE_FINALIZER(Observable, willFinalize);
 public:
     static Observable* create(Bar* bar) { return new Observable(bar);  }
     ~Observable() { m_wasDestructed = true; }
@@ -1017,7 +1016,9 @@ public:
     {
         EXPECT_FALSE(m_wasDestructed);
         EXPECT_FALSE(m_bar->hasBeenFinalized());
+        s_willFinalizeWasCalled = true;
     }
+    static bool s_willFinalizeWasCalled;
 
 private:
     explicit Observable(Bar* bar)
@@ -1029,6 +1030,34 @@ private:
     Member<Bar> m_bar;
     bool m_wasDestructed;
 };
+
+bool Observable::s_willFinalizeWasCalled = false;
+
+class ObservableWithPreFinalizer : public GarbageCollected<ObservableWithPreFinalizer> {
+    USING_PRE_FINALIZER(ObservableWithPreFinalizer, dispose);
+public:
+    static ObservableWithPreFinalizer* create() { return new ObservableWithPreFinalizer();  }
+    ~ObservableWithPreFinalizer() { m_wasDestructed = true; }
+    void trace(Visitor*) { }
+    void dispose()
+    {
+        ThreadState::current()->unregisterPreFinalizer(*this);
+        EXPECT_FALSE(m_wasDestructed);
+        s_disposeWasCalled = true;
+    }
+    static bool s_disposeWasCalled;
+
+private:
+    explicit ObservableWithPreFinalizer()
+        : m_wasDestructed(false)
+    {
+        ThreadState::current()->registerPreFinalizer(*this);
+    }
+
+    bool m_wasDestructed;
+};
+
+bool ObservableWithPreFinalizer::s_disposeWasCalled = false;
 
 template <typename T> class FinalizationObserver : public GarbageCollected<FinalizationObserver<T> > {
 public:
@@ -1083,21 +1112,28 @@ public:
         return map;
     }
 
+    static void clearObservers()
+    {
+        delete s_observerMap;
+        s_observerMap = nullptr;
+    }
+
     static bool s_didCallWillFinalize;
 
 private:
     static ObserverMap& observers()
     {
-        DEFINE_STATIC_LOCAL(Persistent<ObserverMap>, observerMap, ());
-        if (!observerMap)
-            observerMap = new ObserverMap();
-        return *observerMap;
+        if (!s_observerMap)
+            s_observerMap = new Persistent<ObserverMap>(new ObserverMap());
+        return **s_observerMap;
     }
 
     Observable& m_target;
+    static Persistent<ObserverMap>* s_observerMap;
 };
 
 bool FinalizationObserverWithHashMap::s_didCallWillFinalize = false;
+Persistent<FinalizationObserverWithHashMap::ObserverMap>* FinalizationObserverWithHashMap::s_observerMap;
 
 class SuperClass;
 
@@ -1236,7 +1272,7 @@ class TransitionRefCounted : public RefCountedWillBeRefCountedGarbageCollected<T
 public:
     static PassRefPtrWillBeRawPtr<TransitionRefCounted> create()
     {
-        return adoptRefWillBeRefCountedGarbageCollected(new TransitionRefCounted());
+        return adoptRefWillBeNoop(new TransitionRefCounted());
     }
 
     ~TransitionRefCounted()
@@ -1410,7 +1446,7 @@ private:
 TEST(HeapTest, Transition)
 {
     {
-        RefPtr<TransitionRefCounted> refCounted = TransitionRefCounted::create();
+        RefPtrWillBePersistent<TransitionRefCounted> refCounted = TransitionRefCounted::create();
         EXPECT_EQ(1, TransitionRefCounted::s_aliveCount);
         Heap::collectGarbage(ThreadState::NoHeapPointersOnStack);
         EXPECT_EQ(1, TransitionRefCounted::s_aliveCount);
@@ -1504,9 +1540,7 @@ TEST(HeapTest, BasicFunctionality)
         getHeapStats(&heapStats);
         CheckWithSlack(baseLevel + total, heapStats.totalObjectSpace(), slack);
         if (testPagesAllocated)
-            EXPECT_EQ(heapStats.totalAllocatedSpace(), blinkPageSize);
-
-        CheckWithSlack(alloc32 + 32 + sizeof(FinalizedHeapObjectHeader), alloc64, slack);
+            EXPECT_EQ(heapStats.totalAllocatedSpace(), 2 * blinkPageSize);
 
         EXPECT_EQ(alloc32->get(0), 40);
         EXPECT_EQ(alloc32->get(31), 40);
@@ -1571,7 +1605,6 @@ TEST(HeapTest, BasicFunctionality)
     if (testPagesAllocated)
         EXPECT_EQ(0ul, heapStats.totalAllocatedSpace() & (blinkPageSize - 1));
 
-    DynamicallySizedObject* bigAreaRaw = bigArea;
     // Clear the persistent, so that the big area will be garbage collected.
     bigArea.release();
     clearOutOldGarbage(&heapStats);
@@ -1582,17 +1615,6 @@ TEST(HeapTest, BasicFunctionality)
     CheckWithSlack(baseLevel + total, heapStats.totalObjectSpace(), slack);
     if (testPagesAllocated)
         EXPECT_EQ(0ul, heapStats.totalAllocatedSpace() & (blinkPageSize - 1));
-
-    // Endless loop unless we eventually get the memory back that we just freed.
-    while (true) {
-        Persistent<DynamicallySizedObject>* alloc = new Persistent<DynamicallySizedObject>(DynamicallySizedObject::create(big / 2));
-        slack += 4;
-        persistents[persistentCount++] = alloc;
-        EXPECT_LT(persistentCount, numPersistents);
-        total += big / 2;
-        if (bigAreaRaw == alloc->get())
-            break;
-    }
 
     getHeapStats(&heapStats);
     CheckWithSlack(baseLevel + total, heapStats.totalObjectSpace(), slack);
@@ -2711,7 +2733,7 @@ static void heapMapDestructorHelper(bool clearMaps)
     clearOutOldGarbage(&initialHeapStats);
     ThingWithDestructor::s_liveThingsWithDestructor = 0;
 
-    typedef HeapHashMap<WeakMember<IntWrapper>, RefPtr<RefCountedAndGarbageCollected> > RefMap;
+    typedef HeapHashMap<WeakMember<IntWrapper>, Member<RefCountedAndGarbageCollected> > RefMap;
 
     typedef HeapHashMap<
         WeakMember<IntWrapper>,
@@ -3138,8 +3160,8 @@ TEST(HeapTest, RefCountedGarbageCollected)
         {
             Persistent<RefCountedAndGarbageCollected> persistent;
             {
-                RefPtr<RefCountedAndGarbageCollected> refPtr1 = RefCountedAndGarbageCollected::create();
-                RefPtr<RefCountedAndGarbageCollected> refPtr2 = RefCountedAndGarbageCollected::create();
+                Persistent<RefCountedAndGarbageCollected> refPtr1 = RefCountedAndGarbageCollected::create();
+                Persistent<RefCountedAndGarbageCollected> refPtr2 = RefCountedAndGarbageCollected::create();
                 Heap::collectGarbage(ThreadState::NoHeapPointersOnStack);
                 EXPECT_EQ(0, RefCountedAndGarbageCollected::s_destructorCalls);
                 persistent = refPtr1.get();
@@ -3169,8 +3191,8 @@ TEST(HeapTest, RefCountedGarbageCollectedWithStackPointers)
         RefCountedAndGarbageCollected* pointer1 = 0;
         RefCountedAndGarbageCollected2* pointer2 = 0;
         {
-            RefPtr<RefCountedAndGarbageCollected> object1 = RefCountedAndGarbageCollected::create();
-            RefPtr<RefCountedAndGarbageCollected2> object2 = RefCountedAndGarbageCollected2::create();
+            Persistent<RefCountedAndGarbageCollected> object1 = RefCountedAndGarbageCollected::create();
+            Persistent<RefCountedAndGarbageCollected2> object2 = RefCountedAndGarbageCollected2::create();
             pointer1 = object1.get();
             pointer2 = object2.get();
             void* objects[2] = { object1.get(), object2.get() };
@@ -3194,8 +3216,8 @@ TEST(HeapTest, RefCountedGarbageCollectedWithStackPointers)
         EXPECT_TRUE(visitor.validate());
 
         {
-            RefPtr<RefCountedAndGarbageCollected> object1(pointer1);
-            RefPtr<RefCountedAndGarbageCollected2> object2(pointer2);
+            Persistent<RefCountedAndGarbageCollected> object1(pointer1);
+            Persistent<RefCountedAndGarbageCollected2> object2(pointer2);
             void* objects[2] = { object1.get(), object2.get() };
             RefCountedGarbageCollectedVisitor visitor(2, objects);
             ThreadState::current()->visitPersistents(&visitor);
@@ -3280,6 +3302,40 @@ TEST(HeapTest, FinalizationObserver)
     EXPECT_EQ(0u, Bar::s_live);
     EXPECT_EQ(0u, map.size());
     EXPECT_TRUE(FinalizationObserverWithHashMap::s_didCallWillFinalize);
+
+    FinalizationObserverWithHashMap::clearObservers();
+}
+
+TEST(HeapTest, PreFinalizer)
+{
+    Observable::s_willFinalizeWasCalled = false;
+    {
+        Observable* foo = Observable::create(Bar::create());
+        ThreadState::current()->registerPreFinalizer(*foo);
+    }
+    Heap::collectGarbage(ThreadState::NoHeapPointersOnStack);
+    EXPECT_TRUE(Observable::s_willFinalizeWasCalled);
+}
+
+TEST(HeapTest, PreFinalizerIsNotCalledIfUnregistered)
+{
+    Observable::s_willFinalizeWasCalled = false;
+    {
+        Observable* foo = Observable::create(Bar::create());
+        ThreadState::current()->registerPreFinalizer(*foo);
+        ThreadState::current()->unregisterPreFinalizer(*foo);
+    }
+    Heap::collectGarbage(ThreadState::NoHeapPointersOnStack);
+    EXPECT_FALSE(Observable::s_willFinalizeWasCalled);
+}
+
+TEST(HeapTest, PreFinalizerUnregistersItself)
+{
+    ObservableWithPreFinalizer::s_disposeWasCalled = false;
+    ObservableWithPreFinalizer::create();
+    Heap::collectGarbage(ThreadState::NoHeapPointersOnStack);
+    EXPECT_TRUE(ObservableWithPreFinalizer::s_disposeWasCalled);
+    // Don't crash, and assertions don't fail.
 }
 
 TEST(HeapTest, Comparisons)
@@ -3321,7 +3377,8 @@ TEST(HeapTest, CheckAndMarkPointer)
     {
         TestGCScope scope(ThreadState::HeapPointersOnStack);
         EXPECT_TRUE(scope.allThreadsParked()); // Fail the test if we could not park all threads.
-        Heap::makeConsistentForSweeping();
+        Heap::prepareForGC();
+        Heap::flushHeapDoesNotContainCache();
         for (size_t i = 0; i < objectAddresses.size(); i++) {
             EXPECT_TRUE(Heap::checkAndMarkPointer(&visitor, objectAddresses[i]));
             EXPECT_TRUE(Heap::checkAndMarkPointer(&visitor, endAddresses[i]));
@@ -3340,7 +3397,8 @@ TEST(HeapTest, CheckAndMarkPointer)
     {
         TestGCScope scope(ThreadState::HeapPointersOnStack);
         EXPECT_TRUE(scope.allThreadsParked());
-        Heap::makeConsistentForSweeping();
+        Heap::prepareForGC();
+        Heap::flushHeapDoesNotContainCache();
         for (size_t i = 0; i < objectAddresses.size(); i++) {
             // We would like to assert that checkAndMarkPointer returned false
             // here because the pointers no longer point into a valid object

@@ -39,10 +39,10 @@ class SoftwareRendererTest : public testing::Test, public RendererClient {
     resource_provider_ = ResourceProvider::Create(output_surface_.get(),
                                                   shared_bitmap_manager_.get(),
                                                   NULL,
+                                                  NULL,
                                                   0,
                                                   false,
-                                                  1,
-                                                  false);
+                                                  1);
     renderer_ = SoftwareRenderer::Create(
         this, &settings_, output_surface_.get(), resource_provider());
   }
@@ -54,7 +54,7 @@ class SoftwareRendererTest : public testing::Test, public RendererClient {
   SoftwareRenderer* renderer() const { return renderer_.get(); }
 
   // RendererClient implementation.
-  virtual void SetFullRootLayerDamage() OVERRIDE {}
+  void SetFullRootLayerDamage() override {}
 
   scoped_ptr<SkBitmap> DrawAndCopyOutput(RenderPassList* list,
                                          float device_scale_factor,
@@ -128,7 +128,7 @@ TEST_F(SoftwareRendererTest, SolidColorQuad) {
       shared_quad_state, outer_rect, outer_rect, SK_ColorYELLOW, false);
 
   RenderPassList list;
-  list.push_back(root_render_pass.PassAs<RenderPass>());
+  list.push_back(root_render_pass.Pass());
 
   float device_scale_factor = 1.f;
   gfx::Rect device_viewport_rect(outer_size);
@@ -224,7 +224,7 @@ TEST_F(SoftwareRendererTest, TileQuad) {
                      false);
 
   RenderPassList list;
-  list.push_back(root_render_pass.PassAs<RenderPass>());
+  list.push_back(root_render_pass.Pass());
 
   float device_scale_factor = 1.f;
   gfx::Rect device_viewport_rect(outer_size);
@@ -298,7 +298,7 @@ TEST_F(SoftwareRendererTest, TileQuadVisibleRect) {
   quad->visible_rect = visible_rect;
 
   RenderPassList list;
-  list.push_back(root_render_pass.PassAs<RenderPass>());
+  list.push_back(root_render_pass.Pass());
 
   float device_scale_factor = 1.f;
   gfx::Rect device_viewport_rect(tile_size);

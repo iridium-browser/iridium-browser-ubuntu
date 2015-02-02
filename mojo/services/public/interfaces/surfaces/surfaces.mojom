@@ -2,12 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import "mojo/services/gles2/command_buffer.mojom"
-import "mojo/services/public/interfaces/geometry/geometry.mojom"
-import "mojo/services/public/interfaces/surfaces/quads.mojom"
-import "mojo/services/public/interfaces/surfaces/surface_id.mojom"
+module mojo;
 
-module mojo {
+import "mojo/services/public/interfaces/geometry/geometry.mojom";
+import "mojo/services/public/interfaces/gpu/command_buffer.mojom";
+import "mojo/services/public/interfaces/surfaces/quads.mojom";
+import "mojo/services/public/interfaces/surfaces/surface_id.mojom";
 
 enum ResourceFormat {
   RGBA_8888,
@@ -20,7 +20,7 @@ enum ResourceFormat {
 };
 
 struct Mailbox {
-  int8[64] name;
+  array<int8, 64> name;
 };
 
 struct MailboxHolder {
@@ -47,12 +47,12 @@ struct ReturnedResource {
 };
 
 struct Frame {
-  TransferableResource[] resources;
-  Pass[] passes;
+  array<TransferableResource> resources;
+  array<Pass> passes;
 };
 
 interface SurfaceClient {
-  ReturnResources(ReturnedResource[] resources);
+  ReturnResources(array<ReturnedResource> resources);
 };
 
 [Client=SurfaceClient]
@@ -69,5 +69,3 @@ interface Surface {
                           SurfaceId id,
                           Size size);
 };
-
-}

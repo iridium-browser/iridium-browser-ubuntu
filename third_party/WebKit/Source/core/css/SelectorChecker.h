@@ -47,12 +47,6 @@ public:
     enum VisitedMatchType { VisitedMatchDisabled, VisitedMatchEnabled };
     enum Mode { ResolvingStyle = 0, CollectingStyleRules, CollectingCSSRules, QueryingRules, SharingRules };
     explicit SelectorChecker(Document&, Mode);
-    enum ContextFlags {
-        // FIXME: Revmoe DefaultBehavior.
-        DefaultBehavior = 0,
-        ScopeContainsLastMatchedElement = 1,
-        TreatShadowHostAsNormalScope = 2,
-    };
 
     struct SelectorCheckingContext {
         STACK_ALLOCATED();
@@ -66,13 +60,14 @@ public:
             , visitedMatchType(visitedMatchType)
             , pseudoId(NOPSEUDO)
             , elementStyle(0)
-            , scrollbar(0)
+            , scrollbar(nullptr)
             , scrollbarPart(NoPart)
             , isSubSelector(false)
             , hasScrollbarPseudo(false)
             , hasSelectionPseudo(false)
             , isUARule(false)
-            , contextFlags(DefaultBehavior)
+            , scopeContainsLastMatchedElement(false)
+            , treatShadowHostAsNormalScope(false)
         {
         }
 
@@ -83,13 +78,14 @@ public:
         VisitedMatchType visitedMatchType;
         PseudoId pseudoId;
         RenderStyle* elementStyle;
-        RenderScrollbar* scrollbar;
+        RawPtrWillBeMember<RenderScrollbar> scrollbar;
         ScrollbarPart scrollbarPart;
-        bool isSubSelector;
-        bool hasScrollbarPseudo;
-        bool hasSelectionPseudo;
-        bool isUARule;
-        ContextFlags contextFlags;
+        unsigned isSubSelector : 1;
+        unsigned hasScrollbarPseudo : 1;
+        unsigned hasSelectionPseudo : 1;
+        unsigned isUARule : 1;
+        unsigned scopeContainsLastMatchedElement : 1;
+        unsigned treatShadowHostAsNormalScope : 1;
     };
 
     struct MatchResult {
@@ -132,8 +128,14 @@ private:
     Match matchForShadowDistributed(const Element*, const SiblingTraversalStrategy&, SelectorCheckingContext& nextContext, MatchResult* = 0) const;
     template<typename SiblingTraversalStrategy>
     Match matchForPseudoShadow(const ContainerNode*, const SelectorCheckingContext&, const SiblingTraversalStrategy&, MatchResult*) const;
+    template<typename SiblingTraversalStrategy>
+    bool checkPseudoClass(const SelectorCheckingContext&, const SiblingTraversalStrategy&, unsigned* specificity) const;
+    template<typename SiblingTraversalStrategy>
+    bool checkPseudoElement(const SelectorCheckingContext&, const SiblingTraversalStrategy&) const;
 
     bool checkScrollbarPseudoClass(const SelectorCheckingContext&, Document*, const CSSSelector&) const;
+    template<typename SiblingTraversalStrategy>
+    bool checkPseudoHost(const SelectorCheckingContext&, const SiblingTraversalStrategy&, unsigned*) const;
 
     static bool isFrameFocused(const Element&);
 
@@ -165,10 +167,8 @@ inline bool SelectorChecker::tagMatches(const Element& element, const QualifiedN
 
 inline bool SelectorChecker::checkExactAttribute(const Element& element, const QualifiedName& selectorAttributeName, const StringImpl* value)
 {
-    AttributeCollection attributes = element.attributesWithoutUpdate();
-    AttributeCollection::iterator end = attributes.end();
-    for (AttributeCollection::iterator it = attributes.begin(); it != end; ++it) {
-        if (it->matches(selectorAttributeName) && (!value || it->value().impl() == value))
+    for (const auto& attribute : element.attributesWithoutUpdate()) {
+        if (attribute.matches(selectorAttributeName) && (!value || attribute.value().impl() == value))
             return true;
     }
     return false;

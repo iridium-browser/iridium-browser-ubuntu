@@ -92,8 +92,8 @@ protected:
 
         GrDrawState* drawState = tt.target()->drawState();
 
-        GrTexture* texture = GrLockAndRefCachedBitmapTexture(context, fBmp, NULL);
-        if (NULL == texture) {
+        SkAutoTUnref<GrTexture> texture(GrRefCachedBitmapTexture(context, fBmp, NULL));
+        if (!texture) {
             return;
         }
 
@@ -105,15 +105,14 @@ protected:
         textureMatrices.back().preRotate(45.f, texture->width() / 2.f, texture->height() / 2.f);
 
         const SkIRect texelDomains[] = {
-            SkIRect::MakeWH(fBmp.width(), fBmp.height()),
+            fBmp.bounds(),
             SkIRect::MakeXYWH(fBmp.width() / 4,
                               fBmp.height() / 4,
                               fBmp.width() / 2,
                               fBmp.height() / 2),
         };
 
-        SkRect renderRect = SkRect::MakeWH(SkIntToScalar(fBmp.width()),
-                                           SkIntToScalar(fBmp.height()));
+        SkRect renderRect = SkRect::Make(fBmp.bounds());
         renderRect.outset(kDrawPad, kDrawPad);
 
         SkScalar y = kDrawPad + kTestPad;
@@ -144,7 +143,6 @@ protected:
                 y += renderRect.height() + kTestPad;
             }
         }
-        GrUnlockAndUnrefCachedBitmapTexture(texture);
     }
 
 private:

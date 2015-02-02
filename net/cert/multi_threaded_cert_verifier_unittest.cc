@@ -36,19 +36,17 @@ class MockCertVerifyProc : public CertVerifyProc {
   MockCertVerifyProc() {}
 
  private:
-  virtual ~MockCertVerifyProc() {}
+  ~MockCertVerifyProc() override {}
 
   // CertVerifyProc implementation
-  virtual bool SupportsAdditionalTrustAnchors() const OVERRIDE {
-    return false;
-  }
+  bool SupportsAdditionalTrustAnchors() const override { return false; }
 
-  virtual int VerifyInternal(X509Certificate* cert,
-                             const std::string& hostname,
-                             int flags,
-                             CRLSet* crl_set,
-                             const CertificateList& additional_trust_anchors,
-                             CertVerifyResult* verify_result) OVERRIDE {
+  int VerifyInternal(X509Certificate* cert,
+                     const std::string& hostname,
+                     int flags,
+                     CRLSet* crl_set,
+                     const CertificateList& additional_trust_anchors,
+                     CertVerifyResult* verify_result) override {
     verify_result->Reset();
     verify_result->verified_cert = cert;
     verify_result->cert_status = CERT_STATUS_COMMON_NAME_INVALID;
@@ -69,7 +67,7 @@ class MockCertTrustAnchorProvider : public CertTrustAnchorProvider {
 class MultiThreadedCertVerifierTest : public ::testing::Test {
  public:
   MultiThreadedCertVerifierTest() : verifier_(new MockCertVerifyProc()) {}
-  virtual ~MultiThreadedCertVerifierTest() {}
+  ~MultiThreadedCertVerifierTest() override {}
 
  protected:
   MultiThreadedCertVerifier verifier_;
@@ -383,7 +381,7 @@ TEST_F(MultiThreadedCertVerifierTest, RequestParamsComparators) {
       -1,
     },
   };
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
+  for (size_t i = 0; i < arraysize(tests); ++i) {
     SCOPED_TRACE(base::StringPrintf("Test[%" PRIuS "]", i));
 
     const MultiThreadedCertVerifier::RequestParams& key1 = tests[i].key1;

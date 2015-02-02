@@ -34,16 +34,15 @@ class ViewHttpCacheJob : public net::URLRequestJob {
   }
 
   // net::URLRequestJob implementation.
-  virtual void Start() OVERRIDE;
-  virtual void Kill() OVERRIDE;
-  virtual bool GetMimeType(std::string* mime_type) const OVERRIDE{
+  void Start() override;
+  void Kill() override;
+  bool GetMimeType(std::string* mime_type) const override {
     return core_->GetMimeType(mime_type);
   }
-  virtual bool GetCharset(std::string* charset) OVERRIDE{
+  bool GetCharset(std::string* charset) override {
     return core_->GetCharset(charset);
   }
-  virtual bool ReadRawData(net::IOBuffer* buf,
-                           int buf_size, int *bytes_read) OVERRIDE{
+  bool ReadRawData(net::IOBuffer* buf, int buf_size, int* bytes_read) override {
     return core_->ReadRawData(buf, buf_size, bytes_read);
   }
 
@@ -83,7 +82,7 @@ class ViewHttpCacheJob : public net::URLRequestJob {
     DISALLOW_COPY_AND_ASSIGN(Core);
   };
 
-  virtual ~ViewHttpCacheJob() {}
+  ~ViewHttpCacheJob() override {}
 
   void StartAsync();
   void OnStartCompleted();

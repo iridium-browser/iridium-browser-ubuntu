@@ -29,7 +29,7 @@ class SyncStartupTracker : public ProfileSyncServiceObserver {
   };
 
   SyncStartupTracker(Profile* profile, Observer* observer);
-  virtual ~SyncStartupTracker();
+  ~SyncStartupTracker() override;
 
   enum SyncServiceState {
     // Sync backend is still starting up.
@@ -37,7 +37,7 @@ class SyncStartupTracker : public ProfileSyncServiceObserver {
     // An error has been detected that prevents the sync backend from starting
     // up.
     SYNC_STARTUP_ERROR,
-    // Sync startup has completed (i.e. ProfileSyncService::sync_initialized()
+    // Sync startup has completed (i.e. ProfileSyncService::SyncActive()
     // returns true).
     SYNC_STARTUP_COMPLETE
   };
@@ -46,7 +46,7 @@ class SyncStartupTracker : public ProfileSyncServiceObserver {
   static SyncServiceState GetSyncServiceState(Profile* profile);
 
   // ProfileSyncServiceObserver implementation.
-  virtual void OnStateChanged() OVERRIDE;
+  void OnStateChanged() override;
 
  private:
   // Checks the current service state and notifies |observer_| if the state

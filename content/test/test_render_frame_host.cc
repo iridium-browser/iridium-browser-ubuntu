@@ -42,11 +42,6 @@ TestRenderFrameHost::TestRenderFrameHost(RenderViewHostImpl* render_view_host,
       child_creation_observer_(delegate ? delegate->GetAsWebContents() : NULL),
       contents_mime_type_("text/html"),
       simulate_history_list_was_cleared_(false) {
-  // Allow TestRenderViewHosts to easily access their main frame RFH.
-  if (frame_tree_node == frame_tree->root()) {
-    static_cast<TestRenderViewHost*>(render_view_host)->
-        set_main_render_frame_host(this);
-  }
 }
 
 TestRenderFrameHost::~TestRenderFrameHost() {}
@@ -68,6 +63,19 @@ void TestRenderFrameHost::SendNavigateWithTransition(
     const GURL& url,
     ui::PageTransition transition) {
   SendNavigateWithTransitionAndResponseCode(page_id, url, transition, 200);
+}
+
+void TestRenderFrameHost::SetContentsMimeType(const std::string& mime_type) {
+  contents_mime_type_ = mime_type;
+}
+
+void TestRenderFrameHost::SendBeforeUnloadACK(bool proceed) {
+  base::TimeTicks now = base::TimeTicks::Now();
+  OnBeforeUnloadACK(proceed, now, now);
+}
+
+void TestRenderFrameHost::SimulateSwapOutACK() {
+  OnSwappedOut();
 }
 
 void TestRenderFrameHost::SendNavigate(int page_id, const GURL& url) {
@@ -167,16 +175,15 @@ void TestRenderFrameHost::SendNavigateWithParameters(
 }
 
 void TestRenderFrameHost::SendBeginNavigationWithURL(const GURL& url) {
-  FrameHostMsg_BeginNavigation_Params params;
-  params.method = "GET";
-  params.url = url;
-  params.referrer = Referrer(GURL(), blink::WebReferrerPolicyDefault);
-  params.load_flags = net::LOAD_NORMAL;
-  params.has_user_gesture = false;
-  params.transition_type = ui::PAGE_TRANSITION_LINK;
-  params.should_replace_current_entry = false;
-  params.allow_download = true;
-  OnBeginNavigation(params);
+  FrameHostMsg_BeginNavigation_Params begin_params;
+  CommonNavigationParams common_params;
+  begin_params.method = "GET";
+  begin_params.load_flags = net::LOAD_NORMAL;
+  begin_params.has_user_gesture = false;
+  common_params.url = url;
+  common_params.referrer = Referrer(GURL(), blink::WebReferrerPolicyDefault);
+  common_params.transition = ui::PAGE_TRANSITION_LINK;
+  OnBeginNavigation(begin_params, common_params);
 }
 
 void TestRenderFrameHost::DidDisownOpener() {

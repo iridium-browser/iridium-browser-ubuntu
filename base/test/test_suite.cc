@@ -32,8 +32,6 @@
 #include "base/mac/scoped_nsautorelease_pool.h"
 #if defined(OS_IOS)
 #include "base/test/test_listener_ios.h"
-#else
-#include "base/test/mock_chrome_application_mac.h"
 #endif  // OS_IOS
 #endif  // OS_MACOSX
 
@@ -49,7 +47,7 @@ namespace {
 
 class MaybeTestDisabler : public testing::EmptyTestEventListener {
  public:
-  virtual void OnTestStart(const testing::TestInfo& test_info) OVERRIDE {
+  virtual void OnTestStart(const testing::TestInfo& test_info) override {
     ASSERT_FALSE(TestSuite::IsMarkedMaybe(test_info))
         << "Probably the OS #ifdefs don't include all of the necessary "
            "platforms.\nPlease ensure that no tests have the MAYBE_ prefix "
@@ -63,11 +61,11 @@ class TestClientInitializer : public testing::EmptyTestEventListener {
       : old_command_line_(CommandLine::NO_PROGRAM) {
   }
 
-  virtual void OnTestStart(const testing::TestInfo& test_info) OVERRIDE {
+  virtual void OnTestStart(const testing::TestInfo& test_info) override {
     old_command_line_ = *CommandLine::ForCurrentProcess();
   }
 
-  virtual void OnTestEnd(const testing::TestInfo& test_info) OVERRIDE {
+  virtual void OnTestEnd(const testing::TestInfo& test_info) override {
     *CommandLine::ForCurrentProcess() = old_command_line_;
   }
 
@@ -285,11 +283,6 @@ void TestSuite::Initialize() {
           switches::kWaitForDebugger)) {
     base::debug::WaitForDebugger(60, true);
   }
-#endif
-
-#if defined(OS_MACOSX) && !defined(OS_IOS)
-  // Some of the app unit tests spin runloops.
-  mock_cr_app::RegisterMockCrApp();
 #endif
 
 #if defined(OS_IOS)

@@ -43,16 +43,14 @@ class StartSyncFlareMock {
 
 class PasswordStoreTest : public testing::Test {
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     login_db_.reset(new LoginDatabase());
     ASSERT_TRUE(login_db_->Init(temp_dir_.path().Append(
         FILE_PATH_LITERAL("login_test"))));
   }
 
-  virtual void TearDown() OVERRIDE {
-    ASSERT_TRUE(temp_dir_.Delete());
-  }
+  void TearDown() override { ASSERT_TRUE(temp_dir_.Delete()); }
 
   base::MessageLoopForUI message_loop_;
   scoped_ptr<LoginDatabase> login_db_;
@@ -68,7 +66,7 @@ TEST_F(PasswordStoreTest, IgnoreOldWwwGoogleLogins) {
       base::MessageLoopProxy::current(),
       base::MessageLoopProxy::current(),
       login_db_.release()));
-  store->Init(syncer::SyncableService::StartSyncFlare(), "");
+  store->Init(syncer::SyncableService::StartSyncFlare());
 
   const time_t cutoff = 1325376000;  // 00:00 Jan 1 2012 UTC
   // The passwords are all empty because PasswordStoreDefault doesn't store the
@@ -134,7 +132,7 @@ TEST_F(PasswordStoreTest, IgnoreOldWwwGoogleLogins) {
 
   // Build the forms vector and add the forms to the store.
   std::vector<PasswordForm*> all_forms;
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(form_data); ++i) {
+  for (size_t i = 0; i < arraysize(form_data); ++i) {
     PasswordForm* form = CreatePasswordFormFromData(form_data[i]);
     all_forms.push_back(form);
     store->AddLogin(*form);
@@ -199,9 +197,8 @@ TEST_F(PasswordStoreTest, StartSyncFlare) {
       base::MessageLoopProxy::current(),
       login_db_.release()));
   StartSyncFlareMock mock;
-  store->Init(base::Bind(&StartSyncFlareMock::StartSyncFlare,
-                         base::Unretained(&mock)),
-              "");
+  store->Init(
+      base::Bind(&StartSyncFlareMock::StartSyncFlare, base::Unretained(&mock)));
   {
     PasswordForm form;
     EXPECT_CALL(mock, StartSyncFlare(syncer::PASSWORDS));

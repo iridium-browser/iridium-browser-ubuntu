@@ -28,6 +28,8 @@ struct CC_EXPORT RenderingStats {
 
     void Add(const TimeDeltaList& other);
 
+    base::TimeDelta GetLastTimeDelta() const;
+
    private:
     std::list<base::TimeDelta> values;
   };
@@ -36,7 +38,6 @@ struct CC_EXPORT RenderingStats {
     // Note: when adding new members, please remember to update Add in
     // rendering_stats.cc.
 
-    int64 frame_count;
     base::TimeDelta paint_time;
     int64 painted_pixel_count;
     base::TimeDelta record_time;
@@ -54,9 +55,6 @@ struct CC_EXPORT RenderingStats {
     // rendering_stats.cc.
 
     int64 frame_count;
-    base::TimeDelta rasterize_time;
-    base::TimeDelta analysis_time;
-    int64 rasterized_pixel_count;
     int64 visible_content_area;
     int64 approximated_visible_content_area;
 

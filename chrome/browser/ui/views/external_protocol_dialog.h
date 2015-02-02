@@ -24,19 +24,18 @@ class ExternalProtocolDialog : public views::DialogDelegate {
                          int render_process_host_id,
                          int routing_id);
 
-  virtual ~ExternalProtocolDialog();
+  ~ExternalProtocolDialog() override;
 
   // views::DialogDelegate methods:
-  virtual int GetDefaultDialogButton() const OVERRIDE;
-  virtual base::string16 GetDialogButtonLabel(
-      ui::DialogButton button) const OVERRIDE;
-  virtual base::string16 GetWindowTitle() const OVERRIDE;
-  virtual void DeleteDelegate() OVERRIDE;
-  virtual bool Cancel() OVERRIDE;
-  virtual bool Accept() OVERRIDE;
-  virtual views::View* GetContentsView() OVERRIDE;
-  virtual views::Widget* GetWidget() OVERRIDE;
-  virtual const views::Widget* GetWidget() const OVERRIDE;
+  int GetDefaultDialogButton() const override;
+  base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
+  base::string16 GetWindowTitle() const override;
+  void DeleteDelegate() override;
+  bool Cancel() override;
+  bool Accept() override;
+  views::View* GetContentsView() override;
+  views::Widget* GetWidget() override;
+  const views::Widget* GetWidget() const override;
 
  private:
   const scoped_ptr<const ProtocolDialogDelegate> delegate_;

@@ -67,7 +67,7 @@ class NavigationObserver : public content::WebContentsObserver {
       : content::WebContentsObserver(web_contents),
         message_loop_runner_(new content::MessageLoopRunner) {}
 
-  virtual ~NavigationObserver() {}
+  ~NavigationObserver() override {}
 
   // Normally Wait() will not return until a main frame navigation occurs.
   // If a path is set, Wait() will return after this path has been seen,
@@ -77,8 +77,8 @@ class NavigationObserver : public content::WebContentsObserver {
   }
 
   // content::WebContentsObserver:
-  virtual void DidFinishLoad(content::RenderFrameHost* render_frame_host,
-                             const GURL& validated_url) OVERRIDE {
+  void DidFinishLoad(content::RenderFrameHost* render_frame_host,
+                     const GURL& validated_url) override {
     if (!wait_for_path_.empty()) {
       if (validated_url.path() == wait_for_path_)
         message_loop_runner_->Quit();
@@ -138,18 +138,16 @@ class InfoBarObserver : public PromptObserver,
     infobar_service_->AddObserver(this);
   }
 
-  virtual ~InfoBarObserver() {
+  ~InfoBarObserver() override {
     if (infobar_service_)
       infobar_service_->RemoveObserver(this);
   }
 
  private:
   // PromptObserver:
-  virtual bool IsShowingPrompt() const OVERRIDE {
-    return infobar_is_being_shown_;
-  }
+  bool IsShowingPrompt() const override { return infobar_is_being_shown_; }
 
-  virtual void AcceptImpl() const OVERRIDE {
+  void AcceptImpl() const override {
     EXPECT_EQ(1u, infobar_service_->infobar_count());
     if (!infobar_service_->infobar_count())
       return;  // Let the test finish to gather possibly more diagnostics.
@@ -165,17 +163,15 @@ class InfoBarObserver : public PromptObserver,
   }
 
   // infobars::InfoBarManager::Observer:
-  virtual void OnInfoBarAdded(infobars::InfoBar* infobar) OVERRIDE {
+  void OnInfoBarAdded(infobars::InfoBar* infobar) override {
     infobar_is_being_shown_ = true;
   }
 
-  virtual void OnInfoBarRemoved(infobars::InfoBar* infobar,
-                                bool animate) OVERRIDE {
+  void OnInfoBarRemoved(infobars::InfoBar* infobar, bool animate) override {
     infobar_is_being_shown_ = false;
   }
 
-  virtual void OnManagerShuttingDown(
-      infobars::InfoBarManager* manager) OVERRIDE {
+  void OnManagerShuttingDown(infobars::InfoBarManager* manager) override {
     ASSERT_EQ(infobar_service_, manager);
     infobar_service_->RemoveObserver(this);
     infobar_service_ = NULL;
@@ -193,15 +189,15 @@ class BubbleObserver : public PromptObserver {
       : ui_controller_(
             ManagePasswordsUIController::FromWebContents(web_contents)) {}
 
-  virtual ~BubbleObserver() {}
+  ~BubbleObserver() override {}
 
  private:
   // PromptObserver:
-  virtual bool IsShowingPrompt() const OVERRIDE {
+  bool IsShowingPrompt() const override {
     return ui_controller_->PasswordPendingUserDecision();
   }
 
-  virtual void AcceptImpl() const OVERRIDE {
+  void AcceptImpl() const override {
     ui_controller_->SavePassword();
     EXPECT_FALSE(IsShowingPrompt());
   }
@@ -242,14 +238,14 @@ scoped_ptr<net::test_server::HttpResponse> HandleTestAuthRequest(
         new net::test_server::BasicHttpResponse);
     http_response->set_code(net::HTTP_OK);
     http_response->set_content("Success!");
-    return http_response.PassAs<net::test_server::HttpResponse>();
+    return http_response.Pass();
   } else {
     scoped_ptr<net::test_server::BasicHttpResponse> http_response(
         new net::test_server::BasicHttpResponse);
     http_response->set_code(net::HTTP_UNAUTHORIZED);
     http_response->AddCustomHeader("WWW-Authenticate",
                                    "Basic realm=\"test realm\"");
-    return http_response.PassAs<net::test_server::HttpResponse>();
+    return http_response.Pass();
   }
 }
 
@@ -261,10 +257,10 @@ scoped_ptr<net::test_server::HttpResponse> HandleTestAuthRequest(
 class PasswordManagerBrowserTest : public InProcessBrowserTest {
  public:
   PasswordManagerBrowserTest() {}
-  virtual ~PasswordManagerBrowserTest() {}
+  ~PasswordManagerBrowserTest() override {}
 
   // InProcessBrowserTest:
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     // Use TestPasswordStore to remove a possible race. Normally the
     // PasswordStore does its database manipulation on the DB thread, which
     // creates a possible race during navigation. Specifically the
@@ -277,7 +273,7 @@ class PasswordManagerBrowserTest : public InProcessBrowserTest {
         password_manager::switches::kEnableAutomaticPasswordSaving));
   }
 
-  virtual void TearDownOnMainThread() OVERRIDE {
+  void TearDownOnMainThread() override {
     ASSERT_TRUE(embedded_test_server()->ShutdownAndWaitUntilComplete());
   }
 
@@ -663,6 +659,27 @@ IN_PROC_BROWSER_TEST_F(PasswordManagerBrowserTest,
   std::string fill_and_navigate =
       "document.getElementById('username_field').value = 'temp';"
       "document.getElementById('password_field').value = 'random';"
+      "send_xhr()";
+  ASSERT_TRUE(content::ExecuteScript(RenderViewHost(), fill_and_navigate));
+  observer.Wait();
+  EXPECT_TRUE(prompt_observer->IsShowingPrompt());
+}
+
+IN_PROC_BROWSER_TEST_F(PasswordManagerBrowserTest,
+                       PromptForXHRWithNewPasswordsWithoutOnSubmit) {
+  NavigateToFile("/password/password_xhr_submit.html");
+
+  // Verify that if XHR navigation occurs and the form is properly filled out,
+  // we try and save the password even though onsubmit hasn't been called.
+  // Specifically verify that the password form saving new passwords is treated
+  // the same as a login form.
+  NavigationObserver observer(WebContents());
+  scoped_ptr<PromptObserver> prompt_observer(
+      PromptObserver::Create(WebContents()));
+  std::string fill_and_navigate =
+      "document.getElementById('signup_username_field').value = 'temp';"
+      "document.getElementById('signup_password_field').value = 'random';"
+      "document.getElementById('confirmation_password_field').value = 'random';"
       "send_xhr()";
   ASSERT_TRUE(content::ExecuteScript(RenderViewHost(), fill_and_navigate));
   observer.Wait();

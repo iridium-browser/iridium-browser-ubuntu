@@ -22,10 +22,19 @@ namespace extensions {
 class ExternalPolicyLoader : public ExternalLoader,
                              public ExtensionManagement::Observer {
  public:
-  explicit ExternalPolicyLoader(ExtensionManagement* settings);
+  // Indicates the policies for installed extensions from this class, according
+  // to management polices.
+  enum InstallationType {
+    // Installed extensions are not allowed to be disabled or removed.
+    FORCED,
+    // Installed extensions are allowed to be disabled but not removed.
+    RECOMMENDED
+  };
+
+  ExternalPolicyLoader(ExtensionManagement* settings, InstallationType type);
 
   // ExtensionManagement::Observer implementation
-  virtual void OnExtensionManagementSettingsChanged() OVERRIDE;
+  void OnExtensionManagementSettingsChanged() override;
 
   // Adds an extension to be updated to the pref dictionary.
   static void AddExtension(base::DictionaryValue* dict,
@@ -33,14 +42,15 @@ class ExternalPolicyLoader : public ExternalLoader,
                            const std::string& update_url);
 
  protected:
-  virtual void StartLoading() OVERRIDE;
+  void StartLoading() override;
 
  private:
   friend class base::RefCountedThreadSafe<ExternalLoader>;
 
-  virtual ~ExternalPolicyLoader();
+  ~ExternalPolicyLoader() override;
 
   ExtensionManagement* settings_;
+  InstallationType type_;
 
   DISALLOW_COPY_AND_ASSIGN(ExternalPolicyLoader);
 };

@@ -22,7 +22,7 @@ namespace test {
 class TestEventHandler : public EventHandler {
  public:
   TestEventHandler();
-  virtual ~TestEventHandler();
+  ~TestEventHandler() override;
 
   int num_key_events() const { return num_key_events_; }
   int num_mouse_events() const { return num_mouse_events_; }
@@ -40,11 +40,11 @@ class TestEventHandler : public EventHandler {
   }
 
   // EventHandler overrides:
-  virtual void OnKeyEvent(KeyEvent* event) OVERRIDE;
-  virtual void OnMouseEvent(MouseEvent* event) OVERRIDE;
-  virtual void OnScrollEvent(ScrollEvent* event) OVERRIDE;
-  virtual void OnTouchEvent(TouchEvent* event) OVERRIDE;
-  virtual void OnGestureEvent(GestureEvent* event) OVERRIDE;
+  void OnKeyEvent(KeyEvent* event) override;
+  void OnMouseEvent(MouseEvent* event) override;
+  void OnScrollEvent(ScrollEvent* event) override;
+  void OnTouchEvent(TouchEvent* event) override;
+  void OnGestureEvent(GestureEvent* event) override;
 
  private:
   // How many events have been received of each type?

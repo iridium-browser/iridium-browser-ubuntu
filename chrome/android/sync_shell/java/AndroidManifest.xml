@@ -9,7 +9,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="org.chromium.chrome.sync_shell">
 
-    <uses-sdk android:minSdkVersion="14" android:targetSdkVersion="20" />
+    <uses-sdk android:minSdkVersion="14" android:targetSdkVersion="21" />
     <permission android:name="org.chromium.chrome.shell.permission.SANDBOX"
             android:protectionLevel="signature" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
@@ -19,6 +19,7 @@
     <uses-permission android:name="android.permission.GET_ACCOUNTS"/>
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
+    <uses-permission android:name="android.permission.NFC"/>
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
@@ -176,8 +177,8 @@
 
         <!-- Notification service for sync. -->
         <meta-data android:name="ipc.invalidation.ticl.listener_service_class"
-                   android:value="org.chromium.sync.notifier.InvalidationService"/>
-        <service android:name="org.chromium.sync.notifier.InvalidationService"
+                   android:value="org.chromium.components.invalidation.InvalidationClientService"/>
+        <service android:name="org.chromium.components.invalidation.InvalidationClientService"
                  android:exported="false">
             <intent-filter>
                 <action android:name="com.google.ipc.invalidation.AUTH_TOKEN_REQUEST"/>

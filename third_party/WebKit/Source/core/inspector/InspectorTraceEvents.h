@@ -5,28 +5,34 @@
 #ifndef InspectorTraceEvents_h
 #define InspectorTraceEvents_h
 
+#include "core/css/CSSSelector.h"
 #include "platform/EventTracer.h"
 #include "platform/TraceEvent.h"
+#include "platform/heap/Handle.h"
 #include "wtf/Forward.h"
+#include "wtf/Functional.h"
 
 namespace blink {
 
+class DescendantInvalidationSet;
 class Document;
+class Element;
 class Event;
 class ExecutionContext;
 class FrameView;
-class GraphicsContext;
 class GraphicsLayer;
 class KURL;
 class LayoutRect;
 class LocalFrame;
+class Node;
+class QualifiedName;
 class RenderImage;
 class RenderLayer;
 class RenderObject;
 class ResourceRequest;
 class ResourceResponse;
-class ScriptSourceCode;
-class ScriptCallStack;
+class StyleChangeReasonForTracing;
+class TracedValue;
 class WorkerThread;
 class XMLHttpRequest;
 
@@ -35,6 +41,68 @@ public:
     static PassRefPtr<TraceEvent::ConvertableToTraceFormat> beginData(FrameView*);
     static PassRefPtr<TraceEvent::ConvertableToTraceFormat> endData(RenderObject* rootForThisLayout);
 };
+
+class InspectorScheduleStyleInvalidationTrackingEvent {
+public:
+    static const char Attribute[];
+    static const char Class[];
+    static const char Id[];
+    static const char Pseudo[];
+
+    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> attributeChange(Element&, const DescendantInvalidationSet&, const QualifiedName&);
+    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> classChange(Element&, const DescendantInvalidationSet&, const AtomicString&);
+    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> idChange(Element&, const DescendantInvalidationSet&, const AtomicString&);
+    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> pseudoChange(Element&, const DescendantInvalidationSet&, CSSSelector::PseudoType);
+
+private:
+    static PassRefPtr<TracedValue> fillCommonPart(Element&, const DescendantInvalidationSet&, const char* invalidatedSelector);
+};
+
+#define TRACE_SCHEDULE_STYLE_INVALIDATION(element, invalidationSet, changeType, ...) \
+    TRACE_EVENT_INSTANT1( \
+        TRACE_DISABLED_BY_DEFAULT("devtools.timeline.invalidationTracking"), \
+        "ScheduleStyleInvalidationTracking", \
+        "data", \
+        InspectorScheduleStyleInvalidationTrackingEvent::changeType((element), (invalidationSet), __VA_ARGS__))
+
+class InspectorStyleRecalcInvalidationTrackingEvent {
+public:
+    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(Node*, const StyleChangeReasonForTracing&);
+};
+
+String descendantInvalidationSetToIdString(const DescendantInvalidationSet&);
+
+class InspectorStyleInvalidatorInvalidateEvent {
+public:
+    static const char ElementHasPendingInvalidationList[];
+    static const char InvalidateCustomPseudo[];
+    static const char InvalidationSetMatchedAttribute[];
+    static const char InvalidationSetMatchedClass[];
+    static const char InvalidationSetMatchedId[];
+    static const char InvalidationSetMatchedTagName[];
+    static const char PreventStyleSharingForParent[];
+
+    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(Element&, const char* reason);
+    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> selectorPart(Element&, const char* reason, const String&);
+    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> invalidationList(Element&, const WillBeHeapVector<RefPtrWillBeMember<DescendantInvalidationSet> >&);
+
+private:
+    static PassRefPtr<TracedValue> fillCommonPart(Element&, const char* reason);
+};
+
+#define TRACE_STYLE_INVALIDATOR_INVALIDATION(element, reason) \
+    TRACE_EVENT_INSTANT1( \
+        TRACE_DISABLED_BY_DEFAULT("devtools.timeline.invalidationTracking"), \
+        "StyleInvalidatorInvalidationTracking", \
+        "data", \
+        InspectorStyleInvalidatorInvalidateEvent::data((element), (InspectorStyleInvalidatorInvalidateEvent::reason)))
+
+#define TRACE_STYLE_INVALIDATOR_INVALIDATION_SELECTORPART(element, reason, singleSelectorPart) \
+    TRACE_EVENT_INSTANT1( \
+        TRACE_DISABLED_BY_DEFAULT("devtools.timeline.invalidationTracking"), \
+        "StyleInvalidatorInvalidationTracking", \
+        "data", \
+        InspectorStyleInvalidatorInvalidateEvent::selectorPart((element), (InspectorStyleInvalidatorInvalidateEvent::reason), (singleSelectorPart)))
 
 class InspectorLayoutInvalidationTrackingEvent {
 public:
@@ -118,7 +186,6 @@ public:
     static const char RemovedFromSquashingLayer[];
     static const char ReflectionLayerChanged[];
     static const char NewCompositedLayer[];
-    static const char AncestorRequiresNewLayer[];
 
     static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(const RenderLayer*, const char* reason);
 };

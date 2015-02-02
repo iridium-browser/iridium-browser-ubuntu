@@ -10,7 +10,7 @@
 
 #include "GrContext.h"
 #include "GrContextFactory.h"
-#include "GrProcessor.h"
+#include "GrFragmentProcessor.h"
 #include "SkColorFilter.h"
 #include "SkGr.h"
 #include "Test.h"
@@ -99,12 +99,13 @@ static void test_getConstantColorComponents(skiatest::Reporter* reporter, GrCont
         const GetConstantComponentTestCase& test = filterTests[i];
         SkAutoTUnref<SkColorFilter> cf(SkColorFilter::CreateModeFilter(test.filterColor, test.filterMode));
         SkAutoTUnref<GrFragmentProcessor> effect(cf->asFragmentProcessor(grContext));
-        GrColor color = test.inputColor;
-        uint32_t components = test.inputComponents;
-        effect->getConstantColorComponents(&color, &components);
+        GrProcessor::InvariantOutput inout;
+        inout.setToOther(test.inputComponents, test.inputColor,
+                         GrProcessor::InvariantOutput::kWill_ReadInput);
+        effect->computeInvariantOutput(&inout);
 
-        REPORTER_ASSERT(reporter, filterColor(color, components) == test.outputColor);
-        REPORTER_ASSERT(reporter, test.outputComponents == components);
+        REPORTER_ASSERT(reporter, filterColor(inout.color(), inout.validFlags()) == test.outputColor);
+        REPORTER_ASSERT(reporter, test.outputComponents == inout.validFlags());
     }
 }
 

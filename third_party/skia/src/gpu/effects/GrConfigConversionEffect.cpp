@@ -24,7 +24,7 @@ public:
         fPMConversion = configConversionEffect.pmConversion();
     }
 
-    virtual void emitCode(GrGLProgramBuilder* builder,
+    virtual void emitCode(GrGLFPBuilder* builder,
                           const GrFragmentProcessor&,
                           const GrProcessorKey& key,
                           const char* outputColor,
@@ -36,7 +36,7 @@ public:
         SkString tmpDecl;
         tmpVar.appendDecl(builder->ctxInfo(), &tmpDecl);
 
-        GrGLFragmentShaderBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+        GrGLFPFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
 
         fsBuilder->codeAppendf("%s;", tmpDecl.c_str());
 
@@ -81,7 +81,7 @@ public:
             fsBuilder->codeAppendf("%s = %s;", outputColor, tmpVar.c_str());
         }
         SkString modulate;
-        GrGLSLMulVarBy4f(&modulate, 2, outputColor, inputColor);
+        GrGLSLMulVarBy4f(&modulate, outputColor, inputColor);
         fsBuilder->codeAppend(modulate.c_str());
     }
 
@@ -119,16 +119,14 @@ const GrBackendFragmentProcessorFactory& GrConfigConversionEffect::getFactory() 
     return GrTBackendFragmentProcessorFactory<GrConfigConversionEffect>::getInstance();
 }
 
-bool GrConfigConversionEffect::onIsEqual(const GrProcessor& s) const {
+bool GrConfigConversionEffect::onIsEqual(const GrFragmentProcessor& s) const {
     const GrConfigConversionEffect& other = s.cast<GrConfigConversionEffect>();
-    return this->texture(0) == s.texture(0) &&
-           other.fSwapRedAndBlue == fSwapRedAndBlue &&
+    return other.fSwapRedAndBlue == fSwapRedAndBlue &&
            other.fPMConversion == fPMConversion;
 }
 
-void GrConfigConversionEffect::getConstantColorComponents(GrColor* color,
-                                                          uint32_t* validFlags) const {
-    this->updateConstantColorComponentsForModulation(color, validFlags);
+void GrConfigConversionEffect::onComputeInvariantOutput(InvariantOutput* inout) const {
+    this->updateInvariantOutputForModulation(inout);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -176,9 +174,9 @@ void GrConfigConversionEffect::TestForPreservingPMConversions(GrContext* context
         }
     }
 
-    GrTextureDesc desc;
-    desc.fFlags = kRenderTarget_GrTextureFlagBit |
-                  kNoStencil_GrTextureFlagBit;
+    GrSurfaceDesc desc;
+    desc.fFlags = kRenderTarget_GrSurfaceFlag |
+                  kNoStencil_GrSurfaceFlag;
     desc.fWidth = 256;
     desc.fHeight = 256;
     desc.fConfig = kRGBA_8888_GrPixelConfig;
@@ -191,7 +189,7 @@ void GrConfigConversionEffect::TestForPreservingPMConversions(GrContext* context
     if (!tempTex.get()) {
         return;
     }
-    desc.fFlags = kNone_GrTextureFlags;
+    desc.fFlags = kNone_GrSurfaceFlags;
     SkAutoTUnref<GrTexture> dataTex(context->createUncachedTexture(desc, data, 0));
     if (!dataTex.get()) {
         return;

@@ -15,10 +15,10 @@
 class ChromeManifestTest : public extensions::ManifestTest {
  public:
   ChromeManifestTest();
-  virtual ~ChromeManifestTest();
+  ~ChromeManifestTest() override;
 
   // ManifestTest overrides:
-  virtual base::FilePath GetTestDataDir() OVERRIDE;
+  base::FilePath GetTestDataDir() override;
 
  private:
   // Force the manifest tests to run as though they are on trunk, since several

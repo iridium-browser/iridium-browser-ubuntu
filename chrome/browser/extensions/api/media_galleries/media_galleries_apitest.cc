@@ -71,14 +71,14 @@ class DoNothingMediaFolderFinder : public MediaFolderFinder {
       const MediaFolderFinderResultsCallback& callback)
       : MediaFolderFinder(callback) {
   }
-  virtual ~DoNothingMediaFolderFinder() {}
+  ~DoNothingMediaFolderFinder() override {}
 
   static MediaFolderFinder* CreateDoNothingMediaFolderFinder(
       const MediaFolderFinderResultsCallback& callback) {
     return new DoNothingMediaFolderFinder(callback);
   }
 
-  virtual void StartScan() OVERRIDE {}
+  void StartScan() override {}
 
  private:
 };
@@ -93,13 +93,13 @@ class TestMediaGalleriesAddScanResultsFunction
   }
 
  protected:
-  virtual ~TestMediaGalleriesAddScanResultsFunction() {}
+  ~TestMediaGalleriesAddScanResultsFunction() override {}
 
   // Accepts the dialog as soon as it is created.
-  virtual MediaGalleriesScanResultController* MakeDialog(
+  MediaGalleriesScanResultController* MakeDialog(
       content::WebContents* web_contents,
       const extensions::Extension& extension,
-      const base::Closure& on_finish) OVERRIDE {
+      const base::Closure& on_finish) override {
     MediaGalleriesScanResultController* controller =
         extensions::MediaGalleriesAddScanResultsFunction::MakeDialog(
             web_contents, extension, on_finish);
@@ -112,9 +112,9 @@ class TestMediaGalleriesAddScanResultsFunction
 class MediaGalleriesPlatformAppBrowserTest : public PlatformAppBrowserTest {
  protected:
   MediaGalleriesPlatformAppBrowserTest() : test_jpg_size_(0) {}
-  virtual ~MediaGalleriesPlatformAppBrowserTest() {}
+  ~MediaGalleriesPlatformAppBrowserTest() override {}
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     PlatformAppBrowserTest::SetUpOnMainThread();
     ensure_media_directories_exists_.reset(new EnsureMediaDirectoriesExists);
 
@@ -124,7 +124,7 @@ class MediaGalleriesPlatformAppBrowserTest : public PlatformAppBrowserTest {
     test_jpg_size_ = base::checked_cast<int>(file_size);
   }
 
-  virtual void TearDownOnMainThread() OVERRIDE {
+  void TearDownOnMainThread() override {
     ensure_media_directories_exists_.reset();
     PlatformAppBrowserTest::TearDownOnMainThread();
   }
@@ -438,12 +438,12 @@ class MediaGalleriesPlatformAppBrowserTest : public PlatformAppBrowserTest {
 class MediaGalleriesPlatformAppPpapiTest
     : public MediaGalleriesPlatformAppBrowserTest {
  protected:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     MediaGalleriesPlatformAppBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kEnablePepperTesting);
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     MediaGalleriesPlatformAppBrowserTest::SetUpOnMainThread();
 
     ASSERT_TRUE(PathService::Get(chrome::DIR_GEN_TEST_DATA, &app_dir_));
@@ -515,9 +515,8 @@ IN_PROC_BROWSER_TEST_F(MediaGalleriesPlatformAppBrowserTest,
   ASSERT_TRUE(RunMediaGalleriesTest("no_galleries_copy_to")) << message_;
 }
 
-// Test is flaky. crbug.com/416128
 IN_PROC_BROWSER_TEST_F(MediaGalleriesPlatformAppBrowserTest,
-                       DISABLED_MediaGalleriesRead) {
+                       MediaGalleriesRead) {
   RemoveAllGalleries();
   MakeSingleFakeGallery(NULL);
   base::ListValue custom_args;

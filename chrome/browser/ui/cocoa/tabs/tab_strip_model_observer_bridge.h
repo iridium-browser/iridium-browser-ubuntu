@@ -24,39 +24,36 @@ class WebContents;
 class TabStripModelObserverBridge : public TabStripModelObserver {
  public:
   TabStripModelObserverBridge(TabStripModel* model, id controller);
-  virtual ~TabStripModelObserverBridge();
+  ~TabStripModelObserverBridge() override;
 
   // Overridden from TabStripModelObserver
-  virtual void TabInsertedAt(content::WebContents* contents,
-                             int index,
-                             bool foreground) OVERRIDE;
-  virtual void TabClosingAt(TabStripModel* tab_strip_model,
-                            content::WebContents* contents,
-                            int index) OVERRIDE;
-  virtual void TabDetachedAt(content::WebContents* contents,
-                             int index) OVERRIDE;
-  virtual void TabDeactivated(content::WebContents* contents) OVERRIDE;
-  virtual void ActiveTabChanged(content::WebContents* old_contents,
-                                content::WebContents* new_contents,
-                                int index,
-                                int reason) OVERRIDE;
-  virtual void TabSelectionChanged(
-      TabStripModel* tab_strip_model,
-      const ui::ListSelectionModel& old_model) OVERRIDE;
-  virtual void TabMoved(content::WebContents* contents,
-                        int from_index,
-                        int to_index) OVERRIDE;
-  virtual void TabChangedAt(content::WebContents* contents,
-                            int index,
-                            TabChangeType change_type) OVERRIDE;
-  virtual void TabReplacedAt(TabStripModel* tab_strip_model,
-                             content::WebContents* old_contents,
-                             content::WebContents* new_contents,
-                             int index) OVERRIDE;
-  virtual void TabMiniStateChanged(content::WebContents* contents,
-                                   int index) OVERRIDE;
-  virtual void TabStripEmpty() OVERRIDE;
-  virtual void TabStripModelDeleted() OVERRIDE;
+  void TabInsertedAt(content::WebContents* contents,
+                     int index,
+                     bool foreground) override;
+  void TabClosingAt(TabStripModel* tab_strip_model,
+                    content::WebContents* contents,
+                    int index) override;
+  void TabDetachedAt(content::WebContents* contents, int index) override;
+  void TabDeactivated(content::WebContents* contents) override;
+  void ActiveTabChanged(content::WebContents* old_contents,
+                        content::WebContents* new_contents,
+                        int index,
+                        int reason) override;
+  void TabSelectionChanged(TabStripModel* tab_strip_model,
+                           const ui::ListSelectionModel& old_model) override;
+  void TabMoved(content::WebContents* contents,
+                int from_index,
+                int to_index) override;
+  void TabChangedAt(content::WebContents* contents,
+                    int index,
+                    TabChangeType change_type) override;
+  void TabReplacedAt(TabStripModel* tab_strip_model,
+                     content::WebContents* old_contents,
+                     content::WebContents* new_contents,
+                     int index) override;
+  void TabMiniStateChanged(content::WebContents* contents, int index) override;
+  void TabStripEmpty() override;
+  void TabStripModelDeleted() override;
 
  private:
   id controller_;  // weak, owns me

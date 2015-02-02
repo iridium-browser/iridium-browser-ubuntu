@@ -7,7 +7,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/chromeos/kiosk_mode/mock_kiosk_mode_settings.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "chrome/test/base/ui_test_utils.h"
+#include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/views/widget/widget.h"
 
@@ -18,15 +18,15 @@ public:
   explicit MockIdleLogoutSettingsProvider(KioskModeSettings* mock_settings)
       : mock_settings_(mock_settings) {}
 
-  virtual base::TimeDelta GetCountdownUpdateInterval() OVERRIDE {
+  virtual base::TimeDelta GetCountdownUpdateInterval() override {
     return base::TimeDelta::FromMilliseconds(0);
   }
 
-  virtual KioskModeSettings* GetKioskModeSettings() OVERRIDE {
+  virtual KioskModeSettings* GetKioskModeSettings() override {
     return mock_settings_;
   }
 
-  virtual void LogoutCurrentUser(IdleLogoutDialogView* dialog) OVERRIDE {
+  virtual void LogoutCurrentUser(IdleLogoutDialogView* dialog) override {
     dialog->GetWidget()->Close();
   }
 
@@ -42,7 +42,7 @@ class IdleLogoutDialogViewTest : public InProcessBrowserTest {
 
   virtual ~IdleLogoutDialogViewTest() {}
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  virtual void SetUpOnMainThread() override {
     mock_settings_.reset(new MockKioskModeSettings());
     mock_provider_.reset(
         new MockIdleLogoutSettingsProvider(mock_settings_.get()));

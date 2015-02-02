@@ -7,8 +7,8 @@
 #include <cmath>
 
 #include "athena/screen/public/screen_manager.h"
-#include "athena/wm/public/window_list_provider.h"
 #include "athena/wm/public/window_manager.h"
+#include "athena/wm/window_list_provider_impl.h"
 #include "base/bind.h"
 #include "ui/aura/scoped_window_targeter.h"
 #include "ui/aura/window.h"
@@ -36,17 +36,34 @@ const int kDragHandleHeight = 80;
 const int kDragHandleMargin = 1;
 const int kDividerWidth = kDragHandleWidth + 2 * kDragHandleMargin;
 
+// Max distance from the scroll end position to the middle of the screen where
+// we would go into the split view mode.
+const float kMaxDistanceFromMiddle = 120.0f;
+
+// The minimum x-velocity required for a fling to disengage split view mode
+// when targeted to the drag handle.
+const float kMinFlingVelocity = 800.0f;
+
+enum WindowToActivate {
+  // Do not activate either of |left_window_| or |right_window_|.
+  WINDOW_NONE,
+  // Activate |left_window_|.
+  WINDOW_LEFT,
+  // Activate |right_window_|.
+  WINDOW_RIGHT
+};
+
 // Always returns the same target.
 class StaticViewTargeterDelegate : public views::ViewTargeterDelegate {
  public:
   explicit StaticViewTargeterDelegate(views::View* target) : target_(target) {}
 
-  virtual ~StaticViewTargeterDelegate() {}
+  ~StaticViewTargeterDelegate() override {}
 
  private:
   // views::ViewTargeterDelegate:
   virtual views::View* TargetForRect(views::View* root,
-                                     const gfx::Rect& rect) OVERRIDE {
+                                     const gfx::Rect& rect) override {
     return target_;
   }
 
@@ -70,15 +87,12 @@ class PriorityWindowTargeter : public aura::WindowTargeter,
     window_->AddObserver(this);
   }
 
-  virtual ~PriorityWindowTargeter() {
-    window_->RemoveObserver(this);
-  }
+  ~PriorityWindowTargeter() override { window_->RemoveObserver(this); }
 
  private:
   // aura::WindowTargeter:
-  virtual ui::EventTarget* FindTargetForLocatedEvent(
-      ui::EventTarget* root,
-      ui::LocatedEvent* event) OVERRIDE {
+  ui::EventTarget* FindTargetForLocatedEvent(ui::EventTarget* root,
+                                             ui::LocatedEvent* event) override {
     if (!window_ || (event->type() != ui::ET_TOUCH_PRESSED))
       return WindowTargeter::FindTargetForLocatedEvent(root, event);
     CHECK_EQ(window_, priority_view_->GetWidget()->GetNativeWindow());
@@ -113,10 +127,10 @@ class PriorityWindowTargeter : public aura::WindowTargeter,
   }
 
   // aura::WindowObserver:
-  virtual void OnWindowDestroying(aura::Window* window) OVERRIDE {
+  void OnWindowDestroying(aura::Window* window) override {
     DCHECK_EQ(window, window_);
     window_->RemoveObserver(this);
-    window_ = NULL;
+    window_ = nullptr;
   }
 
   // Minimum dimension of a target to be comfortably touchable.
@@ -149,20 +163,22 @@ bool IsLandscapeOrientation(gfx::Display::Rotation rotation) {
 
 SplitViewController::SplitViewController(
     aura::Window* container,
-    WindowListProvider* window_list_provider)
+    WindowListProviderImpl* window_list_provider)
     : state_(INACTIVE),
       container_(container),
       window_list_provider_(window_list_provider),
-      left_window_(NULL),
-      right_window_(NULL),
+      left_window_(nullptr),
+      right_window_(nullptr),
       divider_position_(0),
       divider_scroll_start_position_(0),
-      divider_widget_(NULL),
-      drag_handle_(NULL),
+      divider_widget_(nullptr),
+      drag_handle_(nullptr),
       weak_factory_(this) {
+  window_list_provider_->AddObserver(this);
 }
 
 SplitViewController::~SplitViewController() {
+  window_list_provider_->RemoveObserver(this);
 }
 
 bool SplitViewController::CanActivateSplitViewMode() const {
@@ -245,9 +261,9 @@ void SplitViewController::ReplaceWindow(aura::Window* window,
   CHECK(replace_with);
   CHECK(window == left_window_ || window == right_window_);
   CHECK(replace_with != left_window_ && replace_with != right_window_);
-  DCHECK(window_list_provider_->IsWindowInList(replace_with));
+  DCHECK(window_list_provider_->IsValidWindow(replace_with));
 
-  aura::Window* not_replaced = NULL;
+  aura::Window* not_replaced = nullptr;
   if (window == left_window_) {
     left_window_ = replace_with;
     not_replaced = right_window_;
@@ -268,7 +284,7 @@ void SplitViewController::DeactivateSplitMode() {
   CHECK_EQ(ACTIVE, state_);
   SetState(INACTIVE);
   UpdateLayout(false);
-  left_window_ = right_window_ = NULL;
+  left_window_ = right_window_ = nullptr;
 }
 
 void SplitViewController::InitializeDivider() {
@@ -352,11 +368,45 @@ gfx::Rect SplitViewController::GetRightAreaBounds() {
                    work_area.height());
 }
 
+void SplitViewController::OnWindowAddedToList(aura::Window* added_window) {
+}
+
+void SplitViewController::OnWindowRemovedFromList(aura::Window* removed_window,
+                                                  int index) {
+  if (!IsSplitViewModeActive() ||
+      (removed_window != left_window_ && removed_window != right_window_)) {
+    return;
+  }
+
+  DCHECK(!window_list_provider_->IsWindowInList(removed_window));
+
+  const aura::Window::Windows windows = window_list_provider_->GetWindowList();
+  CHECK_GE(static_cast<int>(windows.size()), 1);
+  DCHECK_GE(index, static_cast<int>(windows.size() - 1));
+  DCHECK_LE(index, static_cast<int>(windows.size()));
+
+  if (windows.size() == 1) {
+    DeactivateSplitMode();
+    return;
+  }
+
+  aura::Window* next_window = *(windows.rbegin() + 1);
+  if (removed_window == left_window_) {
+    CHECK(right_window_ == windows.back());
+    left_window_ = next_window;
+  } else {
+    CHECK(left_window_ == windows.back());
+    CHECK(removed_window == right_window_);
+    right_window_ = next_window;
+  }
+  UpdateLayout(false);
+}
+
 void SplitViewController::SetState(SplitViewController::State state) {
   if (state_ == state)
     return;
 
-  if (divider_widget_ == NULL)
+  if (divider_widget_ == nullptr)
     InitializeDivider();
 
   state_ = state;
@@ -437,7 +487,7 @@ void SplitViewController::UpdateLayout(bool animate) {
     SetWindowTransforms(
         left_transform, right_transform, divider_transform, animate);
   }
-  // Note: |left_window_| and |right_window_| may be NULL if calling
+  // Note: |left_window_| and |right_window_| may be nullptr if calling
   // SetWindowTransforms():
   // - caused the in-progress animation to abort.
   // - started a zero duration animation.
@@ -478,7 +528,7 @@ void SplitViewController::SetWindowTransforms(
 
 void SplitViewController::OnAnimationCompleted() {
   // Animation can be cancelled when deactivated.
-  if (left_window_ == NULL)
+  if (left_window_ == nullptr)
     return;
   UpdateLayout(false);
 
@@ -487,8 +537,8 @@ void SplitViewController::OnAnimationCompleted() {
   to_hide_.clear();
 
   if (state_ == INACTIVE) {
-    left_window_ = NULL;
-    right_window_ = NULL;
+    left_window_ = nullptr;
+    right_window_ = nullptr;
   }
 }
 
@@ -496,78 +546,12 @@ int SplitViewController::GetDefaultDividerPosition() {
   return container_->GetBoundsInScreen().width() / 2;
 }
 
-///////////////////////////////////////////////////////////////////////////////
-// BezelController::ScrollDelegate:
-
-void SplitViewController::BezelScrollBegin(BezelController::Bezel bezel,
-                                           float delta) {
-  if (!BezelCanScroll())
-    return;
-
-  SetState(SCROLLING);
-
-  const aura::Window::Windows& windows = window_list_provider_->GetWindowList();
-  CHECK(windows.size() >= 2);
-  aura::Window::Windows::const_reverse_iterator iter = windows.rbegin();
-  aura::Window* current_window = *(iter);
-
-  if (delta > 0) {
-    right_window_ = current_window;
-    left_window_ = *(iter + 1);
-  } else {
-    left_window_ = current_window;
-    right_window_ = *(iter + 1);
-  }
-
-  CHECK(left_window_);
-  CHECK(right_window_);
-
-  // Calculate divider_scroll_start_position_
-  gfx::Screen* screen = gfx::Screen::GetScreenFor(container_);
-  const gfx::Rect& display_bounds =
-      screen->GetDisplayNearestWindow(container_).bounds();
-  gfx::Rect container_bounds = container_->GetBoundsInScreen();
-  divider_scroll_start_position_ =
-      delta > 0 ? display_bounds.x() - container_bounds.x()
-                : display_bounds.right() - container_bounds.x();
-
-  divider_position_ = divider_scroll_start_position_ + delta;
-  UpdateLayout(false);
+float SplitViewController::GetMaxDistanceFromMiddleForTest() const {
+  return kMaxDistanceFromMiddle;
 }
 
-void SplitViewController::BezelScrollEnd() {
-  if (state_ != SCROLLING)
-    return;
-
-  // Max distance from the scroll end position to the middle of the screen where
-  // we would go into the split view mode.
-  const int kMaxDistanceFromMiddle = 120;
-  const int default_divider_position = GetDefaultDividerPosition();
-  if (std::abs(default_divider_position - divider_position_) <=
-      kMaxDistanceFromMiddle) {
-    divider_position_ = default_divider_position;
-    SetState(ACTIVE);
-  } else if (divider_position_ < default_divider_position) {
-    divider_position_ = 0;
-    SetState(INACTIVE);
-    wm::ActivateWindow(right_window_);
-  } else {
-    divider_position_ = container_->GetBoundsInScreen().width();
-    SetState(INACTIVE);
-    wm::ActivateWindow(left_window_);
-  }
-  UpdateLayout(true);
-}
-
-void SplitViewController::BezelScrollUpdate(float delta) {
-  if (state_ != SCROLLING)
-    return;
-  divider_position_ = divider_scroll_start_position_ + delta;
-  UpdateLayout(false);
-}
-
-bool SplitViewController::BezelCanScroll() {
-  return CanActivateSplitViewMode();
+float SplitViewController::GetMinFlingVelocityForTest() const {
+  return kMinFlingVelocity;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -581,12 +565,42 @@ void SplitViewController::HandleScrollBegin(float delta) {
   UpdateLayout(false);
 }
 
-void SplitViewController::HandleScrollEnd() {
-  BezelScrollEnd();
+void SplitViewController::HandleScrollEnd(float velocity) {
+  if (state_ != SCROLLING)
+    return;
+
+  int delta = GetDefaultDividerPosition() - divider_position_;
+  WindowToActivate window = WINDOW_NONE;
+  if (std::abs(velocity) > kMinFlingVelocity)
+    window = velocity > 0 ? WINDOW_LEFT : WINDOW_RIGHT;
+  else if (std::abs(delta) > kMaxDistanceFromMiddle)
+    window = delta > 0 ? WINDOW_RIGHT : WINDOW_LEFT;
+
+  switch (window) {
+    case WINDOW_NONE:
+      divider_position_ = GetDefaultDividerPosition();
+      SetState(ACTIVE);
+      break;
+    case WINDOW_LEFT:
+      divider_position_ = container_->GetBoundsInScreen().width();
+      SetState(INACTIVE);
+      wm::ActivateWindow(left_window_);
+      break;
+    case WINDOW_RIGHT:
+      divider_position_ = 0;
+      SetState(INACTIVE);
+      wm::ActivateWindow(right_window_);
+      break;
+  }
+
+  UpdateLayout(true);
 }
 
 void SplitViewController::HandleScrollUpdate(float delta) {
-  BezelScrollUpdate(delta);
+  if (state_ != SCROLLING)
+    return;
+  divider_position_ = divider_scroll_start_position_ + delta;
+  UpdateLayout(false);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

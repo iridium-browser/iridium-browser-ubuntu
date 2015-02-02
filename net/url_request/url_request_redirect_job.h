@@ -42,15 +42,14 @@ class NET_EXPORT URLRequestRedirectJob : public URLRequestJob {
                         const std::string& redirect_reason);
 
   // URLRequestJob implementation:
-  virtual void GetResponseInfo(HttpResponseInfo* info) OVERRIDE;
-  virtual void GetLoadTimingInfo(
-      LoadTimingInfo* load_timing_info) const OVERRIDE;
-  virtual void Start() OVERRIDE;
-  virtual bool CopyFragmentOnRedirect(const GURL& location) const OVERRIDE;
-  virtual int GetResponseCode() const OVERRIDE;
+  void GetResponseInfo(HttpResponseInfo* info) override;
+  void GetLoadTimingInfo(LoadTimingInfo* load_timing_info) const override;
+  void Start() override;
+  bool CopyFragmentOnRedirect(const GURL& location) const override;
+  int GetResponseCode() const override;
 
  private:
-  virtual ~URLRequestRedirectJob();
+  ~URLRequestRedirectJob() override;
 
   void StartAsync();
 

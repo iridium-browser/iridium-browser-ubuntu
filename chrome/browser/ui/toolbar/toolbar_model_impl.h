@@ -31,25 +31,24 @@ class X509Certificate;
 class ToolbarModelImpl : public ToolbarModel {
  public:
   explicit ToolbarModelImpl(ToolbarModelDelegate* delegate);
-  virtual ~ToolbarModelImpl();
+  ~ToolbarModelImpl() override;
 
   static SecurityLevel GetSecurityLevelForWebContents(
       content::WebContents* web_contents);
 
  private:
   // ToolbarModel:
-  virtual base::string16 GetText() const OVERRIDE;
-  virtual base::string16 GetFormattedURL(size_t* prefix_end) const OVERRIDE;
-  virtual base::string16 GetCorpusNameForMobile() const OVERRIDE;
-  virtual GURL GetURL() const OVERRIDE;
-  virtual bool WouldPerformSearchTermReplacement(
-      bool ignore_editing) const OVERRIDE;
-  virtual SecurityLevel GetSecurityLevel(bool ignore_editing) const OVERRIDE;
-  virtual int GetIcon() const OVERRIDE;
-  virtual int GetIconForSecurityLevel(SecurityLevel level) const OVERRIDE;
-  virtual base::string16 GetEVCertName() const OVERRIDE;
-  virtual bool ShouldDisplayURL() const OVERRIDE;
-  virtual bool WouldOmitURLDueToOriginChip() const OVERRIDE;
+  base::string16 GetText() const override;
+  base::string16 GetFormattedURL(size_t* prefix_end) const override;
+  base::string16 GetCorpusNameForMobile() const override;
+  GURL GetURL() const override;
+  bool WouldPerformSearchTermReplacement(bool ignore_editing) const override;
+  SecurityLevel GetSecurityLevel(bool ignore_editing) const override;
+  int GetIcon() const override;
+  int GetIconForSecurityLevel(SecurityLevel level) const override;
+  base::string16 GetEVCertName() const override;
+  bool ShouldDisplayURL() const override;
+  bool WouldOmitURLDueToOriginChip() const override;
 
   // Returns the navigation controller used to retrieve the navigation entry
   // from which the states are retrieved.

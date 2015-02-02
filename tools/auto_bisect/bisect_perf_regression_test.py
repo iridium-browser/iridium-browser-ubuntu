@@ -5,29 +5,129 @@
 import os
 import re
 import shutil
+import sys
 import unittest
 
-import bisect_perf_regression
-import bisect_results
-import source_control as source_control_module
+SRC = os.path.join(os.path.dirname(__file__), os.path.pardir, os.path.pardir)
+sys.path.append(os.path.join(SRC, 'third_party', 'pymock'))
 
-def _GetBisectPerformanceMetricsInstance():
-  """Returns an instance of the BisectPerformanceMetrics class."""
-  options_dict = {
+import bisect_perf_regression
+import bisect_utils
+import mock
+import source_control
+
+
+# Regression confidence: 0%
+CLEAR_NON_REGRESSION = [
+    # Mean: 30.223 Std. Dev.: 11.383
+    [[16.886], [16.909], [16.99], [17.723], [17.952], [18.118], [19.028],
+     [19.552], [21.954], [38.573], [38.839], [38.965], [40.007], [40.572],
+     [41.491], [42.002], [42.33], [43.109], [43.238]],
+    # Mean: 34.76 Std. Dev.: 11.516
+    [[16.426], [17.347], [20.593], [21.177], [22.791], [27.843], [28.383],
+     [28.46], [29.143], [40.058], [40.303], [40.558], [41.918], [42.44],
+     [45.223], [46.494], [50.002], [50.625], [50.839]]
+]
+# Regression confidence: ~ 90%
+ALMOST_REGRESSION = [
+    # Mean: 30.042 Std. Dev.: 2.002
+    [[26.146], [28.04], [28.053], [28.074], [28.168], [28.209], [28.471],
+     [28.652], [28.664], [30.862], [30.973], [31.002], [31.897], [31.929],
+     [31.99], [32.214], [32.323], [32.452], [32.696]],
+    # Mean: 33.008 Std. Dev.: 4.265
+    [[34.963], [30.741], [39.677], [39.512], [34.314], [31.39], [34.361],
+     [25.2], [30.489], [29.434]]
+]
+# Regression confidence: ~ 98%
+BARELY_REGRESSION = [
+    # Mean: 28.828 Std. Dev.: 1.993
+    [[26.96], [27.605], [27.768], [27.829], [28.006], [28.206], [28.393],
+     [28.911], [28.933], [30.38], [30.462], [30.808], [31.74], [31.805],
+     [31.899], [32.077], [32.454], [32.597], [33.155]],
+    # Mean: 31.156 Std. Dev.: 1.980
+    [[28.729], [29.112], [29.258], [29.454], [29.789], [30.036], [30.098],
+     [30.174], [30.534], [32.285], [32.295], [32.552], [32.572], [32.967],
+     [33.165], [33.403], [33.588], [33.744], [34.147], [35.84]]
+]
+# Regression confidence: 99.5%
+CLEAR_REGRESSION = [
+    # Mean: 30.254 Std. Dev.: 2.987
+    [[26.494], [26.621], [26.701], [26.997], [26.997], [27.05], [27.37],
+     [27.488], [27.556], [31.846], [32.192], [32.21], [32.586], [32.596],
+     [32.618], [32.95], [32.979], [33.421], [33.457], [34.97]],
+    # Mean: 33.190 Std. Dev.: 2.972
+    [[29.547], [29.713], [29.835], [30.132], [30.132], [30.33], [30.406],
+     [30.592], [30.72], [34.486], [35.247], [35.253], [35.335], [35.378],
+     [35.934], [36.233], [36.41], [36.947], [37.982]]
+]
+# Default options for the dry run
+DEFAULT_OPTIONS = {
     'debug_ignore_build': True,
     'debug_ignore_sync': True,
     'debug_ignore_perf_test': True,
+    'debug_ignore_regression_confidence': True,
     'command': 'fake_command',
     'metric': 'fake/metric',
     'good_revision': 280000,
     'bad_revision': 280005,
-  }
-  bisect_options = bisect_perf_regression.BisectOptions.FromDict(options_dict)
-  source_control = source_control_module.DetermineAndCreateSourceControl(
-      bisect_options)
-  bisect_instance = bisect_perf_regression.BisectPerformanceMetrics(
-      source_control, bisect_options)
-  return bisect_instance
+}
+
+# This global is a placeholder for a generator to be defined by the testcases
+# that use _MockRunTest
+_MockResultsGenerator = (x for x in [])
+
+def _FakeTestResult(values):
+  result_dict = {'mean': 0.0, 'std_err': 0.0, 'std_dev': 0.0, 'values': values}
+  success_code = 0
+  return (result_dict, success_code)
+
+
+def _MockRunTests(*args, **kwargs):
+  _, _ = args, kwargs
+  return _FakeTestResult(_MockResultsGenerator.next())
+
+
+def _GetBisectPerformanceMetricsInstance(options_dict):
+  """Returns an instance of the BisectPerformanceMetrics class."""
+  opts = bisect_perf_regression.BisectOptions.FromDict(options_dict)
+  return bisect_perf_regression.BisectPerformanceMetrics(opts, os.getcwd())
+
+
+def _GetExtendedOptions(improvement_dir, fake_first, ignore_confidence=True):
+  """Returns the a copy of the default options dict plus some options."""
+  result = dict(DEFAULT_OPTIONS)
+  result.update({
+      'improvement_direction': improvement_dir,
+      'debug_fake_first_test_mean': fake_first,
+      'debug_ignore_regression_confidence': ignore_confidence})
+  return result
+
+
+def _GenericDryRun(options, print_results=False):
+  """Performs a dry run of the bisector.
+
+  Args:
+    options: Dictionary containing the options for the bisect instance.
+    print_results: Boolean telling whether to call FormatAndPrintResults.
+
+  Returns:
+    The results dictionary as returned by the bisect Run method.
+  """
+  # Disable rmtree to avoid deleting local trees.
+  old_rmtree = shutil.rmtree
+  try:
+    shutil.rmtree = lambda path, onerror: None
+    bisect_instance = _GetBisectPerformanceMetricsInstance(options)
+    results = bisect_instance.Run(
+        bisect_instance.opts.command, bisect_instance.opts.bad_revision,
+        bisect_instance.opts.good_revision, bisect_instance.opts.metric)
+
+    if print_results:
+      bisect_instance.printer.FormatAndPrintResults(results)
+
+    return results
+  finally:
+    shutil.rmtree = old_rmtree
 
 
 class BisectPerfRegressionTest(unittest.TestCase):
@@ -40,74 +140,6 @@ class BisectPerfRegressionTest(unittest.TestCase):
 
   def tearDown(self):
     os.chdir(self.cwd)
-
-  def _AssertConfidence(self, score, bad_values, good_values):
-    """Checks whether the given sets of values have a given confidence score.
-
-    The score represents our confidence that the two sets of values wouldn't
-    be as different as they are just by chance; that is, that some real change
-    occurred between the two sets of values.
-
-    Args:
-      score: Expected confidence score.
-      bad_values: First list of numbers.
-      good_values: Second list of numbers.
-    """
-    # ConfidenceScore takes a list of lists but these lists are flattened
-    # inside the function.
-    confidence = bisect_results.ConfidenceScore(
-        [[v] for v in bad_values],
-        [[v] for v in good_values])
-    self.assertEqual(score, confidence)
-
-  def testConfidenceScore_ZeroConfidence(self):
-    # The good and bad sets contain the same values, so the confidence that
-    # they're different should be zero.
-    self._AssertConfidence(0.0, [4, 5, 7, 6, 8, 7], [8, 7, 6, 7, 5, 4])
-
-  def testConfidenceScore_MediumConfidence(self):
-    self._AssertConfidence(80.0, [0, 1, 1, 1, 2, 2], [1, 1, 1, 3, 3, 4])
-
-  def testConfidenceScore_HighConfidence(self):
-    self._AssertConfidence(95.0, [0, 1, 1, 1, 2, 2], [1, 2, 2, 3, 3, 4])
-
-  def testConfidenceScore_VeryHighConfidence(self):
-    # Confidence is high if the two sets of values have no internal variance.
-    self._AssertConfidence(99.9, [1, 1, 1, 1], [1.2, 1.2, 1.2, 1.2])
-    self._AssertConfidence(99.9, [1, 1, 1, 1], [1.01, 1.01, 1.01, 1.01])
-
-  def testConfidenceScore_UnbalancedSampleSize(self):
-    # The second set of numbers only contains one number, so confidence is 0.
-    self._AssertConfidence(0.0, [1.1, 1.2, 1.1, 1.2, 1.0, 1.3, 1.2], [1.4])
-
-  def testConfidenceScore_EmptySample(self):
-    # Confidence is zero if either or both samples are empty.
-    self._AssertConfidence(0.0, [], [])
-    self._AssertConfidence(0.0, [], [1.1, 1.2, 1.1, 1.2, 1.0, 1.3, 1.2, 1.3])
-    self._AssertConfidence(0.0, [1.1, 1.2, 1.1, 1.2, 1.0, 1.3, 1.2, 1.3], [])
-
-  def testConfidenceScore_FunctionalTestResults(self):
-    self._AssertConfidence(80.0, [1, 1, 0, 1, 1, 1, 0, 1], [0, 0, 1, 0, 1, 0])
-    self._AssertConfidence(99.9, [1, 1, 1, 1, 1, 1, 1, 1], [0, 0, 0, 0, 0, 0])
-
-  def testConfidenceScore_RealWorldCases(self):
-    """This method contains a set of data from actual bisect results.
-
-    The confidence scores asserted below were all copied from the actual
-    results, so the purpose of this test method is mainly to show what the
-    results for real cases are, and compare when we change the confidence
-    score function in the future.
-    """
-    self._AssertConfidence(80, [133, 130, 132, 132, 130, 129], [129, 129, 125])
-    self._AssertConfidence(99.5, [668, 667], [498, 498, 499])
-    self._AssertConfidence(80, [67, 68], [65, 65, 67])
-    self._AssertConfidence(0, [514], [514])
-    self._AssertConfidence(90, [616, 613, 607, 615], [617, 619, 619, 617])
-    self._AssertConfidence(0, [3.5, 5.8, 4.7, 3.5, 3.6], [2.8])
-    self._AssertConfidence(90, [3, 3, 3], [2, 2, 2, 3])
-    self._AssertConfidence(0, [1999004, 1999627], [223355])
-    self._AssertConfidence(90, [1040, 934, 961], [876, 875, 789])
-    self._AssertConfidence(90, [309, 305, 304], [302, 302, 299, 303, 298])
 
   def testParseDEPSStringManually(self):
     """Tests DEPS parsing."""
@@ -201,13 +233,11 @@ class BisectPerfRegressionTest(unittest.TestCase):
     """
     bisect_options = bisect_perf_regression.BisectOptions()
     bisect_options.output_buildbot_annotations = None
-    source_control = source_control_module.DetermineAndCreateSourceControl(
-        bisect_options)
     bisect_instance = bisect_perf_regression.BisectPerformanceMetrics(
-        source_control, bisect_options)
+        bisect_options, os.getcwd())
     bisect_instance.opts.target_platform = target_platform
-    git_revision = bisect_instance.source_control.ResolveToRevision(
-        revision, 'chromium', bisect_perf_regression.DEPOT_DEPS_NAME, 100)
+    git_revision = source_control.ResolveToRevision(
+        revision, 'chromium', bisect_utils.DEPOT_DEPS_NAME, 100)
     depot = 'chromium'
     command = bisect_instance.GetCompatibleCommand(
         original_command, git_revision, depot)
@@ -255,47 +285,80 @@ class BisectPerfRegressionTest(unittest.TestCase):
     This serves as a smoke test to catch errors in the basic execution of the
     script.
     """
-    # Disable rmtree to avoid deleting local trees.
-    old_rmtree = shutil.rmtree
-    try:
-      shutil.rmtree = lambda path, onerror: None
-      bisect_instance = _GetBisectPerformanceMetricsInstance()
-      results = bisect_instance.Run(bisect_instance.opts.command,
-                                    bisect_instance.opts.bad_revision,
-                                    bisect_instance.opts.good_revision,
-                                    bisect_instance.opts.metric)
-      bisect_instance.FormatAndPrintResults(results)
-    finally:
-      shutil.rmtree = old_rmtree
+    _GenericDryRun(DEFAULT_OPTIONS, True)
+
+  def testBisectImprovementDirectionFails(self):
+    """Dry run of a bisect with an improvement instead of regression."""
+    # Test result goes from 0 to 100 where higher is better
+    results = _GenericDryRun(_GetExtendedOptions(1, 100))
+    self.assertIsNotNone(results.error)
+    self.assertIn('not a regression', results.error)
+
+    # Test result goes from 0 to -100 where lower is better
+    results = _GenericDryRun(_GetExtendedOptions(-1, -100))
+    self.assertIsNotNone(results.error)
+    self.assertIn('not a regression', results.error)
+
+  def testBisectImprovementDirectionSucceeds(self):
+    """Bisects with improvement direction matching regression range."""
+    # Test result goes from 0 to 100 where lower is better
+    results = _GenericDryRun(_GetExtendedOptions(-1, 100))
+    self.assertIsNone(results.error)
+    # Test result goes from 0 to -100 where higher is better
+    results = _GenericDryRun(_GetExtendedOptions(1, -100))
+    self.assertIsNone(results.error)
+
+  @mock.patch('bisect_perf_regression.BisectPerformanceMetrics.'
+              'RunPerformanceTestAndParseResults', _MockRunTests)
+  def testBisectStopsOnDoubtfulRegression(self):
+    global _MockResultsGenerator
+    _MockResultsGenerator = (rs for rs in CLEAR_NON_REGRESSION)
+    results = _GenericDryRun(_GetExtendedOptions(0, 0, False))
+    confidence_warnings = [x for x in results.warnings if x.startswith(
+        '\nWe could not reproduce the regression')]
+    self.assertGreater(len(confidence_warnings), 0)
+
+    _MockResultsGenerator = (rs for rs in ALMOST_REGRESSION)
+    results = _GenericDryRun(_GetExtendedOptions(0, 0, False))
+    confidence_warnings = [x for x in results.warnings if x.startswith(
+        '\nWe could not reproduce the regression')]
+    self.assertGreater(len(confidence_warnings), 0)
+
+  @mock.patch('bisect_perf_regression.BisectPerformanceMetrics.'
+              'RunPerformanceTestAndParseResults', _MockRunTests)
+  def testBisectContinuesOnClearRegression(self):
+    global _MockResultsGenerator
+    _MockResultsGenerator = (rs for rs in CLEAR_REGRESSION)
+    with self.assertRaises(StopIteration):
+      _GenericDryRun(_GetExtendedOptions(0, 0, False))
+
+    _MockResultsGenerator = (rs for rs in BARELY_REGRESSION)
+    with self.assertRaises(StopIteration):
+      _GenericDryRun(_GetExtendedOptions(0, 0, False))
 
   def testGetCommitPosition(self):
-    bisect_instance = _GetBisectPerformanceMetricsInstance()
     cp_git_rev = '7017a81991de983e12ab50dfc071c70e06979531'
-    self.assertEqual(
-        291765, bisect_instance.source_control.GetCommitPosition(cp_git_rev))
+    self.assertEqual(291765, source_control.GetCommitPosition(cp_git_rev))
 
     svn_git_rev = 'e6db23a037cad47299a94b155b95eebd1ee61a58'
-    self.assertEqual(
-        291467, bisect_instance.source_control.GetCommitPosition(svn_git_rev))
+    self.assertEqual(291467, source_control.GetCommitPosition(svn_git_rev))
 
   def testGetCommitPositionForV8(self):
-    bisect_instance = _GetBisectPerformanceMetricsInstance()
+    bisect_instance = _GetBisectPerformanceMetricsInstance(DEFAULT_OPTIONS)
     v8_rev = '21d700eedcdd6570eff22ece724b63a5eefe78cb'
     depot_path = os.path.join(bisect_instance.src_cwd, 'v8')
     self.assertEqual(
-        23634,
-        bisect_instance.source_control.GetCommitPosition(v8_rev, depot_path))
+        23634, source_control.GetCommitPosition(v8_rev, depot_path))
 
   def testGetCommitPositionForWebKit(self):
-    bisect_instance = _GetBisectPerformanceMetricsInstance()
+    bisect_instance = _GetBisectPerformanceMetricsInstance(DEFAULT_OPTIONS)
     wk_rev = 'a94d028e0f2c77f159b3dac95eb90c3b4cf48c61'
     depot_path = os.path.join(bisect_instance.src_cwd, 'third_party', 'WebKit')
     self.assertEqual(
-        181660,
-        bisect_instance.source_control.GetCommitPosition(wk_rev, depot_path))
+        181660, source_control.GetCommitPosition(wk_rev, depot_path))
 
   def testUpdateDepsContent(self):
-    bisect_instance = _GetBisectPerformanceMetricsInstance()
+    bisect_instance = _GetBisectPerformanceMetricsInstance(DEFAULT_OPTIONS)
     deps_file = 'DEPS'
     # We are intentionally reading DEPS file contents instead of string literal
     # with few lines from DEPS because to check if the format we are expecting
@@ -318,27 +381,24 @@ class DepotDirectoryRegistryTest(unittest.TestCase):
   def setUp(self):
     self.old_chdir = os.chdir
     os.chdir = self.mockChdir
-    self.old_depot_names = bisect_perf_regression.DEPOT_NAMES
-    bisect_perf_regression.DEPOT_NAMES = ['mock_depot']
-    self.old_depot_deps_name = bisect_perf_regression.DEPOT_DEPS_NAME
-    bisect_perf_regression.DEPOT_DEPS_NAME = {'mock_depot': {'src': 'src/foo'}}
+    self.old_depot_names = bisect_utils.DEPOT_NAMES
+    bisect_utils.DEPOT_NAMES = ['mock_depot']
+    self.old_depot_deps_name = bisect_utils.DEPOT_DEPS_NAME
+    bisect_utils.DEPOT_DEPS_NAME = {'mock_depot': {'src': 'src/foo'}}
 
     self.registry = bisect_perf_regression.DepotDirectoryRegistry('/mock/src')
     self.cur_dir = None
 
   def tearDown(self):
     os.chdir = self.old_chdir
-    bisect_perf_regression.DEPOT_NAMES = self.old_depot_names
-    bisect_perf_regression.DEPOT_DEPS_NAME = self.old_depot_deps_name
+    bisect_utils.DEPOT_NAMES = self.old_depot_names
+    bisect_utils.DEPOT_DEPS_NAME = self.old_depot_deps_name
 
   def mockChdir(self, new_dir):
     self.cur_dir = new_dir
 
   def testReturnsCorrectResultForChrome(self):
     self.assertEqual(self.registry.GetDepotDir('chromium'), '/mock/src')
-
-  def testReturnsCorrectResultForChromeOS(self):
-    self.assertEqual(self.registry.GetDepotDir('cros'), '/mock/src/tools/cros')
 
   def testUsesDepotSpecToInitializeRegistry(self):
     self.assertEqual(self.registry.GetDepotDir('mock_depot'), '/mock/src/foo')
@@ -348,5 +408,159 @@ class DepotDirectoryRegistryTest(unittest.TestCase):
     self.assertEqual(self.cur_dir, '/mock/src/foo')
 
 
+# The tests below test private functions (W0212).
+# pylint: disable=W0212
+class GitTryJobTestCases(unittest.TestCase):
+
+  """Test case for bisect try job."""
+  def setUp(self):
+    bisect_utils_patcher = mock.patch('bisect_perf_regression.bisect_utils')
+    self.mock_bisect_utils = bisect_utils_patcher.start()
+    self.addCleanup(bisect_utils_patcher.stop)
+
+  def _SetupRunGitMock(self, git_cmds):
+    """Setup RunGit mock with expected output for given git command."""
+    def side_effect(git_cmd_args):
+      for val in git_cmds:
+        if set(val[0]) == set(git_cmd_args):
+          return val[1]
+    self.mock_bisect_utils.RunGit = mock.Mock(side_effect=side_effect)
+
+  def _AssertRunGitExceptions(self, git_cmds, func, *args):
+    """Setup RunGit mock and tests RunGitException.
+
+    Args:
+      git_cmds: List of tuples with git command and expected output.
+      func: Callback function to be executed.
+      args: List of arguments to be passed to the function.
+    """
+    self._SetupRunGitMock(git_cmds)
+    self.assertRaises(bisect_perf_regression.RunGitError,
+                      func,
+                      *args)
+
+  def testNotGitRepo(self):
+    new_branch = bisect_perf_regression.BISECT_TRYJOB_BRANCH
+    parent_branch = bisect_perf_regression.BISECT_MASTER_BRANCH
+    cmds = [(['rev-parse', '--abbrev-ref', 'HEAD'], (None, 128))]
+    self._AssertRunGitExceptions(cmds,
+                                 bisect_perf_regression._PrepareBisectBranch,
+                                 parent_branch, new_branch)
+
+  def testFailedCheckoutMaster(self):
+    new_branch = bisect_perf_regression.BISECT_TRYJOB_BRANCH
+    parent_branch = bisect_perf_regression.BISECT_MASTER_BRANCH
+    cmds = [
+        (['rev-parse', '--abbrev-ref', 'HEAD'], (new_branch, 0)),
+        (['checkout', '-f', parent_branch], ('Checkout Failed', 1)),
+    ]
+    self._AssertRunGitExceptions(cmds,
+                                 bisect_perf_regression._PrepareBisectBranch,
+                                 parent_branch, new_branch)
+
+  def testDeleteBisectBranchIfExists(self):
+    new_branch = bisect_perf_regression.BISECT_TRYJOB_BRANCH
+    parent_branch = bisect_perf_regression.BISECT_MASTER_BRANCH
+    cmds = [
+        (['rev-parse', '--abbrev-ref', 'HEAD'], (parent_branch, 0)),
+        (['branch', '--list'], ('bisect-tryjob\n*master\nsomebranch', 0)),
+        (['branch', '-D', new_branch], ('Failed to delete branch', 128)),
+    ]
+    self._AssertRunGitExceptions(cmds,
+                                 bisect_perf_regression._PrepareBisectBranch,
+                                 parent_branch, new_branch)
+
+  def testCreatNewBranchFails(self):
+    new_branch = bisect_perf_regression.BISECT_TRYJOB_BRANCH
+    parent_branch = bisect_perf_regression.BISECT_MASTER_BRANCH
+    cmds = [
+        (['rev-parse', '--abbrev-ref', 'HEAD'], (parent_branch, 0)),
+        (['branch', '--list'], ('bisect-tryjob\n*master\nsomebranch', 0)),
+        (['branch', '-D', new_branch], ('None', 0)),
+        (['update-index', '--refresh', '-q'], (None, 0)),
+        (['diff-index', 'HEAD'], (None, 0)),
+        (['checkout', '-b', new_branch], ('Failed to create branch', 128)),
+    ]
+    self._AssertRunGitExceptions(cmds,
+                                 bisect_perf_regression._PrepareBisectBranch,
+                                 parent_branch, new_branch)
+
+  def testSetUpstreamToFails(self):
+    new_branch = bisect_perf_regression.BISECT_TRYJOB_BRANCH
+    parent_branch = bisect_perf_regression.BISECT_MASTER_BRANCH
+    cmds = [
+        (['rev-parse', '--abbrev-ref', 'HEAD'], (parent_branch, 0)),
+        (['branch', '--list'], ('bisect-tryjob\n*master\nsomebranch', 0)),
+        (['branch', '-D', new_branch], ('None', 0)),
+        (['update-index', '--refresh', '-q'], (None, 0)),
+        (['diff-index', 'HEAD'], (None, 0)),
+        (['checkout', '-b', new_branch], ('None', 0)),
+        (['branch', '--set-upstream-to', parent_branch],
+         ('Setuptream fails', 1)),
+    ]
+    self._AssertRunGitExceptions(cmds,
+                                 bisect_perf_regression._PrepareBisectBranch,
+                                 parent_branch, new_branch)
+
+  def testBuilderTryJobForException(self):
+    git_revision = 'ac4a9f31fe2610bd146857bbd55d7a260003a888'
+    bot_name = 'linux_perf_bisect_builder'
+    bisect_job_name = 'testBisectJobname'
+    patch = None
+    patch_content = '/dev/null'
+    new_branch = bisect_perf_regression.BISECT_TRYJOB_BRANCH
+    parent_branch = bisect_perf_regression.BISECT_MASTER_BRANCH
+    try_cmd = [
+        (['rev-parse', '--abbrev-ref', 'HEAD'], (parent_branch, 0)),
+        (['branch', '--list'], ('bisect-tryjob\n*master\nsomebranch', 0)),
+        (['branch', '-D', new_branch], ('None', 0)),
+        (['update-index', '--refresh', '-q'], (None, 0)),
+        (['diff-index', 'HEAD'], (None, 0)),
+        (['checkout', '-b', new_branch], ('None', 0)),
+        (['branch', '--set-upstream-to', parent_branch],
+         ('Setuptream fails', 0)),
+        (['try',
+          '-b', bot_name,
+          '-r', git_revision,
+          '-n', bisect_job_name,
+          '--svn_repo=%s' % bisect_perf_regression.SVN_REPO_URL,
+          '--diff=%s' % patch_content
+         ], (None, 1)),
+    ]
+    self._AssertRunGitExceptions(try_cmd,
+                                 bisect_perf_regression._BuilderTryjob,
+                                 git_revision, bot_name, bisect_job_name, patch)
+
+  def testBuilderTryJob(self):
+    git_revision = 'ac4a9f31fe2610bd146857bbd55d7a260003a888'
+    bot_name = 'linux_perf_bisect_builder'
+    bisect_job_name = 'testBisectJobname'
+    patch = None
+    patch_content = '/dev/null'
+    new_branch = bisect_perf_regression.BISECT_TRYJOB_BRANCH
+    parent_branch = bisect_perf_regression.BISECT_MASTER_BRANCH
+    try_cmd = [
+        (['rev-parse', '--abbrev-ref', 'HEAD'], (parent_branch, 0)),
+        (['branch', '--list'], ('bisect-tryjob\n*master\nsomebranch', 0)),
+        (['branch', '-D', new_branch], ('None', 0)),
+        (['update-index', '--refresh', '-q'], (None, 0)),
+        (['diff-index', 'HEAD'], (None, 0)),
+        (['checkout', '-b', new_branch], ('None', 0)),
+        (['branch', '--set-upstream-to', parent_branch],
+         ('Setuptream fails', 0)),
+        (['try',
+          '-b', bot_name,
+          '-r', git_revision,
+          '-n', bisect_job_name,
+          '--svn_repo=%s' % bisect_perf_regression.SVN_REPO_URL,
+          '--diff=%s' % patch_content
+         ], (None, 0)),
+    ]
+    self._SetupRunGitMock(try_cmd)
+    bisect_perf_regression._BuilderTryjob(
+        git_revision, bot_name, bisect_job_name, patch)
+
+
 if __name__ == '__main__':
   unittest.main()
+

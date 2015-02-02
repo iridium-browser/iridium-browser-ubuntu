@@ -14,6 +14,7 @@
 #include "base/task/cancelable_task_tracker.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/history/visit_database.h"
+#include "components/history/core/browser/history_service_observer.h"
 #include "content/public/browser/session_storage_namespace.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "url/gurl.h"
@@ -41,7 +42,7 @@ class PrerenderManager;
 // predictions.
 // At this point, the class is not actually creating prerenders, but just
 // recording timing stats about the effect prerendering would have.
-class PrerenderLocalPredictor : public history::VisitDatabaseObserver,
+class PrerenderLocalPredictor : public history::HistoryServiceObserver,
                                 public net::URLFetcherDelegate {
  public:
   struct LocalPredictorURLInfo;
@@ -152,12 +153,13 @@ class PrerenderLocalPredictor : public history::VisitDatabaseObserver,
   // in the constructor.  It will be destoryed at the time its owning
   // PrerenderManager is destroyed.
   explicit PrerenderLocalPredictor(PrerenderManager* prerender_manager);
-  virtual ~PrerenderLocalPredictor();
+  ~PrerenderLocalPredictor() override;
 
   void Shutdown();
 
-  // history::VisitDatabaseObserver implementation
-  virtual void OnAddVisit(const history::BriefVisitInfo& info) OVERRIDE;
+  // history::HistoryServiceObserver:
+  void OnAddVisit(HistoryService* history_service,
+                  const history::BriefVisitInfo& info) override;
 
   void OnGetInitialVisitHistory(
       scoped_ptr<std::vector<history::BriefVisitInfo> > visit_history);
@@ -167,7 +169,7 @@ class PrerenderLocalPredictor : public history::VisitDatabaseObserver,
   void OnTabHelperURLSeen(const GURL& url, content::WebContents* web_contents);
 
   // net::URLFetcherDelegate implementation:
-  void virtual OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
+  void OnURLFetchComplete(const net::URLFetcher* source) override;
 
  private:
   struct PrerenderProperties;
@@ -219,8 +221,8 @@ class PrerenderLocalPredictor : public history::VisitDatabaseObserver,
   static const int kInitDelayMs = 5 * 1000;
 
   // Whether we're registered with the history service as a
-  // history::VisitDatabaseObserver.
-  bool is_visit_database_observer_;
+  // history::HistoryServiceObserver.
+  bool is_history_service_observer_;
 
   base::CancelableTaskTracker history_db_tracker_;
 

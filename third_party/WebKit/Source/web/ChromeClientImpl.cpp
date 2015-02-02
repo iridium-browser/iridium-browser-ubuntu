@@ -39,9 +39,6 @@
 #include "core/dom/Document.h"
 #include "core/dom/Fullscreen.h"
 #include "core/dom/Node.h"
-#include "core/events/KeyboardEvent.h"
-#include "core/events/MouseEvent.h"
-#include "core/events/WheelEvent.h"
 #include "core/frame/Console.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/Settings.h"
@@ -56,11 +53,9 @@
 #include "core/page/WindowFeatures.h"
 #include "core/rendering/HitTestResult.h"
 #include "core/rendering/RenderPart.h"
-#include "core/rendering/RenderWidget.h"
 #include "core/rendering/compositing/CompositedSelectionBound.h"
 #include "platform/Cursor.h"
 #include "platform/FileChooser.h"
-#include "platform/NotImplemented.h"
 #include "platform/PlatformScreen.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/exported/WrappedResourceRequest.h"
@@ -550,8 +545,8 @@ void ChromeClientImpl::mouseDidMoveOverElement(
         && (isHTMLObjectElement(*result.innerNonSharedNode())
             || isHTMLEmbedElement(*result.innerNonSharedNode()))) {
         RenderObject* object = result.innerNonSharedNode()->renderer();
-        if (object && object->isWidget()) {
-            Widget* widget = toRenderWidget(object)->widget();
+        if (object && object->isRenderPart()) {
+            Widget* widget = toRenderPart(object)->widget();
             if (widget && widget->isPluginContainer()) {
                 WebPluginContainerImpl* plugin = toWebPluginContainerImpl(widget);
                 url = plugin->plugin()->linkAtPosition(result.roundedPointInInnerNodeFrame());
@@ -579,13 +574,13 @@ void ChromeClientImpl::print(LocalFrame* frame)
         m_webView->client()->printPage(WebLocalFrameImpl::fromFrame(frame));
 }
 
-PassOwnPtr<ColorChooser> ChromeClientImpl::createColorChooser(LocalFrame* frame, ColorChooserClient* chooserClient, const Color&)
+PassOwnPtrWillBeRawPtr<ColorChooser> ChromeClientImpl::createColorChooser(LocalFrame* frame, ColorChooserClient* chooserClient, const Color&)
 {
-    OwnPtr<ColorChooserUIController> controller;
+    OwnPtrWillBeRawPtr<ColorChooserUIController> controller = nullptr;
     if (RuntimeEnabledFeatures::pagePopupEnabled())
-        controller = adoptPtr(new ColorChooserPopupUIController(frame, this, chooserClient));
+        controller = ColorChooserPopupUIController::create(frame, this, chooserClient);
     else
-        controller = adoptPtr(new ColorChooserUIController(frame, chooserClient));
+        controller = ColorChooserUIController::create(frame, chooserClient);
     controller->openUI();
     return controller.release();
 }
@@ -613,6 +608,7 @@ void ChromeClientImpl::runOpenPanel(LocalFrame* frame, PassRefPtr<FileChooser> f
     if (params.selectedFiles.size() > 0)
         params.initialValue = params.selectedFiles[0];
     params.useMediaCapture = fileChooser->settings().useMediaCapture;
+    params.needLocalPath = fileChooser->settings().allowsDirectoryUpload;
 
     WebFileChooserCompletionImpl* chooserCompletion =
         new WebFileChooserCompletionImpl(fileChooser);
@@ -840,39 +836,6 @@ void ChromeClientImpl::handleKeyboardEventOnTextField(HTMLInputElement& inputEle
     if (!m_webView->autofillClient())
         return;
     m_webView->autofillClient()->textFieldDidReceiveKeyDown(WebInputElement(&inputElement), WebKeyboardEventBuilder(event));
-}
-
-// FIXME: Remove this code once we have input routing in the browser
-// process. See http://crbug.com/339659.
-void ChromeClientImpl::forwardInputEvent(
-    Frame* frame, Event* event)
-{
-    // FIXME: Input event forwarding to out-of-process frames is broken until
-    // WebRemoteFrameImpl has a WebFrameClient.
-    if (frame->isRemoteFrame())
-        return;
-
-    WebLocalFrameImpl* webFrame = WebLocalFrameImpl::fromFrame(toLocalFrame(frame));
-
-    // This is only called when we have out-of-process iframes, which
-    // need to forward input events across processes.
-    // FIXME: Add a check for out-of-process iframes enabled.
-    if (event->isKeyboardEvent()) {
-        WebKeyboardEventBuilder webEvent(*static_cast<KeyboardEvent*>(event));
-        webFrame->client()->forwardInputEvent(&webEvent);
-    } else if (event->isMouseEvent()) {
-        WebMouseEventBuilder webEvent(webFrame->frameView(), frame->ownerRenderer(), *static_cast<MouseEvent*>(event));
-        // Internal Blink events should not be forwarded.
-        if (webEvent.type == WebInputEvent::Undefined)
-            return;
-
-        webFrame->client()->forwardInputEvent(&webEvent);
-    } else if (event->isWheelEvent()) {
-        WebMouseWheelEventBuilder webEvent(webFrame->frameView(), frame->ownerRenderer(), *static_cast<WheelEvent*>(event));
-        if (webEvent.type == WebInputEvent::Undefined)
-            return;
-        webFrame->client()->forwardInputEvent(&webEvent);
-    }
 }
 
 void ChromeClientImpl::didChangeValueInTextField(HTMLFormControlElement& element)

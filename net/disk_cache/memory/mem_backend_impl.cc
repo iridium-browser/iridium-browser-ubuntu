@@ -47,10 +47,10 @@ scoped_ptr<Backend> MemBackendImpl::CreateBackend(int max_bytes,
   scoped_ptr<MemBackendImpl> cache(new MemBackendImpl(net_log));
   cache->SetMaxSize(max_bytes);
   if (cache->Init())
-    return cache.PassAs<Backend>();
+    return cache.Pass();
 
   LOG(ERROR) << "Unable to create cache";
-  return scoped_ptr<Backend>();
+  return nullptr;
 }
 
 bool MemBackendImpl::Init() {
@@ -187,8 +187,8 @@ class MemBackendImpl::MemIterator : public Backend::Iterator {
       : backend_(backend), current_(NULL) {
   }
 
-  virtual int OpenNextEntry(Entry** next_entry,
-                            const CompletionCallback& callback) OVERRIDE {
+  int OpenNextEntry(Entry** next_entry,
+                    const CompletionCallback& callback) override {
     if (!backend_)
       return net::ERR_FAILED;
 

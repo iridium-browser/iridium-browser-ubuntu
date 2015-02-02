@@ -25,16 +25,15 @@ class VIEWS_EXPORT RootViewTargeter : public ViewTargeter {
  public:
   RootViewTargeter(ViewTargeterDelegate* delegate,
                    internal::RootView* root_view);
-  virtual ~RootViewTargeter();
+  ~RootViewTargeter() override;
 
  private:
   // ViewTargeter:
-  virtual View* FindTargetForGestureEvent(
-      View* root,
-      const ui::GestureEvent& gesture) OVERRIDE;
-  virtual ui::EventTarget* FindNextBestTargetForGestureEvent(
+  View* FindTargetForGestureEvent(View* root,
+                                  const ui::GestureEvent& gesture) override;
+  ui::EventTarget* FindNextBestTargetForGestureEvent(
       ui::EventTarget* previous_target,
-      const ui::GestureEvent& gesture) OVERRIDE;
+      const ui::GestureEvent& gesture) override;
 
   // A pointer to the RootView on which |this| is installed.
   internal::RootView* root_view_;

@@ -22,6 +22,8 @@ CHROMEOS_EXPORT extern const char kAccountsPrefDeviceLocalAccountsKeyType[];
 CHROMEOS_EXPORT extern const char
     kAccountsPrefDeviceLocalAccountsKeyKioskAppId[];
 CHROMEOS_EXPORT extern const char
+    kAccountsPrefDeviceLocalAccountsKeyKioskAppUpdateURL[];
+CHROMEOS_EXPORT extern const char
     kAccountsPrefDeviceLocalAccountAutoLoginId[];
 CHROMEOS_EXPORT extern const char
     kAccountsPrefDeviceLocalAccountAutoLoginDelay[];
@@ -85,6 +87,9 @@ CHROMEOS_EXPORT extern const char kDeviceAttestationEnabled[];
 CHROMEOS_EXPORT extern const char kAttestationForContentProtectionEnabled[];
 
 CHROMEOS_EXPORT extern const char kServiceAccountIdentity[];
+
+CHROMEOS_EXPORT extern const char kDeviceDisabled[];
+CHROMEOS_EXPORT extern const char kDeviceDisabledMessage[];
 
 }  // namespace chromeos
 

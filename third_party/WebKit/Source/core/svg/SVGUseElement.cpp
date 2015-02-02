@@ -35,7 +35,6 @@
 #include "core/dom/shadow/ShadowRoot.h"
 #include "core/fetch/FetchRequest.h"
 #include "core/fetch/ResourceFetcher.h"
-#include "core/rendering/svg/RenderSVGResource.h"
 #include "core/rendering/svg/RenderSVGTransformableContainer.h"
 #include "core/svg/SVGGElement.h"
 #include "core/svg/SVGLengthContext.h"
@@ -191,7 +190,7 @@ void SVGUseElement::svgAttributeChanged(const QualifiedName& attrName)
             transferUseWidthAndHeightIfNeeded(*this, m_targetElementInstance.get(), *m_targetElementInstance->correspondingElement());
         }
         if (renderer)
-            RenderSVGResource::markForLayoutAndParentResourceInvalidation(renderer);
+            markForLayoutAndParentResourceInvalidation(renderer);
         return;
     }
 
@@ -435,7 +434,7 @@ void SVGUseElement::toClipPath(Path& path)
             // FIXME: Avoid manual resolution of x/y here. Its potentially harmful.
             SVGLengthContext lengthContext(this);
             path.translate(FloatSize(m_x->currentValue()->value(lengthContext), m_y->currentValue()->value(lengthContext)));
-            path.transform(animatedLocalTransform());
+            path.transform(calculateAnimatedLocalTransform());
         }
     }
 }

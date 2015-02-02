@@ -7,7 +7,7 @@
 
 #include "GrOvalRenderer.h"
 
-#include "gl/builders/GrGLFullProgramBuilder.h"
+#include "gl/builders/GrGLProgramBuilder.h"
 #include "gl/GrGLProcessor.h"
 #include "gl/GrGLSL.h"
 #include "gl/GrGLGeometryProcessor.h"
@@ -26,7 +26,7 @@
 #include "effects/GrRRectEffect.h"
 
 namespace {
-
+// TODO(joshualitt) add per vertex colors
 struct CircleVertex {
     SkPoint  fPos;
     SkPoint  fOffset;
@@ -63,8 +63,8 @@ inline bool circle_stays_circle(const SkMatrix& m) {
 class CircleEdgeEffect : public GrGeometryProcessor {
 public:
     static GrGeometryProcessor* Create(bool stroke) {
-        GR_CREATE_STATIC_GEOMETRY_PROCESSOR(gCircleStrokeEdge, CircleEdgeEffect, (true));
-        GR_CREATE_STATIC_GEOMETRY_PROCESSOR(gCircleFillEdge, CircleEdgeEffect, (false));
+        GR_CREATE_STATIC_PROCESSOR(gCircleStrokeEdge, CircleEdgeEffect, (true));
+        GR_CREATE_STATIC_PROCESSOR(gCircleFillEdge, CircleEdgeEffect, (false));
 
         if (stroke) {
             gCircleStrokeEdge->ref();
@@ -73,11 +73,6 @@ public:
             gCircleFillEdge->ref();
             return gCircleFillEdge;
         }
-    }
-
-    virtual void getConstantColorComponents(GrColor* color,
-                                            uint32_t* validFlags) const SK_OVERRIDE {
-        *validFlags = 0;
     }
 
     const GrShaderVar& inCircleEdge() const { return fInCircleEdge; }
@@ -97,30 +92,25 @@ public:
         GLProcessor(const GrBackendProcessorFactory& factory, const GrProcessor&)
         : INHERITED (factory) {}
 
-        virtual void emitCode(GrGLFullProgramBuilder* builder,
-                              const GrGeometryProcessor& geometryProcessor,
-                              const GrProcessorKey& key,
-                              const char* outputColor,
-                              const char* inputColor,
-                              const TransformedCoordsArray&,
-                              const TextureSamplerArray& samplers) SK_OVERRIDE {
-            const CircleEdgeEffect& circleEffect = geometryProcessor.cast<CircleEdgeEffect>();
-            const char *vsName, *fsName;
-            builder->addVarying(kVec4f_GrSLType, "CircleEdge", &vsName, &fsName);
+        virtual void emitCode(const EmitArgs& args) SK_OVERRIDE {
+            const CircleEdgeEffect& circleEffect = args.fGP.cast<CircleEdgeEffect>();
+            GrGLVertToFrag v(kVec4f_GrSLType);
+            args.fPB->addVarying("CircleEdge", &v);
 
-            GrGLVertexShaderBuilder* vsBuilder = builder->getVertexShaderBuilder();;
-            vsBuilder->codeAppendf("\t%s = %s;\n", vsName, circleEffect.inCircleEdge().c_str());
+            GrGLVertexBuilder* vsBuilder = args.fPB->getVertexShaderBuilder();;
+            vsBuilder->codeAppendf("%s = %s;", v.vsOut(), circleEffect.inCircleEdge().c_str());
 
-            GrGLProcessorFragmentShaderBuilder* fsBuilder = builder->getFragmentShaderBuilder();
-            fsBuilder->codeAppendf("\tfloat d = length(%s.xy);\n", fsName);
-            fsBuilder->codeAppendf("\tfloat edgeAlpha = clamp(%s.z - d, 0.0, 1.0);\n", fsName);
+            GrGLGPFragmentBuilder* fsBuilder = args.fPB->getFragmentShaderBuilder();
+            fsBuilder->codeAppendf("float d = length(%s.xy);", v.fsIn());
+            fsBuilder->codeAppendf("float edgeAlpha = clamp(%s.z - d, 0.0, 1.0);", v.fsIn());
             if (circleEffect.isStroked()) {
-                fsBuilder->codeAppendf("\tfloat innerAlpha = clamp(d - %s.w, 0.0, 1.0);\n", fsName);
-                fsBuilder->codeAppend("\tedgeAlpha *= innerAlpha;\n");
+                fsBuilder->codeAppendf("float innerAlpha = clamp(d - %s.w, 0.0, 1.0);",
+                                       v.fsIn());
+                fsBuilder->codeAppend("edgeAlpha *= innerAlpha;");
             }
 
-            fsBuilder->codeAppendf("\t%s = %s;\n", outputColor,
-                                   (GrGLSLExpr4(inputColor) * GrGLSLExpr1("edgeAlpha")).c_str());
+            fsBuilder->codeAppendf("%s = %s;\n", args.fOutput,
+                                   (GrGLSLExpr4(args.fInput) * GrGLSLExpr1("edgeAlpha")).c_str());
         }
 
         static void GenKey(const GrProcessor& processor, const GrGLCaps&,
@@ -145,9 +135,13 @@ private:
         fStroke = stroke;
     }
 
-    virtual bool onIsEqual(const GrProcessor& other) const SK_OVERRIDE {
+    virtual bool onIsEqual(const GrGeometryProcessor& other) const SK_OVERRIDE {
         const CircleEdgeEffect& cee = other.cast<CircleEdgeEffect>();
         return cee.fStroke == fStroke;
+    }
+
+    virtual void onComputeInvariantOutput(InvariantOutput* inout) const SK_OVERRIDE {
+        inout->mulByUnknownAlpha();
     }
 
     const GrShaderVar& fInCircleEdge;
@@ -180,8 +174,8 @@ GrGeometryProcessor* CircleEdgeEffect::TestCreate(SkRandom* random,
 class EllipseEdgeEffect : public GrGeometryProcessor {
 public:
     static GrGeometryProcessor* Create(bool stroke) {
-        GR_CREATE_STATIC_GEOMETRY_PROCESSOR(gEllipseStrokeEdge, EllipseEdgeEffect, (true));
-        GR_CREATE_STATIC_GEOMETRY_PROCESSOR(gEllipseFillEdge, EllipseEdgeEffect, (false));
+        GR_CREATE_STATIC_PROCESSOR(gEllipseStrokeEdge, EllipseEdgeEffect, (true));
+        GR_CREATE_STATIC_PROCESSOR(gEllipseFillEdge, EllipseEdgeEffect, (false));
 
         if (stroke) {
             gEllipseStrokeEdge->ref();
@@ -190,11 +184,6 @@ public:
             gEllipseFillEdge->ref();
             return gEllipseFillEdge;
         }
-    }
-
-    virtual void getConstantColorComponents(GrColor* color,
-                                            uint32_t* validFlags) const SK_OVERRIDE {
-        *validFlags = 0;
     }
 
     virtual const GrBackendGeometryProcessorFactory& getFactory() const SK_OVERRIDE {
@@ -215,49 +204,47 @@ public:
         GLProcessor(const GrBackendProcessorFactory& factory, const GrProcessor&)
         : INHERITED (factory) {}
 
-        virtual void emitCode(GrGLFullProgramBuilder* builder,
-                              const GrGeometryProcessor& geometryProcessor,
-                              const GrProcessorKey& key,
-                              const char* outputColor,
-                              const char* inputColor,
-                              const TransformedCoordsArray&,
-                              const TextureSamplerArray& samplers) SK_OVERRIDE {
-            const EllipseEdgeEffect& ellipseEffect = geometryProcessor.cast<EllipseEdgeEffect>();
+        virtual void emitCode(const EmitArgs& args) SK_OVERRIDE {
+            const EllipseEdgeEffect& ellipseEffect = args.fGP.cast<EllipseEdgeEffect>();
 
-            const char *vsOffsetName, *fsOffsetName;
-            const char *vsRadiiName, *fsRadiiName;
+            GrGLVertToFrag ellipseOffsets(kVec2f_GrSLType);
+            args.fPB->addVarying("EllipseOffsets", &ellipseOffsets);
 
-            builder->addVarying(kVec2f_GrSLType, "EllipseOffsets", &vsOffsetName, &fsOffsetName);
-
-            GrGLVertexShaderBuilder* vsBuilder = builder->getVertexShaderBuilder();
-            vsBuilder->codeAppendf("%s = %s;", vsOffsetName,
+            GrGLVertexBuilder* vsBuilder = args.fPB->getVertexShaderBuilder();
+            vsBuilder->codeAppendf("%s = %s;", ellipseOffsets.vsOut(),
                                    ellipseEffect.inEllipseOffset().c_str());
 
-            builder->addVarying(kVec4f_GrSLType, "EllipseRadii", &vsRadiiName, &fsRadiiName);
-            vsBuilder->codeAppendf("%s = %s;", vsRadiiName, ellipseEffect.inEllipseRadii().c_str());
+            GrGLVertToFrag ellipseRadii(kVec4f_GrSLType);
+            args.fPB->addVarying("EllipseRadii", &ellipseRadii);
+            vsBuilder->codeAppendf("%s = %s;", ellipseRadii.vsOut(),
+                                   ellipseEffect.inEllipseRadii().c_str());
 
             // for outer curve
-            GrGLProcessorFragmentShaderBuilder* fsBuilder = builder->getFragmentShaderBuilder();
-            fsBuilder->codeAppendf("\tvec2 scaledOffset = %s*%s.xy;\n", fsOffsetName, fsRadiiName);
-            fsBuilder->codeAppend("\tfloat test = dot(scaledOffset, scaledOffset) - 1.0;\n");
-            fsBuilder->codeAppendf("\tvec2 grad = 2.0*scaledOffset*%s.xy;\n", fsRadiiName);
-            fsBuilder->codeAppend("\tfloat grad_dot = dot(grad, grad);\n");
+            GrGLGPFragmentBuilder* fsBuilder = args.fPB->getFragmentShaderBuilder();
+            fsBuilder->codeAppendf("vec2 scaledOffset = %s*%s.xy;", ellipseOffsets.fsIn(),
+                                   ellipseRadii.fsIn());
+            fsBuilder->codeAppend("float test = dot(scaledOffset, scaledOffset) - 1.0;");
+            fsBuilder->codeAppendf("vec2 grad = 2.0*scaledOffset*%s.xy;", ellipseRadii.fsIn());
+            fsBuilder->codeAppend("float grad_dot = dot(grad, grad);");
+
             // avoid calling inversesqrt on zero.
-            fsBuilder->codeAppend("\tgrad_dot = max(grad_dot, 1.0e-4);\n");
-            fsBuilder->codeAppend("\tfloat invlen = inversesqrt(grad_dot);\n");
-            fsBuilder->codeAppend("\tfloat edgeAlpha = clamp(0.5-test*invlen, 0.0, 1.0);\n");
+            fsBuilder->codeAppend("grad_dot = max(grad_dot, 1.0e-4);");
+            fsBuilder->codeAppend("float invlen = inversesqrt(grad_dot);");
+            fsBuilder->codeAppend("float edgeAlpha = clamp(0.5-test*invlen, 0.0, 1.0);");
 
             // for inner curve
             if (ellipseEffect.isStroked()) {
-                fsBuilder->codeAppendf("\tscaledOffset = %s*%s.zw;\n", fsOffsetName, fsRadiiName);
-                fsBuilder->codeAppend("\ttest = dot(scaledOffset, scaledOffset) - 1.0;\n");
-                fsBuilder->codeAppendf("\tgrad = 2.0*scaledOffset*%s.zw;\n", fsRadiiName);
-                fsBuilder->codeAppend("\tinvlen = inversesqrt(dot(grad, grad));\n");
-                fsBuilder->codeAppend("\tedgeAlpha *= clamp(0.5+test*invlen, 0.0, 1.0);\n");
+                fsBuilder->codeAppendf("scaledOffset = %s*%s.zw;",
+                                       ellipseOffsets.fsIn(), ellipseRadii.fsIn());
+                fsBuilder->codeAppend("test = dot(scaledOffset, scaledOffset) - 1.0;");
+                fsBuilder->codeAppendf("grad = 2.0*scaledOffset*%s.zw;",
+                                       ellipseRadii.fsIn());
+                fsBuilder->codeAppend("invlen = inversesqrt(dot(grad, grad));");
+                fsBuilder->codeAppend("edgeAlpha *= clamp(0.5+test*invlen, 0.0, 1.0);");
             }
 
-            fsBuilder->codeAppendf("\t%s = %s;\n", outputColor,
-                                   (GrGLSLExpr4(inputColor) * GrGLSLExpr1("edgeAlpha")).c_str());
+            fsBuilder->codeAppendf("%s = %s;", args.fOutput,
+                                   (GrGLSLExpr4(args.fInput) * GrGLSLExpr1("edgeAlpha")).c_str());
         }
 
         static void GenKey(const GrProcessor& processor, const GrGLCaps&,
@@ -286,9 +273,13 @@ private:
         fStroke = stroke;
     }
 
-    virtual bool onIsEqual(const GrProcessor& other) const SK_OVERRIDE {
+    virtual bool onIsEqual(const GrGeometryProcessor& other) const SK_OVERRIDE {
         const EllipseEdgeEffect& eee = other.cast<EllipseEdgeEffect>();
         return eee.fStroke == fStroke;
+    }
+
+    virtual void onComputeInvariantOutput(InvariantOutput* inout) const SK_OVERRIDE {
+        inout->mulByUnknownAlpha();
     }
 
     const GrShaderVar& fInEllipseOffset;
@@ -325,9 +316,9 @@ public:
     enum Mode { kStroke = 0, kHairline, kFill };
 
     static GrGeometryProcessor* Create(Mode mode) {
-        GR_CREATE_STATIC_GEOMETRY_PROCESSOR(gEllipseStrokeEdge, DIEllipseEdgeEffect, (kStroke));
-        GR_CREATE_STATIC_GEOMETRY_PROCESSOR(gEllipseHairlineEdge, DIEllipseEdgeEffect, (kHairline));
-        GR_CREATE_STATIC_GEOMETRY_PROCESSOR(gEllipseFillEdge, DIEllipseEdgeEffect, (kFill));
+        GR_CREATE_STATIC_PROCESSOR(gEllipseStrokeEdge, DIEllipseEdgeEffect, (kStroke));
+        GR_CREATE_STATIC_PROCESSOR(gEllipseHairlineEdge, DIEllipseEdgeEffect, (kHairline));
+        GR_CREATE_STATIC_PROCESSOR(gEllipseFillEdge, DIEllipseEdgeEffect, (kFill));
 
         if (kStroke == mode) {
             gEllipseStrokeEdge->ref();
@@ -339,11 +330,6 @@ public:
             gEllipseFillEdge->ref();
             return gEllipseFillEdge;
         }
-    }
-
-    virtual void getConstantColorComponents(GrColor* color,
-                                            uint32_t* validFlags) const SK_OVERRIDE {
-        *validFlags = 0;
     }
 
     virtual const GrBackendGeometryProcessorFactory& getFactory() const SK_OVERRIDE {
@@ -364,68 +350,61 @@ public:
         GLProcessor(const GrBackendProcessorFactory& factory, const GrProcessor&)
         : INHERITED (factory) {}
 
-        virtual void emitCode(GrGLFullProgramBuilder* builder,
-                              const GrGeometryProcessor& geometryProcessor,
-                              const GrProcessorKey& key,
-                              const char* outputColor,
-                              const char* inputColor,
-                              const TransformedCoordsArray&,
-                              const TextureSamplerArray& samplers) SK_OVERRIDE {
-            const DIEllipseEdgeEffect& ellipseEffect =
-                    geometryProcessor.cast<DIEllipseEdgeEffect>();
+        virtual void emitCode(const EmitArgs& args) SK_OVERRIDE {
+            const DIEllipseEdgeEffect& ellipseEffect = args.fGP.cast<DIEllipseEdgeEffect>();
 
-            const char *vsOffsetName0, *fsOffsetName0;
-            builder->addVarying(kVec2f_GrSLType, "EllipseOffsets0",
-                                      &vsOffsetName0, &fsOffsetName0);
+            GrGLVertToFrag offsets0(kVec2f_GrSLType);
+            args.fPB->addVarying("EllipseOffsets0", &offsets0);
 
-            GrGLVertexShaderBuilder* vsBuilder = builder->getVertexShaderBuilder();
-            vsBuilder->codeAppendf("%s = %s;", vsOffsetName0,
+            GrGLVertexBuilder* vsBuilder = args.fPB->getVertexShaderBuilder();
+            vsBuilder->codeAppendf("%s = %s;", offsets0.vsOut(),
                                    ellipseEffect.inEllipseOffsets0().c_str());
-            const char *vsOffsetName1, *fsOffsetName1;
-            builder->addVarying(kVec2f_GrSLType, "EllipseOffsets1",
-                                      &vsOffsetName1, &fsOffsetName1);
-            vsBuilder->codeAppendf("\t%s = %s;\n", vsOffsetName1,
+
+            GrGLVertToFrag offsets1(kVec2f_GrSLType);
+            args.fPB->addVarying("EllipseOffsets1", &offsets1);
+            vsBuilder->codeAppendf("%s = %s;", offsets1.vsOut(),
                                    ellipseEffect.inEllipseOffsets1().c_str());
 
-            GrGLProcessorFragmentShaderBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+            GrGLGPFragmentBuilder* fsBuilder = args.fPB->getFragmentShaderBuilder();
             SkAssertResult(fsBuilder->enableFeature(
                     GrGLFragmentShaderBuilder::kStandardDerivatives_GLSLFeature));
             // for outer curve
-            fsBuilder->codeAppendf("\tvec2 scaledOffset = %s.xy;\n", fsOffsetName0);
-            fsBuilder->codeAppend("\tfloat test = dot(scaledOffset, scaledOffset) - 1.0;\n");
-            fsBuilder->codeAppendf("\tvec2 duvdx = dFdx(%s);\n", fsOffsetName0);
-            fsBuilder->codeAppendf("\tvec2 duvdy = dFdy(%s);\n", fsOffsetName0);
-            fsBuilder->codeAppendf("\tvec2 grad = vec2(2.0*%s.x*duvdx.x + 2.0*%s.y*duvdx.y,\n"
-                                   "\t                 2.0*%s.x*duvdy.x + 2.0*%s.y*duvdy.y);\n",
-                                   fsOffsetName0, fsOffsetName0, fsOffsetName0, fsOffsetName0);
+            fsBuilder->codeAppendf("vec2 scaledOffset = %s.xy;", offsets0.fsIn());
+            fsBuilder->codeAppend("float test = dot(scaledOffset, scaledOffset) - 1.0;");
+            fsBuilder->codeAppendf("vec2 duvdx = dFdx(%s);", offsets0.fsIn());
+            fsBuilder->codeAppendf("vec2 duvdy = dFdy(%s);", offsets0.fsIn());
+            fsBuilder->codeAppendf("vec2 grad = vec2(2.0*%s.x*duvdx.x + 2.0*%s.y*duvdx.y,"
+                                   "                 2.0*%s.x*duvdy.x + 2.0*%s.y*duvdy.y);",
+                                   offsets0.fsIn(), offsets0.fsIn(), offsets0.fsIn(), offsets0.fsIn());
 
-            fsBuilder->codeAppend("\tfloat grad_dot = dot(grad, grad);\n");
+            fsBuilder->codeAppend("float grad_dot = dot(grad, grad);");
             // avoid calling inversesqrt on zero.
-            fsBuilder->codeAppend("\tgrad_dot = max(grad_dot, 1.0e-4);\n");
-            fsBuilder->codeAppend("\tfloat invlen = inversesqrt(grad_dot);\n");
+            fsBuilder->codeAppend("grad_dot = max(grad_dot, 1.0e-4);");
+            fsBuilder->codeAppend("float invlen = inversesqrt(grad_dot);");
             if (kHairline == ellipseEffect.getMode()) {
                 // can probably do this with one step
-                fsBuilder->codeAppend("\tfloat edgeAlpha = clamp(1.0-test*invlen, 0.0, 1.0);\n");
-                fsBuilder->codeAppend("\tedgeAlpha *= clamp(1.0+test*invlen, 0.0, 1.0);\n");
+                fsBuilder->codeAppend("float edgeAlpha = clamp(1.0-test*invlen, 0.0, 1.0);");
+                fsBuilder->codeAppend("edgeAlpha *= clamp(1.0+test*invlen, 0.0, 1.0);");
             } else {
-                fsBuilder->codeAppend("\tfloat edgeAlpha = clamp(0.5-test*invlen, 0.0, 1.0);\n");
+                fsBuilder->codeAppend("float edgeAlpha = clamp(0.5-test*invlen, 0.0, 1.0);");
             }
 
             // for inner curve
             if (kStroke == ellipseEffect.getMode()) {
-                fsBuilder->codeAppendf("\tscaledOffset = %s.xy;\n", fsOffsetName1);
-                fsBuilder->codeAppend("\ttest = dot(scaledOffset, scaledOffset) - 1.0;\n");
-                fsBuilder->codeAppendf("\tduvdx = dFdx(%s);\n", fsOffsetName1);
-                fsBuilder->codeAppendf("\tduvdy = dFdy(%s);\n", fsOffsetName1);
-                fsBuilder->codeAppendf("\tgrad = vec2(2.0*%s.x*duvdx.x + 2.0*%s.y*duvdx.y,\n"
-                                       "\t            2.0*%s.x*duvdy.x + 2.0*%s.y*duvdy.y);\n",
-                                       fsOffsetName1, fsOffsetName1, fsOffsetName1, fsOffsetName1);
-                fsBuilder->codeAppend("\tinvlen = inversesqrt(dot(grad, grad));\n");
-                fsBuilder->codeAppend("\tedgeAlpha *= clamp(0.5+test*invlen, 0.0, 1.0);\n");
+                fsBuilder->codeAppendf("scaledOffset = %s.xy;", offsets1.fsIn());
+                fsBuilder->codeAppend("test = dot(scaledOffset, scaledOffset) - 1.0;");
+                fsBuilder->codeAppendf("duvdx = dFdx(%s);", offsets1.fsIn());
+                fsBuilder->codeAppendf("duvdy = dFdy(%s);", offsets1.fsIn());
+                fsBuilder->codeAppendf("grad = vec2(2.0*%s.x*duvdx.x + 2.0*%s.y*duvdx.y,"
+                                       "            2.0*%s.x*duvdy.x + 2.0*%s.y*duvdy.y);",
+                                       offsets1.fsIn(), offsets1.fsIn(), offsets1.fsIn(),
+                                       offsets1.fsIn());
+                fsBuilder->codeAppend("invlen = inversesqrt(dot(grad, grad));");
+                fsBuilder->codeAppend("edgeAlpha *= clamp(0.5+test*invlen, 0.0, 1.0);");
             }
 
-            fsBuilder->codeAppendf("\t%s = %s;\n", outputColor,
-                                   (GrGLSLExpr4(inputColor) * GrGLSLExpr1("edgeAlpha")).c_str());
+            fsBuilder->codeAppendf("%s = %s;", args.fOutput,
+                                   (GrGLSLExpr4(args.fInput) * GrGLSLExpr1("edgeAlpha")).c_str());
         }
 
         static void GenKey(const GrProcessor& processor, const GrGLCaps&,
@@ -455,9 +434,13 @@ private:
         fMode = mode;
     }
 
-    virtual bool onIsEqual(const GrProcessor& other) const SK_OVERRIDE {
+    virtual bool onIsEqual(const GrGeometryProcessor& other) const SK_OVERRIDE {
         const DIEllipseEdgeEffect& eee = other.cast<DIEllipseEdgeEffect>();
         return eee.fMode == fMode;
+    }
+
+    virtual void onComputeInvariantOutput(InvariantOutput* inout) const SK_OVERRIDE {
+        inout->mulByUnknownAlpha();
     }
 
     const GrShaderVar& fInEllipseOffsets0;
@@ -482,6 +465,7 @@ GrGeometryProcessor* DIEllipseEdgeEffect::TestCreate(SkRandom* random,
 
 void GrOvalRenderer::reset() {
     SkSafeSetNull(fRRectIndexBuffer);
+    SkSafeSetNull(fStrokeRRectIndexBuffer);
 }
 
 bool GrOvalRenderer::drawOval(GrDrawTarget* target, const GrContext* context, bool useAA,
@@ -500,13 +484,13 @@ bool GrOvalRenderer::drawOval(GrDrawTarget* target, const GrContext* context, bo
     // we can draw circles
     if (SkScalarNearlyEqual(oval.width(), oval.height())
         && circle_stays_circle(vm)) {
-        this->drawCircle(target, useCoverageAA, oval, stroke);
+        this->drawCircle(target, context, useCoverageAA, oval, stroke);
     // if we have shader derivative support, render as device-independent
     } else if (target->caps()->shaderDerivativeSupport()) {
-        return this->drawDIEllipse(target, useCoverageAA, oval, stroke);
+        return this->drawDIEllipse(target, context, useCoverageAA, oval, stroke);
     // otherwise axis-aligned ellipses only
     } else if (vm.rectStaysRect()) {
-        return this->drawEllipse(target, useCoverageAA, oval, stroke);
+        return this->drawEllipse(target, context, useCoverageAA, oval, stroke);
     } else {
         return false;
     }
@@ -523,6 +507,7 @@ extern const GrVertexAttrib gCircleVertexAttribs[] = {
 };
 
 void GrOvalRenderer::drawCircle(GrDrawTarget* target,
+                                const GrContext* context,
                                 bool useCoverageAA,
                                 const SkRect& circle,
                                 const SkStrokeRec& stroke)
@@ -545,7 +530,7 @@ void GrOvalRenderer::drawCircle(GrDrawTarget* target,
 
     GrDrawTarget::AutoReleaseGeometry geo(target, 4, 0);
     if (!geo.succeeded()) {
-        GrPrintf("Failed to get space for vertices!\n");
+        SkDebugf("Failed to get space for vertices!\n");
         return;
     }
 
@@ -594,22 +579,24 @@ void GrOvalRenderer::drawCircle(GrDrawTarget* target,
     verts[0].fOuterRadius = outerRadius;
     verts[0].fInnerRadius = innerRadius;
 
-    verts[1].fPos = SkPoint::Make(bounds.fRight, bounds.fTop);
-    verts[1].fOffset = SkPoint::Make(outerRadius, -outerRadius);
+    verts[1].fPos = SkPoint::Make(bounds.fLeft,  bounds.fBottom);
+    verts[1].fOffset = SkPoint::Make(-outerRadius, outerRadius);
     verts[1].fOuterRadius = outerRadius;
     verts[1].fInnerRadius = innerRadius;
 
-    verts[2].fPos = SkPoint::Make(bounds.fLeft,  bounds.fBottom);
-    verts[2].fOffset = SkPoint::Make(-outerRadius, outerRadius);
+    verts[2].fPos = SkPoint::Make(bounds.fRight, bounds.fBottom);
+    verts[2].fOffset = SkPoint::Make(outerRadius, outerRadius);
     verts[2].fOuterRadius = outerRadius;
     verts[2].fInnerRadius = innerRadius;
 
-    verts[3].fPos = SkPoint::Make(bounds.fRight, bounds.fBottom);
-    verts[3].fOffset = SkPoint::Make(outerRadius, outerRadius);
+    verts[3].fPos = SkPoint::Make(bounds.fRight, bounds.fTop);
+    verts[3].fOffset = SkPoint::Make(outerRadius, -outerRadius);
     verts[3].fOuterRadius = outerRadius;
     verts[3].fInnerRadius = innerRadius;
 
-    target->drawNonIndexed(kTriangleStrip_GrPrimitiveType, 0, 4, &bounds);
+    target->setIndexSourceToBuffer(context->getGpu()->getQuadIndexBuffer());
+    target->drawIndexedInstances(kTriangles_GrPrimitiveType, 1, 4, 6, &bounds);
+    target->resetIndexSource();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -629,6 +616,7 @@ extern const GrVertexAttrib gDIEllipseVertexAttribs[] = {
 };
 
 bool GrOvalRenderer::drawEllipse(GrDrawTarget* target,
+                                 const GrContext* context,
                                  bool useCoverageAA,
                                  const SkRect& ellipse,
                                  const SkStrokeRec& stroke)
@@ -705,7 +693,7 @@ bool GrOvalRenderer::drawEllipse(GrDrawTarget* target,
 
     GrDrawTarget::AutoReleaseGeometry geo(target, 4, 0);
     if (!geo.succeeded()) {
-        GrPrintf("Failed to get space for vertices!\n");
+        SkDebugf("Failed to get space for vertices!\n");
         return false;
     }
 
@@ -740,27 +728,30 @@ bool GrOvalRenderer::drawEllipse(GrDrawTarget* target,
     verts[0].fOuterRadii = SkPoint::Make(xRadRecip, yRadRecip);
     verts[0].fInnerRadii = SkPoint::Make(xInnerRadRecip, yInnerRadRecip);
 
-    verts[1].fPos = SkPoint::Make(bounds.fRight, bounds.fTop);
-    verts[1].fOffset = SkPoint::Make(xRadius, -yRadius);
+    verts[1].fPos = SkPoint::Make(bounds.fLeft,  bounds.fBottom);
+    verts[1].fOffset = SkPoint::Make(-xRadius, yRadius);
     verts[1].fOuterRadii = SkPoint::Make(xRadRecip, yRadRecip);
     verts[1].fInnerRadii = SkPoint::Make(xInnerRadRecip, yInnerRadRecip);
 
-    verts[2].fPos = SkPoint::Make(bounds.fLeft,  bounds.fBottom);
-    verts[2].fOffset = SkPoint::Make(-xRadius, yRadius);
+    verts[2].fPos = SkPoint::Make(bounds.fRight, bounds.fBottom);
+    verts[2].fOffset = SkPoint::Make(xRadius, yRadius);
     verts[2].fOuterRadii = SkPoint::Make(xRadRecip, yRadRecip);
     verts[2].fInnerRadii = SkPoint::Make(xInnerRadRecip, yInnerRadRecip);
 
-    verts[3].fPos = SkPoint::Make(bounds.fRight, bounds.fBottom);
-    verts[3].fOffset = SkPoint::Make(xRadius, yRadius);
+    verts[3].fPos = SkPoint::Make(bounds.fRight, bounds.fTop);
+    verts[3].fOffset = SkPoint::Make(xRadius, -yRadius);
     verts[3].fOuterRadii = SkPoint::Make(xRadRecip, yRadRecip);
     verts[3].fInnerRadii = SkPoint::Make(xInnerRadRecip, yInnerRadRecip);
 
-    target->drawNonIndexed(kTriangleStrip_GrPrimitiveType, 0, 4, &bounds);
+    target->setIndexSourceToBuffer(context->getGpu()->getQuadIndexBuffer());
+    target->drawIndexedInstances(kTriangles_GrPrimitiveType, 1, 4, 6, &bounds);
+    target->resetIndexSource();
 
     return true;
 }
 
 bool GrOvalRenderer::drawDIEllipse(GrDrawTarget* target,
+                                   const GrContext* context,
                                    bool useCoverageAA,
                                    const SkRect& ellipse,
                                    const SkStrokeRec& stroke)
@@ -822,7 +813,7 @@ bool GrOvalRenderer::drawDIEllipse(GrDrawTarget* target,
 
     GrDrawTarget::AutoReleaseGeometry geo(target, 4, 0);
     if (!geo.succeeded()) {
-        GrPrintf("Failed to get space for vertices!\n");
+        SkDebugf("Failed to get space for vertices!\n");
         return false;
     }
 
@@ -854,19 +845,21 @@ bool GrOvalRenderer::drawDIEllipse(GrDrawTarget* target,
     verts[0].fOuterOffset = SkPoint::Make(-1.0f - offsetDx, -1.0f - offsetDy);
     verts[0].fInnerOffset = SkPoint::Make(-innerRatioX - offsetDx, -innerRatioY - offsetDy);
 
-    verts[1].fPos = SkPoint::Make(bounds.fRight, bounds.fTop);
-    verts[1].fOuterOffset = SkPoint::Make(1.0f + offsetDx, -1.0f - offsetDy);
-    verts[1].fInnerOffset = SkPoint::Make(innerRatioX + offsetDx, -innerRatioY - offsetDy);
+    verts[1].fPos = SkPoint::Make(bounds.fLeft,  bounds.fBottom);
+    verts[1].fOuterOffset = SkPoint::Make(-1.0f - offsetDx, 1.0f + offsetDy);
+    verts[1].fInnerOffset = SkPoint::Make(-innerRatioX - offsetDx, innerRatioY + offsetDy);
 
-    verts[2].fPos = SkPoint::Make(bounds.fLeft,  bounds.fBottom);
-    verts[2].fOuterOffset = SkPoint::Make(-1.0f - offsetDx, 1.0f + offsetDy);
-    verts[2].fInnerOffset = SkPoint::Make(-innerRatioX - offsetDx, innerRatioY + offsetDy);
+    verts[2].fPos = SkPoint::Make(bounds.fRight, bounds.fBottom);
+    verts[2].fOuterOffset = SkPoint::Make(1.0f + offsetDx, 1.0f + offsetDy);
+    verts[2].fInnerOffset = SkPoint::Make(innerRatioX + offsetDx, innerRatioY + offsetDy);
 
-    verts[3].fPos = SkPoint::Make(bounds.fRight, bounds.fBottom);
-    verts[3].fOuterOffset = SkPoint::Make(1.0f + offsetDx, 1.0f + offsetDy);
-    verts[3].fInnerOffset = SkPoint::Make(innerRatioX + offsetDx, innerRatioY + offsetDy);
+    verts[3].fPos = SkPoint::Make(bounds.fRight, bounds.fTop);
+    verts[3].fOuterOffset = SkPoint::Make(1.0f + offsetDx, -1.0f - offsetDy);
+    verts[3].fInnerOffset = SkPoint::Make(innerRatioX + offsetDx, -innerRatioY - offsetDy);
 
-    target->drawNonIndexed(kTriangleStrip_GrPrimitiveType, 0, 4, &bounds);
+    target->setIndexSourceToBuffer(context->getGpu()->getQuadIndexBuffer());
+    target->drawIndexedInstances(kTriangles_GrPrimitiveType, 1, 4, 6, &bounds);
+    target->resetIndexSource();
 
     return true;
 }
@@ -891,21 +884,29 @@ static const uint16_t gRRectIndices[] = {
     5, 6, 10, 5, 10, 9
 };
 
+static const int kIndicesPerStrokeRRect = SK_ARRAY_COUNT(gRRectIndices) - 6;
+static const int kIndicesPerRRect = SK_ARRAY_COUNT(gRRectIndices);
+static const int kVertsPerRRect = 16;
+static const int kNumRRectsInIndexBuffer = 256;
 
-GrIndexBuffer* GrOvalRenderer::rRectIndexBuffer(GrGpu* gpu) {
-    if (NULL == fRRectIndexBuffer) {
-        fRRectIndexBuffer =
-        gpu->createIndexBuffer(sizeof(gRRectIndices), false);
-        if (fRRectIndexBuffer) {
-#ifdef SK_DEBUG
-            bool updated =
-#endif
-            fRRectIndexBuffer->updateData(gRRectIndices,
-                                          sizeof(gRRectIndices));
-            GR_DEBUGASSERT(updated);
+GrIndexBuffer* GrOvalRenderer::rRectIndexBuffer(bool isStrokeOnly, GrGpu* gpu) {
+    if (isStrokeOnly) {
+        if (NULL == fStrokeRRectIndexBuffer) {
+            fStrokeRRectIndexBuffer = gpu->createInstancedIndexBuffer(gRRectIndices,
+                                                                      kIndicesPerStrokeRRect,
+                                                                      kNumRRectsInIndexBuffer,
+                                                                      kVertsPerRRect);
         }
+        return fStrokeRRectIndexBuffer;
+    } else {
+        if (NULL == fRRectIndexBuffer) {
+            fRRectIndexBuffer = gpu->createInstancedIndexBuffer(gRRectIndices,
+                                                                kIndicesPerRRect,
+                                                                kNumRRectsInIndexBuffer,
+                                                                kVertsPerRRect);
+        }
+        return fRRectIndexBuffer;
     }
-    return fRRectIndexBuffer;
 }
 
 bool GrOvalRenderer::drawDRRect(GrDrawTarget* target, GrContext* context, bool useAA,
@@ -1040,9 +1041,9 @@ bool GrOvalRenderer::drawRRect(GrDrawTarget* target, GrContext* context, bool us
         return false;
     }
 
-    GrIndexBuffer* indexBuffer = this->rRectIndexBuffer(context->getGpu());
+    GrIndexBuffer* indexBuffer = this->rRectIndexBuffer(isStrokeOnly, context->getGpu());
     if (NULL == indexBuffer) {
-        GrPrintf("Failed to create index buffer!\n");
+        SkDebugf("Failed to create index buffer!\n");
         return false;
     }
 
@@ -1053,7 +1054,7 @@ bool GrOvalRenderer::drawRRect(GrDrawTarget* target, GrContext* context, bool us
 
         GrDrawTarget::AutoReleaseGeometry geo(target, 16, 0);
         if (!geo.succeeded()) {
-            GrPrintf("Failed to get space for vertices!\n");
+            SkDebugf("Failed to get space for vertices!\n");
             return false;
         }
         CircleVertex* verts = reinterpret_cast<CircleVertex*>(geo.vertices());
@@ -1132,7 +1133,7 @@ bool GrOvalRenderer::drawRRect(GrDrawTarget* target, GrContext* context, bool us
         int indexCnt = isStrokeOnly ? SK_ARRAY_COUNT(gRRectIndices) - 6 :
                                       SK_ARRAY_COUNT(gRRectIndices);
         target->setIndexSourceToBuffer(indexBuffer);
-        target->drawIndexed(kTriangles_GrPrimitiveType, 0, 0, 16, indexCnt, &bounds);
+        target->drawIndexedInstances(kTriangles_GrPrimitiveType, 1, 16, indexCnt, &bounds);
 
     // otherwise we use the ellipse renderer
     } else {
@@ -1175,7 +1176,7 @@ bool GrOvalRenderer::drawRRect(GrDrawTarget* target, GrContext* context, bool us
 
         GrDrawTarget::AutoReleaseGeometry geo(target, 16, 0);
         if (!geo.succeeded()) {
-            GrPrintf("Failed to get space for vertices!\n");
+            SkDebugf("Failed to get space for vertices!\n");
             return false;
         }
         EllipseVertex* verts = reinterpret_cast<EllipseVertex*>(geo.vertices());
@@ -1239,8 +1240,9 @@ bool GrOvalRenderer::drawRRect(GrDrawTarget* target, GrContext* context, bool us
         int indexCnt = isStrokeOnly ? SK_ARRAY_COUNT(gRRectIndices) - 6 :
                                       SK_ARRAY_COUNT(gRRectIndices);
         target->setIndexSourceToBuffer(indexBuffer);
-        target->drawIndexed(kTriangles_GrPrimitiveType, 0, 0, 16, indexCnt, &bounds);
+        target->drawIndexedInstances(kTriangles_GrPrimitiveType, 1, 16, indexCnt, &bounds);
     }
 
+    target->resetIndexSource();
     return true;
 }

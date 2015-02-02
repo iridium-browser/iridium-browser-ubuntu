@@ -8,9 +8,9 @@
 
 #include "base/basictypes.h"
 #include "base/logging.h"
-#include "talk/xmpp/constants.h"
-#include "talk/xmpp/saslcookiemechanism.h"
 #include "webrtc/base/socketaddress.h"
+#include "webrtc/libjingle/xmpp/constants.h"
+#include "webrtc/libjingle/xmpp/saslcookiemechanism.h"
 
 namespace notifier {
 
@@ -25,9 +25,9 @@ class GaiaCookieMechanism : public buzz::SaslCookieMechanism {
       : buzz::SaslCookieMechanism(
           mechanism, username, cookie, token_service) {}
 
-  virtual ~GaiaCookieMechanism() {}
+  ~GaiaCookieMechanism() override {}
 
-  virtual buzz::XmlElement* StartSaslAuth() OVERRIDE {
+  buzz::XmlElement* StartSaslAuth() override {
     buzz::XmlElement* auth = buzz::SaslCookieMechanism::StartSaslAuth();
     // These attributes are necessary for working with non-gmail gaia
     // accounts.

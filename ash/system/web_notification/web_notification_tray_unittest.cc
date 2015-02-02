@@ -6,7 +6,6 @@
 
 #include <vector>
 
-#include "ash/ash_switches.h"
 #include "ash/display/display_manager.h"
 #include "ash/root_window_controller.h"
 #include "ash/shelf/shelf_layout_manager.h"
@@ -25,6 +24,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
+#include "ui/base/ui_base_switches.h"
 #include "ui/events/event.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/gfx/display.h"
@@ -72,15 +72,14 @@ class TestItem : public SystemTrayItem {
  public:
   TestItem() : SystemTrayItem(GetSystemTray()) {}
 
-  virtual views::View* CreateDefaultView(user::LoginStatus status) OVERRIDE {
+  views::View* CreateDefaultView(user::LoginStatus status) override {
     views::View* default_view = new views::View;
     default_view->SetLayoutManager(new views::FillLayout);
     default_view->AddChildView(new views::Label(base::UTF8ToUTF16("Default")));
     return default_view;
   }
 
-  virtual views::View* CreateNotificationView(
-      user::LoginStatus status) OVERRIDE {
+  views::View* CreateNotificationView(user::LoginStatus status) override {
     return new views::View;
   }
 
@@ -93,15 +92,15 @@ class TestItem : public SystemTrayItem {
 class WebNotificationTrayTest : public test::AshTestBase {
  public:
   WebNotificationTrayTest() {}
-  virtual ~WebNotificationTrayTest() {}
+  ~WebNotificationTrayTest() override {}
 
-  virtual void SetUp() OVERRIDE {
-    CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kAshEnableTouchViewTouchFeedback);
+  void SetUp() override {
+    base::CommandLine::ForCurrentProcess()->AppendSwitch(
+        switches::kEnableTouchFeedback);
     test::AshTestBase::SetUp();
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     GetMessageCenter()->RemoveAllNotifications(false);
     test::AshTestBase::TearDown();
   }

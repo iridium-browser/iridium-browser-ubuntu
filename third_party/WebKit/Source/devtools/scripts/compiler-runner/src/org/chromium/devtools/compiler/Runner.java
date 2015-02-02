@@ -15,7 +15,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
@@ -123,6 +123,7 @@ public class Runner {
                 System.err.println("@@ END_MODULE @@");
             } catch (Exception e) {
                 System.err.println("ERROR - " + e.getMessage());
+                e.printStackTrace(System.err);
             }
         }
         System.exit(0);
@@ -170,6 +171,11 @@ public class Runner {
     }
 
     private static class LocalCommandLineRunner extends CommandLineRunner {
+        private static final List<String> EXTRA_ANNOTATION_NAMES = Arrays.asList(
+            "suppressReceiverCheck",
+            "suppressGlobalPropertiesCheck"
+        );
+
         protected LocalCommandLineRunner(String[] args, PrintStream out, PrintStream err) {
             super(args, out, err);
         }
@@ -178,7 +184,7 @@ public class Runner {
         protected CompilerOptions createOptions() {
             CompilerOptions options = super.createOptions();
             options.setIdeMode(true);
-            options.setExtraAnnotationNames(Collections.singletonList("suppressReceiverCheck"));
+            options.setExtraAnnotationNames(EXTRA_ANNOTATION_NAMES);
             return options;
         }
 

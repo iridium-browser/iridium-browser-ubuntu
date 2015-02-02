@@ -37,7 +37,7 @@ namespace {
 
 const char kAccountId[] = "dla1@example.com";
 const char kAccountPassword[] = "letmein";
-const char* kStartupURLs[] = {"chrome://policy", "chrome://about"};
+const char* const kStartupURLs[] = {"chrome://policy", "chrome://about"};
 const char kTestAuthCode[] = "fake-auth-code";
 const char kTestGaiaUberToken[] = "fake-uber-token";
 const char kTestAuthLoginAccessToken[] = "fake-access-token";
@@ -58,7 +58,7 @@ class UserCloudPolicyManagerTest : public chromeos::OobeBaseTest {
 
   virtual ~UserCloudPolicyManagerTest() {}
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     SetServerPolicy();
 
@@ -68,13 +68,13 @@ class UserCloudPolicyManagerTest : public chromeos::OobeBaseTest {
     OobeBaseTest::SetUp();
   }
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  virtual void SetUpCommandLine(CommandLine* command_line) override {
     command_line->AppendSwitchASCII(policy::switches::kDeviceManagementUrl,
                                     test_server_->GetServiceURL().spec());
     OobeBaseTest::SetUpCommandLine(command_line);
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  virtual void SetUpOnMainThread() override {
     SetMergeSessionParams(kAccountId);
     SetupGaiaServerWithAccessTokens();
     OobeBaseTest::SetUpOnMainThread();

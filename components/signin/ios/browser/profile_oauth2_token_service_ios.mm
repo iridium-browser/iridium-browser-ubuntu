@@ -65,9 +65,9 @@ class SSOAccessTokenFetcher : public OAuth2AccessTokenFetcher {
 
   virtual void Start(const std::string& client_id,
                      const std::string& client_secret,
-                     const std::vector<std::string>& scopes) OVERRIDE;
+                     const std::vector<std::string>& scopes) override;
 
-  virtual void CancelRequest() OVERRIDE;
+  virtual void CancelRequest() override;
 
   // Handles an access token response.
   void OnAccessTokenResponse(NSString* token,
@@ -212,7 +212,7 @@ void ProfileOAuth2TokenServiceIOS::LoadCredentials(
 void ProfileOAuth2TokenServiceIOS::ReloadCredentials() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  ScopedBacthChange batch(this);
+  ScopedBatchChange batch(this);
 
   // Remove all old accounts that do not appear in |new_accounts| and then
   // load |new_accounts|.
@@ -242,7 +242,7 @@ void ProfileOAuth2TokenServiceIOS::UpdateCredentials(
 void ProfileOAuth2TokenServiceIOS::RevokeAllCredentials() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  ScopedBacthChange batch(this);
+  ScopedBatchChange batch(this);
   CancelAllRequests();
   ClearCache();
   AccountInfoMap toRemove = accounts_;

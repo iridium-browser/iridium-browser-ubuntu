@@ -7,7 +7,6 @@
 #include <set>
 
 #include "base/files/file_path.h"
-#include "base/path_service.h"
 #include "chromeos/dbus/cros_disks_client.h"
 #include "content/public/test/mock_special_storage_policy.h"
 #include "storage/browser/fileapi/external_mount_points.h"
@@ -258,7 +257,7 @@ TEST(ChromeOSFileSystemBackendTest, GetVirtualPathConflictWithSystemPoints) {
     { FPL("/foo/xxx"), false, FPL("") },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTestCases); ++i) {
+  for (size_t i = 0; i < arraysize(kTestCases); ++i) {
     // Initialize virtual path with a value.
     base::FilePath virtual_path(FPL("/mount"));
     base::FilePath local_path(kTestCases[i].local_path);

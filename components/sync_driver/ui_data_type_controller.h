@@ -38,19 +38,18 @@ class UIDataTypeController : public DataTypeController {
       SyncApiComponentFactory* sync_factory);
 
   // DataTypeController interface.
-  virtual void LoadModels(
-      const ModelLoadCallback& model_load_callback) OVERRIDE;
-  virtual void StartAssociating(const StartCallback& start_callback) OVERRIDE;
-  virtual void Stop() OVERRIDE;
-  virtual syncer::ModelType type() const OVERRIDE;
-  virtual syncer::ModelSafeGroup model_safe_group() const OVERRIDE;
-  virtual ChangeProcessor* GetChangeProcessor() const OVERRIDE;
-  virtual std::string name() const OVERRIDE;
-  virtual State state() const OVERRIDE;
+  void LoadModels(const ModelLoadCallback& model_load_callback) override;
+  void StartAssociating(const StartCallback& start_callback) override;
+  void Stop() override;
+  syncer::ModelType type() const override;
+  syncer::ModelSafeGroup model_safe_group() const override;
+  ChangeProcessor* GetChangeProcessor() const override;
+  std::string name() const override;
+  State state() const override;
 
   // DataTypeErrorHandler interface.
-  virtual void OnSingleDataTypeUnrecoverableError(
-      const syncer::SyncError& error) OVERRIDE;
+  void OnSingleDataTypeUnrecoverableError(
+      const syncer::SyncError& error) override;
 
   // Used by tests to override the factory used to create
   // GenericChangeProcessors.
@@ -61,7 +60,7 @@ class UIDataTypeController : public DataTypeController {
   // For testing only.
   UIDataTypeController();
   // DataTypeController is RefCounted.
-  virtual ~UIDataTypeController();
+  ~UIDataTypeController() override;
 
   // Start any dependent services that need to be running before we can
   // associate models. The default implementation is a no-op.
@@ -76,7 +75,7 @@ class UIDataTypeController : public DataTypeController {
   virtual void StopModels();
 
   // DataTypeController interface.
-  virtual void OnModelLoaded() OVERRIDE;
+  void OnModelLoaded() override;
 
   // Helper method for cleaning up state and invoking the start callback.
   virtual void StartDone(ConfigureResult result,

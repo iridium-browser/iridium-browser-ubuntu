@@ -12,10 +12,10 @@
           'dependencies': [
             '../../chrome/chrome.gyp:browser_tests',
             '../../remoting/remoting.gyp:remoting_webapp_v1',
+            '../../remoting/remoting.gyp:remoting_webapp_v2',
           ],
           'includes': [
             '../../build/isolate.gypi',
-            'chromoting_integration_tests.isolate',
           ],
           'sources': [
             'chromoting_integration_tests.isolate',

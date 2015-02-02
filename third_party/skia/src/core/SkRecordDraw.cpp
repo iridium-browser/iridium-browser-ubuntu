@@ -20,10 +20,12 @@ void SkRecordDraw(const SkRecord& record,
         // is not necessarily in that same space.  getClipBounds() returns us
         // this canvas' clip bounds transformed back into identity space, which
         // lets us query the BBH.
-        SkRect query = { 0, 0, 0, 0 };
-        (void)canvas->getClipBounds(&query);
+        SkRect query;
+        if (!canvas->getClipBounds(&query)) {
+            return;
+        }
 
-        SkTDArray<void*> ops;
+        SkTDArray<unsigned> ops;
         bbh->search(query, &ops);
 
         SkRecords::Draw draw(canvas);
@@ -31,7 +33,10 @@ void SkRecordDraw(const SkRecord& record,
             if (callback && callback->abortDrawing()) {
                 return;
             }
-            record.visit<void>((uintptr_t)ops[i], draw);  // See FillBounds below.
+            // This visit call uses the SkRecords::Draw::operator() to call
+            // methods on the |canvas|, wrapped by methods defined with the
+            // DRAW() macro.
+            record.visit<void>(ops[i], draw);
         }
     } else {
         // Draw all ops.
@@ -40,6 +45,9 @@ void SkRecordDraw(const SkRecord& record,
             if (callback && callback->abortDrawing()) {
                 return;
             }
+            // This visit call uses the SkRecords::Draw::operator() to call
+            // methods on the |canvas|, wrapped by methods defined with the
+            // DRAW() macro.
             record.visit<void>(i, draw);
         }
     }
@@ -93,6 +101,8 @@ DRAW(DrawBitmapNine, drawBitmapNine(shallow_copy(r.bitmap), r.center, r.dst, r.p
 DRAW(DrawBitmapRectToRect,
         drawBitmapRectToRect(shallow_copy(r.bitmap), r.src, r.dst, r.paint, r.flags));
 DRAW(DrawDRRect, drawDRRect(r.outer, r.inner, r.paint));
+DRAW(DrawImage, drawImage(r.image, r.left, r.top, r.paint));
+DRAW(DrawImageRect, drawImageRect(r.image, r.src, r.dst, r.paint));
 DRAW(DrawOval, drawOval(r.oval, r.paint));
 DRAW(DrawPaint, drawPaint(r.paint));
 DRAW(DrawPath, drawPath(r.path, r.paint));
@@ -111,7 +121,6 @@ DRAW(DrawVertices, drawVertices(r.vmode, r.vertexCount, r.vertices, r.texs, r.co
                                 r.xmode.get(), r.indices, r.indexCount, r.paint));
 DRAW(DrawData, drawData(r.data, r.length));
 #undef DRAW
-
 
 // This is an SkRecord visitor that fills an SkBBoxHierarchy.
 //
@@ -133,12 +142,13 @@ DRAW(DrawData, drawData(r.data, r.length));
 // in for all the control ops we stashed away.
 class FillBounds : SkNoncopyable {
 public:
-    FillBounds(const SkRecord& record, SkBBoxHierarchy* bbh) : fBounds(record.count()) {
+    FillBounds(const SkRect& cullRect, const SkRecord& record, SkBBoxHierarchy* bbh) 
+        : fCullRect(cullRect)
+        , fBounds(record.count()) {
         // Calculate bounds for all ops.  This won't go quite in order, so we'll need
         // to store the bounds separately then feed them in to the BBH later in order.
-        const Bounds largest = Bounds::MakeLargest();
         fCTM = &SkMatrix::I();
-        fCurrentClipBounds = largest;
+        fCurrentClipBounds = fCullRect;
         for (fCurrentOp = 0; fCurrentOp < record.count(); fCurrentOp++) {
             record.visit<void>(fCurrentOp, *this);
         }
@@ -151,17 +161,12 @@ public:
 
         // Any control ops not part of any Save/Restore block draw everywhere.
         while (!fControlIndices.isEmpty()) {
-            this->popControl(largest);
+            this->popControl(fCullRect);
         }
 
         // Finally feed all stored bounds into the BBH.  They'll be returned in this order.
         SkASSERT(bbh);
-        for (uintptr_t i = 0; i < record.count(); i++) {
-            if (!fBounds[i].isEmpty()) {
-                bbh->insert((void*)i, fBounds[i], true/*ok to defer*/);
-            }
-        }
-        bbh->flushDeferredInserts();
+        bbh->insert(&fBounds, record.count());
     }
 
     template <typename T> void operator()(const T& op) {
@@ -199,7 +204,7 @@ private:
         Bounds clip = SkRect::Make(devBounds);
         // We don't call adjustAndMap() because as its last step it would intersect the adjusted
         // clip bounds with the previous clip, exactly what we can't do when the clip grows.
-        fCurrentClipBounds = this->adjustForSaveLayerPaints(&clip) ? clip : Bounds::MakeLargest();
+        fCurrentClipBounds = this->adjustForSaveLayerPaints(&clip) ? clip : fCullRect;
     }
 
     // Restore holds the devBounds for the clip after the {save,saveLayer}/restore block completes.
@@ -211,7 +216,7 @@ private:
         const int kSavesToIgnore = 1;
         Bounds clip = SkRect::Make(op.devBounds);
         fCurrentClipBounds =
-            this->adjustForSaveLayerPaints(&clip, kSavesToIgnore) ? clip : Bounds::MakeLargest();
+            this->adjustForSaveLayerPaints(&clip, kSavesToIgnore) ? clip : fCullRect;
     }
 
     // We also take advantage of SaveLayer bounds when present to further cut the clip down.
@@ -248,7 +253,14 @@ private:
 
     void pushSaveBlock(const SkPaint* paint) {
         // Starting a new Save block.  Push a new entry to represent that.
-        SaveBounds sb = { 0, Bounds::MakeEmpty(), paint };
+        SaveBounds sb;
+        sb.controlOps = 0;
+        // If the paint affects transparent black, the bound shouldn't be smaller
+        // than the current clip bounds.
+        sb.bounds =
+            PaintMayAffectTransparentBlack(paint) ? fCurrentClipBounds : Bounds::MakeEmpty();
+        sb.paint = paint;
+
         fSaveStack.push(sb);
         this->pushControl();
     }
@@ -298,19 +310,15 @@ private:
         SaveBounds sb;
         fSaveStack.pop(&sb);
 
-        // If the paint affects transparent black, we can't trust any of our calculated bounds.
-        const Bounds& bounds =
-            PaintMayAffectTransparentBlack(sb.paint) ? fCurrentClipBounds : sb.bounds;
-
         while (sb.controlOps --> 0) {
-            this->popControl(bounds);
+            this->popControl(sb.bounds);
         }
 
         // This whole Save block may be part another Save block.
-        this->updateSaveBounds(bounds);
+        this->updateSaveBounds(sb.bounds);
 
         // If called from a real Restore (not a phony one for balance), it'll need the bounds.
-        return bounds;
+        return sb.bounds;
     }
 
     void pushControl() {
@@ -335,7 +343,7 @@ private:
     // FIXME: this method could use better bounds
     Bounds bounds(const DrawText&) const { return fCurrentClipBounds; }
 
-    Bounds bounds(const Clear&) const { return Bounds::MakeLargest(); }  // Ignores the clip.
+    Bounds bounds(const Clear&) const { return fCullRect; }             // Ignores the clip.
     Bounds bounds(const DrawPaint&) const { return fCurrentClipBounds; }
     Bounds bounds(const NoOp&)  const { return Bounds::MakeEmpty(); }    // NoOps don't draw.
 
@@ -352,7 +360,15 @@ private:
     Bounds bounds(const DrawDRRect& op) const {
         return this->adjustAndMap(op.outer.rect(), &op.paint);
     }
+    Bounds bounds(const DrawImage& op) const {
+        const SkImage* image = op.image;
+        SkRect rect = SkRect::MakeXYWH(op.left, op.top, image->width(), image->height());
 
+        return this->adjustAndMap(rect, op.paint);
+    }
+    Bounds bounds(const DrawImageRect& op) const {
+        return this->adjustAndMap(op.dst, op.paint);
+    }
     Bounds bounds(const DrawBitmapRectToRect& op) const {
         return this->adjustAndMap(op.dst, op.paint);
     }
@@ -449,10 +465,6 @@ private:
     Bounds bounds(const DrawTextBlob& op) const {
         SkRect dst = op.blob->bounds();
         dst.offset(op.x, op.y);
-        // TODO: remove when implicit bounds are plumbed through
-        if (dst.isEmpty()) {
-            return fCurrentClipBounds;
-        }
         return this->adjustAndMap(dst, &op.paint);
     }
 
@@ -460,8 +472,10 @@ private:
 #ifdef SK_DEBUG
         SkRect correct = *rect;
 #endif
-        const SkScalar yPad = 2.0f * paint.getTextSize(),  // In practice, this seems to be enough.
-                       xPad = 4.0f * yPad;                 // Hack for very wide Github logo font.
+        // crbug.com/373785 ~~> xPad = 4x yPad
+        // crbug.com/424824 ~~> bump yPad from 2x text size to 2.5x
+        const SkScalar yPad = 2.5f * paint.getTextSize(),
+                       xPad = 4.0f * yPad;
         rect->outset(xPad, yPad);
 #ifdef SK_DEBUG
         SkPaint::FontMetrics metrics;
@@ -526,6 +540,9 @@ private:
         return rect;
     }
 
+    // We do not guarantee anything for operations outside of the cull rect
+    const SkRect fCullRect;
+
     // Conservative identity-space bounds for each op in the SkRecord.
     SkAutoTMalloc<Bounds> fBounds;
 
@@ -543,6 +560,6 @@ private:
 
 }  // namespace SkRecords
 
-void SkRecordFillBounds(const SkRecord& record, SkBBoxHierarchy* bbh) {
-    SkRecords::FillBounds(record, bbh);
+void SkRecordFillBounds(const SkRect& cullRect, const SkRecord& record, SkBBoxHierarchy* bbh) {
+    SkRecords::FillBounds(cullRect, record, bbh);
 }

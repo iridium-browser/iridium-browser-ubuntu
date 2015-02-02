@@ -1257,56 +1257,67 @@ should be able to be added at any place in this file.
 <action name="BlockedPluginInfobar.AllowThisTime">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>This infobar has been removed.</obsolete>
 </action>
 
 <action name="BlockedPluginInfobar.AlwaysAllow">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>This infobar has been removed.</obsolete>
 </action>
 
 <action name="BlockedPluginInfobar.Closed">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>This infobar has been removed.</obsolete>
 </action>
 
 <action name="BlockedPluginInfobar.Dismissed">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>This infobar has been removed.</obsolete>
 </action>
 
 <action name="BlockedPluginInfobar.LearnMore">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>This infobar has been removed.</obsolete>
 </action>
 
 <action name="BlockedPluginInfobar.Shown">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>This infobar has been removed.</obsolete>
 </action>
 
 <action name="BlockedPluginInfobar.Shown.Java">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>This infobar has been removed.</obsolete>
 </action>
 
 <action name="BlockedPluginInfobar.Shown.QuickTime">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>This infobar has been removed.</obsolete>
 </action>
 
 <action name="BlockedPluginInfobar.Shown.RealPlayer">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>This infobar has been removed.</obsolete>
 </action>
 
 <action name="BlockedPluginInfobar.Shown.Shockwave">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>This infobar has been removed.</obsolete>
 </action>
 
 <action name="BlockedPluginInfobar.Shown.WindowsMediaPlayer">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>This infobar has been removed.</obsolete>
 </action>
 
 <action name="Bold">
@@ -2657,6 +2668,11 @@ should be able to be added at any place in this file.
   <description>Please enter the description of this user action.</description>
 </action>
 
+<action name="Flash.PluginInstanceCreated">
+  <owner>thestig@chromium.org</owner>
+  <description>Count of Flash plugin instances.</description>
+</action>
+
 <action name="FocusAppMenu">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
@@ -2942,6 +2958,16 @@ should be able to be added at any place in this file.
   <description>Please enter the description of this user action.</description>
 </action>
 
+<action name="FrameLoad">
+  <owner>thestig@chromium.org</owner>
+  <description>Count of successful frame loads to new pages.</description>
+</action>
+
+<action name="FrameLoadWithFlash">
+  <owner>thestig@chromium.org</owner>
+  <description>Count of frame loads that also load PPAPI Flash.</description>
+</action>
+
 <action name="Gesture_Overview">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
@@ -3128,6 +3154,13 @@ should be able to be added at any place in this file.
 <action name="Home">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+</action>
+
+<action name="Hotword.HotwordTrigger">
+  <owner>amistry@chromium.org</owner>
+  <owner>rlp@chromium.org</owner>
+  <owner>somast@chromium.org</owner>
+  <description>User triggered the hotword by saying 'Ok Google'.</description>
 </action>
 
 <action name="ImportLockDialogCocoa_Shown">
@@ -8501,6 +8534,16 @@ should be able to be added at any place in this file.
   <description>Please enter the description of this user action.</description>
 </action>
 
+<action name="Options_EasyUnlockRequireProximity_Disable">
+  <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
+  <description>Please enter the description of the metric.</description>
+</action>
+
+<action name="Options_EasyUnlockRequireProximity_Enable">
+  <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
+  <description>Please enter the description of the metric.</description>
+</action>
+
 <action name="Options_EnableCloudPrintProxy">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
@@ -9095,6 +9138,11 @@ should be able to be added at any place in this file.
 <action name="Options_ShowAutoFillSettings">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+</action>
+
+<action name="Options_ShowBatterySettings">
+  <owner>michaelpg@chromium.org</owner>
+  <description>Settings: Power settings</description>
 </action>
 
 <action name="Options_ShowBookmarksBar_Disable">
@@ -10344,22 +10392,22 @@ should be able to be added at any place in this file.
 </action>
 
 <action name="SettingsResetBubble.LearnMore">
-  <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
+  <owner>mad@chromium.org</owner>
   <description>Please enter the description of this user action.</description>
 </action>
 
 <action name="SettingsResetBubble.NoThanks">
-  <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
+  <owner>mad@chromium.org</owner>
   <description>Please enter the description of this user action.</description>
 </action>
 
 <action name="SettingsResetBubble.Reset">
-  <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
+  <owner>mad@chromium.org</owner>
   <description>Please enter the description of this user action.</description>
 </action>
 
 <action name="SettingsResetBubble.Show">
-  <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
+  <owner>mad@chromium.org</owner>
   <description>Please enter the description of this user action.</description>
 </action>
 
@@ -11216,6 +11264,20 @@ should be able to be added at any place in this file.
   <obsolete>Removed from codebase; see GoogleUpdate.UpgradeResult.</obsolete>
 </action>
 
+<action name="VideoPlayer.CastVideoError">
+  <owner>yoshiki@chromium.org</owner>
+  <description>
+    Chrome OS Video Player: an error occurred upon casting.
+  </description>
+</action>
+
+<action name="VideoPlayer.OpenVideoPlayer">
+  <owner>yoshiki@chromium.org</owner>
+  <description>
+    Chrome OS Video Player: the user opened the Chrome OS Video Player.
+  </description>
+</action>
+
 <action name="ViewAboutConflicts">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
@@ -11430,11 +11492,17 @@ should be able to be added at any place in this file.
 <action name="WebsiteSettings_CookiesDialogOpened">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>
+    Superseded by the WebsiteSettings.Action histogram on 2014-10-30.
+  </obsolete>
 </action>
 
 <action name="WebsiteSettings_Opened">
   <owner>Please list the metric's owners. Add more owner tags as needed.</owner>
   <description>Please enter the description of this user action.</description>
+  <obsolete>
+    Superseded by the WebsiteSettings.Action histogram on 2014-10-30.
+  </obsolete>
 </action>
 
 <action name="Win7ASHRestart">
@@ -11608,7 +11676,19 @@ should be able to be added at any place in this file.
 
 <action name="webapps.AddShortcut.Bookmark">
   <owner>dfalcantara@chromium.org</owner>
-  <description>Shortcut added to the homescreen for a bookmark.</description>
+  <description>
+    Shortcut added to the homescreen for a page containing neither
+    mobile-webapp-capable nor apple-mobile-webapp-capable meta tags.
+  </description>
+</action>
+
+<action name="webapps.AddShortcut.Manifest">
+  <owner>mlamouri@chromium.org</owner>
+  <description>
+    Shortcut added to the homescreen with a valid Manifest. This action will be
+    recorded in addition to AppShortcut, AppShortcutApple and Bookmark actions
+    to keep a trend of whether the webapp also add meta tags.
+  </description>
 </action>
 
 </actions>

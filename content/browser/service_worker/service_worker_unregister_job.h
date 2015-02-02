@@ -32,17 +32,17 @@ class ServiceWorkerUnregisterJob : public ServiceWorkerRegisterJobBase {
 
   ServiceWorkerUnregisterJob(base::WeakPtr<ServiceWorkerContextCore> context,
                              const GURL& pattern);
-  virtual ~ServiceWorkerUnregisterJob();
+  ~ServiceWorkerUnregisterJob() override;
 
   // Registers a callback to be called when the job completes (whether
   // successfully or not). Multiple callbacks may be registered.
   void AddCallback(const UnregistrationCallback& callback);
 
   // ServiceWorkerRegisterJobBase implementation:
-  virtual void Start() OVERRIDE;
-  virtual void Abort() OVERRIDE;
-  virtual bool Equals(ServiceWorkerRegisterJobBase* job) OVERRIDE;
-  virtual RegistrationJobType GetType() OVERRIDE;
+  void Start() override;
+  void Abort() override;
+  bool Equals(ServiceWorkerRegisterJobBase* job) override;
+  RegistrationJobType GetType() override;
 
  private:
   void OnRegistrationFound(

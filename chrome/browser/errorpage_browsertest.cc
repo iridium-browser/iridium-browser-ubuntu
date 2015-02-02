@@ -154,12 +154,12 @@ class FailFirstNRequestsInterceptor : public net::URLRequestInterceptor {
  public:
   explicit FailFirstNRequestsInterceptor(int requests_to_fail)
       : requests_(0), failures_(0), requests_to_fail_(requests_to_fail) {}
-  virtual ~FailFirstNRequestsInterceptor() {}
+  ~FailFirstNRequestsInterceptor() override {}
 
   // net::URLRequestInterceptor implementation
-  virtual net::URLRequestJob* MaybeInterceptRequest(
+  net::URLRequestJob* MaybeInterceptRequest(
       net::URLRequest* request,
-      net::NetworkDelegate* network_delegate) const OVERRIDE {
+      net::NetworkDelegate* network_delegate) const override {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
     requests_++;
     if (failures_ < requests_to_fail_) {
@@ -200,12 +200,12 @@ class LinkDoctorInterceptor : public net::URLRequestInterceptor {
                             weak_factory_(this) {
   }
 
-  virtual ~LinkDoctorInterceptor() {}
+  ~LinkDoctorInterceptor() override {}
 
   // net::URLRequestInterceptor implementation
-  virtual net::URLRequestJob* MaybeInterceptRequest(
+  net::URLRequestJob* MaybeInterceptRequest(
       net::URLRequest* request,
-      net::NetworkDelegate* network_delegate) const OVERRIDE {
+      net::NetworkDelegate* network_delegate) const override {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
     BrowserThread::PostTask(
@@ -293,11 +293,11 @@ class ErrorPageTest : public InProcessBrowserTest {
   };
 
   ErrorPageTest() : link_doctor_interceptor_(NULL) {}
-  virtual ~ErrorPageTest() {}
+  ~ErrorPageTest() override {}
 
   // Navigates the active tab to a mock url created for the file at |file_path|.
   // Needed for StaleCacheStatus and StaleCacheStatusFailedCorrections tests.
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kEnableOfflineLoadStaleCache);
   }
 
@@ -357,7 +357,7 @@ class ErrorPageTest : public InProcessBrowserTest {
     const char* js_cache_probe =
         "try {\n"
         "    domAutomationController.send(\n"
-        "        'staleLoadButton' in templateData ? 'yes' : 'no');\n"
+        "        loadTimeData.valueExists('staleLoadButton') ? 'yes' : 'no');\n"
         "} catch (e) {\n"
         "    domAutomationController.send(e.message);\n"
         "}\n";
@@ -405,7 +405,7 @@ class ErrorPageTest : public InProcessBrowserTest {
   }
 
  protected:
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     link_doctor_interceptor_ = new LinkDoctorInterceptor();
     scoped_ptr<net::URLRequestInterceptor> owned_interceptor(
         link_doctor_interceptor_);
@@ -464,14 +464,14 @@ class TestFailProvisionalLoadObserver : public content::WebContentsObserver {
  public:
   explicit TestFailProvisionalLoadObserver(content::WebContents* contents)
       : content::WebContentsObserver(contents) {}
-  virtual ~TestFailProvisionalLoadObserver() {}
+  ~TestFailProvisionalLoadObserver() override {}
 
   // This method is invoked when the provisional load failed.
-  virtual void DidFailProvisionalLoad(
+  void DidFailProvisionalLoad(
       content::RenderFrameHost* render_frame_host,
       const GURL& validated_url,
       int error_code,
-      const base::string16& error_description) OVERRIDE {
+      const base::string16& error_description) override {
     fail_url_ = validated_url;
   }
 
@@ -876,7 +876,7 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, StaleCacheStatus) {
 
 class ErrorPageAutoReloadTest : public InProcessBrowserTest {
  public:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kEnableOfflineAutoReload);
   }
 
@@ -936,12 +936,12 @@ IN_PROC_BROWSER_TEST_F(ErrorPageAutoReloadTest, AutoReload) {
 class AddressUnreachableInterceptor : public net::URLRequestInterceptor {
  public:
   AddressUnreachableInterceptor() {}
-  virtual ~AddressUnreachableInterceptor() {}
+  ~AddressUnreachableInterceptor() override {}
 
   // net::URLRequestInterceptor:
-  virtual net::URLRequestJob* MaybeInterceptRequest(
+  net::URLRequestJob* MaybeInterceptRequest(
       net::URLRequest* request,
-      net::NetworkDelegate* network_delegate) const OVERRIDE {
+      net::NetworkDelegate* network_delegate) const override {
     return new URLRequestFailedJob(request,
                                    network_delegate,
                                    net::ERR_ADDRESS_UNREACHABLE);
@@ -958,13 +958,13 @@ class AddressUnreachableInterceptor : public net::URLRequestInterceptor {
 class ErrorPageNavigationCorrectionsFailTest : public ErrorPageTest {
  public:
   // InProcessBrowserTest:
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
         base::Bind(&ErrorPageNavigationCorrectionsFailTest::AddFilters));
   }
 
-  virtual void TearDownOnMainThread() OVERRIDE {
+  void TearDownOnMainThread() override {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
         base::Bind(&ErrorPageNavigationCorrectionsFailTest::RemoveFilters));
@@ -1058,7 +1058,7 @@ class ErrorPageForIDNTest : public InProcessBrowserTest {
   static const char kHostnameJSUnicode[];
 
   // InProcessBrowserTest:
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     // Clear AcceptLanguages to force punycode decoding.
     browser()->profile()->GetPrefs()->SetString(prefs::kAcceptLanguages,
                                                 std::string());
@@ -1067,7 +1067,7 @@ class ErrorPageForIDNTest : public InProcessBrowserTest {
         base::Bind(&ErrorPageForIDNTest::AddFilters));
   }
 
-  virtual void TearDownOnMainThread() OVERRIDE {
+  void TearDownOnMainThread() override {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
         base::Bind(&ErrorPageForIDNTest::RemoveFilters));

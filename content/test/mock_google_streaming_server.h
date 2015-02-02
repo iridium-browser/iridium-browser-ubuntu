@@ -32,9 +32,9 @@ class MockGoogleStreamingServer : public net::TestURLFetcherDelegateForTests {
   virtual ~MockGoogleStreamingServer();
 
   // net::TestURLFetcherDelegateForTests implementation.
-  virtual void OnRequestStart(int fetcher_id) OVERRIDE;
-  virtual void OnChunkUpload(int fetcher_id) OVERRIDE;
-  virtual void OnRequestEnd(int fetcher_id) OVERRIDE;
+  void OnRequestStart(int fetcher_id) override;
+  void OnChunkUpload(int fetcher_id) override;
+  void OnRequestEnd(int fetcher_id) override;
 
   void SimulateResult(const content::SpeechRecognitionResult& result);
   void SimulateServerFailure();

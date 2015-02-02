@@ -43,7 +43,7 @@ namespace blink {
 
 MediaStreamTrack* MediaStreamTrack::create(ExecutionContext* context, MediaStreamComponent* component)
 {
-    MediaStreamTrack* track = adoptRefCountedGarbageCollectedWillBeNoop(new MediaStreamTrack(context, component));
+    MediaStreamTrack* track = new MediaStreamTrack(context, component);
     track->suspendIfNeeded();
     return track;
 }
@@ -110,6 +110,16 @@ bool MediaStreamTrack::muted() const
     return m_component->muted();
 }
 
+bool MediaStreamTrack::remote() const
+{
+    return m_component->source()->remote();
+}
+
+bool MediaStreamTrack::readonly() const
+{
+    return m_component->source()->readonly();
+}
+
 String MediaStreamTrack::readyState() const
 {
     if (ended())
@@ -172,9 +182,11 @@ void MediaStreamTrack::sourceChangedState()
     m_readyState = m_component->source()->readyState();
     switch (m_readyState) {
     case MediaStreamSource::ReadyStateLive:
+        m_component->setMuted(false);
         dispatchEvent(Event::create(EventTypeNames::unmute));
         break;
     case MediaStreamSource::ReadyStateMuted:
+        m_component->setMuted(true);
         dispatchEvent(Event::create(EventTypeNames::mute));
         break;
     case MediaStreamSource::ReadyStateEnded:

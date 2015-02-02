@@ -23,9 +23,9 @@ namespace ash {
 class MultiWindowResizeControllerTest : public test::AshTestBase {
  public:
   MultiWindowResizeControllerTest() : resize_controller_(NULL) {}
-  virtual ~MultiWindowResizeControllerTest() {}
+  ~MultiWindowResizeControllerTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     test::AshTestBase::SetUp();
     WorkspaceController* wc =
         test::ShellTestApi(Shell::GetInstance()).workspace_controller();

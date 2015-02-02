@@ -40,10 +40,10 @@
 #include "talk/media/base/fakevideorenderer.h"
 #include "talk/media/base/mediachannel.h"
 #include "talk/media/devices/fakedevicemanager.h"
-#include "talk/p2p/base/stunserver.h"
-#include "talk/p2p/base/teststunserver.h"
-#include "talk/p2p/base/testturnserver.h"
-#include "talk/p2p/client/basicportallocator.h"
+#include "webrtc/p2p/base/stunserver.h"
+#include "webrtc/p2p/base/teststunserver.h"
+#include "webrtc/p2p/base/testturnserver.h"
+#include "webrtc/p2p/client/basicportallocator.h"
 #include "talk/session/media/channelmanager.h"
 #include "talk/session/media/mediasession.h"
 #include "webrtc/base/fakenetwork.h"
@@ -309,7 +309,8 @@ class WebRtcSessionTest : public testing::Test {
       ss_scope_(fss_.get()),
       stun_socket_addr_(rtc::SocketAddress(kStunAddrHost,
                                                  cricket::STUN_SERVER_PORT)),
-      stun_server_(Thread::Current(), stun_socket_addr_),
+      stun_server_(cricket::TestStunServer::Create(Thread::Current(),
+                                                   stun_socket_addr_)),
       turn_server_(Thread::Current(), kTurnUdpIntAddr, kTurnUdpExtAddr),
       mediastream_signaling_(channel_manager_.get()),
       ice_type_(PeerConnectionInterface::kAll) {
@@ -327,14 +328,6 @@ class WebRtcSessionTest : public testing::Test {
     EXPECT_TRUE(channel_manager_->Init());
     desc_factory_->set_add_legacy_streams(false);
     allocator_->set_step_delay(cricket::kMinimumStepDelay);
-  }
-
-  static void SetUpTestCase() {
-    rtc::InitializeSSL();
-  }
-
-  static void TearDownTestCase() {
-    rtc::CleanupSSL();
   }
 
   void AddInterface(const SocketAddress& addr) {
@@ -514,7 +507,7 @@ class WebRtcSessionTest : public testing::Test {
   void VerifyAnswerFromNonCryptoOffer() {
     // Create an SDP without Crypto.
     cricket::MediaSessionOptions options;
-    options.has_video = true;
+    options.recv_video = true;
     JsepSessionDescription* offer(
         CreateRemoteOffer(options, cricket::SEC_DISABLED));
     ASSERT_TRUE(offer != NULL);
@@ -528,7 +521,7 @@ class WebRtcSessionTest : public testing::Test {
 
   void VerifyAnswerFromCryptoOffer() {
     cricket::MediaSessionOptions options;
-    options.has_video = true;
+    options.recv_video = true;
     options.bundle_enabled = true;
     scoped_ptr<JsepSessionDescription> offer(
         CreateRemoteOffer(options, cricket::SEC_REQUIRED));
@@ -720,7 +713,7 @@ class WebRtcSessionTest : public testing::Test {
       SessionDescriptionInterface** nocrypto_answer) {
     // Create a SDP without Crypto.
     cricket::MediaSessionOptions options;
-    options.has_video = true;
+    options.recv_video = true;
     options.bundle_enabled = true;
     *offer = CreateRemoteOffer(options, cricket::SEC_ENABLED);
     ASSERT_TRUE(*offer != NULL);
@@ -734,7 +727,7 @@ class WebRtcSessionTest : public testing::Test {
   void CreateDtlsOfferAndNonDtlsAnswer(SessionDescriptionInterface** offer,
       SessionDescriptionInterface** nodtls_answer) {
     cricket::MediaSessionOptions options;
-    options.has_video = true;
+    options.recv_video = true;
     options.bundle_enabled = true;
 
     rtc::scoped_ptr<SessionDescriptionInterface> temp_offer(
@@ -796,8 +789,8 @@ class WebRtcSessionTest : public testing::Test {
       const char* sctp_stream_name, int new_port,
       cricket::MediaSessionOptions options) {
     options.data_channel_type = cricket::DCT_SCTP;
-    options.AddStream(cricket::MEDIA_TYPE_DATA, "datachannel",
-                      sctp_stream_name);
+    options.AddSendStream(cricket::MEDIA_TYPE_DATA, "datachannel",
+                          sctp_stream_name);
     return ChangeSDPSctpPort(new_port, CreateRemoteOffer(options));
   }
 
@@ -1109,7 +1102,7 @@ class WebRtcSessionTest : public testing::Test {
   rtc::scoped_ptr<rtc::FirewallSocketServer> fss_;
   rtc::SocketServerScope ss_scope_;
   rtc::SocketAddress stun_socket_addr_;
-  cricket::TestStunServer stun_server_;
+  rtc::scoped_ptr<cricket::TestStunServer> stun_server_;
   cricket::TestTurnServer turn_server_;
   rtc::FakeNetworkManager network_manager_;
   rtc::scoped_ptr<cricket::BasicPortAllocator> allocator_;
@@ -1393,7 +1386,7 @@ TEST_F(WebRtcSessionTest, SetLocalSdpFailedOnCreateChannel) {
 TEST_F(WebRtcSessionTest, TestSetNonSdesOfferWhenSdesOn) {
   Init(NULL);
   cricket::MediaSessionOptions options;
-  options.has_video = true;
+  options.recv_video = true;
   JsepSessionDescription* offer = CreateRemoteOffer(
       options, cricket::SEC_DISABLED);
   ASSERT_TRUE(offer != NULL);
@@ -1440,7 +1433,7 @@ TEST_F(WebRtcSessionTest, TestReceiveDtlsOfferCreateDtlsAnswer) {
   InitWithDtls();
   SetFactoryDtlsSrtp();
   cricket::MediaSessionOptions options;
-  options.has_video = true;
+  options.recv_video = true;
   JsepSessionDescription* offer =
       CreateRemoteOffer(options, cricket::SEC_DISABLED);
   ASSERT_TRUE(offer != NULL);
@@ -1480,7 +1473,7 @@ TEST_F(WebRtcSessionTest, TestCreateDtlsOfferReceiveDtlsAnswer) {
   SetLocalDescriptionWithoutError(offer);
 
   cricket::MediaSessionOptions options;
-  options.has_video = true;
+  options.recv_video = true;
   JsepSessionDescription* answer =
       CreateRemoteAnswer(offer, options, cricket::SEC_DISABLED);
   ASSERT_TRUE(answer != NULL);
@@ -1497,7 +1490,7 @@ TEST_F(WebRtcSessionTest, TestReceiveNonDtlsOfferWhenDtlsOn) {
   MAYBE_SKIP_TEST(rtc::SSLStreamAdapter::HaveDtlsSrtp);
   InitWithDtls();
   cricket::MediaSessionOptions options;
-  options.has_video = true;
+  options.recv_video = true;
   options.bundle_enabled = true;
   JsepSessionDescription* offer = CreateRemoteOffer(
       options, cricket::SEC_REQUIRED);
@@ -1538,7 +1531,7 @@ TEST_F(WebRtcSessionTest, TestSetRemoteNonDtlsAnswerWhenDtlsOn) {
   InitWithDtls();
   SessionDescriptionInterface* offer = CreateOffer();
   cricket::MediaSessionOptions options;
-  options.has_video = true;
+  options.recv_video = true;
   JsepSessionDescription* answer =
       CreateRemoteAnswer(offer, options, cricket::SEC_ENABLED);
 
@@ -1567,7 +1560,7 @@ TEST_F(WebRtcSessionTest, TestCreateOfferReceiveAnswerWithoutEncryption) {
   SetLocalDescriptionWithoutError(offer);
 
   cricket::MediaSessionOptions options;
-  options.has_video = true;
+  options.recv_video = true;
   JsepSessionDescription* answer =
       CreateRemoteAnswer(offer, options, cricket::SEC_DISABLED);
   ASSERT_TRUE(answer != NULL);
@@ -1585,7 +1578,7 @@ TEST_F(WebRtcSessionTest, TestCreateAnswerReceiveOfferWithoutEncryption) {
   InitWithDtls();
 
   cricket::MediaSessionOptions options;
-  options.has_video = true;
+  options.recv_video = true;
   JsepSessionDescription* offer =
       CreateRemoteOffer(options, cricket::SEC_DISABLED);
   ASSERT_TRUE(offer != NULL);
@@ -2297,8 +2290,8 @@ TEST_F(WebRtcSessionTest, TestAVOfferWithVideoOnlyAnswer) {
   SessionDescriptionInterface* offer = CreateOffer();
 
   cricket::MediaSessionOptions options;
-  options.has_audio = false;
-  options.has_video = true;
+  options.recv_audio = false;
+  options.recv_video = true;
   SessionDescriptionInterface* answer = CreateRemoteAnswer(
       offer, options, cricket::SEC_ENABLED);
 
@@ -2953,7 +2946,7 @@ TEST_F(WebRtcSessionTest, TestCryptoAfterSetLocalDescriptionWithDisabled) {
 TEST_F(WebRtcSessionTest, TestCreateAnswerWithNewUfragAndPassword) {
   Init(NULL);
   cricket::MediaSessionOptions options;
-  options.has_video = true;
+  options.recv_video = true;
   rtc::scoped_ptr<JsepSessionDescription> offer(
       CreateRemoteOffer(options));
   SetRemoteDescriptionWithoutError(offer.release());
@@ -2984,7 +2977,7 @@ TEST_F(WebRtcSessionTest, TestCreateAnswerWithNewUfragAndPassword) {
 TEST_F(WebRtcSessionTest, TestCreateAnswerWithOldUfragAndPassword) {
   Init(NULL);
   cricket::MediaSessionOptions options;
-  options.has_video = true;
+  options.recv_video = true;
   rtc::scoped_ptr<JsepSessionDescription> offer(
       CreateRemoteOffer(options));
   SetRemoteDescriptionWithoutError(offer.release());
@@ -3049,7 +3042,7 @@ TEST_F(WebRtcSessionTest, TestIceStatesBundle) {
 TEST_F(WebRtcSessionTest, SetSdpFailedOnSessionError) {
   Init(NULL);
   cricket::MediaSessionOptions options;
-  options.has_video = true;
+  options.recv_video = true;
 
   cricket::BaseSession::Error error_code = cricket::BaseSession::ERROR_CONTENT;
   std::string error_code_str = "ERROR_CONTENT";
@@ -3226,7 +3219,7 @@ TEST_F(WebRtcSessionTest, TestCreateAnswerBeforeIdentityRequestReturnSuccess) {
   SetFactoryDtlsSrtp();
 
   cricket::MediaSessionOptions options;
-  options.has_video = true;
+  options.recv_video = true;
   scoped_ptr<JsepSessionDescription> offer(
         CreateRemoteOffer(options, cricket::SEC_DISABLED));
   ASSERT_TRUE(offer.get() != NULL);
@@ -3409,7 +3402,7 @@ TEST_F(WebRtcSessionTest, TestRenegotiateNewMediaWithCandidatesInSdp) {
   SetRemoteDescriptionWithoutError(answer);
 
   cricket::MediaSessionOptions options;
-  options.has_video = true;
+  options.recv_video = true;
   offer = CreateRemoteOffer(options, cricket::SEC_DISABLED);
 
   cricket::Candidate candidate1;
@@ -3439,7 +3432,7 @@ TEST_F(WebRtcSessionTest, TestRenegotiateNewMediaWithCandidatesSeparated) {
   SetRemoteDescriptionWithoutError(answer);
 
   cricket::MediaSessionOptions options;
-  options.has_video = true;
+  options.recv_video = true;
   offer = CreateRemoteOffer(options, cricket::SEC_DISABLED);
   SetRemoteDescriptionWithoutError(offer);
 

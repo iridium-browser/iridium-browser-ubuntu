@@ -29,20 +29,18 @@ class ChildProcessResourceProvider
  public:
   explicit ChildProcessResourceProvider(TaskManager* task_manager);
 
-  virtual Resource* GetResource(int origin_pid,
-                                int child_id,
-                                int route_id) OVERRIDE;
-  virtual void StartUpdating() OVERRIDE;
-  virtual void StopUpdating() OVERRIDE;
+  Resource* GetResource(int origin_pid, int child_id, int route_id) override;
+  void StartUpdating() override;
+  void StopUpdating() override;
 
   // content::BrowserChildProcessObserver methods:
-  virtual void BrowserChildProcessHostConnected(
-      const content::ChildProcessData& data) OVERRIDE;
-  virtual void BrowserChildProcessHostDisconnected(
-      const content::ChildProcessData& data) OVERRIDE;
+  void BrowserChildProcessHostConnected(
+      const content::ChildProcessData& data) override;
+  void BrowserChildProcessHostDisconnected(
+      const content::ChildProcessData& data) override;
 
  private:
-  virtual ~ChildProcessResourceProvider();
+  ~ChildProcessResourceProvider() override;
 
   // Retrieves information about the running ChildProcessHosts (performed in the
   // IO thread).

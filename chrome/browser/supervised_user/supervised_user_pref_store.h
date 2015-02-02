@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_SUPERVISED_USER_SUPERVISED_USER_PREF_STORE_H_
 #define CHROME_BROWSER_SUPERVISED_USER_SUPERVISED_USER_PREF_STORE_H_
 
+#include <string>
+
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "base/prefs/pref_store.h"
@@ -26,15 +28,15 @@ class SupervisedUserPrefStore : public PrefStore {
       SupervisedUserSettingsService* supervised_user_settings_service);
 
   // PrefStore overrides:
-  virtual bool GetValue(const std::string& key,
-                        const base::Value** value) const OVERRIDE;
-  virtual void AddObserver(PrefStore::Observer* observer) OVERRIDE;
-  virtual void RemoveObserver(PrefStore::Observer* observer) OVERRIDE;
-  virtual bool HasObservers() const OVERRIDE;
-  virtual bool IsInitializationComplete() const OVERRIDE;
+  bool GetValue(const std::string& key,
+                const base::Value** value) const override;
+  void AddObserver(PrefStore::Observer* observer) override;
+  void RemoveObserver(PrefStore::Observer* observer) override;
+  bool HasObservers() const override;
+  bool IsInitializationComplete() const override;
 
  private:
-  virtual ~SupervisedUserPrefStore();
+  ~SupervisedUserPrefStore() override;
 
   void OnNewSettingsAvailable(const base::DictionaryValue* settings);
 

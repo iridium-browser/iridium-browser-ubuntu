@@ -19,21 +19,21 @@ class PreferenceValidationDelegate
  public:
   explicit PreferenceValidationDelegate(
       const AddIncidentCallback& add_incident);
-  virtual ~PreferenceValidationDelegate();
+  ~PreferenceValidationDelegate() override;
 
  private:
   // TrackedPreferenceValidationDelegate methods.
-  virtual void OnAtomicPreferenceValidation(
+  void OnAtomicPreferenceValidation(
       const std::string& pref_path,
       const base::Value* value,
       PrefHashStoreTransaction::ValueState value_state,
-      TrackedPreferenceHelper::ResetAction reset_action) OVERRIDE;
-  virtual void OnSplitPreferenceValidation(
+      TrackedPreferenceHelper::ResetAction reset_action) override;
+  void OnSplitPreferenceValidation(
       const std::string& pref_path,
       const base::DictionaryValue* dict_value,
       const std::vector<std::string>& invalid_keys,
       PrefHashStoreTransaction::ValueState value_state,
-      TrackedPreferenceHelper::ResetAction reset_action) OVERRIDE;
+      TrackedPreferenceHelper::ResetAction reset_action) override;
 
   AddIncidentCallback add_incident_;
 

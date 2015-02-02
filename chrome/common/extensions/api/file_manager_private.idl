@@ -167,6 +167,12 @@ dictionary FileTask {
 
   // True if this task is a default task for the selected files.
   boolean isDefault;
+
+  // True if this task is from generic file handler. Generic file handler is a
+  // file handler which handles any type of files (e.g. extensions: ["*"],
+  // types: ["*/*"]). Partial wild card (e.g. types: ["image/*"]) is not
+  // generic file handler.
+  boolean isGenericFileHandler;
 };
 
 // Additional entry properties.
@@ -216,6 +222,9 @@ dictionary EntryProperties {
   // True if the entry is labeled as shared (either from me to others or to me
   // by others.)
   boolean? shared;
+
+  // External file URL to open the file in browser.
+  DOMString? externalFileUrl;
 };
 
 // Information about total and remaining size on the mount point.
@@ -279,6 +288,9 @@ dictionary VolumeMetadata {
   // Flag that specifies if volume is mounted in read-only mode.
   boolean isReadOnly;
 
+  // Flag that specifies whether the volume contains media.
+  boolean hasMedia;
+  
   // Additional data about mount, for example, that the filesystem is not
   // supported.
   MountCondition? mountCondition;
@@ -446,6 +458,10 @@ dictionary DriveConnectionState {
 
   // Reasons of offline.
   DOMString? reason;
+
+  // Whether the device has a cellular network access or not. i.e. the |type|
+  // can be 'metered' or not.
+  boolean hasCellularNetworkAccess;
 };
 
 // Device event dispatched to listeners of onDeviceChaged.  See also
@@ -665,10 +681,11 @@ interface Functions {
 
   // Cancels ongoing file transfers for selected files.
   // |fileUrls| Array of files for which ongoing transfer should be canceled.
-  //     If this is absent, all jobs are canceled. 
-  // |callback|
-  static void cancelFileTransfers(optional DOMString[] fileUrls,
-                                  CancelFileTransfersCallback callback);
+  //     If this is absent, all jobs are canceled.
+  // |callback| Completion callback of the cancel.
+  static void cancelFileTransfers(
+      optional DOMString[] fileUrls,
+      optional CancelFileTransfersCallback callback);
 
   // Starts to copy an entry. If the source is a directory, the copy is done
   // recursively.

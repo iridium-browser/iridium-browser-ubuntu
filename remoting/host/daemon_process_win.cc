@@ -15,7 +15,6 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
-#include "base/timer/timer.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_handle.h"
 #include "ipc/ipc_message.h"
@@ -70,25 +69,25 @@ class DaemonProcessWin : public DaemonProcess {
   virtual ~DaemonProcessWin();
 
   // WorkerProcessIpcDelegate implementation.
-  virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
-  virtual void OnPermanentError(int exit_code) OVERRIDE;
+  virtual void OnChannelConnected(int32 peer_pid) override;
+  virtual void OnPermanentError(int exit_code) override;
 
   // DaemonProcess overrides.
-  virtual void SendToNetwork(IPC::Message* message) OVERRIDE;
+  virtual void SendToNetwork(IPC::Message* message) override;
   virtual bool OnDesktopSessionAgentAttached(
       int terminal_id,
       base::ProcessHandle desktop_process,
-      IPC::PlatformFileForTransit desktop_pipe) OVERRIDE;
+      IPC::PlatformFileForTransit desktop_pipe) override;
 
  protected:
   // DaemonProcess implementation.
   virtual scoped_ptr<DesktopSession> DoCreateDesktopSession(
       int terminal_id,
       const ScreenResolution& resolution,
-      bool virtual_terminal) OVERRIDE;
+      bool virtual_terminal) override;
   virtual void DoCrashNetworkProcess(
-      const tracked_objects::Location& location) OVERRIDE;
-  virtual void LaunchNetworkProcess() OVERRIDE;
+      const tracked_objects::Location& location) override;
+  virtual void LaunchNetworkProcess() override;
 
   // Changes the service start type to 'manual'.
   void DisableAutoStart();
@@ -221,8 +220,7 @@ void DaemonProcessWin::LaunchNetworkProcess() {
 
   scoped_ptr<UnprivilegedProcessDelegate> delegate(
       new UnprivilegedProcessDelegate(io_task_runner(), target.Pass()));
-  network_launcher_.reset(new WorkerProcessLauncher(
-      delegate.PassAs<WorkerProcessLauncher::Delegate>(), this));
+  network_launcher_.reset(new WorkerProcessLauncher(delegate.Pass(), this));
 }
 
 scoped_ptr<DaemonProcess> DaemonProcess::Create(
@@ -233,7 +231,7 @@ scoped_ptr<DaemonProcess> DaemonProcess::Create(
       new DaemonProcessWin(caller_task_runner, io_task_runner,
                            stopped_callback));
   daemon_process->Initialize();
-  return daemon_process.PassAs<DaemonProcess>();
+  return daemon_process.Pass();
 }
 
 void DaemonProcessWin::DisableAutoStart() {

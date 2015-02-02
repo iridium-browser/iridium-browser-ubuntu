@@ -21,10 +21,10 @@ const int kMemoryPressureIntervalMs = 750;
 class ResourceManagerDelegateImpl : public ResourceManagerDelegate {
  public:
   ResourceManagerDelegateImpl() {}
-  virtual ~ResourceManagerDelegateImpl() {}
+  ~ResourceManagerDelegateImpl() override {}
 
  private:
-  virtual int GetUsedMemoryInPercent() OVERRIDE {
+  int GetUsedMemoryInPercent() override {
     base::SystemMemoryInfoKB info;
     if (!base::GetSystemMemoryInfo(&info)) {
       LOG(WARNING) << "Cannot determine the free memory of the system.";
@@ -61,7 +61,7 @@ class ResourceManagerDelegateImpl : public ResourceManagerDelegate {
     return percentage;
   }
 
-  virtual int MemoryPressureIntervalInMS() OVERRIDE {
+  int MemoryPressureIntervalInMS() override {
     return kMemoryPressureIntervalMs;
   }
   DISALLOW_COPY_AND_ASSIGN(ResourceManagerDelegateImpl);

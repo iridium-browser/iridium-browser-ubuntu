@@ -22,6 +22,7 @@
 
 #include "core/dom/Document.h"
 #include "core/dom/StyleEngine.h"
+#include "core/paint/RootInlineBoxPainter.h"
 #include "core/rendering/EllipsisBox.h"
 #include "core/rendering/HitTestResult.h"
 #include "core/rendering/InlineTextBox.h"
@@ -151,17 +152,9 @@ float RootInlineBox::placeEllipsisBox(bool ltr, float blockLeftEdge, float block
     return result;
 }
 
-void RootInlineBox::paintEllipsisBox(PaintInfo& paintInfo, const LayoutPoint& paintOffset, LayoutUnit lineTop, LayoutUnit lineBottom) const
-{
-    if (hasEllipsisBox() && paintInfo.shouldPaintWithinRoot(&renderer()) && renderer().style()->visibility() == VISIBLE
-            && paintInfo.phase == PaintPhaseForeground)
-        ellipsisBox()->paint(paintInfo, paintOffset, lineTop, lineBottom);
-}
-
 void RootInlineBox::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset, LayoutUnit lineTop, LayoutUnit lineBottom)
 {
-    InlineFlowBox::paint(paintInfo, paintOffset, lineTop, lineBottom);
-    paintEllipsisBox(paintInfo, paintOffset, lineTop, lineBottom);
+    RootInlineBoxPainter(*this).paint(paintInfo, paintOffset, lineTop, lineBottom);
 }
 
 bool RootInlineBox::nodeAtPoint(const HitTestRequest& request, HitTestResult& result, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, LayoutUnit lineTop, LayoutUnit lineBottom)
@@ -469,7 +462,7 @@ LayoutUnit RootInlineBox::selectionBottom() const
 
 int RootInlineBox::blockDirectionPointInLine() const
 {
-    return !block().style()->isFlippedBlocksWritingMode() ? std::max(lineTop(), selectionTop()) : std::min(lineBottom(), selectionBottom());
+    return !block().style()->slowIsFlippedBlocksWritingMode() ? std::max(lineTop(), selectionTop()) : std::min(lineBottom(), selectionBottom());
 }
 
 RenderBlockFlow& RootInlineBox::block() const
@@ -841,9 +834,9 @@ Node* RootInlineBox::getLogicalStartBoxWithNode(InlineBox*& startBox) const
     Vector<InlineBox*> leafBoxesInLogicalOrder;
     collectLeafBoxesInLogicalOrder(leafBoxesInLogicalOrder);
     for (size_t i = 0; i < leafBoxesInLogicalOrder.size(); ++i) {
-        if (leafBoxesInLogicalOrder[i]->renderer().node()) {
+        if (leafBoxesInLogicalOrder[i]->renderer().nonPseudoNode()) {
             startBox = leafBoxesInLogicalOrder[i];
-            return startBox->renderer().node();
+            return startBox->renderer().nonPseudoNode();
         }
     }
     startBox = 0;
@@ -855,9 +848,9 @@ Node* RootInlineBox::getLogicalEndBoxWithNode(InlineBox*& endBox) const
     Vector<InlineBox*> leafBoxesInLogicalOrder;
     collectLeafBoxesInLogicalOrder(leafBoxesInLogicalOrder);
     for (size_t i = leafBoxesInLogicalOrder.size(); i > 0; --i) {
-        if (leafBoxesInLogicalOrder[i - 1]->renderer().node()) {
+        if (leafBoxesInLogicalOrder[i - 1]->renderer().nonPseudoNode()) {
             endBox = leafBoxesInLogicalOrder[i - 1];
-            return endBox->renderer().node();
+            return endBox->renderer().nonPseudoNode();
         }
     }
     endBox = 0;

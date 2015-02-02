@@ -45,7 +45,6 @@ class QuotaService : public base::NonThreadSafe {
   // Some concrete heuristics (declared below) that ExtensionFunctions can
   // use to help the service make decisions about quota violations.
   class TimedLimit;
-  class SustainedLimit;
 
   QuotaService();
   virtual ~QuotaService();
@@ -65,12 +64,9 @@ class QuotaService : public base::NonThreadSafe {
   // All QuotaLimitHeuristic instances in this map are owned by us.
   typedef std::map<FunctionName, QuotaLimitHeuristics> FunctionHeuristicsMap;
 
-  // Purge resets all accumulated data (except |violation_errors_|) as if the
-  // service was just created. Called periodically so we don't consume an
-  // unbounded amount of memory while tracking quota.  Yes, this could mean an
-  // extension gets away with murder if it is timed right, but the extensions
-  // we are trying to limit are ones that consistently violate, so we'll
-  // converge to the correct set.
+  // Purge resets all accumulated data as if the service was just created.
+  // Called periodically so we don't consume an unbounded amount of memory
+  // while tracking quota.
   void Purge();
   void PurgeFunctionHeuristicsMap(FunctionHeuristicsMap* map);
   base::RepeatingTimer<QuotaService> purge_timer_;
@@ -81,12 +77,6 @@ class QuotaService : public base::NonThreadSafe {
   // track of which functions it has invoked and the heuristics for each one.
   // Each heuristic will be evaluated and ANDed together to get a final answer.
   std::map<ExtensionId, FunctionHeuristicsMap> function_heuristics_;
-
-  // For now, as soon as an extension violates quota, we don't allow it to
-  // make any more requests to quota limited functions.  This provides a quick
-  // lookup for these extensions that is only stored in memory.
-  typedef std::map<std::string, std::string> ViolationErrorMap;
-  ViolationErrorMap violation_errors_;
 
   DISALLOW_COPY_AND_ASSIGN(QuotaService);
 };
@@ -161,9 +151,9 @@ class QuotaLimitHeuristic {
   class SingletonBucketMapper : public BucketMapper {
    public:
     SingletonBucketMapper() {}
-    virtual ~SingletonBucketMapper() {}
-    virtual void GetBucketsForArgs(const base::ListValue* args,
-                                   BucketList* buckets) OVERRIDE;
+    ~SingletonBucketMapper() override {}
+    void GetBucketsForArgs(const base::ListValue* args,
+                           BucketList* buckets) override;
 
    private:
     Bucket bucket_;
@@ -213,27 +203,7 @@ class QuotaService::TimedLimit : public QuotaLimitHeuristic {
  public:
   TimedLimit(const Config& config, BucketMapper* map, const std::string& name)
       : QuotaLimitHeuristic(config, map, name) {}
-  virtual bool Apply(Bucket* bucket,
-                     const base::TimeTicks& event_time) OVERRIDE;
-};
-
-// A per-item heuristic to limit the number of events that can occur in a
-// period of time over a sustained longer interval. E.g "no more than two
-// events per minute, sustained over 10 minutes".
-class QuotaService::SustainedLimit : public QuotaLimitHeuristic {
- public:
-  SustainedLimit(const base::TimeDelta& sustain,
-                 const Config& config,
-                 BucketMapper* map,
-                 const std::string& name);
-  virtual bool Apply(Bucket* bucket,
-                     const base::TimeTicks& event_time) OVERRIDE;
-
- private:
-  // Specifies how long exhaustion of buckets is allowed to continue before
-  // denying requests.
-  const int64 repeat_exhaustion_allowance_;
-  int64 num_available_repeat_exhaustions_;
+  bool Apply(Bucket* bucket, const base::TimeTicks& event_time) override;
 };
 
 }  // namespace extensions

@@ -23,7 +23,6 @@
 #include "chrome/browser/ui/webui/components_ui.h"
 #include "chrome/browser/ui/webui/constrained_web_dialog_ui.h"
 #include "chrome/browser/ui/webui/crashes_ui.h"
-#include "chrome/browser/ui/webui/devtools_ui.h"
 #include "chrome/browser/ui/webui/domain_reliability_internals_ui.h"
 #include "chrome/browser/ui/webui/downloads_ui.h"
 #include "chrome/browser/ui/webui/flags_ui.h"
@@ -32,7 +31,6 @@
 #include "chrome/browser/ui/webui/help/help_ui.h"
 #include "chrome/browser/ui/webui/history_ui.h"
 #include "chrome/browser/ui/webui/identity_internals_ui.h"
-#include "chrome/browser/ui/webui/inspect_ui.h"
 #include "chrome/browser/ui/webui/instant_ui.h"
 #include "chrome/browser/ui/webui/interstitials/interstitial_ui.h"
 #include "chrome/browser/ui/webui/invalidations_ui.h"
@@ -84,13 +82,11 @@
 #include "chrome/browser/ui/webui/media/webrtc_logs_ui.h"
 #endif
 
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
 #include "chrome/browser/ui/webui/print_preview/print_preview_ui.h"
 #endif
 
-#if defined(OS_ANDROID)
-#include "chrome/browser/ui/webui/welcome_ui_android.h"
-#else
+#if !defined(OS_ANDROID)
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/ui/webui/quota_internals/quota_internals_ui.h"
 #include "chrome/browser/ui/webui/suggestions_internals/suggestions_internals_ui.h"
@@ -101,6 +97,9 @@
 
 #if defined(OS_ANDROID) || defined(OS_IOS)
 #include "chrome/browser/ui/webui/net_export_ui.h"
+#else
+#include "chrome/browser/ui/webui/devtools_ui.h"
+#include "chrome/browser/ui/webui/inspect_ui.h"
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -110,9 +109,7 @@
 #include "chrome/browser/ui/webui/chromeos/choose_mobile_network_ui.h"
 #include "chrome/browser/ui/webui/chromeos/cryptohome_ui.h"
 #include "chrome/browser/ui/webui/chromeos/drive_internals_ui.h"
-#include "chrome/browser/ui/webui/chromeos/first_run/first_run_ui.h"
 #include "chrome/browser/ui/webui/chromeos/imageburner/imageburner_ui.h"
-#include "chrome/browser/ui/webui/chromeos/keyboard_overlay_ui.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/browser/ui/webui/chromeos/mobile_setup_ui.h"
 #include "chrome/browser/ui/webui/chromeos/network_ui.h"
@@ -125,6 +122,11 @@
 #include "chrome/browser/ui/webui/chromeos/sim_unlock_ui.h"
 #include "chrome/browser/ui/webui/chromeos/slow_trace_ui.h"
 #include "chrome/browser/ui/webui/chromeos/slow_ui.h"
+#endif
+
+#if defined(OS_CHROMEOS) && !defined(USE_ATHENA)
+#include "chrome/browser/ui/webui/chromeos/first_run/first_run_ui.h"
+#include "chrome/browser/ui/webui/chromeos/keyboard_overlay_ui.h"
 #endif
 
 #if defined(USE_AURA)
@@ -140,7 +142,7 @@
 #include "chrome/browser/ui/webui/set_as_default_browser_ui.h"
 #endif
 
-#if (defined(USE_NSS) || defined(USE_OPENSSL)) && defined(USE_AURA)
+#if (defined(USE_NSS) || defined(USE_OPENSSL_CERTS)) && defined(USE_AURA)
 #include "chrome/browser/ui/webui/certificate_viewer_ui.h"
 #endif
 
@@ -346,10 +348,7 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
   /****************************************************************************
    * OS Specific #defines
    ***************************************************************************/
-#if defined(OS_ANDROID)
-  if (url.host() == chrome::kChromeUIWelcomeHost)
-    return &NewWebUI<WelcomeUI>;
-#else
+#if !defined(OS_ANDROID)
   // AppLauncherPage is not needed on Android.
   if (url.host() == chrome::kChromeUIAppLauncherPageHost &&
       profile && extensions::ExtensionSystem::Get(profile)->
@@ -359,8 +358,6 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
   // Bookmarks are part of NTP on Android.
   if (url.host() == chrome::kChromeUIBookmarksHost)
     return &NewWebUI<BookmarksUI>;
-  if (url.SchemeIs(content::kChromeDevToolsScheme))
-    return &NewWebUI<DevToolsUI>;
   // Downloads list on Android uses the built-in download manager.
   if (url.host() == chrome::kChromeUIDownloadsHost)
     return &NewWebUI<DownloadsUI>;
@@ -375,11 +372,6 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
   // Identity API is not available on Android.
   if (url.host() == chrome::kChromeUIIdentityInternalsHost)
     return &NewWebUI<IdentityInternalsUI>;
-  // chrome://inspect isn't supported on Android. Page debugging is handled by a
-  // remote devtools on the host machine, and other elements (Shared Workers,
-  // extensions, etc) aren't supported.
-  if (url.host() == chrome::kChromeUIInspectHost)
-    return &NewWebUI<InspectUI>;
   // Android does not support plugins for now.
   if (url.host() == chrome::kChromeUIPluginsHost)
     return &NewWebUI<PluginsUI>;
@@ -412,7 +404,7 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
   if (url.host() == chrome::kChromeUIMetroFlowHost)
     return &NewWebUI<SetAsDefaultBrowserUI>;
 #endif
-#if (defined(USE_NSS) || defined(USE_OPENSSL)) && defined(USE_AURA)
+#if (defined(USE_NSS) || defined(USE_OPENSSL_CERTS)) && defined(USE_AURA)
   if (url.host() == chrome::kChromeUICertificateViewerHost)
     return &NewWebUI<CertificateViewerUI>;
 #if defined(OS_CHROMEOS)
@@ -433,12 +425,14 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
     return &NewWebUI<chromeos::CryptohomeUI>;
   if (url.host() == chrome::kChromeUIDriveInternalsHost)
     return &NewWebUI<chromeos::DriveInternalsUI>;
-  if (url.host() == chrome::kChromeUIFirstRunHost)
-    return &NewWebUI<chromeos::FirstRunUI>;
   if (url.host() == chrome::kChromeUIImageBurnerHost)
     return &NewWebUI<ImageBurnUI>;
+#if !defined(USE_ATHENA)
+  if (url.host() == chrome::kChromeUIFirstRunHost)
+    return &NewWebUI<chromeos::FirstRunUI>;
   if (url.host() == chrome::kChromeUIKeyboardOverlayHost)
     return &NewWebUI<KeyboardOverlayUI>;
+#endif
   if (url.host() == chrome::kChromeUIMobileSetupHost)
     return &NewWebUI<MobileSetupUI>;
   if (url.host() == chrome::kChromeUINfcDebugHost)
@@ -467,6 +461,13 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
 #if !defined(OS_ANDROID) && !defined(OS_IOS)
   if (url.host() == chrome::kChromeUIChromeSigninHost)
     return &NewWebUI<InlineLoginUI>;
+  if (url.SchemeIs(content::kChromeDevToolsScheme))
+    return &NewWebUI<DevToolsUI>;
+  // chrome://inspect isn't supported on Android nor iOS. Page debugging is
+  // handled by a remote devtools on the host machine, and other elements, i.e.
+  // extensions aren't supported.
+  if (url.host() == chrome::kChromeUIInspectHost)
+    return &NewWebUI<InspectUI>;
 #endif
 
   /****************************************************************************
@@ -506,8 +507,10 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
       url.host() == chrome::kChromeUIDNSHost ||
       url.host() == chrome::kChromeUIMemoryHost ||
       url.host() == chrome::kChromeUIMemoryRedirectHost ||
-      url.host() == chrome::kChromeUIStatsHost ||
-      url.host() == chrome::kChromeUITermsHost
+      url.host() == chrome::kChromeUIStatsHost
+#if !defined(OS_ANDROID)
+      || url.host() == chrome::kChromeUITermsHost
+#endif
 #if defined(OS_LINUX) || defined(OS_OPENBSD)
       || url.host() == chrome::kChromeUILinuxProxyConfigHost
       || url.host() == chrome::kChromeUISandboxHost
@@ -527,7 +530,7 @@ WebUIFactoryFunction GetWebUIFactoryFunction(WebUI* web_ui,
   if (url.host() == chrome::kChromeUIExtensionsFrameHost)
     return &NewWebUI<extensions::ExtensionsUI>;
 #endif
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
   if (url.host() == chrome::kChromeUIPrintHost &&
       !profile->GetPrefs()->GetBoolean(prefs::kPrintPreviewDisabled)) {
     return &NewWebUI<PrintPreviewUI>;

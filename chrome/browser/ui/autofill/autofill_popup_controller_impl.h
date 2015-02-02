@@ -49,10 +49,10 @@ class AutofillPopupControllerImpl : public AutofillPopupController {
 
   // Hides the popup and destroys the controller. This also invalidates
   // |delegate_|.
-  virtual void Hide() OVERRIDE;
+  void Hide() override;
 
   // Invoked when the view was destroyed by by someone other than this class.
-  virtual void ViewDestroyed() OVERRIDE;
+  void ViewDestroyed() override;
 
   bool HandleKeyPressEvent(const content::NativeWebKeyboardEvent& event);
 
@@ -70,35 +70,33 @@ class AutofillPopupControllerImpl : public AutofillPopupController {
                               gfx::NativeView container_view,
                               const gfx::RectF& element_bounds,
                               base::i18n::TextDirection text_direction);
-  virtual ~AutofillPopupControllerImpl();
+  ~AutofillPopupControllerImpl() override;
 
   // AutofillPopupController implementation.
-  virtual void UpdateBoundsAndRedrawPopup() OVERRIDE;
-  virtual void SetSelectionAtPoint(const gfx::Point& point) OVERRIDE;
-  virtual bool AcceptSelectedLine() OVERRIDE;
-  virtual void SelectionCleared() OVERRIDE;
-  virtual void AcceptSuggestion(size_t index) OVERRIDE;
-  virtual int GetIconResourceID(
-      const base::string16& resource_name) const OVERRIDE;
-  virtual bool CanDelete(size_t index) const OVERRIDE;
-  virtual bool IsWarning(size_t index) const OVERRIDE;
-  virtual gfx::Rect GetRowBounds(size_t index) OVERRIDE;
-  virtual void SetPopupBounds(const gfx::Rect& bounds) OVERRIDE;
-  virtual const gfx::Rect& popup_bounds() const OVERRIDE;
-  virtual gfx::NativeView container_view() OVERRIDE;
-  virtual const gfx::RectF& element_bounds() const OVERRIDE;
-  virtual bool IsRTL() const OVERRIDE;
+  void UpdateBoundsAndRedrawPopup() override;
+  void SetSelectionAtPoint(const gfx::Point& point) override;
+  bool AcceptSelectedLine() override;
+  void SelectionCleared() override;
+  void AcceptSuggestion(size_t index) override;
+  int GetIconResourceID(const base::string16& resource_name) const override;
+  bool CanDelete(size_t index) const override;
+  bool IsWarning(size_t index) const override;
+  gfx::Rect GetRowBounds(size_t index) override;
+  void SetPopupBounds(const gfx::Rect& bounds) override;
+  const gfx::Rect& popup_bounds() const override;
+  gfx::NativeView container_view() override;
+  const gfx::RectF& element_bounds() const override;
+  bool IsRTL() const override;
 
-  virtual const std::vector<base::string16>& names() const OVERRIDE;
-  virtual const std::vector<base::string16>& subtexts() const OVERRIDE;
-  virtual const std::vector<base::string16>& icons() const OVERRIDE;
-  virtual const std::vector<int>& identifiers() const OVERRIDE;
+  const std::vector<base::string16>& names() const override;
+  const std::vector<base::string16>& subtexts() const override;
+  const std::vector<base::string16>& icons() const override;
+  const std::vector<int>& identifiers() const override;
 #if !defined(OS_ANDROID)
-  virtual const gfx::FontList& GetNameFontListForRow(
-      size_t index) const OVERRIDE;
-  virtual const gfx::FontList& subtext_font_list() const OVERRIDE;
+  const gfx::FontList& GetNameFontListForRow(size_t index) const override;
+  const gfx::FontList& subtext_font_list() const override;
 #endif
-  virtual int selected_line() const OVERRIDE;
+  int selected_line() const override;
 
   content::WebContents* web_contents();
 

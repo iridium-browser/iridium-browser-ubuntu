@@ -32,15 +32,15 @@ class GAIAInfoUpdateServiceFactory : public BrowserContextKeyedServiceFactory {
   friend struct DefaultSingletonTraits<GAIAInfoUpdateServiceFactory>;
 
   GAIAInfoUpdateServiceFactory();
-  virtual ~GAIAInfoUpdateServiceFactory();
+  ~GAIAInfoUpdateServiceFactory() override;
 
   // BrowserContextKeyedServiceFactory:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* context) const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* context) const override;
 
-  virtual void RegisterProfilePrefs(
-      user_prefs::PrefRegistrySyncable* registry) OVERRIDE;
-  virtual bool ServiceIsNULLWhileTesting() const OVERRIDE;
+  void RegisterProfilePrefs(
+      user_prefs::PrefRegistrySyncable* registry) override;
+  bool ServiceIsNULLWhileTesting() const override;
 
   DISALLOW_COPY_AND_ASSIGN(GAIAInfoUpdateServiceFactory);
 };

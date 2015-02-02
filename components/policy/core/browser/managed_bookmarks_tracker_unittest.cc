@@ -32,15 +32,15 @@ namespace policy {
 class ManagedBookmarksTrackerTest : public testing::Test {
  public:
   ManagedBookmarksTrackerTest() : managed_node_(NULL) {}
-  virtual ~ManagedBookmarksTrackerTest() {}
+  ~ManagedBookmarksTrackerTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     prefs_.registry()->RegisterListPref(bookmarks::prefs::kManagedBookmarks);
     prefs_.registry()->RegisterListPref(
         bookmarks::prefs::kBookmarkEditorExpandedNodes);
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     if (model_)
       model_->RemoveObserver(&observer_);
   }
@@ -66,7 +66,7 @@ class ManagedBookmarksTrackerTest : public testing::Test {
                  base::FilePath(),
                  base::MessageLoopProxy::current(),
                  base::MessageLoopProxy::current());
-    test::WaitForBookmarkModelToLoad(model_.get());
+    bookmarks::test::WaitForBookmarkModelToLoad(model_.get());
     Mock::VerifyAndClearExpectations(&observer_);
 
     ASSERT_EQ(1u, client_.extra_nodes().size());

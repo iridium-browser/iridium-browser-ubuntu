@@ -21,22 +21,21 @@ class ComponentUpdateService;
 class EVWhitelistComponentInstallerTraits : public ComponentInstallerTraits {
  public:
   EVWhitelistComponentInstallerTraits();
-  virtual ~EVWhitelistComponentInstallerTraits() {}
+  ~EVWhitelistComponentInstallerTraits() override {}
 
  private:
   // The following methods override ComponentInstallerTraits.
-  virtual bool CanAutoUpdate() const OVERRIDE;
-  virtual bool OnCustomInstall(const base::DictionaryValue& manifest,
-                               const base::FilePath& install_dir) OVERRIDE;
-  virtual bool VerifyInstallation(
-      const base::FilePath& install_dir) const OVERRIDE;
-  virtual void ComponentReady(
-      const base::Version& version,
-      const base::FilePath& path,
-      scoped_ptr<base::DictionaryValue> manifest) OVERRIDE;
-  virtual base::FilePath GetBaseDirectory() const OVERRIDE;
-  virtual void GetHash(std::vector<uint8_t>* hash) const OVERRIDE;
-  virtual std::string GetName() const OVERRIDE;
+  bool CanAutoUpdate() const override;
+  bool OnCustomInstall(const base::DictionaryValue& manifest,
+                       const base::FilePath& install_dir) override;
+  bool VerifyInstallation(const base::DictionaryValue& manifest,
+                          const base::FilePath& install_dir) const override;
+  void ComponentReady(const base::Version& version,
+                      const base::FilePath& path,
+                      scoped_ptr<base::DictionaryValue> manifest) override;
+  base::FilePath GetBaseDirectory() const override;
+  void GetHash(std::vector<uint8_t>* hash) const override;
+  std::string GetName() const override;
 
   static base::FilePath GetInstalledPath(const base::FilePath& base);
 

@@ -17,7 +17,7 @@ namespace extensions {
 class SharedModuleInfo : public Extension::ManifestData {
  public:
   SharedModuleInfo();
-  virtual ~SharedModuleInfo();
+  ~SharedModuleInfo() override;
 
   bool Parse(const Extension* extension, base::string16* error);
 
@@ -34,8 +34,6 @@ class SharedModuleInfo : public Extension::ManifestData {
 
   // Functions relating to exporting resources.
   static bool IsSharedModule(const Extension* extension);
-  static bool IsExportAllowed(const Extension* extension,
-                              const std::string& relative_path);
   // Check against the shared module's whitelist to see if |other_id| can import
   // its resources. If no whitelist is specified, all extensions can import this
   // extension.
@@ -49,9 +47,6 @@ class SharedModuleInfo : public Extension::ManifestData {
   static const std::vector<ImportInfo>& GetImports(const Extension* extension);
 
  private:
-  // This extension exports the following resources to other extensions.
-  URLPatternSet exported_set_;
-
   // Optional list of extensions from which importing is allowed.
   std::set<std::string> export_whitelist_;
 
@@ -63,15 +58,15 @@ class SharedModuleInfo : public Extension::ManifestData {
 class SharedModuleHandler : public ManifestHandler {
  public:
   SharedModuleHandler();
-  virtual ~SharedModuleHandler();
+  ~SharedModuleHandler() override;
 
-  virtual bool Parse(Extension* extension, base::string16* error) OVERRIDE;
-  virtual bool Validate(const Extension* extension,
-                        std::string* error,
-                        std::vector<InstallWarning>* warnings) const OVERRIDE;
+  bool Parse(Extension* extension, base::string16* error) override;
+  bool Validate(const Extension* extension,
+                std::string* error,
+                std::vector<InstallWarning>* warnings) const override;
 
  private:
-  virtual const std::vector<std::string> Keys() const OVERRIDE;
+  const std::vector<std::string> Keys() const override;
 };
 
 }  // namespace extensions

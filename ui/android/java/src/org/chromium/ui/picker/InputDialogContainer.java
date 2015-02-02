@@ -76,7 +76,7 @@ public class InputDialogContainer {
     }
 
     public void showPickerDialog(final int dialogType, double dialogValue,
-        double min, double max, double step) {
+            double min, double max, double step) {
         Calendar cal;
         // |dialogValue|, |min|, |max| mean different things depending on the |dialogType|.
         // For input type=month is the number of months since 1970.
@@ -139,7 +139,7 @@ public class InputDialogContainer {
             DateTimeSuggestion[] suggestions) {
         ListView suggestionListView = new ListView(mContext);
         final DateTimeSuggestionListAdapter adapter =
-            new DateTimeSuggestionListAdapter(mContext, Arrays.asList(suggestions));
+                new DateTimeSuggestionListAdapter(mContext, Arrays.asList(suggestions));
         suggestionListView.setAdapter(adapter);
         suggestionListView.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override
@@ -249,7 +249,7 @@ public class InputDialogContainer {
 
         mDialog.setButton(DialogInterface.BUTTON_POSITIVE,
                 mContext.getText(R.string.date_picker_dialog_set),
-                (DialogInterface.OnClickListener)mDialog);
+                (DialogInterface.OnClickListener) mDialog);
 
         mDialog.setButton(DialogInterface.BUTTON_NEGATIVE,
                 mContext.getText(android.R.string.cancel),
@@ -361,7 +361,7 @@ public class InputDialogContainer {
             mInputActionDelegate.replaceDateTime((year - 1970) * 12 + month);
         } else if (dialogType == sTextInputTypeWeek) {
             mInputActionDelegate.replaceDateTime(
-                  WeekPicker.createDateFromWeek(year, week).getTimeInMillis());
+                    WeekPicker.createDateFromWeek(year, week).getTimeInMillis());
         } else if (dialogType == sTextInputTypeTime) {
             mInputActionDelegate.replaceDateTime(TimeUnit.HOURS.toMillis(hourOfDay) +
                                                  TimeUnit.MINUTES.toMillis(minute) +

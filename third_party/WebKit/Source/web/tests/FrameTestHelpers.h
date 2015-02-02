@@ -31,6 +31,9 @@
 #ifndef FrameTestHelpers_h
 #define FrameTestHelpers_h
 
+#include "core/frame/Settings.h"
+#include "platform/RuntimeEnabledFeatures.h"
+#include "platform/scroll/ScrollbarTheme.h"
 #include "public/platform/WebURLRequest.h"
 #include "public/web/WebFrameClient.h"
 #include "public/web/WebHistoryItem.h"
@@ -38,12 +41,11 @@
 #include "public/web/WebViewClient.h"
 #include "web/WebViewImpl.h"
 #include "wtf/PassOwnPtr.h"
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
 #include <string>
 
 namespace blink {
-
-class WebLocalFrameImpl;
-class WebSettings;
 
 namespace FrameTestHelpers {
 
@@ -98,12 +100,13 @@ class TestWebFrameClient : public WebFrameClient {
 public:
     TestWebFrameClient();
 
-    virtual WebFrame* createChildFrame(WebLocalFrame* parent, const WebString& frameName) OVERRIDE;
-    virtual void frameDetached(WebFrame*) OVERRIDE;
-    virtual void didStartLoading(bool) OVERRIDE;
-    virtual void didStopLoading() OVERRIDE;
+    virtual WebFrame* createChildFrame(WebLocalFrame* parent, const WebString& frameName) override;
+    virtual void frameDetached(WebFrame*) override;
+    virtual void didStartLoading(bool) override;
+    virtual void didStopLoading() override;
 
     bool isLoading() { return m_loadsInProgress > 0; }
+    void waitForLoadToComplete();
 
 private:
     int m_loadsInProgress;
@@ -124,11 +127,27 @@ public:
 class TestWebViewClient : public WebViewClient {
 public:
     virtual ~TestWebViewClient() { }
-    virtual void initializeLayerTreeView() OVERRIDE;
-    virtual WebLayerTreeView* layerTreeView() OVERRIDE { return m_layerTreeView.get(); }
+    virtual void initializeLayerTreeView() override;
+    virtual WebLayerTreeView* layerTreeView() override { return m_layerTreeView.get(); }
 
 private:
     OwnPtr<WebLayerTreeView> m_layerTreeView;
+};
+
+class UseMockScrollbarSettings {
+public:
+    UseMockScrollbarSettings()
+    {
+        Settings::setMockScrollbarsEnabled(true);
+        RuntimeEnabledFeatures::setOverlayScrollbarsEnabled(true);
+        EXPECT_TRUE(ScrollbarTheme::theme()->usesOverlayScrollbars());
+    }
+
+    ~UseMockScrollbarSettings()
+    {
+        Settings::setMockScrollbarsEnabled(false);
+        RuntimeEnabledFeatures::setOverlayScrollbarsEnabled(false);
+    }
 };
 
 } // namespace FrameTestHelpers

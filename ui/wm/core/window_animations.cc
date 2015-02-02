@@ -29,11 +29,11 @@
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/animation/animation.h"
+#include "ui/gfx/geometry/vector3d_f.h"
 #include "ui/gfx/interpolated_transform.h"
 #include "ui/gfx/rect_conversions.h"
 #include "ui/gfx/screen.h"
 #include "ui/gfx/vector2d.h"
-#include "ui/gfx/vector3d_f.h"
 #include "ui/wm/core/window_util.h"
 #include "ui/wm/core/wm_core_switches.h"
 #include "ui/wm/public/animation_host.h"
@@ -63,18 +63,18 @@ class HidingWindowAnimationObserverBase : public aura::WindowObserver {
       : window_(window) {
     window_->AddObserver(this);
   }
-  virtual ~HidingWindowAnimationObserverBase() {
+  ~HidingWindowAnimationObserverBase() override {
     if (window_)
       window_->RemoveObserver(this);
   }
 
   // aura::WindowObserver:
-  virtual void OnWindowDestroying(aura::Window* window) OVERRIDE {
+  void OnWindowDestroying(aura::Window* window) override {
     DCHECK_EQ(window, window_);
     WindowInvalid();
   }
 
-  virtual void OnWindowDestroyed(aura::Window* window) OVERRIDE {
+  void OnWindowDestroyed(aura::Window* window) override {
     DCHECK_EQ(window, window_);
     WindowInvalid();
   }
@@ -165,10 +165,10 @@ class ImplicitHidingWindowAnimationObserver
   ImplicitHidingWindowAnimationObserver(
       aura::Window* window,
       ui::ScopedLayerAnimationSettings* settings);
-  virtual ~ImplicitHidingWindowAnimationObserver() {}
+  ~ImplicitHidingWindowAnimationObserver() override {}
 
   // ui::ImplicitAnimationObserver:
-  virtual void OnImplicitAnimationsCompleted() OVERRIDE;
+  void OnImplicitAnimationsCompleted() override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ImplicitHidingWindowAnimationObserver);
@@ -400,7 +400,7 @@ class RotateHidingWindowAnimationObserver
  public:
   explicit RotateHidingWindowAnimationObserver(aura::Window* window)
       : HidingWindowAnimationObserverBase(window) {}
-  virtual ~RotateHidingWindowAnimationObserver() {}
+  ~RotateHidingWindowAnimationObserver() override {}
 
   // Destroys itself after |last_sequence| ends or is aborted. Does not take
   // ownership of |last_sequence|, which should not be NULL.
@@ -409,16 +409,14 @@ class RotateHidingWindowAnimationObserver
   }
 
   // ui::LayerAnimationObserver:
-  virtual void OnLayerAnimationEnded(
-      ui::LayerAnimationSequence* sequence) OVERRIDE {
+  void OnLayerAnimationEnded(ui::LayerAnimationSequence* sequence) override {
     OnAnimationCompleted();
   }
-  virtual void OnLayerAnimationAborted(
-      ui::LayerAnimationSequence* sequence) OVERRIDE {
+  void OnLayerAnimationAborted(ui::LayerAnimationSequence* sequence) override {
     OnAnimationCompleted();
   }
-  virtual void OnLayerAnimationScheduled(
-      ui::LayerAnimationSequence* sequence) OVERRIDE {}
+  void OnLayerAnimationScheduled(
+      ui::LayerAnimationSequence* sequence) override {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(RotateHidingWindowAnimationObserver);

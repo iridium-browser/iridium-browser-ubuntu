@@ -23,7 +23,8 @@ enum GLErrorBit {
   kInvalidValue = (1 << 1),
   kInvalidOperation = (1 << 2),
   kOutOfMemory = (1 << 3),
-  kInvalidFrameBufferOperation = (1 << 4)
+  kInvalidFrameBufferOperation = (1 << 4),
+  kContextLost = (1 << 5)
 };
 }
 
@@ -232,6 +233,10 @@ int GLES2Util::GLGetNumValuesReturned(int id) const {
     //    GL_EXT_multisampled_render_to_texture
     case GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_SAMPLES_EXT:
       return 1;
+    // -- glGetFramebufferAttachmentParameteriv with
+    //    GL_EXT_sRGB
+    case GL_FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING_EXT:
+      return 1;
 
     // -- glGetProgramiv
     case GL_DELETE_STATUS:
@@ -352,11 +357,13 @@ int ElementsPerGroup(int format, int type) {
 
     switch (format) {
     case GL_RGB:
+    case GL_SRGB_EXT:
        return 3;
     case GL_LUMINANCE_ALPHA:
        return 2;
     case GL_RGBA:
     case GL_BGRA_EXT:
+    case GL_SRGB_ALPHA_EXT:
        return 4;
     case GL_ALPHA:
     case GL_LUMINANCE:
@@ -558,6 +565,8 @@ uint32 GLES2Util::GLErrorToErrorBit(uint32 error) {
       return gl_error_bit::kOutOfMemory;
     case GL_INVALID_FRAMEBUFFER_OPERATION:
       return gl_error_bit::kInvalidFrameBufferOperation;
+    case GL_CONTEXT_LOST_KHR:
+      return gl_error_bit::kContextLost;
     default:
       NOTREACHED();
       return gl_error_bit::kNoError;
@@ -576,6 +585,8 @@ uint32 GLES2Util::GLErrorBitToGLError(uint32 error_bit) {
       return GL_OUT_OF_MEMORY;
     case gl_error_bit::kInvalidFrameBufferOperation:
       return GL_INVALID_FRAMEBUFFER_OPERATION;
+    case gl_error_bit::kContextLost:
+      return GL_CONTEXT_LOST_KHR;
     default:
       NOTREACHED();
       return GL_NO_ERROR;
@@ -670,6 +681,7 @@ uint32 GLES2Util::GetChannelsForFormat(int format) {
     case GL_RGB565:
     case GL_RGB16F_EXT:
     case GL_RGB32F_EXT:
+    case GL_SRGB_EXT:
       return kRGB;
     case GL_BGRA_EXT:
     case GL_BGRA8_EXT:
@@ -679,6 +691,8 @@ uint32 GLES2Util::GetChannelsForFormat(int format) {
     case GL_RGBA8_OES:
     case GL_RGBA4:
     case GL_RGB5_A1:
+    case GL_SRGB_ALPHA_EXT:
+    case GL_SRGB8_ALPHA8_EXT:
       return kRGBA;
     case GL_DEPTH_COMPONENT32_OES:
     case GL_DEPTH_COMPONENT24_OES:

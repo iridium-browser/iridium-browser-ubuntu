@@ -46,29 +46,29 @@ class MEDIA_EXPORT MediaSourcePlayer : public MediaPlayerAndroid,
   virtual ~MediaSourcePlayer();
 
   // MediaPlayerAndroid implementation.
-  virtual void SetVideoSurface(gfx::ScopedJavaSurface surface) OVERRIDE;
-  virtual void Start() OVERRIDE;
-  virtual void Pause(bool is_media_related_action ALLOW_UNUSED) OVERRIDE;
-  virtual void SeekTo(base::TimeDelta timestamp) OVERRIDE;
-  virtual void Release() OVERRIDE;
-  virtual void SetVolume(double volume) OVERRIDE;
-  virtual int GetVideoWidth() OVERRIDE;
-  virtual int GetVideoHeight() OVERRIDE;
-  virtual base::TimeDelta GetCurrentTime() OVERRIDE;
-  virtual base::TimeDelta GetDuration() OVERRIDE;
-  virtual bool IsPlaying() OVERRIDE;
-  virtual bool CanPause() OVERRIDE;
-  virtual bool CanSeekForward() OVERRIDE;
-  virtual bool CanSeekBackward() OVERRIDE;
-  virtual bool IsPlayerReady() OVERRIDE;
-  virtual void SetCdm(BrowserCdm* cdm) OVERRIDE;
+  virtual void SetVideoSurface(gfx::ScopedJavaSurface surface) override;
+  virtual void Start() override;
+  virtual void Pause(bool is_media_related_action) override;
+  virtual void SeekTo(base::TimeDelta timestamp) override;
+  virtual void Release() override;
+  virtual void SetVolume(double volume) override;
+  virtual int GetVideoWidth() override;
+  virtual int GetVideoHeight() override;
+  virtual base::TimeDelta GetCurrentTime() override;
+  virtual base::TimeDelta GetDuration() override;
+  virtual bool IsPlaying() override;
+  virtual bool CanPause() override;
+  virtual bool CanSeekForward() override;
+  virtual bool CanSeekBackward() override;
+  virtual bool IsPlayerReady() override;
+  virtual void SetCdm(BrowserCdm* cdm) override;
 
   // DemuxerAndroidClient implementation.
-  virtual void OnDemuxerConfigsAvailable(const DemuxerConfigs& params) OVERRIDE;
-  virtual void OnDemuxerDataAvailable(const DemuxerData& params) OVERRIDE;
+  virtual void OnDemuxerConfigsAvailable(const DemuxerConfigs& params) override;
+  virtual void OnDemuxerDataAvailable(const DemuxerData& params) override;
   virtual void OnDemuxerSeekDone(
-      base::TimeDelta actual_browser_seek_time) OVERRIDE;
-  virtual void OnDemuxerDurationChanged(base::TimeDelta duration) OVERRIDE;
+      base::TimeDelta actual_browser_seek_time) override;
+  virtual void OnDemuxerDurationChanged(base::TimeDelta duration) override;
 
  private:
   friend class MediaSourcePlayerTest;
@@ -162,6 +162,10 @@ class MEDIA_EXPORT MediaSourcePlayer : public MediaPlayerAndroid,
   // Called when new decryption key becomes available.
   void OnKeyAdded();
 
+  // Called to resume playback after NO_KEY is received, but a new key is
+  // available.
+  void ResumePlaybackAfterKeyAdded();
+
   // Called when the CDM is detached.
   void OnCdmUnset();
 
@@ -249,6 +253,12 @@ class MEDIA_EXPORT MediaSourcePlayer : public MediaPlayerAndroid,
   // the player should pause. When a new key is added (OnKeyAdded()), we should
   // try to start playback again.
   bool is_waiting_for_key_;
+
+  // Indicates the situation where new key is added during pending decode
+  // (this variable can only be set when *_decoder_job_->is_decoding()). If this
+  // variable is true and MEDIA_CODEC_NO_KEY is returned then we need to try
+  // decoding again in case the newly added key is the correct decryption key.
+  bool key_added_while_decode_pending_;
 
   // Indicates whether the player is waiting for audio or video decoder to be
   // created. This could happen if video surface is not available or key is

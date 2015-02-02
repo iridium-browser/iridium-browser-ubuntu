@@ -10,8 +10,10 @@
 
 namespace ui {
 
-EventConverterEvdev::EventConverterEvdev(int fd, const base::FilePath& path)
-    : fd_(fd), path_(path) {
+EventConverterEvdev::EventConverterEvdev(int fd,
+                                         const base::FilePath& path,
+                                         int id)
+    : fd_(fd), path_(path), id_(id) {
 }
 
 EventConverterEvdev::~EventConverterEvdev() {
@@ -29,6 +31,19 @@ void EventConverterEvdev::Stop() {
 
 void EventConverterEvdev::OnFileCanWriteWithoutBlocking(int fd) {
   NOTREACHED();
+}
+
+bool EventConverterEvdev::HasTouchscreen() const {
+  return false;
+}
+
+gfx::Size EventConverterEvdev::GetTouchscreenSize() const {
+  NOTREACHED();
+  return gfx::Size();
+}
+
+bool EventConverterEvdev::IsInternal() const {
+  return false;
 }
 
 }  // namespace ui

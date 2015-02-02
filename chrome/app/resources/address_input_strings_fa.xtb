@@ -1,4 +1,6 @@
-<?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="fa">
+<?xml version="1.0" ?>
+<!DOCTYPE translationbundle>
+<translationbundle lang="fa">
 <translation id="777702478322588152">حوزه اداری</translation>
 <translation id="3713769522066937702">این قالب کد پستی قابل شناسایی نیست. نمونه کد پستی معتبر: <ph name="EXAMPLE"/>. کد پستی‌تان را نمی‌دانید؟ آن را از <ph name="BEGIN_LINK"/>اینجا<ph name="END_LINK"/> پیدا کنید.</translation>
 <translation id="7393381084163773901">آدرس</translation>
@@ -24,7 +26,7 @@
 <translation id="9207002871037636573">باید یک کد پستی ارائه دهید، به عنوان مثال <ph name="EXAMPLE"/>.</translation>
 <translation id="5089810972385038852">ایالت</translation>
 <translation id="6735419622867539268"><ph name="FIELD_VALUE"/> به‌ عنوان یک مقدار شناخته شده برای این قسمت پذیرفته نمی‌شود.</translation>
-<translation id="43113324827158664">این قسمت باید پر شود.</translation>
+<translation id="43113324827158664">این مورد نباید خالی باشد.</translation>
 <translation id="3050787670591910834">باید یک کد پستی ارائه دهید، به عنوان مثال <ph name="EXAMPLE"/>.</translation>
 <translation id="6282194474023008486">کد پستی</translation>
 <translation id="5937097533660449554">استان</translation>

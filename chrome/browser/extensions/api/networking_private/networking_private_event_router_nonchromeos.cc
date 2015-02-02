@@ -19,21 +19,21 @@ class NetworkingPrivateEventRouterImpl
       NetworkingPrivateServiceClient::Observer {
  public:
   explicit NetworkingPrivateEventRouterImpl(Profile* profile);
-  virtual ~NetworkingPrivateEventRouterImpl();
+  ~NetworkingPrivateEventRouterImpl() override;
 
  protected:
   // KeyedService overrides:
-  virtual void Shutdown() OVERRIDE;
+  void Shutdown() override;
 
   // EventRouter::Observer overrides:
-  virtual void OnListenerAdded(const EventListenerInfo& details) OVERRIDE;
-  virtual void OnListenerRemoved(const EventListenerInfo& details) OVERRIDE;
+  void OnListenerAdded(const EventListenerInfo& details) override;
+  void OnListenerRemoved(const EventListenerInfo& details) override;
 
   // NetworkingPrivateServiceClient::Observer overrides:
-  virtual void OnNetworksChangedEvent(
-      const std::vector<std::string>& network_guids) OVERRIDE;
-  virtual void OnNetworkListChangedEvent(
-      const std::vector<std::string>& network_guids) OVERRIDE;
+  void OnNetworksChangedEvent(
+      const std::vector<std::string>& network_guids) override;
+  void OnNetworkListChangedEvent(
+      const std::vector<std::string>& network_guids) override;
 
  private:
   // Decide if we should listen for network changes or not. If there are any

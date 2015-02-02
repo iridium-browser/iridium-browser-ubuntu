@@ -44,7 +44,7 @@ class Scrollbar;
 
 class PluginView : public Widget {
 public:
-    virtual bool isPluginView() const OVERRIDE FINAL { return true; }
+    virtual bool isPluginView() const override final { return true; }
 
     virtual blink::WebLayer* platformLayer() const { return 0; }
     virtual v8::Local<v8::Object> scriptableObject(v8::Isolate*) { return v8::Local<v8::Object>(); }
@@ -58,6 +58,11 @@ public:
     virtual void didReceiveData(const char*, int) { }
     virtual void didFinishLoading() { }
     virtual void didFailLoading(const ResourceError&) { }
+
+#if ENABLE(OILPAN)
+    virtual LocalFrame* pluginFrame() const { return nullptr; }
+    virtual void shouldDisposePlugin() { }
+#endif
 
 protected:
     PluginView() : Widget() { }

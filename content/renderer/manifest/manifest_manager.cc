@@ -10,6 +10,7 @@
 #include "content/public/renderer/render_frame.h"
 #include "content/renderer/fetchers/manifest_fetcher.h"
 #include "content/renderer/manifest/manifest_parser.h"
+#include "content/renderer/manifest/manifest_uma_util.h"
 #include "third_party/WebKit/public/platform/WebURLResponse.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
@@ -65,6 +66,10 @@ void ManifestManager::OnRequestManifestComplete(
             0, Manifest::kMaxIPCStringLength),
         ipc_manifest.icons[i].type.is_null());
   }
+  ipc_manifest.gcm_sender_id = base::NullableString16(
+        ipc_manifest.gcm_sender_id.string().substr(
+            0, Manifest::kMaxIPCStringLength),
+        ipc_manifest.gcm_sender_id.is_null());
 
   Send(new ManifestManagerHostMsg_RequestManifestResponse(
       routing_id(), request_id, ipc_manifest));
@@ -99,6 +104,7 @@ void ManifestManager::FetchManifest() {
   GURL url(render_frame()->GetWebFrame()->document().manifestURL());
 
   if (url.is_empty()) {
+    ManifestUmaUtil::FetchFailed(ManifestUmaUtil::FETCH_EMPTY_URL);
     ResolveCallbacks(ResolveStateFailure);
     return;
   }
@@ -118,10 +124,12 @@ void ManifestManager::OnManifestFetchComplete(
     const blink::WebURLResponse& response,
     const std::string& data) {
   if (response.isNull() && data.empty()) {
+    ManifestUmaUtil::FetchFailed(ManifestUmaUtil::FETCH_UNSPECIFIED_REASON);
     ResolveCallbacks(ResolveStateFailure);
     return;
   }
 
+  ManifestUmaUtil::FetchSucceeded();
   manifest_ = ManifestParser::Parse(data, response.url(), document_url);
 
   fetcher_.reset();

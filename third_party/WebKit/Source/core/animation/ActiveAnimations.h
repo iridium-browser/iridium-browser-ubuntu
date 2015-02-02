@@ -44,16 +44,12 @@ class CSSAnimations;
 class RenderObject;
 class Element;
 
-typedef WillBeHeapHashCountedSet<RawPtrWillBeWeakMember<AnimationPlayer> > AnimationPlayerCountedSet;
+using AnimationPlayerCountedSet = WillBeHeapHashCountedSet<RawPtrWillBeWeakMember<AnimationPlayer>>;
 
 class ActiveAnimations : public NoBaseWillBeGarbageCollectedFinalized<ActiveAnimations> {
     WTF_MAKE_NONCOPYABLE(ActiveAnimations);
 public:
-    ActiveAnimations()
-        : m_animationStyleChange(false)
-    {
-    }
-
+    ActiveAnimations();
     ~ActiveAnimations();
 
     // Animations that are currently active for this element, their effects will be applied
@@ -76,6 +72,10 @@ public:
     void updateAnimationFlags(RenderStyle&);
     void setAnimationStyleChange(bool animationStyleChange) { m_animationStyleChange = animationStyleChange; }
 
+    const RenderStyle* baseRenderStyle() const;
+    void updateBaseRenderStyle(const RenderStyle*);
+    void clearBaseRenderStyle();
+
 #if !ENABLE(OILPAN)
     void addAnimation(Animation* animation) { m_animations.append(animation); }
     void notifyAnimationDestroyed(Animation* animation) { m_animations.remove(m_animations.find(animation)); }
@@ -90,6 +90,7 @@ private:
     CSSAnimations m_cssAnimations;
     AnimationPlayerCountedSet m_players;
     bool m_animationStyleChange;
+    RefPtr<RenderStyle> m_baseRenderStyle;
 
 #if !ENABLE(OILPAN)
     // FIXME: Oilpan: This is to avoid a reference cycle that keeps Elements alive

@@ -22,22 +22,22 @@ class StubDevToolsClient : public DevToolsClient {
  public:
   explicit StubDevToolsClient(const std::string& id);
   StubDevToolsClient();
-  virtual ~StubDevToolsClient();
+  ~StubDevToolsClient() override;
 
   // Overridden from DevToolsClient:
-  virtual const std::string& GetId() OVERRIDE;
-  virtual bool WasCrashed() OVERRIDE;
-  virtual Status ConnectIfNecessary() OVERRIDE;
-  virtual Status SendCommand(const std::string& method,
-                             const base::DictionaryValue& params) OVERRIDE;
-  virtual Status SendCommandAndGetResult(
+  const std::string& GetId() override;
+  bool WasCrashed() override;
+  Status ConnectIfNecessary() override;
+  Status SendCommand(const std::string& method,
+                     const base::DictionaryValue& params) override;
+  Status SendCommandAndGetResult(
       const std::string& method,
       const base::DictionaryValue& params,
-      scoped_ptr<base::DictionaryValue>* result) OVERRIDE;
-  virtual void AddListener(DevToolsEventListener* listener) OVERRIDE;
-  virtual Status HandleEventsUntil(const ConditionalFunc& conditional_func,
-                                   const base::TimeDelta& timeout) OVERRIDE;
-  virtual Status HandleReceivedEvents() OVERRIDE;
+      scoped_ptr<base::DictionaryValue>* result) override;
+  void AddListener(DevToolsEventListener* listener) override;
+  Status HandleEventsUntil(const ConditionalFunc& conditional_func,
+                           const base::TimeDelta& timeout) override;
+  Status HandleReceivedEvents() override;
 
  protected:
   const std::string id_;

@@ -43,10 +43,9 @@ class ServiceWorkerGlobalScopeProxy;
 class WebServiceWorkerNetworkProvider;
 class WebView;
 class WorkerInspectorProxy;
-class WorkerScriptLoader;
 class WorkerThread;
 
-class WebEmbeddedWorkerImpl FINAL
+class WebEmbeddedWorkerImpl final
     : public WebEmbeddedWorker
     , public WebFrameClient
     , public WebDevToolsAgentClient {
@@ -63,14 +62,13 @@ public:
     static void terminateAll();
 
     // WebEmbeddedWorker overrides.
-    virtual void startWorkerContext(const WebEmbeddedWorkerStartData&) OVERRIDE;
-    virtual void resumeAfterDownload() OVERRIDE;
-    virtual void terminateWorkerContext() OVERRIDE;
-    virtual void resumeWorkerContext() OVERRIDE;
-    virtual void attachDevTools(const WebString& hostId) OVERRIDE;
-    virtual void reattachDevTools(const WebString& hostId, const WebString& savedState) OVERRIDE;
-    virtual void detachDevTools() OVERRIDE;
-    virtual void dispatchDevToolsMessage(const WebString&) OVERRIDE;
+    virtual void startWorkerContext(const WebEmbeddedWorkerStartData&) override;
+    virtual void resumeAfterDownload() override;
+    virtual void terminateWorkerContext() override;
+    virtual void attachDevTools(const WebString& hostId) override;
+    virtual void reattachDevTools(const WebString& hostId, const WebString& savedState) override;
+    virtual void detachDevTools() override;
+    virtual void dispatchDevToolsMessage(const WebString&) override;
 
     void postMessageToPageInspector(const WTF::String&);
 
@@ -79,19 +77,19 @@ private:
     class LoaderProxy;
 
     void prepareShadowPageForLoader();
+    void loadShadowPage();
 
     // WebFrameClient overrides.
     virtual void willSendRequest(
         WebLocalFrame*, unsigned identifier, WebURLRequest&,
-        const WebURLResponse& redirectResponse) OVERRIDE;
-    virtual void didFinishDocumentLoad(WebLocalFrame*) OVERRIDE;
+        const WebURLResponse& redirectResponse) override;
+    virtual void didFinishDocumentLoad(WebLocalFrame*) override;
 
     // WebDevToolsAgentClient overrides.
-    virtual void sendMessageToInspectorFrontend(const WebString&) OVERRIDE;
-    virtual void saveAgentRuntimeState(const WebString&) OVERRIDE;
-    virtual void resumeStartup() OVERRIDE;
+    virtual void sendMessageToInspectorFrontend(const WebString&) override;
+    virtual void saveAgentRuntimeState(const WebString&) override;
+    virtual void resumeStartup() override;
 
-    void startScriptLoader(WebLocalFrame*);
     void onScriptLoaderFinished();
     void startWorkerThread();
 

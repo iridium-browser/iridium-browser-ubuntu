@@ -45,7 +45,7 @@ class KeywordEditorControllerTest : public testing::Test,
         added_count_(0),
         removed_count_(0) {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     if (simulate_load_failure_)
       util_.model()->OnWebDataServiceRequestDone(0, NULL);
     else
@@ -55,25 +55,17 @@ class KeywordEditorControllerTest : public testing::Test,
     controller_->table_model()->SetObserver(this);
   }
 
-  virtual void TearDown() OVERRIDE {
-    controller_.reset();
-  }
+  void TearDown() override { controller_.reset(); }
 
-  virtual void OnModelChanged() OVERRIDE {
-    model_changed_count_++;
-  }
+  void OnModelChanged() override { model_changed_count_++; }
 
-  virtual void OnItemsChanged(int start, int length) OVERRIDE {
+  void OnItemsChanged(int start, int length) override {
     items_changed_count_++;
   }
 
-  virtual void OnItemsAdded(int start, int length) OVERRIDE {
-    added_count_++;
-  }
+  void OnItemsAdded(int start, int length) override { added_count_++; }
 
-  virtual void OnItemsRemoved(int start, int length) OVERRIDE {
-    removed_count_++;
-  }
+  void OnItemsRemoved(int start, int length) override { removed_count_++; }
 
   void VerifyChangeCount(int model_changed_count, int item_changed_count,
                          int added_count, int removed_count) {

@@ -13,11 +13,9 @@ using bookmarks_helper::AwaitAllModelsMatch;
 class MultipleClientBookmarksSyncTest : public SyncTest {
  public:
   MultipleClientBookmarksSyncTest() : SyncTest(MULTIPLE_CLIENT) {}
-  virtual ~MultipleClientBookmarksSyncTest() {}
+  ~MultipleClientBookmarksSyncTest() override {}
 
-  virtual bool TestUsesSelfNotifications() OVERRIDE {
-    return false;
-  }
+  bool TestUsesSelfNotifications() override { return false; }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MultipleClientBookmarksSyncTest);

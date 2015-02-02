@@ -69,14 +69,15 @@ class SupervisedUserTestBase : public chromeos::LoginManagerTest {
   SupervisedUserTestBase();
   virtual ~SupervisedUserTestBase();
 
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE;
+  virtual void SetUpInProcessBrowserTestFixture() override;
 
  protected:
-  virtual void TearDown() OVERRIDE;
+  virtual void TearDown() override;
 
-  virtual void TearDownInProcessBrowserTestFixture() OVERRIDE;
+  virtual void TearDownInProcessBrowserTestFixture() override;
 
   void JSEval(const std::string& script);
+  void JSEvalOrExitBrowser(const std::string& script);
 
   void JSExpectAsync(const std::string& function);
 

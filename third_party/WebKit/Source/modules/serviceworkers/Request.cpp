@@ -10,53 +10,27 @@
 #include "core/fetch/FetchUtils.h"
 #include "core/fetch/ResourceLoaderOptions.h"
 #include "core/loader/ThreadableLoader.h"
-#include "core/xml/XMLHttpRequest.h"
 #include "modules/serviceworkers/FetchManager.h"
-#include "modules/serviceworkers/HeadersForEachCallback.h"
 #include "modules/serviceworkers/RequestInit.h"
-#include "platform/NotImplemented.h"
 #include "platform/network/HTTPParsers.h"
 #include "platform/network/ResourceRequest.h"
 #include "platform/weborigin/Referrer.h"
 #include "public/platform/WebServiceWorkerRequest.h"
+#include "public/platform/WebURLRequest.h"
 
 namespace blink {
 
-namespace {
-
-class FillWebRequestHeaders : public HeadersForEachCallback {
-public:
-    FillWebRequestHeaders(WebServiceWorkerRequest* webRequest) : m_webRequest(webRequest) { }
-
-    virtual bool handleItem(ScriptValue, const String&, const String&, Headers*)
-    {
-        ASSERT_NOT_REACHED();
-        return false;
-    }
-
-    virtual bool handleItem(const String& value, const String& key, Headers*)
-    {
-        m_webRequest->appendHeader(key, value);
-        return true;
-    }
-
-private:
-    WebServiceWorkerRequest* m_webRequest;
-};
-
-} // namespace
-
-Request* Request::createRequestWithRequestData(ExecutionContext* context, FetchRequestData* request, const RequestInit& init, FetchRequestData::Mode mode, FetchRequestData::Credentials credentials, ExceptionState& exceptionState)
+Request* Request::createRequestWithRequestData(ExecutionContext* context, FetchRequestData* request, const RequestInit& init, WebURLRequest::FetchRequestMode mode, WebURLRequest::FetchCredentialsMode credentials, ExceptionState& exceptionState)
 {
     // "7. Let |mode| be |init|'s mode member if it is present, and
     // |fallbackMode| otherwise."
     // "8. If |mode| is non-null, set |request|'s mode to |mode|."
     if (init.mode == "same-origin") {
-        request->setMode(FetchRequestData::SameOriginMode);
+        request->setMode(WebURLRequest::FetchRequestModeSameOrigin);
     } else if (init.mode == "no-cors") {
-        request->setMode(mode = FetchRequestData::NoCORSMode);
+        request->setMode(mode = WebURLRequest::FetchRequestModeNoCORS);
     } else if (init.mode == "cors") {
-        request->setMode(FetchRequestData::CORSMode);
+        request->setMode(WebURLRequest::FetchRequestModeCORS);
     } else {
         // Instead of using null as a special fallback value, we pass the
         // current mode in Request::create(). So we just set here.
@@ -68,11 +42,11 @@ Request* Request::createRequestWithRequestData(ExecutionContext* context, FetchR
     // "10. If |credentials| is non-null, set |request|'s credentials mode to
     // |credentials|.
     if (init.credentials == "omit") {
-        request->setCredentials(FetchRequestData::OmitCredentials);
+        request->setCredentials(WebURLRequest::FetchCredentialsModeOmit);
     } else if (init.credentials == "same-origin") {
-        request->setCredentials(FetchRequestData::SameOriginCredentials);
+        request->setCredentials(WebURLRequest::FetchCredentialsModeSameOrigin);
     } else if (init.credentials == "include") {
-        request->setCredentials(FetchRequestData::IncludeCredentials);
+        request->setCredentials(WebURLRequest::FetchCredentialsModeInclude);
     } else {
         // Instead of using null as a special fallback value, we pass the
         // current credentials in Request::create(). So we just set here.
@@ -93,7 +67,7 @@ Request* Request::createRequestWithRequestData(ExecutionContext* context, FetchR
         }
         // FIXME: "2. Add case correction as in XMLHttpRequest?"
         // "3. Set |request|'s method to |method|."
-        request->setMethod(XMLHttpRequest::uppercaseKnownHTTPMethod(AtomicString(init.method)));
+        request->setMethod(FetchUtils::normalizeMethod(AtomicString(init.method)));
     }
     // "12. Let |r| be a new Request object associated with |request|, Headers
     // object."
@@ -112,7 +86,7 @@ Request* Request::createRequestWithRequestData(ExecutionContext* context, FetchR
     r->clearHeaderList();
 
     // "16. If |r|'s request's mode is no CORS, run these substeps:
-    if (r->request()->mode() == FetchRequestData::NoCORSMode) {
+    if (r->request()->mode() == WebURLRequest::FetchRequestModeNoCORS) {
         // "1. If |r|'s request's method is not a simple method, throw a
         // TypeError."
         if (!FetchUtils::isSimpleMethod(r->request()->method())) {
@@ -184,7 +158,7 @@ Request* Request::create(ExecutionContext* context, const String& input, const D
     request->setURL(parsedURL);
     // "4. Set |fallbackMode| to CORS."
     // "5. Set |fallbackCredentials| to omit."
-    return createRequestWithRequestData(context, request, RequestInit(context, init, exceptionState), FetchRequestData::CORSMode, FetchRequestData::OmitCredentials, exceptionState);
+    return createRequestWithRequestData(context, request, RequestInit(context, init, exceptionState), WebURLRequest::FetchRequestModeCORS, WebURLRequest::FetchCredentialsModeOmit, exceptionState);
 }
 
 Request* Request::create(ExecutionContext* context, Request* input, ExceptionState& exceptionState)
@@ -211,8 +185,8 @@ Request* Request::create(ExecutionContext* context, Request* input, const Dictio
     // "5. Let |fallbackCredentials| be null."
     // Instead of using null as a special fallback value, just pass the current
     // mode and credentials; it has the same effect.
-    const FetchRequestData::Mode currentMode = request->mode();
-    const FetchRequestData::Credentials currentCredentials = request->credentials();
+    const WebURLRequest::FetchRequestMode currentMode = request->mode();
+    const WebURLRequest::FetchCredentialsMode currentCredentials = request->credentials();
     return createRequestWithRequestData(context, request, RequestInit(context, init, exceptionState), currentMode, currentCredentials, exceptionState);
 }
 
@@ -290,12 +264,12 @@ String Request::mode() const
     // "The mode attribute's getter must return the value corresponding to the
     // first matching statement, switching on request's mode:"
     switch (m_request->mode()) {
-    case FetchRequestData::SameOriginMode:
+    case WebURLRequest::FetchRequestModeSameOrigin:
         return "same-origin";
-    case FetchRequestData::NoCORSMode:
+    case WebURLRequest::FetchRequestModeNoCORS:
         return "no-cors";
-    case FetchRequestData::CORSMode:
-    case FetchRequestData::CORSWithForcedPreflight:
+    case WebURLRequest::FetchRequestModeCORS:
+    case WebURLRequest::FetchRequestModeCORSWithForcedPreflight:
         return "cors";
     }
     ASSERT_NOT_REACHED();
@@ -308,11 +282,11 @@ String Request::credentials() const
     // to the first matching statement, switching on request's credentials
     // mode:"
     switch (m_request->credentials()) {
-    case FetchRequestData::OmitCredentials:
+    case WebURLRequest::FetchCredentialsModeOmit:
         return "omit";
-    case FetchRequestData::SameOriginCredentials:
+    case WebURLRequest::FetchCredentialsModeSameOrigin:
         return "same-origin";
-    case FetchRequestData::IncludeCredentials:
+    case WebURLRequest::FetchCredentialsModeInclude:
         return "include";
     }
     ASSERT_NOT_REACHED();
@@ -324,11 +298,17 @@ Request* Request::clone() const
     return Request::create(*this);
 }
 
-void Request::populateWebServiceWorkerRequest(WebServiceWorkerRequest& webRequest)
+void Request::populateWebServiceWorkerRequest(WebServiceWorkerRequest& webRequest) const
 {
     webRequest.setMethod(method());
     webRequest.setURL(m_request->url());
-    m_headers->forEach(new FillWebRequestHeaders(&webRequest));
+
+    const FetchHeaderList* headerList = m_headers->headerList();
+    for (size_t i = 0, size = headerList->size(); i < size; ++i) {
+        const FetchHeaderList::Header& header = headerList->entry(i);
+        webRequest.appendHeader(header.first, header.second);
+    }
+
     webRequest.setReferrer(m_request->referrer().referrer().referrer, static_cast<WebReferrerPolicy>(m_request->referrer().referrer().referrerPolicy));
     // FIXME: How can we set isReload properly? What is the correct place to load it in to the Request object? We should investigate the right way
     // to plumb this information in to here.

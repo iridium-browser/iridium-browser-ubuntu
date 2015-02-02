@@ -37,7 +37,8 @@ class AdmxWriterUnittest(xml_writer_base_unittest.XmlWriterBaseTest):
       'win_mandatory_category_path': ['test_category'],
       'win_recommended_category_path': ['test_recommended_category'],
       'admx_namespace': 'ADMXWriter.Test.Namespace',
-      'admx_prefix': 'test_prefix'
+      'admx_prefix': 'test_prefix',
+      'build': 'test_product',
     }
     self.writer = admx_writer.GetWriter(config)
     self.writer.Init()
@@ -60,6 +61,38 @@ class AdmxWriterUnittest(xml_writer_base_unittest.XmlWriterBaseTest):
     expected_output = (
         '<?xml version="1.0" ?>\n'
         '<policyDefinitions revision="1.0" schemaVersion="1.0">\n'
+        '  <policyNamespaces>\n'
+        '    <target namespace="ADMXWriter.Test.Namespace"'
+        ' prefix="test_prefix"/>\n'
+        '    <using namespace="Microsoft.Policies.Windows" prefix="windows"/>\n'
+        '  </policyNamespaces>\n'
+        '  <resources minRequiredRevision="1.0"/>\n'
+        '  <supportedOn>\n'
+        '    <definitions>\n'
+        '      <definition displayName="'
+        '$(string.SUPPORTED_TESTOS)" name="SUPPORTED_TESTOS"/>\n'
+        '    </definitions>\n'
+        '  </supportedOn>\n'
+        '  <categories>\n'
+        '    <category displayName="$(string.test_category)"'
+        ' name="test_category"/>\n'
+        '    <category displayName="$(string.test_recommended_category)"'
+        ' name="test_recommended_category"/>\n'
+        '  </categories>\n'
+        '  <policies/>\n'
+        '</policyDefinitions>')
+    self.AssertXMLEquals(output, expected_output)
+
+  def testEmptyVersion(self):
+    self.writer.config['version'] = '39.0.0.0'
+    self.writer.BeginTemplate()
+    self.writer.EndTemplate()
+
+    output = self.writer.GetTemplateText()
+    expected_output = (
+        '<?xml version="1.0" ?>\n'
+        '<policyDefinitions revision="1.0" schemaVersion="1.0">\n'
+        '  <!--test_product version: 39.0.0.0-->\n'
         '  <policyNamespaces>\n'
         '    <target namespace="ADMXWriter.Test.Namespace"'
         ' prefix="test_prefix"/>\n'
@@ -276,7 +309,8 @@ class AdmxWriterUnittest(xml_writer_base_unittest.XmlWriterBaseTest):
         '  <parentCategory ref="PolicyGroup"/>\n'
         '  <supportedOn ref="SUPPORTED_TESTOS"/>\n'
         '  <elements>\n'
-        '    <text id="SampleStringPolicy" valueName="SampleStringPolicy"/>\n'
+        '    <text id="SampleStringPolicy" maxLength="1000000"'
+            ' valueName="SampleStringPolicy"/>\n'
         '  </elements>\n'
         '</policy>')
     self.AssertXMLEquals(output, expected_output)
@@ -454,8 +488,8 @@ class AdmxWriterUnittest(xml_writer_base_unittest.XmlWriterBaseTest):
         '  <parentCategory ref="PolicyGroup"/>\n'
         '  <supportedOn ref="SUPPORTED_TESTOS"/>\n'
         '  <elements>\n'
-        '    <text id="SampleDictionaryPolicy" '
-            'valueName="SampleDictionaryPolicy"/>\n'
+        '    <text id="SampleDictionaryPolicy" maxLength="1000000"'
+            ' valueName="SampleDictionaryPolicy"/>\n'
         '  </elements>\n'
         '</policy>')
     self.AssertXMLEquals(output, expected_output)
@@ -472,6 +506,67 @@ class AdmxWriterUnittest(xml_writer_base_unittest.XmlWriterBaseTest):
         {'platforms': ['mac', 'linux']}, {'platforms': ['aaa']}
       ]
     }))
+
+  def testStringEncodings(self):
+    enum_policy_a = {
+      'name': 'SampleEnumPolicy.A',
+      'type': 'string-enum',
+        'items': [
+          {'name': 'tls1.2', 'value': 'tls1.2'}
+        ]
+    }
+    enum_policy_b = {
+      'name': 'SampleEnumPolicy.B',
+      'type': 'string-enum',
+        'items': [
+          {'name': 'tls1.2', 'value': 'tls1.2'}
+        ]
+    }
+
+    dom_impl = minidom.getDOMImplementation('')
+    self.writer._doc = dom_impl.createDocument(None, 'policyDefinitions', None)
+    self.writer._active_policies_elem = self.writer._doc.documentElement
+    self.writer._active_mandatory_policy_group_name = 'PolicyGroup'
+    self.writer.WritePolicy(enum_policy_a)
+    self.writer.WritePolicy(enum_policy_b)
+    output = self.writer.GetTemplateText()
+    expected_output = (
+        '<?xml version="1.0" ?>\n'
+        '<policyDefinitions>\n'
+        '  <policy class="TestClass" displayName="$(string.SampleEnumPolicy_A)"'
+          ' explainText="$(string.SampleEnumPolicy_A_Explain)"'
+          ' key="Software\\Policies\\Test" name="SampleEnumPolicy.A"'
+          ' presentation="$(presentation.SampleEnumPolicy.A)">\n'
+        '    <parentCategory ref="PolicyGroup"/>\n'
+        '    <supportedOn ref="SUPPORTED_TESTOS"/>\n'
+        '    <elements>\n'
+        '      <enum id="SampleEnumPolicy.A" valueName="SampleEnumPolicy.A">\n'
+        '        <item displayName="$(string.tls1_2)">\n'
+        '          <value>\n'
+        '            <string>tls1.2</string>\n'
+        '          </value>\n'
+        '        </item>\n'
+        '      </enum>\n'
+        '    </elements>\n'
+        '  </policy>\n'
+        '  <policy class="TestClass" displayName="$(string.SampleEnumPolicy_B)"'
+          ' explainText="$(string.SampleEnumPolicy_B_Explain)"'
+          ' key="Software\\Policies\\Test" name="SampleEnumPolicy.B"'
+          ' presentation="$(presentation.SampleEnumPolicy.B)">\n'
+        '    <parentCategory ref="PolicyGroup"/>\n'
+        '    <supportedOn ref="SUPPORTED_TESTOS"/>\n'
+        '    <elements>\n'
+        '      <enum id="SampleEnumPolicy.B" valueName="SampleEnumPolicy.B">\n'
+        '        <item displayName="$(string.tls1_2)">\n'
+        '          <value>\n'
+        '            <string>tls1.2</string>\n'
+        '          </value>\n'
+        '        </item>\n'
+        '      </enum>\n'
+        '    </elements>\n'
+        '  </policy>\n'
+        '</policyDefinitions>')
+    self.AssertXMLEquals(output, expected_output)
 
 
 if __name__ == '__main__':

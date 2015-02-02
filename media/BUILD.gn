@@ -4,8 +4,9 @@
 
 import("//build/config/android/config.gni")
 import("//build/config/arm.gni")
-import("//build/config/ui.gni")
+import("//build/config/features.gni")
 import("//build/config/linux/pkg_config.gni")
+import("//build/config/ui.gni")
 import("//media/media_options.gni")
 
 # Common configuration for targets in the media directory.
@@ -17,7 +18,7 @@ config("media_config") {
   }
   if (use_pulseaudio) {
     defines += [ "USE_PULSEAUDIO" ]
-    if (!linux_link_pulseaudio) {
+    if (!link_pulseaudio) {
       defines += [ "DLOPEN_PULSEAUDIO" ]
     }
   }
@@ -27,8 +28,9 @@ config("media_config") {
 }
 
 config("media_dependent_config") {
+  defines = []
   if (!media_use_libvpx) {
-    defines = [ "MEDIA_DISABLE_LIBVPX" ]
+    defines += [ "MEDIA_DISABLE_LIBVPX" ]
   }
   if (is_win) {
     ldflags = [
@@ -46,14 +48,14 @@ if (use_ozone) {
     # object MediaOzonePlatform.
     script = "../ui/ozone/generate_constructor_list.py"
 
-    platform_list_txt_file = "$target_gen_dir/ui/ozone/platform_list.txt"
-    constructor_list_cc_file = "$target_gen_dir/media/ozone/constructor_list.cc"
+    platform_list_txt_file = "$target_gen_dir/../ui/ozone/platform_list.txt"
+    constructor_list_cc_file = "$target_gen_dir/../media/ozone/constructor_list.cc"
 
     sources = [ platform_list_txt_file ]
     outputs = [ constructor_list_cc_file ]
     args = [
-      "--platform_list=$platform_list_txt_file",
-      "--output_cc=$constructor_list_cc_file",
+      "--platform_list=" + rebase_path(platform_list_txt_file, root_build_dir),
+      "--output_cc=" + rebase_path(constructor_list_cc_file, root_build_dir),
       "--namespace=media",
       "--typename=MediaOzonePlatform",
       "--include=\"media/ozone/media_ozone_platform.h\""
@@ -177,6 +179,8 @@ component("media") {
     "video/capture/video_capture_device.h",
     "video/capture/video_capture_device_factory.cc",
     "video/capture/video_capture_device_factory.h",
+    "video/capture/video_capture_device_info.cc",
+    "video/capture/video_capture_device_info.h",
     "video/capture/video_capture_types.cc",
     "video/capture/video_capture_types.h",
     "video/capture/win/capability_list_win.cc",
@@ -250,6 +254,7 @@ component("media") {
       "filters/blocking_url_protocol.h",
       "filters/ffmpeg_audio_decoder.cc",
       "filters/ffmpeg_audio_decoder.h",
+      "filters/ffmpeg_bitstream_converter.h",
       "filters/ffmpeg_demuxer.cc",
       "filters/ffmpeg_demuxer.h",
       "filters/ffmpeg_glue.cc",
@@ -261,6 +266,8 @@ component("media") {
     ]
     if (proprietary_codecs) {
       sources += [
+        "filters/ffmpeg_aac_bitstream_converter.cc",
+        "filters/ffmpeg_aac_bitstream_converter.h",
         "filters/ffmpeg_h264_to_annex_b_bitstream_converter.cc",
         "filters/ffmpeg_h264_to_annex_b_bitstream_converter.h",
       ]
@@ -304,6 +311,13 @@ component("media") {
     if (!is_android_webview_build) {
       deps += [ "//media/base/android:media_java" ]
     }
+  }
+
+  if (cpu_arch != "arm" && is_chromeos && use_x11) {
+    sources += [
+      "filters/h264_bitstream_buffer.cc",
+      "filters/h264_bitstream_buffer.h",
+    ]
   }
 
   if (use_alsa) {
@@ -366,6 +380,8 @@ component("media") {
 
   if (proprietary_codecs) {
     sources += [
+      "filters/h264_to_annex_b_bitstream_converter.cc",
+      "filters/h264_to_annex_b_bitstream_converter.h",
       "formats/mp2t/es_adapter_video.cc",
       "formats/mp2t/es_adapter_video.h",
       "formats/mp2t/es_parser.cc",
@@ -559,6 +575,7 @@ test("media_unittests") {
 
   if (proprietary_codecs) {
     sources += [
+      "filters/ffmpeg_aac_bitstream_converter_unittest.cc",
       "filters/ffmpeg_h264_to_annex_b_bitstream_converter_unittest.cc",
       "filters/h264_to_annex_b_bitstream_converter_unittest.cc",
       "formats/common/stream_parser_test_base.cc",

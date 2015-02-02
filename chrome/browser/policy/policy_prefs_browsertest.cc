@@ -490,20 +490,18 @@ IN_PROC_BROWSER_TEST_F(PolicyPrefsTestCoverageTest, AllPoliciesHaveATestCase) {
 // Base class for tests that change policy.
 class PolicyPrefsTest : public InProcessBrowserTest {
  protected:
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
+  void SetUpInProcessBrowserTestFixture() override {
     EXPECT_CALL(provider_, IsInitializationComplete(_))
         .WillRepeatedly(Return(true));
     BrowserPolicyConnector::SetPolicyProviderForTesting(&provider_);
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     ui_test_utils::WaitForTemplateURLServiceToLoad(
         TemplateURLServiceFactory::GetForProfile(browser()->profile()));
   }
 
-  virtual void TearDownOnMainThread() OVERRIDE {
-    ClearProviderPolicy();
-  }
+  void TearDownOnMainThread() override { ClearProviderPolicy(); }
 
   void ClearProviderPolicy() {
     provider_.UpdateChromePolicy(PolicyMap());
@@ -660,6 +658,15 @@ IN_PROC_BROWSER_TEST_P(PolicyPrefIndicatorTest, CheckPolicyIndicators) {
             policy_test_case->indicator_selector(),
             std::string(),
             "policy",
+            false);
+        // Check that no controlled setting indicator is visible when previously
+        // enforced value is removed.
+        ClearProviderPolicy();
+        VerifyControlledSettingIndicators(
+            browser(),
+            policy_test_case->indicator_selector(),
+            std::string(),
+            std::string(),
             false);
       }
 

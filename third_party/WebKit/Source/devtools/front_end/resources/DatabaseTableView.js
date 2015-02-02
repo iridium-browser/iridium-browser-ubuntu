@@ -63,7 +63,7 @@ WebInspector.DatabaseTableView.prototype = {
 
     update: function()
     {
-        this.database.executeSql("SELECT * FROM \"" + this._escapeTableName(this.tableName) + "\"", this._queryFinished.bind(this), this._queryError.bind(this));
+        this.database.executeSql("SELECT rowid, * FROM \"" + this._escapeTableName(this.tableName) + "\"", this._queryFinished.bind(this), this._queryError.bind(this));
     },
 
     _queryFinished: function(columnNames, values)
@@ -86,7 +86,7 @@ WebInspector.DatabaseTableView.prototype = {
         this.detachChildViews();
         this.element.removeChildren();
 
-        var errorMsgElement = document.createElement("div");
+        var errorMsgElement = createElement("div");
         errorMsgElement.className = "storage-table-error";
         errorMsgElement.textContent = WebInspector.UIString("An error occurred trying to\nread the “%s” table.", this.tableName);
         this.element.appendChild(errorMsgElement);

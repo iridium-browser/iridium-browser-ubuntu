@@ -27,15 +27,14 @@ namespace {
 class ScopedTransformPanelWindow : public ScopedTransformOverviewWindow {
  public:
   explicit ScopedTransformPanelWindow(aura::Window* window);
-  virtual ~ScopedTransformPanelWindow();
+  ~ScopedTransformPanelWindow() override;
 
   // ScopedTransformOverviewWindow overrides:
-  virtual void PrepareForOverview() OVERRIDE;
+  void PrepareForOverview() override;
 
-  virtual void SetTransform(
-      aura::Window* root_window,
-      const gfx::Transform& transform,
-      bool animate) OVERRIDE;
+  void SetTransform(aura::Window* root_window,
+                    const gfx::Transform& transform,
+                    bool animate) override;
 
  private:
   // Returns the panel window bounds after the transformation.

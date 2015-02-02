@@ -54,6 +54,24 @@ using blink::WebVector;
 namespace autofill {
 namespace {
 
+// A bit field mask for FillForm functions to not fill some fields.
+enum FieldFilterMask {
+  FILTER_NONE                      = 0,
+  FILTER_DISABLED_ELEMENTS         = 1 << 0,
+  FILTER_READONLY_ELEMENTS         = 1 << 1,
+  FILTER_NON_FOCUSABLE_ELEMENTS    = 1 << 2,
+  FILTER_ALL_NON_EDITABLE_ELEMENTS = FILTER_DISABLED_ELEMENTS |
+                                     FILTER_READONLY_ELEMENTS |
+                                     FILTER_NON_FOCUSABLE_ELEMENTS,
+};
+
+RequirementsMask ExtractionRequirements() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+             switches::kIgnoreAutocompleteOffForAutofill)
+             ? REQUIRE_NONE
+             : REQUIRE_AUTOCOMPLETE;
+}
+
 bool IsOptionElement(const WebElement& element) {
   CR_DEFINE_STATIC_LOCAL(WebString, kOption, ("option"));
   return element.hasHTMLTagName(kOption);
@@ -256,6 +274,16 @@ base::string16 InferLabelFromPrevious(const WebFormControlElement& element) {
 }
 
 // Helper for |InferLabelForElement()| that infers a label, if possible, from
+// placeholder text,
+base::string16 InferLabelFromPlaceholder(const WebFormControlElement& element) {
+  CR_DEFINE_STATIC_LOCAL(WebString, kPlaceholder, ("placeholder"));
+  if (element.hasAttribute(kPlaceholder))
+    return element.getAttribute(kPlaceholder);
+
+  return base::string16();
+}
+
+// Helper for |InferLabelForElement()| that infers a label, if possible, from
 // enclosing list item,
 // e.g. <li>Some Text<input ...><input ...><input ...></tr>
 base::string16 InferLabelFromListItem(const WebFormControlElement& element) {
@@ -403,6 +431,11 @@ base::string16 InferLabelForElement(const WebFormControlElement& element) {
   if (!inferred_label.empty())
     return inferred_label;
 
+  // If we didn't find a label, check for placeholder text.
+  inferred_label = InferLabelFromPlaceholder(element);
+  if (!inferred_label.empty())
+    return inferred_label;
+
   // If we didn't find a label, check for list item case.
   inferred_label = InferLabelFromListItem(element);
   if (!inferred_label.empty())
@@ -465,12 +498,12 @@ typedef void (*Callback)(const FormFieldData&,
 void ForEachMatchingFormField(const WebFormElement& form_element,
                               const WebElement& initiating_element,
                               const FormData& data,
-                              bool only_focusable_elements,
+                              FieldFilterMask filters,
                               bool force_override,
                               Callback callback) {
   std::vector<WebFormControlElement> control_elements;
-  ExtractAutofillableElements(form_element, REQUIRE_AUTOCOMPLETE,
-                              &control_elements);
+  ExtractAutofillableElements(
+      form_element, ExtractionRequirements(), &control_elements);
 
   if (control_elements.size() != data.fields.size()) {
     // This case should be reachable only for pathological websites and tests,
@@ -508,8 +541,9 @@ void ForEachMatchingFormField(const WebFormElement& form_element,
          !element->value().isEmpty()))
       continue;
 
-    if (!element->isEnabled() || element->isReadOnly() ||
-        (only_focusable_elements && !element->isFocusable()))
+    if (((filters & FILTER_DISABLED_ELEMENTS) && !element->isEnabled()) ||
+        ((filters & FILTER_READONLY_ELEMENTS) && element->isReadOnly()) ||
+        ((filters & FILTER_NON_FOCUSABLE_ELEMENTS) && !element->isFocusable()))
       continue;
 
     callback(data.fields[i], is_initiating_element, element);
@@ -989,8 +1023,8 @@ void FillForm(const FormData& form, const WebFormControlElement& element) {
   ForEachMatchingFormField(form_element,
                            element,
                            form,
-                           true, /* only_focusable_elements */
-                           false, /* don't force override */
+                           FILTER_ALL_NON_EDITABLE_ELEMENTS,
+                           false, /* dont force override */
                            &FillFormField);
 }
 
@@ -999,10 +1033,25 @@ void FillFormIncludingNonFocusableElements(const FormData& form_data,
   if (form_element.isNull())
     return;
 
+  FieldFilterMask filter_mask = static_cast<FieldFilterMask>(
+      FILTER_DISABLED_ELEMENTS | FILTER_READONLY_ELEMENTS);
   ForEachMatchingFormField(form_element,
                            WebInputElement(),
                            form_data,
-                           false, /* only_focusable_elements */
+                           filter_mask,
+                           true, /* force override */
+                           &FillFormField);
+}
+
+void FillFormForAllElements(const FormData& form_data,
+                            const WebFormElement& form_element) {
+  if (form_element.isNull())
+    return;
+
+  ForEachMatchingFormField(form_element,
+                           WebInputElement(),
+                           form_data,
+                           FILTER_NONE,
                            true, /* force override */
                            &FillFormField);
 }
@@ -1015,7 +1064,7 @@ void PreviewForm(const FormData& form, const WebFormControlElement& element) {
   ForEachMatchingFormField(form_element,
                            element,
                            form,
-                           true, /* only_focusable_elements */
+                           FILTER_ALL_NON_EDITABLE_ELEMENTS,
                            false, /* dont force override */
                            &PreviewFormField);
 }
@@ -1027,8 +1076,8 @@ bool ClearPreviewedFormWithElement(const WebFormControlElement& element,
     return false;
 
   std::vector<WebFormControlElement> control_elements;
-  ExtractAutofillableElements(form_element, REQUIRE_AUTOCOMPLETE,
-                              &control_elements);
+  ExtractAutofillableElements(
+      form_element, ExtractionRequirements(), &control_elements);
   for (size_t i = 0; i < control_elements.size(); ++i) {
     // There might be unrelated elements in this form which have already been
     // auto-filled.  For example, the user might have already filled the address
@@ -1087,8 +1136,8 @@ bool FormWithElementIsAutofilled(const WebInputElement& element) {
     return false;
 
   std::vector<WebFormControlElement> control_elements;
-  ExtractAutofillableElements(form_element, REQUIRE_AUTOCOMPLETE,
-                              &control_elements);
+  ExtractAutofillableElements(
+      form_element, ExtractionRequirements(), &control_elements);
   for (size_t i = 0; i < control_elements.size(); ++i) {
     WebInputElement* input_element = toWebInputElement(&control_elements[i]);
     if (!IsAutofillableInputElement(input_element))

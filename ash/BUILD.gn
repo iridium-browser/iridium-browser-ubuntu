@@ -39,6 +39,7 @@ component("ash") {
     "//ui/compositor",
     "//ui/events",
     "//ui/events:events_base",
+    "//ui/events/devices",
     "//ui/gfx",
     "//ui/gfx/geometry",
     "//ui/keyboard",
@@ -73,6 +74,10 @@ component("ash") {
       "accelerators/magnifier_key_scroller.h",
       "accelerators/spoken_feedback_toggler.cc",
       "accelerators/spoken_feedback_toggler.h",
+      "host/ash_window_tree_host_x11.cc",
+      "host/ash_window_tree_host_x11.h",
+      "wm/maximize_mode/scoped_disable_internal_mouse_and_keyboard_x11.cc",
+      "wm/maximize_mode/scoped_disable_internal_mouse_and_keyboard_x11.h",
     ]
   }
 
@@ -81,12 +86,11 @@ component("ash") {
       "//device/bluetooth",
       "//ui/display",
       "//ui/display/util",
-      #'../chromeos/chromeos.gyp:chromeos',  TODO(GYP)
-      # Ash #includes power_supply_properties.pb.h directly.
-      #'../chromeos/chromeos.gyp:power_manager_proto',  TODO(GYP)
-      #'../ui/chromeos/ui_chromeos.gyp:ui_chromeos_resources',  TODO(GYP)
-      #'../ui/chromeos/ui_chromeos.gyp:ui_chromeos_strings',  TODO(GYP)
-      #'../ui/chromeos/ui_chromeos.gyp:ui_chromeos',  TODO(GYP)
+      "//chromeos",
+      "//chromeos:power_manager_proto",
+      "//ui/chromeos/resources",
+      "//ui/chromeos/strings",
+      "//ui/chromeos:ui_chromeos",
     ]
   } else {
     sources -= [
@@ -97,15 +101,12 @@ component("ash") {
       "system/tray/media_security/media_capture_observer.h",
       "system/tray/media_security/multi_profile_media_tray_item.cc",
       "system/tray/media_security/multi_profile_media_tray_item.h",
-    ]
-  }
-
-  if (!use_x11 || !is_chromeos) {
-    sources -= [
       "touch/touch_transformer_controller.cc",
       "touch/touch_transformer_controller.h",
       "touch/touchscreen_util.cc",
       "touch/touchscreen_util.h",
+      "virtual_keyboard_controller.cc",
+      "virtual_keyboard_controller.h",
     ]
   }
 
@@ -171,6 +172,7 @@ static_library("test_support") {
     "//ui/app_list",
     "//ui/app_list:test_support",
     "//ui/events:events_base",
+    "//ui/events/devices",
     "//ui/gl",
     "//ui/views",
     "//ui/views:test_support",
@@ -254,6 +256,7 @@ test("ash_unittests") {
     "//ui/compositor",
     "//ui/compositor:test_support",
     "//ui/events",
+    "//ui/events/devices",
     "//ui/events:test_support",
     "//ui/events:gesture_detection",
     "//ui/gfx",
@@ -282,6 +285,7 @@ test("ash_unittests") {
       "sticky_keys/sticky_keys_overlay_unittest.cc",
       "system/tray/media_security/multi_profile_media_tray_item_unittest.cc",
       "autoclick/autoclick_unittest.cc",
+      "virtual_keyboard_controller_unittest.cc",
     ]
     sources += [
       #'<(SHARED_INTERMEDIATE_DIR)/ui/resources/ui_unscaled_resources.rc',  TODO(GYP)
@@ -296,6 +300,7 @@ test("ash_unittests") {
     sources -= [
       "accelerators/magnifier_key_scroller_unittest.cc",
       "accelerators/spoken_feedback_toggler_unittest.cc",
+      "host/ash_window_tree_host_x11_unittest.cc",
     ]
   }
   if (is_chromeos) {
@@ -305,8 +310,8 @@ test("ash_unittests") {
       "//ui/display",
       "//ui/display:test_util",
       "//ui/display/types",
-      #'../chromeos/chromeos.gyp:chromeos_test_support_without_gmock',  TODO(GYP)
-      #'../chromeos/chromeos.gyp:power_manager_proto',  TODO(GYP)
+      "//chromeos:power_manager_proto",
+      "//chromeos:test_support_without_gmock",
     ]
   } else {
     sources -= [

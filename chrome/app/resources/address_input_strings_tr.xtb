@@ -1,4 +1,6 @@
-<?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="tr">
+<?xml version="1.0" ?>
+<!DOCTYPE translationbundle>
+<translationbundle lang="tr">
 <translation id="777702478322588152">İdari bölge</translation>
 <translation id="3713769522066937702">Bu posta kodu biçimi tanınmadı. Geçerli bir posta kodu örneği: <ph name="EXAMPLE"/>. Posta kodunuzu bilmiyor musunuz? <ph name="BEGIN_LINK"/>Buradan<ph name="END_LINK"/> bulabilirsiniz.</translation>
 <translation id="7393381084163773901">Adres</translation>

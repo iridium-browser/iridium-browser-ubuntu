@@ -24,11 +24,11 @@ class AppSyncUIStateFactory : public BrowserContextKeyedServiceFactory {
   friend struct DefaultSingletonTraits<AppSyncUIStateFactory>;
 
   AppSyncUIStateFactory();
-  virtual ~AppSyncUIStateFactory();
+  ~AppSyncUIStateFactory() override;
 
   // BrowserContextKeyedServiceFactory overrides:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* context) const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* context) const override;
 
   DISALLOW_COPY_AND_ASSIGN(AppSyncUIStateFactory);
 };

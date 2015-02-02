@@ -18,12 +18,12 @@ namespace translate {
 class StaticRendererCldDataProvider : public RendererCldDataProvider {
  public:
   explicit StaticRendererCldDataProvider();
-  virtual ~StaticRendererCldDataProvider();
+  ~StaticRendererCldDataProvider() override;
   // RendererCldDataProvider implementations:
-  virtual bool OnMessageReceived(const IPC::Message&) OVERRIDE;
-  virtual void SendCldDataRequest() OVERRIDE;
-  virtual void SetCldAvailableCallback(base::Callback<void(void)>) OVERRIDE;
-  virtual bool IsCldDataAvailable() OVERRIDE;
+  bool OnMessageReceived(const IPC::Message&) override;
+  void SendCldDataRequest() override;
+  void SetCldAvailableCallback(base::Callback<void(void)>) override;
+  bool IsCldDataAvailable() override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(StaticRendererCldDataProvider);

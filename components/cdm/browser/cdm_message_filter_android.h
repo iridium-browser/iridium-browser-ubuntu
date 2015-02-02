@@ -21,13 +21,12 @@ class CdmMessageFilterAndroid
   CdmMessageFilterAndroid();
 
  private:
-  virtual ~CdmMessageFilterAndroid();
+  ~CdmMessageFilterAndroid() override;
 
   // BrowserMessageFilter implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
-  virtual void OverrideThreadForMessage(
-      const IPC::Message& message,
-      content::BrowserThread::ID* thread) OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& message) override;
+  void OverrideThreadForMessage(const IPC::Message& message,
+                                content::BrowserThread::ID* thread) override;
 
   // Query the key system information.
   void OnQueryKeySystemSupport(const SupportedKeySystemRequest& request,

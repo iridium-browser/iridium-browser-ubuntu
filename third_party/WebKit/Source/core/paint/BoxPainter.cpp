@@ -10,6 +10,7 @@
 #include "core/html/HTMLFrameOwnerElement.h"
 #include "core/paint/BackgroundImageGeometry.h"
 #include "core/paint/BoxDecorationData.h"
+#include "core/paint/DrawingRecorder.h"
 #include "core/rendering/ImageQualityController.h"
 #include "core/rendering/PaintInfo.h"
 #include "core/rendering/RenderBox.h"
@@ -53,6 +54,12 @@ void BoxPainter::paintBoxDecorationBackgroundWithRect(PaintInfo& paintInfo, cons
     RenderStyle* style = m_renderBox.style();
     BoxDecorationData boxDecorationData(*style, m_renderBox.canRenderBorderImage(), m_renderBox.backgroundHasOpaqueTopLayer(), paintInfo.context);
 
+    IntRect snappedPaintRect(pixelSnappedIntRect(paintRect));
+    // The document element is specified to paint its background infinitely.
+    DrawingRecorder recorder(paintInfo.context, &m_renderBox, paintInfo.phase,
+        m_renderBox.isDocumentElement() ? m_renderBox.view()->backgroundRect(&m_renderBox) : snappedPaintRect);
+
+
     // FIXME: Should eventually give the theme control over whether the box shadow should paint, since controls could have
     // custom shadows of their own.
     if (!m_renderBox.boxShadowShouldBeAppliedToBackground(boxDecorationData.bleedAvoidance()))
@@ -67,7 +74,6 @@ void BoxPainter::paintBoxDecorationBackgroundWithRect(PaintInfo& paintInfo, cons
 
     // If we have a native theme appearance, paint that before painting our background.
     // The theme will tell us whether or not we should also paint the CSS background.
-    IntRect snappedPaintRect(pixelSnappedIntRect(paintRect));
     bool themePainted = boxDecorationData.hasAppearance && !RenderTheme::theme().paint(&m_renderBox, paintInfo, snappedPaintRect);
     if (!themePainted) {
         if (boxDecorationData.bleedAvoidance() == BackgroundBleedBackgroundOverBorder)
@@ -458,7 +464,7 @@ void BoxPainter::paintFillLayerExtended(RenderBoxModelObject& obj, const PaintIn
                 context->setColorFilter(ColorFilterLuminanceToAlpha);
             InterpolationQuality previousInterpolationQuality = context->imageInterpolationQuality();
             context->setImageInterpolationQuality(interpolationQuality);
-            context->drawTiledImage(image.get(), geometry.destRect(), geometry.relativePhase(), geometry.tileSize(),
+            context->drawTiledImage(image.get(), geometry.destRect(), geometry.phase(), geometry.tileSize(),
                 compositeOp, bgLayer.blendMode(), geometry.spaceSize());
             context->setImageInterpolationQuality(previousInterpolationQuality);
         }
@@ -540,10 +546,6 @@ void BoxPainter::paintClippingMask(PaintInfo& paintInfo, const LayoutPoint& pain
 
     if (!m_renderBox.layer() || m_renderBox.layer()->compositingState() != PaintsIntoOwnBacking)
         return;
-
-    // We should never have this state in this function. A layer with a mask
-    // should have always created its own backing if it became composited.
-    ASSERT(m_renderBox.layer()->compositingState() != HasOwnBackingButPaintsIntoAncestor);
 
     LayoutRect paintRect = LayoutRect(paintOffset, m_renderBox.size());
     paintInfo.context->fillRect(pixelSnappedIntRect(paintRect), Color::black);
@@ -771,7 +773,6 @@ void BoxPainter::calculateBackgroundImageGeometry(RenderBoxModelObject& obj, con
         geometry.useFixedAttachment(snappedPaintRect.location());
 
     geometry.clip(snappedPaintRect);
-    geometry.setDestOrigin(geometry.destRect().location());
 }
 
 InterpolationQuality BoxPainter::chooseInterpolationQuality(RenderBoxModelObject& obj, GraphicsContext* context, Image* image, const void* layer, const LayoutSize& size)
@@ -1922,10 +1923,7 @@ void BoxPainter::paintBoxShadow(const PaintInfo& info, const LayoutRect& paintRe
             }
 
             // Draw only the shadow.
-            OwnPtr<DrawLooperBuilder> drawLooperBuilder = DrawLooperBuilder::create();
-            drawLooperBuilder->addShadow(shadowOffset, shadowBlur, shadowColor,
-                DrawLooperBuilder::ShadowRespectsTransforms, DrawLooperBuilder::ShadowIgnoresAlpha);
-            context->setDrawLooper(drawLooperBuilder.release());
+            context->setShadow(shadowOffset, shadowBlur, shadowColor, DrawLooperBuilder::ShadowRespectsTransforms, DrawLooperBuilder::ShadowIgnoresAlpha, DrawShadowOnly);
 
             if (hasBorderRadius) {
                 RoundedRect influenceRect(pixelSnappedIntRect(LayoutRect(shadowRect)), border.radii());
@@ -2110,7 +2108,7 @@ void BoxPainter::clipBorderSidePolygon(GraphicsContext* graphicsContext, const R
     // If the border matches both of its adjacent sides, don't anti-alias the clip, and
     // if neither side matches, anti-alias the clip.
     if (firstEdgeMatches == secondEdgeMatches) {
-        graphicsContext->clipConvexPolygon(4, quad, !firstEdgeMatches);
+        graphicsContext->clipPolygon(4, quad, !firstEdgeMatches);
         return;
     }
 
@@ -2142,14 +2140,14 @@ void BoxPainter::clipBorderSidePolygon(GraphicsContext* graphicsContext, const R
     firstQuad[1] = quad[1];
     firstQuad[2] = FloatPoint(quad[3].x() + r2 * ax, quad[3].y() + r2 * ay);
     firstQuad[3] = quad[3];
-    graphicsContext->clipConvexPolygon(4, firstQuad, !firstEdgeMatches);
+    graphicsContext->clipPolygon(4, firstQuad, !firstEdgeMatches);
 
     FloatPoint secondQuad[4];
     secondQuad[0] = quad[0];
     secondQuad[1] = FloatPoint(quad[0].x() - r1 * cx, quad[0].y() - r1 * cy);
     secondQuad[2] = quad[2];
     secondQuad[3] = quad[3];
-    graphicsContext->clipConvexPolygon(4, secondQuad, !secondEdgeMatches);
+    graphicsContext->clipPolygon(4, secondQuad, !secondEdgeMatches);
 }
 
 } // namespace blink

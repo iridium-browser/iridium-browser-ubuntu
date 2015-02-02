@@ -2,7 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-# GYP version: mojo/mojo_public.gypi:mojo_application_base
+# GYP version: mojo/public/mojo_public.gyp:mojo_application_base
 source_set("application") {
   sources = [
     "application_connection.h",
@@ -32,7 +32,7 @@ source_set("application") {
   ]
 }
 
-# GYP version: mojo/mojo_public.gypi:mojo_application_standalone
+# GYP version: mojo/public/mojo_public.gyp:mojo_application_standalone
 source_set("standalone") {
   sources = [
     "lib/application_runner.cc"
@@ -43,5 +43,32 @@ source_set("standalone") {
   deps = [
     "//mojo/public/cpp/environment:standalone",
     "//mojo/public/cpp/utility",
+  ]
+}
+
+source_set("test_support") {
+  testonly = true
+  sources = [
+    "application_test_base.h",
+    "lib/application_test_base.cc",
+  ]
+
+  deps = [
+    ":application",
+    "//mojo/public/cpp/bindings",
+    "//mojo/public/cpp/environment",
+    "//mojo/public/cpp/system",
+    "//testing/gtest",
+  ]
+}
+
+source_set("test_support_standalone") {
+  testonly = true
+  sources = [ "lib/application_test_main.cc", ]
+  public_deps = [ ":test_support", ]
+  deps = [
+    "//mojo/public/cpp/environment:standalone",
+    "//mojo/public/cpp/application",
+    "//mojo/public/cpp/system",
   ]
 }

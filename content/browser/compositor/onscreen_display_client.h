@@ -28,20 +28,22 @@ class OnscreenDisplayClient : cc::DisplayClient {
       scoped_ptr<cc::OutputSurface> output_surface,
       cc::SurfaceManager* manager,
       scoped_refptr<base::SingleThreadTaskRunner> task_runner);
-  virtual ~OnscreenDisplayClient();
+  ~OnscreenDisplayClient() override;
 
+  bool Initialize();
   cc::Display* display() { return display_.get(); }
   void set_surface_output_surface(SurfaceDisplayOutputSurface* surface) {
     surface_display_output_surface_ = surface;
   }
 
   // cc::DisplayClient implementation.
-  virtual scoped_ptr<cc::OutputSurface> CreateOutputSurface() OVERRIDE;
-  virtual void DisplayDamaged() OVERRIDE;
-  virtual void DidSwapBuffers() OVERRIDE;
-  virtual void DidSwapBuffersComplete() OVERRIDE;
-  virtual void CommitVSyncParameters(base::TimeTicks timebase,
-                                     base::TimeDelta interval) OVERRIDE;
+  void DisplayDamaged() override;
+  void DidSwapBuffers() override;
+  void DidSwapBuffersComplete() override;
+  void CommitVSyncParameters(base::TimeTicks timebase,
+                             base::TimeDelta interval) override;
+  void OutputSurfaceLost() override;
+  void SetMemoryPolicy(const cc::ManagedMemoryPolicy& policy) override;
 
  private:
   void ScheduleDraw();
@@ -52,6 +54,7 @@ class OnscreenDisplayClient : cc::DisplayClient {
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   SurfaceDisplayOutputSurface* surface_display_output_surface_;
   bool scheduled_draw_;
+  bool output_surface_lost_;
   // True if a draw should be scheduled, but it's hit the limit on max frames
   // pending.
   bool deferred_draw_;

@@ -7,6 +7,7 @@
 #include "content/child/web_url_loader_impl.h"
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
@@ -22,17 +23,17 @@
 #include "content/child/web_url_request_util.h"
 #include "content/child/weburlresponse_extradata_impl.h"
 #include "content/common/resource_request_body.h"
+#include "content/common/service_worker/service_worker_types.h"
 #include "content/public/child/request_peer.h"
+#include "content/public/common/content_switches.h"
 #include "net/base/data_url.h"
 #include "net/base/filename_util.h"
-#include "net/base/load_flags.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_util.h"
 #include "net/url_request/redirect_info.h"
 #include "net/url_request/url_request_data_job.h"
-#include "third_party/WebKit/public/platform/WebHTTPHeaderVisitor.h"
 #include "third_party/WebKit/public/platform/WebHTTPLoadInfo.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/platform/WebURLError.h"
@@ -68,45 +69,6 @@ namespace {
 const char kThrottledErrorDescription[] =
     "Request throttled. Visit http://dev.chromium.org/throttling for more "
     "information.";
-
-class HeaderFlattener : public WebHTTPHeaderVisitor {
- public:
-  HeaderFlattener() : has_accept_header_(false) {}
-
-  virtual void visitHeader(const WebString& name, const WebString& value) {
-    // Headers are latin1.
-    const std::string& name_latin1 = name.latin1();
-    const std::string& value_latin1 = value.latin1();
-
-    // Skip over referrer headers found in the header map because we already
-    // pulled it out as a separate parameter.
-    if (LowerCaseEqualsASCII(name_latin1, "referer"))
-      return;
-
-    if (LowerCaseEqualsASCII(name_latin1, "accept"))
-      has_accept_header_ = true;
-
-    if (!buffer_.empty())
-      buffer_.append("\r\n");
-    buffer_.append(name_latin1 + ": " + value_latin1);
-  }
-
-  const std::string& GetBuffer() {
-    // In some cases, WebKit doesn't add an Accept header, but not having the
-    // header confuses some web servers.  See bug 808613.
-    if (!has_accept_header_) {
-      if (!buffer_.empty())
-        buffer_.append("\r\n");
-      buffer_.append("Accept: */*");
-      has_accept_header_ = true;
-    }
-    return buffer_;
-  }
-
- private:
-  std::string buffer_;
-  bool has_accept_header_;
-};
 
 typedef ResourceDevToolsInfo::HeadersVector HeadersVector;
 
@@ -199,6 +161,123 @@ int GetInfoFromDataURL(const GURL& url,
   return net::OK;
 }
 
+#define COMPILE_ASSERT_MATCHING_ENUMS(content_name, blink_name)       \
+  COMPILE_ASSERT(                                                     \
+      static_cast<int>(content_name) == static_cast<int>(blink_name), \
+      mismatching_enums)
+
+COMPILE_ASSERT_MATCHING_ENUMS(FETCH_REQUEST_MODE_SAME_ORIGIN,
+                              WebURLRequest::FetchRequestModeSameOrigin);
+COMPILE_ASSERT_MATCHING_ENUMS(FETCH_REQUEST_MODE_NO_CORS,
+                              WebURLRequest::FetchRequestModeNoCORS);
+COMPILE_ASSERT_MATCHING_ENUMS(FETCH_REQUEST_MODE_CORS,
+                              WebURLRequest::FetchRequestModeCORS);
+COMPILE_ASSERT_MATCHING_ENUMS(
+    FETCH_REQUEST_MODE_CORS_WITH_FORCED_PREFLIGHT,
+    WebURLRequest::FetchRequestModeCORSWithForcedPreflight);
+
+FetchRequestMode GetFetchRequestMode(const WebURLRequest& request) {
+  return static_cast<FetchRequestMode>(request.fetchRequestMode());
+}
+
+COMPILE_ASSERT_MATCHING_ENUMS(FETCH_CREDENTIALS_MODE_OMIT,
+                              WebURLRequest::FetchCredentialsModeOmit);
+COMPILE_ASSERT_MATCHING_ENUMS(FETCH_CREDENTIALS_MODE_SAME_ORIGIN,
+                              WebURLRequest::FetchCredentialsModeSameOrigin);
+COMPILE_ASSERT_MATCHING_ENUMS(FETCH_CREDENTIALS_MODE_INCLUDE,
+                              WebURLRequest::FetchCredentialsModeInclude);
+
+FetchCredentialsMode GetFetchCredentialsMode(const WebURLRequest& request) {
+  return static_cast<FetchCredentialsMode>(request.fetchCredentialsMode());
+}
+
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_FRAME_TYPE_AUXILIARY,
+                              WebURLRequest::FrameTypeAuxiliary);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_FRAME_TYPE_NESTED,
+                              WebURLRequest::FrameTypeNested);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_FRAME_TYPE_NONE,
+                              WebURLRequest::FrameTypeNone);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_FRAME_TYPE_TOP_LEVEL,
+                              WebURLRequest::FrameTypeTopLevel);
+
+RequestContextFrameType GetRequestContextFrameType(
+    const WebURLRequest& request) {
+  return static_cast<RequestContextFrameType>(request.frameType());
+}
+
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_UNSPECIFIED,
+                              WebURLRequest::RequestContextUnspecified);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_AUDIO,
+                              WebURLRequest::RequestContextAudio);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_BEACON,
+                              WebURLRequest::RequestContextBeacon);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_CSP_REPORT,
+                              WebURLRequest::RequestContextCSPReport);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_DOWNLOAD,
+                              WebURLRequest::RequestContextDownload);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_EMBED,
+                              WebURLRequest::RequestContextEmbed);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_EVENT_SOURCE,
+                              WebURLRequest::RequestContextEventSource);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_FAVICON,
+                              WebURLRequest::RequestContextFavicon);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_FETCH,
+                              WebURLRequest::RequestContextFetch);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_FONT,
+                              WebURLRequest::RequestContextFont);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_FORM,
+                              WebURLRequest::RequestContextForm);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_FRAME,
+                              WebURLRequest::RequestContextFrame);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_HYPERLINK,
+                              WebURLRequest::RequestContextHyperlink);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_IFRAME,
+                              WebURLRequest::RequestContextIframe);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_IMAGE,
+                              WebURLRequest::RequestContextImage);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_IMAGE_SET,
+                              WebURLRequest::RequestContextImageSet);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_IMPORT,
+                              WebURLRequest::RequestContextImport);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_INTERNAL,
+                              WebURLRequest::RequestContextInternal);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_LOCATION,
+                              WebURLRequest::RequestContextLocation);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_MANIFEST,
+                              WebURLRequest::RequestContextManifest);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_OBJECT,
+                              WebURLRequest::RequestContextObject);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_PING,
+                              WebURLRequest::RequestContextPing);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_PLUGIN,
+                              WebURLRequest::RequestContextPlugin);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_PREFETCH,
+                              WebURLRequest::RequestContextPrefetch);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_SCRIPT,
+                              WebURLRequest::RequestContextScript);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_SERVICE_WORKER,
+                              WebURLRequest::RequestContextServiceWorker);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_SHARED_WORKER,
+                              WebURLRequest::RequestContextSharedWorker);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_SUBRESOURCE,
+                              WebURLRequest::RequestContextSubresource);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_STYLE,
+                              WebURLRequest::RequestContextStyle);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_TRACK,
+                              WebURLRequest::RequestContextTrack);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_VIDEO,
+                              WebURLRequest::RequestContextVideo);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_WORKER,
+                              WebURLRequest::RequestContextWorker);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_XML_HTTP_REQUEST,
+                              WebURLRequest::RequestContextXMLHttpRequest);
+COMPILE_ASSERT_MATCHING_ENUMS(REQUEST_CONTEXT_TYPE_XSLT,
+                              WebURLRequest::RequestContextXSLT);
+
+RequestContextType GetRequestContextType(const WebURLRequest& request) {
+  return static_cast<RequestContextType>(request.requestContext());
+}
+
 }  // namespace
 
 // WebURLLoaderImpl::Context --------------------------------------------------
@@ -224,26 +303,25 @@ class WebURLLoaderImpl::Context : public base::RefCounted<Context>,
              SyncLoadResponse* sync_load_response);
 
   // RequestPeer methods:
-  virtual void OnUploadProgress(uint64 position, uint64 size) OVERRIDE;
-  virtual bool OnReceivedRedirect(const net::RedirectInfo& redirect_info,
-                                  const ResourceResponseInfo& info) OVERRIDE;
-  virtual void OnReceivedResponse(const ResourceResponseInfo& info) OVERRIDE;
-  virtual void OnDownloadedData(int len, int encoded_data_length) OVERRIDE;
-  virtual void OnReceivedData(const char* data,
-                              int data_length,
-                              int encoded_data_length) OVERRIDE;
-  virtual void OnReceivedCachedMetadata(const char* data, int len) OVERRIDE;
-  virtual void OnCompletedRequest(
-      int error_code,
-      bool was_ignored_by_handler,
-      bool stale_copy_in_cache,
-      const std::string& security_info,
-      const base::TimeTicks& completion_time,
-      int64 total_transfer_size) OVERRIDE;
+  void OnUploadProgress(uint64 position, uint64 size) override;
+  bool OnReceivedRedirect(const net::RedirectInfo& redirect_info,
+                          const ResourceResponseInfo& info) override;
+  void OnReceivedResponse(const ResourceResponseInfo& info) override;
+  void OnDownloadedData(int len, int encoded_data_length) override;
+  void OnReceivedData(const char* data,
+                      int data_length,
+                      int encoded_data_length) override;
+  void OnReceivedCachedMetadata(const char* data, int len) override;
+  void OnCompletedRequest(int error_code,
+                          bool was_ignored_by_handler,
+                          bool stale_copy_in_cache,
+                          const std::string& security_info,
+                          const base::TimeTicks& completion_time,
+                          int64 total_transfer_size) override;
 
  private:
   friend class base::RefCounted<Context>;
-  virtual ~Context() {}
+  ~Context() override {}
 
   // We can optimize the handling of data URLs in most cases.
   bool CanHandleDataURLRequestLocally() const;
@@ -258,6 +336,7 @@ class WebURLLoaderImpl::Context : public base::RefCounted<Context>,
   scoped_ptr<FtpDirectoryListingResponseDelegate> ftp_listing_delegate_;
   scoped_ptr<MultipartResponseDelegate> multipart_delegate_;
   scoped_ptr<ResourceLoaderBridge> completed_bridge_;
+  scoped_ptr<StreamOverrideParameters> stream_override_;
 };
 
 WebURLLoaderImpl::Context::Context(WebURLLoaderImpl* loader,
@@ -312,8 +391,26 @@ void WebURLLoaderImpl::Context::Start(const WebURLRequest& request,
   DCHECK(!bridge_.get());
 
   request_ = request;  // Save the request.
+  if (request.extraData()) {
+    RequestExtraData* extra_data =
+        static_cast<RequestExtraData*>(request.extraData());
+    stream_override_ = extra_data->TakeStreamOverrideOwnership();
+  }
 
   GURL url = request.url();
+
+  // PlzNavigate: during navigation, the renderer should request a stream which
+  // contains the body of the response. The request has already been made by the
+  // browser.
+  if (stream_override_.get()) {
+    CHECK(CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kEnableBrowserSideNavigation));
+    DCHECK(!sync_load_response);
+    DCHECK_NE(WebURLRequest::FrameTypeNone, request.frameType());
+    DCHECK_EQ("GET", request.httpMethod().latin1());
+    url = stream_override_->stream_url;
+  }
+
   if (CanHandleDataURLRequestLocally()) {
     if (sync_load_response) {
       // This is a sync load. Do the work now.
@@ -332,59 +429,21 @@ void WebURLLoaderImpl::Context::Start(const WebURLRequest& request,
       request.httpHeaderField(WebString::fromUTF8("Referer")).latin1());
   const std::string& method = request.httpMethod().latin1();
 
-  int load_flags = net::LOAD_NORMAL;
-  switch (request.cachePolicy()) {
-    case WebURLRequest::ReloadIgnoringCacheData:
-      // Required by LayoutTests/http/tests/misc/refresh-headers.php
-      load_flags |= net::LOAD_VALIDATE_CACHE;
-      break;
-    case WebURLRequest::ReloadBypassingCache:
-      load_flags |= net::LOAD_BYPASS_CACHE;
-      break;
-    case WebURLRequest::ReturnCacheDataElseLoad:
-      load_flags |= net::LOAD_PREFERRING_CACHE;
-      break;
-    case WebURLRequest::ReturnCacheDataDontLoad:
-      load_flags |= net::LOAD_ONLY_FROM_CACHE;
-      break;
-    case WebURLRequest::UseProtocolCachePolicy:
-      break;
-    default:
-      NOTREACHED();
-  }
-
-  if (request.reportUploadProgress())
-    load_flags |= net::LOAD_ENABLE_UPLOAD_PROGRESS;
-  if (request.reportRawHeaders())
-    load_flags |= net::LOAD_REPORT_RAW_HEADERS;
-
-  if (!request.allowStoredCredentials()) {
-    load_flags |= net::LOAD_DO_NOT_SAVE_COOKIES;
-    load_flags |= net::LOAD_DO_NOT_SEND_COOKIES;
-  }
-
-  if (!request.allowStoredCredentials())
-    load_flags |= net::LOAD_DO_NOT_SEND_AUTH_DATA;
-
-  if (request.requestContext() == WebURLRequest::RequestContextXMLHttpRequest &&
-      (url.has_username() || url.has_password())) {
-    load_flags |= net::LOAD_DO_NOT_PROMPT_FOR_LOGIN;
-  }
-
-  HeaderFlattener flattener;
-  request.visitHTTPHeaderFields(&flattener);
-
   // TODO(brettw) this should take parameter encoding into account when
   // creating the GURLs.
+
+  // TODO(horo): Check credentials flag is unset when credentials mode is omit.
+  //             Check credentials flag is set when credentials mode is include.
 
   RequestInfo request_info;
   request_info.method = method;
   request_info.url = url;
   request_info.first_party_for_cookies = request.firstPartyForCookies();
   request_info.referrer = referrer_url;
-  request_info.headers = flattener.GetBuffer();
-  request_info.load_flags = load_flags;
+  request_info.headers = GetWebURLRequestHeaders(request);
+  request_info.load_flags = GetLoadFlagsForWebURLRequest(request);
   request_info.enable_load_timing = true;
+  request_info.enable_upload_progress = request.reportUploadProgress();
   // requestor_pid only needs to be non-zero if the request originates outside
   // the render process, so we can use requestorProcessID even for requests
   // from in-process plugins.
@@ -397,6 +456,10 @@ void WebURLLoaderImpl::Context::Start(const WebURLRequest& request,
   request_info.download_to_file = request.downloadToFile();
   request_info.has_user_gesture = request.hasUserGesture();
   request_info.skip_service_worker = request.skipServiceWorker();
+  request_info.fetch_request_mode = GetFetchRequestMode(request);
+  request_info.fetch_credentials_mode = GetFetchCredentialsMode(request);
+  request_info.fetch_request_context_type = GetRequestContextType(request);
+  request_info.fetch_frame_type = GetRequestContextFrameType(request);
   request_info.extra_data = request.extraData();
   referrer_policy_ = request.referrerPolicy();
   request_info.referrer_policy = request.referrerPolicy();
@@ -488,6 +551,9 @@ bool WebURLLoaderImpl::Context::OnReceivedRedirect(
   new_request.setDownloadToFile(request_.downloadToFile());
   new_request.setRequestContext(request_.requestContext());
   new_request.setFrameType(request_.frameType());
+  new_request.setSkipServiceWorker(request_.skipServiceWorker());
+  new_request.setFetchRequestMode(request_.fetchRequestMode());
+  new_request.setFetchCredentialsMode(request_.fetchCredentialsMode());
 
   new_request.setHTTPReferrer(WebString::fromUTF8(redirect_info.new_referrer),
                               referrer_policy_);
@@ -520,9 +586,19 @@ bool WebURLLoaderImpl::Context::OnReceivedRedirect(
 }
 
 void WebURLLoaderImpl::Context::OnReceivedResponse(
-    const ResourceResponseInfo& info) {
+    const ResourceResponseInfo& initial_info) {
   if (!client_)
     return;
+
+  ResourceResponseInfo info = initial_info;
+
+  // PlzNavigate: during navigations, the ResourceResponse has already been
+  // received on the browser side, and has been passed down to the renderer.
+  if (stream_override_.get()) {
+    CHECK(CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kEnableBrowserSideNavigation));
+    info = stream_override_->response;
+  }
 
   WebURLResponse response;
   response.initialize();
@@ -763,6 +839,9 @@ void WebURLLoaderImpl::PopulateURLResponse(const GURL& url,
   response->setConnectionReused(info.load_timing.socket_reused);
   response->setDownloadFilePath(info.download_file_path.AsUTF16Unsafe());
   response->setWasFetchedViaServiceWorker(info.was_fetched_via_service_worker);
+  response->setWasFallbackRequiredByServiceWorker(
+      info.was_fallback_required_by_service_worker);
+  response->setServiceWorkerResponseType(info.response_type_via_service_worker);
   WebURLResponseExtraDataImpl* extra_data =
       new WebURLResponseExtraDataImpl(info.npn_negotiated_protocol);
   response->setExtraData(extra_data);
@@ -772,6 +851,7 @@ void WebURLLoaderImpl::PopulateURLResponse(const GURL& url,
       info.was_alternate_protocol_available);
   extra_data->set_connection_info(info.connection_info);
   extra_data->set_was_fetched_via_proxy(info.was_fetched_via_proxy);
+  extra_data->set_proxy_server(info.proxy_server);
 
   // If there's no received headers end time, don't set load timing.  This is
   // the case for non-HTTP requests, requests that don't go over the wire, and

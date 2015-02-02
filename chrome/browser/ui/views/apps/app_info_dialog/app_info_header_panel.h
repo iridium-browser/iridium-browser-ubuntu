@@ -20,9 +20,6 @@ class Image;
 
 namespace views {
 class ImageView;
-class Label;
-class Link;
-class View;
 }
 
 // A small summary panel with the app's name, icon, version, and various links
@@ -32,14 +29,13 @@ class AppInfoHeaderPanel : public AppInfoPanel,
                            public base::SupportsWeakPtr<AppInfoHeaderPanel> {
  public:
   AppInfoHeaderPanel(Profile* profile, const extensions::Extension* app);
-  virtual ~AppInfoHeaderPanel();
+  ~AppInfoHeaderPanel() override;
 
  private:
   void CreateControls();
-  void LayoutControls();
 
   // Overridden from views::LinkListener:
-  virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
+  void LinkClicked(views::Link* source, int event_flags) override;
 
   // Load the app icon asynchronously. For the response, check OnAppImageLoaded.
   void LoadAppImageAsync();
@@ -48,19 +44,12 @@ class AppInfoHeaderPanel : public AppInfoPanel,
 
   // Opens the app in the web store. Must only be called if
   // CanShowAppInWebStore() returns true.
-  void ShowAppInWebStore() const;
+  void ShowAppInWebStore();
   bool CanShowAppInWebStore() const;
-
-  // Displays the licenses for the app. Must only be called if
-  // CanDisplayLicenses() returns true.
-  void DisplayLicenses();
-  bool CanDisplayLicenses();
 
   // UI elements on the dialog. Elements are NULL if they are not displayed.
   views::ImageView* app_icon_;
-  views::Label* app_name_label_;
   views::Link* view_in_store_link_;
-  views::Link* licenses_link_;
 
   base::WeakPtrFactory<AppInfoHeaderPanel> weak_ptr_factory_;
 

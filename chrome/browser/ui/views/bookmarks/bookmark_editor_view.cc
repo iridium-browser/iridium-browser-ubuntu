@@ -15,11 +15,11 @@
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
-#include "chrome/browser/ui/views/constrained_window_views.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/locale_settings.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
+#include "components/constrained_window/constrained_window_views.h"
 #include "components/url_fixer/url_fixer.h"
 #include "components/user_prefs/user_prefs.h"
 #include "ui/accessibility/ax_view_state.h"
@@ -168,9 +168,9 @@ bool BookmarkEditorView::HandleKeyEvent(views::Textfield* sender,
 }
 
 void BookmarkEditorView::GetAccessibleState(ui::AXViewState* state) {
+  views::DialogDelegateView::GetAccessibleState(state);
   state->name =
       l10n_util::GetStringUTF16(IDS_BOOKMARK_EDITOR_TITLE);
-  state->role = ui::AX_ROLE_DIALOG;
 }
 
 void BookmarkEditorView::ButtonPressed(views::Button* sender,

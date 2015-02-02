@@ -4,9 +4,6 @@
 
 #include "chrome/browser/chromeos/login/lock/webui_screen_locker.h"
 
-#include "ash/shell.h"
-#include "ash/wm/lock_state_controller.h"
-#include "ash/wm/lock_state_observer.h"
 #include "base/command_line.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/utf_string_conversions.h"
@@ -34,6 +31,11 @@
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/keyboard/keyboard_util.h"
 #include "ui/views/controls/webview/webview.h"
+
+#if !defined(USE_ATHENA)
+#include "ash/wm/lock_state_controller.h"
+#include "ash/wm/lock_state_observer.h"
+#endif
 
 namespace {
 
@@ -67,19 +69,21 @@ WebUIScreenLocker::WebUIScreenLocker(ScreenLocker* screen_locker)
       is_observing_keyboard_(false),
       weak_factory_(this) {
   set_should_emit_login_prompt_visible(false);
+#if !defined(USE_ATHENA)
   ash::Shell::GetInstance()->lock_state_controller()->AddObserver(this);
+  ash::Shell::GetInstance()->delegate()->AddVirtualKeyboardStateObserver(this);
+#endif
   DBusThreadManager::Get()->GetPowerManagerClient()->AddObserver(this);
 
   if (keyboard::KeyboardController::GetInstance()) {
     keyboard::KeyboardController::GetInstance()->AddObserver(this);
     is_observing_keyboard_ = true;
   }
-
-  ash::Shell::GetInstance()->delegate()->AddVirtualKeyboardStateObserver(this);
 }
 
 void WebUIScreenLocker::LockScreen() {
-  gfx::Rect bounds(ash::Shell::GetScreen()->GetPrimaryDisplay().bounds());
+  gfx::Rect bounds =
+      gfx::Screen::GetNativeScreen()->GetPrimaryDisplay().bounds();
 
   lock_time_ = base::TimeTicks::Now();
   LockWindow* lock_window = LockWindow::Create();
@@ -89,6 +93,7 @@ void WebUIScreenLocker::LockScreen() {
   lock_window_->AddObserver(this);
   WebUILoginView::Init();
   lock_window_->SetContentsView(this);
+  lock_window_->SetBounds(bounds);
   lock_window_->Show();
   LoadURL(GURL(kLoginURL));
   lock_window->Grab();
@@ -156,8 +161,13 @@ void WebUIScreenLocker::FocusUserPod() {
 
 WebUIScreenLocker::~WebUIScreenLocker() {
   DBusThreadManager::Get()->GetPowerManagerClient()->RemoveObserver(this);
+#if !defined(USE_ATHENA)
   ash::Shell::GetInstance()->
       lock_state_controller()->RemoveObserver(this);
+
+  ash::Shell::GetInstance()->delegate()->
+      RemoveVirtualKeyboardStateObserver(this);
+#endif
   // In case of shutdown, lock_window_ may be deleted before WebUIScreenLocker.
   if (lock_window_) {
     lock_window_->RemoveObserver(this);
@@ -174,9 +184,6 @@ WebUIScreenLocker::~WebUIScreenLocker() {
     keyboard::KeyboardController::GetInstance()->RemoveObserver(this);
     is_observing_keyboard_ = false;
   }
-
-  ash::Shell::GetInstance()->delegate()->
-      RemoveVirtualKeyboardStateObserver(this);
 
   if (login::LoginScrollIntoViewEnabled())
     ResetKeyboardOverscrollOverride();
@@ -299,6 +306,7 @@ void WebUIScreenLocker::OnLockWindowReady() {
 ////////////////////////////////////////////////////////////////////////////////
 // SessionLockStateObserver override.
 
+#if !defined(USE_ATHENA)
 void WebUIScreenLocker::OnLockStateEvent(
     ash::LockStateObserver::EventType event) {
   if (event == ash::LockStateObserver::EVENT_LOCK_ANIMATION_FINISHED) {
@@ -308,6 +316,7 @@ void WebUIScreenLocker::OnLockStateEvent(
     GetWebUI()->CallJavascriptFunction("cr.ui.Oobe.animateOnceFullyDisplayed");
   }
 }
+#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 // WidgetObserver override.
@@ -346,6 +355,7 @@ void WebUIScreenLocker::RenderProcessGone(base::TerminationStatus status) {
 ////////////////////////////////////////////////////////////////////////////////
 // ash::KeyboardStateObserver overrides.
 
+#if !defined(USE_ATHENA)
 void WebUIScreenLocker::OnVirtualKeyboardStateChanged(bool activated) {
   if (keyboard::KeyboardController::GetInstance()) {
     if (activated) {
@@ -359,6 +369,7 @@ void WebUIScreenLocker::OnVirtualKeyboardStateChanged(bool activated) {
     }
   }
 }
+#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 // keyboard::KeyboardControllerObserver overrides.

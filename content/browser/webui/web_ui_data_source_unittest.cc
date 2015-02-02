@@ -24,17 +24,17 @@ const char kDummytResource[] = "<html>blah</html>";
 class TestClient : public TestContentClient {
  public:
   TestClient() {}
-  virtual ~TestClient() {}
+  ~TestClient() override {}
 
-  virtual base::string16 GetLocalizedString(int message_id) const OVERRIDE {
+  base::string16 GetLocalizedString(int message_id) const override {
     if (message_id == kDummyStringId)
       return base::UTF8ToUTF16(kDummyString);
     return base::string16();
 
   }
 
-  virtual base::RefCountedStaticMemory* GetDataResourceBytes(
-      int resource_id) const OVERRIDE {
+  base::RefCountedStaticMemory* GetDataResourceBytes(
+      int resource_id) const override {
     base::RefCountedStaticMemory* bytes = NULL;
     if (resource_id == kDummyDefaultResourceId) {
       bytes = new base::RefCountedStaticMemory(
@@ -52,7 +52,7 @@ class TestClient : public TestContentClient {
 class WebUIDataSourceTest : public testing::Test {
  public:
   WebUIDataSourceTest() : result_data_(NULL) {}
-  virtual ~WebUIDataSourceTest() {}
+  ~WebUIDataSourceTest() override {}
   WebUIDataSourceImpl* source() { return source_.get(); }
 
   void StartDataRequest(const std::string& path) {
@@ -70,7 +70,7 @@ class WebUIDataSourceTest : public testing::Test {
   scoped_refptr<base::RefCountedMemory> result_data_;
 
  private:
-  virtual void SetUp() {
+  void SetUp() override {
     SetContentClient(&client_);
     WebUIDataSource* source = WebUIDataSourceImpl::Create("host");
     WebUIDataSourceImpl* source_impl = static_cast<WebUIDataSourceImpl*>(
@@ -93,7 +93,7 @@ TEST_F(WebUIDataSourceTest, EmptyStrings) {
   source()->SetJsonPath("strings.js");
   StartDataRequest("strings.js");
   std::string result(result_data_->front_as<char>(), result_data_->size());
-  EXPECT_NE(result.find("var templateData = {"), std::string::npos);
+  EXPECT_NE(result.find("loadTimeData.data = {"), std::string::npos);
   EXPECT_NE(result.find("};"), std::string::npos);
 }
 

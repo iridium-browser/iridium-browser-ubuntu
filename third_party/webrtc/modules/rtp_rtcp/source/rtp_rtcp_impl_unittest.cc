@@ -18,8 +18,10 @@
 #include "webrtc/modules/rtp_rtcp/source/rtcp_packet.h"
 #include "webrtc/modules/rtp_rtcp/source/rtp_rtcp_impl.h"
 #include "webrtc/system_wrappers/interface/scoped_vector.h"
+#include "webrtc/test/rtcp_packet_parser.h"
 
 using ::testing::_;
+using ::testing::ElementsAre;
 using ::testing::NiceMock;
 using ::testing::Return;
 using ::testing::SaveArg;
@@ -39,10 +41,10 @@ class RtcpRttStatsTestImpl : public RtcpRttStats {
   RtcpRttStatsTestImpl() : rtt_ms_(0) {}
   virtual ~RtcpRttStatsTestImpl() {}
 
-  virtual void OnRttUpdate(uint32_t rtt_ms) {
+  virtual void OnRttUpdate(uint32_t rtt_ms) OVERRIDE {
     rtt_ms_ = rtt_ms;
   }
-  virtual uint32_t LastProcessedRtt() const {
+  virtual uint32_t LastProcessedRtt() const OVERRIDE {
     return rtt_ms_;
   }
   uint32_t rtt_ms_;
@@ -65,7 +67,7 @@ class SendTransport : public Transport,
     clock_ = clock;
     delay_ms_ = delay_ms;
   }
-  virtual int SendPacket(int /*ch*/, const void* data, int len) {
+  virtual int SendPacket(int /*ch*/, const void* data, int len) OVERRIDE {
     RTPHeader header;
     scoped_ptr<RtpHeaderParser> parser(RtpHeaderParser::Create());
     EXPECT_TRUE(parser->Parse(static_cast<const uint8_t*>(data),
@@ -75,7 +77,11 @@ class SendTransport : public Transport,
     last_rtp_header_ = header;
     return len;
   }
-  virtual int SendRTCPPacket(int /*ch*/, const void *data, int len) {
+  virtual int SendRTCPPacket(int /*ch*/, const void *data, int len) OVERRIDE {
+    test::RtcpPacketParser parser;
+    parser.Parse(static_cast<const uint8_t*>(data), len);
+    last_nack_list_ = parser.nack_item()->last_nack_list();
+
     if (clock_) {
       clock_->AdvanceTimeMilliseconds(delay_ms_);
     }
@@ -89,6 +95,7 @@ class SendTransport : public Transport,
   uint32_t delay_ms_;
   int rtp_packets_sent_;
   RTPHeader last_rtp_header_;
+  std::vector<uint16_t> last_nack_list_;
 };
 
 class RtpRtcpModule {
@@ -128,6 +135,9 @@ class RtpRtcpModule {
   }
   uint16_t LastRtpSequenceNumber() {
     return transport_.last_rtp_header_.sequenceNumber;
+  }
+  std::vector<uint16_t> LastNackListSent() {
+    return transport_.last_nack_list_;
   }
 };
 }  // namespace
@@ -344,11 +354,51 @@ TEST_F(RtpRtcpImplTest, RtcpPacketTypeCounter_FirAndPli) {
   EXPECT_EQ(1U, sender_.RtcpReceived().pli_packets);
 }
 
+TEST_F(RtpRtcpImplTest, UniqueNackRequests) {
+  receiver_.transport_.SimulateNetworkDelay(0, &clock_);
+  EXPECT_EQ(0U, receiver_.RtcpSent().nack_packets);
+  EXPECT_EQ(0U, receiver_.RtcpSent().nack_requests);
+  EXPECT_EQ(0U, receiver_.RtcpSent().unique_nack_requests);
+  EXPECT_EQ(0, receiver_.RtcpSent().UniqueNackRequestsInPercent());
+
+  // Receive module sends NACK request.
+  const uint16_t kNackLength = 4;
+  uint16_t nack_list[kNackLength] = {10, 11, 13, 18};
+  EXPECT_EQ(0, receiver_.impl_->SendNACK(nack_list, kNackLength));
+  EXPECT_EQ(1U, receiver_.RtcpSent().nack_packets);
+  EXPECT_EQ(4U, receiver_.RtcpSent().nack_requests);
+  EXPECT_EQ(4U, receiver_.RtcpSent().unique_nack_requests);
+  EXPECT_THAT(receiver_.LastNackListSent(), ElementsAre(10, 11, 13, 18));
+
+  // Send module receives the request.
+  EXPECT_EQ(1U, sender_.RtcpReceived().nack_packets);
+  EXPECT_EQ(4U, sender_.RtcpReceived().nack_requests);
+  EXPECT_EQ(4U, sender_.RtcpReceived().unique_nack_requests);
+  EXPECT_EQ(100, sender_.RtcpReceived().UniqueNackRequestsInPercent());
+
+  // Receive module sends new request with duplicated packets.
+  const int kStartupRttMs = 100;
+  clock_.AdvanceTimeMilliseconds(kStartupRttMs + 1);
+  const uint16_t kNackLength2 = 4;
+  uint16_t nack_list2[kNackLength2] = {11, 18, 20, 21};
+  EXPECT_EQ(0, receiver_.impl_->SendNACK(nack_list2, kNackLength2));
+  EXPECT_EQ(2U, receiver_.RtcpSent().nack_packets);
+  EXPECT_EQ(8U, receiver_.RtcpSent().nack_requests);
+  EXPECT_EQ(6U, receiver_.RtcpSent().unique_nack_requests);
+  EXPECT_THAT(receiver_.LastNackListSent(), ElementsAre(11, 18, 20, 21));
+
+  // Send module receives the request.
+  EXPECT_EQ(2U, sender_.RtcpReceived().nack_packets);
+  EXPECT_EQ(8U, sender_.RtcpReceived().nack_requests);
+  EXPECT_EQ(6U, sender_.RtcpReceived().unique_nack_requests);
+  EXPECT_EQ(75, sender_.RtcpReceived().UniqueNackRequestsInPercent());
+}
+
 class RtpSendingTestTransport : public Transport {
  public:
   void ResetCounters() { bytes_received_.clear(); }
 
-  virtual int SendPacket(int channel, const void* data, int length) {
+  virtual int SendPacket(int channel, const void* data, int length) OVERRIDE {
     RTPHeader header;
     scoped_ptr<RtpHeaderParser> parser(RtpHeaderParser::Create());
     EXPECT_TRUE(parser->Parse(static_cast<const uint8_t*>(data),
@@ -359,7 +409,9 @@ class RtpSendingTestTransport : public Transport {
     return length;
   }
 
-  virtual int SendRTCPPacket(int channel, const void* data, int length) {
+  virtual int SendRTCPPacket(int channel,
+                             const void* data,
+                             int length) OVERRIDE {
     return length;
   }
 

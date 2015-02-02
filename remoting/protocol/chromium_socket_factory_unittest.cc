@@ -17,7 +17,7 @@ namespace protocol {
 class ChromiumSocketFactoryTest : public testing::Test,
                                   public sigslot::has_slots<> {
  public:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     socket_factory_.reset(new ChromiumPacketSocketFactory());
 
     socket_.reset(socket_factory_->CreateUdpSocket(
@@ -84,8 +84,8 @@ TEST_F(ChromiumSocketFactoryTest, SetOptions) {
 }
 
 TEST_F(ChromiumSocketFactoryTest, PortRange) {
-  const int kMinPort = 12400;
-  const int kMaxPort = 12410;
+  const uint16 kMinPort = 12400;
+  const uint16 kMaxPort = 12410;
   socket_.reset(socket_factory_->CreateUdpSocket(
       rtc::SocketAddress("127.0.0.1", 0), kMaxPort, kMaxPort));
   ASSERT_TRUE(socket_.get() != NULL);

@@ -21,8 +21,8 @@
 // PacedSender and UdpTransport are shared between all RTP and RTCP
 // streams.
 
-#ifndef MEDIA_CAST_NET_CAST_TRANSPORT_IMPL_H_
-#define MEDIA_CAST_NET_CAST_TRANSPORT_IMPL_H_
+#ifndef MEDIA_CAST_NET_CAST_TRANSPORT_SENDER_IMPL_H_
+#define MEDIA_CAST_NET_CAST_TRANSPORT_SENDER_IMPL_H_
 
 #include "base/callback.h"
 #include "base/gtest_prod_util.h"
@@ -31,7 +31,6 @@
 #include "base/memory/weak_ptr.h"
 #include "base/time/tick_clock.h"
 #include "base/time/time.h"
-#include "base/timer/timer.h"
 #include "media/cast/common/transport_encryption_handler.h"
 #include "media/cast/logging/logging_defines.h"
 #include "media/cast/logging/simple_event_subscriber.h"
@@ -61,6 +60,8 @@ class CastTransportSenderImpl : public CastTransportSender {
   //                                    per 10 ms ideally.
   //   "pacer_max_burst_size": int - specifies how many pakcets to send
   //                                 per 10 ms, max
+  //   "send_buffer_min_size": int - specifies the minimum socket send buffer
+  //                                 size
   //   "disable_wifi_scan" (value ignored) - disable wifi scans while streaming
   //   "media_streaming_mode" (value ignored) - turn media streaming mode on
   // Note, these options may be ignored on some platforms.
@@ -75,28 +76,26 @@ class CastTransportSenderImpl : public CastTransportSender {
       const scoped_refptr<base::SingleThreadTaskRunner>& transport_task_runner,
       PacketSender* external_transport);
 
-  virtual ~CastTransportSenderImpl();
+  ~CastTransportSenderImpl() override;
 
-  virtual void InitializeAudio(const CastTransportRtpConfig& config,
-                               const RtcpCastMessageCallback& cast_message_cb,
-                               const RtcpRttCallback& rtt_cb) OVERRIDE;
-  virtual void InitializeVideo(const CastTransportRtpConfig& config,
-                               const RtcpCastMessageCallback& cast_message_cb,
-                               const RtcpRttCallback& rtt_cb) OVERRIDE;
-  virtual void InsertFrame(uint32 ssrc, const EncodedFrame& frame) OVERRIDE;
+  void InitializeAudio(const CastTransportRtpConfig& config,
+                       const RtcpCastMessageCallback& cast_message_cb,
+                       const RtcpRttCallback& rtt_cb) override;
+  void InitializeVideo(const CastTransportRtpConfig& config,
+                       const RtcpCastMessageCallback& cast_message_cb,
+                       const RtcpRttCallback& rtt_cb) override;
+  void InsertFrame(uint32 ssrc, const EncodedFrame& frame) override;
 
-  virtual void SendSenderReport(
-      uint32 ssrc,
-      base::TimeTicks current_time,
-      uint32 current_time_as_rtp_timestamp) OVERRIDE;
+  void SendSenderReport(uint32 ssrc,
+                        base::TimeTicks current_time,
+                        uint32 current_time_as_rtp_timestamp) override;
 
-  virtual void CancelSendingFrames(
-      uint32 ssrc,
-      const std::vector<uint32>& frame_ids) OVERRIDE;
+  void CancelSendingFrames(uint32 ssrc,
+                           const std::vector<uint32>& frame_ids) override;
 
-  virtual void ResendFrameForKickstart(uint32 ssrc, uint32 frame_id) OVERRIDE;
+  void ResendFrameForKickstart(uint32 ssrc, uint32 frame_id) override;
 
-  virtual PacketReceiverCallback PacketReceiverForTesting() OVERRIDE;
+  PacketReceiverCallback PacketReceiverForTesting() override;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(CastTransportSenderImplTest, NacksCancelRetransmits);
@@ -178,4 +177,4 @@ class CastTransportSenderImpl : public CastTransportSender {
 }  // namespace cast
 }  // namespace media
 
-#endif  // MEDIA_CAST_NET_CAST_TRANSPORT_IMPL_H_
+#endif  // MEDIA_CAST_NET_CAST_TRANSPORT_SENDER_IMPL_H_

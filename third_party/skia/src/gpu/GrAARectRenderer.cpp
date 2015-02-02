@@ -7,7 +7,7 @@
 
 #include "GrAARectRenderer.h"
 #include "GrGpu.h"
-#include "gl/builders/GrGLFullProgramBuilder.h"
+#include "gl/builders/GrGLProgramBuilder.h"
 #include "gl/GrGLProcessor.h"
 #include "gl/GrGLGeometryProcessor.h"
 #include "GrTBackendProcessorFactory.h"
@@ -21,7 +21,7 @@ class GrGLAlignedRectEffect;
 class GrAlignedRectEffect : public GrGeometryProcessor {
 public:
     static GrGeometryProcessor* Create() {
-        GR_CREATE_STATIC_GEOMETRY_PROCESSOR(gAlignedRectEffect, GrAlignedRectEffect, ());
+        GR_CREATE_STATIC_PROCESSOR(gAlignedRectEffect, GrAlignedRectEffect, ());
         gAlignedRectEffect->ref();
         return gAlignedRectEffect;
     }
@@ -29,11 +29,6 @@ public:
     virtual ~GrAlignedRectEffect() {}
 
     static const char* Name() { return "AlignedRectEdge"; }
-
-    virtual void getConstantColorComponents(GrColor* color,
-                                            uint32_t* validFlags) const SK_OVERRIDE {
-        *validFlags = 0;
-    }
 
     const GrShaderVar& inRect() const { return fInRect; }
 
@@ -46,27 +41,21 @@ public:
         GLProcessor(const GrBackendProcessorFactory& factory, const GrProcessor&)
         : INHERITED (factory) {}
 
-        virtual void emitCode(GrGLFullProgramBuilder* builder,
-                              const GrGeometryProcessor& geometryProcessor,
-                              const GrProcessorKey& key,
-                              const char* outputColor,
-                              const char* inputColor,
-                              const TransformedCoordsArray&,
-                              const TextureSamplerArray& samplers) SK_OVERRIDE {
+        virtual void emitCode(const EmitArgs& args) SK_OVERRIDE {
             // setup the varying for the Axis aligned rect effect
             //      xy -> interpolated offset
             //      zw -> w/2+0.5, h/2+0.5
-            const char *vsRectName, *fsRectName;
-            builder->addVarying(kVec4f_GrSLType, "Rect", &vsRectName, &fsRectName);
+            GrGLVertToFrag v(kVec4f_GrSLType);
+            args.fPB->addVarying("Rect", &v);
 
-            const GrShaderVar& inRect = geometryProcessor.cast<GrAlignedRectEffect>().inRect();
-            GrGLVertexShaderBuilder* vsBuilder = builder->getVertexShaderBuilder();
-            vsBuilder->codeAppendf("\t%s = %s;\n", vsRectName, inRect.c_str());
+            const GrShaderVar& inRect = args.fGP.cast<GrAlignedRectEffect>().inRect();
+            GrGLVertexBuilder* vsBuilder = args.fPB->getVertexShaderBuilder();
+            vsBuilder->codeAppendf("\t%s = %s;\n", v.fsIn(), inRect.c_str());
 
-            GrGLProcessorFragmentShaderBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+            GrGLGPFragmentBuilder* fsBuilder = args.fPB->getFragmentShaderBuilder();
             // TODO: compute all these offsets, spans, and scales in the VS
-            fsBuilder->codeAppendf("\tfloat insetW = min(1.0, %s.z) - 0.5;\n", fsRectName);
-            fsBuilder->codeAppendf("\tfloat insetH = min(1.0, %s.w) - 0.5;\n", fsRectName);
+            fsBuilder->codeAppendf("\tfloat insetW = min(1.0, %s.z) - 0.5;\n", v.fsIn());
+            fsBuilder->codeAppendf("\tfloat insetH = min(1.0, %s.w) - 0.5;\n", v.fsIn());
             fsBuilder->codeAppend("\tfloat outset = 0.5;\n");
             // For rects > 1 pixel wide and tall the span's are noops (i.e., 1.0). For rects
             // < 1 pixel wide or tall they serve to normalize the < 1 ramp to a 0 .. 1 range.
@@ -80,16 +69,16 @@ public:
 
             // Compute the coverage for the rect's width
             fsBuilder->codeAppendf(
-                "\tfloat coverage = scaleW*clamp((%s.z-abs(%s.x))/spanW, 0.0, 1.0);\n", fsRectName,
-                fsRectName);
+                "\tfloat coverage = scaleW*clamp((%s.z-abs(%s.x))/spanW, 0.0, 1.0);\n", v.fsIn(),
+                v.fsIn());
             // Compute the coverage for the rect's height and merge with the width
             fsBuilder->codeAppendf(
                 "\tcoverage = coverage*scaleH*clamp((%s.w-abs(%s.y))/spanH, 0.0, 1.0);\n",
-                fsRectName, fsRectName);
+                v.fsIn(), v.fsIn());
 
 
-            fsBuilder->codeAppendf("\t%s = %s;\n", outputColor,
-                                   (GrGLSLExpr4(inputColor) * GrGLSLExpr1("coverage")).c_str());
+            fsBuilder->codeAppendf("\t%s = %s;\n", args.fOutput,
+                                   (GrGLSLExpr4(args.fInput) * GrGLSLExpr1("coverage")).c_str());
         }
 
         static void GenKey(const GrProcessor&, const GrGLCaps&, GrProcessorKeyBuilder*) {}
@@ -110,7 +99,11 @@ private:
 
     const GrShaderVar& fInRect;
 
-    virtual bool onIsEqual(const GrProcessor&) const SK_OVERRIDE { return true; }
+    virtual bool onIsEqual(const GrGeometryProcessor&) const SK_OVERRIDE { return true; }
+
+    virtual void onComputeInvariantOutput(InvariantOutput* inout) const SK_OVERRIDE {
+        inout->mulByUnknownAlpha();
+    }
 
     GR_DECLARE_GEOMETRY_PROCESSOR_TEST;
 
@@ -146,7 +139,7 @@ class GrGLRectEffect;
 class GrRectEffect : public GrGeometryProcessor {
 public:
     static GrGeometryProcessor* Create() {
-        GR_CREATE_STATIC_GEOMETRY_PROCESSOR(gRectEffect, GrRectEffect, ());
+        GR_CREATE_STATIC_PROCESSOR(gRectEffect, GrRectEffect, ());
         gRectEffect->ref();
         return gRectEffect;
     }
@@ -154,11 +147,6 @@ public:
     virtual ~GrRectEffect() {}
 
     static const char* Name() { return "RectEdge"; }
-
-    virtual void getConstantColorComponents(GrColor* color,
-                                            uint32_t* validFlags) const SK_OVERRIDE {
-        *validFlags = 0;
-    }
 
     const GrShaderVar& inRectEdge() const { return fInRectEdge; }
     const GrShaderVar& inWidthHeight() const { return fInWidthHeight; }
@@ -172,35 +160,27 @@ public:
         GLProcessor(const GrBackendProcessorFactory& factory, const GrProcessor&)
         : INHERITED (factory) {}
 
-        virtual void emitCode(GrGLFullProgramBuilder* builder,
-                              const GrGeometryProcessor& geometryProcessor,
-                              const GrProcessorKey& key,
-                              const char* outputColor,
-                              const char* inputColor,
-                              const TransformedCoordsArray&,
-                              const TextureSamplerArray& samplers) SK_OVERRIDE {
+        virtual void emitCode(const EmitArgs& args) SK_OVERRIDE {
             // setup the varying for the center point and the unit vector
             // that points down the height of the rect
-            const char *vsRectEdgeName, *fsRectEdgeName;
-            builder->addVarying(kVec4f_GrSLType, "RectEdge",
-                                &vsRectEdgeName, &fsRectEdgeName);
+            GrGLVertToFrag rectEdge(kVec4f_GrSLType);
+            args.fPB->addVarying("RectEdge", &rectEdge);
 
-            const GrRectEffect& rectEffect = geometryProcessor.cast<GrRectEffect>();
-            GrGLVertexShaderBuilder* vsBuilder = builder->getVertexShaderBuilder();
-            vsBuilder->codeAppendf("%s = %s;", vsRectEdgeName, rectEffect.inRectEdge().c_str());
+            const GrRectEffect& rectEffect = args.fGP.cast<GrRectEffect>();
+            GrGLVertexBuilder* vsBuilder = args.fPB->getVertexShaderBuilder();
+            vsBuilder->codeAppendf("%s = %s;", rectEdge.vsOut(), rectEffect.inRectEdge().c_str());
 
             // setup the varying for width/2+.5 and height/2+.5
-            const char *vsWidthHeightName, *fsWidthHeightName;
-            builder->addVarying(kVec2f_GrSLType, "WidthHeight",
-                                &vsWidthHeightName, &fsWidthHeightName);
+            GrGLVertToFrag widthHeight(kVec2f_GrSLType);
+            args.fPB->addVarying("WidthHeight", &widthHeight);
             vsBuilder->codeAppendf("%s = %s;",
-                                   vsWidthHeightName,
+                                   widthHeight.vsOut(),
                                    rectEffect.inWidthHeight().c_str());
 
-            GrGLProcessorFragmentShaderBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+            GrGLGPFragmentBuilder* fsBuilder = args.fPB->getFragmentShaderBuilder();
             // TODO: compute all these offsets, spans, and scales in the VS
-            fsBuilder->codeAppendf("\tfloat insetW = min(1.0, %s.x) - 0.5;\n", fsWidthHeightName);
-            fsBuilder->codeAppendf("\tfloat insetH = min(1.0, %s.y) - 0.5;\n", fsWidthHeightName);
+            fsBuilder->codeAppendf("\tfloat insetW = min(1.0, %s.x) - 0.5;\n", widthHeight.fsIn());
+            fsBuilder->codeAppendf("\tfloat insetH = min(1.0, %s.y) - 0.5;\n", widthHeight.fsIn());
             fsBuilder->codeAppend("\tfloat outset = 0.5;\n");
             // For rects > 1 pixel wide and tall the span's are noops (i.e., 1.0). For rects
             // < 1 pixel wide or tall they serve to normalize the < 1 ramp to a 0 .. 1 range.
@@ -214,23 +194,23 @@ public:
 
             // Compute the coverage for the rect's width
             fsBuilder->codeAppendf("\tvec2 offset = %s.xy - %s.xy;\n",
-                                   fsBuilder->fragmentPosition(), fsRectEdgeName);
+                                   fsBuilder->fragmentPosition(), rectEdge.fsIn());
             fsBuilder->codeAppendf("\tfloat perpDot = abs(offset.x * %s.w - offset.y * %s.z);\n",
-                                   fsRectEdgeName, fsRectEdgeName);
+                                   rectEdge.fsIn(), rectEdge.fsIn());
             fsBuilder->codeAppendf(
                 "\tfloat coverage = scaleW*clamp((%s.x-perpDot)/spanW, 0.0, 1.0);\n",
-                fsWidthHeightName);
+                widthHeight.fsIn());
 
             // Compute the coverage for the rect's height and merge with the width
             fsBuilder->codeAppendf("\tperpDot = abs(dot(offset, %s.zw));\n",
-                                   fsRectEdgeName);
+                                   rectEdge.fsIn());
             fsBuilder->codeAppendf(
                     "\tcoverage = coverage*scaleH*clamp((%s.y-perpDot)/spanH, 0.0, 1.0);\n",
-                    fsWidthHeightName);
+                    widthHeight.fsIn());
 
 
-            fsBuilder->codeAppendf("\t%s = %s;\n", outputColor,
-                                   (GrGLSLExpr4(inputColor) * GrGLSLExpr1("coverage")).c_str());
+            fsBuilder->codeAppendf("\t%s = %s;\n", args.fOutput,
+                                   (GrGLSLExpr4(args.fInput) * GrGLSLExpr1("coverage")).c_str());
         }
 
         static void GenKey(const GrProcessor&, const GrGLCaps&, GrProcessorKeyBuilder*) {}
@@ -255,7 +235,11 @@ private:
         this->setWillReadFragmentPosition();
     }
 
-    virtual bool onIsEqual(const GrProcessor&) const SK_OVERRIDE { return true; }
+    virtual bool onIsEqual(const GrGeometryProcessor&) const SK_OVERRIDE { return true; }
+
+    virtual void onComputeInvariantOutput(InvariantOutput* inout) const SK_OVERRIDE {
+        inout->mulByUnknownAlpha();
+    }
 
     const GrShaderVar& fInRectEdge;
     const GrShaderVar& fInWidthHeight;
@@ -281,7 +265,7 @@ namespace {
 extern const GrVertexAttrib gAARectAttribs[] = {
     {kVec2f_GrVertexAttribType,  0,                                 kPosition_GrVertexAttribBinding},
     {kVec4ub_GrVertexAttribType, sizeof(SkPoint),                   kColor_GrVertexAttribBinding},
-    {kVec4ub_GrVertexAttribType, sizeof(SkPoint) + sizeof(SkColor), kCoverage_GrVertexAttribBinding},
+    {kFloat_GrVertexAttribType, sizeof(SkPoint) + sizeof(SkColor),  kCoverage_GrVertexAttribBinding},
 };
 
 // Should the coverage be multiplied into the color attrib or use a separate attrib.
@@ -296,7 +280,8 @@ static CoverageAttribType set_rect_attribs(GrDrawState* drawState) {
         drawState->setVertexAttribs<gAARectAttribs>(2, sizeof(SkPoint) + sizeof(SkColor));
         return kUseColor_CoverageAttribType;
     } else {
-        drawState->setVertexAttribs<gAARectAttribs>(3, sizeof(SkPoint) + 2 * sizeof(SkColor));
+        drawState->setVertexAttribs<gAARectAttribs>(3, sizeof(SkPoint) + sizeof(SkColor) +
+                                                       sizeof(float));
         return kUseCoverage_CoverageAttribType;
     }
 }
@@ -325,42 +310,6 @@ static const int kIndicesPerAAFillRect = SK_ARRAY_COUNT(gFillAARectIdx);
 static const int kVertsPerAAFillRect = 8;
 static const int kNumAAFillRectsInIndexBuffer = 256;
 
-GrIndexBuffer* GrAARectRenderer::aaFillRectIndexBuffer(GrGpu* gpu) {
-    static const size_t kAAFillRectIndexBufferSize = kIndicesPerAAFillRect *
-                                                     sizeof(uint16_t) *
-                                                     kNumAAFillRectsInIndexBuffer;
-
-    if (NULL == fAAFillRectIndexBuffer) {
-        fAAFillRectIndexBuffer = gpu->createIndexBuffer(kAAFillRectIndexBufferSize, false);
-        if (fAAFillRectIndexBuffer) {
-            uint16_t* data = (uint16_t*) fAAFillRectIndexBuffer->map();
-            bool useTempData = (NULL == data);
-            if (useTempData) {
-                data = SkNEW_ARRAY(uint16_t, kNumAAFillRectsInIndexBuffer * kIndicesPerAAFillRect);
-            }
-            for (int i = 0; i < kNumAAFillRectsInIndexBuffer; ++i) {
-                // Each AA filled rect is drawn with 8 vertices and 10 triangles (8 around
-                // the inner rect (for AA) and 2 for the inner rect.
-                int baseIdx = i * kIndicesPerAAFillRect;
-                uint16_t baseVert = (uint16_t)(i * kVertsPerAAFillRect);
-                for (int j = 0; j < kIndicesPerAAFillRect; ++j) {
-                    data[baseIdx+j] = baseVert + gFillAARectIdx[j];
-                }
-            }
-            if (useTempData) {
-                if (!fAAFillRectIndexBuffer->updateData(data, kAAFillRectIndexBufferSize)) {
-                    SkFAIL("Can't get AA Fill Rect indices into buffer!");
-                }
-                SkDELETE_ARRAY(data);
-            } else {
-                fAAFillRectIndexBuffer->unmap();
-            }
-        }
-    }
-
-    return fAAFillRectIndexBuffer;
-}
-
 static const uint16_t gMiterStrokeAARectIdx[] = {
     0 + 0, 1 + 0, 5 + 0, 5 + 0, 4 + 0, 0 + 0,
     1 + 0, 2 + 0, 6 + 0, 6 + 0, 5 + 0, 1 + 0,
@@ -377,6 +326,10 @@ static const uint16_t gMiterStrokeAARectIdx[] = {
     2 + 8, 3 + 8, 7 + 8, 7 + 8, 6 + 8, 2 + 8,
     3 + 8, 0 + 8, 4 + 8, 4 + 8, 7 + 8, 3 + 8,
 };
+
+static const int kIndicesPerMiterStrokeRect = SK_ARRAY_COUNT(gMiterStrokeAARectIdx);
+static const int kVertsPerMiterStrokeRect = 16;
+static const int kNumMiterStrokeRectsInIndexBuffer = 256;
 
 /**
  * As in miter-stroke, index = a + b, and a is the current index, b is the shift
@@ -435,45 +388,38 @@ static const uint16_t gBevelStrokeAARectIdx[] = {
     3 + 16, 0 + 16, 4 + 16, 4 + 16, 7 + 16, 3 + 16,
 };
 
-int GrAARectRenderer::aaStrokeRectIndexCount(bool miterStroke) {
+static const int kIndicesPerBevelStrokeRect = SK_ARRAY_COUNT(gBevelStrokeAARectIdx);
+static const int kVertsPerBevelStrokeRect = 24;
+static const int kNumBevelStrokeRectsInIndexBuffer = 256;
+
+static int aa_stroke_rect_index_count(bool miterStroke) {
     return miterStroke ? SK_ARRAY_COUNT(gMiterStrokeAARectIdx) :
                          SK_ARRAY_COUNT(gBevelStrokeAARectIdx);
 }
 
-GrIndexBuffer* GrAARectRenderer::aaStrokeRectIndexBuffer(GrGpu* gpu, bool miterStroke) {
+GrIndexBuffer* GrAARectRenderer::aaStrokeRectIndexBuffer(bool miterStroke) {
     if (miterStroke) {
         if (NULL == fAAMiterStrokeRectIndexBuffer) {
             fAAMiterStrokeRectIndexBuffer =
-                gpu->createIndexBuffer(sizeof(gMiterStrokeAARectIdx), false);
-            if (fAAMiterStrokeRectIndexBuffer) {
-#ifdef SK_DEBUG
-                bool updated =
-#endif
-                fAAMiterStrokeRectIndexBuffer->updateData(gMiterStrokeAARectIdx,
-                                                          sizeof(gMiterStrokeAARectIdx));
-                GR_DEBUGASSERT(updated);
-            }
+                    fGpu->createInstancedIndexBuffer(gMiterStrokeAARectIdx,
+                                                     kIndicesPerMiterStrokeRect,
+                                                     kNumMiterStrokeRectsInIndexBuffer,
+                                                     kVertsPerMiterStrokeRect);
         }
         return fAAMiterStrokeRectIndexBuffer;
     } else {
         if (NULL == fAABevelStrokeRectIndexBuffer) {
             fAABevelStrokeRectIndexBuffer =
-                gpu->createIndexBuffer(sizeof(gBevelStrokeAARectIdx), false);
-            if (fAABevelStrokeRectIndexBuffer) {
-#ifdef SK_DEBUG
-                bool updated =
-#endif
-                fAABevelStrokeRectIndexBuffer->updateData(gBevelStrokeAARectIdx,
-                                                          sizeof(gBevelStrokeAARectIdx));
-                GR_DEBUGASSERT(updated);
-            }
+                    fGpu->createInstancedIndexBuffer(gBevelStrokeAARectIdx,
+                                                     kIndicesPerBevelStrokeRect,
+                                                     kNumBevelStrokeRectsInIndexBuffer,
+                                                     kVertsPerBevelStrokeRect);
         }
         return fAABevelStrokeRectIndexBuffer;
     }
 }
 
-void GrAARectRenderer::geometryFillAARect(GrGpu* gpu,
-                                          GrDrawTarget* target,
+void GrAARectRenderer::geometryFillAARect(GrDrawTarget* target,
                                           const SkRect& rect,
                                           const SkMatrix& combinedMatrix,
                                           const SkRect& devRect) {
@@ -488,13 +434,19 @@ void GrAARectRenderer::geometryFillAARect(GrGpu* gpu,
 
     GrDrawTarget::AutoReleaseGeometry geo(target, 8, 0);
     if (!geo.succeeded()) {
-        GrPrintf("Failed to get space for vertices!\n");
+        SkDebugf("Failed to get space for vertices!\n");
         return;
     }
 
-    GrIndexBuffer* indexBuffer = this->aaFillRectIndexBuffer(gpu);
+    if (NULL == fAAFillRectIndexBuffer) {
+        fAAFillRectIndexBuffer = fGpu->createInstancedIndexBuffer(gFillAARectIdx,
+                                                                  kIndicesPerAAFillRect,
+                                                                  kNumAAFillRectsInIndexBuffer,
+                                                                  kVertsPerAAFillRect);
+    }
+    GrIndexBuffer* indexBuffer = fAAFillRectIndexBuffer;
     if (NULL == indexBuffer) {
-        GrPrintf("Failed to create index buffer!\n");
+        SkDebugf("Failed to create index buffer!\n");
         return;
     }
 
@@ -561,7 +513,7 @@ void GrAARectRenderer::geometryFillAARect(GrGpu* gpu,
     for (int i = 0; i < 4; ++i) {
         if (kUseCoverage_CoverageAttribType == covAttribType) {
             *reinterpret_cast<GrColor*>(verts + i * vstride) = color;
-            *reinterpret_cast<GrColor*>(verts + i * vstride + sizeof(GrColor)) = 0;
+            *reinterpret_cast<float*>(verts + i * vstride + sizeof(GrColor)) = 0;
         } else {
             *reinterpret_cast<GrColor*>(verts + i * vstride) = 0;
         }
@@ -575,19 +527,17 @@ void GrAARectRenderer::geometryFillAARect(GrGpu* gpu,
         scale = 0xff;
     }
 
-    GrColor innerCoverage;
-    if (kUseCoverage_CoverageAttribType == covAttribType) {
-        innerCoverage = GrColorPackRGBA(scale, scale, scale, scale); 
-    } else {
-        innerCoverage = (0xff == scale) ? color : SkAlphaMulQ(color, scale);
-    }
     verts += 4 * vstride;
+
+    float innerCoverage = GrNormalizeByteToFloat(scale);
+    GrColor scaledColor = (0xff == scale) ? color : SkAlphaMulQ(color, scale);
+
     for (int i = 0; i < 4; ++i) {
         if (kUseCoverage_CoverageAttribType == covAttribType) {
             *reinterpret_cast<GrColor*>(verts + i * vstride) = color;
-            *reinterpret_cast<GrColor*>(verts + i * vstride + sizeof(GrColor)) = innerCoverage;
+            *reinterpret_cast<float*>(verts + i * vstride + sizeof(GrColor)) = innerCoverage;
         } else {
-            *reinterpret_cast<GrColor*>(verts + i * vstride) = innerCoverage;
+            *reinterpret_cast<GrColor*>(verts + i * vstride) = scaledColor; 
         }
     }
 
@@ -630,8 +580,7 @@ extern const GrVertexAttrib gAAAARectVertexAttribs[] = {
 
 };
 
-void GrAARectRenderer::shaderFillAARect(GrGpu* gpu,
-                                        GrDrawTarget* target,
+void GrAARectRenderer::shaderFillAARect(GrDrawTarget* target,
                                         const SkRect& rect,
                                         const SkMatrix& combinedMatrix) {
     GrDrawState* drawState = target->drawState();
@@ -656,7 +605,7 @@ void GrAARectRenderer::shaderFillAARect(GrGpu* gpu,
 
     GrDrawTarget::AutoReleaseGeometry geo(target, 4, 0);
     if (!geo.succeeded()) {
-        GrPrintf("Failed to get space for vertices!\n");
+        SkDebugf("Failed to get space for vertices!\n");
         return;
     }
 
@@ -687,13 +636,12 @@ void GrAARectRenderer::shaderFillAARect(GrGpu* gpu,
     verts[2].fPos = SkPoint::Make(devBounds.fRight, devBounds.fBottom);
     verts[3].fPos = SkPoint::Make(devBounds.fRight, devBounds.fTop);
 
-    target->setIndexSourceToBuffer(gpu->getContext()->getQuadIndexBuffer());
+    target->setIndexSourceToBuffer(fGpu->getContext()->getQuadIndexBuffer());
     target->drawIndexedInstances(kTriangles_GrPrimitiveType, 1, 4, 6);
     target->resetIndexSource();
 }
 
-void GrAARectRenderer::shaderFillAlignedAARect(GrGpu* gpu,
-                                               GrDrawTarget* target,
+void GrAARectRenderer::shaderFillAlignedAARect(GrDrawTarget* target,
                                                const SkRect& rect,
                                                const SkMatrix& combinedMatrix) {
     GrDrawState* drawState = target->drawState();
@@ -704,7 +652,7 @@ void GrAARectRenderer::shaderFillAlignedAARect(GrGpu* gpu,
 
     GrDrawTarget::AutoReleaseGeometry geo(target, 4, 0);
     if (!geo.succeeded()) {
-        GrPrintf("Failed to get space for vertices!\n");
+        SkDebugf("Failed to get space for vertices!\n");
         return;
     }
 
@@ -744,13 +692,12 @@ void GrAARectRenderer::shaderFillAlignedAARect(GrGpu* gpu,
     verts[3].fOffset = SkPoint::Make(widthHeight.fX, -widthHeight.fY);
     verts[3].fWidthHeight = widthHeight;
 
-    target->setIndexSourceToBuffer(gpu->getContext()->getQuadIndexBuffer());
+    target->setIndexSourceToBuffer(fGpu->getContext()->getQuadIndexBuffer());
     target->drawIndexedInstances(kTriangles_GrPrimitiveType, 1, 4, 6);
     target->resetIndexSource();
 }
 
-void GrAARectRenderer::strokeAARect(GrGpu* gpu,
-                                    GrDrawTarget* target,
+void GrAARectRenderer::strokeAARect(GrDrawTarget* target,
                                     const SkRect& rect,
                                     const SkMatrix& combinedMatrix,
                                     const SkRect& devRect,
@@ -797,7 +744,7 @@ void GrAARectRenderer::strokeAARect(GrGpu* gpu,
     }
 
     if (spare <= 0 && miterStroke) {
-        this->fillAARect(gpu, target, devOutside, SkMatrix::I(), devOutside);
+        this->fillAARect(target, devOutside, SkMatrix::I(), devOutside);
         return;
     }
 
@@ -814,11 +761,10 @@ void GrAARectRenderer::strokeAARect(GrGpu* gpu,
         devOutsideAssist.outset(0, ry);
     }
 
-    this->geometryStrokeAARect(gpu, target, devOutside, devOutsideAssist, devInside, miterStroke);
+    this->geometryStrokeAARect(target, devOutside, devOutsideAssist, devInside, miterStroke);
 }
 
-void GrAARectRenderer::geometryStrokeAARect(GrGpu* gpu,
-                                            GrDrawTarget* target,
+void GrAARectRenderer::geometryStrokeAARect(GrDrawTarget* target,
                                             const SkRect& devOutside,
                                             const SkRect& devOutsideAssist,
                                             const SkRect& devInside,
@@ -838,12 +784,12 @@ void GrAARectRenderer::geometryStrokeAARect(GrGpu* gpu,
 
     GrDrawTarget::AutoReleaseGeometry geo(target, totalVertexNum, 0);
     if (!geo.succeeded()) {
-        GrPrintf("Failed to get space for vertices!\n");
+        SkDebugf("Failed to get space for vertices!\n");
         return;
     }
-    GrIndexBuffer* indexBuffer = this->aaStrokeRectIndexBuffer(gpu, miterStroke);
+    GrIndexBuffer* indexBuffer = this->aaStrokeRectIndexBuffer(miterStroke);
     if (NULL == indexBuffer) {
-        GrPrintf("Failed to create index buffer!\n");
+        SkDebugf("Failed to create index buffer!\n");
         return;
     }
 
@@ -860,7 +806,7 @@ void GrAARectRenderer::geometryStrokeAARect(GrGpu* gpu,
 
 #ifndef SK_IGNORE_THIN_STROKED_RECT_FIX
     // TODO: this only really works if the X & Y margins are the same all around
-    // the rect
+    // the rect (or if they are all >= 1.0).
     SkScalar inset = SkMinScalar(SK_Scalar1, devOutside.fRight - devInside.fRight);
     inset = SkMinScalar(inset, devInside.fLeft - devOutside.fLeft);
     inset = SkMinScalar(inset, devInside.fTop - devOutside.fTop);
@@ -903,7 +849,7 @@ void GrAARectRenderer::geometryStrokeAARect(GrGpu* gpu,
     for (int i = 0; i < outerVertexNum; ++i) {
         if (kUseCoverage_CoverageAttribType == covAttribType) {
             *reinterpret_cast<GrColor*>(verts + i * vstride) = color;
-            *reinterpret_cast<GrColor*>(verts + i * vstride + sizeof(GrColor)) = 0;
+            *reinterpret_cast<float*>(verts + i * vstride + sizeof(GrColor)) = 0;
         } else {
             *reinterpret_cast<GrColor*>(verts + i * vstride) = 0;
         }
@@ -918,20 +864,16 @@ void GrAARectRenderer::geometryStrokeAARect(GrGpu* gpu,
         scale = 0xff;
     }
 
-    verts += outerVertexNum * vstride;
-    GrColor innerCoverage;
-    if (kUseCoverage_CoverageAttribType == covAttribType) {
-        innerCoverage = GrColorPackRGBA(scale, scale, scale, scale);
-    } else {
-        innerCoverage = (0xff == scale) ? color : SkAlphaMulQ(color, scale);
-    }
+    float innerCoverage = GrNormalizeByteToFloat(scale);
+    GrColor scaledColor = (0xff == scale) ? color : SkAlphaMulQ(color, scale);
 
+    verts += outerVertexNum * vstride;
     for (int i = 0; i < outerVertexNum + innerVertexNum; ++i) {
         if (kUseCoverage_CoverageAttribType == covAttribType) {
             *reinterpret_cast<GrColor*>(verts + i * vstride) = color;
-            *reinterpret_cast<GrColor*>(verts + i * vstride + sizeof(GrColor)) = innerCoverage;
+            *reinterpret_cast<float*>(verts + i * vstride + sizeof(GrColor)) = innerCoverage;
         } else {
-            *reinterpret_cast<GrColor*>(verts + i * vstride) = innerCoverage;
+            *reinterpret_cast<GrColor*>(verts + i * vstride) = scaledColor;
         }
     }
 
@@ -947,12 +889,12 @@ void GrAARectRenderer::geometryStrokeAARect(GrGpu* gpu,
     }
 
     target->setIndexSourceToBuffer(indexBuffer);
-    target->drawIndexed(kTriangles_GrPrimitiveType, 0, 0,
-                        totalVertexNum, aaStrokeRectIndexCount(miterStroke));
+    target->drawIndexedInstances(kTriangles_GrPrimitiveType, 1,
+                                 totalVertexNum, aa_stroke_rect_index_count(miterStroke));
+    target->resetIndexSource();
 }
 
-void GrAARectRenderer::fillAANestedRects(GrGpu* gpu,
-                                         GrDrawTarget* target,
+void GrAARectRenderer::fillAANestedRects(GrDrawTarget* target,
                                          const SkRect rects[2],
                                          const SkMatrix& combinedMatrix) {
     SkASSERT(combinedMatrix.rectStaysRect());
@@ -964,9 +906,9 @@ void GrAARectRenderer::fillAANestedRects(GrGpu* gpu,
     combinedMatrix.mapPoints((SkPoint*)&devInside, (const SkPoint*)&rects[1], 2);
 
     if (devInside.isEmpty()) {
-        this->fillAARect(gpu, target, devOutside, SkMatrix::I(), devOutside);
+        this->fillAARect(target, devOutside, SkMatrix::I(), devOutside);
         return;
     }
 
-    this->geometryStrokeAARect(gpu, target, devOutside, devOutsideAssist, devInside, true);
+    this->geometryStrokeAARect(target, devOutside, devOutsideAssist, devInside, true);
 }

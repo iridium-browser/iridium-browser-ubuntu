@@ -20,6 +20,7 @@ class OwnerKeyUtil;
 
 namespace chromeos {
 
+class DeviceSettingsService;
 class OwnerSettingsServiceChromeOS;
 
 class OwnerSettingsServiceChromeOSFactory
@@ -28,6 +29,9 @@ class OwnerSettingsServiceChromeOSFactory
   static OwnerSettingsServiceChromeOS* GetForProfile(Profile* profile);
 
   static OwnerSettingsServiceChromeOSFactory* GetInstance();
+
+  static void SetDeviceSettingsServiceForTesting(
+      DeviceSettingsService* device_settings_service);
 
   scoped_refptr<ownership::OwnerKeyUtil> GetOwnerKeyUtil();
 
@@ -43,11 +47,11 @@ class OwnerSettingsServiceChromeOSFactory
   static KeyedService* BuildInstanceFor(content::BrowserContext* context);
 
   // BrowserContextKeyedBaseFactory overrides:
-  virtual bool ServiceIsCreatedWithBrowserContext() const OVERRIDE;
+  virtual bool ServiceIsCreatedWithBrowserContext() const override;
 
   // BrowserContextKeyedServiceFactory implementation:
   virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* browser_context) const OVERRIDE;
+      content::BrowserContext* browser_context) const override;
 
   scoped_refptr<ownership::OwnerKeyUtil> owner_key_util_;
 

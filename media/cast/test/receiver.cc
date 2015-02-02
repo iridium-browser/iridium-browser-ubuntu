@@ -202,9 +202,9 @@ class NaivePlayer : public InProcessReceiver,
         num_audio_frames_processed_(0),
         currently_playing_audio_frame_start_(-1) {}
 
-  virtual ~NaivePlayer() {}
+  ~NaivePlayer() override {}
 
-  virtual void Start() OVERRIDE {
+  void Start() override {
     AudioManager::Get()->GetTaskRunner()->PostTask(
         FROM_HERE,
         base::Bind(&NaivePlayer::StartAudioOutputOnAudioManagerThread,
@@ -214,7 +214,7 @@ class NaivePlayer : public InProcessReceiver,
     InProcessReceiver::Start();
   }
 
-  virtual void Stop() OVERRIDE {
+  void Stop() override {
     // First, stop audio output to the Chromium audio stack.
     base::WaitableEvent done(false, false);
     DCHECK(!AudioManager::Get()->GetTaskRunner()->BelongsToCurrentThread());
@@ -265,9 +265,9 @@ class NaivePlayer : public InProcessReceiver,
   ////////////////////////////////////////////////////////////////////
   // InProcessReceiver overrides.
 
-  virtual void OnVideoFrame(const scoped_refptr<VideoFrame>& video_frame,
-                            const base::TimeTicks& playout_time,
-                            bool is_continuous) OVERRIDE {
+  void OnVideoFrame(const scoped_refptr<VideoFrame>& video_frame,
+                    const base::TimeTicks& playout_time,
+                    bool is_continuous) override {
     DCHECK(cast_env()->CurrentlyOn(CastEnvironment::MAIN));
     LOG_IF(WARNING, !is_continuous)
         << "Video: Discontinuity in received frames.";
@@ -282,9 +282,9 @@ class NaivePlayer : public InProcessReceiver,
     }
   }
 
-  virtual void OnAudioFrame(scoped_ptr<AudioBus> audio_frame,
-                            const base::TimeTicks& playout_time,
-                            bool is_continuous) OVERRIDE {
+  void OnAudioFrame(scoped_ptr<AudioBus> audio_frame,
+                    const base::TimeTicks& playout_time,
+                    bool is_continuous) override {
     DCHECK(cast_env()->CurrentlyOn(CastEnvironment::MAIN));
     LOG_IF(WARNING, !is_continuous)
         << "Audio: Discontinuity in received frames.";
@@ -316,8 +316,7 @@ class NaivePlayer : public InProcessReceiver,
   ////////////////////////////////////////////////////////////////////
   // AudioSourceCallback implementation.
 
-  virtual int OnMoreData(AudioBus* dest, AudioBuffersState buffers_state)
-      OVERRIDE {
+  int OnMoreData(AudioBus* dest, uint32 total_bytes_delay) override {
     // Note: This method is being invoked by a separate thread unknown to us
     // (i.e., outside of CastEnvironment).
 
@@ -329,8 +328,8 @@ class NaivePlayer : public InProcessReceiver,
         base::AutoLock auto_lock(audio_lock_);
 
         // Prune the queue, skipping entries that are too old.
-        // TODO(miu): Use |buffers_state| to account for audio buffering delays
-        // upstream.
+        // TODO(miu): Use |total_bytes_delay| to account for audio buffering
+        // delays upstream.
         const base::TimeTicks earliest_time_to_play =
             cast_env()->Clock()->NowTicks() - max_frame_age_;
         while (!audio_playout_queue_.empty() &&
@@ -377,7 +376,7 @@ class NaivePlayer : public InProcessReceiver,
     return dest->frames();
   }
 
-  virtual void OnError(AudioOutputStream* stream) OVERRIDE {
+  void OnError(AudioOutputStream* stream) override {
     LOG(ERROR) << "AudioOutputStream reports an error.  "
                << "Playback is unlikely to continue.";
   }

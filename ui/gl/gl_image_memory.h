@@ -13,42 +13,45 @@
 #include <EGL/eglext.h>
 #endif
 
+#include "ui/gfx/gpu_memory_buffer.h"
+
 namespace gfx {
 
 class GL_EXPORT GLImageMemory : public GLImage {
  public:
   GLImageMemory(const gfx::Size& size, unsigned internalformat);
 
-  bool Initialize(const unsigned char* memory);
+  static size_t BytesPerPixel(gfx::GpuMemoryBuffer::Format format);
+
+  bool Initialize(const unsigned char* memory,
+                  gfx::GpuMemoryBuffer::Format format);
 
   // Overridden from GLImage:
-  virtual void Destroy(bool have_context) OVERRIDE;
-  virtual gfx::Size GetSize() OVERRIDE;
-  virtual bool BindTexImage(unsigned target) OVERRIDE;
-  virtual void ReleaseTexImage(unsigned target) OVERRIDE {}
-  virtual bool CopyTexImage(unsigned target) OVERRIDE;
-  virtual void WillUseTexImage() OVERRIDE;
-  virtual void DidUseTexImage() OVERRIDE;
-  virtual void WillModifyTexImage() OVERRIDE {}
-  virtual void DidModifyTexImage() OVERRIDE {}
-  virtual bool ScheduleOverlayPlane(gfx::AcceleratedWidget widget,
-                                    int z_order,
-                                    OverlayTransform transform,
-                                    const Rect& bounds_rect,
-                                    const RectF& crop_rect) OVERRIDE;
+  void Destroy(bool have_context) override;
+  gfx::Size GetSize() override;
+  bool BindTexImage(unsigned target) override;
+  void ReleaseTexImage(unsigned target) override {}
+  bool CopyTexImage(unsigned target) override;
+  void WillUseTexImage() override;
+  void DidUseTexImage() override;
+  void WillModifyTexImage() override {}
+  void DidModifyTexImage() override {}
+  bool ScheduleOverlayPlane(gfx::AcceleratedWidget widget,
+                            int z_order,
+                            OverlayTransform transform,
+                            const Rect& bounds_rect,
+                            const RectF& crop_rect) override;
 
  protected:
-  virtual ~GLImageMemory();
-
-  bool HasValidFormat() const;
-  size_t Bytes() const;
+  ~GLImageMemory() override;
 
  private:
   void DoBindTexImage(unsigned target);
 
-  const unsigned char* memory_;
   const gfx::Size size_;
   const unsigned internalformat_;
+  const unsigned char* memory_;
+  gfx::GpuMemoryBuffer::Format format_;
   bool in_use_;
   unsigned target_;
   bool need_do_bind_tex_image_;

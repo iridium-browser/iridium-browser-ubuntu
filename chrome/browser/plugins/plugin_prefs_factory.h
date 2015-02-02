@@ -23,23 +23,23 @@ class PluginPrefsFactory : public RefcountedBrowserContextKeyedServiceFactory {
   friend struct DefaultSingletonTraits<PluginPrefsFactory>;
 
   // Helper method for PluginPrefs::GetForTestingProfile.
-  static scoped_refptr<RefcountedBrowserContextKeyedService>
-      CreateForTestingProfile(content::BrowserContext* profile);
+  static scoped_refptr<RefcountedKeyedService> CreateForTestingProfile(
+      content::BrowserContext* profile);
 
   PluginPrefsFactory();
-  virtual ~PluginPrefsFactory();
+  ~PluginPrefsFactory() override;
 
   // RefcountedBrowserContextKeyedServiceFactory methods:
-  virtual scoped_refptr<RefcountedBrowserContextKeyedService>
-      BuildServiceInstanceFor(content::BrowserContext* context) const OVERRIDE;
+  scoped_refptr<RefcountedKeyedService> BuildServiceInstanceFor(
+      content::BrowserContext* context) const override;
 
   // BrowserContextKeyedServiceFactory methods:
-  virtual void RegisterProfilePrefs(
-      user_prefs::PrefRegistrySyncable* registry) OVERRIDE;
-  virtual content::BrowserContext* GetBrowserContextToUse(
-      content::BrowserContext* context) const OVERRIDE;
-  virtual bool ServiceIsNULLWhileTesting() const OVERRIDE;
-  virtual bool ServiceIsCreatedWithBrowserContext() const OVERRIDE;
+  void RegisterProfilePrefs(
+      user_prefs::PrefRegistrySyncable* registry) override;
+  content::BrowserContext* GetBrowserContextToUse(
+      content::BrowserContext* context) const override;
+  bool ServiceIsNULLWhileTesting() const override;
+  bool ServiceIsCreatedWithBrowserContext() const override;
 };
 
 #endif  // CHROME_BROWSER_PLUGINS_PLUGIN_PREFS_FACTORY_H_

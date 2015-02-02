@@ -15,33 +15,30 @@ class VKMojoHandler : public mojo::InterfaceImpl<KeyboardUIHandlerMojo>,
                       public ui::InputMethodObserver {
  public:
   VKMojoHandler();
-  virtual ~VKMojoHandler();
+  ~VKMojoHandler() override;
 
  private:
   ui::InputMethod* GetInputMethod();
 
   // mojo::InterfaceImpl<>:
-  virtual void OnConnectionEstablished() OVERRIDE;
+  void OnConnectionEstablished() override;
 
   // KeyboardUIHandlerMojo:
-  virtual void SendKeyEvent(const mojo::String& event_type,
-                            int32_t char_value,
-                            int32_t key_code,
-                            const mojo::String& key_name,
-                            int32_t modifiers) OVERRIDE;
-  virtual void HideKeyboard() OVERRIDE;
+  void SendKeyEvent(const mojo::String& event_type,
+                    int32_t char_value,
+                    int32_t key_code,
+                    const mojo::String& key_name,
+                    int32_t modifiers) override;
+  void HideKeyboard() override;
 
   // ui::InputMethodObserver:
-  virtual void OnTextInputTypeChanged(
-      const ui::TextInputClient* client) OVERRIDE;
-  virtual void OnFocus() OVERRIDE;
-  virtual void OnBlur() OVERRIDE;
-  virtual void OnCaretBoundsChanged(const ui::TextInputClient* client) OVERRIDE;
-  virtual void OnTextInputStateChanged(
-      const ui::TextInputClient* text_client) OVERRIDE;
-  virtual void OnInputMethodDestroyed(
-      const ui::InputMethod* input_method) OVERRIDE;
-  virtual void OnShowImeIfNeeded() OVERRIDE;
+  void OnTextInputTypeChanged(const ui::TextInputClient* client) override;
+  void OnFocus() override;
+  void OnBlur() override;
+  void OnCaretBoundsChanged(const ui::TextInputClient* client) override;
+  void OnTextInputStateChanged(const ui::TextInputClient* text_client) override;
+  void OnInputMethodDestroyed(const ui::InputMethod* input_method) override;
+  void OnShowImeIfNeeded() override;
 
   DISALLOW_COPY_AND_ASSIGN(VKMojoHandler);
 };

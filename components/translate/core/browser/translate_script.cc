@@ -8,6 +8,7 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"

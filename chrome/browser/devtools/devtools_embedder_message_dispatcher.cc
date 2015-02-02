@@ -151,11 +151,11 @@ bool ParseAndHandle4(const base::Callback<void(A1, A2, A3, A4)>& handler,
  */
 class DispatcherImpl : public DevToolsEmbedderMessageDispatcher {
  public:
-  virtual ~DispatcherImpl() {}
+  ~DispatcherImpl() override {}
 
-  virtual bool Dispatch(const std::string& method,
-                        const base::ListValue* params,
-                        std::string* error) OVERRIDE {
+  bool Dispatch(const std::string& method,
+                const base::ListValue* params,
+                std::string* error) override {
     HandlerMap::iterator it = handlers_.find(method);
     if (it == handlers_.end())
       return false;
@@ -226,6 +226,7 @@ DevToolsEmbedderMessageDispatcher*
 
   d->RegisterHandler("bringToFront", &Delegate::ActivateWindow, delegate);
   d->RegisterHandler("closeWindow", &Delegate::CloseWindow, delegate);
+  d->RegisterHandler("loadCompleted", &Delegate::LoadCompleted, delegate);
   d->RegisterHandler("setInspectedPageBounds",
                      &Delegate::SetInspectedPageBounds, delegate);
   d->RegisterHandler("inspectElementCompleted",

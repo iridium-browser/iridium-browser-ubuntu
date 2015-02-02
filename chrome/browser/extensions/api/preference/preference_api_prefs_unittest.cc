@@ -49,14 +49,13 @@ class TestPreferenceAPI : public PreferenceAPIBase {
 
  private:
   // PreferenceAPIBase implementation.
-  virtual ExtensionPrefs* extension_prefs() OVERRIDE {
+  ExtensionPrefs* extension_prefs() override {
     return test_extension_prefs_->prefs();
   }
-  virtual ExtensionPrefValueMap* extension_pref_value_map() OVERRIDE {
+  ExtensionPrefValueMap* extension_pref_value_map() override {
     return test_extension_prefs_->extension_pref_value_map();
   }
-  virtual scoped_refptr<ContentSettingsStore> content_settings_store()
-      OVERRIDE {
+  scoped_refptr<ContentSettingsStore> content_settings_store() override {
     return content_settings_->content_settings_store();
   }
 
@@ -69,10 +68,9 @@ class TestPreferenceAPI : public PreferenceAPIBase {
 class ExtensionControlledPrefsTest : public PrefsPrepopulatedTestBase {
  public:
   ExtensionControlledPrefsTest();
-  virtual ~ExtensionControlledPrefsTest();
+  ~ExtensionControlledPrefsTest() override;
 
-  virtual void RegisterPreferences(user_prefs::PrefRegistrySyncable* registry)
-      OVERRIDE;
+  void RegisterPreferences(user_prefs::PrefRegistrySyncable* registry) override;
   void InstallExtensionControlledPref(Extension* extension,
                                       const std::string& key,
                                       base::Value* value);
@@ -194,12 +192,12 @@ void ExtensionControlledPrefsTest::EnsureExtensionUninstalled(
 
 class ControlledPrefsInstallOneExtension
     : public ExtensionControlledPrefsTest {
-  virtual void Initialize() OVERRIDE {
+  void Initialize() override {
     InstallExtensionControlledPref(extension1(),
                                    kPref1,
                                    new base::StringValue("val1"));
   }
-  virtual void Verify() OVERRIDE {
+  void Verify() override {
     std::string actual = prefs()->pref_service()->GetString(kPref1);
     EXPECT_EQ("val1", actual);
   }
@@ -211,7 +209,7 @@ TEST_F(ControlledPrefsInstallOneExtension,
 class ControlledPrefsInstallIncognitoPersistent
     : public ExtensionControlledPrefsTest {
  public:
-  virtual void Initialize() OVERRIDE {
+  void Initialize() override {
     InstallExtensionControlledPref(
         extension1(), kPref1, new base::StringValue("val1"));
     InstallExtensionControlledPrefIncognito(
@@ -221,7 +219,7 @@ class ControlledPrefsInstallIncognitoPersistent
     EXPECT_EQ("val2", actual);
   }
 
-  virtual void Verify() OVERRIDE {
+  void Verify() override {
     // Main pref service shall see only non-incognito settings.
     std::string actual = prefs()->pref_service()->GetString(kPref1);
     EXPECT_EQ("val1", actual);
@@ -240,7 +238,7 @@ class ControlledPrefsInstallIncognitoSessionOnly
  public:
   ControlledPrefsInstallIncognitoSessionOnly() : iteration_(0) {}
 
-  virtual void Initialize() OVERRIDE {
+  void Initialize() override {
     InstallExtensionControlledPref(
         extension1(), kPref1, new base::StringValue("val1"));
     InstallExtensionControlledPrefIncognitoSessionOnly(
@@ -249,7 +247,7 @@ class ControlledPrefsInstallIncognitoSessionOnly
     std::string actual = incog_prefs->GetString(kPref1);
     EXPECT_EQ("val2", actual);
   }
-  virtual void Verify() OVERRIDE {
+  void Verify() override {
     // Main pref service shall see only non-incognito settings.
     std::string actual = prefs()->pref_service()->GetString(kPref1);
     EXPECT_EQ("val1", actual);
@@ -271,7 +269,7 @@ TEST_F(ControlledPrefsInstallIncognitoSessionOnly,
        ControlledPrefsInstallIncognitoSessionOnly) { }
 
 class ControlledPrefsUninstallExtension : public ExtensionControlledPrefsTest {
-  virtual void Initialize() OVERRIDE {
+  void Initialize() override {
     InstallExtensionControlledPref(
         extension1(), kPref1, new base::StringValue("val1"));
     InstallExtensionControlledPref(
@@ -288,7 +286,7 @@ class ControlledPrefsUninstallExtension : public ExtensionControlledPrefsTest {
 
     UninstallExtension(extension1()->id());
   }
-  virtual void Verify() OVERRIDE {
+  void Verify() override {
     EXPECT_FALSE(prefs()->HasPrefForExtension(extension1()->id()));
 
     std::string actual;
@@ -303,7 +301,7 @@ TEST_F(ControlledPrefsUninstallExtension,
 
 // Tests triggering of notifications to registered observers.
 class ControlledPrefsNotifyWhenNeeded : public ExtensionControlledPrefsTest {
-  virtual void Initialize() OVERRIDE {
+  void Initialize() override {
     using testing::_;
     using testing::Mock;
     using testing::StrEq;
@@ -368,7 +366,7 @@ class ControlledPrefsNotifyWhenNeeded : public ExtensionControlledPrefsTest {
     registrar.Remove(kPref1);
     incognito_registrar.Remove(kPref1);
   }
-  virtual void Verify() OVERRIDE {
+  void Verify() override {
     std::string actual = prefs()->pref_service()->GetString(kPref1);
     EXPECT_EQ(kDefaultPref1, actual);
   }
@@ -378,14 +376,14 @@ TEST_F(ControlledPrefsNotifyWhenNeeded,
 
 // Tests disabling an extension.
 class ControlledPrefsDisableExtension : public ExtensionControlledPrefsTest {
-  virtual void Initialize() OVERRIDE {
+  void Initialize() override {
     InstallExtensionControlledPref(
         extension1(), kPref1, new base::StringValue("val1"));
     std::string actual = prefs()->pref_service()->GetString(kPref1);
     EXPECT_EQ("val1", actual);
     prefs()->SetExtensionState(extension1()->id(), Extension::DISABLED);
   }
-  virtual void Verify() OVERRIDE {
+  void Verify() override {
     std::string actual = prefs()->pref_service()->GetString(kPref1);
     EXPECT_EQ(kDefaultPref1, actual);
   }
@@ -394,13 +392,13 @@ TEST_F(ControlledPrefsDisableExtension, ControlledPrefsDisableExtension) { }
 
 // Tests disabling and reenabling an extension.
 class ControlledPrefsReenableExtension : public ExtensionControlledPrefsTest {
-  virtual void Initialize() OVERRIDE {
+  void Initialize() override {
     InstallExtensionControlledPref(
         extension1(), kPref1, new base::StringValue("val1"));
     prefs()->SetExtensionState(extension1()->id(), Extension::DISABLED);
     prefs()->SetExtensionState(extension1()->id(), Extension::ENABLED);
   }
-  virtual void Verify() OVERRIDE {
+  void Verify() override {
     std::string actual = prefs()->pref_service()->GetString(kPref1);
     EXPECT_EQ("val1", actual);
   }
@@ -422,7 +420,7 @@ class MockStringValue : public base::StringValue {
 class ControlledPrefsSetExtensionControlledPref
     : public ExtensionControlledPrefsTest {
  public:
-  virtual void Initialize() OVERRIDE {
+  void Initialize() override {
     MockStringValue* v1 = new MockStringValue("https://www.chromium.org");
     MockStringValue* v2 = new MockStringValue("https://www.chromium.org");
     MockStringValue* v1i = new MockStringValue("https://www.chromium.org");
@@ -448,8 +446,7 @@ class ControlledPrefsSetExtensionControlledPref
     testing::Mock::VerifyAndClearExpectations(v2i);
   }
 
-  virtual void Verify() OVERRIDE {
-  }
+  void Verify() override {}
 };
 TEST_F(ControlledPrefsSetExtensionControlledPref,
        ControlledPrefsSetExtensionControlledPref) { }
@@ -460,14 +457,14 @@ class ControlledPrefsDisableExtensions : public ExtensionControlledPrefsTest {
  public:
   ControlledPrefsDisableExtensions()
       : iteration_(0) {}
-  virtual ~ControlledPrefsDisableExtensions() {}
-  virtual void Initialize() OVERRIDE {
+  ~ControlledPrefsDisableExtensions() override {}
+  void Initialize() override {
     InstallExtensionControlledPref(
         extension1(), kPref1, new base::StringValue("val1"));
     // This becomes only active in the second verification phase.
     prefs_.set_extensions_disabled(true);
   }
-  virtual void Verify() OVERRIDE {
+  void Verify() override {
     std::string actual = prefs()->pref_service()->GetString(kPref1);
     if (iteration_ == 0) {
       EXPECT_EQ("val1", actual);

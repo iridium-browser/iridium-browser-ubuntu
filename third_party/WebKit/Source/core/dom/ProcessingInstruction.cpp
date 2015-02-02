@@ -26,6 +26,7 @@
 #include "core/css/MediaList.h"
 #include "core/css/StyleSheetContents.h"
 #include "core/dom/Document.h"
+#include "core/dom/IncrementLoadEventDelayCount.h"
 #include "core/dom/StyleEngine.h"
 #include "core/fetch/CSSStyleSheetResource.h"
 #include "core/fetch/FetchRequest.h"
@@ -219,6 +220,7 @@ void ProcessingInstruction::setXSLStyleSheet(const String& href, const KURL& bas
     ASSERT(m_isXSL);
     m_sheet = XSLStyleSheet::create(this, href, baseURL);
     RefPtrWillBeRawPtr<Document> protect(&document());
+    OwnPtr<IncrementLoadEventDelayCount> delay = IncrementLoadEventDelayCount::create(document());
     parseStyleSheet(sheet);
 }
 
@@ -271,17 +273,20 @@ void ProcessingInstruction::removedFrom(ContainerNode* insertionPoint)
     if (!insertionPoint->inDocument())
         return;
 
+    // No need to remove XSLStyleSheet from StyleEngine.
     if (m_isCSS)
         document().styleEngine()->removeStyleSheetCandidateNode(this);
     else if (m_isXSL)
         document().styleEngine()->removeXSLStyleSheet(this);
 
     RefPtrWillBeRawPtr<StyleSheet> removedSheet = m_sheet;
-
     if (m_sheet) {
         ASSERT(m_sheet->ownerNode() == this);
         clearSheet();
     }
+
+    // No need to remove pending sheets.
+    clearResource();
 
     // If we're in document teardown, then we don't need to do any notification of our sheet's removal.
     if (document().isActive())

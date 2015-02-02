@@ -1102,6 +1102,9 @@ asan = _config(
   chroot_replace=True,
   profile='asan',
   disk_layout='2gb-rootfs',
+  # TODO(deymo): ASan builders generate bigger files, in particular a bigger
+  # Chrome binary, that update_engine can't handle in delta payloads due to
+  # memory limits. Remove the following line once crbug.com/329248 is fixed.
   vm_tests=[constants.SMOKE_SUITE_TEST_TYPE],
 )
 
@@ -1146,6 +1149,7 @@ paladin.add_config('amd64-generic_freon-paladin',
   boards=['amd64-generic_freon'],
   paladin_builder_name='amd64-generic_freon paladin',
   important=False,
+  vm_tests=[],
 )
 
 paladin.add_config('x32-generic-paladin',
@@ -1258,6 +1262,17 @@ internal_chromium_pfq.add_config('amd64-generic-chromium-pfq',
   boards=['amd64-generic'],
 )
 
+internal_chromium_pfq.add_config('amd64-generic_freon-chromium-pfq',
+  disk_layout='2gb-rootfs',
+  boards=['amd64-generic_freon'],
+  vm_tests=[],
+)
+
+internal_chromium_pfq.add_config('arm-generic_freon-chromium-pfq',
+  non_testable_builder,
+  boards=['arm-generic_freon'],
+)
+
 chrome_pfq = internal_chromium_pfq.derive(
   official,
   important=True,
@@ -1285,7 +1300,6 @@ chrome_pfq.add_config('daisy_spring-chrome-pfq',
 chrome_pfq.add_config('falco-chrome-pfq',
   boards=['falco'],
   hw_tests=HWTestConfig.DefaultListPFQ(),
-  important=True,
 )
 
 chrome_pfq.add_config('link_freon-chrome-pfq',
@@ -1293,17 +1307,12 @@ chrome_pfq.add_config('link_freon-chrome-pfq',
   hw_tests=[],
   # This build can't run vm_tests, bug 387507
   vm_tests=[],
-  important=False,
-  usepkg_toolchain=False,
-  usepkg_build_packages=False,
 )
 
-chrome_pfq.add_config('rush-chrome-pfq',
+chrome_pfq.add_config('rush_ryu-chrome-pfq',
   non_testable_builder,
-  boards=['rush'],
-  important=False,
+  boards=['rush_ryu'],
   usepkg_toolchain=False,
-  usepkg_build_packages=False,
 )
 
 chrome_try = _config(
@@ -1427,6 +1436,7 @@ _arm_release_boards = frozenset([
   'peach_pi',
   'peach_pit',
   'rush',
+  'rush_ryu',
   'veyron_pinky',
 ])
 _arm_full_boards = _arm_release_boards | frozenset([
@@ -1439,6 +1449,7 @@ _x86_release_boards = frozenset([
   'auron',
   'bayleybay',
   'beltino',
+  'bobcat',
   'butterfly',
   'candy',
   'cranky',
@@ -1665,34 +1676,37 @@ compile_only_pre_cq = pre_cq.derive(
 
 # The Pre-CQ tests 6 platforms. Because we test so many platforms in parallel,
 # it is important to delay the launch of some builds in order to conserve RAM.
-# We build rambi and daisy in parallel first. When daisy finishes BuildPackages,
-# the remaining boards start BuildPackages. Because Rambi runs VMTest and this
-# takes a long time, the remaining boards still finish well before Rambi
-# finishes.
+# We build rambi and daisy_spring and duck in parallel first. When duck finishes
+# BuildPackages, the remaining boards start BuildPackages. Because Rambi runs
+# VMTest and this takes a long time, the remaining boards still finish well
+# before Rambi finishes.
 # TODO(davidjames): Add peach_pit, nyan, and beaglebone to pre-cq.
+# TODO(davidjames): Revert CL:221326 so daisy_spring and duck can build
+#                   images again
 _config.add_group(constants.PRE_CQ_BUILDER_NAME,
   # amd64 w/kernel 3.10. This builder runs VMTest so it's going to be
   # the slowest one.
   pre_cq.add_config('rambi-pre-cq', boards=['rambi']),
 
-  # daisy w/kernel 3.8.
-  pre_cq.add_config('daisy_spring-pre-cq', non_testable_builder,
-                    boards=['daisy_spring']),
+  # daisy_spring w/kernel 3.8.
+  compile_only_pre_cq.add_config('daisy_spring-pre-cq', non_testable_builder,
+                                 boards=['daisy_spring']),
 
-  # samus w/kernel 3.14. We set build_packages_in_background=False here, so
-  # that subsequent boards (lumpy, parrot, duck) don't get launched until
+  # brillo config. We set build_packages_in_background=False here, so
+  # that subsequent boards (samus, lumpy, parrot) don't get launched until
   # after samus finishes BuildPackages.
-  compile_only_pre_cq.add_config('samus-pre-cq', boards=['samus'],
+  compile_only_pre_cq.add_config('duck-pre-cq', brillo,
+                                 boards=['duck'],
                                  build_packages_in_background=False),
+
+  # samus w/kernel 3.14.
+  compile_only_pre_cq.add_config('samus-pre-cq', boards=['samus']),
 
   # lumpy w/kernel 3.8.
   compile_only_pre_cq.add_config('lumpy-pre-cq', boards=['lumpy']),
 
   # amd64 w/kernel 3.4.
   compile_only_pre_cq.add_config('parrot-pre-cq', boards=['parrot']),
-
-  # brillo config.
-  pre_cq.add_config('duck-pre-cq', brillo, boards=['duck']),
 )
 
 internal_paladin.add_config('pre-cq-launcher',
@@ -2002,7 +2016,6 @@ internal_paladin.add_config('link_freon-paladin',
   vm_tests=[],
   important=False,
   paladin_builder_name='link_freon paladin',
-  usepkg_build_packages=False,
 )
 
 internal_paladin.add_config('stumpy_moblab-paladin',
@@ -2033,6 +2046,14 @@ internal_notest_paladin.add_config('daisy_spring-paladin',
   hw_tests=HWTestConfig.DefaultListCQ(),
 )
 
+internal_notest_paladin.add_config('kayle-paladin',
+  brillo_non_testable,
+  boards=['kayle'],
+  paladin_builder_name='kayle paladin',
+  important=False,
+  manifest='kayle.xml',
+)
+
 internal_notest_paladin.add_config('peach_pit-paladin',
   boards=['peach_pit'],
   paladin_builder_name='peach_pit paladin',
@@ -2045,10 +2066,10 @@ internal_notest_paladin.add_config('nyan-paladin',
   paladin_builder_name='nyan paladin',
 )
 
-internal_notest_paladin.add_config('rush-paladin',
-  boards=['rush'],
+internal_notest_paladin.add_config('rush_ryu-paladin',
+  boards=['rush_ryu'],
   usepkg_toolchain=False,
-  paladin_builder_name='rush paladin',
+  paladin_builder_name='rush_ryu paladin',
   important=False,
 )
 
@@ -2056,6 +2077,13 @@ internal_notest_paladin.add_config('storm-paladin',
   brillo_non_testable,
   boards=['storm'],
   paladin_builder_name='storm paladin',
+)
+
+internal_notest_paladin.add_config('urara-paladin',
+  brillo_non_testable,
+  boards=['urara'],
+  paladin_builder_name='urara paladin',
+  important=False,
 )
 
 internal_notest_paladin.add_config('veyron_pinky-paladin',
@@ -2085,14 +2113,15 @@ internal_brillo_paladin.add_config('lemmings-paladin',
   important=False,
 )
 
-
 external_brillo_paladin = paladin.derive(brillo)
 
 external_brillo_paladin.add_config('gizmo-paladin',
   boards=['gizmo'],
   paladin_builder_name='gizmo paladin',
   trybot_list=True,
-  important=False,
+  important=True,
+  vm_tests=None,
+  create_delta_sysroot=True,
 )
 
 external_brillo_paladin.add_config('panther_embedded-minimal-paladin',
@@ -2288,6 +2317,17 @@ _release.add_config('beltino-release',
   vm_tests=[],
 )
 
+# bayleybay-release does not enable vm_tests or unittests due to the compiler
+# flags enabled for baytrail.
+_release.add_config('bobcat-release',
+  boards=['bobcat'],
+  hw_tests=[],
+  profile='minimal',
+  # This build doesn't generate signed images, so don't try to release them.
+  paygen=False,
+  signer_tests=False,
+)
+
 _release.add_config('fox_wtm2-release',
   boards=['fox_wtm2'],
   # Until these are configured and ready, disable them.
@@ -2325,6 +2365,7 @@ _release.add_config('quawks-release',
 
 _release.add_config('samus-release',
   boards=['samus'],
+  useflags=_release['useflags'] + ['highdpi'],
   important=True,
 )
 
@@ -2401,10 +2442,14 @@ _AddReleaseConfigs()
 _brillo_release = _release.derive(brillo,
   dev_installer_prebuilts=False,
   afdo_use=False,
+  signer_tests=True,
 )
 
 _brillo_release.add_config('duck-release',
   boards=['duck'],
+
+  # Need to verify before enabling.
+  signer_tests=False,
 
   # Hw Lab can't test, yet.
   paygen_skip_testing=True,
@@ -2416,6 +2461,7 @@ _brillo_release.add_config('gizmo-release',
 
   # This build doesn't generate signed images, so don't try to release them.
   paygen=False,
+  signer_tests=False,
 )
 
 _brillo_release.add_config('lemmings-release',
@@ -2426,25 +2472,42 @@ _brillo_release.add_config('lemmings-release',
 
   # This build doesn't generate signed images, so don't try to release them.
   paygen=False,
+  signer_tests=False,
 )
 
 _brillo_release.add_config('panther_embedded-minimal-release',
   boards=['panther_embedded'],
   profile='minimal',
   paygen=False,
+  signer_tests=False,
 )
 
-_arm_brillo_release = _brillo_release.derive(non_testable_builder)
+_non_testable_brillo_release = _brillo_release.derive(non_testable_builder)
 
-_arm_brillo_release.add_config('storm-release',
+_non_testable_brillo_release.add_config('kayle-release',
+  boards=['kayle'],
+  manifest='kayle.xml',
+  paygen=False,
+  important=False,
+)
+
+_non_testable_brillo_release.add_config('storm-release',
   boards=['storm'],
 
-  # Hw Lab can't test duck, yet.
+  # Hw Lab can't test storm, yet.
   paygen_skip_testing=True,
   important=True,
+  signer_tests=False
 )
 
-_beaglebone_release = _arm_brillo_release.derive(beaglebone)
+_non_testable_brillo_release.add_config('urara-release',
+  boards=['urara'],
+  paygen=False,
+  signer_tests=False,
+  important=False,
+)
+
+_beaglebone_release = _non_testable_brillo_release.derive(beaglebone)
 
 _config.add_group('beaglebone-release-group',
   _beaglebone_release.add_config('beaglebone-release',
@@ -2452,12 +2515,14 @@ _config.add_group('beaglebone-release-group',
 
     # This build doesn't generate signed images, so don't try to release them.
     paygen=False,
+    signer_tests=False,
   ),
   _beaglebone_release.add_config('beaglebone_servo-release',
     boards=['beaglebone_servo'],
 
     # This build doesn't generate signed images, so don't try to release them.
     paygen=False,
+    signer_tests=False,
   ).derive(_grouped_variant_config),
   important=True,
 )
@@ -2492,6 +2557,13 @@ _release.add_config('rush-release',
   # This build doesn't generate signed images, so don't try to release them.
   paygen=False,
   signer_tests=False,
+)
+
+_release.add_config('rush_ryu-release',
+  non_testable_builder,
+  boards=['rush_ryu'],
+  hw_tests=[],
+  usepkg_toolchain=False,
 )
 
 ### Per-chipset release groups
@@ -2588,7 +2660,9 @@ _AddGroupConfig('rambi-c', 'squawks', (
     'candy',
 ))
 
-_AddGroupConfig('rambi-d', 'cranky', ())
+_AddGroupConfig('rambi-d', 'cranky', (),
+    important=False,
+)
 
 # daisy-based boards
 _AddGroupConfig('daisy', 'daisy', (
@@ -2721,6 +2795,7 @@ _arm_firmware_boards = (
   'daisy_spring',
   'peach_pit',
   'peach_pi',
+  'storm',
 )
 
 def _AddFirmwareConfigs():

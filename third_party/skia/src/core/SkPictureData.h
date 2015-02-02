@@ -13,7 +13,6 @@
 #include "SkPicture.h"
 #include "SkPictureContentInfo.h"
 #include "SkPictureFlat.h"
-#include "SkPictureStateTree.h"
 
 class SkData;
 class SkPictureRecord;
@@ -24,7 +23,6 @@ class SkBBoxHierarchy;
 class SkMatrix;
 class SkPaint;
 class SkPath;
-class SkPictureStateTree;
 class SkReadBuffer;
 class SkTextBlob;
 
@@ -57,24 +55,8 @@ struct SkPictInfo {
 // Always write this guy last (with no length field afterwards)
 #define SK_PICT_EOF_TAG     SkSetFourByteTag('e', 'o', 'f', ' ')
 
-#ifdef SK_SUPPORT_LEGACY_PICTURE_CLONE
-/**
- * Container for data that is needed to deep copy a SkPicture. The container
- * enables the data to be generated once and reused for subsequent copies.
- */
-struct SkPictCopyInfo {
-    SkPictCopyInfo() : controller(1024) {}
-
-    SkChunkFlatController controller;
-    SkTDArray<SkFlatData*> paintData;
-};
-#endif
-
 class SkPictureData {
 public:
-#ifdef SK_SUPPORT_LEGACY_PICTURE_CLONE
-    SkPictureData(const SkPictureData& src, SkPictCopyInfo* deepCopyInfo = NULL);
-#endif
     SkPictureData(const SkPictureRecord& record, const SkPictInfo&, bool deepCopyOps);
     static SkPictureData* CreateFromStream(SkStream*,
                                            const SkPictInfo&,
@@ -82,8 +64,6 @@ public:
     static SkPictureData* CreateFromBuffer(SkReadBuffer&, const SkPictInfo&);
 
     virtual ~SkPictureData();
-
-    const SkPicture::OperationList* getActiveOps(const SkRect& queryRect) const;
 
     void serialize(SkWStream*, SkPicture::EncodeBitmap) const;
     void flatten(SkWriteBuffer&) const;
@@ -139,14 +119,6 @@ public:
         return fTextBlobRefs[index - 1];
     }
 
-    void initIterator(SkPictureStateTree::Iterator* iter,
-                      const SkTDArray<void*>& draws,
-                      SkCanvas* canvas) const {
-        if (fStateTree) {
-            fStateTree->initIterator(iter, draws, canvas);
-        }
-    }
-
 #if SK_SUPPORT_GPU
     /**
      * sampleCount is the number of samples-per-pixel or zero if non-MSAA.
@@ -166,8 +138,6 @@ public:
 #endif
 
 private:
-    friend class SkPicture; // needed in SkPicture::clone (rm when it is removed)
-
     void init();
 
     // these help us with reading/writing
@@ -192,9 +162,6 @@ private:
     int fPictureCount;
     const SkTextBlob** fTextBlobRefs;
     int fTextBlobCount;
-
-    SkBBoxHierarchy* fBoundingHierarchy;
-    SkPictureStateTree* fStateTree;
 
     SkPictureContentInfo fContentInfo;
 

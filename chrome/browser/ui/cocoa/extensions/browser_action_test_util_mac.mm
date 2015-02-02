@@ -7,8 +7,10 @@
 #include "base/mac/foundation_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/toolbar/toolbar_action_view_controller.h"
 #import "chrome/browser/ui/cocoa/browser_window_cocoa.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
+#import "chrome/browser/ui/cocoa/extensions/browser_action_button.h"
 #import "chrome/browser/ui/cocoa/extensions/browser_actions_controller.h"
 #import "chrome/browser/ui/cocoa/extensions/extension_popup_controller.h"
 #import "chrome/browser/ui/cocoa/info_bubble_window.h"
@@ -26,7 +28,7 @@ BrowserActionsController* GetController(Browser* browser) {
            browserActionsController];
 }
 
-NSButton* GetButton(Browser* browser, int index) {
+BrowserActionButton* GetButton(Browser* browser, int index) {
   return [GetController(browser) buttonWithIndex:index];
 }
 
@@ -36,9 +38,8 @@ int BrowserActionTestUtil::NumberOfBrowserActions() {
   return [GetController(browser_) buttonCount];
 }
 
-ExtensionAction* BrowserActionTestUtil::GetExtensionAction(int index) {
-  NOTREACHED();
-  return NULL;
+int BrowserActionTestUtil::VisibleBrowserActions() {
+  return [GetController(browser_) visibleButtonCount];
 }
 
 void BrowserActionTestUtil::InspectPopup(int index) {
@@ -63,6 +64,10 @@ void BrowserActionTestUtil::Press(int index) {
   [button performClick:nil];
 }
 
+std::string BrowserActionTestUtil::GetExtensionId(int index) {
+  return [GetButton(browser_, index) viewController]->GetId();
+}
+
 std::string BrowserActionTestUtil::GetTooltip(int index) {
   NSString* tooltip = [GetButton(browser_, index) toolTip];
   return base::SysNSStringToUTF8(tooltip);
@@ -76,9 +81,9 @@ bool BrowserActionTestUtil::HasPopup() {
   return [ExtensionPopupController popup] != nil;
 }
 
-gfx::Rect BrowserActionTestUtil::GetPopupBounds() {
+gfx::Size BrowserActionTestUtil::GetPopupSize() {
   NSRect bounds = [[[ExtensionPopupController popup] view] bounds];
-  return gfx::Rect(NSRectToCGRect(bounds));
+  return gfx::Size(NSSizeToCGSize(bounds.size));
 }
 
 bool BrowserActionTestUtil::HidePopup() {
@@ -90,10 +95,20 @@ bool BrowserActionTestUtil::HidePopup() {
   return !HasPopup();
 }
 
+// static
+void BrowserActionTestUtil::DisableAnimations() {
+}
+
+// static
+void BrowserActionTestUtil::EnableAnimations() {
+}
+
+// static
 gfx::Size BrowserActionTestUtil::GetMinPopupSize() {
   return gfx::Size(NSSizeToCGSize([ExtensionPopupController minPopupSize]));
 }
 
+// static
 gfx::Size BrowserActionTestUtil::GetMaxPopupSize() {
   return gfx::Size(NSSizeToCGSize([ExtensionPopupController maxPopupSize]));
 }

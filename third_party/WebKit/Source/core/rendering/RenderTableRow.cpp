@@ -181,16 +181,16 @@ void RenderTableRow::layout()
 
     m_overflow.clear();
     addVisualEffectOverflow();
+    // We do not call addOverflowFromCell here. The cell are laid out to be
+    // measured above and will be sized correctly in a follow-up phase.
 
     // We only ever need to issue paint invalidations if our cells didn't, which means that they didn't need
     // layout, so we know that our bounds didn't change. This code is just making up for
     // the fact that we did not invalidate paints in setStyle() because we had a layout hint.
-    // We cannot call paintInvalidationForWholeRenderer() because our clippedOverflowRectForPaintInvalidation() is taken from the
-    // parent table, and being mid-layout, that is invalid. Instead, we issue paint invalidations for our cells.
-    if (selfNeedsLayout() && checkForPaintInvalidation()) {
+    if (selfNeedsLayout()) {
         for (RenderTableCell* cell = firstCell(); cell; cell = cell->nextCell()) {
             // FIXME: Is this needed when issuing paint invalidations after layout?
-            cell->setShouldDoFullPaintInvalidation(true);
+            cell->setShouldDoFullPaintInvalidation();
         }
     }
 
@@ -228,7 +228,7 @@ void RenderTableRow::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 void RenderTableRow::imageChanged(WrappedImagePtr, const IntRect*)
 {
     // FIXME: Examine cells and issue paint invalidations of only the rect the image paints in.
-    setShouldDoFullPaintInvalidation(true);
+    setShouldDoFullPaintInvalidation();
 }
 
 RenderTableRow* RenderTableRow::createAnonymous(Document* document)
@@ -244,6 +244,24 @@ RenderTableRow* RenderTableRow::createAnonymousWithParentRenderer(const RenderOb
     RefPtr<RenderStyle> newStyle = RenderStyle::createAnonymousStyleWithDisplay(parent->style(), TABLE_ROW);
     newRow->setStyle(newStyle.release());
     return newRow;
+}
+
+void RenderTableRow::addOverflowFromCell(const RenderTableCell* cell)
+{
+    // Non-row-spanning-cells don't create overflow (they are fully contained within this row).
+    if (cell->rowSpan() == 1)
+        return;
+
+    // Cells only generates visual overflow.
+    LayoutRect cellVisualOverflowRect = cell->visualOverflowRectForPropagation(style());
+
+    // The cell and the row share the section's coordinate system. However
+    // the visual overflow should be determined in the coordinate system of
+    // the row, that's why we shift it below.
+    LayoutUnit cellOffsetLogicalTopDifference = cell->location().y() - location().y();
+    cellVisualOverflowRect.move(0, cellOffsetLogicalTopDifference);
+
+    addVisualOverflow(cellVisualOverflowRect);
 }
 
 } // namespace blink

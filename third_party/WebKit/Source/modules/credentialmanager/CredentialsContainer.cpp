@@ -13,12 +13,14 @@
 #include "core/dom/ExecutionContext.h"
 #include "modules/credentialmanager/Credential.h"
 #include "modules/credentialmanager/CredentialManagerClient.h"
+#include "modules/credentialmanager/FederatedCredential.h"
 #include "modules/credentialmanager/LocalCredential.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebCredential.h"
 #include "public/platform/WebCredentialManagerClient.h"
 #include "public/platform/WebCredentialManagerError.h"
+#include "public/platform/WebFederatedCredential.h"
 #include "public/platform/WebLocalCredential.h"
 
 namespace blink {
@@ -42,12 +44,12 @@ public:
     explicit NotificationCallbacks(PassRefPtr<ScriptPromiseResolver> resolver) : m_resolver(resolver) { }
     virtual ~NotificationCallbacks() { }
 
-    virtual void onSuccess() OVERRIDE
+    virtual void onSuccess() override
     {
         m_resolver->resolve();
     }
 
-    virtual void onError(WebCredentialManagerError* reason) OVERRIDE
+    virtual void onError(WebCredentialManagerError* reason) override
     {
         rejectDueToCredentialManagerError(m_resolver, reason);
     }
@@ -62,18 +64,21 @@ public:
     explicit RequestCallbacks(PassRefPtr<ScriptPromiseResolver> resolver) : m_resolver(resolver) { }
     virtual ~RequestCallbacks() { }
 
-    virtual void onSuccess(WebCredential* credential) OVERRIDE
+    virtual void onSuccess(WebCredential* credential) override
     {
         if (!credential) {
             m_resolver->resolve();
             return;
         }
 
-        // FIXME: Split this into Local/Federated types. Right now it's hard-coded to be a LocalCredential. :(
-        m_resolver->resolve(LocalCredential::create(static_cast<WebLocalCredential*>(credential)));
+        ASSERT(credential->isLocalCredential() || credential->isFederatedCredential());
+        if (credential->isLocalCredential())
+            m_resolver->resolve(LocalCredential::create(static_cast<WebLocalCredential*>(credential)));
+        else
+            m_resolver->resolve(FederatedCredential::create(static_cast<WebFederatedCredential*>(credential)));
     }
 
-    virtual void onError(WebCredentialManagerError* reason) OVERRIDE
+    virtual void onError(WebCredentialManagerError* reason) override
     {
         rejectDueToCredentialManagerError(m_resolver, reason);
     }
@@ -129,7 +134,7 @@ ScriptPromise CredentialsContainer::notifySignedIn(ScriptState* scriptState, Cre
     if (!checkBoilerplate(resolver))
         return promise;
 
-    CredentialManagerClient::from(scriptState->executionContext())->dispatchSignedIn(WebCredential(credential->platformCredential()), new NotificationCallbacks(resolver));
+    CredentialManagerClient::from(scriptState->executionContext())->dispatchSignedIn(WebCredential::create(credential->platformCredential()), new NotificationCallbacks(resolver));
     return promise;
 }
 
@@ -140,7 +145,7 @@ ScriptPromise CredentialsContainer::notifyFailedSignIn(ScriptState* scriptState,
     if (!checkBoilerplate(resolver))
         return promise;
 
-    CredentialManagerClient::from(scriptState->executionContext())->dispatchFailedSignIn(WebCredential(credential->platformCredential()), new NotificationCallbacks(resolver));
+    CredentialManagerClient::from(scriptState->executionContext())->dispatchFailedSignIn(WebCredential::create(credential->platformCredential()), new NotificationCallbacks(resolver));
     return promise;
 }
 

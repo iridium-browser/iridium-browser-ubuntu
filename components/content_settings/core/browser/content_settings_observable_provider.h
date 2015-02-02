@@ -8,6 +8,7 @@
 #include <string>
 
 #include "base/observer_list.h"
+#include "base/threading/thread_checker.h"
 #include "components/content_settings/core/browser/content_settings_observer.h"
 #include "components/content_settings/core/browser/content_settings_provider.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
@@ -17,7 +18,7 @@ namespace content_settings {
 class ObservableProvider : public ProviderInterface {
  public:
   ObservableProvider();
-  virtual ~ObservableProvider();
+  ~ObservableProvider() override;
 
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
@@ -28,8 +29,10 @@ class ObservableProvider : public ProviderInterface {
                        ContentSettingsType content_type,
                        const std::string& resource_identifier);
   void RemoveAllObservers();
+  bool CalledOnValidThread();
 
  private:
+  base::ThreadChecker thread_checker_;
   ObserverList<Observer, true> observer_list_;
 };
 

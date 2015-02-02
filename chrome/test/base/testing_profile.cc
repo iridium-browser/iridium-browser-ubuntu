@@ -18,8 +18,6 @@
 #include "chrome/browser/bookmarks/chrome_bookmark_client_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
-#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/favicon/chrome_favicon_client_factory.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
@@ -51,9 +49,9 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/history_index_restore_observer.h"
 #include "chrome/test/base/testing_pref_service_syncable.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/common/bookmark_constants.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/history/core/browser/top_sites_observer.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/policy/core/common/policy_service.h"
@@ -83,6 +81,7 @@
 #endif  // defined(ENABLE_CONFIGURATION_POLICY)
 
 #if defined(ENABLE_EXTENSIONS)
+#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
 #include "chrome/browser/extensions/extension_system_factory.h"
 #include "chrome/browser/extensions/test_extension_system.h"
@@ -112,10 +111,10 @@ class WaitTopSitesLoadedObserver : public history::TopSitesObserver {
  public:
   explicit WaitTopSitesLoadedObserver(content::MessageLoopRunner* runner)
       : runner_(runner) {}
-  virtual void TopSitesLoaded(history::TopSites* top_sites) OVERRIDE {
+  void TopSitesLoaded(history::TopSites* top_sites) override {
     runner_->Quit();
   }
-  virtual void TopSitesChanged(history::TopSites* top_sites) OVERRIDE {}
+  void TopSitesChanged(history::TopSites* top_sites) override {}
 
  private:
   // weak
@@ -129,17 +128,15 @@ class QuittingHistoryDBTask : public history::HistoryDBTask {
  public:
   QuittingHistoryDBTask() {}
 
-  virtual bool RunOnDBThread(history::HistoryBackend* backend,
-                             history::HistoryDatabase* db) OVERRIDE {
+  bool RunOnDBThread(history::HistoryBackend* backend,
+                     history::HistoryDatabase* db) override {
     return true;
   }
 
-  virtual void DoneRunOnMainThread() OVERRIDE {
-    base::MessageLoop::current()->Quit();
-  }
+  void DoneRunOnMainThread() override { base::MessageLoop::current()->Quit(); }
 
  private:
-  virtual ~QuittingHistoryDBTask() {}
+  ~QuittingHistoryDBTask() override {}
 
   DISALLOW_COPY_AND_ASSIGN(QuittingHistoryDBTask);
 };
@@ -155,26 +152,24 @@ class TestExtensionURLRequestContext : public net::URLRequestContext {
     set_cookie_store(cookie_monster);
   }
 
-  virtual ~TestExtensionURLRequestContext() {
-    AssertNoURLRequests();
-  }
+  ~TestExtensionURLRequestContext() override { AssertNoURLRequests(); }
 };
 
 class TestExtensionURLRequestContextGetter
     : public net::URLRequestContextGetter {
  public:
-  virtual net::URLRequestContext* GetURLRequestContext() OVERRIDE {
+  net::URLRequestContext* GetURLRequestContext() override {
     if (!context_.get())
       context_.reset(new TestExtensionURLRequestContext());
     return context_.get();
   }
-  virtual scoped_refptr<base::SingleThreadTaskRunner>
-      GetNetworkTaskRunner() const OVERRIDE {
+  scoped_refptr<base::SingleThreadTaskRunner> GetNetworkTaskRunner()
+      const override {
     return BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO);
   }
 
  protected:
-  virtual ~TestExtensionURLRequestContextGetter() {}
+  ~TestExtensionURLRequestContextGetter() override {}
 
  private:
   scoped_ptr<net::URLRequestContext> context_;
@@ -470,8 +465,12 @@ void TestingProfile::CreateFaviconService() {
 
 static KeyedService* BuildHistoryService(content::BrowserContext* context) {
   Profile* profile = static_cast<Profile*>(context);
-  return new HistoryService(ChromeHistoryClientFactory::GetForProfile(profile),
-                            profile);
+  ChromeHistoryClient* history_client =
+      ChromeHistoryClientFactory::GetForProfile(profile);
+  HistoryService* history_service = new HistoryService(history_client, profile);
+  if (history_client)
+    history_client->SetHistoryService(history_service);
+  return history_service;
 }
 
 bool TestingProfile::CreateHistoryService(bool delete_file, bool no_db) {
@@ -495,6 +494,13 @@ bool TestingProfile::CreateHistoryService(bool delete_file, bool no_db) {
 }
 
 void TestingProfile::DestroyHistoryService() {
+  // TODO(sdefresne): remove this once ChromeHistoryClient is no longer an
+  // HistoryServiceObserver, http://crbug.com/373326
+  ChromeHistoryClient* history_client =
+      ChromeHistoryClientFactory::GetForProfileWithoutCreating(this);
+  if (history_client)
+    history_client->Shutdown();
+
   HistoryService* history_service =
       HistoryServiceFactory::GetForProfileWithoutCreating(this);
   if (!history_service)
@@ -522,6 +528,11 @@ void TestingProfile::CreateTopSites() {
   DestroyTopSites();
   top_sites_ = history::TopSites::Create(
       this, GetPath().Append(chrome::kTopSitesFilename));
+}
+
+void TestingProfile::SetTopSites(history::TopSites* top_sites) {
+  DestroyTopSites();
+  top_sites_ = top_sites;
 }
 
 void TestingProfile::DestroyTopSites() {
@@ -830,6 +841,7 @@ content::ResourceContext* TestingProfile::GetResourceContext() {
 }
 
 HostContentSettingsMap* TestingProfile::GetHostContentSettingsMap() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   if (!host_content_settings_map_.get()) {
     host_content_settings_map_ = new HostContentSettingsMap(GetPrefs(), false);
 #if defined(ENABLE_EXTENSIONS)

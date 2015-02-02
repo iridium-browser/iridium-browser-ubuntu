@@ -63,19 +63,31 @@ void AssertIntercepted(
 // ProtocolHandlerRegistry properly handled a job creation request.
 class FakeURLRequestJobFactory : public net::URLRequestJobFactory {
   // net::URLRequestJobFactory implementation:
-  virtual net::URLRequestJob* MaybeCreateJobWithProtocolHandler(
+  net::URLRequestJob* MaybeCreateJobWithProtocolHandler(
       const std::string& scheme,
       net::URLRequest* request,
-      net::NetworkDelegate* network_delegate) const OVERRIDE {
+      net::NetworkDelegate* network_delegate) const override {
     return NULL;
   }
-  virtual bool IsHandledProtocol(const std::string& scheme) const OVERRIDE {
+
+  net::URLRequestJob* MaybeInterceptRedirect(
+      net::URLRequest* request,
+      net::NetworkDelegate* network_delegate,
+      const GURL& location) const override {
+    return nullptr;
+  }
+
+  net::URLRequestJob* MaybeInterceptResponse(
+      net::URLRequest* request,
+      net::NetworkDelegate* network_delegate) const override {
+    return nullptr;
+  }
+
+  bool IsHandledProtocol(const std::string& scheme) const override {
     return false;
   }
-  virtual bool IsHandledURL(const GURL& url) const OVERRIDE {
-    return false;
-  }
-  virtual bool IsSafeRedirectTarget(const GURL& location) const OVERRIDE {
+  bool IsHandledURL(const GURL& url) const override { return false; }
+  bool IsSafeRedirectTarget(const GURL& location) const override {
     return true;
   }
 };
@@ -124,34 +136,32 @@ base::DictionaryValue* GetProtocolHandlerValueWithDefault(std::string protocol,
 class FakeDelegate : public ProtocolHandlerRegistry::Delegate {
  public:
   FakeDelegate() : force_os_failure_(false) {}
-  virtual ~FakeDelegate() { }
-  virtual void RegisterExternalHandler(const std::string& protocol) OVERRIDE {
+  ~FakeDelegate() override {}
+  void RegisterExternalHandler(const std::string& protocol) override {
     ASSERT_TRUE(
         registered_protocols_.find(protocol) == registered_protocols_.end());
     registered_protocols_.insert(protocol);
   }
 
-  virtual void DeregisterExternalHandler(const std::string& protocol) OVERRIDE {
+  void DeregisterExternalHandler(const std::string& protocol) override {
     registered_protocols_.erase(protocol);
   }
 
-  virtual ShellIntegration::DefaultProtocolClientWorker* CreateShellWorker(
-    ShellIntegration::DefaultWebClientObserver* observer,
-    const std::string& protocol) OVERRIDE;
+  ShellIntegration::DefaultProtocolClientWorker* CreateShellWorker(
+      ShellIntegration::DefaultWebClientObserver* observer,
+      const std::string& protocol) override;
 
-  virtual ProtocolHandlerRegistry::DefaultClientObserver* CreateShellObserver(
-      ProtocolHandlerRegistry* registry) OVERRIDE;
+  ProtocolHandlerRegistry::DefaultClientObserver* CreateShellObserver(
+      ProtocolHandlerRegistry* registry) override;
 
-  virtual void RegisterWithOSAsDefaultClient(
-      const std::string& protocol,
-      ProtocolHandlerRegistry* reg) OVERRIDE {
+  void RegisterWithOSAsDefaultClient(const std::string& protocol,
+                                     ProtocolHandlerRegistry* reg) override {
     ProtocolHandlerRegistry::Delegate::RegisterWithOSAsDefaultClient(protocol,
                                                                      reg);
     ASSERT_FALSE(IsFakeRegisteredWithOS(protocol));
   }
 
-  virtual bool IsExternalHandlerRegistered(
-      const std::string& protocol) OVERRIDE {
+  bool IsExternalHandlerRegistered(const std::string& protocol) override {
     return registered_protocols_.find(protocol) != registered_protocols_.end();
   }
 
@@ -188,8 +198,8 @@ class FakeClientObserver
       : ProtocolHandlerRegistry::DefaultClientObserver(registry),
         delegate_(registry_delegate) {}
 
-  virtual void SetDefaultWebClientUIState(
-      ShellIntegration::DefaultWebClientUIState state) OVERRIDE {
+  void SetDefaultWebClientUIState(
+      ShellIntegration::DefaultWebClientUIState state) override {
     ProtocolHandlerRegistry::DefaultClientObserver::SetDefaultWebClientUIState(
         state);
     if (state == ShellIntegration::STATE_IS_DEFAULT) {
@@ -214,9 +224,9 @@ class FakeProtocolClientWorker
         force_failure_(force_failure) {}
 
  private:
-  virtual ~FakeProtocolClientWorker() {}
+  ~FakeProtocolClientWorker() override {}
 
-  virtual ShellIntegration::DefaultWebClientState CheckIsDefault() OVERRIDE {
+  ShellIntegration::DefaultWebClientState CheckIsDefault() override {
     if (force_failure_) {
       return ShellIntegration::NOT_DEFAULT;
     } else {
@@ -224,9 +234,7 @@ class FakeProtocolClientWorker
     }
   }
 
-  virtual bool SetAsDefault(bool interactive_permitted) OVERRIDE {
-    return true;
-  }
+  bool SetAsDefault(bool interactive_permitted) override { return true; }
 
  private:
   bool force_failure_;
@@ -256,9 +264,9 @@ class NotificationCounter : public content::NotificationObserver {
   int events() { return events_; }
   bool notified() { return events_ > 0; }
   void Clear() { events_ = 0; }
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE {
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override {
     ++events_;
   }
 
@@ -279,9 +287,9 @@ class QueryProtocolHandlerOnChange
             content::Source<content::BrowserContext>(context));
   }
 
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE {
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override {
     std::vector<std::string> output;
     local_registry_->GetRegisteredProtocols(&output);
     called_ = true;
@@ -301,8 +309,8 @@ class QueryProtocolHandlerOnChange
 class TestMessageLoop : public base::MessageLoop {
  public:
   TestMessageLoop() {}
-  virtual ~TestMessageLoop() {}
-  virtual bool IsType(base::MessageLoop::Type type) const OVERRIDE {
+  ~TestMessageLoop() override {}
+  bool IsType(base::MessageLoop::Type type) const override {
     switch (type) {
       case base::MessageLoop::TYPE_UI:
         return BrowserThread::CurrentlyOn(BrowserThread::UI);
@@ -396,7 +404,7 @@ class ProtocolHandlerRegistryTest : public testing::Test {
     // Registry owns the delegate_ it handles deletion of that object.
   }
 
-  virtual void SetUp() {
+  void SetUp() override {
     profile_.reset(new TestingProfile());
     CHECK(profile_->GetPrefs());
     SetUpRegistry(true);
@@ -404,9 +412,7 @@ class ProtocolHandlerRegistryTest : public testing::Test {
         CreateProtocolHandler("test", GURL("http://test.com/%s"));
   }
 
-  virtual void TearDown() {
-    TeadDownRegistry();
-  }
+  void TearDown() override { TeadDownRegistry(); }
 
   TestMessageLoop loop_;
 

@@ -1,11 +1,11 @@
 {
     "extensions": [
         {
-            "type": "@WebInspector.Panel",
+            "type": "@WebInspector.PanelFactory",
             "name": "network",
             "title": "Network",
             "order": 1,
-            "className": "WebInspector.NetworkPanel"
+            "className": "WebInspector.NetworkPanelFactory"
         },
         {
             "type": "@WebInspector.ContextMenu.Provider",
@@ -20,7 +20,6 @@
     ],
     "dependencies": ["source_frame"],
     "scripts": [
-        "HAREntry.js",
         "RequestView.js",
         "NetworkItemView.js",
         "RequestCookiesView.js",
@@ -32,5 +31,12 @@
         "RequestTimingView.js",
         "ResourceWebSocketFrameView.js",
         "NetworkPanel.js"
+    ],
+    "stylesheets": [
+        "networkLogView.css",
+        "networkPanel.css",
+        "requestCookiesView.css",
+        "requestHeadersView.css",
+        "webSocketFrameView.css"
     ]
 }

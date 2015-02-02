@@ -111,8 +111,6 @@ ServiceWorkerVersion::ServiceWorkerVersion(
   context_->AddLiveVersion(this);
   embedded_worker_ = context_->embedded_worker_registry()->CreateWorker();
   embedded_worker_->AddListener(this);
-  cache_listener_.reset(new ServiceWorkerCacheListener(this, context));
-  embedded_worker_->AddListener(cache_listener_.get());
 }
 
 ServiceWorkerVersion::~ServiceWorkerVersion() {
@@ -177,12 +175,14 @@ void ServiceWorkerVersion::StartWorker(
     case STARTING:
       start_callbacks_.push_back(callback);
       if (running_status() == STOPPED) {
+        DCHECK(!cache_listener_.get());
+        cache_listener_.reset(new ServiceWorkerCacheListener(this, context_));
         embedded_worker_->Start(
             version_id_,
             scope_,
             script_url_,
             pause_after_download,
-            base::Bind(&ServiceWorkerVersion::RunStartWorkerCallbacksOnError,
+            base::Bind(&ServiceWorkerVersion::OnStartMessageSent,
                        weak_factory_.GetWeakPtr()));
       }
       return;
@@ -374,6 +374,43 @@ void ServiceWorkerVersion::DispatchPushEvent(const StatusCallback& callback,
   }
 }
 
+void ServiceWorkerVersion::DispatchGeofencingEvent(
+    const StatusCallback& callback,
+    blink::WebGeofencingEventType event_type,
+    const std::string& region_id,
+    const blink::WebCircularGeofencingRegion& region) {
+  DCHECK_EQ(ACTIVATED, status()) << status();
+
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableExperimentalWebPlatformFeatures)) {
+    callback.Run(SERVICE_WORKER_ERROR_ABORT);
+    return;
+  }
+
+  if (running_status() != RUNNING) {
+    // Schedule calling this method after starting the worker.
+    StartWorker(base::Bind(&RunTaskAfterStartWorker,
+                           weak_factory_.GetWeakPtr(),
+                           callback,
+                           base::Bind(&self::DispatchGeofencingEvent,
+                                      weak_factory_.GetWeakPtr(),
+                                      callback,
+                                      event_type,
+                                      region_id,
+                                      region)));
+    return;
+  }
+
+  int request_id = geofencing_callbacks_.Add(new StatusCallback(callback));
+  ServiceWorkerStatusCode status =
+      embedded_worker_->SendMessage(ServiceWorkerMsg_GeofencingEvent(
+          request_id, event_type, region_id, region));
+  if (status != SERVICE_WORKER_OK) {
+    geofencing_callbacks_.Remove(request_id);
+    RunSoon(base::Bind(callback, status));
+  }
+}
+
 void ServiceWorkerVersion::AddControllee(
     ServiceWorkerProviderHost* provider_host) {
   DCHECK(!ContainsKey(controllee_map_, provider_host));
@@ -417,6 +454,7 @@ void ServiceWorkerVersion::Doom() {
 
 void ServiceWorkerVersion::OnStarted() {
   DCHECK_EQ(RUNNING, running_status());
+  DCHECK(cache_listener_.get());
   if (status() == ACTIVATED && !HasControllee())
     ScheduleStopWorker();
   // Fire all start callbacks.
@@ -455,8 +493,16 @@ void ServiceWorkerVersion::OnStopped() {
   RunIDMapCallbacks(&push_callbacks_,
                     &StatusCallback::Run,
                     MakeTuple(SERVICE_WORKER_ERROR_FAILED));
+  RunIDMapCallbacks(&geofencing_callbacks_,
+                    &StatusCallback::Run,
+                    MakeTuple(SERVICE_WORKER_ERROR_FAILED));
 
   FOR_EACH_OBSERVER(Listener, listeners_, OnWorkerStopped(this));
+
+  // There should be no more communication from/to a stopped worker. Deleting
+  // the listener prevents any pending completion callbacks from causing
+  // messages to be sent to the stopped worker.
+  cache_listener_.reset();
 }
 
 void ServiceWorkerVersion::OnReportException(
@@ -501,6 +547,8 @@ bool ServiceWorkerVersion::OnMessageReceived(const IPC::Message& message) {
                         OnSyncEventFinished)
     IPC_MESSAGE_HANDLER(ServiceWorkerHostMsg_PushEventFinished,
                         OnPushEventFinished)
+    IPC_MESSAGE_HANDLER(ServiceWorkerHostMsg_GeofencingEventFinished,
+                        OnGeofencingEventFinished)
     IPC_MESSAGE_HANDLER(ServiceWorkerHostMsg_PostMessageToDocument,
                         OnPostMessageToDocument)
     IPC_MESSAGE_UNHANDLED(handled = false)
@@ -508,7 +556,7 @@ bool ServiceWorkerVersion::OnMessageReceived(const IPC::Message& message) {
   return handled;
 }
 
-void ServiceWorkerVersion::RunStartWorkerCallbacksOnError(
+void ServiceWorkerVersion::OnStartMessageSent(
     ServiceWorkerStatusCode status) {
   if (status != SERVICE_WORKER_OK)
     RunCallbacks(this, &start_callbacks_, status);
@@ -652,6 +700,22 @@ void ServiceWorkerVersion::OnPushEventFinished(
   scoped_refptr<ServiceWorkerVersion> protect(this);
   callback->Run(SERVICE_WORKER_OK);
   push_callbacks_.Remove(request_id);
+}
+
+void ServiceWorkerVersion::OnGeofencingEventFinished(int request_id) {
+  TRACE_EVENT1("ServiceWorker",
+               "ServiceWorkerVersion::OnGeofencingEventFinished",
+               "Request id",
+               request_id);
+  StatusCallback* callback = geofencing_callbacks_.Lookup(request_id);
+  if (!callback) {
+    NOTREACHED() << "Got unexpected message: " << request_id;
+    return;
+  }
+
+  scoped_refptr<ServiceWorkerVersion> protect(this);
+  callback->Run(SERVICE_WORKER_OK);
+  geofencing_callbacks_.Remove(request_id);
 }
 
 void ServiceWorkerVersion::OnPostMessageToDocument(

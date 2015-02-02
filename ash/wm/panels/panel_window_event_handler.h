@@ -14,11 +14,11 @@ namespace ash {
 class PanelWindowEventHandler : public ui::EventHandler {
  public:
   PanelWindowEventHandler();
-  virtual ~PanelWindowEventHandler();
+  ~PanelWindowEventHandler() override;
 
   // ui::EventHandler:
-  virtual void OnMouseEvent(ui::MouseEvent* event) OVERRIDE;
-  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
+  void OnMouseEvent(ui::MouseEvent* event) override;
+  void OnGestureEvent(ui::GestureEvent* event) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(PanelWindowEventHandler);

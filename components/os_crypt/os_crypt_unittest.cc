@@ -17,7 +17,7 @@ class OSCryptTest : public testing::Test {
  public:
   OSCryptTest() {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
 #if defined(OS_MACOSX)
     OSCrypt::UseMockKeychain(true);
 #endif

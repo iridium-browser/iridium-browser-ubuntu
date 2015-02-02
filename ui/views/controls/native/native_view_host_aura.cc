@@ -20,26 +20,28 @@ namespace views {
 class NativeViewHostAura::ClippingWindowDelegate : public aura::WindowDelegate {
  public:
   ClippingWindowDelegate() : native_view_(NULL) {}
-  virtual ~ClippingWindowDelegate() {}
+  ~ClippingWindowDelegate() override {}
 
   void set_native_view(aura::Window* native_view) {
     native_view_ = native_view;
   }
 
-  virtual gfx::Size GetMinimumSize() const OVERRIDE { return gfx::Size(); }
-  virtual gfx::Size GetMaximumSize() const OVERRIDE { return gfx::Size(); }
-  virtual void OnBoundsChanged(const gfx::Rect& old_bounds,
-                               const gfx::Rect& new_bounds) OVERRIDE {}
-  virtual gfx::NativeCursor GetCursor(const gfx::Point& point) OVERRIDE {
+  gfx::Size GetMinimumSize() const override { return gfx::Size(); }
+  gfx::Size GetMaximumSize() const override { return gfx::Size(); }
+  void OnBoundsChanged(const gfx::Rect& old_bounds,
+                       const gfx::Rect& new_bounds) override {}
+  gfx::NativeCursor GetCursor(const gfx::Point& point) override {
     return gfx::kNullCursor;
   }
-  virtual int GetNonClientComponent(const gfx::Point& point) const OVERRIDE {
+  int GetNonClientComponent(const gfx::Point& point) const override {
     return HTCLIENT;
   }
-  virtual bool ShouldDescendIntoChildForEventHandling(
+  bool ShouldDescendIntoChildForEventHandling(
       aura::Window* child,
-      const gfx::Point& location) OVERRIDE { return true; }
-  virtual bool CanFocus() OVERRIDE {
+      const gfx::Point& location) override {
+    return true;
+  }
+  bool CanFocus() override {
     // Ask the hosted native view's delegate because directly calling
     // aura::Window::CanFocus() will call back into this when checking whether
     // parents can focus.
@@ -47,14 +49,14 @@ class NativeViewHostAura::ClippingWindowDelegate : public aura::WindowDelegate {
         ? native_view_->delegate()->CanFocus()
         : true;
   }
-  virtual void OnCaptureLost() OVERRIDE {}
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {}
-  virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE {}
-  virtual void OnWindowDestroying(aura::Window* window) OVERRIDE {}
-  virtual void OnWindowDestroyed(aura::Window* window) OVERRIDE {}
-  virtual void OnWindowTargetVisibilityChanged(bool visible) OVERRIDE {}
-  virtual bool HasHitTestMask() const OVERRIDE { return false; }
-  virtual void GetHitTestMask(gfx::Path* mask) const OVERRIDE {}
+  void OnCaptureLost() override {}
+  void OnPaint(gfx::Canvas* canvas) override {}
+  void OnDeviceScaleFactorChanged(float device_scale_factor) override {}
+  void OnWindowDestroying(aura::Window* window) override {}
+  void OnWindowDestroyed(aura::Window* window) override {}
+  void OnWindowTargetVisibilityChanged(bool visible) override {}
+  bool HasHitTestMask() const override { return false; }
+  void GetHitTestMask(gfx::Path* mask) const override {}
 
  private:
   aura::Window* native_view_;

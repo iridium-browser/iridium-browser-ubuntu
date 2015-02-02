@@ -12,10 +12,10 @@
 #include "base/memory/singleton.h"
 #include "base/prefs/pref_change_registrar.h"
 #include "base/synchronization/lock.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings.h"
-#include "components/keyed_service/content/refcounted_browser_context_keyed_service.h"
 #include "components/keyed_service/content/refcounted_browser_context_keyed_service_factory.h"
+#include "components/keyed_service/core/refcounted_keyed_service.h"
 
 class ContentSettingsPattern;
 class CookieSettingsWrapper;
@@ -26,7 +26,7 @@ class Profile;
 // A frontend to the cookie settings of |HostContentSettingsMap|. Handles
 // cookie-specific logic such as blocking third-party cookies. Written on the UI
 // thread and read on any thread. One instance per profile.
-class CookieSettings : public RefcountedBrowserContextKeyedService {
+class CookieSettings : public RefcountedKeyedService {
  public:
   CookieSettings(
       HostContentSettingsMap* host_content_settings_map,
@@ -90,7 +90,7 @@ class CookieSettings : public RefcountedBrowserContextKeyedService {
   // Detaches the |CookieSettings| from all |Profile|-related objects like
   // |PrefService|. This methods needs to be called before destroying the
   // |Profile|. Afterwards, only const methods can be called.
-  virtual void ShutdownOnUIThread() OVERRIDE;
+  void ShutdownOnUIThread() override;
 
   // A helper for applying third party cookie blocking rules.
   ContentSetting GetCookieSetting(
@@ -114,20 +114,19 @@ class CookieSettings : public RefcountedBrowserContextKeyedService {
     friend struct DefaultSingletonTraits<Factory>;
 
     Factory();
-    virtual ~Factory();
+    ~Factory() override;
 
     // |BrowserContextKeyedBaseFactory| methods:
-    virtual void RegisterProfilePrefs(
-        user_prefs::PrefRegistrySyncable* registry) OVERRIDE;
-    virtual content::BrowserContext* GetBrowserContextToUse(
-        content::BrowserContext* context) const OVERRIDE;
-    virtual scoped_refptr<RefcountedBrowserContextKeyedService>
-        BuildServiceInstanceFor(
-            content::BrowserContext* context) const OVERRIDE;
+    void RegisterProfilePrefs(
+        user_prefs::PrefRegistrySyncable* registry) override;
+    content::BrowserContext* GetBrowserContextToUse(
+        content::BrowserContext* context) const override;
+    scoped_refptr<RefcountedKeyedService> BuildServiceInstanceFor(
+        content::BrowserContext* context) const override;
   };
 
  private:
-  virtual ~CookieSettings();
+  ~CookieSettings() override;
 
   void OnBlockThirdPartyCookiesChanged();
 

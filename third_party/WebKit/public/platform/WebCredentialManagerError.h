@@ -5,8 +5,6 @@
 #ifndef WebCredentialManagerError_h
 #define WebCredentialManagerError_h
 
-#include "public/platform/WebString.h"
-
 namespace blink {
 
 struct WebCredentialManagerError {
@@ -14,18 +12,17 @@ struct WebCredentialManagerError {
     // list as the API evolves.
     enum ErrorType {
         ErrorTypeDisabled = 0,
+        ErrorTypePendingRequest,
+        ErrorTypePasswordStoreUnavailable,
         ErrorTypeUnknown,
         ErrorTypeLast = ErrorTypeUnknown
     };
 
-    WebCredentialManagerError(ErrorType type, WebString message)
-        : errorType(type)
-        , errorMessage(message)
-    {
-    }
+    // FIXME: We need this to be an object for the moment to make the WebCallbacks templates
+    // happy. But, really, we probably just need the enum. We should fix that.
+    explicit WebCredentialManagerError(ErrorType type) : errorType(type) { }
 
     ErrorType errorType;
-    WebString errorMessage;
 };
 
 } // namespace blink

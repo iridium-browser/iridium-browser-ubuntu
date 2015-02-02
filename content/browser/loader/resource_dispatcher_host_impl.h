@@ -54,6 +54,8 @@ class ShareableFileReference;
 }
 
 namespace content {
+class AppCacheService;
+class NavigationURLLoaderImplCore;
 class ResourceContext;
 class ResourceDispatcherHostDelegate;
 class ResourceMessageDelegate;
@@ -61,6 +63,7 @@ class ResourceMessageFilter;
 class ResourceRequestInfoImpl;
 class SaveFileManager;
 class WebContentsImpl;
+struct CommonNavigationParams;
 struct DownloadSaveInfo;
 struct NavigationRequestInfo;
 struct Referrer;
@@ -70,16 +73,16 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
       public ResourceLoaderDelegate {
  public:
   ResourceDispatcherHostImpl();
-  virtual ~ResourceDispatcherHostImpl();
+  ~ResourceDispatcherHostImpl() override;
 
   // Returns the current ResourceDispatcherHostImpl. May return NULL if it
   // hasn't been created yet.
   static ResourceDispatcherHostImpl* Get();
 
   // ResourceDispatcherHost implementation:
-  virtual void SetDelegate(ResourceDispatcherHostDelegate* delegate) OVERRIDE;
-  virtual void SetAllowCrossOriginAuthPrompt(bool value) OVERRIDE;
-  virtual DownloadInterruptReason BeginDownload(
+  void SetDelegate(ResourceDispatcherHostDelegate* delegate) override;
+  void SetAllowCrossOriginAuthPrompt(bool value) override;
+  DownloadInterruptReason BeginDownload(
       scoped_ptr<net::URLRequest> request,
       const Referrer& referrer,
       bool is_content_initiated,
@@ -89,11 +92,10 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
       bool prefer_cache,
       scoped_ptr<DownloadSaveInfo> save_info,
       uint32 download_id,
-      const DownloadStartedCallback& started_callback) OVERRIDE;
-  virtual void ClearLoginDelegateForRequest(net::URLRequest* request) OVERRIDE;
-  virtual void BlockRequestsForRoute(int child_id, int route_id) OVERRIDE;
-  virtual void ResumeBlockedRequestsForRoute(
-      int child_id, int route_id) OVERRIDE;
+      const DownloadStartedCallback& started_callback) override;
+  void ClearLoginDelegateForRequest(net::URLRequest* request) override;
+  void BlockRequestsForRoute(int child_id, int route_id) override;
+  void ResumeBlockedRequestsForRoute(int child_id, int route_id) override;
 
   // Puts the resource dispatcher host in an inactive state (unable to begin
   // new requests).  Cancels all pending requests.
@@ -164,7 +166,10 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
   }
 
   // Called when a RenderViewHost is created.
-  void OnRenderViewHostCreated(int child_id, int route_id, bool is_visible);
+  void OnRenderViewHostCreated(int child_id,
+                               int route_id,
+                               bool is_visible,
+                               bool is_audible);
 
   // Called when a RenderViewHost is deleted.
   void OnRenderViewHostDeleted(int child_id, int route_id);
@@ -179,6 +184,11 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
 
   // Called when a RenderViewHost is shown.
   void OnRenderViewHostWasShown(int child_id, int route_id);
+
+  // Called when an AudioRenderHost starts or stops playing.
+  void OnAudioRenderHostStreamStateChanged(int child_id,
+                                           int route_id,
+                                           bool is_playing);
 
   // Force cancels any pending requests for the given process.
   void CancelRequestsForProcess(int child_id);
@@ -242,27 +252,21 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
   // sending it to the renderer. Returns true if there are enough file
   // descriptors available for the shared memory buffer. If false is returned,
   // the request should cancel.
-  bool HasSufficientResourcesForRequest(const net::URLRequest* request_);
+  bool HasSufficientResourcesForRequest(net::URLRequest* request);
 
   // Called by a ResourceHandler after it has finished its request and is done
   // using its shared memory buffer. Frees up that file descriptor to be used
   // elsewhere.
-  void FinishedWithResourcesForRequest(const net::URLRequest* request_);
+  void FinishedWithResourcesForRequest(net::URLRequest* request);
 
-  // PlzNavigate
-  // Called by NavigationRequest to start a navigation request in the node
-  // identified by |frame_node_id|.
-  void StartNavigationRequest(const NavigationRequestInfo& info,
+  // PlzNavigate: Begins a request for NavigationURLLoader. |loader| is the
+  // loader to attach to the leaf resource handler.
+  void BeginNavigationRequest(ResourceContext* resource_context,
+                              int64 frame_tree_node_id,
+                              const CommonNavigationParams& common_params,
+                              const NavigationRequestInfo& info,
                               scoped_refptr<ResourceRequestBody> request_body,
-                              int64 navigation_request_id,
-                              int64 frame_node_id);
-
-  // PlzNavigate
-  // Called by NavigationRequest to cancel a navigation request with the
-  // provided |navigation_request_id| in the node identified by
-  // |frame_node_id|.
-  void CancelNavigationRequest(int64 navigation_request_id,
-                               int64 frame_node_id);
+                              NavigationURLLoaderImplCore* loader);
 
  private:
   friend class ResourceDispatcherHostTest;
@@ -287,16 +291,14 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
   friend class ResourceMessageDelegate;
 
   // ResourceLoaderDelegate implementation:
-  virtual ResourceDispatcherHostLoginDelegate* CreateLoginDelegate(
+  ResourceDispatcherHostLoginDelegate* CreateLoginDelegate(
       ResourceLoader* loader,
-      net::AuthChallengeInfo* auth_info) OVERRIDE;
-  virtual bool HandleExternalProtocol(ResourceLoader* loader,
-                                      const GURL& url) OVERRIDE;
-  virtual void DidStartRequest(ResourceLoader* loader) OVERRIDE;
-  virtual void DidReceiveRedirect(ResourceLoader* loader,
-                                  const GURL& new_url) OVERRIDE;
-  virtual void DidReceiveResponse(ResourceLoader* loader) OVERRIDE;
-  virtual void DidFinishLoading(ResourceLoader* loader) OVERRIDE;
+      net::AuthChallengeInfo* auth_info) override;
+  bool HandleExternalProtocol(ResourceLoader* loader, const GURL& url) override;
+  void DidStartRequest(ResourceLoader* loader) override;
+  void DidReceiveRedirect(ResourceLoader* loader, const GURL& new_url) override;
+  void DidReceiveResponse(ResourceLoader* loader) override;
+  void DidFinishLoading(ResourceLoader* loader) override;
 
   // An init helper that runs on the IO thread.
   void OnInit();
@@ -335,12 +337,12 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
       int count,
       const ResourceRequestInfoImpl& info);
 
-  // Called every time an in flight request is issued or finished. |count|
-  // indicates whether the request is issuing or finishing. |count| must be 1
-  // or -1.
+  // Called when an in flight request allocates or releases a shared memory
+  // buffer. |count| indicates whether the request is issuing or finishing.
+  // |count| must be 1 or -1.
   OustandingRequestsStats IncrementOutstandingRequestsCount(
       int count,
-      const ResourceRequestInfoImpl& info);
+      ResourceRequestInfoImpl* info);
 
   // Estimate how much heap space |request| will consume to run.
   static int CalculateApproximateMemoryCost(net::URLRequest* request);
@@ -402,6 +404,18 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
       int process_type,
       int child_id,
       ResourceContext* resource_context);
+
+  // Wraps |handler| in the standard resource handlers for normal resource
+  // loading and navigation requests. This adds BufferedResourceHandler and
+  // ResourceThrottles.
+  scoped_ptr<ResourceHandler> AddStandardHandlers(
+      net::URLRequest* request,
+      ResourceType resource_type,
+      ResourceContext* resource_context,
+      AppCacheService* appcache_service,
+      int child_id,
+      int route_id,
+      scoped_ptr<ResourceHandler> handler);
 
   void OnDataDownloadedACK(int request_id);
   void OnUploadProgressACK(int request_id);

@@ -28,7 +28,7 @@
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_folder_controller.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_folder_window.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_toolbar_view.h"
-#import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_view.h"
+#import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_view_cocoa.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_button.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_button_cell.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_context_menu_cocoa_controller.h"
@@ -2806,7 +2806,7 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
     // The button being removed is in the OTS (off-the-side) and the OTS
     // menu is showing so we need to remove the button.
     NSInteger index = buttonIndex - displayedButtonCount_;
-    [folderController_ removeButton:index animate:YES];
+    [folderController_ removeButton:index animate:animate];
   }
 }
 

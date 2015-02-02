@@ -44,11 +44,14 @@ def concatenate_scripts(file_names, module_dir, output_dir, output):
 
 
 class Descriptors:
-    def __init__(self, application_dir, application_descriptor, module_descriptors, application_json):
+    def __init__(self, application_dir, application_descriptor, module_descriptors):
         self.application_dir = application_dir
         self.application = application_descriptor
         self.modules = module_descriptors
-        self.application_json = application_json
+        self._cached_sorted_modules = None
+
+    def application_json(self):
+        return json.dumps(self.application.values())
 
     def all_compiled_files(self):
         files = {}
@@ -62,14 +65,20 @@ class Descriptors:
 
     def module_compiled_files(self, name):
         files = []
-        module = self.modules[name]
+        module = self.modules.get(name)
         skipped_files = set(module.get('skip_compilation', []))
         for script in module.get('scripts', []):
             if script not in skipped_files:
                 files.append(script)
         return files
 
+    def module_stylesheets(self, name):
+        return [name + '/' + css for css in self.modules[name].get('stylesheets', [])]
+
     def sorted_modules(self):
+        if self._cached_sorted_modules:
+            return self._cached_sorted_modules
+
         result = []
         unvisited_modules = set(self.modules)
         temp_modules = set()
@@ -101,6 +110,7 @@ class Descriptors:
                 # failure[0] can never be None
                 bail_error('Unknown module "%s" encountered in dependencies of "%s"' % (failure[1], failure[0]))
 
+        self._cached_sorted_modules = result
         return result
 
     def sorted_dependencies_closure(self, module_name):
@@ -125,23 +135,33 @@ class DescriptorLoader:
         self.application_dir = application_dir
 
     def load_application(self, application_descriptor_name):
-        application_descriptor_filename = path.join(self.application_dir, application_descriptor_name)
-        application_descriptor_json = read_file(application_descriptor_filename)
-        application_descriptor = {desc['name']: desc for desc in json.loads(application_descriptor_json)}
+        return self.load_applications([application_descriptor_name])
 
-        module_descriptors = {}
-        for (module_name, module) in application_descriptor.items():
-            if module_descriptors.get(module_name):
-                bail_error('Duplicate definition of module "%s" in %s' % (module_name, application_descriptor_filename))
-            module_json_filename = path.join(self.application_dir, module_name, 'module.json')
-            module_descriptors[module_name] = self._read_module_descriptor(module_name, application_descriptor_filename)
+    def load_applications(self, application_descriptor_names):
+        merged_application_descriptor = {}
+        all_module_descriptors = {}
+        for application_descriptor_name in application_descriptor_names:
+            module_descriptors = {}
+            application_descriptor_filename = path.join(self.application_dir, application_descriptor_name)
+            application_descriptor_json = read_file(application_descriptor_filename)
+            application_descriptor = {desc['name']: desc for desc in json.loads(application_descriptor_json)}
+            for name in application_descriptor:
+                merged_application_descriptor[name] = application_descriptor[name]
 
-        for module in module_descriptors.values():
-            deps = module.get('dependencies', [])
-            for dep in deps:
-                if dep not in application_descriptor:
-                    bail_error('Module "%s" (dependency of "%s") not listed in application descriptor %s' % (dep, module['name'], application_descriptor_filename))
-        return Descriptors(self.application_dir, application_descriptor, module_descriptors, application_descriptor_json)
+            for (module_name, module) in application_descriptor.items():
+                if module_descriptors.get(module_name):
+                    bail_error('Duplicate definition of module "%s" in %s' % (module_name, application_descriptor_filename))
+                if not all_module_descriptors.get(module_name):
+                    module_descriptors[module_name] = self._read_module_descriptor(module_name, application_descriptor_filename)
+                    all_module_descriptors[module_name] = module_descriptors[module_name]
+
+            for module in module_descriptors.values():
+                deps = module.get('dependencies', [])
+                for dep in deps:
+                    if dep not in application_descriptor:
+                        bail_error('Module "%s" (dependency of "%s") not listed in application descriptor %s' % (dep, module['name'], application_descriptor_filename))
+
+        return Descriptors(self.application_dir, merged_application_descriptor, all_module_descriptors)
 
     def _read_module_descriptor(self, module_name, application_descriptor_filename):
         json_filename = path.join(self.application_dir, module_name, 'module.json')

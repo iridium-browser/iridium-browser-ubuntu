@@ -25,7 +25,7 @@ header {
   padding: 0 12px;
 }
 
-header h2 {
+header h1 {
   flex: 1;
   /* TODO(dbeam): reconcile font/line-height/margin with chrome_shared.css */
   font-size: 1.5em;
@@ -52,4 +52,7 @@ header > :-webkit-any(form, input[type='search']) {
 
 .summary :first-child {
   flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

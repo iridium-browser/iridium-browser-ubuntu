@@ -76,7 +76,6 @@ color
 cols
 colspan
 compact
-composite
 content
 contenteditable
 contextmenu
@@ -144,6 +143,7 @@ media
 mediagroup
 method
 min
+minlength
 multiple
 muted
 name
@@ -260,7 +260,6 @@ placeholder
 ping
 poster
 preload
-profile
 pseudo
 readonly
 rel

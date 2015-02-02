@@ -26,19 +26,22 @@
 #include "base/threading/thread_local.h"
 #include "base/tracked_objects.h"
 #include "components/tracing/child_trace_message_filter.h"
+#include "content/child/child_discardable_shared_memory_manager.h"
+#include "content/child/child_gpu_memory_buffer_manager.h"
 #include "content/child/child_histogram_message_filter.h"
 #include "content/child/child_process.h"
 #include "content/child/child_resource_message_filter.h"
 #include "content/child/child_shared_bitmap_manager.h"
 #include "content/child/fileapi/file_system_dispatcher.h"
 #include "content/child/fileapi/webfilesystem_impl.h"
+#include "content/child/geofencing/geofencing_message_filter.h"
 #include "content/child/mojo/mojo_application.h"
+#include "content/child/notifications/notification_dispatcher.h"
 #include "content/child/power_monitor_broadcast_source.h"
 #include "content/child/quota_dispatcher.h"
 #include "content/child/quota_message_filter.h"
 #include "content/child/resource_dispatcher.h"
 #include "content/child/service_worker/service_worker_message_filter.h"
-#include "content/child/socket_stream_dispatcher.h"
 #include "content/child/thread_safe_sender.h"
 #include "content/child/websocket_dispatcher.h"
 #include "content/common/child_process_messages.h"
@@ -82,9 +85,9 @@ class WaitAndExitDelegate : public base::PlatformThread::Delegate {
  public:
   explicit WaitAndExitDelegate(base::TimeDelta duration)
       : duration_(duration) {}
-  virtual ~WaitAndExitDelegate() OVERRIDE {}
+  virtual ~WaitAndExitDelegate() override {}
 
-  virtual void ThreadMain() OVERRIDE {
+  virtual void ThreadMain() override {
     base::PlatformThread::Sleep(duration_);
     _exit(0);
   }
@@ -115,7 +118,7 @@ bool CreateWaitAndExitThread(base::TimeDelta duration) {
 class SuicideOnChannelErrorFilter : public IPC::MessageFilter {
  public:
   // IPC::MessageFilter
-  virtual void OnChannelError() OVERRIDE {
+  void OnChannelError() override {
     // For renderer/worker processes:
     // On POSIX, at least, one can install an unload handler which loops
     // forever and leave behind a renderer process which eats 100% CPU forever.
@@ -149,7 +152,7 @@ class SuicideOnChannelErrorFilter : public IPC::MessageFilter {
   }
 
  protected:
-  virtual ~SuicideOnChannelErrorFilter() {}
+  ~SuicideOnChannelErrorFilter() override {}
 };
 
 #endif  // OS(POSIX)
@@ -272,7 +275,6 @@ void ChildThread::Init(const Options& options) {
       base::MessageLoopProxy::current().get(), sync_message_filter_.get());
 
   resource_dispatcher_.reset(new ResourceDispatcher(this));
-  socket_stream_dispatcher_.reset(new SocketStreamDispatcher());
   websocket_dispatcher_.reset(new WebSocketDispatcher);
   file_system_dispatcher_.reset(new FileSystemDispatcher());
 
@@ -287,12 +289,17 @@ void ChildThread::Init(const Options& options) {
       new QuotaMessageFilter(thread_safe_sender_.get());
   quota_dispatcher_.reset(new QuotaDispatcher(thread_safe_sender_.get(),
                                               quota_message_filter_.get()));
-
+  geofencing_message_filter_ =
+      new GeofencingMessageFilter(thread_safe_sender_.get());
+  notification_dispatcher_ =
+      new NotificationDispatcher(thread_safe_sender_.get());
   channel_->AddFilter(histogram_message_filter_.get());
   channel_->AddFilter(sync_message_filter_.get());
   channel_->AddFilter(resource_message_filter_.get());
   channel_->AddFilter(quota_message_filter_->GetFilter());
+  channel_->AddFilter(notification_dispatcher_->GetFilter());
   channel_->AddFilter(service_worker_message_filter_->GetFilter());
+  channel_->AddFilter(geofencing_message_filter_->GetFilter());
 
   if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kSingleProcess)) {
@@ -309,7 +316,7 @@ void ChildThread::Init(const Options& options) {
     channel_->AddFilter(power_monitor_source->GetMessageFilter());
 
     power_monitor_.reset(new base::PowerMonitor(
-        power_monitor_source.PassAs<base::PowerMonitorSource>()));
+        power_monitor_source.Pass()));
   }
 
 #if defined(OS_POSIX)
@@ -355,6 +362,12 @@ void ChildThread::Init(const Options& options) {
 
   shared_bitmap_manager_.reset(
       new ChildSharedBitmapManager(thread_safe_sender()));
+
+  gpu_memory_buffer_manager_.reset(
+      new ChildGpuMemoryBufferManager(thread_safe_sender()));
+
+  discardable_shared_memory_manager_.reset(
+      new ChildDiscardableSharedMemoryManager(thread_safe_sender()));
 }
 
 ChildThread::~ChildThread() {
@@ -454,8 +467,6 @@ bool ChildThread::OnMessageReceived(const IPC::Message& msg) {
 
   // Resource responses are sent to the resource dispatcher.
   if (resource_dispatcher_->OnMessageReceived(msg))
-    return true;
-  if (socket_stream_dispatcher_->OnMessageReceived(msg))
     return true;
   if (websocket_dispatcher_->OnMessageReceived(msg))
     return true;

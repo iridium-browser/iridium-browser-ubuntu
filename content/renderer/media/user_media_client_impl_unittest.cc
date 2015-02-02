@@ -75,48 +75,48 @@ class UserMediaClientImplUnderTest : public UserMediaClientImpl {
     requestSources(sources_request);
   }
 
-  virtual void GetUserMediaRequestSucceeded(
+  void GetUserMediaRequestSucceeded(
       const blink::WebMediaStream& stream,
-      blink::WebUserMediaRequest* request_info) OVERRIDE {
+      blink::WebUserMediaRequest* request_info) override {
     last_generated_stream_ = stream;
     state_ = REQUEST_SUCCEEDED;
   }
 
-  virtual void GetUserMediaRequestFailed(
+  void GetUserMediaRequestFailed(
       blink::WebUserMediaRequest* request_info,
-      content::MediaStreamRequestResult result) OVERRIDE {
+      content::MediaStreamRequestResult result) override {
     last_generated_stream_.reset();
     state_ = REQUEST_FAILED;
     result_ = result;
   }
 
-  virtual void GetUserMediaRequestTrackStartedFailed(
+  void GetUserMediaRequestTrackStartedFailed(
       blink::WebUserMediaRequest* request_info,
       MediaStreamRequestResult result,
-      const blink::WebString& result_name) OVERRIDE {
+      const blink::WebString& result_name) override {
     last_generated_stream_.reset();
     state_ = REQUEST_FAILED;
     result_ = result;
     result_name_ = result_name;
   }
 
-  virtual void EnumerateDevicesSucceded(
+  void EnumerateDevicesSucceded(
       blink::WebMediaDevicesRequest* request,
-      blink::WebVector<blink::WebMediaDeviceInfo>& devices) OVERRIDE {
+      blink::WebVector<blink::WebMediaDeviceInfo>& devices) override {
     state_ = REQUEST_SUCCEEDED;
     last_devices_ = devices;
   }
 
-  virtual void EnumerateSourcesSucceded(
+  void EnumerateSourcesSucceded(
       blink::WebMediaStreamTrackSourcesRequest* request,
-      blink::WebVector<blink::WebSourceInfo>& sources) OVERRIDE {
+      blink::WebVector<blink::WebSourceInfo>& sources) override {
     state_ = REQUEST_SUCCEEDED;
     last_sources_ = sources;
   }
 
-  virtual MediaStreamVideoSource* CreateVideoSource(
+  MediaStreamVideoSource* CreateVideoSource(
       const StreamDeviceInfo& device,
-      const MediaStreamSource::SourceStoppedCallback& stop_callback) OVERRIDE {
+      const MediaStreamSource::SourceStoppedCallback& stop_callback) override {
     video_source_ = new MockMediaStreamVideoCapturerSource(device,
                                                            stop_callback,
                                                            factory_);
@@ -160,7 +160,7 @@ class UserMediaClientImplUnderTest : public UserMediaClientImpl {
 
 class UserMediaClientImplTest : public ::testing::Test {
  public:
-  virtual void SetUp() {
+  void SetUp() override {
     // Create our test object.
     child_process_.reset(new ChildProcess());
     dependency_factory_.reset(new MockPeerConnectionDependencyFactory());
@@ -170,7 +170,7 @@ class UserMediaClientImplTest : public ::testing::Test {
         scoped_ptr<MediaStreamDispatcher>(ms_dispatcher_).Pass()));
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     used_media_impl_.reset();
     blink::WebHeap::collectAllGarbageForTesting();
   }

@@ -4,9 +4,6 @@ InterstitialUITest.OpenInterstitial
 # http://crbug.com/400509
 CustomLauncherPageBrowserTest.LoadPageAndOpenLauncher
 
-# http://crbug.com/403627
-BrowserOptionsOverlayWebUITest.testNavigationInBackground
-
 # http://crbug.com/403628
 RangeHistoryWebUITest.monthViewGrouped
 
@@ -19,3 +16,6 @@ SSLUITest.TestBadFrameNavigation
 SSLUITest.TestInterstitialJavaScriptProceeds
 SSLUITest.TestRefNavigation
 SSLUITest.TestWSSInvalidCertAndGoForward
+
+# http://crbug.com/403007
+WorkerDevToolsSanityTest.InspectSharedWorker

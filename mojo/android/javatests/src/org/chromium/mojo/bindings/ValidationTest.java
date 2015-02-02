@@ -7,6 +7,7 @@ package org.chromium.mojo.bindings;
 import android.test.suitebuilder.annotation.SmallTest;
 import android.util.Log;
 
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.mojo.HandleMock;
 import org.chromium.mojo.MojoTestCase;
@@ -62,10 +63,11 @@ public class ValidationTest extends MojoTestCase {
 
     private static String getStringContent(File f) throws FileNotFoundException {
         Scanner scanner = new Scanner(f).useDelimiter("\\Z");
-        if (scanner.hasNext()) {
-            return scanner.next();
+        StringBuilder result = new StringBuilder();
+        while (scanner.hasNext()) {
+            result.append(scanner.next());
         }
-        return "";
+        return result.toString().trim();
     }
 
     private static List<TestData> getTestData(String prefix)
@@ -97,7 +99,9 @@ public class ValidationTest extends MojoTestCase {
             throws FileNotFoundException {
         List<TestData> testData = getTestData(prefix);
         for (TestData test : testData) {
-            assertNull(test.inputData.getErrorMessage());
+            assertNull("Unable to read: " + test.dataFile.getName() +
+                    ": " + test.inputData.getErrorMessage(),
+                    test.inputData.getErrorMessage());
             List<Handle> handles = new ArrayList<Handle>();
             for (int i = 0; i < test.inputData.getHandlesCount(); ++i) {
                 handles.add(new HandleMock());
@@ -173,8 +177,9 @@ public class ValidationTest extends MojoTestCase {
 
     /**
      * Testing the conformance suite.
+     * Disabled: http://crbug.com/426564
      */
-    @SmallTest
+    @DisabledTest
     public void testConformance() throws FileNotFoundException {
         runTest("conformance_", ConformanceTestInterface.MANAGER.buildStub(null,
                 ConformanceTestInterface.MANAGER.buildProxy(null, new SinkMessageReceiver())));

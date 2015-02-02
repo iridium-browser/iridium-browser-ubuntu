@@ -38,7 +38,6 @@ WebInspector.TimelineManager = function(target)
     WebInspector.SDKModel.call(this, WebInspector.TimelineManager, target);
     this._dispatcher = new WebInspector.TimelineDispatcher(this);
     this._enablementCount = 0;
-    this._jsProfilerStarted = false;
     target.timelineAgent().enable();
 }
 
@@ -68,12 +67,7 @@ WebInspector.TimelineManager.prototype = {
     start: function(maxCallStackDepth, liveEvents, includeCounters, includeGPUEvents, callback)
     {
         this._enablementCount++;
-        WebInspector.profilingLock().acquire();
-        if (Runtime.experiments.isEnabled("timelineJSCPUProfile") && maxCallStackDepth) {
-            this._configureCpuProfilerSamplingInterval();
-            this._jsProfilerStarted = true;
-            this.target().profilerAgent().start();
-        }
+        WebInspector.targetManager.suspendAllTargets();
         if (this._enablementCount === 1)
             this.target().timelineAgent().start(maxCallStackDepth, true, liveEvents, includeCounters, includeGPUEvents, callback);
         else if (callback)
@@ -81,7 +75,7 @@ WebInspector.TimelineManager.prototype = {
     },
 
     /**
-     * @param {function(?Protocol.Error,?ProfilerAgent.CPUProfile)} callback
+     * @param {function(?Protocol.Error)} callback
      */
     stop: function(callback)
     {
@@ -91,41 +85,16 @@ WebInspector.TimelineManager.prototype = {
             return;
         }
 
-        var masterError = null;
-        var masterProfile = null;
-        var callbackBarrier = new CallbackBarrier();
-
-        if (this._jsProfilerStarted) {
-            this.target().profilerAgent().stop(callbackBarrier.createCallback(profilerCallback));
-            this._jsProfilerStarted = false;
-        }
         if (!this._enablementCount)
-            this.target().timelineAgent().stop(callbackBarrier.createCallback(timelineCallback));
-
-        callbackBarrier.callWhenDone(allDoneCallback);
+            this.target().timelineAgent().stop(allDoneCallback);
 
         /**
          * @param {?Protocol.Error} error
          */
-        function timelineCallback(error)
+        function allDoneCallback(error)
         {
-            masterError = masterError || error;
-        }
-
-        /**
-         * @param {?Protocol.Error} error
-         * @param {!ProfilerAgent.CPUProfile} profile
-         */
-        function profilerCallback(error, profile)
-        {
-            masterError = masterError || error;
-            masterProfile = profile;
-        }
-
-        function allDoneCallback()
-        {
-            WebInspector.profilingLock().release();
-            callback(masterError, masterProfile);
+            WebInspector.targetManager.resumeAllTargets();
+            callback(error);
         }
     },
 
@@ -140,18 +109,6 @@ WebInspector.TimelineManager.prototype = {
             events: events || []
         };
         this.dispatchEventToListeners(WebInspector.TimelineManager.EventTypes.TimelineStopped, data);
-    },
-
-    _configureCpuProfilerSamplingInterval: function()
-    {
-        var intervalUs = WebInspector.settings.highResolutionCpuProfiling.get() ? 100 : 1000;
-        this.target().profilerAgent().setSamplingInterval(intervalUs, didChangeInterval);
-
-        function didChangeInterval(error)
-        {
-            if (error)
-                WebInspector.console.error(error);
-        }
     },
 
     __proto__: WebInspector.SDKModel.prototype
@@ -189,10 +146,6 @@ WebInspector.TimelineDispatcher.prototype = {
      */
     started: function(consoleTimeline)
     {
-        if (consoleTimeline) {
-            // Wake up timeline panel module.
-            self.runtime.loadModule("timeline");
-        }
         this._started = true;
         this._manager.dispatchEventToListeners(WebInspector.TimelineManager.EventTypes.TimelineStarted, consoleTimeline);
     },

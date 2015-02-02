@@ -56,7 +56,7 @@ WebInspector.CPUProfileView = function(profileHeader)
     var option = options[optionName] || options[WebInspector.CPUProfileView._TypeFlame];
     this.viewSelectComboBox.select(option);
 
-    this._statusBarButtonsElement = document.createElement("span");
+    this._statusBarButtonsElement = createElement("span");
 
     this.focusButton = new WebInspector.StatusBarButton(WebInspector.UIString("Focus selected function."), "focus-profile-node-status-bar-item");
     this.focusButton.setEnabled(false);
@@ -88,6 +88,14 @@ WebInspector.CPUProfileView._TypeTree = "Tree";
 WebInspector.CPUProfileView._TypeHeavy = "Heavy";
 
 WebInspector.CPUProfileView.prototype = {
+    focus: function()
+    {
+        if (this._flameChart)
+            this._flameChart.focus();
+        else
+            WebInspector.View.prototype.focus.call(this);
+    },
+
     /**
      * @return {?WebInspector.Target}
      */
@@ -321,22 +329,6 @@ WebInspector.CPUProfileView.prototype = {
         if (--this._currentSearchResultIndex < 0)
             this._currentSearchResultIndex = (this._searchResults.length - 1);
         this._jumpToSearchResult(this._currentSearchResultIndex);
-    },
-
-    /**
-     * @return {boolean}
-     */
-    showingFirstSearchResult: function()
-    {
-        return (this._currentSearchResultIndex === 0);
-    },
-
-    /**
-     * @return {boolean}
-     */
-    showingLastSearchResult: function()
-    {
-        return (this._searchResults && this._currentSearchResultIndex === (this._searchResults.length - 1));
     },
 
     /**

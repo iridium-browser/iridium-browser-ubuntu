@@ -11,14 +11,17 @@
 #include "core/frame/Settings.h"
 #include "core/page/Page.h"
 #include "core/paint/BoxPainter.h"
+#include "core/paint/DrawingRecorder.h"
 #include "core/paint/InlinePainter.h"
 #include "core/paint/LineBoxListPainter.h"
 #include "core/rendering/GraphicsContextAnnotator.h"
 #include "core/rendering/PaintInfo.h"
 #include "core/rendering/RenderBlock.h"
+#include "core/rendering/RenderBoxClipper.h"
 #include "core/rendering/RenderFlexibleBox.h"
 #include "core/rendering/RenderInline.h"
 #include "core/rendering/RenderLayer.h"
+#include "core/rendering/RenderView.h"
 #include "platform/geometry/LayoutPoint.h"
 #include "platform/geometry/LayoutRect.h"
 #include "platform/graphics/GraphicsContextCullSaver.h"
@@ -52,26 +55,31 @@ void BlockPainter::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
     if (m_renderBlock.hasOverflowClip() && !m_renderBlock.hasControlClip() && !(m_renderBlock.shouldPaintSelectionGaps() && phase == PaintPhaseForeground) && !hasCaret())
         contentsClipBehavior = SkipContentsClipIfPossible;
 
-    bool pushedClip = m_renderBlock.pushContentsClip(paintInfo, adjustedPaintOffset, contentsClipBehavior);
     {
+        RenderBoxClipper boxClipper(m_renderBlock, paintInfo, adjustedPaintOffset, contentsClipBehavior);
         GraphicsContextCullSaver cullSaver(*paintInfo.context);
         // Cull if we have more than one child and we didn't already clip.
-        bool shouldCull = m_renderBlock.document().settings()->containerCullingEnabled() && !pushedClip && !m_renderBlock.isDocumentElement()
+        bool shouldCull = m_renderBlock.document().settings()->containerCullingEnabled() && !boxClipper.pushedClip() && !m_renderBlock.isDocumentElement()
             && m_renderBlock.firstChild() && m_renderBlock.lastChild() && m_renderBlock.firstChild() != m_renderBlock.lastChild();
         if (shouldCull)
             cullSaver.cull(overflowBox);
 
         m_renderBlock.paintObject(paintInfo, adjustedPaintOffset);
     }
-    // FIXME: move popContentsClip out of RenderBox.
-    if (pushedClip)
-        m_renderBlock.popContentsClip(paintInfo, phase, adjustedPaintOffset);
 
     // Our scrollbar widgets paint exactly when we tell them to, so that they work properly with
     // z-index. We paint after we painted the background/border, so that the scrollbars will
     // sit above the background/border.
-    if (m_renderBlock.hasOverflowClip() && m_renderBlock.style()->visibility() == VISIBLE && (phase == PaintPhaseBlockBackground || phase == PaintPhaseChildBlockBackground) && paintInfo.shouldPaintWithinRoot(&m_renderBlock) && !paintInfo.paintRootBackgroundOnly())
-        m_renderBlock.layer()->scrollableArea()->paintOverflowControls(paintInfo.context, roundedIntPoint(adjustedPaintOffset), paintInfo.rect, false /* paintingOverlayControls */);
+    paintOverflowControlsIfNeeded(paintInfo, adjustedPaintOffset);
+}
+
+void BlockPainter::paintOverflowControlsIfNeeded(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+{
+    PaintPhase phase = paintInfo.phase;
+    if (m_renderBlock.hasOverflowClip() && m_renderBlock.style()->visibility() == VISIBLE && (phase == PaintPhaseBlockBackground || phase == PaintPhaseChildBlockBackground) && paintInfo.shouldPaintWithinRoot(&m_renderBlock) && !paintInfo.paintRootBackgroundOnly()) {
+        DrawingRecorder recorder(paintInfo.context, &m_renderBlock, paintInfo.phase, pixelSnappedIntRect(paintOffset, m_renderBlock.visualOverflowRect().size()));
+        m_renderBlock.layer()->scrollableArea()->paintOverflowControls(paintInfo.context, roundedIntPoint(paintOffset), paintInfo.rect, false /* paintingOverlayControls */);
+    }
 }
 
 void BlockPainter::paintChildren(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
@@ -106,7 +114,7 @@ void BlockPainter::paintInlineBox(InlineBox& inlineBox, PaintInfo& paintInfo, co
         return;
 
     LayoutPoint childPoint = paintOffset;
-    if (inlineBox.parent()->renderer().style()->isFlippedBlocksWritingMode()) // Faster than calling containingBlock().
+    if (inlineBox.parent()->renderer().style()->slowIsFlippedBlocksWritingMode()) // Faster than calling containingBlock().
         childPoint = inlineBox.renderer().containingBlock()->flipForWritingModeForChild(&toRenderBox(inlineBox.renderer()), childPoint);
 
     paintAsInlineBlock(&inlineBox.renderer(), paintInfo, childPoint);
@@ -146,6 +154,12 @@ void BlockPainter::paintObject(PaintInfo& paintInfo, const LayoutPoint& paintOff
     if (m_renderBlock.hasOverflowClip())
         scrolledOffset.move(-m_renderBlock.scrolledContentOffset());
 
+    LayoutRect bounds;
+    if (RuntimeEnabledFeatures::slimmingPaintEnabled()) {
+        bounds = m_renderBlock.visualOverflowRect();
+        bounds.moveBy(scrolledOffset);
+    }
+
     // 1. paint background, borders etc
     if ((paintPhase == PaintPhaseBlockBackground || paintPhase == PaintPhaseChildBlockBackground) && m_renderBlock.style()->visibility() == VISIBLE) {
         if (m_renderBlock.hasBoxDecorationBackground())
@@ -155,11 +169,13 @@ void BlockPainter::paintObject(PaintInfo& paintInfo, const LayoutPoint& paintOff
     }
 
     if (paintPhase == PaintPhaseMask && m_renderBlock.style()->visibility() == VISIBLE) {
+        DrawingRecorder recorder(paintInfo.context, &m_renderBlock, paintPhase, bounds);
         m_renderBlock.paintMask(paintInfo, paintOffset);
         return;
     }
 
     if (paintPhase == PaintPhaseClippingMask && m_renderBlock.style()->visibility() == VISIBLE) {
+        DrawingRecorder recorder(paintInfo.context, &m_renderBlock, paintPhase, bounds);
         m_renderBlock.paintClippingMask(paintInfo, paintOffset);
         return;
     }
@@ -205,8 +221,10 @@ void BlockPainter::paintObject(PaintInfo& paintInfo, const LayoutPoint& paintOff
     // 7. paint caret.
     // If the caret's node's render object's containing block is this block, and the paint action is PaintPhaseForeground,
     // then paint the caret.
-    if (paintPhase == PaintPhaseForeground)
+    if (paintPhase == PaintPhaseForeground) {
+        DrawingRecorder recorder(paintInfo.context, &m_renderBlock, paintPhase, bounds);
         paintCarets(paintInfo, paintOffset);
+    }
 }
 
 static inline bool caretBrowsingEnabled(const Frame* frame)
@@ -307,7 +325,7 @@ void BlockPainter::paintColumnRules(PaintInfo& paintInfo, const LayoutPoint& pai
             ruleLogicalLeft = currLogicalLeftOffset;
         }
     } else {
-        bool topToBottom = !m_renderBlock.style()->isFlippedBlocksWritingMode();
+        bool topToBottom = !m_renderBlock.style()->slowIsFlippedBlocksWritingMode();
         LayoutUnit ruleLeft = m_renderBlock.isHorizontalWritingMode()
             ? m_renderBlock.borderLeft() + m_renderBlock.paddingLeft()
             : colGap / 2 - colGap - ruleThickness / 2 + m_renderBlock.borderBefore() + m_renderBlock.paddingBefore();
@@ -394,7 +412,7 @@ void BlockPainter::paintColumnContents(PaintInfo& paintInfo, const LayoutPoint& 
         }
 
         LayoutUnit blockDelta = (m_renderBlock.isHorizontalWritingMode() ? colRect.height() : colRect.width());
-        if (m_renderBlock.style()->isFlippedBlocksWritingMode())
+        if (m_renderBlock.style()->slowIsFlippedBlocksWritingMode())
             currLogicalTopOffset += blockDelta;
         else
             currLogicalTopOffset -= blockDelta;

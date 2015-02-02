@@ -27,41 +27,6 @@
 
 namespace {
 
-// A mapping from an input method id to a string for the language indicator. The
-// mapping is necessary since some input methods belong to the same language.
-// For example, both "xkb:us::eng" and "xkb:us:dvorak:eng" are for US English.
-const struct {
-  const char* engine_id;
-  const char* indicator_text;
-} kMappingFromIdToIndicatorText[] = {
-  // To distinguish from "xkb:jp::jpn"
-  // TODO(nona): Make following variables configurable. http://crbug.com/232260.
-  { "nacl_mozc_us", "\xe3\x81\x82" },
-  { "nacl_mozc_jp", "\xe3\x81\x82" },
-  // For simplified Chinese input methods
-  { "zh-t-i0-pinyin", "\xe6\x8b\xbc" },  // U+62FC
-  { "zh-t-i0-wubi-1986", "\xe4\xba\x94" }, // U+4E94
-  // For traditional Chinese input methods
-  { "zh-hant-t-i0-pinyin", "\xe6\x8b\xbc" },  // U+62FC
-  { "zh-hant-t-i0-und", "\xE6\xB3\xA8" },  // U+9177
-  { "zh-hant-t-i0-cangjie-1987", "\xe5\x80\x89" },  // U+5009
-  { "zh-hant-t-i0-cangjie-1987-x-m0-simplified", "\xe9\x80\x9f" },  // U+901F
-  // For Hangul input method.
-  { "hangul_ahnmatae", "\xed\x95\x9c" },  // U+D55C
-  { "hangul_2set", "\xed\x95\x9c" },  // U+D55C
-  { "hangul_3set390", "\xed\x95\x9c" },  // U+D55C
-  { "hangul_3setfinal", "\xed\x95\x9c" },  // U+D55C
-  { "hangul_3setnoshift", "\xed\x95\x9c" },  // U+D55C
-  { "hangul_romaja", "\xed\x95\x9c" },  // U+D55C
-  { extension_misc::kBrailleImeEngineId,
-    // U+2803 U+2817 U+2807 (Unicode braille patterns for the letters 'brl' in
-    // English (and many other) braille codes.
-    "\xe2\xa0\x83\xe2\xa0\x97\xe2\xa0\x87" },
-};
-
-const size_t kMappingFromIdToIndicatorTextLen =
-    ARRAYSIZE_UNSAFE(kMappingFromIdToIndicatorText);
-
 // A mapping from an input method id to a resource id for a
 // medium length language indicator.
 // For those languages that want to display a slightly longer text in the
@@ -87,86 +52,25 @@ const struct {
     IDS_LANGUAGES_MEDIUM_LEN_NAME_BRAILLE },
 };
 const size_t kMappingImeIdToMediumLenNameResourceIdLen =
-    ARRAYSIZE_UNSAFE(kMappingImeIdToMediumLenNameResourceId);
+    arraysize(kMappingImeIdToMediumLenNameResourceId);
 
 // Due to asynchronous initialization of component extension manager,
 // GetFirstLogingInputMethodIds may miss component extension IMEs. To enable
 // component extension IME as the first loging input method, we have to prepare
 // component extension IME IDs.
+// Note: empty layout means the rule applies for all layouts.
 const struct {
   const char* locale;
   const char* layout;
   const char* engine_id;
 } kDefaultInputMethodRecommendation[] = {
-  { "ja", "us", "nacl_mozc_us" },
   { "ja", "jp", "nacl_mozc_jp" },
-  { "zh-CN", "us", "zh-t-i0-pinyin" },
-  { "zh-TW", "us", "zh-hant-t-i0-und" },
-  { "th", "us", "vkd_th" },
-  { "vi", "us", "vkd_vi_tcvn" },
-};
-
-// The map from xkb layout to the indicator text.
-// Refer to crbug.com/349829.
-const char* const kXkbIndicators[][2] = {{"am", "AM"},
-                                         {"be", "BE"},
-                                         {"bg", "BG"},
-                                         {"bg(phonetic)", "BG"},
-                                         {"br", "BR"},
-                                         {"by", "BY"},
-                                         {"ca", "CA"},
-                                         {"ca(eng)", "CA"},
-                                         {"ca(multix)", "CA"},
-                                         {"ch", "CH"},
-                                         {"ch(fr)", "CH"},
-                                         {"cz", "CZ"},
-                                         {"cz(qwerty)", "CS"},
-                                         {"de", "DE"},
-                                         {"de(neo)", "NEO"},
-                                         {"dk", "DK"},
-                                         {"ee", "EE"},
-                                         {"es", "ES"},
-                                         {"es(cat)", "CAS"},
-                                         {"fi", "FI"},
-                                         {"fr", "FR"},
-                                         {"gb(dvorak)", "DV"},
-                                         {"gb(extd)", "GB"},
-                                         {"ge", "GE"},
-                                         {"gr", "GR"},
-                                         {"hr", "HR"},
-                                         {"hu", "HU"},
-                                         {"il", "IL"},
-                                         {"is", "IS"},
-                                         {"it", "IT"},
-                                         {"jp", "JA"},
-                                         {"latam", "LA"},
-                                         {"lt", "LT"},
-                                         {"lv(apostrophe)", "LV"},
-                                         {"mn", "MN"},
-                                         {"no", "NO"},
-                                         {"pl", "PL"},
-                                         {"pt", "PT"},
-                                         {"ro", "RO"},
-                                         {"rs", "RS"},
-                                         {"ru", "RU"},
-                                         {"ru(phonetic)", "RU"},
-                                         {"se", "SE"},
-                                         {"si", "SI"},
-                                         {"sk", "SK"},
-                                         {"tr", "TR"},
-                                         {"ua", "UA"},
-                                         {"us", "US"},
-                                         {"us(altgr-intl)", "EXTD"},
-                                         {"us(colemak)", "CO"},
-                                         {"us(dvorak)", "DV"},
-                                         {"us(intl)", "INTL"}, };
-
-// The extension ID map for migration.
-const char* const kExtensionIdMigrationMap[][2] = {
-  // Official Japanese IME extension ID.
-  {"fpfbhcjppmaeaijcidgiibchfbnhbelj", "gjaehgfemfahhmlgpdfknkhdnemmolop"},
-  // Official M17n keyboard extension ID.
-  {"habcdindjejkmepknlhkkloncjcpcnbf", "gjaehgfemfahhmlgpdfknkhdnemmolop"},
+  { "ja", "", "nacl_mozc_us" },
+  { "zh-CN", "", "zh-t-i0-pinyin" },
+  { "zh-TW", "", "zh-hant-t-i0-und" },
+  { "th", "", "vkd_th" },
+  { "vi", "", "vkd_vi_tcvn" },
+  { "ru", "", "xkb:ru::rus" },
 };
 
 // The engine ID map for migration. This migration is for input method IDs from
@@ -206,8 +110,6 @@ const char* const kEngineIdMigrationMap[][2] = {
     {"t13n:ti", "ti-t-i0-und"},
     {"t13n:ur", "ur-t-i0-und"},
 };
-
-const size_t kExtensionIdLen = 32;
 
 const struct EnglishToResouceId {
   const char* english_string_from_ibus;
@@ -299,11 +201,6 @@ InputMethodUtil::InputMethodUtil(InputMethodDelegate* delegate)
     DCHECK(result) << "Duplicated string is found: "
                    << map_entry.english_string_from_ibus;
   }
-
-  // Initialize the map from xkb layout to indicator text.
-  for (size_t i = 0; i < arraysize(kXkbIndicators); ++i) {
-    xkb_layout_to_indicator_[kXkbIndicators[i][0]] = kXkbIndicators[i][1];
-  }
 }
 
 InputMethodUtil::~InputMethodUtil() {
@@ -375,47 +272,9 @@ std::string InputMethodUtil::GetInputMethodDisplayNameFromId(
 
 base::string16 InputMethodUtil::GetInputMethodShortName(
     const InputMethodDescriptor& input_method) const {
-  // For the status area, we use two-letter, upper-case language code like
-  // "US" and "JP".
-
-  // Use the indicator string if set.
-  if (!input_method.indicator().empty()) {
-    return base::UTF8ToUTF16(input_method.indicator());
-  }
-
-  base::string16 text;
-  // Check special cases first.
-  for (size_t i = 0; i < kMappingFromIdToIndicatorTextLen; ++i) {
-    if (extension_ime_util::GetInputMethodIDByEngineID(
-        kMappingFromIdToIndicatorText[i].engine_id) == input_method.id()) {
-      text = base::UTF8ToUTF16(kMappingFromIdToIndicatorText[i].indicator_text);
-      break;
-    }
-  }
-
-  // Display the keyboard layout name when using a keyboard layout.
-  if (text.empty() && IsKeyboardLayout(input_method.id())) {
-    std::map<std::string, std::string>::const_iterator it =
-        xkb_layout_to_indicator_.find(GetKeyboardLayoutName(input_method.id()));
-    if (it != xkb_layout_to_indicator_.end())
-      text = base::UTF8ToUTF16(it->second);
-  }
-
-  // TODO(yusukes): Some languages have two or more input methods. For example,
-  // Thai has 3, Vietnamese has 4. If these input methods could be activated at
-  // the same time, we should do either of the following:
-  //   (1) Add mappings to |kMappingFromIdToIndicatorText|
-  //   (2) Add suffix (1, 2, ...) to |text| when ambiguous.
-
-  if (text.empty()) {
-    const size_t kMaxLanguageNameLen = 2;
-    DCHECK(!input_method.language_codes().empty());
-    const std::string language_code = input_method.language_codes().at(0);
-    text = StringToUpperASCII(base::UTF8ToUTF16(language_code)).substr(
-        0, kMaxLanguageNameLen);
-  }
-  DCHECK(!text.empty()) << input_method.id();
-  return text;
+  // TODO(shuchen): remove this method, as the client can directly use
+  // input_method.GetIndicator().
+  return base::UTF8ToUTF16(input_method.GetIndicator());
 }
 
 base::string16 InputMethodUtil::GetInputMethodMediumName(
@@ -434,8 +293,8 @@ base::string16 InputMethodUtil::GetInputMethodMediumName(
   return GetInputMethodShortName(input_method);
 }
 
-base::string16 InputMethodUtil::GetInputMethodLongName(
-    const InputMethodDescriptor& input_method) const {
+base::string16 InputMethodUtil::GetInputMethodLongNameInternal(
+    const InputMethodDescriptor& input_method, bool short_name) const {
   if (!input_method.name().empty() && !IsKeyboardLayout(input_method.id())) {
     // If the descriptor has a name, use it.
     return base::UTF8ToUTF16(input_method.name());
@@ -443,30 +302,34 @@ base::string16 InputMethodUtil::GetInputMethodLongName(
 
   // We don't show language here.  Name of keyboard layout or input method
   // usually imply (or explicitly include) its language.
-
   // Special case for German, French and Dutch: these languages have multiple
   // keyboard layouts and share the same layout of keyboard (Belgian). We need
-  // to show explicitly the language for the layout. For Arabic, Amharic, and
-  // Indic languages: they share "Standard Input Method".
-  const base::string16 standard_input_method_text =
-      delegate_->GetLocalizedString(
-          IDS_OPTIONS_SETTINGS_LANGUAGES_M17N_STANDARD_INPUT_METHOD);
+  // to show explicitly the language for the layout.
   DCHECK(!input_method.language_codes().empty());
   const std::string language_code = input_method.language_codes().at(0);
 
-  base::string16 text = TranslateString(input_method.id());
-  if (text == standard_input_method_text ||
-             language_code == "de" ||
-             language_code == "fr" ||
-             language_code == "nl") {
+  base::string16 text = (short_name || input_method.name().empty())
+      ? TranslateString(input_method.id())
+      : base::UTF8ToUTF16(input_method.name());
+  if (language_code == "de" || language_code == "fr" || language_code == "nl") {
     const base::string16 language_name = delegate_->GetDisplayLanguageName(
         language_code);
-
     text = language_name + base::UTF8ToUTF16(" - ") + text;
   }
 
   DCHECK(!text.empty());
   return text;
+}
+
+
+base::string16 InputMethodUtil::GetInputMethodLongNameStripped(
+    const InputMethodDescriptor& input_method) const {
+  return GetInputMethodLongNameInternal(input_method, true /* short_name */);
+}
+
+base::string16 InputMethodUtil::GetInputMethodLongName(
+    const InputMethodDescriptor& input_method) const {
+  return GetInputMethodLongNameInternal(input_method, false /* short_name */);
 }
 
 const InputMethodDescriptor* InputMethodUtil::GetInputMethodDescriptorFromId(
@@ -524,10 +387,11 @@ void InputMethodUtil::GetFirstLoginInputMethodIds(
 
   const std::string current_layout
       = current_input_method.GetPreferredKeyboardLayout();
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kDefaultInputMethodRecommendation);
+  for (size_t i = 0; i < arraysize(kDefaultInputMethodRecommendation);
        ++i) {
-    if (kDefaultInputMethodRecommendation[i].locale == language_code &&
-        kDefaultInputMethodRecommendation[i].layout == current_layout) {
+    if (kDefaultInputMethodRecommendation[i].locale == language_code && (
+        !kDefaultInputMethodRecommendation[i].layout[0] ||
+        kDefaultInputMethodRecommendation[i].layout == current_layout)) {
       out_input_method_ids->push_back(
           extension_ime_util::GetInputMethodIDByEngineID(
               kDefaultInputMethodRecommendation[i].engine_id));
@@ -623,17 +487,18 @@ bool InputMethodUtil::MigrateInputMethods(
         break;
       }
     }
+    // Migrates the extension IDs.
     std::string id =
         extension_ime_util::GetInputMethodIDByEngineID(engine_id);
-    // Migrates old ime id's to new ones.
-    for (size_t j = 0; j < arraysize(kExtensionIdMigrationMap); ++j) {
-      size_t pos = id.find(kExtensionIdMigrationMap[j][0]);
-      if (pos != std::string::npos)
-        id.replace(pos, kExtensionIdLen, kExtensionIdMigrationMap[j][1]);
-      if (id != ids[i]) {
-        ids[i] = id;
-        rewritten = true;
-      }
+    if (extension_ime_util::IsComponentExtensionIME(id)) {
+      std::string id_new = extension_ime_util::GetInputMethodIDByEngineID(
+          extension_ime_util::GetComponentIDByInputMethodID(id));
+      if (extension_ime_util::IsComponentExtensionIME(id_new))
+        id = id_new;
+    }
+    if (id != ids[i]) {
+      ids[i] = id;
+      rewritten = true;
     }
   }
   if (rewritten) {
@@ -662,15 +527,17 @@ void InputMethodUtil::UpdateHardwareLayoutCache() {
     if (IsLoginKeyboard(hardware_layouts_[i]))
       hardware_login_layouts_.push_back(hardware_layouts_[i]);
   }
-  if (hardware_layouts_.empty()) {
-    // This is totally fine if it's empty. The hardware keyboard layout is
-    // not stored if startup_manifest.json (OEM customization data) is not
-    // present (ex. Cr48 doen't have that file).
-    hardware_layouts_.push_back(GetFallbackInputMethodDescriptor().id());
-  }
 
-  if (hardware_login_layouts_.empty())
-    hardware_login_layouts_.push_back(GetFallbackInputMethodDescriptor().id());
+  if (hardware_login_layouts_.empty()) {
+    // This is totally fine if |hardware_layouts_| is empty. The hardware
+    // keyboard layout is not stored if startup_manifest.json
+    // (OEM customization data) is not present (ex. Cr48 doen't have that file).
+    // So need to make sure |hardware_login_layouts_| is not empty, and
+    // |hardware_layouts_| contains at least one login layout.
+    std::string fallback_id = GetFallbackInputMethodDescriptor().id();
+    hardware_layouts_.insert(hardware_layouts_.begin(), fallback_id);
+    hardware_login_layouts_.push_back(fallback_id);
+  }
 }
 
 void InputMethodUtil::SetHardwareKeyboardLayoutForTesting(

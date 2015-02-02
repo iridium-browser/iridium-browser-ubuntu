@@ -175,13 +175,16 @@ Node::InsertionNotificationRequest ShadowRoot::insertedInto(ContainerNode* inser
 
 void ShadowRoot::removedFrom(ContainerNode* insertionPoint)
 {
-    if (insertionPoint->inDocument() && m_registeredWithParentShadowRoot) {
-        ShadowRoot* root = host()->containingShadowRoot();
-        if (!root)
-            root = insertionPoint->containingShadowRoot();
-        if (root)
-            root->removeChildShadowRoot();
-        m_registeredWithParentShadowRoot = false;
+    if (insertionPoint->inDocument()) {
+        clearScopedStyleResolver();
+        if (m_registeredWithParentShadowRoot) {
+            ShadowRoot* root = host()->containingShadowRoot();
+            if (!root)
+                root = insertionPoint->containingShadowRoot();
+            if (root)
+                root->removeChildShadowRoot();
+            m_registeredWithParentShadowRoot = false;
+        }
     }
 
     DocumentFragment::removedFrom(insertionPoint);
@@ -300,8 +303,8 @@ const WillBeHeapVector<RefPtrWillBeMember<InsertionPoint> >& ShadowRoot::descend
         return emptyList;
 
     WillBeHeapVector<RefPtrWillBeMember<InsertionPoint> > insertionPoints;
-    for (InsertionPoint* insertionPoint = Traversal<InsertionPoint>::firstWithin(*this); insertionPoint; insertionPoint = Traversal<InsertionPoint>::next(*insertionPoint, this))
-        insertionPoints.append(insertionPoint);
+    for (InsertionPoint& insertionPoint : Traversal<InsertionPoint>::descendantsOf(*this))
+        insertionPoints.append(&insertionPoint);
 
     ensureShadowRootRareData()->setDescendantInsertionPoints(insertionPoints);
 

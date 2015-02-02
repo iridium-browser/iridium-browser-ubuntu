@@ -30,7 +30,7 @@ class BrowserCommandController : public CommandUpdaterDelegate,
                                  public TabRestoreServiceObserver {
  public:
   explicit BrowserCommandController(Browser* browser);
-  virtual ~BrowserCommandController();
+  ~BrowserCommandController() override;
 
   CommandUpdater* command_updater() { return &command_updater_; }
   bool block_command_execution() const { return block_command_execution_; }
@@ -78,27 +78,25 @@ class BrowserCommandController : public CommandUpdaterDelegate,
   class InterstitialObserver;
 
   // Overridden from CommandUpdaterDelegate:
-  virtual void ExecuteCommandWithDisposition(
-      int id,
-      WindowOpenDisposition disposition) OVERRIDE;
+  void ExecuteCommandWithDisposition(int id, WindowOpenDisposition disposition)
+      override;
 
   // Overridden from TabStripModelObserver:
-  virtual void TabInsertedAt(content::WebContents* contents,
-                             int index,
-                             bool foreground) OVERRIDE;
-  virtual void TabDetachedAt(content::WebContents* contents,
-                             int index) OVERRIDE;
-  virtual void TabReplacedAt(TabStripModel* tab_strip_model,
-                             content::WebContents* old_contents,
-                             content::WebContents* new_contents,
-                             int index) OVERRIDE;
-  virtual void TabBlockedStateChanged(content::WebContents* contents,
-                                      int index) OVERRIDE;
+  void TabInsertedAt(content::WebContents* contents,
+                     int index,
+                     bool foreground) override;
+  void TabDetachedAt(content::WebContents* contents, int index) override;
+  void TabReplacedAt(TabStripModel* tab_strip_model,
+                     content::WebContents* old_contents,
+                     content::WebContents* new_contents,
+                     int index) override;
+  void TabBlockedStateChanged(content::WebContents* contents,
+                              int index) override;
 
   // Overridden from TabRestoreServiceObserver:
-  virtual void TabRestoreServiceChanged(TabRestoreService* service) OVERRIDE;
-  virtual void TabRestoreServiceDestroyed(TabRestoreService* service) OVERRIDE;
-  virtual void TabRestoreServiceLoaded(TabRestoreService* service) OVERRIDE;
+  void TabRestoreServiceChanged(TabRestoreService* service) override;
+  void TabRestoreServiceDestroyed(TabRestoreService* service) override;
+  void TabRestoreServiceLoaded(TabRestoreService* service) override;
 
   // Returns true if the regular Chrome UI (not the fullscreen one and
   // not the single-tab one) is shown. Used for updating window command states

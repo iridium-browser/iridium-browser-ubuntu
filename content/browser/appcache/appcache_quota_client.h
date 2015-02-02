@@ -33,23 +33,23 @@ class AppCacheQuotaClient : public storage::QuotaClient {
  public:
   typedef std::deque<base::Closure> RequestQueue;
 
-  virtual ~AppCacheQuotaClient();
+  ~AppCacheQuotaClient() override;
 
   // QuotaClient method overrides
-  virtual ID id() const OVERRIDE;
-  virtual void OnQuotaManagerDestroyed() OVERRIDE;
-  virtual void GetOriginUsage(const GURL& origin,
-                              storage::StorageType type,
-                              const GetUsageCallback& callback) OVERRIDE;
-  virtual void GetOriginsForType(storage::StorageType type,
-                                 const GetOriginsCallback& callback) OVERRIDE;
-  virtual void GetOriginsForHost(storage::StorageType type,
-                                 const std::string& host,
-                                 const GetOriginsCallback& callback) OVERRIDE;
-  virtual void DeleteOriginData(const GURL& origin,
-                                storage::StorageType type,
-                                const DeletionCallback& callback) OVERRIDE;
-  virtual bool DoesSupport(storage::StorageType type) const OVERRIDE;
+  ID id() const override;
+  void OnQuotaManagerDestroyed() override;
+  void GetOriginUsage(const GURL& origin,
+                      storage::StorageType type,
+                      const GetUsageCallback& callback) override;
+  void GetOriginsForType(storage::StorageType type,
+                         const GetOriginsCallback& callback) override;
+  void GetOriginsForHost(storage::StorageType type,
+                         const std::string& host,
+                         const GetOriginsCallback& callback) override;
+  void DeleteOriginData(const GURL& origin,
+                        storage::StorageType type,
+                        const DeletionCallback& callback) override;
+  bool DoesSupport(storage::StorageType type) const override;
 
  private:
   friend class content::AppCacheQuotaClientTest;

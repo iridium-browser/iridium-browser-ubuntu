@@ -47,40 +47,38 @@ class AutofillWebDataService : public AutofillWebData,
                          const ProfileErrorCallback& callback);
 
   // WebDataServiceBase implementation.
-  virtual void ShutdownOnUIThread() OVERRIDE;
+  void ShutdownOnUIThread() override;
 
   // AutofillWebData implementation.
-  virtual void AddFormFields(
-      const std::vector<FormFieldData>& fields) OVERRIDE;
-  virtual WebDataServiceBase::Handle GetFormValuesForElementName(
+  void AddFormFields(const std::vector<FormFieldData>& fields) override;
+  WebDataServiceBase::Handle GetFormValuesForElementName(
       const base::string16& name,
       const base::string16& prefix,
       int limit,
-      WebDataServiceConsumer* consumer) OVERRIDE;
+      WebDataServiceConsumer* consumer) override;
 
-  virtual WebDataServiceBase::Handle HasFormElements(
-      WebDataServiceConsumer* consumer) OVERRIDE;
-  virtual void RemoveFormElementsAddedBetween(
-      const base::Time& delete_begin, const base::Time& delete_end) OVERRIDE;
-  virtual void RemoveFormValueForElementName(
-      const base::string16& name,
-      const base::string16& value) OVERRIDE;
-  virtual void AddAutofillProfile(const AutofillProfile& profile) OVERRIDE;
-  virtual void UpdateAutofillProfile(const AutofillProfile& profile) OVERRIDE;
-  virtual void RemoveAutofillProfile(const std::string& guid) OVERRIDE;
-  virtual WebDataServiceBase::Handle GetAutofillProfiles(
-      WebDataServiceConsumer* consumer) OVERRIDE;
-  virtual void UpdateAutofillEntries(
-      const std::vector<AutofillEntry>& autofill_entries) OVERRIDE;
-  virtual void AddCreditCard(const CreditCard& credit_card) OVERRIDE;
-  virtual void UpdateCreditCard(const CreditCard& credit_card) OVERRIDE;
-  virtual void RemoveCreditCard(const std::string& guid) OVERRIDE;
-  virtual WebDataServiceBase::Handle GetCreditCards(
-      WebDataServiceConsumer* consumer) OVERRIDE;
-  virtual void RemoveAutofillDataModifiedBetween(
-      const base::Time& delete_begin, const base::Time& delete_end) OVERRIDE;
-  virtual void RemoveOriginURLsModifiedBetween(
-      const base::Time& delete_begin, const base::Time& delete_end) OVERRIDE;
+  WebDataServiceBase::Handle HasFormElements(
+      WebDataServiceConsumer* consumer) override;
+  void RemoveFormElementsAddedBetween(const base::Time& delete_begin,
+                                      const base::Time& delete_end) override;
+  void RemoveFormValueForElementName(const base::string16& name,
+                                     const base::string16& value) override;
+  void AddAutofillProfile(const AutofillProfile& profile) override;
+  void UpdateAutofillProfile(const AutofillProfile& profile) override;
+  void RemoveAutofillProfile(const std::string& guid) override;
+  WebDataServiceBase::Handle GetAutofillProfiles(
+      WebDataServiceConsumer* consumer) override;
+  void UpdateAutofillEntries(
+      const std::vector<AutofillEntry>& autofill_entries) override;
+  void AddCreditCard(const CreditCard& credit_card) override;
+  void UpdateCreditCard(const CreditCard& credit_card) override;
+  void RemoveCreditCard(const std::string& guid) override;
+  WebDataServiceBase::Handle GetCreditCards(
+      WebDataServiceConsumer* consumer) override;
+  void RemoveAutofillDataModifiedBetween(const base::Time& delete_begin,
+                                         const base::Time& delete_end) override;
+  void RemoveOriginURLsModifiedBetween(const base::Time& delete_begin,
+                                       const base::Time& delete_end) override;
 
   void AddObserver(AutofillWebDataServiceObserverOnDBThread* observer);
   void RemoveObserver(AutofillWebDataServiceObserverOnDBThread* observer);
@@ -101,7 +99,7 @@ class AutofillWebDataService : public AutofillWebData,
       const base::Callback<void(AutofillWebDataBackend*)>& callback);
 
  protected:
-  virtual ~AutofillWebDataService();
+  ~AutofillWebDataService() override;
 
   virtual void NotifyAutofillMultipleChangedOnUIThread();
 

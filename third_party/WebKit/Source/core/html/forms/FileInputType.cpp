@@ -213,22 +213,22 @@ void FileInputType::setValue(const String&, bool valueChanged, TextFieldEventBeh
         return;
 
     m_fileList->clear();
-    element().setNeedsStyleRecalc(SubtreeStyleChange);
+    element().setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::create(StyleChangeReason::ControlValue));
     element().setNeedsValidityCheck();
 }
 
-PassRefPtrWillBeRawPtr<FileList> FileInputType::createFileList(const Vector<FileChooserFileInfo>& files) const
+FileList* FileInputType::createFileList(const Vector<FileChooserFileInfo>& files, bool hasWebkitDirectoryAttr)
 {
-    RefPtrWillBeRawPtr<FileList> fileList(FileList::create());
+    FileList* fileList(FileList::create());
     size_t size = files.size();
 
     // If a directory is being selected, the UI allows a directory to be chosen
     // and the paths provided here share a root directory somewhere up the tree;
     // we want to store only the relative paths from that point.
-    if (size && element().fastHasAttribute(webkitdirectoryAttr)) {
+    if (size && hasWebkitDirectoryAttr) {
         // Find the common root path.
         String rootPath = directoryName(files[0].path);
-        for (size_t i = 1; i < size; i++) {
+        for (size_t i = 1; i < size; ++i) {
             while (!files[i].path.startsWith(rootPath))
                 rootPath = directoryName(rootPath);
         }
@@ -237,7 +237,7 @@ PassRefPtrWillBeRawPtr<FileList> FileInputType::createFileList(const Vector<File
         int rootLength = rootPath.length();
         if (rootPath[rootLength - 1] != '\\' && rootPath[rootLength - 1] != '/')
             rootLength += 1;
-        for (size_t i = 0; i < size; i++) {
+        for (size_t i = 0; i < size; ++i) {
             // Normalize backslashes to slashes before exposing the relative path to script.
             String relativePath = files[i].path.substring(rootLength).replace('\\', '/');
             fileList->append(File::createWithRelativePath(files[i].path, relativePath));
@@ -245,8 +245,13 @@ PassRefPtrWillBeRawPtr<FileList> FileInputType::createFileList(const Vector<File
         return fileList;
     }
 
-    for (size_t i = 0; i < size; i++)
-        fileList->append(File::createForUserProvidedFile(files[i].path, files[i].displayName));
+    for (size_t i = 0; i < size; ++i) {
+        if (files[i].fileSystemURL.isEmpty()) {
+            fileList->append(File::createForUserProvidedFile(files[i].path, files[i].displayName));
+        } else {
+            fileList->append(File::createForFileSystemFile(files[i].fileSystemURL, files[i].metadata, File::IsUserVisible));
+        }
+    }
     return fileList;
 }
 
@@ -274,20 +279,20 @@ void FileInputType::multipleAttributeChanged()
         button->setAttribute(valueAttr, AtomicString(locale().queryString(element().multiple() ? WebLocalizedString::FileButtonChooseMultipleFilesLabel : WebLocalizedString::FileButtonChooseFileLabel)));
 }
 
-void FileInputType::setFiles(PassRefPtrWillBeRawPtr<FileList> files)
+void FileInputType::setFiles(FileList* files)
 {
     if (!files)
         return;
 
     RefPtrWillBeRawPtr<HTMLInputElement> input(element());
 
-    bool pathsChanged = false;
+    bool filesChanged = false;
     if (files->length() != m_fileList->length()) {
-        pathsChanged = true;
+        filesChanged = true;
     } else {
         for (unsigned i = 0; i < files->length(); ++i) {
-            if (files->item(i)->path() != m_fileList->item(i)->path()) {
-                pathsChanged = true;
+            if (!files->item(i)->hasSameSource(*m_fileList->item(i))) {
+                filesChanged = true;
                 break;
             }
         }
@@ -299,9 +304,9 @@ void FileInputType::setFiles(PassRefPtrWillBeRawPtr<FileList> files)
     input->setNeedsValidityCheck();
 
     if (input->renderer())
-        input->renderer()->setShouldDoFullPaintInvalidation(true);
+        input->renderer()->setShouldDoFullPaintInvalidation();
 
-    if (pathsChanged) {
+    if (filesChanged) {
         // This call may cause destruction of this instance.
         // input instance is safe since it is ref-counted.
         input->dispatchChangeEvent();
@@ -311,7 +316,7 @@ void FileInputType::setFiles(PassRefPtrWillBeRawPtr<FileList> files)
 
 void FileInputType::filesChosen(const Vector<FileChooserFileInfo>& files)
 {
-    setFiles(createFileList(files));
+    setFiles(createFileList(files, element().fastHasAttribute(webkitdirectoryAttr)));
 }
 
 void FileInputType::receiveDropForDirectoryUpload(const Vector<String>& paths)
@@ -331,7 +336,7 @@ void FileInputType::receiveDropForDirectoryUpload(const Vector<String>& paths)
 bool FileInputType::receiveDroppedFiles(const DragData* dragData)
 {
     Vector<String> paths;
-    dragData->asFilenames(paths);
+    dragData->asFilePaths(paths);
     if (paths.isEmpty())
         return false;
 

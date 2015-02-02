@@ -6,13 +6,17 @@
 
 #include "athena/activity/public/activity_factory.h"
 #include "athena/activity/public/activity_manager.h"
+#include "athena/activity/public/activity_view.h"
 #include "athena/content/content_proxy.h"
+#include "athena/content/media_utils.h"
 #include "athena/content/public/dialogs.h"
+#include "athena/content/web_activity_helpers.h"
 #include "athena/input/public/accelerator_manager.h"
 #include "athena/strings/grit/athena_strings.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/strings/utf_string_conversions.h"
+#include "components/app_modal_dialogs/javascript_dialog_manager.h"
 #include "components/favicon_base/select_favicon_frames.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/navigation_controller.h"
@@ -45,9 +49,12 @@ class WebActivityController : public AcceleratorHandler {
     CMD_STOP,
   };
 
-  explicit WebActivityController(views::WebView* web_view)
-      : web_view_(web_view), reserved_accelerator_enabled_(true) {}
-  virtual ~WebActivityController() {}
+  explicit WebActivityController(WebActivity* owner_activity,
+                                 views::WebView* web_view)
+      : owner_activity_(owner_activity),
+        web_view_(web_view),
+        reserved_accelerator_enabled_(true) {}
+  ~WebActivityController() override {}
 
   // Installs accelerators for web activity.
   void InstallAccelerators() {
@@ -100,7 +107,7 @@ class WebActivityController : public AcceleratorHandler {
 
  private:
   // AcceleratorHandler:
-  virtual bool IsCommandEnabled(int command_id) const OVERRIDE {
+  bool IsCommandEnabled(int command_id) const override {
     switch (command_id) {
       case CMD_RELOAD:
       case CMD_RELOAD_IGNORE_CACHE:
@@ -118,8 +125,8 @@ class WebActivityController : public AcceleratorHandler {
     return false;
   }
 
-  virtual bool OnAcceleratorFired(int command_id,
-                                  const ui::Accelerator& accelerator) OVERRIDE {
+  bool OnAcceleratorFired(int command_id,
+                          const ui::Accelerator& accelerator) override {
     switch (command_id) {
       case CMD_RELOAD:
         web_view_->GetWebContents()->GetController().Reload(false);
@@ -134,7 +141,7 @@ class WebActivityController : public AcceleratorHandler {
         web_view_->GetWebContents()->GetController().GoForward();
         return true;
       case CMD_CLOSE:
-        web_view_->GetWidget()->Close();
+        Activity::Delete(owner_activity_);
         return true;
       case CMD_STOP:
         web_view_->GetWebContents()->Stop();
@@ -143,6 +150,7 @@ class WebActivityController : public AcceleratorHandler {
     return false;
   }
 
+  Activity* const owner_activity_;
   views::WebView* web_view_;
   bool reserved_accelerator_enabled_;
   scoped_ptr<AcceleratorManager> accelerator_manager_;
@@ -152,10 +160,9 @@ class WebActivityController : public AcceleratorHandler {
 };
 
 const SkColor kDefaultTitleColor = SkColorSetRGB(0xf2, 0xf2, 0xf2);
-const SkColor kDefaultUnavailableColor = SkColorSetRGB(0xbb, 0x77, 0x77);
 const int kIconSize = 32;
-const int kDistanceShowReloadMessage = 100;
-const int kDistanceReload = 150;
+const float kDistanceShowReloadMessage = 100;
+const float kDistanceReload = 150;
 
 }  // namespace
 
@@ -163,8 +170,11 @@ const int kDistanceReload = 150;
 // own content so that it can eject and reload it.
 class AthenaWebView : public views::WebView {
  public:
-  AthenaWebView(content::BrowserContext* context)
-      : views::WebView(context), controller_(new WebActivityController(this)),
+  explicit AthenaWebView(content::BrowserContext* context,
+                         WebActivity* owner_activity)
+      : views::WebView(context),
+        controller_(new WebActivityController(owner_activity, this)),
+        owner_activity_(owner_activity),
         fullscreen_(false),
         overscroll_y_(0) {
     SetEmbedFullscreenWidgetMode(true);
@@ -172,14 +182,16 @@ class AthenaWebView : public views::WebView {
     // content status to unloaded if that happens.
   }
 
-  AthenaWebView(content::WebContents* web_contents)
+  AthenaWebView(content::WebContents* web_contents,
+                WebActivity* owner_activity)
       : views::WebView(web_contents->GetBrowserContext()),
-        controller_(new WebActivityController(this)) {
+        controller_(new WebActivityController(owner_activity, this)),
+        owner_activity_(owner_activity) {
     scoped_ptr<content::WebContents> old_contents(
         SwapWebContents(scoped_ptr<content::WebContents>(web_contents)));
   }
 
-  virtual ~AthenaWebView() {}
+  ~AthenaWebView() override {}
 
   void InstallAccelerators() { controller_->InstallAccelerators(); }
 
@@ -203,19 +215,29 @@ class AthenaWebView : public views::WebView {
     // run into this state. by unloading.
   }
 
-  void ReloadContent() {
+  void AttachHelpers() {
+    if (!IsContentEvicted())
+      AttachWebActivityHelpers(GetWebContents());
+    // Else: The helpers will be attached when the evicted content is reloaded.
+  }
+
+  void ReloadEvictedContent() {
     CHECK(evicted_web_contents_.get());
-    scoped_ptr<content::WebContents> replaced_contents(SwapWebContents(
-        evicted_web_contents_.Pass()));
+
+    // Order is important. The helpers must be attached prior to the RenderView
+    // being created.
+    AttachWebActivityHelpers(evicted_web_contents_.get());
+
+    SwapWebContents(evicted_web_contents_.Pass());
   }
 
   // Check if the content got evicted.
   const bool IsContentEvicted() { return !!evicted_web_contents_.get(); }
 
   // content::WebContentsDelegate:
-  virtual content::WebContents* OpenURLFromTab(
+  content::WebContents* OpenURLFromTab(
       content::WebContents* source,
-      const content::OpenURLParams& params) OVERRIDE {
+      const content::OpenURLParams& params) override {
     switch(params.disposition) {
       case CURRENT_TAB: {
         DCHECK(source == web_contents());
@@ -245,17 +267,17 @@ class AthenaWebView : public views::WebView {
       default:
         break;
     }
-    // NULL is returned if the URL wasn't opened immediately.
-    return NULL;
+    // nullptr is returned if the URL wasn't opened immediately.
+    return nullptr;
   }
 
-  virtual bool CanOverscrollContent() const OVERRIDE {
+  bool CanOverscrollContent() const override {
     const std::string value = CommandLine::ForCurrentProcess()->
         GetSwitchValueASCII(switches::kOverscrollHistoryNavigation);
     return value != "0";
   }
 
-  virtual void OverscrollUpdate(int delta_y) OVERRIDE {
+  void OverscrollUpdate(float delta_y) override {
     overscroll_y_ = delta_y;
     if (overscroll_y_ > kDistanceShowReloadMessage) {
       if (!reload_message_)
@@ -263,9 +285,8 @@ class AthenaWebView : public views::WebView {
       reload_message_->Show();
       float opacity = 1.0f;
       if (overscroll_y_ < kDistanceReload) {
-        opacity =
-            (overscroll_y_ - kDistanceShowReloadMessage) /
-            static_cast<float>(kDistanceReload - kDistanceShowReloadMessage);
+        opacity = (overscroll_y_ - kDistanceShowReloadMessage) /
+            (kDistanceReload - kDistanceShowReloadMessage);
       }
       reload_message_->GetLayer()->SetOpacity(opacity);
     } else if (reload_message_) {
@@ -273,7 +294,7 @@ class AthenaWebView : public views::WebView {
     }
   }
 
-  virtual void OverscrollComplete() OVERRIDE {
+  void OverscrollComplete() override {
     if (overscroll_y_ >= kDistanceReload)
       GetWebContents()->GetController().Reload(false);
     if (reload_message_)
@@ -281,50 +302,49 @@ class AthenaWebView : public views::WebView {
     overscroll_y_ = 0;
   }
 
-  virtual void AddNewContents(content::WebContents* source,
-                              content::WebContents* new_contents,
-                              WindowOpenDisposition disposition,
-                              const gfx::Rect& initial_pos,
-                              bool user_gesture,
-                              bool* was_blocked) OVERRIDE {
-    // TODO(oshima): Use factory.
-    ActivityManager::Get()->AddActivity(
-        new WebActivity(new AthenaWebView(new_contents)));
+  void AddNewContents(content::WebContents* source,
+                      content::WebContents* new_contents,
+                      WindowOpenDisposition disposition,
+                      const gfx::Rect& initial_pos,
+                      bool user_gesture,
+                      bool* was_blocked) override {
+    Activity* activity =
+        ActivityFactory::Get()->CreateWebActivity(new_contents);
+    Activity::Show(activity);
   }
 
-  virtual bool PreHandleKeyboardEvent(
-      content::WebContents* source,
-      const content::NativeWebKeyboardEvent& event,
-      bool* is_keyboard_shortcut) OVERRIDE {
+  bool PreHandleKeyboardEvent(content::WebContents* source,
+                              const content::NativeWebKeyboardEvent& event,
+                              bool* is_keyboard_shortcut) override {
     return controller_->PreHandleKeyboardEvent(
         source, event, is_keyboard_shortcut);
   }
 
-  virtual void HandleKeyboardEvent(
+  void HandleKeyboardEvent(
       content::WebContents* source,
-      const content::NativeWebKeyboardEvent& event) OVERRIDE {
+      const content::NativeWebKeyboardEvent& event) override {
     controller_->HandleKeyboardEvent(source, event);
   }
 
-  virtual void ToggleFullscreenModeForTab(content::WebContents* web_contents,
-                                          bool enter_fullscreen) OVERRIDE {
+  void ToggleFullscreenModeForTab(content::WebContents* web_contents,
+                                  bool enter_fullscreen) override {
     fullscreen_ = enter_fullscreen;
     GetWidget()->SetFullscreen(fullscreen_);
   }
 
-  virtual bool IsFullscreenForTabOrPending(
-      const content::WebContents* web_contents) const OVERRIDE {
+  bool IsFullscreenForTabOrPending(
+      const content::WebContents* web_contents) const override {
     return fullscreen_;
   }
 
-  virtual void LoadingStateChanged(content::WebContents* source,
-                                   bool to_different_document) OVERRIDE {
-    bool has_stopped = source == NULL || !source->IsLoading();
+  void LoadingStateChanged(content::WebContents* source,
+                           bool to_different_document) override {
+    bool has_stopped = source == nullptr || !source->IsLoading();
     LoadProgressChanged(source, has_stopped ? 1 : 0);
   }
 
-  virtual void LoadProgressChanged(content::WebContents* source,
-                                   double progress) OVERRIDE {
+  void LoadProgressChanged(content::WebContents* source,
+                           double progress) override {
     if (!progress)
       return;
 
@@ -345,18 +365,25 @@ class AthenaWebView : public views::WebView {
     layer->SetOpacity(0.f);
   }
 
-  virtual content::ColorChooser* OpenColorChooser(
+  content::JavaScriptDialogManager* GetJavaScriptDialogManager() override {
+    return GetJavaScriptDialogManagerInstance();
+  }
+
+  content::ColorChooser* OpenColorChooser(
       content::WebContents* web_contents,
       SkColor color,
-      const std::vector<content::ColorSuggestion>& suggestions) OVERRIDE {
+      const std::vector<content::ColorSuggestion>& suggestions) override {
     return athena::OpenColorChooser(web_contents, color, suggestions);
   }
 
   // Called when a file selection is to be done.
-  virtual void RunFileChooser(
-      content::WebContents* web_contents,
-      const content::FileChooserParams& params) OVERRIDE {
+  void RunFileChooser(content::WebContents* web_contents,
+                      const content::FileChooserParams& params) override {
     return athena::OpenFileChooser(web_contents, params);
+  }
+
+  void CloseContents(content::WebContents* contents) override {
+    Activity::Delete(owner_activity_);
   }
 
  private:
@@ -387,6 +414,8 @@ class AthenaWebView : public views::WebView {
 
   scoped_ptr<WebActivityController> controller_;
 
+  Activity* const owner_activity_;
+
   // If the activity got evicted, this is the web content which holds the known
   // state of the content before eviction.
   scoped_ptr<content::WebContents> evicted_web_contents_;
@@ -400,7 +429,7 @@ class AthenaWebView : public views::WebView {
   bool fullscreen_;
 
   // The distance that the user has overscrolled vertically.
-  int overscroll_y_;
+  float overscroll_y_;
 
   DISALLOW_COPY_AND_ASSIGN(AthenaWebView);
 };
@@ -409,22 +438,29 @@ WebActivity::WebActivity(content::BrowserContext* browser_context,
                          const base::string16& title,
                          const GURL& url)
     : browser_context_(browser_context),
+      web_view_(new AthenaWebView(browser_context, this)),
       title_(title),
-      url_(url),
-      web_view_(NULL),
       title_color_(kDefaultTitleColor),
       current_state_(ACTIVITY_UNLOADED),
+      activity_view_(nullptr),
       weak_ptr_factory_(this) {
+  // Order is important. The web activity helpers must be attached prior to the
+  // RenderView being created.
+  SetCurrentState(ACTIVITY_INVISIBLE);
+  web_view_->LoadInitialURL(url);
 }
 
-WebActivity::WebActivity(AthenaWebView* web_view)
-    : browser_context_(web_view->browser_context()),
-      url_(web_view->GetWebContents()->GetURL()),
-      web_view_(web_view),
+WebActivity::WebActivity(content::WebContents* contents)
+    : browser_context_(contents->GetBrowserContext()),
+      web_view_(new AthenaWebView(contents, this)),
+      title_color_(kDefaultTitleColor),
       current_state_(ACTIVITY_UNLOADED),
+      activity_view_(nullptr),
       weak_ptr_factory_(this) {
-  // Transition to state ACTIVITY_INVISIBLE to perform the same setup steps
-  // as on new activities (namely adding a WebContentsObserver).
+  // If the activity was created as a result of
+  // WebContentsDelegate::AddNewContents(), web activity helpers may not be
+  // created prior to the RenderView being created. Desktop Chrome has a
+  // similar problem.
   SetCurrentState(ACTIVITY_INVISIBLE);
 }
 
@@ -439,21 +475,20 @@ ActivityViewModel* WebActivity::GetActivityViewModel() {
 
 void WebActivity::SetCurrentState(Activity::ActivityState state) {
   DCHECK_NE(state, current_state_);
+  if (current_state_ == ACTIVITY_UNLOADED) {
+    web_view_->AttachHelpers();
+    if (web_view_->IsContentEvicted())
+      web_view_->ReloadEvictedContent();
+    Observe(web_view_->GetWebContents());
+  }
+
   switch (state) {
     case ACTIVITY_VISIBLE:
-      if (!web_view_)
-        break;
       HideContentProxy();
-      ReloadAndObserve();
       break;
     case ACTIVITY_INVISIBLE:
-      if (!web_view_)
-        break;
-
       if (current_state_ == ACTIVITY_VISIBLE)
         ShowContentProxy();
-      else
-        ReloadAndObserve();
 
       break;
     case ACTIVITY_BACKGROUND_LOW_PRIORITY:
@@ -470,7 +505,7 @@ void WebActivity::SetCurrentState(Activity::ActivityState state) {
       DCHECK_NE(ACTIVITY_UNLOADED, current_state_);
       if (content_proxy_)
         content_proxy_->ContentWillUnload();
-      Observe(NULL);
+      Observe(nullptr);
       web_view_->EvictContent();
       break;
   }
@@ -480,53 +515,54 @@ void WebActivity::SetCurrentState(Activity::ActivityState state) {
 
 Activity::ActivityState WebActivity::GetCurrentState() {
   // If the content is evicted, the state has to be UNLOADED.
-  DCHECK(!web_view_ ||
-         !web_view_->IsContentEvicted() ||
+  DCHECK(!web_view_->IsContentEvicted() ||
          current_state_ == ACTIVITY_UNLOADED);
   return current_state_;
 }
 
 bool WebActivity::IsVisible() {
-  return web_view_ &&
-         web_view_->visible() &&
-         current_state_ != ACTIVITY_UNLOADED;
+  return web_view_->visible() && current_state_ != ACTIVITY_UNLOADED;
 }
 
 Activity::ActivityMediaState WebActivity::GetMediaState() {
-  // TODO(skuhne): The function GetTabMediaStateForContents(WebContents),
-  // and the AudioStreamMonitor needs to be moved from Chrome into contents to
-  // make it more modular and so that we can use it from here.
-  return Activity::ACTIVITY_MEDIA_STATE_NONE;
+  return current_state_ == ACTIVITY_UNLOADED ?
+      Activity::ACTIVITY_MEDIA_STATE_NONE :
+      GetActivityMediaState(GetWebContents());
 }
 
 aura::Window* WebActivity::GetWindow() {
-  return !web_view_ ? NULL : web_view_->GetWidget()->GetNativeWindow();
+  return web_view_->GetWidget() ? web_view_->GetWidget()->GetNativeWindow()
+                                : nullptr;
 }
 
 content::WebContents* WebActivity::GetWebContents() {
-  return !web_view_ ? NULL : web_view_->GetWebContents();
+  return web_view_->GetWebContents();
 }
 
 void WebActivity::Init() {
-  DCHECK(web_view_);
   web_view_->InstallAccelerators();
 }
 
 SkColor WebActivity::GetRepresentativeColor() const {
-  return web_view_ ? title_color_ : kDefaultUnavailableColor;
+  return title_color_;
 }
 
 base::string16 WebActivity::GetTitle() const {
   if (!title_.empty())
     return title_;
-  // TODO(oshima): Use title set by the web contents.
-  return web_view_ ? base::UTF8ToUTF16(
-                         web_view_->GetWebContents()->GetVisibleURL().host())
-                   : base::string16();
+  const base::string16& title = web_view_->GetWebContents()->GetTitle();
+  if (!title.empty())
+    return title;
+  return base::UTF8ToUTF16(web_view_->GetWebContents()->GetVisibleURL().host());
 }
 
 gfx::ImageSkia WebActivity::GetIcon() const {
   return icon_;
+}
+
+void WebActivity::SetActivityView(ActivityView* view) {
+  DCHECK(!activity_view_);
+  activity_view_ = view;
 }
 
 bool WebActivity::UsesFrame() const {
@@ -534,31 +570,12 @@ bool WebActivity::UsesFrame() const {
 }
 
 views::View* WebActivity::GetContentsView() {
-  if (!web_view_) {
-    web_view_ = new AthenaWebView(browser_context_);
-    web_view_->LoadInitialURL(url_);
-    // Make sure the content gets properly shown.
-    if (current_state_ == ACTIVITY_VISIBLE) {
-      HideContentProxy();
-      ReloadAndObserve();
-    } else if (current_state_ == ACTIVITY_INVISIBLE) {
-      ShowContentProxy();
-      ReloadAndObserve();
-    } else {
-      // If not previously specified, we change the state now to invisible..
-      SetCurrentState(ACTIVITY_INVISIBLE);
-    }
-  }
   return web_view_;
-}
-
-views::Widget* WebActivity::CreateWidget() {
-  return NULL;  // Use default widget.
 }
 
 gfx::ImageSkia WebActivity::GetOverviewModeImage() {
   if (content_proxy_.get())
-    content_proxy_->GetContentImage();
+    return content_proxy_->GetContentImage();
   return gfx::ImageSkia();
 }
 
@@ -580,7 +597,8 @@ void WebActivity::ResetContentsView() {
 
 void WebActivity::TitleWasSet(content::NavigationEntry* entry,
                               bool explicit_set) {
-  ActivityManager::Get()->UpdateActivity(this);
+  if (activity_view_)
+    activity_view_->UpdateTitle();
 }
 
 void WebActivity::DidNavigateMainFrame(
@@ -590,7 +608,8 @@ void WebActivity::DidNavigateMainFrame(
   weak_ptr_factory_.InvalidateWeakPtrs();
 
   icon_ = gfx::ImageSkia();
-  ActivityManager::Get()->UpdateActivity(this);
+  if (activity_view_)
+    activity_view_->UpdateIcon();
 }
 
 void WebActivity::DidUpdateFaviconURL(
@@ -619,31 +638,25 @@ void WebActivity::OnDidDownloadFavicon(
     const std::vector<SkBitmap>& bitmaps,
     const std::vector<gfx::Size>& original_bitmap_sizes) {
   icon_ = CreateFaviconImageSkia(
-      bitmaps, original_bitmap_sizes, kIconSize, NULL);
-  ActivityManager::Get()->UpdateActivity(this);
+      bitmaps, original_bitmap_sizes, kIconSize, nullptr);
+  if (activity_view_)
+    activity_view_->UpdateIcon();
 }
 
 void WebActivity::DidChangeThemeColor(SkColor theme_color) {
   title_color_ = theme_color;
-  ActivityManager::Get()->UpdateActivity(this);
+  if (activity_view_)
+    activity_view_->UpdateRepresentativeColor();
 }
 
 void WebActivity::HideContentProxy() {
   if (content_proxy_.get())
-    content_proxy_.reset(NULL);
+    content_proxy_.reset(nullptr);
 }
 
 void WebActivity::ShowContentProxy() {
-  if (!content_proxy_.get() && web_view_)
-    content_proxy_.reset(new ContentProxy(web_view_, this));
-}
-
-void WebActivity::ReloadAndObserve() {
-  if (web_view_->IsContentEvicted()) {
-    DCHECK_EQ(ACTIVITY_UNLOADED, current_state_);
-    web_view_->ReloadContent();
-  }
-  Observe(web_view_->GetWebContents());
+  if (!content_proxy_.get())
+    content_proxy_.reset(new ContentProxy(web_view_));
 }
 
 }  // namespace athena

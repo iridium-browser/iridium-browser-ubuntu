@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
-
 /**
  * ImageEditor is the top level object that holds together and connects
  * everything needed for image editing.
@@ -13,7 +11,8 @@
  * @param {ImageEditor.Prompt} prompt Prompt instance.
  * @param {Object} DOMContainers Various DOM containers required for the editor.
  * @param {Array.<ImageEditor.Mode>} modes Available editor modes.
- * @param {function} displayStringFunction String formatting function.
+ * @param {function(string, ...[string])} displayStringFunction String
+ *     formatting function.
  * @param {function()} onToolsVisibilityChanged Callback to be called, when
  *     some of the UI elements have been dimmed or revealed.
  * @constructor
@@ -104,9 +103,9 @@ ImageEditor.prototype.onContentUpdate_ = function() {
  *
  * @param {Gallery.Item} item Gallery item.
  * @param {Object} effect Transition effect object.
- * @param {function(function)} saveFunction Image save function.
- * @param {function} displayCallback Display callback.
- * @param {function} loadCallback Load callback.
+ * @param {function(function())} saveFunction Image save function.
+ * @param {function(number)} displayCallback Display callback.
+ * @param {function(number, number, *=)} loadCallback Load callback.
  */
 ImageEditor.prototype.openSession = function(
     item, effect, saveFunction, displayCallback, loadCallback) {
@@ -132,7 +131,7 @@ ImageEditor.prototype.openSession = function(
 
 /**
  * Close the current image editing session.
- * @param {function} callback Callback.
+ * @param {function()} callback Callback.
  */
 ImageEditor.prototype.closeSession = function(callback) {
   this.getPrompt().hide();
@@ -160,7 +159,7 @@ ImageEditor.prototype.closeSession = function(callback) {
 /**
  * Commit the current operation and execute the action.
  *
- * @param {function} callback Callback.
+ * @param {function()} callback Callback.
  */
 ImageEditor.prototype.executeWhenReady = function(callback) {
   if (this.commandQueue_) {
@@ -615,9 +614,9 @@ ImageEditor.prototype.onDoubleTap_ = function(x, y) {
 /**
  * Hide the tools that overlap the given rectangular frame.
  *
- * @param {Rect} frame Hide the tool that overlaps this rect.
- * @param {Rect} transparent But do not hide the tool that is completely inside
- *                           this rect.
+ * @param {ImageRect} frame Hide the tool that overlaps this rect.
+ * @param {ImageRect} transparent But do not hide the tool that is completely
+ *     inside this rect.
  */
 ImageEditor.prototype.hideOverlappingTools = function(frame, transparent) {
   var tools = this.rootContainer_.ownerDocument.querySelectorAll('.dimmable');
@@ -713,7 +712,7 @@ ImageEditor.MouseControl.getPosition_ = function(e) {
  * Returns touch position or null if there is more than one touch position.
  *
  * @param {TouchEvent} e Event.
- * @return {object?} A pair of x,y in page coordinates.
+ * @return {Object?} A pair of x,y in page coordinates.
  * @private
  */
 ImageEditor.MouseControl.prototype.getTouchPosition_ = function(e) {
@@ -893,8 +892,9 @@ ImageEditor.MouseControl.prototype.updateCursor_ = function(position) {
 /**
  * A toolbar for the ImageEditor.
  * @param {HTMLElement} parent The parent element.
- * @param {function} displayStringFunction A string formatting function.
- * @param {function} updateCallback The callback called when controls change.
+ * @param {function(string)} displayStringFunction A string formatting function.
+ * @param {function(Object)} updateCallback The callback called when controls
+ *     change.
  * @constructor
  */
 ImageEditor.Toolbar = function(parent, displayStringFunction, updateCallback) {
@@ -953,7 +953,7 @@ ImageEditor.Toolbar.prototype.addLabel = function(name) {
  *
  * @param {string} name Button name.
  * @param {string} title Button title.
- * @param {function} handler onClick handler.
+ * @param {function(Event)} handler onClick handler.
  * @param {string=} opt_class Extra class name.
  * @return {HTMLElement} The added button.
  */
@@ -1080,7 +1080,8 @@ ImageEditor.Toolbar.prototype.show = function(on) {
 /** A prompt panel for the editor.
  *
  * @param {HTMLElement} container Container element.
- * @param {function} displayStringFunction A formatting function.
+ * @param {function(string, ...[string])} displayStringFunction A formatting
+ *     function.
  * @constructor
  */
 ImageEditor.Prompt = function(container, displayStringFunction) {
@@ -1112,7 +1113,7 @@ ImageEditor.Prompt.prototype.cancelTimer = function() {
 
 /**
  * Schedule the delayed action.
- * @param {function} callback Callback.
+ * @param {function()} callback Callback.
  * @param {number} timeout Timeout.
  */
 ImageEditor.Prompt.prototype.setTimer = function(callback, timeout) {

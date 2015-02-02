@@ -34,12 +34,12 @@ namespace blink {
 class AudioParam;
 class ExceptionState;
 
-class DelayNode FINAL : public AudioBasicProcessorNode {
+class DelayNode final : public AudioBasicProcessorNode {
     DEFINE_WRAPPERTYPEINFO();
 public:
     static DelayNode* create(AudioContext* context, float sampleRate, double maxDelayTime, ExceptionState& exceptionState)
     {
-        return adoptRefCountedGarbageCollectedWillBeNoop(new DelayNode(context, sampleRate, maxDelayTime, exceptionState));
+        return new DelayNode(context, sampleRate, maxDelayTime, exceptionState);
     }
 
     AudioParam* delayTime();

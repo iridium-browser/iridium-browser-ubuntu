@@ -24,14 +24,14 @@ namespace {
 // This class will test the language options settings.
 // This test is part of the interactive_ui_tests isntead of browser_tests
 // because it is necessary to emulate pushing a button in order to properly
-// test accessiblity.
+// test accessibility.
 class LanguageOptionsWebUITest : public InProcessBrowserTest {
  public:
   LanguageOptionsWebUITest() {}
 
   // This method will navigate to the language settings page and show
   // a subset of languages from the list of available languages.
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
 #if defined(OS_CHROMEOS)
     auto setting_name = prefs::kLanguagePreferredLanguages;
 #else

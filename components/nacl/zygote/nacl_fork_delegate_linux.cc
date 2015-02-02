@@ -188,7 +188,9 @@ void NaClForkDelegate::Init(const int sandboxdesc,
   status_ = kNaClHelperUnused;
   base::FilePath helper_exe;
   base::FilePath helper_bootstrap_exe;
-  if (!PathService::Get(nacl::FILE_NACL_HELPER, &helper_exe)) {
+  if (!PathService::Get(
+          nonsfi_mode_ ? nacl::FILE_NACL_HELPER_NONSFI : nacl::FILE_NACL_HELPER,
+          &helper_exe)) {
     status_ = kNaClHelperMissing;
   } else if (use_nacl_bootstrap &&
              !PathService::Get(nacl::FILE_NACL_HELPER_BOOTSTRAP,
@@ -208,6 +210,7 @@ void NaClForkDelegate::Init(const int sandboxdesc,
       // Append any switches that need to be forwarded to the NaCl helper.
       static const char* kForwardSwitches[] = {
         switches::kDisableSeccompFilterSandbox,
+        switches::kEnableNaClDebug,
         switches::kNaClDangerousNoSandboxNonSfi,
         switches::kNoSandbox,
       };

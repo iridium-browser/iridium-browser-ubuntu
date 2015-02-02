@@ -33,7 +33,7 @@
 WebInspector.NavigatorView = function()
 {
     WebInspector.VBox.call(this);
-    this.registerRequiredCSS("navigatorView.css");
+    this.registerRequiredCSS("sources/navigatorView.css");
 
     this.element.classList.add("navigator-container");
     var scriptsOutlineElement = this.element.createChild("div", "outline-disclosure navigator");
@@ -44,7 +44,7 @@ WebInspector.NavigatorView = function()
 
     /** @type {!Map.<!WebInspector.UISourceCode, !WebInspector.NavigatorUISourceCodeTreeNode>} */
     this._uiSourceCodeNodes = new Map();
-    /** @type {!Map.<!WebInspector.NavigatorTreeNode, !StringMap.<!WebInspector.NavigatorFolderTreeNode>>} */
+    /** @type {!Map.<!WebInspector.NavigatorTreeNode, !Map.<string, !WebInspector.NavigatorFolderTreeNode>>} */
     this._subfolderNodes = new Map();
 
     this._rootNode = new WebInspector.NavigatorRootTreeNode(this);
@@ -194,7 +194,7 @@ WebInspector.NavigatorView.prototype = {
 
         var subfolderNodes = this._subfolderNodes.get(projectNode);
         if (!subfolderNodes) {
-            subfolderNodes = /** @type {!StringMap.<!WebInspector.NavigatorFolderTreeNode>} */ (new StringMap());
+            subfolderNodes = /** @type {!Map.<string, !WebInspector.NavigatorFolderTreeNode>} */ (new Map());
             this._subfolderNodes.set(projectNode, subfolderNodes);
         }
 
@@ -285,7 +285,7 @@ WebInspector.NavigatorView.prototype = {
 
     reset: function()
     {
-        var nodes = this._uiSourceCodeNodes.values();
+        var nodes = this._uiSourceCodeNodes.valuesArray();
         for (var i = 0; i < nodes.length; ++i)
             nodes[i].dispose();
 
@@ -545,7 +545,7 @@ WebInspector.SourcesNavigatorView.prototype = {
      */
     _inspectedURLChanged: function(event)
     {
-       var nodes = this._uiSourceCodeNodes.values();
+       var nodes = this._uiSourceCodeNodes.valuesArray();
        for (var i = 0; i < nodes.length; ++i) {
            var uiSourceCode = nodes[i].uiSourceCode();
            var inspectedPageURL = WebInspector.targetManager.inspectedPageURL();
@@ -878,6 +878,7 @@ WebInspector.NavigatorSourceTreeElement.prototype = {
         if (!this._uiSourceCode.canRename())
             return false;
         var isSelected = this === this.treeOutline.selectedTreeElement;
+        var document = this.treeOutline.childrenListElement.ownerDocument;
         var isFocused = this.treeOutline.childrenListElement.isSelfOrAncestor(document.activeElement);
         return isSelected && isFocused && !WebInspector.isBeingEdited(this.treeOutline.element);
     },
@@ -974,8 +975,8 @@ WebInspector.NavigatorSourceTreeElement.prototype = {
 WebInspector.NavigatorTreeNode = function(id)
 {
     this.id = id;
-    /** @type {!StringMap.<!WebInspector.NavigatorTreeNode>} */
-    this._children = new StringMap();
+    /** @type {!Map.<string, !WebInspector.NavigatorTreeNode>} */
+    this._children = new Map();
 }
 
 WebInspector.NavigatorTreeNode.prototype = {
@@ -1067,7 +1068,7 @@ WebInspector.NavigatorTreeNode.prototype = {
      */
     children: function()
     {
-        return this._children.values();
+        return this._children.valuesArray();
     },
 
     /**

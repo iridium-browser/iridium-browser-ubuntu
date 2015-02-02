@@ -9,6 +9,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/bookmarks/browser/bookmark_model.h"
@@ -34,14 +35,16 @@ class EnhancedBookmarkModelTest
         shutting_down_calls_(0),
         added_calls_(0),
         removed_calls_(0),
+        changed_calls_(0),
         all_user_nodes_removed_calls_(0),
         remote_id_changed_calls_(0),
         last_added_(NULL),
         last_removed_(NULL),
+        last_changed_(NULL),
         last_remote_id_node_(NULL) {}
-  virtual ~EnhancedBookmarkModelTest() {}
+  ~EnhancedBookmarkModelTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     message_loop_.reset(new base::MessageLoop(base::MessageLoop::TYPE_DEFAULT));
     bookmark_client_.reset(new bookmarks::TestBookmarkClient());
     bookmark_model_.reset(bookmark_client_->CreateModel().release());
@@ -49,7 +52,7 @@ class EnhancedBookmarkModelTest
     model_->AddObserver(this);
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     if (model_)
       model_->Shutdown();
     model_.reset();
@@ -107,25 +110,26 @@ class EnhancedBookmarkModelTest
   scoped_ptr<EnhancedBookmarkModel> model_;
 
   // EnhancedBookmarkModelObserver implementation:
-  virtual void EnhancedBookmarkModelLoaded() OVERRIDE { loaded_calls_++; }
-  virtual void EnhancedBookmarkModelShuttingDown() OVERRIDE {
-    shutting_down_calls_++;
-  }
-  virtual void EnhancedBookmarkAdded(const BookmarkNode* node) OVERRIDE {
+  void EnhancedBookmarkModelLoaded() override { loaded_calls_++; }
+  void EnhancedBookmarkModelShuttingDown() override { shutting_down_calls_++; }
+  void EnhancedBookmarkAdded(const BookmarkNode* node) override {
     added_calls_++;
     last_added_ = node;
   }
-  virtual void EnhancedBookmarkRemoved(const BookmarkNode* node) OVERRIDE {
+  void EnhancedBookmarkRemoved(const BookmarkNode* node) override {
     removed_calls_++;
     last_removed_ = node;
   }
-  virtual void EnhancedBookmarkAllUserNodesRemoved() OVERRIDE {
+  void EnhancedBookmarkNodeChanged(const BookmarkNode* node) override {
+    changed_calls_++;
+    last_changed_ = node;
+  }
+  void EnhancedBookmarkAllUserNodesRemoved() override {
     all_user_nodes_removed_calls_++;
   }
-  virtual void EnhancedBookmarkRemoteIdChanged(
-      const BookmarkNode* node,
-      const std::string& old_remote_id,
-      const std::string& remote_id) OVERRIDE {
+  void EnhancedBookmarkRemoteIdChanged(const BookmarkNode* node,
+                                       const std::string& old_remote_id,
+                                       const std::string& remote_id) override {
     remote_id_changed_calls_++;
     last_remote_id_node_ = node;
     last_old_remote_id_ = old_remote_id;
@@ -137,12 +141,14 @@ class EnhancedBookmarkModelTest
   int shutting_down_calls_;
   int added_calls_;
   int removed_calls_;
+  int changed_calls_;
   int all_user_nodes_removed_calls_;
   int remote_id_changed_calls_;
 
   // Observer parameter cache:
   const BookmarkNode* last_added_;
   const BookmarkNode* last_removed_;
+  const BookmarkNode* last_changed_;
   const BookmarkNode* last_remote_id_node_;
   std::string last_old_remote_id_;
   std::string last_remote_id_;
@@ -594,6 +600,15 @@ TEST_F(EnhancedBookmarkModelTest, ObserverNodeRemovedEvent) {
   EXPECT_EQ(folder, last_removed_);
 }
 
+TEST_F(EnhancedBookmarkModelTest, ObserverNodeChangedEvent) {
+  const BookmarkNode* node = AddBookmark();
+
+  EXPECT_EQ(0, changed_calls_);
+  bookmark_model_->SetTitle(node, base::ASCIIToUTF16("New Title"));
+  EXPECT_EQ(1, changed_calls_);
+  EXPECT_EQ(node, last_changed_);
+}
+
 TEST_F(EnhancedBookmarkModelTest, ObserverAllUserNodesRemovedEvent) {
   AddBookmark();
   AddFolder();
@@ -648,4 +663,104 @@ TEST_F(EnhancedBookmarkModelTest, ShutDownWhileResetDuplicationScheduled) {
   model_->Shutdown();
   model_.reset();
   base::RunLoop().RunUntilIdle();
+}
+
+TEST_F(EnhancedBookmarkModelTest, NodeRemovedWhileResetDuplicationScheduled) {
+  const BookmarkNode* node1 = AddBookmark();
+  const BookmarkNode* node2 = AddBookmark();
+  bookmark_model_->SetNodeMetaInfo(node1, "stars.id", "c_1");
+  bookmark_model_->SetNodeMetaInfo(node2, "stars.id", "c_1");
+  bookmark_model_->Remove(node1->parent(), node1->parent()->GetIndexOf(node1));
+  base::RunLoop().RunUntilIdle();
+}
+
+// Verifies that the NEEDS_OFFLINE_PROCESSING flag is set for nodes added
+// with no remote id.
+TEST_F(EnhancedBookmarkModelTest, BookmarkAddedSetsOfflineProcessingFlag) {
+  const BookmarkNode* node =
+      bookmark_model_->AddURL(bookmark_model_->other_node(),
+                              0,
+                              base::ASCIIToUTF16("Some title"),
+                              GURL(BOOKMARK_URL));
+  std::string flags_str;
+  EXPECT_FALSE(node->GetMetaInfo("stars.flags", &flags_str));
+  base::RunLoop().RunUntilIdle();
+  ASSERT_TRUE(node->GetMetaInfo("stars.flags", &flags_str));
+  int flags;
+  ASSERT_TRUE(base::StringToInt(flags_str, &flags));
+  EXPECT_EQ(1, (flags & 1));
+}
+
+// Verifies that the NEEDS_OFFLINE_PROCESSING_FLAG is not set for added folders.
+TEST_F(EnhancedBookmarkModelTest, FolderAddedDoesNotSetOfflineProcessingFlag) {
+  const BookmarkNode* node = AddFolder();
+  base::RunLoop().RunUntilIdle();
+
+  std::string flags_str;
+  if (node->GetMetaInfo("stars.flags", &flags_str)) {
+    int flags;
+    ASSERT_TRUE(base::StringToInt(flags_str, &flags));
+    EXPECT_EQ(0, (flags & 1));
+  }
+}
+
+// Verifies that when a bookmark is added that has a remote id, the status of
+// the NEEDS_OFFLINE_PROCESSING flag doesn't change.
+TEST_F(EnhancedBookmarkModelTest,
+       BookmarkAddedWithIdKeepsOfflineProcessingFlag) {
+  BookmarkNode::MetaInfoMap meta_info;
+  meta_info["stars.id"] = "some_id";
+  meta_info["stars.flags"] = "1";
+
+  const BookmarkNode* node1 =
+      bookmark_model_->AddURLWithCreationTimeAndMetaInfo(
+          bookmark_model_->other_node(),
+          0,
+          base::ASCIIToUTF16("Some title"),
+          GURL(BOOKMARK_URL),
+          base::Time::Now(),
+          &meta_info);
+  base::RunLoop().RunUntilIdle();
+  std::string flags_str;
+  ASSERT_TRUE(node1->GetMetaInfo("stars.flags", &flags_str));
+  int flags;
+  ASSERT_TRUE(base::StringToInt(flags_str, &flags));
+  EXPECT_EQ(1, (flags & 1));
+
+  meta_info["stars.flags"] = "0";
+  const BookmarkNode* node2 =
+      bookmark_model_->AddURLWithCreationTimeAndMetaInfo(
+          bookmark_model_->other_node(),
+          0,
+          base::ASCIIToUTF16("Some title"),
+          GURL(BOOKMARK_URL),
+          base::Time::Now(),
+          &meta_info);
+  base::RunLoop().RunUntilIdle();
+  ASSERT_TRUE(node2->GetMetaInfo("stars.flags", &flags_str));
+  ASSERT_TRUE(base::StringToInt(flags_str, &flags));
+  EXPECT_EQ(0, (flags & 1));
+}
+
+TEST_F(EnhancedBookmarkModelTest,
+       NodeRemovedWhileSetNeedsOfflineProcessingIsScheduled) {
+  const BookmarkNode* node =
+      bookmark_model_->AddURL(bookmark_model_->other_node(),
+                              0,
+                              base::ASCIIToUTF16("Some title"),
+                              GURL(BOOKMARK_URL));
+  bookmark_model_->Remove(node->parent(), node->parent()->GetIndexOf(node));
+  base::RunLoop().RunUntilIdle();
+}
+
+TEST_F(EnhancedBookmarkModelTest,
+       RemoveParentShouldRemoveChildrenFromMaps) {
+  const BookmarkNode* parent = AddFolder();
+  const BookmarkNode* node = AddBookmark("Title", parent);
+  std::string remote_id = GetId(node);
+  EXPECT_EQ(node, model_->BookmarkForRemoteId(remote_id));
+
+  const BookmarkNode* gp = parent->parent();
+  bookmark_model_->Remove(gp, gp->GetIndexOf(parent));
+  EXPECT_FALSE(model_->BookmarkForRemoteId(remote_id));
 }

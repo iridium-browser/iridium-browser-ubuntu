@@ -21,44 +21,41 @@ class DetachedPanelCollection : public PanelCollection {
   typedef bool (*PanelsComparer)(Panel* panel1, Panel* panel2);
 
   explicit DetachedPanelCollection(PanelManager* panel_manager);
-  virtual ~DetachedPanelCollection();
+  ~DetachedPanelCollection() override;
 
   // PanelCollection OVERRIDES:
-  virtual void OnDisplayChanged() OVERRIDE;
-  virtual void RefreshLayout() OVERRIDE;
-  virtual void AddPanel(Panel* panel,
-                        PositioningMask positioning_mask) OVERRIDE;
-  virtual void RemovePanel(Panel* panel, RemovalReason reason) OVERRIDE;
-  virtual void CloseAll() OVERRIDE;
-  virtual void ResizePanelWindow(
-      Panel* panel,
-      const gfx::Size& preferred_window_size) OVERRIDE;
-  virtual panel::Resizability GetPanelResizability(
-      const Panel* panel) const OVERRIDE;
-  virtual void OnPanelResizedByMouse(Panel* panel,
-                                     const gfx::Rect& new_bounds) OVERRIDE;
-  virtual void OnPanelAttentionStateChanged(Panel* panel) OVERRIDE;
-  virtual void OnPanelTitlebarClicked(Panel* panel,
-                                      panel::ClickModifier modifier) OVERRIDE;
-  virtual void ActivatePanel(Panel* panel) OVERRIDE;
-  virtual void MinimizePanel(Panel* panel) OVERRIDE;
-  virtual void RestorePanel(Panel* panel) OVERRIDE;
-  virtual void OnMinimizeButtonClicked(Panel* panel,
-                                       panel::ClickModifier modifier) OVERRIDE;
-  virtual void OnRestoreButtonClicked(Panel* panel,
-                                      panel::ClickModifier modifier) OVERRIDE;
-  virtual bool CanShowMinimizeButton(const Panel* panel) const OVERRIDE;
-  virtual bool CanShowRestoreButton(const Panel* panel) const OVERRIDE;
-  virtual bool IsPanelMinimized(const Panel* panel) const OVERRIDE;
-  virtual bool UsesAlwaysOnTopPanels() const OVERRIDE;
-  virtual void SavePanelPlacement(Panel* panel) OVERRIDE;
-  virtual void RestorePanelToSavedPlacement() OVERRIDE;
-  virtual void DiscardSavedPanelPlacement() OVERRIDE;
-  virtual void UpdatePanelOnCollectionChange(Panel* panel) OVERRIDE;
-  virtual void OnPanelExpansionStateChanged(Panel* panel) OVERRIDE;
-  virtual void OnPanelActiveStateChanged(Panel* panel) OVERRIDE;
-  virtual gfx::Rect GetInitialPanelBounds(
-      const gfx::Rect& requested_bounds) const OVERRIDE;
+  void OnDisplayChanged() override;
+  void RefreshLayout() override;
+  void AddPanel(Panel* panel, PositioningMask positioning_mask) override;
+  void RemovePanel(Panel* panel, RemovalReason reason) override;
+  void CloseAll() override;
+  void ResizePanelWindow(Panel* panel,
+                         const gfx::Size& preferred_window_size) override;
+  panel::Resizability GetPanelResizability(const Panel* panel) const override;
+  void OnPanelResizedByMouse(Panel* panel,
+                             const gfx::Rect& new_bounds) override;
+  void OnPanelAttentionStateChanged(Panel* panel) override;
+  void OnPanelTitlebarClicked(Panel* panel,
+                              panel::ClickModifier modifier) override;
+  void ActivatePanel(Panel* panel) override;
+  void MinimizePanel(Panel* panel) override;
+  void RestorePanel(Panel* panel) override;
+  void OnMinimizeButtonClicked(Panel* panel,
+                               panel::ClickModifier modifier) override;
+  void OnRestoreButtonClicked(Panel* panel,
+                              panel::ClickModifier modifier) override;
+  bool CanShowMinimizeButton(const Panel* panel) const override;
+  bool CanShowRestoreButton(const Panel* panel) const override;
+  bool IsPanelMinimized(const Panel* panel) const override;
+  bool UsesAlwaysOnTopPanels() const override;
+  void SavePanelPlacement(Panel* panel) override;
+  void RestorePanelToSavedPlacement() override;
+  void DiscardSavedPanelPlacement() override;
+  void UpdatePanelOnCollectionChange(Panel* panel) override;
+  void OnPanelExpansionStateChanged(Panel* panel) override;
+  void OnPanelActiveStateChanged(Panel* panel) override;
+  gfx::Rect GetInitialPanelBounds(
+      const gfx::Rect& requested_bounds) const override;
 
   bool HasPanel(Panel* panel) const;
 

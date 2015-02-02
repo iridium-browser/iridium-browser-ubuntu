@@ -23,33 +23,19 @@
  */
 
 #include "config.h"
-
 #include "core/rendering/svg/SVGRenderingContext.h"
 
 #include "core/frame/FrameHost.h"
-#include "core/frame/FrameView.h"
-#include "core/frame/LocalFrame.h"
-#include "core/frame/Settings.h"
-#include "core/paint/SVGImagePainter.h"
+#include "core/rendering/PaintInfo.h"
 #include "core/rendering/RenderLayer.h"
-#include "core/rendering/svg/RenderSVGImage.h"
-#include "core/rendering/svg/RenderSVGResource.h"
 #include "core/rendering/svg/RenderSVGResourceFilter.h"
 #include "core/rendering/svg/RenderSVGResourceMasker.h"
+#include "core/rendering/svg/SVGRenderSupport.h"
 #include "core/rendering/svg/SVGResources.h"
 #include "core/rendering/svg/SVGResourcesCache.h"
 #include "platform/FloatConversion.h"
 
-static int kMaxImageBufferSize = 4096;
-
 namespace blink {
-
-static inline bool isRenderingMaskImage(RenderObject* object)
-{
-    if (object->frame() && object->frame()->view())
-        return object->frame()->view()->paintBehavior() & PaintBehaviorRenderingSVGMask;
-    return false;
-}
 
 SVGRenderingContext::~SVGRenderingContext()
 {
@@ -65,7 +51,7 @@ SVGRenderingContext::~SVGRenderingContext()
 
         if (m_filter) {
             ASSERT(SVGResourcesCache::cachedResourcesForRenderObject(m_object)->filter() == m_filter);
-            m_filter->postApplyResource(m_object, m_paintInfo->context);
+            m_filter->finishEffect(m_object, m_paintInfo->context);
             m_paintInfo->context = m_savedContext;
             m_paintInfo->rect = m_savedPaintRect;
         }
@@ -77,7 +63,7 @@ SVGRenderingContext::~SVGRenderingContext()
 
         if (m_masker) {
             ASSERT(SVGResourcesCache::cachedResourcesForRenderObject(m_object)->masker() == m_masker);
-            m_masker->postApplyResource(m_object, m_paintInfo->context);
+            m_masker->finishEffect(m_object, m_paintInfo->context);
         }
     }
 
@@ -100,7 +86,6 @@ void SVGRenderingContext::prepareToRenderSVGContent(RenderObject* object, PaintI
 
     m_object = object;
     m_paintInfo = &paintInfo;
-    m_filter = 0;
 
     RenderStyle* style = m_object->style();
     ASSERT(style);
@@ -108,12 +93,12 @@ void SVGRenderingContext::prepareToRenderSVGContent(RenderObject* object, PaintI
     const SVGRenderStyle& svgStyle = style->svgStyle();
 
     // Setup transparency layers before setting up SVG resources!
-    bool isRenderingMask = isRenderingMaskImage(m_object);
+    bool isRenderingMask = SVGRenderSupport::isRenderingClipPathAsMaskImage(*m_object);
     // RenderLayer takes care of root opacity.
-    float opacity = (object->isSVGRoot() || isRenderingMask) ? 1 : style->opacity();
-    bool hasBlendMode = style->hasBlendMode() && !isRenderingMask;
+    float opacity = object->isSVGRoot() ? 1 : style->opacity();
+    bool hasBlendMode = style->hasBlendMode();
 
-    if (opacity < 1 || hasBlendMode || style->hasIsolation()) {
+    if (!isRenderingMask && (opacity < 1 || hasBlendMode || style->hasIsolation())) {
         FloatRect paintInvalidationRect = m_object->paintInvalidationRectInLocalCoordinates();
         m_paintInfo->context->clip(paintInvalidationRect);
 
@@ -133,39 +118,37 @@ void SVGRenderingContext::prepareToRenderSVGContent(RenderObject* object, PaintI
         m_renderingFlags |= EndOpacityLayer;
     }
 
-    ClipPathOperation* clipPathOperation = style->clipPath();
-    if (clipPathOperation && clipPathOperation->type() == ClipPathOperation::SHAPE) {
-        ShapeClipPathOperation* clipPath = toShapeClipPathOperation(clipPathOperation);
-        m_paintInfo->context->clipPath(clipPath->path(object->objectBoundingBox()), clipPath->windRule());
-    }
-
     SVGResources* resources = SVGResourcesCache::cachedResourcesForRenderObject(m_object);
-    if (!resources) {
-        if (svgStyle.hasFilter())
-            return;
 
-        m_renderingFlags |= RenderingPrepared;
-        return;
-    }
-
-    if (!isRenderingMask) {
-        if (RenderSVGResourceMasker* masker = resources->masker()) {
-            if (!masker->applyResource(m_object, style, m_paintInfo->context, ApplyToDefaultMode))
-                return;
-            m_masker = masker;
-            m_renderingFlags |= PostApplyResources;
-        }
-    }
-
-    RenderSVGResourceClipper* clipper = resources->clipper();
-    if (!clipPathOperation && clipper) {
+    // Prefer a 'clipper' (non-prefixed 'clip-path') to a 'clip shape'
+    // ('-webkit-clip-path'), until these two properties end up being merged
+    // properly.
+    if (RenderSVGResourceClipper* clipper = resources ? resources->clipper() : nullptr) {
         if (!clipper->applyStatefulResource(m_object, m_paintInfo->context, m_clipperState))
             return;
         m_clipper = clipper;
         m_renderingFlags |= PostApplyResources;
+    } else {
+        ClipPathOperation* clipPathOperation = style->clipPath();
+        if (clipPathOperation && clipPathOperation->type() == ClipPathOperation::SHAPE) {
+            ShapeClipPathOperation* clipPath = toShapeClipPathOperation(clipPathOperation);
+            m_paintInfo->context->clipPath(clipPath->path(object->objectBoundingBox()), clipPath->windRule());
+        }
     }
 
-    if (!isRenderingMask) {
+    if (isRenderingMask) {
+        m_renderingFlags |= RenderingPrepared;
+        return;
+    }
+
+    if (resources) {
+        if (RenderSVGResourceMasker* masker = resources->masker()) {
+            if (!masker->prepareEffect(m_object, m_paintInfo->context))
+                return;
+            m_masker = masker;
+            m_renderingFlags |= PostApplyResources;
+        }
+
         m_filter = resources->filter();
         if (m_filter) {
             m_savedContext = m_paintInfo->context;
@@ -173,7 +156,7 @@ void SVGRenderingContext::prepareToRenderSVGContent(RenderObject* object, PaintI
             // Return with false here may mean that we don't need to draw the content
             // (because it was either drawn before or empty) but we still need to apply the filter.
             m_renderingFlags |= PostApplyResources;
-            if (!m_filter->applyResource(m_object, style, m_paintInfo->context, ApplyToDefaultMode))
+            if (!m_filter->prepareEffect(m_object, m_paintInfo->context))
                 return;
 
             // Since we're caching the resulting bitmap and do not invalidate it on paint invalidation rect
@@ -182,6 +165,10 @@ void SVGRenderingContext::prepareToRenderSVGContent(RenderObject* object, PaintI
             // be drawn.
             m_paintInfo->rect = IntRect(m_filter->drawingRegion(m_object));
         }
+    } else {
+        // Broken filter disables rendering.
+        if (svgStyle.hasFilter())
+            return;
     }
 
     m_renderingFlags |= RenderingPrepared;
@@ -193,18 +180,19 @@ static AffineTransform& currentContentTransformation()
     return s_currentContentTransformation;
 }
 
-float SVGRenderingContext::calculateScreenFontSizeScalingFactor(const RenderObject* renderer)
+SubtreeContentTransformScope::SubtreeContentTransformScope(const AffineTransform& subtreeContentTransformation)
 {
-    ASSERT(renderer);
-
-    AffineTransform ctm;
-    // FIXME: calculateDeviceSpaceTransformation() queries layer compositing state - which is not
-    // supported during layout. Hence, the result may not include all CSS transforms.
-    calculateDeviceSpaceTransformation(renderer, ctm);
-    return narrowPrecisionToFloat(sqrt((pow(ctm.xScale(), 2) + pow(ctm.yScale(), 2)) / 2));
+    AffineTransform& contentTransformation = currentContentTransformation();
+    m_savedContentTransformation = contentTransformation;
+    contentTransformation = subtreeContentTransformation * contentTransformation;
 }
 
-void SVGRenderingContext::calculateDeviceSpaceTransformation(const RenderObject* renderer, AffineTransform& absoluteTransform)
+SubtreeContentTransformScope::~SubtreeContentTransformScope()
+{
+    currentContentTransformation() = m_savedContentTransformation;
+}
+
+float SVGRenderingContext::calculateScreenFontSizeScalingFactor(const RenderObject* renderer)
 {
     // FIXME: trying to compute a device space transform at record time is wrong. All clients
     // should be updated to avoid relying on this information, and the method should be removed.
@@ -214,15 +202,17 @@ void SVGRenderingContext::calculateDeviceSpaceTransformation(const RenderObject*
     float deviceScaleFactor = renderer->document().frameHost()->deviceScaleFactor();
 
     // Walk up the render tree, accumulating SVG transforms.
-    absoluteTransform = currentContentTransformation();
+    AffineTransform ctm = currentContentTransformation();
     while (renderer) {
-        absoluteTransform = renderer->localToParentTransform() * absoluteTransform;
+        ctm = renderer->localToParentTransform() * ctm;
         if (renderer->isSVGRoot())
             break;
         renderer = renderer->parent();
     }
 
     // Continue walking up the layer tree, accumulating CSS transforms.
+    // FIXME: this queries layer compositing state - which is not
+    // supported during layout. Hence, the result may not include all CSS transforms.
     RenderLayer* layer = renderer ? renderer->enclosingLayer() : 0;
     while (layer && layer->isAllowedToQueryCompositingState()) {
         // We can stop at compositing layers, to match the backing resolution.
@@ -234,74 +224,24 @@ void SVGRenderingContext::calculateDeviceSpaceTransformation(const RenderObject*
             break;
 
         if (TransformationMatrix* layerTransform = layer->transform())
-            absoluteTransform = layerTransform->toAffineTransform() * absoluteTransform;
+            ctm = layerTransform->toAffineTransform() * ctm;
 
         layer = layer->parent();
     }
 
-    absoluteTransform.scale(deviceScaleFactor);
+    ctm.scale(deviceScaleFactor);
+
+    return narrowPrecisionToFloat(sqrt((pow(ctm.xScale(), 2) + pow(ctm.yScale(), 2)) / 2));
 }
 
-void SVGRenderingContext::renderSubtree(GraphicsContext* context, RenderObject* item, const AffineTransform& subtreeContentTransformation)
+void SVGRenderingContext::renderSubtree(GraphicsContext* context, RenderObject* item)
 {
-    ASSERT(item);
     ASSERT(context);
+    ASSERT(item);
+    ASSERT(!item->needsLayout());
 
     PaintInfo info(context, PaintInfo::infiniteRect(), PaintPhaseForeground, PaintBehaviorNormal);
-
-    AffineTransform& contentTransformation = currentContentTransformation();
-    AffineTransform savedContentTransformation = contentTransformation;
-    contentTransformation = subtreeContentTransformation * contentTransformation;
-
-    ASSERT(!item->needsLayout());
     item->paint(info, IntPoint());
-
-    contentTransformation = savedContentTransformation;
-}
-
-FloatRect SVGRenderingContext::clampedAbsoluteTargetRect(const FloatRect& absoluteTargetRect)
-{
-    const FloatSize maxImageBufferSize(kMaxImageBufferSize, kMaxImageBufferSize);
-    return FloatRect(absoluteTargetRect.location(), absoluteTargetRect.size().shrunkTo(maxImageBufferSize));
-}
-
-void SVGRenderingContext::clear2DRotation(AffineTransform& transform)
-{
-    AffineTransform::DecomposedType decomposition;
-    transform.decompose(decomposition);
-    decomposition.angle = 0;
-    transform.recompose(decomposition);
-}
-
-bool SVGRenderingContext::bufferForeground(OwnPtr<ImageBuffer>& imageBuffer)
-{
-    ASSERT(m_paintInfo);
-    ASSERT(m_object->isSVGImage());
-    FloatRect boundingBox = m_object->objectBoundingBox();
-
-    // Invalidate an existing buffer if the scale is not correct.
-    if (imageBuffer) {
-        AffineTransform transform = m_paintInfo->context->getCTM();
-        IntSize expandedBoundingBox = expandedIntSize(boundingBox.size());
-        IntSize bufferSize(static_cast<int>(ceil(expandedBoundingBox.width() * transform.xScale())), static_cast<int>(ceil(expandedBoundingBox.height() * transform.yScale())));
-        if (bufferSize != imageBuffer->size())
-            imageBuffer.clear();
-    }
-
-    // Create a new buffer and paint the foreground into it.
-    if (!imageBuffer) {
-        if ((imageBuffer = m_paintInfo->context->createRasterBuffer(expandedIntSize(boundingBox.size())))) {
-            GraphicsContext* bufferedRenderingContext = imageBuffer->context();
-            bufferedRenderingContext->translate(-boundingBox.x(), -boundingBox.y());
-            PaintInfo bufferedInfo(*m_paintInfo);
-            bufferedInfo.context = bufferedRenderingContext;
-            SVGImagePainter::paintForeground(toRenderSVGImage(*m_object), bufferedInfo);
-        } else
-            return false;
-    }
-
-    m_paintInfo->context->drawImageBuffer(imageBuffer.get(), boundingBox);
-    return true;
 }
 
 } // namespace blink

@@ -49,6 +49,7 @@
 #include "chrome/app/close_handle_hook_win.h"
 #include "chrome/common/child_process_logging.h"
 #include "chrome/common/terminate_on_heap_corruption_experiment_win.h"
+#include "chrome/common/v8_breakpad_support_win.h"
 #include "sandbox/win/src/sandbox.h"
 #include "ui/base/resource/resource_bundle_win.h"
 #endif
@@ -402,6 +403,10 @@ bool ChromeMainDelegate::BasicStartupComplete(int* exit_code) {
 
   Profiling::ProcessStarted();
 
+#if defined(OS_WIN)
+  v8_breakpad_support::SetUp();
+#endif
+
 #if defined(OS_POSIX)
   if (HandleVersionSwitches(command_line)) {
     *exit_code = 0;
@@ -482,13 +487,12 @@ bool ChromeMainDelegate::BasicStartupComplete(int* exit_code) {
   // original command line.
   if (command_line.HasSwitch(chromeos::switches::kLoginUser) ||
       command_line.HasSwitch(switches::kDiagnosticsRecovery)) {
-
     // The statistics subsystem needs get initialized soon enough for the
     // statistics to be collected.  It's safe to call this more than once.
     base::StatisticsRecorder::Initialize();
 
     CommandLine interim_command_line(command_line.GetProgram());
-    const char* kSwitchNames[] = {switches::kUserDataDir, };
+    const char* const kSwitchNames[] = {switches::kUserDataDir, };
     interim_command_line.CopySwitchesFrom(
         command_line, kSwitchNames, arraysize(kSwitchNames));
     interim_command_line.AppendSwitch(switches::kDiagnostics);
@@ -806,7 +810,7 @@ int ChromeMainDelegate::RunProcess(
   // doesn't support empty array. So we comment out the block for Android.
 #if !defined(OS_ANDROID)
   static const MainFunction kMainFunctions[] = {
-#if defined(ENABLE_FULL_PRINTING) && !defined(CHROME_MULTIPLE_DLL_CHILD)
+#if defined(ENABLE_PRINT_PREVIEW) && !defined(CHROME_MULTIPLE_DLL_CHILD)
     { switches::kServiceProcess,     ServiceProcessMain },
 #endif
 

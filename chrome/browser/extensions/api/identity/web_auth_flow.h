@@ -80,7 +80,7 @@ class WebAuthFlow : public content::NotificationObserver,
               const GURL& provider_url,
               Mode mode);
 
-  virtual ~WebAuthFlow();
+  ~WebAuthFlow() override;
 
   // Starts the flow.
   virtual void Start();
@@ -92,31 +92,29 @@ class WebAuthFlow : public content::NotificationObserver,
   friend class ::WebAuthFlowTest;
 
   // ::AppWindowRegistry::Observer implementation.
-  virtual void OnAppWindowAdded(AppWindow* app_window) OVERRIDE;
-  virtual void OnAppWindowRemoved(AppWindow* app_window) OVERRIDE;
+  void OnAppWindowAdded(AppWindow* app_window) override;
+  void OnAppWindowRemoved(AppWindow* app_window) override;
 
   // NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   // WebContentsObserver implementation.
-  virtual void DidStopLoading(content::RenderViewHost* render_view_host)
-      OVERRIDE;
-  virtual void DidNavigateMainFrame(
+  void DidStopLoading(content::RenderViewHost* render_view_host) override;
+  void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
-      const content::FrameNavigateParams& params) OVERRIDE;
-  virtual void RenderProcessGone(base::TerminationStatus status) OVERRIDE;
-  virtual void DidStartProvisionalLoadForFrame(
+      const content::FrameNavigateParams& params) override;
+  void RenderProcessGone(base::TerminationStatus status) override;
+  void DidStartProvisionalLoadForFrame(
       content::RenderFrameHost* render_frame_host,
       const GURL& validated_url,
       bool is_error_page,
-      bool is_iframe_srcdoc) OVERRIDE;
-  virtual void DidFailProvisionalLoad(
-      content::RenderFrameHost* render_frame_host,
-      const GURL& validated_url,
-      int error_code,
-      const base::string16& error_description) OVERRIDE;
+      bool is_iframe_srcdoc) override;
+  void DidFailProvisionalLoad(content::RenderFrameHost* render_frame_host,
+                              const GURL& validated_url,
+                              int error_code,
+                              const base::string16& error_description) override;
 
   void BeforeUrlLoaded(const GURL& url);
   void AfterUrlLoaded();

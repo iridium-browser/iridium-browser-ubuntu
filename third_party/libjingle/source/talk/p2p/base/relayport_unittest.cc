@@ -25,9 +25,9 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "talk/p2p/base/basicpacketsocketfactory.h"
-#include "talk/p2p/base/relayport.h"
-#include "talk/p2p/base/relayserver.h"
+#include "webrtc/p2p/base/basicpacketsocketfactory.h"
+#include "webrtc/p2p/base/relayport.h"
+#include "webrtc/p2p/base/relayserver.h"
 #include "webrtc/base/gunit.h"
 #include "webrtc/base/helpers.h"
 #include "webrtc/base/logging.h"
@@ -93,15 +93,6 @@ class RelayPortTest : public testing::Test,
   }
 
  protected:
-  static void SetUpTestCase() {
-    rtc::InitializeSSL();
-  }
-
-  static void TearDownTestCase() {
-    rtc::CleanupSSL();
-  }
-
-
   virtual void SetUp() {
     // The relay server needs an external socket to work properly.
     rtc::AsyncUDPSocket* ext_socket =

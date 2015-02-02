@@ -35,13 +35,12 @@
 #include "platform/geometry/IntRect.h"
 #include "platform/mac/BlockExceptions.h"
 #include "platform/mac/NSScrollerImpDetails.h"
-#include "platform/scroll/ScrollView.h"
 #include "platform/scroll/ScrollableArea.h"
 #include "platform/scroll/ScrollbarTheme.h"
 #include "platform/scroll/ScrollbarThemeMacCommon.h"
 #include "platform/scroll/ScrollbarThemeMacOverlayAPI.h"
 #include "wtf/MainThread.h"
-#include "wtf/PassOwnPtr.h"
+#include "wtf/PassRefPtr.h"
 
 using namespace blink;
 
@@ -327,7 +326,6 @@ public:
     void stop()
     {
         m_timer.stop();
-        [m_animation setCurrentProgress:1];
     }
 
     void setDuration(CFTimeInterval duration)
@@ -341,12 +339,12 @@ private:
         double currentTime = WTF::currentTime();
         double delta = currentTime - m_startTime;
 
-        if (delta >= m_duration) {
-            stop();
-            return;
-        }
+        if (delta >= m_duration)
+            m_timer.stop();
 
         double fraction = delta / m_duration;
+        fraction = std::min(1.0, fraction);
+        fraction = std::max(0.0, fraction);
         double progress = m_timingFunction->evaluate(fraction, 0.001);
         [m_animation setCurrentProgress:progress];
     }
@@ -534,7 +532,7 @@ private:
     // If we are currently animating, stop
     if (scrollbarPartAnimation) {
         [scrollbarPartAnimation.get() stopAnimation];
-        scrollbarPartAnimation = nil;
+        scrollbarPartAnimation = nullptr;
     }
 
     if (part == blink::ThumbPart && _scrollbar->orientation() == VerticalScrollbar) {
@@ -654,9 +652,9 @@ private:
 
 namespace blink {
 
-PassOwnPtr<ScrollAnimator> ScrollAnimator::create(ScrollableArea* scrollableArea)
+PassRefPtr<ScrollAnimator> ScrollAnimator::create(ScrollableArea* scrollableArea)
 {
-    return adoptPtr(new ScrollAnimatorMac(scrollableArea));
+    return adoptRef(new ScrollAnimatorMac(scrollableArea));
 }
 
 ScrollAnimatorMac::ScrollAnimatorMac(ScrollableArea* scrollableArea)

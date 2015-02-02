@@ -10,8 +10,11 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
+#include "base/files/file_util.h"
+#include "base/location.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
@@ -45,9 +48,11 @@
 #include "base/i18n/time_formatting.h"
 #include "base/prefs/pref_service.h"
 #include "base/sys_info.h"
+#include "base/task_runner_util.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/webui/chromeos/image_source.h"
 #include "chrome/browser/ui/webui/help/help_utils_chromeos.h"
 #include "chrome/browser/ui/webui/help/version_updater_chromeos.h"
 #include "chromeos/chromeos_switches.h"
@@ -62,6 +67,8 @@ using content::BrowserThread;
 namespace {
 
 #if defined(OS_CHROMEOS)
+
+const char kFCCLabelTextPath[] = "fcc/label.txt";
 
 // Returns message that informs user that for update it's better to
 // connect to a network of one of the allowed types.
@@ -108,6 +115,19 @@ bool CanChangeChannel() {
     return !value;
   }
   return false;
+}
+
+// Reads the file containing the FCC label text, if found. Must be called from
+// the blocking pool.
+std::string ReadFCCLabelText() {
+  const base::FilePath asset_dir(FILE_PATH_LITERAL(chrome::kChromeOSAssetPath));
+  const base::FilePath label_file_path =
+      asset_dir.AppendASCII(kFCCLabelTextPath);
+
+  std::string contents;
+  if (base::ReadFileToString(label_file_path, &contents))
+    return contents;
+  return std::string();
 }
 
 #endif  // defined(OS_CHROMEOS)
@@ -197,7 +217,7 @@ void HelpHandler::GetLocalizedValues(base::DictionaryValue* localized_strings) {
 #endif
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(resources); ++i) {
+  for (size_t i = 0; i < arraysize(resources); ++i) {
     localized_strings->SetString(resources[i].name,
                                  l10n_util::GetStringUTF16(resources[i].ids));
   }
@@ -293,6 +313,12 @@ void HelpHandler::RegisterMessages() {
   web_ui()->RegisterMessageCallback("promoteUpdater",
       base::Bind(&HelpHandler::PromoteUpdater, base::Unretained(this)));
 #endif
+
+#if defined(OS_CHROMEOS)
+  // Handler for the product label image, which will be shown if available.
+  content::URLDataSource::Add(Profile::FromWebUI(web_ui()),
+                              new chromeos::ImageSource());
+#endif
 }
 
 void HelpHandler::Observe(int type, const content::NotificationSource& source,
@@ -312,7 +338,6 @@ void HelpHandler::Observe(int type, const content::NotificationSource& source,
 // static
 base::string16 HelpHandler::BuildBrowserVersionString() {
   chrome::VersionInfo version_info;
-  DCHECK(version_info.is_valid());
 
   std::string version = version_info.Version();
 
@@ -378,6 +403,13 @@ void HelpHandler::OnPageLoaded(const base::ListValue* args) {
       base::Bind(&HelpHandler::OnCurrentChannel, weak_factory_.GetWeakPtr()));
   version_updater_->GetChannel(false,
       base::Bind(&HelpHandler::OnTargetChannel, weak_factory_.GetWeakPtr()));
+
+  base::PostTaskAndReplyWithResult(
+      content::BrowserThread::GetBlockingPool(),
+      FROM_HERE,
+      base::Bind(&ReadFCCLabelText),
+      base::Bind(&HelpHandler::OnFCCLabelTextRead,
+                 weak_factory_.GetWeakPtr()));
 #endif
 }
 
@@ -557,6 +589,13 @@ void HelpHandler::OnCurrentChannel(const std::string& channel) {
 void HelpHandler::OnTargetChannel(const std::string& channel) {
   web_ui()->CallJavascriptFunction(
       "help.HelpPage.updateTargetChannel", base::StringValue(channel));
+}
+
+void HelpHandler::OnFCCLabelTextRead(const std::string& text) {
+  // Remove unnecessary whitespace.
+  web_ui()->CallJavascriptFunction(
+      "help.HelpPage.setProductLabelText",
+      base::StringValue(base::CollapseWhitespaceASCII(text, true)));
 }
 
 #endif // defined(OS_CHROMEOS)

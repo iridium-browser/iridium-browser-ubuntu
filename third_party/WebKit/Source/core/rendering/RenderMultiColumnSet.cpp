@@ -206,6 +206,12 @@ void RenderMultiColumnSet::addContentRun(LayoutUnit endOffsetFromFirstPage)
 
 bool RenderMultiColumnSet::recalculateColumnHeight(BalancedHeightCalculation calculationMode)
 {
+    if (previousSiblingMultiColumnSet()) {
+        // FIXME: column spanner layout is not yet implemented. Until it's in place, we only operate
+        // on the first set during layout. We need to ignore the others here, or assertions will
+        // fail.
+        return false;
+    }
     ASSERT(multiColumnFlowThread()->heightIsAuto());
 
     LayoutUnit oldColumnHeight = m_columnHeight;
@@ -465,14 +471,16 @@ void RenderMultiColumnSet::paintInvalidationForFlowThreadContent(const LayoutRec
 
 void RenderMultiColumnSet::collectLayerFragments(LayerFragments& fragments, const LayoutRect& layerBoundingBox, const LayoutRect& dirtyRect)
 {
-    // The two rectangles passed to this method are physical, except that we pretend that there's
-    // only one long column (that's how a flow thread works).
+    // |layerBoundingBox| is in the flow thread coordinate space, relative to the top/left edge of
+    // the flow thread, but note that it has been converted with respect to writing mode (so that
+    // it's visual/physical in that sense).
+    //
+    // |dirtyRect| is visual, relative to the multicol container.
     //
     // Then there's the output from this method - the stuff we put into the list of fragments. The
-    // fragment.paginationOffset point is the actual physical translation required to get from a
+    // fragment.paginationOffset point is the actual visual translation required to get from a
     // location in the flow thread to a location in a given column. The fragment.paginationClip
-    // rectangle, on the other hand, is in the same coordinate system as the two rectangles passed
-    // to this method (flow thread coordinates).
+    // rectangle, on the other hand, is in flow thread coordinates.
     //
     // All other rectangles in this method are sized physically, and the inline direction coordinate
     // is physical too, but the block direction coordinate is "logical top". This is the same as

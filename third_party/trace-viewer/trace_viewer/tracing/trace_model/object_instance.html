@@ -7,8 +7,8 @@ found in the LICENSE file.
 
 <link rel="import" href="/tracing/trace_model/event.html">
 <link rel="import" href="/tracing/trace_model/object_snapshot.html">
-<link rel="import" href="/tvcm/range.html">
-<link rel="import" href="/tvcm/sorted_array_utils.html">
+<link rel="import" href="/base/range.html">
+<link rel="import" href="/base/sorted_array_utils.html">
 
 <script>
 'use strict';
@@ -16,7 +16,7 @@ found in the LICENSE file.
 /**
  * @fileoverview Provides the ObjectSnapshot and ObjectHistory classes.
  */
-tvcm.exportTo('tracing.trace_model', function() {
+tv.exportTo('tracing.trace_model', function() {
   var ObjectSnapshot = tracing.trace_model.ObjectSnapshot;
 
   /**
@@ -38,7 +38,7 @@ tvcm.exportTo('tracing.trace_model', function() {
     this.deletionTs = Number.MAX_VALUE;
     this.deletionTsWasExplicit = false;
     this.colorId = 0;
-    this.bounds = new tvcm.Range();
+    this.bounds = new tv.Range();
     this.snapshots = [];
     this.hasImplicitSnapshots = false;
   }
@@ -83,7 +83,8 @@ tvcm.exportTo('tracing.trace_model', function() {
       }
 
       var snapshotConstructor =
-          tracing.trace_model.ObjectSnapshot.getConstructor(this.name);
+          tracing.trace_model.ObjectSnapshot.getConstructor(
+              this.category, this.name);
       var snapshot = new snapshotConstructor(this, ts, args);
       this.snapshots.push(snapshot);
       return snapshot;
@@ -128,7 +129,7 @@ tvcm.exportTo('tracing.trace_model', function() {
         throw new Error('ts must be within lifetime of this instance');
 
       var snapshots = this.snapshots;
-      var i = tvcm.findLowIndexInSortedIntervals(
+      var i = tv.findLowIndexInSortedIntervals(
           snapshots,
           function(snapshot) { return snapshot.ts; },
           function(snapshot, i) {
@@ -169,22 +170,7 @@ tvcm.exportTo('tracing.trace_model', function() {
     }
   };
 
-  ObjectInstance.nameToConstructorMap_ = {};
-  ObjectInstance.register = function(name, constructor) {
-    if (ObjectInstance.nameToConstructorMap_[name])
-      throw new Error('Constructor already registered for ' + name);
-    ObjectInstance.nameToConstructorMap_[name] = constructor;
-  };
-
-  ObjectInstance.unregister = function(name) {
-    delete ObjectInstance.nameToConstructorMap_[name];
-  };
-
-  ObjectInstance.getConstructor = function(name) {
-    if (ObjectInstance.nameToConstructorMap_[name])
-      return ObjectInstance.nameToConstructorMap_[name];
-    return ObjectInstance;
-  };
+  tracing.trace_model.Event.decorateSubtype(ObjectInstance);
 
   return {
     ObjectInstance: ObjectInstance

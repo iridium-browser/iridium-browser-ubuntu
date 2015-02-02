@@ -37,7 +37,7 @@ class ByContextFinder : public content::RenderViewVisitor {
   explicit ByContextFinder(v8::Handle<v8::Context> context)
       : context_(context), found_(NULL) {}
 
-  virtual bool Visit(content::RenderView* render_view) OVERRIDE {
+  bool Visit(content::RenderView* render_view) override {
     ExtensionHelper* helper = ExtensionHelper::Get(render_view);
     if (helper &&
         helper->dispatcher()->script_context_set().GetByV8Context(context_)) {
@@ -173,8 +173,7 @@ void AddMessage(v8::Handle<v8::Context> context,
   AddMessage(render_view, level, message);
 }
 
-v8::Local<v8::Object> AsV8Object() {
-  v8::Isolate* isolate = v8::Isolate::GetCurrent();
+v8::Local<v8::Object> AsV8Object(v8::Isolate* isolate) {
   v8::EscapableHandleScope handle_scope(isolate);
   v8::Local<v8::Object> console_object = v8::Object::New(isolate);
   BindLogMethod(isolate, console_object, "debug", &Debug);

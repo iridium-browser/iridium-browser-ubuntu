@@ -7,7 +7,6 @@
 
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
 #include "chrome/browser/history/visit_database.h"
@@ -43,7 +42,7 @@ class VisitDatabaseTest : public PlatformTest,
 
  private:
   // Test setup.
-  virtual void SetUp() {
+  void SetUp() override {
     PlatformTest::SetUp();
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     base::FilePath db_file = temp_dir_.path().AppendASCII("VisitTest.db");
@@ -55,15 +54,13 @@ class VisitDatabaseTest : public PlatformTest,
     CreateMainURLIndex();
     InitVisitTable();
   }
-  virtual void TearDown() {
+  void TearDown() override {
     db_.Close();
     PlatformTest::TearDown();
   }
 
   // Provided for URL/VisitDatabase.
-  virtual sql::Connection& GetDB() OVERRIDE {
-    return db_;
-  }
+  sql::Connection& GetDB() override { return db_; }
 
   base::ScopedTempDir temp_dir_;
   sql::Connection db_;

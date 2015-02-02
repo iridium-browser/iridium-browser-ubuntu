@@ -216,14 +216,15 @@ void DragController::dragExited(DragData* dragData)
     ASSERT(dragData);
     LocalFrame* mainFrame = m_page->deprecatedLocalMainFrame();
 
-    if (RefPtr<FrameView> v = mainFrame->view()) {
+    RefPtrWillBeRawPtr<FrameView> frameView(mainFrame->view());
+    if (frameView) {
         DataTransferAccessPolicy policy = (!m_documentUnderMouse || m_documentUnderMouse->securityOrigin()->isLocal()) ? DataTransferReadable : DataTransferTypesReadable;
         RefPtrWillBeRawPtr<DataTransfer> dataTransfer = createDraggingDataTransfer(policy, dragData);
         dataTransfer->setSourceOperation(dragData->draggingSourceOperationMask());
         mainFrame->eventHandler().cancelDragAndDrop(createMouseEvent(dragData), dataTransfer.get());
         dataTransfer->setAccessPolicy(DataTransferNumb); // invalidate clipboard here for security
     }
-    mouseMovedIntoDocument(0);
+    mouseMovedIntoDocument(nullptr);
     if (m_fileInputElementUnderMouse)
         m_fileInputElementUnderMouse->setCanReceiveDroppedFiles(false);
     m_fileInputElementUnderMouse = nullptr;
@@ -250,6 +251,7 @@ bool DragController::performDrag(DragData* dragData)
         }
         if (preventedDefault) {
             m_documentUnderMouse = nullptr;
+            cancelDrag();
             return true;
         }
     }
@@ -265,7 +267,7 @@ bool DragController::performDrag(DragData* dragData)
         return false;
 
     if (m_page->settings().navigateOnDragDrop())
-        m_page->deprecatedLocalMainFrame()->loader().load(FrameLoadRequest(0, ResourceRequest(dragData->asURL())));
+        m_page->deprecatedLocalMainFrame()->loader().load(FrameLoadRequest(nullptr, ResourceRequest(dragData->asURL())));
     return true;
 }
 
@@ -306,7 +308,7 @@ static HTMLInputElement* asFileInput(Node* node)
         if (isHTMLInputElement(*node) && toHTMLInputElement(node)->type() == InputTypeNames::file)
             return toHTMLInputElement(node);
     }
-    return 0;
+    return nullptr;
 }
 
 // This can return null if an empty document is loaded.
@@ -353,7 +355,7 @@ bool DragController::tryDocumentDrag(DragData* dragData, DragDestinationAction a
 
     // It's unclear why this check is after tryDHTMLDrag.
     // We send drag events in tryDHTMLDrag and that may be the reason.
-    RefPtr<FrameView> frameView = m_documentUnderMouse->view();
+    RefPtrWillBeRawPtr<FrameView> frameView = m_documentUnderMouse->view();
     if (!frameView)
         return false;
 
@@ -383,16 +385,18 @@ bool DragController::tryDocumentDrag(DragData* dragData, DragDestinationAction a
         dragSession.mouseIsOverFileInput = m_fileInputElementUnderMouse;
         dragSession.numberOfItemsToBeAccepted = 0;
 
-        unsigned numberOfFiles = dragData->numberOfFiles();
+        Vector<String> paths;
+        dragData->asFilePaths(paths);
+        const unsigned numberOfFiles = paths.size();
         if (m_fileInputElementUnderMouse) {
             if (m_fileInputElementUnderMouse->isDisabledFormControl())
                 dragSession.numberOfItemsToBeAccepted = 0;
             else if (m_fileInputElementUnderMouse->multiple())
                 dragSession.numberOfItemsToBeAccepted = numberOfFiles;
-            else if (numberOfFiles > 1)
-                dragSession.numberOfItemsToBeAccepted = 0;
-            else
+            else if (numberOfFiles == 1)
                 dragSession.numberOfItemsToBeAccepted = 1;
+            else
+                dragSession.numberOfItemsToBeAccepted = 0;
 
             if (!dragSession.numberOfItemsToBeAccepted)
                 dragSession.operation = DragOperationNone;
@@ -594,7 +598,7 @@ bool DragController::tryDHTMLDrag(DragData* dragData, DragOperation& operation)
     if (!mainFrame->view())
         return false;
 
-    RefPtr<FrameView> viewProtector(mainFrame->view());
+    RefPtrWillBeRawPtr<FrameView> viewProtector(mainFrame->view());
     DataTransferAccessPolicy policy = m_documentUnderMouse->securityOrigin()->isLocal() ? DataTransferReadable : DataTransferTypesReadable;
     RefPtrWillBeRawPtr<DataTransfer> dataTransfer = createDraggingDataTransfer(policy, dragData);
     DragOperation srcOpMask = dragData->draggingSourceOperationMask();
@@ -628,7 +632,7 @@ Node* DragController::draggableNode(const LocalFrame* src, Node* startNode, cons
         dragType = DragSourceActionNone;
     }
 
-    Node* node = 0;
+    Node* node = nullptr;
     DragSourceAction candidateDragType = DragSourceActionNone;
     for (const RenderObject* renderer = startNode->renderer(); renderer; renderer = renderer->parent()) {
         node = renderer->nonPseudoNode();
@@ -641,7 +645,7 @@ Node* DragController::draggableNode(const LocalFrame* src, Node* startNode, cons
             // In this case we have a click in the unselected portion of text. If this text is
             // selectable, we want to start the selection process instead of looking for a parent
             // to try to drag.
-            return 0;
+            return nullptr;
         }
         if (node->isElementNode()) {
             EUserDrag dragMode = renderer->style()->userDrag();
@@ -672,7 +676,7 @@ Node* DragController::draggableNode(const LocalFrame* src, Node* startNode, cons
         // 2) There was a selection under the cursor but selectionDragPolicy is set to
         //    DelayedSelectionDragResolution and no other draggable element could be found, so bail
         //    out and allow text selection to start at the cursor instead.
-        return 0;
+        return nullptr;
     }
 
     ASSERT(node);
@@ -695,7 +699,7 @@ static ImageResource* getImageResource(Element* element)
     ASSERT(element);
     RenderObject* renderer = element->renderer();
     if (!renderer || !renderer->isImage())
-        return 0;
+        return nullptr;
     RenderImage* image = toRenderImage(renderer);
     return image->cachedImage();
 }
@@ -708,7 +712,7 @@ static Image* getImage(Element* element)
     // Users of getImage() want access to the SVGImage, in order to figure out the filename extensions,
     // which would be empty when asking the cached BitmapImages.
     return (cachedImage && !cachedImage->errorOccurred()) ?
-        cachedImage->image() : 0;
+        cachedImage->image() : nullptr;
 }
 
 static void prepareDataTransferForImageDrag(LocalFrame* source, DataTransfer* dataTransfer, Element* node, const KURL& linkURL, const KURL& imageURL, const String& label)
@@ -721,6 +725,23 @@ static void prepareDataTransferForImageDrag(LocalFrame* source, DataTransfer* da
     dataTransfer->declareAndWriteDragImage(node, !linkURL.isEmpty() ? linkURL : imageURL, label);
 }
 
+static ShadowRoot::ShadowRootType treeScopeType(const TreeScope& scope)
+{
+    // Treat document like an author shadow root.
+    if (scope.rootNode().isDocumentNode())
+        return ShadowRoot::AuthorShadowRoot;
+    return toShadowRoot(scope.rootNode()).type();
+}
+
+static bool containsExcludingUserAgentShadowTrees(const Node& dragSrc, Node* dragOrigin)
+{
+    if (!dragOrigin)
+        return false;
+    if (treeScopeType(dragSrc.treeScope()) != treeScopeType(dragOrigin->treeScope()))
+        return false;
+    return dragSrc.containsIncludingShadowDOM(dragOrigin);
+}
+
 bool DragController::populateDragDataTransfer(LocalFrame* src, const DragState& state, const IntPoint& dragOrigin)
 {
     ASSERT(dragTypeIsValid(state.m_dragType));
@@ -731,7 +752,7 @@ bool DragController::populateDragDataTransfer(LocalFrame* src, const DragState& 
     HitTestResult hitTestResult = src->eventHandler().hitTestResultAtPoint(dragOrigin);
     // FIXME: Can this even happen? I guess it's possible, but should verify
     // with a layout test.
-    if (!state.m_dragSrc->containsIncludingShadowDOM(hitTestResult.innerNode())) {
+    if (!containsExcludingUserAgentShadowTrees(*state.m_dragSrc, hitTestResult.innerNode())) {
         // The original node being dragged isn't under the drag origin anymore... maybe it was
         // hidden or moved out from under the cursor. Regardless, we don't want to start a drag on
         // something that's not actually under the drag origin.
@@ -849,7 +870,7 @@ bool DragController::startDrag(LocalFrame* src, const DragState& state, const Pl
         return false;
 
     HitTestResult hitTestResult = src->eventHandler().hitTestResultAtPoint(dragOrigin);
-    if (!state.m_dragSrc->containsIncludingShadowDOM(hitTestResult.innerNode())) {
+    if (!containsExcludingUserAgentShadowTrees(*state.m_dragSrc, hitTestResult.innerNode())) {
         // The original node being dragged isn't under the drag origin anymore... maybe it was
         // hidden or moved out from under the cursor. Regardless, we don't want to start a drag on
         // something that's not actually under the drag origin.
@@ -929,7 +950,7 @@ void DragController::doSystemDrag(DragImage* image, const IntPoint& dragLocation
     m_dragInitiator = frame->document();
     // Protect this frame and view, as a load may occur mid drag and attempt to unload this frame
     RefPtrWillBeRawPtr<LocalFrame> mainFrame = m_page->deprecatedLocalMainFrame();
-    RefPtr<FrameView> mainFrameView = mainFrame->view();
+    RefPtrWillBeRawPtr<FrameView> mainFrameView = mainFrame->view();
 
     m_client->startDrag(image, mainFrameView->rootViewToContents(frame->view()->contentsToRootView(dragLocation)),
         mainFrameView->rootViewToContents(frame->view()->contentsToRootView(eventPos)), dataTransfer, frame, forLink);

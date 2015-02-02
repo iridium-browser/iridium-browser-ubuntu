@@ -31,27 +31,26 @@ namespace {
 class TestHarness : public PolicyProviderTestHarness {
  public:
   explicit TestHarness(PolicyLevel level);
-  virtual ~TestHarness();
+  ~TestHarness() override;
 
-  virtual void SetUp() OVERRIDE;
+  void SetUp() override;
 
-  virtual ConfigurationPolicyProvider* CreateProvider(
+  ConfigurationPolicyProvider* CreateProvider(
       SchemaRegistry* registry,
-      scoped_refptr<base::SequencedTaskRunner> task_runner) OVERRIDE;
+      scoped_refptr<base::SequencedTaskRunner> task_runner) override;
 
-  virtual void InstallEmptyPolicy() OVERRIDE;
-  virtual void InstallStringPolicy(const std::string& policy_name,
-                                   const std::string& policy_value) OVERRIDE;
-  virtual void InstallIntegerPolicy(const std::string& policy_name,
-                                    int policy_value) OVERRIDE;
-  virtual void InstallBooleanPolicy(const std::string& policy_name,
-                                    bool policy_value) OVERRIDE;
-  virtual void InstallStringListPolicy(
+  void InstallEmptyPolicy() override;
+  void InstallStringPolicy(const std::string& policy_name,
+                           const std::string& policy_value) override;
+  void InstallIntegerPolicy(const std::string& policy_name,
+                            int policy_value) override;
+  void InstallBooleanPolicy(const std::string& policy_name,
+                            bool policy_value) override;
+  void InstallStringListPolicy(const std::string& policy_name,
+                               const base::ListValue* policy_value) override;
+  void InstallDictionaryPolicy(
       const std::string& policy_name,
-      const base::ListValue* policy_value) OVERRIDE;
-  virtual void InstallDictionaryPolicy(
-      const std::string& policy_name,
-      const base::DictionaryValue* policy_value) OVERRIDE;
+      const base::DictionaryValue* policy_value) override;
 
   // Creates harnesses for mandatory and recommended levels, respectively.
   static PolicyProviderTestHarness* CreateMandatory();
@@ -156,7 +155,7 @@ class TestCloudPolicyManager : public CloudPolicyManager {
                            task_runner,
                            task_runner,
                            task_runner) {}
-  virtual ~TestCloudPolicyManager() {}
+  ~TestCloudPolicyManager() override {}
 
   // Publish the protected members for testing.
   using CloudPolicyManager::client;
@@ -177,7 +176,7 @@ class CloudPolicyManagerTest : public testing::Test {
   CloudPolicyManagerTest()
       : policy_ns_key_(dm_protocol::kChromeUserPolicyType, std::string()) {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     // Set up a policy map for testing.
     policy_map_.Set("key",
                     POLICY_LEVEL_MANDATORY,
@@ -198,7 +197,7 @@ class CloudPolicyManagerTest : public testing::Test {
     manager_->AddObserver(&observer_);
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     manager_->RemoveObserver(&observer_);
     manager_->Shutdown();
   }

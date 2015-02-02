@@ -18,7 +18,7 @@
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #include "chrome/browser/ui/cocoa/download/download_item_controller.h"
 #include "chrome/browser/ui/cocoa/download/download_shelf_mac.h"
-#import "chrome/browser/ui/cocoa/download/download_shelf_view.h"
+#import "chrome/browser/ui/cocoa/download/download_shelf_view_cocoa.h"
 #import "chrome/browser/ui/cocoa/presentation_mode_controller.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/download_manager.h"
@@ -252,10 +252,12 @@ const NSSize kHoverCloseButtonDefaultSize = { 18, 18 };
   // do no animation over janky animation.  Find a way to make animating in
   // smoother.
   AnimatableView* view = [self animatableView];
-  if (show)
+  if (show) {
     [view setHeight:maxShelfHeight_];
-  else
+    [view setHidden:NO];
+  } else {
     [view animateToNewHeight:0 duration:kDownloadShelfCloseDuration];
+  }
 
   barIsVisible_ = show;
   [self updateCloseButton];
@@ -270,8 +272,10 @@ const NSSize kHoverCloseButtonDefaultSize = { 18, 18 };
 }
 
 - (void)animationDidEnd:(NSAnimation*)animation {
-  if (![self isVisible])
+  if (![self isVisible]) {
     [self closed];
+    [[self view] setHidden:YES];  // So that it doesn't appear in AX hierarchy.
+  }
 }
 
 - (float)height {

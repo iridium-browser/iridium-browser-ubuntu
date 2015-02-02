@@ -4,16 +4,9 @@
 
 #include "ash/system/tray/system_tray_notifier.h"
 
-#if defined(OS_CHROMEOS)
-#include "ash/system/chromeos/network/network_state_notifier.h"
-#endif
-
 namespace ash {
 
 SystemTrayNotifier::SystemTrayNotifier() {
-#if defined(OS_CHROMEOS)
-  network_state_notifier_.reset(new NetworkStateNotifier());
-#endif
 }
 
 SystemTrayNotifier::~SystemTrayNotifier() {
@@ -182,10 +175,20 @@ void SystemTrayNotifier::RemoveLastWindowClosedObserver(
     LastWindowClosedObserver* observer) {
   last_window_closed_observers_.RemoveObserver(observer);
 }
+
+void SystemTrayNotifier::AddVirtualKeyboardObserver(
+    VirtualKeyboardObserver* observer) {
+  virtual_keyboard_observers_.AddObserver(observer);
+}
+
+void SystemTrayNotifier::RemoveVirtualKeyboardObserver(
+    VirtualKeyboardObserver* observer) {
+  virtual_keyboard_observers_.RemoveObserver(observer);
+}
 #endif
 
 void SystemTrayNotifier::NotifyAccessibilityModeChanged(
-    AccessibilityNotificationVisibility notify) {
+    ui::AccessibilityNotificationVisibility notify) {
   FOR_EACH_OBSERVER(
       AccessibilityObserver,
       accessibility_observers_,
@@ -285,11 +288,9 @@ void SystemTrayNotifier::NotifyLocaleChanged(
       OnLocaleChanged(delegate, cur_locale, from_locale, to_locale));
 }
 
-void SystemTrayNotifier::NotifyUpdateRecommended(
-    UpdateObserver::UpdateSeverity severity) {
-  FOR_EACH_OBSERVER(UpdateObserver,
-                    update_observers_,
-                    OnUpdateRecommended(severity));
+void SystemTrayNotifier::NotifyUpdateRecommended(const UpdateInfo& info) {
+  FOR_EACH_OBSERVER(
+      UpdateObserver, update_observers_, OnUpdateRecommended(info));
 }
 
 void SystemTrayNotifier::NotifyUserUpdate() {
@@ -382,6 +383,13 @@ void SystemTrayNotifier::NotifyLastWindowClosed() {
   FOR_EACH_OBSERVER(LastWindowClosedObserver,
                     last_window_closed_observers_,
                     OnLastWindowClosed());
+}
+
+void SystemTrayNotifier::NotifyVirtualKeyboardSuppressionChanged(
+    bool suppressed) {
+  FOR_EACH_OBSERVER(VirtualKeyboardObserver,
+                    virtual_keyboard_observers_,
+                    OnKeyboardSuppressionChanged(suppressed));
 }
 
 #endif  // OS_CHROMEOS

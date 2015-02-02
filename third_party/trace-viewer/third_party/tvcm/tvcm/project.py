@@ -101,9 +101,6 @@ class Project(object):
   tvcm_src_path = os.path.abspath(os.path.join(
       tvcm_path, 'src'))
 
-  tvcm_third_party_path = os.path.abspath(os.path.join(
-      tvcm_path, 'third_party'))
-
   def __init__(self, source_paths=None, include_tvcm_paths=True, non_module_html_files=None):
     """
     source_paths: A list of top-level directories in which modules and raw scripts can be found.
@@ -116,21 +113,6 @@ class Project(object):
 
     if include_tvcm_paths:
       self.source_paths.append(self.tvcm_src_path)
-      self.source_paths.extendRel(self.tvcm_third_party_path, [
-        'Promises/polyfill/src',
-        'gl-matrix/src',
-        'polymer',
-        'd3'
-      ])
-      self.non_module_html_files.extendRel(self.tvcm_third_party_path, [
-        'gl-matrix/jsdoc-template/static/header.html',
-        'gl-matrix/jsdoc-template/static/index.html',
-        'Promises/polyfill/tests/test.html',
-        'Promises/reworked_APIs/IndexedDB/example/after.html',
-        'Promises/reworked_APIs/IndexedDB/example/before.html',
-        'Promises/reworked_APIs/WebCrypto/example/after.html',
-        'Promises/reworked_APIs/WebCrypto/example/before.html'
-      ]);
 
     if source_paths != None:
       self.source_paths.extend(source_paths)

@@ -53,7 +53,6 @@ content::WebUIDataSource* CreateFlagsUIHTMLSource() {
   content::WebUIDataSource* source =
       content::WebUIDataSource::Create(chrome::kChromeUIFlagsHost);
 
-  source->SetUseJsonJSFormatV2();
   source->AddLocalizedString("flagsLongTitle", IDS_FLAGS_LONG_TITLE);
   source->AddLocalizedString("flagsTableTitle", IDS_FLAGS_TABLE_TITLE);
   source->AddLocalizedString("flagsNoExperimentsAvailable",
@@ -108,7 +107,7 @@ class FlagsDOMHandler : public WebUIMessageHandler {
   FlagsDOMHandler() : access_(about_flags::kGeneralAccessFlagsOnly),
                       flags_experiments_requested_(false) {
   }
-  virtual ~FlagsDOMHandler() {}
+  ~FlagsDOMHandler() override {}
 
   // Initializes the DOM handler with the provided flags storage and flags
   // access. If there were flags experiments requested from javascript before
@@ -117,7 +116,7 @@ class FlagsDOMHandler : public WebUIMessageHandler {
             about_flags::FlagAccess access);
 
   // WebUIMessageHandler implementation.
-  virtual void RegisterMessages() OVERRIDE;
+  void RegisterMessages() override;
 
   // Callback for the "requestFlagsExperiments" message.
   void HandleRequestFlagsExperiments(const base::ListValue* args);

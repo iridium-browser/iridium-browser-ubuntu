@@ -7,18 +7,18 @@
 
 #ifndef GrGLFragmentShaderBuilder_DEFINED
 #define GrGLFragmentShaderBuilder_DEFINED
+
 #include "GrGLShaderBuilder.h"
 
-class GrGLProgramBuilder;
+class GrGLVarying;
 
 /*
- * This base class encapsulates the functionality which all GrProcessors are allowed to use in their
- * fragment shader
+ * This base class encapsulates the functionality which the GP uses to build fragment shaders
  */
-class GrGLProcessorFragmentShaderBuilder : public GrGLShaderBuilder {
+class GrGLGPFragmentBuilder : public GrGLShaderBuilder {
 public:
-    GrGLProcessorFragmentShaderBuilder(GrGLProgramBuilder* program) : INHERITED(program) {}
-    virtual ~GrGLProcessorFragmentShaderBuilder() {}
+    GrGLGPFragmentBuilder(GrGLProgramBuilder* program) : INHERITED(program) {}
+    virtual ~GrGLGPFragmentBuilder() {}
     /**
      * Use of these features may require a GLSL extension to be enabled. Shaders may not compile
      * if code is added that uses one of these features without calling enableFeature()
@@ -53,20 +53,23 @@ private:
 
 /*
  * Fragment processor's, in addition to all of the above, may need to use dst color so they use
- * this builder to create their shader
+ * this builder to create their shader.  Because this is the only shader builder the FP sees, we
+ * just call it FPShaderBuilder
  */
-class GrGLFragmentProcessorShaderBuilder : public GrGLProcessorFragmentShaderBuilder {
+class GrGLFPFragmentBuilder : public GrGLGPFragmentBuilder {
 public:
-    GrGLFragmentProcessorShaderBuilder(GrGLProgramBuilder* program) : INHERITED(program) {}
+    GrGLFPFragmentBuilder(GrGLProgramBuilder* program) : INHERITED(program) {}
+
     /** Returns the variable name that holds the color of the destination pixel. This may be NULL if
         no effect advertised that it will read the destination. */
     virtual const char* dstColor() = 0;
 
 private:
-    typedef GrGLProcessorFragmentShaderBuilder INHERITED;
+    typedef GrGLGPFragmentBuilder INHERITED;
 };
 
-class GrGLFragmentShaderBuilder : public GrGLFragmentProcessorShaderBuilder {
+// TODO rename to Fragment Builder
+class GrGLFragmentShaderBuilder : public GrGLFPFragmentBuilder {
 public:
     typedef uint8_t DstReadKey;
     typedef uint8_t FragPosKey;
@@ -81,40 +84,40 @@ public:
        the key is 0. */
     static FragPosKey KeyForFragmentPosition(const GrRenderTarget* dst, const GrGLCaps&);
 
-    GrGLFragmentShaderBuilder(GrGLProgramBuilder* program, const GrGLProgramDesc& desc);
+    GrGLFragmentShaderBuilder(GrGLProgramBuilder* program, uint8_t fragPosKey);
 
-    virtual const char* dstColor() SK_OVERRIDE;
-
+    // true public interface, defined explicitly in the abstract interfaces above
     virtual bool enableFeature(GLSLFeature) SK_OVERRIDE;
-
     virtual SkString ensureFSCoords2D(const GrGLProcessor::TransformedCoordsArray& coords,
                                       int index) SK_OVERRIDE;
-
     virtual const char* fragmentPosition() SK_OVERRIDE;
+    virtual const char* dstColor() SK_OVERRIDE;
 
 private:
-    /*
-     * An internal call for GrGLFullProgramBuilder to use to add varyings to the vertex shader
-     */
-    void addVarying(GrSLType type,
-                   const char* name,
-                   const char** fsInName,
-                   GrGLShaderVar::Precision fsPrecision = GrGLShaderVar::kDefault_Precision);
-
-    /*
-     * Private functions used by GrGLProgramBuilder for compilation
-    */
-    void bindProgramLocations(GrGLuint programId);
+    // Private public interface, used by GrGLProgramBuilder to build a fragment shader
+    void emitCodeToReadDstTexture();
+    void enableCustomOutput();
+    void enableSecondaryOutput();
+    const char* getPrimaryColorOutputName() const;
+    const char* getSecondaryColorOutputName() const;
+    void enableSecondaryOutput(const GrGLSLExpr4& inputColor, const GrGLSLExpr4& inputCoverage);
+    void combineColorAndCoverage(const GrGLSLExpr4& inputColor, const GrGLSLExpr4& inputCoverage);
     bool compileAndAttachShaders(GrGLuint programId, SkTDArray<GrGLuint>* shaderIds) const;
-    void emitCodeBeforeEffects();
-    void emitCodeAfterEffects(const GrGLSLExpr4& inputColor, const GrGLSLExpr4& inputCoverage);
+    void bindFragmentShaderLocations(GrGLuint programID);
 
-    /** Enables using the secondary color output and returns the name of the var in which it is
-        to be stored */
-    const char* enableSecondaryOutput();
+    // As GLProcessors emit code, there are some conditions we need to verify.  We use the below
+    // state to track this.  The reset call is called per processor emitted.
+    bool hasReadDstColor() const { return fHasReadDstColor; }
+    bool hasReadFragmentPosition() const { return fHasReadFragmentPosition; }
+    void reset() {
+        fHasReadDstColor = false;
+        fHasReadFragmentPosition = false;
+    }
 
-    /** Gets the name of the primary color output. */
-    const char* getColorOutputName() const;
+    /*
+     * An internal call for GrGLProgramBuilder to use to add varyings to the vertex shader
+     */
+    void addVarying(GrGLVarying*, GrGLShaderVar::Precision);
 
     /**
      * Features that should only be enabled by GrGLFragmentShaderBuilder itself.
@@ -132,21 +135,30 @@ private:
         kTopLeftOrigin_DstReadKeyBit    = 0x4, // Set if dst-copy origin is top-left.
     };
 
+    // Interpretation of FragPosKey when generating code
     enum {
         kNoFragPosRead_FragPosKey           = 0,  // The fragment positition will not be needed.
         kTopLeftFragPosRead_FragPosKey      = 0x1,// Read frag pos relative to top-left.
         kBottomLeftFragPosRead_FragPosKey   = 0x2,// Read frag pos relative to bottom-left.
     };
 
+    static const char* kDstCopyColorName;
+
     bool fHasCustomColorOutput;
     bool fHasSecondaryOutput;
     bool fSetupFragPosition;
     bool fTopLeftFragPosRead;
+    int  fCustomColorOutputIndex;
 
+    // some state to verify shaders and effects are consistent, this is reset between effects by
+    // the program creator
+    bool fHasReadDstColor;
+    bool fHasReadFragmentPosition;
+
+    friend class GrGLNvprProgramBuilder;
     friend class GrGLProgramBuilder;
-    friend class GrGLFullProgramBuilder;
 
-    typedef GrGLFragmentProcessorShaderBuilder INHERITED;
+    typedef GrGLFPFragmentBuilder INHERITED;
 };
 
 #endif

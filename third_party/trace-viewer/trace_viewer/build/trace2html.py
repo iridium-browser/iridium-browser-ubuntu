@@ -4,11 +4,13 @@
 
 import base64
 import gzip
+import json
 import optparse
 import shutil
+import os
+import StringIO
 import sys
 import tempfile
-import os
 
 from trace_viewer import trace_viewer_project
 from tvcm import generate
@@ -45,33 +47,36 @@ file that contains both the trace and the trace viewer.""")
     print output_filename
   return 0
 
+
 class ViewerDataScript(generate.ExtraScript):
-  def __init__(self, filename):
+  def __init__(self, trace_data_string):
     super(ViewerDataScript, self).__init__()
-    self._filename = filename
+    self._trace_data_string = trace_data_string
 
   def WriteToFile(self, output_file):
     output_file.write('<script id="viewer-data" type="application/json">\n')
-
-    with tempfile.NamedTemporaryFile() as compressed_file:
-      gzfile = gzip.open(compressed_file.name, 'wb')
-      with open(self._filename, 'r') as f:
-        shutil.copyfileobj(f, gzfile)
-      gzfile.close()
-
-      with open(compressed_file.name, 'rb') as gzfile:
-        b64_content = base64.b64encode(gzfile.read())
-        output_file.write(b64_content)
-
+    compressed_trace = StringIO.StringIO()
+    with gzip.GzipFile(fileobj=compressed_trace, mode='w') as f:
+      f.write(self._trace_data_string)
+    b64_content = base64.b64encode(compressed_trace.getvalue())
+    output_file.write(b64_content)
     output_file.write('\n</script>\n')
 
-def WriteHTMLForTracesToFile(trace_filenames, output_file):
-  project = trace_viewer_project.TraceViewerProject()
-  load_sequence = project.CalcLoadSequenceForModuleNames(
-      ['build.trace2html'])
 
-  scripts = [ViewerDataScript(x) for x in trace_filenames]
+def WriteHTMLForTraceDataToFile(trace_data_list, title, output_file):
+  project = trace_viewer_project.TraceViewerProject()
+  load_sequence = project.CalcLoadSequenceForModuleNames(['build.trace2html'])
+  scripts = [ViewerDataScript(json.dumps(trace_data)) for
+             trace_data in trace_data_list]
+  generate.GenerateStandaloneHTMLToFile(
+    output_file, load_sequence, title, extra_scripts=scripts)
+
+
+def WriteHTMLForTracesToFile(trace_filenames, output_file):
+  trace_data_list = []
+  for filename in trace_filenames:
+    with open(filename, 'r') as f:
+      trace_data_list.append(json.load(f))
 
   title = "Trace from %s" % ','.join(trace_filenames)
-  generate.GenerateStandaloneHTMLToFile(
-      output_file, load_sequence, title, extra_scripts=scripts)
+  WriteHTMLForTraceDataToFile(trace_data_list, title, output_file)

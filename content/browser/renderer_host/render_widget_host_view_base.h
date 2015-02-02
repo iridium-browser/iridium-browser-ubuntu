@@ -36,8 +36,6 @@
 class SkBitmap;
 
 struct AccessibilityHostMsg_EventParams;
-struct GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params;
-struct GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params;
 struct ViewHostMsg_SelectionBounds_Params;
 
 namespace media {
@@ -68,24 +66,25 @@ typedef const base::Callback<void(bool, const SkBitmap&)>
 class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
                                                 public IPC::Listener {
  public:
-  virtual ~RenderWidgetHostViewBase();
+  ~RenderWidgetHostViewBase() override;
 
   // RenderWidgetHostView implementation.
-  virtual void SetBackgroundOpaque(bool opaque) OVERRIDE;
-  virtual bool GetBackgroundOpaque() OVERRIDE;
-  virtual ui::TextInputClient* GetTextInputClient() OVERRIDE;
-  virtual bool IsShowingContextMenu() const OVERRIDE;
-  virtual void SetShowingContextMenu(bool showing_menu) OVERRIDE;
-  virtual base::string16 GetSelectedText() const OVERRIDE;
-  virtual bool IsMouseLocked() OVERRIDE;
-  virtual gfx::Size GetVisibleViewportSize() const OVERRIDE;
-  virtual void SetInsets(const gfx::Insets& insets) OVERRIDE;
-  virtual void BeginFrameSubscription(
-      scoped_ptr<RenderWidgetHostViewFrameSubscriber> subscriber) OVERRIDE;
-  virtual void EndFrameSubscription() OVERRIDE;
+  void SetBackgroundColor(SkColor color) override;
+  void SetBackgroundColorToDefault() final;
+  bool GetBackgroundOpaque() override;
+  ui::TextInputClient* GetTextInputClient() override;
+  bool IsShowingContextMenu() const override;
+  void SetShowingContextMenu(bool showing_menu) override;
+  base::string16 GetSelectedText() const override;
+  bool IsMouseLocked() override;
+  gfx::Size GetVisibleViewportSize() const override;
+  void SetInsets(const gfx::Insets& insets) override;
+  void BeginFrameSubscription(
+      scoped_ptr<RenderWidgetHostViewFrameSubscriber> subscriber) override;
+  void EndFrameSubscription() override;
 
   // IPC::Listener implementation:
-  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& msg) override;
 
   // Called by the host when the input flush has completed.
   void OnDidFlushInput();
@@ -224,7 +223,8 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
   // Updates the type of the input method attached to the view.
   virtual void TextInputTypeChanged(ui::TextInputType type,
                                     ui::TextInputMode mode,
-                                    bool can_compose_inline) = 0;
+                                    bool can_compose_inline,
+                                    int flags) = 0;
 
   // Cancel the ongoing composition of the input method attached to the view.
   virtual void ImeCancelComposition() = 0;
@@ -289,27 +289,8 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
   // IsSurfaceAvailableForCopy() and HasAcceleratedSurface().
   virtual bool CanCopyToVideoFrame() const = 0;
 
-  // Called when an accelerated compositing surface is initialized.
-  virtual void AcceleratedSurfaceInitialized(int host_id, int route_id) = 0;
-  // |params.window| and |params.surface_id| indicate which accelerated
-  // surface's buffers swapped. |params.renderer_id| and |params.route_id|
-  // are used to formulate a reply to the GPU process to prevent it from getting
-  // too far ahead. They may all be zero, in which case no flow control is
-  // enforced; this case is currently used for accelerated plugins.
-  virtual void AcceleratedSurfaceBuffersSwapped(
-      const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params_in_pixel,
-      int gpu_host_id) = 0;
-  // Similar to above, except |params.(x|y|width|height)| define the region
-  // of the surface that changed.
-  virtual void AcceleratedSurfacePostSubBuffer(
-      const GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params& params_in_pixel,
-      int gpu_host_id) = 0;
-
-  // Release the accelerated surface temporarily. It will be recreated on the
-  // next swap buffers or post sub buffer.
-  virtual void AcceleratedSurfaceSuspend() = 0;
-
-  virtual void AcceleratedSurfaceRelease() = 0;
+  // DEPRECATED. Called when an accelerated compositing surface is initialized.
+  virtual void AcceleratedSurfaceInitialized(int route_id) {}
 
   // Return true if the view has an accelerated surface that contains the last
   // presented frame for the view. If |desired_size| is non-empty, true is
@@ -331,14 +312,16 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
 
   virtual gfx::GLSurfaceHandle GetCompositingSurface() = 0;
 
+  // Called by the RenderFrameHost when it receives an IPC response to a
+  // TextSurroundingSelectionRequest.
   virtual void OnTextSurroundingSelectionResponse(const base::string16& content,
                                                   size_t start_offset,
-                                                  size_t end_offset) {};
+                                                  size_t end_offset);
 
-#if defined(OS_ANDROID) || defined(TOOLKIT_VIEWS) || defined(USE_AURA)
+  // Called by the RenderWidgetHost when an ambiguous gesture is detected to
+  // show the disambiguation popup bubble.
   virtual void ShowDisambiguationPopup(const gfx::Rect& rect_pixels,
-                                       const SkBitmap& zoomed_bitmap) = 0;
-#endif
+                                       const SkBitmap& zoomed_bitmap);
 
 #if defined(OS_ANDROID)
   // Instructs the view to not drop the surface even when the view is hidden.
@@ -355,7 +338,7 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
       const NativeWebKeyboardEvent& event) = 0;
 #endif
 
-#if defined(OS_MACOSX) || defined(USE_AURA)
+#if defined(OS_MACOSX) || defined(USE_AURA) || defined(OS_ANDROID)
   // Updates the range of the marked text in an IME composition.
   virtual void ImeCompositionRangeChanged(
       const gfx::Range& range,
@@ -398,8 +381,8 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
   // autofill...).
   blink::WebPopupType popup_type_;
 
-  // When false, the background of the web content is not fully opaque.
-  bool background_opaque_;
+  // The background color of the web content.
+  SkColor background_color_;
 
   // While the mouse is locked, the cursor is hidden from the user. Mouse events
   // are still generated. However, the position they report is the last known

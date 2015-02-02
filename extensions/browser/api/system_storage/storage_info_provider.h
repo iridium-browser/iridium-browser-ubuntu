@@ -10,7 +10,6 @@
 #include "base/lazy_instance.h"
 #include "base/memory/ref_counted.h"
 #include "base/observer_list_threadsafe.h"
-#include "base/timer/timer.h"
 #include "extensions/browser/api/system_info/system_info_provider.h"
 #include "extensions/common/api/system_storage.h"
 
@@ -41,9 +40,8 @@ class StorageInfoProvider : public SystemInfoProvider {
   static StorageInfoProvider* Get();
 
   // SystemInfoProvider implementations
-  virtual void PrepareQueryOnUIThread() OVERRIDE;
-  virtual void InitializeProvider(
-      const base::Closure& do_query_info_callback) OVERRIDE;
+  void PrepareQueryOnUIThread() override;
+  void InitializeProvider(const base::Closure& do_query_info_callback) override;
 
   virtual double GetStorageFreeSpaceFromTransientIdOnFileThread(
       const std::string& transient_id);
@@ -55,7 +53,7 @@ class StorageInfoProvider : public SystemInfoProvider {
  protected:
   StorageInfoProvider();
 
-  virtual ~StorageInfoProvider();
+  ~StorageInfoProvider() override;
 
   // Put all available storages' information into |info_|.
   void GetAllStoragesIntoInfoList();
@@ -73,7 +71,7 @@ class StorageInfoProvider : public SystemInfoProvider {
   // SystemInfoProvider implementations.
   // Override to query the available capacity of all known storage devices on
   // the blocking pool, including fixed and removable devices.
-  virtual bool QueryInfo() OVERRIDE;
+  bool QueryInfo() override;
 
   static base::LazyInstance<scoped_refptr<StorageInfoProvider> > provider_;
 

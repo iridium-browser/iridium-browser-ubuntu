@@ -1,4 +1,6 @@
-<?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="pt-BR">
+<?xml version="1.0" ?>
+<!DOCTYPE translationbundle>
+<translationbundle lang="pt-BR">
 <translation id="777702478322588152">Prefeitura</translation>
 <translation id="3713769522066937702">Este formato de CEP não foi reconhecido. Veja este exemplo de um CEP válido: <ph name="EXAMPLE"/>. Não sabe seu CEP? Encontre-o <ph name="BEGIN_LINK"/>aqui<ph name="END_LINK"/>.</translation>
 <translation id="7393381084163773901">Endereço de correspondência</translation>

@@ -32,7 +32,7 @@ class ConstrainedWebDialogDelegateMac
       : ConstrainedWebDialogDelegateBase(browser_context, delegate, NULL) {}
 
   // WebDialogWebContentsDelegate interface.
-  virtual void CloseContents(WebContents* source) OVERRIDE {
+  void CloseContents(WebContents* source) override {
     window_->CloseWebContentsModalDialog();
   }
 
@@ -57,32 +57,28 @@ class ConstrainedWebDialogDelegateViewMac :
       content::BrowserContext* browser_context,
       WebDialogDelegate* delegate,
       content::WebContents* web_contents);
-  virtual ~ConstrainedWebDialogDelegateViewMac() {}
+  ~ConstrainedWebDialogDelegateViewMac() override {}
 
   // ConstrainedWebDialogDelegate interface
-  virtual const WebDialogDelegate*
-      GetWebDialogDelegate() const OVERRIDE {
+  const WebDialogDelegate* GetWebDialogDelegate() const override {
     return impl_->GetWebDialogDelegate();
   }
-  virtual WebDialogDelegate* GetWebDialogDelegate() OVERRIDE {
+  WebDialogDelegate* GetWebDialogDelegate() override {
     return impl_->GetWebDialogDelegate();
   }
-  virtual void OnDialogCloseFromWebUI() OVERRIDE {
+  void OnDialogCloseFromWebUI() override {
     return impl_->OnDialogCloseFromWebUI();
   }
-  virtual void ReleaseWebContentsOnDialogClose() OVERRIDE {
+  void ReleaseWebContentsOnDialogClose() override {
     return impl_->ReleaseWebContentsOnDialogClose();
   }
-  virtual NativeWebContentsModalDialog GetNativeDialog() OVERRIDE {
+  NativeWebContentsModalDialog GetNativeDialog() override {
     return constrained_window_->GetNativeDialog();
   }
-  virtual WebContents* GetWebContents() OVERRIDE {
-    return impl_->GetWebContents();
-  }
+  WebContents* GetWebContents() override { return impl_->GetWebContents(); }
 
   // ConstrainedWindowMacDelegate interface
-  virtual void OnConstrainedWindowClosed(
-      ConstrainedWindowMac* window) OVERRIDE {
+  void OnConstrainedWindowClosed(ConstrainedWindowMac* window) override {
     if (!impl_->closed_via_webui())
       GetWebDialogDelegate()->OnDialogClosed("");
     delete this;

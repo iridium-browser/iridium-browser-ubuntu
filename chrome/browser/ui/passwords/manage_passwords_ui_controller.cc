@@ -15,9 +15,14 @@
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
 #include "chrome/browser/ui/passwords/manage_passwords_icon.h"
+#include "chrome/browser/ui/passwords/password_bubble_experiment.h"
 #include "chrome/common/url_constants.h"
 #include "components/password_manager/core/browser/password_store.h"
 #include "content/public/browser/notification_service.h"
+
+#if defined(OS_ANDROID)
+#include "chrome/browser/android/chromium_application.h"
+#endif
 
 using autofill::PasswordFormMap;
 using password_manager::PasswordFormManager;
@@ -158,9 +163,9 @@ void ManagePasswordsUIController::OnLoginsChanged(
 
 void ManagePasswordsUIController::
     NavigateToPasswordManagerSettingsPage() {
-// TODO(mkwst): chrome_pages.h is compiled out of Android. Need to figure out
-// how this navigation should work there.
-#if !defined(OS_ANDROID)
+#if defined(OS_ANDROID)
+  chrome::android::ChromiumApplication::ShowPasswordSettings();
+#else
   chrome::ShowSettingsSubPage(
       chrome::FindBrowserWithWebContents(web_contents()),
       chrome::kPasswordManagerSubPage);
@@ -263,6 +268,10 @@ void ManagePasswordsUIController::ShowBubbleWithoutUserInteraction() {
 #if !defined(OS_ANDROID)
   Browser* browser = chrome::FindBrowserWithWebContents(web_contents());
   if (!browser || browser->toolbar_model()->input_in_progress())
+    return;
+  if (state_ == password_manager::ui::PENDING_PASSWORD_AND_BUBBLE_STATE &&
+      !password_bubble_experiment::ShouldShowBubble(
+          browser->profile()->GetPrefs()))
     return;
   CommandUpdater* updater = browser->command_controller()->command_updater();
   updater->ExecuteCommand(IDC_MANAGE_PASSWORDS_FOR_PAGE);

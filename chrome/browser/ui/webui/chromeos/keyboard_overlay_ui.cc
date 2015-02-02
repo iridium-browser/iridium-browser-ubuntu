@@ -265,7 +265,6 @@ content::WebUIDataSource* CreateKeyboardOverlayUIHTMLSource() {
   source->AddBoolean("keyboardOverlayIsDisplayUIScalingEnabled",
                      display_manager->IsDisplayUIScalingEnabled());
   source->SetJsonPath("strings.js");
-  source->SetUseJsonJSFormatV2();
   source->AddResourcePath("keyboard_overlay.js", IDR_KEYBOARD_OVERLAY_JS);
   source->SetDefaultResource(IDR_KEYBOARD_OVERLAY_HTML);
   return source;
@@ -282,7 +281,7 @@ class KeyboardOverlayHandler
   virtual ~KeyboardOverlayHandler();
 
   // WebUIMessageHandler implementation.
-  virtual void RegisterMessages() OVERRIDE;
+  virtual void RegisterMessages() override;
 
  private:
   // Called when the page requires the input method ID corresponding to the

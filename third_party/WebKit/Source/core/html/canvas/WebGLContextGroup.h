@@ -37,13 +37,12 @@ class WebGraphicsContext3D;
 
 namespace blink {
 
-class WebGLExtension;
 class WebGLSharedObject;
 class WebGLRenderingContextBase;
 
 typedef int ExceptionCode;
 
-class WebGLContextGroup FINAL : public RefCounted<WebGLContextGroup> {
+class WebGLContextGroup final : public RefCounted<WebGLContextGroup> {
 public:
     static PassRefPtr<WebGLContextGroup> create();
     ~WebGLContextGroup();

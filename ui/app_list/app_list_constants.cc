@@ -6,18 +6,27 @@
 
 namespace app_list {
 
-const SkColor kContentsBackgroundColor = SkColorSetRGB(0xFB, 0xFB, 0xFB);
+const SkColor kContentsBackgroundColor = SkColorSetRGB(0xF5, 0xF5, 0xF5);
 const SkColor kSearchBoxBackground = SK_ColorWHITE;
-const SkColor kTopSeparatorColor = SkColorSetRGB(0xE5, 0xE5, 0xE5);
-const SkColor kBottomSeparatorColor = SkColorSetRGB(0xE5, 0xE5, 0xE5);
+
+// In Windows, transparent background color will cause ugly text rendering,
+// therefore kContentsBackgroundColor should be used. See crbug.com/406989
+#if defined(OS_CHROMEOS)
+const SkColor kLabelBackgroundColor = SK_ColorTRANSPARENT;
+#else
+const SkColor kLabelBackgroundColor = kContentsBackgroundColor;
+#endif
+
+const SkColor kTopSeparatorColor = SkColorSetRGB(0xC0, 0xC0, 0xC0);
+const SkColor kBottomSeparatorColor = SkColorSetRGB(0xC0, 0xC0, 0xC0);
 
 // The color of the separator used inside dialogs in the app list.
 const SkColor kDialogSeparatorColor = SkColorSetRGB(0xD1, 0xD1, 0xD1);
 
 // 6% black over kContentsBackgroundColor
-const SkColor kHighlightedColor = SkColorSetRGB(0xE6, 0xE6, 0xE6);
+const SkColor kHighlightedColor = SkColorSetRGB(0xEB, 0xEB, 0xEB);
 // 10% black over kContentsBackgroundColor
-const SkColor kSelectedColor = SkColorSetRGB(0xF1, 0xF1, 0xF1);
+const SkColor kSelectedColor = SkColorSetRGB(0xE1, 0xE1, 0xE1);
 
 const SkColor kPagerHoverColor = SkColorSetRGB(0xB4, 0xB4, 0xB4);
 const SkColor kPagerNormalColor = SkColorSetRGB(0xE2, 0xE2, 0xE2);
@@ -28,11 +37,18 @@ const SkColor kResultDefaultTextColor = SkColorSetRGB(0x33, 0x33, 0x33);
 const SkColor kResultDimmedTextColor = SkColorSetRGB(0x96, 0x96, 0x96);
 const SkColor kResultURLTextColor = SkColorSetRGB(0x00, 0x99, 0x33);
 
-const SkColor kGridTitleColor = SkColorSetRGB(0x5A, 0x5A, 0x5A);
-const SkColor kGridTitleHoverColor = SkColorSetRGB(0x3C, 0x3C, 0x3C);
+const SkColor kGridTitleColor = SkColorSetRGB(0x33, 0x33, 0x33);
+const SkColor kGridTitleHoverColor = kGridTitleColor;
 
+const SkColor kFolderTitleColor = SkColorSetRGB(0x33, 0x33, 0x33);
+const SkColor kFolderTitleHintTextColor = SkColorSetRGB(0xA0, 0xA0, 0xA0);
 // Color of the folder ink bubble.
-const SkColor kFolderBubbleColor = SkColorSetRGB(0xD7, 0xD7, 0xD7);
+const SkColor kFolderBubbleColor = SK_ColorWHITE;
+// Color of the folder bubble shadow.
+const SkColor kFolderShadowColor = SkColorSetRGB(0xBF, 0xBF, 0xBF);
+const float kFolderBubbleRadius = 22;
+const float kFolderShadowRadius = 22.5;
+const float kFolderShadowOffsetY = 1;
 
 // Duration in milliseconds for page transition.
 const int kPageTransitionDurationInMs = 180;
@@ -78,7 +94,7 @@ const int kExperimentalPreferredRows = 4;
 const int kReorderDroppingCircleRadius = 35;
 
 // The padding around the outside of the experimental app list (top and sides).
-const int kExperimentalWindowPadding = 23;
+const int kExperimentalWindowPadding = 24;
 
 // Max items allowed in a folder.
 size_t kMaxFolderItems = 16;

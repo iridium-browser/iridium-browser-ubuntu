@@ -54,10 +54,10 @@ AudioNode::AudioNode(AudioContext* context, float sampleRate)
     , m_lastNonSilentTime(-1)
     , m_connectionRefCount(0)
     , m_isDisabled(false)
-    , m_newChannelCountMode(Max)
     , m_channelCount(2)
     , m_channelCountMode(Max)
     , m_channelInterpretation(AudioBus::Speakers)
+    , m_newChannelCountMode(Max)
 {
     m_context->registerLiveNode(*this);
 #if DEBUG_AUDIONODE_REFERENCES
@@ -87,6 +87,10 @@ void AudioNode::initialize()
 void AudioNode::uninitialize()
 {
     m_isInitialized = false;
+}
+
+void AudioNode::clearInternalStateWhenDisabled()
+{
 }
 
 void AudioNode::dispose()
@@ -475,6 +479,7 @@ void AudioNode::disableOutputsIfNecessary()
         // longer any active connections.
         if (nodeType() != NodeTypeConvolver && nodeType() != NodeTypeDelay) {
             m_isDisabled = true;
+            clearInternalStateWhenDisabled();
             for (unsigned i = 0; i < m_outputs.size(); ++i)
                 output(i)->disable();
         }
@@ -501,21 +506,17 @@ void AudioNode::breakConnection()
     // graph lock. In the case of the audio thread, we must use a tryLock to
     // avoid glitches.
     bool hasLock = false;
-    bool mustReleaseLock = false;
-
     if (context()->isAudioThread()) {
         // Real-time audio thread must not contend lock (to avoid glitches).
-        hasLock = context()->tryLock(mustReleaseLock);
+        hasLock = context()->tryLock();
     } else {
-        context()->lock(mustReleaseLock);
+        context()->lock();
         hasLock = true;
     }
 
     if (hasLock) {
         breakConnectionWithLock();
-
-        if (mustReleaseLock)
-            context()->unlock();
+        context()->unlock();
     } else {
         // We were unable to get the lock, so put this in a list to finish up
         // later.

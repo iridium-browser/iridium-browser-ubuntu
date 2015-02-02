@@ -80,25 +80,29 @@ scoped_ptr<tabs::Tab> CreateTabModelHelper(
     const Extension* extension) {
   scoped_ptr<tabs::Tab> tab_struct(new tabs::Tab);
 
-  GURL gurl = current_navigation.virtual_url();
+  const GURL& url = current_navigation.virtual_url();
   std::string title = base::UTF16ToUTF8(current_navigation.title());
 
   tab_struct->session_id.reset(new std::string(session_id));
-  tab_struct->url.reset(new std::string(gurl.spec()));
+  tab_struct->url.reset(new std::string(url.spec()));
+  tab_struct->fav_icon_url.reset(
+      new std::string(current_navigation.favicon_url().spec()));
   if (!title.empty()) {
     tab_struct->title.reset(new std::string(title));
   } else {
     const std::string languages =
         profile->GetPrefs()->GetString(prefs::kAcceptLanguages);
-    tab_struct->title.reset(new std::string(base::UTF16ToUTF8(
-        net::FormatUrl(gurl, languages))));
+    tab_struct->title.reset(
+        new std::string(base::UTF16ToUTF8(net::FormatUrl(url, languages))));
   }
   tab_struct->index = index;
   tab_struct->pinned = pinned;
-  tab_struct->selected = index == selected_index;
-  tab_struct->active = false;
-  tab_struct->highlighted = false;
-  tab_struct->incognito = false;
+  // Note: |selected_index| from the sync sessions model is what we call
+  // "active" in extensions terminology.  "selected" is deprecated because it's
+  // not clear whether it means "active" (user can see) or "highlighted" (user
+  // has highlighted, since you can select tabs without bringing them into the
+  // foreground).
+  tab_struct->active = index == selected_index;
   ExtensionTabUtil::ScrubTabForExtension(extension, tab_struct.get());
   return tab_struct.Pass();
 }
@@ -285,10 +289,10 @@ scoped_ptr<windows::Window> SessionsGetDevicesFunction::CreateWindowModel(
 
   windows::Window::Type type = windows::Window::TYPE_NONE;
   switch (window.type) {
-    case Browser::TYPE_TABBED:
+    case SessionWindow::TYPE_TABBED:
       type = windows::Window::TYPE_NORMAL;
       break;
-    case Browser::TYPE_POPUP:
+    case SessionWindow::TYPE_POPUP:
       type = windows::Window::TYPE_POPUP;
       break;
   }

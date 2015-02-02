@@ -12,8 +12,8 @@
 #include "cc/quads/texture_draw_quad.h"
 #include "cc/trees/layer_tree_impl.h"
 #include "cc/trees/layer_tree_settings.h"
-#include "cc/trees/occlusion_tracker.h"
-#include "ui/gfx/rect_conversions.h"
+#include "cc/trees/occlusion.h"
+#include "ui/gfx/geometry/rect_conversions.h"
 
 namespace cc {
 
@@ -43,8 +43,7 @@ PaintedScrollbarLayerImpl::~PaintedScrollbarLayerImpl() {}
 
 scoped_ptr<LayerImpl> PaintedScrollbarLayerImpl::CreateLayerImpl(
     LayerTreeImpl* tree_impl) {
-  return PaintedScrollbarLayerImpl::Create(tree_impl, id(), orientation())
-      .PassAs<LayerImpl>();
+  return PaintedScrollbarLayerImpl::Create(tree_impl, id(), orientation());
 }
 
 void PaintedScrollbarLayerImpl::PushPropertiesTo(LayerImpl* layer) {
@@ -70,7 +69,7 @@ bool PaintedScrollbarLayerImpl::WillDraw(DrawMode draw_mode,
 
 void PaintedScrollbarLayerImpl::AppendQuads(
     RenderPass* render_pass,
-    const OcclusionTracker<LayerImpl>& occlusion_tracker,
+    const Occlusion& occlusion_in_content_space,
     AppendQuadsData* append_quads_data) {
   bool premultipled_alpha = true;
   bool flipped = false;
@@ -87,10 +86,8 @@ void PaintedScrollbarLayerImpl::AppendQuads(
       render_pass, content_bounds(), shared_quad_state, append_quads_data);
 
   gfx::Rect thumb_quad_rect = ComputeThumbQuadRect();
-  Occlusion occlusion =
-      occlusion_tracker.GetCurrentOcclusionForLayer(draw_transform());
   gfx::Rect visible_thumb_quad_rect =
-      occlusion.GetUnoccludedContentRect(thumb_quad_rect);
+      occlusion_in_content_space.GetUnoccludedContentRect(thumb_quad_rect);
 
   ResourceProvider::ResourceId thumb_resource_id =
       layer_tree_impl()->ResourceIdForUIResource(thumb_ui_resource_id_);
@@ -117,7 +114,7 @@ void PaintedScrollbarLayerImpl::AppendQuads(
 
   gfx::Rect track_quad_rect = content_bounds_rect;
   gfx::Rect visible_track_quad_rect =
-      occlusion.GetUnoccludedContentRect(track_quad_rect);
+      occlusion_in_content_space.GetUnoccludedContentRect(track_quad_rect);
   if (track_resource_id && !visible_track_quad_rect.IsEmpty()) {
     gfx::Rect opaque_rect(contents_opaque() ? track_quad_rect : gfx::Rect());
     const float opacity[] = {1.0f, 1.0f, 1.0f, 1.0f};

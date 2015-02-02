@@ -44,15 +44,15 @@ public:
     explicit ScrollAnimatorNone(ScrollableArea*);
     virtual ~ScrollAnimatorNone();
 
-    virtual bool scroll(ScrollbarOrientation, ScrollGranularity, float step, float delta) OVERRIDE;
-    virtual void scrollToOffsetWithoutAnimation(const FloatPoint&) OVERRIDE;
+    virtual bool scroll(ScrollbarOrientation, ScrollGranularity, float step, float delta) override;
+    virtual void scrollToOffsetWithoutAnimation(const FloatPoint&) override;
 
-    virtual void cancelAnimations() OVERRIDE;
-    virtual void serviceScrollAnimations() OVERRIDE;
+    virtual void cancelAnimations() override;
+    virtual void serviceScrollAnimations() override;
 
-    virtual void willEndLiveResize() OVERRIDE;
-    virtual void didAddVerticalScrollbar(Scrollbar*) OVERRIDE;
-    virtual void didAddHorizontalScrollbar(Scrollbar*) OVERRIDE;
+    virtual void willEndLiveResize() override;
+    virtual void didAddVerticalScrollbar(Scrollbar*) override;
+    virtual void didAddHorizontalScrollbar(Scrollbar*) override;
 
     enum Curve {
         Linear,
@@ -92,7 +92,7 @@ protected:
     friend class ::ScrollAnimatorNoneTest;
 
     struct PLATFORM_EXPORT PerAxisData {
-        PerAxisData(ScrollAnimatorNone* parent, float* currentPos, int visibleLength);
+        PerAxisData(float* currentPos, int visibleLength);
         void reset();
         bool updateDataFromParameters(float step, float delta, float scrollableSize, double currentTime, Parameters*);
         bool animateScroll(double currentTime);

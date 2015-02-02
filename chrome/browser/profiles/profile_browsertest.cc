@@ -25,7 +25,7 @@
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "chrome/test/base/ui_test_utils.h"
+#include "content/public/test/test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -93,7 +93,7 @@ void SpinThreads() {
 
 class ProfileBrowserTest : public InProcessBrowserTest {
  protected:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
 #if defined(OS_CHROMEOS)
     command_line->AppendSwitch(
         chromeos::switches::kIgnoreUserProfileMappingForTests);

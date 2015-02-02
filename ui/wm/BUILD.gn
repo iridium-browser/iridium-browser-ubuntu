@@ -19,6 +19,8 @@ component("wm") {
     "core/cursor_manager.h",
     "core/default_activation_client.cc",
     "core/default_activation_client.h",
+    "core/default_screen_position_client.cc",
+    "core/default_screen_position_client.h",
     "core/easy_resize_window_targeter.cc",
     "core/easy_resize_window_targeter.h",
     "core/focus_controller.cc",
@@ -67,7 +69,6 @@ component("wm") {
     "core/wm_core_switches.h",
     "core/wm_state.cc",
     "core/wm_state.h",
-    "public/window_types.h",
     "wm_export.h",
   ]
 
@@ -80,6 +81,7 @@ component("wm") {
     "//ui/base",
     "//ui/compositor",
     "//ui/events",
+    "//ui/events/devices",
     "//ui/events/platform",
     "//ui/events:events_base",
     "//ui/events/platform",
@@ -87,9 +89,6 @@ component("wm") {
     "//ui/gfx/geometry",
     "//ui/resources",
   ]
-
-  # http://crbug.com/408650 Circular dependency between this target and Aura.
-  allow_circular_includes_from = [ "//ui/aura" ]
 }
 
 static_library("test_support") {

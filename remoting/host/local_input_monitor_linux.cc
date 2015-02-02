@@ -39,7 +39,7 @@ class LocalInputMonitorLinux : public base::NonThreadSafe,
       scoped_refptr<base::SingleThreadTaskRunner> caller_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> input_task_runner,
       base::WeakPtr<ClientSessionControl> client_session_control);
-  virtual ~LocalInputMonitorLinux();
+  ~LocalInputMonitorLinux() override;
 
  private:
   // The actual implementation resides in LocalInputMonitorLinux::Core class.
@@ -56,14 +56,14 @@ class LocalInputMonitorLinux : public base::NonThreadSafe,
 
    private:
     friend class base::RefCountedThreadSafe<Core>;
-    virtual ~Core();
+    ~Core() override;
 
     void StartOnInputThread();
     void StopOnInputThread();
 
     // base::MessagePumpLibevent::Watcher interface.
-    virtual void OnFileCanReadWithoutBlocking(int fd) OVERRIDE;
-    virtual void OnFileCanWriteWithoutBlocking(int fd) OVERRIDE;
+    void OnFileCanReadWithoutBlocking(int fd) override;
+    void OnFileCanWriteWithoutBlocking(int fd) override;
 
     // Processes key and mouse events.
     void ProcessXEvent(xEvent* event);
@@ -322,10 +322,8 @@ scoped_ptr<LocalInputMonitor> LocalInputMonitor::Create(
     scoped_refptr<base::SingleThreadTaskRunner> input_task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
     base::WeakPtr<ClientSessionControl> client_session_control) {
-  return scoped_ptr<LocalInputMonitor>(
-      new LocalInputMonitorLinux(caller_task_runner,
-                                 input_task_runner,
-                                 client_session_control));
+  return make_scoped_ptr(new LocalInputMonitorLinux(
+      caller_task_runner, input_task_runner, client_session_control));
 }
 
 }  // namespace remoting

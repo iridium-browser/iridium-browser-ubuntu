@@ -62,7 +62,7 @@ void ExceptionState::throwDOMException(const ExceptionCode& ec, const String& me
     m_code = ec;
     String processedMessage = addExceptionContext(message);
     m_message = processedMessage;
-    setException(V8ThrowException::createDOMException(ec, processedMessage, m_creationContext, m_isolate));
+    setException(V8ThrowException::createDOMException(m_isolate, ec, processedMessage, m_creationContext));
 }
 
 void ExceptionState::throwSecurityError(const String& sanitizedMessage, const String& unsanitizedMessage)
@@ -74,7 +74,7 @@ void ExceptionState::throwSecurityError(const String& sanitizedMessage, const St
     m_message = finalSanitized;
     String finalUnsanitized = addExceptionContext(unsanitizedMessage);
 
-    setException(V8ThrowException::createDOMException(SecurityError, finalSanitized, finalUnsanitized, m_creationContext, m_isolate));
+    setException(V8ThrowException::createDOMException(m_isolate, SecurityError, finalSanitized, finalUnsanitized, m_creationContext));
 }
 
 void ExceptionState::setException(v8::Handle<v8::Value> exception)
@@ -99,7 +99,7 @@ void ExceptionState::throwTypeError(const String& message)
     ASSERT(m_isolate);
     m_code = V8TypeError;
     m_message = message;
-    setException(V8ThrowException::createTypeError(addExceptionContext(message), m_isolate));
+    setException(V8ThrowException::createTypeError(m_isolate, addExceptionContext(message)));
 }
 
 void ExceptionState::throwRangeError(const String& message)
@@ -107,7 +107,7 @@ void ExceptionState::throwRangeError(const String& message)
     ASSERT(m_isolate);
     m_code = V8RangeError;
     m_message = message;
-    setException(V8ThrowException::createRangeError(addExceptionContext(message), m_isolate));
+    setException(V8ThrowException::createRangeError(m_isolate, addExceptionContext(message)));
 }
 
 void NonThrowableExceptionState::throwDOMException(const ExceptionCode& ec, const String& message)

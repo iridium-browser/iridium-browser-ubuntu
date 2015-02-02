@@ -14,12 +14,11 @@ namespace options {
 class GeolocationOptionsHandler : public OptionsPageUIHandler {
  public:
   GeolocationOptionsHandler();
-  virtual ~GeolocationOptionsHandler();
+  ~GeolocationOptionsHandler() override;
 
   // OptionsPageUIHandler implementation
-  virtual void GetLocalizedValues(
-      base::DictionaryValue* localized_strings) OVERRIDE;
-  virtual void InitializePage() OVERRIDE;
+  void GetLocalizedValues(base::DictionaryValue* localized_strings) override;
+  void InitializePage() override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(GeolocationOptionsHandler);

@@ -20,20 +20,20 @@ class ProfileIdentityProvider : public IdentityProvider,
   ProfileIdentityProvider(SigninManagerBase* signin_manager,
                           ProfileOAuth2TokenService* token_service,
                           LoginUIService* login_ui_service);
-  virtual ~ProfileIdentityProvider();
+  ~ProfileIdentityProvider() override;
 
   // IdentityProvider:
-  virtual std::string GetActiveUsername() OVERRIDE;
-  virtual std::string GetActiveAccountId() OVERRIDE;
-  virtual OAuth2TokenService* GetTokenService() OVERRIDE;
-  virtual bool RequestLogin() OVERRIDE;
+  std::string GetActiveUsername() override;
+  std::string GetActiveAccountId() override;
+  OAuth2TokenService* GetTokenService() override;
+  bool RequestLogin() override;
 
   // SigninManagerBase::Observer:
-  virtual void GoogleSigninSucceeded(const std::string& account_id,
-                                     const std::string& username,
-                                     const std::string& password) OVERRIDE;
-  virtual void GoogleSignedOut(const std::string& account_id,
-                               const std::string& username) OVERRIDE;
+  void GoogleSigninSucceeded(const std::string& account_id,
+                             const std::string& username,
+                             const std::string& password) override;
+  void GoogleSignedOut(const std::string& account_id,
+                       const std::string& username) override;
 
  private:
   SigninManagerBase* const signin_manager_;

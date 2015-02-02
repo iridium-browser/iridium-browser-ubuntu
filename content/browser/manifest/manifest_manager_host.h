@@ -9,17 +9,6 @@
 #include "base/id_map.h"
 #include "content/public/browser/web_contents_observer.h"
 
-#if defined(COMPILER_GCC)
-namespace BASE_HASH_NAMESPACE {
-template<>
-struct hash<content::RenderFrameHost*> {
-  uint64 operator()(content::RenderFrameHost* ptr) const {
-    return hash<uint64>()(reinterpret_cast<uint64>(ptr));
-  }
-};
-}
-#endif
-
 namespace content {
 
 class RenderFrameHost;
@@ -32,7 +21,7 @@ struct Manifest;
 class ManifestManagerHost : public WebContentsObserver {
  public:
   explicit ManifestManagerHost(WebContents* web_contents);
-  virtual ~ManifestManagerHost();
+  ~ManifestManagerHost() override;
 
   typedef base::Callback<void(const Manifest&)> GetManifestCallback;
 
@@ -42,9 +31,8 @@ class ManifestManagerHost : public WebContentsObserver {
   void GetManifest(RenderFrameHost*, const GetManifestCallback&);
 
   // WebContentsObserver
-  virtual bool OnMessageReceived(const IPC::Message&,
-                                 RenderFrameHost*) OVERRIDE;
-  virtual void RenderFrameDeleted(RenderFrameHost*) OVERRIDE;
+  bool OnMessageReceived(const IPC::Message&, RenderFrameHost*) override;
+  void RenderFrameDeleted(RenderFrameHost*) override;
 
  private:
   typedef IDMap<GetManifestCallback, IDMapOwnPointer> CallbackMap;

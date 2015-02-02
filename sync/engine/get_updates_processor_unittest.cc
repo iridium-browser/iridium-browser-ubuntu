@@ -26,8 +26,7 @@ namespace {
 scoped_ptr<InvalidationInterface> BuildInvalidation(
     int64 version,
     const std::string& payload) {
-  return MockInvalidation::Build(version, payload)
-      .PassAs<InvalidationInterface>();
+  return MockInvalidation::Build(version, payload);
 }
 
 }  // namespace
@@ -389,7 +388,7 @@ class GetUpdatesProcessorApplyUpdatesTest : public GetUpdatesProcessorTest {
   GetUpdatesProcessorApplyUpdatesTest() {}
   virtual ~GetUpdatesProcessorApplyUpdatesTest() {}
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     bookmarks_handler_ = AddUpdateHandler(BOOKMARKS);
     autofill_handler_ = AddUpdateHandler(AUTOFILL);
   }

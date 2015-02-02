@@ -101,8 +101,8 @@ class ExternalDefaultProtocolObserver
         tab_contents_id_(tab_contents_id),
         prompt_user_(prompt_user) {}
 
-  virtual void SetDefaultWebClientUIState(
-      ShellIntegration::DefaultWebClientUIState state) OVERRIDE {
+  void SetDefaultWebClientUIState(
+      ShellIntegration::DefaultWebClientUIState state) override {
     DCHECK(base::MessageLoopForUI::IsCurrent());
 
     // If we are still working out if we're the default, or we've found
@@ -135,7 +135,7 @@ class ExternalDefaultProtocolObserver
         escaped_url_, render_process_host_id_, tab_contents_id_, delegate_);
   }
 
-  virtual bool IsOwnedByWorker() OVERRIDE { return true; }
+  bool IsOwnedByWorker() override { return true; }
 
  private:
   ExternalProtocolHandler::Delegate* delegate_;

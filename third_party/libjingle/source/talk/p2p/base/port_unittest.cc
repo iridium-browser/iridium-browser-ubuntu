@@ -25,16 +25,16 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "talk/p2p/base/basicpacketsocketfactory.h"
-#include "talk/p2p/base/portproxy.h"
-#include "talk/p2p/base/relayport.h"
-#include "talk/p2p/base/stunport.h"
-#include "talk/p2p/base/tcpport.h"
-#include "talk/p2p/base/testrelayserver.h"
-#include "talk/p2p/base/teststunserver.h"
-#include "talk/p2p/base/testturnserver.h"
-#include "talk/p2p/base/transport.h"
-#include "talk/p2p/base/turnport.h"
+#include "webrtc/p2p/base/basicpacketsocketfactory.h"
+#include "webrtc/p2p/base/portproxy.h"
+#include "webrtc/p2p/base/relayport.h"
+#include "webrtc/p2p/base/stunport.h"
+#include "webrtc/p2p/base/tcpport.h"
+#include "webrtc/p2p/base/testrelayserver.h"
+#include "webrtc/p2p/base/teststunserver.h"
+#include "webrtc/p2p/base/testturnserver.h"
+#include "webrtc/p2p/base/transport.h"
+#include "webrtc/p2p/base/turnport.h"
 #include "webrtc/base/crc32.h"
 #include "webrtc/base/gunit.h"
 #include "webrtc/base/helpers.h"
@@ -343,7 +343,7 @@ class PortTest : public testing::Test, public sigslot::has_slots<> {
         nat_factory2_(ss_.get(), kNatAddr2),
         nat_socket_factory1_(&nat_factory1_),
         nat_socket_factory2_(&nat_factory2_),
-        stun_server_(main_, kStunAddr),
+        stun_server_(TestStunServer::Create(main_, kStunAddr)),
         turn_server_(main_, kTurnUdpIntAddr, kTurnUdpExtAddr),
         relay_server_(main_, kRelayUdpIntAddr, kRelayUdpExtAddr,
                       kRelayTcpIntAddr, kRelayTcpExtAddr,
@@ -357,15 +357,6 @@ class PortTest : public testing::Test, public sigslot::has_slots<> {
   }
 
  protected:
-  static void SetUpTestCase() {
-    rtc::InitializeSSL();
-  }
-
-  static void TearDownTestCase() {
-    rtc::CleanupSSL();
-  }
-
-
   void TestLocalToLocal() {
     Port* port1 = CreateUdpPort(kLocalAddr1);
     Port* port2 = CreateUdpPort(kLocalAddr2);
@@ -617,7 +608,7 @@ class PortTest : public testing::Test, public sigslot::has_slots<> {
   rtc::NATSocketFactory nat_factory2_;
   rtc::BasicPacketSocketFactory nat_socket_factory1_;
   rtc::BasicPacketSocketFactory nat_socket_factory2_;
-  TestStunServer stun_server_;
+  scoped_ptr<TestStunServer> stun_server_;
   TestTurnServer turn_server_;
   TestRelayServer relay_server_;
   std::string username_;

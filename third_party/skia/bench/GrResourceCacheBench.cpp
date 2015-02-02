@@ -11,9 +11,11 @@
 #include "Benchmark.h"
 #include "GrGpuResource.h"
 #include "GrContext.h"
+#include "GrGpu.h"
 #include "GrResourceCache.h"
 #include "GrStencilBuffer.h"
 #include "GrTexture.h"
+#include "GrTexturePriv.h"
 #include "SkCanvas.h"
 
 enum {
@@ -61,8 +63,15 @@ public:
         return 100 + ((fID % 1 == 0) ? -40 : 33);
     }
 
-    static GrResourceKey ComputeKey(const GrTextureDesc& desc) {
-        return GrTextureImpl::ComputeScratchKey(desc);
+    static GrResourceKey ComputeKey(const GrSurfaceDesc& desc) {
+        GrCacheID::Key key;
+        memset(&key, 0, sizeof(key));
+        key.fData32[0] = (desc.fWidth) | (desc.fHeight << 16);
+        key.fData32[1] = desc.fConfig | desc.fSampleCnt << 16;
+        key.fData32[2] = desc.fFlags;
+        static int gType = GrResourceKey::GenerateResourceType();
+        static int gDomain = GrCacheID::GenerateDomain();
+        return GrResourceKey(GrCacheID(gDomain, key), gType, 0);
     }
 
     int fID;
@@ -77,9 +86,9 @@ static void get_stencil(int i, int* w, int* h, int* s) {
     *s = i % 1 == 0 ? 0 : 4;
 }
 
-static void get_texture_desc(int i, GrTextureDesc* desc) {
-    desc->fFlags = kRenderTarget_GrTextureFlagBit |
-        kNoStencil_GrTextureFlagBit;
+static void get_texture_desc(int i, GrSurfaceDesc* desc) {
+    desc->fFlags = kRenderTarget_GrSurfaceFlag |
+        kNoStencil_GrSurfaceFlag;
     desc->fWidth  = i % 1024;
     desc->fHeight = i * 2 % 1024;
     desc->fConfig = static_cast<GrPixelConfig>(i % (kLast_GrPixelConfig + 1));
@@ -98,7 +107,7 @@ static void populate_cache(GrResourceCache* cache, GrGpu* gpu, int resourceCount
     }
 
     for (int i = 0; i < resourceCount; ++i) {
-        GrTextureDesc desc;
+        GrSurfaceDesc desc;
         get_texture_desc(i, &desc);
         GrResourceKey key =  TextureResource::ComputeKey(desc);
         GrGpuResource* resource = SkNEW_ARGS(TextureResource, (gpu, i));
@@ -111,7 +120,7 @@ static void populate_cache(GrResourceCache* cache, GrGpu* gpu, int resourceCount
 static void check_cache_contents_or_die(GrResourceCache* cache, int k) {
     // Benchmark find calls that succeed.
     {
-        GrTextureDesc desc;
+        GrSurfaceDesc desc;
         get_texture_desc(k, &desc);
         GrResourceKey key = TextureResource::ComputeKey(desc);
         GrGpuResource* item = cache->find(key);
@@ -141,7 +150,7 @@ static void check_cache_contents_or_die(GrResourceCache* cache, int k) {
 
     // Benchmark also find calls that always fail.
     {
-        GrTextureDesc desc;
+        GrSurfaceDesc desc;
         get_texture_desc(k, &desc);
         desc.fHeight |= 1;
         GrResourceKey key = TextureResource::ComputeKey(desc);
@@ -184,7 +193,7 @@ protected:
         GrGpu* gpu = canvas->getGrContext()->getGpu();
 
         for (int i = 0; i < loops; ++i) {
-            GrResourceCache cache(CACHE_SIZE_COUNT, CACHE_SIZE_BYTES);
+            GrResourceCache cache(gpu->caps(), CACHE_SIZE_COUNT, CACHE_SIZE_BYTES);
             populate_cache(&cache, gpu, DUPLICATE_COUNT);
             populate_cache(&cache, gpu, RESOURCE_COUNT);
 
@@ -218,7 +227,7 @@ protected:
 
     virtual void onDraw(const int loops, SkCanvas* canvas) SK_OVERRIDE {
         GrGpu* gpu = canvas->getGrContext()->getGpu();
-        GrResourceCache cache(CACHE_SIZE_COUNT, CACHE_SIZE_BYTES);
+        GrResourceCache cache(gpu->caps(), CACHE_SIZE_COUNT, CACHE_SIZE_BYTES);
         populate_cache(&cache, gpu, DUPLICATE_COUNT);
         populate_cache(&cache, gpu, RESOURCE_COUNT);
 

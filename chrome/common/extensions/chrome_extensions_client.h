@@ -20,37 +20,34 @@ namespace extensions {
 class ChromeExtensionsClient : public ExtensionsClient {
  public:
   ChromeExtensionsClient();
-  virtual ~ChromeExtensionsClient();
+  ~ChromeExtensionsClient() override;
 
-  virtual void Initialize() OVERRIDE;
+  void Initialize() override;
 
-  virtual const PermissionMessageProvider& GetPermissionMessageProvider() const
-      OVERRIDE;
-  virtual const std::string GetProductName() OVERRIDE;
-  virtual scoped_ptr<FeatureProvider> CreateFeatureProvider(
-      const std::string& name) const OVERRIDE;
-  virtual scoped_ptr<JSONFeatureProviderSource> CreateFeatureProviderSource(
-      const std::string& name) const OVERRIDE;
-  virtual void FilterHostPermissions(
+  const PermissionMessageProvider& GetPermissionMessageProvider()
+      const override;
+  const std::string GetProductName() override;
+  scoped_ptr<FeatureProvider> CreateFeatureProvider(
+      const std::string& name) const override;
+  scoped_ptr<JSONFeatureProviderSource> CreateFeatureProviderSource(
+      const std::string& name) const override;
+  void FilterHostPermissions(
       const URLPatternSet& hosts,
       URLPatternSet* new_hosts,
-      std::set<PermissionMessage>* messages) const OVERRIDE;
-  virtual void SetScriptingWhitelist(const ScriptingWhitelist& whitelist)
-      OVERRIDE;
-  virtual const ScriptingWhitelist& GetScriptingWhitelist() const OVERRIDE;
-  virtual URLPatternSet GetPermittedChromeSchemeHosts(
+      std::set<PermissionMessage>* messages) const override;
+  void SetScriptingWhitelist(const ScriptingWhitelist& whitelist) override;
+  const ScriptingWhitelist& GetScriptingWhitelist() const override;
+  URLPatternSet GetPermittedChromeSchemeHosts(
       const Extension* extension,
-      const APIPermissionSet& api_permissions) const OVERRIDE;
-  virtual bool IsScriptableURL(const GURL& url, std::string* error) const
-      OVERRIDE;
-  virtual bool IsAPISchemaGenerated(const std::string& name) const OVERRIDE;
-  virtual base::StringPiece GetAPISchema(const std::string& name) const
-      OVERRIDE;
-  virtual void RegisterAPISchemaResources(ExtensionAPI* api) const OVERRIDE;
-  virtual bool ShouldSuppressFatalErrors() const OVERRIDE;
-  virtual std::string GetWebstoreBaseURL() const OVERRIDE;
-  virtual std::string GetWebstoreUpdateURL() const OVERRIDE;
-  virtual bool IsBlacklistUpdateURL(const GURL& url) const OVERRIDE;
+      const APIPermissionSet& api_permissions) const override;
+  bool IsScriptableURL(const GURL& url, std::string* error) const override;
+  bool IsAPISchemaGenerated(const std::string& name) const override;
+  base::StringPiece GetAPISchema(const std::string& name) const override;
+  void RegisterAPISchemaResources(ExtensionAPI* api) const override;
+  bool ShouldSuppressFatalErrors() const override;
+  std::string GetWebstoreBaseURL() const override;
+  std::string GetWebstoreUpdateURL() const override;
+  bool IsBlacklistUpdateURL(const GURL& url) const override;
 
   // Get the LazyInstance for ChromeExtensionsClient.
   static ChromeExtensionsClient* GetInstance();

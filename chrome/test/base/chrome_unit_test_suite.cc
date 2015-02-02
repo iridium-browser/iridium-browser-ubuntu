@@ -27,13 +27,16 @@
 
 #if !defined(OS_IOS)
 #include "chrome/browser/ui/webui/chrome_web_ui_controller_factory.h"
-#include "chrome/common/extensions/chrome_extensions_client.h"
-#include "extensions/common/extension_paths.h"
 #include "ui/gl/gl_surface.h"
 #endif
 
 #if defined(OS_POSIX)
 #include "base/memory/shared_memory.h"
+#endif
+
+#if defined(ENABLE_EXTENSIONS)
+#include "chrome/common/extensions/chrome_extensions_client.h"
+#include "extensions/common/extension_paths.h"
 #endif
 
 namespace {
@@ -44,7 +47,7 @@ class ChromeUnitTestSuiteInitializer : public testing::EmptyTestEventListener {
   ChromeUnitTestSuiteInitializer() {}
   virtual ~ChromeUnitTestSuiteInitializer() {}
 
-  virtual void OnTestStart(const testing::TestInfo& test_info) OVERRIDE {
+  virtual void OnTestStart(const testing::TestInfo& test_info) override {
     content_client_.reset(new ChromeContentClient);
     content::SetContentClient(content_client_.get());
     // TODO(ios): Bring this back once ChromeContentBrowserClient is building.
@@ -58,7 +61,7 @@ class ChromeUnitTestSuiteInitializer : public testing::EmptyTestEventListener {
     TestingBrowserProcess::CreateInstance();
   }
 
-  virtual void OnTestEnd(const testing::TestInfo& test_info) OVERRIDE {
+  virtual void OnTestEnd(const testing::TestInfo& test_info) override {
     // TODO(ios): Bring this back once ChromeContentBrowserClient is building.
 #if !defined(OS_IOS)
     browser_content_client_.reset();
@@ -127,12 +130,14 @@ void ChromeUnitTestSuite::InitializeProviders() {
   chromeos::RegisterPathProvider();
 #endif
 
-#if !defined(OS_IOS)
+#if defined(ENABLE_EXTENSIONS)
   extensions::RegisterPathProvider();
 
   extensions::ExtensionsClient::Set(
       extensions::ChromeExtensionsClient::GetInstance());
+#endif
 
+#if !defined(OS_IOS)
   content::WebUIControllerFactory::RegisterFactory(
       ChromeWebUIControllerFactory::GetInstance());
 

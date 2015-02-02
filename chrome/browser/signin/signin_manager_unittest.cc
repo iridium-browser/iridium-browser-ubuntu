@@ -61,7 +61,7 @@ class TestSigninManagerObserver : public SigninManagerBase::Observer {
                                 num_signouts_(0) {
   }
 
-  virtual ~TestSigninManagerObserver() {}
+  ~TestSigninManagerObserver() override {}
 
   int num_failed_signins_;
   int num_successful_signins_;
@@ -69,20 +69,18 @@ class TestSigninManagerObserver : public SigninManagerBase::Observer {
 
  private:
   // SigninManagerBase::Observer:
-  virtual void GoogleSigninFailed(
-      const GoogleServiceAuthError& error) OVERRIDE {
+  void GoogleSigninFailed(const GoogleServiceAuthError& error) override {
     num_failed_signins_++;
   }
 
-  virtual void GoogleSigninSucceeded(
-      const std::string& account_id,
-      const std::string& username,
-      const std::string& password) OVERRIDE {
+  void GoogleSigninSucceeded(const std::string& account_id,
+                             const std::string& username,
+                             const std::string& password) override {
     num_successful_signins_++;
   }
 
-  virtual void GoogleSignedOut(const std::string& account_id,
-                               const std::string& username) OVERRIDE {
+  void GoogleSignedOut(const std::string& account_id,
+                       const std::string& username) override {
     num_signouts_++;
   }
 };
@@ -93,9 +91,9 @@ class TestSigninManagerObserver : public SigninManagerBase::Observer {
 class SigninManagerTest : public testing::Test {
  public:
   SigninManagerTest() : manager_(NULL) {}
-  virtual ~SigninManagerTest() {}
+  ~SigninManagerTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     manager_ = NULL;
     prefs_.reset(new TestingPrefServiceSimple);
     chrome::RegisterLocalState(prefs_->registry());
@@ -115,7 +113,7 @@ class SigninManagerTest : public testing::Test {
             SetURLRequestContext(profile_->GetRequestContext());
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     if (manager_)
       manager_->RemoveObserver(&test_observer_);
 

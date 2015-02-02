@@ -8,7 +8,6 @@
 
 #include "content/common/accessibility_messages.h"
 #include "content/common/appcache_messages.h"
-#include "content/common/battery_status_messages.h"
 #include "content/common/browser_plugin/browser_plugin_messages.h"
 #include "content/common/cc_messages.h"
 #include "content/common/clipboard_messages.h"
@@ -26,6 +25,7 @@
 #include "content/common/fileapi/webblob_messages.h"
 #include "content/common/frame_messages.h"
 #include "content/common/gamepad_messages.h"
+#include "content/common/geofencing_messages.h"
 #include "content/common/geolocation_messages.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "content/common/image_messages.h"
@@ -56,7 +56,6 @@
 #include "content/common/screen_orientation_messages.h"
 #include "content/common/service_worker/embedded_worker_messages.h"
 #include "content/common/service_worker/service_worker_messages.h"
-#include "content/common/socket_stream_messages.h"
 #include "content/common/speech_recognition_messages.h"
 #include "content/common/text_input_client_messages.h"
 #include "content/common/utility_messages.h"

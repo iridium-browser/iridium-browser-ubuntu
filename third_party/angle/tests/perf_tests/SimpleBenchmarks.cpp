@@ -7,6 +7,7 @@
 #include "SimpleBenchmark.h"
 #include "BufferSubData.h"
 #include "TexSubImage.h"
+#include "PointSprites.h"
 
 EGLint platforms[] =
 {
@@ -17,7 +18,7 @@ EGLint platforms[] =
 GLenum vertexTypes[] = { GL_FLOAT };
 GLint componentCounts[] = { 4 };
 GLboolean vertexNorms[] = { GL_FALSE };
-GLsizeiptr updateSizes[] = { 0, 300 };
+GLsizeiptr updateSizes[] = { 300 };
 GLsizeiptr bufferSizes[] = { 1024 * 1024 };
 unsigned int iterationCounts[] = { 10 };
 unsigned int updatesEveryNFrames[] = { 1, 4 };
@@ -100,4 +101,21 @@ int main(int argc, char **argv)
     }
 
     RunBenchmarks<TexSubImageBenchmark>(subImageParams);
+
+    std::vector<PointSpritesParams> pointSpriteParams;
+
+    for (size_t platIt = 0; platIt < ArraySize(platforms); platIt++)
+    {
+        PointSpritesParams params;
+
+        params.requestedRenderer = platforms[platIt];
+        params.iterations = 10;
+        params.count = 10;
+        params.size = 3.0f;
+        params.numVaryings = 3;
+
+        pointSpriteParams.push_back(params);
+    }
+
+    RunBenchmarks<PointSpritesBenchmark>(pointSpriteParams);
 }

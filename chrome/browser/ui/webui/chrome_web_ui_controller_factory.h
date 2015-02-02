@@ -20,16 +20,15 @@ class RefCountedMemory;
 
 class ChromeWebUIControllerFactory : public content::WebUIControllerFactory {
  public:
-  virtual content::WebUI::TypeID GetWebUIType(
-      content::BrowserContext* browser_context,
-      const GURL& url) const OVERRIDE;
-  virtual bool UseWebUIForURL(content::BrowserContext* browser_context,
-                              const GURL& url) const OVERRIDE;
-  virtual bool UseWebUIBindingsForURL(content::BrowserContext* browser_context,
-                                      const GURL& url) const OVERRIDE;
-  virtual content::WebUIController* CreateWebUIControllerForURL(
+  content::WebUI::TypeID GetWebUIType(content::BrowserContext* browser_context,
+                                      const GURL& url) const override;
+  bool UseWebUIForURL(content::BrowserContext* browser_context,
+                      const GURL& url) const override;
+  bool UseWebUIBindingsForURL(content::BrowserContext* browser_context,
+                              const GURL& url) const override;
+  content::WebUIController* CreateWebUIControllerForURL(
       content::WebUI* web_ui,
-      const GURL& url) const OVERRIDE;
+      const GURL& url) const override;
 
   // Get the favicon for |page_url| and run |callback| with result when loaded.
   // Note. |callback| is always run asynchronously.
@@ -43,7 +42,7 @@ class ChromeWebUIControllerFactory : public content::WebUIControllerFactory {
 
  protected:
   ChromeWebUIControllerFactory();
-  virtual ~ChromeWebUIControllerFactory();
+  ~ChromeWebUIControllerFactory() override;
 
  private:
   friend struct DefaultSingletonTraits<ChromeWebUIControllerFactory>;

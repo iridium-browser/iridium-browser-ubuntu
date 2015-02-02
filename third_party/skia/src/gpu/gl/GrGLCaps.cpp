@@ -7,6 +7,7 @@
 
 
 #include "GrGLCaps.h"
+
 #include "GrGLContext.h"
 #include "SkTSearch.h"
 #include "SkTSort.h"
@@ -50,6 +51,8 @@ void GrGLCaps::reset() {
     fFBFetchSupport = false;
     fFBFetchColorName = NULL;
     fFBFetchExtensionString = NULL;
+
+    fReadPixelsSupportedCache.reset();
 }
 
 GrGLCaps::GrGLCaps(const GrGLCaps& caps) : GrDrawTargetCaps() {
@@ -197,9 +200,10 @@ bool GrGLCaps::init(const GrGLContextInfo& ctxInfo, const GrGLInterface* gli) {
     // can change based on which render target is bound
     fTwoFormatLimit = kGLES_GrGLStandard == standard;
 
+    // Frag Coords Convention support is not part of ES
     // Known issue on at least some Intel platforms:
     // http://code.google.com/p/skia/issues/detail?id=946
-    if (kIntel_GrGLVendor != ctxInfo.vendor()) {
+    if (kIntel_GrGLVendor != ctxInfo.vendor() && kGLES_GrGLStandard != standard) {
         fFragCoordsConventionSupport = ctxInfo.glslGeneration() >= k150_GrGLSLGeneration ||
                                        ctxInfo.hasExtension("GL_ARB_fragment_coord_conventions");
     }
@@ -366,13 +370,19 @@ bool GrGLCaps::init(const GrGLContextInfo& ctxInfo, const GrGLInterface* gli) {
         fGeometryShaderSupport = ctxInfo.version() >= GR_GL_VER(3,2) &&
                                  ctxInfo.glslGeneration() >= k150_GrGLSLGeneration;
     } else {
-        fShaderDerivativeSupport = ctxInfo.hasExtension("GL_OES_standard_derivatives");
+        fShaderDerivativeSupport = ctxInfo.version() >= GR_GL_VER(3, 0) ||
+                                   ctxInfo.hasExtension("GL_OES_standard_derivatives");
     }
 
     if (GrGLCaps::kES_IMG_MsToTexture_MSFBOType == fMSFBOType) {
         GR_GL_GetIntegerv(gli, GR_GL_MAX_SAMPLES_IMG, &fMaxSampleCount);
     } else if (GrGLCaps::kNone_MSFBOType != fMSFBOType) {
         GR_GL_GetIntegerv(gli, GR_GL_MAX_SAMPLES, &fMaxSampleCount);
+    }
+
+    if (kPowerVR54x_GrGLRenderer == ctxInfo.renderer() ||
+        kPowerVRRogue_GrGLRenderer == ctxInfo.renderer()) {
+        fUseDrawInsteadOfClear = true;
     }
 
     this->initConfigTexturableTable(ctxInfo, gli);
@@ -582,7 +592,7 @@ void GrGLCaps::initConfigTexturableTable(const GrGLContextInfo& ctxInfo, const G
     }
 
     // Check for ASTC
-    fConfigTextureSupport[kASTC_12x12_GrPixelConfig] = 
+    fConfigTextureSupport[kASTC_12x12_GrPixelConfig] =
         ctxInfo.hasExtension("GL_KHR_texture_compression_astc_hdr") ||
         ctxInfo.hasExtension("GL_KHR_texture_compression_astc_ldr") ||
         ctxInfo.hasExtension("GL_OES_texture_compression_astc");
@@ -601,9 +611,9 @@ void GrGLCaps::initConfigTexturableTable(const GrGLContextInfo& ctxInfo, const G
     fConfigTextureSupport[kRGBA_float_GrPixelConfig] = hasFPTextures;
 }
 
-bool GrGLCaps::readPixelsSupported(const GrGLInterface* intf,
-                                   GrGLenum format,
-                                   GrGLenum type) const {
+bool GrGLCaps::doReadPixelsSupported(const GrGLInterface* intf,
+                                     GrGLenum format,
+                                     GrGLenum type) const {
     if (GR_GL_RGBA == format && GR_GL_UNSIGNED_BYTE == type) {
         // ES 2 guarantees this format is supported
         return true;
@@ -628,6 +638,26 @@ bool GrGLCaps::readPixelsSupported(const GrGLInterface* intf,
                       &otherType);
 
     return (GrGLenum)otherFormat == format && (GrGLenum)otherType == type;
+}
+
+bool GrGLCaps::readPixelsSupported(const GrGLInterface* intf,
+                                   GrGLenum format,
+                                   GrGLenum type,
+                                   GrGLenum currFboFormat) const {
+
+    ReadPixelsSupportedFormats::Key key = {format, type, currFboFormat};
+
+    ReadPixelsSupportedFormats* cachedValue = fReadPixelsSupportedCache.find(key);
+
+    if (NULL == cachedValue) {
+        bool value = doReadPixelsSupported(intf, format, type);
+        ReadPixelsSupportedFormats newValue(key, value);
+        fReadPixelsSupportedCache.add(newValue);
+
+        return newValue.value();
+    }
+
+    return cachedValue->value();
 }
 
 void GrGLCaps::initFSAASupport(const GrGLContextInfo& ctxInfo, const GrGLInterface* gli) {

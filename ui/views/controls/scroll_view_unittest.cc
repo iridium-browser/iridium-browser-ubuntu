@@ -26,11 +26,9 @@ class CustomView : public View {
     PreferredSizeChanged();
   }
 
-  virtual gfx::Size GetPreferredSize() const OVERRIDE {
-    return preferred_size_;
-  }
+  gfx::Size GetPreferredSize() const override { return preferred_size_; }
 
-  virtual void Layout() OVERRIDE {
+  void Layout() override {
     gfx::Size pref = GetPreferredSize();
     int width = pref.width();
     int height = pref.height();

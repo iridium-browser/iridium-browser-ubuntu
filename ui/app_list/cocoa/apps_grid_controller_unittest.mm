@@ -96,7 +96,7 @@ class AppsGridControllerTest : public AppsGridControllerTestHelper {
     return [attributes objectForKey:NSForegroundColorAttributeName];
   }
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     owned_apps_grid_controller_.reset([[AppsGridController alloc] init]);
     owned_delegate_.reset(new AppListTestViewDelegate);
     [owned_apps_grid_controller_ setDelegate:owned_delegate_.get()];
@@ -108,7 +108,7 @@ class AppsGridControllerTest : public AppsGridControllerTestHelper {
         [apps_grid_controller_ collectionViewAtPageIndex:0]];
   }
 
-  virtual void TearDown() OVERRIDE {
+  virtual void TearDown() override {
     [owned_apps_grid_controller_ setDelegate:NULL];
     owned_apps_grid_controller_.reset();
     AppsGridControllerTestHelper::TearDown();
@@ -145,7 +145,7 @@ class AppListItemWithMenu : public AppListItem {
     menu_ready_ = ready;
   }
 
-  virtual ui::MenuModel* GetContextMenuModel() OVERRIDE {
+  ui::MenuModel* GetContextMenuModel() override {
     if (!menu_ready_)
       return NULL;
 
@@ -556,26 +556,22 @@ TEST_F(AppsGridControllerTest, ItemInstallProgress) {
   ReplaceTestModel(kItemsPerPage + 1);
   EXPECT_EQ(2u, [apps_grid_controller_ pageCount]);
   EXPECT_EQ(0u, [apps_grid_controller_ visiblePage]);
+  // The single item on the second page.
+  int kTestItemIndex = kItemsPerPage;
   app_list::AppListItem* item_model =
-      model()->top_level_item_list()->item_at(kItemsPerPage);
+      model()->top_level_item_list()->item_at(kTestItemIndex);
 
   // Highlighting an item should activate the page it is on.
-  item_model->SetHighlighted(true);
+  model()->HighlightItemAt(kTestItemIndex);
   EXPECT_EQ(1u, [apps_grid_controller_ visiblePage]);
-
-  // Clearing a highlight stays on the current page.
-  [apps_grid_controller_ scrollToPage:0];
-  EXPECT_EQ(0u, [apps_grid_controller_ visiblePage]);
-  item_model->SetHighlighted(false);
-  EXPECT_EQ(0u, [apps_grid_controller_ visiblePage]);
 
   // Starting install should add a progress bar, and temporarily clear the
   // button title.
-  NSButton* button = GetItemViewAt(kItemsPerPage);
+  NSButton* button = GetItemViewAt(kTestItemIndex);
   NSView* containerView = [button superview];
   EXPECT_EQ(1u, [[containerView subviews] count]);
   EXPECT_NSEQ(@"Item 16", [button title]);
-  item_model->SetHighlighted(true);
+  model()->HighlightItemAt(kTestItemIndex);
   item_model->SetIsInstalling(true);
   EXPECT_EQ(1u, [apps_grid_controller_ visiblePage]);
 
@@ -592,10 +588,8 @@ TEST_F(AppsGridControllerTest, ItemInstallProgress) {
 
   // Two things can be installing simultaneously. When one starts or completes
   // the model builder will ask for the item to be highlighted.
-  app_list::AppListItem* alternate_item_model =
-      model()->top_level_item_list()->item_at(0);
-  item_model->SetHighlighted(false);
-  alternate_item_model->SetHighlighted(true);
+  const int kAlternateTestItemIndex = 0;
+  model()->HighlightItemAt(kAlternateTestItemIndex);
   EXPECT_EQ(0u, [apps_grid_controller_ visiblePage]);
 
   // Update the first item (page doesn't change on updates).
@@ -611,8 +605,7 @@ TEST_F(AppsGridControllerTest, ItemInstallProgress) {
   // Completing install removes the progress bar, and restores the title.
   // ExtensionAppModelBuilder will reload the ExtensionAppItem, which also
   // highlights. Do the same here.
-  alternate_item_model->SetHighlighted(false);
-  item_model->SetHighlighted(true);
+  model()->HighlightItemAt(kTestItemIndex);
   item_model->SetIsInstalling(false);
   EXPECT_EQ(1u, [[containerView subviews] count]);
   EXPECT_NSEQ(@"Item 16", [button title]);

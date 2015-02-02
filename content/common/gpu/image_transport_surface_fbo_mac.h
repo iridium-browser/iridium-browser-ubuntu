@@ -53,8 +53,9 @@ class ImageTransportSurfaceFBO
     virtual void DiscardBackbuffer() = 0;
 
     // Called once for every SwapBuffers call when the IPC for the present has
-    // been processed by the browser.
-    virtual void SwapBuffersAckedByBrowser() = 0;
+    // been processed by the browser. |disable_throttling| is set if the
+    // browser suspects that GPU back-pressure should be disabled.
+    virtual void SwapBuffersAckedByBrowser(bool disable_throttling) = 0;
   };
 
   ImageTransportSurfaceFBO(GpuChannelManager* manager,
@@ -62,40 +63,41 @@ class ImageTransportSurfaceFBO
                            gfx::PluginWindowHandle handle);
 
   // GLSurface implementation
-  virtual bool Initialize() OVERRIDE;
-  virtual void Destroy() OVERRIDE;
-  virtual bool DeferDraws() OVERRIDE;
-  virtual bool IsOffscreen() OVERRIDE;
-  virtual bool SwapBuffers() OVERRIDE;
-  virtual bool PostSubBuffer(int x, int y, int width, int height) OVERRIDE;
-  virtual bool SupportsPostSubBuffer() OVERRIDE;
-  virtual gfx::Size GetSize() OVERRIDE;
-  virtual void* GetHandle() OVERRIDE;
-  virtual void* GetDisplay() OVERRIDE;
-  virtual bool OnMakeCurrent(gfx::GLContext* context) OVERRIDE;
-  virtual unsigned int GetBackingFrameBufferObject() OVERRIDE;
-  virtual bool SetBackbufferAllocation(bool allocated) OVERRIDE;
-  virtual void SetFrontbufferAllocation(bool allocated) OVERRIDE;
+  bool Initialize() override;
+  void Destroy() override;
+  bool DeferDraws() override;
+  bool IsOffscreen() override;
+  bool SwapBuffers() override;
+  bool PostSubBuffer(int x, int y, int width, int height) override;
+  bool SupportsPostSubBuffer() override;
+  gfx::Size GetSize() override;
+  void* GetHandle() override;
+  void* GetDisplay() override;
+  bool OnMakeCurrent(gfx::GLContext* context) override;
+  void NotifyWasBound() override;
+  unsigned int GetBackingFrameBufferObject() override;
+  bool SetBackbufferAllocation(bool allocated) override;
+  void SetFrontbufferAllocation(bool allocated) override;
 
   // Called when the context may continue to make forward progress after a swap.
   void SendSwapBuffers(uint64 surface_handle,
                        const gfx::Size pixel_size,
                        float scale_factor);
+  void SetRendererID(int renderer_id);
 
  protected:
   // ImageTransportSurface implementation
-  virtual void OnBufferPresented(
-      const AcceleratedSurfaceMsg_BufferPresented_Params& params) OVERRIDE;
-  virtual void OnResize(gfx::Size pixel_size, float scale_factor) OVERRIDE;
-  virtual void SetLatencyInfo(
-      const std::vector<ui::LatencyInfo>&) OVERRIDE;
-  virtual void WakeUpGpu() OVERRIDE;
+  void OnBufferPresented(
+      const AcceleratedSurfaceMsg_BufferPresented_Params& params) override;
+  void OnResize(gfx::Size pixel_size, float scale_factor) override;
+  void SetLatencyInfo(const std::vector<ui::LatencyInfo>&) override;
+  void WakeUpGpu() override;
 
   // GpuCommandBufferStub::DestructionObserver implementation.
-  virtual void OnWillDestroyStub() OVERRIDE;
+  void OnWillDestroyStub() override;
 
  private:
-  virtual ~ImageTransportSurfaceFBO() OVERRIDE;
+  ~ImageTransportSurfaceFBO() override;
 
   void AdjustBufferAllocation();
   void DestroyFramebuffer();

@@ -266,6 +266,7 @@ TextIterator::TextIterator(const Range* range, TextIteratorBehaviorFlags behavio
     , m_emitsImageAltText(behavior & TextIteratorEmitsImageAltText)
     , m_entersAuthorShadowRoots(behavior & TextIteratorEntersAuthorShadowRoots)
     , m_emitsObjectReplacementCharacter(behavior & TextIteratorEmitsObjectReplacementCharacter)
+    , m_breaksAtReplacedElement(!(behavior & TextIteratorDoesNotBreakAtReplacedElement))
 {
     if (range)
         initialize(range->startPosition(), range->endPosition());
@@ -297,6 +298,7 @@ TextIterator::TextIterator(const Position& start, const Position& end, TextItera
     , m_emitsImageAltText(behavior & TextIteratorEmitsImageAltText)
     , m_entersAuthorShadowRoots(behavior & TextIteratorEntersAuthorShadowRoots)
     , m_emitsObjectReplacementCharacter(behavior & TextIteratorEmitsObjectReplacementCharacter)
+    , m_breaksAtReplacedElement(!(behavior & TextIteratorDoesNotBreakAtReplacedElement))
 {
     initialize(start, end);
 }
@@ -463,7 +465,7 @@ void TextIterator::advance()
                 bool handledNode = false;
                 if (renderer->isText() && m_node->nodeType() == Node::TEXT_NODE) { // FIXME: What about CDATA_SECTION_NODE?
                     handledNode = handleTextNode();
-                } else if (renderer && (renderer->isImage() || renderer->isWidget()
+                } else if (renderer && (renderer->isImage() || renderer->isRenderPart()
                     || (m_node && m_node->isHTMLElement()
                     && (isHTMLFormControlElement(toHTMLElement(*m_node))
                     || isHTMLLegendElement(toHTMLElement(*m_node))
@@ -706,7 +708,7 @@ void TextIterator::handleTextBox()
         unsigned runEnd = std::min(textBoxEnd, end);
 
         // Determine what the next text box will be, but don't advance yet
-        InlineTextBox* nextTextBox = 0;
+        InlineTextBox* nextTextBox = nullptr;
         if (renderer->containsReversedText()) {
             if (m_sortedTextBoxesPosition + 1 < m_sortedTextBoxes.size())
                 nextTextBox = m_sortedTextBoxes[m_sortedTextBoxesPosition + 1];
@@ -1407,7 +1409,7 @@ void SimplifiedBackwardsTextIterator::advance()
                 // FIXME: What about CDATA_SECTION_NODE?
                 if (renderer->style()->visibility() == VISIBLE && m_offset > 0)
                     m_handledNode = handleTextNode();
-            } else if (renderer && (renderer->isImage() || renderer->isWidget())) {
+            } else if (renderer && (renderer->isImage() || renderer->isRenderPart())) {
                 if (renderer->style()->visibility() == VISIBLE && m_offset > 0)
                     m_handledNode = handleReplacedElement();
             } else {
@@ -1746,7 +1748,7 @@ void CharacterIterator::advance(int count)
     for (m_textIterator.advance(); !atEnd(); m_textIterator.advance()) {
         int runLength = m_textIterator.length();
         if (!runLength) {
-            m_atBreak = true;
+            m_atBreak = m_textIterator.breaksAtReplacedElement();
         } else {
             // see whether this is m_textIterator to use
             if (count < runLength) {
@@ -2256,7 +2258,7 @@ int TextIterator::rangeLength(const Position& start, const Position& end, bool f
 
 PassRefPtrWillBeRawPtr<Range> TextIterator::subrange(Range* entireRange, int characterOffset, int characterCount)
 {
-    CharacterIterator entireRangeIterator(entireRange);
+    CharacterIterator entireRangeIterator(entireRange, TextIteratorEmitsObjectReplacementCharacter);
     Position start;
     Position end;
     calculateCharacterSubrange(entireRangeIterator, characterOffset, characterCount, start, end);
@@ -2265,7 +2267,7 @@ PassRefPtrWillBeRawPtr<Range> TextIterator::subrange(Range* entireRange, int cha
 
 void TextIterator::subrange(Position& start, Position& end, int characterOffset, int characterCount)
 {
-    CharacterIterator entireRangeIterator(start, end);
+    CharacterIterator entireRangeIterator(start, end, TextIteratorEmitsObjectReplacementCharacter);
     calculateCharacterSubrange(entireRangeIterator, characterOffset, characterCount, start, end);
 }
 
@@ -2376,7 +2378,7 @@ tryAgain:
     return matchLength;
 }
 
-static const TextIteratorBehaviorFlags iteratorFlagsForFindPlainText = TextIteratorEntersTextControls | TextIteratorEntersAuthorShadowRoots;
+static const TextIteratorBehaviorFlags iteratorFlagsForFindPlainText = TextIteratorEntersTextControls | TextIteratorEntersAuthorShadowRoots | TextIteratorDoesNotBreakAtReplacedElement;
 
 PassRefPtrWillBeRawPtr<Range> findPlainText(const Range* range, const String& target, FindOptions options)
 {

@@ -26,6 +26,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
+#include "content/shell/browser/layout_test/layout_test_devtools_frontend.h"
 #include "content/shell/browser/shell.h"
 #include "content/shell/browser/shell_browser_context.h"
 #include "content/shell/browser/shell_content_browser_client.h"
@@ -530,12 +531,7 @@ void WebKitTestController::OnImageDump(
   if (actual_pixel_hash != expected_pixel_hash_) {
     std::vector<unsigned char> png;
 
-    // Only the expected PNGs for Mac have a valid alpha channel.
-#if defined(OS_MACOSX)
-    bool discard_transparency = false;
-#else
     bool discard_transparency = true;
-#endif
     if (CommandLine::ForCurrentProcess()->HasSwitch(
         switches::kEnableOverlayFullscreenVideo))
       discard_transparency = false;
@@ -583,7 +579,8 @@ void WebKitTestController::OnClearDevToolsLocalStorage() {
   StoragePartition* storage_partition =
       BrowserContext::GetStoragePartition(browser_context, NULL);
   storage_partition->GetDOMStorageContext()->DeleteLocalStorage(
-      content::GetDevToolsPathAsURL("", "").GetOrigin());
+      content::LayoutTestDevToolsFrontend::GetDevToolsPathAsURL("", "")
+          .GetOrigin());
 }
 
 void WebKitTestController::OnShowDevTools(const std::string& settings,

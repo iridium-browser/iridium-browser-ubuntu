@@ -30,13 +30,13 @@ class AccountTrackerServiceFactory
   friend struct DefaultSingletonTraits<AccountTrackerServiceFactory>;
 
   AccountTrackerServiceFactory();
-  virtual ~AccountTrackerServiceFactory();
+  ~AccountTrackerServiceFactory() override;
 
   // BrowserContextKeyedServiceFactory implementation.
-  virtual void RegisterProfilePrefs(
-      user_prefs::PrefRegistrySyncable* registry) OVERRIDE;
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* context) const OVERRIDE;
+  void RegisterProfilePrefs(
+      user_prefs::PrefRegistrySyncable* registry) override;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* context) const override;
 
   DISALLOW_COPY_AND_ASSIGN(AccountTrackerServiceFactory);
 };

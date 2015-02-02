@@ -25,6 +25,7 @@ source_set("browser") {
     "//content/browser/speech/proto",
     "//content/public/common:common_sources",
     "//crypto",
+    "//device/battery",
     "//google_apis",
     "//net",
     "//skia",
@@ -84,6 +85,8 @@ source_set("browser") {
       "$root_gen_dir/ui/resources/grit/webui_resources_map.cc",
       "$root_gen_dir/content/browser/devtools/devtools_protocol_constants.cc",
       "$root_gen_dir/content/browser/devtools/devtools_protocol_constants.h",
+      "$root_gen_dir/content/browser/devtools/protocol/devtools_protocol_handler_impl.cc",
+      "$root_gen_dir/content/browser/devtools/protocol/devtools_protocol_handler_impl.h",
     ], ".")
 
     # Non-iOS deps.
@@ -94,9 +97,10 @@ source_set("browser") {
       "//content/app/strings",
       "//content/browser/devtools:resources",
       "//content/common:mojo_bindings",
+      "//content/public/common:mojo_bindings",
       "//mojo/public/cpp/bindings",
       "//mojo/public/interfaces/application",
-      "//mojo/public/js/bindings",
+      "//mojo/public/js",
       "//net:http_server",
       "//storage/browser",
       "//storage/common",
@@ -125,7 +129,11 @@ source_set("browser") {
     ]
     deps += [ "//third_party/power_gadget" ]
   } else {
-    sources += [ "power_profiler/power_data_provider_dummy.cc" ]
+    sources += [
+      "power_profiler/power_data_provider_dummy.cc",
+      "file_descriptor_info_impl.cc",
+      "file_descriptor_info_impl.h",
+    ]
     sources -= [ "renderer_host/web_input_event_aurawin.cc" ]
   }
 
@@ -133,7 +141,7 @@ source_set("browser") {
     sources += [ "gamepad/gamepad_platform_data_fetcher.cc" ]
   }
 
-  if (printing_mode != 0) {
+  if (enable_basic_printing || enable_print_preview) {
     deps += [ "//printing" ]
   }
 
@@ -262,16 +270,8 @@ source_set("browser") {
     sources -= [ "power_save_blocker_x11.cc", ]
   }
 
-  # Dealing with battery_status_manager_*.cc and *wifi_data_provider_*.cc
-  # is also a bit complicated given android, chromeos, linux and use_dbus.
-  if (is_android || is_chromeos || (is_linux && use_dbus)) {
-    sources -= [ "battery_status/battery_status_manager_default.cc" ]
-  }
-  if (is_linux && !use_dbus) {
-    # This will already have gotten removed for all non-Linux cases.
-    sources -= [ "battery_status/battery_status_manager_linux.cc" ]
-  }
-
+  # Dealing with *wifi_data_provider_*.cc is also a bit complicated given
+  # android, chromeos, linux and use_dbus.
   if (is_android) {
     sources -= [ "geolocation/wifi_data_provider_common.cc" ]
   }
@@ -326,6 +326,7 @@ source_set("browser") {
     deps += [
       "//content/public/android:jni",
       "//media",
+      "//mojo/android:libsystem_java",
     ]
     libs += [ "jnigraphics" ]
   }
@@ -340,7 +341,10 @@ source_set("browser") {
   }
 
   if (is_chromeos) {
-    deps += [ "//chromeos:power_manager_proto" ]
+    deps += [
+      "//chromeos",
+      "//chromeos:power_manager_proto",
+    ]
   }
 
   if (use_aura) {
@@ -407,7 +411,7 @@ source_set("browser") {
   }
 
   if (is_linux && use_dbus) {
-      deps += [ "//dbus" ]
+    deps += [ "//dbus" ]
   }
 
   if (enable_browser_cdms) {

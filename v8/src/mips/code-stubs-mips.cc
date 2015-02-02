@@ -15,7 +15,7 @@
 #include "src/isolate.h"
 #include "src/jsregexp.h"
 #include "src/regexp-macro-assembler.h"
-#include "src/runtime.h"
+#include "src/runtime/runtime.h"
 
 namespace v8 {
 namespace internal {
@@ -1099,22 +1099,18 @@ void CEntryStub::GenerateAheadOfTime(Isolate* isolate) {
 
 void CEntryStub::Generate(MacroAssembler* masm) {
   // Called from JavaScript; parameters are on stack as if calling JS function
-  // s0: number of arguments including receiver
-  // s1: size of arguments excluding receiver
-  // s2: pointer to builtin function
+  // a0: number of arguments including receiver
+  // a1: pointer to builtin function
   // fp: frame pointer    (restored after C call)
   // sp: stack pointer    (restored as callee's sp after C call)
   // cp: current context  (C callee-saved)
 
   ProfileEntryHookStub::MaybeCallEntryHook(masm);
 
-  // NOTE: s0-s2 hold the arguments of this function instead of a0-a2.
-  // The reason for this is that these arguments would need to be saved anyway
-  // so it's faster to set them up directly.
-  // See MacroAssembler::PrepareCEntryArgs and PrepareCEntryFunction.
-
   // Compute the argv pointer in a callee-saved register.
+  __ sll(s1, a0, kPointerSizeLog2);
   __ Addu(s1, sp, s1);
+  __ Subu(s1, s1, kPointerSize);
 
   // Enter the exit frame that transitions from JavaScript to C++.
   FrameScope scope(masm, StackFrame::MANUAL);
@@ -1126,7 +1122,8 @@ void CEntryStub::Generate(MacroAssembler* masm) {
 
   // Prepare arguments for C routine.
   // a0 = argc
-  __ mov(a0, s0);
+  __ mov(s0, a0);
+  __ mov(s2, a1);
   // a1 = argv (set in the delay slot after find_ra below).
 
   // We are calling compiled C/C++ code. a0 and a1 hold our two arguments. We
@@ -1406,6 +1403,34 @@ void JSEntryStub::Generate(MacroAssembler* masm) {
 }
 
 
+void LoadIndexedStringStub::Generate(MacroAssembler* masm) {
+  // Return address is in ra.
+  Label miss;
+
+  Register receiver = LoadDescriptor::ReceiverRegister();
+  Register index = LoadDescriptor::NameRegister();
+  Register scratch = a3;
+  Register result = v0;
+  DCHECK(!scratch.is(receiver) && !scratch.is(index));
+
+  StringCharAtGenerator char_at_generator(receiver, index, scratch, result,
+                                          &miss,  // When not a string.
+                                          &miss,  // When not a number.
+                                          &miss,  // When index out of range.
+                                          STRING_INDEX_IS_ARRAY_INDEX,
+                                          RECEIVER_IS_STRING);
+  char_at_generator.GenerateFast(masm);
+  __ Ret();
+
+  StubRuntimeCallHelper call_helper;
+  char_at_generator.GenerateSlow(masm, call_helper);
+
+  __ bind(&miss);
+  PropertyAccessCompiler::TailCallBuiltin(
+      masm, PropertyAccessCompiler::MissBuiltin(Code::KEYED_LOAD_IC));
+}
+
+
 // Uses registers a0 to t0.
 // Expected input (depending on whether args are in registers or on the stack):
 // * object: a0 or at sp + 1 * kPointerSize.
@@ -1417,8 +1442,6 @@ void JSEntryStub::Generate(MacroAssembler* masm) {
 void InstanceofStub::Generate(MacroAssembler* masm) {
   // Call site inlining and patching implies arguments in registers.
   DCHECK(HasArgsInRegisters() || !HasCallSiteInlineCheck());
-  // ReturnTrueFalse is only implemented for inlined call sites.
-  DCHECK(!ReturnTrueFalseObject() || HasCallSiteInlineCheck());
 
   // Fixed register usage throughout the stub:
   const Register object = a0;  // Object (lhs).
@@ -1443,7 +1466,7 @@ void InstanceofStub::Generate(MacroAssembler* masm) {
 
   // If there is a call site cache don't look in the global cache, but do the
   // real lookup and update the call site cache.
-  if (!HasCallSiteInlineCheck()) {
+  if (!HasCallSiteInlineCheck() && !ReturnTrueFalseObject()) {
     Label miss;
     __ LoadRoot(at, Heap::kInstanceofCacheFunctionRootIndex);
     __ Branch(&miss, ne, function, Operand(at));
@@ -1502,6 +1525,9 @@ void InstanceofStub::Generate(MacroAssembler* masm) {
   if (!HasCallSiteInlineCheck()) {
     __ mov(v0, zero_reg);
     __ StoreRoot(v0, Heap::kInstanceofCacheAnswerRootIndex);
+    if (ReturnTrueFalseObject()) {
+      __ LoadRoot(v0, Heap::kTrueValueRootIndex);
+    }
   } else {
     // Patch the call site to return true.
     __ LoadRoot(v0, Heap::kTrueValueRootIndex);
@@ -1520,6 +1546,9 @@ void InstanceofStub::Generate(MacroAssembler* masm) {
   if (!HasCallSiteInlineCheck()) {
     __ li(v0, Operand(Smi::FromInt(1)));
     __ StoreRoot(v0, Heap::kInstanceofCacheAnswerRootIndex);
+    if (ReturnTrueFalseObject()) {
+      __ LoadRoot(v0, Heap::kFalseValueRootIndex);
+    }
   } else {
     // Patch the call site to return false.
     __ LoadRoot(v0, Heap::kFalseValueRootIndex);
@@ -1543,23 +1572,33 @@ void InstanceofStub::Generate(MacroAssembler* masm) {
   __ Branch(&slow, ne, scratch, Operand(JS_FUNCTION_TYPE));
 
   // Null is not instance of anything.
-  __ Branch(&object_not_null,
-            ne,
-            scratch,
+  __ Branch(&object_not_null, ne, object,
             Operand(isolate()->factory()->null_value()));
-  __ li(v0, Operand(Smi::FromInt(1)));
+  if (ReturnTrueFalseObject()) {
+    __ LoadRoot(v0, Heap::kFalseValueRootIndex);
+  } else {
+    __ li(v0, Operand(Smi::FromInt(1)));
+  }
   __ DropAndRet(HasArgsInRegisters() ? 0 : 2);
 
   __ bind(&object_not_null);
   // Smi values are not instances of anything.
   __ JumpIfNotSmi(object, &object_not_null_or_smi);
-  __ li(v0, Operand(Smi::FromInt(1)));
+  if (ReturnTrueFalseObject()) {
+    __ LoadRoot(v0, Heap::kFalseValueRootIndex);
+  } else {
+    __ li(v0, Operand(Smi::FromInt(1)));
+  }
   __ DropAndRet(HasArgsInRegisters() ? 0 : 2);
 
   __ bind(&object_not_null_or_smi);
   // String values are not instances of anything.
   __ IsObjectJSStringType(object, scratch, &slow);
-  __ li(v0, Operand(Smi::FromInt(1)));
+  if (ReturnTrueFalseObject()) {
+    __ LoadRoot(v0, Heap::kFalseValueRootIndex);
+  } else {
+    __ li(v0, Operand(Smi::FromInt(1)));
+  }
   __ DropAndRet(HasArgsInRegisters() ? 0 : 2);
 
   // Slow-case.  Tail call builtin.
@@ -2507,14 +2546,14 @@ static void GenerateRecordCallTarget(MacroAssembler* masm) {
 
   // A monomorphic miss (i.e, here the cache is not uninitialized) goes
   // megamorphic.
-  __ LoadRoot(at, Heap::kUninitializedSymbolRootIndex);
+  __ LoadRoot(at, Heap::kuninitialized_symbolRootIndex);
   __ Branch(&initialize, eq, t0, Operand(at));
   // MegamorphicSentinel is an immortal immovable object (undefined) so no
   // write-barrier is needed.
   __ bind(&megamorphic);
   __ sll(t0, a3, kPointerSizeLog2 - kSmiTagSize);
   __ Addu(t0, a2, Operand(t0));
-  __ LoadRoot(at, Heap::kMegamorphicSymbolRootIndex);
+  __ LoadRoot(at, Heap::kmegamorphic_symbolRootIndex);
   __ sw(at, FieldMemOperand(t0, FixedArray::kHeaderSize));
   __ jmp(&done);
 
@@ -2832,9 +2871,9 @@ void CallICStub::Generate(MacroAssembler* masm) {
   __ bind(&extra_checks_or_miss);
   Label miss;
 
-  __ LoadRoot(at, Heap::kMegamorphicSymbolRootIndex);
+  __ LoadRoot(at, Heap::kmegamorphic_symbolRootIndex);
   __ Branch(&slow_start, eq, t0, Operand(at));
-  __ LoadRoot(at, Heap::kUninitializedSymbolRootIndex);
+  __ LoadRoot(at, Heap::kuninitialized_symbolRootIndex);
   __ Branch(&miss, eq, t0, Operand(at));
 
   if (!FLAG_trace_ic) {
@@ -2845,8 +2884,19 @@ void CallICStub::Generate(MacroAssembler* masm) {
     __ Branch(&miss, ne, t1, Operand(JS_FUNCTION_TYPE));
     __ sll(t0, a3, kPointerSizeLog2 - kSmiTagSize);
     __ Addu(t0, a2, Operand(t0));
-    __ LoadRoot(at, Heap::kMegamorphicSymbolRootIndex);
+    __ LoadRoot(at, Heap::kmegamorphic_symbolRootIndex);
     __ sw(at, FieldMemOperand(t0, FixedArray::kHeaderSize));
+    // We have to update statistics for runtime profiling.
+    const int with_types_offset =
+        FixedArray::OffsetOfElementAt(TypeFeedbackVector::kWithTypesIndex);
+    __ lw(t0, FieldMemOperand(a2, with_types_offset));
+    __ Subu(t0, t0, Operand(Smi::FromInt(1)));
+    __ sw(t0, FieldMemOperand(a2, with_types_offset));
+    const int generic_offset =
+        FixedArray::OffsetOfElementAt(TypeFeedbackVector::kGenericCountIndex);
+    __ lw(t0, FieldMemOperand(a2, generic_offset));
+    __ Addu(t0, t0, Operand(Smi::FromInt(1)));
+    __ sw(t0, FieldMemOperand(a2, generic_offset));
     __ Branch(&slow_start);
   }
 
@@ -2896,16 +2946,17 @@ void StringCharCodeAtGenerator::GenerateFast(MacroAssembler* masm) {
   DCHECK(!t0.is(index_));
   DCHECK(!t0.is(result_));
   DCHECK(!t0.is(object_));
+  if (check_mode_ == RECEIVER_IS_UNKNOWN) {
+    // If the receiver is a smi trigger the non-string case.
+    __ JumpIfSmi(object_, receiver_not_string_);
 
-  // If the receiver is a smi trigger the non-string case.
-  __ JumpIfSmi(object_, receiver_not_string_);
-
-  // Fetch the instance type of the receiver into result register.
-  __ lw(result_, FieldMemOperand(object_, HeapObject::kMapOffset));
-  __ lbu(result_, FieldMemOperand(result_, Map::kInstanceTypeOffset));
-  // If the receiver is not a string trigger the non-string case.
-  __ And(t0, result_, Operand(kIsNotStringMask));
-  __ Branch(receiver_not_string_, ne, t0, Operand(zero_reg));
+    // Fetch the instance type of the receiver into result register.
+    __ lw(result_, FieldMemOperand(object_, HeapObject::kMapOffset));
+    __ lbu(result_, FieldMemOperand(result_, Map::kInstanceTypeOffset));
+    // If the receiver is not a string trigger the non-string case.
+    __ And(t0, result_, Operand(kIsNotStringMask));
+    __ Branch(receiver_not_string_, ne, t0, Operand(zero_reg));
+  }
 
   // If the index is non-smi trigger the non-smi case.
   __ JumpIfNotSmi(index_, &index_not_smi_);
@@ -3292,8 +3343,8 @@ void SubStringStub::Generate(MacroAssembler* masm) {
   // a2: length
   // a3: from index (untagged)
   __ SmiTag(a3, a3);
-  StringCharAtGenerator generator(
-      v0, a3, a2, v0, &runtime, &runtime, &runtime, STRING_INDEX_IS_NUMBER);
+  StringCharAtGenerator generator(v0, a3, a2, v0, &runtime, &runtime, &runtime,
+                                  STRING_INDEX_IS_NUMBER, RECEIVER_IS_STRING);
   generator.GenerateFast(masm);
   __ DropAndRet(3);
   generator.SkipSlow(masm, &runtime);

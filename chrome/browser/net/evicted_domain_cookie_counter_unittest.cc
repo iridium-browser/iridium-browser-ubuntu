@@ -35,21 +35,20 @@ class EvictedDomainCookieCounterTest : public testing::Test {
     explicit MockDelegate(EvictedDomainCookieCounterTest* tester);
 
     // EvictedDomainCookieCounter::Delegate implementation.
-    virtual void Report(
-        const EvictedDomainCookieCounter::EvictedCookie& evicted_cookie,
-        const Time& reinstatement_time) OVERRIDE;
-    virtual Time CurrentTime() const OVERRIDE;
+    void Report(const EvictedDomainCookieCounter::EvictedCookie& evicted_cookie,
+                const Time& reinstatement_time) override;
+    Time CurrentTime() const override;
 
    private:
     EvictedDomainCookieCounterTest* tester_;
   };
 
   EvictedDomainCookieCounterTest();
-  virtual ~EvictedDomainCookieCounterTest();
+  ~EvictedDomainCookieCounterTest() override;
 
   // testing::Test implementation.
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
   // Initialization that allows parameters to be specified.
   void InitCounter(size_t max_size, size_t purge_count);
@@ -127,10 +126,7 @@ void EvictedDomainCookieCounterTest::InitCounter(size_t max_size,
                                                  size_t purge_count) {
   scoped_ptr<MockDelegate> cookie_counter_delegate(new MockDelegate(this));
   cookie_counter_ = new EvictedDomainCookieCounter(
-      NULL,
-      cookie_counter_delegate.PassAs<EvictedDomainCookieCounter::Delegate>(),
-      max_size,
-      purge_count);
+      NULL, cookie_counter_delegate.Pass(), max_size, purge_count);
 }
 
 void EvictedDomainCookieCounterTest::CreateNewCookie(
@@ -187,26 +183,23 @@ TEST_F(EvictedDomainCookieCounterTest, TestChain) {
    public:
     explicit ChangedDelegateDummy(int* result) : result_(result) {}
 
-    virtual void OnCookieChanged(const net::CanonicalCookie& cookie,
-                                 bool removed,
-                                 ChangeCause cause) OVERRIDE {
+    void OnCookieChanged(const net::CanonicalCookie& cookie,
+                         bool removed,
+                         ChangeCause cause) override {
       ++(*result_);
     }
 
-    virtual void OnLoaded() OVERRIDE {}
+    void OnLoaded() override {}
 
    private:
-    virtual ~ChangedDelegateDummy() {}
+    ~ChangedDelegateDummy() override {}
 
     int* result_;
   };
 
   scoped_ptr<MockDelegate> cookie_counter_delegate(new MockDelegate(this));
   cookie_counter_ = new EvictedDomainCookieCounter(
-      new ChangedDelegateDummy(&result),
-      cookie_counter_delegate.PassAs<EvictedDomainCookieCounter::Delegate>(),
-      10,
-      5);
+      new ChangedDelegateDummy(&result), cookie_counter_delegate.Pass(), 10, 5);
   InitStockCookies();
   // Perform 6 cookie transactions.
   for (int i = 0; i < 6; ++i) {

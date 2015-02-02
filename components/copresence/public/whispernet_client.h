@@ -11,6 +11,7 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "components/copresence/public/copresence_constants.h"
 
 namespace media {
 class AudioBusRefCounted;
@@ -18,29 +19,12 @@ class AudioBusRefCounted;
 
 namespace copresence {
 
-struct AudioToken {
-  AudioToken(const std::string& token, bool audible)
-      : token(token), audible(audible) {}
-  std::string token;
-  bool audible;
-};
-
 // The interface that the whispernet client needs to implement. These methods
 // provide us the ability to use the audio medium in copresence. Currently since
 // the only medium that copresence uses is audio, the implementation of this
 // interface is required.
 class WhispernetClient {
  public:
-  // Generic callback to indicate a boolean success or failure.
-  typedef base::Callback<void(bool)> SuccessCallback;
-  // Callback that returns detected tokens.
-  typedef base::Callback<void(const std::vector<AudioToken>&)> TokensCallback;
-  // Callback that returns encoded samples for a given token.
-  typedef base::Callback<void(const std::string&,
-                              bool,
-                              const scoped_refptr<media::AudioBusRefCounted>&)>
-      SamplesCallback;
-
   // Initialize the whispernet client and call the callback when done. The
   // parameter indicates whether we succeeded or failed.
   virtual void Initialize(const SuccessCallback& init_callback) = 0;
@@ -48,9 +32,9 @@ class WhispernetClient {
   virtual void Shutdown() = 0;
 
   // Fires an event to request a token encode.
-  virtual void EncodeToken(const std::string& token, bool audible) = 0;
+  virtual void EncodeToken(const std::string& token, AudioType type) = 0;
   // Fires an event to request a decode for the given samples.
-  virtual void DecodeSamples(const std::string& samples) = 0;
+  virtual void DecodeSamples(AudioType type, const std::string& samples) = 0;
   // Fires an event to request detection of a whispernet broadcast.
   virtual void DetectBroadcast() = 0;
 

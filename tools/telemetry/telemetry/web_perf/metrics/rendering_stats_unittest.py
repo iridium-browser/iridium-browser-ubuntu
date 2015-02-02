@@ -54,8 +54,6 @@ class ReferenceRenderingStats(object):
     self.painted_pixel_counts = []
     self.record_times = []
     self.recorded_pixel_counts = []
-    self.rasterize_times = []
-    self.rasterized_pixel_counts = []
     self.approximated_pixel_percentages = []
 
   def AppendNewRange(self):
@@ -65,8 +63,6 @@ class ReferenceRenderingStats(object):
     self.painted_pixel_counts.append([])
     self.record_times.append([])
     self.recorded_pixel_counts.append([])
-    self.rasterize_times.append([])
-    self.rasterized_pixel_counts.append([])
     self.approximated_pixel_percentages.append([])
 
 class ReferenceInputLatencyStats(object):
@@ -75,8 +71,7 @@ class ReferenceInputLatencyStats(object):
     self.input_event_latency = []
     self.input_event = []
 
-def AddMainThreadRenderingStats(mock_timer, thread, first_frame,
-                                ref_stats = None):
+def AddMainThreadRenderingStats(mock_timer, thread, ref_stats = None):
   """ Adds a random main thread rendering stats event.
 
   thread: The timeline model thread to which the event will be added.
@@ -84,8 +79,7 @@ def AddMainThreadRenderingStats(mock_timer, thread, first_frame,
   ref_stats: A ReferenceRenderingStats object to record expected values.
   """
   # Create randonm data and timestap for main thread rendering stats.
-  data = { 'frame_count': 0,
-           'paint_time': 0.0,
+  data = { 'paint_time': 0.0,
            'painted_pixel_count': 0,
            'record_time': mock_timer.Advance(2, 4) / 1000.0,
            'recorded_pixel_count': 3000*3000 }
@@ -100,19 +94,40 @@ def AddMainThreadRenderingStats(mock_timer, thread, first_frame,
   if not ref_stats:
     return
 
-  # Add timestamp only if a frame was output
-  if data['frame_count'] == 1:
-    if not first_frame:
-      # Add frame_time if this is not the first frame in within the bounds of an
-      # action.
-      prev_timestamp = ref_stats.frame_timestamps[-1][-1]
-      ref_stats.frame_times[-1].append(round(timestamp - prev_timestamp, 2))
-    ref_stats.frame_timestamps[-1].append(timestamp)
-
   ref_stats.paint_times[-1].append(data['paint_time'] * 1000.0)
   ref_stats.painted_pixel_counts[-1].append(data['painted_pixel_count'])
   ref_stats.record_times[-1].append(data['record_time'] * 1000.0)
   ref_stats.recorded_pixel_counts[-1].append(data['recorded_pixel_count'])
+
+
+def AddDisplayRenderingStats(mock_timer, thread, first_frame,
+                             ref_stats = None):
+  """ Adds a random display rendering stats event.
+
+  thread: The timeline model thread to which the event will be added.
+  first_frame: Is this the first frame within the bounds of an action?
+  ref_stats: A ReferenceRenderingStats object to record expected values.
+  """
+  # Create randonm data and timestap for main thread rendering stats.
+  data = { 'frame_count': 1 }
+  timestamp = mock_timer.Get()
+
+  # Add a slice with the event data to the given thread.
+  thread.PushCompleteSlice(
+      'benchmark', 'BenchmarkInstrumentation::DisplayRenderingStats',
+      timestamp, duration=0.0, thread_timestamp=None, thread_duration=None,
+      args={'data': data})
+
+  if not ref_stats:
+    return
+
+  # Add timestamp only if a frame was output
+  if not first_frame:
+    # Add frame_time if this is not the first frame in within the bounds of an
+    # action.
+    prev_timestamp = ref_stats.frame_timestamps[-1][-1]
+    ref_stats.frame_times[-1].append(round(timestamp - prev_timestamp, 2))
+  ref_stats.frame_timestamps[-1].append(timestamp)
 
 
 def AddImplThreadRenderingStats(mock_timer, thread, first_frame,
@@ -125,8 +140,6 @@ def AddImplThreadRenderingStats(mock_timer, thread, first_frame,
   """
   # Create randonm data and timestap for impl thread rendering stats.
   data = { 'frame_count': 1,
-           'rasterize_time': mock_timer.Advance(5, 10) / 1000.0,
-           'rasterized_pixel_count': 1280*720,
            'visible_content_area': random.uniform(0, 100),
            'approximated_visible_content_area': random.uniform(0, 5)}
   timestamp = mock_timer.Get()
@@ -149,8 +162,6 @@ def AddImplThreadRenderingStats(mock_timer, thread, first_frame,
       ref_stats.frame_times[-1].append(round(timestamp - prev_timestamp, 2))
     ref_stats.frame_timestamps[-1].append(timestamp)
 
-  ref_stats.rasterize_times[-1].append(data['rasterize_time'] * 1000.0)
-  ref_stats.rasterized_pixel_counts[-1].append(data['rasterized_pixel_count'])
   ref_stats.approximated_pixel_percentages[-1].append(
       round(DivideIfPossibleOrZero(data['approximated_visible_content_area'],
                                    data['visible_content_area']) * 100.0, 3))
@@ -221,7 +232,7 @@ def AddInputLatencyStats(mock_timer, start_thread, end_thread,
 
   # Also add some dummy frame statistics so we can feed the resulting timeline
   # to RenderingStats.
-  AddMainThreadRenderingStats(mock_timer, start_thread, False)
+  AddMainThreadRenderingStats(mock_timer, start_thread)
   AddImplThreadRenderingStats(mock_timer, end_thread, False)
 
   if not ref_latency_stats:
@@ -253,7 +264,7 @@ class RenderingStatsUnitTest(unittest.TestCase):
     # A process with rendering stats, but no frames in them
     process_without_frames = timeline.GetOrCreateProcess(pid = 2)
     thread_without_frames = process_without_frames.GetOrCreateThread(tid = 21)
-    AddMainThreadRenderingStats(timer, thread_without_frames, True, None)
+    AddMainThreadRenderingStats(timer, thread_without_frames, None)
     process_without_frames.FinalizeImport()
     self.assertFalse(HasRenderingStats(thread_without_frames))
 
@@ -263,6 +274,42 @@ class RenderingStatsUnitTest(unittest.TestCase):
     AddImplThreadRenderingStats(timer, thread_with_frames, True, None)
     process_with_frames.FinalizeImport()
     self.assertTrue(HasRenderingStats(thread_with_frames))
+
+  def testBothDisplayAndImplStats(self):
+    timeline = model.TimelineModel()
+    timer = MockTimer()
+
+    ref_stats = ReferenceRenderingStats()
+    ref_stats.AppendNewRange()
+    renderer = timeline.GetOrCreateProcess(pid = 2)
+    browser = timeline.GetOrCreateProcess(pid = 3)
+    browser_main = browser.GetOrCreateThread(tid = 31)
+    browser_main.BeginSlice('webkit.console', 'ActionA', timer.Get(), '')
+
+    # Create main, impl, and display rendering stats.
+    for i in xrange(0, 10):
+      first = (i == 0)
+      AddMainThreadRenderingStats(timer, browser_main, ref_stats)
+      AddImplThreadRenderingStats(timer, browser_main, first, None)
+      timer.Advance(2, 4)
+
+    for i in xrange(0, 10):
+      first = (i == 0)
+      AddDisplayRenderingStats(timer, browser_main, first, ref_stats)
+      timer.Advance(5, 10)
+
+    browser_main.EndSlice(timer.Get())
+
+    browser.FinalizeImport()
+    renderer.FinalizeImport()
+    timeline_markers = timeline.FindTimelineMarkers(['ActionA'])
+    timeline_ranges = [ timeline_bounds.Bounds.CreateFromEvent(marker)
+                        for marker in timeline_markers ]
+    stats = RenderingStats(renderer, browser, timeline_ranges)
+
+    # Compare rendering stats to reference - Only display stats should count
+    self.assertEquals(stats.frame_timestamps, ref_stats.frame_timestamps)
+    self.assertEquals(stats.frame_times, ref_stats.frame_times)
 
   def testRangeWithoutFrames(self):
     timer = MockTimer()
@@ -278,7 +325,7 @@ class RenderingStatsUnitTest(unittest.TestCase):
     renderer_main.BeginSlice('webkit.console', 'ActionA', timer.Get(), '')
     for i in xrange(0, 10):
       first = (i == 0)
-      AddMainThreadRenderingStats(timer, renderer_main, first, None)
+      AddMainThreadRenderingStats(timer, renderer_main, None)
       AddImplThreadRenderingStats(timer, renderer_compositor, first, None)
     timer.Advance(2, 4)
     renderer_main.EndSlice(timer.Get())
@@ -286,7 +333,7 @@ class RenderingStatsUnitTest(unittest.TestCase):
     # Create 5 main and impl rendering stats events not within any action.
     for i in xrange(0, 5):
       first = (i == 0)
-      AddMainThreadRenderingStats(timer, renderer_main, first, None)
+      AddMainThreadRenderingStats(timer, renderer_main, None)
       AddImplThreadRenderingStats(timer, renderer_compositor, first, None)
 
     # Create Action B without any frames. This should trigger
@@ -330,11 +377,11 @@ class RenderingStatsUnitTest(unittest.TestCase):
     for i in xrange(0, 10):
       first = (i == 0)
       AddMainThreadRenderingStats(
-          timer, renderer_main, first, renderer_ref_stats)
+          timer, renderer_main, renderer_ref_stats)
       AddImplThreadRenderingStats(
           timer, renderer_compositor, first, renderer_ref_stats)
       AddMainThreadRenderingStats(
-          timer, browser_main, first, browser_ref_stats)
+          timer, browser_main, browser_ref_stats)
       AddImplThreadRenderingStats(
           timer, browser_compositor, first, browser_ref_stats)
     timer.Advance(2, 4)
@@ -343,9 +390,9 @@ class RenderingStatsUnitTest(unittest.TestCase):
     # Create 5 main and impl rendering stats events not within any action.
     for i in xrange(0, 5):
       first = (i == 0)
-      AddMainThreadRenderingStats(timer, renderer_main, first, None)
+      AddMainThreadRenderingStats(timer, renderer_main, None)
       AddImplThreadRenderingStats(timer, renderer_compositor, first, None)
-      AddMainThreadRenderingStats(timer, browser_main, first, None)
+      AddMainThreadRenderingStats(timer, browser_main, None)
       AddImplThreadRenderingStats(timer, browser_compositor, first, None)
 
     # Create 10 main and impl rendering stats events for Action B.
@@ -356,11 +403,11 @@ class RenderingStatsUnitTest(unittest.TestCase):
     for i in xrange(0, 10):
       first = (i == 0)
       AddMainThreadRenderingStats(
-          timer, renderer_main, first, renderer_ref_stats)
+          timer, renderer_main, renderer_ref_stats)
       AddImplThreadRenderingStats(
           timer, renderer_compositor, first, renderer_ref_stats)
       AddMainThreadRenderingStats(
-          timer, browser_main, first, browser_ref_stats)
+          timer, browser_main, browser_ref_stats)
       AddImplThreadRenderingStats(
           timer, browser_compositor, first, browser_ref_stats)
     timer.Advance(2, 4)
@@ -374,11 +421,11 @@ class RenderingStatsUnitTest(unittest.TestCase):
     for i in xrange(0, 10):
       first = (i == 0)
       AddMainThreadRenderingStats(
-          timer, renderer_main, first, renderer_ref_stats)
+          timer, renderer_main, renderer_ref_stats)
       AddImplThreadRenderingStats(
           timer, renderer_compositor, first, renderer_ref_stats)
       AddMainThreadRenderingStats(
-          timer, browser_main, first, browser_ref_stats)
+          timer, browser_main, browser_ref_stats)
       AddImplThreadRenderingStats(
           timer, browser_compositor, first, browser_ref_stats)
     timer.Advance(2, 4)
@@ -397,9 +444,6 @@ class RenderingStatsUnitTest(unittest.TestCase):
     self.assertEquals(stats.frame_timestamps,
                       browser_ref_stats.frame_timestamps)
     self.assertEquals(stats.frame_times, browser_ref_stats.frame_times)
-    self.assertEquals(stats.rasterize_times, renderer_ref_stats.rasterize_times)
-    self.assertEquals(stats.rasterized_pixel_counts,
-                      renderer_ref_stats.rasterized_pixel_counts)
     self.assertEquals(stats.approximated_pixel_percentages,
                       renderer_ref_stats.approximated_pixel_percentages)
     self.assertEquals(stats.paint_times, renderer_ref_stats.paint_times)

@@ -14,35 +14,34 @@ namespace extensions {
 class ChromeExtensionsAPIClient : public ExtensionsAPIClient {
  public:
   ChromeExtensionsAPIClient();
-  virtual ~ChromeExtensionsAPIClient();
+  ~ChromeExtensionsAPIClient() override;
 
   // ExtensionsApiClient implementation.
-  virtual void AddAdditionalValueStoreCaches(
+  void AddAdditionalValueStoreCaches(
       content::BrowserContext* context,
       const scoped_refptr<SettingsStorageFactory>& factory,
-      const scoped_refptr<ObserverListThreadSafe<SettingsObserver> >& observers,
+      const scoped_refptr<ObserverListThreadSafe<SettingsObserver>>& observers,
       std::map<settings_namespace::Namespace, ValueStoreCache*>* caches)
-      OVERRIDE;
-  virtual AppViewGuestDelegate* CreateAppViewGuestDelegate() const OVERRIDE;
-  virtual ExtensionOptionsGuestDelegate* CreateExtensionOptionsGuestDelegate(
-      ExtensionOptionsGuest* guest) const OVERRIDE;
-  virtual scoped_ptr<MimeHandlerViewGuestDelegate>
-      CreateMimeHandlerViewGuestDelegate(
-          MimeHandlerViewGuest* guest) const OVERRIDE;
-  virtual WebViewGuestDelegate* CreateWebViewGuestDelegate(
-      WebViewGuest* web_view_guest) const OVERRIDE;
-  virtual WebViewPermissionHelperDelegate*
-      CreateWebViewPermissionHelperDelegate(
-          WebViewPermissionHelper* web_view_permission_helper) const OVERRIDE;
-  virtual scoped_refptr<RulesRegistry> GetRulesRegistry(
+      override;
+  AppViewGuestDelegate* CreateAppViewGuestDelegate() const override;
+  ExtensionOptionsGuestDelegate* CreateExtensionOptionsGuestDelegate(
+      ExtensionOptionsGuest* guest) const override;
+  scoped_ptr<MimeHandlerViewGuestDelegate> CreateMimeHandlerViewGuestDelegate(
+      MimeHandlerViewGuest* guest) const override;
+  WebViewGuestDelegate* CreateWebViewGuestDelegate(
+      WebViewGuest* web_view_guest) const override;
+  WebViewPermissionHelperDelegate* CreateWebViewPermissionHelperDelegate(
+      WebViewPermissionHelper* web_view_permission_helper) const override;
+  WebRequestEventRouterDelegate* CreateWebRequestEventRouterDelegate()
+      const override;
+  scoped_refptr<ContentRulesRegistry> CreateContentRulesRegistry(
       content::BrowserContext* browser_context,
-      const RulesRegistry::WebViewKey& webview_key,
-      const std::string& event_name) OVERRIDE;
-  virtual WebRequestEventRouterDelegate* CreateWebRequestEventRouterDelegate()
-      const OVERRIDE;
-  virtual scoped_refptr<ContentRulesRegistry> CreateContentRulesRegistry(
-      content::BrowserContext* browser_context,
-      RulesCacheDelegate* cache_delegate) const OVERRIDE;
+      RulesCacheDelegate* cache_delegate) const override;
+  scoped_ptr<DevicePermissionsPrompt> CreateDevicePermissionsPrompt(
+      content::WebContents* web_contents) const override;
+  scoped_ptr<VirtualKeyboardDelegate> CreateVirtualKeyboardDelegate()
+      const override;
+  ManagementAPIDelegate* CreateManagementAPIDelegate() const override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ChromeExtensionsAPIClient);

@@ -16,6 +16,7 @@
 
 class CreditCard;
 class PersonalDataManager;
+class InfoBarService;
 
 namespace autofill {
 
@@ -41,22 +42,21 @@ class AutofillCCInfoBarDelegate : public ConfirmInfoBarDelegate {
  private:
   AutofillCCInfoBarDelegate(const AutofillMetrics* metric_logger,
                             const base::Closure& save_card_callback);
-  virtual ~AutofillCCInfoBarDelegate();
+  ~AutofillCCInfoBarDelegate() override;
 
   void LogUserAction(AutofillMetrics::InfoBarMetric user_action);
 
   // ConfirmInfoBarDelegate:
-  virtual void InfoBarDismissed() OVERRIDE;
-  virtual int GetIconID() const OVERRIDE;
-  virtual Type GetInfoBarType() const OVERRIDE;
-  virtual bool ShouldExpireInternal(
-      const NavigationDetails& details) const OVERRIDE;
-  virtual base::string16 GetMessageText() const OVERRIDE;
-  virtual base::string16 GetButtonLabel(InfoBarButton button) const OVERRIDE;
-  virtual bool Accept() OVERRIDE;
-  virtual bool Cancel() OVERRIDE;
-  virtual base::string16 GetLinkText() const OVERRIDE;
-  virtual bool LinkClicked(WindowOpenDisposition disposition) OVERRIDE;
+  void InfoBarDismissed() override;
+  int GetIconID() const override;
+  Type GetInfoBarType() const override;
+  bool ShouldExpireInternal(const NavigationDetails& details) const override;
+  base::string16 GetMessageText() const override;
+  base::string16 GetButtonLabel(InfoBarButton button) const override;
+  bool Accept() override;
+  bool Cancel() override;
+  base::string16 GetLinkText() const override;
+  bool LinkClicked(WindowOpenDisposition disposition) override;
 
   // For logging UMA metrics.
   // Weak reference. Owned by the AutofillManager that initiated this infobar.

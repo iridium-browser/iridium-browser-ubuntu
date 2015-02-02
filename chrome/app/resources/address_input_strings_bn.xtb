@@ -1,4 +1,6 @@
-<?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="bn">
+<?xml version="1.0" ?>
+<!DOCTYPE translationbundle>
+<translationbundle lang="bn">
 <translation id="777702478322588152">জেলা</translation>
 <translation id="3713769522066937702">এই পিন কোডের ফরম্যাটটি স্বীকৃত নয়৷ একটি বৈধ পিন কোডের উদাহরণ হল: <ph name="EXAMPLE"/>৷ আপনার পিন কোড জানেন না? এটিকে <ph name="BEGIN_LINK"/>এখানে<ph name="END_LINK"/> খুঁজুন৷</translation>
 <translation id="7393381084163773901">রাস্তার ঠিকানা</translation>

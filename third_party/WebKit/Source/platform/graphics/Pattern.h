@@ -29,7 +29,6 @@
 #ifndef Pattern_h
 #define Pattern_h
 
-#include "SkShader.h"
 #include "platform/PlatformExport.h"
 #include "platform/graphics/Image.h"
 #include "platform/transforms/AffineTransform.h"
@@ -38,7 +37,11 @@
 #include "wtf/RefCounted.h"
 #include "wtf/RefPtr.h"
 
+class SkShader;
+
 namespace blink {
+
+class DisplayList;
 
 class PLATFORM_EXPORT Pattern : public RefCounted<Pattern> {
 public:
@@ -52,20 +55,32 @@ public:
 
     static PassRefPtr<Pattern> createBitmapPattern(PassRefPtr<Image> tileImage,
         RepeatMode = RepeatModeXY);
-    ~Pattern();
+    static PassRefPtr<Pattern> createDisplayListPattern(PassRefPtr<DisplayList>,
+        RepeatMode = RepeatModeXY);
+    virtual ~Pattern();
 
     SkShader* shader();
 
     void setPatternSpaceTransform(const AffineTransform& patternSpaceTransformation);
+    const AffineTransform& patternSpaceTransform() const { return m_patternSpaceTransformation; }
 
-private:
-    Pattern(PassRefPtr<Image>, RepeatMode);
+    bool isRepeatX() { return m_repeatMode & RepeatModeX; }
+    bool isRepeatY() { return m_repeatMode & RepeatModeY; }
+    bool isRepeatXY() { return m_repeatMode == RepeatModeXY; }
 
-    RefPtr<NativeImageSkia> m_tileImage;
+protected:
+    virtual PassRefPtr<SkShader> createShader() = 0;
+
+    void adjustExternalMemoryAllocated(int64_t delta);
+
     RepeatMode m_repeatMode;
     AffineTransform m_patternSpaceTransformation;
+
+    Pattern(RepeatMode, int64_t externalMemoryAllocated = 0);
+
+private:
     RefPtr<SkShader> m_pattern;
-    int m_externalMemoryAllocated;
+    int64_t m_externalMemoryAllocated;
 };
 
 } // namespace blink

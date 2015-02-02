@@ -4,10 +4,13 @@
 
 #include "chrome/browser/ui/views/apps/app_info_dialog/app_info_panel.h"
 
+#include "chrome/browser/ui/browser_navigator.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/layout/layout_constants.h"
+#include "ui/views/widget/widget.h"
+#include "url/gurl.h"
 
 namespace {
 
@@ -20,6 +23,16 @@ AppInfoPanel::AppInfoPanel(Profile* profile, const extensions::Extension* app)
 }
 
 AppInfoPanel::~AppInfoPanel() {
+}
+
+void AppInfoPanel::Close() {
+  GetWidget()->Close();
+}
+
+void AppInfoPanel::OpenLink(const GURL& url) {
+  DCHECK(!url.is_empty());
+  chrome::NavigateParams params(profile_, url, ui::PAGE_TRANSITION_LINK);
+  chrome::Navigate(&params);
 }
 
 views::Label* AppInfoPanel::CreateHeading(const base::string16& text) const {
@@ -46,10 +59,6 @@ views::View* AppInfoPanel::CreateHorizontalStack(int child_spacing) const {
   vertically_stacked_view->SetLayoutManager(
       new views::BoxLayout(views::BoxLayout::kHorizontal, 0, 0, child_spacing));
   return vertically_stacked_view;
-}
-
-views::View* AppInfoPanel::CreateHorizontalStack() const {
-  return CreateVerticalStack(views::kRelatedControlHorizontalSpacing);
 }
 
 views::View* AppInfoPanel::CreateKeyValueField(views::View* key,

@@ -27,8 +27,10 @@ class ChromeLauncherAppMenuItemV2App : public ChromeLauncherAppMenuItem {
       ChromeLauncherController* launcher_controller,
       int app_index,
       bool has_leading_separator);
-  virtual bool IsEnabled() const OVERRIDE;
-  virtual void Execute(int event_flags) OVERRIDE;
+  ~ChromeLauncherAppMenuItemV2App() override;
+
+  bool IsEnabled() const override;
+  void Execute(int event_flags) override;
 
  private:
   // The owning class which can be used to validate the controller.

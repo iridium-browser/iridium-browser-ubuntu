@@ -25,13 +25,13 @@ class TestNetLogTempFile : public NetLogTempFile {
   }
 
   // NetLogTempFile implementation:
-  virtual bool GetNetExportLogDirectory(base::FilePath* path) OVERRIDE {
+  bool GetNetExportLogDirectory(base::FilePath* path) override {
     if (lie_about_net_export_log_directory_)
       return false;
     return NetLogTempFile::GetNetExportLogDirectory(path);
   }
 
-  virtual bool NetExportLogExists() OVERRIDE {
+  bool NetExportLogExists() override {
     if (lie_about_file_existence_)
       return false;
     return NetLogTempFile::NetExportLogExists();
@@ -61,7 +61,7 @@ class NetLogTempFileTest : public ::testing::Test {
   }
 
   // ::testing::Test implementation:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     // Get a temporary file name for unit tests.
     base::FilePath net_log_dir;
     ASSERT_TRUE(net_log_temp_file_->GetNetExportLogDirectory(&net_log_dir));
@@ -76,7 +76,7 @@ class NetLogTempFileTest : public ::testing::Test {
     ASSERT_FALSE(net_export_log_.empty());
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     // Delete the temporary file we have created.
     ASSERT_TRUE(base::DeleteFile(net_export_log_, false));
   }
@@ -176,6 +176,22 @@ class NetLogTempFileTest : public ::testing::Test {
     VerifyNetExportLog();
   }
 
+  // Make sure the export file has been successfully initialized.
+  void VerifyFileAndStateAfterDoStopWithStripPrivateData() {
+    EXPECT_EQ("NOT_LOGGING", GetStateString());
+    EXPECT_EQ(NetLogTempFile::STATE_NOT_LOGGING, net_log_temp_file_->state());
+    EXPECT_EQ("STRIP_PRIVATE_DATA", GetLogTypeString());
+    EXPECT_EQ(NetLogTempFile::LOG_TYPE_STRIP_PRIVATE_DATA,
+              net_log_temp_file_->log_type());
+
+    base::FilePath net_export_file_path;
+    EXPECT_TRUE(net_log_temp_file_->GetFilePath(&net_export_file_path));
+    EXPECT_TRUE(base::PathExists(net_export_file_path));
+    EXPECT_EQ(net_export_log_, net_export_file_path);
+
+    VerifyNetExportLog();
+  }
+
   scoped_ptr<ChromeNetLog> net_log_;
   // |net_log_temp_file_| is initialized after |net_log_| so that it can stop
   // obvserving on destruction.
@@ -244,6 +260,25 @@ TEST_F(NetLogTempFileTest, ProcessCommandDoStartAndStop) {
   VerifyFileAndStateAfterDoStop();
 }
 
+TEST_F(NetLogTempFileTest,
+       ProcessCommandDoStartAndStopWithPrivateDataStripping) {
+  net_log_temp_file_->ProcessCommand(
+      NetLogTempFile::DO_START_STRIP_PRIVATE_DATA);
+  VerifyFileAndStateAfterDoStartStripPrivateData();
+
+  // Calling DO_START_STRIP_PRIVATE_DATA second time should be a no-op.
+  net_log_temp_file_->ProcessCommand(
+      NetLogTempFile::DO_START_STRIP_PRIVATE_DATA);
+  VerifyFileAndStateAfterDoStartStripPrivateData();
+
+  net_log_temp_file_->ProcessCommand(NetLogTempFile::DO_STOP);
+  VerifyFileAndStateAfterDoStopWithStripPrivateData();
+
+  // Calling DO_STOP second time should be a no-op.
+  net_log_temp_file_->ProcessCommand(NetLogTempFile::DO_STOP);
+  VerifyFileAndStateAfterDoStopWithStripPrivateData();
+}
+
 TEST_F(NetLogTempFileTest, DoStartClearsFile) {
   // Verify file sizes after two consecutives start/stop are the same (even if
   // we add some junk data in between).
@@ -262,8 +297,8 @@ TEST_F(NetLogTempFileTest, DoStartClearsFile) {
 
   // Add some junk at the end of the file.
   std::string junk_data("Hello");
-  EXPECT_GT(base::AppendToFile(
-      net_export_log_, junk_data.c_str(), junk_data.size()), 0);
+  EXPECT_TRUE(base::AppendToFile(net_export_log_, junk_data.c_str(),
+                                 junk_data.size()));
 
   int64 junk_file_size;
   EXPECT_TRUE(base::GetFileSize(net_export_log_, &junk_file_size));

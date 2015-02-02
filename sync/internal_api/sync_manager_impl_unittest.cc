@@ -691,38 +691,33 @@ namespace {
 
 class TestHttpPostProviderInterface : public HttpPostProviderInterface {
  public:
-  virtual ~TestHttpPostProviderInterface() {}
+  ~TestHttpPostProviderInterface() override {}
 
-  virtual void SetExtraRequestHeaders(const char* headers) OVERRIDE {}
-  virtual void SetURL(const char* url, int port) OVERRIDE {}
-  virtual void SetPostPayload(const char* content_type,
-                              int content_length,
-                              const char* content) OVERRIDE {}
-  virtual bool MakeSynchronousPost(int* error_code, int* response_code)
-      OVERRIDE {
+  void SetExtraRequestHeaders(const char* headers) override {}
+  void SetURL(const char* url, int port) override {}
+  void SetPostPayload(const char* content_type,
+                      int content_length,
+                      const char* content) override {}
+  bool MakeSynchronousPost(int* error_code, int* response_code) override {
     return false;
   }
-  virtual int GetResponseContentLength() const OVERRIDE {
-    return 0;
-  }
-  virtual const char* GetResponseContent() const OVERRIDE {
-    return "";
-  }
-  virtual const std::string GetResponseHeaderValue(
-      const std::string& name) const OVERRIDE {
+  int GetResponseContentLength() const override { return 0; }
+  const char* GetResponseContent() const override { return ""; }
+  const std::string GetResponseHeaderValue(
+      const std::string& name) const override {
     return std::string();
   }
-  virtual void Abort() OVERRIDE {}
+  void Abort() override {}
 };
 
 class TestHttpPostProviderFactory : public HttpPostProviderFactory {
  public:
-  virtual ~TestHttpPostProviderFactory() {}
-  virtual void Init(const std::string& user_agent) OVERRIDE { }
-  virtual HttpPostProviderInterface* Create() OVERRIDE {
+  ~TestHttpPostProviderFactory() override {}
+  void Init(const std::string& user_agent) override {}
+  HttpPostProviderInterface* Create() override {
     return new TestHttpPostProviderInterface();
   }
-  virtual void Destroy(HttpPostProviderInterface* http) OVERRIDE {
+  void Destroy(HttpPostProviderInterface* http) override {
     delete static_cast<TestHttpPostProviderInterface*>(http);
   }
 };
@@ -877,9 +872,9 @@ class SyncManagerTest : public testing::Test,
       ModelType model_type,
       int64 model_version,
       const BaseTransaction* trans,
-      const ImmutableChangeRecordList& changes) OVERRIDE {}
+      const ImmutableChangeRecordList& changes) override {}
 
-  virtual void OnChangesComplete(ModelType model_type) OVERRIDE {}
+  virtual void OnChangesComplete(ModelType model_type) override {}
 
   // Helper methods.
   bool SetUpEncryption(NigoriStatus nigori_status,
@@ -2406,12 +2401,12 @@ class ComponentsFactory : public TestInternalComponentsFactory {
           switches, InternalComponentsFactory::STORAGE_IN_MEMORY, storage_used),
         scheduler_to_use_(scheduler_to_use),
         session_context_(session_context) {}
-  virtual ~ComponentsFactory() {}
+  ~ComponentsFactory() override {}
 
-  virtual scoped_ptr<SyncScheduler> BuildScheduler(
+  scoped_ptr<SyncScheduler> BuildScheduler(
       const std::string& name,
       sessions::SyncSessionContext* context,
-      CancelationSignal* stop_handle) OVERRIDE {
+      CancelationSignal* stop_handle) override {
     *session_context_ = context;
     return scheduler_to_use_.Pass();
   }
@@ -2424,7 +2419,7 @@ class ComponentsFactory : public TestInternalComponentsFactory {
 class SyncManagerTestWithMockScheduler : public SyncManagerTest {
  public:
   SyncManagerTestWithMockScheduler() : scheduler_(NULL) {}
-  virtual InternalComponentsFactory* GetFactory() OVERRIDE {
+  InternalComponentsFactory* GetFactory() override {
     scheduler_ = new MockSyncScheduler();
     return new ComponentsFactory(GetSwitches(), scheduler_, &session_context_,
                                  &storage_used_);
@@ -2811,15 +2806,14 @@ TEST_F(SyncManagerTest, PurgeUnappliedTypes) {
 // ChangeProcessor.
 class SyncManagerChangeProcessingTest : public SyncManagerTest {
  public:
-  virtual void OnChangesApplied(
-      ModelType model_type,
-      int64 model_version,
-      const BaseTransaction* trans,
-      const ImmutableChangeRecordList& changes) OVERRIDE {
+  void OnChangesApplied(ModelType model_type,
+                        int64 model_version,
+                        const BaseTransaction* trans,
+                        const ImmutableChangeRecordList& changes) override {
     last_changes_ = changes;
   }
 
-  virtual void OnChangesComplete(ModelType model_type) OVERRIDE {}
+  void OnChangesComplete(ModelType model_type) override {}
 
   const ImmutableChangeRecordList& GetRecentChangeList() {
     return last_changes_;
@@ -3170,7 +3164,7 @@ class SyncManagerInitInvalidStorageTest : public SyncManagerTest {
   SyncManagerInitInvalidStorageTest() {
   }
 
-  virtual InternalComponentsFactory* GetFactory() OVERRIDE {
+  InternalComponentsFactory* GetFactory() override {
     return new TestInternalComponentsFactory(
         GetSwitches(), InternalComponentsFactory::STORAGE_INVALID,
         &storage_used_);

@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/ui/views/constrained_window_views.h"
+#include "components/constrained_window/constrained_window_views.h"
 
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/ui/browser.h"
@@ -32,13 +32,13 @@ namespace {
 class TestDialog : public views::DialogDelegateView {
  public:
   TestDialog() { SetFocusable(true); }
-  virtual ~TestDialog() {}
+  ~TestDialog() override {}
 
-  virtual views::View* GetInitiallyFocusedView() OVERRIDE { return this; }
+  views::View* GetInitiallyFocusedView() override { return this; }
   // Don't delete the delegate yet. Keep it around for inspection later.
-  virtual void DeleteDelegate() OVERRIDE {}
+  void DeleteDelegate() override {}
 
-  virtual ui::ModalType GetModalType() const OVERRIDE {
+  ui::ModalType GetModalType() const override {
 #if defined(USE_ASH)
     return ui::MODAL_TYPE_CHILD;
 #else

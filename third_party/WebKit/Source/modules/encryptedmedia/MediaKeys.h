@@ -29,14 +29,15 @@
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "core/dom/ContextLifecycleObserver.h"
+#include "platform/Timer.h"
 #include "wtf/Forward.h"
 #include "wtf/text/WTFString.h"
 
 namespace blink {
 
-class ExceptionState;
+class DOMArrayBuffer;
+class DOMArrayBufferView;
 class ExecutionContext;
-class HTMLMediaElement;
 class MediaKeySession;
 class ScriptState;
 class WebContentDecryptionModule;
@@ -46,13 +47,19 @@ class WebContentDecryptionModule;
 class MediaKeys : public GarbageCollectedFinalized<MediaKeys>, public ContextLifecycleObserver, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static ScriptPromise create(ScriptState*, const String& keySystem);
+    MediaKeys(ExecutionContext*, const String& keySystem, PassOwnPtr<blink::WebContentDecryptionModule>);
     virtual ~MediaKeys();
 
+    // FIXME: This should be removed after crbug.com/425186 is fully
+    // implemented.
     const String& keySystem() const { return m_keySystem; }
 
     MediaKeySession* createSession(ScriptState*, const String& sessionType);
 
+    ScriptPromise setServerCertificate(ScriptState*, DOMArrayBuffer* serverCertificate);
+    ScriptPromise setServerCertificate(ScriptState*, DOMArrayBufferView* serverCertificate);
+
+    // FIXME: Remove this method since it's not in the spec anymore.
     static bool isTypeSupported(const String& keySystem, const String& contentType);
 
     blink::WebContentDecryptionModule* contentDecryptionModule();
@@ -60,14 +67,20 @@ public:
     void trace(Visitor*);
 
     // ContextLifecycleObserver
-    virtual void contextDestroyed() OVERRIDE;
+    virtual void contextDestroyed() override;
 
 private:
-    friend class MediaKeysInitializer;
-    MediaKeys(ExecutionContext*, const String& keySystem, PassOwnPtr<blink::WebContentDecryptionModule>);
+    class PendingAction;
+
+    ScriptPromise setServerCertificateInternal(ScriptState*, PassRefPtr<DOMArrayBuffer> initData);
+
+    void timerFired(Timer<MediaKeys>*);
 
     const String m_keySystem;
     OwnPtr<blink::WebContentDecryptionModule> m_cdm;
+
+    HeapDeque<Member<PendingAction> > m_pendingActions;
+    Timer<MediaKeys> m_timer;
 };
 
 } // namespace blink

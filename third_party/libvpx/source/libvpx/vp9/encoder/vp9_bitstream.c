@@ -120,16 +120,28 @@ static void update_switchable_interp_probs(VP9_COMMON *cm, vp9_writer *w) {
 }
 
 static void pack_mb_tokens(vp9_writer *w,
-                           TOKENEXTRA **tp, const TOKENEXTRA *const stop) {
+                           TOKENEXTRA **tp, const TOKENEXTRA *const stop,
+                           vpx_bit_depth_t bit_depth) {
   TOKENEXTRA *p = *tp;
 
   while (p < stop && p->token != EOSB_TOKEN) {
     const int t = p->token;
     const struct vp9_token *const a = &vp9_coef_encodings[t];
-    const vp9_extra_bit *const b = &vp9_extra_bits[t];
     int i = 0;
     int v = a->value;
     int n = a->len;
+#if CONFIG_VP9_HIGHBITDEPTH
+    const vp9_extra_bit *b;
+    if (bit_depth == VPX_BITS_12)
+      b = &vp9_extra_bits_high12[t];
+    else if (bit_depth == VPX_BITS_10)
+      b = &vp9_extra_bits_high10[t];
+    else
+      b = &vp9_extra_bits[t];
+#else
+    const vp9_extra_bit *const b = &vp9_extra_bits[t];
+    (void) bit_depth;
+#endif  // CONFIG_VP9_HIGHBITDEPTH
 
     /* skip one or two nodes */
     if (p->skip_eob_node) {
@@ -387,7 +399,7 @@ static void write_modes_b(VP9_COMP *cpi, const TileInfo *const tile,
   }
 
   assert(*tok < tok_end);
-  pack_mb_tokens(w, tok, tok_end);
+  pack_mb_tokens(w, tok, tok_end, cm->bit_depth);
 }
 
 static void write_partition(const VP9_COMMON *const cm,
@@ -419,7 +431,7 @@ static void write_modes_sb(VP9_COMP *cpi,
   const VP9_COMMON *const cm = &cpi->common;
   MACROBLOCKD *const xd = &cpi->mb.e_mbd;
 
-  const int bsl = b_width_log2(bsize);
+  const int bsl = b_width_log2_lookup[bsize];
   const int bs = (1 << bsl) / 4;
   PARTITION_TYPE partition;
   BLOCK_SIZE subsize;
@@ -923,26 +935,27 @@ static size_t encode_tiles(VP9_COMP *cpi, uint8_t *data_ptr) {
   size_t total_size = 0;
   const int tile_cols = 1 << cm->log2_tile_cols;
   const int tile_rows = 1 << cm->log2_tile_rows;
+  TileInfo tile[4][1 << 6];
+  TOKENEXTRA *pre_tok = cpi->tok;
+  int tile_tok = 0;
 
   vpx_memset(cm->above_seg_context, 0, sizeof(*cm->above_seg_context) *
              mi_cols_aligned_to_sb(cm->mi_cols));
 
-  tok[0][0] = cpi->tok;
-  for (tile_row = 0; tile_row < tile_rows; tile_row++) {
-    if (tile_row)
-      tok[tile_row][0] = tok[tile_row - 1][tile_cols - 1] +
-                         cpi->tok_count[tile_row - 1][tile_cols - 1];
+  for (tile_row = 0; tile_row < tile_rows; ++tile_row) {
+    for (tile_col = 0; tile_col < tile_cols; ++tile_col) {
+      vp9_tile_init(&tile[tile_row][tile_col], cm, tile_row, tile_col);
 
-    for (tile_col = 1; tile_col < tile_cols; tile_col++)
-      tok[tile_row][tile_col] = tok[tile_row][tile_col - 1] +
-                                cpi->tok_count[tile_row][tile_col - 1];
+      tok[tile_row][tile_col] = pre_tok + tile_tok;
+      pre_tok = tok[tile_row][tile_col];
+      tile_tok = allocated_tokens(tile[tile_row][tile_col]);
+    }
   }
 
   for (tile_row = 0; tile_row < tile_rows; tile_row++) {
     for (tile_col = 0; tile_col < tile_cols; tile_col++) {
-      TileInfo tile;
+      const TileInfo * const ptile = &tile[tile_row][tile_col];
 
-      vp9_tile_init(&tile, cm, tile_row, tile_col);
       tok_end = tok[tile_row][tile_col] + cpi->tok_count[tile_row][tile_col];
 
       if (tile_col < tile_cols - 1 || tile_row < tile_rows - 1)
@@ -950,7 +963,7 @@ static size_t encode_tiles(VP9_COMP *cpi, uint8_t *data_ptr) {
       else
         vp9_start_encode(&residual_bc, data_ptr + total_size);
 
-      write_modes(cpi, &tile, &residual_bc, &tok[tile_row][tile_col], tok_end);
+      write_modes(cpi, ptile, &residual_bc, &tok[tile_row][tile_col], tok_end);
       assert(tok[tile_row][tile_col] == tok_end);
       vp9_stop_encode(&residual_bc);
       if (tile_col < tile_cols - 1 || tile_row < tile_rows - 1) {
@@ -1001,7 +1014,11 @@ static void write_frame_size_with_refs(VP9_COMP *cpi,
         ((cpi->svc.number_temporal_layers > 1 &&
          cpi->oxcf.rc_mode == VPX_CBR) ||
         (cpi->svc.number_spatial_layers > 1 &&
-         cpi->svc.layer_context[cpi->svc.spatial_layer_id].is_key_frame))) {
+         cpi->svc.layer_context[cpi->svc.spatial_layer_id].is_key_frame) ||
+        (is_two_pass_svc(cpi) &&
+         cpi->svc.encode_empty_frame_state == ENCODING &&
+         cpi->svc.layer_context[0].frames_from_key_frame <
+         cpi->svc.number_temporal_layers + 1))) {
       found = 0;
     }
     vp9_wb_write_bit(wb, found);
@@ -1093,8 +1110,7 @@ static void write_uncompressed_header(VP9_COMP *cpi,
     // will change to show_frame flag to 0, then add an one byte frame with
     // show_existing_frame flag which tells the decoder which frame we want to
     // show.
-    if (!cm->show_frame ||
-        (is_two_pass_svc(cpi) && cm->error_resilient_mode == 0))
+    if (!cm->show_frame)
       vp9_wb_write_bit(wb, cm->intra_only);
 
     if (!cm->error_resilient_mode)

@@ -5,7 +5,6 @@
 #include "chrome/browser/ui/ash/chrome_shell_delegate.h"
 
 #include "ash/content_support/gpu_support_impl.h"
-#include "ash/magnifier/magnifier_constants.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
@@ -50,9 +49,8 @@ bool ChromeShellDelegate::IsMultiProfilesEnabled() const {
   // simultaneous users to allow this feature.
   if (!user_manager::UserManager::IsInitialized())
     return false;
-  size_t admitted_users_to_be_added = user_manager::UserManager::Get()
-                                          ->GetUsersAdmittedForMultiProfile()
-                                          .size();
+  size_t admitted_users_to_be_added =
+      user_manager::UserManager::Get()->GetUsersAllowedForMultiProfile().size();
   size_t logged_in_users =
       user_manager::UserManager::Get()->GetLoggedInUsers().size();
   if (!logged_in_users) {
@@ -102,9 +100,13 @@ content::BrowserContext* ChromeShellDelegate::GetActiveBrowserContext() {
 }
 
 app_list::AppListViewDelegate* ChromeShellDelegate::GetAppListViewDelegate() {
+#if defined(USE_ATHENA)
+  return NULL;
+#else
   DCHECK(ash::Shell::HasInstance());
   return AppListServiceAsh::GetInstance()->GetViewDelegate(
       Profile::FromBrowserContext(GetActiveBrowserContext()));
+#endif
 }
 
 ash::ShelfDelegate* ChromeShellDelegate::CreateShelfDelegate(

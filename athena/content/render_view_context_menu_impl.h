@@ -7,12 +7,16 @@
 
 #include "components/renderer_context_menu/render_view_context_menu_base.h"
 
-namespace views {
-class Widget;
+namespace aura {
+class Window;
 }
 
 namespace gfx {
 class Point;
+}
+
+namespace views {
+class Widget;
 }
 
 namespace athena {
@@ -21,31 +25,36 @@ class RenderViewContextMenuImpl : public RenderViewContextMenuBase {
  public:
   RenderViewContextMenuImpl(content::RenderFrameHost* render_frame_host,
                             const content::ContextMenuParams& params);
-  virtual ~RenderViewContextMenuImpl();
+  ~RenderViewContextMenuImpl() override;
 
   void RunMenuAt(views::Widget* parent,
                  const gfx::Point& point,
                  ui::MenuSourceType type);
 
+  // RenderViewContextMenuBase:
+  void Show() override;
+
  private:
   // RenderViewContextMenuBase:
-  virtual void InitMenu() OVERRIDE;
-  virtual void RecordShownItem(int id) OVERRIDE;
-  virtual void RecordUsedItem(int id) OVERRIDE;
+  void InitMenu() override;
+  void RecordShownItem(int id) override;
+  void RecordUsedItem(int id) override;
 #if defined(ENABLE_PLUGINS)
-  virtual void HandleAuthorizeAllPlugins() OVERRIDE;
+  void HandleAuthorizeAllPlugins() override;
 #endif
-  virtual void NotifyMenuShown() OVERRIDE;
-  virtual void NotifyURLOpened(const GURL& url,
-                               content::WebContents* new_contents) OVERRIDE;
+  void NotifyMenuShown() override;
+  void NotifyURLOpened(const GURL& url,
+                       content::WebContents* new_contents) override;
 
   // ui::SimpleMenuModel:
-  virtual bool GetAcceleratorForCommandId(
-      int command_id,
-      ui::Accelerator* accelerator) OVERRIDE;
-  virtual bool IsCommandIdChecked(int command_id) const OVERRIDE;
-  virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE;
-  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE;
+  bool GetAcceleratorForCommandId(int command_id,
+                                  ui::Accelerator* accelerator) override;
+  bool IsCommandIdChecked(int command_id) const override;
+  bool IsCommandIdEnabled(int command_id) const override;
+  void ExecuteCommand(int command_id, int event_flags) override;
+
+  aura::Window* GetActiveNativeView();
+  views::Widget* GetTopLevelWidget();
 
   DISALLOW_COPY_AND_ASSIGN(RenderViewContextMenuImpl);
 };

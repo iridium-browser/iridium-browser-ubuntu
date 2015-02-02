@@ -72,7 +72,7 @@ class VariationsService
     virtual ~Observer() {}
   };
 
-  virtual ~VariationsService();
+  ~VariationsService() override;
 
   // Creates field trials based on Variations Seed loaded from local prefs. If
   // there is a problem loading the seed data, all trials specified by the seed
@@ -168,10 +168,10 @@ class VariationsService
       const variations::VariationsSeedSimulator::Result& result);
 
   // net::URLFetcherDelegate implementation:
-  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
+  void OnURLFetchComplete(const net::URLFetcher* source) override;
 
   // ResourceRequestAllowedNotifier::Observer implementation:
-  virtual void OnResourceRequestsAllowed() OVERRIDE;
+  void OnResourceRequestsAllowed() override;
 
   // Performs a variations seed simulation with the given |seed| and |version|
   // and logs the simulation results as histograms.

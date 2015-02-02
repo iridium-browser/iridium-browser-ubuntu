@@ -80,42 +80,42 @@ class GCMClientImpl
       public ConnectionFactory::ConnectionListener {
  public:
   explicit GCMClientImpl(scoped_ptr<GCMInternalsBuilder> internals_builder);
-  virtual ~GCMClientImpl();
+  ~GCMClientImpl() override;
 
   // GCMClient implementation.
-  virtual void Initialize(
+  void Initialize(
       const ChromeBuildInfo& chrome_build_info,
       const base::FilePath& store_path,
       const scoped_refptr<base::SequencedTaskRunner>& blocking_task_runner,
       const scoped_refptr<net::URLRequestContextGetter>&
           url_request_context_getter,
       scoped_ptr<Encryptor> encryptor,
-      GCMClient::Delegate* delegate) OVERRIDE;
-  virtual void Start() OVERRIDE;
-  virtual void Stop() OVERRIDE;
-  virtual void CheckOut() OVERRIDE;
-  virtual void Register(const std::string& app_id,
-                        const std::vector<std::string>& sender_ids) OVERRIDE;
-  virtual void Unregister(const std::string& app_id) OVERRIDE;
-  virtual void Send(const std::string& app_id,
-                    const std::string& receiver_id,
-                    const OutgoingMessage& message) OVERRIDE;
-  virtual void SetRecording(bool recording) OVERRIDE;
-  virtual void ClearActivityLogs() OVERRIDE;
-  virtual GCMStatistics GetStatistics() const OVERRIDE;
-  virtual void SetAccountsForCheckin(
-      const std::map<std::string, std::string>& account_tokens) OVERRIDE;
-  virtual void UpdateAccountMapping(
-      const AccountMapping& account_mapping) OVERRIDE;
-  virtual void RemoveAccountMapping(const std::string& account_id) OVERRIDE;
+      GCMClient::Delegate* delegate) override;
+  void Start() override;
+  void Stop() override;
+  void CheckOut() override;
+  void Register(const std::string& app_id,
+                const std::vector<std::string>& sender_ids) override;
+  void Unregister(const std::string& app_id) override;
+  void Send(const std::string& app_id,
+            const std::string& receiver_id,
+            const OutgoingMessage& message) override;
+  void SetRecording(bool recording) override;
+  void ClearActivityLogs() override;
+  GCMStatistics GetStatistics() const override;
+  void SetAccountTokens(
+      const std::vector<AccountTokenInfo>& account_tokens) override;
+  void UpdateAccountMapping(const AccountMapping& account_mapping) override;
+  void RemoveAccountMapping(const std::string& account_id) override;
+  void SetLastTokenFetchTime(const base::Time& time) override;
 
   // GCMStatsRecorder::Delegate implemenation.
-  virtual void OnActivityRecorded() OVERRIDE;
+  void OnActivityRecorded() override;
 
   // ConnectionFactory::ConnectionListener implementation.
-  virtual void OnConnected(const GURL& current_server,
-                           const net::IPEndPoint& ip_endpoint) OVERRIDE;
-  virtual void OnDisconnected() OVERRIDE;
+  void OnConnected(const GURL& current_server,
+                   const net::IPEndPoint& ip_endpoint) override;
+  void OnDisconnected() override;
 
  private:
   // State representation of the GCMClient.
@@ -198,7 +198,8 @@ class GCMClientImpl
   void ResetState();
   // Sets state to ready. This will initiate the MCS login and notify the
   // delegates.
-  void OnReady(const std::vector<AccountMapping>& account_mappings);
+  void OnReady(const std::vector<AccountMapping>& account_mappings,
+               const base::Time& last_token_fetch_time);
 
   // Starts a first time device checkin.
   void StartCheckin();
@@ -228,6 +229,9 @@ class GCMClientImpl
   // Callback for all store operations that do not try to recover, if write in
   // |gcm_store_| fails.
   void DefaultStoreCallback(bool success);
+
+  // Callback for store operation where result does not matter.
+  void IgnoreWriteResultCallback(bool success);
 
   // Completes the registration request.
   void OnRegisterCompleted(const std::string& app_id,

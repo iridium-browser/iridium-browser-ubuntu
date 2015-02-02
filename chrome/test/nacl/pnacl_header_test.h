@@ -29,14 +29,14 @@ class TestDispatcherHostDelegate : public ResourceDispatcherHostDelegate {
   explicit TestDispatcherHostDelegate()
       : ResourceDispatcherHostDelegate(), found_pnacl_header_(false) {}
 
-  virtual ~TestDispatcherHostDelegate() {}
+  ~TestDispatcherHostDelegate() override {}
 
-  virtual void RequestBeginning(
+  void RequestBeginning(
       net::URLRequest* request,
       content::ResourceContext* resource_context,
       content::AppCacheService* appcache_service,
       content::ResourceType resource_type,
-      ScopedVector<content::ResourceThrottle>* throttles) OVERRIDE;
+      ScopedVector<content::ResourceThrottle>* throttles) override;
 
   bool found_pnacl_header() const { return found_pnacl_header_; }
 
@@ -49,7 +49,7 @@ class TestDispatcherHostDelegate : public ResourceDispatcherHostDelegate {
 class PnaclHeaderTest : public InProcessBrowserTest {
  public:
   PnaclHeaderTest();
-  virtual ~PnaclHeaderTest();
+  ~PnaclHeaderTest() override;
 
   // Run a simple test that checks that the NaCl plugin sends the right
   // headers when doing |expected_noncors| same origin pexe load requests

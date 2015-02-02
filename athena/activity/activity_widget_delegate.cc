@@ -18,6 +18,18 @@ ActivityWidgetDelegate::ActivityWidgetDelegate(ActivityViewModel* view_model)
 ActivityWidgetDelegate::~ActivityWidgetDelegate() {
 }
 
+bool ActivityWidgetDelegate::CanResize() const {
+  return true;
+}
+
+bool ActivityWidgetDelegate::CanMaximize() const {
+  return true;
+}
+
+bool ActivityWidgetDelegate::CanMinimize() const {
+  return true;
+}
+
 base::string16 ActivityWidgetDelegate::GetWindowTitle() const {
   return view_model_->GetTitle();
 }
@@ -36,11 +48,6 @@ const views::Widget* ActivityWidgetDelegate::GetWidget() const {
 
 views::View* ActivityWidgetDelegate::GetContentsView() {
   return view_model_->GetContentsView();
-}
-
-views::ClientView* ActivityWidgetDelegate::CreateClientView(
-    views::Widget* widget) {
-  return new views::ClientView(widget, view_model_->GetContentsView());
 }
 
 views::NonClientFrameView* ActivityWidgetDelegate::CreateNonClientFrameView(

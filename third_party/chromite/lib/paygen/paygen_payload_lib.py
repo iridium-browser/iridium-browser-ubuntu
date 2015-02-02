@@ -9,6 +9,7 @@ from __future__ import print_function
 import base64
 import datetime
 import filecmp
+import json
 import logging
 import os
 import shutil
@@ -26,15 +27,8 @@ from chromite.lib.paygen import signer_payloads_client
 from chromite.lib.paygen import urilib
 from chromite.lib.paygen import utils
 
-# If we are a bootstrap environment, this import will fail.
-# We quietly ignore the failure, but leave bombs around that will
-# explode if people try to really use this library.
-try:
-  from dev.host.lib import update_payload
-except ImportError:
-  update_payload = None
-  logging.exception('update_payload import failed. Normal during bootstrap.')
 
+DESCRIPTION_FILE_VERSION = 1
 
 class Error(Exception):
   """Base class for payload generation errors."""
@@ -53,7 +47,7 @@ class _PaygenPayload(object):
 
   # GeneratorUri uses these to ensure we don't use generators that are too
   # old to be supported.
-  MINIMUM_GENERATOR_VERSION = '6270.0.0'
+  MINIMUM_GENERATOR_VERSION = '6303.0.0'
   MINIMUM_GENERATOR_URI = (
       'gs://chromeos-releases/canary-channel/x86-mario/%s/au-generator.zip' %
       MINIMUM_GENERATOR_VERSION)
@@ -105,13 +99,15 @@ class _PaygenPayload(object):
 
     self.payload_file = os.path.join(work_dir, 'delta.bin')
     self.delta_log_file = os.path.join(work_dir, 'delta.log')
+    self.description_file = os.path.join(work_dir, 'delta.json')
 
     self.signer = None
 
-    if self._verify and update_payload is None:
-      # TODO(dgarrett): Change to a hard failure after crbug.com/415027 fixed.
-      logging.error('Verification disabled because update_payload unavailable.')
-      self._verify = False
+    # If we are a bootstrap environment, this import will fail, so don't
+    # perform it until we need it.
+    from dev.host.lib import update_payload
+
+    self._update_payload = update_payload
 
     if sign:
       self.signed_payload_file = self.payload_file + '.signed'
@@ -129,6 +125,10 @@ class _PaygenPayload(object):
   def _DeltaLogsUri(self, uri):
     """Given a payload uri, find the uri for the delta generator logs."""
     return uri + '.log'
+
+  def _JsonUri(self, uri):
+    """Given a payload uri, find the uri for the json payload description."""
+    return uri + '.json'
 
   def _GeneratorUri(self):
     """Find the URI for the au-generator.zip to use to generate this payload.
@@ -469,6 +469,48 @@ class _PaygenPayload(object):
     with open(self.metadata_signature_file, 'w+') as f:
       f.write(encoded_signature)
 
+  def _StorePayloadJson(self, metadata_signatures):
+    """Generate the payload description json file.
+
+    The payload description contains a dictionary with the following
+    fields populated.
+
+    {
+      "version": 1,
+      "sha1_hex": <payload sha1 hash as a hex encoded string>,
+      "sha256_hex": <payload sha256 hash as a hex encoded string>,
+      "metadata_signature": <metadata signature as base64 encoded string or nil>
+    }
+
+    Args:
+      metadata_signatures: A list of signatures in binary string format.
+    """
+    # Locate everything we put in the json.
+    sha1_hex, sha256_hex = filelib.ShaSums(self.payload_file)
+
+    metadata_signature = None
+    if metadata_signatures:
+      if len(metadata_signatures) != 1:
+        self._GenerateSignerResultsError(
+            'Received %d metadata signatures, only one supported.',
+            len(metadata_signatures))
+      metadata_signature = base64.b64encode(metadata_signatures[0])
+
+    # Bundle it up in a map matching the Json format.
+    # Increment DESCRIPTION_FILE_VERSION, if changing this map.
+    payload_map = {
+      'version': DESCRIPTION_FILE_VERSION,
+      'sha1_hex': sha1_hex,
+      'sha256_hex': sha256_hex,
+      'metadata_signature': metadata_signature,
+    }
+
+    # Convert to Json.
+    payload_json = json.dumps(payload_map, sort_keys=True)
+
+    # Write out the results.
+    osutils.WriteFile(self.description_file, payload_json)
+
   def _StoreDeltaLog(self, delta_log):
     """Store delta log related to the payload.
 
@@ -482,22 +524,26 @@ class _PaygenPayload(object):
       f.write(delta_log)
 
   def _SignPayload(self):
-    """Wrap all the steps for signing an existing payload."""
+    """Wrap all the steps for signing an existing payload.
+
+    Returns:
+      List of payload signatures, List of metadata signatures.
+      """
     # Create hashes to sign.
     payload_hash = self._GenPayloadHash()
     metadata_hash = self._GenMetadataHash()
 
     # Sign them.
-    signatures = self._SignHashes([payload_hash, metadata_hash])
-
-    # Split them back up. A list of signatures per hash.
-    payload_signatures, metadata_signatures = signatures
+    payload_signatures, metadata_signatures = self._SignHashes(
+        [payload_hash, metadata_hash])
 
     # Insert payload signature(s).
     self._InsertPayloadSignatures(payload_signatures)
 
     # Store Metadata signature(s).
     self._StoreMetadataSignatures(metadata_signatures)
+
+    return (payload_signatures, metadata_signatures)
 
   def _Create(self):
     """Create a given payload, if it doesn't already exist."""
@@ -519,8 +565,13 @@ class _PaygenPayload(object):
     self._GenerateUnsignedPayload()
 
     # Sign the payload, if needed.
+    metadata_signatures = None
     if self.signer:
-      self._SignPayload()
+      _, metadata_signatures = self._SignPayload()
+
+    # Store hash and signatures json.
+    self._StorePayloadJson(metadata_signatures)
+
 
   def _CheckPayloadIntegrity(self, payload, is_delta, metadata_sig_file_name):
     """Checks the integrity of a generated payload.
@@ -547,7 +598,7 @@ class _PaygenPayload(object):
                       rootfs_part_size=self._DEFAULT_ROOTFS_PART_SIZE,
                       kernel_part_size=self._DEFAULT_KERNEL_PART_SIZE,
                       disabled_tests=['move-same-src-dst-block'])
-      except update_payload.PayloadError as e:
+      except self._update_payload.PayloadError as e:
         raise PayloadVerificationError(
             'Payload integrity check failed: %s' % e)
 
@@ -601,7 +652,7 @@ class _PaygenPayload(object):
     bspatch_path = os.path.join(self.generator_dir, 'bspatch')
     try:
       payload.Apply(bspatch_path=bspatch_path, **part_files)
-    except update_payload.PayloadError as e:
+    except self._update_payload.PayloadError as e:
       raise PayloadVerificationError('Payload failed to apply: %s' % e)
 
     # Prior to comparing, remove unused space past the filesystem boundary
@@ -631,7 +682,7 @@ class _PaygenPayload(object):
       metadata_sig_file_name = None
 
     with open(payload_file_name) as payload_file:
-      payload = update_payload.Payload(payload_file)
+      payload = self._update_payload.Payload(payload_file)
       is_delta = bool(self.payload.src_image)
       try:
         payload.Init()
@@ -642,7 +693,7 @@ class _PaygenPayload(object):
         # Second, try to apply the payload and check the result.
         self._ApplyPayload(payload, is_delta)
 
-      except update_payload.PayloadError as e:
+      except self._update_payload.PayloadError as e:
         raise PayloadVerificationError('Payload failed to verify: %s' % e)
 
   def _UploadResults(self):
@@ -658,8 +709,9 @@ class _PaygenPayload(object):
     else:
       urilib.Copy(self.payload_file, self.payload.uri)
 
-    # Upload delta generation log
+    # Upload payload related artifacts.
     urilib.Copy(self.delta_log_file, self._DeltaLogsUri(self.payload.uri))
+    urilib.Copy(self.description_file, self._JsonUri(self.payload.uri))
 
   def Run(self):
     """Create, verify and upload the results."""

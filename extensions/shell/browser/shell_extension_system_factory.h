@@ -14,8 +14,8 @@ namespace extensions {
 class ShellExtensionSystemFactory : public ExtensionSystemProvider {
  public:
   // ExtensionSystemProvider implementation:
-  virtual ExtensionSystem* GetForBrowserContext(
-      content::BrowserContext* context) OVERRIDE;
+  ExtensionSystem* GetForBrowserContext(
+      content::BrowserContext* context) override;
 
   static ShellExtensionSystemFactory* GetInstance();
 
@@ -23,14 +23,14 @@ class ShellExtensionSystemFactory : public ExtensionSystemProvider {
   friend struct DefaultSingletonTraits<ShellExtensionSystemFactory>;
 
   ShellExtensionSystemFactory();
-  virtual ~ShellExtensionSystemFactory();
+  ~ShellExtensionSystemFactory() override;
 
   // BrowserContextKeyedServiceFactory implementation:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* context) const OVERRIDE;
-  virtual content::BrowserContext* GetBrowserContextToUse(
-      content::BrowserContext* context) const OVERRIDE;
-  virtual bool ServiceIsCreatedWithBrowserContext() const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* context) const override;
+  content::BrowserContext* GetBrowserContextToUse(
+      content::BrowserContext* context) const override;
+  bool ServiceIsCreatedWithBrowserContext() const override;
 
   DISALLOW_COPY_AND_ASSIGN(ShellExtensionSystemFactory);
 };

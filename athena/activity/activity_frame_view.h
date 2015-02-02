@@ -5,6 +5,7 @@
 #ifndef ATHENA_ACTIVITY_ACTIVITY_FRAME_VIEW_H_
 #define ATHENA_ACTIVITY_ACTIVITY_FRAME_VIEW_H_
 
+#include "athena/activity/public/activity_view.h"
 #include "athena/wm/public/window_manager_observer.h"
 #include "ui/gfx/insets.h"
 #include "ui/views/window/non_client_view.h"
@@ -21,38 +22,43 @@ class ActivityViewModel;
 
 // A NonClientFrameView used for activity.
 class ActivityFrameView : public views::NonClientFrameView,
-                          public WindowManagerObserver {
+                          public WindowManagerObserver,
+                          public ActivityView {
  public:
   // The frame class name.
   static const char kViewClassName[];
 
   ActivityFrameView(views::Widget* frame, ActivityViewModel* view_model);
-  virtual ~ActivityFrameView();
+  ~ActivityFrameView() override;
 
   // views::NonClientFrameView:
-  virtual gfx::Rect GetBoundsForClientView() const OVERRIDE;
-  virtual gfx::Rect GetWindowBoundsForClientBounds(
-      const gfx::Rect& client_bounds) const OVERRIDE;
-  virtual int NonClientHitTest(const gfx::Point& point) OVERRIDE;
-  virtual void GetWindowMask(const gfx::Size& size,
-                             gfx::Path* window_mask) OVERRIDE;
-  virtual void ResetWindowControls() OVERRIDE;
-  virtual void UpdateWindowIcon() OVERRIDE;
-  virtual void UpdateWindowTitle() OVERRIDE;
-  virtual void SizeConstraintsChanged() OVERRIDE;
+  gfx::Rect GetBoundsForClientView() const override;
+  gfx::Rect GetWindowBoundsForClientBounds(
+      const gfx::Rect& client_bounds) const override;
+  int NonClientHitTest(const gfx::Point& point) override;
+  void GetWindowMask(const gfx::Size& size, gfx::Path* window_mask) override;
+  void ResetWindowControls() override;
+  void UpdateWindowIcon() override;
+  void UpdateWindowTitle() override;
+  void SizeConstraintsChanged() override;
 
   // views::View:
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
-  virtual const char* GetClassName() const OVERRIDE;
-  virtual void Layout() OVERRIDE;
-  virtual void OnPaintBackground(gfx::Canvas* canvas) OVERRIDE;
+  gfx::Size GetPreferredSize() const override;
+  const char* GetClassName() const override;
+  void Layout() override;
+  void OnPaintBackground(gfx::Canvas* canvas) override;
 
  private:
+  // ActivityView:
+  void UpdateTitle() override;
+  void UpdateIcon() override;
+  void UpdateRepresentativeColor() override;
+
   // WindowManagerObserver:
-  virtual void OnOverviewModeEnter() OVERRIDE;
-  virtual void OnOverviewModeExit() OVERRIDE;
-  virtual void OnSplitViewModeEnter() OVERRIDE;
-  virtual void OnSplitViewModeExit() OVERRIDE;
+  void OnOverviewModeEnter() override;
+  void OnOverviewModeExit() override;
+  void OnSplitViewModeEnter() override;
+  void OnSplitViewModeExit() override;
 
   gfx::Insets NonClientBorderInsets() const;
   int NonClientBorderThickness() const;

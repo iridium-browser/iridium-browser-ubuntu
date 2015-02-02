@@ -39,6 +39,7 @@ class DocWriterUnittest(writer_unittest_common.WriterUnittestCommon):
         'os_name': 'Chrome OS',
         'win_reg_mandatory_key_name': 'MockKey',
         'win_reg_recommended_key_name': 'MockKeyRec',
+        'build': 'test_product',
       })
     self.writer.messages = {
       'doc_back_to_top': {'text': '_test_back_to_top'},
@@ -86,6 +87,31 @@ class DocWriterUnittest(writer_unittest_common.WriterUnittestCommon):
     self.assertEquals(
         self.writer._main_div.toxml(),
         '<div>'
+          '<div>'
+            '<a name="top"/><br/>_test_intro<br/><br/><br/>'
+            '<table style="style_table;">'
+              '<thead><tr style="style_tr;">'
+                '<td style="style_td;style_td.left;style_thead td;">'
+                  '_test_name_column_title'
+                '</td>'
+                '<td style="style_td;style_td.right;style_thead td;">'
+                  '_test_description_column_title'
+                '</td>'
+              '</tr></thead>'
+              '<tbody/>'
+            '</table>'
+          '</div>'
+          '<div/>'
+        '</div>')
+
+  def testVersionAnnotation(self):
+    # Test if DocWriter creates the skeleton of the document correctly.
+    self.writer.config['version'] = '39.0.0.0'
+    self.writer.BeginTemplate()
+    self.assertEquals(
+        self.writer._main_div.toxml(),
+        '<div>'
+          '<!--test_product version: 39.0.0.0-->'
           '<div>'
             '<a name="top"/><br/>_test_intro<br/><br/><br/>'
             '<table style="style_table;">'

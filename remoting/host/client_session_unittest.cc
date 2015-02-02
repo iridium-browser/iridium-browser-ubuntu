@@ -122,8 +122,8 @@ class ClientSessionTest : public testing::Test {
  public:
   ClientSessionTest() : client_jid_("user@domain/rest-of-jid") {}
 
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
   // Creates the client session.
   void CreateClientSession();
@@ -254,7 +254,7 @@ void ClientSessionTest::CreateClientSession() {
       task_runner_, // Encode thread.
       task_runner_, // Network thread.
       task_runner_, // UI thread.
-      connection.PassAs<protocol::ConnectionToClient>(),
+      connection.Pass(),
       desktop_environment_factory_.get(),
       base::TimeDelta(),
       NULL,

@@ -39,7 +39,7 @@ class WebUITestHandler;
 // and the lone test within this class.
 class WebUIBrowserTest : public JavaScriptBrowserTest {
  public:
-  virtual ~WebUIBrowserTest();
+  ~WebUIBrowserTest() override;
 
   // Runs a javascript function in the context of all libraries.
   // Note that calls to functions in test_api.js are not supported.
@@ -112,8 +112,8 @@ class WebUIBrowserTest : public JavaScriptBrowserTest {
   void set_preload_test_name(const std::string& preload_test_name);
 
   // Set up & tear down console error catching.
-  virtual void SetUpOnMainThread() OVERRIDE;
-  virtual void TearDownOnMainThread() OVERRIDE;
+  void SetUpOnMainThread() override;
+  void TearDownOnMainThread() override;
 
   // Set a WebUI instance to run tests on.
   void SetWebUIInstance(content::WebUI* web_ui);

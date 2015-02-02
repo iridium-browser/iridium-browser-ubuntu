@@ -16,7 +16,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/profile_sync_service_mock.h"
-#include "chrome/common/pref_names.h"
 #include "components/sync_driver/device_info.h"
 #include "extensions/common/extension.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -30,10 +29,10 @@ namespace extensions {
 
 class MockDeviceInfoTracker : public DeviceInfoTracker {
  public:
-  virtual ~MockDeviceInfoTracker() {}
+  ~MockDeviceInfoTracker() override {}
 
-  virtual scoped_ptr<DeviceInfo> GetDeviceInfo(
-      const std::string& client_id) const OVERRIDE {
+  scoped_ptr<DeviceInfo> GetDeviceInfo(
+      const std::string& client_id) const override {
     NOTREACHED();
     return scoped_ptr<DeviceInfo>();
   }
@@ -47,7 +46,7 @@ class MockDeviceInfoTracker : public DeviceInfoTracker {
                           device_info->signin_scoped_device_id());
   }
 
-  virtual ScopedVector<DeviceInfo> GetAllDeviceInfo() const OVERRIDE {
+  ScopedVector<DeviceInfo> GetAllDeviceInfo() const override {
     ScopedVector<DeviceInfo> list;
 
     for (std::vector<const DeviceInfo*>::const_iterator iter = devices_.begin();
@@ -59,9 +58,9 @@ class MockDeviceInfoTracker : public DeviceInfoTracker {
     return list.Pass();
   }
 
-  virtual void AddObserver(Observer* observer) OVERRIDE { NOTREACHED(); }
+  void AddObserver(Observer* observer) override { NOTREACHED(); }
 
-  virtual void RemoveObserver(Observer* observer) OVERRIDE { NOTREACHED(); }
+  void RemoveObserver(Observer* observer) override { NOTREACHED(); }
 
   void Add(const DeviceInfo* device) { devices_.push_back(device); }
 
@@ -150,7 +149,7 @@ KeyedService* CreateProfileSyncServiceMock(content::BrowserContext* profile) {
 
 class ExtensionSignedInDevicesTest : public ExtensionApiUnittest {
  public:
-  virtual void SetUp() {
+  void SetUp() override {
     ExtensionApiUnittest::SetUp();
 
     ProfileSyncServiceFactory::GetInstance()->SetTestingFactory(

@@ -18,7 +18,7 @@ namespace extensions {
 class BackgroundInfo : public Extension::ManifestData {
  public:
   BackgroundInfo();
-  virtual ~BackgroundInfo();
+  ~BackgroundInfo() override;
 
   static GURL GetBackgroundURL(const Extension* extension);
   static const std::vector<std::string>& GetBackgroundScripts(
@@ -81,16 +81,16 @@ class BackgroundInfo : public Extension::ManifestData {
 class BackgroundManifestHandler : public ManifestHandler {
  public:
   BackgroundManifestHandler();
-  virtual ~BackgroundManifestHandler();
+  ~BackgroundManifestHandler() override;
 
-  virtual bool Parse(Extension* extension, base::string16* error) OVERRIDE;
-  virtual bool Validate(const Extension* extension,
-                        std::string* error,
-                        std::vector<InstallWarning>* warnings) const OVERRIDE;
-  virtual bool AlwaysParseForType(Manifest::Type type) const OVERRIDE;
+  bool Parse(Extension* extension, base::string16* error) override;
+  bool Validate(const Extension* extension,
+                std::string* error,
+                std::vector<InstallWarning>* warnings) const override;
+  bool AlwaysParseForType(Manifest::Type type) const override;
 
  private:
-  virtual const std::vector<std::string> Keys() const OVERRIDE;
+  const std::vector<std::string> Keys() const override;
 
   DISALLOW_COPY_AND_ASSIGN(BackgroundManifestHandler);
 };

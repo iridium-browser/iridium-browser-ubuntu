@@ -20,10 +20,11 @@ import zlib
 # net_utils adjusts sys.path.
 import net_utils
 
-from depot_tools import auto_stub
+import auth
 import isolated_format
 import isolateserver
 import test_utils
+from depot_tools import auto_stub
 from utils import threading_utils
 
 
@@ -34,7 +35,7 @@ class TestCase(net_utils.TestCase):
   """Mocks out url_open() calls and sys.stdout/stderr."""
   def setUp(self):
     super(TestCase, self).setUp()
-    self.mock(isolateserver.auth, 'ensure_logged_in', lambda _: None)
+    self.mock(auth, 'ensure_logged_in', lambda _: None)
     self.mock(sys, 'stdout', StringIO.StringIO())
     self.mock(sys, 'stderr', StringIO.StringIO())
 
@@ -250,21 +251,20 @@ class StorageTest(TestCase):
             [expected_push] * attempts, storage_api.push_calls)
 
   def test_upload_tree(self):
-    root = 'root'
     files = {
-      'a': {
+      '/a': {
         's': 100,
         'h': 'hash_a',
       },
-      'b': {
+      '/some/dir/b': {
         's': 200,
         'h': 'hash_b',
       },
-      'c': {
+      '/another/dir/c': {
         's': 300,
         'h': 'hash_c',
       },
-      'a_copy': {
+      '/a_copy': {
         's': 100,
         'h': 'hash_a',
       },
@@ -277,11 +277,9 @@ class StorageTest(TestCase):
     read_calls = []
 
     def mocked_file_read(filepath, chunk_size=0, offset=0):
-      self.assertEqual(root, os.path.dirname(filepath))
-      filename = os.path.basename(filepath)
-      self.assertIn(filename, files_data)
-      read_calls.append(filename)
-      return files_data[filename]
+      self.assertIn(filepath, files_data)
+      read_calls.append(filepath)
+      return files_data[filepath]
     self.mock(isolateserver, 'file_read', mocked_file_read)
 
     storage_api = MockedStorageApi(missing_hashes)
@@ -292,7 +290,7 @@ class StorageTest(TestCase):
       return storage
     self.mock(isolateserver, 'get_storage', mock_get_storage)
 
-    isolateserver.upload_tree('base_url', root, files, 'some-namespace')
+    isolateserver.upload_tree('base_url', files.iteritems(), 'some-namespace')
 
     # Was reading only missing files.
     self.assertEqualIgnoringOrder(
@@ -315,7 +313,7 @@ class StorageTest(TestCase):
       # If there are multiple files that map to same hash, upload_tree chooses
       # a first one.
       filename = filenames[0]
-      self.assertEqual(os.path.join(root, filename), pushed_item.path)
+      self.assertEqual(filename, pushed_item.path)
       self.assertEqual(files_data[filename], pushed_content)
       self.assertEqual(missing_hashes[pushed_item.digest], push_state)
 

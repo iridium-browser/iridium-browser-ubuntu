@@ -37,35 +37,26 @@ class SavePasswordInfoBarDelegate : public ConfirmInfoBarDelegate {
       scoped_ptr<password_manager::PasswordFormManager> form_to_save,
       const std::string& uma_histogram_suffix);
 
-  virtual ~SavePasswordInfoBarDelegate();
-
-  // Specifies whether additional authentication (as defined by the OS) should
-  // be required before autofilling this password.
-  void SetUseAdditionalPasswordAuthentication(
-      bool use_additional_authentication);
-
  private:
   SavePasswordInfoBarDelegate(
       scoped_ptr<password_manager::PasswordFormManager> form_to_save,
       const std::string& uma_histogram_suffix);
 
-  // Returns a save password infobar that owns |delegate|.
-  static scoped_ptr<infobars::InfoBar> CreateInfoBar(
-      scoped_ptr<SavePasswordInfoBarDelegate> delegate);
+  ~SavePasswordInfoBarDelegate() override;
 
   // InfoBarDelegate
-  virtual bool ShouldExpire(const NavigationDetails& details) const OVERRIDE;
+  bool ShouldExpire(const NavigationDetails& details) const override;
 
   // ConfirmInfoBarDelegate
-  virtual int GetIconID() const OVERRIDE;
-  virtual Type GetInfoBarType() const OVERRIDE;
-  virtual base::string16 GetMessageText() const OVERRIDE;
-  virtual base::string16 GetButtonLabel(InfoBarButton button) const OVERRIDE;
-  virtual bool Accept() OVERRIDE;
-  virtual bool Cancel() OVERRIDE;
-  virtual void InfoBarDismissed() OVERRIDE;
+  int GetIconID() const override;
+  Type GetInfoBarType() const override;
+  base::string16 GetMessageText() const override;
+  base::string16 GetButtonLabel(InfoBarButton button) const override;
+  bool Accept() override;
+  bool Cancel() override;
+  void InfoBarDismissed() override;
 
-  virtual InfoBarAutomationType GetInfoBarAutomationType() const OVERRIDE;
+  InfoBarAutomationType GetInfoBarAutomationType() const override;
 
   // The PasswordFormManager managing the form we're asking the user about,
   // and should update as per her decision.

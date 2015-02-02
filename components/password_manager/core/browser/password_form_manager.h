@@ -39,7 +39,7 @@ class PasswordFormManager : public PasswordStoreConsumer {
                       PasswordManagerDriver* driver,
                       const autofill::PasswordForm& observed_form,
                       bool ssl_valid);
-  virtual ~PasswordFormManager();
+  ~PasswordFormManager() override;
 
   // Flags describing the result of comparing two forms as performed by
   // DoesMatch. Individual flags are only relevant for HTML forms, but
@@ -113,18 +113,13 @@ class PasswordFormManager : public PasswordStoreConsumer {
   // Takes ownership of the elements in |result|.
   void OnRequestDone(const std::vector<autofill::PasswordForm*>& result);
 
-  virtual void OnGetPasswordStoreResults(
-      const std::vector<autofill::PasswordForm*>& results) OVERRIDE;
+  void OnGetPasswordStoreResults(
+      const std::vector<autofill::PasswordForm*>& results) override;
 
   // A user opted to 'never remember' passwords for this form.
   // Blacklist it so that from now on when it is seen we ignore it.
   // TODO: Make this private once we switch to the new UI.
   void PermanentlyBlacklist();
-
-  // Sets whether the password form should use additional password
-  // authentication if available before being used for autofill.
-  void SetUseAdditionalPasswordAuthentication(
-      bool use_additional_authentication);
 
   // If the user has submitted observed_form_, provisionally hold on to
   // the submitted credentials until we are told by PasswordManager whether
@@ -170,6 +165,9 @@ class PasswordFormManager : public PasswordStoreConsumer {
   const std::string& realm() const {
     return pending_credentials_.signon_realm;
   }
+
+ protected:
+  const autofill::PasswordForm& observed_form() const { return observed_form_; }
 
  private:
   friend class PasswordFormManagerTest;
@@ -255,6 +253,10 @@ class PasswordFormManager : public PasswordStoreConsumer {
   // match which had this username.
   bool UpdatePendingCredentialsIfOtherPossibleUsername(
       const base::string16& username);
+
+  // Update state to reflect that |credential| was used. This is broken out from
+  // UpdateLogin() so that PSL matches can also be properly updated.
+  void UpdateMetadataForUsage(const autofill::PasswordForm& credential);
 
   // Converts the "ActionsTaken" fields into an int so they can be logged to
   // UMA.

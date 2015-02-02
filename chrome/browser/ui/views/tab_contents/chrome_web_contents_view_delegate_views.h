@@ -12,8 +12,7 @@
 #include "content/public/browser/web_contents_view_delegate.h"
 
 class LinkDisambiguationPopup;
-class RenderViewContextMenu;
-class RenderViewContextMenuViews;
+class RenderViewContextMenuBase;
 
 namespace aura {
 class Window;
@@ -38,31 +37,30 @@ class ChromeWebContentsViewDelegateViews
  public:
   explicit ChromeWebContentsViewDelegateViews(
       content::WebContents* web_contents);
-  virtual ~ChromeWebContentsViewDelegateViews();
+  ~ChromeWebContentsViewDelegateViews() override;
 
   // Overridden from WebContentsViewDelegate:
-  virtual content::WebDragDestDelegate* GetDragDestDelegate() OVERRIDE;
-  virtual void StoreFocus() OVERRIDE;
-  virtual void RestoreFocus() OVERRIDE;
-  virtual bool Focus() OVERRIDE;
-  virtual void TakeFocus(bool reverse) OVERRIDE;
-  virtual void ShowContextMenu(
-      content::RenderFrameHost* render_frame_host,
-      const content::ContextMenuParams& params) OVERRIDE;
-  virtual void SizeChanged(const gfx::Size& size) OVERRIDE;
-  virtual void ShowDisambiguationPopup(
+  content::WebDragDestDelegate* GetDragDestDelegate() override;
+  void StoreFocus() override;
+  void RestoreFocus() override;
+  bool Focus() override;
+  void TakeFocus(bool reverse) override;
+  void ShowContextMenu(content::RenderFrameHost* render_frame_host,
+                       const content::ContextMenuParams& params) override;
+  void SizeChanged(const gfx::Size& size) override;
+  void ShowDisambiguationPopup(
       const gfx::Rect& target_rect,
       const SkBitmap& zoomed_bitmap,
       const gfx::NativeView content,
       const base::Callback<void(ui::GestureEvent*)>& gesture_cb,
-      const base::Callback<void(ui::MouseEvent*)>& mouse_cb) OVERRIDE;
-  virtual void HideDisambiguationPopup() OVERRIDE;
+      const base::Callback<void(ui::MouseEvent*)>& mouse_cb) override;
+  void HideDisambiguationPopup() override;
 
   // Overridden from ContextMenuDelegate.
-  virtual scoped_ptr<RenderViewContextMenu> BuildMenu(
+  scoped_ptr<RenderViewContextMenuBase> BuildMenu(
       content::WebContents* web_contents,
-      const content::ContextMenuParams& params) OVERRIDE;
-  virtual void ShowMenu(scoped_ptr<RenderViewContextMenu> menu) OVERRIDE;
+      const content::ContextMenuParams& params) override;
+  void ShowMenu(scoped_ptr<RenderViewContextMenuBase> menu) override;
 
  private:
   aura::Window* GetActiveNativeView();
@@ -75,7 +73,7 @@ class ChromeWebContentsViewDelegateViews
 
   // The context menu is reset every time we show it, but we keep a pointer to
   // between uses so that it won't go out of scope before we're done with it.
-  scoped_ptr<RenderViewContextMenuViews> context_menu_;
+  scoped_ptr<RenderViewContextMenuBase> context_menu_;
 
   // The chrome specific delegate that receives events from WebDragDest.
   scoped_ptr<content::WebDragDestDelegate> bookmark_handler_;

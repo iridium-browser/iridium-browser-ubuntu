@@ -21,8 +21,10 @@ const char kNoCleanup[] = "no-cleanup";
 const char kNoInstall[] = "no-install";
 const char kWebAppCrx[] = "webapp-crx";
 const char kWebAppUnpacked[] = "webapp-unpacked";
-const char kUsername[] = "username";
-const char kkPassword[] = "password";
+const char kUserName[] = "username";
+const char kUserPassword[] = "password";
+const char kAccountsFile[] = "accounts-file";
+const char kAccountType[] = "account-type";
 const char kMe2MePin[] = "me2me-pin";
 const char kRemoteHostName[] = "remote-host-name";
 const char kExtensionName[] = "extension-name";
@@ -51,18 +53,18 @@ namespace remoting {
 class RemoteDesktopBrowserTest : public extensions::PlatformAppBrowserTest {
  public:
   RemoteDesktopBrowserTest();
-  virtual ~RemoteDesktopBrowserTest();
+  ~RemoteDesktopBrowserTest() override;
 
   // InProcessBrowserTest Overrides
-  virtual void SetUp() OVERRIDE;
-  virtual void SetUpOnMainThread() OVERRIDE;
+  void SetUp() override;
+  void SetUpOnMainThread() override;
 
  protected:
   // InProcessBrowserTest Overrides
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE;
+  void SetUpInProcessBrowserTestFixture() override;
 
   // InProcessBrowserTest Overrides
-  virtual void TearDownInProcessBrowserTestFixture() OVERRIDE;
+  void TearDownInProcessBrowserTestFixture() override;
 
   // The following helpers each perform a simple task.
 
@@ -124,6 +126,9 @@ class RemoteDesktopBrowserTest : public extensions::PlatformAppBrowserTest {
   // Helper to simulate a mouse click.
   void SimulateMouseClickAt(
       int modifiers, blink::WebMouseEvent::Button button, int x, int y);
+
+  void SetUserNameAndPassword(
+      const base::FilePath &accounts_file, const std::string& account_type);
 
   // The following helpers each perform a composite task.
 
@@ -218,7 +223,14 @@ class RemoteDesktopBrowserTest : public extensions::PlatformAppBrowserTest {
 
   // Helper to construct the starting URL of the installed chromoting webapp.
   GURL Chromoting_Main_URL() {
-    return GURL("chrome-extension://" + ChromotingID() + "/main.html");
+    if (is_platform_app())
+      // The v2 remoting app recently (M38 at the latest) started adding a
+      // query-string parameter to the main extension page. So we'll create a
+      // different expected URL for it.
+      return GURL("chrome-extension://" + ChromotingID() +
+        "/main.html?isKioskSession=false");
+    else
+      return GURL("chrome-extension://" + ChromotingID() + "/main.html");
   }
 
   // Helper to retrieve the current URL in the active WebContents.

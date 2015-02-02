@@ -9,7 +9,7 @@
 #include "cc/base/cc_export.h"
 #include "cc/debug/layer_tree_debug_state.h"
 #include "third_party/skia/include/core/SkColor.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace cc {
 
@@ -20,12 +20,14 @@ class CC_EXPORT LayerTreeSettings {
 
   bool impl_side_painting;
   bool allow_antialiasing;
+  bool force_antialiasing;
+  bool force_blending_with_shaders;
   bool throttle_frame_production;
   bool single_thread_proxy_scheduler;
   bool begin_frame_scheduling_enabled;
-  bool main_frame_before_draw_enabled;
   bool main_frame_before_activation_enabled;
   bool using_synchronous_renderer_compositor;
+  bool disable_hi_res_timer_tasks_on_battery;
   bool report_overscroll_only_for_scrollable_axes;
   bool per_tile_painting_enabled;
   bool partial_swap_enabled;
@@ -35,11 +37,6 @@ class CC_EXPORT LayerTreeSettings {
   bool should_clear_root_render_pass;
   bool gpu_rasterization_enabled;
   bool gpu_rasterization_forced;
-  enum RecordingMode {
-    RecordNormally,
-    RecordWithSkRecord,
-  };
-  RecordingMode recording_mode;
   bool create_low_res_tiling;
 
   enum ScrollbarAnimator {
@@ -49,6 +46,7 @@ class CC_EXPORT LayerTreeSettings {
   };
   ScrollbarAnimator scrollbar_animator;
   int scrollbar_fade_delay_ms;
+  int scrollbar_fade_resize_delay_ms;
   int scrollbar_fade_duration_ms;
   SkColor solid_color_scrollbar_color;
   bool calculate_top_controls_position;
@@ -64,6 +62,7 @@ class CC_EXPORT LayerTreeSettings {
   size_t max_partial_texture_updates;
   gfx::Size default_tile_size;
   gfx::Size max_untiled_layer_size;
+  gfx::Size default_tile_grid_size;
   gfx::Size minimum_occlusion_tracking_size;
   bool use_pinch_zoom_scrollbars;
   bool use_pinch_virtual_viewport;
@@ -79,6 +78,7 @@ class CC_EXPORT LayerTreeSettings {
   bool ignore_root_layer_flings;
   bool use_rgba_4444_textures;
   size_t texture_id_allocation_chunk_size;
+  size_t scheduled_raster_task_limit;
   bool use_occlusion_for_tile_prioritization;
   bool record_full_layer;
 

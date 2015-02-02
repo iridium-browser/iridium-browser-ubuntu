@@ -26,19 +26,22 @@ class DriCursor : public CursorDelegateEvdev {
  public:
   explicit DriCursor(HardwareCursorDelegate* hardware,
                      DriWindowManager* window_manager);
-  virtual ~DriCursor();
+  ~DriCursor() override;
 
+  // Set's platform_cursor for widget. SetCursor is not responsible for showing
+  // the cursor. ShowCursor needs  to be explicitly called to make the cursor
+  // visible.
   void SetCursor(gfx::AcceleratedWidget widget, PlatformCursor platform_cursor);
   void ShowCursor();
   void HideCursor();
   gfx::AcceleratedWidget GetCursorWindow();
 
   // CursorDelegateEvdev:
-  virtual void MoveCursorTo(gfx::AcceleratedWidget widget,
-                            const gfx::PointF& location) OVERRIDE;
-  virtual void MoveCursor(const gfx::Vector2dF& delta) OVERRIDE;
-  virtual bool IsCursorVisible() OVERRIDE;
-  virtual gfx::PointF location() OVERRIDE;
+  void MoveCursorTo(gfx::AcceleratedWidget widget,
+                    const gfx::PointF& location) override;
+  void MoveCursor(const gfx::Vector2dF& delta) override;
+  bool IsCursorVisible() override;
+  gfx::PointF location() override;
 
  private:
   // The location of the bitmap (the cursor location is the hotspot location).

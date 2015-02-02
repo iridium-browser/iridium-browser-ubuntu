@@ -8,7 +8,6 @@
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_path_override.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_service_test_base.h"
 #include "chrome/browser/extensions/tab_helper.h"
@@ -24,7 +23,7 @@
 #include "chrome/browser/webdata/web_data_service_factory.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
-#include "components/google/core/browser/google_pref_names.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/search_engines/template_url_service_client.h"
 #include "content/public/browser/web_contents.h"
@@ -100,10 +99,10 @@ class ProfileResetterTest : public extensions::ExtensionServiceTestBase,
                             public ProfileResetterTestBase {
  public:
   ProfileResetterTest();
-  virtual ~ProfileResetterTest();
+  ~ProfileResetterTest() override;
 
  protected:
-  virtual void SetUp() OVERRIDE;
+  void SetUp() override;
 
   TestingProfile* profile() { return profile_.get(); }
 
@@ -161,7 +160,7 @@ KeyedService* ProfileResetterTest::CreateTemplateURLService(
 class PinnedTabsResetTest : public BrowserWithTestWindowTest,
                             public ProfileResetterTestBase {
  protected:
-  virtual void SetUp() OVERRIDE;
+  void SetUp() override;
 
   content::WebContents* CreateWebContents();
 };
@@ -182,9 +181,9 @@ content::WebContents* PinnedTabsResetTest::CreateWebContents() {
 // URLFetcher delegate that simply records the upload data.
 struct URLFetcherRequestListener : net::URLFetcherDelegate {
   URLFetcherRequestListener();
-  virtual ~URLFetcherRequestListener();
+  ~URLFetcherRequestListener() override;
 
-  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
+  void OnURLFetchComplete(const net::URLFetcher* source) override;
 
   std::string upload_data;
   net::URLFetcherDelegate* real_delegate;
@@ -423,10 +422,6 @@ TEST_F(ProfileResetterTest, ResetNothing) {
 }
 
 TEST_F(ProfileResetterTest, ResetDefaultSearchEngineNonOrganic) {
-  PrefService* prefs = profile()->GetPrefs();
-  DCHECK(prefs);
-  prefs->SetString(prefs::kLastPromptedGoogleURL, "http://www.foo.com/");
-
   ResetAndWait(ProfileResetter::DEFAULT_SEARCH_ENGINE, kDistributionConfig);
 
   TemplateURLService* model =
@@ -436,17 +431,11 @@ TEST_F(ProfileResetterTest, ResetDefaultSearchEngineNonOrganic) {
   EXPECT_EQ(base::ASCIIToUTF16("first"), default_engine->short_name());
   EXPECT_EQ(base::ASCIIToUTF16("firstkey"), default_engine->keyword());
   EXPECT_EQ("http://www.foo.com/s?q={searchTerms}", default_engine->url());
-
-  EXPECT_EQ("", prefs->GetString(prefs::kLastPromptedGoogleURL));
 }
 
 TEST_F(ProfileResetterTest, ResetDefaultSearchEnginePartially) {
   // Search engine's logic is tested by
   // TemplateURLServiceTest.RepairPrepopulatedSearchEngines.
-  PrefService* prefs = profile()->GetPrefs();
-  DCHECK(prefs);
-  prefs->SetString(prefs::kLastPromptedGoogleURL, "http://www.foo.com/");
-
   // Make sure TemplateURLService has loaded.
   ResetAndWait(ProfileResetter::DEFAULT_SEARCH_ENGINE);
 
@@ -458,7 +447,6 @@ TEST_F(ProfileResetterTest, ResetDefaultSearchEnginePartially) {
   ResetAndWait(ProfileResetter::DEFAULT_SEARCH_ENGINE);
 
   EXPECT_EQ(urls, model->GetTemplateURLs());
-  EXPECT_EQ(std::string(), prefs->GetString(prefs::kLastPromptedGoogleURL));
 }
 
 TEST_F(ProfileResetterTest, ResetHomepageNonOrganic) {

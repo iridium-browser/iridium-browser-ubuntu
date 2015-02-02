@@ -6,13 +6,19 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
 #include "content/browser/devtools/devtools_manager.h"
+#include "content/browser/devtools/embedded_worker_devtools_manager.h"
 #include "content/browser/devtools/render_view_devtools_agent_host.h"
+#include "content/browser/shared_worker/shared_worker_instance.h"
+#include "content/browser/shared_worker/worker_storage_partition.h"
 #include "content/common/view_messages.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/devtools_external_agent_proxy.h"
 #include "content/public/browser/devtools_external_agent_proxy_delegate.h"
+#include "content/public/browser/devtools_target.h"
 #include "content/public/browser/web_contents_delegate.h"
+#include "content/public/test/test_utils.h"
 #include "content/test/test_content_browser_client.h"
 #include "content/test/test_render_view_host.h"
 #include "content/test/test_web_contents.h"
@@ -30,9 +36,7 @@ class TestDevToolsClientHost : public DevToolsAgentHostClient {
         closed_(false) {
   }
 
-  virtual ~TestDevToolsClientHost() {
-    EXPECT_TRUE(closed_);
-  }
+  ~TestDevToolsClientHost() override { EXPECT_TRUE(closed_); }
 
   void Close() {
     EXPECT_FALSE(closed_);
@@ -41,13 +45,12 @@ class TestDevToolsClientHost : public DevToolsAgentHostClient {
     closed_ = true;
   }
 
-  virtual void AgentHostClosed(
-      DevToolsAgentHost* agent_host, bool replaced) OVERRIDE {
+  void AgentHostClosed(DevToolsAgentHost* agent_host, bool replaced) override {
     FAIL();
   }
 
-  virtual void DispatchProtocolMessage(
-      DevToolsAgentHost* agent_host, const std::string& message) OVERRIDE {
+  void DispatchProtocolMessage(DevToolsAgentHost* agent_host,
+                               const std::string& message) override {
     last_sent_message = &message;
   }
 
@@ -81,7 +84,7 @@ class TestWebContentsDelegate : public WebContentsDelegate {
   TestWebContentsDelegate() : renderer_unresponsive_received_(false) {}
 
   // Notification that the contents is hung.
-  virtual void RendererUnresponsive(WebContents* source) OVERRIDE {
+  void RendererUnresponsive(WebContents* source) override {
     renderer_unresponsive_received_ = true;
   }
 
@@ -93,14 +96,125 @@ class TestWebContentsDelegate : public WebContentsDelegate {
   bool renderer_unresponsive_received_;
 };
 
+class TestTarget : public DevToolsTarget {
+ public:
+  explicit TestTarget(scoped_refptr<DevToolsAgentHost> agent_host)
+      : agent_host_(agent_host) {}
+  ~TestTarget() override {}
+
+  std::string GetId() const override { return agent_host_->GetId(); }
+  std::string GetParentId() const override { return std::string(); }
+  std::string GetType() const override { return std::string(); }
+  std::string GetTitle() const override { return agent_host_->GetTitle(); }
+  std::string GetDescription() const override { return std::string(); }
+  GURL GetURL() const override { return agent_host_->GetURL(); }
+  GURL GetFaviconURL() const override { return GURL(); }
+  base::TimeTicks GetLastActivityTime() const override {
+    return base::TimeTicks();
+  }
+  bool IsAttached() const override { return agent_host_->IsAttached(); }
+  scoped_refptr<DevToolsAgentHost> GetAgentHost() const override {
+    return agent_host_;
+  }
+  bool Activate() const override { return agent_host_->Activate(); }
+  bool Close() const override { return agent_host_->Close(); }
+
+ private:
+  scoped_refptr<DevToolsAgentHost> agent_host_;
+};
+
+class TestDevToolsManagerDelegate : public DevToolsManagerDelegate {
+ public:
+  ~TestDevToolsManagerDelegate() override {}
+
+  void Inspect(BrowserContext* browser_context,
+               DevToolsAgentHost* agent_host) override {}
+
+  void DevToolsAgentStateChanged(DevToolsAgentHost* agent_host,
+                                 bool attached) override {}
+
+  base::DictionaryValue* HandleCommand(
+      DevToolsAgentHost* agent_host,
+      base::DictionaryValue* command) override {
+    return NULL;
+  }
+
+  scoped_ptr<DevToolsTarget> CreateNewTarget(const GURL& url) override {
+    return scoped_ptr<DevToolsTarget>();
+  }
+
+  void EnumerateTargets(TargetCallback callback) override {
+    TargetList result;
+    DevToolsAgentHost::List agents = DevToolsAgentHost::GetOrCreateAll();
+    for (DevToolsAgentHost::List::iterator it = agents.begin();
+         it != agents.end(); ++it) {
+      if ((*it)->GetType() == DevToolsAgentHost::TYPE_WEB_CONTENTS)
+        result.insert(result.begin(), new TestTarget(*it));
+      else
+        result.push_back(new TestTarget(*it));
+    }
+    callback.Run(result);
+  }
+
+  std::string GetPageThumbnailData(const GURL& url) override {
+    return std::string();
+  }
+};
+
+class ContentBrowserClientWithDevTools : public TestContentBrowserClient {
+ public:
+  ~ContentBrowserClientWithDevTools() override {}
+  content::DevToolsManagerDelegate* GetDevToolsManagerDelegate() override {
+    return new TestDevToolsManagerDelegate();
+  }
+};
+
+class TestDevToolsManagerObserver : public DevToolsManager::Observer {
+ public:
+  TestDevToolsManagerObserver()
+      : updates_count_(0) {}
+  ~TestDevToolsManagerObserver() override {}
+
+  int updates_count() { return updates_count_; }
+  const std::vector<scoped_refptr<DevToolsAgentHost>> hosts() {
+    return hosts_;
+  }
+
+  void TargetListChanged(const TargetList& targets) override {
+    updates_count_++;
+    hosts_.clear();
+    for (TargetList::const_iterator it = targets.begin();
+         it != targets.end(); ++it) {
+      hosts_.push_back((*it)->GetAgentHost());
+    }
+  }
+
+ private:
+  int updates_count_;
+  std::vector<scoped_refptr<DevToolsAgentHost>> hosts_;
+};
+
 }  // namespace
 
 class DevToolsManagerTest : public RenderViewHostImplTestHarness {
+ public:
+  DevToolsManagerTest()
+      : old_browser_client_(NULL) {}
+
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     RenderViewHostImplTestHarness::SetUp();
     TestDevToolsClientHost::ResetCounters();
+    old_browser_client_ = SetBrowserClientForTesting(&browser_client_);
   }
+
+  void TearDown() override {
+    SetBrowserClientForTesting(old_browser_client_);
+    RenderViewHostImplTestHarness::TearDown();
+  }
+
+  ContentBrowserClientWithDevTools browser_client_;
+  ContentBrowserClient* old_browser_client_;
 };
 
 TEST_F(DevToolsManagerTest, OpenAndManuallyCloseDevToolsClientHost) {
@@ -201,20 +315,18 @@ class TestExternalAgentDelegate: public DevToolsExternalAgentProxyDelegate {
     EXPECT_EQ(count, event_counter_[name]);
   }
 
-  virtual void Attach(DevToolsExternalAgentProxy* proxy) OVERRIDE {
+  void Attach(DevToolsExternalAgentProxy* proxy) override {
     recordEvent("Attach");
   };
 
-  virtual void Detach() OVERRIDE {
-    recordEvent("Detach");
-  };
+  void Detach() override { recordEvent("Detach"); };
 
-  virtual void SendMessageToBackend(const std::string& message) OVERRIDE {
+  void SendMessageToBackend(const std::string& message) override {
     recordEvent(std::string("SendMessageToBackend.") + message);
   };
 
  public :
-  virtual ~TestExternalAgentDelegate() {
+  ~TestExternalAgentDelegate() override {
     expectEvent(1, "Attach");
     expectEvent(1, "Detach");
     expectEvent(0, "SendMessageToBackend.message0");
@@ -237,6 +349,112 @@ TEST_F(DevToolsManagerTest, TestExternalProxy) {
   agent_host->DispatchProtocolMessage("message2");
 
   client_host.Close();
+}
+
+class TestDevToolsManagerScheduler {
+ public:
+  DevToolsManager::Scheduler callback() {
+    return base::Bind(&TestDevToolsManagerScheduler::Schedule,
+                      base::Unretained(this));
+  }
+
+  void Run() {
+    ASSERT_FALSE(closure_.is_null());
+    base::Closure copy = closure_;
+    closure_.Reset();
+    copy.Run();
+  }
+
+  bool IsEmpty() {
+    return closure_.is_null();
+  }
+
+ private:
+  void Schedule(base::Closure closure) {
+    EXPECT_TRUE(closure_.is_null());
+    closure_ = closure;
+  }
+
+  base::Closure closure_;
+};
+
+TEST_F(DevToolsManagerTest, TestObserver) {
+  GURL url1("data:text/html,<body>Body1</body>");
+  GURL url2("data:text/html,<body>Body2</body>");
+  GURL url3("data:text/html,<body>Body3</body>");
+
+  TestDevToolsManagerScheduler scheduler;
+  DevToolsManager* manager = DevToolsManager::GetInstance();
+  manager->SetSchedulerForTest(scheduler.callback());
+
+  contents()->NavigateAndCommit(url1);
+  RunAllPendingInMessageLoop();
+
+  scoped_ptr<TestDevToolsManagerObserver> observer(
+      new TestDevToolsManagerObserver());
+  manager->AddObserver(observer.get());
+  // Added observer should get an update.
+  EXPECT_EQ(1, observer->updates_count());
+  ASSERT_EQ(1u, observer->hosts().size());
+  EXPECT_EQ(contents(), observer->hosts()[0]->GetWebContents());
+  EXPECT_EQ(url1.spec(), observer->hosts()[0]->GetURL().spec());
+
+  contents()->NavigateAndCommit(url2);
+  RunAllPendingInMessageLoop();
+  contents()->NavigateAndCommit(url3);
+  scheduler.Run();
+  // Updates should be coalesced.
+  EXPECT_EQ(2, observer->updates_count());
+  ASSERT_EQ(1u, observer->hosts().size());
+  EXPECT_EQ(contents(), observer->hosts()[0]->GetWebContents());
+  EXPECT_EQ(url3.spec(), observer->hosts()[0]->GetURL().spec());
+
+  // Check there were no extra updates.
+  scheduler.Run();
+  EXPECT_TRUE(scheduler.IsEmpty());
+  EXPECT_EQ(2, observer->updates_count());
+
+  scoped_ptr<WorkerStoragePartition> partition(new WorkerStoragePartition(
+      browser_context()->GetRequestContext(),
+      NULL, NULL, NULL, NULL, NULL, NULL, NULL));
+  WorkerStoragePartitionId partition_id(*partition.get());
+
+  GURL shared_worker_url("http://example.com/shared_worker.js");
+  SharedWorkerInstance shared_worker(
+      shared_worker_url,
+      base::string16(),
+      base::string16(),
+      blink::WebContentSecurityPolicyTypeReport,
+      browser_context()->GetResourceContext(),
+      partition_id);
+  EmbeddedWorkerDevToolsManager::GetInstance()->SharedWorkerCreated(
+      1, 1, shared_worker);
+  contents()->NavigateAndCommit(url2);
+
+  EXPECT_EQ(3, observer->updates_count());
+  ASSERT_EQ(2u, observer->hosts().size());
+  EXPECT_EQ(contents(), observer->hosts()[0]->GetWebContents());
+  EXPECT_EQ(url2.spec(), observer->hosts()[0]->GetURL().spec());
+  EXPECT_EQ(DevToolsAgentHost::TYPE_SHARED_WORKER,
+            observer->hosts()[1]->GetType());
+  EXPECT_EQ(shared_worker_url.spec(), observer->hosts()[1]->GetURL().spec());
+
+  EmbeddedWorkerDevToolsManager::GetInstance()->WorkerDestroyed(1, 1);
+  scheduler.Run();
+  EXPECT_EQ(4, observer->updates_count());
+  ASSERT_EQ(1u, observer->hosts().size());
+  EXPECT_EQ(contents(), observer->hosts()[0]->GetWebContents());
+  EXPECT_EQ(url2.spec(), observer->hosts()[0]->GetURL().spec());
+
+  // Check there were no extra updates.
+  scheduler.Run();
+  EXPECT_TRUE(scheduler.IsEmpty());
+  EXPECT_EQ(4, observer->updates_count());
+
+  manager->RemoveObserver(observer.get());
+
+  EXPECT_TRUE(scheduler.IsEmpty());
+  manager->SetSchedulerForTest(DevToolsManager::Scheduler());
 }
 
 }  // namespace content

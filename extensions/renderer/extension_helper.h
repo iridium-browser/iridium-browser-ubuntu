@@ -7,6 +7,7 @@
 
 #include <vector>
 
+#include "base/memory/scoped_ptr.h"
 #include "content/public/common/console_message_level.h"
 #include "content/public/renderer/render_view_observer.h"
 #include "content/public/renderer/render_view_observer_tracker.h"
@@ -22,7 +23,9 @@ class ListValue;
 }
 
 namespace extensions {
+class AutomationApiHelper;
 class Dispatcher;
+
 struct Message;
 
 // RenderView-level plumbing for extension features.
@@ -43,7 +46,7 @@ class ExtensionHelper
       const std::string& extension_id);
 
   ExtensionHelper(content::RenderView* render_view, Dispatcher* dispatcher);
-  virtual ~ExtensionHelper();
+  ~ExtensionHelper() override;
 
   int tab_id() const { return tab_id_; }
   int browser_window_id() const { return browser_window_id_; }
@@ -52,14 +55,14 @@ class ExtensionHelper
 
  private:
   // RenderViewObserver implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
-  virtual void DidCreateDocumentElement(blink::WebLocalFrame* frame) OVERRIDE;
-  virtual void DidMatchCSS(
+  bool OnMessageReceived(const IPC::Message& message) override;
+  void DidCreateDocumentElement(blink::WebLocalFrame* frame) override;
+  void DidMatchCSS(
       blink::WebLocalFrame* frame,
       const blink::WebVector<blink::WebString>& newly_matching_selectors,
       const blink::WebVector<blink::WebString>& stopped_matching_selectors)
-      OVERRIDE;
-  virtual void DraggableRegionsChanged(blink::WebFrame* frame) OVERRIDE;
+      override;
+  void DraggableRegionsChanged(blink::WebFrame* frame) override;
 
   void OnExtensionResponse(int request_id, bool success,
                            const base::ListValue& response,

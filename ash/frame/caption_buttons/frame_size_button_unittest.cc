@@ -13,7 +13,7 @@
 #include "grit/ash_resources.h"
 #include "ui/aura/window.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/events/gestures/gesture_configuration.h"
+#include "ui/events/gesture_detection/gesture_configuration.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/screen.h"
@@ -28,21 +28,13 @@ namespace {
 class TestWidgetDelegate : public views::WidgetDelegateView {
  public:
   TestWidgetDelegate() {}
-  virtual ~TestWidgetDelegate() {}
+  ~TestWidgetDelegate() override {}
 
   // Overridden from views::WidgetDelegate:
-  virtual views::View* GetContentsView() OVERRIDE {
-    return this;
-  }
-  virtual bool CanResize() const OVERRIDE {
-    return true;
-  }
-  virtual bool CanMaximize() const OVERRIDE {
-    return true;
-  }
-  virtual bool CanMinimize() const OVERRIDE {
-    return true;
-  }
+  views::View* GetContentsView() override { return this; }
+  bool CanResize() const override { return true; }
+  bool CanMaximize() const override { return true; }
+  bool CanMinimize() const override { return true; }
 
   ash::FrameCaptionButtonContainerView* caption_button_container() {
     return caption_button_container_;
@@ -50,7 +42,7 @@ class TestWidgetDelegate : public views::WidgetDelegateView {
 
  private:
   // Overridden from views::View:
-  virtual void Layout() OVERRIDE {
+  void Layout() override {
     caption_button_container_->Layout();
 
     // Right align the caption button container.
@@ -59,11 +51,11 @@ class TestWidgetDelegate : public views::WidgetDelegateView {
         preferred_size.width(), preferred_size.height());
   }
 
-  virtual void ViewHierarchyChanged(
-      const ViewHierarchyChangedDetails& details) OVERRIDE {
+  void ViewHierarchyChanged(
+      const ViewHierarchyChangedDetails& details) override {
     if (details.is_add && details.child == this) {
-      caption_button_container_ = new FrameCaptionButtonContainerView(
-          GetWidget(), FrameCaptionButtonContainerView::MINIMIZE_ALLOWED);
+      caption_button_container_ =
+          new FrameCaptionButtonContainerView(GetWidget());
 
       // Set arbitrary images for the container's buttons so that the buttons
       // have non-empty sizes.
@@ -91,7 +83,7 @@ class TestWidgetDelegate : public views::WidgetDelegateView {
 class FrameSizeButtonTest : public AshTestBase {
  public:
   FrameSizeButtonTest() {}
-  virtual ~FrameSizeButtonTest() {}
+  ~FrameSizeButtonTest() override {}
 
   // Returns the center point of |view| in screen coordinates.
   gfx::Point CenterPointInScreen(views::View* view) {
@@ -125,7 +117,7 @@ class FrameSizeButtonTest : public AshTestBase {
   }
 
   // AshTestBase overrides:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     AshTestBase::SetUp();
 
     TestWidgetDelegate* delegate = new TestWidgetDelegate();
@@ -246,9 +238,9 @@ TEST_F(FrameSizeButtonTest, ButtonDrag) {
   EXPECT_TRUE(HasStateType(wm::WINDOW_STATE_TYPE_LEFT_SNAPPED));
 
   // 3) Test with tap gestures.
-  const int touch_default_radius =
-      ui::GestureConfiguration::default_radius();
-  ui::GestureConfiguration::set_default_radius(0);
+  const float touch_default_radius =
+      ui::GestureConfiguration::GetInstance()->default_radius();
+  ui::GestureConfiguration::GetInstance()->set_default_radius(0);
   // Snap right.
   generator.MoveMouseTo(CenterPointInScreen(size_button()));
   generator.PressMoveAndReleaseTouchTo(CenterPointInScreen(close_button()));
@@ -259,7 +251,8 @@ TEST_F(FrameSizeButtonTest, ButtonDrag) {
   generator.PressMoveAndReleaseTouchTo(CenterPointInScreen(minimize_button()));
   RunAllPendingInMessageLoop();
   EXPECT_TRUE(HasStateType(wm::WINDOW_STATE_TYPE_LEFT_SNAPPED));
-  ui::GestureConfiguration::set_default_radius(touch_default_radius);
+  ui::GestureConfiguration::GetInstance()->set_default_radius(
+      touch_default_radius);
 }
 
 // Test that clicking, dragging, and overshooting the minimize button a bit
@@ -406,16 +399,16 @@ TEST_F(FrameSizeButtonTest, SizeButtonPressedWhenSnapButtonHovered) {
 class FrameSizeButtonTestRTL : public FrameSizeButtonTest {
  public:
   FrameSizeButtonTestRTL() {}
-  virtual ~FrameSizeButtonTestRTL() {}
+  ~FrameSizeButtonTestRTL() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     original_locale_ = l10n_util::GetApplicationLocale(std::string());
     base::i18n::SetICUDefaultLocale("he");
 
     FrameSizeButtonTest::SetUp();
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     FrameSizeButtonTest::TearDown();
     base::i18n::SetICUDefaultLocale(original_locale_);
   }

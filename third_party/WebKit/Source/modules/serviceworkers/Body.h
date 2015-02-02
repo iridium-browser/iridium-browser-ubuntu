@@ -43,11 +43,14 @@ public:
     ScriptPromise json(ScriptState*);
     ScriptPromise text(ScriptState*);
 
+    // Sets the bodyUsed flag to true. This signifies that the contents of the
+    // body have been consumed and cannot be accessed again.
+    void setBodyUsed();
     bool bodyUsed() const;
 
     // ActiveDOMObject override.
-    virtual void stop() OVERRIDE;
-    virtual bool hasPendingActivity() const OVERRIDE;
+    virtual void stop() override;
+    virtual bool hasPendingActivity() const override;
 
     virtual void trace(Visitor*) { }
 
@@ -55,19 +58,15 @@ protected:
     // Copy constructor for clone() implementations
     explicit Body(const Body&);
 
-    // Sets the bodyUsed flag to true. This signifies that the contents of the
-    // body have been consumed and cannot be accessed again.
-    void setBodyUsed();
-
 private:
     ScriptPromise readAsync(ScriptState*, ResponseType);
     void resolveJSON();
 
     // FileReaderLoaderClient functions.
-    virtual void didStartLoading() OVERRIDE;
-    virtual void didReceiveData() OVERRIDE;
-    virtual void didFinishLoading() OVERRIDE;
-    virtual void didFail(FileError::ErrorCode) OVERRIDE;
+    virtual void didStartLoading() override;
+    virtual void didReceiveData() override;
+    virtual void didFinishLoading() override;
+    virtual void didFail(FileError::ErrorCode) override;
 
     virtual PassRefPtr<BlobDataHandle> blobDataHandle() = 0;
 

@@ -13,29 +13,25 @@ namespace extensions {
 class ChromeExtensionHostDelegate : public ExtensionHostDelegate {
  public:
   ChromeExtensionHostDelegate();
-  virtual ~ChromeExtensionHostDelegate();
+  ~ChromeExtensionHostDelegate() override;
 
   // ExtensionHostDelegate implementation.
-  virtual void OnExtensionHostCreated(content::WebContents* web_contents)
-      OVERRIDE;
-  virtual void OnRenderViewCreatedForBackgroundPage(ExtensionHost* host)
-      OVERRIDE;
-  virtual content::JavaScriptDialogManager* GetJavaScriptDialogManager()
-      OVERRIDE;
-  virtual void CreateTab(content::WebContents* web_contents,
-                         const std::string& extension_id,
-                         WindowOpenDisposition disposition,
-                         const gfx::Rect& initial_pos,
-                         bool user_gesture) OVERRIDE;
-  virtual void ProcessMediaAccessRequest(
-      content::WebContents* web_contents,
-      const content::MediaStreamRequest& request,
-      const content::MediaResponseCallback& callback,
-      const Extension* extension) OVERRIDE;
-  virtual bool CheckMediaAccessPermission(content::WebContents* web_contents,
-                                          const GURL& security_origin,
-                                          content::MediaStreamType type,
-                                          const Extension* extension) OVERRIDE;
+  void OnExtensionHostCreated(content::WebContents* web_contents) override;
+  void OnRenderViewCreatedForBackgroundPage(ExtensionHost* host) override;
+  content::JavaScriptDialogManager* GetJavaScriptDialogManager() override;
+  void CreateTab(content::WebContents* web_contents,
+                 const std::string& extension_id,
+                 WindowOpenDisposition disposition,
+                 const gfx::Rect& initial_pos,
+                 bool user_gesture) override;
+  void ProcessMediaAccessRequest(content::WebContents* web_contents,
+                                 const content::MediaStreamRequest& request,
+                                 const content::MediaResponseCallback& callback,
+                                 const Extension* extension) override;
+  bool CheckMediaAccessPermission(content::WebContents* web_contents,
+                                  const GURL& security_origin,
+                                  content::MediaStreamType type,
+                                  const Extension* extension) override;
 };
 
 }  // namespace extensions

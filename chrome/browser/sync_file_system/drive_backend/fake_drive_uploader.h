@@ -23,14 +23,14 @@ namespace drive_backend {
 class FakeDriveServiceWrapper : public drive::FakeDriveService {
  public:
   FakeDriveServiceWrapper();
-  virtual ~FakeDriveServiceWrapper();
+  ~FakeDriveServiceWrapper() override;
 
   // DriveServiceInterface overrides.
-  virtual google_apis::CancelCallback AddNewDirectory(
+  google_apis::CancelCallback AddNewDirectory(
       const std::string& parent_resource_id,
       const std::string& directory_name,
       const AddNewDirectoryOptions& options,
-      const google_apis::FileResourceCallback& callback) OVERRIDE;
+      const google_apis::FileResourceCallback& callback) override;
 
   void set_make_directory_conflict(bool enable) {
     make_directory_conflict_ = enable;
@@ -47,30 +47,30 @@ class FakeDriveServiceWrapper : public drive::FakeDriveService {
 class FakeDriveUploader : public drive::DriveUploaderInterface {
  public:
   explicit FakeDriveUploader(FakeDriveServiceWrapper* fake_drive_service);
-  virtual ~FakeDriveUploader();
+  ~FakeDriveUploader() override;
 
   // DriveUploaderInterface overrides.
-  virtual google_apis::CancelCallback UploadNewFile(
+  google_apis::CancelCallback UploadNewFile(
       const std::string& parent_resource_id,
       const base::FilePath& local_file_path,
       const std::string& title,
       const std::string& content_type,
       const UploadNewFileOptions& options,
       const drive::UploadCompletionCallback& callback,
-      const google_apis::ProgressCallback& progress_callback) OVERRIDE;
-  virtual google_apis::CancelCallback UploadExistingFile(
+      const google_apis::ProgressCallback& progress_callback) override;
+  google_apis::CancelCallback UploadExistingFile(
       const std::string& resource_id,
       const base::FilePath& local_file_path,
       const std::string& content_type,
       const UploadExistingFileOptions& options,
       const drive::UploadCompletionCallback& callback,
-      const google_apis::ProgressCallback& progress_callback) OVERRIDE;
-  virtual google_apis::CancelCallback ResumeUploadFile(
+      const google_apis::ProgressCallback& progress_callback) override;
+  google_apis::CancelCallback ResumeUploadFile(
       const GURL& upload_location,
       const base::FilePath& local_file_path,
       const std::string& content_type,
       const drive::UploadCompletionCallback& callback,
-      const google_apis::ProgressCallback& progress_callback) OVERRIDE;
+      const google_apis::ProgressCallback& progress_callback) override;
 
   void set_make_file_conflict(bool enable) {
     make_file_conflict_ = enable;

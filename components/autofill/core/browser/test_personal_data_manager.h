@@ -17,7 +17,7 @@ namespace autofill {
 class TestPersonalDataManager : public PersonalDataManager {
  public:
   TestPersonalDataManager();
-  virtual ~TestPersonalDataManager();
+  ~TestPersonalDataManager() override;
 
   // Adds |profile| to |profiles_|. This does not take ownership of |profile|.
   void AddTestingProfile(AutofillProfile* profile);
@@ -26,18 +26,17 @@ class TestPersonalDataManager : public PersonalDataManager {
   // |credit_card|.
   void AddTestingCreditCard(CreditCard* credit_card);
 
-  virtual const std::vector<AutofillProfile*>& GetProfiles() const OVERRIDE;
-  virtual const std::vector<AutofillProfile*>& web_profiles() const OVERRIDE;
-  virtual const std::vector<CreditCard*>& GetCreditCards() const OVERRIDE;
+  const std::vector<AutofillProfile*>& GetProfiles() const override;
+  const std::vector<AutofillProfile*>& web_profiles() const override;
+  const std::vector<CreditCard*>& GetCreditCards() const override;
 
-  virtual std::string SaveImportedProfile(
-      const AutofillProfile& imported_profile) OVERRIDE;
-  virtual std::string SaveImportedCreditCard(
-      const CreditCard& imported_credit_card) OVERRIDE;
+  std::string SaveImportedProfile(
+      const AutofillProfile& imported_profile) override;
+  std::string SaveImportedCreditCard(
+      const CreditCard& imported_credit_card) override;
 
-  virtual std::string CountryCodeForCurrentTimezone() const OVERRIDE;
-  virtual const std::string& GetDefaultCountryCodeForNewAddress() const
-      OVERRIDE;
+  std::string CountryCodeForCurrentTimezone() const override;
+  const std::string& GetDefaultCountryCodeForNewAddress() const override;
 
   void set_timezone_country_code(const std::string& timezone_country_code) {
     timezone_country_code_ = timezone_country_code;

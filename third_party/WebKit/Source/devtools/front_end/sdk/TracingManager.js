@@ -82,14 +82,6 @@ WebInspector.TracingManager.prototype = {
         this.dispatchEventToListeners(WebInspector.TracingManager.Events.TracingComplete);
     },
 
-    _tracingStarted: function()
-    {
-        if (this._active)
-            return;
-        this._active = true;
-        this.dispatchEventToListeners(WebInspector.TracingManager.Events.TracingStarted);
-    },
-
     /**
      * @param {string} categoryFilter
      * @param {string} options
@@ -99,12 +91,11 @@ WebInspector.TracingManager.prototype = {
     {
         if (this._active)
             return;
-        WebInspector.profilingLock().acquire();
-        this._shouldReleaseLock = true;
+        WebInspector.targetManager.suspendAllTargets();
         var bufferUsageReportingIntervalMs = 500;
         TracingAgent.start(categoryFilter, options, bufferUsageReportingIntervalMs, callback);
-        this._tracingStarted();
         this._active = true;
+        this.dispatchEventToListeners(WebInspector.TracingManager.Events.TracingStarted);
     },
 
     stop: function()
@@ -112,10 +103,7 @@ WebInspector.TracingManager.prototype = {
         if (!this._active)
             return;
         TracingAgent.end(this._onStop.bind(this));
-        if (this._shouldReleaseLock) {
-            this._shouldReleaseLock = false;
-            WebInspector.profilingLock().release();
-        }
+        WebInspector.targetManager.resumeAllTargets();
     },
 
     _onStop: function()
@@ -159,10 +147,5 @@ WebInspector.TracingDispatcher.prototype = {
     tracingComplete: function()
     {
         this._tracingManager._tracingComplete();
-    },
-
-    started: function()
-    {
-        this._tracingManager._tracingStarted();
     }
 }

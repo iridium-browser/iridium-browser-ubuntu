@@ -22,14 +22,13 @@ class PrivetConfirmApiCallFlow : public CloudPrintApiFlowRequest {
   PrivetConfirmApiCallFlow(const std::string& token,
                            const ResponseCallback& callback);
 
-  virtual ~PrivetConfirmApiCallFlow();
+  ~PrivetConfirmApiCallFlow() override;
 
-  virtual void OnGCDAPIFlowError(GCDApiFlow::Status status) OVERRIDE;
-  virtual void OnGCDAPIFlowComplete(
-      const base::DictionaryValue& value) OVERRIDE;
-  virtual net::URLFetcher::RequestType GetRequestType() OVERRIDE;
+  void OnGCDAPIFlowError(GCDApiFlow::Status status) override;
+  void OnGCDAPIFlowComplete(const base::DictionaryValue& value) override;
+  net::URLFetcher::RequestType GetRequestType() override;
 
-  virtual GURL GetURL() OVERRIDE;
+  GURL GetURL() override;
 
  private:
   ResponseCallback callback_;

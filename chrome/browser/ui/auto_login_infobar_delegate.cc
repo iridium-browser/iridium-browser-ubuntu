@@ -58,11 +58,11 @@ class AutoLoginRedirector : public UbertokenConsumer,
 
  private:
   // Overriden from UbertokenConsumer:
-  virtual void OnUbertokenSuccess(const std::string& token) OVERRIDE;
-  virtual void OnUbertokenFailure(const GoogleServiceAuthError& error) OVERRIDE;
+  virtual void OnUbertokenSuccess(const std::string& token) override;
+  virtual void OnUbertokenFailure(const GoogleServiceAuthError& error) override;
 
   // Implementation of content::WebContentsObserver
-  virtual void WebContentsDestroyed() OVERRIDE;
+  virtual void WebContentsDestroyed() override;
 
   // Redirect tab to MergeSession URL, logging the user in and navigating
   // to the desired page.
@@ -87,6 +87,7 @@ AutoLoginRedirector::AutoLoginRedirector(
       SigninManagerFactory::GetInstance()->GetForProfile(profile);
   ubertoken_fetcher_.reset(new UbertokenFetcher(token_service,
                                                 this,
+                                                GaiaConstants::kChromeSource,
                                                 profile->GetRequestContext()));
   ubertoken_fetcher_->StartFetchingToken(
       signin_manager->GetAuthenticatedAccountId());

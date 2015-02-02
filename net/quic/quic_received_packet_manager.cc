@@ -167,7 +167,7 @@ void QuicReceivedPacketManager::RecordPacketReceived(
     uint32 sequence_gap = ack_frame_.largest_observed - sequence_number;
     stats_->max_sequence_reordering =
         max(stats_->max_sequence_reordering, sequence_gap);
-    uint32 reordering_time_us =
+    int64 reordering_time_us =
         receipt_time.Subtract(time_largest_observed_).ToMicroseconds();
     stats_->max_time_reordering_us = max(stats_->max_time_reordering_us,
                                          reordering_time_us);
@@ -229,14 +229,11 @@ void QuicReceivedPacketManager::UpdateReceivedPacketInfo(
     return;
   }
 
-  if (approximate_now < time_largest_observed_) {
-    // Approximate now may well be "in the past".
-    ack_frame->delta_time_largest_observed = QuicTime::Delta::Zero();
-    return;
-  }
-
+  // Ensure the delta is zero if approximate now is "in the past".
   ack_frame->delta_time_largest_observed =
-      approximate_now.Subtract(time_largest_observed_);
+      approximate_now < time_largest_observed_ ?
+          QuicTime::Delta::Zero() :
+          approximate_now.Subtract(time_largest_observed_);
 
   // Remove all packets that are too far from largest_observed to express.
   received_packet_times_.remove_if(isTooLarge(ack_frame_.largest_observed));
@@ -287,10 +284,14 @@ void QuicReceivedPacketManager::UpdatePacketInformationSentByPeer(
              peer_least_packet_awaiting_ack_);
 }
 
-bool QuicReceivedPacketManager::HasNewMissingPackets() {
+bool QuicReceivedPacketManager::HasNewMissingPackets() const {
   return !ack_frame_.missing_packets.empty() &&
       (ack_frame_.largest_observed -
        *ack_frame_.missing_packets.rbegin()) <= kMaxPacketsAfterNewMissing;
+}
+
+size_t QuicReceivedPacketManager::NumTrackedPackets() const {
+  return entropy_tracker_.size();
 }
 
 }  // namespace net

@@ -1,4 +1,6 @@
-<?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="sk">
+<?xml version="1.0" ?>
+<!DOCTYPE translationbundle>
+<translationbundle lang="sk">
 <translation id="777702478322588152">Prefektúra</translation>
 <translation id="3713769522066937702">Formát tohto PSČ sa nedá rozpoznať. Príklad platného PSČ: <ph name="EXAMPLE"/>. Nepoznáte svoje PSČ? Zistite ho <ph name="BEGIN_LINK"/>tu<ph name="END_LINK"/>.</translation>
 <translation id="7393381084163773901">Ulica</translation>

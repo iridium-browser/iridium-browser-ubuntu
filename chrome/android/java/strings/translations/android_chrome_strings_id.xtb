@@ -69,7 +69,6 @@ Anda masuk dengan akun yang dikelola dan memberikan administratornya kontrol ata
 <translation id="7267430310003164111">Permintaan untuk mendapatkan aplikasi dari Google Play Store. Nama aplikasi: <ph name="APP_NAME"/>. Peringkat rata-rata aplikasi: <ph name="APP_RATING"/>.</translation>
 <translation id="4148957013307229264">Memasang...</translation>
 <translation id="3992315671621218278">Simpan tautan</translation>
-<translation id="8034522405403831421">Laman ini berbahasa <ph name="SOURCE_LANGUAGE"/>. Terjemahkan ke <ph name="TARGET_LANGUAGE"/>?</translation>
 <translation id="2476578072172137802">Setelan Situs</translation>
 <translation id="4195643157523330669">Buka di tab baru</translation>
 <translation id="651048280540227067">Tutup menu</translation>
@@ -95,6 +94,7 @@ Anda masuk dengan akun yang dikelola dan memberikan administratornya kontrol ata
 <translation id="7947953824732555851">Terima dan masuk</translation>
 <translation id="6333140779060797560">Bagikan melalui <ph name="APPLICATION"/></translation>
 <translation id="6040143037577758943">Tutup</translation>
+<translation id="5138299137310274655">Laman ini berbahasa <ph name="SOURCE_LANGUAGE"/>. Terjemahkan ke <ph name="TARGET_LANGUAGE"/>?</translation>
 <translation id="969096075394517431">Ubah bahasa</translation>
 <translation id="5032574515228824816">Meminta</translation>
 <translation id="7961015016161918242">Tidak pernah</translation>

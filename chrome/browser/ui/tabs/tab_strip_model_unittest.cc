@@ -9,7 +9,6 @@
 
 #include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/path_service.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
@@ -59,7 +58,7 @@ class DeleteWebContentsOnDestroyedObserver
         tab_strip_(tab_strip) {
   }
 
-  virtual void WebContentsDestroyed() OVERRIDE {
+  void WebContentsDestroyed() override {
     WebContents* tab_to_delete = tab_to_delete_;
     tab_to_delete_ = NULL;
     TabStripModel* tab_strip_to_delete = tab_strip_;
@@ -78,11 +77,11 @@ class DeleteWebContentsOnDestroyedObserver
 class TabStripDummyDelegate : public TestTabStripModelDelegate {
  public:
   TabStripDummyDelegate() : run_unload_(false) {}
-  virtual ~TabStripDummyDelegate() {}
+  ~TabStripDummyDelegate() override {}
 
   void set_run_unload_listener(bool value) { run_unload_ = value; }
 
-  virtual bool RunUnloadListenerBeforeClosing(WebContents* contents) OVERRIDE {
+  bool RunUnloadListenerBeforeClosing(WebContents* contents) override {
     return run_unload_;
   }
 
@@ -98,7 +97,7 @@ const char kTabStripModelTestIDUserDataKey[] = "TabStripModelTestIDUserData";
 class TabStripModelTestIDUserData : public base::SupportsUserData::Data {
  public:
   explicit TabStripModelTestIDUserData(int id) : id_(id) {}
-  virtual ~TabStripModelTestIDUserData() {}
+  ~TabStripModelTestIDUserData() override {}
   int id() { return id_; }
 
  private:
@@ -113,18 +112,15 @@ class DummySingleWebContentsDialogManager
       web_modal::SingleWebContentsDialogManagerDelegate* delegate)
       : delegate_(delegate),
         dialog_(dialog) {}
-  virtual ~DummySingleWebContentsDialogManager() {}
+  ~DummySingleWebContentsDialogManager() override {}
 
-  virtual void Show() OVERRIDE {}
-  virtual void Hide() OVERRIDE {}
-  virtual void Close() OVERRIDE {
-    delegate_->WillClose(dialog_);
-  }
-  virtual void Focus() OVERRIDE {}
-  virtual void Pulse() OVERRIDE {}
-  virtual void HostChanged(
-      web_modal::WebContentsModalDialogHost* new_host) OVERRIDE {}
-  virtual NativeWebContentsModalDialog dialog() OVERRIDE { return dialog_; }
+  void Show() override {}
+  void Hide() override {}
+  void Close() override { delegate_->WillClose(dialog_); }
+  void Focus() override {}
+  void Pulse() override {}
+  void HostChanged(web_modal::WebContentsModalDialogHost* new_host) override {}
+  NativeWebContentsModalDialog dialog() override { return dialog_; }
 
  private:
   web_modal::SingleWebContentsDialogManagerDelegate* delegate_;
@@ -143,15 +139,15 @@ class TabBlockedStateTestBrowser
     tab_strip_model_->AddObserver(this);
   }
 
-  virtual ~TabBlockedStateTestBrowser() {
+  ~TabBlockedStateTestBrowser() override {
     tab_strip_model_->RemoveObserver(this);
   }
 
  private:
   // TabStripModelObserver
-  virtual void TabInsertedAt(WebContents* contents,
-                             int index,
-                             bool foreground) OVERRIDE {
+  void TabInsertedAt(WebContents* contents,
+                     int index,
+                     bool foreground) override {
     web_modal::WebContentsModalDialogManager* manager =
         web_modal::WebContentsModalDialogManager::FromWebContents(contents);
     if (manager)
@@ -159,8 +155,8 @@ class TabBlockedStateTestBrowser
   }
 
   // WebContentsModalDialogManagerDelegate
-  virtual void SetWebContentsBlocked(content::WebContents* contents,
-                                     bool blocked) OVERRIDE {
+  void SetWebContentsBlocked(content::WebContents* contents,
+                             bool blocked) override {
     int index = tab_strip_model_->GetIndexOfWebContents(contents);
     ASSERT_GE(index, 0);
     tab_strip_model_->SetTabBlocked(index, blocked);
@@ -269,7 +265,7 @@ class MockTabStripModelObserver : public TabStripModelObserver {
       : empty_(true),
         deleted_(false),
         model_(model) {}
-  virtual ~MockTabStripModelObserver() {}
+  ~MockTabStripModelObserver() override {}
 
   enum TabStripModelObserverAction {
     INSERT,
@@ -348,79 +344,71 @@ class MockTabStripModelObserver : public TabStripModelObserver {
   }
 
   // TabStripModelObserver implementation:
-  virtual void TabInsertedAt(WebContents* contents,
-                             int index,
-                             bool foreground) OVERRIDE {
+  void TabInsertedAt(WebContents* contents,
+                     int index,
+                     bool foreground) override {
     empty_ = false;
     State s(contents, index, INSERT);
     s.foreground = foreground;
     states_.push_back(s);
   }
-  virtual void ActiveTabChanged(WebContents* old_contents,
-                                WebContents* new_contents,
-                                int index,
-                                int reason) OVERRIDE {
+  void ActiveTabChanged(WebContents* old_contents,
+                        WebContents* new_contents,
+                        int index,
+                        int reason) override {
     State s(new_contents, index, ACTIVATE);
     s.src_contents = old_contents;
     s.change_reason = reason;
     states_.push_back(s);
   }
-  virtual void TabSelectionChanged(
-      TabStripModel* tab_strip_model,
-      const ui::ListSelectionModel& old_model) OVERRIDE {
+  void TabSelectionChanged(TabStripModel* tab_strip_model,
+                           const ui::ListSelectionModel& old_model) override {
     State s(model()->GetActiveWebContents(), model()->active_index(), SELECT);
     s.src_contents = model()->GetWebContentsAt(old_model.active());
     s.src_index = old_model.active();
     states_.push_back(s);
   }
-  virtual void TabMoved(WebContents* contents,
-                        int from_index,
-                        int to_index) OVERRIDE {
+  void TabMoved(WebContents* contents, int from_index, int to_index) override {
     State s(contents, to_index, MOVE);
     s.src_index = from_index;
     states_.push_back(s);
   }
 
-  virtual void TabClosingAt(TabStripModel* tab_strip_model,
-                            WebContents* contents,
-                            int index) OVERRIDE {
+  void TabClosingAt(TabStripModel* tab_strip_model,
+                    WebContents* contents,
+                    int index) override {
     states_.push_back(State(contents, index, CLOSE));
   }
-  virtual void TabDetachedAt(WebContents* contents, int index) OVERRIDE {
+  void TabDetachedAt(WebContents* contents, int index) override {
     states_.push_back(State(contents, index, DETACH));
   }
-  virtual void TabDeactivated(WebContents* contents) OVERRIDE {
+  void TabDeactivated(WebContents* contents) override {
     states_.push_back(State(contents, model()->active_index(), DEACTIVATE));
   }
-  virtual void TabChangedAt(WebContents* contents,
-                            int index,
-                            TabChangeType change_type) OVERRIDE {
+  void TabChangedAt(WebContents* contents,
+                    int index,
+                    TabChangeType change_type) override {
     states_.push_back(State(contents, index, CHANGE));
   }
-  virtual void TabReplacedAt(TabStripModel* tab_strip_model,
-                             WebContents* old_contents,
-                             WebContents* new_contents,
-                             int index) OVERRIDE {
+  void TabReplacedAt(TabStripModel* tab_strip_model,
+                     WebContents* old_contents,
+                     WebContents* new_contents,
+                     int index) override {
     State s(new_contents, index, REPLACED);
     s.src_contents = old_contents;
     states_.push_back(s);
   }
-  virtual void TabPinnedStateChanged(WebContents* contents,
-                                     int index) OVERRIDE {
+  void TabPinnedStateChanged(WebContents* contents, int index) override {
     states_.push_back(State(contents, index, PINNED));
   }
-  virtual void TabStripEmpty() OVERRIDE {
-    empty_ = true;
-  }
-  virtual void WillCloseAllTabs() OVERRIDE {
+  void TabStripEmpty() override { empty_ = true; }
+  void WillCloseAllTabs() override {
     states_.push_back(State(NULL, -1, CLOSE_ALL));
   }
-  virtual void CloseAllTabsCanceled() OVERRIDE {
+  void CloseAllTabsCanceled() override {
     states_.push_back(State(NULL, -1, CLOSE_ALL_CANCELED));
   }
-  virtual void TabStripModelDeleted() OVERRIDE {
-    deleted_ = true;
-  }
+  void TabStripModelDeleted() override { deleted_ = true; }
 
   void ClearStates() {
     states_.clear();
@@ -2309,7 +2297,7 @@ TEST_F(TabStripModelTest, MoveSelectedTabsTo) {
     { 7, 4, "2 3 4", 3, "0p 1p 2p 3p 5 4 6" },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_data); ++i) {
+  for (size_t i = 0; i < arraysize(test_data); ++i) {
     TabStripDummyDelegate delegate;
     TabStripModel strip(&delegate, profile());
     ASSERT_NO_FATAL_FAILURE(

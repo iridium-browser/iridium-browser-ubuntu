@@ -39,15 +39,26 @@ class APP_LIST_EXPORT AppListModel : public AppListItemListObserver {
     STATUS_SYNCING,  // Syncing apps or installing synced apps.
   };
 
+  enum State {
+    STATE_APPS,
+    STATE_SEARCH_RESULTS,
+    STATE_START,
+
+    INVALID_STATE,
+  };
+
   typedef ui::ListModel<SearchResult> SearchResults;
 
   AppListModel();
-  virtual ~AppListModel();
+  ~AppListModel() override;
 
   void AddObserver(AppListModelObserver* observer);
   void RemoveObserver(AppListModelObserver* observer);
 
   void SetStatus(Status status);
+
+  void SetState(State state);
+  State state() { return state_; }
 
   // Finds the item matching |id|.
   AppListItem* FindItem(const std::string& id);
@@ -133,9 +144,9 @@ class APP_LIST_EXPORT AppListModel : public AppListItemListObserver {
 
  private:
   // AppListItemListObserver
-  virtual void OnListItemMoved(size_t from_index,
-                               size_t to_index,
-                               AppListItem* item) OVERRIDE;
+  void OnListItemMoved(size_t from_index,
+                       size_t to_index,
+                       AppListItem* item) override;
 
   // Returns an existing folder matching |folder_id| or creates a new folder.
   AppListFolderItem* FindOrCreateFolderItem(const std::string& folder_id);
@@ -169,6 +180,7 @@ class APP_LIST_EXPORT AppListModel : public AppListItemListObserver {
   scoped_ptr<SearchResults> results_;
 
   Status status_;
+  State state_;
   ObserverList<AppListModelObserver, true> observers_;
   bool folders_enabled_;
 

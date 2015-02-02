@@ -12,6 +12,7 @@
 #include "GrGpu.h"
 
 #include "SkData.h"
+#include "SkDistanceFieldGen.h"
 #include "SkStrokeRec.h"
 
 // TODO: try to remove this #include
@@ -227,10 +228,9 @@ bool GrSWMaskHelper::init(const SkIRect& resultBounds,
 
 /**
  * Get a texture (from the texture cache) of the correct size & format.
- * Return true on success; false on failure.
  */
-bool GrSWMaskHelper::getTexture(GrAutoScratchTexture* texture) {
-    GrTextureDesc desc;
+GrTexture* GrSWMaskHelper::createTexture() {
+    GrSurfaceDesc desc;
     desc.fWidth = fBM.width();
     desc.fHeight = fBM.height();
     desc.fConfig = kAlpha_8_GrPixelConfig;
@@ -248,11 +248,10 @@ bool GrSWMaskHelper::getTexture(GrAutoScratchTexture* texture) {
         SkASSERT(fContext->getGpu()->caps()->isConfigTexturable(desc.fConfig));
     }
 
-    texture->set(fContext, desc);
-    return SkToBool(texture->texture());
+    return fContext->refScratchTexture(desc, GrContext::kApprox_ScratchTexMatch);
 }
 
-void GrSWMaskHelper::sendTextureData(GrTexture *texture, const GrTextureDesc& desc,
+void GrSWMaskHelper::sendTextureData(GrTexture *texture, const GrSurfaceDesc& desc,
                                      const void *data, int rowbytes) {
     // If we aren't reusing scratch textures we don't need to flush before
     // writing since no one else will be using 'texture'
@@ -267,7 +266,7 @@ void GrSWMaskHelper::sendTextureData(GrTexture *texture, const GrTextureDesc& de
                          reuseScratch ? 0 : GrContext::kDontFlush_PixelOpsFlag);
 }
 
-void GrSWMaskHelper::compressTextureData(GrTexture *texture, const GrTextureDesc& desc) {
+void GrSWMaskHelper::compressTextureData(GrTexture *texture, const GrSurfaceDesc& desc) {
 
     SkASSERT(GrPixelConfigIsCompressed(desc.fConfig));
     SkASSERT(fmt_to_config(fCompressedFormat) == desc.fConfig);
@@ -284,7 +283,7 @@ void GrSWMaskHelper::compressTextureData(GrTexture *texture, const GrTextureDesc
 void GrSWMaskHelper::toTexture(GrTexture *texture) {
     SkAutoLockPixels alp(fBM);
 
-    GrTextureDesc desc;
+    GrSurfaceDesc desc;
     desc.fWidth = fBM.width();
     desc.fHeight = fBM.height();
     desc.fConfig = texture->config();
@@ -304,6 +303,16 @@ void GrSWMaskHelper::toTexture(GrTexture *texture) {
             this->sendTextureData(texture, desc, fCompressedBuffer.get(), 0);
             break;
     }
+}
+
+/**
+ * Convert mask generation results to a signed distance field
+ */
+void GrSWMaskHelper::toSDF(unsigned char* sdf) {
+    SkAutoLockPixels alp(fBM);
+    
+    SkGenerateDistanceFieldFromA8Image(sdf, (const unsigned char*)fBM.getPixels(),
+                                       fBM.width(), fBM.height(), fBM.rowBytes());
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -326,14 +335,14 @@ GrTexture* GrSWMaskHelper::DrawPathMaskToTexture(GrContext* context,
 
     helper.draw(path, stroke, SkRegion::kReplace_Op, antiAlias, 0xFF);
 
-    GrAutoScratchTexture ast;
-    if (!helper.getTexture(&ast)) {
+    GrTexture* texture(helper.createTexture());
+    if (!texture) {
         return NULL;
     }
 
-    helper.toTexture(ast.texture());
+    helper.toTexture(texture);
 
-    return ast.detach();
+    return texture;
 }
 
 void GrSWMaskHelper::DrawToTargetWithPathMask(GrTexture* texture,

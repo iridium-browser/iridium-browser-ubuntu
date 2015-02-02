@@ -92,11 +92,10 @@ class LogoutButton : public TrayPopupLabelButton {
     SetEnabled(!placeholder_);
   }
 
-  virtual ~LogoutButton() {}
+  ~LogoutButton() override {}
 
  private:
-  virtual void Paint(gfx::Canvas* canvas,
-                     const views::CullSet& cull_set) OVERRIDE {
+  void Paint(gfx::Canvas* canvas, const views::CullSet& cull_set) override {
     // Just skip paint if this button used as a placeholder.
     if (!placeholder_)
       TrayPopupLabelButton::Paint(canvas, cull_set);
@@ -110,11 +109,11 @@ class UserViewMouseWatcherHost : public views::MouseWatcherHost {
  public:
   explicit UserViewMouseWatcherHost(const gfx::Rect& screen_area)
       : screen_area_(screen_area) {}
-  virtual ~UserViewMouseWatcherHost() {}
+  ~UserViewMouseWatcherHost() override {}
 
   // Implementation of MouseWatcherHost.
-  virtual bool Contains(const gfx::Point& screen_point,
-                        views::MouseWatcherHost::MouseEventType type) OVERRIDE {
+  bool Contains(const gfx::Point& screen_point,
+                views::MouseWatcherHost::MouseEventType type) override {
     return screen_area_.Contains(screen_point);
   }
 
@@ -130,14 +129,14 @@ class AddUserView : public views::View {
  public:
   // The |owner| is the view for which this view gets created.
   AddUserView(ButtonFromView* owner);
-  virtual ~AddUserView();
+  ~AddUserView() override;
 
   // Get the anchor view for a message.
   views::View* anchor() { return anchor_; }
 
  private:
   // Overridden from views::View.
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
+  gfx::Size GetPreferredSize() const override;
 
   // Create the additional client content for this item.
   void AddContent();
@@ -378,7 +377,7 @@ void UserView::AddLogoutButton(user::LoginStatus login) {
                        views::Button::STATE_PRESSED,
                        views::Painter::CreateImageGridPainter(
                            kPublicAccountLogoutButtonBorderImagesHovered));
-    logout_button_->SetBorder(border.PassAs<views::Border>());
+    logout_button_->SetBorder(border.Pass());
   }
   AddChildView(logout_button_);
 }

@@ -200,7 +200,7 @@ WebInspector.ChunkedFileReader.prototype = {
  * @return {!Node}
  */
 WebInspector.createFileSelectorElement = function(callback) {
-    var fileSelectorElement = document.createElement("input");
+    var fileSelectorElement = createElement("input");
     fileSelectorElement.type = "file";
     fileSelectorElement.style.display = "none";
     fileSelectorElement.setAttribute("tabindex", -1);

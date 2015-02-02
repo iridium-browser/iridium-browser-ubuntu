@@ -13,6 +13,7 @@
 #include "chrome/browser/chromeos/file_manager/url_util.h"
 #include "chrome/browser/chromeos/file_system_provider/mount_path_util.h"
 #include "chrome/browser/chromeos/file_system_provider/provided_file_system_interface.h"
+#include "chrome/browser/chromeos/fileapi/external_file_url_util.h"
 #include "chrome/browser/chromeos/fileapi/file_system_backend.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/drive/drive_app_registry.h"
@@ -22,6 +23,8 @@
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chromeos/chromeos_switches.h"
+#include "chromeos/network/network_handler.h"
+#include "chromeos/network/network_state_handler.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "content/public/browser/browser_thread.h"
@@ -470,24 +473,21 @@ bool FileManagerPrivateGetEntryPropertiesFunction::RunAsync() {
     switch (file_system_url.type()) {
       case storage::kFileSystemTypeDrive:
         SingleEntryPropertiesGetterForDrive::Start(
-            file_system_url.path(),
-            GetProfile(),
+            file_system_url.path(), GetProfile(),
             base::Bind(&FileManagerPrivateGetEntryPropertiesFunction::
                            CompleteGetEntryProperties,
-                       this,
-                       i));
+                       this, i, file_system_url));
         break;
       case storage::kFileSystemTypeProvided:
         SingleEntryPropertiesGetterForFileSystemProvider::Start(
             file_system_url,
             base::Bind(&FileManagerPrivateGetEntryPropertiesFunction::
                            CompleteGetEntryProperties,
-                       this,
-                       i));
+                       this, i, file_system_url));
         break;
       default:
         LOG(ERROR) << "Not supported file system type.";
-        CompleteGetEntryProperties(i,
+        CompleteGetEntryProperties(i, file_system_url,
                                    make_scoped_ptr(new EntryProperties),
                                    base::File::FILE_ERROR_INVALID_OPERATION);
     }
@@ -498,12 +498,17 @@ bool FileManagerPrivateGetEntryPropertiesFunction::RunAsync() {
 
 void FileManagerPrivateGetEntryPropertiesFunction::CompleteGetEntryProperties(
     size_t index,
+    const storage::FileSystemURL& url,
     scoped_ptr<EntryProperties> properties,
     base::File::Error error) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(0 <= processed_count_ && processed_count_ < properties_list_.size());
 
   properties_list_[index] = make_linked_ptr(properties.release());
+  if (error == base::File::FILE_OK) {
+    properties_list_[index]->external_file_url.reset(
+        new std::string(chromeos::FileSystemURLToExternalFileURL(url).spec()));
+  }
 
   processed_count_++;
   if (processed_count_ < properties_list_.size())
@@ -808,6 +813,10 @@ bool FileManagerPrivateGetDriveConnectionStateFunction::RunSync() {
       break;
   }
 
+  result.has_cellular_network_access =
+      chromeos::NetworkHandler::Get()
+          ->network_state_handler()
+          ->FirstNetworkByType(chromeos::NetworkTypePattern::Mobile());
   results_ = api::file_manager_private::GetDriveConnectionState::Results::
       Create(result);
 

@@ -60,7 +60,7 @@ scoped_ptr<HttpResponse> HandleRequest(const HttpRequest& request) {
   if (request.relative_url == "/doc_path.doc") {
     response->set_code(net::HTTP_OK);
     response->set_content_type("application/msword");
-    return response.PassAs<HttpResponse>();
+    return response.Pass();
   }
 
   // For relative path "/spreadsheet_path.xls", return success response with
@@ -71,7 +71,7 @@ scoped_ptr<HttpResponse> HandleRequest(const HttpRequest& request) {
     // Test that multiple headers with the same name are merged.
     response->AddCustomHeader("Test-Header", "part1");
     response->AddCustomHeader("Test-Header", "part2");
-    return response.PassAs<HttpResponse>();
+    return response.Pass();
   }
 
   // For relative path "/text_path_attch.txt", return success response with
@@ -83,7 +83,7 @@ scoped_ptr<HttpResponse> HandleRequest(const HttpRequest& request) {
     response->set_content_type("text/plain");
     response->AddCustomHeader("Content-Disposition",
                               "attachment; filename=test_path.txt");
-    return response.PassAs<HttpResponse>();
+    return response.Pass();
   }
 
   // For relative path "/test_path_attch.txt", return success response with
@@ -92,7 +92,7 @@ scoped_ptr<HttpResponse> HandleRequest(const HttpRequest& request) {
     response->set_code(net::HTTP_OK);
     response->set_content("txt content");
     response->set_content_type("text/plain");
-    return response.PassAs<HttpResponse>();
+    return response.Pass();
   }
 
   // A random HTML file to navigate to.
@@ -100,7 +100,7 @@ scoped_ptr<HttpResponse> HandleRequest(const HttpRequest& request) {
     response->set_code(net::HTTP_OK);
     response->set_content("html content");
     response->set_content_type("text/html");
-    return response.PassAs<HttpResponse>();
+    return response.Pass();
   }
 
   // RTF files for testing chrome.streamsPrivate.abort().
@@ -108,19 +108,19 @@ scoped_ptr<HttpResponse> HandleRequest(const HttpRequest& request) {
       request.relative_url == "/no_abort.rtf") {
     response->set_code(net::HTTP_OK);
     response->set_content_type("application/rtf");
-    return response.PassAs<HttpResponse>();
+    return response.Pass();
   }
 
   // Respond to /favicon.ico for navigating to the page.
   if (request.relative_url == "/favicon.ico") {
     response->set_code(net::HTTP_NOT_FOUND);
-    return response.PassAs<HttpResponse>();
+    return response.Pass();
   }
 
   // No other requests should be handled in the tests.
   EXPECT_TRUE(false) << "NOTREACHED!";
   response->set_code(net::HTTP_NOT_FOUND);
-  return response.PassAs<HttpResponse>();
+  return response.Pass();
 }
 
 // Tests to verify that resources are correctly intercepted by
@@ -132,9 +132,9 @@ class StreamsPrivateApiTest : public ExtensionApiTest {
  public:
   StreamsPrivateApiTest() {}
 
-  virtual ~StreamsPrivateApiTest() {}
+  ~StreamsPrivateApiTest() override {}
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     // Init test server.
     test_server_.reset(new EmbeddedTestServer);
     ASSERT_TRUE(test_server_->InitializeAndWaitUntilReady());
@@ -143,7 +143,7 @@ class StreamsPrivateApiTest : public ExtensionApiTest {
     ExtensionApiTest::SetUpOnMainThread();
   }
 
-  virtual void TearDownOnMainThread() OVERRIDE {
+  void TearDownOnMainThread() override {
     // Tear down the test server.
     EXPECT_TRUE(test_server_->ShutdownAndWaitUntilComplete());
     test_server_.reset();
@@ -257,6 +257,34 @@ IN_PROC_BROWSER_TEST_F(StreamsPrivateApiTest, Navigate) {
 
   // Wait for the response from the test server.
   base::MessageLoop::current()->RunUntilIdle();
+
+  // There should be no downloads started by the navigation.
+  DownloadManager* download_manager = GetDownloadManager();
+  std::vector<DownloadItem*> downloads;
+  download_manager->GetAllDownloads(&downloads);
+  ASSERT_EQ(0u, downloads.size());
+
+  // The test extension should receive onExecuteContentHandler event with MIME
+  // type 'application/msword' (and call chrome.test.notifySuccess).
+  EXPECT_TRUE(catcher.GetNextResult());
+}
+
+// Tests that navigating to a file URL also intercepts despite there being no
+// HTTP headers. This is a regression test for https://crbug.com/416433.
+IN_PROC_BROWSER_TEST_F(StreamsPrivateApiTest, FileURL) {
+#if defined(OS_WIN) && defined(USE_ASH)
+  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+    return;
+#endif
+
+  ASSERT_TRUE(LoadTestExtension()) << message_;
+
+  ResultCatcher catcher;
+
+  ui_test_utils::NavigateToURL(browser(), ui_test_utils::GetTestUrl(
+      base::FilePath(FILE_PATH_LITERAL("downloads")),
+      base::FilePath(FILE_PATH_LITERAL("Picture_1.doc"))));
 
   // There should be no downloads started by the navigation.
   DownloadManager* download_manager = GetDownloadManager();

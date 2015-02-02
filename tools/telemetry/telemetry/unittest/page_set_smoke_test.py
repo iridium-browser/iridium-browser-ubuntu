@@ -10,6 +10,7 @@ from telemetry.core import browser_credentials
 from telemetry.core import discover
 from telemetry.page import page_set as page_set_module
 from telemetry.page import page_set_archive_info
+from telemetry.util import classes
 
 
 class PageSetSmokeTest(unittest.TestCase):
@@ -40,11 +41,11 @@ class PageSetSmokeTest(unittest.TestCase):
 
   def CheckCredentials(self, page_set):
     """Verify that all pages in page_set use proper credentials"""
-    credentials = browser_credentials.BrowserCredentials()
-    if page_set.credentials_path:
-      credentials.credentials_path = (
-          os.path.join(page_set.base_dir, page_set.credentials_path))
     for page in page_set.pages:
+      credentials = browser_credentials.BrowserCredentials()
+      if page.credentials_path:
+        credentials.credentials_path = (
+            os.path.join(page.base_dir, page.credentials_path))
       fail_message = ('page %s of %s has invalid credentials %s' %
                       (page.url, page_set.file_path, page.credentials))
       if page.credentials:
@@ -53,14 +54,38 @@ class PageSetSmokeTest(unittest.TestCase):
         except browser_credentials.CredentialsError:
           self.fail(fail_message)
 
-  def CheckTypes(self, page_set):
+  def CheckAttributes(self, page_set):
     """Verify that page_set and its page's base attributes have the right types.
     """
-    self.CheckTypesOfPageSetBasicAttributes(page_set)
+    self.CheckAttributesOfPageSetBasicAttributes(page_set)
     for page in page_set.pages:
-      self.CheckTypesOfPageBasicAttributes(page)
+      self.CheckAttributesOfPageBasicAttributes(page)
 
-  def CheckTypesOfPageSetBasicAttributes(self, page_set):
+  def CheckNoMixedInBetweenLegacyRunMethodsAndRunPageInteractions(
+      self, page_set):
+    # This test is to make sure that page has been converted to use single
+    # RunPageInteractions does not contain legacy run method.
+    # For more context see: crbug.com/418375
+    # TODO(nednguyen, ernstm): remove this test when crbug.com/418375 is marked
+    # fixed.
+    LEGACY_RUN_METHODS = [
+        'RunMediaMetrics',
+        'RunNoOp',
+        'RunRepaint',
+        'RunPrepareForScreenShot',
+        'RunSmoothness',
+        'RunWebrtc'
+        ]
+    for page in page_set.pages:
+      if hasattr(page, 'RunPageInteractions'):
+        for legacy_run_method in LEGACY_RUN_METHODS:
+          self.assertTrue(
+              not hasattr(page, legacy_run_method),
+              msg=('page %s in page_set %s has both legacy Run.. methods and '
+                   'RunPageInteractions defined. ' % (
+                       page, page_set.file_path)))
+
+  def CheckAttributesOfPageSetBasicAttributes(self, page_set):
     if page_set.file_path is not None:
       self.assertTrue(
           isinstance(page_set.file_path, str),
@@ -83,7 +108,8 @@ class PageSetSmokeTest(unittest.TestCase):
         isinstance(page_set.startup_url, str),
         msg='page_set\'s startup_url must have type string')
 
-  def CheckTypesOfPageBasicAttributes(self, page):
+  def CheckAttributesOfPageBasicAttributes(self, page):
+    self.assertTrue(not hasattr(page, 'disabled'))
     self.assertTrue(
        isinstance(page.url, str),
        msg='page %s \'s url must have type string' % page.display_name)
@@ -94,6 +120,14 @@ class PageSetSmokeTest(unittest.TestCase):
     self.assertTrue(
        isinstance(page.name, str),
        msg='page %s \'s name field must have type string' % page.display_name)
+    self.assertTrue(
+       isinstance(page.labels, set),
+       msg='page %s \'s labels field must have type set' % page.display_name)
+    for l in page.labels:
+      self.assertTrue(
+         isinstance(l, str),
+         msg='label %s in page %s \'s labels must have type string'
+         % (str(l), page.display_name))
 
   def RunSmokeTest(self, page_sets_dir, top_level_dir):
     """Run smoke test on all page sets in page_sets_dir.
@@ -104,8 +138,13 @@ class PageSetSmokeTest(unittest.TestCase):
     page_sets = discover.DiscoverClasses(page_sets_dir, top_level_dir,
                                          page_set_module.PageSet).values()
     for page_set_class in page_sets:
+      if not classes.IsDirectlyConstructable(page_set_class):
+        # We can't test page sets that aren't directly constructable since we
+        # don't know what arguments to put for the constructor.
+        continue
       page_set = page_set_class()
       logging.info('Testing %s', page_set.file_path)
       self.CheckArchive(page_set)
       self.CheckCredentials(page_set)
-      self.CheckTypes(page_set)
+      self.CheckAttributes(page_set)
+      self.CheckNoMixedInBetweenLegacyRunMethodsAndRunPageInteractions(page_set)

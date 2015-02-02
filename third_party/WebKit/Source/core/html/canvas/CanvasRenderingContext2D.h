@@ -36,11 +36,13 @@
 #include "platform/fonts/Font.h"
 #include "platform/graphics/Color.h"
 #include "platform/geometry/FloatSize.h"
+#include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/GraphicsTypes.h"
 #include "platform/graphics/ImageBuffer.h"
 #include "platform/graphics/Path.h"
 #include "platform/transforms/AffineTransform.h"
 #include "wtf/HashMap.h"
+#include "wtf/ListHashSet.h"
 #include "wtf/Vector.h"
 #include "wtf/text/WTFString.h"
 
@@ -56,23 +58,20 @@ class Path2D;
 class Element;
 class ExceptionState;
 class FloatRect;
-class GraphicsContext;
 class HTMLCanvasElement;
 class HTMLImageElement;
 class HTMLVideoElement;
-class HitRegionOptions;
-class ImageBitmap;
 class ImageData;
 class TextMetrics;
 
-typedef WillBeHeapHashMap<String, RefPtrWillBeMember<MutableStylePropertySet> > MutableStylePropertyMap;
+typedef WillBeHeapHashMap<String, RefPtrWillBeMember<MutableStylePropertySet>> MutableStylePropertyMap;
 
-class CanvasRenderingContext2D FINAL: public CanvasRenderingContext, public ScriptWrappable, public CanvasPathMethods {
+class CanvasRenderingContext2D final: public CanvasRenderingContext, public ScriptWrappable, public CanvasPathMethods {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static PassOwnPtrWillBeRawPtr<CanvasRenderingContext2D> create(HTMLCanvasElement* canvas, const Canvas2DContextAttributes* attrs, bool usesCSSCompatibilityParseMode)
+    static PassOwnPtrWillBeRawPtr<CanvasRenderingContext2D> create(HTMLCanvasElement* canvas, const Canvas2DContextAttributes* attrs, Document& document)
     {
-        return adoptPtrWillBeNoop(new CanvasRenderingContext2D(canvas, attrs, usesCSSCompatibilityParseMode));
+        return adoptPtrWillBeNoop(new CanvasRenderingContext2D(canvas, attrs, document));
     }
     virtual ~CanvasRenderingContext2D();
 
@@ -242,7 +241,7 @@ public:
     void loseContext();
     void restoreContext();
 
-    virtual void trace(Visitor*) OVERRIDE;
+    virtual void trace(Visitor*) override;
 
 private:
     enum Direction {
@@ -251,7 +250,7 @@ private:
         DirectionLTR
     };
 
-    class State FINAL : public CSSFontSelectorClient {
+    class State final : public CSSFontSelectorClient {
     public:
         State();
         virtual ~State();
@@ -260,9 +259,9 @@ private:
         State& operator=(const State&);
 
         // CSSFontSelectorClient implementation
-        virtual void fontsNeedUpdate(CSSFontSelector*) OVERRIDE;
+        virtual void fontsNeedUpdate(CSSFontSelector*) override;
 
-        virtual void trace(Visitor*) OVERRIDE;
+        virtual void trace(Visitor*) override;
 
         unsigned m_unrealizedSaveCount;
 
@@ -279,7 +278,7 @@ private:
         RGBA32 m_shadowColor;
         float m_globalAlpha;
         CompositeOperator m_globalComposite;
-        blink::WebBlendMode m_globalBlend;
+        WebBlendMode m_globalBlend;
         AffineTransform m_transform;
         bool m_invertibleCTM;
         Vector<float> m_lineDash;
@@ -298,14 +297,14 @@ private:
         bool m_hasClip;
     };
 
-    CanvasRenderingContext2D(HTMLCanvasElement*, const Canvas2DContextAttributes* attrs, bool usesCSSCompatibilityParseMode);
+    CanvasRenderingContext2D(HTMLCanvasElement*, const Canvas2DContextAttributes* attrs, Document&);
 
     State& modifiableState() { ASSERT(!state().m_unrealizedSaveCount); return *m_stateStack.last(); }
     const State& state() const { return *m_stateStack.last(); }
 
     void applyLineDash() const;
     void setShadow(const FloatSize& offset, float blur, RGBA32 color);
-    void applyShadow();
+    void applyShadow(ShadowMode = DrawShadowAndForeground);
     bool shouldDrawShadows() const;
 
     void dispatchContextLostEvent(Timer<CanvasRenderingContext2D>*);
@@ -324,8 +323,7 @@ private:
     void applyStrokePattern();
     void applyFillPattern();
 
-    void drawImageInternal(CanvasImageSource*, float sx, float sy, float sw, float sh, float dx, float dy, float dw, float dh, ExceptionState&, CompositeOperator, blink::WebBlendMode, GraphicsContext* = 0);
-    void drawVideo(HTMLVideoElement*, FloatRect srcRect, FloatRect dstRect);
+    void drawImageInternal(CanvasImageSource*, float sx, float sy, float sw, float sh, float dx, float dy, float dw, float dh, ExceptionState&);
 
     void fillInternal(const Path&, const String& windingRuleString);
     void strokeInternal(const Path&);
@@ -346,37 +344,36 @@ private:
 
     void inflateStrokeRect(FloatRect&) const;
 
-    template<class T> void fullCanvasCompositedFill(const T&);
-    template<class T> void fullCanvasCompositedStroke(const T&);
-    template<class T> void fullCanvasCompositedDrawImage(T*, const FloatRect&, const FloatRect&, CompositeOperator);
+    void fullCanvasCompositedDraw(const Closure& draw);
 
     void drawFocusIfNeededInternal(const Path&, Element*);
     bool focusRingCallIsValid(const Path&, Element*);
     void drawFocusRing(const Path&);
 
-    void addHitRegionInternal(const HitRegionOptionsInternal&, ExceptionState&);
     bool hasClip() { return state().m_hasClip; }
 
     void validateStateStack();
 
-    virtual bool is2d() const OVERRIDE { return true; }
-    virtual bool isAccelerated() const OVERRIDE;
-    virtual bool hasAlpha() const OVERRIDE { return m_hasAlpha; }
-    virtual void setIsHidden(bool) OVERRIDE;
+    virtual bool is2d() const override { return true; }
+    virtual bool isAccelerated() const override;
+    virtual bool hasAlpha() const override { return m_hasAlpha; }
+    virtual void setIsHidden(bool) override;
 
-    virtual bool isTransformInvertible() const OVERRIDE { return state().m_invertibleCTM; }
+    virtual bool isTransformInvertible() const override { return state().m_invertibleCTM; }
 
-    virtual blink::WebLayer* platformLayer() const OVERRIDE;
+    virtual WebLayer* platformLayer() const override;
     TextDirection toTextDirection(Direction, RenderStyle** computedStyle = nullptr) const;
 
-    WillBeHeapVector<OwnPtrWillBeMember<State> > m_stateStack;
+    WillBeHeapVector<OwnPtrWillBeMember<State>> m_stateStack;
     OwnPtrWillBeMember<HitRegionManager> m_hitRegionManager;
     bool m_usesCSSCompatibilityParseMode;
+    GraphicsContext::AntiAliasingMode m_clipAntialiasing;
     bool m_hasAlpha;
     bool m_isContextLost;
     bool m_contextRestorable;
     Canvas2DContextStorage m_storageMode;
     MutableStylePropertyMap m_fetchedFonts;
+    ListHashSet<String> m_fetchedFontsLRUList;
     unsigned m_tryRestoreContextAttemptCount;
     Timer<CanvasRenderingContext2D> m_dispatchContextLostEventTimer;
     Timer<CanvasRenderingContext2D> m_dispatchContextRestoredEventTimer;

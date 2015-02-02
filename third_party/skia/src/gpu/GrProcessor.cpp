@@ -12,6 +12,50 @@
 #include "GrMemoryPool.h"
 #include "SkTLS.h"
 
+#if SK_ALLOW_STATIC_GLOBAL_INITIALIZERS
+
+/*
+ * Originally these were both in the processor unit test header, but then it seemed to cause linker
+ * problems on android.
+ */
+template<>
+SkTArray<GrProcessorTestFactory<GrFragmentProcessor>*, true>*
+GrProcessorTestFactory<GrFragmentProcessor>::GetFactories() {
+    static SkTArray<GrProcessorTestFactory<GrFragmentProcessor>*, true> gFactories;
+    return &gFactories;
+}
+
+template<>
+SkTArray<GrProcessorTestFactory<GrGeometryProcessor>*, true>*
+GrProcessorTestFactory<GrGeometryProcessor>::GetFactories() {
+    static SkTArray<GrProcessorTestFactory<GrGeometryProcessor>*, true> gFactories;
+    return &gFactories;
+}
+
+/*
+ * To ensure we always have successful static initialization, before creating from the factories
+ * we verify the count is as expected.  If a new factory is added, then these numbers must be
+ * manually adjusted.
+ */
+static const int kFPFactoryCount = 37;
+static const int kGPFactoryCount = 15;
+
+template<>
+void GrProcessorTestFactory<GrFragmentProcessor>::VerifyFactoryCount() {
+    if (kFPFactoryCount != GetFactories()->count()) {
+        SkFAIL("Wrong number of fragment processor factories!");
+    }
+}
+
+template<>
+void GrProcessorTestFactory<GrGeometryProcessor>::VerifyFactoryCount() {
+    if (kGPFactoryCount != GetFactories()->count()) {
+        SkFAIL("Wrong number of geometry processor factories!");
+    }
+}
+
+#endif
+
 namespace GrProcessorUnitTest {
 const SkMatrix& TestMatrix(SkRandom* random) {
     static SkMatrix gMatrices[5];
@@ -48,8 +92,8 @@ private:
     }
 };
 
-int32_t GrBackendProcessorFactory::fCurrEffectClassID =
-        GrBackendProcessorFactory::kIllegalEffectClassID;
+int32_t GrBackendProcessorFactory::fCurrProcessorClassID =
+        GrBackendProcessorFactory::kIllegalProcessorClassID;
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -57,11 +101,6 @@ GrProcessor::~GrProcessor() {}
 
 const char* GrProcessor::name() const {
     return this->getFactory().name();
-}
-
-void GrProcessor::addCoordTransform(const GrCoordTransform* transform) {
-    fCoordTransforms.push_back(transform);
-    SkDEBUGCODE(transform->setInEffect();)
 }
 
 void GrProcessor::addTextureAccess(const GrTextureAccess* access) {
@@ -77,15 +116,81 @@ void GrProcessor::operator delete(void* target) {
     GrProcessor_Globals::GetTLS()->release(target);
 }
 
-#ifdef SK_DEBUG
-void GrProcessor::assertEquality(const GrProcessor& other) const {
-    SkASSERT(this->numTransforms() == other.numTransforms());
-    for (int i = 0; i < this->numTransforms(); ++i) {
-        SkASSERT(this->coordTransform(i) == other.coordTransform(i));
+bool GrProcessor::hasSameTextureAccesses(const GrProcessor& that) const {
+    if (this->numTextures() != that.numTextures()) {
+        return false;
     }
-    SkASSERT(this->numTextures() == other.numTextures());
     for (int i = 0; i < this->numTextures(); ++i) {
-        SkASSERT(this->textureAccess(i) == other.textureAccess(i));
+        if (this->textureAccess(i) != that.textureAccess(i)) {
+            return false;
+        }
     }
+    return true;
 }
-#endif
+
+#ifdef SK_DEBUG
+
+void GrProcessor::InvariantOutput::validate() const {
+    if (fIsSingleComponent) {
+        SkASSERT(0 == fValidFlags || kRGBA_GrColorComponentFlags == fValidFlags);
+        if (kRGBA_GrColorComponentFlags == fValidFlags) {
+            SkASSERT(this->colorComponentsAllEqual());
+        }
+    }
+
+    SkASSERT(this->validPreMulColor());
+
+    // If we claim that we are not using the input color we must not be modulating the input.
+    SkASSERT(fNonMulStageFound || fWillUseInputColor);
+}
+
+bool GrProcessor::InvariantOutput::colorComponentsAllEqual() const {
+    unsigned colorA = GrColorUnpackA(fColor);
+    return(GrColorUnpackR(fColor) == colorA &&
+           GrColorUnpackG(fColor) == colorA &&
+           GrColorUnpackB(fColor) == colorA);
+}
+
+bool GrProcessor::InvariantOutput::validPreMulColor() const {
+    if (kA_GrColorComponentFlag & fValidFlags) {
+        float c[4];
+        GrColorToRGBAFloat(fColor, c);
+        if (kR_GrColorComponentFlag & fValidFlags) {
+            if (c[0] > c[3]) {
+                return false;
+            }
+        }
+        if (kG_GrColorComponentFlag & fValidFlags) {
+            if (c[1] > c[3]) {
+                return false;
+            }
+        }
+        if (kB_GrColorComponentFlag & fValidFlags) {
+            if (c[2] > c[3]) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+#endif // end DEBUG
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+
+void GrFragmentProcessor::addCoordTransform(const GrCoordTransform* transform) {
+    fCoordTransforms.push_back(transform);
+    SkDEBUGCODE(transform->setInProcessor();)
+}
+
+bool GrFragmentProcessor::hasSameTransforms(const GrFragmentProcessor& that) const {
+    if (fCoordTransforms.count() != that.fCoordTransforms.count()) {
+        return false;
+    }
+    int count = fCoordTransforms.count();
+    for (int i = 0; i < count; ++i) {
+        if (*fCoordTransforms[i] != *that.fCoordTransforms[i]) {
+            return false;
+        }
+    }
+    return true;
+}

@@ -19,28 +19,27 @@ class CC_EXPORT ImageLayer : public TiledLayer {
   static scoped_refptr<ImageLayer> Create();
 
   // Layer implementation.
-  virtual void SetTexturePriorities(const PriorityCalculator& priority_calc)
-      OVERRIDE;
-  virtual bool Update(ResourceUpdateQueue* queue,
-                      const OcclusionTracker<Layer>* occlusion) OVERRIDE;
-  virtual void CalculateContentsScale(float ideal_contents_scale,
-                                      float* contents_scale_x,
-                                      float* contents_scale_y,
-                                      gfx::Size* content_bounds) OVERRIDE;
-  virtual void OnOutputSurfaceCreated() OVERRIDE;
+  void SetTexturePriorities(const PriorityCalculator& priority_calc) override;
+  bool Update(ResourceUpdateQueue* queue,
+              const OcclusionTracker<Layer>* occlusion) override;
+  void CalculateContentsScale(float ideal_contents_scale,
+                              float* contents_scale_x,
+                              float* contents_scale_y,
+                              gfx::Size* content_bounds) override;
+  void OnOutputSurfaceCreated() override;
 
   void SetBitmap(const SkBitmap& image);
 
  protected:
-  virtual bool HasDrawableContent() const OVERRIDE;
+  bool HasDrawableContent() const override;
 
  private:
   ImageLayer();
-  virtual ~ImageLayer();
+  ~ImageLayer() override;
 
   // TiledLayer Implementation.
-  virtual LayerUpdater* Updater() const OVERRIDE;
-  virtual void CreateUpdaterIfNeeded() OVERRIDE;
+  LayerUpdater* Updater() const override;
+  void CreateUpdaterIfNeeded() override;
 
   float ImageContentsScaleX() const;
   float ImageContentsScaleY() const;

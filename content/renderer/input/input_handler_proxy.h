@@ -7,6 +7,7 @@
 
 #include "base/basictypes.h"
 #include "base/containers/hash_tables.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "cc/input/input_handler.h"
 #include "content/common/content_export.h"
@@ -42,13 +43,9 @@ class CONTENT_EXPORT InputHandlerProxy
   EventDisposition HandleInputEvent(const blink::WebInputEvent& event);
 
   // cc::InputHandlerClient implementation.
-  virtual void WillShutdown() OVERRIDE;
-  virtual void Animate(base::TimeTicks time) OVERRIDE;
-  virtual void MainThreadHasStoppedFlinging() OVERRIDE;
-  virtual void DidOverscroll(
-      const gfx::PointF& causal_event_viewport_point,
-      const gfx::Vector2dF& accumulated_overscroll,
-      const gfx::Vector2dF& latest_overscroll_delta) OVERRIDE;
+  void WillShutdown() override;
+  void Animate(base::TimeTicks time) override;
+  void MainThreadHasStoppedFlinging() override;
 
   // blink::WebGestureCurveTarget implementation.
   virtual bool scrollBy(const blink::WebFloatSize& offset,
@@ -80,6 +77,11 @@ class CONTENT_EXPORT InputHandlerProxy
 
   // Returns true if we actually had an active fling to cancel.
   bool CancelCurrentFlingWithoutNotifyingClient();
+
+  // Used to send overscroll messages to the browser.
+  void HandleOverscroll(
+      const gfx::Point& causal_event_viewport_point,
+      const cc::InputHandlerScrollResult& scroll_result);
 
   scoped_ptr<blink::WebGestureCurve> fling_curve_;
   // Parameters for the active fling animation, stored in case we need to

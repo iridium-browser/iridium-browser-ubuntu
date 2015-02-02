@@ -99,6 +99,11 @@ namespace blink {
     if (UNLIKELY(exceptionState.throwIfNeeded()))                       \
         return;
 
+#define TONATIVE_VOID_EXCEPTIONSTATE_ARGINTERNAL(value, exceptionState) \
+    (value);                                                            \
+    if (UNLIKELY(exceptionState.throwIfNeeded()))                       \
+        return;
+
 #define TONATIVE_DEFAULT_EXCEPTIONSTATE(type, var, value, exceptionState, retVal) \
     type var = (value);                                                           \
     if (UNLIKELY(exceptionState.throwIfNeeded()))                                 \
@@ -128,6 +133,11 @@ namespace blink {
 #define TOSTRING_VOID_INTERNAL(var, value) \
     var = (value);                         \
     if (UNLIKELY(!var.prepare()))          \
+        return;
+
+#define TOSTRING_VOID_EXCEPTIONSTATE(type, var, value, exceptionState) \
+    type var(value);                                                   \
+    if (UNLIKELY(!var.prepare(exceptionState)))                        \
         return;
 
 #define TOSTRING_DEFAULT(type, var, value, retVal) \

@@ -40,16 +40,16 @@ class MEDIA_EXPORT DecryptingAudioDecoder : public AudioDecoder {
   DecryptingAudioDecoder(
       const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
       const SetDecryptorReadyCB& set_decryptor_ready_cb);
-  virtual ~DecryptingAudioDecoder();
+  ~DecryptingAudioDecoder() override;
 
   // AudioDecoder implementation.
-  virtual std::string GetDisplayName() const OVERRIDE;
-  virtual void Initialize(const AudioDecoderConfig& config,
-                          const PipelineStatusCB& status_cb,
-                          const OutputCB& output_cb) OVERRIDE;
-  virtual void Decode(const scoped_refptr<DecoderBuffer>& buffer,
-                      const DecodeCB& decode_cb) OVERRIDE;
-  virtual void Reset(const base::Closure& closure) OVERRIDE;
+  std::string GetDisplayName() const override;
+  void Initialize(const AudioDecoderConfig& config,
+                  const PipelineStatusCB& status_cb,
+                  const OutputCB& output_cb) override;
+  void Decode(const scoped_refptr<DecoderBuffer>& buffer,
+              const DecodeCB& decode_cb) override;
+  void Reset(const base::Closure& closure) override;
 
  private:
   // For a detailed state diagram please see this link: http://goo.gl/8jAok

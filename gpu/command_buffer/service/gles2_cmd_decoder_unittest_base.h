@@ -19,6 +19,7 @@
 #include "gpu/command_buffer/service/shader_manager.h"
 #include "gpu/command_buffer/service/test_helper.h"
 #include "gpu/command_buffer/service/texture_manager.h"
+#include "gpu/command_buffer/service/valuebuffer_manager.h"
 #include "gpu/command_buffer/service/vertex_array_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gl/gl_context_stub_with_extensions.h"
@@ -69,8 +70,8 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool> {
     engine_->ClearSharedMemory();
   }
 
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
   template <typename T>
   error::Error ExecuteCmd(const T& cmd) {
@@ -95,10 +96,6 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool> {
   T GetSharedMemoryAsWithOffset(uint32 offset) {
     void* ptr = reinterpret_cast<int8*>(shared_memory_address_) + offset;
     return reinterpret_cast<T>(ptr);
-  }
-
-  IdAllocatorInterface* GetIdAllocator(GLuint namespace_id) {
-    return group_->GetIdAllocator(namespace_id);
   }
 
   Buffer* GetBuffer(GLuint service_id) {
@@ -126,6 +123,10 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool> {
     return group_->program_manager()->GetProgram(client_id);
   }
 
+  Valuebuffer* GetValuebuffer(GLuint client_id) {
+    return group_->valuebuffer_manager()->GetValuebuffer(client_id);
+  }
+
   QueryManager::Query* GetQueryInfo(GLuint client_id) {
     return decoder_->GetQueryManager()->GetQuery(client_id);
   }
@@ -138,6 +139,10 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool> {
 
   ProgramManager* program_manager() {
     return group_->program_manager();
+  }
+
+  ValuebufferManager* valuebuffer_manager() {
+    return group_->valuebuffer_manager();
   }
 
   ImageManager* GetImageManager() { return decoder_->GetImageManager(); }
@@ -518,6 +523,7 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool> {
   GLuint client_fragment_shader_id_;
   GLuint client_query_id_;
   GLuint client_vertexarray_id_;
+  GLuint client_valuebuffer_id_;
 
   uint32 shared_memory_id_;
   uint32 shared_memory_offset_;
@@ -558,24 +564,23 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool> {
    public:
     MockCommandBufferEngine();
 
-    virtual ~MockCommandBufferEngine();
+    ~MockCommandBufferEngine() override;
 
-    virtual scoped_refptr<gpu::Buffer> GetSharedMemoryBuffer(int32 shm_id)
-        OVERRIDE;
+    scoped_refptr<gpu::Buffer> GetSharedMemoryBuffer(int32 shm_id) override;
 
     void ClearSharedMemory() {
       memset(valid_buffer_->memory(), kInitialMemoryValue, kSharedBufferSize);
     }
 
-    virtual void set_token(int32 token) OVERRIDE;
+    void set_token(int32 token) override;
 
-    virtual bool SetGetBuffer(int32 /* transfer_buffer_id */) OVERRIDE;
-
-    // Overridden from CommandBufferEngine.
-    virtual bool SetGetOffset(int32 offset) OVERRIDE;
+    bool SetGetBuffer(int32 /* transfer_buffer_id */) override;
 
     // Overridden from CommandBufferEngine.
-    virtual int32 GetGetOffset() OVERRIDE;
+    bool SetGetOffset(int32 offset) override;
+
+    // Overridden from CommandBufferEngine.
+    int32 GetGetOffset() override;
 
    private:
     scoped_refptr<gpu::Buffer> valid_buffer_;
@@ -632,9 +637,8 @@ class GLES2DecoderWithShaderTestBase : public GLES2DecoderTestBase {
   }
 
  protected:
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
-
+  void SetUp() override;
+  void TearDown() override;
 };
 
 // SpecializedSetup specializations that are needed in multiple unittest files.

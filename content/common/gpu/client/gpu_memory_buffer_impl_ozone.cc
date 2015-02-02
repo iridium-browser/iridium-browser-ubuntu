@@ -10,22 +10,22 @@
 namespace content {
 
 // static
-void GpuMemoryBufferImpl::Create(const gfx::Size& size,
-                                 unsigned internalformat,
-                                 unsigned usage,
+void GpuMemoryBufferImpl::Create(gfx::GpuMemoryBufferId id,
+                                 const gfx::Size& size,
+                                 Format format,
+                                 Usage usage,
                                  int client_id,
                                  const CreationCallback& callback) {
-  if (GpuMemoryBufferImplOzoneNativeBuffer::IsConfigurationSupported(
-          internalformat, usage)) {
+  if (GpuMemoryBufferImplOzoneNativeBuffer::IsConfigurationSupported(format,
+                                                                     usage)) {
     GpuMemoryBufferImplOzoneNativeBuffer::Create(
-        size, internalformat, usage, client_id, callback);
+        id, size, format, client_id, callback);
     return;
   }
 
   if (GpuMemoryBufferImplSharedMemory::IsConfigurationSupported(
-          size, internalformat, usage)) {
-    GpuMemoryBufferImplSharedMemory::Create(
-        size, internalformat, usage, callback);
+          size, format, usage)) {
+    GpuMemoryBufferImplSharedMemory::Create(id, size, format, callback);
     return;
   }
 
@@ -34,22 +34,24 @@ void GpuMemoryBufferImpl::Create(const gfx::Size& size,
 
 // static
 void GpuMemoryBufferImpl::AllocateForChildProcess(
+    gfx::GpuMemoryBufferId id,
     const gfx::Size& size,
-    unsigned internalformat,
-    unsigned usage,
+    Format format,
+    Usage usage,
     base::ProcessHandle child_process,
     int child_client_id,
     const AllocationCallback& callback) {
-  if (GpuMemoryBufferImplOzoneNativeBuffer::IsConfigurationSupported(
-          internalformat, usage)) {
+  if (GpuMemoryBufferImplOzoneNativeBuffer::IsConfigurationSupported(format,
+                                                                     usage)) {
     GpuMemoryBufferImplOzoneNativeBuffer::AllocateForChildProcess(
-        size, internalformat, usage, child_client_id, callback);
+        id, size, format, child_client_id, callback);
     return;
   }
+
   if (GpuMemoryBufferImplSharedMemory::IsConfigurationSupported(
-          size, internalformat, usage)) {
+          size, format, usage)) {
     GpuMemoryBufferImplSharedMemory::AllocateForChildProcess(
-        size, internalformat, child_process, callback);
+        id, size, format, child_process, callback);
     return;
   }
 
@@ -59,23 +61,36 @@ void GpuMemoryBufferImpl::AllocateForChildProcess(
 // static
 void GpuMemoryBufferImpl::DeletedByChildProcess(
     gfx::GpuMemoryBufferType type,
-    const gfx::GpuMemoryBufferId& id,
-    base::ProcessHandle child_process) {
+    gfx::GpuMemoryBufferId id,
+    base::ProcessHandle child_process,
+    int child_client_id,
+    uint32_t sync_point) {
+  switch (type) {
+    case gfx::SHARED_MEMORY_BUFFER:
+      break;
+    case gfx::OZONE_NATIVE_BUFFER:
+      GpuMemoryBufferImplOzoneNativeBuffer::DeletedByChildProcess(
+          id, child_client_id, sync_point);
+      break;
+    default:
+      NOTREACHED();
+      break;
+  }
 }
 
 // static
 scoped_ptr<GpuMemoryBufferImpl> GpuMemoryBufferImpl::CreateFromHandle(
     const gfx::GpuMemoryBufferHandle& handle,
     const gfx::Size& size,
-    unsigned internalformat,
+    Format format,
     const DestructionCallback& callback) {
   switch (handle.type) {
     case gfx::SHARED_MEMORY_BUFFER:
       return GpuMemoryBufferImplSharedMemory::CreateFromHandle(
-          handle, size, internalformat, callback);
+          handle, size, format, callback);
     case gfx::OZONE_NATIVE_BUFFER:
       return GpuMemoryBufferImplOzoneNativeBuffer::CreateFromHandle(
-          handle, size, internalformat, callback);
+          handle, size, format, callback);
     default:
       return scoped_ptr<GpuMemoryBufferImpl>();
   }

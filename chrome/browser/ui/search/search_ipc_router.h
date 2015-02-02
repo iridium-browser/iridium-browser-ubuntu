@@ -116,7 +116,7 @@ class SearchIPCRouter : public content::WebContentsObserver {
 
   SearchIPCRouter(content::WebContents* web_contents, Delegate* delegate,
                   scoped_ptr<Policy> policy);
-  virtual ~SearchIPCRouter();
+  ~SearchIPCRouter() override;
 
   // Tells the SearchIPCRouter that a new page in an Instant process committed.
   void OnNavigationEntryCommitted();
@@ -160,7 +160,8 @@ class SearchIPCRouter : public content::WebContentsObserver {
   void ToggleVoiceSearch();
 
   // Tells the page that the user pressed Enter in the omnibox.
-  void Submit(const base::string16& text);
+  void Submit(const base::string16& text,
+              const EmbeddedSearchRequestParams& params);
 
   // Called when the tab corresponding to |this| instance is activated.
   void OnTabActivated();
@@ -184,7 +185,7 @@ class SearchIPCRouter : public content::WebContentsObserver {
   FRIEND_TEST_ALL_PREFIXES(SearchIPCRouterTest, HandleTabChangedEvents);
 
   // Overridden from contents::WebContentsObserver:
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& message) override;
 
   void OnInstantSupportDetermined(int page_seq_no, bool supports_instant) const;
   void OnVoiceSearchSupportDetermined(int page_id,

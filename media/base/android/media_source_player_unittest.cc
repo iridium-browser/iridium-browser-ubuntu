@@ -50,39 +50,39 @@ class MockMediaPlayerManager : public MediaPlayerManager {
   virtual ~MockMediaPlayerManager() {}
 
   // MediaPlayerManager implementation.
-  virtual MediaResourceGetter* GetMediaResourceGetter() OVERRIDE {
+  virtual MediaResourceGetter* GetMediaResourceGetter() override {
     return NULL;
   }
-  virtual MediaUrlInterceptor* GetMediaUrlInterceptor() OVERRIDE {
+  virtual MediaUrlInterceptor* GetMediaUrlInterceptor() override {
     return NULL;
   }
   virtual void OnTimeUpdate(int player_id,
                             base::TimeDelta current_time,
-                            base::TimeTicks current_time_ticks) OVERRIDE {
+                            base::TimeTicks current_time_ticks) override {
     timestamp_updated_ = true;
   }
   virtual void OnMediaMetadataChanged(
       int player_id, base::TimeDelta duration, int width, int height,
-      bool success) OVERRIDE {
+      bool success) override {
     num_metadata_changes_++;
   }
-  virtual void OnPlaybackComplete(int player_id) OVERRIDE {
+  virtual void OnPlaybackComplete(int player_id) override {
     playback_completed_ = true;
     if (message_loop_->is_running())
       message_loop_->Quit();
   }
-  virtual void OnMediaInterrupted(int player_id) OVERRIDE {}
-  virtual void OnBufferingUpdate(int player_id, int percentage) OVERRIDE {}
+  virtual void OnMediaInterrupted(int player_id) override {}
+  virtual void OnBufferingUpdate(int player_id, int percentage) override {}
   virtual void OnSeekComplete(int player_id,
-                              const base::TimeDelta& current_time) OVERRIDE {}
-  virtual void OnError(int player_id, int error) OVERRIDE {}
+                              const base::TimeDelta& current_time) override {}
+  virtual void OnError(int player_id, int error) override {}
   virtual void OnVideoSizeChanged(int player_id, int width,
-                                  int height) OVERRIDE {}
-  virtual MediaPlayerAndroid* GetFullscreenPlayer() OVERRIDE { return NULL; }
-  virtual MediaPlayerAndroid* GetPlayer(int player_id) OVERRIDE { return NULL; }
-  virtual void RequestFullScreen(int player_id) OVERRIDE {}
+                                  int height) override {}
+  virtual MediaPlayerAndroid* GetFullscreenPlayer() override { return NULL; }
+  virtual MediaPlayerAndroid* GetPlayer(int player_id) override { return NULL; }
+  virtual void RequestFullScreen(int player_id) override {}
 #if defined(VIDEO_HOLE)
-  virtual bool ShouldUseVideoOverlayForEmbeddedEncryptedVideo() OVERRIDE {
+  virtual bool ShouldUseVideoOverlayForEmbeddedEncryptedVideo() override {
     return false;
   }
 #endif  // defined(VIDEO_HOLE)
@@ -133,14 +133,14 @@ class MockDemuxerAndroid : public DemuxerAndroid {
         num_browser_seek_requests_(0) {}
   virtual ~MockDemuxerAndroid() {}
 
-  virtual void Initialize(DemuxerAndroidClient* client) OVERRIDE {}
-  virtual void RequestDemuxerData(DemuxerStream::Type type) OVERRIDE {
+  virtual void Initialize(DemuxerAndroidClient* client) override {}
+  virtual void RequestDemuxerData(DemuxerStream::Type type) override {
     num_data_requests_++;
     if (message_loop_->is_running())
       message_loop_->Quit();
   }
   virtual void RequestDemuxerSeek(const base::TimeDelta& time_to_seek,
-                                  bool is_browser_seek) OVERRIDE {
+                                  bool is_browser_seek) override {
     num_seek_requests_++;
     if (is_browser_seek)
       num_browser_seek_requests_++;
@@ -364,7 +364,10 @@ class MediaSourcePlayerTest : public testing::Test {
                 new_current_time.InMilliseconds());
       current_time = new_current_time;
       if (manager_.timestamp_updated()) {
-        EXPECT_LT(start_timestamp.InMillisecondsF(),
+        // TODO(qinmin): the current time is from the decoder thread and it does
+        // not take the delay from posting the task into consideration.
+        // http://crbug.com/421616.
+        EXPECT_LE(start_timestamp.InMillisecondsF(),
                   new_current_time.InMillisecondsF());
         return;
       }
@@ -1194,9 +1197,9 @@ TEST_F(MediaSourcePlayerTest, StartTimeTicksResetAfterDecoderUnderruns) {
 
   DecodeAudioDataUntilOutputBecomesAvailable();
 
-  // The decoder job should finish and a new request will be sent.
-  base::TimeTicks previous = StartTimeTicks();
+  // The decoder job should finish prerolling and start prefetching.
   player_.OnDemuxerDataAvailable(CreateReadFromDemuxerAckForAudio(3));
+  base::TimeTicks previous = StartTimeTicks();
 
   // Let the decoder starve.
   TriggerPlayerStarvation();
@@ -1634,7 +1637,15 @@ TEST_F(MediaSourcePlayerTest, PrerollContinuesAcrossReleaseAndStart) {
   PrerollDecoderToTime(true, target_timestamp, target_timestamp, true);
 }
 
-TEST_F(MediaSourcePlayerTest, PrerollContinuesAcrossConfigChange) {
+// Flaky on Android: crbug.com/419122.
+#if defined(OS_ANDROID)
+#define MAYBE_PrerollContinuesAcrossConfigChange \
+        DISABLED_PrerollContinuesAcrossConfigChange
+#else
+#define MAYBE_PrerollContinuesAcrossConfigChange \
+        PrerollContinuesAcrossConfigChange
+#endif
+TEST_F(MediaSourcePlayerTest, MAYBE_PrerollContinuesAcrossConfigChange) {
   SKIP_TEST_IF_MEDIA_CODEC_BRIDGE_IS_NOT_AVAILABLE();
 
   // Test decoder job will resume media prerolling if interrupted by

@@ -56,6 +56,7 @@ TEST(AutocompleteInputTest, InputType) {
     { ASCIIToUTF16("foo.com:123456"), metrics::OmniboxInputType::QUERY },
     { ASCIIToUTF16("foo.com:abc"), metrics::OmniboxInputType::QUERY },
     { ASCIIToUTF16("1.2.3.4:abc"), metrics::OmniboxInputType::QUERY },
+    { ASCIIToUTF16("user@foo"), metrics::OmniboxInputType::UNKNOWN },
     { ASCIIToUTF16("user@foo.com"), metrics::OmniboxInputType::UNKNOWN },
     { ASCIIToUTF16("user@foo/z"), metrics::OmniboxInputType::URL },
     { ASCIIToUTF16("user@foo/z z"), metrics::OmniboxInputType::URL },
@@ -67,14 +68,27 @@ TEST(AutocompleteInputTest, InputType) {
     { ASCIIToUTF16("user:pass@foo.com"), metrics::OmniboxInputType::URL },
     { ASCIIToUTF16("user:pass@foo.com:81"), metrics::OmniboxInputType::URL },
     { ASCIIToUTF16("user:pass@foo:81"), metrics::OmniboxInputType::URL },
-    { ASCIIToUTF16("1.2"), metrics::OmniboxInputType::UNKNOWN },
-    { ASCIIToUTF16("1.2/45"), metrics::OmniboxInputType::UNKNOWN },
-    { ASCIIToUTF16("1.2:45"), metrics::OmniboxInputType::UNKNOWN },
-    { ASCIIToUTF16("user@1.2:45"), metrics::OmniboxInputType::URL },
+    { ASCIIToUTF16(".1"), metrics::OmniboxInputType::QUERY },
+    { ASCIIToUTF16(".1/3"), metrics::OmniboxInputType::QUERY },
+    { ASCIIToUTF16("1.2"), metrics::OmniboxInputType::QUERY },
+    { ASCIIToUTF16(".1.2"), metrics::OmniboxInputType::UNKNOWN },
+    { ASCIIToUTF16("1.2/"), metrics::OmniboxInputType::URL },
+    { ASCIIToUTF16("1.2/45"), metrics::OmniboxInputType::QUERY },
+    { ASCIIToUTF16("6008/32768"), metrics::OmniboxInputType::QUERY },
+    { ASCIIToUTF16("1.2:45"), metrics::OmniboxInputType::QUERY },
+    { ASCIIToUTF16("user@1.2:45"), metrics::OmniboxInputType::QUERY },
     { ASCIIToUTF16("user@foo:45"), metrics::OmniboxInputType::URL },
     { ASCIIToUTF16("user:pass@1.2:45"), metrics::OmniboxInputType::URL },
     { ASCIIToUTF16("host?query"), metrics::OmniboxInputType::UNKNOWN },
-    { ASCIIToUTF16("host#ref"), metrics::OmniboxInputType::UNKNOWN },
+    { ASCIIToUTF16("host#ref"), metrics::OmniboxInputType::QUERY },
+    { ASCIIToUTF16("host#"), metrics::OmniboxInputType::QUERY },
+    { ASCIIToUTF16("host#ref"), metrics::OmniboxInputType::QUERY },
+    { ASCIIToUTF16("host# ref"), metrics::OmniboxInputType::QUERY },
+    { ASCIIToUTF16("host/#ref"), metrics::OmniboxInputType::URL },
+    { ASCIIToUTF16("host/?#ref"), metrics::OmniboxInputType::URL },
+    { ASCIIToUTF16("host/?#"), metrics::OmniboxInputType::URL },
+    { ASCIIToUTF16("host.com#ref"), metrics::OmniboxInputType::URL },
+    { ASCIIToUTF16("http://host#ref"), metrics::OmniboxInputType::URL },
     { ASCIIToUTF16("host/path?query"), metrics::OmniboxInputType::URL },
     { ASCIIToUTF16("host/path#ref"), metrics::OmniboxInputType::URL },
     { ASCIIToUTF16("en.wikipedia.org/wiki/Jim Beam"),
@@ -109,15 +123,17 @@ TEST(AutocompleteInputTest, InputType) {
     { ASCIIToUTF16("http://1.2.3.4:abc"), metrics::OmniboxInputType::QUERY },
     { ASCIIToUTF16("http:user@foo.com"), metrics::OmniboxInputType::URL },
     { ASCIIToUTF16("http://user@foo.com"), metrics::OmniboxInputType::URL },
+    { ASCIIToUTF16("http://user:pass@foo"), metrics::OmniboxInputType::URL },
     { ASCIIToUTF16("http:user:pass@foo.com"), metrics::OmniboxInputType::URL },
     { ASCIIToUTF16("http://user:pass@foo.com"),
       metrics::OmniboxInputType::URL },
     { ASCIIToUTF16("http://1.2"), metrics::OmniboxInputType::URL },
+    { ASCIIToUTF16("http:user@1.2"), metrics::OmniboxInputType::URL },
     { ASCIIToUTF16("http://1.2/45"), metrics::OmniboxInputType::URL },
     { ASCIIToUTF16("http:ps/2 games"), metrics::OmniboxInputType::URL },
     { ASCIIToUTF16("https://foo.com"), metrics::OmniboxInputType::URL },
     { ASCIIToUTF16("127.0.0.1"), metrics::OmniboxInputType::URL },
-    { ASCIIToUTF16("127.0.1"), metrics::OmniboxInputType::UNKNOWN },
+    { ASCIIToUTF16("127.0.1"), metrics::OmniboxInputType::QUERY },
     { ASCIIToUTF16("127.0.1/"), metrics::OmniboxInputType::URL },
     { ASCIIToUTF16("browser.tabs.closeButtons"),
       metrics::OmniboxInputType::UNKNOWN },
@@ -138,12 +154,13 @@ TEST(AutocompleteInputTest, InputType) {
     { ASCIIToUTF16("about://f;"), metrics::OmniboxInputType::QUERY },
     { ASCIIToUTF16("://w"), metrics::OmniboxInputType::QUERY },
     { ASCIIToUTF16(":w"), metrics::OmniboxInputType::QUERY },
+    { base::WideToUTF16(L".\u062A"), metrics::OmniboxInputType::UNKNOWN },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(input_cases); ++i) {
+  for (size_t i = 0; i < arraysize(input_cases); ++i) {
     SCOPED_TRACE(input_cases[i].input);
     AutocompleteInput input(input_cases[i].input, base::string16::npos,
-                            base::string16(), GURL(),
+                            std::string(), GURL(),
                             OmniboxEventProto::INVALID_SPEC, true, false, true,
                             true, TestSchemeClassifier());
     EXPECT_EQ(input_cases[i].type, input.type());
@@ -158,10 +175,20 @@ TEST(AutocompleteInputTest, InputTypeWithDesiredTLD) {
   } input_cases[] = {
     { ASCIIToUTF16("401k"), metrics::OmniboxInputType::URL,
         std::string("http://www.401k.com/") },
+    { ASCIIToUTF16("56"), metrics::OmniboxInputType::URL,
+        std::string("http://www.56.com/") },
+    { ASCIIToUTF16("1.2"), metrics::OmniboxInputType::URL,
+        std::string("http://www.1.2.com/") },
+    { ASCIIToUTF16("1.2/3.4"), metrics::OmniboxInputType::URL,
+        std::string("http://www.1.2.com/3.4") },
+    { ASCIIToUTF16("192.168.0.1"), metrics::OmniboxInputType::URL,
+        std::string("http://www.192.168.0.1.com/") },
     { ASCIIToUTF16("999999999999999"), metrics::OmniboxInputType::URL,
         std::string("http://www.999999999999999.com/") },
     { ASCIIToUTF16("x@y"), metrics::OmniboxInputType::URL,
         std::string("http://x@www.y.com/") },
+    { ASCIIToUTF16("x@y.com"), metrics::OmniboxInputType::URL,
+        std::string("http://x@y.com/") },
     { ASCIIToUTF16("y/z z"), metrics::OmniboxInputType::URL,
         std::string("http://www.y.com/z%20z") },
     { ASCIIToUTF16("abc.com"), metrics::OmniboxInputType::URL,
@@ -170,12 +197,11 @@ TEST(AutocompleteInputTest, InputTypeWithDesiredTLD) {
         std::string() },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(input_cases); ++i) {
+  for (size_t i = 0; i < arraysize(input_cases); ++i) {
     SCOPED_TRACE(input_cases[i].input);
-    AutocompleteInput input(input_cases[i].input, base::string16::npos,
-                            ASCIIToUTF16("com"), GURL(),
-                            OmniboxEventProto::INVALID_SPEC, true, false, true,
-                            true, TestSchemeClassifier());
+    AutocompleteInput input(input_cases[i].input, base::string16::npos, "com",
+                            GURL(), OmniboxEventProto::INVALID_SPEC, true,
+                            false, true, true, TestSchemeClassifier());
     EXPECT_EQ(input_cases[i].type, input.type());
     if (input_cases[i].type == metrics::OmniboxInputType::URL)
       EXPECT_EQ(input_cases[i].spec, input.canonicalized_url().spec());
@@ -186,7 +212,7 @@ TEST(AutocompleteInputTest, InputTypeWithDesiredTLD) {
 // crash. As long as the test completes without crashing, we're fine.
 TEST(AutocompleteInputTest, InputCrash) {
   AutocompleteInput input(base::WideToUTF16(L"\uff65@s"), base::string16::npos,
-                          base::string16(), GURL(),
+                          std::string(), GURL(),
                           OmniboxEventProto::INVALID_SPEC, true, false,
                           true, true, TestSchemeClassifier());
 }
@@ -223,7 +249,7 @@ TEST(AutocompleteInputTest, ParseForEmphasizeComponent) {
         Component(12, 11), kInvalidComponent }
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(input_cases); ++i) {
+  for (size_t i = 0; i < arraysize(input_cases); ++i) {
     SCOPED_TRACE(input_cases[i].input);
     Component scheme, host;
     AutocompleteInput::ParseForEmphasizeComponents(input_cases[i].input,
@@ -231,7 +257,7 @@ TEST(AutocompleteInputTest, ParseForEmphasizeComponent) {
                                                    &scheme,
                                                    &host);
     AutocompleteInput input(input_cases[i].input, base::string16::npos,
-                            base::string16(), GURL(),
+                            std::string(), GURL(),
                             OmniboxEventProto::INVALID_SPEC, true,
                             false, true, true, TestSchemeClassifier());
     EXPECT_EQ(input_cases[i].scheme.begin, scheme.begin);
@@ -266,13 +292,12 @@ TEST(AutocompleteInputTest, InputTypeWithCursorPosition) {
     { ASCIIToUTF16("  ?  foo bar"), 6, ASCIIToUTF16("foo bar"), 1 },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(input_cases); ++i) {
+  for (size_t i = 0; i < arraysize(input_cases); ++i) {
     SCOPED_TRACE(input_cases[i].input);
     AutocompleteInput input(input_cases[i].input,
-                            input_cases[i].cursor_position,
-                            base::string16(), GURL(),
-                            OmniboxEventProto::INVALID_SPEC,
-                            true, false, true, true, TestSchemeClassifier());
+                            input_cases[i].cursor_position, std::string(),
+                            GURL(), OmniboxEventProto::INVALID_SPEC, true,
+                            false, true, true, TestSchemeClassifier());
     EXPECT_EQ(input_cases[i].normalized_input, input.text());
     EXPECT_EQ(input_cases[i].normalized_cursor_position,
               input.cursor_position());

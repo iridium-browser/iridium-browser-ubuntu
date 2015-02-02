@@ -23,19 +23,19 @@ class SerialConnection : public mojo::InterfaceImpl<serial::Connection> {
   SerialConnection(scoped_refptr<SerialIoHandler> io_handler,
                    mojo::InterfaceRequest<serial::DataSink> sink,
                    mojo::InterfaceRequest<serial::DataSource> source);
-  virtual ~SerialConnection();
+  ~SerialConnection() override;
 
   // mojo::InterfaceImpl<serial::Connection> overrides.
-  virtual void GetInfo(
-      const mojo::Callback<void(serial::ConnectionInfoPtr)>& callback) OVERRIDE;
-  virtual void SetOptions(serial::ConnectionOptionsPtr options,
-                          const mojo::Callback<void(bool)>& callback) OVERRIDE;
-  virtual void SetControlSignals(
-      serial::HostControlSignalsPtr signals,
-      const mojo::Callback<void(bool)>& callback) OVERRIDE;
-  virtual void GetControlSignals(const mojo::Callback<
-      void(serial::DeviceControlSignalsPtr)>& callback) OVERRIDE;
-  virtual void Flush(const mojo::Callback<void(bool)>& callback) OVERRIDE;
+  void GetInfo(
+      const mojo::Callback<void(serial::ConnectionInfoPtr)>& callback) override;
+  void SetOptions(serial::ConnectionOptionsPtr options,
+                  const mojo::Callback<void(bool)>& callback) override;
+  void SetControlSignals(serial::HostControlSignalsPtr signals,
+                         const mojo::Callback<void(bool)>& callback) override;
+  void GetControlSignals(
+      const mojo::Callback<void(serial::DeviceControlSignalsPtr)>& callback)
+      override;
+  void Flush(const mojo::Callback<void(bool)>& callback) override;
 
  private:
   void OnSendPipeReady(scoped_ptr<ReadOnlyBuffer> buffer);

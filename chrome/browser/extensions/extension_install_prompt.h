@@ -15,7 +15,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
-#include "chrome/browser/extensions/crx_installer_error.h"
 #include "chrome/browser/extensions/extension_install_prompt_experiment.h"
 #include "extensions/common/url_pattern.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -23,8 +22,7 @@
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/native_widget_types.h"
 
-class Browser;
-class ExtensionInstallUI;
+class ExtensionInstallPromptShowParams;
 class Profile;
 
 namespace base {
@@ -33,13 +31,14 @@ class MessageLoop;
 }  // namespace base
 
 namespace content {
-class PageNavigator;
 class WebContents;
 }
 
 namespace extensions {
 class BundleInstaller;
+class CrxInstallerError;
 class Extension;
+class ExtensionInstallUI;
 class ExtensionWebstorePrivateApiTest;
 class MockGetAuthTokenFunction;
 class PermissionSet;
@@ -84,6 +83,7 @@ class ExtensionInstallPrompt
     PERMISSIONS_DETAILS = 0,
     WITHHELD_PERMISSIONS_DETAILS,
     RETAINED_FILES_DETAILS,
+    RETAINED_DEVICES_DETAILS,
   };
 
   // This enum is used to differentiate regular and withheld permissions for
@@ -135,6 +135,7 @@ class ExtensionInstallPrompt
     base::string16 GetPermissionsHeading(
         PermissionsType permissions_type) const;
     base::string16 GetRetainedFilesHeading() const;
+    base::string16 GetRetainedDevicesHeading() const;
 
     bool ShouldShowPermissions() const;
     bool ShouldShowExplanationText() const;
@@ -160,6 +161,8 @@ class ExtensionInstallPrompt
     bool GetIsShowingDetails(DetailsType type, size_t index) const;
     size_t GetRetainedFileCount() const;
     base::string16 GetRetainedFile(size_t index) const;
+    size_t GetRetainedDeviceCount() const;
+    base::string16 GetRetainedDeviceMessageString(size_t index) const;
 
     // Populated for BUNDLE_INSTALL_PROMPT.
     const extensions::BundleInstaller* bundle() const { return bundle_; }
@@ -176,6 +179,10 @@ class ExtensionInstallPrompt
     // May be populated for POST_INSTALL_PERMISSIONS_PROMPT.
     void set_retained_files(const std::vector<base::FilePath>& retained_files) {
       retained_files_ = retained_files;
+    }
+    void set_retained_device_messages(
+        const std::vector<base::string16>& retained_device_messages) {
+      retained_device_messages_ = retained_device_messages;
     }
 
     const gfx::Image& icon() const { return icon_; }
@@ -204,6 +211,8 @@ class ExtensionInstallPrompt
 
     virtual ~Prompt();
 
+    bool ShouldDisplayRevokeButton() const;
+
     // Returns the InstallPromptPermissions corresponding to
     // |permissions_type|.
     InstallPromptPermissions& GetPermissionsForType(
@@ -222,6 +231,7 @@ class ExtensionInstallPrompt
     InstallPromptPermissions withheld_prompt_permissions_;
 
     bool is_showing_details_for_retained_files_;
+    bool is_showing_details_for_retained_devices_;
 
     // The extension or bundle being installed.
     const extensions::Extension* extension_;
@@ -247,6 +257,7 @@ class ExtensionInstallPrompt
     bool has_webstore_data_;
 
     std::vector<base::FilePath> retained_files_;
+    std::vector<base::string16> retained_device_messages_;
 
     scoped_refptr<ExtensionInstallPromptExperiment> experiment_;
 
@@ -269,23 +280,7 @@ class ExtensionInstallPrompt
     virtual ~Delegate() {}
   };
 
-  // Parameters to show a prompt dialog. Two sets of the
-  // parameters are supported: either use a parent WebContents or use a
-  // parent NativeWindow + a PageNavigator.
-  struct ShowParams {
-    explicit ShowParams(content::WebContents* contents);
-    ShowParams(gfx::NativeWindow window, content::PageNavigator* navigator);
-
-    // Parent web contents of the install UI dialog. This can be NULL.
-    content::WebContents* parent_web_contents;
-
-    // NativeWindow parent and navigator. If initialized using a parent web
-    // contents, these are derived from it.
-    gfx::NativeWindow parent_window;
-    content::PageNavigator* navigator;
-  };
-
-  typedef base::Callback<void(const ExtensionInstallPrompt::ShowParams&,
+  typedef base::Callback<void(ExtensionInstallPromptShowParams*,
                               ExtensionInstallPrompt::Delegate*,
                               scoped_refptr<ExtensionInstallPrompt::Prompt>)>
       ShowDialogCallback;
@@ -307,17 +302,15 @@ class ExtensionInstallPrompt
   // Creates a prompt with a parent web content.
   explicit ExtensionInstallPrompt(content::WebContents* contents);
 
-  // Creates a prompt with a profile, a native window and a page navigator.
-  ExtensionInstallPrompt(Profile* profile,
-                         gfx::NativeWindow native_window,
-                         content::PageNavigator* navigator);
+  // Creates a prompt with a profile and a native window. The most recently
+  // active browser window (or a new browser window if there are no browser
+  // windows) is used if a new tab needs to be opened.
+  ExtensionInstallPrompt(Profile* profile, gfx::NativeWindow native_window);
 
   virtual ~ExtensionInstallPrompt();
 
-  ExtensionInstallUI* install_ui() const { return install_ui_.get(); }
-
-  content::WebContents* parent_web_contents() const {
-    return show_params_.parent_web_contents;
+  extensions::ExtensionInstallUI* install_ui() const {
+    return install_ui_.get();
   }
 
   // This is called by the bundle installer to verify whether the bundle
@@ -389,7 +382,8 @@ class ExtensionInstallPrompt
   virtual void ReviewPermissions(
       Delegate* delegate,
       const extensions::Extension* extension,
-      const std::vector<base::FilePath>& retained_file_paths);
+      const std::vector<base::FilePath>& retained_file_paths,
+      const std::vector<base::string16>& retained_device_messages);
 
   // Installation was successful. This is declared virtual for testing.
   virtual void OnInstallSuccess(const extensions::Extension* extension,
@@ -427,6 +421,8 @@ class ExtensionInstallPrompt
   // Shows the actual UI (the icon should already be loaded).
   void ShowConfirmation();
 
+  Profile* profile_;
+
   base::MessageLoop* ui_loop_;
 
   // The extensions installation icon.
@@ -444,10 +440,10 @@ class ExtensionInstallPrompt
   scoped_refptr<const extensions::PermissionSet> custom_permissions_;
 
   // The object responsible for doing the UI specific actions.
-  scoped_ptr<ExtensionInstallUI> install_ui_;
+  scoped_ptr<extensions::ExtensionInstallUI> install_ui_;
 
   // Parameters to show the confirmation UI.
-  ShowParams show_params_;
+  scoped_ptr<ExtensionInstallPromptShowParams> show_params_;
 
   // The delegate we will call Proceed/Abort on after confirmation UI.
   Delegate* delegate_;

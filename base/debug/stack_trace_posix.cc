@@ -343,7 +343,7 @@ void StackDumpSignalHandler(int signal, siginfo_t* info, void* void_context) {
   const int kRegisterPadding = 16;
 #endif
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(registers); i++) {
+  for (size_t i = 0; i < arraysize(registers); i++) {
     PrintToStderr(registers[i].label);
     internal::itoa_r(registers[i].value, buf, sizeof(buf),
                      16, kRegisterPadding);
@@ -402,7 +402,7 @@ class PrintBacktraceOutputHandler : public BacktraceOutputHandler {
  public:
   PrintBacktraceOutputHandler() {}
 
-  virtual void HandleOutput(const char* output) OVERRIDE {
+  void HandleOutput(const char* output) override {
     // NOTE: This code MUST be async-signal safe (it's used by in-process
     // stack dumping signal handler). NO malloc or stdio is allowed here.
     PrintToStderr(output);
@@ -417,9 +417,7 @@ class StreamBacktraceOutputHandler : public BacktraceOutputHandler {
   explicit StreamBacktraceOutputHandler(std::ostream* os) : os_(os) {
   }
 
-  virtual void HandleOutput(const char* output) OVERRIDE {
-    (*os_) << output;
-  }
+  void HandleOutput(const char* output) override { (*os_) << output; }
 
  private:
   std::ostream* os_;

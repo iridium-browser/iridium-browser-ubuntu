@@ -52,7 +52,9 @@ def JavaScriptDefaultValue(field):
     return _kind_to_javascript_default_value[field.kind]
   if mojom.IsStructKind(field.kind):
     return "null"
-  if mojom.IsAnyArrayKind(field.kind):
+  if mojom.IsArrayKind(field.kind):
+    return "null"
+  if mojom.IsMapKind(field.kind):
     return "null"
   if mojom.IsInterfaceKind(field.kind) or \
      mojom.IsInterfaceRequestKind(field.kind):
@@ -105,26 +107,32 @@ def CodecType(kind):
     pointer_type = "NullablePointerTo" if mojom.IsNullableKind(kind) \
         else "PointerTo"
     return "new codec.%s(%s)" % (pointer_type, JavaScriptType(kind))
-  if mojom.IsAnyArrayKind(kind):
+  if mojom.IsArrayKind(kind):
     array_type = "NullableArrayOf" if mojom.IsNullableKind(kind) else "ArrayOf"
+    array_length = "" if kind.length is None else ", %d" % kind.length
     element_type = "codec.PackedBool" if mojom.IsBoolKind(kind.kind) \
         else CodecType(kind.kind)
-    return "new codec.%s(%s)" % (array_type, element_type)
+    return "new codec.%s(%s%s)" % (array_type, element_type, array_length)
   if mojom.IsInterfaceKind(kind) or mojom.IsInterfaceRequestKind(kind):
     return CodecType(mojom.MSGPIPE)
   if mojom.IsEnumKind(kind):
     return _kind_to_codec_type[mojom.INT32]
   return kind
 
+def MapCodecType(kind):
+  return "codec.PackedBool" if mojom.IsBoolKind(kind) else CodecType(kind)
 
 def JavaScriptDecodeSnippet(kind):
   if kind in mojom.PRIMITIVES:
     return "decodeStruct(%s)" % CodecType(kind)
   if mojom.IsStructKind(kind):
     return "decodeStructPointer(%s)" % JavaScriptType(kind)
-  if mojom.IsAnyArrayKind(kind) and mojom.IsBoolKind(kind.kind):
+  if mojom.IsMapKind(kind):
+    return "decodeMapPointer(%s, %s)" % \
+        (MapCodecType(kind.key_kind), MapCodecType(kind.value_kind))
+  if mojom.IsArrayKind(kind) and mojom.IsBoolKind(kind.kind):
     return "decodeArrayPointer(codec.PackedBool)"
-  if mojom.IsAnyArrayKind(kind):
+  if mojom.IsArrayKind(kind):
     return "decodeArrayPointer(%s)" % CodecType(kind.kind)
   if mojom.IsInterfaceKind(kind) or mojom.IsInterfaceRequestKind(kind):
     return JavaScriptDecodeSnippet(mojom.MSGPIPE)
@@ -137,9 +145,12 @@ def JavaScriptEncodeSnippet(kind):
     return "encodeStruct(%s, " % CodecType(kind)
   if mojom.IsStructKind(kind):
     return "encodeStructPointer(%s, " % JavaScriptType(kind)
-  if mojom.IsAnyArrayKind(kind) and mojom.IsBoolKind(kind.kind):
+  if mojom.IsMapKind(kind):
+    return "encodeMapPointer(%s, %s, " % \
+        (MapCodecType(kind.key_kind), MapCodecType(kind.value_kind))
+  if mojom.IsArrayKind(kind) and mojom.IsBoolKind(kind.kind):
     return "encodeArrayPointer(codec.PackedBool, ";
-  if mojom.IsAnyArrayKind(kind):
+  if mojom.IsArrayKind(kind):
     return "encodeArrayPointer(%s, " % CodecType(kind.kind)
   if mojom.IsInterfaceKind(kind) or mojom.IsInterfaceRequestKind(kind):
     return JavaScriptEncodeSnippet(mojom.MSGPIPE)
@@ -155,16 +166,29 @@ def JavaScriptNullableParam(packed_field):
   return "true" if mojom.IsNullableKind(packed_field.field.kind) else "false"
 
 
+def GetArrayExpectedDimensionSizes(kind):
+  expected_dimension_sizes = []
+  while mojom.IsArrayKind(kind):
+    expected_dimension_sizes.append(generator.ExpectedArraySize(kind) or 0)
+    kind = kind.kind
+  # Strings are serialized as variable-length arrays.
+  if (mojom.IsStringKind(kind)):
+    expected_dimension_sizes.append(0)
+  return expected_dimension_sizes
+
+
 def JavaScriptValidateArrayParams(packed_field):
   nullable = JavaScriptNullableParam(packed_field)
   field_offset = JavaScriptFieldOffset(packed_field)
   element_kind = packed_field.field.kind.kind
   element_size = pack.PackedField.GetSizeForKind(element_kind)
-  element_count = generator.ExpectedArraySize(packed_field.field.kind)
+  expected_dimension_sizes = GetArrayExpectedDimensionSizes(
+      packed_field.field.kind)
   element_type = "codec.PackedBool" if mojom.IsBoolKind(element_kind) \
       else CodecType(element_kind)
-  return "%s, %s, %s, %s, %s" % \
-      (field_offset, element_size, element_count, element_type, nullable)
+  return "%s, %s, %s, %s, %s, 0" % \
+      (field_offset, element_size, element_type, nullable,
+       expected_dimension_sizes)
 
 
 def JavaScriptValidateStructParams(packed_field):
@@ -172,6 +196,17 @@ def JavaScriptValidateStructParams(packed_field):
   field_offset = JavaScriptFieldOffset(packed_field)
   struct_type = JavaScriptType(packed_field.field.kind)
   return "%s, %s, %s" % (field_offset, struct_type, nullable)
+
+
+def JavaScriptValidateMapParams(packed_field):
+  nullable = JavaScriptNullableParam(packed_field)
+  field_offset = JavaScriptFieldOffset(packed_field)
+  keys_type = MapCodecType(packed_field.field.kind.key_kind)
+  values_kind = packed_field.field.kind.value_kind;
+  values_type = MapCodecType(values_kind)
+  values_nullable = "true" if mojom.IsNullableKind(values_kind) else "false"
+  return "%s, %s, %s, %s, %s" % \
+      (field_offset, nullable, keys_type, values_type, values_nullable)
 
 
 def JavaScriptValidateStringParams(packed_field):
@@ -216,13 +251,16 @@ def ExpressionToText(value):
 
 
 def IsArrayPointerField(field):
-  return mojom.IsAnyArrayKind(field.kind)
+  return mojom.IsArrayKind(field.kind)
 
 def IsStringPointerField(field):
   return mojom.IsStringKind(field.kind)
 
 def IsStructPointerField(field):
   return mojom.IsStructKind(field.kind)
+
+def IsMapPointerField(field):
+  return mojom.IsMapKind(field.kind)
 
 def IsHandleField(field):
   return mojom.IsAnyHandleKind(field.kind)
@@ -239,6 +277,7 @@ class Generator(generator.Generator):
     "field_offset": JavaScriptFieldOffset,
     "has_callbacks": mojom.HasCallbacks,
     "is_array_pointer_field": IsArrayPointerField,
+    "is_map_pointer_field": IsMapPointerField,
     "is_struct_pointer_field": IsStructPointerField,
     "is_string_pointer_field": IsStringPointerField,
     "is_handle_field": IsHandleField,
@@ -246,12 +285,12 @@ class Generator(generator.Generator):
     "stylize_method": generator.StudlyCapsToCamel,
     "validate_array_params": JavaScriptValidateArrayParams,
     "validate_handle_params": JavaScriptValidateHandleParams,
+    "validate_map_params": JavaScriptValidateMapParams,
     "validate_string_params": JavaScriptValidateStringParams,
     "validate_struct_params": JavaScriptValidateStructParams,
   }
 
-  @UseJinja("js_templates/module.js.tmpl", filters=js_filters)
-  def GenerateJsModule(self):
+  def GetParameters(self):
     return {
       "namespace": self.module.namespace,
       "imports": self.GetImports(),
@@ -260,16 +299,46 @@ class Generator(generator.Generator):
       "module": self.module,
       "structs": self.GetStructs() + self.GetStructsFromMethods(),
       "interfaces": self.module.interfaces,
+      "imported_interfaces": self.GetImportedInterfaces(),
     }
 
+  @UseJinja("js_templates/module.amd.tmpl", filters=js_filters)
+  def GenerateAMDModule(self):
+    return self.GetParameters()
+
+  @UseJinja("js_templates/module.sky.tmpl", filters=js_filters)
+  def GenerateHTMLModule(self):
+    return self.GetParameters()
+
   def GenerateFiles(self, args):
-    self.Write(self.GenerateJsModule(), "%s.js" % self.module.name)
+    self.Write(self.GenerateAMDModule(),
+        self.MatchMojomFilePath("%s.js" % self.module.name))
+    self.Write(self.GenerateHTMLModule(),
+        self.MatchMojomFilePath("%s.sky" % self.module.name))
 
   def GetImports(self):
-    # Since each import is assigned a variable in JS, they need to have unique
-    # names.
-    counter = 1
-    for each in self.module.imports:
-      each["unique_name"] = "import" + str(counter)
+    used_names = set()
+    for each_import in self.module.imports:
+      simple_name = each_import["module_name"].split(".")[0]
+
+      # Since each import is assigned a variable in JS, they need to have unique
+      # names.
+      unique_name = simple_name
+      counter = 0
+      while unique_name in used_names:
+        counter += 1
+        unique_name = simple_name + str(counter)
+
+      used_names.add(unique_name)
+      each_import["unique_name"] = unique_name
       counter += 1
     return self.module.imports
+
+  def GetImportedInterfaces(self):
+    interface_to_import = {};
+    for each_import in self.module.imports:
+      for each_interface in each_import["module"].interfaces:
+        name = each_interface.name
+        interface_to_import[name] = each_import["unique_name"] + "." + name
+    return interface_to_import;
+

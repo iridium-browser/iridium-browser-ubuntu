@@ -20,6 +20,9 @@
 #include "content/common/resource_request_body.h"
 #include "content/common/service_worker/service_worker_messages.h"
 #include "content/public/browser/blob_handle.h"
+#include "content/public/common/request_context_frame_type.h"
+#include "content/public/common/request_context_type.h"
+#include "content/public/common/resource_type.h"
 #include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "net/base/io_buffer.h"
@@ -52,16 +55,20 @@ class MockHttpProtocolHandler
       base::WeakPtr<storage::BlobStorageContext> blob_storage_context)
       : provider_host_(provider_host),
         blob_storage_context_(blob_storage_context) {}
-  virtual ~MockHttpProtocolHandler() {}
+  ~MockHttpProtocolHandler() override {}
 
-  virtual net::URLRequestJob* MaybeCreateJob(
+  net::URLRequestJob* MaybeCreateJob(
       net::URLRequest* request,
-      net::NetworkDelegate* network_delegate) const OVERRIDE {
+      net::NetworkDelegate* network_delegate) const override {
     ServiceWorkerURLRequestJob* job =
         new ServiceWorkerURLRequestJob(request,
                                        network_delegate,
                                        provider_host_,
                                        blob_storage_context_,
+                                       FETCH_REQUEST_MODE_NO_CORS,
+                                       FETCH_CREDENTIALS_MODE_OMIT,
+                                       REQUEST_CONTEXT_TYPE_HYPERLINK,
+                                       REQUEST_CONTEXT_FRAME_TYPE_TOP_LEVEL,
                                        scoped_refptr<ResourceRequestBody>());
     job->ForwardToServiceWorker();
     return job;
@@ -89,9 +96,9 @@ class ServiceWorkerURLRequestJobTest : public testing::Test {
   ServiceWorkerURLRequestJobTest()
       : thread_bundle_(TestBrowserThreadBundle::IO_MAINLOOP),
         blob_data_(new storage::BlobData("blob-id:myblob")) {}
-  virtual ~ServiceWorkerURLRequestJobTest() {}
+  ~ServiceWorkerURLRequestJobTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     browser_context_.reset(new TestBrowserContext);
     SetUpWithHelper(new EmbeddedWorkerTestHelper(kProcessID));
   }
@@ -134,7 +141,7 @@ class ServiceWorkerURLRequestJobTest : public testing::Test {
     helper_->context()->AddProviderHost(provider_host.Pass());
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     version_ = NULL;
     registration_ = NULL;
     helper_.reset();
@@ -186,24 +193,33 @@ TEST_F(ServiceWorkerURLRequestJobTest, Simple) {
 // Responds to fetch events with a blob.
 class BlobResponder : public EmbeddedWorkerTestHelper {
  public:
-  BlobResponder(int mock_render_process_id, const std::string& blob_uuid)
+  BlobResponder(int mock_render_process_id,
+                const std::string& blob_uuid,
+                uint64 blob_size)
       : EmbeddedWorkerTestHelper(mock_render_process_id),
-        blob_uuid_(blob_uuid) {}
-  virtual ~BlobResponder() {}
+        blob_uuid_(blob_uuid),
+        blob_size_(blob_size) {}
+  ~BlobResponder() override {}
 
  protected:
-  virtual void OnFetchEvent(int embedded_worker_id,
-                            int request_id,
-                            const ServiceWorkerFetchRequest& request) OVERRIDE {
+  void OnFetchEvent(int embedded_worker_id,
+                    int request_id,
+                    const ServiceWorkerFetchRequest& request) override {
     SimulateSend(new ServiceWorkerHostMsg_FetchEventFinished(
         embedded_worker_id,
         request_id,
         SERVICE_WORKER_FETCH_EVENT_RESULT_RESPONSE,
-        ServiceWorkerResponse(
-            GURL(""), 200, "OK", ServiceWorkerHeaderMap(), blob_uuid_)));
+        ServiceWorkerResponse(GURL(""),
+                              200,
+                              "OK",
+                              blink::WebServiceWorkerResponseTypeDefault,
+                              ServiceWorkerHeaderMap(),
+                              blob_uuid_,
+                              blob_size_)));
   }
 
   std::string blob_uuid_;
+  uint64 blob_size_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(BlobResponder);
@@ -219,14 +235,15 @@ TEST_F(ServiceWorkerURLRequestJobTest, BlobResponse) {
   }
   scoped_ptr<storage::BlobDataHandle> blob_handle =
       blob_storage_context->context()->AddFinishedBlob(blob_data_.get());
-  SetUpWithHelper(new BlobResponder(kProcessID, blob_handle->uuid()));
+  SetUpWithHelper(new BlobResponder(
+      kProcessID, blob_handle->uuid(), expected_response.size()));
 
   version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
   TestRequest(200, "OK", expected_response);
 }
 
 TEST_F(ServiceWorkerURLRequestJobTest, NonExistentBlobUUIDResponse) {
-  SetUpWithHelper(new BlobResponder(kProcessID, "blob-id:nothing-is-here"));
+  SetUpWithHelper(new BlobResponder(kProcessID, "blob-id:nothing-is-here", 0));
   version_->SetStatus(ServiceWorkerVersion::ACTIVATED);
   TestRequest(500, "Service Worker Response Error", std::string());
 }

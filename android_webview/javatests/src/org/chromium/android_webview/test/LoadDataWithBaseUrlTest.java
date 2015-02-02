@@ -42,8 +42,8 @@ public class LoadDataWithBaseUrlTest extends AwTestBase {
     }
 
     protected void loadDataWithBaseUrlSync(
-        final String data, final String mimeType, final boolean isBase64Encoded,
-        final String baseUrl, final String historyUrl) throws Throwable {
+            final String data, final String mimeType, final boolean isBase64Encoded,
+            final String baseUrl, final String historyUrl) throws Throwable {
         loadDataWithBaseUrlSync(mAwContents, mContentsClient.getOnPageFinishedHelper(),
                 data, mimeType, isBase64Encoded, baseUrl, historyUrl);
     }
@@ -88,9 +88,8 @@ public class LoadDataWithBaseUrlTest extends AwTestBase {
     @SmallTest
     @Feature({"AndroidWebView"})
     public void testImageLoad() throws Throwable {
-        TestWebServer webServer = null;
+        TestWebServer webServer = TestWebServer.start();
         try {
-            webServer = new TestWebServer(false);
             webServer.setResponseBase64("/" + CommonResources.FAVICON_FILENAME,
                     CommonResources.FAVICON_DATA_BASE64, CommonResources.getImagePngHeaders(true));
 
@@ -104,17 +103,15 @@ public class LoadDataWithBaseUrlTest extends AwTestBase {
 
             assertEquals("5", getTitleOnUiThread(mAwContents));
         } finally {
-            if (webServer != null) webServer.shutdown();
+            webServer.shutdown();
         }
     }
 
     @SmallTest
     @Feature({"AndroidWebView"})
     public void testScriptLoad() throws Throwable {
-        TestWebServer webServer = null;
+        TestWebServer webServer = TestWebServer.start();
         try {
-            webServer = new TestWebServer(false);
-
             final String scriptUrl = webServer.setResponse(SCRIPT_FILE, SCRIPT_JS,
                     CommonResources.getTextJavascriptHeaders(true));
             final String pageHtml = getScriptFileTestPageHtml(scriptUrl);
@@ -122,18 +119,16 @@ public class LoadDataWithBaseUrlTest extends AwTestBase {
             getAwSettingsOnUiThread(mAwContents).setJavaScriptEnabled(true);
             loadDataWithBaseUrlSync(pageHtml, "text/html", false, webServer.getBaseUrl(), null);
             assertEquals(SCRIPT_LOADED, getTitleOnUiThread(mAwContents));
-
         } finally {
-            if (webServer != null) webServer.shutdown();
+            webServer.shutdown();
         }
     }
 
     @SmallTest
     @Feature({"AndroidWebView"})
     public void testSameOrigin() throws Throwable {
-        TestWebServer webServer = null;
+        TestWebServer webServer = TestWebServer.start();
         try {
-            webServer = new TestWebServer(false);
             final String frameUrl = webServer.setResponse("/" + CommonResources.ABOUT_FILENAME,
                     CommonResources.ABOUT_HTML, CommonResources.getTextHtmlHeaders(true));
             final String html = getCrossOriginAccessTestPageHtml(frameUrl);
@@ -141,18 +136,16 @@ public class LoadDataWithBaseUrlTest extends AwTestBase {
             getAwSettingsOnUiThread(mAwContents).setJavaScriptEnabled(true);
             loadDataWithBaseUrlSync(html, "text/html", false, webServer.getBaseUrl(), null);
             assertEquals(frameUrl, getTitleOnUiThread(mAwContents));
-
         } finally {
-            if (webServer != null) webServer.shutdown();
+            webServer.shutdown();
         }
     }
 
     @SmallTest
     @Feature({"AndroidWebView"})
     public void testCrossOrigin() throws Throwable {
-        TestWebServer webServer = null;
+        TestWebServer webServer = TestWebServer.start();
         try {
-            webServer = new TestWebServer(false);
             final String frameUrl = webServer.setResponse("/" + CommonResources.ABOUT_FILENAME,
                     CommonResources.ABOUT_HTML, CommonResources.getTextHtmlHeaders(true));
             final String html = getCrossOriginAccessTestPageHtml(frameUrl);
@@ -162,9 +155,8 @@ public class LoadDataWithBaseUrlTest extends AwTestBase {
             loadDataWithBaseUrlSync(html, "text/html", false, baseUrl, null);
 
             assertEquals("Exception", getTitleOnUiThread(mAwContents));
-
         } finally {
-            if (webServer != null) webServer.shutdown();
+            webServer.shutdown();
         }
     }
 
@@ -238,9 +230,8 @@ public class LoadDataWithBaseUrlTest extends AwTestBase {
     */
     @DisabledTest
     public void testHistoryUrlNavigation() throws Throwable {
-        TestWebServer webServer = null;
+        TestWebServer webServer = TestWebServer.start();
         try {
-            webServer = new TestWebServer(false);
             final String historyUrl = webServer.setResponse("/" + CommonResources.ABOUT_FILENAME,
                     CommonResources.ABOUT_HTML, CommonResources.getTextHtmlHeaders(true));
 
@@ -263,9 +254,8 @@ public class LoadDataWithBaseUrlTest extends AwTestBase {
             HistoryUtils.goBackSync(getInstrumentation(), mWebContents, onPageFinishedHelper);
             // The title of the 'about.html' specified via historyUrl.
             assertEquals(CommonResources.ABOUT_TITLE, getTitleOnUiThread(mAwContents));
-
         } finally {
-            if (webServer != null) webServer.shutdown();
+            webServer.shutdown();
         }
     }
 
@@ -320,20 +310,20 @@ public class LoadDataWithBaseUrlTest extends AwTestBase {
             // All access to file://, including android_asset and android_res is blocked
             // with a data: base URL, regardless of AwSettings.getAllowFileAccess().
             assertFalse(canAccessFileFromData(dataBaseUrl,
-                  "file:///android_asset/asset_icon.png?" + token));
+                    "file:///android_asset/asset_icon.png?" + token));
             assertFalse(canAccessFileFromData(dataBaseUrl,
-                  "file:///android_res/raw/resource_icon.png?" + token));
+                    "file:///android_res/raw/resource_icon.png?" + token));
             assertFalse(canAccessFileFromData(dataBaseUrl, "file://" + imagePath + "?" + token));
 
             // WebView always has access to android_asset and android_res for non-data
             // base URLs and can access other file:// URLs based on the value of
             // AwSettings.getAllowFileAccess().
             assertTrue(canAccessFileFromData(nonDataBaseUrl,
-                  "file:///android_asset/asset_icon.png?" + token));
+                    "file:///android_asset/asset_icon.png?" + token));
             assertTrue(canAccessFileFromData(nonDataBaseUrl,
-                  "file:///android_res/raw/resource_icon.png?" + token));
+                    "file:///android_res/raw/resource_icon.png?" + token));
             assertFalse(canAccessFileFromData(nonDataBaseUrl,
-                  "file://" + imagePath + "?" + token));
+                    "file://" + imagePath + "?" + token));
 
             token += "a";
             mAwContents.getSettings().setAllowFileAccess(true);
@@ -341,17 +331,17 @@ public class LoadDataWithBaseUrlTest extends AwTestBase {
             // data: base URL, but we should now be able to access the wider file system
             // (still restricted by OS-level permission checks) with a non-data base URL.
             assertFalse(canAccessFileFromData(dataBaseUrl,
-                  "file:///android_asset/asset_icon.png?" + token));
+                    "file:///android_asset/asset_icon.png?" + token));
             assertFalse(canAccessFileFromData(dataBaseUrl,
-                  "file:///android_res/raw/resource_icon.png?" + token));
+                    "file:///android_res/raw/resource_icon.png?" + token));
             assertFalse(canAccessFileFromData(dataBaseUrl, "file://" + imagePath + "?" + token));
 
             assertTrue(canAccessFileFromData(nonDataBaseUrl,
-                  "file:///android_asset/asset_icon.png?" + token));
+                    "file:///android_asset/asset_icon.png?" + token));
             assertTrue(canAccessFileFromData(nonDataBaseUrl,
-                  "file:///android_res/raw/resource_icon.png?" + token));
+                    "file:///android_res/raw/resource_icon.png?" + token));
             assertTrue(canAccessFileFromData(nonDataBaseUrl,
-                  "file://" + imagePath + "?" + token));
+                    "file://" + imagePath + "?" + token));
         } finally {
             if (!tempImage.delete()) throw new AssertionError();
         }

@@ -17,13 +17,13 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/views/constrained_window_views.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/locale_settings.h"
+#include "components/constrained_window/constrained_window_views.h"
 #include "components/favicon_base/select_favicon_frames.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
@@ -70,7 +70,7 @@ class AppInfoView : public views::View {
   void UpdateIcon(const gfx::ImageFamily& image);
 
   // Overridden from views::View:
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
+  void OnPaint(gfx::Canvas* canvas) override;
 
  private:
   // Initializes the controls

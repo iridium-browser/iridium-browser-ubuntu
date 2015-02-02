@@ -28,7 +28,7 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/extensions/manifest_url_handler.h"
+#include "chrome/common/extensions/chrome_manifest_url_handlers.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/infobars/core/confirm_infobar_delegate.h"
@@ -54,12 +54,19 @@
 using base::DictionaryValue;
 using content::BrowserThread;
 
+namespace content {
+struct LoadCommittedDetails;
+struct FrameNavigateParams;
+}
+
 namespace {
 
 static const char kFrontendHostId[] = "id";
 static const char kFrontendHostMethod[] = "method";
 static const char kFrontendHostParams[] = "params";
 static const char kTitleFormat[] = "Developer Tools - %s";
+
+const size_t kMaxMessageChunkSize = IPC::Channel::kMaximumMessageSize / 4;
 
 typedef std::vector<DevToolsUIBindings*> DevToolsUIBindingsList;
 base::LazyInstance<DevToolsUIBindingsList>::Leaky g_instances =
@@ -110,12 +117,12 @@ class DevToolsConfirmInfoBarDelegate : public ConfirmInfoBarDelegate {
   DevToolsConfirmInfoBarDelegate(
       const InfoBarCallback& callback,
       const base::string16& message);
-  virtual ~DevToolsConfirmInfoBarDelegate();
+  ~DevToolsConfirmInfoBarDelegate() override;
 
-  virtual base::string16 GetMessageText() const OVERRIDE;
-  virtual base::string16 GetButtonLabel(InfoBarButton button) const OVERRIDE;
-  virtual bool Accept() OVERRIDE;
-  virtual bool Cancel() OVERRIDE;
+  base::string16 GetMessageText() const override;
+  base::string16 GetButtonLabel(InfoBarButton button) const override;
+  bool Accept() override;
+  bool Cancel() override;
 
   InfoBarCallback callback_;
   const base::string16 message_;
@@ -180,21 +187,21 @@ class DefaultBindingsDelegate : public DevToolsUIBindings::Delegate {
       : web_contents_(web_contents) {}
 
  private:
-  virtual ~DefaultBindingsDelegate() {}
+  ~DefaultBindingsDelegate() override {}
 
-  virtual void ActivateWindow() OVERRIDE;
-  virtual void CloseWindow() OVERRIDE {}
-  virtual void SetInspectedPageBounds(const gfx::Rect& rect) OVERRIDE {}
-  virtual void InspectElementCompleted() OVERRIDE {}
-  virtual void MoveWindow(int x, int y) OVERRIDE {}
-  virtual void SetIsDocked(bool is_docked) OVERRIDE {}
-  virtual void OpenInNewTab(const std::string& url) OVERRIDE;
-  virtual void SetWhitelistedShortcuts(const std::string& message) OVERRIDE {}
+  void ActivateWindow() override;
+  void CloseWindow() override {}
+  void SetInspectedPageBounds(const gfx::Rect& rect) override {}
+  void InspectElementCompleted() override {}
+  void MoveWindow(int x, int y) override {}
+  void SetIsDocked(bool is_docked) override {}
+  void OpenInNewTab(const std::string& url) override;
+  void SetWhitelistedShortcuts(const std::string& message) override {}
 
-  virtual void InspectedContentsClosing() OVERRIDE;
-  virtual void OnLoadCompleted() OVERRIDE {}
-  virtual InfoBarService* GetInfoBarService() OVERRIDE;
-  virtual void RenderProcessGone() OVERRIDE {}
+  void InspectedContentsClosing() override;
+  void OnLoadCompleted() override {}
+  InfoBarService* GetInfoBarService() override;
+  void RenderProcessGone(bool crashed) override {}
 
   content::WebContents* web_contents_;
   DISALLOW_COPY_AND_ASSIGN(DefaultBindingsDelegate);
@@ -229,14 +236,17 @@ class DevToolsUIBindings::FrontendWebContentsObserver
     : public content::WebContentsObserver {
  public:
   explicit FrontendWebContentsObserver(DevToolsUIBindings* ui_bindings);
-  virtual ~FrontendWebContentsObserver();
+  ~FrontendWebContentsObserver() override;
 
  private:
   // contents::WebContentsObserver:
-  virtual void RenderProcessGone(base::TerminationStatus status) OVERRIDE;
-  virtual void AboutToNavigateRenderView(
-      content::RenderViewHost* render_view_host) OVERRIDE;
-  virtual void DocumentOnLoadCompletedInMainFrame() OVERRIDE;
+  void RenderProcessGone(base::TerminationStatus status) override;
+  void AboutToNavigateRenderView(
+      content::RenderViewHost* render_view_host) override;
+  void DocumentOnLoadCompletedInMainFrame() override;
+  void DidNavigateMainFrame(
+      const content::LoadCommittedDetails& details,
+      const content::FrameNavigateParams& params) override;
 
   DevToolsUIBindings* devtools_bindings_;
   DISALLOW_COPY_AND_ASSIGN(FrontendWebContentsObserver);
@@ -254,6 +264,7 @@ DevToolsUIBindings::FrontendWebContentsObserver::
 
 void DevToolsUIBindings::FrontendWebContentsObserver::RenderProcessGone(
     base::TerminationStatus status) {
+  bool crashed = true;
   switch (status) {
     case base::TERMINATION_STATUS_ABNORMAL_TERMINATION:
     case base::TERMINATION_STATUS_PROCESS_WAS_KILLED:
@@ -262,9 +273,10 @@ void DevToolsUIBindings::FrontendWebContentsObserver::RenderProcessGone(
         devtools_bindings_->Detach();
       break;
     default:
+      crashed = false;
       break;
   }
-  devtools_bindings_->delegate_->RenderProcessGone();
+  devtools_bindings_->delegate_->RenderProcessGone(crashed);
 }
 
 void DevToolsUIBindings::FrontendWebContentsObserver::AboutToNavigateRenderView(
@@ -277,6 +289,12 @@ void DevToolsUIBindings::FrontendWebContentsObserver::AboutToNavigateRenderView(
 void DevToolsUIBindings::FrontendWebContentsObserver::
     DocumentOnLoadCompletedInMainFrame() {
   devtools_bindings_->DocumentOnLoadCompletedInMainFrame();
+}
+
+void DevToolsUIBindings::FrontendWebContentsObserver::
+    DidNavigateMainFrame(const content::LoadCommittedDetails& details,
+                         const content::FrameNavigateParams& params) {
+  devtools_bindings_->DidNavigateMainFrame();
 }
 
 // DevToolsUIBindings ---------------------------------------------------------
@@ -323,6 +341,7 @@ DevToolsUIBindings::DevToolsUIBindings(content::WebContents* web_contents)
       delegate_(new DefaultBindingsDelegate(web_contents_)),
       device_count_updates_enabled_(false),
       devices_updates_enabled_(false),
+      frontend_loaded_(false),
       weak_factory_(this) {
   g_instances.Get().push_back(this);
   frontend_contents_observer_.reset(new FrontendWebContentsObserver(this));
@@ -422,9 +441,20 @@ void DevToolsUIBindings::HandleMessageFromDevToolsFrontendToBackend(
 void DevToolsUIBindings::DispatchProtocolMessage(
     content::DevToolsAgentHost* agent_host, const std::string& message) {
   DCHECK(agent_host == agent_host_.get());
-  base::StringValue message_value(message);
-  CallClientFunction("InspectorFrontendAPI.dispatchMessage",
-                     &message_value, NULL, NULL);
+
+  if (message.length() < kMaxMessageChunkSize) {
+    base::StringValue message_value(message);
+    CallClientFunction("InspectorFrontendAPI.dispatchMessage",
+                       &message_value, NULL, NULL);
+    return;
+  }
+
+  base::FundamentalValue total_size(static_cast<int>(message.length()));
+  for (size_t pos = 0; pos < message.length(); pos += kMaxMessageChunkSize) {
+    base::StringValue message_value(message.substr(pos, kMaxMessageChunkSize));
+    CallClientFunction("InspectorFrontendAPI.dispatchMessageChunk",
+                       &message_value, pos ? NULL : &total_size, NULL);
+  }
 }
 
 void DevToolsUIBindings::AgentHostClosed(
@@ -442,6 +472,10 @@ void DevToolsUIBindings::ActivateWindow() {
 
 void DevToolsUIBindings::CloseWindow() {
   delegate_->CloseWindow();
+}
+
+void DevToolsUIBindings::LoadCompleted() {
+  FrontendLoaded();
 }
 
 void DevToolsUIBindings::SetInspectedPageBounds(const gfx::Rect& rect) {
@@ -771,14 +805,14 @@ void DevToolsUIBindings::AddDevToolsExtensionsToClient() {
   base::ListValue results;
   for (extensions::ExtensionSet::const_iterator extension(extensions->begin());
        extension != extensions->end(); ++extension) {
-    if (extensions::ManifestURL::GetDevToolsPage(extension->get()).is_empty())
+    if (extensions::chrome_manifest_urls::GetDevToolsPage(extension->get())
+            .is_empty())
       continue;
     base::DictionaryValue* extension_info = new base::DictionaryValue();
     extension_info->Set(
         "startPage",
-        new base::StringValue(
-            extensions::ManifestURL::GetDevToolsPage(
-                extension->get()).spec()));
+        new base::StringValue(extensions::chrome_manifest_urls::GetDevToolsPage(
+                                  extension->get()).spec()));
     extension_info->Set("name", new base::StringValue((*extension)->name()));
     extension_info->Set("exposeExperimentalAPIs",
                         new base::FundamentalValue(
@@ -842,6 +876,23 @@ void DevToolsUIBindings::CallClientFunction(const std::string& function_name,
 }
 
 void DevToolsUIBindings::DocumentOnLoadCompletedInMainFrame() {
+  // In the DEBUG_DEVTOOLS mode, the DocumentOnLoadCompletedInMainFrame event
+  // arrives before the LoadCompleted event, thus it should not trigger the
+  // frontend load handling.
+#if !defined(DEBUG_DEVTOOLS)
+  FrontendLoaded();
+#endif
+}
+
+void DevToolsUIBindings::DidNavigateMainFrame() {
+  frontend_loaded_ = false;
+}
+
+void DevToolsUIBindings::FrontendLoaded() {
+  if (frontend_loaded_)
+    return;
+  frontend_loaded_ = true;
+
   // Call delegate first - it seeds importants bit of information.
   delegate_->OnLoadCompleted();
 

@@ -26,17 +26,16 @@ class PrivetDeviceListerImpl : public PrivetDeviceLister,
       ServiceDiscoveryClient* service_discovery_client,
       PrivetDeviceLister::Delegate* delegate);
 
-  virtual ~PrivetDeviceListerImpl();
+  ~PrivetDeviceListerImpl() override;
 
-  virtual void Start() OVERRIDE;
-  virtual void DiscoverNewDevices(bool force_update) OVERRIDE;
+  void Start() override;
+  void DiscoverNewDevices(bool force_update) override;
 
  protected:
-  virtual void OnDeviceChanged(
-      bool added,
-      const ServiceDescription& service_description) OVERRIDE;
-  virtual void OnDeviceRemoved(const std::string& service_name) OVERRIDE;
-  virtual void OnDeviceCacheFlushed() OVERRIDE;
+  void OnDeviceChanged(bool added,
+                       const ServiceDescription& service_description) override;
+  void OnDeviceRemoved(const std::string& service_name) override;
+  void OnDeviceCacheFlushed() override;
 
  private:
   PrivetDeviceLister::Delegate* delegate_;

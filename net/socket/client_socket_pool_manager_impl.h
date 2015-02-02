@@ -71,31 +71,31 @@ class ClientSocketPoolManagerImpl : public base::NonThreadSafe,
                               bool enable_ssl_connect_job_waiting,
                               ProxyDelegate* proxy_delegate,
                               HttpNetworkSession::SocketPoolType pool_type);
-  virtual ~ClientSocketPoolManagerImpl();
+  ~ClientSocketPoolManagerImpl() override;
 
-  virtual void FlushSocketPoolsWithError(int error) OVERRIDE;
-  virtual void CloseIdleSockets() OVERRIDE;
+  void FlushSocketPoolsWithError(int error) override;
+  void CloseIdleSockets() override;
 
-  virtual TransportClientSocketPool* GetTransportSocketPool() OVERRIDE;
+  TransportClientSocketPool* GetTransportSocketPool() override;
 
-  virtual SSLClientSocketPool* GetSSLSocketPool() OVERRIDE;
+  SSLClientSocketPool* GetSSLSocketPool() override;
 
-  virtual SOCKSClientSocketPool* GetSocketPoolForSOCKSProxy(
-      const HostPortPair& socks_proxy) OVERRIDE;
+  SOCKSClientSocketPool* GetSocketPoolForSOCKSProxy(
+      const HostPortPair& socks_proxy) override;
 
-  virtual HttpProxyClientSocketPool* GetSocketPoolForHTTPProxy(
-      const HostPortPair& http_proxy) OVERRIDE;
+  HttpProxyClientSocketPool* GetSocketPoolForHTTPProxy(
+      const HostPortPair& http_proxy) override;
 
-  virtual SSLClientSocketPool* GetSocketPoolForSSLWithProxy(
-      const HostPortPair& proxy_server) OVERRIDE;
+  SSLClientSocketPool* GetSocketPoolForSSLWithProxy(
+      const HostPortPair& proxy_server) override;
 
   // Creates a Value summary of the state of the socket pools. The caller is
   // responsible for deleting the returned value.
-  virtual base::Value* SocketPoolInfoToValue() const OVERRIDE;
+  base::Value* SocketPoolInfoToValue() const override;
 
   // CertDatabase::Observer methods:
-  virtual void OnCertAdded(const X509Certificate* cert) OVERRIDE;
-  virtual void OnCACertChanged(const X509Certificate* cert) OVERRIDE;
+  void OnCertAdded(const X509Certificate* cert) override;
+  void OnCACertChanged(const X509Certificate* cert) override;
 
  private:
   typedef internal::OwnedPoolMap<HostPortPair, TransportClientSocketPool*>

@@ -31,17 +31,19 @@
 #include "third_party/khronos/GLES2/gl2ext.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 
 class GrContext;
 
 namespace gpu {
+class GpuMemoryBufferManager;
 namespace gles {
 class GLES2Interface;
 }
 }
 
 namespace gfx {
+class GpuMemoryBuffer;
 class Rect;
 class Vector2d;
 }
@@ -56,6 +58,9 @@ class TextureUploader;
 // This class is not thread-safe and can only be called from the thread it was
 // created on (in practice, the impl thread).
 class CC_EXPORT ResourceProvider {
+ private:
+  struct Resource;
+
  public:
   typedef unsigned ResourceId;
   typedef std::vector<ResourceId> ResourceIdArray;
@@ -77,11 +82,11 @@ class CC_EXPORT ResourceProvider {
   static scoped_ptr<ResourceProvider> Create(
       OutputSurface* output_surface,
       SharedBitmapManager* shared_bitmap_manager,
+      gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
       BlockingTaskRunner* blocking_main_thread_task_runner,
       int highp_threshold_min,
       bool use_rgba_4444_texture_format,
-      size_t id_allocation_chunk_size,
-      bool use_distance_field_text);
+      size_t id_allocation_chunk_size);
   virtual ~ResourceProvider();
 
   void InitializeSoftware();
@@ -235,7 +240,7 @@ class CC_EXPORT ResourceProvider {
                     ResourceProvider::ResourceId resource_id,
                     GLenum unit,
                     GLenum filter);
-    virtual ~ScopedSamplerGL();
+    ~ScopedSamplerGL() override;
 
     GLenum target() const { return target_; }
 
@@ -256,7 +261,7 @@ class CC_EXPORT ResourceProvider {
 
    private:
     ResourceProvider* resource_provider_;
-    ResourceProvider::ResourceId resource_id_;
+    ResourceProvider::Resource* resource_;
     unsigned texture_id_;
 
     DISALLOW_COPY_AND_ASSIGN(ScopedWriteLockGL);
@@ -296,11 +301,48 @@ class CC_EXPORT ResourceProvider {
 
    private:
     ResourceProvider* resource_provider_;
-    ResourceProvider::ResourceId resource_id_;
+    ResourceProvider::Resource* resource_;
     SkBitmap sk_bitmap_;
     scoped_ptr<SkCanvas> sk_canvas_;
+    base::ThreadChecker thread_checker_;
 
     DISALLOW_COPY_AND_ASSIGN(ScopedWriteLockSoftware);
+  };
+
+  class CC_EXPORT ScopedWriteLockGpuMemoryBuffer {
+   public:
+    ScopedWriteLockGpuMemoryBuffer(ResourceProvider* resource_provider,
+                                   ResourceProvider::ResourceId resource_id);
+    ~ScopedWriteLockGpuMemoryBuffer();
+
+    gfx::GpuMemoryBuffer* GetGpuMemoryBuffer();
+
+   private:
+    ResourceProvider* resource_provider_;
+    ResourceProvider::Resource* resource_;
+    gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager_;
+    gfx::GpuMemoryBuffer* gpu_memory_buffer_;
+    gfx::Size size_;
+    ResourceFormat format_;
+    base::ThreadChecker thread_checker_;
+
+    DISALLOW_COPY_AND_ASSIGN(ScopedWriteLockGpuMemoryBuffer);
+  };
+
+  class CC_EXPORT ScopedWriteLockGr {
+   public:
+    ScopedWriteLockGr(ResourceProvider* resource_provider,
+                      ResourceProvider::ResourceId resource_id);
+    ~ScopedWriteLockGr();
+
+    SkSurface* GetSkSurface(bool use_distance_field_text);
+
+   private:
+    ResourceProvider* resource_provider_;
+    ResourceProvider::Resource* resource_;
+    base::ThreadChecker thread_checker_;
+
+    DISALLOW_COPY_AND_ASSIGN(ScopedWriteLockGr);
   };
 
   class Fence : public base::RefCounted<Fence> {
@@ -309,6 +351,7 @@ class CC_EXPORT ResourceProvider {
 
     virtual void Set() = 0;
     virtual bool HasPassed() = 0;
+    virtual void Wait() = 0;
 
    protected:
     friend class base::RefCounted<Fence>;
@@ -316,6 +359,29 @@ class CC_EXPORT ResourceProvider {
 
    private:
     DISALLOW_COPY_AND_ASSIGN(Fence);
+  };
+
+  class SynchronousFence : public ResourceProvider::Fence {
+   public:
+    explicit SynchronousFence(gpu::gles2::GLES2Interface* gl);
+
+    // Overridden from Fence:
+    void Set() override;
+    bool HasPassed() override;
+    void Wait() override;
+
+    // Returns true if fence has been set but not yet synchornized.
+    bool has_synchronized() const { return has_synchronized_; }
+
+   private:
+    ~SynchronousFence() override;
+
+    void Synchronize();
+
+    gpu::gles2::GLES2Interface* gl_;
+    bool has_synchronized_;
+
+    DISALLOW_COPY_AND_ASSIGN(SynchronousFence);
   };
 
   // Acquire pixel buffer for resource. The pixel buffer can be used to
@@ -329,22 +395,6 @@ class CC_EXPORT ResourceProvider {
   void BeginSetPixels(ResourceId id);
   void ForceSetPixelsToComplete(ResourceId id);
   bool DidSetPixelsComplete(ResourceId id);
-
-  // Acquire and release an image. The image allows direct
-  // manipulation of texture memory.
-  void AcquireImage(ResourceId id);
-  void ReleaseImage(ResourceId id);
-  // Maps the acquired image so that its pixels could be modified.
-  // Unmap is called when all pixels are set.
-  uint8_t* MapImage(ResourceId id, int* stride);
-  void UnmapImage(ResourceId id);
-
-  // Acquire and release a SkSurface.
-  void AcquireSkSurface(ResourceId id);
-  void ReleaseSkSurface(ResourceId id);
-  // Lock/unlock resource for writing to SkSurface.
-  SkSurface* LockForWriteToSkSurface(ResourceId id);
-  void UnlockForWriteToSkSurface(ResourceId id);
 
   // For tests only! This prevents detecting uninitialized reads.
   // Use SetPixels or LockForWrite to allocate implicitly.
@@ -360,9 +410,6 @@ class CC_EXPORT ResourceProvider {
   // until this fence has passed.
   void SetReadLockFence(Fence* fence) { current_read_lock_fence_ = fence; }
 
-  // Enable read lock fences for a specific resource.
-  void EnableReadLockFences(ResourceId id);
-
   // Indicates if we can currently lock this resource for write.
   bool CanLockForWrite(ResourceId id);
 
@@ -370,6 +417,8 @@ class CC_EXPORT ResourceProvider {
   void CopyResource(ResourceId source_id, ResourceId dest_id);
 
   void WaitSyncPointIfNeeded(ResourceId id);
+
+  void WaitReadLockIfNeeded(ResourceId id);
 
   static GLint GetActiveTextureUnit(gpu::gles2::GLES2Interface* gl);
 
@@ -440,6 +489,7 @@ class CC_EXPORT ResourceProvider {
     ResourceFormat format;
     SharedBitmapId shared_bitmap_id;
     SharedBitmap* shared_bitmap;
+    gfx::GpuMemoryBuffer* gpu_memory_buffer;
     skia::RefPtr<SkSurface> sk_surface;
   };
   typedef base::hash_map<ResourceId, Resource> ResourceMap;
@@ -467,19 +517,20 @@ class CC_EXPORT ResourceProvider {
 
   ResourceProvider(OutputSurface* output_surface,
                    SharedBitmapManager* shared_bitmap_manager,
+                   gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
                    BlockingTaskRunner* blocking_main_thread_task_runner,
                    int highp_threshold_min,
                    bool use_rgba_4444_texture_format,
-                   size_t id_allocation_chunk_size,
-                   bool use_distance_field_text);
+                   size_t id_allocation_chunk_size);
 
   void CleanUpGLIfNeeded();
 
   Resource* GetResource(ResourceId id);
   const Resource* LockForRead(ResourceId id);
   void UnlockForRead(ResourceId id);
-  const Resource* LockForWrite(ResourceId id);
-  void UnlockForWrite(ResourceId id);
+  Resource* LockForWrite(ResourceId id);
+  void UnlockForWrite(Resource* resource);
+
   static void PopulateSkBitmapWithResource(SkBitmap* sk_bitmap,
                                            const Resource* resource);
 
@@ -510,6 +561,7 @@ class CC_EXPORT ResourceProvider {
 
   OutputSurface* output_surface_;
   SharedBitmapManager* shared_bitmap_manager_;
+  gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager_;
   BlockingTaskRunner* blocking_main_thread_task_runner_;
   bool lost_output_surface_;
   int highp_threshold_min_;
@@ -537,8 +589,8 @@ class CC_EXPORT ResourceProvider {
   scoped_ptr<IdAllocator> buffer_id_allocator_;
 
   bool use_sync_query_;
-
-  bool use_distance_field_text_;
+  // Fence used for CopyResource if CHROMIUM_sync_query is not supported.
+  scoped_refptr<SynchronousFence> synchronous_fence_;
 
   DISALLOW_COPY_AND_ASSIGN(ResourceProvider);
 };

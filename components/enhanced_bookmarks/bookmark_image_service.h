@@ -34,12 +34,12 @@ class BookmarkImageService : public KeyedService,
                        EnhancedBookmarkModel* enhanced_bookmark_model,
                        scoped_refptr<base::SequencedWorkerPool> pool);
 
-  virtual ~BookmarkImageService();
+  ~BookmarkImageService() override;
 
   typedef base::Callback<void(const gfx::Image&, const GURL& url)> Callback;
 
   // KeyedService:
-  virtual void Shutdown() OVERRIDE;
+  void Shutdown() override;
 
   // Returns a salient image for a URL. This may trigger a network request for
   // the image if the image was not retrieved before and if a bookmark node has
@@ -49,32 +49,30 @@ class BookmarkImageService : public KeyedService,
   void SalientImageForUrl(const GURL& page_url, Callback callback);
 
   // BookmarkModelObserver methods.
-  virtual void BookmarkNodeRemoved(BookmarkModel* model,
-                                   const BookmarkNode* parent,
-                                   int old_index,
-                                   const BookmarkNode* node,
-                                   const std::set<GURL>& removed_urls) OVERRIDE;
-  virtual void BookmarkModelLoaded(BookmarkModel* model,
-                                   bool ids_reassigned) OVERRIDE;
-  virtual void BookmarkNodeMoved(BookmarkModel* model,
-                                 const BookmarkNode* old_parent,
-                                 int old_index,
-                                 const BookmarkNode* new_parent,
-                                 int new_index) OVERRIDE;
-  virtual void BookmarkNodeAdded(BookmarkModel* model,
-                                 const BookmarkNode* parent,
-                                 int index) OVERRIDE;
-  virtual void OnWillChangeBookmarkNode(BookmarkModel* model,
-                                        const BookmarkNode* node) OVERRIDE;
-  virtual void BookmarkNodeChanged(BookmarkModel* model,
-                                   const BookmarkNode* node) OVERRIDE;
-  virtual void BookmarkNodeFaviconChanged(BookmarkModel* model,
-                                          const BookmarkNode* node) OVERRIDE;
-  virtual void BookmarkNodeChildrenReordered(BookmarkModel* model,
-                                             const BookmarkNode* node) OVERRIDE;
-  virtual void BookmarkAllUserNodesRemoved(
-      BookmarkModel* model,
-      const std::set<GURL>& removed_urls) OVERRIDE;
+  void BookmarkNodeRemoved(BookmarkModel* model,
+                           const BookmarkNode* parent,
+                           int old_index,
+                           const BookmarkNode* node,
+                           const std::set<GURL>& removed_urls) override;
+  void BookmarkModelLoaded(BookmarkModel* model, bool ids_reassigned) override;
+  void BookmarkNodeMoved(BookmarkModel* model,
+                         const BookmarkNode* old_parent,
+                         int old_index,
+                         const BookmarkNode* new_parent,
+                         int new_index) override;
+  void BookmarkNodeAdded(BookmarkModel* model,
+                         const BookmarkNode* parent,
+                         int index) override;
+  void OnWillChangeBookmarkNode(BookmarkModel* model,
+                                const BookmarkNode* node) override;
+  void BookmarkNodeChanged(BookmarkModel* model,
+                           const BookmarkNode* node) override;
+  void BookmarkNodeFaviconChanged(BookmarkModel* model,
+                                  const BookmarkNode* node) override;
+  void BookmarkNodeChildrenReordered(BookmarkModel* model,
+                                     const BookmarkNode* node) override;
+  void BookmarkAllUserNodesRemoved(BookmarkModel* model,
+                                   const std::set<GURL>& removed_urls) override;
 
  protected:
   // Returns true if the image for the page_url is currently being fetched.

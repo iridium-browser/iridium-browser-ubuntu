@@ -12,7 +12,7 @@
 #include "ui/events/gesture_detection/gesture_event_data.h"
 #include "ui/events/gesture_detection/gesture_provider.h"
 #include "ui/events/gesture_detection/motion_event.h"
-#include "ui/events/test/mock_motion_event.h"
+#include "ui/events/test/motion_event_test_utils.h"
 #include "ui/gfx/geometry/point_f.h"
 
 using base::TimeDelta;
@@ -58,7 +58,7 @@ gfx::RectF BoundsForSingleMockTouchAtLocation(float x, float y) {
 class GestureProviderTest : public testing::Test, public GestureProviderClient {
  public:
   GestureProviderTest() {}
-  virtual ~GestureProviderTest() {}
+  ~GestureProviderTest() override {}
 
   static MockMotionEvent ObtainMotionEvent(base::TimeTicks event_time,
                                            MotionEvent::Action action,
@@ -123,15 +123,15 @@ class GestureProviderTest : public testing::Test, public GestureProviderClient {
   }
 
   // Test
-  virtual void SetUp() OVERRIDE { SetUpWithConfig(GetDefaultConfig()); }
+  void SetUp() override { SetUpWithConfig(GetDefaultConfig()); }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     gestures_.clear();
     gesture_provider_.reset();
   }
 
   // GestureProviderClient
-  virtual void OnGestureEvent(const GestureEventData& gesture) OVERRIDE {
+  void OnGestureEvent(const GestureEventData& gesture) override {
     if (gesture.type() == ET_GESTURE_SCROLL_BEGIN)
       active_scroll_begin_event_.reset(new GestureEventData(gesture));
     gestures_.push_back(gesture);

@@ -73,13 +73,13 @@ void FakeOutputSurface::SwapBuffers(CompositorFrame* frame) {
     }
 
     ++num_sent_frames_;
-    PostSwapBuffersComplete();
-    client_->DidSwapBuffers();
   } else {
-    OutputSurface::SwapBuffers(frame);
+    last_swap_rect_ = frame->gl_frame_data->sub_buffer_rect;
     frame->AssignTo(&last_sent_frame_);
     ++num_sent_frames_;
   }
+  PostSwapBuffersComplete();
+  client_->DidSwapBuffers();
 }
 
 void FakeOutputSurface::SetNeedsBeginFrame(bool enable) {
@@ -105,7 +105,7 @@ bool FakeOutputSurface::BindToClient(OutputSurfaceClient* client) {
     client_ = client;
     if (memory_policy_to_set_at_bind_) {
       client_->SetMemoryPolicy(*memory_policy_to_set_at_bind_.get());
-      memory_policy_to_set_at_bind_.reset();
+      memory_policy_to_set_at_bind_ = nullptr;
     }
     return true;
   } else {

@@ -19,21 +19,20 @@ class TestObserver : public AppListItemListObserver {
  public:
   TestObserver() : items_added_(0), items_removed_(0), items_moved_(0) {}
 
-  virtual ~TestObserver() {
-  }
+  ~TestObserver() override {}
 
   // AppListItemListObserver overriden:
-  virtual void OnListItemAdded(size_t index, AppListItem* item) OVERRIDE {
+  void OnListItemAdded(size_t index, AppListItem* item) override {
     ++items_added_;
   }
 
-  virtual void OnListItemRemoved(size_t index, AppListItem* item) OVERRIDE {
+  void OnListItemRemoved(size_t index, AppListItem* item) override {
     ++items_removed_;
   }
 
-  virtual void OnListItemMoved(size_t from_index,
-                               size_t to_index,
-                               AppListItem* item) OVERRIDE {
+  void OnListItemMoved(size_t from_index,
+                       size_t to_index,
+                       AppListItem* item) override {
     ++items_moved_;
   }
 
@@ -64,16 +63,12 @@ std::string GetItemId(int id) {
 class AppListItemListTest : public testing::Test {
  public:
   AppListItemListTest() {}
-  virtual ~AppListItemListTest() {}
+  ~AppListItemListTest() override {}
 
   // testing::Test overrides:
-  virtual void SetUp() OVERRIDE {
-    item_list_.AddObserver(&observer_);
-  }
+  void SetUp() override { item_list_.AddObserver(&observer_); }
 
-  virtual void TearDown() OVERRIDE {
-    item_list_.RemoveObserver(&observer_);
-  }
+  void TearDown() override { item_list_.RemoveObserver(&observer_); }
 
  protected:
   AppListItem* FindItem(const std::string& id) {

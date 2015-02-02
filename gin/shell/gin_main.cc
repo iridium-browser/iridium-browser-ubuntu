@@ -44,8 +44,7 @@ class GinShellRunnerDelegate : public ModuleRunnerDelegate {
     AddBuiltinModule(Console::kModuleName, Console::GetModule);
   }
 
-  virtual void UnhandledException(ShellRunner* runner,
-                                  TryCatch& try_catch) OVERRIDE {
+  void UnhandledException(ShellRunner* runner, TryCatch& try_catch) override {
     ModuleRunnerDelegate::UnhandledException(runner, try_catch);
     LOG(ERROR) << try_catch.GetStackTrace();
   }
@@ -61,6 +60,9 @@ int main(int argc, char** argv) {
   base::AtExitManager at_exit;
   CommandLine::Init(argc, argv);
   base::i18n::InitializeICU();
+#ifdef V8_USE_EXTERNAL_STARTUP_DATA
+  gin::IsolateHolder::LoadV8Snapshot();
+#endif
 
   gin::IsolateHolder::Initialize(gin::IsolateHolder::kStrictMode,
                                  gin::ArrayBufferAllocator::SharedInstance());

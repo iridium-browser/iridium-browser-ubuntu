@@ -95,10 +95,7 @@ void SyncWorker::RegisterOrigin(
   }
 
   task_manager_->ScheduleSyncTask(
-      FROM_HERE,
-      task.PassAs<SyncTask>(),
-      SyncTaskManager::PRIORITY_HIGH,
-      callback);
+      FROM_HERE, task.Pass(), SyncTaskManager::PRIORITY_HIGH, callback);
 }
 
 void SyncWorker::EnableOrigin(
@@ -514,6 +511,7 @@ void SyncWorker::DidProcessRemoteChange(RemoteToLocalSyncer* syncer,
           Observer, observers_,
           OnFileStatusChanged(
               syncer->url(),
+              syncer->file_type(),
               SYNC_FILE_STATUS_SYNCED,
               syncer->sync_action(),
               SYNC_DIRECTION_REMOTE_TO_LOCAL));
@@ -544,6 +542,7 @@ void SyncWorker::DidApplyLocalChange(LocalToRemoteSyncer* syncer,
     }
     FOR_EACH_OBSERVER(Observer, observers_,
                       OnFileStatusChanged(updated_url,
+                                          syncer->file_type(),
                                           SYNC_FILE_STATUS_SYNCED,
                                           syncer->sync_action(),
                                           SYNC_DIRECTION_LOCAL_TO_REMOTE));
@@ -618,7 +617,7 @@ bool SyncWorker::MaybeStartFetchChanges() {
 void SyncWorker::DidResolveConflict(SyncStatusCode status) {
   DCHECK(sequence_checker_.CalledOnValidSequencedThread());
 
-  if (status == SYNC_STATUS_OK)
+  if (status == SYNC_STATUS_OK || status == SYNC_STATUS_RETRY)
     should_check_conflict_ = true;
 }
 

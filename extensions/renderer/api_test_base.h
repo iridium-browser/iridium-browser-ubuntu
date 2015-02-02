@@ -17,7 +17,7 @@
 #include "gin/modules/module_registry.h"
 #include "gin/object_template_builder.h"
 #include "gin/wrappable.h"
-#include "mojo/bindings/js/handle.h"
+#include "mojo/edk/js/handle.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
 #include "mojo/public/cpp/system/core.h"
 
@@ -30,10 +30,10 @@ class V8SchemaRegistry;
 class TestServiceProvider : public gin::Wrappable<TestServiceProvider> {
  public:
   static gin::Handle<TestServiceProvider> Create(v8::Isolate* isolate);
-  virtual ~TestServiceProvider();
+  ~TestServiceProvider() override;
 
-  virtual gin::ObjectTemplateBuilder GetObjectTemplateBuilder(
-      v8::Isolate* isolate) OVERRIDE;
+  gin::ObjectTemplateBuilder GetObjectTemplateBuilder(
+      v8::Isolate* isolate) override;
 
   template <typename Interface>
   void AddService(const base::Callback<void(mojo::InterfaceRequest<Interface>)>
@@ -41,6 +41,13 @@ class TestServiceProvider : public gin::Wrappable<TestServiceProvider> {
     service_factories_.insert(std::make_pair(
         Interface::Name_,
         base::Bind(ForwardToServiceFactory<Interface>, service_factory)));
+  }
+
+  // Ignore requests for the Interface service.
+  template <typename Interface>
+  void IgnoreServiceRequests() {
+    service_factories_.insert(std::make_pair(
+        Interface::Name_, base::Bind(&TestServiceProvider::IgnoreHandle)));
   }
 
   static gin::WrapperInfo kWrapperInfo;
@@ -57,6 +64,9 @@ class TestServiceProvider : public gin::Wrappable<TestServiceProvider> {
       mojo::ScopedMessagePipeHandle handle) {
     service_factory.Run(mojo::MakeRequest<Interface>(handle.Pass()));
   }
+
+  static void IgnoreHandle(mojo::ScopedMessagePipeHandle handle);
+
   std::map<std::string, base::Callback<void(mojo::ScopedMessagePipeHandle)> >
       service_factories_;
 };
@@ -72,8 +82,8 @@ class TestServiceProvider : public gin::Wrappable<TestServiceProvider> {
 class ApiTestBase : public ModuleSystemTest {
  protected:
   ApiTestBase();
-  virtual ~ApiTestBase();
-  virtual void SetUp() OVERRIDE;
+  ~ApiTestBase() override;
+  void SetUp() override;
   void RunTest(const std::string& file_name, const std::string& test_name);
   TestServiceProvider* service_provider() { return service_provider_; }
 

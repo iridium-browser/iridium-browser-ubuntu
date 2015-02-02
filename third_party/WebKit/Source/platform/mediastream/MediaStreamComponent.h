@@ -44,7 +44,7 @@ namespace blink {
 class MediaStreamSource;
 class WebAudioSourceProvider;
 
-class PLATFORM_EXPORT MediaStreamComponent : public RefCounted<MediaStreamComponent> {
+class PLATFORM_EXPORT MediaStreamComponent final : public RefCounted<MediaStreamComponent> {
 public:
     class ExtraData {
     public:
@@ -60,6 +60,7 @@ public:
     bool enabled() const { return m_enabled; }
     void setEnabled(bool enabled) { m_enabled = enabled; }
     bool muted() const { return m_muted; }
+    void setMuted(bool muted) { m_muted = muted; }
 
 #if ENABLE(WEB_AUDIO)
     AudioSourceProvider* audioSourceProvider() { return &m_sourceProvider; }
@@ -76,7 +77,7 @@ private:
     // AudioSourceProviderImpl wraps a WebAudioSourceProvider::provideInput()
     // calls into chromium to get a rendered audio stream.
 
-    class PLATFORM_EXPORT AudioSourceProviderImpl FINAL: public AudioSourceProvider {
+    class PLATFORM_EXPORT AudioSourceProviderImpl final: public AudioSourceProvider {
     public:
         AudioSourceProviderImpl()
             : m_webAudioSourceProvider(0)
@@ -89,7 +90,7 @@ private:
         void wrap(WebAudioSourceProvider*);
 
         // blink::AudioSourceProvider
-        virtual void provideInput(blink::AudioBus*, size_t framesToProcess) OVERRIDE;
+        virtual void provideInput(AudioBus*, size_t framesToProcess) override;
 
     private:
         WebAudioSourceProvider* m_webAudioSourceProvider;

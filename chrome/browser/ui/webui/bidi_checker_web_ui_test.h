@@ -16,11 +16,11 @@ class WaitableEvent;
 // for each test.
 class WebUIBidiCheckerBrowserTest : public WebUIBrowserTest {
  public:
-  virtual ~WebUIBidiCheckerBrowserTest();
+  ~WebUIBidiCheckerBrowserTest() override;
 
   // testing::Test implementation.
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
  protected:
   WebUIBidiCheckerBrowserTest();
@@ -30,7 +30,7 @@ class WebUIBidiCheckerBrowserTest : public WebUIBrowserTest {
   void RunBidiCheckerOnPage(const std::string& page_url, bool is_rtl);
 
   // Setup test path.
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE;
+  void SetUpInProcessBrowserTestFixture() override;
 
  private:
   // The command line args used to run the test before being changed in SetUp().
@@ -49,8 +49,8 @@ class WebUIBidiCheckerBrowserTestRTL : public WebUIBidiCheckerBrowserTest {
   void RunBidiCheckerOnPage(const std::string& page_url);
 
  protected:
-  virtual void SetUpOnMainThread() OVERRIDE;
-  virtual void TearDownOnMainThread() OVERRIDE;
+  void SetUpOnMainThread() override;
+  void TearDownOnMainThread() override;
 
   // The app locale before we change it
   std::string app_locale_;

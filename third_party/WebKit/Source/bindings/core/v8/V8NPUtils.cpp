@@ -43,7 +43,7 @@
 
 namespace blink {
 
-void convertV8ObjectToNPVariant(v8::Local<v8::Value> object, NPObject* owner, NPVariant* result, v8::Isolate* isolate)
+void convertV8ObjectToNPVariant(v8::Isolate* isolate, v8::Local<v8::Value> object, NPObject* owner, NPVariant* result)
 {
     VOID_TO_NPVARIANT(*result);
 
@@ -70,14 +70,14 @@ void convertV8ObjectToNPVariant(v8::Local<v8::Value> object, NPObject* owner, NP
         STRINGN_TO_NPVARIANT(utf8Chars, length-1, *result);
     } else if (object->IsObject()) {
         LocalDOMWindow* window = currentDOMWindow(isolate);
-        NPObject* npobject = npCreateV8ScriptObject(0, v8::Handle<v8::Object>::Cast(object), window, isolate);
+        NPObject* npobject = npCreateV8ScriptObject(isolate, 0, v8::Handle<v8::Object>::Cast(object), window);
         if (npobject)
             _NPN_RegisterObject(npobject, owner);
         OBJECT_TO_NPVARIANT(npobject, *result);
     }
 }
 
-v8::Handle<v8::Value> convertNPVariantToV8Object(const NPVariant* variant, NPObject* owner, v8::Isolate* isolate)
+v8::Handle<v8::Value> convertNPVariantToV8Object(v8::Isolate* isolate, const NPVariant* variant, NPObject* owner)
 {
     NPVariantType type = variant->type;
 
@@ -100,7 +100,7 @@ v8::Handle<v8::Value> convertNPVariantToV8Object(const NPVariant* variant, NPObj
         NPObject* object = NPVARIANT_TO_OBJECT(*variant);
         if (V8NPObject* v8Object = npObjectToV8NPObject(object))
             return v8::Local<v8::Object>::New(isolate, v8Object->v8Object);
-        return createV8ObjectForNPObject(object, owner, isolate);
+        return createV8ObjectForNPObject(isolate, object, owner);
     }
     default:
         return v8::Undefined(isolate);

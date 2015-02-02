@@ -29,45 +29,35 @@ package org.appspot.apprtc;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.Fragment;
 import android.content.DialogInterface;
 import android.content.Intent;
-import android.content.res.Configuration;
+import android.content.pm.ActivityInfo;
 import android.graphics.Color;
-import android.graphics.Point;
-import android.media.AudioManager;
+import android.net.Uri;
+import android.opengl.GLSurfaceView;
 import android.os.Bundle;
 import android.util.Log;
 import android.util.TypedValue;
+import android.view.LayoutInflater;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.ViewGroup.LayoutParams;
+import android.view.Window;
 import android.view.WindowManager;
-import android.webkit.JavascriptInterface;
-import android.widget.EditText;
+import android.widget.ImageButton;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import org.json.JSONException;
-import org.json.JSONObject;
-import org.webrtc.DataChannel;
+import org.appspot.apprtc.AppRTCClient.AppRTCSignalingParameters;
 import org.webrtc.IceCandidate;
-import org.webrtc.MediaConstraints;
-import org.webrtc.MediaStream;
-import org.webrtc.PeerConnection;
 import org.webrtc.PeerConnectionFactory;
-import org.webrtc.SdpObserver;
 import org.webrtc.SessionDescription;
 import org.webrtc.StatsObserver;
 import org.webrtc.StatsReport;
-import org.webrtc.VideoCapturer;
 import org.webrtc.VideoRenderer;
 import org.webrtc.VideoRendererGui;
-import org.webrtc.VideoSource;
-import org.webrtc.VideoTrack;
-
-import java.util.LinkedList;
-import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import org.webrtc.VideoRendererGui.ScalingType;
 
 /**
  * Main Activity of the AppRTCDemo Android app demonstrating interoperability
@@ -75,54 +65,119 @@ import java.util.regex.Pattern;
  * apprtc.appspot.com demo webapp.
  */
 public class AppRTCDemoActivity extends Activity
-    implements AppRTCClient.IceServersObserver {
-  private static final String TAG = "AppRTCDemoActivity";
-  private PeerConnectionFactory factory;
-  private VideoSource videoSource;
-  private boolean videoSourceStopped;
-  private PeerConnection pc;
-  private final PCObserver pcObserver = new PCObserver();
-  private final SDPObserver sdpObserver = new SDPObserver();
-  private final GAEChannelClient.MessageHandler gaeHandler = new GAEHandler();
-  private AppRTCClient appRtcClient = new AppRTCClient(this, gaeHandler, this);
-  private AppRTCGLView vsv;
+    implements AppRTCClient.AppRTCSignalingEvents,
+      PeerConnectionClient.PeerConnectionEvents {
+  private static final String TAG = "AppRTCClient";
+  private PeerConnectionClient pc;
+  private AppRTCClient appRtcClient = new GAERTCClient(this, this);
+  private AppRTCSignalingParameters appRtcParameters;
+  private AppRTCAudioManager audioManager = null;
+  private View rootView;
+  private View menuBar;
+  private GLSurfaceView videoView;
   private VideoRenderer.Callbacks localRender;
   private VideoRenderer.Callbacks remoteRender;
+  private ScalingType scalingType;
   private Toast logToast;
   private final LayoutParams hudLayout =
       new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
   private TextView hudView;
-  private LinkedList<IceCandidate> queuedRemoteCandidates =
-      new LinkedList<IceCandidate>();
-  // Synchronize on quit[0] to avoid teardown-related crashes.
-  private final Boolean[] quit = new Boolean[] { false };
-  private MediaConstraints sdpMediaConstraints;
+  private TextView roomName;
+  private ImageButton videoScalingButton;
+  private boolean iceConnected;
 
   @Override
   public void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
 
-    Thread.setDefaultUncaughtExceptionHandler(
-        new UnhandledExceptionHandler(this));
-
+    // Set window styles for fullscreen-window size. Needs to be done before
+    // adding content.
+    requestWindowFeature(Window.FEATURE_NO_TITLE);
     getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
     getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+    getWindow().getDecorView().setSystemUiVisibility(
+        View.SYSTEM_UI_FLAG_HIDE_NAVIGATION |
+        View.SYSTEM_UI_FLAG_FULLSCREEN |
+        View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
 
-    Point displaySize = new Point();
-    getWindowManager().getDefaultDisplay().getRealSize(displaySize);
+    setContentView(R.layout.activity_fullscreen);
 
-    vsv = new AppRTCGLView(this, displaySize);
-    VideoRendererGui.setView(vsv);
-    remoteRender = VideoRendererGui.create(0, 0, 100, 100);
-    localRender = VideoRendererGui.create(70, 5, 25, 25);
+    Thread.setDefaultUncaughtExceptionHandler(
+        new UnhandledExceptionHandler(this));
+    iceConnected = false;
 
-    vsv.setOnClickListener(new View.OnClickListener() {
-        @Override public void onClick(View v) {
-          toggleHUD();
-        }
-      });
-    setContentView(vsv);
-    logAndToast("Tap the screen to toggle stats visibility");
+    rootView = findViewById(android.R.id.content);
+    menuBar = findViewById(R.id.menubar_fragment);
+    roomName = (TextView) findViewById(R.id.room_name);
+    videoView = (GLSurfaceView) findViewById(R.id.glview);
+
+    VideoRendererGui.setView(videoView);
+    scalingType = ScalingType.SCALE_ASPECT_FILL;
+    remoteRender = VideoRendererGui.create(0, 0, 100, 100, scalingType);
+    localRender = VideoRendererGui.create(0, 0, 100, 100, scalingType);
+
+    videoView.setOnClickListener(
+        new View.OnClickListener() {
+          @Override
+          public void onClick(View view) {
+            int visibility = menuBar.getVisibility() == View.VISIBLE
+                    ? View.INVISIBLE : View.VISIBLE;
+            menuBar.setVisibility(visibility);
+            roomName.setVisibility(visibility);
+            if (visibility == View.VISIBLE) {
+              menuBar.bringToFront();
+              roomName.bringToFront();
+              rootView.invalidate();
+            }
+          }
+        });
+
+    ((ImageButton) findViewById(R.id.button_disconnect)).setOnClickListener(
+        new View.OnClickListener() {
+          @Override
+          public void onClick(View view) {
+            logAndToast("Disconnecting call.");
+            disconnect();
+          }
+        });
+
+    ((ImageButton) findViewById(R.id.button_switch_camera)).setOnClickListener(
+        new View.OnClickListener() {
+          @Override
+          public void onClick(View view) {
+            if (pc != null) {
+              pc.switchCamera();
+            }
+          }
+        });
+
+    ((ImageButton) findViewById(R.id.button_toggle_debug)).setOnClickListener(
+        new View.OnClickListener() {
+          @Override
+          public void onClick(View view) {
+            int visibility = hudView.getVisibility() == View.VISIBLE
+                ? View.INVISIBLE : View.VISIBLE;
+            hudView.setVisibility(visibility);
+          }
+        });
+
+    videoScalingButton = (ImageButton) findViewById(R.id.button_scaling_mode);
+    videoScalingButton.setOnClickListener(
+        new View.OnClickListener() {
+          @Override
+          public void onClick(View view) {
+            if (scalingType == ScalingType.SCALE_ASPECT_FILL) {
+              videoScalingButton.setBackgroundResource(
+                  R.drawable.ic_action_full_screen);
+              scalingType = ScalingType.SCALE_ASPECT_FIT;
+            } else {
+              videoScalingButton.setBackgroundResource(
+                  R.drawable.ic_action_return_from_full_screen);
+              scalingType = ScalingType.SCALE_ASPECT_FILL;
+            }
+            updateVideoView();
+          }
+        });
 
     hudView = new TextView(this);
     hudView.setTextColor(Color.BLACK);
@@ -132,59 +187,80 @@ public class AppRTCDemoActivity extends Activity
     hudView.setVisibility(View.INVISIBLE);
     addContentView(hudView, hudLayout);
 
-    AudioManager audioManager =
-        ((AudioManager) getSystemService(AUDIO_SERVICE));
-    // TODO(fischman): figure out how to do this Right(tm) and remove the
-    // suppression.
-    @SuppressWarnings("deprecation")
-    boolean isWiredHeadsetOn = audioManager.isWiredHeadsetOn();
-    audioManager.setMode(isWiredHeadsetOn ?
-        AudioManager.MODE_IN_CALL : AudioManager.MODE_IN_COMMUNICATION);
-    audioManager.setSpeakerphoneOn(!isWiredHeadsetOn);
-
-    sdpMediaConstraints = new MediaConstraints();
-    sdpMediaConstraints.mandatory.add(new MediaConstraints.KeyValuePair(
-        "OfferToReceiveAudio", "true"));
-    sdpMediaConstraints.mandatory.add(new MediaConstraints.KeyValuePair(
-        "OfferToReceiveVideo", "true"));
+    // Create and audio manager that will take care of audio routing,
+    // audio modes, audio device enumeration etc.
+    audioManager = AppRTCAudioManager.create(this);
 
     final Intent intent = getIntent();
-    if ("android.intent.action.VIEW".equals(intent.getAction())) {
-      connectToRoom(intent.getData().toString());
-      return;
-    }
-    showGetRoomUI();
-  }
-
-  private void showGetRoomUI() {
-    final EditText roomInput = new EditText(this);
-    roomInput.setText("https://apprtc.appspot.com/?r=");
-    roomInput.setSelection(roomInput.getText().length());
-    DialogInterface.OnClickListener listener =
-        new DialogInterface.OnClickListener() {
-          @Override public void onClick(DialogInterface dialog, int which) {
-            abortUnless(which == DialogInterface.BUTTON_POSITIVE, "lolwat?");
-            dialog.dismiss();
-            connectToRoom(roomInput.getText().toString());
-          }
-        };
-    AlertDialog.Builder builder = new AlertDialog.Builder(this);
-    builder
-        .setMessage("Enter room URL").setView(roomInput)
-        .setPositiveButton("Go!", listener).show();
-  }
-
-  private void connectToRoom(String roomUrl) {
-    logAndToast("Connecting to room...");
-    appRtcClient.connectToRoom(roomUrl);
-  }
-
-  // Toggle visibility of the heads-up display.
-  private void toggleHUD() {
-    if (hudView.getVisibility() == View.VISIBLE) {
-      hudView.setVisibility(View.INVISIBLE);
+    Uri url = intent.getData();
+    if (url != null) {
+      String room = url.getQueryParameter("r");
+      String loopback = url.getQueryParameter("debug");
+      if ((room != null && !room.equals("")) ||
+          (loopback != null && loopback.equals("loopback"))) {
+        logAndToast(getString(R.string.connecting_to, url));
+        appRtcClient.connectToRoom(url.toString());
+        if (room != null && !room.equals("")) {
+          roomName.setText(room);
+        } else {
+          roomName.setText("loopback");
+        }
+      } else {
+        logAndToast("Empty or missing room name!");
+        finish();
+      }
     } else {
-      hudView.setVisibility(View.VISIBLE);
+      logAndToast(getString(R.string.missing_url));
+      Log.wtf(TAG, "Didn't get any URL in intent!");
+      finish();
+    }
+  }
+
+  public static class MenuBarFragment extends Fragment {
+    @Override
+    public View onCreateView(
+        LayoutInflater inflater,
+        ViewGroup container,
+        Bundle savedInstanceState) {
+      return inflater.inflate(R.layout.fragment_menubar, container, false);
+    }
+  }
+
+  @Override
+  public void onPause() {
+    super.onPause();
+    videoView.onPause();
+    if (pc != null) {
+      pc.stopVideoSource();
+    }
+  }
+
+  @Override
+  public void onResume() {
+    super.onResume();
+    videoView.onResume();
+    if (pc != null) {
+      pc.startVideoSource();
+    }
+  }
+
+  @Override
+  protected void onDestroy() {
+    disconnect();
+    if (audioManager != null) {
+      audioManager.close();
+      audioManager = null;
+    }
+    super.onDestroy();
+  }
+
+  private void updateVideoView() {
+    VideoRendererGui.update(remoteRender, 0, 0, 100, 100, scalingType);
+    if (iceConnected) {
+      VideoRendererGui.update(localRender, 70, 70, 28, 28,
+          ScalingType.SCALE_ASPECT_FIT);
+    } else {
+      VideoRendererGui.update(localRender, 0, 0, 100, 100, scalingType);
     }
   }
 
@@ -235,147 +311,30 @@ public class AppRTCDemoActivity extends Activity
     return activeConnectionbuilder.toString();
   }
 
-  @Override
-  public void onPause() {
-    super.onPause();
-    vsv.onPause();
-    if (videoSource != null) {
-      videoSource.stop();
-      videoSourceStopped = true;
+  // Disconnect from remote resources, dispose of local resources, and exit.
+  private void disconnect() {
+    if (appRtcClient != null) {
+      appRtcClient.disconnect();
+      appRtcClient = null;
     }
-  }
-
-  @Override
-  public void onResume() {
-    super.onResume();
-    vsv.onResume();
-    if (videoSource != null && videoSourceStopped) {
-      videoSource.restart();
+    if (pc != null) {
+      pc.close();
+      pc = null;
     }
+    finish();
   }
 
-  @Override
-  public void onConfigurationChanged (Configuration newConfig) {
-    Point displaySize = new Point();
-    getWindowManager().getDefaultDisplay().getSize(displaySize);
-    vsv.updateDisplaySize(displaySize);
-    super.onConfigurationChanged(newConfig);
-  }
-
-  // Just for fun (and to regression-test bug 2302) make sure that DataChannels
-  // can be created, queried, and disposed.
-  private static void createDataChannelToRegressionTestBug2302(
-      PeerConnection pc) {
-    DataChannel dc = pc.createDataChannel("dcLabel", new DataChannel.Init());
-    abortUnless("dcLabel".equals(dc.label()), "Unexpected label corruption?");
-    dc.close();
-    dc.dispose();
-  }
-
-  @Override
-  public void onIceServers(List<PeerConnection.IceServer> iceServers) {
-    abortUnless(PeerConnectionFactory.initializeAndroidGlobals(
-      this, true, true, VideoRendererGui.getEGLContext()),
-        "Failed to initializeAndroidGlobals");
-    factory = new PeerConnectionFactory();
-
-    MediaConstraints pcConstraints = appRtcClient.pcConstraints();
-    pcConstraints.optional.add(
-        new MediaConstraints.KeyValuePair("RtpDataChannels", "true"));
-    pc = factory.createPeerConnection(iceServers, pcConstraints, pcObserver);
-
-    createDataChannelToRegressionTestBug2302(pc);  // See method comment.
-
-    // Uncomment to get ALL WebRTC tracing and SENSITIVE libjingle logging.
-    // NOTE: this _must_ happen while |factory| is alive!
-    // Logging.enableTracing(
-    //     "logcat:",
-    //     EnumSet.of(Logging.TraceLevel.TRACE_ALL),
-    //     Logging.Severity.LS_SENSITIVE);
-
-    {
-      final PeerConnection finalPC = pc;
-      final Runnable repeatedStatsLogger = new Runnable() {
-          public void run() {
-            synchronized (quit[0]) {
-              if (quit[0]) {
-                return;
-              }
-              final Runnable runnableThis = this;
-              if (hudView.getVisibility() == View.INVISIBLE) {
-                vsv.postDelayed(runnableThis, 1000);
-                return;
-              }
-              boolean success = finalPC.getStats(new StatsObserver() {
-                  public void onComplete(final StatsReport[] reports) {
-                    runOnUiThread(new Runnable() {
-                        public void run() {
-                          updateHUD(reports);
-                        }
-                      });
-                    for (StatsReport report : reports) {
-                      Log.d(TAG, "Stats: " + report.toString());
-                    }
-                    vsv.postDelayed(runnableThis, 1000);
-                  }
-                }, null);
-              if (!success) {
-                throw new RuntimeException("getStats() return false!");
-              }
-            }
-          }
-        };
-      vsv.postDelayed(repeatedStatsLogger, 1000);
-    }
-
-    {
-      logAndToast("Creating local video source...");
-      MediaStream lMS = factory.createLocalMediaStream("ARDAMS");
-      if (appRtcClient.videoConstraints() != null) {
-        VideoCapturer capturer = getVideoCapturer();
-        videoSource = factory.createVideoSource(
-            capturer, appRtcClient.videoConstraints());
-        VideoTrack videoTrack =
-            factory.createVideoTrack("ARDAMSv0", videoSource);
-        videoTrack.addRenderer(new VideoRenderer(localRender));
-        lMS.addTrack(videoTrack);
-      }
-      if (appRtcClient.audioConstraints() != null) {
-        lMS.addTrack(factory.createAudioTrack(
-            "ARDAMSa0",
-            factory.createAudioSource(appRtcClient.audioConstraints())));
-      }
-      pc.addStream(lMS, new MediaConstraints());
-    }
-    logAndToast("Waiting for ICE candidates...");
-  }
-
-  // Cycle through likely device names for the camera and return the first
-  // capturer that works, or crash if none do.
-  private VideoCapturer getVideoCapturer() {
-    String[] cameraFacing = { "front", "back" };
-    int[] cameraIndex = { 0, 1 };
-    int[] cameraOrientation = { 0, 90, 180, 270 };
-    for (String facing : cameraFacing) {
-      for (int index : cameraIndex) {
-        for (int orientation : cameraOrientation) {
-          String name = "Camera " + index + ", Facing " + facing +
-              ", Orientation " + orientation;
-          VideoCapturer capturer = VideoCapturer.create(name);
-          if (capturer != null) {
-            logAndToast("Using camera: " + name);
-            return capturer;
-          }
+  private void disconnectWithMessage(String errorMessage) {
+    new AlertDialog.Builder(this)
+    .setTitle(getText(R.string.channel_error_title))
+    .setMessage(errorMessage)
+    .setCancelable(false)
+    .setNeutralButton(R.string.ok, new DialogInterface.OnClickListener() {
+        public void onClick(DialogInterface dialog, int id) {
+          dialog.cancel();
+          disconnect();
         }
-      }
-    }
-    throw new RuntimeException("Failed to open capturer");
-  }
-
-  @Override
-  protected void onDestroy() {
-    disconnectAndExit();
-    super.onDestroy();
+      }).create().show();
   }
 
   // Poor-man's assert(): die with |msg| unless |condition| is true.
@@ -395,300 +354,144 @@ public class AppRTCDemoActivity extends Activity
     logToast.show();
   }
 
-  // Send |json| to the underlying AppEngine Channel.
-  private void sendMessage(JSONObject json) {
-    appRtcClient.sendMessage(json.toString());
-  }
-
-  // Put a |key|->|value| mapping in |json|.
-  private static void jsonPut(JSONObject json, String key, Object value) {
-    try {
-      json.put(key, value);
-    } catch (JSONException e) {
-      throw new RuntimeException(e);
+  // -----Implementation of AppRTCClient.AppRTCSignalingEvents ---------------
+  // All events are called from UI thread.
+  @Override
+  public void onConnectedToRoom(final AppRTCSignalingParameters params) {
+    if (audioManager != null) {
+      // Store existing audio settings and change audio mode to
+      // MODE_IN_COMMUNICATION for best possible VoIP performance.
+      logAndToast("Initializing the audio manager...");
+      audioManager.init();
     }
-  }
-
-  // Mangle SDP to prefer ISAC/16000 over any other audio codec.
-  private static String preferISAC(String sdpDescription) {
-    String[] lines = sdpDescription.split("\r\n");
-    int mLineIndex = -1;
-    String isac16kRtpMap = null;
-    Pattern isac16kPattern =
-        Pattern.compile("^a=rtpmap:(\\d+) ISAC/16000[\r]?$");
-    for (int i = 0;
-         (i < lines.length) && (mLineIndex == -1 || isac16kRtpMap == null);
-         ++i) {
-      if (lines[i].startsWith("m=audio ")) {
-        mLineIndex = i;
-        continue;
-      }
-      Matcher isac16kMatcher = isac16kPattern.matcher(lines[i]);
-      if (isac16kMatcher.matches()) {
-        isac16kRtpMap = isac16kMatcher.group(1);
-        continue;
-      }
-    }
-    if (mLineIndex == -1) {
-      Log.d(TAG, "No m=audio line, so can't prefer iSAC");
-      return sdpDescription;
-    }
-    if (isac16kRtpMap == null) {
-      Log.d(TAG, "No ISAC/16000 line, so can't prefer iSAC");
-      return sdpDescription;
-    }
-    String[] origMLineParts = lines[mLineIndex].split(" ");
-    StringBuilder newMLine = new StringBuilder();
-    int origPartIndex = 0;
-    // Format is: m=<media> <port> <proto> <fmt> ...
-    newMLine.append(origMLineParts[origPartIndex++]).append(" ");
-    newMLine.append(origMLineParts[origPartIndex++]).append(" ");
-    newMLine.append(origMLineParts[origPartIndex++]).append(" ");
-    newMLine.append(isac16kRtpMap);
-    for (; origPartIndex < origMLineParts.length; ++origPartIndex) {
-      if (!origMLineParts[origPartIndex].equals(isac16kRtpMap)) {
-        newMLine.append(" ").append(origMLineParts[origPartIndex]);
-      }
-    }
-    lines[mLineIndex] = newMLine.toString();
-    StringBuilder newSdpDescription = new StringBuilder();
-    for (String line : lines) {
-      newSdpDescription.append(line).append("\r\n");
-    }
-    return newSdpDescription.toString();
-  }
-
-  // Implementation detail: observe ICE & stream changes and react accordingly.
-  private class PCObserver implements PeerConnection.Observer {
-    @Override public void onIceCandidate(final IceCandidate candidate){
-      runOnUiThread(new Runnable() {
-          public void run() {
-            JSONObject json = new JSONObject();
-            jsonPut(json, "type", "candidate");
-            jsonPut(json, "label", candidate.sdpMLineIndex);
-            jsonPut(json, "id", candidate.sdpMid);
-            jsonPut(json, "candidate", candidate.sdp);
-            sendMessage(json);
-          }
-        });
+    appRtcParameters = params;
+    abortUnless(PeerConnectionFactory.initializeAndroidGlobals(
+      this, true, true, VideoRendererGui.getEGLContext()),
+        "Failed to initializeAndroidGlobals");
+    logAndToast("Creating peer connection...");
+    pc = new PeerConnectionClient(
+        this, localRender, remoteRender, appRtcParameters, this);
+    if (pc.isHDVideo()) {
+      setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+    } else {
+      setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
     }
 
-    @Override public void onError(){
-      runOnUiThread(new Runnable() {
-          public void run() {
-            throw new RuntimeException("PeerConnection error!");
-          }
-        });
-    }
-
-    @Override public void onSignalingChange(
-        PeerConnection.SignalingState newState) {
-    }
-
-    @Override public void onIceConnectionChange(
-        PeerConnection.IceConnectionState newState) {
-    }
-
-    @Override public void onIceGatheringChange(
-        PeerConnection.IceGatheringState newState) {
-    }
-
-    @Override public void onAddStream(final MediaStream stream){
-      runOnUiThread(new Runnable() {
-          public void run() {
-            abortUnless(stream.audioTracks.size() <= 1 &&
-                stream.videoTracks.size() <= 1,
-                "Weird-looking stream: " + stream);
-            if (stream.videoTracks.size() == 1) {
-              stream.videoTracks.get(0).addRenderer(
-                  new VideoRenderer(remoteRender));
+    {
+      final Runnable repeatedStatsLogger = new Runnable() {
+        public void run() {
+            if (pc == null) {
+              return;
+            }
+            final Runnable runnableThis = this;
+            if (hudView.getVisibility() == View.INVISIBLE) {
+              videoView.postDelayed(runnableThis, 1000);
+              return;
+            }
+            boolean success = pc.getStats(new StatsObserver() {
+                public void onComplete(final StatsReport[] reports) {
+                  runOnUiThread(new Runnable() {
+                      public void run() {
+                        updateHUD(reports);
+                      }
+                    });
+                  for (StatsReport report : reports) {
+                    Log.d(TAG, "Stats: " + report.toString());
+                  }
+                  videoView.postDelayed(runnableThis, 1000);
+                }
+              }, null);
+            if (!success) {
+              throw new RuntimeException("getStats() return false!");
             }
           }
-        });
+      };
+      videoView.postDelayed(repeatedStatsLogger, 1000);
     }
 
-    @Override public void onRemoveStream(final MediaStream stream){
-      runOnUiThread(new Runnable() {
-          public void run() {
-            stream.videoTracks.get(0).dispose();
-          }
-        });
-    }
+    logAndToast("Waiting for remote connection...");
+  }
 
-    @Override public void onDataChannel(final DataChannel dc) {
-      runOnUiThread(new Runnable() {
-          public void run() {
-            throw new RuntimeException(
-                "AppRTC doesn't use data channels, but got: " + dc.label() +
-                " anyway!");
-          }
-        });
+  @Override
+  public void onChannelOpen() {
+    if (pc == null) {
+      return;
     }
-
-    @Override public void onRenegotiationNeeded() {
-      // No need to do anything; AppRTC follows a pre-agreed-upon
-      // signaling/negotiation protocol.
+    if (appRtcParameters.initiator) {
+      logAndToast("Creating OFFER...");
+      // Create offer. Offer SDP will be sent to answering client in
+      // PeerConnectionEvents.onLocalDescription event.
+      pc.createOffer();
     }
   }
 
-  // Implementation detail: handle offer creation/signaling and answer setting,
-  // as well as adding remote ICE candidates once the answer SDP is set.
-  private class SDPObserver implements SdpObserver {
-    private SessionDescription localSdp;
-
-    @Override public void onCreateSuccess(final SessionDescription origSdp) {
-      abortUnless(localSdp == null, "multiple SDP create?!?");
-      final SessionDescription sdp = new SessionDescription(
-          origSdp.type, preferISAC(origSdp.description));
-      localSdp = sdp;
-      runOnUiThread(new Runnable() {
-          public void run() {
-            pc.setLocalDescription(sdpObserver, sdp);
-          }
-        });
+  @Override
+  public void onRemoteDescription(final SessionDescription sdp) {
+    if (pc == null) {
+      return;
     }
-
-    // Helper for sending local SDP (offer or answer, depending on role) to the
-    // other participant.  Note that it is important to send the output of
-    // create{Offer,Answer} and not merely the current value of
-    // getLocalDescription() because the latter may include ICE candidates that
-    // we might want to filter elsewhere.
-    private void sendLocalDescription() {
-      logAndToast("Sending " + localSdp.type);
-      JSONObject json = new JSONObject();
-      jsonPut(json, "type", localSdp.type.canonicalForm());
-      jsonPut(json, "sdp", localSdp.description);
-      sendMessage(json);
-    }
-
-    @Override public void onSetSuccess() {
-      runOnUiThread(new Runnable() {
-          public void run() {
-            if (appRtcClient.isInitiator()) {
-              if (pc.getRemoteDescription() != null) {
-                // We've set our local offer and received & set the remote
-                // answer, so drain candidates.
-                drainRemoteCandidates();
-              } else {
-                // We've just set our local description so time to send it.
-                sendLocalDescription();
-              }
-            } else {
-              if (pc.getLocalDescription() == null) {
-                // We just set the remote offer, time to create our answer.
-                logAndToast("Creating answer");
-                pc.createAnswer(SDPObserver.this, sdpMediaConstraints);
-              } else {
-                // Answer now set as local description; send it and drain
-                // candidates.
-                sendLocalDescription();
-                drainRemoteCandidates();
-              }
-            }
-          }
-        });
-    }
-
-    @Override public void onCreateFailure(final String error) {
-      runOnUiThread(new Runnable() {
-          public void run() {
-            throw new RuntimeException("createSDP error: " + error);
-          }
-        });
-    }
-
-    @Override public void onSetFailure(final String error) {
-      runOnUiThread(new Runnable() {
-          public void run() {
-            throw new RuntimeException("setSDP error: " + error);
-          }
-        });
-    }
-
-    private void drainRemoteCandidates() {
-      for (IceCandidate candidate : queuedRemoteCandidates) {
-        pc.addIceCandidate(candidate);
-      }
-      queuedRemoteCandidates = null;
+    logAndToast("Received remote " + sdp.type + " ...");
+    pc.setRemoteDescription(sdp);
+    if (!appRtcParameters.initiator) {
+      logAndToast("Creating ANSWER...");
+      // Create answer. Answer SDP will be sent to offering client in
+      // PeerConnectionEvents.onLocalDescription event.
+      pc.createAnswer();
     }
   }
 
-  // Implementation detail: handler for receiving GAE messages and dispatching
-  // them appropriately.
-  private class GAEHandler implements GAEChannelClient.MessageHandler {
-    @JavascriptInterface public void onOpen() {
-      if (!appRtcClient.isInitiator()) {
-        return;
-      }
-      logAndToast("Creating offer...");
-      pc.createOffer(sdpObserver, sdpMediaConstraints);
-    }
-
-    @JavascriptInterface public void onMessage(String data) {
-      try {
-        JSONObject json = new JSONObject(data);
-        String type = (String) json.get("type");
-        if (type.equals("candidate")) {
-          IceCandidate candidate = new IceCandidate(
-              (String) json.get("id"),
-              json.getInt("label"),
-              (String) json.get("candidate"));
-          if (queuedRemoteCandidates != null) {
-            queuedRemoteCandidates.add(candidate);
-          } else {
-            pc.addIceCandidate(candidate);
-          }
-        } else if (type.equals("answer") || type.equals("offer")) {
-          SessionDescription sdp = new SessionDescription(
-              SessionDescription.Type.fromCanonicalForm(type),
-              preferISAC((String) json.get("sdp")));
-          pc.setRemoteDescription(sdpObserver, sdp);
-        } else if (type.equals("bye")) {
-          logAndToast("Remote end hung up; dropping PeerConnection");
-          disconnectAndExit();
-        } else {
-          throw new RuntimeException("Unexpected message: " + data);
-        }
-      } catch (JSONException e) {
-        throw new RuntimeException(e);
-      }
-    }
-
-    @JavascriptInterface public void onClose() {
-      disconnectAndExit();
-    }
-
-    @JavascriptInterface public void onError(int code, String description) {
-      disconnectAndExit();
+  @Override
+  public void onRemoteIceCandidate(final IceCandidate candidate) {
+    if (pc != null) {
+      pc.addRemoteIceCandidate(candidate);
     }
   }
 
-  // Disconnect from remote resources, dispose of local resources, and exit.
-  private void disconnectAndExit() {
-    synchronized (quit[0]) {
-      if (quit[0]) {
-        return;
-      }
-      quit[0] = true;
-      if (pc != null) {
-        pc.dispose();
-        pc = null;
-      }
-      if (appRtcClient != null) {
-        appRtcClient.sendMessage("{\"type\": \"bye\"}");
-        appRtcClient.disconnect();
-        appRtcClient = null;
-      }
-      if (videoSource != null) {
-        videoSource.dispose();
-        videoSource = null;
-      }
-      if (factory != null) {
-        factory.dispose();
-        factory = null;
-      }
-      finish();
+  @Override
+  public void onChannelClose() {
+    logAndToast("Remote end hung up; dropping PeerConnection");
+    disconnect();
+  }
+
+  @Override
+  public void onChannelError(int code, String description) {
+    disconnectWithMessage(description);
+  }
+
+  // -----Implementation of PeerConnectionClient.PeerConnectionEvents.---------
+  // Send local peer connection SDP and ICE candidates to remote party.
+  // All callbacks are invoked from UI thread.
+  @Override
+  public void onLocalDescription(final SessionDescription sdp) {
+    if (appRtcClient != null) {
+      logAndToast("Sending " + sdp.type + " ...");
+      appRtcClient.sendLocalDescription(sdp);
     }
+  }
+
+  @Override
+  public void onIceCandidate(final IceCandidate candidate) {
+    if (appRtcClient != null) {
+      appRtcClient.sendLocalIceCandidate(candidate);
+    }
+  }
+
+  @Override
+  public void onIceConnected() {
+    logAndToast("ICE connected");
+    iceConnected = true;
+    updateVideoView();
+  }
+
+  @Override
+  public void onIceDisconnected() {
+    logAndToast("ICE disconnected");
+    disconnect();
+  }
+
+  @Override
+  public void onPeerConnectionError(String description) {
+    disconnectWithMessage(description);
   }
 
 }

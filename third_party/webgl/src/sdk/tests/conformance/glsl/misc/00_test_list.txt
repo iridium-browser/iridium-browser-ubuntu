@@ -2,6 +2,7 @@ attrib-location-length-limits.html
 --min-version 1.0.3 boolean_precision.html
 embedded-struct-definitions-forbidden.html
 empty_main.vert.html
+--min-version 1.0.3 expression-list-in-declarator-initializer.html
 gl_position_unset.vert.html
 # this test is intentionally disabled as it is too strict and to hard to simulate
 # glsl-2types-of-textures-on-same-unit.html
@@ -63,6 +64,7 @@ shader-with-long-line.html
 shader-with-non-ascii-error.frag.html
 --min-version 1.0.2 shader-with-non-reserved-words.html
 shader-with-precision.frag.html
+--min-version 1.0.3 shader-with-preprocessor-whitespace.html
 shader-with-quoted-error.frag.html
 --min-version 1.0.2 shader-with-reserved-words.html
 --min-version 1.0.2 shader-with-similar-uniform-array-names.html
@@ -80,6 +82,8 @@ shader-with-version-130.vert.html
 shader-with-webgl-identifier.vert.html
 --min-version 1.0.2 shader-with-while-loop.html
 shader-without-precision.frag.html
+--min-version 1.0.3 shaders-with-constant-expression-loop-conditions.html
+--min-version 1.0.3 shaders-with-invariance.html
 --min-version 1.0.3 shaders-with-name-conflicts.html
 --min-version 1.0.2 shaders-with-mis-matching-uniforms.html
 --min-version 1.0.2 shaders-with-mis-matching-varyings.html
@@ -94,3 +98,8 @@ uniform-location-length-limits.html
 --min-version 1.0.2 shader-with-global-variable-precision-mismatch.html
 --min-version 1.0.2 large-loop-compile.html
 --min-version 1.0.3 struct-equals.html
+--min-version 1.0.3 struct-mixed-array-declarators.html
+--min-version 1.0.3 struct-nesting-of-variable-names.html
+--min-version 1.0.3 struct-unary-operators.html
+--min-version 1.0.3 ternary-operators-in-global-initializers.html
+--min-version 1.0.3 ternary-operators-in-initializers.html

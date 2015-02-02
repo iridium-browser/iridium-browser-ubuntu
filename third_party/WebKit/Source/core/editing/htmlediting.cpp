@@ -425,18 +425,15 @@ const String& nonBreakingSpaceString()
 }
 
 // FIXME: need to dump this
-bool isSpecialHTMLElement(const Node* n)
+static bool isSpecialHTMLElement(const Node& n)
 {
-    if (!n)
+    if (!n.isHTMLElement())
         return false;
 
-    if (!n->isHTMLElement())
-        return false;
-
-    if (n->isLink())
+    if (n.isLink())
         return true;
 
-    RenderObject* renderer = n->renderer();
+    RenderObject* renderer = n.renderer();
     if (!renderer)
         return false;
 
@@ -453,7 +450,7 @@ static HTMLElement* firstInSpecialElement(const Position& pos)
 {
     Element* rootEditableElement = pos.containerNode()->rootEditableElement();
     for (Node* n = pos.deprecatedNode(); n && n->rootEditableElement() == rootEditableElement; n = n->parentNode()) {
-        if (isSpecialHTMLElement(n)) {
+        if (isSpecialHTMLElement(*n)) {
             HTMLElement* specialElement = toHTMLElement(n);
             VisiblePosition vPos = VisiblePosition(pos, DOWNSTREAM);
             VisiblePosition firstInElement = VisiblePosition(firstPositionInOrBeforeNode(specialElement), DOWNSTREAM);
@@ -470,7 +467,7 @@ static HTMLElement* lastInSpecialElement(const Position& pos)
 {
     Element* rootEditableElement = pos.containerNode()->rootEditableElement();
     for (Node* n = pos.deprecatedNode(); n && n->rootEditableElement() == rootEditableElement; n = n->parentNode()) {
-        if (isSpecialHTMLElement(n)) {
+        if (isSpecialHTMLElement(*n)) {
             HTMLElement* specialElement = toHTMLElement(n);
             VisiblePosition vPos = VisiblePosition(pos, DOWNSTREAM);
             VisiblePosition lastInElement = VisiblePosition(lastPositionInOrAfterNode(specialElement), DOWNSTREAM);
@@ -612,8 +609,8 @@ Node* enclosingNodeOfType(const Position& p, bool (*nodeIsOfType)(const Node*), 
 
 Node* highestEnclosingNodeOfType(const Position& p, bool (*nodeIsOfType)(const Node*), EditingBoundaryCrossingRule rule, Node* stayWithin)
 {
-    Node* highest = 0;
-    ContainerNode* root = rule == CannotCrossEditingBoundary ? highestEditableRoot(p) : 0;
+    Node* highest = nullptr;
+    ContainerNode* root = rule == CannotCrossEditingBoundary ? highestEditableRoot(p) : nullptr;
     for (Node* n = p.containerNode(); n && n != stayWithin; n = n->parentNode()) {
         if (root && !n->hasEditableStyle())
             continue;
@@ -642,8 +639,8 @@ static bool hasARenderedDescendant(Node* node, Node* excludedNode)
 
 Node* highestNodeToRemoveInPruning(Node* node, Node* excludeNode)
 {
-    Node* previousNode = 0;
-    Element* rootEditableElement = node ? node->rootEditableElement() : 0;
+    Node* previousNode = nullptr;
+    Element* rootEditableElement = node ? node->rootEditableElement() : nullptr;
     for (; node; node = node->parentNode()) {
         if (RenderObject* renderer = node->renderer()) {
             if (!renderer->canHaveChildren() || hasARenderedDescendant(node, previousNode) || rootEditableElement == node || excludeNode == node)

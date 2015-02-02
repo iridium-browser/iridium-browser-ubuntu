@@ -9,7 +9,8 @@
 #include "athena/content/public/app_registry.h"
 #include "athena/extensions/public/extensions_delegate.h"
 #include "athena/resource_manager/public/resource_manager.h"
-#include "athena/test/athena_test_base.h"
+#include "athena/test/base/athena_test_base.h"
+#include "extensions/browser/install/extension_install_ui.h"
 #include "extensions/common/extension_set.h"
 #include "ui/aura/window.h"
 #include "ui/views/view.h"
@@ -36,10 +37,10 @@ class TestAppActivity : public AppActivity {
         view_(new views::View()),
         current_state_(ACTIVITY_VISIBLE) {
     app_activity_registry_ =
-        AppRegistry::Get()->GetAppActivityRegistry(app_id, NULL);
+        AppRegistry::Get()->GetAppActivityRegistry(app_id, nullptr);
     app_activity_registry_->RegisterAppActivity(this);
   }
-  virtual ~TestAppActivity() {
+  ~TestAppActivity() override {
     app_activity_registry_->UnregisterAppActivity(this);
   }
 
@@ -48,37 +49,28 @@ class TestAppActivity : public AppActivity {
   }
 
   // Activity:
-  virtual ActivityViewModel* GetActivityViewModel() OVERRIDE {
-    return this;
-  }
-  virtual void SetCurrentState(Activity::ActivityState state) OVERRIDE {
+  ActivityViewModel* GetActivityViewModel() override { return this; }
+  void SetCurrentState(Activity::ActivityState state) override {
     current_state_ = state;
     if (state == ACTIVITY_UNLOADED)
       app_activity_registry_->Unload();
   }
-  virtual ActivityState GetCurrentState() OVERRIDE {
-    return current_state_;
-  }
-  virtual bool IsVisible() OVERRIDE {
-    return true;
-  }
-  virtual ActivityMediaState GetMediaState() OVERRIDE {
+  ActivityState GetCurrentState() override { return current_state_; }
+  bool IsVisible() override { return true; }
+  ActivityMediaState GetMediaState() override {
     return Activity::ACTIVITY_MEDIA_STATE_NONE;
   }
-  virtual aura::Window* GetWindow() OVERRIDE {
-    return view_->GetWidget()->GetNativeWindow();
+  aura::Window* GetWindow() override {
+    return view_->GetWidget() ? view_->GetWidget()->GetNativeWindow() : nullptr;
   }
 
   // ActivityViewModel:
-  virtual void Init() OVERRIDE {}
-  virtual SkColor GetRepresentativeColor() const OVERRIDE { return 0; }
-  virtual base::string16 GetTitle() const OVERRIDE { return title_; }
-  virtual bool UsesFrame() const OVERRIDE { return true; }
-  virtual views::View* GetContentsView() OVERRIDE { return view_; }
-  virtual views::Widget* CreateWidget() OVERRIDE { return NULL; }
-  virtual gfx::ImageSkia GetOverviewModeImage() OVERRIDE {
-    return gfx::ImageSkia();
-  }
+  void Init() override {}
+  SkColor GetRepresentativeColor() const override { return 0; }
+  base::string16 GetTitle() const override { return title_; }
+  bool UsesFrame() const override { return true; }
+  views::View* GetContentsView() override { return view_; }
+  gfx::ImageSkia GetOverviewModeImage() override { return gfx::ImageSkia(); }
 
  private:
   // If known the registry which holds all activities for the associated app.
@@ -100,28 +92,32 @@ class TestAppActivity : public AppActivity {
 class TestExtensionsDelegate : public ExtensionsDelegate {
  public:
   TestExtensionsDelegate() : unload_called_(0), restart_called_(0) {}
-  virtual ~TestExtensionsDelegate() {}
+  ~TestExtensionsDelegate() override {}
 
   int unload_called() const { return unload_called_; }
   int restart_called() const { return restart_called_; }
 
   // ExtensionsDelegate:
-  virtual content::BrowserContext* GetBrowserContext() const OVERRIDE {
-    return NULL;
+  content::BrowserContext* GetBrowserContext() const override {
+    return nullptr;
   }
-  virtual const extensions::ExtensionSet& GetInstalledExtensions() OVERRIDE {
+  const extensions::ExtensionSet& GetInstalledExtensions() override {
     return extension_set_;
   }
   // Unload an application. Returns true when unloaded.
-  virtual bool UnloadApp(const std::string& app_id) OVERRIDE {
+  bool UnloadApp(const std::string& app_id) override {
     unload_called_++;
     // Since we did not close anything we let the framework clean up.
     return false;
   }
   // Restarts an application. Returns true when the restart was initiated.
-  virtual bool LaunchApp(const std::string& app_id) OVERRIDE {
+  bool LaunchApp(const std::string& app_id) override {
     restart_called_++;
     return true;
+  }
+  scoped_ptr<extensions::ExtensionInstallUI> CreateExtensionInstallUI()
+      override {
+    return scoped_ptr<extensions::ExtensionInstallUI>();
   }
 
  private:
@@ -138,11 +134,11 @@ class TestExtensionsDelegate : public ExtensionsDelegate {
 // Our testing base.
 class AppActivityTest : public AthenaTestBase {
  public:
-  AppActivityTest() : test_extensions_delegate_(NULL) {}
-  virtual ~AppActivityTest() {}
+  AppActivityTest() : test_extensions_delegate_(nullptr) {}
+  ~AppActivityTest() override {}
 
   // AthenaTestBase:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     AthenaTestBase::SetUp();
     // Create and install our TestAppContentDelegate with instrumentation.
     ExtensionsDelegate::Shutdown();
@@ -199,7 +195,7 @@ TEST_F(AppActivityTest, OneAppActivity) {
     TestAppActivity* app_activity = CreateAppActivity(kDummyApp1);
     EXPECT_EQ(1, AppRegistry::Get()->NumberOfApplications());
     EXPECT_EQ(1, app_activity->app_activity_registry()->NumberOfActivities());
-    EXPECT_EQ(AppRegistry::Get()->GetAppActivityRegistry(kDummyApp1, NULL),
+    EXPECT_EQ(AppRegistry::Get()->GetAppActivityRegistry(kDummyApp1, nullptr),
               app_activity->app_activity_registry());
     DeleteActivity(app_activity);
   }
@@ -292,7 +288,7 @@ TEST_F(AppActivityTest, TestUnloadFollowedByClose) {
   // created.
   ASSERT_EQ(1, AppRegistry::Get()->NumberOfApplications());
   ASSERT_EQ(app_activity_registry,
-            AppRegistry::Get()->GetAppActivityRegistry(kDummyApp1, NULL));
+            AppRegistry::Get()->GetAppActivityRegistry(kDummyApp1, nullptr));
   EXPECT_EQ(0, app_activity_registry->NumberOfActivities());
   Activity* activity_proxy = app_activity_registry->unloaded_activity_proxy();
   ASSERT_TRUE(activity_proxy);
@@ -382,7 +378,7 @@ TEST_F(AppActivityTest, TestMultipleActivityUnloadLock) {
   // Now there should only be the proxy activity left.
   ASSERT_EQ(1, AppRegistry::Get()->NumberOfApplications());
   ASSERT_EQ(app_activity_registry,
-            AppRegistry::Get()->GetAppActivityRegistry(kDummyApp1, NULL));
+            AppRegistry::Get()->GetAppActivityRegistry(kDummyApp1, nullptr));
   EXPECT_EQ(0, app_activity_registry->NumberOfActivities());
   Activity* activity_proxy = app_activity_registry->unloaded_activity_proxy();
   ASSERT_TRUE(activity_proxy);

@@ -18,25 +18,25 @@ class FirstRunHelperImpl : public FirstRunHelper,
                            public OverlayEventFilter::Delegate {
  public:
   FirstRunHelperImpl();
-  virtual ~FirstRunHelperImpl();
+  ~FirstRunHelperImpl() override;
 
   // Overriden from FirstRunHelper.
-  virtual views::Widget* GetOverlayWidget() OVERRIDE;
-  virtual void OpenAppList() OVERRIDE;
-  virtual void CloseAppList() OVERRIDE;
-  virtual gfx::Rect GetLauncherBounds() OVERRIDE;
-  virtual gfx::Rect GetAppListButtonBounds() OVERRIDE;
-  virtual gfx::Rect GetAppListBounds() OVERRIDE;
-  virtual void OpenTrayBubble() OVERRIDE;
-  virtual void CloseTrayBubble() OVERRIDE;
-  virtual bool IsTrayBubbleOpened() OVERRIDE;
-  virtual gfx::Rect GetTrayBubbleBounds() OVERRIDE;
-  virtual gfx::Rect GetHelpButtonBounds() OVERRIDE;
+  views::Widget* GetOverlayWidget() override;
+  void OpenAppList() override;
+  void CloseAppList() override;
+  gfx::Rect GetLauncherBounds() override;
+  gfx::Rect GetAppListButtonBounds() override;
+  gfx::Rect GetAppListBounds() override;
+  void OpenTrayBubble() override;
+  void CloseTrayBubble() override;
+  bool IsTrayBubbleOpened() override;
+  gfx::Rect GetTrayBubbleBounds() override;
+  gfx::Rect GetHelpButtonBounds() override;
 
   // Overriden from OverlayEventFilter::Delegate.
-  virtual void Cancel() OVERRIDE;
-  virtual bool IsCancelingKeyEvent(ui::KeyEvent* event) OVERRIDE;
-  virtual aura::Window* GetWindow() OVERRIDE;
+  void Cancel() override;
+  bool IsCancelingKeyEvent(ui::KeyEvent* event) override;
+  aura::Window* GetWindow() override;
 
  private:
   views::Widget* widget_;

@@ -30,7 +30,7 @@ namespace chromeos {
 
 namespace {
 
-const char* kUsers[] = {"a@gmail.com", "b@gmail.com" };
+const char* const kUsers[] = {"a@gmail.com", "b@gmail.com" };
 
 struct BehaviorTestCase {
   const char* primary;
@@ -119,7 +119,7 @@ class MultiProfileUserControllerTest
         user_not_allowed_count_(0) {}
   virtual ~MultiProfileUserControllerTest() {}
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     profile_manager_.reset(
         new TestingProfileManager(TestingBrowserProcess::GetGlobal()));
     ASSERT_TRUE(profile_manager_->SetUp());
@@ -141,7 +141,7 @@ class MultiProfileUserControllerTest
     }
   }
 
-  virtual void TearDown() OVERRIDE {
+  virtual void TearDown() override {
     // Clear our cached pointer to the PolicyCertVerifier.
     g_policy_cert_verifier_for_factory = NULL;
 
@@ -189,7 +189,7 @@ class MultiProfileUserControllerTest
   }
 
   // MultiProfileUserControllerDeleagte overrides:
-  virtual void OnUserNotAllowed(const std::string& user_email) OVERRIDE {
+  virtual void OnUserNotAllowed(const std::string& user_email) override {
     ++user_not_allowed_count_;
   }
 
@@ -212,12 +212,13 @@ class MultiProfileUserControllerTest
 
   int user_not_allowed_count_;
 
+ private:
   DISALLOW_COPY_AND_ASSIGN(MultiProfileUserControllerTest);
 };
 
 // Tests that everyone is allowed before a session starts.
 TEST_F(MultiProfileUserControllerTest, AllAllowedBeforeLogin) {
-  const char* kTestCases[] = {
+  const char* const kTestCases[] = {
     MultiProfileUserController::kBehaviorUnrestricted,
     MultiProfileUserController::kBehaviorPrimaryOnly,
     MultiProfileUserController::kBehaviorNotAllowed,
@@ -246,7 +247,7 @@ TEST_F(MultiProfileUserControllerTest, InvalidCacheBecomesDefault) {
 TEST_F(MultiProfileUserControllerTest, CachedBehaviorUpdate) {
   LoginUser(0);
 
-  const char* kTestCases[] = {
+  const char* const kTestCases[] = {
     MultiProfileUserController::kBehaviorUnrestricted,
     MultiProfileUserController::kBehaviorPrimaryOnly,
     MultiProfileUserController::kBehaviorNotAllowed,
@@ -322,7 +323,10 @@ TEST_F(MultiProfileUserControllerTest, PrimaryBehaviorChange) {
 }
 
 // Tests that owner could not be a secondary user.
-TEST_F(MultiProfileUserControllerTest, NoSecondaryOwner) {
+//
+// TODO (ygorshenin@, crbug.com/230018): remove or change the test when the
+// issue will be fixed.
+TEST_F(MultiProfileUserControllerTest, DISABLED_NoSecondaryOwner) {
   LoginUser(0);
   SetOwner(1);
 

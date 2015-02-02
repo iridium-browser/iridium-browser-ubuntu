@@ -10,6 +10,8 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
+#include "base/time/time.h"
+#include "base/timer/elapsed_timer.h"
 #include "components/bookmarks/browser/base_bookmark_model_observer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -43,7 +45,7 @@ class WrenchMenu : public views::MenuDelegate,
   };
 
   WrenchMenu(Browser* browser, int run_flags);
-  virtual ~WrenchMenu();
+  ~WrenchMenu() override;
 
   void Init(ui::MenuModel* model);
 
@@ -62,51 +64,51 @@ class WrenchMenu : public views::MenuDelegate,
   void RemoveObserver(WrenchMenuObserver* observer);
 
   // MenuDelegate overrides:
-  virtual const gfx::FontList* GetLabelFontList(int command_id) const OVERRIDE;
-  virtual bool GetShouldUseDisabledEmphasizedForegroundColor(
-      int command_id) const OVERRIDE;
-  virtual base::string16 GetTooltipText(int command_id,
-                                        const gfx::Point& p) const OVERRIDE;
-  virtual bool IsTriggerableEvent(views::MenuItemView* menu,
-                                  const ui::Event& e) OVERRIDE;
-  virtual bool GetDropFormats(
+  const gfx::FontList* GetLabelFontList(int command_id) const override;
+  bool GetShouldUseDisabledEmphasizedForegroundColor(
+      int command_id) const override;
+  base::string16 GetTooltipText(int command_id,
+                                const gfx::Point& p) const override;
+  bool IsTriggerableEvent(views::MenuItemView* menu,
+                          const ui::Event& e) override;
+  bool GetDropFormats(
       views::MenuItemView* menu,
       int* formats,
-      std::set<ui::OSExchangeData::CustomFormat>* custom_formats) OVERRIDE;
-  virtual bool AreDropTypesRequired(views::MenuItemView* menu) OVERRIDE;
-  virtual bool CanDrop(views::MenuItemView* menu,
-                       const ui::OSExchangeData& data) OVERRIDE;
-  virtual int GetDropOperation(views::MenuItemView* item,
-                               const ui::DropTargetEvent& event,
-                               DropPosition* position) OVERRIDE;
-  virtual int OnPerformDrop(views::MenuItemView* menu,
-                            DropPosition position,
-                            const ui::DropTargetEvent& event) OVERRIDE;
-  virtual bool ShowContextMenu(views::MenuItemView* source,
-                               int command_id,
-                               const gfx::Point& p,
-                               ui::MenuSourceType source_type) OVERRIDE;
-  virtual bool CanDrag(views::MenuItemView* menu) OVERRIDE;
-  virtual void WriteDragData(views::MenuItemView* sender,
-                             ui::OSExchangeData* data) OVERRIDE;
-  virtual int GetDragOperations(views::MenuItemView* sender) OVERRIDE;
-  virtual int GetMaxWidthForMenu(views::MenuItemView* menu) OVERRIDE;
-  virtual bool IsItemChecked(int command_id) const OVERRIDE;
-  virtual bool IsCommandEnabled(int command_id) const OVERRIDE;
-  virtual void ExecuteCommand(int command_id, int mouse_event_flags) OVERRIDE;
-  virtual bool GetAccelerator(int command_id,
-                              ui::Accelerator* accelerator) const OVERRIDE;
-  virtual void WillShowMenu(views::MenuItemView* menu) OVERRIDE;
-  virtual void WillHideMenu(views::MenuItemView* menu) OVERRIDE;
-  virtual bool ShouldCloseOnDragComplete() OVERRIDE;
+      std::set<ui::OSExchangeData::CustomFormat>* custom_formats) override;
+  bool AreDropTypesRequired(views::MenuItemView* menu) override;
+  bool CanDrop(views::MenuItemView* menu,
+               const ui::OSExchangeData& data) override;
+  int GetDropOperation(views::MenuItemView* item,
+                       const ui::DropTargetEvent& event,
+                       DropPosition* position) override;
+  int OnPerformDrop(views::MenuItemView* menu,
+                    DropPosition position,
+                    const ui::DropTargetEvent& event) override;
+  bool ShowContextMenu(views::MenuItemView* source,
+                       int command_id,
+                       const gfx::Point& p,
+                       ui::MenuSourceType source_type) override;
+  bool CanDrag(views::MenuItemView* menu) override;
+  void WriteDragData(views::MenuItemView* sender,
+                     ui::OSExchangeData* data) override;
+  int GetDragOperations(views::MenuItemView* sender) override;
+  int GetMaxWidthForMenu(views::MenuItemView* menu) override;
+  bool IsItemChecked(int command_id) const override;
+  bool IsCommandEnabled(int command_id) const override;
+  void ExecuteCommand(int command_id, int mouse_event_flags) override;
+  bool GetAccelerator(int command_id,
+                      ui::Accelerator* accelerator) const override;
+  void WillShowMenu(views::MenuItemView* menu) override;
+  void WillHideMenu(views::MenuItemView* menu) override;
+  bool ShouldCloseOnDragComplete() override;
 
   // BaseBookmarkModelObserver overrides:
-  virtual void BookmarkModelChanged() OVERRIDE;
+  void BookmarkModelChanged() override;
 
   // content::NotificationObserver overrides:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
  private:
   class CutCopyPasteView;
@@ -183,6 +185,9 @@ class WrenchMenu : public views::MenuDelegate,
   const int run_flags_;
 
   ObserverList<WrenchMenuObserver> observer_list_;
+
+  // Records the time from when menu opens to when the user selects a menu item.
+  base::ElapsedTimer menu_opened_timer_;
 
   DISALLOW_COPY_AND_ASSIGN(WrenchMenu);
 };

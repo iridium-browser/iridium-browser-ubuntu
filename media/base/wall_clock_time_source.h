@@ -20,15 +20,15 @@ namespace media {
 class MEDIA_EXPORT WallClockTimeSource : public TimeSource {
  public:
   WallClockTimeSource();
-  virtual ~WallClockTimeSource();
+  ~WallClockTimeSource() override;
 
   // TimeSource implementation.
-  virtual void StartTicking() OVERRIDE;
-  virtual void StopTicking() OVERRIDE;
-  virtual void SetPlaybackRate(float playback_rate) OVERRIDE;
-  virtual void SetMediaTime(base::TimeDelta time) OVERRIDE;
-  virtual base::TimeDelta CurrentMediaTime() OVERRIDE;
-  virtual base::TimeDelta CurrentMediaTimeForSyncingVideo() OVERRIDE;
+  void StartTicking() override;
+  void StopTicking() override;
+  void SetPlaybackRate(float playback_rate) override;
+  void SetMediaTime(base::TimeDelta time) override;
+  base::TimeDelta CurrentMediaTime() override;
+  base::TimeDelta CurrentMediaTimeForSyncingVideo() override;
 
   void SetTickClockForTesting(scoped_ptr<base::TickClock> tick_clock);
 

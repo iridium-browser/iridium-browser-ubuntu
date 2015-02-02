@@ -13,9 +13,9 @@
 #include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/extensions/updater/extension_cache.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "extensions/browser/updater/extension_cache.h"
 
 template <typename T> struct DefaultSingletonTraits;
 
@@ -28,31 +28,27 @@ class LocalExtensionCache;
 class ExtensionCacheImpl : public ExtensionCache,
                            public content::NotificationObserver {
  public:
-  static ExtensionCacheImpl* GetInstance();
+  ExtensionCacheImpl();
+  virtual ~ExtensionCacheImpl();
 
   // Implementation of ExtensionCache.
-  virtual void Start(const base::Closure& callback) OVERRIDE;
-  virtual void Shutdown(const base::Closure& callback) OVERRIDE;
-  virtual void AllowCaching(const std::string& id) OVERRIDE;
+  virtual void Start(const base::Closure& callback) override;
+  virtual void Shutdown(const base::Closure& callback) override;
+  virtual void AllowCaching(const std::string& id) override;
   virtual bool GetExtension(const std::string& id,
                             base::FilePath* file_path,
-                            std::string* version) OVERRIDE;
+                            std::string* version) override;
   virtual void PutExtension(const std::string& id,
                             const base::FilePath& file_path,
                             const std::string& version,
-                            const PutExtensionCallback& callback) OVERRIDE;
+                            const PutExtensionCallback& callback) override;
 
   // Implementation of content::NotificationObserver:
   virtual void Observe(int type,
                        const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+                       const content::NotificationDetails& details) override;
 
  private:
-  friend struct DefaultSingletonTraits<ExtensionCacheImpl>;
-
-  ExtensionCacheImpl();
-  virtual ~ExtensionCacheImpl();
-
   // Callback that is called when local cache is ready.
   void OnCacheInitialized();
 

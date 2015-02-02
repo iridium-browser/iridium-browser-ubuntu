@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
-
 /**
  * Called from the main frame when unloading.
  * @param {boolean=} opt_exiting True if the app is exiting.
@@ -67,7 +65,7 @@ GalleryDataModel.prototype = {
  *
  * @param {VolumeManager} volumeManager Volume manager instance.
  * @param {Gallery.Item} item Original gallery item.
- * @param {Canvas} canvas Canvas containing new image.
+ * @param {HTMLCanvasElement} canvas Canvas containing new image.
  * @param {boolean} overwrite Whether to overwrite the image to the item or not.
  * @return {Promise} Promise to be fulfilled with when the operation completes.
  */
@@ -237,7 +235,7 @@ Gallery.prototype.__proto__ = cr.EventTarget.prototype;
  * @const
  * @type {number}
  */
-Gallery.FADE_TIMEOUT = 3000;
+Gallery.FADE_TIMEOUT = 2000;
 
 /**
  * First time tools fade-out timeout in milliseconds.
@@ -370,10 +368,13 @@ Gallery.prototype.initDom_ = function() {
 
   this.prompt_ = new ImageEditor.Prompt(this.container_, strf);
 
+  this.errorBanner_ = new ErrorBanner(this.container_);
+
   this.modeButton_ = this.toolbar_.querySelector('button.mode');
   this.modeButton_.addEventListener('click', this.toggleMode_.bind(this, null));
 
   this.mosaicMode_ = new MosaicMode(content,
+                                    this.errorBanner_,
                                     this.dataModel_,
                                     this.selectionModel_,
                                     this.volumeManager_,
@@ -383,6 +384,7 @@ Gallery.prototype.initDom_ = function() {
                                   content,
                                   this.toolbar_,
                                   this.prompt_,
+                                  this.errorBanner_,
                                   this.dataModel_,
                                   this.selectionModel_,
                                   this.context_,
@@ -397,8 +399,8 @@ Gallery.prototype.initDom_ = function() {
     cr.dispatchSimpleEvent(this, 'image-saved');
   }.bind(this));
 
-  var deleteButton = this.initToolbarButton_('delete', 'GALLERY_DELETE');
-  deleteButton.addEventListener('click', this.delete_.bind(this));
+  this.deleteButton_ = this.initToolbarButton_('delete', 'GALLERY_DELETE');
+  this.deleteButton_.addEventListener('click', this.delete_.bind(this));
 
   this.shareButton_ = this.initToolbarButton_('share', 'GALLERY_SHARE');
   this.shareButton_.addEventListener(
@@ -590,7 +592,7 @@ Gallery.prototype.onMinimize_ = function() {
 
 /**
  * Executes a function when the editor is done with the modifications.
- * @param {function} callback Function to execute.
+ * @param {function()} callback Function to execute.
  */
 Gallery.prototype.executeWhenReady = function(callback) {
   this.currentMode_.executeWhenReady(callback);
@@ -637,7 +639,7 @@ Gallery.prototype.setCurrentMode_ = function(mode) {
 
 /**
  * Mode toggle event handler.
- * @param {function=} opt_callback Callback.
+ * @param {function()=} opt_callback Callback.
  * @param {Event=} opt_event Event that caused this call.
  * @private
  */
@@ -712,7 +714,8 @@ Gallery.prototype.delete_ = function() {
 
     var entry = itemsToRemove.pop().getEntry();
     entry.remove(deleteNext, function() {
-      util.flog('Error deleting: ' + entry.name, deleteNext);
+      console.error('Error deleting: ' + entry.name);
+      deleteNext();
     });
   }
 
@@ -846,6 +849,12 @@ Gallery.prototype.updateSelectionAndState_ = function() {
 
   // If it's selecting something, update the variable values.
   if (numSelectedItems) {
+    // Delete button is available when all images are NOT readOnly.
+    this.deleteButton_.disabled = !this.selectionModel_.selectedIndexes
+        .every(function(i) {
+          return !this.dataModel_.item(i).getLocationInfo().isReadOnly;
+        }, this);
+
     // Obtains selected item.
     var selectedItem =
         this.dataModel_.item(this.selectionModel_.selectedIndex);
@@ -880,6 +889,7 @@ Gallery.prototype.updateSelectionAndState_ = function() {
   } else {
     document.title = '';
     this.filenameEdit_.disabled = true;
+    this.deleteButton_.disabled = true;
     this.filenameEdit_.value = '';
     this.shareButton_.hidden = true;
   }

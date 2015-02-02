@@ -128,48 +128,50 @@ int fourcc_is_ivf(const char detect[4]) {
   return 0;
 }
 
-static const arg_def_t debugmode = ARG_DEF("D", "debug", 0,
-                                           "Debug mode (makes output deterministic)");
-static const arg_def_t outputfile = ARG_DEF("o", "output", 1,
-                                            "Output filename");
-static const arg_def_t use_yv12 = ARG_DEF(NULL, "yv12", 0,
-                                          "Input file is YV12 ");
-static const arg_def_t use_i420 = ARG_DEF(NULL, "i420", 0,
-                                          "Input file is I420 (default)");
-static const arg_def_t use_i422 = ARG_DEF(NULL, "i422", 0,
-                                          "Input file is I422");
-static const arg_def_t use_i444 = ARG_DEF(NULL, "i444", 0,
-                                          "Input file is I444");
-static const arg_def_t codecarg = ARG_DEF(NULL, "codec", 1,
-                                          "Codec to use");
-static const arg_def_t passes           = ARG_DEF("p", "passes", 1,
-                                                  "Number of passes (1/2)");
-static const arg_def_t pass_arg         = ARG_DEF(NULL, "pass", 1,
-                                                  "Pass to execute (1/2)");
-static const arg_def_t fpf_name         = ARG_DEF(NULL, "fpf", 1,
-                                                  "First pass statistics file name");
+static const arg_def_t debugmode = ARG_DEF(
+    "D", "debug", 0, "Debug mode (makes output deterministic)");
+static const arg_def_t outputfile = ARG_DEF(
+    "o", "output", 1, "Output filename");
+static const arg_def_t use_yv12 = ARG_DEF(
+    NULL, "yv12", 0, "Input file is YV12 ");
+static const arg_def_t use_i420 = ARG_DEF(
+    NULL, "i420", 0, "Input file is I420 (default)");
+static const arg_def_t use_i422 = ARG_DEF(
+    NULL, "i422", 0, "Input file is I422");
+static const arg_def_t use_i444 = ARG_DEF(
+    NULL, "i444", 0, "Input file is I444");
+static const arg_def_t use_i440 = ARG_DEF(
+    NULL, "i440", 0, "Input file is I440");
+static const arg_def_t codecarg = ARG_DEF(
+    NULL, "codec", 1, "Codec to use");
+static const arg_def_t passes = ARG_DEF(
+    "p", "passes", 1, "Number of passes (1/2)");
+static const arg_def_t pass_arg = ARG_DEF(
+    NULL, "pass", 1, "Pass to execute (1/2)");
+static const arg_def_t fpf_name = ARG_DEF(
+    NULL, "fpf", 1, "First pass statistics file name");
 #if CONFIG_FP_MB_STATS
-static const arg_def_t fpmbf_name         = ARG_DEF(NULL, "fpmbf", 1,
-                                      "First pass block statistics file name");
+static const arg_def_t fpmbf_name = ARG_DEF(
+    NULL, "fpmbf", 1, "First pass block statistics file name");
 #endif
-static const arg_def_t limit = ARG_DEF(NULL, "limit", 1,
-                                       "Stop encoding after n input frames");
-static const arg_def_t skip = ARG_DEF(NULL, "skip", 1,
-                                      "Skip the first n input frames");
-static const arg_def_t deadline         = ARG_DEF("d", "deadline", 1,
-                                                  "Deadline per frame (usec)");
-static const arg_def_t best_dl          = ARG_DEF(NULL, "best", 0,
-                                                  "Use Best Quality Deadline");
-static const arg_def_t good_dl          = ARG_DEF(NULL, "good", 0,
-                                                  "Use Good Quality Deadline");
-static const arg_def_t rt_dl            = ARG_DEF(NULL, "rt", 0,
-                                                  "Use Realtime Quality Deadline");
-static const arg_def_t quietarg         = ARG_DEF("q", "quiet", 0,
-                                                  "Do not print encode progress");
-static const arg_def_t verbosearg       = ARG_DEF("v", "verbose", 0,
-                                                  "Show encoder parameters");
-static const arg_def_t psnrarg          = ARG_DEF(NULL, "psnr", 0,
-                                                  "Show PSNR in status line");
+static const arg_def_t limit = ARG_DEF(
+    NULL, "limit", 1, "Stop encoding after n input frames");
+static const arg_def_t skip = ARG_DEF(
+    NULL, "skip", 1, "Skip the first n input frames");
+static const arg_def_t deadline = ARG_DEF(
+    "d", "deadline", 1, "Deadline per frame (usec)");
+static const arg_def_t best_dl = ARG_DEF(
+    NULL, "best", 0, "Use Best Quality Deadline");
+static const arg_def_t good_dl = ARG_DEF(
+    NULL, "good", 0, "Use Good Quality Deadline");
+static const arg_def_t rt_dl = ARG_DEF(
+    NULL, "rt", 0, "Use Realtime Quality Deadline");
+static const arg_def_t quietarg = ARG_DEF(
+    "q", "quiet", 0, "Do not print encode progress");
+static const arg_def_t verbosearg = ARG_DEF(
+    "v", "verbose", 0, "Show encoder parameters");
+static const arg_def_t psnrarg = ARG_DEF(
+    NULL, "psnr", 0, "Show PSNR in status line");
 
 static const struct arg_enum_list test_decode_enum[] = {
   {"off",   TEST_DECODE_OFF},
@@ -177,28 +179,25 @@ static const struct arg_enum_list test_decode_enum[] = {
   {"warn",  TEST_DECODE_WARN},
   {NULL, 0}
 };
-static const arg_def_t recontest = ARG_DEF_ENUM(NULL, "test-decode", 1,
-                                                "Test encode/decode mismatch",
-                                                test_decode_enum);
-static const arg_def_t framerate        = ARG_DEF(NULL, "fps", 1,
-                                                  "Stream frame rate (rate/scale)");
-static const arg_def_t use_ivf          = ARG_DEF(NULL, "ivf", 0,
-                                                  "Output IVF (default is WebM if WebM IO is enabled)");
-static const arg_def_t out_part = ARG_DEF("P", "output-partitions", 0,
-                                          "Makes encoder output partitions. Requires IVF output!");
-static const arg_def_t q_hist_n         = ARG_DEF(NULL, "q-hist", 1,
-                                                  "Show quantizer histogram (n-buckets)");
-static const arg_def_t rate_hist_n         = ARG_DEF(NULL, "rate-hist", 1,
-                                                     "Show rate histogram (n-buckets)");
-static const arg_def_t disable_warnings =
-    ARG_DEF(NULL, "disable-warnings", 0,
-            "Disable warnings about potentially incorrect encode settings.");
-static const arg_def_t disable_warning_prompt =
-    ARG_DEF("y", "disable-warning-prompt", 0,
-            "Display warnings, but do not prompt user to continue.");
-static const arg_def_t experimental_bitstream =
-    ARG_DEF(NULL, "experimental-bitstream", 0,
-            "Allow experimental bitstream features.");
+static const arg_def_t recontest = ARG_DEF_ENUM(
+    NULL, "test-decode", 1, "Test encode/decode mismatch", test_decode_enum);
+static const arg_def_t framerate = ARG_DEF(
+    NULL, "fps", 1, "Stream frame rate (rate/scale)");
+static const arg_def_t use_ivf = ARG_DEF(
+    NULL, "ivf", 0, "Output IVF (default is WebM if WebM IO is enabled)");
+static const arg_def_t out_part = ARG_DEF(
+    "P", "output-partitions", 0,
+    "Makes encoder output partitions. Requires IVF output!");
+static const arg_def_t q_hist_n = ARG_DEF(
+    NULL, "q-hist", 1, "Show quantizer histogram (n-buckets)");
+static const arg_def_t rate_hist_n = ARG_DEF(
+    NULL, "rate-hist", 1, "Show rate histogram (n-buckets)");
+static const arg_def_t disable_warnings = ARG_DEF(
+    NULL, "disable-warnings", 0,
+    "Disable warnings about potentially incorrect encode settings.");
+static const arg_def_t disable_warning_prompt = ARG_DEF(
+    "y", "disable-warning-prompt", 0,
+    "Display warnings, but do not prompt user to continue.");
 
 #if CONFIG_VP9 && CONFIG_VP9_HIGHBITDEPTH
 static const arg_def_t test16bitinternalarg = ARG_DEF(
@@ -214,16 +213,14 @@ static const arg_def_t *main_args[] = {
   NULL
 };
 
-static const arg_def_t usage            = ARG_DEF("u", "usage", 1,
-                                                  "Usage profile number to use");
-static const arg_def_t threads          = ARG_DEF("t", "threads", 1,
-                                                  "Max number of threads to use");
-static const arg_def_t profile          = ARG_DEF(NULL, "profile", 1,
-                                                  "Bitstream profile number to use");
-static const arg_def_t width            = ARG_DEF("w", "width", 1,
-                                                  "Frame width");
-static const arg_def_t height           = ARG_DEF("h", "height", 1,
-                                                  "Frame height");
+static const arg_def_t usage = ARG_DEF(
+    "u", "usage", 1, "Usage profile number to use");
+static const arg_def_t threads = ARG_DEF(
+    "t", "threads", 1, "Max number of threads to use");
+static const arg_def_t profile = ARG_DEF(
+    NULL, "profile", 1, "Bitstream profile number to use");
+static const arg_def_t width = ARG_DEF("w", "width", 1, "Frame width");
+static const arg_def_t height = ARG_DEF("h", "height", 1, "Frame height");
 #if CONFIG_WEBM_IO
 static const struct arg_enum_list stereo_mode_enum[] = {
   {"mono", STEREO_FORMAT_MONO},
@@ -233,18 +230,18 @@ static const struct arg_enum_list stereo_mode_enum[] = {
   {"right-left", STEREO_FORMAT_RIGHT_LEFT},
   {NULL, 0}
 };
-static const arg_def_t stereo_mode      = ARG_DEF_ENUM(NULL, "stereo-mode", 1,
-                                                       "Stereo 3D video format", stereo_mode_enum);
+static const arg_def_t stereo_mode = ARG_DEF_ENUM(
+    NULL, "stereo-mode", 1, "Stereo 3D video format", stereo_mode_enum);
 #endif
-static const arg_def_t timebase         = ARG_DEF(NULL, "timebase", 1,
-                                                  "Output timestamp precision (fractional seconds)");
-static const arg_def_t error_resilient  = ARG_DEF(NULL, "error-resilient", 1,
-                                                  "Enable error resiliency features");
-static const arg_def_t lag_in_frames    = ARG_DEF(NULL, "lag-in-frames", 1,
-                                                  "Max number of frames to lag");
+static const arg_def_t timebase = ARG_DEF(
+    NULL, "timebase", 1, "Output timestamp precision (fractional seconds)");
+static const arg_def_t error_resilient = ARG_DEF(
+    NULL, "error-resilient", 1, "Enable error resiliency features");
+static const arg_def_t lag_in_frames = ARG_DEF(
+    NULL, "lag-in-frames", 1, "Max number of frames to lag");
 
 static const arg_def_t *global_args[] = {
-  &use_yv12, &use_i420, &use_i422, &use_i444,
+  &use_yv12, &use_i420, &use_i422, &use_i444, &use_i440,
   &usage, &threads, &profile,
   &width, &height,
 #if CONFIG_WEBM_IO
@@ -258,18 +255,18 @@ static const arg_def_t *global_args[] = {
   &lag_in_frames, NULL
 };
 
-static const arg_def_t dropframe_thresh   = ARG_DEF(NULL, "drop-frame", 1,
-                                                    "Temporal resampling threshold (buf %)");
-static const arg_def_t resize_allowed     = ARG_DEF(NULL, "resize-allowed", 1,
-                                                    "Spatial resampling enabled (bool)");
-static const arg_def_t resize_width       = ARG_DEF(NULL, "resize-width", 1,
-                                                    "Width of encoded frame");
-static const arg_def_t resize_height      = ARG_DEF(NULL, "resize-height", 1,
-                                                    "Height of encoded frame");
-static const arg_def_t resize_up_thresh   = ARG_DEF(NULL, "resize-up", 1,
-                                                    "Upscale threshold (buf %)");
-static const arg_def_t resize_down_thresh = ARG_DEF(NULL, "resize-down", 1,
-                                                    "Downscale threshold (buf %)");
+static const arg_def_t dropframe_thresh = ARG_DEF(
+    NULL, "drop-frame", 1, "Temporal resampling threshold (buf %)");
+static const arg_def_t resize_allowed = ARG_DEF(
+    NULL, "resize-allowed", 1, "Spatial resampling enabled (bool)");
+static const arg_def_t resize_width = ARG_DEF(
+    NULL, "resize-width", 1, "Width of encoded frame");
+static const arg_def_t resize_height = ARG_DEF(
+    NULL, "resize-height", 1, "Height of encoded frame");
+static const arg_def_t resize_up_thresh = ARG_DEF(
+    NULL, "resize-up", 1, "Upscale threshold (buf %)");
+static const arg_def_t resize_down_thresh = ARG_DEF(
+    NULL, "resize-down", 1, "Downscale threshold (buf %)");
 static const struct arg_enum_list end_usage_enum[] = {
   {"vbr", VPX_VBR},
   {"cbr", VPX_CBR},
@@ -277,24 +274,24 @@ static const struct arg_enum_list end_usage_enum[] = {
   {"q",   VPX_Q},
   {NULL, 0}
 };
-static const arg_def_t end_usage          = ARG_DEF_ENUM(NULL, "end-usage", 1,
-                                                         "Rate control mode", end_usage_enum);
-static const arg_def_t target_bitrate     = ARG_DEF(NULL, "target-bitrate", 1,
-                                                    "Bitrate (kbps)");
-static const arg_def_t min_quantizer      = ARG_DEF(NULL, "min-q", 1,
-                                                    "Minimum (best) quantizer");
-static const arg_def_t max_quantizer      = ARG_DEF(NULL, "max-q", 1,
-                                                    "Maximum (worst) quantizer");
-static const arg_def_t undershoot_pct     = ARG_DEF(NULL, "undershoot-pct", 1,
-                                                    "Datarate undershoot (min) target (%)");
-static const arg_def_t overshoot_pct      = ARG_DEF(NULL, "overshoot-pct", 1,
-                                                    "Datarate overshoot (max) target (%)");
-static const arg_def_t buf_sz             = ARG_DEF(NULL, "buf-sz", 1,
-                                                    "Client buffer size (ms)");
-static const arg_def_t buf_initial_sz     = ARG_DEF(NULL, "buf-initial-sz", 1,
-                                                    "Client initial buffer size (ms)");
-static const arg_def_t buf_optimal_sz     = ARG_DEF(NULL, "buf-optimal-sz", 1,
-                                                    "Client optimal buffer size (ms)");
+static const arg_def_t end_usage = ARG_DEF_ENUM(
+    NULL, "end-usage", 1, "Rate control mode", end_usage_enum);
+static const arg_def_t target_bitrate = ARG_DEF(
+    NULL, "target-bitrate", 1, "Bitrate (kbps)");
+static const arg_def_t min_quantizer = ARG_DEF(
+    NULL, "min-q", 1, "Minimum (best) quantizer");
+static const arg_def_t max_quantizer = ARG_DEF(
+    NULL, "max-q", 1, "Maximum (worst) quantizer");
+static const arg_def_t undershoot_pct = ARG_DEF(
+    NULL, "undershoot-pct", 1, "Datarate undershoot (min) target (%)");
+static const arg_def_t overshoot_pct = ARG_DEF(
+    NULL, "overshoot-pct", 1, "Datarate overshoot (max) target (%)");
+static const arg_def_t buf_sz = ARG_DEF(
+    NULL, "buf-sz", 1, "Client buffer size (ms)");
+static const arg_def_t buf_initial_sz = ARG_DEF(
+    NULL, "buf-initial-sz", 1, "Client initial buffer size (ms)");
+static const arg_def_t buf_optimal_sz = ARG_DEF(
+    NULL, "buf-optimal-sz", 1, "Client optimal buffer size (ms)");
 static const arg_def_t *rc_args[] = {
   &dropframe_thresh, &resize_allowed, &resize_width, &resize_height,
   &resize_up_thresh, &resize_down_thresh, &end_usage, &target_bitrate,
@@ -303,59 +300,59 @@ static const arg_def_t *rc_args[] = {
 };
 
 
-static const arg_def_t bias_pct = ARG_DEF(NULL, "bias-pct", 1,
-                                          "CBR/VBR bias (0=CBR, 100=VBR)");
-static const arg_def_t minsection_pct = ARG_DEF(NULL, "minsection-pct", 1,
-                                                "GOP min bitrate (% of target)");
-static const arg_def_t maxsection_pct = ARG_DEF(NULL, "maxsection-pct", 1,
-                                                "GOP max bitrate (% of target)");
+static const arg_def_t bias_pct = ARG_DEF(
+    NULL, "bias-pct", 1, "CBR/VBR bias (0=CBR, 100=VBR)");
+static const arg_def_t minsection_pct = ARG_DEF(
+    NULL, "minsection-pct", 1, "GOP min bitrate (% of target)");
+static const arg_def_t maxsection_pct = ARG_DEF(
+    NULL, "maxsection-pct", 1, "GOP max bitrate (% of target)");
 static const arg_def_t *rc_twopass_args[] = {
   &bias_pct, &minsection_pct, &maxsection_pct, NULL
 };
 
 
-static const arg_def_t kf_min_dist = ARG_DEF(NULL, "kf-min-dist", 1,
-                                             "Minimum keyframe interval (frames)");
-static const arg_def_t kf_max_dist = ARG_DEF(NULL, "kf-max-dist", 1,
-                                             "Maximum keyframe interval (frames)");
-static const arg_def_t kf_disabled = ARG_DEF(NULL, "disable-kf", 0,
-                                             "Disable keyframe placement");
+static const arg_def_t kf_min_dist = ARG_DEF(
+    NULL, "kf-min-dist", 1, "Minimum keyframe interval (frames)");
+static const arg_def_t kf_max_dist = ARG_DEF(
+    NULL, "kf-max-dist", 1, "Maximum keyframe interval (frames)");
+static const arg_def_t kf_disabled = ARG_DEF(
+    NULL, "disable-kf", 0, "Disable keyframe placement");
 static const arg_def_t *kf_args[] = {
   &kf_min_dist, &kf_max_dist, &kf_disabled, NULL
 };
 
 
-static const arg_def_t noise_sens = ARG_DEF(NULL, "noise-sensitivity", 1,
-                                            "Noise sensitivity (frames to blur)");
-static const arg_def_t sharpness = ARG_DEF(NULL, "sharpness", 1,
-                                           "Loop filter sharpness (0..7)");
-static const arg_def_t static_thresh = ARG_DEF(NULL, "static-thresh", 1,
-                                               "Motion detection threshold");
-static const arg_def_t cpu_used = ARG_DEF(NULL, "cpu-used", 1,
-                                          "CPU Used (-16..16)");
-static const arg_def_t auto_altref = ARG_DEF(NULL, "auto-alt-ref", 1,
-                                             "Enable automatic alt reference frames");
-static const arg_def_t arnr_maxframes = ARG_DEF(NULL, "arnr-maxframes", 1,
-                                                "AltRef max frames (0..15)");
-static const arg_def_t arnr_strength = ARG_DEF(NULL, "arnr-strength", 1,
-                                               "AltRef filter strength (0..6)");
-static const arg_def_t arnr_type = ARG_DEF(NULL, "arnr-type", 1,
-                                           "AltRef type");
+static const arg_def_t noise_sens = ARG_DEF(
+    NULL, "noise-sensitivity", 1, "Noise sensitivity (frames to blur)");
+static const arg_def_t sharpness = ARG_DEF(
+    NULL, "sharpness", 1, "Loop filter sharpness (0..7)");
+static const arg_def_t static_thresh = ARG_DEF(
+    NULL, "static-thresh", 1, "Motion detection threshold");
+static const arg_def_t cpu_used = ARG_DEF(
+    NULL, "cpu-used", 1, "CPU Used (-16..16)");
+static const arg_def_t auto_altref = ARG_DEF(
+    NULL, "auto-alt-ref", 1, "Enable automatic alt reference frames");
+static const arg_def_t arnr_maxframes = ARG_DEF(
+    NULL, "arnr-maxframes", 1, "AltRef max frames (0..15)");
+static const arg_def_t arnr_strength = ARG_DEF(
+    NULL, "arnr-strength", 1, "AltRef filter strength (0..6)");
+static const arg_def_t arnr_type = ARG_DEF(
+    NULL, "arnr-type", 1, "AltRef type");
 static const struct arg_enum_list tuning_enum[] = {
   {"psnr", VP8_TUNE_PSNR},
   {"ssim", VP8_TUNE_SSIM},
   {NULL, 0}
 };
-static const arg_def_t tune_ssim = ARG_DEF_ENUM(NULL, "tune", 1,
-                                                "Material to favor", tuning_enum);
-static const arg_def_t cq_level = ARG_DEF(NULL, "cq-level", 1,
-                                          "Constant/Constrained Quality level");
-static const arg_def_t max_intra_rate_pct = ARG_DEF(NULL, "max-intra-rate", 1,
-                                                    "Max I-frame bitrate (pct)");
+static const arg_def_t tune_ssim = ARG_DEF_ENUM(
+    NULL, "tune", 1, "Material to favor", tuning_enum);
+static const arg_def_t cq_level = ARG_DEF(
+    NULL, "cq-level", 1, "Constant/Constrained Quality level");
+static const arg_def_t max_intra_rate_pct = ARG_DEF(
+    NULL, "max-intra-rate", 1, "Max I-frame bitrate (pct)");
 
 #if CONFIG_VP8_ENCODER
-static const arg_def_t token_parts =
-    ARG_DEF(NULL, "token-parts", 1, "Number of token partitions to use, log2");
+static const arg_def_t token_parts = ARG_DEF(
+    NULL, "token-parts", 1, "Number of token partitions to use, log2");
 static const arg_def_t *vp8_args[] = {
   &cpu_used, &auto_altref, &noise_sens, &sharpness, &static_thresh,
   &token_parts, &arnr_maxframes, &arnr_strength, &arnr_type,
@@ -373,11 +370,12 @@ static const int vp8_arg_ctrl_map[] = {
 #endif
 
 #if CONFIG_VP9_ENCODER
-static const arg_def_t tile_cols =
-    ARG_DEF(NULL, "tile-columns", 1, "Number of tile columns to use, log2");
-static const arg_def_t tile_rows =
-    ARG_DEF(NULL, "tile-rows", 1, "Number of tile rows to use, log2");
-static const arg_def_t lossless = ARG_DEF(NULL, "lossless", 1, "Lossless mode");
+static const arg_def_t tile_cols = ARG_DEF(
+    NULL, "tile-columns", 1, "Number of tile columns to use, log2");
+static const arg_def_t tile_rows = ARG_DEF(
+    NULL, "tile-rows", 1, "Number of tile rows to use, log2");
+static const arg_def_t lossless = ARG_DEF(
+    NULL, "lossless", 1, "Lossless mode");
 static const arg_def_t frame_parallel_decoding = ARG_DEF(
     NULL, "frame-parallel", 1, "Enable frame parallel decodability features");
 static const arg_def_t aq_mode = ARG_DEF(
@@ -396,13 +394,12 @@ static const struct arg_enum_list bitdepth_enum[] = {
   {NULL, 0}
 };
 
-static const arg_def_t bitdeptharg   = ARG_DEF_ENUM("b", "bit-depth", 1,
-                                                    "Bit depth for codec "
-                                                    "(8 for version <=1, "
-                                                    "10 or 12 for version 2)",
-                                                    bitdepth_enum);
-static const arg_def_t inbitdeptharg = ARG_DEF(NULL, "input-bit-depth", 1,
-                                               "Bit depth of input");
+static const arg_def_t bitdeptharg = ARG_DEF_ENUM(
+    "b", "bit-depth", 1,
+    "Bit depth for codec (8 for version <=1, 10 or 12 for version 2)",
+    bitdepth_enum);
+static const arg_def_t inbitdeptharg = ARG_DEF(
+    NULL, "input-bit-depth", 1, "Bit depth of input");
 #endif
 
 static const struct arg_enum_list tune_content_enum[] = {
@@ -829,6 +826,8 @@ static void parse_global_config(struct VpxEncoderConfig *global, char **argv) {
       global->color_type = I422;
     else if (arg_match(&arg, &use_i444, argi))
       global->color_type = I444;
+    else if (arg_match(&arg, &use_i440, argi))
+      global->color_type = I440;
     else if (arg_match(&arg, &quietarg, argi))
       global->quiet = 1;
     else if (arg_match(&arg, &verbosearg, argi))
@@ -857,8 +856,6 @@ static void parse_global_config(struct VpxEncoderConfig *global, char **argv) {
       global->disable_warnings = 1;
     else if (arg_match(&arg, &disable_warning_prompt, argi))
       global->disable_warning_prompt = 1;
-    else if (arg_match(&arg, &experimental_bitstream, argi))
-      global->experimental_bitstream = 1;
     else
       argj++;
   }
@@ -1162,7 +1159,6 @@ static int parse_stream_params(struct VpxEncoderConfig *global,
             if (j == config->arg_ctrl_cnt)
               config->arg_ctrl_cnt++;
           }
-
         }
       }
       if (!match)
@@ -1195,12 +1191,6 @@ static void validate_stream_config(const struct stream_state *stream,
   if (!stream->config.cfg.g_w || !stream->config.cfg.g_h)
     fatal("Stream %d: Specify stream dimensions with --width (-w) "
           " and --height (-h)", stream->index);
-
-  if (stream->config.cfg.g_profile != 0 && !global->experimental_bitstream) {
-    fatal("Stream %d: profile %d is experimental and requires the --%s flag",
-          stream->index, stream->config.cfg.g_profile,
-          experimental_bitstream.long_name);
-  }
 
   // Check that the codec bit depth is greater than the input bit depth.
   if (stream->config.cfg.g_input_bit_depth >
@@ -1288,7 +1278,12 @@ static const char* image_format_to_string(vpx_img_fmt_t f) {
     case VPX_IMG_FMT_I420: return "I420";
     case VPX_IMG_FMT_I422: return "I422";
     case VPX_IMG_FMT_I444: return "I444";
+    case VPX_IMG_FMT_I440: return "I440";
     case VPX_IMG_FMT_YV12: return "YV12";
+    case VPX_IMG_FMT_I42016: return "I42016";
+    case VPX_IMG_FMT_I42216: return "I42216";
+    case VPX_IMG_FMT_I44416: return "I44416";
+    case VPX_IMG_FMT_I44016: return "I44016";
     default: return "Other";
   }
 }
@@ -1695,7 +1690,7 @@ static void get_cx_data(struct stream_state *stream,
 }
 
 
-static void show_psnr(struct stream_state  *stream) {
+static void show_psnr(struct stream_state  *stream, double peak) {
   int i;
   double ovpsnr;
 
@@ -1703,7 +1698,7 @@ static void show_psnr(struct stream_state  *stream) {
     return;
 
   fprintf(stderr, "Stream %d PSNR (Overall/Avg/Y/U/V)", stream->index);
-  ovpsnr = sse_to_psnr((double)stream->psnr_samples_total, 255.0,
+  ovpsnr = sse_to_psnr((double)stream->psnr_samples_total, peak,
                        (double)stream->psnr_sse_total);
   fprintf(stderr, " %.3f", ovpsnr);
 
@@ -1717,132 +1712,6 @@ static void show_psnr(struct stream_state  *stream) {
 static float usec_to_fps(uint64_t usec, unsigned int frames) {
   return (float)(usec > 0 ? frames * 1000000.0 / (float)usec : 0);
 }
-
-#if CONFIG_VP9 && CONFIG_VP9_HIGHBITDEPTH
-static void high_img_upshift(vpx_image_t *dst, vpx_image_t *src,
-                             int input_shift) {
-  // Note the offset is 1 less than half
-  const int offset = input_shift > 0 ? (1 << (input_shift - 1)) - 1 : 0;
-  int plane;
-  if (dst->w != src->w || dst->h != src->h ||
-      dst->x_chroma_shift != src->x_chroma_shift ||
-      dst->y_chroma_shift != src->y_chroma_shift ||
-      dst->fmt != src->fmt || input_shift < 0) {
-    fatal("Unsupported image conversion");
-  }
-  switch (src->fmt) {
-    case VPX_IMG_FMT_I42016:
-    case VPX_IMG_FMT_I42216:
-    case VPX_IMG_FMT_I44416:
-      break;
-    default:
-      fatal("Unsupported image conversion");
-      break;
-  }
-  for (plane = 0; plane < 3; plane++) {
-    int w = src->w;
-    int h = src->h;
-    int x, y;
-    if (plane) {
-      w >>= src->x_chroma_shift;
-      h >>= src->y_chroma_shift;
-    }
-    for (y = 0; y < h; y++) {
-      uint16_t *p_src = (uint16_t *)(src->planes[plane] +
-                                     y * src->stride[plane]);
-      uint16_t *p_dst = (uint16_t *)(dst->planes[plane] +
-                                     y * dst->stride[plane]);
-      for (x = 0; x < w; x++)
-        *p_dst++ = (*p_src++ << input_shift) + offset;
-    }
-  }
-}
-
-static void low_img_upshift(vpx_image_t *dst, vpx_image_t *src,
-                            int input_shift) {
-  // Note the offset is 1 less than half
-  const int offset = input_shift > 0 ? (1 << (input_shift - 1)) - 1 : 0;
-  int plane;
-  if (dst->w != src->w || dst->h != src->h ||
-      dst->x_chroma_shift != src->x_chroma_shift ||
-      dst->y_chroma_shift != src->y_chroma_shift ||
-      dst->fmt != src->fmt + VPX_IMG_FMT_HIGHBITDEPTH ||
-      input_shift < 0) {
-    fatal("Unsupported image conversion");
-  }
-  switch (src->fmt) {
-    case VPX_IMG_FMT_I420:
-    case VPX_IMG_FMT_I422:
-    case VPX_IMG_FMT_I444:
-      break;
-    default:
-      fatal("Unsupported image conversion");
-      break;
-  }
-  for (plane = 0; plane < 3; plane++) {
-    int w = src->w;
-    int h = src->h;
-    int x, y;
-    if (plane) {
-      w >>= src->x_chroma_shift;
-      h >>= src->y_chroma_shift;
-    }
-    for (y = 0; y < h; y++) {
-      uint8_t *p_src = src->planes[plane] + y * src->stride[plane];
-      uint16_t *p_dst = (uint16_t *)(dst->planes[plane] +
-                                     y * dst->stride[plane]);
-      for (x = 0; x < w; x++) {
-        *p_dst++ = (*p_src++ << input_shift) + offset;
-      }
-    }
-  }
-}
-
-static void img_upshift(vpx_image_t *dst, vpx_image_t *src,
-                        int input_shift) {
-  if (src->fmt & VPX_IMG_FMT_HIGHBITDEPTH) {
-    high_img_upshift(dst, src, input_shift);
-  } else {
-    low_img_upshift(dst, src, input_shift);
-  }
-}
-
-static void img_cast_16_to_8(vpx_image_t *dst, vpx_image_t *src) {
-  int plane;
-  if (dst->fmt + VPX_IMG_FMT_HIGHBITDEPTH != src->fmt ||
-      dst->d_w != src->d_w || dst->d_h != src->d_h ||
-      dst->x_chroma_shift != src->x_chroma_shift ||
-      dst->y_chroma_shift != src->y_chroma_shift) {
-    fatal("Unsupported image conversion");
-  }
-  switch (dst->fmt) {
-    case VPX_IMG_FMT_I420:
-    case VPX_IMG_FMT_I422:
-    case VPX_IMG_FMT_I444:
-      break;
-    default:
-      fatal("Unsupported image conversion");
-      break;
-  }
-  for (plane = 0; plane < 3; plane++) {
-    int w = src->d_w;
-    int h = src->d_h;
-    int x, y;
-    if (plane) {
-      w >>= src->x_chroma_shift;
-      h >>= src->y_chroma_shift;
-    }
-    for (y = 0; y < h; y++) {
-      uint16_t *p_src = (uint16_t *)(src->planes[plane] +
-                                     y * src->stride[plane]);
-      uint8_t *p_dst = dst->planes[plane] + y * dst->stride[plane];
-      for (x = 0; x < w; x++) {
-        *p_dst++ = *p_src++;
-      }
-    }
-  }
-}
-#endif
 
 static void test_decode(struct stream_state  *stream,
                         enum TestDecodeFatality fatal,
@@ -1883,12 +1752,12 @@ static void test_decode(struct stream_state  *stream,
       if (enc_img.fmt & VPX_IMG_FMT_HIGHBITDEPTH) {
         vpx_img_alloc(&enc_img, enc_img.fmt - VPX_IMG_FMT_HIGHBITDEPTH,
                       enc_img.d_w, enc_img.d_h, 16);
-        img_cast_16_to_8(&enc_img, &ref_enc.img);
+        vpx_img_truncate_16_to_8(&enc_img, &ref_enc.img);
       }
       if (dec_img.fmt & VPX_IMG_FMT_HIGHBITDEPTH) {
         vpx_img_alloc(&dec_img, dec_img.fmt - VPX_IMG_FMT_HIGHBITDEPTH,
                       dec_img.d_w, dec_img.d_h, 16);
-        img_cast_16_to_8(&dec_img, &ref_dec.img);
+        vpx_img_truncate_16_to_8(&dec_img, &ref_dec.img);
       }
     }
 #endif
@@ -1993,6 +1862,9 @@ int main(int argc, const char **argv_) {
     case I444:
       input.fmt = VPX_IMG_FMT_I444;
       break;
+    case I440:
+      input.fmt = VPX_IMG_FMT_I440;
+      break;
     case YV12:
       input.fmt = VPX_IMG_FMT_YV12;
       break;
@@ -2042,14 +1914,15 @@ int main(int argc, const char **argv_) {
     /* If the input file doesn't specify its w/h (raw files), try to get
      * the data from the first stream's configuration.
      */
-    if (!input.width || !input.height)
-      FOREACH_STREAM( {
-      if (stream->config.cfg.g_w && stream->config.cfg.g_h) {
-        input.width = stream->config.cfg.g_w;
-        input.height = stream->config.cfg.g_h;
-        break;
-      }
-    });
+    if (!input.width || !input.height) {
+      FOREACH_STREAM({
+        if (stream->config.cfg.g_w && stream->config.cfg.g_h) {
+          input.width = stream->config.cfg.g_w;
+          input.height = stream->config.cfg.g_h;
+          break;
+        }
+      });
+    }
 
     /* Update stream configurations from the input file's parameters */
     if (!input.width || !input.height)
@@ -2196,7 +2069,7 @@ int main(int argc, const char **argv_) {
                           input.width, input.height, 32);
             allocated_raw_shift = 1;
           }
-          img_upshift(&raw_shift, &raw, input_shift);
+          vpx_img_upshift(&raw_shift, &raw, input_shift);
           frame_to_encode = &raw_shift;
         } else {
           frame_to_encode = &raw;
@@ -2272,24 +2145,29 @@ int main(int argc, const char **argv_) {
     if (stream_cnt > 1)
       fprintf(stderr, "\n");
 
-    if (!global.quiet)
-      FOREACH_STREAM(fprintf(
-                       stderr,
-                       "\rPass %d/%d frame %4d/%-4d %7"PRId64"B %7lub/f %7"PRId64"b/s"
-                       " %7"PRId64" %s (%.2f fps)\033[K\n", pass + 1,
-                       global.passes, frames_in, stream->frames_out, (int64_t)stream->nbytes,
-                       seen_frames ? (unsigned long)(stream->nbytes * 8 / seen_frames) : 0,
-                       seen_frames ? (int64_t)stream->nbytes * 8
-                       * (int64_t)global.framerate.num / global.framerate.den
-                       / seen_frames
-                       : 0,
-                       stream->cx_time > 9999999 ? stream->cx_time / 1000 : stream->cx_time,
-                       stream->cx_time > 9999999 ? "ms" : "us",
-                       usec_to_fps(stream->cx_time, seen_frames));
-                    );
+    if (!global.quiet) {
+      FOREACH_STREAM(fprintf(stderr,
+          "\rPass %d/%d frame %4d/%-4d %7"PRId64"B %7"PRId64"b/f %7"PRId64"b/s"
+          " %7"PRId64" %s (%.2f fps)\033[K\n",
+          pass + 1,
+          global.passes, frames_in, stream->frames_out, (int64_t)stream->nbytes,
+          seen_frames ? (int64_t)(stream->nbytes * 8 / seen_frames) : 0,
+          seen_frames ? (int64_t)stream->nbytes * 8 *
+              (int64_t)global.framerate.num / global.framerate.den /
+              seen_frames : 0,
+          stream->cx_time > 9999999 ? stream->cx_time / 1000 : stream->cx_time,
+          stream->cx_time > 9999999 ? "ms" : "us",
+          usec_to_fps(stream->cx_time, seen_frames)));
+    }
 
-    if (global.show_psnr)
-      FOREACH_STREAM(show_psnr(stream));
+    if (global.show_psnr) {
+      if (global.codec->fourcc == VP9_FOURCC) {
+        FOREACH_STREAM(
+            show_psnr(stream, (1 << stream->config.cfg.g_input_bit_depth) - 1));
+      } else {
+        FOREACH_STREAM(show_psnr(stream, 255.0));
+      }
+    }
 
     FOREACH_STREAM(vpx_codec_destroy(&stream->encoder));
 

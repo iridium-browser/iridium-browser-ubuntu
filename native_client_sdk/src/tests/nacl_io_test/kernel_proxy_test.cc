@@ -7,6 +7,8 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <utime.h>
 
 #include <map>
 #include <string>
@@ -22,6 +24,7 @@
 #include "nacl_io/kernel_proxy.h"
 #include "nacl_io/memfs/mem_fs.h"
 #include "nacl_io/osmman.h"
+#include "nacl_io/ostime.h"
 #include "nacl_io/path.h"
 #include "nacl_io/typed_fs_factory.h"
 
@@ -426,6 +429,13 @@ TEST_F(KernelProxyTest, MemMountFTruncate) {
   EXPECT_EQ(2, ki_read(fd2, text, sizeof(text)));
   EXPECT_EQ(0, ki_close(fd1));
   EXPECT_EQ(0, ki_close(fd2));
+
+  // Truncate should fail if the file is not writable.
+  EXPECT_EQ(0, ki_chmod("/trunc", 0444));
+  fd2 = ki_open("/trunc", O_RDONLY, 0);
+  ASSERT_NE(-1, fd2);
+  EXPECT_EQ(-1, ki_ftruncate(fd2,  0));
+  EXPECT_EQ(EACCES, errno);
 }
 
 TEST_F(KernelProxyTest, MemMountTruncate) {
@@ -445,6 +455,11 @@ TEST_F(KernelProxyTest, MemMountTruncate) {
   ASSERT_NE(-1, fd1);
   EXPECT_EQ(2, ki_read(fd1, text, sizeof(text)));
   EXPECT_EQ(0, ki_close(fd1));
+
+  // Truncate should fail if the file is not writable.
+  EXPECT_EQ(0, ki_chmod("/trunc", 0444));
+  EXPECT_EQ(-1, ki_truncate("/trunc",  0));
+  EXPECT_EQ(EACCES, errno);
 }
 
 TEST_F(KernelProxyTest, MemMountLseek) {
@@ -528,6 +543,22 @@ TEST_F(KernelProxyTest, Lstat) {
 
   EXPECT_EQ(-1, ki_lstat("/no-such-file", &buf));
   EXPECT_EQ(ENOENT, errno);
+
+  // Still legal to stat a file that is write-only.
+  EXPECT_EQ(0, ki_chmod("/foo", 0222));
+  EXPECT_EQ(0, ki_lstat("/foo", &buf));
+}
+
+TEST_F(KernelProxyTest, OpenDirectory) {
+  // Opening a directory for read should succeed.
+  int fd = ki_open("/", O_RDONLY, 0);
+  ASSERT_GT(fd, -1);
+
+  // Opening a directory for write should fail.
+  EXPECT_EQ(-1, ki_open("/", O_RDWR, 0));
+  EXPECT_EQ(errno, EISDIR);
+  EXPECT_EQ(-1, ki_open("/", O_WRONLY, 0));
+  EXPECT_EQ(errno, EISDIR);
 }
 
 TEST_F(KernelProxyTest, OpenWithMode) {
@@ -536,7 +567,12 @@ TEST_F(KernelProxyTest, OpenWithMode) {
 
   struct stat buf;
   EXPECT_EQ(0, ki_lstat("/foo", &buf));
-  EXPECT_EQ(0723, buf.st_mode & ~S_IFMT);
+  EXPECT_EQ(0723, buf.st_mode & 0777);
+}
+
+TEST_F(KernelProxyTest, CreateWronlyWithReadOnlyMode) {
+  int fd = ki_open("/foo", O_CREAT | O_WRONLY, 0444);
+  ASSERT_GT(fd, -1);
 }
 
 TEST_F(KernelProxyTest, UseAfterClose) {
@@ -546,6 +582,93 @@ TEST_F(KernelProxyTest, UseAfterClose) {
   EXPECT_EQ(0, ki_close(fd));
   EXPECT_EQ(-1, ki_write(fd, "hello", 5));
   EXPECT_EQ(EBADF, errno);
+}
+
+TEST_F(KernelProxyTest, Utimes) {
+  struct timeval times[2];
+  times[0].tv_sec = 1000;
+  times[0].tv_usec = 2000;
+  times[1].tv_sec = 3000;
+  times[1].tv_usec = 4000;
+
+  int fd = ki_open("/dummy", O_CREAT | O_WRONLY, 0222);
+  ASSERT_GT(fd, -1);
+  EXPECT_EQ(0, ki_close(fd));
+
+  // utime should work if the file is write-only.
+  EXPECT_EQ(0, ki_utimes("/dummy", times));
+
+  // utime should work on directories (which can never be opened for write)
+  EXPECT_EQ(0, ki_utimes("/", times));
+
+  // or if the file is read-only.
+  EXPECT_EQ(0, ki_chmod("/dummy", 0444));
+  EXPECT_EQ(0, ki_utimes("/dummy", times));
+
+  // times can be NULL. In that case the access/mod times will be set to the
+  // current time.
+  struct timeval tm;
+  EXPECT_EQ(0, gettimeofday(&tm, NULL));
+
+  EXPECT_EQ(0, ki_utimes("/dummy", NULL));
+  struct stat buf;
+  EXPECT_EQ(0, ki_stat("/dummy", &buf));
+
+  EXPECT_GE(buf.st_atime, tm.tv_sec);
+  EXPECT_GE(buf.st_atimensec, tm.tv_usec * 1000);
+  EXPECT_GE(buf.st_mtime, tm.tv_sec);
+  EXPECT_GE(buf.st_mtimensec, tm.tv_usec * 1000);
+}
+
+TEST_F(KernelProxyTest, Utime) {
+  struct utimbuf times;
+  times.actime = 1000;
+  times.modtime = 2000;
+
+  int fd = ki_open("/dummy", O_CREAT | O_WRONLY, 0222);
+  ASSERT_GT(fd, -1);
+  EXPECT_EQ(0, ki_close(fd));
+
+  // utime should work if the file is write-only.
+  EXPECT_EQ(0, ki_utime("/dummy", &times));
+
+  // or if the file is read-only.
+  EXPECT_EQ(0, ki_chmod("/dummy", 0444));
+  EXPECT_EQ(0, ki_utime("/dummy", &times));
+
+  // times can be NULL. In that case the access/mod times will be set to the
+  // current time.
+  struct timeval tm;
+  EXPECT_EQ(0, gettimeofday(&tm, NULL));
+
+  EXPECT_EQ(0, ki_utime("/dummy", NULL));
+  struct stat buf;
+  EXPECT_EQ(0, ki_stat("/dummy", &buf));
+
+  EXPECT_GE(buf.st_atime, tm.tv_sec);
+  EXPECT_GE(buf.st_atimensec, tm.tv_usec * 1000);
+  EXPECT_GE(buf.st_mtime, tm.tv_sec);
+  EXPECT_GE(buf.st_mtimensec, tm.tv_usec * 1000);
+}
+
+TEST_F(KernelProxyTest, Umask) {
+  mode_t oldmask = ki_umask(0222);
+  EXPECT_EQ(0, oldmask);
+
+  int fd = ki_open("/foo", O_CREAT | O_RDONLY, 0666);
+  ASSERT_GT(fd, -1);
+  ki_close(fd);
+
+  EXPECT_EQ(0, ki_mkdir("/dir", 0777));
+
+  struct stat buf;
+  EXPECT_EQ(0, ki_stat("/foo", &buf));
+  EXPECT_EQ(0444, buf.st_mode & 0777);
+
+  EXPECT_EQ(0, ki_stat("/dir", &buf));
+  EXPECT_EQ(0555, buf.st_mode & 0777);
+
+  EXPECT_EQ(0222, ki_umask(0));
 }
 
 namespace {

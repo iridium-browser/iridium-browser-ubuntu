@@ -69,7 +69,6 @@
 <translation id="7267430310003164111">提示您从Google Play商店下载应用。应用名称：<ph name="APP_NAME"/>。应用的平均评分：<ph name="APP_RATING"/>。</translation>
 <translation id="4148957013307229264">正在安装...</translation>
 <translation id="3992315671621218278">保存链接</translation>
-<translation id="8034522405403831421">此网页的源语言为<ph name="SOURCE_LANGUAGE"/>，要将其翻译成<ph name="TARGET_LANGUAGE"/>吗？</translation>
 <translation id="2476578072172137802">网站设置</translation>
 <translation id="4195643157523330669">在新标签页中打开</translation>
 <translation id="651048280540227067">关闭此菜单</translation>
@@ -95,6 +94,7 @@
 <translation id="7947953824732555851">接受并登录</translation>
 <translation id="6333140779060797560">通过<ph name="APPLICATION"/>分享</translation>
 <translation id="6040143037577758943">关闭</translation>
+<translation id="5138299137310274655">这是<ph name="SOURCE_LANGUAGE"/>网页，要将其翻译成<ph name="TARGET_LANGUAGE"/>吗？</translation>
 <translation id="969096075394517431">更改语言</translation>
 <translation id="5032574515228824816">提示</translation>
 <translation id="7961015016161918242">永不保存</translation>

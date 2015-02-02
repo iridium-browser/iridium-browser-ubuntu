@@ -15,14 +15,13 @@
 #include "chrome/browser/ui/browser_window_state.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/pref_names.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/gfx/screen.h"
 
 #if defined(USE_ASH)
 #include "ash/shell.h"
 #include "ash/wm/window_positioner.h"
-#include "chrome/browser/ui/ash/ash_init.h"
+#include "chrome/browser/ui/ash/ash_util.h"
 #endif
 
 namespace {
@@ -42,10 +41,9 @@ class DefaultStateProvider : public WindowSizer::StateProvider {
   }
 
   // Overridden from WindowSizer::StateProvider:
-  virtual bool GetPersistentState(
-      gfx::Rect* bounds,
-      gfx::Rect* work_area,
-      ui::WindowShowState* show_state) const OVERRIDE {
+  bool GetPersistentState(gfx::Rect* bounds,
+                          gfx::Rect* work_area,
+                          ui::WindowShowState* show_state) const override {
     DCHECK(bounds);
     DCHECK(show_state);
 
@@ -85,9 +83,9 @@ class DefaultStateProvider : public WindowSizer::StateProvider {
     return has_prefs;
   }
 
-  virtual bool GetLastActiveWindowState(
+  bool GetLastActiveWindowState(
       gfx::Rect* bounds,
-      ui::WindowShowState* show_state) const OVERRIDE {
+      ui::WindowShowState* show_state) const override {
     DCHECK(show_state);
     // Applications are always restored with the same position.
     if (!app_name_.empty())
@@ -141,11 +139,10 @@ class DefaultStateProvider : public WindowSizer::StateProvider {
 class DefaultTargetDisplayProvider : public WindowSizer::TargetDisplayProvider {
  public:
   DefaultTargetDisplayProvider() {}
-  virtual ~DefaultTargetDisplayProvider() {}
+  ~DefaultTargetDisplayProvider() override {}
 
-  virtual gfx::Display GetTargetDisplay(
-      const gfx::Screen* screen,
-      const gfx::Rect& bounds) const OVERRIDE {
+  gfx::Display GetTargetDisplay(const gfx::Screen* screen,
+                                const gfx::Rect& bounds) const override {
 #if defined(USE_ASH)
     bool force_ash = false;
     // On Windows check if the browser is launched to serve ASH. If yes then

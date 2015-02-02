@@ -143,8 +143,6 @@ std::string GetVersionString() {
   // Build a version string that matches MakeUserAgentForSyncApi with the
   // addition of channel info and proper OS names.
   chrome::VersionInfo chrome_version;
-  if (!chrome_version.is_valid())
-    return "invalid";
   // GetVersionStringModifier returns empty string for stable channel or
   // unofficial builds, the channel string otherwise. We want to have "-devel"
   // for unofficial builds only.
@@ -326,11 +324,9 @@ scoped_ptr<base::DictionaryValue> ConstructAboutInformation(
 
   syncer::SyncStatus full_status;
   bool is_status_valid = service->QueryDetailedSyncStatus(&full_status);
-  bool sync_initialized = service->sync_initialized();
+  bool sync_active = service->SyncActive();
   const syncer::sessions::SyncSessionSnapshot& snapshot =
-      sync_initialized ?
-      service->GetLastSessionSnapshot() :
-      syncer::sessions::SyncSessionSnapshot();
+      service->GetLastSessionSnapshot();
 
   if (is_status_valid)
     summary_string.SetValue(service->QuerySyncStatusSummaryString());
@@ -373,7 +369,7 @@ scoped_ptr<base::DictionaryValue> ConstructAboutInformation(
         full_status.notifications_enabled);
   }
 
-  if (sync_initialized) {
+  if (sync_active) {
     is_using_explicit_passphrase.SetValue(
         service->IsUsingSecondaryPassphrase());
     is_passphrase_required.SetValue(service->IsPassphraseRequired());

@@ -15,7 +15,6 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
 #include "chrome/browser/ui/webui/uber/uber_ui.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -56,7 +55,7 @@ class SignOutWaiter : public SigninManagerBase::Observer {
       : seen_(false), running_(false), scoped_observer_(this) {
     scoped_observer_.Add(signin_manager);
   }
-  virtual ~SignOutWaiter() {}
+  ~SignOutWaiter() override {}
 
   void Wait() {
     if (seen_)
@@ -68,8 +67,8 @@ class SignOutWaiter : public SigninManagerBase::Observer {
     EXPECT_TRUE(seen_);
   }
 
-  virtual void GoogleSignedOut(const std::string& account_id,
-                               const std::string& username) OVERRIDE {
+  void GoogleSignedOut(const std::string& account_id,
+                       const std::string& username) override {
     seen_ = true;
     if (!running_)
       return;

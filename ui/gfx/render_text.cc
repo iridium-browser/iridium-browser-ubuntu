@@ -18,6 +18,7 @@
 #include "third_party/skia/include/core/SkTypeface.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/geometry/safe_integer_conversions.h"
 #include "ui/gfx/insets.h"
 #include "ui/gfx/render_text_harfbuzz.h"
 #include "ui/gfx/scoped_canvas.h"
@@ -269,8 +270,10 @@ void SkiaTextRenderer::EndDiagonalStrike() {
 }
 
 void SkiaTextRenderer::DrawUnderline(int x, int y, int width) {
-  SkRect r = SkRect::MakeLTRB(x, y + underline_position_, x + width,
-                              y + underline_position_ + underline_thickness_);
+  SkScalar x_scalar = SkIntToScalar(x);
+  SkRect r = SkRect::MakeLTRB(
+      x_scalar, y + underline_position_, x_scalar + width,
+      y + underline_position_ + underline_thickness_);
   if (underline_thickness_ == kUnderlineMetricsNotSet) {
     const SkScalar text_size = paint_.getTextSize();
     r.fTop = SkScalarMulAdd(text_size, kUnderlineOffset, y);
@@ -283,7 +286,9 @@ void SkiaTextRenderer::DrawStrike(int x, int y, int width) const {
   const SkScalar text_size = paint_.getTextSize();
   const SkScalar height = SkScalarMul(text_size, kLineThickness);
   const SkScalar offset = SkScalarMulAdd(text_size, kStrikeThroughOffset, y);
-  const SkRect r = SkRect::MakeLTRB(x, offset, x + width, offset + height);
+  SkScalar x_scalar = SkIntToScalar(x);
+  const SkRect r =
+      SkRect::MakeLTRB(x_scalar, offset, x_scalar + width, offset + height);
   canvas_skia_->drawRect(r, paint_);
 }
 
@@ -314,7 +319,7 @@ void SkiaTextRenderer::DiagonalStrike::Draw() {
   const int clip_height = height + 2 * thickness;
 
   paint_.setAntiAlias(true);
-  paint_.setStrokeWidth(thickness);
+  paint_.setStrokeWidth(SkIntToScalar(thickness));
 
   const bool clipped = pieces_.size() > 1;
   SkCanvas* sk_canvas = canvas_->sk_canvas();
@@ -393,16 +398,14 @@ RenderText::~RenderText() {
 }
 
 RenderText* RenderText::CreateInstance() {
-#if defined(OS_MACOSX) && defined(TOOLKIT_VIEWS)
-  // Use the more complete HarfBuzz implementation for Views controls on Mac.
-  return new RenderTextHarfBuzz;
+#if defined(OS_MACOSX) && !defined(TOOLKIT_VIEWS)
+  static const bool use_harfbuzz = CommandLine::ForCurrentProcess()->
+      HasSwitch(switches::kEnableHarfBuzzRenderText);
 #else
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableHarfBuzzRenderText)) {
-    return new RenderTextHarfBuzz;
-  }
-  return CreateNativeInstance();
+  static const bool use_harfbuzz = !CommandLine::ForCurrentProcess()->
+      HasSwitch(switches::kDisableHarfBuzzRenderText);
 #endif
+  return use_harfbuzz ? new RenderTextHarfBuzz : CreateNativeInstance();
 }
 
 void RenderText::SetText(const base::string16& text) {
@@ -715,8 +718,7 @@ VisualCursorDirection RenderText::GetVisualDirectionOfLogicalEnd() {
 }
 
 SizeF RenderText::GetStringSizeF() {
-  const Size size = GetStringSize();
-  return SizeF(size.width(), size.height());
+  return GetStringSize();
 }
 
 float RenderText::GetContentWidth() {
@@ -852,7 +854,8 @@ const Vector2d& RenderText::GetUpdatedDisplayOffset() {
 }
 
 void RenderText::SetDisplayOffset(int horizontal_offset) {
-  const int extra_content = GetContentWidth() - display_rect_.width();
+  const int extra_content =
+      ToFlooredInt(GetContentWidth()) - display_rect_.width();
   const int cursor_width = cursor_enabled_ ? 1 : 0;
 
   int min_offset = 0;
@@ -1093,7 +1096,8 @@ Vector2d RenderText::GetAlignmentOffset(size_t line_number) {
 
 void RenderText::ApplyFadeEffects(internal::SkiaTextRenderer* renderer) {
   const int width = display_rect().width();
-  if (multiline() || elide_behavior_ != FADE_TAIL || GetContentWidth() <= width)
+  if (multiline() || elide_behavior_ != FADE_TAIL ||
+      static_cast<int>(GetContentWidth()) <= width)
     return;
 
   const int gradient_width = CalculateFadeGradientWidth(font_list(), width);
@@ -1198,12 +1202,15 @@ void RenderText::UpdateLayoutText() {
     }
   }
 
-  if (elide_behavior_ != NO_ELIDE && elide_behavior_ != FADE_TAIL &&
-      !layout_text_.empty() && GetContentWidth() > display_rect_.width()) {
+  if (elide_behavior_ != NO_ELIDE &&
+      elide_behavior_ != FADE_TAIL &&
+      !layout_text_.empty() &&
+      static_cast<int>(GetContentWidth()) > display_rect_.width()) {
     // This doesn't trim styles so ellipsis may get rendered as a different
     // style than the preceding text. See crbug.com/327850.
-    layout_text_.assign(
-        Elide(layout_text_, display_rect_.width(), elide_behavior_));
+    layout_text_.assign(Elide(layout_text_,
+                              static_cast<float>(display_rect_.width()),
+                              elide_behavior_));
   }
 
   // Replace the newline character with a newline symbol in single line mode.

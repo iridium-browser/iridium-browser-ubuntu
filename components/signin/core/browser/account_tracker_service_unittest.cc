@@ -10,6 +10,7 @@
 #include "base/prefs/testing_pref_service.h"
 #include "base/strings/stringprintf.h"
 #include "components/signin/core/browser/account_tracker_service.h"
+#include "components/signin/core/common/signin_pref_names.h"
 #include "google_apis/gaia/fake_oauth2_token_service.h"
 #include "google_apis/gaia/gaia_oauth_client.h"
 #include "net/http/http_status_code.h"
@@ -98,7 +99,7 @@ std::string Str(const std::vector<TrackingEvent>& events) {
 class AccountTrackerObserver : public AccountTrackerService::Observer {
  public:
   AccountTrackerObserver() {}
-  virtual ~AccountTrackerObserver() {}
+  ~AccountTrackerObserver() override {}
 
   void Clear();
   void SortEventsByUser();
@@ -113,10 +114,8 @@ class AccountTrackerObserver : public AccountTrackerService::Observer {
 
  private:
   // AccountTrackerService::Observer implementation
-  virtual void OnAccountUpdated(
-      const AccountTrackerService::AccountInfo& ids) OVERRIDE;
-  virtual void OnAccountRemoved(
-      const AccountTrackerService::AccountInfo& ids) OVERRIDE;
+  void OnAccountUpdated(const AccountTrackerService::AccountInfo& ids) override;
+  void OnAccountRemoved(const AccountTrackerService::AccountInfo& ids) override;
 
   testing::AssertionResult CheckEvents(
       const std::vector<TrackingEvent>& events);
@@ -193,13 +192,16 @@ class AccountTrackerServiceTest : public testing::Test {
  public:
   AccountTrackerServiceTest() {}
 
-  virtual ~AccountTrackerServiceTest() {}
+  ~AccountTrackerServiceTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     fake_oauth2_token_service_.reset(new FakeOAuth2TokenService());
 
     pref_service_.registry()->RegisterListPref(
         AccountTrackerService::kAccountInfoPref);
+    pref_service_.registry()->RegisterIntegerPref(
+        prefs::kAccountIdMigrationState,
+        AccountTrackerService::MIGRATION_NOT_STARTED);
 
     account_tracker_.reset(new AccountTrackerService());
     account_tracker_->Initialize(fake_oauth2_token_service_.get(),
@@ -209,7 +211,7 @@ class AccountTrackerServiceTest : public testing::Test {
     account_tracker_->AddObserver(&observer_);
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     account_tracker_->RemoveObserver(&observer_);
     account_tracker_->Shutdown();
   }
@@ -506,4 +508,22 @@ TEST_F(AccountTrackerServiceTest, Persistence) {
     EXPECT_EQ(AccountIdToEmail("beta"), infos[0].email);
     tracker.Shutdown();
   }
+}
+
+TEST_F(AccountTrackerServiceTest, SeedAccountInfo) {
+  std::vector<AccountTrackerService::AccountInfo> infos =
+      account_tracker()->GetAccounts();
+  EXPECT_EQ(0u, infos.size());
+
+  const std::string gaia_id = AccountIdToGaiaId("alpha");
+  const std::string email = AccountIdToEmail("alpha");
+  const std::string account_id =
+      account_tracker()->PickAccountIdForAccount(gaia_id, email);
+  account_tracker()->SeedAccountInfo(gaia_id, email);
+
+  infos = account_tracker()->GetAccounts();
+  EXPECT_EQ(1u, infos.size());
+  EXPECT_EQ(account_id, infos[0].account_id);
+  EXPECT_EQ(gaia_id, infos[0].gaia);
+  EXPECT_EQ(email, infos[0].email);
 }

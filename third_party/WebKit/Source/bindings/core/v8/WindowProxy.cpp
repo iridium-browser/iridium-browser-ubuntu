@@ -75,9 +75,9 @@ static void checkDocumentWrapper(v8::Handle<v8::Object> wrapper, Document* docum
     ASSERT(!document->isHTMLDocument() || (V8Document::toImpl(v8::Handle<v8::Object>::Cast(wrapper->GetPrototype())) == document));
 }
 
-PassOwnPtr<WindowProxy> WindowProxy::create(LocalFrame* frame, DOMWrapperWorld& world, v8::Isolate* isolate)
+PassOwnPtrWillBeRawPtr<WindowProxy> WindowProxy::create(LocalFrame* frame, DOMWrapperWorld& world, v8::Isolate* isolate)
 {
-    return adoptPtr(new WindowProxy(frame, &world, isolate));
+    return adoptPtrWillBeNoop(new WindowProxy(frame, &world, isolate));
 }
 
 WindowProxy::WindowProxy(LocalFrame* frame, PassRefPtr<DOMWrapperWorld> world, v8::Isolate* isolate)
@@ -85,6 +85,17 @@ WindowProxy::WindowProxy(LocalFrame* frame, PassRefPtr<DOMWrapperWorld> world, v
     , m_isolate(isolate)
     , m_world(world)
 {
+}
+
+WindowProxy::~WindowProxy()
+{
+    // clearForClose() or clearForNavigation() must be invoked before destruction starts.
+    ASSERT(!isContextInitialized());
+}
+
+void WindowProxy::trace(Visitor* visitor)
+{
+    visitor->trace(m_frame);
 }
 
 void WindowProxy::disposeContext(GlobalDetachmentBehavior behavior)
@@ -104,7 +115,7 @@ void WindowProxy::disposeContext(GlobalDetachmentBehavior behavior)
     // It's likely that disposing the context has created a lot of
     // garbage. Notify V8 about this so it'll have a chance of cleaning
     // it up when idle.
-    V8GCForContextDispose::instanceTemplate().notifyContextDisposed(m_frame->isMainFrame());
+    V8GCForContextDispose::instance().notifyContextDisposed(m_frame->isMainFrame());
 }
 
 void WindowProxy::clearForClose()
@@ -280,13 +291,13 @@ static v8::Handle<v8::Object> toInnerGlobalObject(v8::Handle<v8::Context> contex
 
 bool WindowProxy::installDOMWindow()
 {
-    LocalDOMWindow* window = m_frame->domWindow();
+    DOMWindow* window = m_frame->domWindow();
     const WrapperTypeInfo* wrapperTypeInfo = window->wrapperTypeInfo();
     v8::Local<v8::Object> windowWrapper = V8ObjectConstructor::newInstance(m_isolate, m_scriptState->perContextData()->constructorForType(wrapperTypeInfo));
     if (windowWrapper.IsEmpty())
         return false;
 
-    V8DOMWrapper::setNativeInfoForHiddenWrapper(v8::Handle<v8::Object>::Cast(windowWrapper->GetPrototype()), wrapperTypeInfo, window->toScriptWrappableBase());
+    V8DOMWrapper::setNativeInfo(v8::Handle<v8::Object>::Cast(windowWrapper->GetPrototype()), wrapperTypeInfo, window->toScriptWrappableBase());
 
     // Install the windowWrapper as the prototype of the innerGlobalObject.
     // The full structure of the global object is as follows:
@@ -300,18 +311,10 @@ bool WindowProxy::installDOMWindow()
     // Note: Much of this prototype structure is hidden from web content. The
     //       outer, inner, and LocalDOMWindow instance all appear to be the same
     //       JavaScript object.
-    //
-    // Note: With Oilpan, the LocalDOMWindow object is garbage collected.
-    //       Persistent references to this inner global object view of the LocalDOMWindow
-    //       aren't kept, as that would prevent the global object from ever being released.
-    //       It is safe not to do so, as the wrapper for the LocalDOMWindow being installed here
-    //       already keeps a persistent reference, and it along with the inner global object
-    //       views of the LocalDOMWindow will die together once that wrapper clears the persistent
-    //       reference.
     v8::Handle<v8::Object> innerGlobalObject = toInnerGlobalObject(m_scriptState->context());
-    V8DOMWrapper::setNativeInfoForHiddenWrapper(innerGlobalObject, wrapperTypeInfo, window->toScriptWrappableBase());
+    V8DOMWrapper::setNativeInfo(innerGlobalObject, wrapperTypeInfo, window->toScriptWrappableBase());
     innerGlobalObject->SetPrototype(windowWrapper);
-    V8DOMWrapper::associateObjectWithWrapperNonTemplate(window, wrapperTypeInfo, windowWrapper, m_isolate);
+    V8DOMWrapper::associateObjectWithWrapper(m_isolate, window, wrapperTypeInfo, windowWrapper);
     wrapperTypeInfo->installConditionallyEnabledProperties(windowWrapper, m_isolate);
     return true;
 }

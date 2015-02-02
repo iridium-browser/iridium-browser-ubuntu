@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// From ppb_video_decoder.idl modified Mon Sep  8 16:40:15 2014.
+// From ppb_video_decoder.idl modified Fri Nov  7 14:49:08 2014.
 
 #include "ppapi/c/pp_completion_callback.h"
 #include "ppapi/c/pp_errors.h"
@@ -40,10 +40,8 @@ int32_t Initialize_0_1(PP_Resource video_decoder,
   EnterResource<PPB_VideoDecoder_API> enter(video_decoder, callback, true);
   if (enter.failed())
     return enter.retval();
-  return enter.SetResult(enter.object()->Initialize0_1(graphics3d_context,
-                                                       profile,
-                                                       allow_software_fallback,
-                                                       enter.callback()));
+  return enter.SetResult(enter.object()->Initialize0_1(
+      graphics3d_context, profile, allow_software_fallback, enter.callback()));
 }
 
 int32_t Initialize(PP_Resource video_decoder,
@@ -55,10 +53,8 @@ int32_t Initialize(PP_Resource video_decoder,
   EnterResource<PPB_VideoDecoder_API> enter(video_decoder, callback, true);
   if (enter.failed())
     return enter.retval();
-  return enter.SetResult(enter.object()->Initialize(graphics3d_context,
-                                                    profile,
-                                                    acceleration,
-                                                    enter.callback()));
+  return enter.SetResult(enter.object()->Initialize(
+      graphics3d_context, profile, acceleration, enter.callback()));
 }
 
 int32_t Decode(PP_Resource video_decoder,
@@ -70,10 +66,19 @@ int32_t Decode(PP_Resource video_decoder,
   EnterResource<PPB_VideoDecoder_API> enter(video_decoder, callback, true);
   if (enter.failed())
     return enter.retval();
-  return enter.SetResult(enter.object()->Decode(decode_id,
-                                                size,
-                                                buffer,
-                                                enter.callback()));
+  return enter.SetResult(
+      enter.object()->Decode(decode_id, size, buffer, enter.callback()));
+}
+
+int32_t GetPicture_0_1(PP_Resource video_decoder,
+                       struct PP_VideoPicture_0_1* picture,
+                       struct PP_CompletionCallback callback) {
+  VLOG(4) << "PPB_VideoDecoder::GetPicture()";
+  EnterResource<PPB_VideoDecoder_API> enter(video_decoder, callback, true);
+  if (enter.failed())
+    return enter.retval();
+  return enter.SetResult(
+      enter.object()->GetPicture0_1(picture, enter.callback()));
 }
 
 int32_t GetPicture(PP_Resource video_decoder,
@@ -113,38 +118,45 @@ int32_t Reset(PP_Resource video_decoder,
   return enter.SetResult(enter.object()->Reset(enter.callback()));
 }
 
-const PPB_VideoDecoder_0_1 g_ppb_videodecoder_thunk_0_1 = {
-  &Create,
-  &IsVideoDecoder,
-  &Initialize_0_1,
-  &Decode,
-  &GetPicture,
-  &RecyclePicture,
-  &Flush,
-  &Reset
-};
+const PPB_VideoDecoder_0_1 g_ppb_videodecoder_thunk_0_1 = {&Create,
+                                                           &IsVideoDecoder,
+                                                           &Initialize_0_1,
+                                                           &Decode,
+                                                           &GetPicture_0_1,
+                                                           &RecyclePicture,
+                                                           &Flush,
+                                                           &Reset};
 
-const PPB_VideoDecoder_0_2 g_ppb_videodecoder_thunk_0_2 = {
-  &Create,
-  &IsVideoDecoder,
-  &Initialize,
-  &Decode,
-  &GetPicture,
-  &RecyclePicture,
-  &Flush,
-  &Reset
-};
+const PPB_VideoDecoder_0_2 g_ppb_videodecoder_thunk_0_2 = {&Create,
+                                                           &IsVideoDecoder,
+                                                           &Initialize,
+                                                           &Decode,
+                                                           &GetPicture_0_1,
+                                                           &RecyclePicture,
+                                                           &Flush,
+                                                           &Reset};
+
+const PPB_VideoDecoder_1_0 g_ppb_videodecoder_thunk_1_0 = {&Create,
+                                                           &IsVideoDecoder,
+                                                           &Initialize,
+                                                           &Decode,
+                                                           &GetPicture,
+                                                           &RecyclePicture,
+                                                           &Flush,
+                                                           &Reset};
 
 }  // namespace
 
-PPAPI_THUNK_EXPORT const PPB_VideoDecoder_0_1*
-    GetPPB_VideoDecoder_0_1_Thunk() {
+PPAPI_THUNK_EXPORT const PPB_VideoDecoder_0_1* GetPPB_VideoDecoder_0_1_Thunk() {
   return &g_ppb_videodecoder_thunk_0_1;
 }
 
-PPAPI_THUNK_EXPORT const PPB_VideoDecoder_0_2*
-    GetPPB_VideoDecoder_0_2_Thunk() {
+PPAPI_THUNK_EXPORT const PPB_VideoDecoder_0_2* GetPPB_VideoDecoder_0_2_Thunk() {
   return &g_ppb_videodecoder_thunk_0_2;
+}
+
+PPAPI_THUNK_EXPORT const PPB_VideoDecoder_1_0* GetPPB_VideoDecoder_1_0_Thunk() {
+  return &g_ppb_videodecoder_thunk_1_0;
 }
 
 }  // namespace thunk

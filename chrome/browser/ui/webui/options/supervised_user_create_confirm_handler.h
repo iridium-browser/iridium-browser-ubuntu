@@ -18,14 +18,13 @@ namespace options {
 class SupervisedUserCreateConfirmHandler : public OptionsPageUIHandler {
  public:
   SupervisedUserCreateConfirmHandler();
-  virtual ~SupervisedUserCreateConfirmHandler();
+  ~SupervisedUserCreateConfirmHandler() override;
 
   // OptionsPageUIHandler implementation.
-  virtual void GetLocalizedValues(
-      base::DictionaryValue* localized_strings) OVERRIDE;
+  void GetLocalizedValues(base::DictionaryValue* localized_strings) override;
 
   // WebUIMessageHandler implementation.
-  virtual void RegisterMessages() OVERRIDE;
+  void RegisterMessages() override;
 
  private:
   // Callback for the "switchToProfile" message.

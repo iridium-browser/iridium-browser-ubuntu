@@ -23,10 +23,10 @@ class TestingSearchTermsData;
 class TemplateURLServiceTestUtil : public TemplateURLServiceObserver {
  public:
   TemplateURLServiceTestUtil();
-  virtual ~TemplateURLServiceTestUtil();
+  ~TemplateURLServiceTestUtil() override;
 
   // TemplateURLServiceObserver implemementation.
-  virtual void OnTemplateURLServiceChanged() OVERRIDE;
+  void OnTemplateURLServiceChanged() override;
 
   // Gets the observer count.
   int GetObserverCount();

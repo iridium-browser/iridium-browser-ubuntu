@@ -23,11 +23,9 @@ using themes_helper::UsingSystemTheme;
 class TwoClientThemesSyncTest : public SyncTest {
  public:
   TwoClientThemesSyncTest() : SyncTest(TWO_CLIENT) {}
-  virtual ~TwoClientThemesSyncTest() {}
+  ~TwoClientThemesSyncTest() override {}
 
-  virtual bool TestUsesSelfNotifications() OVERRIDE {
-    return false;
-  }
+  bool TestUsesSelfNotifications() override { return false; }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TwoClientThemesSyncTest);

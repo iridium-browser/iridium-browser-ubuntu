@@ -23,6 +23,7 @@
 #include "cc/test/pixel_test_output_surface.h"
 #include "cc/test/pixel_test_software_output_device.h"
 #include "cc/test/pixel_test_utils.h"
+#include "cc/test/test_gpu_memory_buffer_manager.h"
 #include "cc/test/test_in_process_context_provider.h"
 #include "cc/test/test_shared_bitmap_manager.h"
 #include "cc/trees/blocking_task_runner.h"
@@ -54,12 +55,26 @@ bool PixelTest::RunPixelTestWithReadbackTarget(
     RenderPass* target,
     const base::FilePath& ref_file,
     const PixelComparator& comparator) {
+  return RunPixelTestWithReadbackTargetAndArea(
+      pass_list, target, ref_file, comparator, nullptr);
+}
+
+bool PixelTest::RunPixelTestWithReadbackTargetAndArea(
+    RenderPassList* pass_list,
+    RenderPass* target,
+    const base::FilePath& ref_file,
+    const PixelComparator& comparator,
+    const gfx::Rect* copy_rect) {
   base::RunLoop run_loop;
 
-  target->copy_requests.push_back(CopyOutputRequest::CreateBitmapRequest(
-      base::Bind(&PixelTest::ReadbackResult,
-                 base::Unretained(this),
-                 run_loop.QuitClosure())));
+  scoped_ptr<CopyOutputRequest> request =
+      CopyOutputRequest::CreateBitmapRequest(
+          base::Bind(&PixelTest::ReadbackResult,
+                     base::Unretained(this),
+                     run_loop.QuitClosure()));
+  if (copy_rect)
+    request->set_area(*copy_rect);
+  target->copy_requests.push_back(request.Pass());
 
   float device_scale_factor = 1.f;
   gfx::Rect device_viewport_rect =
@@ -107,21 +122,24 @@ bool PixelTest::PixelsMatchReference(const base::FilePath& ref_file,
       *result_bitmap_, test_data_dir.Append(ref_file), comparator);
 }
 
-void PixelTest::SetUpGLRenderer(bool use_skia_gpu_backend) {
+void PixelTest::SetUpGLRenderer(bool use_skia_gpu_backend,
+                                bool flipped_output_surface) {
   enable_pixel_output_.reset(new gfx::DisableNullDrawGLBindings);
 
-  output_surface_.reset(
-      new PixelTestOutputSurface(new TestInProcessContextProvider));
+  output_surface_.reset(new PixelTestOutputSurface(
+      new TestInProcessContextProvider, flipped_output_surface));
   output_surface_->BindToClient(output_surface_client_.get());
 
-  shared_bitmap_manager_.reset(new TestSharedBitmapManager());
-  resource_provider_ = ResourceProvider::Create(output_surface_.get(),
-                                                shared_bitmap_manager_.get(),
-                                                main_thread_task_runner_.get(),
-                                                0,
-                                                false,
-                                                1,
-                                                false);
+  shared_bitmap_manager_.reset(new TestSharedBitmapManager);
+  gpu_memory_buffer_manager_.reset(new TestGpuMemoryBufferManager);
+  resource_provider_ =
+      ResourceProvider::Create(output_surface_.get(),
+                               shared_bitmap_manager_.get(),
+                               gpu_memory_buffer_manager_.get(),
+                               main_thread_task_runner_.get(),
+                               0,
+                               false,
+                               1);
 
   texture_mailbox_deleter_ = make_scoped_ptr(
       new TextureMailboxDeleter(base::MessageLoopProxy::current()));
@@ -131,7 +149,7 @@ void PixelTest::SetUpGLRenderer(bool use_skia_gpu_backend) {
                                  output_surface_.get(),
                                  resource_provider_.get(),
                                  texture_mailbox_deleter_.get(),
-                                 0).PassAs<DirectRenderer>();
+                                 0);
 }
 
 void PixelTest::ForceExpandedViewport(const gfx::Size& surface_expansion) {
@@ -162,17 +180,16 @@ void PixelTest::SetUpSoftwareRenderer() {
   output_surface_.reset(new PixelTestOutputSurface(device.Pass()));
   output_surface_->BindToClient(output_surface_client_.get());
   shared_bitmap_manager_.reset(new TestSharedBitmapManager());
-  resource_provider_ = ResourceProvider::Create(output_surface_.get(),
-                                                shared_bitmap_manager_.get(),
-                                                main_thread_task_runner_.get(),
-                                                0,
-                                                false,
-                                                1,
-                                                false);
-  renderer_ =
-      SoftwareRenderer::Create(
-          this, &settings_, output_surface_.get(), resource_provider_.get())
-          .PassAs<DirectRenderer>();
+  resource_provider_ =
+      ResourceProvider::Create(output_surface_.get(),
+                               shared_bitmap_manager_.get(),
+                               gpu_memory_buffer_manager_.get(),
+                               main_thread_task_runner_.get(),
+                               0,
+                               false,
+                               1);
+  renderer_ = SoftwareRenderer::Create(
+      this, &settings_, output_surface_.get(), resource_provider_.get());
 }
 
 }  // namespace cc

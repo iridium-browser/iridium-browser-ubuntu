@@ -29,11 +29,9 @@ class FakeUploader : public TwoPhaseUploader {
                const base::FilePath& file_path,
                const ProgressCallback& progress_callback,
                const FinishCallback& finish_callback);
-  virtual ~FakeUploader() {}
+  ~FakeUploader() override {}
 
-  virtual void Start() OVERRIDE {
-    start_called_ = true;
-  }
+  void Start() override { start_called_ = true; }
 
   scoped_refptr<net::URLRequestContextGetter> url_request_context_getter_;
   scoped_refptr<base::TaskRunner> file_task_runner_;
@@ -67,16 +65,16 @@ FakeUploader::FakeUploader(
 class FakeUploaderFactory : public TwoPhaseUploaderFactory {
  public:
   FakeUploaderFactory() : uploader_(NULL) {}
-  virtual ~FakeUploaderFactory() {}
+  ~FakeUploaderFactory() override {}
 
-  virtual TwoPhaseUploader* CreateTwoPhaseUploader(
+  TwoPhaseUploader* CreateTwoPhaseUploader(
       net::URLRequestContextGetter* url_request_context_getter,
       base::TaskRunner* file_task_runner,
       const GURL& base_url,
       const std::string& metadata,
       const base::FilePath& file_path,
       const TwoPhaseUploader::ProgressCallback& progress_callback,
-      const TwoPhaseUploader::FinishCallback& finish_callback) OVERRIDE;
+      const TwoPhaseUploader::FinishCallback& finish_callback) override;
 
   FakeUploader* uploader_;
 };
@@ -112,7 +110,7 @@ class DownloadFeedbackTest : public testing::Test {
     EXPECT_NE(io_task_runner_, file_task_runner_);
   }
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     upload_file_path_ = temp_dir_.path().AppendASCII("test file");
     upload_file_data_ = "data";
@@ -122,9 +120,7 @@ class DownloadFeedbackTest : public testing::Test {
     TwoPhaseUploader::RegisterFactory(&two_phase_uploader_factory_);
   }
 
-  virtual void TearDown() OVERRIDE {
-    TwoPhaseUploader::RegisterFactory(NULL);
-  }
+  void TearDown() override { TwoPhaseUploader::RegisterFactory(NULL); }
 
   FakeUploader* uploader() const {
     return two_phase_uploader_factory_.uploader_;

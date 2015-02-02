@@ -13,15 +13,15 @@
 class TestPanelMouseWatcher : public PanelMouseWatcher {
  public:
   TestPanelMouseWatcher();
-  virtual ~TestPanelMouseWatcher();
+  ~TestPanelMouseWatcher() override;
 
  private:
-  virtual void Start() OVERRIDE;
-  virtual void Stop() OVERRIDE;
-  virtual bool IsActive() const OVERRIDE;
+  void Start() override;
+  void Stop() override;
+  bool IsActive() const override;
 
-  virtual void NotifyMouseMovement(const gfx::Point& mouse_position) OVERRIDE;
-  virtual gfx::Point GetMousePosition() const OVERRIDE;
+  void NotifyMouseMovement(const gfx::Point& mouse_position) override;
+  gfx::Point GetMousePosition() const override;
 
   bool started_;
   gfx::Point mouse_position_;

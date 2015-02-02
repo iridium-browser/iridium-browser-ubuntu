@@ -20,19 +20,19 @@ class DefaultEventGeneratorDelegate : public EventGeneratorDelegateAura {
   }
 
   // EventGeneratorDelegate:
-  virtual void SetContext(ui::test::EventGenerator* owner,
-                          gfx::NativeWindow root_window,
-                          gfx::NativeWindow window) OVERRIDE {
+  void SetContext(ui::test::EventGenerator* owner,
+                  gfx::NativeWindow root_window,
+                  gfx::NativeWindow window) override {
     root_window_ = root_window;
   }
 
   // EventGeneratorDelegateAura:
-  virtual WindowTreeHost* GetHostAt(const gfx::Point& point) const OVERRIDE {
+  WindowTreeHost* GetHostAt(const gfx::Point& point) const override {
     return root_window_->GetHost();
   }
 
-  virtual client::ScreenPositionClient* GetScreenPositionClient(
-      const aura::Window* window) const OVERRIDE {
+  client::ScreenPositionClient* GetScreenPositionClient(
+      const aura::Window* window) const override {
     return NULL;
   }
 
@@ -44,7 +44,7 @@ class DefaultEventGeneratorDelegate : public EventGeneratorDelegateAura {
     ui::test::EventGenerator::default_delegate = this;
   }
 
-  virtual ~DefaultEventGeneratorDelegate() {
+  ~DefaultEventGeneratorDelegate() override {
     DCHECK_EQ(this, ui::test::EventGenerator::default_delegate);
     ui::test::EventGenerator::default_delegate = NULL;
   }

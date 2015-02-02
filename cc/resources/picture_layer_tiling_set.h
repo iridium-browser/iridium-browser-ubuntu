@@ -8,7 +8,7 @@
 #include "cc/base/region.h"
 #include "cc/base/scoped_ptr_vector.h"
 #include "cc/resources/picture_layer_tiling.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace base {
 namespace debug {
@@ -34,8 +34,7 @@ class CC_EXPORT PictureLayerTilingSet {
     size_t end;
   };
 
-  PictureLayerTilingSet(PictureLayerTilingClient* client,
-                        const gfx::Size& layer_bounds);
+  explicit PictureLayerTilingSet(PictureLayerTilingClient* client);
   ~PictureLayerTilingSet();
 
   void SetClient(PictureLayerTilingClient* client);
@@ -53,9 +52,8 @@ class CC_EXPORT PictureLayerTilingSet {
                    const Region& layer_invalidation,
                    float minimum_contents_scale);
 
-  gfx::Size layer_bounds() const { return layer_bounds_; }
-
-  PictureLayerTiling* AddTiling(float contents_scale);
+  PictureLayerTiling* AddTiling(float contents_scale,
+                                const gfx::Size& layer_bounds);
   size_t num_tilings() const { return tilings_.size(); }
   int NumHighResTilings() const;
   PictureLayerTiling* tiling_at(size_t idx) { return tilings_[idx]; }
@@ -73,9 +71,6 @@ class CC_EXPORT PictureLayerTilingSet {
 
   // Remove all tiles; keep all tilings.
   void RemoveAllTiles();
-
-  void DidBecomeActive();
-  void DidBecomeRecycled();
 
   // For a given rect, iterates through tiles that can fill it.  If no
   // set of tiles with resources can fill the rect, then it will iterate
@@ -104,7 +99,8 @@ class CC_EXPORT PictureLayerTilingSet {
     CoverageIterator& operator++();
     operator bool() const;
 
-    PictureLayerTiling* CurrentTiling();
+    TileResolution resolution() const;
+    PictureLayerTiling* CurrentTiling() const;
 
    private:
     int NextTiling() const;
@@ -128,7 +124,6 @@ class CC_EXPORT PictureLayerTilingSet {
 
  private:
   PictureLayerTilingClient* client_;
-  gfx::Size layer_bounds_;
   ScopedPtrVector<PictureLayerTiling> tilings_;
 
   friend class Iterator;

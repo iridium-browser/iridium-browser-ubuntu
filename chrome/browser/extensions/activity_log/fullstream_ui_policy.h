@@ -26,49 +26,49 @@ class FullStreamUIPolicy : public ActivityLogDatabasePolicy {
   // For more info about these member functions, see the super class.
   explicit FullStreamUIPolicy(Profile* profile);
 
-  virtual void ProcessAction(scoped_refptr<Action> action) OVERRIDE;
+  void ProcessAction(scoped_refptr<Action> action) override;
 
-  virtual void ReadFilteredData(
+  void ReadFilteredData(
       const std::string& extension_id,
       const Action::ActionType type,
       const std::string& api_name,
       const std::string& page_url,
       const std::string& arg_url,
       const int days_ago,
-      const base::Callback
-          <void(scoped_ptr<Action::ActionVector>)>& callback) OVERRIDE;
+      const base::Callback<void(scoped_ptr<Action::ActionVector>)>& callback)
+      override;
 
-  virtual void Close() OVERRIDE;
+  void Close() override;
 
   // Remove the actions stored for this policy according to the passed IDs.
-  virtual void RemoveActions(const std::vector<int64>& action_ids) OVERRIDE;
+  void RemoveActions(const std::vector<int64>& action_ids) override;
 
   // Clean the URL data stored for this policy.
-  virtual void RemoveURLs(const std::vector<GURL>& restrict_urls) OVERRIDE;
+  void RemoveURLs(const std::vector<GURL>& restrict_urls) override;
 
   // Clean the data related to this extension for this policy.
-  virtual void RemoveExtensionData(const std::string& extension_id) OVERRIDE;
+  void RemoveExtensionData(const std::string& extension_id) override;
 
   // Delete everything in the database.
-  virtual void DeleteDatabase() OVERRIDE;
+  void DeleteDatabase() override;
 
   // Database table schema.
-  static const char* kTableName;
-  static const char* kTableContentFields[];
-  static const char* kTableFieldTypes[];
+  static const char kTableName[];
+  static const char* const kTableContentFields[];
+  static const char* const kTableFieldTypes[];
   static const int kTableFieldCount;
 
  protected:
   // Only ever run by OnDatabaseClose() below; see the comments on the
   // ActivityDatabase class for an overall discussion of how cleanup works.
-  virtual ~FullStreamUIPolicy();
+  ~FullStreamUIPolicy() override;
 
   // The ActivityDatabase::Delegate interface.  These are always called from
   // the database thread.
-  virtual bool InitDatabase(sql::Connection* db) OVERRIDE;
-  virtual bool FlushDatabase(sql::Connection* db) OVERRIDE;
-  virtual void OnDatabaseFailure() OVERRIDE;
-  virtual void OnDatabaseClose() OVERRIDE;
+  bool InitDatabase(sql::Connection* db) override;
+  bool FlushDatabase(sql::Connection* db) override;
+  void OnDatabaseFailure() override;
+  void OnDatabaseClose() override;
 
   // Strips arguments if needed by policy.  May return the original object (if
   // unmodified), or a copy (if modifications were made).  The implementation

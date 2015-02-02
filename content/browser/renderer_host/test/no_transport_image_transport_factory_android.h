@@ -27,8 +27,7 @@ class NoTransportImageTransportFactoryAndroid
  public:
   NoTransportImageTransportFactoryAndroid();
   virtual ~NoTransportImageTransportFactoryAndroid();
-  virtual GLHelper* GetGLHelper() OVERRIDE;
-  virtual uint32 GetChannelID() OVERRIDE;
+  virtual GLHelper* GetGLHelper() override;
 
  private:
   scoped_ptr<ui::ContextFactory> context_factory_;

@@ -23,13 +23,13 @@ class SupervisedUserSettingsServiceFactory
   friend struct DefaultSingletonTraits<SupervisedUserSettingsServiceFactory>;
 
   SupervisedUserSettingsServiceFactory();
-  virtual ~SupervisedUserSettingsServiceFactory();
+  ~SupervisedUserSettingsServiceFactory() override;
 
   // BrowserContextKeyedServiceFactory:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* profile) const OVERRIDE;
-  virtual content::BrowserContext* GetBrowserContextToUse(
-      content::BrowserContext* context) const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* profile) const override;
+  content::BrowserContext* GetBrowserContextToUse(
+      content::BrowserContext* context) const override;
 };
 
 #endif  // CHROME_BROWSER_SUPERVISED_USER_SUPERVISED_USER_SETTINGS_SERVICE_FACTORY_H_

@@ -62,13 +62,11 @@ class TestFocusController : public ui::EventHandler {
     root_->AddPreTargetHandler(this);
   }
 
-  virtual ~TestFocusController() {
-    root_->RemovePreTargetHandler(this);
-  }
+  ~TestFocusController() override { root_->RemovePreTargetHandler(this); }
 
  private:
   // Overridden from ui::EventHandler:
-  virtual void OnEvent(ui::Event* event) OVERRIDE {
+  void OnEvent(ui::Event* event) override {
     aura::Window* target = static_cast<aura::Window*>(event->target());
     if (event->type() == ui::ET_MOUSE_PRESSED ||
         event->type() == ui::ET_TOUCH_PRESSED) {
@@ -86,14 +84,14 @@ class TestKeyboardControllerProxy : public KeyboardControllerProxy {
       : input_method_(
             ui::CreateInputMethod(NULL, gfx::kNullAcceleratedWidget)) {}
 
-  virtual ~TestKeyboardControllerProxy() {
+  ~TestKeyboardControllerProxy() override {
     // Destroy the window before the delegate.
     window_.reset();
   }
 
   // Overridden from KeyboardControllerProxy:
-  virtual bool HasKeyboardWindow() const OVERRIDE { return window_; }
-  virtual aura::Window* GetKeyboardWindow() OVERRIDE {
+  bool HasKeyboardWindow() const override { return window_; }
+  aura::Window* GetKeyboardWindow() override {
     if (!window_) {
       window_.reset(new aura::Window(&delegate_));
       window_->Init(aura::WINDOW_LAYER_NOT_DRAWN);
@@ -101,15 +99,16 @@ class TestKeyboardControllerProxy : public KeyboardControllerProxy {
     }
     return window_.get();
   }
-  virtual content::BrowserContext* GetBrowserContext() OVERRIDE { return NULL; }
-  virtual ui::InputMethod* GetInputMethod() OVERRIDE {
-    return input_method_.get();
-  }
-  virtual void RequestAudioInput(content::WebContents* web_contents,
+  content::BrowserContext* GetBrowserContext() override { return NULL; }
+  ui::InputMethod* GetInputMethod() override { return input_method_.get(); }
+  void RequestAudioInput(
+      content::WebContents* web_contents,
       const content::MediaStreamRequest& request,
-      const content::MediaResponseCallback& callback) OVERRIDE { return; }
-  virtual void LoadSystemKeyboard() OVERRIDE {};
-  virtual void ReloadKeyboardIfNeeded() OVERRIDE {};
+      const content::MediaResponseCallback& callback) override {
+    return;
+  }
+  void LoadSystemKeyboard() override{};
+  void ReloadKeyboardIfNeeded() override{};
 
  private:
   scoped_ptr<aura::Window> window_;
@@ -123,7 +122,7 @@ class TestKeyboardControllerProxy : public KeyboardControllerProxy {
 class EventObserver : public ui::EventHandler {
  public:
   EventObserver() {}
-  virtual ~EventObserver() {}
+  ~EventObserver() override {}
 
   int GetEventCount(ui::EventType type) {
     return event_counts_[type];
@@ -131,7 +130,7 @@ class EventObserver : public ui::EventHandler {
 
  private:
   // Overridden from ui::EventHandler:
-  virtual void OnEvent(ui::Event* event) OVERRIDE {
+  void OnEvent(ui::Event* event) override {
     ui::EventHandler::OnEvent(event);
     event_counts_[event->type()]++;
   }
@@ -145,13 +144,10 @@ class KeyboardContainerObserver : public aura::WindowObserver {
   explicit KeyboardContainerObserver(aura::Window* window) : window_(window) {
     window_->AddObserver(this);
   }
-  virtual ~KeyboardContainerObserver() {
-    window_->RemoveObserver(this);
-  }
+  ~KeyboardContainerObserver() override { window_->RemoveObserver(this); }
 
  private:
-  virtual void OnWindowVisibilityChanged(aura::Window* window,
-                                         bool visible) OVERRIDE {
+  void OnWindowVisibilityChanged(aura::Window* window, bool visible) override {
     if (!visible)
       base::MessageLoop::current()->Quit();
   }
@@ -166,9 +162,9 @@ class KeyboardContainerObserver : public aura::WindowObserver {
 class KeyboardControllerTest : public testing::Test {
  public:
   KeyboardControllerTest() {}
-  virtual ~KeyboardControllerTest() {}
+  ~KeyboardControllerTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     // The ContextFactory must exist before any Compositors are created.
     bool enable_pixel_output = false;
     ui::ContextFactory* context_factory =
@@ -185,7 +181,7 @@ class KeyboardControllerTest : public testing::Test {
     controller_.reset(new KeyboardController(proxy_));
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     controller_.reset();
     focus_controller_.reset();
     if (::switches::IsTextInputFocusManagerEnabled())
@@ -497,9 +493,9 @@ class KeyboardControllerAnimationTest : public KeyboardControllerTest,
                                         public KeyboardControllerObserver {
  public:
   KeyboardControllerAnimationTest() {}
-  virtual ~KeyboardControllerAnimationTest() {}
+  ~KeyboardControllerAnimationTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     // We cannot short-circuit animations for this test.
     ui::ScopedAnimationDurationScaleMode test_duration_mode(
         ui::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
@@ -512,14 +508,14 @@ class KeyboardControllerAnimationTest : public KeyboardControllerTest,
     controller()->AddObserver(this);
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     controller()->RemoveObserver(this);
     KeyboardControllerTest::TearDown();
   }
 
  protected:
   // KeyboardControllerObserver overrides
-  virtual void OnKeyboardBoundsChanging(const gfx::Rect& new_bounds) OVERRIDE {
+  void OnKeyboardBoundsChanging(const gfx::Rect& new_bounds) override {
     notified_bounds_ = new_bounds;
   }
 

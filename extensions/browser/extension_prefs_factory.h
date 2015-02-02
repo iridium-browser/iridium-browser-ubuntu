@@ -26,12 +26,12 @@ class ExtensionPrefsFactory : public BrowserContextKeyedServiceFactory {
   friend struct DefaultSingletonTraits<ExtensionPrefsFactory>;
 
   ExtensionPrefsFactory();
-  virtual ~ExtensionPrefsFactory();
+  ~ExtensionPrefsFactory() override;
 
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* context) const OVERRIDE;
-  virtual content::BrowserContext* GetBrowserContextToUse(
-      content::BrowserContext* context) const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* context) const override;
+  content::BrowserContext* GetBrowserContextToUse(
+      content::BrowserContext* context) const override;
 };
 
 }  // namespace extensions

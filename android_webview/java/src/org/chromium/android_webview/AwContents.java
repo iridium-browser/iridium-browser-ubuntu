@@ -20,6 +20,7 @@ import android.net.http.SslCertificate;
 import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
 import android.os.Message;
 import android.text.TextUtils;
 import android.util.Log;
@@ -48,7 +49,8 @@ import org.chromium.content.browser.ContentSettings;
 import org.chromium.content.browser.ContentViewClient;
 import org.chromium.content.browser.ContentViewCore;
 import org.chromium.content.browser.ContentViewStatics;
-import org.chromium.content.browser.WebContentsObserverAndroid;
+import org.chromium.content.browser.SmartClipProvider;
+import org.chromium.content.browser.WebContentsObserver;
 import org.chromium.content.common.CleanupReference;
 import org.chromium.content_public.browser.GestureStateListener;
 import org.chromium.content_public.browser.JavaScriptCallback;
@@ -58,7 +60,7 @@ import org.chromium.content_public.browser.NavigationHistory;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.common.Referrer;
 import org.chromium.ui.base.ActivityWindowAndroid;
-import org.chromium.ui.base.PageTransitionTypes;
+import org.chromium.ui.base.PageTransition;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.gfx.DeviceDisplayInfo;
 
@@ -80,7 +82,7 @@ import java.util.concurrent.Callable;
  * continuous build & test in the open source SDK-based tree).
  */
 @JNINamespace("android_webview")
-public class AwContents {
+public class AwContents implements SmartClipProvider {
     private static final String TAG = "AwContents";
 
     private static final String WEB_ARCHIVE_EXTENSION = ".mht";
@@ -188,7 +190,7 @@ public class AwContents {
     private NavigationController mNavigationController;
     private final AwContentsClient mContentsClient;
     private final AwContentViewClient mContentViewClient;
-    private WebContentsObserverAndroid mWebContentsObserver;
+    private WebContentsObserver mWebContentsObserver;
     private final AwContentsClientBridge mContentsClientBridge;
     private final AwWebContentsDelegateAdapter mWebContentsDelegate;
     private final AwContentsIoThreadClient mIoThreadClient;
@@ -274,6 +276,8 @@ public class AwContents {
         private final InternalAccessDelegate mInitialInternalAccessAdapter;
         private final AwViewMethods mInitialAwViewMethods;
         private FullScreenView mFullScreenView;
+        /** Whether the initial container view was focused when we entered fullscreen */
+        private boolean mWasInitialContainerViewFocused;
 
         private FullScreenTransitionsState(ViewGroup initialContainerView,
                 InternalAccessDelegate initialInternalAccessAdapter,
@@ -283,8 +287,14 @@ public class AwContents {
             mInitialAwViewMethods = initialAwViewMethods;
         }
 
-        private void enterFullScreen(FullScreenView fullScreenView) {
+        private void enterFullScreen(FullScreenView fullScreenView,
+                boolean wasInitialContainerViewFocused) {
             mFullScreenView = fullScreenView;
+            mWasInitialContainerViewFocused = wasInitialContainerViewFocused;
+        }
+
+        private boolean wasInitialContainerViewFocused() {
+            return mWasInitialContainerViewFocused;
         }
 
         private void exitFullScreen() {
@@ -340,8 +350,8 @@ public class AwContents {
                 mContentsClient.getCallbackHelper().postOnLoadResource(url);
             }
 
-            if (params.isMainFrame && awWebResourceResponse != null &&
-                    awWebResourceResponse.getData() == null) {
+            if (params.isMainFrame && awWebResourceResponse != null
+                    && awWebResourceResponse.getData() == null) {
                 // In this case the intercepted URLRequest job will simulate an empty response
                 // which doesn't trigger the onReceivedError callback. For WebViewClassic
                 // compatibility we synthesize that callback. http://crbug.com/180950
@@ -431,8 +441,9 @@ public class AwContents {
 
         @Override
         public boolean isLayoutParamsHeightWrapContent() {
-            return mContainerView.getLayoutParams() != null &&
-                    mContainerView.getLayoutParams().height == ViewGroup.LayoutParams.WRAP_CONTENT;
+            return mContainerView.getLayoutParams() != null
+                    && (mContainerView.getLayoutParams().height
+                            == ViewGroup.LayoutParams.WRAP_CONTENT);
         }
 
         @Override
@@ -472,7 +483,7 @@ public class AwContents {
 
         @Override
         public void invalidate() {
-            mContainerView.invalidate();
+            postInvalidateOnAnimation();
         }
     }
 
@@ -567,7 +578,13 @@ public class AwContents {
             AwContentsClient contentsClient, AwSettings settings,
             DependencyFactory dependencyFactory) {
         mBrowserContext = browserContext;
+
+        // setWillNotDraw(false) is required since WebView draws it's own contents using it's
+        // container view. If this is ever not the case we should remove this, as it removes
+        // Android's gatherTransparentRegion optimization for the view.
         mContainerView = containerView;
+        mContainerView.setWillNotDraw(false);
+
         mContext = context;
         mInternalAccessAdapter = internalAccessAdapter;
         mNativeGLDelegate = nativeGLDelegate;
@@ -582,7 +599,7 @@ public class AwContents {
         mLayoutSizer.setDelegate(new AwLayoutSizerDelegate());
         mLayoutSizer.setDIPScale(mDIPScale);
         mWebContentsDelegate = new AwWebContentsDelegateAdapter(
-                contentsClient, mContainerView, mContext);
+                this, contentsClient, mContentViewClient, mContext, mContainerView);
         mContentsClientBridge = new AwContentsClientBridge(contentsClient,
                 mBrowserContext.getKeyStore(), AwContentsStatics.getClientCertLookupTable());
         mZoomControls = new AwZoomControls(this);
@@ -654,8 +671,14 @@ public class AwContents {
 
         // In fullscreen mode FullScreenView owns the AwViewMethodsImpl and AwContents
         // a NullAwViewMethods.
-        FullScreenView fullScreenView = new FullScreenView(mContext, mAwViewMethods);
-        mFullScreenTransitionsState.enterFullScreen(fullScreenView);
+        FullScreenView fullScreenView = new FullScreenView(mContext, mAwViewMethods, this);
+        fullScreenView.setFocusable(true);
+        fullScreenView.setFocusableInTouchMode(true);
+        boolean wasInitialContainerViewFocused = mContainerView.isFocused();
+        if (wasInitialContainerViewFocused) {
+            fullScreenView.requestFocus();
+        }
+        mFullScreenTransitionsState.enterFullScreen(fullScreenView, wasInitialContainerViewFocused);
         mAwViewMethods = new NullAwViewMethods(this, mInternalAccessAdapter, mContainerView);
         mContainerView.removeOnLayoutChangeListener(mLayoutChangeListener);
         fullScreenView.addOnLayoutChangeListener(mLayoutChangeListener);
@@ -665,6 +688,13 @@ public class AwContents {
         setContainerView(fullScreenView);
 
         return fullScreenView;
+    }
+
+    /**
+     * Called when the app has requested to exit fullscreen.
+     */
+    void requestExitFullscreen() {
+        mContentViewCore.getWebContents().exitFullscreen();
     }
 
     /**
@@ -699,6 +729,10 @@ public class AwContents {
         setInternalAccessAdapter(mFullScreenTransitionsState.getInitialInternalAccessDelegate());
         setContainerView(initialContainerView);
 
+        // Return focus to the WebView.
+        if (mFullScreenTransitionsState.wasInitialContainerViewFocused()) {
+            mContainerView.requestFocus();
+        }
         mFullScreenTransitionsState.exitFullScreen();
     }
 
@@ -708,7 +742,12 @@ public class AwContents {
     }
 
     private void setContainerView(ViewGroup newContainerView) {
+        // setWillNotDraw(false) is required since WebView draws it's own contents using it's
+        // container view. If this is ever not the case we should remove this, as it removes
+        // Android's gatherTransparentRegion optimization for the view.
         mContainerView = newContainerView;
+        mContainerView.setWillNotDraw(false);
+
         mContentViewCore.setContainerView(mContainerView);
         if (mAwPdfExporter != null) {
             mAwPdfExporter.setContainerView(mContainerView);
@@ -772,9 +811,10 @@ public class AwContents {
 
         long nativeWebContents = nativeGetWebContents(mNativeAwContents);
 
-        mWindowAndroid = mContext instanceof Activity ?
-                new ActivityWindowAndroid((Activity) mContext) :
-                new WindowAndroid(mContext.getApplicationContext());
+        Activity activity = ContentViewCore.activityFromContext(mContext);
+        mWindowAndroid = activity != null
+                ? new ActivityWindowAndroid(activity)
+                : new WindowAndroid(mContext.getApplicationContext());
         mContentViewCore = createAndInitializeContentViewCore(
                 mContainerView, mContext, mInternalAccessAdapter, nativeWebContents,
                 new AwGestureStateListener(), mContentViewClient, mZoomControls, mWindowAndroid);
@@ -870,8 +910,19 @@ public class AwContents {
      * Destroys this object and deletes its native counterpart.
      */
     public void destroy() {
+        if (isDestroyed()) return;
+        // If we are attached, we have to call native detach to clean up
+        // hardware resources.
+        if (mIsAttachedToWindow) {
+            nativeOnDetachedFromWindow(mNativeAwContents);
+        }
         mIsDestroyed = true;
-        destroyNatives();
+        new Handler().post(new Runnable() {
+            @Override
+            public void run() {
+                destroyNatives();
+            }
+        });
     }
 
     /**
@@ -880,11 +931,6 @@ public class AwContents {
     private void destroyNatives() {
         if (mCleanupReference != null) {
             assert mNativeAwContents != 0;
-            // If we are attached, we have to call native detach to clean up
-            // hardware resources.
-            if (mIsAttachedToWindow) {
-                nativeOnDetachedFromWindow(mNativeAwContents);
-            }
 
             mWebContentsObserver.detachFromWebContents();
             mWebContentsObserver = null;
@@ -905,12 +951,7 @@ public class AwContents {
     }
 
     private boolean isDestroyed() {
-        if (mIsDestroyed) {
-            assert mContentViewCore == null;
-            assert mWebContents == null;
-            assert mNavigationController == null;
-            assert mNativeAwContents == 0;
-        } else {
+        if (!mIsDestroyed) {
             assert mContentViewCore != null;
             assert mWebContents != null;
             assert mNavigationController != null;
@@ -1104,8 +1145,8 @@ public class AwContents {
     public void loadUrl(LoadUrlParams params) {
         if (isDestroyed()) return;
 
-        if (params.getLoadUrlType() == LoadUrlParams.LOAD_TYPE_DATA &&
-                !params.isBaseUrlDataScheme()) {
+        if (params.getLoadUrlType() == LoadUrlParams.LOAD_TYPE_DATA
+                && !params.isBaseUrlDataScheme()) {
             // This allows data URLs with a non-data base URL access to file:///android_asset/ and
             // file:///android_res/ URLs. If AwSettings.getAllowFileAccess permits, it will also
             // allow access to file:// URLs (subject to OS level permission checks).
@@ -1113,13 +1154,13 @@ public class AwContents {
         }
 
         // If we are reloading the same url, then set transition type as reload.
-        if (params.getUrl() != null &&
-                params.getUrl().equals(mWebContents.getUrl()) &&
-                params.getTransitionType() == PageTransitionTypes.PAGE_TRANSITION_LINK) {
-            params.setTransitionType(PageTransitionTypes.PAGE_TRANSITION_RELOAD);
+        if (params.getUrl() != null
+                && params.getUrl().equals(mWebContents.getUrl())
+                && params.getTransitionType() == PageTransition.LINK) {
+            params.setTransitionType(PageTransition.RELOAD);
         }
         params.setTransitionType(
-                params.getTransitionType() | PageTransitionTypes.PAGE_TRANSITION_FROM_API);
+                params.getTransitionType() | PageTransition.FROM_API);
 
         // For WebView, always use the user agent override, which is set
         // every time the user agent in AwSettings is modified.
@@ -1156,8 +1197,8 @@ public class AwContents {
             requestVisitedHistoryFromClient();
         }
 
-        if (params.getLoadUrlType() == LoadUrlParams.LOAD_TYPE_DATA &&
-                params.getBaseUrl() != null) {
+        if (params.getLoadUrlType() == LoadUrlParams.LOAD_TYPE_DATA
+                && params.getBaseUrl() != null) {
             // Data loads with a base url will be resolved in Blink, and not cause an onPageStarted
             // event to be sent. Sending the callback directly from here.
             mContentsClient.getCallbackHelper().postOnPageStarted(params.getBaseUrl());
@@ -1281,11 +1322,7 @@ public class AwContents {
      * @see View#onScrollChanged(int,int)
      */
     public void onContainerViewScrollChanged(int l, int t, int oldl, int oldt) {
-        // A side-effect of View.onScrollChanged is that the scroll accessibility event being sent
-        // by the base class implementation. This is completely hidden from the base classes and
-        // cannot be prevented, which is why we need the code below.
-        mScrollAccessibilityHelper.removePostedViewScrolledAccessibilityEventCallback();
-        mScrollOffsetManager.onContainerViewScrollChanged(l, t);
+        mAwViewMethods.onContainerViewScrollChanged(l, t, oldl, oldt);
     }
 
     /**
@@ -1294,17 +1331,7 @@ public class AwContents {
      */
     public void onContainerViewOverScrolled(int scrollX, int scrollY, boolean clampedX,
             boolean clampedY) {
-        int oldX = mContainerView.getScrollX();
-        int oldY = mContainerView.getScrollY();
-
-        mScrollOffsetManager.onContainerViewOverScrolled(scrollX, scrollY, clampedX, clampedY);
-
-        if (mOverScrollGlow != null) {
-            mOverScrollGlow.pullGlow(mContainerView.getScrollX(), mContainerView.getScrollY(),
-                    oldX, oldY,
-                    mScrollOffsetManager.computeMaximumHorizontalScrollOffset(),
-                    mScrollOffsetManager.computeMaximumVerticalScrollOffset());
-        }
+        mAwViewMethods.onContainerViewOverScrolled(scrollX, scrollY, clampedX, clampedY);
     }
 
     /**
@@ -1317,45 +1344,45 @@ public class AwContents {
     }
 
     /**
-     * @see View.computeScroll()
-     */
-    public void computeScroll() {
-        mScrollOffsetManager.computeScrollAndAbsorbGlow(mOverScrollGlow);
-    }
-
-    /**
      * @see View#computeHorizontalScrollRange()
      */
     public int computeHorizontalScrollRange() {
-        return mScrollOffsetManager.computeHorizontalScrollRange();
+        return mAwViewMethods.computeHorizontalScrollRange();
     }
 
     /**
      * @see View#computeHorizontalScrollOffset()
      */
     public int computeHorizontalScrollOffset() {
-        return mScrollOffsetManager.computeHorizontalScrollOffset();
+        return mAwViewMethods.computeHorizontalScrollOffset();
     }
 
     /**
      * @see View#computeVerticalScrollRange()
      */
     public int computeVerticalScrollRange() {
-        return mScrollOffsetManager.computeVerticalScrollRange();
+        return mAwViewMethods.computeVerticalScrollRange();
     }
 
     /**
      * @see View#computeVerticalScrollOffset()
      */
     public int computeVerticalScrollOffset() {
-        return mScrollOffsetManager.computeVerticalScrollOffset();
+        return mAwViewMethods.computeVerticalScrollOffset();
     }
 
     /**
      * @see View#computeVerticalScrollExtent()
      */
     public int computeVerticalScrollExtent() {
-        return mScrollOffsetManager.computeVerticalScrollExtent();
+        return mAwViewMethods.computeVerticalScrollExtent();
+    }
+
+    /**
+     * @see View.computeScroll()
+     */
+    public void computeScroll() {
+        mAwViewMethods.computeScroll();
     }
 
     /**
@@ -2076,8 +2103,8 @@ public class AwContents {
     }
 
     @CalledByNative
-    private boolean requestDrawGL(Canvas canvas, boolean waitForCompletion) {
-        return mNativeGLDelegate.requestDrawGL(canvas, waitForCompletion, mContainerView);
+    private boolean requestDrawGL(boolean waitForCompletion) {
+        return mNativeGLDelegate.requestDrawGL(null, waitForCompletion, mContainerView);
     }
 
     private static final boolean SUPPORTS_ON_ANIMATION =
@@ -2135,7 +2162,7 @@ public class AwContents {
         mContentWidthDip = contentWidthDip;
         mContentHeightDip = contentHeightDip;
         mScrollOffsetManager.setMaxScrollOffset(maxContainerViewScrollOffsetX,
-            maxContainerViewScrollOffsetY);
+                maxContainerViewScrollOffsetY);
         setPageScaleFactorAndLimits(pageScaleFactor, minPageScaleFactor, maxPageScaleFactor);
     }
 
@@ -2154,7 +2181,7 @@ public class AwContents {
         mScrollOffsetManager.overScrollBy(deltaX, deltaY);
 
         if (mOverScrollGlow != null && mOverScrollGlow.isAnimating()) {
-            mContainerView.invalidate();
+            postInvalidateOnAnimation();
         }
     }
 
@@ -2164,9 +2191,9 @@ public class AwContents {
 
     private void setPageScaleFactorAndLimits(
             float pageScaleFactor, float minPageScaleFactor, float maxPageScaleFactor) {
-        if (mPageScaleFactor == pageScaleFactor &&
-                mMinPageScaleFactor == minPageScaleFactor &&
-                mMaxPageScaleFactor == maxPageScaleFactor) {
+        if (mPageScaleFactor == pageScaleFactor
+                && mMinPageScaleFactor == minPageScaleFactor
+                && mMaxPageScaleFactor == maxPageScaleFactor) {
             return;
         }
         mMinPageScaleFactor = minPageScaleFactor;
@@ -2227,12 +2254,36 @@ public class AwContents {
         return null;
     }
 
+    @Override
     public void extractSmartClipData(int x, int y, int width, int height) {
         if (!isDestroyed()) mContentViewCore.extractSmartClipData(x, y, width, height);
     }
 
-    public void setSmartClipDataListener(ContentViewCore.SmartClipDataListener listener) {
-        if (!isDestroyed()) mContentViewCore.setSmartClipDataListener(listener);
+    @Override
+    public void setSmartClipResultHandler(final Handler resultHandler) {
+        if (isDestroyed()) return;
+
+        if (resultHandler == null) {
+            mContentViewCore.setSmartClipDataListener(null);
+            return;
+        }
+        mContentViewCore.setSmartClipDataListener(new ContentViewCore.SmartClipDataListener() {
+            public void onSmartClipDataExtracted(String text, String html, Rect clipRect) {
+                Bundle bundle = new Bundle();
+                bundle.putString("url", mContentViewCore.getWebContents().getVisibleUrl());
+                bundle.putString("title", mContentViewCore.getWebContents().getTitle());
+                bundle.putParcelable("rect", clipRect);
+                bundle.putString("text", text);
+                bundle.putString("html", html);
+                try {
+                    Message msg = Message.obtain(resultHandler, 0);
+                    msg.setData(bundle);
+                    msg.sendToTarget();
+                } catch (Exception e) {
+                    Log.e(TAG, "Error calling handler for smart clip data: ", e);
+                }
+            }
+        });
     }
 
     // --------------------------------------------------------------------------------------------
@@ -2261,20 +2312,22 @@ public class AwContents {
 
             mScrollOffsetManager.syncScrollOffsetFromOnDraw();
             Rect globalVisibleRect = getGlobalVisibleRect();
-            if (!nativeOnDraw(mNativeAwContents, canvas, canvas.isHardwareAccelerated(),
+            boolean did_draw = nativeOnDraw(
+                    mNativeAwContents, canvas, canvas.isHardwareAccelerated(),
                     mContainerView.getScrollX(), mContainerView.getScrollY(),
                     globalVisibleRect.left, globalVisibleRect.top,
-                    globalVisibleRect.right, globalVisibleRect.bottom)) {
-                // Can happen during initialization when compositor is not set
-                // up. Or when clearView
-                // is in effect. Just draw background color instead.
+                    globalVisibleRect.right, globalVisibleRect.bottom);
+            if (did_draw && canvas.isHardwareAccelerated()) {
+                did_draw = mNativeGLDelegate.requestDrawGL(canvas, false, mContainerView);
+            }
+            if (!did_draw) {
                 canvas.drawColor(getEffectiveBackgroundColor());
             }
 
             if (mOverScrollGlow != null && mOverScrollGlow.drawEdgeGlows(canvas,
                     mScrollOffsetManager.computeMaximumHorizontalScrollOffset(),
                     mScrollOffsetManager.computeMaximumVerticalScrollOffset())) {
-                mContainerView.invalidate();
+                postInvalidateOnAnimation();
             }
         }
 
@@ -2299,9 +2352,9 @@ public class AwContents {
 
         private void updateHardwareAcceleratedFeaturesToggle() {
             mSettings.setEnableSupportedHardwareAcceleratedFeatures(
-                    mIsAttachedToWindow && mContainerView.isHardwareAccelerated() &&
-                            (mLayerType == View.LAYER_TYPE_NONE
-                            || mLayerType == View.LAYER_TYPE_HARDWARE));
+                    mIsAttachedToWindow && mContainerView.isHardwareAccelerated()
+                            && (mLayerType == View.LAYER_TYPE_NONE
+                                    || mLayerType == View.LAYER_TYPE_HARDWARE));
         }
 
         @Override
@@ -2361,8 +2414,8 @@ public class AwContents {
             if (mOverScrollGlow != null) {
                 if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
                     mOverScrollGlow.setShouldPull(true);
-                } else if (event.getActionMasked() == MotionEvent.ACTION_UP ||
-                        event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
+                } else if (event.getActionMasked() == MotionEvent.ACTION_UP
+                        || event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
                     mOverScrollGlow.setShouldPull(false);
                     mOverScrollGlow.releaseAll();
                 }
@@ -2468,6 +2521,61 @@ public class AwContents {
             boolean windowVisible = visibility == View.VISIBLE;
             if (mIsWindowVisible == windowVisible) return;
             setWindowVisibilityInternal(windowVisible);
+        }
+
+        @Override
+        public void onContainerViewScrollChanged(int l, int t, int oldl, int oldt) {
+            // A side-effect of View.onScrollChanged is that the scroll accessibility event being
+            // sent by the base class implementation. This is completely hidden from the base
+            // classes and cannot be prevented, which is why we need the code below.
+            mScrollAccessibilityHelper.removePostedViewScrolledAccessibilityEventCallback();
+            mScrollOffsetManager.onContainerViewScrollChanged(l, t);
+        }
+
+        @Override
+        public void onContainerViewOverScrolled(int scrollX, int scrollY, boolean clampedX,
+                boolean clampedY) {
+            int oldX = mContainerView.getScrollX();
+            int oldY = mContainerView.getScrollY();
+
+            mScrollOffsetManager.onContainerViewOverScrolled(scrollX, scrollY, clampedX, clampedY);
+
+            if (mOverScrollGlow != null) {
+                mOverScrollGlow.pullGlow(mContainerView.getScrollX(), mContainerView.getScrollY(),
+                        oldX, oldY,
+                        mScrollOffsetManager.computeMaximumHorizontalScrollOffset(),
+                        mScrollOffsetManager.computeMaximumVerticalScrollOffset());
+            }
+        }
+
+        @Override
+        public int computeHorizontalScrollRange() {
+            return mScrollOffsetManager.computeHorizontalScrollRange();
+        }
+
+        @Override
+        public int computeHorizontalScrollOffset() {
+            return mScrollOffsetManager.computeHorizontalScrollOffset();
+        }
+
+        @Override
+        public int computeVerticalScrollRange() {
+            return mScrollOffsetManager.computeVerticalScrollRange();
+        }
+
+        @Override
+        public int computeVerticalScrollOffset() {
+            return mScrollOffsetManager.computeVerticalScrollOffset();
+        }
+
+        @Override
+        public int computeVerticalScrollExtent() {
+            return mScrollOffsetManager.computeVerticalScrollExtent();
+        }
+
+        @Override
+        public void computeScroll() {
+            mScrollOffsetManager.computeScrollAndAbsorbGlow(mOverScrollGlow);
         }
     }
 

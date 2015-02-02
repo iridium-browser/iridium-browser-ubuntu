@@ -51,12 +51,15 @@ const char kExternalClearKeyCrashKeySystem[] =
 // Supported media types.
 const char kWebMAudioOnly[] = "audio/webm; codecs=\"vorbis\"";
 const char kWebMVideoOnly[] = "video/webm; codecs=\"vp8\"";
-const char kWebMVP9VideoOnly[] = "video/webm; codecs=\"vp9\"";
 const char kWebMAudioVideo[] = "video/webm; codecs=\"vorbis, vp8\"";
+// Some tests are disabled in Chrome OS official builds. http://crbug.com/430711
+#if !(defined(OS_CHROMEOS) && defined(OFFICIAL_BUILD))
+const char kWebMVP9VideoOnly[] = "video/webm; codecs=\"vp9\"";
 #if defined(USE_PROPRIETARY_CODECS)
 const char kMP4AudioOnly[] = "audio/mp4; codecs=\"mp4a.40.2\"";
 const char kMP4VideoOnly[] = "video/mp4; codecs=\"avc1.4D4041\"";
 #endif  // defined(USE_PROPRIETARY_CODECS)
+#endif  // !(defined(OS_CHROMEOS) && defined(OFFICIAL_BUILD))
 
 // Sessions to load.
 const char kNoSessionToLoad[] = "";
@@ -86,7 +89,7 @@ enum EmeVersion {
 static bool IsMSESupported() {
 #if defined(OS_ANDROID)
   if (base::android::BuildInfo::GetInstance()->sdk_int() < 16) {
-    VLOG(0) << "MSE is only supported in Android 4.1 and later.";
+    DVLOG(0) << "MSE is only supported in Android 4.1 and later.";
     return false;
   }
 #endif  // defined(OS_ANDROID)
@@ -118,9 +121,9 @@ class EncryptedMediaTestBase : public MediaBrowserTest {
   void RunEncryptedMediaTestPage(
       const std::string& html_page,
       const std::string& key_system,
-      const media::QueryParams& query_params,
+      base::StringPairs& query_params,
       const std::string& expected_title) {
-    media::QueryParams new_query_params = query_params;
+    base::StringPairs new_query_params = query_params;
     StartLicenseServerIfNeeded(key_system, &new_query_params);
     RunMediaTestPage(html_page, new_query_params, expected_title, true);
   }
@@ -143,10 +146,10 @@ class EncryptedMediaTestBase : public MediaBrowserTest {
                              bool force_invalid_response,
                              const std::string& expected_title) {
     if (src_type == MSE && !IsMSESupported()) {
-      VLOG(0) << "Skipping test - MSE not supported.";
+      DVLOG(0) << "Skipping test - MSE not supported.";
       return;
     }
-    media::QueryParams query_params;
+    base::StringPairs query_params;
     query_params.push_back(std::make_pair("mediaFile", media_file));
     query_params.push_back(std::make_pair("mediaType", media_type));
     query_params.push_back(std::make_pair("keySystem", key_system));
@@ -193,7 +196,7 @@ class EncryptedMediaTestBase : public MediaBrowserTest {
   // Starts a license server if available for the |key_system| and adds a
   // 'licenseServerURL' query parameter to |query_params|.
   void StartLicenseServerIfNeeded(const std::string& key_system,
-                                  media::QueryParams* query_params) {
+                                  base::StringPairs* query_params) {
     scoped_ptr<TestLicenseServerConfig> config = GetServerConfig(key_system);
     if (!config)
       return;
@@ -228,13 +231,13 @@ class EncryptedMediaTestBase : public MediaBrowserTest {
   scoped_ptr<TestLicenseServer> license_server_;
 
   // We want to fail quickly when a test fails because an error is encountered.
-  virtual void AddWaitForTitles(content::TitleWatcher* title_watcher) OVERRIDE {
+  void AddWaitForTitles(content::TitleWatcher* title_watcher) override {
     MediaBrowserTest::AddWaitForTitles(title_watcher);
     title_watcher->AlsoWaitForTitle(base::ASCIIToUTF16(kEmeNotSupportedError));
     title_watcher->AlsoWaitForTitle(base::ASCIIToUTF16(kEmeKeyError));
   }
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
 #if defined(OS_ANDROID)
     command_line->AppendSwitch(
         switches::kDisableGestureRequirementForMediaPlayback);
@@ -326,8 +329,21 @@ class ECKEncryptedMediaTest : public EncryptedMediaTestBase {
   }
 
  protected:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     EncryptedMediaTestBase::SetUpCommandLine(command_line);
+    SetUpCommandLineForKeySystem(kExternalClearKeyKeySystem, command_line);
+  }
+};
+
+// Tests encrypted media playback using ExternalClearKey key system in
+// decrypt-and-decode mode for unprefixed EME.
+// TODO(jrummell): Merge with ECKEncryptedMediaTest once unprefixed is
+// enabled by default.
+class ECKUnprefixedEncryptedMediaTest : public EncryptedMediaTestBase {
+ protected:
+  void SetUpCommandLine(CommandLine* command_line) override {
+    EncryptedMediaTestBase::SetUpCommandLine(command_line);
+    command_line->AppendSwitch(switches::kEnableEncryptedMedia);
     SetUpCommandLineForKeySystem(kExternalClearKeyKeySystem, command_line);
   }
 };
@@ -336,7 +352,7 @@ class ECKEncryptedMediaTest : public EncryptedMediaTestBase {
 // Tests encrypted media playback using Widevine key system.
 class WVEncryptedMediaTest : public EncryptedMediaTestBase {
  protected:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  virtual void SetUpCommandLine(CommandLine* command_line) override {
     EncryptedMediaTestBase::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kEnableEncryptedMedia);
     SetUpCommandLineForKeySystem(kWidevineKeySystem, command_line);
@@ -406,7 +422,7 @@ class EncryptedMediaTest
 
   void TestConfigChange() {
     DCHECK(IsMSESupported());
-    media::QueryParams query_params;
+    base::StringPairs query_params;
     query_params.push_back(std::make_pair("keySystem", CurrentKeySystem()));
     query_params.push_back(std::make_pair("runEncrypted", "1"));
     if (CurrentEmeVersion() == PREFIXED)
@@ -418,7 +434,7 @@ class EncryptedMediaTest
   }
 
  protected:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     EncryptedMediaTestBase::SetUpCommandLine(command_line);
     SetUpCommandLineForKeySystem(CurrentKeySystem(), command_line);
 
@@ -452,8 +468,7 @@ INSTANTIATE_TEST_CASE_P(MSE_ClearKey_Prefixed,
                         Combine(Values(kPrefixedClearKeyKeySystem),
                                 Values(MSE),
                                 Values(PREFIXED)));
-// http://crbug.com/402766
-INSTANTIATE_TEST_CASE_P(DISABLED_MSE_ClearKey,
+INSTANTIATE_TEST_CASE_P(MSE_ClearKey,
                         EncryptedMediaTest,
                         Combine(Values(kClearKeyKeySystem),
                                 Values(MSE),
@@ -514,6 +529,8 @@ INSTANTIATE_TEST_CASE_P(MSE_Widevine,
 #endif  // !defined(WIDEVINE_CDM_IS_COMPONENT)
 #endif  // defined(WIDEVINE_CDM_AVAILABLE)
 
+// These tests time out in Chrome OS official builds. http://crbug.com/430711
+#if !(defined(OS_CHROMEOS) && defined(OFFICIAL_BUILD))
 IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_AudioOnly_WebM) {
   TestSimplePlayback("bear-a_enc-a.webm", kWebMAudioOnly);
 }
@@ -544,11 +561,11 @@ IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, InvalidResponseKeyError) {
 
 IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, ConfigChangeVideo) {
   if (CurrentSourceType() != MSE || !IsMSESupported()) {
-    VLOG(0) << "Skipping test - ConfigChange test requires MSE.";
+    DVLOG(0) << "Skipping test - ConfigChange test requires MSE.";
     return;
   }
   if (!IsPlayBackPossible(CurrentKeySystem())) {
-    VLOG(0) << "Skipping test - ConfigChange test requires video playback.";
+    DVLOG(0) << "Skipping test - ConfigChange test requires video playback.";
     return;
   }
   TestConfigChange();
@@ -561,7 +578,7 @@ IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, FrameSizeChangeVideo) {
     return;
 #endif
   if (!IsPlayBackPossible(CurrentKeySystem())) {
-    VLOG(0) << "Skipping test - FrameSizeChange test requires video playback.";
+    DVLOG(0) << "Skipping test - FrameSizeChange test requires video playback.";
     return;
   }
   TestFrameSizeChange();
@@ -571,7 +588,7 @@ IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, FrameSizeChangeVideo) {
 IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_VideoOnly_MP4) {
   // MP4 without MSE is not support yet, http://crbug.com/170793.
   if (CurrentSourceType() != MSE) {
-    VLOG(0) << "Skipping test; Can only play MP4 encrypted streams by MSE.";
+    DVLOG(0) << "Skipping test; Can only play MP4 encrypted streams by MSE.";
     return;
   }
   TestSimplePlayback("bear-640x360-v_frag-cenc.mp4", kMP4VideoOnly);
@@ -580,12 +597,13 @@ IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_VideoOnly_MP4) {
 IN_PROC_BROWSER_TEST_P(EncryptedMediaTest, Playback_AudioOnly_MP4) {
   // MP4 without MSE is not support yet, http://crbug.com/170793.
   if (CurrentSourceType() != MSE) {
-    VLOG(0) << "Skipping test; Can only play MP4 encrypted streams by MSE.";
+    DVLOG(0) << "Skipping test; Can only play MP4 encrypted streams by MSE.";
     return;
   }
   TestSimplePlayback("bear-640x360-a_frag-cenc.mp4", kMP4AudioOnly);
 }
 #endif  // defined(USE_PROPRIETARY_CODECS)
+#endif  // !(defined(OS_CHROMEOS) && defined(OFFICIAL_BUILD))
 
 #if defined(WIDEVINE_CDM_AVAILABLE)
 // The parent key system cannot be used in generateKeyRequest.
@@ -662,6 +680,31 @@ IN_PROC_BROWSER_TEST_F(ECKEncryptedMediaTest, LoadUnknownSession) {
                         kExternalClearKeyKeySystem,
                         SRC,
                         PREFIXED,
+                        kUnknownSession,
+                        false,
+                        kEmeKeyError);
+}
+
+IN_PROC_BROWSER_TEST_F(ECKUnprefixedEncryptedMediaTest, LoadLoadableSession) {
+  RunEncryptedMediaTest(kDefaultEmePlayer,
+                        "bear-320x240-v_enc-v.webm",
+                        kWebMVideoOnly,
+                        kExternalClearKeyKeySystem,
+                        SRC,
+                        UNPREFIXED,
+                        kLoadableSession,
+                        false,
+                        kEnded);
+}
+
+IN_PROC_BROWSER_TEST_F(ECKUnprefixedEncryptedMediaTest, LoadUnknownSession) {
+  // TODO(xhwang): Add a specific error for this failure, e.g. kSessionNotFound.
+  RunEncryptedMediaTest(kDefaultEmePlayer,
+                        "bear-320x240-v_enc-v.webm",
+                        kWebMVideoOnly,
+                        kExternalClearKeyKeySystem,
+                        SRC,
+                        UNPREFIXED,
                         kUnknownSession,
                         false,
                         kEmeKeyError);

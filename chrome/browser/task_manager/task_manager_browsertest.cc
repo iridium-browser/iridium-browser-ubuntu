@@ -64,7 +64,7 @@ const base::FilePath::CharType* kTitle1File = FILE_PATH_LITERAL("title1.html");
 class TaskManagerBrowserTest : public ExtensionBrowserTest {
  public:
   TaskManagerBrowserTest() {}
-  virtual ~TaskManagerBrowserTest() {}
+  ~TaskManagerBrowserTest() override {}
 
   TaskManagerModel* model() const {
     return TaskManager::GetInstance()->model();
@@ -101,7 +101,7 @@ class TaskManagerBrowserTest : public ExtensionBrowserTest {
   }
 
  protected:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     ExtensionBrowserTest::SetUpCommandLine(command_line);
 
     // Do not launch device discovery process.

@@ -32,37 +32,34 @@ class DemuxerStreamProvider;
 class MojoRendererImpl : public Renderer, public mojo::MediaRendererClient {
  public:
   // |task_runner| is the TaskRunner on which all methods are invoked.
-  // |demuxer_stream_provider| provides encoded streams for decoding and
-  //     rendering.
   // |audio_renderer_provider| is a ServiceProvider from a connected
   //     Application that is hosting a mojo::MediaRenderer.
   MojoRendererImpl(
       const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
-      DemuxerStreamProvider* demuxer_stream_provider,
       mojo::ServiceProvider* audio_renderer_provider);
-  virtual ~MojoRendererImpl();
+  ~MojoRendererImpl() override;
 
   // Renderer implementation.
-  virtual void Initialize(const base::Closure& init_cb,
-                          const StatisticsCB& statistics_cb,
-                          const base::Closure& ended_cb,
-                          const PipelineStatusCB& error_cb,
-                          const BufferingStateCB& buffering_state_cb) OVERRIDE;
-  virtual void Flush(const base::Closure& flush_cb) OVERRIDE;
-  virtual void StartPlayingFrom(base::TimeDelta time) OVERRIDE;
-  virtual void SetPlaybackRate(float playback_rate) OVERRIDE;
-  virtual void SetVolume(float volume) OVERRIDE;
-  virtual base::TimeDelta GetMediaTime() OVERRIDE;
-  virtual bool HasAudio() OVERRIDE;
-  virtual bool HasVideo() OVERRIDE;
-  virtual void SetCdm(MediaKeys* cdm) OVERRIDE;
+  void Initialize(DemuxerStreamProvider* demuxer_stream_provider,
+                  const base::Closure& init_cb,
+                  const StatisticsCB& statistics_cb,
+                  const base::Closure& ended_cb,
+                  const PipelineStatusCB& error_cb,
+                  const BufferingStateCB& buffering_state_cb) override;
+  void Flush(const base::Closure& flush_cb) override;
+  void StartPlayingFrom(base::TimeDelta time) override;
+  void SetPlaybackRate(float playback_rate) override;
+  void SetVolume(float volume) override;
+  base::TimeDelta GetMediaTime() override;
+  bool HasAudio() override;
+  bool HasVideo() override;
+  void SetCdm(MediaKeys* cdm) override;
 
   // mojo::MediaRendererClient implementation.
-  virtual void OnTimeUpdate(int64_t time_usec,
-                            int64_t max_time_usec) MOJO_OVERRIDE;
-  virtual void OnBufferingStateChange(mojo::BufferingState state) MOJO_OVERRIDE;
-  virtual void OnEnded() MOJO_OVERRIDE;
-  virtual void OnError() MOJO_OVERRIDE;
+  void OnTimeUpdate(int64_t time_usec, int64_t max_time_usec) override;
+  void OnBufferingStateChange(mojo::BufferingState state) override;
+  void OnEnded() override;
+  void OnError() override;
 
  private:
   // Called when |remote_audio_renderer_| has finished initializing.
@@ -81,7 +78,15 @@ class MojoRendererImpl : public Renderer, public mojo::MediaRendererClient {
   PipelineStatusCB error_cb_;
   BufferingStateCB buffering_state_cb_;
 
+  // Lock used to serialize access for the following data members.
+  mutable base::Lock lock_;
+
+  base::TimeDelta time_;
+  // TODO(xhwang): It seems we don't need |max_time_| now. Drop it!
+  base::TimeDelta max_time_;
+
   base::WeakPtrFactory<MojoRendererImpl> weak_factory_;
+
   DISALLOW_COPY_AND_ASSIGN(MojoRendererImpl);
 };
 

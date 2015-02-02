@@ -10,6 +10,7 @@
 #include "content/browser/service_worker/service_worker_metrics.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
+#include "net/http/http_network_session.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_util.h"
@@ -69,6 +70,7 @@ void ServiceWorkerWriteToCacheJob::Kill() {
   if (did_notify_started_ && !did_notify_finished_) {
     version_->script_cache_map()->NotifyFinishedCaching(
         url_,
+        -1,
         net::URLRequestStatus(net::URLRequestStatus::FAILED, net::ERR_ABORTED));
     did_notify_finished_ = true;
   }
@@ -129,7 +131,7 @@ bool ServiceWorkerWriteToCacheJob::ReadRawData(
   // No more data to process, the job is complete.
   io_buffer_ = NULL;
   version_->script_cache_map()->NotifyFinishedCaching(
-      url_, net::URLRequestStatus());
+      url_, writer_->amount_written(), status);
   did_notify_finished_ = true;
   return status.is_success();
 }
@@ -306,7 +308,7 @@ void ServiceWorkerWriteToCacheJob::OnCertificateRequested(
       net::URLRequestStatus::FAILED, net::ERR_FAILED));
 }
 
-void ServiceWorkerWriteToCacheJob:: OnSSLCertificateError(
+void ServiceWorkerWriteToCacheJob::OnSSLCertificateError(
     net::URLRequest* request,
     const net::SSLInfo& ssl_info,
     bool fatal) {
@@ -316,7 +318,7 @@ void ServiceWorkerWriteToCacheJob:: OnSSLCertificateError(
   // TODO(michaeln): Pass this thru to our jobs client,
   // see NotifySSLCertificateError.
   AsyncNotifyDoneHelper(net::URLRequestStatus(
-      net::URLRequestStatus::FAILED, net::ERR_FAILED));
+      net::URLRequestStatus::FAILED, net::ERR_INSECURE_RESPONSE));
 }
 
 void ServiceWorkerWriteToCacheJob::OnBeforeNetworkStart(
@@ -342,6 +344,17 @@ void ServiceWorkerWriteToCacheJob::OnResponseStarted(
     // response to our consumer, just don't cache it?
     return;
   }
+  // OnSSLCertificateError is not called when the HTTPS connection is reused.
+  // So we check cert_status here.
+  if (net::IsCertStatusError(request->ssl_info().cert_status)) {
+    const net::HttpNetworkSession::Params* session_params =
+        request->context()->GetNetworkSessionParams();
+    if (!session_params || !session_params->ignore_certificate_errors) {
+      AsyncNotifyDoneHelper(net::URLRequestStatus(net::URLRequestStatus::FAILED,
+                                                  net::ERR_INSECURE_RESPONSE));
+      return;
+    }
+  }
   // To prevent most user-uploaded content from being used as a serviceworker.
   if (version_->script_url() == url_) {
     std::string mime_type;
@@ -361,7 +374,8 @@ void ServiceWorkerWriteToCacheJob::OnReadCompleted(
     net::URLRequest* request,
     int bytes_read) {
   DCHECK_EQ(net_request_, request);
-  if (!request->status().is_success()) {
+  if (bytes_read < 0) {
+    DCHECK(!request->status().is_success());
     AsyncNotifyDoneHelper(request->status());
     return;
   }
@@ -369,19 +383,25 @@ void ServiceWorkerWriteToCacheJob::OnReadCompleted(
     WriteDataToCache(bytes_read);
     return;
   }
-  TRACE_EVENT_ASYNC_STEP_INTO0("ServiceWorker",
-                               "ServiceWorkerWriteToCacheJob::ExecutingJob",
-                               this,
-                               "WriteHeadersToCache");
-  // We're done with all.
-  AsyncNotifyDoneHelper(request->status());
-  return;
+  // No more data to process, the job is complete.
+  DCHECK(request->status().is_success());
+  io_buffer_ = NULL;
+  version_->script_cache_map()->NotifyFinishedCaching(
+      url_, writer_->amount_written(), net::URLRequestStatus());
+  did_notify_finished_ = true;
+  SetStatus(net::URLRequestStatus());  // Clear the IO_PENDING status
+  NotifyReadComplete(0);
 }
 
 void ServiceWorkerWriteToCacheJob::AsyncNotifyDoneHelper(
     const net::URLRequestStatus& status) {
   DCHECK(!status.is_io_pending());
-  version_->script_cache_map()->NotifyFinishedCaching(url_, status);
+  DCHECK(!did_notify_finished_);
+  int size = -1;
+  if (writer_.get()) {
+    size = writer_->amount_written();
+  }
+  version_->script_cache_map()->NotifyFinishedCaching(url_, size, status);
   did_notify_finished_ = true;
   SetStatus(status);
   NotifyDone(status);

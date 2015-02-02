@@ -45,7 +45,7 @@ namespace {
 double now(ExecutionContext* context)
 {
     LocalDOMWindow* window = context ? context->executingWindow() : 0;
-    Performance* performance = window ? &window->performance() : 0;
+    Performance* performance = window ? window->performance() : 0;
     return performance ? performance->now() : 0.0;
 }
 
@@ -173,20 +173,28 @@ private:
 
 } // namespace
 
-MIDIOutput* MIDIOutput::create(MIDIAccess* access, unsigned portIndex, const String& id, const String& manufacturer, const String& name, const String& version)
+MIDIOutput* MIDIOutput::create(MIDIAccess* access, unsigned portIndex, const String& id, const String& manufacturer, const String& name, const String& version, bool isActive)
 {
     ASSERT(access);
-    return adoptRefCountedGarbageCollectedWillBeNoop(new MIDIOutput(access, portIndex, id, manufacturer, name, version));
+    return new MIDIOutput(access, portIndex, id, manufacturer, name, version, isActive);
 }
 
-MIDIOutput::MIDIOutput(MIDIAccess* access, unsigned portIndex, const String& id, const String& manufacturer, const String& name, const String& version)
-    : MIDIPort(access, id, manufacturer, name, MIDIPortTypeOutput, version)
+MIDIOutput::MIDIOutput(MIDIAccess* access, unsigned portIndex, const String& id, const String& manufacturer, const String& name, const String& version, bool isActive)
+    : MIDIPort(access, id, manufacturer, name, MIDIPortTypeOutput, version, isActive)
     , m_portIndex(portIndex)
 {
 }
 
 MIDIOutput::~MIDIOutput()
 {
+}
+
+void MIDIOutput::send(DOMUint8Array* array, double timestamp, ExceptionState& exceptionState)
+{
+    if (!array)
+        return;
+
+    send(array->view(), timestamp, exceptionState);
 }
 
 void MIDIOutput::send(Uint8Array* array, double timestamp, ExceptionState& exceptionState)
@@ -220,7 +228,7 @@ void MIDIOutput::send(Vector<unsigned> unsignedData, double timestamp, Exception
     send(array.get(), timestamp, exceptionState);
 }
 
-void MIDIOutput::send(Uint8Array* data, ExceptionState& exceptionState)
+void MIDIOutput::send(DOMUint8Array* data, ExceptionState& exceptionState)
 {
     send(data, 0.0, exceptionState);
 }

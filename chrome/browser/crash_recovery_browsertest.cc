@@ -60,7 +60,7 @@ class CacheMaxAgeHandler {
                                              request_count_));
     response->set_content_type("text/html");
     response->AddCustomHeader("Cache-Control", "max-age=99999");
-    return response.PassAs<net::test_server::HttpResponse>();
+    return response.Pass();
   }
  private:
   std::string path_;
@@ -76,7 +76,7 @@ class CrashRecoveryBrowserTest : public InProcessBrowserTest {
   }
 
  private:
-  virtual void SetUpCommandLine(base::CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kDisableBreakpad);
   }
 };

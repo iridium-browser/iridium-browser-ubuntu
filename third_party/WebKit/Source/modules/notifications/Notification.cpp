@@ -34,6 +34,7 @@
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "core/dom/Document.h"
 #include "core/events/Event.h"
+#include "core/frame/UseCounter.h"
 #include "core/page/WindowFocusAllowedIndicator.h"
 #include "modules/notifications/NotificationClient.h"
 #include "modules/notifications/NotificationController.h"
@@ -45,7 +46,7 @@ namespace blink {
 Notification* Notification::create(ExecutionContext* context, const String& title, const NotificationOptions& options)
 {
     NotificationClient& client = NotificationController::clientFrom(context);
-    Notification* notification = adoptRefCountedGarbageCollectedWillBeNoop(new Notification(title, context, &client));
+    Notification* notification = new Notification(title, context, &client);
 
     notification->setBody(options.body());
     notification->setTag(options.tag());
@@ -56,6 +57,11 @@ Notification* Notification::create(ExecutionContext* context, const String& titl
         if (!iconUrl.isEmpty() && iconUrl.isValid())
             notification->setIconUrl(iconUrl);
     }
+
+    String insecureOriginMessage;
+    UseCounter::Feature feature = context->securityOrigin()->canAccessFeatureRequiringSecureOrigin(insecureOriginMessage)
+        ? UseCounter::NotificationSecureOrigin : UseCounter::NotificationInsecureOrigin;
+    UseCounter::count(context, feature);
 
     notification->suspendIfNeeded();
     return notification;

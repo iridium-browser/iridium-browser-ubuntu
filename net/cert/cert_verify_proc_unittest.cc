@@ -58,18 +58,18 @@ class WellKnownCaCertVerifyProc : public CertVerifyProc {
       : is_well_known_(is_well_known) {}
 
   // CertVerifyProc implementation:
-  virtual bool SupportsAdditionalTrustAnchors() const OVERRIDE { return false; }
+  bool SupportsAdditionalTrustAnchors() const override { return false; }
 
  protected:
-  virtual ~WellKnownCaCertVerifyProc() {}
+  ~WellKnownCaCertVerifyProc() override {}
 
  private:
-  virtual int VerifyInternal(X509Certificate* cert,
-                             const std::string& hostname,
-                             int flags,
-                             CRLSet* crl_set,
-                             const CertificateList& additional_trust_anchors,
-                             CertVerifyResult* verify_result) OVERRIDE;
+  int VerifyInternal(X509Certificate* cert,
+                     const std::string& hostname,
+                     int flags,
+                     CRLSet* crl_set,
+                     const CertificateList& additional_trust_anchors,
+                     CertVerifyResult* verify_result) override;
 
   const bool is_well_known_;
 
@@ -114,7 +114,7 @@ class CertVerifyProcTest : public testing::Test {
   CertVerifyProcTest()
       : verify_proc_(CertVerifyProc::CreateDefault()) {
   }
-  virtual ~CertVerifyProcTest() {}
+  ~CertVerifyProcTest() override {}
 
  protected:
   bool SupportsAdditionalTrustAnchors() {

@@ -84,11 +84,11 @@ class WifiDataProviderCommonWithMock : public WifiDataProviderCommon {
         new_polling_policy_(new MockPollingPolicy) {}
 
   // WifiDataProviderCommon
-  virtual WlanApiInterface* NewWlanApi() OVERRIDE {
+  WlanApiInterface* NewWlanApi() override {
     CHECK(new_wlan_api_ != NULL);
     return new_wlan_api_.release();
   }
-  virtual WifiPollingPolicy* NewPollingPolicy() OVERRIDE {
+  WifiPollingPolicy* NewPollingPolicy() override {
     CHECK(new_polling_policy_ != NULL);
     return new_polling_policy_.release();
   }
@@ -97,7 +97,7 @@ class WifiDataProviderCommonWithMock : public WifiDataProviderCommon {
   scoped_ptr<MockPollingPolicy> new_polling_policy_;
 
  private:
-  virtual ~WifiDataProviderCommonWithMock() {}
+  ~WifiDataProviderCommonWithMock() override {}
 
   DISALLOW_COPY_AND_ASSIGN(WifiDataProviderCommonWithMock);
 };
@@ -113,13 +113,13 @@ class GeolocationWifiDataProviderCommonTest : public testing::Test {
       : loop_quitter_(&main_message_loop_) {
   }
 
-  virtual void SetUp() {
+  void SetUp() override {
     provider_ = new WifiDataProviderCommonWithMock;
     wlan_api_ = provider_->new_wlan_api_.get();
     polling_policy_ = provider_->new_polling_policy_.get();
     provider_->AddCallback(&loop_quitter_.callback_);
   }
-  virtual void TearDown() {
+  void TearDown() override {
     provider_->RemoveCallback(&loop_quitter_.callback_);
     provider_->StopDataProvider();
     provider_ = NULL;

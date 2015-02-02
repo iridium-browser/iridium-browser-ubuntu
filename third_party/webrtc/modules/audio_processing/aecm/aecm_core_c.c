@@ -483,17 +483,11 @@ int WebRtcAecm_ProcessBlock(AecmCore_t * aecm,
       if (zeros32 > tmp16no1)
       {
         echoEst32Gained = WEBRTC_SPL_UMUL_32_16((uint32_t)aecm->echoFilt[i],
-                                                (uint16_t)WEBRTC_SPL_RSHIFT_W16(
-                                                  supGain,
-                                                  tmp16no1)
-                                                );
+                                                supGain >> tmp16no1);
       } else
       {
         // Result in Q-(RESOLUTION_CHANNEL+RESOLUTION_SUPGAIN-16)
-        echoEst32Gained = WEBRTC_SPL_UMUL_32_16((uint32_t)WEBRTC_SPL_RSHIFT_W32(
-                                                  aecm->echoFilt[i],
-                                                  tmp16no1),
-                                                (uint16_t)supGain);
+        echoEst32Gained = (aecm->echoFilt[i] >> tmp16no1) * supGain;
       }
     }
 
@@ -512,7 +506,7 @@ int WebRtcAecm_ProcessBlock(AecmCore_t * aecm,
       tmp16no2 = ptrDfaClean[i];
     }
     tmp32no1 = (int32_t)(tmp16no2 - tmp16no1);
-    tmp16no2 = (int16_t)WEBRTC_SPL_RSHIFT_W32(tmp32no1, 4);
+    tmp16no2 = (int16_t)(tmp32no1 >> 4);
     tmp16no2 += tmp16no1;
     zeros16 = WebRtcSpl_NormW16(tmp16no2);
     if ((tmp16no2) & (-qDomainDiff > zeros16)) {
@@ -687,7 +681,7 @@ static void ComfortNoise(AecmCore_t* aecm,
   {
     // Shift to the noise domain.
     tmp32 = (int32_t)dfa[i];
-    outLShift32 = WEBRTC_SPL_LSHIFT_W32(tmp32, shiftFromNearToNoise);
+    outLShift32 = tmp32 << shiftFromNearToNoise;
 
     if (outLShift32 < aecm->noiseEst[i])
     {
@@ -746,11 +740,11 @@ static void ComfortNoise(AecmCore_t* aecm,
 
   for (i = 0; i < PART_LEN1; i++)
   {
-    tmp32 = WEBRTC_SPL_RSHIFT_W32(aecm->noiseEst[i], shiftFromNearToNoise);
+    tmp32 = aecm->noiseEst[i] >> shiftFromNearToNoise;
     if (tmp32 > 32767)
     {
       tmp32 = 32767;
-      aecm->noiseEst[i] = WEBRTC_SPL_LSHIFT_W32(tmp32, shiftFromNearToNoise);
+      aecm->noiseEst[i] = tmp32 << shiftFromNearToNoise;
     }
     noiseRShift16[i] = (int16_t)tmp32;
 

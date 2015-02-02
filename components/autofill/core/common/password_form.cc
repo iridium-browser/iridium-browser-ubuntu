@@ -5,6 +5,7 @@
 #include <ostream>
 
 #include "base/strings/string16.h"
+#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/common/password_form.h"
 
@@ -18,7 +19,6 @@ PasswordForm::PasswordForm()
       blacklisted_by_user(false),
       type(TYPE_MANUAL),
       times_used(0),
-      use_additional_authentication(false),
       is_zero_click(false) {
 }
 
@@ -49,7 +49,6 @@ bool PasswordForm::operator==(const PasswordForm& form) const {
       blacklisted_by_user == form.blacklisted_by_user &&
       type == form.type &&
       times_used == form.times_used &&
-      use_additional_authentication == form.use_additional_authentication &&
       form_data == form.form_data &&
       display_name == form.display_name &&
       avatar_url == form.avatar_url &&
@@ -75,6 +74,8 @@ std::ostream& operator<<(std::ostream& os, const PasswordForm& form) {
             << base::UTF16ToUTF8(form.new_password_element)
             << " new_password_value: "
             << base::UTF16ToUTF8(form.new_password_value)
+            << " other_possible_usernames: "
+            << JoinString(form.other_possible_usernames, '|')
             << " autocomplete_set:" << form.password_autocomplete_set
             << " blacklisted: " << form.blacklisted_by_user
             << " preferred: " << form.preferred
@@ -83,8 +84,6 @@ std::ostream& operator<<(std::ostream& os, const PasswordForm& form) {
             << " date_synced: " << form.date_synced.ToDoubleT()
             << " type: " << form.type
             << " times_used: " << form.times_used
-            << " use additional authentication: "
-            << form.use_additional_authentication
             << " form_data: " << form.form_data
             << " display_name: " << base::UTF16ToUTF8(form.display_name)
             << " avatar_url: " << form.avatar_url

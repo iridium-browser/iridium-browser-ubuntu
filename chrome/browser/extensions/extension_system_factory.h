@@ -26,13 +26,13 @@ class ExtensionSystemSharedFactory : public BrowserContextKeyedServiceFactory {
   friend struct DefaultSingletonTraits<ExtensionSystemSharedFactory>;
 
   ExtensionSystemSharedFactory();
-  virtual ~ExtensionSystemSharedFactory();
+  ~ExtensionSystemSharedFactory() override;
 
   // BrowserContextKeyedServiceFactory implementation:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* context) const OVERRIDE;
-  virtual content::BrowserContext* GetBrowserContextToUse(
-      content::BrowserContext* context) const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* context) const override;
+  content::BrowserContext* GetBrowserContextToUse(
+      content::BrowserContext* context) const override;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionSystemSharedFactory);
 };
@@ -42,8 +42,8 @@ class ExtensionSystemSharedFactory : public BrowserContextKeyedServiceFactory {
 class ExtensionSystemFactory : public ExtensionSystemProvider {
  public:
   // ExtensionSystem provider implementation:
-  virtual ExtensionSystem* GetForBrowserContext(
-      content::BrowserContext* context) OVERRIDE;
+  ExtensionSystem* GetForBrowserContext(
+      content::BrowserContext* context) override;
 
   static ExtensionSystemFactory* GetInstance();
 
@@ -51,14 +51,14 @@ class ExtensionSystemFactory : public ExtensionSystemProvider {
   friend struct DefaultSingletonTraits<ExtensionSystemFactory>;
 
   ExtensionSystemFactory();
-  virtual ~ExtensionSystemFactory();
+  ~ExtensionSystemFactory() override;
 
   // BrowserContextKeyedServiceFactory implementation:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* context) const OVERRIDE;
-  virtual content::BrowserContext* GetBrowserContextToUse(
-      content::BrowserContext* context) const OVERRIDE;
-  virtual bool ServiceIsCreatedWithBrowserContext() const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* context) const override;
+  content::BrowserContext* GetBrowserContextToUse(
+      content::BrowserContext* context) const override;
+  bool ServiceIsCreatedWithBrowserContext() const override;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionSystemFactory);
 };

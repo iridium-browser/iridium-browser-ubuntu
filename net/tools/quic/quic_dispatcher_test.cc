@@ -102,12 +102,12 @@ class QuicDispatcherTest : public ::testing::Test {
       : crypto_config_(QuicCryptoServerConfig::TESTING,
                        QuicRandom::GetInstance()),
         dispatcher_(config_, crypto_config_, &eps_),
-        session1_(NULL),
-        session2_(NULL) {
+        session1_(nullptr),
+        session2_(nullptr) {
     dispatcher_.Initialize(1);
   }
 
-  virtual ~QuicDispatcherTest() {}
+  ~QuicDispatcherTest() override {}
 
   MockConnection* connection1() {
     return reinterpret_cast<MockConnection*>(session1_->connection());
@@ -264,14 +264,13 @@ class BlockingWriter : public QuicPacketWriterWrapper {
  public:
   BlockingWriter() : write_blocked_(false) {}
 
-  virtual bool IsWriteBlocked() const OVERRIDE { return write_blocked_; }
-  virtual void SetWritable() OVERRIDE { write_blocked_ = false; }
+  bool IsWriteBlocked() const override { return write_blocked_; }
+  void SetWritable() override { write_blocked_ = false; }
 
-  virtual WriteResult WritePacket(
-      const char* buffer,
-      size_t buf_len,
-      const IPAddressNumber& self_client_address,
-      const IPEndPoint& peer_client_address) OVERRIDE {
+  WriteResult WritePacket(const char* buffer,
+                          size_t buf_len,
+                          const IPAddressNumber& self_client_address,
+                          const IPEndPoint& peer_client_address) override {
     // It would be quite possible to actually implement this method here with
     // the fake blocked status, but it would be significantly more work in
     // Chromium, and since it's not called anyway, don't bother.
@@ -284,7 +283,7 @@ class BlockingWriter : public QuicPacketWriterWrapper {
 
 class QuicDispatcherWriteBlockedListTest : public QuicDispatcherTest {
  public:
-  virtual void SetUp() {
+  void SetUp() override {
     writer_ = new BlockingWriter;
     QuicDispatcherPeer::SetPacketWriterFactory(&dispatcher_,
                                                new TestWriterFactory());
@@ -305,7 +304,7 @@ class QuicDispatcherWriteBlockedListTest : public QuicDispatcherTest {
     blocked_list_ = QuicDispatcherPeer::GetWriteBlockedList(&dispatcher_);
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     EXPECT_CALL(*connection1(), SendConnectionClose(QUIC_PEER_GOING_AWAY));
     EXPECT_CALL(*connection2(), SendConnectionClose(QUIC_PEER_GOING_AWAY));
     dispatcher_.Shutdown();

@@ -10,6 +10,9 @@
 #include <string>
 
 #include "content/common/content_export.h"
+#include "content/common/service_worker/service_worker_types.h"
+#include "content/public/common/request_context_frame_type.h"
+#include "content/public/common/request_context_type.h"
 #include "content/public/common/resource_type.h"
 #include "net/base/request_priority.h"
 #include "third_party/WebKit/public/platform/WebReferrerPolicy.h"
@@ -55,6 +58,8 @@ struct CONTENT_EXPORT RequestInfo {
   // Indicates if the current request is the main frame load, a sub-frame
   // load, or a sub objects load.
   ResourceType request_type;
+  RequestContextType fetch_request_context_type;
+  RequestContextFrameType fetch_frame_type;
 
   // Indicates the priority of this request, as determined by WebKit.
   net::RequestPriority priority;
@@ -78,9 +83,18 @@ struct CONTENT_EXPORT RequestInfo {
   // True if the request should not be handled by the ServiceWorker.
   bool skip_service_worker;
 
+  // The request mode passed to the ServiceWorker.
+  FetchRequestMode fetch_request_mode;
+
+  // The credentials mode passed to the ServiceWorker.
+  FetchCredentialsMode fetch_credentials_mode;
+
   // TODO(mmenke): Investigate if enable_load_timing is safe to remove.
   // True if load timing data should be collected for the request.
   bool enable_load_timing;
+
+  // True if upload progress should be available.
+  bool enable_upload_progress;
 
   // Extra data associated with this request.  We do not own this pointer.
   blink::WebURLRequest::ExtraData* extra_data;

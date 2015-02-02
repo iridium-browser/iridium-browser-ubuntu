@@ -28,7 +28,7 @@
     <!--end-logo-->
 
     <h1>WebGL Specification</h1>
-    <h2 class="no-toc">Editor's Draft 15 July 2014</h2>
+    <h2 class="no-toc">Editor's Draft 27 October 2014</h2>
     <dl>
         <dt>This version:
             <dd>
@@ -366,7 +366,7 @@
     
 <!-- ======================================================================================================= -->
 
-    <h3>The WebGL Viewport</h3>
+    <h3><a name="WEBGL_VIEWPORT">The WebGL Viewport</a></h3>
 
     <p>
         OpenGL manages a rectangular viewport as part of its state which defines the placement of
@@ -2069,14 +2069,20 @@ WebGLRenderingContext implements WebGLRenderingContextBase;
     <h4>Viewing and clipping</h4>
 
     <p>
-        The viewport specifies the affine transformation of x and y from normalized device 
-        coordinates to window coordinates. The size of the drawing buffer is determined by 
-        the HTMLCanvasElement. The scissor box defines a rectangle which constrains drawing.
-        When the scissor test is enabled only pixels that lie within  the scissor box can 
-        be modified by drawing commands. When enabled drawing can only occur inside the 
-        intersection of the viewport, canvas area and the scissor box. When the scissor test
-        is not enabled drawing can only occur inside the intersection of the viewport and 
-        canvas area.
+        Drawing commands can only modify pixels inside the currently bound framebuffer. In
+        addition, the viewport and the scissor box affect drawing.
+    </p>
+
+    <p>
+        The viewport specifies the affine transformation of x and y from normalized device
+        coordinates to window coordinates. The size of the viewport is initially determined
+        as specified in section <a href="#WEBGL_VIEWPORT">The WebGL Viewport</a>.
+        The scissor box defines a rectangle which constrains drawing. When the scissor test is
+        enabled only pixels that lie within the scissor box can be modified by drawing commands
+        including <code>clear</code>, and primitives can only be drawn inside the intersection
+        of the viewport, the currently bound framebuffer, and the scissor box. When the scissor
+        test is not enabled primitives can only be drawn inside the intersection of the viewport
+        and the currently bound framebuffer.
     </p>
 
     <dl class="methods">
@@ -2582,7 +2588,7 @@ WebGLRenderingContext implements WebGLRenderingContextBase;
             Create a WebGLProgram object and initialize it with a program object name as if by
             calling glCreateProgram.
             
-        <dt class="idl-code">WebGLShader? createShader(type)
+        <dt class="idl-code">WebGLShader? createShader(GLenum type)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.10.1">OpenGL ES 2.0 &sect;2.10.1</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glCreateShader.xml">man page</a>)</span>
         <dd>
             Create a WebGLShader object and initialize it with a shader object name as if by
@@ -3683,6 +3689,14 @@ extensions.
 <p>
     In the WebGL API, if the <code>width</code> parameter passed to <code>lineWidth</code> is set
     to NaN, an <code>INVALID_VALUE</code> error is generated and the line width is not changed.
+</p>
+
+<h3><a name="ATTRIBUTE_ALIASING">Attribute Aliasing</a></h3>
+<p>
+    It is possible for an application to bind more than one attribute name to the
+    same location. This is referred to as aliasing. When more than one attributes that
+    are aliased to the same location are active in the executable program,
+    <code>linkProgram</code> should fail.
 </p>
 
 <!-- ======================================================================================================= -->

@@ -76,25 +76,24 @@ class DevToolsClientImpl : public DevToolsClient {
                      const FrontendCloserFunc& frontend_closer_func,
                      const ParserFunc& parser_func);
 
-  virtual ~DevToolsClientImpl();
+  ~DevToolsClientImpl() override;
 
   void SetParserFuncForTesting(const ParserFunc& parser_func);
 
   // Overridden from DevToolsClient:
-  virtual const std::string& GetId() OVERRIDE;
-  virtual bool WasCrashed() OVERRIDE;
-  virtual Status ConnectIfNecessary() OVERRIDE;
-  virtual Status SendCommand(const std::string& method,
-                             const base::DictionaryValue& params) OVERRIDE;
-  virtual Status SendCommandAndGetResult(
+  const std::string& GetId() override;
+  bool WasCrashed() override;
+  Status ConnectIfNecessary() override;
+  Status SendCommand(const std::string& method,
+                     const base::DictionaryValue& params) override;
+  Status SendCommandAndGetResult(
       const std::string& method,
       const base::DictionaryValue& params,
-      scoped_ptr<base::DictionaryValue>* result) OVERRIDE;
-  virtual void AddListener(DevToolsEventListener* listener) OVERRIDE;
-  virtual Status HandleEventsUntil(
-      const ConditionalFunc& conditional_func,
-      const base::TimeDelta& timeout) OVERRIDE;
-  virtual Status HandleReceivedEvents() OVERRIDE;
+      scoped_ptr<base::DictionaryValue>* result) override;
+  void AddListener(DevToolsEventListener* listener) override;
+  Status HandleEventsUntil(const ConditionalFunc& conditional_func,
+                           const base::TimeDelta& timeout) override;
+  Status HandleReceivedEvents() override;
 
  private:
   enum ResponseState {

@@ -273,11 +273,19 @@ class ClassReferenceHolder {
     LoadClass(jni, "org/webrtc/IceCandidate");
 #if defined(ANDROID) && !defined(WEBRTC_CHROMIUM_BUILD)
     LoadClass(jni, "android/graphics/SurfaceTexture");
-    LoadClass(jni, "android/opengl/EGLContext");
     LoadClass(jni, "org/webrtc/MediaCodecVideoEncoder");
     LoadClass(jni, "org/webrtc/MediaCodecVideoEncoder$OutputBufferInfo");
     LoadClass(jni, "org/webrtc/MediaCodecVideoDecoder");
     LoadClass(jni, "org/webrtc/MediaCodecVideoDecoder$DecoderOutputBufferInfo");
+    jclass j_decoder_class = GetClass("org/webrtc/MediaCodecVideoDecoder");
+    jmethodID j_is_egl14_supported_method = jni->GetStaticMethodID(
+        j_decoder_class, "isEGL14Supported", "()Z");
+    bool is_egl14_supported = jni->CallStaticBooleanMethod(
+        j_decoder_class, j_is_egl14_supported_method);
+    CHECK_EXCEPTION(jni);
+    if (is_egl14_supported) {
+      LoadClass(jni, "android/opengl/EGLContext");
+    }
 #endif
     LoadClass(jni, "org/webrtc/MediaSource$State");
     LoadClass(jni, "org/webrtc/MediaStream");
@@ -575,13 +583,6 @@ class PCOJava : public PeerConnectionObserver {
     jmethodID m = GetMethodID(jni(), *j_observer_class_,
                               "onIceCandidate", "(Lorg/webrtc/IceCandidate;)V");
     jni()->CallVoidMethod(*j_observer_global_, m, j_candidate);
-    CHECK_EXCEPTION(jni()) << "error during CallVoidMethod";
-  }
-
-  virtual void OnError() OVERRIDE {
-    ScopedLocalRefFrame local_ref_frame(jni());
-    jmethodID m = GetMethodID(jni(), *j_observer_class_, "onError", "()V");
-    jni()->CallVoidMethod(*j_observer_global_, m);
     CHECK_EXCEPTION(jni()) << "error during CallVoidMethod";
   }
 
@@ -1234,6 +1235,13 @@ static int64_t GetCurrentTimeMs() {
   return TickTime::Now().Ticks() / 1000000LL;
 }
 
+// Allow Invoke() calls from from current thread.
+static void AllowBlockingCalls() {
+  Thread* current_thread = Thread::Current();
+  if (current_thread != NULL)
+    current_thread->SetAllowBlockingCalls(true);
+}
+
 // MediaCodecVideoEncoder is a webrtc::VideoEncoder implementation that uses
 // Android's MediaCodec SDK API behind the scenes to implement (hopefully)
 // HW-backed video encode.  This C++ class is implemented as a very thin shim,
@@ -1327,6 +1335,7 @@ class MediaCodecVideoEncoder : public webrtc::VideoEncoder,
   int width_;   // Frame width in pixels.
   int height_;  // Frame height in pixels.
   bool inited_;
+  uint16_t picture_id_;
   enum libyuv::FourCC encoder_fourcc_; // Encoder color space format.
   int last_set_bitrate_kbps_;  // Last-requested bitrate in kbps.
   int last_set_fps_;  // Last-requested frame rate.
@@ -1362,6 +1371,7 @@ MediaCodecVideoEncoder::~MediaCodecVideoEncoder() {
 MediaCodecVideoEncoder::MediaCodecVideoEncoder(JNIEnv* jni)
   : callback_(NULL),
     inited_(false),
+    picture_id_(0),
     codec_thread_(new Thread()),
     j_media_codec_video_encoder_class_(
         jni,
@@ -1417,6 +1427,7 @@ MediaCodecVideoEncoder::MediaCodecVideoEncoder(JNIEnv* jni)
   j_info_presentation_timestamp_us_field_ = GetFieldID(
       jni, j_output_buffer_info_class, "presentationTimestampUs", "J");
   CHECK_EXCEPTION(jni) << "MediaCodecVideoEncoder ctor failed";
+  AllowBlockingCalls();
 }
 
 int32_t MediaCodecVideoEncoder::InitEncode(
@@ -1542,6 +1553,7 @@ int32_t MediaCodecVideoEncoder::InitEncodeOnCodecThread(
   render_times_ms_.clear();
   frame_rtc_times_ms_.clear();
   drop_next_input_frame_ = false;
+  picture_id_ = static_cast<uint16_t>(rand()) & 0x7FFF;
   // We enforce no extra stride/padding in the format creation step.
   jobjectArray input_buffers = reinterpret_cast<jobjectArray>(
       jni->CallObjectMethod(*j_media_codec_video_encoder_,
@@ -1633,7 +1645,7 @@ int32_t MediaCodecVideoEncoder::EncodeOnCodecThread(
     int encoder_latency_ms = last_input_timestamp_ms_ -
         last_output_timestamp_ms_;
     if (frames_in_queue_ > 2 || encoder_latency_ms > 70) {
-      ALOGV("Drop frame - encoder is behind by %d ms. Q size: %d",
+      ALOGD("Drop frame - encoder is behind by %d ms. Q size: %d",
           encoder_latency_ms, frames_in_queue_);
       frames_dropped_++;
       return WEBRTC_VIDEO_CODEC_OK;
@@ -1853,9 +1865,14 @@ bool MediaCodecVideoEncoder::DeliverPendingOutputs(JNIEnv* jni) {
       webrtc::CodecSpecificInfo info;
       memset(&info, 0, sizeof(info));
       info.codecType = kVideoCodecVP8;
-      info.codecSpecific.VP8.pictureId = webrtc::kNoPictureId;
+      info.codecSpecific.VP8.pictureId = picture_id_;
+      info.codecSpecific.VP8.nonReference = false;
+      info.codecSpecific.VP8.simulcastIdx = 0;
+      info.codecSpecific.VP8.temporalIdx = webrtc::kNoTemporalIdx;
+      info.codecSpecific.VP8.layerSync = false;
       info.codecSpecific.VP8.tl0PicIdx = webrtc::kNoTl0PicIdx;
       info.codecSpecific.VP8.keyIdx = webrtc::kNoKeyIdx;
+      picture_id_ = (picture_id_ + 1) & 0x7FFF;
 
       // Generate a header describing a single fragment.
       webrtc::RTPFragmentationHeader header;
@@ -1900,8 +1917,6 @@ class MediaCodecVideoEncoderFactory
   // WebRtcVideoEncoderFactory implementation.
   virtual webrtc::VideoEncoder* CreateVideoEncoder(webrtc::VideoCodecType type)
       OVERRIDE;
-  virtual void AddObserver(Observer* observer) OVERRIDE;
-  virtual void RemoveObserver(Observer* observer) OVERRIDE;
   virtual const std::vector<VideoCodec>& codecs() const OVERRIDE;
   virtual void DestroyVideoEncoder(webrtc::VideoEncoder* encoder) OVERRIDE;
 
@@ -1936,11 +1951,6 @@ webrtc::VideoEncoder* MediaCodecVideoEncoderFactory::CreateVideoEncoder(
     return NULL;
   return new MediaCodecVideoEncoder(AttachCurrentThreadIfNeeded());
 }
-
-// Since the available codec list is never going to change, we ignore the
-// Observer-related interface here.
-void MediaCodecVideoEncoderFactory::AddObserver(Observer* observer) {}
-void MediaCodecVideoEncoderFactory::RemoveObserver(Observer* observer) {}
 
 const std::vector<MediaCodecVideoEncoderFactory::VideoCodec>&
 MediaCodecVideoEncoderFactory::codecs() const {
@@ -1993,6 +2003,7 @@ class MediaCodecVideoDecoder : public webrtc::VideoDecoder,
   bool key_frame_required_;
   bool inited_;
   bool use_surface_;
+  int error_count_;
   VideoCodec codec_;
   I420VideoFrame decoded_image_;
   NativeHandleImpl native_handle_;
@@ -2039,6 +2050,7 @@ class MediaCodecVideoDecoder : public webrtc::VideoDecoder,
   // Global references; must be deleted in Release().
   std::vector<jobject> input_buffers_;
   jobject surface_texture_;
+  jobject previous_surface_texture_;
 
   // Render EGL context.
   static jobject render_egl_context_;
@@ -2055,14 +2067,26 @@ int MediaCodecVideoDecoder::SetAndroidObjects(JNIEnv* jni,
     render_egl_context_ = NULL;
   } else {
     render_egl_context_ = jni->NewGlobalRef(render_egl_context);
+    CHECK_EXCEPTION(jni) << "error calling NewGlobalRef for EGL Context.";
+    jclass j_egl_context_class = FindClass(jni, "android/opengl/EGLContext");
+    if (!jni->IsInstanceOf(render_egl_context_, j_egl_context_class)) {
+      ALOGE("Wrong EGL Context.");
+      jni->DeleteGlobalRef(render_egl_context_);
+      render_egl_context_ = NULL;
+    }
   }
-  ALOGD("VideoDecoder EGL context set.");
+  if (render_egl_context_ == NULL) {
+    ALOGD("NULL VideoDecoder EGL context - HW surface decoding is disabled.");
+  }
   return 0;
 }
 
 MediaCodecVideoDecoder::MediaCodecVideoDecoder(JNIEnv* jni)
   : key_frame_required_(true),
     inited_(false),
+    error_count_(0),
+    surface_texture_(NULL),
+    previous_surface_texture_(NULL),
     codec_thread_(new Thread()),
     j_media_codec_video_decoder_class_(
         jni,
@@ -2080,7 +2104,7 @@ MediaCodecVideoDecoder::MediaCodecVideoDecoder(JNIEnv* jni)
 
   j_init_decode_method_ = GetMethodID(
       jni, *j_media_codec_video_decoder_class_, "initDecode",
-      "(IIZLandroid/opengl/EGLContext;)Z");
+      "(IIZZLandroid/opengl/EGLContext;)Z");
   j_release_method_ =
       GetMethodID(jni, *j_media_codec_video_decoder_class_, "release", "()V");
   j_dequeue_input_buffer_method_ = GetMethodID(
@@ -2131,11 +2155,18 @@ MediaCodecVideoDecoder::MediaCodecVideoDecoder(JNIEnv* jni)
   if (render_egl_context_ == NULL)
     use_surface_ = false;
   memset(&codec_, 0, sizeof(codec_));
+  AllowBlockingCalls();
 }
 
 MediaCodecVideoDecoder::~MediaCodecVideoDecoder() {
   // Call Release() to ensure no more callbacks to us after we are deleted.
   Release();
+  // Delete global references.
+  JNIEnv* jni = AttachCurrentThreadIfNeeded();
+  if (previous_surface_texture_ != NULL)
+    jni->DeleteGlobalRef(previous_surface_texture_);
+  if (surface_texture_ != NULL)
+    jni->DeleteGlobalRef(surface_texture_);
 }
 
 int32_t MediaCodecVideoDecoder::InitDecode(const VideoCodec* inst,
@@ -2167,13 +2198,19 @@ int32_t MediaCodecVideoDecoder::InitDecodeOnCodecThread() {
   CheckOnCodecThread();
   JNIEnv* jni = AttachCurrentThreadIfNeeded();
   ScopedLocalRefFrame local_ref_frame(jni);
-  ALOGD("InitDecodeOnCodecThread: %d x %d. fps: %d",
-      codec_.width, codec_.height, codec_.maxFramerate);
+  ALOGD("InitDecodeOnCodecThread: %d x %d. Fps: %d. Errors: %d",
+      codec_.width, codec_.height, codec_.maxFramerate, error_count_);
+  bool use_sw_codec = false;
+  if (error_count_ > 1) {
+    // If more than one critical errors happen for HW codec, switch to SW codec.
+    use_sw_codec = true;
+  }
 
   bool success = jni->CallBooleanMethod(*j_media_codec_video_decoder_,
                                        j_init_decode_method_,
                                        codec_.width,
                                        codec_.height,
+                                       use_sw_codec,
                                        use_surface_,
                                        render_egl_context_);
   CHECK_EXCEPTION(jni);
@@ -2207,6 +2244,10 @@ int32_t MediaCodecVideoDecoder::InitDecodeOnCodecThread() {
   if (use_surface_) {
     jobject surface_texture = GetObjectField(
         jni, *j_media_codec_video_decoder_, j_surface_texture_field_);
+    if (previous_surface_texture_ != NULL) {
+      jni->DeleteGlobalRef(previous_surface_texture_);
+    }
+    previous_surface_texture_ = surface_texture_;
     surface_texture_ = jni->NewGlobalRef(surface_texture);
   }
   codec_thread_->PostDelayed(kMediaCodecPollMs, this);
@@ -2231,18 +2272,6 @@ int32_t MediaCodecVideoDecoder::ReleaseOnCodecThread() {
     jni->DeleteGlobalRef(input_buffers_[i]);
   }
   input_buffers_.clear();
-  if (use_surface_) {
-    // Before deleting texture object make sure it is no longer referenced
-    // by any TextureVideoFrame.
-    int32_t waitTimeoutUs = 3000000;  // 3 second wait
-    while (waitTimeoutUs > 0 && native_handle_.ref_count() > 0) {
-      ALOGD("Current Texture RefCnt: %d", native_handle_.ref_count());
-      usleep(30000);
-      waitTimeoutUs -= 30000;
-    }
-    ALOGD("TextureRefCnt: %d", native_handle_.ref_count());
-    jni->DeleteGlobalRef(surface_texture_);
-  }
   jni->CallVoidMethod(*j_media_codec_video_decoder_, j_release_method_);
   CHECK_EXCEPTION(jni);
   rtc::MessageQueueManager::Clear(this);
@@ -2311,11 +2340,13 @@ int32_t MediaCodecVideoDecoder::DecodeOnCodecThread(
   if (frames_received_ > frames_decoded_ + max_pending_frames_) {
     ALOGV("Wait for output...");
     if (!DeliverPendingOutputs(jni, kMediaCodecTimeoutMs * 1000)) {
+      error_count_++;
       Reset();
       return WEBRTC_VIDEO_CODEC_ERROR;
     }
     if (frames_received_ > frames_decoded_ + max_pending_frames_) {
       ALOGE("Output buffer dequeue timeout");
+      error_count_++;
       Reset();
       return WEBRTC_VIDEO_CODEC_ERROR;
     }
@@ -2327,6 +2358,7 @@ int32_t MediaCodecVideoDecoder::DecodeOnCodecThread(
   CHECK_EXCEPTION(jni);
   if (j_input_buffer_index < 0) {
     ALOGE("dequeueInputBuffer error");
+    error_count_++;
     Reset();
     return WEBRTC_VIDEO_CODEC_ERROR;
   }
@@ -2341,6 +2373,7 @@ int32_t MediaCodecVideoDecoder::DecodeOnCodecThread(
   if (buffer_capacity < inputImage._length) {
     ALOGE("Input frame size %d is bigger than buffer size %d.",
         inputImage._length, buffer_capacity);
+    error_count_++;
     Reset();
     return WEBRTC_VIDEO_CODEC_ERROR;
   }
@@ -2365,6 +2398,7 @@ int32_t MediaCodecVideoDecoder::DecodeOnCodecThread(
   CHECK_EXCEPTION(jni);
   if (!success) {
     ALOGE("queueInputBuffer error");
+    error_count_++;
     Reset();
     return WEBRTC_VIDEO_CODEC_ERROR;
   }
@@ -2372,6 +2406,7 @@ int32_t MediaCodecVideoDecoder::DecodeOnCodecThread(
   // Try to drain the decoder
   if (!DeliverPendingOutputs(jni, 0)) {
     ALOGE("DeliverPendingOutputs error");
+    error_count_++;
     Reset();
     return WEBRTC_VIDEO_CODEC_ERROR;
   }
@@ -2401,7 +2436,6 @@ bool MediaCodecVideoDecoder::DeliverPendingOutputs(
       GetIntField(jni, j_decoder_output_buffer_info, j_info_index_field_);
   if (output_buffer_index < 0) {
     ALOGE("dequeueOutputBuffer error : %d", output_buffer_index);
-    Reset();
     return false;
   }
   int output_buffer_offset =
@@ -2426,7 +2460,6 @@ bool MediaCodecVideoDecoder::DeliverPendingOutputs(
   if (!use_surface_) {
     if (output_buffer_size < width * height * 3 / 2) {
       ALOGE("Insufficient output buffer size: %d", output_buffer_size);
-      Reset();
       return false;
     }
     jobjectArray output_buffers = reinterpret_cast<jobjectArray>(GetObjectField(
@@ -2485,7 +2518,6 @@ bool MediaCodecVideoDecoder::DeliverPendingOutputs(
   CHECK_EXCEPTION(jni);
   if (!success) {
     ALOGE("releaseOutputBuffer error");
-    Reset();
     return false;
   }
 
@@ -2552,7 +2584,10 @@ void MediaCodecVideoDecoder::OnMessage(rtc::Message* msg) {
   CHECK(!msg->pdata) << "Unexpected message!";
   CheckOnCodecThread();
 
-  DeliverPendingOutputs(jni, 0);
+  if (!DeliverPendingOutputs(jni, 0)) {
+    error_count_++;
+    Reset();
+  }
   codec_thread_->PostDelayed(kMediaCodecPollMs, this);
 }
 
@@ -3102,12 +3137,9 @@ JOW(jboolean, PeerConnection_nativeAddIceCandidate)(
 }
 
 JOW(jboolean, PeerConnection_nativeAddLocalStream)(
-    JNIEnv* jni, jobject j_pc, jlong native_stream, jobject j_constraints) {
-  scoped_ptr<ConstraintsWrapper> constraints(
-      new ConstraintsWrapper(jni, j_constraints));
+    JNIEnv* jni, jobject j_pc, jlong native_stream) {
   return ExtractNativePC(jni, j_pc)->AddStream(
-      reinterpret_cast<MediaStreamInterface*>(native_stream),
-      constraints.get());
+      reinterpret_cast<MediaStreamInterface*>(native_stream));
 }
 
 JOW(void, PeerConnection_nativeRemoveLocalStream)(

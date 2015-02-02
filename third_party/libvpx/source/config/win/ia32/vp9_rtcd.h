@@ -12,8 +12,8 @@
  */
 
 #include "vpx/vpx_integer.h"
+#include "vp9/common/vp9_common.h"
 #include "vp9/common/vp9_enums.h"
-#include "vp9/common/vp9_idct.h"
 
 struct macroblockd;
 
@@ -28,6 +28,10 @@ struct yv12_buffer_config;
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+unsigned int vp9_avg_8x8_c(const uint8_t *, int p);
+unsigned int vp9_avg_8x8_sse2(const uint8_t *, int p);
+RTCD_EXTERN unsigned int (*vp9_avg_8x8)(const uint8_t *, int p);
 
 int64_t vp9_block_error_c(const tran_low_t *coeff, const tran_low_t *dqcoeff, intptr_t block_size, int64_t *ssz);
 int64_t vp9_block_error_sse2(const tran_low_t *coeff, const tran_low_t *dqcoeff, intptr_t block_size, int64_t *ssz);
@@ -426,7 +430,8 @@ unsigned int vp9_mse8x8_sse2(const uint8_t *src_ptr, int  source_stride, const u
 RTCD_EXTERN unsigned int (*vp9_mse8x8)(const uint8_t *src_ptr, int  source_stride, const uint8_t *ref_ptr, int  recon_stride, unsigned int *sse);
 
 void vp9_quantize_b_c(const tran_low_t *coeff_ptr, intptr_t n_coeffs, int skip_block, const int16_t *zbin_ptr, const int16_t *round_ptr, const int16_t *quant_ptr, const int16_t *quant_shift_ptr, tran_low_t *qcoeff_ptr, tran_low_t *dqcoeff_ptr, const int16_t *dequant_ptr, int zbin_oq_value, uint16_t *eob_ptr, const int16_t *scan, const int16_t *iscan);
-#define vp9_quantize_b vp9_quantize_b_c
+void vp9_quantize_b_sse2(const tran_low_t *coeff_ptr, intptr_t n_coeffs, int skip_block, const int16_t *zbin_ptr, const int16_t *round_ptr, const int16_t *quant_ptr, const int16_t *quant_shift_ptr, tran_low_t *qcoeff_ptr, tran_low_t *dqcoeff_ptr, const int16_t *dequant_ptr, int zbin_oq_value, uint16_t *eob_ptr, const int16_t *scan, const int16_t *iscan);
+RTCD_EXTERN void (*vp9_quantize_b)(const tran_low_t *coeff_ptr, intptr_t n_coeffs, int skip_block, const int16_t *zbin_ptr, const int16_t *round_ptr, const int16_t *quant_ptr, const int16_t *quant_shift_ptr, tran_low_t *qcoeff_ptr, tran_low_t *dqcoeff_ptr, const int16_t *dequant_ptr, int zbin_oq_value, uint16_t *eob_ptr, const int16_t *scan, const int16_t *iscan);
 
 void vp9_quantize_b_32x32_c(const tran_low_t *coeff_ptr, intptr_t n_coeffs, int skip_block, const int16_t *zbin_ptr, const int16_t *round_ptr, const int16_t *quant_ptr, const int16_t *quant_shift_ptr, tran_low_t *qcoeff_ptr, tran_low_t *dqcoeff_ptr, const int16_t *dequant_ptr, int zbin_oq_value, uint16_t *eob_ptr, const int16_t *scan, const int16_t *iscan);
 #define vp9_quantize_b_32x32 vp9_quantize_b_32x32_c
@@ -882,6 +887,8 @@ static void setup_rtcd_internal(void)
 
     (void)flags;
 
+    vp9_avg_8x8 = vp9_avg_8x8_c;
+    if (flags & HAS_SSE2) vp9_avg_8x8 = vp9_avg_8x8_sse2;
     vp9_block_error = vp9_block_error_c;
     if (flags & HAS_SSE2) vp9_block_error = vp9_block_error_sse2;
     vp9_convolve8 = vp9_convolve8_c;
@@ -1047,6 +1054,8 @@ static void setup_rtcd_internal(void)
     if (flags & HAS_SSE2) vp9_mse8x16 = vp9_mse8x16_sse2;
     vp9_mse8x8 = vp9_mse8x8_c;
     if (flags & HAS_SSE2) vp9_mse8x8 = vp9_mse8x8_sse2;
+    vp9_quantize_b = vp9_quantize_b_c;
+    if (flags & HAS_SSE2) vp9_quantize_b = vp9_quantize_b_sse2;
     vp9_sad16x16 = vp9_sad16x16_c;
     if (flags & HAS_SSE2) vp9_sad16x16 = vp9_sad16x16_sse2;
     vp9_sad16x16_avg = vp9_sad16x16_avg_c;

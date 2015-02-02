@@ -40,12 +40,10 @@ class ResolutionChangeNotificationDelegate
 
  private:
   // message_center::NotificationDelegate overrides:
-  virtual void Display() OVERRIDE;
-  virtual void Error() OVERRIDE;
-  virtual void Close(bool by_user) OVERRIDE;
-  virtual void Click() OVERRIDE;
-  virtual bool HasClickedListener() OVERRIDE;
-  virtual void ButtonClick(int button_index) OVERRIDE;
+  virtual void Close(bool by_user) override;
+  virtual void Click() override;
+  virtual bool HasClickedListener() override;
+  virtual void ButtonClick(int button_index) override;
 
   ResolutionNotificationController* controller_;
   bool has_timeout_;
@@ -62,12 +60,6 @@ ResolutionChangeNotificationDelegate::ResolutionChangeNotificationDelegate(
 }
 
 ResolutionChangeNotificationDelegate::~ResolutionChangeNotificationDelegate() {
-}
-
-void ResolutionChangeNotificationDelegate::Display() {
-}
-
-void ResolutionChangeNotificationDelegate::Error() {
 }
 
 void ResolutionChangeNotificationDelegate::Close(bool by_user) {

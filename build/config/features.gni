@@ -36,6 +36,9 @@ declare_args() {
   #enable_webrtc = !is_ios  TODO(GYP) use this condition when WebRTC works in
   #                         the GN build.
   enable_webrtc = false
+
+  # Enables proprietary codecs and demuxers; e.g. H264, MOV, AAC, and MP3.
+  proprietary_codecs = false
 }
 
 # Additional dependent variables -----------------------------------------------
@@ -60,15 +63,12 @@ enable_pepper_cdms = enable_plugins && (is_linux || is_mac || is_win)
 
 enable_browser_cdms = is_android
 
-# Enable printing support and UI. This variable is used to configure which
-# parts of printing will be built. 0 disables printing completely, 1 enables it
-# fully, and 2 enables only the codepath to generate a Metafile (e.g.  usually
-# a PDF or EMF) and disables print preview, cloud print, UI, etc.
-if (is_android) {
-  printing_mode = 2
-} else {
-  printing_mode = 1
-}
+# Enable basic printing support and UI.
+enable_basic_printing = !is_chromeos
+
+# Enable printing with print preview. It does not imply
+# enable_basic_printing. It's possible to build Chrome with preview only.
+enable_print_preview = !is_android
 
 # The seccomp-bpf sandbox is only supported on three architectures
 # currently.
@@ -77,9 +77,8 @@ if (is_android) {
 use_seccomp_bpf = (is_linux || is_android) &&
   (cpu_arch == "x86" || cpu_arch == "x64" || cpu_arch == "arm")
 
-# Enable notifications everywhere except Android/iOS.
-# Android is http://crbug.com/115320
-enable_notifications = !is_android && !is_ios
+# Enable notifications everywhere except iOS.
+enable_notifications = !is_ios
 
 # TODO(brettw) this should be moved to net and only dependents get this define.
 disable_ftp_support = is_ios
@@ -123,7 +122,7 @@ enable_task_manager = !is_ios && !is_android
 
 use_cups = is_desktop_linux || is_mac
 
-enable_themes = !is_android && !is_chromeos
+enable_themes = !is_android && !is_ios
 
 # TODO(scottmg) remove this when we've fixed printing.
 win_pdf_metafile_for_printing = true

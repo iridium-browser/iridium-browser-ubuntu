@@ -18,6 +18,7 @@ per-file *_messages*.h=jln@chromium.org
 per-file *_messages*.h=jorgelo@chromium.org
 per-file *_messages*.h=jschuh@chromium.org
 per-file *_messages*.h=kenrb@chromium.org
+per-file *_messages*.h=mkwst@chromium.org
 per-file *_messages*.h=nasko@chromium.org
 per-file *_messages*.h=palmer@chromium.org
 per-file *_messages*.h=tsepez@chromium.org
@@ -35,12 +36,9 @@ per-file spellcheck_result.h=rlp@chromium.org
 per-file spellcheck_result.h=rouslan@chromium.org
 
 # Instant/Search files.
-per-file instant_restricted_id_cache*=kmadhusu@chromium.org
-per-file instant_restricted_id_cache*=jered@chromium.org
-per-file instant_restricted_id_cache*=samarth@chromium.org
-per-file instant_types.*=kmadhusu@chromium.org
-per-file instant_types.*=jered@chromium.org
-per-file instant_types.*=samarth@chromium.org
+per-file instant_types*=kmadhusu@chromium.org
+per-file instant_types*=jered@chromium.org
+per-file instant_types*=samarth@chromium.org
 per-file search_types.*=kmadhusu@chromium.org
 per-file search_types.*=jered@chromium.org
 per-file search_types.*=samarth@chromium.org

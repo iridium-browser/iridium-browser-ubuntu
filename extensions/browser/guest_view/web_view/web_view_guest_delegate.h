@@ -40,9 +40,6 @@ class WebViewGuestDelegate {
   // Called to attach helpers just after additional initialization is performed.
   virtual void OnAttachWebViewHelpers(content::WebContents* contents) = 0;
 
-  // Called to perform some cleanup prior to destruction.
-  virtual void OnEmbedderDestroyed() = 0;
-
   // Called after the guest has been attached to an embedder and suspended
   // resource loads have been resumed.
   virtual void OnDidAttachToEmbedder() = 0;
@@ -55,6 +52,9 @@ class WebViewGuestDelegate {
 
   virtual void OnDocumentLoadedInFrame(
       content::RenderFrameHost* render_frame_host) = 0;
+
+  // Called before the embedder is destroyed.
+  virtual void OnEmbedderWillBeDestroyed() = 0;
 
   // Called immediately after the guest WebContents has been destroyed.
   virtual void OnGuestDestroyed() = 0;

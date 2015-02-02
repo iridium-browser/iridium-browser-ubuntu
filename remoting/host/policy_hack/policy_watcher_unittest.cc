@@ -22,7 +22,7 @@ class PolicyWatcherTest : public testing::Test {
   PolicyWatcherTest() {
   }
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     message_loop_proxy_ = base::MessageLoopProxy::current();
     policy_callback_ = base::Bind(&MockPolicyCallback::OnPolicyUpdate,
                                   base::Unretained(&mock_policy_callback_));
@@ -99,11 +99,13 @@ class PolicyWatcherTest : public testing::Test {
   }
 
   void StopWatching() {
-    base::WaitableEvent stop_event(false, false);
-    policy_watcher_->StopWatching(&stop_event);
+    EXPECT_CALL(*this, PostPolicyWatcherShutdown()).Times(1);
+    policy_watcher_->StopWatching(base::Bind(
+        &PolicyWatcherTest::PostPolicyWatcherShutdown, base::Unretained(this)));
     base::RunLoop().RunUntilIdle();
-    EXPECT_EQ(true, stop_event.IsSignaled());
   }
+
+  MOCK_METHOD0(PostPolicyWatcherShutdown, void());
 
   static const char* kHostDomain;
   static const char* kPortRange;

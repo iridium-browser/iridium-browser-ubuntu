@@ -14,6 +14,7 @@ import os
 from pylib import cmd_helper
 from pylib.device import decorators
 from pylib.device import device_errors
+from pylib.utils import timeout_retry
 
 
 _DEFAULT_TIMEOUT = 30
@@ -49,10 +50,11 @@ class AdbWrapper(object):
   @decorators.WithTimeoutAndRetries
   def _RunAdbCmd(cls, arg_list, timeout=None, retries=None, check_error=True):
     cmd = ['adb'] + arg_list
-    exit_code, output = cmd_helper.GetCmdStatusAndOutput(cmd)
+    exit_code, output = cmd_helper.GetCmdStatusAndOutputWithTimeout(
+      cmd, timeout_retry.CurrentTimeoutThread().GetRemainingTime())
     if exit_code != 0:
       raise device_errors.AdbCommandFailedError(
-          cmd, 'returned non-zero exit code %s, output: %s' %
+          cmd, 'returned non-zero exit code %d and output %r' %
           (exit_code, output))
     # This catches some errors, including when the device drops offline;
     # unfortunately adb is very inconsistent with error reporting so many
@@ -171,18 +173,27 @@ class AdbWrapper(object):
     if expect_rc is None:
       actual_command = command
     else:
-      actual_command = '%s; echo $?;' % command
+      actual_command = '%s; echo %%$?;' % command.rstrip()
     output = self._DeviceAdbCmd(
         ['shell', actual_command], timeout, retries, check_error=False)
     if expect_rc is not None:
-      output_end = output.rstrip().rfind('\n') + 1
-      rc = output[output_end:].strip()
-      output = output[:output_end]
-      if int(rc) != expect_rc:
+      output_end = output.rfind('%')
+      if output_end < 0:
+        # causes the string for rc to become empty and also raise a ValueError
+        output_end = len(output)
+
+      try:
+        rc = int(output[output_end+1:])
+      except ValueError:
         raise device_errors.AdbCommandFailedError(
-            ['shell', command],
-            'shell command exited with code: %s' % rc,
+            ['shell'], 'command %r on device produced output %r where no'
+            ' valid return code was found' % (actual_command, output),
             self._device_serial)
+
+      output = output[:output_end]
+      if rc != expect_rc:
+        raise device_errors.AdbShellCommandFailedError(
+            command, rc, output, self._device_serial)
     return output
 
   def Logcat(self, filter_spec=None, timeout=_DEFAULT_TIMEOUT,

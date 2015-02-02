@@ -7,8 +7,7 @@
     Exposed=ServiceWorker,
     RuntimeEnabled=ServiceWorker,
     GarbageCollected,
+    TypeChecking=Interface,
 ] interface ServiceWorkerClient {
-    readonly attribute unsigned long id;
-
     [Custom, RaisesException, CallWith=ExecutionContext] void postMessage(SerializedScriptValue message, optional sequence<Transferable> transfer);
 };

@@ -54,14 +54,14 @@ class ApplicationImpl : public InterfaceImpl<Application> {
  public:
   ApplicationImpl(ApplicationDelegate* delegate,
                   ScopedMessagePipeHandle shell_handle);
-  ApplicationImpl(ApplicationDelegate* delegate,
-                  MojoHandle shell_handle);
-  virtual ~ApplicationImpl();
+  ApplicationImpl(ApplicationDelegate* delegate, MojoHandle shell_handle);
+  ~ApplicationImpl() override;
 
   Shell* shell() const { return shell_.get(); }
 
   // Returns any initial configuration arguments, passed by the Shell.
-  const Array<String>& args() { return args_; }
+  const std::vector<std::string>& args() const { return args_; }
+  bool HasArg(const std::string& arg) const;
 
   // Establishes a new connection to an application. Caller does not own.
   ApplicationConnection* ConnectToApplication(const String& application_url);
@@ -74,6 +74,18 @@ class ApplicationImpl : public InterfaceImpl<Application> {
     ConnectToApplication(application_url)->ConnectToService(ptr);
   }
 
+  // Wait for the ShellPtr's Initialize message.
+  bool WaitForInitialize();
+
+  // Unbind the shell from this application and return its handle.
+  ScopedMessagePipeHandle UnbindShell();
+
+  // Application implementation.
+  void Initialize(Array<String> args) override;
+
+  // Quits the main run loop for this application.
+  static void Terminate();
+
  private:
   class ShellPtrWatcher;
 
@@ -82,15 +94,11 @@ class ApplicationImpl : public InterfaceImpl<Application> {
   void OnShellError() {
     ClearConnections();
     Terminate();
-  };
-
-  // Quits the main run loop for this application.
-  static void Terminate();
+  }
 
   // Application implementation.
-  virtual void Initialize(Array<String> args) MOJO_OVERRIDE;
-  virtual void AcceptConnection(const String& requestor_url,
-                                ServiceProviderPtr provider) MOJO_OVERRIDE;
+  void AcceptConnection(const String& requestor_url,
+                        ServiceProviderPtr provider) override;
 
   typedef std::vector<internal::ServiceRegistry*> ServiceRegistryList;
 
@@ -100,7 +108,7 @@ class ApplicationImpl : public InterfaceImpl<Application> {
   ApplicationDelegate* delegate_;
   ShellPtr shell_;
   ShellPtrWatcher* shell_watch_;
-  Array<String> args_;
+  std::vector<std::string> args_;
 
   MOJO_DISALLOW_COPY_AND_ASSIGN(ApplicationImpl);
 };

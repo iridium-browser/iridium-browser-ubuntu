@@ -2,14 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
-
 /**
  * Manage the installation of apps.
  *
  * @param {string} itemId Item id to be installed.
  * @constructor
- * @extends {cr.EventType}
  */
 function AppInstaller(itemId) {
   this.itemId_ = itemId;
@@ -45,8 +42,8 @@ AppInstaller.USER_CANCELLED_ERROR_STR_ = 'User cancelled install';
 
 /**
  * Start an installation.
- * @param {function(boolean, string)} callback Called when the installation is
- *     finished.
+ * @param {function(AppInstaller.Result, string)} callback Called when the
+ *     installation is finished.
  */
 AppInstaller.prototype.install = function(callback) {
   this.callback_ = callback;

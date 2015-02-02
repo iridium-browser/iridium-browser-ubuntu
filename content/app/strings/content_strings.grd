@@ -335,6 +335,15 @@ below:
         <ph name="WEEK">$1<ex>Week 38, 2014</ex></ph>, starting on <ph name="WEEK_START_DATE">$2<ex>September 15, 2014</ex></ph>
       </message>
 
+      <message name="IDS_AX_ROLE_ARTICLE" desc="accessibility role description for article">
+        article
+      </message>
+      <message name="IDS_AX_ROLE_BANNER" desc="accessibility role description for banner">
+        banner
+      </message>
+      <message name="IDS_AX_ROLE_COMPLEMENTARY" desc="accessibility role description for complementary">
+        complementary
+      </message>
       <message name="IDS_AX_ROLE_WEB_AREA" desc="accessibility role description for web area">
         HTML content
       </message>
@@ -350,6 +359,9 @@ below:
       <message name="IDS_AX_ROLE_HEADING" desc="accessibility role description for headings">
         heading
       </message>
+      <message name="IDS_AX_ROLE_REGION" desc="accessibility role description for region">
+        region
+      </message>
       <if expr="is_macosx">
         <message name="IDS_AX_ROLE_FOOTER" desc="accessibility role description for footers">
           footer
@@ -361,6 +373,15 @@ below:
           toggle button
         </message>
       </if>
+      <message name="IDS_AX_ROLE_ADDRESS" desc="accessibility role description for an address (as in a person's contact information)">
+        address
+      </message>
+      <message name="IDS_AX_ROLE_MAIN_CONTENT" desc="accessibility role description for main content of the document.">
+        main
+      </message>
+      <message name="IDS_AX_ROLE_NAVIGATIONAL_LINK" desc="accessibility role description for group of navigational links.">
+        navigation
+      </message>
 
       <message name="IDS_AX_BUTTON_ACTION_VERB" desc="Verb stating the action that will occur when a button is pressed, as used by accessibility.">
         press
@@ -692,6 +713,9 @@ below:
       </message>
       <message name="IDS_FORM_VALIDATION_TOO_LONG" desc="Heading or short sentence shown when a form control in a webpage needs to be shorter than a length specified by the page author, but a user specified long value.">
         Please shorten this text to <ph name="MAX_CHARACTERS">$2<ex>100</ex></ph> characters or less (you are currently using <ph name="CURRENT_LENGTH">$1<ex>101</ex></ph> characters).
+      </message>
+      <message name="IDS_FORM_VALIDATION_TOO_SHORT" desc="Heading or short sentence shown when a form control in a webpage needs to be longer than a length specified by the page author, but a user specified short value.">
+        Please lengthen this text to <ph name="MIN_CHARACTERS">$2<ex>101</ex></ph> characters or more (you are currently using <ph name="CURRENT_LENGTH">$1<ex>100</ex></ph> characters).
       </message>
 
       <message name="IDS_PLUGIN_INITIALIZATION_ERROR" desc="A message displayed when a plug-in failed to load">

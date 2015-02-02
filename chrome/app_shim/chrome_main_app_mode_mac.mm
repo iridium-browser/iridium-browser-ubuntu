@@ -24,7 +24,6 @@
 #include "base/mac/scoped_nsobject.h"
 #include "base/mac/sdk_forward_declarations.h"
 #include "base/message_loop/message_loop.h"
-#include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/threading/thread.h"
@@ -88,7 +87,7 @@ class AppShimController;
 class AppShimController : public IPC::Listener {
  public:
   AppShimController();
-  virtual ~AppShimController();
+  ~AppShimController() override;
 
   // Called when the main Chrome process responds to the Apple Event ping that
   // was sent, or when the ping fails (if |success| is false).
@@ -119,8 +118,8 @@ class AppShimController : public IPC::Listener {
 
  private:
   // IPC::Listener implemetation.
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
-  virtual void OnChannelError() OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& message) override;
+  void OnChannelError() override;
 
   // If Chrome failed to launch the app, |success| will be false and the app
   // shim process should die.

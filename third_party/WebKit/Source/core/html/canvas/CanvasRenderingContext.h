@@ -38,8 +38,6 @@ namespace blink {
 
 class CanvasImageSource;
 class HTMLCanvasElement;
-class KURL;
-class WebGLObject;
 
 class CanvasRenderingContext : public NoBaseWillBeGarbageCollectedFinalized<CanvasRenderingContext> {
     WTF_MAKE_NONCOPYABLE(CanvasRenderingContext);
@@ -60,9 +58,10 @@ public:
     virtual bool hasAlpha() const { return true; }
     virtual void setIsHidden(bool) = 0;
 
-    virtual void paintRenderingResultsToCanvas() {}
+    enum SourceBuffer { Front, Back };
+    virtual void paintRenderingResultsToCanvas(SourceBuffer) { }
 
-    virtual blink::WebLayer* platformLayer() const { return 0; }
+    virtual blink::WebLayer* platformLayer() const { return nullptr; }
 
     virtual void trace(Visitor* visitor) { visitor->trace(m_canvas); }
 

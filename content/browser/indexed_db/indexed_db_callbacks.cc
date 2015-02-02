@@ -6,7 +6,6 @@
 
 #include <algorithm>
 
-#include "base/guid.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
@@ -223,15 +222,10 @@ void IndexedDBCallbacks::OnSuccess(scoped_ptr<IndexedDBConnection> connection,
 static std::string CreateBlobData(
     const IndexedDBBlobInfo& blob_info,
     scoped_refptr<IndexedDBDispatcherHost> dispatcher_host,
-    storage::BlobStorageContext* blob_storage_context,
     base::TaskRunner* task_runner) {
-  std::string uuid = blob_info.uuid();
-  if (!uuid.empty()) {
+  if (!blob_info.uuid().empty()) {
     // We're sending back a live blob, not a reference into our backing store.
-    scoped_ptr<storage::BlobDataHandle> blob_data_handle(
-        blob_storage_context->GetBlobDataFromUUID(uuid));
-    dispatcher_host->HoldBlobDataHandle(uuid, blob_data_handle.Pass());
-    return uuid;
+    return dispatcher_host->HoldBlobData(blob_info);
   }
   scoped_refptr<ShareableFileReference> shareable_file =
       ShareableFileReference::Get(blob_info.file_path());
@@ -243,17 +237,7 @@ static std::string CreateBlobData(
     if (!blob_info.release_callback().is_null())
       shareable_file->AddFinalReleaseCallback(blob_info.release_callback());
   }
-
-  uuid = base::GenerateGUID();
-  scoped_refptr<storage::BlobData> blob_data = new storage::BlobData(uuid);
-  blob_data->set_content_type(base::UTF16ToUTF8(blob_info.type()));
-  blob_data->AppendFile(
-      blob_info.file_path(), 0, blob_info.size(), blob_info.last_modified());
-  scoped_ptr<storage::BlobDataHandle> blob_data_handle(
-      blob_storage_context->AddFinishedBlob(blob_data.get()));
-  dispatcher_host->HoldBlobDataHandle(uuid, blob_data_handle.Pass());
-
-  return uuid;
+  return dispatcher_host->HoldBlobData(blob_info);
 }
 
 static bool CreateAllBlobs(
@@ -268,7 +252,6 @@ static bool CreateAllBlobs(
     (*blob_or_file_info)[i].uuid =
         CreateBlobData(blob_info[i],
                        dispatcher_host,
-                       dispatcher_host->blob_storage_context(),
                        dispatcher_host->Context()->TaskRunner());
   }
   return true;
@@ -307,22 +290,20 @@ static void BlobLookupForCursorPrefetch(
 static void FillInBlobData(
     const std::vector<IndexedDBBlobInfo>& blob_info,
     std::vector<IndexedDBMsg_BlobOrFileInfo>* blob_or_file_info) {
-  for (std::vector<IndexedDBBlobInfo>::const_iterator iter = blob_info.begin();
-       iter != blob_info.end();
-       ++iter) {
-    if (iter->is_file()) {
+  for (const auto& iter : blob_info) {
+    if (iter.is_file()) {
       IndexedDBMsg_BlobOrFileInfo info;
       info.is_file = true;
-      info.mime_type = iter->type();
-      info.file_name = iter->file_name();
-      info.file_path = iter->file_path().AsUTF16Unsafe();
-      info.size = iter->size();
-      info.last_modified = iter->last_modified().ToDoubleT();
+      info.mime_type = iter.type();
+      info.file_name = iter.file_name();
+      info.file_path = iter.file_path().AsUTF16Unsafe();
+      info.size = iter.size();
+      info.last_modified = iter.last_modified().ToDoubleT();
       blob_or_file_info->push_back(info);
     } else {
       IndexedDBMsg_BlobOrFileInfo info;
-      info.mime_type = iter->type();
-      info.size = iter->size();
+      info.mime_type = iter.type();
+      info.size = iter.size();
       blob_or_file_info->push_back(info);
     }
   }
@@ -331,10 +312,9 @@ static void FillInBlobData(
 void IndexedDBCallbacks::RegisterBlobsAndSend(
     const std::vector<IndexedDBBlobInfo>& blob_info,
     const base::Closure& callback) {
-  std::vector<IndexedDBBlobInfo>::const_iterator iter;
-  for (iter = blob_info.begin(); iter != blob_info.end(); ++iter) {
-    if (!iter->mark_used_callback().is_null())
-      iter->mark_used_callback().Run();
+  for (const auto& iter : blob_info) {
+    if (!iter.mark_used_callback().is_null())
+      iter.mark_used_callback().Run();
   }
   DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::IO));
   BrowserThread::PostTask(BrowserThread::IO, FROM_HERE, callback);
@@ -473,12 +453,9 @@ void IndexedDBCallbacks::OnSuccessWithPrefetch(
     if (iter->blob_info.size()) {
       found_blob_info = true;
       FillInBlobData(iter->blob_info, &values_blob_infos[i]);
-      std::vector<IndexedDBBlobInfo>::const_iterator blob_iter;
-      for (blob_iter = iter->blob_info.begin();
-           blob_iter != iter->blob_info.end();
-           ++blob_iter) {
-        if (!blob_iter->mark_used_callback().is_null())
-          blob_iter->mark_used_callback().Run();
+      for (const auto& blob_iter : iter->blob_info) {
+        if (!blob_iter.mark_used_callback().is_null())
+          blob_iter.mark_used_callback().Run();
       }
     }
   }

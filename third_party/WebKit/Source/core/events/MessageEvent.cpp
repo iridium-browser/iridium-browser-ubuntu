@@ -30,7 +30,7 @@
 
 #include "bindings/core/v8/ExceptionMessages.h"
 #include "bindings/core/v8/ExceptionState.h"
-#include "bindings/core/v8/custom/V8ArrayBufferCustom.h"
+#include "bindings/core/v8/V8ArrayBuffer.h"
 
 namespace blink {
 
@@ -106,7 +106,7 @@ MessageEvent::MessageEvent(const String& data, const String& origin)
 {
 }
 
-MessageEvent::MessageEvent(PassRefPtrWillBeRawPtr<Blob> data, const String& origin)
+MessageEvent::MessageEvent(Blob* data, const String& origin)
     : Event(EventTypeNames::message, false, false)
     , m_dataType(DataTypeBlob)
     , m_dataAsBlob(data)
@@ -114,7 +114,7 @@ MessageEvent::MessageEvent(PassRefPtrWillBeRawPtr<Blob> data, const String& orig
 {
 }
 
-MessageEvent::MessageEvent(PassRefPtr<ArrayBuffer> data, const String& origin)
+MessageEvent::MessageEvent(PassRefPtr<DOMArrayBuffer> data, const String& origin)
     : Event(EventTypeNames::message, false, false)
     , m_dataType(DataTypeArrayBuffer)
     , m_dataAsArrayBuffer(data)

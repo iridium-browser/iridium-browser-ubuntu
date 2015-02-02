@@ -38,7 +38,7 @@ namespace content {
 class WebRtcAecDumpBrowserTest : public WebRtcContentBrowserTest {
  public:
   WebRtcAecDumpBrowserTest() {}
-  virtual ~WebRtcAecDumpBrowserTest() {}
+  ~WebRtcAecDumpBrowserTest() override {}
 };
 
 #if defined(OS_WIN)
@@ -52,9 +52,6 @@ class WebRtcAecDumpBrowserTest : public WebRtcContentBrowserTest {
 #define MAYBE_CallWithAecDump DISABLED_CallWithAecDump
 #elif defined(OS_ANDROID) && defined(ADDRESS_SANITIZER)
 // Renderer crashes under Android ASAN: https://crbug.com/408496.
-#define MAYBE_CallWithAecDump DISABLED_CallWithAecDump
-#elif defined(OS_WIN) && !defined(NDEBUG)
-// Flaky on Webkit Win7 Debug bot: http://crbug.com/417756
 #define MAYBE_CallWithAecDump DISABLED_CallWithAecDump
 #else
 #define MAYBE_CallWithAecDump CallWithAecDump
@@ -171,6 +168,11 @@ IN_PROC_BROWSER_TEST_F(WebRtcAecDumpBrowserTest,
 #endif
 
 IN_PROC_BROWSER_TEST_F(WebRtcAecDumpBrowserTest, MAYBE_TwoCallsWithAecDump) {
+  if (OnWinXp()) {
+    // http://crbug.com/425034.
+    LOG(INFO) << "Disabled on Win XP: skipping test...";
+    return;
+  }
   if (!media::AudioManager::Get()->HasAudioOutputDevices()) {
     LOG(INFO) << "Missing output devices: skipping test...";
     return;

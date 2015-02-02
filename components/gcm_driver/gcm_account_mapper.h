@@ -22,6 +22,7 @@ class Clock;
 namespace gcm {
 
 class GCMDriver;
+extern const char kGCMAccountMapperAppId[];
 
 // Class for mapping signed-in GAIA accounts to the GCM Device ID.
 class GCMAccountMapper : public GCMAppHandler {
@@ -30,26 +31,26 @@ class GCMAccountMapper : public GCMAppHandler {
   typedef std::vector<AccountMapping> AccountMappings;
 
   explicit GCMAccountMapper(GCMDriver* gcm_driver);
-  virtual ~GCMAccountMapper();
+  ~GCMAccountMapper() override;
 
   void Initialize(const AccountMappings& account_mappings);
 
   // Called by AccountTracker, when a new list of account tokens is available.
   // This will cause a refresh of account mappings and sending updates to GCM.
   void SetAccountTokens(
-      const std::vector<GCMClient::AccountTokenInfo> account_tokens);
+      const std::vector<GCMClient::AccountTokenInfo>& account_tokens);
 
   // Implementation of GCMAppHandler:
-  virtual void ShutdownHandler() OVERRIDE;
-  virtual void OnMessage(const std::string& app_id,
-                         const GCMClient::IncomingMessage& message) OVERRIDE;
-  virtual void OnMessagesDeleted(const std::string& app_id) OVERRIDE;
-  virtual void OnSendError(
+  void ShutdownHandler() override;
+  void OnMessage(const std::string& app_id,
+                 const GCMClient::IncomingMessage& message) override;
+  void OnMessagesDeleted(const std::string& app_id) override;
+  void OnSendError(
       const std::string& app_id,
-      const GCMClient::SendErrorDetails& send_error_details) OVERRIDE;
-  virtual void OnSendAcknowledged(const std::string& app_id,
-                                  const std::string& message_id) OVERRIDE;
-  virtual bool CanHandle(const std::string& app_id) const OVERRIDE;
+      const GCMClient::SendErrorDetails& send_error_details) override;
+  void OnSendAcknowledged(const std::string& app_id,
+                          const std::string& message_id) override;
+  bool CanHandle(const std::string& app_id) const override;
 
  private:
   friend class GCMAccountMapperTest;

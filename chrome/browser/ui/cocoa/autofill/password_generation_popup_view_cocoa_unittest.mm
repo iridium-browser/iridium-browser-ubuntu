@@ -12,6 +12,7 @@
 #include "testing/platform_test.h"
 #include "ui/gfx/font_list.h"
 #include "ui/gfx/range/range.h"
+#include "ui/gfx/rect_f.h"
 
 using testing::AtLeast;
 using testing::Return;
@@ -25,34 +26,38 @@ class MockPasswordGenerationPopupController
     : help_text_(base::ASCIIToUTF16("Help me if you can I'm feeling dooown")),
       popup_bounds_(gfx::Rect(0, 0, 200, 100)) {}
 
-  virtual void OnSavedPasswordsLinkClicked() OVERRIDE {}
+  MOCK_METHOD0(PasswordAccepted, void());
 
-  virtual int GetMinimumWidth() OVERRIDE { return 200; }
+  virtual void OnSavedPasswordsLinkClicked() override {}
 
-  virtual bool display_password() const OVERRIDE { return true; }
+  virtual int GetMinimumWidth() override { return 200; }
 
-  virtual bool password_selected() const OVERRIDE { return false; }
+  virtual bool display_password() const override { return true; }
+
+  virtual bool password_selected() const override { return false; }
 
   MOCK_CONST_METHOD0(password, base::string16());
 
-  virtual base::string16 SuggestedText() OVERRIDE {
+  virtual base::string16 SuggestedText() override {
     return base::ASCIIToUTF16("Suggested by Chrome");
   }
 
-  virtual const base::string16& HelpText() OVERRIDE { return help_text_; }
+  virtual const base::string16& HelpText() override { return help_text_; }
 
-  virtual const gfx::Range& HelpTextLinkRange() OVERRIDE { return link_range_; }
+  virtual const gfx::Range& HelpTextLinkRange() override { return link_range_; }
 
   // AutofillPopupViewDelegate implementation.
-  virtual void Hide() OVERRIDE {}
+  virtual void Hide() override {}
   MOCK_METHOD0(ViewDestroyed, void());
-  virtual void SetSelectionAtPoint(const gfx::Point&) OVERRIDE {}
-  virtual bool AcceptSelectedLine() OVERRIDE { return true; }
-  virtual void SelectionCleared() OVERRIDE {}
-  virtual const gfx::Rect& popup_bounds() const OVERRIDE {
+  virtual void SetSelectionAtPoint(const gfx::Point&) override {}
+  virtual bool AcceptSelectedLine() override { return true; }
+  virtual void SelectionCleared() override {}
+  virtual const gfx::Rect& popup_bounds() const override {
     return popup_bounds_;
   }
   MOCK_METHOD0(container_view, gfx::NativeView());
+  MOCK_CONST_METHOD0(element_bounds, gfx::RectF&());
+  MOCK_CONST_METHOD0(IsRTL, bool());
 
  private:
   base::string16 help_text_;
@@ -69,7 +74,7 @@ class PasswordGenerationPopupViewCocoaTest : public CocoaTest {
     : password_(base::ASCIIToUTF16("wow! such password"))
   {}
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     mock_controller_.reset(new MockPasswordGenerationPopupController);
     EXPECT_CALL(*mock_controller_, password())
         .WillRepeatedly(Return(password_));

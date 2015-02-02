@@ -66,9 +66,6 @@
 #include "net/base/load_flags.h"
 #include "net/base/network_change_notifier.h"
 #include "net/cookies/cookie_monster.h"
-#include "net/proxy/proxy_config.h"
-#include "net/proxy/proxy_config_service_fixed.h"
-#include "net/proxy/proxy_service.h"
 #include "net/test/spawned_test_server/spawned_test_server.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_fetcher.h"
@@ -101,7 +98,7 @@ class SyncServerStatusChecker : public net::URLFetcherDelegate {
  public:
   SyncServerStatusChecker() : running_(false) {}
 
-  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE {
+  void OnURLFetchComplete(const net::URLFetcher* source) override {
     std::string data;
     source->GetResponseAsString(&data);
     running_ =
@@ -126,13 +123,11 @@ class EncryptionChecker : public SingleClientStatusChangeChecker {
   explicit EncryptionChecker(ProfileSyncService* service)
       : SingleClientStatusChangeChecker(service) {}
 
-  virtual bool IsExitConditionSatisfied() OVERRIDE {
+  bool IsExitConditionSatisfied() override {
     return IsEncryptionComplete(service());
   }
 
-  virtual std::string GetDebugMessage() const OVERRIDE {
-    return "Encryption";
-  }
+  std::string GetDebugMessage() const override { return "Encryption"; }
 };
 
 void SetupNetworkCallback(
@@ -140,17 +135,6 @@ void SetupNetworkCallback(
     net::URLRequestContextGetter* url_request_context_getter) {
   url_request_context_getter->GetURLRequestContext()->
       set_cookie_store(new net::CookieMonster(NULL, NULL));
-  done->Signal();
-}
-
-void SetProxyConfigCallback(
-    base::WaitableEvent* done,
-    net::URLRequestContextGetter* url_request_context_getter,
-    const net::ProxyConfig& proxy_config) {
-  net::ProxyService* proxy_service =
-      url_request_context_getter->GetURLRequestContext()->proxy_service();
-  proxy_service->ResetConfigService(
-      new net::ProxyConfigServiceFixed(proxy_config));
   done->Signal();
 }
 
@@ -366,7 +350,7 @@ bool SyncTest::SetupClients() {
 
   // Create the verifier profile.
   verifier_ = MakeProfile(FILE_PATH_LITERAL("Verifier"));
-  test::WaitForBookmarkModelToLoad(
+  bookmarks::test::WaitForBookmarkModelToLoad(
       BookmarkModelFactory::GetForProfile(verifier()));
   ui_test_utils::WaitForHistoryToLoad(HistoryServiceFactory::GetForProfile(
       verifier(), Profile::EXPLICIT_ACCESS));
@@ -411,7 +395,7 @@ void SyncTest::InitializeInstance(int index) {
                                          << index << ".";
   InitializeInvalidations(index);
 
-  test::WaitForBookmarkModelToLoad(
+  bookmarks::test::WaitForBookmarkModelToLoad(
       BookmarkModelFactory::GetForProfile(GetProfile(index)));
   ui_test_utils::WaitForHistoryToLoad(HistoryServiceFactory::GetForProfile(
       GetProfile(index), Profile::EXPLICIT_ACCESS));
@@ -799,35 +783,6 @@ bool SyncTest::IsTestServerRunning() {
   return delegate.running();
 }
 
-void SyncTest::EnableNetwork(Profile* profile) {
-  // TODO(pvalenzuela): Remove this restriction when FakeServer's observers
-  // (namely FakeServerInvaldationService) are aware of a network disconnect.
-  ASSERT_NE(IN_PROCESS_FAKE_SERVER, server_type_)
-      << "FakeServer does not support EnableNetwork.";
-  SetProxyConfig(profile->GetRequestContext(),
-                 net::ProxyConfig::CreateDirect());
-  if (notifications_enabled_) {
-    EnableNotificationsImpl();
-  }
-  // TODO(rsimha): Remove this line once http://crbug.com/53857 is fixed.
-  net::NetworkChangeNotifier::NotifyObserversOfIPAddressChangeForTests();
-}
-
-void SyncTest::DisableNetwork(Profile* profile) {
-  // TODO(pvalenzuela): Remove this restriction when FakeServer's observers
-  // (namely FakeServerInvaldationService) are aware of a network disconnect.
-  ASSERT_NE(IN_PROCESS_FAKE_SERVER, server_type_)
-      << "FakeServer does not support DisableNetwork.";
-  DisableNotificationsImpl();
-  // Set the current proxy configuration to a nonexistent proxy to effectively
-  // disable networking.
-  net::ProxyConfig config;
-  config.proxy_rules().ParseFromString("http=127.0.0.1:0");
-  SetProxyConfig(profile->GetRequestContext(), config);
-  // TODO(rsimha): Remove this line once http://crbug.com/53857 is fixed.
-  net::NetworkChangeNotifier::NotifyObserversOfIPAddressChangeForTests();
-}
-
 bool SyncTest::TestUsesSelfNotifications() {
   return true;
 }
@@ -946,105 +901,10 @@ void SyncTest::TriggerMigrationDoneError(syncer::ModelTypeSet model_types) {
                     GetTitle()));
 }
 
-void SyncTest::TriggerTransientError() {
-  ASSERT_TRUE(ServerSupportsErrorTriggering());
-  std::string path = "chromiumsync/transienterror";
-  ui_test_utils::NavigateToURL(browser(), sync_server_.GetURL(path));
-  ASSERT_EQ("Transient error",
-            base::UTF16ToASCII(
-                browser()->tab_strip_model()->GetActiveWebContents()->
-                    GetTitle()));
-}
-
 void SyncTest::TriggerXmppAuthError() {
   ASSERT_TRUE(ServerSupportsErrorTriggering());
   std::string path = "chromiumsync/xmppcred";
   ui_test_utils::NavigateToURL(browser(), sync_server_.GetURL(path));
-}
-
-namespace {
-
-sync_pb::SyncEnums::ErrorType
-    GetClientToServerResponseErrorType(
-        syncer::SyncProtocolErrorType error) {
-  switch (error) {
-    case syncer::SYNC_SUCCESS:
-      return sync_pb::SyncEnums::SUCCESS;
-    case syncer::NOT_MY_BIRTHDAY:
-      return sync_pb::SyncEnums::NOT_MY_BIRTHDAY;
-    case syncer::THROTTLED:
-      return sync_pb::SyncEnums::THROTTLED;
-    case syncer::CLEAR_PENDING:
-      return sync_pb::SyncEnums::CLEAR_PENDING;
-    case syncer::TRANSIENT_ERROR:
-      return sync_pb::SyncEnums::TRANSIENT_ERROR;
-    case syncer::MIGRATION_DONE:
-      return sync_pb::SyncEnums::MIGRATION_DONE;
-    case syncer::UNKNOWN_ERROR:
-      return sync_pb::SyncEnums::UNKNOWN;
-    case syncer::INVALID_CREDENTIAL:
-      NOTREACHED();   // NOTREACHED() because auth error is not set through
-                      // error code in sync response.
-      return sync_pb::SyncEnums::UNKNOWN;
-    case syncer::DISABLED_BY_ADMIN:
-      return sync_pb::SyncEnums::DISABLED_BY_ADMIN;
-    case syncer::USER_ROLLBACK:
-      return sync_pb::SyncEnums::USER_ROLLBACK;
-    case syncer::NON_RETRIABLE_ERROR:
-      return sync_pb::SyncEnums::UNKNOWN;
-  }
-  return sync_pb::SyncEnums::UNKNOWN;
-}
-
-sync_pb::SyncEnums::Action GetClientToServerResponseAction(
-    const syncer::ClientAction& action) {
-  switch (action) {
-    case syncer::UPGRADE_CLIENT:
-      return sync_pb::SyncEnums::UPGRADE_CLIENT;
-    case syncer::CLEAR_USER_DATA_AND_RESYNC:
-      return sync_pb::SyncEnums::CLEAR_USER_DATA_AND_RESYNC;
-    case syncer::ENABLE_SYNC_ON_ACCOUNT:
-      return sync_pb::SyncEnums::ENABLE_SYNC_ON_ACCOUNT;
-    case syncer::STOP_AND_RESTART_SYNC:
-      return sync_pb::SyncEnums::STOP_AND_RESTART_SYNC;
-    case syncer::DISABLE_SYNC_ON_CLIENT:
-      return sync_pb::SyncEnums::DISABLE_SYNC_ON_CLIENT;
-    case syncer::STOP_SYNC_FOR_DISABLED_ACCOUNT:
-    case syncer::DISABLE_SYNC_AND_ROLLBACK:
-    case syncer::ROLLBACK_DONE:
-      NOTREACHED();   // No corresponding proto action for these. Shouldn't
-                      // test.
-      return sync_pb::SyncEnums::UNKNOWN_ACTION;
-    case syncer::UNKNOWN_ACTION:
-      return sync_pb::SyncEnums::UNKNOWN_ACTION;
-  }
-  return sync_pb::SyncEnums::UNKNOWN_ACTION;
-}
-
-}  // namespace
-
-void SyncTest::TriggerSyncError(const syncer::SyncProtocolError& error,
-                                SyncErrorFrequency frequency) {
-  ASSERT_TRUE(ServerSupportsErrorTriggering());
-  std::string path = "chromiumsync/error";
-  int error_type =
-      static_cast<int>(GetClientToServerResponseErrorType(
-          error.error_type));
-  int action = static_cast<int>(GetClientToServerResponseAction(
-      error.action));
-
-  path.append(base::StringPrintf("?error=%d", error_type));
-  path.append(base::StringPrintf("&action=%d", action));
-
-  path.append(base::StringPrintf("&error_description=%s",
-                                 error.error_description.c_str()));
-  path.append(base::StringPrintf("&url=%s", error.url.c_str()));
-  path.append(base::StringPrintf("&frequency=%d", frequency));
-
-  ui_test_utils::NavigateToURL(browser(), sync_server_.GetURL(path));
-  std::string output = base::UTF16ToASCII(
-      browser()->tab_strip_model()->GetActiveWebContents()->GetTitle());
-  ASSERT_TRUE(output.find("SetError: 200") != base::string16::npos);
 }
 
 void SyncTest::TriggerCreateSyncedBookmarks() {
@@ -1063,16 +923,6 @@ void SyncTest::SetupNetwork(net::URLRequestContextGetter* context_getter) {
       BrowserThread::IO, FROM_HERE,
       base::Bind(&SetupNetworkCallback, &done,
                  make_scoped_refptr(context_getter)));
-  done.Wait();
-}
-
-void SyncTest::SetProxyConfig(net::URLRequestContextGetter* context_getter,
-                              const net::ProxyConfig& proxy_config) {
-  base::WaitableEvent done(false, false);
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      base::Bind(&SetProxyConfigCallback, &done,
-                 make_scoped_refptr(context_getter), proxy_config));
   done.Wait();
 }
 

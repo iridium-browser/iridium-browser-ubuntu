@@ -17,7 +17,6 @@
 #include "extensions/browser/event_router.h"
 #include "extensions/common/api/test.h"
 #include "extensions/common/extension.h"
-#include "extensions/common/feature_switch.h"
 #include "extensions/common/switches.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -127,16 +126,6 @@ class ExtensionWebUITest : public ExtensionApiTest {
     return frame_host;
   }
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
-    FeatureSwitch::ScopedOverride enable_options(
-        FeatureSwitch::embedded_extension_options(), true);
-    // Need to add a command line flag as well as a FeatureSwitch because the
-    // FeatureSwitch is not copied over to the renderer process from the
-    // browser process.
-    command_line->AppendSwitch(switches::kEnableEmbeddedExtensionOptions);
-    ExtensionApiTest::SetUpCommandLine(command_line);
-  }
-
   scoped_ptr<FeatureSwitch::ScopedOverride> enable_options_;
 };
 
@@ -219,7 +208,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebUITest, CanEmbedExtensionOptions) {
 
   ASSERT_TRUE(listener->WaitUntilSatisfied());
   listener->Reply(extension->id());
-  listener.reset(new ExtensionTestMessageListener("guest loaded", false));
+  listener.reset(new ExtensionTestMessageListener("load", false));
   ASSERT_TRUE(listener->WaitUntilSatisfied());
 }
 
@@ -238,6 +227,32 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebUITest, ReceivesExtensionOptionsOnClose) {
   ASSERT_TRUE(listener->WaitUntilSatisfied());
   listener->Reply(extension->id());
   listener.reset(new ExtensionTestMessageListener("onclose received", false));
+  ASSERT_TRUE(listener->WaitUntilSatisfied());
+}
+
+// Regression test for crbug.com/414526.
+//
+// Same setup as CanEmbedExtensionOptions but disable the extension before
+// embedding.
+IN_PROC_BROWSER_TEST_F(ExtensionWebUITest, EmbedDisabledExtension) {
+  scoped_ptr<ExtensionTestMessageListener> listener(
+      new ExtensionTestMessageListener("ready", true));
+
+  std::string extension_id;
+  {
+    const Extension* extension =
+        LoadExtension(test_data_dir_.AppendASCII("extension_options")
+                          .AppendASCII("embed_self"));
+    ASSERT_TRUE(extension);
+    extension_id = extension->id();
+    DisableExtension(extension_id);
+  }
+
+  ASSERT_TRUE(RunTestOnExtensionsFrame("can_embed_extension_options.js"));
+
+  ASSERT_TRUE(listener->WaitUntilSatisfied());
+  listener->Reply(extension_id);
+  listener.reset(new ExtensionTestMessageListener("createfailed", false));
   ASSERT_TRUE(listener->WaitUntilSatisfied());
 }
 

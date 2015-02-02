@@ -14,6 +14,10 @@
 #include "extensions/browser/uninstall_reason.h"
 #include "extensions/common/extension_set.h"
 
+#if !defined(ENABLE_EXTENSIONS)
+#error "Extensions must be enabled"
+#endif
+
 namespace content {
 class BrowserContext;
 }
@@ -38,14 +42,14 @@ class ExtensionRegistry : public KeyedService {
   };
 
   explicit ExtensionRegistry(content::BrowserContext* browser_context);
-  virtual ~ExtensionRegistry();
+  ~ExtensionRegistry() override;
 
   // Returns the instance for the given |browser_context|.
   static ExtensionRegistry* Get(content::BrowserContext* browser_context);
 
   content::BrowserContext* browser_context() const { return browser_context_; }
 
-  // NOTE: These sets are *eventually* mututally exclusive, but an extension can
+  // NOTE: These sets are *eventually* mutually exclusive, but an extension can
   // appear in two sets for short periods of time.
   const ExtensionSet& enabled_extensions() const {
     return enabled_extensions_;
@@ -142,7 +146,7 @@ class ExtensionRegistry : public KeyedService {
       const ExtensionSet::ModificationCallback& callback);
 
   // KeyedService implementation:
-  virtual void Shutdown() OVERRIDE;
+  void Shutdown() override;
 
  private:
   // Extensions that are installed, enabled and not terminated.

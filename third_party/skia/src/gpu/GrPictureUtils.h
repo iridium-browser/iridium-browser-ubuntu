@@ -21,23 +21,24 @@ public:
         SaveLayerInfo() : fPicture(NULL), fPaint(NULL) {}
         ~SaveLayerInfo() { SkSafeUnref(fPicture); SkDELETE(fPaint); }
 
-        // True if the SaveLayerInfo is valid. False if 'fOffset' is
-        // invalid (due to a non-invertible CTM).
-        // TODO: remove fValid
-        bool fValid;
         // The picture owning the layer. If the owning picture is the top-most
         // one (i.e., the picture for which this GrAccelData was created) then
         // this pointer is NULL. If it is a nested picture then the pointer
         // is non-NULL and owns a ref on the picture.
         const SkPicture* fPicture;
-        // The size of the saveLayer
-        SkISize fSize;
-        // The matrix state in which this layer's draws must occur. It does not
-        // include the translation needed to map the layer's top-left point to the origin.
-        SkMatrix fOriginXform;
-        // The offset that needs to be passed to drawBitmap to correctly
-        // position the pre-rendered layer. It is in device space.
-        SkIPoint fOffset;
+        // The device space bounds of this layer.
+        SkRect fBounds;
+        // The pre-matrix begins as the identity and accumulates the transforms
+        // of the containing SkPictures (if any). This matrix state has to be
+        // part of the initial matrix during replay so that it will be 
+        // preserved across setMatrix calls.
+        SkMatrix fPreMat;
+        // The matrix state (in the leaf picture) in which this layer's draws 
+        // must occur. It will/can be overridden by setMatrix calls in the
+        // layer itself. It does not include the translation needed to map the 
+        // layer's top-left point to the origin (which must be part of the
+        // initial matrix).
+        SkMatrix fLocalMat;
         // The paint to use on restore. Can be NULL since it is optional.
         const SkPaint* fPaint;
         // The ID of this saveLayer in the picture. 0 is an invalid ID.

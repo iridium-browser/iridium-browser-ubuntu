@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
-
 /**
  * Interval for updating media info (in ms).
  * @type {number}
@@ -488,6 +486,8 @@ CastVideoElement.prototype = {
     }
 
     if (this.currentMediaDuration_ !== media.media.duration) {
+      metrics.recordCastedVideoLength(this.currentMediaDuration_);
+
       this.currentMediaDuration_ = media.media.duration;
       this.dispatchEvent(new Event('durationchange'));
     }

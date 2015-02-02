@@ -16,7 +16,7 @@ namespace extensions {
 struct SandboxedPageInfo : public Extension::ManifestData {
  public:
   SandboxedPageInfo();
-  virtual ~SandboxedPageInfo();
+  ~SandboxedPageInfo() override;
 
   // Returns the extension's Content Security Policy for the sandboxed pages.
   static const std::string& GetContentSecurityPolicy(
@@ -42,12 +42,12 @@ struct SandboxedPageInfo : public Extension::ManifestData {
 class SandboxedPageHandler : public ManifestHandler {
  public:
   SandboxedPageHandler();
-  virtual ~SandboxedPageHandler();
+  ~SandboxedPageHandler() override;
 
-  virtual bool Parse(Extension* extension, base::string16* error) OVERRIDE;
+  bool Parse(Extension* extension, base::string16* error) override;
 
  private:
-  virtual const std::vector<std::string> Keys() const OVERRIDE;
+  const std::vector<std::string> Keys() const override;
 };
 
 }  // namespace extensions

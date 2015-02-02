@@ -54,8 +54,8 @@
  * copied and put under another distribution licence
  * [including the GNU Public Licence.] */
 
-#if !defined(_BSD_SOURCE)
-#define _BSD_SOURCE  /* for snprintf, vprintf etc */
+#if !defined(_POSIX_C_SOURCE)
+#define _POSIX_C_SOURCE 201410L  /* for snprintf, vprintf etc */
 #endif
 
 #include <openssl/bio.h>
@@ -74,6 +74,17 @@ int BIO_printf(BIO *bio, const char *format, ...) {
   va_start(args, format);
   out_len = vsnprintf(buf, sizeof(buf), format, args);
   va_end(args);
+
+#if defined(OPENSSL_WINDOWS)
+  /* On Windows, vsnprintf returns -1 rather than the requested length on
+   * truncation */
+  if (out_len < 0) {
+    va_start(args, format);
+    out_len = _vscprintf(format, args);
+    va_end(args);
+    assert(out_len >= sizeof(buf));
+  }
+#endif
 
   if (out_len >= sizeof(buf)) {
     const int requested_len = out_len;

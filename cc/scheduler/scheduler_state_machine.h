@@ -17,7 +17,7 @@
 
 namespace base {
 namespace debug {
-class ConvertableToTraceForamt;
+class ConvertableToTraceFormat;
 class TracedValue;
 }
 class Value;
@@ -68,7 +68,6 @@ class CC_EXPORT SchedulerStateMachine {
     COMMIT_STATE_BEGIN_MAIN_FRAME_STARTED,
     COMMIT_STATE_READY_TO_COMMIT,
     COMMIT_STATE_WAITING_FOR_ACTIVATION,
-    COMMIT_STATE_WAITING_FOR_FIRST_DRAW,
   };
   static const char* CommitStateToString(CommitState state);
 
@@ -239,6 +238,12 @@ class CC_EXPORT SchedulerStateMachine {
 
   bool CouldSendBeginMainFrame() const;
 
+  void SetImplLatencyTakesPriorityOnBattery(
+      bool impl_latency_takes_priority_on_battery) {
+    impl_latency_takes_priority_on_battery_ =
+        impl_latency_takes_priority_on_battery;
+  }
+
   // TODO(zmo): This is temporary for debugging crbug.com/393331.
   // We should remove it afterwards.
   std::string GetStatesForDebugging() const;
@@ -261,6 +266,7 @@ class CC_EXPORT SchedulerStateMachine {
   bool ShouldManageTiles() const;
 
   void AdvanceCurrentFrameNumber();
+  bool HasAnimatedThisFrame() const;
   bool HasSentBeginMainFrameThisFrame() const;
   bool HasUpdatedVisibleTilesThisFrame() const;
   bool HasRequestedSwapThisFrame() const;
@@ -308,11 +314,13 @@ class CC_EXPORT SchedulerStateMachine {
   bool has_pending_tree_;
   bool pending_tree_is_ready_for_activation_;
   bool active_tree_needs_first_draw_;
+  bool did_commit_after_animating_;
   bool did_create_and_initialize_first_output_surface_;
   bool impl_latency_takes_priority_;
   bool skip_next_begin_main_frame_to_reduce_latency_;
   bool skip_begin_main_frame_to_reduce_latency_;
   bool continuous_painting_;
+  bool impl_latency_takes_priority_on_battery_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(SchedulerStateMachine);

@@ -49,20 +49,19 @@ class FaviconCache : public syncer::SyncableService,
                      public content::NotificationObserver {
  public:
   FaviconCache(Profile* profile, int max_sync_favicon_limit);
-  virtual ~FaviconCache();
+  ~FaviconCache() override;
 
   // SyncableService implementation.
-  virtual syncer::SyncMergeResult MergeDataAndStartSyncing(
+  syncer::SyncMergeResult MergeDataAndStartSyncing(
       syncer::ModelType type,
       const syncer::SyncDataList& initial_sync_data,
       scoped_ptr<syncer::SyncChangeProcessor> sync_processor,
-      scoped_ptr<syncer::SyncErrorFactory> error_handler) OVERRIDE;
-  virtual void StopSyncing(syncer::ModelType type) OVERRIDE;
-  virtual syncer::SyncDataList GetAllSyncData(syncer::ModelType type)
-      const OVERRIDE;
-  virtual syncer::SyncError ProcessSyncChanges(
+      scoped_ptr<syncer::SyncErrorFactory> error_handler) override;
+  void StopSyncing(syncer::ModelType type) override;
+  syncer::SyncDataList GetAllSyncData(syncer::ModelType type) const override;
+  syncer::SyncError ProcessSyncChanges(
       const tracked_objects::Location& from_here,
-      const syncer::SyncChangeList& change_list) OVERRIDE;
+      const syncer::SyncChangeList& change_list) override;
 
   // If a valid favicon for the icon at |favicon_url| is found, fills
   // |favicon_png| with the png-encoded image and returns true. Else, returns
@@ -98,9 +97,9 @@ class FaviconCache : public syncer::SyncableService,
                              int64 visit_time_ms);
 
   // NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
  private:
   friend class SyncFaviconCacheTest;

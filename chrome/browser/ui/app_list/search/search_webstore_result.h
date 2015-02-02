@@ -8,27 +8,29 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "chrome/browser/ui/app_list/search/chrome_search_result.h"
+#include "ui/app_list/search_result.h"
 #include "url/gurl.h"
 
+class AppListControllerDelegate;
 class Profile;
 
 namespace app_list {
 
 // A "search in webstore" result.
-class SearchWebstoreResult : public ChromeSearchResult {
+class SearchWebstoreResult : public SearchResult {
  public:
-  SearchWebstoreResult(Profile* profile, const std::string& query);
-  virtual ~SearchWebstoreResult();
+  SearchWebstoreResult(Profile* profile,
+                       AppListControllerDelegate* controller,
+                       const std::string& query);
+  ~SearchWebstoreResult() override;
 
-  // ChromeSearchResult overides:
-  virtual void Open(int event_flags) OVERRIDE;
-  virtual void InvokeAction(int action_index, int event_flags) OVERRIDE;
-  virtual scoped_ptr<ChromeSearchResult> Duplicate() OVERRIDE;
-  virtual ChromeSearchResultType GetType() OVERRIDE;
+  // SearchResult overrides:
+  void Open(int event_flags) override;
+  scoped_ptr<SearchResult> Duplicate() override;
 
  private:
   Profile* profile_;
+  AppListControllerDelegate* controller_;
   const std::string query_;
   GURL launch_url_;
 

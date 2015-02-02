@@ -25,10 +25,11 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "talk/p2p/base/stunport.h"
+#include "webrtc/p2p/base/stunport.h"
 
-#include "talk/p2p/base/common.h"
-#include "talk/p2p/base/stun.h"
+#include "webrtc/p2p/base/common.h"
+#include "webrtc/p2p/base/portallocator.h"
+#include "webrtc/p2p/base/stun.h"
 #include "webrtc/base/common.h"
 #include "webrtc/base/helpers.h"
 #include "webrtc/base/logging.h"
@@ -389,12 +390,23 @@ void UDPPort::OnStunBindingRequestSucceeded(
   }
   bind_request_succeeded_servers_.insert(stun_server_addr);
 
-  if (!SharedSocket() || stun_reflected_addr != socket_->GetLocalAddress()) {
-    // If socket is shared and |stun_reflected_addr| is equal to local socket
-    // address then discarding the stun address.
-    // For STUN related address is local socket address.
+  // If socket is shared and |stun_reflected_addr| is equal to local socket
+  // address, or if the same address has been added by another STUN server,
+  // then discarding the stun address.
+  // For STUN, related address is the local socket address.
+  if ((!SharedSocket() || stun_reflected_addr != socket_->GetLocalAddress()) &&
+      !HasCandidateWithAddress(stun_reflected_addr)) {
+
+    rtc::SocketAddress related_address = socket_->GetLocalAddress();
+    if (!(candidate_filter() & CF_HOST)) {
+      // If candidate filter doesn't have CF_HOST specified, empty raddr to
+      // avoid local address leakage.
+      related_address = rtc::EmptySocketAddressWithFamily(
+          related_address.family());
+    }
+
     AddAddress(stun_reflected_addr, socket_->GetLocalAddress(),
-               socket_->GetLocalAddress(), UDP_PROTOCOL_NAME, "",
+               related_address, UDP_PROTOCOL_NAME, "",
                STUN_PORT_TYPE, ICE_TYPE_PREFERENCE_SRFLX, 0, false);
   }
   MaybeSetPortCompleteOrError();
@@ -441,6 +453,16 @@ void UDPPort::OnSendPacket(const void* data, size_t size, StunRequest* req) {
   rtc::PacketOptions options(DefaultDscpValue());
   if (socket_->SendTo(data, size, sreq->server_addr(), options) < 0)
     PLOG(LERROR, socket_->GetError()) << "sendto";
+}
+
+bool UDPPort::HasCandidateWithAddress(const rtc::SocketAddress& addr) const {
+  const std::vector<Candidate>& existing_candidates = Candidates();
+  std::vector<Candidate>::const_iterator it = existing_candidates.begin();
+  for (; it != existing_candidates.end(); ++it) {
+    if (it->address() == addr)
+      return true;
+  }
+  return false;
 }
 
 }  // namespace cricket

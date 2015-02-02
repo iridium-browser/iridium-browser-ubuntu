@@ -9,7 +9,7 @@
 #include "base/debug/trace_event.h"
 #include "base/lazy_instance.h"
 #include "base/message_loop/message_loop.h"
-#include "base/process/process.h"
+#include "base/process/process_handle.h"
 #include "base/strings/string_number_conversions.h"
 #include "content/common/devtools_messages.h"
 #include "content/common/frame_messages.h"
@@ -51,6 +51,8 @@ namespace content {
 base::subtle::AtomicWord DevToolsAgent::event_callback_;
 
 namespace {
+
+const size_t kMaxMessageChunkSize = IPC::Channel::kMaximumMessageSize / 4;
 
 class WebKitClientMessageLoopImpl
     : public WebDevToolsAgentClient::WebKitClientMessageLoop {
@@ -116,12 +118,23 @@ bool DevToolsAgent::OnMessageReceived(const IPC::Message& message) {
 
 void DevToolsAgent::sendMessageToInspectorFrontend(
     const blink::WebString& message) {
-  Send(new DevToolsClientMsg_DispatchOnInspectorFrontend(routing_id(),
-                                                         message.utf8()));
+  std::string msg(message.utf8());
+  if (msg.length() < kMaxMessageChunkSize) {
+    Send(new DevToolsClientMsg_DispatchOnInspectorFrontend(
+        routing_id(), msg, msg.size()));
+    return;
+  }
+
+  for (size_t pos = 0; pos < msg.length(); pos += kMaxMessageChunkSize) {
+    Send(new DevToolsClientMsg_DispatchOnInspectorFrontend(
+        routing_id(),
+        msg.substr(pos, kMaxMessageChunkSize),
+        pos ? 0 : msg.size()));
+  }
 }
 
 long DevToolsAgent::processId() {
-  return base::Process::Current().pid();
+  return base::GetCurrentProcId();
 }
 
 int DevToolsAgent::debuggerId() {

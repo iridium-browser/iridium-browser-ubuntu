@@ -67,7 +67,7 @@ WebInspector.TimelineView = function(delegate, model, uiUtils)
     this._popoverHelper = new WebInspector.PopoverHelper(this.element, this._getPopoverAnchor.bind(this), this._showPopover.bind(this));
 
     this.element.addEventListener("mousemove", this._mouseMove.bind(this), false);
-    this.element.addEventListener("mouseout", this._mouseOut.bind(this), false);
+    this.element.addEventListener("mouseleave", this._mouseLeave.bind(this), false);
     this.element.addEventListener("keydown", this._keyDown.bind(this), false);
 
     this._expandOffset = 15;
@@ -150,7 +150,7 @@ WebInspector.TimelineView.prototype = {
             this._frameContainer.removeChildren();
         } else {
             const frameContainerBorderWidth = 1;
-            this._frameContainer = document.createElementWithClass("div", "fill timeline-frame-container");
+            this._frameContainer = createElementWithClass("div", "fill timeline-frame-container");
             this._frameContainer.style.height = WebInspector.TimelinePanel.rowHeight + frameContainerBorderWidth + "px";
             this._frameContainer.addEventListener("dblclick", this._onFrameDoubleClicked.bind(this), false);
             this._frameContainer.addEventListener("click", this._onFrameClicked.bind(this), false);
@@ -164,7 +164,7 @@ WebInspector.TimelineView.prototype = {
             var frameStart = this._calculator.computePosition(frame.startTime);
             var frameEnd = this._calculator.computePosition(frame.endTime);
 
-            var frameStrip = document.createElementWithClass("div", "timeline-frame-strip");
+            var frameStrip = createElementWithClass("div", "timeline-frame-strip");
             var actualStart = Math.max(frameStart, 0);
             var width = frameEnd - actualStart;
             frameStrip.style.left = actualStart + "px";
@@ -347,9 +347,13 @@ WebInspector.TimelineView.prototype = {
             for (var category in aggregatedStats)
                 idle -= aggregatedStats[category];
             aggregatedStats["idle"] = idle;
+
+            var contentHelper = new WebInspector.TimelineDetailsContentHelper(null, null, true);
             var pieChart = WebInspector.TimelineUIUtils.generatePieChart(aggregatedStats);
             var title = this._uiUtils.titleForRecord(presentationRecord.record());
-            this._delegate.showInDetails(title, pieChart);
+            contentHelper.appendTextRow(WebInspector.UIString("Type"), title);
+            contentHelper.appendElementRow(WebInspector.UIString("Aggregated Time"), pieChart);
+            this._delegate.showInDetails(contentHelper.element);
             return;
         }
         this._delegate.select(WebInspector.TimelineSelection.fromRecord(presentationRecord.record()));
@@ -722,7 +726,7 @@ WebInspector.TimelineView.prototype = {
             return anchor;
     },
 
-    _mouseOut: function()
+    _mouseLeave: function()
     {
         this._hideQuadHighlight();
     },
@@ -1030,12 +1034,12 @@ WebInspector.TimelineCalculator.prototype = {
  */
 WebInspector.TimelineRecordListRow = function(linkifier, selectRecord, scheduleRefresh)
 {
-    this.element = document.createElement("div");
+    this.element = createElement("div");
     this.element.row = this;
     this.element.style.cursor = "pointer";
     this.element.addEventListener("click", this._onClick.bind(this), false);
     this.element.addEventListener("mouseover", this._onMouseOver.bind(this), false);
-    this.element.addEventListener("mouseout", this._onMouseOut.bind(this), false);
+    this.element.addEventListener("mouseleave", this._onMouseLeave.bind(this), false);
     this._linkifier = linkifier;
 
     // Warning is float right block, it goes first.
@@ -1147,11 +1151,11 @@ WebInspector.TimelineRecordListRow.prototype = {
     /**
      * @param {!Event} event
      */
-    _onMouseOut: function(event)
+    _onMouseLeave: function(event)
     {
         this.element.classList.remove("hovered");
-    if (this._record.graphRow())
-        this._record.graphRow().element.classList.remove("hovered");
+        if (this._record.graphRow())
+            this._record.graphRow().element.classList.remove("hovered");
     }
 }
 
@@ -1163,10 +1167,10 @@ WebInspector.TimelineRecordListRow.prototype = {
  */
 WebInspector.TimelineRecordGraphRow = function(graphContainer, selectRecord, scheduleRefresh)
 {
-    this.element = document.createElement("div");
+    this.element = createElement("div");
     this.element.row = this;
     this.element.addEventListener("mouseover", this._onMouseOver.bind(this), false);
-    this.element.addEventListener("mouseout", this._onMouseOut.bind(this), false);
+    this.element.addEventListener("mouseleave", this._onMouseLeave.bind(this), false);
     this.element.addEventListener("click", this._onClick.bind(this), false);
 
     this._barAreaElement = this.element.createChild("div", "timeline-graph-bar-area");
@@ -1246,7 +1250,7 @@ WebInspector.TimelineRecordGraphRow.prototype = {
     /**
      * @param {!Event} event
      */
-    _onMouseOut: function(event)
+    _onMouseLeave: function(event)
     {
         this.element.classList.remove("hovered");
         if (this._record.listRow())

@@ -28,7 +28,7 @@ class NackFeedbackVerification : public RtpPayloadFeedback {
   NackFeedbackVerification()
       : triggered_(false), missing_packets_(), last_frame_acked_(0) {}
 
-  virtual void CastFeedback(const RtcpCastMessage& cast_feedback) OVERRIDE {
+  void CastFeedback(const RtcpCastMessage& cast_feedback) override {
     EXPECT_EQ(kSsrc, cast_feedback.media_ssrc);
 
     last_frame_acked_ = cast_feedback.ack_frame_id;
@@ -100,7 +100,7 @@ class CastMessageBuilderTest : public ::testing::Test {
         base::TimeDelta::FromMilliseconds(kStartMillisecond));
   }
 
-  virtual ~CastMessageBuilderTest() {}
+  ~CastMessageBuilderTest() override {}
 
   void SetFrameIds(uint32 frame_id, uint32 reference_frame_id) {
     rtp_header_.frame_id = frame_id;

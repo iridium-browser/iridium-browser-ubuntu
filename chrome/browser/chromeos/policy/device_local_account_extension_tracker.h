@@ -16,6 +16,11 @@ class SchemaRegistry;
 
 // Helper class that keeps all the extensions that a device-local account uses
 // registered in a SchemaRegistry.
+// This makes it possible to precache the policy for extensions for public
+// sessions before the session is started (e.g. during enrollment).
+// Otherwise, the ComponentCloudPolicyService would ignore the
+// PolicyFetchResponses from the DMServer because the SchemaRegistry for this
+// account doesn't have this extension "installed".
 class DeviceLocalAccountExtensionTracker : public CloudPolicyStore::Observer {
  public:
   DeviceLocalAccountExtensionTracker(
@@ -26,8 +31,8 @@ class DeviceLocalAccountExtensionTracker : public CloudPolicyStore::Observer {
   virtual ~DeviceLocalAccountExtensionTracker();
 
   // CloudPolicyStore::Observer:
-  virtual void OnStoreLoaded(CloudPolicyStore* store) OVERRIDE;
-  virtual void OnStoreError(CloudPolicyStore* store) OVERRIDE;
+  virtual void OnStoreLoaded(CloudPolicyStore* store) override;
+  virtual void OnStoreError(CloudPolicyStore* store) override;
 
  private:
   void UpdateFromStore();

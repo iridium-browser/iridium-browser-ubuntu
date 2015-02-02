@@ -94,7 +94,9 @@ class CONTENT_EXPORT BrowserContext : public base::SupportsUserData {
       const GURL& origin,
       int64 service_worker_registration_id,
       const std::string& data,
-      const base::Callback<void(PushMessagingStatus)>& callback);
+      const base::Callback<void(PushDeliveryStatus)>& callback);
+
+  static void NotifyWillBeDestroyed(BrowserContext* browser_context);
 
   // Ensures that the corresponding ResourceContext is initialized. Normally the
   // BrowserContext initializs the corresponding getters when its objects are
@@ -107,7 +109,7 @@ class CONTENT_EXPORT BrowserContext : public base::SupportsUserData {
   // across the next restart.
   static void SaveSessionState(BrowserContext* browser_context);
 
-  virtual ~BrowserContext();
+  ~BrowserContext() override;
 
   // Returns the path of the directory where this context's data is stored.
   virtual base::FilePath GetPath() const = 0;
@@ -167,18 +169,5 @@ class CONTENT_EXPORT BrowserContext : public base::SupportsUserData {
 };
 
 }  // namespace content
-
-#if defined(COMPILER_GCC)
-namespace BASE_HASH_NAMESPACE {
-
-template<>
-struct hash<content::BrowserContext*> {
-  std::size_t operator()(content::BrowserContext* const& p) const {
-    return reinterpret_cast<std::size_t>(p);
-  }
-};
-
-}  // namespace BASE_HASH_NAMESPACE
-#endif
 
 #endif  // CONTENT_PUBLIC_BROWSER_BROWSER_CONTEXT_H_

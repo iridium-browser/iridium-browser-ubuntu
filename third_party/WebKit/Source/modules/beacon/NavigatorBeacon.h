@@ -9,26 +9,23 @@
 #include "platform/Supplementable.h"
 #include "platform/heap/Handle.h"
 
-namespace WTF {
-class ArrayBufferView;
-}
-
 namespace blink {
 
 class Blob;
+class DOMArrayBufferView;
 class DOMFormData;
 class ExceptionState;
 class ExecutionContext;
 class KURL;
 
-class NavigatorBeacon FINAL : public NoBaseWillBeGarbageCollected<NavigatorBeacon>, public WillBeHeapSupplement<Navigator> {
+class NavigatorBeacon final : public NoBaseWillBeGarbageCollected<NavigatorBeacon>, public WillBeHeapSupplement<Navigator> {
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(NavigatorBeacon);
 public:
     static NavigatorBeacon& from(Navigator&);
 
     static bool sendBeacon(ExecutionContext*, Navigator&, const String&, const String&, ExceptionState&);
-    static bool sendBeacon(ExecutionContext*, Navigator&, const String&, PassRefPtr<WTF::ArrayBufferView>, ExceptionState&);
-    static bool sendBeacon(ExecutionContext*, Navigator&, const String&, PassRefPtrWillBeRawPtr<Blob>, ExceptionState&);
+    static bool sendBeacon(ExecutionContext*, Navigator&, const String&, PassRefPtr<DOMArrayBufferView>, ExceptionState&);
+    static bool sendBeacon(ExecutionContext*, Navigator&, const String&, Blob*, ExceptionState&);
     static bool sendBeacon(ExecutionContext*, Navigator&, const String&, PassRefPtrWillBeRawPtr<DOMFormData>, ExceptionState&);
 
 private:
@@ -37,8 +34,8 @@ private:
     static const char* supplementName();
 
     bool sendBeacon(ExecutionContext*, const String&, const String&, ExceptionState&);
-    bool sendBeacon(ExecutionContext*, const String&, PassRefPtr<WTF::ArrayBufferView>, ExceptionState&);
-    bool sendBeacon(ExecutionContext*, const String&, PassRefPtrWillBeRawPtr<Blob>, ExceptionState&);
+    bool sendBeacon(ExecutionContext*, const String&, PassRefPtr<DOMArrayBufferView>, ExceptionState&);
+    bool sendBeacon(ExecutionContext*, const String&, Blob*, ExceptionState&);
     bool sendBeacon(ExecutionContext*, const String&, PassRefPtrWillBeRawPtr<DOMFormData>, ExceptionState&);
 
     bool canSendBeacon(ExecutionContext*, const KURL&, ExceptionState&);

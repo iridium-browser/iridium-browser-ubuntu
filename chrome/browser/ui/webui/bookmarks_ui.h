@@ -22,16 +22,16 @@ class BookmarksUIHTMLSource : public content::URLDataSource {
   BookmarksUIHTMLSource();
 
   // content::URLDataSource implementation.
-  virtual std::string GetSource() const OVERRIDE;
-  virtual void StartDataRequest(
+  std::string GetSource() const override;
+  void StartDataRequest(
       const std::string& path,
       int render_process_id,
       int render_frame_id,
-      const content::URLDataSource::GotDataCallback& callback) OVERRIDE;
-  virtual std::string GetMimeType(const std::string& path) const OVERRIDE;
+      const content::URLDataSource::GotDataCallback& callback) override;
+  std::string GetMimeType(const std::string& path) const override;
 
  private:
-  virtual ~BookmarksUIHTMLSource();
+  ~BookmarksUIHTMLSource() override;
 
   DISALLOW_COPY_AND_ASSIGN(BookmarksUIHTMLSource);
 };

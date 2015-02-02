@@ -14,10 +14,15 @@ namespace blink {
 
 class WebServiceWorkerResponsePrivate : public RefCounted<WebServiceWorkerResponsePrivate> {
 public:
-    WebServiceWorkerResponsePrivate() : status(0) { }
+    WebServiceWorkerResponsePrivate()
+        : status(0)
+        , responseType(WebServiceWorkerResponseTypeOpaque)
+    {
+    }
     WebURL url;
     unsigned short status;
     WebString statusText;
+    WebServiceWorkerResponseType responseType;
     HTTPHeaderMap headers;
     RefPtr<BlobDataHandle> blobDataHandle;
 };
@@ -67,6 +72,16 @@ WebString WebServiceWorkerResponse::statusText() const
     return m_private->statusText;
 }
 
+void WebServiceWorkerResponse::setResponseType(WebServiceWorkerResponseType responseType)
+{
+    m_private->responseType = responseType;
+}
+
+WebServiceWorkerResponseType WebServiceWorkerResponse::responseType() const
+{
+    return m_private->responseType;
+}
+
 void WebServiceWorkerResponse::setHeader(const WebString& key, const WebString& value)
 {
     m_private->headers.set(key, value);
@@ -99,11 +114,23 @@ void WebServiceWorkerResponse::visitHTTPHeaderFields(WebHTTPHeaderVisitor* heade
         headerVisitor->visitHeader(i->key, i->value);
 }
 
+void WebServiceWorkerResponse::setBlob(const WebString& uuid, uint64_t size)
+{
+    m_private->blobDataHandle = BlobDataHandle::create(uuid, String(), size);
+}
+
 WebString WebServiceWorkerResponse::blobUUID() const
 {
     if (!m_private->blobDataHandle)
         return WebString();
     return m_private->blobDataHandle->uuid();
+}
+
+uint64_t WebServiceWorkerResponse::blobSize() const
+{
+    if (!m_private->blobDataHandle)
+        return 0;
+    return m_private->blobDataHandle->size();
 }
 
 const HTTPHeaderMap& WebServiceWorkerResponse::headers() const

@@ -63,6 +63,20 @@ class PaygenPayloadLibTest(mox.MoxTestBase):
         uri=('gs://chromeos-releases-test/dev-channel/x86-alex/4171.0.0/'
              'chromeos_4171.0.1_x86-alex_recovery_nplusone-channel_mp-v3.bin'))
 
+    self.old_test_image = gspaths.UnsignedImageArchive(
+        channel='dev-channel',
+        board='x86-alex',
+        version='1620.0.0',
+        uri=('gs://chromeos-releases-test/dev-channel/x86-alex/1620.0.0/'
+             'chromeos_1620.0.0_x86-alex_recovery_dev-channel_test.bin'))
+
+    self.new_test_image = gspaths.Image(
+        channel='dev-channel',
+        board='x86-alex',
+        version='4171.0.0',
+        uri=('gs://chromeos-releases-test/dev-channel/x86-alex/4171.0.0/'
+             'chromeos_4171.0.0_x86-alex_recovery_dev-channel_test.bin'))
+
     self.full_payload = gspaths.Payload(tgt_image=self.old_image,
                                         src_image=None,
                                         uri='gs://full_old_foo/boo')
@@ -74,6 +88,14 @@ class PaygenPayloadLibTest(mox.MoxTestBase):
     self.nplusone_payload = gspaths.Payload(tgt_image=self.new_nplusone_image,
                                             src_image=self.new_image,
                                             uri='gs://delta_npo_new/boo')
+
+    self.full_test_payload = gspaths.Payload(tgt_image=self.old_test_image,
+                                             src_image=None,
+                                             uri='gs://full_old_foo/boo-test')
+
+    self.delta_test_payload = gspaths.Payload(tgt_image=self.new_test_image,
+                                              src_image=self.old_test_image,
+                                              uri='gs://delta_new_old/boo-test')
 
   @classmethod
   def setUpClass(cls):
@@ -134,6 +156,12 @@ class PaygenPayloadLibBasicTest(PaygenPayloadLibTest):
                      '/foo/bar.log')
     self.assertEqual(gen._DeltaLogsUri('gs://foo/bar'),
                      'gs://foo/bar.log')
+
+    self.assertEqual(gen._JsonUri('/foo/bar'),
+                     '/foo/bar.json')
+    self.assertEqual(gen._JsonUri('gs://foo/bar'),
+                     'gs://foo/bar.json')
+
 
   @osutils.TempDirDecorator
   def testGeneratorUri(self):
@@ -376,6 +404,69 @@ class PaygenPayloadLibBasicTest(PaygenPayloadLibTest):
     self.mox.ReplayAll()
     gen._GenerateUnsignedPayload()
 
+  def testGenerateUnsignedTestPayloadFull(self):
+    """Test _GenerateUnsignedPayload with full test payload."""
+    gen = self._GetStdGenerator(payload=self.full_test_payload,
+                                work_dir='/work')
+
+    # Stub out the required functions.
+    self.mox.StubOutWithMock(gen, '_RunGeneratorCmd')
+    self.mox.StubOutWithMock(gen, '_StoreDeltaLog')
+
+    # Record the expected function calls.
+    cmd = ['cros_generate_update_payload',
+           '--outside_chroot',
+           '--output', gen.payload_file,
+           '--image', gen.tgt_image_file,
+           '--channel', 'dev-channel',
+           '--board', 'x86-alex',
+           '--version', '1620.0.0',
+           '--key', 'test',
+           '--build_channel', 'dev-channel',
+           '--build_version', '1620.0.0',
+           ]
+    gen._RunGeneratorCmd(cmd).AndReturn('log contents')
+    gen._StoreDeltaLog('log contents')
+
+    # Run the test.
+    self.mox.ReplayAll()
+    gen._GenerateUnsignedPayload()
+
+  def testGenerateUnsignedTestPayloadDelta(self):
+    """Test _GenerateUnsignedPayload with delta payload."""
+    gen = self._GetStdGenerator(payload=self.delta_test_payload,
+                                work_dir='/work')
+
+    # Stub out the required functions.
+    self.mox.StubOutWithMock(gen, '_RunGeneratorCmd')
+    self.mox.StubOutWithMock(gen, '_StoreDeltaLog')
+
+    # Record the expected function calls.
+    cmd = ['cros_generate_update_payload',
+           '--outside_chroot',
+           '--output', gen.payload_file,
+           '--image', gen.tgt_image_file,
+           '--channel', 'dev-channel',
+           '--board', 'x86-alex',
+           '--version', '4171.0.0',
+           '--key', 'test',
+           '--build_channel', 'dev-channel',
+           '--build_version', '4171.0.0',
+           '--src_image', gen.src_image_file,
+           '--src_channel', 'dev-channel',
+           '--src_board', 'x86-alex',
+           '--src_version', '1620.0.0',
+           '--src_key', 'test',
+           '--src_build_channel', 'dev-channel',
+           '--src_build_version', '1620.0.0',
+           ]
+    gen._RunGeneratorCmd(cmd).AndReturn('log contents')
+    gen._StoreDeltaLog('log contents')
+
+    # Run the test.
+    self.mox.ReplayAll()
+    gen._GenerateUnsignedPayload()
+
   @osutils.TempDirDecorator
   def testGenPayloadHashes(self):
     """Test _GenPayloadHash via mox."""
@@ -476,6 +567,24 @@ class PaygenPayloadLibBasicTest(PaygenPayloadLibTest):
     with file(gen.metadata_signature_file, 'rb') as f:
       self.assertEqual(f.read(), encoded_metadata_signature)
 
+  @osutils.TempDirDecorator
+  def testPayloadJson(self):
+    """Test how we store the payload description in json."""
+    gen = self._GetStdGenerator(payload=self.delta_payload)
+    osutils.WriteFile(gen.payload_file, 'Fake payload contents.')
+
+    metadata_signatures = ('1',)
+
+    expected_json = (
+        '{"metadata_signature": "MQ==", "sha1_hex": "FDwoNOUO+kNwrQJMSLnLDY7i'
+        'Z/E=", "sha256_hex": "gkm9207E7xbqpNRBFjEPO43nxyp/MNGQfyH3IYrq2kE=",'
+        ' "version": 1}')
+
+    gen._StorePayloadJson(metadata_signatures)
+
+    # Validate the results.
+    self.assertEqual(osutils.ReadFile(gen.description_file), expected_json)
+
   def testSignPayload(self):
     """Test the overall payload signature process via mox."""
     payload_hash = 'payload_hash'
@@ -507,7 +616,11 @@ class PaygenPayloadLibBasicTest(PaygenPayloadLibTest):
 
     # Run the test.
     self.mox.ReplayAll()
-    gen._SignPayload()
+    result_payload_sigs, result_metadata_sigs = gen._SignPayload()
+
+    self.assertEqual(payload_sigs, result_payload_sigs)
+    self.assertEqual(metadata_sigs, result_metadata_sigs)
+
 
   def testCreateSignedDelta(self):
     """Test the overall payload generation process via mox."""
@@ -523,13 +636,16 @@ class PaygenPayloadLibBasicTest(PaygenPayloadLibTest):
                              '_GenerateUnsignedPayload')
     self.mox.StubOutWithMock(paygen_payload_lib._PaygenPayload,
                              '_SignPayload')
+    self.mox.StubOutWithMock(paygen_payload_lib._PaygenPayload,
+                             '_StorePayloadJson')
 
     # Record expected calls.
     gen._PrepareGenerator()
     gen._PrepareImage(payload.tgt_image, gen.tgt_image_file)
     gen._PrepareImage(payload.src_image, gen.src_image_file)
     gen._GenerateUnsignedPayload()
-    gen._SignPayload()
+    gen._SignPayload().AndReturn((['payload_sigs'], ['metadata_sigs']))
+    gen._StorePayloadJson(['metadata_sigs'])
 
     # Run the test.
     self.mox.ReplayAll()
@@ -551,12 +667,16 @@ class PaygenPayloadLibBasicTest(PaygenPayloadLibTest):
                 'gs://full_old_foo/boo.metadata-signature')
     urilib.Copy('/work/delta.log',
                 'gs://full_old_foo/boo.log')
+    urilib.Copy('/work/delta.json',
+                'gs://full_old_foo/boo.json')
 
     # Record unsigned calls.
     urilib.Copy('/work/delta.bin',
                 'gs://full_old_foo/boo')
     urilib.Copy('/work/delta.log',
                 'gs://full_old_foo/boo.log')
+    urilib.Copy('/work/delta.json',
+                'gs://full_old_foo/boo.json')
 
     # Run the test.
     self.mox.ReplayAll()

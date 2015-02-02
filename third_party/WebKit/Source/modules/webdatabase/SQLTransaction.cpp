@@ -32,6 +32,7 @@
 #include "bindings/core/v8/ExceptionState.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/html/VoidCallback.h"
+#include "core/inspector/InspectorInstrumentation.h"
 #include "modules/webdatabase/Database.h"
 #include "modules/webdatabase/DatabaseAuthorizer.h"
 #include "modules/webdatabase/DatabaseContext.h"
@@ -48,11 +49,10 @@
 
 namespace blink {
 
-PassRefPtrWillBeRawPtr<SQLTransaction> SQLTransaction::create(Database* db, SQLTransactionCallback* callback,
-    VoidCallback* successCallback, SQLTransactionErrorCallback* errorCallback,
-    bool readOnly)
+SQLTransaction* SQLTransaction::create(Database* db, SQLTransactionCallback* callback,
+    VoidCallback* successCallback, SQLTransactionErrorCallback* errorCallback, bool readOnly)
 {
-    return adoptRefWillBeNoop(new SQLTransaction(db, callback, successCallback, errorCallback, readOnly));
+    return new SQLTransaction(db, callback, successCallback, errorCallback, readOnly);
 }
 
 SQLTransaction::SQLTransaction(Database* db, SQLTransactionCallback* callback,
@@ -66,6 +66,7 @@ SQLTransaction::SQLTransaction(Database* db, SQLTransactionCallback* callback,
     , m_readOnly(readOnly)
 {
     ASSERT(m_database);
+    m_asyncOperationId = InspectorInstrumentation::traceAsyncOperationStarting(db->executionContext(), "SQLTransaction");
 }
 
 SQLTransaction::~SQLTransaction()
@@ -154,7 +155,9 @@ SQLTransactionState SQLTransaction::deliverTransactionCallback()
     // Spec 4.3.2 4: Invoke the transaction callback with the new SQLTransaction object
     if (SQLTransactionCallback* callback = m_callback.release()) {
         m_executeSqlAllowed = true;
+        InspectorInstrumentationCookie cookie = InspectorInstrumentation::traceAsyncCallbackStarting(m_database->executionContext(), m_asyncOperationId);
         shouldDeliverErrorCallback = !callback->handleEvent(this);
+        InspectorInstrumentation::traceAsyncCallbackCompleted(cookie);
         m_executeSqlAllowed = false;
     }
 
@@ -171,6 +174,8 @@ SQLTransactionState SQLTransaction::deliverTransactionCallback()
 
 SQLTransactionState SQLTransaction::deliverTransactionErrorCallback()
 {
+    InspectorInstrumentationCookie cookie = InspectorInstrumentation::traceAsyncOperationCompletedCallbackStarting(m_database->executionContext(), m_asyncOperationId);
+
     // Spec 4.3.2.10: If exists, invoke error callback with the last
     // error to have occurred in this transaction.
     if (SQLTransactionErrorCallback* errorCallback = m_errorCallback.release()) {
@@ -183,12 +188,12 @@ SQLTransactionState SQLTransaction::deliverTransactionErrorCallback()
             m_transactionError = SQLErrorData::create(*m_backend->transactionError());
         }
         ASSERT(m_transactionError);
-        RefPtrWillBeRawPtr<SQLError> error = SQLError::create(*m_transactionError);
-        errorCallback->handleEvent(error.get());
+        errorCallback->handleEvent(SQLError::create(*m_transactionError));
 
         m_transactionError = nullptr;
     }
 
+    InspectorInstrumentation::traceAsyncCallbackCompleted(cookie);
     clearCallbacks();
 
     // Spec 4.3.2.10: Rollback the transaction.
@@ -228,10 +233,13 @@ SQLTransactionState SQLTransaction::deliverQuotaIncreaseCallback()
 
 SQLTransactionState SQLTransaction::deliverSuccessCallback()
 {
+    InspectorInstrumentationCookie cookie = InspectorInstrumentation::traceAsyncOperationCompletedCallbackStarting(m_database->executionContext(), m_asyncOperationId);
+
     // Spec 4.3.2.8: Deliver success callback.
     if (VoidCallback* successCallback = m_successCallback.release())
         successCallback->handleEvent();
 
+    InspectorInstrumentation::traceAsyncCallbackCompleted(cookie);
     clearCallbacks();
 
     // Schedule a "post-success callback" step to return control to the database thread in case there
@@ -279,8 +287,8 @@ void SQLTransaction::executeSQL(const String& sqlStatement, const Vector<SQLValu
     else if (m_readOnly)
         permissions |= DatabaseAuthorizer::ReadOnlyMask;
 
-    OwnPtrWillBeRawPtr<SQLStatement> statement = SQLStatement::create(m_database.get(), callback, callbackError);
-    m_backend->executeSQL(statement.release(), sqlStatement, arguments, permissions);
+    SQLStatement* statement = SQLStatement::create(m_database.get(), callback, callbackError);
+    m_backend->executeSQL(statement, sqlStatement, arguments, permissions);
 }
 
 bool SQLTransaction::computeNextStateAndCleanupIfNeeded()

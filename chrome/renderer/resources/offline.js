@@ -19,6 +19,7 @@ function Runner(outerContainerId, opt_config) {
 
   this.outerContainerEl = document.querySelector(outerContainerId);
   this.containerEl = null;
+  this.detailsButton = this.outerContainerEl.querySelector('#details-button');
 
   this.config = opt_config || Runner.config;
 
@@ -86,6 +87,8 @@ var IS_MOBILE = window.navigator.userAgent.indexOf('Mobi') > -1;
 /** @const */
 var IS_TOUCH_ENABLED = 'ontouchstart' in window;
 
+/** @const */
+var IS_IOS = window.navigator.userAgent.indexOf('CriOS') > -1;
 
 /**
  * Default game configuration.
@@ -250,19 +253,22 @@ Runner.prototype = {
    * Load and decode base 64 encoded sounds.
    */
   loadSounds: function() {
-    this.audioContext = new AudioContext();
-    var resourceTemplate =
-        document.getElementById(this.config.RESOURCE_TEMPLATE_ID).content;
+    if (!IS_IOS) {
+      this.audioContext = new AudioContext();
+      var resourceTemplate =
+          document.getElementById(this.config.RESOURCE_TEMPLATE_ID).content;
 
-    for (var sound in Runner.sounds) {
-      var soundSrc = resourceTemplate.getElementById(Runner.sounds[sound]).src;
-      soundSrc = soundSrc.substr(soundSrc.indexOf(',') + 1);
-      var buffer = decodeBase64ToArrayBuffer(soundSrc);
+      for (var sound in Runner.sounds) {
+        var soundSrc =
+            resourceTemplate.getElementById(Runner.sounds[sound]).src;
+        soundSrc = soundSrc.substr(soundSrc.indexOf(',') + 1);
+        var buffer = decodeBase64ToArrayBuffer(soundSrc);
 
-      // Async, so no guarantee of order in array.
-      this.audioContext.decodeAudioData(buffer, function(index, audioData) {
-          this.soundFx[index] = audioData;
-        }.bind(this, sound));
+        // Async, so no guarantee of order in array.
+        this.audioContext.decodeAudioData(buffer, function(index, audioData) {
+            this.soundFx[index] = audioData;
+          }.bind(this, sound));
+      }
     }
   },
 
@@ -456,7 +462,7 @@ Runner.prototype = {
   update: function() {
     this.drawPending = false;
 
-    var now = performance.now();
+    var now = getTimeStamp();
     var deltaTime = now - (this.time || now);
     this.time = now;
 
@@ -578,22 +584,24 @@ Runner.prototype = {
    * @param {Event} e
    */
   onKeyDown: function(e) {
-    if (!this.crashed && (Runner.keycodes.JUMP[String(e.keyCode)] ||
-         e.type == Runner.events.TOUCHSTART)) {
-      if (!this.activated) {
-        this.loadSounds();
-        this.activated = true;
+    if (e.target != this.detailsButton) {
+      if (!this.crashed && (Runner.keycodes.JUMP[String(e.keyCode)] ||
+           e.type == Runner.events.TOUCHSTART)) {
+        if (!this.activated) {
+          this.loadSounds();
+          this.activated = true;
+        }
+
+        if (!this.tRex.jumping) {
+          this.playSound(this.soundFx.BUTTON_PRESS);
+          this.tRex.startJump();
+        }
       }
 
-      if (!this.tRex.jumping) {
-        this.playSound(this.soundFx.BUTTON_PRESS);
-        this.tRex.startJump();
+      if (this.crashed && e.type == Runner.events.TOUCHSTART &&
+          e.currentTarget == this.containerEl) {
+        this.restart();
       }
-    }
-
-    if (this.crashed && e.type == Runner.events.TOUCHSTART &&
-        e.currentTarget == this.containerEl) {
-      this.restart();
     }
 
     // Speed drop, activated only when jump key is not pressed.
@@ -620,7 +628,7 @@ Runner.prototype = {
       this.tRex.speedDrop = false;
     } else if (this.crashed) {
       // Check that enough time has elapsed before allowing jump key to restart.
-      var deltaTime = performance.now() - this.time;
+      var deltaTime = getTimeStamp() - this.time;
 
       if (Runner.keycodes.RESTART[keyCode] ||
          (e.type == Runner.events.MOUSEUP && e.target == this.canvas) ||
@@ -680,7 +688,7 @@ Runner.prototype = {
     }
 
     // Reset the time clock.
-    this.time = performance.now();
+    this.time = getTimeStamp();
   },
 
   stop: function() {
@@ -695,7 +703,7 @@ Runner.prototype = {
       this.activated = true;
       this.paused = false;
       this.tRex.update(0, Trex.status.RUNNING);
-      this.time = performance.now();
+      this.time = getTimeStamp();
       this.update();
     }
   },
@@ -709,7 +717,7 @@ Runner.prototype = {
       this.distanceRan = 0;
       this.setSpeed(this.config.SPEED);
 
-      this.time = performance.now();
+      this.time = getTimeStamp();
       this.containerEl.classList.remove(Runner.classes.CRASHED);
       this.clearCanvas();
       this.distanceMeter.reset(this.highestScore);
@@ -805,8 +813,8 @@ function getRandomNum(min, max) {
  * @param {number} duration Duration of the vibration in milliseconds.
  */
 function vibrate(duration) {
-  if (IS_MOBILE) {
-    window.navigator['vibrate'](duration);
+  if (IS_MOBILE && window.navigator.vibrate) {
+    window.navigator.vibrate(duration);
   }
 }
 
@@ -845,6 +853,15 @@ function decodeBase64ToArrayBuffer(base64String) {
     bytes[i] = str.charCodeAt(i);
   }
   return bytes.buffer;
+}
+
+
+/**
+ * Return the current timestamp.
+ * @return {number}
+ */
+function getTimeStamp() {
+  return IS_IOS ? new Date().getTime() : performance.now();
 }
 
 
@@ -1421,7 +1438,7 @@ Trex.prototype = {
       this.currentAnimFrames = Trex.animFrames[opt_status].frames;
 
       if (opt_status == Trex.status.WAITING) {
-        this.animStartTime = performance.now();
+        this.animStartTime = getTimeStamp();
         this.setBlinkDelay();
       }
     }
@@ -1433,7 +1450,7 @@ Trex.prototype = {
     }
 
     if (this.status == Trex.status.WAITING) {
-      this.blink(performance.now());
+      this.blink(getTimeStamp());
     } else {
       this.draw(this.currentAnimFrames[this.currentFrame], 0);
     }
@@ -1855,7 +1872,7 @@ function Cloud(canvas, cloudImg, containerWidth) {
  * @enum {number}
  */
 Cloud.config = {
-  HEIGHT: 13,
+  HEIGHT: 14,
   MAX_CLOUD_GAP: 400,
   MAX_SKY_LEVEL: 30,
   MIN_CLOUD_GAP: 100,

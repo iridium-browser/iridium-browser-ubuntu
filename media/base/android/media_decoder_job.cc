@@ -117,16 +117,10 @@ bool MediaDecoderJob::Decode(
   DCHECK(decode_cb_.is_null());
   DCHECK(data_received_cb_.is_null());
   DCHECK(ui_task_runner_->BelongsToCurrentThread());
-
   if (!media_codec_bridge_ || need_to_reconfig_decoder_job_) {
+    if (drain_decoder_)
+      OnDecoderDrained();
     need_to_reconfig_decoder_job_ = !CreateMediaCodecBridge();
-    if (drain_decoder_) {
-      // Decoder has been recreated, stop draining.
-      drain_decoder_ = false;
-      input_eos_encountered_ = false;
-      output_eos_encountered_ = false;
-      access_unit_index_[current_demuxer_data_index_]++;
-    }
     skip_eos_enqueue_ = true;
     if (need_to_reconfig_decoder_job_)
       return false;
@@ -517,8 +511,10 @@ void MediaDecoderJob::OnDecodeCompleted(
   DCHECK(!decode_cb_.is_null());
 
   // If output was queued for rendering, then we have completed prerolling.
-  if (current_presentation_timestamp != kNoTimestamp())
+  if (current_presentation_timestamp != kNoTimestamp() ||
+      status == MEDIA_CODEC_OUTPUT_END_OF_STREAM) {
     prerolling_ = false;
+  }
 
   switch (status) {
     case MEDIA_CODEC_OK:

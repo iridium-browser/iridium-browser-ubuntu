@@ -17,11 +17,6 @@ TestLoginUtils::TestLoginUtils(const UserContext& user_context)
 
 TestLoginUtils::~TestLoginUtils() {}
 
-void TestLoginUtils::RespectLocalePreference(Profile* profile,
-                                             const base::Closure& callback) {
-  callback.Run();
-}
-
 void TestLoginUtils::PrepareProfile(
     const UserContext& user_context,
     bool has_auth_cookies,
@@ -29,8 +24,9 @@ void TestLoginUtils::PrepareProfile(
     Delegate* delegate) {
   if (user_context != expected_user_context_)
     NOTREACHED();
+
   // Profile hasn't been loaded.
-  delegate->OnProfilePrepared(NULL);
+  delegate->OnProfilePrepared(NULL, false);
 }
 
 void TestLoginUtils::DelegateDeleted(Delegate* delegate) {

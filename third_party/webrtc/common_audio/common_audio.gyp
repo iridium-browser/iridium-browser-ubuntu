@@ -29,7 +29,11 @@
         ],
       },
       'sources': [
+        'audio_converter.cc',
+        'audio_converter.h',
         'audio_util.cc',
+        'blocker.cc',
+        'blocker.h',
         'fir_filter.cc',
         'fir_filter.h',
         'fir_filter_neon.h',
@@ -78,11 +82,12 @@
         'signal_processing/spl_init.c',
         'signal_processing/spl_sqrt.c',
         'signal_processing/spl_sqrt_floor.c',
-        'signal_processing/spl_version.c',
         'signal_processing/splitting_filter.c',
         'signal_processing/sqrt_of_one_minus_x_squared.c',
         'signal_processing/vector_scaling_operations.c',
+        'vad/include/vad.h',
         'vad/include/webrtc_vad.h',
+        'vad/vad.cc',
         'vad/webrtc_vad.c',
         'vad/vad_core.c',
         'vad/vad_core.h',
@@ -94,10 +99,23 @@
         'vad/vad_sp.h',
         'wav_header.cc',
         'wav_header.h',
-        'wav_writer.cc',
-        'wav_writer.h',
+        'wav_file.cc',
+        'wav_file.h',
+        'window_generator.cc',
+        'window_generator.h',
       ],
       'conditions': [
+        ['rtc_use_openmax_dl==1', {
+          'sources': [
+            'lapped_transform.cc',
+            'lapped_transform.h',
+            'real_fourier.cc',
+            'real_fourier.h',
+          ],
+          'dependencies': [
+            '<(DEPTH)/third_party/openmax_dl/dl/dl.gyp:openmax_dl',
+          ],
+        }],
         ['target_arch=="ia32" or target_arch=="x64"', {
           'dependencies': ['common_audio_sse2',],
         }],
@@ -208,7 +226,9 @@
             '<(DEPTH)/testing/gtest.gyp:gtest',
           ],
           'sources': [
+            'audio_converter_unittest.cc',
             'audio_util_unittest.cc',
+            'blocker_unittest.cc',
             'fir_filter_unittest.cc',
             'resampler/resampler_unittest.cc',
             'resampler/push_resampler_unittest.cc',
@@ -225,9 +245,16 @@
             'vad/vad_unittest.cc',
             'vad/vad_unittest.h',
             'wav_header_unittest.cc',
-            'wav_writer_unittest.cc',
+            'wav_file_unittest.cc',
+            'window_generator_unittest.cc',
           ],
           'conditions': [
+            ['rtc_use_openmax_dl==1', {
+              'sources': [
+                'lapped_transform_unittest.cc',
+                'real_fourier_unittest.cc',
+              ],
+            }],
             ['OS=="android"', {
               'dependencies': [
                 '<(DEPTH)/testing/android/native_test.gyp:native_test_native_code',
@@ -258,7 +285,6 @@
               ],
               'includes': [
                 '../build/isolate.gypi',
-                'common_audio_unittests.isolate',
               ],
               'sources': [
                 'common_audio_unittests.isolate',

@@ -33,7 +33,7 @@ class CONTENT_EXPORT RenderFrameHost : public IPC::Listener,
   // Returns NULL if the IDs do not correspond to a live RenderFrameHost.
   static RenderFrameHost* FromID(int render_process_id, int render_frame_id);
 
-  virtual ~RenderFrameHost() {}
+  ~RenderFrameHost() override {}
 
   // Returns the route id for this frame.
   virtual int GetRoutingID() = 0;
@@ -77,13 +77,21 @@ class CONTENT_EXPORT RenderFrameHost : public IPC::Listener,
   // execution. (crbug.com/408426)
   virtual void ExecuteJavaScriptForTests(const base::string16& javascript) = 0;
 
-  // Accessibility actions.
+  // Accessibility actions - these send a message to the RenderFrame
+  // to trigger an action on an accessibility object.
   virtual void AccessibilitySetFocus(int acc_obj_id) = 0;
   virtual void AccessibilityDoDefaultAction(int acc_obj_id) = 0;
   virtual void AccessibilityScrollToMakeVisible(
       int acc_obj_id, const gfx::Rect& subfocus) = 0;
   virtual void AccessibilitySetTextSelection(
       int acc_obj_id, int start_offset, int end_offset) = 0;
+
+  // This is called when the user has committed to the given find in page
+  // request (e.g. by pressing enter or by clicking on the next / previous
+  // result buttons). It triggers sending a native accessibility event on
+  // the result object on the page, navigating assistive technology to that
+  // result.
+  virtual void ActivateFindInPageResultForAccessibility(int request_id) = 0;
 
   // Temporary until we get rid of RenderViewHost.
   virtual RenderViewHost* GetRenderViewHost() = 0;

@@ -70,18 +70,18 @@ class IPCResourceLoaderBridge : public ResourceLoaderBridge {
  public:
   IPCResourceLoaderBridge(ResourceDispatcher* dispatcher,
                           const RequestInfo& request_info);
-  virtual ~IPCResourceLoaderBridge();
+  ~IPCResourceLoaderBridge() override;
 
   // ResourceLoaderBridge
-  virtual void SetRequestBody(ResourceRequestBody* request_body) OVERRIDE;
-  virtual bool Start(RequestPeer* peer) OVERRIDE;
-  virtual void Cancel() OVERRIDE;
-  virtual void SetDefersLoading(bool value) OVERRIDE;
-  virtual void DidChangePriority(net::RequestPriority new_priority,
-                                 int intra_priority_value) OVERRIDE;
-  virtual bool AttachThreadedDataReceiver(
-      blink::WebThreadedDataReceiver* threaded_data_receiver) OVERRIDE;
-  virtual void SyncLoad(SyncLoadResponse* response) OVERRIDE;
+  void SetRequestBody(ResourceRequestBody* request_body) override;
+  bool Start(RequestPeer* peer) override;
+  void Cancel() override;
+  void SetDefersLoading(bool value) override;
+  void DidChangePriority(net::RequestPriority new_priority,
+                         int intra_priority_value) override;
+  bool AttachThreadedDataReceiver(
+      blink::WebThreadedDataReceiver* threaded_data_receiver) override;
+  void SyncLoad(SyncLoadResponse* response) override;
 
  private:
   // The resource dispatcher for this loader.  The bridge doesn't own it, but
@@ -127,7 +127,12 @@ IPCResourceLoaderBridge::IPCResourceLoaderBridge(
   request_.download_to_file = request_info.download_to_file;
   request_.has_user_gesture = request_info.has_user_gesture;
   request_.skip_service_worker = request_info.skip_service_worker;
+  request_.fetch_request_mode = request_info.fetch_request_mode;
+  request_.fetch_credentials_mode = request_info.fetch_credentials_mode;
+  request_.fetch_request_context_type = request_info.fetch_request_context_type;
+  request_.fetch_frame_type = request_info.fetch_frame_type;
   request_.enable_load_timing = request_info.enable_load_timing;
+  request_.enable_upload_progress = request_info.enable_upload_progress;
 
   const RequestExtraData kEmptyData;
   const RequestExtraData* extra_data;

@@ -6,13 +6,17 @@
 
 #include <string.h>
 
+#include "base/command_line.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/time/time.h"
+#include "content/child/request_extra_data.h"
+#include "content/child/request_info.h"
 #include "content/child/resource_dispatcher.h"
 #include "content/child/resource_loader_bridge.h"
 #include "content/public/child/request_peer.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/common/resource_response_info.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_response_headers.h"
@@ -23,6 +27,7 @@
 #include "third_party/WebKit/public/platform/WebURLError.h"
 #include "third_party/WebKit/public/platform/WebURLLoaderClient.h"
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
+#include "third_party/WebKit/public/platform/WebURLResponse.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -57,43 +62,51 @@ const char kMultipartResponse[] =
 class TestBridge : public ResourceLoaderBridge,
                    public base::SupportsWeakPtr<TestBridge> {
  public:
-  TestBridge() : peer_(NULL), canceled_(false) {}
-  virtual ~TestBridge() {}
+  TestBridge(const RequestInfo& info) :
+    peer_(NULL),
+    canceled_(false),
+    url_(info.url) {
+  }
+
+  ~TestBridge() override {}
 
   // ResourceLoaderBridge implementation:
-  virtual void SetRequestBody(ResourceRequestBody* request_body) OVERRIDE {}
+  void SetRequestBody(ResourceRequestBody* request_body) override {}
 
-  virtual bool Start(RequestPeer* peer) OVERRIDE {
+  bool Start(RequestPeer* peer) override {
     EXPECT_FALSE(peer_);
     peer_ = peer;
     return true;
   }
 
-  virtual void Cancel() OVERRIDE {
+  void Cancel() override {
     EXPECT_FALSE(canceled_);
     canceled_ = true;
   }
 
-  virtual void SetDefersLoading(bool value) OVERRIDE {}
+  void SetDefersLoading(bool value) override {}
 
-  virtual void DidChangePriority(net::RequestPriority new_priority,
-                                 int intra_priority_value) OVERRIDE {}
+  void DidChangePriority(net::RequestPriority new_priority,
+                         int intra_priority_value) override {}
 
-  virtual bool AttachThreadedDataReceiver(
-      blink::WebThreadedDataReceiver* threaded_data_receiver) OVERRIDE {
+  bool AttachThreadedDataReceiver(
+      blink::WebThreadedDataReceiver* threaded_data_receiver) override {
     NOTREACHED();
     return false;
   }
 
-  virtual void SyncLoad(SyncLoadResponse* response) OVERRIDE {}
+  void SyncLoad(SyncLoadResponse* response) override {}
 
   RequestPeer* peer() { return peer_; }
 
   bool canceled() { return canceled_; }
 
+  const GURL& url() { return url_; }
+
  private:
   RequestPeer* peer_;
   bool canceled_;
+  GURL url_;
 
   DISALLOW_COPY_AND_ASSIGN(TestBridge);
 };
@@ -101,13 +114,12 @@ class TestBridge : public ResourceLoaderBridge,
 class TestResourceDispatcher : public ResourceDispatcher {
  public:
   TestResourceDispatcher() : ResourceDispatcher(NULL) {}
-  virtual ~TestResourceDispatcher() {}
+  ~TestResourceDispatcher() override {}
 
   // ResourceDispatcher implementation:
-  virtual ResourceLoaderBridge* CreateBridge(
-      const RequestInfo& request_info) OVERRIDE {
+  ResourceLoaderBridge* CreateBridge(const RequestInfo& request_info) override {
     EXPECT_FALSE(bridge_.get());
-    TestBridge* bridge = new TestBridge();
+    TestBridge* bridge = new TestBridge(request_info);
     bridge_ = bridge->AsWeakPtr();
     return bridge;
   }
@@ -141,7 +153,7 @@ class TestWebURLLoaderClient : public blink::WebURLLoaderClient {
   virtual void willSendRequest(
       blink::WebURLLoader* loader,
       blink::WebURLRequest& newRequest,
-      const blink::WebURLResponse& redirectResponse) OVERRIDE {
+      const blink::WebURLResponse& redirectResponse) override {
     EXPECT_TRUE(loader_);
     EXPECT_EQ(loader_.get(), loader);
     // No test currently simulates mutiple redirects.
@@ -154,14 +166,14 @@ class TestWebURLLoaderClient : public blink::WebURLLoaderClient {
 
   virtual void didSendData(blink::WebURLLoader* loader,
                            unsigned long long bytesSent,
-                           unsigned long long totalBytesToBeSent) OVERRIDE {
+                           unsigned long long totalBytesToBeSent) override {
     EXPECT_TRUE(loader_);
     EXPECT_EQ(loader_.get(), loader);
   }
 
   virtual void didReceiveResponse(
       blink::WebURLLoader* loader,
-      const blink::WebURLResponse& response) OVERRIDE {
+      const blink::WebURLResponse& response) override {
     EXPECT_TRUE(loader_);
     EXPECT_EQ(loader_.get(), loader);
 
@@ -169,13 +181,14 @@ class TestWebURLLoaderClient : public blink::WebURLLoaderClient {
     EXPECT_TRUE(expect_multipart_response_ || !did_receive_response_);
 
     did_receive_response_ = true;
+    response_ = response;
     if (delete_on_receive_response_)
       loader_.reset();
   }
 
   virtual void didDownloadData(blink::WebURLLoader* loader,
                                int dataLength,
-                               int encodedDataLength) OVERRIDE {
+                               int encodedDataLength) override {
     EXPECT_TRUE(loader_);
     EXPECT_EQ(loader_.get(), loader);
   }
@@ -183,7 +196,7 @@ class TestWebURLLoaderClient : public blink::WebURLLoaderClient {
   virtual void didReceiveData(blink::WebURLLoader* loader,
                               const char* data,
                               int dataLength,
-                              int encodedDataLength) OVERRIDE {
+                              int encodedDataLength) override {
     EXPECT_TRUE(loader_);
     EXPECT_EQ(loader_.get(), loader);
     // The response should have started, but must not have finished, or failed.
@@ -200,13 +213,13 @@ class TestWebURLLoaderClient : public blink::WebURLLoaderClient {
 
   virtual void didReceiveCachedMetadata(blink::WebURLLoader* loader,
                                         const char* data,
-                                        int dataLength) OVERRIDE {
+                                        int dataLength) override {
     EXPECT_EQ(loader_.get(), loader);
   }
 
   virtual void didFinishLoading(blink::WebURLLoader* loader,
                                 double finishTime,
-                                int64_t totalEncodedDataLength) OVERRIDE {
+                                int64_t totalEncodedDataLength) override {
     EXPECT_TRUE(loader_);
     EXPECT_EQ(loader_.get(), loader);
     EXPECT_TRUE(did_receive_response_);
@@ -218,7 +231,7 @@ class TestWebURLLoaderClient : public blink::WebURLLoaderClient {
   }
 
   virtual void didFail(blink::WebURLLoader* loader,
-                       const blink::WebURLError& error) OVERRIDE {
+                       const blink::WebURLError& error) override {
     EXPECT_TRUE(loader_);
     EXPECT_EQ(loader_.get(), loader);
     EXPECT_FALSE(did_finish_);
@@ -246,6 +259,7 @@ class TestWebURLLoaderClient : public blink::WebURLLoaderClient {
   const std::string& received_data() const { return received_data_; }
   bool did_finish() const { return did_finish_; }
   const blink::WebURLError& error() const { return error_; }
+  const blink::WebURLResponse& response() const { return response_; }
 
  private:
   scoped_ptr<WebURLLoaderImpl> loader_;
@@ -263,6 +277,7 @@ class TestWebURLLoaderClient : public blink::WebURLLoaderClient {
   std::string received_data_;
   bool did_finish_;
   blink::WebURLError error_;
+  blink::WebURLResponse response_;
 
   DISALLOW_COPY_AND_ASSIGN(TestWebURLLoaderClient);
 };
@@ -270,7 +285,7 @@ class TestWebURLLoaderClient : public blink::WebURLLoaderClient {
 class WebURLLoaderImplTest : public testing::Test {
  public:
   explicit WebURLLoaderImplTest() : client_(&dispatcher_) {}
-  virtual ~WebURLLoaderImplTest() {}
+  ~WebURLLoaderImplTest() override {}
 
   void DoStartAsyncRequest() {
     blink::WebURLRequest request;
@@ -644,6 +659,48 @@ TEST_F(WebURLLoaderImplTest, MultipartDeleteFail) {
   DoReceiveDataMultipart();
   DoFailRequest();
   EXPECT_FALSE(bridge());
+}
+
+// PlzNavigate: checks that the stream override parameters provided on
+// navigation commit are properly applied.
+TEST_F(WebURLLoaderImplTest, BrowserSideNavigationCommit) {
+  // Initialize the request and the stream override.
+  const GURL kStreamURL = GURL("http://bar");
+  const std::string kMimeType = "text/html";
+  blink::WebURLRequest request;
+  request.initialize();
+  request.setURL(GURL(kTestURL));
+  request.setFrameType(blink::WebURLRequest::FrameTypeTopLevel);
+  request.setRequestContext(blink::WebURLRequest::RequestContextFrame);
+  scoped_ptr<StreamOverrideParameters> stream_override(
+      new StreamOverrideParameters());
+  stream_override->stream_url = kStreamURL;
+  stream_override->response.mime_type = kMimeType;
+  RequestExtraData* extra_data = new RequestExtraData();
+  extra_data->set_stream_override(stream_override.Pass());
+  request.setExtraData(extra_data);
+  CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kEnableBrowserSideNavigation);
+
+  client()->loader()->loadAsynchronously(request, client());
+
+  // The stream url should have been requestead instead of the request url.
+  ASSERT_TRUE(bridge());
+  ASSERT_TRUE(peer());
+  EXPECT_EQ(kStreamURL, bridge()->url());
+
+  EXPECT_FALSE(client()->did_receive_response());
+  peer()->OnReceivedResponse(content::ResourceResponseInfo());
+  EXPECT_TRUE(client()->did_receive_response());
+
+  // The response info should have been overriden.
+  ASSERT_FALSE(client()->response().isNull());
+  EXPECT_EQ(kMimeType, client()->response().mimeType().latin1());
+
+  DoReceiveData();
+  DoCompleteRequest();
+  EXPECT_FALSE(bridge()->canceled());
+  EXPECT_EQ(kTestData, client()->received_data());
 }
 
 }  // namespace

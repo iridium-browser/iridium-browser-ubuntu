@@ -25,19 +25,19 @@ class BookmarkBubbleViewTest : public BrowserWithTestWindowTest {
   BookmarkBubbleViewTest() {}
 
   // testing::Test:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     BrowserWithTestWindowTest::SetUp();
 
     profile()->CreateBookmarkModel(true);
     BookmarkModel* bookmark_model =
         BookmarkModelFactory::GetForProfile(profile());
-    test::WaitForBookmarkModelToLoad(bookmark_model);
+    bookmarks::test::WaitForBookmarkModelToLoad(bookmark_model);
 
     bookmarks::AddIfNotBookmarked(
         bookmark_model, GURL(kTestBookmarkURL), base::string16());
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     // Make sure the bubble is destroyed before the profile to avoid a crash.
     bubble_.reset();
 
@@ -45,7 +45,7 @@ class BookmarkBubbleViewTest : public BrowserWithTestWindowTest {
   }
 
   // BrowserWithTestWindowTest:
-  virtual TestingProfile* CreateProfile() OVERRIDE {
+  TestingProfile* CreateProfile() override {
     TestingProfile::Builder builder;
     builder.AddTestingFactory(SigninManagerFactory::GetInstance(),
                               FakeSigninManagerBase::Build);

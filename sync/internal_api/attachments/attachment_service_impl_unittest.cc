@@ -16,25 +16,27 @@
 
 namespace syncer {
 
+namespace {
+
 class MockAttachmentStore : public AttachmentStore,
                             public base::SupportsWeakPtr<MockAttachmentStore> {
  public:
   MockAttachmentStore() {}
 
-  virtual void Read(const AttachmentIdList& ids,
-                    const ReadCallback& callback) OVERRIDE {
+  void Read(const AttachmentIdList& ids,
+            const ReadCallback& callback) override {
     read_ids.push_back(ids);
     read_callbacks.push_back(callback);
   }
 
-  virtual void Write(const AttachmentList& attachments,
-                     const WriteCallback& callback) OVERRIDE {
+  void Write(const AttachmentList& attachments,
+             const WriteCallback& callback) override {
     write_attachments.push_back(attachments);
     write_callbacks.push_back(callback);
   }
 
-  virtual void Drop(const AttachmentIdList& ids,
-                    const DropCallback& callback) OVERRIDE {
+  void Drop(const AttachmentIdList& ids,
+            const DropCallback& callback) override {
     NOTREACHED();
   }
 
@@ -86,7 +88,7 @@ class MockAttachmentStore : public AttachmentStore,
   std::vector<WriteCallback> write_callbacks;
 
  private:
-  virtual ~MockAttachmentStore() {}
+  ~MockAttachmentStore() override {}
 
   DISALLOW_COPY_AND_ASSIGN(MockAttachmentStore);
 };
@@ -97,8 +99,8 @@ class MockAttachmentDownloader
  public:
   MockAttachmentDownloader() {}
 
-  virtual void DownloadAttachment(const AttachmentId& id,
-                                  const DownloadCallback& callback) OVERRIDE {
+  void DownloadAttachment(const AttachmentId& id,
+                          const DownloadCallback& callback) override {
     ASSERT_TRUE(download_requests.find(id) == download_requests.end());
     download_requests.insert(std::make_pair(id, callback));
   }
@@ -131,8 +133,8 @@ class MockAttachmentUploader
   MockAttachmentUploader() {}
 
   // AttachmentUploader implementation.
-  virtual void UploadAttachment(const Attachment& attachment,
-                                const UploadCallback& callback) OVERRIDE {
+  void UploadAttachment(const Attachment& attachment,
+                        const UploadCallback& callback) override {
     const AttachmentId id = attachment.GetId();
     ASSERT_TRUE(upload_requests.find(id) == upload_requests.end());
     upload_requests.insert(std::make_pair(id, callback));
@@ -150,19 +152,21 @@ class MockAttachmentUploader
   DISALLOW_COPY_AND_ASSIGN(MockAttachmentUploader);
 };
 
+}  // namespace
+
 class AttachmentServiceImplTest : public testing::Test,
                                   public AttachmentService::Delegate {
  protected:
   AttachmentServiceImplTest() {}
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     network_change_notifier_.reset(net::NetworkChangeNotifier::CreateMock());
     InitializeAttachmentService(make_scoped_ptr(new MockAttachmentUploader()),
                                 make_scoped_ptr(new MockAttachmentDownloader()),
                                 this);
   }
 
-  virtual void TearDown() OVERRIDE {
+  virtual void TearDown() override {
     attachment_service_.reset();
     ASSERT_FALSE(attachment_store_);
     ASSERT_FALSE(attachment_uploader_);
@@ -170,8 +174,7 @@ class AttachmentServiceImplTest : public testing::Test,
   }
 
   // AttachmentService::Delegate implementation.
-  virtual void OnAttachmentUploaded(
-      const AttachmentId& attachment_id) OVERRIDE {
+  void OnAttachmentUploaded(const AttachmentId& attachment_id) override {
     on_attachment_uploaded_list_.push_back(attachment_id);
   }
 
@@ -191,8 +194,8 @@ class AttachmentServiceImplTest : public testing::Test,
     }
     attachment_service_.reset(
         new AttachmentServiceImpl(attachment_store,
-                                  uploader.PassAs<AttachmentUploader>(),
-                                  downloader.PassAs<AttachmentDownloader>(),
+                                  uploader.Pass(),
+                                  downloader.Pass(),
                                   delegate,
                                   base::TimeDelta::FromMinutes(1),
                                   base::TimeDelta::FromMinutes(8)));
@@ -200,7 +203,7 @@ class AttachmentServiceImplTest : public testing::Test,
     scoped_ptr<base::MockTimer> timer_to_pass(
         new base::MockTimer(false, false));
     mock_timer_ = timer_to_pass.get();
-    attachment_service_->SetTimerForTest(timer_to_pass.PassAs<base::Timer>());
+    attachment_service_->SetTimerForTest(timer_to_pass.Pass());
   }
 
   AttachmentService* attachment_service() { return attachment_service_.get(); }

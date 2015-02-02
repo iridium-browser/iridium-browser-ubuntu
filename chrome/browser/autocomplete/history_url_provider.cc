@@ -278,21 +278,18 @@ GURL ConvertToHostOnly(const history::HistoryMatch& match,
 class SearchTermsDataSnapshot : public SearchTermsData {
  public:
   explicit SearchTermsDataSnapshot(const SearchTermsData& search_terms_data);
-  virtual ~SearchTermsDataSnapshot();
+  ~SearchTermsDataSnapshot() override;
 
-  virtual std::string GoogleBaseURLValue() const OVERRIDE;
-  virtual std::string GetApplicationLocale() const OVERRIDE;
-  virtual base::string16 GetRlzParameterValue(
-      bool from_app_list) const OVERRIDE;
-  virtual std::string GetSearchClient() const OVERRIDE;
-  virtual bool EnableAnswersInSuggest() const OVERRIDE;
-  virtual bool IsShowingSearchTermsOnSearchResultsPages() const OVERRIDE;
-  virtual std::string InstantExtendedEnabledParam(
-      bool for_search) const OVERRIDE;
-  virtual std::string ForceInstantResultsParam(
-      bool for_prerender) const OVERRIDE;
-  virtual std::string NTPIsThemedParam() const OVERRIDE;
-  virtual std::string GoogleImageSearchSource() const OVERRIDE;
+  std::string GoogleBaseURLValue() const override;
+  std::string GetApplicationLocale() const override;
+  base::string16 GetRlzParameterValue(bool from_app_list) const override;
+  std::string GetSearchClient() const override;
+  bool EnableAnswersInSuggest() const override;
+  bool IsShowingSearchTermsOnSearchResultsPages() const override;
+  std::string InstantExtendedEnabledParam(bool for_search) const override;
+  std::string ForceInstantResultsParam(bool for_prerender) const override;
+  std::string NTPIsThemedParam() const override;
+  std::string GoogleImageSearchSource() const override;
 
  private:
   std::string google_base_url_value_;
@@ -759,20 +756,20 @@ void HistoryURLProvider::DoAutocomplete(history::HistoryBackend* backend,
   SortAndDedupMatches(&params->matches);
 
   // Try to create a shorter suggestion from the best match.
-  // We consider the what you typed match eligible for display when there's a
-  // reasonable chance the user actually cares:
-  // * Their input can be opened as a URL, and
-  // * We parsed the input as a URL, or it starts with an explicit "http:" or
-  // "https:".
-  // Otherwise, this is just low-quality noise.  In the cases where we've parsed
-  // as UNKNOWN, we'll still show an accidental search infobar if need be.
+  // We consider the what you typed match eligible for display when it's
+  // navigable and there's a reasonable chance the user intended to do
+  // something other than search.  We use a variety of heuristics to determine
+  // this, e.g. whether the user explicitly typed a scheme, or if omnibox
+  // searching has been disabled by policy. In the cases where we've parsed as
+  // UNKNOWN, we'll still show an accidental search infobar if need be.
   VisitClassifier classifier(this, params->input, db);
   params->have_what_you_typed_match =
       (params->input.type() != metrics::OmniboxInputType::QUERY) &&
       ((params->input.type() != metrics::OmniboxInputType::UNKNOWN) ||
        (classifier.type() == VisitClassifier::UNVISITED_INTRANET) ||
        !params->trim_http ||
-       (AutocompleteInput::NumNonHostComponents(params->input.parts()) > 0));
+       (AutocompleteInput::NumNonHostComponents(params->input.parts()) > 0) ||
+       !params->default_search_provider);
   const bool have_shorter_suggestion_suitable_for_inline_autocomplete =
       PromoteOrCreateShorterSuggestion(
           db, params->have_what_you_typed_match, params);
@@ -920,33 +917,6 @@ bool HistoryURLProvider::FixupExactSuggestion(
             UNVISITED_INTRANET : WHAT_YOU_TYPED;
       }
       break;
-  }
-
-  const GURL& url = params->what_you_typed_match.destination_url;
-  const url::Parsed& parsed = url.parsed_for_possibly_invalid_spec();
-  // If the what-you-typed result looks like a single word (which can be
-  // interpreted as an intranet address) followed by a pound sign ("#"),
-  // leave the score for the url-what-you-typed result as is.  It will be
-  // outscored by a search query from the SearchProvider. This test fixes
-  // cases such as "c#" and "c# foo" where the user has visited an intranet
-  // site "c".  We want the search-what-you-typed score to beat the
-  // URL-what-you-typed score in this case.  Most of the below test tries to
-  // make sure that this code does not trigger if the user did anything to
-  // indicate the desired match is a URL.  For instance, "c/# foo" will not
-  // pass the test because that will be classified as input type URL.  The
-  // parsed.CountCharactersBefore() in the test looks for the presence of a
-  // reference fragment in the URL by checking whether the position differs
-  // included the delimiter (pound sign) versus not including the delimiter.
-  // (One cannot simply check url.ref() because it will not distinguish
-  // between the input "c" and the input "c#", both of which will have empty
-  // reference fragments.)
-  if ((type == UNVISITED_INTRANET) &&
-      (params->input.type() != metrics::OmniboxInputType::URL) &&
-      url.username().empty() && url.password().empty() && url.port().empty() &&
-      (url.path() == "/") && url.query().empty() &&
-      (parsed.CountCharactersBefore(url::Parsed::REF, true) !=
-       parsed.CountCharactersBefore(url::Parsed::REF, false))) {
-    return false;
   }
 
   params->what_you_typed_match.relevance = CalculateRelevance(type, 0);

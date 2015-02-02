@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "base/callback.h"
+#include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
 #include "content/public/common/service_registry.h"
 #include "mojo/public/cpp/bindings/interface_impl.h"
@@ -19,12 +20,13 @@
 
 namespace content {
 
-class ServiceRegistryImpl : public ServiceRegistry,
-                            public mojo::InterfaceImpl<mojo::ServiceProvider> {
+class CONTENT_EXPORT ServiceRegistryImpl
+    : public ServiceRegistry,
+      public NON_EXPORTED_BASE(mojo::InterfaceImpl<mojo::ServiceProvider>) {
  public:
   ServiceRegistryImpl();
   explicit ServiceRegistryImpl(mojo::ScopedMessagePipeHandle handle);
-  virtual ~ServiceRegistryImpl();
+  ~ServiceRegistryImpl() override;
 
   // Binds to a remote ServiceProvider. This will expose added services to the
   // remote ServiceProvider with the corresponding handle and enable
@@ -33,23 +35,20 @@ class ServiceRegistryImpl : public ServiceRegistry,
   void BindRemoteServiceProvider(mojo::ScopedMessagePipeHandle handle);
 
   // ServiceRegistry overrides.
-  virtual void AddService(
-      const std::string& service_name,
-      const base::Callback<void(mojo::ScopedMessagePipeHandle)> service_factory)
-      OVERRIDE;
-  virtual void RemoveService(const std::string& service_name) OVERRIDE;
-  virtual void ConnectToRemoteService(
-      const base::StringPiece& service_name,
-      mojo::ScopedMessagePipeHandle handle) OVERRIDE;
+  void AddService(const std::string& service_name,
+                  const base::Callback<void(mojo::ScopedMessagePipeHandle)>
+                      service_factory) override;
+  void RemoveService(const std::string& service_name) override;
+  void ConnectToRemoteService(const base::StringPiece& service_name,
+                              mojo::ScopedMessagePipeHandle handle) override;
 
   base::WeakPtr<ServiceRegistry> GetWeakPtr();
 
  private:
   // mojo::InterfaceImpl<mojo::ServiceProvider> overrides.
-  virtual void ConnectToService(
-      const mojo::String& name,
-      mojo::ScopedMessagePipeHandle client_handle) OVERRIDE;
-  virtual void OnConnectionError() OVERRIDE;
+  void ConnectToService(const mojo::String& name,
+                        mojo::ScopedMessagePipeHandle client_handle) override;
+  void OnConnectionError() override;
 
   std::map<std::string, base::Callback<void(mojo::ScopedMessagePipeHandle)> >
       service_factories_;

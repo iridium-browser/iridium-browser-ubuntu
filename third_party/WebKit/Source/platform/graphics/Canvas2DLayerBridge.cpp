@@ -30,9 +30,11 @@
 #include "GrContext.h"
 #include "SkDevice.h"
 #include "SkSurface.h"
+
 #include "platform/TraceEvent.h"
 #include "platform/graphics/Canvas2DLayerManager.h"
 #include "platform/graphics/GraphicsLayer.h"
+#include "platform/graphics/ImageBuffer.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebCompositorSupport.h"
 #include "public/platform/WebGraphicsContext3D.h"
@@ -317,8 +319,6 @@ void Canvas2DLayerBridge::freeReleasedMailbox()
     }
     // Invalidate texture state in case the compositor altered it since the copy-on-write.
     if (mailboxInfo->m_image) {
-        if (isHidden() || releasedMailboxHasExpired())
-            mailboxInfo->m_image->getTexture()->resetFlag(static_cast<GrTextureFlags>(GrTexture::kReturnToCache_FlagBit));
         mailboxInfo->m_image->getTexture()->textureParamsModified();
         mailboxInfo->m_image.clear();
     }
@@ -511,10 +511,8 @@ void Canvas2DLayerBridge::mailboxReleased(const WebExternalTextureMailbox& mailb
                 // in future.
                 if (mailboxInfo->m_image) {
                     GrTexture* texture = mailboxInfo->m_image->getTexture();
-                    if (texture) {
-                        texture->resetFlag(static_cast<GrTextureFlags>(GrTexture::kReturnToCache_FlagBit));
+                    if (texture)
                         texture->textureParamsModified();
-                    }
                     mailboxInfo->m_image.clear();
                 }
                 if (m_destructionInProgress) {
@@ -565,7 +563,7 @@ void Canvas2DLayerBridge::finalizeFrame(const FloatRect &dirtyRect)
 {
     ASSERT(!m_destructionInProgress);
     Canvas2DLayerManager::get().layerDidDraw(this);
-    m_layer->layer()->invalidateRect(dirtyRect);
+    m_layer->layer()->invalidateRect(enclosingIntRect(dirtyRect));
     m_didRecordDrawCommand = true;
 }
 
@@ -581,6 +579,11 @@ Platform3DObject Canvas2DLayerBridge::getBackingTexture()
         return renderTarget->asTexture()->getTextureHandle();
     }
     return 0;
+}
+
+PassRefPtr<SkImage> Canvas2DLayerBridge::newImageSnapshot()
+{
+    return adoptRef(m_canvas->newImageSnapshot());
 }
 
 Canvas2DLayerBridge::MailboxInfo::MailboxInfo(const MailboxInfo& other) {

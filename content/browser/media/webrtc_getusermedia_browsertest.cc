@@ -78,7 +78,7 @@ namespace content {
 class WebRtcGetUserMediaBrowserTest: public WebRtcContentBrowserTest {
  public:
   WebRtcGetUserMediaBrowserTest() : trace_log_(NULL) {}
-  virtual ~WebRtcGetUserMediaBrowserTest() {}
+  ~WebRtcGetUserMediaBrowserTest() override {}
 
   void StartTracing() {
     CHECK(trace_log_ == NULL) << "Can only can start tracing once";
@@ -126,15 +126,15 @@ class WebRtcGetUserMediaBrowserTest: public WebRtcContentBrowserTest {
     // Put getUserMedia to work and let it run for a couple of seconds.
     DCHECK(time_to_sample_secs);
     ExecuteJavascriptAndWaitForOk(
-        base::StringPrintf("%s({video: true});",
+        base::StringPrintf("%s({video: true}, 'myStreamName');",
                            kGetUserMediaAndGetStreamUp));
 
     // Now the stream is up and running, start collecting traces.
     StartTracing();
 
-    // Let the stream run for a while in javascript.
     ExecuteJavascriptAndWaitForOk(
-        base::StringPrintf("waitAndStopVideoTrack(%d);", time_to_sample_secs));
+        base::StringPrintf("waitAndStopVideoTrack(window['myStreamName'], %d);",
+                           time_to_sample_secs));
 
     // Wait until the page title changes to "OK". Do not sleep() here since that
     // would stop both this code and the browser underneath.
@@ -298,15 +298,8 @@ IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
                           kRenderDuplicatedMediastreamAndStop));
 }
 
-// Flaky on Android.  http://crbug.com/387895
-#if defined(OS_ANDROID)
-#define MAYBE_GetAudioAndVideoStreamAndStop DISABLED_GetAudioAndVideoStreamAndStop
-#else
-#define MAYBE_GetAudioAndVideoStreamAndStop GetAudioAndVideoStreamAndStop
-#endif
-
 IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
-                       MAYBE_GetAudioAndVideoStreamAndStop) {
+                       GetAudioAndVideoStreamAndStop) {
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   GURL url(embedded_test_server()->GetURL("/media/getusermedia.html"));
@@ -439,16 +432,8 @@ IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest, TwoGetUserMediaAndStop) {
       "twoGetUserMediaAndStop({video: true, audio: true});");
 }
 
-#if defined(OS_WIN) && !defined(NDEBUG)
-// Flaky on Webkit Win7 Debug bot: http://crbug.com/417756
-#define MAYBE_TwoGetUserMediaWithEqualConstraints \
-    DISABLED_TwoGetUserMediaWithEqualConstraints
-#else
-#define MAYBE_TwoGetUserMediaWithEqualConstraints \
-    TwoGetUserMediaWithEqualConstraints
-#endif
 IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
-                       MAYBE_TwoGetUserMediaWithEqualConstraints) {
+                       TwoGetUserMediaWithEqualConstraints) {
   std::string constraints1 = "{video: true, audio: true}";
   const std::string& constraints2 = constraints1;
   std::string expected_result = "w=640:h=480-w=640:h=480";
@@ -466,16 +451,8 @@ IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
                                                   expected_result);
 }
 
-#if defined(OS_WIN) || (defined(OS_LINUX) && !defined(NDEBUG))
-// Flaky on Windows and on Linux Debug: http://crbug.com/417756
-#define MAYBE_TwoGetUserMediaWithFirstHdSecondVga \
-    DISABLED_TwoGetUserMediaWithFirstHdSecondVga
-#else
-#define MAYBE_TwoGetUserMediaWithFirstHdSecondVga \
-    TwoGetUserMediaWithFirstHdSecondVga
-#endif
 IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
-                       MAYBE_TwoGetUserMediaWithFirstHdSecondVga) {
+                       TwoGetUserMediaWithFirstHdSecondVga) {
   std::string constraints1 =
       "{video: {mandatory: {minWidth:1280 , minHeight: 720}}}";
   std::string constraints2 =
@@ -522,6 +499,36 @@ IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
 
   EXPECT_EQ("ConstraintNotSatisfiedError",
             ExecuteJavascriptAndReturnResult(call));
+}
+
+// This test makes two getUserMedia requests, one with impossible constraints
+// that should trigger an error, and one with valid constraints. The test
+// verifies getUserMedia can succeed after being given impossible constraints.
+IN_PROC_BROWSER_TEST_F(WebRtcGetUserMediaBrowserTest,
+                       TwoGetUserMediaAndCheckCallbackAfterFailure) {
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+
+  GURL url(embedded_test_server()->GetURL("/media/getusermedia.html"));
+  NavigateToURL(shell(), url);
+
+  int large_value = 99999;
+  const std::string gum_with_impossible_constraints =
+    GenerateGetUserMediaCall(kGetUserMediaAndExpectFailure,
+                             large_value,
+                             large_value,
+                             large_value,
+                             large_value,
+                             large_value,
+                             large_value);
+  const std::string gum_with_vga_constraints =
+    GenerateGetUserMediaCall(kGetUserMediaAndAnalyseAndStop,
+                             640, 640, 480, 480, 10, 30);
+
+  ASSERT_EQ("ConstraintNotSatisfiedError",
+            ExecuteJavascriptAndReturnResult(gum_with_impossible_constraints));
+
+  ASSERT_EQ("w=640:h=480",
+            ExecuteJavascriptAndReturnResult(gum_with_vga_constraints));
 }
 
 // This test will make a simple getUserMedia page, verify that video is playing

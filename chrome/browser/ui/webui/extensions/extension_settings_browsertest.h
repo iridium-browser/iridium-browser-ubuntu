@@ -15,7 +15,7 @@ class Profile;
 class ExtensionSettingsUIBrowserTest : public WebUIBrowserTest {
  public:
   ExtensionSettingsUIBrowserTest();
-  virtual ~ExtensionSettingsUIBrowserTest();
+  ~ExtensionSettingsUIBrowserTest() override;
 
  protected:
   // Get the profile to use.
@@ -25,7 +25,7 @@ class ExtensionSettingsUIBrowserTest : public WebUIBrowserTest {
     return observer_->last_loaded_extension_id();
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE;
+  void SetUpOnMainThread() override;
 
   void InstallGoodExtension();
 

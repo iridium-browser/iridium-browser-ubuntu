@@ -6,6 +6,7 @@
 #define UI_OZONE_PLATFORM_DRI_DRI_SURFACE_FACTORY_H_
 
 #include <map>
+#include <vector>
 
 #include "base/memory/scoped_ptr.h"
 #include "base/timer/timer.h"
@@ -32,7 +33,7 @@ class DriSurfaceFactory : public SurfaceFactoryOzone,
   DriSurfaceFactory(DriWrapper* drm,
                     ScreenManager* screen_manager,
                     DriWindowDelegateManager* window_manager);
-  virtual ~DriSurfaceFactory();
+  ~DriSurfaceFactory() override;
 
   // Describes the state of the hardware after initialization.
   enum HardwareState {
@@ -48,19 +49,19 @@ class DriSurfaceFactory : public SurfaceFactoryOzone,
   void ShutdownHardware();
 
   // SurfaceFactoryOzone:
-  virtual scoped_ptr<SurfaceOzoneCanvas> CreateCanvasForWidget(
-      gfx::AcceleratedWidget widget) OVERRIDE;
-  virtual bool LoadEGLGLES2Bindings(
+  scoped_ptr<SurfaceOzoneCanvas> CreateCanvasForWidget(
+      gfx::AcceleratedWidget widget) override;
+  bool LoadEGLGLES2Bindings(
       AddGLLibraryCallback add_gl_library,
-      SetGLGetProcAddressProcCallback set_gl_get_proc_address) OVERRIDE;
+      SetGLGetProcAddressProcCallback set_gl_get_proc_address) override;
 
   // HardwareCursorDelegate:
-  virtual void SetHardwareCursor(gfx::AcceleratedWidget widget,
-                                 const std::vector<SkBitmap>& bitmaps,
-                                 const gfx::Point& location,
-                                 int frame_delay_ms) OVERRIDE;
-  virtual void MoveHardwareCursor(gfx::AcceleratedWidget window,
-                                  const gfx::Point& location) OVERRIDE;
+  void SetHardwareCursor(gfx::AcceleratedWidget widget,
+                         const std::vector<SkBitmap>& bitmaps,
+                         const gfx::Point& location,
+                         int frame_delay_ms) override;
+  void MoveHardwareCursor(gfx::AcceleratedWidget window,
+                          const gfx::Point& location) override;
 
  protected:
   // Draw the last set cursor & update the cursor plane.

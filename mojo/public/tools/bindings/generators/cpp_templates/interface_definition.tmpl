@@ -52,8 +52,11 @@ params->{{param.name}}
 {#--- Sets #}
 {%   for param in parameters %}
 {%-     if param.kind|is_object_kind %}
-{%-       if param.kind|is_any_array_kind %}
+{%-       if param.kind|is_array_kind %}
   mojo::SerializeArray_<{{param.kind|get_array_validate_params|indent(24)}}>(
+      mojo::internal::Forward(in_{{param.name}}), builder.buffer(), &params->{{param.name}}.ptr);
+{%-       elif param.kind|is_map_kind %}
+  mojo::SerializeMap_<{{param.kind.value_kind|get_map_validate_params|indent(24)}}>(
       mojo::internal::Forward(in_{{param.name}}), builder.buffer(), &params->{{param.name}}.ptr);
 {%-       else %}
   Serialize_(mojo::internal::Forward(in_{{param.name}}), builder.buffer(), &params->{{param.name}}.ptr);
@@ -104,7 +107,7 @@ class {{class_name}}_{{method.name}}_ForwardToCallback
       const {{interface_macros.declare_callback(method)}}& callback)
       : callback_(callback) {
   }
-  virtual bool Accept(mojo::Message* message) MOJO_OVERRIDE;
+  virtual bool Accept(mojo::Message* message) override;
  private:
   {{interface_macros.declare_callback(method)}} callback_;
   MOJO_DISALLOW_COPY_AND_ASSIGN({{class_name}}_{{method.name}}_ForwardToCallback);
@@ -154,9 +157,10 @@ void {{proxy_name}}::{{method.name}}(
   if (!receiver_->AcceptWithResponder(&message, responder))
     delete responder;
 {%- else %}
-  bool ok MOJO_ALLOW_UNUSED = receiver_->Accept(&message);
+  bool ok = receiver_->Accept(&message);
   // This return value may be ignored as !ok implies the Connector has
   // encountered an error, which will be visible through other means.
+  MOJO_ALLOW_UNUSED_LOCAL(ok);
 {%- endif %}
 }
 {%- endfor %}
@@ -184,7 +188,7 @@ class {{class_name}}_{{method.name}}_ProxyToResponder
         responder_(responder) {
   }
 
-  virtual void Run({{interface_macros.declare_params("in_", method.response_parameters)}}) const MOJO_OVERRIDE;
+  virtual void Run({{interface_macros.declare_params("in_", method.response_parameters)}}) const override;
 
  private:
   uint64_t request_id_;
@@ -197,18 +201,19 @@ void {{class_name}}_{{method.name}}_ProxyToResponder::Run(
   mojo::internal::ResponseMessageBuilder builder(
       {{message_name}}, payload_size, request_id_);
   {{build_message(params_name, method.response_parameters, params_description)}}
-  bool ok MOJO_ALLOW_UNUSED = responder_->Accept(&message);
+  bool ok = responder_->Accept(&message);
+  MOJO_ALLOW_UNUSED_LOCAL(ok);
   // TODO(darin): !ok returned here indicates a malformed message, and that may
   // be good reason to close the connection. However, we don't have a way to do
   // that from here. We should add a way.
   delete responder_;
-  responder_ = NULL;
+  responder_ = nullptr;
 }
 {%-   endif -%}
 {%- endfor %}
 
 {{class_name}}Stub::{{class_name}}Stub()
-    : sink_(NULL) {
+    : sink_(nullptr) {
 }
 
 {#--- Stub definition #}
@@ -225,6 +230,9 @@ bool {{class_name}}Stub::Accept(mojo::Message* message) {
 
       params->DecodePointersAndHandles(message->mutable_handles());
       {{alloc_params(method.parameters)|indent(6)}}
+      // A null |sink_| typically means there is a missing call to
+      // InterfacePtr::set_client().
+      assert(sink_);
       sink_->{{method.name}}({{pass_params(method.parameters)}});
       return true;
 {%-     else %}
@@ -254,6 +262,9 @@ bool {{class_name}}Stub::AcceptWithResponder(
               message->request_id(), responder);
       {{interface_macros.declare_callback(method)}} callback(runnable);
       {{alloc_params(method.parameters)|indent(6)}}
+      // A null |sink_| typically means there is a missing call to
+      // InterfacePtr::set_client().
+      assert(sink_);
       sink_->{{method.name}}(
 {%- if method.parameters -%}{{pass_params(method.parameters)}}, {% endif -%}callback);
       return true;
@@ -300,6 +311,9 @@ bool {{class_name}}RequestValidator::Accept(mojo::Message* message) {
   }
 {%- endif %}
 
+  // A null |sink_| typically means there is a missing call to
+  // InterfacePtr::set_client().
+  assert(sink_);
   return sink_->Accept(message);
 }
 
@@ -329,6 +343,9 @@ bool {{class_name}}ResponseValidator::Accept(mojo::Message* message) {
   }
 {%- endif %}
 
+  // A null |sink_| typically means there is a missing call to
+  // InterfacePtr::set_client().
+  assert(sink_);
   return sink_->Accept(message);
 }
 {%- endif -%}

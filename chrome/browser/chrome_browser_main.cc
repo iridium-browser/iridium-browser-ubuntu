@@ -25,6 +25,7 @@
 #include "base/prefs/pref_value_store.h"
 #include "base/prefs/scoped_user_pref_update.h"
 #include "base/process/process_info.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
@@ -91,6 +92,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_result_codes.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/chrome_version_info.h"
 #include "chrome/common/crash_keys.h"
 #include "chrome/common/env_vars.h"
 #include "chrome/common/logging_chrome.h"
@@ -110,7 +112,7 @@
 #include "components/startup_metric_utils/startup_metric_utils.h"
 #include "components/translate/content/common/cld_data_source.h"
 #include "components/translate/core/browser/translate_download_manager.h"
-#include "components/variations/variations_http_header_provider.h"
+#include "components/variations/net/variations_http_header_provider.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -180,6 +182,10 @@
 #include "chrome/browser/mac/keystone_glue.h"
 #endif
 
+#if !defined(OS_IOS)
+#include "chrome/browser/ui/app_modal_dialogs/chrome_javascript_native_dialog_factory.h"
+#endif
+
 #if !defined(DISABLE_NACL)
 #include "chrome/browser/component_updater/pnacl/pnacl_component_installer.h"
 #include "components/nacl/browser/nacl_process_host.h"
@@ -188,9 +194,10 @@
 #if defined(ENABLE_EXTENSIONS)
 #include "chrome/browser/extensions/startup_helper.h"
 #include "extensions/browser/extension_protocols.h"
+#include "extensions/components/javascript_dialog_extensions_client/javascript_dialog_extension_client_impl.h"
 #endif
 
-#if defined(ENABLE_FULL_PRINTING) && !defined(OFFICIAL_BUILD)
+#if defined(ENABLE_PRINT_PREVIEW) && !defined(OFFICIAL_BUILD)
 #include "printing/printed_document.h"
 #endif
 
@@ -402,9 +409,16 @@ void RegisterComponentsForUpdate() {
   RegisterPepperFlashComponent(cus);
   RegisterSwiftShaderComponent(cus);
   RegisterWidevineCdmComponent(cus);
-#if !defined(DISABLE_NACL)
-  g_browser_process->pnacl_component_installer()->RegisterPnaclComponent(cus);
 #endif
+
+#if !defined(DISABLE_NACL) && !defined(OS_ANDROID)
+#if defined(OS_CHROMEOS)
+  // PNaCl on Chrome OS is on rootfs and there is no need to download it. But
+  // Chrome4ChromeOS on Linux doesn't contain PNaCl so enable component
+  // installer when ruining on Linux. See crbug.com/422121 for more details.
+  if (!base::SysInfo::IsRunningOnChromeOS())
+#endif
+    g_browser_process->pnacl_component_installer()->RegisterPnaclComponent(cus);
 #endif
 
   if (translate::CldDataSource::ShouldRegisterForComponentUpdates()) {
@@ -502,12 +516,12 @@ class LoadCompleteListener : public content::NotificationObserver {
                    content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
                    content::NotificationService::AllSources());
   }
-  virtual ~LoadCompleteListener() {}
+  ~LoadCompleteListener() override {}
 
   // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE {
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override {
     DCHECK_EQ(content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME, type);
     startup_metric_utils::OnInitialPageLoadComplete();
     delete this;
@@ -614,6 +628,7 @@ void ChromeBrowserMainParts::SetupMetricsAndFieldTrials() {
         command_line->GetSwitchValueASCII(switches::kForceVariationIds));
     CHECK(result) << "Invalid --" << switches::kForceVariationIds
                   << " list specified.";
+    metrics->AddSyntheticTrialObserver(provider);
   }
   chrome_variations::VariationsService* variations_service =
       browser_process_->variations_service();
@@ -632,6 +647,20 @@ void ChromeBrowserMainParts::SetupMetricsAndFieldTrials() {
 
   // Now that field trials have been created, initializes metrics recording.
   metrics->InitializeMetricsRecordingState();
+
+  // Enable profiler instrumentation depending on the channel.
+  switch (chrome::VersionInfo::GetChannel()) {
+    case chrome::VersionInfo::CHANNEL_UNKNOWN:
+    case chrome::VersionInfo::CHANNEL_CANARY:
+      tracked_objects::ScopedTracker::Enable();
+      break;
+
+    case chrome::VersionInfo::CHANNEL_DEV:
+    case chrome::VersionInfo::CHANNEL_BETA:
+    case chrome::VersionInfo::CHANNEL_STABLE:
+      // Don't enable instrumentation.
+      break;
+  }
 }
 
 // ChromeBrowserMainParts: |SetupMetricsAndFieldTrials()| related --------------
@@ -1037,6 +1066,14 @@ void ChromeBrowserMainParts::PreProfileInit() {
         base::Bind(&ProfileManager::CleanUpStaleProfiles, profiles_to_delete));
   }
 #endif  // OS_ANDROID
+
+#if defined(ENABLE_EXTENSIONS)
+  InstallJavaScriptDialogExtensionsClient();
+#endif
+
+#if !defined(OS_IOS)
+  InstallChromeJavaScriptNativeDialogFactory();
+#endif
 }
 
 void ChromeBrowserMainParts::PostProfileInit() {
@@ -1082,9 +1119,11 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   StartMetricsRecording();
 #endif
 
-  // Create watchdog thread after creating all other threads because it will
-  // watch the other threads and they must be running.
-  browser_process_->watchdog_thread();
+  if (!base::debug::BeingDebugged()) {
+    // Create watchdog thread after creating all other threads because it will
+    // watch the other threads and they must be running.
+    browser_process_->watchdog_thread();
+  }
 
   // Do any initializating in the browser process that requires all threads
   // running.
@@ -1392,7 +1431,7 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
     net::SdchManager::EnableSdchSupport(false);
   }
 
-#if defined(ENABLE_FULL_PRINTING) && !defined(OFFICIAL_BUILD)
+#if defined(ENABLE_PRINT_PREVIEW) && !defined(OFFICIAL_BUILD)
   if (parsed_command_line().HasSwitch(switches::kDebugPrint)) {
     base::FilePath path =
         parsed_command_line().GetSwitchValuePath(switches::kDebugPrint);
@@ -1425,7 +1464,7 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
   browser_process_->metrics_service()->LogNeedForCleanShutdown();
 #endif
 
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
   // Create the instance of the cloud print proxy service so that it can launch
   // the service process if needed. This is needed because the service process
   // might have shutdown because an update was available.
@@ -1549,12 +1588,10 @@ int ChromeBrowserMainParts::PreMainMessageLoopRunImpl() {
     run_message_loop_ = false;
   }
   browser_creator_.reset();
-#endif  // !defined(OS_ANDROID)
 
-#if !defined(OS_ANDROID)
   process_power_collector_.reset(new ProcessPowerCollector);
   process_power_collector_->Initialize();
-#endif
+#endif  // !defined(OS_ANDROID)
 
   PostBrowserStart();
 

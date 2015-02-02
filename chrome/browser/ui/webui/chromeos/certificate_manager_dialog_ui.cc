@@ -36,16 +36,16 @@ class CertificateManagerDialogHTMLSource : public content::URLDataSource {
       base::DictionaryValue* localized_strings);
 
   // content::URLDataSource implementation.
-  virtual std::string GetSource() const OVERRIDE;
+  virtual std::string GetSource() const override;
   virtual void StartDataRequest(
       const std::string& path,
       int render_process_id,
       int render_frame_id,
-      const content::URLDataSource::GotDataCallback& callback) OVERRIDE;
-  virtual std::string GetMimeType(const std::string&) const OVERRIDE {
+      const content::URLDataSource::GotDataCallback& callback) override;
+  virtual std::string GetMimeType(const std::string&) const override {
     return "text/html";
   }
-  virtual bool ShouldAddContentSecurityPolicy() const OVERRIDE {
+  virtual bool ShouldAddContentSecurityPolicy() const override {
     return false;
   }
 
@@ -77,7 +77,6 @@ void CertificateManagerDialogHTMLSource::StartDataRequest(
 
   if (path == kLocalizedStringsFile) {
     // Return dynamically-generated strings from memory.
-    webui::UseVersion2 version;
     std::string strings_js;
     webui::AppendJsonJS(localized_strings_.get(), &strings_js);
     response_bytes = base::RefCountedString::TakeString(&strings_js);

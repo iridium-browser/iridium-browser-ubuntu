@@ -30,43 +30,44 @@ class MetadataDatabaseIndexOnDisk : public MetadataDatabaseIndexInterface {
  public:
   static scoped_ptr<MetadataDatabaseIndexOnDisk>  Create(LevelDBWrapper* db);
 
-  virtual ~MetadataDatabaseIndexOnDisk();
+  ~MetadataDatabaseIndexOnDisk() override;
 
   // MetadataDatabaseIndexInterface overrides.
-  virtual bool GetFileMetadata(
-      const std::string& file_id, FileMetadata* metadata) const OVERRIDE;
-  virtual bool GetFileTracker(
-      int64 tracker_id, FileTracker* tracker) const OVERRIDE;
-  virtual void StoreFileMetadata(scoped_ptr<FileMetadata> metadata) OVERRIDE;
-  virtual void StoreFileTracker(scoped_ptr<FileTracker> tracker) OVERRIDE;
-  virtual void RemoveFileMetadata(const std::string& file_id) OVERRIDE;
-  virtual void RemoveFileTracker(int64 tracker_id) OVERRIDE;
-  virtual TrackerIDSet GetFileTrackerIDsByFileID(
-      const std::string& file_id) const OVERRIDE;
-  virtual int64 GetAppRootTracker(const std::string& app_id) const OVERRIDE;
-  virtual TrackerIDSet GetFileTrackerIDsByParentAndTitle(
-      int64 parent_tracker_id, const std::string& title) const OVERRIDE;
-  virtual std::vector<int64> GetFileTrackerIDsByParent(
-      int64 parent_tracker_id) const OVERRIDE;
-  virtual std::string PickMultiTrackerFileID() const OVERRIDE;
-  virtual ParentIDAndTitle PickMultiBackingFilePath() const OVERRIDE;
-  virtual int64 PickDirtyTracker() const OVERRIDE;
-  virtual void DemoteDirtyTracker(int64 tracker_id) OVERRIDE;
-  virtual bool HasDemotedDirtyTracker() const OVERRIDE;
-  virtual void PromoteDemotedDirtyTracker(int64 tracker_id) OVERRIDE;
-  virtual bool PromoteDemotedDirtyTrackers() OVERRIDE;
-  virtual size_t CountDirtyTracker() const OVERRIDE;
-  virtual size_t CountFileMetadata() const OVERRIDE;
-  virtual size_t CountFileTracker() const OVERRIDE;
-  virtual void SetSyncRootTrackerID(int64 sync_root_id) const OVERRIDE;
-  virtual void SetLargestChangeID(int64 largest_change_id) const OVERRIDE;
-  virtual void SetNextTrackerID(int64 next_tracker_id) const OVERRIDE;
-  virtual int64 GetSyncRootTrackerID() const OVERRIDE;
-  virtual int64 GetLargestChangeID() const OVERRIDE;
-  virtual int64 GetNextTrackerID() const OVERRIDE;
-  virtual std::vector<std::string> GetRegisteredAppIDs() const OVERRIDE;
-  virtual std::vector<int64> GetAllTrackerIDs() const OVERRIDE;
-  virtual std::vector<std::string> GetAllMetadataIDs() const OVERRIDE;
+  bool GetFileMetadata(const std::string& file_id,
+                       FileMetadata* metadata) const override;
+  bool GetFileTracker(int64 tracker_id, FileTracker* tracker) const override;
+  void StoreFileMetadata(scoped_ptr<FileMetadata> metadata) override;
+  void StoreFileTracker(scoped_ptr<FileTracker> tracker) override;
+  void RemoveFileMetadata(const std::string& file_id) override;
+  void RemoveFileTracker(int64 tracker_id) override;
+  TrackerIDSet GetFileTrackerIDsByFileID(
+      const std::string& file_id) const override;
+  int64 GetAppRootTracker(const std::string& app_id) const override;
+  TrackerIDSet GetFileTrackerIDsByParentAndTitle(
+      int64 parent_tracker_id,
+      const std::string& title) const override;
+  std::vector<int64> GetFileTrackerIDsByParent(
+      int64 parent_tracker_id) const override;
+  std::string PickMultiTrackerFileID() const override;
+  ParentIDAndTitle PickMultiBackingFilePath() const override;
+  int64 PickDirtyTracker() const override;
+  void DemoteDirtyTracker(int64 tracker_id) override;
+  bool HasDemotedDirtyTracker() const override;
+  bool IsDemotedDirtyTracker(int64 tracker_id) const override;
+  void PromoteDemotedDirtyTracker(int64 tracker_id) override;
+  bool PromoteDemotedDirtyTrackers() override;
+  size_t CountDirtyTracker() const override;
+  size_t CountFileMetadata() const override;
+  size_t CountFileTracker() const override;
+  void SetSyncRootTrackerID(int64 sync_root_id) const override;
+  void SetLargestChangeID(int64 largest_change_id) const override;
+  void SetNextTrackerID(int64 next_tracker_id) const override;
+  int64 GetSyncRootTrackerID() const override;
+  int64 GetLargestChangeID() const override;
+  int64 GetNextTrackerID() const override;
+  std::vector<std::string> GetRegisteredAppIDs() const override;
+  std::vector<int64> GetAllTrackerIDs() const override;
+  std::vector<std::string> GetAllMetadataIDs() const override;
 
   // Builds on-disk indexes from FileTracker entries on disk.
   // Returns the number of newly added entries for indexing.
@@ -149,7 +150,7 @@ class MetadataDatabaseIndexOnDisk : public MetadataDatabaseIndexInterface {
       int64 tracker_id);
 
   // Checks if |db_| has an entry whose key is |key|.
-  bool DBHasKey(const std::string& key);
+  bool DBHasKey(const std::string& key) const;
 
   // Returns the number of dirty trackers, actually counting them.
   size_t CountDirtyTrackerInternal() const;

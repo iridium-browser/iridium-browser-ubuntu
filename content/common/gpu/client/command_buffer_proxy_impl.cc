@@ -15,10 +15,13 @@
 #include "content/common/gpu/client/gpu_video_encode_accelerator_host.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "content/common/view_messages.h"
+#include "gpu/command_buffer/client/gpu_memory_buffer_manager.h"
 #include "gpu/command_buffer/common/cmd_buffer_common.h"
 #include "gpu/command_buffer/common/command_buffer_shared.h"
 #include "gpu/command_buffer/common/gpu_memory_allocation.h"
+#include "gpu/command_buffer/service/image_factory.h"
 #include "ui/gfx/size.h"
+#include "ui/gl/gl_bindings.h"
 
 namespace content {
 
@@ -42,12 +45,13 @@ bool CommandBufferProxyImpl::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(CommandBufferProxyImpl, message)
     IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_Destroyed, OnDestroyed);
-    IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_EchoAck, OnEchoAck);
     IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_ConsoleMsg, OnConsoleMessage);
     IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_SetMemoryAllocation,
                         OnSetMemoryAllocation);
     IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_SignalSyncPointAck,
                         OnSignalSyncPointAck);
+    IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_SwapBuffersCompleted,
+                        OnSwapBuffersCompleted);
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -73,13 +77,6 @@ void CommandBufferProxyImpl::OnDestroyed(gpu::error::ContextLostReason reason) {
     // Avoid calling the error callback more than once.
     channel_error_callback_.Reset();
   }
-}
-
-void CommandBufferProxyImpl::OnEchoAck() {
-  DCHECK(!echo_tasks_.empty());
-  base::Closure callback = echo_tasks_.front();
-  echo_tasks_.pop();
-  callback.Run();
 }
 
 void CommandBufferProxyImpl::OnConsoleMessage(
@@ -159,7 +156,7 @@ bool CommandBufferProxyImpl::Initialize() {
     return false;
   }
 
-  capabilities_.map_image = true;
+  capabilities_.image = true;
 
   return true;
 }
@@ -198,6 +195,11 @@ void CommandBufferProxyImpl::SetLatencyInfo(
     const std::vector<ui::LatencyInfo>& latency_info) {
   for (size_t i = 0; i < latency_info.size(); i++)
     latency_info_.push_back(latency_info[i]);
+}
+
+void CommandBufferProxyImpl::SetSwapBuffersCompletionCallback(
+    const SwapBuffersCompletionCallback& callback) {
+  swap_buffers_completion_callback_ = callback;
 }
 
 void CommandBufferProxyImpl::WaitForTokenInRange(int32 start, int32 end) {
@@ -297,74 +299,73 @@ gpu::Capabilities CommandBufferProxyImpl::GetCapabilities() {
   return capabilities_;
 }
 
-gfx::GpuMemoryBuffer* CommandBufferProxyImpl::CreateGpuMemoryBuffer(
-    size_t width,
-    size_t height,
-    unsigned internalformat,
-    unsigned usage,
-    int32* id) {
-  *id = -1;
-
+int32_t CommandBufferProxyImpl::CreateImage(ClientBuffer buffer,
+                                            size_t width,
+                                            size_t height,
+                                            unsigned internalformat) {
   if (last_state_.error != gpu::error::kNoError)
-    return NULL;
+    return -1;
 
-  scoped_ptr<gfx::GpuMemoryBuffer> buffer(
-      channel_->factory()->AllocateGpuMemoryBuffer(
-          width, height, internalformat, usage));
-  if (!buffer)
-    return NULL;
+  int32 new_id = channel_->ReserveImageId();
 
-  DCHECK(GpuChannelHost::IsValidGpuMemoryBuffer(buffer->GetHandle()));
-
-  int32 new_id = channel_->ReserveGpuMemoryBufferId();
+  gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager =
+      channel_->gpu_memory_buffer_manager();
+  gfx::GpuMemoryBuffer* gpu_memory_buffer =
+      gpu_memory_buffer_manager->GpuMemoryBufferFromClientBuffer(buffer);
+  DCHECK(gpu_memory_buffer);
 
   // This handle is owned by the GPU process and must be passed to it or it
   // will leak. In otherwords, do not early out on error between here and the
-  // sending of the RegisterGpuMemoryBuffer IPC below.
+  // sending of the CreateImage IPC below.
+  bool requires_sync_point = false;
   gfx::GpuMemoryBufferHandle handle =
-      channel_->ShareGpuMemoryBufferToGpuProcess(buffer->GetHandle());
+      channel_->ShareGpuMemoryBufferToGpuProcess(gpu_memory_buffer->GetHandle(),
+                                                 &requires_sync_point);
 
-  if (!Send(new GpuCommandBufferMsg_RegisterGpuMemoryBuffer(
-                route_id_,
-                new_id,
-                handle,
-                width,
-                height,
-                internalformat))) {
-    return NULL;
+  DCHECK(gpu::ImageFactory::IsImageFormatCompatibleWithGpuMemoryBufferFormat(
+      internalformat, gpu_memory_buffer->GetFormat()));
+  if (!Send(new GpuCommandBufferMsg_CreateImage(route_id_,
+                                                new_id,
+                                                handle,
+                                                gfx::Size(width, height),
+                                                gpu_memory_buffer->GetFormat(),
+                                                internalformat))) {
+    return -1;
   }
 
-  *id = new_id;
-  DCHECK(gpu_memory_buffers_.find(new_id) == gpu_memory_buffers_.end());
-  return gpu_memory_buffers_.add(new_id, buffer.Pass()).first->second;
+  if (requires_sync_point) {
+    gpu_memory_buffer_manager->SetDestructionSyncPoint(gpu_memory_buffer,
+                                                       InsertSyncPoint());
+  }
+
+  return new_id;
 }
 
-void CommandBufferProxyImpl::DestroyGpuMemoryBuffer(int32 id) {
+void CommandBufferProxyImpl::DestroyImage(int32 id) {
   if (last_state_.error != gpu::error::kNoError)
     return;
 
-  Send(new GpuCommandBufferMsg_UnregisterGpuMemoryBuffer(route_id_, id));
+  Send(new GpuCommandBufferMsg_DestroyImage(route_id_, id));
+}
 
-  // Remove the gpu memory buffer from the client side cache.
-  DCHECK(gpu_memory_buffers_.find(id) != gpu_memory_buffers_.end());
-  gpu_memory_buffers_.take(id);
+int32_t CommandBufferProxyImpl::CreateGpuMemoryBufferImage(
+    size_t width,
+    size_t height,
+    unsigned internalformat,
+    unsigned usage) {
+  scoped_ptr<gfx::GpuMemoryBuffer> buffer(
+      channel_->gpu_memory_buffer_manager()->AllocateGpuMemoryBuffer(
+          gfx::Size(width, height),
+          gpu::ImageFactory::ImageFormatToGpuMemoryBufferFormat(internalformat),
+          gpu::ImageFactory::ImageUsageToGpuMemoryBufferUsage(usage)));
+  if (!buffer)
+    return -1;
+
+  return CreateImage(buffer->AsClientBuffer(), width, height, internalformat);
 }
 
 int CommandBufferProxyImpl::GetRouteID() const {
   return route_id_;
-}
-
-void CommandBufferProxyImpl::Echo(const base::Closure& callback) {
-  if (last_state_.error != gpu::error::kNoError) {
-    return;
-  }
-
-  if (!Send(new GpuCommandBufferMsg_Echo(
-           route_id_, GpuCommandBufferMsg_EchoAck(route_id_)))) {
-    return;
-  }
-
-  echo_tasks_.push(callback);
 }
 
 uint32 CommandBufferProxyImpl::CreateStreamTexture(uint32 texture_id) {
@@ -523,6 +524,18 @@ void CommandBufferProxyImpl::TryUpdateState() {
 gpu::CommandBufferSharedState* CommandBufferProxyImpl::shared_state() const {
   return reinterpret_cast<gpu::CommandBufferSharedState*>(
       shared_state_shm_->memory());
+}
+
+void CommandBufferProxyImpl::OnSwapBuffersCompleted(
+    const std::vector<ui::LatencyInfo>& latency_info) {
+  if (!swap_buffers_completion_callback_.is_null()) {
+    if (!ui::LatencyInfo::Verify(
+            latency_info, "CommandBufferProxyImpl::OnSwapBuffersCompleted")) {
+      swap_buffers_completion_callback_.Run(std::vector<ui::LatencyInfo>());
+      return;
+    }
+    swap_buffers_completion_callback_.Run(latency_info);
+  }
 }
 
 }  // namespace content

@@ -80,7 +80,8 @@ class MediaEngineInterface {
   virtual VoiceMediaChannel *CreateChannel() = 0;
   // Creates a video media channel, paired with the specified voice channel.
   // Returns NULL on failure.
-  virtual VideoMediaChannel *CreateVideoChannel(
+  virtual VideoMediaChannel* CreateVideoChannel(
+      const VideoOptions& options,
       VoiceMediaChannel* voice_media_channel) = 0;
 
   // Creates a soundclip object for playing sounds on. Returns NULL on failure.
@@ -98,10 +99,6 @@ class MediaEngineInterface {
   // and encode video.
   virtual bool SetDefaultVideoEncoderConfig(const VideoEncoderConfig& config)
       = 0;
-  // Gets the default (maximum) codec/resolution and encoder option used to
-  // capture and encode video, as set by SetDefaultVideoEncoderConfig or the
-  // default from the video engine if not previously set.
-  virtual VideoEncoderConfig GetDefaultVideoEncoderConfig() const = 0;
 
   // Device selection
   // TODO(tschmelcher): Add method for selecting the soundclip device.
@@ -198,8 +195,9 @@ class CompositeMediaEngine : public MediaEngineInterface {
   virtual VoiceMediaChannel *CreateChannel() {
     return voice_.CreateChannel();
   }
-  virtual VideoMediaChannel *CreateVideoChannel(VoiceMediaChannel* channel) {
-    return video_.CreateChannel(channel);
+  virtual VideoMediaChannel* CreateVideoChannel(const VideoOptions& options,
+                                                VoiceMediaChannel* channel) {
+    return video_.CreateChannel(options, channel);
   }
   virtual SoundclipMedia *CreateSoundclip() {
     return voice_.CreateSoundclip();
@@ -216,9 +214,6 @@ class CompositeMediaEngine : public MediaEngineInterface {
   }
   virtual bool SetDefaultVideoEncoderConfig(const VideoEncoderConfig& config) {
     return video_.SetDefaultEncoderConfig(config);
-  }
-  virtual VideoEncoderConfig GetDefaultVideoEncoderConfig() const {
-    return video_.GetDefaultEncoderConfig();
   }
 
   virtual bool SetSoundDevices(const Device* in_device,
@@ -345,9 +340,6 @@ class NullVideoEngine {
     return NULL;
   }
   bool SetOptions(const VideoOptions& options) { return true; }
-  VideoEncoderConfig GetDefaultEncoderConfig() const {
-    return VideoEncoderConfig();
-  }
   bool SetDefaultEncoderConfig(const VideoEncoderConfig& config) {
     return true;
   }

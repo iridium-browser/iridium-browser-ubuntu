@@ -17,6 +17,8 @@ class ShelfLayoutManager;
 // Button used for items on the launcher, except for the AppList.
 class ASH_EXPORT ShelfButton : public views::CustomButton {
  public:
+  static const char kViewClassName[];
+
   // Used to indicate the current state of the button.
   enum State {
     // Nothing special. Usually represents an app shortcut item with no running
@@ -35,7 +37,7 @@ class ASH_EXPORT ShelfButton : public views::CustomButton {
     STATE_HIDDEN = 1 << 5,
   };
 
-  virtual ~ShelfButton();
+  ~ShelfButton() override;
 
   // Called to create an instance of a ShelfButton.
   static ShelfButton* Create(views::ButtonListener* listener,
@@ -60,11 +62,11 @@ class ASH_EXPORT ShelfButton : public views::CustomButton {
   gfx::Rect GetIconBounds() const;
 
   // Overrides to views::CustomButton:
-  virtual void ShowContextMenu(const gfx::Point& p,
-                               ui::MenuSourceType source_type) OVERRIDE;
+  void ShowContextMenu(const gfx::Point& p,
+                       ui::MenuSourceType source_type) override;
 
   // View override - needed by unit test.
-  virtual void OnMouseCaptureLost() OVERRIDE;
+  void OnMouseCaptureLost() override;
 
  protected:
   ShelfButton(views::ButtonListener* listener,
@@ -77,7 +79,7 @@ class ASH_EXPORT ShelfButton : public views::CustomButton {
   class IconView : public views::ImageView {
    public:
     IconView();
-    virtual ~IconView();
+    ~IconView() override;
 
     void set_icon_size(int icon_size) { icon_size_ = icon_size; }
     int icon_size() const { return icon_size_; }
@@ -91,21 +93,22 @@ class ASH_EXPORT ShelfButton : public views::CustomButton {
   };
 
   // View overrides:
-  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
-  virtual bool OnMouseDragged(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseMoved(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseEntered(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE;
-  virtual void GetAccessibleState(ui::AXViewState* state) OVERRIDE;
-  virtual void Layout() OVERRIDE;
-  virtual void ChildPreferredSizeChanged(views::View* child) OVERRIDE;
-  virtual void OnFocus() OVERRIDE;
-  virtual void OnBlur() OVERRIDE;
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
+  const char* GetClassName() const override;
+  bool OnMousePressed(const ui::MouseEvent& event) override;
+  void OnMouseReleased(const ui::MouseEvent& event) override;
+  bool OnMouseDragged(const ui::MouseEvent& event) override;
+  void OnMouseMoved(const ui::MouseEvent& event) override;
+  void OnMouseEntered(const ui::MouseEvent& event) override;
+  void OnMouseExited(const ui::MouseEvent& event) override;
+  void GetAccessibleState(ui::AXViewState* state) override;
+  void Layout() override;
+  void ChildPreferredSizeChanged(views::View* child) override;
+  void OnFocus() override;
+  void OnBlur() override;
+  void OnPaint(gfx::Canvas* canvas) override;
 
   // ui::EventHandler overrides:
-  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
+  void OnGestureEvent(ui::GestureEvent* event) override;
 
   // Sets the icon image with a shadow.
   void SetShadowedImage(const gfx::ImageSkia& bitmap);

@@ -8,6 +8,7 @@
 #include "src/allocation.h"
 #include "src/arguments.h"
 #include "src/assembler.h"
+#include "src/base/atomicops.h"
 #include "src/base/platform/platform.h"
 #include "src/execution.h"
 #include "src/factory.h"
@@ -454,8 +455,15 @@ class Debug {
   // Record function from which eval was called.
   static void RecordEvalCaller(Handle<Script> script);
 
+  bool CheckExecutionState(int id) {
+    return !debug_context().is_null() && break_id() != 0 && break_id() == id;
+  }
+
   // Flags and states.
-  DebugScope* debugger_entry() { return thread_local_.current_debug_scope_; }
+  DebugScope* debugger_entry() {
+    return reinterpret_cast<DebugScope*>(
+        base::NoBarrier_Load(&thread_local_.current_debug_scope_));
+  }
   inline Handle<Context> debug_context() { return debug_context_; }
   void set_live_edit_enabled(bool v) { live_edit_enabled_ = v; }
   bool live_edit_enabled() const {
@@ -466,7 +474,7 @@ class Debug {
   inline bool is_loaded() const { return !debug_context_.is_null(); }
   inline bool has_break_points() const { return has_break_points_; }
   inline bool in_debug_scope() const {
-    return thread_local_.current_debug_scope_ != NULL;
+    return !!base::NoBarrier_Load(&thread_local_.current_debug_scope_);
   }
   void set_disable_break(bool v) { break_disabled_ = v; }
 
@@ -503,6 +511,9 @@ class Debug {
   // Check whether there are commands in the command queue.
   inline bool has_commands() const { return !command_queue_.IsEmpty(); }
   inline bool ignore_events() const { return is_suppressed_ || !is_active_; }
+  inline bool break_disabled() const {
+    return break_disabled_ || in_debug_event_listener_;
+  }
 
   void OnException(Handle<Object> exception, bool uncaught,
                    Handle<Object> promise);
@@ -529,8 +540,8 @@ class Debug {
   // Mirror cache handling.
   void ClearMirrorCache();
 
-  // Returns a promise if the pushed try-catch handler matches the current one.
-  bool PromiseHasRejectHandler(Handle<JSObject> promise);
+  MaybeHandle<Object> PromiseHasUserDefinedRejectHandler(
+      Handle<JSObject> promise);
 
   void CallEventCallback(v8::DebugEvent event,
                          Handle<Object> exec_state,
@@ -551,8 +562,8 @@ class Debug {
   void ClearStepIn();
   void ActivateStepOut(StackFrame* frame);
   void ClearStepNext();
-  // Returns whether the compile succeeded.
-  void RemoveDebugInfo(Handle<DebugInfo> debug_info);
+  void RemoveDebugInfoAndClearFromShared(Handle<DebugInfo> debug_info);
+  void RemoveDebugInfo(DebugInfo** debug_info);
   Handle<Object> CheckBreakPoints(Handle<Object> break_point);
   bool CheckBreakPoint(Handle<Object> break_point_object);
 
@@ -580,6 +591,7 @@ class Debug {
   bool live_edit_enabled_;
   bool has_break_points_;
   bool break_disabled_;
+  bool in_debug_event_listener_;
   bool break_on_exception_;
   bool break_on_uncaught_exception_;
 
@@ -595,7 +607,7 @@ class Debug {
   class ThreadLocal {
    public:
     // Top debugger entry.
-    DebugScope* current_debug_scope_;
+    base::AtomicWord current_debug_scope_;
 
     // Counter for generating next break id.
     int break_count_;
@@ -690,14 +702,21 @@ class DebugScope BASE_EMBEDDED {
 class DisableBreak BASE_EMBEDDED {
  public:
   explicit DisableBreak(Debug* debug, bool disable_break)
-    : debug_(debug), old_state_(debug->break_disabled_) {
+      : debug_(debug),
+        previous_break_disabled_(debug->break_disabled_),
+        previous_in_debug_event_listener_(debug->in_debug_event_listener_) {
     debug_->break_disabled_ = disable_break;
+    debug_->in_debug_event_listener_ = disable_break;
   }
-  ~DisableBreak() { debug_->break_disabled_ = old_state_; }
+  ~DisableBreak() {
+    debug_->break_disabled_ = previous_break_disabled_;
+    debug_->in_debug_event_listener_ = previous_in_debug_event_listener_;
+  }
 
  private:
   Debug* debug_;
-  bool old_state_;
+  bool previous_break_disabled_;
+  bool previous_in_debug_event_listener_;
   DISALLOW_COPY_AND_ASSIGN(DisableBreak);
 };
 

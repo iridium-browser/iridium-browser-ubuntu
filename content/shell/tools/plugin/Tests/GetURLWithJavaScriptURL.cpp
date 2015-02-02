@@ -48,18 +48,20 @@ public:
     }
 
 private:
- virtual NPError NPP_New(NPMIMEType pluginType,
-                         uint16_t mode,
-                         int16_t argc,
-                         char* argn[],
-                         char* argv[],
-                         NPSavedData* saved) OVERRIDE {
+ NPError NPP_New(NPMIMEType pluginType,
+                 uint16_t mode,
+                 int16_t argc,
+                 char* argn[],
+                 char* argv[],
+                 NPSavedData* saved) override {
         NPN_GetURL(javaScriptURL, 0);
         return NPERR_NO_ERROR;
     }
 
-    virtual NPError NPP_NewStream(NPMIMEType type, NPStream* stream, NPBool seekable, uint16_t* stype) OVERRIDE
-    {
+    NPError NPP_NewStream(NPMIMEType type,
+                          NPStream* stream,
+                          NPBool seekable,
+                          uint16_t* stype) override {
         stream->pdata = this;
 
         if (strcmp(stream->url, javaScriptURL))
@@ -72,8 +74,7 @@ private:
         return NPERR_NO_ERROR;
     }
 
-    virtual NPError NPP_DestroyStream(NPStream* stream, NPReason reason) OVERRIDE
-    {
+    NPError NPP_DestroyStream(NPStream* stream, NPReason reason) override {
         if (stream->pdata != this)
             m_didFail = true;
 
@@ -96,16 +97,17 @@ private:
         return NPERR_NO_ERROR;
     }
 
-    virtual int32_t NPP_WriteReady(NPStream* stream) OVERRIDE
-    {
+    int32_t NPP_WriteReady(NPStream* stream) override {
         if (stream->pdata != this)
             m_didFail = true;
 
         return 2;
     }
 
-    virtual int32_t NPP_Write(NPStream* stream, int32_t offset, int32_t len, void* buffer) OVERRIDE
-    {
+    int32_t NPP_Write(NPStream* stream,
+                      int32_t offset,
+                      int32_t len,
+                      void* buffer) override {
         if (stream->pdata != this)
             m_didFail = true;
 

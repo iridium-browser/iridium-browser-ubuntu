@@ -8,6 +8,7 @@
 #include <string>
 
 #include "athena/athena_export.h"
+#include "base/memory/scoped_ptr.h"
 
 namespace content {
 class BrowserContext;
@@ -15,6 +16,7 @@ class WebContents;
 }
 
 namespace extensions {
+class ExtensionInstallUI;
 class ExtensionSet;
 }
 
@@ -25,12 +27,8 @@ class ATHENA_EXPORT ExtensionsDelegate {
  public:
   static ExtensionsDelegate* Get(content::BrowserContext* context);
 
-  // Creates the extension delegate for app shell environment.
-  static void CreateExtensionsDelegateForShell(
-      content::BrowserContext* context);
-
-  // Creates the extension delegate for chrome environment.
-  static void CreateExtensionsDelegateForChrome(
+  // Creates the extension delegate.
+  static void CreateExtensionsDelegate(
       content::BrowserContext* context);
 
   // Creates the extension delegate for test environment.
@@ -56,6 +54,9 @@ class ATHENA_EXPORT ExtensionsDelegate {
   // Unload an application. Returns true if the application was
   // successfully unloaded.
   virtual bool UnloadApp(const std::string& app_id) = 0;
+
+  virtual scoped_ptr<extensions::ExtensionInstallUI>
+  CreateExtensionInstallUI() = 0;
 };
 
 }  // namespace athena

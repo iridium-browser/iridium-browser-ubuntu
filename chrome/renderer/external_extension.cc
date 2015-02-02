@@ -43,9 +43,9 @@ class ExternalExtensionWrapper : public v8::Extension {
 
   // Allows v8's javascript code to call the native functions defined
   // in this class for window.external.
-  virtual v8::Handle<v8::FunctionTemplate> GetNativeFunctionTemplate(
+  v8::Handle<v8::FunctionTemplate> GetNativeFunctionTemplate(
       v8::Isolate* isolate,
-      v8::Handle<v8::String> name) OVERRIDE;
+      v8::Handle<v8::String> name) override;
 
   // Helper function to find the RenderView. May return NULL.
   static RenderView* GetRenderView();

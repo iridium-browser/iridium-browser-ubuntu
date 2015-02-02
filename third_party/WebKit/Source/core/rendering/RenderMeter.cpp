@@ -70,14 +70,9 @@ void RenderMeter::computeLogicalHeight(LayoutUnit logicalHeight, LayoutUnit logi
     computedValues.m_extent = isHorizontalWritingMode() ? frameSize.height() : frameSize.width();
 }
 
-double RenderMeter::valueRatio() const
-{
-    return meterElement()->valueRatio();
-}
-
 void RenderMeter::updateFromElement()
 {
-    setShouldDoFullPaintInvalidation(true);
+    setShouldDoFullPaintInvalidation();
 }
 
 } // namespace blink

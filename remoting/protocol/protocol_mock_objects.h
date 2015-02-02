@@ -202,8 +202,8 @@ class MockSessionManager : public SessionManager {
       const std::string& host_jid,
       scoped_ptr<Authenticator> authenticator,
       scoped_ptr<CandidateSessionConfig> config) {
-    return scoped_ptr<Session>(ConnectPtr(
-        host_jid, authenticator.get(), config.get()));
+    return make_scoped_ptr(
+        ConnectPtr(host_jid, authenticator.get(), config.get()));
   }
   virtual void set_authenticator_factory(
       scoped_ptr<AuthenticatorFactory> authenticator_factory) {
@@ -218,15 +218,15 @@ class MockSessionManager : public SessionManager {
 class MockPairingRegistryDelegate : public PairingRegistry::Delegate {
  public:
   MockPairingRegistryDelegate();
-  virtual ~MockPairingRegistryDelegate();
+  ~MockPairingRegistryDelegate() override;
 
   // PairingRegistry::Delegate implementation.
-  virtual scoped_ptr<base::ListValue> LoadAll() OVERRIDE;
-  virtual bool DeleteAll() OVERRIDE;
-  virtual protocol::PairingRegistry::Pairing Load(
-      const std::string& client_id) OVERRIDE;
-  virtual bool Save(const protocol::PairingRegistry::Pairing& pairing) OVERRIDE;
-  virtual bool Delete(const std::string& client_id) OVERRIDE;
+  scoped_ptr<base::ListValue> LoadAll() override;
+  bool DeleteAll() override;
+  protocol::PairingRegistry::Pairing Load(
+      const std::string& client_id) override;
+  bool Save(const protocol::PairingRegistry::Pairing& pairing) override;
+  bool Delete(const std::string& client_id) override;
 
  private:
   typedef std::map<std::string, protocol::PairingRegistry::Pairing> Pairings;
@@ -238,13 +238,12 @@ class SynchronousPairingRegistry : public PairingRegistry {
   explicit SynchronousPairingRegistry(scoped_ptr<Delegate> delegate);
 
  protected:
-  virtual ~SynchronousPairingRegistry();
+  ~SynchronousPairingRegistry() override;
 
   // Runs tasks synchronously instead of posting them to |task_runner|.
-  virtual void PostTask(
-      const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
-      const tracked_objects::Location& from_here,
-      const base::Closure& task) OVERRIDE;
+  void PostTask(const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
+                const tracked_objects::Location& from_here,
+                const base::Closure& task) override;
 };
 
 }  // namespace protocol

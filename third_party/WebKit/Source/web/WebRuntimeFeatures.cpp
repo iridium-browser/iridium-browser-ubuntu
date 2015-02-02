@@ -49,6 +49,11 @@ void WebRuntimeFeatures::enableBleedingEdgeFastPaths(bool enable)
     RuntimeEnabledFeatures::setWebAnimationsAPIEnabled(enable);
 }
 
+void WebRuntimeFeatures::enableBlinkScheduler(bool enable)
+{
+    RuntimeEnabledFeatures::setBlinkSchedulerEnabled(enable);
+}
+
 void WebRuntimeFeatures::enableTestOnlyFeatures(bool enable)
 {
     RuntimeEnabledFeatures::setTestFeaturesEnabled(enable);
@@ -58,7 +63,6 @@ void WebRuntimeFeatures::enableApplicationCache(bool enable)
 {
     RuntimeEnabledFeatures::setApplicationCacheEnabled(enable);
 }
-
 
 void WebRuntimeFeatures::enableCompositedSelectionUpdate(bool enable)
 {
@@ -80,6 +84,11 @@ void WebRuntimeFeatures::enableDecodeToYUV(bool enable)
     RuntimeEnabledFeatures::setDecodeToYUVEnabled(enable);
 }
 
+void WebRuntimeFeatures::forceDisplayList2dCanvas(bool enable)
+{
+    RuntimeEnabledFeatures::setForceDisplayList2dCanvasEnabled(enable);
+}
+
 void WebRuntimeFeatures::enableDisplayList2dCanvas(bool enable)
 {
     RuntimeEnabledFeatures::setDisplayList2dCanvasEnabled(enable);
@@ -88,10 +97,6 @@ void WebRuntimeFeatures::enableDisplayList2dCanvas(bool enable)
 void WebRuntimeFeatures::enableEncryptedMedia(bool enable)
 {
     RuntimeEnabledFeatures::setEncryptedMediaEnabled(enable);
-    // FIXME: Hack to allow MediaKeyError to be enabled for either version.
-    RuntimeEnabledFeatures::setEncryptedMediaAnyVersionEnabled(
-        RuntimeEnabledFeatures::encryptedMediaEnabled()
-        || RuntimeEnabledFeatures::prefixedEncryptedMediaEnabled());
 }
 
 bool WebRuntimeFeatures::isEncryptedMediaEnabled()
@@ -102,10 +107,6 @@ bool WebRuntimeFeatures::isEncryptedMediaEnabled()
 void WebRuntimeFeatures::enablePrefixedEncryptedMedia(bool enable)
 {
     RuntimeEnabledFeatures::setPrefixedEncryptedMediaEnabled(enable);
-    // FIXME: Hack to allow MediaKeyError to be enabled for either version.
-    RuntimeEnabledFeatures::setEncryptedMediaAnyVersionEnabled(
-        RuntimeEnabledFeatures::encryptedMediaEnabled()
-        || RuntimeEnabledFeatures::prefixedEncryptedMediaEnabled());
 }
 
 bool WebRuntimeFeatures::isPrefixedEncryptedMediaEnabled()
@@ -128,9 +129,9 @@ void WebRuntimeFeatures::enableFileSystem(bool enable)
     RuntimeEnabledFeatures::setFileSystemEnabled(enable);
 }
 
-void WebRuntimeFeatures::enableGamepad(bool enable)
+void WebRuntimeFeatures::enableImageColorProfiles(bool enable)
 {
-    RuntimeEnabledFeatures::setGamepadEnabled(enable);
+    RuntimeEnabledFeatures::setImageColorProfilesEnabled(enable);
 }
 
 void WebRuntimeFeatures::enableLocalStorage(bool enable)
@@ -156,11 +157,6 @@ void WebRuntimeFeatures::enableMediaCapture(bool enable)
 void WebRuntimeFeatures::enableMediaSource(bool enable)
 {
     RuntimeEnabledFeatures::setMediaSourceEnabled(enable);
-}
-
-void WebRuntimeFeatures::enableMediaStream(bool enable)
-{
-    RuntimeEnabledFeatures::setMediaStreamEnabled(enable);
 }
 
 void WebRuntimeFeatures::enableNotifications(bool enable)
@@ -221,6 +217,11 @@ void WebRuntimeFeatures::enableServiceWorker(bool enable)
 void WebRuntimeFeatures::enableSessionStorage(bool enable)
 {
     RuntimeEnabledFeatures::setSessionStorageEnabled(enable);
+}
+
+void WebRuntimeFeatures::enableSlimmingPaint(bool enable)
+{
+    RuntimeEnabledFeatures::setSlimmingPaintEnabled(enable);
 }
 
 void WebRuntimeFeatures::enableTouch(bool enable)
@@ -291,6 +292,31 @@ void WebRuntimeFeatures::enableShowModalDialog(bool enable)
 void WebRuntimeFeatures::enableLaxMixedContentChecking(bool enable)
 {
     RuntimeEnabledFeatures::setLaxMixedContentCheckingEnabled(enable);
+}
+
+void WebRuntimeFeatures::enableCredentialManagerAPI(bool enable)
+{
+    RuntimeEnabledFeatures::setCredentialManagerEnabled(enable);
+}
+
+void WebRuntimeFeatures::enableTextBlobs(bool enable)
+{
+    RuntimeEnabledFeatures::setTextBlobEnabled(enable);
+}
+
+void WebRuntimeFeatures::enableCSSViewport(bool enable)
+{
+    RuntimeEnabledFeatures::setCSSViewportEnabled(enable);
+}
+
+void WebRuntimeFeatures::enableV8IdleTasks(bool enable)
+{
+    RuntimeEnabledFeatures::setV8IdleTasksEnabled(enable);
+}
+
+void WebRuntimeFeatures::enableSVG1DOM(bool enable)
+{
+    RuntimeEnabledFeatures::setSVG1DOMEnabled(enable);
 }
 
 } // namespace blink

@@ -17,14 +17,14 @@ namespace braille_display_private {
 class BrailleControllerImpl : public BrailleController {
  public:
   static BrailleControllerImpl* GetInstance();
-  virtual scoped_ptr<DisplayState> GetDisplayState() OVERRIDE;
-  virtual void WriteDots(const std::string& cells) OVERRIDE;
-  virtual void AddObserver(BrailleObserver* observer) OVERRIDE;
-  virtual void RemoveObserver(BrailleObserver* observer) OVERRIDE;
+  scoped_ptr<DisplayState> GetDisplayState() override;
+  void WriteDots(const std::string& cells) override;
+  void AddObserver(BrailleObserver* observer) override;
+  void RemoveObserver(BrailleObserver* observer) override;
 
  private:
   BrailleControllerImpl();
-  virtual ~BrailleControllerImpl();
+  ~BrailleControllerImpl() override;
   friend struct DefaultSingletonTraits<BrailleControllerImpl>;
   DISALLOW_COPY_AND_ASSIGN(BrailleControllerImpl);
 };

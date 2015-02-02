@@ -68,6 +68,7 @@ class CDATASection;
 class CSSStyleDeclaration;
 class CSSStyleSheet;
 class CanvasRenderingContext2D;
+class CanvasRenderingContext2DOrWebGLRenderingContext;
 class Chrome;
 class Comment;
 class ConsoleMessage;
@@ -85,6 +86,7 @@ class DocumentState;
 class DocumentType;
 class Element;
 class ElementDataCache;
+class ElementRegistrationOptions;
 class Event;
 class EventFactoryBase;
 class EventListener;
@@ -154,8 +156,8 @@ class WebGLRenderingContext;
 struct AnnotatedRegionValue;
 struct IconURL;
 
-typedef EventWithHitTestResults<PlatformMouseEvent> MouseEventWithHitTestResults;
-typedef int ExceptionCode;
+using MouseEventWithHitTestResults = EventWithHitTestResults<PlatformMouseEvent>;
+using ExceptionCode = int;
 
 enum StyleResolverUpdateMode {
     // Discards the StyleResolver and rebuilds it.
@@ -187,7 +189,7 @@ enum DocumentClass {
     XMLDocumentClass = 1 << 6,
 };
 
-typedef unsigned char DocumentClassFlags;
+using DocumentClassFlags = unsigned char;
 
 class Document;
 
@@ -236,7 +238,7 @@ public:
     using SecurityContext::contentSecurityPolicy;
     using TreeScope::getElementById;
 
-    virtual bool canContainRangeEndPoint() const OVERRIDE { return true; }
+    virtual bool canContainRangeEndPoint() const override { return true; }
 
     SelectorQueryCache& selectorQueryCache();
 
@@ -344,7 +346,7 @@ public:
     void setXMLStandalone(bool, ExceptionState&);
     void setHasXMLDeclaration(bool hasXMLDeclaration) { m_hasXMLDeclaration = hasXMLDeclaration ? 1 : 0; }
 
-    virtual KURL baseURI() const OVERRIDE FINAL;
+    virtual KURL baseURI() const override final;
 
     String visibilityState() const;
     bool hidden() const;
@@ -478,8 +480,8 @@ public:
 
     ResourceFetcher* fetcher() { return m_fetcher.get(); }
 
-    virtual void attach(const AttachContext& = AttachContext()) OVERRIDE;
-    virtual void detach(const AttachContext& = AttachContext()) OVERRIDE;
+    virtual void attach(const AttachContext& = AttachContext()) override;
+    virtual void detach(const AttachContext& = AttachContext()) override;
     void prepareForDestruction();
 
     // If you have a Document, use renderView() instead which is faster.
@@ -497,7 +499,7 @@ public:
 
     DocumentLoader* loader() const;
 
-    void open(Document* ownerDocument = 0, ExceptionState& = ASSERT_NO_EXCEPTION);
+    void open(Document* ownerDocument = nullptr, ExceptionState& = ASSERT_NO_EXCEPTION);
     PassRefPtrWillBeRawPtr<DocumentParser> implicitOpen();
 
     // close() is the DOM API document.close()
@@ -522,9 +524,9 @@ public:
 
     void cancelParsing();
 
-    void write(const SegmentedString& text, Document* ownerDocument = 0, ExceptionState& = ASSERT_NO_EXCEPTION);
-    void write(const String& text, Document* ownerDocument = 0, ExceptionState& = ASSERT_NO_EXCEPTION);
-    void writeln(const String& text, Document* ownerDocument = 0, ExceptionState& = ASSERT_NO_EXCEPTION);
+    void write(const SegmentedString& text, Document* ownerDocument = nullptr, ExceptionState& = ASSERT_NO_EXCEPTION);
+    void write(const String& text, Document* ownerDocument = nullptr, ExceptionState& = ASSERT_NO_EXCEPTION);
+    void writeln(const String& text, Document* ownerDocument = nullptr, ExceptionState& = ASSERT_NO_EXCEPTION);
 
     bool wellFormed() const { return m_wellFormed; }
 
@@ -543,8 +545,8 @@ public:
     KURL completeURL(const String&) const;
     KURL completeURLWithOverride(const String&, const KURL& baseURLOverride) const;
 
-    virtual String userAgent(const KURL&) const OVERRIDE FINAL;
-    virtual void disableEval(const String& errorMessage) OVERRIDE FINAL;
+    virtual String userAgent(const KURL&) const override final;
+    virtual void disableEval(const String& errorMessage) override final;
 
     bool canNavigate(const Frame& targetFrame);
     LocalFrame* findUnsafeParentScrollPropagationBoundary();
@@ -616,7 +618,7 @@ public:
     void hoveredNodeDetached(Node*);
     void activeChainNodeDetached(Node*);
 
-    void updateHoverActiveState(const HitTestRequest&, Element*, const PlatformMouseEvent* = 0);
+    void updateHoverActiveState(const HitTestRequest&, Element*, const PlatformMouseEvent* = nullptr);
 
     // Updates for :target (CSS3 selector).
     void setCSSTarget(Element*);
@@ -629,7 +631,7 @@ public:
     void unregisterNodeList(const LiveNodeListBase*);
     void registerNodeListWithIdNameCache(const LiveNodeListBase*);
     void unregisterNodeListWithIdNameCache(const LiveNodeListBase*);
-    bool shouldInvalidateNodeListCaches(const QualifiedName* attrName = 0) const;
+    bool shouldInvalidateNodeListCaches(const QualifiedName* attrName = nullptr) const;
     void invalidateNodeListCaches(const QualifiedName* attrName);
 
     void attachNodeIterator(NodeIterator*);
@@ -707,7 +709,7 @@ public:
     void processReferrerPolicy(const String& policy);
 
     // Returns the owning element in the parent document.
-    // Returns 0 if this is the top level document.
+    // Returns nullptr if this is the top level document.
     HTMLFrameOwnerElement* ownerElement() const;
 
     // Returns true if this document belongs to a frame that the parent document
@@ -772,7 +774,7 @@ public:
     // that as the style for the root element, rather than obtaining it on our own. The reason for
     // this is that style may not have been associated with the elements yet - in which case it may
     // have been calculated on the fly (without associating it with the actual element) somewhere.
-    Element* viewportDefiningElement(RenderStyle* rootStyle = 0) const;
+    Element* viewportDefiningElement(RenderStyle* rootStyle = nullptr) const;
 
     DocumentMarkerController& markers() const { return *m_markers; }
 
@@ -780,6 +782,9 @@ public:
     bool writingModeSetOnDocumentElement() const { return m_writingModeSetOnDocumentElement; }
     void setDirectionSetOnDocumentElement(bool b) { m_directionSetOnDocumentElement = b; }
     void setWritingModeSetOnDocumentElement(bool b) { m_writingModeSetOnDocumentElement = b; }
+
+    bool containsAnyRareWritingMode() const { return m_containsAnyRareWritingMode; }
+    void setContainsAnyRareWritingMode(bool b) { m_containsAnyRareWritingMode = b; }
 
     bool execCommand(const String& command, bool userInterface = false, const String& value = String());
     bool queryCommandEnabled(const String& command);
@@ -804,7 +809,7 @@ public:
 
     ScriptRunner* scriptRunner() { return m_scriptRunner.get(); }
 
-    HTMLScriptElement* currentScript() const { return !m_currentScriptStack.isEmpty() ? m_currentScriptStack.last().get() : 0; }
+    HTMLScriptElement* currentScript() const { return !m_currentScriptStack.isEmpty() ? m_currentScriptStack.last().get() : nullptr; }
     void pushCurrentScript(PassRefPtrWillBeRawPtr<HTMLScriptElement>);
     void popCurrentScript();
 
@@ -841,21 +846,21 @@ public:
     void cancelFocusAppearanceUpdate();
 
     // Extension for manipulating canvas drawing contexts for use in CSS
-    void getCSSCanvasContext(const String& type, const String& name, int width, int height, RefPtrWillBeRawPtr<CanvasRenderingContext2D>&, RefPtrWillBeRawPtr<WebGLRenderingContext>&);
+    void getCSSCanvasContext(const String& type, const String& name, int width, int height, CanvasRenderingContext2DOrWebGLRenderingContext&);
     HTMLCanvasElement& getCSSCanvasElement(const String& name);
 
     bool isDNSPrefetchEnabled() const { return m_isDNSPrefetchEnabled; }
     void parseDNSPrefetchControlHeader(const String&);
 
     // FIXME(crbug.com/305497): This should be removed once LocalDOMWindow is an ExecutionContext.
-    virtual void postTask(PassOwnPtr<ExecutionContextTask>) OVERRIDE; // Executes the task on context's thread asynchronously.
+    virtual void postTask(PassOwnPtr<ExecutionContextTask>) override; // Executes the task on context's thread asynchronously.
     void postInspectorTask(PassOwnPtr<ExecutionContextTask>);
 
-    virtual void tasksWereSuspended() OVERRIDE FINAL;
-    virtual void tasksWereResumed() OVERRIDE FINAL;
-    virtual void suspendScheduledTasks() OVERRIDE FINAL;
-    virtual void resumeScheduledTasks() OVERRIDE FINAL;
-    virtual bool tasksNeedSuspension() OVERRIDE FINAL;
+    virtual void tasksWereSuspended() override final;
+    virtual void tasksWereResumed() override final;
+    virtual void suspendScheduledTasks() override final;
+    virtual void resumeScheduledTasks() override final;
+    virtual bool tasksNeedSuspension() override final;
 
     void finishedParsing();
 
@@ -872,7 +877,7 @@ public:
     const Vector<AnnotatedRegionValue>& annotatedRegions() const;
     void setAnnotatedRegions(const Vector<AnnotatedRegionValue>&);
 
-    virtual void removeAllEventListeners() OVERRIDE FINAL;
+    virtual void removeAllEventListeners() override final;
 
     const SVGDocumentExtensions* svgExtensions();
     SVGDocumentExtensions& accessSVGExtensions();
@@ -900,12 +905,14 @@ public:
     bool processingLoadEvent() const { return m_loadEventProgress == LoadEventInProgress; }
     bool loadEventFinished() const { return m_loadEventProgress >= LoadEventCompleted; }
     bool unloadStarted() const { return m_loadEventProgress >= PageHideInProgress; }
+    bool processingBeforeUnload() const { return m_loadEventProgress == BeforeUnloadEventInProgress; }
+    void suppressLoadEvent() { m_loadEventProgress = LoadEventCompleted; }
 
     void setContainsPlugins() { m_containsPlugins = true; }
     bool containsPlugins() const { return m_containsPlugins; }
 
-    virtual bool isContextThread() const OVERRIDE FINAL;
-    virtual bool isJSExecutionForbidden() const OVERRIDE FINAL { return false; }
+    virtual bool isContextThread() const override final;
+    virtual bool isJSExecutionForbidden() const override final { return false; }
 
     bool containsValidityStyleRules() const { return m_containsValidityStyleRules; }
     void setContainsValidityStyleRules() { m_containsValidityStyleRules = true; }
@@ -915,7 +922,9 @@ public:
     void enqueueAnimationFrameEvent(PassRefPtrWillBeRawPtr<Event>);
     // Only one event for a target/event type combination will be dispatched per frame.
     void enqueueUniqueAnimationFrameEvent(PassRefPtrWillBeRawPtr<Event>);
-    void enqueueMediaQueryChangeListeners(WillBeHeapVector<RefPtrWillBeMember<MediaQueryListListener> >&);
+    void enqueueMediaQueryChangeListeners(WillBeHeapVector<RefPtrWillBeMember<MediaQueryListListener>>&);
+
+    void dispatchEventsForPrinting();
 
     bool hasFullscreenSupplement() const { return m_hasFullscreenSupplement; }
     void setHasFullscreenSupplement() { m_hasFullscreenSupplement = true; }
@@ -931,7 +940,7 @@ public:
     void loadPluginsSoon();
 
     PassRefPtrWillBeRawPtr<Touch> createTouch(LocalDOMWindow*, EventTarget*, int identifier, double pageX, double pageY, double screenX, double screenY, double radiusX, double radiusY, float rotationAngle, float force) const;
-    PassRefPtrWillBeRawPtr<TouchList> createTouchList(WillBeHeapVector<RefPtrWillBeMember<Touch> >&) const;
+    PassRefPtrWillBeRawPtr<TouchList> createTouchList(WillBeHeapVector<RefPtrWillBeMember<Touch>>&) const;
 
     const DocumentTiming& timing() const { return m_documentTiming; }
 
@@ -939,8 +948,8 @@ public:
     void cancelAnimationFrame(int id);
     void serviceScriptedAnimations(double monotonicAnimationStartTime);
 
-    virtual EventTarget* errorEventTarget() OVERRIDE FINAL;
-    virtual void logExceptionToConsole(const String& errorMessage, int scriptId, const String& sourceURL, int lineNumber, int columnNumber, PassRefPtrWillBeRawPtr<ScriptCallStack>) OVERRIDE FINAL;
+    virtual EventTarget* errorEventTarget() override final;
+    virtual void logExceptionToConsole(const String& errorMessage, int scriptId, const String& sourceURL, int lineNumber, int columnNumber, PassRefPtrWillBeRawPtr<ScriptCallStack>) override final;
 
     void initDNSPrefetch();
 
@@ -953,7 +962,7 @@ public:
     PassRefPtrWillBeRawPtr<Element> createElement(const AtomicString& localName, const AtomicString& typeExtension, ExceptionState&);
     PassRefPtrWillBeRawPtr<Element> createElementNS(const AtomicString& namespaceURI, const AtomicString& qualifiedName, const AtomicString& typeExtension, ExceptionState&);
     ScriptValue registerElement(ScriptState*, const AtomicString& name, ExceptionState&);
-    ScriptValue registerElement(ScriptState*, const AtomicString& name, const Dictionary& options, ExceptionState&, CustomElement::NameSet validNames = CustomElement::StandardNames);
+    ScriptValue registerElement(ScriptState*, const AtomicString& name, const ElementRegistrationOptions&, ExceptionState&, CustomElement::NameSet validNames = CustomElement::StandardNames);
     CustomElementRegistrationContext* registrationContext() { return m_registrationContext.get(); }
     CustomElementMicrotaskRunQueue* customElementMicrotaskRunQueue();
 
@@ -990,9 +999,9 @@ public:
     AnimationTimeline& timeline() const { return *m_timeline; }
     CompositorPendingAnimations& compositorPendingAnimations() { return m_compositorPendingAnimations; }
 
-    void addToTopLayer(Element*, const Element* before = 0);
+    void addToTopLayer(Element*, const Element* before = nullptr);
     void removeFromTopLayer(Element*);
-    const WillBeHeapVector<RefPtrWillBeMember<Element> >& topLayerElements() const { return m_topLayerElements; }
+    const WillBeHeapVector<RefPtrWillBeMember<Element>>& topLayerElements() const { return m_topLayerElements; }
     HTMLDialogElement* activeModalDialog() const;
 
     // A non-null m_templateDocumentHost implies that |this| was created by ensureTemplateDocument().
@@ -1002,9 +1011,9 @@ public:
 
     void didAssociateFormControl(Element*);
 
-    virtual void addConsoleMessage(PassRefPtrWillBeRawPtr<ConsoleMessage>) OVERRIDE FINAL;
+    virtual void addConsoleMessage(PassRefPtrWillBeRawPtr<ConsoleMessage>) override final;
 
-    virtual LocalDOMWindow* executingWindow() OVERRIDE FINAL;
+    virtual LocalDOMWindow* executingWindow() override final;
     LocalFrame* executingFrame();
 
     DocumentLifecycleNotifier& lifecycleNotifier();
@@ -1020,7 +1029,7 @@ public:
     void maybeHandleHttpRefresh(const String&, HttpRefreshType);
 
     void updateSecurityOrigin(PassRefPtr<SecurityOrigin>);
-    PassOwnPtr<LifecycleNotifier<Document> > createLifecycleNotifier();
+    PassOwnPtr<LifecycleNotifier<Document>> createLifecycleNotifier();
 
     void setHasViewportUnits() { m_hasViewportUnits = true; }
     bool hasViewportUnits() const { return m_hasViewportUnits; }
@@ -1031,25 +1040,25 @@ public:
 
     void updateStyleInvalidationIfNeeded();
 
-    virtual void trace(Visitor*) OVERRIDE;
+    virtual void trace(Visitor*) override;
 
     bool hasSVGFilterElementsRequiringLayerUpdate() const { return m_layerUpdateSVGFilterElements.size(); }
     void didRecalculateStyleForElement() { ++m_styleRecalcElementCounter; }
 
     AtomicString convertLocalName(const AtomicString&);
 
-    virtual v8::Handle<v8::Object> wrap(v8::Handle<v8::Object> creationContext, v8::Isolate*) OVERRIDE;
-    virtual v8::Handle<v8::Object> associateWithWrapper(const WrapperTypeInfo*, v8::Handle<v8::Object> wrapper, v8::Isolate*) OVERRIDE;
+    virtual v8::Handle<v8::Object> wrap(v8::Handle<v8::Object> creationContext, v8::Isolate*) override;
+    virtual v8::Handle<v8::Object> associateWithWrapper(const WrapperTypeInfo*, v8::Handle<v8::Object> wrapper, v8::Isolate*) override;
 
 protected:
     Document(const DocumentInit&, DocumentClassFlags = DefaultDocumentClass);
 
-    virtual void didUpdateSecurityOrigin() OVERRIDE FINAL;
+    virtual void didUpdateSecurityOrigin() override final;
 
     void clearXMLVersion() { m_xmlVersion = String(); }
 
 #if !ENABLE(OILPAN)
-    virtual void dispose() OVERRIDE;
+    virtual void dispose() override;
 #endif
 
     virtual PassRefPtrWillBeRawPtr<Document> cloneDocumentWithoutChildren();
@@ -1066,8 +1075,8 @@ private:
     bool isElementNode() const WTF_DELETED_FUNCTION; // This will catch anyone doing an unnecessary check.
 
     ScriptedAnimationController& ensureScriptedAnimationController();
-    virtual SecurityContext& securityContext() OVERRIDE FINAL { return *this; }
-    virtual EventQueue* eventQueue() const OVERRIDE FINAL;
+    virtual SecurityContext& securityContext() override final { return *this; }
+    virtual EventQueue* eventQueue() const override final;
 
     // FIXME: Rename the StyleRecalc state to RenderTreeUpdate.
     bool hasPendingStyleRecalc() const { return m_lifecycle.state() == DocumentLifecycle::VisualUpdatePending; }
@@ -1091,27 +1100,27 @@ private:
 
     void clearWeakMembers(Visitor*);
 
-    virtual bool isDocument() const OVERRIDE FINAL { return true; }
+    virtual bool isDocument() const override final { return true; }
 
-    virtual void childrenChanged(const ChildrenChange&) OVERRIDE;
+    virtual void childrenChanged(const ChildrenChange&) override;
 
-    virtual String nodeName() const OVERRIDE FINAL;
-    virtual NodeType nodeType() const OVERRIDE FINAL;
-    virtual bool childTypeAllowed(NodeType) const OVERRIDE FINAL;
-    virtual PassRefPtrWillBeRawPtr<Node> cloneNode(bool deep = true) OVERRIDE FINAL;
+    virtual String nodeName() const override final;
+    virtual NodeType nodeType() const override final;
+    virtual bool childTypeAllowed(NodeType) const override final;
+    virtual PassRefPtrWillBeRawPtr<Node> cloneNode(bool deep = true) override final;
     void cloneDataFromDocument(const Document&);
 
 #if !ENABLE(OILPAN)
-    virtual void refExecutionContext() OVERRIDE FINAL { ref(); }
-    virtual void derefExecutionContext() OVERRIDE FINAL { deref(); }
+    virtual void refExecutionContext() override final { ref(); }
+    virtual void derefExecutionContext() override final { deref(); }
 #endif
 
-    virtual const KURL& virtualURL() const OVERRIDE FINAL; // Same as url(), but needed for ExecutionContext to implement it without a performance loss for direct calls.
-    virtual KURL virtualCompleteURL(const String&) const OVERRIDE FINAL; // Same as completeURL() for the same reason as above.
+    virtual const KURL& virtualURL() const override final; // Same as url(), but needed for ExecutionContext to implement it without a performance loss for direct calls.
+    virtual KURL virtualCompleteURL(const String&) const override final; // Same as completeURL() for the same reason as above.
 
-    virtual void reportBlockedScriptExecutionToInspector(const String& directiveText) OVERRIDE FINAL;
+    virtual void reportBlockedScriptExecutionToInspector(const String& directiveText) override final;
 
-    virtual double timerAlignmentInterval() const OVERRIDE FINAL;
+    virtual double timerAlignmentInterval() const override final;
 
     void updateTitle(const String&);
     void updateFocusAppearanceTimerFired(Timer<Document>*);
@@ -1148,7 +1157,7 @@ private:
     void setHoverNode(PassRefPtrWillBeRawPtr<Node>);
     Node* hoverNode() const { return m_hoverNode.get(); }
 
-    typedef HashSet<OwnPtr<EventFactoryBase> > EventFactorySet;
+    using EventFactorySet = HashSet<OwnPtr<EventFactoryBase>>;
     static EventFactorySet& eventFactories();
 
     DocumentLifecycle m_lifecycle;
@@ -1212,8 +1221,8 @@ private:
     uint64_t m_domTreeVersion;
     static uint64_t s_globalTreeVersion;
 
-    WillBeHeapHashSet<RawPtrWillBeWeakMember<NodeIterator> > m_nodeIterators;
-    typedef WillBeHeapHashSet<RawPtrWillBeWeakMember<Range> > AttachedRangeSet;
+    WillBeHeapHashSet<RawPtrWillBeWeakMember<NodeIterator>> m_nodeIterators;
+    using AttachedRangeSet = WillBeHeapHashSet<RawPtrWillBeWeakMember<Range>>;
     AttachedRangeSet m_ranges;
 
     unsigned short m_listenerTypes;
@@ -1259,7 +1268,7 @@ private:
 
     OwnPtrWillBeMember<ScriptRunner> m_scriptRunner;
 
-    WillBeHeapVector<RefPtrWillBeMember<HTMLScriptElement> > m_currentScriptStack;
+    WillBeHeapVector<RefPtrWillBeMember<HTMLScriptElement>> m_currentScriptStack;
 
     OwnPtr<TransformSource> m_transformSource;
     RefPtrWillBeMember<Document> m_transformSourceDocument;
@@ -1275,13 +1284,13 @@ private:
 
     InheritedBool m_designMode;
 
-    WillBeHeapHashSet<RawPtrWillBeWeakMember<const LiveNodeListBase> > m_listsInvalidatedAtDocument;
+    WillBeHeapHashSet<RawPtrWillBeWeakMember<const LiveNodeListBase>> m_listsInvalidatedAtDocument;
 #if ENABLE(OILPAN)
     // Oilpan keeps track of all registered NodeLists.
     //
     // FIXME: Oilpan: improve - only need to know if a NodeList
     // is currently alive or not for the different types.
-    HeapHashSet<WeakMember<const LiveNodeListBase> > m_nodeLists[numNodeListInvalidationTypes];
+    HeapHashSet<WeakMember<const LiveNodeListBase>> m_nodeLists[numNodeListInvalidationTypes];
 #else
     unsigned m_nodeListCounts[numNodeListInvalidationTypes];
 #endif
@@ -1292,7 +1301,7 @@ private:
     bool m_hasAnnotatedRegions;
     bool m_annotatedRegionsDirty;
 
-    WillBeHeapHashMap<String, RefPtrWillBeMember<HTMLCanvasElement> > m_cssCanvasElements;
+    WillBeHeapHashMap<String, RefPtrWillBeMember<HTMLCanvasElement>> m_cssCanvasElements;
 
     OwnPtr<SelectorQueryCache> m_selectorQueryCache;
 
@@ -1315,7 +1324,7 @@ private:
 
     bool m_hasFullscreenSupplement; // For early return in Fullscreen::fromIfExists()
 
-    WillBeHeapVector<RefPtrWillBeMember<Element> > m_topLayerElements;
+    WillBeHeapVector<RefPtrWillBeMember<Element>> m_topLayerElements;
 
     int m_loadEventDelayCount;
     Timer<Document> m_loadEventDelayTimer;
@@ -1330,6 +1339,7 @@ private:
 
     bool m_directionSetOnDocumentElement;
     bool m_writingModeSetOnDocumentElement;
+    bool m_containsAnyRareWritingMode;
     DocumentTiming m_documentTiming;
     RefPtrWillBeMember<MediaQueryMatcher> m_mediaQueryMatcher;
     bool m_writeRecursionIsTooDeep;
@@ -1347,7 +1357,7 @@ private:
 
     OwnPtrWillBeMember<ElementDataCache> m_elementDataCache;
 
-    typedef HashMap<AtomicString, OwnPtr<Locale> > LocaleIdentifierToLocaleMap;
+    using LocaleIdentifierToLocaleMap = HashMap<AtomicString, OwnPtr<Locale>>;
     LocaleIdentifierToLocaleMap m_localeCache;
 
     AnimationClock m_animationClock;
@@ -1361,14 +1371,14 @@ private:
     RawPtrWillBeMember<Document> m_templateDocumentHost;
 
     Timer<Document> m_didAssociateFormControlsTimer;
-    WillBeHeapHashSet<RefPtrWillBeMember<Element> > m_associatedFormControls;
+    WillBeHeapHashSet<RefPtrWillBeMember<Element>> m_associatedFormControls;
 
-    WillBeHeapHashSet<RawPtrWillBeMember<SVGUseElement> > m_useElementsNeedingUpdate;
-    WillBeHeapHashSet<RawPtrWillBeMember<Element> > m_layerUpdateSVGFilterElements;
+    WillBeHeapHashSet<RawPtrWillBeMember<SVGUseElement>> m_useElementsNeedingUpdate;
+    WillBeHeapHashSet<RawPtrWillBeMember<Element>> m_layerUpdateSVGFilterElements;
 
     bool m_hasViewportUnits;
 
-    typedef WillBeHeapHashSet<RawPtrWillBeWeakMember<DocumentVisibilityObserver> > DocumentVisibilityObserverSet;
+    using DocumentVisibilityObserverSet = WillBeHeapHashSet<RawPtrWillBeWeakMember<DocumentVisibilityObserver>>;
     DocumentVisibilityObserverSet m_visibilityObservers;
 
     int m_styleRecalcElementCounter;
@@ -1408,6 +1418,8 @@ inline bool Node::isDocumentNode() const
 }
 
 Node* eventTargetNodeForDocument(Document*);
+
+DEFINE_TYPE_CASTS(TreeScope, Document, document, true, true);
 
 } // namespace blink
 

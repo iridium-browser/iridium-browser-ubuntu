@@ -92,9 +92,9 @@ class TransparentButton : public CustomButton {
       : CustomButton(listener) {
     SetAnimationDuration(LabelButton::kHoverAnimationDurationMs);
   }
-  virtual ~TransparentButton() {}
+  ~TransparentButton() override {}
 
-  virtual bool OnMousePressed(const ui::MouseEvent& mouse_event) OVERRIDE {
+  bool OnMousePressed(const ui::MouseEvent& mouse_event) override {
     parent()->RequestFocus();
     return true;
   }
@@ -636,7 +636,7 @@ void Combobox::UpdateBorder() {
     border->SetInsets(5, 10, 5, 10);
   if (invalid_)
     border->SetColor(kWarningColor);
-  SetBorder(border.PassAs<Border>());
+  SetBorder(border.Pass());
 }
 
 void Combobox::AdjustBoundsForRTLUI(gfx::Rect* rect) const {

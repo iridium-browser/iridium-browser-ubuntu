@@ -20,15 +20,15 @@ class DevToolsUI : public content::WebUIController,
   static GURL GetProxyURL(const std::string& frontend_url);
 
   explicit DevToolsUI(content::WebUI* web_ui);
-  virtual ~DevToolsUI();
+  ~DevToolsUI() override;
 
   // content::WebContentsObserver overrides.
-  virtual void NavigationEntryCommitted(
-      const content::LoadCommittedDetails& load_details) OVERRIDE;
+  void NavigationEntryCommitted(
+      const content::LoadCommittedDetails& load_details) override;
 
  private:
   void RemotePageOpened(const GURL& virtual_url,
-                        DevToolsAndroidBridge::RemotePage* page);
+                        scoped_refptr<DevToolsAndroidBridge::RemotePage> page);
 
   DevToolsUIBindings bindings_;
   GURL remote_frontend_loading_url_;

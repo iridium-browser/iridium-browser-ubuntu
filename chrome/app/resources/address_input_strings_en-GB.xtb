@@ -1,4 +1,6 @@
-<?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="en-GB">
+<?xml version="1.0" ?>
+<!DOCTYPE translationbundle>
+<translationbundle lang="en-GB">
 <translation id="777702478322588152">Prefecture</translation>
 <translation id="3713769522066937702">This postcode format is not recognised. Example of a valid postcode: <ph name="EXAMPLE"/>. Don't know your postcode? Find it out <ph name="BEGIN_LINK"/>here<ph name="END_LINK"/>.</translation>
 <translation id="7393381084163773901">Street address</translation>

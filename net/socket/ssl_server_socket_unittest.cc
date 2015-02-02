@@ -23,7 +23,6 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/message_loop/message_loop.h"
-#include "base/path_service.h"
 #include "crypto/nss_util.h"
 #include "crypto/rsa_private_key.h"
 #include "net/base/address_list.h"
@@ -167,87 +166,65 @@ class FakeSocket : public StreamSocket {
         outgoing_(outgoing_channel) {
   }
 
-  virtual ~FakeSocket() {
-  }
+  ~FakeSocket() override {}
 
-  virtual int Read(IOBuffer* buf, int buf_len,
-                   const CompletionCallback& callback) OVERRIDE {
+  int Read(IOBuffer* buf,
+           int buf_len,
+           const CompletionCallback& callback) override {
     // Read random number of bytes.
     buf_len = rand() % buf_len + 1;
     return incoming_->Read(buf, buf_len, callback);
   }
 
-  virtual int Write(IOBuffer* buf, int buf_len,
-                    const CompletionCallback& callback) OVERRIDE {
+  int Write(IOBuffer* buf,
+            int buf_len,
+            const CompletionCallback& callback) override {
     // Write random number of bytes.
     buf_len = rand() % buf_len + 1;
     return outgoing_->Write(buf, buf_len, callback);
   }
 
-  virtual int SetReceiveBufferSize(int32 size) OVERRIDE {
-    return OK;
-  }
+  int SetReceiveBufferSize(int32 size) override { return OK; }
 
-  virtual int SetSendBufferSize(int32 size) OVERRIDE {
-    return OK;
-  }
+  int SetSendBufferSize(int32 size) override { return OK; }
 
-  virtual int Connect(const CompletionCallback& callback) OVERRIDE {
-    return OK;
-  }
+  int Connect(const CompletionCallback& callback) override { return OK; }
 
-  virtual void Disconnect() OVERRIDE {
+  void Disconnect() override {
     incoming_->Close();
     outgoing_->Close();
   }
 
-  virtual bool IsConnected() const OVERRIDE {
-    return true;
-  }
+  bool IsConnected() const override { return true; }
 
-  virtual bool IsConnectedAndIdle() const OVERRIDE {
-    return true;
-  }
+  bool IsConnectedAndIdle() const override { return true; }
 
-  virtual int GetPeerAddress(IPEndPoint* address) const OVERRIDE {
+  int GetPeerAddress(IPEndPoint* address) const override {
     IPAddressNumber ip_address(kIPv4AddressSize);
     *address = IPEndPoint(ip_address, 0 /*port*/);
     return OK;
   }
 
-  virtual int GetLocalAddress(IPEndPoint* address) const OVERRIDE {
+  int GetLocalAddress(IPEndPoint* address) const override {
     IPAddressNumber ip_address(4);
     *address = IPEndPoint(ip_address, 0);
     return OK;
   }
 
-  virtual const BoundNetLog& NetLog() const OVERRIDE {
-    return net_log_;
-  }
+  const BoundNetLog& NetLog() const override { return net_log_; }
 
-  virtual void SetSubresourceSpeculation() OVERRIDE {}
-  virtual void SetOmniboxSpeculation() OVERRIDE {}
+  void SetSubresourceSpeculation() override {}
+  void SetOmniboxSpeculation() override {}
 
-  virtual bool WasEverUsed() const OVERRIDE {
-    return true;
-  }
+  bool WasEverUsed() const override { return true; }
 
-  virtual bool UsingTCPFastOpen() const OVERRIDE {
-    return false;
-  }
+  bool UsingTCPFastOpen() const override { return false; }
 
+  bool WasNpnNegotiated() const override { return false; }
 
-  virtual bool WasNpnNegotiated() const OVERRIDE {
-    return false;
-  }
+  NextProto GetNegotiatedProtocol() const override { return kProtoUnknown; }
 
-  virtual NextProto GetNegotiatedProtocol() const OVERRIDE {
-    return kProtoUnknown;
-  }
-
-  virtual bool GetSSLInfo(SSLInfo* ssl_info) OVERRIDE {
-    return false;
-  }
+  bool GetSSLInfo(SSLInfo* ssl_info) override { return false; }
 
  private:
   BoundNetLog net_log_;

@@ -25,10 +25,10 @@ const int kBufferSize = 32 * 1024;
 //
 // These objects are used in a pair to handle duplex traffic, as in:
 //
-//                    ------> [BufferedCopier_1] --->
-//                  /                                \
+//                   -------> [BufferedCopier_1] --->
+//                  |                                |
 //      socket_1   *                                  * socket_2
-//                  \                                /
+//                  |                                |
 //                   <------ [BufferedCopier_2] <----
 //
 // When a BufferedCopier is in the READING state (see below), it only listens
@@ -136,7 +136,13 @@ class Forwarder::BufferedCopier {
 
   // Call this after a select() call to operate over the buffer.
   void ProcessSelect(const fd_set& read_fds, const fd_set& write_fds) {
-    int fd, ret;
+    int fd;
+    int ret;
+    // With FORTIFY_SOURCE, FD_ISSET is implemented as a function that takes a
+    // non-const fd_set*. Make a copy of the passed arguments so we can safely
+    // take a reference.
+    fd_set read_fds_copy = read_fds;
+    fd_set write_fds_copy = write_fds;
     switch (state_) {
       case STATE_READING:
         fd = socket_from_->fd();
@@ -144,7 +150,7 @@ class Forwarder::BufferedCopier {
           state_ = STATE_CLOSED;  // T02
           return;
         }
-        if (!FD_ISSET(fd, &read_fds))
+        if (!FD_ISSET(fd, &read_fds_copy))
           return;
 
         ret = socket_from_->NonBlockingRead(buffer_, kBufferSize);
@@ -164,7 +170,7 @@ class Forwarder::BufferedCopier {
           ForceClose();  // T06 + T11
           return;
         }
-        if (!FD_ISSET(fd, &write_fds))
+        if (!FD_ISSET(fd, &write_fds_copy))
           return;
 
         ret = socket_to_->NonBlockingWrite(buffer_ + write_offset_,

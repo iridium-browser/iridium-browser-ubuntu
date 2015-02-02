@@ -12,6 +12,14 @@
 #include "base/strings/string16.h"
 #include "url/gurl.h"
 
+namespace autofill {
+struct PasswordForm;
+}
+
+namespace blink {
+class WebCredential;
+};
+
 namespace password_manager {
 
 // Limit the size of the federations array that we pass to the browser to
@@ -19,7 +27,7 @@ namespace password_manager {
 const size_t kMaxFederations = 50u;
 
 enum CredentialType {
-  CREDENTIAL_TYPE_UNKNOWN = 0,
+  CREDENTIAL_TYPE_EMPTY = 0,
   CREDENTIAL_TYPE_LOCAL,
   CREDENTIAL_TYPE_FEDERATED,
   CREDENTIAL_TYPE_LAST = CREDENTIAL_TYPE_FEDERATED
@@ -27,9 +35,8 @@ enum CredentialType {
 
 struct CredentialInfo {
   CredentialInfo();
-  CredentialInfo(const base::string16& id,
-                 const base::string16& name,
-                 const GURL& avatar);
+  explicit CredentialInfo(const blink::WebCredential& credential);
+  explicit CredentialInfo(const autofill::PasswordForm& form);
   ~CredentialInfo();
 
   CredentialType type;
@@ -38,7 +45,7 @@ struct CredentialInfo {
   // WebCredential's id property.
   base::string16 id;
 
-  // An user-friendly name ("John Doe"). Corresponds to WebCredential's name
+  // An user-friendly name ("Jane Doe"). Corresponds to WebCredential's name
   // property.
   base::string16 name;
 
@@ -53,6 +60,12 @@ struct CredentialInfo {
   // origin serialized as a URL (e.g. "https://example.com/").
   GURL federation;
 };
+
+// Create a new autofill::PasswordForm object based on |info|, valid in the
+// context of |origin|.
+scoped_ptr<autofill::PasswordForm> CreatePasswordFormFromCredentialInfo(
+    const CredentialInfo& info,
+    const GURL& origin);
 
 }  // namespace password_manager
 

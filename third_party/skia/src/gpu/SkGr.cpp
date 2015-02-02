@@ -34,7 +34,7 @@
  Ganesh wants a full 256 palette entry, even though Skia's ctable is only as big
  as the colortable.count says it is.
  */
-static void build_compressed_data(void* buffer, const SkBitmap& bitmap) {
+static void build_index8_data(void* buffer, const SkBitmap& bitmap) {
     SkASSERT(kIndex_8_SkColorType == bitmap.colorType());
 
     SkAutoLockPixels alp(bitmap);
@@ -105,8 +105,8 @@ static void generate_bitmap_cache_id(const SkBitmap& bitmap, GrCacheID* id) {
     id->reset(gBitmapTextureDomain, key);
 }
 
-static void generate_bitmap_texture_desc(const SkBitmap& bitmap, GrTextureDesc* desc) {
-    desc->fFlags = kNone_GrTextureFlags;
+static void generate_bitmap_texture_desc(const SkBitmap& bitmap, GrSurfaceDesc* desc) {
+    desc->fFlags = kNone_GrSurfaceFlags;
     desc->fWidth = bitmap.width();
     desc->fHeight = bitmap.height();
     desc->fConfig = SkImageInfo2GrPixelConfig(bitmap.info());
@@ -139,7 +139,7 @@ static GrTexture* sk_gr_allocate_texture(GrContext* ctx,
                                          bool cache,
                                          const GrTextureParams* params,
                                          const SkBitmap& bm,
-                                         GrTextureDesc desc,
+                                         GrSurfaceDesc desc,
                                          const void* pixels,
                                          size_t rowBytes) {
     GrTexture* result;
@@ -159,7 +159,7 @@ static GrTexture* sk_gr_allocate_texture(GrContext* ctx,
         // cache so no one else can find it. Additionally, once unlocked, the
         // scratch texture will go to the end of the list for purging so will
         // likely be available for this volatile bitmap the next time around.
-        result = ctx->lockAndRefScratchTexture(desc, GrContext::kExact_ScratchTexMatch);
+        result = ctx->refScratchTexture(desc, GrContext::kExact_ScratchTexMatch);
         if (pixels) {
             result->writePixels(0, 0, bm.width(), bm.height(), desc.fConfig, pixels, rowBytes);
         }
@@ -170,7 +170,7 @@ static GrTexture* sk_gr_allocate_texture(GrContext* ctx,
 #ifndef SK_IGNORE_ETC1_SUPPORT
 static GrTexture *load_etc1_texture(GrContext* ctx, bool cache,
                                     const GrTextureParams* params,
-                                    const SkBitmap &bm, GrTextureDesc desc) {
+                                    const SkBitmap &bm, GrSurfaceDesc desc) {
     SkAutoTUnref<SkData> data(bm.pixelRef()->refEncodedData());
 
     // Is this even encoded data?
@@ -219,7 +219,13 @@ static GrTexture *load_etc1_texture(GrContext* ctx, bool cache,
 #endif   // SK_IGNORE_ETC1_SUPPORT
 
 static GrTexture *load_yuv_texture(GrContext* ctx, bool cache, const GrTextureParams* params,
-                                   const SkBitmap& bm, const GrTextureDesc& desc) {
+                                   const SkBitmap& bm, const GrSurfaceDesc& desc) {
+    // Subsets are not supported, the whole pixelRef is loaded when using YUV decoding
+    if ((bm.pixelRef()->info().width()  != bm.info().width()) ||
+        (bm.pixelRef()->info().height() != bm.info().height())) {
+        return NULL;
+    }
+
     SkPixelRef* pixelRef = bm.pixelRef();
     SkISize yuvSizes[3];
     if ((NULL == pixelRef) || !pixelRef->getYUV8Planes(yuvSizes, NULL, NULL, NULL)) {
@@ -246,33 +252,32 @@ static GrTexture *load_yuv_texture(GrContext* ctx, bool cache, const GrTexturePa
         return NULL;
     }
 
-    GrTextureDesc yuvDesc;
+    GrSurfaceDesc yuvDesc;
     yuvDesc.fConfig = kAlpha_8_GrPixelConfig;
-    GrAutoScratchTexture yuvTextures[3];
+    SkAutoTUnref<GrTexture> yuvTextures[3];
     for (int i = 0; i < 3; ++i) {
         yuvDesc.fWidth  = yuvSizes[i].fWidth;
         yuvDesc.fHeight = yuvSizes[i].fHeight;
-        yuvTextures[i].set(ctx, yuvDesc);
-        if ((NULL == yuvTextures[i].texture()) ||
-            !ctx->writeTexturePixels(yuvTextures[i].texture(),
-                0, 0, yuvDesc.fWidth, yuvDesc.fHeight,
-                yuvDesc.fConfig, planes[i], rowBytes[i])) {
+        yuvTextures[i].reset(
+            ctx->refScratchTexture(yuvDesc, GrContext::kApprox_ScratchTexMatch));
+        if (!yuvTextures[i] ||
+            !yuvTextures[i]->writePixels(0, 0, yuvDesc.fWidth, yuvDesc.fHeight,
+                                         yuvDesc.fConfig, planes[i], rowBytes[i])) {
             return NULL;
         }
     }
 
-    GrTextureDesc rtDesc = desc;
+    GrSurfaceDesc rtDesc = desc;
     rtDesc.fFlags = rtDesc.fFlags |
-                    kRenderTarget_GrTextureFlagBit |
-                    kNoStencil_GrTextureFlagBit;
+                    kRenderTarget_GrSurfaceFlag |
+                    kNoStencil_GrSurfaceFlag;
 
     GrTexture* result = sk_gr_allocate_texture(ctx, cache, params, bm, rtDesc, NULL, 0);
 
     GrRenderTarget* renderTarget = result ? result->asRenderTarget() : NULL;
     if (renderTarget) {
-        SkAutoTUnref<GrFragmentProcessor> yuvToRgbProcessor(GrYUVtoRGBEffect::Create(
-            yuvTextures[0].texture(), yuvTextures[1].texture(), yuvTextures[2].texture(),
-            colorSpace));
+        SkAutoTUnref<GrFragmentProcessor> yuvToRgbProcessor(
+            GrYUVtoRGBEffect::Create(yuvTextures[0], yuvTextures[1], yuvTextures[2], colorSpace));
         GrPaint paint;
         paint.addColorProcessor(yuvToRgbProcessor);
         SkRect r = SkRect::MakeWH(SkIntToScalar(yuvSizes[0].fWidth),
@@ -297,18 +302,17 @@ static GrTexture* sk_gr_create_bitmap_texture(GrContext* ctx,
 
     const SkBitmap* bitmap = &origBitmap;
 
-    GrTextureDesc desc;
+    GrSurfaceDesc desc;
     generate_bitmap_texture_desc(*bitmap, &desc);
 
     if (kIndex_8_SkColorType == bitmap->colorType()) {
         // build_compressed_data doesn't do npot->pot expansion
         // and paletted textures can't be sub-updated
-        if (ctx->supportsIndex8PixelConfig(params, bitmap->width(), bitmap->height())) {
+        if (cache && ctx->supportsIndex8PixelConfig(params, bitmap->width(), bitmap->height())) {
             size_t imageSize = GrCompressedFormatDataSize(kIndex_8_GrPixelConfig,
                                                           bitmap->width(), bitmap->height());
             SkAutoMalloc storage(imageSize);
-
-            build_compressed_data(storage.get(), origBitmap);
+            build_index8_data(storage.get(), origBitmap);
 
             // our compressed data will be trimmed, so pass width() for its
             // "rowBytes", since they are the same now.
@@ -364,14 +368,14 @@ bool GrIsBitmapInCache(const GrContext* ctx,
     GrCacheID cacheID;
     generate_bitmap_cache_id(bitmap, &cacheID);
 
-    GrTextureDesc desc;
+    GrSurfaceDesc desc;
     generate_bitmap_texture_desc(bitmap, &desc);
     return ctx->isTextureInCache(desc, cacheID, params);
 }
 
-GrTexture* GrLockAndRefCachedBitmapTexture(GrContext* ctx,
-                                           const SkBitmap& bitmap,
-                                           const GrTextureParams* params) {
+GrTexture* GrRefCachedBitmapTexture(GrContext* ctx,
+                                    const SkBitmap& bitmap,
+                                    const GrTextureParams* params) {
     GrTexture* result = NULL;
 
     bool cache = !bitmap.isVolatile();
@@ -382,7 +386,7 @@ GrTexture* GrLockAndRefCachedBitmapTexture(GrContext* ctx,
         GrCacheID cacheID;
         generate_bitmap_cache_id(bitmap, &cacheID);
 
-        GrTextureDesc desc;
+        GrSurfaceDesc desc;
         generate_bitmap_texture_desc(bitmap, &desc);
 
         result = ctx->findAndRefTexture(desc, cacheID, params);
@@ -391,17 +395,10 @@ GrTexture* GrLockAndRefCachedBitmapTexture(GrContext* ctx,
         result = sk_gr_create_bitmap_texture(ctx, cache, params, bitmap);
     }
     if (NULL == result) {
-        GrPrintf("---- failed to create texture for cache [%d %d]\n",
-                    bitmap.width(), bitmap.height());
+        SkDebugf("---- failed to create texture for cache [%d %d]\n",
+                 bitmap.width(), bitmap.height());
     }
     return result;
-}
-
-void GrUnlockAndUnrefCachedBitmapTexture(GrTexture* texture) {
-    SkASSERT(texture->getContext());
-
-    texture->getContext()->unlockScratchTexture(texture);
-    texture->unref();
 }
 
 ///////////////////////////////////////////////////////////////////////////////

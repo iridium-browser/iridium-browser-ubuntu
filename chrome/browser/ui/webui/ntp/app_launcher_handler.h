@@ -39,7 +39,7 @@ class AppLauncherHandler
       public content::NotificationObserver {
  public:
   explicit AppLauncherHandler(ExtensionService* extension_service);
-  virtual ~AppLauncherHandler();
+  ~AppLauncherHandler() override;
 
   // Populate a dictionary with the information from an extension.
   static void CreateAppInfo(
@@ -48,12 +48,12 @@ class AppLauncherHandler
       base::DictionaryValue* value);
 
   // WebUIMessageHandler implementation.
-  virtual void RegisterMessages() OVERRIDE;
+  void RegisterMessages() override;
 
   // content::NotificationObserver
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   // Populate the given dictionary with all installed app info.
   void FillAppDictionary(base::DictionaryValue* value);
@@ -124,12 +124,12 @@ class AppLauncherHandler
   void PromptToEnableApp(const std::string& extension_id);
 
   // ExtensionUninstallDialog::Delegate:
-  virtual void ExtensionUninstallAccepted() OVERRIDE;
-  virtual void ExtensionUninstallCanceled() OVERRIDE;
+  void ExtensionUninstallAccepted() override;
+  void ExtensionUninstallCanceled() override;
 
   // ExtensionEnableFlowDelegate:
-  virtual void ExtensionEnableFlowFinished() OVERRIDE;
-  virtual void ExtensionEnableFlowAborted(bool user_initiated) OVERRIDE;
+  void ExtensionEnableFlowFinished() override;
+  void ExtensionEnableFlowAborted(bool user_initiated) override;
 
   // Returns the ExtensionUninstallDialog object for this class, creating it if
   // needed.

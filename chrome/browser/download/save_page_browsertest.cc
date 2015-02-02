@@ -68,7 +68,7 @@ class DownloadPersistedObserver : public DownloadHistory::Observer {
       GetDownloadHistory()->AddObserver(this);
   }
 
-  virtual ~DownloadPersistedObserver() {
+  ~DownloadPersistedObserver() override {
     DownloadService* service = DownloadServiceFactory::GetForBrowserContext(
         profile_);
     if (service && service->GetDownloadHistory())
@@ -84,8 +84,8 @@ class DownloadPersistedObserver : public DownloadHistory::Observer {
     return persisted_;
   }
 
-  virtual void OnDownloadStored(DownloadItem* item,
-                                const history::DownloadRow& info) OVERRIDE {
+  void OnDownloadStored(DownloadItem* item,
+                        const history::DownloadRow& info) override {
     persisted_ = persisted_ || filter_.Run(item, info);
     if (persisted_ && waiting_)
       base::MessageLoopForUI::current()->Quit();
@@ -109,7 +109,7 @@ class DownloadRemovedObserver : public DownloadPersistedObserver {
         waiting_(false),
         download_id_(download_id) {
   }
-  virtual ~DownloadRemovedObserver() {}
+  ~DownloadRemovedObserver() override {}
 
   bool WaitForRemoved() {
     if (removed_)
@@ -120,11 +120,10 @@ class DownloadRemovedObserver : public DownloadPersistedObserver {
     return removed_;
   }
 
-  virtual void OnDownloadStored(DownloadItem* item,
-                                const history::DownloadRow& info) OVERRIDE {
-  }
+  void OnDownloadStored(DownloadItem* item,
+                        const history::DownloadRow& info) override {}
 
-  virtual void OnDownloadsRemoved(const DownloadHistory::IdSet& ids) OVERRIDE {
+  void OnDownloadsRemoved(const DownloadHistory::IdSet& ids) override {
     removed_ = ids.find(download_id_) != ids.end();
     if (removed_ && waiting_)
       base::MessageLoopForUI::current()->Quit();
@@ -149,28 +148,28 @@ bool DownloadStoredProperly(
   // false doesn't necessarily mean that the test has failed or will fail, it
   // might just mean that the test hasn't passed yet.
   if (info.target_path != expected_path) {
-    VLOG(20) << __FUNCTION__ << " " << info.target_path.value()
-             << " != " << expected_path.value();
+    DVLOG(20) << __FUNCTION__ << " " << info.target_path.value()
+              << " != " << expected_path.value();
     return false;
   }
   if (info.url_chain.size() != 1u) {
-    VLOG(20) << __FUNCTION__ << " " << info.url_chain.size()
-             << " != 1";
+    DVLOG(20) << __FUNCTION__ << " " << info.url_chain.size()
+              << " != 1";
     return false;
   }
   if (info.url_chain[0] != expected_url) {
-    VLOG(20) << __FUNCTION__ << " " << info.url_chain[0].spec()
-             << " != " << expected_url.spec();
+    DVLOG(20) << __FUNCTION__ << " " << info.url_chain[0].spec()
+              << " != " << expected_url.spec();
     return false;
   }
   if ((num_files >= 0) && (info.received_bytes != num_files)) {
-    VLOG(20) << __FUNCTION__ << " " << num_files
-             << " != " << info.received_bytes;
+    DVLOG(20) << __FUNCTION__ << " " << num_files
+              << " != " << info.received_bytes;
     return false;
   }
   if (info.state != expected_state) {
-    VLOG(20) << __FUNCTION__ << " " << info.state
-             << " != " << expected_state;
+    DVLOG(20) << __FUNCTION__ << " " << info.state
+              << " != " << expected_state;
     return false;
   }
   return true;
@@ -188,7 +187,7 @@ class DownloadItemCreatedObserver : public DownloadManager::Observer {
     manager->AddObserver(this);
   }
 
-  virtual ~DownloadItemCreatedObserver() {
+  ~DownloadItemCreatedObserver() override {
     if (manager_)
       manager_->RemoveObserver(this);
   }
@@ -217,8 +216,8 @@ class DownloadItemCreatedObserver : public DownloadManager::Observer {
 
  private:
   // DownloadManager::Observer
-  virtual void OnDownloadCreated(
-      DownloadManager* manager, DownloadItem* item) OVERRIDE {
+  void OnDownloadCreated(DownloadManager* manager,
+                         DownloadItem* item) override {
     DCHECK_EQ(manager, manager_);
     items_seen_.push_back(item);
 
@@ -226,7 +225,7 @@ class DownloadItemCreatedObserver : public DownloadManager::Observer {
       base::MessageLoopForUI::current()->Quit();
   }
 
-  virtual void ManagerGoingDown(DownloadManager* manager) OVERRIDE {
+  void ManagerGoingDown(DownloadManager* manager) override {
     manager_->RemoveObserver(this);
     manager_ = NULL;
     if (waiting_)
@@ -249,17 +248,17 @@ class SavePackageFinishedObserver : public content::DownloadManager::Observer {
     download_manager_->AddObserver(this);
   }
 
-  virtual ~SavePackageFinishedObserver() {
+  ~SavePackageFinishedObserver() override {
     if (download_manager_)
       download_manager_->RemoveObserver(this);
   }
 
   // DownloadManager::Observer:
-  virtual void OnSavePackageSuccessfullyFinished(
-      content::DownloadManager* manager, content::DownloadItem* item) OVERRIDE {
+  void OnSavePackageSuccessfullyFinished(content::DownloadManager* manager,
+                                         content::DownloadItem* item) override {
     callback_.Run();
   }
-  virtual void ManagerGoingDown(content::DownloadManager* manager) OVERRIDE {
+  void ManagerGoingDown(content::DownloadManager* manager) override {
     download_manager_->RemoveObserver(this);
     download_manager_ = NULL;
   }
@@ -274,16 +273,16 @@ class SavePackageFinishedObserver : public content::DownloadManager::Observer {
 class SavePageBrowserTest : public InProcessBrowserTest {
  public:
   SavePageBrowserTest() {}
-  virtual ~SavePageBrowserTest();
+  ~SavePageBrowserTest() override;
 
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_dir_));
     ASSERT_TRUE(save_dir_.CreateUniqueTempDir());
     InProcessBrowserTest::SetUp();
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     browser()->profile()->GetPrefs()->SetFilePath(
         prefs::kDownloadDefaultDirectory, save_dir_.path());
     browser()->profile()->GetPrefs()->SetFilePath(
@@ -443,11 +442,11 @@ class DelayingDownloadManagerDelegate : public ChromeDownloadManagerDelegate {
   explicit DelayingDownloadManagerDelegate(Profile* profile)
     : ChromeDownloadManagerDelegate(profile) {
   }
-  virtual ~DelayingDownloadManagerDelegate() {}
+  ~DelayingDownloadManagerDelegate() override {}
 
-  virtual bool ShouldCompleteDownload(
+  bool ShouldCompleteDownload(
       content::DownloadItem* item,
-      const base::Closure& user_complete_callback) OVERRIDE {
+      const base::Closure& user_complete_callback) override {
     return false;
   }
 
@@ -467,9 +466,8 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, MAYBE_SaveHTMLOnlyTabDestroy) {
       new DelayingDownloadManagerDelegate(browser()->profile()));
   delaying_delegate->GetDownloadIdReceiverCallback().Run(
       content::DownloadItem::kInvalidId + 1);
-  DownloadServiceFactory::GetForBrowserContext(browser()->profile())->
-      SetDownloadManagerDelegateForTesting(
-          delaying_delegate.PassAs<ChromeDownloadManagerDelegate>());
+  DownloadServiceFactory::GetForBrowserContext(browser()->profile())
+      ->SetDownloadManagerDelegateForTesting(delaying_delegate.Pass());
   DownloadManager* manager(GetDownloadManager());
   std::vector<DownloadItem*> downloads;
   manager->GetAllDownloads(&downloads);
@@ -750,8 +748,8 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, CleanFilenameFromPageTitle) {
 class SavePageAsMHTMLBrowserTest : public SavePageBrowserTest {
  public:
   SavePageAsMHTMLBrowserTest() {}
-  virtual ~SavePageAsMHTMLBrowserTest();
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  ~SavePageAsMHTMLBrowserTest() override;
+  void SetUpCommandLine(CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kSavePageAsMHTML);
   }
 

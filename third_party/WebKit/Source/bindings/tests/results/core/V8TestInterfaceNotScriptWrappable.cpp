@@ -21,11 +21,9 @@
 
 namespace blink {
 
-const WrapperTypeInfo V8TestInterfaceNotScriptWrappable::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceNotScriptWrappable::domTemplate, V8TestInterfaceNotScriptWrappable::refObject, V8TestInterfaceNotScriptWrappable::derefObject, V8TestInterfaceNotScriptWrappable::createPersistentHandle, 0, 0, 0, V8TestInterfaceNotScriptWrappable::installConditionallyEnabledMethods, V8TestInterfaceNotScriptWrappable::installConditionallyEnabledProperties, 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::Independent, WrapperTypeInfo::RefCountedObject };
+const WrapperTypeInfo V8TestInterfaceNotScriptWrappable::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceNotScriptWrappable::domTemplate, V8TestInterfaceNotScriptWrappable::refObject, V8TestInterfaceNotScriptWrappable::derefObject, V8TestInterfaceNotScriptWrappable::trace, 0, 0, 0, V8TestInterfaceNotScriptWrappable::installConditionallyEnabledMethods, V8TestInterfaceNotScriptWrappable::installConditionallyEnabledProperties, 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::Independent, WrapperTypeInfo::RefCountedObject };
 
 namespace TestInterfaceNotScriptWrappableV8Internal {
-
-template <typename T> void V8_USE(T) { }
 
 static void attr1AttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
@@ -59,7 +57,7 @@ static void attr1AttributeSetterCallback(v8::Local<v8::String>, v8::Local<v8::Va
 static void funcMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     if (UNLIKELY(info.Length() < 1)) {
-        V8ThrowException::throwException(createMinimumArityTypeErrorForMethod("func", "TestInterfaceNotScriptWrappable", 1, info.Length(), info.GetIsolate()), info.GetIsolate());
+        V8ThrowException::throwException(createMinimumArityTypeErrorForMethod(info.GetIsolate(), "func", "TestInterfaceNotScriptWrappable", 1, info.Length()), info.GetIsolate());
         return;
     }
     TestInterfaceNotScriptWrappable* impl = V8TestInterfaceNotScriptWrappable::toImpl(info.Holder());
@@ -97,8 +95,10 @@ static void installV8TestInterfaceNotScriptWrappableTemplate(v8::Handle<v8::Func
         0, 0,
         V8TestInterfaceNotScriptWrappableMethods, WTF_ARRAY_LENGTH(V8TestInterfaceNotScriptWrappableMethods),
         isolate);
-    v8::Local<v8::ObjectTemplate> instanceTemplate ALLOW_UNUSED = functionTemplate->InstanceTemplate();
-    v8::Local<v8::ObjectTemplate> prototypeTemplate ALLOW_UNUSED = functionTemplate->PrototypeTemplate();
+    v8::Local<v8::ObjectTemplate> instanceTemplate = functionTemplate->InstanceTemplate();
+    ALLOW_UNUSED_LOCAL(instanceTemplate);
+    v8::Local<v8::ObjectTemplate> prototypeTemplate = functionTemplate->PrototypeTemplate();
+    ALLOW_UNUSED_LOCAL(prototypeTemplate);
 
     // Custom toString template
     functionTemplate->Set(v8AtomicString(isolate, "toString"), V8PerIsolateData::from(isolate)->toStringTemplate());
@@ -124,42 +124,14 @@ TestInterfaceNotScriptWrappable* V8TestInterfaceNotScriptWrappable::toImplWithTy
     return hasInstance(value, isolate) ? blink::toScriptWrappableBase(v8::Handle<v8::Object>::Cast(value))->toImpl<TestInterfaceNotScriptWrappable>() : 0;
 }
 
-v8::Handle<v8::Object> wrap(TestInterfaceNotScriptWrappable* impl, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
+void V8TestInterfaceNotScriptWrappable::refObject(ScriptWrappableBase* scriptWrappableBase)
 {
-    ASSERT(impl);
-    ASSERT(!DOMDataStore::containsWrapper<V8TestInterfaceNotScriptWrappable>(impl, isolate));
-    return V8TestInterfaceNotScriptWrappable::createWrapper(impl, creationContext, isolate);
+    scriptWrappableBase->toImpl<TestInterfaceNotScriptWrappable>()->ref();
 }
 
-v8::Handle<v8::Object> V8TestInterfaceNotScriptWrappable::createWrapper(PassRefPtr<TestInterfaceNotScriptWrappable> impl, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
+void V8TestInterfaceNotScriptWrappable::derefObject(ScriptWrappableBase* scriptWrappableBase)
 {
-    ASSERT(impl);
-    ASSERT(!DOMDataStore::containsWrapper<V8TestInterfaceNotScriptWrappable>(impl.get(), isolate));
-
-    v8::Handle<v8::Object> wrapper = V8DOMWrapper::createWrapper(creationContext, &wrapperTypeInfo, impl->toScriptWrappableBase(), isolate);
-    if (UNLIKELY(wrapper.IsEmpty()))
-        return wrapper;
-
-    installConditionallyEnabledProperties(wrapper, isolate);
-    V8DOMWrapper::associateObjectWithWrapper<V8TestInterfaceNotScriptWrappable>(impl, &wrapperTypeInfo, wrapper, isolate);
-    return wrapper;
-}
-
-
-void V8TestInterfaceNotScriptWrappable::refObject(ScriptWrappableBase* internalPointer)
-{
-    internalPointer->toImpl<TestInterfaceNotScriptWrappable>()->ref();
-}
-
-void V8TestInterfaceNotScriptWrappable::derefObject(ScriptWrappableBase* internalPointer)
-{
-    internalPointer->toImpl<TestInterfaceNotScriptWrappable>()->deref();
-}
-
-WrapperPersistentNode* V8TestInterfaceNotScriptWrappable::createPersistentHandle(ScriptWrappableBase* internalPointer)
-{
-    ASSERT_NOT_REACHED();
-    return 0;
+    scriptWrappableBase->toImpl<TestInterfaceNotScriptWrappable>()->deref();
 }
 
 template<>

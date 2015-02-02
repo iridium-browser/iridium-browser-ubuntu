@@ -23,7 +23,7 @@ class DataReductionProxyInfoBarDelegate : public ConfirmInfoBarDelegate {
   static void Create(content::WebContents* web_contents,
                      const std::string& link_url);
 
-  virtual ~DataReductionProxyInfoBarDelegate();
+  ~DataReductionProxyInfoBarDelegate() override;
 
  private:
   explicit DataReductionProxyInfoBarDelegate(const std::string& link_url);
@@ -33,10 +33,10 @@ class DataReductionProxyInfoBarDelegate : public ConfirmInfoBarDelegate {
       scoped_ptr<DataReductionProxyInfoBarDelegate> delegate);
 
   // ConfirmInfoBarDelegate
-  virtual base::string16 GetMessageText() const OVERRIDE;
-  virtual int GetButtons() const OVERRIDE;
-  virtual bool ShouldExpire(const NavigationDetails& details) const OVERRIDE;
-  virtual bool LinkClicked(WindowOpenDisposition disposition) OVERRIDE;
+  base::string16 GetMessageText() const override;
+  int GetButtons() const override;
+  bool ShouldExpire(const NavigationDetails& details) const override;
+  bool LinkClicked(WindowOpenDisposition disposition) override;
 
   std::string link_url_;
 

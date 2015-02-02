@@ -178,7 +178,7 @@ class TopSites
  protected:
   void NotifyTopSitesLoaded();
   void NotifyTopSitesChanged();
-  virtual ~TopSites();
+  ~TopSites() override;
 
  private:
   ObserverList<TopSitesObserver> observer_list_;
@@ -186,10 +186,12 @@ class TopSites
 };
 
 #if defined(OS_ANDROID)
-extern const TopSites::PrepopulatedPage kPrepopulatedPages[1];
+const int kPrepopulatedPagesCount = 0;
 #else
-extern const TopSites::PrepopulatedPage kPrepopulatedPages[2];
+const int kPrepopulatedPagesCount = 2;
 #endif
+extern const TopSites::PrepopulatedPage
+    kPrepopulatedPages[kPrepopulatedPagesCount];
 
 }  // namespace history
 

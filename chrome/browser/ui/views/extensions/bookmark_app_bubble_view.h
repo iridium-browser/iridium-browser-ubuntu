@@ -37,7 +37,7 @@ class BookmarkAppBubbleView : public views::BubbleDelegateView,
                               public views::ButtonListener,
                               public extensions::AppIconLoader::Delegate {
  public:
-  virtual ~BookmarkAppBubbleView();
+  ~BookmarkAppBubbleView() override;
 
   static void ShowBubble(views::View* anchor_view,
                          Profile* profile,
@@ -52,24 +52,22 @@ class BookmarkAppBubbleView : public views::BubbleDelegateView,
                         const std::string& extension_id);
 
   // Overriden from views::BubbleDelegateView:
-  virtual void Init() OVERRIDE;
-  virtual views::View* GetInitiallyFocusedView() OVERRIDE;
+  void Init() override;
+  views::View* GetInitiallyFocusedView() override;
 
   // Overridden from views::WidgetDelegate:
-  virtual void WindowClosing() OVERRIDE;
+  void WindowClosing() override;
 
   // Overridden from views::View:
-  virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
-  virtual gfx::Size GetMinimumSize() const OVERRIDE;
+  bool AcceleratorPressed(const ui::Accelerator& accelerator) override;
+  gfx::Size GetMinimumSize() const override;
 
   // Overridden from views::ButtonListener:
   // Closes the bubble or opens the edit dialog.
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // Overridden from extensions::AppIconLoader::Delegate:
-  virtual void SetAppImage(const std::string& id,
-                           const gfx::ImageSkia& image) OVERRIDE;
+  void SetAppImage(const std::string& id, const gfx::ImageSkia& image) override;
 
   // Handle the message when the user presses a button.
   void HandleButtonPressed(views::Button* sender);

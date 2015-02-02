@@ -65,13 +65,13 @@ class CONTENT_EXPORT PepperFileRefHost
                     PP_Resource resource,
                     const base::FilePath& external_path);
 
-  virtual ~PepperFileRefHost();
+  ~PepperFileRefHost() override;
 
   // ResourceHost overrides.
-  virtual int32_t OnResourceMessageReceived(
+  int32_t OnResourceMessageReceived(
       const IPC::Message& msg,
-      ppapi::host::HostMessageContext* context) OVERRIDE;
-  virtual bool IsFileRefHost() OVERRIDE;
+      ppapi::host::HostMessageContext* context) override;
+  bool IsFileRefHost() override;
 
   // Required to support Rename().
   PP_FileSystemType GetFileSystemType() const;

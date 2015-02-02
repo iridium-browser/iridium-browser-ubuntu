@@ -36,7 +36,6 @@ namespace {
 content::WebUIDataSource* CreateComponentsUIHTMLSource(Profile* profile) {
   content::WebUIDataSource* source =
       content::WebUIDataSource::Create(chrome::kChromeUIComponentsHost);
-  source->SetUseJsonJSFormatV2();
 
   source->AddLocalizedString("componentsTitle", IDS_COMPONENTS_TITLE);
   source->AddLocalizedString("componentsNoneInstalled",
@@ -66,10 +65,10 @@ content::WebUIDataSource* CreateComponentsUIHTMLSource(Profile* profile) {
 class ComponentsDOMHandler : public WebUIMessageHandler {
  public:
   ComponentsDOMHandler();
-  virtual ~ComponentsDOMHandler() {}
+  ~ComponentsDOMHandler() override {}
 
   // WebUIMessageHandler implementation.
-  virtual void RegisterMessages() OVERRIDE;
+  void RegisterMessages() override;
 
   // Callback for the "requestComponentsData" message.
   void HandleRequestComponentsData(const base::ListValue* args);

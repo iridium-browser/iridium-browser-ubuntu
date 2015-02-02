@@ -50,9 +50,9 @@ const char kMalformedOAuth2Token[] = "{ \"foo\": ";
 class TestForAuthError : public SingleClientStatusChangeChecker {
  public:
   explicit TestForAuthError(ProfileSyncService* service);
-  virtual ~TestForAuthError();
-  virtual bool IsExitConditionSatisfied() OVERRIDE;
-  virtual std::string GetDebugMessage() const OVERRIDE;
+  ~TestForAuthError() override;
+  bool IsExitConditionSatisfied() override;
+  std::string GetDebugMessage() const override;
 };
 
 TestForAuthError::TestForAuthError(ProfileSyncService* service)
@@ -73,7 +73,7 @@ std::string TestForAuthError::GetDebugMessage() const {
 class SyncAuthTest : public SyncTest {
  public:
   SyncAuthTest() : SyncTest(SINGLE_CLIENT), bookmark_index_(0) {}
-  virtual ~SyncAuthTest() {}
+  ~SyncAuthTest() override {}
 
   // Helper function that adds a bookmark and waits for either an auth error, or
   // for the bookmark to be committed.  Returns true if it detects an auth
@@ -247,7 +247,7 @@ IN_PROC_BROWSER_TEST_F(SyncAuthTest, FailInitialSetupWithPersistentError) {
                          net::HTTP_BAD_REQUEST,
                          net::URLRequestStatus::SUCCESS);
   ASSERT_FALSE(GetClient(0)->SetupSync());
-  ASSERT_FALSE(GetSyncService((0))->sync_initialized());
+  ASSERT_FALSE(GetSyncService((0))->SyncActive());
   ASSERT_EQ(GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS,
             GetSyncService((0))->GetAuthError().state());
 }
@@ -264,7 +264,7 @@ IN_PROC_BROWSER_TEST_F(SyncAuthTest, RetryInitialSetupWithTransientError) {
                          net::HTTP_INTERNAL_SERVER_ERROR,
                          net::URLRequestStatus::SUCCESS);
   ASSERT_FALSE(GetClient(0)->SetupSync());
-  ASSERT_FALSE(GetSyncService((0))->sync_initialized());
+  ASSERT_FALSE(GetSyncService((0))->SyncActive());
   ASSERT_TRUE(
       GetSyncService((0))->IsRetryingAccessTokenFetchForTest());
 }

@@ -33,7 +33,7 @@ namespace blink {
 
 class KURL;
 
-class MediaFragmentURIParser FINAL {
+class MediaFragmentURIParser final {
 public:
 
     MediaFragmentURIParser(const KURL&);
@@ -56,7 +56,7 @@ private:
     TimeFormat m_timeFormat;
     double m_startTime;
     double m_endTime;
-    Vector<std::pair<String, String> > m_fragments;
+    Vector<std::pair<String, String>> m_fragments;
 };
 
 } // namespace blink

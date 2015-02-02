@@ -9,12 +9,13 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "net/base/sdch_manager.h"
+#include "net/base/sdch_observer.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/gurl.h"
 
 namespace net {
 
-//------------------------------------------------------------------------------
-// Workaround for http://crbug.com/418975; remove when fixed.
+// Workaround for http://crbug.com/437794; remove when fixed.
 #if !defined(OS_IOS)
 
 //------------------------------------------------------------------------------
@@ -24,6 +25,32 @@ static const char kTestVcdiffDictionary[] = "DictionaryFor"
     "SdchCompression1SdchCompression2SdchCompression3SdchCompression\n";
 
 //------------------------------------------------------------------------------
+
+class MockSdchObserver : public SdchObserver {
+ public:
+  MockSdchObserver() : get_dictionary_notifications_(0) {}
+
+  const GURL& last_dictionary_request_url() {
+    return last_dictionary_request_url_;
+  }
+  const GURL& last_dictionary_url() { return last_dictionary_url_; }
+  int get_dictionary_notifications() { return get_dictionary_notifications_; }
+
+  // SdchObserver implementation
+  void OnGetDictionary(SdchManager* manager,
+                       const GURL& request_url,
+                       const GURL& dictionary_url) override {
+    ++get_dictionary_notifications_;
+    last_dictionary_request_url_ = request_url;
+    last_dictionary_url_ = dictionary_url;
+  }
+  void OnClearDictionaries(SdchManager* manager) override {}
+
+ private:
+  int get_dictionary_notifications_;
+  GURL last_dictionary_request_url_;
+  GURL last_dictionary_url_;
+};
 
 class SdchManagerTest : public testing::Test {
  protected:
@@ -35,10 +62,12 @@ class SdchManagerTest : public testing::Test {
     default_https_support_ = sdch_manager_->secure_scheme_supported();
   }
 
+  virtual ~SdchManagerTest() {}
+
   SdchManager* sdch_manager() { return sdch_manager_.get(); }
 
   // Reset globals back to default state.
-  virtual void TearDown() {
+  void TearDown() override {
     SdchManager::EnableSdchSupport(default_support_);
     SdchManager::EnableSecureSchemeSupport(default_https_support_);
   }
@@ -521,12 +550,7 @@ TEST_F(SdchManagerTest, HttpsCorrectlySupported) {
   GURL url("http://www.google.com");
   GURL secure_url("https://www.google.com");
 
-#if !defined(OS_IOS)
-  // Workaround for http://crbug.com/418975; remove when fixed.
   bool expect_https_support = true;
-#else
-  bool expect_https_support = false;
-#endif
 
   EXPECT_TRUE(sdch_manager()->IsInSupportedDomain(url));
   EXPECT_EQ(expect_https_support,
@@ -572,11 +596,39 @@ TEST_F(SdchManagerTest, ClearDictionaryData) {
   EXPECT_TRUE(sdch_manager()->IsInSupportedDomain(blacklist_url));
 }
 
+TEST_F(SdchManagerTest, GetDictionaryNotification) {
+  GURL test_request_gurl(GURL("http://www.example.com/data"));
+  GURL test_dictionary_gurl(GURL("http://www.example.com/dict"));
+  MockSdchObserver observer;
+  sdch_manager()->AddObserver(&observer);
+
+  EXPECT_EQ(0, observer.get_dictionary_notifications());
+  sdch_manager()->OnGetDictionary(test_request_gurl, test_dictionary_gurl);
+  EXPECT_EQ(1, observer.get_dictionary_notifications());
+  EXPECT_EQ(test_request_gurl, observer.last_dictionary_request_url());
+  EXPECT_EQ(test_dictionary_gurl, observer.last_dictionary_url());
+
+  sdch_manager()->RemoveObserver(&observer);
+  sdch_manager()->OnGetDictionary(test_request_gurl, test_dictionary_gurl);
+  EXPECT_EQ(1, observer.get_dictionary_notifications());
+  EXPECT_EQ(test_request_gurl, observer.last_dictionary_request_url());
+  EXPECT_EQ(test_dictionary_gurl, observer.last_dictionary_url());
+}
+
+TEST_F(SdchManagerTest, SdchOnByDefault) {
+  GURL google_url("http://www.google.com");
+  scoped_ptr<SdchManager> sdch_manager(new SdchManager);
+
+  EXPECT_TRUE(sdch_manager->IsInSupportedDomain(google_url));
+  SdchManager::EnableSdchSupport(false);
+  EXPECT_FALSE(sdch_manager->IsInSupportedDomain(google_url));
+}
+
 #else
 
 TEST(SdchManagerTest, SdchOffByDefault) {
   GURL google_url("http://www.google.com");
-  SdchManager* sdch_manager(new SdchManager);
+  scoped_ptr<SdchManager> sdch_manager(new SdchManager);
 
   EXPECT_FALSE(sdch_manager->IsInSupportedDomain(google_url));
   SdchManager::EnableSdchSupport(true);

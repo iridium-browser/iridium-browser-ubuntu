@@ -41,14 +41,14 @@ using testing::Return;
 class NoOpAutofillBackend : public AutofillWebDataBackend {
  public:
   NoOpAutofillBackend() {}
-  virtual ~NoOpAutofillBackend() {}
-  virtual WebDatabase* GetDatabase() OVERRIDE { return NULL; }
-  virtual void AddObserver(
-      autofill::AutofillWebDataServiceObserverOnDBThread* observer) OVERRIDE {}
-  virtual void RemoveObserver(
-      autofill::AutofillWebDataServiceObserverOnDBThread* observer) OVERRIDE {}
-  virtual void RemoveExpiredFormElements() OVERRIDE {}
-  virtual void NotifyOfMultipleAutofillChanges() OVERRIDE {}
+  ~NoOpAutofillBackend() override {}
+  WebDatabase* GetDatabase() override { return NULL; }
+  void AddObserver(
+      autofill::AutofillWebDataServiceObserverOnDBThread* observer) override {}
+  void RemoveObserver(
+      autofill::AutofillWebDataServiceObserverOnDBThread* observer) override {}
+  void RemoveExpiredFormElements() override {}
+  void NotifyOfMultipleAutofillChanges() override {}
 };
 
 // Fake WebDataService implementation that stubs out the database loading.
@@ -70,12 +70,10 @@ class FakeWebDataService : public AutofillWebDataService {
       db_loaded_callback_.Run();
   }
 
-  virtual bool IsDatabaseLoaded() OVERRIDE {
-    return is_database_loaded_;
-  }
+  bool IsDatabaseLoaded() override { return is_database_loaded_; }
 
-  virtual void RegisterDBLoadedCallback(
-      const base::Callback<void(void)>& callback) OVERRIDE {
+  void RegisterDBLoadedCallback(
+      const base::Callback<void(void)>& callback) override {
     db_loaded_callback_ = callback;
   }
 
@@ -90,8 +88,7 @@ class FakeWebDataService : public AutofillWebDataService {
   }
 
  private:
-  virtual ~FakeWebDataService() {
-  }
+  ~FakeWebDataService() override {}
 
   void CreateSyncableService() {
     ASSERT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::DB));
@@ -118,7 +115,7 @@ class MockWebDataServiceWrapperSyncable : public MockWebDataServiceWrapper {
       : MockWebDataServiceWrapper(new FakeWebDataService(), NULL) {
   }
 
-  virtual void Shutdown() OVERRIDE {
+  void Shutdown() override {
     static_cast<FakeWebDataService*>(
         fake_autofill_web_data_.get())->ShutdownOnUIThread();
     // Make sure WebDataService is shutdown properly on DB thread before we
@@ -141,9 +138,9 @@ class SyncAutofillDataTypeControllerTest : public testing::Test {
         last_start_result_(sync_driver::DataTypeController::OK),
         weak_ptr_factory_(this) {}
 
-  virtual ~SyncAutofillDataTypeControllerTest() {}
+  ~SyncAutofillDataTypeControllerTest() override {}
 
-  virtual void SetUp() {
+  void SetUp() override {
     EXPECT_CALL(profile_sync_factory_,
                 GetSyncableServiceForType(_)).
         WillRepeatedly(Return(base::WeakPtr<syncer::SyncableService>()));
@@ -169,9 +166,7 @@ class SyncAutofillDataTypeControllerTest : public testing::Test {
     EXPECT_EQ(type, syncer::AUTOFILL);
   }
 
-  virtual void TearDown() {
-    autofill_dtc_ = NULL;
-  }
+  void TearDown() override { autofill_dtc_ = NULL; }
 
   void BlockForDBThread() {
     base::RunLoop run_loop;

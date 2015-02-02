@@ -46,7 +46,6 @@
 #include "core/workers/WorkerScriptLoaderClient.h"
 #include "core/workers/WorkerThreadStartupData.h"
 #include "modules/serviceworkers/ServiceWorkerThread.h"
-#include "platform/NotImplemented.h"
 #include "platform/SharedBuffer.h"
 #include "platform/heap/Handle.h"
 #include "platform/network/ContentSecurityPolicyParsers.h"
@@ -89,7 +88,7 @@ public:
             *loadingContext, scriptURL, DenyCrossOriginRequests, this);
     }
 
-    virtual void notifyFinished() OVERRIDE
+    virtual void notifyFinished() override
     {
         m_callback();
     }
@@ -119,12 +118,12 @@ public:
         return adoptPtr(new LoaderProxy(embeddedWorker));
     }
 
-    virtual void postTaskToLoader(PassOwnPtr<ExecutionContextTask> task) OVERRIDE
+    virtual void postTaskToLoader(PassOwnPtr<ExecutionContextTask> task) override
     {
         toWebLocalFrameImpl(m_embeddedWorker.m_mainFrame)->frame()->document()->postTask(task);
     }
 
-    virtual bool postTaskToWorkerGlobalScope(PassOwnPtr<ExecutionContextTask> task) OVERRIDE
+    virtual bool postTaskToWorkerGlobalScope(PassOwnPtr<ExecutionContextTask> task) override
     {
         if (m_embeddedWorker.m_askedToTerminate || !m_embeddedWorker.m_workerThread)
             return false;
@@ -172,6 +171,9 @@ WebEmbeddedWorkerImpl::WebEmbeddedWorkerImpl(
 
 WebEmbeddedWorkerImpl::~WebEmbeddedWorkerImpl()
 {
+    if (m_workerThread)
+        m_workerThread->terminateAndWait();
+
     ASSERT(runningWorkerInstances().contains(this));
     runningWorkerInstances().remove(this);
     ASSERT(m_webView);
@@ -239,10 +241,6 @@ void WebEmbeddedWorkerImpl::resumeAfterDownload()
         startWorkerThread();
 }
 
-void WebEmbeddedWorkerImpl::resumeWorkerContext()
-{
-}
-
 void WebEmbeddedWorkerImpl::attachDevTools(const WebString& hostId)
 {
     WebDevToolsAgent* devtoolsAgent = m_webView->devToolsAgent();
@@ -299,8 +297,24 @@ void WebEmbeddedWorkerImpl::prepareShadowPageForLoader()
     m_webView->setMainFrame(m_mainFrame);
     m_webView->setDevToolsAgentClient(this);
 
-    WebLocalFrameImpl* webFrame = toWebLocalFrameImpl(m_webView->mainFrame());
+    // If we were asked to wait for debugger then it is the good time to do that.
+    // However if we are updating service worker version (m_pauseAfterDownloadState is set)
+    // Then we need to load the worker script to check the version, so in this case we wait for debugger
+    // later in ::resumeAfterDownload().
+    if (m_pauseAfterDownloadState != DoPauseAfterDownload) {
+        m_workerContextClient->workerReadyForInspection();
+        if (m_workerStartData.waitForDebuggerMode == WebEmbeddedWorkerStartData::WaitForDebugger) {
+            m_waitingForDebuggerState = WaitingForDebuggerBeforeLoadingScript;
+            return;
+        }
+    }
 
+    loadShadowPage();
+}
+
+void WebEmbeddedWorkerImpl::loadShadowPage()
+{
+    WebLocalFrameImpl* webFrame = toWebLocalFrameImpl(m_webView->mainFrame());
     // Construct substitute data source for the 'shadow page'. We only need it
     // to have same origin as the worker so the loading checks work correctly.
     CString content("");
@@ -319,18 +333,16 @@ void WebEmbeddedWorkerImpl::willSendRequest(
 
 void WebEmbeddedWorkerImpl::didFinishDocumentLoad(WebLocalFrame* frame)
 {
-    // If we were asked to wait for debugger then it is the good time to do that.
-    // However if we are updating service worker version (m_pauseAfterDownloadState is set)
-    // Then we need to load the worker script to check the version, so in this case we wait for debugger
-    // later in ::resumeAfterDownload().
-    if (m_pauseAfterDownloadState != DoPauseAfterDownload) {
-        m_workerContextClient->workerReadyForInspection();
-        if (m_workerStartData.waitForDebuggerMode == WebEmbeddedWorkerStartData::WaitForDebugger) {
-            m_waitingForDebuggerState = WaitingForDebuggerBeforeLoadingScript;
-            return;
-        }
-    }
-    startScriptLoader(frame);
+    ASSERT(!m_mainScriptLoader);
+    ASSERT(!m_networkProvider);
+    ASSERT(m_mainFrame);
+    ASSERT(m_workerContextClient);
+    m_networkProvider = adoptPtr(m_workerContextClient->createServiceWorkerNetworkProvider(frame->dataSource()));
+    m_mainScriptLoader = Loader::create();
+    m_mainScriptLoader->load(
+        toWebLocalFrameImpl(m_mainFrame)->frame()->document(),
+        m_workerStartData.scriptURL,
+        bind(&WebEmbeddedWorkerImpl::onScriptLoaderFinished, this));
 }
 
 void WebEmbeddedWorkerImpl::sendMessageToInspectorFrontend(const WebString& message)
@@ -343,7 +355,7 @@ void WebEmbeddedWorkerImpl::resumeStartup()
     WaitingForDebuggerState waitingForDebuggerState = m_waitingForDebuggerState;
     m_waitingForDebuggerState = NotWaitingForDebugger;
     if (waitingForDebuggerState == WaitingForDebuggerBeforeLoadingScript)
-        startScriptLoader(toWebLocalFrameImpl(m_mainFrame));
+        loadShadowPage();
     else if (waitingForDebuggerState == WaitingForDebuggerAfterScriptLoaded)
         startWorkerThread();
 }
@@ -351,20 +363,6 @@ void WebEmbeddedWorkerImpl::resumeStartup()
 void WebEmbeddedWorkerImpl::saveAgentRuntimeState(const WebString& inspectorState)
 {
     m_workerContextClient->saveDevToolsAgentState(inspectorState);
-}
-
-void WebEmbeddedWorkerImpl::startScriptLoader(WebLocalFrame* frame)
-{
-    ASSERT(!m_mainScriptLoader);
-    ASSERT(!m_networkProvider);
-    ASSERT(m_mainFrame);
-    ASSERT(m_workerContextClient);
-    m_networkProvider = adoptPtr(m_workerContextClient->createServiceWorkerNetworkProvider(frame->dataSource()));
-    m_mainScriptLoader = Loader::create();
-    m_mainScriptLoader->load(
-        toWebLocalFrameImpl(m_mainFrame)->frame()->document(),
-        m_workerStartData.scriptURL,
-        bind(&WebEmbeddedWorkerImpl::onScriptLoaderFinished, this));
 }
 
 void WebEmbeddedWorkerImpl::onScriptLoaderFinished()
@@ -402,6 +400,9 @@ void WebEmbeddedWorkerImpl::startWorkerThread()
     if (InspectorInstrumentation::shouldPauseDedicatedWorkerOnStart(document))
         startMode = PauseWorkerGlobalScopeOnStart;
 
+    // FIXME: this document's origin is pristine and without any extra privileges. (crbug.com/254993)
+    SecurityOrigin* starterOrigin = document->securityOrigin();
+
     OwnPtrWillBeRawPtr<WorkerClients> workerClients = WorkerClients::create();
     providePermissionClientToWorker(workerClients.get(), m_permissionClient.release());
     provideServiceWorkerGlobalScopeClientToWorker(workerClients.get(), ServiceWorkerGlobalScopeClientImpl::create(*m_workerContextClient));
@@ -416,6 +417,7 @@ void WebEmbeddedWorkerImpl::startWorkerThread()
             // FIXME: fill appropriate CSP info and policy type.
             String(),
             ContentSecurityPolicyHeaderTypeEnforce,
+            starterOrigin,
             workerClients.release());
 
     m_mainScriptLoader.clear();

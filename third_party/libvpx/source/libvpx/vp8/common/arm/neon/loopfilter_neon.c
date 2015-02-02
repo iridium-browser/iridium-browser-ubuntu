@@ -10,6 +10,7 @@
 
 #include <arm_neon.h>
 #include "./vpx_config.h"
+#include "vpx_ports/arm.h"
 
 static INLINE void vp8_loop_filter_neon(
         uint8x16_t qblimit,  // flimit
@@ -251,38 +252,56 @@ void vp8_loop_filter_horizontal_edge_uv_neon(
     return;
 }
 
-#if (__GNUC__ == 4 && (__GNUC_MINOR__ == 6))
-#warning Using GCC 4.6 is not recommended
-// Some versions of gcc4.6 do not correctly process vst4_lane_u8. When built
-// with any gcc4.6, use the C code.
-extern void vp8_loop_filter_vertical_edge_c(unsigned char *s, int p,
-                                            const unsigned char *blimit,
-                                            const unsigned char *limit,
-                                            const unsigned char *thresh,
-                                            int count);
-
-void vp8_loop_filter_vertical_edge_y_neon(
-        unsigned char *src,
-        int pitch,
-        unsigned char blimit,
-        unsigned char limit,
-        unsigned char thresh) {
-  vp8_loop_filter_vertical_edge_c(src, pitch, &blimit, &limit, &thresh, 2);
-}
-
-void vp8_loop_filter_vertical_edge_uv_neon(
-        unsigned char *u,
-        int pitch,
-        unsigned char blimit,
-        unsigned char limit,
-        unsigned char thresh,
-        unsigned char *v) {
-  vp8_loop_filter_vertical_edge_c(u, pitch, &blimit, &limit, &thresh, 1);
-  vp8_loop_filter_vertical_edge_c(v, pitch, &blimit, &limit, &thresh, 1);
-}
-#else
 static INLINE void write_4x8(unsigned char *dst, int pitch,
                              const uint8x8x4_t result) {
+#ifdef VPX_INCOMPATIBLE_GCC
+    /*
+     * uint8x8x4_t result
+    00 01 02 03 | 04 05 06 07
+    10 11 12 13 | 14 15 16 17
+    20 21 22 23 | 24 25 26 27
+    30 31 32 33 | 34 35 36 37
+    ---
+    * after vtrn_u16
+    00 01 20 21 | 04 05 24 25
+    02 03 22 23 | 06 07 26 27
+    10 11 30 31 | 14 15 34 35
+    12 13 32 33 | 16 17 36 37
+    ---
+    * after vtrn_u8
+    00 10 20 30 | 04 14 24 34
+    01 11 21 31 | 05 15 25 35
+    02 12 22 32 | 06 16 26 36
+    03 13 23 33 | 07 17 27 37
+    */
+    const uint16x4x2_t r02_u16 = vtrn_u16(vreinterpret_u16_u8(result.val[0]),
+                                          vreinterpret_u16_u8(result.val[2]));
+    const uint16x4x2_t r13_u16 = vtrn_u16(vreinterpret_u16_u8(result.val[1]),
+                                          vreinterpret_u16_u8(result.val[3]));
+    const uint8x8x2_t r01_u8 = vtrn_u8(vreinterpret_u8_u16(r02_u16.val[0]),
+                                       vreinterpret_u8_u16(r13_u16.val[0]));
+    const uint8x8x2_t r23_u8 = vtrn_u8(vreinterpret_u8_u16(r02_u16.val[1]),
+                                       vreinterpret_u8_u16(r13_u16.val[1]));
+    const uint32x2_t x_0_4 = vreinterpret_u32_u8(r01_u8.val[0]);
+    const uint32x2_t x_1_5 = vreinterpret_u32_u8(r01_u8.val[1]);
+    const uint32x2_t x_2_6 = vreinterpret_u32_u8(r23_u8.val[0]);
+    const uint32x2_t x_3_7 = vreinterpret_u32_u8(r23_u8.val[1]);
+    vst1_lane_u32((uint32_t *)dst, x_0_4, 0);
+    dst += pitch;
+    vst1_lane_u32((uint32_t *)dst, x_1_5, 0);
+    dst += pitch;
+    vst1_lane_u32((uint32_t *)dst, x_2_6, 0);
+    dst += pitch;
+    vst1_lane_u32((uint32_t *)dst, x_3_7, 0);
+    dst += pitch;
+    vst1_lane_u32((uint32_t *)dst, x_0_4, 1);
+    dst += pitch;
+    vst1_lane_u32((uint32_t *)dst, x_1_5, 1);
+    dst += pitch;
+    vst1_lane_u32((uint32_t *)dst, x_2_6, 1);
+    dst += pitch;
+    vst1_lane_u32((uint32_t *)dst, x_3_7, 1);
+#else
     vst4_lane_u8(dst, result, 0);
     dst += pitch;
     vst4_lane_u8(dst, result, 1);
@@ -298,6 +317,7 @@ static INLINE void write_4x8(unsigned char *dst, int pitch,
     vst4_lane_u8(dst, result, 6);
     dst += pitch;
     vst4_lane_u8(dst, result, 7);
+#endif  // VPX_INCOMPATIBLE_GCC
 }
 
 void vp8_loop_filter_vertical_edge_y_neon(
@@ -528,4 +548,3 @@ void vp8_loop_filter_vertical_edge_uv_neon(
     vd = v - 2;
     write_4x8(vd, pitch, q4ResultH);
 }
-#endif  // (__GNUC__ == 4 && (__GNUC_MINOR__ == 6))

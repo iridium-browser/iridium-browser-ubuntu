@@ -18,14 +18,14 @@ class PairingClientAuthenticator : public PairingAuthenticatorBase {
       const std::string& paired_secret,
       const FetchSecretCallback& fetch_pin_callback,
       const std::string& authentication_tag);
-  virtual ~PairingClientAuthenticator();
+  ~PairingClientAuthenticator() override;
 
  private:
   // PairingAuthenticatorBase interface.
-  virtual void CreateV2AuthenticatorWithPIN(
+  void CreateV2AuthenticatorWithPIN(
       State initial_state,
-      const SetAuthenticatorCallback& callback) OVERRIDE;
-  virtual void AddPairingElements(buzz::XmlElement* message) OVERRIDE;
+      const SetAuthenticatorCallback& callback) override;
+  void AddPairingElements(buzz::XmlElement* message) override;
 
   void OnPinFetched(State initial_state,
                     const SetAuthenticatorCallback& callback,

@@ -37,12 +37,12 @@ class PepperPortAllocatorSession
       const std::vector<std::string>& relay_hosts,
       const std::string& relay_token,
       const pp::InstanceHandle& instance);
-  virtual ~PepperPortAllocatorSession();
+  ~PepperPortAllocatorSession() override;
 
   // cricket::HttpPortAllocatorBase overrides.
-  virtual void ConfigReady(cricket::PortConfiguration* config) OVERRIDE;
-  virtual void GetPortConfigurations() OVERRIDE;
-  virtual void SendSessionRequest(const std::string& host, int port) OVERRIDE;
+  void ConfigReady(cricket::PortConfiguration* config) override;
+  void GetPortConfigurations() override;
+  void SendSessionRequest(const std::string& host, int port) override;
 
  private:
   void OnUrlOpened(int32_t result);

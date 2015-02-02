@@ -275,9 +275,9 @@ void Step::nodesInAxis(EvaluationContext& evaluationContext, Node* context, Node
         if (context->isAttributeNode())
             return;
 
-        for (Node* n = context->firstChild(); n; n = NodeTraversal::next(*n, context)) {
-            if (nodeMatches(evaluationContext, n, DescendantAxis, nodeTest()))
-                nodes.append(n);
+        for (Node& n : NodeTraversal::descendantsOf(*context)) {
+            if (nodeMatches(evaluationContext, &n, DescendantAxis, nodeTest()))
+                nodes.append(&n);
         }
         return;
 
@@ -331,18 +331,18 @@ void Step::nodesInAxis(EvaluationContext& evaluationContext, Node* context, Node
 
     case FollowingAxis:
         if (context->isAttributeNode()) {
-            for (Node* p = NodeTraversal::next(*toAttr(context)->ownerElement()); p; p = NodeTraversal::next(*p)) {
-                if (nodeMatches(evaluationContext, p, FollowingAxis, nodeTest()))
-                    nodes.append(p);
+            for (Node& p : NodeTraversal::startsAfter(*toAttr(context)->ownerElement())) {
+                if (nodeMatches(evaluationContext, &p, FollowingAxis, nodeTest()))
+                    nodes.append(&p);
             }
         } else {
             for (Node* p = context; !isRootDomNode(p); p = p->parentNode()) {
                 for (Node* n = p->nextSibling(); n; n = n->nextSibling()) {
                     if (nodeMatches(evaluationContext, n, FollowingAxis, nodeTest()))
                         nodes.append(n);
-                    for (Node* c = n->firstChild(); c; c = NodeTraversal::next(*c, n)) {
-                        if (nodeMatches(evaluationContext, c, FollowingAxis, nodeTest()))
-                            nodes.append(c);
+                    for (Node& c : NodeTraversal::descendantsOf(*n)) {
+                        if (nodeMatches(evaluationContext, &c, FollowingAxis, nodeTest()))
+                            nodes.append(&c);
                     }
                 }
             }
@@ -409,9 +409,9 @@ void Step::nodesInAxis(EvaluationContext& evaluationContext, Node* context, Node
         if (context->isAttributeNode())
             return;
 
-        for (Node* n = context->firstChild(); n; n = NodeTraversal::next(*n, context)) {
-            if (nodeMatches(evaluationContext, n, DescendantOrSelfAxis, nodeTest()))
-                nodes.append(n);
+        for (Node& n : NodeTraversal::descendantsOf(*context)) {
+            if (nodeMatches(evaluationContext, &n, DescendantOrSelfAxis, nodeTest()))
+                nodes.append(&n);
         }
         return;
 

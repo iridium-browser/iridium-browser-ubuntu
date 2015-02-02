@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
-
 /**
  * Protocol + host parts of extension URL.
  * @type {string}
@@ -252,7 +250,7 @@ Id3Parser.prototype.readFrame_ = function(reader, majorVersion) {
  * @param {File} file File object to parse.
  * @param {Object} metadata Metadata object of the file.
  * @param {function(Object)} callback Success callback.
- * @param {function(etring)} onError Error callback.
+ * @param {function(string)} onError Error callback.
  */
 Id3Parser.prototype.parse = function(file, metadata, callback, onError) {
   var self = this;
@@ -270,7 +268,7 @@ Id3Parser.prototype.parse = function(file, metadata, callback, onError) {
          */
         function readTail(file) {
           util.readFileBytes(file, file.size - 128, file.size,
-              this.nextStep, this.onError, this);
+              this.nextStep, this.onError);
         },
 
         /**
@@ -313,8 +311,7 @@ Id3Parser.prototype.parse = function(file, metadata, callback, onError) {
       'id3v2parser',
       [
         function readHead(file) {
-          util.readFileBytes(file, 0, 10, this.nextStep, this.onError,
-              this);
+          util.readFileBytes(file, 0, 10, this.nextStep, this.onError);
         },
 
         /**
@@ -333,7 +330,7 @@ Id3Parser.prototype.parse = function(file, metadata, callback, onError) {
             id3v2.size = Id3Parser.readSynchSafe_(reader, 4);
 
             util.readFileBytes(file, 10, 10 + id3v2.size, this.nextStep,
-                this.onError, this);
+                this.onError);
           } else {
             this.finish();
           }

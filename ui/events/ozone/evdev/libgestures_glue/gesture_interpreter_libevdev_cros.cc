@@ -11,7 +11,10 @@
 #include "base/timer/timer.h"
 #include "ui/events/event.h"
 #include "ui/events/ozone/evdev/cursor_delegate_evdev.h"
+#include "ui/events/ozone/evdev/event_device_util.h"
 #include "ui/events/ozone/evdev/event_modifiers_evdev.h"
+#include "ui/events/ozone/evdev/keyboard_evdev.h"
+#include "ui/events/ozone/evdev/libgestures_glue/gesture_property_provider.h"
 #include "ui/events/ozone/evdev/libgestures_glue/gesture_timer_provider.h"
 #include "ui/gfx/geometry/point_f.h"
 
@@ -36,18 +39,20 @@ GestureInterpreterDeviceClass GestureDeviceClass(Evdev* evdev) {
 }
 
 // Convert libevdev state to libgestures hardware properties.
-HardwareProperties GestureHardwareProperties(Evdev* evdev) {
+HardwareProperties GestureHardwareProperties(
+    Evdev* evdev,
+    const GestureDeviceProperties* props) {
   HardwareProperties hwprops;
-  hwprops.left = Event_Get_Left(evdev);
-  hwprops.top = Event_Get_Top(evdev);
-  hwprops.right = Event_Get_Right(evdev);
-  hwprops.bottom = Event_Get_Bottom(evdev);
-  hwprops.res_x = Event_Get_Res_X(evdev);
-  hwprops.res_y = Event_Get_Res_Y(evdev);
+  hwprops.left = props->area_left;
+  hwprops.top = props->area_top;
+  hwprops.right = props->area_right;
+  hwprops.bottom = props->area_bottom;
+  hwprops.res_x = props->res_x;
+  hwprops.res_y = props->res_y;
   hwprops.screen_x_dpi = 133;
   hwprops.screen_y_dpi = 133;
-  hwprops.orientation_minimum = Event_Get_Orientation_Minimum(evdev);
-  hwprops.orientation_maximum = Event_Get_Orientation_Maximum(evdev);
+  hwprops.orientation_minimum = props->orientation_minimum;
+  hwprops.orientation_maximum = props->orientation_maximum;
   hwprops.max_finger_cnt = Event_Get_Slot_Count(evdev);
   hwprops.max_touch_cnt = Event_Get_Touch_Count_Max(evdev);
   hwprops.supports_t5r2 = Event_Get_T5R2(evdev);
@@ -79,19 +84,41 @@ const int kGestureSwipeFingerCount = 3;
 }  // namespace
 
 GestureInterpreterLibevdevCros::GestureInterpreterLibevdevCros(
+    int id,
     EventModifiersEvdev* modifiers,
     CursorDelegateEvdev* cursor,
+    KeyboardEvdev* keyboard,
+    GesturePropertyProvider* property_provider,
     const EventDispatchCallback& callback)
-    : modifiers_(modifiers),
+    : id_(id),
+      modifiers_(modifiers),
       cursor_(cursor),
+      keyboard_(keyboard),
+      property_provider_(property_provider),
       dispatch_callback_(callback),
-      interpreter_(NULL) {}
+      interpreter_(NULL),
+      evdev_(NULL),
+      device_properties_(new GestureDeviceProperties) {
+  memset(&prev_key_state_, 0, sizeof(prev_key_state_));
+}
 
 GestureInterpreterLibevdevCros::~GestureInterpreterLibevdevCros() {
+  // Note that this destructor got called after the evdev device node has been
+  // closed. Therefore, all clean-up codes here shouldn't depend on the device
+  // information (except for the pointer address itself).
+
+  // Clean-up if the gesture interpreter has been successfully created.
   if (interpreter_) {
+    // Unset callbacks.
+    GestureInterpreterSetCallback(interpreter_, NULL, NULL);
+    GestureInterpreterSetPropProvider(interpreter_, NULL, NULL);
+    GestureInterpreterSetTimerProvider(interpreter_, NULL, NULL);
     DeleteGestureInterpreter(interpreter_);
     interpreter_ = NULL;
   }
+
+  // Unregister device from the gesture property provider.
+  GesturesPropFunctionsWrapper::UnregisterDevice(this);
 }
 
 void GestureInterpreterLibevdevCros::OnLibEvdevCrosOpen(
@@ -100,12 +127,21 @@ void GestureInterpreterLibevdevCros::OnLibEvdevCrosOpen(
   DCHECK(evdev->info.is_monotonic) << "libevdev must use monotonic timestamps";
   VLOG(9) << "HACK DO NOT REMOVE OR LINK WILL FAIL" << (void*)gestures_log;
 
-  HardwareProperties hwprops = GestureHardwareProperties(evdev);
+  // Set device pointer and initialize properties.
+  evdev_ = evdev;
+  GesturesPropFunctionsWrapper::InitializeDeviceProperties(
+      this, device_properties_.get());
+  HardwareProperties hwprops =
+      GestureHardwareProperties(evdev, device_properties_.get());
   GestureInterpreterDeviceClass devclass = GestureDeviceClass(evdev);
 
   // Create & initialize GestureInterpreter.
   DCHECK(!interpreter_);
   interpreter_ = NewGestureInterpreter();
+  GestureInterpreterSetPropProvider(
+      interpreter_,
+      const_cast<GesturesPropProvider*>(&kGesturePropProvider),
+      this);
   GestureInterpreterInitialize(interpreter_, devclass);
   GestureInterpreterSetHardwareProperties(interpreter_, &hwprops);
   GestureInterpreterSetTimerProvider(
@@ -118,6 +154,9 @@ void GestureInterpreterLibevdevCros::OnLibEvdevCrosOpen(
 void GestureInterpreterLibevdevCros::OnLibEvdevCrosEvent(Evdev* evdev,
                                                          EventStateRec* evstate,
                                                          const timeval& time) {
+  // If the device has keys no it, dispatch any presses/release.
+  DispatchChangedKeys(evdev, time);
+
   HardwareState hwstate;
   memset(&hwstate, 0, sizeof(hwstate));
   hwstate.timestamp = StimeFromTimeval(&time);
@@ -211,12 +250,11 @@ void GestureInterpreterLibevdevCros::OnGestureMove(const Gesture* gesture,
   cursor_->MoveCursor(gfx::Vector2dF(move->dx, move->dy));
   // TODO(spang): Use move->ordinal_dx, move->ordinal_dy
   // TODO(spang): Use move->start_time, move->end_time
-  MouseEvent event(ET_MOUSE_MOVED,
-                   cursor_->location(),
-                   cursor_->location(),
-                   modifiers_->GetModifierFlags(),
-                   /* changed_button_flags */ 0);
-  Dispatch(&event);
+  Dispatch(make_scoped_ptr(new MouseEvent(ET_MOUSE_MOVED,
+                                          cursor_->location(),
+                                          cursor_->location(),
+                                          modifiers_->GetModifierFlags(),
+                                          /* changed_button_flags */ 0)));
 }
 
 void GestureInterpreterLibevdevCros::OnGestureScroll(
@@ -232,16 +270,15 @@ void GestureInterpreterLibevdevCros::OnGestureScroll(
 
   // TODO(spang): Support SetNaturalScroll
   // TODO(spang): Use scroll->start_time
-  ScrollEvent event(ET_SCROLL,
-                    cursor_->location(),
-                    StimeToTimedelta(gesture->end_time),
-                    modifiers_->GetModifierFlags(),
-                    scroll->dx,
-                    scroll->dy,
-                    scroll->ordinal_dx,
-                    scroll->ordinal_dy,
-                    kGestureScrollFingerCount);
-  Dispatch(&event);
+  Dispatch(make_scoped_ptr(new ScrollEvent(ET_SCROLL,
+                                           cursor_->location(),
+                                           StimeToTimedelta(gesture->end_time),
+                                           modifiers_->GetModifierFlags(),
+                                           scroll->dx,
+                                           scroll->dy,
+                                           scroll->ordinal_dx,
+                                           scroll->ordinal_dy,
+                                           kGestureScrollFingerCount)));
 }
 
 void GestureInterpreterLibevdevCros::OnGestureButtonsChange(
@@ -300,16 +337,15 @@ void GestureInterpreterLibevdevCros::OnGestureFling(const Gesture* gesture,
                                                   : ET_SCROLL_FLING_CANCEL);
 
   // Fling is like 2-finger scrolling but with velocity instead of displacement.
-  ScrollEvent event(type,
-                    cursor_->location(),
-                    StimeToTimedelta(gesture->end_time),
-                    modifiers_->GetModifierFlags(),
-                    fling->vx,
-                    fling->vy,
-                    fling->ordinal_vx,
-                    fling->ordinal_vy,
-                    kGestureScrollFingerCount);
-  Dispatch(&event);
+  Dispatch(make_scoped_ptr(new ScrollEvent(type,
+                                           cursor_->location(),
+                                           StimeToTimedelta(gesture->end_time),
+                                           modifiers_->GetModifierFlags(),
+                                           fling->vx,
+                                           fling->vy,
+                                           fling->ordinal_vx,
+                                           fling->ordinal_vy,
+                                           kGestureScrollFingerCount)));
 }
 
 void GestureInterpreterLibevdevCros::OnGestureSwipe(const Gesture* gesture,
@@ -324,16 +360,15 @@ void GestureInterpreterLibevdevCros::OnGestureSwipe(const Gesture* gesture,
     return;  // No cursor!
 
   // Swipe is 3-finger scrolling.
-  ScrollEvent event(ET_SCROLL,
-                    cursor_->location(),
-                    StimeToTimedelta(gesture->end_time),
-                    modifiers_->GetModifierFlags(),
-                    swipe->dx,
-                    swipe->dy,
-                    swipe->ordinal_dx,
-                    swipe->ordinal_dy,
-                    kGestureSwipeFingerCount);
-  Dispatch(&event);
+  Dispatch(make_scoped_ptr(new ScrollEvent(ET_SCROLL,
+                                           cursor_->location(),
+                                           StimeToTimedelta(gesture->end_time),
+                                           modifiers_->GetModifierFlags(),
+                                           swipe->dx,
+                                           swipe->dy,
+                                           swipe->ordinal_dx,
+                                           swipe->ordinal_dy,
+                                           kGestureSwipeFingerCount)));
 }
 
 void GestureInterpreterLibevdevCros::OnGestureSwipeLift(
@@ -347,17 +382,15 @@ void GestureInterpreterLibevdevCros::OnGestureSwipeLift(
   // Turn a swipe lift into a fling start.
   // TODO(spang): Figure out why and put it in this comment.
 
-  ScrollEvent event(ET_SCROLL_FLING_START,
-                    cursor_->location(),
-                    StimeToTimedelta(gesture->end_time),
-                    modifiers_->GetModifierFlags(),
-                    /* x_offset */ 0,
-                    /* y_offset */ 0,
-                    /* x_offset_ordinal */ 0,
-                    /* y_offset_ordinal */ 0,
-                    kGestureScrollFingerCount);
-  Dispatch(&event);
-
+  Dispatch(make_scoped_ptr(new ScrollEvent(ET_SCROLL_FLING_START,
+                                           cursor_->location(),
+                                           StimeToTimedelta(gesture->end_time),
+                                           modifiers_->GetModifierFlags(),
+                                           /* x_offset */ 0,
+                                           /* y_offset */ 0,
+                                           /* x_offset_ordinal */ 0,
+                                           /* y_offset_ordinal */ 0,
+                                           kGestureScrollFingerCount)));
 }
 
 void GestureInterpreterLibevdevCros::OnGesturePinch(const Gesture* gesture,
@@ -381,8 +414,8 @@ void GestureInterpreterLibevdevCros::OnGestureMetrics(
   NOTIMPLEMENTED();
 }
 
-void GestureInterpreterLibevdevCros::Dispatch(Event* event) {
-  dispatch_callback_.Run(event);
+void GestureInterpreterLibevdevCros::Dispatch(scoped_ptr<Event> event) {
+  dispatch_callback_.Run(event.Pass());
 }
 
 void GestureInterpreterLibevdevCros::DispatchMouseButton(unsigned int modifier,
@@ -391,8 +424,39 @@ void GestureInterpreterLibevdevCros::DispatchMouseButton(unsigned int modifier,
   int flag = modifiers_->GetEventFlagFromModifier(modifier);
   EventType type = (down ? ET_MOUSE_PRESSED : ET_MOUSE_RELEASED);
   modifiers_->UpdateModifier(modifier, down);
-  MouseEvent event(type, loc, loc, modifiers_->GetModifierFlags() | flag, flag);
-  Dispatch(&event);
+  Dispatch(make_scoped_ptr(new MouseEvent(
+      type, loc, loc, modifiers_->GetModifierFlags() | flag, flag)));
+}
+
+void GestureInterpreterLibevdevCros::DispatchChangedKeys(Evdev* evdev,
+                                                         const timeval& time) {
+  unsigned long key_state_diff[EVDEV_BITS_TO_LONGS(KEY_CNT)];
+
+  // Find changed keys.
+  for (unsigned long i = 0; i < arraysize(key_state_diff); ++i)
+    key_state_diff[i] = evdev->key_state_bitmask[i] ^ prev_key_state_[i];
+
+  // Dispatch events for changed keys.
+  for (unsigned long key = 0; key < KEY_CNT; ++key) {
+    if (EvdevBitIsSet(key_state_diff, key)) {
+      bool value = EvdevBitIsSet(evdev->key_state_bitmask, key);
+
+      // Mouse buttons are handled by DispatchMouseButton.
+      if (key >= BTN_MOUSE && key < BTN_JOYSTICK)
+        continue;
+
+      // Ignore digi buttons (e.g. BTN_TOOL_FINGER).
+      if (key >= BTN_DIGI && key < BTN_WHEEL)
+        continue;
+
+      // Dispatch key press or release to keyboard.
+      keyboard_->OnKeyChange(key, value);
+    }
+  }
+
+  // Update internal key state.
+  for (unsigned long i = 0; i < EVDEV_BITS_TO_LONGS(KEY_CNT); ++i)
+    prev_key_state_[i] = evdev->key_state_bitmask[i];
 }
 
 }  // namespace ui

@@ -40,6 +40,7 @@ using namespace HTMLNames;
 
 inline HTMLLabelElement::HTMLLabelElement(Document& document, HTMLFormElement* form)
     : HTMLElement(labelTag, document)
+    , m_processingClick(false)
 {
     FormAssociatedElement::associateByParser(form);
 }
@@ -63,11 +64,11 @@ LabelableElement* HTMLLabelElement::control() const
         // Search the children and descendants of the label element for a form element.
         // per http://dev.w3.org/html5/spec/Overview.html#the-label-element
         // the form element must be "labelable form-associated element".
-        for (LabelableElement* element = Traversal<LabelableElement>::next(*this, this); element; element = Traversal<LabelableElement>::next(*element, this)) {
-            if (element->supportLabels())
-                return element;
+        for (LabelableElement& element : Traversal<LabelableElement>::descendantsOf(*this)) {
+            if (element.supportLabels())
+                return &element;
         }
-        return 0;
+        return nullptr;
     }
 
     if (Element* element = treeScope().getElementById(controlId)) {
@@ -75,7 +76,7 @@ LabelableElement* HTMLLabelElement::control() const
             return toLabelableElement(element);
     }
 
-    return 0;
+    return nullptr;
 }
 
 HTMLFormElement* HTMLLabelElement::formOwner() const
@@ -128,9 +129,7 @@ bool HTMLLabelElement::isInInteractiveContent(Node* node) const
 
 void HTMLLabelElement::defaultEventHandler(Event* evt)
 {
-    static bool processingClick = false;
-
-    if (evt->type() == EventTypeNames::click && !processingClick) {
+    if (evt->type() == EventTypeNames::click && !m_processingClick) {
         RefPtrWillBeRawPtr<HTMLElement> element = control();
 
         // If we can't find a control or if the control received the click
@@ -174,7 +173,7 @@ void HTMLLabelElement::defaultEventHandler(Event* evt)
             }
         }
 
-        processingClick = true;
+        m_processingClick = true;
 
         document().updateLayoutIgnorePendingStylesheets();
         if (element->isMouseFocusable()) {
@@ -189,7 +188,7 @@ void HTMLLabelElement::defaultEventHandler(Event* evt)
         // Click the corresponding control.
         element->dispatchSimulatedClick(evt);
 
-        processingClick = false;
+        m_processingClick = false;
 
         evt->setDefaultHandled();
     }

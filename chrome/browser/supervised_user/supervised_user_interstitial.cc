@@ -65,7 +65,7 @@ class TabCloser : public content::WebContentsUserData<TabCloser> {
         FROM_HERE,
         base::Bind(&TabCloser::CloseTabImpl, weak_ptr_factory_.GetWeakPtr()));
   }
-  virtual ~TabCloser() {}
+  ~TabCloser() override {}
 
   void CloseTabImpl() {
     // On Android, FindBrowserWithWebContents and TabStripModel don't exist.
@@ -114,7 +114,8 @@ SupervisedUserInterstitial::SupervisedUserInterstitial(
       profile_(Profile::FromBrowserContext(web_contents->GetBrowserContext())),
       interstitial_page_(NULL),
       url_(url),
-      callback_(callback) {}
+      callback_(callback),
+      weak_ptr_factory_(this) {}
 
 SupervisedUserInterstitial::~SupervisedUserInterstitial() {
   DCHECK(!web_contents_);
@@ -216,7 +217,6 @@ std::string SupervisedUserInterstitial::GetHTMLContents() {
   base::StringPiece html(ResourceBundle::GetSharedInstance().GetRawDataResource(
       IDR_SUPERVISED_USER_BLOCK_INTERSTITIAL_HTML));
 
-  webui::UseVersion2 version;
   return webui::GetI18nTemplateHtml(html, &strings);
 }
 
@@ -251,9 +251,9 @@ void SupervisedUserInterstitial::CommandReceived(const std::string& command) {
 
     SupervisedUserService* supervised_user_service =
         SupervisedUserServiceFactory::GetForProfile(profile_);
-    supervised_user_service->AddAccessRequest(url_);
-    DVLOG(1) << "Sent access request for " << url_.spec();
-
+    supervised_user_service->AddAccessRequest(
+        url_, base::Bind(&SupervisedUserInterstitial::OnAccessRequestAdded,
+                         weak_ptr_factory_.GetWeakPtr()));
     return;
   }
 
@@ -261,9 +261,6 @@ void SupervisedUserInterstitial::CommandReceived(const std::string& command) {
 }
 
 void SupervisedUserInterstitial::OnProceed() {
-  // CHECK instead of DCHECK as defense in depth in case we'd accidentally
-  // proceed on a blocked page.
-  CHECK(ShouldProceed());
   DispatchContinueRequest(true);
 }
 
@@ -276,13 +273,22 @@ void SupervisedUserInterstitial::OnURLFilterChanged() {
     interstitial_page_->Proceed();
 }
 
+void SupervisedUserInterstitial::OnAccessRequestAdded(bool success) {
+  // TODO(akuegel): Figure out how to show the result of issuing the permission
+  // request in the UI. Currently, we assume the permission request was created
+  // successfully.
+  VLOG(1) << "Sent access request for " << url_.spec()
+          << (success ? " successfully" : " unsuccessfully");
+}
+
 bool SupervisedUserInterstitial::ShouldProceed() {
   SupervisedUserService* supervised_user_service =
       SupervisedUserServiceFactory::GetForProfile(profile_);
   SupervisedUserURLFilter* url_filter =
       supervised_user_service->GetURLFilterForUIThread();
-  return url_filter->GetFilteringBehaviorForURL(url_) !=
-         SupervisedUserURLFilter::BLOCK;
+  SupervisedUserURLFilter::FilteringBehavior behavior;
+  return (url_filter->GetManualFilteringBehaviorForURL(url_, &behavior) &&
+          behavior != SupervisedUserURLFilter::BLOCK);
 }
 
 void SupervisedUserInterstitial::DispatchContinueRequest(

@@ -48,30 +48,28 @@ class AccountServiceFlagFetcher : public GaiaAuthConsumer,
                             const ResultCallback& callback);
 
   // Destructing the object before the callback is called cancels the request.
-  virtual ~AccountServiceFlagFetcher();
+  ~AccountServiceFlagFetcher() override;
 
  private:
   void Start();
   void StartFetchingOAuth2AccessToken();
 
   // Overridden from OAuth2TokenService::Observer:
-  virtual void OnRefreshTokenAvailable(const std::string& account_id) OVERRIDE;
-  virtual void OnRefreshTokensLoaded() OVERRIDE;
+  void OnRefreshTokenAvailable(const std::string& account_id) override;
+  void OnRefreshTokensLoaded() override;
 
   // Overridden from OAuth2TokenService::Consumer:
-  virtual void OnGetTokenSuccess(const OAuth2TokenService::Request* request,
-                                 const std::string& access_token,
-                                 const base::Time& expiration_time) OVERRIDE;
-  virtual void OnGetTokenFailure(const OAuth2TokenService::Request* request,
-                                 const GoogleServiceAuthError& error) OVERRIDE;
+  void OnGetTokenSuccess(const OAuth2TokenService::Request* request,
+                         const std::string& access_token,
+                         const base::Time& expiration_time) override;
+  void OnGetTokenFailure(const OAuth2TokenService::Request* request,
+                         const GoogleServiceAuthError& error) override;
 
   // Overridden from GaiaAuthConsumer:
-  virtual void OnClientLoginSuccess(const ClientLoginResult& result) OVERRIDE;
-  virtual void OnClientLoginFailure(const GoogleServiceAuthError& error)
-      OVERRIDE;
-  virtual void OnGetUserInfoSuccess(const UserInfoMap& data) OVERRIDE;
-  virtual void OnGetUserInfoFailure(const GoogleServiceAuthError& error)
-      OVERRIDE;
+  void OnClientLoginSuccess(const ClientLoginResult& result) override;
+  void OnClientLoginFailure(const GoogleServiceAuthError& error) override;
+  void OnGetUserInfoSuccess(const UserInfoMap& data) override;
+  void OnGetUserInfoFailure(const GoogleServiceAuthError& error) override;
 
   const std::string account_id_;
   ProfileOAuth2TokenService* token_service_;

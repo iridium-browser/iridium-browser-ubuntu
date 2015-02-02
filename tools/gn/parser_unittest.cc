@@ -558,6 +558,7 @@ TEST(Parser, CommentsSuffix) {
     " FUNCTION(executable)\n"
     "  LIST\n"
     "   LITERAL(\"wee\")\n"
+    "   END())\n"
     "    +SUFFIX_COMMENT(\"# This is some stuff.\")\n"
     "  BLOCK\n"
     "   BINARY(=)\n"
@@ -585,6 +586,7 @@ TEST(Parser, CommentsSuffixDifferentLine) {
     "    LIST\n"
     "     LITERAL(\"a\")\n"
     "     LITERAL(\"b\")\n"
+    "     END(])\n"
     "      +SUFFIX_COMMENT(\"# Comment\")\n";
   DoParserPrintTest(input, expected);
 }
@@ -630,6 +632,41 @@ TEST(Parser, CommentsConnectedInList) {
     "   LITERAL(\"WEE\")\n"
     "    +BEFORE_COMMENT(\"# Connected comment.\")\n"
     "   LITERAL(\"BLORPY\")\n";
+  DoParserPrintTest(input, expected);
+}
+
+TEST(Parser, CommentsAtEndOfBlock) {
+  const char* input =
+    "if (is_win) {\n"
+    "  sources = [\"a.cc\"]\n"
+    "  # Some comment at end.\n"
+    "}\n";
+  const char* expected =
+    "BLOCK\n"
+    " CONDITION\n"
+    "  IDENTIFIER(is_win)\n"
+    "  BLOCK\n"
+    "   BINARY(=)\n"
+    "    IDENTIFIER(sources)\n"
+    "    LIST\n"
+    "     LITERAL(\"a.cc\")\n"
+    "   END(})\n"
+    "    +BEFORE_COMMENT(\"# Some comment at end.\")\n";
+  DoParserPrintTest(input, expected);
+}
+
+// TODO(scottmg): I could be convinced this is incorrect. It's not clear to me
+// which thing this comment is intended to be attached to.
+TEST(Parser, CommentsEndOfBlockSingleLine) {
+  const char* input =
+    "defines = [ # EOL defines.\n"
+    "]\n";
+  const char* expected =
+    "BLOCK\n"
+    " BINARY(=)\n"
+    "  IDENTIFIER(defines)\n"
+    "   +SUFFIX_COMMENT(\"# EOL defines.\")\n"
+    "  LIST\n";
   DoParserPrintTest(input, expected);
 }
 

@@ -120,7 +120,7 @@ void ApplicationCacheHost::selectCacheWithManifest(const KURL& manifestURL)
         // during navigation.
         // see ApplicationCacheGroup::selectCache()
         LocalFrame* frame = m_documentLoader->frame();
-        frame->navigationScheduler().scheduleLocationChange(frame->document(), frame->document()->url(), Referrer(frame->document()->referrer(), frame->document()->referrerPolicy()));
+        frame->navigationScheduler().scheduleLocationChange(frame->document(), frame->document()->url());
     }
 }
 
@@ -132,7 +132,7 @@ void ApplicationCacheHost::didReceiveResponseForMainResource(const ResourceRespo
     }
 }
 
-void ApplicationCacheHost::mainResourceDataReceived(const char* data, int length)
+void ApplicationCacheHost::mainResourceDataReceived(const char* data, unsigned length)
 {
     if (m_host)
         m_host->didReceiveDataForMainResource(data, length);

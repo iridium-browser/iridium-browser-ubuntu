@@ -10,9 +10,9 @@ namespace switches {
 
 // All switches in alphabetical order. The switches should be documented
 // alongside the definition of their values in the .cc file.
-extern const char kDisableIgnoreAutocompleteOff[];
 extern const char kDisablePasswordGeneration[];
 extern const char kEnablePasswordGeneration[];
+extern const char kIgnoreAutocompleteOffForAutofill[];
 extern const char kLocalHeuristicsOnlyForPasswordGeneration[];
 extern const char kShowAutofillTypePredictions[];
 extern const char kWalletSecureServiceUrl[];

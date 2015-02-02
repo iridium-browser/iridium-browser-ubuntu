@@ -58,16 +58,16 @@ class ExtensionBrowsingDataTest : public InProcessBrowserTest,
   }
 
  protected:
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     called_with_details_.reset(new BrowsingDataRemover::NotificationDetails());
     registrar_.Add(this, chrome::NOTIFICATION_BROWSING_DATA_REMOVED,
                    content::Source<Profile>(browser()->profile()));
   }
 
   // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE {
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override {
     DCHECK_EQ(type, chrome::NOTIFICATION_BROWSING_DATA_REMOVED);
 
     // We're not taking ownership of the details object, but storing a copy of
@@ -305,9 +305,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowsingDataTest, RemovalProhibited) {
   CheckRemovalPermitted("{\"cookies\": true, \"downloads\": false}", true);
 }
 
-// Use-after-free, see http://crbug.com/116522
-IN_PROC_BROWSER_TEST_F(ExtensionBrowsingDataTest,
-                       DISABLED_RemoveBrowsingDataAll) {
+IN_PROC_BROWSER_TEST_F(ExtensionBrowsingDataTest, RemoveBrowsingDataAll) {
   scoped_refptr<BrowsingDataRemoveFunction> function =
       new BrowsingDataRemoveFunction();
   EXPECT_EQ(NULL, RunFunctionAndReturnSingleResult(function.get(),

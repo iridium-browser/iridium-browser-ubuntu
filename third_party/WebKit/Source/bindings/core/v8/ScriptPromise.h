@@ -33,25 +33,20 @@
 
 #include "bindings/core/v8/ScriptFunction.h"
 #include "bindings/core/v8/ScriptValue.h"
-#include "bindings/core/v8/V8ThrowException.h"
-#include "core/dom/ExceptionCode.h"
 #include "platform/heap/Handle.h"
-#include "wtf/PassOwnPtr.h"
 #include "wtf/PassRefPtr.h"
-#include "wtf/text/WTFString.h"
 #include <v8.h>
 
 namespace blink {
 
 class DOMException;
-class ExceptionState;
 
 // ScriptPromise is the class for representing Promise values in C++ world.
 // ScriptPromise holds a Promise.
 // So holding a ScriptPromise as a member variable in DOM object causes
 // memory leaks since it has a reference from C++ to V8.
 //
-class ScriptPromise FINAL {
+class ScriptPromise final {
 public:
     // Constructs an empty promise.
     ScriptPromise() { }
@@ -123,7 +118,7 @@ public:
 
     // This is a utility class intended to be used internally.
     // ScriptPromiseResolver is for general purpose.
-    class InternalResolver FINAL {
+    class InternalResolver final {
     public:
         explicit InternalResolver(ScriptState*);
         v8::Local<v8::Promise> v8Promise() const;

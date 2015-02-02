@@ -75,10 +75,7 @@ WebInspector.ShortcutsScreen.prototype = {
             orderedSections[i].renderSection(container);
 
         var note = scrollPane.createChild("p", "help-footnote");
-        var noteLink = note.createChild("a");
-        noteLink.href = "https://developers.google.com/chrome-developer-tools/docs/shortcuts";
-        noteLink.target = "_blank";
-        noteLink.createTextChild(WebInspector.UIString("Full list of keyboard shortcuts and gestures"));
+        note.appendChild(WebInspector.createDocumentationAnchor("shortcuts", WebInspector.UIString("Full list of keyboard shortcuts and gestures")));
 
         return view;
     }
@@ -189,7 +186,7 @@ WebInspector.ShortcutsSection.prototype = {
      */
     _createSpan: function(className, textContent)
     {
-        var node = document.createElement("span");
+        var node = createElement("span");
         node.className = className;
         node.textContent = textContent;
         return node;
@@ -202,7 +199,7 @@ WebInspector.ShortcutsSection.prototype = {
      */
     _joinNodes: function(nodes, delimiter)
     {
-        var result = document.createDocumentFragment();
+        var result = createDocumentFragment();
         for (var i = 0; i < nodes.length; ++i) {
             if (i > 0)
                 result.appendChild(delimiter.cloneNode(true));

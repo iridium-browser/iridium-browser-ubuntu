@@ -495,7 +495,7 @@ class VideoMediaChannelTest : public testing::Test,
   virtual void SetUp() {
     cricket::Device device("test", "device");
     EXPECT_TRUE(engine_.Init(rtc::Thread::Current()));
-    channel_.reset(engine_.CreateChannel(NULL));
+    channel_.reset(engine_.CreateChannel(cricket::VideoOptions(), NULL));
     EXPECT_TRUE(channel_.get() != NULL);
     ConnectVideoChannelError();
     network_interface_.SetDestination(channel_.get());
@@ -783,10 +783,7 @@ class VideoMediaChannelTest : public testing::Test,
   void SetSendSetsTransportBufferSizes() {
     EXPECT_TRUE(SetOneCodec(DefaultCodec()));
     EXPECT_TRUE(SetSend(true));
-    // TODO(sriniv): Remove or re-enable this.
-    // As part of b/8030474, send-buffer is size now controlled through
-    // portallocator flags. Its not set by channels.
-    // EXPECT_EQ(64 * 1024, network_interface_.sendbuf_size());
+    EXPECT_EQ(64 * 1024, network_interface_.sendbuf_size());
     EXPECT_EQ(64 * 1024, network_interface_.recvbuf_size());
   }
   // Tests that we can send frames and the right payload type is used.
@@ -1010,7 +1007,6 @@ class VideoMediaChannelTest : public testing::Test,
 
   // Test that we can set the bandwidth.
   void SetSendBandwidth() {
-    EXPECT_TRUE(channel_->SetStartSendBandwidth(64 * 1024));
     EXPECT_TRUE(channel_->SetMaxSendBandwidth(-1));  // <= 0 means unlimited.
     EXPECT_TRUE(channel_->SetMaxSendBandwidth(128 * 1024));
   }
@@ -1381,6 +1377,9 @@ class VideoMediaChannelTest : public testing::Test,
     EXPECT_EQ(0, renderer_.num_rendered_frames());
     EXPECT_TRUE(SendFrame());
     EXPECT_FRAME_WAIT(1, 640, 400, kTimeout);
+    // Wait for one frame so they don't get dropped because we send frames too
+    // tightly.
+    rtc::Thread::Current()->ProcessMessages(30);
     // Remove the capturer.
     EXPECT_TRUE(channel_->SetCapturer(kSsrc, NULL));
     // Wait for one black frame for removing the capturer.

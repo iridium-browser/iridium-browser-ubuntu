@@ -43,33 +43,32 @@ class SSLClientCertificateSelector : public SSLClientAuthObserver,
       const net::HttpNetworkSession* network_session,
       const scoped_refptr<net::SSLCertRequestInfo>& cert_request_info,
       const chrome::SelectCertificateCallback& callback);
-  virtual ~SSLClientCertificateSelector();
+  ~SSLClientCertificateSelector() override;
 
   void Init();
 
   net::X509Certificate* GetSelectedCert() const;
 
   // SSLClientAuthObserver implementation:
-  virtual void OnCertSelectedByNotification() OVERRIDE;
+  void OnCertSelectedByNotification() override;
 
   // DialogDelegateView:
-  virtual bool CanResize() const OVERRIDE;
-  virtual base::string16 GetWindowTitle() const OVERRIDE;
-  virtual void DeleteDelegate() OVERRIDE;
-  virtual bool IsDialogButtonEnabled(ui::DialogButton button) const OVERRIDE;
-  virtual bool Cancel() OVERRIDE;
-  virtual bool Accept() OVERRIDE;
-  virtual views::View* GetInitiallyFocusedView() OVERRIDE;
-  virtual views::View* CreateExtraView() OVERRIDE;
-  virtual ui::ModalType GetModalType() const OVERRIDE;
+  bool CanResize() const override;
+  base::string16 GetWindowTitle() const override;
+  void DeleteDelegate() override;
+  bool IsDialogButtonEnabled(ui::DialogButton button) const override;
+  bool Cancel() override;
+  bool Accept() override;
+  views::View* GetInitiallyFocusedView() override;
+  views::View* CreateExtraView() override;
+  ui::ModalType GetModalType() const override;
 
   // views::ButtonListener:
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // views::TableViewObserver:
-  virtual void OnSelectionChanged() OVERRIDE;
-  virtual void OnDoubleClick() OVERRIDE;
+  void OnSelectionChanged() override;
+  void OnDoubleClick() override;
 
  private:
   void CreateCertTable();

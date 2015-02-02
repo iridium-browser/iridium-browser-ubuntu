@@ -206,14 +206,11 @@ html[dir=rtl] .main-pane {
   top: 11px;
 }
 
-.password-label,
-.signin-transition-container {
+.password-label {
   display: none;
 }
 
-.pod[auth-type='userClick']:not(.signing-in) .password-label,
-.pod[auth-type='userClick'].signing-in .signin-transition-container {
-  color: grey;
+.pod[auth-type='userClick'] .password-label {
   display: block;
   flex: auto;
   margin-top: 11px;
@@ -262,6 +259,36 @@ html[dir=rtl] .main-pane {
   background-image: url('chrome://theme/IDR_EASY_UNLOCK_LOCKED_PRESSED');
 }
 
+.custom-icon-locked-to-be-activated {
+  background-image:
+      url('chrome://theme/IDR_EASY_UNLOCK_LOCKED_TO_BE_ACTIVATED');
+}
+
+.custom-icon-locked-to-be-activated.icon-with-tooltip:hover {
+  background-image:
+      url('chrome://theme/IDR_EASY_UNLOCK_LOCKED_TO_BE_ACTIVATED_HOVER');
+}
+
+.custom-icon-locked-to-be-activated.interactive-custom-icon:active {
+  background-image:
+      url('chrome://theme/IDR_EASY_UNLOCK_LOCKED_TO_BE_ACTIVATED_PRESSED');
+}
+
+.custom-icon-locked-with-proximity-hint {
+  background-image:
+      url('chrome://theme/IDR_EASY_UNLOCK_LOCKED_WITH_PROXIMITY_HINT');
+}
+
+.custom-icon-locked-with-proximity-hint.icon-with-tooltip:hover {
+  background-image:
+      url('chrome://theme/IDR_EASY_UNLOCK_LOCKED_WITH_PROXIMITY_HINT_HOVER');
+}
+
+.custom-icon-locked-with-proximity-hint.interactive-custom-icon:active {
+  background-image:
+      url('chrome://theme/IDR_EASY_UNLOCK_LOCKED_WITH_PROXIMITY_HINT_PRESSED');
+}
+
 .custom-icon-unlocked {
   background-image: url('chrome://theme/IDR_EASY_UNLOCK_UNLOCKED');
 }
@@ -287,6 +314,12 @@ html[dir=rtl] .main-pane {
     url('chrome://theme/IDR_EASY_UNLOCK_LOCKED')
     url('chrome://theme/IDR_EASY_UNLOCK_LOCKED_HOVER')
     url('chrome://theme/IDR_EASY_UNLOCK_LOCKED_PRESSED')
+    url('chrome://theme/IDR_EASY_UNLOCK_LOCKED_TO_BE_ACTIVATED')
+    url('chrome://theme/IDR_EASY_UNLOCK_LOCKED_TO_BE_ACTIVATED_HOVER')
+    url('chrome://theme/IDR_EASY_UNLOCK_LOCKED_TO_BE_ACTIVATED_PRESSED')
+    url('chrome://theme/IDR_EASY_UNLOCK_LOCKED_WITH_PROXIMITY_HINT')
+    url('chrome://theme/IDR_EASY_UNLOCK_LOCKED_WITH_PROXIMITY_HINT_HOVER')
+    url('chrome://theme/IDR_EASY_UNLOCK_LOCKED_WITH_PROXIMITY_HINT_PRESSED')
     url('chrome://theme/IDR_EASY_UNLOCK_UNLOCKED')
     url('chrome://theme/IDR_EASY_UNLOCK_UNLOCKED_HOVER')
     url('chrome://theme/IDR_EASY_UNLOCK_UNLOCKED_PRESSED');
@@ -688,41 +721,4 @@ html[dir=rtl] .expanded-pane-contents {
 
 .enter-button {
   font-size: 14px;
-}
-
-/* Animations for the animated ellipsis: */
-.animated-ellipsis-component0 {
-  -webkit-animation: ellipsis-component0 1.5s infinite;
-}
-
-@-webkit-keyframes ellipsis-component0 {
-  0% { opacity: 0; }
-  25% { opacity: 1; }
-  50% { opacity: 1; }
-  75% { opacity: 1; }
-  100% { opacity: 0; }
-}
-
-.animated-ellipsis-component1 {
-  -webkit-animation: ellipsis-component1 1.5s infinite;
-}
-
-@-webkit-keyframes ellipsis-component1 {
-  0% { opacity: 0; }
-  25% { opacity: 0; }
-  50% { opacity: 1; }
-  75% { opacity: 1; }
-  100% { opacity: 0; }
-}
-
-.animated-ellipsis-component2 {
-  -webkit-animation: ellipsis-component2 1.5s infinite;
-}
-
-@-webkit-keyframes ellipsis-component2 {
-  0% { opacity: 0; }
-  25% { opacity: 0; }
-  50% { opacity: 0; }
-  75% { opacity: 1; }
-  100% { opacity: 0; }
 }

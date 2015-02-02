@@ -97,7 +97,7 @@ class TemplateURLService : public WebDataServiceConsumer,
       const base::Closure& dsp_change_callback);
   // The following is for testing.
   TemplateURLService(const Initializer* initializers, const int count);
-  virtual ~TemplateURLService();
+  ~TemplateURLService() override;
 
   // Creates a TemplateURLData that was previously saved to |prefs| via
   // SaveDefaultSearchProviderToPrefs or set via policy.
@@ -290,9 +290,8 @@ class TemplateURLService : public WebDataServiceConsumer,
   // Notification that the keywords have been loaded.
   // This is invoked from WebDataService, and should not be directly
   // invoked.
-  virtual void OnWebDataServiceRequestDone(
-      KeywordWebDataService::Handle h,
-      const WDTypedResult* result) OVERRIDE;
+  void OnWebDataServiceRequestDone(KeywordWebDataService::Handle h,
+                                   const WDTypedResult* result) override;
 
   // Returns the locale-direction-adjusted short name for the given keyword.
   // Also sets the out param to indicate whether the keyword belongs to an
@@ -304,29 +303,28 @@ class TemplateURLService : public WebDataServiceConsumer,
   void OnHistoryURLVisited(const URLVisitedDetails& details);
 
   // KeyedService implementation.
-  virtual void Shutdown() OVERRIDE;
+  void Shutdown() override;
 
   // syncer::SyncableService implementation.
 
   // Returns all syncable TemplateURLs from this model as SyncData. This should
   // include every search engine and no Extension keywords.
-  virtual syncer::SyncDataList GetAllSyncData(
-      syncer::ModelType type) const OVERRIDE;
+  syncer::SyncDataList GetAllSyncData(syncer::ModelType type) const override;
   // Process new search engine changes from Sync, merging them into our local
   // data. This may send notifications if local search engines are added,
   // updated or removed.
-  virtual syncer::SyncError ProcessSyncChanges(
+  syncer::SyncError ProcessSyncChanges(
       const tracked_objects::Location& from_here,
-      const syncer::SyncChangeList& change_list) OVERRIDE;
+      const syncer::SyncChangeList& change_list) override;
   // Merge initial search engine data from Sync and push any local changes up
   // to Sync. This may send notifications if local search engines are added,
   // updated or removed.
-  virtual syncer::SyncMergeResult MergeDataAndStartSyncing(
+  syncer::SyncMergeResult MergeDataAndStartSyncing(
       syncer::ModelType type,
       const syncer::SyncDataList& initial_sync_data,
       scoped_ptr<syncer::SyncChangeProcessor> sync_processor,
-      scoped_ptr<syncer::SyncErrorFactory> sync_error_factory) OVERRIDE;
-  virtual void StopSyncing(syncer::ModelType type) OVERRIDE;
+      scoped_ptr<syncer::SyncErrorFactory> sync_error_factory) override;
+  void StopSyncing(syncer::ModelType type) override;
 
   // Processes a local TemplateURL change for Sync. |turl| is the TemplateURL
   // that has been modified, and |type| is the Sync ChangeType that took place.
@@ -355,7 +353,8 @@ class TemplateURLService : public WebDataServiceConsumer,
   // data, an appropriate SyncChange is added to |change_list|.  If the sync
   // data is bad for some reason, an ACTION_DELETE change is added and the
   // function returns NULL.
-  static TemplateURL* CreateTemplateURLFromTemplateURLAndSyncData(
+  static scoped_ptr<TemplateURL> CreateTemplateURLFromTemplateURLAndSyncData(
+      TemplateURLServiceClient* client,
       PrefService* prefs,
       const SearchTermsData& search_terms_data,
       TemplateURL* existing_turl,
@@ -382,6 +381,7 @@ class TemplateURLService : public WebDataServiceConsumer,
                            DontUpdateKeywordSearchForNonReplaceable);
   FRIEND_TEST_ALL_PREFIXES(TemplateURLServiceTest, ChangeGoogleBaseValue);
   FRIEND_TEST_ALL_PREFIXES(TemplateURLServiceTest, MergeDeletesUnusedProviders);
+  FRIEND_TEST_ALL_PREFIXES(TemplateURLServiceTest, AddExtensionKeyword);
   FRIEND_TEST_ALL_PREFIXES(TemplateURLServiceSyncTest, UniquifyKeyword);
   FRIEND_TEST_ALL_PREFIXES(TemplateURLServiceSyncTest,
                            IsLocalTemplateURLBetter);

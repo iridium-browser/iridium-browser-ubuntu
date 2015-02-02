@@ -43,9 +43,8 @@ namespace blink {
 
 class InjectedScriptModule;
 class Node;
-class SerializedScriptValue;
 
-class InjectedScript FINAL : public InjectedScriptBase {
+class InjectedScript final : public InjectedScriptBase {
 public:
     InjectedScript();
     virtual ~InjectedScript() { }
@@ -101,6 +100,8 @@ public:
 
     void inspectNode(Node*);
     void releaseObjectGroup(const String&);
+
+    void setLastEvaluationResult(const String& objectId);
 
 private:
     friend class InjectedScriptModule;

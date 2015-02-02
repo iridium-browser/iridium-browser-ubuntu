@@ -4,14 +4,12 @@
 
 #include "chrome/browser/chromeos/login/ui/webui_login_display.h"
 
-#include "ash/shell.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/login/lock/screen_locker.h"
 #include "chrome/browser/chromeos/login/screens/chrome_user_selection_screen.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host_impl.h"
 #include "chrome/browser/chromeos/login/ui/user_adding_screen.h"
 #include "chrome/browser/chromeos/login/ui/webui_login_view.h"
-#include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/grit/chromium_strings.h"
@@ -25,6 +23,10 @@
 #include "ui/views/widget/widget.h"
 #include "ui/wm/core/user_activity_detector.h"
 
+#if !defined(USE_ATHENA)
+#include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
+#endif
+
 namespace chromeos {
 
 // WebUILoginDisplay, public: --------------------------------------------------
@@ -32,12 +34,9 @@ namespace chromeos {
 WebUILoginDisplay::~WebUILoginDisplay() {
   if (webui_handler_)
     webui_handler_->ResetSigninScreenHandlerDelegate();
-#if !defined(USE_ATHENA)
-  wm::UserActivityDetector* activity_detector = ash::Shell::GetInstance()->
-    user_activity_detector();
+  wm::UserActivityDetector* activity_detector = wm::UserActivityDetector::Get();
   if (activity_detector->HasObserver(this))
     activity_detector->RemoveObserver(this);
-#endif
 }
 
 // LoginDisplay implementation: ------------------------------------------------
@@ -68,12 +67,9 @@ void WebUILoginDisplay::Init(const user_manager::UserList& users,
   show_users_ = show_users;
   show_new_user_ = show_new_user;
 
-#if !defined(USE_ATHENA)
-  wm::UserActivityDetector* activity_detector = ash::Shell::GetInstance()->
-      user_activity_detector();
+  wm::UserActivityDetector* activity_detector = wm::UserActivityDetector::Get();
   if (!activity_detector->HasObserver(this))
     activity_detector->AddObserver(this);
-#endif
 }
 
 // ---- Common methods
@@ -269,12 +265,16 @@ void WebUILoginDisplay::MigrateUserData(const std::string& old_password) {
 }
 
 void WebUILoginDisplay::LoadWallpaper(const std::string& username) {
+#if !defined(USE_ATHENA)
   WallpaperManager::Get()->SetUserWallpaperDelayed(username);
+#endif
 }
 
 void WebUILoginDisplay::LoadSigninWallpaper() {
+#if !defined(USE_ATHENA)
   WallpaperManager::Get()->SetDefaultWallpaperDelayed(
       chromeos::login::kSignInUser);
+#endif
 }
 
 void WebUILoginDisplay::OnSigninScreenReady() {

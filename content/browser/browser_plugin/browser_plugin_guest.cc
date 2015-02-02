@@ -51,15 +51,14 @@ class BrowserPluginGuest::EmbedderWebContentsObserver
         browser_plugin_guest_(guest) {
   }
 
-  virtual ~EmbedderWebContentsObserver() {
-  }
+  ~EmbedderWebContentsObserver() override {}
 
   // WebContentsObserver implementation.
-  virtual void WasShown() OVERRIDE {
+  void WasShown() override {
     browser_plugin_guest_->EmbedderVisibilityChanged(true);
   }
 
-  virtual void WasHidden() OVERRIDE {
+  void WasHidden() override {
     browser_plugin_guest_->EmbedderVisibilityChanged(false);
   }
 
@@ -81,12 +80,14 @@ BrowserPluginGuest::BrowserPluginGuest(bool has_render_view,
       pending_lock_request_(false),
       guest_visible_(false),
       embedder_visible_(true),
-      copy_request_id_(0),
+      is_full_page_plugin_(false),
       has_render_view_(has_render_view),
       is_in_destruction_(false),
       last_text_input_type_(ui::TEXT_INPUT_TYPE_NONE),
       last_input_mode_(ui::TEXT_INPUT_MODE_DEFAULT),
+      last_input_flags_(0),
       last_can_compose_inline_(true),
+      guest_proxy_routing_id_(MSG_ROUTING_NONE),
       delegate_(delegate),
       weak_ptr_factory_(this) {
   DCHECK(web_contents);
@@ -120,8 +121,17 @@ void BrowserPluginGuest::SetFocus(RenderWidgetHost* rwh, bool focused) {
       rwh->GetView());
   if (rwhv) {
     rwhv->TextInputTypeChanged(last_text_input_type_, last_input_mode_,
-                               last_can_compose_inline_);
+                               last_can_compose_inline_, last_input_flags_);
   }
+}
+
+void BrowserPluginGuest::SetTooltipText(const base::string16& tooltip_text) {
+  if (tooltip_text == current_tooltip_text_)
+    return;
+  current_tooltip_text_ = tooltip_text;
+
+  SendMessageToEmbedder(new BrowserPluginMsg_SetTooltipText(
+      browser_plugin_instance_id_, tooltip_text));
 }
 
 bool BrowserPluginGuest::LockMouse(bool allowed) {
@@ -129,10 +139,6 @@ bool BrowserPluginGuest::LockMouse(bool allowed) {
     return false;
 
   return embedder_web_contents()->GotResponseToLockMouseRequest(allowed);
-}
-
-void BrowserPluginGuest::Destroy() {
-  delegate_->Destroy();
 }
 
 WebContentsImpl* BrowserPluginGuest::CreateNewGuestWindow(
@@ -159,8 +165,6 @@ bool BrowserPluginGuest::OnMessageReceivedFromEmbedder(
   IPC_BEGIN_MESSAGE_MAP(BrowserPluginGuest, message)
     IPC_MESSAGE_HANDLER(BrowserPluginHostMsg_CompositorFrameSwappedACK,
                         OnCompositorFrameSwappedACK)
-    IPC_MESSAGE_HANDLER(BrowserPluginHostMsg_CopyFromCompositingSurfaceAck,
-                        OnCopyFromCompositingSurfaceAck)
     IPC_MESSAGE_HANDLER(BrowserPluginHostMsg_DragStatusUpdate,
                         OnDragStatusUpdate)
     IPC_MESSAGE_HANDLER(BrowserPluginHostMsg_ExecuteEditCommand,
@@ -172,7 +176,6 @@ bool BrowserPluginGuest::OnMessageReceivedFromEmbedder(
     IPC_MESSAGE_HANDLER(BrowserPluginHostMsg_ImeSetComposition,
                         OnImeSetComposition)
     IPC_MESSAGE_HANDLER(BrowserPluginHostMsg_LockMouse_ACK, OnLockMouseAck)
-    IPC_MESSAGE_HANDLER(BrowserPluginHostMsg_PluginDestroyed, OnPluginDestroyed)
     IPC_MESSAGE_HANDLER(BrowserPluginHostMsg_ReclaimCompositorResources,
                         OnReclaimCompositorResources)
     IPC_MESSAGE_HANDLER(BrowserPluginHostMsg_ResizeGuest, OnResizeGuest)
@@ -194,16 +197,19 @@ void BrowserPluginGuest::Initialize(
   browser_plugin_instance_id_ = browser_plugin_instance_id;
   focused_ = params.focused;
   guest_visible_ = params.visible;
+  is_full_page_plugin_ = params.is_full_page_plugin;
   guest_window_rect_ = gfx::Rect(params.origin,
                                  params.resize_guest_params.view_size);
+
+  WebContentsViewGuest* new_view =
+      static_cast<WebContentsViewGuest*>(GetWebContents()->GetView());
+  if (attached())
+    new_view->OnGuestDetached(embedder_web_contents_->GetView());
 
   // Once a BrowserPluginGuest has an embedder WebContents, it's considered to
   // be attached.
   embedder_web_contents_ = embedder_web_contents;
-
-  WebContentsViewGuest* new_view =
-      static_cast<WebContentsViewGuest*>(GetWebContents()->GetView());
-  new_view->OnGuestInitialized(embedder_web_contents->GetView());
+  new_view->OnGuestAttached(embedder_web_contents->GetView());
 
   RendererPreferences* renderer_prefs =
       GetWebContents()->GetMutableRendererPrefs();
@@ -284,19 +290,6 @@ void BrowserPluginGuest::UpdateVisibility() {
   OnSetVisibility(browser_plugin_instance_id(), visible());
 }
 
-void BrowserPluginGuest::CopyFromCompositingSurface(
-      gfx::Rect src_subrect,
-      gfx::Size dst_size,
-      const base::Callback<void(bool, const SkBitmap&)>& callback) {
-  copy_request_callbacks_.insert(std::make_pair(++copy_request_id_, callback));
-  SendMessageToEmbedder(
-      new BrowserPluginMsg_CopyFromCompositingSurface(
-          browser_plugin_instance_id(),
-          copy_request_id_,
-          src_subrect,
-          dst_size));
-}
-
 BrowserPluginGuestManager*
 BrowserPluginGuest::GetBrowserPluginGuestManager() const {
   return GetWebContents()->GetBrowserContext()->GetGuestManager();
@@ -333,7 +326,6 @@ void BrowserPluginGuest::SwapCompositorFrame(
   guest_params.output_surface_id = output_surface_id;
   guest_params.producing_route_id = host_routing_id;
   guest_params.producing_host_id = host_process_id;
-
   SendMessageToEmbedder(
       new BrowserPluginMsg_CompositorFrameSwapped(
           browser_plugin_instance_id(), guest_params));
@@ -343,6 +335,13 @@ void BrowserPluginGuest::SetContentsOpaque(bool opaque) {
   SendMessageToEmbedder(
       new BrowserPluginMsg_SetContentsOpaque(
           browser_plugin_instance_id(), opaque));
+}
+
+bool BrowserPluginGuest::Find(int request_id,
+                              const base::string16& search_text,
+                              const blink::WebFindOptions& options) {
+  return delegate_->Find(request_id, search_text, options,
+                         is_full_page_plugin_);
 }
 
 WebContentsImpl* BrowserPluginGuest::GetWebContents() const {
@@ -443,7 +442,6 @@ bool BrowserPluginGuest::ShouldForwardToBrowserPluginGuest(
     const IPC::Message& message) {
   switch (message.type()) {
     case BrowserPluginHostMsg_CompositorFrameSwappedACK::ID:
-    case BrowserPluginHostMsg_CopyFromCompositingSurfaceAck::ID:
     case BrowserPluginHostMsg_DragStatusUpdate::ID:
     case BrowserPluginHostMsg_ExecuteEditCommand::ID:
     case BrowserPluginHostMsg_ExtendSelectionAndDelete::ID:
@@ -451,7 +449,6 @@ bool BrowserPluginGuest::ShouldForwardToBrowserPluginGuest(
     case BrowserPluginHostMsg_ImeConfirmComposition::ID:
     case BrowserPluginHostMsg_ImeSetComposition::ID:
     case BrowserPluginHostMsg_LockMouse_ACK::ID:
-    case BrowserPluginHostMsg_PluginDestroyed::ID:
     case BrowserPluginHostMsg_ReclaimCompositorResources::ID:
     case BrowserPluginHostMsg_ResizeGuest::ID:
     case BrowserPluginHostMsg_SetEditCommandsForNextKeyEvent::ID:
@@ -517,20 +514,21 @@ void BrowserPluginGuest::Attach(
     int browser_plugin_instance_id,
     WebContentsImpl* embedder_web_contents,
     const BrowserPluginHostMsg_Attach_Params& params) {
-  if (attached())
-    return;
-
   delegate_->WillAttach(embedder_web_contents, browser_plugin_instance_id);
 
   // If a RenderView has already been created for this new window, then we need
   // to initialize the browser-side state now so that the RenderFrameHostManager
   // does not create a new RenderView on navigation.
   if (has_render_view_) {
+    // This will trigger a callback to RenderViewReady after a round-trip IPC.
     static_cast<RenderViewHostImpl*>(
         GetWebContents()->GetRenderViewHost())->Init();
-    WebContentsViewGuest* new_view =
+    WebContentsViewGuest* web_contents_view =
         static_cast<WebContentsViewGuest*>(GetWebContents()->GetView());
-    new_view->CreateViewForWidget(web_contents()->GetRenderViewHost());
+    if (!web_contents()->GetRenderViewHost()->GetView()) {
+      web_contents_view->CreateViewForWidget(
+          web_contents()->GetRenderViewHost(), true);
+    }
   }
 
   Initialize(browser_plugin_instance_id, params, embedder_web_contents);
@@ -539,11 +537,18 @@ void BrowserPluginGuest::Attach(
 
   // Create a swapped out RenderView for the guest in the embedder render
   // process, so that the embedder can access the guest's window object.
-  int guest_routing_id =
-      GetWebContents()->CreateSwappedOutRenderView(
-          embedder_web_contents_->GetSiteInstance());
+  // On reattachment, we can reuse the same swapped out RenderView because
+  // the embedder process will always be the same even if the embedder
+  // WebContents changes.
+  if (guest_proxy_routing_id_ == MSG_ROUTING_NONE) {
+    guest_proxy_routing_id_ =
+        GetWebContents()->CreateSwappedOutRenderView(
+            embedder_web_contents_->GetSiteInstance());
+  }
 
-  delegate_->DidAttach(guest_routing_id);
+  delegate_->DidAttach(guest_proxy_routing_id_);
+
+  has_render_view_ = true;
 
   RecordAction(base::UserMetricsAction("BrowserPlugin.Guest.Attached"));
 }
@@ -657,10 +662,6 @@ void BrowserPluginGuest::OnLockMouseAck(int browser_plugin_instance_id,
     mouse_locked_ = true;
 }
 
-void BrowserPluginGuest::OnPluginDestroyed(int browser_plugin_instance_id) {
-  Destroy();
-}
-
 void BrowserPluginGuest::OnResizeGuest(
     int browser_plugin_instance_id,
     const BrowserPluginHostMsg_ResizeGuest_Params& params) {
@@ -724,18 +725,6 @@ void BrowserPluginGuest::OnUnlockMouseAck(int browser_plugin_instance_id) {
   mouse_locked_ = false;
 }
 
-void BrowserPluginGuest::OnCopyFromCompositingSurfaceAck(
-    int browser_plugin_instance_id,
-    int request_id,
-    const SkBitmap& bitmap) {
-  CHECK(copy_request_callbacks_.count(request_id));
-  if (!copy_request_callbacks_.count(request_id))
-    return;
-  const CopyRequestCallback& callback = copy_request_callbacks_[request_id];
-  callback.Run(!bitmap.empty() && !bitmap.isNull(), bitmap);
-  copy_request_callbacks_.erase(request_id);
-}
-
 void BrowserPluginGuest::OnUpdateGeometry(int browser_plugin_instance_id,
                                           const gfx::Rect& view_rect) {
   // The plugin has moved within the embedder without resizing or the
@@ -783,15 +772,17 @@ void BrowserPluginGuest::OnTakeFocus(bool reverse) {
 
 void BrowserPluginGuest::OnTextInputTypeChanged(ui::TextInputType type,
                                                 ui::TextInputMode input_mode,
-                                                bool can_compose_inline) {
+                                                bool can_compose_inline,
+                                                int flags) {
   // Save the state of text input so we can restore it on focus.
   last_text_input_type_ = type;
   last_input_mode_ = input_mode;
+  last_input_flags_ = flags;
   last_can_compose_inline_ = can_compose_inline;
 
   static_cast<RenderWidgetHostViewBase*>(
       web_contents()->GetRenderWidgetHostView())->TextInputTypeChanged(
-          type, input_mode, can_compose_inline);
+          type, input_mode, can_compose_inline, flags);
 }
 
 void BrowserPluginGuest::OnImeCancelComposition() {

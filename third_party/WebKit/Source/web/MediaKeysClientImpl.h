@@ -11,14 +11,13 @@
 namespace blink {
 
 class WebContentDecryptionModule;
-class WebViewImpl;
 
-class MediaKeysClientImpl FINAL : public MediaKeysClient {
+class MediaKeysClientImpl final : public MediaKeysClient {
 public:
     MediaKeysClientImpl();
 
     // MediaKeysClient implementation.
-    virtual PassOwnPtr<WebContentDecryptionModule> createContentDecryptionModule(ExecutionContext*, const String& keySystem) OVERRIDE;
+    virtual PassOwnPtr<WebContentDecryptionModule> createContentDecryptionModule(ExecutionContext*, const String& keySystem) override;
 };
 
 } // namespace blink

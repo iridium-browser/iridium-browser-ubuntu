@@ -38,17 +38,18 @@
 #include "third_party/skia/include/core/SkPostConfig.h"
 #include "ui/base/x/x11_menu_list.h"
 #include "ui/base/x/x11_util_internal.h"
+#include "ui/events/devices/x11/device_data_manager_x11.h"
+#include "ui/events/devices/x11/touch_factory_x11.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/keycodes/keyboard_code_conversion_x.h"
-#include "ui/events/x/device_data_manager_x11.h"
-#include "ui/events/x/touch_factory_x11.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/geometry/insets.h"
+#include "ui/gfx/geometry/point.h"
+#include "ui/gfx/geometry/point_conversions.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_rep.h"
-#include "ui/gfx/point.h"
-#include "ui/gfx/point_conversions.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/size.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/gfx/x/x11_error_tracker.h"
 
@@ -580,7 +581,7 @@ void ClearX11DefaultRootWindow() {
   XDisplay* display = gfx::GetXDisplay();
   XID root_window = GetX11RootWindow();
   gfx::Rect root_bounds;
-  if (!GetWindowRect(root_window, &root_bounds)) {
+  if (!GetOuterWindowBounds(root_window, &root_bounds)) {
     LOG(ERROR) << "Failed to get the bounds of the X11 root window";
     return;
   }
@@ -624,7 +625,7 @@ bool IsWindowVisible(XID window) {
           window_desktop == current_desktop);
 }
 
-bool GetWindowRect(XID window, gfx::Rect* rect) {
+bool GetInnerWindowBounds(XID window, gfx::Rect* rect) {
   Window root, child;
   int x, y;
   unsigned int width, height;
@@ -640,11 +641,31 @@ bool GetWindowRect(XID window, gfx::Rect* rect) {
 
   *rect = gfx::Rect(x, y, width, height);
 
+  return true;
+}
+
+bool GetWindowExtents(XID window, gfx::Insets* extents) {
   std::vector<int> insets;
-  if (GetIntArrayProperty(window, "_NET_FRAME_EXTENTS", &insets) &&
-      insets.size() == 4) {
-    rect->Inset(-insets[0], -insets[2], -insets[1], -insets[3]);
-  }
+  if (!GetIntArrayProperty(window, "_NET_FRAME_EXTENTS", &insets))
+    return false;
+  if (insets.size() != 4)
+    return false;
+
+  int left = insets[0];
+  int right = insets[1];
+  int top = insets[2];
+  int bottom = insets[3];
+  extents->Set(-top, -left, -bottom, -right);
+  return true;
+}
+
+bool GetOuterWindowBounds(XID window, gfx::Rect* rect) {
+  if (!GetInnerWindowBounds(window, rect))
+    return false;
+
+  gfx::Insets extents;
+  if (GetWindowExtents(window, &extents))
+    rect->Inset(extents);
   // Not all window managers support _NET_FRAME_EXTENTS so return true even if
   // requesting the property fails.
 
@@ -656,7 +677,7 @@ bool WindowContainsPoint(XID window, gfx::Point screen_loc) {
   TRACE_EVENT0("ui", "WindowContainsPoint");
 
   gfx::Rect window_rect;
-  if (!GetWindowRect(window, &window_rect))
+  if (!GetOuterWindowBounds(window, &window_rect))
     return false;
 
   if (!window_rect.Contains(screen_loc))
@@ -1032,7 +1053,8 @@ bool GetCustomFramePrefDefault() {
       wm == WM_NOTION ||
       wm == WM_QTILE ||
       wm == WM_RATPOISON ||
-      wm == WM_STUMPWM)
+      wm == WM_STUMPWM ||
+      wm == WM_WMII)
     return false;
 
   // Handle a few more window managers that don't get along well with custom
@@ -1231,6 +1253,8 @@ WindowManagerName GuessWindowManager() {
       return WM_COMPIZ;
     if (name == "e16" || name == "Enlightenment")
       return WM_ENLIGHTENMENT;
+    if (name == "Fluxbox")
+      return WM_FLUXBOX;
     if (name == "i3")
       return WM_I3;
     if (StartsWithASCII(name, "IceWM", true))
@@ -1259,6 +1283,8 @@ WindowManagerName GuessWindowManager() {
       return WM_RATPOISON;
     if (name == "stumpwm")
       return WM_STUMPWM;
+    if (name == "wmii")
+      return WM_WMII;
     if (name == "Xfwm4")
       return WM_XFWM4;
   }
@@ -1294,7 +1320,7 @@ bool IsX11WindowFullScreen(XID window) {
   }
 
   gfx::Rect window_rect;
-  if (!ui::GetWindowRect(window, &window_rect))
+  if (!ui::GetOuterWindowBounds(window, &window_rect))
     return false;
 
   // We can't use gfx::Screen here because we don't have an aura::Window. So

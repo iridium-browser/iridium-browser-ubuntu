@@ -32,7 +32,6 @@
         'geometry/point.h',
         'geometry/point3_f.cc',
         'geometry/point3_f.h',
-        'geometry/point_base.h',
         'geometry/point_conversions.cc',
         'geometry/point_conversions.h',
         'geometry/point_f.cc',
@@ -41,8 +40,6 @@
         'geometry/quad_f.h',
         'geometry/rect.cc',
         'geometry/rect.h',
-        'geometry/rect_base.h',
-        'geometry/rect_base_impl.h',
         'geometry/rect_conversions.cc',
         'geometry/rect_conversions.h',
         'geometry/rect_f.cc',
@@ -51,9 +48,10 @@
         'geometry/r_tree_base.cc',
         'geometry/r_tree_base.h',
         'geometry/safe_integer_conversions.h',
+        'geometry/scroll_offset.cc',
+        'geometry/scroll_offset.h',
         'geometry/size.cc',
         'geometry/size.h',
-        'geometry/size_base.h',
         'geometry/size_conversions.cc',
         'geometry/size_conversions.h',
         'geometry/size_f.cc',
@@ -66,6 +64,9 @@
         'geometry/vector2d_f.h',
         'geometry/vector3d_f.cc',
         'geometry/vector3d_f.h',
+      ],
+      'includes': [
+        '../../build/android/increase_size_for_speed.gypi',
       ],
     },
     {
@@ -103,8 +104,6 @@
         'android/gfx_jni_registrar.h',
         'android/java_bitmap.cc',
         'android/java_bitmap.h',
-        'android/scroller.cc',
-        'android/scroller.h',
         'android/shared_device_display_info.cc',
         'android/shared_device_display_info.h',
         'android/view_configuration.cc',
@@ -297,6 +296,8 @@
         'utf16_indexing.cc',
         'utf16_indexing.h',
         'vsync_provider.h',
+        'win/direct_write.cc',
+        'win/direct_write.h',
         'win/dpi.cc',
         'win/dpi.h',
         'win/hwnd_util.cc',
@@ -306,6 +307,9 @@
         'win/singleton_hwnd.h',
         'win/window_impl.cc',
         'win/window_impl.h',
+      ],
+      'includes': [
+        '../../build/android/increase_size_for_speed.gypi',
       ],
       'conditions': [
         ['OS=="ios"', {
@@ -347,7 +351,6 @@
         ['OS=="android"', {
           'sources!': [
             'animation/throb_animation.cc',
-            'display_observer.cc',
             'selection_model.cc',
           ],
           'dependencies': [

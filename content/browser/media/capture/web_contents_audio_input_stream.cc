@@ -64,7 +64,7 @@ class WebContentsAudioInputStream::Impl
     CLOSED
   };
 
-  virtual ~Impl();
+  ~Impl() override;
 
   // Notifies the consumer callback that the stream is now dead.
   void ReportError();
@@ -79,13 +79,12 @@ class WebContentsAudioInputStream::Impl
   void UnmuteWebContentsAudio();
 
   // AudioMirroringManager::MirroringDestination implementation
-  virtual void QueryForMatches(
-      const std::set<SourceFrameRef>& candidates,
-      const MatchesCallback& results_callback) OVERRIDE;
+  void QueryForMatches(const std::set<SourceFrameRef>& candidates,
+                       const MatchesCallback& results_callback) override;
   void QueryForMatchesOnUIThread(const std::set<SourceFrameRef>& candidates,
                                  const MatchesCallback& results_callback);
-  virtual media::AudioOutputStream* AddInput(
-      const media::AudioParameters& params) OVERRIDE;
+  media::AudioOutputStream* AddInput(
+      const media::AudioParameters& params) override;
 
   // Callback which is run when |stream| is closed.  Deletes |stream|.
   void ReleaseInput(media::VirtualAudioOutputStream* stream);

@@ -25,16 +25,18 @@
 #include "content/common/sandbox_linux/sandbox_seccomp_bpf_linux.h"
 #include "content/common/set_process_title.h"
 #include "content/public/common/content_switches.h"
+#include "sandbox/linux/bpf_dsl/bpf_dsl.h"
+#include "sandbox/linux/seccomp-bpf-helpers/syscall_parameters_restrictions.h"
 #include "sandbox/linux/seccomp-bpf-helpers/syscall_sets.h"
-#include "sandbox/linux/seccomp-bpf/trap.h"
-#include "sandbox/linux/services/broker_process.h"
 #include "sandbox/linux/services/linux_syscalls.h"
+#include "sandbox/linux/syscall_broker/broker_process.h"
 
 using sandbox::BrokerProcess;
 using sandbox::SyscallSets;
 using sandbox::arch_seccomp_data;
 using sandbox::bpf_dsl::Allow;
 using sandbox::bpf_dsl::ResultExpr;
+using sandbox::bpf_dsl::Trap;
 
 namespace content {
 
@@ -117,12 +119,12 @@ intptr_t GpuSIGSYS_Handler(const struct arch_seccomp_data& args,
 
 class GpuBrokerProcessPolicy : public GpuProcessPolicy {
  public:
-  static sandbox::bpf_dsl::SandboxBPFDSLPolicy* Create() {
+  static sandbox::bpf_dsl::Policy* Create() {
     return new GpuBrokerProcessPolicy();
   }
-  virtual ~GpuBrokerProcessPolicy() {}
+  ~GpuBrokerProcessPolicy() override {}
 
-  virtual ResultExpr EvaluateSyscall(int system_call_number) const OVERRIDE;
+  ResultExpr EvaluateSyscall(int system_call_number) const override;
 
  private:
   GpuBrokerProcessPolicy() {}
@@ -158,8 +160,8 @@ void UpdateProcessTypeToGpuBroker() {
   SetProcessTitleFromCommandLine(NULL);
 }
 
-bool UpdateProcessTypeAndEnableSandbox(sandbox::bpf_dsl::SandboxBPFDSLPolicy* (
-    *broker_sandboxer_allocator)(void)) {
+bool UpdateProcessTypeAndEnableSandbox(
+    sandbox::bpf_dsl::Policy* (*broker_sandboxer_allocator)(void)) {
   DCHECK(broker_sandboxer_allocator);
   UpdateProcessTypeToGpuBroker();
   return SandboxSeccompBPF::StartSandboxWithExternalPolicy(
@@ -168,7 +170,12 @@ bool UpdateProcessTypeAndEnableSandbox(sandbox::bpf_dsl::SandboxBPFDSLPolicy* (
 
 }  // namespace
 
-GpuProcessPolicy::GpuProcessPolicy() : broker_process_(NULL) {}
+GpuProcessPolicy::GpuProcessPolicy() : GpuProcessPolicy(false) {
+}
+
+GpuProcessPolicy::GpuProcessPolicy(bool allow_mincore)
+    : broker_process_(NULL), allow_mincore_(allow_mincore) {
+}
 
 GpuProcessPolicy::~GpuProcessPolicy() {}
 
@@ -176,6 +183,13 @@ GpuProcessPolicy::~GpuProcessPolicy() {}
 ResultExpr GpuProcessPolicy::EvaluateSyscall(int sysno) const {
   switch (sysno) {
     case __NR_ioctl:
+      return Allow();
+    case __NR_mincore:
+      if (allow_mincore_) {
+        return Allow();
+      } else {
+        return SandboxBPFBasePolicy::EvaluateSyscall(sysno);
+      }
 #if defined(__i386__) || defined(__x86_64__) || defined(__mips__)
     // The Nvidia driver uses flags not in the baseline policy
     // (MAP_LOCKED | MAP_EXECUTABLE | MAP_32BIT)
@@ -186,15 +200,17 @@ ResultExpr GpuProcessPolicy::EvaluateSyscall(int sysno) const {
     case __NR_mprotect:
     // TODO(jln): restrict prctl.
     case __NR_prctl:
-    case __NR_sched_getaffinity:
-    case __NR_sched_setaffinity:
-    case __NR_setpriority:
       return Allow();
     case __NR_access:
     case __NR_open:
     case __NR_openat:
       DCHECK(broker_process_);
       return Trap(GpuSIGSYS_Handler, broker_process_);
+    case __NR_setpriority:
+      return sandbox::RestrictGetSetpriority(GetPolicyPid());
+    case __NR_sched_getaffinity:
+    case __NR_sched_setaffinity:
+      return sandbox::RestrictSchedTarget(GetPolicyPid(), sysno);
     default:
       if (SyscallSets::IsEventFd(sysno))
         return Allow();
@@ -240,7 +256,7 @@ bool GpuProcessPolicy::PreSandboxHook() {
 }
 
 void GpuProcessPolicy::InitGpuBrokerProcess(
-    sandbox::bpf_dsl::SandboxBPFDSLPolicy* (*broker_sandboxer_allocator)(void),
+    sandbox::bpf_dsl::Policy* (*broker_sandboxer_allocator)(void),
     const std::vector<std::string>& read_whitelist_extra,
     const std::vector<std::string>& write_whitelist_extra) {
   static const char kDriRcPath[] = "/etc/drirc";

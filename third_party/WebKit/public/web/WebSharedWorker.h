@@ -63,12 +63,7 @@ public:
     virtual void clientDestroyed() = 0;
 
     virtual void pauseWorkerContextOnStart() = 0;
-    virtual void resumeWorkerContext() = 0;
-    virtual void attachDevTools() = 0;
-    // FIXME: Remove this once chromium uses the one that receives hostId as a parameter.
     virtual void attachDevTools(const WebString& hostId) = 0;
-    virtual void reattachDevTools(const WebString& savedState) = 0;
-    // FIXME: Remove this once chromium uses the one that receives hostId as a parameter.
     virtual void reattachDevTools(const WebString& hostId, const WebString& savedState) = 0;
     virtual void detachDevTools() = 0;
     virtual void dispatchDevToolsMessage(const WebString&) = 0;

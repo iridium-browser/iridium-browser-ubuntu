@@ -16,7 +16,7 @@ namespace {
 
 class CannedBrowsingDataIndexedDBHelperTest : public testing::Test {
  public:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     IndexedDBContext()->SetTaskRunnerForTesting(
         base::MessageLoopProxy::current().get());
   }

@@ -12,11 +12,11 @@ namespace system_logs {
 // Fetches memory usage details.
 class NetworkEventLogSource : public SystemLogsSource {
  public:
-  NetworkEventLogSource() {}
-  virtual ~NetworkEventLogSource() {}
+  NetworkEventLogSource();
+  virtual ~NetworkEventLogSource();
 
   // SystemLogsSource override.
-  virtual void Fetch(const SysLogsSourceCallback& request) OVERRIDE;
+  virtual void Fetch(const SysLogsSourceCallback& request) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(NetworkEventLogSource);

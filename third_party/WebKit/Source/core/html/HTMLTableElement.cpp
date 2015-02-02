@@ -242,7 +242,7 @@ void HTMLTableElement::setNeedsTableStyleRecalc() const
 {
     Element* element = ElementTraversal::next(*this, this);
     while (element) {
-        element->setNeedsStyleRecalc(LocalStyleChange);
+        element->setNeedsStyleRecalc(LocalStyleChange, StyleChangeReasonForTracing::fromAttribute(rulesAttr));
         if (isHTMLTableCellElement(*element))
             element = ElementTraversal::nextSkippingChildren(*element, this);
         else
@@ -403,7 +403,7 @@ static PassRefPtrWillBeRawPtr<StylePropertySet> createBorderStyle(CSSValueID val
 const StylePropertySet* HTMLTableElement::additionalPresentationAttributeStyle()
 {
     if (m_frameAttr)
-        return 0;
+        return nullptr;
 
     if (!m_borderAttr && !m_borderColorAttr) {
         // Setting the border to 'hidden' allows it to win over any border
@@ -412,7 +412,7 @@ const StylePropertySet* HTMLTableElement::additionalPresentationAttributeStyle()
             DEFINE_STATIC_REF_WILL_BE_PERSISTENT(StylePropertySet, solidBorderStyle, (createBorderStyle(CSSValueHidden)));
             return solidBorderStyle;
         }
-        return 0;
+        return nullptr;
     }
 
     if (m_borderColorAttr) {
@@ -513,7 +513,7 @@ static PassRefPtrWillBeRawPtr<StylePropertySet> createGroupBorderStyle(int rows)
 const StylePropertySet* HTMLTableElement::additionalGroupStyle(bool rows)
 {
     if (m_rulesAttr != GroupsRules)
-        return 0;
+        return nullptr;
 
     if (rows) {
         DEFINE_STATIC_REF_WILL_BE_PERSISTENT(StylePropertySet, rowBorderStyle, (createGroupBorderStyle(true)));

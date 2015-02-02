@@ -127,6 +127,10 @@ bool OrderedSimpleTaskRunner::RunsTasksOnCurrentThread() const {
   return true;
 }
 
+bool OrderedSimpleTaskRunner::HasPendingTasks() const {
+  return pending_tasks_.size() > 0;
+}
+
 base::TimeTicks OrderedSimpleTaskRunner::NextTaskTime() {
   if (pending_tasks_.size() <= 0) {
     return TestNowSource::kAbsoluteMaxNow;
@@ -153,13 +157,13 @@ const size_t OrderedSimpleTaskRunner::kAbsoluteMaxTasks =
 
 bool OrderedSimpleTaskRunner::RunTasksWhile(
     base::Callback<bool(void)> condition) {
-  std::vector<base::Callback<bool(void)> > conditions(1);
+  std::vector<base::Callback<bool(void)>> conditions(1);
   conditions[0] = condition;
   return RunTasksWhile(conditions);
 }
 
 bool OrderedSimpleTaskRunner::RunTasksWhile(
-    const std::vector<base::Callback<bool(void)> >& conditions) {
+    const std::vector<base::Callback<bool(void)>>& conditions) {
   TRACE_EVENT2("cc",
                "OrderedSimpleTaskRunner::RunPendingTasks",
                "this",
@@ -175,7 +179,7 @@ bool OrderedSimpleTaskRunner::RunTasksWhile(
                                                       true);
 
   // Make a copy so we can append some extra run checks.
-  std::vector<base::Callback<bool(void)> > modifiable_conditions(conditions);
+  std::vector<base::Callback<bool(void)>> modifiable_conditions(conditions);
 
   // Provide a timeout base on number of tasks run so this doesn't loop
   // forever.
@@ -191,7 +195,7 @@ bool OrderedSimpleTaskRunner::RunTasksWhile(
   while (pending_tasks_.size() > 0) {
     // Check if we should continue to run pending tasks.
     bool condition_success = true;
-    for (std::vector<base::Callback<bool(void)> >::iterator it =
+    for (std::vector<base::Callback<bool(void)>>::iterator it =
              modifiable_conditions.begin();
          it != modifiable_conditions.end();
          it++) {
@@ -202,7 +206,7 @@ bool OrderedSimpleTaskRunner::RunTasksWhile(
 
     // Conditions could modify the pending task length, so we need to recheck
     // that there are tasks to run.
-    if (!condition_success || pending_tasks_.size() == 0) {
+    if (!condition_success || !HasPendingTasks()) {
       break;
     }
 
@@ -219,7 +223,7 @@ bool OrderedSimpleTaskRunner::RunTasksWhile(
     pending_tasks_.erase(task_to_run);
   }
 
-  return pending_tasks_.size() > 0;
+  return HasPendingTasks();
 }
 
 bool OrderedSimpleTaskRunner::RunPendingTasks() {
@@ -227,7 +231,7 @@ bool OrderedSimpleTaskRunner::RunPendingTasks() {
 }
 
 bool OrderedSimpleTaskRunner::RunUntilIdle() {
-  return RunTasksWhile(std::vector<base::Callback<bool(void)> >());
+  return RunTasksWhile(std::vector<base::Callback<bool(void)>>());
 }
 
 bool OrderedSimpleTaskRunner::RunUntilTime(base::TimeTicks time) {
@@ -263,16 +267,21 @@ OrderedSimpleTaskRunner::AsValue() const {
 void OrderedSimpleTaskRunner::AsValueInto(
     base::debug::TracedValue* state) const {
   state->SetInteger("pending_tasks", pending_tasks_.size());
+
+  state->BeginArray("tasks");
   for (std::set<TestOrderablePendingTask>::const_iterator it =
            pending_tasks_.begin();
        it != pending_tasks_.end();
        ++it) {
-    state->BeginDictionary(
-        base::SizeTToString(std::distance(pending_tasks_.begin(), it)).c_str());
+    state->BeginDictionary();
     it->AsValueInto(state);
     state->EndDictionary();
   }
+  state->EndArray();
+
+  state->BeginDictionary("now_src");
   now_src_->AsValueInto(state);
+  state->EndDictionary();
 }
 
 base::Callback<bool(void)> OrderedSimpleTaskRunner::TaskRunCountBelow(

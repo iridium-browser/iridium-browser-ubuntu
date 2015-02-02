@@ -20,6 +20,7 @@ examples/api/var_array_buffer/*
 examples/api/var_dictionary/*
 examples/api/video_decode/*
 examples/api/websocket/*
+examples/benchmarks/*
 examples/button_close.png
 examples/button_close_hover.png
 examples/demo/drive/*
@@ -42,6 +43,7 @@ examples/index.js
 examples/Makefile
 examples/tutorial/debugging/*
 examples/tutorial/dlopen/*
+examples/tutorial/filesystem_passing/*
 examples/tutorial/load_progress/*
 examples/tutorial/multi_platform/*
 [win]examples/tutorial/make.bat
@@ -438,6 +440,7 @@ tools/nacl_gcc.mk
 tools/nacl_llvm.mk
 tools/ncval${EXE_EXT}
 tools/ncval.py
+[linux]tools/nonsfi_loader_x86_32${EXE_EXT}
 tools/oshelpers.py
 tools/run.py
 tools/sel_ldr.py

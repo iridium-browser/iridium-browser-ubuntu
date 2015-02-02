@@ -60,7 +60,6 @@ content::WebUIDataSource* CreateFlashUIHTMLSource() {
   content::WebUIDataSource* source =
       content::WebUIDataSource::Create(chrome::kChromeUIFlashHost);
 
-  source->SetUseJsonJSFormatV2();
   source->AddLocalizedString("loadingMessage", IDS_FLASH_LOADING_MESSAGE);
   source->AddLocalizedString("flashLongTitle", IDS_FLASH_TITLE_MESSAGE);
   source->SetJsonPath("strings.js");
@@ -83,16 +82,16 @@ class FlashDOMHandler : public WebUIMessageHandler,
                         public content::GpuDataManagerObserver {
  public:
   FlashDOMHandler();
-  virtual ~FlashDOMHandler();
+  ~FlashDOMHandler() override;
 
   // WebUIMessageHandler implementation.
-  virtual void RegisterMessages() OVERRIDE;
+  void RegisterMessages() override;
 
   // CrashUploadList::Delegate implementation.
-  virtual void OnUploadListAvailable() OVERRIDE;
+  void OnUploadListAvailable() override;
 
   // GpuDataManager::Observer implementation.
-  virtual void OnGpuInfoUpdate() OVERRIDE;
+  void OnGpuInfoUpdate() override;
 
   // Callback for the "requestFlashInfo" message.
   void HandleRequestFlashInfo(const base::ListValue* args);

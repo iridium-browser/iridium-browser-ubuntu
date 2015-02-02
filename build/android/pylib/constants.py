@@ -67,6 +67,12 @@ PACKAGE_INFO = {
         None,
         None,
         None),
+    'chromecast_shell': PackageInfo(
+        'com.google.android.apps.mediashell',
+        'com.google.android.apps.mediashell.MediaShellActivity',
+        '/data/local/tmp/castshell-command-line',
+        None,
+        None),
     'content_shell': PackageInfo(
         'org.chromium.content_shell_apk',
         'org.chromium.content_shell_apk.ContentShellActivity',
@@ -140,8 +146,23 @@ DEVICE_PERF_OUTPUT_DIR = (
 
 SCREENSHOTS_DIR = os.path.join(DIR_SOURCE_ROOT, 'out_screenshots')
 
-ANDROID_SDK_VERSION = 20
-ANDROID_SDK_BUILD_TOOLS_VERSION = '20.0.0'
+class ANDROID_SDK_VERSION_CODES(object):
+  """Android SDK version codes.
+
+  http://developer.android.com/reference/android/os/Build.VERSION_CODES.html
+  """
+
+  ICE_CREAM_SANDWICH = 14
+  ICE_CREAM_SANDWICH_MR1 = 15
+  JELLY_BEAN = 16
+  JELLY_BEAN_MR1 = 17
+  JELLY_BEAN_MR2 = 18
+  KITKAT = 19
+  KITKAT_WATCH = 20
+  LOLLIPOP = 21
+
+ANDROID_SDK_VERSION = ANDROID_SDK_VERSION_CODES.LOLLIPOP
+ANDROID_SDK_BUILD_TOOLS_VERSION = '21.0.1'
 ANDROID_SDK_ROOT = os.path.join(DIR_SOURCE_ROOT,
                                 'third_party/android_tools/sdk')
 ANDROID_SDK_TOOLS = os.path.join(ANDROID_SDK_ROOT,
@@ -161,6 +182,25 @@ UPSTREAM_FLAKINESS_SERVER = 'test-results.appspot.com'
 
 DEVICE_LOCAL_PROPERTIES_PATH = '/data/local.prop'
 
+PYTHON_UNIT_TEST_SUITES = {
+  'pylib_py_unittests': {
+    'path': os.path.join(DIR_SOURCE_ROOT, 'build', 'android'),
+    'test_modules': [
+      'pylib.device.device_utils_test',
+    ]
+  },
+  'gyp_py_unittests': {
+    'path': os.path.join(DIR_SOURCE_ROOT, 'build', 'android', 'gyp'),
+    'test_modules': [
+      'java_cpp_enum_tests',
+    ]
+  },
+}
+
+LOCAL_MACHINE_TESTS = ['junit', 'python']
+VALID_ENVIRONMENTS = ['local']
+
+
 def GetBuildType():
   try:
     return os.environ['BUILDTYPE']
@@ -170,6 +210,10 @@ def GetBuildType():
 
 def SetBuildType(build_type):
   os.environ['BUILDTYPE'] = build_type
+
+
+def SetBuildDirectory(build_directory):
+  os.environ['CHROMIUM_OUT_DIR'] = build_directory
 
 
 def GetOutDirectory(build_type=None):

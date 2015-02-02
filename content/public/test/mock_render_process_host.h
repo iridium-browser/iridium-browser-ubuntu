@@ -23,7 +23,7 @@ class MockRenderProcessHostFactory;
 class MockRenderProcessHost : public RenderProcessHost {
  public:
   explicit MockRenderProcessHost(BrowserContext* browser_context);
-  virtual ~MockRenderProcessHost();
+  ~MockRenderProcessHost() override;
 
   // Provides access to all IPC messages that would have been sent to the
   // renderer via this RenderProcessHost.
@@ -33,63 +33,62 @@ class MockRenderProcessHost : public RenderProcessHost {
   int bad_msg_count() const { return bad_msg_count_; }
 
   // RenderProcessHost implementation (public portion).
-  virtual void EnableSendQueue() OVERRIDE;
-  virtual bool Init() OVERRIDE;
-  virtual int GetNextRoutingID() OVERRIDE;
-  virtual void AddRoute(int32 routing_id, IPC::Listener* listener) OVERRIDE;
-  virtual void RemoveRoute(int32 routing_id) OVERRIDE;
-  virtual void AddObserver(RenderProcessHostObserver* observer) OVERRIDE;
-  virtual void RemoveObserver(RenderProcessHostObserver* observer) OVERRIDE;
-  virtual void ReceivedBadMessage() OVERRIDE;
-  virtual void WidgetRestored() OVERRIDE;
-  virtual void WidgetHidden() OVERRIDE;
-  virtual int VisibleWidgetCount() const OVERRIDE;
-  virtual bool IsIsolatedGuest() const OVERRIDE;
-  virtual StoragePartition* GetStoragePartition() const OVERRIDE;
+  void EnableSendQueue() override;
+  bool Init() override;
+  int GetNextRoutingID() override;
+  void AddRoute(int32 routing_id, IPC::Listener* listener) override;
+  void RemoveRoute(int32 routing_id) override;
+  void AddObserver(RenderProcessHostObserver* observer) override;
+  void RemoveObserver(RenderProcessHostObserver* observer) override;
+  void ReceivedBadMessage() override;
+  void WidgetRestored() override;
+  void WidgetHidden() override;
+  int VisibleWidgetCount() const override;
+  bool IsIsolatedGuest() const override;
+  StoragePartition* GetStoragePartition() const override;
   virtual void AddWord(const base::string16& word);
-  virtual bool FastShutdownIfPossible() OVERRIDE;
-  virtual bool FastShutdownStarted() const OVERRIDE;
-  virtual void DumpHandles() OVERRIDE;
-  virtual base::ProcessHandle GetHandle() const OVERRIDE;
-  virtual int GetID() const OVERRIDE;
-  virtual bool HasConnection() const OVERRIDE;
-  virtual void SetIgnoreInputEvents(bool ignore_input_events) OVERRIDE;
-  virtual bool IgnoreInputEvents() const OVERRIDE;
-  virtual void Cleanup() OVERRIDE;
-  virtual void AddPendingView() OVERRIDE;
-  virtual void RemovePendingView() OVERRIDE;
-  virtual void SetSuddenTerminationAllowed(bool allowed) OVERRIDE;
-  virtual bool SuddenTerminationAllowed() const OVERRIDE;
-  virtual BrowserContext* GetBrowserContext() const OVERRIDE;
-  virtual bool InSameStoragePartition(
-      StoragePartition* partition) const OVERRIDE;
-  virtual IPC::ChannelProxy* GetChannel() OVERRIDE;
-  virtual void AddFilter(BrowserMessageFilter* filter) OVERRIDE;
-  virtual bool FastShutdownForPageCount(size_t count) OVERRIDE;
-  virtual base::TimeDelta GetChildProcessIdleTime() const OVERRIDE;
-  virtual void ResumeRequestsForView(int route_id) OVERRIDE;
-  virtual void FilterURL(bool empty_allowed, GURL* url) OVERRIDE;
+  bool FastShutdownIfPossible() override;
+  bool FastShutdownStarted() const override;
+  void DumpHandles() override;
+  base::ProcessHandle GetHandle() const override;
+  int GetID() const override;
+  bool HasConnection() const override;
+  void SetIgnoreInputEvents(bool ignore_input_events) override;
+  bool IgnoreInputEvents() const override;
+  void Cleanup() override;
+  void AddPendingView() override;
+  void RemovePendingView() override;
+  void SetSuddenTerminationAllowed(bool allowed) override;
+  bool SuddenTerminationAllowed() const override;
+  BrowserContext* GetBrowserContext() const override;
+  bool InSameStoragePartition(StoragePartition* partition) const override;
+  IPC::ChannelProxy* GetChannel() override;
+  void AddFilter(BrowserMessageFilter* filter) override;
+  bool FastShutdownForPageCount(size_t count) override;
+  base::TimeDelta GetChildProcessIdleTime() const override;
+  void ResumeRequestsForView(int route_id) override;
+  void FilterURL(bool empty_allowed, GURL* url) override;
 #if defined(ENABLE_WEBRTC)
-  virtual void EnableAecDump(const base::FilePath& file) OVERRIDE;
-  virtual void DisableAecDump() OVERRIDE;
-  virtual void SetWebRtcLogMessageCallback(
-      base::Callback<void(const std::string&)> callback) OVERRIDE;
-  virtual WebRtcStopRtpDumpCallback StartRtpDump(
+  void EnableAecDump(const base::FilePath& file) override;
+  void DisableAecDump() override;
+  void SetWebRtcLogMessageCallback(
+      base::Callback<void(const std::string&)> callback) override;
+  WebRtcStopRtpDumpCallback StartRtpDump(
       bool incoming,
       bool outgoing,
-      const WebRtcRtpPacketCallback& packet_callback) OVERRIDE;
+      const WebRtcRtpPacketCallback& packet_callback) override;
 #endif
-  virtual void ResumeDeferredNavigation(const GlobalRequestID& request_id)
-      OVERRIDE;
-  virtual void NotifyTimezoneChange() OVERRIDE;
-  virtual ServiceRegistry* GetServiceRegistry() OVERRIDE;
+  void ResumeDeferredNavigation(const GlobalRequestID& request_id) override;
+  void NotifyTimezoneChange() override;
+  ServiceRegistry* GetServiceRegistry() override;
+  const base::TimeTicks& GetInitTimeForNavigationMetrics() const override;
 
   // IPC::Sender via RenderProcessHost.
-  virtual bool Send(IPC::Message* msg) OVERRIDE;
+  bool Send(IPC::Message* msg) override;
 
   // IPC::Listener via RenderProcessHost.
-  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
-  virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& msg) override;
+  void OnChannelConnected(int32 peer_pid) override;
 
   // Attaches the factory object so we can remove this object in its destructor
   // and prevent MockRenderProcessHostFacotry from deleting it.
@@ -130,11 +129,11 @@ class MockRenderProcessHost : public RenderProcessHost {
 class MockRenderProcessHostFactory : public RenderProcessHostFactory {
  public:
   MockRenderProcessHostFactory();
-  virtual ~MockRenderProcessHostFactory();
+  ~MockRenderProcessHostFactory() override;
 
-  virtual RenderProcessHost* CreateRenderProcessHost(
+  RenderProcessHost* CreateRenderProcessHost(
       BrowserContext* browser_context,
-      SiteInstance* site_instance) const OVERRIDE;
+      SiteInstance* site_instance) const override;
 
   // Removes the given MockRenderProcessHost from the MockRenderProcessHost list
   // without deleting it. When a test deletes a MockRenderProcessHost, we need

@@ -5,12 +5,13 @@
 #ifndef HTMLMediaElementEncryptedMedia_h
 #define HTMLMediaElementEncryptedMedia_h
 
-#include "modules/EventTargetModules.h"
+#include "core/EventTypeNames.h"
+#include "core/dom/DOMTypedArray.h"
+#include "core/events/EventTarget.h"
 #include "platform/Supplementable.h"
 #include "platform/graphics/media/MediaPlayer.h"
 #include "platform/heap/Handle.h"
 #include "public/platform/WebMediaPlayerClient.h"
-#include "wtf/Forward.h"
 
 namespace blink {
 
@@ -20,15 +21,15 @@ class MediaKeys;
 class ScriptPromise;
 class ScriptState;
 
-class HTMLMediaElementEncryptedMedia FINAL : public NoBaseWillBeGarbageCollected<HTMLMediaElementEncryptedMedia>, public WillBeHeapSupplement<HTMLMediaElement> {
+class HTMLMediaElementEncryptedMedia final : public NoBaseWillBeGarbageCollected<HTMLMediaElementEncryptedMedia>, public WillBeHeapSupplement<HTMLMediaElement> {
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(HTMLMediaElementEncryptedMedia);
     DECLARE_EMPTY_VIRTUAL_DESTRUCTOR_WILL_BE_REMOVED(HTMLMediaElementEncryptedMedia);
 public:
     // encrypted media extensions (v0.1b)
-    static void webkitGenerateKeyRequest(HTMLMediaElement&, const String& keySystem, PassRefPtr<Uint8Array> initData, ExceptionState&);
+    static void webkitGenerateKeyRequest(HTMLMediaElement&, const String& keySystem, PassRefPtr<DOMUint8Array> initData, ExceptionState&);
     static void webkitGenerateKeyRequest(HTMLMediaElement&, const String& keySystem, ExceptionState&);
-    static void webkitAddKey(HTMLMediaElement&, const String& keySystem, PassRefPtr<Uint8Array> key, PassRefPtr<Uint8Array> initData, const String& sessionId, ExceptionState&);
-    static void webkitAddKey(HTMLMediaElement&, const String& keySystem, PassRefPtr<Uint8Array> key, ExceptionState&);
+    static void webkitAddKey(HTMLMediaElement&, const String& keySystem, PassRefPtr<DOMUint8Array> key, PassRefPtr<DOMUint8Array> initData, const String& sessionId, ExceptionState&);
+    static void webkitAddKey(HTMLMediaElement&, const String& keySystem, PassRefPtr<DOMUint8Array> key, ExceptionState&);
     static void webkitCancelKeyRequest(HTMLMediaElement&, const String& keySystem, const String& sessionId, ExceptionState&);
 
     DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(webkitkeyadded);
@@ -39,26 +40,26 @@ public:
     // encrypted media extensions (WD)
     static MediaKeys* mediaKeys(HTMLMediaElement&);
     static ScriptPromise setMediaKeys(ScriptState*, HTMLMediaElement&, MediaKeys*);
-    DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(needkey);
+    DEFINE_STATIC_ATTRIBUTE_EVENT_LISTENER(encrypted);
 
     static void keyAdded(HTMLMediaElement&, const String& keySystem, const String& sessionId);
     static void keyError(HTMLMediaElement&, const String& keySystem, const String& sessionId, WebMediaPlayerClient::MediaKeyErrorCode, unsigned short systemCode);
     static void keyMessage(HTMLMediaElement&, const String& keySystem, const String& sessionId, const unsigned char* message, unsigned messageLength, const WebURL& defaultURL);
-    static void keyNeeded(HTMLMediaElement&, const String& contentType, const unsigned char* initData, unsigned initDataLength);
+    static void encrypted(HTMLMediaElement&, const String& initDataType, const unsigned char* initData, unsigned initDataLength);
     static void playerDestroyed(HTMLMediaElement&);
     static WebContentDecryptionModule* contentDecryptionModule(HTMLMediaElement&);
 
     static HTMLMediaElementEncryptedMedia& from(HTMLMediaElement&);
     static const char* supplementName();
 
-    virtual void trace(Visitor*) OVERRIDE;
+    virtual void trace(Visitor*) override;
 
 private:
     friend class SetMediaKeysHandler;
 
     HTMLMediaElementEncryptedMedia();
-    void generateKeyRequest(WebMediaPlayer*, const String& keySystem, PassRefPtr<Uint8Array> initData, ExceptionState&);
-    void addKey(WebMediaPlayer*, const String& keySystem, PassRefPtr<Uint8Array> key, PassRefPtr<Uint8Array> initData, const String& sessionId, ExceptionState&);
+    void generateKeyRequest(WebMediaPlayer*, const String& keySystem, PassRefPtr<DOMUint8Array> initData, ExceptionState&);
+    void addKey(WebMediaPlayer*, const String& keySystem, PassRefPtr<DOMUint8Array> key, PassRefPtr<DOMUint8Array> initData, const String& sessionId, ExceptionState&);
     void cancelKeyRequest(WebMediaPlayer*, const String& keySystem, const String& sessionId, ExceptionState&);
 
     // EventTarget

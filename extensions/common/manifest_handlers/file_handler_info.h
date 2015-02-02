@@ -32,7 +32,7 @@ typedef std::vector<FileHandlerInfo> FileHandlersInfo;
 
 struct FileHandlers : public Extension::ManifestData {
   FileHandlers();
-  virtual ~FileHandlers();
+  ~FileHandlers() override;
 
   FileHandlersInfo file_handlers;
 
@@ -43,12 +43,12 @@ struct FileHandlers : public Extension::ManifestData {
 class FileHandlersParser : public ManifestHandler {
  public:
   FileHandlersParser();
-  virtual ~FileHandlersParser();
+  ~FileHandlersParser() override;
 
-  virtual bool Parse(Extension* extension, base::string16* error) OVERRIDE;
+  bool Parse(Extension* extension, base::string16* error) override;
 
  private:
-  virtual const std::vector<std::string> Keys() const OVERRIDE;
+  const std::vector<std::string> Keys() const override;
 
   DISALLOW_COPY_AND_ASSIGN(FileHandlersParser);
 };

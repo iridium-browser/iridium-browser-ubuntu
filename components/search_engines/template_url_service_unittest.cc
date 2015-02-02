@@ -133,8 +133,8 @@ class TemplateURLServiceTest : public testing::Test {
   TemplateURLServiceTest();
 
   // testing::Test:
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
   TemplateURL* AddKeywordWithDate(const std::string& short_name,
                                   const std::string& keyword,
@@ -176,12 +176,12 @@ class TemplateURLServiceWithoutFallbackTest : public TemplateURLServiceTest {
  public:
   TemplateURLServiceWithoutFallbackTest() : TemplateURLServiceTest() {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     DefaultSearchManager::SetFallbackSearchEnginesDisabledForTesting(true);
     TemplateURLServiceTest::SetUp();
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     TemplateURLServiceTest::TearDown();
     DefaultSearchManager::SetFallbackSearchEnginesDisabledForTesting(false);
   }
@@ -396,7 +396,7 @@ TEST_F(TemplateURLServiceTest, AddSameKeyword) {
 TEST_F(TemplateURLServiceTest, AddExtensionKeyword) {
   test_util()->VerifyLoad();
 
-  TemplateURL* original1 = AddKeywordWithDate(
+  AddKeywordWithDate(
       "replaceable", "keyword1", "http://test1", std::string(), std::string(),
       std::string(), true, "UTF-8", Time(), Time());
   TemplateURL* original2 = AddKeywordWithDate(
@@ -408,30 +408,29 @@ TEST_F(TemplateURLServiceTest, AddExtensionKeyword) {
       model()->GetTemplateURLForKeyword(ASCIIToUTF16("keyword3"));
   ASSERT_TRUE(original3);
 
-  // Add an extension keyword that conflicts with each of the above three
-  // keywords.
-  // Both replaceable and non-replaceable keywords should be uniquified.
-  model()->RegisterOmniboxKeyword("test4", "test", "keyword1", "http://test4");
-  TemplateURL* extension1 =
-      model()->GetTemplateURLForKeyword(ASCIIToUTF16("keyword1"));
-  ASSERT_TRUE(extension1);
-  EXPECT_EQ(original1,
-            model()->GetTemplateURLForKeyword(ASCIIToUTF16("test1")));
+  // Extension keywords should override replaceable keywords.
+  model()->RegisterOmniboxKeyword("id1", "test", "keyword1", "http://test4");
+  TemplateURL* extension1 = model()->FindTemplateURLForExtension(
+      "id1", TemplateURL::OMNIBOX_API_EXTENSION);
+  EXPECT_TRUE(extension1);
+  EXPECT_EQ(extension1,
+            model()->GetTemplateURLForKeyword(ASCIIToUTF16("keyword1")));
 
-  model()->RegisterOmniboxKeyword("test5", "test", "keyword2", "http://test5");
-  TemplateURL* extension2 =
-      model()->GetTemplateURLForKeyword(ASCIIToUTF16("keyword2"));
+  // They should not override non-replaceable keywords.
+  model()->RegisterOmniboxKeyword("id2", "test", "keyword2", "http://test5");
+  TemplateURL* extension2 = model()->FindTemplateURLForExtension(
+      "id2", TemplateURL::OMNIBOX_API_EXTENSION);
   ASSERT_TRUE(extension2);
   EXPECT_EQ(original2,
-            model()->GetTemplateURLForKeyword(ASCIIToUTF16("test2")));
+            model()->GetTemplateURLForKeyword(ASCIIToUTF16("keyword2")));
 
   // They should override extension keywords added earlier.
-  model()->RegisterOmniboxKeyword("test6", "test", "keyword3", "http://test6");
-  TemplateURL* extension3 =
-      model()->GetTemplateURLForKeyword(ASCIIToUTF16("keyword3"));
+  model()->RegisterOmniboxKeyword("id3", "test", "keyword3", "http://test6");
+  TemplateURL* extension3 = model()->FindTemplateURLForExtension(
+      "id3", TemplateURL::OMNIBOX_API_EXTENSION);
   ASSERT_TRUE(extension3);
-  EXPECT_EQ(original3,
-            model()->GetTemplateURLForKeyword(ASCIIToUTF16("keyword3_")));
+  EXPECT_EQ(extension3,
+            model()->GetTemplateURLForKeyword(ASCIIToUTF16("keyword3")));
 }
 
 TEST_F(TemplateURLServiceTest, AddSameKeywordWithExtensionPresent) {
@@ -445,8 +444,7 @@ TEST_F(TemplateURLServiceTest, AddSameKeywordWithExtensionPresent) {
   TemplateURL* extension =
       model()->GetTemplateURLForKeyword(ASCIIToUTF16("keyword"));
   ASSERT_TRUE(extension);
-  // Adding a keyword that matches the extension should cause the extension
-  // to uniquify.
+  // Adding a keyword that matches the extension.
   AddKeywordWithDate(
       "replaceable", "keyword", "http://test1", std::string(),  std::string(),
       std::string(), true, "UTF-8", Time(), Time());
@@ -461,12 +459,12 @@ TEST_F(TemplateURLServiceTest, AddSameKeywordWithExtensionPresent) {
   TemplateURL* t_url = new TemplateURL(data);
   model()->Add(t_url);
   EXPECT_EQ(extension,
-            model()->GetTemplateURLForKeyword(ASCIIToUTF16("keyword_")));
-  EXPECT_TRUE(model()->GetTemplateURLForHost("test1") == NULL);
+            model()->GetTemplateURLForKeyword(ASCIIToUTF16("keyword")));
   EXPECT_EQ(t_url, model()->GetTemplateURLForHost("test3"));
 
   // Adding a nonreplaceable keyword should remove the existing replaceable
-  // keyword.
+  // keyword and replace the extension as the associated URL for this keyword,
+  // but not evict the extension from the service entirely.
   data.short_name = ASCIIToUTF16("name2");
   data.SetURL("http://test4");
   data.safe_for_autoreplace = false;
@@ -474,12 +472,9 @@ TEST_F(TemplateURLServiceTest, AddSameKeywordWithExtensionPresent) {
   model()->Add(t_url2);
   EXPECT_EQ(t_url2,
             model()->GetTemplateURLForKeyword(ASCIIToUTF16("keyword")));
-  EXPECT_TRUE(model()->GetTemplateURLForHost("test3") == NULL);
-  EXPECT_EQ(extension,
-            model()->GetTemplateURLForKeyword(ASCIIToUTF16("keyword_")));
 }
 
-TEST_F(TemplateURLServiceTest, RestoreOmniboxExtensionKeyword) {
+TEST_F(TemplateURLServiceTest, NotPersistOmniboxExtensionKeyword) {
   test_util()->VerifyLoad();
 
   // Register an omnibox keyword.
@@ -490,12 +485,8 @@ TEST_F(TemplateURLServiceTest, RestoreOmniboxExtensionKeyword) {
   // Reload the data.
   test_util()->ResetModel(true);
 
-  // Ensure the omnibox keyword is restored correctly.
-  TemplateURL* t_url =
-      model()->GetTemplateURLForKeyword(ASCIIToUTF16("keyword"));
-  ASSERT_TRUE(t_url);
-  ASSERT_EQ(TemplateURL::OMNIBOX_API_EXTENSION, t_url->GetType());
-  EXPECT_EQ("test", t_url->GetExtensionId());
+  // Ensure the omnibox keyword is not persisted.
+  ASSERT_FALSE(model()->GetTemplateURLForKeyword(ASCIIToUTF16("keyword")));
 }
 
 TEST_F(TemplateURLServiceTest, ClearBrowsingData_Keywords) {
@@ -889,7 +880,7 @@ TEST_F(TemplateURLServiceTest, UpdateKeywordSearchTermsForURL) {
                      "http://sugg1", "http://x/foo#query={searchTerms}",
                      "http://icon1", false, "UTF-8;UTF-16", Time(), Time());
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(data); ++i) {
+  for (size_t i = 0; i < arraysize(data); ++i) {
     TemplateURLService::URLVisitedDetails details = {
       GURL(data[i].url), false
     };
@@ -911,7 +902,7 @@ TEST_F(TemplateURLServiceTest, DontUpdateKeywordSearchForNonReplaceable) {
   AddKeywordWithDate("name", "x", "http://x/foo", "http://sugg1", std::string(),
                      "http://icon1", false, "UTF-8;UTF-16", Time(), Time());
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(data); ++i) {
+  for (size_t i = 0; i < arraysize(data); ++i) {
     TemplateURLService::URLVisitedDetails details = {
       GURL(data[i].url), false
     };
@@ -980,8 +971,9 @@ TEST_F(TemplateURLServiceWithoutFallbackTest, ChangeGoogleBaseValue) {
 // Make sure TemplateURLService generates a KEYWORD_GENERATED visit for
 // KEYWORD visits.
 TEST_F(TemplateURLServiceTest, GenerateVisitOnKeyword) {
-  test_util()->VerifyLoad();
+  test_util()->profile()->CreateBookmarkModel(false);
   ASSERT_TRUE(test_util()->profile()->CreateHistoryService(true, false));
+  test_util()->ResetModel(true);
 
   // Create a keyword.
   TemplateURL* t_url = AddKeywordWithDate(

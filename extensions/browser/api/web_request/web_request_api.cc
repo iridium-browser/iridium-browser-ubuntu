@@ -223,8 +223,8 @@ void ExtractRequestInfoBody(const net::URLRequest* request,
       (request->method() != "POST" && request->method() != "PUT"))
     return;  // Need to exit without "out->Set(keys::kRequestBodyKey, ...);" .
 
-  base::DictionaryValue* requestBody = new base::DictionaryValue();
-  out->Set(keys::kRequestBodyKey, requestBody);
+  base::DictionaryValue* request_body = new base::DictionaryValue();
+  out->Set(keys::kRequestBodyKey, request_body);
 
   // Get the data presenters, ordered by how specific they are.
   extensions::ParsedDataPresenter parsed_data_presenter(*request);
@@ -239,20 +239,22 @@ void ExtractRequestInfoBody(const net::URLRequest* request,
     keys::kRequestBodyRawKey
   };
 
-  const ScopedVector<net::UploadElementReader>& readers =
-      upload_data->element_readers();
+  const ScopedVector<net::UploadElementReader>* readers =
+      upload_data->GetElementReaders();
   bool some_succeeded = false;
-  for (size_t i = 0; !some_succeeded && i < arraysize(presenters); ++i) {
-    ScopedVector<net::UploadElementReader>::const_iterator reader;
-    for (reader = readers.begin(); reader != readers.end(); ++reader)
-      presenters[i]->FeedNext(**reader);
-    if (presenters[i]->Succeeded()) {
-      requestBody->Set(kKeys[i], presenters[i]->Result().release());
-      some_succeeded = true;
+  if (readers) {
+    for (size_t i = 0; !some_succeeded && i < arraysize(presenters); ++i) {
+      ScopedVector<net::UploadElementReader>::const_iterator reader;
+      for (reader = readers->begin(); reader != readers->end(); ++reader)
+        presenters[i]->FeedNext(**reader);
+      if (presenters[i]->Succeeded()) {
+        request_body->Set(kKeys[i], presenters[i]->Result().release());
+        some_succeeded = true;
+      }
     }
   }
   if (!some_succeeded)
-    requestBody->SetString(keys::kRequestBodyErrorKey, "Unknown error.");
+    request_body->SetString(keys::kRequestBodyErrorKey, "Unknown error.");
 }
 
 // Converts a HttpHeaders dictionary to a |name|, |value| pair. Returns
@@ -2128,9 +2130,8 @@ class ClearCacheQuotaHeuristic : public extensions::QuotaLimitHeuristic {
             "MAX_HANDLER_BEHAVIOR_CHANGED_CALLS_PER_10_MINUTES"),
         callback_registered_(false),
         weak_ptr_factory_(this) {}
-  virtual ~ClearCacheQuotaHeuristic() {}
-  virtual bool Apply(Bucket* bucket,
-                     const base::TimeTicks& event_time) OVERRIDE;
+  ~ClearCacheQuotaHeuristic() override {}
+  bool Apply(Bucket* bucket, const base::TimeTicks& event_time) override;
 
  private:
   // Callback that is triggered by the ExtensionWebRequestEventRouter on a page
@@ -2212,8 +2213,9 @@ bool WebRequestInternalAddEventListenerFunction::RunSync() {
       ipc_sender.get() ? ipc_sender->render_process_id() : -1;
 
   const Extension* extension =
-      extension_info_map()->extensions().GetByID(extension_id());
-  std::string extension_name = extension ? extension->name() : extension_id();
+      extension_info_map()->extensions().GetByID(extension_id_safe());
+  std::string extension_name =
+      extension ? extension->name() : extension_id_safe();
 
   bool is_web_view_guest = webview_instance_id != 0;
   // We check automatically whether the extension has the 'webRequest'
@@ -2243,7 +2245,7 @@ bool WebRequestInternalAddEventListenerFunction::RunSync() {
 
   bool success =
       ExtensionWebRequestEventRouter::GetInstance()->AddEventListener(
-          profile_id(), extension_id(), extension_name,
+          profile_id(), extension_id_safe(), extension_name,
           event_name, sub_event_name, filter, extra_info_spec,
           embedder_process_id, webview_instance_id, ipc_sender_weak());
   EXTENSION_FUNCTION_VALIDATE(success);
@@ -2268,7 +2270,7 @@ void WebRequestInternalEventHandledFunction::RespondWithError(
   error_ = error;
   ExtensionWebRequestEventRouter::GetInstance()->OnEventHandled(
       profile_id(),
-      extension_id(),
+      extension_id_safe(),
       event_name,
       sub_event_name,
       request_id,
@@ -2295,9 +2297,9 @@ bool WebRequestInternalEventHandledFunction::RunSync() {
 
     if (!value->empty()) {
       base::Time install_time =
-          extension_info_map()->GetInstallTime(extension_id());
+          extension_info_map()->GetInstallTime(extension_id_safe());
       response.reset(new ExtensionWebRequestEventRouter::EventResponse(
-          extension_id(), install_time));
+          extension_id_safe(), install_time));
     }
 
     if (value->HasKey("cancel")) {
@@ -2420,7 +2422,7 @@ bool WebRequestInternalEventHandledFunction::RunSync() {
   }
 
   ExtensionWebRequestEventRouter::GetInstance()->OnEventHandled(
-      profile_id(), extension_id(), event_name, sub_event_name, request_id,
+      profile_id(), extension_id_safe(), event_name, sub_event_name, request_id,
       response.release());
 
   return true;
@@ -2444,7 +2446,7 @@ void WebRequestHandlerBehaviorChangedFunction::OnQuotaExceeded(
   // Post warning message.
   WarningSet warnings;
   warnings.insert(
-      Warning::CreateRepeatedCacheFlushesWarning(extension_id()));
+      Warning::CreateRepeatedCacheFlushesWarning(extension_id_safe()));
   BrowserThread::PostTask(
       BrowserThread::UI,
       FROM_HERE,

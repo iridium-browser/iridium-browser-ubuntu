@@ -15,7 +15,7 @@
 class InterstitialUITest : public InProcessBrowserTest {
  public:
    InterstitialUITest() {}
-   virtual ~InterstitialUITest() {}
+   ~InterstitialUITest() override {}
 
  protected:
   void TestInterstitial(GURL url, const std::string& page_title) {
@@ -32,7 +32,7 @@ class InterstitialUITest : public InProcessBrowserTest {
   }
 };
 
-IN_PROC_BROWSER_TEST_F(InterstitialUITest, FLAKY_OpenInterstitial) {
+IN_PROC_BROWSER_TEST_F(InterstitialUITest, DISABLED_OpenInterstitial) {
   TestInterstitial(
       GURL("chrome://interstitials"),
       "Interstitials");

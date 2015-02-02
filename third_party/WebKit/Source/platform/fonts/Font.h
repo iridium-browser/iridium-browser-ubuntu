@@ -100,11 +100,12 @@ public:
     void update(PassRefPtrWillBeRawPtr<FontSelector>) const;
 
     enum CustomFontNotReadyAction { DoNotPaintIfFontNotReady, UseFallbackIfFontNotReady };
-    float drawText(GraphicsContext*, const TextRunPaintInfo&, const FloatPoint&, CustomFontNotReadyAction = DoNotPaintIfFontNotReady) const;
+    void drawText(GraphicsContext*, const TextRunPaintInfo&, const FloatPoint&) const;
+    float drawUncachedText(GraphicsContext*, const TextRunPaintInfo&, const FloatPoint&,
+        CustomFontNotReadyAction) const;
     void drawEmphasisMarks(GraphicsContext*, const TextRunPaintInfo&, const AtomicString& mark, const FloatPoint&) const;
 
     float width(const TextRun&, HashSet<const SimpleFontData*>* fallbackFonts = 0, GlyphOverflow* = 0) const;
-    float width(const TextRun&, int& charsConsumed, Glyph& glyphId) const;
 
     int offsetForPosition(const TextRun&, float position, bool includePartialGlyphs) const;
     FloatRect selectionRectForText(const TextRun&, const FloatPoint&, int h, int from = 0, int to = -1, bool accountForGlyphBounds = false) const;
@@ -127,25 +128,28 @@ public:
     {
         return glyphDataAndPageForCharacter(c, mirror, spaceNormalize, variant).first;
     }
-#if OS(MACOSX)
-    const SimpleFontData* fontDataForCombiningCharacterSequence(const UChar*, size_t length, FontDataVariant) const;
-#endif
+
     std::pair<GlyphData, GlyphPage*> glyphDataAndPageForCharacter(UChar32&, bool mirror, bool normalizeSpace = false, FontDataVariant = AutoVariant) const;
     bool primaryFontHasGlyphForCharacter(UChar32) const;
 
-    CodePath codePath(const TextRun&) const;
-
-    PassTextBlobPtr buildTextBlob(const TextRunPaintInfo&, const FloatPoint& textOrigin, bool couldUseLCDRenderedText, CustomFontNotReadyAction = DoNotPaintIfFontNotReady) const;
-    void drawTextBlob(GraphicsContext*, const SkTextBlob*, const SkPoint& origin) const;
+    CodePath codePath(const TextRunPaintInfo&) const;
 
 private:
     enum ForTextEmphasisOrNot { NotForTextEmphasis, ForTextEmphasis };
 
     // Returns the initial in-stream advance.
-    float getGlyphsAndAdvancesForSimpleText(const TextRunPaintInfo&, GlyphBuffer&, ForTextEmphasisOrNot = NotForTextEmphasis) const;
-    float drawSimpleText(GraphicsContext*, const TextRunPaintInfo&, const FloatPoint&) const;
-    void drawEmphasisMarksForSimpleText(GraphicsContext*, const TextRunPaintInfo&, const AtomicString& mark, const FloatPoint&) const;
+    float buildGlyphBuffer(const TextRunPaintInfo&, GlyphBuffer&, ForTextEmphasisOrNot = NotForTextEmphasis) const;
+    PassTextBlobPtr buildTextBlob(const GlyphBuffer&, float initialAdvance, const FloatRect& bounds,
+        bool couldUseLCD) const;
+
+    SkPaint textFillPaint(GraphicsContext*, const SimpleFontData*) const;
+    SkPaint textStrokePaint(GraphicsContext*, const SimpleFontData*, bool isFilling) const;
+    void paintGlyphs(GraphicsContext*, const SimpleFontData*, const Glyph glyphs[], unsigned numGlyphs,
+        const SkPoint pos[], const FloatRect& textRect) const;
+    void paintGlyphsHorizontal(GraphicsContext*, const SimpleFontData*, const Glyph glyphs[], unsigned numGlyphs,
+        const SkScalar xpos[], SkScalar constY, const FloatRect& textRect) const;
     void drawGlyphs(GraphicsContext*, const SimpleFontData*, const GlyphBuffer&, unsigned from, unsigned numGlyphs, const FloatPoint&, const FloatRect& textRect) const;
+    void drawTextBlob(GraphicsContext*, const SkTextBlob*, const SkPoint& origin) const;
     float drawGlyphBuffer(GraphicsContext*, const TextRunPaintInfo&, const GlyphBuffer&, const FloatPoint&) const;
     void drawEmphasisMarks(GraphicsContext*, const TextRunPaintInfo&, const GlyphBuffer&, const AtomicString&, const FloatPoint&) const;
     float floatWidthForSimpleText(const TextRun&, HashSet<const SimpleFontData*>* fallbackFonts = 0, IntRectExtent* glyphBounds = 0) const;
@@ -154,33 +158,19 @@ private:
 
     bool getEmphasisMarkGlyphData(const AtomicString&, GlyphData&) const;
 
-    // Returns the initial in-stream advance.
-    float getGlyphsAndAdvancesForComplexText(const TextRunPaintInfo&, GlyphBuffer&, ForTextEmphasisOrNot = NotForTextEmphasis) const;
-    float drawComplexText(GraphicsContext*, const TextRunPaintInfo&, const FloatPoint&) const;
-    void drawEmphasisMarksForComplexText(GraphicsContext*, const TextRunPaintInfo&, const AtomicString& mark, const FloatPoint&) const;
     float floatWidthForComplexText(const TextRun&, HashSet<const SimpleFontData*>* fallbackFonts, IntRectExtent* glyphBounds) const;
     int offsetForPositionForComplexText(const TextRun&, float position, bool includePartialGlyphs) const;
     FloatRect selectionRectForComplexText(const TextRun&, const FloatPoint&, int h, int from, int to) const;
 
-    PassTextBlobPtr buildTextBlobForSimpleText(const TextRunPaintInfo&, const FloatPoint& textOrigin, bool couldUseLCDRenderedText) const;
-    PassTextBlobPtr buildTextBlob(const GlyphBuffer&, float initialAdvance, const FloatRect& bounds, float& advance, bool couldUseLCD) const;
-
-    friend struct WidthIterator;
-    friend class SVGTextRunRenderingContext;
+    friend struct SimpleShaper;
 
 public:
-    // Useful for debugging the different font rendering code paths.
-    static void setCodePath(CodePath);
-    static CodePath codePath();
-    static CodePath s_codePath;
-
     FontSelector* fontSelector() const;
 
     FontFallbackList* fontList() const { return m_fontFallbackList.get(); }
 
     void willUseFontData(UChar32) const;
 
-    static FloatRect pixelSnappedSelectionRect(float fromX, float toX, float y, float height);
 private:
     bool loadingCustomFonts() const
     {

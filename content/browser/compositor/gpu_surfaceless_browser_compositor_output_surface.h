@@ -10,6 +10,7 @@
 namespace content {
 
 class BufferQueue;
+class GLHelper;
 
 class GpuSurfacelessBrowserCompositorOutputSurface
     : public GpuBrowserCompositorOutputSurface {
@@ -20,18 +21,21 @@ class GpuSurfacelessBrowserCompositorOutputSurface
       IDMap<BrowserCompositorOutputSurface>* output_surface_map,
       const scoped_refptr<ui::CompositorVSyncManager>& vsync_manager,
       scoped_ptr<cc::OverlayCandidateValidator> overlay_candidate_validator,
-      unsigned internalformat);
-  virtual ~GpuSurfacelessBrowserCompositorOutputSurface();
+      unsigned internalformat,
+      bool use_own_gl_helper);
+  ~GpuSurfacelessBrowserCompositorOutputSurface() override;
 
  private:
   // cc::OutputSurface implementation.
-  virtual void SwapBuffers(cc::CompositorFrame* frame) OVERRIDE;
-  virtual void OnSwapBuffersComplete() OVERRIDE;
-  virtual void BindFramebuffer() OVERRIDE;
-  virtual void Reshape(const gfx::Size& size, float scale_factor) OVERRIDE;
-  virtual bool BindToClient(cc::OutputSurfaceClient* client) OVERRIDE;
+  void SwapBuffers(cc::CompositorFrame* frame) override;
+  void OnSwapBuffersComplete() override;
+  void BindFramebuffer() override;
+  void Reshape(const gfx::Size& size, float scale_factor) override;
+  bool BindToClient(cc::OutputSurfaceClient* client) override;
 
   unsigned int internalformat_;
+  bool use_own_gl_helper_;
+  scoped_ptr<GLHelper> gl_helper_;
   scoped_ptr<BufferQueue> output_surface_;
 };
 

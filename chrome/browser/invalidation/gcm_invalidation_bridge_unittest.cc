@@ -24,13 +24,12 @@ namespace {
 class CustomFakeGCMDriver : public gcm::FakeGCMDriver {
  public:
   CustomFakeGCMDriver() {}
-  virtual ~CustomFakeGCMDriver() {}
+  ~CustomFakeGCMDriver() override {}
 
  protected:
   // FakeGCMDriver override:
-  virtual void RegisterImpl(
-      const std::string& app_id,
-      const std::vector<std::string>& sender_ids) OVERRIDE {
+  void RegisterImpl(const std::string& app_id,
+                    const std::vector<std::string>& sender_ids) override {
     base::MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(&CustomFakeGCMDriver::RegisterFinished,
@@ -49,9 +48,9 @@ class GCMInvalidationBridgeTest : public ::testing::Test {
   GCMInvalidationBridgeTest()
       : connection_online_(false) {}
 
-  virtual ~GCMInvalidationBridgeTest() {}
+  ~GCMInvalidationBridgeTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     TestingProfile::Builder builder;
     builder.AddTestingFactory(ProfileOAuth2TokenServiceFactory::GetInstance(),
                               &BuildAutoIssuingFakeProfileOAuth2TokenService);

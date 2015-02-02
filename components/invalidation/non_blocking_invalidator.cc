@@ -116,16 +116,16 @@ class NonBlockingInvalidator::Core
 
   // InvalidationHandler implementation (all called on I/O thread by
   // InvalidationNotifier).
-  virtual void OnInvalidatorStateChange(InvalidatorState reason) OVERRIDE;
-  virtual void OnIncomingInvalidation(
-      const ObjectIdInvalidationMap& invalidation_map) OVERRIDE;
-  virtual std::string GetOwnerName() const OVERRIDE;
+  void OnInvalidatorStateChange(InvalidatorState reason) override;
+  void OnIncomingInvalidation(
+      const ObjectIdInvalidationMap& invalidation_map) override;
+  std::string GetOwnerName() const override;
 
  private:
   friend class
       base::RefCountedThreadSafe<NonBlockingInvalidator::Core>;
   // Called on parent or I/O thread.
-  virtual ~Core();
+  ~Core() override;
 
   // The variables below should be used only on the I/O thread.
   const base::WeakPtr<NonBlockingInvalidator> delegate_observer_;

@@ -32,24 +32,16 @@ class ExternalVideoEncoder : public VideoEncoder {
       const CreateVideoEncodeAcceleratorCallback& create_vea_cb,
       const CreateVideoEncodeMemoryCallback& create_video_encode_mem_cb);
 
-  virtual ~ExternalVideoEncoder();
+  ~ExternalVideoEncoder() override;
 
-  // Called from the main cast thread. This function post the encode task to the
-  // video encoder thread;
-  // The video_frame must be valid until the closure callback is called.
-  // The closure callback is called from the video encoder thread as soon as
-  // the encoder is done with the frame; it does not mean that the encoded frame
-  // has been sent out.
-  // Once the encoded frame is ready the frame_encoded_callback is called.
-  virtual bool EncodeVideoFrame(
+  // VideoEncoder implementation.
+  bool EncodeVideoFrame(
       const scoped_refptr<media::VideoFrame>& video_frame,
-      const base::TimeTicks& capture_time,
-      const FrameEncodedCallback& frame_encoded_callback) OVERRIDE;
-
-  // The following functions are called from the main cast thread.
-  virtual void SetBitRate(int new_bit_rate) OVERRIDE;
-  virtual void GenerateKeyFrame() OVERRIDE;
-  virtual void LatestFrameIdToReference(uint32 frame_id) OVERRIDE;
+      const base::TimeTicks& reference_time,
+      const FrameEncodedCallback& frame_encoded_callback) override;
+  void SetBitRate(int new_bit_rate) override;
+  void GenerateKeyFrame() override;
+  void LatestFrameIdToReference(uint32 frame_id) override;
 
   // Called when video_accelerator_client_ has finished creating the VEA and
   // is ready for use.

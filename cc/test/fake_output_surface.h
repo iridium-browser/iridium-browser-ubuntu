@@ -20,7 +20,7 @@ namespace cc {
 
 class FakeOutputSurface : public OutputSurface {
  public:
-  virtual ~FakeOutputSurface();
+  ~FakeOutputSurface() override;
 
   static scoped_ptr<FakeOutputSurface> Create3d() {
     return make_scoped_ptr(new FakeOutputSurface(
@@ -92,12 +92,12 @@ class FakeOutputSurface : public OutputSurface {
   CompositorFrame& last_sent_frame() { return last_sent_frame_; }
   size_t num_sent_frames() { return num_sent_frames_; }
 
-  virtual void SwapBuffers(CompositorFrame* frame) OVERRIDE;
+  void SwapBuffers(CompositorFrame* frame) override;
 
-  virtual void SetNeedsBeginFrame(bool enable) OVERRIDE;
+  void SetNeedsBeginFrame(bool enable) override;
   bool needs_begin_frame() const { return needs_begin_frame_; }
 
-  virtual bool BindToClient(OutputSurfaceClient* client) OVERRIDE;
+  bool BindToClient(OutputSurfaceClient* client) override;
 
   using OutputSurface::ReleaseGL;
   using OutputSurface::InitializeAndSetContext3d;
@@ -110,7 +110,7 @@ class FakeOutputSurface : public OutputSurface {
 
   void ReturnResource(unsigned id, CompositorFrameAck* ack);
 
-  virtual bool HasExternalStencilTest() const OVERRIDE;
+  bool HasExternalStencilTest() const override;
 
   void set_has_external_stencil_test(bool has_test) {
     has_external_stencil_test_ = has_test;
@@ -118,6 +118,10 @@ class FakeOutputSurface : public OutputSurface {
 
   void SetMemoryPolicyToSetAtBind(
       scoped_ptr<ManagedMemoryPolicy> memory_policy_to_set_at_bind);
+
+  gfx::Rect last_swap_rect() const {
+    return last_swap_rect_;
+  }
 
  protected:
   FakeOutputSurface(
@@ -142,6 +146,7 @@ class FakeOutputSurface : public OutputSurface {
   bool has_external_stencil_test_;
   TransferableResourceArray resources_held_by_parent_;
   scoped_ptr<ManagedMemoryPolicy> memory_policy_to_set_at_bind_;
+  gfx::Rect last_swap_rect_;
 
   base::WeakPtrFactory<FakeOutputSurface> fake_weak_ptr_factory_;
 };

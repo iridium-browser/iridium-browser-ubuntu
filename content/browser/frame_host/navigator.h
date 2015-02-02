@@ -6,6 +6,7 @@
 #define CONTENT_BROWSER_FRAME_HOST_NAVIGATOR_H_
 
 #include "base/memory/ref_counted.h"
+#include "base/time/time.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/navigation_controller.h"
 #include "ui/base/window_open_disposition.h"
@@ -21,11 +22,15 @@ class TimeTicks;
 
 namespace content {
 
+class FrameTreeNode;
 class NavigationControllerImpl;
 class NavigationEntryImpl;
+class NavigationRequest;
 class NavigatorDelegate;
 class RenderFrameHostImpl;
-struct NavigationBeforeCommitInfo;
+class StreamHandle;
+struct CommonNavigationParams;
+struct ResourceResponse;
 
 // Implementations of this interface are responsible for performing navigations
 // in a node of the FrameTree. Its lifetime is bound to all FrameTreeNode
@@ -109,11 +114,38 @@ class CONTENT_EXPORT Navigator : public base::RefCounted<Navigator> {
       bool should_replace_current_entry,
       bool user_gesture) {}
 
+  // PlzNavigate: Used to start a navigation. OnBeginNavigation is called
+  // directly by RequestNavigation when there is no live renderer. Otherwise, it
+  // is called following a BeginNavigation IPC from the renderer (which in
+  // browser-initiated navigation also happens after RequestNavigation has been
+  // called).
+  virtual void OnBeginNavigation(
+      FrameTreeNode* frame_tree_node,
+      const FrameHostMsg_BeginNavigation_Params& params,
+      const CommonNavigationParams& common_params) {}
+
   // PlzNavigate
   // Signal |render_frame_host| that a navigation is ready to commit (the
   // response to the navigation request has been received).
-  virtual void CommitNavigation(RenderFrameHostImpl* render_frame_host,
-                                const NavigationBeforeCommitInfo& info) {};
+  virtual void CommitNavigation(FrameTreeNode* frame_tree_node,
+                                ResourceResponse* response,
+                                scoped_ptr<StreamHandle> body);
+
+  // PlzNavigate
+  // Cancel a NavigationRequest for |frame_tree_node|. Called when
+  // |frame_tree_node| is destroyed.
+  virtual void CancelNavigation(FrameTreeNode* frame_tree_node) {}
+
+  // Called when the first resource request for a given navigation is executed
+  // so that it can be tracked into an histogram.
+  virtual void LogResourceRequestTime(
+    base::TimeTicks timestamp, const GURL& url) {};
+
+  // Called to record the time it took to execute the before unload hook for the
+  // current navigation.
+  virtual void LogBeforeUnloadTime(
+      const base::TimeTicks& renderer_before_unload_start_time,
+      const base::TimeTicks& renderer_before_unload_end_time) {}
 
  protected:
   friend class base::RefCounted<Navigator>;

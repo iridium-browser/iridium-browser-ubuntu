@@ -71,8 +71,8 @@ class ActiveScriptControllerBrowserTest : public ExtensionBrowserTest {
  public:
   ActiveScriptControllerBrowserTest() {}
 
-  virtual void SetUpCommandLine(base::CommandLine* command_line) OVERRIDE;
-  virtual void TearDownOnMainThread() OVERRIDE;
+  void SetUpCommandLine(base::CommandLine* command_line) override;
+  void TearDownOnMainThread() override;
 
   // Returns an extension with the given |host_type| and |injection_type|. If
   // one already exists, the existing extension will be returned. Othewrwise,
@@ -108,7 +108,7 @@ const Extension* ActiveScriptControllerBrowserTest::CreateExtension(
               "content_script" : "execute_script",
           host_type == ALL_HOSTS ? "all_hosts" : "explicit_hosts");
 
-  const char* permission_scheme =
+  const char* const permission_scheme =
       host_type == ALL_HOSTS ? kAllHostsScheme : kExplicitHostsScheme;
 
   std::string permissions = base::StringPrintf(
@@ -303,7 +303,7 @@ IN_PROC_BROWSER_TEST_F(ActiveScriptControllerBrowserTest,
   base::FilePath active_script_path =
       test_data_dir_.AppendASCII("active_script");
 
-  const char* kExtensionNames[] = {
+  const char* const kExtensionNames[] = {
       "inject_scripts_all_hosts",
       "inject_scripts_explicit_hosts",
       "content_scripts_all_hosts",
@@ -408,14 +408,14 @@ class FlagOffActiveScriptControllerBrowserTest
     : public ActiveScriptControllerBrowserTest {
  private:
   // Simply don't append the flag.
-  virtual void SetUpCommandLine(base::CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     ExtensionBrowserTest::SetUpCommandLine(command_line);
   }
 };
 
 IN_PROC_BROWSER_TEST_F(FlagOffActiveScriptControllerBrowserTest,
                        ScriptsExecuteWhenFlagAbsent) {
-  const char* kExtensionNames[] = {
+  const char* const kExtensionNames[] = {
     "content_scripts_all_hosts",
     "inject_scripts_all_hosts",
   };

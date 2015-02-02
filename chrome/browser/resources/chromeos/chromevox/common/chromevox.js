@@ -270,3 +270,8 @@ cvox.ChromeVox.isStickyModeOn = function() {
 function $(id) {
   return document.getElementById(id);
 }
+
+/**
+ * @param {Array} tabs
+ */
+cvox.ChromeVox.injectChromeVoxIntoTabs = function(tabs) {};

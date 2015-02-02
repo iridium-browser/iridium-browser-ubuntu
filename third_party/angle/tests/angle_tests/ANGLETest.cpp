@@ -2,17 +2,25 @@
 #include "EGLWindow.h"
 #include "OSWindow.h"
 
-OSWindow *ANGLETest::mOSWindow = NULL;
-
-ANGLETest::ANGLETest()
-    : mEGLWindow(NULL)
+ANGLETest::ANGLETest(EGLint glesMajorVersion, EGLint requestedRenderer)
+    : mEGLWindow(NULL),
+      mOSWindow(NULL)
 {
-    mEGLWindow = new EGLWindow(1280, 720, 2, EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE);
+    mEGLWindow = new EGLWindow(1280, 720, glesMajorVersion, requestedRenderer);
 }
 
 void ANGLETest::SetUp()
 {
-    ResizeWindow(mEGLWindow->getWidth(), mEGLWindow->getHeight());
+    if (!initTestWindow())
+    {
+        FAIL() << "Failed to create ANGLE test window.";
+    }
+
+    if (!resizeWindow(mEGLWindow->getWidth(), mEGLWindow->getHeight()))
+    {
+        FAIL() << "Failed to resize ANGLE test window.";
+    }
+
     if (!createEGLContext())
     {
         FAIL() << "egl context creation failed.";
@@ -37,6 +45,11 @@ void ANGLETest::TearDown()
         {
             exit(0);
         }
+    }
+
+    if (!destroyTestWindow())
+    {
+        FAIL() << "ANGLE test window destruction failed.";
     }
 }
 
@@ -90,9 +103,9 @@ GLuint ANGLETest::compileShader(GLenum type, const std::string &source)
         glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &infoLogLength);
 
         std::vector<GLchar> infoLog(infoLogLength);
-        glGetShaderInfoLog(shader, infoLog.size(), NULL, infoLog.data());
+        glGetShaderInfoLog(shader, infoLog.size(), NULL, &infoLog[0]);
 
-        std::cerr << "shader compilation failed: " << infoLog.data();
+        std::cerr << "shader compilation failed: " << &infoLog[0];
 
         glDeleteShader(shader);
         shader = 0;
@@ -105,11 +118,6 @@ bool ANGLETest::extensionEnabled(const std::string &extName)
 {
     const char* extString = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
     return strstr(extString, extName.c_str()) != NULL;
-}
-
-void ANGLETest::setClientVersion(int clientVersion)
-{
-    mEGLWindow->setClientVersion(clientVersion);
 }
 
 void ANGLETest::setWindowWidth(int width)
@@ -188,7 +196,7 @@ bool ANGLETest::destroyEGLContext()
     return true;
 }
 
-bool ANGLETest::InitTestWindow()
+bool ANGLETest::initTestWindow()
 {
     mOSWindow = CreateOSWindow();
     if (!mOSWindow->initialize("ANGLE_TEST", 128, 128))
@@ -196,12 +204,12 @@ bool ANGLETest::InitTestWindow()
         return false;
     }
 
-    mOSWindow->setVisible(true);
+    mOSWindow->setVisible(false);
 
     return true;
 }
 
-bool ANGLETest::DestroyTestWindow()
+bool ANGLETest::destroyTestWindow()
 {
     if (mOSWindow)
     {
@@ -213,20 +221,12 @@ bool ANGLETest::DestroyTestWindow()
     return true;
 }
 
-bool ANGLETest::ResizeWindow(int width, int height)
+bool ANGLETest::resizeWindow(int width, int height)
 {
     return mOSWindow->resize(width, height);
 }
 
-void ANGLETestEnvironment::SetUp()
+void ANGLETest::setWindowVisible(bool isVisible)
 {
-    if (!ANGLETest::InitTestWindow())
-    {
-        FAIL() << "Failed to create ANGLE test window.";
-    }
-}
-
-void ANGLETestEnvironment::TearDown()
-{
-    ANGLETest::DestroyTestWindow();
+    mOSWindow->setVisible(isVisible);
 }

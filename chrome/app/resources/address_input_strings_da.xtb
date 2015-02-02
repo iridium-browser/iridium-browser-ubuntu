@@ -1,4 +1,6 @@
-<?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="da">
+<?xml version="1.0" ?>
+<!DOCTYPE translationbundle>
+<translationbundle lang="da">
 <translation id="777702478322588152">Præfektur</translation>
 <translation id="3713769522066937702">Dette postnummerformat genkendes ikke. Eksempel på et gyldigt postnummer: <ph name="EXAMPLE"/>. Kender du ikke dit postnummer? Find det <ph name="BEGIN_LINK"/>her<ph name="END_LINK"/>.</translation>
 <translation id="7393381084163773901">Adresse</translation>

@@ -22,11 +22,11 @@ class SupervisedUserSyncServiceFactory
   friend struct DefaultSingletonTraits<SupervisedUserSyncServiceFactory>;
 
   SupervisedUserSyncServiceFactory();
-  virtual ~SupervisedUserSyncServiceFactory();
+  ~SupervisedUserSyncServiceFactory() override;
 
   // BrowserContextKeyedServiceFactory:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* profile) const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* profile) const override;
 };
 
 #endif  // CHROME_BROWSER_SUPERVISED_USER_SUPERVISED_USER_SYNC_SERVICE_FACTORY_H_

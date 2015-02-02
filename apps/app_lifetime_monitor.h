@@ -32,9 +32,11 @@ class AppLifetimeMonitor : public KeyedService,
    public:
     // Called when the app starts running.
     virtual void OnAppStart(Profile* profile, const std::string& app_id) {}
-    // Called when the app becomes active to the user, i.e. it opens a window.
+    // Called when the app becomes active to the user, i.e. the first window
+    // becomes visible.
     virtual void OnAppActivated(Profile* profile, const std::string& app_id) {}
-    // Called when the app becomes inactive to the user.
+    // Called when the app becomes inactive to the user, i.e. the last window is
+    // hidden or closed.
     virtual void OnAppDeactivated(Profile* profile, const std::string& app_id) {
     }
     // Called when the app stops running.
@@ -49,26 +51,27 @@ class AppLifetimeMonitor : public KeyedService,
   };
 
   explicit AppLifetimeMonitor(Profile* profile);
-  virtual ~AppLifetimeMonitor();
+  ~AppLifetimeMonitor() override;
 
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
 
  private:
   // content::NotificationObserver overrides:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   // extensions::AppWindowRegistry::Observer overrides:
-  virtual void OnAppWindowRemoved(extensions::AppWindow* app_window) OVERRIDE;
-  virtual void OnAppWindowHidden(extensions::AppWindow* app_window) OVERRIDE;
-  virtual void OnAppWindowShown(extensions::AppWindow* app_window) OVERRIDE;
+  void OnAppWindowRemoved(extensions::AppWindow* app_window) override;
+  void OnAppWindowHidden(extensions::AppWindow* app_window) override;
+  void OnAppWindowShown(extensions::AppWindow* app_window,
+                        bool was_hidden) override;
 
   // KeyedService overrides:
-  virtual void Shutdown() OVERRIDE;
+  void Shutdown() override;
 
-  bool HasVisibleAppWindows(extensions::AppWindow* app_window) const;
+  bool HasOtherVisibleAppWindows(extensions::AppWindow* app_window) const;
 
   void NotifyAppStart(const std::string& app_id);
   void NotifyAppActivated(const std::string& app_id);

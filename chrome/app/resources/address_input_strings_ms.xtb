@@ -1,4 +1,6 @@
-<?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="ms">
+<?xml version="1.0" ?>
+<!DOCTYPE translationbundle>
+<translationbundle lang="ms">
 <translation id="777702478322588152">Wilayah</translation>
 <translation id="3713769522066937702">Format poskod ini tidak dapat dikenal pasti. Contoh poskod yang sah: <ph name="EXAMPLE"/>. Tidak tahu poskod anda? Dapatkannya <ph name="BEGIN_LINK"/>di sini<ph name="END_LINK"/>.</translation>
 <translation id="7393381084163773901">Alamat jalan</translation>

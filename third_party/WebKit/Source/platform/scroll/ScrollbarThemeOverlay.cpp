@@ -62,6 +62,11 @@ int ScrollbarThemeOverlay::scrollbarThickness(ScrollbarControlSize controlSize)
     return m_thumbThickness + m_scrollbarMargin;
 }
 
+int ScrollbarThemeOverlay::scrollbarMargin() const
+{
+    return m_scrollbarMargin;
+}
+
 bool ScrollbarThemeOverlay::usesOverlayScrollbars() const
 {
     return true;
@@ -136,19 +141,19 @@ void ScrollbarThemeOverlay::paintThumb(GraphicsContext* context, ScrollbarThemeC
         return;
     }
 
-    blink::WebThemeEngine::State state = blink::WebThemeEngine::StateNormal;
+    WebThemeEngine::State state = WebThemeEngine::StateNormal;
     if (scrollbar->pressedPart() == ThumbPart)
-        state = blink::WebThemeEngine::StatePressed;
+        state = WebThemeEngine::StatePressed;
     else if (scrollbar->hoveredPart() == ThumbPart)
-        state = blink::WebThemeEngine::StateHover;
+        state = WebThemeEngine::StateHover;
 
-    blink::WebCanvas* canvas = context->canvas();
+    WebCanvas* canvas = context->canvas();
 
-    blink::WebThemeEngine::Part part = blink::WebThemeEngine::PartScrollbarHorizontalThumb;
+    WebThemeEngine::Part part = WebThemeEngine::PartScrollbarHorizontalThumb;
     if (scrollbar->orientation() == VerticalScrollbar)
-        part = blink::WebThemeEngine::PartScrollbarVerticalThumb;
+        part = WebThemeEngine::PartScrollbarVerticalThumb;
 
-    blink::Platform::current()->themeEngine()->paint(canvas, part, state, blink::WebRect(rect), 0);
+    Platform::current()->themeEngine()->paint(canvas, part, state, WebRect(rect), 0);
 }
 
 ScrollbarPart ScrollbarThemeOverlay::hitTest(ScrollbarThemeClient* scrollbar, const IntPoint& position)

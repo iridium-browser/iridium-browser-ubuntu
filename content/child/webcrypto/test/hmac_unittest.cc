@@ -118,7 +118,7 @@ TEST(WebCryptoHmacTest, GenerateKeyIsRandom) {
   std::vector<std::vector<uint8_t> > keys;
   for (int i = 0; i < 16; ++i) {
     std::vector<uint8_t> key_bytes;
-    blink::WebCryptoKey key = blink::WebCryptoKey::createNull();
+    blink::WebCryptoKey key;
     blink::WebCryptoAlgorithm algorithm =
         CreateHmacKeyGenAlgorithm(blink::WebCryptoAlgorithmIdSha1, 512);
     ASSERT_EQ(Status::Success(), GenerateSecretKey(algorithm, true, 0, &key));
@@ -143,7 +143,7 @@ TEST(WebCryptoHmacTest, GenerateKeyIsRandom) {
 
 // If the key length is not provided, then the block size is used.
 TEST(WebCryptoHmacTest, GenerateKeyNoLengthSha1) {
-  blink::WebCryptoKey key = blink::WebCryptoKey::createNull();
+  blink::WebCryptoKey key;
   blink::WebCryptoAlgorithm algorithm =
       CreateHmacKeyGenAlgorithm(blink::WebCryptoAlgorithmIdSha1, 0);
   ASSERT_EQ(Status::Success(), GenerateSecretKey(algorithm, true, 0, &key));
@@ -161,7 +161,7 @@ TEST(WebCryptoHmacTest, GenerateKeyNoLengthSha1) {
 
 // If the key length is not provided, then the block size is used.
 TEST(WebCryptoHmacTest, GenerateKeyNoLengthSha512) {
-  blink::WebCryptoKey key = blink::WebCryptoKey::createNull();
+  blink::WebCryptoKey key;
   blink::WebCryptoAlgorithm algorithm =
       CreateHmacKeyGenAlgorithm(blink::WebCryptoAlgorithmIdSha512, 0);
   ASSERT_EQ(Status::Success(), GenerateSecretKey(algorithm, true, 0, &key));
@@ -176,7 +176,7 @@ TEST(WebCryptoHmacTest, GenerateKeyNoLengthSha512) {
 }
 
 TEST(WebCryptoHmacTest, ImportKeyJwkKeyOpsSignVerify) {
-  blink::WebCryptoKey key = blink::WebCryptoKey::createNull();
+  blink::WebCryptoKey key;
   base::DictionaryValue dict;
   dict.SetString("kty", "oct");
   dict.SetString("k", "GADWrMRHwQfoNaXU5fZvTg==");
@@ -210,7 +210,7 @@ TEST(WebCryptoHmacTest, ImportKeyJwkKeyOpsSignVerify) {
 
 // Test 'use' inconsistent with 'key_ops'.
 TEST(WebCryptoHmacTest, ImportKeyJwkUseInconsisteWithKeyOps) {
-  blink::WebCryptoKey key = blink::WebCryptoKey::createNull();
+  blink::WebCryptoKey key;
   base::DictionaryValue dict;
   dict.SetString("kty", "oct");
   dict.SetString("k", "GADWrMRHwQfoNaXU5fZvTg==");
@@ -233,7 +233,7 @@ TEST(WebCryptoHmacTest, ImportKeyJwkUseInconsisteWithKeyOps) {
 
 // Test JWK composite 'sig' use
 TEST(WebCryptoHmacTest, ImportKeyJwkUseSig) {
-  blink::WebCryptoKey key = blink::WebCryptoKey::createNull();
+  blink::WebCryptoKey key;
   base::DictionaryValue dict;
   dict.SetString("kty", "oct");
   dict.SetString("k", "GADWrMRHwQfoNaXU5fZvTg==");
@@ -256,11 +256,11 @@ TEST(WebCryptoHmacTest, ImportJwkInputConsistency) {
   // inconsistent with the input value, the operation must fail.
 
   // Consistency rules when JWK value is not present: Inputs should be used.
-  blink::WebCryptoKey key = blink::WebCryptoKey::createNull();
+  blink::WebCryptoKey key;
   bool extractable = false;
   blink::WebCryptoAlgorithm algorithm =
       CreateHmacImportAlgorithm(blink::WebCryptoAlgorithmIdSha256);
-  blink::WebCryptoKeyUsageMask usage_mask = blink::WebCryptoKeyUsageVerify;
+  blink::WebCryptoKeyUsageMask usages = blink::WebCryptoKeyUsageVerify;
   base::DictionaryValue dict;
   dict.SetString("kty", "oct");
   dict.SetString("k", "l3nZEgZCeX8XRwJdWyK3rGB8qwjhdY8vOkbIvh4lxTuMao9Y_--hdg");
@@ -270,7 +270,7 @@ TEST(WebCryptoHmacTest, ImportJwkInputConsistency) {
                       CryptoData(json_vec),
                       algorithm,
                       extractable,
-                      usage_mask,
+                      usages,
                       &key));
   EXPECT_TRUE(key.handle());
   EXPECT_EQ(blink::WebCryptoKeyTypeSecret, key.type());
@@ -297,7 +297,7 @@ TEST(WebCryptoHmacTest, ImportJwkInputConsistency) {
                       CryptoData(json_vec),
                       algorithm,
                       extractable,
-                      usage_mask,
+                      usages,
                       &key));
 
   // Extractable cases:
@@ -310,22 +310,22 @@ TEST(WebCryptoHmacTest, ImportJwkInputConsistency) {
                       CryptoData(json_vec),
                       algorithm,
                       true,
-                      usage_mask,
+                      usages,
                       &key));
   EXPECT_EQ(Status::Success(),
             ImportKey(blink::WebCryptoKeyFormatJwk,
                       CryptoData(json_vec),
                       algorithm,
                       false,
-                      usage_mask,
+                      usages,
                       &key));
   EXPECT_FALSE(key.extractable());
   dict.SetBoolean("ext", true);
   EXPECT_EQ(Status::Success(),
-            ImportKeyJwkFromDict(dict, algorithm, true, usage_mask, &key));
+            ImportKeyJwkFromDict(dict, algorithm, true, usages, &key));
   EXPECT_TRUE(key.extractable());
   EXPECT_EQ(Status::Success(),
-            ImportKeyJwkFromDict(dict, algorithm, false, usage_mask, &key));
+            ImportKeyJwkFromDict(dict, algorithm, false, usages, &key));
   EXPECT_FALSE(key.extractable());
   dict.SetBoolean("ext", true);  // restore previous value
 
@@ -359,7 +359,7 @@ TEST(WebCryptoHmacTest, ImportJwkInputConsistency) {
                 CryptoData(json_vec),
                 CreateHmacImportAlgorithm(blink::WebCryptoAlgorithmIdSha1),
                 extractable,
-                usage_mask,
+                usages,
                 &key));
 
   // Pass: JWK alg missing but input algorithm specified: use input value
@@ -369,12 +369,12 @@ TEST(WebCryptoHmacTest, ImportJwkInputConsistency) {
                 dict,
                 CreateHmacImportAlgorithm(blink::WebCryptoAlgorithmIdSha256),
                 extractable,
-                usage_mask,
+                usages,
                 &key));
   EXPECT_EQ(blink::WebCryptoAlgorithmIdHmac, algorithm.id());
   dict.SetString("alg", "HS256");
 
-  // Fail: Input usage_mask (encrypt) is not a subset of the JWK value
+  // Fail: Input usages (encrypt) is not a subset of the JWK value
   // (sign|verify). Moreover "encrypt" is not a valid usage for HMAC.
   EXPECT_EQ(Status::ErrorCreateKeyBadUsages(),
             ImportKey(blink::WebCryptoKeyFormatJwk,
@@ -384,16 +384,16 @@ TEST(WebCryptoHmacTest, ImportJwkInputConsistency) {
                       blink::WebCryptoKeyUsageEncrypt,
                       &key));
 
-  // Fail: Input usage_mask (encrypt|sign|verify) is not a subset of the JWK
+  // Fail: Input usages (encrypt|sign|verify) is not a subset of the JWK
   // value (sign|verify). Moreover "encrypt" is not a valid usage for HMAC.
-  usage_mask = blink::WebCryptoKeyUsageEncrypt | blink::WebCryptoKeyUsageSign |
-               blink::WebCryptoKeyUsageVerify;
+  usages = blink::WebCryptoKeyUsageEncrypt | blink::WebCryptoKeyUsageSign |
+           blink::WebCryptoKeyUsageVerify;
   EXPECT_EQ(Status::ErrorCreateKeyBadUsages(),
             ImportKey(blink::WebCryptoKeyFormatJwk,
                       CryptoData(json_vec),
                       algorithm,
                       extractable,
-                      usage_mask,
+                      usages,
                       &key));
 
   // TODO(padolph): kty vs alg consistency tests: Depending on the kty value,
@@ -408,11 +408,11 @@ TEST(WebCryptoHmacTest, ImportJwkHappy) {
   // This test verifies the happy path of JWK import, including the application
   // of the imported key material.
 
-  blink::WebCryptoKey key = blink::WebCryptoKey::createNull();
+  blink::WebCryptoKey key;
   bool extractable = false;
   blink::WebCryptoAlgorithm algorithm =
       CreateHmacImportAlgorithm(blink::WebCryptoAlgorithmIdSha256);
-  blink::WebCryptoKeyUsageMask usage_mask = blink::WebCryptoKeyUsageSign;
+  blink::WebCryptoKeyUsageMask usages = blink::WebCryptoKeyUsageSign;
 
   // Import a symmetric key JWK and HMAC-SHA256 sign()
   // Uses the first SHA256 test vector from the HMAC sample set above.
@@ -424,9 +424,8 @@ TEST(WebCryptoHmacTest, ImportJwkHappy) {
   dict.SetBoolean("ext", false);
   dict.SetString("k", "l3nZEgZCeX8XRwJdWyK3rGB8qwjhdY8vOkbIvh4lxTuMao9Y_--hdg");
 
-  ASSERT_EQ(
-      Status::Success(),
-      ImportKeyJwkFromDict(dict, algorithm, extractable, usage_mask, &key));
+  ASSERT_EQ(Status::Success(),
+            ImportKeyJwkFromDict(dict, algorithm, extractable, usages, &key));
 
   EXPECT_EQ(blink::WebCryptoAlgorithmIdSha256,
             key.algorithm().hmacParams()->hash().id());
@@ -488,7 +487,7 @@ TEST(WebCryptoHmacTest, ExportJwkEmptyKey) {
       CreateHmacImportAlgorithm(blink::WebCryptoAlgorithmIdSha1);
 
   blink::WebCryptoKeyUsageMask usages = blink::WebCryptoKeyUsageSign;
-  blink::WebCryptoKey key = blink::WebCryptoKey::createNull();
+  blink::WebCryptoKey key;
 
   // Import a zero-byte HMAC key.
   const char key_data_hex[] = "";
@@ -527,7 +526,7 @@ TEST(WebCryptoHmacTest, ExportJwkEmptyKey) {
 TEST(WebCryptoHmacTest, ImportRawKeyTooLarge) {
   CryptoData big_data(NULL, UINT_MAX);  // Invalid data of big length.
 
-  blink::WebCryptoKey key = blink::WebCryptoKey::createNull();
+  blink::WebCryptoKey key;
   EXPECT_EQ(
       Status::ErrorDataTooLarge(),
       ImportKey(blink::WebCryptoKeyFormatRaw,

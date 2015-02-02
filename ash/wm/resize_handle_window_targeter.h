@@ -25,23 +25,20 @@ class ResizeHandleWindowTargeter : public wm::WindowStateObserver,
  public:
   ResizeHandleWindowTargeter(aura::Window* window,
                              ImmersiveFullscreenController* immersive);
-  virtual ~ResizeHandleWindowTargeter();
+  ~ResizeHandleWindowTargeter() override;
 
  private:
   // wm::WindowStateObserver:
-  virtual void OnPostWindowStateTypeChange(
-      wm::WindowState* window_state,
-      wm::WindowStateType old_type) OVERRIDE;
+  void OnPostWindowStateTypeChange(wm::WindowState* window_state,
+                                   wm::WindowStateType old_type) override;
   // aura::WindowObserver:
-  virtual void OnWindowDestroying(aura::Window* window) OVERRIDE;
+  void OnWindowDestroying(aura::Window* window) override;
 
   // aura::WindowTargeter:
-  virtual ui::EventTarget* FindTargetForLocatedEvent(
-      ui::EventTarget* root,
-      ui::LocatedEvent* event) OVERRIDE;
-  virtual bool SubtreeShouldBeExploredForEvent(
-      ui::EventTarget* target,
-      const ui::LocatedEvent& event) OVERRIDE;
+  ui::EventTarget* FindTargetForLocatedEvent(ui::EventTarget* root,
+                                             ui::LocatedEvent* event) override;
+  bool SubtreeShouldBeExploredForEvent(ui::EventTarget* target,
+                                       const ui::LocatedEvent& event) override;
 
   // The targeter does not take ownership of |window_| or
   // |immersive_controller_|.

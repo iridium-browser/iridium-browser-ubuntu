@@ -44,7 +44,7 @@ class TestingHttpServerPropertiesManager : public HttpServerPropertiesManager {
 
   // Post tasks without a delay during tests.
   virtual void StartPrefsUpdateTimerOnNetworkThread(
-      base::TimeDelta delay) OVERRIDE {
+      base::TimeDelta delay) override {
     HttpServerPropertiesManager::StartPrefsUpdateTimerOnNetworkThread(
         base::TimeDelta());
   }
@@ -55,7 +55,7 @@ class TestingHttpServerPropertiesManager : public HttpServerPropertiesManager {
 
   // Post tasks without a delay during tests.
   virtual void StartCacheUpdateTimerOnPrefThread(
-      base::TimeDelta delay) OVERRIDE {
+      base::TimeDelta delay) override {
     HttpServerPropertiesManager::StartCacheUpdateTimerOnPrefThread(
         base::TimeDelta());
   }
@@ -67,11 +67,10 @@ class TestingHttpServerPropertiesManager : public HttpServerPropertiesManager {
 
   MOCK_METHOD0(UpdateCacheFromPrefsOnPrefThread, void());
   MOCK_METHOD1(UpdatePrefsFromCacheOnNetworkThread, void(const base::Closure&));
-  MOCK_METHOD6(UpdateCacheFromPrefsOnNetworkThread,
+  MOCK_METHOD5(UpdateCacheFromPrefsOnNetworkThread,
                void(std::vector<std::string>* spdy_servers,
                     net::SpdySettingsMap* spdy_settings_map,
                     net::AlternateProtocolMap* alternate_protocol_map,
-                    net::AlternateProtocolExperiment experiment,
                     net::SupportsQuicMap* supports_quic_map,
                     bool detected_corrupted_prefs));
   MOCK_METHOD4(UpdatePrefsOnPref,
@@ -88,7 +87,7 @@ class HttpServerPropertiesManagerTest : public testing::Test {
  protected:
   HttpServerPropertiesManagerTest() {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     pref_service_.registry()->RegisterDictionaryPref(kTestHttpServerProperties);
     http_server_props_manager_.reset(
         new StrictMock<TestingHttpServerPropertiesManager>(
@@ -99,7 +98,7 @@ class HttpServerPropertiesManagerTest : public testing::Test {
     base::RunLoop().RunUntilIdle();
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     if (http_server_props_manager_.get())
       http_server_props_manager_->ShutdownOnPrefThread();
     base::RunLoop().RunUntilIdle();

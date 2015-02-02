@@ -6,7 +6,7 @@
  */
 
 #include "GrCustomCoordsTextureEffect.h"
-#include "gl/builders/GrGLFullProgramBuilder.h"
+#include "gl/builders/GrGLProgramBuilder.h"
 #include "gl/GrGLProcessor.h"
 #include "gl/GrGLSL.h"
 #include "gl/GrGLTexture.h"
@@ -19,34 +19,25 @@ public:
     GrGLCustomCoordsTextureEffect(const GrBackendProcessorFactory& factory, const GrProcessor&)
         : INHERITED (factory) {}
 
-    virtual void emitCode(GrGLFullProgramBuilder* builder,
-                          const GrGeometryProcessor& geometryProcessor,
-                          const GrProcessorKey& key,
-                          const char* outputColor,
-                          const char* inputColor,
-                          const TransformedCoordsArray&,
-                          const TextureSamplerArray& samplers) SK_OVERRIDE {
+    virtual void emitCode(const EmitArgs& args) SK_OVERRIDE {
         const GrCustomCoordsTextureEffect& customCoordsTextureEffect =
-                geometryProcessor.cast<GrCustomCoordsTextureEffect>();
+                args.fGP.cast<GrCustomCoordsTextureEffect>();
         SkASSERT(1 == customCoordsTextureEffect.getVertexAttribs().count());
 
-        SkString fsCoordName;
-        const char* vsVaryingName;
-        const char* fsVaryingNamePtr;
-        builder->addVarying(kVec2f_GrSLType, "textureCoords", &vsVaryingName, &fsVaryingNamePtr);
-        fsCoordName = fsVaryingNamePtr;
+        GrGLVertToFrag v(kVec2f_GrSLType);
+        args.fPB->addVarying("TextureCoords", &v);
 
-        GrGLVertexShaderBuilder* vsBuilder = builder->getVertexShaderBuilder();
+        GrGLVertexBuilder* vsBuilder = args.fPB->getVertexShaderBuilder();
         const GrShaderVar& inTextureCoords = customCoordsTextureEffect.inTextureCoords();
-        vsBuilder->codeAppendf("\t%s = %s;\n", vsVaryingName, inTextureCoords.c_str());
+        vsBuilder->codeAppendf("%s = %s;", v.vsOut(), inTextureCoords.c_str());
 
-        GrGLProcessorFragmentShaderBuilder* fsBuilder = builder->getFragmentShaderBuilder();
-        fsBuilder->codeAppendf("\t%s = ", outputColor);
-        fsBuilder->appendTextureLookupAndModulate(inputColor,
-                                                  samplers[0],
-                                                  fsCoordName.c_str(),
+        GrGLGPFragmentBuilder* fsBuilder = args.fPB->getFragmentShaderBuilder();
+        fsBuilder->codeAppendf("%s = ", args.fOutput);
+        fsBuilder->appendTextureLookupAndModulate(args.fInput,
+                                                  args.fSamplers[0],
+                                                  v.fsIn(),
                                                   kVec2f_GrSLType);
-        fsBuilder->codeAppend(";\n");
+        fsBuilder->codeAppend(";");
     }
 
     virtual void setData(const GrGLProgramDataManager&,
@@ -67,18 +58,15 @@ GrCustomCoordsTextureEffect::GrCustomCoordsTextureEffect(GrTexture* texture,
     this->addTextureAccess(&fTextureAccess);
 }
 
-bool GrCustomCoordsTextureEffect::onIsEqual(const GrProcessor& other) const {
-    const GrCustomCoordsTextureEffect& cte = other.cast<GrCustomCoordsTextureEffect>();
-    return fTextureAccess == cte.fTextureAccess;
+bool GrCustomCoordsTextureEffect::onIsEqual(const GrGeometryProcessor& other) const {
+    return true;
 }
 
-void GrCustomCoordsTextureEffect::getConstantColorComponents(GrColor* color,
-                                                             uint32_t* validFlags) const {
-    if ((*validFlags & kA_GrColorComponentFlag) && 0xFF == GrColorUnpackA(*color) &&
-        GrPixelConfigIsOpaque(this->texture(0)->config())) {
-        *validFlags = kA_GrColorComponentFlag;
+void GrCustomCoordsTextureEffect::onComputeInvariantOutput(InvariantOutput* inout) const {
+    if (GrPixelConfigIsOpaque(this->texture(0)->config())) {
+        inout->mulByUnknownOpaqueColor();
     } else {
-        *validFlags = 0;
+        inout->mulByUnknownColor();
     }
 }
 

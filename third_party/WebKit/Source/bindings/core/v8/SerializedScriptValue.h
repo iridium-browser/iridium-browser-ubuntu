@@ -46,16 +46,17 @@ class ArrayBufferContents;
 namespace blink {
 
 class BlobDataHandle;
+class DOMArrayBuffer;
 class ExceptionState;
 class MessagePort;
 class WebBlobInfo;
 
 typedef WillBeHeapVector<RefPtrWillBeMember<MessagePort>, 1> MessagePortArray;
-typedef Vector<RefPtr<WTF::ArrayBuffer>, 1> ArrayBufferArray;
+typedef Vector<RefPtr<DOMArrayBuffer>, 1> ArrayBufferArray;
 typedef HashMap<String, RefPtr<BlobDataHandle> > BlobDataHandleMap;
 typedef Vector<blink::WebBlobInfo> WebBlobInfoArray;
 
-class SerializedScriptValue FINAL : public ThreadSafeRefCounted<SerializedScriptValue> {
+class SerializedScriptValue final : public ThreadSafeRefCounted<SerializedScriptValue> {
 public:
     // Increment this for each incompatible change to the wire format.
     // Version 2: Added StringUCharTag for UChar v8 strings.
@@ -82,7 +83,7 @@ public:
     static PassRefPtr<SerializedScriptValue> create(const ScriptValue&, WebBlobInfoArray*, ExceptionState&, v8::Isolate*);
 
     // Never throws exceptions.
-    static PassRefPtr<SerializedScriptValue> createAndSwallowExceptions(v8::Handle<v8::Value>, v8::Isolate*);
+    static PassRefPtr<SerializedScriptValue> createAndSwallowExceptions(v8::Isolate*, v8::Handle<v8::Value>);
 
     static PassRefPtr<SerializedScriptValue> nullValue();
 
@@ -98,7 +99,7 @@ public:
     // Also validates the elements per sections 4.1.13 and 4.1.15 of the WebIDL spec and section 8.3.3
     // of the HTML5 spec and generates exceptions as appropriate.
     // Returns true if the array was filled, or false if the passed value was not of an appropriate type.
-    static bool extractTransferables(v8::Local<v8::Value>, int, MessagePortArray&, ArrayBufferArray&, ExceptionState&, v8::Isolate*);
+    static bool extractTransferables(v8::Isolate*, v8::Local<v8::Value>, int, MessagePortArray&, ArrayBufferArray&, ExceptionState&);
 
     // Informs the V8 about external memory allocated and owned by this object. Large values should contribute
     // to GC counters to eventually trigger a GC, otherwise flood of postMessage() can cause OOM.
@@ -117,7 +118,7 @@ private:
     SerializedScriptValue(v8::Handle<v8::Value>, MessagePortArray*, ArrayBufferArray*, WebBlobInfoArray*, ExceptionState&, v8::Isolate*);
     explicit SerializedScriptValue(const String& wireData);
 
-    static PassOwnPtr<ArrayBufferContentsArray> transferArrayBuffers(ArrayBufferArray&, ExceptionState&, v8::Isolate*);
+    static PassOwnPtr<ArrayBufferContentsArray> transferArrayBuffers(v8::Isolate*, ArrayBufferArray&, ExceptionState&);
 
     String m_data;
     OwnPtr<ArrayBufferContentsArray> m_arrayBufferContentsArray;

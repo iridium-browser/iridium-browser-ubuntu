@@ -30,7 +30,7 @@ class CC_EXPORT RasterizerTaskClient {
 
 class CC_EXPORT RasterizerTask : public Task {
  public:
-  typedef std::vector<scoped_refptr<RasterizerTask> > Vector;
+  typedef std::vector<scoped_refptr<RasterizerTask>> Vector;
 
   virtual void ScheduleOnOriginThread(RasterizerTaskClient* client) = 0;
   virtual void CompleteOnOriginThread(RasterizerTaskClient* client) = 0;
@@ -50,7 +50,7 @@ class CC_EXPORT RasterizerTask : public Task {
 
  protected:
   RasterizerTask();
-  virtual ~RasterizerTask();
+  ~RasterizerTask() override;
 
   bool did_schedule_;
   bool did_complete_;
@@ -58,29 +58,29 @@ class CC_EXPORT RasterizerTask : public Task {
 
 class CC_EXPORT ImageDecodeTask : public RasterizerTask {
  public:
-  typedef std::vector<scoped_refptr<ImageDecodeTask> > Vector;
+  typedef std::vector<scoped_refptr<ImageDecodeTask>> Vector;
 
   // Overridden from RasterizerTask:
-  virtual ImageDecodeTask* AsImageDecodeTask() OVERRIDE;
+  ImageDecodeTask* AsImageDecodeTask() override;
 
  protected:
   ImageDecodeTask();
-  virtual ~ImageDecodeTask();
+  ~ImageDecodeTask() override;
 };
 
 class CC_EXPORT RasterTask : public RasterizerTask {
  public:
-  typedef std::vector<scoped_refptr<RasterTask> > Vector;
+  typedef std::vector<scoped_refptr<RasterTask>> Vector;
 
   // Overridden from RasterizerTask:
-  virtual RasterTask* AsRasterTask() OVERRIDE;
+  RasterTask* AsRasterTask() override;
 
   const Resource* resource() const { return resource_; }
   const ImageDecodeTask::Vector& dependencies() const { return dependencies_; }
 
  protected:
   RasterTask(const Resource* resource, ImageDecodeTask::Vector* dependencies);
-  virtual ~RasterTask();
+  ~RasterTask() override;
 
  private:
   const Resource* resource_;

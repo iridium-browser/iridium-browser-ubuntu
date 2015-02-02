@@ -53,7 +53,6 @@ content::WebUIDataSource* CreateNaClUIHTMLSource() {
   content::WebUIDataSource* source =
       content::WebUIDataSource::Create(chrome::kChromeUINaClHost);
 
-  source->SetUseJsonJSFormatV2();
   source->AddLocalizedString("loadingMessage", IDS_NACL_LOADING_MESSAGE);
   source->AddLocalizedString("naclLongTitle", IDS_NACL_TITLE_MESSAGE);
   source->SetJsonPath("strings.js");
@@ -73,10 +72,10 @@ content::WebUIDataSource* CreateNaClUIHTMLSource() {
 class NaClDomHandler : public WebUIMessageHandler {
  public:
   NaClDomHandler();
-  virtual ~NaClDomHandler();
+  ~NaClDomHandler() override;
 
   // WebUIMessageHandler implementation.
-  virtual void RegisterMessages() OVERRIDE;
+  void RegisterMessages() override;
 
  private:
   // Callback for the "requestNaClInfo" message.

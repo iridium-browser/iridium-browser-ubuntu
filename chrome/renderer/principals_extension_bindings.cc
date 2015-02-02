@@ -23,9 +23,9 @@ class PrincipalsExtensionWrapper : public v8::Extension {
 
  private:
   // v8::Extension overrides.
-  virtual v8::Handle<v8::FunctionTemplate> GetNativeFunctionTemplate(
+  v8::Handle<v8::FunctionTemplate> GetNativeFunctionTemplate(
       v8::Isolate* isolate,
-      v8::Handle<v8::String> name) OVERRIDE;
+      v8::Handle<v8::String> name) override;
 
   static RenderView* GetRenderView();
 
@@ -37,8 +37,8 @@ class PrincipalsExtensionWrapper : public v8::Extension {
   DISALLOW_COPY_AND_ASSIGN(PrincipalsExtensionWrapper);
 };
 
-const char* kPrincipalsExtensionName = "v8/Principals";
-const char* kPrincipalsExtensionCode =
+const char kPrincipalsExtensionName[] = "v8/Principals";
+const char kPrincipalsExtensionCode[] =
     "var chrome;"
     "if (!chrome)"
     "  chrome = {};"

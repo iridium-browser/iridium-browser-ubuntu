@@ -28,33 +28,30 @@ class ProgrammaticScriptInjector : public ScriptInjector {
  public:
   ProgrammaticScriptInjector(const ExtensionMsg_ExecuteCode_Params& params,
                              blink::WebFrame* web_frame);
-  virtual ~ProgrammaticScriptInjector();
+  ~ProgrammaticScriptInjector() override;
 
  private:
   // ScriptInjector implementation.
-  virtual UserScript::InjectionType script_type() const OVERRIDE;
-  virtual bool ShouldExecuteInChildFrames() const OVERRIDE;
-  virtual bool ShouldExecuteInMainWorld() const OVERRIDE;
-  virtual bool IsUserGesture() const OVERRIDE;
-  virtual bool ExpectsResults() const OVERRIDE;
-  virtual bool ShouldInjectJs(
-      UserScript::RunLocation run_location) const OVERRIDE;
-  virtual bool ShouldInjectCss(
-      UserScript::RunLocation run_location) const OVERRIDE;
-  virtual PermissionsData::AccessType CanExecuteOnFrame(
+  UserScript::InjectionType script_type() const override;
+  bool ShouldExecuteInChildFrames() const override;
+  bool ShouldExecuteInMainWorld() const override;
+  bool IsUserGesture() const override;
+  bool ExpectsResults() const override;
+  bool ShouldInjectJs(UserScript::RunLocation run_location) const override;
+  bool ShouldInjectCss(UserScript::RunLocation run_location) const override;
+  PermissionsData::AccessType CanExecuteOnFrame(
       const Extension* extension,
       blink::WebFrame* web_frame,
       int tab_id,
-      const GURL& top_url) const OVERRIDE;
-  virtual std::vector<blink::WebScriptSource> GetJsSources(
-      UserScript::RunLocation run_location) const OVERRIDE;
-  virtual std::vector<std::string> GetCssSources(
-      UserScript::RunLocation run_location) const OVERRIDE;
-  virtual void OnInjectionComplete(
-      scoped_ptr<base::ListValue> execution_results,
-      ScriptsRunInfo* scripts_run_info,
-      UserScript::RunLocation run_location) OVERRIDE;
-  virtual void OnWillNotInject(InjectFailureReason reason) OVERRIDE;
+      const GURL& top_url) const override;
+  std::vector<blink::WebScriptSource> GetJsSources(
+      UserScript::RunLocation run_location) const override;
+  std::vector<std::string> GetCssSources(
+      UserScript::RunLocation run_location) const override;
+  void OnInjectionComplete(scoped_ptr<base::ListValue> execution_results,
+                           ScriptsRunInfo* scripts_run_info,
+                           UserScript::RunLocation run_location) override;
+  void OnWillNotInject(InjectFailureReason reason) override;
 
   // Return the run location for this injector.
   UserScript::RunLocation GetRunLocation() const;

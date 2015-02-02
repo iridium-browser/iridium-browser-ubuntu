@@ -11,11 +11,10 @@
 #include "android_webview/browser/aw_resource_context.h"
 #include "android_webview/browser/browser_view_renderer.h"
 #include "android_webview/browser/deferred_gpu_command_service.h"
-#include "android_webview/browser/gpu_memory_buffer_factory_impl.h"
-#include "android_webview/browser/hardware_renderer.h"
 #include "android_webview/browser/net_disk_cache_remover.h"
 #include "android_webview/browser/renderer_host/aw_resource_dispatcher_host_delegate.h"
 #include "android_webview/browser/scoped_app_gl_state_restore.h"
+#include "android_webview/browser/shared_renderer_state.h"
 #include "android_webview/common/aw_hit_test_data.h"
 #include "android_webview/common/devtools_instrumentation.h"
 #include "android_webview/native/aw_autofill_client.h"
@@ -34,6 +33,7 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
+#include "base/android/locale_utils.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/atomicops.h"
 #include "base/bind.h"
@@ -46,7 +46,7 @@
 #include "components/autofill/content/browser/content_autofill_driver.h"
 #include "components/autofill/core/browser/autofill_manager.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
-#include "components/data_reduction_proxy/browser/data_reduction_proxy_settings.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
 #include "components/navigation_interception/intercept_navigation_delegate.h"
 #include "content/public/browser/android/content_view_core.h"
 #include "content/public/browser/browser_thread.h"
@@ -63,13 +63,11 @@
 #include "net/base/auth.h"
 #include "net/cert/x509_certificate.h"
 #include "third_party/skia/include/core/SkPicture.h"
-#include "ui/base/l10n/l10n_util_android.h"
 #include "ui/gfx/android/java_bitmap.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/size.h"
 
 struct AwDrawSWFunctionTable;
-struct AwDrawGLFunctionTable;
 
 using autofill::ContentAutofillDriver;
 using autofill::AutofillManager;
@@ -94,7 +92,7 @@ static void DrawGLFunction(long view_context,
                            void* spare) {
   // |view_context| is the value that was returned from the java
   // AwContents.onPrepareDrawGL; this cast must match the code there.
-  reinterpret_cast<android_webview::AwContents*>(view_context)
+  reinterpret_cast<android_webview::SharedRendererState*>(view_context)
       ->DrawGL(draw_info);
 }
 }
@@ -114,7 +112,7 @@ class AwContentsUserData : public base::SupportsUserData::Data {
   static AwContents* GetContents(WebContents* web_contents) {
     if (!web_contents)
       return NULL;
-    AwContentsUserData* data = reinterpret_cast<AwContentsUserData*>(
+    AwContentsUserData* data = static_cast<AwContentsUserData*>(
         web_contents->GetUserData(kAwContentsUserDataKey));
     return data ? data->contents_ : NULL;
   }
@@ -161,12 +159,8 @@ AwBrowserPermissionRequestDelegate* AwBrowserPermissionRequestDelegate::FromID(
 
 AwContents::AwContents(scoped_ptr<WebContents> web_contents)
     : web_contents_(web_contents.Pass()),
-      shared_renderer_state_(
-          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
-          this),
       browser_view_renderer_(
           this,
-          &shared_renderer_state_,
           web_contents_.get(),
           BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI)),
       renderer_manager_key_(GLViewRendererManager::GetInstance()->NullKey()) {
@@ -253,7 +247,7 @@ void AwContents::InitAutofillIfNecessary(bool enabled) {
   ContentAutofillDriver::CreateForWebContentsAndDelegate(
       web_contents,
       AwAutofillClient::FromWebContents(web_contents),
-      l10n_util::GetDefaultLocale(),
+      base::android::GetDefaultLocale(),
       AutofillManager::DISABLE_AUTOFILL_DOWNLOAD_MANAGER);
 }
 
@@ -268,7 +262,6 @@ void AwContents::SetAwAutofillClient(jobject client) {
 
 AwContents::~AwContents() {
   DCHECK_EQ(this, AwContents::FromWebContents(web_contents_.get()));
-  DCHECK(!hardware_renderer_.get());
   web_contents_->RemoveUserData(kAwContentsUserDataKey);
   if (find_helper_.get())
     find_helper_->SetListener(NULL);
@@ -280,7 +273,7 @@ AwContents::~AwContents() {
   // without ever using another WebView.
   if (base::subtle::NoBarrier_Load(&g_instance_count) == 0) {
     base::MemoryPressureListener::NotifyMemoryPressure(
-        base::MemoryPressureListener::MEMORY_PRESSURE_CRITICAL);
+        base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_CRITICAL);
   }
 }
 
@@ -292,22 +285,7 @@ jlong AwContents::GetWebContents(JNIEnv* env, jobject obj) {
 
 void AwContents::Destroy(JNIEnv* env, jobject obj) {
   java_ref_.reset();
-
-  // We clear the contents_client_bridge_ here so that we break the link with
-  // the java peer. This is important for the popup window case, where we are
-  // swapping AwContents out that share the same java AwContentsClientBridge.
-  // See b/15074651.
-  AwContentsClientBridgeBase::Disassociate(web_contents_.get());
-  contents_client_bridge_.reset();
-
-  // Do not wait until the WebContents are deleted asynchronously to clear
-  // the delegate and stop sending callbacks.
-  web_contents_->SetDelegate(NULL);
-
-  // We do not delete AwContents immediately. Some applications try to delete
-  // Webview in ShouldOverrideUrlLoading callback, which is a sync IPC from
-  // Webkit.
-  BrowserThread::DeleteSoon(BrowserThread::UI, FROM_HERE, this);
+  delete this;
 }
 
 static jlong Init(JNIEnv* env, jclass, jobject browser_context) {
@@ -328,8 +306,6 @@ static void SetAwDrawSWFunctionTable(JNIEnv* env, jclass,
 
 static void SetAwDrawGLFunctionTable(JNIEnv* env, jclass,
                                      jlong function_table) {
-  GpuMemoryBufferFactoryImpl::SetAwDrawGLFunctionTable(
-      reinterpret_cast<AwDrawGLFunctionTable*>(function_table));
 }
 
 static jlong GetAwDrawGLFunction(JNIEnv* env, jclass) {
@@ -343,67 +319,7 @@ jint GetNativeInstanceCount(JNIEnv* env, jclass) {
 
 jlong AwContents::GetAwDrawGLViewContext(JNIEnv* env, jobject obj) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  return reinterpret_cast<intptr_t>(this);
-}
-
-void AwContents::DrawGL(AwDrawGLInfo* draw_info) {
-  if (draw_info->mode == AwDrawGLInfo::kModeSync) {
-    if (hardware_renderer_)
-      hardware_renderer_->CommitFrame();
-    return;
-  }
-
-  {
-    GLViewRendererManager* manager = GLViewRendererManager::GetInstance();
-    base::AutoLock lock(render_thread_lock_);
-    if (renderer_manager_key_ != manager->NullKey()) {
-      manager->DidDrawGL(renderer_manager_key_);
-    }
-  }
-
-  ScopedAppGLStateRestore state_restore(
-      draw_info->mode == AwDrawGLInfo::kModeDraw
-          ? ScopedAppGLStateRestore::MODE_DRAW
-          : ScopedAppGLStateRestore::MODE_RESOURCE_MANAGEMENT);
-  ScopedAllowGL allow_gl;
-
-  if (draw_info->mode == AwDrawGLInfo::kModeProcessNoContext) {
-    LOG(ERROR) << "Received unexpected kModeProcessNoContext";
-  }
-
-  // kModeProcessNoContext should never happen because we tear down hardware
-  // in onTrimMemory. However that guarantee is maintained outside of chromium
-  // code. Not notifying shared state in kModeProcessNoContext can lead to
-  // immediate deadlock, which is slightly more catastrophic than leaks or
-  // corruption.
-  if (draw_info->mode == AwDrawGLInfo::kModeProcess ||
-      draw_info->mode == AwDrawGLInfo::kModeProcessNoContext) {
-    shared_renderer_state_.DidDrawGLProcess();
-  }
-
-  if (shared_renderer_state_.IsInsideHardwareRelease()) {
-    hardware_renderer_.reset();
-    // Flush the idle queue in tear down.
-    DeferredGpuCommandService::GetInstance()->PerformAllIdleWork();
-    return;
-  }
-
-  if (draw_info->mode != AwDrawGLInfo::kModeDraw) {
-    if (draw_info->mode == AwDrawGLInfo::kModeProcess) {
-      DeferredGpuCommandService::GetInstance()->PerformIdleWork(true);
-    }
-    return;
-  }
-
-  if (!hardware_renderer_) {
-    hardware_renderer_.reset(new HardwareRenderer(&shared_renderer_state_));
-    hardware_renderer_->CommitFrame();
-  }
-
-  hardware_renderer_->DrawGL(state_restore.stencil_enabled(),
-                             state_restore.framebuffer_binding_ext(),
-                             draw_info);
-  DeferredGpuCommandService::GetInstance()->PerformIdleWork(false);
+  return browser_view_renderer_.GetAwDrawGLViewContext();
 }
 
 namespace {
@@ -753,15 +669,13 @@ void AwContents::OnReceivedTouchIconUrl(const std::string& url,
       env, obj.obj(), ConvertUTF8ToJavaString(env, url).obj(), precomposed);
 }
 
-bool AwContents::RequestDrawGL(jobject canvas, bool wait_for_completion) {
+bool AwContents::RequestDrawGL(bool wait_for_completion) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(!canvas || !wait_for_completion);
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
   if (obj.is_null())
     return false;
-  return Java_AwContents_requestDrawGL(
-      env, obj.obj(), canvas, wait_for_completion);
+  return Java_AwContents_requestDrawGL(env, obj.obj(), wait_for_completion);
 }
 
 void AwContents::PostInvalidate() {
@@ -886,58 +800,16 @@ void AwContents::OnAttachedToWindow(JNIEnv* env, jobject obj, int w, int h) {
   browser_view_renderer_.OnAttachedToWindow(w, h);
 }
 
-void AwContents::InitializeHardwareDrawIfNeeded() {
-  GLViewRendererManager* manager = GLViewRendererManager::GetInstance();
-
-  base::AutoLock lock(render_thread_lock_);
-  if (renderer_manager_key_ == manager->NullKey()) {
-    renderer_manager_key_ = manager->PushBack(&shared_renderer_state_);
-    DeferredGpuCommandService::SetInstance();
-  }
-}
-
 void AwContents::OnDetachedFromWindow(JNIEnv* env, jobject obj) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  ReleaseHardwareDrawIfNeeded();
   browser_view_renderer_.OnDetachedFromWindow();
 }
 
-void AwContents::ReleaseHardwareDrawIfNeeded() {
-  InsideHardwareReleaseReset inside_reset(&shared_renderer_state_);
-
+void AwContents::InvalidateOnFunctorDestroy() {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
   if (!obj.is_null())
     Java_AwContents_invalidateOnFunctorDestroy(env, obj.obj());
-
-  bool hardware_initialized = browser_view_renderer_.hardware_enabled();
-  if (hardware_initialized) {
-    bool draw_functor_succeeded = RequestDrawGL(NULL, true);
-    if (!draw_functor_succeeded) {
-      LOG(ERROR) << "Unable to free GL resources. Has the Window leaked?";
-      // Calling release on wrong thread intentionally.
-      AwDrawGLInfo info;
-      info.mode = AwDrawGLInfo::kModeProcess;
-      DrawGL(&info);
-    }
-    browser_view_renderer_.ReleaseHardware();
-  }
-  DCHECK(!hardware_renderer_);
-
-  GLViewRendererManager* manager = GLViewRendererManager::GetInstance();
-
-  {
-    base::AutoLock lock(render_thread_lock_);
-    if (renderer_manager_key_ != manager->NullKey()) {
-      manager->Remove(renderer_manager_key_);
-      renderer_manager_key_ = manager->NullKey();
-    }
-  }
-
-  if (hardware_initialized) {
-    // Flush any invoke functors that's caused by OnDetachedFromWindow.
-    RequestDrawGL(NULL, true);
-  }
 }
 
 base::android::ScopedJavaLocalRef<jbyteArray>
@@ -983,8 +855,6 @@ bool AwContents::OnDraw(JNIEnv* env,
                         jint visible_right,
                         jint visible_bottom) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (is_hardware_accelerated)
-    InitializeHardwareDrawIfNeeded();
   return browser_view_renderer_.OnDraw(
       canvas,
       is_hardware_accelerated,
@@ -1167,14 +1037,6 @@ void AwContents::TrimMemory(JNIEnv* env,
                             jint level,
                             jboolean visible) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  enum {
-    TRIM_MEMORY_MODERATE = 60,
-  };
-  if (level >= TRIM_MEMORY_MODERATE) {
-    ReleaseHardwareDrawIfNeeded();
-    return;
-  }
-
   browser_view_renderer_.TrimMemory(level, visible);
 }
 

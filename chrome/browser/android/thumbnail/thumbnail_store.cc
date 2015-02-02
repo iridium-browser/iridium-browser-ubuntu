@@ -194,9 +194,7 @@ void ThumbnailStore::Remove(TabId tab_id) {
   RemoveFromReadQueue(tab_id);
 }
 
-Thumbnail* ThumbnailStore::Get(TabId tab_id,
-                               bool force_disk_read,
-                               bool allow_approximation) {
+Thumbnail* ThumbnailStore::Get(TabId tab_id, bool force_disk_read) {
   Thumbnail* thumbnail = cache_.Get(tab_id);
   if (thumbnail) {
     thumbnail->CreateUIResource();
@@ -212,12 +210,10 @@ Thumbnail* ThumbnailStore::Get(TabId tab_id,
     ReadNextThumbnail();
   }
 
-  if (allow_approximation) {
-    thumbnail = approximation_cache_.Get(tab_id);
-    if (thumbnail) {
-      thumbnail->CreateUIResource();
-      return thumbnail;
-    }
+  thumbnail = approximation_cache_.Get(tab_id);
+  if (thumbnail) {
+    thumbnail->CreateUIResource();
+    return thumbnail;
   }
 
   return NULL;

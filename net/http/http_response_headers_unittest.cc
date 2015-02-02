@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include <algorithm>
+#include <iostream>
 #include <limits>
 
 #include "base/basictypes.h"
@@ -777,9 +778,14 @@ INSTANTIATE_TEST_CASE_P(HttpResponseHeaders,
                         ContentTypeTest,
                         testing::ValuesIn(mimetype_tests));
 
+using net::ValidationType;
+using net::VALIDATION_NONE;
+using net::VALIDATION_SYNCHRONOUS;
+using net::VALIDATION_ASYNCHRONOUS;
+
 struct RequiresValidationTestData {
   const char* headers;
-  bool requires_validation;
+  ValidationType validation_type;
 };
 
 class RequiresValidationTest
@@ -800,41 +806,41 @@ TEST_P(RequiresValidationTest, RequiresValidation) {
   scoped_refptr<net::HttpResponseHeaders> parsed(
       new net::HttpResponseHeaders(headers));
 
-  bool requires_validation =
+  ValidationType validation_type =
       parsed->RequiresValidation(request_time, response_time, current_time);
-  EXPECT_EQ(test.requires_validation, requires_validation);
+  EXPECT_EQ(test.validation_type, validation_type);
 }
 
 const struct RequiresValidationTestData requires_validation_tests[] = {
   // No expiry info: expires immediately.
   { "HTTP/1.1 200 OK\n"
     "\n",
-    true
+    VALIDATION_SYNCHRONOUS
   },
   // No expiry info: expires immediately.
   { "HTTP/1.1 200 OK\n"
     "\n",
-    true
+    VALIDATION_SYNCHRONOUS
   },
   // Valid for a little while.
   { "HTTP/1.1 200 OK\n"
     "cache-control: max-age=10000\n"
     "\n",
-    false
+    VALIDATION_NONE
   },
   // Expires in the future.
   { "HTTP/1.1 200 OK\n"
     "date: Wed, 28 Nov 2007 00:40:11 GMT\n"
     "expires: Wed, 28 Nov 2007 01:00:00 GMT\n"
     "\n",
-    false
+    VALIDATION_NONE
   },
   // Already expired.
   { "HTTP/1.1 200 OK\n"
     "date: Wed, 28 Nov 2007 00:40:11 GMT\n"
     "expires: Wed, 28 Nov 2007 00:00:00 GMT\n"
     "\n",
-    true
+    VALIDATION_SYNCHRONOUS
   },
   // Max-age trumps expires.
   { "HTTP/1.1 200 OK\n"
@@ -842,77 +848,77 @@ const struct RequiresValidationTestData requires_validation_tests[] = {
     "expires: Wed, 28 Nov 2007 00:00:00 GMT\n"
     "cache-control: max-age=10000\n"
     "\n",
-    false
+    VALIDATION_NONE
   },
   // Last-modified heuristic: modified a while ago.
   { "HTTP/1.1 200 OK\n"
     "date: Wed, 28 Nov 2007 00:40:11 GMT\n"
     "last-modified: Wed, 27 Nov 2007 08:00:00 GMT\n"
     "\n",
-    false
+    VALIDATION_NONE
   },
   { "HTTP/1.1 203 Non-Authoritative Information\n"
     "date: Wed, 28 Nov 2007 00:40:11 GMT\n"
     "last-modified: Wed, 27 Nov 2007 08:00:00 GMT\n"
     "\n",
-    false
+    VALIDATION_NONE
   },
   { "HTTP/1.1 206 Partial Content\n"
     "date: Wed, 28 Nov 2007 00:40:11 GMT\n"
     "last-modified: Wed, 27 Nov 2007 08:00:00 GMT\n"
     "\n",
-    false
+    VALIDATION_NONE
   },
   // Last-modified heuristic: modified recently.
   { "HTTP/1.1 200 OK\n"
     "date: Wed, 28 Nov 2007 00:40:11 GMT\n"
     "last-modified: Wed, 28 Nov 2007 00:40:10 GMT\n"
     "\n",
-    true
+    VALIDATION_SYNCHRONOUS
   },
   { "HTTP/1.1 203 Non-Authoritative Information\n"
     "date: Wed, 28 Nov 2007 00:40:11 GMT\n"
     "last-modified: Wed, 28 Nov 2007 00:40:10 GMT\n"
     "\n",
-    true
+    VALIDATION_SYNCHRONOUS
   },
   { "HTTP/1.1 206 Partial Content\n"
   "date: Wed, 28 Nov 2007 00:40:11 GMT\n"
     "last-modified: Wed, 28 Nov 2007 00:40:10 GMT\n"
     "\n",
-    true
+    VALIDATION_SYNCHRONOUS
   },
   // Cached permanent redirect.
   { "HTTP/1.1 301 Moved Permanently\n"
     "\n",
-    false
+    VALIDATION_NONE
   },
   // Another cached permanent redirect.
   { "HTTP/1.1 308 Permanent Redirect\n"
     "\n",
-    false
+    VALIDATION_NONE
   },
   // Cached redirect: not reusable even though by default it would be.
   { "HTTP/1.1 300 Multiple Choices\n"
     "Cache-Control: no-cache\n"
     "\n",
-    true
+    VALIDATION_SYNCHRONOUS
   },
   // Cached forever by default.
   { "HTTP/1.1 410 Gone\n"
     "\n",
-    false
+    VALIDATION_NONE
   },
   // Cached temporary redirect: not reusable.
   { "HTTP/1.1 302 Found\n"
     "\n",
-    true
+    VALIDATION_SYNCHRONOUS
   },
   // Cached temporary redirect: reusable.
   { "HTTP/1.1 302 Found\n"
     "cache-control: max-age=10000\n"
     "\n",
-    false
+    VALIDATION_NONE
   },
   // Cache-control: max-age=N overrides expires: date in the past.
   { "HTTP/1.1 200 OK\n"
@@ -920,7 +926,7 @@ const struct RequiresValidationTestData requires_validation_tests[] = {
     "expires: Wed, 28 Nov 2007 00:20:11 GMT\n"
     "cache-control: max-age=10000\n"
     "\n",
-    false
+    VALIDATION_NONE
   },
   // Cache-control: no-store overrides expires: in the future.
   { "HTTP/1.1 200 OK\n"
@@ -928,7 +934,7 @@ const struct RequiresValidationTestData requires_validation_tests[] = {
     "expires: Wed, 29 Nov 2007 00:40:11 GMT\n"
     "cache-control: no-store,private,no-cache=\"foo\"\n"
     "\n",
-    true
+    VALIDATION_SYNCHRONOUS
   },
   // Pragma: no-cache overrides last-modified heuristic.
   { "HTTP/1.1 200 OK\n"
@@ -936,7 +942,60 @@ const struct RequiresValidationTestData requires_validation_tests[] = {
     "last-modified: Wed, 27 Nov 2007 08:00:00 GMT\n"
     "pragma: no-cache\n"
     "\n",
-    true
+    VALIDATION_SYNCHRONOUS
+  },
+  // max-age has expired, needs synchronous revalidation
+  { "HTTP/1.1 200 OK\n"
+    "date: Wed, 28 Nov 2007 00:40:11 GMT\n"
+    "cache-control: max-age=300\n"
+    "\n",
+    VALIDATION_SYNCHRONOUS
+  },
+  // max-age has expired, stale-while-revalidate has not, eligible for
+  // asynchronous revalidation
+  { "HTTP/1.1 200 OK\n"
+    "date: Wed, 28 Nov 2007 00:40:11 GMT\n"
+    "cache-control: max-age=300, stale-while-revalidate=3600\n"
+    "\n",
+    VALIDATION_ASYNCHRONOUS
+  },
+  // max-age and stale-while-revalidate have expired, needs synchronous
+  // revalidation
+  { "HTTP/1.1 200 OK\n"
+    "date: Wed, 28 Nov 2007 00:40:11 GMT\n"
+    "cache-control: max-age=300, stale-while-revalidate=5\n"
+    "\n",
+    VALIDATION_SYNCHRONOUS
+  },
+  // max-age is 0, stale-while-revalidate is large enough to permit
+  // asynchronous revalidation
+  { "HTTP/1.1 200 OK\n"
+    "date: Wed, 28 Nov 2007 00:40:11 GMT\n"
+    "cache-control: max-age=0, stale-while-revalidate=360\n"
+    "\n",
+    VALIDATION_ASYNCHRONOUS
+  },
+  // stale-while-revalidate must not override no-cache or similar directives.
+  { "HTTP/1.1 200 OK\n"
+    "date: Wed, 28 Nov 2007 00:40:11 GMT\n"
+    "cache-control: no-cache, stale-while-revalidate=360\n"
+    "\n",
+    VALIDATION_SYNCHRONOUS
+  },
+  // max-age has not expired, so no revalidation is needed.
+  { "HTTP/1.1 200 OK\n"
+    "date: Wed, 28 Nov 2007 00:40:11 GMT\n"
+    "cache-control: max-age=3600, stale-while-revalidate=3600\n"
+    "\n",
+    VALIDATION_NONE
+  },
+  // must-revalidate overrides stale-while-revalidate, so synchronous validation
+  // is needed.
+  { "HTTP/1.1 200 OK\n"
+    "date: Wed, 28 Nov 2007 00:40:11 GMT\n"
+    "cache-control: must-revalidate, max-age=300, stale-while-revalidate=3600\n"
+    "\n",
+    VALIDATION_SYNCHRONOUS
   },
 
   // TODO(darin): Add many many more tests here.
@@ -1582,6 +1641,14 @@ struct KeepAliveTestData {
   bool expected_keep_alive;
 };
 
+// Enable GTest to print KeepAliveTestData in an intelligible way if the test
+// fails.
+void PrintTo(const KeepAliveTestData& keep_alive_test_data,
+             std::ostream* os) {
+  *os << "{\"" << keep_alive_test_data.headers << "\", " << std::boolalpha
+      << keep_alive_test_data.expected_keep_alive << "}";
+}
+
 class IsKeepAliveTest
     : public HttpResponseHeadersTest,
       public ::testing::WithParamInterface<KeepAliveTestData> {
@@ -1655,6 +1722,82 @@ const KeepAliveTestData keepalive_tests[] = {
   { "HTTP/1.1 200 OK\n"
     "proxy-connection: keep-alive\n",
     true
+  },
+  { "HTTP/1.1 200 OK\n"
+    "Connection: Upgrade, close\n",
+    false
+  },
+  { "HTTP/1.1 200 OK\n"
+    "Connection: Upgrade, keep-alive\n",
+    true
+  },
+  { "HTTP/1.1 200 OK\n"
+    "Connection: Upgrade\n"
+    "Connection: close\n",
+    false
+  },
+  { "HTTP/1.1 200 OK\n"
+    "Connection: Upgrade\n"
+    "Connection: keep-alive\n",
+    true
+  },
+  { "HTTP/1.1 200 OK\n"
+    "Connection: close, Upgrade\n",
+    false
+  },
+  { "HTTP/1.1 200 OK\n"
+    "Connection: keep-alive, Upgrade\n",
+    true
+  },
+  { "HTTP/1.1 200 OK\n"
+    "Connection: Upgrade\n"
+    "Proxy-Connection: close\n",
+    false
+  },
+  { "HTTP/1.1 200 OK\n"
+    "Connection: Upgrade\n"
+    "Proxy-Connection: keep-alive\n",
+    true
+  },
+  // In situations where the response headers conflict with themselves, use the
+  // first one for backwards-compatibility.
+  { "HTTP/1.1 200 OK\n"
+    "Connection: close\n"
+    "Connection: keep-alive\n",
+    false
+  },
+  { "HTTP/1.1 200 OK\n"
+    "Connection: keep-alive\n"
+    "Connection: close\n",
+    true
+  },
+  { "HTTP/1.0 200 OK\n"
+    "Connection: close\n"
+    "Connection: keep-alive\n",
+    false
+  },
+  { "HTTP/1.0 200 OK\n"
+    "Connection: keep-alive\n"
+    "Connection: close\n",
+    true
+  },
+  // Ignore the Proxy-Connection header if at all possible.
+  { "HTTP/1.0 200 OK\n"
+    "Proxy-Connection: keep-alive\n"
+    "Connection: close\n",
+    false
+  },
+  { "HTTP/1.1 200 OK\n"
+    "Proxy-Connection: close\n"
+    "Connection: keep-alive\n",
+    true
+  },
+  // Older versions of Chrome would have ignored Proxy-Connection in this case,
+  // but it doesn't seem safe.
+  { "HTTP/1.1 200 OK\n"
+    "Proxy-Connection: close\n"
+    "Connection: Transfer-Encoding\n",
+    false
   },
 };
 

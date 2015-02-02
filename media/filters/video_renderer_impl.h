@@ -56,22 +56,22 @@ class MEDIA_EXPORT VideoRendererImpl
       const PaintCB& paint_cb,
       bool drop_frames,
       const scoped_refptr<MediaLog>& media_log);
-  virtual ~VideoRendererImpl();
+  ~VideoRendererImpl() override;
 
   // VideoRenderer implementation.
-  virtual void Initialize(DemuxerStream* stream,
-                          bool low_delay,
-                          const PipelineStatusCB& init_cb,
-                          const StatisticsCB& statistics_cb,
-                          const BufferingStateCB& buffering_state_cb,
-                          const base::Closure& ended_cb,
-                          const PipelineStatusCB& error_cb,
-                          const TimeDeltaCB& get_time_cb) OVERRIDE;
-  virtual void Flush(const base::Closure& callback) OVERRIDE;
-  virtual void StartPlayingFrom(base::TimeDelta timestamp) OVERRIDE;
+  void Initialize(DemuxerStream* stream,
+                  bool low_delay,
+                  const PipelineStatusCB& init_cb,
+                  const StatisticsCB& statistics_cb,
+                  const BufferingStateCB& buffering_state_cb,
+                  const base::Closure& ended_cb,
+                  const PipelineStatusCB& error_cb,
+                  const TimeDeltaCB& get_time_cb) override;
+  void Flush(const base::Closure& callback) override;
+  void StartPlayingFrom(base::TimeDelta timestamp) override;
 
   // PlatformThread::Delegate implementation.
-  virtual void ThreadMain() OVERRIDE;
+  void ThreadMain() override;
 
  private:
   // Callback for |video_frame_stream_| initialization.

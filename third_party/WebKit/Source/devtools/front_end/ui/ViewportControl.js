@@ -34,7 +34,7 @@
  */
 WebInspector.ViewportControl = function(provider)
 {
-    this.element = document.createElement("div");
+    this.element = createElement("div");
     this.element.style.overflow = "auto";
     this._topGapElement = this.element.createChild("div", "viewport-control-gap-element");
     this._topGapElement.textContent = ".";
@@ -230,6 +230,7 @@ WebInspector.ViewportControl.prototype = {
 
     /**
      * @param {?Selection} selection
+     * @suppressGlobalPropertiesCheck
      */
     _isSelectionBackwards: function(selection)
     {

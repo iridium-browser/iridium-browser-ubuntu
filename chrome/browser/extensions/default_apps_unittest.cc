@@ -22,15 +22,17 @@ class MockExternalLoader : public ExternalLoader {
  public:
   MockExternalLoader() {}
 
-  virtual void StartLoading() OVERRIDE {}
+  void StartLoading() override {}
+
  private:
-  virtual ~MockExternalLoader() {}
+  ~MockExternalLoader() override {}
 };
 
 class DefaultAppsTest : public testing::Test {
  public:
   DefaultAppsTest() : ui_thread_(content::BrowserThread::UI, &loop_) {}
-  virtual ~DefaultAppsTest() {}
+  ~DefaultAppsTest() override {}
+
  private:
   base::MessageLoopForIO loop_;
   content::TestBrowserThread ui_thread_;
@@ -73,8 +75,7 @@ TEST_F(DefaultAppsTest, Install) {
   EXPECT_TRUE(state == default_apps::kAlreadyInstalledDefaultApps);
 
   class DefaultTestingProfile : public TestingProfile {
-    virtual  bool WasCreatedByVersionOrLater(
-        const std::string& version) OVERRIDE {
+    bool WasCreatedByVersionOrLater(const std::string& version) override {
       return false;
     }
   };

@@ -68,7 +68,7 @@ class CONTENT_EXPORT AppCacheHost
 
   AppCacheHost(int host_id, AppCacheFrontend* frontend,
                AppCacheServiceImpl* service);
-  virtual ~AppCacheHost();
+  ~AppCacheHost() override;
 
   // Adds/removes an observer, the AppCacheHost does not take
   // ownership of the observer.
@@ -163,6 +163,10 @@ class CONTENT_EXPORT AppCacheHost
   AppCacheFrontend* frontend() const { return frontend_; }
   AppCache* associated_cache() const { return associated_cache_.get(); }
 
+  void enable_cache_selection(bool enable) {
+    is_cache_selection_enabled_ = enable;
+  }
+
   bool is_selection_pending() const {
     return pending_selected_cache_id_ != kAppCacheNoCacheId ||
            !pending_selected_manifest_url_.is_empty();
@@ -188,12 +192,11 @@ class CONTENT_EXPORT AppCacheHost
   void AssociateCacheHelper(AppCache* cache, const GURL& manifest_url);
 
   // AppCacheStorage::Delegate impl
-  virtual void OnCacheLoaded(AppCache* cache, int64 cache_id) OVERRIDE;
-  virtual void OnGroupLoaded(AppCacheGroup* group,
-                             const GURL& manifest_url) OVERRIDE;
+  void OnCacheLoaded(AppCache* cache, int64 cache_id) override;
+  void OnGroupLoaded(AppCacheGroup* group, const GURL& manifest_url) override;
   // AppCacheServiceImpl::Observer impl
-  virtual void OnServiceReinitialized(
-      AppCacheStorageReference* old_storage_ref) OVERRIDE;
+  void OnServiceReinitialized(
+      AppCacheStorageReference* old_storage_ref) override;
 
   void FinishCacheSelection(AppCache* cache, AppCacheGroup* group);
   void DoPendingGetStatus();
@@ -203,7 +206,7 @@ class CONTENT_EXPORT AppCacheHost
   void ObserveGroupBeingUpdated(AppCacheGroup* group);
 
   // AppCacheGroup::UpdateObserver methods.
-  virtual void OnUpdateComplete(AppCacheGroup* group) OVERRIDE;
+  void OnUpdateComplete(AppCacheGroup* group) override;
 
   // Returns true if this host is for a dedicated worker context.
   bool is_for_dedicated_worker() const {
@@ -264,6 +267,9 @@ class CONTENT_EXPORT AppCacheHost
   // indicate which cache or group is being loaded.
   int64 pending_selected_cache_id_;
   GURL pending_selected_manifest_url_;
+
+  // Used to avoid stepping on pages controlled by ServiceWorkers.
+  bool is_cache_selection_enabled_;
 
   // A new master entry to be added to the cache, may be empty.
   GURL new_master_entry_url_;

@@ -41,20 +41,24 @@ class FrameView;
 class PopupContainer;
 class PopupMenuClient;
 
-class PopupMenuChromium FINAL : public PopupMenu {
+class PopupMenuChromium final : public PopupMenu {
 public:
     PopupMenuChromium(LocalFrame&, PopupMenuClient*);
     virtual ~PopupMenuChromium();
 
-    virtual void show(const FloatQuad& controlPosition, const IntSize& controlSize, int index) OVERRIDE;
-    virtual void hide() OVERRIDE;
-    virtual void updateFromElement() OVERRIDE;
-    virtual void disconnectClient() OVERRIDE;
+    virtual void show(const FloatQuad& controlPosition, const IntSize& controlSize, int index) override;
+    virtual void hide() override;
+    virtual void updateFromElement() override;
+    virtual void disconnectClient() override;
+
+    virtual void trace(Visitor*) override;
 
 private:
+    void dispose();
+
     PopupMenuClient* m_popupClient;
-    RefPtr<FrameView> m_frameView;
-    RefPtr<PopupContainer> m_popup;
+    RefPtrWillBeMember<FrameView> m_frameView;
+    RefPtrWillBeMember<PopupContainer> m_popup;
 };
 
 } // namespace blink

@@ -57,15 +57,14 @@ class TestProvider : public AutocompleteProvider {
         match_keyword_(match_keyword) {
   }
 
-  virtual void Start(const AutocompleteInput& input,
-                     bool minimal_changes) OVERRIDE;
+  void Start(const AutocompleteInput& input, bool minimal_changes) override;
 
   void set_listener(AutocompleteProviderListener* listener) {
     listener_ = listener;
   }
 
  private:
-  virtual ~TestProvider() {}
+  ~TestProvider() override {}
 
   void Run();
 
@@ -215,9 +214,9 @@ class AutocompleteProviderTest : public testing::Test,
 
  private:
   // content::NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   base::MessageLoopForUI message_loop_;
   content::NotificationRegistrar registrar_;
@@ -390,7 +389,7 @@ void AutocompleteProviderTest::RunKeywordTest(const base::string16& input,
   AutocompleteResult result;
   result.AppendMatches(matches);
   controller_->input_ = AutocompleteInput(
-      input, base::string16::npos, base::string16(), GURL(),
+      input, base::string16::npos, std::string(), GURL(),
       metrics::OmniboxEventProto::INSTANT_NTP_WITH_OMNIBOX_AS_STARTING_FOCUS,
       false, true, true, true, ChromeAutocompleteSchemeClassifier(&profile_));
   controller_->UpdateAssociatedKeywords(&result);
@@ -434,7 +433,7 @@ void AutocompleteProviderTest::RunAssistedQueryStatsTest(
 void AutocompleteProviderTest::RunQuery(const base::string16 query) {
   result_.Reset();
   controller_->Start(AutocompleteInput(
-      query, base::string16::npos, base::string16(), GURL(),
+      query, base::string16::npos, std::string(), GURL(),
       metrics::OmniboxEventProto::INVALID_SPEC, true, false, true, true,
       ChromeAutocompleteSchemeClassifier(&profile_)));
 
@@ -453,8 +452,8 @@ void AutocompleteProviderTest::RunExactKeymatchTest(
   // be from SearchProvider.  (It provides all verbatim search matches,
   // keyword or not.)
   controller_->Start(AutocompleteInput(
-      base::ASCIIToUTF16("k test"), base::string16::npos, base::string16(),
-      GURL(), metrics::OmniboxEventProto::INVALID_SPEC, true, false,
+      base::ASCIIToUTF16("k test"), base::string16::npos, std::string(), GURL(),
+      metrics::OmniboxEventProto::INVALID_SPEC, true, false,
       allow_exact_keyword_match, false,
       ChromeAutocompleteSchemeClassifier(&profile_)));
   EXPECT_TRUE(controller_->done());
@@ -571,7 +570,7 @@ TEST_F(AutocompleteProviderTest, RedundantKeywordsIgnoredInResult) {
 
     SCOPED_TRACE("Duplicate url");
     RunKeywordTest(base::ASCIIToUTF16("fo"), duplicate_url,
-                   ARRAYSIZE_UNSAFE(duplicate_url));
+                   arraysize(duplicate_url));
   }
 
   {
@@ -583,7 +582,7 @@ TEST_F(AutocompleteProviderTest, RedundantKeywordsIgnoredInResult) {
 
     SCOPED_TRACE("Duplicate url with keyword match");
     RunKeywordTest(base::ASCIIToUTF16("fo"), keyword_match,
-                   ARRAYSIZE_UNSAFE(keyword_match));
+                   arraysize(keyword_match));
   }
 
   {
@@ -598,7 +597,7 @@ TEST_F(AutocompleteProviderTest, RedundantKeywordsIgnoredInResult) {
 
     SCOPED_TRACE("Duplicate url with multiple keywords");
     RunKeywordTest(base::ASCIIToUTF16("fo"), multiple_keyword,
-                   ARRAYSIZE_UNSAFE(multiple_keyword));
+                   arraysize(multiple_keyword));
   }
 }
 
@@ -615,7 +614,7 @@ TEST_F(AutocompleteProviderTest, ExactMatchKeywords) {
 
     SCOPED_TRACE("keyword match as usual");
     RunKeywordTest(base::ASCIIToUTF16("fo"), keyword_match,
-                   ARRAYSIZE_UNSAFE(keyword_match));
+                   arraysize(keyword_match));
   }
 
   // The same result set with an input of "f" (versus "fo") should get
@@ -630,7 +629,7 @@ TEST_F(AutocompleteProviderTest, ExactMatchKeywords) {
 
     SCOPED_TRACE("keyword exact match");
     RunKeywordTest(base::ASCIIToUTF16("f"), keyword_match,
-                   ARRAYSIZE_UNSAFE(keyword_match));
+                   arraysize(keyword_match));
   }
 }
 
@@ -652,7 +651,7 @@ TEST_F(AutocompleteProviderTest, UpdateAssistedQueryStats) {
       { AutocompleteMatchType::SEARCH_WHAT_YOU_TYPED, "chrome..69i57" }
     };
     SCOPED_TRACE("One match");
-    RunAssistedQueryStatsTest(test_data, ARRAYSIZE_UNSAFE(test_data));
+    RunAssistedQueryStatsTest(test_data, arraysize(test_data));
   }
 
   {
@@ -675,7 +674,7 @@ TEST_F(AutocompleteProviderTest, UpdateAssistedQueryStats) {
         "chrome.7.69i57j69i58j5l2j0l3j69i59" },
     };
     SCOPED_TRACE("Multiple matches");
-    RunAssistedQueryStatsTest(test_data, ARRAYSIZE_UNSAFE(test_data));
+    RunAssistedQueryStatsTest(test_data, arraysize(test_data));
   }
 }
 

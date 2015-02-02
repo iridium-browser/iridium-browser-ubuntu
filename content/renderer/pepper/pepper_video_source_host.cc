@@ -28,23 +28,13 @@ namespace content {
 
 PepperVideoSourceHost::FrameReceiver::FrameReceiver(
     const base::WeakPtr<PepperVideoSourceHost>& host)
-    : host_(host),
-      main_message_loop_proxy_(base::MessageLoopProxy::current()) {}
+    : host_(host) {}
 
 PepperVideoSourceHost::FrameReceiver::~FrameReceiver() {}
 
-bool PepperVideoSourceHost::FrameReceiver::GotFrame(
+void PepperVideoSourceHost::FrameReceiver::GotFrame(
     const scoped_refptr<media::VideoFrame>& frame) {
-  // It's not safe to access the host from this thread, so post a task to our
-  // main thread to transfer the new frame.
-  main_message_loop_proxy_->PostTask(
-      FROM_HERE, base::Bind(&FrameReceiver::OnGotFrame, this, frame));
-
-  return true;
-}
-
-void PepperVideoSourceHost::FrameReceiver::OnGotFrame(
-    const scoped_refptr<media::VideoFrame>& frame) {
+  DCHECK(thread_checker_.CalledOnValidThread());
   if (host_.get()) {
     // Hold a reference to the new frame and release the previous.
     host_->last_frame_ = frame;
@@ -234,16 +224,24 @@ void PepperVideoSourceHost::SendGetFrameReply() {
   const uint8* src_v = frame->data(media::VideoFrame::kVPlane) +
                        (center * vert_crop + horiz_crop) / 2;
 
-  libyuv::I420ToBGRA(src_y,
-                     frame->stride(media::VideoFrame::kYPlane),
-                     src_u,
-                     frame->stride(media::VideoFrame::kUPlane),
-                     src_v,
-                     frame->stride(media::VideoFrame::kVPlane),
-                     bitmap_pixels,
-                     bitmap->rowBytes(),
-                     dst_width,
-                     dst_height);
+  // TODO(magjed): Chrome OS is not ready for switching from BGRA to ARGB.
+  // Remove this once http://crbug/434007 is fixed. We have a corresponding
+  // problem when we receive frames from the effects plugin in PpFrameWriter.
+#if defined(OS_CHROMEOS)
+  auto libyuv_i420_to_xxxx = &libyuv::I420ToBGRA;
+#else
+  auto libyuv_i420_to_xxxx = &libyuv::I420ToARGB;
+#endif
+  libyuv_i420_to_xxxx(src_y,
+                      frame->stride(media::VideoFrame::kYPlane),
+                      src_u,
+                      frame->stride(media::VideoFrame::kUPlane),
+                      src_v,
+                      frame->stride(media::VideoFrame::kVPlane),
+                      bitmap_pixels,
+                      bitmap->rowBytes(),
+                      dst_width,
+                      dst_height);
 
   ppapi::HostResource host_resource;
   host_resource.SetHostResource(pp_instance(), shared_image_->GetReference());

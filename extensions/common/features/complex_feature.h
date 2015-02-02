@@ -23,32 +23,31 @@ class ComplexFeature : public Feature {
   typedef ScopedVector<Feature> FeatureList;
 
   explicit ComplexFeature(scoped_ptr<FeatureList> features);
-  virtual ~ComplexFeature();
+  ~ComplexFeature() override;
 
   // extensions::Feature:
-  virtual Availability IsAvailableToManifest(const std::string& extension_id,
-                                             Manifest::Type type,
-                                             Manifest::Location location,
-                                             int manifest_version,
-                                             Platform platform) const OVERRIDE;
+  Availability IsAvailableToManifest(const std::string& extension_id,
+                                     Manifest::Type type,
+                                     Manifest::Location location,
+                                     int manifest_version,
+                                     Platform platform) const override;
 
-  virtual Availability IsAvailableToContext(const Extension* extension,
-                                            Context context,
-                                            const GURL& url,
-                                            Platform platform) const OVERRIDE;
+  Availability IsAvailableToContext(const Extension* extension,
+                                    Context context,
+                                    const GURL& url,
+                                    Platform platform) const override;
 
-  virtual bool IsIdInBlacklist(const std::string& extension_id) const OVERRIDE;
-  virtual bool IsIdInWhitelist(const std::string& extension_id) const OVERRIDE;
+  bool IsIdInBlacklist(const std::string& extension_id) const override;
+  bool IsIdInWhitelist(const std::string& extension_id) const override;
 
  protected:
   // extensions::Feature:
-  virtual std::string GetAvailabilityMessage(
-      AvailabilityResult result,
-      Manifest::Type type,
-      const GURL& url,
-      Context context) const OVERRIDE;
+  std::string GetAvailabilityMessage(AvailabilityResult result,
+                                     Manifest::Type type,
+                                     const GURL& url,
+                                     Context context) const override;
 
-  virtual bool IsInternal() const OVERRIDE;
+  bool IsInternal() const override;
 
  private:
   FeatureList features_;

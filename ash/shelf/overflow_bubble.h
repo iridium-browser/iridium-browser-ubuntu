@@ -28,7 +28,7 @@ class OverflowBubble : public ui::EventHandler,
                        public views::WidgetObserver {
  public:
   OverflowBubble();
-  virtual ~OverflowBubble();
+  ~OverflowBubble() override;
 
   // Shows an bubble pointing to |anchor| with |shelf_view| as its content.
   void Show(views::View* anchor, ShelfView* shelf_view);
@@ -47,11 +47,11 @@ class OverflowBubble : public ui::EventHandler,
   void ProcessPressedEvent(ui::LocatedEvent* event);
 
   // Overridden from ui::EventHandler:
-  virtual void OnMouseEvent(ui::MouseEvent* event) OVERRIDE;
-  virtual void OnTouchEvent(ui::TouchEvent* event) OVERRIDE;
+  void OnMouseEvent(ui::MouseEvent* event) override;
+  void OnTouchEvent(ui::TouchEvent* event) override;
 
   // Overridden from views::WidgetObserver:
-  virtual void OnWidgetDestroying(views::Widget* widget) OVERRIDE;
+  void OnWidgetDestroying(views::Widget* widget) override;
 
   OverflowBubbleView* bubble_;  // Owned by views hierarchy.
   views::View* anchor_;  // Owned by ShelfView.

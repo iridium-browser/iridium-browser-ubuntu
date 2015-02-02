@@ -10,6 +10,7 @@
 #include "public/platform/WebReferrerPolicy.h"
 #include "public/platform/WebString.h"
 #include "public/platform/WebURL.h"
+#include "public/platform/WebURLRequest.h"
 
 #if INSIDE_BLINK
 #include "platform/network/HTTPHeaderMap.h"
@@ -59,6 +60,18 @@ public:
     void setReferrer(const WebString&, WebReferrerPolicy);
     WebURL referrerUrl() const;
     WebReferrerPolicy referrerPolicy() const;
+
+    void setMode(WebURLRequest::FetchRequestMode);
+    WebURLRequest::FetchRequestMode mode() const;
+
+    void setCredentialsMode(WebURLRequest::FetchCredentialsMode);
+    WebURLRequest::FetchCredentialsMode credentialsMode() const;
+
+    void setRequestContext(WebURLRequest::RequestContext);
+    WebURLRequest::RequestContext requestContext() const;
+
+    void setFrameType(WebURLRequest::FrameType);
+    WebURLRequest::FrameType frameType() const;
 
     void setIsReload(bool);
     bool isReload() const;

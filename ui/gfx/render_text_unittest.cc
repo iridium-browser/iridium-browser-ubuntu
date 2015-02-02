@@ -15,10 +15,12 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/break_list.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/font.h"
 #include "ui/gfx/render_text_harfbuzz.h"
 
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
+#include "ui/gfx/platform_font_win.h"
 #include "ui/gfx/render_text_win.h"
 #endif
 
@@ -29,6 +31,7 @@
 using base::ASCIIToUTF16;
 using base::UTF8ToUTF16;
 using base::WideToUTF16;
+using base::WideToUTF8;
 
 namespace gfx {
 
@@ -229,7 +232,7 @@ TEST_F(RenderTextTest, PangoAttributes) {
   rt_linux->EnsureLayout();
   PangoAttrList* attributes = pango_layout_get_attributes(rt_linux->layout_);
   PangoAttrIterator* iter = pango_attr_list_get_iterator(attributes);
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); ++i) {
+  for (size_t i = 0; i < arraysize(cases); ++i) {
     pango_attr_iterator_range(iter, &start, &end);
     EXPECT_EQ(cases[i].start, start);
     EXPECT_EQ(cases[i].end, end);
@@ -468,7 +471,7 @@ TEST_F(RenderTextTest, ElidedText) {
   render_text->SetFontList(FontList("serif, Sans serif, 12px"));
   render_text->SetElideBehavior(ELIDE_TAIL);
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); i++) {
+  for (size_t i = 0; i < arraysize(cases); i++) {
     // Compute expected width
     expected_render_text->SetText(WideToUTF16(cases[i].layout_text));
     int expected_width = expected_render_text->GetContentWidth();
@@ -543,7 +546,7 @@ TEST_F(RenderTextTest, TruncatedText) {
 
   scoped_ptr<RenderText> render_text(RenderText::CreateInstance());
   render_text->set_truncate_length(5);
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); i++) {
+  for (size_t i = 0; i < arraysize(cases); i++) {
     render_text->SetText(WideToUTF16(cases[i].text));
     EXPECT_EQ(WideToUTF16(cases[i].text), render_text->text());
     EXPECT_EQ(WideToUTF16(cases[i].layout_text), render_text->GetLayoutText())
@@ -644,7 +647,7 @@ TEST_F(RenderTextTest, GetTextDirection) {
         base::i18n::RIGHT_TO_LEFT : base::i18n::LEFT_TO_RIGHT;
 
     // Ensure that directionality modes yield the correct text directions.
-    for (size_t j = 0; j < ARRAYSIZE_UNSAFE(cases); j++) {
+    for (size_t j = 0; j < arraysize(cases); j++) {
       render_text->SetText(WideToUTF16(cases[j].text));
       render_text->SetDirectionalityMode(DIRECTIONALITY_FROM_TEXT);
       EXPECT_EQ(render_text->GetTextDirection(), cases[j].text_direction);
@@ -919,7 +922,7 @@ TEST_F(RenderTextTest, GraphemePositions) {
 #endif
 
   scoped_ptr<RenderText> render_text(RenderText::CreateInstance());
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); i++) {
+  for (size_t i = 0; i < arraysize(cases); i++) {
     SCOPED_TRACE(base::StringPrintf("Testing cases[%" PRIuS "]", i));
     render_text->SetText(cases[i].text);
 
@@ -1016,7 +1019,7 @@ TEST_F(RenderTextTest, EdgeSelectionModels) {
 #endif
 
   scoped_ptr<RenderText> render_text(RenderText::CreateInstance());
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); i++) {
+  for (size_t i = 0; i < arraysize(cases); i++) {
     render_text->SetText(cases[i].text);
     bool ltr = (cases[i].expected_text_direction == base::i18n::LEFT_TO_RIGHT);
 
@@ -1048,7 +1051,7 @@ TEST_F(RenderTextTest, SelectAll) {
     EXPECT_EQ(render_text->selection_model(), SelectionModel());
 
     // Test the weak, LTR, RTL, and Bidi string cases.
-    for (size_t j = 0; j < ARRAYSIZE_UNSAFE(cases); j++) {
+    for (size_t j = 0; j < arraysize(cases); j++) {
       render_text->SetText(WideToUTF16(cases[j]));
       render_text->SelectAll(false);
       EXPECT_EQ(render_text->selection_model(), expected_forwards);
@@ -1454,7 +1457,7 @@ TEST_F(RenderTextTest, StringSizeHeight) {
   const FontList& larger_font_list = default_font_list.DeriveWithSizeDelta(24);
   EXPECT_GT(larger_font_list.GetHeight(), default_font_list.GetHeight());
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); i++) {
+  for (size_t i = 0; i < arraysize(cases); i++) {
     scoped_ptr<RenderText> render_text(RenderText::CreateInstance());
     render_text->SetFontList(default_font_list);
     render_text->SetText(cases[i]);
@@ -1589,7 +1592,7 @@ TEST_F(RenderTextTest, SetDisplayOffset) {
     { ALIGN_CENTER, kEnlargement },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(small_content_cases); i++) {
+  for (size_t i = 0; i < arraysize(small_content_cases); i++) {
     render_text->SetHorizontalAlignment(small_content_cases[i].alignment);
     render_text->SetDisplayOffset(small_content_cases[i].offset);
     EXPECT_EQ(0, render_text->GetUpdatedDisplayOffset().x());
@@ -1624,7 +1627,7 @@ TEST_F(RenderTextTest, SetDisplayOffset) {
     { ALIGN_CENTER, kEnlargement, (kEnlargement - 1) / 2 },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(large_content_cases); i++) {
+  for (size_t i = 0; i < arraysize(large_content_cases); i++) {
     render_text->SetHorizontalAlignment(large_content_cases[i].alignment);
     render_text->SetDisplayOffset(large_content_cases[i].offset);
     EXPECT_EQ(large_content_cases[i].expected_offset,
@@ -1672,14 +1675,14 @@ TEST_F(RenderTextTest, SameFontForParentheses) {
   };
 
   scoped_ptr<RenderText> render_text(RenderText::CreateInstance());
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); ++i) {
+  for (size_t i = 0; i < arraysize(cases); ++i) {
     base::string16 text = cases[i].text;
     const size_t start_paren_char_index = text.find('(');
     ASSERT_NE(base::string16::npos, start_paren_char_index);
     const size_t end_paren_char_index = text.find(')');
     ASSERT_NE(base::string16::npos, end_paren_char_index);
 
-    for (size_t j = 0; j < ARRAYSIZE_UNSAFE(punctuation_pairs); ++j) {
+    for (size_t j = 0; j < arraysize(punctuation_pairs); ++j) {
       text[start_paren_char_index] = punctuation_pairs[j].left_char;
       text[end_paren_char_index] = punctuation_pairs[j].right_char;
       render_text->SetText(text);
@@ -1743,7 +1746,7 @@ TEST_F(RenderTextTest, SelectWord) {
     { 16, 13, 16 },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); ++i) {
+  for (size_t i = 0; i < arraysize(cases); ++i) {
     render_text->SetCursorPosition(cases[i].cursor);
     render_text->SelectWord();
     EXPECT_EQ(Range(cases[i].selection_start, cases[i].selection_end),
@@ -1969,7 +1972,7 @@ TEST_F(RenderTextTest, Multiline_NormalWidth) {
   render_text->SetMultiline(true);
   Canvas canvas;
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTestStrings); ++i) {
+  for (size_t i = 0; i < arraysize(kTestStrings); ++i) {
     SCOPED_TRACE(base::StringPrintf("kTestStrings[%" PRIuS "]", i));
     render_text->SetText(WideToUTF16(kTestStrings[i].text));
     render_text->Draw(&canvas);
@@ -2023,7 +2026,7 @@ TEST_F(RenderTextTest, Multiline_Newline) {
   render_text->SetMultiline(true);
   Canvas canvas;
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTestStrings); ++i) {
+  for (size_t i = 0; i < arraysize(kTestStrings); ++i) {
     SCOPED_TRACE(base::StringPrintf("kTestStrings[%" PRIuS "]", i));
     render_text->SetText(WideToUTF16(kTestStrings[i].text));
     render_text->Draw(&canvas);
@@ -2112,7 +2115,7 @@ TEST_F(RenderTextTest, HarfBuzz_Clusters) {
   run.glyph_count = 4;
   run.glyph_to_char.resize(4);
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); ++i) {
+  for (size_t i = 0; i < arraysize(cases); ++i) {
     std::copy(cases[i].glyph_to_char, cases[i].glyph_to_char + 4,
               run.glyph_to_char.begin());
     run.is_rtl = cases[i].is_rtl;
@@ -2201,7 +2204,7 @@ TEST_F(RenderTextTest, HarfBuzz_SubglyphGraphemePartition) {
       kString, base::i18n::BreakIterator::BREAK_CHARACTER));
   ASSERT_TRUE(iter->Init());
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(cases); ++i) {
+  for (size_t i = 0; i < arraysize(cases); ++i) {
     std::copy(cases[i].glyph_to_char, cases[i].glyph_to_char + 2,
               run.glyph_to_char.begin());
     run.is_rtl = cases[i].is_rtl;
@@ -2287,7 +2290,8 @@ TEST_F(RenderTextTest, HarfBuzz_NonExistentFont) {
   render_text.EnsureLayout();
   ASSERT_EQ(1U, render_text.runs_.size());
   internal::TextRunHarfBuzz* run = render_text.runs_[0];
-  render_text.ShapeRunWithFont(run, "TheFontThatDoesntExist");
+  render_text.ShapeRunWithFont(
+      run, "TheFontThatDoesntExist", FontRenderParams());
 }
 
 // Ensure an empty run returns sane values to queries.
@@ -2308,5 +2312,65 @@ TEST_F(RenderTextTest, HarfBuzz_EmptyRun) {
   EXPECT_EQ(Range(3, 8), chars);
   EXPECT_EQ(Range(0, 0), glyphs);
 }
+
+// Ensure a string fits in a display rect with a width equal to the string's.
+TEST_F(RenderTextTest, StringFitsOwnWidth) {
+  scoped_ptr<RenderText> render_text(RenderText::CreateInstance());
+  const base::string16 kString = ASCIIToUTF16("www.example.com");
+
+  render_text->SetText(kString);
+  render_text->ApplyStyle(BOLD, true, Range(0, 3));
+  render_text->SetElideBehavior(ELIDE_TAIL);
+
+  render_text->SetDisplayRect(Rect(0, 0, 500, 100));
+  EXPECT_EQ(kString, render_text->GetLayoutText());
+  render_text->SetDisplayRect(Rect(0, 0, render_text->GetContentWidth(), 100));
+  EXPECT_EQ(kString, render_text->GetLayoutText());
+}
+
+// TODO(derat): Figure out why this fails on Windows: http://crbug.com/427184
+#if !defined(OS_WIN)
+// Ensure that RenderText examines all of the fonts in its FontList before
+// falling back to other fonts.
+TEST_F(RenderTextTest, HarfBuzz_FontListFallback) {
+  // Double-check that the requested fonts are present.
+  FontList font_list("Arial, Symbol, 12px");
+  const std::vector<Font>& fonts = font_list.GetFonts();
+  ASSERT_EQ(2u, fonts.size());
+  ASSERT_EQ("arial",
+            base::StringToLowerASCII(fonts[0].GetActualFontNameForTesting()));
+  ASSERT_EQ("symbol",
+            base::StringToLowerASCII(fonts[1].GetActualFontNameForTesting()));
+
+  // "⊕" (CIRCLED PLUS) should be rendered with Symbol rather than falling back
+  // to some other font that's present on the system.
+  RenderTextHarfBuzz render_text;
+  render_text.SetFontList(font_list);
+  render_text.SetText(UTF8ToUTF16("\xE2\x8A\x95"));
+  const std::vector<RenderText::FontSpan> spans =
+      render_text.GetFontSpansForTesting();
+  ASSERT_EQ(static_cast<size_t>(1), spans.size());
+  EXPECT_EQ("Symbol", spans[0].first.GetFontName());
+}
+#endif  // !defined(OS_WIN)
+
+// Ensure that the fallback fonts of the Uniscribe font are tried for shaping.
+#if defined(OS_WIN)
+TEST_F(RenderTextTest, HarfBuzz_UniscribeFallback) {
+  RenderTextHarfBuzz render_text;
+  PlatformFontWin* font_win = new PlatformFontWin("Meiryo", 12);
+  // Japanese name for Meiryo. This name won't be found in the system's linked
+  // fonts, forcing RTHB to try the Uniscribe font and its fallbacks.
+  font_win->font_ref_->font_name_ = WideToUTF8(L"\x30e1\x30a4\x30ea\x30aa");
+  FontList font_list((Font(font_win)));
+
+  render_text.SetFontList(font_list);
+  // Korean character "han".
+  render_text.SetText(WideToUTF16(L"\xd55c"));
+  render_text.EnsureLayout();
+  ASSERT_EQ(1U, render_text.runs_.size());
+  EXPECT_EQ(0U, render_text.runs_[0]->CountMissingGlyphs());
+}
+#endif  // defined(OS_WIN)
 
 }  // namespace gfx

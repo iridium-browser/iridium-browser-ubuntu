@@ -24,11 +24,11 @@ class ViewsTestHelper;
 class ViewsTestBase : public PlatformTest {
  public:
   ViewsTestBase();
-  virtual ~ViewsTestBase();
+  ~ViewsTestBase() override;
 
   // testing::Test:
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
   void RunPendingMessages();
 

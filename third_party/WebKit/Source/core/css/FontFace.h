@@ -47,10 +47,13 @@ namespace blink {
 
 class CSSFontFace;
 class CSSValueList;
+class DOMArrayBuffer;
+class DOMArrayBufferView;
 class Dictionary;
 class Document;
 class ExceptionState;
 class FontFaceDescriptors;
+class StringOrArrayBufferOrArrayBufferView;
 class StylePropertySet;
 class StyleRuleFontFace;
 
@@ -59,9 +62,7 @@ class FontFace : public RefCountedWillBeGarbageCollectedFinalized<FontFace>, pub
 public:
     enum LoadStatus { Unloaded, Loading, Loaded, Error };
 
-    static PassRefPtrWillBeRawPtr<FontFace> create(ExecutionContext*, const AtomicString& family, PassRefPtr<ArrayBuffer> source, const FontFaceDescriptors&);
-    static PassRefPtrWillBeRawPtr<FontFace> create(ExecutionContext*, const AtomicString& family, PassRefPtr<ArrayBufferView>, const FontFaceDescriptors&);
-    static PassRefPtrWillBeRawPtr<FontFace> create(ExecutionContext*, const AtomicString& family, const String& source, const FontFaceDescriptors&);
+    static PassRefPtrWillBeRawPtr<FontFace> create(ExecutionContext*, const AtomicString& family, StringOrArrayBufferOrArrayBufferView&, const FontFaceDescriptors&);
     static PassRefPtrWillBeRawPtr<FontFace> create(Document*, const StyleRuleFontFace*);
 
     ~FontFace();
@@ -109,9 +110,13 @@ public:
     void loadWithCallback(PassRefPtrWillBeRawPtr<LoadFontCallback>, ExecutionContext*);
 
     // ActiveDOMObject
-    virtual bool hasPendingActivity() const OVERRIDE;
+    virtual bool hasPendingActivity() const override;
 
 private:
+    static PassRefPtrWillBeRawPtr<FontFace> create(ExecutionContext*, const AtomicString& family, PassRefPtr<DOMArrayBuffer> source, const FontFaceDescriptors&);
+    static PassRefPtrWillBeRawPtr<FontFace> create(ExecutionContext*, const AtomicString& family, PassRefPtr<DOMArrayBufferView>, const FontFaceDescriptors&);
+    static PassRefPtrWillBeRawPtr<FontFace> create(ExecutionContext*, const AtomicString& family, const String& source, const FontFaceDescriptors&);
+
     explicit FontFace(ExecutionContext*);
     FontFace(ExecutionContext*, const AtomicString& family, const FontFaceDescriptors&);
 

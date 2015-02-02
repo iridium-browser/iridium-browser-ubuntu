@@ -37,11 +37,9 @@
 namespace blink {
 
 class ExceptionState;
-class IDBKey;
-class IDBKeyRange;
-class ExecutionContext;
+class ScriptState;
 
-class IDBFactory FINAL : public GarbageCollected<IDBFactory>, public ScriptWrappable {
+class IDBFactory final : public GarbageCollected<IDBFactory>, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
 public:
     static IDBFactory* create(IndexedDBClient* client)

@@ -8,32 +8,38 @@
 
 #include "base/macros.h"
 #include "base/observer_list.h"
-#include "ui/views/widget/widget_observer.h"
+#include "ui/aura/window_observer.h"
+#include "ui/wm/public/activation_change_observer.h"
 
 namespace athena {
 
 class ActivityManagerObserver;
 
 class ActivityManagerImpl : public ActivityManager,
-                            public views::WidgetObserver {
+                            public aura::WindowObserver,
+                            public aura::client::ActivationChangeObserver {
  public:
   ActivityManagerImpl();
-  virtual ~ActivityManagerImpl();
+  ~ActivityManagerImpl() override;
 
   int num_activities() const { return activities_.size(); }
 
   // ActivityManager:
-  virtual void AddActivity(Activity* activity) OVERRIDE;
-  virtual void RemoveActivity(Activity* activity) OVERRIDE;
-  virtual void UpdateActivity(Activity* activity) OVERRIDE;
-  virtual Activity* GetActivityForWindow(aura::Window* window) OVERRIDE;
-  virtual void AddObserver(ActivityManagerObserver* observer) OVERRIDE;
-  virtual void RemoveObserver(ActivityManagerObserver* observer) OVERRIDE;
-
-  // views::WidgetObserver
-  virtual void OnWidgetDestroying(views::Widget* widget) OVERRIDE;
+  void AddActivity(Activity* activity) override;
+  void RemoveActivity(Activity* activity) override;
+  const ActivityList& GetActivityList() override;
+  Activity* GetActivityForWindow(aura::Window* window) override;
+  void AddObserver(ActivityManagerObserver* observer) override;
+  void RemoveObserver(ActivityManagerObserver* observer) override;
 
  private:
+  // aura::WindowObserver:
+  void OnWindowDestroying(aura::Window* window) override;
+
+  // aura::client::ActivationChangeObserver:
+  void OnWindowActivated(aura::Window* gained_active,
+                         aura::Window* lost_active) override;
+
   std::vector<Activity*> activities_;
 
   ObserverList<ActivityManagerObserver> observers_;

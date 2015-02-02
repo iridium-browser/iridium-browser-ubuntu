@@ -1,4 +1,5 @@
 <?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="ru">
+<translation id="4542520061254486227">Просмотр данных на сайтах <ph name="WEBSITE_1"/> и <ph name="WEBSITE_2"/></translation>
 <translation id="3624204664103857160">Не удалось загрузить страницу запуска <ph name="PAGE"/>.</translation>
 <translation id="8804398419035066391">Обмен данными с определенными сайтами</translation>
 <translation id="7809034755304591547">Расширение <ph name="EXTENSION_NAME"/> (идентификатор: <ph name="EXTENSION_ID"/>) заблокировано администратором.</translation>
@@ -15,9 +16,9 @@
 <translation id="5911798608827489036">Обмен данными с любыми компьютерами в локальной сети или в Интернете</translation>
 <translation id="4719685943208231314">Доступ к USB-устройству <ph name="VENDOR_NAME"/></translation>
 <translation id="8284835137979141223"><ph name="PRODUCT_NAME"/> от <ph name="VENDOR_NAME"/></translation>
-<translation id="6364903856942348513">Неизвестный поставщик</translation>
 <translation id="657064425229075395">Не удалось загрузить фоновый скрипт <ph name="BACKGROUND_SCRIPT"/>.</translation>
 <translation id="9131487537093447019">Обмен сообщениями с устройствами Bluetooth.</translation>
+<translation id="5678955352098267522">Просмотр данных на сайте <ph name="WEBSITE_1"/></translation>
 <translation id="8198425243160395623">Доступ к USB-устройствам</translation>
 <translation id="8597109877291678953">Обмен данными с компьютером <ph name="HOSTNAME"/></translation>
 <translation id="5456409301717116725">Это расширение содержит файл ключа <ph name="KEY_PATH"/>. Вероятно, это неприемлемо.</translation>
@@ -26,24 +27,23 @@
 <translation id="8058376558882514200">Доступ к USB-устройству <ph name="PRODUCT_NAME"/> производства <ph name="VENDOR_NAME"/></translation>
 <translation id="149347756975725155">Не удается загрузить значок расширения &quot;<ph name="ICON"/>&quot;.</translation>
 <translation id="8825366169884721447">Это расширение не может изменить заголовок запроса (<ph name="HEADER_NAME"/>) из-за конфликта с другим расширением (<ph name="EXTENSION_NAME"/>).</translation>
+<translation id="7495493006406536234">Устройство <ph name="PRODUCT_ID"/></translation>
 <translation id="4233778200880751280">Не удалось загрузить страницу <ph name="ABOUT_PAGE"/>.</translation>
 <translation id="388442998277590542">Не удалось загрузить страницу параметров <ph name="OPTIONS_PAGE"/>.</translation>
 <translation id="6344170822609224263">Доступ к списку сетевых подключений</translation>
 <translation id="2616366145935564096">Просмотр и изменение данных на сайте <ph name="WEBSITE_1"/></translation>
 <translation id="2518849872271000461">Обмен данными с компьютерами <ph name="HOSTNAMES"/></translation>
 <translation id="289069346039609763"><ph name="VENDOR_NAME"/> (<ph name="VENDOR_ID"/>), <ph name="PRODUCT_NAME"/> (<ph name="PRODUCT_ID"/>)</translation>
-<translation id="1389014510128217152">- <ph name="WEBSITE_1"/></translation>
 <translation id="973833515778624067">Выберите устройства для работы с приложением &quot;<ph name="APP_NAME"/>&quot;.</translation>
+<translation id="4444304522807523469">Доступ к сканерам, подключенным через USB-порт или локальную сеть</translation>
 <translation id="6408118934673775994">Просмотр и изменение данных на сайтах <ph name="WEBSITE_1"/>, <ph name="WEBSITE_2"/> и <ph name="WEBSITE_3"/></translation>
 <translation id="961805664415579088">Обмен данными с любыми компьютерами в домене <ph name="DOMAIN"/></translation>
 <translation id="3502064055007747926">Доступ к устройствам ввода</translation>
 <translation id="8670869118777164560">Расширение не может перенаправить сетевой запрос на <ph name="ATTEMPTED_REDIRECT_DESTINATION"/>, поскольку другое расширение (<ph name="EXTENSION_NAME"/>) перенаправило его на <ph name="ACTUAL_REDIRECT_DESTINATION"/>.</translation>
 <translation id="6840444547062817500">Это расширение слишком часто перезагружалось.</translation>
 <translation id="8047248493720652249">Данному расширению не удалось присвоить скачанному файлу имя &quot;<ph name="ATTEMPTED_FILENAME"/>&quot;, поскольку другое расширение (<ph name="EXTENSION_NAME"/>) уже присвоило ему другое имя: &quot;<ph name="ACTUAL_FILENAME"/>&quot;.</translation>
-<translation id="2732710576072980201">Устройство <ph name="PRODUCT_ID"/>, поставщик: <ph name="VENDOR_NAME"/> (серийный номер: <ph name="SERIAL_NUMBER"/>)</translation>
 <translation id="4968399700653439437">Обмен данными с любыми компьютерами в доменах <ph name="DOMAINS"/></translation>
 <translation id="5026754133087629784">WebView: <ph name="WEBVIEW_TAG_NAME"/></translation>
-<translation id="4789057617885588545">Неизвестное устройство</translation>
 <translation id="8284279544186306258">все сайты <ph name="WEBSITE_1"/></translation>
 <translation id="8662911384982557515">Смена главной страницы на <ph name="HOME_PAGE"/></translation>
 <translation id="27822970480436970">Этому расширению не удалось изменить сетевой запрос, так как при этом возник конфликт с другим расширением.</translation>
@@ -60,11 +60,14 @@
 <translation id="7217838517480956708">Удаление и изменение расширения <ph name="EXTENSION_NAME"/> на этом компьютере запрещено администратором.</translation>
 <translation id="6580950983454333167"><ph name="PRODUCT_NAME"/>, поставщик: <ph name="VENDOR_NAME"/> (серийный номер: <ph name="SERIAL_NUMBER"/>)</translation>
 <translation id="7154130902455071009">Смена стартовой страницы на <ph name="START_PAGE"/></translation>
-<translation id="6758203075041033901">Устройство <ph name="PRODUCT_ID"/>, поставщик: <ph name="VENDOR_ID"/> (серийный номер: <ph name="SERIAL_NUMBER"/>)</translation>
 <translation id="6698810901424468597">Просмотр и изменение данные на сайтах <ph name="WEBSITE_1"/> и <ph name="WEBSITE_2"/></translation>
+<translation id="5544884907028850012">Поставщик <ph name="VENDOR_ID"/></translation>
+<translation id="2048182445208425546">Доступ к сетевому трафику</translation>
 <translation id="5972529113578162692">Удаление расширения &quot;<ph name="EXTENSION_NAME"/>&quot; на этом компьютере запрещено администратором</translation>
 <translation id="2706892089432507937">USB-устройства</translation>
+<translation id="7131040479572660648">Просмотр данных на сайтах <ph name="WEBSITE_1"/>, <ph name="WEBSITE_2"/> и <ph name="WEBSITE_3"/></translation>
 <translation id="2457545405930252243">Выберите устройство для работы с приложением &quot;<ph name="APP_NAME"/>&quot;.</translation>
 <translation id="1803557475693955505">Не удалось загрузить страницу фона &quot;<ph name="BACKGROUND_PAGE"/>&quot;.</translation>
 <translation id="7972881773422714442">Options: <ph name="EXTENSIONOPTIONS_TAG_NAME"/></translation>
+<translation id="344630545793878684">Просмотр данных на нескольких сайтах</translation>
 </translationbundle>

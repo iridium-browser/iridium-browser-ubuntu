@@ -292,7 +292,7 @@ WebInspector.ResourceTreeModel.prototype = {
             return;
 
         var request = /** @type {!WebInspector.NetworkRequest} */ (event.data);
-        if (request.failed || request.type === WebInspector.resourceTypes.XHR)
+        if (request.failed || request.resourceType() === WebInspector.resourceTypes.XHR)
             return;
 
         var frame = this._frames[request.frameId];
@@ -440,7 +440,10 @@ WebInspector.ResourceTreeModel.prototype = {
         var frameResource = this._createResourceFromFramePayload(framePayload, framePayload.url, WebInspector.resourceTypes.Document, framePayload.mimeType);
         if (frame.isMainFrame())
             this._inspectedPageURL = frameResource.url;
-        frame.addResource(frameResource);
+        // FIXME(413891): This check could be removed once we stop to send frame tree for service/shared workers.
+        // This makes sure that the shadow page document resource does not hide the worker script resource (they have the same url).
+        if (!WebInspector.isWorkerFrontend())
+            frame.addResource(frameResource);
 
         for (var i = 0; frameTreePayload.childFrames && i < frameTreePayload.childFrames.length; ++i)
             this._addFramesRecursively(frame, frameTreePayload.childFrames[i]);
@@ -661,7 +664,7 @@ WebInspector.ResourceTreeFrame.prototype = {
             // Already in the tree, we just got an extra update.
             return resource;
         }
-        resource = new WebInspector.Resource(this.target(), request, request.url, request.documentURL, request.frameId, request.loaderId, request.type, request.mimeType);
+        resource = new WebInspector.Resource(this.target(), request, request.url, request.documentURL, request.frameId, request.loaderId, request.resourceType(), request.mimeType);
         this._resourcesMap[resource.url] = resource;
         this._model.dispatchEventToListeners(WebInspector.ResourceTreeModel.EventTypes.ResourceAdded, resource);
         return resource;

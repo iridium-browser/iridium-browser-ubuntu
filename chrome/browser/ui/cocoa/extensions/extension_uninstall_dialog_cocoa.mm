@@ -26,10 +26,10 @@ class ExtensionUninstallDialogCocoa
     : public extensions::ExtensionUninstallDialog {
  public:
   ExtensionUninstallDialogCocoa(Profile* profile, Delegate* delegate);
-  virtual ~ExtensionUninstallDialogCocoa() OVERRIDE;
+  ~ExtensionUninstallDialogCocoa() override;
 
  private:
-  virtual void Show() OVERRIDE;
+  void Show() override;
 };
 
 ExtensionUninstallDialogCocoa::ExtensionUninstallDialogCocoa(

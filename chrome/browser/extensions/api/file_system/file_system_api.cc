@@ -20,6 +20,7 @@
 #include "base/values.h"
 #include "chrome/browser/extensions/api/file_handlers/app_file_handler_util.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/path_util.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
@@ -32,6 +33,7 @@
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/app_window/app_window.h"
 #include "extensions/browser/app_window/app_window_registry.h"
@@ -42,6 +44,7 @@
 #include "extensions/common/permissions/permissions_data.h"
 #include "net/base/mime_util.h"
 #include "storage/browser/fileapi/external_mount_points.h"
+#include "storage/browser/fileapi/file_system_operation_runner.h"
 #include "storage/browser/fileapi/isolated_context.h"
 #include "storage/common/fileapi/file_system_types.h"
 #include "storage/common/fileapi/file_system_util.h"
@@ -161,6 +164,21 @@ const int kGraylistedPaths[] = {
   base::DIR_WINDOWS,
 #endif
 };
+
+typedef base::Callback<void(scoped_ptr<base::File::Info>)> FileInfoOptCallback;
+
+// Passes optional file info to the UI thread depending on |result| and |info|.
+void PassFileInfoToUIThread(const FileInfoOptCallback& callback,
+                            base::File::Error result,
+                            const base::File::Info& info) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
+  scoped_ptr<base::File::Info> file_info(
+      result == base::File::FILE_OK ? new base::File::Info(info) : NULL);
+  content::BrowserThread::PostTask(
+      content::BrowserThread::UI,
+      FROM_HERE,
+      base::Bind(callback, base::Passed(&file_info)));
+}
 
 }  // namespace
 
@@ -425,21 +443,21 @@ class FileSystemChooseEntryFunction::FilePicker
                                     NULL);
   }
 
-  virtual ~FilePicker() {}
+  ~FilePicker() override {}
 
  private:
   // ui::SelectFileDialog::Listener implementation.
-  virtual void FileSelected(const base::FilePath& path,
-                            int index,
-                            void* params) OVERRIDE {
+  void FileSelected(const base::FilePath& path,
+                    int index,
+                    void* params) override {
     std::vector<base::FilePath> paths;
     paths.push_back(path);
     MultiFilesSelected(paths, params);
   }
 
-  virtual void FileSelectedWithExtraInfo(const ui::SelectedFileInfo& file,
-                                         int index,
-                                         void* params) OVERRIDE {
+  void FileSelectedWithExtraInfo(const ui::SelectedFileInfo& file,
+                                 int index,
+                                 void* params) override {
     // Normally, file.local_path is used because it is a native path to the
     // local read-only cached file in the case of remote file system like
     // Chrome OS's Google Drive integration. Here, however, |file.file_path| is
@@ -451,15 +469,15 @@ class FileSystemChooseEntryFunction::FilePicker
     FileSelected(file.file_path, index, params);
   }
 
-  virtual void MultiFilesSelected(const std::vector<base::FilePath>& files,
-                                  void* params) OVERRIDE {
+  void MultiFilesSelected(const std::vector<base::FilePath>& files,
+                          void* params) override {
     function_->FilesSelected(files);
     delete this;
   }
 
-  virtual void MultiFilesSelectedWithExtraInfo(
+  void MultiFilesSelectedWithExtraInfo(
       const std::vector<ui::SelectedFileInfo>& files,
-      void* params) OVERRIDE {
+      void* params) override {
     std::vector<base::FilePath> paths;
     for (std::vector<ui::SelectedFileInfo>::const_iterator it = files.begin();
          it != files.end(); ++it) {
@@ -468,7 +486,7 @@ class FileSystemChooseEntryFunction::FilePicker
     MultiFilesSelected(paths, params);
   }
 
-  virtual void FileSelectionCanceled(void* params) OVERRIDE {
+  void FileSelectionCanceled(void* params) override {
     function_->FileSelectionCanceled();
     delete this;
   }
@@ -858,24 +876,47 @@ bool FileSystemRetainEntryFunction::RunAsync() {
   if (!saved_files_service->IsRegistered(extension_->id(), entry_id)) {
     std::string filesystem_name;
     std::string filesystem_path;
+    base::FilePath path;
     EXTENSION_FUNCTION_VALIDATE(args_->GetString(1, &filesystem_name));
     EXTENSION_FUNCTION_VALIDATE(args_->GetString(2, &filesystem_path));
     if (!app_file_handler_util::ValidateFileEntryAndGetPath(filesystem_name,
                                                             filesystem_path,
                                                             render_view_host_,
-                                                            &path_,
+                                                            &path,
                                                             &error_)) {
       return false;
     }
 
-    content::BrowserThread::PostTaskAndReply(
-        content::BrowserThread::FILE,
+    std::string filesystem_id;
+    if (!storage::CrackIsolatedFileSystemName(filesystem_name, &filesystem_id))
+      return false;
+
+    const GURL site =
+        extensions::util::GetSiteForExtensionId(extension_id(), GetProfile());
+    storage::FileSystemContext* const context =
+        content::BrowserContext::GetStoragePartitionForSite(GetProfile(), site)
+            ->GetFileSystemContext();
+    const storage::FileSystemURL url = context->CreateCrackedFileSystemURL(
+        site,
+        storage::kFileSystemTypeIsolated,
+        IsolatedContext::GetInstance()
+            ->CreateVirtualRootPath(filesystem_id)
+            .Append(base::FilePath::FromUTF8Unsafe(filesystem_path)));
+
+    content::BrowserThread::PostTask(
+        content::BrowserThread::IO,
         FROM_HERE,
-        base::Bind(&FileSystemRetainEntryFunction::SetIsDirectoryOnFileThread,
-                   this),
-        base::Bind(&FileSystemRetainEntryFunction::RetainFileEntry,
-                   this,
-                   entry_id));
+        base::Bind(
+            base::IgnoreResult(
+                &storage::FileSystemOperationRunner::GetMetadata),
+            context->operation_runner()->AsWeakPtr(),
+            url,
+            base::Bind(
+                &PassFileInfoToUIThread,
+                base::Bind(&FileSystemRetainEntryFunction::RetainFileEntry,
+                           this,
+                           entry_id,
+                           path))));
     return true;
   }
 
@@ -885,16 +926,19 @@ bool FileSystemRetainEntryFunction::RunAsync() {
 }
 
 void FileSystemRetainEntryFunction::RetainFileEntry(
-    const std::string& entry_id) {
+    const std::string& entry_id,
+    const base::FilePath& path,
+    scoped_ptr<base::File::Info> file_info) {
+  if (!file_info) {
+    SendResponse(false);
+    return;
+  }
+
   SavedFilesService* saved_files_service = SavedFilesService::Get(GetProfile());
   saved_files_service->RegisterFileEntry(
-      extension_->id(), entry_id, path_, is_directory_);
+      extension_->id(), entry_id, path, file_info->is_directory);
   saved_files_service->EnqueueFileEntry(extension_->id(), entry_id);
   SendResponse(true);
-}
-
-void FileSystemRetainEntryFunction::SetIsDirectoryOnFileThread() {
-  is_directory_ = base::DirectoryExists(path_);
 }
 
 bool FileSystemIsRestorableFunction::RunSync() {

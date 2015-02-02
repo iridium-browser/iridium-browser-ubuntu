@@ -89,10 +89,7 @@ public:
      */
     const GrFragmentProcessor* addColorProcessor(const GrFragmentProcessor* fp) {
         SkASSERT(fp);
-        if (!fp->willUseInputColor()) {
-            fColorStages.reset();
-        }
-        SkNEW_APPEND_TO_TARRAY(&fColorStages, GrProcessorStage, (fp));
+        SkNEW_APPEND_TO_TARRAY(&fColorStages, GrFragmentStage, (fp));
         return fp;
     }
 
@@ -101,10 +98,7 @@ public:
      */
     const GrFragmentProcessor* addCoverageProcessor(const GrFragmentProcessor* fp) {
         SkASSERT(fp);
-        if (!fp->willUseInputColor()) {
-            fCoverageStages.reset();
-        }
-        SkNEW_APPEND_TO_TARRAY(&fCoverageStages, GrProcessorStage, (fp));
+        SkNEW_APPEND_TO_TARRAY(&fCoverageStages, GrFragmentStage, (fp));
         return fp;
     }
 

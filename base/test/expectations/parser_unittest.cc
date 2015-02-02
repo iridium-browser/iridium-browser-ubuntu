@@ -15,16 +15,16 @@ using test_expectations::Parser;
 class TestExpectationParserTest : public testing::Test,
                                   public Parser::Delegate {
  public:
-  virtual void EmitExpectation(
-      const test_expectations::Expectation& expectation) OVERRIDE {
+  void EmitExpectation(
+      const test_expectations::Expectation& expectation) override {
     expectations_.push_back(expectation);
   }
 
-  virtual void OnSyntaxError(const std::string& message) OVERRIDE {
+  void OnSyntaxError(const std::string& message) override {
     syntax_error_ = message;
   }
 
-  virtual void OnDataError(const std::string& error) OVERRIDE {
+  void OnDataError(const std::string& error) override {
     data_errors_.push_back(error);
   }
 
@@ -161,7 +161,7 @@ TEST_F(TestExpectationParserTest, WeirdSpaces) {
 }
 
 TEST_F(TestExpectationParserTest, SyntaxErrors) {
-  const char* kErrors[] = {
+  const char* const kErrors[] = {
     "Foo [ dfasd",
     "Foo [Linux] # This is an illegal comment",
     "Foo [Linux] Bar # Another illegal comment.",
@@ -184,7 +184,7 @@ TEST_F(TestExpectationParserTest, SyntaxErrors) {
 }
 
 TEST_F(TestExpectationParserTest, DataErrors) {
-  const char* kOneError[] = {
+  const char* const kOneError[] = {
     "http://crbug.com/1234 [MagicBrowzR] BadModifier = Timeout",
     "________ [Linux] BadResult = WhatNow",
     "http://wkb.ug/1234 [Debug Release Win-7] MultipleConfigs = Skip",
@@ -196,7 +196,7 @@ TEST_F(TestExpectationParserTest, DataErrors) {
     data_errors_.clear();
   }
 
-  const char* kTwoErrors[] = {
+  const char* const kTwoErrors[] = {
     ". [Mac-TurningIntoiOS] BadModifierVariant.BadResult = Foobar",
     "1234 [ Debug Release OS/2 ] MultipleConfigs.BadModifier = Pass",
   };

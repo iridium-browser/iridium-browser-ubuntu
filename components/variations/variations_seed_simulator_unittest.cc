@@ -22,11 +22,11 @@ class TestEntropyProvider : public base::FieldTrial::EntropyProvider {
  public:
   explicit TestEntropyProvider(double entropy_value)
       : entropy_value_(entropy_value) {}
-  virtual ~TestEntropyProvider() {}
+  ~TestEntropyProvider() override {}
 
   // base::FieldTrial::EntropyProvider implementation:
-  virtual double GetEntropyForTrial(const std::string& trial_name,
-                                    uint32 randomization_seed) const OVERRIDE {
+  double GetEntropyForTrial(const std::string& trial_name,
+                            uint32 randomization_seed) const override {
     return entropy_value_;
   }
 
@@ -85,7 +85,7 @@ class VariationsSeedSimulatorTest : public ::testing::Test {
   VariationsSeedSimulatorTest() : field_trial_list_(NULL) {
   }
 
-  virtual ~VariationsSeedSimulatorTest() {
+  ~VariationsSeedSimulatorTest() override {
     // Ensure that the maps are cleared between tests, since they are stored as
     // process singletons.
     testing::ClearAllVariationIDs();

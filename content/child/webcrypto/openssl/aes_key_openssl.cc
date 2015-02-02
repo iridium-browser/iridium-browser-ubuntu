@@ -30,37 +30,34 @@ AesAlgorithm::AesAlgorithm(const std::string& jwk_suffix)
       jwk_suffix_(jwk_suffix) {
 }
 
-Status AesAlgorithm::VerifyKeyUsagesBeforeGenerateKey(
-    blink::WebCryptoKeyUsageMask usage_mask) const {
-  return CheckKeyCreationUsages(all_key_usages_, usage_mask);
-}
+Status AesAlgorithm::GenerateKey(const blink::WebCryptoAlgorithm& algorithm,
+                                 bool extractable,
+                                 blink::WebCryptoKeyUsageMask usages,
+                                 GenerateKeyResult* result) const {
+  Status status = CheckKeyCreationUsages(all_key_usages_, usages);
+  if (status.IsError())
+    return status;
 
-Status AesAlgorithm::GenerateSecretKey(
-    const blink::WebCryptoAlgorithm& algorithm,
-    bool extractable,
-    blink::WebCryptoKeyUsageMask usage_mask,
-    blink::WebCryptoKey* key) const {
   unsigned int keylen_bits;
-  Status status =
-      GetAesKeyGenLengthInBits(algorithm.aesKeyGenParams(), &keylen_bits);
+  status = GetAesKeyGenLengthInBits(algorithm.aesKeyGenParams(), &keylen_bits);
   if (status.IsError())
     return status;
 
   return GenerateSecretKeyOpenSsl(
       blink::WebCryptoKeyAlgorithm::createAes(algorithm.id(), keylen_bits),
       extractable,
-      usage_mask,
+      usages,
       keylen_bits / 8,
-      key);
+      result);
 }
 
 Status AesAlgorithm::VerifyKeyUsagesBeforeImportKey(
     blink::WebCryptoKeyFormat format,
-    blink::WebCryptoKeyUsageMask usage_mask) const {
+    blink::WebCryptoKeyUsageMask usages) const {
   switch (format) {
     case blink::WebCryptoKeyFormatRaw:
     case blink::WebCryptoKeyFormatJwk:
-      return CheckKeyCreationUsages(all_key_usages_, usage_mask);
+      return CheckKeyCreationUsages(all_key_usages_, usages);
     default:
       return Status::ErrorUnsupportedImportKeyFormat();
   }
@@ -69,7 +66,7 @@ Status AesAlgorithm::VerifyKeyUsagesBeforeImportKey(
 Status AesAlgorithm::ImportKeyRaw(const CryptoData& key_data,
                                   const blink::WebCryptoAlgorithm& algorithm,
                                   bool extractable,
-                                  blink::WebCryptoKeyUsageMask usage_mask,
+                                  blink::WebCryptoKeyUsageMask usages,
                                   blink::WebCryptoKey* key) const {
   const unsigned int keylen_bytes = key_data.byte_length();
   Status status = VerifyAesKeyLengthForImport(keylen_bytes);
@@ -83,23 +80,23 @@ Status AesAlgorithm::ImportKeyRaw(const CryptoData& key_data,
       key_data,
       blink::WebCryptoKeyAlgorithm::createAes(algorithm.id(), keylen_bits),
       extractable,
-      usage_mask,
+      usages,
       key);
 }
 
 Status AesAlgorithm::ImportKeyJwk(const CryptoData& key_data,
                                   const blink::WebCryptoAlgorithm& algorithm,
                                   bool extractable,
-                                  blink::WebCryptoKeyUsageMask usage_mask,
+                                  blink::WebCryptoKeyUsageMask usages,
                                   blink::WebCryptoKey* key) const {
   std::vector<uint8_t> raw_data;
   Status status = ReadAesSecretKeyJwk(
-      key_data, jwk_suffix_, extractable, usage_mask, &raw_data);
+      key_data, jwk_suffix_, extractable, usages, &raw_data);
   if (status.IsError())
     return status;
 
   return ImportKeyRaw(
-      CryptoData(raw_data), algorithm, extractable, usage_mask, key);
+      CryptoData(raw_data), algorithm, extractable, usages, key);
 }
 
 Status AesAlgorithm::ExportKeyRaw(const blink::WebCryptoKey& key,

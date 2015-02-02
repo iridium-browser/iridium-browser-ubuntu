@@ -40,20 +40,18 @@ class FakeDownloadFeedback : public DownloadFeedback {
         start_called_(false) {
   }
 
-  virtual ~FakeDownloadFeedback() {
-    deletion_callback_.Run();
-  }
+  ~FakeDownloadFeedback() override { deletion_callback_.Run(); }
 
-  virtual void Start(const base::Closure& finish_callback) OVERRIDE {
+  void Start(const base::Closure& finish_callback) override {
     start_called_ = true;
     finish_callback_ = finish_callback;
   }
 
-  virtual const std::string& GetPingRequestForTesting() const OVERRIDE {
+  const std::string& GetPingRequestForTesting() const override {
     return ping_request_;
   }
 
-  virtual const std::string& GetPingResponseForTesting() const OVERRIDE {
+  const std::string& GetPingResponseForTesting() const override {
     return ping_response_;
   }
 
@@ -79,14 +77,14 @@ class FakeDownloadFeedback : public DownloadFeedback {
 
 class FakeDownloadFeedbackFactory : public DownloadFeedbackFactory {
  public:
-  virtual ~FakeDownloadFeedbackFactory() {}
+  ~FakeDownloadFeedbackFactory() override {}
 
-  virtual DownloadFeedback* CreateDownloadFeedback(
+  DownloadFeedback* CreateDownloadFeedback(
       net::URLRequestContextGetter* request_context_getter,
       base::TaskRunner* file_task_runner,
       const base::FilePath& file_path,
       const std::string& ping_request,
-      const std::string& ping_response) OVERRIDE {
+      const std::string& ping_response) override {
     FakeDownloadFeedback* feedback = new FakeDownloadFeedback(
         request_context_getter,
         file_task_runner,
@@ -139,14 +137,12 @@ class DownloadFeedbackServiceTest : public testing::Test {
             new net::TestURLRequestContextGetter(io_task_runner_)) {
   }
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     DownloadFeedback::RegisterFactory(&download_feedback_factory_);
   }
 
-  virtual void TearDown() OVERRIDE {
-    DownloadFeedback::RegisterFactory(NULL);
-  }
+  void TearDown() override { DownloadFeedback::RegisterFactory(NULL); }
 
   base::FilePath CreateTestFile(int n) const {
     base::FilePath upload_file_path(

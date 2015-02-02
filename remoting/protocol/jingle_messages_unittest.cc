@@ -7,8 +7,8 @@
 #include "base/logging.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/libjingle/source/talk/xmpp/constants.h"
 #include "third_party/webrtc/libjingle/xmllite/xmlelement.h"
+#include "third_party/webrtc/libjingle/xmpp/constants.h"
 
 using buzz::QName;
 using buzz::XmlAttr;
@@ -314,7 +314,7 @@ TEST(JingleMessageReplyTest, ToXml) {
       "<unexpected-request/></error></iq>" },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
+  for (size_t i = 0; i < arraysize(tests); ++i) {
     JingleMessageReply reply_msg;
     if (tests[i].error_text.empty()) {
       reply_msg = JingleMessageReply(tests[i].error);

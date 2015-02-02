@@ -15,7 +15,7 @@ namespace bookmarks {
 class TestBookmarkClient : public BookmarkClient {
  public:
   TestBookmarkClient();
-  virtual ~TestBookmarkClient();
+  ~TestBookmarkClient() override;
 
   // Create a BookmarkModel using this object as its client. The returned
   // BookmarkModel* is owned by the caller.
@@ -38,14 +38,12 @@ class TestBookmarkClient : public BookmarkClient {
 
  private:
   // BookmarkClient:
-  virtual bool IsPermanentNodeVisible(
-      const BookmarkPermanentNode* node) OVERRIDE;
-  virtual void RecordAction(const base::UserMetricsAction& action) OVERRIDE;
-  virtual LoadExtraCallback GetLoadExtraNodesCallback() OVERRIDE;
-  virtual bool CanSetPermanentNodeTitle(
-      const BookmarkNode* permanent_node) OVERRIDE;
-  virtual bool CanSyncNode(const BookmarkNode* node) OVERRIDE;
-  virtual bool CanBeEditedByUser(const BookmarkNode* node) OVERRIDE;
+  bool IsPermanentNodeVisible(const BookmarkPermanentNode* node) override;
+  void RecordAction(const base::UserMetricsAction& action) override;
+  LoadExtraCallback GetLoadExtraNodesCallback() override;
+  bool CanSetPermanentNodeTitle(const BookmarkNode* permanent_node) override;
+  bool CanSyncNode(const BookmarkNode* node) override;
+  bool CanBeEditedByUser(const BookmarkNode* node) override;
 
   // Helpers for GetLoadExtraNodesCallback().
   static BookmarkPermanentNodeList LoadExtraNodes(

@@ -32,19 +32,17 @@
  */
 WebInspector.Spectrum = function()
 {
-    WebInspector.VBox.call(this);
-    this.registerRequiredCSS("spectrum.css");
+    WebInspector.VBox.call(this, true);
+    this.contentElement.appendChild(WebInspector.View.createStyleElement("elements/spectrum.css"));
+    this.contentElement.tabIndex = 0;
 
-    this.element.classList.add("spectrum-container");
-    this.element.tabIndex = 0;
-
-    this._draggerElement = this.element.createChild("div", "spectrum-color");
+    this._draggerElement = this.contentElement.createChild("div", "spectrum-color");
     this._dragHelperElement = this._draggerElement.createChild("div", "spectrum-sat fill").createChild("div", "spectrum-val fill").createChild("div", "spectrum-dragger");
 
-    this._sliderElement = this.element.createChild("div", "spectrum-hue");
+    this._sliderElement = this.contentElement.createChild("div", "spectrum-hue");
     this.slideHelper = this._sliderElement.createChild("div", "spectrum-slider");
 
-    var rangeContainer = this.element.createChild("div", "spectrum-range-container");
+    var rangeContainer = this.contentElement.createChild("div", "spectrum-range-container");
     var alphaLabel = rangeContainer.createChild("label");
     alphaLabel.textContent = WebInspector.UIString("\u03B1:");
 
@@ -55,7 +53,7 @@ WebInspector.Spectrum = function()
     this._alphaElement.addEventListener("input", alphaDrag.bind(this), false);
     this._alphaElement.addEventListener("change", alphaDrag.bind(this), false);
 
-    var displayContainer = this.element.createChild("div", "spectrum-text");
+    var displayContainer = this.contentElement.createChild("div", "spectrum-text");
     var swatchElement = displayContainer.createChild("span", "swatch");
     this._swatchInnerElement = swatchElement.createChild("span", "swatch-inner");
     this._displayElement = displayContainer.createChild("span", "source-code spectrum-display-value");
@@ -131,7 +129,6 @@ WebInspector.Spectrum.Events = {
  */
 WebInspector.Spectrum.draggable = function(element, onmove, onstart, onstop) {
 
-    var doc = document;
     var dragging;
     var offset;
     var scrollOffset;
@@ -180,10 +177,10 @@ WebInspector.Spectrum.draggable = function(element, onmove, onstart, onstop) {
             scrollOffset = element.scrollOffset();
             offset = element.totalOffset();
 
-            doc.addEventListener("selectstart", consume, false);
-            doc.addEventListener("dragstart", consume, false);
-            doc.addEventListener("mousemove", move, false);
-            doc.addEventListener("mouseup", stop, false);
+            element.ownerDocument.addEventListener("selectstart", consume, false);
+            element.ownerDocument.addEventListener("dragstart", consume, false);
+            element.ownerDocument.addEventListener("mousemove", move, false);
+            element.ownerDocument.addEventListener("mouseup", stop, false);
 
             move(mouseEvent);
             consume(mouseEvent);
@@ -196,10 +193,10 @@ WebInspector.Spectrum.draggable = function(element, onmove, onstart, onstop) {
     function stop(e)
     {
         if (dragging) {
-            doc.removeEventListener("selectstart", consume, false);
-            doc.removeEventListener("dragstart", consume, false);
-            doc.removeEventListener("mousemove", move, false);
-            doc.removeEventListener("mouseup", stop, false);
+            element.ownerDocument.removeEventListener("selectstart", consume, false);
+            element.ownerDocument.removeEventListener("dragstart", consume, false);
+            element.ownerDocument.removeEventListener("mousemove", move, false);
+            element.ownerDocument.removeEventListener("mouseup", stop, false);
 
             if (onstop)
                 onstop(element, /** @type {!MouseEvent} */ (e));
@@ -317,7 +314,7 @@ WebInspector.Spectrum.prototype = {
 WebInspector.SpectrumPopupHelper = function()
 {
     this._spectrum = new WebInspector.Spectrum();
-    this._spectrum.element.addEventListener("keydown", this._onKeyDown.bind(this), false);
+    this._spectrum.contentElement.addEventListener("keydown", this._onKeyDown.bind(this), false);
 
     this._popover = new WebInspector.Popover();
     this._popover.setCanShrink(false);
@@ -372,8 +369,9 @@ WebInspector.SpectrumPopupHelper.prototype = {
         this._spectrum._originalFormat = format !== WebInspector.Color.Format.Original ? format : color.format();
         this.reposition(element);
 
+        var document = this._popover.element.ownerDocument;
         document.addEventListener("mousedown", this._hideProxy, false);
-        window.addEventListener("resize", this._hideProxy, false);
+        document.defaultView.addEventListener("resize", this._hideProxy, false);
 
         WebInspector.targetManager.addModelListener(WebInspector.ResourceTreeModel, WebInspector.ResourceTreeModel.EventTypes.ColorPicked, this._colorPicked, this);
         PageAgent.setColorPickerEnabled(true);
@@ -385,7 +383,7 @@ WebInspector.SpectrumPopupHelper.prototype = {
         if (!this._previousFocusElement)
             this._previousFocusElement = WebInspector.currentFocusElement();
         this._popover.showView(this._spectrum, element);
-        WebInspector.setCurrentFocusElement(this._spectrum.element);
+        WebInspector.setCurrentFocusElement(this._spectrum.contentElement);
     },
 
     /**
@@ -395,11 +393,12 @@ WebInspector.SpectrumPopupHelper.prototype = {
     {
         if (this._isHidden)
             return;
+        var document = this._popover.element.ownerDocument;
         this._isHidden = true;
         this._popover.hide();
 
         document.removeEventListener("mousedown", this._hideProxy, false);
-        window.removeEventListener("resize", this._hideProxy, false);
+        document.defaultView.removeEventListener("resize", this._hideProxy, false);
 
         PageAgent.setColorPickerEnabled(false);
         WebInspector.targetManager.removeModelListener(WebInspector.ResourceTreeModel, WebInspector.ResourceTreeModel.EventTypes.ColorPicked, this._colorPicked, this);
@@ -446,7 +445,7 @@ WebInspector.SpectrumPopupHelper.prototype = {
  */
 WebInspector.ColorSwatch = function(readOnly)
 {
-    this.element = document.createElementWithClass("span", "swatch");
+    this.element = createElementWithClass("span", "swatch");
     this._swatchInnerElement = this.element.createChild("span", "swatch-inner");
     var shiftClickMessage = WebInspector.UIString("Shift-click to change color format.");
     this.element.title = readOnly ? shiftClickMessage : String.sprintf("%s\n%s", WebInspector.UIString("Click to open a colorpicker."), shiftClickMessage);

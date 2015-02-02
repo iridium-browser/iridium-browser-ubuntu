@@ -12,6 +12,7 @@
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/prefs/pref_service.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -188,6 +189,11 @@ PersonalDataManager::~PersonalDataManager() {
 void PersonalDataManager::OnWebDataServiceRequestDone(
     WebDataServiceBase::Handle h,
     const WDTypedResult* result) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422460 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422460 PersonalDataManager::OnWebDataServiceRequestDone"));
+
   DCHECK(pending_profiles_query_ || pending_creditcards_query_);
 
   if (!result) {
@@ -667,15 +673,16 @@ void PersonalDataManager::GetCreditCardSuggestions(
     base::string16 creditcard_field_value =
         credit_card->GetInfo(type, app_locale_);
     if (!creditcard_field_value.empty() &&
-        StartsWith(creditcard_field_value, field_contents, false)) {
-      if (type.GetStorableType() == CREDIT_CARD_NUMBER)
-        creditcard_field_value = credit_card->ObfuscatedNumber();
-
+        (StartsWith(creditcard_field_value, field_contents, false) ||
+         (type.GetStorableType() == CREDIT_CARD_NUMBER &&
+          base::string16::npos !=
+              creditcard_field_value.find(field_contents)))) {
       // If the value is the card number, the label is the expiration date.
       // Otherwise the label is the card number, or if that is empty the
       // cardholder name. The label should never repeat the value.
       base::string16 label;
       if (type.GetStorableType() == CREDIT_CARD_NUMBER) {
+        creditcard_field_value = credit_card->ObfuscatedNumber();
         label = credit_card->GetInfo(
             AutofillType(CREDIT_CARD_EXP_DATE_2_DIGIT_YEAR), app_locale_);
       } else if (credit_card->number().empty()) {

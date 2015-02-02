@@ -26,6 +26,7 @@
 #define AudioContext_h
 
 #include "core/dom/ActiveDOMObject.h"
+#include "core/dom/DOMTypedArray.h"
 #include "core/events/EventListener.h"
 #include "modules/EventTargetModules.h"
 #include "modules/webaudio/AsyncAudioDecoder.h"
@@ -82,14 +83,14 @@ public:
 
     virtual ~AudioContext();
 
-    virtual void trace(Visitor*) OVERRIDE;
+    virtual void trace(Visitor*) override;
 
     bool isInitialized() const { return m_isInitialized; }
     bool isOfflineContext() { return m_isOfflineContext; }
 
     // Document notification
-    virtual void stop() OVERRIDE FINAL;
-    virtual bool hasPendingActivity() const OVERRIDE;
+    virtual void stop() override final;
+    virtual bool hasPendingActivity() const override;
 
     AudioDestinationNode* destination() { return m_destinationNode.get(); }
     size_t currentSampleFrame() const { return m_destinationNode->currentSampleFrame(); }
@@ -99,7 +100,7 @@ public:
     AudioBuffer* createBuffer(unsigned numberOfChannels, size_t numberOfFrames, float sampleRate, ExceptionState&);
 
     // Asynchronous audio file data decoding.
-    void decodeAudioData(ArrayBuffer*, AudioBufferCallback*, AudioBufferCallback*, ExceptionState&);
+    void decodeAudioData(DOMArrayBuffer*, AudioBufferCallback*, AudioBufferCallback*, ExceptionState&);
 
     AudioListener* listener() { return m_listener.get(); }
 
@@ -126,9 +127,13 @@ public:
     ChannelMergerNode* createChannelMerger(ExceptionState&);
     ChannelMergerNode* createChannelMerger(size_t numberOfInputs, ExceptionState&);
     OscillatorNode* createOscillator();
-    PeriodicWave* createPeriodicWave(Float32Array* real, Float32Array* imag, ExceptionState&);
+    PeriodicWave* createPeriodicWave(DOMFloat32Array* real, DOMFloat32Array* imag, ExceptionState&);
 
-    // When a source node has no more processing to do (has finished playing), then it tells the context to dereference it.
+    // When a source node has started processing and needs to be protected,
+    // this method tells the context to protect the node.
+    void notifyNodeStartedProcessing(AudioNode*);
+    // When a source node has no more processing to do (has finished playing),
+    // this method tells the context to dereference the node.
     void notifyNodeFinishedProcessing(AudioNode*);
 
     // Called at the start of each render quantum.
@@ -174,17 +179,14 @@ public:
     ThreadIdentifier audioThread() const { return m_audioThread; }
     bool isAudioThread() const;
 
-    // mustReleaseLock is set to true if we acquired the lock in this method call and caller must unlock(), false if it was previously acquired.
-    void lock(bool& mustReleaseLock);
-
-    // Returns true if we own the lock.
-    // mustReleaseLock is set to true if we acquired the lock in this method call and caller must unlock(), false if it was previously acquired.
-    bool tryLock(bool& mustReleaseLock);
-
+    void lock();
+    bool tryLock();
     void unlock();
 
+#if ENABLE(ASSERT)
     // Returns true if this thread owns the context's lock.
-    bool isGraphOwner() const;
+    bool isGraphOwner();
+#endif
 
     // Returns the maximum numuber of channels we can support.
     static unsigned maxNumberOfChannels() { return MaxNumberOfChannels;}
@@ -196,17 +198,15 @@ public:
             : m_context(context)
         {
             ASSERT(context);
-            context->lock(m_mustReleaseLock);
+            context->lock();
         }
 
         ~AutoLocker()
         {
-            if (m_mustReleaseLock)
-                m_context->unlock();
+            m_context->unlock();
         }
     private:
         Member<AudioContext> m_context;
-        bool m_mustReleaseLock;
     };
 
     // In AudioNode::breakConnection() and deref(), a tryLock() is used for
@@ -225,8 +225,8 @@ public:
     void disposeOutputs(AudioNode&);
 
     // EventTarget
-    virtual const AtomicString& interfaceName() const OVERRIDE FINAL;
-    virtual ExecutionContext* executionContext() const OVERRIDE FINAL;
+    virtual const AtomicString& interfaceName() const override final;
+    virtual ExecutionContext* executionContext() const override final;
 
     DEFINE_ATTRIBUTE_EVENT_LISTENER(complete);
 
@@ -277,7 +277,7 @@ private:
     // Oilpan: This Vector holds connection references. We must call
     // AudioNode::makeConnection when we add an AudioNode to this, and must call
     // AudioNode::breakConnection() when we remove an AudioNode from this.
-    HeapVector<Member<AudioNode> > m_referencedNodes;
+    HeapVector<Member<AudioNode>> m_referencedNodes;
 
     class AudioNodeDisposer {
     public:
@@ -330,9 +330,9 @@ private:
     unsigned m_connectionCount;
 
     // Graph locking.
-    Mutex m_contextGraphMutex;
+    bool m_didInitializeContextGraphMutex;
+    RecursiveMutex m_contextGraphMutex;
     volatile ThreadIdentifier m_audioThread;
-    volatile ThreadIdentifier m_graphOwnerThread; // if the lock is held then this is the thread which owns it, otherwise == UndefinedThreadIdentifier
 
     // Only accessed in the audio thread.
     // Oilpan: Since items are added to these vectors by the audio thread (not registered to Oilpan),

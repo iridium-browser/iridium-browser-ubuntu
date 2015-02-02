@@ -5,6 +5,7 @@
 #ifndef MOJO_CC_OUTPUT_SURFACE_MOJO_H_
 #define MOJO_CC_OUTPUT_SURFACE_MOJO_H_
 
+#include "base/macros.h"
 #include "cc/output/output_surface.h"
 #include "cc/surfaces/surface_id.h"
 #include "cc/surfaces/surface_id_allocator.h"
@@ -27,14 +28,14 @@ class OutputSurfaceMojo : public cc::OutputSurface, public SurfaceClient {
                     uint32_t id_namespace);
 
   // SurfaceClient implementation.
-  virtual void ReturnResources(Array<ReturnedResourcePtr> resources) OVERRIDE;
+  void ReturnResources(Array<ReturnedResourcePtr> resources) override;
 
   // cc::OutputSurface implementation.
-  virtual void SwapBuffers(cc::CompositorFrame* frame) OVERRIDE;
-  virtual bool BindToClient(cc::OutputSurfaceClient* client) OVERRIDE;
+  void SwapBuffers(cc::CompositorFrame* frame) override;
+  bool BindToClient(cc::OutputSurfaceClient* client) override;
 
  protected:
-  virtual ~OutputSurfaceMojo();
+  ~OutputSurfaceMojo() override;
 
  private:
   OutputSurfaceMojoClient* output_surface_mojo_client_;

@@ -17,11 +17,9 @@ const char kText2[] = "world";
 
 class StringRecorder {
  public:
-  explicit StringRecorder(std::string* buf) : buf_(buf) {
-  }
-  void Run(const String& a) const {
-    *buf_ = a.To<std::string>();
-  }
+  explicit StringRecorder(std::string* buf) : buf_(buf) {}
+  void Run(const String& a) const { *buf_ = a.To<std::string>(); }
+
  private:
   std::string* buf_;
 };
@@ -29,9 +27,7 @@ class StringRecorder {
 class ImportedInterfaceImpl
     : public InterfaceImpl<imported::ImportedInterface> {
  public:
-  virtual void DoSomething() MOJO_OVERRIDE {
-    do_something_count_++;
-  }
+  void DoSomething() override { do_something_count_++; }
 
   static int do_something_count() { return do_something_count_; }
 
@@ -42,12 +38,9 @@ int ImportedInterfaceImpl::do_something_count_ = 0;
 
 class SampleNamedObjectImpl : public InterfaceImpl<sample::NamedObject> {
  public:
-  virtual void SetName(const mojo::String& name) MOJO_OVERRIDE {
-    name_ = name;
-  }
+  void SetName(const mojo::String& name) override { name_ = name; }
 
-  virtual void GetName(const mojo::Callback<void(mojo::String)>& callback)
-      MOJO_OVERRIDE {
+  void GetName(const mojo::Callback<void(mojo::String)>& callback) override {
     callback.Run(name_);
   }
 
@@ -57,8 +50,8 @@ class SampleNamedObjectImpl : public InterfaceImpl<sample::NamedObject> {
 
 class SampleFactoryImpl : public InterfaceImpl<sample::Factory> {
  public:
-  virtual void DoStuff(sample::RequestPtr request,
-                       ScopedMessagePipeHandle pipe) MOJO_OVERRIDE {
+  void DoStuff(sample::RequestPtr request,
+               ScopedMessagePipeHandle pipe) override {
     std::string text1;
     if (pipe.is_valid())
       EXPECT_TRUE(ReadTextMessage(pipe.get(), &text1));
@@ -73,7 +66,7 @@ class SampleFactoryImpl : public InterfaceImpl<sample::Factory> {
 
     ScopedMessagePipeHandle pipe0;
     if (!text2.empty()) {
-      CreateMessagePipe(NULL, &pipe0, &pipe1_);
+      CreateMessagePipe(nullptr, &pipe0, &pipe1_);
       EXPECT_TRUE(WriteTextMessage(pipe1_.get(), text2));
     }
 
@@ -86,26 +79,27 @@ class SampleFactoryImpl : public InterfaceImpl<sample::Factory> {
       request->obj->DoSomething();
   }
 
-  virtual void DoStuff2(ScopedDataPipeConsumerHandle pipe) MOJO_OVERRIDE {
+  void DoStuff2(ScopedDataPipeConsumerHandle pipe) override {
     // Read the data from the pipe, writing the response (as a string) to
     // DidStuff2().
     ASSERT_TRUE(pipe.is_valid());
     uint32_t data_size = 0;
     ASSERT_EQ(MOJO_RESULT_OK,
-              ReadDataRaw(pipe.get(), NULL, &data_size,
-                          MOJO_READ_DATA_FLAG_QUERY));
+              ReadDataRaw(
+                  pipe.get(), nullptr, &data_size, MOJO_READ_DATA_FLAG_QUERY));
     ASSERT_NE(0, static_cast<int>(data_size));
     char data[64];
     ASSERT_LT(static_cast<int>(data_size), 64);
-    ASSERT_EQ(MOJO_RESULT_OK,
-              ReadDataRaw(pipe.get(), data, &data_size,
-                          MOJO_READ_DATA_FLAG_ALL_OR_NONE));
+    ASSERT_EQ(
+        MOJO_RESULT_OK,
+        ReadDataRaw(
+            pipe.get(), data, &data_size, MOJO_READ_DATA_FLAG_ALL_OR_NONE));
 
     client()->DidStuff2(data);
   }
 
-  virtual void CreateNamedObject(
-      InterfaceRequest<sample::NamedObject> object_request) MOJO_OVERRIDE {
+  void CreateNamedObject(
+      InterfaceRequest<sample::NamedObject> object_request) override {
     EXPECT_TRUE(object_request.is_pending());
     BindToRequest(new SampleNamedObjectImpl(), &object_request);
   }
@@ -113,14 +107,14 @@ class SampleFactoryImpl : public InterfaceImpl<sample::Factory> {
   // These aren't called or implemented, but exist here to test that the
   // methods are generated with the correct argument types for imported
   // interfaces.
-  virtual void RequestImportedInterface(
+  void RequestImportedInterface(
       InterfaceRequest<imported::ImportedInterface> imported,
       const mojo::Callback<void(InterfaceRequest<imported::ImportedInterface>)>&
-          callback) MOJO_OVERRIDE {}
-  virtual void TakeImportedInterface(
+          callback) override {}
+  void TakeImportedInterface(
       imported::ImportedInterfacePtr imported,
       const mojo::Callback<void(imported::ImportedInterfacePtr)>& callback)
-      MOJO_OVERRIDE {}
+      override {}
 
  private:
   ScopedMessagePipeHandle pipe1_;
@@ -128,19 +122,16 @@ class SampleFactoryImpl : public InterfaceImpl<sample::Factory> {
 
 class SampleFactoryClientImpl : public sample::FactoryClient {
  public:
-  SampleFactoryClientImpl() : got_response_(false) {
-  }
+  SampleFactoryClientImpl() : got_response_(false) {}
 
   void set_expected_text_reply(const std::string& expected_text_reply) {
     expected_text_reply_ = expected_text_reply;
   }
 
-  bool got_response() const {
-    return got_response_;
-  }
+  bool got_response() const { return got_response_; }
 
-  virtual void DidStuff(sample::ResponsePtr response,
-                        const String& text_reply) MOJO_OVERRIDE {
+  void DidStuff(sample::ResponsePtr response,
+                const String& text_reply) override {
     EXPECT_EQ(expected_text_reply_, text_reply);
 
     if (response->pipe.is_valid()) {
@@ -161,7 +152,7 @@ class SampleFactoryClientImpl : public sample::FactoryClient {
     got_response_ = true;
   }
 
-  virtual void DidStuff2(const String& text_reply) MOJO_OVERRIDE {
+  void DidStuff2(const String& text_reply) override {
     got_response_ = true;
     EXPECT_EQ(expected_text_reply_, text_reply);
   }
@@ -175,13 +166,9 @@ class SampleFactoryClientImpl : public sample::FactoryClient {
 
 class HandlePassingTest : public testing::Test {
  public:
-  virtual void TearDown() {
-    PumpMessages();
-  }
+  void TearDown() override { PumpMessages(); }
 
-  void PumpMessages() {
-    loop_.RunUntilIdle();
-  }
+  void PumpMessages() { loop_.RunUntilIdle(); }
 
  private:
   Environment env_;
@@ -251,11 +238,10 @@ TEST_F(HandlePassingTest, DataPipe) {
   // factory.
   ScopedDataPipeProducerHandle producer_handle;
   ScopedDataPipeConsumerHandle consumer_handle;
-  MojoCreateDataPipeOptions options = {
-      sizeof(MojoCreateDataPipeOptions),
-      MOJO_CREATE_DATA_PIPE_OPTIONS_FLAG_NONE,
-      1,
-      1024};
+  MojoCreateDataPipeOptions options = {sizeof(MojoCreateDataPipeOptions),
+                                       MOJO_CREATE_DATA_PIPE_OPTIONS_FLAG_NONE,
+                                       1,
+                                       1024};
   ASSERT_EQ(MOJO_RESULT_OK,
             CreateDataPipe(&options, &producer_handle, &consumer_handle));
   std::string expected_text_reply = "got it";
@@ -263,8 +249,10 @@ TEST_F(HandlePassingTest, DataPipe) {
   // +1 for \0.
   uint32_t data_size = static_cast<uint32_t>(expected_text_reply.size() + 1);
   ASSERT_EQ(MOJO_RESULT_OK,
-            WriteDataRaw(producer_handle.get(), expected_text_reply.c_str(),
-                         &data_size, MOJO_WRITE_DATA_FLAG_ALL_OR_NONE));
+            WriteDataRaw(producer_handle.get(),
+                         expected_text_reply.c_str(),
+                         &data_size,
+                         MOJO_WRITE_DATA_FLAG_ALL_OR_NONE));
 
   factory->DoStuff2(consumer_handle.Pass());
 
@@ -325,7 +313,7 @@ TEST_F(HandlePassingTest, CreateNamedObject) {
   sample::NamedObjectPtr object1;
   EXPECT_FALSE(object1);
 
-  InterfaceRequest<sample::NamedObject> object1_request = Get(&object1);
+  InterfaceRequest<sample::NamedObject> object1_request = GetProxy(&object1);
   EXPECT_TRUE(object1_request.is_pending());
   factory->CreateNamedObject(object1_request.Pass());
   EXPECT_FALSE(object1_request.is_pending());  // We've passed the request.
@@ -334,7 +322,7 @@ TEST_F(HandlePassingTest, CreateNamedObject) {
   object1->SetName("object1");
 
   sample::NamedObjectPtr object2;
-  factory->CreateNamedObject(Get(&object2));
+  factory->CreateNamedObject(GetProxy(&object2));
   object2->SetName("object2");
 
   std::string name1;

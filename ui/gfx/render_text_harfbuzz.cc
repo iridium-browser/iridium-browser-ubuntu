@@ -71,12 +71,12 @@ void GetGlyphWidthAndExtents(SkPaint* paint,
                              hb_codepoint_t codepoint,
                              hb_position_t* width,
                              hb_glyph_extents_t* extents) {
-  DCHECK_LE(codepoint, 0xFFFFU);
+  DCHECK_LE(codepoint, std::numeric_limits<uint16>::max());
   paint->setTextEncoding(SkPaint::kGlyphID_TextEncoding);
 
   SkScalar sk_width;
   SkRect sk_bounds;
-  uint16_t glyph = codepoint;
+  uint16_t glyph = static_cast<uint16_t>(codepoint);
 
   paint->getTextWidths(&glyph, sizeof(glyph), &sk_width, &sk_bounds);
   if (width)
@@ -273,7 +273,7 @@ class HarfBuzzFace {
 
 // Creates a HarfBuzz font from the given Skia face and text size.
 hb_font_t* CreateHarfBuzzFont(SkTypeface* skia_face,
-                              int text_size,
+                              SkScalar text_size,
                               const FontRenderParams& params,
                               bool background_is_transparent) {
   typedef std::pair<HarfBuzzFace, GlyphCache> FaceCache;
@@ -882,7 +882,7 @@ void RenderTextHarfBuzz::EnsureLayout() {
       lines[0].segments.push_back(segment);
 
       paint.setTypeface(run.skia_face.get());
-      paint.setTextSize(run.font_size);
+      paint.setTextSize(SkIntToScalar(run.font_size));
       SkPaint::FontMetrics metrics;
       paint.getFontMetrics(&metrics);
 
@@ -909,7 +909,7 @@ void RenderTextHarfBuzz::DrawVisualText(Canvas* canvas) {
   for (size_t i = 0; i < runs_.size(); ++i) {
     const internal::TextRunHarfBuzz& run = *runs_[visual_to_logical_[i]];
     renderer.SetTypeface(run.skia_face.get());
-    renderer.SetTextSize(run.font_size);
+    renderer.SetTextSize(SkIntToScalar(run.font_size));
     renderer.SetFontRenderParams(run.render_params,
                                  background_is_transparent());
 
@@ -937,11 +937,12 @@ void RenderTextHarfBuzz::DrawVisualText(Canvas* canvas) {
       renderer.DrawPosText(&positions[colored_glyphs.start()],
                            &run.glyphs[colored_glyphs.start()],
                            colored_glyphs.length());
-      int width = (colored_glyphs.end() == run.glyph_count ? run.width :
-              run.positions[colored_glyphs.end()].x()) -
-          run.positions[colored_glyphs.start()].x();
-      renderer.DrawDecorations(origin.x(), origin.y(), width, run.underline,
-                               run.strike, run.diagonal_strike);
+      int start_x = SkScalarRoundToInt(positions[colored_glyphs.start()].x());
+      int end_x = SkScalarRoundToInt((colored_glyphs.end() == run.glyph_count) ?
+          (run.width + SkIntToScalar(origin.x())) :
+          positions[colored_glyphs.end()].x());
+      renderer.DrawDecorations(start_x, origin.y(), end_x - start_x,
+                               run.underline, run.strike, run.diagonal_strike);
     }
 
     current_x += run.width;
@@ -1069,84 +1070,108 @@ void RenderTextHarfBuzz::ItemizeText() {
   ubidi_reorderLogical(&levels[0], num_runs, &logical_to_visual_[0]);
 }
 
+bool RenderTextHarfBuzz::CompareFamily(
+    internal::TextRunHarfBuzz* run,
+    const std::string& family,
+    const gfx::FontRenderParams& render_params,
+    std::string* best_family,
+    gfx::FontRenderParams* best_render_params,
+    size_t* best_missing_glyphs) {
+  if (!ShapeRunWithFont(run, family, render_params))
+    return false;
+
+  const size_t missing_glyphs = run->CountMissingGlyphs();
+  if (missing_glyphs < *best_missing_glyphs) {
+    *best_family = family;
+    *best_render_params = render_params;
+    *best_missing_glyphs = missing_glyphs;
+  }
+  return missing_glyphs == 0;
+}
+
 void RenderTextHarfBuzz::ShapeRun(internal::TextRunHarfBuzz* run) {
   const Font& primary_font = font_list().GetPrimaryFont();
-  const std::string primary_font_name = primary_font.GetFontName();
+  const std::string primary_family = primary_font.GetFontName();
   run->font_size = primary_font.GetFontSize();
 
-  size_t best_font_missing = std::numeric_limits<size_t>::max();
-  std::string best_font;
-  std::string current_font;
+  std::string best_family;
+  FontRenderParams best_render_params;
+  size_t best_missing_glyphs = std::numeric_limits<size_t>::max();
 
-  // Try shaping with |primary_font|.
-  if (ShapeRunWithFont(run, primary_font_name)) {
-    current_font = primary_font_name;
-    size_t current_missing = run->CountMissingGlyphs();
-    if (current_missing == 0)
+  for (const Font& font : font_list().GetFonts()) {
+    if (CompareFamily(run, font.GetFontName(), font.GetFontRenderParams(),
+                      &best_family, &best_render_params, &best_missing_glyphs))
       return;
-    if (current_missing < best_font_missing) {
-      best_font_missing = current_missing;
-      best_font = current_font;
-    }
   }
 
 #if defined(OS_WIN)
   Font uniscribe_font;
+  std::string uniscribe_family;
   const base::char16* run_text = &(GetLayoutText()[run->range.start()]);
   if (GetUniscribeFallbackFont(primary_font, run_text, run->range.length(),
-                               &uniscribe_font) &&
-      ShapeRunWithFont(run, uniscribe_font.GetFontName())) {
-    current_font = uniscribe_font.GetFontName();
-    size_t current_missing = run->CountMissingGlyphs();
-    if (current_missing == 0)
+                               &uniscribe_font)) {
+    uniscribe_family = uniscribe_font.GetFontName();
+    if (CompareFamily(run, uniscribe_family,
+                      uniscribe_font.GetFontRenderParams(),
+                      &best_family, &best_render_params, &best_missing_glyphs))
       return;
-    if (current_missing < best_font_missing) {
-      best_font_missing = current_missing;
-      best_font = current_font;
-    }
   }
 #endif
 
-  // Try shaping with the fonts in the fallback list except the first, which is
-  // |primary_font|.
-  std::vector<std::string> fonts = GetFallbackFontFamilies(primary_font_name);
-  for (size_t i = 1; i < fonts.size(); ++i) {
-    if (!ShapeRunWithFont(run, fonts[i]))
+  std::vector<std::string> fallback_families =
+      GetFallbackFontFamilies(primary_family);
+
+#if defined(OS_WIN)
+  // Append fonts in the fallback list of the Uniscribe font.
+  if (!uniscribe_family.empty()) {
+    std::vector<std::string> uniscribe_fallbacks =
+        GetFallbackFontFamilies(uniscribe_family);
+    fallback_families.insert(fallback_families.end(),
+        uniscribe_fallbacks.begin(), uniscribe_fallbacks.end());
+  }
+#endif
+
+  // Try shaping with the fallback fonts.
+  for (auto family : fallback_families) {
+    if (family == primary_family)
       continue;
-    current_font = fonts[i];
-    size_t current_missing = run->CountMissingGlyphs();
-    if (current_missing == 0)
+#if defined(OS_WIN)
+    if (family == uniscribe_family)
+      continue;
+#endif
+    FontRenderParamsQuery query(false);
+    query.families.push_back(family);
+    query.pixel_size = run->font_size;
+    query.style = run->font_style;
+    FontRenderParams fallback_render_params = GetFontRenderParams(query, NULL);
+    if (CompareFamily(run, family, fallback_render_params, &best_family,
+                      &best_render_params, &best_missing_glyphs))
       return;
-    if (current_missing < best_font_missing) {
-      best_font_missing = current_missing;
-      best_font = current_font;
-    }
   }
 
-  if (!best_font.empty() &&
-      (best_font == current_font || ShapeRunWithFont(run, best_font))) {
+  if (!best_family.empty() &&
+      (best_family == run->family ||
+       ShapeRunWithFont(run, best_family, best_render_params)))
     return;
-  }
 
   run->glyph_count = 0;
   run->width = 0.0f;
 }
 
 bool RenderTextHarfBuzz::ShapeRunWithFont(internal::TextRunHarfBuzz* run,
-                                          const std::string& font_family) {
+                                          const std::string& font_family,
+                                          const FontRenderParams& params) {
   const base::string16& text = GetLayoutText();
   skia::RefPtr<SkTypeface> skia_face =
       internal::CreateSkiaTypeface(font_family, run->font_style);
   if (skia_face == NULL)
     return false;
   run->skia_face = skia_face;
-  FontRenderParamsQuery query(false);
-  query.families.push_back(font_family);
-  query.pixel_size = run->font_size;
-  query.style = run->font_style;
-  run->render_params = GetFontRenderParams(query, NULL);
-  hb_font_t* harfbuzz_font = CreateHarfBuzzFont(run->skia_face.get(),
-      run->font_size, run->render_params, background_is_transparent());
+  run->family = font_family;
+  run->render_params = params;
+  hb_font_t* harfbuzz_font = CreateHarfBuzzFont(
+      run->skia_face.get(), SkIntToScalar(run->font_size), run->render_params,
+      background_is_transparent());
 
   // Create a HarfBuzz buffer and add the string to be shaped. The HarfBuzz
   // buffer holds our text, run information to be used by the shaping engine,
@@ -1174,17 +1199,16 @@ bool RenderTextHarfBuzz::ShapeRunWithFont(internal::TextRunHarfBuzz* run,
   run->positions.reset(new SkPoint[run->glyph_count]);
   run->width = 0.0f;
   for (size_t i = 0; i < run->glyph_count; ++i) {
-    run->glyphs[i] = infos[i].codepoint;
+    DCHECK_LE(infos[i].codepoint, std::numeric_limits<uint16>::max());
+    run->glyphs[i] = static_cast<uint16>(infos[i].codepoint);
     run->glyph_to_char[i] = infos[i].cluster;
-    const int x_offset = SkFixedToScalar(hb_positions[i].x_offset);
-    const int y_offset = SkFixedToScalar(hb_positions[i].y_offset);
+    const SkScalar x_offset = SkFixedToScalar(hb_positions[i].x_offset);
+    const SkScalar y_offset = SkFixedToScalar(hb_positions[i].y_offset);
     run->positions[i].set(run->width + x_offset, -y_offset);
     run->width += SkFixedToScalar(hb_positions[i].x_advance);
-#if defined(OS_LINUX)
-    // Match Pango's glyph rounding logic on Linux.
+    // Round run widths if subpixel positioning is off to match native behavior.
     if (!run->render_params.subpixel_positioning)
       run->width = std::floor(run->width + 0.5f);
-#endif
   }
 
   hb_buffer_destroy(buffer);

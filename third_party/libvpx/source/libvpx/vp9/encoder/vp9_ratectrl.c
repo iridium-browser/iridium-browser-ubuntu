@@ -177,6 +177,9 @@ int vp9_rc_bits_per_mb(FRAME_TYPE frame_type, int qindex,
   const double q = vp9_convert_qindex_to_q(qindex, bit_depth);
   int enumerator = frame_type == KEY_FRAME ? 2700000 : 1800000;
 
+  assert(correction_factor <= MAX_BPB_FACTOR &&
+         correction_factor >= MIN_BPB_FACTOR);
+
   // q based adjustment to baseline enumerator
   enumerator += (int)(enumerator * q) >> 12;
   return (int)(enumerator * correction_factor / q);
@@ -187,7 +190,8 @@ static int estimate_bits_at_q(FRAME_TYPE frame_type, int q, int mbs,
                               vpx_bit_depth_t bit_depth) {
   const int bpm = (int)(vp9_rc_bits_per_mb(frame_type, q, correction_factor,
                                            bit_depth));
-  return ((uint64_t)bpm * mbs) >> BPER_MB_NORMBITS;
+  return MAX(FRAME_OVERHEAD_BITS,
+             (int)((uint64_t)bpm * mbs) >> BPER_MB_NORMBITS);
 }
 
 int vp9_rc_clamp_pframe_target_size(const VP9_COMP *const cpi, int target) {
@@ -276,7 +280,7 @@ void vp9_rc_init(const VP9EncoderConfig *oxcf, int pass, RATE_CONTROL *rc) {
   }
 
   rc->last_q[KEY_FRAME] = oxcf->best_allowed_q;
-  rc->last_q[INTER_FRAME] = oxcf->best_allowed_q;
+  rc->last_q[INTER_FRAME] = oxcf->worst_allowed_q;
 
   rc->buffer_level =    rc->starting_buffer_level;
   rc->bits_off_target = rc->starting_buffer_level;
@@ -298,7 +302,6 @@ void vp9_rc_init(const VP9EncoderConfig *oxcf, int pass, RATE_CONTROL *rc) {
   rc->source_alt_ref_active = 0;
 
   rc->frames_till_gf_update_due = 0;
-
   rc->ni_av_qi = oxcf->worst_allowed_q;
   rc->ni_tot_qi = 0;
   rc->ni_frames = 0;
@@ -410,7 +413,7 @@ void vp9_rc_update_rate_correction_factors(VP9_COMP *cpi, int damp_var) {
                                                  rate_correction_factor,
                                                  cm->bit_depth);
   // Work out a size correction factor.
-  if (projected_size_based_on_q > 0)
+  if (projected_size_based_on_q > FRAME_OVERHEAD_BITS)
     correction_factor = (100 * cpi->rc.projected_frame_size) /
                             projected_size_based_on_q;
 
@@ -559,7 +562,7 @@ static int calc_active_worst_quality_one_pass_cbr(const VP9_COMP *cpi) {
   int adjustment = 0;
   int active_worst_quality;
   if (cm->frame_type == KEY_FRAME)
-    return rc->worst_quality;
+    return rc->worst_quality * 4 / 5;
   if (cm->current_video_frame > 1)
     active_worst_quality = MIN(rc->worst_quality,
                                rc->avg_frame_qindex[INTER_FRAME] * 5 / 4);
@@ -985,6 +988,21 @@ static int rc_pick_q_and_bounds_two_pass(const VP9_COMP *cpi,
           (active_best_quality < cq_level)) {
         active_best_quality = cq_level;
       }
+    }
+  }
+
+  // Extenstion to max or min Q if undershoot or overshoot is outside
+  // the permitted range.
+  if ((cpi->oxcf.rc_mode == VPX_VBR) &&
+      (cpi->twopass.gf_zeromotion_pct < VLOW_MOTION_THRESHOLD)) {
+    if (frame_is_intra_only(cm) ||
+        (!rc->is_src_frame_alt_ref &&
+         (cpi->refresh_golden_frame || cpi->refresh_alt_ref_frame))) {
+      active_best_quality -= cpi->twopass.extend_minq;
+      active_worst_quality += (cpi->twopass.extend_maxq / 2);
+    } else {
+      active_best_quality -= cpi->twopass.extend_minq / 2;
+      active_worst_quality += cpi->twopass.extend_maxq;
     }
   }
 
@@ -1482,9 +1500,7 @@ void vp9_rc_set_gf_max_interval(const VP9_COMP *const cpi,
   rc->max_gf_interval = 16;
 
   // Extended interval for genuinely static scenes
-  rc->static_scene_max_gf_interval = oxcf->key_freq >> 1;
-  if (rc->static_scene_max_gf_interval > (MAX_LAG_BUFFERS * 2))
-    rc->static_scene_max_gf_interval = MAX_LAG_BUFFERS * 2;
+  rc->static_scene_max_gf_interval = MAX_LAG_BUFFERS * 2;
 
   if (is_altref_enabled(cpi)) {
     if (rc->static_scene_max_gf_interval > oxcf->lag_in_frames - 1)

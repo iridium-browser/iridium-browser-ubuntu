@@ -10,7 +10,7 @@
 #include "../GrAARectRenderer.h"
 
 #include "GrGeometryProcessor.h"
-#include "gl/builders/GrGLFullProgramBuilder.h"
+#include "gl/builders/GrGLProgramBuilder.h"
 #include "gl/GrGLProcessor.h"
 #include "gl/GrGLGeometryProcessor.h"
 #include "gl/GrGLSL.h"
@@ -194,7 +194,7 @@ bool GrDashingEffect::DrawDashLine(const SkPoint pts[2], const GrPaint& paint,
         SkMatrix rotMatrix;
         align_to_x_axis(pts, &rotMatrix, ptsRot);
         if(!rotMatrix.invert(&srcRotInv)) {
-            GrPrintf("Failed to create invertible rotation matrix!\n");
+            SkDebugf("Failed to create invertible rotation matrix!\n");
             return false;
         }
     } else {
@@ -369,7 +369,7 @@ bool GrDashingEffect::DrawDashLine(const SkPoint pts[2], const GrPaint& paint,
 
     GrDrawTarget::AutoReleaseGeometry geo(target, totalRectCnt * 4, 0);
     if (!geo.succeeded()) {
-        GrPrintf("Failed to get space for vertices!\n");
+        SkDebugf("Failed to get space for vertices!\n");
         return false;
     }
 
@@ -456,14 +456,14 @@ public:
 
     typedef GLDashingCircleEffect GLProcessor;
 
-    virtual void getConstantColorComponents(GrColor* color, uint32_t* validFlags) const SK_OVERRIDE;
-
     virtual const GrBackendGeometryProcessorFactory& getFactory() const SK_OVERRIDE;
 
 private:
     DashingCircleEffect(GrPrimitiveEdgeType edgeType, const DashInfo& info, SkScalar radius);
 
-    virtual bool onIsEqual(const GrProcessor& other) const SK_OVERRIDE;
+    virtual bool onIsEqual(const GrGeometryProcessor& other) const SK_OVERRIDE;
+
+    virtual void onComputeInvariantOutput(InvariantOutput* inout) const SK_OVERRIDE;
 
     GrPrimitiveEdgeType    fEdgeType;
     const GrShaderVar&  fInCoord;
@@ -482,13 +482,7 @@ class GLDashingCircleEffect : public GrGLGeometryProcessor {
 public:
     GLDashingCircleEffect(const GrBackendProcessorFactory&, const GrProcessor&);
 
-    virtual void emitCode(GrGLFullProgramBuilder* builder,
-                          const GrGeometryProcessor& geometryProcessor,
-                          const GrProcessorKey& key,
-                          const char* outputColor,
-                          const char* inputColor,
-                          const TransformedCoordsArray&,
-                          const TextureSamplerArray&) SK_OVERRIDE;
+    virtual void emitCode(const EmitArgs&) SK_OVERRIDE;
 
     static inline void GenKey(const GrProcessor&, const GrGLCaps&, GrProcessorKeyBuilder*);
 
@@ -510,33 +504,27 @@ GLDashingCircleEffect::GLDashingCircleEffect(const GrBackendProcessorFactory& fa
     fPrevIntervalLength = SK_ScalarMax;
 }
 
-void GLDashingCircleEffect::emitCode(GrGLFullProgramBuilder* builder,
-                                    const GrGeometryProcessor& geometryProcessor,
-                                    const GrProcessorKey& key,
-                                    const char* outputColor,
-                                    const char* inputColor,
-                                    const TransformedCoordsArray&,
-                                    const TextureSamplerArray& samplers) {
-    const DashingCircleEffect& dce = geometryProcessor.cast<DashingCircleEffect>();
+void GLDashingCircleEffect::emitCode(const EmitArgs& args) {
+    const DashingCircleEffect& dce = args.fGP.cast<DashingCircleEffect>();
     const char *paramName;
     // The param uniforms, xyz, refer to circle radius - 0.5, cicles center x coord, and
     // the total interval length of the dash.
-    fParamUniform = builder->addUniform(GrGLProgramBuilder::kFragment_Visibility,
-                                       kVec3f_GrSLType,
-                                       "params",
-                                       &paramName);
+    fParamUniform = args.fPB->addUniform(GrGLProgramBuilder::kFragment_Visibility,
+                                         kVec3f_GrSLType,
+                                         "params",
+                                         &paramName);
 
-    const char *vsCoordName, *fsCoordName;
-    builder->addVarying(kVec2f_GrSLType, "Coord", &vsCoordName, &fsCoordName);
+    GrGLVertToFrag v(kVec2f_GrSLType);
+    args.fPB->addVarying("Coord", &v);
 
-    GrGLVertexShaderBuilder* vsBuilder = builder->getVertexShaderBuilder();
-    vsBuilder->codeAppendf("\t%s = %s;\n", vsCoordName, dce.inCoord().c_str());
+    GrGLVertexBuilder* vsBuilder = args.fPB->getVertexShaderBuilder();
+    vsBuilder->codeAppendf("\t%s = %s;\n", v.vsOut(), dce.inCoord().c_str());
 
     // transforms all points so that we can compare them to our test circle
-    GrGLProcessorFragmentShaderBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+    GrGLGPFragmentBuilder* fsBuilder = args.fPB->getFragmentShaderBuilder();
     fsBuilder->codeAppendf("\t\tfloat xShifted = %s.x - floor(%s.x / %s.z) * %s.z;\n",
-                           fsCoordName, fsCoordName, paramName, paramName);
-    fsBuilder->codeAppendf("\t\tvec2 fragPosShifted = vec2(xShifted, %s.y);\n", fsCoordName);
+                           v.fsIn(), v.fsIn(), paramName, paramName);
+    fsBuilder->codeAppendf("\t\tvec2 fragPosShifted = vec2(xShifted, %s.y);\n", v.fsIn());
     fsBuilder->codeAppendf("\t\tvec2 center = vec2(%s.y, 0.0);\n", paramName);
     fsBuilder->codeAppend("\t\tfloat dist = length(center - fragPosShifted);\n");
     if (GrProcessorEdgeTypeIsAA(dce.getEdgeType())) {
@@ -547,8 +535,8 @@ void GLDashingCircleEffect::emitCode(GrGLFullProgramBuilder* builder,
         fsBuilder->codeAppendf("\t\tfloat alpha = 1.0;\n");
         fsBuilder->codeAppendf("\t\talpha *=  dist < %s.x + 0.5 ? 1.0 : 0.0;\n", paramName);
     }
-    fsBuilder->codeAppendf("\t\t%s = %s;\n", outputColor,
-                           (GrGLSLExpr4(inputColor) * GrGLSLExpr1("alpha")).c_str());
+    fsBuilder->codeAppendf("\t\t%s = %s;\n", args.fOutput,
+                           (GrGLSLExpr4(args.fInput) * GrGLSLExpr1("alpha")).c_str());
 }
 
 void GLDashingCircleEffect::setData(const GrGLProgramDataManager& pdman
@@ -584,8 +572,8 @@ GrGeometryProcessor* DashingCircleEffect::Create(GrPrimitiveEdgeType edgeType, c
 
 DashingCircleEffect::~DashingCircleEffect() {}
 
-void DashingCircleEffect::getConstantColorComponents(GrColor* color, uint32_t* validFlags) const {
-    *validFlags = 0;
+void DashingCircleEffect::onComputeInvariantOutput(InvariantOutput* inout) const {
+    inout->mulByUnknownAlpha();
 }
 
 const GrBackendGeometryProcessorFactory& DashingCircleEffect::getFactory() const {
@@ -605,7 +593,7 @@ DashingCircleEffect::DashingCircleEffect(GrPrimitiveEdgeType edgeType, const Das
     fCenterX = SkScalarHalf(offLen);
 }
 
-bool DashingCircleEffect::onIsEqual(const GrProcessor& other) const {
+bool DashingCircleEffect::onIsEqual(const GrGeometryProcessor& other) const {
     const DashingCircleEffect& dce = other.cast<DashingCircleEffect>();
     return (fEdgeType == dce.fEdgeType &&
             fIntervalLength == dce.fIntervalLength &&
@@ -668,14 +656,14 @@ public:
 
     typedef GLDashingLineEffect GLProcessor;
 
-    virtual void getConstantColorComponents(GrColor* color, uint32_t* validFlags) const SK_OVERRIDE;
-
     virtual const GrBackendGeometryProcessorFactory& getFactory() const SK_OVERRIDE;
 
 private:
     DashingLineEffect(GrPrimitiveEdgeType edgeType, const DashInfo& info, SkScalar strokeWidth);
 
-    virtual bool onIsEqual(const GrProcessor& other) const SK_OVERRIDE;
+    virtual bool onIsEqual(const GrGeometryProcessor& other) const SK_OVERRIDE;
+
+    virtual void onComputeInvariantOutput(InvariantOutput* inout) const SK_OVERRIDE;
 
     GrPrimitiveEdgeType    fEdgeType;
     const GrShaderVar&  fInCoord;
@@ -693,13 +681,7 @@ class GLDashingLineEffect : public GrGLGeometryProcessor {
 public:
     GLDashingLineEffect(const GrBackendProcessorFactory&, const GrProcessor&);
 
-    virtual void emitCode(GrGLFullProgramBuilder* builder,
-                          const GrGeometryProcessor& geometryProcessor,
-                          const GrProcessorKey& key,
-                          const char* outputColor,
-                          const char* inputColor,
-                          const TransformedCoordsArray&,
-                          const TextureSamplerArray&) SK_OVERRIDE;
+    virtual void emitCode(const EmitArgs&) SK_OVERRIDE;
 
     static inline void GenKey(const GrProcessor&, const GrGLCaps&, GrProcessorKeyBuilder*);
 
@@ -720,38 +702,32 @@ GLDashingLineEffect::GLDashingLineEffect(const GrBackendProcessorFactory& factor
     fPrevIntervalLength = SK_ScalarMax;
 }
 
-void GLDashingLineEffect::emitCode(GrGLFullProgramBuilder* builder,
-                                   const GrGeometryProcessor& geometryProcessor,
-                                   const GrProcessorKey& key,
-                                   const char* outputColor,
-                                   const char* inputColor,
-                                   const TransformedCoordsArray&,
-                                   const TextureSamplerArray& samplers) {
-    const DashingLineEffect& de = geometryProcessor.cast<DashingLineEffect>();
+void GLDashingLineEffect::emitCode(const EmitArgs& args) {
+    const DashingLineEffect& de = args.fGP.cast<DashingLineEffect>();
     const char *rectName;
     // The rect uniform's xyzw refer to (left + 0.5, top + 0.5, right - 0.5, bottom - 0.5),
     // respectively.
-    fRectUniform = builder->addUniform(GrGLProgramBuilder::kFragment_Visibility,
+    fRectUniform = args.fPB->addUniform(GrGLProgramBuilder::kFragment_Visibility,
                                        kVec4f_GrSLType,
                                        "rect",
                                        &rectName);
     const char *intervalName;
     // The interval uniform's refers to the total length of the interval (on + off)
-    fIntervalUniform = builder->addUniform(GrGLProgramBuilder::kFragment_Visibility,
-                                       kFloat_GrSLType,
-                                       "interval",
-                                       &intervalName);
+    fIntervalUniform = args.fPB->addUniform(GrGLProgramBuilder::kFragment_Visibility,
+                                            kFloat_GrSLType,
+                                            "interval",
+                                            &intervalName);
 
-    const char *vsCoordName, *fsCoordName;
-    builder->addVarying(kVec2f_GrSLType, "Coord", &vsCoordName, &fsCoordName);
-    GrGLVertexShaderBuilder* vsBuilder = builder->getVertexShaderBuilder();
-    vsBuilder->codeAppendf("\t%s = %s;\n", vsCoordName, de.inCoord().c_str());
+    GrGLVertToFrag v(kVec2f_GrSLType);
+    args.fPB->addVarying("Coord", &v);
+    GrGLVertexBuilder* vsBuilder = args.fPB->getVertexShaderBuilder();
+    vsBuilder->codeAppendf("\t%s = %s;\n", v.vsOut(), de.inCoord().c_str());
 
     // transforms all points so that we can compare them to our test rect
-    GrGLProcessorFragmentShaderBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+    GrGLGPFragmentBuilder* fsBuilder = args.fPB->getFragmentShaderBuilder();
     fsBuilder->codeAppendf("\t\tfloat xShifted = %s.x - floor(%s.x / %s) * %s;\n",
-                           fsCoordName, fsCoordName, intervalName, intervalName);
-    fsBuilder->codeAppendf("\t\tvec2 fragPosShifted = vec2(xShifted, %s.y);\n", fsCoordName);
+                           v.fsIn(), v.fsIn(), intervalName, intervalName);
+    fsBuilder->codeAppendf("\t\tvec2 fragPosShifted = vec2(xShifted, %s.y);\n", v.fsIn());
     if (GrProcessorEdgeTypeIsAA(de.getEdgeType())) {
         // The amount of coverage removed in x and y by the edges is computed as a pair of negative
         // numbers, xSub and ySub.
@@ -769,8 +745,8 @@ void GLDashingLineEffect::emitCode(GrGLFullProgramBuilder* builder,
         fsBuilder->codeAppendf("\t\talpha *= (fragPosShifted.x - %s.x) > -0.5 ? 1.0 : 0.0;\n", rectName);
         fsBuilder->codeAppendf("\t\talpha *= (%s.z - fragPosShifted.x) >= -0.5 ? 1.0 : 0.0;\n", rectName);
     }
-    fsBuilder->codeAppendf("\t\t%s = %s;\n", outputColor,
-                           (GrGLSLExpr4(inputColor) * GrGLSLExpr1("alpha")).c_str());
+    fsBuilder->codeAppendf("\t\t%s = %s;\n", args.fOutput,
+                           (GrGLSLExpr4(args.fInput) * GrGLSLExpr1("alpha")).c_str());
 }
 
 void GLDashingLineEffect::setData(const GrGLProgramDataManager& pdman,
@@ -807,8 +783,8 @@ GrGeometryProcessor* DashingLineEffect::Create(GrPrimitiveEdgeType edgeType,
 
 DashingLineEffect::~DashingLineEffect() {}
 
-void DashingLineEffect::getConstantColorComponents(GrColor* color, uint32_t* validFlags) const {
-    *validFlags = 0;
+void DashingLineEffect::onComputeInvariantOutput(InvariantOutput* inout) const {
+    inout->mulByUnknownAlpha();
 }
 
 const GrBackendGeometryProcessorFactory& DashingLineEffect::getFactory() const {
@@ -829,7 +805,7 @@ DashingLineEffect::DashingLineEffect(GrPrimitiveEdgeType edgeType, const DashInf
     fRect.set(halfOffLen, -halfStroke, halfOffLen + onLen, halfStroke);
 }
 
-bool DashingLineEffect::onIsEqual(const GrProcessor& other) const {
+bool DashingLineEffect::onIsEqual(const GrGeometryProcessor& other) const {
     const DashingLineEffect& de = other.cast<DashingLineEffect>();
     return (fEdgeType == de.fEdgeType &&
             fRect == de.fRect &&

@@ -60,19 +60,18 @@ class InputInjectorMac : public InputInjector {
  public:
   explicit InputInjectorMac(
       scoped_refptr<base::SingleThreadTaskRunner> task_runner);
-  virtual ~InputInjectorMac();
+  ~InputInjectorMac() override;
 
   // ClipboardStub interface.
-  virtual void InjectClipboardEvent(const ClipboardEvent& event) OVERRIDE;
+  void InjectClipboardEvent(const ClipboardEvent& event) override;
 
   // InputStub interface.
-  virtual void InjectKeyEvent(const KeyEvent& event) OVERRIDE;
-  virtual void InjectTextEvent(const TextEvent& event) OVERRIDE;
-  virtual void InjectMouseEvent(const MouseEvent& event) OVERRIDE;
+  void InjectKeyEvent(const KeyEvent& event) override;
+  void InjectTextEvent(const TextEvent& event) override;
+  void InjectMouseEvent(const MouseEvent& event) override;
 
   // InputInjector interface.
-  virtual void Start(
-      scoped_ptr<protocol::ClipboardStub> client_clipboard) OVERRIDE;
+  void Start(scoped_ptr<protocol::ClipboardStub> client_clipboard) override;
 
  private:
   // The actual implementation resides in InputInjectorMac::Core class.
@@ -338,7 +337,7 @@ InputInjectorMac::Core::~Core() {}
 scoped_ptr<InputInjector> InputInjector::Create(
     scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner) {
-  return scoped_ptr<InputInjector>(new InputInjectorMac(main_task_runner));
+  return make_scoped_ptr(new InputInjectorMac(main_task_runner));
 }
 
 }  // namespace remoting

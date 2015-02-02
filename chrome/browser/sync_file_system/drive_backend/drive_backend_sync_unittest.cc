@@ -75,9 +75,9 @@ class DriveBackendSyncTest : public testing::Test,
       : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP),
         pending_remote_changes_(0),
         pending_local_changes_(0) {}
-  virtual ~DriveBackendSyncTest() {}
+  ~DriveBackendSyncTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ASSERT_TRUE(base_dir_.CreateUniqueTempDir());
     in_memory_env_.reset(leveldb::NewMemEnv(leveldb::Env::Default()));
 
@@ -119,26 +119,24 @@ class DriveBackendSyncTest : public testing::Test,
                        worker_task_runner_.get(),
                        drive_task_runner.get(),
                        base_dir_.path(),
-                       NULL,  // task_logger
-                       NULL,  // notification_manager
-                       NULL,  // extension_service
-                       NULL,  // signin_manager
-                       NULL,  // token_service
-                       NULL,  // request_context
-                       scoped_ptr<SyncEngine::DriveServiceFactory>(),
+                       nullptr,  // task_logger
+                       nullptr,  // notification_manager
+                       nullptr,  // extension_service
+                       nullptr,  // signin_manager
+                       nullptr,  // token_service
+                       nullptr,  // request_context
+                       nullptr,  // drive_service
                        in_memory_env_.get()));
     remote_sync_service_->AddServiceObserver(this);
     remote_sync_service_->InitializeForTesting(
-        drive_service.PassAs<drive::DriveServiceInterface>(),
-        uploader.Pass(),
-        scoped_ptr<SyncWorkerInterface>());
+        drive_service.Pass(), uploader.Pass(), nullptr /* sync_worker */);
     remote_sync_service_->SetSyncEnabled(true);
 
     local_sync_service_->SetLocalChangeProcessor(remote_sync_service_.get());
     remote_sync_service_->SetRemoteChangeProcessor(local_sync_service_.get());
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     typedef std::map<std::string, CannedSyncableFileSystem*>::iterator iterator;
     for (iterator itr = file_systems_.begin();
          itr != file_systems_.end(); ++itr) {
@@ -157,11 +155,11 @@ class DriveBackendSyncTest : public testing::Test,
     RevokeSyncableFileSystem();
   }
 
-  virtual void OnRemoteChangeQueueUpdated(int64 pending_changes_hint) OVERRIDE {
+  void OnRemoteChangeQueueUpdated(int64 pending_changes_hint) override {
     pending_remote_changes_ = pending_changes_hint;
   }
 
-  virtual void OnLocalChangeAvailable(int64 pending_changes_hint) OVERRIDE {
+  void OnLocalChangeAvailable(int64 pending_changes_hint) override {
     pending_local_changes_ = pending_changes_hint;
   }
 
@@ -1217,7 +1215,7 @@ TEST_F(DriveBackendSyncTest, ConflictTest_DeleteFolder_AddFolder) {
   EXPECT_EQ(google_apis::HTTP_CREATED,
             fake_drive_service_helper()->AddFolder(
                 app_root_folder_id,
-                "conflict_to_existing_remote", NULL));
+                "conflict_to_existing_remote", nullptr));
 
   EXPECT_EQ(SYNC_STATUS_OK, ProcessChangesUntilDone());
   VerifyConsistency();
@@ -1280,14 +1278,15 @@ TEST_F(DriveBackendSyncTest, ConflictTest_DeleteFolder_AddFile) {
 
   EXPECT_EQ(google_apis::HTTP_SUCCESS,
             fake_drive_service_helper()->AddFile(
-                app_root_folder_id, "conflict_to_pending_remote", "foo", NULL));
+                app_root_folder_id, "conflict_to_pending_remote", "foo",
+                nullptr));
 
   FetchRemoteChanges();
 
   EXPECT_EQ(google_apis::HTTP_SUCCESS,
             fake_drive_service_helper()->AddFile(
                 app_root_folder_id, "conflict_to_existing_remote", "bar",
-                NULL));
+                nullptr));
 
   EXPECT_EQ(SYNC_STATUS_OK, ProcessChangesUntilDone());
   VerifyConsistency();
@@ -1554,13 +1553,13 @@ TEST_F(DriveBackendSyncTest, ConflictTest_DeleteFile_AddFolder) {
 
   EXPECT_EQ(google_apis::HTTP_CREATED,
             fake_drive_service_helper()->AddFolder(
-                app_root_folder_id, "conflict_to_pending_remote", NULL));
+                app_root_folder_id, "conflict_to_pending_remote", nullptr));
 
   FetchRemoteChanges();
 
   EXPECT_EQ(google_apis::HTTP_CREATED,
             fake_drive_service_helper()->AddFolder(
-                app_root_folder_id, "conflict_to_existing_remote", NULL));
+                app_root_folder_id, "conflict_to_existing_remote", nullptr));
 
   EXPECT_EQ(SYNC_STATUS_OK, ProcessChangesUntilDone());
   VerifyConsistency();
@@ -1629,14 +1628,14 @@ TEST_F(DriveBackendSyncTest, ConflictTest_DeleteFile_AddFile) {
   EXPECT_EQ(google_apis::HTTP_SUCCESS,
             fake_drive_service_helper()->AddFile(
                 app_root_folder_id, "conflict_to_pending_remote", "hoge",
-                NULL));
+                nullptr));
 
   FetchRemoteChanges();
 
   EXPECT_EQ(google_apis::HTTP_SUCCESS,
             fake_drive_service_helper()->AddFile(
                 app_root_folder_id, "conflict_to_existing_remote", "fuga",
-                NULL));
+                nullptr));
 
   EXPECT_EQ(SYNC_STATUS_OK, ProcessChangesUntilDone());
   VerifyConsistency();

@@ -25,6 +25,10 @@ ARCH_MAP = {
         'gyp_arch': 'arm',
         'scons_platform': 'arm',
         },
+    'mips32': {
+        'gyp_arch': 'mips32',
+        'scons_platform': 'mips32',
+        },
     }
 
 
@@ -187,18 +191,18 @@ def ParseStandardCommandLine(context):
   options, args = parser.parse_args()
 
   if len(args) != 3:
-    parser.error('Expected 3 arguments: mode arch clib')
+    parser.error('Expected 3 arguments: mode arch toolchain')
 
   # script + 3 args == 4
-  mode, arch, clib = args
+  mode, arch, toolchain = args
   if mode not in ('dbg', 'opt', 'coverage'):
     parser.error('Invalid mode %r' % mode)
 
   if arch not in ARCH_MAP:
     parser.error('Invalid arch %r' % arch)
 
-  if clib not in ('newlib', 'glibc', 'pnacl'):
-    parser.error('Invalid clib %r' % clib)
+  if toolchain not in ('newlib', 'glibc', 'pnacl', 'nacl_clang'):
+    parser.error('Invalid toolchain %r' % toolchain)
 
   # TODO(ncbray) allow a command-line override
   platform = GetHostPlatform()
@@ -216,6 +220,10 @@ def ParseStandardCommandLine(context):
       'opt': 'Release',
       'dbg': 'Debug',
       'coverage': 'Debug'}[mode]
+  context['gn_is_debug'] = {
+      'opt': 'false',
+      'dbg': 'true',
+      'coverage': 'true'}[mode]
   context['gyp_arch'] = ARCH_MAP[arch]['gyp_arch']
   context['gyp_vars'] = []
   if context['clang']:
@@ -228,8 +236,9 @@ def ParseStandardCommandLine(context):
   # TODO(mcgrathr): clean this up somehow
   if arch != 'arm' or platform == 'linux':
     context['default_scons_mode'] += [mode + '-host']
-  context['use_glibc'] = clib == 'glibc'
-  context['pnacl'] = clib == 'pnacl'
+  context['use_glibc'] = toolchain == 'glibc'
+  context['pnacl'] = toolchain == 'pnacl'
+  context['nacl_clang'] = toolchain == 'nacl_clang'
   context['max_jobs'] = 8
   context['dry_run'] = options.dry_run
   context['inside_toolchain'] = options.inside_toolchain
@@ -440,6 +449,7 @@ def SCons(context, mode=None, platform=None, parallel=False, browser_test=False,
   if context['asan']: cmd.append('--asan')
   if context['use_glibc']: cmd.append('--nacl_glibc')
   if context['pnacl']: cmd.append('bitcode=1')
+  if context['nacl_clang']: cmd.append('nacl_clang=1')
   if context['use_breakpad_tools']:
     cmd.append('breakpad_tools_dir=breakpad-out')
   if context['android']:

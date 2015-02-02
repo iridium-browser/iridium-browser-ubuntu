@@ -27,19 +27,19 @@ class CONTENT_EXPORT DeviceOrientationEventPump
   static const double kOrientationThreshold;
 
   explicit DeviceOrientationEventPump(RenderThread* thread);
-  virtual ~DeviceOrientationEventPump();
+  ~DeviceOrientationEventPump() override;
 
   // PlatformEventObserver.
-  virtual bool OnControlMessageReceived(const IPC::Message& message) OVERRIDE;
-  virtual void SendFakeDataForTesting(void* data) OVERRIDE;
+  bool OnControlMessageReceived(const IPC::Message& message) override;
+  void SendFakeDataForTesting(void* data) override;
 
  protected:
-  virtual void FireEvent() OVERRIDE;
-  virtual bool InitializeReader(base::SharedMemoryHandle handle) OVERRIDE;
+  void FireEvent() override;
+  bool InitializeReader(base::SharedMemoryHandle handle) override;
 
   // PlatformEventObserver.
-  virtual void SendStartMessage() OVERRIDE;
-  virtual void SendStopMessage() OVERRIDE;
+  void SendStartMessage() override;
+  void SendStopMessage() override;
 
   bool ShouldFireEvent(const blink::WebDeviceOrientationData& data) const;
 

@@ -11,6 +11,7 @@
 #include "base/mac/scoped_nsobject.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 
+class ExtensionInstallPromptShowParams;
 @class ExtensionInstallViewController;
 @class WindowedInstallController;
 
@@ -22,18 +23,18 @@ class WindowedInstallDialogController
   // Initializes the ExtensionInstallViewController and shows the window. This
   // object will delete itself when the window is closed.
   WindowedInstallDialogController(
-      const ExtensionInstallPrompt::ShowParams& show_params,
+      ExtensionInstallPromptShowParams* show_params,
       ExtensionInstallPrompt::Delegate* delegate,
       scoped_refptr<ExtensionInstallPrompt::Prompt> prompt);
-  virtual ~WindowedInstallDialogController();
+  ~WindowedInstallDialogController() override;
 
   // Invoked by the -[NSWindow windowWillClose:] notification after a dialog
   // choice is invoked. Releases owned resources, then deletes |this|.
   void OnWindowClosing();
 
   // ExtensionInstallPrompt::Delegate:
-  virtual void InstallUIProceed() OVERRIDE;
-  virtual void InstallUIAbort(bool user_initiated) OVERRIDE;
+  void InstallUIProceed() override;
+  void InstallUIAbort(bool user_initiated) override;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(WindowedInstallDialogControllerBrowserTest,

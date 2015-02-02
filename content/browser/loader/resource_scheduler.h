@@ -111,7 +111,10 @@ class CONTENT_EXPORT ResourceScheduler : public base::NonThreadSafe {
   // Signals from the UI thread, posted as tasks on the IO thread:
 
   // Called when a renderer is created.
-  void OnClientCreated(int child_id, int route_id, bool is_visible);
+  void OnClientCreated(int child_id,
+                       int route_id,
+                       bool is_visible,
+                       bool is_audible);
 
   // Called when a renderer is destroyed.
   void OnClientDeleted(int child_id, int route_id);
@@ -121,6 +124,9 @@ class CONTENT_EXPORT ResourceScheduler : public base::NonThreadSafe {
 
   // Called when a Client is shown or hidden.
   void OnVisibilityChanged(int child_id, int route_id, bool is_visible);
+
+  // Called when a Client starts or stops playing audio.
+  void OnAudibilityChanged(int child_id, int route_id, bool is_audible);
 
   // Signals from IPC messages directly from the renderers:
 
@@ -142,12 +148,18 @@ class CONTENT_EXPORT ResourceScheduler : public base::NonThreadSafe {
   // Called to check if all user observable tabs have completed loading.
   bool active_clients_loaded() const { return active_clients_loading_ == 0; }
 
-  // Called when a Client starts or stops playing audio.
-  void OnAudibilityChanged(int child_id, int route_id, bool is_audible);
-
   bool IsClientVisibleForTesting(int child_id, int route_id);
 
  private:
+  enum ClientState {
+    // Observable client.
+    ACTIVE,
+    // Non-observable client.
+    BACKGROUND,
+    // No client found.
+    UNKNOWN,
+  };
+
   class RequestQueue;
   class ScheduledResourceRequest;
   struct RequestPriorityParams;
@@ -184,6 +196,10 @@ class CONTENT_EXPORT ResourceScheduler : public base::NonThreadSafe {
   void LoadCoalescedRequests();
 
   size_t CountCoalescedClients() const;
+
+  // Returns UNKNOWN if the corresponding client is not found, else returns
+  // whether the client is ACTIVE (user-observable) or BACKGROUND.
+  ClientState GetClientState(ClientId client_id) const;
 
   // Update the queue position for |request|, possibly causing it to start
   // loading.

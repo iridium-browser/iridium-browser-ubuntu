@@ -49,11 +49,11 @@ class LoggedInPredictorTable : public PredictorTableBase {
   friend class PredictorDatabaseInternal;
 
   LoggedInPredictorTable();
-  virtual ~LoggedInPredictorTable();
+  ~LoggedInPredictorTable() override;
 
   // PredictorTableBase methods.
-  virtual void CreateTableIfNonExistent() OVERRIDE;
-  virtual void LogDatabaseStats() OVERRIDE;
+  void CreateTableIfNonExistent() override;
+  void LogDatabaseStats() override;
 
   DISALLOW_COPY_AND_ASSIGN(LoggedInPredictorTable);
 };

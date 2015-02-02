@@ -6,7 +6,6 @@
 
 #include "base/command_line.h"
 #include "base/files/file_util.h"
-#include "base/path_service.h"
 #include "base/process/launch.h"
 #include "base/scoped_native_library.h"
 #include "base/strings/stringprintf.h"
@@ -79,10 +78,14 @@ static const char kMainWebrtcTestHtmlPage[] =
 // 2. Install it + reboot.
 // 3. Install MacPorts (http://www.macports.org/).
 // 4. Install sox: sudo port install sox.
-// 5. In Sound Preferences, set both input and output to Soundflower (2ch).
+// 5. (For Chrome bots) Ensure sox and rec are reachable from the env the test
+//    executes in (sox and rec tends to install in /opt/, which generally isn't
+//    in the Chrome bots' env). For instance, run
+//    sudo ln -s /opt/local/bin/rec /usr/local/bin/rec
+//    sudo ln -s /opt/local/bin/sox /usr/local/bin/sox
+// 6. In Sound Preferences, set both input and output to Soundflower (2ch).
 //    Note: You will no longer hear audio on this machine, and it will no
 //    longer use any built-in mics.
-// 6. Ensure the output volume is max and the input volume at about 20%.
 // 7. Try launching chrome as the target user on the target machine, try
 //    playing, say, a YouTube video, and record with 'rec test.wav trim 0 5'.
 //    Stop the video in chrome and try playing back the file; you should hear
@@ -105,11 +108,11 @@ static const char kMainWebrtcTestHtmlPage[] =
 class WebRtcAudioQualityBrowserTest : public WebRtcTestBase {
  public:
   WebRtcAudioQualityBrowserTest() {}
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
+  void SetUpInProcessBrowserTestFixture() override {
     DetectErrorsInJavaScript();  // Look for errors in our rather complex js.
   }
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     // This test expects real device handling and requires a real webcam / audio
     // device; it will not work with fake devices.
     EXPECT_FALSE(command_line->HasSwitch(
@@ -209,7 +212,7 @@ class AudioRecorder {
     command_line.AppendArgPath(output_file);
 #endif
 
-    VLOG(0) << "Running " << command_line.GetCommandLineString();
+    DVLOG(0) << "Running " << command_line.GetCommandLineString();
     return base::LaunchProcess(command_line, base::LaunchOptions(),
                                &recording_application_);
   }
@@ -229,14 +232,24 @@ bool ForceMicrophoneVolumeTo100Percent() {
   // Note: the force binary isn't in tools since it's one of our own.
   CommandLine command_line(test::GetReferenceFilesDir().Append(
       FILE_PATH_LITERAL("force_mic_volume_max.exe")));
-  VLOG(0) << "Running " << command_line.GetCommandLineString();
+  DVLOG(0) << "Running " << command_line.GetCommandLineString();
   std::string result;
   if (!base::GetAppOutput(command_line, &result)) {
     LOG(ERROR) << "Failed to set source volume: output was " << result;
     return false;
   }
 #elif defined(OS_MACOSX)
-  // TODO(phoglund): implement.
+  CommandLine command_line(base::FilePath(FILE_PATH_LITERAL("osascript")));
+  command_line.AppendArg("-e");
+  command_line.AppendArg("set volume input volume 100");
+  command_line.AppendArg("-e");
+  command_line.AppendArg("set volume output volume 100");
+
+  std::string result;
+  if (!base::GetAppOutput(command_line, &result)) {
+    LOG(ERROR) << "Failed to set source volume: output was " << result;
+    return false;
+  }
 #else
   // Just force the volume of, say the first 5 devices. A machine will rarely
   // have more input sources than that. This is way easier than finding the
@@ -248,7 +261,7 @@ bool ForceMicrophoneVolumeTo100Percent() {
     command_line.AppendArg("set-source-volume");
     command_line.AppendArg(base::StringPrintf("%d", device_index));
     command_line.AppendArg(kHundredPercentVolume);
-    VLOG(0) << "Running " << command_line.GetCommandLineString();
+    DVLOG(0) << "Running " << command_line.GetCommandLineString();
     if (!base::GetAppOutput(command_line, &result)) {
       LOG(ERROR) << "Failed to set source volume: output was " << result;
       return false;
@@ -301,10 +314,10 @@ bool RemoveSilence(const base::FilePath& input_file,
   command_line.AppendArg(kTreshold);
   command_line.AppendArg("reverse");
 
-  VLOG(0) << "Running " << command_line.GetCommandLineString();
+  DVLOG(0) << "Running " << command_line.GetCommandLineString();
   std::string result;
   bool ok = base::GetAppOutput(command_line, &result);
-  VLOG(0) << "Output was:\n\n" << result;
+  DVLOG(0) << "Output was:\n\n" << result;
   return ok;
 }
 
@@ -352,19 +365,19 @@ bool RunPesq(const base::FilePath& reference_file,
   command_line.AppendArgPath(reference_file);
   command_line.AppendArgPath(actual_file);
 
-  VLOG(0) << "Running " << command_line.GetCommandLineString();
+  DVLOG(0) << "Running " << command_line.GetCommandLineString();
   std::string result;
   if (!base::GetAppOutput(command_line, &result)) {
     LOG(ERROR) << "Failed to run PESQ.";
     return false;
   }
-  VLOG(0) << "Output was:\n\n" << result;
+  DVLOG(0) << "Output was:\n\n" << result;
 
   const std::string result_anchor = "Prediction (Raw MOS, MOS-LQO):  = ";
   std::size_t anchor_pos = result.find(result_anchor);
   if (anchor_pos == std::string::npos) {
     LOG(ERROR) << "PESQ was not able to compute a score; we probably recorded "
-        << "only silence.";
+        << "only silence. Please check the output/input volume levels.";
     return false;
   }
 
@@ -378,10 +391,10 @@ bool RunPesq(const base::FilePath& reference_file,
   return true;
 }
 
-#if defined(OS_LINUX) || defined(OS_WIN)
-// Only implemented on Linux and Windows for now.
+#if defined(OS_LINUX) || defined(OS_WIN) || defined(OS_MACOSX)
 #define MAYBE_MANUAL_TestAudioQuality MANUAL_TestAudioQuality
 #else
+// Not implemented on Android, ChromeOS etc.
 #define MAYBE_MANUAL_TestAudioQuality DISABLED_MANUAL_TestAudioQuality
 #endif
 
@@ -440,14 +453,14 @@ IN_PROC_BROWSER_TEST_F(WebRtcAudioQualityBrowserTest,
   PlayAudioFile(left_tab);
 
   ASSERT_TRUE(recorder.WaitForRecordingToEnd());
-  VLOG(0) << "Done recording to " << recording.value() << std::endl;
+  DVLOG(0) << "Done recording to " << recording.value() << std::endl;
 
   HangUp(left_tab);
 
   base::FilePath trimmed_recording = CreateTemporaryWaveFile();
 
   ASSERT_TRUE(RemoveSilence(recording, trimmed_recording));
-  VLOG(0) << "Trimmed silence: " << trimmed_recording.value() << std::endl;
+  DVLOG(0) << "Trimmed silence: " << trimmed_recording.value() << std::endl;
 
   std::string raw_mos;
   std::string mos_lqo;

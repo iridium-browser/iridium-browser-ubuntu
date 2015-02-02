@@ -38,18 +38,17 @@ class InsecureContentInfoBarDelegate : public ConfirmInfoBarDelegate {
   };
 
   explicit InsecureContentInfoBarDelegate(InfoBarType type);
-  virtual ~InsecureContentInfoBarDelegate();
+  ~InsecureContentInfoBarDelegate() override;
 
   // ConfirmInfoBarDelegate:
-  virtual void InfoBarDismissed() OVERRIDE;
-  virtual InsecureContentInfoBarDelegate*
-      AsInsecureContentInfoBarDelegate() OVERRIDE;
-  virtual base::string16 GetMessageText() const OVERRIDE;
-  virtual base::string16 GetButtonLabel(InfoBarButton button) const OVERRIDE;
-  virtual bool Accept() OVERRIDE;
-  virtual bool Cancel() OVERRIDE;
-  virtual base::string16 GetLinkText() const OVERRIDE;
-  virtual bool LinkClicked(WindowOpenDisposition disposition) OVERRIDE;
+  void InfoBarDismissed() override;
+  InsecureContentInfoBarDelegate* AsInsecureContentInfoBarDelegate() override;
+  base::string16 GetMessageText() const override;
+  base::string16 GetButtonLabel(InfoBarButton button) const override;
+  bool Accept() override;
+  bool Cancel() override;
+  base::string16 GetLinkText() const override;
+  bool LinkClicked(WindowOpenDisposition disposition) override;
 
   InfoBarType type_;
 

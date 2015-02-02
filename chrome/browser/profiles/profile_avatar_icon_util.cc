@@ -57,10 +57,10 @@ class AvatarImageSource : public gfx::CanvasImageSource {
                     int width,
                     AvatarPosition position,
                     AvatarBorder border);
-  virtual ~AvatarImageSource();
+  ~AvatarImageSource() override;
 
   // CanvasImageSource override:
-  virtual void Draw(gfx::Canvas* canvas) OVERRIDE;
+  void Draw(gfx::Canvas* canvas) override;
 
  private:
   gfx::ImageSkia avatar_;
@@ -190,6 +190,9 @@ const SkColor kAvatarTutorialBackgroundColor = SkColorSetRGB(0x42, 0x85, 0xf4);
 const SkColor kAvatarTutorialContentTextColor = SkColorSetRGB(0xc6, 0xda, 0xfc);
 const SkColor kAvatarBubbleAccountsBackgroundColor =
     SkColorSetRGB(0xf3, 0xf3, 0xf3);
+const SkColor kAvatarBubbleGaiaBackgroundColor =
+    SkColorSetRGB(0xf5, 0xf5, 0xf5);
+const SkColor kUserManagerBackgroundColor = SkColorSetRGB(0xee, 0xee, 0xee);
 
 const char kDefaultUrlPrefix[] = "chrome://theme/IDR_PROFILE_AVATAR_";
 const char kGAIAPictureFileName[] = "Google Profile Picture.png";

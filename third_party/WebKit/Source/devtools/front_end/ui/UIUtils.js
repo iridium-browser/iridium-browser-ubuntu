@@ -78,15 +78,26 @@ WebInspector.elementDragStart = function(elementDragStart, elementDrag, elementD
     targetDocument.addEventListener("mouseup", WebInspector._elementDragEnd, true);
     targetDocument.addEventListener("mouseout", WebInspector._mouseOutWhileDragging, true);
 
-    targetDocument.body.style.cursor = cursor;
-
+    var targetElement = /** @type {!Element} */ (event.target);
+    if (typeof cursor === "string") {
+        WebInspector._restoreCursorAfterDrag = restoreCursor.bind(null, targetElement.style.cursor);
+        targetElement.style.cursor = cursor;
+        targetDocument.body.style.cursor = cursor;
+    }
+    function restoreCursor(oldCursor)
+    {
+        targetDocument.body.style.removeProperty("cursor");
+        targetElement.style.cursor = oldCursor;
+        WebInspector._restoreCursorAfterDrag = null;
+    }
     event.preventDefault();
 }
 
 WebInspector._mouseOutWhileDragging = function()
 {
+    var document = WebInspector._mouseOutWhileDraggingTargetDocument;
     WebInspector._unregisterMouseOutWhileDragging();
-    WebInspector._elementDraggingGlassPane = new WebInspector.GlassPane();
+    WebInspector._elementDraggingGlassPane = new WebInspector.GlassPane(document);
 }
 
 WebInspector._unregisterMouseOutWhileDragging = function()
@@ -116,7 +127,8 @@ WebInspector._cancelDragEvents = function(event)
     targetDocument.removeEventListener("mouseup", WebInspector._elementDragEnd, true);
     WebInspector._unregisterMouseOutWhileDragging();
 
-    targetDocument.body.style.removeProperty("cursor");
+    if (WebInspector._restoreCursorAfterDrag)
+        WebInspector._restoreCursorAfterDrag();
 
     if (WebInspector._elementDraggingGlassPane)
         WebInspector._elementDraggingGlassPane.dispose();
@@ -142,10 +154,11 @@ WebInspector._elementDragEnd = function(event)
 
 /**
  * @constructor
+ * @param {!Document} document
  */
-WebInspector.GlassPane = function()
+WebInspector.GlassPane = function(document)
 {
-    this.element = document.createElement("div");
+    this.element = createElement("div");
     this.element.style.cssText = "position:absolute;top:0;bottom:0;left:0;right:0;background-color:transparent;z-index:1000;";
     this.element.id = "glass-pane";
     document.body.appendChild(this.element);
@@ -185,9 +198,23 @@ WebInspector.isBeingEdited = function(node)
     while (element) {
         if (element.__editing)
             return true;
-        element = element.parentElement;
+        element = element.parentElementOrShadowHost();
     }
     return false;
+}
+
+/**
+ * @return {boolean}
+ */
+WebInspector.isEditing = function()
+{
+    if (WebInspector.__editingCount)
+        return true;
+
+    var element = WebInspector.currentFocusElement();
+    if (!element)
+        return false;
+    return element.classList.contains("text-prompt") || element.nodeName === "INPUT" || element.nodeName === "TEXTAREA";
 }
 
 /**
@@ -219,9 +246,9 @@ WebInspector.StyleValueDelimiters = " \xA0\t\n\"':;,/()";
 
 
 /**
-  * @param {!Event} event
-  * @return {?string}
-  */
+ * @param {!Event} event
+ * @return {?string}
+ */
 WebInspector._valueModificationDirection = function(event)
 {
     var direction = null;
@@ -313,15 +340,24 @@ WebInspector._modifiedFloatNumber = function(number, event)
 }
 
 /**
-  * @param {!Event} event
-  * @param {!Element} element
-  * @param {function(string,string)=} finishHandler
-  * @param {function(string)=} suggestionHandler
-  * @param {function(string, number, string):string=} customNumberHandler
-  * @return {boolean}
+ * @param {!Event} event
+ * @param {!Element} element
+ * @param {function(string,string)=} finishHandler
+ * @param {function(string)=} suggestionHandler
+ * @param {function(string, number, string):string=} customNumberHandler
+ * @return {boolean}
  */
 WebInspector.handleElementValueModifications = function(event, element, finishHandler, suggestionHandler, customNumberHandler)
 {
+    /**
+     * @return {?Range}
+     * @suppressGlobalPropertiesCheck
+     */
+    function createRange()
+    {
+        return document.createRange();
+    }
+
     var arrowKeyOrMouseWheelEvent = (event.keyIdentifier === "Up" || event.keyIdentifier === "Down" || event.type === "mousewheel");
     var pageKeyPressed = (event.keyIdentifier === "PageUp" || event.keyIdentifier === "PageDown");
     if (!arrowKeyOrMouseWheelEvent && !pageKeyPressed)
@@ -369,12 +405,12 @@ WebInspector.handleElementValueModifications = function(event, element, finishHa
     }
 
     if (replacementString) {
-        var replacementTextNode = document.createTextNode(replacementString);
+        var replacementTextNode = createTextNode(replacementString);
 
         wordRange.deleteContents();
         wordRange.insertNode(replacementTextNode);
 
-        var finalSelectionRange = document.createRange();
+        var finalSelectionRange = createRange();
         finalSelectionRange.setStart(replacementTextNode, 0);
         finalSelectionRange.setEnd(replacementTextNode, replacementString.length);
 
@@ -399,9 +435,9 @@ WebInspector.handleElementValueModifications = function(event, element, finishHa
  */
 Number.preciseMillisToString = function(ms, precision)
 {
-  precision = precision || 0;
-  var format = "%." + precision + "f\u2009ms";
-  return WebInspector.UIString(format, ms);
+    precision = precision || 0;
+    var format = "%." + precision + "f\u2009ms";
+    return WebInspector.UIString(format, ms);
 }
 
 /** @type {!WebInspector.UIStringFormat} */
@@ -567,24 +603,42 @@ WebInspector.manageBlackboxingButtonLabel = function()
     return WebInspector.UIString("Manage framework blackboxing...");
 }
 
-WebInspector.installPortStyles = function()
+/**
+ * @param {!Element} element
+ * @return {boolean}
+ */
+WebInspector.installComponentRootStyles = function(element)
 {
-    var platform = WebInspector.platform();
-    document.body.classList.add("platform-" + platform);
-    var flavor = WebInspector.platformFlavor();
-    if (flavor)
-        document.body.classList.add("platform-" + flavor);
-    var port = WebInspector.port();
-    document.body.classList.add("port-" + port);
+    var wasInstalled = element.classList.contains("component-root");
+    if (wasInstalled)
+        return false;
+    element.classList.add("component-root", "platform-" + WebInspector.platform());
+    return true;
 }
 
-WebInspector._windowFocused = function(event)
+/**
+ * @param {!Element} element
+ */
+WebInspector.uninstallComponentRootStyles = function(element)
+{
+    var wasInstalled = element.classList.remove("component-root", "platform-" + WebInspector.platform());
+}
+
+/**
+ * @param {!Document} document
+ * @param {!Event} event
+ */
+WebInspector._windowFocused = function(document, event)
 {
     if (event.target.document.nodeType === Node.DOCUMENT_NODE)
         document.body.classList.remove("inactive");
 }
 
-WebInspector._windowBlurred = function(event)
+/**
+ * @param {!Document} document
+ * @param {!Event} event
+ */
+WebInspector._windowBlurred = function(document, event)
 {
     if (event.target.document.nodeType === Node.DOCUMENT_NODE)
         document.body.classList.add("inactive");
@@ -606,12 +660,23 @@ WebInspector.currentFocusElement = function()
     return WebInspector._currentFocusElement;
 }
 
-WebInspector._focusChanged = function(event)
+/**
+ * @param {!Document} document
+ * @param {!Event} event
+ */
+WebInspector._focusChanged = function(document, event)
 {
-    WebInspector.setCurrentFocusElement(event.target);
+    var node = document.activeElement;
+    while (node && node.shadowRoot)
+        node = node.shadowRoot.activeElement;
+    WebInspector.setCurrentFocusElement(node);
 }
 
-WebInspector._documentBlurred = function(event)
+/**
+ * @param {!Document} document
+ * @param {!Event} event
+ */
+WebInspector._documentBlurred = function(document, event)
 {
     // We want to know when currentFocusElement loses focus to nowhere.
     // This is the case when event.relatedTarget is null (no element is being focused)
@@ -665,10 +730,15 @@ WebInspector.restoreFocusFromElement = function(element)
         WebInspector.setCurrentFocusElement(WebInspector.previousFocusElement());
 }
 
-WebInspector.setToolbarColors = function(backgroundColor, color)
+/**
+ * @param {!Document} document
+ * @param {string} backgroundColor
+ * @param {string} color
+ */
+WebInspector.setToolbarColors = function(document, backgroundColor, color)
 {
     if (!WebInspector._themeStyleElement) {
-        WebInspector._themeStyleElement = document.createElement("style");
+        WebInspector._themeStyleElement = createElement("style");
         document.head.appendChild(WebInspector._themeStyleElement);
     }
     var parsedColor = WebInspector.Color.parse(color);
@@ -676,19 +746,19 @@ WebInspector.setToolbarColors = function(backgroundColor, color)
     var prefix = WebInspector.isMac() ? "body:not(.undocked)" : "";
     WebInspector._themeStyleElement.textContent =
         String.sprintf(
-            "%s .toolbar-colors {\
-                 background-image: none !important;\
-                 background-color: %s !important;\
-                 color: %s !important;\
-             }", prefix, backgroundColor, color) +
+            "%s .toolbar-colors {" +
+            "    background-image: none !important;" +
+            "    background-color: %s !important;" +
+            "    color: %s !important;" +
+            "}", prefix, backgroundColor, color) +
         String.sprintf(
-             "%s .toolbar-colors button.status-bar-item .glyph, %s .toolbar-colors button.status-bar-item .long-click-glyph {\
-                 background-color: %s;\
-             }", prefix, prefix, color) +
+             "%s .toolbar-colors button.status-bar-item .glyph, %s .toolbar-colors button.status-bar-item .long-click-glyph {" +
+             "   background-color: %s;" +
+             "}", prefix, prefix, color) +
         String.sprintf(
-             "%s .toolbar-colors button.status-bar-item .glyph.shadow, %s .toolbar-colors button.status-bar-item .long-click-glyph.shadow {\
-                 background-color: %s;\
-             }", prefix, prefix, shadowColor);
+             "%s .toolbar-colors button.status-bar-item .glyph.shadow, %s .toolbar-colors button.status-bar-item .long-click-glyph.shadow {" +
+             "   background-color: %s;" +
+             "}", prefix, prefix, shadowColor);
 }
 
 WebInspector.resetToolbarColors = function()
@@ -723,6 +793,18 @@ WebInspector.highlightSearchResults = function(element, resultRanges, changes)
 
 /**
  * @param {!Element} element
+ */
+WebInspector.removeSearchResultsHighlight = function(element)
+{
+    var highlightBits = element.querySelectorAll(".highlighted-search-result");
+    for (var i = 0; i < highlightBits.length; ++i) {
+        var span = highlightBits[i];
+        span.parentElement.replaceChild(createTextNode(span.textContent), span);
+    }
+}
+
+/**
+ * @param {!Element} element
  * @param {string} className
  */
 WebInspector.runCSSAnimationOnce = function(element, className)
@@ -730,13 +812,13 @@ WebInspector.runCSSAnimationOnce = function(element, className)
     function animationEndCallback()
     {
         element.classList.remove(className);
-        element.removeEventListener("animationend", animationEndCallback, false);
+        element.removeEventListener("webkitAnimationEnd", animationEndCallback, false);
     }
 
     if (element.classList.contains(className))
         element.classList.remove(className);
 
-    element.addEventListener("animationend", animationEndCallback, false);
+    element.addEventListener("webkitAnimationEnd", animationEndCallback, false);
     element.classList.add(className);
 }
 
@@ -857,6 +939,25 @@ WebInspector.revertDomChanges = function(domChanges)
 }
 
 /**
+ * @param {!Element} element
+ * @param {?Element=} containerElement
+ * @return {!Size}
+ */
+WebInspector.measurePreferredSize = function(element, containerElement)
+{
+    containerElement = containerElement || element.ownerDocument.body;
+    containerElement.appendChild(element);
+    var fakingComponentRoot = WebInspector.installComponentRootStyles(element);
+    element.positionAt(0, 0);
+    var result = new Size(element.offsetWidth, element.offsetHeight);
+    element.positionAt(undefined, undefined);
+    element.remove();
+    if (fakingComponentRoot)
+        WebInspector.uninstallComponentRootStyles(element);
+    return result;
+}
+
+/**
  * @constructor
  * @param {boolean} autoInvoke
  */
@@ -896,10 +997,10 @@ WebInspector.InvokeOnceHandlers.prototype = {
     {
         var handlers = this._handlers;
         this._handlers = null;
-        var keys = handlers.keys();
+        var keys = handlers.keysArray();
         for (var i = 0; i < keys.length; ++i) {
             var object = keys[i];
-            var methods = handlers.get(object).values();
+            var methods = handlers.get(object).valuesArray();
             for (var j = 0; j < methods.length; ++j)
                 methods[j].call(object);
         }
@@ -1071,17 +1172,59 @@ WebInspector.LongClickController.prototype = {
     __proto__: WebInspector.Object.prototype
 }
 
-;(function() {
-
-function windowLoaded()
+/**
+ * @param {string} url
+ * @param {string=} linkText
+ * @param {string=} classes
+ * @return {!Element}
+ */
+WebInspector.createExternalAnchor = function(url, linkText, classes)
 {
-    window.addEventListener("focus", WebInspector._windowFocused, false);
-    window.addEventListener("blur", WebInspector._windowBlurred, false);
-    document.addEventListener("focus", WebInspector._focusChanged, true);
-    document.addEventListener("blur", WebInspector._documentBlurred, true);
-    window.removeEventListener("DOMContentLoaded", windowLoaded, false);
+    var anchor = createElementWithClass("a", "link");
+    var href = sanitizeHref(url);
+
+    if (href)
+        anchor.href = href;
+    anchor.title = url;
+
+    if (!linkText)
+        linkText = url;
+
+    anchor.className = classes;
+    anchor.textContent = linkText;
+    anchor.setAttribute("target", "_blank");
+
+    /**
+     * @param {!Event} event
+     */
+    function clickHandler(event)
+    {
+        event.consume(true);
+        InspectorFrontendHost.openInNewTab(anchor.href);
+    }
+
+    anchor.addEventListener("click", clickHandler, false);
+
+    return anchor;
 }
 
-window.addEventListener("DOMContentLoaded", windowLoaded, false);
+/**
+ * @param {string} article
+ * @param {string} title
+ * @return {!Element}
+ */
+WebInspector.createDocumentationAnchor = function(article, title)
+{
+    return WebInspector.createExternalAnchor("https://developer.chrome.com/devtools/docs/" + article, title);
+}
 
-})();
+/**
+ * @param {!Window} window
+ */
+WebInspector.initializeUIUtils = function(window)
+{
+    window.addEventListener("focus", WebInspector._windowFocused.bind(WebInspector, window.document), false);
+    window.addEventListener("blur", WebInspector._windowBlurred.bind(WebInspector, window.document), false);
+    window.document.addEventListener("focus", WebInspector._focusChanged.bind(WebInspector, window.document), true);
+    window.document.addEventListener("blur", WebInspector._documentBlurred.bind(WebInspector, window.document), true);
+}

@@ -28,16 +28,14 @@ class FakeRegistrationManager : public RegistrationManager {
       : RegistrationManager(invalidation_client),
         jitter_(0.0) {}
 
-  virtual ~FakeRegistrationManager() {}
+  ~FakeRegistrationManager() override {}
 
   void SetJitter(double jitter) {
     jitter_ = jitter;
   }
 
  protected:
-  virtual double GetJitter() OVERRIDE {
-    return jitter_;
-  }
+  double GetJitter() override { return jitter_; }
 
  private:
   double jitter_;
@@ -51,7 +49,7 @@ class FakeInvalidationClient : public invalidation::InvalidationClient {
  public:
   FakeInvalidationClient() {}
 
-  virtual ~FakeInvalidationClient() {}
+  ~FakeInvalidationClient() override {}
 
   void LoseRegistration(const invalidation::ObjectId& oid) {
     EXPECT_TRUE(ContainsKey(registered_ids_, oid));
@@ -64,27 +62,25 @@ class FakeInvalidationClient : public invalidation::InvalidationClient {
 
   // invalidation::InvalidationClient implementation.
 
-  virtual void Start() OVERRIDE {}
-  virtual void Stop() OVERRIDE {}
-  virtual void Acknowledge(const invalidation::AckHandle& handle) OVERRIDE {}
+  void Start() override {}
+  void Stop() override {}
+  void Acknowledge(const invalidation::AckHandle& handle) override {}
 
-  virtual void Register(const invalidation::ObjectId& oid) OVERRIDE {
+  void Register(const invalidation::ObjectId& oid) override {
     EXPECT_FALSE(ContainsKey(registered_ids_, oid));
     registered_ids_.insert(oid);
   }
 
-  virtual void Register(
-      const std::vector<invalidation::ObjectId>& oids) OVERRIDE {
+  void Register(const std::vector<invalidation::ObjectId>& oids) override {
     // Unused for now.
   }
 
-  virtual void Unregister(const invalidation::ObjectId& oid) OVERRIDE {
+  void Unregister(const invalidation::ObjectId& oid) override {
     EXPECT_TRUE(ContainsKey(registered_ids_, oid));
     registered_ids_.erase(oid);
   }
 
-  virtual void Unregister(
-      const std::vector<invalidation::ObjectId>& oids) OVERRIDE {
+  void Unregister(const std::vector<invalidation::ObjectId>& oids) override {
     // Unused for now.
   }
 
@@ -152,7 +148,7 @@ class RegistrationManagerTest : public testing::Test {
   RegistrationManagerTest()
       : fake_registration_manager_(&fake_invalidation_client_) {}
 
-  virtual ~RegistrationManagerTest() {}
+  ~RegistrationManagerTest() override {}
 
   void LoseRegistrations(const ObjectIdSet& oids) {
     for (ObjectIdSet::const_iterator it = oids.begin(); it != oids.end();

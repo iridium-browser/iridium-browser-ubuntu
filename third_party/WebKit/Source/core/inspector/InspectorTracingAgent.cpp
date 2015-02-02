@@ -18,7 +18,6 @@ namespace blink {
 
 namespace TracingAgentState {
 const char sessionId[] = "sessionId";
-const char tracingStarted[] = "tracingStarted";
 }
 
 namespace {
@@ -39,21 +38,20 @@ void InspectorTracingAgent::restore()
     emitMetadataEvents();
 }
 
-void InspectorTracingAgent::start(ErrorString*, const String& categoryFilter, const String&, const double*)
+void InspectorTracingAgent::start(ErrorString*, const String* categoryFilter, const String*, const double*, PassRefPtrWillBeRawPtr<StartCallback> callback)
 {
-    if (m_state->getBoolean(TracingAgentState::tracingStarted))
-        return;
+    ASSERT(m_state->getString(TracingAgentState::sessionId).isEmpty());
     m_state->setString(TracingAgentState::sessionId, IdentifiersFactory::createIdentifier());
-    m_state->setBoolean(TracingAgentState::tracingStarted, true);
-    m_client->enableTracing(categoryFilter);
+    m_client->enableTracing(categoryFilter ? *categoryFilter : String());
     emitMetadataEvents();
+    callback->sendSuccess();
 }
 
-void InspectorTracingAgent::end(ErrorString* errorString)
+void InspectorTracingAgent::end(ErrorString* errorString, PassRefPtrWillBeRawPtr<EndCallback> callback)
 {
     m_client->disableTracing();
-    m_state->setBoolean(TracingAgentState::tracingStarted, false);
-    m_workerAgent->setTracingSessionId(String());
+    resetSessionId();
+    callback->sendSuccess();
 }
 
 String InspectorTracingAgent::sessionId()
@@ -63,8 +61,6 @@ String InspectorTracingAgent::sessionId()
 
 void InspectorTracingAgent::emitMetadataEvents()
 {
-    if (!m_state->getBoolean(TracingAgentState::tracingStarted))
-        return;
     TRACE_EVENT_INSTANT1(devtoolsMetadataEventCategory, "TracingStartedInPage", "sessionId", sessionId().utf8());
     if (m_layerTreeId)
         setLayerTreeId(m_layerTreeId);
@@ -80,6 +76,17 @@ void InspectorTracingAgent::setLayerTreeId(int layerTreeId)
 void InspectorTracingAgent::setFrontend(InspectorFrontend* frontend)
 {
     m_frontend = frontend->tracing();
+}
+
+void InspectorTracingAgent::clearFrontend()
+{
+    resetSessionId();
+}
+
+void InspectorTracingAgent::resetSessionId()
+{
+    m_state->remove(TracingAgentState::sessionId);
+    m_workerAgent->setTracingSessionId(sessionId());
 }
 
 }

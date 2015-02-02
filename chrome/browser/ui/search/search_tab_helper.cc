@@ -142,7 +142,7 @@ bool IsHistorySyncEnabled(Profile* profile) {
   ProfileSyncService* sync =
       ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile);
   return sync &&
-      sync->sync_initialized() &&
+      sync->SyncActive() &&
       sync->GetActiveDataTypes().Has(syncer::HISTORY_DELETE_DIRECTIVES);
 }
 
@@ -156,9 +156,9 @@ SearchTabHelper::SearchTabHelper(content::WebContents* web_contents)
     : WebContentsObserver(web_contents),
       is_search_enabled_(chrome::IsInstantExtendedAPIEnabled()),
       web_contents_(web_contents),
-      ipc_router_(web_contents, this,
-                  make_scoped_ptr(new SearchIPCRouterPolicyImpl(web_contents))
-                      .PassAs<SearchIPCRouter::Policy>()),
+      ipc_router_(web_contents,
+                  this,
+                  make_scoped_ptr(new SearchIPCRouterPolicyImpl(web_contents))),
       instant_service_(NULL),
       delegate_(NULL),
       omnibox_has_focus_fn_(&OmniboxHasFocus) {
@@ -255,8 +255,9 @@ void SearchTabHelper::SetSuggestionToPrefetch(
   ipc_router_.SetSuggestionToPrefetch(suggestion);
 }
 
-void SearchTabHelper::Submit(const base::string16& text) {
-  ipc_router_.Submit(text);
+void SearchTabHelper::Submit(const base::string16& text,
+                             const EmbeddedSearchRequestParams& params) {
+  ipc_router_.Submit(text, params);
 }
 
 void SearchTabHelper::OnTabActivated() {

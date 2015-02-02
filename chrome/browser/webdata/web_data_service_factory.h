@@ -32,10 +32,10 @@ class WebDataServiceWrapper : public KeyedService {
   // For testing.
   WebDataServiceWrapper();
 
-  virtual ~WebDataServiceWrapper();
+  ~WebDataServiceWrapper() override;
 
   // KeyedService:
-  virtual void Shutdown() OVERRIDE;
+  void Shutdown() override;
 
   virtual scoped_refptr<autofill::AutofillWebDataService> GetAutofillWebData();
 
@@ -102,14 +102,14 @@ class WebDataServiceFactory : public BrowserContextKeyedServiceFactory {
   friend struct DefaultSingletonTraits<WebDataServiceFactory>;
 
   WebDataServiceFactory();
-  virtual ~WebDataServiceFactory();
+  ~WebDataServiceFactory() override;
 
   // |BrowserContextKeyedBaseFactory| methods:
-  virtual content::BrowserContext* GetBrowserContextToUse(
-      content::BrowserContext* context) const OVERRIDE;
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* profile) const OVERRIDE;
-  virtual bool ServiceIsNULLWhileTesting() const OVERRIDE;
+  content::BrowserContext* GetBrowserContextToUse(
+      content::BrowserContext* context) const override;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* profile) const override;
+  bool ServiceIsNULLWhileTesting() const override;
 
   DISALLOW_COPY_AND_ASSIGN(WebDataServiceFactory);
 };

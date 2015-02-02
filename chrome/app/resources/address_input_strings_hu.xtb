@@ -1,4 +1,6 @@
-<?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="hu">
+<?xml version="1.0" ?>
+<!DOCTYPE translationbundle>
+<translationbundle lang="hu">
 <translation id="777702478322588152">Prefektúra</translation>
 <translation id="3713769522066937702">Ezt az irányítószámot (ZIP-kódot) nem lehet felismerni. Példa egy érvényes irányítószámra (ZIP-kódra): <ph name="EXAMPLE"/>. Nem tudja irányítószámát (ZIP-kódját)? Keresse meg <ph name="BEGIN_LINK"/>itt<ph name="END_LINK"/>.</translation>
 <translation id="7393381084163773901">Cím</translation>

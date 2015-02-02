@@ -30,21 +30,19 @@ class BrowserFrameAsh : public views::NativeWidgetAura,
 
  protected:
   // Overridden from views::NativeWidgetAura:
-  virtual void OnWindowDestroying(aura::Window* window) OVERRIDE;
-  virtual void OnWindowTargetVisibilityChanged(bool visible) OVERRIDE;
+  void OnWindowDestroying(aura::Window* window) override;
+  void OnWindowTargetVisibilityChanged(bool visible) override;
 
   // Overridden from NativeBrowserFrame:
-  virtual views::NativeWidget* AsNativeWidget() OVERRIDE;
-  virtual const views::NativeWidget* AsNativeWidget() const OVERRIDE;
-  virtual bool UsesNativeSystemMenu() const OVERRIDE;
-  virtual int GetMinimizeButtonOffset() const OVERRIDE;
-  virtual bool ShouldSaveWindowPlacement() const OVERRIDE;
-  virtual void GetWindowPlacement(
-      gfx::Rect* bounds,
-      ui::WindowShowState* show_state) const OVERRIDE;
+  views::NativeWidget* AsNativeWidget() override;
+  const views::NativeWidget* AsNativeWidget() const override;
+  bool UsesNativeSystemMenu() const override;
+  int GetMinimizeButtonOffset() const override;
+  bool ShouldSaveWindowPlacement() const override;
+  void GetWindowPlacement(gfx::Rect* bounds,
+                          ui::WindowShowState* show_state) const override;
 
-
-  virtual ~BrowserFrameAsh();
+  ~BrowserFrameAsh() override;
 
  private:
   class WindowPropertyWatcher;

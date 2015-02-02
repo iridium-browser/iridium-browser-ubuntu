@@ -249,6 +249,7 @@
         '../sql/sql.gyp:sql',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
+        '../third_party/leveldatabase/leveldatabase.gyp:leveldatabase',
         '../third_party/protobuf/protobuf.gyp:protobuf_lite',
         'sync',
         'test_support_sync_core',
@@ -260,7 +261,6 @@
       'sources': [
         'api/attachments/attachment_id_unittest.cc',
         'api/attachments/attachment_unittest.cc',
-        'api/attachments/fake_attachment_store_unittest.cc',
         'api/sync_change_unittest.cc',
         'api/sync_data_unittest.cc',
         'api/sync_error_unittest.cc',
@@ -281,9 +281,13 @@
         'internal_api/attachments/attachment_downloader_impl_unittest.cc',
         'internal_api/attachments/attachment_service_impl_unittest.cc',
         'internal_api/attachments/attachment_service_proxy_unittest.cc',
+        'internal_api/attachments/attachment_store_handle_unittest.cc',
+        'internal_api/attachments/attachment_store_test_template.h',
         'internal_api/attachments/attachment_uploader_impl_unittest.cc',
         'internal_api/attachments/fake_attachment_downloader_unittest.cc',
         'internal_api/attachments/fake_attachment_uploader_unittest.cc',
+        'internal_api/attachments/in_memory_attachment_store_unittest.cc',
+        'internal_api/attachments/on_disk_attachment_store_unittest.cc',
         'internal_api/attachments/task_queue_unittest.cc',
         'internal_api/debug_info_event_listener_unittest.cc',
         'internal_api/http_bridge_unittest.cc',
@@ -425,6 +429,7 @@
     ['OS == "android"', {
       'targets': [
         {
+          # GN: //sync/android:sync_javatests
           'target_name': 'sync_javatests',
           'type': 'none',
           'variables': {
@@ -438,6 +443,7 @@
           'includes': [ '../build/java.gypi' ],
         },
         {
+          # GN: //sync:sync_java_test_support
           'target_name': 'sync_java_test_support',
           'type': 'none',
           'variables': {
@@ -449,6 +455,7 @@
           'includes': [ '../build/java.gypi' ],
         },
         {
+          # GN: //sync:sync_fake_server_jni_headers
           'target_name': 'sync_fake_server_jni_headers',
           'type': 'none',
           'sources': [
@@ -461,6 +468,7 @@
           'includes': [ '../build/jni_generator.gypi' ],
         },
         {
+          # GN: //sync:test_support_sync_fake_server_android
           'target_name': 'test_support_sync_fake_server_android',
           'type': 'static_library',
           'dependencies': [
@@ -473,11 +481,8 @@
             'test/fake_server/android/fake_server_helper_android.h',
           ],
         },
-      ],
-    }],
-    ['OS == "android"', {
-      'targets': [
         {
+          # GN: //sync:sync_unit_tests_apk
           'target_name': 'sync_unit_tests_apk',
           'type': 'none',
           'dependencies': [

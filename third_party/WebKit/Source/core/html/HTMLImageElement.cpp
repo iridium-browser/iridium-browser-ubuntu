@@ -43,6 +43,7 @@
 #include "core/html/parser/HTMLSrcsetParser.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/rendering/RenderImage.h"
+#include "platform/ContentType.h"
 #include "platform/MIMETypeRegistry.h"
 #include "platform/RuntimeEnabledFeatures.h"
 
@@ -50,14 +51,14 @@ namespace blink {
 
 using namespace HTMLNames;
 
-class HTMLImageElement::ViewportChangeListener FINAL : public MediaQueryListListener {
+class HTMLImageElement::ViewportChangeListener final : public MediaQueryListListener {
 public:
     static RefPtrWillBeRawPtr<ViewportChangeListener> create(HTMLImageElement* element)
     {
         return adoptRefWillBeNoop(new ViewportChangeListener(element));
     }
 
-    virtual void notifyMediaQueryChanged() OVERRIDE
+    virtual void notifyMediaQueryChanged() override
     {
         if (m_element)
             m_element->notifyViewportChanged();
@@ -66,7 +67,7 @@ public:
 #if !ENABLE(OILPAN)
     void clearElement() { m_element = nullptr; }
 #endif
-    virtual void trace(Visitor* visitor) OVERRIDE
+    virtual void trace(Visitor* visitor) override
     {
         visitor->trace(m_element);
         MediaQueryListListener::trace(visitor);
@@ -79,12 +80,10 @@ private:
 HTMLImageElement::HTMLImageElement(Document& document, HTMLFormElement* form, bool createdByParser)
     : HTMLElement(imgTag, document)
     , m_imageLoader(HTMLImageLoader::create(this))
-    , m_compositeOperator(CompositeSourceOver)
     , m_imageDevicePixelRatio(1.0f)
     , m_formWasSetByParser(false)
     , m_elementCreatedByParser(createdByParser)
     , m_intrinsicSizingViewportDependant(false)
-    , m_effectiveSizeViewportDependant(false)
 {
     if (form && form->inDocument()) {
 #if ENABLE(OILPAN)
@@ -243,12 +242,6 @@ void HTMLImageElement::parseAttribute(const QualifiedName& name, const AtomicStr
         selectSourceURL(ImageLoader::UpdateIgnorePreviousError);
     } else if (name == usemapAttr) {
         setIsLink(!value.isNull());
-    } else if (name == compositeAttr) {
-        blink::WebBlendMode blendOp = blink::WebBlendModeNormal;
-        if (!parseCompositeAndBlendOperator(value, m_compositeOperator, blendOp))
-            m_compositeOperator = CompositeSourceOver;
-        else if (m_compositeOperator != CompositeSourceOver)
-            UseCounter::count(document(), UseCounter::HTMLImageElementComposite);
     } else {
         HTMLElement::parseAttribute(name, value);
     }
@@ -268,7 +261,11 @@ const AtomicString& HTMLImageElement::altText() const
 
 static bool supportedImageType(const String& type)
 {
-    return MIMETypeRegistry::isSupportedImagePrefixedMIMEType(type);
+    String trimmedType = ContentType(type).type();
+    // An empty type attribute is implicitly supported.
+    if (trimmedType.isEmpty())
+        return true;
+    return MIMETypeRegistry::isSupportedImagePrefixedMIMEType(trimmedType);
 }
 
 // http://picture.responsiveimages.org/#update-source-set
@@ -302,9 +299,8 @@ ImageCandidate HTMLImageElement::findBestFitImageFromPictureParent()
         if (!sizes.isNull())
             UseCounter::count(document(), UseCounter::Sizes);
         SizesAttributeParser parser = SizesAttributeParser(MediaValuesDynamic::create(document()), sizes);
-        unsigned effectiveSize = parser.length();
-        m_effectiveSizeViewportDependant = parser.viewportDependant();
-        ImageCandidate candidate = bestFitSourceForSrcsetAttribute(document().devicePixelRatio(), effectiveSize, source->fastGetAttribute(srcsetAttr));
+        float effectiveSize = parser.length();
+        ImageCandidate candidate = bestFitSourceForSrcsetAttribute(document().devicePixelRatio(), effectiveSize, source->fastGetAttribute(srcsetAttr), &document());
         if (candidate.isEmpty())
             continue;
         return candidate;
@@ -359,7 +355,7 @@ Node::InsertionNotificationRequest HTMLImageElement::insertedInto(ContainerNode*
         document().mediaQueryMatcher().addViewportListener(m_listener);
 
     bool imageWasModified = false;
-    if (RuntimeEnabledFeatures::pictureEnabled()) {
+    if (RuntimeEnabledFeatures::pictureEnabled() && document().isActive()) {
         ImageCandidate candidate = findBestFitImageFromPictureParent();
         if (!candidate.isEmpty()) {
             setBestFitURLAndDPRFromImageCandidate(candidate);
@@ -555,7 +551,7 @@ bool HTMLImageElement::isServerMap() const
 Image* HTMLImageElement::imageContents()
 {
     if (!imageLoader().imageComplete())
-        return 0;
+        return nullptr;
 
     return imageLoader().image()->image();
 }
@@ -620,6 +616,9 @@ FloatSize HTMLImageElement::defaultDestinationSize() const
 
 void HTMLImageElement::selectSourceURL(ImageLoader::UpdateFromElementBehavior behavior)
 {
+    if (!document().isActive())
+        return;
+
     bool foundURL = false;
     if (RuntimeEnabledFeatures::pictureEnabled()) {
         ImageCandidate candidate = findBestFitImageFromPictureParent();
@@ -630,19 +629,18 @@ void HTMLImageElement::selectSourceURL(ImageLoader::UpdateFromElementBehavior be
     }
 
     if (!foundURL) {
-        unsigned effectiveSize = 0;
+        float effectiveSize = 0;
         if (RuntimeEnabledFeatures::pictureSizesEnabled()) {
             String sizes = fastGetAttribute(sizesAttr);
             if (!sizes.isNull())
                 UseCounter::count(document(), UseCounter::Sizes);
             SizesAttributeParser parser = SizesAttributeParser(MediaValuesDynamic::create(document()), sizes);
             effectiveSize = parser.length();
-            m_effectiveSizeViewportDependant = parser.viewportDependant();
         }
-        ImageCandidate candidate = bestFitSourceForImageAttributes(document().devicePixelRatio(), effectiveSize, fastGetAttribute(srcAttr), fastGetAttribute(srcsetAttr));
+        ImageCandidate candidate = bestFitSourceForImageAttributes(document().devicePixelRatio(), effectiveSize, fastGetAttribute(srcAttr), fastGetAttribute(srcsetAttr), &document());
         setBestFitURLAndDPRFromImageCandidate(candidate);
     }
-    if (m_intrinsicSizingViewportDependant && m_effectiveSizeViewportDependant && !m_listener) {
+    if (m_intrinsicSizingViewportDependant && !m_listener) {
         m_listener = ViewportChangeListener::create(this);
         document().mediaQueryMatcher().addViewportListener(m_listener);
     }

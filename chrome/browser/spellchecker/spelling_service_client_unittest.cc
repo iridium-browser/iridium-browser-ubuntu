@@ -45,11 +45,10 @@ class TestSpellingURLFetcher : public net::TestURLFetcher {
     set_response_code(status);
     SetResponseString(response);
   }
-  virtual ~TestSpellingURLFetcher() {
-  }
+  ~TestSpellingURLFetcher() override {}
 
-  virtual void SetUploadData(const std::string& upload_content_type,
-                             const std::string& upload_content) OVERRIDE {
+  void SetUploadData(const std::string& upload_content_type,
+                     const std::string& upload_content) override {
     // Verify the given content type is JSON. (The Spelling service returns an
     // internal server error when this content type is not JSON.)
     EXPECT_EQ("application/json", upload_content_type);
@@ -79,7 +78,7 @@ class TestSpellingURLFetcher : public net::TestURLFetcher {
     net::TestURLFetcher::SetUploadData(upload_content_type, upload_content);
   }
 
-  virtual void Start() OVERRIDE {
+  void Start() override {
     // Verify that this client does not either send cookies to the Spelling
     // service or accept cookies from it.
     EXPECT_EQ(net::LOAD_DO_NOT_SEND_COOKIES | net::LOAD_DO_NOT_SAVE_COOKIES,
@@ -95,7 +94,7 @@ class TestSpellingURLFetcher : public net::TestURLFetcher {
       {"af", "ZAF"},
       {"en", "USA"},
     };
-    for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kCountries); ++i) {
+    for (size_t i = 0; i < arraysize(kCountries); ++i) {
       if (!language.compare(kCountries[i].language)) {
         country->assign(kCountries[i].country);
         return true;
@@ -122,8 +121,7 @@ class TestingSpellingServiceClient : public SpellingServiceClient {
         success_(false),
         fetcher_(NULL) {
   }
-  virtual ~TestingSpellingServiceClient() {
-  }
+  ~TestingSpellingServiceClient() override {}
 
   void SetHTTPRequest(int type,
                       const std::string& text,
@@ -168,7 +166,7 @@ class TestingSpellingServiceClient : public SpellingServiceClient {
   }
 
  private:
-  virtual net::URLFetcher* CreateURLFetcher(const GURL& url) OVERRIDE {
+  net::URLFetcher* CreateURLFetcher(const GURL& url) override {
     EXPECT_EQ("https://www.googleapis.com/rpc", url.spec());
     fetcher_ = new TestSpellingURLFetcher(0, url, this,
                                           request_type_, request_text_,
@@ -304,7 +302,7 @@ TEST_F(SpellingServiceClientTest, RequestTextCheck) {
   pref->SetBoolean(prefs::kEnableContinuousSpellcheck, true);
   pref->SetBoolean(prefs::kSpellCheckUseSpellingService, true);
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTests); ++i) {
+  for (size_t i = 0; i < arraysize(kTests); ++i) {
     client_.SetHTTPRequest(kTests[i].request_type, kTests[i].request_text,
                            kTests[i].language);
     client_.SetHTTPResponse(kTests[i].response_status, kTests[i].response_data);
@@ -349,14 +347,13 @@ TEST_F(SpellingServiceClientTest, AvailableServices) {
   EXPECT_FALSE(client_.IsAvailable(&profile_, kSuggest));
   EXPECT_FALSE(client_.IsAvailable(&profile_, kSpellcheck));
 
-  static const char* kSupported[] = {
 #if !defined(OS_MACOSX)
+  static const char* kSupported[] = {
     "en-AU", "en-CA", "en-GB", "en-US",
-#endif
   };
   // If spellcheck is allowed, then suggest is not since spellcheck is a
   // superset of suggest.
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kSupported); ++i) {
+  for (size_t i = 0; i < arraysize(kSupported); ++i) {
     pref->SetString(prefs::kSpellCheckDictionary, kSupported[i]);
     EXPECT_FALSE(client_.IsAvailable(&profile_, kSuggest));
     EXPECT_TRUE(client_.IsAvailable(&profile_, kSpellcheck));
@@ -365,19 +362,18 @@ TEST_F(SpellingServiceClientTest, AvailableServices) {
   // This function returns true for suggestions for all and false for
   // spellcheck for unsupported locales.
   static const char* kUnsupported[] = {
-#if !defined(OS_MACOSX)
     "af-ZA", "bg-BG", "ca-ES", "cs-CZ", "da-DK", "de-DE", "el-GR", "es-ES",
     "et-EE", "fo-FO", "fr-FR", "he-IL", "hi-IN", "hr-HR", "hu-HU", "id-ID",
     "it-IT", "lt-LT", "lv-LV", "nb-NO", "nl-NL", "pl-PL", "pt-BR", "pt-PT",
     "ro-RO", "ru-RU", "sk-SK", "sl-SI", "sh", "sr", "sv-SE", "tr-TR",
     "uk-UA", "vi-VN",
-#endif
   };
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kUnsupported); ++i) {
+  for (size_t i = 0; i < arraysize(kUnsupported); ++i) {
     pref->SetString(prefs::kSpellCheckDictionary, kUnsupported[i]);
     EXPECT_TRUE(client_.IsAvailable(&profile_, kSuggest));
     EXPECT_FALSE(client_.IsAvailable(&profile_, kSpellcheck));
   }
+#endif  // !defined(OS_MACOSX)
 }
 
 // Verify that an error in JSON response from spelling service will result in

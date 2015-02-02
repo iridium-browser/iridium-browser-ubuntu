@@ -1038,7 +1038,7 @@ void TestIterate(const TilingData& data,
   EXPECT_LT(expect_right, data.num_tiles_x());
   EXPECT_LT(expect_bottom, data.num_tiles_y());
 
-  std::vector<std::pair<int, int> > original_expected;
+  std::vector<std::pair<int, int>> original_expected;
   for (int x = 0; x < data.num_tiles_x(); ++x) {
     for (int y = 0; y < data.num_tiles_y(); ++y) {
       gfx::Rect bounds;
@@ -1058,7 +1058,7 @@ void TestIterate(const TilingData& data,
 
   // Verify with vanilla iterator.
   {
-    std::vector<std::pair<int, int> > expected = original_expected;
+    std::vector<std::pair<int, int>> expected = original_expected;
     for (TilingData::Iterator iter(&data, rect, include_borders); iter;
          ++iter) {
       bool found = false;
@@ -1078,7 +1078,7 @@ void TestIterate(const TilingData& data,
   // Make sure this also works with a difference iterator and an empty ignore.
   // The difference iterator never includes borders, so ignore it otherwise.
   if (!include_borders) {
-    std::vector<std::pair<int, int> > expected = original_expected;
+    std::vector<std::pair<int, int>> expected = original_expected;
     for (TilingData::DifferenceIterator iter(&data, rect, gfx::Rect()); iter;
          ++iter) {
       bool found = false;
@@ -1244,7 +1244,7 @@ void TestDiff(const TilingData& data,
               gfx::Rect consider,
               gfx::Rect ignore,
               size_t num_tiles) {
-  std::vector<std::pair<int, int> > expected;
+  std::vector<std::pair<int, int>> expected;
   for (int y = 0; y < data.num_tiles_y(); ++y) {
     for (int x = 0; x < data.num_tiles_x(); ++x) {
       gfx::Rect bounds = data.TileBounds(x, y);
@@ -1373,21 +1373,43 @@ void TestSpiralIterate(int source_line_number,
                        const gfx::Rect& consider,
                        const gfx::Rect& ignore,
                        const gfx::Rect& center,
-                       const std::vector<std::pair<int, int> >& expected) {
-  std::vector<std::pair<int, int> > actual;
+                       const std::vector<std::pair<int, int>>& expected) {
+  std::vector<std::pair<int, int>> actual_forward;
   for (TilingData::SpiralDifferenceIterator it(
            &tiling_data, consider, ignore, center);
        it;
        ++it) {
-    actual.push_back(it.index());
+    actual_forward.push_back(it.index());
   }
 
-  EXPECT_EQ(expected.size(), actual.size()) << "error from line "
-                                            << source_line_number;
-  for (size_t i = 0; i < std::min(expected.size(), actual.size()); ++i) {
-    EXPECT_EQ(expected[i].first, actual[i].first)
+  EXPECT_EQ(expected.size(), actual_forward.size()) << "error from line "
+                                                    << source_line_number;
+  for (size_t i = 0; i < std::min(expected.size(), actual_forward.size());
+       ++i) {
+    EXPECT_EQ(expected[i].first, actual_forward[i].first)
         << "i: " << i << " error from line: " << source_line_number;
-    EXPECT_EQ(expected[i].second, actual[i].second)
+    EXPECT_EQ(expected[i].second, actual_forward[i].second)
+        << "i: " << i << " error from line: " << source_line_number;
+  }
+
+  std::vector<std::pair<int, int>> actual_reverse;
+  for (TilingData::ReverseSpiralDifferenceIterator it(
+           &tiling_data, consider, ignore, center);
+       it;
+       ++it) {
+    actual_reverse.push_back(it.index());
+  }
+
+  std::vector<std::pair<int, int>> reversed_expected = expected;
+  std::reverse(reversed_expected.begin(), reversed_expected.end());
+  EXPECT_EQ(reversed_expected.size(), actual_reverse.size())
+      << "error from line " << source_line_number;
+  for (size_t i = 0;
+       i < std::min(reversed_expected.size(), actual_reverse.size());
+       ++i) {
+    EXPECT_EQ(reversed_expected[i].first, actual_reverse[i].first)
+        << "i: " << i << " error from line: " << source_line_number;
+    EXPECT_EQ(reversed_expected[i].second, actual_reverse[i].second)
         << "i: " << i << " error from line: " << source_line_number;
   }
 }
@@ -1396,7 +1418,7 @@ TEST(TilingDataTest, SpiralDifferenceIteratorNoIgnoreFullConsider) {
   TilingData tiling_data(gfx::Size(10, 10), gfx::Size(30, 30), false);
   gfx::Rect consider(30, 30);
   gfx::Rect ignore;
-  std::vector<std::pair<int, int> > expected;
+  std::vector<std::pair<int, int>> expected;
 
   // Center is in the center of the tiling.
   gfx::Rect center(15, 15, 1, 1);
@@ -1507,7 +1529,7 @@ TEST(TilingDataTest, SpiralDifferenceIteratorNoIgnoreFullConsider) {
 TEST(TilingDataTest, SpiralDifferenceIteratorSmallConsider) {
   TilingData tiling_data(gfx::Size(10, 10), gfx::Size(50, 50), false);
   gfx::Rect ignore;
-  std::vector<std::pair<int, int> > expected;
+  std::vector<std::pair<int, int>> expected;
   gfx::Rect center(15, 15, 1, 1);
 
   // Consider is one cell.
@@ -1567,7 +1589,7 @@ TEST(TilingDataTest, SpiralDifferenceIteratorSmallConsider) {
 TEST(TilingDataTest, SpiralDifferenceIteratorHasIgnore) {
   TilingData tiling_data(gfx::Size(10, 10), gfx::Size(50, 50), false);
   gfx::Rect consider(50, 50);
-  std::vector<std::pair<int, int> > expected;
+  std::vector<std::pair<int, int>> expected;
   gfx::Rect center(15, 15, 1, 1);
 
   // Full ignore.
@@ -1641,7 +1663,7 @@ TEST(TilingDataTest, SpiralDifferenceIteratorHasIgnore) {
 TEST(TilingDataTest, SpiralDifferenceIteratorRectangleCenter) {
   TilingData tiling_data(gfx::Size(10, 10), gfx::Size(50, 50), false);
   gfx::Rect consider(50, 50);
-  std::vector<std::pair<int, int> > expected;
+  std::vector<std::pair<int, int>> expected;
   gfx::Rect ignore;
 
   // Two cell center
@@ -1762,7 +1784,7 @@ TEST(TilingDataTest, SpiralDifferenceIteratorRectangleCenter) {
 
 TEST(TilingDataTest, SpiralDifferenceIteratorEdgeCases) {
   TilingData tiling_data(gfx::Size(10, 10), gfx::Size(30, 30), false);
-  std::vector<std::pair<int, int> > expected;
+  std::vector<std::pair<int, int>> expected;
   gfx::Rect center;
   gfx::Rect consider;
   gfx::Rect ignore;

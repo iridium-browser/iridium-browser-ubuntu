@@ -51,15 +51,17 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#elif defined(OS_WIN)
+#include "base/win/scoped_handle.h"
 #endif
 
 namespace {
 
-const char* kCommonSwitches[] = {
+const char* const kCommonSwitches[] = {
     "ignore-certificate-errors", "metrics-recording-only"};
 
 #if defined(OS_LINUX)
-const char* kEnableCrashReport = "enable-crash-reporter-for-testing";
+const char kEnableCrashReport[] = "enable-crash-reporter-for-testing";
 #endif
 
 Status UnpackAutomationExtension(const base::FilePath& temp_dir,
@@ -128,28 +130,33 @@ Status PrepareCommandLine(int port,
     switches.RemoveSwitch(*iter);
   }
   switches.SetFromSwitches(capabilities.switches);
-
+  base::FilePath user_data_dir_path;
   if (!switches.HasSwitch("user-data-dir")) {
     command.AppendArg("data:,");
     if (!user_data_dir->CreateUniqueTempDir())
       return Status(kUnknownError, "cannot create temp dir for user data dir");
     switches.SetSwitch("user-data-dir", user_data_dir->path().value());
-    Status status = internal::PrepareUserDataDir(
-        user_data_dir->path(), capabilities.prefs.get(),
-        capabilities.local_state.get());
-    if (status.IsError())
-      return status;
+    user_data_dir_path = user_data_dir->path();
+  } else {
+    user_data_dir_path = base::FilePath(
+        switches.GetSwitchValueNative("user-data-dir"));
   }
+
+  Status status = internal::PrepareUserDataDir(user_data_dir_path,
+                                               capabilities.prefs.get(),
+                                               capabilities.local_state.get());
+  if (status.IsError())
+    return status;
 
   if (!extension_dir->CreateUniqueTempDir()) {
     return Status(kUnknownError,
                   "cannot create temp dir for unpacking extensions");
   }
-  Status status = internal::ProcessExtensions(capabilities.extensions,
-                                              extension_dir->path(),
-                                              true,
-                                              &switches,
-                                              extension_bg_pages);
+  status = internal::ProcessExtensions(capabilities.extensions,
+                                       extension_dir->path(),
+                                       true,
+                                       &switches,
+                                       extension_bg_pages);
   if (status.IsError())
     return status;
   switches.AppendToCommandLine(&command);
@@ -197,7 +204,7 @@ Status CreateBrowserwideDevToolsClientAndConnect(
     const NetAddress& address,
     const PerfLoggingPrefs& perf_logging_prefs,
     const SyncWebSocketFactory& socket_factory,
-    ScopedVector<DevToolsEventListener>& devtools_event_listeners,
+    const ScopedVector<DevToolsEventListener>& devtools_event_listeners,
     scoped_ptr<DevToolsClient>* browser_client) {
   scoped_ptr<DevToolsClient> client(new DevToolsClientImpl(
       socket_factory, base::StringPrintf("ws://%s/devtools/browser/",
@@ -231,7 +238,7 @@ Status LaunchRemoteChromeSession(
     URLRequestContextGetter* context_getter,
     const SyncWebSocketFactory& socket_factory,
     const Capabilities& capabilities,
-    ScopedVector<DevToolsEventListener>& devtools_event_listeners,
+    ScopedVector<DevToolsEventListener>* devtools_event_listeners,
     scoped_ptr<Chrome>* chrome) {
   Status status(kOk);
   scoped_ptr<DevToolsHttpClient> devtools_http_client;
@@ -247,7 +254,7 @@ Status LaunchRemoteChromeSession(
   scoped_ptr<DevToolsClient> devtools_websocket_client;
   status = CreateBrowserwideDevToolsClientAndConnect(
       capabilities.debugger_address, capabilities.perf_logging_prefs,
-      socket_factory, devtools_event_listeners, &devtools_websocket_client);
+      socket_factory, *devtools_event_listeners, &devtools_websocket_client);
   if (status.IsError()) {
     LOG(WARNING) << "Browser-wide DevTools client failed to connect: "
                  << status.message();
@@ -255,7 +262,7 @@ Status LaunchRemoteChromeSession(
 
   chrome->reset(new ChromeRemoteImpl(devtools_http_client.Pass(),
                                      devtools_websocket_client.Pass(),
-                                     devtools_event_listeners));
+                                     *devtools_event_listeners));
   return Status(kOk);
 }
 
@@ -265,7 +272,7 @@ Status LaunchDesktopChrome(
     scoped_ptr<PortReservation> port_reservation,
     const SyncWebSocketFactory& socket_factory,
     const Capabilities& capabilities,
-    ScopedVector<DevToolsEventListener>& devtools_event_listeners,
+    ScopedVector<DevToolsEventListener>* devtools_event_listeners,
     scoped_ptr<Chrome>* chrome) {
   CommandLine command(CommandLine::NO_PROGRAM);
   base::ScopedTempDir user_data_dir;
@@ -318,6 +325,25 @@ Status LaunchDesktopChrome(
     no_stderr.push_back(std::make_pair(devnull.get(), STDERR_FILENO));
     options.fds_to_remap = &no_stderr;
   }
+#elif defined(OS_WIN)
+  // Silence chrome error message.
+  HANDLE out_read;
+  HANDLE out_write;
+  SECURITY_ATTRIBUTES sa_attr;
+
+  sa_attr.nLength = sizeof(SECURITY_ATTRIBUTES);
+  sa_attr.bInheritHandle = TRUE;
+  sa_attr.lpSecurityDescriptor = NULL;
+  if (!CreatePipe(&out_read, &out_write, &sa_attr, 0))
+      return Status(kUnknownError, "CreatePipe() - Pipe creation failed");
+  // Prevent handle leak.
+  base::win::ScopedHandle scoped_out_read(out_read);
+  base::win::ScopedHandle scoped_out_write(out_write);
+
+  options.stdout_handle = out_write;
+  options.stderr_handle = out_write;
+  options.stdin_handle = GetStdHandle(STD_INPUT_HANDLE);
+  options.inherit_handles = true;
 #endif
 
 #if defined(OS_WIN)
@@ -373,7 +399,7 @@ Status LaunchDesktopChrome(
   scoped_ptr<DevToolsClient> devtools_websocket_client;
   status = CreateBrowserwideDevToolsClientAndConnect(
       NetAddress(port), capabilities.perf_logging_prefs, socket_factory,
-      devtools_event_listeners, &devtools_websocket_client);
+      *devtools_event_listeners, &devtools_websocket_client);
   if (status.IsError()) {
     LOG(WARNING) << "Browser-wide DevTools client failed to connect: "
                  << status.message();
@@ -382,7 +408,7 @@ Status LaunchDesktopChrome(
   scoped_ptr<ChromeDesktopImpl> chrome_desktop(
       new ChromeDesktopImpl(devtools_http_client.Pass(),
                             devtools_websocket_client.Pass(),
-                            devtools_event_listeners,
+                            *devtools_event_listeners,
                             port_reservation.Pass(),
                             process,
                             command,
@@ -410,7 +436,7 @@ Status LaunchAndroidChrome(
     scoped_ptr<PortReservation> port_reservation,
     const SyncWebSocketFactory& socket_factory,
     const Capabilities& capabilities,
-    ScopedVector<DevToolsEventListener>& devtools_event_listeners,
+    ScopedVector<DevToolsEventListener>* devtools_event_listeners,
     DeviceManager* device_manager,
     scoped_ptr<Chrome>* chrome) {
   Status status(kOk);
@@ -454,7 +480,7 @@ Status LaunchAndroidChrome(
   scoped_ptr<DevToolsClient> devtools_websocket_client;
   status = CreateBrowserwideDevToolsClientAndConnect(
       NetAddress(port), capabilities.perf_logging_prefs, socket_factory,
-      devtools_event_listeners, &devtools_websocket_client);
+      *devtools_event_listeners, &devtools_websocket_client);
   if (status.IsError()) {
     LOG(WARNING) << "Browser-wide DevTools client failed to connect: "
                  << status.message();
@@ -462,7 +488,7 @@ Status LaunchAndroidChrome(
 
   chrome->reset(new ChromeAndroidImpl(devtools_http_client.Pass(),
                                       devtools_websocket_client.Pass(),
-                                      devtools_event_listeners,
+                                      *devtools_event_listeners,
                                       port_reservation.Pass(),
                                       device.Pass()));
   return Status(kOk);
@@ -477,7 +503,7 @@ Status LaunchChrome(
     PortServer* port_server,
     PortManager* port_manager,
     const Capabilities& capabilities,
-    ScopedVector<DevToolsEventListener>& devtools_event_listeners,
+    ScopedVector<DevToolsEventListener>* devtools_event_listeners,
     scoped_ptr<Chrome>* chrome) {
   if (capabilities.IsRemoteBrowser()) {
     return LaunchRemoteChromeSession(
@@ -490,7 +516,10 @@ Status LaunchChrome(
   Status port_status(kOk);
 
   if (capabilities.IsAndroid()) {
-    port_status = port_manager->ReservePortFromPool(&port, &port_reservation);
+    if (port_server)
+      port_status = port_server->ReservePort(&port, &port_reservation);
+    else
+      port_status = port_manager->ReservePortFromPool(&port, &port_reservation);
     if (port_status.IsError())
       return Status(kUnknownError, "cannot reserve port for Chrome",
                     port_status);
@@ -772,14 +801,32 @@ Status PrepareUserDataDir(
   if (!base::CreateDirectory(default_dir))
     return Status(kUnknownError, "cannot create default profile directory");
 
+  std::string preferences;
+  base::FilePath preferences_path =
+      default_dir.Append(chrome::kPreferencesFilename);
+
+  if (base::PathExists(preferences_path))
+    base::ReadFileToString(preferences_path, &preferences);
+  else
+    preferences = kPreferences;
+
   Status status =
-      WritePrefsFile(kPreferences,
+      WritePrefsFile(preferences,
                      custom_prefs,
                      default_dir.Append(chrome::kPreferencesFilename));
   if (status.IsError())
     return status;
 
-  status = WritePrefsFile(kLocalState,
+  std::string local_state;
+  base::FilePath local_state_path =
+      user_data_dir.Append(chrome::kLocalStateFilename);
+
+  if (base::PathExists(local_state_path))
+    base::ReadFileToString(local_state_path, &local_state);
+  else
+    local_state = kLocalState;
+
+  status = WritePrefsFile(local_state,
                           custom_local_state,
                           user_data_dir.Append(chrome::kLocalStateFilename));
   if (status.IsError())

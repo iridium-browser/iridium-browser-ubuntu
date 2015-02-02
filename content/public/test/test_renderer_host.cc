@@ -38,25 +38,24 @@ RenderFrameHostTester* RenderFrameHostTester::For(RenderFrameHost* host) {
   return static_cast<TestRenderFrameHost*>(host);
 }
 
+// static
+RenderFrameHost* RenderFrameHostTester::GetPendingForController(
+    NavigationController* controller) {
+  WebContentsImpl* web_contents = static_cast<WebContentsImpl*>(
+      controller->GetWebContents());
+  return web_contents->GetRenderManagerForTesting()->pending_frame_host();
+}
+
+// static
+bool RenderFrameHostTester::IsRenderFrameHostSwappedOut(RenderFrameHost* rfh) {
+  return static_cast<RenderFrameHostImpl*>(rfh)->is_swapped_out();
+}
+
 // RenderViewHostTester -------------------------------------------------------
 
 // static
 RenderViewHostTester* RenderViewHostTester::For(RenderViewHost* host) {
   return static_cast<TestRenderViewHost*>(host);
-}
-
-// static
-RenderViewHost* RenderViewHostTester::GetPendingForController(
-    NavigationController* controller) {
-  WebContentsImpl* web_contents = static_cast<WebContentsImpl*>(
-      controller->GetWebContents());
-  return web_contents->GetRenderManagerForTesting()->pending_render_view_host();
-}
-
-// static
-bool RenderViewHostTester::IsRenderViewHostSwappedOut(RenderViewHost* rvh) {
-  return static_cast<RenderViewHostImpl*>(rvh)->rvh_state() ==
-         RenderViewHostImpl::STATE_SWAPPED_OUT;
 }
 
 // static
@@ -160,17 +159,16 @@ void RenderViewHostTestHarness::Reload() {
   NavigationEntry* entry = controller().GetLastCommittedEntry();
   DCHECK(entry);
   controller().Reload(false);
-  static_cast<TestRenderViewHost*>(
-      rvh())->SendNavigateWithTransition(
-          entry->GetPageID(), entry->GetURL(), ui::PAGE_TRANSITION_RELOAD);
+  RenderFrameHostTester::For(main_rfh())->SendNavigateWithTransition(
+      entry->GetPageID(), entry->GetURL(), ui::PAGE_TRANSITION_RELOAD);
 }
 
 void RenderViewHostTestHarness::FailedReload() {
   NavigationEntry* entry = controller().GetLastCommittedEntry();
   DCHECK(entry);
   controller().Reload(false);
-  static_cast<TestRenderViewHost*>(
-      rvh())->SendFailedNavigate(entry->GetPageID(), entry->GetURL());
+  RenderFrameHostTester::For(main_rfh())->SendFailedNavigate(entry->GetPageID(),
+                                                             entry->GetURL());
 }
 
 void RenderViewHostTestHarness::SetUp() {

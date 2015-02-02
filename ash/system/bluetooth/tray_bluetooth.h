@@ -18,21 +18,21 @@ class TrayBluetooth : public SystemTrayItem,
                       public BluetoothObserver {
  public:
   explicit TrayBluetooth(SystemTray* system_tray);
-  virtual ~TrayBluetooth();
+  ~TrayBluetooth() override;
 
  private:
   // Overridden from SystemTrayItem.
-  virtual views::View* CreateTrayView(user::LoginStatus status) OVERRIDE;
-  virtual views::View* CreateDefaultView(user::LoginStatus status) OVERRIDE;
-  virtual views::View* CreateDetailedView(user::LoginStatus status) OVERRIDE;
-  virtual void DestroyTrayView() OVERRIDE;
-  virtual void DestroyDefaultView() OVERRIDE;
-  virtual void DestroyDetailedView() OVERRIDE;
-  virtual void UpdateAfterLoginStatusChange(user::LoginStatus status) OVERRIDE;
+  views::View* CreateTrayView(user::LoginStatus status) override;
+  views::View* CreateDefaultView(user::LoginStatus status) override;
+  views::View* CreateDetailedView(user::LoginStatus status) override;
+  void DestroyTrayView() override;
+  void DestroyDefaultView() override;
+  void DestroyDetailedView() override;
+  void UpdateAfterLoginStatusChange(user::LoginStatus status) override;
 
   // Overridden from BluetoothObserver.
-  virtual void OnBluetoothRefresh() OVERRIDE;
-  virtual void OnBluetoothDiscoveringChanged() OVERRIDE;
+  void OnBluetoothRefresh() override;
+  void OnBluetoothDiscoveringChanged() override;
 
   tray::BluetoothDefaultView* default_;
   tray::BluetoothDetailedView* detailed_;

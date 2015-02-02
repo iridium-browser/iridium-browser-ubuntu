@@ -9,25 +9,27 @@
 
 #include "base/basictypes.h"
 #include "base/memory/weak_ptr.h"
-#include "chrome/browser/ui/app_list/search/chrome_search_result.h"
+#include "ui/app_list/search_result.h"
 #include "url/gurl.h"
 
+class AppListControllerDelegate;
 class Profile;
 
 namespace app_list {
 
 struct Person;
 
-class PeopleResult : public ChromeSearchResult {
+class PeopleResult : public SearchResult {
  public:
-  PeopleResult(Profile* profile, scoped_ptr<Person> person);
-  virtual ~PeopleResult();
+  PeopleResult(Profile* profile,
+               AppListControllerDelegate* controller,
+               scoped_ptr<Person> person);
+  ~PeopleResult() override;
 
-  // ChromeSearchResult overides:
-  virtual void Open(int event_flags) OVERRIDE;
-  virtual void InvokeAction(int action_index, int event_flags) OVERRIDE;
-  virtual scoped_ptr<ChromeSearchResult> Duplicate() OVERRIDE;
-  virtual ChromeSearchResultType GetType() OVERRIDE;
+  // SearchResult overrides:
+  void Open(int event_flags) override;
+  void InvokeAction(int action_index, int event_flags) override;
+  scoped_ptr<SearchResult> Duplicate() override;
 
  private:
   void OnIconLoaded();
@@ -43,6 +45,7 @@ class PeopleResult : public ChromeSearchResult {
   void RefreshHangoutsExtensionId();
 
   Profile* profile_;
+  AppListControllerDelegate* controller_;
   scoped_ptr<Person> person_;
 
   gfx::ImageSkia image_;

@@ -92,8 +92,8 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
   if (command_line.HasSwitch(switches::kDisableApplicationCache))
     WebRuntimeFeatures::enableApplicationCache(false);
 
-  if (command_line.HasSwitch(switches::kDisableDesktopNotifications))
-    WebRuntimeFeatures::enableNotifications(false);
+  if (command_line.HasSwitch(switches::kDisableBlinkScheduler))
+    WebRuntimeFeatures::enableBlinkScheduler(false);
 
   if (command_line.HasSwitch(switches::kDisableLocalStorage))
     WebRuntimeFeatures::enableLocalStorage(false);
@@ -113,6 +113,9 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
 
   if (!command_line.HasSwitch(switches::kEnableSpeechRecognition))
     WebRuntimeFeatures::enableScriptedSpeech(false);
+
+  if (command_line.HasSwitch(switches::kEnableExperimentalWebPlatformFeatures))
+    WebRuntimeFeatures::enableNotifications(true);
 
   // WebAudio is enabled by default on ARM and X86, if the MediaCodec
   // API is available.
@@ -177,6 +180,16 @@ void SetRuntimeFeaturesDefaultsAndUpdateFromArgs(
       command_line.HasSwitch(
           switches::kEnableExperimentalWebPlatformFeatures)) {
     WebRuntimeFeatures::enableNetworkInformation(true);
+  }
+
+  if (command_line.HasSwitch(switches::kEnableCredentialManagerAPI))
+    WebRuntimeFeatures::enableCredentialManagerAPI(true);
+
+  if (command_line.HasSwitch(switches::kEnableViewport))
+    WebRuntimeFeatures::enableCSSViewport(true);
+
+  if (command_line.HasSwitch(switches::kDisableSVG1DOM)) {
+    WebRuntimeFeatures::enableSVG1DOM(false);
   }
 }
 

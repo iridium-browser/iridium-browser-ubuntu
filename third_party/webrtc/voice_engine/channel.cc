@@ -395,116 +395,6 @@ Channel::OnInitializeDecoder(
     return 0;
 }
 
-void
-Channel::OnPacketTimeout(int32_t id)
-{
-    WEBRTC_TRACE(kTraceInfo, kTraceVoice, VoEId(_instanceId,_channelId),
-                 "Channel::OnPacketTimeout(id=%d)", id);
-
-    CriticalSectionScoped cs(_callbackCritSectPtr);
-    if (_voiceEngineObserverPtr)
-    {
-        if (channel_state_.Get().receiving || _externalTransport)
-        {
-            int32_t channel = VoEChannelId(id);
-            assert(channel == _channelId);
-            // Ensure that next OnReceivedPacket() callback will trigger
-            // a VE_PACKET_RECEIPT_RESTARTED callback.
-            _rtpPacketTimedOut = true;
-            // Deliver callback to the observer
-            WEBRTC_TRACE(kTraceInfo, kTraceVoice,
-                         VoEId(_instanceId,_channelId),
-                         "Channel::OnPacketTimeout() => "
-                         "CallbackOnError(VE_RECEIVE_PACKET_TIMEOUT)");
-            _voiceEngineObserverPtr->CallbackOnError(channel,
-                                                     VE_RECEIVE_PACKET_TIMEOUT);
-        }
-    }
-}
-
-void
-Channel::OnReceivedPacket(int32_t id,
-                          RtpRtcpPacketType packetType)
-{
-    WEBRTC_TRACE(kTraceInfo, kTraceVoice, VoEId(_instanceId,_channelId),
-                 "Channel::OnReceivedPacket(id=%d, packetType=%d)",
-                 id, packetType);
-
-    assert(VoEChannelId(id) == _channelId);
-
-    // Notify only for the case when we have restarted an RTP session.
-    if (_rtpPacketTimedOut && (kPacketRtp == packetType))
-    {
-        CriticalSectionScoped cs(_callbackCritSectPtr);
-        if (_voiceEngineObserverPtr)
-        {
-            int32_t channel = VoEChannelId(id);
-            assert(channel == _channelId);
-            // Reset timeout mechanism
-            _rtpPacketTimedOut = false;
-            // Deliver callback to the observer
-            WEBRTC_TRACE(kTraceInfo, kTraceVoice,
-                         VoEId(_instanceId,_channelId),
-                         "Channel::OnPacketTimeout() =>"
-                         " CallbackOnError(VE_PACKET_RECEIPT_RESTARTED)");
-            _voiceEngineObserverPtr->CallbackOnError(
-                channel,
-                VE_PACKET_RECEIPT_RESTARTED);
-        }
-    }
-}
-
-void
-Channel::OnPeriodicDeadOrAlive(int32_t id,
-                               RTPAliveType alive)
-{
-    WEBRTC_TRACE(kTraceInfo, kTraceVoice, VoEId(_instanceId,_channelId),
-                 "Channel::OnPeriodicDeadOrAlive(id=%d, alive=%d)", id, alive);
-
-    {
-        CriticalSectionScoped cs(&_callbackCritSect);
-        if (!_connectionObserver)
-            return;
-    }
-
-    int32_t channel = VoEChannelId(id);
-    assert(channel == _channelId);
-
-    // Use Alive as default to limit risk of false Dead detections
-    bool isAlive(true);
-
-    // Always mark the connection as Dead when the module reports kRtpDead
-    if (kRtpDead == alive)
-    {
-        isAlive = false;
-    }
-
-    // It is possible that the connection is alive even if no RTP packet has
-    // been received for a long time since the other side might use VAD/DTX
-    // and a low SID-packet update rate.
-    if ((kRtpNoRtp == alive) && channel_state_.Get().playing)
-    {
-        // Detect Alive for all NetEQ states except for the case when we are
-        // in PLC_CNG state.
-        // PLC_CNG <=> background noise only due to long expand or error.
-        // Note that, the case where the other side stops sending during CNG
-        // state will be detected as Alive. Dead is is not set until after
-        // missing RTCP packets for at least twelve seconds (handled
-        // internally by the RTP/RTCP module).
-        isAlive = (_outputSpeechType != AudioFrame::kPLCCNG);
-    }
-
-    // Send callback to the registered observer
-    if (_connectionObserver)
-    {
-        CriticalSectionScoped cs(&_callbackCritSect);
-        if (_connectionObserverPtr)
-        {
-            _connectionObserverPtr->OnPeriodicDeadOrAlive(channel, isAlive);
-        }
-    }
-}
-
 int32_t
 Channel::OnReceivedPayloadData(const uint8_t* payloadData,
                                uint16_t payloadSize,
@@ -862,7 +752,6 @@ Channel::Channel(int32_t channelId,
     _rtpDumpOut(*RtpDump::CreateRtpDump()),
     _outputAudioLevel(),
     _externalTransport(false),
-    _audioLevel_dBov(0),
     _inputFilePlayerPtr(NULL),
     _outputFilePlayerPtr(NULL),
     _outputFileRecorderPtr(NULL),
@@ -902,7 +791,6 @@ Channel::Channel(int32_t channelId,
     _oldVadDecision(-1),
     _sendFrameType(0),
     _rtcpObserverPtr(NULL),
-    _externalPlayout(false),
     _externalMixing(false),
     _mixFileWithMicrophone(false),
     _rtcpObserver(false),
@@ -915,11 +803,6 @@ Channel::Channel(int32_t channelId,
     _lastLocalTimeStamp(0),
     _lastPayloadType(0),
     _includeAudioLevelIndication(false),
-    _rtpPacketTimedOut(false),
-    _rtpPacketTimeOutIsEnabled(false),
-    _rtpTimeOutSeconds(0),
-    _connectionObserver(false),
-    _connectionObserverPtr(NULL),
     _outputSpeechType(AudioFrame::kNormalSpeech),
     vie_network_(NULL),
     video_channel_(-1),
@@ -1898,8 +1781,20 @@ int32_t Channel::ReceivedRTCPPacket(const int8_t* data, int32_t length) {
 
   {
     CriticalSectionScoped lock(ts_stats_lock_.get());
-    ntp_estimator_.UpdateRtcpTimestamp(rtp_receiver_->SSRC(),
-                                       _rtpRtcpModule.get());
+    uint16_t rtt = GetRTT();
+    if (rtt == 0) {
+      // Waiting for valid RTT.
+      return 0;
+    }
+    uint32_t ntp_secs = 0;
+    uint32_t ntp_frac = 0;
+    uint32_t rtp_timestamp = 0;
+    if (0 != _rtpRtcpModule->RemoteNTP(&ntp_secs, &ntp_frac, NULL, NULL,
+                                       &rtp_timestamp)) {
+      // Waiting for RTCP.
+      return 0;
+    }
+    ntp_estimator_.UpdateRtcpTimestamp(rtt, ntp_secs, ntp_frac, rtp_timestamp);
   }
   return 0;
 }
@@ -2624,27 +2519,6 @@ int Channel::SendTelephoneEventInband(unsigned char eventCode,
     _inbandDtmfQueue.AddDtmf(eventCode, lengthMs, attenuationDb);
 
     return 0;
-}
-
-int
-Channel::SetDtmfPlayoutStatus(bool enable)
-{
-    WEBRTC_TRACE(kTraceInfo, kTraceVoice, VoEId(_instanceId,_channelId),
-               "Channel::SetDtmfPlayoutStatus()");
-    if (audio_coding_->SetDtmfPlayoutStatus(enable) != 0)
-    {
-        _engineStatisticsPtr->SetLastError(
-            VE_AUDIO_CODING_MODULE_ERROR, kTraceWarning,
-            "SetDtmfPlayoutStatus() failed to set Dtmf playout");
-        return -1;
-    }
-    return 0;
-}
-
-bool
-Channel::DtmfPlayoutStatus() const
-{
-    return audio_coding_->DtmfPlayoutStatus();
 }
 
 int

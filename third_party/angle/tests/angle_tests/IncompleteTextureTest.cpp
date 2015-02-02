@@ -2,10 +2,15 @@
 
 #include <vector>
 
+// Use this to select which configurations (e.g. which renderer, which GLES major version) these tests should be run against.
+typedef ::testing::Types<TFT<Gles::Two, Rend::D3D11>, TFT<Gles::Two, Rend::D3D9>> TestFixtureTypes;
+TYPED_TEST_CASE(IncompleteTextureTest, TestFixtureTypes);
+
+template<typename T>
 class IncompleteTextureTest : public ANGLETest
 {
 protected:
-    IncompleteTextureTest()
+    IncompleteTextureTest() : ANGLETest(T::GetGlesMajorVersion(), T::GetRequestedRenderer())
     {
         setWindowWidth(128);
         setWindowHeight(128);
@@ -76,7 +81,7 @@ protected:
     GLint mTextureUniformLocation;
 };
 
-TEST_F(IncompleteTextureTest, IncompleteTexture2D)
+TYPED_TEST(IncompleteTextureTest, IncompleteTexture2D)
 {
     GLuint tex;
     glGenTextures(1, &tex);
@@ -91,7 +96,7 @@ TEST_F(IncompleteTextureTest, IncompleteTexture2D)
     std::vector<GLubyte> textureData(textureWidth * textureHeight * 4);
     fillTextureData(textureData, 255, 0, 0, 255);
 
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, textureWidth, textureHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, textureData.data());
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, textureWidth, textureHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, &textureData[0]);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 
     drawQuad(mProgram, "position", 0.5f);
@@ -102,7 +107,7 @@ TEST_F(IncompleteTextureTest, IncompleteTexture2D)
     drawQuad(mProgram, "position", 0.5f);
     EXPECT_PIXEL_EQ(0, 0, 0, 0, 0, 255);
 
-    glTexImage2D(GL_TEXTURE_2D, 1, GL_RGBA, textureWidth >> 1, textureHeight >> 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, textureData.data());
+    glTexImage2D(GL_TEXTURE_2D, 1, GL_RGBA, textureWidth >> 1, textureHeight >> 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, &textureData[0]);
 
     drawQuad(mProgram, "position", 0.5f);
     EXPECT_PIXEL_EQ(0, 0, 255, 0, 0, 255);
@@ -110,7 +115,7 @@ TEST_F(IncompleteTextureTest, IncompleteTexture2D)
     glDeleteTextures(1, &tex);
 }
 
-TEST_F(IncompleteTextureTest, UpdateTexture)
+TYPED_TEST(IncompleteTextureTest, UpdateTexture)
 {
     GLuint tex;
     glGenTextures(1, &tex);
@@ -127,7 +132,7 @@ TEST_F(IncompleteTextureTest, UpdateTexture)
     for (size_t i = 0; i < 7; i++)
     {
         glTexImage2D(GL_TEXTURE_2D, i, GL_RGBA, redTextureWidth >> i, redTextureHeight >> i, 0, GL_RGBA, GL_UNSIGNED_BYTE,
-                     redTextureData.data());
+                     &redTextureData[0]);
     }
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -145,7 +150,7 @@ TEST_F(IncompleteTextureTest, UpdateTexture)
     {
         glTexSubImage2D(GL_TEXTURE_2D, i, greenTextureWidth >> i, greenTextureHeight >> i,
                         greenTextureWidth >> i, greenTextureHeight >> i, GL_RGBA, GL_UNSIGNED_BYTE,
-                        greenTextureData.data());
+                        &greenTextureData[0]);
     }
 
     drawQuad(mProgram, "position", 0.5f);

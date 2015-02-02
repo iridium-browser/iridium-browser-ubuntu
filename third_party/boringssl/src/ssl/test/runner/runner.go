@@ -22,6 +22,8 @@ import (
 )
 
 var useValgrind = flag.Bool("valgrind", false, "If true, run code under valgrind")
+var useGDB = flag.Bool("gdb", false, "If true, run BoringSSL code under gdb")
+var flagDebug *bool = flag.Bool("debug", false, "Hexdump the contents of the connection")
 
 const (
 	rsaCertificateFile   = "cert.pem"
@@ -148,6 +150,12 @@ type testCase struct {
 	// shimWritesFirst controls whether the shim sends an initial "hello"
 	// message before doing a roundtrip with the runner.
 	shimWritesFirst bool
+	// renegotiate indicates the the connection should be renegotiated
+	// during the exchange.
+	renegotiate bool
+	// renegotiateCiphers is a list of ciphersuite ids that will be
+	// switched in just before renegotiation.
+	renegotiateCiphers []uint16
 	// flags, if not empty, contains a list of command-line flags that will
 	// be passed to the shim program.
 	flags []string
@@ -563,6 +571,17 @@ func doExchange(test *testCase, config *Config, conn net.Conn, messageLen int, i
 		}
 	}
 
+	if test.renegotiate {
+		if test.renegotiateCiphers != nil {
+			config.CipherSuites = test.renegotiateCiphers
+		}
+		if err := tlsConn.Renegotiate(); err != nil {
+			return err
+		}
+	} else if test.renegotiateCiphers != nil {
+		panic("renegotiateCiphers without renegotiate")
+	}
+
 	if messageLen < 0 {
 		if test.protocol == dtls {
 			return fmt.Errorf("messageLen < 0 not supported for DTLS tests")
@@ -649,6 +668,10 @@ func openSocketPair() (shimEnd *os.File, conn net.Conn) {
 }
 
 func runTest(test *testCase, buildDir string) error {
+	if !test.shouldFail && (len(test.expectedError) > 0 || len(test.expectedLocalError) > 0) {
+		panic("Error expected without shouldFail in " + test.name)
+	}
+
 	shimEnd, conn := openSocketPair()
 	shimEndResume, connResume := openSocketPair()
 
@@ -689,10 +712,11 @@ func runTest(test *testCase, buildDir string) error {
 	var shim *exec.Cmd
 	if *useValgrind {
 		shim = valgrindOf(false, shim_path, flags...)
+	} else if *useGDB {
+		shim = gdbOf(shim_path, flags...)
 	} else {
 		shim = exec.Command(shim_path, flags...)
 	}
-	// shim = gdbOf(shim_path, flags...)
 	shim.ExtraFiles = []*os.File{shimEnd, shimEndResume}
 	shim.Stdin = os.Stdin
 	var stdoutBuf, stderrBuf bytes.Buffer
@@ -713,8 +737,19 @@ func runTest(test *testCase, buildDir string) error {
 		}
 	}
 
+	var connDebug *recordingConn
+	if *flagDebug {
+		connDebug = &recordingConn{Conn: conn}
+		conn = connDebug
+	}
+
 	err := doExchange(test, &config, conn, test.messageLen,
 		false /* not a resumption */)
+
+	if *flagDebug {
+		connDebug.WriteTo(os.Stdout)
+	}
+
 	conn.Close()
 	if err == nil && test.resumeSession {
 		var resumeConfig Config
@@ -810,6 +845,7 @@ var testCipherSuites = []struct {
 	{"ECDHE-ECDSA-AES256-SHA", TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA},
 	{"ECDHE-ECDSA-AES256-SHA384", TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384},
 	{"ECDHE-ECDSA-RC4-SHA", TLS_ECDHE_ECDSA_WITH_RC4_128_SHA},
+	{"ECDHE-PSK-WITH-AES-128-GCM-SHA256", TLS_ECDHE_PSK_WITH_AES_128_GCM_SHA256},
 	{"ECDHE-RSA-AES128-GCM", TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256},
 	{"ECDHE-RSA-AES128-SHA", TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA},
 	{"ECDHE-RSA-AES128-SHA256", TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256},
@@ -817,6 +853,9 @@ var testCipherSuites = []struct {
 	{"ECDHE-RSA-AES256-SHA", TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA},
 	{"ECDHE-RSA-AES256-SHA384", TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384},
 	{"ECDHE-RSA-RC4-SHA", TLS_ECDHE_RSA_WITH_RC4_128_SHA},
+	{"PSK-AES128-CBC-SHA", TLS_PSK_WITH_AES_128_CBC_SHA},
+	{"PSK-AES256-CBC-SHA", TLS_PSK_WITH_AES_256_CBC_SHA},
+	{"PSK-RC4-SHA", TLS_PSK_WITH_RC4_128_SHA},
 	{"RC4-MD5", TLS_RSA_WITH_RC4_128_MD5},
 	{"RC4-SHA", TLS_RSA_WITH_RC4_128_SHA},
 }
@@ -829,6 +868,9 @@ func isTLS12Only(suiteName string) bool {
 
 func addCipherSuiteTests() {
 	for _, suite := range testCipherSuites {
+		const psk = "12345"
+		const pskIdentity = "luggage combo"
+
 		var cert Certificate
 		var certFile string
 		var keyFile string
@@ -840,6 +882,13 @@ func addCipherSuiteTests() {
 			cert = getRSACertificate()
 			certFile = rsaCertificateFile
 			keyFile = rsaKeyFile
+		}
+
+		var flags []string
+		if strings.HasPrefix(suite.name, "PSK-") || strings.Contains(suite.name, "-PSK-") {
+			flags = append(flags,
+				"-psk", psk,
+				"-psk-identity", pskIdentity)
 		}
 
 		for _, ver := range tlsVersions {
@@ -856,11 +905,14 @@ func addCipherSuiteTests() {
 				testType: clientTest,
 				name:     ver.name + "-" + suite.name + "-client",
 				config: Config{
-					MinVersion:   ver.version,
-					MaxVersion:   ver.version,
-					CipherSuites: []uint16{suite.id},
-					Certificates: []Certificate{cert},
+					MinVersion:           ver.version,
+					MaxVersion:           ver.version,
+					CipherSuites:         []uint16{suite.id},
+					Certificates:         []Certificate{cert},
+					PreSharedKey:         []byte(psk),
+					PreSharedKeyIdentity: pskIdentity,
 				},
+				flags:         flags,
 				resumeSession: resumeSession,
 			})
 
@@ -868,13 +920,16 @@ func addCipherSuiteTests() {
 				testType: serverTest,
 				name:     ver.name + "-" + suite.name + "-server",
 				config: Config{
-					MinVersion:   ver.version,
-					MaxVersion:   ver.version,
-					CipherSuites: []uint16{suite.id},
-					Certificates: []Certificate{cert},
+					MinVersion:           ver.version,
+					MaxVersion:           ver.version,
+					CipherSuites:         []uint16{suite.id},
+					Certificates:         []Certificate{cert},
+					PreSharedKey:         []byte(psk),
+					PreSharedKeyIdentity: pskIdentity,
 				},
 				certFile:      certFile,
 				keyFile:       keyFile,
+				flags:         flags,
 				resumeSession: resumeSession,
 			})
 
@@ -885,11 +940,14 @@ func addCipherSuiteTests() {
 					protocol: dtls,
 					name:     "D" + ver.name + "-" + suite.name + "-client",
 					config: Config{
-						MinVersion:   ver.version,
-						MaxVersion:   ver.version,
-						CipherSuites: []uint16{suite.id},
-						Certificates: []Certificate{cert},
+						MinVersion:           ver.version,
+						MaxVersion:           ver.version,
+						CipherSuites:         []uint16{suite.id},
+						Certificates:         []Certificate{cert},
+						PreSharedKey:         []byte(psk),
+						PreSharedKeyIdentity: pskIdentity,
 					},
+					flags:         flags,
 					resumeSession: resumeSession,
 				})
 				testCases = append(testCases, testCase{
@@ -897,13 +955,16 @@ func addCipherSuiteTests() {
 					protocol: dtls,
 					name:     "D" + ver.name + "-" + suite.name + "-server",
 					config: Config{
-						MinVersion:   ver.version,
-						MaxVersion:   ver.version,
-						CipherSuites: []uint16{suite.id},
-						Certificates: []Certificate{cert},
+						MinVersion:           ver.version,
+						MaxVersion:           ver.version,
+						CipherSuites:         []uint16{suite.id},
+						Certificates:         []Certificate{cert},
+						PreSharedKey:         []byte(psk),
+						PreSharedKeyIdentity: pskIdentity,
 					},
 					certFile:      certFile,
 					keyFile:       keyFile,
+					flags:         flags,
 					resumeSession: resumeSession,
 				})
 			}
@@ -1066,6 +1127,62 @@ func addClientAuthTests() {
 	}
 }
 
+func addExtendedMasterSecretTests() {
+	const expectEMSFlag = "-expect-extended-master-secret"
+
+	for _, with := range []bool{false, true} {
+		prefix := "No"
+		var flags []string
+		if with {
+			prefix = ""
+			flags = []string{expectEMSFlag}
+		}
+
+		for _, isClient := range []bool{false, true} {
+			suffix := "-Server"
+			testType := serverTest
+			if isClient {
+				suffix = "-Client"
+				testType = clientTest
+			}
+
+			for _, ver := range tlsVersions {
+				test := testCase{
+					testType: testType,
+					name:     prefix + "ExtendedMasterSecret-" + ver.name + suffix,
+					config: Config{
+						MinVersion: ver.version,
+						MaxVersion: ver.version,
+						Bugs: ProtocolBugs{
+							NoExtendedMasterSecret:      !with,
+							RequireExtendedMasterSecret: with,
+						},
+					},
+					flags:      flags,
+					shouldFail: ver.version == VersionSSL30 && with,
+				}
+				if test.shouldFail {
+					test.expectedLocalError = "extended master secret required but not supported by peer"
+				}
+				testCases = append(testCases, test)
+			}
+		}
+	}
+
+	// When a session is resumed, it should still be aware that its master
+	// secret was generated via EMS and thus it's safe to use tls-unique.
+	testCases = append(testCases, testCase{
+		name: "ExtendedMasterSecret-Resume",
+		config: Config{
+			Bugs: ProtocolBugs{
+				RequireExtendedMasterSecret: true,
+			},
+		},
+		flags:         []string{expectEMSFlag},
+		resumeSession: true,
+	})
+}
+
 // Adds tests that try to cover the range of the handshake state machine, under
 // various conditions. Some of these are redundant with other tests, but they
 // only cover the synchronous case.
@@ -1172,6 +1289,34 @@ func addStateMachineCoverageTests(async, splitHandshake bool, protocol protocol)
 			},
 		},
 		flags: flags,
+	})
+
+	// Skip ServerKeyExchange in PSK key exchange if there's no
+	// identity hint.
+	testCases = append(testCases, testCase{
+		protocol: protocol,
+		name:     "EmptyPSKHint-Client" + suffix,
+		config: Config{
+			CipherSuites: []uint16{TLS_PSK_WITH_AES_128_CBC_SHA},
+			PreSharedKey: []byte("secret"),
+			Bugs: ProtocolBugs{
+				MaxHandshakeRecordLength: maxHandshakeRecordLength,
+			},
+		},
+		flags: append(flags, "-psk", "secret"),
+	})
+	testCases = append(testCases, testCase{
+		protocol: protocol,
+		testType: serverTest,
+		name:     "EmptyPSKHint-Server" + suffix,
+		config: Config{
+			CipherSuites: []uint16{TLS_PSK_WITH_AES_128_CBC_SHA},
+			PreSharedKey: []byte("secret"),
+			Bugs: ProtocolBugs{
+				MaxHandshakeRecordLength: maxHandshakeRecordLength,
+			},
+		},
+		flags: append(flags, "-psk", "secret"),
 	})
 
 	if protocol == tls {
@@ -1542,6 +1687,31 @@ func addExtensionTests() {
 		expectedNextProtoType: alpn,
 		resumeSession:         true,
 	})
+	// Resume with a corrupt ticket.
+	testCases = append(testCases, testCase{
+		testType: serverTest,
+		name:     "CorruptTicket",
+		config: Config{
+			Bugs: ProtocolBugs{
+				CorruptTicket: true,
+			},
+		},
+		resumeSession: true,
+		flags:         []string{"-expect-session-miss"},
+	})
+	// Resume with an oversized session id.
+	testCases = append(testCases, testCase{
+		testType: serverTest,
+		name:     "OversizedSessionId",
+		config: Config{
+			Bugs: ProtocolBugs{
+				OversizedSessionId: true,
+			},
+		},
+		resumeSession: true,
+		shouldFail:    true,
+		expectedError: ":DECODE_ERROR:",
+	})
 }
 
 func addResumptionVersionTests() {
@@ -1606,6 +1776,84 @@ func addResumptionVersionTests() {
 	}
 }
 
+func addRenegotiationTests() {
+	testCases = append(testCases, testCase{
+		testType:        serverTest,
+		name:            "Renegotiate-Server",
+		flags:           []string{"-renegotiate"},
+		shimWritesFirst: true,
+	})
+	testCases = append(testCases, testCase{
+		testType: serverTest,
+		name:     "Renegotiate-Server-EmptyExt",
+		config: Config{
+			Bugs: ProtocolBugs{
+				EmptyRenegotiationInfo: true,
+			},
+		},
+		flags:           []string{"-renegotiate"},
+		shimWritesFirst: true,
+		shouldFail:      true,
+		expectedError:   ":RENEGOTIATION_MISMATCH:",
+	})
+	testCases = append(testCases, testCase{
+		testType: serverTest,
+		name:     "Renegotiate-Server-BadExt",
+		config: Config{
+			Bugs: ProtocolBugs{
+				BadRenegotiationInfo: true,
+			},
+		},
+		flags:           []string{"-renegotiate"},
+		shimWritesFirst: true,
+		shouldFail:      true,
+		expectedError:   ":RENEGOTIATION_MISMATCH:",
+	})
+	// TODO(agl): test the renegotiation info SCSV.
+	testCases = append(testCases, testCase{
+		name:        "Renegotiate-Client",
+		renegotiate: true,
+	})
+	testCases = append(testCases, testCase{
+		name:        "Renegotiate-Client-EmptyExt",
+		renegotiate: true,
+		config: Config{
+			Bugs: ProtocolBugs{
+				EmptyRenegotiationInfo: true,
+			},
+		},
+		shouldFail:    true,
+		expectedError: ":RENEGOTIATION_MISMATCH:",
+	})
+	testCases = append(testCases, testCase{
+		name:        "Renegotiate-Client-BadExt",
+		renegotiate: true,
+		config: Config{
+			Bugs: ProtocolBugs{
+				BadRenegotiationInfo: true,
+			},
+		},
+		shouldFail:    true,
+		expectedError: ":RENEGOTIATION_MISMATCH:",
+	})
+	testCases = append(testCases, testCase{
+		name:        "Renegotiate-Client-SwitchCiphers",
+		renegotiate: true,
+		config: Config{
+			CipherSuites: []uint16{TLS_RSA_WITH_RC4_128_SHA},
+		},
+		renegotiateCiphers: []uint16{TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256},
+	})
+	testCases = append(testCases, testCase{
+		name:        "Renegotiate-Client-SwitchCiphers2",
+		renegotiate: true,
+		config: Config{
+			CipherSuites: []uint16{TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256},
+		},
+		renegotiateCiphers: []uint16{TLS_RSA_WITH_RC4_128_SHA},
+	})
+}
+
 func worker(statusChan chan statusMsg, c chan *testCase, buildDir string, wg *sync.WaitGroup) {
 	defer wg.Done()
 
@@ -1661,6 +1909,8 @@ func main() {
 	addD5BugTests()
 	addExtensionTests()
 	addResumptionVersionTests()
+	addExtendedMasterSecretTests()
+	addRenegotiationTests()
 	for _, async := range []bool{false, true} {
 		for _, splitHandshake := range []bool{false, true} {
 			for _, protocol := range []protocol{tls, dtls} {

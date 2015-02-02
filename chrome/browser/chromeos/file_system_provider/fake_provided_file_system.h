@@ -12,9 +12,15 @@
 #include "base/callback.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/observer_list.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "chrome/browser/chromeos/file_system_provider/provided_file_system_info.h"
 #include "chrome/browser/chromeos/file_system_provider/provided_file_system_interface.h"
+#include "chrome/browser/chromeos/file_system_provider/provided_file_system_observer.h"
+#include "chrome/browser/chromeos/file_system_provider/watcher.h"
+#include "storage/browser/fileapi/async_file_util.h"
+#include "storage/browser/fileapi/watcher_manager.h"
+#include "url/gurl.h"
 
 class Profile;
 
@@ -72,59 +78,80 @@ class FakeProvidedFileSystem : public ProvidedFileSystemInterface {
 
   // ProvidedFileSystemInterface overrides.
   virtual AbortCallback RequestUnmount(
-      const storage::AsyncFileUtil::StatusCallback& callback) OVERRIDE;
+      const storage::AsyncFileUtil::StatusCallback& callback) override;
   virtual AbortCallback GetMetadata(
       const base::FilePath& entry_path,
       ProvidedFileSystemInterface::MetadataFieldMask fields,
       const ProvidedFileSystemInterface::GetMetadataCallback& callback)
-      OVERRIDE;
+      override;
   virtual AbortCallback ReadDirectory(
       const base::FilePath& directory_path,
-      const storage::AsyncFileUtil::ReadDirectoryCallback& callback) OVERRIDE;
+      const storage::AsyncFileUtil::ReadDirectoryCallback& callback) override;
   virtual AbortCallback OpenFile(const base::FilePath& file_path,
                                  OpenFileMode mode,
-                                 const OpenFileCallback& callback) OVERRIDE;
+                                 const OpenFileCallback& callback) override;
   virtual AbortCallback CloseFile(
       int file_handle,
-      const storage::AsyncFileUtil::StatusCallback& callback) OVERRIDE;
+      const storage::AsyncFileUtil::StatusCallback& callback) override;
   virtual AbortCallback ReadFile(
       int file_handle,
       net::IOBuffer* buffer,
       int64 offset,
       int length,
-      const ReadChunkReceivedCallback& callback) OVERRIDE;
+      const ReadChunkReceivedCallback& callback) override;
   virtual AbortCallback CreateDirectory(
       const base::FilePath& directory_path,
       bool recursive,
-      const storage::AsyncFileUtil::StatusCallback& callback) OVERRIDE;
+      const storage::AsyncFileUtil::StatusCallback& callback) override;
   virtual AbortCallback DeleteEntry(
       const base::FilePath& entry_path,
       bool recursive,
-      const storage::AsyncFileUtil::StatusCallback& callback) OVERRIDE;
+      const storage::AsyncFileUtil::StatusCallback& callback) override;
   virtual AbortCallback CreateFile(
       const base::FilePath& file_path,
-      const storage::AsyncFileUtil::StatusCallback& callback) OVERRIDE;
+      const storage::AsyncFileUtil::StatusCallback& callback) override;
   virtual AbortCallback CopyEntry(
       const base::FilePath& source_path,
       const base::FilePath& target_path,
-      const storage::AsyncFileUtil::StatusCallback& callback) OVERRIDE;
+      const storage::AsyncFileUtil::StatusCallback& callback) override;
   virtual AbortCallback MoveEntry(
       const base::FilePath& source_path,
       const base::FilePath& target_path,
-      const storage::AsyncFileUtil::StatusCallback& callback) OVERRIDE;
+      const storage::AsyncFileUtil::StatusCallback& callback) override;
   virtual AbortCallback Truncate(
       const base::FilePath& file_path,
       int64 length,
-      const storage::AsyncFileUtil::StatusCallback& callback) OVERRIDE;
+      const storage::AsyncFileUtil::StatusCallback& callback) override;
   virtual AbortCallback WriteFile(
       int file_handle,
       net::IOBuffer* buffer,
       int64 offset,
       int length,
-      const storage::AsyncFileUtil::StatusCallback& callback) OVERRIDE;
-  virtual const ProvidedFileSystemInfo& GetFileSystemInfo() const OVERRIDE;
-  virtual RequestManager* GetRequestManager() OVERRIDE;
-  virtual base::WeakPtr<ProvidedFileSystemInterface> GetWeakPtr() OVERRIDE;
+      const storage::AsyncFileUtil::StatusCallback& callback) override;
+  virtual AbortCallback AddWatcher(
+      const GURL& origin,
+      const base::FilePath& entry_path,
+      bool recursive,
+      bool persistent,
+      const storage::AsyncFileUtil::StatusCallback& callback,
+      const storage::WatcherManager::NotificationCallback&
+          notification_callback) override;
+  virtual void RemoveWatcher(
+      const GURL& origin,
+      const base::FilePath& entry_path,
+      bool recursive,
+      const storage::AsyncFileUtil::StatusCallback& callback) override;
+  virtual const ProvidedFileSystemInfo& GetFileSystemInfo() const override;
+  virtual RequestManager* GetRequestManager() override;
+  virtual Watchers* GetWatchers() override;
+  virtual void AddObserver(ProvidedFileSystemObserver* observer) override;
+  virtual void RemoveObserver(ProvidedFileSystemObserver* observer) override;
+  virtual bool Notify(const base::FilePath& entry_path,
+                      bool recursive,
+                      storage::WatcherManager::ChangeType change_type,
+                      scoped_ptr<ProvidedFileSystemObserver::Changes> changes,
+                      const std::string& tag) override;
+  virtual base::WeakPtr<ProvidedFileSystemInterface> GetWeakPtr() override;
 
   // Factory callback, to be used in Service::SetFileSystemFactory(). The
   // |event_router| argument can be NULL.
@@ -156,6 +183,8 @@ class FakeProvidedFileSystem : public ProvidedFileSystemInterface {
   OpenedFilesMap opened_files_;
   int last_file_handle_;
   base::CancelableTaskTracker tracker_;
+  ObserverList<ProvidedFileSystemObserver> observers_;
+  Watchers watchers_;
 
   base::WeakPtrFactory<FakeProvidedFileSystem> weak_ptr_factory_;
   DISALLOW_COPY_AND_ASSIGN(FakeProvidedFileSystem);

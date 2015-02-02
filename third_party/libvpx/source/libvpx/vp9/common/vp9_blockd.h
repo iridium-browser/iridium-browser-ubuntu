@@ -17,14 +17,10 @@
 #include "vpx_ports/mem.h"
 #include "vpx_scale/yv12config.h"
 
-#include "vp9/common/vp9_common.h"
 #include "vp9/common/vp9_common_data.h"
-#include "vp9/common/vp9_enums.h"
 #include "vp9/common/vp9_filter.h"
-#include "vp9/common/vp9_idct.h"
 #include "vp9/common/vp9_mv.h"
 #include "vp9/common/vp9_scale.h"
-#include "vp9/common/vp9_seg_common.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -47,9 +43,9 @@ typedef enum {
   PLANE_TYPES
 } PLANE_TYPE;
 
-typedef char ENTROPY_CONTEXT;
+#define MAX_MB_PLANE 3
 
-typedef char PARTITION_CONTEXT;
+typedef char ENTROPY_CONTEXT;
 
 static INLINE int combine_entropy_contexts(ENTROPY_CONTEXT a,
                                            ENTROPY_CONTEXT b) {
@@ -111,17 +107,6 @@ typedef enum {
   MAX_REF_FRAMES = 4
 } MV_REFERENCE_FRAME;
 
-static INLINE int b_width_log2(BLOCK_SIZE sb_type) {
-  return b_width_log2_lookup[sb_type];
-}
-static INLINE int b_height_log2(BLOCK_SIZE sb_type) {
-  return b_height_log2_lookup[sb_type];
-}
-
-static INLINE int mi_width_log2(BLOCK_SIZE sb_type) {
-  return mi_width_log2_lookup[sb_type];
-}
-
 // This structure now relates to 8x8 block regions.
 typedef struct {
   // Common for both INTER and INTRA blocks
@@ -172,8 +157,6 @@ enum mv_precision {
   MV_PRECISION_Q3,
   MV_PRECISION_Q4
 };
-
-enum { MAX_MB_PLANE = 3 };
 
 struct buf_2d {
   uint8_t *buf;
@@ -312,7 +295,7 @@ void vp9_foreach_transformed_block(
 static INLINE void txfrm_block_to_raster_xy(BLOCK_SIZE plane_bsize,
                                             TX_SIZE tx_size, int block,
                                             int *x, int *y) {
-  const int bwl = b_width_log2(plane_bsize);
+  const int bwl = b_width_log2_lookup[plane_bsize];
   const int tx_cols_log2 = bwl - tx_size;
   const int tx_cols = 1 << tx_cols_log2;
   const int raster_mb = block >> (tx_size << 1);

@@ -13,47 +13,6 @@
 #include "GrGpu.h"
 #include "GrStencilBuffer.h"
 
-bool GrRenderTarget::readPixels(int left, int top, int width, int height,
-                                GrPixelConfig config,
-                                void* buffer,
-                                size_t rowBytes,
-                                uint32_t pixelOpsFlags) {
-    // go through context so that all necessary flushing occurs
-    GrContext* context = this->getContext();
-    if (NULL == context) {
-        return false;
-    }
-    return context->readRenderTargetPixels(this,
-                                           left, top, width, height,
-                                           config, buffer, rowBytes,
-                                           pixelOpsFlags);
-}
-
-void GrRenderTarget::writePixels(int left, int top, int width, int height,
-                                 GrPixelConfig config,
-                                 const void* buffer,
-                                 size_t rowBytes,
-                                 uint32_t pixelOpsFlags) {
-    // go through context so that all necessary flushing occurs
-    GrContext* context = this->getContext();
-    if (NULL == context) {
-        return;
-    }
-    context->writeRenderTargetPixels(this,
-                                     left, top, width, height,
-                                     config, buffer, rowBytes,
-                                     pixelOpsFlags);
-}
-
-void GrRenderTarget::resolve() {
-    // go through context so that all necessary flushing occurs
-    GrContext* context = this->getContext();
-    if (NULL == context) {
-        return;
-    }
-    context->resolveRenderTarget(this);
-}
-
 void GrRenderTarget::discard() {
     // go through context so that all necessary flushing occurs
     GrContext* context = this->getContext();
@@ -61,20 +20,6 @@ void GrRenderTarget::discard() {
         return;
     }
     context->discardRenderTarget(this);
-}
-
-size_t GrRenderTarget::gpuMemorySize() const {
-    size_t colorBits;
-    if (kUnknown_GrPixelConfig == fDesc.fConfig) {
-        colorBits = 32; // don't know, make a guess
-    } else {
-        colorBits = GrBytesPerPixel(fDesc.fConfig) * 8;
-    }
-    uint64_t size = fDesc.fWidth;
-    size *= fDesc.fHeight;
-    size *= colorBits;
-    size *= SkTMax(1, fDesc.fSampleCnt);
-    return (size_t)(size / 8);
 }
 
 void GrRenderTarget::flagAsNeedingResolve(const SkIRect* rect) {

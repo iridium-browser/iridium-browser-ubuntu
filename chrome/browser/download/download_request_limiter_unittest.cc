@@ -6,12 +6,12 @@
 
 #include "base/bind.h"
 #include "base/run_loop.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/download/download_request_infobar_delegate.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/ui/website_settings/permission_bubble_manager.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -25,7 +25,7 @@ class FakePermissionBubbleView : public PermissionBubbleView {
   explicit FakePermissionBubbleView(DownloadRequestLimiterTest *test)
       : test_(test), delegate_(NULL) {}
 
-  virtual ~FakePermissionBubbleView() {
+  ~FakePermissionBubbleView() override {
     if (delegate_)
       delegate_->SetView(NULL);
   }
@@ -36,19 +36,16 @@ class FakePermissionBubbleView : public PermissionBubbleView {
   }
 
   // PermissionBubbleView:
-  virtual void SetDelegate(Delegate* delegate) OVERRIDE {
-    delegate_ = delegate;
-  }
+  void SetDelegate(Delegate* delegate) override { delegate_ = delegate; }
 
-  virtual void Show(
-      const std::vector<PermissionBubbleRequest*>& requests,
-      const std::vector<bool>& accept_state,
-      bool customization_mode) OVERRIDE;
+  void Show(const std::vector<PermissionBubbleRequest*>& requests,
+            const std::vector<bool>& accept_state,
+            bool customization_mode) override;
 
-  virtual bool CanAcceptRequestUpdate() OVERRIDE { return false; }
+  bool CanAcceptRequestUpdate() override { return false; }
 
-  virtual void Hide() OVERRIDE {}
-  virtual bool IsVisible() OVERRIDE { return false; }
+  void Hide() override {}
+  bool IsVisible() override { return false; }
 
  private:
   DownloadRequestLimiterTest* test_;
@@ -63,7 +60,7 @@ class DownloadRequestLimiterTest : public ChromeRenderViewHostTestHarness {
     WAIT
   };
 
-  virtual void SetUp() {
+  void SetUp() override {
     ChromeRenderViewHostTestHarness::SetUp();
     InfoBarService::CreateForWebContents(web_contents());
 
@@ -109,7 +106,7 @@ class DownloadRequestLimiterTest : public ChromeRenderViewHostTestHarness {
     }
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     content_settings_->ShutdownOnUIThread();
     content_settings_ = NULL;
     UnsetDelegate();

@@ -25,18 +25,17 @@ class SANDBOX_EXPORT XPCMessageServer : public MessageServer {
   // Otherwise the server will create a new receive right on which to listen.
   XPCMessageServer(MessageDemuxer* demuxer,
                    mach_port_t server_receive_right);
-  virtual ~XPCMessageServer();
+  ~XPCMessageServer() override;
 
   // MessageServer:
-  virtual bool Initialize() OVERRIDE;
-  virtual pid_t GetMessageSenderPID(IPCMessage request) OVERRIDE;
-  virtual IPCMessage CreateReply(IPCMessage request) OVERRIDE;
-  virtual bool SendReply(IPCMessage reply) OVERRIDE;
-  virtual void ForwardMessage(IPCMessage request,
-                              mach_port_t destination) OVERRIDE;
+  bool Initialize() override;
+  pid_t GetMessageSenderPID(IPCMessage request) override;
+  IPCMessage CreateReply(IPCMessage request) override;
+  bool SendReply(IPCMessage reply) override;
+  void ForwardMessage(IPCMessage request, mach_port_t destination) override;
   // Creates an error reply message with a field "error" set to |error_code|.
-  virtual void RejectMessage(IPCMessage request, int error_code) OVERRIDE;
-  virtual mach_port_t GetServerPort() const OVERRIDE;
+  void RejectMessage(IPCMessage request, int error_code) override;
+  mach_port_t GetServerPort() const override;
 
  private:
   // Reads a message from the XPC pipe.

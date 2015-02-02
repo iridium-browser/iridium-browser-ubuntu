@@ -132,11 +132,9 @@ void HTMLOptionElement::setText(const String &text, ExceptionState& exceptionSta
     bool selectIsMenuList = select && select->usesMenuList();
     int oldSelectedIndex = selectIsMenuList ? select->selectedIndex() : -1;
 
-    // Handle the common special case where there's exactly 1 child node, and it's a text node.
-    Node* child = firstChild();
-    if (child && child->isTextNode() && !child->nextSibling())
-        toText(child)->setData(text);
-    else {
+    if (hasOneTextChild()) {
+        toText(firstChild())->setData(text);
+    } else {
         removeChildren();
         appendChild(Text::create(document(), text), exceptionState);
     }
@@ -161,7 +159,7 @@ int HTMLOptionElement::index() const
 
     int optionIndex = 0;
 
-    const WillBeHeapVector<RawPtrWillBeMember<HTMLElement> >& items = selectElement->listItems();
+    const WillBeHeapVector<RawPtrWillBeMember<HTMLElement>>& items = selectElement->listItems();
     size_t length = items.size();
     for (size_t i = 0; i < length; ++i) {
         if (!isHTMLOptionElement(*items[i]))
@@ -309,7 +307,7 @@ void HTMLOptionElement::didRecalcStyle(StyleRecalcChange change)
     // FIXME: We ask our owner select to repaint regardless of which property changed.
     if (HTMLSelectElement* select = ownerSelectElement()) {
         if (RenderObject* renderer = select->renderer())
-            renderer->setShouldDoFullPaintInvalidation(true);
+            renderer->setShouldDoFullPaintInvalidation();
     }
 }
 
@@ -377,7 +375,7 @@ HTMLFormElement* HTMLOptionElement::form() const
     if (HTMLSelectElement* selectElement = ownerSelectElement())
         return selectElement->formOwner();
 
-    return 0;
+    return nullptr;
 }
 
 void HTMLOptionElement::didAddUserAgentShadowRoot(ShadowRoot& root)

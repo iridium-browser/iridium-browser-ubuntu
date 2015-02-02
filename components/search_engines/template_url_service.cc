@@ -15,6 +15,7 @@
 #include "base/memory/scoped_vector.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
@@ -663,7 +664,7 @@ TemplateURLService::TemplateURLVector TemplateURLService::GetTemplateURLs() {
 void TemplateURLService::IncrementUsageCount(TemplateURL* url) {
   DCHECK(url);
   // Extension-controlled search engines are not persisted.
-  if (url->GetType() == TemplateURL::NORMAL_CONTROLLED_BY_EXTENSION)
+  if (url->GetType() != TemplateURL::NORMAL)
     return;
   if (std::find(template_urls_.begin(), template_urls_.end(), url) ==
       template_urls_.end())
@@ -825,11 +826,21 @@ scoped_ptr<TemplateURLService::Subscription>
 void TemplateURLService::OnWebDataServiceRequestDone(
     KeywordWebDataService::Handle h,
     const WDTypedResult* result) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422460 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422460 TemplateURLService::OnWebDataServiceRequestDone"));
+
   // Reset the load_handle so that we don't try and cancel the load in
   // the destructor.
   load_handle_ = 0;
 
   if (!result) {
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/422460 is fixed.
+    tracked_objects::ScopedTracker tracking_profile1(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "422460 TemplateURLService::OnWebDataServiceRequestDone 1"));
+
     // Results are null if the database went away or (most likely) wasn't
     // loaded.
     load_failed_ = true;
@@ -840,44 +851,77 @@ void TemplateURLService::OnWebDataServiceRequestDone(
 
   TemplateURLVector template_urls;
   int new_resource_keyword_version = 0;
-  GetSearchProvidersUsingKeywordResult(
-      *result,
-      web_data_service_.get(),
-      prefs_,
-      &template_urls,
-      (default_search_provider_source_ == DefaultSearchManager::FROM_USER) ?
-          initial_default_search_provider_.get() : NULL,
-      search_terms_data(),
-      &new_resource_keyword_version,
-      &pre_sync_deletes_);
+  {
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/422460 is fixed.
+    tracked_objects::ScopedTracker tracking_profile2(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "422460 TemplateURLService::OnWebDataServiceRequestDone 2"));
 
-  if (client_) {
-    // Restore extension info of loaded TemplateURLs.
-    for (size_t i = 0; i < template_urls.size(); ++i) {
-      DCHECK(!template_urls[i]->extension_info_);
-      client_->RestoreExtensionInfoIfNecessary(template_urls[i]);
-    }
+    GetSearchProvidersUsingKeywordResult(
+        *result,
+        web_data_service_.get(),
+        prefs_,
+        &template_urls,
+        (default_search_provider_source_ == DefaultSearchManager::FROM_USER)
+            ? initial_default_search_provider_.get()
+            : NULL,
+        search_terms_data(),
+        &new_resource_keyword_version,
+        &pre_sync_deletes_);
   }
 
   KeywordWebDataService::BatchModeScoper scoper(web_data_service_.get());
 
-  PatchMissingSyncGUIDs(&template_urls);
-  SetTemplateURLs(&template_urls);
+  {
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/422460 is fixed.
+    tracked_objects::ScopedTracker tracking_profile4(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "422460 TemplateURLService::OnWebDataServiceRequestDone 4"));
 
-  // This initializes provider_map_ which should be done before
-  // calling UpdateKeywordSearchTermsForURL.
-  // This also calls NotifyObservers.
-  ChangeToLoadedState();
+    PatchMissingSyncGUIDs(&template_urls);
 
-  // Index any visits that occurred before we finished loading.
-  for (size_t i = 0; i < visits_to_add_.size(); ++i)
-    UpdateKeywordSearchTermsForURL(visits_to_add_[i]);
-  visits_to_add_.clear();
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/422460 is fixed.
+    tracked_objects::ScopedTracker tracking_profile41(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "422460 TemplateURLService::OnWebDataServiceRequestDone 41"));
 
-  if (new_resource_keyword_version)
-    web_data_service_->SetBuiltinKeywordVersion(new_resource_keyword_version);
+    SetTemplateURLs(&template_urls);
+
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/422460 is fixed.
+    tracked_objects::ScopedTracker tracking_profile42(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "422460 TemplateURLService::OnWebDataServiceRequestDone 42"));
+
+    // This initializes provider_map_ which should be done before
+    // calling UpdateKeywordSearchTermsForURL.
+    // This also calls NotifyObservers.
+    ChangeToLoadedState();
+
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/422460 is fixed.
+    tracked_objects::ScopedTracker tracking_profile43(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "422460 TemplateURLService::OnWebDataServiceRequestDone 43"));
+
+    // Index any visits that occurred before we finished loading.
+    for (size_t i = 0; i < visits_to_add_.size(); ++i)
+      UpdateKeywordSearchTermsForURL(visits_to_add_[i]);
+    visits_to_add_.clear();
+
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/422460 is fixed.
+    tracked_objects::ScopedTracker tracking_profile44(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "422460 TemplateURLService::OnWebDataServiceRequestDone 44"));
+
+    if (new_resource_keyword_version)
+      web_data_service_->SetBuiltinKeywordVersion(new_resource_keyword_version);
+  }
 
   if (default_search_provider_) {
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/422460 is fixed.
+    tracked_objects::ScopedTracker tracking_profile5(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "422460 TemplateURLService::OnWebDataServiceRequestDone 5"));
+
     UMA_HISTOGRAM_ENUMERATION(
         "Search.DefaultSearchProviderType",
         TemplateURLPrepopulateData::GetEngineType(
@@ -919,6 +963,8 @@ void TemplateURLService::OnHistoryURLVisited(const URLVisitedDetails& details) {
 }
 
 void TemplateURLService::Shutdown() {
+  if (client_)
+    client_->Shutdown();
   // This check has to be done at Shutdown() instead of in the dtor to ensure
   // that no clients of KeywordWebDataService are holding ptrs to it after the
   // first phase of the KeyedService Shutdown() process.
@@ -940,7 +986,7 @@ syncer::SyncDataList TemplateURLService::GetAllSyncData(
     if ((*iter)->created_by_policy())
       continue;
     // We don't sync extension-controlled search engines.
-    if ((*iter)->GetType() == TemplateURL::NORMAL_CONTROLLED_BY_EXTENSION)
+    if ((*iter)->GetType() != TemplateURL::NORMAL)
       continue;
     current_data.push_back(CreateSyncDataFromTemplateURL(**iter));
   }
@@ -973,15 +1019,15 @@ syncer::SyncError TemplateURLService::ProcessSyncChanges(
   syncer::SyncChangeList new_changes;
   syncer::SyncError error;
   for (syncer::SyncChangeList::const_iterator iter = change_list.begin();
-      iter != change_list.end(); ++iter) {
+       iter != change_list.end(); ++iter) {
     DCHECK_EQ(syncer::SEARCH_ENGINES, iter->sync_data().GetDataType());
 
     std::string guid =
         iter->sync_data().GetSpecifics().search_engine().sync_guid();
     TemplateURL* existing_turl = GetTemplateURLForGUID(guid);
     scoped_ptr<TemplateURL> turl(CreateTemplateURLFromTemplateURLAndSyncData(
-        prefs_, search_terms_data(), existing_turl, iter->sync_data(),
-        &new_changes));
+        client_.get(), prefs_, search_terms_data(), existing_turl,
+        iter->sync_data(), &new_changes));
     if (!turl.get())
       continue;
 
@@ -1135,8 +1181,8 @@ syncer::SyncMergeResult TemplateURLService::MergeDataAndStartSyncing(
     TemplateURL* local_turl = GetTemplateURLForGUID(iter->first);
     scoped_ptr<TemplateURL> sync_turl(
         CreateTemplateURLFromTemplateURLAndSyncData(
-            prefs_, search_terms_data(), local_turl, iter->second,
-            &new_changes));
+            client_.get(), prefs_, search_terms_data(), local_turl,
+            iter->second, &new_changes));
     if (!sync_turl.get())
       continue;
 
@@ -1300,7 +1346,9 @@ syncer::SyncData TemplateURLService::CreateSyncDataFromTemplateURL(
 }
 
 // static
-TemplateURL* TemplateURLService::CreateTemplateURLFromTemplateURLAndSyncData(
+scoped_ptr<TemplateURL>
+TemplateURLService::CreateTemplateURLFromTemplateURLAndSyncData(
+    TemplateURLServiceClient* client,
     PrefService* prefs,
     const SearchTermsData& search_terms_data,
     TemplateURL* existing_turl,
@@ -1365,12 +1413,24 @@ TemplateURL* TemplateURLService::CreateTemplateURLFromTemplateURLAndSyncData(
     data.alternate_urls.push_back(specifics.alternate_urls(i));
   data.search_terms_replacement_key = specifics.search_terms_replacement_key();
 
-  TemplateURL* turl = new TemplateURL(data);
+  scoped_ptr<TemplateURL> turl(new TemplateURL(data));
   // If this TemplateURL matches a built-in prepopulated template URL, it's
   // possible that sync is trying to modify fields that should not be touched.
   // Revert these fields to the built-in values.
-  UpdateTemplateURLIfPrepopulated(turl, prefs);
-  DCHECK_NE(TemplateURL::NORMAL_CONTROLLED_BY_EXTENSION, turl->GetType());
+  UpdateTemplateURLIfPrepopulated(turl.get(), prefs);
+
+  // We used to sync keywords associated with omnibox extensions, but no longer
+  // want to.  However, if we delete these keywords from sync, we'll break any
+  // synced old versions of Chrome which were relying on them.  Instead, for now
+  // we simply ignore these.
+  // TODO(vasilii): After a few Chrome versions, change this to go ahead and
+  // delete these from sync.
+  DCHECK(client);
+  client->RestoreExtensionInfoIfNecessary(turl.get());
+  if (turl->GetType() == TemplateURL::OMNIBOX_API_EXTENSION)
+    return NULL;
+
+  DCHECK_EQ(TemplateURL::NORMAL, turl->GetType());
   if (reset_keyword || deduped) {
     if (reset_keyword)
       turl->ResetKeywordIfNecessary(search_terms_data, true);
@@ -1394,7 +1454,7 @@ TemplateURL* TemplateURLService::CreateTemplateURLFromTemplateURLAndSyncData(
     }
   }
 
-  return turl;
+  return turl.Pass();
 }
 
 // static
@@ -1495,6 +1555,9 @@ void TemplateURLService::RemoveFromMaps(TemplateURL* template_url) {
       keyword_to_template_map_.erase(keyword);
   }
 
+  if (template_url->GetType() == TemplateURL::OMNIBOX_API_EXTENSION)
+    return;
+
   if (!template_url->sync_guid().empty())
     guid_to_template_map_.erase(template_url->sync_guid());
   // |provider_map_| is only initialized after loading has completed.
@@ -1524,6 +1587,9 @@ void TemplateURLService::AddToMaps(TemplateURL* template_url) {
         !CanReplace(template_url) : CanReplace(existing_url))
       keyword_to_template_map_[keyword] = template_url;
   }
+
+  if (template_url_is_omnibox_api)
+    return;
 
   if (!template_url->sync_guid().empty())
     guid_to_template_map_[template_url->sync_guid()] = template_url;
@@ -1566,10 +1632,20 @@ void TemplateURLService::SetTemplateURLs(TemplateURLVector* urls) {
 }
 
 void TemplateURLService::ChangeToLoadedState() {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422460 is fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422460 TemplateURLService::ChangeToLoadedState 1"));
+
   DCHECK(!loaded_);
 
   provider_map_->Init(template_urls_, search_terms_data());
   loaded_ = true;
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422460 is fixed.
+  tracked_objects::ScopedTracker tracking_profile2(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422460 TemplateURLService::ChangeToLoadedState 2"));
 
   // This will cause a call to NotifyObservers().
   ApplyDefaultSearchChangeNoMetrics(
@@ -1577,6 +1653,12 @@ void TemplateURLService::ChangeToLoadedState() {
           &initial_default_search_provider_->data() : NULL,
       default_search_provider_source_);
   initial_default_search_provider_.reset();
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422460 is fixed.
+  tracked_objects::ScopedTracker tracking_profile3(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422460 TemplateURLService::ChangeToLoadedState 3"));
+
   on_loaded_callbacks_.Notify();
 }
 
@@ -1624,6 +1706,8 @@ bool TemplateURLService::UpdateNoNotify(TemplateURL* existing_turl,
   if (std::find(template_urls_.begin(), template_urls_.end(), existing_turl) ==
       template_urls_.end())
     return false;
+
+  DCHECK_NE(TemplateURL::OMNIBOX_API_EXTENSION, existing_turl->GetType());
 
   base::string16 old_keyword(existing_turl->keyword());
   keyword_to_template_map_.erase(old_keyword);
@@ -1965,7 +2049,9 @@ bool TemplateURLService::AddNoNotify(TemplateURL* template_url,
   // that any "pre-existing" entries we find are actually coming from
   // |template_urls_|, lest we detect a "conflict" between the
   // |initial_default_search_provider_| and the web data version of itself.
-  if (existing_keyword_turl &&
+  if (template_url->GetType() != TemplateURL::OMNIBOX_API_EXTENSION &&
+      existing_keyword_turl &&
+      existing_keyword_turl->GetType() != TemplateURL::OMNIBOX_API_EXTENSION &&
       (std::find(template_urls_.begin(), template_urls_.end(),
                  existing_keyword_turl) != template_urls_.end())) {
     DCHECK_NE(existing_keyword_turl, template_url);
@@ -1990,8 +2076,7 @@ bool TemplateURLService::AddNoNotify(TemplateURL* template_url,
   AddToMaps(template_url);
 
   if (newly_adding &&
-      (template_url->GetType() !=
-          TemplateURL::NORMAL_CONTROLLED_BY_EXTENSION)) {
+      (template_url->GetType() == TemplateURL::NORMAL)) {
     if (web_data_service_.get())
       web_data_service_->AddKeyword(template_url->data());
 
@@ -2018,7 +2103,7 @@ void TemplateURLService::RemoveNoNotify(TemplateURL* template_url) {
   // Remove it from the vector containing all TemplateURLs.
   template_urls_.erase(i);
 
-  if (template_url->GetType() != TemplateURL::NORMAL_CONTROLLED_BY_EXTENSION) {
+  if (template_url->GetType() == TemplateURL::NORMAL) {
     if (web_data_service_.get())
       web_data_service_->RemoveKeyword(template_url->id());
 
@@ -2176,8 +2261,7 @@ void TemplateURLService::ResolveSyncKeywordConflict(
   DCHECK(applied_sync_turl);
   DCHECK(change_list);
   DCHECK_EQ(applied_sync_turl->keyword(), unapplied_sync_turl->keyword());
-  DCHECK_NE(TemplateURL::NORMAL_CONTROLLED_BY_EXTENSION,
-            applied_sync_turl->GetType());
+  DCHECK_EQ(TemplateURL::NORMAL, applied_sync_turl->GetType());
 
   // Both |unapplied_sync_turl| and |applied_sync_turl| are known to Sync, so
   // don't delete either of them. Instead, determine which is "better" and
@@ -2288,8 +2372,7 @@ void TemplateURLService::PatchMissingSyncGUIDs(
     TemplateURL* template_url = *i;
     DCHECK(template_url);
     if (template_url->sync_guid().empty() &&
-        (template_url->GetType() !=
-            TemplateURL::NORMAL_CONTROLLED_BY_EXTENSION)) {
+        (template_url->GetType() == TemplateURL::NORMAL)) {
       template_url->data_.sync_guid = base::GenerateGUID();
       if (web_data_service_.get())
         web_data_service_->UpdateKeyword(template_url->data());

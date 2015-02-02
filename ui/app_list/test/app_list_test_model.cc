@@ -146,12 +146,12 @@ AppListTestModel::AppListTestItem* AppListTestModel::CreateItem(
 AppListTestModel::AppListTestItem* AppListTestModel::CreateAndAddItem(
     const std::string& id) {
   scoped_ptr<AppListTestItem> test_item(CreateItem(id));
-  AppListItem* item = AppListModel::AddItem(test_item.PassAs<AppListItem>());
+  AppListItem* item = AppListModel::AddItem(test_item.Pass());
   return static_cast<AppListTestItem*>(item);
 }
 void AppListTestModel::HighlightItemAt(int index) {
   AppListItem* item = top_level_item_list()->item_at(index);
-  item->SetHighlighted(true);
+  top_level_item_list()->HighlightItemInstalledFromUI(item->id());
 }
 
 void AppListTestModel::ItemActivated(AppListTestItem* item) {

@@ -20,17 +20,32 @@ import java.util.Arrays;
  * |s_CAM_PARAMS|; all devices |id| are index 0 towards the parent VideoCapture.
  **/
 @SuppressWarnings("deprecation")
-public class VideoCaptureTango extends VideoCapture {
+public class VideoCaptureTango extends VideoCaptureCamera {
+
+    private static class CamParams {
+        final int mId;
+        final String mName;
+        final int mWidth;
+        final int mHeight;
+
+        CamParams(int id, String name, int width, int height) {
+            mId = id;
+            mName = name;
+            mWidth = width;
+            mHeight = height;
+        }
+    }
+
     private ByteBuffer mFrameBuffer = null;
     private final int mTangoCameraId;
-    // The indexes must coincide with the s_CAM_PARAMS used below.
+    // The indexes must coincide with |CAM_PARAMS| defined below.
     private static final int DEPTH_CAMERA_ID = 0;
     private static final int FISHEYE_CAMERA_ID = 1;
     private static final int FOURMP_CAMERA_ID = 2;
-    private static final VideoCaptureFactory.CamParams CAM_PARAMS[] = {
-         new VideoCaptureFactory.CamParams(DEPTH_CAMERA_ID, "depth", 320, 240),
-         new VideoCaptureFactory.CamParams(FISHEYE_CAMERA_ID, "fisheye", 640, 480),
-         new VideoCaptureFactory.CamParams(FOURMP_CAMERA_ID, "4MP", 1280, 720)};
+    private static final CamParams CAM_PARAMS[] = {
+            new CamParams(DEPTH_CAMERA_ID, "depth", 320, 240),
+            new CamParams(FISHEYE_CAMERA_ID, "fisheye", 640, 480),
+            new CamParams(FOURMP_CAMERA_ID, "4MP", 1280, 720) };
 
     // SuperFrame size definitions. Note that total size is the amount of lines
     // multiplied by 3/2 due to Chroma components following.
@@ -52,31 +67,36 @@ public class VideoCaptureTango extends VideoCapture {
         return CAM_PARAMS.length;
     }
 
-    static VideoCaptureFactory.CamParams getCamParams(int index) {
-        if (index >= CAM_PARAMS.length) return null;
-        return CAM_PARAMS[index];
+    static String getName(int index) {
+        if (index >= CAM_PARAMS.length) return "";
+        return CAM_PARAMS[index].mName;
     }
 
     static CaptureFormat[] getDeviceSupportedFormats(int id) {
-      ArrayList<CaptureFormat> formatList = new ArrayList<CaptureFormat>();
-      if (id == DEPTH_CAMERA_ID) {
-          formatList.add(new CaptureFormat(320, 180, 5, ImageFormat.YV12));
-      } else if (id == FISHEYE_CAMERA_ID) {
-          formatList.add(new CaptureFormat(640, 480, 30, ImageFormat.YV12));
-      } else if (id == FOURMP_CAMERA_ID) {
-          formatList.add(new CaptureFormat(1280, 720, 20, ImageFormat.YV12));
-      }
-      return formatList.toArray(new CaptureFormat[formatList.size()]);
+        ArrayList<CaptureFormat> formatList = new ArrayList<CaptureFormat>();
+        if (id == DEPTH_CAMERA_ID) {
+            formatList.add(new CaptureFormat(320, 180, 5, ImageFormat.YV12));
+        } else if (id == FISHEYE_CAMERA_ID) {
+            formatList.add(new CaptureFormat(640, 480, 30, ImageFormat.YV12));
+        } else if (id == FOURMP_CAMERA_ID) {
+            formatList.add(new CaptureFormat(1280, 720, 20, ImageFormat.YV12));
+        }
+        return formatList.toArray(new CaptureFormat[formatList.size()]);
     }
 
-    VideoCaptureTango(Context context, int id, long nativeVideoCaptureDeviceAndroid) {
+    VideoCaptureTango(Context context,
+                      int id,
+                      long nativeVideoCaptureDeviceAndroid) {
         // All Tango cameras are like the back facing one for the generic VideoCapture code.
         super(context, 0, nativeVideoCaptureDeviceAndroid);
         mTangoCameraId = id;
     }
 
     @Override
-    protected void setCaptureParameters(int width, int height, int frameRate,
+    protected void setCaptureParameters(
+            int width,
+            int height,
+            int frameRate,
             android.hardware.Camera.Parameters cameraParameters) {
         mCaptureFormat = new CaptureFormat(CAM_PARAMS[mTangoCameraId].mWidth,
                                            CAM_PARAMS[mTangoCameraId].mHeight,
@@ -106,7 +126,6 @@ public class VideoCaptureTango extends VideoCapture {
         mPreviewBufferLock.lock();
         try {
             if (!mIsRunning) return;
-
             if (data.length == SF_WIDTH * SF_FULL_HEIGHT) {
                 int rotation = getDeviceOrientation();
                 if (rotation != mDeviceOrientation) {
@@ -142,8 +161,8 @@ public class VideoCaptureTango extends VideoCapture {
                     // them explicitly since they're filled to 128 on creation.
                     ByteBuffer.wrap(data, startY, sizeY).get(mFrameBuffer.array(), 0, sizeY);
                 } else if (mTangoCameraId == FOURMP_CAMERA_ID) {
-                    int startY = SF_WIDTH * (SF_LINES_HEADER + SF_LINES_FISHEYE +
-                                    SF_LINES_RESERVED + SF_LINES_DEPTH_PADDED);
+                    int startY = SF_WIDTH * (SF_LINES_HEADER + SF_LINES_FISHEYE
+                                    + SF_LINES_RESERVED + SF_LINES_DEPTH_PADDED);
                     int sizeY = SF_WIDTH * SF_LINES_BIGIMAGE;
 
                     // The spec is completely inaccurate on the location, sizes
@@ -167,8 +186,10 @@ public class VideoCaptureTango extends VideoCapture {
                     return;
                 }
                 mFrameBuffer.rewind();  // Important!
-                nativeOnFrameAvailable(mNativeVideoCaptureDeviceAndroid, mFrameBuffer.array(),
-                        mFrameBuffer.capacity(), rotation);
+                nativeOnFrameAvailable(mNativeVideoCaptureDeviceAndroid,
+                                       mFrameBuffer.array(),
+                                       mFrameBuffer.capacity(),
+                                       rotation);
             }
         } finally {
             mPreviewBufferLock.unlock();

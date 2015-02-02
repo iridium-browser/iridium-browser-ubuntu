@@ -33,65 +33,62 @@ class SYNC_EXPORT_PRIVATE SyncRollbackManagerBase :
     public syncable::TransactionObserver {
  public:
   SyncRollbackManagerBase();
-  virtual ~SyncRollbackManagerBase();
+  ~SyncRollbackManagerBase() override;
 
   // SyncManager implementation.
-  virtual ModelTypeSet InitialSyncEndedTypes() OVERRIDE;
-  virtual ModelTypeSet GetTypesWithEmptyProgressMarkerToken(
-      ModelTypeSet types) OVERRIDE;
-  virtual bool PurgePartiallySyncedTypes() OVERRIDE;
-  virtual void UpdateCredentials(const SyncCredentials& credentials) OVERRIDE;
-  virtual void StartSyncingNormally(const ModelSafeRoutingInfo& routing_info)
-      OVERRIDE;
-  virtual void ConfigureSyncer(
-      ConfigureReason reason,
-      ModelTypeSet to_download,
-      ModelTypeSet to_purge,
-      ModelTypeSet to_journal,
-      ModelTypeSet to_unapply,
-      const ModelSafeRoutingInfo& new_routing_info,
-      const base::Closure& ready_task,
-      const base::Closure& retry_task) OVERRIDE;
-  virtual void SetInvalidatorEnabled(bool invalidator_enabled) OVERRIDE;
-  virtual void OnIncomingInvalidation(
+  ModelTypeSet InitialSyncEndedTypes() override;
+  ModelTypeSet GetTypesWithEmptyProgressMarkerToken(
+      ModelTypeSet types) override;
+  bool PurgePartiallySyncedTypes() override;
+  void UpdateCredentials(const SyncCredentials& credentials) override;
+  void StartSyncingNormally(const ModelSafeRoutingInfo& routing_info) override;
+  void ConfigureSyncer(ConfigureReason reason,
+                       ModelTypeSet to_download,
+                       ModelTypeSet to_purge,
+                       ModelTypeSet to_journal,
+                       ModelTypeSet to_unapply,
+                       const ModelSafeRoutingInfo& new_routing_info,
+                       const base::Closure& ready_task,
+                       const base::Closure& retry_task) override;
+  void SetInvalidatorEnabled(bool invalidator_enabled) override;
+  void OnIncomingInvalidation(
       syncer::ModelType type,
-      scoped_ptr<InvalidationInterface> invalidation) OVERRIDE;
-  virtual void AddObserver(SyncManager::Observer* observer) OVERRIDE;
-  virtual void RemoveObserver(SyncManager::Observer* observer) OVERRIDE;
-  virtual SyncStatus GetDetailedStatus() const OVERRIDE;
-  virtual void SaveChanges() OVERRIDE;
-  virtual void ShutdownOnSyncThread(ShutdownReason reason) OVERRIDE;
-  virtual UserShare* GetUserShare() OVERRIDE;
-  virtual const std::string cache_guid() OVERRIDE;
-  virtual bool ReceivedExperiment(Experiments* experiments) OVERRIDE;
-  virtual bool HasUnsyncedItems() OVERRIDE;
-  virtual SyncEncryptionHandler* GetEncryptionHandler() OVERRIDE;
-  virtual void RefreshTypes(ModelTypeSet types) OVERRIDE;
-  virtual SyncContextProxy* GetSyncContextProxy() OVERRIDE;
-  virtual ScopedVector<ProtocolEvent> GetBufferedProtocolEvents()
-      OVERRIDE;
-  virtual scoped_ptr<base::ListValue> GetAllNodesForType(
-      syncer::ModelType type) OVERRIDE;
+      scoped_ptr<InvalidationInterface> invalidation) override;
+  void AddObserver(SyncManager::Observer* observer) override;
+  void RemoveObserver(SyncManager::Observer* observer) override;
+  SyncStatus GetDetailedStatus() const override;
+  void SaveChanges() override;
+  void ShutdownOnSyncThread(ShutdownReason reason) override;
+  UserShare* GetUserShare() override;
+  const std::string cache_guid() override;
+  bool ReceivedExperiment(Experiments* experiments) override;
+  bool HasUnsyncedItems() override;
+  SyncEncryptionHandler* GetEncryptionHandler() override;
+  void RefreshTypes(ModelTypeSet types) override;
+  SyncContextProxy* GetSyncContextProxy() override;
+  ScopedVector<ProtocolEvent> GetBufferedProtocolEvents() override;
+  scoped_ptr<base::ListValue> GetAllNodesForType(
+      syncer::ModelType type) override;
 
   // DirectoryChangeDelegate implementation.
-  virtual void HandleTransactionCompleteChangeEvent(
-      ModelTypeSet models_with_changes) OVERRIDE;
-  virtual ModelTypeSet HandleTransactionEndingChangeEvent(
+  void HandleTransactionCompleteChangeEvent(
+      ModelTypeSet models_with_changes) override;
+  ModelTypeSet HandleTransactionEndingChangeEvent(
       const syncable::ImmutableWriteTransactionInfo& write_transaction_info,
-      syncable::BaseTransaction* trans) OVERRIDE;
-  virtual void HandleCalculateChangesChangeEventFromSyncApi(
-      const syncable::ImmutableWriteTransactionInfo& write_transaction_info,
-      syncable::BaseTransaction* trans,
-      std::vector<int64>* entries_changed) OVERRIDE;
-  virtual void HandleCalculateChangesChangeEventFromSyncer(
+      syncable::BaseTransaction* trans) override;
+  void HandleCalculateChangesChangeEventFromSyncApi(
       const syncable::ImmutableWriteTransactionInfo& write_transaction_info,
       syncable::BaseTransaction* trans,
-      std::vector<int64>* entries_changed) OVERRIDE;
+      std::vector<int64>* entries_changed) override;
+  void HandleCalculateChangesChangeEventFromSyncer(
+      const syncable::ImmutableWriteTransactionInfo& write_transaction_info,
+      syncable::BaseTransaction* trans,
+      std::vector<int64>* entries_changed) override;
 
   // syncable::TransactionObserver implementation.
-  virtual void OnTransactionWrite(
+  void OnTransactionWrite(
       const syncable::ImmutableWriteTransactionInfo& write_transaction_info,
-      ModelTypeSet models_with_changes) OVERRIDE;
+      ModelTypeSet models_with_changes) override;
 
  protected:
   ObserverList<SyncManager::Observer>* GetObservers();
@@ -104,13 +101,13 @@ class SYNC_EXPORT_PRIVATE SyncRollbackManagerBase :
       scoped_ptr<UnrecoverableErrorHandler> unrecoverable_error_handler,
       ReportUnrecoverableErrorFunction report_unrecoverable_error_function);
 
-  virtual void RegisterDirectoryTypeDebugInfoObserver(
-      syncer::TypeDebugInfoObserver* observer) OVERRIDE;
-  virtual void UnregisterDirectoryTypeDebugInfoObserver(
-      syncer::TypeDebugInfoObserver* observer) OVERRIDE;
-  virtual bool HasDirectoryTypeDebugInfoObserver(
-      syncer::TypeDebugInfoObserver* observer) OVERRIDE;
-  virtual void RequestEmitDebugInfo() OVERRIDE;
+  void RegisterDirectoryTypeDebugInfoObserver(
+      syncer::TypeDebugInfoObserver* observer) override;
+  void UnregisterDirectoryTypeDebugInfoObserver(
+      syncer::TypeDebugInfoObserver* observer) override;
+  bool HasDirectoryTypeDebugInfoObserver(
+      syncer::TypeDebugInfoObserver* observer) override;
+  void RequestEmitDebugInfo() override;
 
   bool initialized() const {
     return initialized_;

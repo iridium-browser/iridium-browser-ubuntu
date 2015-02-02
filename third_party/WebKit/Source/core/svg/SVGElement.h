@@ -46,25 +46,23 @@ class SVGFitToViewBox;
 class SVGSVGElement;
 class SVGUseElement;
 
-void mapAttributeToCSSProperty(HashMap<StringImpl*, CSSPropertyID>* propertyNameToIdMap, const QualifiedName& attrName);
-
 typedef WillBeHeapHashSet<RawPtrWillBeMember<SVGElement> > SVGElementSet;
 
 class SVGElement : public Element {
     DEFINE_WRAPPERTYPEINFO();
 public:
     virtual ~SVGElement();
-    virtual void attach(const AttachContext&) OVERRIDE;
-    virtual void detach(const AttachContext&) OVERRIDE;
+    virtual void attach(const AttachContext&) override;
+    virtual void detach(const AttachContext&) override;
 
-    virtual short tabIndex() const OVERRIDE;
-    virtual bool supportsFocus() const OVERRIDE { return false; }
+    virtual short tabIndex() const override;
+    virtual bool supportsFocus() const override { return false; }
 
     bool isOutermostSVGSVGElement() const;
 
     bool hasTagName(const SVGQualifiedName& name) const { return hasLocalName(name.localName()); }
 
-    virtual String title() const OVERRIDE;
+    virtual String title() const override;
     bool hasRelativeLengths() const { return !m_elementsWithRelativeLengths.isEmpty(); }
     static bool isAnimatableCSSProperty(const QualifiedName&);
     enum CTMScope {
@@ -103,7 +101,7 @@ public:
     void svgLoadEventTimerFired(Timer<SVGElement>*);
     virtual Timer<SVGElement>* svgLoadEventTimer();
 
-    virtual AffineTransform* supplementalTransform() { return 0; }
+    virtual AffineTransform* animateMotionTransform() { return 0; }
 
     void invalidateSVGAttributes() { ensureUniqueElementData().m_animatedSVGAttributesAreDirty = true; }
     void invalidateSVGPresentationAttributeStyle() { ensureUniqueElementData().m_presentationAttributeStyleIsDirty = true; }
@@ -128,7 +126,7 @@ public:
 
     void synchronizeAnimatedSVGAttribute(const QualifiedName&) const;
 
-    virtual PassRefPtr<RenderStyle> customStyleForRenderer() OVERRIDE FINAL;
+    virtual PassRefPtr<RenderStyle> customStyleForRenderer() override final;
 
     virtual void synchronizeRequiredFeatures() { }
     virtual void synchronizeRequiredExtensions() { }
@@ -144,8 +142,8 @@ public:
 
     virtual bool haveLoadedRequiredResources();
 
-    virtual bool addEventListener(const AtomicString& eventType, PassRefPtr<EventListener>, bool useCapture = false) OVERRIDE FINAL;
-    virtual bool removeEventListener(const AtomicString& eventType, PassRefPtr<EventListener>, bool useCapture = false) OVERRIDE FINAL;
+    virtual bool addEventListener(const AtomicString& eventType, PassRefPtr<EventListener>, bool useCapture = false) override final;
+    virtual bool removeEventListener(const AtomicString& eventType, PassRefPtr<EventListener>, bool useCapture = false) override final;
 
     void invalidateRelativeLengthClients(SubtreeLayoutScope* = 0);
 
@@ -185,32 +183,33 @@ public:
 
     void invalidateInstances();
 
-    virtual void trace(Visitor*) OVERRIDE;
+    virtual void trace(Visitor*) override;
 
     static const AtomicString& eventParameterName();
 
 protected:
     SVGElement(const QualifiedName&, Document&, ConstructionType = CreateSVGElement);
 
-    virtual void parseAttribute(const QualifiedName&, const AtomicString&) OVERRIDE;
+    virtual void parseAttribute(const QualifiedName&, const AtomicString&) override;
 
     // FIXME: |parseAttributeNew| is a new implementation of parseAttribute
     // which maps attribute using |m_attributeToPropertyMap|.
     // This is to replace |parseAttribute()| after all derived class switch to call this.
     void parseAttributeNew(const QualifiedName&, const AtomicString&);
 
-    virtual void attributeChanged(const QualifiedName&, const AtomicString&, AttributeModificationReason = ModifiedDirectly) OVERRIDE;
+    virtual void attributeChanged(const QualifiedName&, const AtomicString&, AttributeModificationReason = ModifiedDirectly) override;
 
-    virtual bool isPresentationAttribute(const QualifiedName&) const OVERRIDE;
-    virtual void collectStyleForPresentationAttribute(const QualifiedName&, const AtomicString&, MutableStylePropertySet*) OVERRIDE;
+    virtual bool isPresentationAttribute(const QualifiedName&) const override;
+    virtual void collectStyleForPresentationAttribute(const QualifiedName&, const AtomicString&, MutableStylePropertySet*) override;
 
-    virtual InsertionNotificationRequest insertedInto(ContainerNode*) OVERRIDE;
-    virtual void removedFrom(ContainerNode*) OVERRIDE;
-    virtual void childrenChanged(const ChildrenChange&) OVERRIDE;
+    virtual InsertionNotificationRequest insertedInto(ContainerNode*) override;
+    virtual void removedFrom(ContainerNode*) override;
+    virtual void childrenChanged(const ChildrenChange&) override;
 
     static CSSPropertyID cssPropertyIdForSVGAttributeName(const QualifiedName&);
     void updateRelativeLengthsInformation() { updateRelativeLengthsInformation(selfHasRelativeLengths(), this); }
     void updateRelativeLengthsInformation(bool hasRelativeLengths, SVGElement*);
+    static void markForLayoutAndParentResourceInvalidation(RenderObject*);
 
     virtual bool selfHasRelativeLengths() const { return false; }
 
@@ -228,16 +227,12 @@ protected:
     bool hasFocusEventListeners() const;
 
 private:
-    // FIXME: Author shadows should be allowed
-    // https://bugs.webkit.org/show_bug.cgi?id=77938
-    virtual bool areAuthorShadowsAllowed() const OVERRIDE FINAL { return false; }
-
     bool isSVGElement() const WTF_DELETED_FUNCTION; // This will catch anyone doing an unnecessary check.
     bool isStyledElement() const WTF_DELETED_FUNCTION; // This will catch anyone doing an unnecessary check.
 
     RenderStyle* computedStyle(PseudoId = NOPSEUDO);
-    virtual RenderStyle* virtualComputedStyle(PseudoId pseudoElementSpecifier = NOPSEUDO) OVERRIDE FINAL { return computedStyle(pseudoElementSpecifier); }
-    virtual void willRecalcStyle(StyleRecalcChange) OVERRIDE;
+    virtual RenderStyle* virtualComputedStyle(PseudoId pseudoElementSpecifier = NOPSEUDO) override final { return computedStyle(pseudoElementSpecifier); }
+    virtual void willRecalcStyle(StyleRecalcChange) override;
 
     void buildPendingResourcesIfNeeded();
 

@@ -19,7 +19,7 @@ using content::WebContentsTester;
 
 class FindBackendTest : public ChromeRenderViewHostTestHarness {
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ChromeRenderViewHostTestHarness::SetUp();
     FindTabHelper::CreateForWebContents(web_contents());
   }

@@ -1,7 +1,8 @@
 {
     "dependencies": [
-        "ui",
-        "bindings"
+        "bindings",
+        "platform",
+        "ui"
     ],
     "scripts": [
         "CookiesTable.js",
@@ -14,7 +15,6 @@
         "Drawer.js",
         "Panel.js",
         "ExecutionContextSelector.js",
-        "ExtensionServerProxy.js",
         "FilterBar.js",
         "FilterSuggestionBuilder.js",
         "FlameChart.js",
@@ -29,5 +29,12 @@
         "ShortcutsScreen.js",
         "TargetsComboBoxController.js",
         "TimelineGrid.js"
+    ],
+    "stylesheets": [
+        "breakpointsList.css",
+        "flameChart.css",
+        "helpScreen.css",
+        "overviewGrid.css",
+        "panelEnablerView.css"
     ]
 }

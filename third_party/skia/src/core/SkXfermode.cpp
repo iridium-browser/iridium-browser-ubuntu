@@ -775,7 +775,7 @@ void SkXfermode::xferA8(SkAlpha* SK_RESTRICT dst,
 
 #if SK_SUPPORT_GPU
 
-#include "GrProcessor.h"
+#include "GrFragmentProcessor.h"
 #include "GrCoordTransform.h"
 #include "GrProcessorUnitTest.h"
 #include "GrTBackendProcessorFactory.h"
@@ -799,11 +799,6 @@ public:
         }
     }
 
-    virtual void getConstantColorComponents(GrColor* color,
-                                            uint32_t* validFlags) const SK_OVERRIDE {
-        *validFlags = 0;
-    }
-
     virtual const GrBackendFragmentProcessorFactory& getFactory() const SK_OVERRIDE {
         return GrTBackendFragmentProcessorFactory<XferEffect>::getInstance();
     }
@@ -818,7 +813,7 @@ public:
         GLProcessor(const GrBackendProcessorFactory& factory, const GrProcessor&)
             : INHERITED(factory) {
         }
-        virtual void emitCode(GrGLProgramBuilder* builder,
+        virtual void emitCode(GrGLFPBuilder* builder,
                               const GrFragmentProcessor& fp,
                               const GrProcessorKey& key,
                               const char* outputColor,
@@ -828,7 +823,7 @@ public:
             SkXfermode::Mode mode = fp.cast<XferEffect>().mode();
             const GrTexture* backgroundTex =
                     fp.cast<XferEffect>().backgroundAccess().getTexture();
-            GrGLFragmentShaderBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+            GrGLFPFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
             const char* dstColor;
             if (backgroundTex) {
                 dstColor = "bgColor";
@@ -978,7 +973,7 @@ public:
         }
 
     private:
-        static void HardLight(GrGLFragmentShaderBuilder* fsBuilder,
+        static void HardLight(GrGLFPFragmentBuilder* fsBuilder,
                               const char* final,
                               const char* src,
                               const char* dst) {
@@ -997,7 +992,7 @@ public:
         }
 
         // Does one component of color-dodge
-        static void ColorDodgeComponent(GrGLFragmentShaderBuilder* fsBuilder,
+        static void ColorDodgeComponent(GrGLFPFragmentBuilder* fsBuilder,
                                         const char* final,
                                         const char* src,
                                         const char* dst,
@@ -1021,7 +1016,7 @@ public:
         }
 
         // Does one component of color-burn
-        static void ColorBurnComponent(GrGLFragmentShaderBuilder* fsBuilder,
+        static void ColorBurnComponent(GrGLFPFragmentBuilder* fsBuilder,
                                        const char* final,
                                        const char* src,
                                        const char* dst,
@@ -1042,7 +1037,7 @@ public:
         }
 
         // Does one component of soft-light. Caller should have already checked that dst alpha > 0.
-        static void SoftLightComponentPosDstAlpha(GrGLFragmentShaderBuilder* fsBuilder,
+        static void SoftLightComponentPosDstAlpha(GrGLFPFragmentBuilder* fsBuilder,
                                                   const char* final,
                                                   const char* src,
                                                   const char* dst,
@@ -1080,7 +1075,7 @@ public:
         // hue and saturation of the first color, the luminosity of the second color, and the input
         // alpha. It has this signature:
         //      vec3 set_luminance(vec3 hueSatColor, float alpha, vec3 lumColor).
-        static void AddLumFunction(GrGLFragmentShaderBuilder* fsBuilder, SkString* setLumFunction) {
+        static void AddLumFunction(GrGLFPFragmentBuilder* fsBuilder, SkString* setLumFunction) {
             // Emit a helper that gets the luminance of a color.
             SkString getFunction;
             GrGLShaderVar getLumArgs[] = {
@@ -1122,7 +1117,7 @@ public:
         // Adds a function that creates a color with the hue and luminosity of one input color and
         // the saturation of another color. It will have this signature:
         //      float set_saturation(vec3 hueLumColor, vec3 satColor)
-        static void AddSatFunction(GrGLFragmentShaderBuilder* fsBuilder, SkString* setSatFunction) {
+        static void AddSatFunction(GrGLFPFragmentBuilder* fsBuilder, SkString* setSatFunction) {
             // Emit a helper that gets the saturation of a color
             SkString getFunction;
             GrGLShaderVar getSatArgs[] = { GrGLShaderVar("color", kVec3f_GrSLType) };
@@ -1211,10 +1206,13 @@ private:
             this->setWillReadDstColor();
         }
     }
-    virtual bool onIsEqual(const GrProcessor& other) const SK_OVERRIDE {
+    virtual bool onIsEqual(const GrFragmentProcessor& other) const SK_OVERRIDE {
         const XferEffect& s = other.cast<XferEffect>();
-        return fMode == s.fMode &&
-               fBackgroundAccess.getTexture() == s.fBackgroundAccess.getTexture();
+        return fMode == s.fMode;
+    }
+
+    virtual void onComputeInvariantOutput(InvariantOutput* inout) const SK_OVERRIDE {
+        inout->setToUnknown(InvariantOutput::kWill_ReadInput);
     }
 
     SkXfermode::Mode fMode;
@@ -1709,6 +1707,7 @@ SkXfermode* create_mode(int iMode) {
 }
 }  // namespace
 
+SK_DECLARE_STATIC_LAZY_PTR_ARRAY(SkXfermode, cached, SkXfermode::kLastMode + 1, create_mode);
 
 SkXfermode* SkXfermode::Create(Mode mode) {
     SkASSERT(SK_ARRAY_COUNT(gProcCoeffs) == kModeCount);
@@ -1724,7 +1723,6 @@ SkXfermode* SkXfermode::Create(Mode mode) {
         return NULL;
     }
 
-    SK_DECLARE_STATIC_LAZY_PTR_ARRAY(SkXfermode, cached, kModeCount, create_mode);
     return SkSafeRef(cached[mode]);
 }
 

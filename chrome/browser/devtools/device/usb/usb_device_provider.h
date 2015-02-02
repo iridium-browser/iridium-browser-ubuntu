@@ -19,19 +19,19 @@ class UsbDeviceProvider : public AndroidDeviceManager::DeviceProvider {
 
   explicit UsbDeviceProvider(Profile* profile);
 
-  virtual void QueryDevices(const SerialsCallback& callback) OVERRIDE;
+  void QueryDevices(const SerialsCallback& callback) override;
 
-  virtual void QueryDeviceInfo(const std::string& serial,
-                               const DeviceInfoCallback& callback) OVERRIDE;
+  void QueryDeviceInfo(const std::string& serial,
+                       const DeviceInfoCallback& callback) override;
 
-  virtual void OpenSocket(const std::string& serial,
-                          const std::string& socket_name,
-                          const SocketCallback& callback) OVERRIDE;
+  void OpenSocket(const std::string& serial,
+                  const std::string& socket_name,
+                  const SocketCallback& callback) override;
 
-  virtual void ReleaseDevice(const std::string& serial) OVERRIDE;
+  void ReleaseDevice(const std::string& serial) override;
 
  private:
-  virtual ~UsbDeviceProvider();
+  ~UsbDeviceProvider() override;
 
   void EnumeratedDevices(
       const SerialsCallback& callback,

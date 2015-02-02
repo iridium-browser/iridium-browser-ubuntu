@@ -38,8 +38,9 @@ extern const char kNullAudioHash[];
 class DummyTickClock : public base::TickClock {
  public:
   DummyTickClock() : now_() {}
-  virtual ~DummyTickClock() {}
-  virtual base::TimeTicks NowTicks() OVERRIDE;
+  ~DummyTickClock() override {}
+  base::TimeTicks NowTicks() override;
+
  private:
   base::TimeTicks now_;
 };
@@ -112,6 +113,7 @@ class PipelineIntegrationTestBase {
   AudioHardwareConfig hardware_config_;
   PipelineMetadata metadata_;
 
+  void SaveStatus(PipelineStatus status);
   void OnStatusCallbackChecked(PipelineStatus expected_status,
                                PipelineStatus status);
   void OnStatusCallback(PipelineStatus status);

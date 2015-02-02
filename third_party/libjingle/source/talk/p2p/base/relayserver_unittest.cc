@@ -27,7 +27,7 @@
 
 #include <string>
 
-#include "talk/p2p/base/relayserver.h"
+#include "webrtc/p2p/base/relayserver.h"
 #include "webrtc/base/gunit.h"
 #include "webrtc/base/helpers.h"
 #include "webrtc/base/logging.h"
@@ -53,14 +53,6 @@ static const char* msg2 = "Lobster Thermidor a Crevette with a mornay sauce...";
 
 class RelayServerTest : public testing::Test {
  public:
-  static void SetUpTestCase() {
-    rtc::InitializeSSL();
-  }
-
-  static void TearDownTestCase() {
-    rtc::CleanupSSL();
-  }
-
   RelayServerTest()
       : main_(rtc::Thread::Current()), ss_(main_->socketserver()),
         username_(rtc::CreateRandomString(12)),

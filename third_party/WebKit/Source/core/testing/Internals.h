@@ -35,7 +35,6 @@
 #include "core/dom/ContextLifecycleObserver.h"
 #include "core/page/scrolling/ScrollingCoordinator.h"
 #include "platform/heap/Handle.h"
-#include "wtf/ArrayBuffer.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/RefCounted.h"
 #include "wtf/text/WTFString.h"
@@ -45,11 +44,12 @@ namespace blink {
 class CanvasRenderingContext2D;
 class ClientRect;
 class ClientRectList;
+class DOMArrayBuffer;
 class DOMPoint;
 class DOMStringList;
-class LocalDOMWindow;
 class DictionaryTest;
 class Document;
+class DocumentFragment;
 class DocumentMarker;
 class Element;
 class ExceptionState;
@@ -62,6 +62,7 @@ class InternalRuntimeFlags;
 class InternalSettings;
 class Iterator;
 class LayerRectList;
+class LocalDOMWindow;
 class LocalFrame;
 class Node;
 class Page;
@@ -70,11 +71,12 @@ class PrivateScriptTest;
 class Range;
 class SerializedScriptValue;
 class ShadowRoot;
+class TypeConversions;
+class UnionTypesTest;
 template <typename NodeType> class StaticNodeTypeList;
 typedef StaticNodeTypeList<Node> StaticNodeList;
-class TypeConversions;
 
-class Internals FINAL : public GarbageCollectedFinalized<Internals>, public ScriptWrappable, public ContextLifecycleObserver {
+class Internals final : public GarbageCollectedFinalized<Internals>, public ScriptWrappable, public ContextLifecycleObserver {
     DEFINE_WRAPPERTYPEINFO();
 public:
     static Internals* create(Document*);
@@ -94,6 +96,8 @@ public:
     bool isSharingStyle(Element*, Element*) const;
 
     PassRefPtrWillBeRawPtr<CSSStyleDeclaration> computedStyleIncludingVisitedInfo(Node*) const;
+
+    PassRefPtrWillBeRawPtr<ShadowRoot> createUserAgentShadowRoot(Element* host);
 
     ShadowRoot* shadowRoot(Element* host);
     ShadowRoot* youngestShadowRoot(Element* host);
@@ -137,6 +141,7 @@ public:
     void setFormControlStateOfHistoryItem(const Vector<String>&, ExceptionState&);
     void setEnableMockPagePopup(bool, ExceptionState&);
     PassRefPtrWillBeRawPtr<PagePopupController> pagePopupController();
+    LocalDOMWindow* pagePopupWindow() const;
 
     PassRefPtrWillBeRawPtr<ClientRect> absoluteCaretBounds(ExceptionState&);
 
@@ -150,7 +155,7 @@ public:
     void setMarkersActive(Node*, unsigned startOffset, unsigned endOffset, bool);
     void setMarkedTextMatchesAreHighlighted(Document*, bool);
 
-    void setScrollViewPosition(Document*, long x, long y, ExceptionState&);
+    void setFrameViewPosition(Document*, long x, long y, ExceptionState&);
     String viewportAsText(Document*, float devicePixelRatio, int availableWidth, int availableHeight, ExceptionState&);
 
     bool wasLastChangeUserEdit(Element* textField, ExceptionState&);
@@ -214,7 +219,6 @@ public:
     String elementLayerTreeAsText(Element*, ExceptionState&) const;
 
     bool scrollsWithRespectTo(Element*, Element*, ExceptionState&);
-    bool isUnclippedDescendant(Element*, ExceptionState&);
 
     String scrollingStateTreeAsText(Document*) const;
     String mainThreadScrollingReasons(Document*, ExceptionState&) const;
@@ -231,6 +235,7 @@ public:
     void closeDummyInspectorFrontend();
     Vector<unsigned long> setMemoryCacheCapacities(unsigned long minDeadBytes, unsigned long maxDeadBytes, unsigned long totalBytes);
     void setInspectorResourcesDataSizeLimits(int maximumResourcesContentSize, int maximumSingleResourceContentSize, ExceptionState&);
+    String inspectorHighlightJSON(Node*, ExceptionState&);
 
     String counterValue(Element*);
 
@@ -258,6 +263,7 @@ public:
     TypeConversions* typeConversions() const;
     PrivateScriptTest* privateScriptTest() const;
     DictionaryTest* dictionaryTest() const;
+    UnionTypesTest* unionTypesTest() const;
 
     Vector<String> getReferencedFilePaths() const;
 
@@ -270,8 +276,8 @@ public:
     PassRefPtrWillBeRawPtr<ClientRectList> draggableRegions(Document*, ExceptionState&);
     PassRefPtrWillBeRawPtr<ClientRectList> nonDraggableRegions(Document*, ExceptionState&);
 
-    PassRefPtr<ArrayBuffer> serializeObject(PassRefPtr<SerializedScriptValue>) const;
-    PassRefPtr<SerializedScriptValue> deserializeBuffer(PassRefPtr<ArrayBuffer>) const;
+    PassRefPtr<DOMArrayBuffer> serializeObject(PassRefPtr<SerializedScriptValue>) const;
+    PassRefPtr<SerializedScriptValue> deserializeBuffer(PassRefPtr<DOMArrayBuffer>) const;
 
     String getCurrentCursorInfo(Document*, ExceptionState&);
 
@@ -301,6 +307,9 @@ public:
     ScriptPromise promiseCheck(ScriptState*, long, bool, const Dictionary&, const String&, const Vector<String>&, ExceptionState&);
     ScriptPromise promiseCheckWithoutExceptionState(ScriptState*, const Dictionary&, const String&, const Vector<String>&);
     ScriptPromise promiseCheckRange(ScriptState*, long);
+    ScriptPromise promiseCheckOverload(ScriptState*, Location*);
+    ScriptPromise promiseCheckOverload(ScriptState*, Document*);
+    ScriptPromise promiseCheckOverload(ScriptState*, Location*, long, long);
 
     void trace(Visitor*);
 
@@ -320,7 +329,7 @@ public:
 
     unsigned countHitRegions(CanvasRenderingContext2D*);
 
-    void forcePluginPlaceholder(HTMLElement* plugin, const String& htmlSource, ExceptionState&);
+    void forcePluginPlaceholder(HTMLElement* plugin, PassRefPtrWillBeRawPtr<DocumentFragment>, ExceptionState&);
     void forcePluginPlaceholder(HTMLElement* plugin, const Dictionary& options, ExceptionState&);
 
     Iterator* iterator(ScriptState*, ExceptionState&);

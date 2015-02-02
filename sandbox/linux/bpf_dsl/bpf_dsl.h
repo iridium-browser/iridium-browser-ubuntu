@@ -12,15 +12,10 @@
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "sandbox/linux/bpf_dsl/bpf_dsl_forward.h"
 #include "sandbox/linux/bpf_dsl/cons.h"
-#include "sandbox/linux/seccomp-bpf/sandbox_bpf_policy.h"
-#include "sandbox/linux/seccomp-bpf/trap.h"
+#include "sandbox/linux/bpf_dsl/trap_registry.h"
 #include "sandbox/sandbox_export.h"
-
-namespace sandbox {
-class ErrorCode;
-class SandboxBPF;
-}
 
 // The sandbox::bpf_dsl namespace provides a domain-specific language
 // to make writing BPF policies more expressive.  In general, the
@@ -35,11 +30,11 @@ class SandboxBPF;
 //
 //      using namespace sandbox::bpf_dsl;
 //
-//      class SillyPolicy : public SandboxBPFDSLPolicy {
+//      class SillyPolicy : public Policy {
 //       public:
 //        SillyPolicy() {}
 //        virtual ~SillyPolicy() {}
-//        virtual ResultExpr EvaluateSyscall(int sysno) const OVERRIDE {
+//        virtual ResultExpr EvaluateSyscall(int sysno) const override {
 //          if (sysno == __NR_fcntl) {
 //            Arg<int> fd(0), cmd(1);
 //            Arg<unsigned long> flags(2);
@@ -78,47 +73,11 @@ class SandboxBPF;
 namespace sandbox {
 namespace bpf_dsl {
 
-// Forward declarations of classes; see below for proper documentation.
-class Elser;
-template <typename T>
-class Caser;
-namespace internal {
-class ResultExprImpl;
-class BoolExprImpl;
-}
-
 // ResultExpr is an opaque reference to an immutable result expression tree.
 typedef scoped_refptr<const internal::ResultExprImpl> ResultExpr;
 
 // BoolExpr is an opaque reference to an immutable boolean expression tree.
 typedef scoped_refptr<const internal::BoolExprImpl> BoolExpr;
-
-// Helper class to make writing policies easier.
-class SANDBOX_EXPORT SandboxBPFDSLPolicy : public SandboxBPFPolicy {
- public:
-  SandboxBPFDSLPolicy() : SandboxBPFPolicy() {}
-  virtual ~SandboxBPFDSLPolicy() {}
-
-  // User extension point for writing custom sandbox policies.
-  virtual ResultExpr EvaluateSyscall(int sysno) const = 0;
-
-  // Optional overload for specifying alternate behavior for invalid
-  // system calls.  The default is to return ENOSYS.
-  virtual ResultExpr InvalidSyscall() const;
-
-  // Override implementations from SandboxBPFPolicy.  Marked as FINAL
-  // to prevent mixups with child classes accidentally overloading
-  // these instead of the above methods.
-  virtual ErrorCode EvaluateSyscall(SandboxBPF* sb,
-                                    int sysno) const OVERRIDE FINAL;
-  virtual ErrorCode InvalidSyscall(SandboxBPF* sb) const OVERRIDE FINAL;
-
-  // Helper method so policies can just write Trap(func, aux).
-  static ResultExpr Trap(Trap::TrapFnc trap_func, const void* aux);
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(SandboxBPFDSLPolicy);
-};
 
 // Allow specifies a result that the system call should be allowed to
 // execute normally.
@@ -141,7 +100,8 @@ SANDBOX_EXPORT ResultExpr Trace(uint16_t aux);
 // Trap specifies a result that the system call should be handled by
 // trapping back into userspace and invoking |trap_func|, passing
 // |aux| as the second parameter.
-SANDBOX_EXPORT ResultExpr Trap(Trap::TrapFnc trap_func, const void* aux);
+SANDBOX_EXPORT ResultExpr
+    Trap(TrapRegistry::TrapFnc trap_func, const void* aux);
 
 // UnsafeTrap is like Trap, except the policy is marked as "unsafe"
 // and allowed to use SandboxSyscall to invoke any system call.
@@ -151,7 +111,8 @@ SANDBOX_EXPORT ResultExpr Trap(Trap::TrapFnc trap_func, const void* aux);
 //   very useful to diagnose code that is incompatible with the sandbox.
 //   If even a single system call returns "UnsafeTrap", the security of
 //   entire sandbox should be considered compromised.
-SANDBOX_EXPORT ResultExpr UnsafeTrap(Trap::TrapFnc trap_func, const void* aux);
+SANDBOX_EXPORT ResultExpr
+    UnsafeTrap(TrapRegistry::TrapFnc trap_func, const void* aux);
 
 // BoolConst converts a bool value into a BoolExpr.
 SANDBOX_EXPORT BoolExpr BoolConst(bool value);
@@ -216,9 +177,9 @@ class SANDBOX_EXPORT Elser {
  private:
   typedef std::pair<BoolExpr, ResultExpr> Clause;
 
-  explicit Elser(Cons<Clause>::List clause_list);
+  explicit Elser(cons::List<Clause> clause_list);
 
-  Cons<Clause>::List clause_list_;
+  cons::List<Clause> clause_list_;
 
   friend Elser If(const BoolExpr&, const ResultExpr&);
   template <typename T>
@@ -281,9 +242,6 @@ class SANDBOX_EXPORT Caser {
 // Official API ends here.
 // =====================================================================
 
-// Definitions below are necessary here only for C++03 compatibility.
-// Once C++11 is available, they should be moved into bpf_dsl.cc via extern
-// templates.
 namespace internal {
 
 // Make argument-dependent lookup work.  This is necessary because although
@@ -303,36 +261,6 @@ SANDBOX_EXPORT BoolExpr
 
 // Returns the default mask for a system call argument of the specified size.
 SANDBOX_EXPORT uint64_t DefaultMask(size_t size);
-
-// Internal interface implemented by BoolExpr implementations.
-class SANDBOX_EXPORT BoolExprImpl : public base::RefCounted<BoolExprImpl> {
- public:
-  BoolExprImpl() {}
-  virtual ErrorCode Compile(SandboxBPF* sb,
-                            ErrorCode true_ec,
-                            ErrorCode false_ec) const = 0;
-
- protected:
-  virtual ~BoolExprImpl() {}
-
- private:
-  friend class base::RefCounted<BoolExprImpl>;
-  DISALLOW_COPY_AND_ASSIGN(BoolExprImpl);
-};
-
-// Internal interface implemented by ResultExpr implementations.
-class SANDBOX_EXPORT ResultExprImpl : public base::RefCounted<ResultExprImpl> {
- public:
-  ResultExprImpl() {}
-  virtual ErrorCode Compile(SandboxBPF* sb) const = 0;
-
- protected:
-  virtual ~ResultExprImpl() {}
-
- private:
-  friend class base::RefCounted<ResultExprImpl>;
-  DISALLOW_COPY_AND_ASSIGN(ResultExprImpl);
-};
 
 }  // namespace internal
 
@@ -355,7 +283,7 @@ BoolExpr Arg<T>::EqualTo(T val) const {
 
 template <typename T>
 SANDBOX_EXPORT Caser<T> Switch(const Arg<T>& arg) {
-  return Caser<T>(arg, Elser(Cons<Elser::Clause>::List()));
+  return Caser<T>(arg, Elser(nullptr));
 }
 
 template <typename T>

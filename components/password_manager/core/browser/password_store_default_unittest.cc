@@ -48,16 +48,14 @@ class MockPasswordStoreObserver : public PasswordStore::Observer {
 
 class PasswordStoreDefaultTest : public testing::Test {
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     login_db_.reset(new LoginDatabase());
     ASSERT_TRUE(login_db_->Init(temp_dir_.path().Append(
         FILE_PATH_LITERAL("login_test"))));
   }
 
-  virtual void TearDown() OVERRIDE {
-    ASSERT_TRUE(temp_dir_.Delete());
-  }
+  void TearDown() override { ASSERT_TRUE(temp_dir_.Delete()); }
 
   base::MessageLoopForUI message_loop_;
   scoped_ptr<LoginDatabase> login_db_;
@@ -73,7 +71,7 @@ TEST_F(PasswordStoreDefaultTest, NonASCIIData) {
       base::MessageLoopProxy::current(),
       base::MessageLoopProxy::current(),
       login_db_.release()));
-  store->Init(syncer::SyncableService::StartSyncFlare(), "");
+  store->Init(syncer::SyncableService::StartSyncFlare());
 
   // Some non-ASCII password form data.
   static const PasswordFormData form_data[] = {
@@ -91,7 +89,7 @@ TEST_F(PasswordStoreDefaultTest, NonASCIIData) {
 
   // Build the expected forms vector and add the forms to the store.
   std::vector<PasswordForm*> expected_forms;
-  for (unsigned int i = 0; i < ARRAYSIZE_UNSAFE(form_data); ++i) {
+  for (unsigned int i = 0; i < arraysize(form_data); ++i) {
     PasswordForm* form = CreatePasswordFormFromData(form_data[i]);
     expected_forms.push_back(form);
     store->AddLogin(*form);
@@ -119,7 +117,7 @@ TEST_F(PasswordStoreDefaultTest, Notifications) {
       base::MessageLoopProxy::current(),
       base::MessageLoopProxy::current(),
       login_db_.release()));
-  store->Init(syncer::SyncableService::StartSyncFlare(), "");
+  store->Init(syncer::SyncableService::StartSyncFlare());
 
   PasswordFormData form_data =
   { PasswordForm::SCHEME_HTML,

@@ -8,12 +8,13 @@
 #include <string>
 
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/ui/views/extensions/extension_action_view_controller.h"
-#include "chrome/browser/ui/views/extensions/extension_action_view_delegate.h"
+#include "chrome/browser/ui/extensions/extension_action_view_controller.h"
+#include "chrome/browser/ui/views/toolbar/toolbar_action_view_delegate_views.h"
 #include "ui/views/controls/image_view.h"
 
 class Browser;
 class ExtensionAction;
+class ExtensionActionViewController;
 class LocationBarView;
 
 namespace content {
@@ -22,13 +23,13 @@ class WebContents;
 
 // PageActionImageView is used by the LocationBarView to display the icon for a
 // given PageAction and notify the extension when the icon is clicked.
-class PageActionImageView : public ExtensionActionViewDelegate,
+class PageActionImageView : public ToolbarActionViewDelegateViews,
                             public views::ImageView {
  public:
   PageActionImageView(LocationBarView* owner,
                       ExtensionAction* page_action,
                       Browser* browser);
-  virtual ~PageActionImageView();
+  ~PageActionImageView() override;
 
   void set_preview_enabled(bool preview_enabled) {
     preview_enabled_ = preview_enabled;
@@ -41,12 +42,12 @@ class PageActionImageView : public ExtensionActionViewDelegate,
   }
 
   // Overridden from views::View:
-  virtual const char* GetClassName() const OVERRIDE;
-  virtual void GetAccessibleState(ui::AXViewState* state) OVERRIDE;
-  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseReleased(const ui::MouseEvent& event) OVERRIDE;
-  virtual bool OnKeyPressed(const ui::KeyEvent& event) OVERRIDE;
-  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
+  const char* GetClassName() const override;
+  void GetAccessibleState(ui::AXViewState* state) override;
+  bool OnMousePressed(const ui::MouseEvent& event) override;
+  void OnMouseReleased(const ui::MouseEvent& event) override;
+  bool OnKeyPressed(const ui::KeyEvent& event) override;
+  void OnGestureEvent(ui::GestureEvent* event) override;
 
   // Called to notify the PageAction that it should determine whether to be
   // visible or hidden. |contents| is the WebContents that is active.
@@ -56,21 +57,20 @@ class PageActionImageView : public ExtensionActionViewDelegate,
   static const char kViewClassName[];
 
   // Overridden from View.
-  virtual void PaintChildren(gfx::Canvas* canvas,
-                             const views::CullSet& cull_set) OVERRIDE;
+  void PaintChildren(gfx::Canvas* canvas,
+                     const views::CullSet& cull_set) override;
 
-  // Overridden from ExtensionActionViewDelegate:
-  virtual void OnIconUpdated() OVERRIDE;
-  virtual views::View* GetAsView() OVERRIDE;
-  virtual bool IsShownInMenu() OVERRIDE;
-  virtual views::FocusManager* GetFocusManagerForAccelerator() OVERRIDE;
-  virtual views::Widget* GetParentForContextMenu() OVERRIDE;
-  virtual ExtensionActionViewController* GetPreferredPopupViewController()
-      OVERRIDE;
-  virtual views::View* GetReferenceViewForPopup() OVERRIDE;
-  virtual views::MenuButton* GetContextMenuButton() OVERRIDE;
-  virtual content::WebContents* GetCurrentWebContents() OVERRIDE;
-  virtual void HideActivePopup() OVERRIDE;
+  // ToolbarActionViewDelegateViews:
+  void UpdateState() override;
+  views::View* GetAsView() override;
+  bool IsShownInMenu() override;
+  views::FocusManager* GetFocusManagerForAccelerator() override;
+  views::Widget* GetParentForContextMenu() override;
+  ToolbarActionViewController* GetPreferredPopupViewController() override;
+  views::View* GetReferenceViewForPopup() override;
+  views::MenuButton* GetContextMenuButton() override;
+  content::WebContents* GetCurrentWebContents() const override;
+  void HideActivePopup() override;
 
   // The controller for this ExtensionAction view.
   scoped_ptr<ExtensionActionViewController> view_controller_;

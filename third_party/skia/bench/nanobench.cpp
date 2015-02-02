@@ -17,7 +17,7 @@
 #include "Stats.h"
 #include "Timer.h"
 
-#include "SkBBHFactory.h"
+#include "SkBBoxHierarchy.h"
 #include "SkCanvas.h"
 #include "SkCommonFlags.h"
 #include "SkForceLinking.h"
@@ -35,7 +35,7 @@
 
 __SK_FORCE_IMAGE_DECODER_LINKING;
 
-static const int kAutoTuneLoops = -1;
+static const int kAutoTuneLoops = 0;
 
 static const int kDefaultLoops =
 #ifdef SK_DEBUG
@@ -70,6 +70,7 @@ DEFINE_int32(maxLoops, 1000000, "Never run a bench more times than this.");
 DEFINE_string(clip, "0,0,1000,1000", "Clip for SKPs.");
 DEFINE_string(scales, "1.0", "Space-separated scales for SKPs.");
 DEFINE_bool(bbh, true, "Build a BBH for SKPs?");
+DEFINE_int32(flushEvery, 10, "Flush --outResultsFile every Nth run.");
 
 static SkString humanize(double ms) {
     if (FLAGS_verbose) return SkStringPrintf("%llu", (uint64_t)(ms*1e6));
@@ -84,7 +85,7 @@ static SkString humanize(double ms) {
 }
 #define HUMANIZE(ms) humanize(ms).c_str()
 
-static double time(int loops, Benchmark* bench, SkCanvas* canvas, SkGLContextHelper* gl) {
+static double time(int loops, Benchmark* bench, SkCanvas* canvas, SkGLContext* gl) {
     if (canvas) {
         canvas->clear(SK_ColorWHITE);
     }
@@ -114,9 +115,18 @@ static double estimate_timer_overhead() {
     return overhead / FLAGS_overheadLoops;
 }
 
+static int detect_forever_loops(int loops) {
+    // look for a magic run-forever value
+    if (loops < 0) {
+        loops = SK_MaxS32;
+    }
+    return loops;
+}
+
 static int clamp_loops(int loops) {
     if (loops < 1) {
-        SkDebugf("ERROR: clamping loops from %d to 1.\n", loops);
+        SkDebugf("ERROR: clamping loops from %d to 1. "
+                 "There's probably something wrong with the bench.\n", loops);
         return 1;
     }
     if (loops > FLAGS_maxLoops) {
@@ -193,8 +203,10 @@ static int cpu_bench(const double overhead, Benchmark* bench, SkCanvas* canvas, 
         const double numer = overhead / FLAGS_overheadGoal - overhead;
         const double denom = bench_plus_overhead - overhead;
         loops = (int)ceil(numer / denom);
+        loops = clamp_loops(loops);
+    } else {
+        loops = detect_forever_loops(loops);
     }
-    loops = clamp_loops(loops);
 
     for (int i = 0; i < FLAGS_samples; i++) {
         samples[i] = time(loops, bench, canvas, NULL) / loops;
@@ -203,7 +215,7 @@ static int cpu_bench(const double overhead, Benchmark* bench, SkCanvas* canvas, 
 }
 
 #if SK_SUPPORT_GPU
-static int gpu_bench(SkGLContextHelper* gl,
+static int gpu_bench(SkGLContext* gl,
                      Benchmark* bench,
                      SkCanvas* canvas,
                      double* samples) {
@@ -217,6 +229,11 @@ static int gpu_bench(SkGLContextHelper* gl,
         loops = 1;
         double elapsed = 0;
         do {
+            if (1<<30 == loops) {
+                // We're about to wrap.  Something's wrong with the bench.
+                loops = 0;
+                break;
+            }
             loops *= 2;
             // If the GPU lets frames lag at all, we need to make sure we're timing
             // _this_ round, not still timing last round.  We force this by looping
@@ -228,11 +245,13 @@ static int gpu_bench(SkGLContextHelper* gl,
 
         // We've overshot at least a little.  Scale back linearly.
         loops = (int)ceil(loops * FLAGS_gpuMs / elapsed);
+        loops = clamp_loops(loops);
 
         // Might as well make sure we're not still timing our calibration.
         SK_GL(*gl, Finish());
+    } else {
+        loops = detect_forever_loops(loops);
     }
-    loops = clamp_loops(loops);
 
     // Pretty much the same deal as the calibration: do some warmup to make
     // sure we're timing steady-state pipelined frames.
@@ -274,7 +293,7 @@ struct Target {
     const Config config;
     SkAutoTDelete<SkSurface> surface;
 #if SK_SUPPORT_GPU
-    SkGLContextHelper* gl;
+    SkGLContext* gl;
 #endif
 };
 
@@ -389,7 +408,7 @@ static void create_targets(SkTDArray<Target*>* targets, Benchmark* b,
 }
 
 #if SK_SUPPORT_GPU
-static void fill_gpu_options(ResultsWriter* log, SkGLContextHelper* ctx) {
+static void fill_gpu_options(ResultsWriter* log, SkGLContext* ctx) {
     const GrGLubyte* version;
     SK_GL_RET(*ctx, version, GetString(GR_GL_VERSION));
     log->configOption("GL_VERSION", (const char*)(version));
@@ -501,13 +520,7 @@ public:
                 }
                 if (FLAGS_bbh) {
                     // The SKP we read off disk doesn't have a BBH.  Re-record so it grows one.
-                    // Here we use an SkTileGrid with parameters optimized for FLAGS_clip.
-                    const SkTileGridFactory::TileGridInfo info = {
-                        SkISize::Make(fClip.width(), fClip.height()),  // tile interval
-                        SkISize::Make(0,0),                            // margin
-                        SkIPoint::Make(fClip.left(), fClip.top()),     // offset
-                    };
-                    SkTileGridFactory factory(info);
+                    SkRTreeFactory factory;
                     SkPictureRecorder recorder;
                     pic->playback(recorder.beginRecording(pic->cullRect().width(),
                                                           pic->cullRect().height(),
@@ -563,6 +576,10 @@ int nanobench_main() {
     gGrFactory.reset(SkNEW_ARGS(GrContextFactory, (grContextOpts)));
 #endif
 
+    if (FLAGS_veryVerbose) {
+        FLAGS_verbose = true;
+    }
+
     if (kAutoTuneLoops != FLAGS_loops) {
         FLAGS_samples     = 1;
         FLAGS_gpuFrameLag = 0;
@@ -616,6 +633,7 @@ int nanobench_main() {
     SkTDArray<Config> configs;
     create_configs(&configs);
 
+    int runs = 0;
     BenchmarkStream benchStream;
     while (Benchmark* b = benchStream.next()) {
         SkAutoTDelete<Benchmark> bench(b);
@@ -668,6 +686,9 @@ int nanobench_main() {
             log->timer("mean_ms",   stats.mean);
             log->timer("max_ms",    stats.max);
             log->timer("stddev_ms", sqrt(stats.var));
+            if (runs++ % FLAGS_flushEvery == 0) {
+                log->flush();
+            }
 
             if (kAutoTuneLoops != FLAGS_loops) {
                 if (targets.count() == 1) {
@@ -702,17 +723,23 @@ int nanobench_main() {
                         , bench->getUniqueName()
                         );
             }
+#if SK_SUPPORT_GPU && GR_CACHE_STATS
+            if (FLAGS_veryVerbose &&
+                Benchmark::kGPU_Backend == targets[j]->config.backend) {
+                gGrFactory->get(targets[j]->config.ctxType)->printCacheStats();
+            }
+#endif
         }
         targets.deleteAll();
 
-    #if SK_SUPPORT_GPU
+#if SK_SUPPORT_GPU
         if (FLAGS_abandonGpuContext) {
             gGrFactory->abandonContexts();
         }
         if (FLAGS_resetGpuContext || FLAGS_abandonGpuContext) {
             gGrFactory->destroyContexts();
         }
-    #endif
+#endif
     }
 
     return 0;

@@ -132,6 +132,7 @@ VolumeInfo CreateDriveVolumeInfo(Profile* profile) {
   volume_info.mount_condition = chromeos::disks::MOUNT_CONDITION_NONE;
   volume_info.is_parent = false;
   volume_info.is_read_only = false;
+  volume_info.has_media = false;
   volume_info.volume_id = GenerateVolumeId(volume_info);
   return volume_info;
 }
@@ -145,6 +146,7 @@ VolumeInfo CreateDownloadsVolumeInfo(const base::FilePath& downloads_path) {
   volume_info.mount_condition = chromeos::disks::MOUNT_CONDITION_NONE;
   volume_info.is_parent = false;
   volume_info.is_read_only = false;
+  volume_info.has_media = false;
   volume_info.volume_id = GenerateVolumeId(volume_info);
   return volume_info;
 }
@@ -160,6 +162,7 @@ VolumeInfo CreateTestingVolumeInfo(const base::FilePath& path,
   volume_info.mount_condition = chromeos::disks::MOUNT_CONDITION_NONE;
   volume_info.is_parent = false;
   volume_info.is_read_only = false;
+  volume_info.has_media = false;
   volume_info.volume_id = GenerateVolumeId(volume_info);
   return volume_info;
 }
@@ -179,11 +182,13 @@ VolumeInfo CreateVolumeInfoFromMountPointInfo(
         base::FilePath(disk->system_path_prefix());
     volume_info.is_parent = disk->is_parent();
     volume_info.is_read_only = disk->is_read_only();
+    volume_info.has_media = disk->has_media();
   } else {
     volume_info.device_type = chromeos::DEVICE_TYPE_UNKNOWN;
     volume_info.is_parent = false;
     volume_info.is_read_only =
         (mount_point.mount_type == chromeos::MOUNT_TYPE_ARCHIVE);
+    volume_info.has_media = false;
   }
   volume_info.volume_id = GenerateVolumeId(volume_info);
 
@@ -202,6 +207,7 @@ VolumeInfo CreateProvidedFileSystemVolumeInfo(
   volume_info.mount_condition = chromeos::disks::MOUNT_CONDITION_NONE;
   volume_info.is_parent = true;
   volume_info.is_read_only = !file_system_info.writable();
+  volume_info.has_media = false;
   volume_info.volume_id = GenerateVolumeId(volume_info);
   return volume_info;
 }
@@ -220,7 +226,8 @@ VolumeInfo::VolumeInfo()
       device_type(chromeos::DEVICE_TYPE_UNKNOWN),
       mount_condition(chromeos::disks::MOUNT_CONDITION_NONE),
       is_parent(false),
-      is_read_only(false) {
+      is_read_only(false),
+      has_media(false) {
 }
 
 VolumeInfo::~VolumeInfo() {
@@ -252,21 +259,6 @@ void VolumeManager::Initialize() {
   // If in Sign in profile, then skip mounting and listening for mount events.
   if (chromeos::ProfileHelper::IsSigninProfile(profile_))
     return;
-
-  // Path to mount user folders have changed several times. We need to migrate
-  // the old preferences on paths to the new format when needed. For the detail,
-  // see the comments in file_manager::util::MigratePathFromOldFormat,
-  // Note: Preferences related to downloads are handled in download_prefs.cc.
-  // TODO(kinaba): Remove this after several rounds of releases.
-  const base::FilePath old_path =
-      profile_->GetPrefs()->GetFilePath(prefs::kSelectFileLastDirectory);
-  base::FilePath new_path;
-  if (!old_path.empty() &&
-      file_manager::util::MigratePathFromOldFormat(profile_,
-                                                   old_path, &new_path)) {
-    profile_->GetPrefs()->SetFilePath(prefs::kSelectFileLastDirectory,
-                                      new_path);
-  }
 
   // Register 'Downloads' folder for the profile to the file system.
   const base::FilePath downloads =

@@ -428,6 +428,9 @@ cr.define('options', function() {
       this.setAttribute('inlineeditable', '');
       this.addEventListener('hasElementFocusChange',
                             this.handleListFocusChange_);
+      // <list> isn't focusable by default, but cr.ui.List defaults tabindex to
+      // 0 if it's not set.
+      this.tabIndex = -1;
     },
 
     /**

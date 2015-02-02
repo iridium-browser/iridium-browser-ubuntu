@@ -10,7 +10,6 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
-#include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/synchronization/cancellation_flag.h"
 #include "base/synchronization/waitable_event.h"
@@ -74,6 +73,7 @@ const char kHardwareClassKey[] = "hardware_class";
 const char kOffersCouponCodeKey[] = "ubind_attribute";
 const char kOffersGroupCodeKey[] = "gbind_attribute";
 const char kRlzBrandCodeKey[] = "rlz_brand_code";
+const char kActivateDateKey[] = "ActivateDate";
 
 // OEM specific statistics. Must be prefixed with "oem_".
 const char kOemCanExitEnterpriseEnrollmentKey[] = "oem_can_exit_enrollment";
@@ -91,11 +91,13 @@ class StatisticsProviderImpl : public StatisticsProvider {
   // StatisticsProvider implementation:
   virtual void StartLoadingMachineStatistics(
       const scoped_refptr<base::TaskRunner>& file_task_runner,
-      bool load_oem_manifest) OVERRIDE;
+      bool load_oem_manifest) override;
   virtual bool GetMachineStatistic(const std::string& name,
-                                   std::string* result) OVERRIDE;
-  virtual bool GetMachineFlag(const std::string& name, bool* result) OVERRIDE;
-  virtual void Shutdown() OVERRIDE;
+                                   std::string* result) override;
+  virtual bool HasMachineStatistic(const std::string& name) override;
+  virtual bool GetMachineFlag(const std::string& name, bool* result) override;
+  virtual bool HasMachineFlag(const std::string& name) override;
+  virtual void Shutdown() override;
 
   static StatisticsProviderImpl* GetInstance();
 
@@ -171,6 +173,11 @@ bool StatisticsProviderImpl::GetMachineStatistic(const std::string& name,
   return true;
 }
 
+bool StatisticsProviderImpl::HasMachineStatistic(const std::string& name) {
+  std::string result;
+  return GetMachineStatistic(name, &result);
+}
+
 bool StatisticsProviderImpl::GetMachineFlag(const std::string& name,
                                             bool* result) {
   VLOG(1) << "Machine Flag requested: " << name;
@@ -189,6 +196,11 @@ bool StatisticsProviderImpl::GetMachineFlag(const std::string& name,
   }
   *result = iter->second;
   return true;
+}
+
+bool StatisticsProviderImpl::HasMachineFlag(const std::string& name) {
+  bool result = false;
+  return GetMachineFlag(name, &result);
 }
 
 void StatisticsProviderImpl::Shutdown() {

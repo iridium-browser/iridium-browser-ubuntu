@@ -12,7 +12,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "cc/base/cc_export.h"
-#include "cc/base/rolling_time_delta_history.h"
 #include "cc/output/context_provider.h"
 #include "cc/output/overlay_candidate_validator.h"
 #include "cc/output/software_output_device.h"
@@ -64,7 +63,8 @@ class CC_EXPORT OutputSurface {
           deferred_gl_initialization(false),
           draw_and_swap_full_viewport_every_frame(false),
           adjust_deadline_for_parent(true),
-          uses_default_gl_framebuffer(true) {}
+          uses_default_gl_framebuffer(true),
+          flipped_output_surface(false) {}
     bool delegated_rendering;
     int max_frames_pending;
     bool deferred_gl_initialization;
@@ -75,6 +75,8 @@ class CC_EXPORT OutputSurface {
     // Whether this output surface renders to the default OpenGL zero
     // framebuffer or to an offscreen framebuffer.
     bool uses_default_gl_framebuffer;
+    // Whether this OutputSurface is flipped or not.
+    bool flipped_output_surface;
   };
 
   const Capabilities& capabilities() const {
@@ -113,8 +115,10 @@ class CC_EXPORT OutputSurface {
 
   // The implementation may destroy or steal the contents of the CompositorFrame
   // passed in (though it will not take ownership of the CompositorFrame
-  // itself).
-  virtual void SwapBuffers(CompositorFrame* frame);
+  // itself). For successful swaps, the implementation must call
+  // OutputSurfaceClient::DidSwapBuffers() and eventually
+  // DidSwapBuffersComplete().
+  virtual void SwapBuffers(CompositorFrame* frame) = 0;
   virtual void OnSwapBuffersComplete();
 
   // Notifies frame-rate smoothness preference. If true, all non-critical
@@ -128,14 +132,13 @@ class CC_EXPORT OutputSurface {
 
   bool HasClient() { return !!client_; }
 
-  // Returns an estimate of the current GPU latency. When only a software
-  // device is present, returns 0.
-  base::TimeDelta GpuLatencyEstimate();
-
   // Get the class capable of informing cc of hardware overlay capability.
   OverlayCandidateValidator* overlay_candidate_validator() const {
     return overlay_candidate_validator_.get();
   }
+
+  void DidLoseOutputSurface();
+  void SetMemoryPolicy(const ManagedMemoryPolicy& policy);
 
  protected:
   OutputSurfaceClient* client_;
@@ -160,7 +163,6 @@ class CC_EXPORT OutputSurface {
 
   void SetNeedsRedrawRect(const gfx::Rect& damage_rect);
   void ReclaimResources(const CompositorFrameAck* ack);
-  void DidLoseOutputSurface();
   void SetExternalStencilTest(bool enabled);
   void SetExternalDrawConstraints(
       const gfx::Transform& transform,
@@ -173,14 +175,8 @@ class CC_EXPORT OutputSurface {
  private:
   void SetUpContext3d();
   void ResetContext3d();
-  void SetMemoryPolicy(const ManagedMemoryPolicy& policy);
-  void UpdateAndMeasureGpuLatency();
 
   bool external_stencil_test_enabled_;
-
-  std::deque<unsigned> available_gpu_latency_query_ids_;
-  std::deque<unsigned> pending_gpu_latency_query_ids_;
-  RollingTimeDeltaHistory gpu_latency_history_;
 
   base::WeakPtrFactory<OutputSurface> weak_ptr_factory_;
 

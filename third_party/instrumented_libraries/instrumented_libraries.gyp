@@ -8,6 +8,8 @@
     'instrumented_libraries_jobs%': 1,
   },
 
+  'ubuntu_release': '<!(lsb_release -cs)',
+
   'conditions': [
     ['asan==1', {
       'sanitizer_type': 'asan',
@@ -36,7 +38,8 @@
       '-gline-tables-only',
       '-fPIC',
       '-w',
-      '-U_FORITFY_SOURCE'
+      '-U_FORITFY_SOURCE',
+      '-fno-omit-frame-pointer'
     ],
     'package_ldflags': [
       '-Wl,-z,origin',
@@ -116,25 +119,29 @@
         '<(_sanitizer_type)-libasound2',
         '<(_sanitizer_type)-pango1.0',
         '<(_sanitizer_type)-libcap2',
-        '<(_sanitizer_type)-libudev0',
-        '<(_sanitizer_type)-libtasn1-3',
+        '<(_sanitizer_type)-udev',
         '<(_sanitizer_type)-libgnome-keyring0',
         '<(_sanitizer_type)-libgtk2.0-0',
         '<(_sanitizer_type)-libgdk-pixbuf2.0-0',
         '<(_sanitizer_type)-libpci3',
         '<(_sanitizer_type)-libdbusmenu-glib4',
-        '<(_sanitizer_type)-liboverlay-scrollbar-0.2-0',
+        '<(_sanitizer_type)-overlay-scrollbar',
         '<(_sanitizer_type)-libgconf-2-4',
         '<(_sanitizer_type)-libappindicator1',
         '<(_sanitizer_type)-libdbusmenu',
         '<(_sanitizer_type)-atk1.0',
         '<(_sanitizer_type)-libunity9',
         '<(_sanitizer_type)-dee',
+        '<(_sanitizer_type)-libpixman-1-0',
       ],
       'conditions': [
-        ['asan==1', {
+        ['"<(_ubuntu_release)"=="precise"', {
           'dependencies': [
-            '<(_sanitizer_type)-libpixman-1-0',
+            '<(_sanitizer_type)-libtasn1-3',
+          ],
+        }, {
+          'dependencies': [
+            '<(_sanitizer_type)-libtasn1-6',
           ],
         }],
         ['msan==1', {
@@ -158,7 +165,7 @@
             '<(PRODUCT_DIR)/instrumented_libraries/<(_sanitizer_type)/rpaths.fixed.txt',
           ],
           'action': [
-            '<(DEPTH)/third_party/instrumented_libraries/fix_rpaths.sh',
+            './fix_rpaths.sh',
             '<(PRODUCT_DIR)/instrumented_libraries/<(_sanitizer_type)'
           ],
         },
@@ -219,7 +226,13 @@
         # From debian/rules.
         '--with-add-fonts=/usr/X11R6/lib/X11/fonts,/usr/local/share/fonts',
       ],
-      'patch': 'patches/libfontconfig.diff',
+      'conditions': [
+        ['"<(_ubuntu_release)"=="precise"', {
+          'patch': 'patches/libfontconfig.precise.diff',
+        }, {
+          'patch': 'patches/libfontconfig.trusty.diff',
+        }],
+      ],
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
@@ -245,6 +258,8 @@
         '--disable-gtk-doc-pdf',
       ],
       'asan_blacklist': 'blacklists/asan/libglib2.0-0.txt',
+      'msan_blacklist': 'blacklists/msan/libglib2.0-0.txt',
+      'run_before_build': 'scripts/autogen.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
@@ -266,6 +281,8 @@
     {
       'package_name': 'libp11-kit0',
       'dependencies=': [],
+      # Required on Trusty due to autoconf version mismatch.
+      'run_before_build': 'scripts/autoreconf.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
@@ -280,6 +297,11 @@
     {
       'package_name': 'libpixman-1-0',
       'dependencies=': [],
+      'extra_configure_flags': [
+        # From debian/rules.
+        '--disable-gtk',
+        '--disable-silent-rules',
+      ],
       'patch': 'patches/libpixman-1-0.diff',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
@@ -293,6 +315,8 @@
       'dependencies=': [],
       'extra_configure_flags': ['--disable-specs'],
       'msan_blacklist': 'blacklists/msan/libx11-6.txt',
+      # Required on Trusty due to autoconf version mismatch.
+      'run_before_build': 'scripts/autoreconf.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
@@ -304,6 +328,8 @@
       'package_name': 'libxcb1',
       'dependencies=': [],
       'extra_configure_flags': ['--disable-build-docs'],
+      # Required on Trusty due to autoconf version mismatch.
+      'run_before_build': 'scripts/autoreconf.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
@@ -392,7 +418,19 @@
     {
       'package_name': 'pulseaudio',
       'dependencies=': [],
-      'patch': 'patches/pulseaudio.diff',
+      'conditions': [
+        ['"<(_ubuntu_release)"=="precise"', {
+          'patch': 'patches/pulseaudio.precise.diff',
+        }],
+      ],
+      'extra_configure_flags': [
+          # From debian/rules.
+          '--enable-x11',
+          '--disable-hal-compat',
+          # Disable some ARM-related code that fails compilation. No idea why
+          # this even impacts x86-64 builds.
+          '--disable-neon-opt'
+      ],
       'run_before_build': 'scripts/pulseaudio.sh',
       'jobs': 1,
       'includes': ['standard_instrumented_package_target.gypi'],
@@ -456,7 +494,7 @@
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
-      'package_name': 'libudev0',
+      'package_name': 'udev',
       'dependencies=': [],
       'extra_configure_flags': [
           # Without this flag there's a linking step that doesn't honor LDFLAGS
@@ -464,11 +502,26 @@
           # TODO(earthdok): find a better fix.
           '--disable-gudev'
       ],
+      # Required on Trusty due to autoconf version mismatch.
+      'run_before_build': 'scripts/autoreconf.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
       'package_name': 'libtasn1-3',
       'dependencies=': [],
+      'extra_configure_flags': [
+          # From debian/rules.
+          '--enable-ld-version-script',
+      ],
+      'includes': ['standard_instrumented_package_target.gypi'],
+    },
+    {
+      'package_name': 'libtasn1-6',
+      'dependencies=': [],
+      'extra_configure_flags': [
+          # From debian/rules.
+          '--enable-ld-version-script',
+      ],
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
@@ -477,6 +530,8 @@
           # Build static libs (from debian/rules).
           '--enable-static',
           '--enable-tests=no',
+          # Make the build less problematic.
+          '--disable-introspection',
       ],
       'package_ldflags': ['-Wl,--as-needed'],
       'dependencies=': [],
@@ -494,7 +549,13 @@
           '--with-xinput=yes',
       ],
       'dependencies=': [],
-      'patch': 'patches/libgtk2.0-0.diff',
+      'conditions': [
+        ['"<(_ubuntu_release)"=="precise"', {
+          'patch': 'patches/libgtk2.0-0.precise.diff',
+        }, {
+          'patch': 'patches/libgtk2.0-0.trusty.diff',
+        }],
+      ],
       'run_before_build': 'scripts/libgtk2.0-0.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
@@ -508,7 +569,6 @@
           '--disable-introspection',
       ],
       'dependencies=': [],
-      'patch': 'patches/libgdk-pixbuf2.0-0.diff',
       'run_before_build': 'scripts/libgdk-pixbuf2.0-0.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
@@ -532,14 +592,16 @@
           '--disable-vala',
       ],
       'dependencies=': [],
+      'run_before_build': 'scripts/autogen.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
-      'package_name': 'liboverlay-scrollbar-0.2-0',
+      'package_name': 'overlay-scrollbar',
       'extra_configure_flags': [
           '--with-gtk=2',
       ],
       'dependencies=': [],
+      'run_before_build': 'scripts/autogen.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
@@ -562,6 +624,7 @@
       ],
       'dependencies=': [],
       'jobs': 1,
+      'run_before_build': 'scripts/autogen.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
@@ -575,6 +638,7 @@
           '--disable-vala',
       ],
       'dependencies=': [],
+      'run_before_build': 'scripts/autogen.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
@@ -589,6 +653,7 @@
     {
       'package_name': 'libunity9',
       'dependencies=': [],
+      'run_before_build': 'scripts/autogen.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
     {
@@ -598,6 +663,7 @@
           '--disable-introspection',
       ],
       'dependencies=': [],
+      'run_before_build': 'scripts/autogen.sh',
       'includes': ['standard_instrumented_package_target.gypi'],
     },
   ],

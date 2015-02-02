@@ -292,6 +292,19 @@ void CrasAudioHandler::ChangeActiveNodes(const NodeIdList& new_active_ids) {
     NotifyActiveNodeChanged(false);
 }
 
+void CrasAudioHandler::SwapInternalSpeakerLeftRightChannel(bool swap) {
+  for (AudioDeviceMap::const_iterator it = audio_devices_.begin();
+       it != audio_devices_.end();
+       ++it) {
+    const AudioDevice& device = it->second;
+    if (!device.is_input && device.type == AUDIO_TYPE_INTERNAL_SPEAKER) {
+      chromeos::DBusThreadManager::Get()->GetCrasAudioClient()->SwapLeftRight(
+          device.id, swap);
+      break;
+    }
+  }
+}
+
 bool CrasAudioHandler::has_alternative_input() const {
   return has_alternative_input_;
 }

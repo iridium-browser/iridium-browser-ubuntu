@@ -17,6 +17,7 @@ class FakeOutputSurfaceClient : public OutputSurfaceClient {
   FakeOutputSurfaceClient()
       : output_surface_(NULL),
         begin_frame_count_(0),
+        swap_count_(0),
         deferred_initialize_called_(false),
         did_lose_output_surface_called_(false),
         memory_policy_(0) {}
@@ -24,31 +25,33 @@ class FakeOutputSurfaceClient : public OutputSurfaceClient {
   explicit FakeOutputSurfaceClient(OutputSurface* output_surface)
       : output_surface_(output_surface),
         begin_frame_count_(0),
+        swap_count_(0),
         deferred_initialize_called_(false),
         did_lose_output_surface_called_(false),
         memory_policy_(0) {}
 
-  virtual void DeferredInitialize() OVERRIDE;
-  virtual void ReleaseGL() OVERRIDE;
-  virtual void CommitVSyncParameters(base::TimeTicks timebase,
-                                     base::TimeDelta interval) OVERRIDE {}
-  virtual void SetNeedsRedrawRect(const gfx::Rect& damage_rect) OVERRIDE {}
-  virtual void BeginFrame(const BeginFrameArgs& args) OVERRIDE;
-  virtual void DidSwapBuffers() OVERRIDE {}
-  virtual void DidSwapBuffersComplete() OVERRIDE {}
-  virtual void ReclaimResources(const CompositorFrameAck* ack) OVERRIDE {}
-  virtual void DidLoseOutputSurface() OVERRIDE;
-  virtual void SetExternalDrawConstraints(
+  void DeferredInitialize() override;
+  void ReleaseGL() override;
+  void CommitVSyncParameters(base::TimeTicks timebase,
+                             base::TimeDelta interval) override {}
+  void SetNeedsRedrawRect(const gfx::Rect& damage_rect) override {}
+  void BeginFrame(const BeginFrameArgs& args) override;
+  void DidSwapBuffers() override;
+  void DidSwapBuffersComplete() override {}
+  void ReclaimResources(const CompositorFrameAck* ack) override {}
+  void DidLoseOutputSurface() override;
+  void SetExternalDrawConstraints(
       const gfx::Transform& transform,
       const gfx::Rect& viewport,
       const gfx::Rect& clip,
       const gfx::Rect& viewport_rect_for_tile_priority,
       const gfx::Transform& transform_for_tile_priority,
-      bool resourceless_software_draw) OVERRIDE {}
-  virtual void SetMemoryPolicy(const ManagedMemoryPolicy& policy) OVERRIDE;
-  virtual void SetTreeActivationCallback(const base::Closure&) OVERRIDE {}
+      bool resourceless_software_draw) override {}
+  void SetMemoryPolicy(const ManagedMemoryPolicy& policy) override;
+  void SetTreeActivationCallback(const base::Closure&) override {}
 
   int begin_frame_count() { return begin_frame_count_; }
+  int swap_count() { return swap_count_; }
 
   bool deferred_initialize_called() {
     return deferred_initialize_called_;
@@ -63,6 +66,7 @@ class FakeOutputSurfaceClient : public OutputSurfaceClient {
  private:
   OutputSurface* output_surface_;
   int begin_frame_count_;
+  int swap_count_;
   bool deferred_initialize_called_;
   bool did_lose_output_surface_called_;
   ManagedMemoryPolicy memory_policy_;

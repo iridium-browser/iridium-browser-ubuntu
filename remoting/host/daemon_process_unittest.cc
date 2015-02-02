@@ -40,10 +40,9 @@ enum Messages {
 class FakeDesktopSession : public DesktopSession {
  public:
   FakeDesktopSession(DaemonProcess* daemon_process, int id);
-  virtual ~FakeDesktopSession();
+  ~FakeDesktopSession() override;
 
-  virtual void SetScreenResolution(
-      const ScreenResolution& resolution) OVERRIDE {}
+  void SetScreenResolution(const ScreenResolution& resolution) override {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(FakeDesktopSession);
@@ -60,10 +59,10 @@ class MockDaemonProcess : public DaemonProcess {
   virtual scoped_ptr<DesktopSession> DoCreateDesktopSession(
       int terminal_id,
       const ScreenResolution& resolution,
-      bool virtual_terminal) OVERRIDE;
+      bool virtual_terminal) override;
 
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
-  virtual void SendToNetwork(IPC::Message* message) OVERRIDE;
+  virtual bool OnMessageReceived(const IPC::Message& message) override;
+  virtual void SendToNetwork(IPC::Message* message) override;
 
   MOCK_METHOD1(Received, void(const IPC::Message&));
   MOCK_METHOD1(Sent, void(const IPC::Message&));
@@ -100,7 +99,7 @@ scoped_ptr<DesktopSession> MockDaemonProcess::DoCreateDesktopSession(
     int terminal_id,
     const ScreenResolution& resolution,
     bool virtual_terminal) {
-  return scoped_ptr<DesktopSession>(DoCreateDesktopSessionPtr(terminal_id));
+  return make_scoped_ptr(DoCreateDesktopSessionPtr(terminal_id));
 }
 
 bool MockDaemonProcess::OnMessageReceived(const IPC::Message& message) {
@@ -122,10 +121,10 @@ void MockDaemonProcess::SendToNetwork(IPC::Message* message) {
 class DaemonProcessTest : public testing::Test {
  public:
   DaemonProcessTest();
-  virtual ~DaemonProcessTest();
+  ~DaemonProcessTest() override;
 
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
   // DaemonProcess mocks
   DesktopSession* DoCreateDesktopSession(int terminal_id);

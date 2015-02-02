@@ -6,9 +6,12 @@
 #define CHROME_BROWSER_RENDERER_CONTEXT_MENU_RENDER_VIEW_CONTEXT_MENU_TEST_UTIL_H_
 
 #include "base/basictypes.h"
-#include "chrome/browser/extensions/context_menu_matcher.h"
 #include "chrome/browser/renderer_context_menu/render_view_context_menu.h"
 #include "url/gurl.h"
+
+#if defined(ENABLE_EXTENSIONS)
+#include "chrome/browser/extensions/context_menu_matcher.h"
+#endif
 
 class Browser;
 
@@ -23,7 +26,7 @@ class TestRenderViewContextMenu : public RenderViewContextMenu {
  public:
   TestRenderViewContextMenu(content::RenderFrameHost* render_frame_host,
                             content::ContextMenuParams params);
-  virtual ~TestRenderViewContextMenu();
+  ~TestRenderViewContextMenu() override;
 
   // Factory.
   // This is a lightweight method to create a test RenderViewContextMenu
@@ -35,9 +38,8 @@ class TestRenderViewContextMenu : public RenderViewContextMenu {
                                            const GURL& frame_url);
 
   // Implementation of pure virtuals in RenderViewContextMenu.
-  virtual bool GetAcceleratorForCommandId(
-      int command_id,
-      ui::Accelerator* accelerator) OVERRIDE;
+  bool GetAcceleratorForCommandId(int command_id,
+                                  ui::Accelerator* accelerator) override;
 
   // Returns true if command specified by |command_id| is present
   // in the menu.
@@ -51,7 +53,11 @@ class TestRenderViewContextMenu : public RenderViewContextMenu {
                                 ui::MenuModel** found_model,
                                 int* found_index);
 
+#if defined(ENABLE_EXTENSIONS)
   extensions::ContextMenuMatcher& extension_items() { return extension_items_; }
+#endif
+
+  void Show() override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestRenderViewContextMenu);

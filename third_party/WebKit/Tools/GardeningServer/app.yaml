@@ -5,14 +5,15 @@ api_version: 1
 threadsafe: true
 
 handlers:
-- url: /
-  static_files: sheriff-o-matic.html
-  upload: sheriff-o-matic.html
-  secure: always
-  http_headers:
-      Strict-Transport-Security: max-age=10886400; includeSubDomains
-
 - url: /alerts
+  script: alerts.app
+  secure: always
+
+- url: /alerts-history
+  script: alerts.app
+  secure: always
+
+- url: /alerts-history/.*
   script: alerts.app
   secure: always
 
@@ -54,6 +55,13 @@ handlers:
 - url: /bower_components
   static_dir: bower_components
   secure: always
+
+- url: /.*
+  static_files: sheriff-o-matic.html
+  upload: sheriff-o-matic.html
+  secure: always
+  http_headers:
+      Strict-Transport-Security: max-age=10886400; includeSubDomains
 
 skip_files:
 - ^(.*/)?#.*#$

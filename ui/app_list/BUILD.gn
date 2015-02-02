@@ -26,6 +26,8 @@ component("app_list") {
     "app_list_switches.h",
     "app_list_view_delegate.cc",
     "app_list_view_delegate.h",
+    "folder_image.cc",
+    "folder_image.h",
     "pagination_controller.cc",
     "pagination_controller.h",
     "pagination_model.cc",
@@ -34,10 +36,23 @@ component("app_list") {
     "search_box_model.cc",
     "search_box_model.h",
     "search_box_model_observer.h",
+    "search_controller.cc",
+    "search_controller.h",
     "search_provider.cc",
     "search_provider.h",
     "search_result.cc",
     "search_result.h",
+    "search/dictionary_data_store.cc",
+    "search/dictionary_data_store.h",
+    "search/history.cc",
+    "search/history.h",
+    "search/history_data.cc",
+    "search/history_data.h",
+    "search/history_data_store.cc",
+    "search/history_data_store.h",
+    "search/history_types.h",
+    "search/mixer.cc",
+    "search/mixer.h",
     "search/term_break_iterator.cc",
     "search/term_break_iterator.h",
     "search/tokenized_string.cc",
@@ -57,6 +72,7 @@ component("app_list") {
     "//base",
     "//base:i18n",
     "//base/third_party/dynamic_annotations",
+    "//components/keyed_service/core",
     "//skia",
     "//sync",
     "//third_party/icu",
@@ -79,6 +95,8 @@ component("app_list") {
 
   if (toolkit_views) {
     sources += [
+      "views/all_apps_tile_item_view.cc",
+      "views/all_apps_tile_item_view.h",
       "views/apps_container_view.cc",
       "views/apps_container_view.h",
       "views/app_list_background.cc",
@@ -119,6 +137,8 @@ component("app_list") {
       "views/search_box_view.cc",
       "views/search_box_view.h",
       "views/search_box_view_delegate.h",
+      "views/search_result_container_view.cc",
+      "views/search_result_container_view.h",
       "views/search_result_actions_view.cc",
       "views/search_result_actions_view.h",
       "views/search_result_list_view.cc",
@@ -130,6 +150,8 @@ component("app_list") {
       "views/speech_view.h",
       "views/start_page_view.cc",
       "views/start_page_view.h",
+      "views/search_result_tile_item_view.cc",
+      "views/search_result_tile_item_view.h",
       "views/tile_item_view.cc",
       "views/tile_item_view.h",
       "views/top_icon_animation_view.cc",
@@ -168,7 +190,7 @@ component("app_list") {
       "cocoa/scroll_view_with_no_scrollbars.mm",
     ]
     deps += [
-      #"../../third_party/google_toolbox_for_mac/google_toolbox_for_mac.gyp:google_toolbox_for_mac",  TODO(GYP)
+      "//third_party/google_toolbox_for_mac",
     ]
     libs = [ "QuartzCore.framework" ]
   }
@@ -180,6 +202,8 @@ static_library("test_support") {
     "test/app_list_test_model.h",
     "test/app_list_test_view_delegate.cc",
     "test/app_list_test_view_delegate.h",
+    "test/test_search_result.cc",
+    "test/test_search_result.h",
   ]
 
   deps = [
@@ -195,7 +219,10 @@ test("app_list_unittests") {
   sources = [
     "app_list_item_list_unittest.cc",
     "app_list_model_unittest.cc",
+    "folder_image_unittest.cc",
     "pagination_model_unittest.cc",
+    "search/history_data_store_unittest.cc",
+    "search/mixer_unittest.cc",
     "search/term_break_iterator_unittest.cc",
     "search/tokenized_string_char_iterator_unittest.cc",
     "search/tokenized_string_match_unittest.cc",

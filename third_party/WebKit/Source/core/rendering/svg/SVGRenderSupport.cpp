@@ -25,6 +25,8 @@
 #include "config.h"
 #include "core/rendering/svg/SVGRenderSupport.h"
 
+#include "core/frame/FrameView.h"
+#include "core/frame/LocalFrame.h"
 #include "core/rendering/PaintInfo.h"
 #include "core/rendering/RenderGeometryMap.h"
 #include "core/rendering/RenderLayer.h"
@@ -41,7 +43,6 @@
 #include "core/rendering/svg/SVGResourcesCache.h"
 #include "core/svg/SVGElement.h"
 #include "platform/geometry/TransformState.h"
-#include "platform/graphics/Path.h"
 
 namespace blink {
 
@@ -55,6 +56,21 @@ LayoutRect SVGRenderSupport::clippedOverflowRectForPaintInvalidation(const Rende
     // map to parent coords and recurse up the parent chain.
     FloatRect paintInvalidationRect = object->paintInvalidationRectInLocalCoordinates();
     paintInvalidationRect.inflate(object->style()->outlineWidth());
+
+    if (paintInvalidationState && paintInvalidationState->canMapToContainer(paintInvalidationContainer)) {
+        // Compute accumulated SVG transform and apply to local paint rect.
+        AffineTransform transform = paintInvalidationState->svgTransform() * object->localToParentTransform();
+        paintInvalidationRect = transform.mapRect(paintInvalidationRect);
+        // FIXME: These are quirks carried forward from RenderSVGRoot::computeFloatRectForPaintInvalidation.
+        LayoutRect rect;
+        if (!paintInvalidationRect.isEmpty())
+            rect = enclosingIntRect(paintInvalidationRect);
+        // Offset by SVG root paint offset and apply clipping as needed.
+        rect.move(paintInvalidationState->paintOffset());
+        if (paintInvalidationState->isClipped())
+            rect.intersect(paintInvalidationState->clipRect());
+        return rect;
+    }
 
     object->computeFloatRectForPaintInvalidation(paintInvalidationContainer, paintInvalidationRect, paintInvalidationState);
     return enclosingLayoutRect(paintInvalidationRect);
@@ -70,6 +86,13 @@ void SVGRenderSupport::computeFloatRectForPaintInvalidation(const RenderObject* 
 void SVGRenderSupport::mapLocalToContainer(const RenderObject* object, const RenderLayerModelObject* paintInvalidationContainer, TransformState& transformState, bool* wasFixed, const PaintInvalidationState* paintInvalidationState)
 {
     transformState.applyTransform(object->localToParentTransform());
+
+    if (paintInvalidationState && paintInvalidationState->canMapToContainer(paintInvalidationContainer)) {
+        // |svgTransform| contains localToBorderBoxTransform mentioned below.
+        transformState.applyTransform(paintInvalidationState->svgTransform());
+        transformState.move(paintInvalidationState->paintOffset());
+        return;
+    }
 
     RenderObject* parent = object->parent();
 
@@ -252,6 +275,11 @@ bool SVGRenderSupport::isOverflowHidden(const RenderObject* object)
     return object->style()->overflowX() == OHIDDEN || object->style()->overflowX() == OSCROLL;
 }
 
+bool SVGRenderSupport::isRenderingClipPathAsMaskImage(const RenderObject& object)
+{
+    return object.frame() && object.frame()->view() && object.frame()->view()->paintBehavior() & PaintBehaviorRenderingClipPathAsMask;
+}
+
 void SVGRenderSupport::intersectPaintInvalidationRectWithResources(const RenderObject* renderer, FloatRect& paintInvalidationRect)
 {
     ASSERT(renderer);
@@ -365,14 +393,38 @@ void SVGRenderSupport::applyStrokeStyleToStrokeData(StrokeData* strokeData, cons
     strokeData->setLineDash(dashArray, svgStyle.strokeDashOffset()->value(lengthContext));
 }
 
-void SVGRenderSupport::fillOrStrokePath(GraphicsContext* context, unsigned short resourceMode, const Path& path)
+bool SVGRenderSupport::updateGraphicsContext(GraphicsContextStateSaver& stateSaver, RenderStyle* style, RenderObject& renderer, RenderSVGResourceMode resourceMode, const AffineTransform* additionalPaintServerTransform)
 {
-    ASSERT(resourceMode != ApplyToDefaultMode);
+    ASSERT(style);
 
-    if (resourceMode & ApplyToFillMode)
-        context->fillPath(path);
-    if (resourceMode & ApplyToStrokeMode)
-        context->strokePath(path);
+    GraphicsContext* context = stateSaver.context();
+    if (isRenderingClipPathAsMaskImage(renderer)) {
+        if (resourceMode == ApplyToStrokeMode)
+            return false;
+        context->setAlphaAsFloat(1);
+        context->setFillColor(SVGRenderStyle::initialFillPaintColor());
+        return true;
+    }
+
+    SVGPaintServer paintServer = SVGPaintServer::requestForRenderer(renderer, style, resourceMode);
+    if (!paintServer.isValid())
+        return false;
+
+    if (additionalPaintServerTransform && paintServer.isTransformDependent())
+        paintServer.prependTransform(*additionalPaintServerTransform);
+
+    paintServer.apply(*context, resourceMode, &stateSaver);
+
+    const SVGRenderStyle& svgStyle = style->svgStyle();
+
+    if (resourceMode == ApplyToFillMode) {
+        context->setAlphaAsFloat(svgStyle.fillOpacity());
+        context->setFillRule(svgStyle.fillRule());
+    } else {
+        context->setAlphaAsFloat(svgStyle.strokeOpacity());
+        applyStrokeStyleToContext(context, style, &renderer);
+    }
+    return true;
 }
 
 bool SVGRenderSupport::isRenderableTextNode(const RenderObject* object)

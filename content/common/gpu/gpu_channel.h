@@ -58,7 +58,7 @@ class GpuChannel : public IPC::Listener, public IPC::Sender {
              int client_id,
              bool software,
              bool allow_future_sync_points);
-  virtual ~GpuChannel();
+  ~GpuChannel() override;
 
   void Init(base::MessageLoopProxy* io_message_loop,
             base::WaitableEvent* shutdown_event);
@@ -72,7 +72,7 @@ class GpuChannel : public IPC::Listener, public IPC::Sender {
   std::string GetChannelName();
 
 #if defined(OS_POSIX)
-  int TakeRendererFileDescriptor();
+  base::ScopedFD TakeRendererFileDescriptor();
 #endif  // defined(OS_POSIX)
 
   base::ProcessId renderer_pid() const { return channel_->GetPeerPID(); }
@@ -84,11 +84,11 @@ class GpuChannel : public IPC::Listener, public IPC::Sender {
   }
 
   // IPC::Listener implementation:
-  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
-  virtual void OnChannelError() OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& msg) override;
+  void OnChannelError() override;
 
   // IPC::Sender implementation:
-  virtual bool Send(IPC::Message* msg) OVERRIDE;
+  bool Send(IPC::Message* msg) override;
 
   // Requeue the message that is currently being processed to the beginning of
   // the queue. Used when the processing of a message gets aborted because of
@@ -166,12 +166,6 @@ class GpuChannel : public IPC::Listener, public IPC::Sender {
 
   // Decrement the count of unhandled IPC messages and defer preemption.
   void MessageProcessed();
-
-  // Try to match the messages pattern for GL SwapBuffers operation in the
-  // deferred message queue starting from the current processing message.
-  // Return the number of messages that matches the given pattern, e.g.
-  // AsyncFlush -> Echo sequence.
-  size_t MatchSwapBufferMessagesPattern(IPC::Message* current_message);
 
   // The lifetime of objects of this class is managed by a GpuChannelManager.
   // The GpuChannelManager destroy all the GpuChannels that they own when they

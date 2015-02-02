@@ -30,8 +30,9 @@
 namespace blink {
 
 class ExceptionState;
+class NodeListOrElement;
 
-class HTMLOptionsCollection FINAL : public HTMLCollection {
+class HTMLOptionsCollection final : public HTMLCollection {
     DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<HTMLOptionsCollection> create(ContainerNode&, CollectionType);
@@ -46,7 +47,7 @@ public:
     void setSelectedIndex(int);
 
     void setLength(unsigned, ExceptionState&);
-    void namedGetter(const AtomicString& name, RefPtrWillBeRawPtr<NodeList>&, RefPtrWillBeRawPtr<Element>&);
+    void namedGetter(const AtomicString& name, NodeListOrElement&);
     bool anonymousIndexedSetter(unsigned, PassRefPtrWillBeRawPtr<HTMLOptionElement>, ExceptionState&);
 
     bool elementMatches(const HTMLElement&) const;
@@ -54,7 +55,7 @@ public:
 private:
     explicit HTMLOptionsCollection(ContainerNode&);
 
-    virtual void supportedPropertyNames(Vector<String>& names) OVERRIDE;
+    virtual void supportedPropertyNames(Vector<String>& names) override;
 };
 
 DEFINE_TYPE_CASTS(HTMLOptionsCollection, LiveNodeListBase, collection, collection->type() == SelectOptions, collection.type() == SelectOptions);

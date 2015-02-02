@@ -66,7 +66,6 @@
 #include "platform/Logging.h"
 #include "platform/MIMETypeFromURL.h"
 #include "platform/MIMETypeRegistry.h"
-#include "platform/NotImplemented.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/UserGestureIndicator.h"
 #include "platform/graphics/GraphicsLayer.h"
@@ -126,7 +125,7 @@ static const char mediaSourceBlobProtocol[] = "blob";
 
 using namespace HTMLNames;
 
-typedef WillBeHeapHashSet<RawPtrWillBeWeakMember<HTMLMediaElement> > WeakMediaElementSet;
+typedef WillBeHeapHashSet<RawPtrWillBeWeakMember<HTMLMediaElement>> WeakMediaElementSet;
 typedef WillBeHeapHashMap<RawPtrWillBeWeakMember<Document>, WeakMediaElementSet> DocumentElementSetMap;
 static DocumentElementSetMap& documentToElementSetMap()
 {
@@ -267,6 +266,27 @@ static bool canLoadURL(const KURL& url, const ContentType& contentType, const St
     return false;
 }
 
+// These values are used for a histogram. Do not reorder.
+enum AutoplayMetrics {
+    // Media element with autoplay seen.
+    AutoplayMediaFound = 0,
+    // Autoplay enabled and user stopped media play at any point.
+    AutoplayStopped = 1,
+    // Autoplay enabled but user bailed out on media play early.
+    AutoplayBailout = 2,
+    // Autoplay disabled but user manually started media.
+    AutoplayManualStart = 3,
+    // Autoplay was (re)enabled through a user-gesture triggered load()
+    AutoplayEnabledThroughLoad = 4,
+    // This enum value must be last.
+    NumberOfAutoplayMetrics,
+};
+
+static void recordAutoplayMetric(AutoplayMetrics metric)
+{
+    blink::Platform::current()->histogramEnumeration("Blink.MediaElement.Autoplay", metric, NumberOfAutoplayMetrics);
+}
+
 WebMimeRegistry::SupportsType HTMLMediaElement::supportsType(const ContentType& contentType, const String& keySystem)
 {
     DEFINE_STATIC_LOCAL(const String, codecs, ("codecs"));
@@ -328,7 +348,7 @@ HTMLMediaElement::HTMLMediaElement(const QualifiedName& tagName, Document& docum
     , m_loadState(WaitingForSource)
     , m_deferredLoadState(NotDeferred)
     , m_deferredLoadTimer(this, &HTMLMediaElement::deferredLoadTimerFired)
-    , m_webLayer(0)
+    , m_webLayer(nullptr)
     , m_preload(MediaPlayer::Auto)
     , m_displayMode(Unknown)
     , m_cachedTime(MediaPlayer::invalidTime())
@@ -358,6 +378,8 @@ HTMLMediaElement::HTMLMediaElement(const QualifiedName& tagName, Document& docum
     , m_closeMediaSourceWhenFinalizing(false)
 #endif
     , m_lastTextTrackUpdateTime(-1)
+    , m_initialPlayWithoutUserGestures(false)
+    , m_autoplayMediaCounted(false)
     , m_audioTracks(AudioTrackList::create(*this))
     , m_videoTracks(VideoTrackList::create(*this))
     , m_textTracks(nullptr)
@@ -720,8 +742,17 @@ void HTMLMediaElement::load()
 {
     WTF_LOG(Media, "HTMLMediaElement::load(%p)", this);
 
-    if (UserGestureIndicator::processingUserGesture())
+    if (m_initialPlayWithoutUserGestures && m_playing)
+        gesturelessInitialPlayHalted();
+
+    if (UserGestureIndicator::processingUserGesture() && m_userGestureRequiredForPlay) {
+        recordAutoplayMetric(AutoplayEnabledThroughLoad);
         m_userGestureRequiredForPlay = false;
+        // While usergesture-initiated load()s technically count as autoplayed,
+        // they don't feel like such to the users and hence we don't want to
+        // count them for the purposes of metrics.
+        m_autoplayMediaCounted = true;
+    }
 
     prepareForLoad();
     loadInternal();
@@ -1189,13 +1220,10 @@ void HTMLMediaElement::updateActiveTextTrackCues(double movieTime)
         CueList potentiallySkippedCues =
             m_cueTree.allOverlaps(m_cueTree.createInterval(lastTime, movieTime));
 
-        for (size_t i = 0; i < potentiallySkippedCues.size(); ++i) {
-            double cueStartTime = potentiallySkippedCues[i].low();
-            double cueEndTime = potentiallySkippedCues[i].high();
-
+        for (CueInterval cue : potentiallySkippedCues) {
             // Consider cues that may have been missed since the last seek time.
-            if (cueStartTime > std::max(m_lastSeekTime, lastTime) && cueEndTime < movieTime)
-                missedCues.append(potentiallySkippedCues[i]);
+            if (cue.low() > std::max(m_lastSeekTime, lastTime) && cue.high() < movieTime)
+                missedCues.append(cue);
         }
     }
 
@@ -1227,10 +1255,10 @@ void HTMLMediaElement::updateActiveTextTrackCues(double movieTime)
             activeSetChanged = true;
     }
 
-    for (size_t i = 0; i < currentCuesSize; ++i) {
-        currentCues[i].data()->updateDisplayTree(movieTime);
+    for (CueInterval currentCue : currentCues) {
+        currentCue.data()->updateDisplayTree(movieTime);
 
-        if (!currentCues[i].data()->isActive())
+        if (!currentCue.data()->isActive())
             activeSetChanged = true;
     }
 
@@ -1257,10 +1285,10 @@ void HTMLMediaElement::updateActiveTextTrackCues(double movieTime)
     // 8 - Let events be a list of tasks, initially empty. Each task in this
     // list will be associated with a text track, a text track cue, and a time,
     // which are used to sort the list before the tasks are queued.
-    WillBeHeapVector<std::pair<double, RawPtrWillBeMember<TextTrackCue> > > eventTasks;
+    WillBeHeapVector<std::pair<double, RawPtrWillBeMember<TextTrackCue>>> eventTasks;
 
     // 8 - Let affected tracks be a list of text tracks, initially empty.
-    WillBeHeapVector<RawPtrWillBeMember<TextTrack> > affectedTracks;
+    WillBeHeapVector<RawPtrWillBeMember<TextTrack>> affectedTracks;
 
     for (size_t i = 0; i < missedCuesSize; ++i) {
         // 9 - For each text track cue in missed cues, prepare an event named enter
@@ -1876,11 +1904,14 @@ void HTMLMediaElement::setReadyState(ReadyState state)
                 scheduleEvent(EventTypeNames::playing);
         }
 
-        if (m_autoplaying && m_paused && autoplay() && !document().isSandboxed(SandboxAutomaticFeatures) && !m_userGestureRequiredForPlay) {
-            m_paused = false;
-            invalidateCachedTime();
-            scheduleEvent(EventTypeNames::play);
-            scheduleEvent(EventTypeNames::playing);
+        if (m_autoplaying && m_paused && autoplay() && !document().isSandboxed(SandboxAutomaticFeatures)) {
+            autoplayMediaEncountered();
+            if (!m_userGestureRequiredForPlay) {
+                m_paused = false;
+                invalidateCachedTime();
+                scheduleEvent(EventTypeNames::play);
+                scheduleEvent(EventTypeNames::playing);
+            }
         }
 
         scheduleEvent(EventTypeNames::canplaythrough);
@@ -2028,6 +2059,8 @@ void HTMLMediaElement::seek(double time)
 
     // 11 - Set the current playback position to the given new playback position.
     webMediaPlayer()->seek(time);
+
+    m_initialPlayWithoutUserGestures = false;
 
     // 14-17 are handled, if necessary, when the engine signals a readystate change or otherwise
     // satisfies seek completion and signals a time change.
@@ -2243,10 +2276,15 @@ void HTMLMediaElement::play()
 {
     WTF_LOG(Media, "HTMLMediaElement::play(%p)", this);
 
-    if (m_userGestureRequiredForPlay && !UserGestureIndicator::processingUserGesture())
-        return;
-    if (UserGestureIndicator::processingUserGesture())
+    if (!UserGestureIndicator::processingUserGesture()) {
+        autoplayMediaEncountered();
+        if (m_userGestureRequiredForPlay)
+            return;
+    } else if (m_userGestureRequiredForPlay) {
+        if (m_autoplayMediaCounted)
+            recordAutoplayMetric(AutoplayManualStart);
         m_userGestureRequiredForPlay = false;
+    }
 
     playInternal();
 }
@@ -2281,6 +2319,34 @@ void HTMLMediaElement::playInternal()
     updateMediaController();
 }
 
+void HTMLMediaElement::autoplayMediaEncountered()
+{
+    if (!m_autoplayMediaCounted) {
+        m_autoplayMediaCounted = true;
+        recordAutoplayMetric(AutoplayMediaFound);
+
+        if (!m_userGestureRequiredForPlay)
+            m_initialPlayWithoutUserGestures = true;
+    }
+}
+
+void HTMLMediaElement::gesturelessInitialPlayHalted()
+{
+    ASSERT(m_initialPlayWithoutUserGestures);
+    m_initialPlayWithoutUserGestures = false;
+
+    recordAutoplayMetric(AutoplayStopped);
+
+    // We count the user as having bailed-out on the video if they watched
+    // less than one minute and less than 50% of it.
+    double playedTime = currentTime();
+    if (playedTime < 60) {
+        double progress = playedTime / duration();
+        if (progress < 0.5)
+            recordAutoplayMetric(AutoplayBailout);
+    }
+}
+
 void HTMLMediaElement::pause()
 {
     WTF_LOG(Media, "HTMLMediaElement::pause(%p)", this);
@@ -2291,6 +2357,9 @@ void HTMLMediaElement::pause()
     m_autoplaying = false;
 
     if (!m_paused) {
+        if (m_initialPlayWithoutUserGestures)
+            gesturelessInitialPlayHalted();
+
         m_paused = true;
         scheduleTimeupdateEvent(false);
         scheduleEvent(EventTypeNames::pause);
@@ -2795,7 +2864,7 @@ void HTMLMediaElement::configureTextTrackGroup(const TrackGroup& group)
     WTF_LOG(Media, "HTMLMediaElement::configureTextTrackGroup(%p, %d)", this, group.kind);
 
     // First, find the track in the group that should be enabled (if any).
-    WillBeHeapVector<RefPtrWillBeMember<TextTrack> > currentlyEnabledTracks;
+    WillBeHeapVector<RefPtrWillBeMember<TextTrack>> currentlyEnabledTracks;
     RefPtrWillBeRawPtr<TextTrack> trackToEnable = nullptr;
     RefPtrWillBeRawPtr<TextTrack> defaultTrack = nullptr;
     RefPtrWillBeRawPtr<TextTrack> fallbackTrack = nullptr;
@@ -3249,7 +3318,7 @@ void HTMLMediaElement::mediaPlayerRepaint()
 
     updateDisplayState();
     if (renderer())
-        renderer()->setShouldDoFullPaintInvalidation(true);
+        renderer()->setShouldDoFullPaintInvalidation();
 }
 
 void HTMLMediaElement::mediaPlayerSizeChanged()
@@ -3291,12 +3360,10 @@ PassRefPtrWillBeRawPtr<TimeRanges> HTMLMediaElement::played()
 
 PassRefPtrWillBeRawPtr<TimeRanges> HTMLMediaElement::seekable() const
 {
-    if (webMediaPlayer()) {
-        double maxTimeSeekable = webMediaPlayer()->maxTimeSeekable();
-        if (maxTimeSeekable)
-            return TimeRanges::create(0, maxTimeSeekable);
-    }
-    return TimeRanges::create();
+    if (!webMediaPlayer())
+        return TimeRanges::create();
+
+    return TimeRanges::create(webMediaPlayer()->seekable());
 }
 
 bool HTMLMediaElement::potentiallyPlaying() const
@@ -3494,6 +3561,9 @@ void HTMLMediaElement::clearMediaPlayer(int flags)
 void HTMLMediaElement::stop()
 {
     WTF_LOG(Media, "HTMLMediaElement::stop(%p)", this);
+
+    if (m_playing && m_initialPlayWithoutUserGestures)
+        gesturelessInitialPlayHalted();
 
     m_active = false;
     userCancelledLoad();
@@ -3793,7 +3863,7 @@ void* HTMLMediaElement::preDispatchEventHandler(Event* event)
     if (event && event->type() == EventTypeNames::webkitfullscreenchange)
         configureMediaControls();
 
-    return 0;
+    return nullptr;
 }
 
 void HTMLMediaElement::createMediaPlayer()
@@ -3831,7 +3901,7 @@ AudioSourceProvider* HTMLMediaElement::audioSourceProvider()
     if (m_player)
         return m_player->audioSourceProvider();
 
-    return 0;
+    return nullptr;
 }
 #endif
 
@@ -3855,15 +3925,15 @@ void HTMLMediaElement::setMediaGroup(const AtomicString& group)
     // 4. If there is another media element whose Document is the same as m's Document (even if one or both
     // of these elements are not actually in the Document),
     WeakMediaElementSet elements = documentToElementSetMap().get(&document());
-    for (WeakMediaElementSet::iterator i = elements.begin(); i != elements.end(); ++i) {
-        if (*i == this)
+    for (const auto& element : elements) {
+        if (element == this)
             continue;
 
         // and which also has a mediagroup attribute, and whose mediagroup attribute has the same value as
         // the new value of m's mediagroup attribute,
-        if ((*i)->mediaGroup() == group) {
+        if (element->mediaGroup() == group) {
             //  then let controller be that media element's current media controller.
-            setControllerInternal((*i)->controller());
+            setControllerInternal(element->controller());
             return;
         }
     }
@@ -3950,15 +4020,18 @@ void HTMLMediaElement::mediaPlayerSetWebLayer(blink::WebLayer* webLayer)
         return;
 
     // If either of the layers is null we need to enable or disable compositing. This is done by triggering a style recalc.
-    if (!m_webLayer || !webLayer)
+    if ((!m_webLayer || !webLayer)
+#if ENABLE(OILPAN)
+        && !isFinalizing()
+#endif
+        )
         setNeedsCompositingUpdate();
 
     if (m_webLayer)
         GraphicsLayer::unregisterContentsLayer(m_webLayer);
     m_webLayer = webLayer;
-    if (m_webLayer) {
+    if (m_webLayer)
         GraphicsLayer::registerContentsLayer(m_webLayer);
-    }
 }
 
 void HTMLMediaElement::mediaPlayerMediaSourceOpened(blink::WebMediaSource* webMediaSource)
@@ -4034,7 +4107,7 @@ void HTMLMediaElement::selectInitialTracksIfNecessary()
 void HTMLMediaElement::clearWeakMembers(Visitor* visitor)
 {
     if (!visitor->isAlive(m_audioSourceNode) && audioSourceProvider())
-        audioSourceProvider()->setClient(0);
+        audioSourceProvider()->setClient(nullptr);
 }
 #endif
 

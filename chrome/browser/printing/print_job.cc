@@ -9,7 +9,6 @@
 #include "base/message_loop/message_loop.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/threading/worker_pool.h"
-#include "base/timer/timer.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/printing/print_job_worker.h"
 #include "content/public/browser/browser_thread.h"
@@ -294,7 +293,7 @@ void PrintJob::OnPdfToEmfStarted(int page_count) {
 }
 
 void PrintJob::OnPdfToEmfPageConverted(int page_number,
-                                       double scale_factor,
+                                       float scale_factor,
                                        scoped_ptr<MetafilePlayer> emf) {
   DCHECK(ptd_to_emf_state_);
   if (!document_.get() || !emf) {

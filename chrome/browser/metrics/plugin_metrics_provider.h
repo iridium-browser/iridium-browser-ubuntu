@@ -32,18 +32,18 @@ class PluginMetricsProvider : public metrics::MetricsProvider,
                               public content::BrowserChildProcessObserver {
  public:
   explicit PluginMetricsProvider(PrefService* local_state);
-  virtual ~PluginMetricsProvider();
+  ~PluginMetricsProvider() override;
 
   // Fetches plugin information data asynchronously and calls |done_callback|
   // when done.
   void GetPluginInformation(const base::Closure& done_callback);
 
   // metrics::MetricsDataProvider:
-  virtual void ProvideSystemProfileMetrics(
-      metrics::SystemProfileProto* system_profile_proto) OVERRIDE;
-  virtual void ProvideStabilityMetrics(
-      metrics::SystemProfileProto* system_profile_proto) OVERRIDE;
-  virtual void ClearSavedStabilityMetrics() OVERRIDE;
+  void ProvideSystemProfileMetrics(
+      metrics::SystemProfileProto* system_profile_proto) override;
+  void ProvideStabilityMetrics(
+      metrics::SystemProfileProto* system_profile_proto) override;
+  void ClearSavedStabilityMetrics() override;
 
   // Notifies the provider about an error loading the plugin at |plugin_path|.
   void LogPluginLoadingError(const base::FilePath& plugin_path);
@@ -88,12 +88,12 @@ class PluginMetricsProvider : public metrics::MetricsProvider,
   bool RecordCurrentStateIfPending();
 
   // content::BrowserChildProcessObserver:
-  virtual void BrowserChildProcessHostConnected(
-      const content::ChildProcessData& data) OVERRIDE;
-  virtual void BrowserChildProcessCrashed(
-      const content::ChildProcessData& data) OVERRIDE;
-  virtual void BrowserChildProcessInstanceCreated(
-      const content::ChildProcessData& data) OVERRIDE;
+  void BrowserChildProcessHostConnected(
+      const content::ChildProcessData& data) override;
+  void BrowserChildProcessCrashed(
+      const content::ChildProcessData& data) override;
+  void BrowserChildProcessInstanceCreated(
+      const content::ChildProcessData& data) override;
 
   PrefService* local_state_;
 

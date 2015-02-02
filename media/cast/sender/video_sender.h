@@ -45,7 +45,7 @@ class VideoSender : public FrameSender,
               CastTransportSender* const transport_sender,
               const PlayoutDelayChangeCB& playout_delay_change_cb);
 
-  virtual ~VideoSender();
+  ~VideoSender() override;
 
   // Note: It is not guaranteed that |video_frame| will actually be encoded and
   // sent, if VideoSender detects too many frames in flight.  Therefore, clients
@@ -54,12 +54,12 @@ class VideoSender : public FrameSender,
   // Note: It is invalid to call this method if InitializationResult() returns
   // anything but STATUS_VIDEO_INITIALIZED.
   void InsertRawVideoFrame(const scoped_refptr<media::VideoFrame>& video_frame,
-                           const base::TimeTicks& capture_time);
+                           const base::TimeTicks& reference_time);
 
  protected:
-  virtual int GetNumberOfFramesInEncoder() const OVERRIDE;
-  virtual base::TimeDelta GetInFlightMediaDuration() const OVERRIDE;
-  virtual void OnAck(uint32 frame_id) OVERRIDE;
+  int GetNumberOfFramesInEncoder() const override;
+  base::TimeDelta GetInFlightMediaDuration() const override;
+  void OnAck(uint32 frame_id) override;
 
  private:
   // Called when the encoder is initialized or has failed to initialize.
@@ -83,6 +83,7 @@ class VideoSender : public FrameSender,
   base::TimeDelta duration_in_encoder_;
 
   // The timestamp of the frame that was last enqueued in |video_encoder_|.
+  RtpTimestamp last_enqueued_frame_rtp_timestamp_;
   base::TimeTicks last_enqueued_frame_reference_time_;
 
   // Remember what we set the bitrate to before, no need to set it again if

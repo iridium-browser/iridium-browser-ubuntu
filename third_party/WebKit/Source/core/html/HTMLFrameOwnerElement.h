@@ -48,7 +48,7 @@ public:
     void setContentFrame(Frame&);
     void clearContentFrame();
 
-    void disconnectContentFrame();
+    virtual void disconnectContentFrame();
 
     // Most subclasses use RenderPart (either RenderEmbeddedObject or RenderIFrame)
     // except for HTMLObjectElement and HTMLEmbedElement which may return any
@@ -65,7 +65,7 @@ public:
     virtual void renderFallbackContent() { }
 
     virtual bool isObjectElement() const { return false; }
-    void setWidget(PassRefPtr<Widget>);
+    void setWidget(PassRefPtrWillBeRawPtr<Widget>);
     Widget* ownedWidget() const;
 
     class UpdateSuspendScope {
@@ -77,7 +77,7 @@ public:
         void performDeferredWidgetTreeOperations();
     };
 
-    virtual void trace(Visitor*) OVERRIDE;
+    virtual void trace(Visitor*) override;
 
 protected:
     HTMLFrameOwnerElement(const QualifiedName& tagName, Document&);
@@ -86,16 +86,16 @@ protected:
     bool loadOrRedirectSubframe(const KURL&, const AtomicString& frameName, bool lockBackForwardList);
 
 private:
-    virtual bool isKeyboardFocusable() const OVERRIDE;
-    virtual bool isFrameOwnerElement() const OVERRIDE FINAL { return true; }
+    virtual bool isKeyboardFocusable() const override;
+    virtual bool isFrameOwnerElement() const override final { return true; }
 
     // FrameOwner overrides:
     virtual bool isLocal() const { return true; }
-    virtual SandboxFlags sandboxFlags() const OVERRIDE { return m_sandboxFlags; }
-    virtual void dispatchLoad() OVERRIDE;
+    virtual SandboxFlags sandboxFlags() const override { return m_sandboxFlags; }
+    virtual void dispatchLoad() override;
 
     RawPtrWillBeMember<Frame> m_contentFrame;
-    RefPtr<Widget> m_widget;
+    RefPtrWillBeMember<Widget> m_widget;
     SandboxFlags m_sandboxFlags;
 };
 
@@ -127,7 +127,7 @@ public:
     }
 
 private:
-    static WillBeHeapHashCountedSet<RawPtrWillBeMember<Node> >& disabledSubtreeRoots();
+    static WillBeHeapHashCountedSet<RawPtrWillBeMember<Node>>& disabledSubtreeRoots();
 
     RawPtrWillBeMember<Node> m_root;
 };

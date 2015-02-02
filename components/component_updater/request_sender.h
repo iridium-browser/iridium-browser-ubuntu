@@ -35,7 +35,7 @@ class RequestSender : public net::URLFetcherDelegate {
       RequestSenderCallback;
 
   explicit RequestSender(const Configurator& config);
-  virtual ~RequestSender();
+  ~RequestSender() override;
 
   void Send(const std::string& request_string,
             const std::vector<GURL>& urls,
@@ -45,7 +45,7 @@ class RequestSender : public net::URLFetcherDelegate {
   void SendInternal();
 
   // Overrides for URLFetcherDelegate.
-  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE;
+  void OnURLFetchComplete(const net::URLFetcher* source) override;
 
   const Configurator& config_;
   std::vector<GURL> urls_;

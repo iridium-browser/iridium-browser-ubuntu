@@ -36,8 +36,7 @@ Me2MeDesktopEnvironment::~Me2MeDesktopEnvironment() {
 scoped_ptr<ScreenControls> Me2MeDesktopEnvironment::CreateScreenControls() {
   DCHECK(caller_task_runner()->BelongsToCurrentThread());
 
-  return scoped_ptr<ScreenControls>(
-      new ResizingHostObserver(DesktopResizer::Create()));
+  return make_scoped_ptr(new ResizingHostObserver(DesktopResizer::Create()));
 }
 
 std::string Me2MeDesktopEnvironment::GetCapabilities() const {
@@ -61,11 +60,10 @@ scoped_ptr<GnubbyAuthHandler> Me2MeDesktopEnvironment::CreateGnubbyAuthHandler(
   DCHECK(caller_task_runner()->BelongsToCurrentThread());
 
   if (gnubby_auth_enabled_)
-    return scoped_ptr<GnubbyAuthHandler>(
-        GnubbyAuthHandler::Create(client_stub));
+    return GnubbyAuthHandler::Create(client_stub);
 
   HOST_LOG << "gnubby auth is not enabled";
-  return scoped_ptr<GnubbyAuthHandler>();
+  return nullptr;
 }
 
 bool Me2MeDesktopEnvironment::InitializeSecurity(
@@ -148,11 +146,11 @@ scoped_ptr<DesktopEnvironment> Me2MeDesktopEnvironmentFactory::Create(
                                   ui_task_runner()));
   if (!desktop_environment->InitializeSecurity(client_session_control,
                                                curtain_enabled_)) {
-    return scoped_ptr<DesktopEnvironment>();
+    return nullptr;
   }
   desktop_environment->SetEnableGnubbyAuth(gnubby_auth_enabled_);
 
-  return desktop_environment.PassAs<DesktopEnvironment>();
+  return desktop_environment.Pass();
 }
 
 void Me2MeDesktopEnvironmentFactory::SetEnableCurtaining(bool enable) {

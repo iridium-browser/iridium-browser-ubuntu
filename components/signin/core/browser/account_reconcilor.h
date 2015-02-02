@@ -16,6 +16,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
+#include "base/time/time.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/signin/core/browser/signin_client.h"
 #include "components/signin/core/browser/signin_manager.h"
@@ -41,7 +42,7 @@ class AccountReconcilor : public KeyedService,
   AccountReconcilor(ProfileOAuth2TokenService* token_service,
                     SigninManagerBase* signin_manager,
                     SigninClient* client);
-  virtual ~AccountReconcilor();
+  ~AccountReconcilor() override;
 
   void Initialize(bool start_reconcile_if_tokens_available);
 
@@ -51,7 +52,7 @@ class AccountReconcilor : public KeyedService,
   void OnNewProfileManagementFlagChanged(bool new_flag_status);
 
   // KeyedService implementation.
-  virtual void Shutdown() OVERRIDE;
+  void Shutdown() override;
 
   // Add or remove observers for the merge session notification.
   void AddMergeSessionObserver(MergeSessionHelper::Observer* observer);
@@ -135,27 +136,26 @@ class AccountReconcilor : public KeyedService,
   // Note internally that this |account_id| is added to the cookie jar.
   bool MarkAccountAsAddedToCookie(const std::string& account_id);
 
-  void OnCookieChanged(const net::CanonicalCookie* cookie);
+  void OnCookieChanged(const net::CanonicalCookie& cookie, bool removed);
 
   // Overriden from GaiaAuthConsumer.
-  virtual void OnListAccountsSuccess(const std::string& data) OVERRIDE;
-  virtual void OnListAccountsFailure(const GoogleServiceAuthError& error)
-      OVERRIDE;
+  void OnListAccountsSuccess(const std::string& data) override;
+  void OnListAccountsFailure(const GoogleServiceAuthError& error) override;
 
   // Overriden from MergeSessionHelper::Observer.
-  virtual void MergeSessionCompleted(const std::string& account_id,
-                                     const GoogleServiceAuthError& error)
-      OVERRIDE;
+  void MergeSessionCompleted(const std::string& account_id,
+                             const GoogleServiceAuthError& error) override;
+  void GetCheckConnectionInfoCompleted(bool succeeded) override;
 
   // Overriden from OAuth2TokenService::Observer.
-  virtual void OnEndBatchChanges() OVERRIDE;
+  void OnEndBatchChanges() override;
 
   // Overriden from SigninManagerBase::Observer.
-  virtual void GoogleSigninSucceeded(const std::string& account_id,
-                                     const std::string& username,
-                                     const std::string& password) OVERRIDE;
-  virtual void GoogleSignedOut(const std::string& account_id,
-                               const std::string& username) OVERRIDE;
+  void GoogleSigninSucceeded(const std::string& account_id,
+                             const std::string& username,
+                             const std::string& password) override;
+  void GoogleSignedOut(const std::string& account_id,
+                       const std::string& username) override;
 
   void MayBeDoNextListAccounts();
 
@@ -175,6 +175,7 @@ class AccountReconcilor : public KeyedService,
   // True while the reconcilor is busy checking or managing the accounts in
   // this profile.
   bool is_reconcile_started_;
+  base::Time m_reconcile_start_time_;
 
   // True iff this is the first time the reconcilor is executing.
   bool first_execution_;
@@ -196,7 +197,7 @@ class AccountReconcilor : public KeyedService,
 
   std::deque<GetAccountsFromCookieCallback> get_gaia_accounts_callbacks_;
 
-  scoped_ptr<SigninClient::CookieChangedCallbackList::Subscription>
+  scoped_ptr<SigninClient::CookieChangedSubscription>
       cookie_changed_subscription_;
 
   DISALLOW_COPY_AND_ASSIGN(AccountReconcilor);

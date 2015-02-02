@@ -20,6 +20,7 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/account_reconcilor_factory.h"
+#include "chrome/browser/signin/account_tracker_service_factory.h"
 #include "chrome/browser/signin/fake_account_reconcilor.h"
 #include "chrome/browser/signin/fake_profile_oauth2_token_service.h"
 #include "chrome/browser/signin/fake_profile_oauth2_token_service_builder.h"
@@ -30,10 +31,10 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/api/identity.h"
-#include "chrome/common/extensions/api/identity/oauth2_manifest_handler.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/test_switches.h"
 #include "components/crx_file/id_util.h"
+#include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "components/signin/core/common/signin_pref_names.h"
@@ -41,6 +42,7 @@
 #include "content/public/browser/notification_source.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/guest_view/guest_view_base.h"
+#include "extensions/common/manifest_handlers/oauth2_manifest_handler.h"
 #include "extensions/common/test_util.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "google_apis/gaia/oauth2_mint_token_flow.h"
@@ -85,9 +87,9 @@ class SendResponseDelegate
     return *response_.get();
   }
 
-  virtual void OnSendResponse(UIThreadExtensionFunction* function,
-                              bool success,
-                              bool bad_message) OVERRIDE {
+  void OnSendResponse(UIThreadExtensionFunction* function,
+                      bool success,
+                      bool bad_message) override {
     ASSERT_FALSE(bad_message);
     ASSERT_FALSE(HasResponse());
     response_.reset(new bool);
@@ -162,9 +164,10 @@ class AsyncExtensionBrowserTest : public ExtensionBrowserTest {
 class TestHangOAuth2MintTokenFlow : public OAuth2MintTokenFlow {
  public:
   TestHangOAuth2MintTokenFlow()
-      : OAuth2MintTokenFlow(NULL, NULL, OAuth2MintTokenFlow::Parameters()) {}
+      : OAuth2MintTokenFlow(NULL, OAuth2MintTokenFlow::Parameters()) {}
 
-  virtual void Start() OVERRIDE {
+  void Start(net::URLRequestContextGetter* context,
+             const std::string& access_token) override {
     // Do nothing, simulating a hanging network call.
   }
 };
@@ -181,12 +184,12 @@ class TestOAuth2MintTokenFlow : public OAuth2MintTokenFlow {
 
   TestOAuth2MintTokenFlow(ResultType result,
                           OAuth2MintTokenFlow::Delegate* delegate)
-    : OAuth2MintTokenFlow(NULL, delegate, OAuth2MintTokenFlow::Parameters()),
-      result_(result),
-      delegate_(delegate) {
-  }
+      : OAuth2MintTokenFlow(delegate, OAuth2MintTokenFlow::Parameters()),
+        result_(result),
+        delegate_(delegate) {}
 
-  virtual void Start() OVERRIDE {
+  void Start(net::URLRequestContextGetter* context,
+             const std::string& access_token) override {
     switch (result_) {
       case ISSUE_ADVICE_SUCCESS: {
         IssueAdviceInfo info;
@@ -234,9 +237,9 @@ class WaitForGURLAndCloseWindow : public content::WindowedNotificationObserver {
         url_(url) {}
 
   // NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE {
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override {
     content::NavigationController* web_auth_flow_controller =
         content::Source<content::NavigationController>(source).ptr();
     content::WebContents* web_contents =
@@ -294,9 +297,8 @@ class FakeGetAuthTokenFunction : public IdentityGetAuthTokenFunction {
   }
 
   void set_mint_token_result(TestOAuth2MintTokenFlow::ResultType result_type) {
-    set_mint_token_flow(scoped_ptr<TestOAuth2MintTokenFlow>(
-                            new TestOAuth2MintTokenFlow(result_type, this))
-                            .PassAs<OAuth2MintTokenFlow>());
+    set_mint_token_flow(
+        make_scoped_ptr(new TestOAuth2MintTokenFlow(result_type, this)));
   }
 
   void set_scope_ui_failure(GaiaWebAuthFlow::Failure failure) {
@@ -316,7 +318,7 @@ class FakeGetAuthTokenFunction : public IdentityGetAuthTokenFunction {
 
   std::string login_access_token() const { return login_access_token_; }
 
-  virtual void StartLoginAccessTokenRequest() OVERRIDE {
+  void StartLoginAccessTokenRequest() override {
     if (auto_login_access_token_) {
       if (login_access_token_result_) {
         OnGetTokenSuccess(login_token_request_.get(),
@@ -334,7 +336,7 @@ class FakeGetAuthTokenFunction : public IdentityGetAuthTokenFunction {
     }
   }
 
-  virtual void ShowLoginPopup() OVERRIDE {
+  void ShowLoginPopup() override {
     EXPECT_FALSE(login_ui_shown_);
     login_ui_shown_ = true;
     if (login_ui_result_)
@@ -343,8 +345,7 @@ class FakeGetAuthTokenFunction : public IdentityGetAuthTokenFunction {
       SigninFailed();
   }
 
-  virtual void ShowOAuthApprovalDialog(
-      const IssueAdviceInfo& issue_advice) OVERRIDE {
+  void ShowOAuthApprovalDialog(const IssueAdviceInfo& issue_advice) override {
     scope_ui_shown_ = true;
 
     if (scope_ui_result_) {
@@ -358,17 +359,20 @@ class FakeGetAuthTokenFunction : public IdentityGetAuthTokenFunction {
     }
   }
 
-  virtual OAuth2MintTokenFlow* CreateMintTokenFlow(
-      const std::string& login_access_token) OVERRIDE {
+  void StartGaiaRequest(const std::string& login_access_token) override {
     EXPECT_TRUE(login_access_token_.empty());
-    // Save the login token used to create the flow so tests can see
+    // Save the login token used in the mint token flow so tests can see
     // what account was used.
     login_access_token_ = login_access_token;
+    IdentityGetAuthTokenFunction::StartGaiaRequest(login_access_token);
+  }
+
+  OAuth2MintTokenFlow* CreateMintTokenFlow() override {
     return flow_.release();
   }
 
  private:
-  virtual ~FakeGetAuthTokenFunction() {}
+  ~FakeGetAuthTokenFunction() override {}
   bool login_access_token_result_;
   bool auto_login_access_token_;
   bool login_ui_result_;
@@ -397,7 +401,7 @@ gaia::AccountIds CreateIds(std::string email, std::string obfid) {
 }
 
 class IdentityGetAccountsFunctionTest : public ExtensionBrowserTest {
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     ExtensionBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kExtensionsMultiAccount);
   }
@@ -509,7 +513,7 @@ IN_PROC_BROWSER_TEST_F(IdentityGetAccountsFunctionTest, TwoAccountsSignedIn) {
 
 class IdentityOldProfilesGetAccountsFunctionTest
     : public IdentityGetAccountsFunctionTest {
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     // Don't add the multi-account switch that parent class would have.
   }
 };
@@ -528,7 +532,70 @@ IN_PROC_BROWSER_TEST_F(IdentityOldProfilesGetAccountsFunctionTest,
   EXPECT_TRUE(ExpectGetAccounts(only_primary));
 }
 
-class IdentityGetProfileUserInfoFunctionTest : public ExtensionBrowserTest {
+class IdentityTestWithSignin : public AsyncExtensionBrowserTest {
+ public:
+  void SetUpInProcessBrowserTestFixture() override {
+    AsyncExtensionBrowserTest::SetUpInProcessBrowserTestFixture();
+
+    will_create_browser_context_services_subscription_ =
+        BrowserContextDependencyManager::GetInstance()
+            ->RegisterWillCreateBrowserContextServicesCallbackForTesting(
+                  base::Bind(&IdentityTestWithSignin::
+                                 OnWillCreateBrowserContextServices,
+                             base::Unretained(this)))
+            .Pass();
+  }
+
+  void OnWillCreateBrowserContextServices(content::BrowserContext* context) {
+    // Replace the signin manager and token service with fakes. Do this ahead of
+    // creating the browser so that a bunch of classes don't register as
+    // observers and end up needing to unregister when the fake is substituted.
+    SigninManagerFactory::GetInstance()->SetTestingFactory(
+        context, &FakeSigninManagerBase::Build);
+    ProfileOAuth2TokenServiceFactory::GetInstance()->SetTestingFactory(
+        context, &BuildFakeProfileOAuth2TokenService);
+    AccountReconcilorFactory::GetInstance()->SetTestingFactory(
+        context, &FakeAccountReconcilor::Build);
+  }
+
+  void SetUpOnMainThread() override {
+    AsyncExtensionBrowserTest::SetUpOnMainThread();
+
+    // Grab references to the fake signin manager and token service.
+    signin_manager_ = static_cast<FakeSigninManagerForTesting*>(
+        SigninManagerFactory::GetInstance()->GetForProfile(profile()));
+    ASSERT_TRUE(signin_manager_);
+    token_service_ = static_cast<FakeProfileOAuth2TokenService*>(
+        ProfileOAuth2TokenServiceFactory::GetInstance()->GetForProfile(
+            profile()));
+    ASSERT_TRUE(token_service_);
+  }
+
+ protected:
+  void SignIn(const std::string account_key) {
+#if defined(OS_CHROMEOS)
+    signin_manager_->SetAuthenticatedUsername(account_key);
+#else
+    signin_manager_->SignIn(account_key, "password");
+#endif
+    token_service_->IssueRefreshTokenForUser(account_key, "refresh_token");
+  }
+
+  void SignIn(const std::string& account_key, const std::string& gaia) {
+    AccountTrackerService* account_tracker =
+        AccountTrackerServiceFactory::GetForProfile(profile());
+    account_tracker->SeedAccountInfo(gaia, account_key);
+    SignIn(account_key);
+  }
+
+  FakeSigninManagerForTesting* signin_manager_;
+  FakeProfileOAuth2TokenService* token_service_;
+
+  scoped_ptr<base::CallbackList<void(content::BrowserContext*)>::Subscription>
+      will_create_browser_context_services_subscription_;
+};
+
+class IdentityGetProfileUserInfoFunctionTest : public IdentityTestWithSignin {
  protected:
   scoped_ptr<api::identity::ProfileUserInfo> RunGetProfileUserInfo() {
     scoped_refptr<IdentityGetProfileUserInfoFunction> func(
@@ -566,11 +633,7 @@ IN_PROC_BROWSER_TEST_F(IdentityGetProfileUserInfoFunctionTest, NotSignedIn) {
 }
 
 IN_PROC_BROWSER_TEST_F(IdentityGetProfileUserInfoFunctionTest, SignedIn) {
-  profile()->GetPrefs()
-      ->SetString(prefs::kGoogleServicesUsername, "president@example.com");
-  profile()->GetPrefs()
-      ->SetString(prefs::kGoogleServicesUserAccountId, "12345");
-
+  SignIn("president@example.com", "12345");
   scoped_ptr<api::identity::ProfileUserInfo> info =
       RunGetProfileUserInfoWithEmail();
   EXPECT_EQ("president@example.com", info->email);
@@ -586,67 +649,17 @@ IN_PROC_BROWSER_TEST_F(IdentityGetProfileUserInfoFunctionTest,
 
 IN_PROC_BROWSER_TEST_F(IdentityGetProfileUserInfoFunctionTest,
                        SignedInNoEmail) {
-  profile()->GetPrefs()->SetString(prefs::kGoogleServicesUsername,
-                                   "president@example.com");
-  profile()->GetPrefs()->SetString(prefs::kGoogleServicesUserAccountId,
-                                   "12345");
-
+  SignIn("president@example.com", "12345");
   scoped_ptr<api::identity::ProfileUserInfo> info = RunGetProfileUserInfo();
   EXPECT_TRUE(info->email.empty());
   EXPECT_EQ("12345", info->id);
 }
 
-class GetAuthTokenFunctionTest : public AsyncExtensionBrowserTest {
+class GetAuthTokenFunctionTest : public IdentityTestWithSignin {
  public:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
-    AsyncExtensionBrowserTest::SetUpCommandLine(command_line);
+  void SetUpCommandLine(CommandLine* command_line) override {
+    IdentityTestWithSignin::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kExtensionsMultiAccount);
-  }
-
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
-    AsyncExtensionBrowserTest::SetUpInProcessBrowserTestFixture();
-
-    will_create_browser_context_services_subscription_ =
-        BrowserContextDependencyManager::GetInstance()
-            ->RegisterWillCreateBrowserContextServicesCallbackForTesting(
-                  base::Bind(&GetAuthTokenFunctionTest::
-                                 OnWillCreateBrowserContextServices,
-                             base::Unretained(this)))
-            .Pass();
-  }
-
-  void OnWillCreateBrowserContextServices(content::BrowserContext* context) {
-    // Replace the signin manager and token service with fakes. Do this ahead of
-    // creating the browser so that a bunch of classes don't register as
-    // observers and end up needing to unregister when the fake is substituted.
-    SigninManagerFactory::GetInstance()->SetTestingFactory(
-        context, &FakeSigninManagerBase::Build);
-    ProfileOAuth2TokenServiceFactory::GetInstance()->SetTestingFactory(
-        context, &BuildFakeProfileOAuth2TokenService);
-    AccountReconcilorFactory::GetInstance()->SetTestingFactory(
-        context, &FakeAccountReconcilor::Build);
-  }
-
-  virtual void SetUpOnMainThread() OVERRIDE {
-    AsyncExtensionBrowserTest::SetUpOnMainThread();
-
-    // Grab references to the fake signin manager and token service.
-    signin_manager_ = static_cast<FakeSigninManagerForTesting*>(
-        SigninManagerFactory::GetInstance()->GetForProfile(profile()));
-    ASSERT_TRUE(signin_manager_);
-    token_service_ = static_cast<FakeProfileOAuth2TokenService*>(
-        ProfileOAuth2TokenServiceFactory::GetInstance()->GetForProfile(
-            profile()));
-    ASSERT_TRUE(token_service_);
-  }
-
-  void SignIn(const std::string account_key) {
-#if defined(OS_CHROMEOS)
-    signin_manager_->SetAuthenticatedUsername(account_key);
-#else
-    signin_manager_->SignIn(account_key, "password");
-#endif
-    token_service_->IssueRefreshTokenForUser(account_key, "refresh_token");
   }
 
   void IssueLoginRefreshTokenForAccount(const std::string account_key) {
@@ -673,10 +686,7 @@ class GetAuthTokenFunctionTest : public AsyncExtensionBrowserTest {
     AS_COMPONENT = 4
   };
 
-  FakeSigninManagerForTesting* signin_manager_;
-  FakeProfileOAuth2TokenService* token_service_;
-
-  virtual ~GetAuthTokenFunctionTest() {}
+  ~GetAuthTokenFunctionTest() override {}
 
   // Helper to create an extension with specific OAuth2Info fields set.
   // |fields_to_set| should be computed by using fields of Oauth2Fields enum.
@@ -742,9 +752,6 @@ class GetAuthTokenFunctionTest : public AsyncExtensionBrowserTest {
  private:
   std::string extension_id_;
   std::set<std::string> oauth_scopes_;
-
-  scoped_ptr<base::CallbackList<void(content::BrowserContext*)>::Subscription>
-      will_create_browser_context_services_subscription_;
 };
 
 IN_PROC_BROWSER_TEST_F(GetAuthTokenFunctionTest,
@@ -1221,9 +1228,7 @@ IN_PROC_BROWSER_TEST_F(GetAuthTokenFunctionTest, NoninteractiveShutdown) {
   scoped_refptr<FakeGetAuthTokenFunction> func(new FakeGetAuthTokenFunction());
   func->set_extension(extension.get());
 
-  scoped_ptr<TestHangOAuth2MintTokenFlow> flow(
-      new TestHangOAuth2MintTokenFlow());
-  func->set_mint_token_flow(flow.PassAs<OAuth2MintTokenFlow>());
+  func->set_mint_token_flow(make_scoped_ptr(new TestHangOAuth2MintTokenFlow()));
   RunFunctionAsync(func.get(), "[{\"interactive\": false}]");
 
   // After the request is canceled, the function will complete.
@@ -1657,7 +1662,7 @@ IN_PROC_BROWSER_TEST_F(RemoveCachedAuthTokenFunctionTest, MatchingToken) {
 
 class LaunchWebAuthFlowFunctionTest : public AsyncExtensionBrowserTest {
  public:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     AsyncExtensionBrowserTest::SetUpCommandLine(command_line);
     // Reduce performance test variance by disabling background networking.
     command_line->AppendSwitch(switches::kDisableBackgroundNetworking);

@@ -37,8 +37,9 @@ WebInspector.Popover = function(popoverHelper)
 {
     WebInspector.View.call(this);
     this.markAsRoot();
-    this.element.className = "popover custom-popup-vertical-scroll custom-popup-horizontal-scroll"; // Override
-    this._containerElement = document.createElementWithClass("div", "fill popover-container");
+    this.element.className = WebInspector.Popover._classNamePrefix; // Override
+    WebInspector.installComponentRootStyles(this.element);
+    this._containerElement = createElementWithClass("div", "fill popover-container");
 
     this._popupArrowElement = this.element.createChild("div", "arrow");
     this._contentDiv = this.element.createChild("div", "content");
@@ -46,6 +47,8 @@ WebInspector.Popover = function(popoverHelper)
     this._popoverHelper = popoverHelper;
     this._hideBound = this.hide.bind(this);
 }
+
+WebInspector.Popover._classNamePrefix = "popover custom-popup-vertical-scroll custom-popup-horizontal-scroll";
 
 WebInspector.Popover.prototype = {
     /**
@@ -83,15 +86,18 @@ WebInspector.Popover.prototype = {
     {
         if (this._disposed)
             return;
-        this.contentElement = contentElement;
+        this._contentElement = contentElement;
 
         // This should not happen, but we hide previous popup to be on the safe side.
         if (WebInspector.Popover._popover)
             WebInspector.Popover._popover.hide();
         WebInspector.Popover._popover = this;
 
+        var document = anchor instanceof Element ? anchor.ownerDocument : contentElement.ownerDocument;
+        var window = document.defaultView;
+
         // Temporarily attach in order to measure preferred dimensions.
-        var preferredSize = view ? view.measurePreferredSize() : this.contentElement.measurePreferredSize();
+        var preferredSize = view ? view.measurePreferredSize() : WebInspector.measurePreferredSize(this._contentElement);
         preferredWidth = preferredWidth || preferredSize.width;
         preferredHeight = preferredHeight || preferredSize.height;
 
@@ -102,7 +108,7 @@ WebInspector.Popover.prototype = {
         if (view)
             view.show(this._contentDiv);
         else
-            this._contentDiv.appendChild(this.contentElement);
+            this._contentDiv.appendChild(this._contentElement);
 
         this._positionElement(anchor, preferredWidth, preferredHeight, arrowDirection);
 
@@ -114,7 +120,7 @@ WebInspector.Popover.prototype = {
 
     hide: function()
     {
-        window.removeEventListener("resize", this._hideBound, false);
+        this._containerElement.ownerDocument.defaultView.removeEventListener("resize", this._hideBound, false);
         this.detach();
         this._containerElement.remove();
         delete WebInspector.Popover._popover;
@@ -135,7 +141,7 @@ WebInspector.Popover.prototype = {
     setCanShrink: function(canShrink)
     {
         this._hasFixedHeight = !canShrink;
-        this._contentDiv.classList.add("fixed-height");
+        this._contentDiv.classList.toggle("fixed-height", this._hasFixedHeight);
     },
 
     /**
@@ -218,7 +224,8 @@ WebInspector.Popover.prototype = {
             this._popupArrowElement.style.left += anchorBox.width / 2;
         }
 
-        this.element.className = "popover custom-popup-vertical-scroll custom-popup-horizontal-scroll " + verticalAlignment + "-" + horizontalAlignment + "-arrow";
+        this.element.className = WebInspector.Popover._classNamePrefix + " " + verticalAlignment + "-" + horizontalAlignment + "-arrow";
+        WebInspector.installComponentRootStyles(this.element);
         this.element.positionAt(newElementPosition.x - borderWidth, newElementPosition.y - borderWidth, container);
         this.element.style.width = newElementPosition.width + borderWidth * 2 + "px";
         this.element.style.height = newElementPosition.height + borderWidth * 2 + "px";

@@ -7,7 +7,6 @@
 #include "base/base64.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/path_service.h"
 #include "base/test/test_timeouts.h"
 #include "base/timer/timer.h"
 #include "net/base/net_errors.h"
@@ -116,12 +115,12 @@ void AuthenticatorTestBase::RunChannelAuth(bool expected_fail) {
   client_fake_socket_->PairWith(host_fake_socket_.get());
 
   client_auth_->SecureAndAuthenticate(
-      client_fake_socket_.PassAs<net::StreamSocket>(),
+      client_fake_socket_.Pass(),
       base::Bind(&AuthenticatorTestBase::OnClientConnected,
                  base::Unretained(this)));
 
   host_auth_->SecureAndAuthenticate(
-      host_fake_socket_.PassAs<net::StreamSocket>(),
+      host_fake_socket_.Pass(),
       base::Bind(&AuthenticatorTestBase::OnHostConnected,
                  base::Unretained(this)));
 

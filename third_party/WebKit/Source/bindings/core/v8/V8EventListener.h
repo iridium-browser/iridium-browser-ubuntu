@@ -38,7 +38,6 @@
 namespace blink {
 
 class Event;
-class LocalFrame;
 
 // V8EventListener is a wrapper of a JS object implements EventListener interface (has handleEvent(event) method), or a JS function
 // that can handle the event.
@@ -54,7 +53,7 @@ protected:
 
     v8::Local<v8::Function> getListenerFunction(ExecutionContext*);
 
-    virtual v8::Local<v8::Value> callListenerFunction(v8::Handle<v8::Value> jsEvent, Event*) OVERRIDE;
+    virtual v8::Local<v8::Value> callListenerFunction(v8::Handle<v8::Value> jsEvent, Event*) override;
 };
 
 } // namespace blink

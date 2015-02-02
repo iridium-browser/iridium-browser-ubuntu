@@ -19,14 +19,14 @@ class MockInvalidation : public InvalidationInterface {
   static scoped_ptr<MockInvalidation> Build(int64 version,
                                             const std::string& payload);
 
-  virtual ~MockInvalidation();
+  ~MockInvalidation() override;
 
   // Implementation of InvalidationInterface.
-  virtual bool IsUnknownVersion() const OVERRIDE;
-  virtual const std::string& GetPayload() const OVERRIDE;
-  virtual int64 GetVersion() const OVERRIDE;
-  virtual void Acknowledge() OVERRIDE;
-  virtual void Drop() OVERRIDE;
+  bool IsUnknownVersion() const override;
+  const std::string& GetPayload() const override;
+  int64 GetVersion() const override;
+  void Acknowledge() override;
+  void Drop() override;
 
  protected:
   MockInvalidation(bool is_unknown_version,

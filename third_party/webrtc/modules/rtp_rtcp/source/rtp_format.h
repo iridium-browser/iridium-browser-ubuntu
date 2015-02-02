@@ -52,12 +52,19 @@ class RtpPacketizer {
 
 class RtpDepacketizer {
  public:
-  static RtpDepacketizer* Create(RtpVideoCodecTypes type,
-                                 RtpData* const callback);
+  struct ParsedPayload {
+    const uint8_t* payload;
+    size_t payload_length;
+    FrameType frame_type;
+    RTPTypeHeader type;
+  };
+
+  static RtpDepacketizer* Create(RtpVideoCodecTypes type);
 
   virtual ~RtpDepacketizer() {}
 
-  virtual bool Parse(WebRtcRTPHeader* rtp_header,
+  // Parses the RTP payload, parsed result will be saved in |parsed_payload|.
+  virtual bool Parse(ParsedPayload* parsed_payload,
                      const uint8_t* payload_data,
                      size_t payload_data_length) = 0;
 };

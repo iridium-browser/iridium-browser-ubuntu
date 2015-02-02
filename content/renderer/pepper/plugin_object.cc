@@ -71,7 +71,9 @@ PluginObject* PluginObject::FromV8Object(v8::Isolate* isolate,
 PP_Var PluginObject::Create(PepperPluginInstanceImpl* instance,
                             const PPP_Class_Deprecated* ppp_class,
                             void* ppp_class_data) {
-  PepperTryCatchVar try_catch(instance, NULL);
+  V8VarConverter var_converter(instance->pp_instance(),
+                               V8VarConverter::kAllowObjectVars);
+  PepperTryCatchVar try_catch(instance, &var_converter, NULL);
   gin::Handle<PluginObject> object =
       gin::CreateHandle(instance->GetIsolate(),
                         new PluginObject(instance, ppp_class, ppp_class_data));
@@ -95,8 +97,9 @@ bool PluginObject::SetNamedProperty(v8::Isolate* isolate,
     return false;
   ScopedPPVar identifier_var(ScopedPPVar::PassRef(),
                              StringVar::StringToPPVar(identifier));
-  PepperTryCatchV8 try_catch(instance_, V8VarConverter::kAllowObjectVars,
-                             isolate);
+  V8VarConverter var_converter(instance_->pp_instance(),
+                               V8VarConverter::kAllowObjectVars);
+  PepperTryCatchV8 try_catch(instance_, &var_converter, isolate);
 
   bool has_property =
       ppp_class_->HasProperty(ppp_class_data_, identifier_var.get(),
@@ -127,8 +130,9 @@ std::vector<std::string> PluginObject::EnumerateNamedProperties(
   if (!instance_)
     return result;
 
-  PepperTryCatchV8 try_catch(instance_, V8VarConverter::kAllowObjectVars,
-                             isolate);
+  V8VarConverter var_converter(instance_->pp_instance(),
+                               V8VarConverter::kAllowObjectVars);
+  PepperTryCatchV8 try_catch(instance_, &var_converter, isolate);
 
   PP_Var* name_vars;
   uint32_t count = 0;
@@ -165,7 +169,8 @@ PluginObject::PluginObject(PepperPluginInstanceImpl* instance,
       instance_(instance),
       ppp_class_(ppp_class),
       ppp_class_data_(ppp_class_data),
-      weak_factory_(this) {
+      weak_factory_(this),
+      template_cache_(instance->GetIsolate()) {
   instance_->AddPluginObject(this);
 }
 
@@ -180,8 +185,9 @@ v8::Local<v8::Value> PluginObject::GetPropertyOrMethod(v8::Isolate* isolate,
   if (!instance_)
     return v8::Local<v8::Value>();
 
-  PepperTryCatchV8 try_catch(instance_, V8VarConverter::kAllowObjectVars,
-                             isolate);
+  V8VarConverter var_converter(instance_->pp_instance(),
+                               V8VarConverter::kAllowObjectVars);
+  PepperTryCatchV8 try_catch(instance_, &var_converter, isolate);
   bool has_property =
       ppp_class_->HasProperty(ppp_class_data_, identifier_var,
                               try_catch.exception());
@@ -211,10 +217,7 @@ v8::Local<v8::Value> PluginObject::GetPropertyOrMethod(v8::Isolate* isolate,
   if (has_method) {
     const std::string& identifier =
         StringVar::FromPPVar(identifier_var)->value();
-    return gin::CreateFunctionTemplate(isolate,
-                                       base::Bind(&PluginObject::Call,
-                                                  weak_factory_.GetWeakPtr(),
-                                                  identifier))->GetFunction();
+    return GetFunctionTemplate(isolate, identifier)->GetFunction();
   }
 
   return v8::Local<v8::Value>();
@@ -225,8 +228,9 @@ void PluginObject::Call(const std::string& identifier,
   if (!instance_)
     return;
 
-  PepperTryCatchV8 try_catch(instance_, V8VarConverter::kAllowObjectVars,
-                             args->isolate());
+  V8VarConverter var_converter(instance_->pp_instance(),
+                               V8VarConverter::kAllowObjectVars);
+  PepperTryCatchV8 try_catch(instance_, &var_converter, args->isolate());
   ScopedPPVar identifier_var(ScopedPPVar::PassRef(),
                              StringVar::StringToPPVar(identifier));
   ScopedPPVarArray argument_vars(args->Length());
@@ -260,6 +264,20 @@ void PluginObject::Call(const std::string& identifier,
     return;
 
   args->Return(result);
+}
+
+v8::Local<v8::FunctionTemplate> PluginObject::GetFunctionTemplate(
+    v8::Isolate* isolate,
+    const std::string& name) {
+  v8::Local<v8::FunctionTemplate> function_template = template_cache_.Get(name);
+  if (!function_template.IsEmpty())
+    return function_template;
+  function_template =
+      gin::CreateFunctionTemplate(
+          isolate, base::Bind(&PluginObject::Call, weak_factory_.GetWeakPtr(),
+                              name));
+  template_cache_.Set(name, function_template);
+  return function_template;
 }
 
 }  // namespace content

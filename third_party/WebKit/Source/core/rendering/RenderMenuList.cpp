@@ -216,14 +216,13 @@ void RenderMenuList::updateFromElement()
         m_optionsChanged = false;
     }
 
-    if (m_popupIsVisible) {
+    if (m_popupIsVisible)
         m_popup->updateFromElement();
-    } else {
-        if (selectElement()->suggestedIndex() >= 0)
-            setTextFromOption(selectElement()->suggestedIndex());
-        else
-            setTextFromOption(selectElement()->selectedIndex());
-    }
+
+    if (selectElement()->suggestedIndex() >= 0)
+        setTextFromOption(selectElement()->suggestedIndex());
+    else
+        setTextFromOption(selectElement()->selectedIndex());
 }
 
 void RenderMenuList::setTextFromOption(int optionIndex)
@@ -342,34 +341,6 @@ void RenderMenuList::computeIntrinsicLogicalWidths(LayoutUnit& minLogicalWidth, 
         minLogicalWidth = maxLogicalWidth;
 }
 
-void RenderMenuList::computePreferredLogicalWidths()
-{
-    m_minPreferredLogicalWidth = 0;
-    m_maxPreferredLogicalWidth = 0;
-    RenderStyle* styleToUse = style();
-
-    if (styleToUse->width().isFixed() && styleToUse->width().value() > 0)
-        m_minPreferredLogicalWidth = m_maxPreferredLogicalWidth = adjustContentBoxLogicalWidthForBoxSizing(styleToUse->width().value());
-    else
-        computeIntrinsicLogicalWidths(m_minPreferredLogicalWidth, m_maxPreferredLogicalWidth);
-
-    if (styleToUse->minWidth().isFixed() && styleToUse->minWidth().value() > 0) {
-        m_maxPreferredLogicalWidth = std::max(m_maxPreferredLogicalWidth, adjustContentBoxLogicalWidthForBoxSizing(styleToUse->minWidth().value()));
-        m_minPreferredLogicalWidth = std::max(m_minPreferredLogicalWidth, adjustContentBoxLogicalWidthForBoxSizing(styleToUse->minWidth().value()));
-    }
-
-    if (styleToUse->maxWidth().isFixed()) {
-        m_maxPreferredLogicalWidth = std::min(m_maxPreferredLogicalWidth, adjustContentBoxLogicalWidthForBoxSizing(styleToUse->maxWidth().value()));
-        m_minPreferredLogicalWidth = std::min(m_minPreferredLogicalWidth, adjustContentBoxLogicalWidthForBoxSizing(styleToUse->maxWidth().value()));
-    }
-
-    LayoutUnit toAdd = borderAndPaddingWidth();
-    m_minPreferredLogicalWidth += toAdd;
-    m_maxPreferredLogicalWidth += toAdd;
-
-    clearPreferredLogicalWidthsDirty();
-}
-
 void RenderMenuList::showPopup()
 {
     if (m_popupIsVisible)
@@ -438,8 +409,7 @@ void RenderMenuList::didUpdateActiveOption(int optionIndex)
     int listIndex = select->optionToListIndex(optionIndex);
     if (listIndex < 0 || listIndex >= static_cast<int>(select->listItems().size()))
         return;
-    if (AXMenuList* menuList = toAXMenuList(document().axObjectCache()->get(this)))
-        menuList->didUpdateActiveOption(optionIndex);
+    document().existingAXObjectCache()->handleUpdateActiveMenuOption(this, optionIndex);
 }
 
 String RenderMenuList::itemText(unsigned listIndex) const
@@ -597,8 +567,6 @@ int RenderMenuList::selectedIndex() const
 void RenderMenuList::popupDidHide()
 {
     m_popupIsVisible = false;
-    // Ensure the text is updated which wasn't updated when the popup is visible.
-    updateFromElement();
 }
 
 bool RenderMenuList::itemIsSeparator(unsigned listIndex) const

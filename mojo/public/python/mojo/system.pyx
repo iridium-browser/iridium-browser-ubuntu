@@ -15,7 +15,11 @@ from cpython.buffer cimport PyBuffer_FillInfo
 from cpython.buffer cimport PyBuffer_Release
 from cpython.buffer cimport PyObject_GetBuffer
 from cpython.mem cimport PyMem_Malloc, PyMem_Free
+from cpython.object cimport Py_EQ, Py_NE
 from libc.stdint cimport int32_t, int64_t, uint32_t, uint64_t, uintptr_t
+
+import ctypes
+import threading
 
 def SetSystemThunks(system_thunks_as_object):
   """Bind the basic Mojo Core functions.
@@ -292,6 +296,19 @@ cdef class Handle(object):
     ensure that the handle is not leaked.
     """
     self._mojo_handle = c_core.MOJO_HANDLE_INVALID
+
+  def __richcmp__(self, other, op):
+    if op != Py_EQ and op != Py_NE:
+      raise TypeError('Handle is not ordered')
+    cdef int equality
+    if type(self) is not type(other):
+      equality = id(self) == id(other)
+    else:
+      equality = (<Handle>self)._mojo_handle == (<Handle>other)._mojo_handle
+    if op == Py_EQ:
+      return equality
+    else:
+      return not equality
 
   def IsValid(self):
     """Returns whether this handle is valid."""
@@ -711,10 +728,29 @@ class DuplicateSharedBufferOptions(object):
     self.flags = DuplicateSharedBufferOptions.FLAG_NONE
 
 
+# Keeps a thread local weak reference to the current run loop.
+_RUN_LOOPS = threading.local()
+
+
 cdef class RunLoop(object):
   """RunLoop to use when using asynchronous operations on handles."""
 
-  cdef c_environment.CRunLoop c_run_loop
+  cdef c_environment.CRunLoop* c_run_loop
+
+  def __init__(self):
+    assert not <uintptr_t>(c_environment.CRunLoopCurrent())
+    self.c_run_loop = new c_environment.CRunLoop()
+    _RUN_LOOPS.loop = id(self)
+
+  def __dealloc__(self):
+    del _RUN_LOOPS.loop
+    del self.c_run_loop
+
+  @staticmethod
+  def Current():
+    if hasattr(_RUN_LOOPS, 'loop'):
+      return ctypes.cast(_RUN_LOOPS.loop, ctypes.py_object).value
+    return None
 
   def Run(self):
     """Run the runloop until Quit is called."""

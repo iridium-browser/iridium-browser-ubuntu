@@ -33,16 +33,19 @@ struct RtpStatistics {
   int extended_max_sequence_number;
 };
 
-struct StreamStats {
-  StreamStats()
+struct SsrcStats {
+  SsrcStats()
       : key_frames(0),
         delta_frames(0),
-        bitrate_bps(0),
+        total_bitrate_bps(0),
+        retransmit_bitrate_bps(0),
         avg_delay_ms(0),
         max_delay_ms(0) {}
   uint32_t key_frames;
   uint32_t delta_frames;
-  int32_t bitrate_bps;
+  // TODO(holmer): Move bitrate_bps out to the webrtc::Call layer.
+  int total_bitrate_bps;
+  int retransmit_bitrate_bps;
   int avg_delay_ms;
   int max_delay_ms;
   StreamDataCounters rtp_stats;
@@ -104,8 +107,17 @@ struct VideoStream {
 
   int max_qp;
 
-  // Bitrate thresholds for enabling additional temporal layers.
-  std::vector<int> temporal_layers;
+  // Bitrate thresholds for enabling additional temporal layers. Since these are
+  // thresholds in between layers, we have one additional layer. One threshold
+  // gives two temporal layers, one below the threshold and one above, two give
+  // three, and so on.
+  // The VideoEncoder may redistribute bitrates over the temporal layers so a
+  // bitrate threshold of 100k and an estimate of 105k does not imply that we
+  // get 100k in one temporal layer and 5k in the other, just that the bitrate
+  // in the first temporal layer should not exceed 100k.
+  // TODO(pbos): Apart from a special case for two-layer screencast these
+  // thresholds are not propagated to the VideoEncoder. To be implemented.
+  std::vector<int> temporal_layer_thresholds_bps;
 };
 
 struct VideoEncoderConfig {
@@ -115,11 +127,21 @@ struct VideoEncoderConfig {
   };
 
   VideoEncoderConfig()
-      : content_type(kRealtimeVideo), encoder_specific_settings(NULL) {}
+      : content_type(kRealtimeVideo),
+        encoder_specific_settings(NULL),
+        min_transmit_bitrate_bps(0) {}
+
+  std::string ToString() const;
 
   std::vector<VideoStream> streams;
   ContentType content_type;
   void* encoder_specific_settings;
+
+  // Padding will be used up to this bitrate regardless of the bitrate produced
+  // by the encoder. Padding above what's actually produced by the encoder helps
+  // maintaining a higher bitrate estimate. Padding will however not be sent
+  // unless the estimated bandwidth indicates that the link can handle it.
+  int min_transmit_bitrate_bps;
 };
 
 }  // namespace webrtc

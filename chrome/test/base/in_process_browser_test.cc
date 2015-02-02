@@ -39,7 +39,6 @@
 #include "chrome/test/base/test_launcher_utils.h"
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/testing_browser_process.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/os_crypt/os_crypt.h"
 #include "content/public/browser/notification_service.h"
@@ -85,10 +84,10 @@ class SingleDesktopTestObserver : public chrome::BrowserListObserver,
                                   public base::NonThreadSafe {
  public:
   explicit SingleDesktopTestObserver(chrome::HostDesktopType allowed_desktop);
-  virtual ~SingleDesktopTestObserver();
+  ~SingleDesktopTestObserver() override;
 
   // chrome::BrowserListObserver:
-  virtual void OnBrowserAdded(Browser* browser) OVERRIDE;
+  void OnBrowserAdded(Browser* browser) override;
 
  private:
   chrome::HostDesktopType allowed_desktop_;

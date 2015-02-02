@@ -10,9 +10,8 @@
 
 #include "cc/base/region.h"
 #include "cc/debug/rendering_stats_instrumentation.h"
-#include "cc/resources/picture_pile_impl.h"
 #include "cc/resources/raster_worker_pool.h"
-#include "cc/resources/tile_priority.h"
+#include "skia/ext/analysis_canvas.h"
 
 namespace {
 // Layout pixel buffer around the visible layer rect to record.  Any base
@@ -436,10 +435,10 @@ bool PicturePile::UpdateAndExpandInvalidation(
         updated = picture_it->second.Invalidate(frame_number) || updated;
         // Invalidate drops the picture so the whole tile better be invalidated
         // if it won't be re-recorded below.
-        DCHECK(tiling_.TileBounds(key.first, key.second)
-                   .Intersects(interest_rect_over_tiles) ||
-               invalidation_expanded_to_full_tiles.Contains(
-                   tiling_.TileBounds(key.first, key.second)));
+        DCHECK_IMPLIES(!tiling_.TileBounds(key.first, key.second)
+                            .Intersects(interest_rect_over_tiles),
+                       invalidation_expanded_to_full_tiles.Contains(
+                           tiling_.TileBounds(key.first, key.second)));
       }
     }
     invalidation->Union(invalidation_expanded_to_full_tiles);
@@ -517,7 +516,6 @@ bool PicturePile::UpdateAndExpandInvalidation(
         // the pile after each invalidation.
         is_suitable_for_gpu_rasterization_ &=
             picture->IsSuitableForGpuRasterization();
-        has_text_ |= picture->HasText();
         base::TimeDelta duration =
             stats_instrumentation->EndRecording(start_time);
         best_duration = std::min(duration, best_duration);
@@ -551,9 +549,20 @@ bool PicturePile::UpdateAndExpandInvalidation(
 
 void PicturePile::SetEmptyBounds() {
   tiling_.SetTilingSize(gfx::Size());
-  picture_map_.clear();
-  has_any_recordings_ = false;
-  recorded_viewport_ = gfx::Rect();
+  Clear();
+}
+
+bool PicturePile::CanRasterSlowTileCheck(const gfx::Rect& layer_rect) const {
+  bool include_borders = false;
+  for (TilingData::Iterator tile_iter(&tiling_, layer_rect, include_borders);
+       tile_iter; ++tile_iter) {
+    PictureMap::const_iterator map_iter = picture_map_.find(tile_iter.index());
+    if (map_iter == picture_map_.end())
+      return false;
+    if (!map_iter->second.GetPicture())
+      return false;
+  }
+  return true;
 }
 
 void PicturePile::DetermineIfSolidColor() {
@@ -581,9 +590,10 @@ void PicturePile::DetermineIfSolidColor() {
     if (it->second.GetPicture() != picture)
       return;
   }
-  skia::AnalysisCanvas canvas(recorded_viewport_.width(),
-                              recorded_viewport_.height());
-  canvas.translate(-recorded_viewport_.x(), -recorded_viewport_.y());
+
+  gfx::Size layer_size = tiling_size();
+  skia::AnalysisCanvas canvas(layer_size.width(), layer_size.height());
+
   picture->Raster(&canvas, nullptr, Region(), 1.0f);
   is_solid_color_ = canvas.GetColorIfSolid(&solid_color_);
 }

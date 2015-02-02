@@ -27,7 +27,7 @@ class ChildModalParent : public views::WidgetDelegateView,
                          public views::WidgetObserver {
  public:
   ChildModalParent(gfx::NativeView context);
-  virtual ~ChildModalParent();
+  ~ChildModalParent() override;
 
   void ShowChild();
   gfx::NativeWindow GetModalParent() const;
@@ -37,22 +37,21 @@ class ChildModalParent : public views::WidgetDelegateView,
   views::Widget* CreateChild();
 
   // Overridden from views::WidgetDelegate:
-  virtual View* GetContentsView() OVERRIDE;
-  virtual base::string16 GetWindowTitle() const OVERRIDE;
-  virtual bool CanResize() const OVERRIDE;
-  virtual void DeleteDelegate() OVERRIDE;
+  View* GetContentsView() override;
+  base::string16 GetWindowTitle() const override;
+  bool CanResize() const override;
+  void DeleteDelegate() override;
 
   // Overridden from views::View:
-  virtual void Layout() OVERRIDE;
-  virtual void ViewHierarchyChanged(
-      const ViewHierarchyChangedDetails& details) OVERRIDE;
+  void Layout() override;
+  void ViewHierarchyChanged(
+      const ViewHierarchyChangedDetails& details) override;
 
   // Overridden from ButtonListener:
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // Overridden from WidgetObserver:
-  virtual void OnWidgetDestroying(views::Widget* widget) OVERRIDE;
+  void OnWidgetDestroying(views::Widget* widget) override;
 
   // The button to toggle showing and hiding the child window. The child window
   // does not block input to this button.

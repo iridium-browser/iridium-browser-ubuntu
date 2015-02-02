@@ -81,6 +81,12 @@ void ScriptedAnimationController::resume()
     scheduleAnimationIfNeeded();
 }
 
+void ScriptedAnimationController::dispatchEventsAndCallbacksForPrinting()
+{
+    dispatchEvents(EventNames::MediaQueryListEvent);
+    callMediaQueryListListeners();
+}
+
 ScriptedAnimationController::CallbackId ScriptedAnimationController::registerCallback(RequestAnimationFrameCallback* callback)
 {
     ScriptedAnimationController::CallbackId id = ++m_nextCallbackId;
@@ -122,11 +128,25 @@ void ScriptedAnimationController::cancelCallback(CallbackId id)
     }
 }
 
-void ScriptedAnimationController::dispatchEvents()
+void ScriptedAnimationController::dispatchEvents(const AtomicString& eventInterfaceFilter)
 {
     WillBeHeapVector<RefPtrWillBeMember<Event> > events;
-    events.swap(m_eventQueue);
-    m_perFrameEvents.clear();
+    if (eventInterfaceFilter.isEmpty()) {
+        events.swap(m_eventQueue);
+        m_perFrameEvents.clear();
+    } else {
+        WillBeHeapVector<RefPtrWillBeMember<Event> > remaining;
+        for (auto& event : m_eventQueue) {
+            if (event && event->interfaceName() == eventInterfaceFilter) {
+                m_perFrameEvents.remove(eventTargetKey(event.get()));
+                events.append(event.release());
+            } else {
+                remaining.append(event.release());
+            }
+        }
+        remaining.swap(m_eventQueue);
+    }
+
 
     for (size_t i = 0; i < events.size(); ++i) {
         EventTarget* eventTarget = events[i]->target();

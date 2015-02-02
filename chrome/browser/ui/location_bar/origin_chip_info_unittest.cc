@@ -52,7 +52,7 @@ class OriginChipInfoTest : public ChromeRenderViewHostTestHarness,
     EXPECT_EQ(expect_update, info_->Update(web_contents(), toolbar_model()));
   }
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ChromeRenderViewHostTestHarness::SetUp();
 #if defined(OS_CHROMEOS)
     test_user_manager_.reset(new chromeos::ScopedTestUserManager());
@@ -61,7 +61,7 @@ class OriginChipInfoTest : public ChromeRenderViewHostTestHarness,
     info_.reset(new OriginChipInfo(this, profile()));
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     info_.reset();
     toolbar_model_.reset();
 #if defined(OS_CHROMEOS)
@@ -70,8 +70,7 @@ class OriginChipInfoTest : public ChromeRenderViewHostTestHarness,
     ChromeRenderViewHostTestHarness::TearDown();
   }
 
-  virtual void OnExtensionIconImageChanged(
-      extensions::IconImage* image) OVERRIDE {
+  void OnExtensionIconImageChanged(extensions::IconImage* image) override {
     // We keep the value of |image| to check if it's set, but the actual value
     // is never used.
     icon_image_ = image;

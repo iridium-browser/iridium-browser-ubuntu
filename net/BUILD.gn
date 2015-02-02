@@ -197,8 +197,11 @@ component("net") {
       "cert/ct_objects_extractor_nss.cc",
       "cert/jwk_serializer_nss.cc",
       "cert/scoped_nss_types.h",
+      "cert/test_root_certs_nss.cc",
       "cert/x509_util_nss.cc",
       "cert/x509_util_nss.h",
+      "ocsp/nss_ocsp.cc",
+      "ocsp/nss_ocsp.h",
       "quic/crypto/aead_base_decrypter_nss.cc",
       "quic/crypto/aead_base_encrypter_nss.cc",
       "quic/crypto/aes_128_gcm_12_decrypter_nss.cc",
@@ -244,9 +247,11 @@ component("net") {
       sources -= [
         "cert/cert_verify_proc_nss.cc",
         "cert/cert_verify_proc_nss.h",
-        "cert/test_root_certs_nss.cc",
-        "ocsp/nss_ocsp.cc",
-        "ocsp/nss_ocsp.h",
+      ]
+    }
+    if (is_win) {
+      sources -= [
+        "cert/cert/sha256_legacy_support_nss_win.cc",
       ]
     }
   } else {
@@ -284,6 +289,7 @@ component("net") {
     }
     if (is_win) {
       sources -= [
+        "cert/sha256_legacy_support_openssl_win.cc",
         "ssl/openssl_platform_key_win.cc",
       ]
     }
@@ -317,7 +323,7 @@ component("net") {
     ]
   }
 
-  if (use_glib) {
+  if (use_glib && !is_chromeos) {
     configs += [ "//build/config/linux:gconf" ]
     deps += [ "//build/config/linux:gio" ]
   }
@@ -340,7 +346,7 @@ component("net") {
       "third_party/mozilla_security_manager/nsPKCS12Blob.h",
     ]
 
-    if (!is_ios) {
+    if (!is_ios && !use_openssl) {
       # These files are part of the partial implementation of NSS on iOS so
       # keep them in that case.
       sources -= [
@@ -458,10 +464,6 @@ component("net") {
       "udp/udp_socket_libevent.cc",
       "udp/udp_socket_libevent.h",
     ]
-    deps += [
-      "//third_party/nss:nspr",
-      "//third_party/nss",
-    ]
   } else {  # !is_win
     sources -= [
       "base/winsock_init.cc",
@@ -474,12 +476,6 @@ component("net") {
   }
 
   if (is_mac) {
-    if (!use_openssl) {
-      deps += [
-        "//third_party/nss:nspr",
-        "//third_party/nss",
-      ]
-    }
     libs = [
       "Foundation.framework",
       "Security.framework",
@@ -509,9 +505,6 @@ component("net") {
     set_sources_assignment_filter(sources_assignment_filter)
 
     sources -= [ "disk_cache/blockfile/file_posix.cc" ]
-    deps += [
-      "//third_party/nss",
-    ]
     libs = [
       "CFNetwork.framework",
       "MobileCoreServices.framework",
@@ -708,8 +701,8 @@ source_set("test_support") {
     "//url",
   ]
 
-  if (is_ios) {
-    public_deps += [ "//third_party/nss" ]
+  if (!use_openssl && (use_nss_certs || is_ios)) {
+    public_deps += ["//crypto:platform" ]
   }
 
   if (!is_android) {
@@ -732,9 +725,7 @@ source_set("test_support") {
     ]
   }
 
-  if (use_nss_certs) {
-    public_deps += ["//crypto:platform" ]
-  } else {
+  if (!use_nss_certs) {
     sources -= [
       "test/cert_test_util_nss.cc",
     ]
@@ -864,7 +855,7 @@ if (!is_ios && !is_android) {
         "//base",
       ]
 
-      if (is_linux) {
+      if (is_desktop_linux) {
         configs += [
           "//build/config/linux:gconf",
           "//build/config/linux:glib",

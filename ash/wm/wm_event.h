@@ -26,6 +26,7 @@ enum WMEventType {
   WM_EVENT_FULLSCREEN,
   WM_EVENT_SNAP_LEFT,
   WM_EVENT_SNAP_RIGHT,
+  WM_EVENT_DOCK,
 
   // A window is requested to be the given bounds. The request may or
   // may not be fulfilled depending on the requested bounds and window's
@@ -52,6 +53,19 @@ enum WMEventType {
 
   // A user requested to toggle fullscreen state.
   WM_EVENT_TOGGLE_FULLSCREEN,
+
+  // A user requested a cycle of dock and snap left.
+  // The way this event is processed is the current window state is used as
+  // the starting state. Assuming normal window start state; if the window can
+  // be snapped left, snap it; otherwise progress to next state. If the window
+  // can be docked left, dock it; otherwise progress to next state. If the
+  // window can be restored; and this isn't the entry condition restore it;
+  // otherwise apply the bounce animation to the window.
+  WM_EVENT_CYCLE_SNAP_DOCK_LEFT,
+
+  // A user requested a cycle of dock and snap right.
+  // See decription of WM_EVENT_CYCLE_SNAP_DOCK_LEFT.
+  WM_EVENT_CYCLE_SNAP_DOCK_RIGHT,
 
   // A user requested to center a window.
   WM_EVENT_CENTER,
@@ -91,7 +105,7 @@ class ASH_EXPORT WMEvent {
 class SetBoundsEvent : public WMEvent {
 public:
   SetBoundsEvent(WMEventType type, const gfx::Rect& requested_bounds);
-  virtual ~SetBoundsEvent();
+  ~SetBoundsEvent() override;
 
   const gfx::Rect& requested_bounds() const { return requested_bounds_; }
 

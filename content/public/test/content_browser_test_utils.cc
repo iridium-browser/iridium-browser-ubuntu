@@ -110,7 +110,7 @@ class RenderViewCreatedObserver : public WebContentsObserver {
   }
 
   // WebContentsObserver:
-  virtual void RenderViewCreated(RenderViewHost* rvh) OVERRIDE {
+  void RenderViewCreated(RenderViewHost* rvh) override {
     render_view_created_called_ = true;
   }
 

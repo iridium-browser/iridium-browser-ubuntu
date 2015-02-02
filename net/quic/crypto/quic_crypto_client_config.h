@@ -35,6 +35,24 @@ class NET_EXPORT_PRIVATE QuicCryptoClientConfig : public QuicCryptoConfig {
   // over several connections to the same server.
   class NET_EXPORT_PRIVATE CachedState {
    public:
+    // Enum to track if the server config is valid or not. If it is not valid,
+    // it specifies why it is invalid.
+    enum ServerConfigState {
+      // WARNING: Do not change the numerical values of any of server config
+      // state. Do not remove deprecated server config states - just comment
+      // them as deprecated.
+      SERVER_CONFIG_EMPTY = 0,
+      SERVER_CONFIG_INVALID = 1,
+      SERVER_CONFIG_CORRUPTED = 2,
+      SERVER_CONFIG_EXPIRED = 3,
+      SERVER_CONFIG_INVALID_EXPIRY = 4,
+      SERVER_CONFIG_VALID = 5,
+      // NOTE: Add new server config states only immediately above this line.
+      // Make sure to update the QuicServerConfigState enum in
+      // tools/metrics/histograms/histograms.xml accordingly.
+      SERVER_CONFIG_COUNT
+    };
+
     CachedState();
     ~CachedState();
 
@@ -46,17 +64,17 @@ class NET_EXPORT_PRIVATE QuicCryptoClientConfig : public QuicCryptoConfig {
     // IsEmpty returns true if |server_config_| is empty.
     bool IsEmpty() const;
 
-    // GetServerConfig returns the parsed contents of |server_config|, or NULL
-    // if |server_config| is empty. The return value is owned by this object
-    // and is destroyed when this object is.
+    // GetServerConfig returns the parsed contents of |server_config|, or
+    // nullptr if |server_config| is empty. The return value is owned by this
+    // object and is destroyed when this object is.
     const CryptoHandshakeMessage* GetServerConfig() const;
 
     // SetServerConfig checks that |server_config| parses correctly and stores
     // it in |server_config_|. |now| is used to judge whether |server_config|
     // has expired.
-    QuicErrorCode SetServerConfig(base::StringPiece server_config,
-                                  QuicWallTime now,
-                                  std::string* error_details);
+    ServerConfigState SetServerConfig(base::StringPiece server_config,
+                                      QuicWallTime now,
+                                      std::string* error_details);
 
     // InvalidateServerConfig clears the cached server config (if any).
     void InvalidateServerConfig();
@@ -133,9 +151,6 @@ class NET_EXPORT_PRIVATE QuicCryptoClientConfig : public QuicCryptoConfig {
   QuicCryptoClientConfig();
   ~QuicCryptoClientConfig();
 
-  // Sets the members to reasonable, default values.
-  void SetDefaults();
-
   // LookupOrCreate returns a CachedState for the given |server_id|. If no such
   // CachedState currently exists, it will be created and cached.
   CachedState* LookupOrCreate(const QuicServerId& server_id);
@@ -144,7 +159,7 @@ class NET_EXPORT_PRIVATE QuicCryptoClientConfig : public QuicCryptoConfig {
   void ClearCachedStates();
 
   // FillInchoateClientHello sets |out| to be a CHLO message that elicits a
-  // source-address token or SCFG from a server. If |cached| is non-NULL, the
+  // source-address token or SCFG from a server. If |cached| is non-nullptr, the
   // source-address token will be taken from it. |out_params| is used in order
   // to store the cached certs that were sent as hints to the server in
   // |out_params->cached_certs|. |preferred_version| is the version of the
@@ -269,6 +284,9 @@ class NET_EXPORT_PRIVATE QuicCryptoClientConfig : public QuicCryptoConfig {
  private:
   typedef std::map<QuicServerId, CachedState*> CachedStateMap;
 
+  // Sets the members to reasonable, default values.
+  void SetDefaults();
+
   // CacheNewServerConfig checks for SCFG, STK, PROF, and CRT tags in |message|,
   // verifies them, and stores them in the cached state if they validate.
   // This is used on receipt of a REJ from a server, or when a server sends
@@ -280,10 +298,11 @@ class NET_EXPORT_PRIVATE QuicCryptoClientConfig : public QuicCryptoConfig {
       CachedState* cached,
       std::string* error_details);
 
-  // If the suffix of the hostname in |server_id| is in |canoncial_suffixes_|,
+  // If the suffix of the hostname in |server_id| is in |canonical_suffixes_|,
   // then populate |cached| with the canonical cached state from
-  // |canonical_server_map_| for that suffix.
-  void PopulateFromCanonicalConfig(const QuicServerId& server_id,
+  // |canonical_server_map_| for that suffix. Returns true if |cached| is
+  // initialized with canonical cached state.
+  bool PopulateFromCanonicalConfig(const QuicServerId& server_id,
                                    CachedState* cached);
 
   // cached_states_ maps from the server_id to the cached information about
@@ -297,8 +316,8 @@ class NET_EXPORT_PRIVATE QuicCryptoClientConfig : public QuicCryptoConfig {
   std::map<QuicServerId, QuicServerId> canonical_server_map_;
 
   // Contains list of suffixes (for exmaple ".c.youtube.com",
-  // ".googlevideo.com") of canoncial hostnames.
-  std::vector<std::string> canoncial_suffixes_;
+  // ".googlevideo.com") of canonical hostnames.
+  std::vector<std::string> canonical_suffixes_;
 
   scoped_ptr<ProofVerifier> proof_verifier_;
   scoped_ptr<ChannelIDSource> channel_id_source_;

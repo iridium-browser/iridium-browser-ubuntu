@@ -39,11 +39,11 @@ class ProfileSyncServiceTestHelper {
 class AbstractProfileSyncServiceTest : public testing::Test {
  public:
   AbstractProfileSyncServiceTest();
-  virtual ~AbstractProfileSyncServiceTest();
+  ~AbstractProfileSyncServiceTest() override;
 
-  virtual void SetUp() OVERRIDE;
+  void SetUp() override;
 
-  virtual void TearDown() OVERRIDE;
+  void TearDown() override;
 
   bool CreateRoot(syncer::ModelType model_type);
 

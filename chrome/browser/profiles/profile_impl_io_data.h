@@ -14,6 +14,8 @@
 #include "chrome/browser/profiles/profile_io_data.h"
 #include "content/public/browser/cookie_store_factory.h"
 
+class ChromeSdchPolicy;
+
 namespace chrome_browser_net {
 class Predictor;
 }  // namespace chrome_browser_net
@@ -149,6 +151,12 @@ class ProfileImplIOData : public ProfileIOData {
     DISALLOW_COPY_AND_ASSIGN(Handle);
   };
 
+  bool IsDataReductionProxyEnabled() const override;
+
+  BooleanPrefMember* data_reduction_proxy_enabled() const {
+    return &data_reduction_proxy_enabled_;
+  }
+
  private:
   friend class base::RefCountedThreadSafe<ProfileImplIOData>;
 
@@ -170,41 +178,37 @@ class ProfileImplIOData : public ProfileIOData {
   };
 
   ProfileImplIOData();
-  virtual ~ProfileImplIOData();
+  ~ProfileImplIOData() override;
 
-  virtual void InitializeInternal(
-      ProfileParams* profile_params,
-      content::ProtocolHandlerMap* protocol_handlers,
-      content::URLRequestInterceptorScopedVector request_interceptors)
-          const OVERRIDE;
-  virtual void InitializeExtensionsRequestContext(
-      ProfileParams* profile_params) const OVERRIDE;
-  virtual net::URLRequestContext* InitializeAppRequestContext(
+  void InitializeInternal(ProfileParams* profile_params,
+                          content::ProtocolHandlerMap* protocol_handlers,
+                          content::URLRequestInterceptorScopedVector
+                              request_interceptors) const override;
+  void InitializeExtensionsRequestContext(
+      ProfileParams* profile_params) const override;
+  net::URLRequestContext* InitializeAppRequestContext(
       net::URLRequestContext* main_context,
       const StoragePartitionDescriptor& partition_descriptor,
       scoped_ptr<ProtocolHandlerRegistry::JobInterceptorFactory>
           protocol_handler_interceptor,
       content::ProtocolHandlerMap* protocol_handlers,
       content::URLRequestInterceptorScopedVector request_interceptors)
-          const OVERRIDE;
-  virtual net::URLRequestContext* InitializeMediaRequestContext(
+      const override;
+  net::URLRequestContext* InitializeMediaRequestContext(
       net::URLRequestContext* original_context,
-      const StoragePartitionDescriptor& partition_descriptor) const OVERRIDE;
-  virtual net::URLRequestContext*
-      AcquireMediaRequestContext() const OVERRIDE;
-  virtual net::URLRequestContext* AcquireIsolatedAppRequestContext(
+      const StoragePartitionDescriptor& partition_descriptor) const override;
+  net::URLRequestContext* AcquireMediaRequestContext() const override;
+  net::URLRequestContext* AcquireIsolatedAppRequestContext(
       net::URLRequestContext* main_context,
       const StoragePartitionDescriptor& partition_descriptor,
       scoped_ptr<ProtocolHandlerRegistry::JobInterceptorFactory>
           protocol_handler_interceptor,
       content::ProtocolHandlerMap* protocol_handlers,
       content::URLRequestInterceptorScopedVector request_interceptors)
-          const OVERRIDE;
-  virtual net::URLRequestContext*
-      AcquireIsolatedMediaRequestContext(
-          net::URLRequestContext* app_context,
-          const StoragePartitionDescriptor& partition_descriptor)
-              const OVERRIDE;
+      const override;
+  net::URLRequestContext* AcquireIsolatedMediaRequestContext(
+      net::URLRequestContext* app_context,
+      const StoragePartitionDescriptor& partition_descriptor) const override;
 
   // Deletes all network related data since |time|. It deletes transport
   // security state since |time| and also deletes HttpServerProperties data.
@@ -234,6 +238,9 @@ class ProfileImplIOData : public ProfileIOData {
       domain_reliability_monitor_;
 
   mutable scoped_ptr<net::SdchManager> sdch_manager_;
+  mutable scoped_ptr<ChromeSdchPolicy> sdch_policy_;
+
+  mutable BooleanPrefMember data_reduction_proxy_enabled_;
 
   // Parameters needed for isolated apps.
   base::FilePath profile_path_;

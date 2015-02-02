@@ -28,13 +28,13 @@ class FindBarStateFactory : public BrowserContextKeyedServiceFactory {
   friend struct DefaultSingletonTraits<FindBarStateFactory>;
 
   FindBarStateFactory();
-  virtual ~FindBarStateFactory();
+  ~FindBarStateFactory() override;
 
   // BrowserContextKeyedServiceFactory:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* profile) const OVERRIDE;
-  virtual content::BrowserContext* GetBrowserContextToUse(
-      content::BrowserContext* context) const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* profile) const override;
+  content::BrowserContext* GetBrowserContextToUse(
+      content::BrowserContext* context) const override;
 
   DISALLOW_COPY_AND_ASSIGN(FindBarStateFactory);
 };

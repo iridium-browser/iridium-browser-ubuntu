@@ -1,5 +1,6 @@
 include_rules = [
   "+components/keyed_service",
+  "+components/omaha_query_params",
   "+components/pref_registry",
   "+components/sessions",
   "+components/storage_monitor",
@@ -7,6 +8,9 @@ include_rules = [
   "+components/web_modal",
   "+content/public/browser",
   "+device/bluetooth",
+  "+device/serial",
+  "+device/usb",
+  "+google_apis/gaia",
   "+grit/extensions_strings.h",
   "+net",
   "+skia/ext/image_operations.h",

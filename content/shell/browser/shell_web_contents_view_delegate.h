@@ -14,27 +14,16 @@ namespace content {
 class ShellWebContentsViewDelegate : public WebContentsViewDelegate {
  public:
   explicit ShellWebContentsViewDelegate(WebContents* web_contents);
-  virtual ~ShellWebContentsViewDelegate();
+  ~ShellWebContentsViewDelegate() override;
 
   // Overridden from WebContentsViewDelegate:
-  virtual void ShowContextMenu(RenderFrameHost* render_frame_host,
-                               const ContextMenuParams& params) OVERRIDE;
+  void ShowContextMenu(RenderFrameHost* render_frame_host,
+                       const ContextMenuParams& params) override;
 
 #if defined(OS_MACOSX)
   void ActionPerformed(int id);
 #elif defined(OS_WIN)
   void MenuItemSelected(int selection);
-#endif
-
-#if defined(TOOLKIT_VIEWS)
-  virtual void ShowDisambiguationPopup(
-      const gfx::Rect& target_rect,
-      const SkBitmap& zoomed_bitmap,
-      const gfx::NativeView content,
-      const base::Callback<void(ui::GestureEvent*)>& gesture_cb,
-      const base::Callback<void(ui::MouseEvent*)>& mouse_cb) OVERRIDE;
-
-  virtual void HideDisambiguationPopup() OVERRIDE;
 #endif
 
  private:

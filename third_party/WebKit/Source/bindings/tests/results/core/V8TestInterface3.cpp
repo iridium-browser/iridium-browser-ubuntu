@@ -21,7 +21,7 @@
 
 namespace blink {
 
-const WrapperTypeInfo V8TestInterface3::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterface3::domTemplate, V8TestInterface3::refObject, V8TestInterface3::derefObject, V8TestInterface3::createPersistentHandle, 0, 0, V8TestInterface3::visitDOMWrapper, V8TestInterface3::installConditionallyEnabledMethods, V8TestInterface3::installConditionallyEnabledProperties, 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::Dependent, WrapperTypeInfo::RefCountedObject };
+const WrapperTypeInfo V8TestInterface3::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterface3::domTemplate, V8TestInterface3::refObject, V8TestInterface3::derefObject, V8TestInterface3::trace, 0, 0, V8TestInterface3::visitDOMWrapper, V8TestInterface3::installConditionallyEnabledMethods, V8TestInterface3::installConditionallyEnabledProperties, 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::Dependent, WrapperTypeInfo::RefCountedObject };
 
 // This static member must be declared by DEFINE_WRAPPERTYPEINFO in TestInterface3.h.
 // For details, see the comment of DEFINE_WRAPPERTYPEINFO in
@@ -29,8 +29,6 @@ const WrapperTypeInfo V8TestInterface3::wrapperTypeInfo = { gin::kEmbedderBlink,
 const WrapperTypeInfo& TestInterface3::s_wrapperTypeInfo = V8TestInterface3::wrapperTypeInfo;
 
 namespace TestInterface3V8Internal {
-
-template <typename T> void V8_USE(T) { }
 
 static void indexedPropertyGetterCallback(uint32_t index, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
@@ -100,8 +98,10 @@ static void installV8TestInterface3Template(v8::Handle<v8::FunctionTemplate> fun
         0, 0,
         0, 0,
         isolate);
-    v8::Local<v8::ObjectTemplate> instanceTemplate ALLOW_UNUSED = functionTemplate->InstanceTemplate();
-    v8::Local<v8::ObjectTemplate> prototypeTemplate ALLOW_UNUSED = functionTemplate->PrototypeTemplate();
+    v8::Local<v8::ObjectTemplate> instanceTemplate = functionTemplate->InstanceTemplate();
+    ALLOW_UNUSED_LOCAL(instanceTemplate);
+    v8::Local<v8::ObjectTemplate> prototypeTemplate = functionTemplate->PrototypeTemplate();
+    ALLOW_UNUSED_LOCAL(prototypeTemplate);
     functionTemplate->InstanceTemplate()->SetIndexedPropertyHandler(TestInterface3V8Internal::indexedPropertyGetterCallback, TestInterface3V8Internal::indexedPropertySetterCallback, 0, TestInterface3V8Internal::indexedPropertyDeleterCallback, indexedPropertyEnumerator<TestInterface3>);
     functionTemplate->InstanceTemplate()->SetNamedPropertyHandler(TestInterface3V8Internal::namedPropertyGetterCallback, TestInterface3V8Internal::namedPropertySetterCallback, TestInterface3V8Internal::namedPropertyQueryCallback, TestInterface3V8Internal::namedPropertyDeleterCallback, TestInterface3V8Internal::namedPropertyEnumeratorCallback);
 
@@ -129,21 +129,14 @@ TestInterface3* V8TestInterface3::toImplWithTypeCheck(v8::Isolate* isolate, v8::
     return hasInstance(value, isolate) ? blink::toScriptWrappableBase(v8::Handle<v8::Object>::Cast(value))->toImpl<TestInterface3>() : 0;
 }
 
-
-void V8TestInterface3::refObject(ScriptWrappableBase* internalPointer)
+void V8TestInterface3::refObject(ScriptWrappableBase* scriptWrappableBase)
 {
-    internalPointer->toImpl<TestInterface3>()->ref();
+    scriptWrappableBase->toImpl<TestInterface3>()->ref();
 }
 
-void V8TestInterface3::derefObject(ScriptWrappableBase* internalPointer)
+void V8TestInterface3::derefObject(ScriptWrappableBase* scriptWrappableBase)
 {
-    internalPointer->toImpl<TestInterface3>()->deref();
-}
-
-WrapperPersistentNode* V8TestInterface3::createPersistentHandle(ScriptWrappableBase* internalPointer)
-{
-    ASSERT_NOT_REACHED();
-    return 0;
+    scriptWrappableBase->toImpl<TestInterface3>()->deref();
 }
 
 template<>

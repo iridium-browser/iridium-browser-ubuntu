@@ -41,6 +41,8 @@
 
     [TypeChecking=Interface] CSSStyleDeclaration computedStyleIncludingVisitedInfo(Node node);
 
+    [TypeChecking=Interface] ShadowRoot createUserAgentShadowRoot(Element host);
+
     [TypeChecking=Interface] ShadowRoot shadowRoot(Element host);
     [TypeChecking=Interface] ShadowRoot youngestShadowRoot(Element host);
     [TypeChecking=Interface] ShadowRoot oldestShadowRoot(Element host);
@@ -83,6 +85,7 @@
     [RaisesException] void setFormControlStateOfHistoryItem(sequence<DOMString> values);
     [RaisesException] void setEnableMockPagePopup(boolean enabled);
     readonly attribute PagePopupController pagePopupController;
+    readonly attribute Window pagePopupWindow;
 
     [RaisesException] ClientRect absoluteCaretBounds();
 
@@ -96,7 +99,7 @@
     [TypeChecking=Interface] void setMarkersActive(Node node, unsigned long startOffset, unsigned long endOffset, boolean active);
     void setMarkedTextMatchesAreHighlighted(Document document, boolean highlight);
 
-    [RaisesException, TypeChecking=Interface] void setScrollViewPosition(Document document, long x, long y);
+    [RaisesException, TypeChecking=Interface] void setFrameViewPosition(Document document, long x, long y);
 
     [RaisesException, TypeChecking=Interface] DOMString viewportAsText(Document document,
                                                                        float devicePixelRatio,
@@ -166,7 +169,6 @@
     [RaisesException, TypeChecking=Interface] DOMString elementLayerTreeAsText(Element element, optional unsigned short flags);
 
     [RaisesException, TypeChecking=Interface] boolean scrollsWithRespectTo(Element element1, Element element2);
-    [RaisesException, TypeChecking=Interface] boolean isUnclippedDescendant(Element element);
 
     [TypeChecking=Interface] DOMString scrollingStateTreeAsText(Document document);
     [RaisesException, TypeChecking=Interface] DOMString mainThreadScrollingReasons(Document document);
@@ -181,6 +183,7 @@
     sequence<DOMString> consoleMessageArgumentCounts(Document document);
     unsigned long[] setMemoryCacheCapacities(unsigned long minDeadBytes, unsigned long maxDeadBytes, unsigned long totalBytes);
     [RaisesException] void setInspectorResourcesDataSizeLimits(long maximumResourcesContentSize, long maximumSingleResourceContentSize);
+    [RaisesException] DOMString inspectorHighlightJSON(Node node);
 
     DOMString counterValue(Element element);
     long pageNumber(Element element, optional float pageWidth, optional float pageHeight);
@@ -259,6 +262,9 @@
     [CallWith=ScriptState, RaisesException] Promise promiseCheck(long arg1, boolean arg2, Dictionary arg3, DOMString arg4, DOMString[] arg5);
     [CallWith=ScriptState] Promise promiseCheckWithoutExceptionState(Dictionary arg1, DOMString arg2, DOMString... variadic);
     [CallWith=ScriptState] Promise promiseCheckRange([EnforceRange] octet arg1);
+    [CallWith=ScriptState] Promise promiseCheckOverload(Location arg1);
+    [CallWith=ScriptState] Promise promiseCheckOverload(Document arg1);
+    [CallWith=ScriptState] Promise promiseCheckOverload(Location arg1, long arg2, long arg3);
 
     void setValueForUser(Element element, DOMString value);
 
@@ -279,8 +285,9 @@
     DOMString serializeNavigationMarkup();
     void hideAllTransitionElements();
 
-    [RaisesException, TypeChecking=Interface] void forcePluginPlaceholder(HTMLElement plugin, DOMString htmlSource);
+    [RaisesException, TypeChecking=Interface] void forcePluginPlaceholder(HTMLElement plugin, DocumentFragment fragment);
     [RaisesException, TypeChecking=Interface] void forcePluginPlaceholder(HTMLElement plugin, Dictionary options);
 
     DictionaryTest dictionaryTest();
+    UnionTypesTest unionTypesTest();
 };

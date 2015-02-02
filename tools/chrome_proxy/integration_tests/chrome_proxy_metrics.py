@@ -7,6 +7,7 @@ import logging
 import os
 
 from integration_tests import network_metrics
+from telemetry.core import util
 from telemetry.page import page_test
 from telemetry.value import scalar
 
@@ -20,7 +21,7 @@ CHROME_PROXY_VIA_HEADER_DEPRECATED = '1.1 Chrome Compression Proxy'
 
 PROXY_SETTING_HTTPS = 'proxy.googlezip.net:443'
 PROXY_SETTING_HTTPS_WITH_SCHEME = 'https://' + PROXY_SETTING_HTTPS
-PROXY_DEV_SETTING_HTTPS_WITH_SCHEME = 'http://proxy-dev.googlezip.net:80'
+PROXY_DEV_SETTING_HTTP = 'proxy-dev.googlezip.net:80'
 PROXY_SETTING_HTTP = 'compress.googlezip.net:80'
 PROXY_SETTING_DIRECT = 'direct://'
 
@@ -36,12 +37,21 @@ def GetProxyInfoFromNetworkInternals(tab, url='chrome://net-internals#proxy'):
     js = f.read()
     tab.ExecuteJavaScript(js)
   tab.WaitForJavaScriptExpression('performance.timing.loadEventStart', 300)
+
+  # Sometimes, the proxy information on net_internals#proxy is slow to come up.
+  # In order to prevent this from causing tests to flake frequently, wait for
+  # up to 10 seconds for this information to appear.
+  def IsDataReductionProxyEnabled():
+    info = tab.EvaluateJavaScript('window.__getChromeProxyInfo()')
+    return info['enabled']
+
+  util.WaitFor(IsDataReductionProxyEnabled, 10)
   info = tab.EvaluateJavaScript('window.__getChromeProxyInfo()')
   return info
 
 
 def ProxyRetryTimeInRange(retry_time, low, high, grace_seconds=30):
-  return (retry_time >= low and
+  return (retry_time >= low - datetime.timedelta(seconds=grace_seconds) and
           (retry_time < high + datetime.timedelta(seconds=grace_seconds)))
 
 
@@ -89,6 +99,26 @@ class ChromeProxyResponse(network_metrics.HTTPResponse):
       return True
     return False
 
+  def GetChromeProxyClientType(self):
+    """Get the client type directive from the Chrome-Proxy request header.
+
+    Returns:
+        The client type directive from the Chrome-Proxy request header for the
+        request that lead to this response. For example, if the request header
+        "Chrome-Proxy: c=android" is present, then this method would return
+        "android". Returns None if no client type directive is present.
+    """
+    if 'Chrome-Proxy' not in self.response.request_headers:
+      return None
+
+    chrome_proxy_request_header = self.response.request_headers['Chrome-Proxy']
+    values = [v.strip() for v in chrome_proxy_request_header.split(',')]
+    for value in values:
+      kvp = value.split('=', 1)
+      if len(kvp) == 2 and kvp[0].strip() == 'c':
+        return kvp[1].strip()
+    return None
+
 
 class ChromeProxyMetric(network_metrics.NetworkMetric):
   """A Chrome proxy timeline metric."""
@@ -98,7 +128,7 @@ class ChromeProxyMetric(network_metrics.NetworkMetric):
     self.compute_data_saving = True
     self.effective_proxies = {
         "proxy": PROXY_SETTING_HTTPS_WITH_SCHEME,
-        "proxy-dev": PROXY_DEV_SETTING_HTTPS_WITH_SCHEME,
+        "proxy-dev": PROXY_DEV_SETTING_HTTP,
         "fallback": PROXY_SETTING_HTTP,
         "direct": PROXY_SETTING_DIRECT,
         }
@@ -169,9 +199,61 @@ class ChromeProxyMetric(network_metrics.NetworkMetric):
     results.AddValue(scalar.ScalarValue(
         results.current_page, 'version_test', 'count', 1))
 
+  def GetClientTypeFromRequests(self, tab):
+    """Get the Chrome-Proxy client type value from requests made in this tab.
+
+    Returns:
+        The client type value from the first request made in this tab that
+        specifies a client type in the Chrome-Proxy request header. See
+        ChromeProxyResponse.GetChromeProxyClientType for more details about the
+        Chrome-Proxy client type. Returns None if none of the requests made in
+        this tab specify a client type.
+    """
+    for resp in self.IterResponses(tab):
+      client_type = resp.GetChromeProxyClientType()
+      if client_type:
+        return client_type
+    return None
+
+  def AddResultsForClientType(self, tab, results, client_type,
+                              bypass_for_client_type):
+    via_count = 0
+    bypass_count = 0
+
+    for resp in self.IterResponses(tab):
+      if resp.HasChromeProxyViaHeader():
+        via_count += 1
+        if client_type.lower() == bypass_for_client_type.lower():
+          raise ChromeProxyMetricException, (
+              '%s: Response for client of type "%s" has via header, but should '
+              'be bypassed.' % (
+                  resp.response.url, bypass_for_client_type, client_type))
+      elif resp.ShouldHaveChromeProxyViaHeader():
+        bypass_count += 1
+        if client_type.lower() != bypass_for_client_type.lower():
+          raise ChromeProxyMetricException, (
+              '%s: Response missing via header. Only "%s" clients should '
+              'bypass for this page, but this client is "%s".' % (
+                  resp.response.url, bypass_for_client_type, client_type))
+
+    results.AddValue(scalar.ScalarValue(
+        results.current_page, 'via', 'count', via_count))
+    results.AddValue(scalar.ScalarValue(
+        results.current_page, 'bypass', 'count', bypass_count))
+
+  def ProxyListForDev(self, proxies):
+    return [self.effective_proxies['proxy-dev']
+            if proxy == self.effective_proxies['proxy']
+            else proxy for proxy in proxies]
 
   def IsProxyBypassed(self, tab):
-    """ Returns True if all configured proxies are bypassed."""
+    """Get whether all configured proxies are bypassed.
+
+    Returns:
+        A tuple of the form (boolean, string list). If all configured proxies
+        are bypassed, then the return value will be (True, bypassed proxies).
+        Otherwise, the return value will be (False, empty list).
+    """
     if not tab:
       return False, []
 
@@ -180,13 +262,15 @@ class ChromeProxyMetric(network_metrics.NetworkMetric):
       raise ChromeProxyMetricException, (
           'Chrome proxy should be enabled. proxy info: %s' % info)
 
+    if not info['badProxies']:
+      return False, []
+
     bad_proxies = [str(p['proxy']) for p in info['badProxies']]
     bad_proxies.sort()
     proxies = [self.effective_proxies['proxy'],
                self.effective_proxies['fallback']]
     proxies.sort()
-    proxies_dev = [self.effective_proxies['proxy-dev'],
-                   self.effective_proxies['fallback']]
+    proxies_dev = self.ProxyListForDev(proxies)
     proxies_dev.sort()
     if bad_proxies == proxies:
       return True, proxies
@@ -194,38 +278,68 @@ class ChromeProxyMetric(network_metrics.NetworkMetric):
       return True, proxies_dev
     return False, []
 
-  @staticmethod
-  def VerifyBadProxies(
-      badProxies, expected_proxies,
-      retry_seconds_low = DEFAULT_BYPASS_MIN_SECONDS,
-      retry_seconds_high = DEFAULT_BYPASS_MAX_SECONDS):
-    """Verify the bad proxy list and their retry times are expected. """
-    if not badProxies or (len(badProxies) != len(expected_proxies)):
-      return False
+  def VerifyBadProxies(self, bad_proxies, expected_bad_proxies):
+    """Verify the bad proxy list and their retry times are expected.
 
-    # Check all expected proxies.
-    proxies = [p['proxy'] for p in badProxies]
-    expected_proxies.sort()
-    proxies.sort()
-    if not expected_proxies == proxies:
-      raise ChromeProxyMetricException, (
-          'Bad proxies: got %s want %s' % (
-              str(badProxies), str(expected_proxies)))
+    Args:
+        bad_proxies: the list of actual bad proxies and their retry times.
+        expected_bad_proxies: a list of dictionaries in the form:
 
-    # Check retry time
-    for p in badProxies:
+            {'proxy': <proxy origin>,
+             'retry_seconds_low': <minimum bypass duration in seconds>,
+             'retry_seconds_high': <maximum bypass duration in seconds>}
+
+            If an element in the list is missing either the 'retry_seconds_low'
+            entry or the 'retry_seconds_high' entry, the default bypass minimum
+            and maximum durations respectively will be used for that element.
+    """
+    if not bad_proxies:
+      bad_proxies = []
+
+    # Check that each of the proxy origins and retry times match.
+    for bad_proxy, expected_bad_proxy in map(None, bad_proxies,
+                                             expected_bad_proxies):
+      # Check if the proxy origins match, allowing for the proxy-dev origin in
+      # the place of the HTTPS proxy origin.
+      if (bad_proxy['proxy'] != expected_bad_proxy['proxy'] and
+          bad_proxy['proxy'] != expected_bad_proxy['proxy'].replace(
+              self.effective_proxies['proxy'],
+              self.effective_proxies['proxy-dev'])):
+        raise ChromeProxyMetricException, (
+            'Actual and expected bad proxies should match: %s vs. %s' % (
+                str(bad_proxy), str(expected_bad_proxy)))
+
+      # Check that the retry times match.
+      retry_seconds_low = expected_bad_proxy.get('retry_seconds_low',
+                                                 DEFAULT_BYPASS_MIN_SECONDS)
+      retry_seconds_high = expected_bad_proxy.get('retry_seconds_high',
+                                                  DEFAULT_BYPASS_MAX_SECONDS)
       retry_time_low = (datetime.datetime.now() +
                         datetime.timedelta(seconds=retry_seconds_low))
       retry_time_high = (datetime.datetime.now() +
-                        datetime.timedelta(seconds=retry_seconds_high))
-      got_retry_time = datetime.datetime.fromtimestamp(int(p['retry'])/1000)
+                         datetime.timedelta(seconds=retry_seconds_high))
+      got_retry_time = datetime.datetime.fromtimestamp(
+          int(bad_proxy['retry'])/1000)
       if not ProxyRetryTimeInRange(
           got_retry_time, retry_time_low, retry_time_high):
         raise ChromeProxyMetricException, (
             'Bad proxy %s retry time (%s) should be within range (%s-%s).' % (
-                p['proxy'], str(got_retry_time), str(retry_time_low),
+                bad_proxy['proxy'], str(got_retry_time), str(retry_time_low),
                 str(retry_time_high)))
-    return True
+
+  def VerifyAllProxiesBypassed(self, tab):
+    """Verify that all proxies are bypassed for 1 to 5 minutes."""
+    if tab:
+      info = GetProxyInfoFromNetworkInternals(tab)
+      if not info['enabled']:
+        raise ChromeProxyMetricException, (
+            'Chrome proxy should be enabled. proxy info: %s' % info)
+      is_bypassed, expected_bad_proxies = self.IsProxyBypassed(tab)
+      if not is_bypassed:
+        raise ChromeProxyMetricException, (
+            'Chrome proxy should be bypassed. proxy info: %s' % info)
+      self.VerifyBadProxies(info['badProxies'],
+                            [{'proxy': p} for p in expected_bad_proxies])
 
   def AddResultsForBypass(self, tab, results):
     bypass_count = 0
@@ -237,16 +351,72 @@ class ChromeProxyMetric(network_metrics.NetworkMetric):
                 r.url, r.GetHeader('Via'), r.GetHeader('Referer'), r.status))
       bypass_count += 1
 
-    if tab:
-      info = GetProxyInfoFromNetworkInternals(tab)
-      if not info['enabled']:
-        raise ChromeProxyMetricException, (
-            'Chrome proxy should be enabled. proxy info: %s' % info)
-      _, expected_bad_proxies = self.IsProxyBypassed(tab)
-      self.VerifyBadProxies(info['badProxies'], expected_bad_proxies)
-
+    self.VerifyAllProxiesBypassed(tab)
     results.AddValue(scalar.ScalarValue(
         results.current_page, 'bypass', 'count', bypass_count))
+
+  def AddResultsForFallback(self, tab, results):
+    via_proxy_count = 0
+    bypass_count = 0
+    for resp in self.IterResponses(tab):
+      if resp.HasChromeProxyViaHeader():
+        via_proxy_count += 1
+      elif resp.ShouldHaveChromeProxyViaHeader():
+        bypass_count += 1
+
+    if bypass_count != 1:
+      raise ChromeProxyMetricException, (
+          'Only the triggering response should have bypassed all proxies.')
+
+    info = GetProxyInfoFromNetworkInternals(tab)
+    if not 'enabled' in info or not info['enabled']:
+      raise ChromeProxyMetricException, (
+          'Chrome proxy should be enabled. proxy info: %s' % info)
+    self.VerifyBadProxies(info['badProxies'],
+                          [{'proxy': self.effective_proxies['proxy']}])
+
+    results.AddValue(scalar.ScalarValue(
+        results.current_page, 'via_proxy', 'count', via_proxy_count))
+    results.AddValue(scalar.ScalarValue(
+        results.current_page, 'bypass', 'count', bypass_count))
+
+  def AddResultsForCorsBypass(self, tab, results):
+    eligible_response_count = 0
+    bypass_count = 0
+    bypasses = {}
+    for resp in self.IterResponses(tab):
+      logging.warn('got a resource %s' % (resp.response.url))
+
+    for resp in self.IterResponses(tab):
+      if resp.ShouldHaveChromeProxyViaHeader():
+        eligible_response_count += 1
+        if not resp.HasChromeProxyViaHeader():
+          bypass_count += 1
+        elif resp.response.status == 502:
+          bypasses[resp.response.url] = 0
+
+    for resp in self.IterResponses(tab):
+      if resp.ShouldHaveChromeProxyViaHeader():
+        if not resp.HasChromeProxyViaHeader():
+          if resp.response.status == 200:
+            if (bypasses.has_key(resp.response.url)):
+              bypasses[resp.response.url] = bypasses[resp.response.url] + 1
+
+    for url in bypasses:
+      if bypasses[url] == 0:
+        raise ChromeProxyMetricException, (
+              '%s: Got a 502 without a subsequent 200' % (url))
+      elif bypasses[url] > 1:
+        raise ChromeProxyMetricException, (
+              '%s: Got a 502 and multiple 200s: %d' % (url, bypasses[url]))
+    if bypass_count == 0:
+      raise ChromeProxyMetricException, (
+          'At least one response should be bypassed. '
+          '(eligible_response_count=%d, bypass_count=%d)\n' % (
+              eligible_response_count, bypass_count))
+
+    results.AddValue(scalar.ScalarValue(
+        results.current_page, 'cors_bypass', 'count', bypass_count))
 
   def AddResultsForBlockOnce(self, tab, results):
     eligible_response_count = 0
@@ -302,21 +472,14 @@ class ChromeProxyMetric(network_metrics.NetworkMetric):
           'Safebrowsing failed (count=%d, safebrowsing_count=%d)\n' % (
               count, safebrowsing_count))
 
-  def AddResultsForHTTPFallback(
-      self, tab, results, expected_proxies=None, expected_bad_proxies=None):
+  def VerifyProxyInfo(self, tab, expected_proxies, expected_bad_proxies):
     info = GetProxyInfoFromNetworkInternals(tab)
     if not 'enabled' in info or not info['enabled']:
       raise ChromeProxyMetricException, (
           'Chrome proxy should be enabled. proxy info: %s' % info)
-
-    if not expected_proxies:
-      expected_proxies = [self.effective_proxies['fallback'],
-                          self.effective_proxies['direct']]
-    if not expected_bad_proxies:
-      expected_bad_proxies = []
-
     proxies = info['proxies']
-    if proxies != expected_proxies:
+    if (set(proxies) != set(expected_proxies) and
+        set(proxies) != set(self.ProxyListForDev(expected_proxies))):
       raise ChromeProxyMetricException, (
           'Wrong effective proxies (%s). Expect: "%s"' % (
           str(proxies), str(expected_proxies)))
@@ -325,9 +488,44 @@ class ChromeProxyMetric(network_metrics.NetworkMetric):
     if 'badProxies' in info and info['badProxies']:
       bad_proxies = [p['proxy'] for p in info['badProxies']
                      if 'proxy' in p and p['proxy']]
-    if bad_proxies != expected_bad_proxies:
+    if (set(bad_proxies) != set(expected_bad_proxies) and
+        set(bad_proxies) != set(self.ProxyListForDev(expected_bad_proxies))):
       raise ChromeProxyMetricException, (
           'Wrong bad proxies (%s). Expect: "%s"' % (
           str(bad_proxies), str(expected_bad_proxies)))
+
+  def AddResultsForHTTPFallback(
+      self, tab, results, expected_proxies=None, expected_bad_proxies=None):
+    if not expected_proxies:
+      expected_proxies = [self.effective_proxies['fallback'],
+                          self.effective_proxies['direct']]
+    if not expected_bad_proxies:
+      expected_bad_proxies = []
+
+    self.VerifyProxyInfo(tab, expected_proxies, expected_bad_proxies)
     results.AddValue(scalar.ScalarValue(
         results.current_page, 'http_fallback', 'boolean', True))
+
+  def AddResultsForHTTPToDirectFallback(self, tab, results):
+    self.VerifyAllProxiesBypassed(tab)
+    results.AddValue(scalar.ScalarValue(
+        results.current_page, 'direct_fallback', 'boolean', True))
+
+  def AddResultsForExplicitBypass(self, tab, results, expected_bad_proxies):
+    """Verify results for an explicit bypass test.
+
+    Args:
+        tab: the tab for the test.
+        results: the results object to add the results values to.
+        expected_bad_proxies: A list of dictionary objects representing
+            expected bad proxies and their expected retry time windows.
+            See the definition of VerifyBadProxies for details.
+    """
+    info = GetProxyInfoFromNetworkInternals(tab)
+    if not 'enabled' in info or not info['enabled']:
+      raise ChromeProxyMetricException, (
+          'Chrome proxy should be enabled. proxy info: %s' % info)
+    self.VerifyBadProxies(info['badProxies'],
+                          expected_bad_proxies)
+    results.AddValue(scalar.ScalarValue(
+        results.current_page, 'explicit_bypass', 'boolean', True))

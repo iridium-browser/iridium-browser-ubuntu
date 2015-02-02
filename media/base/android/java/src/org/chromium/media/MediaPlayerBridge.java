@@ -296,13 +296,19 @@ public class MediaPlayerBridge {
         }
 
         @CalledByNative("AllowedOperations")
-        private boolean canPause() { return mCanPause; }
+        private boolean canPause() {
+            return mCanPause;
+        }
 
         @CalledByNative("AllowedOperations")
-        private boolean canSeekForward() { return mCanSeekForward; }
+        private boolean canSeekForward() {
+            return mCanSeekForward;
+        }
 
         @CalledByNative("AllowedOperations")
-        private boolean canSeekBackward() { return mCanSeekBackward; }
+        private boolean canSeekBackward() {
+            return mCanSeekBackward;
+        }
     }
 
     /**
@@ -327,7 +333,7 @@ public class MediaPlayerBridge {
 
                 int pause = (Integer) metadataClass.getField("PAUSE_AVAILABLE").get(null);
                 int seekForward =
-                    (Integer) metadataClass.getField("SEEK_FORWARD_AVAILABLE").get(null);
+                        (Integer) metadataClass.getField("SEEK_FORWARD_AVAILABLE").get(null);
                 int seekBackward =
                         (Integer) metadataClass.getField("SEEK_BACKWARD_AVAILABLE").get(null);
                 hasMethod.setAccessible(true);

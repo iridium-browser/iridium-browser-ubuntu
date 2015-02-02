@@ -52,6 +52,7 @@ class WebApplicationCacheHostClient;
 
 namespace blink {
 
+    class Document;
     class DocumentLoader;
     class FetchRequest;
     class HTMLAppletElement;
@@ -61,13 +62,12 @@ namespace blink {
     class HistoryItem;
     class KURL;
     class LocalFrame;
-    class MessageEvent;
+    class PluginPlaceholder;
     class ResourceError;
     class ResourceRequest;
     class ResourceResponse;
     class SecurityOrigin;
     class SharedWorkerRepositoryClient;
-    class SocketStreamHandle;
     class SubstituteData;
     class Widget;
 
@@ -76,8 +76,6 @@ namespace blink {
         virtual ~FrameLoaderClient() { }
 
         virtual bool hasWebView() const = 0; // mainly for assertions
-
-        virtual void detachedFromParent() = 0;
 
         virtual void dispatchWillSendRequest(DocumentLoader*, unsigned long identifier, ResourceRequest&, const ResourceResponse& redirectResponse) = 0;
         virtual void dispatchDidReceiveResponse(DocumentLoader*, unsigned long identifier, const ResourceResponse&) = 0;
@@ -143,16 +141,21 @@ namespace blink {
 
         virtual void transitionToCommittedForNewPage() = 0;
 
-        virtual PassRefPtrWillBeRawPtr<LocalFrame> createFrame(const KURL&, const AtomicString& name, const Referrer&, HTMLFrameOwnerElement*) = 0;
+        virtual PassRefPtrWillBeRawPtr<LocalFrame> createFrame(const KURL&, const AtomicString& name, HTMLFrameOwnerElement*) = 0;
         // Whether or not plugin creation should fail if the HTMLPlugInElement isn't in the DOM after plugin initialization.
         enum DetachedPluginPolicy {
             FailOnDetachedPlugin,
             AllowDetachedPlugin,
         };
         virtual bool canCreatePluginWithoutRenderer(const String& mimeType) const = 0;
-        virtual PassRefPtr<Widget> createPlugin(HTMLPlugInElement*, const KURL&, const Vector<String>&, const Vector<String>&, const String&, bool loadManually, DetachedPluginPolicy) = 0;
 
-        virtual PassRefPtr<Widget> createJavaAppletWidget(HTMLAppletElement*, const KURL& baseURL, const Vector<String>& paramNames, const Vector<String>& paramValues) = 0;
+        // Called before plugin creation in order to ask the embedder whether a
+        // placeholder should be substituted instead.
+        virtual PassOwnPtrWillBeRawPtr<PluginPlaceholder> createPluginPlaceholder(Document&, const KURL&, const Vector<String>& paramNames, const Vector<String>& paramValues, const String& mimeType, bool loadManually) = 0;
+
+        virtual PassRefPtrWillBeRawPtr<Widget> createPlugin(HTMLPlugInElement*, const KURL&, const Vector<String>&, const Vector<String>&, const String&, bool loadManually, DetachedPluginPolicy) = 0;
+
+        virtual PassRefPtrWillBeRawPtr<Widget> createJavaAppletWidget(HTMLAppletElement*, const KURL& baseURL, const Vector<String>& paramNames, const Vector<String>& paramValues) = 0;
 
         virtual ObjectContentType objectContentType(const KURL&, const String& mimeType, bool shouldPreferPlugInsForImages) = 0;
 
@@ -188,7 +191,6 @@ namespace blink {
 
         virtual void didChangeName(const String&) { }
 
-        virtual void dispatchWillOpenSocketStream(SocketStreamHandle*) { }
         virtual void dispatchWillOpenWebSocket(blink::WebSocketHandle*) { }
 
         virtual void dispatchWillStartUsingPeerConnectionHandler(blink::WebRTCPeerConnectionHandler*) { }
@@ -207,7 +209,9 @@ namespace blink {
 
         virtual PassOwnPtr<blink::WebServiceWorkerProvider> createServiceWorkerProvider() = 0;
 
-        virtual bool isControlledByServiceWorker() = 0;
+        virtual bool isControlledByServiceWorker(DocumentLoader&) = 0;
+
+        virtual int64_t serviceWorkerID(DocumentLoader&) = 0;
 
         virtual SharedWorkerRepositoryClient* sharedWorkerRepositoryClient() { return 0; }
 
@@ -216,6 +220,8 @@ namespace blink {
         virtual void didStopAllLoaders() { }
 
         virtual void dispatchDidChangeManifest() { }
+
+        virtual unsigned backForwardLength() { return 0; }
 
         virtual bool isFrameLoaderClientImpl() const { return false; }
     };

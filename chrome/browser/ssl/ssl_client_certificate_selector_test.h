@@ -18,12 +18,12 @@ class URLRequestContextGetter;
 class SSLClientCertificateSelectorTestBase : public InProcessBrowserTest {
  public:
   SSLClientCertificateSelectorTestBase();
-  virtual ~SSLClientCertificateSelectorTestBase();
+  ~SSLClientCertificateSelectorTestBase() override;
 
   // InProcessBrowserTest:
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE;
-  virtual void SetUpOnMainThread() OVERRIDE;
-  virtual void TearDownOnMainThread() OVERRIDE;
+  void SetUpInProcessBrowserTestFixture() override;
+  void SetUpOnMainThread() override;
+  void TearDownOnMainThread() override;
 
   virtual void SetUpOnIOThread();
   virtual void TearDownOnIOThread();

@@ -51,29 +51,29 @@ class FakeDesktopResizer : public DesktopResizer {
     }
   }
 
-  virtual ~FakeDesktopResizer() {
+  ~FakeDesktopResizer() override {
     EXPECT_EQ(initial_resolution_, GetCurrentResolution());
   }
 
   int set_resolution_call_count() { return set_resolution_call_count_; }
 
   // remoting::DesktopResizer interface
-  virtual ScreenResolution GetCurrentResolution() OVERRIDE {
+  ScreenResolution GetCurrentResolution() override {
     return current_resolution_;
   }
-  virtual std::list<ScreenResolution> GetSupportedResolutions(
-      const ScreenResolution& preferred) OVERRIDE {
+  std::list<ScreenResolution> GetSupportedResolutions(
+      const ScreenResolution& preferred) override {
     std::list<ScreenResolution> result = supported_resolutions_;
     if (exact_size_supported_) {
       result.push_back(preferred);
     }
     return result;
   }
-  virtual void SetResolution(const ScreenResolution& resolution) OVERRIDE {
+  void SetResolution(const ScreenResolution& resolution) override {
     current_resolution_ = resolution;
     ++set_resolution_call_count_;
   }
-  virtual void RestoreResolution(const ScreenResolution& resolution) OVERRIDE {
+  void RestoreResolution(const ScreenResolution& resolution) override {
     current_resolution_ = resolution;
     if (restore_resolution_call_count_)
       ++(*restore_resolution_call_count_);
@@ -108,7 +108,7 @@ class ResizingHostObserverTest : public testing::Test {
     desktop_resizer_ = desktop_resizer.get();
 
     resizing_host_observer_.reset(
-        new ResizingHostObserver(desktop_resizer.PassAs<DesktopResizer>()));
+        new ResizingHostObserver(desktop_resizer.Pass()));
     resizing_host_observer_->SetNowFunctionForTesting(
         base::Bind(&ResizingHostObserverTest::GetTimeAndIncrement,
                    base::Unretained(this)));
@@ -256,10 +256,9 @@ TEST_F(ResizingHostObserverTest, SelectWidest) {
 TEST_F(ResizingHostObserverTest, NoSetSizeForSameSize) {
   ScreenResolution supported_sizes[] = { MakeResolution(640, 480),
                                          MakeResolution(480, 640) };
-  FakeDesktopResizer* desktop_resizer =
-      new FakeDesktopResizer(MakeResolution(480, 640), false,
-                             supported_sizes, arraysize(supported_sizes), NULL);
-  SetDesktopResizer(scoped_ptr<FakeDesktopResizer>(desktop_resizer));
+  SetDesktopResizer(make_scoped_ptr(new FakeDesktopResizer(
+      MakeResolution(480, 640), false,
+      supported_sizes, arraysize(supported_sizes), NULL)));
 
   ScreenResolution client_sizes[] = { MakeResolution(640, 640),
                                       MakeResolution(1024, 768),
@@ -268,15 +267,14 @@ TEST_F(ResizingHostObserverTest, NoSetSizeForSameSize) {
                                         MakeResolution(640, 480),
                                         MakeResolution(640, 480) };
   VerifySizes(client_sizes, expected_sizes, arraysize(client_sizes));
-  EXPECT_EQ(desktop_resizer->set_resolution_call_count(), 1);
+  EXPECT_EQ(desktop_resizer_->set_resolution_call_count(), 1);
 }
 
 // Check that desktop resizes are rate-limited, and that if multiple resize
 // requests are received in the time-out period, the most recent is respected.
 TEST_F(ResizingHostObserverTest, RateLimited) {
-  FakeDesktopResizer* desktop_resizer =
-      new FakeDesktopResizer(MakeResolution(640, 480), true, NULL, 0, NULL);
-  SetDesktopResizer(scoped_ptr<FakeDesktopResizer>(desktop_resizer));
+  SetDesktopResizer(make_scoped_ptr(
+      new FakeDesktopResizer(MakeResolution(640, 480), true, NULL, 0, NULL)));
   resizing_host_observer_->SetNowFunctionForTesting(
       base::Bind(&ResizingHostObserverTest::GetTime, base::Unretained(this)));
 

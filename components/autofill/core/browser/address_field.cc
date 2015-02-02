@@ -142,6 +142,10 @@ bool AddressField::ParseAddressLines(AutofillScanner* scanner) {
   if (address1_ || street_address_)
     return false;
 
+  // Ignore "Address Lookup" field. http://crbug.com/427622
+  if (ParseField(scanner, base::UTF8ToUTF16(autofill::kAddressLookupRe), NULL))
+    return false;
+
   base::string16 pattern = UTF8ToUTF16(autofill::kAddressLine1Re);
   base::string16 label_pattern = UTF8ToUTF16(autofill::kAddressLine1LabelRe);
   if (!ParseFieldSpecifics(scanner, pattern, MATCH_DEFAULT, &address1_) &&
@@ -196,13 +200,21 @@ bool AddressField::ParseZipCode(AutofillScanner* scanner) {
   if (zip_)
     return false;
 
-  base::string16 pattern = UTF8ToUTF16(autofill::kZipCodeRe);
-  if (!ParseField(scanner, pattern, &zip_))
+  // Some sites use type="tel" for zip fields (to get a numerical input).
+  // http://crbug.com/426958
+  if (!ParseFieldSpecifics(scanner,
+                           UTF8ToUTF16(autofill::kZipCodeRe),
+                           MATCH_DEFAULT | MATCH_TELEPHONE,
+                           &zip_)) {
     return false;
+  }
 
   // Look for a zip+4, whose field name will also often contain
   // the substring "zip".
-  ParseField(scanner, UTF8ToUTF16(autofill::kZip4Re), &zip4_);
+  ParseFieldSpecifics(scanner,
+                      UTF8ToUTF16(autofill::kZip4Re),
+                      MATCH_DEFAULT | MATCH_TELEPHONE,
+                      &zip4_);
   return true;
 }
 

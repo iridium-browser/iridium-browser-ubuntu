@@ -27,7 +27,9 @@ class QueryParserTest : public testing::Test {
 // convenience) to a SQLite query string.
 std::string QueryParserTest::QueryToString(const std::string& query) {
   base::string16 sqlite_query;
-  query_parser_.ParseQuery(base::UTF8ToUTF16(query), &sqlite_query);
+  query_parser_.ParseQuery(base::UTF8ToUTF16(query),
+                           MatchingAlgorithm::DEFAULT,
+                           &sqlite_query);
   return base::UTF16ToUTF8(sqlite_query);
 }
 
@@ -85,6 +87,7 @@ TEST_F(QueryParserTest, NumWords) {
     base::string16 query_string;
     EXPECT_EQ(data[i].expected_word_count,
               query_parser_.ParseQuery(base::UTF8ToUTF16(data[i].input),
+                                       MatchingAlgorithm::DEFAULT,
                                        &query_string));
   }
 }
@@ -116,10 +119,11 @@ TEST_F(QueryParserTest, ParseQueryNodesAndMatch) {
     { "\"foo blah\"",  "\"foo blah\"",     true,  1, 9, 0, 0 },
     { "foo blah",      "\"foo bar blah\"", true,  1, 4, 9, 13 },
   };
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(data); ++i) {
+  for (size_t i = 0; i < arraysize(data); ++i) {
     QueryParser parser;
     ScopedVector<QueryNode> query_nodes;
     parser.ParseQueryNodes(base::UTF8ToUTF16(data[i].query),
+                           MatchingAlgorithm::DEFAULT,
                            &query_nodes.get());
     Snippet::MatchPositions match_positions;
     ASSERT_EQ(data[i].matches,
@@ -154,10 +158,12 @@ TEST_F(QueryParserTest, ParseQueryWords) {
     { "\"foo bar\"",   "foo", "bar", "",  2 },
     { "\"foo bar\" a", "foo", "bar", "a", 3 },
   };
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(data); ++i) {
+  for (size_t i = 0; i < arraysize(data); ++i) {
     std::vector<base::string16> results;
     QueryParser parser;
-    parser.ParseQueryWords(base::UTF8ToUTF16(data[i].text), &results);
+    parser.ParseQueryWords(base::UTF8ToUTF16(data[i].text),
+                           MatchingAlgorithm::DEFAULT,
+                           &results);
     ASSERT_EQ(data[i].word_count, results.size());
     EXPECT_EQ(data[i].w1, base::UTF16ToUTF8(results[0]));
     if (results.size() == 2)

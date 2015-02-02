@@ -22,27 +22,26 @@ class SearchEngineManagerHandler : public OptionsPageUIHandler,
                                    public EditSearchEngineControllerDelegate {
  public:
   SearchEngineManagerHandler();
-  virtual ~SearchEngineManagerHandler();
+  ~SearchEngineManagerHandler() override;
 
   // OptionsPageUIHandler implementation.
-  virtual void GetLocalizedValues(
-      base::DictionaryValue* localized_strings) OVERRIDE;
-  virtual void InitializeHandler() OVERRIDE;
-  virtual void InitializePage() OVERRIDE;
+  void GetLocalizedValues(base::DictionaryValue* localized_strings) override;
+  void InitializeHandler() override;
+  void InitializePage() override;
 
   // ui::TableModelObserver implementation.
-  virtual void OnModelChanged() OVERRIDE;
-  virtual void OnItemsChanged(int start, int length) OVERRIDE;
-  virtual void OnItemsAdded(int start, int length) OVERRIDE;
-  virtual void OnItemsRemoved(int start, int length) OVERRIDE;
+  void OnModelChanged() override;
+  void OnItemsChanged(int start, int length) override;
+  void OnItemsAdded(int start, int length) override;
+  void OnItemsRemoved(int start, int length) override;
 
   // EditSearchEngineControllerDelegate implementation.
-  virtual void OnEditedKeyword(TemplateURL* template_url,
-                               const base::string16& title,
-                               const base::string16& keyword,
-                               const std::string& url) OVERRIDE;
+  void OnEditedKeyword(TemplateURL* template_url,
+                       const base::string16& title,
+                       const base::string16& keyword,
+                       const std::string& url) override;
 
-  virtual void RegisterMessages() OVERRIDE;
+  void RegisterMessages() override;
 
  private:
   scoped_ptr<KeywordEditorController> list_controller_;
@@ -72,8 +71,7 @@ class SearchEngineManagerHandler : public OptionsPageUIHandler,
   void EditCompleted(const base::ListValue* args);
 
   // Returns a dictionary to pass to WebUI representing the given search engine.
-  base::DictionaryValue* CreateDictionaryForEngine(
-      int index, bool is_default, bool is_extension);
+  base::DictionaryValue* CreateDictionaryForEngine(int index, bool is_default);
 
   // Returns a dictionary to pass to WebUI representing the extension.
   base::DictionaryValue* CreateDictionaryForExtension(

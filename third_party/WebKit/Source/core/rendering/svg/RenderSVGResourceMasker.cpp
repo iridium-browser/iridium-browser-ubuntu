@@ -18,11 +18,9 @@
  */
 
 #include "config.h"
-
 #include "core/rendering/svg/RenderSVGResourceMasker.h"
 
 #include "core/dom/ElementTraversal.h"
-#include "core/rendering/svg/RenderSVGResource.h"
 #include "core/rendering/svg/SVGRenderingContext.h"
 #include "core/svg/SVGElement.h"
 #include "platform/graphics/DisplayList.h"
@@ -30,8 +28,6 @@
 #include "platform/transforms/AffineTransform.h"
 
 namespace blink {
-
-const RenderSVGResourceType RenderSVGResourceMasker::s_resourceType = MaskerResourceType;
 
 RenderSVGResourceMasker::RenderSVGResourceMasker(SVGMaskElement* node)
     : RenderSVGResourceContainer(node)
@@ -55,13 +51,11 @@ void RenderSVGResourceMasker::removeClientFromCache(RenderObject* client, bool m
     markClientForInvalidation(client, markForInvalidation ? BoundariesInvalidation : ParentOnlyInvalidation);
 }
 
-bool RenderSVGResourceMasker::applyResource(RenderObject* object, RenderStyle*,
-    GraphicsContext*& context, unsigned short resourceMode)
+bool RenderSVGResourceMasker::prepareEffect(RenderObject* object, GraphicsContext*& context)
 {
     ASSERT(object);
     ASSERT(context);
     ASSERT(style());
-    ASSERT_UNUSED(resourceMode, resourceMode == ApplyToDefaultMode);
     ASSERT_WITH_SECURITY_IMPLICATION(!needsLayout());
 
     clearInvalidationMask();
@@ -76,7 +70,7 @@ bool RenderSVGResourceMasker::applyResource(RenderObject* object, RenderStyle*,
     return true;
 }
 
-void RenderSVGResourceMasker::postApplyResource(RenderObject* object, GraphicsContext*& context)
+void RenderSVGResourceMasker::finishEffect(RenderObject* object, GraphicsContext*& context)
 {
     ASSERT(object);
     ASSERT(context);
@@ -119,14 +113,15 @@ void RenderSVGResourceMasker::drawMaskForRenderer(GraphicsContext* context, cons
         context->concatCTM(contentTransformation);
     }
 
-    if (!m_maskContentDisplayList)
-        createDisplayList(context, contentTransformation);
+    if (!m_maskContentDisplayList) {
+        SubtreeContentTransformScope contentTransformScope(contentTransformation);
+        createDisplayList(context);
+    }
     ASSERT(m_maskContentDisplayList);
     context->drawDisplayList(m_maskContentDisplayList.get());
 }
 
-void RenderSVGResourceMasker::createDisplayList(GraphicsContext* context,
-    const AffineTransform& contentTransform)
+void RenderSVGResourceMasker::createDisplayList(GraphicsContext* context)
 {
     ASSERT(context);
 
@@ -143,7 +138,7 @@ void RenderSVGResourceMasker::createDisplayList(GraphicsContext* context,
         if (!style || style->display() == NONE || style->visibility() != VISIBLE)
             continue;
 
-        SVGRenderingContext::renderSubtree(context, renderer, contentTransform);
+        SVGRenderingContext::renderSubtree(context, renderer);
     }
     m_maskContentDisplayList = context->endRecording();
 }

@@ -256,7 +256,7 @@ void WebApplicationCacheHostImpl::didReceiveResponseForMainResource(
 }
 
 void WebApplicationCacheHostImpl::didReceiveDataForMainResource(
-    const char* data, int len) {
+    const char* data, unsigned len) {
   if (is_new_master_entry_ == NO)
     return;
   // TODO(michaeln): write me

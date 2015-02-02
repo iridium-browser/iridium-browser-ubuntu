@@ -119,9 +119,9 @@ class DefaultPollPolicy : public ProxyService::PacPollPolicy {
  public:
   DefaultPollPolicy() {}
 
-  virtual Mode GetNextDelay(int initial_error,
-                            TimeDelta current_delay,
-                            TimeDelta* next_delay) const OVERRIDE {
+  Mode GetNextDelay(int initial_error,
+                    TimeDelta current_delay,
+                    TimeDelta* next_delay) const override {
     if (initial_error != OK) {
       // Re-try policy for failures.
       const int kDelay1Seconds = 8;
@@ -160,10 +160,9 @@ class DefaultPollPolicy : public ProxyService::PacPollPolicy {
 class ProxyConfigServiceDirect : public ProxyConfigService {
  public:
   // ProxyConfigService implementation:
-  virtual void AddObserver(Observer* observer) OVERRIDE {}
-  virtual void RemoveObserver(Observer* observer) OVERRIDE {}
-  virtual ConfigAvailability GetLatestProxyConfig(ProxyConfig* config)
-      OVERRIDE {
+  void AddObserver(Observer* observer) override {}
+  void RemoveObserver(Observer* observer) override {}
+  ConfigAvailability GetLatestProxyConfig(ProxyConfig* config) override {
     *config = ProxyConfig::CreateDirect();
     config->set_source(PROXY_CONFIG_SOURCE_UNKNOWN);
     return CONFIG_VALID;
@@ -176,30 +175,26 @@ class ProxyResolverNull : public ProxyResolver {
   ProxyResolverNull() : ProxyResolver(false /*expects_pac_bytes*/) {}
 
   // ProxyResolver implementation.
-  virtual int GetProxyForURL(const GURL& url,
-                             ProxyInfo* results,
-                             const CompletionCallback& callback,
-                             RequestHandle* request,
-                             const BoundNetLog& net_log) OVERRIDE {
+  int GetProxyForURL(const GURL& url,
+                     ProxyInfo* results,
+                     const CompletionCallback& callback,
+                     RequestHandle* request,
+                     const BoundNetLog& net_log) override {
     return ERR_NOT_IMPLEMENTED;
   }
 
-  virtual void CancelRequest(RequestHandle request) OVERRIDE {
-    NOTREACHED();
-  }
+  void CancelRequest(RequestHandle request) override { NOTREACHED(); }
 
-  virtual LoadState GetLoadState(RequestHandle request) const OVERRIDE {
+  LoadState GetLoadState(RequestHandle request) const override {
     NOTREACHED();
     return LOAD_STATE_IDLE;
   }
 
-  virtual void CancelSetPacScript() OVERRIDE {
-    NOTREACHED();
-  }
+  void CancelSetPacScript() override { NOTREACHED(); }
 
-  virtual int SetPacScript(
+  int SetPacScript(
       const scoped_refptr<ProxyResolverScriptData>& /*script_data*/,
-      const CompletionCallback& /*callback*/) OVERRIDE {
+      const CompletionCallback& /*callback*/) override {
     return ERR_NOT_IMPLEMENTED;
   }
 };
@@ -212,31 +207,26 @@ class ProxyResolverFromPacString : public ProxyResolver {
       : ProxyResolver(false /*expects_pac_bytes*/),
         pac_string_(pac_string) {}
 
-  virtual int GetProxyForURL(const GURL& url,
-                             ProxyInfo* results,
-                             const CompletionCallback& callback,
-                             RequestHandle* request,
-                             const BoundNetLog& net_log) OVERRIDE {
+  int GetProxyForURL(const GURL& url,
+                     ProxyInfo* results,
+                     const CompletionCallback& callback,
+                     RequestHandle* request,
+                     const BoundNetLog& net_log) override {
     results->UsePacString(pac_string_);
     return OK;
   }
 
-  virtual void CancelRequest(RequestHandle request) OVERRIDE {
-    NOTREACHED();
-  }
+  void CancelRequest(RequestHandle request) override { NOTREACHED(); }
 
-  virtual LoadState GetLoadState(RequestHandle request) const OVERRIDE {
+  LoadState GetLoadState(RequestHandle request) const override {
     NOTREACHED();
     return LOAD_STATE_IDLE;
   }
 
-  virtual void CancelSetPacScript() OVERRIDE {
-    NOTREACHED();
-  }
+  void CancelSetPacScript() override { NOTREACHED(); }
 
-  virtual int SetPacScript(
-      const scoped_refptr<ProxyResolverScriptData>& pac_script,
-      const CompletionCallback& callback) OVERRIDE {
+  int SetPacScript(const scoped_refptr<ProxyResolverScriptData>& pac_script,
+                   const CompletionCallback& callback) override {
     return OK;
   }
 
@@ -250,7 +240,7 @@ class ProxyResolverFactoryForSystem : public ProxyResolverFactory {
   ProxyResolverFactoryForSystem()
       : ProxyResolverFactory(false /*expects_pac_bytes*/) {}
 
-  virtual ProxyResolver* CreateProxyResolver() OVERRIDE {
+  ProxyResolver* CreateProxyResolver() override {
     DCHECK(IsSupported());
 #if defined(OS_WIN)
     return new ProxyResolverWinHttp();
@@ -313,10 +303,10 @@ class UnsetProxyConfigService : public ProxyConfigService {
   UnsetProxyConfigService() {}
   virtual ~UnsetProxyConfigService() {}
 
-  virtual void AddObserver(Observer* observer) OVERRIDE {}
-  virtual void RemoveObserver(Observer* observer) OVERRIDE {}
+  virtual void AddObserver(Observer* observer) override {}
+  virtual void RemoveObserver(Observer* observer) override {}
   virtual ConfigAvailability GetLatestProxyConfig(
-      ProxyConfig* config) OVERRIDE {
+      ProxyConfig* config) override {
     return CONFIG_UNSET;
   }
 };
@@ -557,15 +547,15 @@ class ProxyService::ProxyScriptDeciderPoller {
                            int init_net_error,
                            ProxyResolverScriptData* init_script_data,
                            NetLog* net_log)
-      : weak_factory_(this),
-        change_callback_(callback),
+      : change_callback_(callback),
         config_(config),
         proxy_resolver_expects_pac_bytes_(proxy_resolver_expects_pac_bytes),
         proxy_script_fetcher_(proxy_script_fetcher),
         dhcp_proxy_script_fetcher_(dhcp_proxy_script_fetcher),
         last_error_(init_net_error),
         last_script_data_(init_script_data),
-        last_poll_time_(TimeTicks::Now()) {
+        last_poll_time_(TimeTicks::Now()),
+        weak_factory_(this) {
     // Set the initial poll delay.
     next_poll_mode_ = poll_policy()->GetNextDelay(
         last_error_, TimeDelta::FromSeconds(-1), &next_poll_delay_);
@@ -694,8 +684,6 @@ class ProxyService::ProxyScriptDeciderPoller {
     change_callback_.Run(result, script_data.get(), effective_config);
   }
 
-  base::WeakPtrFactory<ProxyScriptDeciderPoller> weak_factory_;
-
   ChangeCallback change_callback_;
   ProxyConfig config_;
   bool proxy_resolver_expects_pac_bytes_;
@@ -718,6 +706,8 @@ class ProxyService::ProxyScriptDeciderPoller {
   const DefaultPollPolicy default_poll_policy_;
 
   bool quick_check_enabled_;
+
+  base::WeakPtrFactory<ProxyScriptDeciderPoller> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ProxyScriptDeciderPoller);
 };
@@ -979,8 +969,24 @@ int ProxyService::ResolveProxy(const GURL& raw_url,
                                PacRequest** pac_request,
                                NetworkDelegate* network_delegate,
                                const BoundNetLog& net_log) {
-  DCHECK(CalledOnValidThread());
   DCHECK(!callback.is_null());
+  return ResolveProxyHelper(raw_url,
+                            load_flags,
+                            result,
+                            callback,
+                            pac_request,
+                            network_delegate,
+                            net_log);
+}
+
+int ProxyService::ResolveProxyHelper(const GURL& raw_url,
+                                     int load_flags,
+                                     ProxyInfo* result,
+                                     const net::CompletionCallback& callback,
+                                     PacRequest** pac_request,
+                                     NetworkDelegate* network_delegate,
+                                     const BoundNetLog& net_log) {
+  DCHECK(CalledOnValidThread());
 
   net_log.BeginEvent(NetLog::TYPE_PROXY_SERVICE);
 
@@ -1005,6 +1011,9 @@ int ProxyService::ResolveProxy(const GURL& raw_url,
     return DidFinishResolvingProxy(url, load_flags, network_delegate,
                                    result, rv, net_log);
 
+  if (callback.is_null())
+    return ERR_IO_PENDING;
+
   scoped_refptr<PacRequest> req(
       new PacRequest(this, url, load_flags, network_delegate,
                      result, callback, net_log));
@@ -1027,6 +1036,22 @@ int ProxyService::ResolveProxy(const GURL& raw_url,
   if (pac_request)
     *pac_request = req.get();
   return rv;  // ERR_IO_PENDING
+}
+
+bool ProxyService:: TryResolveProxySynchronously(
+    const GURL& raw_url,
+    int load_flags,
+    ProxyInfo* result,
+    NetworkDelegate* network_delegate,
+    const BoundNetLog& net_log) {
+  net::CompletionCallback null_callback;
+  return ResolveProxyHelper(raw_url,
+                            load_flags,
+                            result,
+                            null_callback,
+                            NULL /* pac_request*/,
+                            network_delegate,
+                            net_log) == OK;
 }
 
 int ProxyService::TryToCompleteSynchronously(const GURL& url,

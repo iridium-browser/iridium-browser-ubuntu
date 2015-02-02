@@ -35,8 +35,8 @@
 WebInspector.AuditsPanel = function()
 {
     WebInspector.PanelWithSidebarTree.call(this, "audits");
-    this.registerRequiredCSS("panelEnablerView.css");
-    this.registerRequiredCSS("auditsPanel.css");
+    this.registerRequiredCSS("components/panelEnablerView.css");
+    this.registerRequiredCSS("audits/auditsPanel.css");
 
     this.auditsTreeElement = new WebInspector.SidebarSectionTreeElement("", {}, true);
     this.sidebarTree.appendChild(this.auditsTreeElement);
@@ -55,6 +55,13 @@ WebInspector.AuditsPanel = function()
     this._launcherView = new WebInspector.AuditLauncherView(this._auditController);
     for (var id in this.categoriesById)
         this._launcherView.addCategory(this.categoriesById[id]);
+
+    var extensionCategories = WebInspector.extensionServer.auditCategories();
+    for (var i = 0; i < extensionCategories.length; ++i) {
+        var category = extensionCategories[i];
+        this.addCategory(new WebInspector.AuditExtensionCategory(category.extensionOrigin, category.id, category.displayName, category.ruleCount));
+    }
+    WebInspector.extensionServer.addEventListener(WebInspector.ExtensionServer.Events.AuditCategoryAdded, this._extensionAuditCategoryAdded, this);
 }
 
 WebInspector.AuditsPanel.prototype = {
@@ -166,6 +173,15 @@ WebInspector.AuditsPanel.prototype = {
     {
         this.auditsItemTreeElement.revealAndSelect();
         this.auditResultsTreeElement.removeChildren();
+    },
+
+    /**
+     * @param {!WebInspector.Event} event
+     */
+    _extensionAuditCategoryAdded: function(event)
+    {
+        var category = /** @type {!WebInspector.ExtensionAuditCategory} */ (event.data);
+        this.addCategory(new WebInspector.AuditExtensionCategory(category.extensionOrigin, category.id, category.displayName, category.ruleCount));
     },
 
     __proto__: WebInspector.PanelWithSidebarTree.prototype
@@ -427,12 +443,12 @@ WebInspector.AuditRuleResult.prototype = {
     addFormatted: function(format, vararg)
     {
         var substitutions = Array.prototype.slice.call(arguments, 1);
-        var fragment = document.createDocumentFragment();
+        var fragment = createDocumentFragment();
 
         function append(a, b)
         {
             if (!(b instanceof Node))
-                b = document.createTextNode(b);
+                b = createTextNode(b);
             a.appendChild(b);
             return a;
         }
@@ -516,6 +532,39 @@ WebInspector.AuditResultSidebarTreeElement.prototype = {
     },
 
     __proto__: WebInspector.SidebarTreeElement.prototype
+}
+
+WebInspector.AuditsPanel.show = function()
+{
+    WebInspector.inspectorView.setCurrentPanel(WebInspector.AuditsPanel.instance());
+}
+
+/**
+ * @return {!WebInspector.AuditsPanel}
+ */
+WebInspector.AuditsPanel.instance = function()
+{
+    if (!WebInspector.AuditsPanel._instanceObject)
+        WebInspector.AuditsPanel._instanceObject = new WebInspector.AuditsPanel();
+    return WebInspector.AuditsPanel._instanceObject;
+}
+
+/**
+ * @constructor
+ * @implements {WebInspector.PanelFactory}
+ */
+WebInspector.AuditsPanelFactory = function()
+{
+}
+
+WebInspector.AuditsPanelFactory.prototype = {
+    /**
+     * @return {!WebInspector.Panel}
+     */
+    createPanel: function()
+    {
+        return WebInspector.AuditsPanel.instance();
+    }
 }
 
 // Contributed audit rules should go into this namespace.

@@ -36,56 +36,49 @@ class SharedUserScriptMaster;
 class ShellExtensionSystem : public ExtensionSystem {
  public:
   explicit ShellExtensionSystem(content::BrowserContext* browser_context);
-  virtual ~ShellExtensionSystem();
+  ~ShellExtensionSystem() override;
 
-  // Loads an unpacked application from a directory. Returns true on success.
-  bool LoadApp(const base::FilePath& app_dir);
+  // Loads an unpacked application from a directory. Returns the extension on
+  // success, or null otherwise.
+  const Extension* LoadApp(const base::FilePath& app_dir);
 
-  // Launch the currently loaded app.
-  void LaunchApp();
+  // Initializes the extension system.
+  void Init();
+
+  // Launch the app with id |extension_id|.
+  void LaunchApp(const std::string& extension_id);
 
   // KeyedService implementation:
-  virtual void Shutdown() OVERRIDE;
-
-  scoped_refptr<Extension> extension() { return extension_; }
+  void Shutdown() override;
 
   // ExtensionSystem implementation:
-  virtual void InitForRegularProfile(bool extensions_enabled) OVERRIDE;
-  virtual ExtensionService* extension_service() OVERRIDE;
-  virtual RuntimeData* runtime_data() OVERRIDE;
-  virtual ManagementPolicy* management_policy() OVERRIDE;
-  virtual SharedUserScriptMaster* shared_user_script_master() OVERRIDE;
-  virtual ProcessManager* process_manager() OVERRIDE;
-  virtual StateStore* state_store() OVERRIDE;
-  virtual StateStore* rules_store() OVERRIDE;
-  virtual InfoMap* info_map() OVERRIDE;
-  virtual LazyBackgroundTaskQueue* lazy_background_task_queue() OVERRIDE;
-  virtual EventRouter* event_router() OVERRIDE;
-  virtual WarningService* warning_service() OVERRIDE;
-  virtual Blacklist* blacklist() OVERRIDE;
-  virtual ErrorConsole* error_console() OVERRIDE;
-  virtual InstallVerifier* install_verifier() OVERRIDE;
-  virtual QuotaService* quota_service() OVERRIDE;
-  virtual void RegisterExtensionWithRequestContexts(
-      const Extension* extension) OVERRIDE;
-  virtual void UnregisterExtensionWithRequestContexts(
+  void InitForRegularProfile(bool extensions_enabled) override;
+  ExtensionService* extension_service() override;
+  RuntimeData* runtime_data() override;
+  ManagementPolicy* management_policy() override;
+  SharedUserScriptMaster* shared_user_script_master() override;
+  StateStore* state_store() override;
+  StateStore* rules_store() override;
+  InfoMap* info_map() override;
+  LazyBackgroundTaskQueue* lazy_background_task_queue() override;
+  EventRouter* event_router() override;
+  ErrorConsole* error_console() override;
+  InstallVerifier* install_verifier() override;
+  QuotaService* quota_service() override;
+  void RegisterExtensionWithRequestContexts(
+      const Extension* extension) override;
+  void UnregisterExtensionWithRequestContexts(
       const std::string& extension_id,
-      const UnloadedExtensionInfo::Reason reason) OVERRIDE;
-  virtual const OneShotEvent& ready() const OVERRIDE;
-  virtual ContentVerifier* content_verifier() OVERRIDE;
-  virtual scoped_ptr<ExtensionSet> GetDependentExtensions(
-      const Extension* extension) OVERRIDE;
-  virtual DeclarativeUserScriptMaster*
-      GetDeclarativeUserScriptMasterByExtension(
-          const ExtensionId& extension_id) OVERRIDE;
+      const UnloadedExtensionInfo::Reason reason) override;
+  const OneShotEvent& ready() const override;
+  ContentVerifier* content_verifier() override;
+  scoped_ptr<ExtensionSet> GetDependentExtensions(
+      const Extension* extension) override;
+  DeclarativeUserScriptMaster* GetDeclarativeUserScriptMasterByExtension(
+      const ExtensionId& extension_id) override;
 
  private:
   content::BrowserContext* browser_context_;  // Not owned.
-
-  // Extension ID for the app.
-  std::string app_id_;
-
-  scoped_refptr<Extension> extension_;
 
   // Data to be accessed on the IO thread. Must outlive process_manager_.
   scoped_refptr<InfoMap> info_map_;
@@ -93,7 +86,6 @@ class ShellExtensionSystem : public ExtensionSystem {
   scoped_ptr<RuntimeData> runtime_data_;
   scoped_ptr<LazyBackgroundTaskQueue> lazy_background_task_queue_;
   scoped_ptr<EventRouter> event_router_;
-  scoped_ptr<ProcessManager> process_manager_;
   scoped_ptr<QuotaService> quota_service_;
 
   // Signaled when the extension system has completed its startup tasks.

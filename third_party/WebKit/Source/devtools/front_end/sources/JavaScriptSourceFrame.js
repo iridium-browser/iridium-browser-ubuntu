@@ -96,11 +96,11 @@ WebInspector.JavaScriptSourceFrame.prototype = {
 
         var fileURL = this._uiSourceCode.originURL();
         infobar.createDetailsRowMessage(WebInspector.UIString("The content of this file on the file system:\u00a0")).appendChild(
-            WebInspector.linkifyURLAsNode(fileURL, fileURL, "source-frame-infobar-details-url", true, fileURL));
+            WebInspector.createExternalAnchor(fileURL, fileURL, "source-frame-infobar-details-url"));
 
         var scriptURL = this._uiSourceCode.url;
         infobar.createDetailsRowMessage(WebInspector.UIString("does not match the loaded script:\u00a0")).appendChild(
-            WebInspector.linkifyURLAsNode(scriptURL, scriptURL, "source-frame-infobar-details-url", true, scriptURL));
+            WebInspector.createExternalAnchor(scriptURL, scriptURL, "source-frame-infobar-details-url"));
 
         infobar.createDetailsRowMessage();
         infobar.createDetailsRowMessage(WebInspector.UIString("Possible solutions are:"));
@@ -148,7 +148,7 @@ WebInspector.JavaScriptSourceFrame.prototype = {
         infobar.createDetailsRowMessage(WebInspector.UIString("Possible ways to cancel this behavior are:"));
 
         infobar.createDetailsRowMessage(" - ").createTextChild(WebInspector.UIString("Press \"%s\" button in settings", WebInspector.manageBlackboxingButtonLabel()));
-        var unblackboxLink = infobar.createDetailsRowMessage(" - ").createChild("span", "source-frame-infobar-link");
+        var unblackboxLink = infobar.createDetailsRowMessage(" - ").createChild("span", "link");
         unblackboxLink.textContent = WebInspector.UIString("Unblackbox this script");
         unblackboxLink.addEventListener("click", unblackbox, false);
 
@@ -321,7 +321,7 @@ WebInspector.JavaScriptSourceFrame.prototype = {
 
         if (this._uiSourceCode.project().type() === WebInspector.projectTypes.Network && WebInspector.settings.jsSourceMapsEnabled.get()) {
             if (this._scriptFileForTarget.size) {
-                var scriptFile = this._scriptFileForTarget.values()[0];
+                var scriptFile = this._scriptFileForTarget.valuesArray()[0];
                 var addSourceMapURLLabel = WebInspector.UIString(WebInspector.useLowerCaseMenuTitles() ? "Add source map\u2026" : "Add Source Map\u2026");
                 contextMenu.appendItem(addSourceMapURLLabel, addSourceMapURL.bind(this, scriptFile));
                 contextMenu.appendSeparator();
@@ -384,7 +384,7 @@ WebInspector.JavaScriptSourceFrame.prototype = {
 
         this._scriptsPanel.setIgnoreExecutionLineEvents(true);
         this._hasCommittedLiveEdit = true;
-        var scriptFiles = this._scriptFileForTarget.values();
+        var scriptFiles = this._scriptFileForTarget.valuesArray();
         for (var i = 0; i < scriptFiles.length; ++i)
             scriptFiles[i].commitLiveEdit(liveEditCallback.bind(this));
     },
@@ -426,7 +426,7 @@ WebInspector.JavaScriptSourceFrame.prototype = {
             return;
         }
 
-        var scriptFiles = this._scriptFileForTarget.values();
+        var scriptFiles = this._scriptFileForTarget.valuesArray();
         var hasDivergedScript = false;
         for (var i = 0; i < scriptFiles.length; ++i)
             hasDivergedScript = hasDivergedScript || scriptFiles[i].hasDivergedFromVM();
@@ -447,7 +447,7 @@ WebInspector.JavaScriptSourceFrame.prototype = {
 
     _restoreBreakpointsIfConsistentScripts: function()
     {
-        var scriptFiles = this._scriptFileForTarget.values();
+        var scriptFiles = this._scriptFileForTarget.valuesArray();
         for (var i = 0; i < scriptFiles.length; ++i)
             if (scriptFiles[i].hasDivergedFromVM() || scriptFiles[i].isMergingToVM())
                 return;
@@ -667,7 +667,7 @@ WebInspector.JavaScriptSourceFrame.prototype = {
 
     _createConditionElement: function(lineNumber)
     {
-        var conditionElement = document.createElementWithClass("div", "source-frame-breakpoint-condition");
+        var conditionElement = createElementWithClass("div", "source-frame-breakpoint-condition");
 
         var labelElement = conditionElement.createChild("label", "source-frame-breakpoint-message");
         labelElement.htmlFor = "source-frame-breakpoint-condition";
@@ -707,7 +707,7 @@ WebInspector.JavaScriptSourceFrame.prototype = {
             return false;
         if (this._muted)
             return true;
-        var scriptFiles = this._scriptFileForTarget.values();
+        var scriptFiles = this._scriptFileForTarget.valuesArray();
         var hasDivergingOrMergingFile = false;
         for (var i = 0; i < scriptFiles.length; ++i)
             if (scriptFiles[i].isDivergingFromVM() || scriptFiles[i].isMergingToVM())
@@ -774,8 +774,13 @@ WebInspector.JavaScriptSourceFrame.prototype = {
     _updateLinesWithoutMappingHighlight: function()
     {
         var linesCount = this.textEditor.linesCount;
-        for (var i = 0; i < linesCount; ++i)
-            this.textEditor.toggleLineClass(i, "cm-line-without-source-mapping", !WebInspector.debuggerWorkspaceBinding.uiLineHasMapping(this._uiSourceCode, i));
+        for (var i = 0; i < linesCount; ++i) {
+            var lineHasMapping = WebInspector.debuggerWorkspaceBinding.uiLineHasMapping(this._uiSourceCode, i);
+            if (!lineHasMapping)
+                this._hasLineWithoutMapping = true;
+            if (this._hasLineWithoutMapping)
+                this.textEditor.toggleLineClass(i, "cm-line-without-source-mapping", !lineHasMapping);
+        }
     },
 
     /**
@@ -821,7 +826,7 @@ WebInspector.JavaScriptSourceFrame.prototype = {
             this.addMessageToSource(message.lineNumber, message.originalMessage);
         }
 
-        var scriptFiles = this._scriptFileForTarget.values();
+        var scriptFiles = this._scriptFileForTarget.valuesArray();
         for (var i = 0; i < scriptFiles.length; ++i)
             scriptFiles[i].checkMapping();
 

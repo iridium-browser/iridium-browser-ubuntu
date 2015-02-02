@@ -143,7 +143,7 @@ class ASH_EXPORT LockStateController : public aura::WindowTreeHostObserver,
   };
 
   LockStateController();
-  virtual ~LockStateController();
+  ~LockStateController() override;
 
   void SetDelegate(scoped_ptr<LockStateControllerDelegate> delegate);
 
@@ -200,12 +200,12 @@ class ASH_EXPORT LockStateController : public aura::WindowTreeHostObserver,
   void SetLockScreenDisplayedCallback(const base::Closure& callback);
 
   // aura::WindowTreeHostObserver override:
-  virtual void OnHostCloseRequested(const aura::WindowTreeHost* host) OVERRIDE;
+  void OnHostCloseRequested(const aura::WindowTreeHost* host) override;
 
   // ShellObserver overrides:
-  virtual void OnLoginStateChanged(user::LoginStatus status) OVERRIDE;
-  virtual void OnAppTerminating() OVERRIDE;
-  virtual void OnLockStateChanged(bool locked) OVERRIDE;
+  void OnLoginStateChanged(user::LoginStatus status) override;
+  void OnAppTerminating() override;
+  void OnLockStateChanged(bool locked) override;
 
   void set_animator_for_test(SessionStateAnimator* animator) {
     animator_.reset(animator);

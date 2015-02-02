@@ -189,7 +189,7 @@ bool DOMFileSystemBase::pathPrefixToFileSystemType(const String& pathPrefix, Fil
     return false;
 }
 
-PassRefPtrWillBeRawPtr<File> DOMFileSystemBase::createFile(const FileMetadata& metadata, const KURL& fileSystemURL, FileSystemType type, const String name)
+File* DOMFileSystemBase::createFile(const FileMetadata& metadata, const KURL& fileSystemURL, FileSystemType type, const String name)
 {
     // For regular filesystem types (temporary or persistent), we should not cache file metadata as it could change File semantics.
     // For other filesystem types (which could be platform-specific ones), there's a chance that the files are on remote filesystem.
@@ -199,13 +199,15 @@ PassRefPtrWillBeRawPtr<File> DOMFileSystemBase::createFile(const FileMetadata& m
     if (type == FileSystemTypeTemporary || type == FileSystemTypePersistent)
         return File::createForFileSystemFile(metadata.platformPath, name);
 
-    if (!metadata.platformPath.isEmpty()) {
-        // If the platformPath in the returned metadata is given, we create a File object for the path.
-        File::UserVisibility userVisibility = (type == FileSystemTypeExternal) ? File::IsUserVisible : File::IsNotUserVisible;
-        return File::createForFileSystemFile(name, metadata, userVisibility);
-    }
+    const File::UserVisibility userVisibility = (type == FileSystemTypeExternal) ? File::IsUserVisible : File::IsNotUserVisible;
 
-    return File::createForFileSystemFile(fileSystemURL, metadata);
+    if (!metadata.platformPath.isEmpty()) {
+        // If the platformPath in the returned metadata is given, we create a File object for the snapshot path.
+        return File::createForFileSystemFile(name, metadata, userVisibility);
+    } else {
+        // Otherwise we create a File object for the fileSystemURL.
+        return File::createForFileSystemFile(fileSystemURL, metadata, userVisibility);
+    }
 }
 
 void DOMFileSystemBase::getMetadata(const EntryBase* entry, MetadataCallback* successCallback, ErrorCallback* errorCallback, SynchronousType synchronousType)
@@ -356,8 +358,8 @@ void DOMFileSystemBase::getFile(const EntryBase* entry, const String& path, cons
     OwnPtr<AsyncFileSystemCallbacks> callbacks(EntryCallbacks::create(successCallback, errorCallback, m_context, this, absolutePath, false));
     callbacks->setShouldBlockUntilCompletion(synchronousType == Synchronous);
 
-    if (flags.create)
-        fileSystem()->createFile(createFileSystemURL(absolutePath), flags.exclusive, callbacks.release());
+    if (flags.createFlag())
+        fileSystem()->createFile(createFileSystemURL(absolutePath), flags.exclusive(), callbacks.release());
     else
         fileSystem()->fileExists(createFileSystemURL(absolutePath), callbacks.release());
 }
@@ -378,8 +380,8 @@ void DOMFileSystemBase::getDirectory(const EntryBase* entry, const String& path,
     OwnPtr<AsyncFileSystemCallbacks> callbacks(EntryCallbacks::create(successCallback, errorCallback, m_context, this, absolutePath, true));
     callbacks->setShouldBlockUntilCompletion(synchronousType == Synchronous);
 
-    if (flags.create)
-        fileSystem()->createDirectory(createFileSystemURL(absolutePath), flags.exclusive, callbacks.release());
+    if (flags.createFlag())
+        fileSystem()->createDirectory(createFileSystemURL(absolutePath), flags.exclusive(), callbacks.release());
     else
         fileSystem()->directoryExists(createFileSystemURL(absolutePath), callbacks.release());
 }

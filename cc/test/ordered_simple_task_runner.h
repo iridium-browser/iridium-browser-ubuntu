@@ -53,15 +53,14 @@ class OrderedSimpleTaskRunner : public base::SingleThreadTaskRunner {
                           bool advance_now);
 
   // base::TestSimpleTaskRunner implementation:
-  virtual bool PostDelayedTask(const tracked_objects::Location& from_here,
-                               const base::Closure& task,
-                               base::TimeDelta delay) OVERRIDE;
-  virtual bool PostNonNestableDelayedTask(
-      const tracked_objects::Location& from_here,
-      const base::Closure& task,
-      base::TimeDelta delay) OVERRIDE;
+  bool PostDelayedTask(const tracked_objects::Location& from_here,
+                       const base::Closure& task,
+                       base::TimeDelta delay) override;
+  bool PostNonNestableDelayedTask(const tracked_objects::Location& from_here,
+                                  const base::Closure& task,
+                                  base::TimeDelta delay) override;
 
-  virtual bool RunsTasksOnCurrentThread() const OVERRIDE;
+  bool RunsTasksOnCurrentThread() const override;
 
   // Set a maximum number of tasks to run at once. Useful as a timeout to
   // prevent infinite task loops.
@@ -74,6 +73,7 @@ class OrderedSimpleTaskRunner : public base::SingleThreadTaskRunner {
     advance_now_ = advance_now;
   }
 
+  bool HasPendingTasks() const;
   base::TimeTicks NextTaskTime();
   base::TimeDelta DelayToNextTaskTime();
 
@@ -86,8 +86,7 @@ class OrderedSimpleTaskRunner : public base::SingleThreadTaskRunner {
   // calling all remaining conditions. Conditions can have side effects,
   // including modifying the task queue.
   // Returns true if there are still pending tasks left.
-  bool RunTasksWhile(
-      const std::vector<base::Callback<bool(void)> >& conditions);
+  bool RunTasksWhile(const std::vector<base::Callback<bool(void)>>& conditions);
 
   // Convenience functions to run tasks with common conditions.
 
@@ -133,7 +132,7 @@ class OrderedSimpleTaskRunner : public base::SingleThreadTaskRunner {
   bool NowBeforeCallback(base::TimeTicks stop_at);
   bool AdvanceNowCallback();
 
-  virtual ~OrderedSimpleTaskRunner();
+  ~OrderedSimpleTaskRunner() override;
 
   base::ThreadChecker thread_checker_;
 

@@ -7,7 +7,6 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/string_util.h"
 #include "content/browser/webui/web_ui_controller_factory_registry.h"
@@ -26,10 +25,10 @@
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/shell/browser/shell.h"
 #include "content/test/data/web_ui_test_mojo_bindings.mojom.h"
-#include "mojo/common/test/test_utils.h"
+#include "mojo/edk/test/test_utils.h"
 #include "mojo/public/cpp/bindings/interface_impl.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
-#include "mojo/public/js/bindings/constants.h"
+#include "mojo/public/js/constants.h"
 
 namespace content {
 namespace {
@@ -64,12 +63,10 @@ class BrowserTargetImpl : public mojo::InterfaceImpl<BrowserTarget> {
  public:
   explicit BrowserTargetImpl(base::RunLoop* run_loop) : run_loop_(run_loop) {}
 
-  virtual ~BrowserTargetImpl() {}
+  ~BrowserTargetImpl() override {}
 
   // mojo::InterfaceImpl<BrowserTarget> overrides:
-  virtual void PingResponse() OVERRIDE {
-    NOTREACHED();
-  }
+  void PingResponse() override { NOTREACHED(); }
 
  protected:
   base::RunLoop* run_loop_;
@@ -83,15 +80,13 @@ class PingBrowserTargetImpl : public BrowserTargetImpl {
   explicit PingBrowserTargetImpl(base::RunLoop* run_loop)
       : BrowserTargetImpl(run_loop) {}
 
-  virtual ~PingBrowserTargetImpl() {}
+  ~PingBrowserTargetImpl() override {}
 
   // mojo::InterfaceImpl<BrowserTarget> overrides:
-  virtual void OnConnectionEstablished() OVERRIDE {
-    client()->Ping();
-  }
+  void OnConnectionEstablished() override { client()->Ping(); }
 
   // Quit the RunLoop when called.
-  virtual void PingResponse() OVERRIDE {
+  void PingResponse() override {
     got_message = true;
     run_loop_->Quit();
   }
@@ -127,10 +122,10 @@ class PingTestWebUIController : public TestWebUIController {
    PingTestWebUIController(WebUI* web_ui, base::RunLoop* run_loop)
        : TestWebUIController(web_ui, run_loop) {
    }
-   virtual ~PingTestWebUIController() {}
+   ~PingTestWebUIController() override {}
 
   // WebUIController overrides:
-  virtual void RenderViewCreated(RenderViewHost* render_view_host) OVERRIDE {
+   void RenderViewCreated(RenderViewHost* render_view_host) override {
     render_view_host->GetMainFrame()->GetServiceRegistry()->
         AddService<BrowserTarget>(base::Bind(
             &PingTestWebUIController::CreateHandler, base::Unretained(this)));
@@ -152,22 +147,22 @@ class TestWebUIControllerFactory : public WebUIControllerFactory {
 
   void set_run_loop(base::RunLoop* run_loop) { run_loop_ = run_loop; }
 
-  virtual WebUIController* CreateWebUIControllerForURL(
-      WebUI* web_ui, const GURL& url) const OVERRIDE {
+  WebUIController* CreateWebUIControllerForURL(WebUI* web_ui,
+                                               const GURL& url) const override {
     if (url.query() == "ping")
       return new PingTestWebUIController(web_ui, run_loop_);
     return NULL;
   }
-  virtual WebUI::TypeID GetWebUIType(BrowserContext* browser_context,
-      const GURL& url) const OVERRIDE {
+  WebUI::TypeID GetWebUIType(BrowserContext* browser_context,
+                             const GURL& url) const override {
     return reinterpret_cast<WebUI::TypeID>(1);
   }
-  virtual bool UseWebUIForURL(BrowserContext* browser_context,
-                              const GURL& url) const OVERRIDE {
+  bool UseWebUIForURL(BrowserContext* browser_context,
+                      const GURL& url) const override {
     return true;
   }
-  virtual bool UseWebUIBindingsForURL(BrowserContext* browser_context,
-                                      const GURL& url) const OVERRIDE {
+  bool UseWebUIBindingsForURL(BrowserContext* browser_context,
+                              const GURL& url) const override {
     return true;
   }
 
@@ -183,7 +178,7 @@ class WebUIMojoTest : public ContentBrowserTest {
     WebUIControllerFactory::RegisterFactory(&factory_);
   }
 
-  virtual ~WebUIMojoTest() {
+  ~WebUIMojoTest() override {
     WebUIControllerFactory::UnregisterFactoryForTesting(&factory_);
   }
 
@@ -197,13 +192,7 @@ class WebUIMojoTest : public ContentBrowserTest {
 
 // Loads a webui page that contains mojo bindings and verifies a message makes
 // it from the browser to the page and back.
-// Fails on Win and Linux.  http://crbug.com/418019
-#if defined(OS_WIN) || defined(OS_LINUX)
-#define MAYBE_EndToEndPing DISABLED_EndToEndPing
-#else
-#define MAYBE_EndToEndPing EndToEndPing
-#endif
-IN_PROC_BROWSER_TEST_F(WebUIMojoTest, MAYBE_EndToEndPing) {
+IN_PROC_BROWSER_TEST_F(WebUIMojoTest, EndToEndPing) {
   // Currently there is no way to have a generated file included in the isolate
   // files. If the bindings file doesn't exist assume we're on such a bot and
   // pass.

@@ -8,7 +8,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/net/url_request_mock_util.h"
 #include "chrome/browser/plugins/chrome_plugin_service_filter.h"
@@ -21,6 +20,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_service.h"
@@ -53,7 +53,7 @@ class ContentSettingsTest : public InProcessBrowserTest {
                       base::FilePath(FILE_PATH_LITERAL("chrome/test/data"))) {
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
         base::Bind(&chrome_browser_net::SetUrlRequestMocksEnabled, true));
@@ -299,7 +299,7 @@ class ClickToPlayPluginTest : public ContentSettingsTest {
   ClickToPlayPluginTest() {}
 
 #if defined(OS_MACOSX)
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     base::FilePath plugin_dir;
     PathService::Get(base::DIR_MODULE, &plugin_dir);
     plugin_dir = plugin_dir.AppendASCII("plugins");
@@ -470,7 +470,7 @@ class PepperContentSettingsSpecialCasesTest : public ContentSettingsTest {
   static const char* const kExternalClearKeyMimeType;
 
   // Registers any CDM plugins not registered by default.
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
 #if defined(ENABLE_PEPPER_CDMS)
     // Platform-specific filename relative to the chrome executable.
 #if defined(OS_WIN)
@@ -618,7 +618,7 @@ PepperContentSettingsSpecialCasesTest::kExternalClearKeyMimeType =
 class PepperContentSettingsSpecialCasesPluginsBlockedTest
     : public PepperContentSettingsSpecialCasesTest {
  public:
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     PepperContentSettingsSpecialCasesTest::SetUpOnMainThread();
     browser()->profile()->GetHostContentSettingsMap()->SetDefaultContentSetting(
         CONTENT_SETTINGS_TYPE_PLUGINS, CONTENT_SETTING_BLOCK);
@@ -628,7 +628,7 @@ class PepperContentSettingsSpecialCasesPluginsBlockedTest
 class PepperContentSettingsSpecialCasesJavaScriptBlockedTest
     : public PepperContentSettingsSpecialCasesTest {
  public:
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     PepperContentSettingsSpecialCasesTest::SetUpOnMainThread();
     browser()->profile()->GetHostContentSettingsMap()->SetDefaultContentSetting(
         CONTENT_SETTINGS_TYPE_PLUGINS, CONTENT_SETTING_ALLOW);

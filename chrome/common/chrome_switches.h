@@ -11,7 +11,7 @@
 
 #include "base/base_switches.h"
 #include "components/autofill/core/common/autofill_switches.h"
-#include "components/data_reduction_proxy/common/data_reduction_proxy_switches.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_switches.h"
 #include "components/password_manager/core/common/password_manager_switches.h"
 #include "components/signin/core/common/signin_switches.h"
 #include "content/public/common/content_switches.h"
@@ -60,7 +60,6 @@ extern const char kCloudPrintPrintTicket[];
 extern const char kCloudPrintSetupProxy[];
 extern const char kCrashOnHangThreads[];
 extern const char kCreateBrowserOnStartupForTests[];
-extern const char kCustomLauncherPage[];
 extern const char kDebugEnableFrameToggle[];
 extern const char kDebugPackedApps[];
 extern const char kDiagnostics[];
@@ -71,6 +70,7 @@ extern const char kDisableAsyncDns[];
 extern const char kDisableAuthNegotiateCnameLookup[];
 extern const char kDisableBackgroundNetworking[];
 extern const char kDisableBundledPpapiFlash[];
+extern const char kDisableCastStreamingHWEncoding[];
 extern const char kDisableClientSidePhishingDetection[];
 extern const char kDisableComponentExtensionsWithBackgroundPages[];
 extern const char kDisableComponentUpdate[];
@@ -99,12 +99,12 @@ extern const char kDisablePromptOnRepost[];
 extern const char kDisableQuic[];
 extern const char kDisableQuicPacing[];
 extern const char kDisableQuicPortSelection[];
-extern const char kDisableQuicTimeBasedLossDetection[];
 extern const char kDisableSavePasswordBubble[];
 extern const char kDisableSearchButtonInOmnibox[];
 extern const char kDisableSessionCrashedBubble[];
-extern const char kDisableSpdy31[];
 extern const char kDisableSuggestionsService[];
+extern const char kDisableSupervisedUserBlacklist[];
+extern const char kDisableSupervisedUserSafeSites[];
 extern const char kDisableSync[];
 extern const char kDisableSyncSyncedNotifications[];
 extern const char kDisableSyncTypes[];
@@ -150,6 +150,7 @@ extern const char kEnableOriginChipOnSrp[];
 extern const char kEnablePanels[];
 extern const char kEnablePermissionsBubbles[];
 extern const char kEnablePluginPlaceholderShadowDom[];
+extern const char kEnablePowerOverlay[];
 extern const char kEnablePrintPreviewRegisterPromos[];
 extern const char kEnablePrivetStorage[];
 extern const char kEnableProfiling[];
@@ -157,7 +158,6 @@ extern const char kEnableQueryExtraction[];
 extern const char kEnableQuic[];
 extern const char kEnableQuicPacing[];
 extern const char kEnableQuicPortSelection[];
-extern const char kEnableQuicTimeBasedLossDetection[];
 extern const char kEnableReaderModeToolbarIcon[];
 extern const char kEnableResourceContentSettings[];
 extern const char kEnableSavePasswordBubble[];
@@ -170,12 +170,12 @@ extern const char kEnableSettingsWindow[];
 extern const char kEnableShowModalDialog[];
 extern const char kDisableSettingsWindow[];
 extern const char kEnableSpdy4[];
-extern const char kEnableSpellingAutoCorrect[];
-extern const char kEnableSpellingFeedbackFieldTrial[];
 extern const char kEnableSSLConnectJobWaiting[];
+extern const char kEnableStaleWhileRevalidate[];
 extern const char kEnableStreamlinedHostedApps[];
 extern const char kEnableSuggestionsService[];
 extern const char kEnableSupervisedUserBlacklist[];
+extern const char kEnableSupervisedUserSafeSites[];
 extern const char kEnableSyncArticles[];
 extern const char kEnableSyncSyncedNotifications[];
 extern const char kEnableTabAudioMuting[];
@@ -304,11 +304,19 @@ extern const char kSpeculativeResourcePrefetching[];
 extern const char kSpeculativeResourcePrefetchingDisabled[];
 extern const char kSpeculativeResourcePrefetchingEnabled[];
 extern const char kSpeculativeResourcePrefetchingLearning[];
+#if defined(ENABLE_SPELLCHECK)
+extern const char kEnableSpellingAutoCorrect[];
+extern const char kEnableSpellingFeedbackFieldTrial[];
 extern const char kSpellingServiceFeedbackUrl[];
 extern const char kSpellingServiceFeedbackIntervalSeconds[];
+#endif
 extern const char kSSLVersionMax[];
 extern const char kSSLVersionMin[];
 extern const char kSSLVersionFallbackMin[];
+extern const char kSSLVersionSSLv3[];
+extern const char kSSLVersionTLSv1[];
+extern const char kSSLVersionTLSv11[];
+extern const char kSSLVersionTLSv12[];
 extern const char kStartMaximized[];
 extern const char kSupervisedUserId[];
 extern const char kSupervisedUserSyncToken[];
@@ -347,10 +355,8 @@ extern const char kDisableZeroSuggest[];
 extern const char kEnableAccessibilityTabSwitcher[];
 extern const char kEnableAppInstallAlerts[];
 extern const char kEnableContextualSearch[];
-extern const char kEnableZeroSuggestEtherSerp[];
-extern const char kEnableZeroSuggestEtherNoSerp[];
 extern const char kEnableZeroSuggestMostVisited[];
-extern const char kEnableZeroSuggestPersonalized[];
+extern const char kEnableZeroSuggestMostVisitedWithoutSerp[];
 extern const char kEnableInstantSearchClicks[];
 #endif
 
@@ -369,7 +375,6 @@ extern const char kMigrateDataDirForSxS[];
 #if defined(OS_MACOSX)
 extern const char kAppsKeepChromeAliveInTests[];
 extern const char kDisableSystemFullscreenForTesting[];
-extern const char kEnableFullSizeContentView[];
 extern const char kRelauncherProcess[];
 #endif
 
@@ -384,7 +389,7 @@ extern const char kWaitForMutex[];
 extern const char kWindows8Search[];
 #endif
 
-#if defined(ENABLE_FULL_PRINTING) && !defined(OFFICIAL_BUILD)
+#if defined(ENABLE_PRINT_PREVIEW) && !defined(OFFICIAL_BUILD)
 extern const char kDebugPrint[];
 #endif
 
@@ -400,6 +405,10 @@ extern const char kFileManagerExtensionPath[];
 
 bool AboutInSettingsEnabled();
 bool SettingsWindowEnabled();
+
+#if defined(OS_CHROMEOS)
+bool PowerOverlayEnabled();
+#endif
 
 // DON'T ADD RANDOM STUFF HERE. Put it in the main section above in
 // alphabetical order, or in one of the ifdefs (also in order in each section).

@@ -117,6 +117,17 @@ typedef struct RD_OPT {
   int RDDIV;
 } RD_OPT;
 
+typedef struct RD_COST {
+  int rate;
+  int64_t dist;
+  int64_t rdcost;
+} RD_COST;
+
+// Reset the rate distortion cost values to maximum (invalid) value.
+void vp9_rd_cost_reset(RD_COST *rd_cost);
+// Initialize the rate distortion cost values to zero.
+void vp9_rd_cost_init(RD_COST *rd_cost);
+
 struct TileInfo;
 struct VP9_COMP;
 struct macroblock;
@@ -162,6 +173,10 @@ void vp9_setup_pred_block(const MACROBLOCKD *xd,
                           int mi_row, int mi_col,
                           const struct scale_factors *scale,
                           const struct scale_factors *scale_uv);
+
+int vp9_get_intra_cost_penalty(int qindex, int qdelta,
+                               vpx_bit_depth_t bit_depth);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

@@ -15,17 +15,16 @@ namespace cc {
 class TestSharedBitmapManager : public SharedBitmapManager {
  public:
   TestSharedBitmapManager();
-  virtual ~TestSharedBitmapManager();
+  ~TestSharedBitmapManager() override;
 
-  virtual scoped_ptr<SharedBitmap> AllocateSharedBitmap(const gfx::Size& size)
-      OVERRIDE;
+  scoped_ptr<SharedBitmap> AllocateSharedBitmap(const gfx::Size& size) override;
 
-  virtual scoped_ptr<SharedBitmap> GetSharedBitmapFromId(
+  scoped_ptr<SharedBitmap> GetSharedBitmapFromId(
       const gfx::Size&,
-      const SharedBitmapId& id) OVERRIDE;
+      const SharedBitmapId& id) override;
 
-  virtual scoped_ptr<SharedBitmap> GetBitmapForSharedMemory(
-      base::SharedMemory* memory) OVERRIDE;
+  scoped_ptr<SharedBitmap> GetBitmapForSharedMemory(
+      base::SharedMemory* memory) override;
 
  private:
   base::Lock lock_;

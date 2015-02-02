@@ -28,7 +28,7 @@ class FetchManager::Loader : public ThreadableLoaderClient {
 public:
     Loader(ExecutionContext*, FetchManager*, PassRefPtr<ScriptPromiseResolver>, const FetchRequestData*);
     ~Loader();
-    virtual void didReceiveResponse(unsigned long, const ResourceResponse&);
+    virtual void didReceiveResponse(unsigned long, const ResourceResponse&, PassOwnPtr<WebDataConsumerHandle>);
     virtual void didFinishLoading(unsigned long, double);
     virtual void didFail(const ResourceError&);
     virtual void didFailAccessControlCheck(const ResourceError&);
@@ -75,8 +75,10 @@ FetchManager::Loader::~Loader()
         m_loader->cancel();
 }
 
-void FetchManager::Loader::didReceiveResponse(unsigned long, const ResourceResponse& response)
+void FetchManager::Loader::didReceiveResponse(unsigned long, const ResourceResponse& response, PassOwnPtr<WebDataConsumerHandle> handle)
 {
+    // FIXME: Use |handle|.
+    ASSERT_UNUSED(handle, !handle);
     m_response = response;
 }
 
@@ -175,14 +177,14 @@ void FetchManager::Loader::start()
     }
 
     // "- |request|'s mode is |same-origin|"
-    if (m_request->mode() == FetchRequestData::SameOriginMode) {
+    if (m_request->mode() == WebURLRequest::FetchRequestModeSameOrigin) {
         // "A network error."
         performNetworkError();
         return;
     }
 
     // "- |request|'s mode is |no CORS|"
-    if (m_request->mode() == FetchRequestData::NoCORSMode) {
+    if (m_request->mode() == WebURLRequest::FetchRequestModeNoCORS) {
         // "Set |request|'s response tainting to |opaque|."
         m_request->setResponseTainting(FetchRequestData::OpaqueTainting);
         // "The result of performing a basic fetch using |request|."
@@ -201,7 +203,7 @@ void FetchManager::Loader::start()
     // "- |request|'s unsafe request flag is set and either |request|'s method
     // is not a simple method or a header in |request|'s header list is not a
     // simple header"
-    if (m_request->mode() == FetchRequestData::CORSWithForcedPreflight
+    if (m_request->mode() == WebURLRequest::FetchRequestModeCORSWithForcedPreflight
         || (m_request->unsafeRequestFlag()
             && (!FetchUtils::isSimpleMethod(m_request->method())
                 || m_request->headerList()->containsNonSimpleHeader()))) {
@@ -303,8 +305,8 @@ void FetchManager::Loader::performHTTPFetch()
     // and the |CORS flag| is unset, and unset otherwise.
     ResourceLoaderOptions resourceLoaderOptions;
     resourceLoaderOptions.dataBufferingPolicy = DoNotBufferData;
-    if (m_request->credentials() == FetchRequestData::IncludeCredentials
-        || (m_request->credentials() == FetchRequestData::SameOriginCredentials && !m_corsFlag)) {
+    if (m_request->credentials() == WebURLRequest::FetchCredentialsModeInclude
+        || (m_request->credentials() == WebURLRequest::FetchCredentialsModeSameOrigin && !m_corsFlag)) {
         resourceLoaderOptions.allowCredentials = AllowStoredCredentials;
     }
 
@@ -329,7 +331,7 @@ void FetchManager::Loader::failed()
     m_failed = true;
     ScriptState* state = m_resolver->scriptState();
     ScriptState::Scope scope(state);
-    m_resolver->reject(V8ThrowException::createTypeError("Failed to fetch", state->isolate()));
+    m_resolver->reject(V8ThrowException::createTypeError(state->isolate(), "Failed to fetch"));
     notifyFinished();
 }
 

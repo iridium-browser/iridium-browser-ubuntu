@@ -145,7 +145,7 @@ class WorkerActivatedObserver
     RunOnIOThread(base::Bind(&WorkerActivatedObserver::InitOnIOThread, this));
   }
   // ServiceWorkerContextObserver overrides.
-  virtual void OnVersionStateChanged(int64 version_id) OVERRIDE {
+  void OnVersionStateChanged(int64 version_id) override {
     DCHECK_CURRENTLY_ON(BrowserThread::IO);
     const ServiceWorkerVersion* version =
         context_->context()->GetLiveVersion(version_id);
@@ -160,7 +160,7 @@ class WorkerActivatedObserver
 
  private:
   friend class base::RefCountedThreadSafe<WorkerActivatedObserver>;
-  virtual ~WorkerActivatedObserver() {}
+  ~WorkerActivatedObserver() override {}
   void InitOnIOThread() { context_->AddObserver(this); }
   void Quit() { run_loop_.Quit(); }
 
@@ -180,7 +180,7 @@ scoped_ptr<net::test_server::HttpResponse> VerifyServiceWorkerHeaderInRequest(
   scoped_ptr<net::test_server::BasicHttpResponse> http_response(
       new net::test_server::BasicHttpResponse());
   http_response->set_content_type("text/javascript");
-  return http_response.PassAs<net::test_server::HttpResponse>();
+  return http_response.Pass();
 }
 
 // The ImportsBustMemcache test requires that the imported script
@@ -192,12 +192,12 @@ class LongLivedResourceInterceptor : public net::URLRequestInterceptor {
  public:
   LongLivedResourceInterceptor(const std::string& body)
       : body_(body) {}
-  virtual ~LongLivedResourceInterceptor() {}
+  ~LongLivedResourceInterceptor() override {}
 
   // net::URLRequestInterceptor implementation
-  virtual net::URLRequestJob* MaybeInterceptRequest(
+  net::URLRequestJob* MaybeInterceptRequest(
       net::URLRequest* request,
-      net::NetworkDelegate* network_delegate) const OVERRIDE {
+      net::NetworkDelegate* network_delegate) const override {
     const char kHeaders[] =
         "HTTP/1.1 200 OK\0"
         "Content-Type: text/javascript\0"
@@ -242,11 +242,14 @@ void CountScriptResources(
 
   int version_id;
   size_t index = infos.size() - 1;
-  if (!infos[index].installing_version.is_null)
+  if (infos[index].installing_version.version_id !=
+      kInvalidServiceWorkerVersionId)
     version_id = infos[index].installing_version.version_id;
-  else if (!infos[index].waiting_version.is_null)
+  else if (infos[index].waiting_version.version_id !=
+           kInvalidServiceWorkerVersionId)
     version_id = infos[1].waiting_version.version_id;
-  else if (!infos[index].active_version.is_null)
+  else if (infos[index].active_version.version_id !=
+           kInvalidServiceWorkerVersionId)
     version_id = infos[index].active_version.version_id;
   else
     return;
@@ -262,12 +265,12 @@ class ServiceWorkerBrowserTest : public ContentBrowserTest {
  protected:
   typedef ServiceWorkerBrowserTest self;
 
-  virtual void SetUpCommandLine(base::CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(
         switches::kEnableExperimentalWebPlatformFeatures);
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
     StoragePartition* partition = BrowserContext::GetDefaultStoragePartition(
         shell()->web_contents()->GetBrowserContext());
@@ -283,7 +286,7 @@ class ServiceWorkerBrowserTest : public ContentBrowserTest {
     RunOnIOThread(base::Bind(&self::SetUpOnIOThread, this));
   }
 
-  virtual void TearDownOnMainThread() OVERRIDE {
+  void TearDownOnMainThread() override {
     RunOnIOThread(base::Bind(&self::TearDownOnIOThread, this));
     wrapper_ = NULL;
   }
@@ -311,9 +314,9 @@ class EmbeddedWorkerBrowserTest : public ServiceWorkerBrowserTest,
   EmbeddedWorkerBrowserTest()
       : last_worker_status_(EmbeddedWorkerInstance::STOPPED),
         pause_mode_(DONT_PAUSE) {}
-  virtual ~EmbeddedWorkerBrowserTest() {}
+  ~EmbeddedWorkerBrowserTest() override {}
 
-  virtual void TearDownOnIOThread() OVERRIDE {
+  void TearDownOnIOThread() override {
     if (worker_) {
       worker_->RemoveListener(this);
       worker_.reset();
@@ -367,19 +370,19 @@ class EmbeddedWorkerBrowserTest : public ServiceWorkerBrowserTest,
 
  protected:
   // EmbeddedWorkerInstance::Observer overrides:
-  virtual void OnStarted() OVERRIDE {
+  void OnStarted() override {
     ASSERT_TRUE(worker_ != NULL);
     ASSERT_FALSE(done_closure_.is_null());
     last_worker_status_ = worker_->status();
     BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, done_closure_);
   }
-  virtual void OnStopped() OVERRIDE {
+  void OnStopped() override {
     ASSERT_TRUE(worker_ != NULL);
     ASSERT_FALSE(done_closure_.is_null());
     last_worker_status_ = worker_->status();
     BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, done_closure_);
   }
-  virtual void OnPausedAfterDownload() OVERRIDE {
+  void OnPausedAfterDownload() override {
     if (pause_mode_ == PAUSE_THEN_RESUME)
       worker_->ResumeAfterDownload();
     else if (pause_mode_ == PAUSE_THEN_STOP)
@@ -387,18 +390,16 @@ class EmbeddedWorkerBrowserTest : public ServiceWorkerBrowserTest,
     else
       ASSERT_TRUE(false);
   }
-  virtual void OnReportException(const base::string16& error_message,
-                                 int line_number,
-                                 int column_number,
-                                 const GURL& source_url) OVERRIDE {}
-  virtual void OnReportConsoleMessage(int source_identifier,
-                                      int message_level,
-                                      const base::string16& message,
-                                      int line_number,
-                                      const GURL& source_url) OVERRIDE {}
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE {
-    return false;
-  }
+  void OnReportException(const base::string16& error_message,
+                         int line_number,
+                         int column_number,
+                         const GURL& source_url) override {}
+  void OnReportConsoleMessage(int source_identifier,
+                              int message_level,
+                              const base::string16& message,
+                              int line_number,
+                              const GURL& source_url) override {}
+  bool OnMessageReceived(const IPC::Message& message) override { return false; }
 
   scoped_ptr<EmbeddedWorkerInstance> worker_;
   EmbeddedWorkerInstance::Status last_worker_status_;
@@ -418,9 +419,9 @@ class ServiceWorkerVersionBrowserTest : public ServiceWorkerBrowserTest {
  public:
   typedef ServiceWorkerVersionBrowserTest self;
 
-  virtual ~ServiceWorkerVersionBrowserTest() {}
+  ~ServiceWorkerVersionBrowserTest() override {}
 
-  virtual void TearDownOnIOThread() OVERRIDE {
+  void TearDownOnIOThread() override {
     registration_ = NULL;
     version_ = NULL;
   }
@@ -761,13 +762,7 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerVersionBrowserTest, SyncEventHandled) {
   EXPECT_EQ(200, response.status_code);
 }
 
-// ServiceWorkerBrowserTest.Reload is flaky on Android crbug.com/393486
-#if defined(OS_ANDROID)
-#define MAYBE_Reload DISABLED_Reload
-#else
-#define MAYBE_Reload Reload
-#endif
-IN_PROC_BROWSER_TEST_F(ServiceWorkerBrowserTest, MAYBE_Reload) {
+IN_PROC_BROWSER_TEST_F(ServiceWorkerBrowserTest, Reload) {
   const std::string kPageUrl = "/service_worker/reload.html";
   const std::string kWorkerUrl = "/service_worker/fetch_event_reload.js";
   {
@@ -869,8 +864,8 @@ static int CountRenderProcessHosts() {
   return result;
 }
 
-// Crashes on Android and flakes on CrOS: http://crbug.com/387045
-#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
+// Flaky timeouts on CrOS: http://crbug.com/387045
+#if defined(OS_CHROMEOS)
 #define MAYBE_Registration DISABLED_Registration
 #else
 #define MAYBE_Registration Registration

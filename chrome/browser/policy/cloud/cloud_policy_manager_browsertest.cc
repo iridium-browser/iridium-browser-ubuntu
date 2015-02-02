@@ -47,15 +47,15 @@ namespace policy {
 class CloudPolicyManagerTest : public InProcessBrowserTest {
  protected:
   CloudPolicyManagerTest() {}
-  virtual ~CloudPolicyManagerTest() {}
+  ~CloudPolicyManagerTest() override {}
 
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
+  void SetUpInProcessBrowserTestFixture() override {
     CommandLine* command_line = CommandLine::ForCurrentProcess();
     command_line->AppendSwitchASCII(switches::kDeviceManagementUrl,
                                     "http://localhost");
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     ASSERT_TRUE(PolicyServiceIsEmpty(g_browser_process->policy_service()))
         << "Pre-existing policies in this machine will make this test fail.";
 
@@ -85,7 +85,7 @@ class CloudPolicyManagerTest : public InProcessBrowserTest {
 #endif
   }
 
-  virtual void TearDownOnMainThread() OVERRIDE {
+  void TearDownOnMainThread() override {
     // Verify that all the expected requests were handled.
     EXPECT_EQ(0u, interceptor_->GetPendingSize());
 

@@ -17,7 +17,7 @@ namespace cc {
 Tile::Id Tile::s_next_id_ = 0;
 
 Tile::Tile(TileManager* tile_manager,
-           PicturePileImpl* picture_pile,
+           RasterSource* raster_source,
            const gfx::Size& tile_size,
            const gfx::Rect& content_rect,
            float contents_scale,
@@ -33,8 +33,11 @@ Tile::Tile(TileManager* tile_manager,
       source_frame_number_(source_frame_number),
       flags_(flags),
       is_shared_(false),
+      tiling_i_index_(-1),
+      tiling_j_index_(-1),
+      required_for_activation_(false),
       id_(s_next_id_++) {
-  set_picture_pile(picture_pile);
+  set_raster_source(raster_source);
   for (int i = 0; i < NUM_TREES; i++)
     is_occluded_[i] = false;
 }
@@ -45,26 +48,10 @@ Tile::~Tile() {
       "cc::Tile", this);
 }
 
-void Tile::SetPriority(WhichTree tree, const TilePriority& priority) {
-  if (priority == priority_[tree])
-    return;
-
-  priority_[tree] = priority;
-  tile_manager_->DidChangeTilePriority(this);
-}
-
-void Tile::MarkRequiredForActivation() {
-  if (priority_[PENDING_TREE].required_for_activation)
-    return;
-
-  priority_[PENDING_TREE].required_for_activation = true;
-  tile_manager_->DidChangeTilePriority(this);
-}
-
 void Tile::AsValueInto(base::debug::TracedValue* res) const {
   TracedValue::MakeDictIntoImplicitSnapshotWithCategory(
       TRACE_DISABLED_BY_DEFAULT("cc.debug"), res, "cc::Tile", this);
-  TracedValue::SetIDRef(picture_pile_.get(), res, "picture_pile");
+  TracedValue::SetIDRef(raster_source_.get(), res, "picture_pile");
   res->SetDouble("contents_scale", contents_scale_);
 
   res->BeginArray("content_rect");
@@ -91,35 +78,13 @@ void Tile::AsValueInto(base::debug::TracedValue* res) const {
 }
 
 size_t Tile::GPUMemoryUsageInBytes() const {
-  size_t total_size = 0;
-  for (int mode = 0; mode < NUM_RASTER_MODES; ++mode)
-    total_size += managed_state_.tile_versions[mode].GPUMemoryUsageInBytes();
-  return total_size;
-}
-
-RasterMode Tile::DetermineRasterModeForTree(WhichTree tree) const {
-  return DetermineRasterModeForResolution(priority(tree).resolution);
-}
-
-RasterMode Tile::DetermineOverallRasterMode() const {
-  return DetermineRasterModeForResolution(managed_state_.resolution);
-}
-
-RasterMode Tile::DetermineRasterModeForResolution(
-    TileResolution resolution) const {
-  RasterMode current_mode = managed_state_.raster_mode;
-  RasterMode raster_mode = resolution == LOW_RESOLUTION
-                               ? LOW_QUALITY_RASTER_MODE
-                               : HIGH_QUALITY_RASTER_MODE;
-  return std::min(raster_mode, current_mode);
+  if (managed_state_.draw_info.resource_)
+    return managed_state_.draw_info.resource_->bytes();
+  return 0;
 }
 
 bool Tile::HasRasterTask() const {
-  for (int mode = 0; mode < NUM_RASTER_MODES; ++mode) {
-    if (managed_state_.tile_versions[mode].raster_task_.get())
-      return true;
-  }
-  return false;
+  return !!managed_state_.raster_task.get();
 }
 
 }  // namespace cc

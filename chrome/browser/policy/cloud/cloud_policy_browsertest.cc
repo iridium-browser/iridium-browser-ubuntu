@@ -198,9 +198,9 @@ class CloudPolicyTest : public InProcessBrowserTest,
                         public PolicyService::Observer {
  protected:
   CloudPolicyTest() {}
-  virtual ~CloudPolicyTest() {}
+  ~CloudPolicyTest() override {}
 
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
+  void SetUpInProcessBrowserTestFixture() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     ASSERT_NO_FATAL_FAILURE(SetServerPolicy(GetEmptyPolicy()));
 
@@ -216,7 +216,7 @@ class CloudPolicyTest : public InProcessBrowserTest,
         RegisterTestingFactory(BuildFakeProfileInvalidationProvider);
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     ASSERT_TRUE(PolicyServiceIsEmpty(g_browser_process->policy_service()))
         << "Pre-existing policies in this machine will make this test fail.";
 
@@ -308,16 +308,16 @@ class CloudPolicyTest : public InProcessBrowserTest,
     return temp_dir_.path().AppendASCII("policy.json");
   }
 
-  virtual void OnPolicyUpdated(const PolicyNamespace& ns,
-                               const PolicyMap& previous,
-                               const PolicyMap& current) OVERRIDE {
+  void OnPolicyUpdated(const PolicyNamespace& ns,
+                       const PolicyMap& previous,
+                       const PolicyMap& current) override {
     if (!on_policy_updated_.is_null()) {
       on_policy_updated_.Run();
       on_policy_updated_.Reset();
     }
   }
 
-  virtual void OnPolicyServiceInitialized(PolicyDomain domain) OVERRIDE {}
+  void OnPolicyServiceInitialized(PolicyDomain domain) override {}
 
   base::ScopedTempDir temp_dir_;
   scoped_ptr<LocalPolicyTestServer> test_server_;

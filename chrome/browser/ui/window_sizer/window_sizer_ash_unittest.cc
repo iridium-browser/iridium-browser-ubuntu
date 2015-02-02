@@ -11,7 +11,7 @@
 #include "ash/wm/window_resizer.h"
 #include "ash/wm/window_state.h"
 #include "base/compiler_specific.h"
-#include "chrome/browser/ui/ash/ash_init.h"
+#include "chrome/browser/ui/ash/ash_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/window_sizer/window_sizer_common_unittest.h"
 #include "chrome/common/chrome_switches.h"
@@ -38,26 +38,22 @@ class TestBrowserWindowAura : public TestBrowserWindow {
   explicit TestBrowserWindowAura(aura::Window* native_window)
       : native_window_(native_window) {
   }
-  virtual ~TestBrowserWindowAura() {}
+  ~TestBrowserWindowAura() override {}
 
   // TestBrowserWindow overrides:
-  virtual void Show() OVERRIDE {
+  void Show() override {
     native_window_->Show();
     Activate();
   }
-  virtual void Hide() OVERRIDE {
-    native_window_->Hide();
-  }
-  virtual void Activate() OVERRIDE {
+  void Hide() override { native_window_->Hide(); }
+  void Activate() override {
     aura::client::GetActivationClient(
         native_window_->GetRootWindow())->ActivateWindow(native_window_.get());
   }
-  virtual gfx::NativeWindow GetNativeWindow() OVERRIDE {
+  gfx::NativeWindow GetNativeWindow() const override {
     return native_window_.get();
   }
-  virtual gfx::Rect GetBounds() const OVERRIDE {
-    return native_window_->bounds();
-  }
+  gfx::Rect GetBounds() const override { return native_window_->bounds(); }
 
   Browser* browser() { return browser_.get(); }
 

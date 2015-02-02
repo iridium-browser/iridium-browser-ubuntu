@@ -66,8 +66,6 @@ std::string VideoSendStream::Config::Rtp::ToString() const {
   ss << '}';
 
   ss << ", max_packet_size: " << max_packet_size;
-  if (min_transmit_bitrate_bps != 0)
-    ss << ", min_transmit_bitrate_bps: " << min_transmit_bitrate_bps;
 
   ss << ", extensions: {";
   for (size_t i = 0; i < extensions.size(); ++i) {
@@ -125,6 +123,7 @@ VideoSendStream::VideoSendStream(
       suspended_ssrcs_(suspended_ssrcs),
       external_codec_(NULL),
       channel_(-1),
+      use_default_bitrate_(true),
       stats_proxy_(config) {
   video_engine_base_ = ViEBase::GetInterface(video_engine);
   video_engine_base_->CreateChannel(channel_, base_channel);
@@ -135,10 +134,6 @@ VideoSendStream::VideoSendStream(
   assert(rtp_rtcp_ != NULL);
 
   assert(config_.rtp.ssrcs.size() > 0);
-
-  assert(config_.rtp.min_transmit_bitrate_bps >= 0);
-  rtp_rtcp_->SetMinTransmitBitrate(channel_,
-                                   config_.rtp.min_transmit_bitrate_bps / 1000);
 
   for (size_t i = 0; i < config_.rtp.extensions.size(); ++i) {
     const std::string& extension = config_.rtp.extensions[i].name;
@@ -297,6 +292,7 @@ void VideoSendStream::Stop() {
 
 bool VideoSendStream::ReconfigureVideoEncoder(
     const VideoEncoderConfig& config) {
+  LOG(LS_INFO) << "(Re)configureVideoEncoder: " << config.ToString();
   const std::vector<VideoStream>& streams = config.streams;
   assert(!streams.empty());
   assert(config_.rtp.ssrcs.size() >= streams.size());
@@ -305,22 +301,32 @@ bool VideoSendStream::ReconfigureVideoEncoder(
   memset(&video_codec, 0, sizeof(video_codec));
   if (config_.encoder_settings.payload_name == "VP8") {
     video_codec.codecType = kVideoCodecVP8;
+  } else if (config_.encoder_settings.payload_name == "VP9") {
+    video_codec.codecType = kVideoCodecVP9;
   } else if (config_.encoder_settings.payload_name == "H264") {
     video_codec.codecType = kVideoCodecH264;
   } else {
     video_codec.codecType = kVideoCodecGeneric;
   }
+
   switch (config.content_type) {
     case VideoEncoderConfig::kRealtimeVideo:
       video_codec.mode = kRealtimeVideo;
       break;
     case VideoEncoderConfig::kScreenshare:
       video_codec.mode = kScreensharing;
+      if (config.streams.size() == 1 &&
+          config.streams[0].temporal_layer_thresholds_bps.size() == 1) {
+        video_codec.targetBitrate =
+            config.streams[0].temporal_layer_thresholds_bps[0] / 1000;
+      }
       break;
   }
 
   if (video_codec.codecType == kVideoCodecVP8) {
     video_codec.codecSpecific.VP8 = VideoEncoder::GetDefaultVp8Settings();
+  } else if (video_codec.codecType == kVideoCodecVP9) {
+    video_codec.codecSpecific.VP9 = VideoEncoder::GetDefaultVp9Settings();
   } else if (video_codec.codecType == kVideoCodecH264) {
     video_codec.codecSpecific.H264 = VideoEncoder::GetDefaultH264Settings();
   }
@@ -331,7 +337,8 @@ bool VideoSendStream::ReconfigureVideoEncoder(
                                           config.encoder_specific_settings);
     }
     video_codec.codecSpecific.VP8.numberOfTemporalLayers =
-        static_cast<unsigned char>(streams.back().temporal_layers.size());
+        static_cast<unsigned char>(
+            streams.back().temporal_layer_thresholds_bps.size() + 1);
   } else {
     // TODO(pbos): Support encoder_settings codec-agnostically.
     assert(config.encoder_specific_settings == NULL);
@@ -364,8 +371,8 @@ bool VideoSendStream::ReconfigureVideoEncoder(
     sim_stream->targetBitrate = streams[i].target_bitrate_bps / 1000;
     sim_stream->maxBitrate = streams[i].max_bitrate_bps / 1000;
     sim_stream->qpMax = streams[i].max_qp;
-    sim_stream->numberOfTemporalLayers =
-        static_cast<unsigned char>(streams[i].temporal_layers.size());
+    sim_stream->numberOfTemporalLayers = static_cast<unsigned char>(
+        streams[i].temporal_layer_thresholds_bps.size() + 1);
 
     video_codec.width = std::max(video_codec.width,
                                  static_cast<unsigned short>(streams[i].width));
@@ -378,8 +385,13 @@ bool VideoSendStream::ReconfigureVideoEncoder(
     video_codec.qpMax = std::max(video_codec.qpMax,
                                  static_cast<unsigned int>(streams[i].max_qp));
   }
+  unsigned int start_bitrate_bps;
+  if (codec_->GetCodecTargetBitrate(channel_, &start_bitrate_bps) != 0 ||
+      use_default_bitrate_) {
+    start_bitrate_bps = start_bitrate_bps_;
+  }
   video_codec.startBitrate =
-      static_cast<unsigned int>(start_bitrate_bps_) / 1000;
+      static_cast<unsigned int>(start_bitrate_bps) / 1000;
 
   if (video_codec.minBitrate < kViEMinCodecBitrate)
     video_codec.minBitrate = kViEMinCodecBitrate;
@@ -398,7 +410,15 @@ bool VideoSendStream::ReconfigureVideoEncoder(
   assert(streams[0].max_framerate > 0);
   video_codec.maxFramerate = streams[0].max_framerate;
 
-  return codec_->SetSendCodec(channel_, video_codec) == 0;
+  if (codec_->SetSendCodec(channel_, video_codec) != 0)
+    return false;
+
+  assert(config.min_transmit_bitrate_bps >= 0);
+  rtp_rtcp_->SetMinTransmitBitrate(channel_,
+                                   config.min_transmit_bitrate_bps / 1000);
+
+  use_default_bitrate_ = false;
+  return true;
 }
 
 bool VideoSendStream::DeliverRtcp(const uint8_t* packet, size_t length) {
@@ -472,5 +492,12 @@ void VideoSendStream::SignalNetworkState(Call::NetworkState state) {
     rtp_rtcp_->SetRTCPStatus(channel_, kRtcpNone);
 }
 
+int VideoSendStream::GetPacerQueuingDelayMs() const {
+  int pacer_delay_ms = 0;
+  if (rtp_rtcp_->GetPacerQueuingDelayMs(channel_, &pacer_delay_ms) != 0) {
+    return 0;
+  }
+  return pacer_delay_ms;
+}
 }  // namespace internal
 }  // namespace webrtc

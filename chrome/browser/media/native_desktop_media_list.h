@@ -28,16 +28,15 @@ class NativeDesktopMediaList : public DesktopMediaList {
   NativeDesktopMediaList(
       scoped_ptr<webrtc::ScreenCapturer> screen_capturer,
       scoped_ptr<webrtc::WindowCapturer> window_capturer);
-  virtual ~NativeDesktopMediaList();
+  ~NativeDesktopMediaList() override;
 
   // DesktopMediaList interface.
-  virtual void SetUpdatePeriod(base::TimeDelta period) OVERRIDE;
-  virtual void SetThumbnailSize(const gfx::Size& thumbnail_size) OVERRIDE;
-  virtual void StartUpdating(DesktopMediaListObserver* observer) OVERRIDE;
-  virtual int GetSourceCount() const OVERRIDE;
-  virtual const Source& GetSource(int index) const OVERRIDE;
-  virtual void SetViewDialogWindowId(
-      content::DesktopMediaID::Id dialog_id) OVERRIDE;
+  void SetUpdatePeriod(base::TimeDelta period) override;
+  void SetThumbnailSize(const gfx::Size& thumbnail_size) override;
+  void StartUpdating(DesktopMediaListObserver* observer) override;
+  int GetSourceCount() const override;
+  const Source& GetSource(int index) const override;
+  void SetViewDialogWindowId(content::DesktopMediaID::Id dialog_id) override;
 
  private:
   class Worker;

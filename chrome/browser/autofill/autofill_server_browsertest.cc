@@ -35,7 +35,7 @@ class WindowedPersonalDataManagerObserver : public PersonalDataManagerObserver {
         message_loop_runner_(new content::MessageLoopRunner){
     PersonalDataManagerFactory::GetForProfile(profile_)->AddObserver(this);
   }
-  virtual ~WindowedPersonalDataManagerObserver() {}
+  ~WindowedPersonalDataManagerObserver() override {}
 
   // Waits for the PersonalDataManager's list of profiles to be updated.
   void Wait() {
@@ -44,9 +44,7 @@ class WindowedPersonalDataManagerObserver : public PersonalDataManagerObserver {
   }
 
   // PersonalDataManagerObserver:
-  virtual void OnPersonalDataChanged() OVERRIDE {
-    message_loop_runner_->Quit();
-  }
+  void OnPersonalDataChanged() override { message_loop_runner_->Quit(); }
 
  private:
   Profile* profile_;
@@ -70,7 +68,7 @@ class WindowedNetworkObserver : public net::TestURLFetcher::DelegateForTests {
   }
 
   // net::TestURLFetcher::DelegateForTests:
-  virtual void OnRequestStart(int fetcher_id) OVERRIDE {
+  void OnRequestStart(int fetcher_id) override {
     net::TestURLFetcher* fetcher = factory_->GetFetcherByID(fetcher_id);
     if (fetcher->upload_data() == expected_upload_data_)
       message_loop_runner_->Quit();
@@ -78,8 +76,8 @@ class WindowedNetworkObserver : public net::TestURLFetcher::DelegateForTests {
     // Not interested in any further status updates from this fetcher.
     fetcher->SetDelegateForTests(NULL);
   }
-  virtual void OnChunkUpload(int fetcher_id) OVERRIDE {}
-  virtual void OnRequestEnd(int fetcher_id) OVERRIDE {}
+  void OnChunkUpload(int fetcher_id) override {}
+  void OnRequestEnd(int fetcher_id) override {}
 
  private:
   // Mocks out network requests.
@@ -95,7 +93,7 @@ class WindowedNetworkObserver : public net::TestURLFetcher::DelegateForTests {
 
 class AutofillServerTest : public InProcessBrowserTest  {
  public:
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     // Disable interactions with the Mac Keychain.
     PrefService* pref_service = browser()->profile()->GetPrefs();
     test::DisableSystemServices(pref_service);
@@ -169,6 +167,34 @@ IN_PROC_BROWSER_TEST_F(AutofillServerTest,
   content::SimulateMouseClick(
       web_contents, 0, blink::WebMouseEvent::ButtonLeft);
   upload_network_observer.Wait();
+}
+
+// Verify that a site with password fields will query even in the presence
+// of user defined autocomplete types.
+IN_PROC_BROWSER_TEST_F(AutofillServerTest,
+                       AlwaysQueryForPasswordFields) {
+  // Load the test page. Expect a query request upon loading the page.
+  const char kDataURIPrefix[] = "data:text/html;charset=utf-8,";
+  const char kFormHtml[] =
+      "<form id='test_form'>"
+      "  <input type='text' id='one' autocomplete='username'>"
+      "  <input type='text' id='two' autocomplete='off'>"
+      "  <input type='password' id='three'>"
+      "  <input type='submit'>"
+      "</form>";
+  const char kQueryRequest[] =
+      "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+      "<autofillquery clientversion=\"6.1.1715.1442/en (GGLL)\">"
+      "<form signature=\"8900697631820480876\">"
+      "<field signature=\"2594484045\"/>"
+      "<field signature=\"2750915947\"/>"
+      "<field signature=\"116843943\"/>"
+      "</form>"
+      "</autofillquery>";
+  WindowedNetworkObserver query_network_observer(kQueryRequest);
+  ui_test_utils::NavigateToURL(
+      browser(), GURL(std::string(kDataURIPrefix) + kFormHtml));
+  query_network_observer.Wait();
 }
 
 }  // namespace autofill

@@ -30,20 +30,20 @@
 
 namespace blink {
 
-class SimplifyMarkupCommand FINAL : public CompositeEditCommand {
+class SimplifyMarkupCommand final : public CompositeEditCommand {
 public:
     static PassRefPtrWillBeRawPtr<SimplifyMarkupCommand> create(Document& document, Node* firstNode, Node* nodeAfterLast)
     {
         return adoptRefWillBeNoop(new SimplifyMarkupCommand(document, firstNode, nodeAfterLast));
     }
 
-    virtual void trace(Visitor*) OVERRIDE;
+    virtual void trace(Visitor*) override;
 
 private:
     SimplifyMarkupCommand(Document&, Node* firstNode, Node* nodeAfterLast);
 
-    virtual void doApply() OVERRIDE;
-    int pruneSubsequentAncestorsToRemove(WillBeHeapVector<RefPtrWillBeMember<ContainerNode> >& nodesToRemove, size_t startNodeIndex);
+    virtual void doApply() override;
+    int pruneSubsequentAncestorsToRemove(WillBeHeapVector<RefPtrWillBeMember<ContainerNode>>& nodesToRemove, size_t startNodeIndex);
 
     RefPtrWillBeMember<Node> m_firstNode;
     RefPtrWillBeMember<Node> m_nodeAfterLast;

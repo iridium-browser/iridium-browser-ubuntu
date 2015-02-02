@@ -27,13 +27,13 @@ class VideoCaptureDeviceLinux : public VideoCaptureDevice {
                                      std::list<int>* fourccs);
 
   explicit VideoCaptureDeviceLinux(const Name& device_name);
-  virtual ~VideoCaptureDeviceLinux();
+  ~VideoCaptureDeviceLinux() override;
 
   // VideoCaptureDevice implementation.
-  virtual void AllocateAndStart(const VideoCaptureParams& params,
-                                scoped_ptr<Client> client) OVERRIDE;
+  void AllocateAndStart(const VideoCaptureParams& params,
+                        scoped_ptr<Client> client) override;
 
-  virtual void StopAndDeAllocate() OVERRIDE;
+  void StopAndDeAllocate() override;
 
  protected:
   void SetRotation(int rotation);
@@ -42,13 +42,6 @@ class VideoCaptureDeviceLinux : public VideoCaptureDevice {
   void SetRotationOnV4L2Thread(int rotation);
 
  private:
-  enum InternalState {
-    kIdle,  // The device driver is opened but camera is not in use.
-    kCapturing,  // Video is being captured.
-    kError  // Error accessing HW functions.
-            // User needs to recover by destroying the object.
-  };
-
   // Buffers used to receive video frames from with v4l2.
   struct Buffer {
     Buffer() : start(0), length(0) {}
@@ -68,7 +61,7 @@ class VideoCaptureDeviceLinux : public VideoCaptureDevice {
   void DeAllocateVideoBuffers();
   void SetErrorState(const std::string& reason);
 
-  InternalState state_;
+  bool is_capturing_;
   scoped_ptr<VideoCaptureDevice::Client> client_;
   Name device_name_;
   base::ScopedFD device_fd_;  // File descriptor for the opened camera device.

@@ -36,7 +36,7 @@ const EncodingTestData kEncodingTestDatas[] = {
   { "Big5.html", "Big5" },
   { "EUC-JP.html", "EUC-JP" },
   { "gb18030.html", "gb18030" },
-  { "iso-8859-1.html", "ISO-8859-1" },
+  { "iso-8859-1.html", "windows-1252" },
   { "ISO-8859-2.html", "ISO-8859-2" },
   { "ISO-8859-4.html", "ISO-8859-4" },
   { "ISO-8859-5.html", "ISO-8859-5" },
@@ -49,7 +49,7 @@ const EncodingTestData kEncodingTestDatas[] = {
   { "KOI8-U.html", "KOI8-U" },
   { "macintosh.html", "macintosh" },
   { "Shift-JIS.html", "Shift_JIS" },
-  { "US-ASCII.html", "ISO-8859-1" },  // http://crbug.com/15801
+  { "US-ASCII.html", "windows-1252" },  // http://crbug.com/15801
   { "UTF-8.html", "UTF-8" },
   { "UTF-16LE.html", "UTF-16LE" },
   { "windows-874.html", "windows-874" },
@@ -74,17 +74,17 @@ class SavePackageFinishedObserver : public content::DownloadManager::Observer {
     download_manager_->AddObserver(this);
   }
 
-  virtual ~SavePackageFinishedObserver() {
+  ~SavePackageFinishedObserver() override {
     if (download_manager_)
       download_manager_->RemoveObserver(this);
   }
 
   // DownloadManager::Observer:
-  virtual void OnSavePackageSuccessfullyFinished(
-      content::DownloadManager* manager, content::DownloadItem* item) OVERRIDE {
+  void OnSavePackageSuccessfullyFinished(content::DownloadManager* manager,
+                                         content::DownloadItem* item) override {
     callback_.Run();
   }
-  virtual void ManagerGoingDown(content::DownloadManager* manager) OVERRIDE {
+  void ManagerGoingDown(content::DownloadManager* manager) override {
     download_manager_->RemoveObserver(this);
     download_manager_ = NULL;
   }
@@ -132,10 +132,12 @@ class BrowserEncodingTest
     base::FilePath expected_file_name = ui_test_utils::GetTestFilePath(
         base::FilePath(kTestDir), expected);
 
-    EXPECT_TRUE(base::ContentsEqual(full_file_name, expected_file_name));
+    EXPECT_TRUE(base::ContentsEqual(full_file_name, expected_file_name)) <<
+        "generated_file = " << full_file_name.AsUTF8Unsafe() <<
+        ", expected_file = " << expected_file_name.AsUTF8Unsafe();
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     save_dir_ = temp_dir_.path();
     temp_sub_resource_dir_ = save_dir_.AppendASCII("sub_resource_files");
@@ -189,7 +191,7 @@ IN_PROC_BROWSER_TEST_F(BrowserEncodingTest, TestOverrideEncoding) {
   ui_test_utils::NavigateToURL(browser(), url);
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
-  EXPECT_EQ("ISO-8859-1", web_contents->GetEncoding());
+  EXPECT_EQ("windows-1252", web_contents->GetEncoding());
 
   // Override the encoding to "gb18030".
   const std::string selected_encoding =
@@ -243,7 +245,7 @@ IN_PROC_BROWSER_TEST_F(BrowserEncodingTest, MAYBE_TestEncodingAutoDetect) {
         "gb18030" },
       { "iso-8859-1_with_no_encoding_specified.html",
         "expected_iso-8859-1_saved_from_no_encoding_specified.html",
-        "ISO-8859-1" },
+        "windows-1252" },
       { "ISO-8859-5_with_no_encoding_specified.html",
         "expected_ISO-8859-5_saved_from_no_encoding_specified.html",
         "ISO-8859-5" },
@@ -296,7 +298,7 @@ IN_PROC_BROWSER_TEST_F(BrowserEncodingTest, MAYBE_TestEncodingAutoDetect) {
 
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTestDatas); ++i) {
+  for (size_t i = 0; i < arraysize(kTestDatas); ++i) {
     // Disable auto detect if it is on.
     browser()->profile()->GetPrefs()->SetBoolean(
         prefs::kWebKitUsesUniversalDetector, false);

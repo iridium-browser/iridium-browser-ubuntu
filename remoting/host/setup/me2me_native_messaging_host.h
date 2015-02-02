@@ -44,13 +44,13 @@ class Me2MeNativeMessagingHost
       scoped_refptr<DaemonController> daemon_controller,
       scoped_refptr<protocol::PairingRegistry> pairing_registry,
       scoped_ptr<OAuthClient> oauth_client);
-  virtual ~Me2MeNativeMessagingHost();
+  ~Me2MeNativeMessagingHost() override;
 
   void Start(const base::Closure& quit_closure);
 
   // extensions::NativeMessagingChannel::EventHandler implementation
-  virtual void OnMessage(scoped_ptr<base::Value> message) OVERRIDE;
-  virtual void OnDisconnect() OVERRIDE;
+  void OnMessage(scoped_ptr<base::Value> message) override;
+  void OnDisconnect() override;
 
  private:
   // These "Process.." methods handle specific request types. The |response|
@@ -135,8 +135,8 @@ class Me2MeNativeMessagingHost
    public:
     ElevatedChannelEventHandler(Me2MeNativeMessagingHost* host);
 
-    virtual void OnMessage(scoped_ptr<base::Value> message) OVERRIDE;
-    virtual void OnDisconnect() OVERRIDE;
+    virtual void OnMessage(scoped_ptr<base::Value> message) override;
+    virtual void OnDisconnect() override;
    private:
     Me2MeNativeMessagingHost* parent_;
   };

@@ -61,7 +61,7 @@ bool ShellNativeAppWindow::IsFullscreen() const {
   return false;
 }
 
-gfx::NativeWindow ShellNativeAppWindow::GetNativeWindow() {
+gfx::NativeWindow ShellNativeAppWindow::GetNativeWindow() const {
   return GetWindow();
 }
 
@@ -92,6 +92,7 @@ void ShellNativeAppWindow::ShowInactive() {
 }
 
 void ShellNativeAppWindow::Close() {
+  DesktopController::instance()->RemoveAppWindow(app_window_);
   app_window_->OnNativeClose();
 }
 

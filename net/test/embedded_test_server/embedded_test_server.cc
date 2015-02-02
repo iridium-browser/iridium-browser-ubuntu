@@ -8,7 +8,6 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/message_loop/message_loop.h"
-#include "base/path_service.h"
 #include "base/process/process_metrics.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
@@ -32,7 +31,7 @@ class CustomHttpResponse : public HttpResponse {
       : headers_(headers), contents_(contents) {
   }
 
-  virtual std::string ToResponseString() const OVERRIDE {
+  std::string ToResponseString() const override {
     return headers_ + "\r\n" + contents_;
   }
 
@@ -73,13 +72,13 @@ scoped_ptr<HttpResponse> HandleFileRequest(
 
     scoped_ptr<CustomHttpResponse> http_response(
         new CustomHttpResponse(headers_contents, file_contents));
-    return http_response.PassAs<HttpResponse>();
+    return http_response.Pass();
   }
 
   scoped_ptr<BasicHttpResponse> http_response(new BasicHttpResponse);
   http_response->set_code(HTTP_OK);
   http_response->set_content(file_contents);
-  return http_response.PassAs<HttpResponse>();
+  return http_response.Pass();
 }
 
 }  // namespace
@@ -243,8 +242,7 @@ void EmbeddedTestServer::HandleRequest(HttpConnection* connection,
                  << request->relative_url;
     scoped_ptr<BasicHttpResponse> not_found_response(new BasicHttpResponse);
     not_found_response->set_code(HTTP_NOT_FOUND);
-    connection->SendResponse(
-        not_found_response.PassAs<HttpResponse>());
+    connection->SendResponse(not_found_response.Pass());
   }
 
   // Drop the connection, since we do not support multiple requests per
@@ -258,6 +256,15 @@ GURL EmbeddedTestServer::GetURL(const std::string& relative_url) const {
   DCHECK(StartsWithASCII(relative_url, "/", true /* case_sensitive */))
       << relative_url;
   return base_url_.Resolve(relative_url);
+}
+
+GURL EmbeddedTestServer::GetURL(
+    const std::string& hostname,
+    const std::string& relative_url) const {
+  GURL local_url = GetURL(relative_url);
+  GURL::Replacements replace_host;
+  replace_host.SetHostStr(hostname);
+  return local_url.ReplaceComponents(replace_host);
 }
 
 void EmbeddedTestServer::ServeFilesFromDirectory(

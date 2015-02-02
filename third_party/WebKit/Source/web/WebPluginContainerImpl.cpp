@@ -68,7 +68,6 @@
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/GraphicsLayer.h"
 #include "platform/scroll/ScrollAnimator.h"
-#include "platform/scroll/ScrollView.h"
 #include "platform/scroll/ScrollbarTheme.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebClipboard.h"
@@ -116,7 +115,7 @@ void WebPluginContainerImpl::paint(GraphicsContext* gc, const IntRect& damageRec
     gc->save();
 
     ASSERT(parent()->isFrameView());
-    ScrollView* view =  toScrollView(parent());
+    FrameView* view =  toFrameView(parent());
 
     // The plugin is positioned in window coordinates, so it needs to be painted
     // in window coordinates.
@@ -175,7 +174,7 @@ void WebPluginContainerImpl::handleEvent(Event* event)
     if (!m_webPlugin->acceptsInputEvents())
         return;
 
-    RefPtr<WebPluginContainerImpl> protector(this);
+    RefPtrWillBeRawPtr<WebPluginContainerImpl> protector(this);
     // The events we pass are defined at:
     //    http://devedge-temp.mozilla.org/library/manuals/2002/plugin/1.0/structures5.html#1000000
     // Don't take the documentation as truth, however.  There are many cases
@@ -436,10 +435,10 @@ v8::Local<v8::Object> WebPluginContainerImpl::v8ObjectForElement()
         return v8::Local<v8::Object>();
 
     ScriptState* scriptState = ScriptState::forMainWorld(frame);
-    if (scriptState->contextIsValid())
+    if (!scriptState->contextIsValid())
         return v8::Local<v8::Object>();
 
-    v8::Handle<v8::Value> v8value = toV8(m_element, scriptState->context()->Global(), scriptState->isolate());
+    v8::Handle<v8::Value> v8value = toV8(m_element.get(), scriptState->context()->Global(), scriptState->isolate());
     ASSERT(v8value->IsObject());
 
     return v8::Handle<v8::Object>::Cast(v8value);
@@ -543,7 +542,7 @@ void WebPluginContainerImpl::setWantsWheelEvents(bool wantsWheelEvents)
 
 WebPoint WebPluginContainerImpl::windowToLocalPoint(const WebPoint& point)
 {
-    ScrollView* view = toScrollView(parent());
+    FrameView* view = toFrameView(parent());
     if (!view)
         return point;
     WebPoint windowPoint = view->windowToContents(point);
@@ -552,7 +551,7 @@ WebPoint WebPluginContainerImpl::windowToLocalPoint(const WebPoint& point)
 
 WebPoint WebPluginContainerImpl::localToWindowPoint(const WebPoint& point)
 {
-    ScrollView* view = toScrollView(parent());
+    FrameView* view = toFrameView(parent());
     if (!view)
         return point;
     IntPoint absolutePoint = roundedIntPoint(m_element->renderer()->localToAbsolute(LayoutPoint(point), UseTransforms));
@@ -600,7 +599,7 @@ v8::Local<v8::Object> WebPluginContainerImpl::scriptableObject(v8::Isolate* isol
 
     NPObject* npObject = m_webPlugin->scriptableObject();
     if (npObject)
-        return createV8ObjectForNPObject(npObject, 0, isolate);
+        return createV8ObjectForNPObject(isolate, npObject, 0);
     return v8::Local<v8::Object>();
 }
 
@@ -663,66 +662,78 @@ void WebPluginContainerImpl::willEndLiveResize()
 
 bool WebPluginContainerImpl::paintCustomOverhangArea(GraphicsContext* context, const IntRect& horizontalOverhangArea, const IntRect& verticalOverhangArea, const IntRect& dirtyRect)
 {
-    context->save();
-    context->setFillColor(Color(0xCC, 0xCC, 0xCC));
-    context->fillRect(intersection(horizontalOverhangArea, dirtyRect));
-    context->fillRect(intersection(verticalOverhangArea, dirtyRect));
-    context->restore();
+    Color fillColor(0xCC, 0xCC, 0xCC);
+    context->fillRect(intersection(horizontalOverhangArea, dirtyRect), fillColor);
+    context->fillRect(intersection(verticalOverhangArea, dirtyRect), fillColor);
     return true;
 }
 
 // Private methods -------------------------------------------------------------
 
 WebPluginContainerImpl::WebPluginContainerImpl(HTMLPlugInElement* element, WebPlugin* webPlugin)
-#if ENABLE(OILPAN)
-    : m_frame(element->document().frame())
-#else
     : FrameDestructionObserver(element->document().frame())
-#endif
     , m_element(element)
     , m_webPlugin(webPlugin)
-    , m_webLayer(0)
+    , m_webLayer(nullptr)
     , m_touchEventRequestType(TouchEventRequestTypeNone)
     , m_wantsWheelEvents(false)
+#if ENABLE(OILPAN)
+    , m_shouldDisposePlugin(false)
+#endif
 {
 }
 
 WebPluginContainerImpl::~WebPluginContainerImpl()
 {
 #if ENABLE(OILPAN)
-    // The element (and its document) are heap allocated and may
-    // have been finalized by now; unsafe to unregister the touch
-    // event handler at this stage.
-    //
-    // This is acceptable, as the widget will unregister itself if it
-    // is cleanly detached. If an explicit detach doesn't happen, this
-    // container is assumed to have died with the plugin element (and
-    // its document), hence no unregistration step is needed.
-    //
-    m_element = 0;
+    if (m_shouldDisposePlugin)
+        dispose();
+    // The plugin container must have been disposed of by now.
+    ASSERT(!m_webPlugin);
 #else
-    if (m_touchEventRequestType != TouchEventRequestTypeNone && m_element->document().frameHost())
-        m_element->document().frameHost()->eventHandlerRegistry().didRemoveEventHandler(*m_element, EventHandlerRegistry::TouchEvent);
+    dispose();
 #endif
+}
 
-    ScriptForbiddenScope::AllowSuperUnsafeScript thisShouldBeRemoved;
+void WebPluginContainerImpl::dispose()
+{
+    if (m_element && m_touchEventRequestType != TouchEventRequestTypeNone && m_element->document().frameHost())
+        m_element->document().frameHost()->eventHandlerRegistry().didRemoveEventHandler(*m_element, EventHandlerRegistry::TouchEvent);
 
     for (size_t i = 0; i < m_pluginLoadObservers.size(); ++i)
         m_pluginLoadObservers[i]->clearPluginContainer();
     m_webPlugin->destroy();
+    m_webPlugin = nullptr;
+
     if (m_webLayer)
         GraphicsLayer::unregisterContentsLayer(m_webLayer);
+
+    m_pluginLoadObservers.clear();
+    m_scrollbarGroup.clear();
+    m_element = nullptr;
 }
 
 #if ENABLE(OILPAN)
-void WebPluginContainerImpl::detach()
+void WebPluginContainerImpl::shouldDisposePlugin()
 {
-    if (m_touchEventRequestType != TouchEventRequestTypeNone && m_element->document().frameHost())
-        m_element->document().frameHost()->eventHandlerRegistry().didRemoveEventHandler(*m_element, EventHandlerRegistry::TouchEvent);
-
-    setWebLayer(0);
+    // If the LocalFrame is still alive, but the plugin element isn't, the
+    // LocalFrame will set m_shouldDisposePlugin via its weak pointer
+    // callback. This is a signal that the plugin container
+    // must dispose of its plugin when finalizing. The LocalFrame and
+    // all objects accessible from it can safely be accessed, but not
+    // the plugin element itself.
+    ASSERT(!m_shouldDisposePlugin);
+    m_shouldDisposePlugin = true;
+    m_element = nullptr;
 }
 #endif
+
+void WebPluginContainerImpl::trace(Visitor* visitor)
+{
+    visitor->trace(m_element);
+    FrameDestructionObserver::trace(visitor);
+    PluginView::trace(visitor);
+}
 
 void WebPluginContainerImpl::handleMouseEvent(MouseEvent* event)
 {
@@ -819,7 +830,7 @@ void WebPluginContainerImpl::handleKeyboardEvent(KeyboardEvent* event)
 #else
         if (webEvent.modifiers == WebInputEvent::ControlKey
 #endif
-            && webEvent.windowsKeyCode == VKEY_C
+            && (webEvent.windowsKeyCode == VKEY_C || webEvent.windowsKeyCode == VKEY_INSERT)
             // Only copy if there's a selection, so that we only ever do this
             // for Pepper plugins that support copying.  Windowless NPAPI
             // plugins will get the event as before.
@@ -932,7 +943,7 @@ void WebPluginContainerImpl::calculateGeometry(const IntRect& frameRect,
                                                IntRect& clipRect,
                                                Vector<IntRect>& cutOutRects)
 {
-    windowRect = toScrollView(parent())->contentsToWindow(frameRect);
+    windowRect = toFrameView(parent())->contentsToWindow(frameRect);
 
     // Calculate a clip-rect so that we don't overlap the scrollbars, etc.
     clipRect = windowClipRect();

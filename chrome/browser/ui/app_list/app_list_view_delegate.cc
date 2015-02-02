@@ -23,7 +23,8 @@
 #include "chrome/browser/ui/app_list/app_list_service.h"
 #include "chrome/browser/ui/app_list/app_list_syncable_service.h"
 #include "chrome/browser/ui/app_list/app_list_syncable_service_factory.h"
-#include "chrome/browser/ui/app_list/search/search_controller.h"
+#include "chrome/browser/ui/app_list/search/search_controller_factory.h"
+#include "chrome/browser/ui/app_list/search/search_resource_manager.h"
 #include "chrome/browser/ui/app_list/start_page_service.h"
 #include "chrome/browser/ui/apps/chrome_app_delegate.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -49,6 +50,7 @@
 #include "ui/app_list/app_list_switches.h"
 #include "ui/app_list/app_list_view_delegate_observer.h"
 #include "ui/app_list/search_box_model.h"
+#include "ui/app_list/search_controller.h"
 #include "ui/app_list/speech_ui_model.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/views/controls/webview/webview.h"
@@ -116,9 +118,9 @@ void GetCustomLauncherPageUrls(content::BrowserContext* browser_context,
   // First, check the command line.
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   if (app_list::switches::IsExperimentalAppListEnabled() &&
-      command_line->HasSwitch(switches::kCustomLauncherPage)) {
-    GURL custom_launcher_page_url(
-        command_line->GetSwitchValueASCII(switches::kCustomLauncherPage));
+      command_line->HasSwitch(app_list::switches::kCustomLauncherPage)) {
+    GURL custom_launcher_page_url(command_line->GetSwitchValueASCII(
+        app_list::switches::kCustomLauncherPage));
 
     if (custom_launcher_page_url.SchemeIs(extensions::kExtensionScheme)) {
       urls->push_back(custom_launcher_page_url);
@@ -205,8 +207,9 @@ void AppListViewDelegate::SetProfile(Profile* new_profile) {
     return;
 
   if (profile_) {
-    // Note: |search_controller_| has a reference to |speech_ui_| so must be
-    // destroyed first.
+    // Note: |search_resource_manager_| has a reference to |speech_ui_| so must
+    // be destroyed first.
+    search_resource_manager_.reset();
     search_controller_.reset();
     custom_page_contents_.clear();
     app_list::StartPageService* start_page_service =
@@ -250,11 +253,13 @@ void AppListViewDelegate::SetUpSearchUI() {
                                             ? start_page_service->state()
                                             : app_list::SPEECH_RECOGNITION_OFF);
 
-  search_controller_.reset(new app_list::SearchController(profile_,
-                                                          model_->search_box(),
-                                                          model_->results(),
-                                                          speech_ui_.get(),
-                                                          controller_));
+  search_resource_manager_.reset(new app_list::SearchResourceManager(
+      profile_,
+      model_->search_box(),
+      speech_ui_.get()));
+
+  search_controller_ = CreateSearchController(
+      profile_, model_->search_box(), model_->results(), controller_);
 }
 
 void AppListViewDelegate::SetUpProfileSwitcher() {
@@ -400,8 +405,10 @@ void AppListViewDelegate::GetShortcutPathForApp(
 }
 
 void AppListViewDelegate::StartSearch() {
-  if (search_controller_)
+  if (search_controller_) {
     search_controller_->Start();
+    controller_->OnSearchStarted();
+  }
 }
 
 void AppListViewDelegate::StopSearch() {
@@ -465,8 +472,22 @@ void AppListViewDelegate::ViewClosing() {
     if (service->HotwordEnabled()) {
       HotwordService* hotword_service =
           HotwordServiceFactory::GetForProfile(profile_);
-      if (hotword_service)
+      if (hotword_service) {
         hotword_service->StopHotwordSession(this);
+
+        // If we're in always-on mode, we always want to restart hotwording
+        // after closing the launcher window. So, in always-on mode, hotwording
+        // is stopped, and then started again right away. Note that hotwording
+        // may already be stopped. The call to StopHotwordSession() above both
+        // explicitly stops hotwording, if it's running, and clears the
+        // association between the hotword service and |this|.  When starting up
+        // hotwording, pass nullptr as the client so that hotword triggers cause
+        // the launcher to open.
+        // TODO(amistry): This only works on ChromeOS since Chrome hides the
+        // launcher instead of destroying it. Make this work on Chrome.
+        if (hotword_service->IsAlwaysOnEnabled())
+          hotword_service->RequestHotwordSession(nullptr);
+      }
     }
   }
 }
@@ -512,6 +533,23 @@ void AppListViewDelegate::ToggleSpeechRecognition() {
       app_list::StartPageService::Get(profile_);
   if (service)
     service->ToggleSpeechRecognition();
+
+  // With the new hotword extension, stop the hotword session. With the launcher
+  // and NTP, this is unnecessary since the hotwording is implicitly stopped.
+  // However, for always on, hotword triggering launches the launcher which
+  // starts a session and hence starts the hotword detector. This results in the
+  // hotword detector and the speech-to-text engine running in parallel, which
+  // will conflict with each other (i.e. saying 'Ok Google' twice in a row
+  // should cause a search to happen for 'Ok Google', not two hotword triggers).
+  // To get around this, always stop the session when switching to speech
+  // recognition.
+  if (HotwordService::IsExperimentalHotwordingEnabled() &&
+      service && service->HotwordEnabled()) {
+    HotwordService* hotword_service =
+        HotwordServiceFactory::GetForProfile(profile_);
+    if (hotword_service)
+      hotword_service->StopHotwordSession(this);
+  }
 }
 
 void AppListViewDelegate::ShowForProfileByPath(
@@ -540,10 +578,12 @@ void AppListViewDelegate::OnSpeechRecognitionStateChanged(
   app_list::StartPageService* service =
       app_list::StartPageService::Get(profile_);
   // With the new hotword extension, we need to re-request hotwording after
-  // speech recognition has stopped.
+  // speech recognition has stopped. Do not request hotwording after the app
+  // list has already closed.
   if (new_state == app_list::SPEECH_RECOGNITION_READY &&
       HotwordService::IsExperimentalHotwordingEnabled() &&
-      service && service->HotwordEnabled()) {
+      service && service->HotwordEnabled() &&
+      controller_->GetAppListWindow()) {
     HotwordService* hotword_service =
         HotwordServiceFactory::GetForProfile(profile_);
     if (hotword_service) {

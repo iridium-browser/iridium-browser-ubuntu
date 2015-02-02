@@ -45,13 +45,6 @@ Event.prototype.isMetaOrCtrlForTest;
 KeyboardEvent.DOM_KEY_LOCATION_NUMPAD;
 
 /**
- * @param {string} eventName
- * @param {!Function} listener
- * @param {boolean=} capturing
- */
-function addEventListener(eventName, listener, capturing) {}
-
-/**
  * @param {!T} value
  * @param {boolean=} onlyFirst
  * @this {Array.<T>}
@@ -453,22 +446,8 @@ CodeMirror.keyMap;
 /** @type {{scrollLeft: number, scrollTop: number}} */
 CodeMirror.doc;
 
-/**
- * @constructor
- * @extends {Event}
- */
-function ErrorEvent() {}
-
-/** @type {string} */
-ErrorEvent.prototype.message;
-
 /** @type {boolean} */
 window.dispatchStandaloneTestRunnerMessages;
-
-/**
- * @param {function()} onCatch
- */
-Promise.prototype.catch = function(onCatch) {};
 
 // FIXME: Remove once ES6 is supported natively by JS compiler.
 
@@ -480,3 +459,108 @@ var symbol;
  * @return {symbol}
  */
 function Symbol(description) {}
+
+/**
+ * @interface
+ * @template T
+ */
+var Iterator = function() { }
+
+Iterator.prototype = {
+    /**
+     * @return {{done: boolean, value: (T|undefined)}}
+     */
+    next: function() { }
+}
+
+/**
+ * @constructor
+ * @template K, V
+ */
+var Map = function() { }
+
+Map.prototype = {
+    /**
+     * @param {K} key
+     * @param {V} value
+     */
+    set: function(key, value) { },
+
+    /**
+     * @param {K} key
+     * @return {boolean}
+     */
+    delete: function(key) { },
+
+    /**
+     * @return {!Iterator.<K>}
+     */
+    keys: function() { },
+
+    /**
+     * @return {!Iterator.<V>}
+     */
+    values: function() { },
+
+    /**
+     * @param {K} key
+     * @return {V}
+     */
+    get: function(key) { },
+
+    /**
+     * @param {K} key
+     * @return {boolean}
+     */
+    has: function(key) { },
+
+    clear: function() { },
+
+    /**
+     * @return {number}
+     */
+    get size() { }
+}
+
+// FIXME: $jscomp.Iterable hack below should be removed once transpilation is not required for closure compiler ES6
+/**
+ * @constructor
+ * @implements $jscomp.Iterable.<V>
+ * @param {!Array.<V>|!Iterator.<V>=} iterable
+ * @template V
+ */
+var Set = function(iterable) { }
+
+Set.prototype = {
+    /**
+     * @param {V} value
+     */
+    add: function(value) { },
+
+    /**
+     * @param {V} value
+     * @return {boolean}
+     */
+    delete: function(value) { },
+
+    /**
+     * @return {!Iterator.<V>}
+     */
+    values: function() { },
+
+    /**
+     * @param {V} value
+     * @return {boolean}
+     */
+    has: function(value) { },
+
+    clear: function() { },
+
+    /**
+     * @return {number}
+     */
+    get size() { },
+
+    // FIXME: This should be removed once transpilation is not required for closure compiler ES6
+    $$iterator: function() { }
+}

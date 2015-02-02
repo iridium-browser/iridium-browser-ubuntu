@@ -26,22 +26,22 @@ class ConstrainedWebDialogDelegateBase
   ConstrainedWebDialogDelegateBase(content::BrowserContext* browser_context,
                                    ui::WebDialogDelegate* delegate,
                                    WebDialogWebContentsDelegate* tab_delegate);
-  virtual ~ConstrainedWebDialogDelegateBase();
+  ~ConstrainedWebDialogDelegateBase() override;
 
   bool closed_via_webui() const;
 
   // ConstrainedWebDialogDelegate interface.
-  virtual const ui::WebDialogDelegate* GetWebDialogDelegate() const OVERRIDE;
-  virtual ui::WebDialogDelegate* GetWebDialogDelegate() OVERRIDE;
-  virtual void OnDialogCloseFromWebUI() OVERRIDE;
-  virtual void ReleaseWebContentsOnDialogClose() OVERRIDE;
-  virtual web_modal::NativeWebContentsModalDialog GetNativeDialog() OVERRIDE;
-  virtual content::WebContents* GetWebContents() OVERRIDE;
+  const ui::WebDialogDelegate* GetWebDialogDelegate() const override;
+  ui::WebDialogDelegate* GetWebDialogDelegate() override;
+  void OnDialogCloseFromWebUI() override;
+  void ReleaseWebContentsOnDialogClose() override;
+  web_modal::NativeWebContentsModalDialog GetNativeDialog() override;
+  content::WebContents* GetWebContents() override;
 
   // WebDialogWebContentsDelegate interface.
-  virtual void HandleKeyboardEvent(
+  void HandleKeyboardEvent(
       content::WebContents* source,
-      const content::NativeWebKeyboardEvent& event) OVERRIDE;
+      const content::NativeWebKeyboardEvent& event) override;
 
  private:
   scoped_ptr<ui::WebDialogDelegate> web_dialog_delegate_;

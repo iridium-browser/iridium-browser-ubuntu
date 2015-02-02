@@ -107,7 +107,7 @@ WebInspector.HeapSnapshotView = function(dataDisplayDelegate, profile)
         splitViewResizer = this._tabbedPane.headerElement();
         this._objectDetailsView = this._tabbedPane;
     } else {
-        var retainmentViewHeader = document.createElementWithClass("div", "heap-snapshot-view-resizer");
+        var retainmentViewHeader = createElementWithClass("div", "heap-snapshot-view-resizer");
         var retainingPathsTitleDiv = retainmentViewHeader.createChild("div", "title");
         var retainingPathsTitle = retainingPathsTitleDiv.createChild("span");
         retainingPathsTitle.textContent = WebInspector.UIString("Retainers");
@@ -361,7 +361,7 @@ WebInspector.HeapSnapshotView.AllocationPerspective = function()
     WebInspector.HeapSnapshotView.Perspective.call(this,  WebInspector.UIString("Allocation"));
     this._allocationSplitView = new WebInspector.SplitView(false, true, "heapSnapshotAllocationSplitViewState", 200, 200);
 
-    var resizer = document.createElementWithClass("div", "heap-snapshot-view-resizer");
+    var resizer = createElementWithClass("div", "heap-snapshot-view-resizer");
     var title = resizer.createChild("div", "title").createChild("span");
     title.textContent = WebInspector.UIString("Live objects");
     this._allocationSplitView.hideDefaultResizer();
@@ -659,22 +659,6 @@ WebInspector.HeapSnapshotView.prototype = {
         if (--this._currentSearchResultIndex < 0)
             this._currentSearchResultIndex = (this._searchResults.length - 1);
         this._jumpToSearchResult(this._currentSearchResultIndex);
-    },
-
-    /**
-     * @return {boolean}
-     */
-    showingFirstSearchResult: function()
-    {
-        return (this._currentSearchResultIndex === 0);
-    },
-
-    /**
-     * @return {boolean}
-     */
-    showingLastSearchResult: function()
-    {
-        return (this._searchResults && this._currentSearchResultIndex === (this._searchResults.length - 1));
     },
 
     /**
@@ -1520,6 +1504,12 @@ WebInspector.HeapProfileHeader.prototype = {
      */
     _handleWorkerEvent: function(eventName, data)
     {
+        if (WebInspector.HeapSnapshotProgressEvent.BrokenSnapshot === eventName) {
+            var error = /** @type {string} */ (data);
+            WebInspector.console.error(error);
+            return;
+        }
+
         if (WebInspector.HeapSnapshotProgressEvent.Update !== eventName)
             return;
         var subtitle = /** @type {string} */ (data);
@@ -1746,11 +1736,10 @@ WebInspector.SaveSnapshotOutputStreamDelegate.prototype = {
 WebInspector.HeapTrackingOverviewGrid = function(heapProfileHeader)
 {
     WebInspector.VBox.call(this);
-    this.registerRequiredCSS("flameChart.css");
     this.element.id = "heap-recording-view";
     this.element.classList.add("heap-tracking-overview");
 
-    this._overviewContainer = this.element.createChild("div", "overview-container");
+    this._overviewContainer = this.element.createChild("div", "heap-overview-container");
     this._overviewGrid = new WebInspector.OverviewGrid("heap-recording");
     this._overviewGrid.element.classList.add("fill");
 
@@ -2111,7 +2100,7 @@ WebInspector.HeapSnapshotStatisticsView = function()
 {
     WebInspector.VBox.call(this);
     this.setMinimumSize(50, 25);
-    this._pieChart = new WebInspector.PieChart(150, WebInspector.HeapSnapshotStatisticsView._valueFormatter);
+    this._pieChart = new WebInspector.PieChart(150, WebInspector.HeapSnapshotStatisticsView._valueFormatter, true);
     this.element.appendChild(this._pieChart.element);
     this._labels = this.element.createChild("div", "heap-snapshot-stats-legend");
 }

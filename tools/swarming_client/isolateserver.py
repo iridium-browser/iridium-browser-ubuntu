@@ -9,9 +9,10 @@ __version__ = '0.3.4'
 
 import functools
 import logging
+import optparse
 import os
 import re
-import shutil
+import signal
 import sys
 import tempfile
 import threading
@@ -25,6 +26,7 @@ from third_party.depot_tools import fix_encoding
 from third_party.depot_tools import subcommand
 
 from utils import file_path
+from utils import lru
 from utils import net
 from utils import on_error
 from utils import threading_utils
@@ -94,15 +96,13 @@ DEFAULT_BLACKLIST = (
 )
 
 
-# Chromium-specific.
-DEFAULT_BLACKLIST += (
-  r'^.+\.(?:run_test_cases)$',
-  r'^(?:.+' + re.escape(os.path.sep) + r'|)testserver\.log$',
-)
-
-
 class Error(Exception):
   """Generic runtime error."""
+  pass
+
+
+class Aborted(Error):
+  """Operation aborted."""
   pass
 
 
@@ -322,7 +322,8 @@ class Storage(object):
   Works only within single namespace (and thus hashing algorithm and compression
   scheme are fixed).
 
-  Spawns multiple internal threads. Thread safe, but not fork safe.
+  Spawns multiple internal threads. Thread safe, but not fork safe. Modifies
+  signal handlers table to handle Ctrl+C.
   """
 
   def __init__(self, storage_api):
@@ -332,6 +333,8 @@ class Storage(object):
     self._hash_algo = isolated_format.get_hash_algo(storage_api.namespace)
     self._cpu_thread_pool = None
     self._net_thread_pool = None
+    self._aborted = False
+    self._prev_sig_handlers = {}
 
   @property
   def hash_algo(self):
@@ -375,6 +378,7 @@ class Storage(object):
 
   def close(self):
     """Waits for all pending tasks to finish."""
+    logging.info('Waiting for all threads to die...')
     if self._cpu_thread_pool:
       self._cpu_thread_pool.join()
       self._cpu_thread_pool.close()
@@ -383,14 +387,31 @@ class Storage(object):
       self._net_thread_pool.join()
       self._net_thread_pool.close()
       self._net_thread_pool = None
+    logging.info('Done.')
+
+  def abort(self):
+    """Cancels any pending or future operations."""
+    # This is not strictly theadsafe, but in the worst case the logging message
+    # will be printed twice. Not a big deal. In other places it is assumed that
+    # unprotected reads and writes to _aborted are serializable (it is true
+    # for python) and thus no locking is used.
+    if not self._aborted:
+      logging.warning('Aborting... It can take a while.')
+      self._aborted = True
 
   def __enter__(self):
     """Context manager interface."""
+    assert not self._prev_sig_handlers, self._prev_sig_handlers
+    for s in (signal.SIGINT, signal.SIGTERM):
+      self._prev_sig_handlers[s] = signal.signal(s, lambda *_args: self.abort())
     return self
 
   def __exit__(self, _exc_type, _exc_value, _traceback):
     """Context manager interface."""
     self.close()
+    while self._prev_sig_handlers:
+      s, h = self._prev_sig_handlers.popitem()
+      signal.signal(s, h)
     return False
 
   def upload_items(self, items):
@@ -404,10 +425,7 @@ class Storage(object):
     Returns:
       List of items that were uploaded. All other items are already there.
     """
-    # TODO(vadimsh): Optimize special case of len(items) == 1 that is frequently
-    # used by swarming.py. There's no need to spawn multiple threads and try to
-    # do stuff in parallel: there's nothing to parallelize. 'contains' check and
-    # 'push' should be performed sequentially in the context of current thread.
+    logging.info('upload_items(items=%d)', len(items))
 
     # Ensure all digests are calculated.
     for item in items:
@@ -423,7 +441,7 @@ class Storage(object):
         duplicates += 1
     items = seen.values()
     if duplicates:
-      logging.info('Skipped %d duplicated files', duplicates)
+      logging.info('Skipped %d files with duplicated content', duplicates)
 
     # Enqueue all upload tasks.
     missing = set()
@@ -508,6 +526,8 @@ class Storage(object):
 
     def push(content):
       """Pushes an Item and returns it to |channel|."""
+      if self._aborted:
+        raise Aborted()
       item.prepare(self._hash_algo)
       self._storage_api.push(item, push_state, content)
       return item
@@ -523,6 +543,8 @@ class Storage(object):
       # TODO(vadimsh): Implement streaming uploads. Before it's done, assemble
       # content right here. It will block until all file is zipped.
       try:
+        if self._aborted:
+          raise Aborted()
         stream = zip_compress(item.content(), item.compression_level)
         data = ''.join(stream)
       except Exception as exc:
@@ -605,11 +627,15 @@ class Storage(object):
     for item in items:
       item.prepare(self._hash_algo)
 
+    def contains(batch):
+      if self._aborted:
+        raise Aborted()
+      return self._storage_api.contains(batch)
+
     # Enqueue all requests.
     for batch in batch_items_for_check(items):
       self.net_thread_pool.add_task_with_channel(
-          channel, threading_utils.PRIORITY_HIGH,
-          self._storage_api.contains, batch)
+          channel, threading_utils.PRIORITY_HIGH, contains, batch)
       pending += 1
 
     # Yield results as they come in.
@@ -1084,8 +1110,6 @@ class IsolateServer(StorageApi):
     push_state.finalized = True
 
   def contains(self, items):
-    logging.info('Checking existence of %d files...', len(items))
-
     # Ensure all items were initialized with 'prepare' call. Storage does that.
     assert all(i.digest is not None and i.size is not None for i in items)
 
@@ -1278,6 +1302,291 @@ class MemoryCache(LocalCache):
       os.chmod(dest, file_mode & self._file_mode_mask)
 
 
+class CachePolicies(object):
+  def __init__(self, max_cache_size, min_free_space, max_items):
+    """
+    Arguments:
+    - max_cache_size: Trim if the cache gets larger than this value. If 0, the
+                      cache is effectively a leak.
+    - min_free_space: Trim if disk free space becomes lower than this value. If
+                      0, it unconditionally fill the disk.
+    - max_items: Maximum number of items to keep in the cache. If 0, do not
+                 enforce a limit.
+    """
+    self.max_cache_size = max_cache_size
+    self.min_free_space = min_free_space
+    self.max_items = max_items
+
+
+class DiskCache(LocalCache):
+  """Stateful LRU cache in a flat hash table in a directory.
+
+  Saves its state as json file.
+  """
+  STATE_FILE = 'state.json'
+
+  def __init__(self, cache_dir, policies, hash_algo):
+    """
+    Arguments:
+      cache_dir: directory where to place the cache.
+      policies: cache retention policies.
+      algo: hashing algorithm used.
+    """
+    super(DiskCache, self).__init__()
+    self.cache_dir = cache_dir
+    self.policies = policies
+    self.hash_algo = hash_algo
+    self.state_file = os.path.join(cache_dir, self.STATE_FILE)
+
+    # All protected methods (starting with '_') except _path should be called
+    # with this lock locked.
+    self._lock = threading_utils.LockWithAssert()
+    self._lru = lru.LRUDict()
+
+    # Profiling values.
+    self._added = []
+    self._removed = []
+    self._free_disk = 0
+
+    with tools.Profiler('Setup'):
+      with self._lock:
+        self._load()
+
+  def __enter__(self):
+    return self
+
+  def __exit__(self, _exc_type, _exec_value, _traceback):
+    with tools.Profiler('CleanupTrimming'):
+      with self._lock:
+        self._trim()
+
+        logging.info(
+            '%5d (%8dkb) added',
+            len(self._added), sum(self._added) / 1024)
+        logging.info(
+            '%5d (%8dkb) current',
+            len(self._lru),
+            sum(self._lru.itervalues()) / 1024)
+        logging.info(
+            '%5d (%8dkb) removed',
+            len(self._removed), sum(self._removed) / 1024)
+        logging.info(
+            '       %8dkb free',
+            self._free_disk / 1024)
+    return False
+
+  def cached_set(self):
+    with self._lock:
+      return self._lru.keys_set()
+
+  def touch(self, digest, size):
+    """Verifies an actual file is valid.
+
+    Note that is doesn't compute the hash so it could still be corrupted if the
+    file size didn't change.
+
+    TODO(maruel): More stringent verification while keeping the check fast.
+    """
+    # Do the check outside the lock.
+    if not is_valid_file(self._path(digest), size):
+      return False
+
+    # Update it's LRU position.
+    with self._lock:
+      if digest not in self._lru:
+        return False
+      self._lru.touch(digest)
+    return True
+
+  def evict(self, digest):
+    with self._lock:
+      self._lru.pop(digest)
+      self._delete_file(digest, UNKNOWN_FILE_SIZE)
+
+  def read(self, digest):
+    with open(self._path(digest), 'rb') as f:
+      return f.read()
+
+  def write(self, digest, content):
+    path = self._path(digest)
+    # A stale broken file may remain. It is possible for the file to have write
+    # access bit removed which would cause the file_write() call to fail to open
+    # in write mode. Take no chance here.
+    file_path.try_remove(path)
+    try:
+      size = file_write(path, content)
+    except:
+      # There are two possible places were an exception can occur:
+      #   1) Inside |content| generator in case of network or unzipping errors.
+      #   2) Inside file_write itself in case of disk IO errors.
+      # In any case delete an incomplete file and propagate the exception to
+      # caller, it will be logged there.
+      file_path.try_remove(path)
+      raise
+    # Make the file read-only in the cache.  This has a few side-effects since
+    # the file node is modified, so every directory entries to this file becomes
+    # read-only. It's fine here because it is a new file.
+    file_path.set_read_only(path, True)
+    with self._lock:
+      self._add(digest, size)
+
+  def hardlink(self, digest, dest, file_mode):
+    """Hardlinks the file to |dest|.
+
+    Note that the file permission bits are on the file node, not the directory
+    entry, so changing the access bit on any of the directory entries for the
+    file node will affect them all.
+    """
+    path = self._path(digest)
+    # TODO(maruel): file_path.HARDLINK_WITH_FALLBACK ?
+    file_path.hardlink(path, dest)
+    if file_mode is not None:
+      # Ignores all other bits.
+      os.chmod(dest, file_mode & 0500)
+
+  def _load(self):
+    """Loads state of the cache from json file."""
+    self._lock.assert_locked()
+
+    if not os.path.isdir(self.cache_dir):
+      os.makedirs(self.cache_dir)
+    else:
+      # Make sure the cache is read-only.
+      # TODO(maruel): Calculate the cost and optimize the performance
+      # accordingly.
+      file_path.make_tree_read_only(self.cache_dir)
+
+    # Load state of the cache.
+    if os.path.isfile(self.state_file):
+      try:
+        self._lru = lru.LRUDict.load(self.state_file)
+      except ValueError as err:
+        logging.error('Failed to load cache state: %s' % (err,))
+        # Don't want to keep broken state file.
+        file_path.try_remove(self.state_file)
+
+    # Ensure that all files listed in the state still exist and add new ones.
+    previous = self._lru.keys_set()
+    unknown = []
+    for filename in os.listdir(self.cache_dir):
+      if filename == self.STATE_FILE:
+        continue
+      if filename in previous:
+        previous.remove(filename)
+        continue
+      # An untracked file.
+      if not isolated_format.is_valid_hash(filename, self.hash_algo):
+        logging.warning('Removing unknown file %s from cache', filename)
+        file_path.try_remove(self._path(filename))
+        continue
+      # File that's not referenced in 'state.json'.
+      # TODO(vadimsh): Verify its SHA1 matches file name.
+      logging.warning('Adding unknown file %s to cache', filename)
+      unknown.append(filename)
+
+    if unknown:
+      # Add as oldest files. They will be deleted eventually if not accessed.
+      self._add_oldest_list(unknown)
+      logging.warning('Added back %d unknown files', len(unknown))
+
+    if previous:
+      # Filter out entries that were not found.
+      logging.warning('Removed %d lost files', len(previous))
+      for filename in previous:
+        self._lru.pop(filename)
+    self._trim()
+
+  def _save(self):
+    """Saves the LRU ordering."""
+    self._lock.assert_locked()
+    if sys.platform != 'win32':
+      d = os.path.dirname(self.state_file)
+      if os.path.isdir(d):
+        # Necessary otherwise the file can't be created.
+        file_path.set_read_only(d, False)
+    if os.path.isfile(self.state_file):
+      file_path.set_read_only(self.state_file, False)
+    self._lru.save(self.state_file)
+
+  def _trim(self):
+    """Trims anything we don't know, make sure enough free space exists."""
+    self._lock.assert_locked()
+
+    # Ensure maximum cache size.
+    if self.policies.max_cache_size:
+      total_size = sum(self._lru.itervalues())
+      while total_size > self.policies.max_cache_size:
+        total_size -= self._remove_lru_file()
+
+    # Ensure maximum number of items in the cache.
+    if self.policies.max_items and len(self._lru) > self.policies.max_items:
+      for _ in xrange(len(self._lru) - self.policies.max_items):
+        self._remove_lru_file()
+
+    # Ensure enough free space.
+    self._free_disk = file_path.get_free_space(self.cache_dir)
+    trimmed_due_to_space = False
+    while (
+        self.policies.min_free_space and
+        self._lru and
+        self._free_disk < self.policies.min_free_space):
+      trimmed_due_to_space = True
+      self._remove_lru_file()
+      self._free_disk = file_path.get_free_space(self.cache_dir)
+    if trimmed_due_to_space:
+      total_usage = sum(self._lru.itervalues())
+      usage_percent = 0.
+      if total_usage:
+        usage_percent = 100. * self.policies.max_cache_size / float(total_usage)
+      logging.warning(
+          'Trimmed due to not enough free disk space: %.1fkb free, %.1fkb '
+          'cache (%.1f%% of its maximum capacity)',
+          self._free_disk / 1024.,
+          total_usage / 1024.,
+          usage_percent)
+    self._save()
+
+  def _path(self, digest):
+    """Returns the path to one item."""
+    return os.path.join(self.cache_dir, digest)
+
+  def _remove_lru_file(self):
+    """Removes the last recently used file and returns its size."""
+    self._lock.assert_locked()
+    digest, size = self._lru.pop_oldest()
+    self._delete_file(digest, size)
+    return size
+
+  def _add(self, digest, size=UNKNOWN_FILE_SIZE):
+    """Adds an item into LRU cache marking it as a newest one."""
+    self._lock.assert_locked()
+    if size == UNKNOWN_FILE_SIZE:
+      size = os.stat(self._path(digest)).st_size
+    self._added.append(size)
+    self._lru.add(digest, size)
+
+  def _add_oldest_list(self, digests):
+    """Adds a bunch of items into LRU cache marking them as oldest ones."""
+    self._lock.assert_locked()
+    pairs = []
+    for digest in digests:
+      size = os.stat(self._path(digest)).st_size
+      self._added.append(size)
+      pairs.append((digest, size))
+    self._lru.batch_insert_oldest(pairs)
+
+  def _delete_file(self, digest, size=UNKNOWN_FILE_SIZE):
+    """Deletes cache file from the file system."""
+    self._lock.assert_locked()
+    try:
+      if size == UNKNOWN_FILE_SIZE:
+        size = os.stat(self._path(digest)).st_size
+      file_path.try_remove(self._path(digest))
+      self._removed.append(size)
+    except OSError as e:
+      logging.error('Error attempting to delete a file %s:\n%s' % (digest, e))
+
+
 class IsolatedBundle(object):
   """Fetched and parsed .isolated file with all dependencies."""
 
@@ -1440,35 +1749,35 @@ def get_storage(file_or_url, namespace):
   return Storage(get_storage_api(file_or_url, namespace))
 
 
-def upload_tree(base_url, indir, infiles, namespace):
+def upload_tree(base_url, infiles, namespace):
   """Uploads the given tree to the given url.
 
   Arguments:
-    base_url:  The base url, it is assume that |base_url|/has/ can be used to
-               query if an element was already uploaded, and |base_url|/store/
-               can be used to upload a new element.
-    indir:     Root directory the infiles are based in.
-    infiles:   dict of files to upload from |indir| to |base_url|.
+    base_url:  The url of the isolate server to upload to.
+    infiles:   iterable of pairs (absolute path, metadata dict) of files.
     namespace: The namespace to use on the server.
   """
-  logging.info('upload_tree(indir=%s, files=%d)', indir, len(infiles))
-
-  # Convert |indir| + |infiles| into a list of FileItem objects.
+  # Convert |infiles| into a list of FileItem objects, skip duplicates.
   # Filter out symlinks, since they are not represented by items on isolate
   # server side.
-  items = [
-      FileItem(
-          path=os.path.join(indir, filepath),
+  items = []
+  seen = set()
+  skipped = 0
+  for filepath, metadata in infiles:
+    if 'l' not in metadata and filepath not in seen:
+      seen.add(filepath)
+      item = FileItem(
+          path=filepath,
           digest=metadata['h'],
           size=metadata['s'],
           high_priority=metadata.get('priority') == '0')
-      for filepath, metadata in infiles.iteritems()
-      if 'l' not in metadata
-  ]
+      items.append(item)
+    else:
+      skipped += 1
 
+  logging.info('Skipped %d duplicated entries', skipped)
   with get_storage(base_url, namespace) as storage:
     storage.upload_items(items)
-  return 0
 
 
 def fetch_isolated(isolated_hash, storage, cache, outdir, require_command):
@@ -1651,7 +1960,7 @@ def archive_files_to_storage(storage, files, blacklist):
     return results
   finally:
     if tempdir:
-      shutil.rmtree(tempdir)
+      file_path.rmtree(tempdir)
 
 
 def archive(out, namespace, files, blacklist):
@@ -1681,11 +1990,7 @@ def CMDarchive(parser, args):
   directory entry itself.
   """
   add_isolate_server_options(parser, False)
-  parser.add_option(
-      '--blacklist',
-      action='append', default=list(DEFAULT_BLACKLIST),
-      help='List of regexp to use as blacklist filter when uploading '
-           'directories')
+  add_archive_options(parser)
   options, files = parser.parse_args(args)
   process_isolate_server_options(parser, options)
   if file_path.is_url(options.isolate_server):
@@ -1714,6 +2019,7 @@ def CMDdownload(parser, args):
   parser.add_option(
       '-t', '--target', metavar='DIR', default=os.getcwd(),
       help='destination directory')
+  add_cache_options(parser)
   options, args = parser.parse_args(args)
   process_isolate_server_options(parser, options)
   if args:
@@ -1721,6 +2027,7 @@ def CMDdownload(parser, args):
   if bool(options.isolated) == bool(options.file):
     parser.error('Use one of --isolated or --file, and only one.')
 
+  cache = process_cache_options(options)
   options.target = os.path.abspath(options.target)
 
   remote = options.isolate_server or options.indir
@@ -1730,6 +2037,7 @@ def CMDdownload(parser, args):
   with get_storage(remote, options.namespace) as storage:
     # Fetching individual files.
     if options.file:
+      # TODO(maruel): Enable cache in this case too.
       channel = threading_utils.TaskChannel()
       pending = {}
       for digest, dest in options.file:
@@ -1747,18 +2055,28 @@ def CMDdownload(parser, args):
 
     # Fetching whole isolated tree.
     if options.isolated:
-      bundle = fetch_isolated(
-          isolated_hash=options.isolated,
-          storage=storage,
-          cache=MemoryCache(),
-          outdir=options.target,
-          require_command=False)
-      rel = os.path.join(options.target, bundle.relative_cwd)
-      print('To run this test please run from the directory %s:' %
-            os.path.join(options.target, rel))
-      print('  ' + ' '.join(bundle.command))
+      with cache:
+        bundle = fetch_isolated(
+            isolated_hash=options.isolated,
+            storage=storage,
+            cache=cache,
+            outdir=options.target,
+            require_command=False)
+      if bundle.command:
+        rel = os.path.join(options.target, bundle.relative_cwd)
+        print('To run this test please run from the directory %s:' %
+              os.path.join(options.target, rel))
+        print('  ' + ' '.join(bundle.command))
 
   return 0
+
+
+def add_archive_options(parser):
+  parser.add_option(
+      '--blacklist',
+      action='append', default=list(DEFAULT_BLACKLIST),
+      help='List of regexp to use as blacklist filter when uploading '
+           'directories')
 
 
 def add_isolate_server_options(parser, add_indir):
@@ -1820,6 +2138,49 @@ def process_isolate_server_options(parser, options):
       os.path.normpath(os.path.join(os.getcwd(), options.indir)))
   if not os.path.isdir(options.indir):
     parser.error('Path given to --indir must exist.')
+
+
+def add_cache_options(parser):
+  cache_group = optparse.OptionGroup(parser, 'Cache management')
+  cache_group.add_option(
+      '--cache', metavar='DIR',
+      help='Directory to keep a local cache of the files. Accelerates download '
+           'by reusing already downloaded files. Default=%default')
+  cache_group.add_option(
+      '--max-cache-size',
+      type='int',
+      metavar='NNN',
+      default=20*1024*1024*1024,
+      help='Trim if the cache gets larger than this value, default=%default')
+  cache_group.add_option(
+      '--min-free-space',
+      type='int',
+      metavar='NNN',
+      default=2*1024*1024*1024,
+      help='Trim if disk free space becomes lower than this value, '
+           'default=%default')
+  cache_group.add_option(
+      '--max-items',
+      type='int',
+      metavar='NNN',
+      default=100000,
+      help='Trim if more than this number of items are in the cache '
+           'default=%default')
+  parser.add_option_group(cache_group)
+
+
+def process_cache_options(options):
+  if options.cache:
+    policies = CachePolicies(
+        options.max_cache_size, options.min_free_space, options.max_items)
+
+    # |options.cache| path may not exist until DiskCache() instance is created.
+    return DiskCache(
+        os.path.abspath(options.cache),
+        policies,
+        isolated_format.get_hash_algo(options.namespace))
+  else:
+    return MemoryCache()
 
 
 class OptionParserIsolateServer(tools.OptionParserWithLogging):

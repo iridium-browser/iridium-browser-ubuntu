@@ -22,9 +22,6 @@
 #include "chrome/browser/browsing_data/browsing_data_file_system_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_indexed_db_helper.h"
 #include "chrome/browser/browsing_data/browsing_data_local_storage_helper.h"
-#include "chrome/browser/content_settings/content_settings_utils.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
-#include "chrome/browser/content_settings/local_shared_objects_container.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ssl/chrome_ssl_host_state_delegate.h"
@@ -35,6 +32,9 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/content_settings/core/browser/content_settings_utils.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "components/content_settings/core/browser/local_shared_objects_counter.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/cert_store.h"
@@ -81,6 +81,9 @@ ContentSettingsType kPermissionType[] = {
   CONTENT_SETTINGS_TYPE_MEDIASTREAM,
   CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS,
   CONTENT_SETTINGS_TYPE_MIDI_SYSEX,
+#if defined(OS_ANDROID)
+  CONTENT_SETTINGS_TYPE_PUSH_MESSAGING,
+#endif
 };
 
 bool CertificateTransparencyStatusMatch(
@@ -202,17 +205,38 @@ WebsiteSettings::WebsiteSettings(
 
   // Every time the Website Settings UI is opened a |WebsiteSettings| object is
   // created. So this counts how ofter the Website Settings UI is opened.
-  content::RecordAction(base::UserMetricsAction("WebsiteSettings_Opened"));
+  RecordWebsiteSettingsAction(WEBSITE_SETTINGS_OPENED);
 }
 
 WebsiteSettings::~WebsiteSettings() {
 }
+
+void WebsiteSettings::RecordWebsiteSettingsAction(
+    WebsiteSettingsAction action) {
+  UMA_HISTOGRAM_ENUMERATION("WebsiteSettings.Action",
+                            action,
+                            WEBSITE_SETTINGS_COUNT);
+
+  // Use a separate histogram to record actions if they are done on a page with
+  // an HTTPS URL. Note that this *disregards* security status.
+  if (site_url_.SchemeIs(url::kHttpsScheme)) {
+    UMA_HISTOGRAM_ENUMERATION("WebsiteSettings.Action.HttpsUrl",
+                              action,
+                              WEBSITE_SETTINGS_COUNT);
+  }
+}
+
 
 void WebsiteSettings::OnSitePermissionChanged(ContentSettingsType type,
                                               ContentSetting setting) {
   // Count how often a permission for a specific content type is changed using
   // the Website Settings UI.
   UMA_HISTOGRAM_COUNTS("WebsiteSettings.PermissionChanged", type);
+
+  // This is technically redundant given the histogram above, but putting the
+  // total count of permission changes in another histogram makes it easier to
+  // compare it against other kinds of actions in WebsiteSettings[PopupView].
+  RecordWebsiteSettingsAction(WEBSITE_SETTINGS_CHANGED_PERMISSION);
 
   ContentSettingsPattern primary_pattern;
   ContentSettingsPattern secondary_pattern;
@@ -235,6 +259,7 @@ void WebsiteSettings::OnSitePermissionChanged(ContentSettingsType type,
     case CONTENT_SETTINGS_TYPE_FULLSCREEN:
     case CONTENT_SETTINGS_TYPE_MOUSELOCK:
     case CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS:
+    case CONTENT_SETTINGS_TYPE_PUSH_MESSAGING:
       primary_pattern = ContentSettingsPattern::FromURL(site_url_);
       secondary_pattern = ContentSettingsPattern::Wildcard();
       break;
@@ -337,7 +362,13 @@ void WebsiteSettings::OnRevokeSSLErrorBypassButtonPressed() {
 void WebsiteSettings::Init(Profile* profile,
                            const GURL& url,
                            const content::SSLStatus& ssl) {
-  if (url.SchemeIs(content::kChromeUIScheme)) {
+  bool isChromeUINativeScheme = false;
+#if defined(OS_ANDROID)
+  isChromeUINativeScheme = url.SchemeIs(chrome::kChromeUINativeScheme);
+#endif
+
+  if (url.SchemeIs(content::kChromeUIScheme) ||
+      url.SchemeIs(url::kAboutScheme) || isChromeUINativeScheme) {
     site_identity_status_ = SITE_IDENTITY_STATUS_INTERNAL_PAGE;
     site_identity_details_ =
         l10n_util::GetStringUTF16(IDS_PAGE_INFO_INTERNAL_PAGE);
@@ -621,8 +652,11 @@ void WebsiteSettings::Init(Profile* profile,
       site_identity_status_ == SITE_IDENTITY_STATUS_CERT_REVOCATION_UNKNOWN ||
       site_identity_status_ == SITE_IDENTITY_STATUS_ADMIN_PROVIDED_CERT ||
       site_identity_status_ ==
-          SITE_IDENTITY_STATUS_DEPRECATED_SIGNATURE_ALGORITHM)
+          SITE_IDENTITY_STATUS_DEPRECATED_SIGNATURE_ALGORITHM) {
     tab_id = WebsiteSettingsUI::TAB_ID_CONNECTION;
+    RecordWebsiteSettingsAction(
+      WEBSITE_SETTINGS_CONNECTION_TAB_SHOWN_IMMEDIATELY);
+  }
   ui_->SetSelectedTab(tab_id);
 }
 
@@ -697,9 +731,9 @@ void WebsiteSettings::PresentSitePermissions() {
 
 void WebsiteSettings::PresentSiteData() {
   CookieInfoList cookie_info_list;
-  const LocalSharedObjectsContainer& allowed_objects =
+  const LocalSharedObjectsCounter& allowed_objects =
       tab_specific_content_settings()->allowed_local_shared_objects();
-  const LocalSharedObjectsContainer& blocked_objects =
+  const LocalSharedObjectsCounter& blocked_objects =
       tab_specific_content_settings()->blocked_local_shared_objects();
 
   // Add first party cookie and site data counts.

@@ -59,7 +59,8 @@ WebInspector.NetworkRequest = function(target, requestId, url, documentURL, fram
     this.requestMethod = "";
     this.requestTime = 0;
 
-    this._type = WebInspector.resourceTypes.Other;
+    /** @type {!WebInspector.ResourceType} */
+    this._resourceType = WebInspector.resourceTypes.Other;
     this._contentEncoded = false;
     this._pendingContentCallbacks = [];
     /** @type {!Array.<!WebInspector.NetworkRequest.WebSocketFrame>} */
@@ -79,6 +80,7 @@ WebInspector.NetworkRequest.Events = {
     RemoteAddressChanged: "RemoteAddressChanged",
     RequestHeadersChanged: "RequestHeadersChanged",
     ResponseHeadersChanged: "ResponseHeadersChanged",
+    WebsocketFrameAdded: "WebsocketFrameAdded",
 }
 
 /** @enum {string} */
@@ -354,16 +356,20 @@ WebInspector.NetworkRequest.prototype = {
     /**
      * @return {boolean}
      */
-    get cached()
+    cached: function()
     {
-        return !!this._cached && !this._transferSize;
+        return (!!this._fromMemoryCache || !!this._fromDiskCache) && !this._transferSize;
     },
 
-    set cached(x)
+    setFromMemoryCache: function()
     {
-        this._cached = x;
-        if (x)
-            delete this._timing;
+        this._fromMemoryCache = true;
+        delete this._timing;
+    },
+
+    setFromDiskCache: function()
+    {
+        this._fromDiskCache = true;
     },
 
     /**
@@ -389,7 +395,7 @@ WebInspector.NetworkRequest.prototype = {
 
     set timing(x)
     {
-        if (x && !this._cached) {
+        if (x && !this._fromMemoryCache) {
             // Take startTime and responseReceivedTime from timing data for better accuracy.
             // Timing's requestTime is a baseline in seconds, rest of the numbers there are ticks in millis.
             this._startTime = x.requestTime;
@@ -482,14 +488,17 @@ WebInspector.NetworkRequest.prototype = {
     /**
      * @return {!WebInspector.ResourceType}
      */
-    get type()
+    resourceType: function()
     {
-        return this._type;
+        return this._resourceType;
     },
 
-    set type(x)
+    /**
+     * @param {!WebInspector.ResourceType} resourceType
+     */
+    setResourceType: function(resourceType)
     {
-        this._type = x;
+        this._resourceType = resourceType;
     },
 
     /**
@@ -817,7 +826,7 @@ WebInspector.NetworkRequest.prototype = {
      */
     contentType: function()
     {
-        return this._type;
+        return this._resourceType;
     },
 
     /**
@@ -828,7 +837,7 @@ WebInspector.NetworkRequest.prototype = {
         // We do not support content retrieval for WebSockets at the moment.
         // Since WebSockets are potentially long-living, fail requests immediately
         // to prevent caller blocking until resource is marked as finished.
-        if (this.type === WebInspector.resourceTypes.WebSocket) {
+        if (this._resourceType === WebInspector.resourceTypes.WebSocket) {
             callback(null);
             return;
         }
@@ -881,19 +890,7 @@ WebInspector.NetworkRequest.prototype = {
      */
     populateImageSource: function(image)
     {
-        /**
-         * @this {WebInspector.NetworkRequest}
-         * @param {?string} content
-         */
-        function onResourceContent(content)
-        {
-            var imageSrc = this.asDataURL();
-            if (imageSrc === null)
-                imageSrc = this.url;
-            image.src = imageSrc;
-        }
-
-        this.requestContent(onResourceContent.bind(this));
+        WebInspector.Resource.populateImageSource(this._url, this._mimeType, this, image);
     },
 
     /**
@@ -901,7 +898,10 @@ WebInspector.NetworkRequest.prototype = {
      */
     asDataURL: function()
     {
-        return WebInspector.Resource.contentAsDataURL(this._content, this.mimeType, this._contentEncoded);
+        var content = this._content;
+        if (!this._contentEncoded)
+            content = window.btoa(content);
+        return WebInspector.Resource.contentAsDataURL(content, this.mimeType, true);
     },
 
     _innerRequestContent: function()
@@ -989,7 +989,7 @@ WebInspector.NetworkRequest.prototype = {
      */
     addFrameError: function(errorMessage, time)
     {
-        this._frames.push({ type: WebInspector.NetworkRequest.WebSocketFrameType.Error, text: errorMessage, time: time, opCode: -1, mask: false });
+        this._addFrame({ type: WebInspector.NetworkRequest.WebSocketFrameType.Error, text: errorMessage, time: time, opCode: -1, mask: false });
     },
 
     /**
@@ -1000,7 +1000,16 @@ WebInspector.NetworkRequest.prototype = {
     addFrame: function(response, time, sent)
     {
         var type = sent ? WebInspector.NetworkRequest.WebSocketFrameType.Send : WebInspector.NetworkRequest.WebSocketFrameType.Receive;
-        this._frames.push({ type: type, text: response.payloadData, time: time, opCode: response.opcode, mask: response.mask });
+        this._addFrame({ type: type, text: response.payloadData, time: time, opCode: response.opcode, mask: response.mask });
+    },
+
+    /**
+     * @param {!WebInspector.NetworkRequest.WebSocketFrame} frame
+     */
+    _addFrame: function(frame)
+    {
+        this._frames.push(frame);
+        this.dispatchEventToListeners(WebInspector.NetworkRequest.Events.WebsocketFrameAdded, frame);
     },
 
     replayXHR: function()

@@ -23,9 +23,9 @@ using preferences_helper::GetPrefs;
 class TwoClientPreferencesSyncTest : public SyncTest {
  public:
   TwoClientPreferencesSyncTest() : SyncTest(TWO_CLIENT) {}
-  virtual ~TwoClientPreferencesSyncTest() {}
+  ~TwoClientPreferencesSyncTest() override {}
 
-  virtual bool TestUsesSelfNotifications() OVERRIDE { return false; }
+  bool TestUsesSelfNotifications() override { return false; }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TwoClientPreferencesSyncTest);

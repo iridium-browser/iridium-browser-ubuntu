@@ -12,10 +12,6 @@
 #include "mojo/services/public/cpp/view_manager/view.h"
 #include "mojo/services/public/interfaces/input_events/input_events.mojom.h"
 
-namespace gfx {
-class Rect;
-}
-
 namespace mojo {
 
 class View;
@@ -54,15 +50,30 @@ class ViewObserver {
   virtual void OnViewDestroyed(View* view) {}
 
   virtual void OnViewBoundsChanging(View* view,
-                                    const gfx::Rect& old_bounds,
-                                    const gfx::Rect& new_bounds) {}
+                                    const Rect& old_bounds,
+                                    const Rect& new_bounds) {}
   virtual void OnViewBoundsChanged(View* view,
-                                   const gfx::Rect& old_bounds,
-                                   const gfx::Rect& new_bounds) {}
+                                   const Rect& old_bounds,
+                                   const Rect& new_bounds) {}
 
   virtual void OnViewFocusChanged(View* gained_focus, View* lost_focus) {}
 
   virtual void OnViewInputEvent(View* view, const EventPtr& event) {}
+
+  virtual void OnViewVisibilityChanging(View* view) {}
+  virtual void OnViewVisibilityChanged(View* view) {}
+
+  virtual void OnViewPropertyChanged(View* view,
+                                     const std::string& name,
+                                     const std::vector<uint8_t>* old_data,
+                                     const std::vector<uint8_t>* new_data) {}
+
+  virtual void OnViewEmbeddedAppDisconnected(View* view) {}
+
+  // Sent when the drawn state changes. This is only sent for the root nodes
+  // when embedded.
+  virtual void OnViewDrawnChanging(View* view) {}
+  virtual void OnViewDrawnChanged(View* view) {}
 
  protected:
   virtual ~ViewObserver() {}

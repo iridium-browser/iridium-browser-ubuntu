@@ -37,23 +37,23 @@ class AppInfoFooterPanel
   AppInfoFooterPanel(gfx::NativeWindow parent_window,
                      Profile* profile,
                      const extensions::Extension* app);
-  virtual ~AppInfoFooterPanel();
+  ~AppInfoFooterPanel() override;
 
  private:
   void CreateButtons();
   void LayoutButtons();
 
   // Updates the visibility of the pin/unpin buttons so that only one is visible
-  // at a time.
-  void UpdatePinButtons();
+  // at a time. If |focus_button| is true, sets the focus to whichever button is
+  // now visible.
+  void UpdatePinButtons(bool focus_visible_button);
 
   // Overridden from views::ButtonListener:
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // Overridden from ExtensionUninstallDialog::Delegate:
-  virtual void ExtensionUninstallAccepted() OVERRIDE;
-  virtual void ExtensionUninstallCanceled() OVERRIDE;
+  void ExtensionUninstallAccepted() override;
+  void ExtensionUninstallCanceled() override;
 
   // Create Shortcuts for the app. Must only be called if CanCreateShortcuts()
   // returns true.

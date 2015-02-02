@@ -170,7 +170,7 @@ void RemoveUnreachableItems(DatabaseContents* contents,
     FileTracker* tracker = contents->file_trackers[i];
     if (ContainsKey(visited_trackers, tracker->tracker_id())) {
       reachable_trackers.push_back(tracker);
-      contents->file_trackers[i] = NULL;
+      contents->file_trackers[i] = nullptr;
     } else {
       PutFileTrackerDeletionToDB(tracker->tracker_id(), db);
     }
@@ -188,7 +188,7 @@ void RemoveUnreachableItems(DatabaseContents* contents,
     FileMetadata* metadata = contents->file_metadata[i];
     if (ContainsKey(referred_file_ids, metadata->file_id())) {
       referred_file_metadata.push_back(metadata);
-      contents->file_metadata[i] = NULL;
+      contents->file_metadata[i] = nullptr;
     } else {
       PutFileMetadataDeletionToDB(metadata->file_id(), db);
     }
@@ -400,6 +400,11 @@ void MetadataDatabaseIndex::DemoteDirtyTracker(int64 tracker_id) {
 
 bool MetadataDatabaseIndex::HasDemotedDirtyTracker() const {
   return !demoted_dirty_trackers_.empty();
+}
+
+bool MetadataDatabaseIndex::IsDemotedDirtyTracker(int64 tracker_id) const {
+  return demoted_dirty_trackers_.find(tracker_id) !=
+      demoted_dirty_trackers_.end();
 }
 
 void MetadataDatabaseIndex::PromoteDemotedDirtyTracker(int64 tracker_id) {

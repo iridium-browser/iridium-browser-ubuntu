@@ -280,7 +280,7 @@ class NET_EXPORT_PRIVATE ProxyConfigServiceLinux : public ProxyConfigService {
   ProxyConfigServiceLinux(base::Environment* env_var_getter,
                           SettingGetter* setting_getter);
 
-  virtual ~ProxyConfigServiceLinux();
+  ~ProxyConfigServiceLinux() override;
 
   void SetupAndFetchInitialConfig(
       const scoped_refptr<base::SingleThreadTaskRunner>& glib_task_runner,
@@ -296,10 +296,10 @@ class NET_EXPORT_PRIVATE ProxyConfigServiceLinux : public ProxyConfigService {
 
   // ProxyConfigService methods:
   // Called from IO thread.
-  virtual void AddObserver(Observer* observer) OVERRIDE;
-  virtual void RemoveObserver(Observer* observer) OVERRIDE;
-  virtual ProxyConfigService::ConfigAvailability GetLatestProxyConfig(
-      ProxyConfig* config) OVERRIDE;
+  void AddObserver(Observer* observer) override;
+  void RemoveObserver(Observer* observer) override;
+  ProxyConfigService::ConfigAvailability GetLatestProxyConfig(
+      ProxyConfig* config) override;
 
  private:
   scoped_refptr<Delegate> delegate_;

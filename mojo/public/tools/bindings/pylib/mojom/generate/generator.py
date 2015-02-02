@@ -36,9 +36,9 @@ def GetDataHeader(exported, struct):
   return struct
 
 def ExpectedArraySize(kind):
-  if mojom.IsFixedArrayKind(kind):
+  if mojom.IsArrayKind(kind):
     return kind.length
-  return 0
+  return None
 
 def StudlyCapsToCamel(studly):
   return studly[0].lower() + studly[1:]
@@ -46,6 +46,16 @@ def StudlyCapsToCamel(studly):
 def CamelCaseToAllCaps(camel_case):
   return '_'.join(
       word for word in re.split(r'([A-Z][^A-Z]+)', camel_case) if word).upper()
+
+def WriteFile(contents, full_path):
+  # Make sure the containing directory exists.
+  full_dir = os.path.dirname(full_path)
+  if not os.path.exists(full_dir):
+    os.makedirs(full_dir)
+
+  # Dump the data to disk.
+  with open(full_path, "w+") as f:
+    f.write(contents)
 
 class Generator(object):
   # Pass |output_dir| to emit files to disk. Omit |output_dir| to echo all
@@ -66,12 +76,17 @@ class Generator(object):
   def GetStructs(self):
     return map(partial(GetDataHeader, True), self.module.structs)
 
+  # Prepend the filename with a directory that matches the directory of the
+  # original .mojom file, relative to the import root.
+  def MatchMojomFilePath(self, filename):
+    return os.path.join(os.path.dirname(self.module.path), filename)
+
   def Write(self, contents, filename):
     if self.output_dir is None:
       print contents
       return
-    with open(os.path.join(self.output_dir, filename), "w+") as f:
-      f.write(contents)
+    full_path = os.path.join(self.output_dir, filename)
+    WriteFile(contents, full_path)
 
   def GenerateFiles(self, args):
     raise NotImplementedError("Subclasses must override/implement this method")

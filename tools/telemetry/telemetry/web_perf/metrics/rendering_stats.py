@@ -97,7 +97,7 @@ def HasRenderingStats(process):
   if not process:
     return False
   for event in process.IterAllSlicesOfName(
-      'BenchmarkInstrumentation::MainThreadRenderingStats'):
+      'BenchmarkInstrumentation::DisplayRenderingStats'):
     if 'data' in event.args and event.args['data']['frame_count'] == 1:
       return True
   for event in process.IterAllSlicesOfName(
@@ -106,6 +106,13 @@ def HasRenderingStats(process):
       return True
   return False
 
+def GetTimestampEventName(process):
+  """ Returns the name of the events used to count frame timestamps. """
+  event_name = 'BenchmarkInstrumentation::DisplayRenderingStats'
+  for event in process.IterAllSlicesOfName(event_name):
+    if 'data' in event.args and event.args['data']['frame_count'] == 1:
+      return event_name
+  return 'BenchmarkInstrumentation::ImplThreadRenderingStats'
 
 class RenderingStats(object):
   def __init__(self, renderer_process, browser_process, timeline_ranges):
@@ -126,6 +133,8 @@ class RenderingStats(object):
     else:
       timestamp_process = renderer_process
 
+    timestamp_event_name = GetTimestampEventName(timestamp_process)
+
     # A lookup from list names below to any errors or exceptions encountered
     # in attempting to generate that list.
     self.errors = {}
@@ -136,8 +145,6 @@ class RenderingStats(object):
     self.painted_pixel_counts = []
     self.record_times = []
     self.recorded_pixel_counts = []
-    self.rasterize_times = []
-    self.rasterized_pixel_counts = []
     self.approximated_pixel_percentages = []
     # End-to-end latency for input event - from when input event is
     # generated to when the its resulted page is swap buffered.
@@ -156,8 +163,6 @@ class RenderingStats(object):
       self.painted_pixel_counts.append([])
       self.record_times.append([])
       self.recorded_pixel_counts.append([])
-      self.rasterize_times.append([])
-      self.rasterized_pixel_counts.append([])
       self.approximated_pixel_percentages.append([])
       self.input_event_latency.append([])
       self.scroll_update_latency.append([])
@@ -165,7 +170,8 @@ class RenderingStats(object):
 
       if timeline_range.is_empty:
         continue
-      self._InitFrameTimestampsFromTimeline(timestamp_process, timeline_range)
+      self._InitFrameTimestampsFromTimeline(
+          timestamp_process, timestamp_event_name, timeline_range)
       self._InitMainThreadRenderingStatsFromTimeline(
           renderer_process, timeline_range)
       self._InitImplThreadRenderingStatsFromTimeline(
@@ -216,13 +222,10 @@ class RenderingStats(object):
         self.frame_times[-1].append(round(self.frame_timestamps[-1][-1] -
                                           self.frame_timestamps[-1][-2], 2))
 
-  def _InitFrameTimestampsFromTimeline(self, process, timeline_range):
-    event_name = 'BenchmarkInstrumentation::MainThreadRenderingStats'
-    for event in self._GatherEvents(event_name, process, timeline_range):
-      self._AddFrameTimestamp(event)
-
-    event_name = 'BenchmarkInstrumentation::ImplThreadRenderingStats'
-    for event in self._GatherEvents(event_name, process, timeline_range):
+  def _InitFrameTimestampsFromTimeline(
+      self, process, timestamp_event_name, timeline_range):
+    for event in self._GatherEvents(
+        timestamp_event_name, process, timeline_range):
       self._AddFrameTimestamp(event)
 
   def _InitMainThreadRenderingStatsFromTimeline(self, process, timeline_range):
@@ -238,8 +241,6 @@ class RenderingStats(object):
     event_name = 'BenchmarkInstrumentation::ImplThreadRenderingStats'
     for event in self._GatherEvents(event_name, process, timeline_range):
       data = event.args['data']
-      self.rasterize_times[-1].append(1000.0 * data['rasterize_time'])
-      self.rasterized_pixel_counts[-1].append(data['rasterized_pixel_count'])
       if data.get('visible_content_area', 0):
         self.approximated_pixel_percentages[-1].append(
             round(float(data['approximated_visible_content_area']) /

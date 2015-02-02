@@ -13,7 +13,9 @@
 #include "chromeos/login/auth/user_context.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-class Profile;
+namespace content {
+class BrowserContext;
+}
 
 namespace chromeos {
 
@@ -25,22 +27,22 @@ class CHROMEOS_EXPORT MockAuthenticator : public Authenticator {
                     const UserContext& expected_user_context);
 
   // Authenticator:
-  virtual void CompleteLogin(Profile* profile,
-                             const UserContext& user_context) OVERRIDE;
-  virtual void AuthenticateToLogin(Profile* profile,
-                                   const UserContext& user_context) OVERRIDE;
-  virtual void AuthenticateToUnlock(const UserContext& user_context) OVERRIDE;
-  virtual void LoginAsSupervisedUser(const UserContext& user_context) OVERRIDE;
-  virtual void LoginRetailMode() OVERRIDE;
-  virtual void LoginOffTheRecord() OVERRIDE;
-  virtual void LoginAsPublicSession(const UserContext& user_context) OVERRIDE;
+  virtual void CompleteLogin(content::BrowserContext* context,
+                             const UserContext& user_context) override;
+  virtual void AuthenticateToLogin(content::BrowserContext* context,
+                                   const UserContext& user_context) override;
+  virtual void AuthenticateToUnlock(const UserContext& user_context) override;
+  virtual void LoginAsSupervisedUser(const UserContext& user_context) override;
+  virtual void LoginRetailMode() override;
+  virtual void LoginOffTheRecord() override;
+  virtual void LoginAsPublicSession(const UserContext& user_context) override;
   virtual void LoginAsKioskAccount(const std::string& app_user_id,
-                                   bool use_guest_mount) OVERRIDE;
-  virtual void OnRetailModeAuthSuccess() OVERRIDE;
-  virtual void OnAuthSuccess() OVERRIDE;
-  virtual void OnAuthFailure(const AuthFailure& failure) OVERRIDE;
-  virtual void RecoverEncryptedData(const std::string& old_password) OVERRIDE;
-  virtual void ResyncEncryptedData() OVERRIDE;
+                                   bool use_guest_mount) override;
+  virtual void OnRetailModeAuthSuccess() override;
+  virtual void OnAuthSuccess() override;
+  virtual void OnAuthFailure(const AuthFailure& failure) override;
+  virtual void RecoverEncryptedData(const std::string& old_password) override;
+  virtual void ResyncEncryptedData() override;
 
   virtual void SetExpectedCredentials(const UserContext& user_context);
 

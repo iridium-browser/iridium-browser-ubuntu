@@ -33,25 +33,17 @@ class BluetoothConnection : public Connection,
   // Bluetooth daemon.
   BluetoothConnection(const RemoteDevice& remote_device,
                       const device::BluetoothUUID& uuid);
-  virtual ~BluetoothConnection();
+  ~BluetoothConnection() override;
 
  protected:
   // Connection:
-  virtual void Connect() OVERRIDE;
-  virtual void Disconnect() OVERRIDE;
-  virtual void SendMessageImpl(scoped_ptr<WireMessage> message) OVERRIDE;
+  void Connect() override;
+  void Disconnect() override;
+  void SendMessageImpl(scoped_ptr<WireMessage> message) override;
 
   // BluetoothAdapter::Observer:
-  virtual void DeviceRemoved(device::BluetoothAdapter* adapter,
-                             device::BluetoothDevice* device) OVERRIDE;
-
-  // Exposed for testing.
-  virtual void ConnectToService(
-      device::BluetoothDevice* device,
-      const device::BluetoothUUID& uuid,
-      const device::BluetoothDevice::ConnectToServiceCallback& callback,
-      const device::BluetoothDevice::ConnectToServiceErrorCallback&
-          error_callback);
+  void DeviceRemoved(device::BluetoothAdapter* adapter,
+                     device::BluetoothDevice* device) override;
 
  private:
   // Registers receive callbacks with the backing |socket_|.

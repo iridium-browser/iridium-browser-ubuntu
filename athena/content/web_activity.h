@@ -43,41 +43,40 @@ class WebActivity : public Activity,
   WebActivity(content::BrowserContext* context,
               const base::string16& title,
               const GURL& gurl);
-  WebActivity(AthenaWebView* web_view);
+  explicit WebActivity(content::WebContents* contents);
 
  protected:
-  virtual ~WebActivity();
+  ~WebActivity() override;
 
  // Activity:
-  virtual athena::ActivityViewModel* GetActivityViewModel() OVERRIDE;
-  virtual void SetCurrentState(ActivityState state) OVERRIDE;
-  virtual ActivityState GetCurrentState() OVERRIDE;
-  virtual bool IsVisible() OVERRIDE;
-  virtual ActivityMediaState GetMediaState() OVERRIDE;
-  virtual aura::Window* GetWindow() OVERRIDE;
-  virtual content::WebContents* GetWebContents() OVERRIDE;
+  athena::ActivityViewModel* GetActivityViewModel() override;
+  void SetCurrentState(ActivityState state) override;
+  ActivityState GetCurrentState() override;
+  bool IsVisible() override;
+  ActivityMediaState GetMediaState() override;
+  aura::Window* GetWindow() override;
+  content::WebContents* GetWebContents() override;
 
   // ActivityViewModel:
-  virtual void Init() OVERRIDE;
-  virtual SkColor GetRepresentativeColor() const OVERRIDE;
-  virtual base::string16 GetTitle() const OVERRIDE;
-  virtual gfx::ImageSkia GetIcon() const OVERRIDE;
-  virtual bool UsesFrame() const OVERRIDE;
-  virtual views::View* GetContentsView() OVERRIDE;
-  virtual views::Widget* CreateWidget() OVERRIDE;
-  virtual gfx::ImageSkia GetOverviewModeImage() OVERRIDE;
-  virtual void PrepareContentsForOverview() OVERRIDE;
-  virtual void ResetContentsView() OVERRIDE;
+  void Init() override;
+  SkColor GetRepresentativeColor() const override;
+  base::string16 GetTitle() const override;
+  gfx::ImageSkia GetIcon() const override;
+  void SetActivityView(ActivityView* activity_view) override;
+  bool UsesFrame() const override;
+  views::View* GetContentsView() override;
+  gfx::ImageSkia GetOverviewModeImage() override;
+  void PrepareContentsForOverview() override;
+  void ResetContentsView() override;
 
   // content::WebContentsObserver:
-  virtual void DidNavigateMainFrame(
+  void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
-      const content::FrameNavigateParams& params) OVERRIDE;
-  virtual void TitleWasSet(content::NavigationEntry* entry,
-                           bool explicit_set) OVERRIDE;
-  virtual void DidUpdateFaviconURL(
-      const std::vector<content::FaviconURL>& candidates) OVERRIDE;
-  virtual void DidChangeThemeColor(SkColor theme_color) OVERRIDE;
+      const content::FrameNavigateParams& params) override;
+  void TitleWasSet(content::NavigationEntry* entry, bool explicit_set) override;
+  void DidUpdateFaviconURL(
+      const std::vector<content::FaviconURL>& candidates) override;
+  void DidChangeThemeColor(SkColor theme_color) override;
 
  private:
   // Called when a favicon download initiated in DidUpdateFaviconURL()
@@ -95,21 +94,22 @@ class WebActivity : public Activity,
   // Showing a content proxy instead of the real content to save resoruces.
   void ShowContentProxy();
 
-  // Reload the content if required, and start observing it.
-  void ReloadAndObserve();
-
   content::BrowserContext* browser_context_;
-  const base::string16 title_;
-  gfx::ImageSkia icon_;
-  const GURL url_;
   AthenaWebView* web_view_;
+  const base::string16 title_;
   SkColor title_color_;
+  gfx::ImageSkia icon_;
 
   // The current state for this activity.
   ActivityState current_state_;
 
   // The content proxy.
   scoped_ptr<ContentProxy> content_proxy_;
+
+  // WebActivity does not take ownership of |activity_view_|. If the view is
+  // destroyed before the activity, then it must be reset using
+  // SetActivityView(nullptr).
+  ActivityView* activity_view_;
 
   base::WeakPtrFactory<WebActivity> weak_ptr_factory_;
 

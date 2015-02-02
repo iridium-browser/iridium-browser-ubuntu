@@ -36,18 +36,18 @@ class SQLiteChannelIDStore : public DefaultChannelIDStore::PersistentStore {
       const scoped_refptr<base::SequencedTaskRunner>& background_task_runner);
 
   // DefaultChannelIDStore::PersistentStore:
-  virtual void Load(const LoadedCallback& loaded_callback) OVERRIDE;
-  virtual void AddChannelID(
-      const DefaultChannelIDStore::ChannelID& channel_id) OVERRIDE;
-  virtual void DeleteChannelID(
-      const DefaultChannelIDStore::ChannelID& channel_id) OVERRIDE;
-  virtual void SetForceKeepSessionState() OVERRIDE;
+  void Load(const LoadedCallback& loaded_callback) override;
+  void AddChannelID(
+      const DefaultChannelIDStore::ChannelID& channel_id) override;
+  void DeleteChannelID(
+      const DefaultChannelIDStore::ChannelID& channel_id) override;
+  void SetForceKeepSessionState() override;
 
   // Delete channel ids from servers in |server_identifiers|.
   void DeleteAllInList(const std::list<std::string>& server_identifiers);
 
  private:
-  virtual ~SQLiteChannelIDStore();
+  ~SQLiteChannelIDStore() override;
 
   class Backend;
 

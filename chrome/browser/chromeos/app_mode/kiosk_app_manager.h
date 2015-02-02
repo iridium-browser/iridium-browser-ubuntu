@@ -37,7 +37,10 @@ namespace chromeos {
 class KioskAppData;
 class KioskAppExternalLoader;
 class KioskAppManagerObserver;
+
+#if !defined(USE_ATHENA)
 class KioskExternalUpdater;
+#endif
 
 // KioskAppManager manages cached app data.
 class KioskAppManager : public KioskAppDataDelegate,
@@ -227,17 +230,17 @@ class KioskAppManager : public KioskAppDataDelegate,
   void UpdateAppData();
 
   // KioskAppDataDelegate overrides:
-  virtual void GetKioskAppIconCacheDir(base::FilePath* cache_dir) OVERRIDE;
-  virtual void OnKioskAppDataChanged(const std::string& app_id) OVERRIDE;
-  virtual void OnKioskAppDataLoadFailure(const std::string& app_id) OVERRIDE;
+  virtual void GetKioskAppIconCacheDir(base::FilePath* cache_dir) override;
+  virtual void OnKioskAppDataChanged(const std::string& app_id) override;
+  virtual void OnKioskAppDataLoadFailure(const std::string& app_id) override;
 
   // ExternalCache::Delegate:
   virtual void OnExtensionListsUpdated(
-      const base::DictionaryValue* prefs) OVERRIDE;
-  virtual void OnExtensionLoadedInCache(const std::string& id) OVERRIDE;
+      const base::DictionaryValue* prefs) override;
+  virtual void OnExtensionLoadedInCache(const std::string& id) override;
   virtual void OnExtensionDownloadFailed(
       const std::string& id,
-      extensions::ExtensionDownloaderDelegate::Error error) OVERRIDE;
+      extensions::ExtensionDownloaderDelegate::Error error) override;
 
   // Callback for EnterpriseInstallAttributes::LockDevice() during
   // EnableConsumerModeKiosk() call.
@@ -274,7 +277,10 @@ class KioskAppManager : public KioskAppDataDelegate,
       local_account_auto_login_id_subscription_;
 
   scoped_ptr<ExternalCache> external_cache_;
+
+#if !defined(USE_ATHENA)
   scoped_ptr<KioskExternalUpdater> usb_stick_updater_;
+#endif
 
   // The extension external loader for installing kiosk app.
   bool external_loader_created_;

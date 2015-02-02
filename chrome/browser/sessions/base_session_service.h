@@ -9,16 +9,12 @@
 #include "base/callback.h"
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
-#include "base/location.h"
-#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
 #include "base/task/cancelable_task_tracker.h"
-#include "base/threading/sequenced_worker_pool.h"
-#include "components/sessions/session_id.h"
 #include "url/gurl.h"
 
-class Profile;
+class BaseSessionServiceDelegate;
 class SessionBackend;
 class SessionCommand;
 
@@ -39,33 +35,27 @@ class BaseSessionService {
     TAB_RESTORE
   };
 
-  // Creates a new BaseSessionService. After creation you need to invoke
-  // Init.
-  // |type| gives the type of session service, |profile| the profile and
-  // |path| the path to save files to. If |profile| is non-NULL, |path| is
-  // ignored and instead the path comes from the profile.
-  BaseSessionService(SessionType type,
-                     Profile* profile,
-                     const base::FilePath& path);
+  typedef base::Callback<void(ScopedVector<SessionCommand>)>
+      GetCommandsCallback;
 
-  Profile* profile() const { return profile_; }
+  // Creates a new BaseSessionService. After creation you need to invoke
+  // Init. |delegate| will remain owned by the creator and it is guaranteed
+  // that its lifetime surpasses this class.
+  // |type| gives the type of session service, |path| the path to save files to.
+  BaseSessionService(SessionType type,
+                     const base::FilePath& path,
+                     BaseSessionServiceDelegate* delegate);
+  ~BaseSessionService();
+
+  // Moves the current session to the last session.
+  void MoveCurrentSessionToLastSession();
 
   // Deletes the last session.
   void DeleteLastSession();
 
-  typedef base::Callback<void(ScopedVector<SessionCommand>)>
-      InternalGetCommandsCallback;
-
- protected:
-  virtual ~BaseSessionService();
-
-  // Returns the backend.
-  SessionBackend* backend() const { return backend_.get(); }
-
-  // Returns the set of commands that needed to be scheduled. The commands
-  // in the vector are owned by BaseSessionService, until they are scheduled
-  // on the backend at which point the backend owns the commands.
-  std::vector<SessionCommand*>&  pending_commands() {
+  // Returns the set of commands which were scheduled to be written. Once
+  // committed to the backend, the commands are removed from here.
+  const ScopedVector<SessionCommand>& pending_commands() {
     return pending_commands_;
   }
 
@@ -79,100 +69,59 @@ class BaseSessionService {
   // Schedules a command. This adds |command| to pending_commands_ and
   // invokes StartSaveTimer to start a timer that invokes Save at a later
   // time.
-  virtual void ScheduleCommand(SessionCommand* command);
+  void ScheduleCommand(scoped_ptr<SessionCommand> command);
+
+  // Appends a command as part of a general rebuild. This will neither count
+  // against a rebuild, nor will it trigger a save of commands.
+  void AppendRebuildCommand(scoped_ptr<SessionCommand> command);
+
+  // Erase the |old_command| from the list of commands.
+  // The passed command will automatically be deleted.
+  void EraseCommand(SessionCommand* old_command);
+
+  // Swap a |new_command| into the list of queued commands at the location of
+  // the |old_command|. The |old_command| will be automatically deleted in the
+  // process.
+  void SwapCommand(SessionCommand* old_command,
+                   scoped_ptr<SessionCommand> new_command);
+
+  // Clears all commands from the list.
+  void ClearPendingCommands();
 
   // Starts the timer that invokes Save (if timer isn't already running).
   void StartSaveTimer();
 
-  // Saves pending commands to the backend. This is invoked from the timer
-  // scheduled by StartSaveTimer.
-  virtual void Save();
+  // Passes all pending commands to the backend for saving.
+  void Save();
 
-  // Creates a SessionCommand that represents a navigation.
-  SessionCommand* CreateUpdateTabNavigationCommand(
-      SessionID::id_type command_id,
-      SessionID::id_type tab_id,
-      const sessions::SerializedNavigationEntry& navigation);
-
-  // Creates a SessionCommand that represents marking a tab as an application.
-  SessionCommand* CreateSetTabExtensionAppIDCommand(
-      SessionID::id_type command_id,
-      SessionID::id_type tab_id,
-      const std::string& extension_id);
-
-  // Creates a SessionCommand that containing user agent override used by a
-  // tab's navigations.
-  SessionCommand* CreateSetTabUserAgentOverrideCommand(
-      SessionID::id_type command_id,
-      SessionID::id_type tab_id,
-      const std::string& user_agent_override);
-
-  // Creates a SessionCommand stores a browser window's app name.
-  SessionCommand* CreateSetWindowAppNameCommand(
-      SessionID::id_type command_id,
-      SessionID::id_type window_id,
-      const std::string& app_name);
-
-  // Converts a SessionCommand previously created by
-  // CreateUpdateTabNavigationCommand into a
-  // sessions::SerializedNavigationEntry. Returns true on success. If
-  // successful |tab_id| is set to the id of the restored tab.
-  bool RestoreUpdateTabNavigationCommand(
-      const SessionCommand& command,
-      sessions::SerializedNavigationEntry* navigation,
-      SessionID::id_type* tab_id);
-
-  // Extracts a SessionCommand as previously created by
-  // CreateSetTabExtensionAppIDCommand into the tab id and application
-  // extension id.
-  bool RestoreSetTabExtensionAppIDCommand(
-      const SessionCommand& command,
-      SessionID::id_type* tab_id,
-      std::string* extension_app_id);
-
-  // Extracts a SessionCommand as previously created by
-  // CreateSetTabUserAgentOverrideCommand into the tab id and user agent.
-  bool RestoreSetTabUserAgentOverrideCommand(
-      const SessionCommand& command,
-      SessionID::id_type* tab_id,
-      std::string* user_agent_override);
-
-  // Extracts a SessionCommand as previously created by
-  // CreateSetWindowAppNameCommand into the window id and application name.
-  bool RestoreSetWindowAppNameCommand(
-      const SessionCommand& command,
-      SessionID::id_type* window_id,
-      std::string* app_name);
-
-  // Returns true if the entry at specified |url| should be written to disk.
-  bool ShouldTrackEntry(const GURL& url);
-
-  // Invokes SessionBackend::ReadLastSessionCommands with callback on the
-  // backend thread.
-  // If testing, SessionBackend::ReadLastSessionCommands is invoked directly.
+  // Uses the backend to load the last session commands from disc. |callback|
+  // gets called once the data has arrived.
   base::CancelableTaskTracker::TaskId ScheduleGetLastSessionCommands(
-      const InternalGetCommandsCallback& callback,
+      const GetCommandsCallback& callback,
       base::CancelableTaskTracker* tracker);
+
+ private:
+  friend class BetterSessionRestoreCrashTest;
+  friend class SessionServiceTestHelper;
+  friend class NoStartupWindowTest;
 
   // This posts the task to the SequencedWorkerPool, or run immediately
   // if the SequencedWorkerPool has been shutdown.
   void RunTaskOnBackendThread(const tracked_objects::Location& from_here,
                               const base::Closure& task);
 
-  // Max number of navigation entries in each direction we'll persist.
-  static const int max_persist_navigation_count;
+  // Returns true if any commands got processed yet - saved or queued (used by
+  // unit tests).
+  bool ProcessedAnyCommandsForTest();
 
- private:
-  friend class BetterSessionRestoreCrashTest;
+  // Read the last session commands directly from file.
+  bool ReadLastSessionCommandsForTest(ScopedVector<SessionCommand>* commands);
 
-  // The profile. This may be null during testing.
-  Profile* profile_;
-
-  // The backend.
+  // The backend object which reads and saves commands.
   scoped_refptr<SessionBackend> backend_;
 
   // Commands we need to send over to the backend.
-  std::vector<SessionCommand*>  pending_commands_;
+  ScopedVector<SessionCommand> pending_commands_;
 
   // Whether the backend file should be recreated the next time we send
   // over the commands.
@@ -180,6 +129,8 @@ class BaseSessionService {
 
   // The number of commands sent to the backend before doing a reset.
   int commands_since_reset_;
+
+  BaseSessionServiceDelegate* delegate_;
 
   // A token to make sure that all tasks will be serialized.
   base::SequencedWorkerPool::SequenceToken sequence_token_;

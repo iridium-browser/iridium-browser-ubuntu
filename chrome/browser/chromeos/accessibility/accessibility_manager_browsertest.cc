@@ -116,7 +116,7 @@ bool IsHighContrastEnabled() {
 
 void SetSpokenFeedbackEnabled(bool enabled) {
   return AccessibilityManager::Get()->EnableSpokenFeedback(
-      enabled, ash::A11Y_NOTIFICATION_NONE);
+      enabled, ui::A11Y_NOTIFICATION_NONE);
 }
 
 bool IsSpokenFeedbackEnabled() {
@@ -226,24 +226,24 @@ class AccessibilityManagerTest : public InProcessBrowserTest {
   AccessibilityManagerTest() : default_autoclick_delay_(0) {}
   virtual ~AccessibilityManagerTest() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  virtual void SetUpCommandLine(CommandLine* command_line) override {
     command_line->AppendSwitch(chromeos::switches::kLoginManager);
     command_line->AppendSwitchASCII(chromeos::switches::kLoginProfile,
                                     TestingProfile::kTestUserProfileDir);
   }
 
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
+  virtual void SetUpInProcessBrowserTestFixture() override {
     AccessibilityManager::SetBrailleControllerForTest(&braille_controller_);
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  virtual void SetUpOnMainThread() override {
     // Sets the login-screen profile.
     AccessibilityManager::Get()->
         SetProfileForTest(ProfileHelper::GetSigninProfile());
     default_autoclick_delay_ = GetAutoclickDelay();
   }
 
-  virtual void TearDownOnMainThread() OVERRIDE {
+  virtual void TearDownOnMainThread() override {
     AccessibilityManager::SetBrailleControllerForTest(NULL);
   }
 
@@ -666,7 +666,7 @@ IN_PROC_BROWSER_TEST_P(AccessibilityManagerUserTypeTest, BrailleWhenLoggedIn) {
   EXPECT_TRUE(IsBrailleImeActive());
 }
 
-IN_PROC_BROWSER_TEST_F(AccessibilityManagerTest, AcessibilityMenuVisibility) {
+IN_PROC_BROWSER_TEST_F(AccessibilityManagerTest, AccessibilityMenuVisibility) {
   // Log in.
   user_manager::UserManager::Get()->UserLoggedIn(
       kTestUserName, kTestUserName, true);

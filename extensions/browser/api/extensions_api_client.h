@@ -19,14 +19,17 @@ class ObserverListThreadSafe;
 
 namespace content {
 class BrowserContext;
+class WebContents;
 }
 
 namespace extensions {
 
 class AppViewGuestDelegate;
 class ContentRulesRegistry;
+class DevicePermissionsPrompt;
 class ExtensionOptionsGuest;
 class ExtensionOptionsGuestDelegate;
+class ManagementAPIDelegate;
 class MimeHandlerViewGuest;
 class MimeHandlerViewGuestDelegate;
 class WebViewGuest;
@@ -38,6 +41,7 @@ class RulesCacheDelegate;
 class SettingsObserver;
 class SettingsStorageFactory;
 class ValueStoreCache;
+class VirtualKeyboardDelegate;
 
 // Allows the embedder of the extensions module to customize its support for
 // API features. The embedder must create a single instance in the browser
@@ -86,13 +90,6 @@ class ExtensionsAPIClient {
       CreateWebViewPermissionHelperDelegate (
           WebViewPermissionHelper* web_view_permission_helper) const;
 
-  // TODO(wjmaclean): Remove this as soon as rules_registry_service.* moves to
-  // extensions/browser/api/declarative/.
-  virtual scoped_refptr<RulesRegistry> GetRulesRegistry(
-      content::BrowserContext* browser_context,
-      const RulesRegistry::WebViewKey& webview_key,
-      const std::string& event_name);
-
   // Creates a delegate for WebRequestEventRouter.
   virtual WebRequestEventRouterDelegate* CreateWebRequestEventRouterDelegate()
       const;
@@ -102,6 +99,17 @@ class ExtensionsAPIClient {
   virtual scoped_refptr<ContentRulesRegistry> CreateContentRulesRegistry(
       content::BrowserContext* browser_context,
       RulesCacheDelegate* cache_delegate) const;
+
+  // Creates a DevicePermissionsPrompt appropriate for the embedder.
+  virtual scoped_ptr<DevicePermissionsPrompt> CreateDevicePermissionsPrompt(
+      content::WebContents* web_contents) const;
+
+  // Returns a delegate for some of VirtualKeyboardAPI's behavior.
+  virtual scoped_ptr<VirtualKeyboardDelegate> CreateVirtualKeyboardDelegate()
+      const;
+
+  // Creates a delegate for handling the management extension api.
+  virtual ManagementAPIDelegate* CreateManagementAPIDelegate() const;
 
   // NOTE: If this interface gains too many methods (perhaps more than 20) it
   // should be split into one interface per API.

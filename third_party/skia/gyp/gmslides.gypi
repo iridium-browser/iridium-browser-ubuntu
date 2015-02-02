@@ -20,6 +20,7 @@
         '../gm/arithmode.cpp',
         '../gm/astcbitmap.cpp',
         '../gm/beziereffects.cpp',
+        '../gm/beziers.cpp',
         '../gm/bigblurs.cpp',
         '../gm/bigmatrix.cpp',
         '../gm/bigtext.cpp',
@@ -42,11 +43,14 @@
         '../gm/circularclips.cpp',
         '../gm/clip_strokerect.cpp',
         '../gm/clippedbitmapshaders.cpp',
+        '../gm/colorcube.cpp',
         '../gm/coloremoji.cpp',
         '../gm/colorfilterimagefilter.cpp',
         '../gm/colorfilters.cpp',
         '../gm/colormatrix.cpp',
         '../gm/colortype.cpp',
+        '../gm/colortypexfermode.cpp',
+        '../gm/colorwheel.cpp',
         '../gm/complexclip.cpp',
         '../gm/complexclip2.cpp',
         '../gm/composeshader.cpp',
@@ -127,7 +131,6 @@
         '../gm/ninepatchstretch.cpp',
         '../gm/nonclosedpaths.cpp',
         '../gm/offsetimagefilter.cpp',
-        '../gm/optimizations.cpp',
         '../gm/ovals.cpp',
         '../gm/patch.cpp',
         '../gm/patchgrid.cpp',
@@ -163,6 +166,7 @@
         '../gm/shallowgradient.cpp',
         '../gm/simpleaaclip.cpp',
         '../gm/skbug1719.cpp',
+        '../gm/smallarc.cpp',
         '../gm/stringart.cpp',
         '../gm/spritebitmap.cpp',
         '../gm/srcmode.cpp',
@@ -182,6 +186,7 @@
         '../gm/texturedomaineffect.cpp',
         '../gm/thinrects.cpp',
         '../gm/thinstrokedrects.cpp',
+        '../gm/tiledscaledbitmap.cpp',
         '../gm/tileimagefilter.cpp',
         '../gm/tilemodes.cpp',
         '../gm/tilemodes_scaled.cpp',
@@ -217,9 +222,6 @@
 
         # SOME of the bitmaprect tests are disabled on Android; see
         # ../gm/bitmaprect.cpp
-
-        # Fail for now until the appropriate freetype changes are submitted.
-        '../gm/coloremoji.cpp',
 
         # We skip GPU tests in this GM; see
         # ../gm/deviceproperties.cpp

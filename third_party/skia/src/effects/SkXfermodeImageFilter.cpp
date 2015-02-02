@@ -134,18 +134,16 @@ bool SkXfermodeImageFilter::filterImageGPU(Proxy* proxy,
 
     GrFragmentProcessor* xferProcessor = NULL;
 
-    GrTextureDesc desc;
-    desc.fFlags = kRenderTarget_GrTextureFlagBit | kNoStencil_GrTextureFlagBit;
+    GrSurfaceDesc desc;
+    desc.fFlags = kRenderTarget_GrSurfaceFlag | kNoStencil_GrSurfaceFlag;
     desc.fWidth = src.width();
     desc.fHeight = src.height();
     desc.fConfig = kSkia8888_GrPixelConfig;
-
-    GrAutoScratchTexture ast(context, desc);
-    if (NULL == ast.texture()) {
+    SkAutoTUnref<GrTexture> dst(
+        context->refScratchTexture(desc, GrContext::kApprox_ScratchTexMatch));
+    if (!dst) {
         return false;
     }
-    SkAutoTUnref<GrTexture> dst(ast.detach());
-
     GrContext::AutoRenderTarget art(context, dst->asRenderTarget());
 
     if (!fMode || !fMode->asFragmentProcessor(&xferProcessor, backgroundTex)) {

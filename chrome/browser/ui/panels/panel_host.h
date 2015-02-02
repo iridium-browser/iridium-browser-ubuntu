@@ -38,7 +38,7 @@ class PanelHost : public content::WebContentsDelegate,
                   public extensions::ExtensionFunctionDispatcher::Delegate {
  public:
   PanelHost(Panel* panel, Profile* profile);
-  virtual ~PanelHost();
+  ~PanelHost() override;
 
   void Init(const GURL& url);
   content::WebContents* web_contents() { return web_contents_.get(); }
@@ -48,46 +48,42 @@ class PanelHost : public content::WebContentsDelegate,
   gfx::Image GetPageIcon() const;
 
   // content::WebContentsDelegate overrides.
-  virtual content::WebContents* OpenURLFromTab(
+  content::WebContents* OpenURLFromTab(
       content::WebContents* source,
-      const content::OpenURLParams& params) OVERRIDE;
-  virtual void NavigationStateChanged(
-      const content::WebContents* source,
-      content::InvalidateTypes changed_flags) OVERRIDE;
-  virtual void AddNewContents(content::WebContents* source,
-                              content::WebContents* new_contents,
-                              WindowOpenDisposition disposition,
-                              const gfx::Rect& initial_pos,
-                              bool user_gesture,
-                              bool* was_blocked) OVERRIDE;
-  virtual void ActivateContents(content::WebContents* contents) OVERRIDE;
-  virtual void DeactivateContents(content::WebContents* contents) OVERRIDE;
-  virtual void LoadingStateChanged(content::WebContents* source,
-                                   bool to_different_document) OVERRIDE;
-  virtual void CloseContents(content::WebContents* source) OVERRIDE;
-  virtual void MoveContents(content::WebContents* source,
-                            const gfx::Rect& pos) OVERRIDE;
-  virtual bool IsPopupOrPanel(
-      const content::WebContents* source) const OVERRIDE;
-  virtual void ContentsZoomChange(bool zoom_in) OVERRIDE;
-  virtual void HandleKeyboardEvent(
+      const content::OpenURLParams& params) override;
+  void NavigationStateChanged(const content::WebContents* source,
+                              content::InvalidateTypes changed_flags) override;
+  void AddNewContents(content::WebContents* source,
+                      content::WebContents* new_contents,
+                      WindowOpenDisposition disposition,
+                      const gfx::Rect& initial_pos,
+                      bool user_gesture,
+                      bool* was_blocked) override;
+  void ActivateContents(content::WebContents* contents) override;
+  void DeactivateContents(content::WebContents* contents) override;
+  void LoadingStateChanged(content::WebContents* source,
+                           bool to_different_document) override;
+  void CloseContents(content::WebContents* source) override;
+  void MoveContents(content::WebContents* source,
+                    const gfx::Rect& pos) override;
+  bool IsPopupOrPanel(const content::WebContents* source) const override;
+  void ContentsZoomChange(bool zoom_in) override;
+  void HandleKeyboardEvent(
       content::WebContents* source,
-      const content::NativeWebKeyboardEvent& event) OVERRIDE;
-  virtual void WebContentsFocused(content::WebContents* contents) OVERRIDE;
-  virtual void ResizeDueToAutoResize(content::WebContents* web_contents,
-                                     const gfx::Size& new_size) OVERRIDE;
+      const content::NativeWebKeyboardEvent& event) override;
+  void WebContentsFocused(content::WebContents* contents) override;
+  void ResizeDueToAutoResize(content::WebContents* web_contents,
+                             const gfx::Size& new_size) override;
 
   // content::WebContentsObserver overrides.
-  virtual void RenderViewCreated(
-      content::RenderViewHost* render_view_host) OVERRIDE;
-  virtual void RenderProcessGone(base::TerminationStatus status) OVERRIDE;
-  virtual void WebContentsDestroyed() OVERRIDE;
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  void RenderViewCreated(content::RenderViewHost* render_view_host) override;
+  void RenderProcessGone(base::TerminationStatus status) override;
+  void WebContentsDestroyed() override;
+  bool OnMessageReceived(const IPC::Message& message) override;
 
   // extensions::ExtensionFunctionDispatcher::Delegate overrides.
-  virtual extensions::WindowController* GetExtensionWindowController() const
-      OVERRIDE;
-  virtual content::WebContents* GetAssociatedWebContents() const OVERRIDE;
+  extensions::WindowController* GetExtensionWindowController() const override;
+  content::WebContents* GetAssociatedWebContents() const override;
 
   // Actions on web contents.
   void Reload();

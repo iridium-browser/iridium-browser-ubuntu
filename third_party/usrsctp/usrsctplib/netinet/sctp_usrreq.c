@@ -32,7 +32,7 @@
 
 #ifdef __FreeBSD__
 #include <sys/cdefs.h>
-__FBSDID("$FreeBSD: head/sys/netinet/sctp_usrreq.c 271221 2014-09-07 09:06:26Z tuexen $");
+__FBSDID("$FreeBSD: head/sys/netinet/sctp_usrreq.c 272750 2014-10-08 15:29:49Z tuexen $");
 #endif
 
 #include <netinet/sctp_os.h>
@@ -56,7 +56,9 @@ __FBSDID("$FreeBSD: head/sys/netinet/sctp_usrreq.c 271221 2014-09-07 09:06:26Z t
 #include <netinet/sctp_timer.h>
 #include <netinet/sctp_auth.h>
 #include <netinet/sctp_bsd_addr.h>
-#if !defined(__Userspace__)
+#if defined(__Userspace__)
+#include <netinet/sctp_callout.h>
+#else
 #include <netinet/udp.h>
 #endif
 
@@ -106,7 +108,7 @@ sctp_init(void)
 	/* Initialize and modify the sysctled variables */
 	sctp_init_sysctls();
 #if defined(__Userspace__)
-#if defined(__Userspace_os_Windows)
+#if defined(__Userspace_os_Windows) || defined(__Userspace_os_NaCl)
 	srand((unsigned int)time(NULL));
 #else
 	srandom(getpid()); /* so inp->sctp_ep.random_numbers are truly random... */
@@ -5027,13 +5029,14 @@ sctp_setopt(struct socket *so, int optname, void *optval, size_t optsize,
 		uint32_t i;
 
 		SCTP_CHECK_AND_CAST(shmac, optval, struct sctp_hmacalgo, optsize);
-		if (optsize < sizeof(struct sctp_hmacalgo) + shmac->shmac_number_of_idents * sizeof(uint16_t)) {
+		if ((optsize < sizeof(struct sctp_hmacalgo) + shmac->shmac_number_of_idents * sizeof(uint16_t)) ||
+		    (shmac->shmac_number_of_idents > 0xffff)) {
 			SCTP_LTRACE_ERR_RET(inp, NULL, NULL, SCTP_FROM_SCTP_USRREQ, EINVAL);
 			error = EINVAL;
 			break;
 		}
 
-		hmaclist = sctp_alloc_hmaclist(shmac->shmac_number_of_idents);
+		hmaclist = sctp_alloc_hmaclist((uint16_t)shmac->shmac_number_of_idents);
 		if (hmaclist == NULL) {
 			SCTP_LTRACE_ERR_RET(inp, NULL, NULL, SCTP_FROM_SCTP_USRREQ, ENOMEM);
 			error = ENOMEM;
@@ -5248,6 +5251,12 @@ sctp_setopt(struct socket *so, int optname, void *optval, size_t optsize,
 			 */
 			SCTP_LTRACE_ERR_RET(inp, NULL, NULL, SCTP_FROM_SCTP_USRREQ, EOPNOTSUPP);
 			error = EOPNOTSUPP;
+			SCTP_TCB_UNLOCK(stcb);
+			break;
+		}
+		if (sizeof(struct sctp_reset_streams) +
+		    strrst->srs_number_streams * sizeof(uint16_t) > optsize) {
+			error = EINVAL;
 			SCTP_TCB_UNLOCK(stcb);
 			break;
 		}

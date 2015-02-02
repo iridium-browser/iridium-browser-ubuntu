@@ -38,10 +38,9 @@
 namespace blink {
 
 class Crypto;
-class ExecutionContext;
 class WorkerGlobalScope;
 
-class WorkerGlobalScopeCrypto FINAL : public NoBaseWillBeGarbageCollected<WorkerGlobalScopeCrypto>, public WillBeHeapSupplement<WorkerGlobalScope> {
+class WorkerGlobalScopeCrypto final : public NoBaseWillBeGarbageCollected<WorkerGlobalScopeCrypto>, public WillBeHeapSupplement<WorkerGlobalScope> {
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(WorkerGlobalScopeCrypto);
 public:
     static WorkerGlobalScopeCrypto& from(WillBeHeapSupplementable<WorkerGlobalScope>&);

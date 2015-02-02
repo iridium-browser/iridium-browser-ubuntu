@@ -39,7 +39,7 @@ TEST(CryptoUtilsTest, NormalizeHostname) {
     { "www.google.com........", "www.google.com", },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
+  for (size_t i = 0; i < arraysize(tests); ++i) {
     EXPECT_EQ(std::string(tests[i].expected),
               CryptoUtils::NormalizeHostname(tests[i].input));
   }
@@ -68,7 +68,7 @@ TEST(CryptoUtilsTest, TestExportKeyingMaterial) {
       "3132333435363700",
       "58585858585858585858585858585858",
       16,
-      NULL
+      nullptr
     },
     // Make sure nulls in the context are fine
     { "d862c2e36b0a42f7827c67ebc8d44df7",
@@ -93,7 +93,7 @@ TEST(CryptoUtilsTest, TestExportKeyingMaterial) {
     },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_vector); i++) {
+  for (size_t i = 0; i < arraysize(test_vector); i++) {
     // Decode the test vector.
     string subkey_secret;
     string label;
@@ -102,7 +102,7 @@ TEST(CryptoUtilsTest, TestExportKeyingMaterial) {
     ASSERT_TRUE(DecodeHexString(test_vector[i].label, &label));
     ASSERT_TRUE(DecodeHexString(test_vector[i].context, &context));
     size_t result_len = test_vector[i].result_len;
-    bool expect_ok = test_vector[i].expected != NULL;
+    bool expect_ok = test_vector[i].expected != nullptr;
     string expected;
     if (expect_ok) {
       ASSERT_TRUE(DecodeHexString(test_vector[i].expected, &expected));

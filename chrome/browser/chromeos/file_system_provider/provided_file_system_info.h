@@ -12,14 +12,27 @@
 namespace chromeos {
 namespace file_system_provider {
 
+// Options for creating the provided file system info.
+struct MountOptions {
+  MountOptions();
+
+  // Only mandatory fields.
+  MountOptions(const std::string& file_system_id,
+               const std::string& display_name);
+
+  std::string file_system_id;
+  std::string display_name;
+  bool writable;
+  bool supports_notify_tag;
+};
+
 // Contains information about the provided file system instance.
 class ProvidedFileSystemInfo {
  public:
   ProvidedFileSystemInfo();
+
   ProvidedFileSystemInfo(const std::string& extension_id,
-                         const std::string& file_system_id,
-                         const std::string& display_name,
-                         const bool writable,
+                         const MountOptions& mount_options,
                          const base::FilePath& mount_path);
 
   ~ProvidedFileSystemInfo();
@@ -28,6 +41,7 @@ class ProvidedFileSystemInfo {
   const std::string& file_system_id() const { return file_system_id_; }
   const std::string& display_name() const { return display_name_; }
   bool writable() const { return writable_; }
+  bool supports_notify_tag() const { return supports_notify_tag_; }
   const base::FilePath& mount_path() const { return mount_path_; }
 
  private:
@@ -42,6 +56,9 @@ class ProvidedFileSystemInfo {
 
   // Whether the file system is writable or just read-only.
   bool writable_;
+
+  // Supports tags for file/directory change notifications.
+  bool supports_notify_tag_;
 
   // Mount path of the underlying file system.
   base::FilePath mount_path_;

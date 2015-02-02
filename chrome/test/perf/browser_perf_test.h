@@ -14,11 +14,11 @@ class CommandLine;
 class BrowserPerfTest : public InProcessBrowserTest {
  public:
   BrowserPerfTest();
-  virtual ~BrowserPerfTest();
+  ~BrowserPerfTest() override;
 
   // Set up common browser perf test flags. Typically call down to this if
   // overridden.
-  virtual void SetUpCommandLine(base::CommandLine* command_line) OVERRIDE;
+  void SetUpCommandLine(base::CommandLine* command_line) override;
 
   // Prints IO performance data for use by perf graphs.
   void PrintIOPerfInfo(const std::string& test_name);

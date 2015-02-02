@@ -49,10 +49,10 @@ class ExtensionIconColorManager : public ExtensionIconManager {
   explicit ExtensionIconColorManager(FaviconWebUIHandler* handler)
       : ExtensionIconManager(),
         handler_(handler) {}
-  virtual ~ExtensionIconColorManager() {}
+  ~ExtensionIconColorManager() override {}
 
-  virtual void OnImageLoaded(const std::string& extension_id,
-                             const gfx::Image& image) OVERRIDE {
+  void OnImageLoaded(const std::string& extension_id,
+                     const gfx::Image& image) override {
     ExtensionIconManager::OnImageLoaded(extension_id, image);
     handler_->NotifyAppIconReady(extension_id);
   }
@@ -97,7 +97,7 @@ void FaviconWebUIHandler::HandleGetFaviconDominantColor(
 
   GURL url(path);
   // Intercept requests for prepopulated pages.
-  for (size_t i = 0; i < arraysize(history::kPrepopulatedPages); i++) {
+  for (size_t i = 0; i < history::kPrepopulatedPagesCount; i++) {
     if (url.spec() ==
         l10n_util::GetStringUTF8(history::kPrepopulatedPages[i].url_id)) {
       base::StringValue dom_id_value(dom_id);

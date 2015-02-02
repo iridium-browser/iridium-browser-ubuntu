@@ -2,15 +2,29 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 import inspect
+import logging
 import os
-import re
 import urlparse
 
-_next_page_id = 0
+from telemetry import user_story
+from telemetry.util import cloud_storage
+from telemetry.util import path
 
-class Page(object):
 
-  def __init__(self, url, page_set=None, base_dir=None, name=''):
+def _UpdateCredentials(credentials_path):
+  # Attempt to download the credentials file.
+  try:
+    cloud_storage.GetIfChanged(credentials_path)
+  except (cloud_storage.CredentialsError, cloud_storage.PermissionError,
+          cloud_storage.CloudStorageError) as e:
+    logging.warning('Cannot retrieve credential file %s due to cloud storage '
+                    'error %s', credentials_path, str(e))
+
+
+class Page(user_story.UserStory):
+  def __init__(self, url, page_set=None, base_dir=None, name='',
+               credentials_path=None, labels=None):
+    super(Page, self).__init__(name)
     self._url = url
     self._page_set = page_set
     # Default value of base_dir is the directory of the file that defines the
@@ -19,19 +33,35 @@ class Page(object):
       base_dir = os.path.dirname(inspect.getfile(self.__class__))
     self._base_dir = base_dir
     self._name = name
-
-    global _next_page_id
-    self._id = _next_page_id
-    _next_page_id += 1
+    if credentials_path:
+      credentials_path = os.path.join(self._base_dir, credentials_path)
+      _UpdateCredentials(credentials_path)
+      if not os.path.exists(credentials_path):
+        logging.error('Invalid credentials path: %s' % credentials_path)
+        credentials_path = None
+    self._credentials_path = credentials_path
+    if labels is None:
+      labels = set([])
+    elif isinstance(labels, list):
+      labels = set(labels)
+    self._labels = labels
 
     # These attributes can be set dynamically by the page.
     self.synthetic_delays = dict()
     self.startup_url = page_set.startup_url if page_set else ''
     self.credentials = None
-    self.disabled = False
     self.skip_waits = False
     self.script_to_evaluate_on_commit = None
     self._SchemeErrorCheck()
+
+
+  @property
+  def labels(self):
+    return self._labels
+
+  @property
+  def credentials_path(self):
+    return self._credentials_path
 
   def _SchemeErrorCheck(self):
     if not self._scheme:
@@ -92,16 +122,8 @@ class Page(object):
     return self._page_set
 
   @property
-  def name(self):
-    return self._name
-
-  @property
   def url(self):
     return self._url
-
-  @property
-  def id(self):
-    return self._id
 
   def GetSyntheticDelayCategories(self):
     result = []
@@ -152,6 +174,10 @@ class Page(object):
         self._base_dir, parsed_url.netloc + parsed_url.path))
 
   @property
+  def base_dir(self):
+    return self._base_dir
+
+  @property
   def file_path_url(self):
     """Returns the file path, including the params, query, and fragment."""
     assert self.is_file
@@ -169,12 +195,6 @@ class Page(object):
       return file_path
     else:
       return os.path.dirname(file_path)
-
-  @property
-  def file_safe_name(self):
-    """A version of display_name that's safe to use as a filename."""
-    # Just replace all special characters in the url with underscore.
-    return re.sub('[^a-zA-Z0-9]', '_', self.display_name)
 
   @property
   def display_name(self):

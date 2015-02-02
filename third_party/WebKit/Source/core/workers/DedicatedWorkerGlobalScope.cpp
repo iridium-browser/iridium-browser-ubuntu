@@ -43,13 +43,13 @@ namespace blink {
 
 PassRefPtrWillBeRawPtr<DedicatedWorkerGlobalScope> DedicatedWorkerGlobalScope::create(DedicatedWorkerThread* thread, PassOwnPtrWillBeRawPtr<WorkerThreadStartupData> startupData, double timeOrigin)
 {
-    RefPtrWillBeRawPtr<DedicatedWorkerGlobalScope> context = adoptRefWillBeNoop(new DedicatedWorkerGlobalScope(startupData->m_scriptURL, startupData->m_userAgent, thread, timeOrigin, startupData->m_workerClients.release()));
+    RefPtrWillBeRawPtr<DedicatedWorkerGlobalScope> context = adoptRefWillBeNoop(new DedicatedWorkerGlobalScope(startupData->m_scriptURL, startupData->m_userAgent, thread, timeOrigin, startupData->m_starterOrigin, startupData->m_workerClients.release()));
     context->applyContentSecurityPolicyFromString(startupData->m_contentSecurityPolicy, startupData->m_contentSecurityPolicyType);
     return context.release();
 }
 
-DedicatedWorkerGlobalScope::DedicatedWorkerGlobalScope(const KURL& url, const String& userAgent, DedicatedWorkerThread* thread, double timeOrigin, PassOwnPtrWillBeRawPtr<WorkerClients> workerClients)
-    : WorkerGlobalScope(url, userAgent, thread, timeOrigin, workerClients)
+DedicatedWorkerGlobalScope::DedicatedWorkerGlobalScope(const KURL& url, const String& userAgent, DedicatedWorkerThread* thread, double timeOrigin, const SecurityOrigin* starterOrigin, PassOwnPtrWillBeRawPtr<WorkerClients> workerClients)
+    : WorkerGlobalScope(url, userAgent, thread, timeOrigin, starterOrigin, workerClients)
 {
 }
 
@@ -94,7 +94,7 @@ private:
     {
     }
 
-    virtual void performTask(ExecutionContext* context) OVERRIDE
+    virtual void performTask(ExecutionContext* context) override
     {
         ASSERT(context->isDocument());
         if (m_isDeprecation)

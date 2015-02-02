@@ -6,17 +6,15 @@
 #define Credential_h
 
 #include "bindings/core/v8/ScriptWrappable.h"
-#include "bindings/core/v8/SerializedScriptValue.h"
 #include "platform/credentialmanager/PlatformCredential.h"
 #include "platform/heap/Handle.h"
 #include "platform/weborigin/KURL.h"
 
 namespace blink {
 
-class WebCredential;
 class ExceptionState;
 
-class Credential : public GarbageCollected<Credential>, public ScriptWrappable {
+class Credential : public GarbageCollectedFinalized<Credential>, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
 public:
     static Credential* create(const String& id, const String& name, const KURL& avatar);

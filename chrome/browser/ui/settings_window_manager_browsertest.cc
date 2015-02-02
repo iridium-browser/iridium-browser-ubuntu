@@ -29,9 +29,9 @@ class SettingsWindowTestObserver
     : public chrome::SettingsWindowManagerObserver {
  public:
   SettingsWindowTestObserver() : browser_(NULL), new_settings_count_(0) {}
-  virtual ~SettingsWindowTestObserver() {}
+  ~SettingsWindowTestObserver() override {}
 
-  virtual void OnNewSettingsWindow(Browser* settings_browser) OVERRIDE {
+  void OnNewSettingsWindow(Browser* settings_browser) override {
     browser_ = settings_browser;
     ++new_settings_count_;
   }
@@ -55,11 +55,11 @@ class SettingsWindowManagerTest : public InProcessBrowserTest {
         test_profile_(NULL) {
     settings_manager_->AddObserver(&observer_);
   }
-  virtual ~SettingsWindowManagerTest() {
+  ~SettingsWindowManagerTest() override {
     settings_manager_->RemoveObserver(&observer_);
   }
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     command_line->AppendSwitch(::switches::kEnableSettingsWindow);
   }
 

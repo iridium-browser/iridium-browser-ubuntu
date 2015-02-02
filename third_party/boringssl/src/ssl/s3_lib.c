@@ -942,7 +942,8 @@ SSL3_ENC_METHOD SSLv3_enc_data={
 	0,
 	SSL3_HM_HEADER_LENGTH,
 	ssl3_set_handshake_header,
-	ssl3_handshake_write
+	ssl3_handshake_write,
+	ssl3_add_to_finished_hash,
 	};
 
 int ssl3_num_ciphers(void)
@@ -975,9 +976,14 @@ void ssl3_set_handshake_header(SSL *s, int htype, unsigned long len)
 	s->init_off = 0;
 	}
 
-int ssl3_handshake_write(SSL *s)
+int ssl3_handshake_write(SSL *s, enum should_add_to_finished_hash should_add_to_finished_hash)
 	{
-	return ssl3_do_write(s, SSL3_RT_HANDSHAKE);
+	return ssl3_do_write(s, SSL3_RT_HANDSHAKE, should_add_to_finished_hash);
+	}
+
+void ssl3_add_to_finished_hash(SSL *s)
+	{
+	ssl3_finish_mac(s, (uint8_t*) s->init_buf->data, s->init_num);
 	}
 
 int ssl3_new(SSL *s)
@@ -1019,6 +1025,10 @@ void ssl3_free(SSL *s)
 		sk_X509_NAME_pop_free(s->s3->tmp.ca_names,X509_NAME_free);
 	if (s->s3->tmp.certificate_types != NULL)
 		OPENSSL_free(s->s3->tmp.certificate_types);
+	if (s->s3->tmp.peer_ecpointformatlist)
+		OPENSSL_free(s->s3->tmp.peer_ecpointformatlist);
+	if (s->s3->tmp.peer_ellipticcurvelist)
+		OPENSSL_free(s->s3->tmp.peer_ellipticcurvelist);
 	if (s->s3->handshake_buffer) {
 		BIO_free(s->s3->handshake_buffer);
 	}
@@ -1275,12 +1285,8 @@ long ssl3_ctrl(SSL *s, int cmd, long larg, void *parg)
 
 	case SSL_CTRL_GET_CURVES:
 		{
-		const uint16_t *clist;
-		size_t clistlen;
-		if (!s->session)
-			return 0;
-		clist = s->session->tlsext_ellipticcurvelist;
-		clistlen = s->session->tlsext_ellipticcurvelist_length;
+		const uint16_t *clist = s->s3->tmp.peer_ellipticcurvelist;
+		size_t clistlen = s->s3->tmp.peer_ellipticcurvelist_length;
 		if (parg)
 			{
 			size_t i;
@@ -1385,12 +1391,11 @@ long ssl3_ctrl(SSL *s, int cmd, long larg, void *parg)
 			}
 	case SSL_CTRL_GET_EC_POINT_FORMATS:
 		{
-		SSL_SESSION *sess = s->session;
-		const unsigned char **pformat = parg;
-		if (!sess || !sess->tlsext_ecpointformatlist)
+		const uint8_t **pformat = parg;
+		if (!s->s3->tmp.peer_ecpointformatlist)
 			return 0;
-		*pformat = sess->tlsext_ecpointformatlist;
-		return (int)sess->tlsext_ecpointformatlist_length;
+		*pformat = s->s3->tmp.peer_ecpointformatlist;
+		return (int)s->s3->tmp.peer_ecpointformatlist_length;
 		}
 
 	case SSL_CTRL_CHANNEL_ID:
@@ -1780,7 +1785,8 @@ const SSL_CIPHER *ssl3_choose_cipher(SSL *s, STACK_OF(SSL_CIPHER) *clnt,
 	{
 	const SSL_CIPHER *c,*ret=NULL;
 	STACK_OF(SSL_CIPHER) *srvr = server_pref->ciphers, *prio, *allow;
-	int i,ok;
+	size_t i;
+	int ok;
 	size_t cipher_index;
 	CERT *cert;
 	unsigned long alg_k,alg_a,mask_k,mask_a;
@@ -1850,10 +1856,6 @@ const SSL_CIPHER *ssl3_choose_cipher(SSL *s, STACK_OF(SSL_CIPHER) *clnt,
 		ssl_set_cert_masks(cert,c);
 		mask_k = cert->mask_k;
 		mask_a = cert->mask_a;
-			
-#ifdef KSSL_DEBUG
-/*		printf("ssl3_choose_cipher %d alg= %lx\n", i,c->algorithms);*/
-#endif    /* KSSL_DEBUG */
 
 		alg_k=c->algorithm_mkey;
 		alg_a=c->algorithm_auth;
@@ -1871,7 +1873,7 @@ const SSL_CIPHER *ssl3_choose_cipher(SSL *s, STACK_OF(SSL_CIPHER) *clnt,
 		/* if we are considering an ECC cipher suite that uses
 		 * an ephemeral EC key check it */
 		if (alg_k & SSL_kEECDH)
-			ok = ok && tls1_check_ec_tmp_key(s, c->id);
+			ok = ok && tls1_check_ec_tmp_key(s);
 
 		if (ok && sk_SSL_CIPHER_find(allow, &cipher_index, c))
 			{
@@ -1880,12 +1882,12 @@ const SSL_CIPHER *ssl3_choose_cipher(SSL *s, STACK_OF(SSL_CIPHER) *clnt,
 				/* This element of |prio| is in a group. Update
 				 * the minimum index found so far and continue
 				 * looking. */
-				if (group_min == -1 || group_min > cipher_index)
+				if (group_min == -1 || (size_t)group_min > cipher_index)
 					group_min = cipher_index;
 				}
 			else
 				{
-				if (group_min != -1 && group_min < cipher_index)
+				if (group_min != -1 && (size_t)group_min < cipher_index)
 					cipher_index = group_min;
 				ret=sk_SSL_CIPHER_value(allow,cipher_index);
 				break;

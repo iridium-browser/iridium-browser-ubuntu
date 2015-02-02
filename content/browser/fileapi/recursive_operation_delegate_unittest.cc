@@ -45,21 +45,17 @@ class LoggingRecursiveOperation : public storage::RecursiveOperationDelegate {
         root_(root),
         callback_(callback),
         weak_factory_(this) {}
-  virtual ~LoggingRecursiveOperation() {}
+  ~LoggingRecursiveOperation() override {}
 
   const std::vector<LogEntry>& log_entries() const { return log_entries_; }
 
   // RecursiveOperationDelegate overrides.
-  virtual void Run() OVERRIDE {
-    NOTREACHED();
-  }
+  void Run() override { NOTREACHED(); }
 
-  virtual void RunRecursively() OVERRIDE {
-    StartRecursiveOperation(root_, callback_);
-  }
+  void RunRecursively() override { StartRecursiveOperation(root_, callback_); }
 
-  virtual void ProcessFile(const FileSystemURL& url,
-                           const StatusCallback& callback) OVERRIDE {
+  void ProcessFile(const FileSystemURL& url,
+                   const StatusCallback& callback) override {
     RecordLogEntry(LogEntry::PROCESS_FILE, url);
     operation_runner()->GetMetadata(
         url,
@@ -67,14 +63,14 @@ class LoggingRecursiveOperation : public storage::RecursiveOperationDelegate {
                    weak_factory_.GetWeakPtr(), callback));
   }
 
-  virtual void ProcessDirectory(const FileSystemURL& url,
-                                const StatusCallback& callback) OVERRIDE {
+  void ProcessDirectory(const FileSystemURL& url,
+                        const StatusCallback& callback) override {
     RecordLogEntry(LogEntry::PROCESS_DIRECTORY, url);
     callback.Run(base::File::FILE_OK);
   }
 
-  virtual void PostProcessDirectory(const FileSystemURL& url,
-                                    const StatusCallback& callback) OVERRIDE {
+  void PostProcessDirectory(const FileSystemURL& url,
+                            const StatusCallback& callback) override {
     RecordLogEntry(LogEntry::POST_PROCESS_DIRECTORY, url);
     callback.Run(base::File::FILE_OK);
   }
@@ -132,14 +128,12 @@ void CallCancelLater(storage::RecursiveOperationDelegate* operation,
 
 class RecursiveOperationDelegateTest : public testing::Test {
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     EXPECT_TRUE(base_.CreateUniqueTempDir());
     sandbox_file_system_.SetUp(base_.path().AppendASCII("filesystem"));
   }
 
-  virtual void TearDown() OVERRIDE {
-    sandbox_file_system_.TearDown();
-  }
+  void TearDown() override { sandbox_file_system_.TearDown(); }
 
   scoped_ptr<FileSystemOperationContext> NewContext() {
     FileSystemOperationContext* context =

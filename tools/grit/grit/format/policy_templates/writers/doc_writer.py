@@ -590,6 +590,10 @@ class DocWriter(xml_formatted_writer.XMLFormattedWriter):
 
   def BeginTemplate(self):
     # Add a <div> for the summary section.
+    if self._GetChromiumVersionString() is not None:
+      self.AddComment(self._main_div, self.config['build'] + \
+          ' version: ' + self._GetChromiumVersionString())
+
     summary_div = self.AddElement(self._main_div, 'div')
     self.AddElement(summary_div, 'a', {'name': 'top'})
     self.AddElement(summary_div, 'br')

@@ -25,6 +25,7 @@
 
 #if defined(OS_ANDROID)
 #include "base/android/jni_android.h"
+#include "components/invalidation/android/component_jni_registrar.h"
 #include "ui/base/android/ui_base_jni_registrar.h"
 #include "ui/gfx/android/gfx_jni_registrar.h"
 #endif
@@ -36,7 +37,7 @@ class ComponentsTestSuite : public base::TestSuite {
   ComponentsTestSuite(int argc, char** argv) : base::TestSuite(argc, argv) {}
 
  private:
-  virtual void Initialize() OVERRIDE {
+  void Initialize() override {
     base::TestSuite::Initialize();
 
     // Initialize the histograms subsystem, so that any histograms hit in tests
@@ -52,6 +53,7 @@ class ComponentsTestSuite : public base::TestSuite {
     JNIEnv* env = base::android::AttachCurrentThread();
     gfx::android::RegisterJni(env);
     ui::android::RegisterJni(env);
+    invalidation::android::RegisterInvalidationJni(env);
 #endif
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
@@ -98,7 +100,7 @@ class ComponentsTestSuite : public base::TestSuite {
         "chrome-extension");
   }
 
-  virtual void Shutdown() OVERRIDE {
+  void Shutdown() override {
     ui::ResourceBundle::CleanupSharedInstance();
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
@@ -116,11 +118,11 @@ class ComponentsUnitTestEventListener : public testing::EmptyTestEventListener {
   ComponentsUnitTestEventListener() {}
   virtual ~ComponentsUnitTestEventListener() {}
 
-  virtual void OnTestStart(const testing::TestInfo& test_info) OVERRIDE {
+  virtual void OnTestStart(const testing::TestInfo& test_info) override {
     content_initializer_.reset(new content::TestContentClientInitializer());
   }
 
-  virtual void OnTestEnd(const testing::TestInfo& test_info) OVERRIDE {
+  virtual void OnTestEnd(const testing::TestInfo& test_info) override {
     content_initializer_.reset();
   }
 

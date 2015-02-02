@@ -24,57 +24,57 @@ namespace wifi {
 class WiFiServiceMac : public WiFiService {
  public:
   WiFiServiceMac();
-  virtual ~WiFiServiceMac();
+  ~WiFiServiceMac() override;
 
   // WiFiService interface implementation.
-  virtual void Initialize(
-      scoped_refptr<base::SequencedTaskRunner> task_runner) OVERRIDE;
+  void Initialize(
+      scoped_refptr<base::SequencedTaskRunner> task_runner) override;
 
-  virtual void UnInitialize() OVERRIDE;
+  void UnInitialize() override;
 
-  virtual void GetProperties(const std::string& network_guid,
-                             base::DictionaryValue* properties,
-                             std::string* error) OVERRIDE;
+  void GetProperties(const std::string& network_guid,
+                     base::DictionaryValue* properties,
+                     std::string* error) override;
 
-  virtual void GetManagedProperties(const std::string& network_guid,
-                                    base::DictionaryValue* managed_properties,
-                                    std::string* error) OVERRIDE;
+  void GetManagedProperties(const std::string& network_guid,
+                            base::DictionaryValue* managed_properties,
+                            std::string* error) override;
 
-  virtual void GetState(const std::string& network_guid,
-                        base::DictionaryValue* properties,
-                        std::string* error) OVERRIDE;
+  void GetState(const std::string& network_guid,
+                base::DictionaryValue* properties,
+                std::string* error) override;
 
-  virtual void SetProperties(const std::string& network_guid,
-                             scoped_ptr<base::DictionaryValue> properties,
-                             std::string* error) OVERRIDE;
+  void SetProperties(const std::string& network_guid,
+                     scoped_ptr<base::DictionaryValue> properties,
+                     std::string* error) override;
 
-  virtual void CreateNetwork(bool shared,
-                             scoped_ptr<base::DictionaryValue> properties,
-                             std::string* network_guid,
-                             std::string* error) OVERRIDE;
+  void CreateNetwork(bool shared,
+                     scoped_ptr<base::DictionaryValue> properties,
+                     std::string* network_guid,
+                     std::string* error) override;
 
-  virtual void GetVisibleNetworks(const std::string& network_type,
-                                  base::ListValue* network_list,
-                                  bool include_details) OVERRIDE;
+  void GetVisibleNetworks(const std::string& network_type,
+                          base::ListValue* network_list,
+                          bool include_details) override;
 
-  virtual void RequestNetworkScan() OVERRIDE;
+  void RequestNetworkScan() override;
 
-  virtual void StartConnect(const std::string& network_guid,
-                            std::string* error) OVERRIDE;
+  void StartConnect(const std::string& network_guid,
+                    std::string* error) override;
 
-  virtual void StartDisconnect(const std::string& network_guid,
-                               std::string* error) OVERRIDE;
+  void StartDisconnect(const std::string& network_guid,
+                       std::string* error) override;
 
-  virtual void GetKeyFromSystem(const std::string& network_guid,
-                                std::string* key_data,
-                                std::string* error) OVERRIDE;
+  void GetKeyFromSystem(const std::string& network_guid,
+                        std::string* key_data,
+                        std::string* error) override;
 
-  virtual void SetEventObservers(
+  void SetEventObservers(
       scoped_refptr<base::MessageLoopProxy> message_loop_proxy,
       const NetworkGuidListCallback& networks_changed_observer,
-      const NetworkGuidListCallback& network_list_changed_observer) OVERRIDE;
+      const NetworkGuidListCallback& network_list_changed_observer) override;
 
-  virtual void RequestConnectedNetworkUpdate() OVERRIDE;
+  void RequestConnectedNetworkUpdate() override;
 
  private:
   // Checks |ns_error| and if is not |nil|, then stores |error_name|

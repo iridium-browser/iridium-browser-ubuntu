@@ -261,10 +261,6 @@ SK_API void SkDebugf_FileLine(const char* file, int line, bool fatal,
 #   define SK_SUPPORT_LEGACY_PUBLIC_IMAGEINFO_FIELDS
 #endif
 
-#ifndef    SK_IGNORE_PROPER_FRACTIONAL_SCALING
-#   define SK_IGNORE_PROPER_FRACTIONAL_SCALING
-#endif
-
 #ifndef    SK_SUPPORT_LEGACY_PICTURE_CLONE
 #   define SK_SUPPORT_LEGACY_PICTURE_CLONE
 #endif
@@ -275,10 +271,6 @@ SK_API void SkDebugf_FileLine(const char* file, int line, bool fatal,
 
 #ifndef    SK_IGNORE_GPU_DITHER
 #   define SK_IGNORE_GPU_DITHER
-#endif
-
-#ifndef    SK_SUPPORT_LEGACY_IMAGECACHE_NAME
-#   define SK_SUPPORT_LEGACY_IMAGECACHE_NAME
 #endif
 
 #ifndef    SK_LEGACY_PICTURE_SIZE_API

@@ -18,7 +18,6 @@
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/common/extension.h"
@@ -33,7 +32,7 @@ using extensions::Extension;
 
 class PanelExtensionBrowserTest : public ExtensionBrowserTest {
  protected:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     ExtensionBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kEnablePanels);
     PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir_);
@@ -123,11 +122,12 @@ class PanelContextMenu : public RenderViewContextMenu {
     return menu_model_.GetIndexOfCommandId(command_id) != -1;
   }
 
+  void Show() override {}
+
  protected:
   // RenderViewContextMenu implementation.
-  virtual bool GetAcceleratorForCommandId(
-      int command_id,
-      ui::Accelerator* accelerator) OVERRIDE {
+  bool GetAcceleratorForCommandId(int command_id,
+                                  ui::Accelerator* accelerator) override {
     return false;
   }
 };

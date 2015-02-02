@@ -2,14 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef ASH_DISPLAY_DISPLAY_CHANGE_OBSERVER_CHROMEOS_H
-#define ASH_DISPLAY_DISPLAY_CHANGE_OBSERVER_CHROMEOS_H
+#ifndef ASH_DISPLAY_DISPLAY_CHANGE_OBSERVER_CHROMEOS_H_
+#define ASH_DISPLAY_DISPLAY_CHANGE_OBSERVER_CHROMEOS_H_
+
+#include <vector>
 
 #include "ash/ash_export.h"
 #include "ash/shell_observer.h"
 #include "base/basictypes.h"
 #include "ui/display/chromeos/display_configurator.h"
-#include "ui/events/input_device_event_observer.h"
+#include "ui/events/devices/input_device_event_observer.h"
 
 namespace ash {
 
@@ -37,19 +39,20 @@ class DisplayChangeObserver : public ui::DisplayConfigurator::StateController,
 
   // ui::DisplayConfigurator::StateController overrides:
   virtual ui::MultipleDisplayState GetStateForDisplayIds(
-      const std::vector<int64>& outputs) const OVERRIDE;
+      const std::vector<int64>& outputs) const override;
   virtual bool GetResolutionForDisplayId(int64 display_id,
-                                         gfx::Size* size) const OVERRIDE;
+                                         gfx::Size* size) const override;
 
   // Overriden from ui::DisplayConfigurator::Observer:
   virtual void OnDisplayModeChanged(
-      const ui::DisplayConfigurator::DisplayStateList& outputs) OVERRIDE;
+      const ui::DisplayConfigurator::DisplayStateList& outputs) override;
 
   // Overriden from ui::InputDeviceEventObserver:
-  virtual void OnInputDeviceConfigurationChanged() OVERRIDE;
+  virtual void OnTouchscreenDeviceConfigurationChanged() override;
+  virtual void OnKeyboardDeviceConfigurationChanged() override;
 
   // Overriden from ShellObserver:
-  virtual void OnAppTerminating() OVERRIDE;
+  virtual void OnAppTerminating() override;
 
   // Exposed for testing.
   ASH_EXPORT static float FindDeviceScaleFactor(float dpi);
@@ -60,4 +63,4 @@ class DisplayChangeObserver : public ui::DisplayConfigurator::StateController,
 
 }  // namespace ash
 
-#endif  // ASH_DISPLAY_AURA_DISPLAY_CHANGE_OBSERVER_CHROMEOS_H
+#endif  // ASH_DISPLAY_DISPLAY_CHANGE_OBSERVER_CHROMEOS_H_

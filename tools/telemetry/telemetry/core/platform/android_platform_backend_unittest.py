@@ -14,7 +14,7 @@ class AndroidPlatformBackendTest(unittest.TestCase):
   def setUp(self):
     self._stubs = system_stub.Override(
         android_platform_backend,
-        ['perf_control', 'thermal_throttle', 'adb_commands'])
+        ['perf_control', 'thermal_throttle', 'adb_commands', 'certutils'])
 
   def tearDown(self):
     self._stubs.Restore()
@@ -33,7 +33,7 @@ class AndroidPlatformBackendTest(unittest.TestCase):
     backend = android_platform_backend.AndroidPlatformBackend(
         android_device.AndroidDevice('12345'))
     cpu_stats = backend.GetCpuStats('7702')
-    self.assertEquals(cpu_stats, {'CpuProcessTime': 5.0})
+    self.assertEquals(cpu_stats, {'CpuProcessTime': 0.05})
 
   @benchmark.Disabled('chromeos')
   def testGetCpuStatsInvalidPID(self):
@@ -65,3 +65,10 @@ class AndroidPlatformBackendTest(unittest.TestCase):
     for cpu in result:
       for state in result[cpu]:
         self.assertAlmostEqual(result[cpu][state], expected_cstate[cpu][state])
+
+  def testInstallTestCaFailure(self):
+    backend = android_platform_backend.AndroidPlatformBackend(
+        android_device.AndroidDevice('12345'))
+    is_installed = backend.InstallTestCa()
+    self.assertFalse(is_installed)
+    self.assertIsNone(backend.wpr_ca_cert_path)

@@ -6,22 +6,16 @@
 // in the file PATENTS.  All contributing project authors may
 // be found in the AUTHORS file in the root of the source tree.
 //
-// This script loads the test file in the virtual machine and runs it in a
-// context that only exposes a test variable with methods for testing and to
-// spawn bots.
-//
-// Note: an important part of this script is to keep nodejs-isms away from test
-// code and isolate it from implementation details.
+// Provides a Test class that exposes api to the tests.
+// Read test.prototype to see what methods are exposed.
 var fs = require('fs');
-var vm = require('vm');
+var request = require('request');
 var BotManager = require('./botmanager.js');
 
-function Test(botType) {
-  // TODO(houssainy) set the time out.
+function Test() {
   this.timeout_ = setTimeout(
       this.fail.bind(this, "Test timeout!"),
-      10000);
-  this.botType_ = botType;
+      100000);
 }
 
 Test.prototype = {
@@ -68,18 +62,94 @@ Test.prototype = {
     }
   },
 
-  spawnBot: function (name, doneCallback) {
+  spawnBot: function (name, botType, doneCallback) {
     // Lazy initialization of botmanager.
     if (!this.botManager_)
       this.botManager_ = new BotManager();
-    this.botManager_.spawnNewBot(name, this.botType_, doneCallback);
+    this.botManager_.spawnNewBot(name, botType, doneCallback);
+  },
+
+  createStatisticsReport: function (outputFileName) {
+    return new StatisticsReport(outputFileName);
+  },
+
+  // Ask computeengineondemand to give us TURN server credentials and URIs.
+  createTurnConfig: function (onSuccess, onError) {
+    request('https://computeengineondemand.appspot.com/turn?username=1234&key=5678',
+        function (error, response, body) {
+          if (error || response.statusCode != 200) {
+            onError('TURN request failed');
+            return;
+          }
+
+          var response = JSON.parse(body);
+          var iceServer = {
+            'username': response.username,
+            'credential': response.password,
+            'urls': response.uris
+          };
+          onSuccess({ 'iceServers': [ iceServer ] });
+        }
+      );
   },
 }
 
-function runTest(botType, testfile) {
-  console.log("Running test: " + testfile);
-  var script = vm.createScript(fs.readFileSync(testfile), testfile);
-  script.runInNewContext({ test: new Test(botType) });
+StatisticsReport = function (outputFileName) {
+  this.output_ = [];
+  this.output_.push("Version: 1");
+  this.outputFileName_ = outputFileName;
 }
 
-runTest(process.argv[2], process.argv[3]);
+StatisticsReport.prototype = {
+  collectStatsFromPeerConnection: function (prefix, pc) {
+    setInterval(this.addPeerConnectionStats.bind(this, prefix, pc), 100);
+  },
+
+  addPeerConnectionStats: function (prefix, pc) {
+    pc.getStats(onStatsReady.bind(this));
+
+    function onStatsReady(reports) {
+      for (index in reports) {
+        var stats = {};
+        stats[reports[index].id] = collectStats(reports[index].stats);
+
+        var data = {};
+        data[prefix] = stats;
+
+        this.output_.push({
+            type: "UpdateCounters",
+            startTime: (new Date()).getTime(),
+            data: data,
+          });
+      }
+    };
+
+    function collectStats(stats) {
+      var outputStats = {};
+      for (index in stats) {
+        var statValue = parseFloat(stats[index].stat);
+        outputStats[stats[index].name] = isNaN(statValue)?
+            stats[index].stat : statValue;
+      }
+      return outputStats;
+    };
+  },
+
+  finish: function (doneCallback) {
+    fs.exists("test/reports/", function (exists) {
+      if(exists) {
+        writeFile.bind(this)();
+      } else {
+        fs.mkdir("test/reports/", 0777, writeFile.bind(this));
+      }
+    }.bind(this));
+
+    function writeFile () {
+      fs.writeFile("test/reports/" + this.outputFileName_ + "_" +
+        (new Date()).getTime() +".json", JSON.stringify(this.output_),
+        doneCallback);
+    }
+  },
+};
+
+module.exports = Test;

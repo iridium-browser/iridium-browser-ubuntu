@@ -16,10 +16,10 @@
 #include "cc/quads/solid_color_draw_quad.h"
 #include "cc/quads/tile_draw_quad.h"
 #include "cc/resources/layer_tiling_data.h"
-#include "cc/trees/occlusion_tracker.h"
+#include "cc/trees/occlusion.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/skia/include/core/SkColor.h"
-#include "ui/gfx/quad_f.h"
+#include "ui/gfx/geometry/quad_f.h"
 
 namespace cc {
 
@@ -53,21 +53,25 @@ TiledLayerImpl::TiledLayerImpl(LayerTreeImpl* tree_impl, int id)
 TiledLayerImpl::~TiledLayerImpl() {
 }
 
-ResourceProvider::ResourceId TiledLayerImpl::ContentsResourceId() const {
+void TiledLayerImpl::GetContentsResourceId(
+    ResourceProvider::ResourceId* resource_id,
+    gfx::Size* resource_size) const {
   // This function is only valid for single texture layers, e.g. masks.
   DCHECK(tiler_);
   // It's possible the mask layer is created but has no size or otherwise
   // can't draw.
-  if (tiler_->num_tiles_x() == 0 || tiler_->num_tiles_y() == 0)
-    return 0;
+  if (tiler_->num_tiles_x() == 0 || tiler_->num_tiles_y() == 0) {
+    *resource_id = 0;
+    return;
+  }
 
   // Any other number of tiles other than 0 or 1 is incorrect for masks.
   DCHECK_EQ(tiler_->num_tiles_x(), 1);
   DCHECK_EQ(tiler_->num_tiles_y(), 1);
 
   DrawableTile* tile = TileAt(0, 0);
-  ResourceProvider::ResourceId resource_id = tile ? tile->resource_id() : 0;
-  return resource_id;
+  *resource_id = tile ? tile->resource_id() : 0;
+  *resource_size = tiler_->tile_size();
 }
 
 bool TiledLayerImpl::HasTileAt(int i, int j) const {
@@ -85,7 +89,7 @@ DrawableTile* TiledLayerImpl::TileAt(int i, int j) const {
 DrawableTile* TiledLayerImpl::CreateTile(int i, int j) {
   scoped_ptr<DrawableTile> tile(DrawableTile::Create());
   DrawableTile* added_tile = tile.get();
-  tiler_->AddTile(tile.PassAs<LayerTilingData::Tile>(), i, j);
+  tiler_->AddTile(tile.Pass(), i, j);
 
   return added_tile;
 }
@@ -98,7 +102,7 @@ void TiledLayerImpl::GetDebugBorderProperties(SkColor* color,
 
 scoped_ptr<LayerImpl> TiledLayerImpl::CreateLayerImpl(
     LayerTreeImpl* tree_impl) {
-  return TiledLayerImpl::Create(tree_impl, id()).PassAs<LayerImpl>();
+  return TiledLayerImpl::Create(tree_impl, id());
 }
 
 void TiledLayerImpl::AsValueInto(base::debug::TracedValue* state) const {
@@ -155,10 +159,9 @@ bool TiledLayerImpl::WillDraw(DrawMode draw_mode,
   return LayerImpl::WillDraw(draw_mode, resource_provider);
 }
 
-void TiledLayerImpl::AppendQuads(
-    RenderPass* render_pass,
-    const OcclusionTracker<LayerImpl>& occlusion_tracker,
-    AppendQuadsData* append_quads_data) {
+void TiledLayerImpl::AppendQuads(RenderPass* render_pass,
+                                 const Occlusion& occlusion_in_content_space,
+                                 AppendQuadsData* append_quads_data) {
   DCHECK(tiler_);
   DCHECK(!tiler_->has_empty_bounds());
   DCHECK(!visible_content_rect().IsEmpty());
@@ -204,8 +207,6 @@ void TiledLayerImpl::AppendQuads(
   if (skips_draw_)
     return;
 
-  Occlusion occlusion =
-      occlusion_tracker.GetCurrentOcclusionForLayer(draw_transform());
   for (int j = top; j <= bottom; ++j) {
     for (int i = left; i <= right; ++i) {
       DrawableTile* tile = TileAt(i, j);
@@ -218,7 +219,7 @@ void TiledLayerImpl::AppendQuads(
         continue;
 
       gfx::Rect visible_tile_rect =
-          occlusion.GetUnoccludedContentRect(tile_rect);
+          occlusion_in_content_space.GetUnoccludedContentRect(tile_rect);
       if (visible_tile_rect.IsEmpty())
         continue;
 

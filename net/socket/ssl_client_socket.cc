@@ -5,11 +5,14 @@
 #include "net/socket/ssl_client_socket.h"
 
 #include "base/metrics/histogram.h"
+#include "base/metrics/sparse_histogram.h"
 #include "base/strings/string_util.h"
 #include "crypto/ec_private_key.h"
+#include "net/base/connection_type_histograms.h"
 #include "net/base/host_port_pair.h"
 #include "net/ssl/channel_id_service.h"
 #include "net/ssl/ssl_config_service.h"
+#include "net/ssl/ssl_connection_status_flags.h"
 
 namespace net {
 
@@ -19,7 +22,8 @@ SSLClientSocket::SSLClientSocket()
       protocol_negotiated_(kProtoUnknown),
       channel_id_sent_(false),
       signed_cert_timestamps_received_(false),
-      stapled_ocsp_response_received_(false) {
+      stapled_ocsp_response_received_(false),
+      negotiation_extension_(kExtensionUnknown) {
 }
 
 // static
@@ -124,6 +128,11 @@ void SSLClientSocket::set_protocol_negotiated(NextProto protocol_negotiated) {
   protocol_negotiated_ = protocol_negotiated;
 }
 
+void SSLClientSocket::set_negotiation_extension(
+    SSLNegotiationExtension negotiation_extension) {
+  negotiation_extension_ = negotiation_extension;
+}
+
 bool SSLClientSocket::WasChannelIDSent() const {
   return channel_id_sent_;
 }
@@ -172,6 +181,28 @@ void SSLClientSocket::RecordChannelIDSupport(
   }
   UMA_HISTOGRAM_ENUMERATION("DomainBoundCerts.Support", supported,
                             CHANNEL_ID_USAGE_MAX);
+}
+
+// static
+void SSLClientSocket::RecordConnectionTypeMetrics(int ssl_version) {
+  UpdateConnectionTypeHistograms(CONNECTION_SSL);
+  switch (ssl_version) {
+    case SSL_CONNECTION_VERSION_SSL2:
+      UpdateConnectionTypeHistograms(CONNECTION_SSL_SSL2);
+      break;
+    case SSL_CONNECTION_VERSION_SSL3:
+      UpdateConnectionTypeHistograms(CONNECTION_SSL_SSL3);
+      break;
+    case SSL_CONNECTION_VERSION_TLS1:
+      UpdateConnectionTypeHistograms(CONNECTION_SSL_TLS1);
+      break;
+    case SSL_CONNECTION_VERSION_TLS1_1:
+      UpdateConnectionTypeHistograms(CONNECTION_SSL_TLS1_1);
+      break;
+    case SSL_CONNECTION_VERSION_TLS1_2:
+      UpdateConnectionTypeHistograms(CONNECTION_SSL_TLS1_2);
+      break;
+  }
 }
 
 // static
@@ -230,6 +261,32 @@ std::vector<uint8_t> SSLClientSocket::SerializeNextProtos(
   DCHECK_EQ(wire_protos.size(), wire_length);
 
   return wire_protos;
+}
+
+void SSLClientSocket::RecordNegotiationExtension() {
+  if (negotiation_extension_ == kExtensionUnknown)
+    return;
+  std::string proto;
+  SSLClientSocket::NextProtoStatus status = GetNextProto(&proto);
+  if (status == kNextProtoUnsupported)
+    return;
+  // Convert protocol into numerical value for histogram.
+  NextProto protocol_negotiated = SSLClientSocket::NextProtoFromString(proto);
+  base::HistogramBase::Sample sample =
+      static_cast<base::HistogramBase::Sample>(protocol_negotiated);
+  // In addition to the protocol negotiated, we want to record which TLS
+  // extension was used, and in case of NPN, whether there was overlap between
+  // server and client list of supported protocols.
+  if (negotiation_extension_ == kExtensionNPN) {
+    if (status == kNextProtoNoOverlap) {
+      sample += 1000;
+    } else {
+      sample += 500;
+    }
+  } else {
+    DCHECK_EQ(kExtensionALPN, negotiation_extension_);
+  }
+  UMA_HISTOGRAM_SPARSE_SLOWLY("Net.SSLProtocolNegotiation", sample);
 }
 
 }  // namespace net

@@ -35,15 +35,14 @@ class FakeUrlFetchRequest : public UrlFetchRequestBase {
         url_(url) {
   }
 
-  virtual ~FakeUrlFetchRequest() {
-  }
+  ~FakeUrlFetchRequest() override {}
 
  protected:
-  virtual GURL GetURL() const OVERRIDE { return url_; }
-  virtual void ProcessURLFetchResults(const net::URLFetcher* source) OVERRIDE {
+  GURL GetURL() const override { return url_; }
+  void ProcessURLFetchResults(const net::URLFetcher* source) override {
     callback_.Run(GetErrorCode());
   }
-  virtual void RunCallbackOnPrematureFailure(GDataErrorCode code) OVERRIDE {
+  void RunCallbackOnPrematureFailure(GDataErrorCode code) override {
     callback_.Run(code);
   }
 
@@ -57,7 +56,7 @@ class BaseRequestsTest : public testing::Test {
  public:
   BaseRequestsTest() : response_code_(net::HTTP_OK) {}
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     request_context_getter_ = new net::TestURLRequestContextGetter(
         message_loop_.message_loop_proxy());
 
@@ -78,7 +77,7 @@ class BaseRequestsTest : public testing::Test {
     response->set_code(response_code_);
     response->set_content(response_body_);
     response->set_content_type("application/json");
-    return response.PassAs<net::test_server::HttpResponse>();
+    return response.Pass();
   }
 
   base::MessageLoopForIO message_loop_;

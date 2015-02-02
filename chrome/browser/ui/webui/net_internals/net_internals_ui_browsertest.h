@@ -17,17 +17,17 @@ class ListValue;
 class NetInternalsTest : public WebUIBrowserTest {
  protected:
   NetInternalsTest();
-  virtual ~NetInternalsTest();
+  ~NetInternalsTest() override;
 
  private:
   class MessageHandler;
 
   // InProcessBrowserTest overrides.
-  virtual void SetUpCommandLine(base::CommandLine* command_line) OVERRIDE;
-  virtual void SetUpOnMainThread() OVERRIDE;
+  void SetUpCommandLine(base::CommandLine* command_line) override;
+  void SetUpOnMainThread() override;
 
   // WebUIBrowserTest implementation.
-  virtual content::WebUIMessageHandler* GetMockMessageHandler() OVERRIDE;
+  content::WebUIMessageHandler* GetMockMessageHandler() override;
 
   GURL CreatePrerenderLoaderUrl(const GURL& prerender_url);
 

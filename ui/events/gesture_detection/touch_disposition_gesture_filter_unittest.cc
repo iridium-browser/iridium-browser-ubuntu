@@ -6,7 +6,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/events/gesture_detection/touch_disposition_gesture_filter.h"
-#include "ui/events/test/mock_motion_event.h"
+#include "ui/events/test/motion_event_test_utils.h"
 
 using ui::test::MockMotionEvent;
 
@@ -23,20 +23,18 @@ class TouchDispositionGestureFilterTest
  public:
   TouchDispositionGestureFilterTest()
       : cancel_after_next_gesture_(false), sent_gesture_count_(0) {}
-  virtual ~TouchDispositionGestureFilterTest() {}
+  ~TouchDispositionGestureFilterTest() override {}
 
   // testing::Test
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     queue_.reset(new TouchDispositionGestureFilter(this));
     touch_event_.set_flags(kDefaultEventFlags);
   }
 
-  virtual void TearDown() OVERRIDE {
-    queue_.reset();
-  }
+  void TearDown() override { queue_.reset(); }
 
   // TouchDispositionGestureFilterClient
-  virtual void ForwardGestureEvent(const GestureEventData& event) OVERRIDE {
+  void ForwardGestureEvent(const GestureEventData& event) override {
     ++sent_gesture_count_;
     last_sent_gesture_.reset(new GestureEventData(event));
     sent_gestures_.push_back(event.type());

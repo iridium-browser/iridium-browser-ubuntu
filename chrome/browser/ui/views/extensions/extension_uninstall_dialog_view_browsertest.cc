@@ -29,14 +29,14 @@ class TestExtensionUninstallDialogDelegate
       const base::Closure& quit_closure)
       : quit_closure_(quit_closure), canceled_(false) {}
 
-  virtual ~TestExtensionUninstallDialogDelegate() {}
+  ~TestExtensionUninstallDialogDelegate() override {}
 
   bool canceled() { return canceled_; }
 
  private:
-  virtual void ExtensionUninstallAccepted() OVERRIDE { quit_closure_.Run(); }
+  void ExtensionUninstallAccepted() override { quit_closure_.Run(); }
 
-  virtual void ExtensionUninstallCanceled() OVERRIDE {
+  void ExtensionUninstallCanceled() override {
     canceled_ = true;
     quit_closure_.Run();
   }

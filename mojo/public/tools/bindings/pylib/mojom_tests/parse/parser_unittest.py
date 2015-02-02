@@ -35,8 +35,7 @@ class ParserTest(unittest.TestCase):
     source = """\
         // This is a comment.
 
-        module my_module {
-        }
+        module my_module;
         """
     expected = ast.Mojom(
         ast.Module(('IDENTIFIER', 'my_module'), None),
@@ -47,7 +46,7 @@ class ParserTest(unittest.TestCase):
   def testSourceWithCrLfs(self):
     """Tests a .mojom source with CR-LFs instead of LFs."""
 
-    source = "// This is a comment.\r\n\r\nmodule my_module {\r\n}\r\n"
+    source = "// This is a comment.\r\n\r\nmodule my_module;\r\n"
     expected = ast.Mojom(
         ast.Module(('IDENTIFIER', 'my_module'), None),
         ast.ImportList(),
@@ -60,7 +59,7 @@ class ParserTest(unittest.TestCase):
     source = """\
         // This is a comment.
 
-        module my_module {
+        module my_module
         """
     with self.assertRaisesRegexp(
         parser.ParseError,
@@ -85,10 +84,10 @@ class ParserTest(unittest.TestCase):
     source2 = """\
         // Consecutive C++-style comments.
         // Foo.
-          // Bar.
+        // Bar.
 
         struct Yada {  // Baz.
-        // Quux.
+                       // Quux.
           int32 x;
         };
 
@@ -133,14 +132,12 @@ class ParserTest(unittest.TestCase):
     """Tests a simple .mojom source that just defines a struct."""
 
     source = """\
-        module my_module {
+        module my_module;
 
         struct MyStruct {
           int32 a;
           double b;
         };
-
-        }  // module my_module
         """
     expected = ast.Mojom(
         ast.Module(('IDENTIFIER', 'my_module'), None),
@@ -154,7 +151,7 @@ class ParserTest(unittest.TestCase):
     self.assertEquals(parser.Parse(source, "my_file.mojom"), expected)
 
   def testSimpleStructWithoutModule(self):
-    """Tests a simple struct without an enclosing module."""
+    """Tests a simple struct without an explict module statement."""
 
     source = """\
         struct MyStruct {
@@ -244,15 +241,14 @@ class ParserTest(unittest.TestCase):
 
     source1 = """\
         // Missing module name.
-        module {
+        module ;
         struct MyStruct {
           int32 a;
         };
-        }
         """
     with self.assertRaisesRegexp(
         parser.ParseError,
-        r"^my_file\.mojom:2: Error: Unexpected '{':\n *module {$"):
+        r"^my_file\.mojom:2: Error: Unexpected ';':\n *module ;$"):
       parser.Parse(source1, "my_file.mojom")
 
     # Another similar case, but make sure that line-number tracking/reporting
@@ -261,19 +257,77 @@ class ParserTest(unittest.TestCase):
         module
         // This line intentionally left unblank.
 
-        {
-        }
+        struct MyStruct {
+          int32 a;
+        };
         """
     with self.assertRaisesRegexp(
         parser.ParseError,
-        r"^my_file\.mojom:4: Error: Unexpected '{':\n *{$"):
+        r"^my_file\.mojom:4: Error: Unexpected 'struct':\n"
+            r" *struct MyStruct {$"):
       parser.Parse(source2, "my_file.mojom")
+
+  def testMultipleModuleStatements(self):
+    """Tests an (invalid) .mojom with multiple module statements."""
+
+    source = """\
+        module foo;
+        module bar;
+        """
+    with self.assertRaisesRegexp(
+        parser.ParseError,
+        r"^my_file\.mojom:2: Error: Multiple \"module\" statements not "
+            r"allowed:\n *module bar;$"):
+      parser.Parse(source, "my_file.mojom")
+
+  def testModuleStatementAfterImport(self):
+    """Tests an (invalid) .mojom with a module statement after an import."""
+
+    source = """\
+        import "foo.mojom";
+        module foo;
+        """
+    with self.assertRaisesRegexp(
+        parser.ParseError,
+        r"^my_file\.mojom:2: Error: \"module\" statements must precede imports "
+            r"and definitions:\n *module foo;$"):
+      parser.Parse(source, "my_file.mojom")
+
+  def testModuleStatementAfterDefinition(self):
+    """Tests an (invalid) .mojom with a module statement after a definition."""
+
+    source = """\
+        struct MyStruct {
+          int32 a;
+        };
+        module foo;
+        """
+    with self.assertRaisesRegexp(
+        parser.ParseError,
+        r"^my_file\.mojom:4: Error: \"module\" statements must precede imports "
+            r"and definitions:\n *module foo;$"):
+      parser.Parse(source, "my_file.mojom")
+
+  def testImportStatementAfterDefinition(self):
+    """Tests an (invalid) .mojom with an import statement after a definition."""
+
+    source = """\
+        struct MyStruct {
+          int32 a;
+        };
+        import "foo.mojom";
+        """
+    with self.assertRaisesRegexp(
+        parser.ParseError,
+        r"^my_file\.mojom:4: Error: \"import\" statements must precede "
+            r"definitions:\n *import \"foo.mojom\";$"):
+      parser.Parse(source, "my_file.mojom")
 
   def testEnums(self):
     """Tests that enum statements are correctly parsed."""
 
     source = """\
-        module my_module {
+        module my_module;
         enum MyEnum1 { VALUE1, VALUE2 };  // No trailing comma.
         enum MyEnum2 {
           VALUE1 = -1,
@@ -284,7 +338,6 @@ class ParserTest(unittest.TestCase):
           VALUE6 = VALUE5,
           VALUE7,  // Leave trailing comma.
         };
-        }  // my_module
         """
     expected = ast.Mojom(
         ast.Module(('IDENTIFIER', 'my_module'), None),
@@ -339,14 +392,12 @@ class ParserTest(unittest.TestCase):
     """Tests some constants and struct members initialized with them."""
 
     source = """\
-        module my_module {
+        module my_module;
 
         struct MyStruct {
           const int8 kNumber = -1;
           int8 number@0 = kNumber;
         };
-
-        }  // my_module
         """
     expected = ast.Mojom(
         ast.Module(('IDENTIFIER', 'my_module'), None),
@@ -363,13 +414,11 @@ class ParserTest(unittest.TestCase):
     """Tests that ?: is not allowed."""
 
     source = """\
-        module my_module {
+        module my_module;
 
         enum MyEnum {
           MY_ENUM_1 = 1 ? 2 : 3
         };
-
-        }  // my_module
         """
     with self.assertRaisesRegexp(
         parser.ParseError,
@@ -381,7 +430,7 @@ class ParserTest(unittest.TestCase):
     """Tests that (valid) ordinal values are scanned correctly."""
 
     source = """\
-        module my_module {
+        module my_module;
 
         // This isn't actually valid .mojom, but the problem (missing ordinals)
         // should be handled at a different level.
@@ -395,8 +444,6 @@ class ParserTest(unittest.TestCase):
           int32 a29 @29;
           int32 a1234567890 @1234567890;
         };
-
-        }  // module my_module
         """
     expected = ast.Mojom(
         ast.Module(('IDENTIFIER', 'my_module'), None),
@@ -420,13 +467,11 @@ class ParserTest(unittest.TestCase):
     """Tests that (lexically) invalid ordinals are correctly detected."""
 
     source1 = """\
-        module my_module {
+        module my_module;
 
         struct MyStruct {
           int32 a_missing@;
         };
-
-        }  // module my_module
         """
     with self.assertRaisesRegexp(
         lexer.LexError,
@@ -434,13 +479,11 @@ class ParserTest(unittest.TestCase):
       parser.Parse(source1, "my_file.mojom")
 
     source2 = """\
-        module my_module {
+        module my_module;
 
         struct MyStruct {
           int32 a_octal@01;
         };
-
-        }  // module my_module
         """
     with self.assertRaisesRegexp(
         lexer.LexError,
@@ -449,7 +492,7 @@ class ParserTest(unittest.TestCase):
       parser.Parse(source2, "my_file.mojom")
 
     source3 = """\
-        module my_module { struct MyStruct { int32 a_invalid_octal@08; }; }
+        module my_module; struct MyStruct { int32 a_invalid_octal@08; };
         """
     with self.assertRaisesRegexp(
         lexer.LexError,
@@ -457,14 +500,14 @@ class ParserTest(unittest.TestCase):
             r"Octal and hexadecimal ordinal values not allowed$"):
       parser.Parse(source3, "my_file.mojom")
 
-    source4 = "module my_module { struct MyStruct { int32 a_hex@0x1aB9; }; }"
+    source4 = "module my_module; struct MyStruct { int32 a_hex@0x1aB9; };"
     with self.assertRaisesRegexp(
         lexer.LexError,
         r"^my_file\.mojom:1: Error: "
             r"Octal and hexadecimal ordinal values not allowed$"):
       parser.Parse(source4, "my_file.mojom")
 
-    source5 = "module my_module { struct MyStruct { int32 a_hex@0X0; }; }"
+    source5 = "module my_module; struct MyStruct { int32 a_hex@0X0; };"
     with self.assertRaisesRegexp(
         lexer.LexError,
         r"^my_file\.mojom:1: Error: "
@@ -487,13 +530,11 @@ class ParserTest(unittest.TestCase):
     """Tests that "nested" namespaces work."""
 
     source = """\
-        module my.mod {
+        module my.mod;
 
         struct MyStruct {
           int32 a;
         };
-
-        }  // module my.mod
         """
     expected = ast.Mojom(
         ast.Module(('IDENTIFIER', 'my.mod'), None),
@@ -614,9 +655,10 @@ class ParserTest(unittest.TestCase):
 
     source = """\
         struct MyStruct {
-          int32[] normal_array;
-          int32[1] fixed_size_array_one_entry;
-          int32[10] fixed_size_array_ten_entries;
+          array<int32> normal_array;
+          array<int32, 1> fixed_size_array_one_entry;
+          array<int32, 10> fixed_size_array_ten_entries;
+          array<array<array<int32, 1>>, 2> nested_arrays;
         };
         """
     expected = ast.Mojom(
@@ -630,13 +672,15 @@ class ParserTest(unittest.TestCase):
                  ast.StructField('fixed_size_array_one_entry', None, 'int32[1]',
                                  None),
                  ast.StructField('fixed_size_array_ten_entries', None,
-                                 'int32[10]', None)]))])
+                                 'int32[10]', None),
+                 ast.StructField('nested_arrays', None,
+                                 'int32[1][][2]', None)]))])
     self.assertEquals(parser.Parse(source, "my_file.mojom"), expected)
 
   def testValidNestedArray(self):
     """Tests parsing a nested array."""
 
-    source = "struct MyStruct { int32[][] nested_array; };"
+    source = "struct MyStruct { array<array<int32>> nested_array; };"
     expected = ast.Mojom(
         None,
         ast.ImportList(),
@@ -652,36 +696,77 @@ class ParserTest(unittest.TestCase):
 
     source1 = """\
         struct MyStruct {
-          int32[0] zero_size_array;
+          array<int32, 0> zero_size_array;
         };
         """
     with self.assertRaisesRegexp(
         parser.ParseError,
-        r"^my_file\.mojom:2: Error: Fixed array size 0 invalid\n"
-            r" *int32\[0\] zero_size_array;$"):
+        r"^my_file\.mojom:2: Error: Fixed array size 0 invalid:\n"
+            r" *array<int32, 0> zero_size_array;$"):
       parser.Parse(source1, "my_file.mojom")
 
     source2 = """\
         struct MyStruct {
-          int32[999999999999] too_big_array;
+          array<int32, 999999999999> too_big_array;
         };
         """
     with self.assertRaisesRegexp(
         parser.ParseError,
-        r"^my_file\.mojom:2: Error: Fixed array size 999999999999 invalid\n"
-            r" *int32\[999999999999\] too_big_array;$"):
+        r"^my_file\.mojom:2: Error: Fixed array size 999999999999 invalid:\n"
+            r" *array<int32, 999999999999> too_big_array;$"):
       parser.Parse(source2, "my_file.mojom")
 
     source3 = """\
         struct MyStruct {
-          int32[abcdefg] not_a_number;
+          array<int32, abcdefg> not_a_number;
         };
         """
     with self.assertRaisesRegexp(
         parser.ParseError,
         r"^my_file\.mojom:2: Error: Unexpected 'abcdefg':\n"
-        r" *int32\[abcdefg\] not_a_number;"):
+        r" *array<int32, abcdefg> not_a_number;"):
       parser.Parse(source3, "my_file.mojom")
+
+  def testValidAssociativeArrays(self):
+    """Tests that we can parse valid associative array structures."""
+
+    source1 = "struct MyStruct { map<string, uint8> data; };"
+    expected1 = ast.Mojom(
+        None,
+        ast.ImportList(),
+        [ast.Struct(
+            'MyStruct',
+            None,
+            ast.StructBody(
+                [ast.StructField('data', None, 'uint8{string}', None)]))])
+    self.assertEquals(parser.Parse(source1, "my_file.mojom"), expected1)
+
+    source2 = "interface MyInterface { MyMethod(map<string, uint8> a); };"
+    expected2 = ast.Mojom(
+        None,
+        ast.ImportList(),
+        [ast.Interface(
+            'MyInterface',
+            None,
+            ast.InterfaceBody(
+                ast.Method(
+                    'MyMethod',
+                    None,
+                    ast.ParameterList(
+                      ast.Parameter('a', None, 'uint8{string}')),
+                    None)))])
+    self.assertEquals(parser.Parse(source2, "my_file.mojom"), expected2)
+
+    source3 = "struct MyStruct { map<string, array<uint8>> data; };"
+    expected3 = ast.Mojom(
+        None,
+        ast.ImportList(),
+        [ast.Struct(
+            'MyStruct',
+            None,
+            ast.StructBody(
+                [ast.StructField('data', None, 'uint8[]{string}', None)]))])
+    self.assertEquals(parser.Parse(source3, "my_file.mojom"), expected3)
 
   def testValidMethod(self):
     """Tests parsing method declarations."""
@@ -917,7 +1002,7 @@ class ParserTest(unittest.TestCase):
     """Tests parsing import statements."""
 
     # One import (no module statement).
-    source1 = "import \"somedir/my.mojom\""
+    source1 = "import \"somedir/my.mojom\";"
     expected1 = ast.Mojom(
         None,
         ast.ImportList(ast.Import("somedir/my.mojom")),
@@ -926,8 +1011,8 @@ class ParserTest(unittest.TestCase):
 
     # Two imports (no module statement).
     source2 = """\
-        import "somedir/my1.mojom"
-        import "somedir/my2.mojom"
+        import "somedir/my1.mojom";
+        import "somedir/my2.mojom";
         """
     expected2 = ast.Mojom(
         None,
@@ -938,9 +1023,9 @@ class ParserTest(unittest.TestCase):
 
     # Imports with module statement.
     source3 = """\
-        import "somedir/my1.mojom"
-        import "somedir/my2.mojom"
-        module my_module {}
+        module my_module;
+        import "somedir/my1.mojom";
+        import "somedir/my2.mojom";
         """
     expected3 = ast.Mojom(
         ast.Module(('IDENTIFIER', 'my_module'), None),
@@ -964,13 +1049,27 @@ class ParserTest(unittest.TestCase):
 
     source2 = """\
         import  // Missing string.
-        module {}
+        struct MyStruct {
+          int32 a;
+        };
         """
     with self.assertRaisesRegexp(
         parser.ParseError,
-        r"^my_file\.mojom:2: Error: Unexpected 'module':\n"
-            r" *module {}$"):
+        r"^my_file\.mojom:2: Error: Unexpected 'struct':\n"
+            r" *struct MyStruct {$"):
       parser.Parse(source2, "my_file.mojom")
+
+    source3 = """\
+        import "foo.mojom"  // Missing semicolon.
+        struct MyStruct {
+          int32 a;
+        };
+        """
+    with self.assertRaisesRegexp(
+        parser.ParseError,
+        r"^my_file\.mojom:2: Error: Unexpected 'struct':\n"
+            r" *struct MyStruct {$"):
+      parser.Parse(source3, "my_file.mojom")
 
   def testValidNullableTypes(self):
     """Tests parsing nullable types."""
@@ -980,11 +1079,11 @@ class ParserTest(unittest.TestCase):
           int32? a;  // This is actually invalid, but handled at a different
                      // level.
           string? b;
-          int32[] ? c;
-          string ? [] ? d;
-          int32[]?[]? e;
-          int32[1]? f;
-          string?[1]? g;
+          array<int32> ? c;
+          array<string ? > ? d;
+          array<array<int32>?>? e;
+          array<int32, 1>? f;
+          array<string?, 1>? g;
           some_struct? h;
           handle? i;
           handle<data_pipe_consumer>? j;

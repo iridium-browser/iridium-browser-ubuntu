@@ -13,9 +13,6 @@
 #include "base/task/cancelable_task_tracker.h"
 #include "base/time/time.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "chrome/browser/favicon/chrome_favicon_client.h"
-#include "chrome/browser/favicon/chrome_favicon_client_factory.h"
-#include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/history/android/android_history_provider_service.h"
 #include "chrome/browser/history/android/android_time.h"
 #include "chrome/browser/history/history_service.h"
@@ -55,7 +52,7 @@ class SQLiteCursorTest : public testing::Test,
   }
 
  protected:
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     // Setup the testing profile, so the bookmark_model_sql_handler could
     // get the bookmark model from it.
     ASSERT_TRUE(profile_manager_.SetUp());
@@ -65,7 +62,7 @@ class SQLiteCursorTest : public testing::Test,
         chrome::kInitialProfile);
 
     testing_profile_->CreateBookmarkModel(true);
-    test::WaitForBookmarkModelToLoad(
+    bookmarks::test::WaitForBookmarkModelToLoad(
         BookmarkModelFactory::GetForProfile(testing_profile_));
 
     testing_profile_->CreateFaviconService();
@@ -75,26 +72,26 @@ class SQLiteCursorTest : public testing::Test,
                                                Profile::EXPLICIT_ACCESS);
   }
 
-  virtual void TearDown() OVERRIDE {
+  virtual void TearDown() override {
     testing_profile_->DestroyHistoryService();
     profile_manager_.DeleteTestingProfile(chrome::kInitialProfile);
     testing_profile_ = NULL;
   }
 
   // Override SQLiteCursor::TestObserver.
-  virtual void OnPostMoveToTask() OVERRIDE {
+  virtual void OnPostMoveToTask() override {
     base::MessageLoop::current()->Run();
   }
 
-  virtual void OnGetMoveToResult() OVERRIDE {
+  virtual void OnGetMoveToResult() override {
     base::MessageLoop::current()->Quit();
   }
 
-  virtual void OnPostGetFaviconTask() OVERRIDE {
+  virtual void OnPostGetFaviconTask() override {
     base::MessageLoop::current()->Run();
   }
 
-  virtual void OnGetFaviconResult() OVERRIDE {
+  virtual void OnGetFaviconResult() override {
     base::MessageLoop::current()->Quit();
   }
 
@@ -203,13 +200,8 @@ TEST_F(SQLiteCursorTest, Run) {
   column_names.push_back(HistoryAndBookmarkRow::GetAndroidName(
       HistoryAndBookmarkRow::FAVICON));
 
-  FaviconClient* favicon_client =
-      ChromeFaviconClientFactory::GetForProfile(testing_profile_);
-  FaviconService* favicon_service =
-      new FaviconService(testing_profile_, favicon_client);
-
   SQLiteCursor* cursor = new SQLiteCursor(column_names, statement,
-      service_.get(), favicon_service);
+      service_.get());
   cursor->set_test_observer(this);
   JNIEnv* env = base::android::AttachCurrentThread();
   EXPECT_EQ(1, cursor->GetCount(env, NULL));

@@ -10,6 +10,7 @@
 #include "third_party/WebKit/public/platform/WebCredential.h"
 #include "third_party/WebKit/public/platform/WebCredentialManagerClient.h"
 #include "third_party/WebKit/public/platform/WebCredentialManagerError.h"
+#include "third_party/WebKit/public/platform/WebLocalCredential.h"
 
 namespace password_manager {
 
@@ -19,15 +20,15 @@ class CredentialManagerClientTest : public content::RenderViewTest {
  public:
   CredentialManagerClientTest()
       : callback_errored_(false), callback_succeeded_(false) {}
-  virtual ~CredentialManagerClientTest() {}
+  ~CredentialManagerClientTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     content::RenderViewTest::SetUp();
-    credential_.reset(new blink::WebCredential("", "", GURL()));
+    credential_.reset(new blink::WebLocalCredential("", "", GURL(), ""));
     client_.reset(new CredentialManagerClient(view_));
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     credential_.reset();
     content::RenderViewTest::TearDown();
   }
@@ -101,7 +102,7 @@ class CredentialManagerClientTest : public content::RenderViewTest {
   bool callback_errored_;
   bool callback_succeeded_;
 
-  scoped_ptr<blink::WebCredential> credential_;
+  scoped_ptr<blink::WebLocalCredential> credential_;
 };
 
 class TestNotificationCallbacks
@@ -112,9 +113,9 @@ class TestNotificationCallbacks
 
   virtual ~TestNotificationCallbacks() {}
 
-  virtual void onSuccess() OVERRIDE { test_->set_callback_succeeded(true); }
+  virtual void onSuccess() { test_->set_callback_succeeded(true); }
 
-  virtual void onError(blink::WebCredentialManagerError* reason) OVERRIDE {
+  virtual void onError(blink::WebCredentialManagerError* reason) {
     test_->set_callback_errored(true);
   }
 
@@ -130,11 +131,11 @@ class TestRequestCallbacks
 
   virtual ~TestRequestCallbacks() {}
 
-  virtual void onSuccess(blink::WebCredential*) OVERRIDE {
+  virtual void onSuccess(blink::WebCredential*) {
     test_->set_callback_succeeded(true);
   }
 
-  virtual void onError(blink::WebCredentialManagerError* reason) OVERRIDE {
+  virtual void onError(blink::WebCredentialManagerError* reason) {
     test_->set_callback_errored(true);
   }
 
@@ -208,6 +209,25 @@ TEST_F(CredentialManagerClientTest, SendRequestCredential) {
                                request_id));
 
   CredentialInfo info;
+  info.type = CREDENTIAL_TYPE_LOCAL;
+  client_->OnSendCredential(request_id, info);
+  EXPECT_TRUE(callback_succeeded());
+  EXPECT_FALSE(callback_errored());
+}
+
+TEST_F(CredentialManagerClientTest, SendRequestCredentialEmpty) {
+  int request_id;
+  EXPECT_FALSE(ExtractRequestId(CredentialManagerHostMsg_RequestCredential::ID,
+                                request_id));
+
+  scoped_ptr<TestRequestCallbacks> callbacks(new TestRequestCallbacks(this));
+  std::vector<GURL> federations;
+  client_->dispatchRequest(false, federations, callbacks.release());
+
+  EXPECT_TRUE(ExtractRequestId(CredentialManagerHostMsg_RequestCredential::ID,
+                               request_id));
+
+  CredentialInfo info; // Send an empty credential in response.
   client_->OnSendCredential(request_id, info);
   EXPECT_TRUE(callback_succeeded());
   EXPECT_FALSE(callback_errored());

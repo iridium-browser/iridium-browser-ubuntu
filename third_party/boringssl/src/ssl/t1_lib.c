@@ -140,7 +140,8 @@ SSL3_ENC_METHOD TLSv1_enc_data={
 	0,
 	SSL3_HM_HEADER_LENGTH,
 	ssl3_set_handshake_header,
-	ssl3_handshake_write
+	ssl3_handshake_write,
+	ssl3_add_to_finished_hash,
 	};
 
 SSL3_ENC_METHOD TLSv1_1_enc_data={
@@ -159,7 +160,8 @@ SSL3_ENC_METHOD TLSv1_1_enc_data={
 	SSL_ENC_FLAG_EXPLICIT_IV,
 	SSL3_HM_HEADER_LENGTH,
 	ssl3_set_handshake_header,
-	ssl3_handshake_write
+	ssl3_handshake_write,
+	ssl3_add_to_finished_hash,
 	};
 
 SSL3_ENC_METHOD TLSv1_2_enc_data={
@@ -179,7 +181,8 @@ SSL3_ENC_METHOD TLSv1_2_enc_data={
 		|SSL_ENC_FLAG_TLS1_2_CIPHERS,
 	SSL3_HM_HEADER_LENGTH,
 	ssl3_set_handshake_header,
-	ssl3_handshake_write
+	ssl3_handshake_write,
+	ssl3_add_to_finished_hash,
 	};
 
 static int compare_uint16_t(const void *p1, const void *p2)
@@ -432,16 +435,17 @@ uint16_t tls1_ec_nid2curve_id(int nid)
 	return 0;
 	}
 
-/* tls1_get_curvelist sets |*out_curve_ids| and |*out_curve_ids_len| to the list
- * of allowed curve IDs. If |get_client_curves| is non-zero, return the client
- * curve list. Otherwise, return the preferred list. */
-static void tls1_get_curvelist(SSL *s, int get_client_curves,
+/* tls1_get_curvelist sets |*out_curve_ids| and |*out_curve_ids_len|
+ * to the list of allowed curve IDs. If |get_peer_curves| is non-zero,
+ * return the peer's curve list. Otherwise, return the preferred
+ * list. */
+static void tls1_get_curvelist(SSL *s, int get_peer_curves,
 	const uint16_t **out_curve_ids, size_t *out_curve_ids_len)
 	{
-	if (get_client_curves)
+	if (get_peer_curves)
 		{
-		*out_curve_ids = s->session->tlsext_ellipticcurvelist;
-		*out_curve_ids_len = s->session->tlsext_ellipticcurvelist_length;
+		*out_curve_ids = s->s3->tmp.peer_ellipticcurvelist;
+		*out_curve_ids_len = s->s3->tmp.peer_ellipticcurvelist_length;
 		return;
 		}
 
@@ -585,42 +589,48 @@ static int tls1_curve_params_from_ec_key(uint16_t *out_curve_id, uint8_t *out_co
 	return 1;
 	}
 
-/* Check an EC key is compatible with extensions */
-static int tls1_check_ec_key(SSL *s,
-	const uint16_t *curve_id, const uint8_t *comp_id)
+/* tls1_check_point_format returns one if |comp_id| is consistent with the
+ * peer's point format preferences. */
+static int tls1_check_point_format(SSL *s, uint8_t comp_id)
+	{
+	uint8_t *p = s->s3->tmp.peer_ecpointformatlist;
+	size_t plen = s->s3->tmp.peer_ecpointformatlist_length;
+	size_t i;
+
+	/* If point formats extension present check it, otherwise everything
+	 * is supported (see RFC4492). */
+	if (p == NULL)
+		return 1;
+
+	for (i = 0; i < plen; i++)
+		{
+		if (comp_id == p[i])
+			return 1;
+		}
+	return 0;
+	}
+
+/* tls1_check_curve_id returns one if |curve_id| is consistent with both our and
+ * the peer's curve preferences. Note: if called as the client, only our
+ * preferences are checked; the peer (the server) does not send preferences. */
+static int tls1_check_curve_id(SSL *s, uint16_t curve_id)
 	{
 	const uint16_t *curves;
-	size_t curves_len, i;
-	int j;
-	/* If point formats extension present check it, otherwise everything
-	 * is supported (see RFC4492).
-	 */
-	if (comp_id && s->session->tlsext_ecpointformatlist)
-		{
-		uint8_t *p = s->session->tlsext_ecpointformatlist;
-		size_t plen = s->session->tlsext_ecpointformatlist_length;
-		for (i = 0; i < plen; i++)
-			{
-			if (*comp_id == p[i])
-				break;
-			}
-		if (i == plen)
-			return 0;
-		}
-	if (!curve_id)
-		return 1;
-	/* Check curve is consistent with client and server preferences */
+	size_t curves_len, i, j;
+
+	/* Check against our list, then the peer's list. */
 	for (j = 0; j <= 1; j++)
 		{
 		tls1_get_curvelist(s, j, &curves, &curves_len);
 		for (i = 0; i < curves_len; i++)
 			{
-			if (curves[i] == *curve_id)
+			if (curves[i] == curve_id)
 				break;
 			}
 		if (i == curves_len)
 			return 0;
-		/* For clients can only check sent curve list */
+		/* Servers do not present a preference list so, if we are a
+		 * client, only check our list. */
 		if (!s->server)
 			return 1;
 		}
@@ -667,20 +677,17 @@ static int tls1_check_cert_param(SSL *s, X509 *x, int set_ee_md)
 	if (!rv)
 		return 0;
 	/* Can't check curve_id for client certs as we don't have a
-	 * supported curves extension.
-	 */
-	return tls1_check_ec_key(s, s->server ? &curve_id : NULL, &comp_id);
+	 * supported curves extension. */
+	if (s->server && !tls1_check_curve_id(s, curve_id))
+		return 0;
+	return tls1_check_point_format(s, comp_id);
 	}
+
 /* Check EC temporary key is compatible with client extensions */
-int tls1_check_ec_tmp_key(SSL *s, unsigned long cid)
+int tls1_check_ec_tmp_key(SSL *s)
 	{
 	uint16_t curve_id;
 	EC_KEY *ec = s->cert->ecdh_tmp;
-#ifdef OPENSSL_SSL_DEBUG_BROKEN_PROTOCOL
-	/* Allow any curve: not just those peer supports */
-	if (s->cert->cert_flags & SSL_CERT_FLAG_BROKEN_PROTOCOL)
-		return 1;
-#endif
 	if (s->cert->ecdh_tmp_auto)
 		{
 		/* Need a shared curve */
@@ -693,14 +700,8 @@ int tls1_check_ec_tmp_key(SSL *s, unsigned long cid)
 		else
 			return 0;
 		}
-	if (!tls1_curve_params_from_ec_key(&curve_id, NULL, ec))
-		return 0;
-/* Set this to allow use of invalid curves for testing */
-#if 0
-	return 1;
-#else
-	return tls1_check_ec_key(s, &curve_id, NULL);
-#endif
+	return tls1_curve_params_from_ec_key(&curve_id, NULL, ec) &&
+		tls1_check_curve_id(s, curve_id);
 	}
 
 
@@ -788,11 +789,15 @@ int tls12_check_peer_sigalg(const EVP_MD **out_md, int *out_alert,
 			*out_alert = SSL_AD_INTERNAL_ERROR;
 			return 0;
 			}
-		if (!s->server && !tls1_check_ec_key(s, &curve_id, &comp_id))
+		if (s->server)
 			{
-			OPENSSL_PUT_ERROR(SSL, tls12_check_peer_sigalg, SSL_R_WRONG_CURVE);
-			*out_alert = SSL_AD_ILLEGAL_PARAMETER;
-			return 0;
+			if (!tls1_check_curve_id(s, curve_id) ||
+				!tls1_check_point_format(s, comp_id))
+				{
+				OPENSSL_PUT_ERROR(SSL, tls12_check_peer_sigalg, SSL_R_WRONG_CURVE);
+				*out_alert = SSL_AD_ILLEGAL_PARAMETER;
+				return 0;
+				}
 			}
 		}
 
@@ -892,7 +897,7 @@ unsigned char *ssl_add_clienthello_tlsext(SSL *s, unsigned char *buf, unsigned c
 	int using_ecc = 0;
 	if (s->version >= TLS1_VERSION || SSL_IS_DTLS(s))
 		{
-		int i;
+		size_t i;
 		unsigned long alg_k, alg_a;
 		STACK_OF(SSL_CIPHER) *cipher_stack = SSL_get_ciphers(s);
 
@@ -975,6 +980,15 @@ unsigned char *ssl_add_clienthello_tlsext(SSL *s, unsigned char *buf, unsigned c
 
           ret += el;
         }
+
+	/* Add extended master secret. */
+	if (s->version != SSL3_VERSION)
+		{
+		if (limit - ret - 4 < 0)
+			return NULL;
+		s2n(TLSEXT_TYPE_extended_master_secret,ret);
+		s2n(0,ret);
+		}
 
 	if (!(SSL_get_options(s) & SSL_OP_NO_TICKET))
 		{
@@ -1204,7 +1218,7 @@ unsigned char *ssl_add_serverhello_tlsext(SSL *s, unsigned char *buf, unsigned c
 	unsigned long alg_k = s->s3->tmp.new_cipher->algorithm_mkey;
 	unsigned long alg_a = s->s3->tmp.new_cipher->algorithm_auth;
 	int using_ecc = (alg_k & SSL_kEECDH) || (alg_a & SSL_aECDSA);
-	using_ecc = using_ecc && (s->session->tlsext_ecpointformatlist != NULL);
+	using_ecc = using_ecc && (s->s3->tmp.peer_ecpointformatlist != NULL);
 	/* don't add extensions for SSLv3, unless doing secure renegotiation */
 	if (s->version == SSL3_VERSION && !s->s3->send_connection_binding)
 		return orig;
@@ -1243,6 +1257,14 @@ unsigned char *ssl_add_serverhello_tlsext(SSL *s, unsigned char *buf, unsigned c
 
           ret += el;
         }
+
+	if (s->s3->tmp.extended_master_secret)
+		{
+		if ((long)(limit - ret - 4) < 0) return NULL;
+
+		s2n(TLSEXT_TYPE_extended_master_secret,ret);
+		s2n(0,ret);
+		}
 
 	if (using_ecc)
 		{
@@ -1421,6 +1443,7 @@ static int ssl_scan_clienthello_tlsext(SSL *s, CBS *cbs, int *out_alert)
 	s->should_ack_sni = 0;
 	s->s3->next_proto_neg_seen = 0;
 	s->s3->tmp.certificate_status_expected = 0;
+	s->s3->tmp.extended_master_secret = 0;
 
 	if (s->s3->alpn_selected)
 		{
@@ -1434,7 +1457,7 @@ static int ssl_scan_clienthello_tlsext(SSL *s, CBS *cbs, int *out_alert)
 		OPENSSL_free(s->cert->peer_sigalgs);
 		s->cert->peer_sigalgs = NULL;
 		}
-	/* Clear any shared sigtnature algorithms */
+	/* Clear any shared signature algorithms */
 	if (s->cert->shared_sigalgs)
 		{
 		OPENSSL_free(s->cert->shared_sigalgs);
@@ -1445,6 +1468,19 @@ static int ssl_scan_clienthello_tlsext(SSL *s, CBS *cbs, int *out_alert)
 		{
 		s->cert->pkeys[i].digest = NULL;
 		s->cert->pkeys[i].valid_flags = 0;
+		}
+	/* Clear ECC extensions */
+	if (s->s3->tmp.peer_ecpointformatlist != 0)
+		{
+		OPENSSL_free(s->s3->tmp.peer_ecpointformatlist);
+		s->s3->tmp.peer_ecpointformatlist = NULL;
+		s->s3->tmp.peer_ecpointformatlist_length = 0;
+		}
+	if (s->s3->tmp.peer_ellipticcurvelist != 0)
+		{
+		OPENSSL_free(s->s3->tmp.peer_ellipticcurvelist);
+		s->s3->tmp.peer_ellipticcurvelist = NULL;
+		s->s3->tmp.peer_ellipticcurvelist_length = 0;
 		}
 
 	/* There may be no extensions. */
@@ -1591,15 +1627,12 @@ static int ssl_scan_clienthello_tlsext(SSL *s, CBS *cbs, int *out_alert)
 				return 0;
 				}
 
-			if (!s->hit)
+			if (!CBS_stow(&ec_point_format_list,
+					&s->s3->tmp.peer_ecpointformatlist,
+					&s->s3->tmp.peer_ecpointformatlist_length))
 				{
-				if (!CBS_stow(&ec_point_format_list,
-						&s->session->tlsext_ecpointformatlist,
-						&s->session->tlsext_ecpointformatlist_length))
-					{
-					*out_alert = SSL_AD_INTERNAL_ERROR;
-					return 0;
-					}
+				*out_alert = SSL_AD_INTERNAL_ERROR;
+				return 0;
 				}
 			}
 		else if (type == TLSEXT_TYPE_elliptic_curves)
@@ -1616,37 +1649,34 @@ static int ssl_scan_clienthello_tlsext(SSL *s, CBS *cbs, int *out_alert)
 				return 0;
 				}
 
-			if (!s->hit)
+			if (s->s3->tmp.peer_ellipticcurvelist)
 				{
-				if (s->session->tlsext_ellipticcurvelist)
-					{
-					OPENSSL_free(s->session->tlsext_ellipticcurvelist);
-					s->session->tlsext_ellipticcurvelist_length = 0;
-					}
-				s->session->tlsext_ellipticcurvelist =
-					(uint16_t*)OPENSSL_malloc(CBS_len(&elliptic_curve_list));
-				if (s->session->tlsext_ellipticcurvelist == NULL)
-					{
-					*out_alert = SSL_AD_INTERNAL_ERROR;
-					return 0;
-					}
-				num_curves = CBS_len(&elliptic_curve_list) / 2;
-				for (i = 0; i < num_curves; i++)
-					{
-					if (!CBS_get_u16(&elliptic_curve_list,
-							&s->session->tlsext_ellipticcurvelist[i]))
-						{
-						*out_alert = SSL_AD_INTERNAL_ERROR;
-						return 0;
-						}
-					}
-				if (CBS_len(&elliptic_curve_list) != 0)
-					{
-					*out_alert = SSL_AD_INTERNAL_ERROR;
-					return 0;
-					}
-				s->session->tlsext_ellipticcurvelist_length = num_curves;
+				OPENSSL_free(s->s3->tmp.peer_ellipticcurvelist);
+				s->s3->tmp.peer_ellipticcurvelist_length = 0;
 				}
+			s->s3->tmp.peer_ellipticcurvelist =
+				(uint16_t*)OPENSSL_malloc(CBS_len(&elliptic_curve_list));
+			if (s->s3->tmp.peer_ellipticcurvelist == NULL)
+					{
+					*out_alert = SSL_AD_INTERNAL_ERROR;
+					return 0;
+					}
+			num_curves = CBS_len(&elliptic_curve_list) / 2;
+			for (i = 0; i < num_curves; i++)
+				{
+				if (!CBS_get_u16(&elliptic_curve_list,
+						&s->s3->tmp.peer_ellipticcurvelist[i]))
+					{
+					*out_alert = SSL_AD_INTERNAL_ERROR;
+					return 0;
+					}
+				}
+			if (CBS_len(&elliptic_curve_list) != 0)
+				{
+				*out_alert = SSL_AD_INTERNAL_ERROR;
+				return 0;
+				}
+			s->s3->tmp.peer_ellipticcurvelist_length = num_curves;
 			}
 		else if (type == TLSEXT_TYPE_session_ticket)
 			{
@@ -1773,6 +1803,18 @@ static int ssl_scan_clienthello_tlsext(SSL *s, CBS *cbs, int *out_alert)
 			if (!ssl_parse_clienthello_use_srtp_ext(s, &extension, out_alert))
 				return 0;
                         }
+
+		else if (type == TLSEXT_TYPE_extended_master_secret &&
+			 s->version != SSL3_VERSION)
+			{
+			if (CBS_len(&extension) != 0)
+				{
+				*out_alert = SSL_AD_DECODE_ERROR;
+				return 0;
+				}
+
+			s->s3->tmp.extended_master_secret = 1;
+			}
 		}
 
 	ri_check:
@@ -1842,11 +1884,20 @@ static int ssl_scan_serverhello_tlsext(SSL *s, CBS *cbs, int *out_alert)
 
 	s->tlsext_ticket_expected = 0;
 	s->s3->tmp.certificate_status_expected = 0;
+	s->s3->tmp.extended_master_secret = 0;
 
 	if (s->s3->alpn_selected)
 		{
 		OPENSSL_free(s->s3->alpn_selected);
 		s->s3->alpn_selected = NULL;
+		}
+
+	/* Clear ECC extensions */
+	if (s->s3->tmp.peer_ecpointformatlist != 0)
+		{
+		OPENSSL_free(s->s3->tmp.peer_ecpointformatlist);
+		s->s3->tmp.peer_ecpointformatlist = NULL;
+		s->s3->tmp.peer_ecpointformatlist_length = 0;
 		}
 
 	/* There may be no extensions. */
@@ -1909,15 +1960,12 @@ static int ssl_scan_serverhello_tlsext(SSL *s, CBS *cbs, int *out_alert)
 				return 0;
 				}
 
-			if (!s->hit)
+			if (!CBS_stow(&ec_point_format_list,
+					&s->s3->tmp.peer_ecpointformatlist,
+					&s->s3->tmp.peer_ecpointformatlist_length))
 				{
-				if (!CBS_stow(&ec_point_format_list,
-						&s->session->tlsext_ecpointformatlist,
-						&s->session->tlsext_ecpointformatlist_length))
-					{
-					*out_alert = SSL_AD_INTERNAL_ERROR;
-					return 0;
-					}
+				*out_alert = SSL_AD_INTERNAL_ERROR;
+				return 0;
 				}
 			}
 		else if (type == TLSEXT_TYPE_session_ticket)
@@ -2072,6 +2120,20 @@ static int ssl_scan_serverhello_tlsext(SSL *s, CBS *cbs, int *out_alert)
                         if (!ssl_parse_serverhello_use_srtp_ext(s, &extension, out_alert))
                                 return 0;
                         }
+
+		else if (type == TLSEXT_TYPE_extended_master_secret)
+			{
+			if (/* It is invalid for the server to select EMS and
+			       SSLv3. */
+			    s->version == SSL3_VERSION ||
+			    CBS_len(&extension) != 0)
+				{
+				*out_alert = SSL_AD_DECODE_ERROR;
+				return 0;
+				}
+
+			s->s3->tmp.extended_master_secret = 1;
+			}
 		}
 
 	if (!s->hit && tlsext_servername == 1)
@@ -2174,28 +2236,11 @@ static int ssl_check_serverhello_tlsext(SSL *s)
 	 */
 	unsigned long alg_k = s->s3->tmp.new_cipher->algorithm_mkey;
 	unsigned long alg_a = s->s3->tmp.new_cipher->algorithm_auth;
-	if ((s->tlsext_ecpointformatlist != NULL) && (s->tlsext_ecpointformatlist_length > 0) && 
-	    (s->session->tlsext_ecpointformatlist != NULL) && (s->session->tlsext_ecpointformatlist_length > 0) && 
-	    ((alg_k & SSL_kEECDH) || (alg_a & SSL_aECDSA)))
+	if (((alg_k & SSL_kEECDH) || (alg_a & SSL_aECDSA)) &&
+		!tls1_check_point_format(s, TLSEXT_ECPOINTFORMAT_uncompressed))
 		{
-		/* we are using an ECC cipher */
-		size_t i;
-		unsigned char *list;
-		int found_uncompressed = 0;
-		list = s->session->tlsext_ecpointformatlist;
-		for (i = 0; i < s->session->tlsext_ecpointformatlist_length; i++)
-			{
-			if (*(list++) == TLSEXT_ECPOINTFORMAT_uncompressed)
-				{
-				found_uncompressed = 1;
-				break;
-				}
-			}
-		if (!found_uncompressed)
-			{
-			OPENSSL_PUT_ERROR(SSL, ssl_check_serverhello_tlsext, SSL_R_TLS_INVALID_ECPOINTFORMAT_LIST);
-			return -1;
-			}
+		OPENSSL_PUT_ERROR(SSL, ssl_check_serverhello_tlsext, SSL_R_TLS_INVALID_ECPOINTFORMAT_LIST);
+		return -1;
 		}
 	ret = SSL_TLSEXT_ERR_OK;
 
@@ -2394,7 +2439,10 @@ static int tls_decrypt_ticket(SSL *s, const unsigned char *etick, int eticklen,
 	HMAC_Final(&hctx, tick_hmac, NULL);
 	HMAC_CTX_cleanup(&hctx);
 	if (CRYPTO_memcmp(tick_hmac, etick + eticklen, mlen))
+		{
+		EVP_CIPHER_CTX_cleanup(&ctx);
 		return 2;
+		}
 	/* Attempt to decrypt session data */
 	/* Move p after IV to start of encrypted ticket, update length */
 	p = etick + 16 + EVP_CIPHER_CTX_iv_length(&ctx);
@@ -2687,32 +2735,6 @@ int tls1_process_sigalgs(SSL *s, const CBS *sigalgs)
 
 	tls1_set_shared_sigalgs(s);
 
-#ifdef OPENSSL_SSL_DEBUG_BROKEN_PROTOCOL
-	if (s->cert->cert_flags & SSL_CERT_FLAG_BROKEN_PROTOCOL)
-		{
-		/* Use first set signature preference to force message
-		 * digest, ignoring any peer preferences.
-		 */
-		const unsigned char *sigs = NULL;
-		if (s->server)
-			sigs = c->conf_sigalgs;
-		else
-			sigs = c->client_sigalgs;
-		if (sigs)
-			{
-			idx = tls12_get_pkey_idx(sigs[1]);
-			md = tls12_get_hash(sigs[0]);
-			c->pkeys[idx].digest = md;
-			c->pkeys[idx].valid_flags = CERT_PKEY_EXPLICIT_SIGN;
-			if (idx == SSL_PKEY_RSA_SIGN)
-				{
-				c->pkeys[SSL_PKEY_RSA_ENC].valid_flags = CERT_PKEY_EXPLICIT_SIGN;
-				c->pkeys[SSL_PKEY_RSA_ENC].digest = md;
-				}
-			}
-		}
-#endif
-
 	for (i = 0, sigptr = c->shared_sigalgs;
 			i < c->shared_sigalgslen; i++, sigptr++)
 		{
@@ -2805,7 +2827,7 @@ tls1_channel_id_hash(EVP_MD_CTX *md, SSL *s)
 	static const char kClientIDMagic[] = "TLS Channel ID signature";
 
 	if (s->s3->handshake_buffer)
-		if (!ssl3_digest_cached_records(s))
+		if (!ssl3_digest_cached_records(s, free_handshake_buffer))
 			return 0;
 
 	EVP_DigestUpdate(md, kClientIDMagic, sizeof(kClientIDMagic));
@@ -2924,7 +2946,7 @@ static int tls1_check_sig_alg(CERT *c, X509 *x, int default_nid)
 static int ssl_check_ca_name(STACK_OF(X509_NAME) *names, X509 *x)
 	{
 	X509_NAME *nm;
-	int i;
+	size_t i;
 	nm = X509_get_issuer_name(x);
 	for (i = 0; i < sk_X509_NAME_num(names); i++)
 		{
@@ -2952,7 +2974,7 @@ static int ssl_check_ca_name(STACK_OF(X509_NAME) *names, X509 *x)
 int tls1_check_chain(SSL *s, X509 *x, EVP_PKEY *pk, STACK_OF(X509) *chain,
 									int idx)
 	{
-	int i;
+	size_t i;
 	int rv = 0;
 	int check_flags = 0, strict_mode;
 	CERT_PKEY *cpk = NULL;
@@ -2975,15 +2997,6 @@ int tls1_check_chain(SSL *s, X509 *x, EVP_PKEY *pk, STACK_OF(X509) *chain,
 		/* If no cert or key, forget it */
 		if (!x || !pk)
 			goto end;
-#ifdef OPENSSL_SSL_DEBUG_BROKEN_PROTOCOL
-		/* Allow any certificate to pass test */
-		if (s->cert->cert_flags & SSL_CERT_FLAG_BROKEN_PROTOCOL)
-			{
-			rv = CERT_PKEY_STRICT_FLAGS|CERT_PKEY_EXPLICIT_SIGN|CERT_PKEY_VALID|CERT_PKEY_SIGN;
-			cpk->valid_flags = rv;
-			return rv;
-			}
-#endif
 		}
 	else
 		{

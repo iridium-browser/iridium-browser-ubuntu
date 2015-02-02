@@ -12,7 +12,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
 #include "chrome/browser/net/dns_probe_runner.h"
-#include "chrome/common/net/net_error_info.h"
+#include "components/error_page/common/net_error_info.h"
 #include "net/base/network_change_notifier.h"
 
 namespace net {
@@ -33,12 +33,12 @@ class DnsProbeService : public net::NetworkChangeNotifier::DNSObserver {
       ProbeCallback;
 
   DnsProbeService();
-  virtual ~DnsProbeService();
+  ~DnsProbeService() override;
 
   virtual void ProbeDns(const ProbeCallback& callback);
 
   // NetworkChangeNotifier::DNSObserver implementation:
-  virtual void OnDNSChanged() OVERRIDE;
+  void OnDNSChanged() override;
 
   void SetSystemClientForTesting(scoped_ptr<net::DnsClient> system_client);
   void SetPublicClientForTesting(scoped_ptr<net::DnsClient> public_client);

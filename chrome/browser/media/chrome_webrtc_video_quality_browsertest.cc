@@ -26,7 +26,6 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "components/infobars/core/infobar.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/browser_test_utils.h"
@@ -102,13 +101,13 @@ class WebRtcVideoQualityBrowserTest : public WebRtcTestBase,
     test_config_ = GetParam();
   }
 
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
+  void SetUpInProcessBrowserTestFixture() override {
     DetectErrorsInJavaScript();  // Look for errors in our rather complex js.
 
     ASSERT_TRUE(temp_working_dir_.CreateUniqueTempDir());
   }
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     // Set up the command line option with the expected file name. We will check
     // its existence in HasAllRequiredResources().
     webrtc_reference_video_y4m_ = test::GetReferenceFilesDir()
@@ -179,10 +178,10 @@ class WebRtcVideoQualityBrowserTest : public WebRtcTestBase,
 
     // We produce an output file that will later be used as an input to the
     // barcode decoder and frame analyzer tools.
-    VLOG(0) << "Running " << converter_command.GetCommandLineString();
+    DVLOG(0) << "Running " << converter_command.GetCommandLineString();
     std::string result;
     bool ok = base::GetAppOutput(converter_command, &result);
-    VLOG(0) << "Output was:\n\n" << result;
+    DVLOG(0) << "Output was:\n\n" << result;
     return ok;
   }
 
@@ -238,7 +237,7 @@ class WebRtcVideoQualityBrowserTest : public WebRtcTestBase,
     compare_command.AppendArg("--stats_file");
     compare_command.AppendArgPath(stats_file);
 
-    VLOG(0) << "Running " << compare_command.GetCommandLineString();
+    DVLOG(0) << "Running " << compare_command.GetCommandLineString();
     std::string output;
     bool ok = base::GetAppOutput(compare_command, &output);
     // Print to stdout to ensure the perf numbers are parsed properly by the

@@ -40,6 +40,18 @@ COMPILE_ASSERT_MATCHING_ENUMS(V8_CACHE_OPTIONS_CODE,
 COMPILE_ASSERT_MATCHING_ENUMS(V8_CACHE_OPTIONS_LAST,
                               WebSettings::V8CacheOptionsCode);
 
+COMPILE_ASSERT_MATCHING_ENUMS(V8_SCRIPT_STREAMING_MODE_ALL,
+                              WebSettings::V8ScriptStreamingModeAll);
+COMPILE_ASSERT_MATCHING_ENUMS(
+    V8_SCRIPT_STREAMING_MODE_ONLY_ASYNC_AND_DEFER,
+    WebSettings::V8ScriptStreamingModeOnlyAsyncAndDefer);
+COMPILE_ASSERT_MATCHING_ENUMS(
+    V8_SCRIPT_STREAMING_MODE_ALL_PLUS_BLOCK_PARSER_BLOCKING,
+    WebSettings::V8ScriptStreamingModeAllPlusBlockParsingBlocking);
+COMPILE_ASSERT_MATCHING_ENUMS(
+    V8_SCRIPT_STREAMING_MODE_LAST,
+    WebSettings::V8ScriptStreamingModeAllPlusBlockParsingBlocking);
+
 WebPreferences::WebPreferences()
     : default_font_size(16),
       default_fixed_font_size(13),
@@ -89,10 +101,12 @@ WebPreferences::WebPreferences()
       accelerated_2d_canvas_enabled(false),
       minimum_accelerated_2d_canvas_size(257 * 256),
       antialiased_2d_canvas_disabled(false),
+      antialiased_clips_2d_canvas_enabled(false),
       accelerated_2d_canvas_msaa_sample_count(0),
       accelerated_filters_enabled(false),
       deferred_filters_enabled(false),
       container_culling_enabled(false),
+      text_blobs_enabled(false),
       allow_displaying_insecure_content(true),
       allow_running_insecure_content(false),
       password_echo_enabled(false),
@@ -107,6 +121,7 @@ WebPreferences::WebPreferences()
       pointer_events_max_touch_points(0),
       sync_xhr_in_documents_enabled(true),
       deferred_image_decoding_enabled(false),
+      image_color_profiles_enabled(false),
       should_respect_image_orientation(false),
       number_of_cpu_cores(1),
 #if defined(OS_MACOSX)
@@ -137,6 +152,8 @@ WebPreferences::WebPreferences()
       navigate_on_drag_drop(true),
       v8_cache_options(V8_CACHE_OPTIONS_OFF),
       v8_script_streaming_enabled(false),
+      v8_script_streaming_mode(V8_SCRIPT_STREAMING_MODE_ALL),
+      slimming_paint_enabled(false),
       cookie_enabled(true),
       pepper_accelerated_video_decode_enabled(false)
 #if defined(OS_ANDROID)
@@ -145,7 +162,6 @@ WebPreferences::WebPreferences()
       font_scale_factor(1.0f),
       device_scale_adjustment(1.0f),
       force_enable_zoom(false),
-      disallow_fullscreen_for_non_media_elements(false),
       fullscreen_supported(true),
       double_tap_to_zoom_enabled(true),
       user_gesture_required_for_media_playback(true),

@@ -72,7 +72,7 @@ def PushAndLaunchAdbReboot(device, target):
   logging.info('  Pushing adb_reboot ...')
   adb_reboot = os.path.join(constants.DIR_SOURCE_ROOT,
                             'out/%s/adb_reboot' % target)
-  device.PushChangedFiles(adb_reboot, '/data/local/tmp/')
+  device.PushChangedFiles([(adb_reboot, '/data/local/tmp/')])
   # Launch adb_reboot
   logging.info('  Launching adb_reboot ...')
   device.old_interface.GetAndroidToolStatusAndOutput(
@@ -190,9 +190,11 @@ def ProvisionDevice(device, options, is_perf):
                      battery_info.get('level', 0))
         time.sleep(60)
         battery_info = device.old_interface.GetBatteryInfo()
-    device.RunShellCommand('date -u %f' % time.time(), as_root=True)
     # TODO(jbudorick): Tune the timeout per OS version.
     device.Reboot(True, timeout=600, retries=0)
+    device.RunShellCommand('date -s %s' % time.strftime('%Y%m%d.%H%M%S',
+                                                        time.gmtime()),
+                           as_root=True)
     props = device.RunShellCommand('getprop')
     for prop in props:
       logging.info('  %s' % prop)
@@ -205,8 +207,8 @@ def ProvisionDevice(device, options, is_perf):
     # Device black list is reset by bb_device_status_check.py per build.
     device_blacklist.ExtendBlacklist([str(device)])
   except (device_errors.CommandFailedError):
-    logging.info('Failed to provision device %s. Adding to blacklist.',
-                 str(device))
+    logging.exception('Failed to provision device %s. Adding to blacklist.',
+                      str(device))
     device_blacklist.ExtendBlacklist([str(device)])
 
 

@@ -27,27 +27,26 @@ class IndexedDBQuotaClient : public storage::QuotaClient,
  public:
   CONTENT_EXPORT explicit IndexedDBQuotaClient(
       IndexedDBContextImpl* indexed_db_context);
-  CONTENT_EXPORT virtual ~IndexedDBQuotaClient();
+  CONTENT_EXPORT ~IndexedDBQuotaClient() override;
 
   // QuotaClient method overrides
-  virtual ID id() const OVERRIDE;
-  virtual void OnQuotaManagerDestroyed() OVERRIDE;
-  CONTENT_EXPORT virtual void GetOriginUsage(
-      const GURL& origin_url,
+  ID id() const override;
+  void OnQuotaManagerDestroyed() override;
+  CONTENT_EXPORT void GetOriginUsage(const GURL& origin_url,
+                                     storage::StorageType type,
+                                     const GetUsageCallback& callback) override;
+  CONTENT_EXPORT void GetOriginsForType(
       storage::StorageType type,
-      const GetUsageCallback& callback) OVERRIDE;
-  CONTENT_EXPORT virtual void GetOriginsForType(
-      storage::StorageType type,
-      const GetOriginsCallback& callback) OVERRIDE;
-  CONTENT_EXPORT virtual void GetOriginsForHost(
+      const GetOriginsCallback& callback) override;
+  CONTENT_EXPORT void GetOriginsForHost(
       storage::StorageType type,
       const std::string& host,
-      const GetOriginsCallback& callback) OVERRIDE;
-  CONTENT_EXPORT virtual void DeleteOriginData(
+      const GetOriginsCallback& callback) override;
+  CONTENT_EXPORT void DeleteOriginData(
       const GURL& origin,
       storage::StorageType type,
-      const DeletionCallback& callback) OVERRIDE;
-  virtual bool DoesSupport(storage::StorageType type) const OVERRIDE;
+      const DeletionCallback& callback) override;
+  bool DoesSupport(storage::StorageType type) const override;
 
  private:
   scoped_refptr<IndexedDBContextImpl> indexed_db_context_;

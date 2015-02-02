@@ -4,6 +4,8 @@
 
 {
   'variables': {
+    'android_support_v13_target%':
+        '../third_party/android_tools/android_tools.gyp:android_support_v13_javalib',
     'chromium_code': 1,
     'chromecast_branding%': 'Chromium',
   },
@@ -14,80 +16,17 @@
   },
   'targets': [
     {
-      'target_name': 'cast_common',
+      'target_name': 'cast_base',
       'type': '<(component)',
       'dependencies': [
         '../base/base.gyp:base',
       ],
       'sources': [
-        'common/cast_paths.cc',
-        'common/cast_paths.h',
-        'common/cast_resource_delegate.cc',
-        'common/cast_resource_delegate.h',
-        'common/chromecast_config.cc',
-        'common/chromecast_config.h',
-        'common/chromecast_switches.cc',
-        'common/chromecast_switches.h',
-        'common/pref_names.cc',
-        'common/pref_names.h',
+        'base/metrics/cast_histograms.h',
+        'base/metrics/cast_metrics_helper.cc',
+        'base/metrics/cast_metrics_helper.h',
       ],
-      'conditions': [
-        ['chromecast_branding=="Chrome"', {
-          'dependencies': [
-            'internal/chromecast_internal.gyp:cast_common_internal',
-          ],
-        }, {
-          'sources': [
-            'common/chromecast_config_simple.cc',
-          ],
-        }],
-      ],
-    },
-    {
-      'target_name': 'cast_metrics',
-      'type': '<(component)',
-      'dependencies': [
-        'cast_common',
-        '../components/components.gyp:component_metrics_proto',
-        '../components/components.gyp:metrics',
-        '../components/components.gyp:metrics_gpu',
-        '../components/components.gyp:metrics_net',
-        '../components/components.gyp:metrics_profiler',
-      ],
-      'sources': [
-        'metrics/cast_metrics_prefs.cc',
-        'metrics/cast_metrics_prefs.h',
-        'metrics/cast_metrics_service_client.cc',
-        'metrics/cast_metrics_service_client.h',
-        'metrics/platform_metrics_providers.h',
-      ],
-      'conditions': [
-        ['chromecast_branding=="Chrome"', {
-          'dependencies': [
-            '<(cast_internal_gyp):cast_metrics_internal',
-          ],
-        }, {
-          'sources': [
-            'metrics/platform_metrics_providers_simple.cc',
-          ],
-        }],
-      ],
-    },
-    {
-      'target_name': 'cast_metrics_unittests',
-      'type': '<(gtest_target_type)',
-      'dependencies': [
-        'cast_metrics',
-        '../base/base.gyp:base_prefs_test_support',
-        '../base/base.gyp:run_all_unittests',
-        '../base/base.gyp:test_support_base',
-        '../components/components.gyp:component_metrics_proto',
-        '../testing/gtest.gyp:gtest',
-      ],
-      'sources': [
-        'metrics/cast_metrics_service_client_unittest.cc',
-      ],
-    },  # end of target 'cast_metrics_unittests'
+    },  # end of target 'cast_base'
     {
       'target_name': 'cast_net',
       'type': '<(component)',
@@ -96,42 +35,6 @@
         'net/network_change_notifier_cast.h',
         'net/network_change_notifier_factory_cast.cc',
         'net/network_change_notifier_factory_cast.h',
-      ],
-    },
-    {
-      'target_name': 'cast_service',
-      'type': '<(component)',
-      'dependencies': [
-        '../skia/skia.gyp:skia',
-      ],
-      'sources': [
-        'service/cast_service.cc',
-        'service/cast_service.h',
-      ],
-      'conditions': [
-        ['chromecast_branding=="Chrome"', {
-          'dependencies': [
-            'internal/chromecast_internal.gyp:cast_service_internal',
-          ],
-        }, {
-          'dependencies': [
-            '../base/base.gyp:base',
-            '../content/content.gyp:content',
-          ],
-          'conditions': [
-            ['OS=="android"', {
-              'sources': [
-                'service/cast_service_android.cc',
-                'service/cast_service_android.h',
-              ],
-            }, {
-              'sources': [
-                'service/cast_service_simple.cc',
-                'service/cast_service_simple.h',
-              ],
-            }],
-          ],
-        }],
       ],
     },
     {
@@ -144,8 +47,8 @@
         {
           'action_name': 'cast_shell_resources',
           'variables': {
-            'grit_grd_file': 'shell/browser/resources/shell_resources.grd',
-            'grit_resource_ids': 'shell/browser/resources/resource_ids',
+            'grit_grd_file': 'app/resources/shell_resources.grd',
+            'grit_resource_ids': 'app/resources/resource_ids',
           },
           'includes': [ '../build/grit_action.gypi' ],
         },
@@ -159,7 +62,6 @@
         'cast_shell_resources',
         '../content/app/resources/content_resources.gyp:content_resources',
         '../content/app/strings/content_strings.gyp:content_strings',
-        '../content/browser/devtools/devtools_resources.gyp:devtools_resources',
         '../net/net.gyp:net_resources',
         '../third_party/WebKit/public/blink_resources.gyp:blink_resources',
         '../ui/resources/ui_resources.gyp:ui_resources',
@@ -180,7 +82,6 @@
               '<(SHARED_INTERMEDIATE_DIR)/ui/resources/webui_resources.pak',
               '<(SHARED_INTERMEDIATE_DIR)/ui/strings/app_locale_settings_en-US.pak',
               '<(SHARED_INTERMEDIATE_DIR)/ui/strings/ui_strings_en-US.pak',
-              '<(SHARED_INTERMEDIATE_DIR)/webkit/devtools_resources.pak',
             ],
             'pak_output': '<(PRODUCT_DIR)/assets/cast_shell.pak',
           },
@@ -194,17 +95,20 @@
       'target_name': 'cast_shell_common',
       'type': '<(component)',
       'dependencies': [
-        'cast_common',
-        'cast_metrics',
-        'cast_service',
+        'cast_base',
         'cast_shell_pak',
         'cast_shell_resources',
         'cast_version_header',
         'chromecast_locales.gyp:chromecast_locales_pak',
         'chromecast_locales.gyp:chromecast_settings',
         'media/media.gyp:media_base',
+        '../base/base.gyp:base',
         '../components/components.gyp:cdm_renderer',
         '../components/components.gyp:component_metrics_proto',
+        '../components/components.gyp:metrics',
+        '../components/components.gyp:metrics_gpu',
+        '../components/components.gyp:metrics_net',
+        '../components/components.gyp:metrics_profiler',
         '../content/content.gyp:content',
         '../content/content.gyp:content_app_browser',
         '../skia/skia.gyp:skia',
@@ -212,50 +116,125 @@
         '../third_party/widevine/cdm/widevine_cdm.gyp:widevine_cdm_version_h',
       ],
       'sources': [
-        'shell/app/cast_main_delegate.cc',
-        'shell/app/cast_main_delegate.h',
-        'shell/browser/cast_browser_context.cc',
-        'shell/browser/cast_browser_context.h',
-        'shell/browser/cast_browser_main_parts.cc',
-        'shell/browser/cast_browser_main_parts.h',
-        'shell/browser/cast_browser_process.cc',
-        'shell/browser/cast_browser_process.h',
-        'shell/browser/cast_content_browser_client.cc',
-        'shell/browser/cast_content_browser_client.h',
-        'shell/browser/cast_download_manager_delegate.cc',
-        'shell/browser/cast_download_manager_delegate.h',
-        'shell/browser/cast_http_user_agent_settings.cc',
-        'shell/browser/cast_http_user_agent_settings.h',
-        'shell/browser/devtools/cast_dev_tools_delegate.cc',
-        'shell/browser/devtools/cast_dev_tools_delegate.h',
-        'shell/browser/devtools/remote_debugging_server.cc',
-        'shell/browser/devtools/remote_debugging_server.h',
-        'shell/browser/geolocation/cast_access_token_store.cc',
-        'shell/browser/geolocation/cast_access_token_store.h',
-        'shell/browser/url_request_context_factory.cc',
-        'shell/browser/url_request_context_factory.h',
-        'shell/browser/webui/webui_cast.h',
-        'shell/common/cast_content_client.cc',
-        'shell/common/cast_content_client.h',
-        'shell/renderer/cast_content_renderer_client.cc',
-        'shell/renderer/cast_content_renderer_client.h',
-        'shell/renderer/key_systems_cast.cc',
-        'shell/renderer/key_systems_cast.h',
+        'app/cast_main_delegate.cc',
+        'app/cast_main_delegate.h',
+        'browser/cast_browser_context.cc',
+        'browser/cast_browser_context.h',
+        'browser/cast_browser_main_parts.cc',
+        'browser/cast_browser_main_parts.h',
+        'browser/cast_browser_process.cc',
+        'browser/cast_browser_process.h',
+        'browser/cast_content_browser_client.cc',
+        'browser/cast_content_browser_client.h',
+        'browser/cast_content_window.cc',
+        'browser/cast_content_window.h',
+        'browser/cast_download_manager_delegate.cc',
+        'browser/cast_download_manager_delegate.h',
+        'browser/cast_http_user_agent_settings.cc',
+        'browser/cast_http_user_agent_settings.h',
+        'browser/cast_network_delegate.cc',
+        'browser/cast_network_delegate.h',
+        'browser/devtools/cast_dev_tools_delegate.cc',
+        'browser/devtools/cast_dev_tools_delegate.h',
+        'browser/devtools/remote_debugging_server.cc',
+        'browser/devtools/remote_debugging_server.h',
+        'browser/geolocation/cast_access_token_store.cc',
+        'browser/geolocation/cast_access_token_store.h',
+        'browser/metrics/cast_metrics_prefs.cc',
+        'browser/metrics/cast_metrics_prefs.h',
+        'browser/metrics/cast_metrics_service_client.cc',
+        'browser/metrics/cast_metrics_service_client.h',
+        'browser/metrics/cast_stability_metrics_provider.cc',
+        'browser/metrics/cast_stability_metrics_provider.h',
+        'browser/metrics/platform_metrics_providers.h',
+        'browser/service/cast_service.cc',
+        'browser/service/cast_service.h',
+        'browser/url_request_context_factory.cc',
+        'browser/url_request_context_factory.h',
+        'browser/webui/webui_cast.h',
+        'common/cast_content_client.cc',
+        'common/cast_content_client.h',
+        'common/cast_paths.cc',
+        'common/cast_paths.h',
+        'common/cast_resource_delegate.cc',
+        'common/cast_resource_delegate.h',
+        'common/chromecast_config.cc',
+        'common/chromecast_config.h',
+        'common/chromecast_switches.cc',
+        'common/chromecast_switches.h',
+        'common/platform_client_auth.h',
+        'common/pref_names.cc',
+        'common/pref_names.h',
+        'renderer/cast_content_renderer_client.cc',
+        'renderer/cast_content_renderer_client.h',
+        'renderer/key_systems_cast.cc',
+        'renderer/key_systems_cast.h',
       ],
       'conditions': [
         ['chromecast_branding=="Chrome"', {
           'dependencies': [
-            'internal/chromecast_internal.gyp:cast_shell_internal',
+            '<(cast_internal_gyp):cast_shell_internal',
           ],
         }, {
           'sources': [
-            'shell/browser/devtools/remote_debugging_server_simple.cc',
-            'shell/browser/webui/webui_cast_simple.cc',
-            'shell/renderer/key_systems_cast_simple.cc',
+            'browser/cast_network_delegate_simple.cc',
+            'browser/devtools/remote_debugging_server_simple.cc',
+            'browser/metrics/platform_metrics_providers_simple.cc',
+            'browser/webui/webui_cast_simple.cc',
+            'common/chromecast_config_simple.cc',
+            'common/platform_client_auth_simple.cc',
+            'renderer/key_systems_cast_simple.cc',
+          ],
+          'conditions': [
+            ['OS=="android"', {
+              'sources': [
+                'browser/service/cast_service_android.cc',
+                'browser/service/cast_service_android.h',
+              ],
+            }, {
+              'sources': [
+                'browser/service/cast_service_simple.cc',
+                'browser/service/cast_service_simple.h',
+              ],
+            }],
+          ],
+        }],
+        # ExternalMetrics not necessary on Android and (as of this writing) uses
+        # non-portable filesystem operations. Also webcrypto is not used on
+        # Android either.
+        ['OS=="linux"', {
+          'sources': [
+            'browser/metrics/external_metrics.cc',
+            'browser/metrics/external_metrics.h',
+          ],
+          'dependencies': [
+            '../components/components.gyp:metrics_serialization',
           ],
         }],
       ],
     },
+    {
+      'target_name': 'cast_shell_unittests',
+      'type': '<(gtest_target_type)',
+      'dependencies': [
+        'cast_shell_common',
+        '../base/base.gyp:base_prefs_test_support',
+        '../base/base.gyp:run_all_unittests',
+        '../base/base.gyp:test_support_base',
+        '../components/components.gyp:component_metrics_proto',
+        '../testing/gtest.gyp:gtest',
+      ],
+      'sources': [
+        'browser/metrics/cast_metrics_service_client_unittest.cc',
+      ],
+      'conditions': [
+        ['use_allocator!="none"', {
+          'dependencies': [
+            '../base/allocator/allocator.gyp:allocator',
+          ],
+        }],
+      ]
+    },  # end of target 'cast_metrics_unittests'
     {
       'target_name': 'cast_version_header',
       'type': 'none',
@@ -292,6 +271,17 @@
       ],
     },
     {
+      'target_name': 'cast_metrics_test_support',
+      'type': '<(component)',
+      'dependencies': [
+        'cast_base',
+      ],
+      'sources': [
+        'base/metrics/cast_metrics_test_helper.cc',
+        'base/metrics/cast_metrics_test_helper.h',
+      ],
+    },  # end of target 'cast_metrics_test_support'
+    {
       'target_name': 'cast_tests',
       'type': 'none',
       'dependencies': [
@@ -308,17 +298,22 @@
           'target_name': 'libcast_shell_android',
           'type': 'shared_library',
           'dependencies': [
-            'cast_common',
             'cast_jni_headers',
             'cast_shell_common',
             'cast_shell_pak',
             'cast_version_header',
             '../base/base.gyp:base',
+            '../breakpad/breakpad.gyp:breakpad_client',
+            '../components/components.gyp:breakpad_host',
+            '../components/components.gyp:crash_component',
             '../content/content.gyp:content_app_browser',
             '../content/content.gyp:content',
             '../skia/skia.gyp:skia',
             '../ui/gfx/gfx.gyp:gfx',
             '../ui/gl/gl.gyp:gl',
+          ],
+          'include_dirs': [
+            '../breakpad/src',
           ],
           'sources': [
             'android/cast_jni_registrar.cc',
@@ -326,11 +321,17 @@
             'android/chromecast_config_android.cc',
             'android/chromecast_config_android.h',
             'android/platform_jni_loader.h',
-            'shell/app/android/cast_jni_loader.cc',
-            'shell/browser/android/cast_window_manager.cc',
-            'shell/browser/android/cast_window_manager.h',
-            'shell/browser/android/cast_window_android.cc',
-            'shell/browser/android/cast_window_android.h',
+            'app/android/cast_jni_loader.cc',
+            'browser/android/cast_window_android.cc',
+            'browser/android/cast_window_android.h',
+            'browser/android/cast_window_manager.cc',
+            'browser/android/cast_window_manager.h',
+            'browser/android/external_video_surface_container_impl.cc',
+            'browser/android/external_video_surface_container_impl.h',
+            'crash/android/cast_crash_reporter_client_android.cc',
+            'crash/android/cast_crash_reporter_client_android.h',
+            'crash/android/crash_handler.cc',
+            'crash/android/crash_handler.h',
           ],
           'conditions': [
             ['chromecast_branding=="Chrome"', {
@@ -339,6 +340,7 @@
               ],
             }, {
               'sources': [
+                'android/chromecast_config_android_stub.cc',
                 'android/platform_jni_loader_stub.cc',
               ],
             }]
@@ -348,17 +350,17 @@
           'target_name': 'cast_shell_java',
           'type': 'none',
           'dependencies': [
+            '<(android_support_v13_target)',
             '../base/base.gyp:base_java',
             '../content/content.gyp:content_java',
             '../media/media.gyp:media_java',
             '../net/net.gyp:net_java',
-            '../third_party/android_tools/android_tools.gyp:android_support_v13_javalib',
             '../ui/android/ui_android.gyp:ui_java',
           ],
           'variables': {
             'has_java_resources': 1,
-            'java_in_dir': 'shell/android/apk',
-            'resource_dir': 'shell/android/apk/res',
+            'java_in_dir': 'browser/android/apk',
+            'resource_dir': 'browser/android/apk/res',
             'R_package': 'org.chromium.chromecast.shell',
           },
           'includes': ['../build/java.gypi'],
@@ -380,7 +382,7 @@
             # if the actual Java path is used.
             # This will hopefully be removable after the great GN migration.
             'java_in_dir': 'android',
-            'android_manifest_path': 'shell/android/apk/AndroidManifest.xml',
+            'android_manifest_path': 'browser/android/apk/AndroidManifest.xml',
             'package_name': 'org.chromium.chromecast.shell',
             'native_lib_target': 'libcast_shell_android',
             'asset_location': '<(PRODUCT_DIR)/assets',
@@ -392,8 +394,10 @@
           'target_name': 'cast_jni_headers',
           'type': 'none',
           'sources': [
-            'shell/android/apk/src/org/chromium/chromecast/shell/CastWindowAndroid.java',
-            'shell/android/apk/src/org/chromium/chromecast/shell/CastWindowManager.java',
+            'browser/android/apk/src/org/chromium/chromecast/shell/CastCrashHandler.java',
+            'browser/android/apk/src/org/chromium/chromecast/shell/CastWindowAndroid.java',
+            'browser/android/apk/src/org/chromium/chromecast/shell/CastWindowManager.java',
+            'browser/android/apk/src/org/chromium/chromecast/shell/ExternalVideoSurfaceContainer.java',
           ],
           'direct_dependent_settings': {
             'include_dirs': [
@@ -423,7 +427,7 @@
           'conditions': [
             ['chromecast_branding=="Chrome"', {
               'dependencies': [
-                'internal/chromecast_internal.gyp:cast_gfx_internal',
+                '<(cast_internal_gyp):cast_gfx_internal',
               ],
             }, {
               'dependencies': [
@@ -439,7 +443,7 @@
             'cast_shell_core',
           ],
           'sources': [
-            'shell/app/cast_main.cc',
+            'app/cast_main.cc',
           ],
         },
         {
@@ -453,7 +457,7 @@
             'HAS_OUT_OF_PROC_TEST_RUNNER',
           ],
           'sources': [
-            'shell/browser/test/chromecast_shell_browser_test.cc',
+            'browser/test/chromecast_shell_browser_test.cc',
           ],
         },
         {
@@ -468,9 +472,9 @@
             '../testing/gtest.gyp:gtest',
           ],
           'sources': [
-            'shell/browser/test/chromecast_browser_test.cc',
-            'shell/browser/test/chromecast_browser_test.h',
-            'shell/browser/test/chromecast_browser_test_runner.cc',
+            'browser/test/chromecast_browser_test.cc',
+            'browser/test/chromecast_browser_test.h',
+            'browser/test/chromecast_browser_test_runner.cc',
           ],
         },
       ],  # end of targets

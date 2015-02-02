@@ -21,27 +21,27 @@
 class TestNaClBrowserDelegate : public NaClBrowserDelegate {
  public:
   TestNaClBrowserDelegate();
-  virtual ~TestNaClBrowserDelegate();
-  virtual void ShowMissingArchInfobar(int render_process_id,
-                                      int render_view_id) OVERRIDE;
-  virtual bool DialogsAreSuppressed() OVERRIDE;
-  virtual bool GetCacheDirectory(base::FilePath* cache_dir) OVERRIDE;
-  virtual bool GetPluginDirectory(base::FilePath* plugin_dir) OVERRIDE;
-  virtual bool GetPnaclDirectory(base::FilePath* pnacl_dir) OVERRIDE;
-  virtual bool GetUserDirectory(base::FilePath* user_dir) OVERRIDE;
-  virtual std::string GetVersionString() const OVERRIDE;
-  virtual ppapi::host::HostFactory* CreatePpapiHostFactory(
-      content::BrowserPpapiHost* ppapi_host) OVERRIDE;
-  virtual bool MapUrlToLocalFilePath(const GURL& url,
-                                     bool use_blocking_api,
-                                     const base::FilePath& profile_directory,
-                                     base::FilePath* file_path) OVERRIDE;
-  virtual void SetDebugPatterns(std::string debug_patterns) OVERRIDE;
-  virtual bool URLMatchesDebugPatterns(const GURL& manifest_url) OVERRIDE;
-  virtual content::BrowserPpapiHost::OnKeepaliveCallback
-      GetOnKeepaliveCallback() OVERRIDE;
-  virtual bool IsNonSfiModeAllowed(const base::FilePath& profile_directory,
-                                   const GURL& manifest_url) OVERRIDE;
+  ~TestNaClBrowserDelegate() override;
+  void ShowMissingArchInfobar(int render_process_id,
+                              int render_view_id) override;
+  bool DialogsAreSuppressed() override;
+  bool GetCacheDirectory(base::FilePath* cache_dir) override;
+  bool GetPluginDirectory(base::FilePath* plugin_dir) override;
+  bool GetPnaclDirectory(base::FilePath* pnacl_dir) override;
+  bool GetUserDirectory(base::FilePath* user_dir) override;
+  std::string GetVersionString() const override;
+  ppapi::host::HostFactory* CreatePpapiHostFactory(
+      content::BrowserPpapiHost* ppapi_host) override;
+  bool MapUrlToLocalFilePath(const GURL& url,
+                             bool use_blocking_api,
+                             const base::FilePath& profile_directory,
+                             base::FilePath* file_path) override;
+  void SetDebugPatterns(std::string debug_patterns) override;
+  bool URLMatchesDebugPatterns(const GURL& manifest_url) override;
+  content::BrowserPpapiHost::OnKeepaliveCallback GetOnKeepaliveCallback()
+      override;
+  bool IsNonSfiModeAllowed(const base::FilePath& profile_directory,
+                           const GURL& manifest_url) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestNaClBrowserDelegate);

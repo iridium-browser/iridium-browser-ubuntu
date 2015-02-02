@@ -43,7 +43,7 @@ namespace blink {
 // For CSS Animations, used to synchronize the start of main-thread animations
 // with compositor animations when both classes of CSS Animations are triggered
 // by the same recalc
-class CompositorPendingAnimations FINAL {
+class CompositorPendingAnimations final {
     DISALLOW_ALLOCATION();
 public:
 
@@ -55,6 +55,7 @@ public:
     // Returns whether we are waiting for an animation to start and should
     // service again on the next frame.
     bool update(bool startOnCompositor = true);
+    void notifyAnimationStarted(double monotonicAnimationStartTime, bool startedOnCompositor);
     void notifyCompositorAnimationStarted(double monotonicAnimationStartTime);
 
     void trace(Visitor*);

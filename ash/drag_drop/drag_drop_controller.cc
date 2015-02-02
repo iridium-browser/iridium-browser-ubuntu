@@ -78,45 +78,38 @@ class DragDropTrackerDelegate : public aura::WindowDelegate {
  public:
   explicit DragDropTrackerDelegate(DragDropController* controller)
       : drag_drop_controller_(controller) {}
-  virtual ~DragDropTrackerDelegate() {}
+  ~DragDropTrackerDelegate() override {}
 
   // Overridden from WindowDelegate:
-  virtual gfx::Size GetMinimumSize() const OVERRIDE {
-    return gfx::Size();
-  }
+  gfx::Size GetMinimumSize() const override { return gfx::Size(); }
 
-  virtual gfx::Size GetMaximumSize() const OVERRIDE {
-    return gfx::Size();
-  }
+  gfx::Size GetMaximumSize() const override { return gfx::Size(); }
 
-  virtual void OnBoundsChanged(const gfx::Rect& old_bounds,
-                               const gfx::Rect& new_bounds) OVERRIDE {}
-  virtual gfx::NativeCursor GetCursor(const gfx::Point& point) OVERRIDE {
+  void OnBoundsChanged(const gfx::Rect& old_bounds,
+                       const gfx::Rect& new_bounds) override {}
+  gfx::NativeCursor GetCursor(const gfx::Point& point) override {
     return gfx::kNullCursor;
   }
-  virtual int GetNonClientComponent(const gfx::Point& point) const OVERRIDE {
+  int GetNonClientComponent(const gfx::Point& point) const override {
     return HTCAPTION;
   }
-  virtual bool ShouldDescendIntoChildForEventHandling(
+  bool ShouldDescendIntoChildForEventHandling(
       aura::Window* child,
-      const gfx::Point& location) OVERRIDE {
+      const gfx::Point& location) override {
     return true;
   }
-  virtual bool CanFocus() OVERRIDE { return true; }
-  virtual void OnCaptureLost() OVERRIDE {
+  bool CanFocus() override { return true; }
+  void OnCaptureLost() override {
     if (drag_drop_controller_->IsDragDropInProgress())
       drag_drop_controller_->DragCancel();
   }
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
-  }
-  virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE {}
-  virtual void OnWindowDestroying(aura::Window* window) OVERRIDE {}
-  virtual void OnWindowDestroyed(aura::Window* window) OVERRIDE {}
-  virtual void OnWindowTargetVisibilityChanged(bool visible) OVERRIDE {}
-  virtual bool HasHitTestMask() const OVERRIDE {
-    return true;
-  }
-  virtual void GetHitTestMask(gfx::Path* mask) const OVERRIDE {
+  void OnPaint(gfx::Canvas* canvas) override {}
+  void OnDeviceScaleFactorChanged(float device_scale_factor) override {}
+  void OnWindowDestroying(aura::Window* window) override {}
+  void OnWindowDestroyed(aura::Window* window) override {}
+  void OnWindowTargetVisibilityChanged(bool visible) override {}
+  bool HasHitTestMask() const override { return true; }
+  void GetHitTestMask(gfx::Path* mask) const override {
     DCHECK(mask->isEmpty());
   }
 
@@ -557,9 +550,9 @@ void DragDropController::Cleanup() {
     drag_window_->RemoveObserver(this);
   drag_window_ = NULL;
   drag_data_ = NULL;
-  // Cleanup can be called again while deleting DragDropTracker, so use Pass
-  // instead of reset to avoid double free.
-  drag_drop_tracker_.Pass();
+  // Cleanup can be called again while deleting DragDropTracker, so delete
+  // the pointer with a local variable to avoid double free.
+  scoped_ptr<ash::DragDropTracker> holder = drag_drop_tracker_.Pass();
 }
 
 }  // namespace ash

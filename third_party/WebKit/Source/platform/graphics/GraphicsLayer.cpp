@@ -24,7 +24,6 @@
  */
 
 #include "config.h"
-
 #include "platform/graphics/GraphicsLayer.h"
 
 #include "SkImageFilter.h"
@@ -53,18 +52,11 @@
 #include "wtf/HashMap.h"
 #include "wtf/HashSet.h"
 #include "wtf/text/WTFString.h"
-
 #include <algorithm>
 
 #ifndef NDEBUG
 #include <stdio.h>
 #endif
-
-using blink::Platform;
-using blink::WebCompositorAnimation;
-using blink::WebFilterOperations;
-using blink::WebLayer;
-using blink::WebPoint;
 
 namespace blink {
 
@@ -442,16 +434,14 @@ void GraphicsLayer::resetTrackedPaintInvalidations()
 void GraphicsLayer::addRepaintRect(const FloatRect& repaintRect)
 {
     if (m_client->isTrackingPaintInvalidations()) {
-        FloatRect largestRepaintRect(FloatPoint(), m_size);
-        largestRepaintRect.intersect(repaintRect);
         RepaintMap::iterator repaintIt = repaintRectMap().find(this);
         if (repaintIt == repaintRectMap().end()) {
             Vector<FloatRect> repaintRects;
-            repaintRects.append(largestRepaintRect);
+            repaintRects.append(repaintRect);
             repaintRectMap().set(this, repaintRects);
         } else {
             Vector<FloatRect>& repaintRects = repaintIt->value;
-            repaintRects.append(largestRepaintRect);
+            repaintRects.append(repaintRect);
         }
     }
 }
@@ -901,12 +891,12 @@ void GraphicsLayer::setNeedsDisplay()
     }
 }
 
-void GraphicsLayer::setNeedsDisplayInRect(const FloatRect& rect, WebInvalidationDebugAnnotations annotations)
+void GraphicsLayer::setNeedsDisplayInRect(const IntRect& rect, PaintInvalidationReason invalidationReason)
 {
     if (drawsContent()) {
         m_layer->layer()->invalidateRect(rect);
         if (firstPaintInvalidationTrackingEnabled())
-            m_debugInfo.appendAnnotatedInvalidateRect(rect, annotations);
+            m_debugInfo.appendAnnotatedInvalidateRect(rect, invalidationReason);
         addRepaintRect(rect);
         for (size_t i = 0; i < m_linkHighlights.size(); ++i)
             m_linkHighlights[i]->invalidate();
@@ -1025,18 +1015,16 @@ void GraphicsLayer::removeLinkHighlight(LinkHighlightClient* linkHighlight)
     updateChildList();
 }
 
-void GraphicsLayer::setScrollableArea(ScrollableArea* scrollableArea, bool isMainFrame)
+void GraphicsLayer::setScrollableArea(ScrollableArea* scrollableArea, bool isViewport)
 {
     if (m_scrollableArea == scrollableArea)
         return;
 
     m_scrollableArea = scrollableArea;
 
-    // Main frame scrolling may involve pinch zoom and gets routed through
+    // Viewport scrolling may involve pinch zoom and gets routed through
     // WebViewImpl explicitly rather than via GraphicsLayer::didScroll.
-    // TODO(bokan): With pinch virtual viewport the special case will no
-    // longer be needed, remove once old-style pinch is gone.
-    if (isMainFrame)
+    if (isViewport)
         m_layer->layer()->setScrollClient(0);
     else
         m_layer->layer()->setScrollClient(this);
@@ -1048,21 +1036,23 @@ void GraphicsLayer::paint(GraphicsContext& context, const IntRect& clip)
 }
 
 
-void GraphicsLayer::notifyAnimationStarted(double monotonicTime, WebCompositorAnimation::TargetProperty)
+void GraphicsLayer::notifyAnimationStarted(double monotonicTime, int group)
 {
     if (m_client)
-        m_client->notifyAnimationStarted(this, monotonicTime);
+        m_client->notifyAnimationStarted(this, monotonicTime, group);
 }
 
-void GraphicsLayer::notifyAnimationFinished(double, WebCompositorAnimation::TargetProperty)
+void GraphicsLayer::notifyAnimationFinished(double, int)
 {
-    // Do nothing.
 }
 
 void GraphicsLayer::didScroll()
 {
-    if (m_scrollableArea)
-        m_scrollableArea->scrollToOffsetWithoutAnimation(m_scrollableArea->minimumScrollPosition() + toIntSize(m_layer->layer()->scrollPosition()));
+    if (m_scrollableArea) {
+        DoublePoint newPosition = m_scrollableArea->minimumScrollPosition() + toDoubleSize(m_layer->layer()->scrollPositionDouble());
+        // FIXME: Remove the toFloatPoint(). crbug.com/414283.
+        m_scrollableArea->scrollToOffsetWithoutAnimation(toFloatPoint(newPosition));
+    }
 }
 
 } // namespace blink

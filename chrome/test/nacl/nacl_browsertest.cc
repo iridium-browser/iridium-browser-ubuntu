@@ -107,6 +107,12 @@ IN_PROC_BROWSER_TEST_F(NaClBrowserTestNewlib, BadNative) {
 #if defined(OS_WIN)
 // crbug.com/98721
 #  define MAYBE_Crash DISABLED_Crash
+#elif defined(OS_MACOSX)
+// crbug.com/425570
+#  define MAYBE_Crash DISABLED_Crash
+#elif defined(OS_LINUX)
+// crbug.com/428838
+#  define MAYBE_Crash DISABLED_Crash
 #else
 #  define MAYBE_Crash Crash
 #endif
@@ -214,7 +220,7 @@ IN_PROC_BROWSER_TEST_F(NaClBrowserTestStatic, RelativeManifest) {
 // Test with the NaCl debug flag turned on.
 class NaClBrowserTestPnaclDebug : public NaClBrowserTestPnacl {
  public:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     NaClBrowserTestPnacl::SetUpCommandLine(command_line);
     // Turn on debugging to influence the PNaCl URL loaded
     command_line->AppendSwitch(switches::kEnableNaClDebug);
@@ -278,7 +284,7 @@ class NaClBrowserTestPnaclDebug : public NaClBrowserTestPnacl {
 // so that nothing is actually debugged.
 class NaClBrowserTestPnaclDebugMasked : public NaClBrowserTestPnaclDebug {
  public:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     NaClBrowserTestPnaclDebug::SetUpCommandLine(command_line);
     command_line->AppendSwitchASCII(switches::kNaClDebugMask,
                                     "!<all_urls>");

@@ -16,7 +16,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
-#include "base/process/process.h"
+#include "base/process/process_handle.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
@@ -64,14 +64,14 @@ static const struct UsbTestGadgetConfiguration kConfigurations[] = {
 
 class UsbTestGadgetImpl : public UsbTestGadget {
  public:
-  virtual ~UsbTestGadgetImpl();
+  ~UsbTestGadgetImpl() override;
 
-  virtual bool Unclaim() OVERRIDE;
-  virtual bool Disconnect() OVERRIDE;
-  virtual bool Reconnect() OVERRIDE;
-  virtual bool SetType(Type type) OVERRIDE;
-  virtual UsbDevice* GetDevice() const OVERRIDE;
-  virtual std::string GetSerialNumber() const OVERRIDE;
+  bool Unclaim() override;
+  bool Disconnect() override;
+  bool Reconnect() override;
+  bool SetType(Type type) override;
+  UsbDevice* GetDevice() const override;
+  std::string GetSerialNumber() const override;
 
  protected:
   UsbTestGadgetImpl();
@@ -93,13 +93,13 @@ class UsbTestGadgetImpl : public UsbTestGadget {
   class Delegate : public net::URLFetcherDelegate {
    public:
     Delegate() {}
-    virtual ~Delegate() {}
+    ~Delegate() override {}
 
     void WaitForCompletion() {
       run_loop_.Run();
     }
 
-    virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE {
+    void OnURLFetchComplete(const net::URLFetcher* source) override {
       run_loop_.Quit();
     }
 
@@ -141,7 +141,7 @@ scoped_ptr<UsbTestGadget> UsbTestGadget::Claim() {
   VLOG(1) << "It took " << (kClaimRetries - retries)
           << " retries to find an unclaimed device.";
 
-  return gadget.PassAs<UsbTestGadget>();
+  return gadget.Pass();
 }
 
 UsbTestGadgetImpl::UsbTestGadgetImpl() {
@@ -149,7 +149,7 @@ UsbTestGadgetImpl::UsbTestGadgetImpl() {
   context_builder.set_proxy_service(net::ProxyService::CreateDirect());
   request_context_.reset(context_builder.Build());
 
-  base::ProcessId process_id = base::Process::Current().pid();
+  base::ProcessId process_id = base::GetCurrentProcId();
   session_id_ = base::StringPrintf(
       "%s:%p", base::HexEncode(&process_id, sizeof(process_id)).c_str(), this);
 
@@ -181,7 +181,7 @@ scoped_ptr<net::URLFetcher> UsbTestGadgetImpl::CreateURLFetcher(
           request_context_.get(),
           base::MessageLoop::current()->message_loop_proxy()));
 
-  return url_fetcher.PassAs<net::URLFetcher>();
+  return url_fetcher;
 }
 
 int UsbTestGadgetImpl::SimplePOSTRequest(const GURL& url,

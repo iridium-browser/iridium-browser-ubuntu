@@ -28,27 +28,23 @@ class SYNC_EXPORT_PRIVATE JsSyncEncryptionHandlerObserver
     : public SyncEncryptionHandler::Observer {
  public:
   JsSyncEncryptionHandlerObserver();
-  virtual ~JsSyncEncryptionHandlerObserver();
+  ~JsSyncEncryptionHandlerObserver() override;
 
   void SetJsEventHandler(const WeakHandle<JsEventHandler>& event_handler);
 
   // SyncEncryptionHandlerObserver::Observer implementation.
-  virtual void OnPassphraseRequired(
+  void OnPassphraseRequired(
       PassphraseRequiredReason reason,
-      const sync_pb::EncryptedData& pending_keys) OVERRIDE;
-  virtual void OnPassphraseAccepted() OVERRIDE;
-  virtual void OnBootstrapTokenUpdated(
-      const std::string& bootstrap_token,
-      BootstrapTokenType type) OVERRIDE;
-  virtual void OnEncryptedTypesChanged(
-      ModelTypeSet encrypted_types,
-      bool encrypt_everything) OVERRIDE;
-  virtual void OnEncryptionComplete() OVERRIDE;
-  virtual void OnCryptographerStateChanged(
-      Cryptographer* cryptographer) OVERRIDE;
-  virtual void OnPassphraseTypeChanged(
-      PassphraseType type,
-      base::Time explicit_passphrase_time) OVERRIDE;
+      const sync_pb::EncryptedData& pending_keys) override;
+  void OnPassphraseAccepted() override;
+  void OnBootstrapTokenUpdated(const std::string& bootstrap_token,
+                               BootstrapTokenType type) override;
+  void OnEncryptedTypesChanged(ModelTypeSet encrypted_types,
+                               bool encrypt_everything) override;
+  void OnEncryptionComplete() override;
+  void OnCryptographerStateChanged(Cryptographer* cryptographer) override;
+  void OnPassphraseTypeChanged(PassphraseType type,
+                               base::Time explicit_passphrase_time) override;
 
  private:
   void HandleJsEvent(const tracked_objects::Location& from_here,

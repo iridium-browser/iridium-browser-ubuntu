@@ -12,6 +12,7 @@
 #include "GrGeometryProcessor.h"
 
 class GrGLDistanceFieldTextureEffect;
+class GrGLDistanceFieldNoGammaTextureEffect;
 class GrGLDistanceFieldLCDTextureEffect;
 
 enum GrDistanceFieldEffectFlags {
@@ -20,6 +21,8 @@ enum GrDistanceFieldEffectFlags {
     kUseLCD_DistanceFieldEffectFlag     = 0x04,   // use lcd text
     kBGR_DistanceFieldEffectFlag        = 0x08,   // lcd display has bgr order
     kPortrait_DistanceFieldEffectFlag   = 0x10,   // lcd display is in portrait mode (not used yet)
+
+    kInvalid_DistanceFieldEffectFlag    = 0x80,   // invalid state (for initialization)
     
     kUniformScale_DistanceFieldEffectMask = kSimilarity_DistanceFieldEffectFlag |
                                             kRectToRect_DistanceFieldEffectFlag,
@@ -58,8 +61,6 @@ public:
 
     static const char* Name() { return "DistanceFieldTexture"; }
 
-    virtual void getConstantColorComponents(GrColor* color, uint32_t* validFlags) const SK_OVERRIDE;
-
     const GrShaderVar& inTextureCoords() const { return fInTextureCoords; }
 #ifdef SK_GAMMA_APPLY_TO_A8
     float getLuminance() const { return fLuminance; }
@@ -77,7 +78,9 @@ private:
 #endif
                                  uint32_t flags);
 
-    virtual bool onIsEqual(const GrProcessor& other) const SK_OVERRIDE;
+    virtual bool onIsEqual(const GrGeometryProcessor& other) const SK_OVERRIDE;
+
+    virtual void onComputeInvariantOutput(InvariantOutput* inout) const SK_OVERRIDE;
 
     GrTextureAccess    fTextureAccess;
 #ifdef SK_GAMMA_APPLY_TO_A8
@@ -89,7 +92,49 @@ private:
 
     GR_DECLARE_GEOMETRY_PROCESSOR_TEST;
 
-    typedef GrFragmentProcessor INHERITED;
+    typedef GrGeometryProcessor INHERITED;
+};
+
+
+/**
+* The output color of this effect is a modulation of the input color and a sample from a
+* distance field texture (using a smoothed step function near 0.5).
+* It allows explicit specification of the filtering and wrap modes (GrTextureParams). The input
+* coords are a custom attribute. No gamma correct blending is applied.
+*/
+class GrDistanceFieldNoGammaTextureEffect : public GrGeometryProcessor {
+public:
+    static GrGeometryProcessor* Create(GrTexture* tex, const GrTextureParams& params,
+                                       uint32_t flags) {
+        return SkNEW_ARGS(GrDistanceFieldNoGammaTextureEffect, (tex, params, flags));
+    }
+
+    virtual ~GrDistanceFieldNoGammaTextureEffect() {}
+
+    static const char* Name() { return "DistanceFieldTexture"; }
+
+    const GrShaderVar& inTextureCoords() const { return fInTextureCoords; }
+    uint32_t getFlags() const { return fFlags; }
+
+    typedef GrGLDistanceFieldNoGammaTextureEffect GLProcessor;
+
+    virtual const GrBackendGeometryProcessorFactory& getFactory() const SK_OVERRIDE;
+
+private:
+    GrDistanceFieldNoGammaTextureEffect(GrTexture* texture, const GrTextureParams& params,
+                                        uint32_t flags);
+
+    virtual bool onIsEqual(const GrGeometryProcessor& other) const SK_OVERRIDE;
+
+    virtual void onComputeInvariantOutput(InvariantOutput* inout) const SK_OVERRIDE;
+
+    GrTextureAccess    fTextureAccess;
+    uint32_t           fFlags;
+    const GrShaderVar& fInTextureCoords;
+
+    GR_DECLARE_GEOMETRY_PROCESSOR_TEST;
+
+    typedef GrGeometryProcessor INHERITED;
 };
 
 /**
@@ -112,7 +157,6 @@ public:
     static const char* Name() { return "DistanceFieldLCDTexture"; }
 
     const GrShaderVar& inTextureCoords() const { return fInTextureCoords; }
-    virtual void getConstantColorComponents(GrColor* color, uint32_t* validFlags) const SK_OVERRIDE;
     GrColor getTextColor() const { return fTextColor; }
     uint32_t getFlags() const { return fFlags; }
 
@@ -126,7 +170,9 @@ private:
                                     SkColor textColor,
                                     uint32_t flags);
 
-    virtual bool onIsEqual(const GrProcessor& other) const SK_OVERRIDE;
+    virtual bool onIsEqual(const GrGeometryProcessor& other) const SK_OVERRIDE;
+
+    virtual void onComputeInvariantOutput(InvariantOutput* inout) const SK_OVERRIDE;
 
     GrTextureAccess    fTextureAccess;
     GrTextureAccess    fGammaTextureAccess;
@@ -136,7 +182,7 @@ private:
 
     GR_DECLARE_GEOMETRY_PROCESSOR_TEST;
 
-    typedef GrFragmentProcessor INHERITED;
+    typedef GrGeometryProcessor INHERITED;
 };
 
 #endif

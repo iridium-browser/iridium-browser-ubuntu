@@ -65,6 +65,7 @@ void updateRequestForAccessControl(ResourceRequest& request, SecurityOrigin* sec
 {
     request.removeCredentials();
     request.setAllowStoredCredentials(allowCredentials == AllowStoredCredentials);
+    request.setFetchCredentialsMode(allowCredentials == AllowStoredCredentials ? WebURLRequest::FetchCredentialsModeInclude : WebURLRequest::FetchCredentialsModeOmit);
 
     if (securityOrigin)
         request.setHTTPOrigin(securityOrigin->toAtomicString());
@@ -133,7 +134,7 @@ bool passesAccessControlCheck(const ResourceResponse& response, StoredCredential
             return false;
         }
     } else if (accessControlOriginString != securityOrigin->toAtomicString()) {
-        if (accessControlOriginString.isEmpty()) {
+        if (accessControlOriginString.isNull()) {
             errorDescription = "No 'Access-Control-Allow-Origin' header is present on the requested resource. Origin '" + securityOrigin->toString() + "' is therefore not allowed access.";
 
             if (isInterestingStatusCode(response.httpStatusCode()))

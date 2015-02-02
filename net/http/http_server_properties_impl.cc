@@ -23,14 +23,12 @@ const uint64 kBrokenAlternateProtocolDelaySecs = 300;
 HttpServerPropertiesImpl::HttpServerPropertiesImpl()
     : spdy_servers_map_(SpdyServerHostPortMap::NO_AUTO_EVICT),
       alternate_protocol_map_(AlternateProtocolMap::NO_AUTO_EVICT),
-      alternate_protocol_experiment_(
-          ALTERNATE_PROTOCOL_NOT_PART_OF_EXPERIMENT),
       spdy_settings_map_(SpdySettingsMap::NO_AUTO_EVICT),
       alternate_protocol_probability_threshold_(1),
       weak_ptr_factory_(this) {
-  canoncial_suffixes_.push_back(".c.youtube.com");
-  canoncial_suffixes_.push_back(".googlevideo.com");
-  canoncial_suffixes_.push_back(".googleusercontent.com");
+  canonical_suffixes_.push_back(".c.youtube.com");
+  canonical_suffixes_.push_back(".googlevideo.com");
+  canonical_suffixes_.push_back(".googleusercontent.com");
 }
 
 HttpServerPropertiesImpl::~HttpServerPropertiesImpl() {
@@ -51,13 +49,12 @@ void HttpServerPropertiesImpl::InitializeSpdyServers(
 
 void HttpServerPropertiesImpl::InitializeAlternateProtocolServers(
     AlternateProtocolMap* alternate_protocol_map) {
-  // Keep all the ALTERNATE_PROTOCOL_BROKEN ones since those don't
-  // get persisted.
+  // Keep all the broken ones since those don't get persisted.
   for (AlternateProtocolMap::iterator it = alternate_protocol_map_.begin();
        it != alternate_protocol_map_.end();) {
     AlternateProtocolMap::iterator old_it = it;
     ++it;
-    if (old_it->second.protocol != ALTERNATE_PROTOCOL_BROKEN) {
+    if (!old_it->second.is_broken) {
       alternate_protocol_map_.Erase(old_it);
     }
   }
@@ -71,8 +68,8 @@ void HttpServerPropertiesImpl::InitializeAlternateProtocolServers(
 
   // Attempt to find canonical servers.
   int canonical_ports[] = { 80, 443 };
-  for (size_t i = 0; i < canoncial_suffixes_.size(); ++i) {
-    std::string canonical_suffix = canoncial_suffixes_[i];
+  for (size_t i = 0; i < canonical_suffixes_.size(); ++i) {
+    std::string canonical_suffix = canonical_suffixes_[i];
     for (size_t j = 0; j < arraysize(canonical_ports); ++j) {
       HostPortPair canonical_host(canonical_suffix, canonical_ports[j]);
       // If we already have a valid canonical server, we're done.
@@ -86,7 +83,7 @@ void HttpServerPropertiesImpl::InitializeAlternateProtocolServers(
       for (AlternateProtocolMap::const_iterator it =
                alternate_protocol_map_.begin();
            it != alternate_protocol_map_.end(); ++it) {
-        if (EndsWith(it->first.host(), canoncial_suffixes_[i], false)) {
+        if (EndsWith(it->first.host(), canonical_suffixes_[i], false)) {
           canonical_host_to_origin_map_[canonical_host] = it->first;
           break;
         }
@@ -207,21 +204,25 @@ bool HttpServerPropertiesImpl::HasAlternateProtocol(
   if (g_forced_alternate_protocol)
     return true;
   AlternateProtocolMap::const_iterator it = alternate_protocol_map_.Get(server);
-  if (it != alternate_protocol_map_.end() &&
-      it->second.probability >= alternate_protocol_probability_threshold_) {
-    return true;
+  if (it != alternate_protocol_map_.end())
+    return it->second.probability >= alternate_protocol_probability_threshold_;
+
+  auto canonical = GetCanonicalHost(server);
+  if (canonical == canonical_host_to_origin_map_.end() ||
+      canonical->second.Equals(server)) {
+    return false;
   }
 
-  return GetCanonicalHost(server) != canonical_host_to_origin_map_.end();
+  return HasAlternateProtocol(canonical->second);
 }
 
 std::string HttpServerPropertiesImpl::GetCanonicalSuffix(
     const HostPortPair& server) {
   // If this host ends with a canonical suffix, then return the canonical
   // suffix.
-  for (size_t i = 0; i < canoncial_suffixes_.size(); ++i) {
-    std::string canonical_suffix = canoncial_suffixes_[i];
-    if (EndsWith(server.host(), canoncial_suffixes_[i], false)) {
+  for (size_t i = 0; i < canonical_suffixes_.size(); ++i) {
+    std::string canonical_suffix = canonical_suffixes_[i];
+    if (EndsWith(server.host(), canonical_suffixes_[i], false)) {
       return canonical_suffix;
     }
   }
@@ -253,10 +254,6 @@ void HttpServerPropertiesImpl::SetAlternateProtocol(
     uint16 alternate_port,
     AlternateProtocol alternate_protocol,
     double alternate_probability) {
-  if (alternate_protocol == ALTERNATE_PROTOCOL_BROKEN) {
-    LOG(DFATAL) << "Call SetBrokenAlternateProtocol() instead.";
-    return;
-  }
 
   AlternateProtocolInfo alternate(alternate_port,
                                   alternate_protocol,
@@ -265,13 +262,12 @@ void HttpServerPropertiesImpl::SetAlternateProtocol(
     const AlternateProtocolInfo existing_alternate =
         GetAlternateProtocol(server);
 
-    if (existing_alternate.protocol == ALTERNATE_PROTOCOL_BROKEN) {
+    if (existing_alternate.is_broken) {
       DVLOG(1) << "Ignore alternate protocol since it's known to be broken.";
       return;
     }
 
-    if (alternate_protocol != ALTERNATE_PROTOCOL_BROKEN &&
-        !existing_alternate.Equals(alternate)) {
+    if (!existing_alternate.Equals(alternate)) {
       LOG(WARNING) << "Changing the alternate protocol for: "
                    << server.ToString()
                    << " from [Port: " << existing_alternate.port
@@ -283,20 +279,21 @@ void HttpServerPropertiesImpl::SetAlternateProtocol(
                    << "].";
     }
   } else {
-    // TODO(rch): Consider the case where multiple requests are started
-    // before the first completes. In this case, only one of the jobs
-    // would reach this code, whereas all of them should should have.
-    HistogramAlternateProtocolUsage(ALTERNATE_PROTOCOL_USAGE_MAPPING_MISSING,
-                                    alternate_protocol_experiment_);
+    if (alternate_probability >= alternate_protocol_probability_threshold_) {
+      // TODO(rch): Consider the case where multiple requests are started
+      // before the first completes. In this case, only one of the jobs
+      // would reach this code, whereas all of them should should have.
+      HistogramAlternateProtocolUsage(ALTERNATE_PROTOCOL_USAGE_MAPPING_MISSING);
+    }
   }
 
   alternate_protocol_map_.Put(server, alternate);
 
   // If this host ends with a canonical suffix, then set it as the
   // canonical host.
-  for (size_t i = 0; i < canoncial_suffixes_.size(); ++i) {
-    std::string canonical_suffix = canoncial_suffixes_[i];
-    if (EndsWith(server.host(), canoncial_suffixes_[i], false)) {
+  for (size_t i = 0; i < canonical_suffixes_.size(); ++i) {
+    std::string canonical_suffix = canonical_suffixes_[i];
+    if (EndsWith(server.host(), canonical_suffixes_[i], false)) {
       HostPortPair canonical_host(canonical_suffix, server.port());
       canonical_host_to_origin_map_[canonical_host] = server;
       break;
@@ -307,14 +304,11 @@ void HttpServerPropertiesImpl::SetAlternateProtocol(
 void HttpServerPropertiesImpl::SetBrokenAlternateProtocol(
     const HostPortPair& server) {
   AlternateProtocolMap::iterator it = alternate_protocol_map_.Get(server);
-  if (it != alternate_protocol_map_.end()) {
-    it->second.protocol = ALTERNATE_PROTOCOL_BROKEN;
-  } else {
-    AlternateProtocolInfo alternate(server.port(),
-                                    ALTERNATE_PROTOCOL_BROKEN,
-                                    1);
-    alternate_protocol_map_.Put(server, alternate);
+  if (it == alternate_protocol_map_.end()) {
+    LOG(DFATAL) << "Trying to mark unknown alternate protocol broken.";
+    return;
   }
+  it->second.is_broken = true;
   int count = ++broken_alternate_protocol_map_[server];
   base::TimeDelta delay =
       base::TimeDelta::FromSeconds(kBrokenAlternateProtocolDelaySecs);
@@ -357,16 +351,6 @@ void HttpServerPropertiesImpl::ClearAlternateProtocol(
 const AlternateProtocolMap&
 HttpServerPropertiesImpl::alternate_protocol_map() const {
   return alternate_protocol_map_;
-}
-
-void HttpServerPropertiesImpl::SetAlternateProtocolExperiment(
-    AlternateProtocolExperiment experiment) {
-  alternate_protocol_experiment_ = experiment;
-}
-
-AlternateProtocolExperiment
-HttpServerPropertiesImpl::GetAlternateProtocolExperiment() const {
-  return alternate_protocol_experiment_;
 }
 
 const SettingsMap& HttpServerPropertiesImpl::GetSpdySettings(
@@ -463,9 +447,9 @@ void HttpServerPropertiesImpl::SetAlternateProtocolProbabilityThreshold(
 
 HttpServerPropertiesImpl::CanonicalHostMap::const_iterator
 HttpServerPropertiesImpl::GetCanonicalHost(HostPortPair server) const {
-  for (size_t i = 0; i < canoncial_suffixes_.size(); ++i) {
-    std::string canonical_suffix = canoncial_suffixes_[i];
-    if (EndsWith(server.host(), canoncial_suffixes_[i], false)) {
+  for (size_t i = 0; i < canonical_suffixes_.size(); ++i) {
+    std::string canonical_suffix = canonical_suffixes_[i];
+    if (EndsWith(server.host(), canonical_suffixes_[i], false)) {
       HostPortPair canonical_host(canonical_suffix, server.port());
       return canonical_host_to_origin_map_.find(canonical_host);
     }

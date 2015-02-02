@@ -12,13 +12,10 @@
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_management.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/updater/extension_downloader.h"
 #include "chrome/browser/extensions/updater/extension_updater.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "components/policy/core/browser/browser_policy_connector.h"
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
 #include "components/policy/core/common/policy_map.h"
@@ -31,6 +28,7 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/notification_types.h"
+#include "extensions/browser/updater/extension_downloader.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "net/url_request/test_url_request_interceptor.h"
 #include "net/url_request/url_fetcher.h"
@@ -56,7 +54,7 @@ std::string BuildForceInstallPolicyValue(const char* extension_id,
 
 class ExtensionManagementTest : public ExtensionBrowserTest {
  public:
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
+  void SetUpInProcessBrowserTestFixture() override {
     EXPECT_CALL(policy_provider_, IsInitializationComplete(_))
         .WillRepeatedly(Return(true));
     policy::BrowserPolicyConnector::SetPolicyProviderForTesting(
@@ -83,8 +81,7 @@ class ExtensionManagementTest : public ExtensionBrowserTest {
     // background page is correct.  This is to ensure that the processes are in
     // sync with the Extension.
     extensions::ProcessManager* manager =
-        extensions::ExtensionSystem::Get(browser()->profile())->
-            process_manager();
+        extensions::ProcessManager::Get(browser()->profile());
     extensions::ExtensionHost* ext_host =
         manager->GetBackgroundHostForExtension(extension->id());
     EXPECT_TRUE(ext_host);
@@ -178,7 +175,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementTest, MAYBE_InstallRequiresConfirm) {
 // Tests that disabling and re-enabling an extension works.
 IN_PROC_BROWSER_TEST_F(ExtensionManagementTest, DisableEnable) {
   extensions::ProcessManager* manager =
-      extensions::ExtensionSystem::Get(browser()->profile())->process_manager();
+      extensions::ProcessManager::Get(browser()->profile());
   ExtensionRegistry* registry = ExtensionRegistry::Get(browser()->profile());
   const size_t size_before = registry->enabled_extensions().size();
 
@@ -216,7 +213,7 @@ class NotificationListener : public content::NotificationObserver {
           this, types[i], content::NotificationService::AllSources());
     }
   }
-  virtual ~NotificationListener() {}
+  ~NotificationListener() override {}
 
   bool started() { return started_; }
 
@@ -231,9 +228,9 @@ class NotificationListener : public content::NotificationObserver {
   }
 
   // Implements content::NotificationObserver interface.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE {
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override {
     switch (type) {
       case extensions::NOTIFICATION_EXTENSION_UPDATING_STARTED: {
         EXPECT_FALSE(started_);
@@ -439,7 +436,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementTest,
 IN_PROC_BROWSER_TEST_F(ExtensionManagementTest, ExternalUrlUpdate) {
   ExtensionService* service = extensions::ExtensionSystem::Get(
       browser()->profile())->extension_service();
-  const char* kExtensionId = "ogjcoiohnmldgjemafoockdghcjciccf";
+  const char kExtensionId[] = "ogjcoiohnmldgjemafoockdghcjciccf";
   extensions::ExtensionUpdater::CheckParams params;
 
   base::FilePath basedir = test_data_dir_.AppendASCII("autoupdate");
@@ -524,7 +521,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementTest, ExternalUrlUpdate) {
 
 namespace {
 
-const char* kForceInstallNotEmptyHelp =
+const char kForceInstallNotEmptyHelp[] =
     "A policy may already be controlling the list of force-installed "
     "extensions. Please remove all policy settings from your computer "
     "before running tests. E.g. from /etc/chromium/policies Linux or "
@@ -536,7 +533,7 @@ const char* kForceInstallNotEmptyHelp =
 IN_PROC_BROWSER_TEST_F(ExtensionManagementTest, ExternalPolicyRefresh) {
   ExtensionService* service = extensions::ExtensionSystem::Get(
       browser()->profile())->extension_service();
-  const char* kExtensionId = "ogjcoiohnmldgjemafoockdghcjciccf";
+  const char kExtensionId[] = "ogjcoiohnmldgjemafoockdghcjciccf";
 
   base::FilePath basedir = test_data_dir_.AppendASCII("autoupdate");
 
@@ -617,7 +614,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementTest,
   ExtensionService* service = extensions::ExtensionSystem::Get(
       browser()->profile())->extension_service();
   ExtensionRegistry* registry = ExtensionRegistry::Get(browser()->profile());
-  const char* kExtensionId = "ogjcoiohnmldgjemafoockdghcjciccf";
+  const char kExtensionId[] = "ogjcoiohnmldgjemafoockdghcjciccf";
   extensions::ExtensionUpdater::CheckParams params;
   service->updater()->set_default_check_params(params);
   const size_t size_before = registry->enabled_extensions().size();

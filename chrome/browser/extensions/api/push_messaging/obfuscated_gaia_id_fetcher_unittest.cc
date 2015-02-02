@@ -20,16 +20,16 @@ static const char kNonDictionaryJsonData[] = "{ 0.5 }";
 // Delegate class for catching notifications from the ObfuscatedGaiaIdFetcher.
 class TestDelegate : public extensions::ObfuscatedGaiaIdFetcher::Delegate {
  public:
-  virtual void OnObfuscatedGaiaIdFetchSuccess(
-      const std::string& obfuscated_id) OVERRIDE {
+  void OnObfuscatedGaiaIdFetchSuccess(
+      const std::string& obfuscated_id) override {
     succeeded_ = true;
   }
-  virtual void OnObfuscatedGaiaIdFetchFailure(
-      const GoogleServiceAuthError& error) OVERRIDE {
+  void OnObfuscatedGaiaIdFetchFailure(
+      const GoogleServiceAuthError& error) override {
     failed_ = true;
   }
   TestDelegate() : succeeded_(false), failed_(false) {}
-  virtual ~TestDelegate() {}
+  ~TestDelegate() override {}
   bool succeeded() const { return succeeded_; }
   bool failed() const { return failed_; }
 
@@ -75,7 +75,7 @@ TEST(ObfuscatedGaiaIdFetcherTest, ParseResponse) {
 
 TEST(ObfuscatedGaiaIdFetcherTest, ProcessApiCallSuccess) {
   TestDelegate delegate;
-  ObfuscatedGaiaIdFetcher fetcher(NULL, &delegate, std::string());
+  ObfuscatedGaiaIdFetcher fetcher(&delegate);
 
   net::TestURLFetcher url_fetcher(1, GURL("http://www.google.com"), NULL);
   url_fetcher.set_status(
@@ -89,7 +89,7 @@ TEST(ObfuscatedGaiaIdFetcherTest, ProcessApiCallSuccess) {
 
 TEST(ObfuscatedGaiaIdFetcherTest, ProcessApiCallFailure) {
   TestDelegate delegate;
-  ObfuscatedGaiaIdFetcher fetcher(NULL, &delegate, std::string());
+  ObfuscatedGaiaIdFetcher fetcher(&delegate);
 
   net::TestURLFetcher url_fetcher(1, GURL("http://www.google.com"), NULL);
   url_fetcher.set_status(

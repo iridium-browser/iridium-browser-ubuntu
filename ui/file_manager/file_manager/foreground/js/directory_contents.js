@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
-
 /**
  * Scanner of the entries.
  * @constructor
@@ -22,7 +20,7 @@ function ContentScanner() {
  *     completion.
  * @param {function()} successCallback Called when the scan is completed
  *     successfully.
- * @param {function(FileError)} errorCallback Called an error occurs.
+ * @param {function(DOMError)} errorCallback Called an error occurs.
  */
 ContentScanner.prototype.scan = function(
     entriesCallback, successCallback, errorCallback) {
@@ -259,7 +257,7 @@ LocalSearchContentScanner.prototype.scan = function(
 
 /**
  * Scanner of the entries for the metadata search on Drive File System.
- * @param {DriveMetadataSearchContentScanner.SearchType} searchType The option
+ * @param {!DriveMetadataSearchContentScanner.SearchType} searchType The option
  *     of the search.
  * @constructor
  * @extends {ContentScanner}
@@ -279,12 +277,13 @@ DriveMetadataSearchContentScanner.prototype.__proto__ =
  * The search types on the Drive File System.
  * @enum {string}
  */
-DriveMetadataSearchContentScanner.SearchType = Object.freeze({
+DriveMetadataSearchContentScanner.SearchType = {
   SEARCH_ALL: 'ALL',
   SEARCH_SHARED_WITH_ME: 'SHARED_WITH_ME',
   SEARCH_RECENT_FILES: 'EXCLUDE_DIRECTORIES',
   SEARCH_OFFLINE: 'OFFLINE'
-});
+};
+Object.freeze(DriveMetadataSearchContentScanner.SearchType);
 
 /**
  * Starts to metadata-search on Drive File System.
@@ -340,7 +339,8 @@ function FileFilter(metadataCache, showHidden) {
 
   // Do not show entries marked as 'deleted'.
   this.addFilter('deleted', function(entry) {
-    var internal = this.metadataCache_.getCached(entry, 'internal');
+    var internal = /** @type {{deleted}} */
+        (this.metadataCache_.getCached(entry, 'internal'));
     return !(internal && internal.deleted);
   }.bind(this));
 }
@@ -422,10 +422,14 @@ function FileListModel(metadataCache) {
   this.metadataCache_ = metadataCache;
 
   // Initialize compare functions.
-  this.setCompareFunction('name', util.compareName);
-  this.setCompareFunction('modificationTime', this.compareMtime_.bind(this));
-  this.setCompareFunction('size', this.compareSize_.bind(this));
-  this.setCompareFunction('type', this.compareType_.bind(this));
+  this.setCompareFunction('name',
+      /** @type {function(*, *): number} */ (util.compareName));
+  this.setCompareFunction('modificationTime',
+      /** @type {function(*, *): number} */ (this.compareMtime_.bind(this)));
+  this.setCompareFunction('size',
+      /** @type {function(*, *): number} */ (this.compareSize_.bind(this)));
+  this.setCompareFunction('type',
+      /** @type {function(*, *): number} */ (this.compareType_.bind(this)));
 }
 
 FileListModel.prototype = {
@@ -590,7 +594,7 @@ DirectoryContents.prototype.makeSpaceInMetadataCache_ = function(size) {
 
 /**
  * Use a given fileList instead of the fileList from the context.
- * @param {Array|cr.ui.ArrayDataModel} fileList The new file list.
+ * @param {(!Array|!cr.ui.ArrayDataModel)} fileList The new file list.
  */
 DirectoryContents.prototype.setFileList = function(fileList) {
   if (fileList instanceof cr.ui.ArrayDataModel)
@@ -820,6 +824,14 @@ DirectoryContents.prototype.onNewEntries_ = function(refresh, entries) {
   this.processNewEntriesQueue_.run(function(callbackOuter) {
     var finish = function() {
       if (!this.scanCancelled_) {
+        // Just before inserting entries into the file list, check and avoid
+        // duplication.
+        var currentURLs = {};
+        for (var i = 0; i < this.fileList_.length; i++)
+          currentURLs[this.fileList_.item(i).toURL()] = true;
+        entriesFiltered = entriesFiltered.filter(function(entry) {
+          return !currentURLs[entry.toURL()];
+        });
         // Update the filelist without waiting the metadata.
         this.fileList_.push.apply(this.fileList_, entriesFiltered);
         cr.dispatchSimpleEvent(this, 'scan-updated');
@@ -938,7 +950,7 @@ DirectoryContents.createForLocalSearch = function(
  * @param {DirectoryEntry} fakeDirectoryEntry Fake directory entry representing
  *     the set of result entries. This serves as a top directory for the
  *     search.
- * @param {DriveMetadataSearchContentScanner.SearchType} searchType The type of
+ * @param {!DriveMetadataSearchContentScanner.SearchType} searchType The type of
  *     the search. The scanner will restricts the entries based on the given
  *     type.
  * @return {DirectoryContents} Created DirectoryContents instance.

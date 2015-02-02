@@ -49,13 +49,13 @@ class IndexedDBBrowserTest : public ContentBrowserTest {
  public:
   IndexedDBBrowserTest() : disk_usage_(-1) {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     GetTestClassFactory()->Reset();
     IndexedDBClassFactory::SetIndexedDBClassFactoryGetter(GetIDBClassFactory);
     ContentBrowserTest::SetUp();
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     IndexedDBClassFactory::SetIndexedDBClassFactoryGetter(NULL);
     ContentBrowserTest::TearDown();
   }
@@ -246,7 +246,7 @@ class IndexedDBBrowserTestWithLowQuota : public IndexedDBBrowserTest {
  public:
   IndexedDBBrowserTestWithLowQuota() {}
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     const int kInitialQuotaKilobytes = 5000;
     SetQuota(kInitialQuotaKilobytes);
   }
@@ -263,7 +263,7 @@ class IndexedDBBrowserTestWithGCExposed : public IndexedDBBrowserTest {
  public:
   IndexedDBBrowserTestWithGCExposed() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     command_line->AppendSwitchASCII(switches::kJavaScriptFlags, "--expose-gc");
   }
 
@@ -297,7 +297,7 @@ static void CopyLevelDBToProfile(Shell* shell,
 class IndexedDBBrowserTestWithPreexistingLevelDB : public IndexedDBBrowserTest {
  public:
   IndexedDBBrowserTestWithPreexistingLevelDB() {}
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     scoped_refptr<IndexedDBContextImpl> context = GetContext();
     context->TaskRunner()->PostTask(
         FROM_HERE,
@@ -317,9 +317,7 @@ class IndexedDBBrowserTestWithPreexistingLevelDB : public IndexedDBBrowserTest {
 
 class IndexedDBBrowserTestWithVersion0Schema : public
     IndexedDBBrowserTestWithPreexistingLevelDB {
-  virtual std::string EnclosingLevelDBDir() OVERRIDE {
-    return "migration_from_0";
-  }
+  std::string EnclosingLevelDBDir() override { return "migration_from_0"; }
 };
 
 IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithVersion0Schema, MigrationTest) {
@@ -328,9 +326,7 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithVersion0Schema, MigrationTest) {
 
 class IndexedDBBrowserTestWithVersion123456Schema : public
     IndexedDBBrowserTestWithPreexistingLevelDB {
-  virtual std::string EnclosingLevelDBDir() OVERRIDE {
-    return "schema_version_123456";
-  }
+  std::string EnclosingLevelDBDir() override { return "schema_version_123456"; }
 };
 
 IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithVersion123456Schema,
@@ -344,9 +340,7 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithVersion123456Schema,
 
 class IndexedDBBrowserTestWithVersion987654SSVData : public
     IndexedDBBrowserTestWithPreexistingLevelDB {
-  virtual std::string EnclosingLevelDBDir() OVERRIDE {
-    return "ssv_version_987654";
-  }
+  std::string EnclosingLevelDBDir() override { return "ssv_version_987654"; }
 };
 
 IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithVersion987654SSVData,
@@ -360,9 +354,7 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithVersion987654SSVData,
 
 class IndexedDBBrowserTestWithCorruptLevelDB : public
     IndexedDBBrowserTestWithPreexistingLevelDB {
-  virtual std::string EnclosingLevelDBDir() OVERRIDE {
-    return "corrupt_leveldb";
-  }
+  std::string EnclosingLevelDBDir() override { return "corrupt_leveldb"; }
 };
 
 IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithCorruptLevelDB,
@@ -376,9 +368,7 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithCorruptLevelDB,
 
 class IndexedDBBrowserTestWithMissingSSTFile : public
     IndexedDBBrowserTestWithPreexistingLevelDB {
-  virtual std::string EnclosingLevelDBDir() OVERRIDE {
-    return "missing_sst";
-  }
+  std::string EnclosingLevelDBDir() override { return "missing_sst"; }
 };
 
 IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTestWithMissingSSTFile,
@@ -504,7 +494,7 @@ static scoped_ptr<net::test_server::HttpResponse> CorruptDBRequestHandler(
     scoped_ptr<net::test_server::BasicHttpResponse> http_response(
         new net::test_server::BasicHttpResponse);
     http_response->set_code(net::HTTP_OK);
-    return http_response.PassAs<net::test_server::HttpResponse>();
+    return http_response.Pass();
   } else if (request_path == "fail" && !request_query.empty()) {
     FailClass failure_class = FAIL_CLASS_NOTHING;
     FailMethod failure_method = FAIL_METHOD_NOTHING;
@@ -568,7 +558,7 @@ static scoped_ptr<net::test_server::HttpResponse> CorruptDBRequestHandler(
     scoped_ptr<net::test_server::BasicHttpResponse> http_response(
         new net::test_server::BasicHttpResponse);
     http_response->set_code(net::HTTP_OK);
-    return http_response.PassAs<net::test_server::HttpResponse>();
+    return http_response.Pass();
   }
 
   // A request for a test resource
@@ -581,7 +571,7 @@ static scoped_ptr<net::test_server::HttpResponse> CorruptDBRequestHandler(
   if (!base::ReadFileToString(resourcePath, &file_contents))
     return scoped_ptr<net::test_server::HttpResponse>();
   http_response->set_content(file_contents);
-  return http_response.PassAs<net::test_server::HttpResponse>();
+  return http_response.Pass();
 }
 
 }  // namespace
@@ -723,7 +713,7 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, ForceCloseEventTest) {
 
 class IndexedDBBrowserTestSingleProcess : public IndexedDBBrowserTest {
  public:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kSingleProcess);
   }
 };

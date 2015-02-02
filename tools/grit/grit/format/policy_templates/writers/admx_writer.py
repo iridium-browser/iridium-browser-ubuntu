@@ -32,6 +32,7 @@ class ADMXWriter(xml_formatted_writer.XMLFormattedWriter):
     Args:
       name: Name of the referenced ADML string.
     '''
+    name = name.replace('.', '_')
     return '$(string.' + name + ')'
 
   def _AdmlStringExplain(self, name):
@@ -39,6 +40,7 @@ class ADMXWriter(xml_formatted_writer.XMLFormattedWriter):
     Args:
       name: Name of the referenced ADML explanation.
     '''
+    name = name.replace('.', '_')
     return '$(string.' + name + '_Explain)'
 
   def _AdmlPresentation(self, name):
@@ -166,6 +168,7 @@ class ADMXWriter(xml_formatted_writer.XMLFormattedWriter):
     attributes = {
       'id': name,
       'valueName': name,
+      'maxLength': '1000000',
     }
     self.AddElement(parent, 'text', attributes)
 
@@ -349,6 +352,9 @@ class ADMXWriter(xml_formatted_writer.XMLFormattedWriter):
     '''
     dom_impl = minidom.getDOMImplementation('')
     self._doc = dom_impl.createDocument(None, 'policyDefinitions', None)
+    if self._GetChromiumVersionString() is not None:
+      self.AddComment(self._doc.documentElement, self.config['build'] + \
+          ' version: ' + self._GetChromiumVersionString())
     policy_definitions_elem = self._doc.documentElement
 
     policy_definitions_elem.attributes['revision'] = '1.0'

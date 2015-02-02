@@ -16,7 +16,6 @@
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/command_updater.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/devtools/devtools_window_testing.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
@@ -32,10 +31,6 @@
 #include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/translate/cld_data_harness.h"
-#include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog.h"
-#include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog_queue.h"
-#include "chrome/browser/ui/app_modal_dialogs/javascript_app_modal_dialog.h"
-#include "chrome/browser/ui/app_modal_dialogs/native_app_modal_dialog.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_command_controller.h"
 #include "chrome/browser/ui/browser_commands.h"
@@ -60,6 +55,11 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/app_modal_dialogs/app_modal_dialog.h"
+#include "components/app_modal_dialogs/app_modal_dialog_queue.h"
+#include "components/app_modal_dialogs/javascript_app_modal_dialog.h"
+#include "components/app_modal_dialogs/native_app_modal_dialog.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/translate/core/browser/language_state.h"
 #include "components/translate/core/common/language_detection_details.h"
 #include "content/public/browser/favicon_status.h"
@@ -161,9 +161,9 @@ class MockTabStripModelObserver : public TabStripModelObserver {
  public:
   MockTabStripModelObserver() : closing_count_(0) {}
 
-  virtual void TabClosingAt(TabStripModel* tab_strip_model,
-                            WebContents* contents,
-                            int index) OVERRIDE {
+  void TabClosingAt(TabStripModel* tab_strip_model,
+                    WebContents* contents,
+                    int index) override {
     ++closing_count_;
   }
 
@@ -175,39 +175,14 @@ class MockTabStripModelObserver : public TabStripModelObserver {
   DISALLOW_COPY_AND_ASSIGN(MockTabStripModelObserver);
 };
 
-class InterstitialObserver : public content::WebContentsObserver {
- public:
-  InterstitialObserver(content::WebContents* web_contents,
-                       const base::Closure& attach_callback,
-                       const base::Closure& detach_callback)
-      : WebContentsObserver(web_contents),
-        attach_callback_(attach_callback),
-        detach_callback_(detach_callback) {
-  }
-
-  virtual void DidAttachInterstitialPage() OVERRIDE {
-    attach_callback_.Run();
-  }
-
-  virtual void DidDetachInterstitialPage() OVERRIDE {
-    detach_callback_.Run();
-  }
-
- private:
-  base::Closure attach_callback_;
-  base::Closure detach_callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(InterstitialObserver);
-};
-
 // Causes the browser to swap processes on a redirect to an HTTPS URL.
 class TransferHttpsRedirectsContentBrowserClient
     : public chrome::ChromeContentBrowserClient {
  public:
-  virtual bool ShouldSwapProcessesForRedirect(
+  bool ShouldSwapProcessesForRedirect(
       content::ResourceContext* resource_context,
       const GURL& current_url,
-      const GURL& new_url) OVERRIDE {
+      const GURL& new_url) override {
     return new_url.SchemeIs(url::kHttpsScheme);
   }
 };
@@ -236,7 +211,7 @@ class TestInterstitialPage : public content::InterstitialPageDelegate {
         tab, new_navigation, url , this);
     interstitial_page_->Show();
   }
-  virtual ~TestInterstitialPage() { }
+  ~TestInterstitialPage() override {}
   void Proceed() {
     interstitial_page_->Proceed();
   }
@@ -244,9 +219,7 @@ class TestInterstitialPage : public content::InterstitialPageDelegate {
     interstitial_page_->DontProceed();
   }
 
-  virtual std::string GetHTMLContents() OVERRIDE {
-    return "<h1>INTERSTITIAL</h1>";
-  }
+  std::string GetHTMLContents() override { return "<h1>INTERSTITIAL</h1>"; }
 
  private:
   InterstitialPage* interstitial_page_;  // Owns us.
@@ -279,17 +252,16 @@ class RenderViewSizeObserver : public content::WebContentsObserver {
   }
 
   // Cache the size when RenderViewHost is first created.
-  virtual void RenderViewCreated(
-      content::RenderViewHost* render_view_host) OVERRIDE {
+  void RenderViewCreated(content::RenderViewHost* render_view_host) override {
     render_view_sizes_[render_view_host].rwhv_create_size =
         render_view_host->GetView()->GetViewBounds().size();
   }
 
   // Enlarge WebContentsView by |wcv_resize_insets_| while the navigation entry
   // is pending.
-  virtual void DidStartNavigationToPendingEntry(
+  void DidStartNavigationToPendingEntry(
       const GURL& url,
-      NavigationController::ReloadType reload_type) OVERRIDE {
+      NavigationController::ReloadType reload_type) override {
     if (wcv_resize_insets_.IsEmpty())
       return;
     // Resizing the main browser window by |wcv_resize_insets_| will
@@ -310,8 +282,8 @@ class RenderViewSizeObserver : public content::WebContentsObserver {
   // Cache the sizes of RenderWidgetHostView and WebContentsView when the
   // navigation entry is committed, which is before
   // WebContentsDelegate::DidNavigateMainFramePostCommit is called.
-  virtual void NavigationEntryCommitted(
-      const content::LoadCommittedDetails& details) OVERRIDE {
+  void NavigationEntryCommitted(
+      const content::LoadCommittedDetails& details) override {
     content::RenderViewHost* rvh = web_contents()->GetRenderViewHost();
     render_view_sizes_[rvh].rwhv_commit_size =
         web_contents()->GetRenderWidgetHostView()->GetViewBounds().size();
@@ -629,13 +601,14 @@ class RedirectObserver : public content::WebContentsObserver {
       : WebContentsObserver(web_contents) {
   }
 
-  virtual void DidNavigateAnyFrame(
+  void DidNavigateAnyFrame(
+      content::RenderFrameHost* render_frame_host,
       const content::LoadCommittedDetails& details,
-      const content::FrameNavigateParams& params) OVERRIDE {
+      const content::FrameNavigateParams& params) override {
     params_ = params;
   }
 
-  virtual void WebContentsDestroyed() OVERRIDE {
+  void WebContentsDestroyed() override {
     // Make sure we don't close the tab while the observer is in scope.
     // See http://crbug.com/314036.
     FAIL() << "WebContents closed during navigation (http://crbug.com/314036).";
@@ -847,7 +820,7 @@ class BeforeUnloadAtQuitWithTwoWindows : public InProcessBrowserTest {
   // This test is for testing a specific shutdown behavior. This mimics what
   // happens in InProcessBrowserTest::RunTestOnMainThread and QuitBrowsers, but
   // ensures that it happens through the single IDC_EXIT of the test.
-  virtual void TearDownOnMainThread() OVERRIDE {
+  void TearDownOnMainThread() override {
     // Cycle both the MessageLoop and the Cocoa runloop twice to flush out any
     // Chrome work that generates Cocoa work. Do this twice since there are two
     // Browsers that must be closed.
@@ -1598,7 +1571,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, OpenAppWindowLikeNtp) {
 // set_show_state(ui::SHOW_STATE_MAXIMIZED) has been invoked.
 IN_PROC_BROWSER_TEST_F(BrowserTest, StartMaximized) {
   Browser::Type types[] = { Browser::TYPE_TABBED, Browser::TYPE_POPUP };
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(types); ++i) {
+  for (size_t i = 0; i < arraysize(types); ++i) {
     Browser::CreateParams params(types[i], browser()->profile(),
                                  browser()->host_desktop_type());
     params.initial_show_state = ui::SHOW_STATE_MAXIMIZED;
@@ -1616,7 +1589,7 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, StartMaximized) {
 // set_show_state(ui::SHOW_STATE_MINIMIZED) has been invoked.
 IN_PROC_BROWSER_TEST_F(BrowserTest, MAYBE_StartMinimized) {
   Browser::Type types[] = { Browser::TYPE_TABBED, Browser::TYPE_POPUP };
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(types); ++i) {
+  for (size_t i = 0; i < arraysize(types); ++i) {
     Browser::CreateParams params(types[i], browser()->profile(),
                                  browser()->host_desktop_type());
     params.initial_show_state = ui::SHOW_STATE_MINIMIZED;
@@ -1892,17 +1865,9 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, InterstitialCommandDisable) {
 
   WebContents* contents = browser()->tab_strip_model()->GetActiveWebContents();
 
-  TestInterstitialPage* interstitial = NULL;
-  {
-    scoped_refptr<content::MessageLoopRunner> loop_runner(
-        new content::MessageLoopRunner);
-
-    InterstitialObserver observer(contents,
-                                  loop_runner->QuitClosure(),
-                                  base::Closure());
-    interstitial = new TestInterstitialPage(contents, false, GURL());
-    loop_runner->Run();
-  }
+  TestInterstitialPage* interstitial =
+      new TestInterstitialPage(contents, false, GURL());
+  content::WaitForInterstitialAttach(contents);
 
   EXPECT_TRUE(contents->ShowingInterstitialPage());
 
@@ -1911,17 +1876,11 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, InterstitialCommandDisable) {
   EXPECT_FALSE(command_updater->IsCommandEnabled(IDC_SAVE_PAGE));
   EXPECT_FALSE(command_updater->IsCommandEnabled(IDC_ENCODING_MENU));
 
-  {
-    scoped_refptr<content::MessageLoopRunner> loop_runner(
-        new content::MessageLoopRunner);
-
-    InterstitialObserver observer(contents,
-                                  base::Closure(),
-                                  loop_runner->QuitClosure());
-    interstitial->Proceed();
-    loop_runner->Run();
-    // interstitial is deleted now.
-  }
+  // Proceed and wait for interstitial to detach. This doesn't destroy
+  // |contents|.
+  interstitial->Proceed();
+  content::WaitForInterstitialDetach(contents);
+  // interstitial is deleted now.
 
   EXPECT_TRUE(command_updater->IsCommandEnabled(IDC_VIEW_SOURCE));
   EXPECT_TRUE(command_updater->IsCommandEnabled(IDC_PRINT));
@@ -1945,33 +1904,19 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, InterstitialClosesDialogs) {
   AppModalDialogQueue* dialog_queue = AppModalDialogQueue::GetInstance();
   EXPECT_TRUE(dialog_queue->HasActiveDialog());
 
-  TestInterstitialPage* interstitial = NULL;
-  {
-    scoped_refptr<content::MessageLoopRunner> loop_runner(
-        new content::MessageLoopRunner);
-
-    InterstitialObserver observer(contents,
-                                  loop_runner->QuitClosure(),
-                                  base::Closure());
-    interstitial = new TestInterstitialPage(contents, false, GURL());
-    loop_runner->Run();
-  }
+  TestInterstitialPage* interstitial =
+      new TestInterstitialPage(contents, false, GURL());
+  content::WaitForInterstitialAttach(contents);
 
   // The interstitial should have closed the dialog.
   EXPECT_TRUE(contents->ShowingInterstitialPage());
   EXPECT_FALSE(dialog_queue->HasActiveDialog());
 
-  {
-    scoped_refptr<content::MessageLoopRunner> loop_runner(
-        new content::MessageLoopRunner);
-
-    InterstitialObserver observer(contents,
-                                  base::Closure(),
-                                  loop_runner->QuitClosure());
-    interstitial->DontProceed();
-    loop_runner->Run();
-    // interstitial is deleted now.
-  }
+  // Don't proceed and wait for interstitial to detach. This doesn't destroy
+  // |contents|.
+  interstitial->DontProceed();
+  content::WaitForInterstitialDetach(contents);
+  // interstitial is deleted now.
 
   // Make sure input events still work in the renderer process.
   EXPECT_FALSE(contents->GetRenderProcessHost()->IgnoreInputEvents());
@@ -1981,31 +1926,16 @@ IN_PROC_BROWSER_TEST_F(BrowserTest, InterstitialClosesDialogs) {
 IN_PROC_BROWSER_TEST_F(BrowserTest, InterstitialCloseTab) {
   WebContents* contents = browser()->tab_strip_model()->GetActiveWebContents();
 
-  {
-    scoped_refptr<content::MessageLoopRunner> loop_runner(
-        new content::MessageLoopRunner);
-
-    InterstitialObserver observer(contents,
-                                  loop_runner->QuitClosure(),
-                                  base::Closure());
-    // Interstitial will delete itself when we close the tab.
-    new TestInterstitialPage(contents, false, GURL());
-    loop_runner->Run();
-  }
+  // Interstitial will delete itself when we close the tab.
+  new TestInterstitialPage(contents, false, GURL());
+  content::WaitForInterstitialAttach(contents);
 
   EXPECT_TRUE(contents->ShowingInterstitialPage());
 
-  {
-    scoped_refptr<content::MessageLoopRunner> loop_runner(
-        new content::MessageLoopRunner);
-
-    InterstitialObserver observer(contents,
-                                  base::Closure(),
-                                  loop_runner->QuitClosure());
-    chrome::CloseTab(browser());
-    loop_runner->Run();
-    // interstitial is deleted now.
-  }
+  // Close the tab and wait for interstitial detach. This destroys |contents|.
+  content::RunTaskAndWaitForInterstitialDetach(
+      contents, base::Bind(&chrome::CloseTab, browser()));
+  // interstitial is deleted now.
 }
 
 class MockWebContentsObserver : public WebContentsObserver {
@@ -2015,9 +1945,7 @@ class MockWebContentsObserver : public WebContentsObserver {
         got_user_gesture_(false) {
   }
 
-  virtual void DidGetUserGesture() OVERRIDE {
-    got_user_gesture_ = true;
-  }
+  void DidGetUserGesture() override { got_user_gesture_ = true; }
 
   bool got_user_gesture() const {
     return got_user_gesture_;
@@ -2194,7 +2122,7 @@ class KioskModeTest : public BrowserTest {
  public:
   KioskModeTest() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kKioskMode);
   }
 };
@@ -2219,7 +2147,7 @@ class LaunchBrowserWithNonAsciiUserDatadir : public BrowserTest {
  public:
   LaunchBrowserWithNonAsciiUserDatadir() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  virtual void SetUpCommandLine(CommandLine* command_line) override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     base::FilePath tmp_profile = temp_dir_.path().AppendASCII("tmp_profile");
     tmp_profile = tmp_profile.Append(L"Test Chrome G\u00E9raldine");
@@ -2244,7 +2172,7 @@ class RunInBackgroundTest : public BrowserTest {
  public:
   RunInBackgroundTest() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kKeepAliveForTest);
   }
 };
@@ -2274,9 +2202,14 @@ class NoStartupWindowTest : public BrowserTest {
  public:
   NoStartupWindowTest() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kNoStartupWindow);
     command_line->AppendSwitch(switches::kKeepAliveForTest);
+  }
+
+  // Returns true if any commands were processed.
+  bool ProcessedAnyCommands(BaseSessionService* base_session_service) {
+    return base_session_service->ProcessedAnyCommandsForTest();
   }
 };
 
@@ -2312,13 +2245,15 @@ IN_PROC_BROWSER_TEST_F(NoStartupWindowTest, DontInitSessionServiceForApps) {
 
   SessionService* session_service =
       SessionServiceFactory::GetForProfile(profile);
-  ASSERT_FALSE(session_service->processed_any_commands());
+  BaseSessionService* base_session_service =
+      session_service->GetBaseSessionServiceForTest();
+  ASSERT_FALSE(ProcessedAnyCommands(base_session_service));
 
   ui_test_utils::BrowserAddedObserver browser_added_observer;
   CreateBrowserForApp("blah", profile);
   browser_added_observer.WaitForSingleNewBrowser();
 
-  ASSERT_FALSE(session_service->processed_any_commands());
+  ASSERT_FALSE(ProcessedAnyCommands(base_session_service));
 }
 #endif  // !defined(OS_CHROMEOS)
 
@@ -2328,7 +2263,7 @@ class AppModeTest : public BrowserTest {
  public:
   AppModeTest() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     GURL url = ui_test_utils::GetTestUrl(
        base::FilePath(), base::FilePath().AppendASCII("title1.html"));
     command_line->AppendSwitchASCII(switches::kApp, url.spec());

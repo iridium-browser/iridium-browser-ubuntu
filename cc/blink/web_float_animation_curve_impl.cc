@@ -43,8 +43,19 @@ void WebFloatAnimationCurveImpl::add(const WebFloatKeyframe& keyframe,
   curve_->AddKeyframe(cc::FloatKeyframe::Create(
       keyframe.time,
       keyframe.value,
-      cc::CubicBezierTimingFunction::Create(x1, y1, x2, y2)
-          .PassAs<cc::TimingFunction>()));
+      cc::CubicBezierTimingFunction::Create(x1, y1, x2, y2)));
+}
+
+void WebFloatAnimationCurveImpl::setTimingFunction(TimingFunctionType type) {
+  curve_->SetTimingFunction(CreateTimingFunction(type));
+}
+
+void WebFloatAnimationCurveImpl::setTimingFunction(double x1,
+                                                   double y1,
+                                                   double x2,
+                                                   double y2) {
+  curve_->SetTimingFunction(
+      cc::CubicBezierTimingFunction::Create(x1, y1, x2, y2).Pass());
 }
 
 float WebFloatAnimationCurveImpl::getValue(double time) const {

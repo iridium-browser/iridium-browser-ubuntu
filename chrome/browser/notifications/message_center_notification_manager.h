@@ -29,6 +29,7 @@ class Notification;
 class PrefRegistrySimple;
 class PrefService;
 class Profile;
+class ProfileNotification;
 
 namespace message_center {
 class NotificationBlocker;
@@ -45,32 +46,30 @@ class MessageCenterNotificationManager
       message_center::MessageCenter* message_center,
       PrefService* local_state,
       scoped_ptr<message_center::NotifierSettingsProvider> settings_provider);
-  virtual ~MessageCenterNotificationManager();
+  ~MessageCenterNotificationManager() override;
 
   // Registers preferences.
   static void RegisterPrefs(PrefRegistrySimple* registry);
 
   // NotificationUIManager
-  virtual void Add(const Notification& notification,
-                   Profile* profile) OVERRIDE;
-  virtual bool Update(const Notification& notification,
-                      Profile* profile) OVERRIDE;
-  virtual const Notification* FindById(
-      const std::string& notification_id) const OVERRIDE;
-  virtual bool CancelById(const std::string& notification_id) OVERRIDE;
-  virtual std::set<std::string> GetAllIdsByProfileAndSourceOrigin(
+  void Add(const Notification& notification, Profile* profile) override;
+  bool Update(const Notification& notification, Profile* profile) override;
+  const Notification* FindById(const std::string& delegate_id,
+                               ProfileID profile_id) const override;
+  bool CancelById(const std::string& delegate_id,
+                  ProfileID profile_id) override;
+  std::set<std::string> GetAllIdsByProfileAndSourceOrigin(
       Profile* profile,
-      const GURL& source) OVERRIDE;
-  virtual bool CancelAllBySourceOrigin(const GURL& source_origin) OVERRIDE;
-  virtual bool CancelAllByProfile(Profile* profile) OVERRIDE;
-  virtual void CancelAll() OVERRIDE;
+      const GURL& source) override;
+  bool CancelAllBySourceOrigin(const GURL& source_origin) override;
+  bool CancelAllByProfile(ProfileID profile_id) override;
+  void CancelAll() override;
 
   // MessageCenterObserver
-  virtual void OnNotificationRemoved(const std::string& notification_id,
-                                     bool by_user) OVERRIDE;
-  virtual void OnCenterVisibilityChanged(message_center::Visibility) OVERRIDE;
-  virtual void OnNotificationUpdated(const std::string& notification_id)
-      OVERRIDE;
+  void OnNotificationRemoved(const std::string& notification_id,
+                             bool by_user) override;
+  void OnCenterVisibilityChanged(message_center::Visibility) override;
+  void OnNotificationUpdated(const std::string& notification_id) override;
 
   void EnsureMessageCenterClosed();
 
@@ -88,97 +87,19 @@ class MessageCenterNotificationManager
   void SetMessageCenterTrayDelegateForTest(
       message_center::MessageCenterTrayDelegate* delegate);
 
+  // Returns the notification id which this manager will use to add to message
+  // center, for this combination of delegate id and profile.
+  std::string GetMessageCenterNotificationIdForTest(
+      const std::string& delegate_id, Profile* profile);
+
  private:
+  // Adds |profile_notification| to an alternative provider extension or app.
+  void AddNotificationToAlternateProvider(
+      ProfileNotification* profile_notification,
+      const std::string& extension_id) const;
+
   FRIEND_TEST_ALL_PREFIXES(message_center::WebNotificationTrayTest,
                            ManuallyCloseMessageCenter);
-  class ImageDownloadsObserver {
-   public:
-    virtual void OnDownloadsCompleted() = 0;
-  };
-
-  typedef base::Callback<void(const gfx::Image&)> SetImageCallback;
-  class ImageDownloads
-      : public base::SupportsWeakPtr<ImageDownloads> {
-   public:
-    ImageDownloads(
-        message_center::MessageCenter* message_center,
-        ImageDownloadsObserver* observer);
-    virtual ~ImageDownloads();
-
-    void StartDownloads(const Notification& notification);
-    void StartDownloadWithImage(const Notification& notification,
-                                const gfx::Image* image,
-                                const GURL& url,
-                                const SetImageCallback& callback);
-    void StartDownloadByKey(const Notification& notification,
-                            const char* key,
-                            int size,
-                            const SetImageCallback& callback);
-
-    // FaviconHelper callback.
-    void DownloadComplete(const SetImageCallback& callback,
-                          int download_id,
-                          int http_status_code,
-                          const GURL& image_url,
-                          const std::vector<SkBitmap>& bitmaps,
-                          const std::vector<gfx::Size>& original_bitmap_sizes);
-   private:
-    // Used to keep track of the number of pending downloads.  Once this
-    // reaches zero, we can tell the delegate that we don't need the
-    // RenderViewHost anymore.
-    void AddPendingDownload();
-    void PendingDownloadCompleted();
-
-    // Weak reference to global message center.
-    message_center::MessageCenter* message_center_;
-
-    // Count of downloads that remain.
-    size_t pending_downloads_;
-
-    // Weak.
-    ImageDownloadsObserver* observer_;
-
-    DISALLOW_COPY_AND_ASSIGN(ImageDownloads);
-  };
-
-  // This class keeps a set of original Notification objects and corresponding
-  // Profiles, so when MessageCenter calls back with a notification_id, this
-  // class has necessary mapping to other source info - for example, it calls
-  // NotificationDelegate supplied by client when someone clicks on a
-  // Notification in MessageCenter. Likewise, if a Profile or Extension is
-  // being removed, the  map makes it possible to revoke the notifications from
-  // MessageCenter.   To keep that set, we use the private ProfileNotification
-  // class that stores  a superset of all information about a notification.
-
-  // TODO(dimich): Consider merging all 4 types (Notification,
-  // QueuedNotification, ProfileNotification and NotificationList::Notification)
-  // into a single class.
-  class ProfileNotification : public ImageDownloadsObserver {
-   public:
-    ProfileNotification(Profile* profile,
-                        const Notification& notification,
-                        message_center::MessageCenter* message_center);
-    virtual ~ProfileNotification();
-
-    void StartDownloads();
-
-    // Overridden from ImageDownloadsObserver.
-    virtual void OnDownloadsCompleted() OVERRIDE;
-
-    Profile* profile() const { return profile_; }
-    const Notification& notification() const { return notification_; }
-
-    // Route a new notification to an app/extension.
-    void AddToAlternateProvider(const std::string extension_id);
-
-   private:
-    // Weak, guaranteed not to be used after profile removal by parent class.
-    Profile* profile_;
-    Notification notification_;
-    // Track the downloads for this notification so the notification can be
-    // updated properly.
-    scoped_ptr<ImageDownloads> downloads_;
-  };
 
   scoped_ptr<message_center::MessageCenterTrayDelegate> tray_;
   message_center::MessageCenter* message_center_;  // Weak, global.

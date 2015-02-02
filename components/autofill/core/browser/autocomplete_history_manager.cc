@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "base/prefs/pref_service.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/browser/autofill_client.h"
@@ -53,6 +54,11 @@ AutocompleteHistoryManager::~AutocompleteHistoryManager() {
 void AutocompleteHistoryManager::OnWebDataServiceRequestDone(
     WebDataServiceBase::Handle h,
     const WDTypedResult* result) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422460 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422460 AutocompleteHistoryManager::OnWebDataServiceRequestDone"));
+
   DCHECK(pending_query_handle_);
   pending_query_handle_ = 0;
 
@@ -81,7 +87,7 @@ void AutocompleteHistoryManager::OnGetAutocompleteSuggestions(
     int query_id,
     const base::string16& name,
     const base::string16& prefix,
-    const std::string form_control_type,
+    const std::string& form_control_type,
     const std::vector<base::string16>& autofill_values,
     const std::vector<base::string16>& autofill_labels,
     const std::vector<base::string16>& autofill_icons,
@@ -120,6 +126,7 @@ void AutocompleteHistoryManager::OnFormSubmitted(const FormData& form) {
   //  - non-empty name
   //  - non-empty value
   //  - text field
+  //  - autocomplete is not disabled
   //  - value is not a credit card number
   //  - value is not a SSN
   std::vector<FormFieldData> values;
@@ -129,6 +136,7 @@ void AutocompleteHistoryManager::OnFormSubmitted(const FormData& form) {
     if (!iter->value.empty() &&
         !iter->name.empty() &&
         IsTextField(*iter) &&
+        iter->should_autocomplete &&
         !autofill::IsValidCreditCardNumber(iter->value) &&
         !autofill::IsSSN(iter->value)) {
       values.push_back(*iter);

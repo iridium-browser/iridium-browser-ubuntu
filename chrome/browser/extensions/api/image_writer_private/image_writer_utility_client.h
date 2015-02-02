@@ -54,16 +54,16 @@ class ImageWriterUtilityClient : public content::UtilityProcessHostClient {
 
  protected:
   // It's a reference-counted object, so destructor is not public.
-  virtual ~ImageWriterUtilityClient();
+  ~ImageWriterUtilityClient() override;
 
  private:
   // Ensures the UtilityProcessHost has been created.
   void StartHost();
 
   // UtilityProcessHostClient implementation.
-  virtual void OnProcessCrashed(int exit_code) OVERRIDE;
-  virtual void OnProcessLaunchFailed() OVERRIDE;
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  void OnProcessCrashed(int exit_code) override;
+  void OnProcessLaunchFailed() override;
+  bool OnMessageReceived(const IPC::Message& message) override;
   virtual bool Send(IPC::Message* msg);
 
   // IPC message handlers.

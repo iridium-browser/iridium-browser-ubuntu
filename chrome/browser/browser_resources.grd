@@ -19,9 +19,6 @@
       </if>
       <structure name="IDR_ABOUT_MEMORY_CSS" file="resources\about_memory.css" type="chrome_html" />
       <structure name="IDR_ABOUT_VERSION_HTML" file="resources\about_version.html" flattenhtml="true" allowexternalscript="true" type="chrome_html" />
-      <if expr="is_android">
-        <structure name="IDR_ABOUT_WELCOME_HTML" file="resources\about_welcome_android\about_welcome_android.html" flattenhtml="true" type="chrome_html" />
-      </if>
       <if expr="enable_app_list">
         <structure name="IDR_APP_LIST_START_PAGE_CSS" file="resources\app_list\start_page.css" flattenhtml="true" type="chrome_html" />
         <structure name="IDR_APP_LIST_START_PAGE_HTML" file="resources\app_list\start_page.html" flattenhtml="true" type="chrome_html" />
@@ -79,9 +76,11 @@
         <!-- TODO(dzhioev): move polymer to chrome://resources when
              http://crbug.com/418199 is fixed. -->
         <part file="polymer_resources.grdp" />
+        <structure name="IDR_CUSTOM_ELEMENTS_HTML" file="resources\chromeos\login\custom_elements.html" flattenhtml="true" type="chrome_html" />
+        <structure name="IDR_CUSTOM_ELEMENTS_JS" file="resources\chromeos\login\custom_elements.js" flattenhtml="true" type="chrome_html" />
       </if>
       <structure name="IDR_READER_OUT_OF_DATE_HTML" file="resources\reader_out_of_date.html" flattenhtml="true" type="chrome_html" />
-      <structure name="IRD_SECURITY_INTERSTITIAL_HTML" file="resources\security_warnings\interstitial_v2.html" flattenhtml="true" type="chrome_html" />
+      <structure name="IDR_SECURITY_INTERSTITIAL_HTML" file="resources\security_warnings\interstitial_v2.html" flattenhtml="true" type="chrome_html" />
     </structures>
     <includes>
       <if expr="is_win">
@@ -170,9 +169,12 @@
       <include name="IDR_HISTORY_JS" file="resources\history\history.js" flattenhtml="true" type="BINDATA" />
       <include name="IDR_OTHER_DEVICES_JS" file="resources\history\other_devices.js" flattenhtml="true" type="BINDATA" />
       <include name="IDR_IDENTITY_API_SCOPE_APPROVAL_MANIFEST" file="resources\identity_scope_approval_dialog\manifest.json" type="BINDATA" />
+      <include name="IDR_NEW_INLINE_LOGIN_HTML" file="resources\inline_login\new_inline_login.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
       <include name="IDR_INLINE_LOGIN_HTML" file="resources\inline_login\inline_login.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
       <include name="IDR_INLINE_LOGIN_CSS" file="resources\inline_login\inline_login.css" flattenhtml="true" type="BINDATA" />
       <include name="IDR_INLINE_LOGIN_JS" file="resources\inline_login\inline_login.js" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_GAIA_AUTH_AUTHENTICATOR_JS" file="resources\gaia_auth_host\authenticator.js" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_GAIA_AUTH_HOST_JS" file="resources\gaia_auth_host\gaia_auth_host.js" flattenhtml="true" type="BINDATA" />
       <include name="IDR_INSPECT_CSS" file="resources\inspect\inspect.css" flattenhtml="true" type="BINDATA" />
       <include name="IDR_INSPECT_HTML" file="resources\inspect\inspect.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
       <include name="IDR_INSPECT_JS" file="resources\inspect\inspect.js" flattenhtml="true" type="BINDATA" />
@@ -251,7 +253,7 @@
       <include name="IDR_POLICY_HTML" file="resources\policy.html" flattenhtml="true" allowexternalscript="true" type="BINDATA"/>
       <include name="IDR_POLICY_JS" file="resources\policy.js" type="BINDATA"/>
       <include name="IDR_PRERENDER_URL_WHITELIST" file="resources\prerender_url_whitelist.dat" type="BINDATA"/>
-      <if expr="enable_full_printing">
+      <if expr="enable_print_preview">
         <include name="IDR_PRINT_PREVIEW_HTML" file="resources\print_preview\print_preview.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
         <include name="IDR_PRINT_PREVIEW_PAGE" file="resources\print_preview\print_preview_page.html" flattenhtml="true" allowexternalscript="false" type="BINDATA" />
         <include name="IDR_PRINT_PREVIEW_JS" file="resources\print_preview\print_preview.js" flattenhtml="true" type="BINDATA" />
@@ -323,7 +325,6 @@
         <include name="IDR_PROVIDED_FILE_SYSTEMS_JS" file="resources\chromeos\provided_file_systems.js" flattenhtml="true" type="BINDATA" />
          <include name="IDR_GUEST_SESSION_TAB_HTML" file="resources\chromeos\guest_session_tab.html" flattenhtml="true" type="BINDATA" />
         <include name="IDR_IMAGEBURNER_HTML" file="resources\chromeos\image_burner.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
-        <include name="IDR_IMAGEBURNER_JS" file="resources\chromeos\image_burner.js" type="BINDATA" />
         <include name="IDR_KEYBOARD_OVERLAY_CSS" file="resources\chromeos\keyboard_overlay.css" flattenhtml="true" type="BINDATA" />
         <include name="IDR_KEYBOARD_OVERLAY_HTML" file="resources\chromeos\keyboard_overlay.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
         <include name="IDR_KEYBOARD_OVERLAY_JS" file="resources\chromeos\keyboard_overlay.js" flattenhtml="true" type="BINDATA" />

@@ -44,6 +44,50 @@ IN_PROC_BROWSER_TEST_F(AppListControllerBrowserTest, CreateNewWindow) {
       browser()->profile()->GetOffTheRecordProfile(), desktop));
 }
 
+// Test creating the app list for an incognito version of the current profile.
+IN_PROC_BROWSER_TEST_F(AppListControllerBrowserTest, RegularThenIncognito) {
+  AppListService* service = test::GetAppListService();
+  // On Ash, the app list always has a profile.
+  if (chrome::GetActiveDesktop() == chrome::HOST_DESKTOP_TYPE_ASH)
+    EXPECT_TRUE(service->GetCurrentAppListProfile());
+  else
+    EXPECT_FALSE(service->GetCurrentAppListProfile());
+
+  service->ShowForProfile(browser()->profile());
+  EXPECT_EQ(browser()->profile(), service->GetCurrentAppListProfile());
+
+  AppListControllerDelegate* controller = service->GetControllerDelegate();
+  service->ShowForProfile(browser()->profile()->GetOffTheRecordProfile());
+
+  // Should be showing the same profile.
+  EXPECT_EQ(browser()->profile(), service->GetCurrentAppListProfile());
+
+  // Should not have been reconstructed.
+  EXPECT_EQ(controller, service->GetControllerDelegate());
+
+  // Same set of tests using ShowForAppInstall, which the webstore uses and was
+  // traditionally where issues with incognito-mode app launchers started. Pass
+  // true for start_discovery_tracking to emulate what the webstore does on the
+  // first app install, to cover AppListServiceImpl::CreateForProfile().
+  service->ShowForAppInstall(
+      browser()->profile()->GetOffTheRecordProfile(), "", true);
+  EXPECT_EQ(browser()->profile(), service->GetCurrentAppListProfile());
+  EXPECT_EQ(controller, service->GetControllerDelegate());
+}
+
+// Test creating the initial app list for incognito profile.
+IN_PROC_BROWSER_TEST_F(AppListControllerBrowserTest, Incognito) {
+  AppListService* service = test::GetAppListService();
+  if (chrome::GetActiveDesktop() == chrome::HOST_DESKTOP_TYPE_ASH)
+    EXPECT_TRUE(service->GetCurrentAppListProfile());
+  else
+    EXPECT_FALSE(service->GetCurrentAppListProfile());
+
+  service->ShowForProfile(browser()->profile()->GetOffTheRecordProfile());
+  // Initial load should have picked the non-incongito profile.
+  EXPECT_EQ(browser()->profile(), service->GetCurrentAppListProfile());
+}
+
 // Browser Test for AppListController that observes search result changes.
 class AppListControllerSearchResultsBrowserTest
     : public ExtensionBrowserTest,
@@ -90,25 +134,25 @@ class AppListControllerSearchResultsBrowserTest
   }
 
   // Overridden from SearchResultObserver:
-  virtual void OnIconChanged() OVERRIDE {}
-  virtual void OnActionsChanged() OVERRIDE {}
-  virtual void OnIsInstallingChanged() OVERRIDE {}
-  virtual void OnPercentDownloadedChanged() OVERRIDE {}
-  virtual void OnItemInstalled() OVERRIDE {}
-  virtual void OnItemUninstalled() OVERRIDE {
+  void OnIconChanged() override {}
+  void OnActionsChanged() override {}
+  void OnIsInstallingChanged() override {}
+  void OnPercentDownloadedChanged() override {}
+  void OnItemInstalled() override {}
+  void OnItemUninstalled() override {
     ++item_uninstall_count_;
     EXPECT_TRUE(observed_result_);
   }
 
   // Overridden from ui::ListModelObserver:
-  virtual void ListItemsAdded(size_t start, size_t count) OVERRIDE {
+  void ListItemsAdded(size_t start, size_t count) override {
     AttemptToLocateItem();
   }
-  virtual void ListItemsRemoved(size_t start, size_t count) OVERRIDE {
+  void ListItemsRemoved(size_t start, size_t count) override {
     AttemptToLocateItem();
   }
-  virtual void ListItemMoved(size_t index, size_t target_index) OVERRIDE {}
-  virtual void ListItemsChanged(size_t start, size_t count) OVERRIDE {}
+  void ListItemMoved(size_t index, size_t target_index) override {}
+  void ListItemsChanged(size_t start, size_t count) override {}
 
   app_list::SearchResult* observed_result_;
   int item_uninstall_count_;

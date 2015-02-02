@@ -28,12 +28,12 @@ class TokenValidatorFactoryImpl : public protocol::TokenValidatorFactory {
       scoped_refptr<RsaKeyPair> key_pair,
       scoped_refptr<net::URLRequestContextGetter> request_context_getter);
 
-  virtual ~TokenValidatorFactoryImpl();
+  ~TokenValidatorFactoryImpl() override;
 
   // TokenValidatorFactory interface.
-  virtual scoped_ptr<protocol::TokenValidator> CreateTokenValidator(
+  scoped_ptr<protocol::TokenValidator> CreateTokenValidator(
       const std::string& local_jid,
-      const std::string& remote_jid) OVERRIDE;
+      const std::string& remote_jid) override;
 
  private:
   ThirdPartyAuthConfig third_party_auth_config_;

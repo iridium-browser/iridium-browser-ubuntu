@@ -39,6 +39,7 @@
 #include "core/css/StyleRule.h"
 #include "core/css/StyleSheetContents.h"
 #include "core/dom/Document.h"
+#include "core/frame/UseCounter.h"
 #include "wtf/FastMalloc.h"
 #include <stdlib.h>
 #include <string.h>
@@ -411,9 +412,7 @@ internal_decls:
 internal_value:
     INTERNAL_VALUE_SYM maybe_space expr TOKEN_EOF {
         parser->m_valueList = parser->sinkFloatingValueList($3);
-        int oldParsedProperties = parser->m_parsedProperties.size();
-        if (!parser->parseValue(parser->m_id, parser->m_important))
-            parser->rollbackLastProperties(parser->m_parsedProperties.size() - oldParsedProperties);
+        parser->parseValue(parser->m_id, parser->m_important);
         parser->m_valueList = nullptr;
     }
 ;
@@ -604,12 +603,19 @@ STRING
 | URI
 ;
 
+before_media_value_expr:
+    /* empty */ {
+        parser->startMediaValue();
+    }
+    ;
+
 maybe_media_value:
     /*empty*/ {
         $$ = 0;
     }
-    | ':' maybe_space expr {
-        $$ = $3;
+    | ':' maybe_space before_media_value_expr expr {
+        $$ = $4;
+        parser->endMediaValue();
     }
     ;
 
@@ -657,13 +663,19 @@ maybe_media_restrictor:
     }
     ;
 
-valid_media_query:
-    media_query_exp_list maybe_space {
-        $$ = parser->createFloatingMediaQuery(parser->sinkFloatingMediaQueryExpList($1));
+before_media_query:
+    /* empty */ {
+        parser->startMediaQuery();
     }
-    | maybe_media_restrictor medium maybe_and_media_query_exp_list {
-        parser->tokenToLowerCase($2);
-        $$ = parser->createFloatingMediaQuery($1, $2, parser->sinkFloatingMediaQueryExpList($3));
+    ;
+
+valid_media_query:
+    before_media_query media_query_exp_list maybe_space {
+        $$ = parser->createFloatingMediaQuery(parser->sinkFloatingMediaQueryExpList($2));
+    }
+    | before_media_query maybe_media_restrictor medium maybe_and_media_query_exp_list {
+        parser->tokenToLowerCase($3);
+        $$ = parser->createFloatingMediaQuery($2, $3, parser->sinkFloatingMediaQueryExpList($4));
     }
     ;
 
@@ -849,7 +861,10 @@ keyframes:
 
 keyframe_name:
     IDENT
-    | STRING
+    | STRING {
+        if (parser->m_context.useCounter())
+            parser->m_context.useCounter()->count(UseCounter::QuotedKeyframesRule);
+    }
     ;
 
 keyframes_rule:
@@ -1266,7 +1281,7 @@ attrib:
     '[' maybe_space attr_name closing_square_bracket {
         $$ = parser->createFloatingSelector();
         $$->setAttribute(QualifiedName(nullAtom, $3, nullAtom), CSSSelector::CaseSensitive);
-        $$->setMatch(CSSSelector::Set);
+        $$->setMatch(CSSSelector::AttributeSet);
     }
     | '[' maybe_space attr_name match maybe_space ident_or_string maybe_space maybe_attr_match_type closing_square_bracket {
         $$ = parser->createFloatingSelector();
@@ -1277,7 +1292,7 @@ attrib:
     | '[' maybe_space namespace_selector attr_name closing_square_bracket {
         $$ = parser->createFloatingSelector();
         $$->setAttribute(parser->determineNameInNamespace($3, $4), CSSSelector::CaseSensitive);
-        $$->setMatch(CSSSelector::Set);
+        $$->setMatch(CSSSelector::AttributeSet);
     }
     | '[' maybe_space namespace_selector attr_name match maybe_space ident_or_string maybe_space maybe_attr_match_type closing_square_bracket {
         $$ = parser->createFloatingSelector();
@@ -1292,22 +1307,22 @@ attrib:
 
 match:
     '=' {
-        $$ = CSSSelector::Exact;
+        $$ = CSSSelector::AttributeExact;
     }
     | INCLUDES {
-        $$ = CSSSelector::List;
+        $$ = CSSSelector::AttributeList;
     }
     | DASHMATCH {
-        $$ = CSSSelector::Hyphen;
+        $$ = CSSSelector::AttributeHyphen;
     }
     | BEGINSWITH {
-        $$ = CSSSelector::Begin;
+        $$ = CSSSelector::AttributeBegin;
     }
     | ENDSWITH {
-        $$ = CSSSelector::End;
+        $$ = CSSSelector::AttributeEnd;
     }
     | CONTAINS {
-        $$ = CSSSelector::Contain;
+        $$ = CSSSelector::AttributeContain;
     }
     ;
 
@@ -1506,12 +1521,10 @@ declaration:
         bool isPropertyParsed = false;
         if ($1 != CSSPropertyInvalid) {
             parser->m_valueList = parser->sinkFloatingValueList($5);
-            int oldParsedProperties = parser->m_parsedProperties.size();
             $$ = parser->parseValue($1, $6);
-            if (!$$) {
-                parser->rollbackLastProperties(parser->m_parsedProperties.size() - oldParsedProperties);
+            if (!$$)
                 parser->reportError($4, InvalidPropertyValueCSSError);
-            } else
+            else
                 isPropertyParsed = true;
             parser->m_valueList = nullptr;
         }

@@ -48,8 +48,4 @@ bool RenderViewHostDelegate::IsNeverVisible() {
   return false;
 }
 
-bool RenderViewHostDelegate::IsVirtualKeyboardRequested() {
-  return false;
-}
-
 }  // namespace content

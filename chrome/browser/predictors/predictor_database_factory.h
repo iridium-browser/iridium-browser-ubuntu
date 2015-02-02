@@ -27,11 +27,11 @@ class PredictorDatabaseFactory : public BrowserContextKeyedServiceFactory {
   friend struct DefaultSingletonTraits<PredictorDatabaseFactory>;
 
   PredictorDatabaseFactory();
-  virtual ~PredictorDatabaseFactory();
+  ~PredictorDatabaseFactory() override;
 
   // BrowserContextKeyedServiceFactory:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* profile) const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* profile) const override;
 
   DISALLOW_COPY_AND_ASSIGN(PredictorDatabaseFactory);
 };

@@ -11,10 +11,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "content/public/browser/web_contents_observer.h"
 
-namespace extensions {
-class AppWindow;
-}
-
 namespace views {
 class WebView;
 }
@@ -25,49 +21,47 @@ class AppActivityRegistry;
 class ContentProxy;
 
 // The activity object for a hosted V2 application.
-// TODO(oshima): Move this to athena/extensions
 class AppActivity : public Activity,
                     public ActivityViewModel,
                     public content::WebContentsObserver {
  public:
-  AppActivity(extensions::AppWindow* app_window, views::WebView* web_view);
+  AppActivity(const std::string& app_id, views::WebView* web_view);
 
   // Gets the content proxy so that the AppActivityProxy can take it over.
   scoped_ptr<ContentProxy> GetContentProxy();
 
   // Activity:
-  virtual athena::ActivityViewModel* GetActivityViewModel() OVERRIDE;
-  virtual void SetCurrentState(Activity::ActivityState state) OVERRIDE;
-  virtual ActivityState GetCurrentState() OVERRIDE;
-  virtual bool IsVisible() OVERRIDE;
-  virtual ActivityMediaState GetMediaState() OVERRIDE;
-  virtual aura::Window* GetWindow() OVERRIDE;
-  virtual content::WebContents* GetWebContents() OVERRIDE;
+  athena::ActivityViewModel* GetActivityViewModel() override;
+  void SetCurrentState(Activity::ActivityState state) override;
+  ActivityState GetCurrentState() override;
+  bool IsVisible() override;
+  ActivityMediaState GetMediaState() override;
+  aura::Window* GetWindow() override;
+  content::WebContents* GetWebContents() override;
 
   // ActivityViewModel:
-  virtual void Init() OVERRIDE;
-  virtual SkColor GetRepresentativeColor() const OVERRIDE;
-  virtual base::string16 GetTitle() const OVERRIDE;
-  virtual gfx::ImageSkia GetIcon() const OVERRIDE;
-  virtual bool UsesFrame() const OVERRIDE;
-  virtual views::Widget* CreateWidget() OVERRIDE;
-  virtual views::View* GetContentsView() OVERRIDE;
-  virtual gfx::ImageSkia GetOverviewModeImage() OVERRIDE;
-  virtual void PrepareContentsForOverview() OVERRIDE;
-  virtual void ResetContentsView() OVERRIDE;
+  void Init() override;
+  SkColor GetRepresentativeColor() const override;
+  base::string16 GetTitle() const override;
+  gfx::ImageSkia GetIcon() const override;
+  void SetActivityView(ActivityView* activity_view) override;
+  bool UsesFrame() const override;
+  views::View* GetContentsView() override;
+  gfx::ImageSkia GetOverviewModeImage() override;
+  void PrepareContentsForOverview() override;
+  void ResetContentsView() override;
 
  protected:
   // Constructor for test.
   explicit AppActivity(const std::string& app_id);
 
-  virtual ~AppActivity();
+  ~AppActivity() override;
 
  private:
  // content::WebContentsObserver:
-  virtual void TitleWasSet(content::NavigationEntry* entry,
-                           bool explicit_set) OVERRIDE;
-  virtual void DidUpdateFaviconURL(
-      const std::vector<content::FaviconURL>& candidates) OVERRIDE;
+  void TitleWasSet(content::NavigationEntry* entry, bool explicit_set) override;
+  void DidUpdateFaviconURL(
+      const std::vector<content::FaviconURL>& candidates) override;
 
   // Register this activity with its application.
   void RegisterActivity();
@@ -92,6 +86,11 @@ class AppActivity : public Activity,
 
   // The content proxy.
   scoped_ptr<ContentProxy> content_proxy_;
+
+  // WebActivity does not take ownership of |activity_view_|. If the view is
+  // destroyed before the activity, then it must be reset using
+  // SetActivityView(nullptr).
+  ActivityView* activity_view_;
 
   DISALLOW_COPY_AND_ASSIGN(AppActivity);
 };

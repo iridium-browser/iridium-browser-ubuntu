@@ -62,6 +62,7 @@ typedef uint32_t SkFontID;
 
 namespace blink {
 
+class Font;
 class GraphicsContext;
 class HarfBuzzFace;
 
@@ -76,13 +77,13 @@ public:
     FontPlatformData();
     FontPlatformData(const FontPlatformData&);
     FontPlatformData(float size, bool syntheticBold, bool syntheticItalic, FontOrientation = Horizontal, FontWidthVariant = RegularWidth);
+    FontPlatformData(const FontPlatformData& src, float textSize);
 #if OS(MACOSX)
     FontPlatformData(NSFont*, float size, bool syntheticBold = false, bool syntheticItalic = false,
                      FontOrientation = Horizontal, FontWidthVariant = RegularWidth);
-    FontPlatformData(CGFontRef, float size, bool syntheticBold, bool syntheticOblique, FontOrientation, FontWidthVariant);
+    FontPlatformData(CGFontRef, PassRefPtr<SkTypeface>, float size, bool syntheticBold, bool syntheticOblique, FontOrientation, FontWidthVariant);
 #else
     FontPlatformData(PassRefPtr<SkTypeface>, const char* name, float textSize, bool syntheticBold, bool syntheticItalic, FontOrientation = Horizontal, bool subpixelTextPosition = defaultUseSubpixelPositioning());
-    FontPlatformData(const FontPlatformData& src, float textSize);
 #endif
     ~FontPlatformData();
 
@@ -142,8 +143,8 @@ public:
 #if !OS(MACOSX)
     // The returned styles are all actual styles without FontRenderStyle::NoPreference.
     const FontRenderStyle& fontRenderStyle() const { return m_style; }
-    void setupPaint(SkPaint*, GraphicsContext* = 0) const;
 #endif
+    void setupPaint(SkPaint*, GraphicsContext* = 0, const Font* = 0) const;
 
 #if OS(WIN)
     int paintTextFlags() const { return m_paintTextFlags; }

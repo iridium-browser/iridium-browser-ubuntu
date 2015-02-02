@@ -151,7 +151,7 @@ class ObfuscatedFileUtilTest : public testing::Test {
         quota_status_(storage::kQuotaStatusUnknown),
         usage_(-1) {}
 
-  virtual void SetUp() {
+  void SetUp() override {
     ASSERT_TRUE(data_dir_.CreateUniqueTempDir());
 
     storage_policy_ = new MockSpecialStoragePolicy();
@@ -177,7 +177,7 @@ class ObfuscatedFileUtilTest : public testing::Test {
         storage::MockFileChangeObserver::CreateList(&change_observer_);
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     quota_manager_ = NULL;
     sandbox_file_system_.TearDown();
   }
@@ -709,8 +709,8 @@ class ObfuscatedFileUtilTest : public testing::Test {
     ASSERT_TRUE(db != NULL);
 
     // Destory it.
-    ASSERT_TRUE(file_util->DestroyDirectoryDatabase(
-        url.origin(), GetTypeString(url.type())));
+    file_util->DestroyDirectoryDatabase(
+        url.origin(), GetTypeString(url.type()));
     ASSERT_TRUE(file_util->directories_.empty());
   }
 
@@ -1784,7 +1784,7 @@ TEST_F(ObfuscatedFileUtilTest, TestIncompleteDirectoryReading) {
   const FileSystemURL empty_path = CreateURL(base::FilePath());
   scoped_ptr<FileSystemOperationContext> context;
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kPath); ++i) {
+  for (size_t i = 0; i < arraysize(kPath); ++i) {
     bool created = false;
     context.reset(NewContext(NULL));
     EXPECT_EQ(base::File::FILE_OK,
@@ -1807,7 +1807,7 @@ TEST_F(ObfuscatedFileUtilTest, TestIncompleteDirectoryReading) {
   EXPECT_EQ(base::File::FILE_OK,
             AsyncFileTestHelper::ReadDirectory(
                 file_system_context(), empty_path, &entries));
-  EXPECT_EQ(ARRAYSIZE_UNSAFE(kPath) - 1, entries.size());
+  EXPECT_EQ(arraysize(kPath) - 1, entries.size());
 }
 
 TEST_F(ObfuscatedFileUtilTest, TestDirectoryTimestampForCreation) {
@@ -2187,7 +2187,6 @@ TEST_F(ObfuscatedFileUtilTest, TestQuotaOnMoveFile) {
                 from_file, from_file_size));
   ASSERT_EQ(expected_total_file_size, ComputeTotalFileSize());
 
-  int64 to_file_size ALLOW_UNUSED = from_file_size;
   from_file_size = 0;
   ASSERT_EQ(base::File::FILE_OK,
             ofu()->CopyOrMoveFile(
@@ -2448,6 +2447,125 @@ TEST_F(ObfuscatedFileUtilTest, CreateDirectory_NotADirectoryInRecursive) {
                                    path_in_file_in_file,
                                    false /* exclusive */,
                                    true /* recursive */));
+}
+
+TEST_F(ObfuscatedFileUtilTest, DeleteDirectoryForOriginAndType) {
+  const GURL origin1("http://www.example.com:12");
+  const GURL origin2("http://www.example.com:1234");
+
+  // Create origin directories.
+  scoped_ptr<SandboxFileSystemTestHelper> fs1(
+      NewFileSystem(origin1, kFileSystemTypeTemporary));
+  scoped_ptr<SandboxFileSystemTestHelper> fs2(
+      NewFileSystem(origin1, kFileSystemTypePersistent));
+  scoped_ptr<SandboxFileSystemTestHelper> fs3(
+      NewFileSystem(origin2, kFileSystemTypeTemporary));
+  scoped_ptr<SandboxFileSystemTestHelper> fs4(
+      NewFileSystem(origin2, kFileSystemTypePersistent));
+
+  // Make sure directories for origin1 exist.
+  base::File::Error error = base::File::FILE_ERROR_FAILED;
+  ofu()->GetDirectoryForOriginAndType(
+      origin1, GetTypeString(kFileSystemTypeTemporary), false, &error);
+  ASSERT_EQ(base::File::FILE_OK, error);
+  error = base::File::FILE_ERROR_FAILED;
+  ofu()->GetDirectoryForOriginAndType(
+      origin1, GetTypeString(kFileSystemTypePersistent), false, &error);
+  ASSERT_EQ(base::File::FILE_OK, error);
+
+  // Make sure directories for origin2 exist.
+  error = base::File::FILE_ERROR_FAILED;
+  ofu()->GetDirectoryForOriginAndType(
+      origin2, GetTypeString(kFileSystemTypeTemporary), false, &error);
+  ASSERT_EQ(base::File::FILE_OK, error);
+  error = base::File::FILE_ERROR_FAILED;
+  ofu()->GetDirectoryForOriginAndType(
+      origin2, GetTypeString(kFileSystemTypePersistent), false, &error);
+  ASSERT_EQ(base::File::FILE_OK, error);
+
+  // Delete a directory for origin1's persistent filesystem.
+  ofu()->DeleteDirectoryForOriginAndType(
+      origin1, GetTypeString(kFileSystemTypePersistent));
+
+  // The directory for origin1's temporary filesystem should not be removed.
+  error = base::File::FILE_ERROR_FAILED;
+  ofu()->GetDirectoryForOriginAndType(
+      origin1, GetTypeString(kFileSystemTypeTemporary), false, &error);
+  ASSERT_EQ(base::File::FILE_OK, error);
+
+  // The directory for origin1's persistent filesystem should be removed.
+  error = base::File::FILE_ERROR_FAILED;
+  ofu()->GetDirectoryForOriginAndType(
+      origin1, GetTypeString(kFileSystemTypePersistent), false, &error);
+  ASSERT_EQ(base::File::FILE_ERROR_NOT_FOUND, error);
+
+  // The directories for origin2 should not be removed.
+  error = base::File::FILE_ERROR_FAILED;
+  ofu()->GetDirectoryForOriginAndType(
+      origin2, GetTypeString(kFileSystemTypeTemporary), false, &error);
+  ASSERT_EQ(base::File::FILE_OK, error);
+  error = base::File::FILE_ERROR_FAILED;
+  ofu()->GetDirectoryForOriginAndType(
+      origin2, GetTypeString(kFileSystemTypePersistent), false, &error);
+  ASSERT_EQ(base::File::FILE_OK, error);
+}
+
+TEST_F(ObfuscatedFileUtilTest, DeleteDirectoryForOriginAndType_DeleteAll) {
+  const GURL origin1("http://www.example.com:12");
+  const GURL origin2("http://www.example.com:1234");
+
+  // Create origin directories.
+  scoped_ptr<SandboxFileSystemTestHelper> fs1(
+      NewFileSystem(origin1, kFileSystemTypeTemporary));
+  scoped_ptr<SandboxFileSystemTestHelper> fs2(
+      NewFileSystem(origin1, kFileSystemTypePersistent));
+  scoped_ptr<SandboxFileSystemTestHelper> fs3(
+      NewFileSystem(origin2, kFileSystemTypeTemporary));
+  scoped_ptr<SandboxFileSystemTestHelper> fs4(
+      NewFileSystem(origin2, kFileSystemTypePersistent));
+
+  // Make sure directories for origin1 exist.
+  base::File::Error error = base::File::FILE_ERROR_FAILED;
+  ofu()->GetDirectoryForOriginAndType(
+      origin1, GetTypeString(kFileSystemTypeTemporary), false, &error);
+  ASSERT_EQ(base::File::FILE_OK, error);
+  error = base::File::FILE_ERROR_FAILED;
+  ofu()->GetDirectoryForOriginAndType(
+      origin1, GetTypeString(kFileSystemTypePersistent), false, &error);
+  ASSERT_EQ(base::File::FILE_OK, error);
+
+  // Make sure directories for origin2 exist.
+  error = base::File::FILE_ERROR_FAILED;
+  ofu()->GetDirectoryForOriginAndType(
+      origin2, GetTypeString(kFileSystemTypeTemporary), false, &error);
+  ASSERT_EQ(base::File::FILE_OK, error);
+  error = base::File::FILE_ERROR_FAILED;
+  ofu()->GetDirectoryForOriginAndType(
+      origin2, GetTypeString(kFileSystemTypePersistent), false, &error);
+  ASSERT_EQ(base::File::FILE_OK, error);
+
+  // Delete all directories for origin1.
+  ofu()->DeleteDirectoryForOriginAndType(origin1, std::string());
+
+  // The directories for origin1 should be removed.
+  error = base::File::FILE_ERROR_FAILED;
+  ofu()->GetDirectoryForOriginAndType(
+      origin1, GetTypeString(kFileSystemTypeTemporary), false, &error);
+  ASSERT_EQ(base::File::FILE_ERROR_NOT_FOUND, error);
+  error = base::File::FILE_ERROR_FAILED;
+  ofu()->GetDirectoryForOriginAndType(
+      origin1, GetTypeString(kFileSystemTypePersistent), false, &error);
+  ASSERT_EQ(base::File::FILE_ERROR_NOT_FOUND, error);
+
+  // The directories for origin2 should not be removed.
+  error = base::File::FILE_ERROR_FAILED;
+  ofu()->GetDirectoryForOriginAndType(
+      origin2, GetTypeString(kFileSystemTypeTemporary), false, &error);
+  ASSERT_EQ(base::File::FILE_OK, error);
+  error = base::File::FILE_ERROR_FAILED;
+  ofu()->GetDirectoryForOriginAndType(
+      origin2, GetTypeString(kFileSystemTypePersistent), false, &error);
+  ASSERT_EQ(base::File::FILE_OK, error);
 }
 
 }  // namespace content

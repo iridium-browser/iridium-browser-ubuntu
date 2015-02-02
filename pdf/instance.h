@@ -62,48 +62,48 @@ class Instance : public pp::InstancePrivate,
   // pp::Instance implementation.
   virtual bool Init(uint32_t argc,
                     const char* argn[],
-                    const char* argv[]) OVERRIDE;
-  virtual bool HandleDocumentLoad(const pp::URLLoader& loader) OVERRIDE;
-  virtual bool HandleInputEvent(const pp::InputEvent& event) OVERRIDE;
-  virtual void DidChangeView(const pp::View& view) OVERRIDE;
-  virtual pp::Var GetInstanceObject() OVERRIDE;
+                    const char* argv[]) override;
+  virtual bool HandleDocumentLoad(const pp::URLLoader& loader) override;
+  virtual bool HandleInputEvent(const pp::InputEvent& event) override;
+  virtual void DidChangeView(const pp::View& view) override;
+  virtual pp::Var GetInstanceObject() override;
 
   // pp::Find_Private implementation.
-  virtual bool StartFind(const std::string& text, bool case_sensitive) OVERRIDE;
-  virtual void SelectFindResult(bool forward) OVERRIDE;
-  virtual void StopFind() OVERRIDE;
+  virtual bool StartFind(const std::string& text, bool case_sensitive) override;
+  virtual void SelectFindResult(bool forward) override;
+  virtual void StopFind() override;
 
   // pp::PaintManager::Client implementation.
   virtual void OnPaint(const std::vector<pp::Rect>& paint_rects,
                        std::vector<PaintManager::ReadyRect>* ready,
-                       std::vector<pp::Rect>* pending) OVERRIDE;
+                       std::vector<pp::Rect>* pending) override;
 
   // pp::Printing_Dev implementation.
-  virtual uint32_t QuerySupportedPrintOutputFormats() OVERRIDE;
+  virtual uint32_t QuerySupportedPrintOutputFormats() override;
   virtual int32_t PrintBegin(
-      const PP_PrintSettings_Dev& print_settings) OVERRIDE;
+      const PP_PrintSettings_Dev& print_settings) override;
   virtual pp::Resource PrintPages(
       const PP_PrintPageNumberRange_Dev* page_ranges,
-      uint32_t page_range_count) OVERRIDE;
-  virtual void PrintEnd() OVERRIDE;
-  virtual bool IsPrintScalingDisabled() OVERRIDE;
+      uint32_t page_range_count) override;
+  virtual void PrintEnd() override;
+  virtual bool IsPrintScalingDisabled() override;
 
   // pp::Private implementation.
   virtual pp::Var GetLinkAtPosition(const pp::Point& point);
 
   // PPP_Selection_Dev implementation.
-  virtual pp::Var GetSelectedText(bool html) OVERRIDE;
+  virtual pp::Var GetSelectedText(bool html) override;
 
   // WidgetClient_Dev implementation.
   virtual void InvalidateWidget(pp::Widget_Dev widget,
-                                const pp::Rect& dirty_rect) OVERRIDE;
+                                const pp::Rect& dirty_rect) override;
   virtual void ScrollbarValueChanged(pp::Scrollbar_Dev scrollbar,
-                                     uint32_t value) OVERRIDE;
+                                     uint32_t value) override;
   virtual void ScrollbarOverlayChanged(pp::Scrollbar_Dev scrollbar,
-                                       bool overlay) OVERRIDE;
+                                       bool overlay) override;
 
   // pp::Zoom_Dev implementation.
-  virtual void Zoom(double scale, bool text_only) OVERRIDE;
+  virtual void Zoom(double scale, bool text_only) override;
   void ZoomChanged(double factor);  // Override.
 
   void FlushCallback(int32_t result);
@@ -129,56 +129,56 @@ class Instance : public pp::InstancePrivate,
   void OnPrint(int32_t);
 
   // PDFEngine::Client implementation.
-  virtual void DocumentSizeUpdated(const pp::Size& size);
-  virtual void Invalidate(const pp::Rect& rect);
-  virtual void Scroll(const pp::Point& point);
-  virtual void ScrollToX(int position);
-  virtual void ScrollToY(int position);
-  virtual void ScrollToPage(int page);
-  virtual void NavigateTo(const std::string& url, bool open_in_new_tab);
-  virtual void UpdateCursor(PP_CursorType_Dev cursor);
-  virtual void UpdateTickMarks(const std::vector<pp::Rect>& tickmarks);
-  virtual void NotifyNumberOfFindResultsChanged(int total, bool final_result);
-  virtual void NotifySelectedFindResultChanged(int current_find_index);
-  virtual void GetDocumentPassword(
-      pp::CompletionCallbackWithOutput<pp::Var> callback);
-  virtual void Alert(const std::string& message);
-  virtual bool Confirm(const std::string& message);
-  virtual std::string Prompt(const std::string& question,
-                             const std::string& default_answer);
-  virtual std::string GetURL();
-  virtual void Email(const std::string& to,
-                     const std::string& cc,
-                     const std::string& bcc,
-                     const std::string& subject,
-                     const std::string& body);
-  virtual void Print();
-  virtual void SubmitForm(const std::string& url,
-                          const void* data,
-                          int length);
-  virtual std::string ShowFileSelectionDialog();
-  virtual pp::URLLoader CreateURLLoader();
-  virtual void ScheduleCallback(int id, int delay_in_ms);
-  virtual void SearchString(const base::char16* string,
-                            const base::char16* term,
-                            bool case_sensitive,
-                            std::vector<SearchStringResult>* results);
-  virtual void DocumentPaintOccurred();
-  virtual void DocumentLoadComplete(int page_count);
-  virtual void DocumentLoadFailed();
-  virtual pp::Instance* GetPluginInstance();
-  virtual void DocumentHasUnsupportedFeature(const std::string& feature);
-  virtual void DocumentLoadProgress(uint32 available, uint32 doc_size);
-  virtual void FormTextFieldFocusChange(bool in_focus);
-  virtual bool IsPrintPreview();
+  void DocumentSizeUpdated(const pp::Size& size) override;
+  void Invalidate(const pp::Rect& rect) override;
+  void Scroll(const pp::Point& point) override;
+  void ScrollToX(int position) override;
+  void ScrollToY(int position) override;
+  void ScrollToPage(int page) override;
+  void NavigateTo(const std::string& url, bool open_in_new_tab) override;
+  void UpdateCursor(PP_CursorType_Dev cursor) override;
+  void UpdateTickMarks(const std::vector<pp::Rect>& tickmarks) override;
+  void NotifyNumberOfFindResultsChanged(int total, bool final_result) override;
+  void NotifySelectedFindResultChanged(int current_find_index) override;
+  void GetDocumentPassword(
+      pp::CompletionCallbackWithOutput<pp::Var> callback) override;
+  void Alert(const std::string& message) override;
+  bool Confirm(const std::string& message) override;
+  std::string Prompt(const std::string& question,
+                     const std::string& default_answer) override;
+  std::string GetURL() override;
+  void Email(const std::string& to,
+             const std::string& cc,
+             const std::string& bcc,
+             const std::string& subject,
+             const std::string& body) override;
+  void Print() override;
+  void SubmitForm(const std::string& url,
+                  const void* data,
+                  int length) override;
+  std::string ShowFileSelectionDialog();
+  pp::URLLoader CreateURLLoader() override;
+  void ScheduleCallback(int id, int delay_in_ms) override;
+  void SearchString(const base::char16* string,
+                    const base::char16* term,
+                    bool case_sensitive,
+                    std::vector<SearchStringResult>* results) override;
+  void DocumentPaintOccurred() override;
+  void DocumentLoadComplete(int page_count) override;
+  void DocumentLoadFailed() override;
+  pp::Instance* GetPluginInstance() override;
+  void DocumentHasUnsupportedFeature(const std::string& feature) override;
+  void DocumentLoadProgress(uint32 available, uint32 doc_size) override;
+  void FormTextFieldFocusChange(bool in_focus) override;
+  bool IsPrintPreview() override;
 
   // ControlOwner implementation.
-  virtual void OnEvent(uint32 control_id, uint32 event_id, void* data);
-  virtual void Invalidate(uint32 control_id, const pp::Rect& rc);
-  virtual uint32 ScheduleTimer(uint32 control_id, uint32 timeout_ms);
-  virtual void SetEventCapture(uint32 control_id, bool set_capture);
-  virtual void SetCursor(uint32 control_id, PP_CursorType_Dev cursor_type);
-  virtual pp::Instance* GetInstance();
+  void OnEvent(uint32 control_id, uint32 event_id, void* data) override;
+  void Invalidate(uint32 control_id, const pp::Rect& rc) override;
+  uint32 ScheduleTimer(uint32 control_id, uint32 timeout_ms) override;
+  void SetEventCapture(uint32 control_id, bool set_capture) override;
+  void SetCursor(uint32 control_id, PP_CursorType_Dev cursor_type) override;
+  pp::Instance* GetInstance() override;
 
   bool dont_paint() const { return dont_paint_; }
   void set_dont_paint(bool dont_paint) { dont_paint_ = dont_paint; }
@@ -190,8 +190,8 @@ class Instance : public pp::InstancePrivate,
                                pp::Var* exception);
 
   // PreviewModeClient::Client implementation.
-  virtual void PreviewDocumentLoadComplete() OVERRIDE;
-  virtual void PreviewDocumentLoadFailed() OVERRIDE;
+  virtual void PreviewDocumentLoadComplete() override;
+  virtual void PreviewDocumentLoadFailed() override;
 
   // Helper functions for implementing PPP_PDF.
   void RotateClockwise();

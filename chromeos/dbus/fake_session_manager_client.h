@@ -24,44 +24,46 @@ class FakeSessionManagerClient : public SessionManagerClient {
   virtual ~FakeSessionManagerClient();
 
   // SessionManagerClient overrides
-  virtual void Init(dbus::Bus* bus) OVERRIDE;
-  virtual void SetStubDelegate(StubDelegate* delegate) OVERRIDE;
-  virtual void AddObserver(Observer* observer) OVERRIDE;
-  virtual void RemoveObserver(Observer* observer) OVERRIDE;
-  virtual bool HasObserver(Observer* observer) OVERRIDE;
-  virtual void EmitLoginPromptVisible() OVERRIDE;
-  virtual void RestartJob(int pid, const std::string& command_line) OVERRIDE;
-  virtual void StartSession(const std::string& user_email) OVERRIDE;
-  virtual void StopSession() OVERRIDE;
-  virtual void StartDeviceWipe() OVERRIDE;
-  virtual void RequestLockScreen() OVERRIDE;
-  virtual void NotifyLockScreenShown() OVERRIDE;
-  virtual void NotifyLockScreenDismissed() OVERRIDE;
+  virtual void Init(dbus::Bus* bus) override;
+  virtual void SetStubDelegate(StubDelegate* delegate) override;
+  virtual void AddObserver(Observer* observer) override;
+  virtual void RemoveObserver(Observer* observer) override;
+  virtual bool HasObserver(Observer* observer) override;
+  virtual void EmitLoginPromptVisible() override;
+  virtual void RestartJob(int pid, const std::string& command_line) override;
+  virtual void StartSession(const std::string& user_email) override;
+  virtual void StopSession() override;
+  virtual void NotifySupervisedUserCreationStarted() override;
+  virtual void NotifySupervisedUserCreationFinished() override;
+  virtual void StartDeviceWipe() override;
+  virtual void RequestLockScreen() override;
+  virtual void NotifyLockScreenShown() override;
+  virtual void NotifyLockScreenDismissed() override;
   virtual void RetrieveActiveSessions(
-      const ActiveSessionsCallback& callback) OVERRIDE;
+      const ActiveSessionsCallback& callback) override;
   virtual void RetrieveDevicePolicy(
-      const RetrievePolicyCallback& callback) OVERRIDE;
+      const RetrievePolicyCallback& callback) override;
   virtual void RetrievePolicyForUser(
       const std::string& username,
-      const RetrievePolicyCallback& callback) OVERRIDE;
+      const RetrievePolicyCallback& callback) override;
   virtual std::string BlockingRetrievePolicyForUser(
-      const std::string& username) OVERRIDE;
+      const std::string& username) override;
   virtual void RetrieveDeviceLocalAccountPolicy(
       const std::string& account_id,
-      const RetrievePolicyCallback& callback) OVERRIDE;
+      const RetrievePolicyCallback& callback) override;
   virtual void StoreDevicePolicy(const std::string& policy_blob,
-                                 const StorePolicyCallback& callback) OVERRIDE;
+                                 const StorePolicyCallback& callback) override;
   virtual void StorePolicyForUser(const std::string& username,
                                   const std::string& policy_blob,
-                                  const StorePolicyCallback& callback) OVERRIDE;
+                                  const StorePolicyCallback& callback) override;
   virtual void StoreDeviceLocalAccountPolicy(
       const std::string& account_id,
       const std::string& policy_blob,
-      const StorePolicyCallback& callback) OVERRIDE;
+      const StorePolicyCallback& callback) override;
   virtual void SetFlagsForUser(const std::string& username,
-                               const std::vector<std::string>& flags) OVERRIDE;
+                               const std::vector<std::string>& flags) override;
   virtual void GetServerBackedStateKeys(const StateKeysCallback& callback)
-      OVERRIDE;
+      override;
 
   const std::string& device_policy() const;
   void set_device_policy(const std::string& policy_blob);
@@ -85,8 +87,6 @@ class FakeSessionManagerClient : public SessionManagerClient {
     server_backed_state_keys_ = state_keys;
   }
 
-  void set_first_boot(bool first_boot) { first_boot_ = first_boot; }
-
   int start_device_wipe_call_count() const {
     return start_device_wipe_call_count_;
   }
@@ -108,7 +108,6 @@ class FakeSessionManagerClient : public SessionManagerClient {
   ObserverList<Observer> observers_;
   SessionManagerClient::ActiveSessionsMap user_sessions_;
   std::vector<std::string> server_backed_state_keys_;
-  bool first_boot_;
 
   int start_device_wipe_call_count_;
   int notify_lock_screen_shown_call_count_;

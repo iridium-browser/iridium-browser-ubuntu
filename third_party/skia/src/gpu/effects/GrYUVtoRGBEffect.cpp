@@ -28,13 +28,6 @@ public:
         return GrTBackendFragmentProcessorFactory<YUVtoRGBEffect>::getInstance();
     }
 
-    virtual void getConstantColorComponents(GrColor* color,
-                                            uint32_t* validFlags) const SK_OVERRIDE {
-        // YUV is opaque
-        *color = 0xFF;
-        *validFlags = kA_GrColorComponentFlag;
-    }
-
     SkYUVColorSpace getColorSpace() const {
         return fColorSpace;
     }
@@ -52,14 +45,14 @@ public:
         : INHERITED(factory) {
         }
 
-        virtual void emitCode(GrGLProgramBuilder* builder,
+        virtual void emitCode(GrGLFPBuilder* builder,
                               const GrFragmentProcessor&,
                               const GrProcessorKey&,
                               const char* outputColor,
                               const char* inputColor,
                               const TransformedCoordsArray& coords,
                               const TextureSamplerArray& samplers) SK_OVERRIDE {
-            GrGLFragmentShaderBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+            GrGLFPFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
 
             const char* yuvMatrix   = NULL;
             fMatrixUni = builder->addUniform(GrGLProgramBuilder::kFragment_Visibility,
@@ -106,15 +99,17 @@ private:
         this->addTextureAccess(&fYAccess);
         this->addTextureAccess(&fUAccess);
         this->addTextureAccess(&fVAccess);
-        this->setWillNotUseInputColor();
     }
 
-    virtual bool onIsEqual(const GrProcessor& sBase) const {
+    virtual bool onIsEqual(const GrFragmentProcessor& sBase) const {
         const YUVtoRGBEffect& s = sBase.cast<YUVtoRGBEffect>();
-        return fYAccess.getTexture() == s.fYAccess.getTexture() &&
-               fUAccess.getTexture() == s.fUAccess.getTexture() &&
-               fVAccess.getTexture() == s.fVAccess.getTexture() &&
-               fColorSpace == s.getColorSpace();
+        return fColorSpace == s.getColorSpace();
+    }
+
+    virtual void onComputeInvariantOutput(InvariantOutput* inout) const SK_OVERRIDE {
+        // YUV is opaque
+        inout->setToOther(kA_GrColorComponentFlag, 0xFF << GrColor_SHIFT_A,
+                          InvariantOutput::kWillNot_ReadInput);
     }
 
     GrCoordTransform fCoordTransform;

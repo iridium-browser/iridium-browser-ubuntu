@@ -55,12 +55,15 @@ void PopulateResourceResponse(ResourceRequestInfoImpl* info,
       response_info.npn_negotiated_protocol;
   response->head.connection_info = response_info.connection_info;
   response->head.was_fetched_via_proxy = request->was_fetched_via_proxy();
+  response->head.proxy_server = response_info.proxy_server;
   response->head.socket_address = request->GetSocketAddress();
   if (ServiceWorkerRequestHandler* handler =
           ServiceWorkerRequestHandler::GetHandler(request)) {
     handler->GetExtraResponseInfo(
         &response->head.was_fetched_via_service_worker,
+        &response->head.was_fallback_required_by_service_worker,
         &response->head.original_url_via_service_worker,
+        &response->head.response_type_via_service_worker,
         &response->head.service_worker_fetch_start,
         &response->head.service_worker_fetch_ready,
         &response->head.service_worker_fetch_end);
@@ -158,7 +161,8 @@ void ResourceLoader::ReportUploadProgress() {
   bool too_much_time_passed = time_since_last > kOneSecond;
 
   if (is_finished || enough_new_progress || too_much_time_passed) {
-    if (request_->load_flags() & net::LOAD_ENABLE_UPLOAD_PROGRESS) {
+    ResourceRequestInfoImpl* info = GetRequestInfo();
+    if (info->is_upload_progress_enabled()) {
       handler_->OnUploadProgress(progress.position(), progress.size());
       waiting_for_upload_progress_ack_ = true;
     }
@@ -290,7 +294,6 @@ void ResourceLoader::OnSSLCertificateError(net::URLRequest* request,
 
   SSLManager::OnSSLCertificateError(
       weak_ptr_factory_.GetWeakPtr(),
-      info->GetGlobalRequestID(),
       info->GetResourceType(),
       request_->url(),
       render_process_id,
@@ -385,8 +388,7 @@ void ResourceLoader::OnReadCompleted(net::URLRequest* unused, int bytes_read) {
   }
 }
 
-void ResourceLoader::CancelSSLRequest(const GlobalRequestID& id,
-                                      int error,
+void ResourceLoader::CancelSSLRequest(int error,
                                       const net::SSLInfo* ssl_info) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
@@ -403,7 +405,7 @@ void ResourceLoader::CancelSSLRequest(const GlobalRequestID& id,
   }
 }
 
-void ResourceLoader::ContinueSSLRequest(const GlobalRequestID& id) {
+void ResourceLoader::ContinueSSLRequest() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
   DVLOG(1) << "ContinueSSLRequest() url: " << request_->url().spec();

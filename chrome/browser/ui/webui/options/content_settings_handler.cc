@@ -17,8 +17,6 @@
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/content_settings/content_settings_utils.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
@@ -32,6 +30,8 @@
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/locale_settings.h"
 #include "components/content_settings/core/browser/content_settings_details.h"
+#include "components/content_settings/core/browser/content_settings_utils.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/google/core/browser/google_util.h"
@@ -44,6 +44,7 @@
 #include "content/public/browser/web_ui.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/page_zoom.h"
+#include "content/public/common/url_constants.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension_set.h"
 #include "extensions/common/permissions/api_permission.h"
@@ -323,7 +324,7 @@ void ContentSettingsHandler::GetLocalizedValues(
     { "plugins_header", IDS_PLUGIN_HEADER },
     { "pluginsAsk", IDS_PLUGIN_ASK_RADIO },
     { "pluginsAllow", IDS_PLUGIN_LOAD_RADIO },
-    { "pluginsBlock", IDS_PLUGIN_NOLOAD_RADIO },
+    { "pluginsBlock", IDS_PLUGIN_ASK_MENU_RADIO },
     { "disableIndividualPlugins", IDS_PLUGIN_SELECTIVE_DISABLE },
     // Pop-ups filter.
     { "popupsTabLabel", IDS_POPUP_TAB_LABEL },
@@ -387,6 +388,8 @@ void ContentSettingsHandler::GetLocalizedValues(
     { "ppapiBrokerBlock", IDS_PPAPI_BROKER_BLOCK_RADIO },
     // Multiple automatic downloads
     { "multipleAutomaticDownloadsTabLabel",
+      IDS_AUTOMATIC_DOWNLOADS_TAB_LABEL },
+    { "multiple-automatic-downloads_header",
       IDS_AUTOMATIC_DOWNLOADS_TAB_LABEL },
     { "multipleAutomaticDownloadsAllow",
       IDS_AUTOMATIC_DOWNLOADS_ALLOW_RADIO },
@@ -994,9 +997,15 @@ void ContentSettingsHandler::UpdateZoomLevelsExceptionsView() {
        ++i) {
     scoped_ptr<base::DictionaryValue> exception(new base::DictionaryValue);
     switch (i->mode) {
-      case content::HostZoomMap::ZOOM_CHANGED_FOR_HOST:
+      case content::HostZoomMap::ZOOM_CHANGED_FOR_HOST: {
         exception->SetString(kOrigin, i->host);
-        break;
+        std::string host = i->host;
+        if (host == content::kUnreachableWebDataURL) {
+          host =
+              l10n_util::GetStringUTF8(IDS_ZOOMLEVELS_CHROME_ERROR_PAGES_LABEL);
+        }
+        exception->SetString(kOrigin, host);
+      }
       case content::HostZoomMap::ZOOM_CHANGED_FOR_SCHEME_AND_HOST:
         // These are not stored in preferences and get cleared on next browser
         // start. Therefore, we don't care for them.
@@ -1216,6 +1225,11 @@ void ContentSettingsHandler::RemoveZoomLevelException(
   std::string pattern;
   rv = args->GetString(2, &pattern);
   DCHECK(rv);
+
+  if (pattern ==
+          l10n_util::GetStringUTF8(IDS_ZOOMLEVELS_CHROME_ERROR_PAGES_LABEL)) {
+    pattern = content::kUnreachableWebDataURL;
+  }
 
   content::HostZoomMap* host_zoom_map =
       content::HostZoomMap::GetDefaultForBrowserContext(

@@ -1,5 +1,6 @@
 #include "DMWriteTask.h"
 
+#include "DMJsonWriter.h"
 #include "DMUtil.h"
 #include "SkColorPriv.h"
 #include "SkCommonFlags.h"
@@ -64,11 +65,9 @@ void WriteTask::makeDirOrFail(SkString dir) {
     }
 }
 
-static SkString get_md5(const void* ptr, size_t len) {
-    SkMD5 hasher;
-    hasher.write(ptr, len);
+static SkString get_md5_string(SkMD5* hasher) {
     SkMD5::Digest digest;
-    hasher.finish(digest);
+    hasher->finish(digest);
 
     SkString md5;
     for (int i = 0; i < 16; i++) {
@@ -77,21 +76,27 @@ static SkString get_md5(const void* ptr, size_t len) {
     return md5;
 }
 
-struct JsonData {
-    SkString name;            // E.g. "ninepatch-stretch", "desk-gws_skp"
-    SkString config;          //      "gpu", "8888"
-    SkString mode;            //      "direct", "default-tilegrid", "pipe"
-    SkString sourceType;      //      "GM", "SKP"
-    SkString md5;             // In ASCII, so 32 bytes long.
-};
-SkTArray<JsonData> gJsonData;
-SK_DECLARE_STATIC_MUTEX(gJsonDataLock);
+static SkString get_md5(const void* ptr, size_t len) {
+    SkMD5 hasher;
+    hasher.write(ptr, len);
+    return get_md5_string(&hasher);
+}
+
+static bool write_asset(SkStreamAsset* input, SkWStream* output) {
+    return input->rewind() && output->writeStream(input, input->getLength());
+}
+
+static SkString get_md5(SkStreamAsset* stream) {
+    SkMD5 hasher;
+    write_asset(stream, &hasher);
+    return get_md5_string(&hasher);
+}
 
 void WriteTask::draw() {
     SkString md5;
     {
         SkAutoLockPixels lock(fBitmap);
-        md5 = fData ? get_md5(fData->getMemoryBase(), fData->getLength())
+        md5 = fData ? get_md5(fData)
                     : get_md5(fBitmap.getPixels(), fBitmap.getSize());
     }
 
@@ -102,14 +107,17 @@ void WriteTask::draw() {
         mode = fSuffixes.fromBack(1);
     }
 
-    JsonData entry = { fBaseName, config, mode, fSourceType, md5 };
     {
-        SkAutoMutexAcquire lock(&gJsonDataLock);
-        gJsonData.push_back(entry);
+        const JsonWriter::BitmapResult entry = { fBaseName,
+                                                 config,
+                                                 mode,
+                                                 fSourceType,
+                                                 md5 };
+        JsonWriter::AddBitmapResult(entry);
     }
 
     SkString dir(FLAGS_writePath[0]);
-#if SK_BUILD_FOR_IOS
+#if defined(SK_BUILD_FOR_IOS)
     if (dir.equals("@")) {
         dir.set(FLAGS_resourcePath[0]);
     }
@@ -144,7 +152,7 @@ void WriteTask::draw() {
         return this->fail("Can't open file.");
     }
 
-    bool ok = fData ? file.writeStream(fData, fData->getLength())
+    bool ok = fData ? write_asset(fData, &file)
                     : SkImageEncoder::EncodeStream(&file, fBitmap, SkImageEncoder::kPNG_Type, 100);
     if (!ok) {
         return this->fail("Can't write to file.");
@@ -162,40 +170,6 @@ SkString WriteTask::name() const {
 
 bool WriteTask::shouldSkip() const {
     return FLAGS_writePath.isEmpty();
-}
-
-void WriteTask::DumpJson() {
-    if (FLAGS_writePath.isEmpty()) {
-        return;
-    }
-
-    Json::Value root;
-
-    for (int i = 1; i < FLAGS_properties.count(); i += 2) {
-        root[FLAGS_properties[i-1]] = FLAGS_properties[i];
-    }
-    for (int i = 1; i < FLAGS_key.count(); i += 2) {
-        root["key"][FLAGS_key[i-1]] = FLAGS_key[i];
-    }
-
-    {
-        SkAutoMutexAcquire lock(&gJsonDataLock);
-        for (int i = 0; i < gJsonData.count(); i++) {
-            Json::Value result;
-            result["key"]["name"]            = gJsonData[i].name.c_str();
-            result["key"]["config"]          = gJsonData[i].config.c_str();
-            result["key"]["mode"]            = gJsonData[i].mode.c_str();
-            result["options"]["source_type"] = gJsonData[i].sourceType.c_str();
-            result["md5"]                    = gJsonData[i].md5.c_str();
-
-            root["results"].append(result);
-        }
-    }
-
-    SkString path = SkOSPath::Join(FLAGS_writePath[0], "dm.json");
-    SkFILEWStream stream(path.c_str());
-    stream.writeText(Json::StyledWriter().write(root).c_str());
-    stream.flush();
 }
 
 }  // namespace DM

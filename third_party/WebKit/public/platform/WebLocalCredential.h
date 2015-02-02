@@ -12,13 +12,23 @@
 
 namespace blink {
 
+class PlatformLocalCredential;
+
 class WebLocalCredential : public WebCredential {
 public:
+    BLINK_PLATFORM_EXPORT WebLocalCredential(const WebString& id, const WebString& password, const WebString& name, const WebURL& avatarURL);
+
+    // FIXME: Throw this away once it's unused on the Chromium side.
     BLINK_PLATFORM_EXPORT WebLocalCredential(const WebString& id, const WebString& name, const WebURL& avatarURL, const WebString& password);
 
     BLINK_PLATFORM_EXPORT void assign(const WebLocalCredential&);
 
     BLINK_PLATFORM_EXPORT WebString password() const;
+
+#if INSIDE_BLINK
+    BLINK_PLATFORM_EXPORT WebLocalCredential(PlatformCredential*);
+    BLINK_PLATFORM_EXPORT WebLocalCredential& operator=(PlatformCredential*);
+#endif
 };
 
 } // namespace blink

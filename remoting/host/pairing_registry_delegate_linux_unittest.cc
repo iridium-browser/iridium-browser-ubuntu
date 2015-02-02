@@ -5,7 +5,6 @@
 #include "remoting/host/pairing_registry_delegate_linux.h"
 
 #include "base/files/file_util.h"
-#include "base/timer/timer.h"
 #include "base/values.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -15,7 +14,7 @@ using protocol::PairingRegistry;
 
 class PairingRegistryDelegateLinuxTest : public testing::Test {
  public:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     // Create a temporary directory in order to get a unique name and use a
     // subdirectory to ensure that PairingRegistryDelegateLinux::Save() creates
     // the parent directory if it doesn't exist.
@@ -23,9 +22,7 @@ class PairingRegistryDelegateLinuxTest : public testing::Test {
     temp_registry_ = temp_dir_.Append("paired-clients");
   }
 
-  virtual void TearDown() OVERRIDE {
-    base::DeleteFile(temp_dir_, true);
-  }
+  void TearDown() override { base::DeleteFile(temp_dir_, true); }
 
  protected:
   base::FilePath temp_dir_;

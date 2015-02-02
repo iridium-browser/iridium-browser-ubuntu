@@ -68,8 +68,14 @@ RenderFrameProxyHost::RenderFrameProxyHost(SiteInstance* site_instance,
 }
 
 RenderFrameProxyHost::~RenderFrameProxyHost() {
-  if (GetProcess()->HasConnection())
-    Send(new FrameMsg_DeleteProxy(routing_id_));
+  if (GetProcess()->HasConnection()) {
+    // TODO(nasko): For now, don't send this IPC for top-level frames, as
+    // the top-level RenderFrame will delete the RenderFrameProxy.
+    // This can be removed once we don't have a swapped out state on
+    // RenderFrame. See https://crbug.com/357747
+    if (!frame_tree_node_->IsMainFrame())
+      Send(new FrameMsg_DeleteProxy(routing_id_));
+  }
 
   GetProcess()->RemoveRoute(routing_id_);
   g_routing_id_frame_proxy_map.Get().erase(
@@ -86,6 +92,12 @@ RenderViewHostImpl* RenderFrameProxyHost::GetRenderViewHost() {
       site_instance_.get());
 }
 
+void RenderFrameProxyHost::TakeFrameHostOwnership(
+    scoped_ptr<RenderFrameHostImpl> render_frame_host) {
+  render_frame_host_ = render_frame_host.Pass();
+  render_frame_host_->set_render_frame_proxy_host(this);
+}
+
 scoped_ptr<RenderFrameHostImpl> RenderFrameProxyHost::PassFrameHostOwnership() {
   render_frame_host_->set_render_frame_proxy_host(NULL);
   return render_frame_host_.Pass();
@@ -95,7 +107,11 @@ bool RenderFrameProxyHost::Send(IPC::Message *msg) {
   // TODO(nasko): For now, RenderFrameHost uses this object to send IPC messages
   // while swapped out. This can be removed once we don't have a swapped out
   // state on RenderFrameHosts. See https://crbug.com/357747.
-  msg->set_routing_id(routing_id_);
+
+  // Don't reset the routing ID for control messages.  See
+  // https://crbug.com/423538
+  if (msg->routing_id() != MSG_ROUTING_CONTROL)
+    msg->set_routing_id(routing_id_);
   return GetProcess()->Send(msg);
 }
 
@@ -109,7 +125,12 @@ bool RenderFrameProxyHost::OnMessageReceived(const IPC::Message& msg) {
   if (render_frame_host_.get())
     return render_frame_host_->OnMessageReceived(msg);
 
-  return false;
+  bool handled = true;
+  IPC_BEGIN_MESSAGE_MAP(RenderFrameProxyHost, msg)
+    IPC_MESSAGE_HANDLER(FrameHostMsg_OpenURL, OnOpenURL)
+    IPC_MESSAGE_UNHANDLED(handled = false)
+  IPC_END_MESSAGE_MAP()
+  return handled;
 }
 
 bool RenderFrameProxyHost::InitRenderFrameProxy() {
@@ -141,6 +162,11 @@ bool RenderFrameProxyHost::InitRenderFrameProxy() {
 
 void RenderFrameProxyHost::DisownOpener() {
   Send(new FrameMsg_DisownOpener(GetRoutingID()));
+}
+
+void RenderFrameProxyHost::OnOpenURL(
+    const FrameHostMsg_OpenURL_Params& params) {
+  frame_tree_node_->current_frame_host()->OpenURL(params);
 }
 
 }  // namespace content

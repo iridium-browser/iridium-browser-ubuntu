@@ -30,16 +30,18 @@ class SuggestionsSource : public content::URLDataSource {
   explicit SuggestionsSource(Profile* profile);
 
   // content::URLDataSource implementation.
-  virtual std::string GetSource() const OVERRIDE;
-  virtual void StartDataRequest(
-      const std::string& path, int render_process_id, int render_frame_id,
-      const content::URLDataSource::GotDataCallback& callback) OVERRIDE;
-  virtual std::string GetMimeType(const std::string& path) const OVERRIDE;
-  virtual base::MessageLoop* MessageLoopForRequestPath(
-      const std::string& path) const OVERRIDE;
+  std::string GetSource() const override;
+  void StartDataRequest(
+      const std::string& path,
+      int render_process_id,
+      int render_frame_id,
+      const content::URLDataSource::GotDataCallback& callback) override;
+  std::string GetMimeType(const std::string& path) const override;
+  base::MessageLoop* MessageLoopForRequestPath(
+      const std::string& path) const override;
 
  private:
-  virtual ~SuggestionsSource();
+  ~SuggestionsSource() override;
 
   // Container for the state of a request.
   struct RequestContext {

@@ -77,17 +77,17 @@ class OMLSyncControlVSyncProvider
         window_(window) {
   }
 
-  virtual ~OMLSyncControlVSyncProvider() { }
+  ~OMLSyncControlVSyncProvider() override {}
 
  protected:
-  virtual bool GetSyncValues(int64* system_time,
-                             int64* media_stream_counter,
-                             int64* swap_buffer_counter) OVERRIDE {
+  bool GetSyncValues(int64* system_time,
+                     int64* media_stream_counter,
+                     int64* swap_buffer_counter) override {
     return glXGetSyncValuesOML(g_display, window_, system_time,
                                media_stream_counter, swap_buffer_counter);
   }
 
-  virtual bool GetMscRate(int32* numerator, int32* denominator) OVERRIDE {
+  bool GetMscRate(int32* numerator, int32* denominator) override {
     if (!g_glx_get_msc_rate_oml_supported)
       return false;
 
@@ -127,7 +127,7 @@ class SGIVideoSyncThread
     DCHECK(CalledOnValidThread());
   }
 
-  virtual ~SGIVideoSyncThread() {
+  ~SGIVideoSyncThread() override {
     DCHECK(CalledOnValidThread());
     g_video_sync_thread = NULL;
     Stop();
@@ -256,7 +256,7 @@ class SGIVideoSyncVSyncProvider
                    base::Unretained(shim_.get())));
   }
 
-  virtual ~SGIVideoSyncVSyncProvider() {
+  ~SGIVideoSyncVSyncProvider() override {
     {
       base::AutoLock locked(*vsync_lock_);
       cancel_vsync_flag_->Set();
@@ -268,8 +268,8 @@ class SGIVideoSyncVSyncProvider
         shim_.release());
   }
 
-  virtual void GetVSyncParameters(
-      const VSyncProvider::UpdateVSyncCallback& callback) OVERRIDE {
+  void GetVSyncParameters(
+      const VSyncProvider::UpdateVSyncCallback& callback) override {
     if (kGetVSyncParametersMinPeriod > base::TimeDelta()) {
       base::TimeTicks now = base::TimeTicks::Now();
       base::TimeDelta delta = now - last_get_vsync_parameters_time_;

@@ -78,7 +78,7 @@ ui::Layer* GetLayer(views::Widget* widget) {
 }
 
 bool IsDraggingTrayEnabled() {
-  static bool dragging_tray_allowed = CommandLine::ForCurrentProcess()->
+  static bool dragging_tray_allowed = base::CommandLine::ForCurrentProcess()->
       HasSwitch(ash::switches::kAshEnableTrayDragging);
   return dragging_tray_allowed;
 }
@@ -103,14 +103,14 @@ const int ShelfLayoutManager::kShelfItemInset = 3;
 class ShelfLayoutManager::AutoHideEventFilter : public ui::EventHandler {
  public:
   explicit AutoHideEventFilter(ShelfLayoutManager* shelf);
-  virtual ~AutoHideEventFilter();
+  ~AutoHideEventFilter() override;
 
   // Returns true if the last mouse event was a mouse drag.
   bool in_mouse_drag() const { return in_mouse_drag_; }
 
   // Overridden from ui::EventHandler:
-  virtual void OnMouseEvent(ui::MouseEvent* event) OVERRIDE;
-  virtual void OnGestureEvent(ui::GestureEvent* event) OVERRIDE;
+  void OnMouseEvent(ui::MouseEvent* event) override;
+  void OnGestureEvent(ui::GestureEvent* event) override;
 
  private:
   ShelfLayoutManager* shelf_;
@@ -166,14 +166,14 @@ class ShelfLayoutManager::UpdateShelfObserver
     shelf_ = NULL;
   }
 
-  virtual void OnImplicitAnimationsCompleted() OVERRIDE {
+  void OnImplicitAnimationsCompleted() override {
     if (shelf_)
       shelf_->UpdateShelfBackground(BACKGROUND_CHANGE_ANIMATE);
     delete this;
   }
 
  private:
-  virtual ~UpdateShelfObserver() {
+  ~UpdateShelfObserver() override {
     if (shelf_)
       shelf_->update_shelf_observer_ = NULL;
   }

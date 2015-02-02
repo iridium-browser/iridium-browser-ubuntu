@@ -745,7 +745,7 @@ SkPDFDevice::SkPDFDevice(const SkISize& pageSize, const SkISize& contentSize,
     fInitialTransform.preConcat(initialTransform);
     fLegacyBitmap.setInfo(info);
 
-    SkIRect existingClip = SkIRect::MakeWH(info.width(), info.height());
+    SkIRect existingClip = info.bounds();
     fExistingClipRegion.setRect(existingClip);
     this->init();
 }
@@ -1134,17 +1134,21 @@ void SkPDFDevice::drawText(const SkDraw& d, const void* text, size_t len,
     set_text_transform(x, y, textPaint.getTextSkewX(),
                        &content.entry()->fContent);
     int consumedGlyphCount = 0;
+
+    SkTDArray<uint16_t> glyphIDsCopy(glyphIDs, numGlyphs);
+
     while (numGlyphs > consumedGlyphCount) {
         updateFont(textPaint, glyphIDs[consumedGlyphCount], content.entry());
         SkPDFFont* font = content.entry()->fState.fFont;
-        //TODO: the const_cast here is a bug if the encoding started out as glyph encoding.
-        int availableGlyphs =
-            font->glyphsToPDFFontEncoding(const_cast<uint16_t*>(glyphIDs) + consumedGlyphCount,
-                                          numGlyphs - consumedGlyphCount);
-        fFontGlyphUsage->noteGlyphUsage(font, glyphIDs + consumedGlyphCount,
-                                        availableGlyphs);
+
+        int availableGlyphs = font->glyphsToPDFFontEncoding(
+                glyphIDsCopy.begin() + consumedGlyphCount,
+                numGlyphs - consumedGlyphCount);
+        fFontGlyphUsage->noteGlyphUsage(
+                font,  glyphIDsCopy.begin() + consumedGlyphCount,
+                availableGlyphs);
         SkString encodedString =
-            SkPDFString::FormatString(glyphIDs + consumedGlyphCount,
+            SkPDFString::FormatString(glyphIDsCopy.begin() + consumedGlyphCount,
                                       availableGlyphs, font->multiByteGlyphs());
         content.entry()->fContent.writeText(encodedString.c_str());
         consumedGlyphCount += availableGlyphs;
@@ -1154,8 +1158,8 @@ void SkPDFDevice::drawText(const SkDraw& d, const void* text, size_t len,
 }
 
 void SkPDFDevice::drawPosText(const SkDraw& d, const void* text, size_t len,
-                              const SkScalar pos[], SkScalar constY,
-                              int scalarsPerPos, const SkPaint& paint) {
+                              const SkScalar pos[], int scalarsPerPos,
+                              const SkPoint& offset, const SkPaint& paint) {
     NOT_IMPLEMENTED(paint.getMaskFilter() != NULL, false);
     if (paint.getMaskFilter() != NULL) {
         // Don't pretend we support drawing MaskFilters, it makes for artifacts
@@ -1192,8 +1196,9 @@ void SkPDFDevice::drawPosText(const SkDraw& d, const void* text, size_t len,
         }
 
         fFontGlyphUsage->noteGlyphUsage(font, &encodedValue, 1);
-        SkScalar x = pos[i * scalarsPerPos];
-        SkScalar y = scalarsPerPos == 1 ? constY : pos[i * scalarsPerPos + 1];
+        SkScalar x = offset.x() + pos[i * scalarsPerPos];
+        SkScalar y = offset.y() + (2 == scalarsPerPos ? pos[i * scalarsPerPos + 1] : 0);
+
         align_text(glyphCacheProc, textPaint, glyphIDs + i, 1, &x, &y);
         set_text_transform(x, y, textPaint.getTextSkewX(), &content.entry()->fContent);
         SkString encodedString =
@@ -2176,7 +2181,7 @@ void SkPDFDevice::internalDrawBitmap(const SkMatrix& origMatrix,
     scaled.setScale(SK_Scalar1, -SK_Scalar1);
     scaled.postTranslate(0, SK_Scalar1);
     // Scale the image up from 1x1 to WxH.
-    SkIRect subset = SkIRect::MakeWH(bitmap->width(), bitmap->height());
+    SkIRect subset = bitmap->bounds();
     scaled.postScale(SkIntToScalar(subset.width()),
                      SkIntToScalar(subset.height()));
     scaled.postConcat(matrix);

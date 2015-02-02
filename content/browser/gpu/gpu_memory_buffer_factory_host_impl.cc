@@ -19,10 +19,12 @@ GpuMemoryBufferFactoryHostImpl::~GpuMemoryBufferFactoryHostImpl() {
 }
 
 void GpuMemoryBufferFactoryHostImpl::CreateGpuMemoryBuffer(
-    const gfx::GpuMemoryBufferHandle& handle,
+    gfx::GpuMemoryBufferType type,
+    gfx::GpuMemoryBufferId id,
     const gfx::Size& size,
-    unsigned internalformat,
-    unsigned usage,
+    gfx::GpuMemoryBuffer::Format format,
+    gfx::GpuMemoryBuffer::Usage usage,
+    int client_id,
     const CreateGpuMemoryBufferCallback& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
@@ -36,17 +38,37 @@ void GpuMemoryBufferFactoryHostImpl::CreateGpuMemoryBuffer(
   create_gpu_memory_buffer_requests_[request_id] = callback;
 
   host->CreateGpuMemoryBuffer(
-      handle,
+      type,
+      id,
       size,
-      internalformat,
+      format,
       usage,
+      client_id,
       base::Bind(&GpuMemoryBufferFactoryHostImpl::OnGpuMemoryBufferCreated,
                  base::Unretained(this),
                  request_id));
 }
 
 void GpuMemoryBufferFactoryHostImpl::DestroyGpuMemoryBuffer(
-    const gfx::GpuMemoryBufferHandle& handle,
+    gfx::GpuMemoryBufferType type,
+    gfx::GpuMemoryBufferId id,
+    int client_id,
+    int32 sync_point) {
+  BrowserThread::PostTask(
+      BrowserThread::IO,
+      FROM_HERE,
+      base::Bind(&GpuMemoryBufferFactoryHostImpl::DestroyGpuMemoryBufferOnIO,
+                 base::Unretained(this),
+                 type,
+                 id,
+                 client_id,
+                 sync_point));
+}
+
+void GpuMemoryBufferFactoryHostImpl::DestroyGpuMemoryBufferOnIO(
+    gfx::GpuMemoryBufferType type,
+    gfx::GpuMemoryBufferId id,
+    int client_id,
     int32 sync_point) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
@@ -54,7 +76,7 @@ void GpuMemoryBufferFactoryHostImpl::DestroyGpuMemoryBuffer(
   if (!host)
     return;
 
-  host->DestroyGpuMemoryBuffer(handle, sync_point);
+  host->DestroyGpuMemoryBuffer(type, id, client_id, sync_point);
 }
 
 void GpuMemoryBufferFactoryHostImpl::OnGpuMemoryBufferCreated(

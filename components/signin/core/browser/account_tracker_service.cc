@@ -5,8 +5,10 @@
 #include "components/signin/core/browser/account_tracker_service.h"
 
 #include "base/debug/trace_event.h"
+#include "base/logging.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/signin_pref_names.h"
@@ -31,24 +33,24 @@ class AccountInfoFetcher : public OAuth2TokenService::Consumer,
                      net::URLRequestContextGetter* request_context_getter,
                      AccountTrackerService* service,
                      const std::string& account_id);
-  virtual ~AccountInfoFetcher();
+  ~AccountInfoFetcher() override;
 
   const std::string& account_id() { return account_id_; }
 
   void Start();
 
   // OAuth2TokenService::Consumer implementation.
-  virtual void OnGetTokenSuccess(const OAuth2TokenService::Request* request,
-                                 const std::string& access_token,
-                                 const base::Time& expiration_time) OVERRIDE;
-  virtual void OnGetTokenFailure(const OAuth2TokenService::Request* request,
-                                 const GoogleServiceAuthError& error) OVERRIDE;
+  void OnGetTokenSuccess(const OAuth2TokenService::Request* request,
+                         const std::string& access_token,
+                         const base::Time& expiration_time) override;
+  void OnGetTokenFailure(const OAuth2TokenService::Request* request,
+                         const GoogleServiceAuthError& error) override;
 
   // gaia::GaiaOAuthClient::Delegate implementation.
-  virtual void OnGetUserInfoResponse(
-      scoped_ptr<base::DictionaryValue> user_info) OVERRIDE;
-  virtual void OnOAuthError() OVERRIDE;
-  virtual void OnNetworkError(int response_code) OVERRIDE;
+  void OnGetUserInfoResponse(
+      scoped_ptr<base::DictionaryValue> user_info) override;
+  void OnOAuthError() override;
+  void OnNetworkError(int response_code) override;
 
  private:
   OAuth2TokenService* token_service_;
@@ -257,6 +259,11 @@ AccountTrackerService::GetMigrationState(PrefService* pref_service) {
 
 void AccountTrackerService::OnRefreshTokenAvailable(
     const std::string& account_id) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422460 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422460 AccountTrackerService::OnRefreshTokenAvailable"));
+
   TRACE_EVENT1("AccountTrackerService",
                "AccountTracker::OnRefreshTokenAvailable",
                "account_id",
@@ -320,6 +327,13 @@ void AccountTrackerService::StopTrackingAccount(const std::string& account_id) {
 
 void AccountTrackerService::StartFetchingUserInfo(
     const std::string& account_id) {
+  // Don't bother fetching for supervised users since this causes the token
+  // service to raise spurious auth errors.
+  // TODO(treib): this string is also used in supervised_user_constants.cc.
+  // Should put in a common place.
+  if (account_id == "managed_user@localhost")
+    return;
+
   if (ContainsKey(user_info_requests_, account_id))
     DeleteFetcher(user_info_requests_[account_id]);
 
@@ -441,4 +455,46 @@ void AccountTrackerService::LoadFromTokenService() {
        it != accounts.end(); ++it) {
     OnRefreshTokenAvailable(*it);
   }
+}
+
+std::string AccountTrackerService::PickAccountIdForAccount(
+    const std::string& gaia,
+    const std::string& email) {
+  return PickAccountIdForAccount(pref_service_, gaia, email);
+}
+
+// static
+std::string AccountTrackerService::PickAccountIdForAccount(
+    PrefService* pref_service,
+    const std::string& gaia,
+    const std::string& email) {
+  DCHECK(!gaia.empty());
+  DCHECK(!email.empty());
+  switch(GetMigrationState(pref_service)) {
+    case MIGRATION_NOT_STARTED:
+    case MIGRATION_IN_PROGRESS:
+      // Some tests don't use a real email address.  To support these cases,
+      // don't try to canonicalize these strings.
+      return (email.find('@') == std::string::npos) ? email :
+          gaia::CanonicalizeEmail(email);
+    case MIGRATION_DONE:
+      return gaia;
+    default:
+      NOTREACHED();
+      return email;
+  }
+}
+
+void AccountTrackerService::SeedAccountInfo(const std::string& gaia,
+                                            const std::string& email) {
+  DCHECK(!gaia.empty());
+  DCHECK(!email.empty());
+  const std::string account_id = PickAccountIdForAccount(gaia, email);
+  const bool already_exists = ContainsKey(accounts_, account_id);
+  StartTrackingAccount(account_id);
+  AccountState& state = accounts_[account_id];
+  DCHECK(!already_exists || state.info.gaia == gaia);
+  state.info.gaia = gaia;
+  state.info.email = email;
+  SaveToPrefs(state);
 }

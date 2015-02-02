@@ -24,14 +24,14 @@ class OrientationController
     : public chromeos::AccelerometerReader::Delegate {
  public:
   OrientationController();
-  virtual ~OrientationController();
+  ~OrientationController() override;
 
   void InitWith(scoped_refptr<base::TaskRunner> blocking_task_runner);
   void Shutdown();
 
   // chromeos::AccelerometerReader::Delegate
   virtual void HandleAccelerometerUpdate(
-      const ui::AccelerometerUpdate& update) OVERRIDE;
+      const ui::AccelerometerUpdate& update) override;
 
  private:
   // The last configured rotation.

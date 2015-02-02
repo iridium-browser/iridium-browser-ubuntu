@@ -34,11 +34,11 @@ class ChromeNotifierServiceFactory : public BrowserContextKeyedServiceFactory {
   friend struct DefaultSingletonTraits<ChromeNotifierServiceFactory>;
 
   ChromeNotifierServiceFactory();
-  virtual ~ChromeNotifierServiceFactory();
+  ~ChromeNotifierServiceFactory() override;
 
   // BrowserContextKeyedServiceFactory:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* profile) const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* profile) const override;
 };
 
 }  // namespace notifier

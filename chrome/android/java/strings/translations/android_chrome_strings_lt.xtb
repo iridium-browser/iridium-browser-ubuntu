@@ -69,7 +69,6 @@ Prisijungiate naudodami valdomą paskyrą ir leidžiate administratoriui valdyti
 <translation id="7267430310003164111">Raginimas gauti programą iš „Google Play“ parduotuvės. Programos pavadinimas: „<ph name="APP_NAME"/>“. Vidutinis programos įvertinimas: <ph name="APP_RATING"/>.</translation>
 <translation id="4148957013307229264">Diegiama...</translation>
 <translation id="3992315671621218278">Išsaugoti nuorodą</translation>
-<translation id="8034522405403831421">Šis puslapis yra <ph name="SOURCE_LANGUAGE"/> k. Išversti į <ph name="TARGET_LANGUAGE"/> k.?</translation>
 <translation id="2476578072172137802">Svetainės nustatymai</translation>
 <translation id="4195643157523330669">Atidaryti naujame skirtuke</translation>
 <translation id="651048280540227067">Atsisakyti meniu</translation>
@@ -95,6 +94,7 @@ Prisijungiate naudodami valdomą paskyrą ir leidžiate administratoriui valdyti
 <translation id="7947953824732555851">Sutikti ir prisij.</translation>
 <translation id="6333140779060797560">Bendrinti per „<ph name="APPLICATION"/>“</translation>
 <translation id="6040143037577758943">Uždaryti</translation>
+<translation id="5138299137310274655">Šis puslapis pateikiamas <ph name="SOURCE_LANGUAGE"/>. Išversti į <ph name="TARGET_LANGUAGE"/>?</translation>
 <translation id="969096075394517431">Pakeisti kalbas</translation>
 <translation id="5032574515228824816">Raginimas</translation>
 <translation id="7961015016161918242">Niekada</translation>

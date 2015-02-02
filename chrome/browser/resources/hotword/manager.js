@@ -19,6 +19,10 @@
 
   // Hotwording state.
   var stateManager = new hotword.StateManager();
+  var pageAudioManager = new hotword.PageAudioManager(stateManager);
+  var alwaysOnManager = new hotword.AlwaysOnManager(stateManager);
+  var launcherManager = new hotword.LauncherManager(stateManager);
+  var trainingManager = new hotword.TrainingManager(stateManager);
 
   // Detect Chrome startup and make sure we get a chance to run.
   chrome.runtime.onStartup.addListener(function() {
@@ -33,25 +37,9 @@
   // Detect when the shared module containing the NaCL module and language model
   // is installed.
   chrome.management.onInstalled.addListener(function(info) {
-    if (info.id == hotword.constants.SHARED_MODULE_ID)
+    if (info.id == hotword.constants.SHARED_MODULE_ID) {
+      hotword.debug('Shared module installed, reloading extension.');
       chrome.runtime.reload();
-  });
-
-  // Detect when a session has requested to be started and stopped.
-  chrome.hotwordPrivate.onHotwordSessionRequested.addListener(function() {
-    // TODO(amistry): This event should change state depending on whether the
-    // user has enabled always-on hotwording. But for now, always signal the
-    // start of a hotwording session. This allows this extension to work with
-    // the app launcher in the current state.
-    stateManager.startSession(
-        hotword.constants.SessionSource.LAUNCHER,
-        function() {
-          chrome.hotwordPrivate.setHotwordSessionState(true, function() {});
-        });
-  });
-
-  chrome.hotwordPrivate.onHotwordSessionStopped.addListener(function() {
-    stateManager.stopSession(hotword.constants.SessionSource.LAUNCHER);
-    chrome.hotwordPrivate.setHotwordSessionState(false, function() {});
+    }
   });
 }());

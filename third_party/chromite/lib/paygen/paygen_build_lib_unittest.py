@@ -81,10 +81,14 @@ class PaygenBuildLibTest(mox.MoxTestBase):
 
     self.test_image = self._GetBuildTestImage(self.foo_build)
 
-  def _GetPaygenBuildInstance(self):
+  def _GetPaygenBuildInstance(self, skip_test_payloads=False,
+                              disable_tests=False):
     """Helper method to create a standard Paygen instance."""
+    control_dir = None if disable_tests else '/tmp/foo'
+
     return paygen_build_lib._PaygenBuild(self.foo_build, self.work_dir,
-                                         control_dir='/tmp/foo')
+                                         control_dir=control_dir,
+                                         skip_test_payloads=skip_test_payloads)
 
   def _GetBuildImages(self, build):
     """Create basic_image, npo_image, premp_image, premp_npo_image.
@@ -819,6 +823,27 @@ fsi_images: 2913.331.0,2465.105.0
 
     self.assertItemsEqual(sorted(results), sorted(expected))
 
+  def testFindFullTestPayloads(self):
+    paygen = self._GetPaygenBuildInstance()
+
+    self.mox.StubOutWithMock(urilib, 'ListFiles')
+
+    urilib.ListFiles(
+        'gs://crt/foo-channel/foo-board/find_full_version/payloads/'
+        'chromeos_find_full_version_foo-board_foo-channel_full_test.bin-*'
+    ).AndReturn(['foo', 'foo.json', 'foo.log', 'bar'])
+
+    # Run the test verification.
+    self.mox.ReplayAll()
+
+    # Call once and use mocked look up. Make sure we filter properly.
+    self.assertEqual(paygen._FindFullTestPayloads('find_full_version'),
+                     ['foo', 'bar'])
+
+    # Call a second time to verify we get cached results (no lookup).
+    self.assertEqual(paygen._FindFullTestPayloads('find_full_version'),
+                     ['foo', 'bar'])
+
   @osutils.TempDirDecorator
   def DoGeneratePayloadsTest(self, run_parallel, test_dry_run):
     """Test paygen_build_lib._GeneratePayloads."""
@@ -898,15 +923,17 @@ fsi_images: 2913.331.0,2465.105.0
 
     paygen._CleanupBuild()
 
-  def _CreatePayloadsSetup(self):
+  def _CreatePayloadsSetup(self, skip_test_payloads=False, disable_tests=False):
     """Helper method for related CreatePayloads tests."""
-    paygen = self._GetPaygenBuildInstance()
+    paygen = self._GetPaygenBuildInstance(skip_test_payloads=skip_test_payloads,
+                                          disable_tests=disable_tests)
 
     self.mox.StubOutWithMock(gslock, 'Lock')
     self.mox.StubOutWithMock(gslib, 'CreateWithContents')
     self.mox.StubOutWithMock(gslib, 'Exists')
     self.mox.StubOutWithMock(gslib, 'Remove')
     self.mox.StubOutWithMock(paygen, '_DiscoverRequiredPayloads')
+    self.mox.StubOutWithMock(paygen, '_MapToArchive')
     self.mox.StubOutWithMock(paygen, '_GeneratePayloads')
     self.mox.StubOutWithMock(paygen, '_AutotestPayloads')
     self.mox.StubOutWithMock(paygen, '_CreatePayloadTests')
@@ -1053,7 +1080,13 @@ fsi_images: 2913.331.0,2465.105.0
     self.mox.StubOutWithMock(paygen_payload_lib, 'FindExistingPayloads')
     paygen_payload_lib.FindExistingPayloads(payload).AndReturn([])
     paygen._GeneratePayloads(payload_list, lock)
+    paygen._MapToArchive('foo-board', '1.2.3').AndReturn(
+        ('archive_board', 'archive_build', 'archive_build_uri'))
+    paygen._CreatePayloadTests(['foo']).AndReturn(['Test Payloads'])
+    paygen._AutotestPayloads(['Test Payloads'])
+
     paygen._CleanupBuild()
+    gslib.CreateWithContents(finished_uri, mox.IgnoreArg())
     lock.__exit__(
         mox.IgnoreArg(), mox.IgnoreArg(), mox.IgnoreArg()).AndReturn(None)
 
@@ -1088,7 +1121,45 @@ fsi_images: 2913.331.0,2465.105.0
     paygen_payload_lib.FindExistingPayloads(payload_new).AndReturn([])
     paygen_payload_lib.SetPayloadUri(payload_existing, payload_existing)
     paygen._GeneratePayloads([payload_new], lock)
+    paygen._MapToArchive('foo-board', '1.2.3').AndReturn(
+        ('archive_board', 'archive_build', 'archive_build_uri'))
+    paygen._CreatePayloadTests(['foo', 'bar']).AndReturn(['Test Payloads'])
+    paygen._AutotestPayloads(['Test Payloads'])
+    gslib.CreateWithContents(finished_uri, mox.IgnoreArg())
     paygen._CleanupBuild()
+    lock.__exit__(
+        mox.IgnoreArg(), mox.IgnoreArg(), mox.IgnoreArg()).AndReturn(None)
+
+    # Run the test verification.
+    self.mox.ReplayAll()
+
+    paygen.CreatePayloads()
+
+  def testCreatePayloadsSkipTests(self):
+    """Test paygen_build_lib._GeneratePayloads success."""
+    paygen = self._CreatePayloadsSetup(skip_test_payloads=True,
+                                       disable_tests=True)
+
+    lock_uri = paygen._GetFlagURI(gspaths.ChromeosReleases.LOCK)
+    skip_uri = paygen._GetFlagURI(gspaths.ChromeosReleases.SKIP)
+    finished_uri = paygen._GetFlagURI(gspaths.ChromeosReleases.FINISHED)
+
+    lock = self.mox.CreateMockAnything()
+    payload = 'foo'
+    payload_list = [payload]
+    payload_skip_list = [(payload, False)]
+
+    gslock.Lock(lock_uri, dry_run=False).AndReturn(lock)
+    lock.__enter__().AndReturn(lock)
+    gslib.Exists(skip_uri).AndReturn(False)
+    gslib.Exists(finished_uri).AndReturn(False)
+    paygen._DiscoverRequiredPayloads(
+        ).AndReturn(payload_skip_list)
+    self.mox.StubOutWithMock(paygen_payload_lib, 'FindExistingPayloads')
+    paygen_payload_lib.FindExistingPayloads(payload).AndReturn([])
+    paygen._GeneratePayloads(payload_list, lock)
+    paygen._CleanupBuild()
+    gslib.CreateWithContents(finished_uri, mox.IgnoreArg())
     lock.__exit__(
         mox.IgnoreArg(), mox.IgnoreArg(), mox.IgnoreArg()).AndReturn(None)
 

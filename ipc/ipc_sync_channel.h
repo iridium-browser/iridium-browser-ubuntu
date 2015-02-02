@@ -91,9 +91,9 @@ class IPC_EXPORT SyncChannel : public ChannelProxy {
       const scoped_refptr<base::SingleThreadTaskRunner>& ipc_task_runner,
       base::WaitableEvent* shutdown_event);
 
-  virtual ~SyncChannel();
+  ~SyncChannel() override;
 
-  virtual bool Send(Message* message) OVERRIDE;
+  bool Send(Message* message) override;
 
   // Sets the dispatch group for this channel, to only allow re-entrant dispatch
   // of messages to other channels in the same group.
@@ -170,17 +170,17 @@ class IPC_EXPORT SyncChannel : public ChannelProxy {
     base::WaitableEventWatcher::EventCallback MakeWaitableEventCallback();
 
    private:
-    virtual ~SyncContext();
+    ~SyncContext() override;
     // ChannelProxy methods that we override.
 
     // Called on the listener thread.
-    virtual void Clear() OVERRIDE;
+    void Clear() override;
 
     // Called on the IPC thread.
-    virtual bool OnMessageReceived(const Message& msg) OVERRIDE;
-    virtual void OnChannelError() OVERRIDE;
-    virtual void OnChannelOpened() OVERRIDE;
-    virtual void OnChannelClosed() OVERRIDE;
+    bool OnMessageReceived(const Message& msg) override;
+    void OnChannelError() override;
+    void OnChannelOpened() override;
+    void OnChannelClosed() override;
 
     // Cancels all pending Send calls.
     void CancelPendingSends();

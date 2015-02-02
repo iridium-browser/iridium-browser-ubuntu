@@ -18,11 +18,11 @@ class FakeTaskRunner : public base::TaskRunner {
  public:
   virtual bool PostDelayedTask(const tracked_objects::Location& from_here,
                                const base::Closure& task,
-                               base::TimeDelta delay) OVERRIDE {
+                               base::TimeDelta delay) override {
     task.Run();
     return true;
   }
-  virtual bool RunsTasksOnCurrentThread() const OVERRIDE { return true; }
+  virtual bool RunsTasksOnCurrentThread() const override { return true; }
 
  protected:
   virtual ~FakeTaskRunner() {}
@@ -101,8 +101,7 @@ const user_manager::UserList& FakeUserManager::GetUsers() const {
   return user_list_;
 }
 
-user_manager::UserList FakeUserManager::GetUsersAdmittedForMultiProfile()
-    const {
+user_manager::UserList FakeUserManager::GetUsersAllowedForMultiProfile() const {
   user_manager::UserList result;
   for (user_manager::UserList::const_iterator it = user_list_.begin();
        it != user_list_.end();

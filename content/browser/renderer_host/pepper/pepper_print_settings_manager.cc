@@ -15,7 +15,7 @@ namespace content {
 
 namespace {
 
-#if defined(ENABLE_FULL_PRINTING)
+#if defined(ENABLE_PRINT_PREVIEW)
 // Print units conversion functions.
 int32_t DeviceUnitsInPoints(int32_t device_units,
                             int32_t device_units_per_inch) {
@@ -47,8 +47,8 @@ PP_Rect PrintAreaToPPPrintArea(const gfx::Rect& print_area,
 class PrintingContextDelegate : public printing::PrintingContext::Delegate {
  public:
   // PrintingContext::Delegate methods.
-  virtual gfx::NativeView GetParentView() OVERRIDE { return NULL; }
-  virtual std::string GetAppLocale() OVERRIDE {
+  gfx::NativeView GetParentView() override { return NULL; }
+  std::string GetAppLocale() override {
     return GetContentClient()->browser()->GetApplicationLocale();
   }
 };

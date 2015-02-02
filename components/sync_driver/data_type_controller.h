@@ -128,10 +128,10 @@ class DataTypeController
 
   // Partial implementation of DataTypeErrorHandler.
   // This is thread safe.
-  virtual syncer::SyncError CreateAndUploadError(
+  syncer::SyncError CreateAndUploadError(
       const tracked_objects::Location& location,
       const std::string& message,
-      syncer::ModelType type) OVERRIDE;
+      syncer::ModelType type) override;
 
   // Called when the sync backend has initialized. |share| is the
   // UserShare handle to associate model data with.
@@ -156,7 +156,7 @@ class DataTypeController
   // us know that it is safe to start associating.
   virtual void OnModelLoaded() = 0;
 
-  virtual ~DataTypeController();
+  ~DataTypeController() override;
 
   syncer::UserShare* user_share() const;
 

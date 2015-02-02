@@ -36,11 +36,11 @@ class MockScreenManager : public ui::ScreenManager {
                     ui::ScanoutBufferGenerator* buffer_generator)
       : ScreenManager(dri, buffer_generator),
         dri_(dri) {}
-  virtual ~MockScreenManager() {}
+  ~MockScreenManager() override {}
 
   // Normally we'd use DRM to figure out the controller configuration. But we
   // can't use DRM in unit tests, so we just create a fake configuration.
-  virtual void ForceInitializationOfPrimaryDisplay() OVERRIDE {
+  void ForceInitializationOfPrimaryDisplay() override {
     ConfigureDisplayController(
         kDefaultCrtc, kDefaultConnector, gfx::Point(), kDefaultMode);
   }
@@ -57,8 +57,9 @@ class DriSurfaceFactoryTest : public testing::Test {
  public:
   DriSurfaceFactoryTest() {}
 
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
+
  protected:
   scoped_ptr<base::MessageLoop> message_loop_;
   scoped_ptr<ui::MockDriWrapper> dri_;
@@ -78,8 +79,8 @@ void DriSurfaceFactoryTest::SetUp() {
   screen_manager_.reset(new MockScreenManager(dri_.get(),
                                               buffer_generator_.get()));
   window_delegate_manager_.reset(new ui::DriWindowDelegateManager());
-  factory_.reset(new ui::DriSurfaceFactory(
-      dri_.get(), screen_manager_.get(), window_delegate_manager_.get()));
+  factory_.reset(new ui::DriSurfaceFactory(dri_.get(), screen_manager_.get(),
+                                           window_delegate_manager_.get()));
 
   scoped_ptr<ui::DriWindowDelegate> window_delegate(
       new ui::DriWindowDelegateImpl(ui::DriSurfaceFactory::kDefaultWidgetHandle,
@@ -133,9 +134,7 @@ TEST_F(DriSurfaceFactoryTest, SetCursorImage) {
   std::vector<SkBitmap> cursor_bitmaps;
   cursor_bitmaps.push_back(image);
   factory_->SetHardwareCursor(ui::DriSurfaceFactory::kDefaultWidgetHandle,
-                              cursor_bitmaps,
-                              gfx::Point(4, 2),
-                              0);
+                              cursor_bitmaps, gfx::Point(4, 2), 0);
 
   SkBitmap cursor;
   // Buffers 0 and 1 are the cursor buffers.

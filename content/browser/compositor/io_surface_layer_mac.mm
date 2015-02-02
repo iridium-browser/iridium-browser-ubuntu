@@ -12,10 +12,10 @@
 
 #include "base/mac/mac_util.h"
 #include "base/mac/sdk_forward_declarations.h"
+#include "content/browser/compositor/io_surface_context_mac.h"
+#include "content/browser/compositor/io_surface_texture_mac.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_mac.h"
-#include "content/browser/renderer_host/compositing_iosurface_context_mac.h"
-#include "content/browser/renderer_host/compositing_iosurface_mac.h"
 #include "ui/base/cocoa/animation_utils.h"
 #include "ui/gfx/size_conversions.h"
 #include "ui/gl/gpu_switching_manager.h"
@@ -168,22 +168,14 @@ void IOSurfaceLayerHelper::EndPumpingFrames() {
 
 @implementation IOSurfaceLayer
 
-- (content::CompositingIOSurfaceMac*)iosurface {
-  return iosurface_.get();
-}
-
-- (content::CompositingIOSurfaceContext*)context {
-  return context_.get();
-}
-
 - (id)initWithClient:(content::IOSurfaceLayerClient*)client
      withScaleFactor:(float)scale_factor {
   if (self = [super init]) {
     helper_.reset(new content::IOSurfaceLayerHelper(client, self));
 
-    iosurface_ = content::CompositingIOSurfaceMac::Create();
-    context_ = content::CompositingIOSurfaceContext::Get(
-        content::CompositingIOSurfaceContext::kCALayerContextWindowNumber);
+    iosurface_ = content::IOSurfaceTexture::Create();
+    context_ = content::IOSurfaceContext::Get(
+        content::IOSurfaceContext::kCALayerContext);
     if (!iosurface_.get() || !context_.get()) {
       LOG(ERROR) << "Failed create CompositingIOSurface or context";
       [self resetClient];
@@ -211,12 +203,7 @@ void IOSurfaceLayerHelper::EndPumpingFrames() {
 - (bool)gotFrameWithIOSurface:(IOSurfaceID)io_surface_id
                 withPixelSize:(gfx::Size)pixel_size
               withScaleFactor:(float)scale_factor {
-  bool result = true;
-  gfx::ScopedCGLSetCurrentContext scoped_set_current_context(
-      context_->cgl_context());
-  result = iosurface_->SetIOSurfaceWithContextCurrent(
-      context_, io_surface_id, pixel_size, scale_factor);
-  return result;
+  return iosurface_->SetIOSurface(io_surface_id, pixel_size);
 }
 
 - (void)poisonContextAndSharegroup {
@@ -228,11 +215,19 @@ void IOSurfaceLayerHelper::EndPumpingFrames() {
 }
 
 - (float)scaleFactor {
-  return iosurface_->scale_factor();
+  if ([self respondsToSelector:(@selector(contentsScale))])
+    return [self contentsScale];
+  return 1;
 }
 
 - (int)rendererID {
-  return iosurface_->GetRendererID();
+  GLint current_renderer_id = -1;
+  if (CGLGetParameter(context_->cgl_context(),
+                      kCGLCPCurrentRendererID,
+                      &current_renderer_id) == kCGLNoError) {
+    return current_renderer_id & kCGLRendererIDMatchingMask;
+  }
+  return -1;
 }
 
 - (void)resetClient {
@@ -294,27 +289,7 @@ void IOSurfaceLayerHelper::EndPumpingFrames() {
              displayTime:(const CVTimeStamp*)timeStamp {
   TRACE_EVENT0("browser", "IOSurfaceLayer::drawInCGLContext");
 
-  if (!iosurface_->HasIOSurface() || context_->cgl_context() != glContext) {
-    glClearColor(1, 1, 1, 1);
-    glClear(GL_COLOR_BUFFER_BIT);
-    return;
-  }
-
-  // The correct viewport to cover the layer will be set up by the caller.
-  // Transform this into a window size for DrawIOSurface, where it will be
-  // transformed back into this viewport.
-  GLint viewport[4];
-  glGetIntegerv(GL_VIEWPORT, viewport);
-  gfx::Rect window_rect(viewport[0], viewport[1], viewport[2], viewport[3]);
-  float window_scale_factor = 1.f;
-  if ([self respondsToSelector:(@selector(contentsScale))])
-    window_scale_factor = [self contentsScale];
-  window_rect = ToNearestRect(
-      gfx::ScaleRect(window_rect, 1.f/window_scale_factor));
-
-  bool draw_succeeded = iosurface_->DrawIOSurface(
-      context_, window_rect, window_scale_factor);
-
+  bool draw_succeeded = iosurface_->DrawIOSurface();
   if (helper_)
     helper_->DidDraw(draw_succeeded);
 

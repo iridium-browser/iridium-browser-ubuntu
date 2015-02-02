@@ -30,11 +30,11 @@ class AppSearchProvider : public SearchProvider,
  public:
   AppSearchProvider(Profile* profile,
                     AppListControllerDelegate* list_controller);
-  virtual ~AppSearchProvider();
+  ~AppSearchProvider() override;
 
   // SearchProvider overrides:
-  virtual void Start(const base::string16& query) OVERRIDE;
-  virtual void Stop() OVERRIDE;
+  void Start(const base::string16& query) override;
+  void Stop() override;
 
  private:
   class App;
@@ -49,13 +49,11 @@ class AppSearchProvider : public SearchProvider,
   void RefreshApps();
 
   // extensions::ExtensionRegistryObserver overrides:
-  virtual void OnExtensionLoaded(
-      content::BrowserContext* browser_context,
-      const extensions::Extension* extension) OVERRIDE;
-  virtual void OnExtensionUninstalled(
-      content::BrowserContext* browser_context,
-      const extensions::Extension* extension,
-      extensions::UninstallReason reason) OVERRIDE;
+  void OnExtensionLoaded(content::BrowserContext* browser_context,
+                         const extensions::Extension* extension) override;
+  void OnExtensionUninstalled(content::BrowserContext* browser_context,
+                              const extensions::Extension* extension,
+                              extensions::UninstallReason reason) override;
 
   Profile* profile_;
   AppListControllerDelegate* list_controller_;

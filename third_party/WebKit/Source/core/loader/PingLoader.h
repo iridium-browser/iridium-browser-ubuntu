@@ -76,12 +76,14 @@ protected:
     static void start(LocalFrame*, ResourceRequest&, const FetchInitiatorInfo&, StoredCredentials = AllowStoredCredentials);
 
 private:
-    virtual void didReceiveResponse(blink::WebURLLoader*, const blink::WebURLResponse&) OVERRIDE;
-    virtual void didReceiveData(blink::WebURLLoader*, const char*, int, int) OVERRIDE;
-    virtual void didFinishLoading(blink::WebURLLoader*, double, int64_t) OVERRIDE;
-    virtual void didFail(blink::WebURLLoader*, const blink::WebURLError&) OVERRIDE;
+    virtual void didReceiveResponse(blink::WebURLLoader*, const blink::WebURLResponse&) override;
+    virtual void didReceiveData(blink::WebURLLoader*, const char*, int, int) override;
+    virtual void didFinishLoading(blink::WebURLLoader*, double, int64_t) override;
+    virtual void didFail(blink::WebURLLoader*, const blink::WebURLError&) override;
 
     void timeout(Timer<PingLoader>*);
+
+    void didFailLoading(Page*);
 
     OwnPtr<blink::WebURLLoader> m_loader;
     Timer<PingLoader> m_timeout;

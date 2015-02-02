@@ -5,17 +5,19 @@
 #include "config.h"
 #include "core/frame/RemoteFrame.h"
 
+#include "core/frame/RemoteFrameClient.h"
 #include "core/frame/RemoteFrameView.h"
 #include "core/html/HTMLFrameOwnerElement.h"
+#include "platform/weborigin/SecurityPolicy.h"
 
 namespace blink {
 
-inline RemoteFrame::RemoteFrame(FrameClient* client, FrameHost* host, FrameOwner* owner)
+inline RemoteFrame::RemoteFrame(RemoteFrameClient* client, FrameHost* host, FrameOwner* owner)
     : Frame(client, host, owner)
 {
 }
 
-PassRefPtrWillBeRawPtr<RemoteFrame> RemoteFrame::create(FrameClient* client, FrameHost* host, FrameOwner* owner)
+PassRefPtrWillBeRawPtr<RemoteFrame> RemoteFrame::create(RemoteFrameClient* client, FrameHost* host, FrameOwner* owner)
 {
     return adoptRefWillBeNoop(new RemoteFrame(client, host, owner));
 }
@@ -25,20 +27,44 @@ RemoteFrame::~RemoteFrame()
     setView(nullptr);
 }
 
+void RemoteFrame::trace(Visitor* visitor)
+{
+    visitor->trace(m_view);
+    Frame::trace(visitor);
+}
+
+void RemoteFrame::navigate(Document& originDocument, const KURL& url, bool lockBackForwardList)
+{
+    // The process where this frame actually lives won't have sufficient information to determine
+    // correct referrer, since it won't have access to the originDocument. Set it now.
+    ResourceRequest request(url);
+    request.setHTTPReferrer(SecurityPolicy::generateReferrer(originDocument.referrerPolicy(), url, originDocument.outgoingReferrer()));
+    remoteFrameClient()->navigate(request, lockBackForwardList);
+}
+
 void RemoteFrame::detach()
 {
     detachChildren();
-    m_host = nullptr;
+    if (!client())
+        return;
+    Frame::detach();
 }
 
-void RemoteFrame::setView(PassRefPtr<RemoteFrameView> view)
+void RemoteFrame::forwardInputEvent(Event* event)
 {
+    remoteFrameClient()->forwardInputEvent(event);
+}
+
+void RemoteFrame::setView(PassRefPtrWillBeRawPtr<RemoteFrameView> view)
+{
+    // Oilpan: as RemoteFrameView performs no finalization actions,
+    // no explicit dispose() of it needed here. (cf. FrameView::dispose().)
     m_view = view;
 }
 
 void RemoteFrame::createView()
 {
-    RefPtr<RemoteFrameView> view = RemoteFrameView::create(this);
+    RefPtrWillBeRawPtr<RemoteFrameView> view = RemoteFrameView::create(this);
     setView(view);
 
     if (ownerRenderer()) {
@@ -46,6 +72,11 @@ void RemoteFrame::createView()
         ASSERT(owner);
         owner->setWidget(view);
     }
+}
+
+RemoteFrameClient* RemoteFrame::remoteFrameClient() const
+{
+    return static_cast<RemoteFrameClient*>(client());
 }
 
 } // namespace blink

@@ -146,7 +146,7 @@ class ChromeChannelListener : public IPC::Listener {
       : ui_proxy_(ui_loop->message_loop_proxy()),
         app_view_(app_view) {}
 
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE {
+  virtual bool OnMessageReceived(const IPC::Message& message) override {
     IPC_BEGIN_MESSAGE_MAP(ChromeChannelListener, message)
       IPC_MESSAGE_HANDLER(MetroViewerHostMsg_ActivateDesktop,
                           OnActivateDesktop)
@@ -170,7 +170,7 @@ class ChromeChannelListener : public IPC::Listener {
     return true;
   }
 
-  virtual void OnChannelError() OVERRIDE {
+  virtual void OnChannelError() override {
     DVLOG(1) << "Channel error. Exiting.";
     ui_proxy_->PostTask(FROM_HERE,
         base::Bind(&ChromeAppViewAsh::OnMetroExit, base::Unretained(app_view_),
@@ -1236,6 +1236,13 @@ HRESULT ChromeAppViewAsh::OnAcceleratorKeyDown(
       if ((virtual_key == VK_F4) && ((keyboard_flags & ui::EF_ALT_DOWN) &&
           !(keyboard_flags & ui::EF_CONTROL_DOWN)))
         return S_OK;
+      // Don't send the EF_ALT_DOWN modifier along with the IPC message for
+      // the Alt or F10 key. The accelerator for VKEY_MENU is registered
+      // without modifiers in Chrome for historical reasons. Not sending the
+      // EF_ALT_DOWN modifier ensures that the accelerator is processed
+      // correctly.
+      if (virtual_key == winsys::VirtualKey_Menu)
+        keyboard_flags &= ~ui::EF_ALT_DOWN;
       ui_channel_->Send(new MetroViewerHostMsg_KeyDown(virtual_key,
                                                        status.RepeatCount,
                                                        status.ScanCode,
@@ -1296,14 +1303,14 @@ HRESULT ChromeAppViewAsh::OnWindowActivated(
     // the same.
     if (state == winui::Core::CoreWindowActivationState_CodeActivated ||
         state == winui::Core::CoreWindowActivationState_PointerActivated) {
-      if (text_service_)
-        text_service_->OnWindowActivated();
       ui_channel_->Send(new MetroViewerHostMsg_WindowActivated(false));
     }
   } else {
     // On Windows 7, we force a repaint when the window is activated.
     ui_channel_->Send(new MetroViewerHostMsg_WindowActivated(true));
   }
+  if (text_service_)
+    text_service_->OnWindowActivated();
   return S_OK;
 }
 

@@ -13,9 +13,35 @@
 
 namespace content {
 
+class AppCacheInterceptor::StartInterceptor
+    : public net::URLRequestInterceptor {
+ public:
+  StartInterceptor() {}
+  ~StartInterceptor() override {}
+  net::URLRequestJob* MaybeInterceptRequest(
+      net::URLRequest* request,
+      net::NetworkDelegate* network_delegate) const override {
+    AppCacheRequestHandler* handler = GetHandler(request);
+    if (!handler)
+      return NULL;
+    return handler->MaybeLoadResource(request, network_delegate);
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(StartInterceptor);
+};
+
+
 // static
 AppCacheInterceptor* AppCacheInterceptor::GetInstance() {
   return Singleton<AppCacheInterceptor>::get();
+}
+
+// static
+scoped_ptr<net::URLRequestInterceptor>
+AppCacheInterceptor::CreateStartInterceptor() {
+  return scoped_ptr<net::URLRequestInterceptor>(
+      new StartInterceptor);
 }
 
 void AppCacheInterceptor::SetHandler(net::URLRequest* request,
@@ -25,7 +51,7 @@ void AppCacheInterceptor::SetHandler(net::URLRequest* request,
 
 AppCacheRequestHandler* AppCacheInterceptor::GetHandler(
     net::URLRequest* request) {
-  return reinterpret_cast<AppCacheRequestHandler*>(
+  return static_cast<AppCacheRequestHandler*>(
       request->GetUserData(GetInstance()));
 }
 
@@ -96,10 +122,8 @@ AppCacheInterceptor::~AppCacheInterceptor() {
 
 net::URLRequestJob* AppCacheInterceptor::MaybeIntercept(
     net::URLRequest* request, net::NetworkDelegate* network_delegate) {
-  AppCacheRequestHandler* handler = GetHandler(request);
-  if (!handler)
-    return NULL;
-  return handler->MaybeLoadResource(request, network_delegate);
+  // Intentionally empty, handled by class StartInterceptor.
+  return NULL;
 }
 
 net::URLRequestJob* AppCacheInterceptor::MaybeInterceptRedirect(

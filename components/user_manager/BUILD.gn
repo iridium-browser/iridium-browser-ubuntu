@@ -13,22 +13,37 @@ component("user_manager") {
     "user_manager_export.h",
   ]
 
-  if (is_chromeos) {
-    sources += [
-      "user_image/user_image.cc",
-      "user_image/user_image.h",
-      "user_type.h",
-    ]
-  }
+  deps = [
+    "//base",
+    "//skia",
+    "//ui/gfx",
+  ]
 
   defines = [
     "USER_MANAGER_IMPLEMENTATION",
   ]
 
-  deps = [
-    "//base",
-    "//skia",
-    "//ui/gfx",
-    "//url",
-  ]
+  if (is_chromeos) {
+    sources += [
+      "remove_user_delegate.h",
+      "user_image/default_user_images.cc",
+      "user_image/default_user_images.h",
+      "user_image/user_image.cc",
+      "user_image/user_image.h",
+      "user.cc",
+      "user.h",
+      "user_manager.cc",
+      "user_manager.h",
+      "user_manager_base.cc",
+      "user_manager_base.h",
+      "user_type.h",
+    ]
+    deps += [
+      "//components/session_manager/core",
+      "//google_apis",
+      "//ui/chromeos/resources",
+      "//ui/chromeos/strings",
+      "//url",
+    ]
+  }
 }

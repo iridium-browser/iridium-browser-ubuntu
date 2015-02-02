@@ -19,8 +19,7 @@ scoped_ptr<LayerImpl> SolidColorScrollbarLayer::CreateLayerImpl(
                                               thumb_thickness_,
                                               track_start_,
                                               is_left_side_vertical_scrollbar_,
-                                              kIsOverlayScrollbar)
-      .PassAs<LayerImpl>();
+                                              kIsOverlayScrollbar);
 }
 
 scoped_refptr<SolidColorScrollbarLayer> SolidColorScrollbarLayer::Create(
@@ -69,7 +68,7 @@ void SolidColorScrollbarLayer::PushScrollClipPropertiesTo(LayerImpl* layer) {
                                                    clip_layer_id_);
 }
 
-void SolidColorScrollbarLayer::SetNeedsDisplayRect(const gfx::RectF&) {
+void SolidColorScrollbarLayer::SetNeedsDisplayRect(const gfx::Rect& rect) {
   // Never needs repaint.
 }
 

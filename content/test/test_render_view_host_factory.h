@@ -23,17 +23,17 @@ class SessionStorageNamespace;
 class TestRenderViewHostFactory : public RenderViewHostFactory {
  public:
   explicit TestRenderViewHostFactory(RenderProcessHostFactory* rph_factory);
-  virtual ~TestRenderViewHostFactory();
+  ~TestRenderViewHostFactory() override;
 
   virtual void set_render_process_host_factory(
       RenderProcessHostFactory* rph_factory);
-  virtual RenderViewHost* CreateRenderViewHost(
+  RenderViewHost* CreateRenderViewHost(
       SiteInstance* instance,
       RenderViewHostDelegate* delegate,
       RenderWidgetHostDelegate* widget_delegate,
       int routing_id,
       int main_frame_routing_id,
-      bool swapped_out) OVERRIDE;
+      bool swapped_out) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestRenderViewHostFactory);

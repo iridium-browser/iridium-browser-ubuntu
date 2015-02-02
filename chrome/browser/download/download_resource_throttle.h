@@ -29,13 +29,13 @@ class DownloadResourceThrottle
                            const std::string& request_method);
 
   // content::ResourceThrottle implementation:
-  virtual void WillStartRequest(bool* defer) OVERRIDE;
-  virtual void WillRedirectRequest(const GURL& new_url, bool* defer) OVERRIDE;
-  virtual void WillProcessResponse(bool* defer) OVERRIDE;
-  virtual const char* GetNameForLogging() const OVERRIDE;
+  void WillStartRequest(bool* defer) override;
+  void WillRedirectRequest(const GURL& new_url, bool* defer) override;
+  void WillProcessResponse(bool* defer) override;
+  const char* GetNameForLogging() const override;
 
  private:
-  virtual ~DownloadResourceThrottle();
+  ~DownloadResourceThrottle() override;
 
   void WillDownload(bool* defer);
   void ContinueDownload(bool allow);

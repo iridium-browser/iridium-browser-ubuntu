@@ -186,6 +186,33 @@ message PolicyFetchRequest {
   optional string verification_key_hash = 9;
 }
 
+// This message customizes how the device behaves when it is disabled by its
+// owner. The message will be sent as part of the DeviceState fetched during
+// normal operation and as part of the DeviceStateRetrievalResponse fetched when
+// the device is wiped/reinstalled.
+message DisabledState {
+  // A message to the finder/thief that should be shown on the screen.
+  optional string message = 1;
+}
+
+message DeviceState {
+  // Modes of operation that the device can be in.
+  enum DeviceMode {
+    // The device is operating normally. Sessions can be started and the device
+    // can be used.
+    DEVICE_MODE_NORMAL = 0;
+    // The device has been disabled by its owner. The device will show a warning
+    // screen and will not allow any sessions to be started.
+    DEVICE_MODE_DISABLED = 1;
+  }
+  // The mode of operation that the device should be in.
+  optional DeviceMode device_mode = 1 [default = DEVICE_MODE_NORMAL];
+
+  // State that is relevant only when the |device_mode| is
+  // |DEVICE_MODE_DISABLED|.
+  optional DisabledState disabled_state = 2;
+}
+
 // This message is included in serialized form in PolicyFetchResponse
 // below.  It may also be signed, with the signature being created for
 // the serialized form.
@@ -289,6 +316,9 @@ message PolicyData {
     CONSUMER_MANAGED = 2;
   }
   optional ManagementMode management_mode = 16;
+
+  // Indicates the state that the device should be in.
+  optional DeviceState device_state = 17;
 }
 
 message PolicyFetchResponse {
@@ -614,12 +644,19 @@ message DeviceStateRetrievalResponse {
     RESTORE_MODE_REENROLLMENT_REQUESTED = 1;
     // Enterprise enrollment is enforced and cannot be skipped.
     RESTORE_MODE_REENROLLMENT_ENFORCED = 2;
+    // The device has been disabled by its owner. The device will show a warning
+    // screen and prevent the user from proceeding further.
+    RESTORE_MODE_DISABLED = 3;
   };
   // The server-indicated restore mode.
   optional RestoreMode restore_mode = 1 [default = RESTORE_MODE_NONE];
 
   // Primary domain the device is associated with.
   optional string management_domain = 2;
+
+  // State that is relevant only when the |restore_mode| is
+  // |RESTORE_MODE_DISABLED|.
+  optional DisabledState disabled_state = 3;
 }
 
 // Sent by the client to the server to pair the Host device with the Controller

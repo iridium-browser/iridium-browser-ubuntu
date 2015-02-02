@@ -8,9 +8,14 @@
 #include "platform/credentialmanager/PlatformLocalCredential.h"
 
 namespace blink {
+WebLocalCredential::WebLocalCredential(const WebString& id, const WebString& password, const WebString& name, const WebURL& avatarURL)
+    : WebCredential(PlatformLocalCredential::create(id, password, name, avatarURL))
+{
+}
 
+// FIXME: Throw this away once it's unused on the Chromium side.
 WebLocalCredential::WebLocalCredential(const WebString& id, const WebString& name, const WebURL& avatarURL, const WebString& password)
-    : WebCredential(PlatformLocalCredential::create(id, name, avatarURL, password))
+    : WebCredential(PlatformLocalCredential::create(id, password, name, avatarURL))
 {
 }
 
@@ -22,6 +27,17 @@ void WebLocalCredential::assign(const WebLocalCredential& other)
 WebString WebLocalCredential::password() const
 {
     return static_cast<PlatformLocalCredential*>(m_platformCredential.get())->password();
+}
+
+WebLocalCredential::WebLocalCredential(PlatformCredential* credential)
+    : WebCredential(credential)
+{
+}
+
+WebLocalCredential& WebLocalCredential::operator=(PlatformCredential* credential)
+{
+    m_platformCredential = credential;
+    return *this;
 }
 
 } // namespace blink

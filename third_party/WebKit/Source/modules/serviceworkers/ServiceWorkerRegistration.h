@@ -8,6 +8,7 @@
 #include "core/dom/ActiveDOMObject.h"
 #include "core/events/EventTarget.h"
 #include "modules/serviceworkers/ServiceWorker.h"
+#include "platform/Supplementable.h"
 #include "public/platform/WebServiceWorkerRegistration.h"
 #include "public/platform/WebServiceWorkerRegistrationProxy.h"
 #include "wtf/OwnPtr.h"
@@ -22,24 +23,25 @@ class ScriptPromiseResolver;
 class ScriptState;
 class WebServiceWorkerProvider;
 
-class ServiceWorkerRegistration FINAL
+class ServiceWorkerRegistration final
     : public RefCountedGarbageCollectedWillBeGarbageCollectedFinalized<ServiceWorkerRegistration>
     , public ActiveDOMObject
     , public EventTargetWithInlineData
-    , public WebServiceWorkerRegistrationProxy {
+    , public WebServiceWorkerRegistrationProxy
+    , public HeapSupplementable<ServiceWorkerRegistration> {
     DEFINE_WRAPPERTYPEINFO();
     DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollected<ServiceWorkerRegistration>);
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(ServiceWorkerRegistration);
+    USING_GARBAGE_COLLECTED_MIXIN(ServiceWorkerRegistration);
 public:
     // EventTarget overrides.
-    virtual const AtomicString& interfaceName() const OVERRIDE;
-    virtual ExecutionContext* executionContext() const OVERRIDE { return ActiveDOMObject::executionContext(); }
+    virtual const AtomicString& interfaceName() const override;
+    virtual ExecutionContext* executionContext() const override { return ActiveDOMObject::executionContext(); }
 
     // WebServiceWorkerRegistrationProxy overrides.
-    virtual void dispatchUpdateFoundEvent() OVERRIDE;
-    virtual void setInstalling(WebServiceWorker*) OVERRIDE;
-    virtual void setWaiting(WebServiceWorker*) OVERRIDE;
-    virtual void setActive(WebServiceWorker*) OVERRIDE;
+    virtual void dispatchUpdateFoundEvent() override;
+    virtual void setInstalling(WebServiceWorker*) override;
+    virtual void setWaiting(WebServiceWorker*) override;
+    virtual void setActive(WebServiceWorker*) override;
 
     // For CallbackPromiseAdapter.
     typedef WebServiceWorkerRegistration WebType;
@@ -53,19 +55,21 @@ public:
 
     String scope() const;
 
+    WebServiceWorkerRegistration* webRegistration() { return m_outerRegistration.get(); }
+
     ScriptPromise unregister(ScriptState*);
 
     DEFINE_ATTRIBUTE_EVENT_LISTENER(updatefound);
 
-    virtual void trace(Visitor*) OVERRIDE;
+    virtual void trace(Visitor*) override;
 
 private:
     static ServiceWorkerRegistration* getOrCreate(ExecutionContext*, WebServiceWorkerRegistration*);
     ServiceWorkerRegistration(ExecutionContext*, PassOwnPtr<WebServiceWorkerRegistration>);
 
     // ActiveDOMObject overrides.
-    virtual bool hasPendingActivity() const OVERRIDE;
-    virtual void stop() OVERRIDE;
+    virtual bool hasPendingActivity() const override;
+    virtual void stop() override;
 
     OwnPtr<WebServiceWorkerRegistration> m_outerRegistration;
     WebServiceWorkerProvider* m_provider;

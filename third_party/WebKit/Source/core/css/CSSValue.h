@@ -74,7 +74,6 @@ public:
 
     bool isBaseValueList() const { return m_classType == ValueListClass; }
 
-    bool isAspectRatioValue() const { return m_classType == AspectRatioClass; }
     bool isBorderImageSliceValue() const { return m_classType == BorderImageSliceClass; }
     bool isCanvasValue() const { return m_classType == CanvasClass; }
     bool isCursorImageValue() const { return m_classType == CursorImageClass; }
@@ -103,6 +102,7 @@ public:
     bool isFilterValue() const { return m_classType == CSSFilterClass; }
     bool isGridTemplateAreasValue() const { return m_classType == GridTemplateAreasClass; }
     bool isSVGDocumentValue() const { return m_classType == CSSSVGDocumentClass; }
+    bool isContentDistributionValue() const { return m_classType == CSSContentDistributionClass; }
     bool isUnicodeRangeValue() const { return m_classType == UnicodeRangeClass; }
     bool isGridLineNamesValue() const { return m_classType == GridLineNamesClass; }
 
@@ -143,7 +143,6 @@ protected:
         StepsTimingFunctionClass,
 
         // Other class types.
-        AspectRatioClass,
         BorderImageSliceClass,
         FontFeatureClass,
         FontClass,
@@ -162,6 +161,8 @@ protected:
 
         // SVG classes.
         CSSSVGDocumentClass,
+
+        CSSContentDistributionClass,
 
         // List class types must appear after ValueListClass.
         ValueListClass,

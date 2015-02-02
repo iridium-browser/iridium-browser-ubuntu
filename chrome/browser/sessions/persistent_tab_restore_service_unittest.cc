@@ -13,6 +13,7 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_service_factory.h"
+#include "chrome/browser/sessions/session_service_utils.h"
 #include "chrome/browser/sessions/session_types.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/sessions/tab_restore_service_observer.h"
@@ -46,11 +47,9 @@ class PersistentTabRestoreTimeFactory : public TabRestoreService::TimeFactory {
  public:
   PersistentTabRestoreTimeFactory() : time_(base::Time::Now()) {}
 
-  virtual ~PersistentTabRestoreTimeFactory() {}
+  ~PersistentTabRestoreTimeFactory() override {}
 
-  virtual base::Time TimeNow() OVERRIDE {
-    return time_;
-  }
+  base::Time TimeNow() override { return time_; }
 
  private:
   base::Time time_;
@@ -68,8 +67,7 @@ class PersistentTabRestoreServiceTest : public ChromeRenderViewHostTestHarness {
       time_factory_(NULL) {
   }
 
-  virtual ~PersistentTabRestoreServiceTest() {
-  }
+  ~PersistentTabRestoreServiceTest() override {}
 
  protected:
   enum {
@@ -77,13 +75,13 @@ class PersistentTabRestoreServiceTest : public ChromeRenderViewHostTestHarness {
   };
 
   // testing::Test:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ChromeRenderViewHostTestHarness::SetUp();
     time_factory_ = new PersistentTabRestoreTimeFactory();
     service_.reset(new PersistentTabRestoreService(profile(), time_factory_));
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     service_->Shutdown();
     service_.reset();
     delete time_factory_;
@@ -129,8 +127,9 @@ class PersistentTabRestoreServiceTest : public ChromeRenderViewHostTestHarness {
         SessionServiceFactory::GetForProfile(profile());
     SessionID tab_id;
     SessionID window_id;
-    session_service->SetWindowType(
-        window_id, Browser::TYPE_TABBED, SessionService::TYPE_NORMAL);
+    session_service->SetWindowType(window_id,
+                                   Browser::TYPE_TABBED,
+                                   SessionService::TYPE_NORMAL);
     session_service->SetTabWindow(window_id, tab_id);
     session_service->SetTabIndexInWindow(window_id, tab_id, 0);
     session_service->SetSelectedTabInWindow(window_id, 0);
@@ -181,11 +180,9 @@ class TestTabRestoreServiceObserver : public TabRestoreServiceObserver {
   bool got_loaded() const { return got_loaded_; }
 
   // TabRestoreServiceObserver:
-  virtual void TabRestoreServiceChanged(TabRestoreService* service) OVERRIDE {
-  }
-  virtual void TabRestoreServiceDestroyed(TabRestoreService* service) OVERRIDE {
-  }
-  virtual void TabRestoreServiceLoaded(TabRestoreService* service) OVERRIDE {
+  void TabRestoreServiceChanged(TabRestoreService* service) override {}
+  void TabRestoreServiceDestroyed(TabRestoreService* service) override {}
+  void TabRestoreServiceLoaded(TabRestoreService* service) override {
     got_loaded_ = true;
   }
 

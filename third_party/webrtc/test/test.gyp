@@ -53,11 +53,13 @@
       ],
     },
     {
-      'target_name': 'rtcp_packet_parser',
+      'target_name': 'rtp_test_utils',
       'type': 'static_library',
       'sources': [
         'rtcp_packet_parser.cc',
         'rtcp_packet_parser.h',
+        'rtp_file_reader.cc',
+        'rtp_file_reader.h',
       ],
       'dependencies': [
         '<(webrtc_root)/modules/modules.gyp:rtp_rtcp',
@@ -84,6 +86,7 @@
         'field_trial',
         '<(DEPTH)/testing/gtest.gyp:gtest',
         '<(DEPTH)/third_party/gflags/gflags.gyp:gflags',
+        '<(webrtc_root)/system_wrappers/source/system_wrappers.gyp:metrics_default',
       ],
     },
     {
@@ -95,8 +98,6 @@
         '<(webrtc_root)/system_wrappers/source/system_wrappers.gyp:system_wrappers',
       ],
       'sources': [
-        'testsupport/android/root_path_android.cc',
-        'testsupport/android/root_path_android_chromium.cc',
         'testsupport/fileutils.cc',
         'testsupport/fileutils.h',
         'testsupport/frame_reader.cc',
@@ -114,20 +115,6 @@
         'testsupport/trace_to_stderr.cc',
         'testsupport/trace_to_stderr.h',
       ],
-      'conditions': [
-        ['OS=="android"', {
-          'dependencies': [
-            '<(DEPTH)/base/base.gyp:base',
-          ],
-          'sources!': [
-            'testsupport/android/root_path_android.cc',
-          ],
-        }, {
-          'sources!': [
-            'testsupport/android/root_path_android_chromium.cc',
-          ],
-        }],
-      ],
     },
     {
       # Depend on this target when you want to have test_support but also the
@@ -140,6 +127,7 @@
         '<(DEPTH)/testing/gmock.gyp:gmock',
         '<(DEPTH)/testing/gtest.gyp:gtest',
         '<(DEPTH)/third_party/gflags/gflags.gyp:gflags',
+        '<(webrtc_root)/system_wrappers/source/system_wrappers.gyp:metrics_default',
       ],
       'sources': [
         'run_all_unittests.cc',
@@ -220,7 +208,6 @@
           ],
           'includes': [
             '../build/isolate.gypi',
-            'test_support_unittests.isolate',
           ],
           'sources': [
             'test_support_unittests.isolate',

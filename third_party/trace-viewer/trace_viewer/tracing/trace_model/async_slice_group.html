@@ -6,8 +6,8 @@ found in the LICENSE file.
 -->
 
 <link rel="import" href="/tracing/trace_model/async_slice.html">
-<link rel="import" href="/tvcm/guid.html">
-<link rel="import" href="/tvcm/range.html">
+<link rel="import" href="/base/guid.html">
+<link rel="import" href="/base/range.html">
 
 <script>
 'use strict';
@@ -15,18 +15,18 @@ found in the LICENSE file.
 /**
  * @fileoverview Provides the AsyncSliceGroup class.
  */
-tvcm.exportTo('tracing.trace_model', function() {
+tv.exportTo('tracing.trace_model', function() {
   /**
    * A group of AsyncSlices associated with a thread.
    * @constructor
    */
   function AsyncSliceGroup(parentThread, opt_name) {
     this.parentThread_ = parentThread;
-    this.guid_ = tvcm.GUID.allocate();
+    this.guid_ = tv.GUID.allocate();
     this.slices = [];
-    this.bounds = new tvcm.Range();
+    this.bounds = new tv.Range();
     this.name_ = opt_name;
-    this.titleSubGroups_ = undefined;
+    this.viewSubGroups_ = undefined;
   }
 
   AsyncSliceGroup.prototype = {
@@ -69,14 +69,22 @@ tvcm.exportTo('tracing.trace_model', function() {
 
     /**
      * Shifts all the timestamps inside this group forward by the amount
-     * specified.
+     * specified, including all nested subSlices if there are any.
      */
     shiftTimestampsForward: function(amount) {
       for (var sI = 0; sI < this.slices.length; sI++) {
         var slice = this.slices[sI];
         slice.start = (slice.start + amount);
-        for (var sJ = 0; sJ < slice.subSlices.length; sJ++)
-          slice.subSlices[sJ].start += amount;
+        // Shift all nested subSlices recursively.
+        var shiftSubSlices = function (subSlices) {
+          if (subSlices === undefined || subSlices.length === 0)
+            return;
+          for (var sJ = 0; sJ < subSlices.length; sJ++) {
+            subSlices[sJ].start += amount;
+            shiftSubSlices(subSlices[sJ].subSlices);
+          }
+        };
+        shiftSubSlices(slice.subSlices);
       }
     },
 
@@ -97,8 +105,8 @@ tvcm.exportTo('tracing.trace_model', function() {
      * @return {Array} An array of AsyncSliceGroups where each group has
      * slices that started on the same thread.
      */
-    get titleSubGroups() {
-      if (this.titleSubGroups_ === undefined) {
+    get viewSubGroups() {
+      if (this.viewSubGroups_ === undefined) {
         var prefix = '';
         if (this.name !== undefined)
           prefix = this.name + '.';
@@ -108,15 +116,16 @@ tvcm.exportTo('tracing.trace_model', function() {
         var subGroupsByTitle = {};
         for (var i = 0; i < this.slices.length; ++i) {
           var slice = this.slices[i];
-          if (!subGroupsByTitle[slice.title]) {
-            subGroupsByTitle[slice.title] = new AsyncSliceGroup(
-                this.parentThread_, prefix + slice.title);
+          var subGroupTitle = slice.viewSubGroupTitle;
+          if (!subGroupsByTitle[subGroupTitle]) {
+            subGroupsByTitle[subGroupTitle] = new AsyncSliceGroup(
+                this.parentThread_, prefix + subGroupTitle);
           }
-          subGroupsByTitle[slice.title].slices.push(slice);
+          subGroupsByTitle[subGroupTitle].slices.push(slice);
         }
-        this.titleSubGroups_ = tvcm.dictionaryValues(subGroupsByTitle);
+        this.viewSubGroups_ = tv.dictionaryValues(subGroupsByTitle);
       }
-      return this.titleSubGroups_;
+      return this.viewSubGroups_;
     },
 
     iterateAllEvents: function(callback, opt_this) {

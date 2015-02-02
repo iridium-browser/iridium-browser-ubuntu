@@ -20,13 +20,11 @@
  */
 
 #include "config.h"
-
 #include "core/svg/SVGAnimateMotionElement.h"
 
 #include "core/SVGNames.h"
 #include "core/dom/ElementTraversal.h"
 #include "core/rendering/RenderObject.h"
-#include "core/rendering/svg/RenderSVGResource.h"
 #include "core/rendering/svg/SVGPathData.h"
 #include "core/svg/SVGMPathElement.h"
 #include "core/svg/SVGParserUtilities.h"
@@ -172,7 +170,7 @@ void SVGAnimateMotionElement::resetAnimatedType()
     SVGElement* targetElement = this->targetElement();
     if (!targetElement)
         return;
-    if (AffineTransform* transform = targetElement->supplementalTransform())
+    if (AffineTransform* transform = targetElement->animateMotionTransform())
         transform->makeIdentity();
 }
 
@@ -181,7 +179,7 @@ void SVGAnimateMotionElement::clearAnimatedType(SVGElement* targetElement)
     if (!targetElement)
         return;
 
-    AffineTransform* transform = targetElement->supplementalTransform();
+    AffineTransform* transform = targetElement->animateMotionTransform();
     if (!transform)
         return;
 
@@ -189,7 +187,7 @@ void SVGAnimateMotionElement::clearAnimatedType(SVGElement* targetElement)
 
     if (RenderObject* targetRenderer = targetElement->renderer()) {
         targetRenderer->setNeedsTransformUpdate();
-        RenderSVGResource::markForLayoutAndParentResourceInvalidation(targetRenderer);
+        markForLayoutAndParentResourceInvalidation(targetRenderer);
     }
 }
 
@@ -225,7 +223,7 @@ void SVGAnimateMotionElement::calculateAnimatedValue(float percentage, unsigned 
     SVGElement* targetElement = this->targetElement();
     if (!targetElement)
         return;
-    AffineTransform* transform = targetElement->supplementalTransform();
+    AffineTransform* transform = targetElement->animateMotionTransform();
     if (!transform)
         return;
 
@@ -283,9 +281,9 @@ void SVGAnimateMotionElement::applyResultsToTarget()
         return;
 
     if (RenderObject* renderer = targetElement->renderer())
-        RenderSVGResource::markForLayoutAndParentResourceInvalidation(renderer);
+        markForLayoutAndParentResourceInvalidation(renderer);
 
-    AffineTransform* t = targetElement->supplementalTransform();
+    AffineTransform* t = targetElement->animateMotionTransform();
     if (!t)
         return;
 
@@ -295,13 +293,13 @@ void SVGAnimateMotionElement::applyResultsToTarget()
     for (WillBeHeapHashSet<RawPtrWillBeWeakMember<SVGElement> >::const_iterator it = instances.begin(); it != end; ++it) {
         SVGElement* shadowTreeElement = *it;
         ASSERT(shadowTreeElement);
-        AffineTransform* transform = shadowTreeElement->supplementalTransform();
+        AffineTransform* transform = shadowTreeElement->animateMotionTransform();
         if (!transform)
             continue;
         transform->setMatrix(t->a(), t->b(), t->c(), t->d(), t->e(), t->f());
         if (RenderObject* renderer = shadowTreeElement->renderer()) {
             renderer->setNeedsTransformUpdate();
-            RenderSVGResource::markForLayoutAndParentResourceInvalidation(renderer);
+            markForLayoutAndParentResourceInvalidation(renderer);
         }
     }
 }

@@ -18,8 +18,8 @@
 #include "base/observer_list.h"
 #include "base/threading/non_thread_safe.h"
 #include "base/timer/timer.h"
-#include "third_party/libjingle/source/talk/xmpp/xmppclient.h"
 #include "third_party/webrtc/base/sigslot.h"
+#include "third_party/webrtc/libjingle/xmpp/xmppclient.h"
 
 namespace net {
 class ClientSocketFactory;
@@ -57,21 +57,21 @@ class XmppSignalStrategy : public base::NonThreadSafe,
       net::ClientSocketFactory* socket_factory,
       scoped_refptr<net::URLRequestContextGetter> request_context_getter,
       const XmppServerConfig& xmpp_server_config);
-  virtual ~XmppSignalStrategy();
+  ~XmppSignalStrategy() override;
 
   // SignalStrategy interface.
-  virtual void Connect() OVERRIDE;
-  virtual void Disconnect() OVERRIDE;
-  virtual State GetState() const OVERRIDE;
-  virtual Error GetError() const OVERRIDE;
-  virtual std::string GetLocalJid() const OVERRIDE;
-  virtual void AddListener(Listener* listener) OVERRIDE;
-  virtual void RemoveListener(Listener* listener) OVERRIDE;
-  virtual bool SendStanza(scoped_ptr<buzz::XmlElement> stanza) OVERRIDE;
-  virtual std::string GetNextId() OVERRIDE;
+  void Connect() override;
+  void Disconnect() override;
+  State GetState() const override;
+  Error GetError() const override;
+  std::string GetLocalJid() const override;
+  void AddListener(Listener* listener) override;
+  void RemoveListener(Listener* listener) override;
+  bool SendStanza(scoped_ptr<buzz::XmlElement> stanza) override;
+  std::string GetNextId() override;
 
   // buzz::XmppStanzaHandler interface.
-  virtual bool HandleStanza(const buzz::XmlElement* stanza) OVERRIDE;
+  bool HandleStanza(const buzz::XmlElement* stanza) override;
 
   // This method is used to update the auth info (for example when the OAuth
   // access token is renewed). It is OK to call this even when we are in the

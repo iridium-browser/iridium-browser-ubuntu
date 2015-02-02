@@ -214,8 +214,6 @@ const wchar_t kUserDataDirname[] = L"User Data";
 
 const bool kRecordModeEnabled = true;
 
-const int kJavaScriptMessageExpectedDelay = 1000;
-
 #if defined(OS_ANDROID) || defined(OS_IOS)
 const bool kEnableTouchIcon = true;
 #else
@@ -223,9 +221,6 @@ const bool kEnableTouchIcon = false;
 #endif
 
 const float kMaxShareOfExtensionProcesses = 0.30f;
-
-// This is used by the PreRead experiment.
-const char kPreReadEnvironmentVariable[] = "CHROME_PRE_READ_EXPERIMENT";
 
 #if defined(OS_LINUX)
 const int kLowestRendererOomScore = 300;

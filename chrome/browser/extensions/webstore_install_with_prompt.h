@@ -8,7 +8,6 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/extensions/webstore_standalone_installer.h"
-#include "content/public/browser/page_navigator.h"
 #include "ui/gfx/native_widget_types.h"
 #include "url/gurl.h"
 
@@ -28,8 +27,7 @@ namespace extensions {
 // Clients of this class must be trusted, as verification of the requestor is
 // skipped. This class stubs out many WebstoreStandaloneInstaller abstract
 // methods and can be used as a base class.
-class WebstoreInstallWithPrompt : public WebstoreStandaloneInstaller,
-                                  public content::PageNavigator {
+class WebstoreInstallWithPrompt : public WebstoreStandaloneInstaller {
  public:
   // Use this constructor when there is no parent window. The install dialog
   // will be centered on the screen.
@@ -46,29 +44,23 @@ class WebstoreInstallWithPrompt : public WebstoreStandaloneInstaller,
 
  protected:
   friend class base::RefCountedThreadSafe<WebstoreInstallWithPrompt>;
-  virtual ~WebstoreInstallWithPrompt();
+  ~WebstoreInstallWithPrompt() override;
 
   void set_show_post_install_ui(bool show) { show_post_install_ui_ = show; }
 
   // extensions::WebstoreStandaloneInstaller overrides:
-  virtual bool CheckRequestorAlive() const OVERRIDE;
-  virtual const GURL& GetRequestorURL() const OVERRIDE;
-  virtual bool ShouldShowPostInstallUI() const OVERRIDE;
-  virtual bool ShouldShowAppInstalledBubble() const OVERRIDE;
-  virtual content::WebContents* GetWebContents() const OVERRIDE;
-  virtual scoped_refptr<ExtensionInstallPrompt::Prompt> CreateInstallPrompt()
-      const OVERRIDE;
-  virtual scoped_ptr<ExtensionInstallPrompt> CreateInstallUI() OVERRIDE;
-  virtual bool CheckInlineInstallPermitted(
-      const base::DictionaryValue& webstore_data,
-      std::string* error) const OVERRIDE;
-  virtual bool CheckRequestorPermitted(
-      const base::DictionaryValue& webstore_data,
-      std::string* error) const OVERRIDE;
-
-  // content::PageNavigator overrides:
-  virtual content::WebContents* OpenURL(
-      const content::OpenURLParams& params) OVERRIDE;
+  bool CheckRequestorAlive() const override;
+  const GURL& GetRequestorURL() const override;
+  bool ShouldShowPostInstallUI() const override;
+  bool ShouldShowAppInstalledBubble() const override;
+  content::WebContents* GetWebContents() const override;
+  scoped_refptr<ExtensionInstallPrompt::Prompt> CreateInstallPrompt()
+      const override;
+  scoped_ptr<ExtensionInstallPrompt> CreateInstallUI() override;
+  bool CheckInlineInstallPermitted(const base::DictionaryValue& webstore_data,
+                                   std::string* error) const override;
+  bool CheckRequestorPermitted(const base::DictionaryValue& webstore_data,
+                               std::string* error) const override;
 
  private:
   bool show_post_install_ui_;

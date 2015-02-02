@@ -42,12 +42,12 @@ namespace blink {
 class Blob;
 class ExceptionState;
 
-class FileWriterSync FINAL : public FileWriterBase, public ScriptWrappable, public WebFileWriterClient {
+class FileWriterSync final : public FileWriterBase, public ScriptWrappable, public WebFileWriterClient {
     DEFINE_WRAPPERTYPEINFO();
 public:
     static FileWriterSync* create()
     {
-        return adoptRefCountedGarbageCollectedWillBeNoop(new FileWriterSync());
+        return new FileWriterSync();
     }
     virtual ~FileWriterSync();
 
@@ -57,9 +57,9 @@ public:
     void truncate(long long length, ExceptionState&);
 
     // WebFileWriterClient, via FileWriterBase
-    virtual void didWrite(long long bytes, bool complete) OVERRIDE;
-    virtual void didTruncate() OVERRIDE;
-    virtual void didFail(WebFileError) OVERRIDE;
+    virtual void didWrite(long long bytes, bool complete) override;
+    virtual void didTruncate() override;
+    virtual void didFail(WebFileError) override;
 
 private:
     FileWriterSync();

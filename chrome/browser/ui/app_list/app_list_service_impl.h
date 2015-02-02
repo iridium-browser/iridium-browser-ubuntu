@@ -32,7 +32,7 @@ class AppListServiceImplTestApi;
 class AppListServiceImpl : public AppListService,
                            public ProfileInfoCacheObserver {
  public:
-  virtual ~AppListServiceImpl();
+  ~AppListServiceImpl() override;
 
   // Constructor used for testing.
   AppListServiceImpl(const base::CommandLine& command_line,
@@ -47,20 +47,25 @@ class AppListServiceImpl : public AppListService,
   static void RecordAppListAppLaunch();
 
   // AppListService overrides:
-  virtual void SetAppListNextPaintCallback(void (*callback)()) OVERRIDE;
-  virtual void HandleFirstRun() OVERRIDE;
-  virtual void Init(Profile* initial_profile) OVERRIDE;
-  virtual base::FilePath GetProfilePath(
-      const base::FilePath& user_data_dir) OVERRIDE;
-  virtual void SetProfilePath(const base::FilePath& profile_path) OVERRIDE;
-  virtual void Show() OVERRIDE;
-  virtual void AutoShowForProfile(Profile* requested_profile) OVERRIDE;
-  virtual void EnableAppList(Profile* initial_profile,
-                             AppListEnableSource enable_source) OVERRIDE;
-  virtual void CreateShortcut() OVERRIDE;
+  void SetAppListNextPaintCallback(void (*callback)()) override;
+  void HandleFirstRun() override;
+  void Init(Profile* initial_profile) override;
+  base::FilePath GetProfilePath(const base::FilePath& user_data_dir) override;
+  void SetProfilePath(const base::FilePath& profile_path) override;
+  void Show() override;
+  void ShowForVoiceSearch(Profile* profile) override;
+  void ShowForAppInstall(Profile* profile,
+                         const std::string& extension_id,
+                         bool start_discovery_tracking) override;
+  void EnableAppList(Profile* initial_profile,
+                     AppListEnableSource enable_source) override;
+  void CreateShortcut() override;
 
  protected:
   AppListServiceImpl();
+
+  // Create the app list UI, and maintain its state, but do not show it.
+  virtual void CreateForProfile(Profile* requested_profile) = 0;
 
   // Destroy the app list. Called when the profile that the app list is showing
   // is being deleted.
@@ -88,8 +93,7 @@ class AppListServiceImpl : public AppListService,
                        Profile::CreateStatus status);
 
   // ProfileInfoCacheObserver overrides:
-  virtual void OnProfileWillBeRemoved(
-      const base::FilePath& profile_path) OVERRIDE;
+  void OnProfileWillBeRemoved(const base::FilePath& profile_path) override;
 
   scoped_ptr<ProfileStore> profile_store_;
   base::CommandLine command_line_;

@@ -33,23 +33,60 @@
 
 namespace blink {
 
+PendingScript::PendingScript()
+    : m_watchingForLoad(false)
+    , m_startingPosition(TextPosition::belowRangePosition())
+{
+}
+
+PendingScript::PendingScript(Element* element, ScriptResource* resource)
+    : m_watchingForLoad(false)
+    , m_element(element)
+{
+    setScriptResource(resource);
+}
+
+PendingScript::PendingScript(const PendingScript& other)
+    : ResourceOwner(other)
+    , m_watchingForLoad(other.m_watchingForLoad)
+    , m_element(other.m_element)
+    , m_startingPosition(other.m_startingPosition)
+    , m_streamer(other.m_streamer)
+{
+    setScriptResource(other.resource());
+}
+
 PendingScript::~PendingScript()
 {
+}
+
+PendingScript& PendingScript::operator=(const PendingScript& other)
+{
+    if (this == &other)
+        return *this;
+
+    m_watchingForLoad = other.m_watchingForLoad;
+    m_element = other.m_element;
+    m_startingPosition = other.m_startingPosition;
+    m_streamer = other.m_streamer;
+    this->ResourceOwner<ScriptResource, ScriptResourceClient>::operator=(other);
+    return *this;
 }
 
 void PendingScript::watchForLoad(ScriptResourceClient* client)
 {
     ASSERT(!m_watchingForLoad);
-    ASSERT(!isReady());
+    // addClient() will call notifyFinished() if the load is complete. Callers
+    // who do not expect to be re-entered from this call should not call
+    // watchForLoad for a PendingScript which isReady. We also need to set
+    // m_watchingForLoad early, since addClient() can result in calling
+    // notifyFinished and further stopWatchingForLoad().
+    m_watchingForLoad = true;
     if (m_streamer) {
         m_streamer->addClient(client);
     } else {
-        // addClient() will call notifyFinished() if the load is
-        // complete. Callers do not expect to be re-entered from this call, so
-        // they should not become a client of an already-loaded Resource.
         resource()->addClient(client);
     }
-    m_watchingForLoad = true;
 }
 
 void PendingScript::stopWatchingForLoad(ScriptResourceClient* client)
@@ -58,9 +95,7 @@ void PendingScript::stopWatchingForLoad(ScriptResourceClient* client)
         return;
     ASSERT(resource());
     if (m_streamer) {
-        m_streamer->cancel();
         m_streamer->removeClient(client);
-        m_streamer.clear();
     } else {
         resource()->removeClient(client);
     }
@@ -72,6 +107,8 @@ PassRefPtrWillBeRawPtr<Element> PendingScript::releaseElementAndClear()
     setScriptResource(0);
     m_watchingForLoad = false;
     m_startingPosition = TextPosition::belowRangePosition();
+    if (m_streamer)
+        m_streamer->cancel();
     m_streamer.release();
     return m_element.release();
 }
@@ -109,6 +146,13 @@ ScriptSourceCode PendingScript::getSource(const KURL& documentURL, bool& errorOc
     }
     errorOccurred = false;
     return ScriptSourceCode(m_element->textContent(), documentURL, startingPosition());
+}
+
+void PendingScript::setStreamer(PassRefPtr<ScriptStreamer> streamer)
+{
+    ASSERT(!m_streamer);
+    ASSERT(!m_watchingForLoad);
+    m_streamer = streamer;
 }
 
 bool PendingScript::isReady() const

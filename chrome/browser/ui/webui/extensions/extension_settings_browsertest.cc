@@ -11,6 +11,7 @@
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_error_reporter.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
+#include "chrome/browser/extensions/extension_install_prompt_show_params.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/profiles/profile.h"
@@ -63,10 +64,9 @@ class MockAutoConfirmExtensionInstallPrompt : public ExtensionInstallPrompt {
     : ExtensionInstallPrompt(web_contents) {}
 
   // Proceed without confirmation prompt.
-  virtual void ConfirmInstall(
-      Delegate* delegate,
-      const Extension* extension,
-      const ShowDialogCallback& show_dialog_callback) OVERRIDE {
+  void ConfirmInstall(Delegate* delegate,
+                      const Extension* extension,
+                      const ShowDialogCallback& show_dialog_callback) override {
     delegate->InstallUIProceed();
   }
 };

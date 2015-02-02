@@ -394,7 +394,6 @@ base::DictionaryValue* AppListSpecificsToValue(
   SET_ENUM(item_type, GetAppListItemTypeString);
   SET_STR(item_name);
   SET_STR(parent_id);
-  SET_STR(page_ordinal);
   SET_STR(item_ordinal);
 
   return value;
@@ -784,6 +783,15 @@ base::DictionaryValue* TypedUrlSpecificsToValue(
   return value;
 }
 
+base::DictionaryValue* WifiCredentialSpecificsToValue(
+    const sync_pb::WifiCredentialSpecifics& proto) {
+  base::DictionaryValue* value = new base::DictionaryValue();
+  SET_BYTES(ssid);
+  SET_ENUM(security_class, GetWifiCredentialSecurityClassString);
+  SET_BYTES(passphrase);
+  return value;
+}
+
 base::DictionaryValue* EntitySpecificsToValue(
     const sync_pb::EntitySpecifics& specifics) {
   base::DictionaryValue* value = new base::DictionaryValue();
@@ -818,6 +826,7 @@ base::DictionaryValue* EntitySpecificsToValue(
             SyncedNotificationAppInfoSpecificsToValue);
   SET_FIELD(theme, ThemeSpecificsToValue);
   SET_FIELD(typed_url, TypedUrlSpecificsToValue);
+  SET_FIELD(wifi_credential, WifiCredentialSpecificsToValue);
   return value;
 }
 

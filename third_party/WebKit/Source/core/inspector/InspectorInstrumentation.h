@@ -51,16 +51,12 @@
 
 namespace blink {
 
-struct CSSParserString;
 class Document;
-class Element;
 class EventTarget;
 class ExecutionContext;
-class GraphicsContext;
-class GraphicsLayer;
+class FrameHost;
 class InspectorTimelineAgent;
 class InstrumentingAgents;
-class RenderLayer;
 class ThreadableLoaderClient;
 class WorkerGlobalScope;
 class WorkerInspectorProxy;
@@ -68,6 +64,7 @@ class WorkerInspectorProxy;
 #define FAST_RETURN_IF_NO_FRONTENDS(value) if (!hasFrontends()) return value;
 
 class InspectorInstrumentationCookie {
+    STACK_ALLOCATED();
 public:
     InspectorInstrumentationCookie();
     InspectorInstrumentationCookie(InstrumentingAgents*, int);
@@ -80,7 +77,7 @@ public:
     bool hasMatchingTimelineAgentId(int id) const { return m_timelineAgentId == id; }
 
 private:
-    RefPtrWillBePersistent<InstrumentingAgents> m_instrumentingAgents;
+    RefPtrWillBeMember<InstrumentingAgents> m_instrumentingAgents;
     int m_timelineAgentId;
 };
 
@@ -113,6 +110,7 @@ InstrumentingAgents* instrumentingAgentsFor(Document*);
 InstrumentingAgents* instrumentingAgentsFor(RenderObject*);
 InstrumentingAgents* instrumentingAgentsFor(Node*);
 InstrumentingAgents* instrumentingAgentsFor(WorkerGlobalScope*);
+InstrumentingAgents* instrumentingAgentsFor(FrameHost*);
 
 // Helper for the one above.
 InstrumentingAgents* instrumentingAgentsForNonDocumentContext(ExecutionContext*);

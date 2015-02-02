@@ -152,8 +152,6 @@ static int tls1_P_hash(const EVP_MD *md, const unsigned char *sec,
 			const void *seed1, int seed1_len,
 			const void *seed2, int seed2_len,
 			const void *seed3, int seed3_len,
-			const void *seed4, int seed4_len,
-			const void *seed5, int seed5_len,
 			unsigned char *out, int olen)
 	{
 	int chunk;
@@ -182,10 +180,6 @@ static int tls1_P_hash(const EVP_MD *md, const unsigned char *sec,
 		goto err;
 	if (seed3 && !EVP_DigestSignUpdate(&ctx,seed3,seed3_len))
 		goto err;
-	if (seed4 && !EVP_DigestSignUpdate(&ctx,seed4,seed4_len))
-		goto err;
-	if (seed5 && !EVP_DigestSignUpdate(&ctx,seed5,seed5_len))
-		goto err;
 	A1_len = EVP_MAX_MD_SIZE;
 	if (!EVP_DigestSignFinal(&ctx,A1,&A1_len))
 		goto err;
@@ -204,10 +198,6 @@ static int tls1_P_hash(const EVP_MD *md, const unsigned char *sec,
 		if (seed2 && !EVP_DigestSignUpdate(&ctx,seed2,seed2_len))
 			goto err;
 		if (seed3 && !EVP_DigestSignUpdate(&ctx,seed3,seed3_len))
-			goto err;
-		if (seed4 && !EVP_DigestSignUpdate(&ctx,seed4,seed4_len))
-			goto err;
-		if (seed5 && !EVP_DigestSignUpdate(&ctx,seed5,seed5_len))
 			goto err;
 
 		if (olen > chunk)
@@ -246,8 +236,6 @@ static int tls1_PRF(long digest_mask,
 		     const void *seed1, int seed1_len,
 		     const void *seed2, int seed2_len,
 		     const void *seed3, int seed3_len,
-		     const void *seed4, int seed4_len,
-		     const void *seed5, int seed5_len,
 		     const unsigned char *sec, int slen,
 		     unsigned char *out1,
 		     unsigned char *out2, int olen)
@@ -275,7 +263,7 @@ static int tls1_PRF(long digest_mask,
 				goto err;				
 			}
 			if (!tls1_P_hash(md ,S1,len+(slen&1),
-					seed1,seed1_len,seed2,seed2_len,seed3,seed3_len,seed4,seed4_len,seed5,seed5_len,
+					seed1,seed1_len,seed2,seed2_len,seed3,seed3_len,
 					out2,olen))
 				goto err;
 			S1+=len;
@@ -298,20 +286,8 @@ static int tls1_generate_key_block(SSL *s, unsigned char *km,
 		 TLS_MD_KEY_EXPANSION_CONST,TLS_MD_KEY_EXPANSION_CONST_SIZE,
 		 s->s3->server_random,SSL3_RANDOM_SIZE,
 		 s->s3->client_random,SSL3_RANDOM_SIZE,
-		 NULL,0,NULL,0,
 		 s->session->master_key,s->session->master_key_length,
 		 km,tmp,num);
-#ifdef KSSL_DEBUG
-	printf("tls1_generate_key_block() ==> %d byte master_key =\n\t",
-                s->session->master_key_length);
-	{
-        int i;
-        for (i=0; i < s->session->master_key_length; i++)
-                {
-                printf("%02X", s->session->master_key[i]);
-                }
-        printf("\n");  }
-#endif    /* KSSL_DEBUG */
 	return ret;
 	}
 
@@ -334,6 +310,20 @@ static int tls1_aead_ctx_init(SSL_AEAD_CTX **aead_ctx)
 	return 1;
 	}
 
+static void tls1_cleanup_enc_ctx(EVP_CIPHER_CTX **ctx)
+	{
+	if (*ctx != NULL)
+		EVP_CIPHER_CTX_free(*ctx);
+	*ctx = NULL;
+	}
+
+static void tls1_cleanup_hash_ctx(EVP_MD_CTX **ctx)
+	{
+	if (*ctx != NULL)
+		EVP_MD_CTX_destroy(*ctx);
+	*ctx = NULL;
+	}
+
 static int tls1_change_cipher_state_aead(SSL *s, char is_read,
 	const unsigned char *key, unsigned key_len,
 	const unsigned char *iv, unsigned iv_len,
@@ -345,6 +335,17 @@ static int tls1_change_cipher_state_aead(SSL *s, char is_read,
 	 * which simulates pre-AEAD cipher suites. It needs to be large enough
 	 * to cope with the largest pair of keys. */
 	uint8_t mac_key_and_key[32 /* HMAC(SHA256) */ + 32 /* AES-256 */];
+
+	if (is_read)
+		{
+		tls1_cleanup_enc_ctx(&s->enc_read_ctx);
+		tls1_cleanup_hash_ctx(&s->read_hash);
+		}
+	else
+		{
+		tls1_cleanup_enc_ctx(&s->enc_write_ctx);
+		tls1_cleanup_hash_ctx(&s->write_hash);
+		}
 
 	if (mac_secret_len > 0)
 		{
@@ -376,7 +377,14 @@ static int tls1_change_cipher_state_aead(SSL *s, char is_read,
 
 	if (!EVP_AEAD_CTX_init(&aead_ctx->ctx, aead, key, key_len,
 			       EVP_AEAD_DEFAULT_TAG_LENGTH, NULL /* engine */))
+		{
+		OPENSSL_free(aead_ctx);
+		if (is_read)
+			s->aead_read_ctx = NULL;
+		else
+			s->aead_write_ctx = NULL;
 		return 0;
+		}
 	if (iv_len > sizeof(aead_ctx->fixed_nonce))
 		{
 		OPENSSL_PUT_ERROR(SSL, tls1_change_cipher_state_aead, ERR_R_INTERNAL_ERROR);
@@ -399,6 +407,16 @@ static int tls1_change_cipher_state_aead(SSL *s, char is_read,
 	return 1;
 	}
 
+static void tls1_cleanup_aead_ctx(SSL_AEAD_CTX **ctx)
+	{
+	if (*ctx != NULL)
+		{
+		EVP_AEAD_CTX_cleanup(&(*ctx)->ctx);
+		OPENSSL_free(*ctx);
+		}
+	*ctx = NULL;
+	}
+
 /* tls1_change_cipher_state_cipher performs the work needed to switch cipher
  * states when using EVP_CIPHER. The argument |is_read| is true iff this
  * function is being called due to reading, as opposed to writing, a
@@ -414,6 +432,11 @@ static int tls1_change_cipher_state_cipher(
 	const EVP_CIPHER *cipher = s->s3->tmp.new_sym_enc;
 	EVP_CIPHER_CTX *cipher_ctx;
 	EVP_MD_CTX *mac_ctx;
+
+	if (is_read)
+		tls1_cleanup_aead_ctx(&s->aead_read_ctx);
+	else
+		tls1_cleanup_aead_ctx(&s->aead_write_ctx);
 
 	if (is_read)
 		{
@@ -499,9 +522,6 @@ int tls1_change_cipher_state(SSL *s, int which)
 	if (!SSL_IS_DTLS(s))
 		memset(is_read ? s->s3->read_sequence : s->s3->write_sequence, 0, 8);
 
-	/* key_arg is used for SSLv2. We don't need it for TLS. */
-	s->session->key_arg_length = 0;
-
 	mac_secret_len = s->s3->tmp.new_mac_secret_size;
 
 	if (aead != NULL)
@@ -581,9 +601,6 @@ int tls1_setup_key_block(SSL *s)
 	int ret=0;
 	unsigned key_len, iv_len;
 
-#ifdef KSSL_DEBUG
-	printf ("tls1_setup_key_block()\n");
-#endif	/* KSSL_DEBUG */
 
 	if (s->s3->tmp.key_block_length != 0)
 		return(1);
@@ -603,7 +620,7 @@ int tls1_setup_key_block(SSL *s)
 		/* For "stateful" AEADs (i.e. compatibility with pre-AEAD
 		 * cipher suites) the key length reported by
 		 * |EVP_AEAD_key_length| will include the MAC key bytes. */
-		if (key_len < mac_secret_size)
+		if (key_len < (size_t)mac_secret_size)
 			{
 			OPENSSL_PUT_ERROR(SSL, tls1_change_cipher_state, ERR_R_INTERNAL_ERROR);
 			return 0;
@@ -882,10 +899,6 @@ int tls1_enc(SSL *s, int send)
 			enc=EVP_CIPHER_CTX_cipher(s->enc_read_ctx);
 		}
 
-#ifdef KSSL_DEBUG
-	printf("tls1_enc(%d)\n", send);
-#endif    /* KSSL_DEBUG */
-
 	if ((s->session == NULL) || (ds == NULL) || (enc == NULL))
 		{
 		memmove(rec->data,rec->input,rec->length);
@@ -911,24 +924,6 @@ int tls1_enc(SSL *s, int send)
 			rec->length+=i;
 			}
 
-#ifdef KSSL_DEBUG
-		{
-		unsigned long ui;
-		printf("EVP_Cipher(ds=%p,rec->data=%p,rec->input=%p,l=%ld) ==>\n",
-			ds,rec->data,rec->input,l);
-		printf("\tEVP_CIPHER_CTX: %d buf_len, %d key_len [%d %d], %d iv_len\n",
-			ds->buf_len, ds->cipher->key_len,
-			DES_KEY_SZ, DES_SCHEDULE_SZ,
-			ds->cipher->iv_len);
-		printf("\t\tIV: ");
-		for (i=0; i<ds->cipher->iv_len; i++) printf("%02X", ds->iv[i]);
-		printf("\n");
-		printf("\trec->input=");
-		for (ui=0; ui<l; ui++) printf(" %02x", rec->input[ui]);
-		printf("\n");
-		}
-#endif	/* KSSL_DEBUG */
-
 		if (!send)
 			{
 			if (l == 0 || l%bs != 0)
@@ -940,15 +935,6 @@ int tls1_enc(SSL *s, int send)
 						?(i<0)
 						:(i==0))
 			return -1;	/* AEAD can fail to verify MAC */
-
-#ifdef KSSL_DEBUG
-		{
-		unsigned long i;
-		printf("\trec->data=");
-		for (i=0; i<l; i++)
-			printf(" %02x", rec->data[i]);  printf("\n");
-		}
-#endif	/* KSSL_DEBUG */
 
 		ret = 1;
 		if (EVP_MD_CTX_md(s->read_hash) != NULL)
@@ -967,8 +953,8 @@ int tls1_cert_verify_mac(SSL *s, int md_nid, unsigned char *out)
 	EVP_MD_CTX ctx, *d=NULL;
 	int i;
 
-	if (s->s3->handshake_buffer) 
-		if (!ssl3_digest_cached_records(s))
+	if (s->s3->handshake_buffer)
+		if (!ssl3_digest_cached_records(s, free_handshake_buffer))
 			return 0;
 
 	for (i=0;i<SSL_MAX_DIGEST;i++) 
@@ -1049,7 +1035,7 @@ int tls1_final_finish_mac(SSL *s,
 	int digests_len;
 
 	if (s->s3->handshake_buffer)
-		if (!ssl3_digest_cached_records(s))
+		if (!ssl3_digest_cached_records(s, free_handshake_buffer))
 			return 0;
 
 	digests_len = tls1_handshake_digest(s, buf, sizeof(buf));
@@ -1060,7 +1046,7 @@ int tls1_final_finish_mac(SSL *s,
 		}
 		
 	if (!tls1_PRF(ssl_get_algorithm2(s),
-			str,slen, buf, digests_len, NULL,0, NULL,0, NULL,0,
+			str,slen, buf, digests_len, NULL,0,
 			s->session->master_key,s->session->master_key_length,
 			out,buf2,sizeof buf2))
 		err = 1;
@@ -1168,22 +1154,53 @@ int tls1_generate_master_secret(SSL *s, unsigned char *out, unsigned char *p,
 	     int len)
 	{
 	unsigned char buff[SSL_MAX_MASTER_KEY_LENGTH];
-	const void *co = NULL, *so = NULL;
-	int col = 0, sol = 0;
 
+	if (s->s3->tmp.extended_master_secret)
+		{
+		uint8_t digests[2*EVP_MAX_MD_SIZE];
+		int digests_len;
 
-#ifdef KSSL_DEBUG
-	printf ("tls1_generate_master_secret(%p,%p, %p, %d)\n", s,out, p,len);
-#endif	/* KSSL_DEBUG */
+		if (s->s3->handshake_buffer)
+			{
+			/* The master secret is based on the handshake hash
+			 * just after sending the ClientKeyExchange. However,
+			 * we might have a client certificate to send, in which
+			 * case we might need different hashes for the
+			 * verification and thus still need the handshake
+			 * buffer around. Keeping both a handshake buffer *and*
+			 * running hashes isn't yet supported so, when it comes
+			 * to calculating the Finished hash, we'll have to hash
+			 * the handshake buffer again. */
+			if (!ssl3_digest_cached_records(s, dont_free_handshake_buffer))
+				return 0;
+			}
 
-	tls1_PRF(ssl_get_algorithm2(s),
-		TLS_MD_MASTER_SECRET_CONST,TLS_MD_MASTER_SECRET_CONST_SIZE,
-		s->s3->client_random,SSL3_RANDOM_SIZE,
-		co, col,
-		s->s3->server_random,SSL3_RANDOM_SIZE,
-		so, sol,
-		p,len,
-		s->session->master_key,buff,sizeof buff);
+		digests_len = tls1_handshake_digest(s, digests, sizeof(digests));
+
+		if (digests_len == -1)
+			{
+			return 0;
+			}
+
+		tls1_PRF(ssl_get_algorithm2(s),
+			TLS_MD_EXTENDED_MASTER_SECRET_CONST,
+			TLS_MD_EXTENDED_MASTER_SECRET_CONST_SIZE,
+			digests, digests_len,
+			NULL, 0,
+			p, len,
+			s->session->master_key,
+			buff, sizeof(buff));
+		}
+	else
+		{
+		tls1_PRF(ssl_get_algorithm2(s),
+			TLS_MD_MASTER_SECRET_CONST,TLS_MD_MASTER_SECRET_CONST_SIZE,
+			s->s3->client_random,SSL3_RANDOM_SIZE,
+			s->s3->server_random,SSL3_RANDOM_SIZE,
+			p, len,
+			s->session->master_key,buff,sizeof buff);
+		}
+
 #ifdef SSL_DEBUG
 	fprintf(stderr, "Premaster Secret:\n");
 	BIO_dump_fp(stderr, (char *)p, len);
@@ -1213,9 +1230,6 @@ int tls1_generate_master_secret(SSL *s, unsigned char *out, unsigned char *p,
 		}
 #endif
 
-#ifdef KSSL_DEBUG
-	printf ("tls1_generate_master_secret() complete\n");
-#endif	/* KSSL_DEBUG */
 	return(SSL3_MASTER_SECRET_SIZE);
 	}
 
@@ -1227,10 +1241,6 @@ int tls1_export_keying_material(SSL *s, unsigned char *out, size_t olen,
 	unsigned char *val = NULL;
 	size_t vallen, currentvalpos;
 	int rv;
-
-#ifdef KSSL_DEBUG
-	printf ("tls1_export_keying_material(%p,%p,%d,%s,%d,%p,%d)\n", s, out, olen, label, llen, p, plen);
-#endif	/* KSSL_DEBUG */
 
 	buff = OPENSSL_malloc(olen);
 	if (buff == NULL) goto err2;
@@ -1286,14 +1296,9 @@ int tls1_export_keying_material(SSL *s, unsigned char *out, size_t olen,
 		      val, vallen,
 		      NULL, 0,
 		      NULL, 0,
-		      NULL, 0,
-		      NULL, 0,
 		      s->session->master_key,s->session->master_key_length,
 		      out,buff,olen);
 
-#ifdef KSSL_DEBUG
-	printf ("tls1_export_keying_material() complete\n");
-#endif	/* KSSL_DEBUG */
 	goto ret;
 err1:
 	OPENSSL_PUT_ERROR(SSL, tls1_export_keying_material, SSL_R_TLS_ILLEGAL_EXPORTER_LABEL);
@@ -1343,10 +1348,6 @@ int tls1_alert_code(int code)
 	case SSL_AD_BAD_CERTIFICATE_HASH_VALUE: return(TLS1_AD_BAD_CERTIFICATE_HASH_VALUE);
 	case SSL_AD_UNKNOWN_PSK_IDENTITY:return(TLS1_AD_UNKNOWN_PSK_IDENTITY);
 	case SSL_AD_INAPPROPRIATE_FALLBACK:return(SSL3_AD_INAPPROPRIATE_FALLBACK);
-#if 0 /* not appropriate for TLS, not used for DTLS */
-	case DTLS1_AD_MISSING_HANDSHAKE_MESSAGE: return 
-					  (DTLS1_AD_MISSING_HANDSHAKE_MESSAGE);
-#endif
 	default:			return(-1);
 		}
 	}

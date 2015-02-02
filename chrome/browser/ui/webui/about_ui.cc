@@ -19,7 +19,6 @@
 #include "base/memory/singleton.h"
 #include "base/metrics/statistics_recorder.h"
 #include "base/metrics/stats_table.h"
-#include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
@@ -125,10 +124,10 @@ class AboutMemoryHandler : public MemoryDetails {
       : callback_(callback) {
   }
 
-  virtual void OnDetailsAvailable() OVERRIDE;
+  void OnDetailsAvailable() override;
 
  private:
-  virtual ~AboutMemoryHandler() {}
+  ~AboutMemoryHandler() override {}
 
   void BindProcessMetrics(base::DictionaryValue* data,
                           ProcessMemoryInformation* info);
@@ -189,7 +188,7 @@ class ChromeOSOnlineTermsHandler : public net::URLFetcherDelegate {
   virtual ~ChromeOSOnlineTermsHandler() {}
 
   // net::URLFetcherDelegate:
-  virtual void OnURLFetchComplete(const net::URLFetcher* source) OVERRIDE {
+  virtual void OnURLFetchComplete(const net::URLFetcher* source) override {
     if (source != eula_fetcher_.get()) {
       NOTREACHED() << "Callback from foreign URL fetcher";
       return;
@@ -328,6 +327,75 @@ class ChromeOSTermsHandler
   DISALLOW_COPY_AND_ASSIGN(ChromeOSTermsHandler);
 };
 
+class ChromeOSCreditsHandler
+    : public base::RefCountedThreadSafe<ChromeOSCreditsHandler> {
+ public:
+  static void Start(const std::string& path,
+                    const content::URLDataSource::GotDataCallback& callback) {
+    scoped_refptr<ChromeOSCreditsHandler> handler(
+        new ChromeOSCreditsHandler(path, callback));
+    handler->StartOnUIThread();
+  }
+
+ private:
+  friend class base::RefCountedThreadSafe<ChromeOSCreditsHandler>;
+
+  ChromeOSCreditsHandler(
+      const std::string& path,
+      const content::URLDataSource::GotDataCallback& callback)
+      : path_(path), callback_(callback) {}
+
+  virtual ~ChromeOSCreditsHandler() {}
+
+  void StartOnUIThread() {
+    DCHECK_CURRENTLY_ON(BrowserThread::UI);
+    if (path_ == kKeyboardUtilsPath) {
+      contents_ = ResourceBundle::GetSharedInstance()
+                      .GetRawDataResource(IDR_KEYBOARD_UTILS_JS)
+                      .as_string();
+      ResponseOnUIThread();
+      return;
+    }
+    // Load local Chrome OS credits from the disk.
+    BrowserThread::PostBlockingPoolTaskAndReply(
+        FROM_HERE,
+        base::Bind(&ChromeOSCreditsHandler::LoadCreditsFileOnBlockingPool,
+                   this),
+        base::Bind(&ChromeOSCreditsHandler::ResponseOnUIThread, this));
+  }
+
+  void LoadCreditsFileOnBlockingPool() {
+    DCHECK(BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
+    base::FilePath credits_file_path(chrome::kChromeOSCreditsPath);
+    if (!base::ReadFileToString(credits_file_path, &contents_)) {
+      // File with credits not found, ResponseOnUIThread will load credits
+      // from resources if contents_ is empty.
+      contents_.clear();
+    }
+  }
+
+  void ResponseOnUIThread() {
+    DCHECK_CURRENTLY_ON(BrowserThread::UI);
+    // If we fail to load Chrome OS credits from disk, load it from resources.
+    if (contents_.empty() && path_ != kKeyboardUtilsPath) {
+      contents_ = ResourceBundle::GetSharedInstance()
+                      .GetRawDataResource(IDR_OS_CREDITS_HTML)
+                      .as_string();
+    }
+    callback_.Run(base::RefCountedString::TakeString(&contents_));
+  }
+
+  // Path in the URL.
+  const std::string path_;
+
+  // Callback to run with the response.
+  content::URLDataSource::GotDataCallback callback_;
+
+  // Chrome OS credits contents that was loaded from file.
+  std::string contents_;
+
+  DISALLOW_COPY_AND_ASSIGN(ChromeOSCreditsHandler);
+};
 #endif
 
 }  // namespace
@@ -971,7 +1039,6 @@ void AboutMemoryHandler::OnDetailsAvailable() {
   webui::SetFontAndTextDirection(&load_time_data);
   load_time_data.Set("jstemplateData", root.release());
 
-  webui::UseVersion2 version2;
   std::string data;
   webui::AppendJsonJS(&load_time_data, &data);
   callback_.Run(base::RefCountedString::TakeString(&data));
@@ -1030,11 +1097,8 @@ void AboutUIHTMLSource::StartDataRequest(
     return;
 #if defined(OS_CHROMEOS)
   } else if (source_name_ == chrome::kChromeUIOSCreditsHost) {
-    int idr = IDR_OS_CREDITS_HTML;
-    if (path == kKeyboardUtilsPath)
-      idr = IDR_KEYBOARD_UTILS_JS;
-    response = ResourceBundle::GetSharedInstance().GetRawDataResource(
-        idr).as_string();
+    ChromeOSCreditsHandler::Start(path, callback);
+    return;
 #endif
 #if defined(OS_LINUX) || defined(OS_OPENBSD)
   } else if (source_name_ == chrome::kChromeUISandboxHost) {
@@ -1042,12 +1106,14 @@ void AboutUIHTMLSource::StartDataRequest(
 #endif
   } else if (source_name_ == chrome::kChromeUIStatsHost) {
     response = AboutStats(path);
+#if !defined(OS_ANDROID)
   } else if (source_name_ == chrome::kChromeUITermsHost) {
 #if defined(OS_CHROMEOS)
     ChromeOSTermsHandler::Start(path, callback);
     return;
 #else
     response = l10n_util::GetStringUTF8(IDS_TERMS_HTML);
+#endif
 #endif
   }
 

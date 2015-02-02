@@ -16,7 +16,6 @@
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/webui/ntp/core_app_launcher_handler.h"
 #include "chrome/common/extensions/extension_constants.h"
-#include "chrome/common/extensions/manifest_url_handler.h"
 #include "content/public/browser/user_metrics.h"
 #include "extensions/browser/app_sorting.h"
 #include "extensions/browser/extension_prefs.h"
@@ -24,6 +23,7 @@
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_icon_set.h"
 #include "extensions/common/manifest_handlers/icons_handler.h"
+#include "extensions/common/manifest_url_handlers.h"
 #include "grit/theme_resources.h"
 #include "sync/api/string_ordinal.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -44,11 +44,11 @@ class ShortcutOverlayImageSource : public gfx::CanvasImageSource {
       : gfx::CanvasImageSource(icon.size(), false),
         icon_(icon) {
   }
-  virtual ~ShortcutOverlayImageSource() {}
+  ~ShortcutOverlayImageSource() override {}
 
  private:
   // gfx::CanvasImageSource overrides:
-  virtual void Draw(gfx::Canvas* canvas) OVERRIDE {
+  void Draw(gfx::Canvas* canvas) override {
     canvas->DrawImageInt(icon_, 0, 0);
 
     // Draw the overlay in the bottom left corner of the icon.
@@ -69,11 +69,11 @@ class RoundedCornersImageSource : public gfx::CanvasImageSource {
       : gfx::CanvasImageSource(icon.size(), false),
         icon_(icon) {
   }
-  virtual ~RoundedCornersImageSource() {}
+  ~RoundedCornersImageSource() override {}
 
  private:
   // gfx::CanvasImageSource overrides:
-  virtual void Draw(gfx::Canvas* canvas) OVERRIDE {
+  void Draw(gfx::Canvas* canvas) override {
     // The radius used to round the app icon.
     const size_t kRoundingRadius = 2;
 

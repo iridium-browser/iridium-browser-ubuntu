@@ -54,35 +54,36 @@ void PopulateCharacteristicProperties(
     std::vector<apibtle::CharacteristicProperty>* api_properties) {
   DCHECK(api_properties && api_properties->empty());
 
-  if (properties == BluetoothGattCharacteristic::kPropertyNone)
+  if (properties == BluetoothGattCharacteristic::PROPERTY_NONE)
     return;
 
-  if (properties & BluetoothGattCharacteristic::kPropertyBroadcast)
+  if (properties & BluetoothGattCharacteristic::PROPERTY_BROADCAST)
     api_properties->push_back(apibtle::CHARACTERISTIC_PROPERTY_BROADCAST);
-  if (properties & BluetoothGattCharacteristic::kPropertyRead)
+  if (properties & BluetoothGattCharacteristic::PROPERTY_READ)
     api_properties->push_back(apibtle::CHARACTERISTIC_PROPERTY_READ);
-  if (properties & BluetoothGattCharacteristic::kPropertyWriteWithoutResponse) {
+  if (properties &
+      BluetoothGattCharacteristic::PROPERTY_WRITE_WITHOUT_RESPONSE) {
     api_properties->push_back(
         apibtle::CHARACTERISTIC_PROPERTY_WRITEWITHOUTRESPONSE);
   }
-  if (properties & BluetoothGattCharacteristic::kPropertyWrite)
+  if (properties & BluetoothGattCharacteristic::PROPERTY_WRITE)
     api_properties->push_back(apibtle::CHARACTERISTIC_PROPERTY_WRITE);
-  if (properties & BluetoothGattCharacteristic::kPropertyNotify)
+  if (properties & BluetoothGattCharacteristic::PROPERTY_NOTIFY)
     api_properties->push_back(apibtle::CHARACTERISTIC_PROPERTY_NOTIFY);
-  if (properties & BluetoothGattCharacteristic::kPropertyIndicate)
+  if (properties & BluetoothGattCharacteristic::PROPERTY_INDICATE)
     api_properties->push_back(apibtle::CHARACTERISTIC_PROPERTY_INDICATE);
   if (properties &
-      BluetoothGattCharacteristic::kPropertyAuthenticatedSignedWrites) {
+      BluetoothGattCharacteristic::PROPERTY_AUTHENTICATED_SIGNED_WRITES) {
     api_properties->push_back(
         apibtle::CHARACTERISTIC_PROPERTY_AUTHENTICATEDSIGNEDWRITES);
   }
-  if (properties & BluetoothGattCharacteristic::kPropertyExtendedProperties) {
+  if (properties & BluetoothGattCharacteristic::PROPERTY_EXTENDED_PROPERTIES) {
     api_properties->push_back(
         apibtle::CHARACTERISTIC_PROPERTY_EXTENDEDPROPERTIES);
   }
-  if (properties & BluetoothGattCharacteristic::kPropertyReliableWrite)
+  if (properties & BluetoothGattCharacteristic::PROPERTY_RELIABLE_WRITE)
     api_properties->push_back(apibtle::CHARACTERISTIC_PROPERTY_RELIABLEWRITE);
-  if (properties & BluetoothGattCharacteristic::kPropertyWritableAuxiliaries) {
+  if (properties & BluetoothGattCharacteristic::PROPERTY_WRITABLE_AUXILIARIES) {
     api_properties->push_back(
         apibtle::CHARACTERISTIC_PROPERTY_WRITABLEAUXILIARIES);
   }
@@ -149,6 +150,34 @@ NotifySessionResourceManager* GetNotifySessionResourceManager(
          "TestExtensionSystem is failing to provide an instance of "
          "ApiResourceManager<BluetoothLowEnergyNotifySession>.";
   return manager;
+}
+
+// Translates GattErrorCodes to RouterError Codes
+extensions::BluetoothLowEnergyEventRouter::Status GattErrorToRouterError(
+    BluetoothGattService::GattErrorCode error_code) {
+  extensions::BluetoothLowEnergyEventRouter::Status error_status =
+      extensions::BluetoothLowEnergyEventRouter::kStatusErrorFailed;
+  if (error_code == BluetoothGattService::GATT_ERROR_IN_PROGRESS) {
+    error_status =
+        extensions::BluetoothLowEnergyEventRouter::kStatusErrorInProgress;
+  } else if (error_code == BluetoothGattService::GATT_ERROR_INVALID_LENGTH) {
+    error_status =
+        extensions::BluetoothLowEnergyEventRouter::kStatusErrorInvalidLength;
+  } else if (error_code == BluetoothGattService::GATT_ERROR_NOT_PERMITTED) {
+    error_status =
+        extensions::BluetoothLowEnergyEventRouter::kStatusErrorPermissionDenied;
+  } else if (error_code == BluetoothGattService::GATT_ERROR_NOT_AUTHORIZED) {
+    error_status = extensions::BluetoothLowEnergyEventRouter::
+        kStatusErrorInsufficientAuthorization;
+  } else if (error_code == BluetoothGattService::GATT_ERROR_NOT_PAIRED) {
+    error_status =
+        extensions::BluetoothLowEnergyEventRouter::kStatusErrorHigherSecurity;
+  } else if (error_code == BluetoothGattService::GATT_ERROR_NOT_SUPPORTED) {
+    error_status =
+        extensions::BluetoothLowEnergyEventRouter::kStatusErrorGattNotSupported;
+  }
+
+  return error_status;
 }
 
 }  // namespace
@@ -1268,9 +1297,11 @@ void BluetoothLowEnergyEventRouter::OnDisconnect(
 }
 
 void BluetoothLowEnergyEventRouter::OnError(
-    const ErrorCallback& error_callback) {
+    const ErrorCallback& error_callback,
+    BluetoothGattService::GattErrorCode error_code) {
   VLOG(2) << "Remote characteristic/descriptor value read/write failed.";
-  error_callback.Run(kStatusErrorFailed);
+
+  error_callback.Run(GattErrorToRouterError(error_code));
 }
 
 void BluetoothLowEnergyEventRouter::OnConnectError(
@@ -1284,7 +1315,22 @@ void BluetoothLowEnergyEventRouter::OnConnectError(
   DCHECK_NE(0U, connecting_devices_.count(connect_id));
 
   connecting_devices_.erase(connect_id);
-  error_callback.Run(kStatusErrorFailed);
+  Status error_status = kStatusErrorFailed;
+  if (error_code == BluetoothDevice::ERROR_INPROGRESS) {
+    error_status = kStatusErrorInProgress;
+  } else if (error_code == BluetoothDevice::ERROR_AUTH_FAILED ||
+             error_code == BluetoothDevice::ERROR_AUTH_REJECTED) {
+    error_status = kStatusErrorAuthenticationFailed;
+  } else if (error_code == BluetoothDevice::ERROR_AUTH_CANCELED) {
+    error_status = kStatusErrorCanceled;
+  } else if (error_code == BluetoothDevice::ERROR_AUTH_TIMEOUT) {
+    error_status = kStatusErrorTimeout;
+  } else if (error_code == BluetoothDevice::ERROR_UNSUPPORTED_DEVICE) {
+    error_status = kStatusErrorUnsupportedDevice;
+  }
+  // ERROR_UNKNOWN and ERROR_FAILED defaulted to kStatusErrorFailed
+
+  error_callback.Run(error_status);
 }
 
 void BluetoothLowEnergyEventRouter::OnStartNotifySession(
@@ -1317,7 +1363,8 @@ void BluetoothLowEnergyEventRouter::OnStartNotifySession(
 void BluetoothLowEnergyEventRouter::OnStartNotifySessionError(
     const std::string& extension_id,
     const std::string& characteristic_id,
-    const ErrorCallback& error_callback) {
+    const ErrorCallback& error_callback,
+    device::BluetoothGattService::GattErrorCode error_code) {
   VLOG(2) << "Failed to create value update session for characteristic: "
           << characteristic_id;
 
@@ -1325,7 +1372,7 @@ void BluetoothLowEnergyEventRouter::OnStartNotifySessionError(
   DCHECK_NE(0U, pending_session_calls_.count(session_id));
 
   pending_session_calls_.erase(session_id);
-  error_callback.Run(kStatusErrorFailed);
+  error_callback.Run(GattErrorToRouterError(error_code));
 }
 
 void BluetoothLowEnergyEventRouter::OnStopNotifySession(

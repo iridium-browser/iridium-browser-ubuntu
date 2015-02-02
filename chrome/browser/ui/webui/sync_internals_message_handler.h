@@ -29,9 +29,9 @@ class SyncInternalsMessageHandler : public content::WebUIMessageHandler,
                                     public syncer::TypeDebugInfoObserver {
  public:
   SyncInternalsMessageHandler();
-  virtual ~SyncInternalsMessageHandler();
+  ~SyncInternalsMessageHandler() override;
 
-  virtual void RegisterMessages() OVERRIDE;
+  void RegisterMessages() override;
 
   // Sets up observers to receive events and forward them to the UI.
   void HandleRegisterForEvents(const base::ListValue* args);
@@ -49,29 +49,25 @@ class SyncInternalsMessageHandler : public content::WebUIMessageHandler,
   void HandleGetAllNodes(const base::ListValue* args);
 
   // syncer::JsEventHandler implementation.
-  virtual void HandleJsEvent(
-      const std::string& name,
-      const syncer::JsEventDetails& details) OVERRIDE;
+  void HandleJsEvent(const std::string& name,
+                     const syncer::JsEventDetails& details) override;
 
   // Callback used in GetAllNodes.
   void OnReceivedAllNodes(int request_id, scoped_ptr<base::ListValue> nodes);
 
   // ProfileSyncServiceObserver implementation.
-  virtual void OnStateChanged() OVERRIDE;
+  void OnStateChanged() override;
 
   // ProtocolEventObserver implementation.
-  virtual void OnProtocolEvent(const syncer::ProtocolEvent& e) OVERRIDE;
+  void OnProtocolEvent(const syncer::ProtocolEvent& e) override;
 
   // TypeDebugInfoObserver implementation.
-  virtual void OnCommitCountersUpdated(
-      syncer::ModelType type,
-      const syncer::CommitCounters& counters) OVERRIDE;
-  virtual void OnUpdateCountersUpdated(
-      syncer::ModelType type,
-      const syncer::UpdateCounters& counters) OVERRIDE;
-  virtual void OnStatusCountersUpdated(
-      syncer::ModelType type,
-      const syncer::StatusCounters& counters) OVERRIDE;
+  void OnCommitCountersUpdated(syncer::ModelType type,
+                               const syncer::CommitCounters& counters) override;
+  void OnUpdateCountersUpdated(syncer::ModelType type,
+                               const syncer::UpdateCounters& counters) override;
+  void OnStatusCountersUpdated(syncer::ModelType type,
+                               const syncer::StatusCounters& counters) override;
 
   // Helper to emit counter updates.
   //

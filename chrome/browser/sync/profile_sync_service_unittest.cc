@@ -50,21 +50,21 @@ class FakeDataTypeManager : public sync_driver::DataTypeManager {
  public:
   explicit FakeDataTypeManager(sync_driver::DataTypeManagerObserver* observer)
      : observer_(observer) {}
-  virtual ~FakeDataTypeManager() {};
+  ~FakeDataTypeManager() override{};
 
-  virtual void Configure(syncer::ModelTypeSet desired_types,
-                         syncer::ConfigureReason reason) OVERRIDE {
+  void Configure(syncer::ModelTypeSet desired_types,
+                 syncer::ConfigureReason reason) override {
     sync_driver::DataTypeManager::ConfigureResult result;
     result.status = sync_driver::DataTypeManager::OK;
     observer_->OnConfigureDone(result);
   }
 
-  virtual void ReenableType(syncer::ModelType type) OVERRIDE {}
-  virtual void ResetDataTypeErrors() OVERRIDE {}
-  virtual void PurgeForMigration(syncer::ModelTypeSet undesired_types,
-                                 syncer::ConfigureReason reason) OVERRIDE {}
-  virtual void Stop() OVERRIDE {};
-  virtual State state() const OVERRIDE {
+  void ReenableType(syncer::ModelType type) override {}
+  void ResetDataTypeErrors() override {}
+  void PurgeForMigration(syncer::ModelTypeSet undesired_types,
+                         syncer::ConfigureReason reason) override {}
+  void Stop() override{};
+  State state() const override {
     return sync_driver::DataTypeManager::CONFIGURED;
   };
 
@@ -84,7 +84,7 @@ class TestProfileSyncServiceObserver : public ProfileSyncServiceObserver {
  public:
   explicit TestProfileSyncServiceObserver(ProfileSyncService* service)
       : service_(service), first_setup_in_progress_(false) {}
-  virtual void OnStateChanged() OVERRIDE {
+  void OnStateChanged() override {
     first_setup_in_progress_ = service_->FirstSetupInProgress();
   }
   bool first_setup_in_progress() const { return first_setup_in_progress_; }
@@ -97,7 +97,7 @@ class TestProfileSyncServiceObserver : public ProfileSyncServiceObserver {
 // call back when asked to initialized.  Allows us to test things
 // that could happen while backend init is in progress.
 class SyncBackendHostNoReturn : public SyncBackendHostMock {
-  virtual void Initialize(
+  void Initialize(
       sync_driver::SyncFrontend* frontend,
       scoped_ptr<base::Thread> sync_thread,
       const syncer::WeakHandle<syncer::JsEventHandler>& event_handler,
@@ -108,7 +108,7 @@ class SyncBackendHostNoReturn : public SyncBackendHostMock {
       scoped_ptr<syncer::UnrecoverableErrorHandler> unrecoverable_error_handler,
       syncer::ReportUnrecoverableErrorFunction
           report_unrecoverable_error_function,
-      syncer::NetworkResources* network_resources) OVERRIDE {}
+      syncer::NetworkResources* network_resources) override {}
 };
 
 class SyncBackendHostMockCollectDeleteDirParam : public SyncBackendHostMock {
@@ -117,7 +117,7 @@ class SyncBackendHostMockCollectDeleteDirParam : public SyncBackendHostMock {
       std::vector<bool>* delete_dir_param)
      : delete_dir_param_(delete_dir_param) {}
 
-  virtual void Initialize(
+  void Initialize(
       sync_driver::SyncFrontend* frontend,
       scoped_ptr<base::Thread> sync_thread,
       const syncer::WeakHandle<syncer::JsEventHandler>& event_handler,
@@ -128,7 +128,7 @@ class SyncBackendHostMockCollectDeleteDirParam : public SyncBackendHostMock {
       scoped_ptr<syncer::UnrecoverableErrorHandler> unrecoverable_error_handler,
       syncer::ReportUnrecoverableErrorFunction
           report_unrecoverable_error_function,
-      syncer::NetworkResources* network_resources) OVERRIDE {
+      syncer::NetworkResources* network_resources) override {
     delete_dir_param_->push_back(delete_sync_data_folder);
     SyncBackendHostMock::Initialize(frontend, sync_thread.Pass(),
                                     event_handler, service_url, credentials,
@@ -173,9 +173,9 @@ class ProfileSyncServiceTest : public ::testing::Test {
   ProfileSyncServiceTest()
       : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP),
         profile_manager_(TestingBrowserProcess::GetGlobal()) {}
-  virtual ~ProfileSyncServiceTest() {}
+  ~ProfileSyncServiceTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     CommandLine::ForCurrentProcess()->AppendSwitchASCII(
         switches::kSyncDeferredStartupTimeoutSeconds, "0");
 
@@ -196,7 +196,7 @@ class ProfileSyncServiceTest : public ::testing::Test {
         testing_facotries);
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     // Kill the service before the profile.
     if (service_)
       service_->Shutdown();
@@ -338,7 +338,7 @@ TEST_F(ProfileSyncServiceTest, SuccessfulInitialization) {
   ExpectSyncBackendHostCreation(1);
   InitializeForNthSync();
   EXPECT_FALSE(service()->IsManaged());
-  EXPECT_TRUE(service()->sync_initialized());
+  EXPECT_TRUE(service()->SyncActive());
   EXPECT_EQ(ProfileSyncService::SYNC, service()->backend_mode());
 }
 
@@ -368,7 +368,7 @@ TEST_F(ProfileSyncServiceTest, DisabledByPolicyBeforeInit) {
   CreateService(browser_sync::AUTO_START);
   InitializeForNthSync();
   EXPECT_TRUE(service()->IsManaged());
-  EXPECT_FALSE(service()->sync_initialized());
+  EXPECT_FALSE(service()->SyncActive());
 }
 
 // Verify that disable by enterprise policy works even after the backend has
@@ -381,13 +381,13 @@ TEST_F(ProfileSyncServiceTest, DisabledByPolicyAfterInit) {
   InitializeForNthSync();
 
   EXPECT_FALSE(service()->IsManaged());
-  EXPECT_TRUE(service()->sync_initialized());
+  EXPECT_TRUE(service()->SyncActive());
 
   profile()->GetTestingPrefService()->SetManagedPref(
       sync_driver::prefs::kSyncManaged, new base::FundamentalValue(true));
 
   EXPECT_TRUE(service()->IsManaged());
-  EXPECT_FALSE(service()->sync_initialized());
+  EXPECT_FALSE(service()->SyncActive());
 }
 
 // Exercies the ProfileSyncService's code paths related to getting shut down
@@ -398,7 +398,7 @@ TEST_F(ProfileSyncServiceTest, AbortedByShutdown) {
 
   IssueTestTokens();
   InitializeForNthSync();
-  EXPECT_FALSE(service()->sync_initialized());
+  EXPECT_FALSE(service()->SyncActive());
 
   ShutdownAndDeleteService();
 }
@@ -414,13 +414,13 @@ TEST_F(ProfileSyncServiceTest, EarlyStopAndSuppress) {
 
   // Because of supression, this should fail.
   InitializeForNthSync();
-  EXPECT_FALSE(service()->sync_initialized());
+  EXPECT_FALSE(service()->SyncActive());
 
   // Remove suppression.  This should be enough to allow init to happen.
   ExpectDataTypeManagerCreation(1);
   ExpectSyncBackendHostCreation(1);
   service()->UnsuppressAndStart();
-  EXPECT_TRUE(service()->sync_initialized());
+  EXPECT_TRUE(service()->SyncActive());
   EXPECT_FALSE(profile()->GetPrefs()->GetBoolean(
       sync_driver::prefs::kSyncSuppressStart));
 }
@@ -433,14 +433,14 @@ TEST_F(ProfileSyncServiceTest, DisableAndEnableSyncTemporarily) {
   ExpectSyncBackendHostCreation(1);
   InitializeForNthSync();
 
-  EXPECT_TRUE(service()->sync_initialized());
+  EXPECT_TRUE(service()->SyncActive());
   EXPECT_FALSE(profile()->GetPrefs()->GetBoolean(
       sync_driver::prefs::kSyncSuppressStart));
 
   testing::Mock::VerifyAndClearExpectations(components_factory());
 
   service()->StopAndSuppress();
-  EXPECT_FALSE(service()->sync_initialized());
+  EXPECT_FALSE(service()->SyncActive());
   EXPECT_TRUE(profile()->GetPrefs()->GetBoolean(
       sync_driver::prefs::kSyncSuppressStart));
 
@@ -448,7 +448,7 @@ TEST_F(ProfileSyncServiceTest, DisableAndEnableSyncTemporarily) {
   ExpectSyncBackendHostCreation(1);
 
   service()->UnsuppressAndStart();
-  EXPECT_TRUE(service()->sync_initialized());
+  EXPECT_TRUE(service()->SyncActive());
   EXPECT_FALSE(profile()->GetPrefs()->GetBoolean(
       sync_driver::prefs::kSyncSuppressStart));
 }
@@ -463,13 +463,13 @@ TEST_F(ProfileSyncServiceTest, EnableSyncAndSignOut) {
   IssueTestTokens();
   InitializeForNthSync();
 
-  EXPECT_TRUE(service()->sync_initialized());
+  EXPECT_TRUE(service()->SyncActive());
   EXPECT_FALSE(profile()->GetPrefs()->GetBoolean(
       sync_driver::prefs::kSyncSuppressStart));
 
   SigninManagerFactory::GetForProfile(profile())->SignOut(
       signin_metrics::SIGNOUT_TEST);
-  EXPECT_FALSE(service()->sync_initialized());
+  EXPECT_FALSE(service()->SyncActive());
 }
 #endif  // !defined(OS_CHROMEOS)
 
@@ -532,13 +532,14 @@ TEST_F(ProfileSyncServiceTest, BackupBeforeFirstSync) {
 
   // At this time, backup is finished. Task is posted to start sync again.
   EXPECT_EQ(ProfileSyncService::BACKUP, service()->backend_mode());
-  EXPECT_TRUE(service()->ShouldPushChanges());
+  EXPECT_FALSE(service()->SyncActive());
   EXPECT_EQ(1u, delete_dir_param.size());
   EXPECT_TRUE(delete_dir_param[0]);
 
   // Pump loop to start sync.
   PumpLoop();
   EXPECT_EQ(ProfileSyncService::SYNC, service()->backend_mode());
+  EXPECT_TRUE(service()->SyncActive());
   EXPECT_EQ(2u, delete_dir_param.size());
   EXPECT_TRUE(delete_dir_param[0]);
 }
@@ -556,13 +557,14 @@ TEST_F(ProfileSyncServiceTest, ResumeBackupIfAborted) {
 
   // At this time, backup is finished. Task is posted to start sync again.
   EXPECT_EQ(ProfileSyncService::BACKUP, service()->backend_mode());
-  EXPECT_TRUE(service()->ShouldPushChanges());
+  EXPECT_FALSE(service()->SyncActive());
   EXPECT_EQ(1u, delete_dir_param.size());
   EXPECT_TRUE(delete_dir_param[0]);
 
   // Pump loop to start sync.
   PumpLoop();
   EXPECT_EQ(ProfileSyncService::SYNC, service()->backend_mode());
+  EXPECT_TRUE(service()->SyncActive());
   EXPECT_EQ(2u, delete_dir_param.size());
   EXPECT_TRUE(delete_dir_param[0]);
 }
@@ -575,7 +577,7 @@ TEST_F(ProfileSyncServiceTest, Rollback) {
   ExpectSyncBackendHostCreationCollectDeleteDir(2, &delete_dir_param);
   IssueTestTokens();
   InitializeForNthSync();
-  EXPECT_TRUE(service()->sync_initialized());
+  EXPECT_TRUE(service()->SyncActive());
   EXPECT_EQ(ProfileSyncService::SYNC, service()->backend_mode());
 
   // First sync time should be recorded.
@@ -625,7 +627,7 @@ TEST_F(ProfileSyncServiceTest, ClearLastSyncedTimeOnSignOut) {
   ExpectDataTypeManagerCreation(1);
   ExpectSyncBackendHostCreation(1);
   InitializeForNthSync();
-  EXPECT_TRUE(service()->sync_initialized());
+  EXPECT_TRUE(service()->SyncActive());
   EXPECT_EQ(l10n_util::GetStringUTF16(IDS_SYNC_TIME_JUST_NOW),
             service()->GetLastSyncedTimeString());
 

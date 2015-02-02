@@ -68,19 +68,18 @@ class FaviconSource : public content::URLDataSource {
   // |type| is the type of icon this FaviconSource will provide.
   FaviconSource(Profile* profile, IconType type);
 
-  virtual ~FaviconSource();
+  ~FaviconSource() override;
 
   // content::URLDataSource implementation.
-  virtual std::string GetSource() const OVERRIDE;
-  virtual void StartDataRequest(
+  std::string GetSource() const override;
+  void StartDataRequest(
       const std::string& path,
       int render_process_id,
       int render_frame_id,
-      const content::URLDataSource::GotDataCallback& callback) OVERRIDE;
-  virtual std::string GetMimeType(const std::string&) const OVERRIDE;
-  virtual bool ShouldReplaceExistingSource() const OVERRIDE;
-  virtual bool ShouldServiceRequest(
-      const net::URLRequest* request) const OVERRIDE;
+      const content::URLDataSource::GotDataCallback& callback) override;
+  std::string GetMimeType(const std::string&) const override;
+  bool ShouldReplaceExistingSource() const override;
+  bool ShouldServiceRequest(const net::URLRequest* request) const override;
 
  protected:
   struct IconRequest {

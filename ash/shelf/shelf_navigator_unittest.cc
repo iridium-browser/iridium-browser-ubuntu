@@ -21,7 +21,7 @@ class ShelfNavigatorTest : public testing::Test {
   ShelfNavigatorTest() {}
 
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     model_.reset(new ShelfModel);
 
     // Add APP_LIST for test.

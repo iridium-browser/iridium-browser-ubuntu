@@ -19,10 +19,12 @@
 #include "ash/test/display_manager_test_api.h"
 #include "ash/test/test_screenshot_delegate.h"
 #include "ash/test/test_session_state_animator.h"
+#include "ash/test/test_shelf_delegate.h"
 #include "ash/test/test_shell_delegate.h"
 #include "ash/test/test_volume_control_delegate.h"
 #include "ash/volume_control_delegate.h"
 #include "ash/wm/lock_state_controller.h"
+#include "ash/wm/panels/panel_layout_manager.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
 #include "ash/wm/wm_event.h"
@@ -49,7 +51,7 @@ namespace {
 class TestTarget : public ui::AcceleratorTarget {
  public:
   TestTarget() : accelerator_pressed_count_(0), accelerator_repeat_count_(0) {}
-  virtual ~TestTarget() {}
+  ~TestTarget() override {}
 
   int accelerator_pressed_count() const {
     return accelerator_pressed_count_;
@@ -63,8 +65,8 @@ class TestTarget : public ui::AcceleratorTarget {
   }
 
   // Overridden from ui::AcceleratorTarget:
-  virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
-  virtual bool CanHandleAccelerators() const OVERRIDE;
+  bool AcceleratorPressed(const ui::Accelerator& accelerator) override;
+  bool CanHandleAccelerators() const override;
 
  private:
   int accelerator_pressed_count_;
@@ -88,22 +90,21 @@ class DummyBrightnessControlDelegate : public BrightnessControlDelegate {
         handle_brightness_down_count_(0),
         handle_brightness_up_count_(0) {
   }
-  virtual ~DummyBrightnessControlDelegate() {}
+  ~DummyBrightnessControlDelegate() override {}
 
-  virtual bool HandleBrightnessDown(
-      const ui::Accelerator& accelerator) OVERRIDE {
+  bool HandleBrightnessDown(const ui::Accelerator& accelerator) override {
     ++handle_brightness_down_count_;
     last_accelerator_ = accelerator;
     return consume_;
   }
-  virtual bool HandleBrightnessUp(const ui::Accelerator& accelerator) OVERRIDE {
+  bool HandleBrightnessUp(const ui::Accelerator& accelerator) override {
     ++handle_brightness_up_count_;
     last_accelerator_ = accelerator;
     return consume_;
   }
-  virtual void SetBrightnessPercent(double percent, bool gradual) OVERRIDE {}
-  virtual void GetBrightnessPercent(
-      const base::Callback<void(double)>& callback) OVERRIDE {
+  void SetBrightnessPercent(double percent, bool gradual) override {}
+  void GetBrightnessPercent(
+      const base::Callback<void(double)>& callback) override {
     callback.Run(100.0);
   }
 
@@ -134,17 +135,15 @@ class DummyImeControlDelegate : public ImeControlDelegate {
         handle_previous_ime_count_(0),
         handle_switch_ime_count_(0) {
   }
-  virtual ~DummyImeControlDelegate() {}
+  ~DummyImeControlDelegate() override {}
 
-  virtual void HandleNextIme() OVERRIDE {
-    ++handle_next_ime_count_;
-  }
-  virtual bool HandlePreviousIme(const ui::Accelerator& accelerator) OVERRIDE {
+  void HandleNextIme() override { ++handle_next_ime_count_; }
+  bool HandlePreviousIme(const ui::Accelerator& accelerator) override {
     ++handle_previous_ime_count_;
     last_accelerator_ = accelerator;
     return consume_;
   }
-  virtual bool HandleSwitchIme(const ui::Accelerator& accelerator) OVERRIDE {
+  bool HandleSwitchIme(const ui::Accelerator& accelerator) override {
     ++handle_switch_ime_count_;
     last_accelerator_ = accelerator;
     return consume_;
@@ -162,8 +161,8 @@ class DummyImeControlDelegate : public ImeControlDelegate {
   const ui::Accelerator& last_accelerator() const {
     return last_accelerator_;
   }
-  virtual ui::Accelerator RemapAccelerator(
-      const ui::Accelerator& accelerator) OVERRIDE {
+  ui::Accelerator RemapAccelerator(
+      const ui::Accelerator& accelerator) override {
     return ui::Accelerator(accelerator);
   }
 
@@ -185,17 +184,16 @@ class DummyKeyboardBrightnessControlDelegate
         handle_keyboard_brightness_down_count_(0),
         handle_keyboard_brightness_up_count_(0) {
   }
-  virtual ~DummyKeyboardBrightnessControlDelegate() {}
+  ~DummyKeyboardBrightnessControlDelegate() override {}
 
-  virtual bool HandleKeyboardBrightnessDown(
-      const ui::Accelerator& accelerator) OVERRIDE {
+  bool HandleKeyboardBrightnessDown(
+      const ui::Accelerator& accelerator) override {
     ++handle_keyboard_brightness_down_count_;
     last_accelerator_ = accelerator;
     return consume_;
   }
 
-  virtual bool HandleKeyboardBrightnessUp(
-      const ui::Accelerator& accelerator) OVERRIDE {
+  bool HandleKeyboardBrightnessUp(const ui::Accelerator& accelerator) override {
     ++handle_keyboard_brightness_up_count_;
     last_accelerator_ = accelerator;
     return consume_;
@@ -239,7 +237,7 @@ bool TestTarget::CanHandleAccelerators() const {
 class AcceleratorControllerTest : public test::AshTestBase {
  public:
   AcceleratorControllerTest() {}
-  virtual ~AcceleratorControllerTest() {}
+  ~AcceleratorControllerTest() override {}
 
  protected:
   void EnableInternalDisplay() {
@@ -267,6 +265,19 @@ class AcceleratorControllerTest : public test::AshTestBase {
   }
   static bool is_exiting(ExitWarningHandler* ewh) {
     return ewh->state_ == ExitWarningHandler::EXITING;
+  }
+  aura::Window* CreatePanel() {
+    aura::Window* window =
+      CreateTestWindowInShellWithDelegateAndType(NULL,
+        ui::wm::WINDOW_TYPE_PANEL, 0, gfx::Rect(5, 5, 20, 20));
+    test::TestShelfDelegate* shelf_delegate =
+      test::TestShelfDelegate::instance();
+    shelf_delegate->AddShelfItem(window);
+    PanelLayoutManager* manager = static_cast<PanelLayoutManager*>(
+        Shell::GetContainer(window->GetRootWindow(),
+                            kShellWindowId_PanelContainer)->layout_manager());
+    manager->Relayout();
+    return window;
   }
 
  private:
@@ -435,13 +446,13 @@ TEST_F(AcceleratorControllerTest, WindowSnap) {
   window_state->Activate();
 
   {
-    GetController()->PerformAction(WINDOW_SNAP_LEFT, dummy);
+    GetController()->PerformAction(WINDOW_CYCLE_SNAP_DOCK_LEFT, dummy);
     gfx::Rect expected_bounds = wm::GetDefaultLeftSnappedWindowBoundsInParent(
         window.get());
     EXPECT_EQ(expected_bounds.ToString(), window->bounds().ToString());
   }
   {
-    GetController()->PerformAction(WINDOW_SNAP_RIGHT, dummy);
+    GetController()->PerformAction(WINDOW_CYCLE_SNAP_DOCK_RIGHT, dummy);
     gfx::Rect expected_bounds = wm::GetDefaultRightSnappedWindowBoundsInParent(
         window.get());
     EXPECT_EQ(expected_bounds.ToString(), window->bounds().ToString());
@@ -460,11 +471,11 @@ TEST_F(AcceleratorControllerTest, WindowSnap) {
     EXPECT_EQ(normal_bounds.ToString(), window->bounds().ToString());
 
     GetController()->PerformAction(TOGGLE_MAXIMIZED, dummy);
-    GetController()->PerformAction(WINDOW_SNAP_LEFT, dummy);
+    GetController()->PerformAction(WINDOW_CYCLE_SNAP_DOCK_LEFT, dummy);
     EXPECT_FALSE(window_state->IsMaximized());
 
     GetController()->PerformAction(TOGGLE_MAXIMIZED, dummy);
-    GetController()->PerformAction(WINDOW_SNAP_RIGHT, dummy);
+    GetController()->PerformAction(WINDOW_CYCLE_SNAP_DOCK_RIGHT, dummy);
     EXPECT_FALSE(window_state->IsMaximized());
 
     GetController()->PerformAction(TOGGLE_MAXIMIZED, dummy);
@@ -479,6 +490,157 @@ TEST_F(AcceleratorControllerTest, WindowSnap) {
     GetController()->PerformAction(WINDOW_MINIMIZE, dummy);
     EXPECT_TRUE(window_state->IsMinimized());
   }
+}
+
+TEST_F(AcceleratorControllerTest, WindowSnapLeftDockLeftRestore) {
+  scoped_ptr<aura::Window> window0(
+      CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
+  scoped_ptr<aura::Window> window1(
+    CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
+  const ui::Accelerator dummy;
+
+  wm::WindowState* window1_state = wm::GetWindowState(window1.get());
+  window1_state->Activate();
+
+  GetController()->PerformAction(WINDOW_CYCLE_SNAP_DOCK_LEFT, dummy);
+  gfx::Rect normal_bounds = window1_state->GetRestoreBoundsInParent();
+  gfx::Rect expected_bounds = wm::GetDefaultLeftSnappedWindowBoundsInParent(
+                                window1.get());
+  EXPECT_EQ(expected_bounds.ToString(), window1->bounds().ToString());
+  EXPECT_TRUE(window1_state->IsSnapped());
+  GetController()->PerformAction(WINDOW_CYCLE_SNAP_DOCK_LEFT, dummy);
+  EXPECT_FALSE(window1_state->IsNormalOrSnapped());
+  EXPECT_TRUE(window1_state->IsDocked());
+  GetController()->PerformAction(WINDOW_CYCLE_SNAP_DOCK_LEFT, dummy);
+  EXPECT_FALSE(window1_state->IsDocked());
+  EXPECT_EQ(normal_bounds.ToString(), window1->bounds().ToString());
+}
+
+TEST_F(AcceleratorControllerTest, WindowSnapRightDockRightRestore) {
+  scoped_ptr<aura::Window> window0(
+      CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
+  scoped_ptr<aura::Window> window1(
+    CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
+  const ui::Accelerator dummy;
+
+  wm::WindowState* window1_state = wm::GetWindowState(window1.get());
+  window1_state->Activate();
+
+  GetController()->PerformAction(WINDOW_CYCLE_SNAP_DOCK_RIGHT, dummy);
+  gfx::Rect normal_bounds = window1_state->GetRestoreBoundsInParent();
+  gfx::Rect expected_bounds =
+    wm::GetDefaultRightSnappedWindowBoundsInParent(window1.get());
+  EXPECT_EQ(expected_bounds.ToString(), window1->bounds().ToString());
+  EXPECT_TRUE(window1_state->IsSnapped());
+  GetController()->PerformAction(WINDOW_CYCLE_SNAP_DOCK_RIGHT, dummy);
+  EXPECT_FALSE(window1_state->IsNormalOrSnapped());
+  EXPECT_TRUE(window1_state->IsDocked());
+  GetController()->PerformAction(WINDOW_CYCLE_SNAP_DOCK_RIGHT, dummy);
+  EXPECT_FALSE(window1_state->IsDocked());
+  EXPECT_EQ(normal_bounds.ToString(), window1->bounds().ToString());
+}
+
+TEST_F(AcceleratorControllerTest, WindowSnapLeftDockLeftSnapRight) {
+  scoped_ptr<aura::Window> window0(
+      CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
+  scoped_ptr<aura::Window> window1(
+    CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
+  const ui::Accelerator dummy;
+
+  wm::WindowState* window1_state = wm::GetWindowState(window1.get());
+  window1_state->Activate();
+
+  GetController()->PerformAction(WINDOW_CYCLE_SNAP_DOCK_LEFT, dummy);
+  gfx::Rect expected_bounds =
+    wm::GetDefaultLeftSnappedWindowBoundsInParent(window1.get());
+  gfx::Rect expected_bounds2 =
+    wm::GetDefaultRightSnappedWindowBoundsInParent(window1.get());
+  EXPECT_EQ(expected_bounds.ToString(), window1->bounds().ToString());
+  EXPECT_TRUE(window1_state->IsSnapped());
+  GetController()->PerformAction(WINDOW_CYCLE_SNAP_DOCK_LEFT, dummy);
+  EXPECT_FALSE(window1_state->IsNormalOrSnapped());
+  EXPECT_TRUE(window1_state->IsDocked());
+  GetController()->PerformAction(WINDOW_CYCLE_SNAP_DOCK_RIGHT, dummy);
+  EXPECT_FALSE(window1_state->IsDocked());
+  EXPECT_TRUE(window1_state->IsSnapped());
+  EXPECT_EQ(expected_bounds2.ToString(), window1->bounds().ToString());
+}
+
+TEST_F(AcceleratorControllerTest, WindowDockLeftMinimizeWindowWithRestore) {
+  scoped_ptr<aura::Window> window0(
+      CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
+  scoped_ptr<aura::Window> window1(
+    CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
+  const ui::Accelerator dummy;
+
+  wm::WindowState* window1_state = wm::GetWindowState(window1.get());
+  window1_state->Activate();
+
+  scoped_ptr<aura::Window> window2(
+    CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
+
+  wm::WindowState* window2_state = wm::GetWindowState(window2.get());
+
+  scoped_ptr<aura::Window> window3(
+    CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
+
+  wm::WindowState* window3_state = wm::GetWindowState(window3.get());
+  window3_state->Activate();
+
+  GetController()->PerformAction(WINDOW_CYCLE_SNAP_DOCK_LEFT, dummy);
+  GetController()->PerformAction(WINDOW_CYCLE_SNAP_DOCK_LEFT, dummy);
+  gfx::Rect window3_docked_bounds = window3->bounds();
+
+  window2_state->Activate();
+  GetController()->PerformAction(WINDOW_CYCLE_SNAP_DOCK_LEFT, dummy);
+  GetController()->PerformAction(WINDOW_CYCLE_SNAP_DOCK_LEFT, dummy);
+  window1_state->Activate();
+  GetController()->PerformAction(WINDOW_CYCLE_SNAP_DOCK_LEFT, dummy);
+  GetController()->PerformAction(WINDOW_CYCLE_SNAP_DOCK_LEFT, dummy);
+
+  EXPECT_TRUE(window3_state->IsDocked());
+  EXPECT_TRUE(window2_state->IsDocked());
+  EXPECT_TRUE(window1_state->IsDocked());
+  EXPECT_TRUE(window3_state->IsMinimized());
+
+  window1_state->Activate();
+  GetController()->PerformAction(WINDOW_CYCLE_SNAP_DOCK_LEFT, dummy);
+  window2_state->Activate();
+  GetController()->PerformAction(WINDOW_CYCLE_SNAP_DOCK_LEFT, dummy);
+  window3_state->Unminimize();
+  EXPECT_FALSE(window1_state->IsDocked());
+  EXPECT_FALSE(window2_state->IsDocked());
+  EXPECT_TRUE(window3_state->IsDocked());
+  EXPECT_EQ(window3_docked_bounds.ToString(), window3->bounds().ToString());
+}
+
+TEST_F(AcceleratorControllerTest, WindowPanelDockLeftDockRightRestore) {
+  scoped_ptr<aura::Window> window0(
+      CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
+
+  scoped_ptr<aura::Window> window(CreatePanel());
+  const ui::Accelerator dummy;
+  wm::WindowState* window_state = wm::GetWindowState(window.get());
+  window_state->Activate();
+
+  gfx::Rect window_restore_bounds2 = window->bounds();
+  GetController()->PerformAction(WINDOW_CYCLE_SNAP_DOCK_LEFT, dummy);
+  gfx::Rect expected_bounds =
+      wm::GetDefaultLeftSnappedWindowBoundsInParent(window.get());
+  gfx::Rect window_restore_bounds =
+      window_state->GetRestoreBoundsInScreen();
+  EXPECT_NE(expected_bounds.ToString(), window->bounds().ToString());
+  EXPECT_FALSE(window_state->IsSnapped());
+  EXPECT_FALSE(window_state->IsNormalOrSnapped());
+  EXPECT_TRUE(window_state->IsDocked());
+  window_state->Restore();
+  GetController()->PerformAction(WINDOW_CYCLE_SNAP_DOCK_RIGHT, dummy);
+  EXPECT_TRUE(window_state->IsDocked());
+  GetController()->PerformAction(WINDOW_CYCLE_SNAP_DOCK_RIGHT, dummy);
+  EXPECT_FALSE(window_state->IsDocked());
+  EXPECT_EQ(window_restore_bounds.ToString(),
+            window_restore_bounds2.ToString());
+  EXPECT_EQ(window_restore_bounds.ToString(), window->bounds().ToString());
 }
 
 TEST_F(AcceleratorControllerTest, CenterWindowAccelerator) {
@@ -811,17 +973,6 @@ TEST_F(AcceleratorControllerTest, GlobalAccelerators) {
   }
 #endif
 
-#if !defined(NDEBUG)
-  // ToggleDesktopBackgroundMode
-  EXPECT_TRUE(GetController()->Process(
-      ui::Accelerator(ui::VKEY_B, ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN)));
-#if !defined(OS_LINUX)
-  // ToggleDesktopFullScreen (not implemented yet on Linux)
-  EXPECT_TRUE(GetController()->Process(
-      ui::Accelerator(ui::VKEY_F11, ui::EF_CONTROL_DOWN)));
-#endif  // OS_LINUX
-#endif  // !NDEBUG
-
 #if !defined(OS_WIN)
   // Exit
   ExitWarningHandler* ewh = GetController()->GetExitWarningHandlerForTest();
@@ -889,12 +1040,12 @@ TEST_F(AcceleratorControllerTest, GlobalAcceleratorsToggleAppList) {
   EXPECT_TRUE(ash::Shell::GetInstance()->GetAppListTargetVisibility());
 
   // When spoken feedback is on, the AppList should not toggle.
-  delegate->ToggleSpokenFeedback(A11Y_NOTIFICATION_NONE);
+  delegate->ToggleSpokenFeedback(ui::A11Y_NOTIFICATION_NONE);
   EXPECT_FALSE(
       GetController()->Process(ui::Accelerator(ui::VKEY_LWIN, ui::EF_NONE)));
   EXPECT_FALSE(
       GetController()->Process(ReleaseAccelerator(ui::VKEY_LWIN, ui::EF_NONE)));
-  delegate->ToggleSpokenFeedback(A11Y_NOTIFICATION_NONE);
+  delegate->ToggleSpokenFeedback(ui::A11Y_NOTIFICATION_NONE);
   EXPECT_TRUE(ash::Shell::GetInstance()->GetAppListTargetVisibility());
 
   EXPECT_FALSE(
@@ -904,12 +1055,12 @@ TEST_F(AcceleratorControllerTest, GlobalAcceleratorsToggleAppList) {
   EXPECT_FALSE(ash::Shell::GetInstance()->GetAppListTargetVisibility());
 
   // When spoken feedback is on, the AppList should not toggle.
-  delegate->ToggleSpokenFeedback(A11Y_NOTIFICATION_NONE);
+  delegate->ToggleSpokenFeedback(ui::A11Y_NOTIFICATION_NONE);
   EXPECT_FALSE(
       GetController()->Process(ui::Accelerator(ui::VKEY_LWIN, ui::EF_NONE)));
   EXPECT_FALSE(
       GetController()->Process(ReleaseAccelerator(ui::VKEY_LWIN, ui::EF_NONE)));
-  delegate->ToggleSpokenFeedback(A11Y_NOTIFICATION_NONE);
+  delegate->ToggleSpokenFeedback(ui::A11Y_NOTIFICATION_NONE);
   EXPECT_FALSE(ash::Shell::GetInstance()->GetAppListTargetVisibility());
 }
 
@@ -1098,10 +1249,10 @@ namespace {
 class PreferredReservedAcceleratorsTest : public test::AshTestBase {
  public:
   PreferredReservedAcceleratorsTest() {}
-  virtual ~PreferredReservedAcceleratorsTest() {}
+  ~PreferredReservedAcceleratorsTest() override {}
 
   // test::AshTestBase:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     AshTestBase::SetUp();
     Shell::GetInstance()->lock_state_controller()->
         set_animator_for_test(new test::TestSessionStateAnimator);
@@ -1160,11 +1311,9 @@ TEST_F(AcceleratorControllerTest, DisallowedAtModalWindow) {
   std::set<AcceleratorAction> all_actions;
   for (size_t i = 0 ; i < kAcceleratorDataLength; ++i)
     all_actions.insert(kAcceleratorData[i].action);
-#if !defined(NDEBUG)
-  std::set<AcceleratorAction> all_desktop_actions;
-  for (size_t i = 0 ; i < kDesktopAcceleratorDataLength; ++i)
-    all_desktop_actions.insert(kDesktopAcceleratorData[i].action);
-#endif
+  std::set<AcceleratorAction> all_debug_actions;
+  for (size_t i = 0 ; i < kDebugAcceleratorDataLength; ++i)
+    all_debug_actions.insert(kDebugAcceleratorData[i].action);
 
   std::set<AcceleratorAction> actionsAllowedAtModalWindow;
   for (size_t k = 0 ; k < kActionsAllowedAtModalWindowLength; ++k)
@@ -1172,14 +1321,10 @@ TEST_F(AcceleratorControllerTest, DisallowedAtModalWindow) {
   for (std::set<AcceleratorAction>::const_iterator it =
            actionsAllowedAtModalWindow.begin();
        it != actionsAllowedAtModalWindow.end(); ++it) {
-    EXPECT_TRUE(all_actions.find(*it) != all_actions.end()
-
-#if !defined(NDEBUG)
-                || all_desktop_actions.find(*it) != all_desktop_actions.end()
-#endif
-                )
+    EXPECT_TRUE(all_actions.find(*it) != all_actions.end() ||
+                all_debug_actions.find(*it) != all_debug_actions.end())
         << " action from kActionsAllowedAtModalWindow"
-        << " not found in kAcceleratorData or kDesktopAcceleratorData. "
+        << " not found in kAcceleratorData or kDebugAcceleratorData. "
         << "action: " << *it;
   }
   scoped_ptr<aura::Window> window(
@@ -1302,10 +1447,11 @@ TEST_F(AcceleratorControllerTest, DisallowedWithNoWindow) {
       ash::Shell::GetInstance()->accessibility_delegate();
 
   for (size_t i = 0; i < kActionsNeedingWindowLength; ++i) {
-    delegate->TriggerAccessibilityAlert(A11Y_ALERT_NONE);
+    delegate->TriggerAccessibilityAlert(ui::A11Y_ALERT_NONE);
     EXPECT_TRUE(
         GetController()->PerformAction(kActionsNeedingWindow[i], dummy));
-    EXPECT_EQ(delegate->GetLastAccessibilityAlert(), A11Y_ALERT_WINDOW_NEEDED);
+    EXPECT_EQ(delegate->GetLastAccessibilityAlert(),
+              ui::A11Y_ALERT_WINDOW_NEEDED);
   }
 
   // Make sure we don't alert if we do have a window.
@@ -1313,9 +1459,10 @@ TEST_F(AcceleratorControllerTest, DisallowedWithNoWindow) {
   for (size_t i = 0; i < kActionsNeedingWindowLength; ++i) {
     window.reset(CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
     wm::ActivateWindow(window.get());
-    delegate->TriggerAccessibilityAlert(A11Y_ALERT_NONE);
+    delegate->TriggerAccessibilityAlert(ui::A11Y_ALERT_NONE);
     GetController()->PerformAction(kActionsNeedingWindow[i], dummy);
-    EXPECT_NE(delegate->GetLastAccessibilityAlert(), A11Y_ALERT_WINDOW_NEEDED);
+    EXPECT_NE(delegate->GetLastAccessibilityAlert(),
+              ui::A11Y_ALERT_WINDOW_NEEDED);
   }
 
   // Don't alert if we have a minimized window either.
@@ -1323,9 +1470,10 @@ TEST_F(AcceleratorControllerTest, DisallowedWithNoWindow) {
     window.reset(CreateTestWindowInShellWithBounds(gfx::Rect(5, 5, 20, 20)));
     wm::ActivateWindow(window.get());
     GetController()->PerformAction(WINDOW_MINIMIZE, dummy);
-    delegate->TriggerAccessibilityAlert(A11Y_ALERT_NONE);
+    delegate->TriggerAccessibilityAlert(ui::A11Y_ALERT_NONE);
     GetController()->PerformAction(kActionsNeedingWindow[i], dummy);
-    EXPECT_NE(delegate->GetLastAccessibilityAlert(), A11Y_ALERT_WINDOW_NEEDED);
+    EXPECT_NE(delegate->GetLastAccessibilityAlert(),
+              ui::A11Y_ALERT_WINDOW_NEEDED);
   }
 }
 

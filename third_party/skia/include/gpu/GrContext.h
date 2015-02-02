@@ -19,7 +19,6 @@
 #include "SkTypes.h"
 
 class GrAARectRenderer;
-class GrAutoScratchTexture;
 class GrDrawState;
 class GrDrawTarget;
 class GrFontCache;
@@ -63,6 +62,11 @@ public:
      * Creates a GrContext for a backend context.
      */
     static GrContext* Create(GrBackend, GrBackendContext, const Options* opts = NULL);
+
+    /**
+     * Only defined in test apps.
+     */
+    static GrContext* CreateMockContext();
 
     virtual ~GrContext();
 
@@ -123,10 +127,6 @@ public:
      *                          video memory that can be held in the cache.
      */
     void getResourceCacheLimits(int* maxResources, size_t* maxResourceBytes) const;
-    SK_ATTR_DEPRECATED("This function has been renamed to getResourceCacheLimits().")
-    void getTextureCacheLimits(int* maxTextures, size_t* maxTextureBytes) const {
-        this->getResourceCacheLimits(maxTextures, maxTextureBytes);
-    }
 
     /**
      *  Gets the current GPU resource cache usage.
@@ -138,20 +138,6 @@ public:
      */
     void getResourceCacheUsage(int* resourceCount, size_t* resourceBytes) const;
 
-    SK_ATTR_DEPRECATED("Use getResourceCacheUsage().")
-    size_t getGpuTextureCacheBytes() const {
-        size_t bytes;
-        this->getResourceCacheUsage(NULL, &bytes);
-        return bytes;
-    }
-
-    SK_ATTR_DEPRECATED("Use getResourceCacheUsage().")
-    int getGpuTextureCacheResourceCount() const {
-        int count;
-        this->getResourceCacheUsage(&count, NULL);
-        return count;
-    }
-
     /**
      *  Specify the GPU resource cache limits. If the current cache exceeds either
      *  of these, it will be purged (LRU) to keep the cache within these limits.
@@ -162,10 +148,6 @@ public:
      *                          that can be held in the cache.
      */
     void setResourceCacheLimits(int maxResources, size_t maxResourceBytes);
-    SK_ATTR_DEPRECATED("This function has been renamed to setResourceCacheLimits().")
-    void setTextureCacheLimits(int maxTextures, size_t maxTextureBytes) {
-        this->setResourceCacheLimits(maxTextures, maxTextureBytes);
-    }
 
     /**
      * Frees GPU created by the context. Can be called to reduce GPU memory
@@ -231,7 +213,7 @@ public:
      * @param cacheKey  (optional) If non-NULL, we'll write the cache key we used to cacheKey.
      */
     GrTexture* createTexture(const GrTextureParams* params,
-                             const GrTextureDesc& desc,
+                             const GrSurfaceDesc& desc,
                              const GrCacheID& cacheID,
                              const void* srcData,
                              size_t rowBytes,
@@ -247,7 +229,7 @@ public:
      *                  for different wrap modes on GPUs with limited NPOT
      *                  texture support). NULL implies clamp wrap modes.
      */
-    GrTexture* findAndRefTexture(const GrTextureDesc& desc,
+    GrTexture* findAndRefTexture(const GrSurfaceDesc& desc,
                                  const GrCacheID& cacheID,
                                  const GrTextureParams* params);
     /**
@@ -255,13 +237,13 @@ public:
      * will not be locked or returned. This call does not affect the priority of
      * the texture for deletion.
      */
-    bool isTextureInCache(const GrTextureDesc& desc,
+    bool isTextureInCache(const GrSurfaceDesc& desc,
                           const GrCacheID& cacheID,
                           const GrTextureParams* params) const;
 
     /**
      * Enum that determines how closely a returned scratch texture must match
-     * a provided GrTextureDesc.
+     * a provided GrSurfaceDesc.
      */
     enum ScratchTexMatch {
         /**
@@ -280,31 +262,30 @@ public:
     };
 
     /**
-     * Returns a texture matching the desc. It's contents are unknown. Subsequent
-     * requests with the same descriptor are not guaranteed to return the same
-     * texture. The same texture is guaranteed not be returned again until it is
-     * unlocked. Call must be balanced with an unlockTexture() call. The caller
+     * Returns a texture matching the desc. It's contents are unknown. The caller
      * owns a ref on the returned texture and must balance with a call to unref.
+     * It is guaranteed that the same texture will not be returned in subsequent
+     * calls until all refs to the texture are dropped.
      *
-     * Textures created by createAndLockTexture() hide the complications of
+     * Textures created by createTexture() hide the complications of
      * tiling non-power-of-two textures on APIs that don't support this (e.g.
-     * unextended GLES2). Tiling a NPOT texture created by lockScratchTexture on
-     * such an API will create gaps in the tiling pattern. This includes clamp
-     * mode. (This may be addressed in a future update.)
+     * unextended GLES2). NPOT scratch textures are not tilable on such APIs.
+     *
+     * internalFlag is a temporary workaround until changes in the internal
+     * architecture are complete. Use the default value.
      */
-    GrTexture* lockAndRefScratchTexture(const GrTextureDesc&, ScratchTexMatch match);
-
-    /**
-     *  When done with an entry, call unlockScratchTexture(entry) on it, which returns
-     *  it to the cache, where it may be purged. This does not unref the texture.
-     */
-    void unlockScratchTexture(GrTexture* texture);
+    GrTexture* refScratchTexture(const GrSurfaceDesc&, ScratchTexMatch match,
+                                 bool internalFlag = false);
 
     /**
      * Creates a texture that is outside the cache. Does not count against
      * cache's budget.
+     *
+     * Textures created by createTexture() hide the complications of
+     * tiling non-power-of-two textures on APIs that don't support this (e.g.
+     * unextended GLES2). NPOT uncached textures are not tilable on such APIs.
      */
-    GrTexture* createUncachedTexture(const GrTextureDesc& desc,
+    GrTexture* createUncachedTexture(const GrSurfaceDesc& desc,
                                      void* srcData,
                                      size_t rowBytes);
 
@@ -458,11 +439,9 @@ public:
      * @param color the color to clear to.
      * @param canIgnoreRect allows partial clears to be converted to whole
      *                      clears on platforms for which that is cheap
-     * @param target if non-NULL, the render target to clear otherwise clear
-     *               the current render target
+     * @param target The render target to clear.
      */
-    void clear(const SkIRect* rect, GrColor color, bool canIgnoreRect,
-               GrRenderTarget* target = NULL);
+    void clear(const SkIRect* rect, GrColor color, bool canIgnoreRect, GrRenderTarget* target);
 
     /**
      *  Draw everywhere (respecting the clip) with the paint.
@@ -597,17 +576,20 @@ public:
     * These flags can be used with the read/write pixels functions below.
     */
     enum PixelOpsFlags {
-        /** The GrContext will not be flushed. This means that the read or write may occur before
-            previous draws have executed. */
+        /** The GrContext will not be flushed before the surface read or write. This means that
+            the read or write may occur before previous draws have executed. */
         kDontFlush_PixelOpsFlag = 0x1,
+        /** Any surface writes should be flushed to the backend 3D API after the surface operation
+            is complete */
+        kFlushWrites_PixelOp = 0x2,
         /** The src for write or dst read is unpremultiplied. This is only respected if both the
             config src and dst configs are an RGBA/BGRA 8888 format. */
-        kUnpremul_PixelOpsFlag  = 0x2,
+        kUnpremul_PixelOpsFlag  = 0x4,
     };
 
     /**
      * Reads a rectangle of pixels from a render target.
-     * @param target        the render target to read from. NULL means the current render target.
+     * @param target        the render target to read from.
      * @param left          left edge of the rectangle to read (inclusive)
      * @param top           top edge of the rectangle to read (inclusive)
      * @param width         width of rectangle to read in pixels.
@@ -629,53 +611,8 @@ public:
                                 uint32_t pixelOpsFlags = 0);
 
     /**
-     * Copy the src pixels [buffer, row bytes, pixel config] into a render target at the specified
-     * rectangle.
-     * @param target        the render target to write into. NULL means the current render target.
-     * @param left          left edge of the rectangle to write (inclusive)
-     * @param top           top edge of the rectangle to write (inclusive)
-     * @param width         width of rectangle to write in pixels.
-     * @param height        height of rectangle to write in pixels.
-     * @param config        the pixel config of the source buffer
-     * @param buffer        memory to read the rectangle from.
-     * @param rowBytes      number of bytes between consecutive rows. Zero means rows are tightly
-     *                      packed.
-     * @param pixelOpsFlags see PixelOpsFlags enum above.
-     *
-     * @return true if the write succeeded, false if not. The write can fail because of an
-     *         unsupported combination of target and pixel configs.
-     */
-    bool writeRenderTargetPixels(GrRenderTarget* target,
-                                 int left, int top, int width, int height,
-                                 GrPixelConfig config, const void* buffer,
-                                 size_t rowBytes = 0,
-                                 uint32_t pixelOpsFlags = 0);
-
-    /**
-     * Reads a rectangle of pixels from a texture.
-     * @param texture       the texture to read from.
-     * @param left          left edge of the rectangle to read (inclusive)
-     * @param top           top edge of the rectangle to read (inclusive)
-     * @param width         width of rectangle to read in pixels.
-     * @param height        height of rectangle to read in pixels.
-     * @param config        the pixel config of the destination buffer
-     * @param buffer        memory to read the rectangle into.
-     * @param rowBytes      number of bytes between consecutive rows. Zero means rows are tightly
-     *                      packed.
-     * @param pixelOpsFlags see PixelOpsFlags enum above.
-     *
-     * @return true if the read succeeded, false if not. The read can fail because of an unsupported
-     *         pixel config.
-     */
-    bool readTexturePixels(GrTexture* texture,
-                           int left, int top, int width, int height,
-                           GrPixelConfig config, void* buffer,
-                           size_t rowBytes = 0,
-                           uint32_t pixelOpsFlags = 0);
-
-    /**
-     * Writes a rectangle of pixels to a texture.
-     * @param texture       the render target to read from.
+     * Writes a rectangle of pixels to a surface.
+     * @param surface       the surface to write to.
      * @param left          left edge of the rectangle to write (inclusive)
      * @param top           top edge of the rectangle to write (inclusive)
      * @param width         width of rectangle to write in pixels.
@@ -686,37 +623,56 @@ public:
      *                      means rows are tightly packed.
      * @param pixelOpsFlags see PixelOpsFlags enum above.
      * @return true if the write succeeded, false if not. The write can fail because of an
-     *         unsupported combination of texture and pixel configs.
+     *         unsupported combination of surface and src configs.
      */
-    bool writeTexturePixels(GrTexture* texture,
+    bool writeSurfacePixels(GrSurface* surface,
                             int left, int top, int width, int height,
                             GrPixelConfig config, const void* buffer,
                             size_t rowBytes,
                             uint32_t pixelOpsFlags = 0);
 
     /**
-     * Copies a rectangle of texels from src to dst. The size of dst is the size of the rectangle
-     * copied and topLeft is the position of the rect in src. The rectangle is clipped to src's
+     * Copies a rectangle of texels from src to dst.
      * bounds.
-     * @param src           the texture to copy from.
-     * @param dst           the render target to copy to.
-     * @param topLeft       the point in src that will be copied to the top-left of dst. If NULL,
-     *                      (0, 0) will be used.
+     * @param dst           the surface to copy to.
+     * @param src           the surface to copy from.
+     * @param srcRect       the rectangle of the src that should be copied.
+     * @param dstPoint      the translation applied when writing the srcRect's pixels to the dst.
+     * @param pixelOpsFlags see PixelOpsFlags enum above. (kUnpremul_PixelOpsFlag is not allowed).
      */
-    void copyTexture(GrTexture* src, GrRenderTarget* dst, const SkIPoint* topLeft = NULL);
+    void copySurface(GrSurface* dst,
+                     GrSurface* src,
+                     const SkIRect& srcRect,
+                     const SkIPoint& dstPoint,
+                     uint32_t pixelOpsFlags = 0);
+
+    /** Helper that copies the whole surface but fails when the two surfaces are not identically
+        sized. */
+    bool copySurface(GrSurface* dst, GrSurface* src) {
+        if (NULL == dst || NULL == src || dst->width() != src->width() ||
+            dst->height() != src->height()) {
+            return false;
+        }
+        this->copySurface(dst, src, SkIRect::MakeWH(dst->width(), dst->height()),
+                          SkIPoint::Make(0,0));
+        return true;
+    }
 
     /**
-     * Resolves a render target that has MSAA. The intermediate MSAA buffer is
-     * down-sampled to the associated GrTexture (accessible via
-     * GrRenderTarget::asTexture()). Any pending draws to the render target will
-     * be executed before the resolve.
-     *
-     * This is only necessary when a client wants to access the object directly
-     * using the backend API directly. GrContext will detect when it must
-     * perform a resolve to a GrTexture used as the source of a draw or before
-     * reading pixels back from a GrTexture or GrRenderTarget.
+     * After this returns any pending writes to the surface will have been issued to the backend 3D API.
      */
-    void resolveRenderTarget(GrRenderTarget*);
+    void flushSurfaceWrites(GrSurface* surface);
+
+    /**
+     * Equivalent to flushSurfaceWrites but also performs MSAA resolve if necessary. This call is
+     * used to make the surface contents available to be read in the backend 3D API, usually for a
+     * compositing step external to Skia.
+     *
+     * It is not necessary to call this before reading the render target via Skia/GrContext.
+     * GrContext will detect when it must perform a resolve before reading pixels back from the
+     * surface or using it as a texture.
+     */
+    void prepareSurfaceForExternalRead(GrSurface*);
 
     /**
      * Provides a perfomance hint that the render target's contents are allowed
@@ -927,6 +883,7 @@ public:
     GrDrawTarget* getTextTarget();
     const GrIndexBuffer* getQuadIndexBuffer() const;
     GrAARectRenderer* getAARectRenderer() { return fAARectRenderer; }
+    GrResourceCache* getResourceCache() { return fResourceCache; }
     GrResourceCache2* getResourceCache2() { return fResourceCache2; }
 
     // Called by tests that draw directly to the context via GrDrawTarget
@@ -985,13 +942,6 @@ public:
 #endif
 
 private:
-    // Used to indicate whether a draw should be performed immediately or queued in fDrawBuffer.
-    enum BufferedDraw {
-        kYes_BufferedDraw,
-        kNo_BufferedDraw,
-    };
-    BufferedDraw fLastDrawWasBuffered;
-
     GrGpu*                          fGpu;
     SkMatrix                        fViewMatrix;
     SkAutoTUnref<GrRenderTarget>    fRenderTarget;
@@ -1033,6 +983,8 @@ private:
 
     GrContext(const Options&); // init must be called after the constructor.
     bool init(GrBackend, GrBackendContext);
+    void initMockContext();
+    void initCommon();
 
     void setupDrawBuffer();
 
@@ -1040,26 +992,18 @@ private:
     class AutoCheckFlush;
     /// Sets the paint and returns the target to draw into. The paint can be NULL in which case the
     /// draw state is left unmodified.
-    GrDrawTarget* prepareToDraw(const GrPaint*, BufferedDraw, AutoRestoreEffects*, AutoCheckFlush*);
+    GrDrawTarget* prepareToDraw(const GrPaint*, AutoRestoreEffects*, AutoCheckFlush*);
 
     void internalDrawPath(GrDrawTarget* target, bool useAA, const SkPath& path,
                           const GrStrokeInfo& stroke);
 
-    GrTexture* createResizedTexture(const GrTextureDesc& desc,
+    GrTexture* createResizedTexture(const GrSurfaceDesc& desc,
                                     const GrCacheID& cacheID,
                                     const void* srcData,
                                     size_t rowBytes,
                                     bool filter);
 
-    // Needed so GrTexture's returnToCache helper function can call
-    // addExistingTextureToCache
-    friend class GrTexture;
-    friend class GrStencilAndCoverPathRenderer;
-    friend class GrStencilAndCoverTextContext;
-
-    // Add an existing texture to the texture cache. This is intended solely
-    // for use with textures released from an GrAutoScratchTexture.
-    void addExistingTextureToCache(GrTexture* texture);
+    GrTexture* createNewScratchTexture(const GrSurfaceDesc& desc);
 
     /**
      * These functions create premul <-> unpremul effects if it is possible to generate a pair
@@ -1076,92 +1020,6 @@ private:
     static bool OverbudgetCB(void* data);
 
     typedef SkRefCnt INHERITED;
-};
-
-/**
- * Gets and locks a scratch texture from a descriptor using either exact or approximate criteria.
- * Unlocks texture in the destructor.
- */
-class GrAutoScratchTexture : public ::SkNoncopyable {
-public:
-    GrAutoScratchTexture()
-        : fContext(NULL)
-        , fTexture(NULL) {
-    }
-
-    GrAutoScratchTexture(GrContext* context,
-                         const GrTextureDesc& desc,
-                         GrContext::ScratchTexMatch match = GrContext::kApprox_ScratchTexMatch)
-      : fContext(NULL)
-      , fTexture(NULL) {
-      this->set(context, desc, match);
-    }
-
-    ~GrAutoScratchTexture() {
-        this->reset();
-    }
-
-    void reset() {
-        if (fContext && fTexture) {
-            fContext->unlockScratchTexture(fTexture);
-            fTexture->unref();
-            fTexture = NULL;
-        }
-    }
-
-    /*
-     * When detaching a texture we do not unlock it in the texture cache but
-     * we do set the returnToCache flag. In this way the texture remains
-     * "locked" in the texture cache until it is freed and recycled in
-     * GrTexture::internal_dispose. In reality, the texture has been removed
-     * from the cache (because this is in AutoScratchTexture) and by not
-     * calling unlockScratchTexture we simply don't re-add it. It will be
-     * reattached in GrTexture::internal_dispose.
-     *
-     * Note that the caller is assumed to accept and manage the ref to the
-     * returned texture.
-     */
-    GrTexture* detach() {
-        if (NULL == fTexture) {
-            return NULL;
-        }
-        GrTexture* texture = fTexture;
-        fTexture = NULL;
-
-        // This GrAutoScratchTexture has a ref from lockAndRefScratchTexture, which we give up now.
-        // The cache also has a ref which we are lending to the caller of detach(). When the caller
-        // lets go of the ref and the ref count goes to 0 internal_dispose will see this flag is
-        // set and re-ref the texture, thereby restoring the cache's ref.
-        SkASSERT(!texture->unique());
-        texture->impl()->setFlag((GrTextureFlags) GrTextureImpl::kReturnToCache_FlagBit);
-        texture->unref();
-        SkASSERT(texture->getCacheEntry());
-
-        return texture;
-    }
-
-    GrTexture* set(GrContext* context,
-                   const GrTextureDesc& desc,
-                   GrContext::ScratchTexMatch match = GrContext::kApprox_ScratchTexMatch) {
-        this->reset();
-
-        fContext = context;
-        if (fContext) {
-            fTexture = fContext->lockAndRefScratchTexture(desc, match);
-            if (NULL == fTexture) {
-                fContext = NULL;
-            }
-            return fTexture;
-        } else {
-            return NULL;
-        }
-    }
-
-    GrTexture* texture() { return fTexture; }
-
-private:
-    GrContext*                    fContext;
-    GrTexture*                    fTexture;
 };
 
 #endif

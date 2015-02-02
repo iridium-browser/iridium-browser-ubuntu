@@ -35,7 +35,7 @@ class ExtensionViewHost
                     content::SiteInstance* site_instance,
                     const GURL& url,
                     ViewType host_type);
-  virtual ~ExtensionViewHost();
+  ~ExtensionViewHost() override;
 
   ExtensionView* view() { return view_.get(); }
   const ExtensionView* view() const { return view_.get(); }
@@ -56,63 +56,56 @@ class ExtensionViewHost
       const content::NativeWebKeyboardEvent& event);
 
   // ExtensionHost
-  virtual void OnDidStopLoading() OVERRIDE;
-  virtual void OnDocumentAvailable() OVERRIDE;
-  virtual void LoadInitialURL() OVERRIDE;
-  virtual bool IsBackgroundPage() const OVERRIDE;
+  void OnDidStopLoading() override;
+  void OnDocumentAvailable() override;
+  void LoadInitialURL() override;
+  bool IsBackgroundPage() const override;
 
   // content::WebContentsDelegate
-  virtual content::WebContents* OpenURLFromTab(
+  content::WebContents* OpenURLFromTab(
       content::WebContents* source,
-      const content::OpenURLParams& params) OVERRIDE;
-  virtual bool PreHandleKeyboardEvent(
+      const content::OpenURLParams& params) override;
+  bool PreHandleKeyboardEvent(content::WebContents* source,
+                              const content::NativeWebKeyboardEvent& event,
+                              bool* is_keyboard_shortcut) override;
+  void HandleKeyboardEvent(
       content::WebContents* source,
-      const content::NativeWebKeyboardEvent& event,
-      bool* is_keyboard_shortcut) OVERRIDE;
-  virtual void HandleKeyboardEvent(
-      content::WebContents* source,
-      const content::NativeWebKeyboardEvent& event) OVERRIDE;
-  virtual bool PreHandleGestureEvent(
-      content::WebContents* source,
-      const blink::WebGestureEvent& event) OVERRIDE;
-  virtual content::ColorChooser* OpenColorChooser(
+      const content::NativeWebKeyboardEvent& event) override;
+  bool PreHandleGestureEvent(content::WebContents* source,
+                             const blink::WebGestureEvent& event) override;
+  content::ColorChooser* OpenColorChooser(
       content::WebContents* web_contents,
       SkColor color,
-      const std::vector<content::ColorSuggestion>& suggestions) OVERRIDE;
-  virtual void RunFileChooser(
-      content::WebContents* tab,
-      const content::FileChooserParams& params) OVERRIDE;
-  virtual void ResizeDueToAutoResize(content::WebContents* source,
-                                     const gfx::Size& new_size) OVERRIDE;
+      const std::vector<content::ColorSuggestion>& suggestions) override;
+  void RunFileChooser(content::WebContents* tab,
+                      const content::FileChooserParams& params) override;
+  void ResizeDueToAutoResize(content::WebContents* source,
+                             const gfx::Size& new_size) override;
 
   // content::WebContentsObserver
-  virtual void RenderViewCreated(
-      content::RenderViewHost* render_view_host) OVERRIDE;
+  void RenderViewCreated(content::RenderViewHost* render_view_host) override;
 
   // web_modal::WebContentsModalDialogManagerDelegate
-  virtual web_modal::WebContentsModalDialogHost*
-      GetWebContentsModalDialogHost() OVERRIDE;
-  virtual bool IsWebContentsVisible(
-      content::WebContents* web_contents) OVERRIDE;
+  web_modal::WebContentsModalDialogHost* GetWebContentsModalDialogHost()
+      override;
+  bool IsWebContentsVisible(content::WebContents* web_contents) override;
 
   // web_modal::WebContentsModalDialogHost
-  virtual gfx::NativeView GetHostView() const OVERRIDE;
-  virtual gfx::Point GetDialogPosition(const gfx::Size& size) OVERRIDE;
-  virtual gfx::Size GetMaximumDialogSize() OVERRIDE;
-  virtual void AddObserver(
-      web_modal::ModalDialogHostObserver* observer) OVERRIDE;
-  virtual void RemoveObserver(
-      web_modal::ModalDialogHostObserver* observer) OVERRIDE;
+  gfx::NativeView GetHostView() const override;
+  gfx::Point GetDialogPosition(const gfx::Size& size) override;
+  gfx::Size GetMaximumDialogSize() override;
+  void AddObserver(web_modal::ModalDialogHostObserver* observer) override;
+  void RemoveObserver(web_modal::ModalDialogHostObserver* observer) override;
 
   // extensions::ExtensionFunctionDispatcher::Delegate
-  virtual WindowController* GetExtensionWindowController() const OVERRIDE;
-  virtual content::WebContents* GetAssociatedWebContents() const OVERRIDE;
-  virtual content::WebContents* GetVisibleWebContents() const OVERRIDE;
+  WindowController* GetExtensionWindowController() const override;
+  content::WebContents* GetAssociatedWebContents() const override;
+  content::WebContents* GetVisibleWebContents() const override;
 
   // content::NotificationObserver
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
  private:
   // Implemented per-platform. Create the platform-specific ExtensionView.

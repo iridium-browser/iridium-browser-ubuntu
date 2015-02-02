@@ -22,30 +22,26 @@ class UserWallpaperDelegate : public ash::UserWallpaperDelegate {
   UserWallpaperDelegate() {
   }
 
-  virtual ~UserWallpaperDelegate() {
-  }
+  ~UserWallpaperDelegate() override {}
 
-  virtual int GetAnimationType() OVERRIDE {
+  int GetAnimationType() override {
     return ShouldShowInitialAnimation() ?
         ash::WINDOW_VISIBILITY_ANIMATION_TYPE_BRIGHTNESS_GRAYSCALE :
         static_cast<int>(wm::WINDOW_VISIBILITY_ANIMATION_TYPE_FADE);
   }
 
-  virtual bool ShouldShowInitialAnimation() OVERRIDE {
-    return true;
-  }
+  bool ShouldShowInitialAnimation() override { return true; }
 
-  virtual int GetAnimationDurationOverride() OVERRIDE {
+  int GetAnimationDurationOverride() override {
     // Return 0 to select the default.
     return 0;
   }
 
-  virtual void SetAnimationDurationOverride(
-      int animation_duration_in_ms) OVERRIDE {
+  void SetAnimationDurationOverride(int animation_duration_in_ms) override {
     NOTIMPLEMENTED();
   }
 
-  virtual void UpdateWallpaper(bool clear_cache) OVERRIDE {
+  void UpdateWallpaper(bool clear_cache) override {
     SkBitmap bitmap;
     bitmap.allocN32Pixels(16, 16);
     bitmap.eraseARGB(255, kBackgroundRed, kBackgroundGreen, kBackgroundBlue);
@@ -63,22 +59,15 @@ class UserWallpaperDelegate : public ash::UserWallpaperDelegate {
         ->SetWallpaperImage(wallpaper, ash::WALLPAPER_LAYOUT_TILE);
   }
 
-  virtual void InitializeWallpaper() OVERRIDE {
-    UpdateWallpaper(false);
-  }
+  void InitializeWallpaper() override { UpdateWallpaper(false); }
 
-  virtual void OpenSetWallpaperPage() OVERRIDE {
-  }
+  void OpenSetWallpaperPage() override {}
 
-  virtual bool CanOpenSetWallpaperPage() OVERRIDE {
-    return false;
-  }
+  bool CanOpenSetWallpaperPage() override { return false; }
 
-  virtual void OnWallpaperAnimationFinished() OVERRIDE {
-  }
+  void OnWallpaperAnimationFinished() override {}
 
-  virtual void OnWallpaperBootAnimationFinished() OVERRIDE {
-  }
+  void OnWallpaperBootAnimationFinished() override {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(UserWallpaperDelegate);

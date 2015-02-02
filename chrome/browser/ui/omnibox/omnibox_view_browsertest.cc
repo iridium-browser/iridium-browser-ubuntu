@@ -139,7 +139,7 @@ const int kCtrlOrCmdMask = ui::EF_CONTROL_DOWN;
 class OmniboxViewTest : public InProcessBrowserTest,
                         public content::NotificationObserver {
  protected:
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
     ASSERT_NO_FATAL_FAILURE(SetupComponents());
     chrome::FocusLocationBar(browser());
@@ -291,7 +291,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
     BookmarkModel* bookmark_model =
         BookmarkModelFactory::GetForProfile(profile);
     ASSERT_TRUE(bookmark_model);
-    test::WaitForBookmarkModelToLoad(bookmark_model);
+    bookmarks::test::WaitForBookmarkModelToLoad(bookmark_model);
 
     GURL url(entry.url);
     // Add everything in order of time. We don't want to have a time that
@@ -339,9 +339,9 @@ class OmniboxViewTest : public InProcessBrowserTest,
     ASSERT_NO_FATAL_FAILURE(SetupHistory());
   }
 
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE {
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override {
     switch (type) {
       case content::NOTIFICATION_WEB_CONTENTS_DESTROYED:
       case chrome::NOTIFICATION_TAB_PARENTED:
@@ -539,7 +539,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, MAYBE_BackspaceInKeywordMode) {
 }
 
 // http://crbug.com/158913
-#if defined(OS_CHROMEOS) || defined(OS_WIN)
+#if defined(USE_AURA)
 #define MAYBE_Escape DISABLED_Escape
 #else
 #define MAYBE_Escape Escape

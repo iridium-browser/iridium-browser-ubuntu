@@ -31,7 +31,7 @@ class FakePacketSender : public PacketSender {
   FakePacketSender()
       : paused_(false), packets_sent_(0), bytes_sent_(0) {}
 
-  virtual bool SendPacket(PacketRef packet, const base::Closure& cb) OVERRIDE {
+  bool SendPacket(PacketRef packet, const base::Closure& cb) override {
     if (paused_) {
       stored_packet_ = packet;
       callback_ = cb;
@@ -42,9 +42,7 @@ class FakePacketSender : public PacketSender {
     return true;
   }
 
-  virtual int64 GetBytesSent() OVERRIDE {
-    return bytes_sent_;
-  }
+  int64 GetBytesSent() override { return bytes_sent_; }
 
   void SetPaused(bool paused) {
     paused_ = paused;
@@ -75,7 +73,7 @@ class CastTransportSenderImplTest : public ::testing::Test {
     task_runner_ = new test::FakeSingleThreadTaskRunner(&testing_clock_);
   }
 
-  virtual ~CastTransportSenderImplTest() {}
+  ~CastTransportSenderImplTest() override {}
 
   void InitWithoutLogging() {
     transport_sender_.reset(

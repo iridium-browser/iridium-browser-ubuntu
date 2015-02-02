@@ -42,6 +42,13 @@ class ScreenlockBridge {
     USER_POD_CUSTOM_ICON_NONE,
     USER_POD_CUSTOM_ICON_HARDLOCKED,
     USER_POD_CUSTOM_ICON_LOCKED,
+    USER_POD_CUSTOM_ICON_LOCKED_TO_BE_ACTIVATED,
+    // TODO(isherman): The "locked with proximity hint" icon is currently the
+    // same as the "locked" icon. It's treated as a separate case to allow an
+    // easy asset swap without changing the code, in case we decide to use a
+    // different icon for this case. If we definitely decide against that, then
+    // this enum entry should be removed.
+    USER_POD_CUSTOM_ICON_LOCKED_WITH_PROXIMITY_HINT,
     USER_POD_CUSTOM_ICON_UNLOCKED,
     USER_POD_CUSTOM_ICON_SPINNER
   };
@@ -64,7 +71,7 @@ class ScreenlockBridge {
     // shown with the icon.
     void SetTooltip(const base::string16& tooltip, bool autoshow);
 
-    // Sets the accessiblity label of the icon. If this attribute is not
+    // Sets the accessibility label of the icon. If this attribute is not
     // provided, then the tooltip will be used.
     void SetAriaLabel(const base::string16& aria_label);
 

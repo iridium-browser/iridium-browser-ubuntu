@@ -5,7 +5,6 @@
 #include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_screensaver.h"
 
 #include "ash/screensaver/screensaver_view.h"
-#include "ash/shell.h"
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/lazy_instance.h"
@@ -14,6 +13,7 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_settings.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
+#include "chrome/browser/chromeos/login/signin_specifics.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host_impl.h"
 #include "chrome/browser/chromeos/policy/app_pack_updater.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
@@ -23,7 +23,10 @@
 #include "chrome/browser/extensions/sandboxed_unpacker.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
+#include "chromeos/login/auth/user_context.h"
 #include "chromeos/login/login_state.h"
+#include "chromeos/login/user_names.h"
+#include "components/user_manager/user_type.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "extensions/browser/extension_system.h"
@@ -70,8 +73,8 @@ class ScreensaverUnpackerClient
                                const base::FilePath& extension_root,
                                const base::DictionaryValue* original_manifest,
                                const Extension* extension,
-                               const SkBitmap& install_icon) OVERRIDE;
-  virtual void OnUnpackFailure(const base::string16& error) OVERRIDE;
+                               const SkBitmap& install_icon) override;
+  virtual void OnUnpackFailure(const base::string16& error) override;
 
  protected:
   virtual ~ScreensaverUnpackerClient() {}
@@ -199,10 +202,10 @@ KioskModeScreensaver::~KioskModeScreensaver() {
 
   // In case we're shutting down without ever triggering the active
   // notification and/or logging in.
-  if (ash::Shell::GetInstance() &&
-      ash::Shell::GetInstance()->user_activity_detector() &&
-      ash::Shell::GetInstance()->user_activity_detector()->HasObserver(this))
-    ash::Shell::GetInstance()->user_activity_detector()->RemoveObserver(this);
+  wm::UserActivityDetector* user_activity_detector =
+      wm::UserActivityDetector::Get();
+  if (user_activity_detector && user_activity_detector->HasObserver(this))
+    user_activity_detector->RemoveObserver(this);
 }
 
 void KioskModeScreensaver::GetScreensaverCrxPath() {
@@ -252,7 +255,7 @@ void KioskModeScreensaver::SetupScreensaver(
   if (chromeos::LoginState::Get()->IsUserLoggedIn())
     return;
 
-  ash::Shell::GetInstance()->user_activity_detector()->AddObserver(this);
+  wm::UserActivityDetector::Get()->AddObserver(this);
 
   ExtensionService* extension_service = GetDefaultExtensionService();
   // Add the extension to the extension service and display the screensaver.
@@ -269,7 +272,7 @@ void KioskModeScreensaver::SetupScreensaver(
 void KioskModeScreensaver::OnUserActivity(const ui::Event* event) {
   // We don't want to handle further user notifications; we'll either login
   // the user and close out or or at least close the screensaver.
-  ash::Shell::GetInstance()->user_activity_detector()->RemoveObserver(this);
+  wm::UserActivityDetector::Get()->RemoveObserver(this);
 
   // Find the retail mode login page.
   if (LoginDisplayHostImpl::default_host()) {
@@ -288,8 +291,11 @@ void KioskModeScreensaver::OnUserActivity(const ui::Event* event) {
     // Log us in.
     ExistingUserController* controller =
         ExistingUserController::current_controller();
-    if (controller && !chromeos::LoginState::Get()->IsUserLoggedIn())
-      controller->LoginAsRetailModeUser();
+    if (controller && !chromeos::LoginState::Get()->IsUserLoggedIn()) {
+      controller->Login(UserContext(user_manager::USER_TYPE_RETAIL_MODE,
+                                    chromeos::login::kRetailModeUserName),
+                        SigninSpecifics());
+    }
   } else {
     // No default host for the WebUiLoginDisplay means that we're already in the
     // process of logging in - shut down screensaver and do nothing else.

@@ -9,12 +9,10 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/extensions/api/management/management_api.h"
 #include "chrome/browser/extensions/api/webstore_private/webstore_private_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_function_test_utils.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
-#include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/webstore_installer.h"
 #include "chrome/browser/profiles/profile.h"
@@ -26,7 +24,9 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/test/browser_test_utils.h"
+#include "extensions/browser/api/management/management_api.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/install/extension_install_ui.h"
 #include "gpu/config/gpu_feature_type.h"
 #include "gpu/config/gpu_info.h"
 #include "net/dns/mock_host_resolver.h"
@@ -45,7 +45,7 @@ class WebstoreInstallListener : public WebstoreInstaller::Delegate {
   WebstoreInstallListener()
       : received_failure_(false), received_success_(false), waiting_(false) {}
 
-  virtual void OnExtensionInstallSuccess(const std::string& id) OVERRIDE {
+  void OnExtensionInstallSuccess(const std::string& id) override {
     received_success_ = true;
     id_ = id;
 
@@ -55,10 +55,10 @@ class WebstoreInstallListener : public WebstoreInstaller::Delegate {
     }
   }
 
-  virtual void OnExtensionInstallFailure(
+  void OnExtensionInstallFailure(
       const std::string& id,
       const std::string& error,
-      WebstoreInstaller::FailureReason reason) OVERRIDE {
+      WebstoreInstaller::FailureReason reason) override {
     received_failure_ = true;
     id_ = id;
     error_ = error;
@@ -93,26 +93,26 @@ class WebstoreInstallListener : public WebstoreInstaller::Delegate {
 class ExtensionWebstorePrivateApiTest : public ExtensionApiTest {
  public:
   ExtensionWebstorePrivateApiTest() {}
-  virtual ~ExtensionWebstorePrivateApiTest() {}
+  ~ExtensionWebstorePrivateApiTest() override {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     ExtensionApiTest::SetUpCommandLine(command_line);
     command_line->AppendSwitchASCII(
         switches::kAppsGalleryURL,
         "http://www.example.com/files/extensions/api_test");
   }
 
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
+  void SetUpInProcessBrowserTestFixture() override {
     ExtensionApiTest::SetUpInProcessBrowserTestFixture();
 
     // Start up the test server and get us ready for calling the install
     // API functions.
     host_resolver()->AddRule("www.example.com", "127.0.0.1");
     ASSERT_TRUE(StartSpawnedTestServer());
-    ExtensionInstallUI::set_disable_failure_ui_for_tests();
+    extensions::ExtensionInstallUI::set_disable_failure_ui_for_tests();
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     ExtensionApiTest::SetUpOnMainThread();
 
     ExtensionInstallPrompt::g_auto_confirm_for_tests =
@@ -398,7 +398,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionWebstoreGetWebGLStatusTest, Blocked) {
 class EphemeralAppWebstorePrivateApiTest
     : public ExtensionWebstorePrivateApiTest {
  public:
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE {
+  void SetUpInProcessBrowserTestFixture() override {
     ExtensionWebstorePrivateApiTest::SetUpInProcessBrowserTestFixture();
 
     net::HostPortPair host_port = test_server()->host_port_pair();
@@ -410,7 +410,7 @@ class EphemeralAppWebstorePrivateApiTest
         switches::kAppsGalleryURL, test_gallery_url);
   }
 
-  virtual GURL GetTestServerURL(const std::string& path) OVERRIDE {
+  GURL GetTestServerURL(const std::string& path) override {
     return DoGetTestServerURL(
         std::string("files/extensions/platform_apps/ephemeral_launcher/") +
         path);

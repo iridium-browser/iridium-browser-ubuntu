@@ -62,8 +62,8 @@ class VisibleSelection;
 ContainerNode* highestEditableRoot(const Position&, EditableType = ContentIsEditable);
 
 Node* highestEnclosingNodeOfType(const Position&, bool (*nodeIsOfType)(const Node*),
-    EditingBoundaryCrossingRule = CannotCrossEditingBoundary, Node* stayWithin = 0);
-Node* highestNodeToRemoveInPruning(Node*, Node* excludeNode = 0);
+    EditingBoundaryCrossingRule = CannotCrossEditingBoundary, Node* stayWithin = nullptr);
+Node* highestNodeToRemoveInPruning(Node*, Node* excludeNode = nullptr);
 Element* lowestEditableAncestor(Node*);
 
 Element* enclosingBlock(Node*, EditingBoundaryCrossingRule = CannotCrossEditingBoundary);
@@ -105,7 +105,6 @@ inline bool canHaveChildrenForEditing(const Node* node)
 bool isAtomicNode(const Node*);
 bool isBlock(const Node*);
 bool isInline(const Node*);
-bool isSpecialHTMLElement(const Node*);
 bool isTabHTMLSpanElement(const Node*);
 bool isTabHTMLSpanElementTextNode(const Node*);
 bool isMailHTMLBlockquoteElement(const Node*);
@@ -136,8 +135,8 @@ Position previousCandidate(const Position&);
 Position nextVisuallyDistinctCandidate(const Position&);
 Position previousVisuallyDistinctCandidate(const Position&);
 
-Position positionBeforeContainingSpecialElement(const Position&, HTMLElement** containingSpecialElement = 0);
-Position positionAfterContainingSpecialElement(const Position&, HTMLElement** containingSpecialElement = 0);
+Position positionBeforeContainingSpecialElement(const Position&, HTMLElement** containingSpecialElement = nullptr);
+Position positionAfterContainingSpecialElement(const Position&, HTMLElement** containingSpecialElement = nullptr);
 
 inline Position firstPositionInOrBeforeNode(Node* node)
 {
@@ -222,7 +221,7 @@ PassRefPtrWillBeRawPtr<HTMLElement> createHTMLElement(Document&, const Qualified
 PassRefPtrWillBeRawPtr<HTMLElement> createHTMLElement(Document&, const AtomicString&);
 
 HTMLElement* enclosingList(Node*);
-HTMLElement* outermostEnclosingList(Node*, HTMLElement* rootList = 0);
+HTMLElement* outermostEnclosingList(Node*, HTMLElement* rootList = nullptr);
 Node* enclosingListChild(Node*);
 
 // -------------------------------------------------------------------------

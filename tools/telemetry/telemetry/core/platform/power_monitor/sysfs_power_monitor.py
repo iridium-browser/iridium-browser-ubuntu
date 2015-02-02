@@ -89,10 +89,12 @@ class SysfsPowerMonitor(power_monitor.PowerMonitor):
     stats = {}
     for cpu in self._cpus:
       cpu_state_path = os.path.join(CPU_PATH, cpu, 'cpuidle/state*')
-      stats[cpu] = self._platform.RunCommand(
-          'cat %s %s %s; date +%%s' % (os.path.join(cpu_state_path, 'name'),
-          os.path.join(cpu_state_path, 'time'),
-          os.path.join(cpu_state_path, 'latency')))
+      output = self._platform.RunCommand(
+          'cat %s %s %s; date +%%s' % (
+              os.path.join(cpu_state_path, 'name'),
+              os.path.join(cpu_state_path, 'time'),
+              os.path.join(cpu_state_path, 'latency')))
+      stats[cpu] = re.sub('\n\n+', '\n', output)
     return stats
 
   def GetCpuFreq(self):
@@ -168,6 +170,11 @@ class SysfsPowerMonitor(power_monitor.PowerMonitor):
       for state in initial[cpu]:
         current_cpu[state] = final[cpu][state] - initial[cpu][state]
         total += current_cpu[state]
+      if total == 0:
+        # Somehow it's possible for initial and final to have the same sum,
+        # but a different distribution, making total == 0. crbug.com/426430
+        cpu_stats[cpu] = collections.defaultdict(int)
+        continue
       for state in current_cpu:
         current_cpu[state] /= (float(total) / 100.0)
         # Calculate the average c-state residency across all CPUs.

@@ -22,27 +22,26 @@ class DeviceInfoSyncService : public syncer::SyncableService,
  public:
   explicit DeviceInfoSyncService(
       LocalDeviceInfoProvider* local_device_info_provider);
-  virtual ~DeviceInfoSyncService();
+  ~DeviceInfoSyncService() override;
 
   // syncer::SyncableService implementation.
-  virtual syncer::SyncMergeResult MergeDataAndStartSyncing(
+  syncer::SyncMergeResult MergeDataAndStartSyncing(
       syncer::ModelType type,
       const syncer::SyncDataList& initial_sync_data,
       scoped_ptr<syncer::SyncChangeProcessor> sync_processor,
-      scoped_ptr<syncer::SyncErrorFactory> error_handler) OVERRIDE;
-  virtual void StopSyncing(syncer::ModelType type) OVERRIDE;
-  virtual syncer::SyncDataList GetAllSyncData(
-      syncer::ModelType type) const OVERRIDE;
-  virtual syncer::SyncError ProcessSyncChanges(
+      scoped_ptr<syncer::SyncErrorFactory> error_handler) override;
+  void StopSyncing(syncer::ModelType type) override;
+  syncer::SyncDataList GetAllSyncData(syncer::ModelType type) const override;
+  syncer::SyncError ProcessSyncChanges(
       const tracked_objects::Location& from_here,
-      const syncer::SyncChangeList& change_list) OVERRIDE;
+      const syncer::SyncChangeList& change_list) override;
 
   // DeviceInfoTracker implementation.
-  virtual scoped_ptr<DeviceInfo> GetDeviceInfo(
-      const std::string& client_id) const OVERRIDE;
-  virtual ScopedVector<DeviceInfo> GetAllDeviceInfo() const OVERRIDE;
-  virtual void AddObserver(Observer* observer) OVERRIDE;
-  virtual void RemoveObserver(Observer* observer) OVERRIDE;
+  scoped_ptr<DeviceInfo> GetDeviceInfo(
+      const std::string& client_id) const override;
+  ScopedVector<DeviceInfo> GetAllDeviceInfo() const override;
+  void AddObserver(Observer* observer) override;
+  void RemoveObserver(Observer* observer) override;
 
   // Called to update local device backup time.
   void UpdateLocalDeviceBackupTime(base::Time backup_time);

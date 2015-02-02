@@ -19,14 +19,14 @@ class SystemInfoAPI : public BrowserContextKeyedAPI,
   static BrowserContextKeyedAPIFactory<SystemInfoAPI>* GetFactoryInstance();
 
   explicit SystemInfoAPI(content::BrowserContext* context);
-  virtual ~SystemInfoAPI();
+  ~SystemInfoAPI() override;
 
   // KeyedService implementation.
-  virtual void Shutdown() OVERRIDE;
+  void Shutdown() override;
 
   // EventRouter::Observer implementation.
-  virtual void OnListenerAdded(const EventListenerInfo& details) OVERRIDE;
-  virtual void OnListenerRemoved(const EventListenerInfo& details) OVERRIDE;
+  void OnListenerAdded(const EventListenerInfo& details) override;
+  void OnListenerRemoved(const EventListenerInfo& details) override;
 
  private:
   friend class BrowserContextKeyedAPIFactory<SystemInfoAPI>;

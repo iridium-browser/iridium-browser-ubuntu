@@ -46,27 +46,26 @@ class MockQuotaManagerProxy : public storage::QuotaManagerProxy {
         usage_(0), quota_(0) {}
 
   // We don't mock them.
-  virtual void NotifyOriginInUse(const GURL& origin) OVERRIDE {}
-  virtual void NotifyOriginNoLongerInUse(const GURL& origin) OVERRIDE {}
-  virtual void SetUsageCacheEnabled(storage::QuotaClient::ID client_id,
-                                    const GURL& origin,
-                                    storage::StorageType type,
-                                    bool enabled) OVERRIDE {}
+  void NotifyOriginInUse(const GURL& origin) override {}
+  void NotifyOriginNoLongerInUse(const GURL& origin) override {}
+  void SetUsageCacheEnabled(storage::QuotaClient::ID client_id,
+                            const GURL& origin,
+                            storage::StorageType type,
+                            bool enabled) override {}
 
-  virtual void NotifyStorageModified(storage::QuotaClient::ID client_id,
-                                     const GURL& origin,
-                                     storage::StorageType type,
-                                     int64 delta) OVERRIDE {
+  void NotifyStorageModified(storage::QuotaClient::ID client_id,
+                             const GURL& origin,
+                             storage::StorageType type,
+                             int64 delta) override {
     ++storage_modified_count_;
     usage_ += delta;
     ASSERT_LE(usage_, quota_);
   }
 
-  virtual void GetUsageAndQuota(
-      base::SequencedTaskRunner* original_task_runner,
-      const GURL& origin,
-      storage::StorageType type,
-      const GetUsageAndQuotaCallback& callback) OVERRIDE {
+  void GetUsageAndQuota(base::SequencedTaskRunner* original_task_runner,
+                        const GURL& origin,
+                        storage::StorageType type,
+                        const GetUsageAndQuotaCallback& callback) override {
     callback.Run(storage::kQuotaStatusOk, usage_, quota_);
   }
 
@@ -76,7 +75,7 @@ class MockQuotaManagerProxy : public storage::QuotaManagerProxy {
   void set_quota(int64 quota) { quota_ = quota; }
 
  protected:
-  virtual ~MockQuotaManagerProxy() {}
+  ~MockQuotaManagerProxy() override {}
 
  private:
   int storage_modified_count_;
@@ -94,7 +93,7 @@ class QuotaBackendImplTest : public testing::Test {
       : file_system_usage_cache_(file_task_runner()),
         quota_manager_proxy_(new MockQuotaManagerProxy) {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ASSERT_TRUE(data_dir_.CreateUniqueTempDir());
     in_memory_env_.reset(leveldb::NewMemEnv(leveldb::Env::Default()));
     file_util_.reset(ObfuscatedFileUtil::CreateForTesting(
@@ -105,7 +104,7 @@ class QuotaBackendImplTest : public testing::Test {
                                         quota_manager_proxy_.get()));
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     backend_.reset();
     quota_manager_proxy_ = NULL;
     file_util_.reset();

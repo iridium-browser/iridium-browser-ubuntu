@@ -10,7 +10,6 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/platform_thread.h"
-#include "base/timer/timer.h"
 #include "net/base/completion_callback.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
@@ -2063,7 +2062,7 @@ class SparseTestCompletionCallback: public net::TestCompletionCallback {
   }
 
  private:
-  virtual void SetResult(int result) OVERRIDE {
+  void SetResult(int result) override {
     cache_.reset();
     TestCompletionCallback::SetResult(result);
   }
@@ -2330,11 +2329,6 @@ TEST_F(DiskCacheEntryTest, KeySanityCheck) {
   ASSERT_NE(net::OK, OpenEntry(key, &entry));
   DisableIntegrityCheck();
 }
-
-// The Simple Cache backend requires a few guarantees from the filesystem like
-// atomic renaming of recently open files. Those guarantees are not provided in
-// general on Windows.
-#if defined(OS_POSIX)
 
 TEST_F(DiskCacheEntryTest, SimpleCacheInternalAsyncIO) {
   SetSimpleCacheMode();
@@ -4063,5 +4057,3 @@ TEST_F(DiskCacheEntryTest, SimpleCacheTruncateLargeSparseFile) {
 
   entry->Close();
 }
-
-#endif  // defined(OS_POSIX)

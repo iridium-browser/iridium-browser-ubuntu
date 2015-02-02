@@ -10,16 +10,15 @@
 class TestingSearchTermsData : public SearchTermsData {
  public:
   explicit TestingSearchTermsData(const std::string& google_base_url);
-  virtual ~TestingSearchTermsData();
+  ~TestingSearchTermsData() override;
 
-  virtual std::string GoogleBaseURLValue() const OVERRIDE;
-  virtual base::string16 GetRlzParameterValue(
-      bool from_app_list) const OVERRIDE;
-  virtual std::string GetSearchClient() const OVERRIDE;
-  virtual std::string GoogleImageSearchSource() const OVERRIDE;
-  virtual bool EnableAnswersInSuggest() const OVERRIDE;
-  virtual bool IsShowingSearchTermsOnSearchResultsPages() const OVERRIDE;
-  virtual int OmniboxStartMargin() const OVERRIDE;
+  std::string GoogleBaseURLValue() const override;
+  base::string16 GetRlzParameterValue(bool from_app_list) const override;
+  std::string GetSearchClient() const override;
+  std::string GoogleImageSearchSource() const override;
+  bool EnableAnswersInSuggest() const override;
+  bool IsShowingSearchTermsOnSearchResultsPages() const override;
+  int OmniboxStartMargin() const override;
 
   void set_google_base_url(const std::string& google_base_url) {
     google_base_url_ = google_base_url;

@@ -7,7 +7,7 @@ var input_focused_event;
 
 if (!chrome.virtualKeyboardPrivate) {
   define('main', [
-      'mojo/public/js/bindings/connection',
+      'mojo/public/js/connection',
       'ui/keyboard/webui/keyboard.mojom',
       'content/public/renderer/service_provider',
   ], function(connector, keyboard, serviceProvider) {
@@ -18,7 +18,8 @@ if (!chrome.virtualKeyboardPrivate) {
       mojo_api = this;
     }
 
-    KeyboardImpl.prototype = Object.create(keyboard.KeyboardAPIStub.prototype);
+    KeyboardImpl.prototype = Object.create(
+        keyboard.KeyboardAPI.stubClass.prototype);
 
     KeyboardImpl.prototype.onTextInputTypeChanged = function(input_type) {
       console.log('Text input changed: ' + input_type);
@@ -30,9 +31,9 @@ if (!chrome.virtualKeyboardPrivate) {
     return function() {
       connection = new connector.Connection(
           serviceProvider.connectToService(
-              keyboard.KeyboardUIHandlerMojoProxy.NAME_),
+              keyboard.KeyboardUIHandlerMojo.name),
           KeyboardImpl,
-          keyboard.KeyboardUIHandlerMojoProxy);
+          keyboard.KeyboardUIHandlerMojo.proxyClass);
     };
   });
 

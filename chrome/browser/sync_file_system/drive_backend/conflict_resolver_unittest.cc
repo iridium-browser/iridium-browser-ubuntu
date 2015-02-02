@@ -52,9 +52,9 @@ class ConflictResolverTest : public testing::Test {
 
   ConflictResolverTest()
       : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP) {}
-  virtual ~ConflictResolverTest() {}
+  ~ConflictResolverTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ASSERT_TRUE(database_dir_.CreateUniqueTempDir());
     in_memory_env_.reset(leveldb::NewMemEnv(leveldb::Env::Default()));
 
@@ -68,12 +68,11 @@ class ConflictResolverTest : public testing::Test {
                                    kSyncRootFolderTitle));
     remote_change_processor_.reset(new FakeRemoteChangeProcessor);
 
-    context_.reset(new SyncEngineContext(
-        fake_drive_service.PassAs<drive::DriveServiceInterface>(),
-        drive_uploader.Pass(),
-        NULL,
-        base::ThreadTaskRunnerHandle::Get(),
-        base::ThreadTaskRunnerHandle::Get()));
+    context_.reset(new SyncEngineContext(fake_drive_service.Pass(),
+                                         drive_uploader.Pass(),
+                                         nullptr,
+                                         base::ThreadTaskRunnerHandle::Get(),
+                                         base::ThreadTaskRunnerHandle::Get()));
     context_->SetRemoteChangeProcessor(remote_change_processor_.get());
 
     RegisterSyncableFileSystem();
@@ -85,7 +84,7 @@ class ConflictResolverTest : public testing::Test {
     sync_task_manager_->Initialize(SYNC_STATUS_OK);
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     sync_task_manager_.reset();
     RevokeSyncableFileSystem();
     fake_drive_helper_.reset();

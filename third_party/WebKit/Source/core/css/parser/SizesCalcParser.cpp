@@ -6,19 +6,18 @@
 #include "core/css/parser/SizesCalcParser.h"
 
 #include "core/css/MediaValues.h"
-#include "core/css/parser/MediaQueryToken.h"
+#include "core/css/parser/CSSParserToken.h"
 
 namespace blink {
 
-SizesCalcParser::SizesCalcParser(MediaQueryTokenIterator start, MediaQueryTokenIterator end, PassRefPtr<MediaValues> mediaValues)
+SizesCalcParser::SizesCalcParser(CSSParserTokenIterator start, CSSParserTokenIterator end, PassRefPtr<MediaValues> mediaValues)
     : m_mediaValues(mediaValues)
-    , m_viewportDependant(false)
     , m_result(0)
 {
     m_isValid = calcToReversePolishNotation(start, end) && calculate();
 }
 
-unsigned SizesCalcParser::result() const
+float SizesCalcParser::result() const
 {
     ASSERT(m_isValid);
     return m_result;
@@ -35,7 +34,7 @@ static bool operatorPriority(UChar cc, bool& highPriority)
     return true;
 }
 
-bool SizesCalcParser::handleOperator(Vector<MediaQueryToken>& stack, const MediaQueryToken& token)
+bool SizesCalcParser::handleOperator(Vector<CSSParserToken>& stack, const CSSParserToken& token)
 {
     // If the token is an operator, o1, then:
     // while there is an operator token, o2, at the top of the stack, and
@@ -60,14 +59,14 @@ bool SizesCalcParser::handleOperator(Vector<MediaQueryToken>& stack, const Media
     return true;
 }
 
-void SizesCalcParser::appendNumber(const MediaQueryToken& token)
+void SizesCalcParser::appendNumber(const CSSParserToken& token)
 {
     SizesCalcValue value;
     value.value = token.numericValue();
     m_valueList.append(value);
 }
 
-bool SizesCalcParser::appendLength(const MediaQueryToken& token)
+bool SizesCalcParser::appendLength(const CSSParserToken& token)
 {
     SizesCalcValue value;
     double result = 0;
@@ -79,27 +78,26 @@ bool SizesCalcParser::appendLength(const MediaQueryToken& token)
     return true;
 }
 
-void SizesCalcParser::appendOperator(const MediaQueryToken& token)
+void SizesCalcParser::appendOperator(const CSSParserToken& token)
 {
     SizesCalcValue value;
     value.operation = token.delimiter();
     m_valueList.append(value);
 }
 
-bool SizesCalcParser::calcToReversePolishNotation(MediaQueryTokenIterator start, MediaQueryTokenIterator end)
+bool SizesCalcParser::calcToReversePolishNotation(CSSParserTokenIterator start, CSSParserTokenIterator end)
 {
     // This method implements the shunting yard algorithm, to turn the calc syntax into a reverse polish notation.
     // http://en.wikipedia.org/wiki/Shunting-yard_algorithm
 
-    Vector<MediaQueryToken> stack;
-    for (MediaQueryTokenIterator it = start; it != end; ++it) {
-        MediaQueryTokenType type = it->type();
+    Vector<CSSParserToken> stack;
+    for (CSSParserTokenIterator it = start; it != end; ++it) {
+        CSSParserTokenType type = it->type();
         switch (type) {
         case NumberToken:
             appendNumber(*it);
             break;
         case DimensionToken:
-            m_viewportDependant = m_viewportDependant || CSSPrimitiveValue::isViewportPercentageLength(it->unitType());
             if (!CSSPrimitiveValue::isLength(it->unitType()) || !appendLength(*it))
                 return false;
             break;
@@ -132,7 +130,11 @@ bool SizesCalcParser::calcToReversePolishNotation(MediaQueryTokenIterator start,
         case WhitespaceToken:
         case EOFToken:
             break;
+        case HashToken:
+        case UrlToken:
+        case BadUrlToken:
         case PercentageToken:
+        case UnicodeRangeToken:
         case IdentToken:
         case CommaToken:
         case ColonToken:
@@ -151,7 +153,7 @@ bool SizesCalcParser::calcToReversePolishNotation(MediaQueryTokenIterator start,
     // While there are still operator tokens in the stack:
     while (!stack.isEmpty()) {
         // If the operator token on the top of the stack is a parenthesis, then there are mismatched parentheses.
-        MediaQueryTokenType type = stack.last().type();
+        CSSParserTokenType type = stack.last().type();
         if (type == LeftParenthesisToken || type == FunctionToken)
             return false;
         // Pop the operator onto the output queue.
@@ -203,16 +205,16 @@ static bool operateOnStack(Vector<SizesCalcValue>& stack, UChar operation)
 bool SizesCalcParser::calculate()
 {
     Vector<SizesCalcValue> stack;
-    for (Vector<SizesCalcValue>::iterator it = m_valueList.begin(); it != m_valueList.end(); ++it) {
-        if (it->operation == 0) {
-            stack.append(*it);
+    for (const auto& value : m_valueList) {
+        if (value.operation == 0) {
+            stack.append(value);
         } else {
-            if (!operateOnStack(stack, it->operation))
+            if (!operateOnStack(stack, value.operation))
                 return false;
         }
     }
     if (stack.size() == 1 && stack.last().isLength) {
-        m_result = clampTo<unsigned>(stack.last().value);
+        m_result = std::max(clampTo<float>(stack.last().value), (float)0.0);
         return true;
     }
     return false;

@@ -108,6 +108,57 @@ extern const char kMimeTypePng[];
 // The extension id of the Web Store component application.
 extern const char kWebStoreAppId[];
 
+// Enumeration of possible app launch sources.
+// Note the enumeration is used in UMA histogram so entries
+// should not be re-ordered or removed.
+enum AppLaunchSource {
+  SOURCE_UNTRACKED = 0,
+  SOURCE_APP_LAUNCHER,
+  SOURCE_NEW_TAB_PAGE,
+  SOURCE_RELOAD,
+  SOURCE_RESTART,
+  SOURCE_LOAD_AND_LAUNCH,
+  SOURCE_COMMAND_LINE,
+  SOURCE_FILE_HANDLER,
+  SOURCE_URL_HANDLER,
+
+  SOURCE_SYSTEM_TRAY,
+  SOURCE_ABOUT_PAGE,
+  SOURCE_KEYBOARD,
+
+  NUM_APP_LAUNCH_SOURCES
+};
+
+// This enum is used for the launch type the user wants to use for an
+// application.
+// Do not remove items or re-order this enum as it is used in preferences
+// and histograms.
+enum LaunchType {
+  LAUNCH_TYPE_INVALID = -1,
+  LAUNCH_TYPE_FIRST = 0,
+  LAUNCH_TYPE_PINNED = LAUNCH_TYPE_FIRST,
+  LAUNCH_TYPE_REGULAR = 1,
+  LAUNCH_TYPE_FULLSCREEN = 2,
+  LAUNCH_TYPE_WINDOW = 3,
+  NUM_LAUNCH_TYPES,
+
+  // Launch an app in the in the way a click on the NTP would,
+  // if no user pref were set.  Update this constant to change
+  // the default for the NTP and chrome.management.launchApp().
+  LAUNCH_TYPE_DEFAULT = LAUNCH_TYPE_REGULAR
+};
+
+// Don't remove items or change the order of this enum.  It's used in
+// histograms and preferences.
+enum LaunchContainer {
+  LAUNCH_CONTAINER_WINDOW,
+  LAUNCH_CONTAINER_PANEL,
+  LAUNCH_CONTAINER_TAB,
+  // For platform apps, which don't actually have a container (they just get a
+  // "onLaunched" event).
+  LAUNCH_CONTAINER_NONE
+};
+
 }  // namespace extensions
 
 namespace extension_misc {

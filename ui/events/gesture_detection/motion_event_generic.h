@@ -7,6 +7,7 @@
 
 #include "base/basictypes.h"
 #include "base/containers/stack_container.h"
+#include "base/memory/scoped_vector.h"
 #include "ui/events/gesture_detection/gesture_detection_export.h"
 #include "ui/events/gesture_detection/motion_event.h"
 
@@ -14,7 +15,8 @@ namespace ui {
 
 struct GESTURE_DETECTION_EXPORT PointerProperties {
   PointerProperties();
-  PointerProperties(float x, float y);
+  PointerProperties(float x, float y, float touch_major);
+  PointerProperties(const MotionEvent& event, size_t pointer_index);
 
   int id;
   MotionEvent::ToolType tool_type;
@@ -36,30 +38,41 @@ class GESTURE_DETECTION_EXPORT MotionEventGeneric : public MotionEvent {
                      const PointerProperties& pointer);
   MotionEventGeneric(const MotionEventGeneric& other);
 
-  virtual ~MotionEventGeneric();
+  ~MotionEventGeneric() override;
 
   // MotionEvent implementation.
-  virtual int GetId() const OVERRIDE;
-  virtual Action GetAction() const OVERRIDE;
-  virtual int GetActionIndex() const OVERRIDE;
-  virtual size_t GetPointerCount() const OVERRIDE;
-  virtual int GetPointerId(size_t pointer_index) const OVERRIDE;
-  virtual float GetX(size_t pointer_index) const OVERRIDE;
-  virtual float GetY(size_t pointer_index) const OVERRIDE;
-  virtual float GetRawX(size_t pointer_index) const OVERRIDE;
-  virtual float GetRawY(size_t pointer_index) const OVERRIDE;
-  virtual float GetTouchMajor(size_t pointer_index) const OVERRIDE;
-  virtual float GetTouchMinor(size_t pointer_index) const OVERRIDE;
-  virtual float GetOrientation(size_t pointer_index) const OVERRIDE;
-  virtual float GetPressure(size_t pointer_index) const OVERRIDE;
-  virtual ToolType GetToolType(size_t pointer_index) const OVERRIDE;
-  virtual int GetButtonState() const OVERRIDE;
-  virtual int GetFlags() const OVERRIDE;
-  virtual base::TimeTicks GetEventTime() const OVERRIDE;
-  virtual scoped_ptr<MotionEvent> Clone() const OVERRIDE;
-  virtual scoped_ptr<MotionEvent> Cancel() const OVERRIDE;
+  int GetId() const override;
+  Action GetAction() const override;
+  int GetActionIndex() const override;
+  size_t GetPointerCount() const override;
+  int GetPointerId(size_t pointer_index) const override;
+  float GetX(size_t pointer_index) const override;
+  float GetY(size_t pointer_index) const override;
+  float GetRawX(size_t pointer_index) const override;
+  float GetRawY(size_t pointer_index) const override;
+  float GetTouchMajor(size_t pointer_index) const override;
+  float GetTouchMinor(size_t pointer_index) const override;
+  float GetOrientation(size_t pointer_index) const override;
+  float GetPressure(size_t pointer_index) const override;
+  ToolType GetToolType(size_t pointer_index) const override;
+  int GetButtonState() const override;
+  int GetFlags() const override;
+  base::TimeTicks GetEventTime() const override;
+  size_t GetHistorySize() const override;
+  base::TimeTicks GetHistoricalEventTime(
+      size_t historical_index) const override;
+  float GetHistoricalTouchMajor(size_t pointer_index,
+                                size_t historical_index) const override;
+  float GetHistoricalX(size_t pointer_index,
+                       size_t historical_index) const override;
+  float GetHistoricalY(size_t pointer_index,
+                       size_t historical_index) const override;
 
   void PushPointer(const PointerProperties& pointer);
+
+  // Add an event to the history. |this| and |event| must have the same pointer
+  // count and must both have an action of ACTION_MOVE.
+  void PushHistoricalEvent(scoped_ptr<MotionEvent> event);
 
   void set_action(Action action) { action_ = action; }
   void set_event_time(base::TimeTicks event_time) { event_time_ = event_time; }
@@ -68,8 +81,13 @@ class GESTURE_DETECTION_EXPORT MotionEventGeneric : public MotionEvent {
   void set_button_state(int button_state) { button_state_ = button_state; }
   void set_flags(int flags) { flags_ = flags; }
 
+  static scoped_ptr<MotionEventGeneric> CloneEvent(const MotionEvent& event);
+  static scoped_ptr<MotionEventGeneric> CancelEvent(const MotionEvent& event);
+
  protected:
   MotionEventGeneric();
+  MotionEventGeneric(const MotionEvent& event, bool with_history);
+  MotionEventGeneric& operator=(const MotionEventGeneric& other);
 
   void PopPointer();
 
@@ -88,6 +106,7 @@ class GESTURE_DETECTION_EXPORT MotionEventGeneric : public MotionEvent {
   int button_state_;
   int flags_;
   base::StackVector<PointerProperties, kTypicalMaxPointerCount> pointers_;
+  ScopedVector<MotionEvent> historical_events_;
 };
 
 }  // namespace ui

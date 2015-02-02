@@ -79,13 +79,13 @@ std::string BuildUpdateCheckRequest(const Configurator& config,
 class UpdateCheckerImpl : public UpdateChecker {
  public:
   explicit UpdateCheckerImpl(const Configurator& config);
-  virtual ~UpdateCheckerImpl();
+  ~UpdateCheckerImpl() override;
 
   // Overrides for UpdateChecker.
-  virtual bool CheckForUpdates(
+  bool CheckForUpdates(
       const std::vector<CrxUpdateItem*>& items_to_check,
       const std::string& additional_attributes,
-      const UpdateCheckCallback& update_check_callback) OVERRIDE;
+      const UpdateCheckCallback& update_check_callback) override;
 
  private:
   void OnRequestSenderComplete(const net::URLFetcher* source);

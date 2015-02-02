@@ -212,12 +212,12 @@ class BlobWriteCallbackImpl : public IndexedDBBackingStore::BlobWriteCallback {
   explicit BlobWriteCallbackImpl(
       scoped_refptr<IndexedDBTransaction> transaction)
       : transaction_(transaction) {}
-  virtual void Run(bool succeeded) OVERRIDE {
+  void Run(bool succeeded) override {
     transaction_->BlobWriteComplete(succeeded);
   }
 
  protected:
-  virtual ~BlobWriteCallbackImpl() {}
+  ~BlobWriteCallbackImpl() override {}
 
  private:
   scoped_refptr<IndexedDBTransaction> transaction_;
@@ -397,10 +397,8 @@ void IndexedDBTransaction::Timeout() {
 }
 
 void IndexedDBTransaction::CloseOpenCursors() {
-  for (std::set<IndexedDBCursor*>::iterator i = open_cursors_.begin();
-       i != open_cursors_.end();
-       ++i)
-    (*i)->Close();
+  for (auto* cursor : open_cursors_)
+    cursor->Close();
   open_cursors_.clear();
 }
 

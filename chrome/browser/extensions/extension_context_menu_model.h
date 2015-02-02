@@ -71,22 +71,21 @@ class ExtensionContextMenuModel
                             Browser* browser);
 
   // SimpleMenuModel::Delegate overrides.
-  virtual bool IsCommandIdChecked(int command_id) const OVERRIDE;
-  virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE;
-  virtual bool GetAcceleratorForCommandId(
-      int command_id,
-      ui::Accelerator* accelerator) OVERRIDE;
-  virtual void ExecuteCommand(int command_id, int event_flags) OVERRIDE;
+  bool IsCommandIdChecked(int command_id) const override;
+  bool IsCommandIdEnabled(int command_id) const override;
+  bool GetAcceleratorForCommandId(int command_id,
+                                  ui::Accelerator* accelerator) override;
+  void ExecuteCommand(int command_id, int event_flags) override;
 
   // ExtensionUninstallDialog::Delegate:
-  virtual void ExtensionUninstallAccepted() OVERRIDE;
-  virtual void ExtensionUninstallCanceled() OVERRIDE;
+  void ExtensionUninstallAccepted() override;
+  void ExtensionUninstallCanceled() override;
 
  private:
   friend class base::RefCounted<ExtensionContextMenuModel>;
   friend class extensions::ExtensionContextMenuModelTest;
 
-  virtual ~ExtensionContextMenuModel();
+  ~ExtensionContextMenuModel() override;
 
   void InitMenu(const extensions::Extension* extension);
 

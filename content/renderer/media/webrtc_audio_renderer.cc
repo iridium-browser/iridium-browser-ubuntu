@@ -58,13 +58,13 @@ class SharedAudioRenderer : public MediaStreamAudioRenderer {
   }
 
  protected:
-  virtual ~SharedAudioRenderer() {
+  ~SharedAudioRenderer() override {
     DCHECK(thread_checker_.CalledOnValidThread());
     DVLOG(1) << __FUNCTION__;
     Stop();
   }
 
-  virtual void Start() OVERRIDE {
+  void Start() override {
     DCHECK(thread_checker_.CalledOnValidThread());
     if (started_)
       return;
@@ -72,7 +72,7 @@ class SharedAudioRenderer : public MediaStreamAudioRenderer {
     delegate_->Start();
   }
 
-  virtual void Play() OVERRIDE {
+  void Play() override {
     DCHECK(thread_checker_.CalledOnValidThread());
     DCHECK(started_);
     if (playing_state_.playing())
@@ -81,7 +81,7 @@ class SharedAudioRenderer : public MediaStreamAudioRenderer {
     on_play_state_changed_.Run(media_stream_, &playing_state_);
   }
 
-  virtual void Pause() OVERRIDE {
+  void Pause() override {
     DCHECK(thread_checker_.CalledOnValidThread());
     DCHECK(started_);
     if (!playing_state_.playing())
@@ -90,7 +90,7 @@ class SharedAudioRenderer : public MediaStreamAudioRenderer {
     on_play_state_changed_.Run(media_stream_, &playing_state_);
   }
 
-  virtual void Stop() OVERRIDE {
+  void Stop() override {
     DCHECK(thread_checker_.CalledOnValidThread());
     if (!started_)
       return;
@@ -99,19 +99,19 @@ class SharedAudioRenderer : public MediaStreamAudioRenderer {
     delegate_->Stop();
   }
 
-  virtual void SetVolume(float volume) OVERRIDE {
+  void SetVolume(float volume) override {
     DCHECK(thread_checker_.CalledOnValidThread());
     DCHECK(volume >= 0.0f && volume <= 1.0f);
     playing_state_.set_volume(volume);
     on_play_state_changed_.Run(media_stream_, &playing_state_);
   }
 
-  virtual base::TimeDelta GetCurrentRenderTime() const OVERRIDE {
+  base::TimeDelta GetCurrentRenderTime() const override {
     DCHECK(thread_checker_.CalledOnValidThread());
     return delegate_->GetCurrentRenderTime();
   }
 
-  virtual bool IsLocalRenderer() const OVERRIDE {
+  bool IsLocalRenderer() const override {
     DCHECK(thread_checker_.CalledOnValidThread());
     return delegate_->IsLocalRenderer();
   }
@@ -140,8 +140,10 @@ int GetCurrentDuckingFlag(int render_frame_id) {
   return media::AudioParameters::NO_EFFECTS;
 }
 
-// Helper method to get platform specific optimal buffer size.
-int GetOptimalBufferSize(int sample_rate, int hardware_buffer_size) {
+}  // namespace
+
+int WebRtcAudioRenderer::GetOptimalBufferSize(int sample_rate,
+                                              int hardware_buffer_size) {
   // Use native hardware buffer size as default. On Windows, we strive to open
   // up using this native hardware buffer size to achieve best
   // possible performance and to ensure that no FIFO is needed on the browser
@@ -173,9 +175,8 @@ int GetOptimalBufferSize(int sample_rate, int hardware_buffer_size) {
   return frames_per_buffer;
 }
 
-}  // namespace
-
 WebRtcAudioRenderer::WebRtcAudioRenderer(
+    const scoped_refptr<base::SingleThreadTaskRunner>& signaling_thread,
     const scoped_refptr<webrtc::MediaStreamInterface>& media_stream,
     int source_render_view_id,
     int source_render_frame_id,
@@ -186,6 +187,7 @@ WebRtcAudioRenderer::WebRtcAudioRenderer(
       source_render_view_id_(source_render_view_id),
       source_render_frame_id_(source_render_frame_id),
       session_id_(session_id),
+      signaling_thread_(signaling_thread),
       media_stream_(media_stream),
       source_(NULL),
       play_ref_count_(0),
@@ -499,7 +501,15 @@ void WebRtcAudioRenderer::UpdateSourceVolume(
     volume = 10.0f;
 
   DVLOG(1) << "Setting remote source volume: " << volume;
-  source->SetVolume(volume);
+  if (!signaling_thread_->BelongsToCurrentThread()) {
+    // Libjingle hands out proxy objects in most cases, but the audio source
+    // object is an exception (bug?).  So, to work around that, we need to make
+    // sure we call SetVolume on the signaling thread.
+    signaling_thread_->PostTask(FROM_HERE,
+        base::Bind(&webrtc::AudioSourceInterface::SetVolume, source, volume));
+  } else {
+    source->SetVolume(volume);
+  }
 }
 
 bool WebRtcAudioRenderer::AddPlayingState(

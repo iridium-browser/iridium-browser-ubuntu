@@ -4,8 +4,11 @@
 
 #include "athena/input/public/accelerator_manager.h"
 
+#include "athena/activity/public/activity.h"
+#include "athena/activity/public/activity_factory.h"
 #include "athena/input/public/input_manager.h"
-#include "athena/test/athena_test_base.h"
+#include "athena/test/base/athena_test_base.h"
+#include "athena/wm/public/window_manager.h"
 #include "ui/events/test/event_generator.h"
 
 namespace athena {
@@ -16,7 +19,7 @@ const int kInvalidCommandId = -1;
 class TestHandler : public AcceleratorHandler {
  public:
   TestHandler() : fired_command_id_(kInvalidCommandId), enabled_(true) {}
-  virtual ~TestHandler() {}
+  ~TestHandler() override {}
 
   void set_enabled(bool enabled) { enabled_ = enabled; }
 
@@ -28,11 +31,11 @@ class TestHandler : public AcceleratorHandler {
 
  private:
   // AcceleratorHandler:
-  virtual bool IsCommandEnabled(int command_id) const OVERRIDE {
+  virtual bool IsCommandEnabled(int command_id) const override {
     return enabled_;
   }
   virtual bool OnAcceleratorFired(int command_id,
-                                  const ui::Accelerator& accelerator) OVERRIDE {
+                                  const ui::Accelerator& accelerator) override {
     fired_command_id_ = command_id;
     return true;
   }
@@ -43,7 +46,7 @@ class TestHandler : public AcceleratorHandler {
   DISALLOW_COPY_AND_ASSIGN(TestHandler);
 };
 
-}  // namespace athena
+}  // namespace
 
 typedef test::AthenaTestBase InputManagerTest;
 
@@ -114,6 +117,27 @@ TEST_F(InputManagerTest, Basic) {
   // an app.
   generator.PressKey(ui::VKEY_E, ui::EF_SHIFT_DOWN);
   EXPECT_EQ(COMMAND_E, test_handler.GetFiredCommandIdAndReset());
+}
+
+TEST_F(InputManagerTest, CloseActivity) {
+  ActivityFactory* factory = ActivityFactory::Get();
+  Activity* activity1 =
+      factory->CreateWebActivity(NULL, base::string16(), GURL());
+  Activity::Show(activity1);
+  Activity::Delete(activity1);
+
+  Activity* activity2 =
+      factory->CreateWebActivity(NULL, base::string16(), GURL());
+  Activity::Show(activity2);
+
+  // TODO(oshima): This shouldn't be necessary. Remove this once
+  // crbug.com/427113 is fixed.
+  RunAllPendingInMessageLoop();
+
+  ui::test::EventGenerator generator(root_window());
+  generator.PressKey(ui::VKEY_F6, ui::EF_NONE);
+  EXPECT_TRUE(WindowManager::Get()->IsOverviewModeActive());
+  Activity::Delete(activity2);
 }
 
 }  // namespace athena

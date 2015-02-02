@@ -60,10 +60,17 @@ TestCase viewportTestCases[] = {
     {"(width: 501px)", 0},
     {"(min-height: 500px)", 1},
     {"(min-height: 501px)", 0},
+    {"(min-height: 500.001px)", 0},
     {"(max-height: 500px)", 1},
+    {"(max-height: 499.999px)", 0},
     {"(max-height: 499px)", 0},
     {"(height: 500px)", 1},
+    {"(height: 500.001px)", 0},
+    {"(height: 499.999px)", 0},
     {"(height: 501px)", 0},
+    {"(height)", 1},
+    {"(width)", 1},
+    {"(width: whatisthis)", 0},
     {"screen and (min-width: 400px) and (max-width: 700px)", 1},
     {0, 0} // Do not remove the terminator line.
 };
@@ -77,8 +84,9 @@ TestCase printTestCases[] = {
 
 void testMQEvaluator(TestCase* testCases, const MediaQueryEvaluator& mediaQueryEvaluator)
 {
+    RefPtrWillBePersistent<MediaQuerySet> querySet = nullptr;
     for (unsigned i = 0; testCases[i].input; ++i) {
-        RefPtrWillBeRawPtr<MediaQuerySet> querySet = MediaQuerySet::create(testCases[i].input);
+        querySet = MediaQuerySet::create(testCases[i].input);
         ASSERT_EQ(testCases[i].output, mediaQueryEvaluator.eval(querySet.get()));
     }
 }
@@ -125,10 +133,10 @@ TEST(MediaQueryEvaluatorTest, Dynamic)
 TEST(MediaQueryEvaluatorTest, DynamicNoView)
 {
     OwnPtr<DummyPageHolder> pageHolder = DummyPageHolder::create(IntSize(500, 500));
-    RefPtr<FrameView> view = pageHolder->frame().view();
+    RefPtrWillBePersistent<FrameView> view = pageHolder->frame().view();
     pageHolder->frame().setView(nullptr);
     MediaQueryEvaluator mediaQueryEvaluator(&pageHolder->frame());
-    RefPtrWillBeRawPtr<MediaQuerySet> querySet = MediaQuerySet::create("foobar");
+    RefPtrWillBePersistent<MediaQuerySet> querySet = MediaQuerySet::create("foobar");
     bool output = false;
     ASSERT_EQ(output, mediaQueryEvaluator.eval(querySet.get()));
     pageHolder->frame().setView(view);

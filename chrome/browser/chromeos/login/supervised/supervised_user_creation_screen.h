@@ -10,7 +10,7 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "chrome/browser/chromeos/camera_presence_notifier.h"
-#include "chrome/browser/chromeos/login/screens/wizard_screen.h"
+#include "chrome/browser/chromeos/login/screens/base_screen.h"
 #include "chrome/browser/chromeos/login/supervised/supervised_user_creation_controller.h"
 #include "chrome/browser/image_decoder.h"
 #include "chrome/browser/supervised_user/supervised_user_sync_service.h"
@@ -22,12 +22,13 @@ class Profile;
 
 namespace chromeos {
 
+class ErrorScreensHistogramHelper;
 class NetworkState;
 class ScreenManager;
 
 // Class that controls screen showing ui for supervised user creation.
 class SupervisedUserCreationScreen
-    : public WizardScreen,
+    : public BaseScreen,
       public SupervisedUserCreationScreenHandler::Delegate,
       public SupervisedUserCreationController::StatusConsumer,
       public SupervisedUserSyncServiceObserver,
@@ -35,9 +36,8 @@ class SupervisedUserCreationScreen
       public NetworkPortalDetector::Observer,
       public CameraPresenceNotifier::Observer {
  public:
-  SupervisedUserCreationScreen(
-      ScreenObserver* observer,
-      SupervisedUserCreationScreenHandler* actor);
+  SupervisedUserCreationScreen(BaseScreenDelegate* base_screen_delegate,
+                               SupervisedUserCreationScreenHandler* actor);
   virtual ~SupervisedUserCreationScreen();
 
   static SupervisedUserCreationScreen* Get(ScreenManager* manager);
@@ -66,63 +66,63 @@ class SupervisedUserCreationScreen
   void ShowInitialScreen();
 
   // CameraPresenceNotifier::Observer implementation:
-  virtual void OnCameraPresenceCheckDone(bool is_camera_present) OVERRIDE;
+  virtual void OnCameraPresenceCheckDone(bool is_camera_present) override;
 
   // SupervisedUserSyncServiceObserver implementation
   virtual void OnSupervisedUserAcknowledged(
-      const std::string& supervised_user_id) OVERRIDE {}
-  virtual void OnSupervisedUsersSyncingStopped() OVERRIDE {}
-  virtual void OnSupervisedUsersChanged() OVERRIDE;
+      const std::string& supervised_user_id) override {}
+  virtual void OnSupervisedUsersSyncingStopped() override {}
+  virtual void OnSupervisedUsersChanged() override;
 
-  // WizardScreen implementation:
-  virtual void PrepareToShow() OVERRIDE;
-  virtual void Show() OVERRIDE;
-  virtual void Hide() OVERRIDE;
-  virtual std::string GetName() const OVERRIDE;
+  // BaseScreen implementation:
+  virtual void PrepareToShow() override;
+  virtual void Show() override;
+  virtual void Hide() override;
+  virtual std::string GetName() const override;
 
   // SupervisedUserCreationScreenHandler::Delegate implementation:
   virtual void OnActorDestroyed(SupervisedUserCreationScreenHandler* actor)
-      OVERRIDE;
+      override;
   virtual void CreateSupervisedUser(
       const base::string16& display_name,
-      const std::string& supervised_user_password) OVERRIDE;
-  virtual void ImportSupervisedUser(const std::string& user_id) OVERRIDE;
+      const std::string& supervised_user_password) override;
+  virtual void ImportSupervisedUser(const std::string& user_id) override;
   virtual void ImportSupervisedUserWithPassword(
       const std::string& user_id,
-      const std::string& password) OVERRIDE;
+      const std::string& password) override;
   virtual void AuthenticateManager(
       const std::string& manager_id,
-      const std::string& manager_password) OVERRIDE;
-  virtual void AbortFlow() OVERRIDE;
-  virtual void FinishFlow() OVERRIDE;
+      const std::string& manager_password) override;
+  virtual void AbortFlow() override;
+  virtual void FinishFlow() override;
   virtual bool FindUserByDisplayName(const base::string16& display_name,
-                                     std::string *out_id) const OVERRIDE;
-  virtual void OnPageSelected(const std::string& page) OVERRIDE;
+                                     std::string *out_id) const override;
+  virtual void OnPageSelected(const std::string& page) override;
 
   // SupervisedUserController::StatusConsumer overrides.
   virtual void OnCreationError(SupervisedUserCreationController::ErrorCode code)
-      OVERRIDE;
-  virtual void OnCreationTimeout() OVERRIDE;
-  virtual void OnCreationSuccess() OVERRIDE;
-  virtual void OnLongCreationWarning() OVERRIDE;
+      override;
+  virtual void OnCreationTimeout() override;
+  virtual void OnCreationSuccess() override;
+  virtual void OnLongCreationWarning() override;
 
   // NetworkPortalDetector::Observer implementation:
   virtual void OnPortalDetectionCompleted(
           const NetworkState* network,
-          const NetworkPortalDetector::CaptivePortalState& state) OVERRIDE;
+          const NetworkPortalDetector::CaptivePortalState& state) override;
 
   // TODO(antrim) : this is an explicit code duplications with UserImageScreen.
   // It should be removed by issue 251179.
 
   // SupervisedUserCreationScreenHandler::Delegate (image) implementation:
-  virtual void OnPhotoTaken(const std::string& raw_data) OVERRIDE;
+  virtual void OnPhotoTaken(const std::string& raw_data) override;
   virtual void OnImageSelected(const std::string& image_url,
-                               const std::string& image_type) OVERRIDE;
-  virtual void OnImageAccepted() OVERRIDE;
+                               const std::string& image_type) override;
+  virtual void OnImageAccepted() override;
   // ImageDecoder::Delegate overrides:
   virtual void OnImageDecoded(const ImageDecoder* decoder,
-                              const SkBitmap& decoded_image) OVERRIDE;
-  virtual void OnDecodeImageFailed(const ImageDecoder* decoder) OVERRIDE;
+                              const SkBitmap& decoded_image) override;
+  virtual void OnDecodeImageFailed(const ImageDecoder* decoder) override;
 
  private:
   void ApplyPicture();
@@ -143,6 +143,8 @@ class SupervisedUserCreationScreen
   scoped_refptr<ImageDecoder> image_decoder_;
   bool apply_photo_after_decoding_;
   int selected_image_;
+
+  scoped_ptr<ErrorScreensHistogramHelper> histogram_helper_;
 
   base::WeakPtrFactory<SupervisedUserCreationScreen> weak_factory_;
 

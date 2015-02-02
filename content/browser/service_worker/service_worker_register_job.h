@@ -38,8 +38,7 @@ class ServiceWorkerRegisterJob : public ServiceWorkerRegisterJobBase,
                                  public ServiceWorkerRegistration::Listener {
  public:
   typedef base::Callback<void(ServiceWorkerStatusCode status,
-                              ServiceWorkerRegistration* registration,
-                              ServiceWorkerVersion* version)>
+                              ServiceWorkerRegistration* registration)>
       RegistrationCallback;
 
   // For registration jobs.
@@ -52,7 +51,7 @@ class ServiceWorkerRegisterJob : public ServiceWorkerRegisterJobBase,
   CONTENT_EXPORT ServiceWorkerRegisterJob(
       base::WeakPtr<ServiceWorkerContextCore> context,
       ServiceWorkerRegistration* registration);
-  virtual ~ServiceWorkerRegisterJob();
+  ~ServiceWorkerRegisterJob() override;
 
   // Registers a callback to be called when the promise would resolve (whether
   // successfully or not). Multiple callbacks may be registered.
@@ -62,10 +61,10 @@ class ServiceWorkerRegisterJob : public ServiceWorkerRegisterJobBase,
                    ServiceWorkerProviderHost* provider_host);
 
   // ServiceWorkerRegisterJobBase implementation:
-  virtual void Start() OVERRIDE;
-  virtual void Abort() OVERRIDE;
-  virtual bool Equals(ServiceWorkerRegisterJobBase* job) OVERRIDE;
-  virtual RegistrationJobType GetType() OVERRIDE;
+  void Start() override;
+  void Abort() override;
+  bool Equals(ServiceWorkerRegisterJobBase* job) override;
+  RegistrationJobType GetType() override;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ServiceWorkerProviderHostWaitingVersionTest,
@@ -132,19 +131,17 @@ class ServiceWorkerRegisterJob : public ServiceWorkerRegisterJobBase,
   void Complete(ServiceWorkerStatusCode status);
   void CompleteInternal(ServiceWorkerStatusCode status);
   void ResolvePromise(ServiceWorkerStatusCode status,
-                      ServiceWorkerRegistration* registration,
-                      ServiceWorkerVersion* version);
+                      ServiceWorkerRegistration* registration);
 
   // EmbeddedWorkerInstance::Listener override of OnPausedAfterDownload.
-  virtual void OnPausedAfterDownload() OVERRIDE;
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  void OnPausedAfterDownload() override;
+  bool OnMessageReceived(const IPC::Message& message) override;
 
   // ServiceWorkerRegistration::Listener overrides
-  virtual void OnRegistrationFinishedUninstalling(
-      ServiceWorkerRegistration* registration) OVERRIDE;
+  void OnRegistrationFinishedUninstalling(
+      ServiceWorkerRegistration* registration) override;
 
   void OnCompareScriptResourcesComplete(
-      ServiceWorkerVersion* most_recent_version,
       ServiceWorkerStatusCode status,
       bool are_equal);
 
@@ -163,7 +160,6 @@ class ServiceWorkerRegisterJob : public ServiceWorkerRegisterJobBase,
   bool is_promise_resolved_;
   ServiceWorkerStatusCode promise_resolved_status_;
   scoped_refptr<ServiceWorkerRegistration> promise_resolved_registration_;
-  scoped_refptr<ServiceWorkerVersion> promise_resolved_version_;
   base::WeakPtrFactory<ServiceWorkerRegisterJob> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ServiceWorkerRegisterJob);

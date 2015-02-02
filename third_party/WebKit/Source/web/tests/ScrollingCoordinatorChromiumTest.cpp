@@ -27,8 +27,8 @@
 #include "core/page/scrolling/ScrollingCoordinator.h"
 
 #include "core/page/Page.h"
+#include "core/rendering/RenderPart.h"
 #include "core/rendering/RenderView.h"
-#include "core/rendering/RenderWidget.h"
 #include "core/rendering/compositing/CompositedLayerMapping.h"
 #include "core/rendering/compositing/RenderLayerCompositor.h"
 #include "core/testing/URLTestHelpers.h"
@@ -104,6 +104,11 @@ private:
     }
 
     FrameTestHelpers::WebViewHelper m_helper;
+};
+
+class GraphicsLayerForScrollTesting : public GraphicsLayer {
+public:
+    virtual WebLayer* contentsLayer() const { return GraphicsLayer::contentsLayer(); }
 };
 
 TEST_F(ScrollingCoordinatorChromiumTest, fastScrollingByDefault)
@@ -396,14 +401,14 @@ TEST_F(ScrollingCoordinatorChromiumTest, iframeScrolling)
 
     RenderObject* renderer = scrollableFrame->renderer();
     ASSERT_TRUE(renderer);
-    ASSERT_TRUE(renderer->isWidget());
+    ASSERT_TRUE(renderer->isRenderPart());
 
-    RenderWidget* renderWidget = toRenderWidget(renderer);
-    ASSERT_TRUE(renderWidget);
-    ASSERT_TRUE(renderWidget->widget());
-    ASSERT_TRUE(renderWidget->widget()->isFrameView());
+    RenderPart* renderPart = toRenderPart(renderer);
+    ASSERT_TRUE(renderPart);
+    ASSERT_TRUE(renderPart->widget());
+    ASSERT_TRUE(renderPart->widget()->isFrameView());
 
-    FrameView* innerFrameView = toFrameView(renderWidget->widget());
+    FrameView* innerFrameView = toFrameView(renderPart->widget());
     RenderView* innerRenderView = innerFrameView->renderView();
     ASSERT_TRUE(innerRenderView);
 
@@ -440,14 +445,14 @@ TEST_F(ScrollingCoordinatorChromiumTest, rtlIframe)
 
     RenderObject* renderer = scrollableFrame->renderer();
     ASSERT_TRUE(renderer);
-    ASSERT_TRUE(renderer->isWidget());
+    ASSERT_TRUE(renderer->isRenderPart());
 
-    RenderWidget* renderWidget = toRenderWidget(renderer);
-    ASSERT_TRUE(renderWidget);
-    ASSERT_TRUE(renderWidget->widget());
-    ASSERT_TRUE(renderWidget->widget()->isFrameView());
+    RenderPart* renderPart = toRenderPart(renderer);
+    ASSERT_TRUE(renderPart);
+    ASSERT_TRUE(renderPart->widget());
+    ASSERT_TRUE(renderPart->widget()->isFrameView());
 
-    FrameView* innerFrameView = toFrameView(renderWidget->widget());
+    FrameView* innerFrameView = toFrameView(renderPart->widget());
     RenderView* innerRenderView = innerFrameView->renderView();
     ASSERT_TRUE(innerRenderView);
 
@@ -462,7 +467,7 @@ TEST_F(ScrollingCoordinatorChromiumTest, rtlIframe)
     ASSERT_TRUE(webScrollLayer->scrollable());
 
     int expectedScrollPosition = 958 + (innerFrameView->verticalScrollbar()->isOverlayScrollbar() ? 0 : 15);
-    ASSERT_EQ(expectedScrollPosition, webScrollLayer->scrollPosition().x);
+    ASSERT_EQ(expectedScrollPosition, webScrollLayer->scrollPositionDouble().x);
 }
 
 TEST_F(ScrollingCoordinatorChromiumTest, setupScrollbarLayerShouldNotCrash)
@@ -472,6 +477,34 @@ TEST_F(ScrollingCoordinatorChromiumTest, setupScrollbarLayerShouldNotCrash)
     forceFullCompositingUpdate();
     // This test document setup an iframe with scrollbars, then switch to
     // an empty document by javascript.
+}
+
+#if OS(MACOSX)
+TEST_F(ScrollingCoordinatorChromiumTest, DISABLED_setupScrollbarLayerShouldSetScrollLayerOpaque)
+#else
+TEST_F(ScrollingCoordinatorChromiumTest, setupScrollbarLayerShouldSetScrollLayerOpaque)
+#endif
+{
+    registerMockedHttpURLLoad("wide_document.html");
+    navigateTo(m_baseURL + "wide_document.html");
+    forceFullCompositingUpdate();
+
+    FrameView* frameView = frame()->view();
+    ASSERT_TRUE(frameView);
+
+    GraphicsLayerForScrollTesting* scrollbarGraphicsLayer = static_cast<GraphicsLayerForScrollTesting*>(frameView->layerForHorizontalScrollbar());
+    ASSERT_TRUE(scrollbarGraphicsLayer);
+
+    WebLayer* platformLayer = scrollbarGraphicsLayer->platformLayer();
+    ASSERT_TRUE(platformLayer);
+
+    WebLayer* contentsLayer = scrollbarGraphicsLayer->contentsLayer();
+    ASSERT_TRUE(contentsLayer);
+
+    // After scrollableAreaScrollbarLayerDidChange,
+    // if the main frame's scrollbarLayer is opaque,
+    // contentsLayer should be opaque too.
+    ASSERT_EQ(platformLayer->opaque(), contentsLayer->opaque());
 }
 
 } // namespace

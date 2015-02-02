@@ -9,6 +9,8 @@ import android.app.Activity;
 import android.test.suitebuilder.annotation.LargeTest;
 import android.util.Log;
 
+import org.chromium.base.ActivityState;
+import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.browser.identity.UniqueIdentificationGenerator;
@@ -103,12 +105,28 @@ public class SyncTest extends ChromeShellTestBase {
 
     @LargeTest
     @Feature({"Sync"})
+    public void testFlushDirectoryDoesntBreakSync() throws Throwable {
+        setupTestAccountAndSignInToSync(FOREIGN_SESSION_TEST_MACHINE_ID);
+        final Activity activity = getActivity();
+
+        runTestOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                ApplicationStatus.onStateChangeForTesting(activity, ActivityState.PAUSED);
+            }
+        });
+
+        // TODO(pvalenzuela): When available, check that sync is still functional.
+    }
+
+    @LargeTest
+    @Feature({"Sync"})
     public void testAboutSyncPageDisplaysCurrentSyncStatus() throws InterruptedException {
         setupTestAccountAndSignInToSync(FOREIGN_SESSION_TEST_MACHINE_ID);
 
         loadUrlWithSanitization("chrome://sync");
         SyncTestUtil.AboutSyncInfoGetter aboutInfoGetter =
-               new SyncTestUtil.AboutSyncInfoGetter(getActivity());
+                new SyncTestUtil.AboutSyncInfoGetter(getActivity());
         try {
             runTestOnUiThread(aboutInfoGetter);
         } catch (Throwable t) {
@@ -130,7 +148,7 @@ public class SyncTest extends ChromeShellTestBase {
                 String innerHtml = "";
                 try {
                     innerHtml = JavaScriptUtils.executeJavaScriptAndWaitForResult(
-                            contentViewCore, "document.documentElement.innerHTML");
+                            contentViewCore.getWebContents(), "document.documentElement.innerHTML");
                 } catch (InterruptedException e) {
                     Log.w(TAG, "Interrupted while polling about:sync page for sync status.", e);
                 } catch (TimeoutException e) {

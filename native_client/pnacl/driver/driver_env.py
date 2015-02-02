@@ -38,12 +38,12 @@ INITIAL_ENV = {
   'BASE_SDK'        : '${BASE}/sdk',
   'BASE_LIB'        : '${BASE}/lib/clang/${CLANG_VER}/lib/le32-nacl',
   'BASE_USR_ARCH'   : '${BASE_USR_%BCLIB_ARCH%}',
-  'BASE_USR_X8632'  : '${BASE}/x86-32_bc-nacl',
-  'BASE_USR_X8664'  : '${BASE}/x86-64_bc-nacl',
+  'BASE_USR_X8632'  : '${BASE}/i686_bc-nacl',
+  'BASE_USR_X8664'  : '${BASE}/x86_64_bc-nacl',
   'BASE_USR_ARM'    : '${BASE}/arm_bc-nacl',
   'BASE_LIB_ARCH'   : '${BASE_LIB_%BCLIB_ARCH%}',
-  'BASE_LIB_X8632'  : '${BASE}/lib/clang/${CLANG_VER}/lib/x86-32_bc-nacl',
-  'BASE_LIB_X8664'  : '${BASE}/lib/clang/${CLANG_VER}/lib/x86-64_bc-nacl',
+  'BASE_LIB_X8632'  : '${BASE}/lib/clang/${CLANG_VER}/lib/i686_bc-nacl',
+  'BASE_LIB_X8664'  : '${BASE}/lib/clang/${CLANG_VER}/lib/x86_64_bc-nacl',
   'BASE_LIB_ARM'    : '${BASE}/lib/clang/${CLANG_VER}/lib/arm_bc-nacl',
 
   'LIBS_NATIVE_ARCH' : '${LIBS_NATIVE_%ARCH%}',
@@ -135,6 +135,13 @@ INITIAL_ENV = {
   'SEL_UNIVERSAL_FLAGS' : '--abort_on_error ' +
                           '--uses_reverse_service ' +
                           '${USE_EMULATOR ? -Q -c -c --command_prefix ${EMULATOR}}',
+
+  'IRT_STAGING'         : '${IRT_STAGING_%ARCH%}',
+  'IRT_STAGING_X8632'   : '${SCONS_OUT}/nacl_irt-x86-32/staging',
+  'IRT_STAGING_X8664'   : '${SCONS_OUT}/nacl_irt-x86-64/staging',
+  'IRT_STAGING_ARM'     : '${SCONS_OUT}/nacl_irt-arm/staging',
+  'IRT_STAGING_MIPS32'  : '${SCONS_OUT}/nacl_irt-mips32/staging',
+  'IRT_BLOB'            : '${IRT_STAGING}/irt_core.nexe',
 
   'EMULATOR'            : '${EMULATOR_%ARCH%}',
   'EMULATOR_X8632'      : '',

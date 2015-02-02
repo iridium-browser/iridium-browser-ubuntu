@@ -43,12 +43,7 @@
 
 namespace blink {
 
-class CustomElementConstructorBuilder;
-class Document;
-class Element;
-class ExceptionState;
-
-class CustomElementRegistrationContext FINAL : public RefCountedWillBeGarbageCollectedFinalized<CustomElementRegistrationContext> {
+class CustomElementRegistrationContext final : public RefCountedWillBeGarbageCollectedFinalized<CustomElementRegistrationContext> {
 public:
     static PassRefPtrWillBeRawPtr<CustomElementRegistrationContext> create()
     {
@@ -83,7 +78,7 @@ private:
     OwnPtrWillBeMember<CustomElementUpgradeCandidateMap> m_candidates;
 };
 
-}
+} // namespace blink
 
 #endif // CustomElementRegistrationContext_h
 

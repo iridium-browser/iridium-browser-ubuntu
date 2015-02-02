@@ -22,7 +22,7 @@
 
 namespace blink {
 
-const WrapperTypeInfo V8SVGTestInterface::wrapperTypeInfo = { gin::kEmbedderBlink, V8SVGTestInterface::domTemplate, V8SVGTestInterface::refObject, V8SVGTestInterface::derefObject, V8SVGTestInterface::createPersistentHandle, 0, 0, 0, V8SVGTestInterface::installConditionallyEnabledMethods, V8SVGTestInterface::installConditionallyEnabledProperties, 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::Dependent, WrapperTypeInfo::RefCountedObject };
+const WrapperTypeInfo V8SVGTestInterface::wrapperTypeInfo = { gin::kEmbedderBlink, V8SVGTestInterface::domTemplate, V8SVGTestInterface::refObject, V8SVGTestInterface::derefObject, V8SVGTestInterface::trace, 0, 0, 0, V8SVGTestInterface::installConditionallyEnabledMethods, V8SVGTestInterface::installConditionallyEnabledProperties, 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::Dependent, WrapperTypeInfo::RefCountedObject };
 
 // This static member must be declared by DEFINE_WRAPPERTYPEINFO in SVGTestInterface.h.
 // For details, see the comment of DEFINE_WRAPPERTYPEINFO in
@@ -30,8 +30,6 @@ const WrapperTypeInfo V8SVGTestInterface::wrapperTypeInfo = { gin::kEmbedderBlin
 const WrapperTypeInfo& SVGTestInterface::s_wrapperTypeInfo = V8SVGTestInterface::wrapperTypeInfo;
 
 namespace SVGTestInterfaceV8Internal {
-
-template <typename T> void V8_USE(T) { }
 
 static void typeAttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
@@ -80,8 +78,10 @@ static void installV8SVGTestInterfaceTemplate(v8::Handle<v8::FunctionTemplate> f
         0, 0,
         0, 0,
         isolate);
-    v8::Local<v8::ObjectTemplate> instanceTemplate ALLOW_UNUSED = functionTemplate->InstanceTemplate();
-    v8::Local<v8::ObjectTemplate> prototypeTemplate ALLOW_UNUSED = functionTemplate->PrototypeTemplate();
+    v8::Local<v8::ObjectTemplate> instanceTemplate = functionTemplate->InstanceTemplate();
+    ALLOW_UNUSED_LOCAL(instanceTemplate);
+    v8::Local<v8::ObjectTemplate> prototypeTemplate = functionTemplate->PrototypeTemplate();
+    ALLOW_UNUSED_LOCAL(prototypeTemplate);
 
     // Custom toString template
     functionTemplate->Set(v8AtomicString(isolate, "toString"), V8PerIsolateData::from(isolate)->toStringTemplate());
@@ -107,21 +107,14 @@ SVGTestInterface* V8SVGTestInterface::toImplWithTypeCheck(v8::Isolate* isolate, 
     return hasInstance(value, isolate) ? blink::toScriptWrappableBase(v8::Handle<v8::Object>::Cast(value))->toImpl<SVGTestInterface>() : 0;
 }
 
-
-void V8SVGTestInterface::refObject(ScriptWrappableBase* internalPointer)
+void V8SVGTestInterface::refObject(ScriptWrappableBase* scriptWrappableBase)
 {
-    internalPointer->toImpl<SVGTestInterface>()->ref();
+    scriptWrappableBase->toImpl<SVGTestInterface>()->ref();
 }
 
-void V8SVGTestInterface::derefObject(ScriptWrappableBase* internalPointer)
+void V8SVGTestInterface::derefObject(ScriptWrappableBase* scriptWrappableBase)
 {
-    internalPointer->toImpl<SVGTestInterface>()->deref();
-}
-
-WrapperPersistentNode* V8SVGTestInterface::createPersistentHandle(ScriptWrappableBase* internalPointer)
-{
-    ASSERT_NOT_REACHED();
-    return 0;
+    scriptWrappableBase->toImpl<SVGTestInterface>()->deref();
 }
 
 template<>

@@ -32,13 +32,13 @@ class StubAttachmentService : public AttachmentService,
     DetachFromThread();
   }
 
-  virtual ~StubAttachmentService() {}
+  ~StubAttachmentService() override {}
 
-  virtual AttachmentStore* GetStore() OVERRIDE { return NULL; }
+  AttachmentStore* GetStore() override { return NULL; }
 
-  virtual void GetOrDownloadAttachments(const AttachmentIdList& attachment_ids,
-                                        const GetOrDownloadCallback& callback)
-      OVERRIDE {
+  void GetOrDownloadAttachments(
+      const AttachmentIdList& attachment_ids,
+      const GetOrDownloadCallback& callback) override {
     CalledOnValidThread();
     Increment();
     scoped_ptr<AttachmentMap> attachments(new AttachmentMap());
@@ -49,16 +49,15 @@ class StubAttachmentService : public AttachmentService,
                    base::Passed(&attachments)));
   }
 
-  virtual void DropAttachments(const AttachmentIdList& attachment_ids,
-                               const DropCallback& callback) OVERRIDE {
+  void DropAttachments(const AttachmentIdList& attachment_ids,
+                       const DropCallback& callback) override {
     CalledOnValidThread();
     Increment();
     base::MessageLoop::current()->PostTask(
         FROM_HERE, base::Bind(callback, AttachmentService::DROP_SUCCESS));
   }
 
-  virtual void UploadAttachments(
-      const AttachmentIdSet& attachments_ids) OVERRIDE {
+  void UploadAttachments(const AttachmentIdSet& attachments_ids) override {
     CalledOnValidThread();
     Increment();
   }
@@ -110,7 +109,7 @@ class AttachmentServiceProxyTest : public testing::Test,
   }
 
   virtual void TearDown()
-      OVERRIDE {
+      override {
     // We must take care to call the stub's destructor on the stub_thread
     // because that's the thread to which its WeakPtrs are bound.
     if (stub) {

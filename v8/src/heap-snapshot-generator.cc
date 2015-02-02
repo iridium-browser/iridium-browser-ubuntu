@@ -1698,7 +1698,7 @@ void V8HeapExplorer::ExtractPropertyReferences(JSObject* js_obj, int entry) {
           continue;
         }
         if (ExtractAccessorPairProperty(js_obj, entry, k, value)) continue;
-        SetPropertyReference(js_obj, entry, String::cast(k), value);
+        SetPropertyReference(js_obj, entry, Name::cast(k), value);
       }
     }
   }
@@ -1711,11 +1711,11 @@ bool V8HeapExplorer::ExtractAccessorPairProperty(
   AccessorPair* accessors = AccessorPair::cast(callback_obj);
   Object* getter = accessors->getter();
   if (!getter->IsOddball()) {
-    SetPropertyReference(js_obj, entry, String::cast(key), getter, "get %s");
+    SetPropertyReference(js_obj, entry, Name::cast(key), getter, "get %s");
   }
   Object* setter = accessors->setter();
   if (!setter->IsOddball()) {
-    SetPropertyReference(js_obj, entry, String::cast(key), setter, "set %s");
+    SetPropertyReference(js_obj, entry, Name::cast(key), setter, "set %s");
   }
   return true;
 }
@@ -2164,6 +2164,9 @@ const char* V8HeapExplorer::GetStrongGcSubrootName(Object* object) {
 #define STRING_NAME(name, str) NAME_ENTRY(name)
     INTERNALIZED_STRING_LIST(STRING_NAME)
 #undef STRING_NAME
+#define SYMBOL_NAME(name) NAME_ENTRY(name)
+    PRIVATE_SYMBOL_LIST(SYMBOL_NAME)
+#undef SYMBOL_NAME
 #undef NAME_ENTRY
     CHECK(!strong_gc_subroot_names_.is_empty());
   }
@@ -2297,7 +2300,6 @@ NativeObjectsExplorer::NativeObjectsExplorer(
     : isolate_(snapshot->profiler()->heap_object_map()->heap()->isolate()),
       snapshot_(snapshot),
       names_(snapshot_->profiler()->names()),
-      progress_(progress),
       embedder_queried_(false),
       objects_by_info_(RetainedInfosMatch),
       native_groups_(StringsMatch),

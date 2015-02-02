@@ -8,8 +8,8 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "ui/app_list/app_list_model.h"
-#include "ui/app_list/search_result.h"
 #include "ui/app_list/test/app_list_test_view_delegate.h"
+#include "ui/app_list/test/test_search_result.h"
 #include "ui/app_list/views/progress_bar_view.h"
 #include "ui/app_list/views/search_result_list_view_delegate.h"
 #include "ui/app_list/views/search_result_view.h"
@@ -26,10 +26,10 @@ class SearchResultListViewTest : public views::ViewsTestBase,
                                  public SearchResultListViewDelegate {
  public:
   SearchResultListViewTest() {}
-  virtual ~SearchResultListViewTest() {}
+  ~SearchResultListViewTest() override {}
 
   // Overridden from testing::Test:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     views::ViewsTestBase::SetUp();
     view_.reset(new SearchResultListView(this, &view_delegate_));
     view_->SetResults(view_delegate_.GetModel()->results());
@@ -55,7 +55,7 @@ class SearchResultListViewTest : public views::ViewsTestBase,
   void SetUpSearchResults() {
     AppListModel::SearchResults* results = GetResults();
     for (int i = 0; i < kDefaultSearchItems; ++i)
-      results->Add(new SearchResult());
+      results->Add(new TestSearchResult());
 
     // Adding results will schedule Update().
     RunPendingMessages();
@@ -78,7 +78,7 @@ class SearchResultListViewTest : public views::ViewsTestBase,
   }
 
   void AddTestResultAtIndex(int index) {
-    GetResults()->Add(new SearchResult());
+    GetResults()->Add(new TestSearchResult());
   }
 
   void DeleteResultAt(int index) { GetResults()->DeleteAt(index); }
@@ -111,8 +111,8 @@ class SearchResultListViewTest : public views::ViewsTestBase,
   }
 
  private:
-  virtual void OnResultInstalled(SearchResult* result) OVERRIDE {}
-  virtual void OnResultUninstalled(SearchResult* result) OVERRIDE {}
+  void OnResultInstalled(SearchResult* result) override {}
+  void OnResultUninstalled(SearchResult* result) override {}
 
   AppListTestViewDelegate view_delegate_;
   scoped_ptr<SearchResultListView> view_;

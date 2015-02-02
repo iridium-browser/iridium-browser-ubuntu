@@ -2,6 +2,39 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+/**
+ * @typedef {{accessibility: Function,
+ *            documentLoadComplete: Function,
+ *            getHeight: Function,
+ *            getHorizontalScrollbarThickness: Function,
+ *            getPageLocationNormalized: Function,
+ *            getVerticalScrollbarThickness: Function,
+ *            getWidth: Function,
+ *            getZoomLevel: Function,
+ *            goToPage: Function,
+ *            grayscale: Function,
+ *            loadPreviewPage: Function,
+ *            onload: Function,
+ *            onPluginSizeChanged: Function,
+ *            onScroll: Function,
+ *            pageXOffset: Function,
+ *            pageYOffset: Function,
+ *            printPreviewPageCount: Function,
+ *            reload: Function,
+ *            removePrintButton: Function,
+ *            resetPrintPreviewUrl: Function,
+ *            sendKeyEvent: Function,
+ *            setPageNumbers: Function,
+ *            setPageXOffset: Function,
+ *            setPageYOffset: Function,
+ *            setZoomLevel: Function,
+ *            fitToHeight: Function,
+ *            fitToWidth: Function,
+ *            zoomIn: Function,
+ *            zoomOut: Function}}
+ */
+print_preview.PDFPlugin;
+
 cr.define('print_preview', function() {
   'use strict';
 
@@ -61,7 +94,7 @@ cr.define('print_preview', function() {
 
     /**
      * The embedded pdf plugin object. It's value is null if not yet loaded.
-     * @type {HTMLEmbedElement}
+     * @type {HTMLEmbedElement|print_preview.PDFPlugin}
      * @private
      */
     this.plugin_ = null;
@@ -166,7 +199,10 @@ cr.define('print_preview', function() {
     OPEN_SYSTEM_DIALOG_BUTTON: 'preview-area-open-system-dialog-button',
     OPEN_SYSTEM_DIALOG_BUTTON_THROBBER:
         'preview-area-open-system-dialog-button-throbber',
-    OVERLAY: 'preview-area-overlay-layer'
+    OVERLAY: 'preview-area-overlay-layer',
+    OVERLAYED: 'preview-area-overlayed',
+    MARGIN_CONTROL: 'margin-control',
+    PREVIEW_AREA: 'preview-area-plugin-wrapper'
   };
 
   /**
@@ -195,7 +231,7 @@ cr.define('print_preview', function() {
 
   /**
    * Maps message IDs to the CSS class that contains them.
-   * @type {object.<PreviewArea.MessageId_, string>}
+   * @type {Object.<print_preview.PreviewArea.MessageId_, string>}
    * @private
    */
   PreviewArea.MessageIdClassMap_ = {};
@@ -230,7 +266,7 @@ cr.define('print_preview', function() {
     /**
      * Processes a keyboard event that could possibly be used to change state of
      * the preview plugin.
-     * @param {MouseEvent} e Mouse event to process.
+     * @param {KeyboardEvent} e Keyboard event to process.
      */
     handleDirectionalKeyEvent: function(e) {
       // Make sure the PDF plugin is there.
@@ -280,7 +316,7 @@ cr.define('print_preview', function() {
     enterDocument: function() {
       print_preview.Component.prototype.enterDocument.call(this);
       this.tracker.add(
-          this.openSystemDialogButton_,
+          assert(this.openSystemDialogButton_),
           'click',
           this.onOpenSystemDialogButtonClick_.bind(this));
 
@@ -399,6 +435,7 @@ cr.define('print_preview', function() {
       // TODO(raymes): Remove the in-process check after we remove the
       // in-process plugin. Change this function back to
       // checkPluginCompatibility_().
+      /** @type {print_preview.PDFPlugin} */
       var compatObj = this.getElement().getElementsByClassName(
           PreviewArea.Classes_.COMPATIBILITY_OBJECT)[0];
       var isCompatible =
@@ -470,20 +507,40 @@ cr.define('print_preview', function() {
             PreviewArea.MessageIdClassMap_[messageId])[0];
       setIsVisible(messageEl, true);
 
-      // Show overlay.
-      this.overlayEl_.classList.remove(PreviewArea.Classes_.INVISIBLE);
+      this.setOverlayVisible_(true);
     },
 
     /**
-     * Hides the message overlay.
+     * Set the visibility of the message overlay.
+     * @param {boolean} visible Whether to make the overlay visible or not
      * @private
      */
-    hideOverlay_: function() {
-      this.overlayEl_.classList.add(PreviewArea.Classes_.INVISIBLE);
-      // Disable jumping animation to conserve cycles.
-      var jumpingDotsEl = this.getElement().querySelector(
-          '.preview-area-loading-message-jumping-dots');
-      jumpingDotsEl.classList.remove('jumping-dots');
+    setOverlayVisible_: function(visible) {
+      this.overlayEl_.classList.toggle(
+          PreviewArea.Classes_.INVISIBLE,
+          !visible);
+      this.overlayEl_.setAttribute('aria-hidden', !visible);
+
+      // Hide/show all controls that will overlap when the overlay is visible.
+      var marginControls = this.getElement().getElementsByClassName(
+          PreviewArea.Classes_.MARGIN_CONTROL);
+      for (var i = 0; i < marginControls.length; ++i) {
+        marginControls[i].classList.toggle(PreviewArea.Classes_.OVERLAYED,
+                                           visible);
+      }
+      var previewAreaControls = this.getElement().getElementsByClassName(
+          PreviewArea.Classes_.PREVIEW_AREA);
+      for (var i = 0; i < previewAreaControls.length; ++i) {
+        previewAreaControls[i].classList.toggle(PreviewArea.Classes_.OVERLAYED,
+                                                visible);
+      }
+
+      if (!visible) {
+        // Disable jumping animation to conserve cycles.
+        var jumpingDotsEl = this.getElement().querySelector(
+            '.preview-area-loading-message-jumping-dots');
+        jumpingDotsEl.classList.remove('jumping-dots');
+      }
     },
 
     /**
@@ -498,12 +555,14 @@ cr.define('print_preview', function() {
       }
 
       if (this.pluginType_ == PreviewArea.PluginType_.IN_PROCESS) {
-        this.plugin_ = document.createElement('embed');
+        this.plugin_ = assertInstanceof(document.createElement('embed'),
+                                        HTMLEmbedElement);
         this.plugin_.setAttribute(
             'type', 'application/x-google-chrome-print-preview-pdf');
         this.plugin_.setAttribute('src', srcUrl);
       } else {
-        this.plugin_ = PDFCreateOutOfProcessPlugin(srcUrl);
+        this.plugin_ = /** @type {print_preview.PDFPlugin} */(
+            PDFCreateOutOfProcessPlugin(srcUrl));
       }
 
       this.plugin_.setAttribute('class', 'preview-area-plugin');
@@ -514,7 +573,7 @@ cr.define('print_preview', function() {
       // it.
       this.plugin_.setAttribute('id', 'pdf-viewer');
       this.getChildElement('.preview-area-plugin-wrapper').
-          appendChild(this.plugin_);
+          appendChild(/** @type {Node} */(this.plugin_));
 
 
       if (this.pluginType_ == PreviewArea.PluginType_.OUT_OF_PROCESS) {
@@ -528,7 +587,8 @@ cr.define('print_preview', function() {
                                            this.documentInfo_.isModifiable);
       } else {
         global['onPreviewPluginLoad'] = this.onPluginLoad_.bind(this);
-        this.plugin_.onload('onPreviewPluginLoad()');
+        (/** @type {print_preview.PDFPlugin} */(this.plugin_)).
+            onload('onPreviewPluginLoad()');
 
         global['onPreviewPluginVisualStateChange'] =
             this.onPreviewVisualStateChange_.bind(this);
@@ -677,7 +737,7 @@ cr.define('print_preview', function() {
           this.plugin_.fitToHeight();
         }
       }
-      this.hideOverlay_();
+      this.setOverlayVisible_(false);
       this.isPluginReloaded_ = true;
       this.dispatchPreviewGenerationDoneIfReady_();
     },

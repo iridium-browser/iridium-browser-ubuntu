@@ -1,4 +1,6 @@
-<?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="de">
+<?xml version="1.0" ?>
+<!DOCTYPE translationbundle>
+<translationbundle lang="de">
 <translation id="777702478322588152">Präfektur</translation>
 <translation id="3713769522066937702">Dieses Postleitzahlformat wurde nicht erkannt. Beispiel für eine gültige Postleitzahl: <ph name="EXAMPLE"/>. Sie kennen Ihre Postleitzahl nicht? <ph name="BEGIN_LINK"/>Schlagen Sie sie hier nach<ph name="END_LINK"/>.</translation>
 <translation id="7393381084163773901">Anschrift</translation>

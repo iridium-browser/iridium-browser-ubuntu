@@ -59,7 +59,7 @@ class StatusIconContainerView::PowerStatus
         ->RequestStatusUpdate();
   }
 
-  virtual ~PowerStatus() {
+  ~PowerStatus() override {
     chromeos::DBusThreadManager::Get()->GetPowerManagerClient()->RemoveObserver(
         this);
   }
@@ -101,7 +101,7 @@ class StatusIconContainerView::PowerStatus
 
   // chromeos::PowerManagerClient::Observer:
   virtual void PowerChanged(
-      const power_manager::PowerSupplyProperties& proto) OVERRIDE {
+      const power_manager::PowerSupplyProperties& proto) override {
     icon_->SetImage(GetPowerIcon(proto));
   }
 
@@ -120,7 +120,7 @@ class StatusIconContainerView::NetworkStatus
     handler->AddObserver(this, FROM_HERE);
   }
 
-  virtual ~NetworkStatus() {
+  ~NetworkStatus() override {
     chromeos::NetworkStateHandler* handler =
         chromeos::NetworkHandler::Get()->network_state_handler();
     handler->RemoveObserver(this, FROM_HERE);
@@ -145,17 +145,17 @@ class StatusIconContainerView::NetworkStatus
 
   // chromeos::NetworkStateHandlerObserver:
   virtual void DefaultNetworkChanged(
-      const chromeos::NetworkState* network) OVERRIDE {
+      const chromeos::NetworkState* network) override {
     Update();
   }
 
   virtual void NetworkConnectionStateChanged(
-      const chromeos::NetworkState* network) OVERRIDE {
+      const chromeos::NetworkState* network) override {
     Update();
   }
 
   virtual void NetworkPropertiesUpdated(
-      const chromeos::NetworkState* network) OVERRIDE {
+      const chromeos::NetworkState* network) override {
     Update();
   }
 
@@ -181,14 +181,14 @@ class StatusIconContainerView::UpdateStatus
         RequestUpdateCheck(base::Bind(StartUpdateCallback));
   }
 
-  virtual ~UpdateStatus() {
+  ~UpdateStatus() override {
     chromeos::DBusThreadManager::Get()->GetUpdateEngineClient()->RemoveObserver(
         this);
   }
 
   // chromeos::UpdateEngineClient::Observer:
   virtual void UpdateStatusChanged(
-      const chromeos::UpdateEngineClient::Status& status) OVERRIDE {
+      const chromeos::UpdateEngineClient::Status& status) override {
     if (status.status !=
         chromeos::UpdateEngineClient::UPDATE_STATUS_UPDATED_NEED_REBOOT) {
       return;
@@ -208,9 +208,7 @@ class StatusIconContainerView::UpdateStatus
 };
 
 StatusIconContainerView::StatusIconContainerView(
-    SystemUI::ColorScheme color_scheme,
-    aura::Window* system_modal_container)
-    : system_modal_container_(system_modal_container) {
+    SystemUI::ColorScheme color_scheme) {
   const int kHorizontalSpacing = 10;
   const int kVerticalSpacing = 3;
   const int kBetweenChildSpacing = 10;
@@ -226,7 +224,8 @@ StatusIconContainerView::StatusIconContainerView(
   AddChildView(CreateLabel(color_scheme, "Network:"));
   views::Label* network_label = CreateLabel(color_scheme, std::string());
   AddChildView(network_label);
-  network_status_.reset(new NetworkStatus(network_label));
+  if (chromeos::NetworkHandler::IsInitialized())
+    network_status_.reset(new NetworkStatus(network_label));
 
   views::ImageView* battery_view = new views::ImageView();
   AddChildView(battery_view);
@@ -241,13 +240,13 @@ StatusIconContainerView::~StatusIconContainerView() {
 }
 
 bool StatusIconContainerView::OnMousePressed(const ui::MouseEvent& event) {
-  CreateNetworkSelector(system_modal_container_);
+  CreateNetworkSelector();
   return true;
 }
 
 void StatusIconContainerView::OnGestureEvent(ui::GestureEvent* event) {
   if (event->type() == ui::ET_GESTURE_TAP) {
-    CreateNetworkSelector(system_modal_container_);
+    CreateNetworkSelector();
     event->SetHandled();
   }
 }

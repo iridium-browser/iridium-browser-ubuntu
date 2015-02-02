@@ -29,6 +29,7 @@
 #include "core/dom/Element.h"
 #include "core/dom/ScriptableDocumentParser.h"
 #include "core/dom/StyleEngine.h"
+#include "core/dom/shadow/ShadowRoot.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/html/HTMLStyleElement.h"
@@ -74,17 +75,29 @@ void StyleElement::processStyleSheet(Document& document, Element* element)
     process(element);
 }
 
-void StyleElement::removedFromDocument(Document& document, Element* element)
+void StyleElement::insertedInto(Element* element, ContainerNode* insertionPoint)
 {
-    removedFromDocument(document, element, 0, document);
+    if (!insertionPoint->inDocument() || !element->isInShadowTree())
+        return;
+    if (ShadowRoot* scope = element->containingShadowRoot())
+        scope->registerScopedHTMLStyleChild();
 }
 
-void StyleElement::removedFromDocument(Document& document, Element* element, ContainerNode* scopingNode, TreeScope& treeScope)
+void StyleElement::removedFrom(Element* element, ContainerNode* insertionPoint)
 {
-    ASSERT(element);
+    if (!insertionPoint->inDocument())
+        return;
 
+    ShadowRoot* shadowRoot = element->containingShadowRoot();
+    if (!shadowRoot)
+        shadowRoot = insertionPoint->containingShadowRoot();
+
+    if (shadowRoot)
+        shadowRoot->unregisterScopedHTMLStyleChild();
+
+    Document& document = element->document();
     if (m_registeredAsCandidate) {
-        document.styleEngine()->removeStyleSheetCandidateNode(element, scopingNode, treeScope);
+        document.styleEngine()->removeStyleSheetCandidateNode(element, shadowRoot ? *toTreeScope(shadowRoot) : toTreeScope(document));
         m_registeredAsCandidate = false;
     }
 
@@ -102,9 +115,9 @@ void StyleElement::clearDocumentData(Document& document, Element* element)
         m_sheet->clearOwnerNode();
 
     if (element->inDocument()) {
-        ContainerNode* scopingNode = isHTMLStyleElement(element) ? toHTMLStyleElement(element)->scopingNode() :  0;
-        TreeScope& treeScope = scopingNode ? scopingNode->treeScope() : element->treeScope();
-        document.styleEngine()->removeStyleSheetCandidateNode(element, scopingNode, treeScope);
+        // HTMLLinkElement in shadow tree is not supported.
+        TreeScope& treeScope = isHTMLStyleElement(element) || isSVGStyleElement(element) ? element->treeScope() : element->document();
+        document.styleEngine()->removeStyleSheetCandidateNode(element, treeScope);
     }
 }
 
@@ -141,6 +154,21 @@ void StyleElement::clearSheet(Element* ownerElement)
     m_sheet.release()->clearOwnerNode();
 }
 
+static bool shouldBypassMainWorldCSP(Element* element)
+{
+    // Main world CSP is bypassed within an isolated world.
+    LocalFrame* frame = element->document().frame();
+    if (frame && frame->script().shouldBypassMainWorldCSP())
+        return true;
+
+    // Main world CSP is bypassed for style elements in user agent shadow DOM.
+    ShadowRoot* root = element->containingShadowRoot();
+    if (root && root->type() == ShadowRoot::UserAgentShadowRoot)
+        return true;
+
+    return false;
+}
+
 void StyleElement::createSheet(Element* e, const String& text)
 {
     ASSERT(e);
@@ -149,13 +177,8 @@ void StyleElement::createSheet(Element* e, const String& text)
     if (m_sheet)
         clearSheet(e);
 
-    // Inline style added from an isolated world should bypass the main world's
-    // CSP just as an inline script would.
-    LocalFrame* frame = document.frame();
-    bool shouldBypassMainWorldCSP = frame && frame->script().shouldBypassMainWorldCSP();
-
     const ContentSecurityPolicy* csp = document.contentSecurityPolicy();
-    bool passesContentSecurityPolicyChecks = shouldBypassMainWorldCSP
+    bool passesContentSecurityPolicyChecks = shouldBypassMainWorldCSP(e)
         || csp->allowStyleWithHash(text)
         || csp->allowStyleWithNonce(e->fastGetAttribute(HTMLNames::nonceAttr))
         || csp->allowInlineStyle(e->document().url(), m_startPosition.m_line);

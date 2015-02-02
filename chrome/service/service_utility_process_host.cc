@@ -62,7 +62,7 @@ class ServiceSandboxedProcessLauncherDelegate
   ServiceSandboxedProcessLauncherDelegate() {}
 
   virtual void PreSpawnTarget(sandbox::TargetPolicy* policy,
-                              bool* success) OVERRIDE {
+                              bool* success) override {
     // Service process may run as windows service and it fails to create a
     // window station.
     policy->SetAlternateDesktop(false);
@@ -232,7 +232,6 @@ bool ServiceUtilityProcessHost::StartProcess(bool no_sandbox) {
 bool ServiceUtilityProcessHost::Launch(base::CommandLine* cmd_line,
                                        bool no_sandbox) {
   if (no_sandbox) {
-    base::ProcessHandle process = base::kNullProcessHandle;
     cmd_line->AppendSwitch(switches::kNoSandbox);
     base::LaunchProcess(*cmd_line, base::LaunchOptions(), &handle_);
   } else {
@@ -317,7 +316,7 @@ void ServiceUtilityProcessHost::OnRenderPDFPagesToMetafilesPageCount(
 
 void ServiceUtilityProcessHost::OnRenderPDFPagesToMetafilesPageDone(
     bool success,
-    double scale_factor) {
+    float scale_factor) {
   DCHECK(waiting_for_reply_);
   if (!pdf_to_emf_state_ || !success)
     return OnPDFToEmfFinished(false);
@@ -408,7 +407,7 @@ void ServiceUtilityProcessHost::OnGetPrinterSemanticCapsAndDefaultsFailed(
                  printing::PrinterSemanticCapsAndDefaults()));
 }
 
-bool ServiceUtilityProcessHost::Client::MetafileAvailable(double scale_factor,
+bool ServiceUtilityProcessHost::Client::MetafileAvailable(float scale_factor,
                                                           base::File file) {
   file.Seek(base::File::FROM_BEGIN, 0);
   int64 size = file.GetLength();

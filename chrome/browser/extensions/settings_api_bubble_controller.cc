@@ -24,6 +24,10 @@ namespace extensions {
 
 namespace {
 
+// Whether the user has been notified about extension taking over some aspect of
+// the user's settings (homepage, startup pages, or search engine).
+const char kSettingsBubbleAcknowledged[] = "ack_settings_bubble";
+
 ////////////////////////////////////////////////////////////////////////////////
 // SettingsApiBubbleDelegate
 
@@ -33,28 +37,26 @@ class SettingsApiBubbleDelegate
   explicit SettingsApiBubbleDelegate(ExtensionService* service,
                                      Profile* profile,
                                      SettingsApiOverrideType type);
-  virtual ~SettingsApiBubbleDelegate();
+  ~SettingsApiBubbleDelegate() override;
 
   // ExtensionMessageBubbleController::Delegate methods.
-  virtual bool ShouldIncludeExtension(const std::string& extension_id) OVERRIDE;
-  virtual void AcknowledgeExtension(
+  bool ShouldIncludeExtension(const std::string& extension_id) override;
+  void AcknowledgeExtension(
       const std::string& extension_id,
-      ExtensionMessageBubbleController::BubbleAction user_action) OVERRIDE;
-  virtual void PerformAction(const ExtensionIdList& list) OVERRIDE;
-  virtual void OnClose() OVERRIDE;
-  virtual base::string16 GetTitle() const OVERRIDE;
-  virtual base::string16 GetMessageBody(
-      bool anchored_to_browser_action) const OVERRIDE;
-  virtual base::string16 GetOverflowText(
-      const base::string16& overflow_count) const OVERRIDE;
-  virtual base::string16 GetLearnMoreLabel() const OVERRIDE;
-  virtual GURL GetLearnMoreUrl() const OVERRIDE;
-  virtual base::string16 GetActionButtonLabel() const OVERRIDE;
-  virtual base::string16 GetDismissButtonLabel() const OVERRIDE;
-  virtual bool ShouldShowExtensionList() const OVERRIDE;
-  virtual void LogExtensionCount(size_t count) OVERRIDE;
-  virtual void LogAction(
-      ExtensionMessageBubbleController::BubbleAction action) OVERRIDE;
+      ExtensionMessageBubbleController::BubbleAction user_action) override;
+  void PerformAction(const ExtensionIdList& list) override;
+  void OnClose() override;
+  base::string16 GetTitle() const override;
+  base::string16 GetMessageBody(bool anchored_to_browser_action) const override;
+  base::string16 GetOverflowText(
+      const base::string16& overflow_count) const override;
+  GURL GetLearnMoreUrl() const override;
+  base::string16 GetActionButtonLabel() const override;
+  base::string16 GetDismissButtonLabel() const override;
+  bool ShouldShowExtensionList() const override;
+  void LogExtensionCount(size_t count) override;
+  void LogAction(
+      ExtensionMessageBubbleController::BubbleAction action) override;
 
  private:
   // Our extension service. Weak, not owned by us.
@@ -78,32 +80,35 @@ SettingsApiBubbleDelegate::SettingsApiBubbleDelegate(
     ExtensionService* service,
     Profile* profile,
     SettingsApiOverrideType type)
-    : service_(service), profile_(profile), type_(type) {}
+    : ExtensionMessageBubbleController::Delegate(profile),
+      service_(service),
+      type_(type) {
+  set_acknowledged_flag_pref_name(kSettingsBubbleAcknowledged);
+}
 
 SettingsApiBubbleDelegate::~SettingsApiBubbleDelegate() {}
 
 bool SettingsApiBubbleDelegate::ShouldIncludeExtension(
     const std::string& extension_id) {
-  ExtensionRegistry* registry = ExtensionRegistry::Get(profile_);
+  ExtensionRegistry* registry = ExtensionRegistry::Get(profile());
   const Extension* extension =
       registry->GetExtensionById(extension_id, ExtensionRegistry::ENABLED);
   if (!extension)
     return false;  // The extension provided is no longer enabled.
 
-  ExtensionPrefs* prefs = ExtensionPrefs::Get(profile_);
-  if (prefs->HasSettingsApiBubbleBeenAcknowledged(extension_id))
+  if (HasBubbleInfoBeenAcknowledged(extension_id))
     return false;
 
   const Extension* override = NULL;
   switch (type_) {
     case extensions::BUBBLE_TYPE_HOME_PAGE:
-      override = extensions::GetExtensionOverridingHomepage(profile_);
+      override = extensions::GetExtensionOverridingHomepage(profile());
       break;
     case extensions::BUBBLE_TYPE_STARTUP_PAGES:
-      override = extensions::GetExtensionOverridingStartupPages(profile_);
+      override = extensions::GetExtensionOverridingStartupPages(profile());
       break;
     case extensions::BUBBLE_TYPE_SEARCH_ENGINE:
-      override = extensions::GetExtensionOverridingSearchEngine(profile_);
+      override = extensions::GetExtensionOverridingSearchEngine(profile());
       break;
   }
 
@@ -117,10 +122,8 @@ bool SettingsApiBubbleDelegate::ShouldIncludeExtension(
 void SettingsApiBubbleDelegate::AcknowledgeExtension(
     const std::string& extension_id,
     ExtensionMessageBubbleController::BubbleAction user_action) {
-  if (user_action != ExtensionMessageBubbleController::ACTION_EXECUTE) {
-    ExtensionPrefs* prefs = ExtensionPrefs::Get(profile_);
-    prefs->SetSettingsApiBubbleBeenAcknowledged(extension_id, true);
-  }
+  if (user_action != ExtensionMessageBubbleController::ACTION_EXECUTE)
+    SetBubbleInfoBeenAcknowledged(extension_id, true);
 }
 
 void SettingsApiBubbleDelegate::PerformAction(const ExtensionIdList& list) {
@@ -130,7 +133,7 @@ void SettingsApiBubbleDelegate::PerformAction(const ExtensionIdList& list) {
 }
 
 void SettingsApiBubbleDelegate::OnClose() {
-  ExtensionToolbarModel* toolbar_model = ExtensionToolbarModel::Get(profile_);
+  ExtensionToolbarModel* toolbar_model = ExtensionToolbarModel::Get(profile());
   if (toolbar_model)
     toolbar_model->StopHighlighting();
 }
@@ -153,7 +156,7 @@ base::string16 SettingsApiBubbleDelegate::GetTitle() const {
 
 base::string16 SettingsApiBubbleDelegate::GetMessageBody(
     bool anchored_to_browser_action) const {
-  ExtensionRegistry* registry = ExtensionRegistry::Get(profile_);
+  ExtensionRegistry* registry = ExtensionRegistry::Get(profile());
   const Extension* extension =
       registry->GetExtensionById(extension_id_, ExtensionRegistry::ENABLED);
   const SettingsOverrides* settings =
@@ -225,10 +228,6 @@ base::string16 SettingsApiBubbleDelegate::GetOverflowText(
   return base::string16();
 }
 
-base::string16 SettingsApiBubbleDelegate::GetLearnMoreLabel() const {
-  return l10n_util::GetStringUTF16(IDS_LEARN_MORE);
-}
-
 GURL SettingsApiBubbleDelegate::GetLearnMoreUrl() const {
   return GURL(chrome::kExtensionControlledSettingLearnMoreURL);
 }
@@ -292,8 +291,7 @@ SettingsApiBubbleController::SettingsApiBubbleController(
 SettingsApiBubbleController::~SettingsApiBubbleController() {}
 
 bool SettingsApiBubbleController::ShouldShow(const std::string& extension_id) {
-  ExtensionPrefs* prefs = ExtensionPrefs::Get(profile_);
-  if (prefs->HasSettingsApiBubbleBeenAcknowledged(extension_id))
+  if (delegate()->HasBubbleInfoBeenAcknowledged(extension_id))
     return false;
 
   if (!delegate()->ShouldIncludeExtension(extension_id))

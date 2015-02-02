@@ -13,22 +13,21 @@ namespace extensions {
 class TestPermissionMessageProvider : public PermissionMessageProvider {
  public:
   TestPermissionMessageProvider();
-  virtual ~TestPermissionMessageProvider();
+  ~TestPermissionMessageProvider() override;
 
  private:
-  virtual PermissionMessages GetPermissionMessages(
+  PermissionMessages GetPermissionMessages(
       const PermissionSet* permissions,
-      Manifest::Type extension_type) const OVERRIDE;
-  virtual std::vector<base::string16> GetWarningMessages(
+      Manifest::Type extension_type) const override;
+  std::vector<base::string16> GetWarningMessages(
       const PermissionSet* permissions,
-      Manifest::Type extension_type) const OVERRIDE;
-  virtual std::vector<base::string16> GetWarningMessagesDetails(
+      Manifest::Type extension_type) const override;
+  std::vector<base::string16> GetWarningMessagesDetails(
       const PermissionSet* permissions,
-      Manifest::Type extension_type) const OVERRIDE;
-  virtual bool IsPrivilegeIncrease(
-      const PermissionSet* old_permissions,
-      const PermissionSet* new_permissions,
-      Manifest::Type extension_type) const OVERRIDE;
+      Manifest::Type extension_type) const override;
+  bool IsPrivilegeIncrease(const PermissionSet* old_permissions,
+                           const PermissionSet* new_permissions,
+                           Manifest::Type extension_type) const override;
 
   DISALLOW_COPY_AND_ASSIGN(TestPermissionMessageProvider);
 };

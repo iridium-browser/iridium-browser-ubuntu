@@ -51,27 +51,12 @@ class NET_EXPORT_PRIVATE QuicSentPacketManager {
         TransmissionType transmission_type,
         QuicByteCount byte_size) {}
 
-    virtual void OnSentPacket(
-        QuicPacketSequenceNumber sequence_number,
-        QuicTime sent_time,
-        QuicByteCount bytes,
-        TransmissionType transmission_type) {}
-
-    virtual void OnRetransmittedPacket(
-        QuicPacketSequenceNumber old_sequence_number,
-        QuicPacketSequenceNumber new_sequence_number,
-        TransmissionType transmission_type,
-        QuicTime time) {}
-
     virtual void OnIncomingAck(
         const QuicAckFrame& ack_frame,
         QuicTime ack_receive_time,
         QuicPacketSequenceNumber largest_observed,
         bool largest_observed_acked,
         QuicPacketSequenceNumber least_unacked_sent_packet) {}
-
-    virtual void OnSerializedPacket(
-        const SerializedPacket& packet) {}
   };
 
   // Interface which gets callbacks from the QuicSentPacketManager when
@@ -82,7 +67,7 @@ class NET_EXPORT_PRIVATE QuicSentPacketManager {
     virtual ~NetworkChangeVisitor() {}
 
     // Called when congestion window may have changed.
-    virtual void OnCongestionWindowChange(QuicByteCount congestion_window) = 0;
+    virtual void OnCongestionWindowChange() = 0;
     // TODO(jri): Add OnRttStatsChange() to this class as well.
   };
 
@@ -113,17 +98,9 @@ class NET_EXPORT_PRIVATE QuicSentPacketManager {
 
   virtual void SetFromConfig(const QuicConfig& config);
 
+  void SetNumOpenStreams(size_t num_streams);
+
   void SetHandshakeConfirmed() { handshake_confirmed_ = true; }
-
-  // Called when a new packet is serialized.  If the packet contains
-  // retransmittable data, it will be added to the unacked packet map.
-  void OnSerializedPacket(const SerializedPacket& serialized_packet);
-
-  // Called when a packet is retransmitted with a new sequence number.
-  // Replaces the old entry in the unacked packet map with the new
-  // sequence number.
-  void OnRetransmittedPacket(QuicPacketSequenceNumber old_sequence_number,
-                             QuicPacketSequenceNumber new_sequence_number);
 
   // Processes the incoming ack.
   void OnIncomingAck(const QuicAckFrame& ack_frame,
@@ -169,7 +146,8 @@ class NET_EXPORT_PRIVATE QuicSentPacketManager {
   // Called when we have sent bytes to the peer.  This informs the manager both
   // the number of bytes sent and if they were retransmitted.  Returns true if
   // the sender should reset the retransmission timer.
-  virtual bool OnPacketSent(QuicPacketSequenceNumber sequence_number,
+  virtual bool OnPacketSent(SerializedPacket* serialized_packet,
+                            QuicPacketSequenceNumber original_sequence_number,
                             QuicTime sent_time,
                             QuicByteCount bytes,
                             TransmissionType transmission_type,
@@ -204,15 +182,22 @@ class NET_EXPORT_PRIVATE QuicSentPacketManager {
 
   const QuicSustainedBandwidthRecorder& SustainedBandwidthRecorder() const;
 
-  // Returns the size of the current congestion window in bytes.  Note, this is
-  // not the *available* window.  Some send algorithms may not use a congestion
-  // window and will return 0.
-  QuicByteCount GetCongestionWindow() const;
+  // Returns the size of the current congestion window in number of
+  // kDefaultTCPMSS-sized segments. Note, this is not the *available* window.
+  // Some send algorithms may not use a congestion window and will return 0.
+  QuicPacketCount GetCongestionWindowInTcpMss() const;
 
-  // Returns the size of the slow start congestion window in bytes,
-  // aka ssthresh.  Some send algorithms do not define a slow start
-  // threshold and will return 0.
-  QuicByteCount GetSlowStartThreshold() const;
+  // Returns the number of packets of length |max_packet_length| which fit in
+  // the current congestion window. More packets may end up in flight if the
+  // congestion window has been recently reduced, of if non-full packets are
+  // sent.
+  QuicPacketCount EstimateMaxPacketsInFlight(
+      QuicByteCount max_packet_length) const;
+
+  // Returns the size of the slow start congestion window in nume of 1460 byte
+  // TCP segments, aka ssthresh.  Some send algorithms do not define a slow
+  // start threshold and will return 0.
+  QuicPacketCount GetSlowStartThresholdInTcpMss() const;
 
   // Enables pacing if it has not already been enabled.
   void EnablePacing();
@@ -265,6 +250,12 @@ class NET_EXPORT_PRIVATE QuicSentPacketManager {
 
   typedef linked_hash_map<QuicPacketSequenceNumber,
                           TransmissionType> PendingRetransmissionMap;
+
+  // Called when a packet is retransmitted with a new sequence number.
+  // Replaces the old entry in the unacked packet map with the new
+  // sequence number.
+  void OnRetransmittedPacket(QuicPacketSequenceNumber old_sequence_number,
+                             QuicPacketSequenceNumber new_sequence_number);
 
   // Updates the least_packet_awaited_by_peer.
   void UpdatePacketInformationReceivedByPeer(const QuicAckFrame& ack_frame);
@@ -330,14 +321,19 @@ class NET_EXPORT_PRIVATE QuicSentPacketManager {
       const SequenceNumberList& all_transmissions,
       QuicPacketSequenceNumber acked_sequence_number);
 
+  // Returns true if the client is sending or the server has received a
+  // connection option.
+  bool HasClientSentConnectionOption(const QuicConfig& config,
+                                     QuicTag tag) const;
+
   // Newly serialized retransmittable and fec packets are added to this map,
   // which contains owning pointers to any contained frames.  If a packet is
   // retransmitted, this map will contain entries for both the old and the new
-  // packet. The old packet's retransmittable frames entry will be NULL, while
-  // the new packet's entry will contain the frames to retransmit.
+  // packet. The old packet's retransmittable frames entry will be nullptr,
+  // while the new packet's entry will contain the frames to retransmit.
   // If the old packet is acked before the new packet, then the old entry will
   // be removed from the map and the new entry's retransmittable frames will be
-  // set to NULL.
+  // set to nullptr.
   QuicUnackedPacketMap unacked_packets_;
 
   // Pending retransmissions which have not been packetized and sent yet.
@@ -358,6 +354,10 @@ class NET_EXPORT_PRIVATE QuicSentPacketManager {
   RttStats rtt_stats_;
   scoped_ptr<SendAlgorithmInterface> send_algorithm_;
   scoped_ptr<LossDetectionInterface> loss_algorithm_;
+  bool n_connection_simulation_;
+
+  // Receiver side buffer in bytes.
+  QuicByteCount receive_buffer_bytes_;
 
   // Least sequence number which the peer is still waiting for.
   QuicPacketSequenceNumber least_packet_awaited_by_peer_;

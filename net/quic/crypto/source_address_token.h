@@ -28,6 +28,9 @@ class NET_EXPORT_PRIVATE CachedNetworkParameters {
   CachedNetworkParameters();
   ~CachedNetworkParameters();
 
+  bool operator==(const CachedNetworkParameters& other) const;
+  bool operator!=(const CachedNetworkParameters& other) const;
+
   std::string serving_region() const {
     return serving_region_;
   }
@@ -74,6 +77,9 @@ class NET_EXPORT_PRIVATE CachedNetworkParameters {
     previous_connection_state_ = previous_connection_state;
   }
 
+  int64 timestamp() const { return timestamp_; }
+  void set_timestamp(int64 timestamp) { timestamp_ = timestamp; }
+
  private:
   // serving_region_ is used to decide whether or not the bandwidth estimate and
   // min RTT are reasonable and if they should be used.
@@ -94,6 +100,8 @@ class NET_EXPORT_PRIVATE CachedNetworkParameters {
   int32 min_rtt_ms_;
   // Encodes the PreviousConnectionState enum.
   int32 previous_connection_state_;
+  // UNIX timestamp when this bandwidth estimate was created.
+  int64 timestamp_;
 };
 
 // TODO(rtenneti): sync with server more rationally.
@@ -128,6 +136,10 @@ class NET_EXPORT_PRIVATE SourceAddressToken {
   void set_cached_network_parameters(
       const CachedNetworkParameters& cached_network_parameters) {
     cached_network_parameters_ = cached_network_parameters;
+    has_cached_network_parameters_ = true;
+  }
+  bool has_cached_network_parameters() const {
+    return has_cached_network_parameters_;
   }
 
  private:
@@ -141,6 +153,9 @@ class NET_EXPORT_PRIVATE SourceAddressToken {
   // The server can provide estimated network parameters to be used for
   // initial parameter selection in future connections.
   CachedNetworkParameters cached_network_parameters_;
+  // TODO(rtenneti): Delete |has_cached_network_parameters_| after we convert
+  // SourceAddressToken to protobuf.
+  bool has_cached_network_parameters_;
 
   DISALLOW_COPY_AND_ASSIGN(SourceAddressToken);
 };

@@ -14,7 +14,9 @@
 #include "base/memory/scoped_vector.h"
 #include "chrome/browser/browsing_data/browsing_data_remover.h"
 #include "chrome/browser/chromeos/login/enrollment/enrollment_screen_actor.h"
+#include "chrome/browser/chromeos/login/screens/error_screen_actor.h"
 #include "chrome/browser/chromeos/login/ui/webui_login_view.h"
+#include "chrome/browser/extensions/signin/scoped_gaia_auth_extension.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/network_state_informer.h"
 
@@ -24,7 +26,7 @@ class PolicyOAuth2TokenFetcher;
 
 namespace chromeos {
 
-class AuthenticatedUserEmailRetriever;
+class ErrorScreensHistogramHelper;
 
 // WebUIMessageHandler implementation which handles events occurring on the
 // page, such as the user pressing the signin button.
@@ -41,45 +43,46 @@ class EnrollmentScreenHandler
   virtual ~EnrollmentScreenHandler();
 
   // Implements WebUIMessageHandler:
-  virtual void RegisterMessages() OVERRIDE;
+  virtual void RegisterMessages() override;
 
   // Implements EnrollmentScreenActor:
   virtual void SetParameters(Controller* controller,
                              EnrollmentMode enrollment_mode,
-                             const std::string& management_domain) OVERRIDE;
-  virtual void PrepareToShow() OVERRIDE;
-  virtual void Show() OVERRIDE;
-  virtual void Hide() OVERRIDE;
-  virtual void FetchOAuthToken() OVERRIDE;
-  virtual void ResetAuth(const base::Closure& callback) OVERRIDE;
-  virtual void ShowSigninScreen() OVERRIDE;
-  virtual void ShowEnrollmentSpinnerScreen() OVERRIDE;
-  virtual void ShowLoginSpinnerScreen() OVERRIDE;
-  virtual void ShowAuthError(const GoogleServiceAuthError& error) OVERRIDE;
-  virtual void ShowEnrollmentStatus(policy::EnrollmentStatus status) OVERRIDE;
-  virtual void ShowUIError(UIError error_code) OVERRIDE;
+                             const std::string& management_domain) override;
+  virtual void PrepareToShow() override;
+  virtual void Show() override;
+  virtual void Hide() override;
+  virtual void FetchOAuthToken() override;
+  virtual void ResetAuth(const base::Closure& callback) override;
+  virtual void ShowSigninScreen() override;
+  virtual void ShowEnrollmentSpinnerScreen() override;
+  virtual void ShowLoginSpinnerScreen() override;
+  virtual void ShowAuthError(const GoogleServiceAuthError& error) override;
+  virtual void ShowEnrollmentStatus(policy::EnrollmentStatus status) override;
+  virtual void ShowUIError(UIError error_code) override;
 
   // Implements BaseScreenHandler:
-  virtual void Initialize() OVERRIDE;
-  virtual void DeclareLocalizedValues(LocalizedValuesBuilder* builder) OVERRIDE;
+  virtual void Initialize() override;
+  virtual void DeclareLocalizedValues(LocalizedValuesBuilder* builder) override;
 
   // Implements BrowsingDataRemover::Observer:
-  virtual void OnBrowsingDataRemoverDone() OVERRIDE;
+  virtual void OnBrowsingDataRemoverDone() override;
 
   // Implements NetworkStateInformer::NetworkStateInformerObserver
-  virtual void UpdateState(ErrorScreenActor::ErrorReason reason) OVERRIDE;
+  virtual void UpdateState(ErrorScreenActor::ErrorReason reason) override;
 
   // Implements WebUILoginView::FrameObserver
-  virtual void OnFrameError(const std::string& frame_unique_name) OVERRIDE;
+  virtual void OnFrameError(const std::string& frame_unique_name) override;
 
  private:
   // Handlers for WebUI messages.
-  void HandleRetrieveAuthenticatedUserEmail(double attempt_token);
   void HandleClose(const std::string& reason);
   void HandleCompleteLogin(const std::string& user);
   void HandleRetry();
   void HandleFrameLoadingCompleted(int status);
 
+  void UpdateStateInternal(ErrorScreenActor::ErrorReason reason,
+                           bool force_update);
   void SetupAndShowOfflineMessage(NetworkStateInformer::State state,
                                   ErrorScreenActor::ErrorReason reason);
   void HideOfflineMessage(NetworkStateInformer::State state,
@@ -139,16 +142,21 @@ class EnrollmentScreenHandler
   // The callbacks to invoke after browsing data has been cleared.
   std::vector<base::Closure> auth_reset_callbacks_;
 
-  // Helper that retrieves the authenticated user's e-mail address.
-  scoped_ptr<AuthenticatedUserEmailRetriever> email_retriever_;
-
   // Latest enrollment frame error.
   net::Error frame_error_;
+
+  // True if screen was not shown yet.
+  bool first_show_;
 
   // Network state informer used to keep signin screen up.
   scoped_refptr<NetworkStateInformer> network_state_informer_;
 
   ErrorScreenActor* error_screen_actor_;
+
+  scoped_ptr<ErrorScreensHistogramHelper> histogram_helper_;
+
+  // GAIA extension loader.
+  scoped_ptr<ScopedGaiaAuthExtension> auth_extension_;
 
   base::WeakPtrFactory<EnrollmentScreenHandler> weak_ptr_factory_;
 

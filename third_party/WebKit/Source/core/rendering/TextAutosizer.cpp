@@ -32,8 +32,10 @@
 #include "core/rendering/TextAutosizer.h"
 
 #include "core/dom/Document.h"
+#include "core/frame/FrameHost.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/PinchViewport.h"
 #include "core/frame/Settings.h"
 #include "core/html/HTMLTextAreaElement.h"
 #include "core/page/Page.h"
@@ -192,7 +194,7 @@ static bool blockIsRowOfLinks(const RenderBlock* block)
 
     while (renderer) {
         if (!isPotentialClusterRoot(renderer)) {
-            if (renderer->isText() && toRenderText(renderer)->text().impl()->stripWhiteSpace()->length() > 3)
+            if (renderer->isText() && toRenderText(renderer)->text().stripWhiteSpace().length() > 3)
                 return false;
             if (!renderer->isInline() || renderer->isBR())
                 return false;
@@ -507,10 +509,17 @@ void TextAutosizer::updatePageInfo()
         RenderView* renderView = m_document->renderView();
         bool horizontalWritingMode = isHorizontalWritingMode(renderView->style()->writingMode());
 
+        // FIXME: With out-of-process iframes, the top frame can be remote and
+        // doesn't have sizing information. Just return if this is the case.
+        Frame* frame = m_document->frame()->tree().top();
+        if (frame->isRemoteFrame())
+            return;
+
         LocalFrame* mainFrame = m_document->page()->deprecatedLocalMainFrame();
         IntSize frameSize = m_document->settings()->textAutosizingWindowSizeOverride();
         if (frameSize.isEmpty())
-            frameSize = mainFrame->view()->unscaledVisibleContentSize(IncludeScrollbars);
+            frameSize = windowSize();
+
         m_pageInfo.m_frameWidth = horizontalWritingMode ? frameSize.width() : frameSize.height();
 
         IntSize layoutSize = mainFrame->view()->layoutSize();
@@ -542,6 +551,15 @@ void TextAutosizer::updatePageInfo()
         resetMultipliers();
         m_pageInfo.m_hasAutosized = false;
     }
+}
+
+IntSize TextAutosizer::windowSize() const
+{
+    Page * page = m_document->page();
+    ASSERT(page);
+    return page->settings().pinchVirtualViewportEnabled() ?
+        page->frameHost().pinchViewport().size() :
+        page->deprecatedLocalMainFrame()->view()->unscaledVisibleContentSize(IncludeScrollbars);
 }
 
 void TextAutosizer::resetMultipliers()

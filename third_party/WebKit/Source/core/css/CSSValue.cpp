@@ -27,10 +27,10 @@
 #include "config.h"
 #include "core/css/CSSValue.h"
 
-#include "core/css/CSSAspectRatioValue.h"
 #include "core/css/CSSBorderImageSliceValue.h"
 #include "core/css/CSSCalculationValue.h"
 #include "core/css/CSSCanvasValue.h"
+#include "core/css/CSSContentDistributionValue.h"
 #include "core/css/CSSCrossfadeValue.h"
 #include "core/css/CSSCursorImageValue.h"
 #include "core/css/CSSFilterValue.h"
@@ -154,8 +154,6 @@ bool CSSValue::equals(const CSSValue& other) const
 
     if (m_classType == other.m_classType) {
         switch (m_classType) {
-        case AspectRatioClass:
-            return compareCSSValues<CSSAspectRatioValue>(*this, other);
         case BorderImageSliceClass:
             return compareCSSValues<CSSBorderImageSliceValue>(*this, other);
         case CanvasClass:
@@ -212,6 +210,8 @@ bool CSSValue::equals(const CSSValue& other) const
             return compareCSSValues<CSSFilterValue>(*this, other);
         case CSSSVGDocumentClass:
             return compareCSSValues<CSSSVGDocumentValue>(*this, other);
+        case CSSContentDistributionClass:
+            return compareCSSValues<CSSContentDistributionValue>(*this, other);
         default:
             ASSERT_NOT_REACHED();
             return false;
@@ -232,8 +232,6 @@ String CSSValue::cssText() const
     ASSERT(!isCSSOMSafe() || isSubtypeExposedToCSSOM());
 
     switch (classType()) {
-    case AspectRatioClass:
-        return toCSSAspectRatioValue(this)->customCSSText();
     case BorderImageSliceClass:
         return toCSSBorderImageSliceValue(this)->customCSSText();
     case CanvasClass:
@@ -290,6 +288,8 @@ String CSSValue::cssText() const
         return toCSSFilterValue(this)->customCSSText();
     case CSSSVGDocumentClass:
         return toCSSSVGDocumentValue(this)->customCSSText();
+    case CSSContentDistributionClass:
+        return toCSSContentDistributionValue(this)->customCSSText();
     }
     ASSERT_NOT_REACHED();
     return String();
@@ -305,9 +305,6 @@ void CSSValue::destroy()
     ASSERT(!isCSSOMSafe() || isSubtypeExposedToCSSOM());
 
     switch (classType()) {
-    case AspectRatioClass:
-        delete toCSSAspectRatioValue(this);
-        return;
     case BorderImageSliceClass:
         delete toCSSBorderImageSliceValue(this);
         return;
@@ -392,6 +389,9 @@ void CSSValue::destroy()
     case CSSSVGDocumentClass:
         delete toCSSSVGDocumentValue(this);
         return;
+    case CSSContentDistributionClass:
+        delete toCSSContentDistributionValue(this);
+        return;
     }
     ASSERT_NOT_REACHED();
 }
@@ -406,9 +406,6 @@ void CSSValue::finalizeGarbageCollectedObject()
     ASSERT(!isCSSOMSafe() || isSubtypeExposedToCSSOM());
 
     switch (classType()) {
-    case AspectRatioClass:
-        toCSSAspectRatioValue(this)->~CSSAspectRatioValue();
-        return;
     case BorderImageSliceClass:
         toCSSBorderImageSliceValue(this)->~CSSBorderImageSliceValue();
         return;
@@ -493,6 +490,9 @@ void CSSValue::finalizeGarbageCollectedObject()
     case CSSSVGDocumentClass:
         toCSSSVGDocumentValue(this)->~CSSSVGDocumentValue();
         return;
+    case CSSContentDistributionClass:
+        toCSSContentDistributionValue(this)->~CSSContentDistributionValue();
+        return;
     }
     ASSERT_NOT_REACHED();
 }
@@ -507,9 +507,6 @@ void CSSValue::trace(Visitor* visitor)
     ASSERT(!isCSSOMSafe() || isSubtypeExposedToCSSOM());
 
     switch (classType()) {
-    case AspectRatioClass:
-        toCSSAspectRatioValue(this)->traceAfterDispatch(visitor);
-        return;
     case BorderImageSliceClass:
         toCSSBorderImageSliceValue(this)->traceAfterDispatch(visitor);
         return;
@@ -593,6 +590,9 @@ void CSSValue::trace(Visitor* visitor)
         return;
     case CSSSVGDocumentClass:
         toCSSSVGDocumentValue(this)->traceAfterDispatch(visitor);
+        return;
+    case CSSContentDistributionClass:
+        toCSSContentDistributionValue(this)->traceAfterDispatch(visitor);
         return;
     }
     ASSERT_NOT_REACHED();

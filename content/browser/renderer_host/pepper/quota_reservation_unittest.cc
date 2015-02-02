@@ -33,30 +33,30 @@ const int kFile3ID = 3;
 class FakeBackend : public QuotaReservationManager::QuotaBackend {
  public:
   FakeBackend() {}
-  virtual ~FakeBackend() {}
+  ~FakeBackend() override {}
 
-  virtual void ReserveQuota(
+  void ReserveQuota(
       const GURL& origin,
       storage::FileSystemType type,
       int64 delta,
-      const QuotaReservationManager::ReserveQuotaCallback& callback) OVERRIDE {
+      const QuotaReservationManager::ReserveQuotaCallback& callback) override {
     base::MessageLoopProxy::current()->PostTask(
         FROM_HERE,
         base::Bind(base::IgnoreResult(callback), base::File::FILE_OK, delta));
   }
 
-  virtual void ReleaseReservedQuota(const GURL& origin,
-                                    storage::FileSystemType type,
-                                    int64 size) OVERRIDE {}
+  void ReleaseReservedQuota(const GURL& origin,
+                            storage::FileSystemType type,
+                            int64 size) override {}
 
-  virtual void CommitQuotaUsage(const GURL& origin,
-                                storage::FileSystemType type,
-                                int64 delta) OVERRIDE {}
+  void CommitQuotaUsage(const GURL& origin,
+                        storage::FileSystemType type,
+                        int64 delta) override {}
 
-  virtual void IncrementDirtyCount(const GURL& origin,
-                                   storage::FileSystemType type) OVERRIDE {}
-  virtual void DecrementDirtyCount(const GURL& origin,
-                                   storage::FileSystemType type) OVERRIDE {}
+  void IncrementDirtyCount(const GURL& origin,
+                           storage::FileSystemType type) override {}
+  void DecrementDirtyCount(const GURL& origin,
+                           storage::FileSystemType type) override {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(FakeBackend);
@@ -67,16 +67,16 @@ class FakeBackend : public QuotaReservationManager::QuotaBackend {
 class QuotaReservationTest : public testing::Test {
  public:
   QuotaReservationTest() {}
-  virtual ~QuotaReservationTest() {}
+  ~QuotaReservationTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ASSERT_TRUE(work_dir_.CreateUniqueTempDir());
 
     reservation_manager_.reset(new QuotaReservationManager(
         scoped_ptr<QuotaReservationManager::QuotaBackend>(new FakeBackend)));
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     reservation_manager_.reset();
     base::RunLoop().RunUntilIdle();
   }

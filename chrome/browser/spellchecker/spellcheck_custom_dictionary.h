@@ -75,7 +75,7 @@ class SpellcheckCustomDictionary : public SpellcheckDictionary,
   };
 
   explicit SpellcheckCustomDictionary(const base::FilePath& path);
-  virtual ~SpellcheckCustomDictionary();
+  ~SpellcheckCustomDictionary() override;
 
   // Returns the in-memory cache of words in the custom dictionary.
   const chrome::spellcheck_common::WordSet& GetWords() const;
@@ -106,20 +106,19 @@ class SpellcheckCustomDictionary : public SpellcheckDictionary,
   bool IsSyncing();
 
   // Overridden from SpellcheckDictionary:
-  virtual void Load() OVERRIDE;
+  void Load() override;
 
   // Overridden from syncer::SyncableService:
-  virtual syncer::SyncMergeResult MergeDataAndStartSyncing(
+  syncer::SyncMergeResult MergeDataAndStartSyncing(
       syncer::ModelType type,
       const syncer::SyncDataList& initial_sync_data,
       scoped_ptr<syncer::SyncChangeProcessor> sync_processor,
-      scoped_ptr<syncer::SyncErrorFactory> sync_error_handler) OVERRIDE;
-  virtual void StopSyncing(syncer::ModelType type) OVERRIDE;
-  virtual syncer::SyncDataList GetAllSyncData(
-      syncer::ModelType type) const OVERRIDE;
-  virtual syncer::SyncError ProcessSyncChanges(
+      scoped_ptr<syncer::SyncErrorFactory> sync_error_handler) override;
+  void StopSyncing(syncer::ModelType type) override;
+  syncer::SyncDataList GetAllSyncData(syncer::ModelType type) const override;
+  syncer::SyncError ProcessSyncChanges(
       const tracked_objects::Location& from_here,
-      const syncer::SyncChangeList& change_list) OVERRIDE;
+      const syncer::SyncChangeList& change_list) override;
 
  private:
   friend class DictionarySyncIntegrationTestHelper;

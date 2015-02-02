@@ -15,6 +15,7 @@
 #include "base/debug/alias.h"
 #include "base/debug/crash_logging.h"
 #include "base/debug/trace_event.h"
+#include "base/float_util.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/metrics/histogram.h"
 #include "base/single_thread_task_runner.h"
@@ -92,11 +93,11 @@ class SyncPointClientImpl : public media::VideoFrame::SyncPointClient {
   explicit SyncPointClientImpl(
       blink::WebGraphicsContext3D* web_graphics_context)
       : web_graphics_context_(web_graphics_context) {}
-  virtual ~SyncPointClientImpl() {}
-  virtual uint32 InsertSyncPoint() OVERRIDE {
+  ~SyncPointClientImpl() override {}
+  uint32 InsertSyncPoint() override {
     return web_graphics_context_->insertSyncPoint();
   }
-  virtual void WaitSyncPoint(uint32 sync_point) OVERRIDE {
+  void WaitSyncPoint(uint32 sync_point) override {
     web_graphics_context_->waitSyncPoint(sync_point);
   }
 
@@ -136,6 +137,7 @@ WebMediaPlayerImpl::WebMediaPlayerImpl(
     blink::WebLocalFrame* frame,
     blink::WebMediaPlayerClient* client,
     base::WeakPtr<WebMediaPlayerDelegate> delegate,
+    scoped_ptr<Renderer> renderer,
     const WebMediaPlayerParams& params)
     : frame_(frame),
       network_state_(WebMediaPlayer::NetworkStateEmpty),
@@ -167,7 +169,8 @@ WebMediaPlayerImpl::WebMediaPlayerImpl(
       text_track_index_(0),
       encrypted_media_support_(
           params.CreateEncryptedMediaPlayerSupport(client)),
-      audio_hardware_config_(params.audio_hardware_config()) {
+      audio_hardware_config_(params.audio_hardware_config()),
+      renderer_(renderer.Pass()) {
   DCHECK(encrypted_media_support_);
 
   // Threaded compositing isn't enabled universally yet.
@@ -176,6 +179,11 @@ WebMediaPlayerImpl::WebMediaPlayerImpl(
 
   media_log_->AddEvent(
       media_log_->CreateEvent(MediaLogEvent::WEBMEDIAPLAYER_CREATED));
+
+  // TODO(xhwang): When we use an external Renderer, many methods won't work,
+  // e.g. GetCurrentFrameFromCompositor(). Fix this in a future CL.
+  if (renderer_)
+    return;
 
   // |gpu_factories_| requires that its entry points be called on its
   // |GetTaskRunner()|.  Since |pipeline_| will own decoders created from the
@@ -484,18 +492,25 @@ blink::WebTimeRanges WebMediaPlayerImpl::buffered() const {
   return ConvertToWebTimeRanges(buffered_time_ranges);
 }
 
-double WebMediaPlayerImpl::maxTimeSeekable() const {
+blink::WebTimeRanges WebMediaPlayerImpl::seekable() const {
   DCHECK(main_task_runner_->BelongsToCurrentThread());
 
-  // If we haven't even gotten to ReadyStateHaveMetadata yet then just
-  // return 0 so that the seekable range is empty.
   if (ready_state_ < WebMediaPlayer::ReadyStateHaveMetadata)
-    return 0.0;
+    return blink::WebTimeRanges();
 
-  // We don't support seeking in streaming media.
-  if (data_source_ && data_source_->IsStreaming())
-    return 0.0;
-  return duration();
+  const double seekable_end = duration();
+
+  // Allow a special exception for seeks to zero for streaming sources with a
+  // finite duration; this allows looping to work.
+  const bool allow_seek_to_zero = data_source_ && data_source_->IsStreaming() &&
+                                  base::IsFinite(seekable_end);
+
+  // TODO(dalecurtis): Technically this allows seeking on media which return an
+  // infinite duration so long as DataSource::IsStreaming() is false.  While not
+  // expected, disabling this breaks semi-live players, http://crbug.com/427412.
+  const blink::WebTimeRange seekable_range(
+      0.0, allow_seek_to_zero ? 0.0 : seekable_end);
+  return blink::WebTimeRanges(&seekable_range, 1);
 }
 
 bool WebMediaPlayerImpl::didLoadingProgress() {
@@ -503,12 +518,6 @@ bool WebMediaPlayerImpl::didLoadingProgress() {
   bool pipeline_progress = pipeline_.DidLoadingProgress();
   bool data_progress = buffered_data_source_host_.DidLoadingProgress();
   return pipeline_progress || data_progress;
-}
-
-void WebMediaPlayerImpl::paint(blink::WebCanvas* canvas,
-                               const blink::WebRect& rect,
-                               unsigned char alpha) {
-  paint(canvas, rect, alpha, SkXfermode::kSrcOver_Mode);
 }
 
 void WebMediaPlayerImpl::paint(blink::WebCanvas* canvas,
@@ -872,10 +881,7 @@ scoped_ptr<Renderer> WebMediaPlayerImpl::CreateRenderer() {
 
   // Create renderer.
   return scoped_ptr<Renderer>(new RendererImpl(
-      media_task_runner_,
-      demuxer_.get(),
-      audio_renderer.Pass(),
-      video_renderer.Pass()));
+      media_task_runner_, audio_renderer.Pass(), video_renderer.Pass()));
 }
 
 void WebMediaPlayerImpl::StartPipeline() {
@@ -914,9 +920,13 @@ void WebMediaPlayerImpl::StartPipeline() {
 
   // ... and we're ready to go!
   seeking_ = true;
+
+  if (!renderer_)
+    renderer_ = CreateRenderer();
+
   pipeline_.Start(
       demuxer_.get(),
-      CreateRenderer(),
+      renderer_.Pass(),
       BIND_TO_RENDER_LOOP(&WebMediaPlayerImpl::OnPipelineEnded),
       BIND_TO_RENDER_LOOP(&WebMediaPlayerImpl::OnPipelineError),
       BIND_TO_RENDER_LOOP1(&WebMediaPlayerImpl::OnPipelineSeeked, false),

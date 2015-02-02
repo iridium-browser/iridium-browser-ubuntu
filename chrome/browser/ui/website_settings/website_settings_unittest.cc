@@ -8,11 +8,11 @@
 #include "base/message_loop/message_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/ui/website_settings/website_settings_ui.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/infobars/core/infobar.h"
@@ -73,10 +73,9 @@ class WebsiteSettingsTest : public ChromeRenderViewHostTestHarness {
  public:
   WebsiteSettingsTest() : cert_id_(0), url_("http://www.example.com") {}
 
-  virtual ~WebsiteSettingsTest() {
-  }
+  ~WebsiteSettingsTest() override {}
 
-  virtual void SetUp() {
+  void SetUp() override {
     ChromeRenderViewHostTestHarness::SetUp();
     // Setup stub SSLStatus.
     ssl_.security_style = content::SECURITY_STYLE_UNAUTHENTICATED;
@@ -103,7 +102,7 @@ class WebsiteSettingsTest : public ChromeRenderViewHostTestHarness {
     mock_ui_.reset(new MockWebsiteSettingsUI());
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     ASSERT_TRUE(website_settings_.get())
         << "No WebsiteSettings instance created.";
     RenderViewHostTestHarness::TearDown();
@@ -117,6 +116,8 @@ class WebsiteSettingsTest : public ChromeRenderViewHostTestHarness {
     EXPECT_CALL(*mock_ui, SetCookieInfo(_));
     EXPECT_CALL(*mock_ui, SetFirstVisit(base::string16()));
   }
+
+  void SetURL(std::string url) { url_ = GURL(url); }
 
   const GURL& url() const { return url_; }
   MockCertStore* cert_store() { return &cert_store_; }
@@ -390,4 +391,24 @@ TEST_F(WebsiteSettingsTest, ShowInfoBar) {
   ASSERT_EQ(1u, infobar_service()->infobar_count());
 
   infobar_service()->RemoveInfoBar(infobar_service()->infobar_at(0));
+}
+
+TEST_F(WebsiteSettingsTest, AboutBlankPage) {
+  SetURL("about:blank");
+  SetDefaultUIExpectations(mock_ui());
+  EXPECT_EQ(WebsiteSettings::SITE_CONNECTION_STATUS_INTERNAL_PAGE,
+            website_settings()->site_connection_status());
+  EXPECT_EQ(WebsiteSettings::SITE_IDENTITY_STATUS_INTERNAL_PAGE,
+            website_settings()->site_identity_status());
+  EXPECT_EQ(base::string16(), website_settings()->organization_name());
+}
+
+TEST_F(WebsiteSettingsTest, InternalPage) {
+  SetURL("chrome://bookmarks");
+  SetDefaultUIExpectations(mock_ui());
+  EXPECT_EQ(WebsiteSettings::SITE_CONNECTION_STATUS_INTERNAL_PAGE,
+            website_settings()->site_connection_status());
+  EXPECT_EQ(WebsiteSettings::SITE_IDENTITY_STATUS_INTERNAL_PAGE,
+            website_settings()->site_identity_status());
+  EXPECT_EQ(base::string16(), website_settings()->organization_name());
 }

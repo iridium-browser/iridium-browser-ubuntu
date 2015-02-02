@@ -73,17 +73,17 @@ class PushMessagingApiTest : public ExtensionApiTest {
       : fake_invalidation_service_(NULL) {
   }
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     ExtensionApiTest::SetUpCommandLine(command_line);
   }
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     invalidation::ProfileInvalidationProviderFactory::GetInstance()->
         RegisterTestingFactory(BuildFakeProfileInvalidationProvider);
     ExtensionApiTest::SetUp();
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     ExtensionApiTest::SetUpOnMainThread();
     fake_invalidation_service_ =
         static_cast<invalidation::FakeInvalidationService*>(
@@ -158,8 +158,7 @@ IN_PROC_BROWSER_TEST_F(PushMessagingApiTest, AutoRegistration) {
       new StrictMock<MockInvalidationMapper>);
   StrictMock<MockInvalidationMapper>* unsafe_mapper = mapper.get();
   // PushMessagingEventRouter owns the mapper now.
-  GetAPI()->SetMapperForTest(
-      mapper.PassAs<PushMessagingInvalidationMapper>());
+  GetAPI()->SetMapperForTest(mapper.Pass());
 
   std::string extension_id1;
   std::string extension_id2;

@@ -119,9 +119,9 @@ class RoundedContainerView : public views::View {
         background_(background) {
   }
 
-  virtual ~RoundedContainerView() {}
+  ~RoundedContainerView() override {}
 
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
+  void OnPaint(gfx::Canvas* canvas) override {
     views::View::OnPaint(canvas);
 
     SkScalar radius = SkIntToScalar(corner_radius_);
@@ -273,7 +273,7 @@ WindowSelector::WindowSelector(const WindowList& windows,
   HideAndTrackNonOverviewWindows();
   // Send an a11y alert.
   shell->accessibility_delegate()->TriggerAccessibilityAlert(
-      A11Y_ALERT_WINDOW_OVERVIEW_MODE_ENTERED);
+      ui::A11Y_ALERT_WINDOW_OVERVIEW_MODE_ENTERED);
 
   UpdateShelfVisibility();
 }
@@ -471,7 +471,7 @@ void WindowSelector::OnAttemptToReactivateWindow(aura::Window* request_active,
 
 void WindowSelector::ContentsChanged(views::Textfield* sender,
                                      const base::string16& new_contents) {
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kAshDisableTextFilteringInOverviewMode)) {
     return;
   }

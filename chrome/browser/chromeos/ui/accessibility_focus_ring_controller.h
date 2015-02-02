@@ -5,8 +5,10 @@
 #ifndef CHROME_BROWSER_CHROMEOS_UI_ACCESSIBILITY_FOCUS_RING_CONTROLLER_H_
 #define CHROME_BROWSER_CHROMEOS_UI_ACCESSIBILITY_FOCUS_RING_CONTROLLER_H_
 
+#include <vector>
+
 #include "base/basictypes.h"
-#include "base/memory/scoped_ptr.h"
+#include "base/memory/scoped_vector.h"
 #include "base/memory/singleton.h"
 #include "base/time/time.h"
 #include "chrome/browser/chromeos/ui/accessibility_focus_ring_layer.h"
@@ -48,10 +50,10 @@ class AccessibilityFocusRingController
 
  private:
   // FocusRingLayerDelegate.
-  virtual void OnDeviceScaleFactorChanged() OVERRIDE;
+  virtual void OnDeviceScaleFactorChanged() override;
 
   // CompositorAnimationObserver.
-  virtual void OnAnimationStep(base::TimeTicks timestamp) OVERRIDE;
+  virtual void OnAnimationStep(base::TimeTicks timestamp) override;
 
   void Update();
 
@@ -67,7 +69,7 @@ class AccessibilityFocusRingController
   std::vector<gfx::Rect> rects_;
   std::vector<AccessibilityFocusRing> previous_rings_;
   std::vector<AccessibilityFocusRing> rings_;
-  std::vector<scoped_ptr<AccessibilityFocusRingLayer> > layers_;
+  ScopedVector<AccessibilityFocusRingLayer> layers_;
   base::TimeTicks focus_change_time_;
   ui::Compositor* compositor_;
 

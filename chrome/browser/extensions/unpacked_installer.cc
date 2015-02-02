@@ -11,30 +11,38 @@
 #include "base/threading/thread_restrictions.h"
 #include "chrome/browser/extensions/extension_error_reporter.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
-#include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_management.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/permissions_updater.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/extensions/extension_install_ui_factory.h"
 #include "chrome/common/extensions/api/plugins/plugins_handler.h"
 #include "components/crx_file/id_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
+#include "extensions/browser/install/extension_install_ui.h"
 #include "extensions/browser/install_flag.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_l10n_util.h"
 #include "extensions/common/file_util.h"
 #include "extensions/common/manifest.h"
+#include "extensions/common/manifest_handlers/shared_module_info.h"
 #include "sync/api/string_ordinal.h"
 
 using content::BrowserThread;
 using extensions::Extension;
+using extensions::SharedModuleInfo;
 
 namespace {
 
 const char kUnpackedExtensionsBlacklistedError[] =
     "Loading of unpacked extensions is disabled by the administrator.";
+
+const char kImportMinVersionNewer[] =
+    "'import' version requested is newer than what is installed.";
+const char kImportMissing[] = "'import' extension is not installed.";
+const char kImportNotSharedModule[] = "'import' is not a shared module.";
 
 // Manages an ExtensionInstallPrompt for a particular extension.
 class SimpleExtensionLoadPrompt : public ExtensionInstallPrompt::Delegate {
@@ -42,13 +50,13 @@ class SimpleExtensionLoadPrompt : public ExtensionInstallPrompt::Delegate {
   SimpleExtensionLoadPrompt(const Extension* extension,
                             Profile* profile,
                             const base::Closure& callback);
-  virtual ~SimpleExtensionLoadPrompt();
+  ~SimpleExtensionLoadPrompt() override;
 
   void ShowPrompt();
 
   // ExtensionInstallUI::Delegate
-  virtual void InstallUIProceed() OVERRIDE;
-  virtual void InstallUIAbort(bool user_initiated) OVERRIDE;
+  void InstallUIProceed() override;
+  void InstallUIAbort(bool user_initiated) override;
 
  private:
   scoped_ptr<ExtensionInstallPrompt> install_ui_;
@@ -60,10 +68,11 @@ SimpleExtensionLoadPrompt::SimpleExtensionLoadPrompt(
     const Extension* extension,
     Profile* profile,
     const base::Closure& callback)
-    : install_ui_(ExtensionInstallUI::CreateInstallPromptWithProfile(
-          profile)),
-      extension_(extension),
-      callback_(callback) {
+    : extension_(extension), callback_(callback) {
+  scoped_ptr<extensions::ExtensionInstallUI> ui(
+      extensions::CreateExtensionInstallUI(profile));
+  install_ui_.reset(new ExtensionInstallPrompt(
+      profile, ui->GetDefaultInstallDialogParent()));
 }
 
 SimpleExtensionLoadPrompt::~SimpleExtensionLoadPrompt() {
@@ -189,6 +198,42 @@ void UnpackedInstaller::ShowInstallPrompt() {
 }
 
 void UnpackedInstaller::StartInstallChecks() {
+  // TODO(crbug.com/421128): Enable these checks all the time.  The reason
+  // they are disabled for extensions loaded from the command-line is that
+  // installing unpacked extensions is asynchronous, but there can be
+  // dependencies between the extensions loaded by the command line.
+  if (extension()->manifest()->location() != Manifest::COMMAND_LINE) {
+    ExtensionService* service = service_weak_.get();
+    if (!service || service->browser_terminating())
+      return;
+
+    // TODO(crbug.com/420147): Move this code to a utility class to avoid
+    // duplication of SharedModuleService::CheckImports code.
+    if (SharedModuleInfo::ImportsModules(extension())) {
+      const std::vector<SharedModuleInfo::ImportInfo>& imports =
+          SharedModuleInfo::GetImports(extension());
+      std::vector<SharedModuleInfo::ImportInfo>::const_iterator i;
+      for (i = imports.begin(); i != imports.end(); ++i) {
+        Version version_required(i->minimum_version);
+        const Extension* imported_module =
+            service->GetExtensionById(i->extension_id, true);
+        if (!imported_module) {
+          ReportExtensionLoadError(kImportMissing);
+          return;
+        } else if (imported_module &&
+                   !SharedModuleInfo::IsSharedModule(imported_module)) {
+          ReportExtensionLoadError(kImportNotSharedModule);
+          return;
+        } else if (imported_module && (version_required.IsValid() &&
+                                       imported_module->version()->CompareTo(
+                                           version_required) < 0)) {
+          ReportExtensionLoadError(kImportMinVersionNewer);
+          return;
+        }
+      }
+    }
+  }
+
   install_checker_.Start(
       ExtensionInstallChecker::CHECK_REQUIREMENTS |
           ExtensionInstallChecker::CHECK_MANAGEMENT_POLICY,

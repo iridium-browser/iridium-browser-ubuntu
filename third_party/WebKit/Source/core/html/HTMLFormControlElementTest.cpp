@@ -9,6 +9,7 @@
 #include "core/html/HTMLDocument.h"
 #include "core/html/HTMLInputElement.h"
 #include "core/loader/EmptyClients.h"
+#include "core/rendering/RenderObject.h"
 #include "core/testing/DummyPageHolder.h"
 #include <gtest/gtest.h>
 
@@ -16,7 +17,7 @@ namespace blink {
 
 class HTMLFormControlElementTest : public ::testing::Test {
 protected:
-    virtual void SetUp() OVERRIDE;
+    virtual void SetUp() override;
 
     DummyPageHolder& page() const { return *m_dummyPageHolder; }
     HTMLDocument& document() const { return *m_document; }

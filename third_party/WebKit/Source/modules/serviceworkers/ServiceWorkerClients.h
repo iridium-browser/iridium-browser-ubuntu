@@ -6,25 +6,22 @@
 #define ServiceWorkerClients_h
 
 #include "bindings/core/v8/ScriptWrappable.h"
-#include "modules/serviceworkers/ServiceWorkerClientQueryParams.h"
+#include "modules/serviceworkers/ServiceWorkerClientQueryOptions.h"
 #include "platform/heap/Handle.h"
 #include "public/platform/WebServiceWorkerClientsInfo.h"
-#include "wtf/Forward.h"
 
 namespace blink {
 
-class ExecutionContext;
 class ScriptPromise;
 class ScriptState;
-class ServiceWorkerClient;
 
-class ServiceWorkerClients FINAL : public GarbageCollected<ServiceWorkerClients>, public ScriptWrappable {
+class ServiceWorkerClients final : public GarbageCollected<ServiceWorkerClients>, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
 public:
     static ServiceWorkerClients* create();
 
     // ServiceWorkerClients.idl
-    ScriptPromise getAll(ScriptState*, const ServiceWorkerClientQueryParams&);
+    ScriptPromise getAll(ScriptState*, const ServiceWorkerClientQueryOptions&);
 
     void trace(Visitor*) { }
 

@@ -88,7 +88,7 @@ interface TestObject {
     attribute Date dateAttribute;
     attribute DOMString stringAttribute;
     attribute ByteString byteStringAttribute;
-    attribute ScalarValueString scalarValueStringAttribute;
+    attribute USVString usvStringAttribute;
     attribute DOMTimeStamp domTimeStampAttribute;
     attribute boolean booleanAttribute;
     attribute byte byteAttribute;
@@ -155,6 +155,8 @@ interface TestObject {
     static attribute long staticLongAttribute;
     // Exceptional type
     attribute EventHandler eventHandlerAttribute;
+    // Union types
+    attribute (double or DOMString) doubleOrStringAttribute;
 
     // Extended attributes
     [LogActivity, LogAllWorlds] attribute long activityLoggingAccessForAllWorldsLongAttribute;
@@ -244,8 +246,8 @@ interface TestObject {
     [TreatReturnedNullStringAs=Undefined, CachedAttribute=isStringDirty] attribute DOMString cachedTreatReturnedNullStringAsUndefinedStringAttribute;
     [TreatReturnedNullStringAs=Null] attribute ByteString treatReturnedNullStringAsNullByteStringAttribute;
     [TreatReturnedNullStringAs=Undefined] attribute ByteString treatReturnedNullStringAsUndefinedByteStringAttribute;
-    [TreatReturnedNullStringAs=Null] attribute ScalarValueString treatReturnedNullStringAsNullScalarValueStringAttribute;
-    [TreatReturnedNullStringAs=Undefined] attribute ScalarValueString treatReturnedNullStringAsUndefinedScalarValueStringAttribute;
+    [TreatReturnedNullStringAs=Null] attribute USVString treatReturnedNullStringAsNullUSVStringAttribute;
+    [TreatReturnedNullStringAs=Undefined] attribute USVString treatReturnedNullStringAsUndefinedUSVStringAttribute;
     [TypeChecking=Interface] attribute float typeCheckingInterfaceFloatAttribute; // nop for non-interface types
     [TypeChecking=Interface] attribute TestInterface typeCheckingInterfaceTestInterfaceAttribute;
     [TypeChecking=Interface] attribute TestInterface? typeCheckingInterfaceTestInterfaceOrNullAttribute;
@@ -268,7 +270,7 @@ interface TestObject {
     Date dateMethod();
     DOMString stringMethod();
     ByteString byteStringMethod();
-    ScalarValueString scalarValueStringMethod();
+    USVString usvStringMethod();
     DOMTimeStamp readonlyDOMTimeStampMethod();
     boolean booleanMethod();
     byte byteMethod();
@@ -285,7 +287,7 @@ interface TestObject {
     void voidMethodDateArg(Date dateArg);
     void voidMethodStringArg(DOMString stringArg);
     void voidMethodByteStringArg(ByteString stringArg);
-    void voidMethodScalarValueStringArg(ScalarValueString scalarValueStringArg);
+    void voidMethodUSVStringArg(USVString usvStringArg);
     void voidMethodDOMTimeStampArg(DOMTimeStamp domTimeStampArg);
     void voidMethodBooleanArg(boolean booleanArg);
     void voidMethodByteArg(byte byteArg);
@@ -352,7 +354,10 @@ interface TestObject {
     // Union types
     (TestInterfaceGarbageCollected or DOMString) testInterfaceGarbageCollectedOrDOMStringMethod();
     (TestInterfaceWillBeGarbageCollected or TestDictionary) testInterfaceWillBeGarbageCollectedOrTestDictionaryMethod();
-    (sequence<long> or DOMString[] or unrestricted double) longSequenceOrDOMStringArrayOrUnrestrictedDoubleMethod();
+    (boolean or DOMString or unrestricted double) booleanOrDOMStringOrUnrestrictedDoubleMethod();
+    (TestInterface or long) testInterfaceOrLongMethod();
+    void voidMethodDOMStringOrDouble((DOMString or double) arg);
+    void voidMethodDOMStringOrArrayBufferOrArrayBufferView((DOMString or ArrayBuffer or ArrayBufferView) arg);
     // Currently only used on interface type arguments
     void voidMethodTestInterfaceEmptyOrNullArg(TestInterfaceEmpty? nullableTestInterfaceEmptyArg);
     // Callback interface types
@@ -364,8 +369,9 @@ interface TestObject {
     void voidMethodTestEnumArg(TestEnum testEnumTypeArg);
     // Exceptional types
     Dictionary dictionaryMethod();
+    TestDictionary testDictionaryMethod();
     NodeFilter nodeFilterMethod();
-    Promise promiseMethod(long arg1, Dictionary arg2, DOMString arg3, DOMString... variadic);
+    Promise<void> promiseMethod(long arg1, Dictionary arg2, DOMString arg3, DOMString... variadic);
     Promise promiseMethodWithoutExceptionState(Dictionary arg1);
     SerializedScriptValue serializedScriptValueMethod();
     XPathNSResolver xPathNSResolverMethod();
@@ -375,8 +381,6 @@ interface TestObject {
     void voidMethodSerializedScriptValueArg(SerializedScriptValue serializedScriptValueArg);
     void voidMethodXPathNSResolverArg(XPathNSResolver xPathNSResolverArg);
     void voidMethodDictionarySequenceArg(sequence<Dictionary> dictionarySequenceArg);
-    Promise overloadedPromiseMethod(long arg);
-    Promise overloadedPromiseMethod(DOMString arg);
 
     // Arguments
     void voidMethodStringArgLongArg(DOMString stringArg, long longArg);
@@ -437,6 +441,9 @@ interface TestObject {
     void overloadedMethodJ(DOMString stringArg);
     void overloadedMethodJ(TestDictionary testDictionaryArg);
 
+    Promise promiseOverloadMethod();
+    Promise promiseOverloadMethod(Window arg1, double arg2);
+    Promise promiseOverloadMethod(Document arg1, double arg2);
 
     [PerWorldBindings] void overloadedPerWorldBindingsMethod();
     [PerWorldBindings] void overloadedPerWorldBindingsMethod(long longArg);
@@ -517,10 +524,14 @@ interface TestObject {
     [TreatReturnedNullStringAs=Undefined] DOMString treatReturnedNullStringAsUndefinedStringMethod();
     [TreatReturnedNullStringAs=Null] ByteString treatReturnedNullStringAsNullByteStringMethod();
     [TreatReturnedNullStringAs=Undefined] ByteString treatReturnedNullStringAsUndefinedByteStringMethod();
-    [TreatReturnedNullStringAs=Null] ScalarValueString treatReturnedNullStringAsNullScalarValueStringMethod();
-    [TreatReturnedNullStringAs=Undefined] ScalarValueString treatReturnedNullStringAsUndefinedScalarValueStringMethod();
+    [TreatReturnedNullStringAs=Null] USVString treatReturnedNullStringAsNullUSVStringMethod();
+    [TreatReturnedNullStringAs=Undefined] USVString treatReturnedNullStringAsUndefinedUSVStringMethod();
     [TypeChecking=Interface] void typeCheckingInterfaceVoidMethodTestInterfaceEmptyArg(TestInterfaceEmpty testInterfaceEmptyArg);
     [TypeChecking=Interface] void typeCheckingInterfaceVoidMethodTestInterfaceEmptyVariadicArg(TestInterfaceEmpty... testInterfaceEmptyArg);
+    // Avoid redundant type checking
+    [TypeChecking=Interface] void useToImpl4ArgumentsCheckingIfPossibleWithOptionalArg(Node node1, optional Node node2);
+    [TypeChecking=Interface] void useToImpl4ArgumentsCheckingIfPossibleWithNullableArg(Node node1, Node? node2);
+    [TypeChecking=Interface] void useToImpl4ArgumentsCheckingIfPossibleWithUndefinedArg(Node node1, [Default=Undefined] optional Node node2);
     [TypeChecking=Unrestricted] void typeCheckingUnrestrictedVoidMethodFloatArgDoubleArg(float floatArg, double doubleArg);
     [Unforgeable] void unforgeableVoidMethod();
     void voidMethodTestInterfaceGarbageCollectedSequenceArg(sequence<TestInterfaceGarbageCollected> testInterfaceGarbageCollectedSequenceArg);

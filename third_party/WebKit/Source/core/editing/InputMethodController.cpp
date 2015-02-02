@@ -194,8 +194,7 @@ bool InputMethodController::finishComposition(const String& text, FinishComposit
     if (Element* target = frame().document()->focusedElement()) {
         unsigned baseOffset = frame().selection().base().downstream().deprecatedEditingOffset();
         Vector<CompositionUnderline> underlines;
-        for (size_t i = 0; i < m_customCompositionUnderlines.size(); ++i) {
-            CompositionUnderline underline = m_customCompositionUnderlines[i];
+        for (auto underline : m_customCompositionUnderlines) {
             underline.startOffset -= baseOffset;
             underline.endOffset -= baseOffset;
             underlines.append(underline);
@@ -299,13 +298,12 @@ void InputMethodController::setComposition(const String& text, const Vector<Comp
             m_compositionStart = baseOffset;
             m_compositionEnd = extentOffset;
             m_customCompositionUnderlines = underlines;
-            size_t numUnderlines = m_customCompositionUnderlines.size();
-            for (size_t i = 0; i < numUnderlines; ++i) {
-                m_customCompositionUnderlines[i].startOffset += baseOffset;
-                m_customCompositionUnderlines[i].endOffset += baseOffset;
+            for (auto& underline : m_customCompositionUnderlines) {
+                underline.startOffset += baseOffset;
+                underline.endOffset += baseOffset;
             }
             if (baseNode->renderer())
-                baseNode->renderer()->setShouldDoFullPaintInvalidation(true);
+                baseNode->renderer()->setShouldDoFullPaintInvalidation();
 
             unsigned start = std::min(baseOffset + selectionStart, extentOffset);
             unsigned end = std::min(std::max(start, baseOffset + selectionEnd), extentOffset);
@@ -343,7 +341,7 @@ void InputMethodController::setCompositionFromExistingText(const Vector<Composit
             m_customCompositionUnderlines[i].endOffset += m_compositionStart;
         }
         if (baseNode->renderer())
-            baseNode->renderer()->setShouldDoFullPaintInvalidation(true);
+            baseNode->renderer()->setShouldDoFullPaintInvalidation();
         return;
     }
 

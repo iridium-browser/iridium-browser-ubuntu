@@ -203,7 +203,7 @@ class CrossProcessFrameTreeBrowserTest : public ContentBrowserTest {
  public:
   CrossProcessFrameTreeBrowserTest() {}
 
-  virtual void SetUpCommandLine(base::CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kSitePerProcess);
   }
 
@@ -247,7 +247,7 @@ IN_PROC_BROWSER_TEST_F(CrossProcessFrameTreeBrowserTest,
   NavigateFrameToURL(root->child_at(0), cross_site_url);
 
   // Ensure that we have created a new process for the subframe.
-  ASSERT_EQ(1U, root->child_count());
+  ASSERT_EQ(2U, root->child_count());
   FrameTreeNode* child = root->child_at(0);
   SiteInstance* child_instance = child->current_frame_host()->GetSiteInstance();
   RenderViewHost* rvh = child->current_frame_host()->render_view_host();

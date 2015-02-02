@@ -30,24 +30,24 @@ class ExtensionSyncEventObserver : public sync_file_system::SyncEventObserver,
       GetFactoryInstance();
 
   explicit ExtensionSyncEventObserver(content::BrowserContext* context);
-  virtual ~ExtensionSyncEventObserver();
+  ~ExtensionSyncEventObserver() override;
 
   void InitializeForService(
       sync_file_system::SyncFileSystemService* sync_service);
 
   // KeyedService override.
-  virtual void Shutdown() OVERRIDE;
+  void Shutdown() override;
 
   // sync_file_system::SyncEventObserver interface implementation.
-  virtual void OnSyncStateUpdated(
-      const GURL& app_origin,
-      sync_file_system::SyncServiceState state,
-      const std::string& description) OVERRIDE;
+  void OnSyncStateUpdated(const GURL& app_origin,
+                          sync_file_system::SyncServiceState state,
+                          const std::string& description) override;
 
-  virtual void OnFileSynced(const storage::FileSystemURL& url,
-                            sync_file_system::SyncFileStatus status,
-                            sync_file_system::SyncAction action,
-                            sync_file_system::SyncDirection direction) OVERRIDE;
+  void OnFileSynced(const storage::FileSystemURL& url,
+                    sync_file_system::SyncFileType file_type,
+                    sync_file_system::SyncFileStatus status,
+                    sync_file_system::SyncAction action,
+                    sync_file_system::SyncDirection direction) override;
 
  private:
   friend class BrowserContextKeyedAPIFactory<ExtensionSyncEventObserver>;

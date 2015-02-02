@@ -473,6 +473,27 @@ typedef struct ssl3_state_st
 		 * negotiated and the server is expected to send a
 		 * CertificateStatus message. */
 		char certificate_status_expected;
+
+		/* peer_ecpointformatlist contains the EC point
+		 * formats advertised by the peer. */
+		uint8_t *peer_ecpointformatlist;
+		size_t peer_ecpointformatlist_length;
+
+		/* Server-only: peer_ellipticcurvelist contains the EC
+		 * curve IDs advertised by the peer. This is only set
+		 * on the server's end. The server does not advertise
+		 * this extension to the client. */
+		uint16_t *peer_ellipticcurvelist;
+		size_t peer_ellipticcurvelist_length;
+
+		/* extended_master_secret indicates whether the extended master
+		 * secret computation is used in this handshake. Note that this
+		 * is different from whether it was used for the current
+		 * session. If this is a resumption handshake then EMS might be
+		 * negotiated in the client and server hello messages, but it
+		 * doesn't matter if the session that's being resumed didn't
+		 * use it to create the master secret initially. */
+		char extended_master_secret;
 		} tmp;
 
         /* Connection binding to prevent renegotiation attacks */

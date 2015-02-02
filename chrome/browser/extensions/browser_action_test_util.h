@@ -29,9 +29,6 @@ class BrowserActionTestUtil {
   // Returns the number of browser action currently visible.
   int VisibleBrowserActions();
 
-  // Returns the ExtensionAction for the given index.
-  ExtensionAction* GetExtensionAction(int index);
-
   // Inspects the extension popup for the action at the given index.
   void InspectPopup(int index);
 
@@ -57,14 +54,20 @@ class BrowserActionTestUtil {
   // Returns whether a browser action popup is being shown currently.
   bool HasPopup();
 
-  // Returns the bounds of the current browser action popup.
-  gfx::Rect GetPopupBounds();
+  // Returns the size of the current browser action popup.
+  gfx::Size GetPopupSize();
 
   // Hides the given popup and returns whether the hide was successful.
   bool HidePopup();
 
   // Set how many icons should be visible.
   void SetIconVisibilityCount(size_t icons);
+
+  // Disables animation.
+  static void DisableAnimations();
+
+  // Enables animation.
+  static void EnableAnimations();
 
   // Returns the minimum allowed size of an extension popup.
   static gfx::Size GetMinPopupSize();

@@ -17,15 +17,18 @@
 #include "chromeos/audio/cras_audio_handler.h"
 #endif
 
+#if defined(OS_WIN)
+#include "base/win/windows_version.h"
+#endif
+
 namespace content {
 
 void WebRtcContentBrowserTest::SetUpCommandLine(CommandLine* command_line) {
-  // We need fake devices in this test since we want to run on naked VMs. We
-  // assume these switches are set by default in content_browsertests.
-  ASSERT_TRUE(CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kUseFakeDeviceForMediaStream));
+  // Assume this is set by the content test launcher.
   ASSERT_TRUE(CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kUseFakeUIForMediaStream));
+  ASSERT_TRUE(CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kUseFakeDeviceForMediaStream));
 
   // Always include loopback interface in network list, in case the test device
   // doesn't have other interfaces available.
@@ -34,6 +37,7 @@ void WebRtcContentBrowserTest::SetUpCommandLine(CommandLine* command_line) {
 }
 
 void WebRtcContentBrowserTest::SetUp() {
+  // We need pixel output when we dig pixels out of video tags for verification.
   EnablePixelOutput();
 #if defined(OS_CHROMEOS)
     chromeos::CrasAudioHandler::InitializeForTesting();
@@ -94,6 +98,14 @@ void WebRtcContentBrowserTest::DisableOpusIfOnAndroid() {
   // Always force iSAC 16K on Android for now (Opus is broken).
   EXPECT_EQ("isac-forced",
             ExecuteJavascriptAndReturnResult("forceIsac16KInSdp();"));
+#endif
+}
+
+bool WebRtcContentBrowserTest::OnWinXp() const {
+#if defined(OS_WIN)
+  return base::win::GetVersion() <= base::win::VERSION_XP;
+#else
+  return false;
 #endif
 }
 

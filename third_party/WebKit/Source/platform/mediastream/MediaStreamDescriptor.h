@@ -49,7 +49,7 @@ public:
     virtual void removeRemoteTrack(MediaStreamComponent*) = 0;
 };
 
-class PLATFORM_EXPORT MediaStreamDescriptor FINAL : public RefCounted<MediaStreamDescriptor> {
+class PLATFORM_EXPORT MediaStreamDescriptor final : public RefCounted<MediaStreamDescriptor> {
 public:
     class ExtraData {
     public:

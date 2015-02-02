@@ -24,7 +24,7 @@ namespace tray {
 // DateView popup and the TimeView tray icon. Exported for tests.
 class ASH_EXPORT BaseDateTimeView : public ActionableView {
  public:
-  virtual ~BaseDateTimeView();
+  ~BaseDateTimeView() override;
 
   // Updates the displayed text for the current time and calls SetTimer().
   void UpdateText();
@@ -40,8 +40,8 @@ class ASH_EXPORT BaseDateTimeView : public ActionableView {
   virtual void UpdateTextInternal(const base::Time& now) = 0;
 
   // Overridden from views::View.
-  virtual void ChildPreferredSizeChanged(views::View* child) OVERRIDE;
-  virtual void OnLocaleChanged() OVERRIDE;
+  void ChildPreferredSizeChanged(views::View* child) override;
+  void OnLocaleChanged() override;
 
   // Invokes UpdateText() when the displayed time should change.
   base::OneShotTimer<BaseDateTimeView> timer_;
@@ -53,7 +53,7 @@ class ASH_EXPORT BaseDateTimeView : public ActionableView {
 class ASH_EXPORT DateView : public BaseDateTimeView {
  public:
   DateView();
-  virtual ~DateView();
+  ~DateView() override;
 
   // Sets the action the view should take. An actionable date view gives visual
   // feedback on hover, can be focused by keyboard, and clicking/pressing space
@@ -66,15 +66,19 @@ class ASH_EXPORT DateView : public BaseDateTimeView {
   base::HourClockType GetHourTypeForTesting() const;
 
  private:
+  // Sets active rendering state and updates the color of |date_label_|.
+  void SetActive(bool active);
+
   // Overridden from BaseDateTimeView.
-  virtual void UpdateTextInternal(const base::Time& now) OVERRIDE;
+  void UpdateTextInternal(const base::Time& now) override;
 
   // Overridden from ActionableView.
-  virtual bool PerformAction(const ui::Event& event) OVERRIDE;
+  bool PerformAction(const ui::Event& event) override;
 
   // Overridden from views::View.
-  virtual void OnMouseEntered(const ui::MouseEvent& event) OVERRIDE;
-  virtual void OnMouseExited(const ui::MouseEvent& event) OVERRIDE;
+  void OnMouseEntered(const ui::MouseEvent& event) override;
+  void OnMouseExited(const ui::MouseEvent& event) override;
+  void OnGestureEvent(ui::GestureEvent* event) override;
 
   views::Label* date_label_;
 
@@ -91,7 +95,7 @@ class ASH_EXPORT DateView : public BaseDateTimeView {
 class ASH_EXPORT TimeView : public BaseDateTimeView {
  public:
   explicit TimeView(TrayDate::ClockLayout clock_layout);
-  virtual ~TimeView();
+  ~TimeView() override;
 
   // Updates the format of the displayed time.
   void UpdateTimeFormat();
@@ -105,13 +109,13 @@ class ASH_EXPORT TimeView : public BaseDateTimeView {
   friend class TimeViewTest;
 
   // Overridden from BaseDateTimeView.
-  virtual void UpdateTextInternal(const base::Time& now) OVERRIDE;
+  void UpdateTextInternal(const base::Time& now) override;
 
   // Overridden from ActionableView.
-  virtual bool PerformAction(const ui::Event& event) OVERRIDE;
+  bool PerformAction(const ui::Event& event) override;
 
   // Overridden from views::View.
-  virtual bool OnMousePressed(const ui::MouseEvent& event) OVERRIDE;
+  bool OnMousePressed(const ui::MouseEvent& event) override;
 
   void SetBorderFromLayout(TrayDate::ClockLayout clock_layout);
   void SetupLabels();

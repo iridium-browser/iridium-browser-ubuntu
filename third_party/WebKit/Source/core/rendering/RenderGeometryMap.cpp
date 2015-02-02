@@ -198,10 +198,10 @@ static bool canMapBetweenRenderers(const RenderObject* renderer, const RenderObj
 {
     for (const RenderObject* current = renderer; ; current = current->parent()) {
         const RenderStyle* style = current->style();
-        if (style->position() == FixedPosition || style->isFlippedBlocksWritingMode())
+        if (style->position() == FixedPosition || style->slowIsFlippedBlocksWritingMode())
             return false;
 
-        if (current->hasColumns() || current->hasTransform() || current->isRenderFlowThread() || current->isSVGRoot())
+        if (current->hasColumns() || current->hasTransformRelatedProperty() || current->isRenderFlowThread() || current->isSVGRoot())
             return false;
 
         if (current == ancestor)

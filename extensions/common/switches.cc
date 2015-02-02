@@ -16,8 +16,9 @@ const char kAllowHTTPBackgroundPage[] = "allow-http-background-page";
 const char kAllowLegacyExtensionManifests[] =
     "allow-legacy-extension-manifests";
 
-// Enables the <appview> tag in platform apps.
-const char kAppView[] = "app-view";
+// Disables the App Info dialog from being launched from the chrome://extensions
+// page (reverts to the old-style permissions dialog instead).
+const char kDisableExtensionInfoDialog[] = "disable-extension-info-dialog";
 
 // Enables extension options to be embedded in chrome://extensions rather than
 // a new tab.
@@ -27,10 +28,6 @@ const char kEmbeddedExtensionOptions[] = "embedded-extension-options";
 // later for heavy apps loading resources synchronously but it will be
 // insignificant for apps that load most of their resources asynchronously.
 const char kEnableAppsShowOnFirstPaint[] = "enable-apps-show-on-first-paint";
-
-// Hack so that feature switch can work with about_flags. See
-// kEnableScriptsRequireAction.
-const char kEnableAppView[] = "enable-app-view";
 
 // Enables the <window-controls> tag in platform apps.
 const char kEnableAppWindowControls[] = "enable-app-window-controls";
@@ -53,8 +50,15 @@ const char kEnableExtensionActionRedesign[] =
 // kEnableScriptsRequireAction.
 const char kEnableMimeHandlerView[] = "enable-mime-handler-view";
 
+// Enables the mojo implementation of the serial API.
+const char kEnableMojoSerialService[] = "enable-mojo-serial-service";
+
 // Enables extensions to hide bookmarks UI elements.
 const char kEnableOverrideBookmarksUI[] = "enable-override-bookmarks-ui";
+
+// Allows remote assistance connection to this computer using the Chrome Remote
+// Desktop app on Chrome OS.
+const char kEnableRemoteAssistance[] = "enable-remote-assistance";
 
 // Allows the ErrorConsole to collect runtime and manifest errors, and display
 // them in the chrome:extensions page.
@@ -94,6 +98,9 @@ const char kShowComponentExtensionOptions[] =
 
 // Adds the given extension ID to all the permission whitelists.
 const char kWhitelistedExtensionID[] = "whitelisted-extension-id";
+
+// Pass launch source to platform apps.
+const char kTraceAppSource[] = "enable-trace-app-source";
 
 }  // namespace switches
 

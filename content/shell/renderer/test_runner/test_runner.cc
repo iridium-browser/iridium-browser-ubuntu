@@ -74,7 +74,7 @@ class HostMethodTask : public WebMethodTask<TestRunner> {
   HostMethodTask(TestRunner* object, CallbackMethodType callback)
       : WebMethodTask<TestRunner>(object), callback_(callback) {}
 
-  virtual void RunIfValid() OVERRIDE { (object_->*callback_)(); }
+  void RunIfValid() override { (object_->*callback_)(); }
 
  private:
   CallbackMethodType callback_;
@@ -89,7 +89,7 @@ class InvokeCallbackTask : public WebMethodTask<TestRunner> {
         callback_(blink::mainThreadIsolate(), callback),
         argc_(0) {}
 
-  virtual void RunIfValid() OVERRIDE {
+  void RunIfValid() override {
     v8::Isolate* isolate = blink::mainThreadIsolate();
     v8::HandleScope handle_scope(isolate);
     WebFrame* frame = object_->web_view_->mainFrame();
@@ -138,11 +138,11 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
  private:
   explicit TestRunnerBindings(
       base::WeakPtr<TestRunner> controller);
-  virtual ~TestRunnerBindings();
+  ~TestRunnerBindings() override;
 
   // gin::Wrappable:
-  virtual gin::ObjectTemplateBuilder GetObjectTemplateBuilder(
-      v8::Isolate* isolate) OVERRIDE;
+  gin::ObjectTemplateBuilder GetObjectTemplateBuilder(
+      v8::Isolate* isolate) override;
 
   void LogToStderr(const std::string& output);
   void NotifyDone();
@@ -273,7 +273,7 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
   void SetMIDISysexPermission(bool value);
   void GrantWebNotificationPermission(gin::Arguments* args);
   void ClearWebNotificationPermissions();
-  bool SimulateWebNotificationClick(const std::string& value);
+  void SimulateWebNotificationClick(const std::string& title);
   void AddMockSpeechRecognitionResult(const std::string& transcript,
                                       double confidence);
   void SetMockSpeechRecognitionError(const std::string& error,
@@ -297,6 +297,7 @@ class TestRunnerBindings : public gin::Wrappable<TestRunnerBindings> {
   void SetMockPushClientSuccess(const std::string& endpoint,
                                 const std::string& registration_id);
   void SetMockPushClientError(const std::string& message);
+  void SetBluetoothMockDataSet(const std::string& dataset_name);
 
   std::string PlatformName();
   std::string TooltipText();
@@ -541,6 +542,8 @@ gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
                  &TestRunnerBindings::SetMockPushClientSuccess)
       .SetMethod("setMockPushClientError",
                  &TestRunnerBindings::SetMockPushClientError)
+      .SetMethod("setBluetoothMockDataSet",
+                 &TestRunnerBindings::SetBluetoothMockDataSet)
 
       // Properties.
       .SetProperty("platformName", &TestRunnerBindings::PlatformName)
@@ -1276,6 +1279,11 @@ void TestRunnerBindings::SetColorProfile(
     runner_->SetColorProfile(name, callback);
 }
 
+void TestRunnerBindings::SetBluetoothMockDataSet(const std::string& name) {
+  if (runner_)
+    runner_->SetBluetoothMockDataSet(name);
+}
+
 void TestRunnerBindings::SetPOSIXLocale(const std::string& locale) {
   if (runner_)
     runner_->SetPOSIXLocale(locale);
@@ -1307,11 +1315,10 @@ void TestRunnerBindings::ClearWebNotificationPermissions() {
     runner_->ClearWebNotificationPermissions();
 }
 
-bool TestRunnerBindings::SimulateWebNotificationClick(
-    const std::string& value) {
+void TestRunnerBindings::SimulateWebNotificationClick(
+    const std::string& title) {
   if (runner_)
-    return runner_->SimulateWebNotificationClick(value);
-  return false;
+    runner_->SimulateWebNotificationClick(title);
 }
 
 void TestRunnerBindings::AddMockSpeechRecognitionResult(
@@ -1451,7 +1458,7 @@ class TestPageOverlay : public WebPageOverlay {
   }
   virtual ~TestPageOverlay() {}
 
-  virtual void paintPageOverlay(WebCanvas* canvas) OVERRIDE  {
+  virtual void paintPageOverlay(WebCanvas* canvas) override  {
     SkRect rect = SkRect::MakeWH(web_view_->size().width,
                                  web_view_->size().height);
     SkPaint paint;
@@ -1527,9 +1534,9 @@ TestRunner::TestRunner(TestInterfaces* interfaces)
       web_history_item_count_(0),
       intercept_post_message_(false),
       test_interfaces_(interfaces),
-      delegate_(NULL),
-      web_view_(NULL),
-      page_overlay_(NULL),
+      delegate_(nullptr),
+      web_view_(nullptr),
+      page_overlay_(nullptr),
       web_permissions_(new WebPermissions()),
       notification_presenter_(new NotificationPresenter()),
       weak_factory_(this) {}
@@ -1569,11 +1576,11 @@ void TestRunner::Reset() {
     if (page_overlay_) {
       web_view_->removePageOverlay(page_overlay_);
       delete page_overlay_;
-      page_overlay_ = NULL;
+      page_overlay_ = nullptr;
     }
   }
 
-  top_loading_frame_ = NULL;
+  top_loading_frame_ = nullptr;
   wait_until_done_ = false;
   wait_until_external_url_load_ = false;
   policy_delegate_enabled_ = false;
@@ -1596,6 +1603,7 @@ void TestRunner::Reset() {
     delegate_->DisableAutoResizeMode(WebSize());
     delegate_->DeleteAllCookies();
     delegate_->ResetScreenOrientation();
+    delegate_->SetBluetoothMockDataSet("");
     ResetBatteryStatus();
     ResetDeviceLight();
   }
@@ -1825,7 +1833,7 @@ void TestRunner::setTopLoadingFrame(WebFrame* frame, bool clear) {
   if (!test_is_running_)
     return;
   if (clear) {
-    top_loading_frame_ = NULL;
+    top_loading_frame_ = nullptr;
     LocationChangeDone();
   } else if (!top_loading_frame_) {
     top_loading_frame_ = frame;
@@ -1915,7 +1923,7 @@ class WorkItemBackForward : public TestRunner::WorkItem {
  public:
   WorkItemBackForward(int distance) : distance_(distance) {}
 
-  virtual bool Run(WebTestDelegate* delegate, WebView*) OVERRIDE {
+  bool Run(WebTestDelegate* delegate, WebView*) override {
     delegate->GoToOffset(distance_);
     return true; // FIXME: Did it really start a navigation?
   }
@@ -1948,7 +1956,7 @@ void TestRunner::QueueForwardNavigation(int how_far_forward) {
 
 class WorkItemReload : public TestRunner::WorkItem {
  public:
-  virtual bool Run(WebTestDelegate* delegate, WebView*) OVERRIDE {
+  bool Run(WebTestDelegate* delegate, WebView*) override {
     delegate->Reload();
     return true;
   }
@@ -1963,7 +1971,7 @@ class WorkItemLoadingScript : public TestRunner::WorkItem {
   WorkItemLoadingScript(const std::string& script)
       : script_(script) {}
 
-  virtual bool Run(WebTestDelegate*, WebView* web_view) OVERRIDE {
+  bool Run(WebTestDelegate*, WebView* web_view) override {
     web_view->mainFrame()->executeScript(
         WebScriptSource(WebString::fromUTF8(script_)));
     return true; // FIXME: Did it really start a navigation?
@@ -1982,7 +1990,7 @@ class WorkItemNonLoadingScript : public TestRunner::WorkItem {
   WorkItemNonLoadingScript(const std::string& script)
       : script_(script) {}
 
-  virtual bool Run(WebTestDelegate*, WebView* web_view) OVERRIDE {
+  bool Run(WebTestDelegate*, WebView* web_view) override {
     web_view->mainFrame()->executeScript(
         WebScriptSource(WebString::fromUTF8(script_)));
     return false;
@@ -2001,7 +2009,7 @@ class WorkItemLoad : public TestRunner::WorkItem {
   WorkItemLoad(const WebURL& url, const std::string& target)
       : url_(url), target_(target) {}
 
-  virtual bool Run(WebTestDelegate* delegate, WebView*) OVERRIDE {
+  bool Run(WebTestDelegate* delegate, WebView*) override {
     delegate->LoadURLForFrame(url_, target_);
     return true; // FIXME: Did it really start a navigation?
   }
@@ -2027,7 +2035,7 @@ class WorkItemLoadHTMLString : public TestRunner::WorkItem  {
                          const WebURL& unreachable_url)
       : html_(html), base_url_(base_url), unreachable_url_(unreachable_url) {}
 
-  virtual bool Run(WebTestDelegate*, WebView* web_view) OVERRIDE {
+  bool Run(WebTestDelegate*, WebView* web_view) override {
     web_view->mainFrame()->loadHTMLString(
         WebData(html_.data(), html_.length()),
         base_url_, unreachable_url_);
@@ -2124,7 +2132,7 @@ void TestRunner::SetDomainRelaxationForbiddenForURLScheme(
 v8::Handle<v8::Value> TestRunner::EvaluateScriptInIsolatedWorldAndReturnValue(
     int world_id,
     const std::string& script) {
-  WebVector<v8::Local<v8::Value> > values;
+  WebVector<v8::Local<v8::Value>> values;
   WebScriptSource source(WebString::fromUTF8(script));
   // This relies on the iframe focusing itself when it loads. This is a bit
   // sketchy, but it seems to be what other tests do.
@@ -2223,8 +2231,7 @@ bool TestRunner::FindString(const std::string& search_text,
   find_options.matchCase = true;
   find_options.findNext = true;
 
-  for (size_t i = 0; i < options_array.size(); ++i) {
-    const std::string& option = options_array[i];
+  for (const std::string& option : options_array) {
     if (option == "CaseInsensitive")
       find_options.matchCase = false;
     else if (option == "Backwards")
@@ -2732,6 +2739,10 @@ void TestRunner::SetColorProfile(const std::string& name,
   delegate_->PostTask(new InvokeCallbackTask(this, callback));
 }
 
+void TestRunner::SetBluetoothMockDataSet(const std::string& name) {
+  delegate_->SetBluetoothMockDataSet(name);
+}
+
 void TestRunner::SetPOSIXLocale(const std::string& locale) {
   delegate_->SetLocale(locale);
 }
@@ -2741,10 +2752,8 @@ void TestRunner::SetMIDIAccessorResult(bool result) {
 }
 
 void TestRunner::SetMIDISysexPermission(bool value) {
-  const std::vector<WebTestProxyBase*>& windowList =
-      test_interfaces_->GetWindowList();
-  for (unsigned i = 0; i < windowList.size(); ++i)
-    windowList.at(i)->GetMIDIClientMock()->setSysexPermission(value);
+  for (auto* window : test_interfaces_->GetWindowList())
+    window->GetMIDIClientMock()->setSysexPermission(value);
 }
 
 void TestRunner::GrantWebNotificationPermission(const GURL& origin,
@@ -2756,8 +2765,12 @@ void TestRunner::ClearWebNotificationPermissions() {
   delegate_->ClearWebNotificationPermissions();
 }
 
-bool TestRunner::SimulateWebNotificationClick(const std::string& value) {
-  return notification_presenter_->SimulateClick(value);
+void TestRunner::SimulateWebNotificationClick(const std::string& title) {
+  delegate_->SimulateWebNotificationClick(title);
+
+  // TODO(peter): Remove this call once Web Notifications switch away from the
+  // WebFrame-based code path.
+  notification_presenter_->SimulateClick(title);
 }
 
 void TestRunner::AddMockSpeechRecognitionResult(const std::string& transcript,
@@ -2798,7 +2811,7 @@ void TestRunner::RemoveWebPageOverlay() {
   if (web_view_ && page_overlay_) {
     web_view_->removePageOverlay(page_overlay_);
     delete page_overlay_;
-    page_overlay_ = NULL;
+    page_overlay_ = nullptr;
   }
 }
 
@@ -2810,7 +2823,7 @@ void TestRunner::DisplayAsyncThen(v8::Handle<v8::Function> callback) {
   scoped_ptr<InvokeCallbackTask> task(
       new InvokeCallbackTask(this, callback));
   proxy_->DisplayAsyncThen(base::Bind(&TestRunner::InvokeCallback,
-                                      base::Unretained(this),
+                                      weak_factory_.GetWeakPtr(),
                                       base::Passed(&task)));
 }
 
@@ -2820,7 +2833,7 @@ void TestRunner::GetManifestThen(v8::Handle<v8::Function> callback) {
 
   FetchManifest(web_view_, web_view_->mainFrame()->document().manifestURL(),
       base::Bind(&TestRunner::GetManifestCallback,
-                 base::Unretained(this),
+                 weak_factory_.GetWeakPtr(),
                  base::Passed(&task)));
 }
 
@@ -2828,7 +2841,7 @@ void TestRunner::CapturePixelsAsyncThen(v8::Handle<v8::Function> callback) {
   scoped_ptr<InvokeCallbackTask> task(
       new InvokeCallbackTask(this, callback));
   proxy_->CapturePixelsAsync(base::Bind(&TestRunner::CapturePixelsCallback,
-                                        base::Unretained(this),
+                                        weak_factory_.GetWeakPtr(),
                                         base::Passed(&task)));
 }
 
@@ -2838,7 +2851,7 @@ void TestRunner::CopyImageAtAndCapturePixelsAsyncThen(
       new InvokeCallbackTask(this, callback));
   proxy_->CopyImageAtAndCapturePixels(
       x, y, base::Bind(&TestRunner::CapturePixelsCallback,
-                       base::Unretained(this),
+                       weak_factory_.GetWeakPtr(),
                        base::Passed(&task)));
 }
 

@@ -33,21 +33,21 @@ class AudioDiscarder : public media::AudioOutputStream {
       : consumer_(media::AudioManager::Get()->GetWorkerTaskRunner(), params) {}
 
   // AudioOutputStream implementation.
-  virtual bool Open() OVERRIDE { return true; }
-  virtual void Start(AudioSourceCallback* callback) OVERRIDE {
+  bool Open() override { return true; }
+  void Start(AudioSourceCallback* callback) override {
     consumer_.Start(base::Bind(&AudioDiscarder::FetchAudioData, callback));
   }
-  virtual void Stop() OVERRIDE { consumer_.Stop(); }
-  virtual void SetVolume(double volume) OVERRIDE {}
-  virtual void GetVolume(double* volume) OVERRIDE { *volume = 0; }
-  virtual void Close() OVERRIDE { delete this; }
+  void Stop() override { consumer_.Stop(); }
+  void SetVolume(double volume) override {}
+  void GetVolume(double* volume) override { *volume = 0; }
+  void Close() override { delete this; }
 
  private:
-  virtual ~AudioDiscarder() {}
+  ~AudioDiscarder() override {}
 
   static void FetchAudioData(AudioSourceCallback* callback,
                              media::AudioBus* audio_bus) {
-    callback->OnMoreData(audio_bus, media::AudioBuffersState());
+    callback->OnMoreData(audio_bus, 0);
   }
 
   // Calls FetchAudioData() at regular intervals and discards the data.
@@ -73,11 +73,10 @@ class WebContentsAudioMuter::MuteDestination
 
   typedef AudioMirroringManager::SourceFrameRef SourceFrameRef;
 
-  virtual ~MuteDestination() {}
+  ~MuteDestination() override {}
 
-  virtual void QueryForMatches(
-      const std::set<SourceFrameRef>& candidates,
-      const MatchesCallback& results_callback) OVERRIDE {
+  void QueryForMatches(const std::set<SourceFrameRef>& candidates,
+                       const MatchesCallback& results_callback) override {
     BrowserThread::PostTask(
         BrowserThread::UI,
         FROM_HERE,
@@ -104,8 +103,8 @@ class WebContentsAudioMuter::MuteDestination
     results_callback.Run(matches);
   }
 
-  virtual media::AudioOutputStream* AddInput(
-      const media::AudioParameters& params) OVERRIDE {
+  media::AudioOutputStream* AddInput(
+      const media::AudioParameters& params) override {
     return new AudioDiscarder(params);
   }
 

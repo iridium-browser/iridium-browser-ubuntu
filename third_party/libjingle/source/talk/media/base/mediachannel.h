@@ -301,18 +301,11 @@ struct VideoOptions {
   }
 
   void SetAll(const VideoOptions& change) {
-    adapt_input_to_encoder.SetFrom(change.adapt_input_to_encoder);
     adapt_input_to_cpu_usage.SetFrom(change.adapt_input_to_cpu_usage);
     adapt_cpu_with_smoothing.SetFrom(change.adapt_cpu_with_smoothing);
-    adapt_view_switch.SetFrom(change.adapt_view_switch);
     video_adapt_third.SetFrom(change.video_adapt_third);
     video_noise_reduction.SetFrom(change.video_noise_reduction);
-    video_one_layer_screencast.SetFrom(change.video_one_layer_screencast);
-    video_high_bitrate.SetFrom(change.video_high_bitrate);
     video_start_bitrate.SetFrom(change.video_start_bitrate);
-    video_temporal_layer_screencast.SetFrom(
-        change.video_temporal_layer_screencast);
-    video_leaky_bucket.SetFrom(change.video_leaky_bucket);
     video_highest_bitrate.SetFrom(change.video_highest_bitrate);
     cpu_overuse_detection.SetFrom(change.cpu_overuse_detection);
     cpu_underuse_threshold.SetFrom(change.cpu_underuse_threshold);
@@ -338,56 +331,42 @@ struct VideoOptions {
   }
 
   bool operator==(const VideoOptions& o) const {
-    return adapt_input_to_encoder == o.adapt_input_to_encoder &&
-        adapt_input_to_cpu_usage == o.adapt_input_to_cpu_usage &&
-        adapt_cpu_with_smoothing == o.adapt_cpu_with_smoothing &&
-        adapt_view_switch == o.adapt_view_switch &&
-        video_adapt_third == o.video_adapt_third &&
-        video_noise_reduction == o.video_noise_reduction &&
-        video_one_layer_screencast == o.video_one_layer_screencast &&
-        video_high_bitrate == o.video_high_bitrate &&
-        video_start_bitrate == o.video_start_bitrate &&
-        video_temporal_layer_screencast == o.video_temporal_layer_screencast &&
-        video_leaky_bucket == o.video_leaky_bucket &&
-        video_highest_bitrate == o.video_highest_bitrate &&
-        cpu_overuse_detection == o.cpu_overuse_detection &&
-        cpu_underuse_threshold == o.cpu_underuse_threshold &&
-        cpu_overuse_threshold == o.cpu_overuse_threshold &&
-        cpu_underuse_encode_rsd_threshold ==
-            o.cpu_underuse_encode_rsd_threshold &&
-        cpu_overuse_encode_rsd_threshold ==
-            o.cpu_overuse_encode_rsd_threshold &&
-        cpu_overuse_encode_usage == o.cpu_overuse_encode_usage &&
-        conference_mode == o.conference_mode &&
-        process_adaptation_threshhold == o.process_adaptation_threshhold &&
-        system_low_adaptation_threshhold ==
-            o.system_low_adaptation_threshhold &&
-        system_high_adaptation_threshhold ==
-            o.system_high_adaptation_threshhold &&
-        buffered_mode_latency == o.buffered_mode_latency &&
-        dscp == o.dscp &&
-        suspend_below_min_bitrate == o.suspend_below_min_bitrate &&
-        unsignalled_recv_stream_limit == o.unsignalled_recv_stream_limit &&
-        use_simulcast_adapter == o.use_simulcast_adapter &&
-        screencast_min_bitrate == o.screencast_min_bitrate &&
-        use_payload_padding == o.use_payload_padding;
+    return adapt_input_to_cpu_usage == o.adapt_input_to_cpu_usage &&
+           adapt_cpu_with_smoothing == o.adapt_cpu_with_smoothing &&
+           video_adapt_third == o.video_adapt_third &&
+           video_noise_reduction == o.video_noise_reduction &&
+           video_start_bitrate == o.video_start_bitrate &&
+           video_highest_bitrate == o.video_highest_bitrate &&
+           cpu_overuse_detection == o.cpu_overuse_detection &&
+           cpu_underuse_threshold == o.cpu_underuse_threshold &&
+           cpu_overuse_threshold == o.cpu_overuse_threshold &&
+           cpu_underuse_encode_rsd_threshold ==
+               o.cpu_underuse_encode_rsd_threshold &&
+           cpu_overuse_encode_rsd_threshold ==
+               o.cpu_overuse_encode_rsd_threshold &&
+           cpu_overuse_encode_usage == o.cpu_overuse_encode_usage &&
+           conference_mode == o.conference_mode &&
+           process_adaptation_threshhold == o.process_adaptation_threshhold &&
+           system_low_adaptation_threshhold ==
+               o.system_low_adaptation_threshhold &&
+           system_high_adaptation_threshhold ==
+               o.system_high_adaptation_threshhold &&
+           buffered_mode_latency == o.buffered_mode_latency && dscp == o.dscp &&
+           suspend_below_min_bitrate == o.suspend_below_min_bitrate &&
+           unsignalled_recv_stream_limit == o.unsignalled_recv_stream_limit &&
+           use_simulcast_adapter == o.use_simulcast_adapter &&
+           screencast_min_bitrate == o.screencast_min_bitrate &&
+           use_payload_padding == o.use_payload_padding;
   }
 
   std::string ToString() const {
     std::ostringstream ost;
     ost << "VideoOptions {";
-    ost << ToStringIfSet("encoder adaption", adapt_input_to_encoder);
     ost << ToStringIfSet("cpu adaption", adapt_input_to_cpu_usage);
     ost << ToStringIfSet("cpu adaptation smoothing", adapt_cpu_with_smoothing);
-    ost << ToStringIfSet("adapt view switch", adapt_view_switch);
     ost << ToStringIfSet("video adapt third", video_adapt_third);
     ost << ToStringIfSet("noise reduction", video_noise_reduction);
-    ost << ToStringIfSet("1 layer screencast", video_one_layer_screencast);
-    ost << ToStringIfSet("high bitrate", video_high_bitrate);
     ost << ToStringIfSet("start bitrate", video_start_bitrate);
-    ost << ToStringIfSet("video temporal layer screencast",
-                         video_temporal_layer_screencast);
-    ost << ToStringIfSet("leaky bucket", video_leaky_bucket);
     ost << ToStringIfSet("highest video bitrate", video_highest_bitrate);
     ost << ToStringIfSet("cpu overuse detection", cpu_overuse_detection);
     ost << ToStringIfSet("cpu underuse threshold", cpu_underuse_threshold);
@@ -415,28 +394,16 @@ struct VideoOptions {
     return ost.str();
   }
 
-  // Encoder adaption, which is the gd callback in LMI, and TBA in WebRTC.
-  Settable<bool> adapt_input_to_encoder;
   // Enable CPU adaptation?
   Settable<bool> adapt_input_to_cpu_usage;
   // Enable CPU adaptation smoothing?
   Settable<bool> adapt_cpu_with_smoothing;
-  // Enable Adapt View Switch?
-  Settable<bool> adapt_view_switch;
   // Enable video adapt third?
   Settable<bool> video_adapt_third;
   // Enable denoising?
   Settable<bool> video_noise_reduction;
-  // Experimental: Enable one layer screencast?
-  Settable<bool> video_one_layer_screencast;
-  // Experimental: Enable WebRtc higher bitrate?
-  Settable<bool> video_high_bitrate;
   // Experimental: Enable WebRtc higher start bitrate?
   Settable<int> video_start_bitrate;
-  // Experimental: Enable WebRTC layered screencast.
-  Settable<bool> video_temporal_layer_screencast;
-  // Enable WebRTC leaky bucket when sending media packets.
-  Settable<bool> video_leaky_bucket;
   // Set highest bitrate mode for video.
   Settable<HighestBitrate> video_highest_bitrate;
   // Enable WebRTC Cpu Overuse Detection, which is a new version of the CPU
@@ -606,8 +573,6 @@ class MediaChannel : public sigslot::has_slots<> {
   virtual int GetRtpSendTimeExtnId() const {
     return -1;
   }
-  // Sets the initial bandwidth to use when sending starts.
-  virtual bool SetStartSendBandwidth(int bps) = 0;
   // Sets the maximum allowed bandwidth to use when sending data.
   virtual bool SetMaxSendBandwidth(int bps) = 0;
 
@@ -878,7 +843,6 @@ struct VideoSenderInfo : public MediaSenderInfo {
         capture_jitter_ms(0),
         avg_encode_ms(0),
         encode_usage_percent(0),
-        encode_rsd(0),
         capture_queue_delay_ms_per_s(0) {
   }
 
@@ -900,7 +864,6 @@ struct VideoSenderInfo : public MediaSenderInfo {
   int capture_jitter_ms;
   int avg_encode_ms;
   int encode_usage_percent;
-  int encode_rsd;
   int capture_queue_delay_ms_per_s;
   VariableInfo<int> adapt_frame_drops;
   VariableInfo<int> effects_frame_drops;
@@ -1008,7 +971,7 @@ struct BandwidthEstimationInfo {
   // StatsOptions::include_received_propagation_stats is true.
   int total_received_propagation_delta_ms;
   std::vector<int> recent_received_propagation_delta_ms;
-  std::vector<int64> recent_received_packet_group_arrival_time_ms;
+  std::vector<int64_t> recent_received_packet_group_arrival_time_ms;
 };
 
 struct VoiceMediaInfo {

@@ -12,7 +12,6 @@
 #include "base/message_loop/message_loop.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/time/time.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_client.h"
 #include "components/signin/core/browser/signin_metrics.h"
@@ -61,6 +60,7 @@ AccountReconcilor::AccountReconcilor(ProfileOAuth2TokenService* token_service,
       signin_manager_(signin_manager),
       client_(client),
       merge_session_helper_(token_service_,
+                            GaiaConstants::kReconcilorSource,
                             client->GetURLRequestContext(),
                             this),
       registered_with_token_service_(false),
@@ -120,6 +120,8 @@ void AccountReconcilor::RegisterForCookieChanges() {
   // go off in some embedders on reauth (e.g., ChromeSigninClient).
   UnregisterForCookieChanges();
   cookie_changed_subscription_ = client_->AddCookieChangedCallback(
+      GaiaUrls::GetInstance()->gaia_url(),
+      "LSID",
       base::Bind(&AccountReconcilor::OnCookieChanged, base::Unretained(this)));
 }
 
@@ -159,10 +161,11 @@ bool AccountReconcilor::IsProfileConnected() {
   return signin_manager_->IsAuthenticated();
 }
 
-void AccountReconcilor::OnCookieChanged(const net::CanonicalCookie* cookie) {
-  if (cookie->Name() == "LSID" &&
-      cookie->Domain() == GaiaUrls::GetInstance()->gaia_url().host() &&
-      cookie->IsSecure() && cookie->IsHttpOnly()) {
+void AccountReconcilor::OnCookieChanged(const net::CanonicalCookie& cookie,
+                                        bool removed) {
+  DCHECK_EQ("LSID", cookie.Name());
+  DCHECK_EQ(GaiaUrls::GetInstance()->gaia_url().host(), cookie.Domain());
+  if (cookie.IsSecure() && cookie.IsHttpOnly()) {
     VLOG(1) << "AccountReconcilor::OnCookieChanged: LSID changed";
 
     // It is possible that O2RT is not available at this moment.
@@ -223,32 +226,29 @@ void AccountReconcilor::StartReconcile() {
     return;
 
   is_reconcile_started_ = true;
+  m_reconcile_start_time_ = base::Time::Now();
 
   StartFetchingExternalCcResult();
 
   // Reset state for validating gaia cookie.
   are_gaia_accounts_set_ = false;
   gaia_accounts_.clear();
-  GetAccountsFromCookie(base::Bind(
-      &AccountReconcilor::ContinueReconcileActionAfterGetGaiaAccounts,
-      base::Unretained(this)));
 
   // Reset state for validating oauth2 tokens.
   primary_account_.clear();
   chrome_accounts_.clear();
   add_to_cookie_.clear();
   ValidateAccountsFromTokenService();
+
+  // Start process by checking connections to external sites.
+  merge_session_helper_.StartFetchingExternalCcResult();
 }
 
 void AccountReconcilor::GetAccountsFromCookie(
     GetAccountsFromCookieCallback callback) {
   get_gaia_accounts_callbacks_.push_back(callback);
-  if (!gaia_fetcher_) {
-    // There is no list account request in flight.
-    gaia_fetcher_.reset(new GaiaAuthFetcher(
-        this, GaiaConstants::kChromeSource, client_->GetURLRequestContext()));
-    gaia_fetcher_->StartListAccounts();
-  }
+  if (!gaia_fetcher_)
+    MayBeDoNextListAccounts();
 }
 
 void AccountReconcilor::StartFetchingExternalCcResult() {
@@ -302,7 +302,8 @@ void AccountReconcilor::OnListAccountsFailure(
 void AccountReconcilor::MayBeDoNextListAccounts() {
   if (!get_gaia_accounts_callbacks_.empty()) {
     gaia_fetcher_.reset(new GaiaAuthFetcher(
-        this, GaiaConstants::kChromeSource, client_->GetURLRequestContext()));
+        this, GaiaConstants::kReconcilorSource,
+        client_->GetURLRequestContext()));
     gaia_fetcher_->StartListAccounts();
   }
 }
@@ -393,8 +394,6 @@ void AccountReconcilor::FinishReconcile() {
   // SignalComplete() will change the array.
   std::vector<std::string> add_to_cookie_copy = add_to_cookie_;
   int added_to_cookie = 0;
-  bool external_cc_result_completed =
-      !merge_session_helper_.StillFetchingExternalCcResult();
   for (size_t i = 0; i < add_to_cookie_copy.size(); ++i) {
     if (gaia_accounts_.end() !=
             std::find_if(gaia_accounts_.begin(),
@@ -417,11 +416,6 @@ void AccountReconcilor::FinishReconcile() {
       }
     }
   }
-
-  // Log whether the external connection checks were completed when we tried
-  // to add the accounts to the cookie.
-  if (rebuild_cookie || added_to_cookie > 0)
-    signin_metrics::LogExternalCcResultFetches(external_cc_result_completed);
 
   signin_metrics::LogSigninAccountReconciliation(chrome_accounts_.size(),
                                                  added_to_cookie,
@@ -487,4 +481,14 @@ void AccountReconcilor::MergeSessionCompleted(
     CalculateIfReconcileIsDone();
     ScheduleStartReconcileIfChromeAccountsChanged();
   }
+}
+
+void AccountReconcilor::GetCheckConnectionInfoCompleted(bool succeeded) {
+  base::TimeDelta time_to_check_connections =
+      base::Time::Now() - m_reconcile_start_time_;
+  signin_metrics::LogExternalCcResultFetches(succeeded,
+                                             time_to_check_connections);
+  GetAccountsFromCookie(base::Bind(
+      &AccountReconcilor::ContinueReconcileActionAfterGetGaiaAccounts,
+      base::Unretained(this)));
 }

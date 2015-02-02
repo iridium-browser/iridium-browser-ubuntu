@@ -29,6 +29,7 @@
 #include "bindings/core/v8/DictionaryHelperForBindings.h"
 #include "bindings/core/v8/ExceptionMessages.h"
 #include "bindings/core/v8/ExceptionState.h"
+#include "bindings/core/v8/V8ArrayBufferView.h"
 #include "bindings/core/v8/V8Binding.h"
 #include "bindings/core/v8/V8DOMError.h"
 #include "bindings/core/v8/V8Element.h"
@@ -38,10 +39,9 @@
 #include "bindings/core/v8/V8Path2D.h"
 #include "bindings/core/v8/V8Storage.h"
 #include "bindings/core/v8/V8TextTrack.h"
+#include "bindings/core/v8/V8Uint8Array.h"
 #include "bindings/core/v8/V8VoidCallback.h"
 #include "bindings/core/v8/V8Window.h"
-#include "bindings/core/v8/custom/V8ArrayBufferViewCustom.h"
-#include "bindings/core/v8/custom/V8Uint8ArrayCustom.h"
 #include "core/html/track/TrackBase.h"
 #include "wtf/MathExtras.h"
 
@@ -375,6 +375,28 @@ bool DictionaryHelper::get(const Dictionary& dictionary, const String& key, Vect
 }
 
 template <>
+bool DictionaryHelper::get(const Dictionary& dictionary, const String& key, Vector<Vector<String> >& value, ExceptionState& exceptionState)
+{
+    v8::Local<v8::Value> v8Value;
+    if (!dictionary.get(key, v8Value))
+        return false;
+
+    if (!v8Value->IsArray())
+        return false;
+
+    v8::Local<v8::Array> v8Array = v8::Local<v8::Array>::Cast(v8Value);
+    for (size_t i = 0; i < v8Array->Length(); ++i) {
+        v8::Local<v8::Value> v8IndexedValue = v8Array->Get(v8::Uint32::New(dictionary.isolate(), i));
+        Vector<String> indexedValue = toImplArray<String>(v8IndexedValue, i, dictionary.isolate(), exceptionState);
+        if (exceptionState.hadException())
+            return false;
+        value.append(indexedValue);
+    }
+
+    return true;
+}
+
+template <>
 bool DictionaryHelper::convert(const Dictionary& dictionary, Dictionary::ConversionContext& context, const String& key, Vector<String>& value)
 {
     Dictionary::ConversionContextScope scope(context);
@@ -431,12 +453,12 @@ bool DictionaryHelper::convert(const Dictionary& dictionary, Dictionary::Convers
 }
 
 template <>
-struct DictionaryHelperTraits<Uint8Array> {
+struct DictionaryHelperTraits<DOMUint8Array> {
     typedef V8Uint8Array type;
 };
 
 template <>
-struct DictionaryHelperTraits<ArrayBufferView> {
+struct DictionaryHelperTraits<DOMArrayBufferView> {
     typedef V8ArrayBufferView type;
 };
 
@@ -465,10 +487,10 @@ struct DictionaryHelperTraits<Path2D> {
     typedef V8Path2D type;
 };
 
-template bool DictionaryHelper::get(const Dictionary&, const String& key, RefPtr<Uint8Array>& value);
-template bool DictionaryHelper::get(const Dictionary&, const String& key, RefPtr<ArrayBufferView>& value);
+template bool DictionaryHelper::get(const Dictionary&, const String& key, RefPtr<DOMUint8Array>& value);
+template bool DictionaryHelper::get(const Dictionary&, const String& key, RefPtr<DOMArrayBufferView>& value);
 template bool DictionaryHelper::get(const Dictionary&, const String& key, RefPtrWillBeMember<MediaKeyError>& value);
-template bool DictionaryHelper::get(const Dictionary&, const String& key, RefPtrWillBeMember<DOMError>& value);
+template bool DictionaryHelper::get(const Dictionary&, const String& key, Member<DOMError>& value);
 template bool DictionaryHelper::get(const Dictionary&, const String& key, RefPtrWillBeMember<Storage>& value);
 template bool DictionaryHelper::get(const Dictionary&, const String& key, RefPtrWillBeMember<Element>& value);
 template bool DictionaryHelper::get(const Dictionary&, const String& key, RawPtr<Element>& value);
@@ -632,8 +654,8 @@ template bool DictionaryHelper::convert(const Dictionary&, Dictionary::Conversio
 
 template bool DictionaryHelper::convert(const Dictionary&, Dictionary::ConversionContext&, const String& key, RefPtrWillBeMember<LocalDOMWindow>& value);
 template bool DictionaryHelper::convert(const Dictionary&, Dictionary::ConversionContext&, const String& key, RefPtrWillBeMember<Storage>& value);
-template bool DictionaryHelper::convert(const Dictionary&, Dictionary::ConversionContext&, const String& key, RefPtr<Uint8Array>& value);
-template bool DictionaryHelper::convert(const Dictionary&, Dictionary::ConversionContext&, const String& key, RefPtr<ArrayBufferView>& value);
+template bool DictionaryHelper::convert(const Dictionary&, Dictionary::ConversionContext&, const String& key, RefPtr<DOMUint8Array>& value);
+template bool DictionaryHelper::convert(const Dictionary&, Dictionary::ConversionContext&, const String& key, RefPtr<DOMArrayBufferView>& value);
 template bool DictionaryHelper::convert(const Dictionary&, Dictionary::ConversionContext&, const String& key, RefPtrWillBeMember<MediaKeyError>& value);
 template bool DictionaryHelper::convert(const Dictionary&, Dictionary::ConversionContext&, const String& key, RefPtrWillBeMember<TrackBase>& value);
 template bool DictionaryHelper::convert(const Dictionary&, Dictionary::ConversionContext&, const String& key, RefPtrWillBeMember<EventTarget>& value);

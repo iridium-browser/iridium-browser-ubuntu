@@ -18,7 +18,7 @@ namespace {
 class FakeDevToolsClient : public DevToolsClient {
  public:
   FakeDevToolsClient() : id_("fake-id"), status_(kOk) {}
-  virtual ~FakeDevToolsClient() {}
+  ~FakeDevToolsClient() override {}
 
   void set_status(const Status& status) {
     status_ = status;
@@ -29,37 +29,28 @@ class FakeDevToolsClient : public DevToolsClient {
   }
 
   // Overridden from DevToolsClient:
-  virtual const std::string& GetId() OVERRIDE {
-    return id_;
-  }
-  virtual bool WasCrashed() OVERRIDE {
-    return false;
-  }
-  virtual Status ConnectIfNecessary() OVERRIDE {
-    return Status(kOk);
-  }
-  virtual Status SendCommand(const std::string& method,
-                             const base::DictionaryValue& params) OVERRIDE {
+  const std::string& GetId() override { return id_; }
+  bool WasCrashed() override { return false; }
+  Status ConnectIfNecessary() override { return Status(kOk); }
+  Status SendCommand(const std::string& method,
+                     const base::DictionaryValue& params) override {
     return SendCommandAndGetResult(method, params, NULL);
   }
-  virtual Status SendCommandAndGetResult(
+  Status SendCommandAndGetResult(
       const std::string& method,
       const base::DictionaryValue& params,
-      scoped_ptr<base::DictionaryValue>* result) OVERRIDE {
+      scoped_ptr<base::DictionaryValue>* result) override {
     if (status_.IsError())
       return status_;
     result->reset(result_.DeepCopy());
     return Status(kOk);
   }
-  virtual void AddListener(DevToolsEventListener* listener) OVERRIDE {}
-  virtual Status HandleEventsUntil(
-      const ConditionalFunc& conditional_func,
-      const base::TimeDelta& timeout) OVERRIDE {
+  void AddListener(DevToolsEventListener* listener) override {}
+  Status HandleEventsUntil(const ConditionalFunc& conditional_func,
+                           const base::TimeDelta& timeout) override {
     return Status(kOk);
   }
-  virtual Status HandleReceivedEvents() OVERRIDE {
-    return Status(kOk);
-  }
+  Status HandleReceivedEvents() override { return Status(kOk); }
 
  private:
   const std::string id_;

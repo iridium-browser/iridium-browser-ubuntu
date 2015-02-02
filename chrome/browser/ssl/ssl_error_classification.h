@@ -31,7 +31,7 @@ class SSLErrorClassification : public content::NotificationObserver {
                          const GURL& url,
                          int cert_error,
                          const net::X509Certificate& cert);
-  virtual ~SSLErrorClassification();
+  ~SSLErrorClassification() override;
 
   // Returns true if the system time is in the past.
   static bool IsUserClockInThePast(const base::Time& time_now);
@@ -44,6 +44,12 @@ class SSLErrorClassification : public content::NotificationObserver {
   // On other platforms, returns false always.
   static bool MaybeWindowsLacksSHA256Support();
 
+  // Returns true if any one of the following conditions hold:
+  // 1.|hostname| is an IP Address in an IANA-reserved range.
+  // 2.|hostname| is a not-yet-assigned by ICANN gTLD.
+  // 3.|hostname| is a dotless domain.
+  static bool IsHostnameNonUniqueOrDotless(const std::string& hostname);
+
   // A function which calculates the severity score when the ssl error is
   // |CERT_DATE_INVALID|. The calculated score is between 0.0 and 1.0, higher
   // being more severe, indicating how severe the certificate's
@@ -55,6 +61,12 @@ class SSLErrorClassification : public content::NotificationObserver {
   // higher being more severe, indicating how severe the certificate's common
   // name invalid error is.
   void InvalidCommonNameSeverityScore();
+
+  // A function which calculates the severity score when the ssl error is
+  // |CERT_AUTHORITY_INVALID|, returns a score between 0.0 and 1.0, higher
+  // values being more severe, indicating how severe the certificate's
+  // authority invalid error is.
+  void InvalidAuthoritySeverityScore();
 
   void RecordUMAStatistics(bool overridable) const;
   void RecordCaptivePortalUMAStatistics(bool overridable) const;
@@ -126,15 +138,14 @@ class SSLErrorClassification : public content::NotificationObserver {
   float CalculateScoreEnvironments() const;
 
   // content::NotificationObserver:
-  virtual void Observe(
-      int type,
-      const content::NotificationSource& source,
-      const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   content::WebContents* web_contents_;
   // This stores the current time.
   base::Time current_time_;
-  const GURL& request_url_;
+  const GURL request_url_;
   int cert_error_;
   // This stores the certificate.
   const net::X509Certificate& cert_;

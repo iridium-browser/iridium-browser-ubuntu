@@ -20,10 +20,12 @@
 #include "chrome/browser/extensions/extension_creator.h"
 #include "chrome/browser/extensions/extension_error_reporter.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
+#include "chrome/browser/extensions/extension_install_prompt_show_params.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/extensions/updater/extension_cache_fake.h"
+#include "chrome/browser/extensions/updater/extension_updater.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
@@ -32,13 +34,13 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/test/browser_test_utils.h"
+#include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_system.h"
@@ -132,6 +134,10 @@ void ExtensionBrowserTest::SetUpCommandLine(CommandLine* command_line) {
 void ExtensionBrowserTest::SetUpOnMainThread() {
   InProcessBrowserTest::SetUpOnMainThread();
   observer_.reset(new ExtensionTestNotificationObserver(browser()));
+  if (extension_service()->updater()) {
+    extension_service()->updater()->SetExtensionCacheForTesting(
+        test_extension_cache_.get());
+  }
 }
 
 const Extension* ExtensionBrowserTest::LoadExtension(
@@ -343,19 +349,16 @@ class MockAbortExtensionInstallPrompt : public ExtensionInstallPrompt {
   }
 
   // Simulate a user abort on an extension installation.
-  virtual void ConfirmInstall(
-      Delegate* delegate,
-      const Extension* extension,
-      const ShowDialogCallback& show_dialog_callback) OVERRIDE {
+  void ConfirmInstall(Delegate* delegate,
+                      const Extension* extension,
+                      const ShowDialogCallback& show_dialog_callback) override {
     delegate->InstallUIAbort(true);
     base::MessageLoopForUI::current()->Quit();
   }
 
-  virtual void OnInstallSuccess(const Extension* extension,
-                                SkBitmap* icon) OVERRIDE {}
+  void OnInstallSuccess(const Extension* extension, SkBitmap* icon) override {}
 
-  virtual void OnInstallFailure(
-      const extensions::CrxInstallerError& error) OVERRIDE {}
+  void OnInstallFailure(const extensions::CrxInstallerError& error) override {}
 };
 
 class MockAutoConfirmExtensionInstallPrompt : public ExtensionInstallPrompt {
@@ -365,10 +368,9 @@ class MockAutoConfirmExtensionInstallPrompt : public ExtensionInstallPrompt {
     : ExtensionInstallPrompt(web_contents) {}
 
   // Proceed without confirmation prompt.
-  virtual void ConfirmInstall(
-      Delegate* delegate,
-      const Extension* extension,
-      const ShowDialogCallback& show_dialog_callback) OVERRIDE {
+  void ConfirmInstall(Delegate* delegate,
+                      const Extension* extension,
+                      const ShowDialogCallback& show_dialog_callback) override {
     delegate->InstallUIProceed();
   }
 };

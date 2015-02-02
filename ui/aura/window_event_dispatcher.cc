@@ -381,7 +381,8 @@ void WindowEventDispatcher::UpdateCapture(Window* old_capture,
     if (details.dispatcher_destroyed)
       return;
 
-    old_capture->delegate()->OnCaptureLost();
+    if (!details.target_destroyed)
+      old_capture->delegate()->OnCaptureLost();
   }
 
   if (new_capture) {
@@ -435,16 +436,12 @@ ui::EventTarget* WindowEventDispatcher::GetRootTarget() {
   return window();
 }
 
-void WindowEventDispatcher::PrepareEventForDispatch(ui::Event* event) {
-  if (dispatching_held_event_) {
-    // The held events are already in |window()|'s coordinate system. So it is
-    // not necessary to apply the transform to convert from the host's
-    // coordinate system to |window()|'s coordinate system.
-    return;
-  }
-  if (event->IsLocatedEvent()) {
+void WindowEventDispatcher::OnEventProcessingStarted(ui::Event* event) {
+  // The held events are already in |window()|'s coordinate system. So it is
+  // not necessary to apply the transform to convert from the host's
+  // coordinate system to |window()|'s coordinate system.
+  if (event->IsLocatedEvent() && !dispatching_held_event_)
     TransformEventForDeviceScaleFactor(static_cast<ui::LocatedEvent*>(event));
-  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////

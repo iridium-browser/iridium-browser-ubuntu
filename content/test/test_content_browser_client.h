@@ -18,8 +18,8 @@ namespace content {
 class TestContentBrowserClient : public ContentBrowserClient {
  public:
   TestContentBrowserClient();
-  virtual ~TestContentBrowserClient();
-  virtual base::FilePath GetDefaultDownloadDirectory() OVERRIDE;
+  ~TestContentBrowserClient() override;
+  base::FilePath GetDefaultDownloadDirectory() override;
 
  private:
   // Temporary directory for GetDefaultDownloadDirectory.

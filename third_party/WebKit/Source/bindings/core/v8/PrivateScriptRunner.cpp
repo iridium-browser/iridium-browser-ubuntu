@@ -14,6 +14,7 @@
 #ifndef NDEBUG
 #include "core/PrivateScriptSourcesForTesting.h"
 #endif
+#include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
 #include "platform/PlatformResourceLoader.h"
 
@@ -52,7 +53,7 @@ static v8::Handle<v8::Value> compileAndRunPrivateScript(v8::Isolate* isolate, St
         RELEASE_ASSERT_NOT_REACHED();
     }
 
-    v8::Handle<v8::Value> result = V8ScriptRunner::runCompiledInternalScript(script, isolate);
+    v8::Handle<v8::Value> result = V8ScriptRunner::runCompiledInternalScript(isolate, script);
     if (block.HasCaught()) {
         fprintf(stderr, "Private script error: installClass() failed. (Class name = %s)\n", scriptClassName.utf8().data());
         dumpV8Message(block.Message());
@@ -170,12 +171,10 @@ static void initializeHolderIfNeeded(ScriptState* scriptState, v8::Handle<v8::Ob
     }
 }
 
-v8::Handle<v8::Value> PrivateScriptRunner::installClassIfNeeded(LocalFrame* frame, String className)
+v8::Handle<v8::Value> PrivateScriptRunner::installClassIfNeeded(Document* document, String className)
 {
-    if (!frame)
-        return v8::Handle<v8::Value>();
-    v8::HandleScope handleScope(toIsolate(frame));
-    v8::Handle<v8::Context> context = toV8Context(frame, DOMWrapperWorld::privateScriptIsolatedWorld());
+    v8::HandleScope handleScope(toIsolate(document));
+    v8::Handle<v8::Context> context = toV8Context(document->contextDocument().get(), DOMWrapperWorld::privateScriptIsolatedWorld());
     if (context.IsEmpty())
         return v8::Handle<v8::Value>();
     ScriptState* scriptState = ScriptState::from(context);

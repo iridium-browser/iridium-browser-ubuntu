@@ -138,7 +138,7 @@ class LocationBarView : public LocationBar,
                   Delegate* delegate,
                   bool is_popup_mode);
 
-  virtual ~LocationBarView();
+  ~LocationBarView() override;
 
   // Initializes the LocationBarView.
   void Init();
@@ -239,22 +239,22 @@ class LocationBarView : public LocationBar,
                                       int* right_margin);
 
   // LocationBar:
-  virtual void FocusLocation(bool select_all) OVERRIDE;
-  virtual void Revert() OVERRIDE;
-  virtual OmniboxView* GetOmniboxView() OVERRIDE;
+  void FocusLocation(bool select_all) override;
+  void Revert() override;
+  OmniboxView* GetOmniboxView() override;
 
   // views::View:
-  virtual bool HasFocus() const OVERRIDE;
-  virtual void GetAccessibleState(ui::AXViewState* state) OVERRIDE;
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
-  virtual void Layout() OVERRIDE;
+  bool HasFocus() const override;
+  void GetAccessibleState(ui::AXViewState* state) override;
+  gfx::Size GetPreferredSize() const override;
+  void Layout() override;
 
   // OmniboxEditController:
-  virtual void Update(const content::WebContents* contents) OVERRIDE;
-  virtual void ShowURL() OVERRIDE;
-  virtual void EndOriginChipAnimations(bool cancel_fade) OVERRIDE;
-  virtual ToolbarModel* GetToolbarModel() OVERRIDE;
-  virtual content::WebContents* GetWebContents() OVERRIDE;
+  void Update(const content::WebContents* contents) override;
+  void ShowURL() override;
+  void EndOriginChipAnimations(bool cancel_fade) override;
+  ToolbarModel* GetToolbarModel() override;
+  content::WebContents* GetWebContents() override;
 
   // Thickness of the edges of the omnibox background images, in normal mode.
   static const int kNormalEdgeThickness;
@@ -298,13 +298,18 @@ class LocationBarView : public LocationBar,
   // of at least one of the views in |content_setting_views_| changed.
   bool RefreshContentSettingViews();
 
-  // Deletes all page action views that we have created.
+  // Clears |page_action_views_| and removes the elements from the view
+  // hierarchy.
   void DeletePageActionViews();
 
   // Updates the views for the Page Actions, to reflect state changes for
   // PageActions. Returns true if the visibility of a PageActionWithBadgeView
   // changed, or PageActionWithBadgeView were created/destroyed.
   bool RefreshPageActionViews();
+
+  // Whether the page actions represented by |page_action_views_| differ
+  // in ordering or value from |page_actions|.
+  bool PageActionsDiffer(const PageActions& page_actions) const;
 
   // Updates the view for the zoom icon based on the current tab's zoom. Returns
   // true if the visibility of the view changed.
@@ -339,76 +344,73 @@ class LocationBarView : public LocationBar,
   void ResetShowAnimationAndColors();
 
   // LocationBar:
-  virtual void ShowFirstRunBubble() OVERRIDE;
-  virtual GURL GetDestinationURL() const OVERRIDE;
-  virtual WindowOpenDisposition GetWindowOpenDisposition() const OVERRIDE;
-  virtual ui::PageTransition GetPageTransition() const OVERRIDE;
-  virtual void AcceptInput() OVERRIDE;
-  virtual void FocusSearch() OVERRIDE;
-  virtual void UpdateContentSettingsIcons() OVERRIDE;
-  virtual void UpdateManagePasswordsIconAndBubble() OVERRIDE;
-  virtual void UpdatePageActions() OVERRIDE;
-  virtual void InvalidatePageActions() OVERRIDE;
-  virtual void UpdateBookmarkStarVisibility() OVERRIDE;
-  virtual bool ShowPageActionPopup(const extensions::Extension* extension,
-                                   bool grant_active_tab) OVERRIDE;
-  virtual void UpdateOpenPDFInReaderPrompt() OVERRIDE;
-  virtual void UpdateGeneratedCreditCardView() OVERRIDE;
-  virtual void SaveStateToContents(content::WebContents* contents) OVERRIDE;
-  virtual const OmniboxView* GetOmniboxView() const OVERRIDE;
-  virtual LocationBarTesting* GetLocationBarForTesting() OVERRIDE;
+  void ShowFirstRunBubble() override;
+  GURL GetDestinationURL() const override;
+  WindowOpenDisposition GetWindowOpenDisposition() const override;
+  ui::PageTransition GetPageTransition() const override;
+  void AcceptInput() override;
+  void FocusSearch() override;
+  void UpdateContentSettingsIcons() override;
+  void UpdateManagePasswordsIconAndBubble() override;
+  void UpdatePageActions() override;
+  void UpdateBookmarkStarVisibility() override;
+  bool ShowPageActionPopup(const extensions::Extension* extension,
+                           bool grant_active_tab) override;
+  void UpdateOpenPDFInReaderPrompt() override;
+  void UpdateGeneratedCreditCardView() override;
+  void SaveStateToContents(content::WebContents* contents) override;
+  const OmniboxView* GetOmniboxView() const override;
+  LocationBarTesting* GetLocationBarForTesting() override;
 
   // LocationBarTesting:
-  virtual int PageActionCount() OVERRIDE;
-  virtual int PageActionVisibleCount() OVERRIDE;
-  virtual ExtensionAction* GetPageAction(size_t index) OVERRIDE;
-  virtual ExtensionAction* GetVisiblePageAction(size_t index) OVERRIDE;
-  virtual void TestPageActionPressed(size_t index) OVERRIDE;
-  virtual bool GetBookmarkStarVisibility() OVERRIDE;
+  int PageActionCount() override;
+  int PageActionVisibleCount() override;
+  ExtensionAction* GetPageAction(size_t index) override;
+  ExtensionAction* GetVisiblePageAction(size_t index) override;
+  void TestPageActionPressed(size_t index) override;
+  bool GetBookmarkStarVisibility() override;
 
   // views::View:
-  virtual const char* GetClassName() const OVERRIDE;
-  virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
-  virtual void OnFocus() OVERRIDE;
-  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
-  virtual void PaintChildren(gfx::Canvas* canvas,
-                             const views::CullSet& cull_set) OVERRIDE;
+  const char* GetClassName() const override;
+  void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
+  void OnFocus() override;
+  void OnPaint(gfx::Canvas* canvas) override;
+  void PaintChildren(gfx::Canvas* canvas,
+                     const views::CullSet& cull_set) override;
 
   // views::ButtonListener:
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // views::DragController:
-  virtual void WriteDragDataForView(View* sender,
-                                    const gfx::Point& press_pt,
-                                    OSExchangeData* data) OVERRIDE;
-  virtual int GetDragOperationsForView(View* sender,
-                                       const gfx::Point& p) OVERRIDE;
-  virtual bool CanStartDragForView(View* sender,
-                                   const gfx::Point& press_pt,
-                                   const gfx::Point& p) OVERRIDE;
+  void WriteDragDataForView(View* sender,
+                            const gfx::Point& press_pt,
+                            OSExchangeData* data) override;
+  int GetDragOperationsForView(View* sender, const gfx::Point& p) override;
+  bool CanStartDragForView(View* sender,
+                           const gfx::Point& press_pt,
+                           const gfx::Point& p) override;
 
   // OmniboxEditController:
-  virtual void OnChanged() OVERRIDE;
-  virtual void OnSetFocus() OVERRIDE;
-  virtual InstantController* GetInstant() OVERRIDE;
-  virtual const ToolbarModel* GetToolbarModel() const OVERRIDE;
-  virtual void HideURL() OVERRIDE;
+  void OnChanged() override;
+  void OnSetFocus() override;
+  InstantController* GetInstant() override;
+  const ToolbarModel* GetToolbarModel() const override;
+  void HideURL() override;
 
   // DropdownBarHostDelegate:
-  virtual void SetFocusAndSelection(bool select_all) OVERRIDE;
-  virtual void SetAnimationOffset(int offset) OVERRIDE;
+  void SetFocusAndSelection(bool select_all) override;
+  void SetAnimationOffset(int offset) override;
 
   // gfx::AnimationDelegate:
-  virtual void AnimationProgressed(const gfx::Animation* animation) OVERRIDE;
-  virtual void AnimationEnded(const gfx::Animation* animation) OVERRIDE;
+  void AnimationProgressed(const gfx::Animation* animation) override;
+  void AnimationEnded(const gfx::Animation* animation) override;
 
   // TemplateURLServiceObserver:
-  virtual void OnTemplateURLServiceChanged() OVERRIDE;
+  void OnTemplateURLServiceChanged() override;
 
   // SearchModelObserver:
-  virtual void ModelChanged(const SearchModel::State& old_state,
-                            const SearchModel::State& new_state) OVERRIDE;
+  void ModelChanged(const SearchModel::State& old_state,
+                    const SearchModel::State& new_state) override;
 
   // The Browser this LocationBarView is in.  Note that at least
   // chromeos::SimpleWebViewDialog uses a LocationBarView outside any browser
@@ -471,9 +473,6 @@ class LocationBarView : public LocationBar,
 
   // The manage passwords icon.
   ManagePasswordsIconView* manage_passwords_icon_view_;
-
-  // The current page actions.
-  PageActions page_actions_;
 
   // The page action icon views.
   PageActionViews page_action_views_;

@@ -21,8 +21,10 @@
 #include "chrome/browser/search/instant_service.h"
 #include "chrome/browser/search/instant_unittest_base.h"
 #include "chrome/browser/search/search.h"
+#include "chrome/browser/ui/browser_instant_controller.h"
 #include "chrome/browser/ui/search/search_tab_helper.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/common/instant_types.h"
 #include "chrome/common/render_messages.h"
 #include "components/omnibox/autocomplete_match.h"
 #include "content/public/browser/navigation_controller.h"
@@ -56,13 +58,13 @@ class DummyPrerenderContents : public PrerenderContents {
       bool call_did_finish_load,
       const content::SessionStorageNamespaceMap& session_storage_namespace_map);
 
-  virtual void StartPrerendering(
-      int ALLOW_UNUSED creator_child_id,
-      const gfx::Size& ALLOW_UNUSED size,
+  void StartPrerendering(
+      int creator_child_id,
+      const gfx::Size& size,
       content::SessionStorageNamespace* session_storage_namespace,
-      net::URLRequestContextGetter* request_context) OVERRIDE;
-  virtual bool GetChildId(int* child_id) const OVERRIDE;
-  virtual bool GetRouteId(int* route_id) const OVERRIDE;
+      net::URLRequestContextGetter* request_context) override;
+  bool GetChildId(int* child_id) const override;
+  bool GetRouteId(int* route_id) const override;
 
  private:
   Profile* profile_;
@@ -82,13 +84,13 @@ class DummyPrerenderContentsFactory : public PrerenderContents::Factory {
         session_storage_namespace_map_(session_storage_namespace_map) {
   }
 
-  virtual PrerenderContents* CreatePrerenderContents(
+  PrerenderContents* CreatePrerenderContents(
       PrerenderManager* prerender_manager,
       Profile* profile,
       const GURL& url,
       const Referrer& referrer,
       Origin origin,
-      uint8 experiment_id) OVERRIDE;
+      uint8 experiment_id) override;
 
  private:
   bool call_did_finish_load_;
@@ -114,8 +116,8 @@ DummyPrerenderContents::DummyPrerenderContents(
 }
 
 void DummyPrerenderContents::StartPrerendering(
-    int ALLOW_UNUSED creator_child_id,
-    const gfx::Size& ALLOW_UNUSED size,
+    int creator_child_id,
+    const gfx::Size& size,
     content::SessionStorageNamespace* session_storage_namespace,
     net::URLRequestContextGetter* request_context) {
   prerender_contents_.reset(content::WebContents::CreateWithSessionStorage(
@@ -165,7 +167,7 @@ class InstantSearchPrerendererTest : public InstantUnitTestBase {
   InstantSearchPrerendererTest() {}
 
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial("EmbeddedSearch",
                                                        "Group1 strk:20"));
     InstantUnitTestBase::SetUp();
@@ -295,7 +297,7 @@ TEST_F(InstantSearchPrerendererTest, CommitQuery) {
   base::string16 query = ASCIIToUTF16("flowers");
   PrerenderSearchQuery(query);
   InstantSearchPrerenderer* prerenderer = GetInstantSearchPrerenderer();
-  prerenderer->Commit(query);
+  prerenderer->Commit(query, EmbeddedSearchRequestParams());
   EXPECT_TRUE(MessageWasSent(ChromeViewMsg_SearchBoxSubmit::ID));
 }
 
@@ -430,7 +432,7 @@ class ReuseInstantSearchBasePageTest : public InstantSearchPrerendererTest {
    ReuseInstantSearchBasePageTest() {}
 
   protected:
-   virtual void SetUp() OVERRIDE {
+   void SetUp() override {
     ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial("EmbeddedSearch",
                                                        "Group1 strk:20"));
     InstantUnitTestBase::SetUp();
@@ -471,7 +473,7 @@ TEST_F(ReuseInstantSearchBasePageTest,
 #if !defined(OS_IOS) && !defined(OS_ANDROID)
 class TestUsePrerenderPage : public InstantSearchPrerendererTest {
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     // Disable query extraction flag in field trials.
     ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial(
         "EmbeddedSearch", "Group1 strk:20 query_extraction:0"));
@@ -492,5 +494,31 @@ TEST_F(TestUsePrerenderPage, ExtractSearchTermsAndUsePrerenderPage) {
                                             false));
   EXPECT_EQ(GetPrerenderURL(), GetActiveWebContents()->GetURL());
   EXPECT_EQ(static_cast<PrerenderHandle*>(NULL), prerender_handle());
+}
+
+TEST_F(TestUsePrerenderPage, SetEmbeddedSearchRequestParams) {
+  PrerenderSearchQuery(ASCIIToUTF16("foo"));
+  EXPECT_TRUE(browser()->instant_controller());
+
+  // Open a search results page. Query extraction flag is disabled in field
+  // trials. Search results page URL does not contain search terms replacement
+  // key.
+  GURL url("https://www.google.com/url?bar=foo&aqs=chrome...0&ie=utf-8&oq=f");
+  browser()->instant_controller()->OpenInstant(CURRENT_TAB, url);
+  content::MockRenderProcessHost* process =
+      static_cast<content::MockRenderProcessHost*>(
+          prerender_contents()->GetRenderViewHost()->GetProcess());
+  const IPC::Message* message = process->sink().GetFirstMessageMatching(
+      ChromeViewMsg_SearchBoxSubmit::ID);
+  ASSERT_TRUE(message);
+
+  // Verify the IPC message params.
+  Tuple2<base::string16, EmbeddedSearchRequestParams> params;
+  ChromeViewMsg_SearchBoxSubmit::Read(message, &params);
+  EXPECT_EQ("foo", base::UTF16ToASCII(params.a));
+  EXPECT_EQ("f", base::UTF16ToASCII(params.b.original_query));
+  EXPECT_EQ("utf-8", base::UTF16ToASCII(params.b.input_encoding));
+  EXPECT_EQ("", base::UTF16ToASCII(params.b.rlz_parameter_value));
+  EXPECT_EQ("chrome...0", base::UTF16ToASCII(params.b.assisted_query_stats));
 }
 #endif

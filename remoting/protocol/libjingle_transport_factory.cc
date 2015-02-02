@@ -13,12 +13,12 @@
 #include "net/base/net_errors.h"
 #include "remoting/protocol/network_settings.h"
 #include "remoting/signaling/jingle_info_request.h"
-#include "third_party/libjingle/source/talk/p2p/base/constants.h"
-#include "third_party/libjingle/source/talk/p2p/base/p2ptransportchannel.h"
-#include "third_party/libjingle/source/talk/p2p/base/port.h"
-#include "third_party/libjingle/source/talk/p2p/client/basicportallocator.h"
-#include "third_party/libjingle/source/talk/p2p/client/httpportallocator.h"
 #include "third_party/webrtc/base/network.h"
+#include "third_party/webrtc/p2p/base/constants.h"
+#include "third_party/webrtc/p2p/base/p2ptransportchannel.h"
+#include "third_party/webrtc/p2p/base/port.h"
+#include "third_party/webrtc/p2p/client/basicportallocator.h"
+#include "third_party/webrtc/p2p/client/httpportallocator.h"
 
 namespace remoting {
 namespace protocol {
@@ -39,19 +39,18 @@ class LibjingleTransport
  public:
   LibjingleTransport(cricket::PortAllocator* port_allocator,
                            const NetworkSettings& network_settings);
-  virtual ~LibjingleTransport();
+  ~LibjingleTransport() override;
 
   // Called by JingleTransportFactory when it has fresh Jingle info.
   void OnCanStart();
 
   // Transport interface.
-  virtual void Connect(
-      const std::string& name,
-      Transport::EventHandler* event_handler,
-      const Transport::ConnectedCallback& callback) OVERRIDE;
-  virtual void AddRemoteCandidate(const cricket::Candidate& candidate) OVERRIDE;
-  virtual const std::string& name() const OVERRIDE;
-  virtual bool is_connected() const OVERRIDE;
+  void Connect(const std::string& name,
+               Transport::EventHandler* event_handler,
+               const Transport::ConnectedCallback& callback) override;
+  void AddRemoteCandidate(const cricket::Candidate& candidate) override;
+  const std::string& name() const override;
+  bool is_connected() const override;
 
  private:
   void DoStart();
@@ -194,7 +193,7 @@ void LibjingleTransport::NotifyConnected() {
 
   Transport::ConnectedCallback callback = callback_;
   callback_.Reset();
-  callback.Run(socket.PassAs<net::Socket>());
+  callback.Run(socket.Pass());
 }
 
 void LibjingleTransport::AddRemoteCandidate(
@@ -353,7 +352,7 @@ scoped_ptr<Transport> LibjingleTransportFactory::CreateTransport() {
     result->OnCanStart();
   }
 
-  return result.PassAs<Transport>();
+  return result.Pass();
 }
 
 void LibjingleTransportFactory::EnsureFreshJingleInfo() {

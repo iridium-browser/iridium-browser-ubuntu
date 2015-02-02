@@ -1,4 +1,6 @@
-<?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="ar">
+<?xml version="1.0" ?>
+<!DOCTYPE translationbundle>
+<translationbundle lang="ar">
 <translation id="777702478322588152">الإدارة الأمنية</translation>
 <translation id="3713769522066937702">لم يتم التعرف على تنسيق الرمز البريدي هذا. مثال الرمز البريدي الصالح: <ph name="EXAMPLE"/>. إذا لم تكن على دراية بالرمز البريدي، يمكنك التعرف عليه <ph name="BEGIN_LINK"/>هنا<ph name="END_LINK"/>.</translation>
 <translation id="7393381084163773901">عنوان الشارع</translation>

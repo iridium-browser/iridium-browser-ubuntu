@@ -30,7 +30,7 @@ class NET_EXPORT HttpServerPropertiesImpl
       NON_EXPORTED_BASE(public base::NonThreadSafe) {
  public:
   HttpServerPropertiesImpl();
-  virtual ~HttpServerPropertiesImpl();
+  ~HttpServerPropertiesImpl() override;
 
   // Initializes |spdy_servers_map_| with the servers (host/port) from
   // |spdy_servers| that either support SPDY or not.
@@ -69,95 +69,85 @@ class NET_EXPORT HttpServerPropertiesImpl
   // -----------------------------
 
   // Gets a weak pointer for this object.
-  virtual base::WeakPtr<HttpServerProperties> GetWeakPtr() OVERRIDE;
+  base::WeakPtr<HttpServerProperties> GetWeakPtr() override;
 
   // Deletes all data.
-  virtual void Clear() OVERRIDE;
+  void Clear() override;
 
   // Returns true if |server| supports SPDY.
-  virtual bool SupportsSpdy(const HostPortPair& server) OVERRIDE;
+  bool SupportsSpdy(const HostPortPair& server) override;
 
   // Add |server| into the persistent store.
-  virtual void SetSupportsSpdy(const HostPortPair& server,
-                               bool support_spdy) OVERRIDE;
+  void SetSupportsSpdy(const HostPortPair& server, bool support_spdy) override;
 
   // Returns true if |server| has an Alternate-Protocol header.
-  virtual bool HasAlternateProtocol(const HostPortPair& server) OVERRIDE;
+  bool HasAlternateProtocol(const HostPortPair& server) override;
 
   // Returns the Alternate-Protocol and port for |server|.
   // HasAlternateProtocol(server) must be true.
-  virtual AlternateProtocolInfo GetAlternateProtocol(
-      const HostPortPair& server) OVERRIDE;
+  AlternateProtocolInfo GetAlternateProtocol(
+      const HostPortPair& server) override;
 
   // Sets the Alternate-Protocol for |server|.
-  virtual void SetAlternateProtocol(
-      const HostPortPair& server,
-      uint16 alternate_port,
-      AlternateProtocol alternate_protocol,
-      double probability) OVERRIDE;
+  void SetAlternateProtocol(const HostPortPair& server,
+                            uint16 alternate_port,
+                            AlternateProtocol alternate_protocol,
+                            double probability) override;
 
   // Sets the Alternate-Protocol for |server| to be BROKEN.
-  virtual void SetBrokenAlternateProtocol(const HostPortPair& server) OVERRIDE;
+  void SetBrokenAlternateProtocol(const HostPortPair& server) override;
 
   // Returns true if Alternate-Protocol for |server| was recently BROKEN.
-  virtual bool WasAlternateProtocolRecentlyBroken(
-      const HostPortPair& server) OVERRIDE;
+  bool WasAlternateProtocolRecentlyBroken(const HostPortPair& server) override;
 
   // Confirms that Alternate-Protocol for |server| is working.
-  virtual void ConfirmAlternateProtocol(const HostPortPair& server) OVERRIDE;
+  void ConfirmAlternateProtocol(const HostPortPair& server) override;
 
   // Clears the Alternate-Protocol for |server|.
-  virtual void ClearAlternateProtocol(const HostPortPair& server) OVERRIDE;
+  void ClearAlternateProtocol(const HostPortPair& server) override;
 
   // Returns all Alternate-Protocol mappings.
-  virtual const AlternateProtocolMap& alternate_protocol_map() const OVERRIDE;
+  const AlternateProtocolMap& alternate_protocol_map() const override;
 
-  virtual void SetAlternateProtocolExperiment(
-      AlternateProtocolExperiment experiment) OVERRIDE;
-
-  virtual void SetAlternateProtocolProbabilityThreshold(
-      double threshold) OVERRIDE;
-
-  virtual AlternateProtocolExperiment GetAlternateProtocolExperiment()
-      const OVERRIDE;
+  void SetAlternateProtocolProbabilityThreshold(double threshold) override;
 
   // Gets a reference to the SettingsMap stored for a host.
   // If no settings are stored, returns an empty SettingsMap.
-  virtual const SettingsMap& GetSpdySettings(
-      const HostPortPair& host_port_pair) OVERRIDE;
+  const SettingsMap& GetSpdySettings(
+      const HostPortPair& host_port_pair) override;
 
   // Saves an individual SPDY setting for a host. Returns true if SPDY setting
   // is to be persisted.
-  virtual bool SetSpdySetting(const HostPortPair& host_port_pair,
-                              SpdySettingsIds id,
-                              SpdySettingsFlags flags,
-                              uint32 value) OVERRIDE;
+  bool SetSpdySetting(const HostPortPair& host_port_pair,
+                      SpdySettingsIds id,
+                      SpdySettingsFlags flags,
+                      uint32 value) override;
 
   // Clears all entries in |spdy_settings_map_| for a host.
-  virtual void ClearSpdySettings(const HostPortPair& host_port_pair) OVERRIDE;
+  void ClearSpdySettings(const HostPortPair& host_port_pair) override;
 
   // Clears all entries in |spdy_settings_map_|.
-  virtual void ClearAllSpdySettings() OVERRIDE;
+  void ClearAllSpdySettings() override;
 
   // Returns all persistent SPDY settings.
-  virtual const SpdySettingsMap& spdy_settings_map() const OVERRIDE;
+  const SpdySettingsMap& spdy_settings_map() const override;
 
   // Methods for SupportsQuic.
-  virtual SupportsQuic GetSupportsQuic(
-      const HostPortPair& host_port_pair) const OVERRIDE;
+  SupportsQuic GetSupportsQuic(
+      const HostPortPair& host_port_pair) const override;
 
-  virtual void SetSupportsQuic(const HostPortPair& host_port_pair,
-                               bool used_quic,
-                               const std::string& address) OVERRIDE;
+  void SetSupportsQuic(const HostPortPair& host_port_pair,
+                       bool used_quic,
+                       const std::string& address) override;
 
-  virtual const SupportsQuicMap& supports_quic_map() const OVERRIDE;
+  const SupportsQuicMap& supports_quic_map() const override;
 
   // Methods for NetworkStats.
-  virtual void SetServerNetworkStats(const HostPortPair& host_port_pair,
-                                     NetworkStats stats) OVERRIDE;
+  void SetServerNetworkStats(const HostPortPair& host_port_pair,
+                             NetworkStats stats) override;
 
-  virtual const NetworkStats* GetServerNetworkStats(
-      const HostPortPair& host_port_pair) const OVERRIDE;
+  const NetworkStats* GetServerNetworkStats(
+      const HostPortPair& host_port_pair) const override;
 
  private:
   // |spdy_servers_map_| has flattened representation of servers (host, port)
@@ -189,7 +179,6 @@ class NET_EXPORT HttpServerPropertiesImpl
   AlternateProtocolMap alternate_protocol_map_;
   BrokenAlternateProtocolList broken_alternate_protocol_list_;
   BrokenAlternateProtocolMap broken_alternate_protocol_map_;
-  AlternateProtocolExperiment alternate_protocol_experiment_;
 
   SpdySettingsMap spdy_settings_map_;
   SupportsQuicMap supports_quic_map_;
@@ -199,8 +188,8 @@ class NET_EXPORT HttpServerPropertiesImpl
   // actual origin, which has a plausible alternate protocol mapping.
   CanonicalHostMap canonical_host_to_origin_map_;
   // Contains list of suffixes (for exmaple ".c.youtube.com",
-  // ".googlevideo.com", ".googleusercontent.com") of canoncial hostnames.
-  CanonicalSufficList canoncial_suffixes_;
+  // ".googlevideo.com", ".googleusercontent.com") of canonical hostnames.
+  CanonicalSufficList canonical_suffixes_;
 
   double alternate_protocol_probability_threshold_;
 

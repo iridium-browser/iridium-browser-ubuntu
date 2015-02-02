@@ -25,10 +25,10 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef TALK_P2P_BASE_STUNSERVER_H_
-#define TALK_P2P_BASE_STUNSERVER_H_
+#ifndef WEBRTC_P2P_BASE_STUNSERVER_H_
+#define WEBRTC_P2P_BASE_STUNSERVER_H_
 
-#include "talk/p2p/base/stun.h"
+#include "webrtc/p2p/base/stun.h"
 #include "webrtc/base/asyncudpsocket.h"
 #include "webrtc/base/scoped_ptr.h"
 
@@ -51,7 +51,7 @@ class StunServer : public sigslot::has_slots<> {
       const rtc::PacketTime& packet_time);
 
   // Handlers for the different types of STUN/TURN requests:
-  void OnBindingRequest(StunMessage* msg,
+  virtual void OnBindingRequest(StunMessage* msg,
       const rtc::SocketAddress& addr);
   void OnAllocateRequest(StunMessage* msg,
       const rtc::SocketAddress& addr);
@@ -69,10 +69,15 @@ class StunServer : public sigslot::has_slots<> {
   void SendResponse(const StunMessage& msg,
        const rtc::SocketAddress& addr);
 
+  // A helper method to compose a STUN binding response.
+  void GetStunBindReqponse(StunMessage* request,
+                           const rtc::SocketAddress& remote_addr,
+                           StunMessage* response) const;
+
  private:
   rtc::scoped_ptr<rtc::AsyncUDPSocket> socket_;
 };
 
 }  // namespace cricket
 
-#endif  // TALK_P2P_BASE_STUNSERVER_H_
+#endif  // WEBRTC_P2P_BASE_STUNSERVER_H_

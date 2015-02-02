@@ -1,4 +1,6 @@
-<?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="ja">
+<?xml version="1.0" ?>
+<!DOCTYPE translationbundle>
+<translationbundle lang="ja">
 <translation id="777702478322588152">都道府県</translation>
 <translation id="3713769522066937702">この郵便番号の形式は認識されません（有効な郵便番号の例: <ph name="EXAMPLE"/>）。郵便番号がわからない場合は<ph name="BEGIN_LINK"/>こちら<ph name="END_LINK"/>でお調べください。</translation>
 <translation id="7393381084163773901">町村、番地</translation>

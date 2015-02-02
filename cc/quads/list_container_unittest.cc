@@ -29,13 +29,12 @@ bool isConstSharedQuadStatePointer(SharedQuadState* ptr) {
 
 class SimpleDrawQuad : public DrawQuad {
  public:
-  virtual ~SimpleDrawQuad() {}
-  virtual void IterateResources(
-      const ResourceIteratorCallback& callback) OVERRIDE {}
+  ~SimpleDrawQuad() override {}
+  void IterateResources(const ResourceIteratorCallback& callback) override {}
 
   void set_value(int val) { value = val; }
   int get_value() { return value; }
-  virtual void ExtendValue(base::debug::TracedValue* value) const OVERRIDE {}
+  void ExtendValue(base::debug::TracedValue* value) const override {}
 
  private:
   int value;
@@ -59,13 +58,13 @@ class MockDrawQuad : public DrawQuad {
  public:
   virtual ~MockDrawQuad() { Destruct(); }
   virtual void IterateResources(
-      const ResourceIteratorCallback& callback) OVERRIDE {}
-  virtual void ExtendValue(base::debug::TracedValue* value) const OVERRIDE {}
+      const ResourceIteratorCallback& callback) override {}
+  virtual void ExtendValue(base::debug::TracedValue* value) const override {}
   MOCK_METHOD0(Destruct, void());
 };
 
 TEST(ListContainerTest, ConstructorCalledInAllocateAndConstruct) {
-  ListContainer<DrawQuad> list(sizeof(kLargestDrawQuad));
+  ListContainer<DrawQuad> list(LargestDrawQuadSize());
 
   size_t size = 2;
   SimpleDrawQuadConstructMagicNumberOne* dq_1 =
@@ -82,7 +81,7 @@ TEST(ListContainerTest, ConstructorCalledInAllocateAndConstruct) {
 }
 
 TEST(ListContainerTest, DestructorCalled) {
-  ListContainer<DrawQuad> list(sizeof(kLargestDrawQuad));
+  ListContainer<DrawQuad> list(LargestDrawQuadSize());
 
   size_t size = 1;
   MockDrawQuad* dq_1 = list.AllocateAndConstruct<MockDrawQuad>();
@@ -93,7 +92,7 @@ TEST(ListContainerTest, DestructorCalled) {
 }
 
 TEST(ListContainerTest, DestructorCalledOnceWhenClear) {
-  ListContainer<DrawQuad> list(sizeof(kLargestDrawQuad));
+  ListContainer<DrawQuad> list(LargestDrawQuadSize());
   size_t size = 1;
   MockDrawQuad* dq_1 = list.AllocateAndConstruct<MockDrawQuad>();
 
@@ -115,7 +114,7 @@ TEST(ListContainerTest, DestructorCalledOnceWhenClear) {
 }
 
 TEST(ListContainerTest, DestructorCalledOnceWhenErase) {
-  ListContainer<DrawQuad> list(sizeof(kLargestDrawQuad));
+  ListContainer<DrawQuad> list(LargestDrawQuadSize());
   size_t size = 1;
   MockDrawQuad* dq_1 = list.AllocateAndConstruct<MockDrawQuad>();
 
@@ -231,7 +230,7 @@ TEST(ListContainerTest,
            sqs_list.begin();
        sqs_iter != sqs_list.end();
        ++sqs_iter) {
-    EXPECT_EQ(*sqs_iter, &*iter);
+    EXPECT_EQ(*sqs_iter, *iter);
     ++iter;
   }
 }
@@ -316,7 +315,7 @@ TEST(ListContainerTest,
            sqs_list.begin();
        sqs_iter != sqs_list.end();
        ++sqs_iter) {
-    EXPECT_EQ(*sqs_iter, &*iter);
+    EXPECT_EQ(*sqs_iter, *iter);
     ++iter;
   }
 }
@@ -336,7 +335,7 @@ TEST(ListContainerTest, SimpleIterationSharedQuadState) {
     for (ListContainer<SharedQuadState>::Iterator iter = list.begin();
          iter != list.end();
          ++iter) {
-      EXPECT_EQ(*sqs_iter, &*iter);
+      EXPECT_EQ(*sqs_iter, *iter);
       ++num_iters_in_list;
       ++sqs_iter;
     }
@@ -349,7 +348,7 @@ TEST(ListContainerTest, SimpleIterationSharedQuadState) {
              sqs_list.begin();
          sqs_iter != sqs_list.end();
          ++sqs_iter) {
-      EXPECT_EQ(*sqs_iter, &*iter);
+      EXPECT_EQ(*sqs_iter, *iter);
       ++num_iters_in_vector;
       ++iter;
     }
@@ -373,8 +372,8 @@ TEST(ListContainerTest, SimpleConstIteratorIterationSharedQuadState) {
     for (ListContainer<SharedQuadState>::ConstIterator iter = list.begin();
          iter != list.end();
          ++iter) {
-      EXPECT_TRUE(isConstSharedQuadStatePointer(&*iter));
-      EXPECT_EQ(*sqs_iter, &*iter);
+      EXPECT_TRUE(isConstSharedQuadStatePointer(*iter));
+      EXPECT_EQ(*sqs_iter, *iter);
       ++sqs_iter;
     }
   }
@@ -385,8 +384,8 @@ TEST(ListContainerTest, SimpleConstIteratorIterationSharedQuadState) {
     for (ListContainer<SharedQuadState>::Iterator iter = list.begin();
          iter != list.end();
          ++iter) {
-      EXPECT_FALSE(isConstSharedQuadStatePointer(&*iter));
-      EXPECT_EQ(*sqs_iter, &*iter);
+      EXPECT_FALSE(isConstSharedQuadStatePointer(*iter));
+      EXPECT_EQ(*sqs_iter, *iter);
       ++sqs_iter;
     }
   }
@@ -397,7 +396,7 @@ TEST(ListContainerTest, SimpleConstIteratorIterationSharedQuadState) {
              sqs_list.begin();
          sqs_iter != sqs_list.end();
          ++sqs_iter) {
-      EXPECT_EQ(*sqs_iter, &*iter);
+      EXPECT_EQ(*sqs_iter, *iter);
       ++iter;
     }
   }
@@ -418,7 +417,7 @@ TEST(ListContainerTest, SimpleReverseInsertionSharedQuadState) {
     for (ListContainer<SharedQuadState>::ReverseIterator iter = list.rbegin();
          iter != list.rend();
          ++iter) {
-      EXPECT_EQ(*sqs_iter, &(*iter));
+      EXPECT_EQ(*sqs_iter, *iter);
       ++sqs_iter;
     }
   }
@@ -429,14 +428,14 @@ TEST(ListContainerTest, SimpleReverseInsertionSharedQuadState) {
              sqs_list.rbegin();
          sqs_iter != sqs_list.rend();
          ++sqs_iter) {
-      EXPECT_EQ(*sqs_iter, &(*iter));
+      EXPECT_EQ(*sqs_iter, *iter);
       ++iter;
     }
   }
 }
 
 TEST(ListContainerTest, SimpleDeletion) {
-  ListContainer<DrawQuad> list(sizeof(kLargestDrawQuad));
+  ListContainer<DrawQuad> list(LargestDrawQuadSize());
   std::vector<SimpleDrawQuad*> sdq_list;
   size_t size = 10;
   for (size_t i = 0; i < size; ++i) {
@@ -452,13 +451,13 @@ TEST(ListContainerTest, SimpleDeletion) {
   for (ListContainer<DrawQuad>::Iterator iter = list.begin();
        iter != list.end();
        ++iter) {
-    EXPECT_EQ(i, static_cast<SimpleDrawQuad*>(&*iter)->get_value());
+    EXPECT_EQ(i, static_cast<SimpleDrawQuad*>(*iter)->get_value());
     ++i;
   }
 }
 
 TEST(ListContainerTest, SimpleIterationAndManipulation) {
-  ListContainer<DrawQuad> list(sizeof(kLargestDrawQuad));
+  ListContainer<DrawQuad> list(LargestDrawQuadSize());
   std::vector<SimpleDrawQuad*> sdq_list;
   size_t size = 10;
   for (size_t i = 0; i < size; ++i) {
@@ -469,7 +468,7 @@ TEST(ListContainerTest, SimpleIterationAndManipulation) {
 
   ListContainer<DrawQuad>::Iterator iter = list.begin();
   for (int i = 0; i < 10; ++i) {
-    static_cast<SimpleDrawQuad*>(&*iter)->set_value(i);
+    static_cast<SimpleDrawQuad*>(*iter)->set_value(i);
     ++iter;
   }
 
@@ -483,7 +482,7 @@ TEST(ListContainerTest, SimpleIterationAndManipulation) {
 }
 
 TEST(ListContainerTest, SimpleManipulationWithIndexSimpleDrawQuad) {
-  ListContainer<DrawQuad> list(sizeof(kLargestDrawQuad));
+  ListContainer<DrawQuad> list(LargestDrawQuadSize());
   std::vector<SimpleDrawQuad*> dq_list;
   size_t size = 10;
   for (size_t i = 0; i < size; ++i) {
@@ -505,7 +504,7 @@ TEST(ListContainerTest, SimpleManipulationWithIndexSimpleDrawQuad) {
 
 TEST(ListContainerTest,
      SimpleManipulationWithIndexMoreThanOneAllocationSimpleDrawQuad) {
-  ListContainer<DrawQuad> list(sizeof(kLargestDrawQuad), 2);
+  ListContainer<DrawQuad> list(LargestDrawQuadSize(), 2);
   std::vector<SimpleDrawQuad*> dq_list;
   size_t size = 10;
   for (size_t i = 0; i < size; ++i) {
@@ -522,6 +521,33 @@ TEST(ListContainerTest,
        dq_iter != dq_list.end();
        ++dq_iter, ++i) {
     EXPECT_EQ(i, (*dq_iter)->get_value());
+  }
+}
+
+TEST(ListContainerTest,
+     SimpleIterationAndReverseIterationWithIndexSharedQuadState) {
+  ListContainer<SharedQuadState> list;
+  std::vector<SharedQuadState*> sqs_list;
+  size_t size = 10;
+  for (size_t i = 0; i < size; ++i) {
+    sqs_list.push_back(list.AllocateAndConstruct<SharedQuadState>());
+  }
+  EXPECT_EQ(size, list.size());
+
+  size_t i = 0;
+  for (ListContainer<SharedQuadState>::Iterator iter = list.begin();
+       iter != list.end();
+       ++iter) {
+    EXPECT_EQ(i, iter.index());
+    ++i;
+  }
+
+  i = 0;
+  for (ListContainer<SharedQuadState>::ReverseIterator iter = list.rbegin();
+       iter != list.rend();
+       ++iter) {
+    EXPECT_EQ(i, iter.index());
+    ++i;
   }
 }
 

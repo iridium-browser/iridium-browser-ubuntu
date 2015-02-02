@@ -12,13 +12,12 @@
 
 namespace blink {
 
-class ServiceWorkerClient FINAL : public GarbageCollected<ServiceWorkerClient>, public ScriptWrappable {
+class ServiceWorkerClient final : public GarbageCollected<ServiceWorkerClient>, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
 public:
     static ServiceWorkerClient* create(unsigned id);
 
     // ServiceWorkerClient.idl
-    unsigned id() const { return m_id; }
     void postMessage(ExecutionContext*, PassRefPtr<SerializedScriptValue> message, const MessagePortArray*, ExceptionState&);
 
     void trace(Visitor*) { }

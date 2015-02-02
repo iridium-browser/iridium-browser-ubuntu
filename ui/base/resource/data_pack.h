@@ -16,7 +16,6 @@
 #include "base/files/memory_mapped_file.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string_piece.h"
-#include "ui/base/layout.h"
 #include "ui/base/resource/resource_handle.h"
 #include "ui/base/ui_base_export.h"
 
@@ -26,11 +25,12 @@ class RefCountedStaticMemory;
 }
 
 namespace ui {
+enum ScaleFactor : int;
 
 class UI_BASE_EXPORT DataPack : public ResourceHandle {
  public:
   DataPack(ui::ScaleFactor scale_factor);
-  virtual ~DataPack();
+  ~DataPack() override;
 
   // Load a pack file from |path|, returning false on error.
   bool LoadFromPath(const base::FilePath& path);
@@ -51,13 +51,13 @@ class UI_BASE_EXPORT DataPack : public ResourceHandle {
                         TextEncodingType textEncodingType);
 
   // ResourceHandle implementation:
-  virtual bool HasResource(uint16 resource_id) const OVERRIDE;
-  virtual bool GetStringPiece(uint16 resource_id,
-                              base::StringPiece* data) const OVERRIDE;
-  virtual base::RefCountedStaticMemory* GetStaticMemory(
-      uint16 resource_id) const OVERRIDE;
-  virtual TextEncodingType GetTextEncodingType() const OVERRIDE;
-  virtual ui::ScaleFactor GetScaleFactor() const OVERRIDE;
+  bool HasResource(uint16 resource_id) const override;
+  bool GetStringPiece(uint16 resource_id,
+                      base::StringPiece* data) const override;
+  base::RefCountedStaticMemory* GetStaticMemory(
+      uint16 resource_id) const override;
+  TextEncodingType GetTextEncodingType() const override;
+  ui::ScaleFactor GetScaleFactor() const override;
 
  private:
   // Does the actual loading of a pack file. Called by Load and LoadFromFile.

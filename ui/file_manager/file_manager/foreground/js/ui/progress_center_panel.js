@@ -2,12 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
-
 /**
  * Item element of the progress center.
- * @param {HTMLDocument} document Document which the new item belongs to.
+ * @param {Document} document Document which the new item belongs to.
  * @constructor
+ * @extends {HTMLDivElement}
  */
 function ProgressCenterItemElement(document) {
   var label = document.createElement('label');
@@ -48,14 +47,14 @@ function ProgressCenterItemElement(document) {
  * @private
  */
 ProgressCenterItemElement.safelySetAnimation_ = function(callback) {
-  var requestId = requestAnimationFrame(function() {
+  var requestId = window.requestAnimationFrame(function() {
     // The transition start properties currently set are rendered at this frame.
     // And the transition end properties set by the callback is rendered at the
     // next frame.
-    requestId = requestAnimationFrame(callback);
+    requestId = window.requestAnimationFrame(callback);
   });
   return function() {
-    cancelAnimationFrame(requestId);
+    window.cancelAnimationFrame(requestId);
   };
 };
 
@@ -68,11 +67,12 @@ ProgressCenterItemElement.PROGRESS_ANIMATION_END_EVENT = 'progressAnimationEnd';
 
 /**
  * Decorates the given element as a progress item.
- * @param {HTMLElement} element Item to be decorated.
+ * @param {Element} element Item to be decorated.
  * @return {ProgressCenterItemElement} Decorated item.
  */
 ProgressCenterItemElement.decorate = function(element) {
   element.__proto__ = ProgressCenterItemElement.prototype;
+  element = /** @type {ProgressCenterItemElement} */ (element);
   element.state_ = ProgressItemState.PROGRESSING;
   element.track_ = element.querySelector('.progress-track');
   element.track_.addEventListener('webkitTransitionEnd',
@@ -119,7 +119,7 @@ ProgressCenterItemElement.prototype.update = function(item, animated) {
 
   // Set track width.
   var setWidth = function(nextWidthFrame) {
-    var currentWidthRate = parseInt(this.track_.style.width);
+    var currentWidthRate = parseInt(this.track_.style.width, 10);
     // Prevent assigning the same width to avoid stopping the animation.
     // animated == false may be intended to cancel the animation, so in that
     // case, the assignment should be done.
@@ -166,27 +166,29 @@ ProgressCenterItemElement.prototype.onTransitionEnd_ = function(event) {
 /**
  * Progress center panel.
  *
- * @param {HTMLElement} element DOM Element of the process center panel.
+ * @param {!Element} element DOM Element of the process center panel.
  * @constructor
  */
 function ProgressCenterPanel(element) {
   /**
    * Root element of the progress center.
-   * @type {HTMLElement}
+   * @type {!Element}
    * @private
    */
   this.element_ = element;
 
   /**
    * Open view containing multiple progress items.
-   * @type {HTMLElement}
+   * @type {!HTMLDivElement}
    * @private
    */
-  this.openView_ = this.element_.querySelector('#progress-center-open-view');
+  this.openView_ = assertInstanceof(
+      queryRequiredElement(this.element_, '#progress-center-open-view'),
+      HTMLDivElement);
 
   /**
    * Close view that is a summarized progress item.
-   * @type {HTMLElement}
+   * @type {ProgressCenterItemElement}
    * @private
    */
   this.closeView_ = ProgressCenterItemElement.decorate(
@@ -194,7 +196,7 @@ function ProgressCenterPanel(element) {
 
   /**
    * Toggle animation rule of the progress center.
-   * @type {CSSKeyFrameRule}
+   * @type {CSSKeyframesRule}
    * @private
    */
   this.toggleAnimation_ = ProgressCenterPanel.getToggleAnimation_(
@@ -253,8 +255,8 @@ function ProgressCenterPanel(element) {
 
 /**
  * Obtains the toggle animation keyframes rule from the document.
- * @param {HTMLDocument} document Document containing the rule.
- * @return {CSSKeyFrameRules} Animation rule.
+ * @param {Document} document Document containing the rule.
+ * @return {CSSKeyframesRule} Animation rule.
  * @private
  */
 ProgressCenterPanel.getToggleAnimation_ = function(document) {
@@ -308,7 +310,9 @@ ProgressCenterPanel.prototype.updateItem = function(item) {
   if (newItem) {
     if (!itemElement) {
       itemElement = new ProgressCenterItemElement(this.element_.ownerDocument);
-      this.openView_.insertBefore(itemElement, this.openView_.firstNode);
+      // Find quiet node and insert the item before the quiet node.
+      this.openView_.insertBefore(
+          itemElement, this.openView_.querySelector('.quiet'));
     }
     itemElement.update(newItem, targetGroup.isAnimated(item.id));
   } else {
@@ -425,12 +429,13 @@ ProgressCenterPanel.prototype.updateCloseView_ = function() {
 /**
  * Gets an item element having the specified ID.
  * @param {string} id progress item ID.
- * @return {HTMLElement} Item element having the ID.
+ * @return {ProgressCenterItemElement} Item element having the ID.
  * @private
  */
 ProgressCenterPanel.prototype.getItemElement_ = function(id) {
   var query = 'li[data-progress-id="' + id + '"]';
-  return this.openView_.querySelector(query);
+  return /** @type {ProgressCenterItemElement} */ (
+      this.openView_.querySelector(query));
 };
 
 /**

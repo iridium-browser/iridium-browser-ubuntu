@@ -64,12 +64,12 @@ class HistoryClient;
 class HistoryDatabase;
 class HistoryDBTask;
 class HistoryQueryTest;
+class HistoryServiceObserver;
 class HistoryTest;
 class InMemoryHistoryBackend;
 class InMemoryURLIndex;
 class InMemoryURLIndexTest;
 class URLDatabase;
-class VisitDatabaseObserver;
 class VisitFilter;
 struct DownloadRow;
 struct HistoryAddPageArgs;
@@ -97,7 +97,7 @@ class HistoryService : public content::NotificationObserver,
   // The empty constructor is provided only for testing.
   HistoryService();
 
-  virtual ~HistoryService();
+  ~HistoryService() override;
 
   // Initializes the history service, returning true on success. On false, do
   // not call any other functions. The given directory will be used for storing
@@ -151,7 +151,7 @@ class HistoryService : public content::NotificationObserver,
   }
 
   // KeyedService:
-  virtual void Shutdown() OVERRIDE;
+  void Shutdown() override;
 
   // Navigation ----------------------------------------------------------------
 
@@ -430,18 +430,18 @@ class HistoryService : public content::NotificationObserver,
   // Notification that a URL is no longer bookmarked.
   void URLsNoLongerBookmarked(const std::set<GURL>& urls);
 
+  // Observers -----------------------------------------------------------------
+
+  // Adds/Removes an Observer.
+  void AddObserver(history::HistoryServiceObserver* observer);
+  void RemoveObserver(history::HistoryServiceObserver* observer);
+
   // Generic Stuff -------------------------------------------------------------
 
   // Schedules a HistoryDBTask for running on the history backend thread. See
   // HistoryDBTask for details on what this does. Takes ownership of |task|.
   virtual void ScheduleDBTask(scoped_ptr<history::HistoryDBTask> task,
                               base::CancelableTaskTracker* tracker);
-
-  // Adds or removes observers for the VisitDatabase.
-  void AddVisitDatabaseObserver(history::VisitDatabaseObserver* observer);
-  void RemoveVisitDatabaseObserver(history::VisitDatabaseObserver* observer);
-
-  void NotifyVisitDBObserversOnAddVisit(const history::BriefVisitInfo& info);
 
   // This callback is invoked when favicon change for urls.
   typedef base::Callback<void(const std::set<GURL>&)> OnFaviconChangedCallback;
@@ -502,17 +502,16 @@ class HistoryService : public content::NotificationObserver,
   base::WeakPtr<HistoryService> AsWeakPtr();
 
   // syncer::SyncableService implementation.
-  virtual syncer::SyncMergeResult MergeDataAndStartSyncing(
+  syncer::SyncMergeResult MergeDataAndStartSyncing(
       syncer::ModelType type,
       const syncer::SyncDataList& initial_sync_data,
       scoped_ptr<syncer::SyncChangeProcessor> sync_processor,
-      scoped_ptr<syncer::SyncErrorFactory> error_handler) OVERRIDE;
-  virtual void StopSyncing(syncer::ModelType type) OVERRIDE;
-  virtual syncer::SyncDataList GetAllSyncData(
-      syncer::ModelType type) const OVERRIDE;
-  virtual syncer::SyncError ProcessSyncChanges(
+      scoped_ptr<syncer::SyncErrorFactory> error_handler) override;
+  void StopSyncing(syncer::ModelType type) override;
+  syncer::SyncDataList GetAllSyncData(syncer::ModelType type) const override;
+  syncer::SyncError ProcessSyncChanges(
       const tracked_objects::Location& from_here,
-      const syncer::SyncChangeList& change_list) OVERRIDE;
+      const syncer::SyncChangeList& change_list) override;
 
  protected:
   // These are not currently used, hopefully we can do something in the future
@@ -556,13 +555,12 @@ class HistoryService : public content::NotificationObserver,
   void Cleanup();
 
   // Implementation of content::NotificationObserver.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   // Implementation of visitedlink::VisitedLinkDelegate.
-  virtual void RebuildTable(
-      const scoped_refptr<URLEnumerator>& enumerator) OVERRIDE;
+  void RebuildTable(const scoped_refptr<URLEnumerator>& enumerator) override;
 
   // Low-level Init().  Same as the public version, but adds a |no_db| parameter
   // that is only set by unittests which causes the backend to not init its DB.
@@ -588,6 +586,22 @@ class HistoryService : public content::NotificationObserver,
   // Reads a URLRow from in-memory database. Returns false if database is not
   // available or the URL does not exist.
   bool GetRowForURL(const GURL& url, history::URLRow* url_row);
+
+  // Observers ----------------------------------------------------------------
+
+  // Notify all Observers registered that the VisitDatabase was changed.
+  void NotifyAddVisit(const history::BriefVisitInfo& info);
+
+  // Notify all HistoryServiceObservers registered that user is visiting a URL.
+  // The |row| ID will be set to the value that is currently in effect in the
+  // main history database. |redirects| is the list of redirects leading up to
+  // the URL. If we have a redirect chain A -> B -> C and user is visiting C,
+  // then |redirects[0]=B| and |redirects[1]=A|. If there are no redirects,
+  // |redirects| is an empty vector.
+  void NotifyURLVisited(ui::PageTransition transition,
+                        const history::URLRow& row,
+                        const history::RedirectList& redirects,
+                        base::Time visit_time);
 
   // Favicon -------------------------------------------------------------------
 
@@ -873,8 +887,7 @@ class HistoryService : public content::NotificationObserver,
   // See http://crbug.com/138321
   scoped_ptr<history::InMemoryURLIndex> in_memory_url_index_;
 
-  ObserverList<history::VisitDatabaseObserver> visit_database_observers_;
-
+  ObserverList<history::HistoryServiceObserver> observers_;
   base::CallbackList<void(const std::set<GURL>&)>
       favicon_changed_callback_list_;
 

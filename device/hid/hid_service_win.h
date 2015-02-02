@@ -30,10 +30,10 @@ class HidServiceWin : public HidService {
  public:
   HidServiceWin();
 
-  virtual void GetDevices(std::vector<HidDeviceInfo>* devices) OVERRIDE;
+  virtual void GetDevices(std::vector<HidDeviceInfo>* devices) override;
 
-  virtual scoped_refptr<HidConnection> Connect(const HidDeviceId& device_id)
-      OVERRIDE;
+  virtual void Connect(const HidDeviceId& device_id,
+                       const ConnectCallback& callback) override;
 
  private:
   virtual ~HidServiceWin();
@@ -49,6 +49,8 @@ class HidServiceWin : public HidService {
                                        HidCollectionInfo* collection_info);
   void PlatformAddDevice(const std::string& device_path);
   void PlatformRemoveDevice(const std::string& device_path);
+
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 
   DISALLOW_COPY_AND_ASSIGN(HidServiceWin);
 };

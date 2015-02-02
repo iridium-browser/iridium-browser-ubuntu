@@ -28,8 +28,6 @@
       'renderer/media/chrome_key_systems.h',
       'renderer/net/net_error_helper.cc',
       'renderer/net/net_error_helper.h',
-      'renderer/net/net_error_helper_core.cc',
-      'renderer/net/net_error_helper_core.h',
       'renderer/net/net_error_page_controller.cc',
       'renderer/net/net_error_page_controller.h',
       'renderer/net/predictor_queue.cc',
@@ -57,12 +55,15 @@
       'renderer/custom_menu_commands.h',
       'renderer/external_extension.cc',
       'renderer/external_extension.h',
+      'renderer/instant_restricted_id_cache.h',
       'renderer/page_load_histograms.cc',
       'renderer/page_load_histograms.h',
       'renderer/plugins/chrome_plugin_placeholder.cc',
       'renderer/plugins/chrome_plugin_placeholder.h',
       'renderer/plugins/plugin_uma.cc',
       'renderer/plugins/plugin_uma.h',
+      'renderer/plugins/shadow_dom_plugin_placeholder.cc',
+      'renderer/plugins/shadow_dom_plugin_placeholder.h',
       'renderer/prefetch_helper.cc',
       'renderer/prefetch_helper.h',
       'renderer/prerender/prerender_dispatcher.cc',
@@ -169,9 +170,6 @@
       'renderer/resources/extensions/system_indicator_custom_bindings.js',
       'renderer/resources/extensions/tts_custom_bindings.js',
       'renderer/resources/extensions/tts_engine_custom_bindings.js',
-      'renderer/resources/extensions/web_view.js',
-      'renderer/resources/extensions/web_view_events.js',
-      'renderer/resources/extensions/web_view_experimental.js',
     ],
     'chrome_renderer_non_android_sources': [
       'renderer/prerender/prerender_media_load_deferrer.cc',
@@ -266,7 +264,8 @@
         '../third_party/re2/re2.gyp:re2',
         '../components/components.gyp:autofill_content_renderer',
         '../components/components.gyp:cdm_renderer',
-        '../components/components.gyp:data_reduction_proxy_common',
+        '../components/components.gyp:data_reduction_proxy_core_common',
+        '../components/components.gyp:error_page_renderer',
         '../components/components.gyp:startup_metric_utils',
         '../components/components.gyp:password_manager_content_renderer',
         '../components/components.gyp:plugins_renderer',
@@ -276,7 +275,6 @@
         '../content/app/resources/content_resources.gyp:content_resources',
         '../content/app/strings/content_strings.gyp:content_strings',
         '../content/content.gyp:content_renderer',
-        '../extensions/extensions_resources.gyp:extensions_resources',
         '../media/cast/cast.gyp:cast_logging_proto',
         '../media/cast/cast.gyp:cast_net',
         '../media/cast/cast.gyp:cast_sender',
@@ -341,6 +339,7 @@
         ['enable_extensions==1', {
           'dependencies': [
             '../extensions/extensions.gyp:extensions_renderer',
+            '../extensions/extensions_resources.gyp:extensions_resources',
             # TODO(hclam): See crbug.com/298380 for details.
             # We should isolate the APIs needed by the renderer.
             '<(DEPTH)/chrome/common/extensions/api/api.gyp:chrome_api',
@@ -372,7 +371,7 @@
             '../third_party/mach_override/mach_override.gyp:mach_override',
           ],
         }],
-        ['enable_printing!=0', {
+        ['enable_basic_printing==1 or enable_print_preview==1', {
           'dependencies': [
             '../printing/printing.gyp:printing',
           ],
@@ -380,7 +379,7 @@
             '<@(chrome_renderer_printing_sources)',
           ],
         }],
-        ['enable_printing==1', {
+        ['enable_print_preview==1', {
           'sources': [
             '<@(chrome_renderer_full_printing_sources)',
           ],

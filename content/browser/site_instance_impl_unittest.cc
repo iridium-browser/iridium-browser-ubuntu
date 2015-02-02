@@ -36,20 +36,20 @@ const char kPrivilegedScheme[] = "privileged";
 
 class SiteInstanceTestWebUIControllerFactory : public WebUIControllerFactory {
  public:
-  virtual WebUIController* CreateWebUIControllerForURL(
-      WebUI* web_ui, const GURL& url) const OVERRIDE {
+  WebUIController* CreateWebUIControllerForURL(WebUI* web_ui,
+                                               const GURL& url) const override {
     return NULL;
   }
-  virtual WebUI::TypeID GetWebUIType(BrowserContext* browser_context,
-      const GURL& url) const OVERRIDE {
+  WebUI::TypeID GetWebUIType(BrowserContext* browser_context,
+                             const GURL& url) const override {
     return WebUI::kNoWebUI;
   }
-  virtual bool UseWebUIForURL(BrowserContext* browser_context,
-                              const GURL& url) const OVERRIDE {
+  bool UseWebUIForURL(BrowserContext* browser_context,
+                      const GURL& url) const override {
     return HasWebUIScheme(url);
   }
-  virtual bool UseWebUIBindingsForURL(BrowserContext* browser_context,
-                                      const GURL& url) const OVERRIDE {
+  bool UseWebUIBindingsForURL(BrowserContext* browser_context,
+                              const GURL& url) const override {
     return HasWebUIScheme(url);
   }
 };
@@ -61,12 +61,12 @@ class SiteInstanceTestBrowserClient : public TestContentBrowserClient {
     WebUIControllerFactory::RegisterFactory(&factory_);
   }
 
-  virtual ~SiteInstanceTestBrowserClient() {
+  ~SiteInstanceTestBrowserClient() override {
     WebUIControllerFactory::UnregisterFactoryForTesting(&factory_);
   }
 
-  virtual bool IsSuitableHost(RenderProcessHost* process_host,
-                              const GURL& site_url) OVERRIDE {
+  bool IsSuitableHost(RenderProcessHost* process_host,
+                      const GURL& site_url) override {
     return (privileged_process_id_ == process_host->GetID()) ==
         site_url.SchemeIs(kPrivilegedScheme);
   }
@@ -90,7 +90,7 @@ class SiteInstanceTest : public testing::Test {
         old_browser_client_(NULL) {
   }
 
-  virtual void SetUp() {
+  void SetUp() override {
     old_browser_client_ = SetBrowserClientForTesting(&browser_client_);
     url::AddStandardScheme(kPrivilegedScheme);
     url::AddStandardScheme(kChromeUIScheme);
@@ -98,7 +98,7 @@ class SiteInstanceTest : public testing::Test {
     SiteInstanceImpl::set_render_process_host_factory(&rph_factory_);
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     // Ensure that no RenderProcessHosts are left over after the tests.
     EXPECT_TRUE(RenderProcessHost::AllHostsIterator().IsAtEnd());
 
@@ -157,9 +157,7 @@ class TestBrowsingInstance : public BrowsingInstance {
   using BrowsingInstance::UnregisterSiteInstance;
 
  private:
-  virtual ~TestBrowsingInstance() {
-    (*delete_counter_)++;
-  }
+  ~TestBrowsingInstance() override { (*delete_counter_)++; }
 
   int* delete_counter_;
 };
@@ -179,9 +177,7 @@ class TestSiteInstance : public SiteInstanceImpl {
  private:
   TestSiteInstance(BrowsingInstance* browsing_instance, int* delete_counter)
     : SiteInstanceImpl(browsing_instance), delete_counter_(delete_counter) {}
-  virtual ~TestSiteInstance() {
-    (*delete_counter_)++;
-  }
+  ~TestSiteInstance() override { (*delete_counter_)++; }
 
   int* delete_counter_;
 };

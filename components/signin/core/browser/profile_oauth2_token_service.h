@@ -37,16 +37,16 @@ class SigninClient;
 class ProfileOAuth2TokenService : public OAuth2TokenService,
                                   public KeyedService {
  public:
-  virtual ~ProfileOAuth2TokenService();
+  ~ProfileOAuth2TokenService() override;
 
   // Initializes this token service with the SigninClient.
   virtual void Initialize(SigninClient* client);
 
   // KeyedService implementation.
-  virtual void Shutdown() OVERRIDE;
+  void Shutdown() override;
 
   // Lists account IDs of all accounts with a refresh token.
-  virtual std::vector<std::string> GetAccounts() OVERRIDE;
+  std::vector<std::string> GetAccounts() override;
 
   // Loads credentials from a backing persistent store to make them available
   // after service is used between profile restarts.
@@ -85,13 +85,16 @@ class ProfileOAuth2TokenService : public OAuth2TokenService,
   // concrete class.
 
   // Simply returns NULL and should be overriden by subsclasses.
-  virtual net::URLRequestContextGetter* GetRequestContext() OVERRIDE;
+  net::URLRequestContextGetter* GetRequestContext() override;
 
   // Updates the internal cache of the result from the most-recently-completed
   // auth request (used for reporting errors to the user).
-  virtual void UpdateAuthError(
-      const std::string& account_id,
-      const GoogleServiceAuthError& error) OVERRIDE;
+  void UpdateAuthError(const std::string& account_id,
+                       const GoogleServiceAuthError& error) override;
+
+  // Validate that the account_id argument is valid.  This method DCHECKs
+  // when invalid.
+  void ValidateAccountId(const std::string& account_id) const;
 
  private:
   // The client with which this instance was initialized, or NULL.

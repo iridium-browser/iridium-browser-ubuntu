@@ -68,6 +68,9 @@ class MediaCodecVideoDecoder {
   // List of supported HW VP8 decoders.
   private static final String[] supportedHwCodecPrefixes =
     {"OMX.qcom.", "OMX.Nvidia." };
+  // List of supported SW VP8 decoders.
+  private static final String[] supportedSwCodecPrefixes =
+    {"OMX.google."};
   // NV12 color format supported by QCOM codec, but not declared in MediaCodec -
   // see /hardware/qcom/media/mm-core/inc/OMX_QCOMExtns.h
   private static final int
@@ -92,11 +95,15 @@ class MediaCodecVideoDecoder {
   private EGLDisplay eglDisplay = EGL14.EGL_NO_DISPLAY;
   private EGLContext eglContext = EGL14.EGL_NO_CONTEXT;
   private EGLSurface eglSurface = EGL14.EGL_NO_SURFACE;
+  private static final int EGL14_SDK_VERSION =
+      android.os.Build.VERSION_CODES.JELLY_BEAN_MR1;
+  private static final int CURRENT_SDK_VERSION =
+      android.os.Build.VERSION.SDK_INT;
 
 
   private MediaCodecVideoDecoder() { }
 
-  // Helper struct for findVp8HwDecoder() below.
+  // Helper struct for findVp8Decoder() below.
   private static class DecoderProperties {
     public DecoderProperties(String codecName, int colorFormat) {
       this.codecName = codecName;
@@ -106,10 +113,14 @@ class MediaCodecVideoDecoder {
     public final int colorFormat;  // Color format supported by codec.
   }
 
-  private static DecoderProperties findVp8HwDecoder() {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.KITKAT)
+  private static DecoderProperties findVp8Decoder(boolean useSwCodec) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.KITKAT) {
       return null; // MediaCodec.setParameters is missing.
-
+    }
+    String[] supportedCodecPrefixes = supportedHwCodecPrefixes;
+    if (useSwCodec) {
+      supportedCodecPrefixes = supportedSwCodecPrefixes;
+    }
     for (int i = 0; i < MediaCodecList.getCodecCount(); ++i) {
       MediaCodecInfo info = MediaCodecList.getCodecInfoAt(i);
       if (info.isEncoder()) {
@@ -127,10 +138,10 @@ class MediaCodecVideoDecoder {
       }
       Log.d(TAG, "Found candidate decoder " + name);
 
-      // Check if this is supported HW decoder.
+      // Check if this is supported decoder.
       boolean supportedCodec = false;
-      for (String hwCodecPrefix : supportedHwCodecPrefixes) {
-        if (name.startsWith(hwCodecPrefix)) {
+      for (String codecPrefix : supportedCodecPrefixes) {
+        if (name.startsWith(codecPrefix)) {
           supportedCodec = true;
           break;
         }
@@ -159,8 +170,13 @@ class MediaCodecVideoDecoder {
     return null;  // No HW VP8 decoder.
   }
 
+  private static boolean isEGL14Supported() {
+    Log.d(TAG, "SDK version: " + CURRENT_SDK_VERSION);
+    return (CURRENT_SDK_VERSION >= EGL14_SDK_VERSION);
+  }
+
   private static boolean isPlatformSupported() {
-    return findVp8HwDecoder() != null;
+    return findVp8Decoder(false) != null;
   }
 
   private void checkOnMediaCodecThread() {
@@ -265,21 +281,21 @@ class MediaCodecVideoDecoder {
     }
   }
 
-  private boolean initDecode(int width, int height, boolean useSurface,
-      EGLContext sharedContext) {
+  private boolean initDecode(int width, int height, boolean useSwCodec,
+      boolean useSurface, EGLContext sharedContext) {
     if (mediaCodecThread != null) {
       throw new RuntimeException("Forgot to release()?");
     }
     if (useSurface && sharedContext == null) {
       throw new RuntimeException("No shared EGL context.");
     }
-    DecoderProperties properties = findVp8HwDecoder();
+    DecoderProperties properties = findVp8Decoder(useSwCodec);
     if (properties == null) {
       throw new RuntimeException("Cannot find HW VP8 decoder");
     }
     Log.d(TAG, "Java initDecode: " + width + " x " + height +
         ". Color: 0x" + Integer.toHexString(properties.colorFormat) +
-        ". Use Surface: " + useSurface );
+        ". Use Surface: " + useSurface + ". Use SW codec: " + useSwCodec);
     if (sharedContext != null) {
       Log.d(TAG, "Decoder shared EGL Context: " + sharedContext);
     }
@@ -326,7 +342,8 @@ class MediaCodecVideoDecoder {
         format.setInteger(MediaFormat.KEY_COLOR_FORMAT, properties.colorFormat);
       }
       Log.d(TAG, "  Format: " + format);
-      mediaCodec = MediaCodec.createByCodecName(properties.codecName);
+      mediaCodec =
+          MediaCodecVideoEncoder.createByCodecName(properties.codecName);
       if (mediaCodec == null) {
         return false;
       }
@@ -357,8 +374,6 @@ class MediaCodecVideoDecoder {
     mediaCodecThread = null;
     if (useSurface) {
       surface.release();
-      surface = null;
-      surfaceTexture = null;
       if (textureID >= 0) {
         int[] textures = new int[1];
         textures[0] = textureID;

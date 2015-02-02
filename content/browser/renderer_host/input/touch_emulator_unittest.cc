@@ -12,7 +12,6 @@
 #include "content/browser/renderer_host/input/touch_emulator_client.h"
 #include "content/common/input/web_input_event_traits.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/events/gesture_detection/gesture_config_helper.h"
 
 #if defined(USE_AURA)
 #include "ui/aura/env.h"
@@ -43,10 +42,10 @@ class TouchEmulatorTest : public testing::Test,
     event_time_delta_seconds_ = 0.1;
   }
 
-  virtual ~TouchEmulatorTest() {}
+  ~TouchEmulatorTest() override {}
 
   // testing::Test
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
 #if defined(USE_AURA)
     aura::Env::CreateInstance(true);
     screen_.reset(aura::TestScreen::Create(gfx::Size()));
@@ -57,7 +56,7 @@ class TouchEmulatorTest : public testing::Test,
     emulator_->Enable();
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     emulator_->Disable();
     EXPECT_EQ("", ExpectedEvents());
 
@@ -67,13 +66,11 @@ class TouchEmulatorTest : public testing::Test,
 #endif
   }
 
-  virtual void ForwardGestureEvent(
-      const blink::WebGestureEvent& event) OVERRIDE {
+  void ForwardGestureEvent(const blink::WebGestureEvent& event) override {
     forwarded_events_.push_back(event.type);
   }
 
-  virtual void ForwardEmulatedTouchEvent(
-      const blink::WebTouchEvent& event) OVERRIDE {
+  void ForwardEmulatedTouchEvent(const blink::WebTouchEvent& event) override {
     forwarded_events_.push_back(event.type);
     EXPECT_EQ(1U, event.touchesLength);
     EXPECT_EQ(last_mouse_x_, event.touches[0].position.x);
@@ -86,9 +83,9 @@ class TouchEmulatorTest : public testing::Test,
     }
   }
 
-  virtual void SetCursor(const WebCursor& cursor) OVERRIDE {}
+  void SetCursor(const WebCursor& cursor) override {}
 
-  virtual void ShowContextMenuAtPoint(const gfx::Point& point) OVERRIDE {}
+  void ShowContextMenuAtPoint(const gfx::Point& point) override {}
 
  protected:
   TouchEmulator* emulator() const {

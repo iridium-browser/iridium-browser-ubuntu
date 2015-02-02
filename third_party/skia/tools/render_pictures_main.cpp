@@ -40,7 +40,7 @@ DEFINE_string(mismatchPath, "", "Write images for tests that failed due to "
 DEFINE_bool(gpuStats, false, "Only meaningful with gpu configurations. "
             "Report some GPU call statistics.");
 #endif
-DEFINE_bool(preprocess, false, "If true, perform device specific preprocessing before rendering.");
+DEFINE_bool(mpd, false, "If true, use MultiPictureDraw for rendering.");
 DEFINE_string(readJsonSummaryPath, "", "JSON file to read image expectations from.");
 DECLARE_string(readPath);
 DEFINE_bool(writeChecksumBasedFilenames, false,
@@ -184,16 +184,6 @@ static bool render_picture_internal(const SkString& inputPath, const SkString* w
         return false;
     }
 
-    if (FLAGS_preprocess) {
-        // Because the GPU preprocessing step relies on the in-memory picture
-        // statistics we need to rerecord the picture here
-        SkPictureRecorder recorder;
-        picture->playback(recorder.beginRecording(picture->cullRect().width(), 
-                                                  picture->cullRect().height(), 
-                                                  NULL, 0));
-        picture.reset(recorder.endRecording());
-    }
-
     while (FLAGS_bench_record) {
         SkPictureRecorder recorder;
         picture->playback(recorder.beginRecording(picture->cullRect().width(), 
@@ -208,13 +198,7 @@ static bool render_picture_internal(const SkString& inputPath, const SkString* w
              inputPath.c_str());
 
     renderer.init(picture, &writePathString, &mismatchPathString, &inputFilename,
-                  FLAGS_writeChecksumBasedFilenames);
-
-    if (FLAGS_preprocess) {
-        if (renderer.getCanvas()) {
-            renderer.getCanvas()->EXPERIMENTAL_optimize(renderer.getPicture());
-        }
-    }
+                  FLAGS_writeChecksumBasedFilenames, FLAGS_mpd);
 
     renderer.setup();
     renderer.enableWrites();
@@ -490,8 +474,7 @@ int tool_main(int argc, char** argv) {
         SkDebugf("Failed to render %i pictures.\n", failures);
         return 1;
     }
-#if SK_SUPPORT_GPU
-#if GR_CACHE_STATS
+#if GR_CACHE_STATS && SK_SUPPORT_GPU
     if (renderer->isUsingGpuDevice()) {
         GrContext* ctx = renderer->getGrContext();
         ctx->printCacheStats();
@@ -500,14 +483,15 @@ int tool_main(int argc, char** argv) {
 #endif
     }
 #endif
-#if GR_GPU_STATS
+
+#if GR_GPU_STATS && SK_SUPPORT_GPU
     if (FLAGS_gpuStats && renderer->isUsingGpuDevice()) {
         GrContext* ctx = renderer->getGrContext();
         SkDebugf("RenderTarget Binds: %d\n", ctx->gpuStats()->renderTargetBinds());
         SkDebugf("Shader Compilations: %d\n", ctx->gpuStats()->shaderCompilations());
     }
 #endif
-#endif
+
     if (FLAGS_writeJsonSummaryPath.count() == 1) {
         // If there were any descriptions on the command line, insert them now.
         for (int i=0; i<FLAGS_descriptions.count(); i++) {

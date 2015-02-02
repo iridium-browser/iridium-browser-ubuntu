@@ -32,21 +32,20 @@ class ThumbnailListSource : public content::URLDataSource {
   explicit ThumbnailListSource(Profile* profile);
 
   // content::URLDataSource implementation.
-  virtual std::string GetSource() const OVERRIDE;
-  virtual void StartDataRequest(
+  std::string GetSource() const override;
+  void StartDataRequest(
       const std::string& path,
       int render_process_id,
       int render_frame_id,
-      const content::URLDataSource::GotDataCallback& callback) OVERRIDE;
-  virtual std::string GetMimeType(const std::string& path) const OVERRIDE;
-  virtual base::MessageLoop* MessageLoopForRequestPath(
-      const std::string& path) const OVERRIDE;
-  virtual bool ShouldServiceRequest(
-      const net::URLRequest* request) const OVERRIDE;
-  virtual bool ShouldReplaceExistingSource() const OVERRIDE;
+      const content::URLDataSource::GotDataCallback& callback) override;
+  std::string GetMimeType(const std::string& path) const override;
+  base::MessageLoop* MessageLoopForRequestPath(
+      const std::string& path) const override;
+  bool ShouldServiceRequest(const net::URLRequest* request) const override;
+  bool ShouldReplaceExistingSource() const override;
 
  private:
-  virtual ~ThumbnailListSource();
+  ~ThumbnailListSource() override;
 
   void OnMostVisitedURLsAvailable(
     const content::URLDataSource::GotDataCallback& callback,

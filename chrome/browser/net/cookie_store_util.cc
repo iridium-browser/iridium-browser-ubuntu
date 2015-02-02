@@ -41,17 +41,17 @@ class ChromeCookieMonsterDelegate : public net::CookieMonsterDelegate {
   }
 
   // net::CookieMonster::Delegate implementation.
-  virtual void OnCookieChanged(
+  void OnCookieChanged(
       const net::CanonicalCookie& cookie,
       bool removed,
-      net::CookieMonster::Delegate::ChangeCause cause) OVERRIDE {
+      net::CookieMonster::Delegate::ChangeCause cause) override {
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
         base::Bind(&ChromeCookieMonsterDelegate::OnCookieChangedAsyncHelper,
                    this, cookie, removed, cause));
   }
 
-  virtual void OnLoaded() OVERRIDE {
+  void OnLoaded() override {
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
         base::Bind(&ChromeCookieMonsterDelegate::OnLoadedAsyncHelper,
@@ -59,7 +59,7 @@ class ChromeCookieMonsterDelegate : public net::CookieMonsterDelegate {
   }
 
  private:
-  virtual ~ChromeCookieMonsterDelegate() {}
+  ~ChromeCookieMonsterDelegate() override {}
 
   static Profile* GetProfileOnUI(ProfileManager* profile_manager,
                                  Profile* profile) {
@@ -129,10 +129,10 @@ namespace {
 // OSCrypt::UseMockKeychain or will hang waiting for user input.
 class CookieOSCryptoDelegate : public content::CookieCryptoDelegate {
  public:
-  virtual bool EncryptString(const std::string& plaintext,
-                             std::string* ciphertext) OVERRIDE;
-  virtual bool DecryptString(const std::string& ciphertext,
-                             std::string* plaintext) OVERRIDE;
+  bool EncryptString(const std::string& plaintext,
+                     std::string* ciphertext) override;
+  bool DecryptString(const std::string& ciphertext,
+                     std::string* plaintext) override;
 };
 
 bool CookieOSCryptoDelegate::EncryptString(const std::string& plaintext,

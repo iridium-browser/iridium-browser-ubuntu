@@ -56,9 +56,9 @@ class CONTENT_EXPORT EmbeddedWorkerRegistry
   scoped_ptr<EmbeddedWorkerInstance> CreateWorker();
 
   // Called from EmbeddedWorkerInstance, relayed to the child process.
-  void SendStartWorker(scoped_ptr<EmbeddedWorkerMsg_StartWorker_Params> params,
-                       const StatusCallback& callback,
-                       int process_id);
+  ServiceWorkerStatusCode SendStartWorker(
+      scoped_ptr<EmbeddedWorkerMsg_StartWorker_Params> params,
+      int process_id);
   ServiceWorkerStatusCode StopWorker(int process_id,
                                      int embedded_worker_id);
 
@@ -72,6 +72,9 @@ class CONTENT_EXPORT EmbeddedWorkerRegistry
                             int thread_id,
                             int embedded_worker_id);
   void OnWorkerScriptLoadFailed(int process_id, int embedded_worker_id);
+  void OnWorkerScriptEvaluated(int process_id,
+                               int embedded_worker_id,
+                               bool success);
   void OnWorkerStarted(int process_id, int embedded_worker_id);
   void OnWorkerStopped(int process_id, int embedded_worker_id);
   void OnPausedAfterDownload(int process_id, int embedded_worker_id);
@@ -121,7 +124,7 @@ class CONTENT_EXPORT EmbeddedWorkerRegistry
   ProcessToSenderMap process_sender_map_;
 
   // Map from process_id to embedded_worker_id.
-  // This map only contains running workers.
+  // This map only contains starting and running workers.
   std::map<int, std::set<int> > worker_process_map_;
 
   int next_embedded_worker_id_;

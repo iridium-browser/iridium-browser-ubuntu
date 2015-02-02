@@ -45,19 +45,6 @@ void NotifyWorkerReadyForInspection(int worker_process_id,
       worker_process_id, worker_route_id);
 }
 
-void NotifyWorkerContextStarted(int worker_process_id, int worker_route_id) {
-  if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-    BrowserThread::PostTask(
-        BrowserThread::UI,
-        FROM_HERE,
-        base::Bind(
-            NotifyWorkerContextStarted, worker_process_id, worker_route_id));
-    return;
-  }
-  EmbeddedWorkerDevToolsManager::GetInstance()->WorkerContextStarted(
-      worker_process_id, worker_route_id);
-}
-
 void NotifyWorkerDestroyed(int worker_process_id, int worker_route_id) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
     BrowserThread::PostTask(
@@ -260,7 +247,14 @@ void EmbeddedWorkerInstance::SendStartWorker(
   worker_devtools_agent_route_id_ = worker_devtools_agent_route_id;
   params->worker_devtools_agent_route_id = worker_devtools_agent_route_id;
   params->wait_for_debugger = wait_for_debugger;
-  registry_->SendStartWorker(params.Pass(), callback, process_id_);
+  ServiceWorkerStatusCode status =
+      registry_->SendStartWorker(params.Pass(), process_id_);
+  if (status != SERVICE_WORKER_OK) {
+    callback.Run(status);
+    return;
+  }
+  DCHECK(start_callback_.is_null());
+  start_callback_ = callback;
 }
 
 void EmbeddedWorkerInstance::OnReadyForInspection() {
@@ -271,11 +265,16 @@ void EmbeddedWorkerInstance::OnReadyForInspection() {
 
 void EmbeddedWorkerInstance::OnScriptLoaded(int thread_id) {
   thread_id_ = thread_id;
-  if (worker_devtools_agent_route_id_ != MSG_ROUTING_NONE)
-    NotifyWorkerContextStarted(process_id_, worker_devtools_agent_route_id_);
 }
 
 void EmbeddedWorkerInstance::OnScriptLoadFailed() {
+}
+
+void EmbeddedWorkerInstance::OnScriptEvaluated(bool success) {
+  DCHECK(!start_callback_.is_null());
+  start_callback_.Run(success ? SERVICE_WORKER_OK
+                              : SERVICE_WORKER_ERROR_START_WORKER_FAILED);
+  start_callback_.Reset();
 }
 
 void EmbeddedWorkerInstance::OnStarted() {
@@ -296,6 +295,7 @@ void EmbeddedWorkerInstance::OnStopped() {
   process_id_ = -1;
   thread_id_ = -1;
   worker_devtools_agent_route_id_ = MSG_ROUTING_NONE;
+  start_callback_.Reset();
   FOR_EACH_OBSERVER(Listener, listener_list_, OnStopped());
 }
 

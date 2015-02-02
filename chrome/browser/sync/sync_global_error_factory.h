@@ -27,11 +27,11 @@ class SyncGlobalErrorFactory : public BrowserContextKeyedServiceFactory {
   friend struct DefaultSingletonTraits<SyncGlobalErrorFactory>;
 
   SyncGlobalErrorFactory();
-  virtual ~SyncGlobalErrorFactory();
+  ~SyncGlobalErrorFactory() override;
 
   // BrowserContextKeyedServiceFactory:
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* profile) const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* profile) const override;
 
   DISALLOW_COPY_AND_ASSIGN(SyncGlobalErrorFactory);
 };

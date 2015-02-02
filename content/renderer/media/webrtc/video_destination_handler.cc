@@ -7,6 +7,7 @@
 #include <string>
 
 #include "base/base64.h"
+#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/rand_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -107,9 +108,12 @@ void PpFrameWriter::StopSourceImpl() {
   DCHECK(CalledOnValidThread());
 }
 
+// Note: PutFrame must copy or process image_data directly in this function,
+// because it may be overwritten as soon as we return from this function.
 void PpFrameWriter::PutFrame(PPB_ImageData_Impl* image_data,
                              int64 time_stamp_ns) {
   DCHECK(CalledOnValidThread());
+  TRACE_EVENT0("video", "PpFrameWriter::PutFrame");
   DVLOG(3) << "PpFrameWriter::PutFrame()";
 
   if (!image_data) {
@@ -129,7 +133,15 @@ void PpFrameWriter::PutFrame(PPB_ImageData_Impl* image_data,
     return;
   }
 
-  const gfx::Size frame_size(bitmap->width(), bitmap->height());
+  const uint8* src_data = static_cast<uint8*>(bitmap->getPixels());
+  const int src_stride = static_cast<int>(bitmap->rowBytes());
+  const int width = bitmap->width();
+  const int height = bitmap->height();
+
+  // We only support PP_IMAGEDATAFORMAT_BGRA_PREMUL at the moment.
+  DCHECK(image_data->format() == PP_IMAGEDATAFORMAT_BGRA_PREMUL);
+
+  const gfx::Size frame_size(width, height);
 
   if (state() != MediaStreamVideoSource::STARTED)
     return;
@@ -137,10 +149,6 @@ void PpFrameWriter::PutFrame(PPB_ImageData_Impl* image_data,
   const base::TimeDelta timestamp = base::TimeDelta::FromMicroseconds(
       time_stamp_ns / base::Time::kNanosecondsPerMicrosecond);
 
-  // TODO(perkj): It would be more efficient to use I420 here. Using YV12 will
-  // force a copy into a tightly packed I420 frame in
-  // WebRtcVideoCapturerAdapter before the frame is delivered to libJingle.
-  // crbug/359587.
   scoped_refptr<media::VideoFrame> new_frame =
       frame_pool_.CreateFrame(media::VideoFrame::YV12, frame_size,
                               gfx::Rect(frame_size), frame_size, timestamp);
@@ -149,15 +157,24 @@ void PpFrameWriter::PutFrame(PPB_ImageData_Impl* image_data,
       MediaStreamVideoSource::kUnknownFrameRate,
       media::PIXEL_FORMAT_YV12);
 
-  libyuv::BGRAToI420(reinterpret_cast<uint8*>(bitmap->getPixels()),
-                     bitmap->rowBytes(),
-                     new_frame->data(media::VideoFrame::kYPlane),
-                     new_frame->stride(media::VideoFrame::kYPlane),
-                     new_frame->data(media::VideoFrame::kUPlane),
-                     new_frame->stride(media::VideoFrame::kUPlane),
-                     new_frame->data(media::VideoFrame::kVPlane),
-                     new_frame->stride(media::VideoFrame::kVPlane),
-                     frame_size.width(), frame_size.height());
+  // TODO(magjed): Chrome OS is not ready for switching from BGRA to ARGB.
+  // Remove this once http://crbug/434007 is fixed. We have a corresponding
+  // problem when we send frames to the effects plugin in PepperVideoSourceHost.
+#if defined(OS_CHROMEOS)
+  auto libyuv_xxxx_to_i420 = &libyuv::BGRAToI420;
+#else
+  auto libyuv_xxxx_to_i420 = &libyuv::ARGBToI420;
+#endif
+  libyuv_xxxx_to_i420(src_data,
+                      src_stride,
+                      new_frame->data(media::VideoFrame::kYPlane),
+                      new_frame->stride(media::VideoFrame::kYPlane),
+                      new_frame->data(media::VideoFrame::kUPlane),
+                      new_frame->stride(media::VideoFrame::kUPlane),
+                      new_frame->data(media::VideoFrame::kVPlane),
+                      new_frame->stride(media::VideoFrame::kVPlane),
+                      width,
+                      height);
 
   delegate_->DeliverFrame(new_frame, format);
 }
@@ -175,7 +192,7 @@ class PpFrameWriterProxy : public FrameWriterInterface {
   virtual ~PpFrameWriterProxy() {}
 
   virtual void PutFrame(PPB_ImageData_Impl* image_data,
-                        int64 time_stamp_ns) OVERRIDE {
+                        int64 time_stamp_ns) override {
     writer_->PutFrame(image_data, time_stamp_ns);
   }
 

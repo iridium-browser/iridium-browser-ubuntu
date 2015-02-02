@@ -33,10 +33,10 @@
  * @extends {WebInspector.PanelWithSidebarTree}
  * @implements {WebInspector.TargetManager.Observer}
  */
-WebInspector.ResourcesPanel = function(database)
+WebInspector.ResourcesPanel = function()
 {
     WebInspector.PanelWithSidebarTree.call(this, "resources");
-    this.registerRequiredCSS("resourcesPanel.css");
+    this.registerRequiredCSS("resources/resourcesPanel.css");
 
     WebInspector.settings.resourcesLastSelectedItem = WebInspector.settings.createSetting("resourcesLastSelectedItem", {});
 
@@ -91,7 +91,7 @@ WebInspector.ResourcesPanel = function(database)
     this._domains = {};
 
     this.sidebarElement().addEventListener("mousemove", this._onmousemove.bind(this), false);
-    this.sidebarElement().addEventListener("mouseout", this._onmouseout.bind(this), false);
+    this.sidebarElement().addEventListener("mouseleave", this._onmouseleave.bind(this), false);
 
     /**
      * @this {WebInspector.ResourcesPanel}
@@ -214,7 +214,7 @@ WebInspector.ResourcesPanel.prototype = {
     _reset: function()
     {
         this._domains = {};
-        var queryViews = this._databaseQueryViews.values();
+        var queryViews = this._databaseQueryViews.valuesArray();
         for (var i = 0; i < queryViews.length; ++i)
             queryViews[i].removeEventListener(WebInspector.DatabaseQueryView.Events.SchemaUpdated, this._updateDatabaseTables, this);
         this._databaseTableViews.clear();
@@ -474,13 +474,21 @@ WebInspector.ResourcesPanel.prototype = {
      */
     _resourceViewForResource: function(resource)
     {
-        if (WebInspector.ResourceView.hasTextContent(resource)) {
+        if (resource.hasTextContent()) {
             var treeElement = this._findTreeElementForResource(resource);
             if (!treeElement)
                 return null;
             return treeElement.sourceView();
         }
-        return WebInspector.ResourceView.nonSourceViewForResource(resource);
+
+        switch (resource.resourceType()) {
+        case WebInspector.resourceTypes.Image:
+            return new WebInspector.ImageView(resource.url, resource.mimeType, resource);
+        case WebInspector.resourceTypes.Font:
+            return new WebInspector.FontView(resource.url);
+        default:
+            return new WebInspector.EmptyView(resource.url);
+        }
     },
 
     /**
@@ -762,7 +770,7 @@ WebInspector.ResourcesPanel.prototype = {
 
     _onmousemove: function(event)
     {
-        var nodeUnderMouse = document.elementFromPoint(event.pageX, event.pageY);
+        var nodeUnderMouse = event.target;
         if (!nodeUnderMouse)
             return;
 
@@ -785,7 +793,7 @@ WebInspector.ResourcesPanel.prototype = {
         }
     },
 
-    _onmouseout: function(event)
+    _onmouseleave: function(event)
     {
         if (this._previousHoveredElement) {
             this._previousHoveredElement.hovered = false;
@@ -808,14 +816,18 @@ WebInspector.ResourcesPanel.ResourceRevealer.prototype = {
     /**
      * @param {!Object} resource
      * @param {number=} lineNumber
+     * @return {!Promise}
      */
     reveal: function(resource, lineNumber)
     {
         if (resource instanceof WebInspector.Resource) {
-            var panel = /** @type {?WebInspector.ResourcesPanel} */ (WebInspector.inspectorView.showPanel("resources"));
-            if (panel)
-                panel.showResource(resource, lineNumber);
+
+            var panel = WebInspector.ResourcesPanel._instance();
+            WebInspector.inspectorView.setCurrentPanel(panel);
+            panel.showResource(resource, lineNumber);
+            return Promise.resolve();
         }
+        return Promise.rejectWithError("Internal error: not a resource");
     }
 }
 
@@ -1073,15 +1085,19 @@ WebInspector.FrameTreeElement.prototype = {
         }
     },
 
+    /**
+     * @param {!WebInspector.Resource} resource
+     */
     appendResource: function(resource)
     {
         if (resource.isHidden())
             return;
-        var categoryName = resource.type.name();
-        var categoryElement = resource.type === WebInspector.resourceTypes.Document ? this : this._categoryElements[categoryName];
+        var resourceType = resource.resourceType();
+        var categoryName = resourceType.name();
+        var categoryElement = resourceType === WebInspector.resourceTypes.Document ? this : this._categoryElements[categoryName];
         if (!categoryElement) {
-            categoryElement = new WebInspector.StorageCategoryTreeElement(this._storagePanel, resource.type.categoryTitle(), categoryName, null, true);
-            this._categoryElements[resource.type.name()] = categoryElement;
+            categoryElement = new WebInspector.StorageCategoryTreeElement(this._storagePanel, resource.resourceType().categoryTitle(), categoryName, null, true);
+            this._categoryElements[resourceType.name()] = categoryElement;
             this._insertInPresentationOrder(this, categoryElement);
         }
         var resourceTreeElement = new WebInspector.FrameResourceTreeElement(this._storagePanel, resource);
@@ -1149,10 +1165,13 @@ WebInspector.FrameTreeElement.prototype = {
 /**
  * @constructor
  * @extends {WebInspector.BaseStorageTreeElement}
+ * @param {!WebInspector.ResourcesPanel} storagePanel
+ * @param {!WebInspector.Resource} resource
  */
 WebInspector.FrameResourceTreeElement = function(storagePanel, resource)
 {
-    WebInspector.BaseStorageTreeElement.call(this, storagePanel, resource, resource.displayName, ["resource-sidebar-tree-item", "resources-type-" + resource.type.name()]);
+    WebInspector.BaseStorageTreeElement.call(this, storagePanel, resource, resource.displayName, ["resource-sidebar-tree-item", "resources-type-" + resource.resourceType().name()]);
+    /** @type {!WebInspector.Resource} */
     this._resource = resource;
     this._resource.addEventListener(WebInspector.Resource.Events.MessageAdded, this._consoleMessageAdded, this);
     this._resource.addEventListener(WebInspector.Resource.Events.MessagesCleared, this._consoleMessagesCleared, this);
@@ -1193,14 +1212,14 @@ WebInspector.FrameResourceTreeElement.prototype = {
     {
         WebInspector.BaseStorageTreeElement.prototype.onattach.call(this);
 
-        if (this._resource.type === WebInspector.resourceTypes.Image) {
-            var iconElement = document.createElementWithClass("div", "icon");
+        if (this._resource.resourceType() === WebInspector.resourceTypes.Image) {
+            var iconElement = createElementWithClass("div", "icon");
             var previewImage = iconElement.createChild("img", "image-resource-icon-preview");
             this._resource.populateImageSource(previewImage);
             this.listItemElement.replaceChild(iconElement, this.imageElement);
         }
 
-        this._statusElement = document.createElementWithClass("div", "status");
+        this._statusElement = createElementWithClass("div", "status");
         this.listItemElement.insertBefore(this._statusElement, this.titleElement);
 
         this.listItemElement.draggable = true;
@@ -1216,7 +1235,7 @@ WebInspector.FrameResourceTreeElement.prototype = {
      */
     _ondragstart: function(event)
     {
-        event.dataTransfer.setData("text/plain", this._resource.content);
+        event.dataTransfer.setData("text/plain", this._resource.content || "");
         event.dataTransfer.effectAllowed = "copy";
         return true;
     },
@@ -1255,7 +1274,7 @@ WebInspector.FrameResourceTreeElement.prototype = {
         this._resetBubble();
 
         if (this._resource.warnings || this._resource.errors)
-            this._setBubbleText(this._resource.warnings + this._resource.errors);
+            this._setBubbleText(String(this._resource.warnings + this._resource.errors));
 
         if (this._resource.warnings)
             this._bubbleElement.classList.add("warning");
@@ -2141,4 +2160,37 @@ WebInspector.StorageCategoryView.prototype = {
     },
 
     __proto__: WebInspector.VBox.prototype
+}
+
+WebInspector.ResourcesPanel.show = function()
+{
+    WebInspector.inspectorView.setCurrentPanel(WebInspector.ResourcesPanel._instance());
+}
+
+/**
+ * @return {!WebInspector.ResourcesPanel}
+ */
+WebInspector.ResourcesPanel._instance = function()
+{
+    if (!WebInspector.ResourcesPanel._instanceObject)
+        WebInspector.ResourcesPanel._instanceObject = new WebInspector.ResourcesPanel();
+    return WebInspector.ResourcesPanel._instanceObject;
+}
+
+/**
+ * @constructor
+ * @implements {WebInspector.PanelFactory}
+ */
+WebInspector.ResourcesPanelFactory = function()
+{
+}
+
+WebInspector.ResourcesPanelFactory.prototype = {
+    /**
+     * @return {!WebInspector.Panel}
+     */
+    createPanel: function()
+    {
+        return WebInspector.ResourcesPanel._instance();
+    }
 }

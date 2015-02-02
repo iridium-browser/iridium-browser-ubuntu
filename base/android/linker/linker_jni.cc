@@ -15,7 +15,9 @@
 
 #include <android/log.h>
 #include <crazy_linker.h>
+#include <fcntl.h>
 #include <jni.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <sys/mman.h>
 #include <unistd.h>
@@ -384,6 +386,17 @@ jboolean LoadLibraryInZipFile(JNIEnv* env,
       static_cast<size_t>(load_address), lib_info_obj, opener);
 }
 
+// Enable the fallback due to lack of support for mapping the APK file with
+// executable permission in the crazy linker.
+//
+// |env| is the current JNI environment handle and is ignored here.
+// |clazz| is the static class handle for org.chromium.base.Linker,
+// and is ignored here.
+void EnableNoMapExecSupportFallback(JNIEnv* env, jclass clazz) {
+  crazy_context_t* context = GetCrazyContext();
+  crazy_context_set_no_map_exec_support_fallback_enabled(context, true);
+}
+
 // Class holding the Java class and method ID for the Java side Linker
 // postCallbackOnMainThread method.
 struct JavaCallbackBindings_class {
@@ -574,6 +587,88 @@ jlong GetRandomBaseLoadAddress(JNIEnv* env, jclass clazz, jlong bytes) {
   return static_cast<jlong>(reinterpret_cast<uintptr_t>(address));
 }
 
+// Get the full path of a library in the zip file
+// (lib/<abi>/crazy.<lib_name>).
+//
+// |env| is the current JNI environment handle.
+// |clazz| is the static class handle which is not used here.
+// |lib_name| is the library base name.
+// Returns the full path (or empty string on failure).
+jstring GetLibraryFilePathInZipFile(JNIEnv* env,
+                                    jclass clazz,
+                                    jstring lib_name) {
+  String lib_name_str(env, lib_name);
+  const char* lib_name_c_str = lib_name_str.c_str();
+  char buffer[kMaxFilePathLengthInZip + 1];
+  if (crazy_library_file_path_in_zip_file(
+          lib_name_c_str, buffer, sizeof(buffer)) == CRAZY_STATUS_FAILURE) {
+    LOG_ERROR("%s: Failed to get full filename for library '%s'",
+              __FUNCTION__, lib_name_c_str);
+    buffer[0] = '\0';
+  }
+  return env->NewStringUTF(buffer);
+}
+
+// Check whether the device supports mapping the APK file with executable
+// permission.
+//
+// |env| is the current JNI environment handle.
+// |clazz| is the static class handle which is not used here.
+// |apkfile_name| is the filename of the APK.
+// Returns true if supported.
+jboolean CheckMapExecSupport(JNIEnv* env, jclass clazz, jstring apkfile_name) {
+  String apkfile_name_str(env, apkfile_name);
+  const char* apkfile_name_c_str = apkfile_name_str.c_str();
+
+  int fd = open(apkfile_name_c_str, O_RDONLY);
+  if (fd == -1) {
+    LOG_ERROR("%s: Failed to open %s\n", __FUNCTION__, apkfile_name_c_str);
+    return false;
+  }
+
+  LOG_INFO(
+      "%s: Memory mapping the first page of %s with executable permissions\n",
+      __FUNCTION__, apkfile_name_c_str);
+  void* address = mmap(NULL, PAGE_SIZE, PROT_EXEC, MAP_PRIVATE, fd, 0);
+
+  jboolean status;
+  if (address == MAP_FAILED) {
+    status = false;
+  } else {
+    status = true;
+    munmap(address, PAGE_SIZE);
+  }
+
+  close(fd);
+
+  LOG_INFO("%s: %s\n", __FUNCTION__, status ? "Supported" : "NOT supported");
+  return status;
+}
+
+// Check whether a library is page aligned and uncompressed in the APK file.
+//
+// |env| is the current JNI environment handle.
+// |clazz| is the static class handle which is not used here.
+// |apkfile_name| is the filename of the APK.
+// |library_name| is the library base name.
+// Returns true if page aligned and uncompressed.
+jboolean CheckLibraryIsMappableInApk(JNIEnv* env, jclass clazz,
+                                     jstring apkfile_name,
+                                     jstring library_name) {
+  String apkfile_name_str(env, apkfile_name);
+  const char* apkfile_name_c_str = apkfile_name_str.c_str();
+  String library_name_str(env, library_name);
+  const char* library_name_c_str = library_name_str.c_str();
+
+  LOG_INFO("%s: Checking if %s is page-aligned and uncompressed in %s\n",
+           __FUNCTION__, library_name_c_str, apkfile_name_c_str);
+  jboolean mappable = crazy_linker_check_library_is_mappable_in_zip_file(
+      apkfile_name_c_str, library_name_c_str) == CRAZY_STATUS_SUCCESS;
+  LOG_INFO("%s: %s\n", __FUNCTION__, aligned ? "Aligned" : "NOT aligned");
+
+  return mappable;
+}
+
 const JNINativeMethod kNativeMethods[] = {
     {"nativeLoadLibrary",
      "("
@@ -592,6 +687,11 @@ const JNINativeMethod kNativeMethods[] = {
      ")"
      "Z",
      reinterpret_cast<void*>(&LoadLibraryInZipFile)},
+    {"nativeEnableNoMapExecSupportFallback",
+     "("
+     ")"
+     "V",
+     reinterpret_cast<void*>(&EnableNoMapExecSupportFallback)},
     {"nativeRunCallbackOnUiThread",
      "("
      "J"
@@ -623,7 +723,26 @@ const JNINativeMethod kNativeMethods[] = {
      "J"
      ")"
      "J",
-     reinterpret_cast<void*>(&GetRandomBaseLoadAddress)}, };
+     reinterpret_cast<void*>(&GetRandomBaseLoadAddress)},
+    {"nativeGetLibraryFilePathInZipFile",
+     "("
+     "Ljava/lang/String;"
+     ")"
+     "Ljava/lang/String;",
+     reinterpret_cast<void*>(&GetLibraryFilePathInZipFile)},
+    {"nativeCheckMapExecSupport",
+     "("
+     "Ljava/lang/String;"
+     ")"
+     "Z",
+     reinterpret_cast<void*>(&CheckMapExecSupport)},
+    {"nativeCheckLibraryIsMappableInApk",
+     "("
+     "Ljava/lang/String;"
+     "Ljava/lang/String;"
+     ")"
+     "Z",
+     reinterpret_cast<void*>(&CheckLibraryIsMappableInApk)}, };
 
 }  // namespace
 

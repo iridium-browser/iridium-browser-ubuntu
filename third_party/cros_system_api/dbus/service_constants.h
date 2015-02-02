@@ -137,6 +137,7 @@ const char kCryptohomeGetBootAttribute[] = "GetBootAttribute";
 const char kCryptohomeSetBootAttribute[] = "SetBootAttribute";
 const char kCryptohomeFlushAndSignBootAttributes[] =
     "FlushAndSignBootAttributes";
+const char kCryptohomeGetLoginStatus[] = "GetLoginStatus";
 
 // Signals
 const char kSignalAsyncCallStatus[] = "AsyncCallStatus";
@@ -200,6 +201,10 @@ const char kSessionManagerRetrieveActiveSessions[] = "RetrieveActiveSessions";
 const char kSessionManagerStartSessionService[] = "StartSessionService";
 const char kSessionManagerStopSessionService[] = "StopSessionService";
 const char kSessionManagerStartDeviceWipe[] = "StartDeviceWipe";
+const char kSessionManagerHandleSupervisedUserCreationStarting[] =
+    "HandleSupervisedUserCreationStarting";
+const char kSessionManagerHandleSupervisedUserCreationFinished[] =
+    "HandleSupervisedUserCreationFinished";
 const char kSessionManagerLockScreen[] = "LockScreen";
 const char kSessionManagerHandleLockScreenShown[] = "HandleLockScreenShown";
 const char kSessionManagerHandleLockScreenDismissed[] =
@@ -259,6 +264,7 @@ const char kHandleUserActivityMethod[] = "HandleUserActivity";
 const char kHandleVideoActivityMethod[] = "HandleVideoActivity";
 const char kSetIsProjectingMethod[] = "SetIsProjecting";
 const char kSetPolicyMethod[] = "SetPolicy";
+const char kSetPowerSource[] = "SetPowerSource";
 const char kRegisterSuspendDelayMethod[] = "RegisterSuspendDelay";
 const char kUnregisterSuspendDelayMethod[] = "UnregisterSuspendDelay";
 const char kHandleSuspendReadinessMethod[] = "HandleSuspendReadiness";
@@ -293,6 +299,9 @@ enum RequestRestartReason {
   REQUEST_RESTART_FOR_USER = 0,
   REQUEST_RESTART_FOR_UPDATE = 1,
 };
+// Special ID passed via kSetPowerSource to indicate that the battery should
+// provide power.
+const char kBatteryPowerSource[] = "_BATTERY";
 }  // namespace power_manager
 
 namespace chromeos {
@@ -305,6 +314,8 @@ const char kCheckLiveness[] = "CheckLiveness";
 const char kLockScreen[] = "LockScreen";
 const char kSetDisplayPower[] = "SetDisplayPower";
 const char kSetDisplaySoftwareDimming[] = "SetDisplaySoftwareDimming";
+const char kTakeDisplayOwnership[] = "TakeDisplayOwnership";
+const char kReleaseDisplayOwnership[] = "ReleaseDisplayOwnership";
 // Values
 enum DisplayPowerState {
   DISPLAY_POWER_ALL_ON = 0,
@@ -352,6 +363,7 @@ const char kProposeScanFunction[] = "ProposeScan";
 const char kRegisterFunction[] = "Register";
 const char kConfigureServiceFunction[] = "ConfigureService";
 const char kConfigureWifiServiceFunction[] = "ConfigureWifiService";
+const char kFindMatchingServiceFunction[] = "FindMatchingService";
 
 // Flimflam Service property names.
 const char kSecurityProperty[] = "Security";
@@ -392,6 +404,7 @@ const char kPortalDetectionFailedStatusProperty[] =
 const char kSavedIPConfigProperty[] = "SavedIPConfig";
 const char kStaticIPConfigProperty[] = "StaticIPConfig";
 const char kLinkMonitorDisableProperty[] = "LinkMonitorDisable";
+const char kSecurityClassProperty[] = "SecurityClass";
 
 // Flimflam provider property names.
 const char kProviderHostProperty[] = "Provider.Host";
@@ -598,6 +611,7 @@ const char kEapPhase2AuthTTLSCHAP[] = "auth=CHAP";
 // Flimflam VPN provider types.
 const char kProviderL2tpIpsec[] = "l2tpipsec";
 const char kProviderOpenVpn[] = "openvpn";
+const char kProviderThirdPartyVpn[] = "thirdpartyvpn";
 
 // Flimflam VPN service properties
 const char kVPNDomainProperty[] = "VPN.Domain";
@@ -825,6 +839,7 @@ const char kShortDNSTimeoutTechnologiesProperty[] =
     "ShortDNSTimeoutTechnologies";
 const char kUninitializedTechnologiesProperty[] = "UninitializedTechnologies";
 const char kWakeOnLanEnabledProperty[] = "WakeOnLanEnabled";
+const char kWakeOnWiFiEnabledProperty[] = "WakeOnWiFiEnabled";
 
 // Service property names.
 const char kActivationTypeProperty[] = "Cellular.ActivationType";
@@ -840,6 +855,7 @@ const char kL2tpIpsecCaCertPemProperty[] = "L2TPIPsec.CACertPEM";
 const char kL2tpIpsecTunnelGroupProperty[] = "L2TPIPsec.TunnelGroup";
 const char kL2tpIpsecXauthPasswordProperty[] = "L2TPIPsec.XauthPassword";
 const char kL2tpIpsecXauthUserProperty[] = "L2TPIPsec.XauthUser";
+const char kManagedCredentialsProperty[] = "ManagedCredentials";
 const char kOpenVPNCaCertPemProperty[] = "OpenVPN.CACertPEM";
 const char kOpenVPNCertProperty[] = "OpenVPN.Cert";
 const char kOpenVPNExtraCertPemProperty[] = "OpenVPN.ExtraCertPEM";
@@ -916,6 +932,11 @@ const char kTDLSDisconnectedState[] = "Disconnected";
 const char kTDLSNonexistentState[] = "Nonexistent";
 const char kTDLSUnknownState[] = "Unknown";
 
+// Wake on WiFi features.
+const char kWakeOnWiFiEnabledPacket[] = "packet";
+const char kWakeOnWiFiEnabledSSID[] = "ssid";
+const char kWakeOnWiFiEnabledPacketSSID[] = "packet_and_ssid";
+const char kWakeOnWiFiEnabledNone[] = "none";
 
 // Cellular service carriers.
 const char kCarrierGenericUMTS[] = "Generic UMTS";
@@ -1667,6 +1688,7 @@ const char kUpdateStatusReportingErrorEvent[] =
     "UPDATE_STATUS_REPORTING_ERROR_EVENT";
 const char kUpdateStatusAttemptingRollback[] =
     "UPDATE_STATUS_ATTEMPTING_ROLLBACK";
+const char kUpdateStatusDisabled[] = "UPDATE_STATUS_DISABLED";
 }  // namespace update_engine
 
 namespace debugd {
@@ -1804,20 +1826,40 @@ const char kEasyUnlockServiceName[] = "org.chromium.EasyUnlock";
 const char kEasyUnlockServiceInterface[] = "org.chromium.EasyUnlock";
 
 // Values supplied as enrcryption type to CreateSecureMessage and
-// UnwrapSecureMessage.
+// UnwrapSecureMessage methods.
 const char kEncryptionTypeNone[] = "NONE";
 const char kEncryptionTypeAES256CBC[] = "AES_256_CBC";
 
 // Values supplied as signature type to CreateSecureMessage and
-// UnwrapSecureMessage.
+// UnwrapSecureMessage methods.
 const char kSignatureTypeECDSAP256SHA256[] = "ECDSA_P256_SHA256";
 const char kSignatureTypeHMACSHA256[] = "HMAC_SHA256";
 
+// Values supplied as key algorithm to WrapPublicKey method.
+const char kKeyAlgorithmRSA[] = "RSA";
+const char kKeyAlgorithmECDSA[] = "ECDSA";
+
 // Methods
 const char kPerformECDHKeyAgreementMethod[] = "PerformECDHKeyAgreement";
+const char kWrapPublicKeyMethod[] = "WrapPublicKey";
 const char kGenerateEcP256KeyPairMethod[] = "GenerateEcP256KeyPair";
 const char kCreateSecureMessageMethod[] = "CreateSecureMessage";
 const char kUnwrapSecureMessageMethod[] = "UnwrapSecureMessage";
 }  // namespace easy_unlock
+
+
+namespace apmanager {
+const char kServiceName[] = "org.chromium.apmanager";
+const char kManagerInterface[] = "org.chromium.apmanager.Manager";
+const char kManagerPath[] = "/manager";
+const char kServiceInterface[] = "org.chromium.apmanager.Service";
+const char kConfigInterface[] = "org.chromium.apmanager.Config";
+const char kClientInterface[] = "org.chromium.apmanager.Client";
+const char kDeviceInterface[] = "org.chromium.apmanager.Device";
+
+// Manager Methods.
+const char kCreateServiceMethod[] = "CreateService";
+const char kRemoveServiceMethod[] = "RemoveService";
+}  // namespace apmanager
 
 #endif  // DBUS_SERVICE_CONSTANTS_H_

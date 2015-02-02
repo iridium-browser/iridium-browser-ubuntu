@@ -67,7 +67,7 @@ class PrintWebViewHelper
       public content::RenderViewObserverTracker<PrintWebViewHelper> {
  public:
   explicit PrintWebViewHelper(content::RenderView* render_view);
-  virtual ~PrintWebViewHelper();
+  ~PrintWebViewHelper() override;
 
   // Disable print preview and switch to system dialog printing even if full
   // printing is build-in. This method is used by CEF.
@@ -118,17 +118,16 @@ class PrintWebViewHelper
   };
 
   // RenderViewObserver implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
-  virtual void PrintPage(blink::WebLocalFrame* frame,
-                         bool user_initiated) OVERRIDE;
-  virtual void DidStartLoading() OVERRIDE;
-  virtual void DidStopLoading() OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& message) override;
+  void PrintPage(blink::WebLocalFrame* frame, bool user_initiated) override;
+  void DidStartLoading() override;
+  void DidStopLoading() override;
 
   // Message handlers ---------------------------------------------------------
-#if !defined(DISABLE_BASIC_PRINTING)
+#if defined(ENABLE_BASIC_PRINTING)
   void OnPrintPages();
   void OnPrintForSystemDialog();
-#endif  // !DISABLE_BASIC_PRINTING
+#endif  // ENABLE_BASIC_PRINTING
   void OnInitiatePrintPreview(bool selection_only);
   void OnPrintPreview(const base::DictionaryValue& settings);
   void OnPrintForPrintPreview(const base::DictionaryValue& job_settings);
@@ -266,6 +265,7 @@ class PrintWebViewHelper
       double* scale_factor,
       PageSizeMargins* page_layout_in_points);
 
+#if defined(ENABLE_PRINT_PREVIEW)
   // Given the |device| and |canvas| to draw on, prints the appropriate headers
   // and footers using strings from |header_footer_info| on to the canvas.
   static void PrintHeaderAndFooter(blink::WebCanvas* canvas,
@@ -275,6 +275,7 @@ class PrintWebViewHelper
                                    float webkit_scale_factor,
                                    const PageSizeMargins& page_layout_in_points,
                                    const PrintMsg_Print_Params& params);
+#endif  // defined(ENABLE_PRINT_PREVIEW)
 
   bool GetPrintFrame(blink::WebLocalFrame** frame);
 

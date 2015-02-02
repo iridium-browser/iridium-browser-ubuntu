@@ -22,20 +22,20 @@ class NewCreditCardBubbleViews : public NewCreditCardBubbleView,
                                  public views::BubbleDelegateView,
                                  public views::LinkListener {
  public:
-  virtual ~NewCreditCardBubbleViews();
+  ~NewCreditCardBubbleViews() override;
 
   // NewCreditCardBubbleView:
-  virtual void Show() OVERRIDE;
-  virtual void Hide() OVERRIDE;
+  void Show() override;
+  void Hide() override;
 
   // views::BubbleDelegateView:
-  virtual gfx::Size GetPreferredSize() const OVERRIDE;
-  virtual base::string16 GetWindowTitle() const OVERRIDE;
-  virtual void Init() OVERRIDE;
-  virtual gfx::Rect GetBubbleBounds() OVERRIDE;
+  gfx::Size GetPreferredSize() const override;
+  base::string16 GetWindowTitle() const override;
+  void Init() override;
+  gfx::Rect GetBubbleBounds() override;
 
   // views::LinkListener:
-  virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
+  void LinkClicked(views::Link* source, int event_flags) override;
 
  private:
   friend base::WeakPtr<NewCreditCardBubbleView> NewCreditCardBubbleView::Create(

@@ -42,20 +42,19 @@ class PasswordSyncableService : public syncer::SyncableService,
   // |password_store|, the constructor doesn't take ownership of the
   // |password_store|.
   explicit PasswordSyncableService(PasswordStoreSync* password_store);
-  virtual ~PasswordSyncableService();
+  ~PasswordSyncableService() override;
 
   // syncer::SyncableService:
-  virtual syncer::SyncMergeResult MergeDataAndStartSyncing(
+  syncer::SyncMergeResult MergeDataAndStartSyncing(
       syncer::ModelType type,
       const syncer::SyncDataList& initial_sync_data,
       scoped_ptr<syncer::SyncChangeProcessor> sync_processor,
-      scoped_ptr<syncer::SyncErrorFactory> error_handler) OVERRIDE;
-  virtual void StopSyncing(syncer::ModelType type) OVERRIDE;
-  virtual syncer::SyncDataList GetAllSyncData(
-      syncer::ModelType type) const OVERRIDE;
-  virtual syncer::SyncError ProcessSyncChanges(
+      scoped_ptr<syncer::SyncErrorFactory> error_handler) override;
+  void StopSyncing(syncer::ModelType type) override;
+  syncer::SyncDataList GetAllSyncData(syncer::ModelType type) const override;
+  syncer::SyncError ProcessSyncChanges(
       const tracked_objects::Location& from_here,
-      const syncer::SyncChangeList& change_list) OVERRIDE;
+      const syncer::SyncChangeList& change_list) override;
 
   // Notifies the Sync engine of changes to the password database.
   void ActOnPasswordStoreChanges(const PasswordStoreChangeList& changes);

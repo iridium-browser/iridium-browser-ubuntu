@@ -46,6 +46,14 @@
 
 #include <stdint.h>
 
+// FIXME: We temporarily disable parallel marking because the current
+// implementation is slower than a single-thread marking. The reason
+// of the slowness is that the parallel marking pollutes CPU caches
+// because marking threads write mark bits on on-heap objects which
+// will be touched by the mutator thread later. We need to make
+// the implementation more cache-aware (e.g., bitmap marking).
+#define ENABLE_PARALLEL_MARKING 0
+
 namespace blink {
 
 const size_t blinkPageSizeLog2 = 17;
@@ -94,7 +102,11 @@ const uint8_t finalizedZapValue = 24;
 // the mark bit when tracing.
 const uint8_t orphanedZapValue = 240;
 
-const int numberOfMarkingThreads = 2;
+#if ENABLE_PARALLEL_MARKING
+const int maxNumberOfMarkingThreads = 4;
+#else
+const int maxNumberOfMarkingThreads = 0;
+#endif
 
 const int numberOfPagesToConsiderForCoalescing = 100;
 
@@ -108,7 +120,6 @@ class HeapStats;
 class PageMemory;
 template<ThreadAffinity affinity> class ThreadLocalPersistents;
 template<typename T, typename RootsAccessor = ThreadLocalPersistents<ThreadingTrait<T>::Affinity > > class Persistent;
-template<typename T> class CrossThreadPersistent;
 
 #if ENABLE(GC_PROFILE_HEAP)
 class TracedValue;
@@ -189,8 +200,8 @@ public:
         COMPILE_ASSERT(!(sizeof(LargeHeapObject<Header>) & allocationMask), large_heap_object_header_misaligned);
     }
 
-    virtual void checkAndMarkPointer(Visitor*, Address) OVERRIDE;
-    virtual bool isLargeObject() OVERRIDE { return true; }
+    virtual void checkAndMarkPointer(Visitor*, Address) override;
+    virtual bool isLargeObject() override { return true; }
 
 #if ENABLE(GC_PROFILE_MARKING)
     virtual const GCInfo* findGCInfo(Address address)
@@ -226,7 +237,7 @@ public:
     // Returns true for any address that is on one of the pages that this
     // large object uses. That ensures that we can use a negative result to
     // populate the negative page cache.
-    virtual bool contains(Address object) OVERRIDE
+    virtual bool contains(Address object) override
     {
         return roundToBlinkPageStart(address()) <= object && object < roundToBlinkPageEnd(address() + size());
     }
@@ -252,7 +263,7 @@ public:
 
     bool isMarked();
     void unmark();
-    void getStats(HeapStats&);
+    void getStatsForTesting(HeapStats&);
     void mark(Visitor*);
     void finalize();
     void setDeadMark();
@@ -502,7 +513,7 @@ public:
     // Returns true for the whole blinkPageSize page that the page is on, even
     // for the header, and the unmapped guard page at the start. That ensures
     // the result can be used to populate the negative page cache.
-    virtual bool contains(Address addr) OVERRIDE
+    virtual bool contains(Address addr) override
     {
         Address blinkPageStart = roundToBlinkPageStart(address());
         ASSERT(blinkPageStart == address() - osPageSize()); // Page is at aligned address plus guard page size.
@@ -523,14 +534,14 @@ public:
 
     Address end() { return payload() + payloadSize(); }
 
-    void getStats(HeapStats&);
+    void getStatsForTesting(HeapStats&);
     void clearLiveAndMarkDead();
     void sweep(HeapStats*, ThreadHeap<Header>*);
     void clearObjectStartBitMap();
     void finalize(Header*);
-    virtual void checkAndMarkPointer(Visitor*, Address) OVERRIDE;
+    virtual void checkAndMarkPointer(Visitor*, Address) override;
 #if ENABLE(GC_PROFILE_MARKING)
-    const GCInfo* findGCInfo(Address) OVERRIDE;
+    const GCInfo* findGCInfo(Address) override;
 #endif
 #if ENABLE(GC_PROFILE_HEAP)
     virtual void snapshot(TracedValue*, ThreadState::SnapshotInfo*);
@@ -573,92 +584,44 @@ protected:
     friend class ThreadHeap<Header>;
 };
 
-class AddressEntry {
-public:
-    AddressEntry() : m_address(0) { }
-
-    explicit AddressEntry(Address address) : m_address(address) { }
-
-    Address address() const { return m_address; }
-
-private:
-    Address m_address;
-};
-
-class PositiveEntry : public AddressEntry {
-public:
-    PositiveEntry()
-        : AddressEntry()
-        , m_containingPage(0)
-    {
-    }
-
-    PositiveEntry(Address address, BaseHeapPage* containingPage)
-        : AddressEntry(address)
-        , m_containingPage(containingPage)
-    {
-    }
-
-    BaseHeapPage* result() const { return m_containingPage; }
-
-    typedef BaseHeapPage* LookupResult;
-
-private:
-    BaseHeapPage* m_containingPage;
-};
-
-class NegativeEntry : public AddressEntry {
-public:
-    NegativeEntry() : AddressEntry() { }
-
-    NegativeEntry(Address address, bool) : AddressEntry(address) { }
-
-    bool result() const { return true; }
-
-    typedef bool LookupResult;
-};
-
-// A HeapExtentCache provides a fast way of taking an arbitrary
-// pointer-sized word, and determining whether it can be interpreted
+// A HeapDoesNotContainCache provides a fast way of taking an arbitrary
+// pointer-sized word, and determining whether it cannot be interpreted
 // as a pointer to an area that is managed by the garbage collected
-// Blink heap. There is a cache of 'pages' that have previously been
-// determined to be wholly inside the heap. The size of these pages must be
+// Blink heap. This is a cache of 'pages' that have previously been
+// determined to be wholly outside of the heap. The size of these pages must be
 // smaller than the allocation alignment of the heap pages. We determine
-// on-heap-ness by rounding down the pointer to the nearest page and looking up
-// the page in the cache. If there is a miss in the cache we can ask the heap
-// to determine the status of the pointer by iterating over all of the heap.
-// The result is then cached in the two-way associative page cache.
+// off-heap-ness by rounding down the pointer to the nearest page and looking up
+// the page in the cache. If there is a miss in the cache we can determine the
+// status of the pointer precisely using the heap RegionTree.
 //
-// A HeapContainsCache is a positive cache. Therefore, it must be flushed when
-// memory is removed from the Blink heap. The HeapDoesNotContainCache is a
-// negative cache, so it must be flushed when memory is added to the heap.
-template<typename Entry>
-class HeapExtentCache {
+// The HeapDoesNotContainCache is a negative cache, so it must be
+// flushed when memory is added to the heap.
+class HeapDoesNotContainCache {
 public:
-    HeapExtentCache()
-        : m_entries(adoptArrayPtr(new Entry[HeapExtentCache::numberOfEntries]))
+    HeapDoesNotContainCache()
+        : m_entries(adoptArrayPtr(new Address[HeapDoesNotContainCache::numberOfEntries]))
         , m_hasEntries(false)
     {
+        // Start by flushing the cache in a non-empty state to initialize all the cache entries.
+        for (int i = 0; i < numberOfEntries; i++)
+            m_entries[i] = 0;
     }
 
     void flush();
-    bool contains(Address);
     bool isEmpty() { return !m_hasEntries; }
 
     // Perform a lookup in the cache.
     //
-    // If lookup returns null/false the argument address was not found in
+    // If lookup returns false, the argument address was not found in
     // the cache and it is unknown if the address is in the Blink
     // heap.
     //
-    // If lookup returns true/a page, the argument address was found in the
-    // cache. For the HeapContainsCache this means the address is in the heap.
-    // For the HeapDoesNotContainCache this means the address is not in the
-    // heap.
-    PLATFORM_EXPORT typename Entry::LookupResult lookup(Address);
+    // If lookup returns true, the argument address was found in the
+    // cache which means the address is not in the heap.
+    PLATFORM_EXPORT bool lookup(Address);
 
     // Add an entry to the cache.
-    PLATFORM_EXPORT void addEntry(Address, typename Entry::LookupResult);
+    PLATFORM_EXPORT void addEntry(Address);
 
 private:
     static const int numberOfEntriesLog2 = 12;
@@ -666,75 +629,8 @@ private:
 
     static size_t hash(Address);
 
-    WTF::OwnPtr<Entry[]> m_entries;
+    WTF::OwnPtr<Address[]> m_entries;
     bool m_hasEntries;
-
-    friend class ThreadState;
-};
-
-// Normally these would be typedefs instead of subclasses, but that makes them
-// very hard to forward declare.
-class HeapContainsCache : public HeapExtentCache<PositiveEntry> {
-public:
-    BaseHeapPage* lookup(Address);
-    void addEntry(Address, BaseHeapPage*);
-};
-
-class HeapDoesNotContainCache : public HeapExtentCache<NegativeEntry> { };
-
-// FIXME: This is currently used by the WebAudio code.
-// We should attempt to restructure the WebAudio code so that the main thread
-// alone determines life-time and receives messages about life-time from the
-// audio thread.
-template<typename T>
-class ThreadSafeRefCountedGarbageCollected : public GarbageCollectedFinalized<T>, public WTF::ThreadSafeRefCountedBase {
-    WTF_MAKE_NONCOPYABLE(ThreadSafeRefCountedGarbageCollected);
-
-public:
-    ThreadSafeRefCountedGarbageCollected()
-    {
-        makeKeepAlive();
-    }
-
-    // Override ref to deal with a case where a reference count goes up
-    // from 0 to 1. This can happen in the following scenario:
-    // (1) The reference count becomes 0, but on-stack pointers keep references to the object.
-    // (2) The on-stack pointer is assigned to a RefPtr. The reference count becomes 1.
-    // In this case, we have to resurrect m_keepAlive.
-    void ref()
-    {
-        MutexLocker lock(m_mutex);
-        if (UNLIKELY(!refCount())) {
-            makeKeepAlive();
-        }
-        WTF::ThreadSafeRefCountedBase::ref();
-    }
-
-    // Override deref to deal with our own deallocation based on ref counting.
-    void deref()
-    {
-        MutexLocker lock(m_mutex);
-        if (derefBase()) {
-            ASSERT(m_keepAlive);
-            m_keepAlive.clear();
-        }
-    }
-
-    using GarbageCollectedFinalized<T>::operator new;
-    using GarbageCollectedFinalized<T>::operator delete;
-
-protected:
-    ~ThreadSafeRefCountedGarbageCollected() { }
-
-private:
-    void makeKeepAlive()
-    {
-        ASSERT(!m_keepAlive);
-        m_keepAlive = adoptPtr(new CrossThreadPersistent<T>(static_cast<T*>(this)));
-    }
-
-    OwnPtr<CrossThreadPersistent<T> > m_keepAlive;
-    mutable Mutex m_mutex;
 };
 
 template<typename DataType>
@@ -814,19 +710,19 @@ public:
     virtual void clearLiveAndMarkDead() = 0;
 
     virtual void makeConsistentForSweeping() = 0;
-
 #if ENABLE(ASSERT)
     virtual bool isConsistentForSweeping() = 0;
-
-    virtual void getScannedStats(HeapStats&) = 0;
 #endif
+    virtual void getStatsForTesting(HeapStats&) = 0;
+
+    virtual void updateRemainingAllocationSize() = 0;
 
     virtual void prepareHeapForTermination() = 0;
 
     virtual int normalPageCount() = 0;
 
-    virtual BaseHeap* split(int normalPages) = 0;
-    virtual void merge(BaseHeap* other) = 0;
+    virtual PassOwnPtr<BaseHeap> split(int normalPages) = 0;
+    virtual void merge(PassOwnPtr<BaseHeap> other) = 0;
 
     // Returns a bucket number for inserting a FreeListEntry of a
     // given size. All FreeListEntries in the given bucket, n, have
@@ -849,36 +745,32 @@ class ThreadHeap : public BaseHeap {
 public:
     ThreadHeap(ThreadState*, int);
     virtual ~ThreadHeap();
-    virtual void cleanupPages();
+    virtual void cleanupPages() override;
 
-    virtual BaseHeapPage* heapPageFromAddress(Address);
+    virtual BaseHeapPage* heapPageFromAddress(Address) override;
 #if ENABLE(GC_PROFILE_MARKING)
-    virtual const GCInfo* findGCInfoOfLargeHeapObject(Address);
+    virtual const GCInfo* findGCInfoOfLargeHeapObject(Address) override;
 #endif
 #if ENABLE(GC_PROFILE_HEAP)
-    virtual void snapshot(TracedValue*, ThreadState::SnapshotInfo*);
+    virtual void snapshot(TracedValue*, ThreadState::SnapshotInfo*) override;
 #endif
 
-    virtual void sweep(HeapStats*);
-    virtual void postSweepProcessing();
+    virtual void sweep(HeapStats*) override;
+    virtual void postSweepProcessing() override;
 
-    virtual void clearFreeLists();
-    virtual void clearLiveAndMarkDead();
+    virtual void clearFreeLists() override;
+    virtual void clearLiveAndMarkDead() override;
 
-    virtual void makeConsistentForSweeping();
-
+    virtual void makeConsistentForSweeping() override;
 #if ENABLE(ASSERT)
-    virtual bool isConsistentForSweeping();
-
-    virtual void getScannedStats(HeapStats&);
+    virtual bool isConsistentForSweeping() override;
 #endif
+    virtual void getStatsForTesting(HeapStats&) override;
+
+    virtual void updateRemainingAllocationSize() override;
 
     ThreadState* threadState() { return m_threadState; }
     HeapStats& stats() { return m_threadState->stats(); }
-    void flushHeapContainsCache()
-    {
-        m_threadState->heapContainsCache()->flush();
-    }
 
     inline Address allocate(size_t, const GCInfo*);
     void addToFreeList(Address, size_t);
@@ -887,12 +779,12 @@ public:
         return allocationSizeFromSize(size) - sizeof(Header);
     }
 
-    virtual void prepareHeapForTermination();
+    virtual void prepareHeapForTermination() override;
 
-    virtual int normalPageCount() { return m_numberOfNormalPages; }
+    virtual int normalPageCount() override { return m_numberOfNormalPages; }
 
-    virtual BaseHeap* split(int numberOfNormalPages);
-    virtual void merge(BaseHeap* splitOffBase);
+    virtual PassOwnPtr<BaseHeap> split(int numberOfNormalPages) override;
+    virtual void merge(PassOwnPtr<BaseHeap> splitOffBase) override;
 
     void removePageFromHeap(HeapPage<Header>*);
 
@@ -910,8 +802,9 @@ private:
     {
         ASSERT(!point || heapPageFromAddress(point));
         ASSERT(size <= HeapPage<Header>::payloadSize());
+        updateRemainingAllocationSize();
         m_currentAllocationPoint = point;
-        m_remainingAllocationSize = size;
+        m_lastRemainingAllocationSize = m_remainingAllocationSize = size;
     }
     void ensureCurrentAllocation(size_t, const GCInfo*);
     bool allocateFromFreeList(size_t);
@@ -930,6 +823,7 @@ private:
 
     Address m_currentAllocationPoint;
     size_t m_remainingAllocationSize;
+    size_t m_lastRemainingAllocationSize;
 
     HeapPage<Header>* m_firstPage;
     LargeHeapObject<Header>* m_firstLargeHeapObject;
@@ -1023,7 +917,7 @@ public:
     static void collectGarbage(ThreadState::StackState, ThreadState::CauseOfGC = ThreadState::NormalGC);
     static void collectGarbageForTerminatingThread(ThreadState*);
     static void collectAllGarbage();
-    static void processMarkingStackEntries(int* numberOfMarkingThreads);
+    static void processMarkingStackEntries(int*);
     static void processMarkingStackOnMultipleThreads();
     static void processMarkingStackInParallel();
     template<CallbackInvocationMode Mode> static void processMarkingStack();
@@ -1054,6 +948,8 @@ public:
     // collection where threads are known to be at safe points.
     static void getStats(HeapStats*);
 
+    static void getStatsForTesting(HeapStats*);
+
     static void getHeapSpaceSize(uint64_t*, uint64_t*);
 
     static void makeConsistentForSweeping();
@@ -1063,7 +959,6 @@ public:
 #endif
 
     static void flushHeapDoesNotContainCache();
-    static bool heapDoesNotContainCacheIsEmpty() { return s_heapDoesNotContainCache->isEmpty(); }
 
     // Return true if the last GC found a pointer into a heap page
     // during conservative scanning.
@@ -1072,9 +967,35 @@ public:
     static FreePagePool* freePagePool() { return s_freePagePool; }
     static OrphanedPagePool* orphanedPagePool() { return s_orphanedPagePool; }
 
+    // This look-up uses the region search tree and a negative contains cache to
+    // provide an efficient mapping from arbitrary addresses to the containing
+    // heap-page if one exists.
+    static BaseHeapPage* lookup(Address);
+    static void addPageMemoryRegion(PageMemoryRegion*);
+    static void removePageMemoryRegion(PageMemoryRegion*);
+
 private:
+    // A RegionTree is a simple binary search tree of PageMemoryRegions sorted
+    // by base addresses.
+    class RegionTree {
+    public:
+        explicit RegionTree(PageMemoryRegion* region) : m_region(region), m_left(0), m_right(0) { }
+        ~RegionTree()
+        {
+            delete m_left;
+            delete m_right;
+        }
+        PageMemoryRegion* lookup(Address);
+        static void add(RegionTree*, RegionTree**);
+        static void remove(PageMemoryRegion*, RegionTree**);
+    private:
+        PageMemoryRegion* m_region;
+        RegionTree* m_left;
+        RegionTree* m_right;
+    };
+
     static Visitor* s_markingVisitor;
-    static Vector<OwnPtr<blink::WebThread> >* s_markingThreads;
+    static Vector<OwnPtr<WebThread>>* s_markingThreads;
     static CallbackStack* s_markingStack;
     static CallbackStack* s_postMarkingCallbackStack;
     static CallbackStack* s_weakCallbackStack;
@@ -1084,6 +1005,7 @@ private:
     static bool s_lastGCWasConservative;
     static FreePagePool* s_freePagePool;
     static OrphanedPagePool* s_orphanedPagePool;
+    static RegionTree* s_regionTree;
     friend class ThreadState;
 };
 
@@ -1232,9 +1154,8 @@ class RefCountedGarbageCollected : public GarbageCollectedFinalized<T> {
 
 public:
     RefCountedGarbageCollected()
-        : m_refCount(1)
+        : m_refCount(0)
     {
-        makeKeepAlive();
     }
 
     // Implement method to increase reference count for use with
@@ -1295,15 +1216,6 @@ private:
     int m_refCount;
     Persistent<T>* m_keepAlive;
 };
-
-template<typename T>
-T* adoptRefCountedGarbageCollected(T* ptr)
-{
-    ASSERT(ptr->hasOneRef());
-    ptr->deref();
-    WTF::adopted(ptr);
-    return ptr;
-}
 
 // Classes that contain heap references but aren't themselves heap
 // allocated, have some extra macros available which allows their use
@@ -1454,26 +1366,23 @@ template<typename Header>
 Address ThreadHeap<Header>::allocate(size_t size, const GCInfo* gcInfo)
 {
     size_t allocationSize = allocationSizeFromSize(size);
-    bool isLargeObject = allocationSize > blinkPageSize / 2;
-    if (isLargeObject)
-        return allocateLargeObject(allocationSize, gcInfo);
-    if (m_remainingAllocationSize < allocationSize)
-        return outOfLineAllocate(size, gcInfo);
-    Address headerAddress = m_currentAllocationPoint;
-    m_currentAllocationPoint += allocationSize;
-    m_remainingAllocationSize -= allocationSize;
-    Header* header = new (NotNull, headerAddress) Header(allocationSize, gcInfo);
-    size_t payloadSize = allocationSize - sizeof(Header);
-    stats().increaseObjectSpace(payloadSize);
-    Address result = headerAddress + sizeof(*header);
-    ASSERT(!(reinterpret_cast<uintptr_t>(result) & allocationMask));
-    // Unpoison the memory used for the object (payload).
-    ASAN_UNPOISON_MEMORY_REGION(result, payloadSize);
+    if (LIKELY(allocationSize <= m_remainingAllocationSize)) {
+        Address headerAddress = m_currentAllocationPoint;
+        m_currentAllocationPoint += allocationSize;
+        m_remainingAllocationSize -= allocationSize;
+        Header* header = new (NotNull, headerAddress) Header(allocationSize, gcInfo);
+        Address result = headerAddress + sizeof(*header);
+        ASSERT(!(reinterpret_cast<uintptr_t>(result) & allocationMask));
+
+        // Unpoison the memory used for the object (payload).
+        ASAN_UNPOISON_MEMORY_REGION(result, allocationSize - sizeof(Header));
 #if ENABLE(ASSERT) || defined(LEAK_SANITIZER) || defined(ADDRESS_SANITIZER)
-    memset(result, 0, payloadSize);
+        memset(result, 0, allocationSize - sizeof(Header));
 #endif
-    ASSERT(heapPageFromAddress(headerAddress + allocationSize - 1));
-    return result;
+        ASSERT(heapPageFromAddress(headerAddress + allocationSize - 1));
+        return result;
+    }
+    return outOfLineAllocate(size, gcInfo);
 }
 
 template<typename T, typename HeapTraits>
@@ -1482,7 +1391,7 @@ Address Heap::allocate(size_t size)
     ThreadState* state = ThreadStateFor<ThreadingTrait<T>::Affinity>::state();
     ASSERT(state->isAllocationAllowed());
     const GCInfo* gcInfo = GCInfoTrait<T>::get();
-    int heapIndex = HeapTraits::index(gcInfo->hasFinalizer());
+    int heapIndex = HeapTraits::index(gcInfo->hasFinalizer(), size);
     BaseHeap* heap = state->heap(heapIndex);
     return static_cast<typename HeapTraits::HeapType*>(heap)->allocate(size, gcInfo);
 }
@@ -1505,11 +1414,12 @@ Address Heap::reallocate(void* previous, size_t size)
     ThreadState* state = ThreadStateFor<ThreadingTrait<T>::Affinity>::state();
     ASSERT(state->isAllocationAllowed());
     const GCInfo* gcInfo = GCInfoTrait<T>::get();
-    int heapIndex = HeapTypeTrait<T>::index(gcInfo->hasFinalizer());
+    int heapIndex = HeapTypeTrait<T>::index(gcInfo->hasFinalizer(), size);
     // FIXME: Currently only supports raw allocation on the
     // GeneralHeap. Hence we assume the header is a
     // FinalizedHeapObjectHeader.
-    ASSERT(heapIndex == GeneralHeap || heapIndex == GeneralHeapNonFinalized);
+    ASSERT((General1Heap <= heapIndex && heapIndex <= General4Heap)
+        || (General1HeapNonFinalized <= heapIndex && heapIndex <= General4HeapNonFinalized));
     BaseHeap* heap = state->heap(heapIndex);
     Address address = static_cast<typename HeapTypeTrait<T>::HeapType*>(heap)->allocate(size, gcInfo);
     if (!previous) {
@@ -2492,6 +2402,6 @@ struct IfWeakMember<WeakMember<T> > {
     static bool isDead(Visitor* visitor, const WeakMember<T>& t) { return !visitor->isAlive(t.get()); }
 };
 
-}
+} // namespace blink
 
 #endif // Heap_h

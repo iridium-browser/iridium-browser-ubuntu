@@ -53,28 +53,23 @@ class TestNativeWebContentsModalDialogManager
       tracker_->SetState(NativeManagerTracker::NOT_SHOWN);
   }
 
-  virtual void Show() OVERRIDE {
+  void Show() override {
     if (tracker_)
       tracker_->SetState(NativeManagerTracker::SHOWN);
   }
-  virtual void Hide() OVERRIDE {
+  void Hide() override {
     if (tracker_)
       tracker_->SetState(NativeManagerTracker::HIDDEN);
   }
-  virtual void Close() OVERRIDE {
+  void Close() override {
     if (tracker_)
       tracker_->SetState(NativeManagerTracker::CLOSED);
     delegate_->WillClose(dialog_);
   }
-  virtual void Focus() OVERRIDE {
-  }
-  virtual void Pulse() OVERRIDE {
-  }
-  virtual void HostChanged(WebContentsModalDialogHost* new_host) OVERRIDE {
-  }
-  virtual NativeWebContentsModalDialog dialog() OVERRIDE {
-      return dialog_;
-  }
+  void Focus() override {}
+  void Pulse() override {}
+  void HostChanged(WebContentsModalDialogHost* new_host) override {}
+  NativeWebContentsModalDialog dialog() override { return dialog_; }
 
   void StopTracking() {
     tracker_ = NULL;
@@ -96,7 +91,7 @@ class WebContentsModalDialogManagerTest
         manager(NULL) {
   }
 
-  virtual void SetUp() {
+  void SetUp() override {
     content::RenderViewHostTestHarness::SetUp();
 
     delegate.reset(new TestWebContentsModalDialogManagerDelegate);
@@ -106,7 +101,7 @@ class WebContentsModalDialogManagerTest
     test_api.reset(new WebContentsModalDialogManager::TestApi(manager));
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     test_api.reset();
     content::RenderViewHostTestHarness::TearDown();
   }

@@ -4,6 +4,7 @@
 
 package org.chromium.mojo.bindings;
 
+import org.chromium.mojo.bindings.Struct.DataHeader;
 import org.chromium.mojo.system.AsyncWaiter;
 import org.chromium.mojo.system.Handle;
 
@@ -29,16 +30,14 @@ public class BindingsHelper {
     public static final int POINTER_SIZE = 8;
 
     /**
+     * The header for a serialized map element.
+     */
+    public static final DataHeader MAP_STRUCT_HEADER = new DataHeader(24, 2);
+
+    /**
      * The value used for the expected length of a non-fixed size array.
      */
     public static final int UNSPECIFIED_ARRAY_LENGTH = -1;
-
-    /**
-     * Align |size| on {@link BindingsHelper#ALIGNMENT}.
-     */
-    public static int align(int size) {
-        return (size + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
-    }
 
     /**
      * Passed as |arrayNullability| when neither the array nor its elements are nullable.
@@ -61,6 +60,13 @@ public class BindingsHelper {
 
     public static boolean isElementNullable(int arrayNullability) {
         return (arrayNullability & ELEMENT_NULLABLE) > 0;
+    }
+
+    /**
+     * Align |size| on {@link BindingsHelper#ALIGNMENT}.
+     */
+    public static int align(int size) {
+        return (size + ALIGNMENT - 1) & ~(ALIGNMENT - 1);
     }
 
     /**
@@ -104,6 +110,64 @@ public class BindingsHelper {
     }
 
     /**
+     * Returns |true| if and only if the two objects are equals, handling |null|.
+     */
+    public static boolean equals(Object o1, Object o2) {
+        if (o1 == o2) {
+            return true;
+        }
+        if (o1 == null) {
+            return false;
+        }
+        return o1.equals(o2);
+    }
+
+    /**
+     * Returns the hash code of the object, handling |null|.
+     */
+    public static int hashCode(Object o) {
+        if (o == null) {
+            return 0;
+        }
+        return o.hashCode();
+    }
+
+    /**
+     * Returns the hash code of the value.
+     */
+    public static int hashCode(boolean o) {
+        return o ? 1231 : 1237;
+    }
+
+    /**
+     * Returns the hash code of the value.
+     */
+    public static int hashCode(long o) {
+        return (int) (o ^ (o >>> 32));
+    }
+
+    /**
+     * Returns the hash code of the value.
+     */
+    public static int hashCode(float o) {
+        return Float.floatToIntBits(o);
+    }
+
+    /**
+     * Returns the hash code of the value.
+     */
+    public static int hashCode(double o) {
+        return hashCode(Double.doubleToLongBits(o));
+    }
+
+    /**
+     * Returns the hash code of the value.
+     */
+    public static int hashCode(int o) {
+        return o;
+    }
+
+    /**
      * Determines if the given {@code char} value is a Unicode <i>surrogate code unit</i>. See
      * {@link Character#isSurrogate}. Extracting here because the method only exists at API level
      * 19.
@@ -113,8 +177,7 @@ public class BindingsHelper {
     }
 
     /**
-     * Returns an {@link AsyncWaiter} to use with the given handle, or <code>null</code> if none if
-     * available.
+     * Returns an {@link AsyncWaiter} to use with the given handle, or |null| if none if available.
      */
     static AsyncWaiter getDefaultAsyncWaiterForHandle(Handle handle) {
         if (handle.getCore() != null) {
@@ -123,5 +186,4 @@ public class BindingsHelper {
             return null;
         }
     }
-
 }

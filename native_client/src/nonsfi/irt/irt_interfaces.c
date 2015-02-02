@@ -25,21 +25,15 @@
 
 #include "native_client/src/include/elf32.h"
 #include "native_client/src/include/elf_auxv.h"
+#include "native_client/src/include/nacl/nacl_exception.h"
 #include "native_client/src/include/nacl_macros.h"
+#include "native_client/src/nonsfi/linux/irt_exception_handling.h"
 #include "native_client/src/public/irt_core.h"
 #include "native_client/src/trusted/service_runtime/include/machine/_types.h"
-#if !defined(__native_client__)
-/*
- * TODO(dschuff): Remove this ifdef (and the #define nacl_abi_foo lines below
- * that replace it) once the service runtime's stat.h is includable directly
- * (as opposed to being part of toolchain) by untrusted code.
- * see https://code.google.com/p/nativeclient/issues/detail?id=3909
- */
-# include "native_client/src/trusted/service_runtime/include/sys/mman.h"
-# include "native_client/src/trusted/service_runtime/include/sys/stat.h"
-# include "native_client/src/trusted/service_runtime/include/sys/unistd.h"
-#endif
+#include "native_client/src/trusted/service_runtime/include/sys/mman.h"
+#include "native_client/src/trusted/service_runtime/include/sys/stat.h"
 #include "native_client/src/trusted/service_runtime/include/sys/time.h"
+#include "native_client/src/trusted/service_runtime/include/sys/unistd.h"
 #include "native_client/src/untrusted/irt/irt.h"
 #include "native_client/src/untrusted/irt/irt_dev.h"
 #include "native_client/src/untrusted/irt/irt_interfaces.h"
@@ -88,46 +82,6 @@ void _start(void *info);
 # define __thread /* nothing */
 #endif
 static __thread void *g_tls_value;
-
-/*
- * When the host is NaCl (i.e., for NaCl newlib based nonsfi_loader),
- * the following structs/macros are not defined. We just map to NaCl
- * newlib's.
- */
-#if defined(__native_client__)
-# define nacl_abi_timespec timespec
-# define nacl_abi_timeval timeval
-# define nacl_abi_tv_sec tv_sec
-# define nacl_abi_tv_usec tv_usec
-# define nacl_abi_stat stat
-# define nacl_abi_st_dev st_dev
-# define nacl_abi_st_ino st_ino
-# define nacl_abi_st_mode st_mode
-# define nacl_abi_st_nlink st_nlink
-# define nacl_abi_st_uid st_uid
-# define nacl_abi_st_gid st_gid
-# define nacl_abi_st_rdev st_rdev
-# define nacl_abi_st_size st_size
-# define nacl_abi_st_blksize st_blksize
-# define nacl_abi_st_blocks st_blocks
-# define nacl_abi_st_atime st_atime
-# define nacl_abi_st_atimensec st_atimensec
-# define nacl_abi_st_mtime st_mtime
-# define nacl_abi_st_mtimensec st_mtimensec
-# define nacl_abi_st_ctime st_ctime
-# define nacl_abi_st_ctimensec st_ctimensec
-# define nacl_abi_off_t off_t
-# define NACL_ABI_PROT_MASK PROT_MASK
-# define NACL_ABI_PROT_READ PROT_READ
-# define NACL_ABI_PROT_WRITE PROT_WRITE
-# define NACL_ABI_PROT_EXEC PROT_EXEC
-# define NACL_ABI_MAP_SHARED MAP_SHARED
-# define NACL_ABI_MAP_PRIVATE MAP_PRIVATE
-# define NACL_ABI_MAP_FIXED MAP_FIXED
-# define NACL_ABI_MAP_ANON MAP_ANONYMOUS
-# define NACL_ABI__SC_PAGESIZE _SC_PAGESIZE
-# define NACL_ABI__SC_NPROCESSORS_ONLN _SC_NPROCESSORS_ONLN
-#endif
 
 /*
  * The IRT functions in irt.h are declared as taking "struct timespec"
@@ -676,6 +630,19 @@ const struct nacl_irt_dev_getpid nacl_irt_dev_getpid = {
   irt_getpid,
 };
 
+/*
+ * The following condition is true when building for Non-SFI Mode,
+ * when we're calling Linux syscalls directly.  (Counter-intuitively,
+ * "__linux__" is not #defined in this case.)
+ */
+#if defined(__native_client__)
+const struct nacl_irt_exception_handling nacl_irt_exception_handling = {
+  nacl_exception_get_and_set_handler,
+  nacl_exception_set_stack,
+  nacl_exception_clear_flag,
+};
+#endif
+
 static const struct nacl_irt_interface irt_interfaces[] = {
   { NACL_IRT_BASIC_v0_1, &nacl_irt_basic, sizeof(nacl_irt_basic), NULL },
   { NACL_IRT_FDIO_v0_1, &nacl_irt_fdio, sizeof(nacl_irt_fdio), NULL },
@@ -690,6 +657,10 @@ static const struct nacl_irt_interface irt_interfaces[] = {
     sizeof(nacl_irt_dev_filename), NULL },
   { NACL_IRT_DEV_GETPID_v0_1, &nacl_irt_dev_getpid,
     sizeof(nacl_irt_dev_getpid), NULL },
+#if defined(__native_client__)
+  { NACL_IRT_EXCEPTION_HANDLING_v0_1, &nacl_irt_exception_handling,
+    sizeof(nacl_irt_exception_handling), NULL},
+#endif
 };
 
 size_t nacl_irt_query_core(const char *interface_ident,

@@ -46,16 +46,7 @@ SkPictureData::SkPictureData(const SkPictureRecord& record,
 
     fOpData = record.opData(deepCopyOps);
 
-    fBoundingHierarchy = record.fBoundingHierarchy;
-    fStateTree = record.fStateTree;
-
-    SkSafeRef(fBoundingHierarchy);
-    SkSafeRef(fStateTree);
     fContentInfo.set(record.fContentInfo);
-
-    if (fBoundingHierarchy) {
-        fBoundingHierarchy->flushDeferredInserts();
-    }
 
     // copy over the refcnt dictionary to our reader
     record.fFlattenableHeap.setupPlaybacks();
@@ -89,62 +80,6 @@ SkPictureData::SkPictureData(const SkPictureRecord& record,
     }
 }
 
-#ifdef SK_SUPPORT_LEGACY_PICTURE_CLONE
-SkPictureData::SkPictureData(const SkPictureData& src, SkPictCopyInfo* deepCopyInfo)
-    : fInfo(src.fInfo) {
-    this->init();
-
-    fBitmapHeap.reset(SkSafeRef(src.fBitmapHeap.get()));
-    fPathHeap.reset(SkSafeRef(src.fPathHeap.get()));
-
-    fOpData = SkSafeRef(src.fOpData);
-
-    fBoundingHierarchy = src.fBoundingHierarchy;
-    fStateTree = src.fStateTree;
-    fContentInfo.set(src.fContentInfo);
-
-    SkSafeRef(fBoundingHierarchy);
-    SkSafeRef(fStateTree);
-
-    if (deepCopyInfo) {
-        int paintCount = SafeCount(src.fPaints);
-
-        if (src.fBitmaps) {
-            fBitmaps = SkTRefArray<SkBitmap>::Create(src.fBitmaps->begin(), src.fBitmaps->count());
-        }
-
-        fPaints = SkTRefArray<SkPaint>::Create(paintCount);
-        SkASSERT(deepCopyInfo->paintData.count() == paintCount);
-        SkBitmapHeap* bmHeap = deepCopyInfo->controller.getBitmapHeap();
-        SkTypefacePlayback* tfPlayback = deepCopyInfo->controller.getTypefacePlayback();
-        for (int i = 0; i < paintCount; i++) {
-            if (deepCopyInfo->paintData[i]) {
-                deepCopyInfo->paintData[i]->unflatten<SkPaint::FlatteningTraits>(
-                    &fPaints->writableAt(i), bmHeap, tfPlayback);
-            } else {
-                // needs_deep_copy was false, so just need to assign
-                fPaints->writableAt(i) = src.fPaints->at(i);
-            }
-        }
-
-    } else {
-        fBitmaps = SkSafeRef(src.fBitmaps);
-        fPaints = SkSafeRef(src.fPaints);
-    }
-
-    fPictureCount = src.fPictureCount;
-    fPictureRefs = SkNEW_ARRAY(const SkPicture*, fPictureCount);
-    for (int i = 0; i < fPictureCount; i++) {
-        if (deepCopyInfo) {
-            fPictureRefs[i] = src.fPictureRefs[i]->clone();
-        } else {
-            fPictureRefs[i] = src.fPictureRefs[i];
-            fPictureRefs[i]->ref();
-        }
-    }
-}
-#endif//SK_SUPPORT_LEGACY_PICTURE_CLONE
-
 void SkPictureData::init() {
     fBitmaps = NULL;
     fPaints = NULL;
@@ -154,8 +89,6 @@ void SkPictureData::init() {
     fTextBlobCount = 0;
     fOpData = NULL;
     fFactoryPlayback = NULL;
-    fBoundingHierarchy = NULL;
-    fStateTree = NULL;
 }
 
 SkPictureData::~SkPictureData() {
@@ -163,8 +96,6 @@ SkPictureData::~SkPictureData() {
 
     SkSafeUnref(fBitmaps);
     SkSafeUnref(fPaints);
-    SkSafeUnref(fBoundingHierarchy);
-    SkSafeUnref(fStateTree);
 
     for (int i = 0; i < fPictureCount; i++) {
         fPictureRefs[i]->unref();
@@ -633,16 +564,6 @@ bool SkPictureData::parseBuffer(SkReadBuffer& buffer) {
 
 ///////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////
-
-const SkPicture::OperationList* SkPictureData::getActiveOps(const SkRect& query) const {
-    if (NULL == fStateTree || NULL == fBoundingHierarchy) {
-        return NULL;
-    }
-
-    SkPicture::OperationList* activeOps = SkNEW(SkPicture::OperationList);
-    fBoundingHierarchy->search(query, &(activeOps->fOps));
-    return activeOps;
-}
 
 #if SK_SUPPORT_GPU
 bool SkPictureData::suitableForGpuRasterization(GrContext* context, const char **reason,

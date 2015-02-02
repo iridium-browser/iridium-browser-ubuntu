@@ -22,12 +22,11 @@ namespace {
 class DisconnectWindowGtk : public HostWindow {
  public:
   DisconnectWindowGtk();
-  virtual ~DisconnectWindowGtk();
+  ~DisconnectWindowGtk() override;
 
   // HostWindow overrides.
-  virtual void Start(
-      const base::WeakPtr<ClientSessionControl>& client_session_control)
-      OVERRIDE;
+  void Start(const base::WeakPtr<ClientSessionControl>& client_session_control)
+      override;
 
  private:
   CHROMEG_CALLBACK_1(DisconnectWindowGtk, gboolean, OnDelete,
@@ -289,7 +288,7 @@ gboolean DisconnectWindowGtk::OnButtonPress(GtkWidget* widget,
 
 // static
 scoped_ptr<HostWindow> HostWindow::CreateDisconnectWindow() {
-  return scoped_ptr<HostWindow>(new DisconnectWindowGtk());
+  return make_scoped_ptr(new DisconnectWindowGtk());
 }
 
 }  // namespace remoting

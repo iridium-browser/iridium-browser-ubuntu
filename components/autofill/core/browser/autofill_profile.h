@@ -22,8 +22,6 @@
 
 namespace autofill {
 
-struct FormFieldData;
-
 // A collection of FormGroups stored in a profile.  AutofillProfile also
 // implements the FormGroup interface so that owners of this object can request
 // form information from the profile, and the profile will delegate the request
@@ -35,29 +33,27 @@ class AutofillProfile : public AutofillDataModel {
   // For use in STL containers.
   AutofillProfile();
   AutofillProfile(const AutofillProfile& profile);
-  virtual ~AutofillProfile();
+  ~AutofillProfile() override;
 
   AutofillProfile& operator=(const AutofillProfile& profile);
 
   // FormGroup:
-  virtual void GetMatchingTypes(
-      const base::string16& text,
-      const std::string& app_locale,
-      ServerFieldTypeSet* matching_types) const OVERRIDE;
-  virtual base::string16 GetRawInfo(ServerFieldType type) const OVERRIDE;
-  virtual void SetRawInfo(ServerFieldType type,
-                          const base::string16& value) OVERRIDE;
-  virtual base::string16 GetInfo(const AutofillType& type,
-                                 const std::string& app_locale) const OVERRIDE;
-  virtual bool SetInfo(const AutofillType& type,
-                       const base::string16& value,
-                       const std::string& app_locale) OVERRIDE;
+  void GetMatchingTypes(const base::string16& text,
+                        const std::string& app_locale,
+                        ServerFieldTypeSet* matching_types) const override;
+  base::string16 GetRawInfo(ServerFieldType type) const override;
+  void SetRawInfo(ServerFieldType type, const base::string16& value) override;
+  base::string16 GetInfo(const AutofillType& type,
+                         const std::string& app_locale) const override;
+  bool SetInfo(const AutofillType& type,
+               const base::string16& value,
+               const std::string& app_locale) override;
 
   // AutofillDataModel:
-  virtual base::string16 GetInfoForVariant(
+  base::string16 GetInfoForVariant(
       const AutofillType& type,
       size_t variant,
-      const std::string& app_locale) const OVERRIDE;
+      const std::string& app_locale) const override;
 
   // Multi-value equivalents to |GetInfo| and |SetInfo|.
   void SetRawMultiInfo(ServerFieldType type,
@@ -153,8 +149,7 @@ class AutofillProfile : public AutofillDataModel {
   typedef std::vector<const FormGroup*> FormGroupList;
 
   // FormGroup:
-  virtual void GetSupportedTypes(
-      ServerFieldTypeSet* supported_types) const OVERRIDE;
+  void GetSupportedTypes(ServerFieldTypeSet* supported_types) const override;
 
   // Shared implementation for GetRawMultiInfo() and GetMultiInfo().  Pass an
   // empty |app_locale| to get the raw info; otherwise, the returned info is

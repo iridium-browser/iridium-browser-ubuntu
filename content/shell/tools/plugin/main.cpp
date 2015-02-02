@@ -348,8 +348,12 @@ NPError NPP_Destroy(NPP instance, NPSavedData **save)
         if (obj->evaluateScriptOnMouseDownOrKeyDown)
             free(obj->evaluateScriptOnMouseDownOrKeyDown);
 
-        if (obj->logDestroy)
-            pluginLog(instance, "NPP_Destroy");
+        if (obj->logDestroy) {
+            // Note: this intentionally avoids using pluginLog(), because that
+            // requires running JS during document detach, which is forbidden.
+            puts("PLUGIN: NPP_Destroy");
+            fflush(stdout);
+        }
 
 #ifdef XP_MACOSX
         if (obj->coreAnimationLayer)

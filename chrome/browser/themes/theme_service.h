@@ -65,7 +65,7 @@ class ThemeService : public base::NonThreadSafe,
   static const char* kDefaultThemeID;
 
   ThemeService();
-  virtual ~ThemeService();
+  ~ThemeService() override;
 
   virtual void Init(Profile* profile);
 
@@ -76,27 +76,26 @@ class ThemeService : public base::NonThreadSafe,
   virtual gfx::Image GetImageNamed(int id) const;
 
   // Overridden from ui::ThemeProvider:
-  virtual bool UsingSystemTheme() const OVERRIDE;
-  virtual gfx::ImageSkia* GetImageSkiaNamed(int id) const OVERRIDE;
-  virtual SkColor GetColor(int id) const OVERRIDE;
-  virtual int GetDisplayProperty(int id) const OVERRIDE;
-  virtual bool ShouldUseNativeFrame() const OVERRIDE;
-  virtual bool HasCustomImage(int id) const OVERRIDE;
-  virtual base::RefCountedMemory* GetRawData(
-      int id,
-      ui::ScaleFactor scale_factor) const OVERRIDE;
+  bool UsingSystemTheme() const override;
+  gfx::ImageSkia* GetImageSkiaNamed(int id) const override;
+  SkColor GetColor(int id) const override;
+  int GetDisplayProperty(int id) const override;
+  bool ShouldUseNativeFrame() const override;
+  bool HasCustomImage(int id) const override;
+  base::RefCountedMemory* GetRawData(int id, ui::ScaleFactor scale_factor)
+      const override;
 #if defined(OS_MACOSX)
-  virtual NSImage* GetNSImageNamed(int id) const OVERRIDE;
-  virtual NSColor* GetNSImageColorNamed(int id) const OVERRIDE;
-  virtual NSColor* GetNSColor(int id) const OVERRIDE;
-  virtual NSColor* GetNSColorTint(int id) const OVERRIDE;
-  virtual NSGradient* GetNSGradient(int id) const OVERRIDE;
+  NSImage* GetNSImageNamed(int id) const override;
+  NSColor* GetNSImageColorNamed(int id) const override;
+  NSColor* GetNSColor(int id) const override;
+  NSColor* GetNSColorTint(int id) const override;
+  NSGradient* GetNSGradient(int id) const override;
 #endif
 
   // Overridden from content::NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   // Set the current theme to the theme defined in |extension|.
   // |extension| must already be added to this profile's
@@ -208,12 +207,14 @@ class ThemeService : public base::NonThreadSafe,
   // case we don't have a theme pack).
   void BuildFromExtension(const extensions::Extension* extension);
 
+#if defined(ENABLE_MANAGED_USERS)
   // Returns true if the profile belongs to a supervised user.
   bool IsSupervisedUser() const;
 
   // Sets the current theme to the supervised user theme. Should only be used
   // for supervised user profiles.
   void SetSupervisedUserTheme();
+#endif
 
 #if defined(OS_MACOSX)
   // |nsimage_cache_| retains the images it has cached.

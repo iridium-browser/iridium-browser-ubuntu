@@ -145,7 +145,7 @@ void RenderInline::updateFromStyle()
     setInline(true);
 
     // FIXME: Support transforms and reflections on inline flows someday.
-    setHasTransform(false);
+    setHasTransformRelatedProperty(false);
     setHasReflection(false);
 }
 
@@ -772,17 +772,6 @@ const char* RenderInline::renderName() const
 {
     if (isRelPositioned())
         return "RenderInline (relative positioned)";
-    // FIXME: Cleanup isPseudoElement duplication with other renderName methods.
-    // crbug.com/415653
-    if (isPseudoElement()) {
-        if (style()->styleType() == BEFORE)
-            return "RenderInline (pseudo:before)";
-        if (style()->styleType() == AFTER)
-            return "RenderInline (pseudo:after)";
-        if (style()->styleType() == BACKDROP)
-            return "RenderInline (pseudo:backdrop)";
-        ASSERT_NOT_REACHED();
-    }
     if (isAnonymous())
         return "RenderInline (generated)";
     return "RenderInline";
@@ -1030,29 +1019,42 @@ LayoutRect RenderInline::linesVisualOverflowBoundingBox() const
     return rect;
 }
 
+LayoutRect RenderInline::absoluteClippedOverflowRect() const
+{
+    return clippedOverflowRect(view());
+}
+
 LayoutRect RenderInline::clippedOverflowRectForPaintInvalidation(const RenderLayerModelObject* paintInvalidationContainer, const PaintInvalidationState* paintInvalidationState) const
+{
+    // If we don't create line boxes, we don't have any invalidations to do.
+    if (!alwaysCreateLineBoxes())
+        return LayoutRect();
+    return clippedOverflowRect(paintInvalidationContainer);
+}
+
+LayoutRect RenderInline::clippedOverflowRect(const RenderLayerModelObject* paintInvalidationContainer, const PaintInvalidationState* paintInvalidationState) const
 {
     if ((!firstLineBoxIncludingCulling() && !continuation()) || style()->visibility() != VISIBLE)
         return LayoutRect();
 
-    LayoutRect paintInvalidationRect(linesVisualOverflowBoundingBox());
+    LayoutRect overflowRect(linesVisualOverflowBoundingBox());
 
     LayoutUnit outlineSize = style()->outlineSize();
-    paintInvalidationRect.inflate(outlineSize);
+    overflowRect.inflate(outlineSize);
 
-    mapRectToPaintInvalidationBacking(paintInvalidationContainer, paintInvalidationRect, paintInvalidationState);
+    mapRectToPaintInvalidationBacking(paintInvalidationContainer, overflowRect, paintInvalidationState);
 
     if (outlineSize) {
         for (RenderObject* curr = firstChild(); curr; curr = curr->nextSibling()) {
             if (!curr->isText())
-                paintInvalidationRect.unite(curr->rectWithOutlineForPaintInvalidation(paintInvalidationContainer, outlineSize));
+                overflowRect.unite(curr->rectWithOutlineForPaintInvalidation(paintInvalidationContainer, outlineSize));
         }
 
         if (continuation() && !continuation()->isInline() && continuation()->parent())
-            paintInvalidationRect.unite(continuation()->rectWithOutlineForPaintInvalidation(paintInvalidationContainer, outlineSize));
+            overflowRect.unite(continuation()->rectWithOutlineForPaintInvalidation(paintInvalidationContainer, outlineSize));
     }
 
-    return paintInvalidationRect;
+    return overflowRect;
 }
 
 LayoutRect RenderInline::rectWithOutlineForPaintInvalidation(const RenderLayerModelObject* paintInvalidationContainer, LayoutUnit outlineWidth, const PaintInvalidationState* paintInvalidationState) const
@@ -1139,7 +1141,7 @@ LayoutSize RenderInline::offsetFromContainer(const RenderObject* container, cons
 
     if (offsetDependsOnPoint) {
         *offsetDependsOnPoint = container->hasColumns()
-            || (container->isBox() && container->style()->isFlippedBlocksWritingMode())
+            || (container->isBox() && container->style()->slowIsFlippedBlocksWritingMode())
             || container->isRenderFlowThread();
     }
 
@@ -1165,7 +1167,7 @@ void RenderInline::mapLocalToContainer(const RenderLayerModelObject* paintInvali
         return;
 
     if (mode & ApplyContainerFlip && o->isBox()) {
-        if (o->style()->isFlippedBlocksWritingMode()) {
+        if (o->style()->slowIsFlippedBlocksWritingMode()) {
             IntPoint centerPoint = roundedIntPoint(transformState.mappedPoint());
             transformState.move(toRenderBox(o)->flipForWritingModeIncludingColumns(centerPoint) - centerPoint);
         }
@@ -1268,11 +1270,6 @@ void RenderInline::dirtyLineBoxes(bool fullLayout)
         m_lineBoxes.dirtyLineBoxes();
 }
 
-void RenderInline::deleteLineBoxTree()
-{
-    m_lineBoxes.deleteLineBoxTree();
-}
-
 InlineFlowBox* RenderInline::createInlineFlowBox()
 {
     return new InlineFlowBox(*this);
@@ -1348,7 +1345,7 @@ void RenderInline::imageChanged(WrappedImagePtr, const IntRect*)
         return;
 
     // FIXME: We can do better.
-    setShouldDoFullPaintInvalidation(true);
+    setShouldDoFullPaintInvalidation();
 }
 
 namespace {

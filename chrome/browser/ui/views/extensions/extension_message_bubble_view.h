@@ -38,7 +38,7 @@ class ExtensionMessageBubbleController;
 class ExtensionMessageBubbleFactory : public BrowserActionsContainerObserver {
  public:
   ExtensionMessageBubbleFactory(Profile* profile, ToolbarView* toolbar_view);
-  virtual ~ExtensionMessageBubbleFactory();
+  ~ExtensionMessageBubbleFactory() override;
 
   void MaybeShow(views::View* anchor_view);
 
@@ -81,8 +81,8 @@ class ExtensionMessageBubbleFactory : public BrowserActionsContainerObserver {
   bool IsInitialProfileCheck(Profile* profile);
 
   // BrowserActionsContainer::Observer implementation.
-  virtual void OnBrowserActionsContainerAnimationEnded() OVERRIDE;
-  virtual void OnBrowserActionsContainerDestroyed() OVERRIDE;
+  void OnBrowserActionsContainerAnimationEnded() override;
+  void OnBrowserActionsContainerDestroyed() override;
 
   // Sets the stage for highlighting extensions and then showing the bubble
   // controlled by |controller|, anchored to |anchor_view|.
@@ -154,33 +154,32 @@ class ExtensionMessageBubbleView : public ExtensionMessageBubble,
       scoped_ptr<ExtensionMessageBubbleController> controller);
 
   // ExtensionMessageBubble methods.
-  virtual void OnActionButtonClicked(const base::Closure& callback) OVERRIDE;
-  virtual void OnDismissButtonClicked(const base::Closure& callback) OVERRIDE;
-  virtual void OnLinkClicked(const base::Closure& callback) OVERRIDE;
-  virtual void Show() OVERRIDE;
+  void OnActionButtonClicked(const base::Closure& callback) override;
+  void OnDismissButtonClicked(const base::Closure& callback) override;
+  void OnLinkClicked(const base::Closure& callback) override;
+  void Show() override;
 
   // WidgetObserver methods.
-  virtual void OnWidgetDestroying(views::Widget* widget) OVERRIDE;
+  void OnWidgetDestroying(views::Widget* widget) override;
 
  private:
-  virtual ~ExtensionMessageBubbleView();
+  ~ExtensionMessageBubbleView() override;
 
   void ShowBubble();
 
   // views::BubbleDelegateView overrides:
-  virtual void Init() OVERRIDE;
+  void Init() override;
 
   // views::ButtonListener implementation.
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // views::LinkListener implementation.
-  virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
+  void LinkClicked(views::Link* source, int event_flags) override;
 
   // views::View implementation.
-  virtual void GetAccessibleState(ui::AXViewState* state) OVERRIDE;
-  virtual void ViewHierarchyChanged(const ViewHierarchyChangedDetails& details)
-      OVERRIDE;
+  void GetAccessibleState(ui::AXViewState* state) override;
+  void ViewHierarchyChanged(
+      const ViewHierarchyChangedDetails& details) override;
 
   // The controller for this bubble.
   scoped_ptr<ExtensionMessageBubbleController> controller_;

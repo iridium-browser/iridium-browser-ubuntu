@@ -56,7 +56,7 @@ bool ReadMessage(int fd, std::string* message) {
 
   // kMessageMaxLength applies to the entire message: the 4-byte
   // length field and the content.
-  if (message_size > metrics::SerializationUtils::kMessageMaxLength) {
+  if (message_size > SerializationUtils::kMessageMaxLength) {
     DLOG(ERROR) << "message too long : " << message_size;
     if (HANDLE_EINTR(lseek(fd, message_size - 4, SEEK_CUR)) == -1) {
       DLOG(ERROR) << "error while skipping message. abort";
@@ -69,7 +69,7 @@ bool ReadMessage(int fd, std::string* message) {
   }
 
   message_size -= sizeof(message_size);  // The message size includes itself.
-  char buffer[metrics::SerializationUtils::kMessageMaxLength];
+  char buffer[SerializationUtils::kMessageMaxLength];
   if (!base::ReadFromFD(fd, buffer, message_size)) {
     DPLOG(ERROR) << "reading metrics message body";
     return false;
@@ -196,17 +196,16 @@ bool SerializationUtils::WriteMetricToFile(const MetricSample& sample,
 
   // The file containing the metrics samples will only be read by programs on
   // the same device so we do not check endianness.
-  if (base::WriteFileDescriptor(file_descriptor.get(),
-                                reinterpret_cast<char*>(&size),
-                                sizeof(size)) != sizeof(size)) {
-    DLOG(ERROR) << "error writing message length " << errno;
+  if (!base::WriteFileDescriptor(file_descriptor.get(),
+                                 reinterpret_cast<char*>(&size),
+                                 sizeof(size))) {
+    DPLOG(ERROR) << "error writing message length";
     return false;
   }
 
-  if (base::WriteFileDescriptor(
-          file_descriptor.get(), msg.c_str(), msg.length()) !=
-      static_cast<int>(msg.length())) {
-    DLOG(ERROR) << "error writing message" << errno;
+  if (!base::WriteFileDescriptor(
+          file_descriptor.get(), msg.c_str(), msg.size())) {
+    DPLOG(ERROR) << "error writing message";
     return false;
   }
 

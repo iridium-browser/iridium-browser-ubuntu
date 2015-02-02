@@ -39,9 +39,9 @@ GURL TestURL(const char* prefix, int i) {
 class DummyVisitedLinkEventListener : public VisitedLinkMaster::Listener {
  public:
   DummyVisitedLinkEventListener() {}
-  virtual void NewTable(base::SharedMemory* table) OVERRIDE {}
-  virtual void Add(VisitedLinkCommon::Fingerprint) OVERRIDE {}
-  virtual void Reset() OVERRIDE {}
+  void NewTable(base::SharedMemory* table) override {}
+  void Add(VisitedLinkCommon::Fingerprint) override {}
+  void Reset() override {}
 };
 
 
@@ -64,12 +64,8 @@ void FillTable(VisitedLinkMaster& master, const char* prefix,
 class VisitedLink : public testing::Test {
  protected:
   base::FilePath db_path_;
-  virtual void SetUp() {
-    ASSERT_TRUE(base::CreateTemporaryFile(&db_path_));
-  }
-  virtual void TearDown() {
-    base::DeleteFile(db_path_, false);
-  }
+  void SetUp() override { ASSERT_TRUE(base::CreateTemporaryFile(&db_path_)); }
+  void TearDown() override { base::DeleteFile(db_path_, false); }
 };
 
 } // namespace

@@ -27,11 +27,11 @@ class WebstoreStartupInstaller : public WebstoreInstallWithPrompt {
   friend class base::RefCountedThreadSafe<WebstoreStartupInstaller>;
   FRIEND_TEST_ALL_PREFIXES(WebstoreStartupInstallerTest, DomainVerification);
 
-  virtual ~WebstoreStartupInstaller();
+  ~WebstoreStartupInstaller() override;
 
   // Implementations of WebstoreStandaloneInstaller Template Method's hooks.
-  virtual scoped_refptr<ExtensionInstallPrompt::Prompt> CreateInstallPrompt()
-      const OVERRIDE;
+  scoped_refptr<ExtensionInstallPrompt::Prompt> CreateInstallPrompt()
+      const override;
 
  private:
   bool show_prompt_;

@@ -52,9 +52,9 @@ class LoadTimesExtensionWrapper : public v8::Extension {
       "  return GetCSI();"
       "}") {}
 
-  virtual v8::Handle<v8::FunctionTemplate> GetNativeFunctionTemplate(
+  v8::Handle<v8::FunctionTemplate> GetNativeFunctionTemplate(
       v8::Isolate* isolate,
-      v8::Handle<v8::String> name) OVERRIDE {
+      v8::Handle<v8::String> name) override {
     if (name->Equals(v8::String::NewFromUtf8(isolate, "GetLoadTimes"))) {
       return v8::FunctionTemplate::New(isolate, GetLoadTimes);
     } else if (name->Equals(v8::String::NewFromUtf8(isolate, "GetCSI"))) {

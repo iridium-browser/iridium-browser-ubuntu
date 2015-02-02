@@ -14,7 +14,7 @@ class TabStrip;
 class FakeBaseTabStripController : public TabStripController {
  public:
   FakeBaseTabStripController();
-  virtual ~FakeBaseTabStripController();
+  ~FakeBaseTabStripController() override;
 
   void AddTab(int index, bool is_active);
   void RemoveTab(int index);
@@ -22,37 +22,35 @@ class FakeBaseTabStripController : public TabStripController {
   void set_tab_strip(TabStrip* tab_strip) { tab_strip_ = tab_strip; }
 
   // TabStripController overrides:
-  virtual const ui::ListSelectionModel& GetSelectionModel() OVERRIDE;
-  virtual int GetCount() const OVERRIDE;
-  virtual bool IsValidIndex(int index) const OVERRIDE;
-  virtual bool IsActiveTab(int index) const OVERRIDE;
-  virtual int GetActiveIndex() const OVERRIDE;
-  virtual bool IsTabSelected(int index) const OVERRIDE;
-  virtual bool IsTabPinned(int index) const OVERRIDE;
-  virtual bool IsNewTabPage(int index) const OVERRIDE;
-  virtual void SelectTab(int index) OVERRIDE;
-  virtual void ExtendSelectionTo(int index) OVERRIDE;
-  virtual void ToggleSelected(int index) OVERRIDE;
-  virtual void AddSelectionFromAnchorTo(int index) OVERRIDE;
-  virtual void CloseTab(int index, CloseTabSource source) OVERRIDE;
-  virtual void ToggleTabAudioMute(int index) OVERRIDE;
-  virtual void ShowContextMenuForTab(Tab* tab,
-                                     const gfx::Point& p,
-                                     ui::MenuSourceType source_type) OVERRIDE;
-  virtual void UpdateLoadingAnimations() OVERRIDE;
-  virtual int HasAvailableDragActions() const OVERRIDE;
-  virtual void OnDropIndexUpdate(int index, bool drop_before) OVERRIDE;
-  virtual void PerformDrop(bool drop_before,
-                           int index,
-                           const GURL& url) OVERRIDE;
-  virtual bool IsCompatibleWith(TabStrip* other) const OVERRIDE;
-  virtual void CreateNewTab() OVERRIDE;
-  virtual void CreateNewTabWithLocation(const base::string16& loc) OVERRIDE;
-  virtual bool IsIncognito() OVERRIDE;
-  virtual void StackedLayoutMaybeChanged() OVERRIDE;
-  virtual void OnStartedDraggingTabs() OVERRIDE;
-  virtual void OnStoppedDraggingTabs() OVERRIDE;
-  virtual void CheckFileSupported(const GURL& url) OVERRIDE;
+  const ui::ListSelectionModel& GetSelectionModel() override;
+  int GetCount() const override;
+  bool IsValidIndex(int index) const override;
+  bool IsActiveTab(int index) const override;
+  int GetActiveIndex() const override;
+  bool IsTabSelected(int index) const override;
+  bool IsTabPinned(int index) const override;
+  bool IsNewTabPage(int index) const override;
+  void SelectTab(int index) override;
+  void ExtendSelectionTo(int index) override;
+  void ToggleSelected(int index) override;
+  void AddSelectionFromAnchorTo(int index) override;
+  void CloseTab(int index, CloseTabSource source) override;
+  void ToggleTabAudioMute(int index) override;
+  void ShowContextMenuForTab(Tab* tab,
+                             const gfx::Point& p,
+                             ui::MenuSourceType source_type) override;
+  void UpdateLoadingAnimations() override;
+  int HasAvailableDragActions() const override;
+  void OnDropIndexUpdate(int index, bool drop_before) override;
+  void PerformDrop(bool drop_before, int index, const GURL& url) override;
+  bool IsCompatibleWith(TabStrip* other) const override;
+  void CreateNewTab() override;
+  void CreateNewTabWithLocation(const base::string16& loc) override;
+  bool IsIncognito() override;
+  void StackedLayoutMaybeChanged() override;
+  void OnStartedDraggingTabs() override;
+  void OnStoppedDraggingTabs() override;
+  void CheckFileSupported(const GURL& url) override;
 
  private:
   TabStrip* tab_strip_;

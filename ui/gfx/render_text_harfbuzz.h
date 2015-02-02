@@ -60,6 +60,7 @@ struct GFX_EXPORT TextRunHarfBuzz {
   std::vector<uint32> glyph_to_char;
   size_t glyph_count;
 
+  std::string family;
   skia::RefPtr<SkTypeface> skia_face;
   FontRenderParams render_params;
   int font_size;
@@ -77,31 +78,31 @@ struct GFX_EXPORT TextRunHarfBuzz {
 class GFX_EXPORT RenderTextHarfBuzz : public RenderText {
  public:
   RenderTextHarfBuzz();
-  virtual ~RenderTextHarfBuzz();
+  ~RenderTextHarfBuzz() override;
 
   // Overridden from RenderText.
-  virtual Size GetStringSize() OVERRIDE;
-  virtual SizeF GetStringSizeF() OVERRIDE;
-  virtual SelectionModel FindCursorPosition(const Point& point) OVERRIDE;
-  virtual std::vector<FontSpan> GetFontSpansForTesting() OVERRIDE;
-  virtual Range GetGlyphBounds(size_t index) OVERRIDE;
+  Size GetStringSize() override;
+  SizeF GetStringSizeF() override;
+  SelectionModel FindCursorPosition(const Point& point) override;
+  std::vector<FontSpan> GetFontSpansForTesting() override;
+  Range GetGlyphBounds(size_t index) override;
 
  protected:
   // Overridden from RenderText.
-  virtual int GetLayoutTextBaseline() OVERRIDE;
-  virtual SelectionModel AdjacentCharSelectionModel(
+  int GetLayoutTextBaseline() override;
+  SelectionModel AdjacentCharSelectionModel(
       const SelectionModel& selection,
-      VisualCursorDirection direction) OVERRIDE;
-  virtual SelectionModel AdjacentWordSelectionModel(
+      VisualCursorDirection direction) override;
+  SelectionModel AdjacentWordSelectionModel(
       const SelectionModel& selection,
-      VisualCursorDirection direction) OVERRIDE;
-  virtual std::vector<Rect> GetSubstringBounds(const Range& range) OVERRIDE;
-  virtual size_t TextIndexToLayoutIndex(size_t index) const OVERRIDE;
-  virtual size_t LayoutIndexToTextIndex(size_t index) const OVERRIDE;
-  virtual bool IsValidCursorIndex(size_t index) OVERRIDE;
-  virtual void ResetLayout() OVERRIDE;
-  virtual void EnsureLayout() OVERRIDE;
-  virtual void DrawVisualText(Canvas* canvas) OVERRIDE;
+      VisualCursorDirection direction) override;
+  std::vector<Rect> GetSubstringBounds(const Range& range) override;
+  size_t TextIndexToLayoutIndex(size_t index) const override;
+  size_t LayoutIndexToTextIndex(size_t index) const override;
+  bool IsValidCursorIndex(size_t index) override;
+  void ResetLayout() override;
+  void EnsureLayout() override;
+  void DrawVisualText(Canvas* canvas) override;
 
  private:
   friend class RenderTextTest;
@@ -110,6 +111,7 @@ class GFX_EXPORT RenderTextHarfBuzz : public RenderText {
   FRIEND_TEST_ALL_PREFIXES(RenderTextTest, HarfBuzz_SubglyphGraphemeCases);
   FRIEND_TEST_ALL_PREFIXES(RenderTextTest, HarfBuzz_SubglyphGraphemePartition);
   FRIEND_TEST_ALL_PREFIXES(RenderTextTest, HarfBuzz_NonExistentFont);
+  FRIEND_TEST_ALL_PREFIXES(RenderTextTest, HarfBuzz_UniscribeFallback);
 
   // Return the run index that contains the argument; or the length of the
   // |runs_| vector if argument exceeds the text length or width.
@@ -127,10 +129,23 @@ class GFX_EXPORT RenderTextHarfBuzz : public RenderText {
   // Break the text into logical runs and populate the visual <-> logical maps.
   void ItemizeText();
 
+  // Helper method for ShapeRun() that calls ShapeRunWithFont() with |run|,
+  // |family|, and |render_params|, returning true if the family provides all
+  // needed glyphs and false otherwise. Additionally updates |best_family|,
+  // |best_render_params|, and |best_missing_glyphs| if |family| has fewer than
+  // |best_missing_glyphs| missing glyphs.
+  bool CompareFamily(internal::TextRunHarfBuzz* run,
+                     const std::string& family,
+                     const gfx::FontRenderParams& render_params,
+                     std::string* best_family,
+                     gfx::FontRenderParams* best_render_params,
+                     size_t* best_missing_glyphs);
+
   // Shape the glyphs needed for the text |run|.
   void ShapeRun(internal::TextRunHarfBuzz* run);
   bool ShapeRunWithFont(internal::TextRunHarfBuzz* run,
-                        const std::string& font);
+                        const std::string& font_family,
+                        const FontRenderParams& params);
 
   // Text runs in logical order.
   ScopedVector<internal::TextRunHarfBuzz> runs_;

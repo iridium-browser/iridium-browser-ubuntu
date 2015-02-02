@@ -6,7 +6,6 @@
 
 #include "base/files/scoped_temp_dir.h"
 #include "base/i18n/time_formatting.h"
-#include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
@@ -48,7 +47,7 @@ void MakeTestSkBitmap(int w, int h, SkBitmap* bmp) {
 
 class BookmarkHTMLWriterTest : public testing::Test {
  protected:
-  virtual void SetUp() {
+  void SetUp() override {
     testing::Test::SetUp();
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     path_ = temp_dir_.path().AppendASCII("bookmarks.html");
@@ -130,9 +129,7 @@ class BookmarksObserver : public BookmarksExportObserver {
     DCHECK(loop);
   }
 
-  virtual void OnExportFinished() OVERRIDE {
-    loop_->Quit();
-  }
+  void OnExportFinished() override { loop_->Quit(); }
 
  private:
   base::RunLoop* loop_;
@@ -152,7 +149,7 @@ TEST_F(BookmarkHTMLWriterTest, Test) {
   profile.CreateBookmarkModel(true);
 
   BookmarkModel* model = BookmarkModelFactory::GetForProfile(&profile);
-  test::WaitForBookmarkModelToLoad(model);
+  bookmarks::test::WaitForBookmarkModelToLoad(model);
 
   // Create test PNG representing favicon for url1.
   SkBitmap bitmap;

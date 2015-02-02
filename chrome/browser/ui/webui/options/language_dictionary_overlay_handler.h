@@ -15,18 +15,17 @@ class LanguageDictionaryOverlayHandler
       public SpellcheckCustomDictionary::Observer {
  public:
   LanguageDictionaryOverlayHandler();
-  virtual ~LanguageDictionaryOverlayHandler();
+  ~LanguageDictionaryOverlayHandler() override;
 
   // Overridden from OptionsPageUIHandler:
-  virtual void GetLocalizedValues(
-      base::DictionaryValue* localized_strings) OVERRIDE;
-  virtual void RegisterMessages() OVERRIDE;
-  virtual void Uninitialize() OVERRIDE;
+  void GetLocalizedValues(base::DictionaryValue* localized_strings) override;
+  void RegisterMessages() override;
+  void Uninitialize() override;
 
   // Overridden from SpellcheckCustomDictionary::Observer:
-  virtual void OnCustomDictionaryLoaded() OVERRIDE;
-  virtual void OnCustomDictionaryChanged(
-      const SpellcheckCustomDictionary::Change& dictionary_change) OVERRIDE;
+  void OnCustomDictionaryLoaded() override;
+  void OnCustomDictionaryChanged(
+      const SpellcheckCustomDictionary::Change& dictionary_change) override;
 
  private:
   // Sends the dictionary words to WebUI.

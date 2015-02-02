@@ -12,15 +12,16 @@ namespace system_logs {
 // Fetches internal Chrome logs.
 class ChromeInternalLogSource : public SystemLogsSource {
  public:
-  ChromeInternalLogSource() {}
-  virtual ~ChromeInternalLogSource() {}
+  ChromeInternalLogSource();
+  ~ChromeInternalLogSource() override;
 
   // SystemLogsSource override.
-  virtual void Fetch(const SysLogsSourceCallback& request) OVERRIDE;
+  void Fetch(const SysLogsSourceCallback& request) override;
 
  private:
   void PopulateSyncLogs(SystemLogsResponse* response);
   void PopulateExtensionInfoLogs(SystemLogsResponse* response);
+  void PopulateDataReductionProxyLogs(SystemLogsResponse* response);
 
   DISALLOW_COPY_AND_ASSIGN(ChromeInternalLogSource);
 };

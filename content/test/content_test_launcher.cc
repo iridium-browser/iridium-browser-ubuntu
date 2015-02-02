@@ -9,7 +9,6 @@
 #include "base/debug/stack_trace.h"
 #include "base/i18n/icu_util.h"
 #include "base/logging.h"
-#include "base/path_service.h"
 #include "base/process/memory.h"
 #include "base/sys_info.h"
 #include "base/test/test_suite.h"
@@ -20,6 +19,10 @@
 #include "content/shell/common/shell_switches.h"
 #include "media/base/media_switches.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+#ifdef V8_USE_EXTERNAL_STARTUP_DATA
+#include "gin/public/isolate_holder.h"
+#endif
 
 #if defined(OS_ANDROID)
 #include "base/message_loop/message_loop.h"
@@ -45,15 +48,17 @@ class ContentBrowserTestSuite : public ContentTestSuiteBase {
   ContentBrowserTestSuite(int argc, char** argv)
       : ContentTestSuiteBase(argc, argv) {
   }
-  virtual ~ContentBrowserTestSuite() {
-  }
+  ~ContentBrowserTestSuite() override {}
 
  protected:
-  virtual void Initialize() OVERRIDE {
-
+  void Initialize() override {
 #if defined(OS_ANDROID)
     base::i18n::AllowMultipleInitializeCallsForTesting();
     base::i18n::InitializeICU();
+
+#ifdef V8_USE_EXTERNAL_STARTUP_DATA
+    gin::IsolateHolder::LoadV8Snapshot();
+#endif
 
     // This needs to be done before base::TestSuite::Initialize() is called,
     // as it also tries to set MessagePumpForUIFactory.
@@ -91,14 +96,15 @@ class ContentBrowserTestSuite : public ContentTestSuiteBase {
 class ContentTestLauncherDelegate : public TestLauncherDelegate {
  public:
   ContentTestLauncherDelegate() {}
-  virtual ~ContentTestLauncherDelegate() {}
+  ~ContentTestLauncherDelegate() override {}
 
-  virtual int RunTestSuite(int argc, char** argv) OVERRIDE {
+  int RunTestSuite(int argc, char** argv) override {
     return ContentBrowserTestSuite(argc, argv).Run();
   }
 
-  virtual bool AdjustChildProcessCommandLine(
-      CommandLine* command_line, const base::FilePath& temp_data_dir) OVERRIDE {
+  bool AdjustChildProcessCommandLine(
+      CommandLine* command_line,
+      const base::FilePath& temp_data_dir) override {
     command_line->AppendSwitchPath(switches::kContentShellDataPath,
                                    temp_data_dir);
     command_line->AppendSwitch(switches::kUseFakeDeviceForMediaStream);
@@ -107,7 +113,7 @@ class ContentTestLauncherDelegate : public TestLauncherDelegate {
   }
 
  protected:
-  virtual ContentMainDelegate* CreateContentMainDelegate() OVERRIDE {
+  ContentMainDelegate* CreateContentMainDelegate() override {
     return new ShellMainDelegate();
   }
 

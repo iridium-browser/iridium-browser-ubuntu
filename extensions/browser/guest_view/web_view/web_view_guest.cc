@@ -31,6 +31,7 @@
 #include "content/public/common/stop_find_action.h"
 #include "content/public/common/url_constants.h"
 #include "extensions/browser/api/extensions_api_client.h"
+#include "extensions/browser/api/web_request/web_request_api.h"
 #include "extensions/browser/api/web_view/web_view_internal_api.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/guest_view/guest_view_manager.h"
@@ -130,6 +131,19 @@ void ParsePartitionParam(const base::DictionaryValue& create_params,
     *storage_partition_id = partition_str;
     *persist_storage = false;
   }
+}
+
+void RemoveWebViewEventListenersOnIOThread(
+    void* profile,
+    const std::string& extension_id,
+    int embedder_process_id,
+    int view_instance_id) {
+  DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
+  ExtensionWebRequestEventRouter::GetInstance()->RemoveWebViewEventListeners(
+      profile,
+      extension_id,
+      embedder_process_id,
+      view_instance_id);
 }
 
 }  // namespace
@@ -271,10 +285,7 @@ void WebViewGuest::DidAttachToEmbedder() {
     SetUserAgentOverride("");
   }
 
-  std::string src;
-  if (attach_params()->GetString(webview::kAttributeSrc, &src) && !src.empty())
-    NavigateGuest(src);
-
+  bool is_pending_new_window = false;
   if (GetOpener()) {
     // We need to do a navigation here if the target URL has changed between
     // the time the WebContents was created and the time it was attached.
@@ -285,14 +296,23 @@ void WebViewGuest::DidAttachToEmbedder() {
     if (it != GetOpener()->pending_new_windows_.end()) {
       const NewWindowInfo& new_window_info = it->second;
       if (new_window_info.changed || !web_contents()->HasOpener())
-        NavigateGuest(new_window_info.url.spec());
-    } else {
-      NOTREACHED();
-    }
+        NavigateGuest(new_window_info.url.spec(), false /* force_navigation */);
 
-    // Once a new guest is attached to the DOM of the embedder page, then the
-    // lifetime of the new guest is no longer managed by the opener guest.
-    GetOpener()->pending_new_windows_.erase(this);
+      // Once a new guest is attached to the DOM of the embedder page, then the
+      // lifetime of the new guest is no longer managed by the opener guest.
+      GetOpener()->pending_new_windows_.erase(this);
+
+      is_pending_new_window = true;
+    }
+  }
+
+  // Only read the src attribute if this is not a New Window API flow.
+  if (!is_pending_new_window) {
+    std::string src;
+    if (attach_params()->GetString(webview::kAttributeSrc, &src) &&
+        !src.empty()) {
+      NavigateGuest(src, false /* force_navigation */);
+    }
   }
 
   bool allow_transparency = false;
@@ -335,9 +355,19 @@ void WebViewGuest::DidStopLoading() {
       new GuestViewBase::Event(webview::kEventLoadStop, args.Pass()));
 }
 
-void WebViewGuest::EmbedderDestroyed() {
+void WebViewGuest::EmbedderWillBeDestroyed() {
   if (web_view_guest_delegate_)
-    web_view_guest_delegate_->OnEmbedderDestroyed();
+    web_view_guest_delegate_->OnEmbedderWillBeDestroyed();
+
+  content::BrowserThread::PostTask(
+      content::BrowserThread::IO,
+      FROM_HERE,
+      base::Bind(
+          &RemoveWebViewEventListenersOnIOThread,
+          browser_context(),
+          embedder_extension_id(),
+          embedder_render_process_id(),
+          view_instance_id()));
 }
 
 void WebViewGuest::GuestDestroyed() {
@@ -356,8 +386,15 @@ void WebViewGuest::GuestReady() {
   // WebContents::GetRenderWidgetHostView will return the RWHV of an
   // interstitial page if one is showing at this time. We only want opacity
   // to apply to web pages.
-  web_contents()->GetRenderViewHost()->GetView()->
-      SetBackgroundOpaque(guest_opaque_);
+  if (guest_opaque_) {
+    web_contents()
+        ->GetRenderViewHost()
+        ->GetView()
+        ->SetBackgroundColorToDefault();
+  } else {
+    web_contents()->GetRenderViewHost()->GetView()->SetBackgroundColor(
+        SK_ColorTRANSPARENT);
+  }
 }
 
 void WebViewGuest::GuestSizeChangedDueToAutoSize(const gfx::Size& old_size,
@@ -382,11 +419,6 @@ bool WebViewGuest::IsDragAndDropEnabled() const {
 void WebViewGuest::WillDestroy() {
   if (!attached() && GetOpener())
     GetOpener()->pending_new_windows_.erase(this);
-  DestroyUnattachedWindows();
-
-  scoped_ptr<base::DictionaryValue> args(new base::DictionaryValue());
-  DispatchEventToEmbedder(
-      new GuestViewBase::Event(webview::kEventPluginDestroyed, args.Pass()));
 }
 
 bool WebViewGuest::AddMessageToConsole(WebContents* source,
@@ -499,7 +531,7 @@ void WebViewGuest::CreateNewGuestWebViewWindow(
                              embedder_web_contents(),
                              create_params,
                              base::Bind(&WebViewGuest::NewGuestWebViewCallback,
-                                        base::Unretained(this),
+                                        weak_ptr_factory_.GetWeakPtr(),
                                         params));
 }
 
@@ -571,7 +603,7 @@ double WebViewGuest::GetZoom() {
   return web_view_guest_delegate_->GetZoom();
 }
 
-void WebViewGuest::Find(
+void WebViewGuest::StartFinding(
     const base::string16& search_text,
     const blink::WebFindOptions& options,
     scoped_refptr<WebViewInternalFindFunction> find_function) {
@@ -583,8 +615,13 @@ void WebViewGuest::StopFinding(content::StopFindAction action) {
   web_contents()->StopFinding(action);
 }
 
-void WebViewGuest::Go(int relative_index) {
-  web_contents()->GetController().GoToOffset(relative_index);
+bool WebViewGuest::Go(int relative_index) {
+  content::NavigationController& controller = web_contents()->GetController();
+  if (!controller.CanGoToOffset(relative_index))
+    return false;
+
+  controller.GoToOffset(relative_index);
+  return true;
 }
 
 void WebViewGuest::Reload() {
@@ -646,7 +683,8 @@ WebViewGuest::WebViewGuest(content::BrowserContext* browser_context,
       find_helper_(this),
       is_overriding_user_agent_(false),
       guest_opaque_(true),
-      javascript_dialog_helper_(this) {
+      javascript_dialog_helper_(this),
+      weak_ptr_factory_(this) {
   web_view_guest_delegate_.reset(
       ExtensionsAPIClient::Get()->CreateWebViewGuestDelegate(this));
 }
@@ -658,6 +696,8 @@ void WebViewGuest::DidCommitProvisionalLoadForFrame(
     content::RenderFrameHost* render_frame_host,
     const GURL& url,
     ui::PageTransition transition_type) {
+  if (!render_frame_host->GetParent())
+    src_ = url;
   scoped_ptr<base::DictionaryValue> args(new base::DictionaryValue());
   args->SetString(guestview::kUrl, url.spec());
   args->SetBoolean(guestview::kIsTopLevel, !render_frame_host->GetParent());
@@ -814,7 +854,7 @@ content::WebContents* WebViewGuest::CreateNewGuestWindow(
   return guest_manager->CreateGuestWithWebContentsParams(
       WebViewGuest::Type,
       embedder_extension_id(),
-      embedder_web_contents()->GetRenderProcessHost()->GetID(),
+      embedder_web_contents(),
       create_params);
 }
 
@@ -877,8 +917,12 @@ content::ColorChooser* WebViewGuest::OpenColorChooser(
       web_contents, color, suggestions);
 }
 
-void WebViewGuest::NavigateGuest(const std::string& src) {
+void WebViewGuest::NavigateGuest(const std::string& src,
+                                 bool force_navigation) {
   if (!attached())
+    return;
+
+  if (src.empty())
     return;
 
   GURL url = ResolveURL(src);
@@ -896,6 +940,8 @@ void WebViewGuest::NavigateGuest(const std::string& src) {
               net::ErrorToShortString(net::ERR_ABORTED));
     return;
   }
+  if (!force_navigation && (src_ == url))
+    return;
 
   GURL validated_url(url);
   web_contents()->GetRenderProcessHost()->FilterURL(false, &validated_url);
@@ -999,7 +1045,58 @@ void WebViewGuest::SetAllowTransparency(bool allow) {
   if (!web_contents()->GetRenderViewHost()->GetView())
     return;
 
-  web_contents()->GetRenderViewHost()->GetView()->SetBackgroundOpaque(!allow);
+  if (guest_opaque_) {
+    web_contents()
+        ->GetRenderViewHost()
+        ->GetView()
+        ->SetBackgroundColorToDefault();
+  } else {
+    web_contents()->GetRenderViewHost()->GetView()->SetBackgroundColor(
+        SK_ColorTRANSPARENT);
+  }
+}
+
+bool WebViewGuest::LoadDataWithBaseURL(const std::string& data_url,
+                                       const std::string& base_url,
+                                       const std::string& virtual_url,
+                                       std::string* error) {
+  // Make GURLs from URLs.
+  const GURL data_gurl = GURL(data_url);
+  const GURL base_gurl = GURL(base_url);
+  const GURL virtual_gurl = GURL(virtual_url);
+
+  // Check that the provided URLs are valid.
+  // |data_url| must be a valid data URL.
+  if (!data_gurl.is_valid() || !data_gurl.SchemeIs(url::kDataScheme)) {
+    base::SStringPrintf(
+        error, webview::kAPILoadDataInvalidDataURL, data_url.c_str());
+    return false;
+  }
+  // |base_url| must be a valid URL.
+  if (!base_gurl.is_valid()) {
+    base::SStringPrintf(
+        error, webview::kAPILoadDataInvalidBaseURL, base_url.c_str());
+    return false;
+  }
+  // |virtual_url| must be a valid URL.
+  if (!virtual_gurl.is_valid()) {
+    base::SStringPrintf(
+        error, webview::kAPILoadDataInvalidVirtualURL, virtual_url.c_str());
+    return false;
+  }
+
+  // Set up the parameters to load |data_url| with the specified |base_url|.
+  content::NavigationController::LoadURLParams load_params(data_gurl);
+  load_params.load_type = content::NavigationController::LOAD_TYPE_DATA;
+  load_params.base_url_for_data_url = base_gurl;
+  load_params.virtual_url_for_data_url = virtual_gurl;
+  load_params.override_user_agent =
+      content::NavigationController::UA_OVERRIDE_INHERIT;
+
+  // Navigate to the data URL.
+  web_contents()->GetController().LoadURLWithParams(load_params);
+
+  return true;
 }
 
 void WebViewGuest::AddNewContents(content::WebContents* source,
@@ -1111,24 +1208,9 @@ void WebViewGuest::RequestNewWindowPermission(
       RequestPermission(WEB_VIEW_PERMISSION_TYPE_NEW_WINDOW,
                         request_info,
                         base::Bind(&WebViewGuest::OnWebViewNewWindowResponse,
-                                   base::Unretained(this),
+                                   weak_ptr_factory_.GetWeakPtr(),
                                    guest->guest_instance_id()),
                                    false /* allowed_by_default */);
-}
-
-void WebViewGuest::DestroyUnattachedWindows() {
-  // Destroy() reaches in and removes the WebViewGuest from its opener's
-  // pending_new_windows_ set. To avoid mutating the set while iterating, we
-  // create a copy of the pending new windows set and iterate over the copy.
-  PendingWindowMap pending_new_windows(pending_new_windows_);
-  // Clean up unattached new windows opened by this guest.
-  for (PendingWindowMap::const_iterator it = pending_new_windows.begin();
-       it != pending_new_windows.end(); ++it) {
-    it->first->Destroy();
-  }
-  // All pending windows should be removed from the set after Destroy() is
-  // called on all of them.
-  DCHECK(pending_new_windows_.empty());
 }
 
 GURL WebViewGuest::ResolveURL(const std::string& src) {

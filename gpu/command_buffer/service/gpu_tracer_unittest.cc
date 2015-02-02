@@ -163,12 +163,12 @@ class BaseGpuTracerTest : public GpuServiceTest {
   }
 
  protected:
-  virtual void SetUp() {
+  void SetUp() override {
     GpuServiceTest::SetUp();
     gl_fake_queries_.Reset();
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     gl_.reset();
     gl_fake_queries_.Reset();
     GpuServiceTest::TearDown();
@@ -207,16 +207,12 @@ class BaseGpuTracerTest : public GpuServiceTest {
 
 class GpuARBTimerTracerTest : public BaseGpuTracerTest {
  protected:
-  virtual GpuTracerType GetTracerType() OVERRIDE {
-    return kTracerTypeARBTimer;
-  }
+  GpuTracerType GetTracerType() override { return kTracerTypeARBTimer; }
 };
 
 class GpuDisjointTimerTracerTest : public BaseGpuTracerTest {
  protected:
-  virtual GpuTracerType GetTracerType() OVERRIDE {
-    return kTracerTypeDisjointTimer;
-  }
+  GpuTracerType GetTracerType() override { return kTracerTypeDisjointTimer; }
 };
 
 TEST_F(GpuARBTimerTracerTest, GPUTrace) {

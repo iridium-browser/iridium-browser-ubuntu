@@ -6,13 +6,13 @@
 
 #include "base/stl_util.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/extensions/extension_warning_badge_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/global_error/global_error.h"
 #include "chrome/browser/ui/global_error/global_error_service.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
 #include "chrome/grit/generated_resources.h"
-#include "extensions/browser/extension_system.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace extensions {
@@ -24,18 +24,18 @@ namespace {
 class ErrorBadge : public GlobalError {
  public:
   explicit ErrorBadge(ExtensionWarningBadgeService* badge_service);
-  virtual ~ErrorBadge();
+  ~ErrorBadge() override;
 
   // Implementation for GlobalError:
-  virtual bool HasMenuItem() OVERRIDE;
-  virtual int MenuItemCommandID() OVERRIDE;
-  virtual base::string16 MenuItemLabel() OVERRIDE;
-  virtual void ExecuteMenuItem(Browser* browser) OVERRIDE;
+  bool HasMenuItem() override;
+  int MenuItemCommandID() override;
+  base::string16 MenuItemLabel() override;
+  void ExecuteMenuItem(Browser* browser) override;
 
-  virtual bool HasBubbleView() OVERRIDE;
-  virtual bool HasShownBubbleView() OVERRIDE;
-  virtual void ShowBubbleView(Browser* browser) OVERRIDE;
-  virtual GlobalErrorBubbleViewBase* GetBubbleView() OVERRIDE;
+  bool HasBubbleView() override;
+  bool HasShownBubbleView() override;
+  void ShowBubbleView(Browser* browser) override;
+  GlobalErrorBubbleViewBase* GetBubbleView() override;
 
   static int GetMenuItemCommandID();
 
@@ -87,13 +87,19 @@ int ErrorBadge::GetMenuItemCommandID() {
 
 }  // namespace
 
-
 ExtensionWarningBadgeService::ExtensionWarningBadgeService(Profile* profile)
-    : profile_(profile) {
+    : profile_(profile), warning_service_observer_(this) {
   DCHECK(CalledOnValidThread());
+  warning_service_observer_.Add(WarningService::Get(profile_));
 }
 
 ExtensionWarningBadgeService::~ExtensionWarningBadgeService() {}
+
+// static
+ExtensionWarningBadgeService* ExtensionWarningBadgeService::Get(
+    content::BrowserContext* context) {
+  return ExtensionWarningBadgeServiceFactory::GetForBrowserContext(context);
+}
 
 void ExtensionWarningBadgeService::SuppressCurrentWarnings() {
   DCHECK(CalledOnValidThread());
@@ -107,7 +113,7 @@ void ExtensionWarningBadgeService::SuppressCurrentWarnings() {
 }
 
 const WarningSet& ExtensionWarningBadgeService::GetCurrentWarnings() const {
-  return ExtensionSystem::Get(profile_)->warning_service()->warnings();
+  return WarningService::Get(profile_)->warnings();
 }
 
 void ExtensionWarningBadgeService::ExtensionWarningsChanged() {

@@ -20,10 +20,10 @@ class InstantServiceObserver;
 class InstantUnitTestBase : public BrowserWithTestWindowTest {
  protected:
   InstantUnitTestBase();
-  virtual ~InstantUnitTestBase();
+  ~InstantUnitTestBase() override;
 
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
 #if !defined(OS_IOS) && !defined(OS_ANDROID)
   // Query extraction is always enabled on Android and iOS.
@@ -50,7 +50,7 @@ class InstantUnitTestBase : public BrowserWithTestWindowTest {
 
  private:
   // BrowserWithTestWindowTest override:
-  virtual TestingProfile* CreateProfile() OVERRIDE;
+  TestingProfile* CreateProfile() override;
 
   void SetUpHelper();
 };

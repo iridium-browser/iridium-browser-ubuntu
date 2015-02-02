@@ -10,6 +10,7 @@
 #include "chrome/browser/autocomplete/autocomplete_controller_delegate.h"
 #include "ui/app_list/search_provider.h"
 
+class AppListControllerDelegate;
 class AutocompleteController;
 class AutocompleteResult;
 class Profile;
@@ -20,21 +21,23 @@ namespace app_list {
 class OmniboxProvider : public SearchProvider,
                         public AutocompleteControllerDelegate {
  public:
-  explicit OmniboxProvider(Profile* profile);
-  virtual ~OmniboxProvider();
+  explicit OmniboxProvider(Profile* profile,
+                           AppListControllerDelegate* list_controller);
+  ~OmniboxProvider() override;
 
   // SearchProvider overrides:
-  virtual void Start(const base::string16& query) OVERRIDE;
-  virtual void Stop() OVERRIDE;
+  void Start(const base::string16& query) override;
+  void Stop() override;
 
  private:
   // Populates result list from AutocompleteResult.
   void PopulateFromACResult(const AutocompleteResult& result);
 
   // AutocompleteControllerDelegate overrides:
-  virtual void OnResultChanged(bool default_match_changed) OVERRIDE;
+  void OnResultChanged(bool default_match_changed) override;
 
   Profile* profile_;
+  AppListControllerDelegate* list_controller_;
 
   // The omnibox AutocompleteController that collects/sorts/dup-
   // eliminates the results as they come in.

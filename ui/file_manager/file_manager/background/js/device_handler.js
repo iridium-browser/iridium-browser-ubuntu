@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
-
 /**
  * Handler of device event.
  * @constructor
@@ -192,8 +190,8 @@ DeviceHandler.Notification.prototype.showOnce = function(devicePath) {
 
 /**
  * Shows the notificaiton without using AsyncQueue.
- * @param {string} notificaitonId Notification ID.
- * @param {?message} message Message overriding the normal message.
+ * @param {string} notificationId Notification ID.
+ * @param {?string} message Message overriding the normal message.
  * @param {function()} callback Callback to be invoked when the notification is
  *     created.
  * @private
@@ -279,7 +277,7 @@ DeviceHandler.prototype.onDeviceChanged_ = function(event) {
  * @enum {string}
  * @const
  */
-DeviceHandler.MountStatus = Object.freeze({
+DeviceHandler.MountStatus = {
   // There is no mount results on the device.
   NO_RESULT: 'noResult',
   // There is no error on the device.
@@ -290,7 +288,8 @@ DeviceHandler.MountStatus = Object.freeze({
   CHILD_ERROR: 'childError',
   // There is multiple child results and at least one is failure.
   MULTIPART_ERROR: 'multipartError'
-});
+};
+Object.freeze(DeviceHandler.MountStatus);
 
 /**
  * Handles mount completed events to show notifications for removable devices.
@@ -301,14 +300,13 @@ DeviceHandler.prototype.onMountCompleted_ = function(event) {
   // If this is remounting, which happens when resuming ChromeOS, the device has
   // already inserted to the computer. So we suppress the notification.
   var volume = event.volumeMetadata;
-  if (!volume.deviceType || !event.shouldNotify)
+  if (!volume.deviceType || !volume.devicePath || !event.shouldNotify)
     return;
 
   // If the current volume status is succeed and it should be handled in
   // Files.app, show the notification to navigate the volume.
   if (event.eventType === 'mount' && event.status === 'success') {
-    DeviceHandler.Notification.DEVICE_NAVIGATION.show(
-        event.volumeMetadata.devicePath);
+    DeviceHandler.Notification.DEVICE_NAVIGATION.show(volume.devicePath);
   } else if (event.eventType === 'unmount') {
     DeviceHandler.Notification.DEVICE_NAVIGATION.hide(volume.devicePath);
   }

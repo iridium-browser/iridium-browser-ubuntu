@@ -23,21 +23,20 @@ class LanguageOptionsHandlerCommon
       public SpellcheckHunspellDictionary::Observer {
  public:
   LanguageOptionsHandlerCommon();
-  virtual ~LanguageOptionsHandlerCommon();
+  ~LanguageOptionsHandlerCommon() override;
 
   // OptionsPageUIHandler implementation.
-  virtual void GetLocalizedValues(
-      base::DictionaryValue* localized_strings) OVERRIDE;
-  virtual void Uninitialize() OVERRIDE;
+  void GetLocalizedValues(base::DictionaryValue* localized_strings) override;
+  void Uninitialize() override;
 
   // DOMMessageHandler implementation.
-  virtual void RegisterMessages() OVERRIDE;
+  void RegisterMessages() override;
 
   // SpellcheckHunspellDictionary::Observer implementation.
-  virtual void OnHunspellDictionaryInitialized() OVERRIDE;
-  virtual void OnHunspellDictionaryDownloadBegin() OVERRIDE;
-  virtual void OnHunspellDictionaryDownloadSuccess() OVERRIDE;
-  virtual void OnHunspellDictionaryDownloadFailure() OVERRIDE;
+  void OnHunspellDictionaryInitialized() override;
+  void OnHunspellDictionaryDownloadBegin() override;
+  void OnHunspellDictionaryDownloadSuccess() override;
+  void OnHunspellDictionaryDownloadFailure() override;
 
   // The following static methods are public for ease of testing.
 

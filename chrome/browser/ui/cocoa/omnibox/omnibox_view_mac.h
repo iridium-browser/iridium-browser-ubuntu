@@ -26,76 +26,73 @@ class OmniboxViewMac : public OmniboxView,
                  Profile* profile,
                  CommandUpdater* command_updater,
                  AutocompleteTextField* field);
-  virtual ~OmniboxViewMac();
+  ~OmniboxViewMac() override;
 
   // OmniboxView:
-  virtual void SaveStateToTab(content::WebContents* tab) OVERRIDE;
-  virtual void OnTabChanged(const content::WebContents* web_contents) OVERRIDE;
-  virtual void Update() OVERRIDE;
-  virtual void UpdatePlaceholderText() OVERRIDE;
-  virtual void OpenMatch(const AutocompleteMatch& match,
-                         WindowOpenDisposition disposition,
-                         const GURL& alternate_nav_url,
-                         const base::string16& pasted_text,
-                         size_t selected_line) OVERRIDE;
-  virtual base::string16 GetText() const OVERRIDE;
-  virtual void SetWindowTextAndCaretPos(const base::string16& text,
-                                        size_t caret_pos,
-                                        bool update_popup,
-                                        bool notify_text_changed) OVERRIDE;
-  virtual void SetForcedQuery() OVERRIDE;
-  virtual bool IsSelectAll() const OVERRIDE;
-  virtual bool DeleteAtEndPressed() OVERRIDE;
-  virtual void GetSelectionBounds(
-      base::string16::size_type* start,
-      base::string16::size_type* end) const OVERRIDE;
-  virtual void SelectAll(bool reversed) OVERRIDE;
-  virtual void RevertAll() OVERRIDE;
-  virtual void UpdatePopup() OVERRIDE;
-  virtual void CloseOmniboxPopup() OVERRIDE;
-  virtual void SetFocus() OVERRIDE;
-  virtual void ApplyCaretVisibility() OVERRIDE;
-  virtual void OnTemporaryTextMaybeChanged(
-      const base::string16& display_text,
-      bool save_original_selection,
-      bool notify_text_changed) OVERRIDE;
-  virtual bool OnInlineAutocompleteTextMaybeChanged(
-      const base::string16& display_text, size_t user_text_length) OVERRIDE;
-  virtual void OnInlineAutocompleteTextCleared() OVERRIDE;
-  virtual void OnRevertTemporaryText() OVERRIDE;
-  virtual void OnBeforePossibleChange() OVERRIDE;
-  virtual bool OnAfterPossibleChange() OVERRIDE;
-  virtual gfx::NativeView GetNativeView() const OVERRIDE;
-  virtual gfx::NativeView GetRelativeWindowForPopup() const OVERRIDE;
-  virtual void SetGrayTextAutocompletion(const base::string16& input) OVERRIDE;
-  virtual base::string16 GetGrayTextAutocompletion() const OVERRIDE;
-  virtual int GetTextWidth() const OVERRIDE;
-  virtual int GetWidth() const OVERRIDE;
-  virtual bool IsImeComposing() const OVERRIDE;
+  void SaveStateToTab(content::WebContents* tab) override;
+  void OnTabChanged(const content::WebContents* web_contents) override;
+  void Update() override;
+  void UpdatePlaceholderText() override;
+  void OpenMatch(const AutocompleteMatch& match,
+                 WindowOpenDisposition disposition,
+                 const GURL& alternate_nav_url,
+                 const base::string16& pasted_text,
+                 size_t selected_line) override;
+  base::string16 GetText() const override;
+  void SetWindowTextAndCaretPos(const base::string16& text,
+                                size_t caret_pos,
+                                bool update_popup,
+                                bool notify_text_changed) override;
+  void SetForcedQuery() override;
+  bool IsSelectAll() const override;
+  bool DeleteAtEndPressed() override;
+  void GetSelectionBounds(base::string16::size_type* start,
+                          base::string16::size_type* end) const override;
+  void SelectAll(bool reversed) override;
+  void RevertAll() override;
+  void UpdatePopup() override;
+  void CloseOmniboxPopup() override;
+  void SetFocus() override;
+  void ApplyCaretVisibility() override;
+  void OnTemporaryTextMaybeChanged(const base::string16& display_text,
+                                   bool save_original_selection,
+                                   bool notify_text_changed) override;
+  bool OnInlineAutocompleteTextMaybeChanged(const base::string16& display_text,
+                                            size_t user_text_length) override;
+  void OnInlineAutocompleteTextCleared() override;
+  void OnRevertTemporaryText() override;
+  void OnBeforePossibleChange() override;
+  bool OnAfterPossibleChange() override;
+  gfx::NativeView GetNativeView() const override;
+  gfx::NativeView GetRelativeWindowForPopup() const override;
+  void SetGrayTextAutocompletion(const base::string16& input) override;
+  base::string16 GetGrayTextAutocompletion() const override;
+  int GetTextWidth() const override;
+  int GetWidth() const override;
+  bool IsImeComposing() const override;
 
   // Implement the AutocompleteTextFieldObserver interface.
-  virtual NSRange SelectionRangeForProposedRange(
-      NSRange proposed_range) OVERRIDE;
-  virtual void OnControlKeyChanged(bool pressed) OVERRIDE;
-  virtual bool CanCopy() OVERRIDE;
-  virtual void CopyToPasteboard(NSPasteboard* pboard) OVERRIDE;
-  virtual bool ShouldEnableShowURL() OVERRIDE;
-  virtual void ShowURL() OVERRIDE;
-  virtual void OnPaste() OVERRIDE;
-  virtual bool CanPasteAndGo() OVERRIDE;
-  virtual int GetPasteActionStringId() OVERRIDE;
-  virtual void OnPasteAndGo() OVERRIDE;
-  virtual void OnFrameChanged() OVERRIDE;
-  virtual void ClosePopup() OVERRIDE;
-  virtual void OnDidBeginEditing() OVERRIDE;
-  virtual void OnBeforeChange() OVERRIDE;
-  virtual void OnDidChange() OVERRIDE;
-  virtual void OnDidEndEditing() OVERRIDE;
-  virtual bool OnDoCommandBySelector(SEL cmd) OVERRIDE;
-  virtual void OnSetFocus(bool control_down) OVERRIDE;
-  virtual void OnKillFocus() OVERRIDE;
-  virtual void OnMouseDown(NSInteger button_number) OVERRIDE;
-  virtual bool ShouldSelectAllOnMouseDown() OVERRIDE;
+  NSRange SelectionRangeForProposedRange(NSRange proposed_range) override;
+  void OnControlKeyChanged(bool pressed) override;
+  bool CanCopy() override;
+  void CopyToPasteboard(NSPasteboard* pboard) override;
+  bool ShouldEnableShowURL() override;
+  void ShowURL() override;
+  void OnPaste() override;
+  bool CanPasteAndGo() override;
+  int GetPasteActionStringId() override;
+  void OnPasteAndGo() override;
+  void OnFrameChanged() override;
+  void ClosePopup() override;
+  void OnDidBeginEditing() override;
+  void OnBeforeChange() override;
+  void OnDidChange() override;
+  void OnDidEndEditing() override;
+  bool OnDoCommandBySelector(SEL cmd) override;
+  void OnSetFocus(bool control_down) override;
+  void OnKillFocus() override;
+  void OnMouseDown(NSInteger button_number) override;
+  bool ShouldSelectAllOnMouseDown() override;
 
   // Helper for LocationBarViewMac.  Optionally selects all in |field_|.
   void FocusLocation(bool select_all);
@@ -154,7 +151,7 @@ class OmniboxViewMac : public OmniboxView,
   // Pass the current content of |field_| to SetText(), maintaining
   // any selection.  Named to be consistent with GTK and Windows,
   // though here we cannot really do the in-place operation they do.
-  virtual void EmphasizeURLComponents() OVERRIDE;
+  void EmphasizeURLComponents() override;
 
   // Calculates text attributes according to |display_text| and applies them
   // to the given |as| object.
@@ -163,7 +160,7 @@ class OmniboxViewMac : public OmniboxView,
 
   // Return the number of UTF-16 units in the current buffer, excluding the
   // suggested text.
-  virtual int GetOmniboxTextLength() const OVERRIDE;
+  int GetOmniboxTextLength() const override;
   NSUInteger GetTextLength() const;
 
   // Returns true if the caret is at the end of the content.

@@ -69,28 +69,30 @@ This directory contains the source code of ICU 52.1 for C/C++
 
 
    - android/brkitr.patch (to be applied for Android build only) :
-       Reverts some changes about Chinese/Japanese segmentation rules in
-       patches/brkitr.patch to reduce binary size for Android.
+       Do not use the C+J dictionary for Chinese/Japanese segmentation
+       to reduce the data size. Adjust word.txt and a few other files.
+
+   - source/data/brkitr/word_ja.txt (used only on Android)
+       Added for Japanese-specific word-breaking without the C+J dictionary.
 
 4. Converter changes :
 
-  - converters.patch :
-     a. revises existing mapping tables
-     b. Remove a lot of unused aliases in the converter alias table
-        (source/data/mappings/convrtrs.txt ) leading to 40kB size reduction.
+  - convrtrs.txt : Replaced the original by our own that only lists encodings
+    and aliases required by the WHATWG Encoding spec plus a few extra (see
+    the file as to why).
 
   - Add source/data/mappings/ucmlocal.txt : to list only converters we need.
-  - Add three new tables per WHATWG encoding standards for EUC-JP,
-    Shift_JIS and CP866.
-    They're generated with scripts/{eucjp, sjis, ibm866}_gen.sh.
-  - Add three 'fake' tables for ISO-2022-CN(-Ext) : noop-*.ucm.
+
+  - Add new tables per the WHATWG encoding standards for EUC-JP,
+    Shift_JIS and all the single byte encodings.
+    They're generated with scripts : scripts/{eucjp, sjis, single_byte}_gen.sh
 
   - uconv.patch
-    a. ucnv2022 uses 3 fake tables for ISO-2022-CN(-Ext) instead of two
-       huge tables.
-    b. ISO-2022-JP-[1-4] is dropped.
-    c. SCSU, BOCU, ISCII, UTF-7 conversion is diabled leading to
-       the 47kB reduction in the code size.
+    a. ISO-2022-JP-[1-4] is dropped.
+    b. SCSU, BOCU, ISCII, UTF-7, LMB, ibm42*, ISO-2022-{KR,CN*} and HZ-GB  :
+       converters and detectors are dropped leading to the ~100kB reduction
+       in the code size.
+
 
 5. Locale changes
   - patches/locale1.patch :
@@ -236,3 +238,16 @@ This directory contains the source code of ICU 52.1 for C/C++
 11. Cherry-pick an upstream patch to fix a bug in bidi.
     - patches/bidi.patch
     - upstream bug : http://bugs.icu-project.org/trac/ticket/11054
+
+12. Apply the following patches for regex
+   - patches/regex.patch and patches/regex2.patch
+   - upstream bugs : http://bugs.icu-project.org/trac/ticket/11369
+                     http://bugs.icu-project.org/trac/ticket/11370
+                     http://bugs.icu-project.org/trac/ticket/11371
+
+13. Apply the patch for collator
+   - patches/col.patch
+   - No upstream bug filed because the upstream code was completely
+     rewritten during the ICU 53 cycle.
+
+

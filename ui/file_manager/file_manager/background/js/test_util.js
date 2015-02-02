@@ -58,17 +58,17 @@ test.util.async.openMainWindow = function(appState, callback) {
  */
 test.util.sync.getWindows = function() {
   var windows = {};
-  for (var id in background.appWindows) {
-    var windowWrapper = background.appWindows[id];
+  for (var id in window.background.appWindows) {
+    var windowWrapper = window.background.appWindows[id];
     windows[id] = {
       outerWidth: windowWrapper.contentWindow.outerWidth,
       outerHeight: windowWrapper.contentWindow.outerHeight
     };
   }
-  for (var id in background.dialogs) {
+  for (var id in window.background.dialogs) {
     windows[id] = {
-      outerWidth: background.dialogs[id].outerWidth,
-      outerHeight: background.dialogs[id].outerHeight
+      outerWidth: window.background.dialogs[id].outerWidth,
+      outerHeight: window.background.dialogs[id].outerHeight
     };
   }
   return windows;
@@ -81,9 +81,9 @@ test.util.sync.getWindows = function() {
  * @return {boolean} Result: True if success, false otherwise.
  */
 test.util.sync.closeWindow = function(appId) {
-  if (appId in background.appWindows &&
-      background.appWindows[appId].contentWindow) {
-    background.appWindows[appId].close();
+  if (appId in window.background.appWindows &&
+      window.background.appWindows[appId].contentWindow) {
+    window.background.appWindows[appId].close();
     return true;
   }
   return false;
@@ -94,16 +94,17 @@ test.util.sync.closeWindow = function(appId) {
  *
  * @param {Window} contentWindow Window to be used.
  * @param {string=} opt_iframeQuery Query for the iframe.
- * @return {Document=} Returns the found document or undefined if not found.
+ * @return {Document} Returns the found document or null if not found.
  * @private
  */
 test.util.sync.getDocument_ = function(contentWindow, opt_iframeQuery) {
   if (opt_iframeQuery) {
     var iframe = contentWindow.document.querySelector(opt_iframeQuery);
-    return iframe && iframe.contentWindow && iframe.contentWindow.document;
+    var doc = iframe && iframe.contentWindow && iframe.contentWindow.document;
+    return doc ? doc : null;
   }
 
-  return contentWindow.document;
+  return contentWindow.document ? contentWindow.document : null;
 };
 
 /**
@@ -111,9 +112,9 @@ test.util.sync.getDocument_ = function(contentWindow, opt_iframeQuery) {
  * @return {number} Error count.
  */
 test.util.sync.getErrorCount = function() {
-  var totalCount = JSErrorCount;
-  for (var appId in background.appWindows) {
-    var contentWindow = background.appWindows[appId].contentWindow;
+  var totalCount = window.JSErrorCount;
+  for (var appId in window.background.appWindows) {
+    var contentWindow = window.background.appWindows[appId].contentWindow;
     if (contentWindow.JSErrorCount)
       totalCount += contentWindow.JSErrorCount;
   }
@@ -129,7 +130,7 @@ test.util.sync.getErrorCount = function() {
  * @return {boolean} True for success.
  */
 test.util.sync.resizeWindow = function(contentWindow, width, height) {
-  background.appWindows[contentWindow.appID].resizeTo(width, height);
+  window.background.appWindows[contentWindow.appID].resizeTo(width, height);
   return true;
 };
 
@@ -190,7 +191,8 @@ test.util.sync.getFileList = function(contentWindow) {
  */
 test.util.sync.queryAllElements = function(
     contentWindow, targetQuery, iframeQuery, opt_styleNames) {
-  var doc = test.util.sync.getDocument_(contentWindow, iframeQuery);
+  var doc = test.util.sync.getDocument_(
+      contentWindow, iframeQuery || undefined);
   if (!doc)
     return [];
   // The return value of querySelectorAll is not an array.
@@ -332,7 +334,7 @@ test.util.async.executeScriptInWebView = function(
  *
  * @param {Window} contentWindow Window to be tested.
  * @param {string} targetQuery Query to specify the element.
- * @param {Event} event Event to be sent.
+ * @param {!Event} event Event to be sent.
  * @param {string=} opt_iframeQuery Optional iframe selector.
  * @return {boolean} True if the event is sent to the target, false otherwise.
  */
@@ -364,7 +366,8 @@ test.util.sync.fakeEvent = function(contentWindow,
                                     targetQuery,
                                     eventType,
                                     opt_additionalProperties) {
-  var event = new Event(eventType, opt_additionalProperties || {});
+  var event = new Event(eventType,
+      /** @type {!EventInit} */ (opt_additionalProperties || {}));
   if (opt_additionalProperties) {
     for (var name in opt_additionalProperties) {
       event[name] = opt_additionalProperties[name];
@@ -562,7 +565,7 @@ test.util.sync.overrideInstallWebstoreItemApi =
     function(contentWindow, expectedItemId, intendedError) {
   var setLastError = function(message) {
     contentWindow.chrome.runtime.lastError =
-        message ? {message: message} : null;
+        message ? {message: message} : undefined;
   };
 
   var installWebstoreItem = function(itemId, silentInstallation, callback) {
@@ -575,7 +578,7 @@ test.util.sync.overrideInstallWebstoreItemApi =
 
       setLastError(intendedError);
       callback();
-    });
+    }, 0);
   };
 
   test.util.executedTasks_ = [];
@@ -597,7 +600,7 @@ test.util.sync.overrideTasks = function(contentWindow, taskList) {
     // Call onTask asynchronously (same with original getFileTasks).
     setTimeout(function() {
       onTasks(taskList);
-    });
+    }, 0);
   };
 
   var executeTask = function(taskId, url) {
@@ -655,7 +658,7 @@ test.util.sync.runVisitDesktopMenu = function(contentWindow, profileId) {
   for (var i = 0; i < list.length; ++i) {
     if (list[i].label.indexOf(profileId) != -1) {
       var activateEvent = contentWindow.document.createEvent('Event');
-      activateEvent.initEvent('activate');
+      activateEvent.initEvent('activate', false, false);
       list[i].dispatchEvent(activateEvent);
       return true;
     }
@@ -664,14 +667,56 @@ test.util.sync.runVisitDesktopMenu = function(contentWindow, profileId) {
 };
 
 /**
+ * Calls the unload handler for the window.
+ * @param {Window} contentWindow Window to be tested.
+ */
+test.util.sync.unload = function(contentWindow) {
+  contentWindow.fileManager.onUnload_();
+};
+
+/**
+ * Obtains the path which is shown in the breadcrumb.
+ *
+ * @param {Window} contentWindow Window to be tested.
+ * @return {string} Path which is shown in the breadcrumb.
+ */
+test.util.sync.getBreadcrumbPath = function(contentWindow) {
+  var breadcrumb = contentWindow.document.querySelector(
+      '#location-breadcrumbs');
+  var paths = breadcrumb.querySelectorAll('.breadcrumb-path');
+
+  var path = '';
+  for(var i = 0; i < paths.length; i++) {
+    path += '/' + paths[i].textContent;
+  }
+  return path;
+};
+
+/**
+ * Obtains the list of notification ID.
+ * @param {function(Object.<string, boolean>)} callback Callback function with
+ *     results returned by the script.
+ */
+test.util.async.getNotificationIDs = function(callback) {
+  chrome.notifications.getAll(callback);
+};
+
+/**
+ * Obtains the preferences.
+ * @param {function(Object)} callback Callback function with results returned by
+ *     the script.
+ */
+test.util.async.getPreferences = function(callback) {
+  chrome.fileManagerPrivate.getPreferences(callback);
+};
+
+/**
  * Registers message listener, which runs test utility functions.
  */
 test.util.registerRemoteTestUtils = function() {
-  // Register the message listener.
-  var onMessage = chrome.runtime ? chrome.runtime.onMessageExternal :
-      chrome.extension.onMessageExternal;
   // Return true for asynchronous functions and false for synchronous.
-  onMessage.addListener(function(request, sender, sendResponse) {
+  chrome.runtime.onMessageExternal.addListener(
+      function(request, sender, sendResponse) {
     // Check the sender.
     if (sender.id != test.util.TESTING_EXTENSION_ID) {
       console.error('The testing extension must be white-listed.');
@@ -687,10 +732,10 @@ test.util.registerRemoteTestUtils = function() {
     // Prepare arguments.
     var args = request.args.slice();  // shallow copy
     if (request.appId) {
-      if (background.appWindows[request.appId]) {
-        args.unshift(background.appWindows[request.appId].contentWindow);
-      } else if (background.dialogs[request.appId]) {
-        args.unshift(background.dialogs[request.appId]);
+      if (window.background.appWindows[request.appId]) {
+        args.unshift(window.background.appWindows[request.appId].contentWindow);
+      } else if (window.background.dialogs[request.appId]) {
+        args.unshift(window.background.dialogs[request.appId]);
       } else {
         console.error('Specified window not found: ' + request.appId);
         return false;

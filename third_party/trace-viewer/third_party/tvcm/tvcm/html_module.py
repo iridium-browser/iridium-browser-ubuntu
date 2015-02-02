@@ -24,8 +24,10 @@ class HTMLModule(module.Module):
       parser_results = parse_html_deps.HTMLModuleParser().Parse(self.contents)
     except Exception, ex:
       raise Exception('While parsing %s: %s' % (self.name, str(ex)))
+
     self.dependency_metadata = Parse(self.loader,
                                      self.name, self._module_dir_name,
+                                     self.isComponent(),
                                      parser_results)
     self._parser_results = parser_results
 
@@ -34,14 +36,14 @@ class HTMLModule(module.Module):
 
     reachable_names = set([m.name
                            for m in self.all_dependent_modules_recursive])
-    if 'tvcm.exportTo' in self.contents:
-      if 'tvcm' not in reachable_names:
-        raise Exception('%s:7:Does not have a dependency on tvcm' % os.path.relpath(self.resource.absolute_path))
+    if 'tv.exportTo' in self.contents:
+      if 'base' not in reachable_names:
+        raise Exception('%s: Does not have a dependency on base' % os.path.relpath(self.resource.absolute_path))
 
     """
-    if 'tvcm.unittest.testSuite' in self.contents:
-      if 'tvcm.unittest' not in reachable_names:
-        raise Exception('%s:7:Does not have a dependency on tvcm.unittest' % os.path.relpath(self.resource.absolute_path))
+    if 'tv.unittest.testSuite' in self.contents:
+      if 'tv.unittest' not in reachable_names:
+        raise Exception('%s: Does not have a dependency on tv.unittest' % os.path.relpath(self.resource.absolute_path))
     """
 
   def GetTVCMDepsModuleType(self):
@@ -158,11 +160,13 @@ def _HRefToResource(loader, module_name, module_dir_name, href, tag_for_err_msg)
   return resource
 
 
-def Parse(loader, module_name, module_dir_name, parser_results):
+def Parse(loader, module_name, module_dir_name, is_component, parser_results):
+  res = module.ModuleDependencyMetadata()
+  if is_component:
+    return res
+
   if parser_results.has_decl == False:
     raise Exception('%s must have <!DOCTYPE html>' % module_name)
-
-  res = module.ModuleDependencyMetadata()
 
   # External script references..
   for href in parser_results.scripts_external:

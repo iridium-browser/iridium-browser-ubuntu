@@ -42,17 +42,17 @@ class QuotaPolicyChannelIDStore
           special_storage_policy);
 
   // net::DefaultChannelIDStore::PersistentStore:
-  virtual void Load(const LoadedCallback& loaded_callback) OVERRIDE;
-  virtual void AddChannelID(
-      const net::DefaultChannelIDStore::ChannelID& channel_id) OVERRIDE;
-  virtual void DeleteChannelID(
-      const net::DefaultChannelIDStore::ChannelID& channel_id) OVERRIDE;
-  virtual void SetForceKeepSessionState() OVERRIDE;
+  void Load(const LoadedCallback& loaded_callback) override;
+  void AddChannelID(
+      const net::DefaultChannelIDStore::ChannelID& channel_id) override;
+  void DeleteChannelID(
+      const net::DefaultChannelIDStore::ChannelID& channel_id) override;
+  void SetForceKeepSessionState() override;
 
  private:
   typedef ScopedVector<net::DefaultChannelIDStore::ChannelID> ChannelIDVector;
 
-  virtual ~QuotaPolicyChannelIDStore();
+  ~QuotaPolicyChannelIDStore() override;
 
   void OnLoad(const LoadedCallback& loaded_callback,
               scoped_ptr<ChannelIDVector> channel_ids);

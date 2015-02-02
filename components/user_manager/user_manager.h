@@ -51,6 +51,9 @@ class USER_MANAGER_EXPORT UserManager {
     // on user_id hash would be accessing up-to-date value.
     virtual void ActiveUserHashChanged(const std::string& hash);
 
+    // Called when supervised status has changed.
+    virtual void UserChangedSupervisedStatus(User* user);
+
    protected:
     virtual ~UserSessionStateObserver();
   };
@@ -105,13 +108,13 @@ class USER_MANAGER_EXPORT UserManager {
   // is sorted by last login date with the most recent user at the beginning.
   virtual const UserList& GetUsers() const = 0;
 
-  // Returns list of users admitted for logging in into multi-profile session.
+  // Returns list of users allowed for logging in into multi-profile session.
   // Users that have a policy that prevents them from being added to the
   // multi-profile session will still be part of this list as long as they
   // are regular users (i.e. not a public session/supervised etc.).
   // Returns an empty list in case when primary user is not a regular one or
   // has a policy that prohibids it to be part of multi-profile session.
-  virtual UserList GetUsersAdmittedForMultiProfile() const = 0;
+  virtual UserList GetUsersAllowedForMultiProfile() const = 0;
 
   // Returns a list of users who are currently logged in.
   virtual const UserList& GetLoggedInUsers() const = 0;
@@ -290,11 +293,12 @@ class USER_MANAGER_EXPORT UserManager {
 
   virtual void NotifyLocalStateChanged() = 0;
 
+  // Makes the supervised status change and notifies observers.
+  virtual void ChangeUserSupervisedStatus(User* user, bool is_supervised) = 0;
+
+
   // Returns true if supervised users allowed.
   virtual bool AreSupervisedUsersAllowed() const = 0;
-
-  // Force update login state.
-  virtual void ForceUpdateState() {}
 
  protected:
   // Sets UserManager instance.

@@ -22,6 +22,7 @@
 #include "base/threading/thread.h"
 #include "base/threading/worker_pool.h"
 #include "base/time/default_clock.h"
+#include "base/timer/timer.h"
 #include "base/values.h"
 #include "google_apis/gcm/base/fake_encryptor.h"
 #include "google_apis/gcm/base/mcs_message.h"
@@ -139,7 +140,7 @@ class MyTestURLRequestContext : public net::TestURLRequestContext {
     Init();
   }
 
-  virtual ~MyTestURLRequestContext() {}
+  ~MyTestURLRequestContext() override {}
 };
 
 class MyTestURLRequestContextGetter : public net::TestURLRequestContextGetter {
@@ -148,7 +149,7 @@ class MyTestURLRequestContextGetter : public net::TestURLRequestContextGetter {
       const scoped_refptr<base::MessageLoopProxy>& io_message_loop_proxy)
       : TestURLRequestContextGetter(io_message_loop_proxy) {}
 
-  virtual net::TestURLRequestContext* GetURLRequestContext() OVERRIDE {
+  net::TestURLRequestContext* GetURLRequestContext() override {
     // Construct |context_| lazily so it gets constructed on the right
     // thread (the IO thread).
     if (!context_)
@@ -157,38 +158,29 @@ class MyTestURLRequestContextGetter : public net::TestURLRequestContextGetter {
   }
 
  private:
-  virtual ~MyTestURLRequestContextGetter() {}
+  ~MyTestURLRequestContextGetter() override {}
 
   scoped_ptr<MyTestURLRequestContext> context_;
-};
-
-// A net log that logs all events by default.
-class MyTestNetLog : public net::NetLog {
- public:
-  MyTestNetLog() {
-    SetBaseLogLevel(LOG_ALL);
-  }
-  virtual ~MyTestNetLog() {}
 };
 
 // A cert verifier that access all certificates.
 class MyTestCertVerifier : public net::CertVerifier {
  public:
   MyTestCertVerifier() {}
-  virtual ~MyTestCertVerifier() {}
+  ~MyTestCertVerifier() override {}
 
-  virtual int Verify(net::X509Certificate* cert,
-                     const std::string& hostname,
-                     int flags,
-                     net::CRLSet* crl_set,
-                     net::CertVerifyResult* verify_result,
-                     const net::CompletionCallback& callback,
-                     RequestHandle* out_req,
-                     const net::BoundNetLog& net_log) OVERRIDE {
+  int Verify(net::X509Certificate* cert,
+             const std::string& hostname,
+             int flags,
+             net::CRLSet* crl_set,
+             net::CertVerifyResult* verify_result,
+             const net::CompletionCallback& callback,
+             RequestHandle* out_req,
+             const net::BoundNetLog& net_log) override {
     return net::OK;
   }
 
-  virtual void CancelRequest(RequestHandle req) OVERRIDE {
+  void CancelRequest(RequestHandle req) override {
     // Do nothing.
   }
 };
@@ -229,9 +221,8 @@ class MCSProbe {
 
   // Network state.
   scoped_refptr<net::URLRequestContextGetter> url_request_context_getter_;
-  MyTestNetLog net_log_;
+  net::NetLog net_log_;
   scoped_ptr<net::NetLogLogger> logger_;
-  scoped_ptr<base::Value> net_constants_;
   scoped_ptr<net::HostResolver> host_resolver_;
   scoped_ptr<net::CertVerifier> cert_verifier_;
   scoped_ptr<net::ChannelIDService> system_channel_id_service_;
@@ -314,7 +305,9 @@ void MCSProbe::Start() {
                                   &clock_,
                                   connection_factory_.get(),
                                   gcm_store_.get(),
-                                  &recorder_));
+                                  &recorder_,
+                                  make_scoped_ptr(new base::Timer(true,
+                                                                  false))));
   run_loop_.reset(new base::RunLoop());
   gcm_store_->Load(base::Bind(&MCSProbe::LoadCallback,
                               base::Unretained(this)));
@@ -364,9 +357,10 @@ void MCSProbe::InitializeNetworkState() {
     log_file = fopen(log_path.value().c_str(), "w");
 #endif
   }
-  net_constants_.reset(net::NetLogLogger::GetConstants());
   if (log_file != NULL) {
-    logger_.reset(new net::NetLogLogger(log_file, *net_constants_));
+    scoped_ptr<base::Value> net_constants(net::NetLogLogger::GetConstants());
+    logger_.reset(new net::NetLogLogger(log_file, *net_constants));
+    logger_->set_log_level(net::NetLog::LOG_ALL_BUT_BYTES);
     logger_->StartObserving(&net_log_);
   }
 

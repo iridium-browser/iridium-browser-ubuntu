@@ -31,7 +31,7 @@ class DownloadTestFileActivityObserver::MockDownloadManagerDelegate
           content::DownloadItem::kInvalidId + 1);
   }
 
-  virtual ~MockDownloadManagerDelegate() {}
+  ~MockDownloadManagerDelegate() override {}
 
   void EnableFileChooser(bool enable) {
     file_chooser_enabled_ = enable;
@@ -48,18 +48,17 @@ class DownloadTestFileActivityObserver::MockDownloadManagerDelegate
   }
 
  protected:
-
-  virtual void PromptUserForDownloadPath(content::DownloadItem* item,
-                                         const base::FilePath& suggested_path,
-                                         const FileSelectedCallback&
-                                             callback) OVERRIDE {
+  void PromptUserForDownloadPath(
+      content::DownloadItem* item,
+      const base::FilePath& suggested_path,
+      const FileSelectedCallback& callback) override {
     file_chooser_displayed_ = true;
     base::MessageLoop::current()->PostTask(
         FROM_HERE, base::Bind(callback, (file_chooser_enabled_ ? suggested_path
                                          : base::FilePath())));
   }
 
-  virtual void OpenDownload(content::DownloadItem* item) OVERRIDE {}
+  void OpenDownload(content::DownloadItem* item) override {}
 
  private:
   bool file_chooser_enabled_;
@@ -72,9 +71,8 @@ DownloadTestFileActivityObserver::DownloadTestFileActivityObserver(
   scoped_ptr<MockDownloadManagerDelegate> mock_delegate(
       new MockDownloadManagerDelegate(profile));
   test_delegate_ = mock_delegate->GetWeakPtr();
-  DownloadServiceFactory::GetForBrowserContext(profile)->
-      SetDownloadManagerDelegateForTesting(
-          mock_delegate.PassAs<ChromeDownloadManagerDelegate>());
+  DownloadServiceFactory::GetForBrowserContext(profile)
+      ->SetDownloadManagerDelegateForTesting(mock_delegate.Pass());
 }
 
 DownloadTestFileActivityObserver::~DownloadTestFileActivityObserver() {

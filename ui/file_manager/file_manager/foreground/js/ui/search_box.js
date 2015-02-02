@@ -2,59 +2,102 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
-
 /**
  * Search box.
  *
- * @param {element} element Root element of the search box.
+ * @param {Element} element Root element of the search box.
+ * @param {Element} searchButton Search button.
+ * @param {Element} noResultMessage Message element for the empty result.
+ * @extends {cr.EventTarget}
  * @constructor
  */
-function SearchBox(element) {
+function SearchBox(element, searchButton, noResultMessage) {
+  cr.EventTarget.call(this);
+
   /**
    * Autocomplete List.
-   * @type {AutocompleteList}
+   * @type {!SearchBox.AutocompleteList}
    */
   this.autocompleteList = new SearchBox.AutocompleteList(element.ownerDocument);
 
   /**
    * Root element of the search box.
-   * @type {HTMLElement}
+   * @type {Element}
    */
   this.element = element;
 
   /**
-   * Text input of the search box.
-   * @type {HTMLElement}
+   * Search button.
+   * @type {Element}
    */
-  this.inputElement = element.querySelector('input');
+  this.searchButton = searchButton;
+
+  /**
+   * No result message.
+   * @type {Element}
+   */
+  this.noResultMessage = noResultMessage;
+
+  /**
+   * Text input of the search box.
+   * @type {!HTMLInputElement}
+   */
+  this.inputElement = /** @type {!HTMLInputElement} */ (
+      element.querySelector('input'));
 
   /**
    * Clear button of the search box.
-   * @type {HTMLElement}
+   * @type {Element}
    */
   this.clearButton = element.querySelector('.clear');
 
-  Object.freeze(this);
-
   // Register events.
-  this.inputElement.addEventListener('input', this.updateStyles_.bind(this));
+  this.inputElement.addEventListener('input', this.onInput_.bind(this));
   this.inputElement.addEventListener('keydown', this.onKeyDown_.bind(this));
   this.inputElement.addEventListener('focus', this.onFocus_.bind(this));
   this.inputElement.addEventListener('blur', this.onBlur_.bind(this));
-  this.inputElement.ownerDocument.addEventListener('dragover',
-                                                   this.onDragEnter_.bind(this),
-                                                   true);
-  this.inputElement.ownerDocument.addEventListener('dragend',
-                                                   this.onDragEnd_.bind(this),
-                                                   true);
+  this.inputElement.ownerDocument.addEventListener(
+      'dragover',
+      this.onDragEnter_.bind(this),
+      true);
+  this.inputElement.ownerDocument.addEventListener(
+      'dragend',
+      this.onDragEnd_.bind(this));
+  this.searchButton.addEventListener(
+      'click',
+      this.onSearchButtonClick_.bind(this));
+  this.clearButton.addEventListener(
+      'click',
+      this.onClearButtonClick_.bind(this));
+  var dispatchItemSelect =
+      cr.dispatchSimpleEvent.bind(cr, this, SearchBox.EventType.ITEM_SELECT);
+  this.autocompleteList.handleEnterKeydown = dispatchItemSelect;
+  this.autocompleteList.addEventListener('mouseDown', dispatchItemSelect);
+
+  // Append dynamically created element.
   element.parentNode.appendChild(this.autocompleteList);
 }
 
+SearchBox.prototype = {
+  __proto__: cr.EventTarget.prototype
+};
+
+/**
+ * Event type.
+ * @enum {string}
+ */
+SearchBox.EventType = {
+  // Dispatched when the text in the search box is changed.
+  TEXT_CHANGE: 'textchange',
+  // Dispatched when the item in the auto complete list is selected.
+  ITEM_SELECT: 'itemselect'
+};
+
 /**
  * Autocomplete list for search box.
- * @param {HTMLDocument} document Document.
+ * @param {Document} document Document.
  * @constructor
+ * @extends {cr.ui.AutocompleteList}
  */
 SearchBox.AutocompleteList = function(document) {
   var self = cr.ui.AutocompleteList.call(this);
@@ -98,7 +141,7 @@ SearchBox.AutocompleteList.prototype.onMouseOver_ = function(event) {
 /**
  * ListItem element for autocomplete.
  *
- * @param {HTMLDocument} document Document.
+ * @param {Document} document Document.
  * @param {Object} item An object representing a suggestion.
  * @constructor
  * @private
@@ -138,6 +181,14 @@ SearchBox.prototype.clear = function() {
 };
 
 /**
+ * @private
+ */
+SearchBox.prototype.onInput_ = function() {
+  this.updateStyles_();
+  cr.dispatchSimpleEvent(this, SearchBox.EventType.TEXT_CHANGE);
+};
+
+/**
  * Handles a focus event of the search box.
  * @private
  */
@@ -159,9 +210,11 @@ SearchBox.prototype.onBlur_ = function() {
 
 /**
  * Handles a keydown event of the search box.
+ * @param {Event} event
  * @private
  */
-SearchBox.prototype.onKeyDown_ = function() {
+SearchBox.prototype.onKeyDown_ = function(event) {
+  event = /** @type {KeyboardEvent} */ (event);
   // Handle only Esc key now.
   if (event.keyCode != 27 || this.inputElement.value)
     return;
@@ -170,10 +223,11 @@ SearchBox.prototype.onKeyDown_ = function() {
 
 /**
  * Handles a dragenter event and refuses a drag source of files.
- * @param {DragEvent} event The dragenter event.
+ * @param {Event} event The dragenter event.
  * @private
  */
 SearchBox.prototype.onDragEnter_ = function(event) {
+  event = /** @type {DragEvent} */ (event);
   // For normal elements, they does not accept drag drop by default, and accept
   // it by using event.preventDefault. But input elements accept drag drop
   // by default. So disable the input element here to prohibit drag drop.
@@ -196,4 +250,19 @@ SearchBox.prototype.onDragEnd_ = function() {
 SearchBox.prototype.updateStyles_ = function() {
   this.element.classList.toggle('has-text',
                                 !!this.inputElement.value);
+};
+
+/**
+ * @private
+ */
+SearchBox.prototype.onSearchButtonClick_ = function() {
+  this.inputElement.focus();
+};
+
+/**
+ * @private
+ */
+SearchBox.prototype.onClearButtonClick_ = function() {
+  this.inputElement.value = '';
+  this.onInput_();
 };

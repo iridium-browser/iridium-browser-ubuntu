@@ -24,6 +24,7 @@
 #include "ui/base/touch/touch_device.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/events/event_switches.h"
+#include "ui/gfx/screen.h"
 
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
 #include <gnu/libc-version.h>
@@ -71,6 +72,8 @@ enum UMALinuxWindowManager {
   UMA_LINUX_WINDOW_MANAGER_QTILE,
   UMA_LINUX_WINDOW_MANAGER_RATPOISON,
   UMA_LINUX_WINDOW_MANAGER_STUMPWM,
+  UMA_LINUX_WINDOW_MANAGER_WMII,
+  UMA_LINUX_WINDOW_MANAGER_FLUXBOX,
   // NOTE: Append new window managers to the list above this line (i.e. don't
   // renumber) and update LinuxWindowManagerName in
   // tools/metrics/histograms/histograms.xml accordingly.
@@ -155,6 +158,8 @@ UMALinuxWindowManager GetLinuxWindowManager() {
       return UMA_LINUX_WINDOW_MANAGER_COMPIZ;
     case ui::WM_ENLIGHTENMENT:
       return UMA_LINUX_WINDOW_MANAGER_ENLIGHTENMENT;
+    case ui::WM_FLUXBOX:
+      return UMA_LINUX_WINDOW_MANAGER_FLUXBOX;
     case ui::WM_I3:
       return UMA_LINUX_WINDOW_MANAGER_I3;
     case ui::WM_ICE_WM:
@@ -181,6 +186,8 @@ UMALinuxWindowManager GetLinuxWindowManager() {
       return UMA_LINUX_WINDOW_MANAGER_RATPOISON;
     case ui::WM_STUMPWM:
       return UMA_LINUX_WINDOW_MANAGER_STUMPWM;
+    case ui::WM_WMII:
+      return UMA_LINUX_WINDOW_MANAGER_WMII;
     case ui::WM_XFWM4:
       return UMA_LINUX_WINDOW_MANAGER_XFWM4;
   }
@@ -215,10 +222,13 @@ void RecordTouchEventState() {
 
 }  // namespace
 
-ChromeBrowserMainExtraPartsMetrics::ChromeBrowserMainExtraPartsMetrics() {
+ChromeBrowserMainExtraPartsMetrics::ChromeBrowserMainExtraPartsMetrics()
+    : display_count_(0), is_screen_observer_(false) {
 }
 
 ChromeBrowserMainExtraPartsMetrics::~ChromeBrowserMainExtraPartsMetrics() {
+  if (is_screen_observer_)
+    gfx::Screen::GetNativeScreen()->RemoveObserver(this);
 }
 
 void ChromeBrowserMainExtraPartsMetrics::PreProfileInit() {
@@ -240,11 +250,43 @@ void ChromeBrowserMainExtraPartsMetrics::PostBrowserStart() {
 #endif
   RecordTouchEventState();
 
+#if defined(OS_MACOSX) && !defined(OS_IOS)
+  RecordMacMetrics();
+#endif  // defined(OS_MACOSX) && !defined(OS_IOS)
+
   const int kStartupMetricsGatheringDelaySeconds = 45;
   content::BrowserThread::GetBlockingPool()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&RecordStartupMetricsOnBlockingPool),
       base::TimeDelta::FromSeconds(kStartupMetricsGatheringDelaySeconds));
+
+  display_count_ = gfx::Screen::GetNativeScreen()->GetNumDisplays();
+  UMA_HISTOGRAM_COUNTS_100("Hardware.Display.Count.OnStartup", display_count_);
+  gfx::Screen::GetNativeScreen()->AddObserver(this);
+  is_screen_observer_ = true;
+}
+
+void ChromeBrowserMainExtraPartsMetrics::OnDisplayAdded(
+    const gfx::Display& new_display) {
+  EmitDisplaysChangedMetric();
+}
+
+void ChromeBrowserMainExtraPartsMetrics::OnDisplayRemoved(
+    const gfx::Display& old_display) {
+  EmitDisplaysChangedMetric();
+}
+
+void ChromeBrowserMainExtraPartsMetrics::OnDisplayMetricsChanged(
+    const gfx::Display& display,
+    uint32_t changed_metrics) {
+}
+
+void ChromeBrowserMainExtraPartsMetrics::EmitDisplaysChangedMetric() {
+  int display_count = gfx::Screen::GetNativeScreen()->GetNumDisplays();
+  if (display_count != display_count_) {
+    display_count_ = display_count;
+    UMA_HISTOGRAM_COUNTS_100("Hardware.Display.Count.OnChange", display_count_);
+  }
 }
 
 namespace chrome {

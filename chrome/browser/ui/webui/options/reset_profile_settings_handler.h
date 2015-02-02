@@ -31,17 +31,16 @@ class ResetProfileSettingsHandler
       public base::SupportsWeakPtr<ResetProfileSettingsHandler> {
  public:
   ResetProfileSettingsHandler();
-  virtual ~ResetProfileSettingsHandler();
+  ~ResetProfileSettingsHandler() override;
 
   // OptionsPageUIHandler implementation.
-  virtual void GetLocalizedValues(
-      base::DictionaryValue* localized_strings) OVERRIDE;
-  virtual void InitializeHandler() OVERRIDE;
-  virtual void InitializePage() OVERRIDE;
-  virtual void Uninitialize() OVERRIDE;
+  void GetLocalizedValues(base::DictionaryValue* localized_strings) override;
+  void InitializeHandler() override;
+  void InitializePage() override;
+  void Uninitialize() override;
 
   // WebUIMessageHandler implementation.
-  virtual void RegisterMessages() OVERRIDE;
+  void RegisterMessages() override;
 
  private:
   // Javascript callback to start clearing data.

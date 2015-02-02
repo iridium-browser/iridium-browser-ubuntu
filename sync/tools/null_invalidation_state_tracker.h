@@ -16,19 +16,18 @@ class NullInvalidationStateTracker
       public InvalidationStateTracker {
  public:
   NullInvalidationStateTracker();
-  virtual ~NullInvalidationStateTracker();
+  ~NullInvalidationStateTracker() override;
 
-  virtual void ClearAndSetNewClientId(const std::string& data) OVERRIDE;
-  virtual std::string GetInvalidatorClientId() const OVERRIDE;
+  void ClearAndSetNewClientId(const std::string& data) override;
+  std::string GetInvalidatorClientId() const override;
 
-  virtual std::string GetBootstrapData() const OVERRIDE;
-  virtual void SetBootstrapData(const std::string& data) OVERRIDE;
+  std::string GetBootstrapData() const override;
+  void SetBootstrapData(const std::string& data) override;
 
-  virtual void SetSavedInvalidations(
-      const UnackedInvalidationsMap& states) OVERRIDE;
-  virtual UnackedInvalidationsMap GetSavedInvalidations() const OVERRIDE;
+  void SetSavedInvalidations(const UnackedInvalidationsMap& states) override;
+  UnackedInvalidationsMap GetSavedInvalidations() const override;
 
-  virtual void Clear() OVERRIDE;
+  void Clear() override;
 };
 
 }  // namespace syncer

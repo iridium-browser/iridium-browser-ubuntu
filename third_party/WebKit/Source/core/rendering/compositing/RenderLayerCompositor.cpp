@@ -39,6 +39,7 @@
 #include "core/page/ChromeClient.h"
 #include "core/page/Page.h"
 #include "core/page/scrolling/ScrollingCoordinator.h"
+#include "core/paint/FramePainter.h"
 #include "core/rendering/RenderEmbeddedObject.h"
 #include "core/rendering/RenderLayerStackingNode.h"
 #include "core/rendering/RenderLayerStackingNodeIterator.h"
@@ -303,7 +304,7 @@ static void forceRecomputePaintInvalidationRectsIncludingNonCompositingDescendan
     // changing the previous position from our paint invalidation container, which is fine as
     // we want a full paint invalidation anyway.
     renderer->setPreviousPaintInvalidationRect(LayoutRect());
-    renderer->setShouldDoFullPaintInvalidation(true);
+    renderer->setShouldDoFullPaintInvalidation();
 
     for (RenderObject* child = renderer->slowFirstChild(); child; child = child->nextSibling()) {
         if (!child->isPaintInvalidationContainer())
@@ -456,11 +457,6 @@ bool RenderLayerCompositor::allocateOrClearCompositedLayerMapping(RenderLayer* l
     case NoCompositingStateChange:
         // Do nothing.
         break;
-    }
-
-    if (layer->hasCompositedLayerMapping() && layer->compositedLayerMapping()->updateRequiresOwnBackingStoreForIntrinsicReasons()) {
-        compositedLayerMappingChanged = true;
-        layer->compositedLayerMapping()->setNeedsGraphicsLayerUpdate(GraphicsLayerUpdateSubtree);
     }
 
     if (compositedLayerMappingChanged && layer->renderer()->isRenderPart()) {
@@ -756,9 +752,7 @@ void RenderLayerCompositor::setOverlayLayer(GraphicsLayer* layer)
 
 bool RenderLayerCompositor::canBeComposited(const RenderLayer* layer) const
 {
-    // FIXME: We disable accelerated compositing for elements in a RenderFlowThread as it doesn't work properly.
-    // See http://webkit.org/b/84900 to re-enable it.
-    return m_hasAcceleratedCompositing && layer->isSelfPaintingLayer() && !layer->subtreeIsInvisible() && layer->renderer()->flowThreadState() == RenderObject::NotInsideFlowThread;
+    return m_hasAcceleratedCompositing && layer->isSelfPaintingLayer() && !layer->subtreeIsInvisible();
 }
 
 // Return true if the given layer is a stacking context and has compositing child
@@ -805,7 +799,7 @@ void RenderLayerCompositor::paintContents(const GraphicsLayer* graphicsLayer, Gr
         context.translate(-scrollCorner.x(), -scrollCorner.y());
         IntRect transformedClip = clip;
         transformedClip.moveBy(scrollCorner.location());
-        m_renderView.frameView()->paintScrollCorner(&context, transformedClip);
+        FramePainter(*m_renderView.frameView()).paintScrollCorner(&context, transformedClip);
         context.restore();
     }
 }
@@ -977,6 +971,7 @@ void RenderLayerCompositor::ensureRootLayer()
     if (expectedAttachment == m_rootLayerAttachment)
          return;
 
+    Settings* settings = m_renderView.document().settings();
     if (!m_rootContentLayer) {
         m_rootContentLayer = GraphicsLayer::create(graphicsLayerFactory(), this);
         IntRect overflowRect = m_renderView.pixelSnappedLayoutOverflowRect();
@@ -984,8 +979,11 @@ void RenderLayerCompositor::ensureRootLayer()
         m_rootContentLayer->setPosition(FloatPoint());
         m_rootContentLayer->setOwnerNodeId(InspectorNodeIds::idForNode(m_renderView.generatingNode()));
 
-        // Need to clip to prevent transformed content showing outside this frame
-        m_rootContentLayer->setMasksToBounds(true);
+        // FIXME: with rootLayerScrolls, we probably don't even need m_rootContentLayer?
+        if (!(settings && settings->rootLayerScrolls())) {
+            // Need to clip to prevent transformed content showing outside this frame
+            m_rootContentLayer->setMasksToBounds(true);
+        }
     }
 
     if (!m_overflowControlsHostLayer) {

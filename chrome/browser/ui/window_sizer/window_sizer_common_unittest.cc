@@ -22,40 +22,31 @@ namespace {
 class TestScreen : public gfx::Screen {
  public:
   TestScreen() {}
-  virtual ~TestScreen() {}
+  ~TestScreen() override {}
 
   // Overridden from gfx::Screen:
-  virtual bool IsDIPEnabled() OVERRIDE {
-    NOTREACHED();
-    return false;
-  }
-
-  virtual gfx::Point GetCursorScreenPoint() OVERRIDE {
+  gfx::Point GetCursorScreenPoint() override {
     NOTREACHED();
     return gfx::Point();
   }
 
-  virtual gfx::NativeWindow GetWindowUnderCursor() OVERRIDE {
+  gfx::NativeWindow GetWindowUnderCursor() override {
     NOTREACHED();
     return NULL;
   }
 
-  virtual gfx::NativeWindow GetWindowAtScreenPoint(const gfx::Point& point)
-      OVERRIDE {
+  gfx::NativeWindow GetWindowAtScreenPoint(const gfx::Point& point) override {
     NOTREACHED();
     return NULL;
   }
 
-  virtual int GetNumDisplays() const OVERRIDE {
-    return displays_.size();
-  }
+  int GetNumDisplays() const override { return displays_.size(); }
 
-  virtual std::vector<gfx::Display> GetAllDisplays() const OVERRIDE {
+  std::vector<gfx::Display> GetAllDisplays() const override {
     return displays_;
   }
 
-  virtual gfx::Display GetDisplayNearestWindow(
-      gfx::NativeView view) const OVERRIDE {
+  gfx::Display GetDisplayNearestWindow(gfx::NativeView view) const override {
 #if defined(USE_AURA)
     return GetDisplayMatching(view->GetBoundsInScreen());
 #else
@@ -64,14 +55,12 @@ class TestScreen : public gfx::Screen {
 #endif
   }
 
-  virtual gfx::Display GetDisplayNearestPoint(
-      const gfx::Point& point) const OVERRIDE {
+  gfx::Display GetDisplayNearestPoint(const gfx::Point& point) const override {
     NOTREACHED();
     return gfx::Display();
   }
 
-  virtual gfx::Display GetDisplayMatching(
-      const gfx::Rect& match_rect) const OVERRIDE {
+  gfx::Display GetDisplayMatching(const gfx::Rect& match_rect) const override {
     int max_area = 0;
     size_t max_area_index = 0;
 
@@ -87,17 +76,11 @@ class TestScreen : public gfx::Screen {
     return displays_[max_area_index];
   }
 
-  virtual gfx::Display GetPrimaryDisplay() const OVERRIDE {
-    return displays_[0];
-  }
+  gfx::Display GetPrimaryDisplay() const override { return displays_[0]; }
 
-  virtual void AddObserver(gfx::DisplayObserver* observer) OVERRIDE {
-    NOTREACHED();
-  }
+  void AddObserver(gfx::DisplayObserver* observer) override { NOTREACHED(); }
 
-  virtual void RemoveObserver(gfx::DisplayObserver* observer) OVERRIDE {
-    NOTREACHED();
-  }
+  void RemoveObserver(gfx::DisplayObserver* observer) override { NOTREACHED(); }
 
   void AddDisplay(const gfx::Rect& bounds,
                   const gfx::Rect& work_area) {
@@ -115,11 +98,10 @@ class TestScreen : public gfx::Screen {
 class TestTargetDisplayProvider : public WindowSizer::TargetDisplayProvider {
 public:
   TestTargetDisplayProvider() {}
-  virtual ~TestTargetDisplayProvider() {}
+  ~TestTargetDisplayProvider() override {}
 
-  virtual gfx::Display GetTargetDisplay(
-      const gfx::Screen* screen,
-      const gfx::Rect& bounds) const OVERRIDE {
+  gfx::Display GetTargetDisplay(const gfx::Screen* screen,
+                                const gfx::Rect& bounds) const override {
     // On ash, the bounds is used as a indicator to specify
     // the target display.
     return screen->GetDisplayMatching(bounds);
@@ -207,8 +189,7 @@ void GetWindowBoundsAndShowState(
   scoped_ptr<WindowSizer::TargetDisplayProvider> tdp(
       new TestTargetDisplayProvider);
 
-  WindowSizer sizer(sp.PassAs<WindowSizer::StateProvider>(),
-                    tdp.Pass(), &test_screen, browser);
+  WindowSizer sizer(sp.Pass(), tdp.Pass(), &test_screen, browser);
   sizer.DetermineWindowBoundsAndShowState(passed_in,
                                           out_bounds,
                                           out_show_state);
@@ -247,8 +228,7 @@ ui::WindowShowState GetWindowShowState(
   scoped_ptr<WindowSizer::TargetDisplayProvider> tdp(
       new TestTargetDisplayProvider);
 
-  WindowSizer sizer(sp.PassAs<WindowSizer::StateProvider>(),
-                    tdp.Pass(), &test_screen, browser);
+  WindowSizer sizer(sp.Pass(), tdp.Pass(), &test_screen, browser);
 
   ui::WindowShowState out_show_state = ui::SHOW_STATE_DEFAULT;
   gfx::Rect out_bounds;

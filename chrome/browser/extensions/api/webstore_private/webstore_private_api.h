@@ -8,7 +8,6 @@
 #include <string>
 
 #include "chrome/browser/extensions/active_install_data.h"
-#include "chrome/browser/extensions/bundle_installer.h"
 #include "chrome/browser/extensions/chrome_extension_function.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/webstore_install_helper.h"
@@ -42,35 +41,6 @@ class WebstorePrivateApi {
   // completeInstall. This should only be used for testing.
   static scoped_ptr<WebstoreInstaller::Approval> PopApprovalForTesting(
       Profile* profile, const std::string& extension_id);
-};
-
-class WebstorePrivateInstallBundleFunction
-    : public ChromeAsyncExtensionFunction,
-      public extensions::BundleInstaller::Delegate {
- public:
-  DECLARE_EXTENSION_FUNCTION("webstorePrivate.installBundle",
-                             WEBSTOREPRIVATE_INSTALLBUNDLE)
-
-  WebstorePrivateInstallBundleFunction();
-
-  // BundleInstaller::Delegate:
-  virtual void OnBundleInstallApproved() OVERRIDE;
-  virtual void OnBundleInstallCanceled(bool user_initiated) OVERRIDE;
-  virtual void OnBundleInstallCompleted() OVERRIDE;
-
- protected:
-  virtual ~WebstorePrivateInstallBundleFunction();
-
-  // ExtensionFunction:
-  virtual bool RunAsync() OVERRIDE;
-
-  // Reads the extension |details| into |items|.
-  bool ReadBundleInfo(
-      const api::webstore_private::InstallBundle::Params& details,
-          extensions::BundleInstaller::ItemList* items);
-
- private:
-  scoped_refptr<extensions::BundleInstaller> bundle_;
 };
 
 class WebstorePrivateBeginInstallWithManifest3Function
@@ -115,24 +85,22 @@ class WebstorePrivateBeginInstallWithManifest3Function
   WebstorePrivateBeginInstallWithManifest3Function();
 
   // WebstoreInstallHelper::Delegate:
-  virtual void OnWebstoreParseSuccess(
-      const std::string& id,
-      const SkBitmap& icon,
-      base::DictionaryValue* parsed_manifest) OVERRIDE;
-  virtual void OnWebstoreParseFailure(
-      const std::string& id,
-      InstallHelperResultCode result_code,
-      const std::string& error_message) OVERRIDE;
+  void OnWebstoreParseSuccess(const std::string& id,
+                              const SkBitmap& icon,
+                              base::DictionaryValue* parsed_manifest) override;
+  void OnWebstoreParseFailure(const std::string& id,
+                              InstallHelperResultCode result_code,
+                              const std::string& error_message) override;
 
   // ExtensionInstallPrompt::Delegate:
-  virtual void InstallUIProceed() OVERRIDE;
-  virtual void InstallUIAbort(bool user_initiated) OVERRIDE;
+  void InstallUIProceed() override;
+  void InstallUIAbort(bool user_initiated) override;
 
  protected:
-  virtual ~WebstorePrivateBeginInstallWithManifest3Function();
+  ~WebstorePrivateBeginInstallWithManifest3Function() override;
 
   // ExtensionFunction:
-  virtual bool RunAsync() OVERRIDE;
+  bool RunAsync() override;
 
   // Sets the result_ as a string based on |code|.
   void SetResultCode(ResultCode code);
@@ -171,17 +139,17 @@ class WebstorePrivateCompleteInstallFunction
   WebstorePrivateCompleteInstallFunction();
 
   // WebstoreInstaller::Delegate:
-  virtual void OnExtensionInstallSuccess(const std::string& id) OVERRIDE;
-  virtual void OnExtensionInstallFailure(
+  void OnExtensionInstallSuccess(const std::string& id) override;
+  void OnExtensionInstallFailure(
       const std::string& id,
       const std::string& error,
-      WebstoreInstaller::FailureReason reason) OVERRIDE;
+      WebstoreInstaller::FailureReason reason) override;
 
  protected:
-  virtual ~WebstorePrivateCompleteInstallFunction();
+  ~WebstorePrivateCompleteInstallFunction() override;
 
   // ExtensionFunction:
-  virtual bool RunAsync() OVERRIDE;
+  bool RunAsync() override;
 
  private:
   scoped_ptr<WebstoreInstaller::Approval> approval_;
@@ -199,10 +167,10 @@ class WebstorePrivateEnableAppLauncherFunction
   WebstorePrivateEnableAppLauncherFunction();
 
  protected:
-  virtual ~WebstorePrivateEnableAppLauncherFunction();
+  ~WebstorePrivateEnableAppLauncherFunction() override;
 
   // ExtensionFunction:
-  virtual bool RunSync() OVERRIDE;
+  bool RunSync() override;
 };
 
 class WebstorePrivateGetBrowserLoginFunction
@@ -212,10 +180,10 @@ class WebstorePrivateGetBrowserLoginFunction
                              WEBSTOREPRIVATE_GETBROWSERLOGIN)
 
  protected:
-  virtual ~WebstorePrivateGetBrowserLoginFunction() {}
+  ~WebstorePrivateGetBrowserLoginFunction() override {}
 
   // ExtensionFunction:
-  virtual bool RunSync() OVERRIDE;
+  bool RunSync() override;
 };
 
 class WebstorePrivateGetStoreLoginFunction
@@ -225,10 +193,10 @@ class WebstorePrivateGetStoreLoginFunction
                              WEBSTOREPRIVATE_GETSTORELOGIN)
 
  protected:
-  virtual ~WebstorePrivateGetStoreLoginFunction() {}
+  ~WebstorePrivateGetStoreLoginFunction() override {}
 
   // ExtensionFunction:
-  virtual bool RunSync() OVERRIDE;
+  bool RunSync() override;
 };
 
 class WebstorePrivateSetStoreLoginFunction
@@ -238,10 +206,10 @@ class WebstorePrivateSetStoreLoginFunction
                              WEBSTOREPRIVATE_SETSTORELOGIN)
 
  protected:
-  virtual ~WebstorePrivateSetStoreLoginFunction() {}
+  ~WebstorePrivateSetStoreLoginFunction() override {}
 
   // ExtensionFunction:
-  virtual bool RunSync() OVERRIDE;
+  bool RunSync() override;
 };
 
 class WebstorePrivateGetWebGLStatusFunction
@@ -253,12 +221,12 @@ class WebstorePrivateGetWebGLStatusFunction
   WebstorePrivateGetWebGLStatusFunction();
 
  protected:
-  virtual ~WebstorePrivateGetWebGLStatusFunction();
+  ~WebstorePrivateGetWebGLStatusFunction() override;
 
   void OnFeatureCheck(bool feature_allowed);
 
   // ExtensionFunction:
-  virtual bool RunAsync() OVERRIDE;
+  bool RunAsync() override;
 
  private:
   void CreateResult(bool webgl_allowed);
@@ -275,10 +243,10 @@ class WebstorePrivateGetIsLauncherEnabledFunction
   WebstorePrivateGetIsLauncherEnabledFunction() {}
 
  protected:
-  virtual ~WebstorePrivateGetIsLauncherEnabledFunction() {}
+  ~WebstorePrivateGetIsLauncherEnabledFunction() override {}
 
   // ExtensionFunction:
-  virtual bool RunSync() OVERRIDE;
+  bool RunSync() override;
 
  private:
   void OnIsLauncherCheckCompleted(bool is_enabled);
@@ -293,10 +261,10 @@ class WebstorePrivateIsInIncognitoModeFunction
   WebstorePrivateIsInIncognitoModeFunction() {}
 
  protected:
-  virtual ~WebstorePrivateIsInIncognitoModeFunction() {}
+  ~WebstorePrivateIsInIncognitoModeFunction() override {}
 
   // ExtensionFunction:
-  virtual bool RunSync() OVERRIDE;
+  bool RunSync() override;
 };
 
 class WebstorePrivateLaunchEphemeralAppFunction
@@ -308,10 +276,10 @@ class WebstorePrivateLaunchEphemeralAppFunction
   WebstorePrivateLaunchEphemeralAppFunction();
 
  protected:
-  virtual ~WebstorePrivateLaunchEphemeralAppFunction();
+  ~WebstorePrivateLaunchEphemeralAppFunction() override;
 
   // ExtensionFunction:
-  virtual bool RunAsync() OVERRIDE;
+  bool RunAsync() override;
 
  private:
   void OnLaunchComplete(webstore_install::Result result,
@@ -330,10 +298,10 @@ class WebstorePrivateGetEphemeralAppsEnabledFunction
   WebstorePrivateGetEphemeralAppsEnabledFunction();
 
  protected:
-  virtual ~WebstorePrivateGetEphemeralAppsEnabledFunction();
+  ~WebstorePrivateGetEphemeralAppsEnabledFunction() override;
 
   // ExtensionFunction:
-  virtual bool RunSync() OVERRIDE;
+  bool RunSync() override;
 };
 
 }  // namespace extensions

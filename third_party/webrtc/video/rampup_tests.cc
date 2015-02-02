@@ -154,7 +154,9 @@ bool StreamObserver::SendRtcp(const uint8_t* packet, size_t length) {
   return true;
 }
 
-EventTypeWrapper StreamObserver::Wait() { return test_done_->Wait(120 * 1000); }
+EventTypeWrapper StreamObserver::Wait() {
+  return test_done_->Wait(test::CallTest::kLongTimeoutMs);
+}
 
 void StreamObserver::ReportResult(const std::string& measurement,
                   size_t value,
@@ -402,7 +404,7 @@ void RampUpTest::RunRampUpTest(bool rtx,
 
   Call::Config call_config(&stream_observer);
   if (start_bitrate_bps != 0) {
-    call_config.start_bitrate_bps = start_bitrate_bps;
+    call_config.stream_start_bitrate_bps = start_bitrate_bps;
     stream_observer.set_start_bitrate_bps(start_bitrate_bps);
   }
 

@@ -20,7 +20,8 @@ import java.util.UUID;
  * Wrapper for the steps needed to initialize the java and native sides of webview chromium.
  */
 public abstract class AwBrowserProcess {
-    private static final String PRIVATE_DATA_DIRECTORY_SUFFIX = "webview";
+    public static final String PRIVATE_DATA_DIRECTORY_SUFFIX = "webview";
+
     private static final String TAG = "AwBrowserProcess";
 
     /**
@@ -35,6 +36,10 @@ public abstract class AwBrowserProcess {
         } catch (ProcessInitException e) {
             throw new RuntimeException("Cannot load WebView", e);
         }
+        // Switch the command line implementation from Java to native.
+        // It's okay for the WebView to do this before initialization because we have
+        // setup the JNI bindings by this point.
+        LibraryLoader.switchCommandLineForWebView();
     }
 
     /**

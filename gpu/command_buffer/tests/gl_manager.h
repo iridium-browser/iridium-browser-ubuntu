@@ -10,6 +10,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "gpu/command_buffer/client/gpu_control.h"
 #include "gpu/command_buffer/service/feature_info.h"
+#include "ui/gfx/gpu_memory_buffer.h"
 #include "ui/gfx/size.h"
 
 namespace gfx {
@@ -58,7 +59,11 @@ class GLManager : private GpuControl {
     bool context_lost_allowed;
   };
   GLManager();
-  virtual ~GLManager();
+  ~GLManager() override;
+
+  static scoped_ptr<gfx::GpuMemoryBuffer> CreateGpuMemoryBuffer(
+      const gfx::Size& size,
+      gfx::GpuMemoryBuffer::Format format);
 
   void Initialize(const Options& options);
   void Destroy();
@@ -90,23 +95,24 @@ class GLManager : private GpuControl {
   const gpu::gles2::FeatureInfo::Workarounds& workarounds() const;
 
   // GpuControl implementation.
-  virtual Capabilities GetCapabilities() OVERRIDE;
-  virtual gfx::GpuMemoryBuffer* CreateGpuMemoryBuffer(size_t width,
-                                                      size_t height,
-                                                      unsigned internalformat,
-                                                      unsigned usage,
-                                                      int32* id) OVERRIDE;
-  virtual void DestroyGpuMemoryBuffer(int32 id) OVERRIDE;
-  virtual uint32 InsertSyncPoint() OVERRIDE;
-  virtual uint32 InsertFutureSyncPoint() OVERRIDE;
-  virtual void RetireSyncPoint(uint32 sync_point) OVERRIDE;
-  virtual void SignalSyncPoint(uint32 sync_point,
-                               const base::Closure& callback) OVERRIDE;
-  virtual void SignalQuery(uint32 query,
-                           const base::Closure& callback) OVERRIDE;
-  virtual void SetSurfaceVisible(bool visible) OVERRIDE;
-  virtual void Echo(const base::Closure& callback) OVERRIDE;
-  virtual uint32 CreateStreamTexture(uint32 texture_id) OVERRIDE;
+  Capabilities GetCapabilities() override;
+  int32 CreateImage(ClientBuffer buffer,
+                    size_t width,
+                    size_t height,
+                    unsigned internalformat) override;
+  void DestroyImage(int32 id) override;
+  int32 CreateGpuMemoryBufferImage(size_t width,
+                                   size_t height,
+                                   unsigned internalformat,
+                                   unsigned usage) override;
+  uint32 InsertSyncPoint() override;
+  uint32 InsertFutureSyncPoint() override;
+  void RetireSyncPoint(uint32 sync_point) override;
+  void SignalSyncPoint(uint32 sync_point,
+                       const base::Closure& callback) override;
+  void SignalQuery(uint32 query, const base::Closure& callback) override;
+  void SetSurfaceVisible(bool visible) override;
+  uint32 CreateStreamTexture(uint32 texture_id) override;
 
  private:
   void PumpCommands();
@@ -124,9 +130,6 @@ class GLManager : private GpuControl {
   scoped_ptr<TransferBuffer> transfer_buffer_;
   scoped_ptr<gles2::GLES2Implementation> gles2_implementation_;
   bool context_lost_allowed_;
-
-  // Client GpuControl implementation.
-  base::ScopedPtrHashMap<int32, gfx::GpuMemoryBuffer> gpu_memory_buffers_;
 
   // Used on Android to virtualize GL for all contexts.
   static int use_count_;

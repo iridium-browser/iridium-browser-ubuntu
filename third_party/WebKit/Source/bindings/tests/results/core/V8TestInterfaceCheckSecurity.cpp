@@ -21,7 +21,7 @@
 
 namespace blink {
 
-const WrapperTypeInfo V8TestInterfaceCheckSecurity::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceCheckSecurity::domTemplate, V8TestInterfaceCheckSecurity::refObject, V8TestInterfaceCheckSecurity::derefObject, V8TestInterfaceCheckSecurity::createPersistentHandle, 0, 0, 0, V8TestInterfaceCheckSecurity::installConditionallyEnabledMethods, V8TestInterfaceCheckSecurity::installConditionallyEnabledProperties, 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::Independent, WrapperTypeInfo::RefCountedObject };
+const WrapperTypeInfo V8TestInterfaceCheckSecurity::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceCheckSecurity::domTemplate, V8TestInterfaceCheckSecurity::refObject, V8TestInterfaceCheckSecurity::derefObject, V8TestInterfaceCheckSecurity::trace, 0, 0, 0, V8TestInterfaceCheckSecurity::installConditionallyEnabledMethods, V8TestInterfaceCheckSecurity::installConditionallyEnabledProperties, 0, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::Independent, WrapperTypeInfo::RefCountedObject };
 
 // This static member must be declared by DEFINE_WRAPPERTYPEINFO in TestInterfaceCheckSecurity.h.
 // For details, see the comment of DEFINE_WRAPPERTYPEINFO in
@@ -29,8 +29,6 @@ const WrapperTypeInfo V8TestInterfaceCheckSecurity::wrapperTypeInfo = { gin::kEm
 const WrapperTypeInfo& TestInterfaceCheckSecurity::s_wrapperTypeInfo = V8TestInterfaceCheckSecurity::wrapperTypeInfo;
 
 namespace TestInterfaceCheckSecurityV8Internal {
-
-template <typename T> void V8_USE(T) { }
 
 static void longAttributeAttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
@@ -479,8 +477,10 @@ static void installV8TestInterfaceCheckSecurityTemplate(v8::Handle<v8::FunctionT
         0, 0,
         V8TestInterfaceCheckSecurityMethods, WTF_ARRAY_LENGTH(V8TestInterfaceCheckSecurityMethods),
         isolate);
-    v8::Local<v8::ObjectTemplate> instanceTemplate ALLOW_UNUSED = functionTemplate->InstanceTemplate();
-    v8::Local<v8::ObjectTemplate> prototypeTemplate ALLOW_UNUSED = functionTemplate->PrototypeTemplate();
+    v8::Local<v8::ObjectTemplate> instanceTemplate = functionTemplate->InstanceTemplate();
+    ALLOW_UNUSED_LOCAL(instanceTemplate);
+    v8::Local<v8::ObjectTemplate> prototypeTemplate = functionTemplate->PrototypeTemplate();
+    ALLOW_UNUSED_LOCAL(prototypeTemplate);
     instanceTemplate->SetAccessCheckCallbacks(TestInterfaceCheckSecurityV8Internal::namedSecurityCheck, TestInterfaceCheckSecurityV8Internal::indexedSecurityCheck, v8::External::New(isolate, const_cast<WrapperTypeInfo*>(&V8TestInterfaceCheckSecurity::wrapperTypeInfo)));
     static const V8DOMConfiguration::AttributeConfiguration doNotCheckSecurityVoidMethodOriginSafeAttributeConfiguration = {
         "doNotCheckSecurityVoidMethod", TestInterfaceCheckSecurityV8Internal::doNotCheckSecurityVoidMethodOriginSafeMethodGetterCallback, TestInterfaceCheckSecurityV8Internal::TestInterfaceCheckSecurityOriginSafeMethodSetterCallback, 0, 0, &V8TestInterfaceCheckSecurity::wrapperTypeInfo, v8::ALL_CAN_READ, static_cast<v8::PropertyAttribute>(v8::DontDelete), V8DOMConfiguration::ExposedToAllScripts, V8DOMConfiguration::OnInstance,
@@ -523,21 +523,14 @@ TestInterfaceCheckSecurity* V8TestInterfaceCheckSecurity::toImplWithTypeCheck(v8
     return hasInstance(value, isolate) ? blink::toScriptWrappableBase(v8::Handle<v8::Object>::Cast(value))->toImpl<TestInterfaceCheckSecurity>() : 0;
 }
 
-
-void V8TestInterfaceCheckSecurity::refObject(ScriptWrappableBase* internalPointer)
+void V8TestInterfaceCheckSecurity::refObject(ScriptWrappableBase* scriptWrappableBase)
 {
-    internalPointer->toImpl<TestInterfaceCheckSecurity>()->ref();
+    scriptWrappableBase->toImpl<TestInterfaceCheckSecurity>()->ref();
 }
 
-void V8TestInterfaceCheckSecurity::derefObject(ScriptWrappableBase* internalPointer)
+void V8TestInterfaceCheckSecurity::derefObject(ScriptWrappableBase* scriptWrappableBase)
 {
-    internalPointer->toImpl<TestInterfaceCheckSecurity>()->deref();
-}
-
-WrapperPersistentNode* V8TestInterfaceCheckSecurity::createPersistentHandle(ScriptWrappableBase* internalPointer)
-{
-    ASSERT_NOT_REACHED();
-    return 0;
+    scriptWrappableBase->toImpl<TestInterfaceCheckSecurity>()->deref();
 }
 
 template<>

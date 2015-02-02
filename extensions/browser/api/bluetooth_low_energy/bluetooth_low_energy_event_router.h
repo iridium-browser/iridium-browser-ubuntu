@@ -49,19 +49,27 @@ class BluetoothLowEnergyEventRouter
     : public device::BluetoothAdapter::Observer {
  public:
   explicit BluetoothLowEnergyEventRouter(content::BrowserContext* context);
-  virtual ~BluetoothLowEnergyEventRouter();
+  ~BluetoothLowEnergyEventRouter() override;
 
   // Possible ways that an API method can fail or succeed.
   enum Status {
     kStatusSuccess = 0,
-    kStatusErrorPermissionDenied,
-    kStatusErrorNotFound,
     kStatusErrorAlreadyConnected,
     kStatusErrorAlreadyNotifying,
-    kStatusErrorNotConnected,
-    kStatusErrorNotNotifying,
+    kStatusErrorAuthenticationFailed,
+    kStatusErrorCanceled,
+    kStatusErrorFailed,
+    kStatusErrorGattNotSupported,
+    kStatusErrorHigherSecurity,
     kStatusErrorInProgress,
-    kStatusErrorFailed
+    kStatusErrorInsufficientAuthorization,
+    kStatusErrorInvalidLength,
+    kStatusErrorNotConnected,
+    kStatusErrorNotFound,
+    kStatusErrorNotNotifying,
+    kStatusErrorPermissionDenied,
+    kStatusErrorTimeout,
+    kStatusErrorUnsupportedDevice,
   };
 
   // Error callback is used by asynchronous methods to report failures.
@@ -228,39 +236,36 @@ class BluetoothLowEnergyEventRouter
   void SetAdapterForTesting(device::BluetoothAdapter* adapter);
 
   // device::BluetoothAdapter::Observer overrides.
-  virtual void GattServiceAdded(device::BluetoothAdapter* adapter,
-                                device::BluetoothDevice* device,
-                                device::BluetoothGattService* service) OVERRIDE;
-  virtual void GattServiceRemoved(
+  void GattServiceAdded(device::BluetoothAdapter* adapter,
+                        device::BluetoothDevice* device,
+                        device::BluetoothGattService* service) override;
+  void GattServiceRemoved(device::BluetoothAdapter* adapter,
+                          device::BluetoothDevice* device,
+                          device::BluetoothGattService* service) override;
+  void GattDiscoveryCompleteForService(
       device::BluetoothAdapter* adapter,
-      device::BluetoothDevice* device,
-      device::BluetoothGattService* service) OVERRIDE;
-  virtual void GattDiscoveryCompleteForService(
+      device::BluetoothGattService* service) override;
+  void GattServiceChanged(device::BluetoothAdapter* adapter,
+                          device::BluetoothGattService* service) override;
+  void GattCharacteristicAdded(
       device::BluetoothAdapter* adapter,
-      device::BluetoothGattService* service) OVERRIDE;
-  virtual void GattServiceChanged(
+      device::BluetoothGattCharacteristic* characteristic) override;
+  void GattCharacteristicRemoved(
       device::BluetoothAdapter* adapter,
-      device::BluetoothGattService* service) OVERRIDE;
-  virtual void GattCharacteristicAdded(
+      device::BluetoothGattCharacteristic* characteristic) override;
+  void GattDescriptorAdded(
       device::BluetoothAdapter* adapter,
-      device::BluetoothGattCharacteristic* characteristic) OVERRIDE;
-  virtual void GattCharacteristicRemoved(
+      device::BluetoothGattDescriptor* descriptor) override;
+  void GattDescriptorRemoved(
       device::BluetoothAdapter* adapter,
-      device::BluetoothGattCharacteristic* characteristic) OVERRIDE;
-  virtual void GattDescriptorAdded(
-      device::BluetoothAdapter* adapter,
-      device::BluetoothGattDescriptor* descriptor) OVERRIDE;
-  virtual void GattDescriptorRemoved(
-      device::BluetoothAdapter* adapter,
-      device::BluetoothGattDescriptor* descriptor) OVERRIDE;
-  virtual void GattCharacteristicValueChanged(
+      device::BluetoothGattDescriptor* descriptor) override;
+  void GattCharacteristicValueChanged(
       device::BluetoothAdapter* adapter,
       device::BluetoothGattCharacteristic* characteristic,
-      const std::vector<uint8>& value) OVERRIDE;
-  virtual void GattDescriptorValueChanged(
-      device::BluetoothAdapter* adapter,
-      device::BluetoothGattDescriptor* descriptor,
-      const std::vector<uint8>& value) OVERRIDE;
+      const std::vector<uint8>& value) override;
+  void GattDescriptorValueChanged(device::BluetoothAdapter* adapter,
+                                  device::BluetoothGattDescriptor* descriptor,
+                                  const std::vector<uint8>& value) override;
 
  private:
   // Called by BluetoothAdapterFactory.
@@ -318,7 +323,8 @@ class BluetoothLowEnergyEventRouter
 
   // Called by BluetoothGattCharacteristic and BluetoothGattDescriptor in
   // case of an error during the read/write operations.
-  void OnError(const ErrorCallback& error_callback);
+  void OnError(const ErrorCallback& error_callback,
+               device::BluetoothGattService::GattErrorCode error_code);
 
   // Called by BluetoothDevice in response to a call to CreateGattConnection.
   void OnConnectError(const std::string& extension_id,
@@ -337,9 +343,11 @@ class BluetoothLowEnergyEventRouter
 
   // Called by BluetoothGattCharacteristic in response to a call to
   // StartNotifySession.
-  void OnStartNotifySessionError(const std::string& extension_id,
-                                 const std::string& characteristic_id,
-                                 const ErrorCallback& error_callback);
+  void OnStartNotifySessionError(
+      const std::string& extension_id,
+      const std::string& characteristic_id,
+      const ErrorCallback& error_callback,
+      device::BluetoothGattService::GattErrorCode error_code);
 
   // Called by BluetoothGattNotifySession in response to a call to Stop.
   void OnStopNotifySession(const std::string& extension_id,

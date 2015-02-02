@@ -20,22 +20,18 @@ class ActualTimer : public MockableTime::Timer {
   // Initialize base timer with retain_user_info and is_repeating false.
   ActualTimer() : base_timer_(false, false) {}
 
-  virtual ~ActualTimer() {}
+  ~ActualTimer() override {}
 
   // MockableTime::Timer implementation:
-  virtual void Start(const tracked_objects::Location& posted_from,
-                     base::TimeDelta delay,
-                     const base::Closure& user_task) OVERRIDE {
+  void Start(const tracked_objects::Location& posted_from,
+             base::TimeDelta delay,
+             const base::Closure& user_task) override {
     base_timer_.Start(posted_from, delay, user_task);
   }
 
-  virtual void Stop() OVERRIDE {
-    base_timer_.Stop();
-  }
+  void Stop() override { base_timer_.Stop(); }
 
-  virtual bool IsRunning() OVERRIDE {
-    return base_timer_.IsRunning();
-  }
+  bool IsRunning() override { return base_timer_.IsRunning(); }
 
  private:
   base::Timer base_timer_;
@@ -46,6 +42,7 @@ const struct NetErrorMapping {
   const char* beacon_status;
 } net_error_map[] = {
   { net::OK, "ok" },
+  { net::ERR_ABORTED, "aborted" },
   { net::ERR_TIMED_OUT, "tcp.connection.timed_out" },
   { net::ERR_CONNECTION_CLOSED, "tcp.connection.closed" },
   { net::ERR_CONNECTION_RESET, "tcp.connection.reset" },
@@ -59,37 +56,19 @@ const struct NetErrorMapping {
   { net::ERR_CONNECTION_TIMED_OUT, "tcp.connection.timed_out" },
   { net::ERR_NAME_RESOLUTION_FAILED, "dns" },
   { net::ERR_SSL_PINNED_KEY_NOT_IN_CERT_CHAIN,
-        "ssl.cert.pinned_key_not_in_cert_chain" },
+        "ssl.pinned_key_not_in_cert_chain" },
   { net::ERR_CERT_COMMON_NAME_INVALID, "ssl.cert.name_invalid" },
   { net::ERR_CERT_DATE_INVALID, "ssl.cert.date_invalid" },
   { net::ERR_CERT_AUTHORITY_INVALID, "ssl.cert.authority_invalid" },
   { net::ERR_CERT_REVOKED, "ssl.cert.revoked" },
   { net::ERR_CERT_INVALID, "ssl.cert.invalid" },
-  { net::ERR_EMPTY_RESPONSE, "http.response.empty" },
+  { net::ERR_EMPTY_RESPONSE, "http.empty_response" },
   { net::ERR_SPDY_PING_FAILED, "spdy.ping_failed" },
   { net::ERR_SPDY_PROTOCOL_ERROR, "spdy.protocol" },
   { net::ERR_QUIC_PROTOCOL_ERROR, "quic.protocol" },
   { net::ERR_DNS_MALFORMED_RESPONSE, "dns.protocol" },
   { net::ERR_DNS_SERVER_FAILED, "dns.server" },
   { net::ERR_DNS_TIMED_OUT, "dns.timed_out" },
-  { net::ERR_INSECURE_RESPONSE, "ssl" },
-  { net::ERR_CONTENT_LENGTH_MISMATCH, "http.response.content_length_mismatch" },
-  { net::ERR_INCOMPLETE_CHUNKED_ENCODING,
-        "http.response.incomplete_chunked_encoding" },
-  { net::ERR_SSL_VERSION_OR_CIPHER_MISMATCH,
-        "ssl.version_or_cipher_mismatch" },
-  { net::ERR_BAD_SSL_CLIENT_AUTH_CERT, "ssl.bad_client_auth_cert" },
-  { net::ERR_INVALID_CHUNKED_ENCODING,
-        "http.response.invalid_chunked_encoding" },
-  { net::ERR_RESPONSE_HEADERS_TRUNCATED, "http.response.headers.truncated" },
-  { net::ERR_REQUEST_RANGE_NOT_SATISFIABLE,
-        "http.request.range_not_satisfiable" },
-  { net::ERR_INVALID_RESPONSE, "http.response.invalid" },
-  { net::ERR_RESPONSE_HEADERS_MULTIPLE_CONTENT_DISPOSITION,
-        "http.response.headers.multiple_content_disposition" },
-  { net::ERR_RESPONSE_HEADERS_MULTIPLE_CONTENT_LENGTH,
-        "http.response.headers.multiple_content_length" },
-  { net::ERR_SSL_UNRECOGNIZED_NAME_ALERT, "ssl.unrecognized_name_alert" }
 };
 
 }  // namespace
@@ -155,6 +134,19 @@ base::TimeTicks ActualTime::NowTicks() { return base::TimeTicks::Now(); }
 
 scoped_ptr<MockableTime::Timer> ActualTime::CreateTimer() {
   return scoped_ptr<MockableTime::Timer>(new ActualTimer());
+}
+
+MockableTimeBackoffEntry::MockableTimeBackoffEntry(
+    const net::BackoffEntry::Policy* const policy,
+    MockableTime* time)
+    : net::BackoffEntry(policy),
+      time_(time) {
+}
+
+MockableTimeBackoffEntry::~MockableTimeBackoffEntry() {}
+
+base::TimeTicks MockableTimeBackoffEntry::ImplGetTimeNow() const {
+  return time_->NowTicks();
 }
 
 }  // namespace domain_reliability

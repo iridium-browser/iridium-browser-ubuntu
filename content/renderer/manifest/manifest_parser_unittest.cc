@@ -13,7 +13,7 @@ namespace content {
 class ManifestParserTest : public testing::Test  {
  protected:
   ManifestParserTest() {}
-  virtual ~ManifestParserTest() {}
+  ~ManifestParserTest() override {}
 
   Manifest ParseManifest(const base::StringPiece& json,
                          const GURL& document_url = default_document_url,
@@ -577,6 +577,30 @@ TEST_F(ManifestParserTest, IconSizesParseRules) {
         "\"sizes\": \"x 40xx 1x2x3 x42 42xx42\" } ] }");
     gfx::Size any = gfx::Size(0, 0);
     EXPECT_EQ(manifest.icons[0].sizes.size(), 0u);
+  }
+}
+
+TEST_F(ManifestParserTest, GCMSenderIDParseRules) {
+  // Smoke test.
+  {
+    Manifest manifest = ParseManifest("{ \"gcm_sender_id\": \"foo\" }");
+    EXPECT_TRUE(EqualsASCII(manifest.gcm_sender_id.string(), "foo"));
+  }
+
+  // Trim whitespaces.
+  {
+    Manifest manifest = ParseManifest("{ \"gcm_sender_id\": \"  foo  \" }");
+    EXPECT_TRUE(EqualsASCII(manifest.gcm_sender_id.string(), "foo"));
+  }
+
+  // Don't parse if property isn't a string.
+  {
+    Manifest manifest = ParseManifest("{ \"gcm_sender_id\": {} }");
+    EXPECT_TRUE(manifest.gcm_sender_id.is_null());
+  }
+  {
+    Manifest manifest = ParseManifest("{ \"gcm_sender_id\": 42 }");
+    EXPECT_TRUE(manifest.gcm_sender_id.is_null());
   }
 }
 

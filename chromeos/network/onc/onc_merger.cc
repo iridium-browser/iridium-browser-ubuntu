@@ -217,7 +217,7 @@ class MergeSettingsAndPolicies : public MergeListOfDictionaries {
   // MergeListOfDictionaries override.
   virtual scoped_ptr<base::Value> MergeListOfValues(
       const std::string& key,
-      const std::vector<const base::Value*>& values) OVERRIDE {
+      const std::vector<const base::Value*>& values) override {
     bool user_editable = !HasUserPolicy();
     if (values[kUserEditableIndex])
       values[kUserEditableIndex]->GetAsBoolean(&user_editable);
@@ -305,7 +305,7 @@ class MergeToEffective : public MergeSettingsAndPolicies {
   // MergeSettingsAndPolicies override.
   virtual scoped_ptr<base::Value> MergeValues(
       const std::string& key,
-      const ValueParams& values) OVERRIDE {
+      const ValueParams& values) override {
     std::string which;
     return MergeValues(key, values, &which);
   }
@@ -360,7 +360,7 @@ class MergeToAugmented : public MergeToEffective {
   // MergeSettingsAndPolicies override.
   virtual scoped_ptr<base::Value> MergeValues(
       const std::string& key,
-      const ValueParams& values) OVERRIDE {
+      const ValueParams& values) override {
     const OncFieldSignature* field = NULL;
     if (signature_)
       field = GetFieldSignature(*signature_, key);
@@ -382,7 +382,7 @@ class MergeToAugmented : public MergeToEffective {
       // Don't augment the GUID but write the plain value.
       if (!effective_value) {
         LOG(ERROR) << "GUID field has no effective value";
-        return make_scoped_ptr<base::Value>(NULL);
+        return nullptr;
       }
 
       // DCHECK that all provided GUIDs are identical.
@@ -439,13 +439,13 @@ class MergeToAugmented : public MergeToEffective {
     }
     if (augmented_value->empty())
       augmented_value.reset();
-    return augmented_value.PassAs<base::Value>();
+    return augmented_value.Pass();
   }
 
   // MergeListOfDictionaries override.
   virtual DictionaryPtr MergeNestedDictionaries(
       const std::string& key,
-      const DictPtrs &dicts) OVERRIDE {
+      const DictPtrs &dicts) override {
     DictionaryPtr result;
     if (signature_) {
       const OncValueSignature* enclosing_signature = signature_;

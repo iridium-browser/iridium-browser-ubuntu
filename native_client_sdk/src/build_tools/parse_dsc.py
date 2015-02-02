@@ -56,7 +56,7 @@ DSC_FORMAT = {
     'SEARCH': (list, '', False),
     'POST': (str, '', False),
     'PRE': (str, '', False),
-    'DEST': (str, ['getting_started', 'examples/api',
+    'DEST': (str, ['getting_started', 'examples/api', 'examples/benchmarks',
                    'examples/demo', 'examples/tutorial',
                    'src', 'tests'], True),
     'NAME': (str, '', False),
@@ -66,6 +66,7 @@ DSC_FORMAT = {
     'EXPERIMENTAL': (bool, [True, False], False),
     'PERMISSIONS': (list, '', False),
     'SOCKET_PERMISSIONS': (list, '', False),
+    'FILESYSTEM_PERMISSIONS': (list, '', False),
     'MULTI_PLATFORM': (bool, [True, False], False),
     'MIN_CHROME_VERSION': (str, '', False),
 }

@@ -51,20 +51,20 @@ namespace panel_internal {
 class PanelExtensionWindowController : public extensions::WindowController {
  public:
   PanelExtensionWindowController(Panel* panel, Profile* profile);
-  virtual ~PanelExtensionWindowController();
+  ~PanelExtensionWindowController() override;
 
   // Overridden from extensions::WindowController.
-  virtual int GetWindowId() const OVERRIDE;
-  virtual std::string GetWindowTypeText() const OVERRIDE;
-  virtual base::DictionaryValue* CreateWindowValueWithTabs(
-      const extensions::Extension* extension) const OVERRIDE;
-  virtual base::DictionaryValue* CreateTabValue(
-      const extensions::Extension* extension, int tab_index) const OVERRIDE;
-  virtual bool CanClose(Reason* reason) const OVERRIDE;
-  virtual void SetFullscreenMode(bool is_fullscreen,
-                                 const GURL& extension_url) const OVERRIDE;
-  virtual bool IsVisibleToExtension(
-      const extensions::Extension* extension) const OVERRIDE;
+  int GetWindowId() const override;
+  std::string GetWindowTypeText() const override;
+  base::DictionaryValue* CreateWindowValueWithTabs(
+      const extensions::Extension* extension) const override;
+  base::DictionaryValue* CreateTabValue(const extensions::Extension* extension,
+                                        int tab_index) const override;
+  bool CanClose(Reason* reason) const override;
+  void SetFullscreenMode(bool is_fullscreen,
+                         const GURL& extension_url) const override;
+  bool IsVisibleToExtension(
+      const extensions::Extension* extension) const override;
 
  private:
   Panel* panel_;  // Weak pointer. Owns us.
@@ -247,7 +247,7 @@ bool Panel::IsFullscreen() const {
   return false;
 }
 
-gfx::NativeWindow Panel::GetNativeWindow() {
+gfx::NativeWindow Panel::GetNativeWindow() const {
   return native_panel_->GetNativePanelWindow();
 }
 

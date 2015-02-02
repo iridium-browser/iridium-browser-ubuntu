@@ -12,17 +12,17 @@ namespace ash {
 class TrayEmpty : public SystemTrayItem {
  public:
   explicit TrayEmpty(SystemTray* system_tray);
-  virtual ~TrayEmpty();
+  ~TrayEmpty() override;
 
  private:
   // Overridden from SystemTrayItem.
-  virtual views::View* CreateTrayView(user::LoginStatus status) OVERRIDE;
-  virtual views::View* CreateDefaultView(user::LoginStatus status) OVERRIDE;
-  virtual views::View* CreateDetailedView(user::LoginStatus status) OVERRIDE;
-  virtual void DestroyTrayView() OVERRIDE;
-  virtual void DestroyDefaultView() OVERRIDE;
-  virtual void DestroyDetailedView() OVERRIDE;
-  virtual void UpdateAfterLoginStatusChange(user::LoginStatus status) OVERRIDE;
+  views::View* CreateTrayView(user::LoginStatus status) override;
+  views::View* CreateDefaultView(user::LoginStatus status) override;
+  views::View* CreateDetailedView(user::LoginStatus status) override;
+  void DestroyTrayView() override;
+  void DestroyDefaultView() override;
+  void DestroyDetailedView() override;
+  void UpdateAfterLoginStatusChange(user::LoginStatus status) override;
 
   DISALLOW_COPY_AND_ASSIGN(TrayEmpty);
 };

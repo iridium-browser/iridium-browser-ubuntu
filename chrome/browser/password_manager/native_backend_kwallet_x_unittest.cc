@@ -239,8 +239,8 @@ class NativeBackendKWalletTest : public NativeBackendKWalletTestBase {
         kwallet_running_(true), kwallet_enabled_(true) {
   }
 
-  virtual void SetUp();
-  virtual void TearDown();
+  void SetUp() override;
+  void TearDown() override;
 
   // Let the DB thread run to completion of all current tasks.
   void RunDBThread() {
@@ -963,7 +963,7 @@ void NativeBackendKWalletPickleTest::CreatePickle(
   if (size_32)
     pickle->WriteUInt32(1);  // Size of form list. 32 bits.
   else
-    pickle->WriteUInt64(1);  // Size of form list. 64 bits.
+    pickle->WriteSizeT(1);  // Size of form list. 64 bits.
   pickle->WriteInt(form.scheme);
   pickle->WriteString(form.origin.spec());
   pickle->WriteString(form.action.spec());

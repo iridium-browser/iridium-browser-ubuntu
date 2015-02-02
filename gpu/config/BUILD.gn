@@ -4,6 +4,11 @@
 
 import("//build/config/ui.gni")
 
+declare_args() {
+  # Use the PCI lib to collect GPU information on Linux.
+  use_libpci = true
+}
+
 source_set("config") {
   sources = [
     "dx_diag_node.cc",
@@ -48,6 +53,9 @@ source_set("config") {
     "//ui/gl",
   ]
 
+  # Prefer mesa GL headers to system headers, which cause problems on Win.
+  include_dirs = [ "//third_party/mesa/src/include" ]
+
   if (is_win) {
     deps += [ "//third_party/libxml" ]
     libs = [ "dxguid.lib", "setupapi.lib" ]
@@ -58,8 +66,14 @@ source_set("config") {
         "//third_party/amd/amd_videocard_info_win.cc",
       ]
     }
+
+    # TODO(jschuh): size_t to int.
+    cflags = [ "/wd4267" ]
   }
-  if (is_linux && (use_x11 || use_ozone)) {
+  if (use_libpci) {
+    defines += [ "USE_LIBPCI=1" ]
+  }
+  if (is_linux && use_libpci && (use_x11 || use_ozone)) {
     deps += [
       "//build/config/linux:libpci",
     ]

@@ -123,7 +123,7 @@ SkFlattenable* SkModeColorFilter::CreateProc(SkReadBuffer& buffer) {
 ///////////////////////////////////////////////////////////////////////////////
 #if SK_SUPPORT_GPU
 #include "GrBlend.h"
-#include "GrProcessor.h"
+#include "GrFragmentProcessor.h"
 #include "GrProcessorUnitTest.h"
 #include "GrTBackendProcessorFactory.h"
 #include "gl/GrGLProcessor.h"
@@ -195,8 +195,6 @@ public:
         return SkNEW_ARGS(ModeColorFilterEffect, (c, mode));
     }
 
-    virtual void getConstantColorComponents(GrColor* color, uint32_t* validFlags) const SK_OVERRIDE;
-
     bool willUseFilterColor() const {
         SkXfermode::Coeff dstCoeff;
         SkXfermode::Coeff srcCoeff;
@@ -222,7 +220,7 @@ public:
             : INHERITED(factory) {
         }
 
-        virtual void emitCode(GrGLProgramBuilder* builder,
+        virtual void emitCode(GrGLFPBuilder* builder,
                               const GrFragmentProcessor& fp,
                               const GrProcessorKey&,
                               const char* outputColor,
@@ -276,22 +274,14 @@ public:
 private:
     ModeColorFilterEffect(GrColor color, SkXfermode::Mode mode)
         : fMode(mode),
-          fColor(color) {
+          fColor(color) {}
 
-        SkXfermode::Coeff dstCoeff;
-        SkXfermode::Coeff srcCoeff;
-        SkAssertResult(SkXfermode::ModeAsCoeff(fMode, &srcCoeff, &dstCoeff));
-        // These could be calculated from the blend equation with template trickery..
-        if (SkXfermode::kZero_Coeff == dstCoeff &&
-                !GrBlendCoeffRefsDst(sk_blend_to_grblend(srcCoeff))) {
-            this->setWillNotUseInputColor();
-        }
-    }
-
-    virtual bool onIsEqual(const GrProcessor& other) const SK_OVERRIDE {
+    virtual bool onIsEqual(const GrFragmentProcessor& other) const SK_OVERRIDE {
         const ModeColorFilterEffect& s = other.cast<ModeColorFilterEffect>();
         return fMode == s.fMode && fColor == s.fColor;
     }
+
+    virtual void onComputeInvariantOutput(InvariantOutput* inout) const SK_OVERRIDE;
 
     SkXfermode::Mode fMode;
     GrColor fColor;
@@ -382,18 +372,27 @@ private:
 
 }
 
-void ModeColorFilterEffect::getConstantColorComponents(GrColor* color, uint32_t* validFlags) const {
+void ModeColorFilterEffect::onComputeInvariantOutput(InvariantOutput* inout) const {
     float inputColor[4];
-    GrColorToRGBAFloat(*color, inputColor);
+    GrColorToRGBAFloat(inout->color(), inputColor);
     float filterColor[4];
     GrColorToRGBAFloat(fColor, filterColor);
     MaskedColorExpr result =
         color_filter_expression(fMode,
                                 MaskedColorExpr(filterColor, kRGBA_GrColorComponentFlags),
-                                MaskedColorExpr(inputColor, *validFlags));
+                                MaskedColorExpr(inputColor, inout->validFlags()));
 
-    *color = result.getColor();
-    *validFlags = result.getValidComponents();
+    // Check if we will use the input color
+    SkXfermode::Coeff dstCoeff;
+    SkXfermode::Coeff srcCoeff;
+    SkAssertResult(SkXfermode::ModeAsCoeff(fMode, &srcCoeff, &dstCoeff));
+    InvariantOutput::ReadInput readInput = InvariantOutput::kWill_ReadInput;
+    // These could be calculated from the blend equation with template trickery..
+    if (SkXfermode::kZero_Coeff == dstCoeff &&
+        !GrBlendCoeffRefsDst(sk_blend_to_grblend(srcCoeff))) {
+        readInput = InvariantOutput::kWillNot_ReadInput;
+    }
+    inout->setToOther(result.getValidComponents(), result.getColor(), readInput);
 }
 
 GR_DEFINE_FRAGMENT_PROCESSOR_TEST(ModeColorFilterEffect);
@@ -405,7 +404,13 @@ GrFragmentProcessor* ModeColorFilterEffect::TestCreate(SkRandom* rand,
     while (SkXfermode::kDst_Mode == mode) {
         mode = static_cast<SkXfermode::Mode>(rand->nextRangeU(0, SkXfermode::kLastCoeffMode));
     }
-    GrColor color = rand->nextU();
+
+    // pick a random premul color
+    uint8_t alpha = rand->nextULessThan(256);
+    GrColor color = GrColorPackRGBA(rand->nextRangeU(0, alpha),
+                                    rand->nextRangeU(0, alpha),
+                                    rand->nextRangeU(0, alpha),
+                                    alpha);
     return ModeColorFilterEffect::Create(color, mode);
 }
 

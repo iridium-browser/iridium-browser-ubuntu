@@ -4,7 +4,6 @@
 
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/history/core/browser/keyword_search_term.h"
@@ -41,13 +40,11 @@ class URLDatabaseTest : public testing::Test,
 
  protected:
   // Provided for URL/VisitDatabase.
-  virtual sql::Connection& GetDB() OVERRIDE {
-    return db_;
-  }
+  sql::Connection& GetDB() override { return db_; }
 
  private:
   // Test setup.
-  virtual void SetUp() {
+  void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     base::FilePath db_file = temp_dir_.path().AppendASCII("URLTest.db");
 
@@ -59,9 +56,7 @@ class URLDatabaseTest : public testing::Test,
     InitKeywordSearchTermsTable();
     CreateKeywordSearchTermsIndices();
   }
-  virtual void TearDown() {
-    db_.Close();
-  }
+  void TearDown() override { db_.Close(); }
 
   base::ScopedTempDir temp_dir_;
   sql::Connection db_;

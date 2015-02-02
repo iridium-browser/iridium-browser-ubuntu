@@ -14,6 +14,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/sequenced_worker_pool.h"
+#include "content/browser/appcache/appcache_interceptor.h"
 #include "content/browser/appcache/chrome_appcache_service.h"
 #include "content/browser/fileapi/browser_file_system_helper.h"
 #include "content/browser/fileapi/chrome_blob_storage_context.h"
@@ -57,12 +58,11 @@ class BlobProtocolHandler : public net::URLRequestJobFactory::ProtocolHandler {
         stream_context_(stream_context),
         file_system_context_(file_system_context) {}
 
-  virtual ~BlobProtocolHandler() {
-  }
+  ~BlobProtocolHandler() override {}
 
-  virtual net::URLRequestJob* MaybeCreateJob(
+  net::URLRequestJob* MaybeCreateJob(
       net::URLRequest* request,
-      net::NetworkDelegate* network_delegate) const OVERRIDE {
+      net::NetworkDelegate* network_delegate) const override {
     scoped_refptr<Stream> stream =
         stream_context_->registry()->GetStream(request->url());
     if (stream.get())
@@ -435,7 +435,10 @@ StoragePartitionImpl* StoragePartitionImplMap::Get(
 
   URLRequestInterceptorScopedVector request_interceptors;
   request_interceptors.push_back(
-      ServiceWorkerRequestHandler::CreateInterceptor().release());
+      ServiceWorkerRequestHandler::CreateInterceptor(
+          browser_context_->GetResourceContext()).release());
+  request_interceptors.push_back(
+      AppCacheInterceptor::CreateStartInterceptor().release());
 
   // These calls must happen after StoragePartitionImpl::Create().
   if (partition_domain.empty()) {

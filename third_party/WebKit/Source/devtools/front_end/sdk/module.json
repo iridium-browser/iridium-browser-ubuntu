@@ -1,12 +1,14 @@
 {
     "dependencies": [
         "common",
-        "host"
+        "host",
+        "platform"
     ],
     "scripts": [
         "InspectorBackend.js",
         "../InspectorBackendCommands.js",
         "Target.js",
+        "AnimationModel.js",
         "ApplicationCacheModel.js",
         "BlackboxSupport.js",
         "ConsoleModel.js",
@@ -22,9 +24,9 @@
         "Database.js",
         "DebuggerModel.js",
         "FileSystemModel.js",
+        "HAREntry.js",
         "IndexedDBModel.js",
         "LayerTreeModel.js",
-        "Locks.js",
         "NetworkLog.js",
         "OverridesSupport.js",
         "PowerProfiler.js",

@@ -7,7 +7,6 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "chrome/common/pref_names.h"
 #include "ui/views/controls/link_listener.h"
 #include "ui/views/window/dialog_delegate.h"
 
@@ -42,27 +41,26 @@ class DownloadFeedbackDialogView : public views::DialogDelegate,
       Profile* profile,
       content::PageNavigator* navigator,
       const UserDecisionCallback& callback);
-  virtual ~DownloadFeedbackDialogView();
+  ~DownloadFeedbackDialogView() override;
 
   // Handles the user's decision.
   bool OnButtonClicked(bool accepted);
 
   // views::DialogDelegate:
-  virtual ui::ModalType GetModalType() const OVERRIDE;
-  virtual base::string16 GetWindowTitle() const OVERRIDE;
-  virtual void DeleteDelegate() OVERRIDE;
-  virtual views::Widget* GetWidget() OVERRIDE;
-  virtual const views::Widget* GetWidget() const OVERRIDE;
-  virtual views::View* GetContentsView() OVERRIDE;
-  virtual int GetDefaultDialogButton() const OVERRIDE;
-  virtual base::string16 GetDialogButtonLabel(
-      ui::DialogButton button) const OVERRIDE;
-  virtual bool Cancel() OVERRIDE;
-  virtual bool Accept() OVERRIDE;
-  virtual views::View* CreateExtraView() OVERRIDE;
+  ui::ModalType GetModalType() const override;
+  base::string16 GetWindowTitle() const override;
+  void DeleteDelegate() override;
+  views::Widget* GetWidget() override;
+  const views::Widget* GetWidget() const override;
+  views::View* GetContentsView() override;
+  int GetDefaultDialogButton() const override;
+  base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
+  bool Cancel() override;
+  bool Accept() override;
+  views::View* CreateExtraView() override;
 
   // views::LinkListener:
-  virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
+  void LinkClicked(views::Link* source, int event_flags) override;
 
   Profile* profile_;
   content::PageNavigator* navigator_;

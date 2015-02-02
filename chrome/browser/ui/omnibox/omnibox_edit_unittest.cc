@@ -24,69 +24,65 @@ class TestingOmniboxView : public OmniboxView {
       : OmniboxView(NULL, controller, NULL) {}
 
   // OmniboxView:
-  virtual void SaveStateToTab(WebContents* tab) OVERRIDE {}
-  virtual void OnTabChanged(const WebContents* web_contents) OVERRIDE {}
-  virtual void Update() OVERRIDE {}
-  virtual void UpdatePlaceholderText() OVERRIDE {}
-  virtual void OpenMatch(const AutocompleteMatch& match,
-                         WindowOpenDisposition disposition,
-                         const GURL& alternate_nav_url,
-                         const base::string16& pasted_text,
-                         size_t selected_line) OVERRIDE {}
-  virtual base::string16 GetText() const OVERRIDE { return text_; }
-  virtual void SetUserText(const base::string16& text,
-                           const base::string16& display_text,
-                           bool update_popup) OVERRIDE {
+  void SaveStateToTab(WebContents* tab) override {}
+  void OnTabChanged(const WebContents* web_contents) override {}
+  void Update() override {}
+  void UpdatePlaceholderText() override {}
+  void OpenMatch(const AutocompleteMatch& match,
+                 WindowOpenDisposition disposition,
+                 const GURL& alternate_nav_url,
+                 const base::string16& pasted_text,
+                 size_t selected_line) override {}
+  base::string16 GetText() const override { return text_; }
+  void SetUserText(const base::string16& text,
+                   const base::string16& display_text,
+                   bool update_popup) override {
     text_ = display_text;
   }
-  virtual void SetWindowTextAndCaretPos(const base::string16& text,
-                                        size_t caret_pos,
-                                        bool update_popup,
-                                        bool notify_text_changed) OVERRIDE {
+  void SetWindowTextAndCaretPos(const base::string16& text,
+                                size_t caret_pos,
+                                bool update_popup,
+                                bool notify_text_changed) override {
     text_ = text;
   }
-  virtual void SetForcedQuery() OVERRIDE {}
-  virtual bool IsSelectAll() const OVERRIDE { return false; }
-  virtual bool DeleteAtEndPressed() OVERRIDE { return false; }
-  virtual void GetSelectionBounds(size_t* start, size_t* end) const OVERRIDE {}
-  virtual void SelectAll(bool reversed) OVERRIDE {}
-  virtual void RevertAll() OVERRIDE {}
-  virtual void UpdatePopup() OVERRIDE {}
-  virtual void SetFocus() OVERRIDE {}
-  virtual void ApplyCaretVisibility() OVERRIDE {}
-  virtual void OnTemporaryTextMaybeChanged(
-      const base::string16& display_text,
-      bool save_original_selection,
-      bool notify_text_changed) OVERRIDE {
+  void SetForcedQuery() override {}
+  bool IsSelectAll() const override { return false; }
+  bool DeleteAtEndPressed() override { return false; }
+  void GetSelectionBounds(size_t* start, size_t* end) const override {}
+  void SelectAll(bool reversed) override {}
+  void RevertAll() override {}
+  void UpdatePopup() override {}
+  void SetFocus() override {}
+  void ApplyCaretVisibility() override {}
+  void OnTemporaryTextMaybeChanged(const base::string16& display_text,
+                                   bool save_original_selection,
+                                   bool notify_text_changed) override {
     text_ = display_text;
   }
-  virtual bool OnInlineAutocompleteTextMaybeChanged(
-      const base::string16& display_text, size_t user_text_length) OVERRIDE {
+  bool OnInlineAutocompleteTextMaybeChanged(const base::string16& display_text,
+                                            size_t user_text_length) override {
     const bool text_changed = text_ != display_text;
     text_ = display_text;
     inline_autocomplete_text_ = display_text.substr(user_text_length);
     return text_changed;
   }
-  virtual void OnInlineAutocompleteTextCleared() OVERRIDE {
+  void OnInlineAutocompleteTextCleared() override {
     inline_autocomplete_text_.clear();
   }
-  virtual void OnRevertTemporaryText() OVERRIDE {}
-  virtual void OnBeforePossibleChange() OVERRIDE {}
-  virtual bool OnAfterPossibleChange() OVERRIDE { return false; }
-  virtual gfx::NativeView GetNativeView() const OVERRIDE { return NULL; }
-  virtual gfx::NativeView GetRelativeWindowForPopup() const OVERRIDE {
-    return NULL;
-  }
-  virtual void SetGrayTextAutocompletion(
-      const base::string16& input) OVERRIDE {}
-  virtual base::string16 GetGrayTextAutocompletion() const OVERRIDE {
+  void OnRevertTemporaryText() override {}
+  void OnBeforePossibleChange() override {}
+  bool OnAfterPossibleChange() override { return false; }
+  gfx::NativeView GetNativeView() const override { return NULL; }
+  gfx::NativeView GetRelativeWindowForPopup() const override { return NULL; }
+  void SetGrayTextAutocompletion(const base::string16& input) override {}
+  base::string16 GetGrayTextAutocompletion() const override {
     return base::string16();
   }
-  virtual int GetTextWidth() const OVERRIDE { return 0; }
-  virtual int GetWidth() const OVERRIDE { return 0; }
-  virtual bool IsImeComposing() const OVERRIDE { return false; }
-  virtual int GetOmniboxTextLength() const OVERRIDE { return 0; }
-  virtual void EmphasizeURLComponents() OVERRIDE { }
+  int GetTextWidth() const override { return 0; }
+  int GetWidth() const override { return 0; }
+  bool IsImeComposing() const override { return false; }
+  int GetOmniboxTextLength() const override { return 0; }
+  void EmphasizeURLComponents() override {}
 
   const base::string16& inline_autocomplete_text() const {
     return inline_autocomplete_text_;
@@ -108,16 +104,16 @@ class TestingOmniboxEditController : public OmniboxEditController {
 
  protected:
   // OmniboxEditController:
-  virtual void Update(const content::WebContents* contents) OVERRIDE {}
-  virtual void OnChanged() OVERRIDE {}
-  virtual void OnSetFocus() OVERRIDE {}
-  virtual void ShowURL() OVERRIDE {}
-  virtual void HideURL() OVERRIDE {}
-  virtual void EndOriginChipAnimations(bool cancel_fade) OVERRIDE {}
-  virtual InstantController* GetInstant() OVERRIDE { return NULL; }
-  virtual WebContents* GetWebContents() OVERRIDE { return NULL; }
-  virtual ToolbarModel* GetToolbarModel() OVERRIDE { return toolbar_model_; }
-  virtual const ToolbarModel* GetToolbarModel() const OVERRIDE {
+  void Update(const content::WebContents* contents) override {}
+  void OnChanged() override {}
+  void OnSetFocus() override {}
+  void ShowURL() override {}
+  void HideURL() override {}
+  void EndOriginChipAnimations(bool cancel_fade) override {}
+  InstantController* GetInstant() override { return NULL; }
+  WebContents* GetWebContents() override { return NULL; }
+  ToolbarModel* GetToolbarModel() override { return toolbar_model_; }
+  const ToolbarModel* GetToolbarModel() const override {
     return toolbar_model_;
   }
 
@@ -203,7 +199,7 @@ TEST_F(AutocompleteEditTest, AdjustTextForCopy) {
       &profile, &AutocompleteClassifierFactory::BuildInstanceFor);
   OmniboxEditModel model(&view, &controller, &profile);
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(input); ++i) {
+  for (size_t i = 0; i < arraysize(input); ++i) {
     toolbar_model()->set_text(ASCIIToUTF16(input[i].perm_text));
     model.UpdatePermanentText();
 

@@ -24,14 +24,12 @@ class ConnectionListener : public GamepadConsumer {
     ClearCounters();
   }
 
-  virtual void OnGamepadConnected(
-      unsigned index,
-      const blink::WebGamepad& gamepad) OVERRIDE {
+  void OnGamepadConnected(unsigned index,
+                          const blink::WebGamepad& gamepad) override {
     connected_counter_++;
   }
-  virtual void OnGamepadDisconnected(
-      unsigned index,
-      const blink::WebGamepad& gamepad) OVERRIDE {
+  void OnGamepadDisconnected(unsigned index,
+                             const blink::WebGamepad& gamepad) override {
     disconnected_counter_++;
   }
 
@@ -51,7 +49,7 @@ class ConnectionListener : public GamepadConsumer {
 class GamepadServiceTest : public testing::Test {
  protected:
   GamepadServiceTest();
-  virtual ~GamepadServiceTest() OVERRIDE;
+  ~GamepadServiceTest() override;
 
   void SetPadsConnected(bool connected);
   void WaitForData();
@@ -63,7 +61,7 @@ class GamepadServiceTest : public testing::Test {
     return connection_listener_->disconnected_counter();
   }
 
-  virtual void SetUp() OVERRIDE;
+  void SetUp() override;
 
  private:
   MockGamepadDataFetcher* fetcher_;

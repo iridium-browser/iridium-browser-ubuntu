@@ -37,11 +37,8 @@
 #include "chrome/browser/chromeos/extensions/default_app_order.h"
 #include "chrome/browser/chromeos/extensions/extension_system_event_observer.h"
 #include "chrome/browser/chromeos/external_metrics.h"
-#include "chrome/browser/chromeos/imageburner/burn_manager.h"
 #include "chrome/browser/chromeos/input_method/input_method_configuration.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
-#include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_idle_logout.h"
-#include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_screensaver.h"
 #include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_settings.h"
 #include "chrome/browser/chromeos/language_preferences.h"
 #include "chrome/browser/chromeos/login/helper.h"
@@ -50,7 +47,6 @@
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
-#include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/memory/oom_priority_manager.h"
 #include "chrome/browser/chromeos/net/network_portal_detector_impl.h"
@@ -78,6 +74,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/rlz/rlz.h"
+#include "chrome/browser/ui/ash/network_connect_delegate_chromeos.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -116,6 +113,7 @@
 #include "content/public/common/main_function_params.h"
 #include "media/audio/sounds/sounds_manager.h"
 #include "net/base/network_change_notifier.h"
+#include "net/socket/ssl_server_socket.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "ui/base/touch/touch_device.h"
@@ -126,6 +124,12 @@
 #include "chrome/browser/chromeos/device_uma.h"
 #include "chrome/browser/chromeos/events/system_key_event_listener.h"
 #include "chrome/browser/chromeos/events/xinput_hierarchy_changed_event_listener.h"
+#endif
+
+#if !defined(USE_ATHENA)
+#include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_idle_logout.h"
+#include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_screensaver.h"
+#include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
 #endif
 
 namespace chromeos {
@@ -179,6 +183,10 @@ class DBusServices {
     // the network manager.
     NetworkChangeNotifierFactoryChromeos::GetInstance()->Initialize();
 
+    // Initialize the NetworkConnect handler.
+    network_connect_delegate_.reset(new NetworkConnectDelegateChromeOS);
+    ui::NetworkConnect::Initialize(network_connect_delegate_.get());
+
     // Likewise, initialize the upgrade detector for Chrome OS. The upgrade
     // detector starts to monitor changes from the update engine.
     UpgradeDetectorChromeos::GetInstance()->Init();
@@ -193,6 +201,9 @@ class DBusServices {
   }
 
   ~DBusServices() {
+    ui::NetworkConnect::Shutdown();
+    network_connect_delegate_.reset();
+
     CertLibrary::Shutdown();
     NetworkHandler::Shutdown();
 
@@ -214,6 +225,7 @@ class DBusServices {
   }
 
  private:
+  scoped_ptr<NetworkConnectDelegateChromeOS> network_connect_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(DBusServices);
 };
@@ -228,8 +240,10 @@ ChromeBrowserMainPartsChromeos::ChromeBrowserMainPartsChromeos(
 }
 
 ChromeBrowserMainPartsChromeos::~ChromeBrowserMainPartsChromeos() {
+#if !defined(USE_ATHENA)
   if (KioskModeSettings::Get()->IsKioskModeEnabled())
     ShutdownKioskModeScreensaver();
+#endif
 
   // To be precise, logout (browser shutdown) is not yet done, but the
   // remaining work is negligible, hence we say LogoutDone here.
@@ -298,6 +312,10 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopStart() {
 
   dbus_services_.reset(new internal::DBusServices(parameters()));
 
+  // Enable support for SSL server sockets, which must be done while still
+  // single-threaded.  This is required for remote assistance host on Chrome OS.
+  net::EnableSSLServerSockets();
+
   ChromeBrowserMainPartsLinux::PostMainMessageLoopStart();
 }
 
@@ -322,8 +340,6 @@ void ChromeBrowserMainPartsChromeos::PreMainMessageLoopRun() {
 
   base::FilePath downloads_directory;
   CHECK(PathService::Get(chrome::DIR_DEFAULT_DOWNLOADS, &downloads_directory));
-  imageburner::BurnManager::Initialize(
-      downloads_directory, g_browser_process->system_request_context());
 
   DeviceOAuth2TokenServiceFactory::Initialize();
 
@@ -346,12 +362,16 @@ void ChromeBrowserMainPartsChromeos::PreProfileInit() {
 
   g_browser_process->platform_part()->InitializeChromeUserManager();
 
+#if defined(USE_ATHENA)
+  ScreenLocker::InitClass();
+#else
   // Initialize the screen locker now so that it can receive
   // LOGIN_USER_CHANGED notification from UserManager.
   if (KioskModeSettings::Get()->IsKioskModeEnabled())
     KioskModeIdleLogout::Initialize();
   else
     ScreenLocker::InitClass();
+#endif
 
   // This forces the ProfileManager to be created and register for the
   // notification it needs to track the logged in user.
@@ -570,6 +590,7 @@ void ChromeBrowserMainPartsChromeos::PostProfileInit() {
     light_bar_.reset(new LightBar());
 
   g_browser_process->platform_part()->InitializeAutomaticRebootManager();
+  g_browser_process->platform_part()->InitializeDeviceDisablingManager();
 
   // This observer cannot be created earlier because it requires the shell to be
   // available.
@@ -705,7 +726,6 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopRun() {
   SystemKeyEventListener::Shutdown();
 #endif
 
-  imageburner::BurnManager::Shutdown();
   CrasAudioHandler::Shutdown();
 
   // Detach D-Bus clients before DBusThreadManager is shut down.
@@ -727,7 +747,13 @@ void ChromeBrowserMainPartsChromeos::PostMainMessageLoopRun() {
   // that the UserManager has no URLRequest pending (see
   // http://crbug.com/276659).
   g_browser_process->platform_part()->user_manager()->Shutdown();
+#if !defined(USE_ATHENA)
   WallpaperManager::Get()->Shutdown();
+#endif
+
+  // Let the DeviceDisablingManager unregister itself as an observer of the
+  // CrosSettings singleton before it is destroyed.
+  g_browser_process->platform_part()->ShutdownDeviceDisablingManager();
 
   // Let the AutomaticRebootManager unregister itself as an observer of several
   // subsystems.

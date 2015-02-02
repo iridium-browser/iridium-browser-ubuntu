@@ -15,20 +15,19 @@ namespace syncer {
 class MockUpdateHandler : public UpdateHandler {
  public:
   explicit MockUpdateHandler(ModelType type);
-  virtual ~MockUpdateHandler();
+  ~MockUpdateHandler() override;
 
   // UpdateHandler implementation.
-  virtual void GetDownloadProgress(
-      sync_pb::DataTypeProgressMarker* progress_marker) const OVERRIDE;
-  virtual void GetDataTypeContext(sync_pb::DataTypeContext* context) const
-      OVERRIDE;
-  virtual SyncerError ProcessGetUpdatesResponse(
+  void GetDownloadProgress(
+      sync_pb::DataTypeProgressMarker* progress_marker) const override;
+  void GetDataTypeContext(sync_pb::DataTypeContext* context) const override;
+  SyncerError ProcessGetUpdatesResponse(
       const sync_pb::DataTypeProgressMarker& progress_marker,
       const sync_pb::DataTypeContext& mutated_context,
       const SyncEntityList& applicable_updates,
-      sessions::StatusController* status) OVERRIDE;
-  virtual void ApplyUpdates(sessions::StatusController* status) OVERRIDE;
-  virtual void PassiveApplyUpdates(sessions::StatusController* status) OVERRIDE;
+      sessions::StatusController* status) override;
+  void ApplyUpdates(sessions::StatusController* status) override;
+  void PassiveApplyUpdates(sessions::StatusController* status) override;
 
   // Returns the number of times ApplyUpdates() was invoked.
   int GetApplyUpdatesCount();

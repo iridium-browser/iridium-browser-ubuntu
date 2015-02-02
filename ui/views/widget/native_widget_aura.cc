@@ -37,6 +37,7 @@
 #include "ui/views/widget/widget_delegate.h"
 #include "ui/views/widget/window_reorderer.h"
 #include "ui/wm/core/shadow_types.h"
+#include "ui/wm/core/window_animations.h"
 #include "ui/wm/core/window_util.h"
 #include "ui/wm/public/activation_client.h"
 #include "ui/wm/public/drag_drop_client.h"
@@ -226,11 +227,7 @@ const ui::Compositor* NativeWidgetAura::GetCompositor() const {
   return window_ ? window_->layer()->GetCompositor() : NULL;
 }
 
-ui::Compositor* NativeWidgetAura::GetCompositor() {
-  return window_ ? window_->layer()->GetCompositor() : NULL;
-}
-
-ui::Layer* NativeWidgetAura::GetLayer() {
+const ui::Layer* NativeWidgetAura::GetLayer() const {
   return window_ ? window_->layer() : NULL;
 }
 
@@ -682,6 +679,31 @@ void NativeWidgetAura::SetVisibilityChangedAnimationsEnabled(bool value) {
     window_->SetProperty(aura::client::kAnimationsDisabledKey, !value);
 }
 
+void NativeWidgetAura::SetVisibilityAnimationDuration(
+    const base::TimeDelta& duration) {
+  wm::SetWindowVisibilityAnimationDuration(window_, duration);
+}
+
+void NativeWidgetAura::SetVisibilityAnimationTransition(
+    Widget::VisibilityTransition transition) {
+  wm::WindowVisibilityAnimationTransition wm_transition = wm::ANIMATE_NONE;
+  switch (transition) {
+    case Widget::ANIMATE_SHOW:
+      wm_transition = wm::ANIMATE_SHOW;
+      break;
+    case Widget::ANIMATE_HIDE:
+      wm_transition = wm::ANIMATE_HIDE;
+      break;
+    case Widget::ANIMATE_BOTH:
+      wm_transition = wm::ANIMATE_BOTH;
+      break;
+    case Widget::ANIMATE_NONE:
+      wm_transition = wm::ANIMATE_NONE;
+      break;
+  }
+  wm::SetWindowVisibilityAnimationTransition(window_, wm_transition);
+}
+
 ui::NativeTheme* NativeWidgetAura::GetNativeTheme() const {
 #if !defined(OS_CHROMEOS)
   return DesktopWindowTreeHost::GetNativeTheme(window_);
@@ -700,6 +722,8 @@ bool NativeWidgetAura::IsTranslucentWindowOpacitySupported() const {
 void NativeWidgetAura::OnSizeConstraintsChanged() {
   window_->SetProperty(aura::client::kCanMaximizeKey,
                        GetWidget()->widget_delegate()->CanMaximize());
+  window_->SetProperty(aura::client::kCanMinimizeKey,
+                       GetWidget()->widget_delegate()->CanMinimize());
   window_->SetProperty(aura::client::kCanResizeKey,
                        GetWidget()->widget_delegate()->CanResize());
 }
@@ -1105,16 +1129,18 @@ void NativeWidgetPrivate::GetAllChildWidgets(gfx::NativeView native_view,
 // static
 void NativeWidgetPrivate::GetAllOwnedWidgets(gfx::NativeView native_view,
                                              Widget::Widgets* owned) {
-  const aura::Window::Windows& transient_children =
-      wm::GetTransientChildren(native_view);
-  for (aura::Window::Windows::const_iterator i = transient_children.begin();
-       i != transient_children.end(); ++i) {
+  // Add all owned widgets.
+  for (aura::Window* transient_child : wm::GetTransientChildren(native_view)) {
     NativeWidgetPrivate* native_widget = static_cast<NativeWidgetPrivate*>(
-        GetNativeWidgetForNativeView(*i));
+        GetNativeWidgetForNativeView(transient_child));
     if (native_widget && native_widget->GetWidget())
       owned->insert(native_widget->GetWidget());
-    GetAllOwnedWidgets((*i), owned);
+    GetAllOwnedWidgets(transient_child, owned);
   }
+
+  // Add all child windows.
+  for (aura::Window* child : native_view->children())
+    GetAllChildWidgets(child, owned);
 }
 
 // static
@@ -1170,7 +1196,7 @@ bool NativeWidgetPrivate::IsMouseButtonDown() {
 // static
 gfx::FontList NativeWidgetPrivate::GetWindowTitleFontList() {
 #if defined(OS_WIN)
-  NONCLIENTMETRICS ncm;
+  NONCLIENTMETRICS_XP ncm;
   base::win::GetNonClientMetrics(&ncm);
   l10n_util::AdjustUIFont(&(ncm.lfCaptionFont));
   base::win::ScopedHFONT caption_font(CreateFontIndirect(&(ncm.lfCaptionFont)));

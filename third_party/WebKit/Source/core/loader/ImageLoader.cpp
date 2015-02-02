@@ -87,7 +87,7 @@ public:
     {
     }
 
-    virtual void run() OVERRIDE
+    virtual void run() override
     {
         if (m_loader) {
             m_loader->doUpdateFromElement(m_shouldBypassMainWorldCSP, m_updateBehavior);
@@ -120,6 +120,7 @@ ImageLoader::ImageLoader(Element* element)
     , m_imageComplete(true)
     , m_loadingImageDocument(false)
     , m_elementIsProtected(false)
+    , m_suppressErrorEvents(false)
     , m_highPriorityClientCount(0)
 {
     WTF_LOG(Timers, "new ImageLoader %p", this);
@@ -252,6 +253,7 @@ void ImageLoader::doUpdateFromElement(BypassMainWorldBehavior bypassBehavior, Up
         // Unlike raw <img>, we block mixed content inside of <picture> or <img srcset>.
         ResourceLoaderOptions resourceLoaderOptions = ResourceFetcher::defaultResourceOptions();
         ResourceRequest resourceRequest(url);
+        resourceRequest.setFetchCredentialsMode(WebURLRequest::FetchCredentialsModeSameOrigin);
         if (isHTMLPictureElement(element()->parentNode()) || !element()->fastGetAttribute(HTMLNames::srcsetAttr).isNull()) {
             resourceLoaderOptions.mixedContentBlockingTreatment = TreatAsActiveContent;
             resourceRequest.setRequestContext(WebURLRequest::RequestContextImageSet);
@@ -319,6 +321,7 @@ void ImageLoader::doUpdateFromElement(BypassMainWorldBehavior bypassBehavior, Up
 void ImageLoader::updateFromElement(UpdateFromElementBehavior updateBehavior, LoadType loadType)
 {
     AtomicString imageSourceURL = m_element->imageSourceURL();
+    m_suppressErrorEvents = (updateBehavior == UpdateSizeChanged);
 
     if (updateBehavior == UpdateIgnorePreviousError)
         clearFailedLoadURL();
@@ -364,7 +367,7 @@ bool ImageLoader::shouldLoadImmediately(const KURL& url, LoadType loadType) cons
         || isHTMLObjectElement(m_element)
         || isHTMLEmbedElement(m_element)
         || url.protocolIsData()
-        || memoryCache()->resourceForURL(url)
+        || memoryCache()->resourceForURL(url, m_element->document().fetcher()->getCacheIdentifier())
         || loadType == ForceLoadImmediately);
 }
 
@@ -386,8 +389,12 @@ void ImageLoader::notifyFinished(Resource* resource)
         loadEventSender().cancelEvent(this);
         m_hasPendingLoadEvent = false;
 
-        m_hasPendingErrorEvent = true;
-        errorEventSender().dispatchEventSoon(this);
+        // The error event should not fire if the image data update is a result of environment change.
+        // https://html.spec.whatwg.org/multipage/embedded-content.html#the-img-element:the-img-element-55
+        if (!m_suppressErrorEvents) {
+            m_hasPendingErrorEvent = true;
+            errorEventSender().dispatchEventSoon(this);
+        }
 
         // Only consider updating the protection ref-count of the Element immediately before returning
         // from this function as doing so might result in the destruction of this ImageLoader.

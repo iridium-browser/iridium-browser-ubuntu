@@ -26,15 +26,14 @@ namespace test {
 class TestChannelIDKey : public ChannelIDKey {
  public:
   explicit TestChannelIDKey(EVP_PKEY* ecdsa_key) : ecdsa_key_(ecdsa_key) {}
-  virtual ~TestChannelIDKey() OVERRIDE {}
+  ~TestChannelIDKey() override {}
 
   // ChannelIDKey implementation.
 
-  virtual bool Sign(StringPiece signed_data,
-                    string* out_signature) const OVERRIDE {
+  bool Sign(StringPiece signed_data, string* out_signature) const override {
     crypto::ScopedEVP_MD_CTX md_ctx(EVP_MD_CTX_create());
     if (!md_ctx ||
-        EVP_DigestSignInit(md_ctx.get(), NULL, EVP_sha256(), NULL,
+        EVP_DigestSignInit(md_ctx.get(), nullptr, EVP_sha256(), nullptr,
                            ecdsa_key_.get()) != 1) {
       return false;
     }
@@ -46,7 +45,7 @@ class TestChannelIDKey : public ChannelIDKey {
     EVP_DigestUpdate(md_ctx.get(), signed_data.data(), signed_data.size());
 
     size_t sig_len;
-    if (!EVP_DigestSignFinal(md_ctx.get(), NULL, &sig_len)) {
+    if (!EVP_DigestSignFinal(md_ctx.get(), nullptr, &sig_len)) {
       return false;
     }
 
@@ -57,8 +56,8 @@ class TestChannelIDKey : public ChannelIDKey {
 
     uint8* derp = der_sig.get();
     crypto::ScopedECDSA_SIG sig(
-        d2i_ECDSA_SIG(NULL, const_cast<const uint8**>(&derp), sig_len));
-    if (sig.get() == NULL) {
+        d2i_ECDSA_SIG(nullptr, const_cast<const uint8**>(&derp), sig_len));
+    if (sig.get() == nullptr) {
       return false;
     }
 
@@ -75,13 +74,13 @@ class TestChannelIDKey : public ChannelIDKey {
     return true;
   }
 
-  virtual string SerializeKey() const OVERRIDE {
+  string SerializeKey() const override {
     // i2d_PublicKey will produce an ANSI X9.62 public key which, for a P-256
     // key, is 0x04 (meaning uncompressed) followed by the x and y field
     // elements as 32-byte, big-endian numbers.
     static const int kExpectedKeyLength = 65;
 
-    int len = i2d_PublicKey(ecdsa_key_.get(), NULL);
+    int len = i2d_PublicKey(ecdsa_key_.get(), nullptr);
     if (len != kExpectedKeyLength) {
       return "";
     }
@@ -99,14 +98,14 @@ class TestChannelIDKey : public ChannelIDKey {
 
 class TestChannelIDSource : public ChannelIDSource {
  public:
-  virtual ~TestChannelIDSource() {}
+  ~TestChannelIDSource() override {}
 
   // ChannelIDSource implementation.
 
-  virtual QuicAsyncStatus GetChannelIDKey(
+  QuicAsyncStatus GetChannelIDKey(
       const string& hostname,
       scoped_ptr<ChannelIDKey>* channel_id_key,
-      ChannelIDSourceCallback* /*callback*/) OVERRIDE {
+      ChannelIDSourceCallback* /*callback*/) override {
     channel_id_key->reset(new TestChannelIDKey(HostnameToKey(hostname)));
     return QUIC_SUCCESS;
   }
@@ -131,19 +130,20 @@ class TestChannelIDSource : public ChannelIDSource {
     digest[0] &= 0x7f;
 
     crypto::ScopedBIGNUM k(BN_new());
-    CHECK(BN_bin2bn(digest, sizeof(digest), k.get()) != NULL);
+    CHECK(BN_bin2bn(digest, sizeof(digest), k.get()) != nullptr);
 
     crypto::ScopedOpenSSL<EC_GROUP, EC_GROUP_free>::Type p256(
         EC_GROUP_new_by_curve_name(NID_X9_62_prime256v1));
     CHECK(p256.get());
 
     crypto::ScopedEC_KEY ecdsa_key(EC_KEY_new());
-    CHECK(ecdsa_key.get() != NULL &&
+    CHECK(ecdsa_key.get() != nullptr &&
           EC_KEY_set_group(ecdsa_key.get(), p256.get()));
 
     crypto::ScopedOpenSSL<EC_POINT, EC_POINT_free>::Type point(
         EC_POINT_new(p256.get()));
-    CHECK(EC_POINT_mul(p256.get(), point.get(), k.get(), NULL, NULL, NULL));
+    CHECK(EC_POINT_mul(p256.get(), point.get(), k.get(), nullptr, nullptr,
+                       nullptr));
 
     EC_KEY_set_private_key(ecdsa_key.get(), k.get());
     EC_KEY_set_public_key(ecdsa_key.get(), point.get());

@@ -20,7 +20,7 @@
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/events/event.h"
 #include "ui/events/keycodes/keyboard_codes.h"
-#include "ui/gfx/vector3d_f.h"
+#include "ui/gfx/geometry/vector3d_f.h"
 
 #if defined(USE_X11)
 #include "ash/wm/maximize_mode/scoped_disable_internal_mouse_and_keyboard_x11.h"
@@ -118,6 +118,7 @@ MaximizeModeController::MaximizeModeController()
     : rotation_locked_(false),
       have_seen_accelerometer_data_(false),
       ignore_display_configuration_updates_(false),
+      lid_open_past_180_(false),
       shutting_down_(false),
       user_rotation_(gfx::Display::ROTATE_0),
       last_touchview_transition_time_(base::Time::Now()),
@@ -166,7 +167,7 @@ bool MaximizeModeController::CanEnterMaximizeMode() {
   // The --enable-touch-view-testing switch can also mean that we may enter
   // maximize mode.
   return have_seen_accelerometer_data_ ||
-         CommandLine::ForCurrentProcess()->HasSwitch(
+         base::CommandLine::ForCurrentProcess()->HasSwitch(
              switches::kAshEnableTouchViewTesting);
 }
 
@@ -274,7 +275,6 @@ void MaximizeModeController::SuspendDone(
 void MaximizeModeController::HandleHingeRotation(const gfx::Vector3dF& base,
                                                  const gfx::Vector3dF& lid) {
   static const gfx::Vector3dF hinge_vector(1.0f, 0.0f, 0.0f);
-  bool maximize_mode_engaged = IsMaximizeModeWindowManagerEnabled();
   // Ignore the component of acceleration parallel to the hinge for the purposes
   // of hinge angle calculation.
   gfx::Vector3dF base_flattened(base);
@@ -306,16 +306,25 @@ void MaximizeModeController::HandleHingeRotation(const gfx::Vector3dF& base,
     last_lid_open_time_ = base::TimeTicks();
 
   // Toggle maximize mode on or off when corresponding thresholds are passed.
-  // TODO(flackr): Make MaximizeModeController own the MaximizeModeWindowManager
-  // such that observations of state changes occur after the change and shell
-  // has fewer states to track.
-  if (maximize_mode_engaged && is_angle_stable &&
+  if (lid_open_past_180_ && is_angle_stable &&
       lid_angle <= kExitMaximizeModeAngle) {
-    LeaveMaximizeMode();
-  } else if (!lid_is_closed_ && !maximize_mode_engaged &&
+    lid_open_past_180_ = false;
+    if (!base::CommandLine::ForCurrentProcess()->
+            HasSwitch(switches::kAshEnableTouchViewTesting)) {
+      LeaveMaximizeMode();
+    }
+    event_blocker_.reset();
+  } else if (!lid_open_past_180_ && !lid_is_closed_ &&
              lid_angle >= kEnterMaximizeModeAngle &&
              (is_angle_stable || !WasLidOpenedRecently())) {
-    EnterMaximizeMode();
+    lid_open_past_180_ = true;
+    if (!base::CommandLine::ForCurrentProcess()->
+            HasSwitch(switches::kAshEnableTouchViewTesting)) {
+      EnterMaximizeMode();
+    }
+#if defined(USE_X11)
+    event_blocker_.reset(new ScopedDisableInternalMouseAndKeyboardX11);
+#endif
   }
 }
 
@@ -402,9 +411,6 @@ void MaximizeModeController::EnterMaximizeMode() {
     LoadDisplayRotationProperties();
   }
   EnableMaximizeModeWindowManager(true);
-#if defined(USE_X11)
-  event_blocker_.reset(new ScopedDisableInternalMouseAndKeyboardX11);
-#endif
   Shell::GetInstance()->display_controller()->AddObserver(this);
 }
 
@@ -421,7 +427,6 @@ void MaximizeModeController::LeaveMaximizeMode() {
   if (!shutting_down_)
     SetRotationLocked(false);
   EnableMaximizeModeWindowManager(false);
-  event_blocker_.reset();
   Shell::GetInstance()->display_controller()->RemoveObserver(this);
 }
 

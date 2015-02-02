@@ -104,8 +104,8 @@ bool RenderView::hitTest(const HitTestRequest& request, const HitTestLocation& l
 
     bool hitLayer = layer()->hitTest(request, location, result);
 
-    // ScrollView scrollbars are not the same as RenderLayer scrollbars tested by RenderLayer::hitTestOverflowControls,
-    // so we need to test ScrollView scrollbars separately here. Note that it's important we do this after
+    // FrameView scrollbars are not the same as RenderLayer scrollbars tested by RenderLayer::hitTestOverflowControls,
+    // so we need to test FrameView scrollbars separately here. Note that it's important we do this after
     // the hit test above, because that may overwrite the entire HitTestResult when it finds a hit.
     IntPoint viewPoint = location.roundedPoint() - frameView()->scrollOffset();
     if (Scrollbar* frameScrollbar = frameView()->scrollbarAtViewPoint(viewPoint))
@@ -242,8 +242,11 @@ void RenderView::mapLocalToContainer(const RenderLayerModelObject* paintInvalida
         transformState.applyTransform(t);
     }
 
-    if (mode & IsFixed && m_frameView)
+    if ((mode & IsFixed) && m_frameView) {
         transformState.move(m_frameView->scrollOffsetForFixedPosition());
+        // IsFixed flag is only applicable within this RenderView.
+        mode &= ~IsFixed;
+    }
 
     if (paintInvalidationContainer == this)
         return;
@@ -330,13 +333,13 @@ void RenderView::invalidateTreeIfNeeded(const PaintInvalidationState& paintInval
     LayoutRect dirtyRect = viewRect();
     if (doingFullPaintInvalidation() && !dirtyRect.isEmpty()) {
         const RenderLayerModelObject* paintInvalidationContainer = &paintInvalidationState.paintInvalidationContainer();
-        mapRectToPaintInvalidationBacking(paintInvalidationContainer, dirtyRect, &paintInvalidationState);
-        invalidatePaintUsingContainer(paintInvalidationContainer, dirtyRect, InvalidationFull);
+        RenderLayer::mapRectToPaintInvalidationBacking(this, paintInvalidationContainer, dirtyRect, &paintInvalidationState);
+        invalidatePaintUsingContainer(paintInvalidationContainer, dirtyRect, PaintInvalidationFull);
     }
     RenderBlock::invalidateTreeIfNeeded(paintInvalidationState);
 }
 
-void RenderView::invalidatePaintForRectangle(const LayoutRect& paintInvalidationRect) const
+void RenderView::invalidatePaintForRectangle(const LayoutRect& paintInvalidationRect, PaintInvalidationReason invalidationReason) const
 {
     ASSERT(!paintInvalidationRect.isEmpty());
 
@@ -346,7 +349,7 @@ void RenderView::invalidatePaintForRectangle(const LayoutRect& paintInvalidation
     ASSERT(layer()->compositingState() == PaintsIntoOwnBacking || !frame()->ownerRenderer());
 
     if (layer()->compositingState() == PaintsIntoOwnBacking) {
-        setBackingNeedsPaintInvalidationInRect(paintInvalidationRect);
+        setBackingNeedsPaintInvalidationInRect(paintInvalidationRect, invalidationReason);
     } else {
         m_frameView->contentRectangleForPaintInvalidation(pixelSnappedIntRect(paintInvalidationRect));
     }
@@ -354,7 +357,7 @@ void RenderView::invalidatePaintForRectangle(const LayoutRect& paintInvalidation
 
 void RenderView::invalidatePaintForViewAndCompositedLayers()
 {
-    setShouldDoFullPaintInvalidation(true);
+    setShouldDoFullPaintInvalidation();
 
     // The only way we know how to hit these ASSERTS below this point is via the Chromium OS login screen.
     DisableCompositingQueryAsserts disabler;
@@ -373,7 +376,7 @@ void RenderView::mapRectToPaintInvalidationBacking(const RenderLayerModelObject*
     if (document().printing())
         return;
 
-    if (style()->isFlippedBlocksWritingMode()) {
+    if (style()->slowIsFlippedBlocksWritingMode()) {
         // We have to flip by hand since the view's logical height has not been determined.  We
         // can use the viewport width and height.
         if (style()->isHorizontalWritingMode())
@@ -382,13 +385,7 @@ void RenderView::mapRectToPaintInvalidationBacking(const RenderLayerModelObject*
             rect.setX(viewWidth() - rect.maxX());
     }
 
-    if (viewportConstraint == IsFixedPosition && m_frameView) {
-        rect.move(m_frameView->scrollOffsetForFixedPosition());
-        // If we have a pending scroll, invalidate the previous scroll position.
-        if (!m_frameView->pendingScrollDelta().isZero()) {
-            rect.move(-m_frameView->pendingScrollDelta());
-        }
-    }
+    adjustViewportConstrainedOffset(rect, viewportConstraint);
 
     // Apply our transform if we have one (because of full page zooming).
     if (!paintInvalidationContainer && layer() && layer()->transform())
@@ -416,6 +413,18 @@ void RenderView::mapRectToPaintInvalidationBacking(const RenderLayerModelObject*
     }
 }
 
+void RenderView::adjustViewportConstrainedOffset(LayoutRect& rect, ViewportConstrainedPosition viewportConstraint) const
+{
+    if (viewportConstraint != IsFixedPosition)
+        return;
+
+    if (m_frameView) {
+        rect.move(m_frameView->scrollOffsetForFixedPosition());
+        // If we have a pending scroll, invalidate the previous scroll position.
+        if (!m_frameView->pendingScrollDelta().isZero())
+            rect.move(-LayoutSize(m_frameView->pendingScrollDelta()));
+    }
+}
 
 void RenderView::absoluteRects(Vector<IntRect>& rects, const LayoutPoint& accumulatedOffset) const
 {
@@ -465,26 +474,15 @@ IntRect RenderView::selectionBounds() const
     // Now create a single bounding box rect that encloses the whole selection.
     LayoutRect selRect;
     SelectionMap::iterator end = selectedObjects.end();
-    for (SelectionMap::iterator i = selectedObjects.begin(); i != end; ++i) {
-        RenderSelectionInfo* info = i->value.get();
-        // RenderSelectionInfo::rect() is in the coordinates of the paintInvalidationContainer, so map to page coordinates.
-        LayoutRect currRect = info->rect();
-        if (const RenderLayerModelObject* paintInvalidationContainer = info->paintInvalidationContainer()) {
-            FloatQuad absQuad = paintInvalidationContainer->localToAbsoluteQuad(FloatRect(currRect));
-            currRect = absQuad.enclosingBoundingBox();
-        }
-        selRect.unite(currRect);
-    }
+    for (SelectionMap::iterator i = selectedObjects.begin(); i != end; ++i)
+        selRect.unite(i->value->absoluteSelectionRect());
+
     return pixelSnappedIntRect(selRect);
 }
 
 void RenderView::invalidatePaintForSelection() const
 {
     HashSet<RenderBlock*> processedBlocks;
-
-    // For querying RenderLayer::compositingState()
-    // FIXME: this may be wrong. crbug.com/407416
-    DisableCompositingQueryAsserts disabler;
 
     RenderObject* end = rendererAfterPosition(m_selectionEnd, m_selectionEndPos);
     for (RenderObject* o = m_selectionStart; o && o != end; o = o->nextInPreOrder()) {
@@ -493,13 +491,13 @@ void RenderView::invalidatePaintForSelection() const
         if (o->selectionState() == SelectionNone)
             continue;
 
-        RenderSelectionInfo(o).invalidatePaint();
+        o->setShouldInvalidateSelection();
 
         // Blocks are responsible for painting line gaps and margin gaps. They must be examined as well.
         for (RenderBlock* block = o->containingBlock(); block && !block->isRenderView(); block = block->containingBlock()) {
             if (!processedBlocks.add(block).isNewEntry)
                 break;
-            RenderSelectionInfo(block).invalidatePaint();
+            block->setShouldInvalidateSelection();
         }
     }
 }
@@ -548,15 +546,19 @@ void RenderView::setSelection(RenderObject* start, int startPos, RenderObject* e
     int oldEndPos = m_selectionEndPos;
 
     // Objects each have a single selection rect to examine.
-    typedef WillBeHeapHashMap<RawPtrWillBeMember<RenderObject>, OwnPtrWillBeMember<RenderSelectionInfo> > SelectedObjectMap;
+    typedef WillBeHeapHashMap<RawPtrWillBeMember<RenderObject>, SelectionState > SelectedObjectMap;
     SelectedObjectMap oldSelectedObjects;
+    // FIXME: |newSelectedObjects| doesn't really need to store the SelectionState, it's just more convenient
+    // to have it use the same data structure as |oldSelectedObjects|.
     SelectedObjectMap newSelectedObjects;
 
     // Blocks contain selected objects and fill gaps between them, either on the left, right, or in between lines and blocks.
     // In order to get the paint invalidation rect right, we have to examine left, middle, and right rects individually, since otherwise
     // the union of those rects might remain the same even when changes have occurred.
-    typedef WillBeHeapHashMap<RawPtrWillBeMember<RenderBlock>, OwnPtrWillBeMember<RenderBlockSelectionInfo> > SelectedBlockMap;
+    typedef WillBeHeapHashMap<RawPtrWillBeMember<RenderBlock>, SelectionState > SelectedBlockMap;
     SelectedBlockMap oldSelectedBlocks;
+    // FIXME: |newSelectedBlocks| doesn't really need to store the SelectionState, it's just more convenient
+    // to have it use the same data structure as |oldSelectedBlocks|.
     SelectedBlockMap newSelectedBlocks;
 
     RenderObject* os = m_selectionStart;
@@ -566,14 +568,13 @@ void RenderView::setSelection(RenderObject* start, int startPos, RenderObject* e
     while (continueExploring) {
         if ((os->canBeSelectionLeaf() || os == m_selectionStart || os == m_selectionEnd) && os->selectionState() != SelectionNone) {
             // Blocks are responsible for painting line gaps and margin gaps.  They must be examined as well.
-            oldSelectedObjects.set(os, adoptPtrWillBeNoop(new RenderSelectionInfo(os)));
+            oldSelectedObjects.set(os, os->selectionState());
             if (blockPaintInvalidationMode == PaintInvalidationNewXOROld) {
                 RenderBlock* cb = os->containingBlock();
                 while (cb && !cb->isRenderView()) {
-                    OwnPtrWillBeMember<RenderBlockSelectionInfo>& blockInfo = oldSelectedBlocks.add(cb, nullptr).storedValue->value;
-                    if (blockInfo)
+                    SelectedBlockMap::AddResult result = oldSelectedBlocks.add(cb, cb->selectionState());
+                    if (!result.isNewEntry)
                         break;
-                    blockInfo = adoptPtrWillBeNoop(new RenderBlockSelectionInfo(cb));
                     cb = cb->containingBlock();
                 }
             }
@@ -612,8 +613,7 @@ void RenderView::setSelection(RenderObject* start, int startPos, RenderObject* e
         o = o->nextInPreOrder();
     }
 
-    if (blockPaintInvalidationMode != PaintInvalidationNothing)
-        layer()->clearBlockSelectionGapsBounds();
+    layer()->clearBlockSelectionGapsBounds();
 
     // Now that the selection state has been updated for the new objects, walk them again and
     // put them in the new objects list.
@@ -622,13 +622,12 @@ void RenderView::setSelection(RenderObject* start, int startPos, RenderObject* e
     continueExploring = o && (o != stop);
     while (continueExploring) {
         if ((o->canBeSelectionLeaf() || o == start || o == end) && o->selectionState() != SelectionNone) {
-            newSelectedObjects.set(o, adoptPtrWillBeNoop(new RenderSelectionInfo(o)));
+            newSelectedObjects.set(o, o->selectionState());
             RenderBlock* cb = o->containingBlock();
             while (cb && !cb->isRenderView()) {
-                OwnPtrWillBeMember<RenderBlockSelectionInfo>& blockInfo = newSelectedBlocks.add(cb, nullptr).storedValue->value;
-                if (blockInfo)
+                SelectedBlockMap::AddResult result = newSelectedBlocks.add(cb, cb->selectionState());
+                if (!result.isNewEntry)
                     break;
-                blockInfo = adoptPtrWillBeNoop(new RenderBlockSelectionInfo(cb));
                 cb = cb->containingBlock();
             }
         }
@@ -636,61 +635,43 @@ void RenderView::setSelection(RenderObject* start, int startPos, RenderObject* e
         o = getNextOrPrevRenderObjectBasedOnDirection(o, stop, continueExploring, exploringBackwards);
     }
 
-    if (!m_frameView || blockPaintInvalidationMode == PaintInvalidationNothing)
+    if (!m_frameView)
         return;
-
-    // For querying RenderLayer::compositingState()
-    // FIXME: this is wrong, selection should not cause eager invalidation. crbug.com/407416
-    DisableCompositingQueryAsserts disabler;
 
     // Have any of the old selected objects changed compared to the new selection?
     for (SelectedObjectMap::iterator i = oldSelectedObjects.begin(); i != oldObjectsEnd; ++i) {
         RenderObject* obj = i->key;
-        RenderSelectionInfo* newInfo = newSelectedObjects.get(obj);
-        RenderSelectionInfo* oldInfo = i->value.get();
-        if (!newInfo || oldInfo->rect() != newInfo->rect() || oldInfo->state() != newInfo->state() ||
-            (m_selectionStart == obj && oldStartPos != m_selectionStartPos) ||
-            (m_selectionEnd == obj && oldEndPos != m_selectionEndPos)) {
-            oldInfo->invalidatePaint();
-            if (newInfo) {
-                newInfo->invalidatePaint();
-                newSelectedObjects.remove(obj);
-            }
+        SelectionState newSelectionState = obj->selectionState();
+        SelectionState oldSelectionState = i->value;
+        if (newSelectionState != oldSelectionState
+            || (m_selectionStart == obj && oldStartPos != m_selectionStartPos)
+            || (m_selectionEnd == obj && oldEndPos != m_selectionEndPos)) {
+            obj->setShouldInvalidateSelection();
+            newSelectedObjects.remove(obj);
         }
     }
 
     // Any new objects that remain were not found in the old objects dict, and so they need to be updated.
     SelectedObjectMap::iterator newObjectsEnd = newSelectedObjects.end();
     for (SelectedObjectMap::iterator i = newSelectedObjects.begin(); i != newObjectsEnd; ++i)
-        i->value->invalidatePaint();
+        i->key->setShouldInvalidateSelection();
 
     // Have any of the old blocks changed?
     SelectedBlockMap::iterator oldBlocksEnd = oldSelectedBlocks.end();
     for (SelectedBlockMap::iterator i = oldSelectedBlocks.begin(); i != oldBlocksEnd; ++i) {
         RenderBlock* block = i->key;
-        RenderBlockSelectionInfo* newInfo = newSelectedBlocks.get(block);
-        RenderBlockSelectionInfo* oldInfo = i->value.get();
-        if (!newInfo || oldInfo->rects() != newInfo->rects() || oldInfo->state() != newInfo->state()) {
-            oldInfo->invalidatePaint();
-            if (newInfo) {
-                newInfo->invalidatePaint();
-                newSelectedBlocks.remove(block);
-            }
+        SelectionState newSelectionState = block->selectionState();
+        SelectionState oldSelectionState = i->value;
+        if (newSelectionState != oldSelectionState) {
+            block->setShouldInvalidateSelection();
+            newSelectedBlocks.remove(block);
         }
     }
 
     // Any new blocks that remain were not found in the old blocks dict, and so they need to be updated.
     SelectedBlockMap::iterator newBlocksEnd = newSelectedBlocks.end();
     for (SelectedBlockMap::iterator i = newSelectedBlocks.begin(); i != newBlocksEnd; ++i)
-        i->value->invalidatePaint();
-}
-
-void RenderView::getSelection(RenderObject*& startRenderer, int& startOffset, RenderObject*& endRenderer, int& endOffset) const
-{
-    startRenderer = m_selectionStart;
-    startOffset = m_selectionStartPos;
-    endRenderer = m_selectionEnd;
-    endOffset = m_selectionEndPos;
+        i->key->setShouldInvalidateSelection();
 }
 
 void RenderView::clearSelection()
@@ -765,7 +746,7 @@ LayoutRect RenderView::backgroundRect(RenderBox* backgroundRenderer) const
 IntRect RenderView::documentRect() const
 {
     FloatRect overflowRect(unscaledDocumentRect());
-    if (hasTransform())
+    if (hasTransformRelatedProperty())
         overflowRect = layer()->currentTransform().mapRect(overflowRect);
     return IntRect(overflowRect);
 }

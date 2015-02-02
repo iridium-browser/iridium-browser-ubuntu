@@ -22,11 +22,11 @@ class WebstoreInstallerTest : public ExtensionBrowserTest {
                         const std::string& crx_filename,
                         const std::string& verified_domain,
                         const std::string& unverified_domain);
-  virtual ~WebstoreInstallerTest();
+  ~WebstoreInstallerTest() override;
 
-  virtual void SetUpCommandLine(base::CommandLine* command_line) OVERRIDE;
-  virtual void SetUpInProcessBrowserTestFixture() OVERRIDE;
-  virtual void SetUpOnMainThread() OVERRIDE;
+  void SetUpCommandLine(base::CommandLine* command_line) override;
+  void SetUpInProcessBrowserTestFixture() override;
+  void SetUpOnMainThread() override;
 
  protected:
   GURL GenerateTestServerUrl(const std::string& domain,

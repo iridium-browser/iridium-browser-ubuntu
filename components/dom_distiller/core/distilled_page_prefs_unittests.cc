@@ -19,14 +19,13 @@ class TestingObserver : public DistilledPagePrefs::Observer {
       : font_(DistilledPagePrefs::SANS_SERIF),
         theme_(DistilledPagePrefs::LIGHT) {}
 
-  virtual void OnChangeFontFamily(
-      DistilledPagePrefs::FontFamily new_font) OVERRIDE {
+  void OnChangeFontFamily(DistilledPagePrefs::FontFamily new_font) override {
     font_ = new_font;
   }
 
   DistilledPagePrefs::FontFamily GetFontFamily() { return font_; }
 
-  virtual void OnChangeTheme(DistilledPagePrefs::Theme new_theme) OVERRIDE {
+  void OnChangeTheme(DistilledPagePrefs::Theme new_theme) override {
     theme_ = new_theme;
   }
 
@@ -41,7 +40,7 @@ class TestingObserver : public DistilledPagePrefs::Observer {
 
 class DistilledPagePrefsTest : public testing::Test {
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     pref_service_.reset(new user_prefs::TestingPrefServiceSyncable());
     DistilledPagePrefs::RegisterProfilePrefs(pref_service_->registry());
     distilled_page_prefs_.reset(new DistilledPagePrefs(pref_service_.get()));

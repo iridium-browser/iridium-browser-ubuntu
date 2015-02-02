@@ -1,4 +1,4 @@
-// Copyright (c) 2014 The Chromium Authors. All rights reserved.
+// Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -40,7 +40,7 @@ function NaClManager() {
 
   /**
    * NaCl plugin element on extension background page.
-   * @private {?Nacl}
+   * @private {?HTMLEmbedElement}
    */
   this.plugin_ = null;
 
@@ -77,6 +77,8 @@ NaClManager.ManagerState_ = {
 };
 var ManagerState_ = NaClManager.ManagerState_;
 var Error_ = hotword.constants.Error;
+var UmaNaClMessageTimeout_ = hotword.constants.UmaNaClMessageTimeout;
+var UmaNaClPluginLoadResult_ = hotword.constants.UmaNaClPluginLoadResult;
 
 NaClManager.prototype.__proto__ = cr.EventTarget.prototype;
 
@@ -86,9 +88,21 @@ NaClManager.prototype.__proto__ = cr.EventTarget.prototype;
  * @private
  */
 NaClManager.prototype.handleError_ = function(error) {
-  event = new Event(hotword.constants.Event.ERROR);
+  var event = new Event(hotword.constants.Event.ERROR);
   event.data = error;
   this.dispatchEvent(event);
+};
+
+/**
+ * Record the result of loading the NaCl plugin to UMA.
+ * @param {!hotword.constants.UmaNaClPluginLoadResult} error
+ * @private
+ */
+NaClManager.prototype.logPluginLoadResult_ = function(error) {
+  hotword.metrics.recordEnum(
+      hotword.constants.UmaMetrics.NACL_PLUGIN_LOAD_RESULT,
+      error,
+      UmaNaClPluginLoadResult_.MAX);
 };
 
 /**
@@ -105,7 +119,7 @@ NaClManager.prototype.isRunning = function() {
  * @private
  */
 NaClManager.prototype.setTimeout_ = function(func, timeout) {
-  assert(!this.naclTimeoutId_);
+  assert(!this.naclTimeoutId_, 'Timeout already exists');
   this.naclTimeoutId_ = window.setTimeout(
       function() {
         this.naclTimeoutId_ = null;
@@ -198,11 +212,11 @@ NaClManager.prototype.getPossibleLanguages_ = function() {
 /**
  * Creates a NaCl plugin object and attaches it to the page.
  * @param {!string} src Location of the plugin.
- * @return {!Nacl} NaCl plugin DOM object.
+ * @return {!HTMLEmbedElement} NaCl plugin DOM object.
  * @private
  */
 NaClManager.prototype.createPlugin_ = function(src) {
-  var plugin = document.createElement('embed');
+  var plugin = /** @type {HTMLEmbedElement} */(document.createElement('embed'));
   plugin.src = src;
   plugin.type = 'application/x-nacl';
   document.body.appendChild(plugin);
@@ -216,7 +230,9 @@ NaClManager.prototype.createPlugin_ = function(src) {
  * @return {boolean} True if the successful.
  */
 NaClManager.prototype.initialize = function(naclArch, stream) {
-  assert(this.recognizerState_ == ManagerState_.UNINITIALIZED);
+  assert(this.recognizerState_ == ManagerState_.UNINITIALIZED,
+         'Recognizer not in uninitialized state. State: ' +
+         this.recognizerState_);
   var langs = this.getPossibleLanguages_();
   var i, j;
   // For country-lang variations. For example, when combined with path it will
@@ -233,7 +249,7 @@ NaClManager.prototype.initialize = function(naclArch, stream) {
     }
 
     var plugin = this.createPlugin_(pluginSrc);
-    this.plugin_ = /** @type {Nacl} */ (plugin);
+    this.plugin_ = plugin;
     if (!this.plugin_ || !this.plugin_.postMessage) {
       document.body.removeChild(this.plugin_);
       this.recognizerState_ = ManagerState_.ERROR;
@@ -248,11 +264,16 @@ NaClManager.prototype.initialize = function(naclArch, stream) {
                             false);
 
     plugin.addEventListener('crash',
-                            this.handleError_.bind(this, Error_.NACL_CRASH),
+                            function() {
+                              this.handleError_(Error_.NACL_CRASH);
+                              this.logPluginLoadResult_(
+                                  UmaNaClPluginLoadResult_.CRASH);
+                            }.bind(this),
                             false);
     return true;
   }
   this.recognizerState_ = ManagerState_.ERROR;
+  this.logPluginLoadResult_(UmaNaClPluginLoadResult_.NO_MODULE_FOUND);
   return false;
 };
 
@@ -271,11 +292,12 @@ NaClManager.prototype.shutdown = function() {
 
 /**
  * Sends data to the NaCl plugin.
- * @param {!string} data Command to be sent to NaCl plugin.
+ * @param {!string|!MediaStreamTrack} data Command to be sent to NaCl plugin.
  * @private
  */
 NaClManager.prototype.sendDataToPlugin_ = function(data) {
-  assert(this.recognizerState_ != ManagerState_.UNINITIALIZED);
+  assert(this.recognizerState_ != ManagerState_.UNINITIALIZED,
+         'Recognizer in uninitialized state');
   this.plugin_.postMessage(data);
 };
 
@@ -294,6 +316,30 @@ NaClManager.prototype.waitForMessage_ = function(timeout, message) {
       function() {
         this.recognizerState_ = ManagerState_.ERROR;
         this.handleError_(Error_.TIMEOUT);
+        switch (this.expectingMessage_) {
+          case hotword.constants.NaClPlugin.REQUEST_MODEL:
+            var metricValue = UmaNaClMessageTimeout_.REQUEST_MODEL;
+            break;
+          case hotword.constants.NaClPlugin.MODEL_LOADED:
+            var metricValue = UmaNaClMessageTimeout_.MODEL_LOADED;
+            break;
+          case hotword.constants.NaClPlugin.READY_FOR_AUDIO:
+            var metricValue = UmaNaClMessageTimeout_.READY_FOR_AUDIO;
+            break;
+          case hotword.constants.NaClPlugin.STOPPED:
+            var metricValue = UmaNaClMessageTimeout_.STOPPED;
+            break;
+          case hotword.constants.NaClPlugin.HOTWORD_DETECTED:
+            var metricValue = UmaNaClMessageTimeout_.HOTWORD_DETECTED;
+            break;
+          case hotword.constants.NaClPlugin.MS_CONFIGURED:
+            var metricValue = UmaNaClMessageTimeout_.MS_CONFIGURED;
+            break;
+        }
+        hotword.metrics.recordEnum(
+            hotword.constants.UmaMetrics.NACL_MESSAGE_TIMEOUT,
+            metricValue,
+            UmaNaClMessageTimeout_.MAX);
       }.bind(this), timeout);
   this.expectingMessage_ = message;
 };
@@ -320,6 +366,7 @@ NaClManager.prototype.handleRequestModel_ = function() {
   if (this.recognizerState_ != ManagerState_.LOADING) {
     return;
   }
+  this.logPluginLoadResult_(UmaNaClPluginLoadResult_.SUCCESS);
   this.sendDataToPlugin_(
       hotword.constants.NaClPlugin.MODEL_PREFIX + this.modelUrl_);
   this.waitForMessage_(hotword.constants.TimeoutMs.LONG,

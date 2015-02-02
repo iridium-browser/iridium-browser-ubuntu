@@ -14,12 +14,12 @@ TEST(StringTest, DefaultIsNull) {
 }
 
 TEST(StringTest, ConstructedWithNULL) {
-  String s(NULL);
+  String s(nullptr);
   EXPECT_TRUE(s.is_null());
 }
 
 TEST(StringTest, ConstructedWithNullCharPointer) {
-  const char* null = NULL;
+  const char* null = nullptr;
   String s(null);
   EXPECT_TRUE(s.is_null());
 }
@@ -27,7 +27,7 @@ TEST(StringTest, ConstructedWithNullCharPointer) {
 TEST(StringTest, AssignedNULL) {
   String s("");
   EXPECT_FALSE(s.is_null());
-  s = NULL;
+  s = nullptr;
   EXPECT_TRUE(s.is_null());
 }
 
@@ -59,6 +59,17 @@ TEST(StringTest, Equality) {
   EXPECT_TRUE(s == "hello world");
   EXPECT_TRUE("not" != s);
   EXPECT_TRUE(s != "not");
+}
+
+TEST(StringTest, LessThanNullness) {
+  String null;
+  String null2;
+  EXPECT_FALSE(null < null2);
+  EXPECT_FALSE(null2 < null);
+
+  String real("real");
+  EXPECT_TRUE(null < real);
+  EXPECT_FALSE(real < null);
 }
 
 }  // namespace test

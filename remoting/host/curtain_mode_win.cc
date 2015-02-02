@@ -16,7 +16,7 @@ class CurtainModeWin : public CurtainMode {
   CurtainModeWin();
 
   // Overriden from CurtainMode.
-  virtual bool Activate() OVERRIDE;
+  virtual bool Activate() override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(CurtainModeWin);
@@ -50,7 +50,7 @@ scoped_ptr<CurtainMode> CurtainMode::Create(
   // |client_session_control| is not used because the client session is
   // disconnected as soon as the session is re-attached to the local console.
   // See RdpDesktopSession for more details.
-  return scoped_ptr<CurtainMode>(new CurtainModeWin());
+  return make_scoped_ptr(new CurtainModeWin());
 }
 
 }  // namespace remoting

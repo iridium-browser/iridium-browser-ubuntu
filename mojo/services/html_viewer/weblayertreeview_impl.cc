@@ -11,7 +11,7 @@
 #include "cc/trees/layer_tree_host.h"
 #include "mojo/cc/context_provider_mojo.h"
 #include "mojo/cc/output_surface_mojo.h"
-#include "mojo/services/public/cpp/surfaces/surfaces_type_converters.h"
+#include "mojo/converters/surfaces/surfaces_type_converters.h"
 #include "mojo/services/public/cpp/view_manager/view.h"
 #include "third_party/WebKit/public/web/WebWidget.h"
 
@@ -39,10 +39,12 @@ WebLayerTreeViewImpl::WebLayerTreeViewImpl(
   settings.layer_transforms_should_scale_layer_contents = true;
 
   cc::SharedBitmapManager* shared_bitmap_manager = NULL;
+  gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager = NULL;
 
   layer_tree_host_ =
       cc::LayerTreeHost::CreateThreaded(this,
                                         shared_bitmap_manager,
+                                        gpu_memory_buffer_manager,
                                         settings,
                                         base::MessageLoopProxy::current(),
                                         compositor_message_loop_proxy);
@@ -70,6 +72,18 @@ void WebLayerTreeViewImpl::BeginMainFrame(const cc::BeginFrameArgs& args) {
 
 void WebLayerTreeViewImpl::Layout() {
   widget_->layout();
+}
+
+void WebLayerTreeViewImpl::ApplyViewportDeltas(
+    const gfx::Vector2d& inner_delta,
+    const gfx::Vector2d& outer_delta,
+    float page_scale,
+    float top_controls_delta) {
+  widget_->applyViewportDeltas(
+      inner_delta,
+      outer_delta,
+      page_scale,
+      top_controls_delta);
 }
 
 void WebLayerTreeViewImpl::ApplyViewportDeltas(
@@ -208,7 +222,7 @@ void WebLayerTreeViewImpl::finishAllRendering() {
 void WebLayerTreeViewImpl::OnSurfaceConnectionCreated(SurfacePtr surface,
                                                       uint32_t id_namespace) {
   CommandBufferPtr cb;
-  gpu_service_->CreateOffscreenGLES2Context(Get(&cb));
+  gpu_service_->CreateOffscreenGLES2Context(GetProxy(&cb));
   scoped_refptr<cc::ContextProvider> context_provider(
       new ContextProviderMojo(cb.PassMessagePipe()));
   output_surface_.reset(new OutputSurfaceMojo(

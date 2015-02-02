@@ -8,13 +8,13 @@ found in the LICENSE file.
 <link rel="import" href="/cc/constants.html">
 <link rel="import" href="/cc/region.html">
 <link rel="import" href="/cc/tile_coverage_rect.html">
-<link rel="import" href="/tvcm/rect.html">
+<link rel="import" href="/base/rect.html">
 <link rel="import" href="/tracing/trace_model/object_instance.html">
 
 <script>
 'use strict';
 
-tvcm.exportTo('cc', function() {
+tv.exportTo('cc', function() {
   var constants = cc.constants;
   var ObjectSnapshot = tracing.trace_model.ObjectSnapshot;
 
@@ -38,6 +38,7 @@ tvcm.exportTo('cc', function() {
     initialize: function() {
       // Defaults.
       this.invalidation = new cc.Region();
+      this.annotatedInvalidation = new cc.Region();
       this.unrecordedRegion = new cc.Region();
       this.pictures = [];
 
@@ -54,13 +55,13 @@ tvcm.exportTo('cc', function() {
       this.gpuMemoryUsageInBytes = this.args.gpuMemoryUsage;
 
       // Leave bounds in both places.
-      this.bounds = tvcm.Rect.fromXYWH(
+      this.bounds = tv.Rect.fromXYWH(
           0, 0,
           this.args.bounds.width, this.args.bounds.height);
 
       if (this.args.animationBounds) {
         // AnimationBounds[2] and [5] are the Z-component of the box.
-        this.animationBoundsRect = tvcm.Rect.fromXYWH(
+        this.animationBoundsRect = tv.Rect.fromXYWH(
             this.args.animationBounds[0], this.args.animationBounds[1],
             this.args.animationBounds[3], this.args.animationBounds[4]);
       }
@@ -124,6 +125,16 @@ tvcm.exportTo('cc', function() {
       if (this.args.invalidation) {
         this.invalidation = cc.Region.fromArray(this.args.invalidation);
         delete this.args.invalidation;
+      }
+      if (this.args.annotatedInvalidationRects) {
+        this.annotatedInvalidation = new cc.Region();
+        for (var i = 0; i < this.args.annotatedInvalidationRects.length; ++i) {
+          var annotatedRect = this.args.annotatedInvalidationRects[i];
+          var rect = annotatedRect.geometryRect;
+          rect.reason = annotatedRect.reason;
+          this.annotatedInvalidation.addRect(rect);
+        }
+        delete this.args.annotatedInvalidationRects;
       }
       if (this.args.unrecordedRegion) {
         this.unrecordedRegion = cc.Region.fromArray(

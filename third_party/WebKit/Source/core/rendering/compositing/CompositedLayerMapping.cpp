@@ -33,6 +33,7 @@
 #include "core/html/HTMLCanvasElement.h"
 #include "core/html/HTMLIFrameElement.h"
 #include "core/html/HTMLMediaElement.h"
+#include "core/html/HTMLVideoElement.h"
 #include "core/html/canvas/CanvasRenderingContext.h"
 #include "core/inspector/InspectorInstrumentation.h"
 #include "core/inspector/InspectorNodeIds.h"
@@ -40,6 +41,7 @@
 #include "core/page/ChromeClient.h"
 #include "core/page/Page.h"
 #include "core/page/scrolling/ScrollingCoordinator.h"
+#include "core/paint/LayerPainter.h"
 #include "core/plugins/PluginView.h"
 #include "core/rendering/FilterEffectRenderer.h"
 #include "core/rendering/RenderEmbeddedObject.h"
@@ -162,8 +164,6 @@ CompositedLayerMapping::CompositedLayerMapping(RenderLayer& layer)
     , m_contentOffsetInCompositingLayerDirty(false)
     , m_pendingUpdateScope(GraphicsLayerUpdateNone)
     , m_isMainFrameRenderViewLayer(false)
-    , m_requiresOwnBackingStoreForIntrinsicReasons(false)
-    , m_requiresOwnBackingStoreForAncestorReasons(false)
     , m_backgroundLayerPaintsFixedRootBackground(false)
     , m_scrollingContentsAreEmpty(false)
 {
@@ -262,7 +262,7 @@ void CompositedLayerMapping::updateTransform(const RenderStyle* style)
     // FIXME: This could use m_owningLayer.transform(), but that currently has transform-origin
     // baked into it, and we don't want that.
     TransformationMatrix t;
-    if (m_owningLayer.hasTransform()) {
+    if (m_owningLayer.hasTransformRelatedProperty()) {
         style->applyTransform(t, toRenderBox(renderer())->pixelSnappedBorderBoxRect().size(), RenderStyle::ExcludeTransformOrigin);
         makeMatrixRenderable(t, compositor()->hasAcceleratedCompositing());
     }
@@ -319,7 +319,7 @@ void CompositedLayerMapping::updateCompositedBounds()
     m_contentOffsetInCompositingLayerDirty = true;
 }
 
-void CompositedLayerMapping::updateAfterWidgetResize()
+void CompositedLayerMapping::updateAfterPartResize()
 {
     if (renderer()->isRenderPart()) {
         if (RenderLayerCompositor* innerCompositor = RenderLayerCompositor::frameContentsCompositor(toRenderPart(renderer()))) {
@@ -705,7 +705,7 @@ void CompositedLayerMapping::updateGraphicsLayerGeometry(const RenderLayer* comp
     updateBackgroundColor();
     updateDrawsContent();
     updateContentsOpaque();
-    updateAfterWidgetResize();
+    updateAfterPartResize();
     updateRenderingContext();
     updateShouldFlattenTransform();
     updateChildrenTransform();
@@ -730,8 +730,8 @@ void CompositedLayerMapping::updateMainGraphicsLayerGeometry(const IntRect& rela
     // non-compositing visible layers.
     bool contentsVisible = m_owningLayer.hasVisibleContent() || hasVisibleNonCompositingDescendant(&m_owningLayer);
     if (RuntimeEnabledFeatures::overlayFullscreenVideoEnabled() && renderer()->isVideo()) {
-        HTMLMediaElement* mediaElement = toHTMLMediaElement(renderer()->node());
-        if (mediaElement->isFullscreen())
+        HTMLVideoElement* videoElement = toHTMLVideoElement(renderer()->node());
+        if (videoElement->isFullscreen() && !HTMLMediaElement::isMediaStreamURL(videoElement->sourceURL().string()))
             contentsVisible = false;
     }
     m_graphicsLayer->setContentsVisible(contentsVisible);
@@ -847,7 +847,7 @@ void CompositedLayerMapping::updateMaskLayerGeometry()
 
 void CompositedLayerMapping::updateTransformGeometry(const IntPoint& snappedOffsetFromCompositedAncestor, const IntRect& relativeCompositingBounds)
 {
-    if (m_owningLayer.hasTransform()) {
+    if (m_owningLayer.hasTransformRelatedProperty()) {
         const LayoutRect borderBox = toRenderBox(renderer())->borderBoxRect();
 
         // Get layout bounds in the coords of compositingContainer to match relativeCompositingBounds.
@@ -890,8 +890,8 @@ void CompositedLayerMapping::updateScrollingLayerGeometry(const IntRect& localCo
     ASSERT(m_scrollingContentsLayer);
     RenderBox* renderBox = toRenderBox(renderer());
     IntRect clientBox = enclosingIntRect(renderBox->clientBoxRect());
-
-    IntSize adjustedScrollOffset = m_owningLayer.scrollableArea()->adjustedScrollOffset();
+    // FIXME: Remove the flooredIntSize conversion. crbug.com/414283.
+    IntSize adjustedScrollOffset = flooredIntSize(m_owningLayer.scrollableArea()->adjustedScrollOffset());
     m_scrollingLayer->setPosition(FloatPoint(clientBox.location() - localCompositingBounds.location() + roundedIntSize(m_owningLayer.subpixelAccumulation())));
     m_scrollingLayer->setSize(clientBox.size());
 
@@ -1008,7 +1008,7 @@ void CompositedLayerMapping::registerScrollingLayers()
     // Page scale is applied as a transform on the root render view layer. Because the scroll
     // layer is further up in the hierarchy, we need to avoid marking the root render view
     // layer as a container.
-    bool isContainer = m_owningLayer.hasTransform() && !m_owningLayer.isRootLayer();
+    bool isContainer = m_owningLayer.hasTransformRelatedProperty() && !m_owningLayer.isRootLayer();
     // FIXME: we should make certain that childForSuperLayers will never be the m_squashingContainmentLayer here
     scrollingCoordinator->setLayerIsContainerForFixedPositionLayers(childForSuperlayers(), isContainer);
 }
@@ -1144,11 +1144,11 @@ void CompositedLayerMapping::updateScrollingBlockSelection()
 
     const IntRect blockSelectionGapsBounds = m_owningLayer.blockSelectionGapsBounds();
     const bool shouldDrawContent = !blockSelectionGapsBounds.isEmpty();
-    m_scrollingBlockSelectionLayer->setDrawsContent(!paintsIntoCompositedAncestor() && shouldDrawContent);
+    m_scrollingBlockSelectionLayer->setDrawsContent(shouldDrawContent);
     if (!shouldDrawContent)
         return;
-
-    const IntPoint position = blockSelectionGapsBounds.location() + m_owningLayer.scrollableArea()->adjustedScrollOffset();
+    // FIXME: Remove the flooredIntSize conversion. crbug.com/414283.
+    const IntPoint position = blockSelectionGapsBounds.location() + flooredIntSize(m_owningLayer.scrollableArea()->adjustedScrollOffset());
     if (m_scrollingBlockSelectionLayer->size() == blockSelectionGapsBounds.size() && m_scrollingBlockSelectionLayer->position() == position)
         return;
 
@@ -1166,7 +1166,7 @@ void CompositedLayerMapping::updateDrawsContent()
         // m_scrollingLayer never has backing store.
         // m_scrollingContentsLayer only needs backing store if the scrolled contents need to paint.
         m_scrollingContentsAreEmpty = !m_owningLayer.hasVisibleContent() || !(renderer()->hasBackground() || paintsChildren());
-        m_scrollingContentsLayer->setDrawsContent(!paintsIntoCompositedAncestor() && !m_scrollingContentsAreEmpty);
+        m_scrollingContentsLayer->setDrawsContent(!m_scrollingContentsAreEmpty);
         updateScrollingBlockSelection();
     }
 
@@ -1191,10 +1191,10 @@ void CompositedLayerMapping::updateDrawsContent()
         m_backgroundLayer->setDrawsContent(hasPaintedContent);
 
     if (m_maskLayer)
-        m_maskLayer->setDrawsContent(!paintsIntoCompositedAncestor());
+        m_maskLayer->setDrawsContent(true);
 
     if (m_childClippingMaskLayer)
-        m_childClippingMaskLayer->setDrawsContent(!paintsIntoCompositedAncestor());
+        m_childClippingMaskLayer->setDrawsContent(true);
 }
 
 void CompositedLayerMapping::updateChildrenTransform()
@@ -1698,7 +1698,7 @@ float CompositedLayerMapping::compositingOpacity(float rendererOpacity) const
         // contribute to. This whole confusion can be avoided by specifying
         // explicitly the composited ancestor where we would stop accumulating
         // opacity.
-        if (curr->compositingState() == PaintsIntoOwnBacking || curr->compositingState() == HasOwnBackingButPaintsIntoAncestor)
+        if (curr->compositingState() == PaintsIntoOwnBacking)
             break;
 
         finalOpacity *= curr->renderer()->opacity();
@@ -1763,7 +1763,7 @@ bool CompositedLayerMapping::hasVisibleNonCompositingDescendant(RenderLayer* par
 
 bool CompositedLayerMapping::containsPaintedContent() const
 {
-    if (paintsIntoCompositedAncestor() || m_owningLayer.isReflection())
+    if (m_owningLayer.isReflection())
         return false;
 
     if (renderer()->isImage() && isDirectlyCompositedImage())
@@ -1950,49 +1950,6 @@ GraphicsLayer* CompositedLayerMapping::layerForChildrenTransform() const
     return m_childTransformLayer.get();
 }
 
-bool CompositedLayerMapping::updateRequiresOwnBackingStoreForAncestorReasons(const RenderLayer* compositingAncestorLayer)
-{
-    unsigned previousRequiresOwnBackingStoreForAncestorReasons = m_requiresOwnBackingStoreForAncestorReasons;
-    bool previousPaintsIntoCompositedAncestor = paintsIntoCompositedAncestor();
-    bool canPaintIntoAncestor = compositingAncestorLayer
-        && (compositingAncestorLayer->compositedLayerMapping()->mainGraphicsLayer()->drawsContent()
-            || compositingAncestorLayer->compositedLayerMapping()->paintsIntoCompositedAncestor());
-
-    m_requiresOwnBackingStoreForAncestorReasons = !canPaintIntoAncestor;
-    if (paintsIntoCompositedAncestor() != previousPaintsIntoCompositedAncestor) {
-        // Back out the change temporarily while invalidating with respect to the old container.
-        m_requiresOwnBackingStoreForAncestorReasons = !m_requiresOwnBackingStoreForAncestorReasons;
-        compositor()->paintInvalidationOnCompositingChange(&m_owningLayer);
-        m_requiresOwnBackingStoreForAncestorReasons = !m_requiresOwnBackingStoreForAncestorReasons;
-    }
-
-    return m_requiresOwnBackingStoreForAncestorReasons != previousRequiresOwnBackingStoreForAncestorReasons;
-}
-
-bool CompositedLayerMapping::updateRequiresOwnBackingStoreForIntrinsicReasons()
-{
-    unsigned previousRequiresOwnBackingStoreForIntrinsicReasons = m_requiresOwnBackingStoreForIntrinsicReasons;
-    bool previousPaintsIntoCompositedAncestor = paintsIntoCompositedAncestor();
-    RenderObject* renderer = m_owningLayer.renderer();
-    m_requiresOwnBackingStoreForIntrinsicReasons = m_owningLayer.isRootLayer()
-        || (m_owningLayer.compositingReasons() & CompositingReasonComboReasonsThatRequireOwnBacking)
-        || m_owningLayer.transform()
-        || m_owningLayer.clipsCompositingDescendantsWithBorderRadius() // FIXME: Revisit this if the paintsIntoCompositedAncestor state is removed.
-        || renderer->isTransparent()
-        || renderer->hasMask()
-        || renderer->hasReflection()
-        || renderer->hasFilter();
-
-    if (paintsIntoCompositedAncestor() != previousPaintsIntoCompositedAncestor) {
-        // Back out the change temporarily while invalidating with respect to the old container.
-        m_requiresOwnBackingStoreForIntrinsicReasons = !m_requiresOwnBackingStoreForIntrinsicReasons;
-        compositor()->paintInvalidationOnCompositingChange(&m_owningLayer);
-        m_requiresOwnBackingStoreForIntrinsicReasons = !m_requiresOwnBackingStoreForIntrinsicReasons;
-    }
-
-    return m_requiresOwnBackingStoreForIntrinsicReasons != previousRequiresOwnBackingStoreForIntrinsicReasons;
-}
-
 void CompositedLayerMapping::setBlendMode(WebBlendMode blendMode)
 {
     if (m_ancestorClippingLayer) {
@@ -2026,7 +1983,6 @@ void CompositedLayerMapping::setSquashingContentsNeedDisplay()
 void CompositedLayerMapping::setContentsNeedDisplay()
 {
     // FIXME: need to split out paint invalidations for the background.
-    ASSERT(!paintsIntoCompositedAncestor());
     ApplyToGraphicsLayers(this, SetContentsNeedsDisplayFunctor(), ApplyToContentLayers);
 }
 
@@ -2036,23 +1992,21 @@ struct SetContentsNeedsDisplayInRectFunctor {
         if (layer->drawsContent()) {
             IntRect layerDirtyRect = r;
             layerDirtyRect.move(-layer->offsetFromRenderer());
-            layer->setNeedsDisplayInRect(layerDirtyRect, annotations);
+            layer->setNeedsDisplayInRect(layerDirtyRect, invalidationReason);
         }
     }
 
     IntRect r;
-    WebInvalidationDebugAnnotations annotations;
+    PaintInvalidationReason invalidationReason;
 };
 
 // r is in the coordinate space of the layer's render object
-void CompositedLayerMapping::setContentsNeedDisplayInRect(const LayoutRect& r, WebInvalidationDebugAnnotations annotations)
+void CompositedLayerMapping::setContentsNeedDisplayInRect(const LayoutRect& r, PaintInvalidationReason invalidationReason)
 {
     // FIXME: need to split out paint invalidations for the background.
-    ASSERT(!paintsIntoCompositedAncestor());
-
     SetContentsNeedsDisplayInRectFunctor functor = {
         pixelSnappedIntRect(r.location() + m_owningLayer.subpixelAccumulation(), r.size()),
-        annotations
+        invalidationReason
     };
     ApplyToGraphicsLayers(this, functor, ApplyToContentLayers);
 }
@@ -2097,8 +2051,6 @@ IntRect CompositedLayerMapping::localClipRectForSquashedLayer(const RenderLayer&
 void CompositedLayerMapping::doPaintTask(const GraphicsLayerPaintInfo& paintInfo, const PaintLayerFlags& paintLayerFlags, GraphicsContext* context,
     const IntRect& clip) // In the coords of rootLayer.
 {
-    RELEASE_ASSERT(paintInfo.renderLayer->compositingState() == PaintsIntoGroupedBacking || !paintsIntoCompositedAncestor());
-
     FontCachePurgePreventer fontCachePurgePreventer;
 
     // Note carefully: in theory it is appropriate to invoke context->save() here
@@ -2129,10 +2081,23 @@ void CompositedLayerMapping::doPaintTask(const GraphicsLayerPaintInfo& paintInfo
     if (paintInfo.renderLayer->compositingState() != PaintsIntoGroupedBacking) {
         // FIXME: GraphicsLayers need a way to split for RenderRegions.
         LayerPaintingInfo paintingInfo(paintInfo.renderLayer, dirtyRect, PaintBehaviorNormal, paintInfo.renderLayer->subpixelAccumulation());
-        paintInfo.renderLayer->paintLayerContents(context, paintingInfo, paintLayerFlags);
+        LayerPainter(*paintInfo.renderLayer).paintLayerContents(context, paintingInfo, paintLayerFlags);
+
+        if (RuntimeEnabledFeatures::slimmingPaintEnabled()) {
+
+#ifndef NDEBUG
+            context->fillRect(dirtyRect, Color(0xFF, 0, 0));
+#endif
+
+            if (RenderView* view = paintInfo.renderLayer->renderer()->view()) {
+                const PaintList& paintList = view->viewDisplayList().paintList();
+                for (PaintList::const_iterator it = paintList.begin(); it != paintList.end(); ++it)
+                    (*it)->replay(context);
+            }
+        }
 
         if (paintInfo.renderLayer->containsDirtyOverlayScrollbars())
-            paintInfo.renderLayer->paintLayerContents(context, paintingInfo, paintLayerFlags | PaintLayerPaintingOverlayScrollbars);
+            LayerPainter(*paintInfo.renderLayer).paintLayerContents(context, paintingInfo, paintLayerFlags | PaintLayerPaintingOverlayScrollbars);
     } else {
         ASSERT(compositor()->layerSquashingEnabled());
         LayerPaintingInfo paintingInfo(paintInfo.renderLayer, dirtyRect, PaintBehaviorNormal, paintInfo.renderLayer->subpixelAccumulation());
@@ -2143,7 +2108,7 @@ void CompositedLayerMapping::doPaintTask(const GraphicsLayerPaintInfo& paintInfo
         context->save();
         dirtyRect.intersect(paintInfo.localClipRectForSquashedLayer);
         context->clip(dirtyRect);
-        paintInfo.renderLayer->paintLayer(context, paintingInfo, paintLayerFlags);
+        LayerPainter(*paintInfo.renderLayer).paintLayer(context, paintingInfo, paintLayerFlags);
         context->restore();
     }
 
@@ -2254,7 +2219,7 @@ void CompositedLayerMapping::verifyNotPainting()
 }
 #endif
 
-void CompositedLayerMapping::notifyAnimationStarted(const GraphicsLayer*, double monotonicTime)
+void CompositedLayerMapping::notifyAnimationStarted(const GraphicsLayer*, double monotonicTime, int)
 {
     renderer()->node()->document().compositorPendingAnimations().notifyCompositorAnimationStarted(monotonicTime);
 }

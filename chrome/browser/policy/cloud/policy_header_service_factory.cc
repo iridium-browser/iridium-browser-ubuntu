@@ -8,6 +8,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
+#include "components/keyed_service/core/keyed_service.h"
 #include "components/policy/core/browser/browser_policy_connector.h"
 #include "components/policy/core/common/cloud/cloud_policy_store.h"
 #include "components/policy/core/common/cloud/device_management_service.h"
@@ -36,7 +37,7 @@ class PolicyHeaderServiceWrapper : public KeyedService {
     return policy_header_service_.get();
   }
 
-  virtual void Shutdown() OVERRIDE {
+  void Shutdown() override {
     // Shutdown our core object so it can unregister any observers before the
     // services we depend on are shutdown.
     policy_header_service_.reset();

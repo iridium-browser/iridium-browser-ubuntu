@@ -7,6 +7,7 @@
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/path_service.h"
+#include "content/public/common/content_switches.h"
 
 namespace chrome {
 
@@ -50,7 +51,9 @@ bool GetUserVideosDirectory(base::FilePath* result) {
 }
 
 bool ProcessNeedsProfileDir(const std::string& process_type) {
-  return true;
+  // SELinux prohibits accessing the data directory from isolated services. Only
+  // the browser (empty process type) should access the profile directory.
+  return process_type.empty();
 }
 
 }  // namespace chrome

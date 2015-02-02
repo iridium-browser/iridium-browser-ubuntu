@@ -22,7 +22,7 @@
      margin: 10px;
      background-color: blue;
      z-index: 0;
-     -webkit-animation-name: "slide";
+     -webkit-animation-name: slide;
      -webkit-animation-duration: 1s;
      -webkit-animation-direction: alternate;
      -webkit-animation-timing-function: ease-in-out;
@@ -38,8 +38,8 @@
    }
    
    @-webkit-keyframes slide {
-     from { -webkit-transform: translateX(0);      }
-     to   { -webkit-transform: translateX(280px);  }
+     from { transform: translateX(0);      }
+     to   { transform: translateX(280px);  }
    }
 
   </style>

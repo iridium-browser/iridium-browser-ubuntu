@@ -34,8 +34,7 @@ class TestDownloadStatusUpdater : public DownloadStatusUpdater {
     return notification_count_;
   }
  protected:
-  virtual void UpdateAppIconDownloadProgress(
-      content::DownloadItem* download) OVERRIDE {
+  void UpdateAppIconDownloadProgress(content::DownloadItem* download) override {
     ++notification_count_;
     if (acceptable_notification_item_)
       EXPECT_EQ(acceptable_notification_item_, download);
@@ -51,7 +50,7 @@ class DownloadStatusUpdaterTest : public testing::Test {
       : updater_(new TestDownloadStatusUpdater()),
         ui_thread_(content::BrowserThread::UI, &loop_) {}
 
-  virtual ~DownloadStatusUpdaterTest() {
+  ~DownloadStatusUpdaterTest() override {
     for (size_t mgr_idx = 0; mgr_idx < managers_.size(); ++mgr_idx) {
       EXPECT_CALL(*Manager(mgr_idx), RemoveObserver(_));
     }

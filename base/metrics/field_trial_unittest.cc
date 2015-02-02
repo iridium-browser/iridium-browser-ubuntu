@@ -4,6 +4,7 @@
 
 #include "base/metrics/field_trial.h"
 
+#include "base/build_time.h"
 #include "base/message_loop/message_loop.h"
 #include "base/rand_util.h"
 #include "base/run_loop.h"
@@ -30,10 +31,10 @@ scoped_refptr<base::FieldTrial> CreateFieldTrial(
       base::FieldTrial::SESSION_RANDOMIZED, default_group_number);
 }
 
-int GetLastYear() {
-  Time last_year_time = Time::NowFromSystemTime() - TimeDelta::FromDays(365);
+int OneYearBeforeBuildTime() {
+  Time one_year_before_build_time = GetBuildTime() - TimeDelta::FromDays(365);
   Time::Exploded exploded;
-  last_year_time.LocalExplode(&exploded);
+  one_year_before_build_time.LocalExplode(&exploded);
   return exploded.year;
 }
 
@@ -44,12 +45,10 @@ class TestFieldTrialObserver : public FieldTrialList::Observer {
     FieldTrialList::AddObserver(this);
   }
 
-  virtual ~TestFieldTrialObserver() {
-    FieldTrialList::RemoveObserver(this);
-  }
+  ~TestFieldTrialObserver() override { FieldTrialList::RemoveObserver(this); }
 
-  virtual void OnFieldTrialGroupFinalized(const std::string& trial,
-                                          const std::string& group) OVERRIDE {
+  void OnFieldTrialGroupFinalized(const std::string& trial,
+                                  const std::string& group) override {
     trial_name_ = trial;
     group_name_ = group;
   }
@@ -78,8 +77,8 @@ class FieldTrialTest : public testing::Test {
 // Test registration, and also check that destructors are called for trials
 // (and that Valgrind doesn't catch us leaking).
 TEST_F(FieldTrialTest, Registration) {
-  const char* name1 = "name 1 test";
-  const char* name2 = "name 2 test";
+  const char name1[] = "name 1 test";
+  const char name2[] = "name 2 test";
   EXPECT_FALSE(FieldTrialList::Find(name1));
   EXPECT_FALSE(FieldTrialList::Find(name2));
 
@@ -114,10 +113,11 @@ TEST_F(FieldTrialTest, AbsoluteProbabilities) {
   char default_always_false[] = " default always false";
   for (int i = 1; i < 250; ++i) {
     // Try lots of names, by changing the first character of the name.
-    always_true[0] = i;
-    default_always_true[0] = i;
-    always_false[0] = i;
-    default_always_false[0] = i;
+    char c = static_cast<char>(i);
+    always_true[0] = c;
+    default_always_true[0] = c;
+    always_false[0] = c;
+    default_always_false[0] = c;
 
     scoped_refptr<FieldTrial> trial_true =
         CreateFieldTrial(always_true, 10, default_always_true, NULL);
@@ -190,8 +190,9 @@ TEST_F(FieldTrialTest, MiddleProbabilities) {
   bool false_event_seen = false;
   bool true_event_seen = false;
   for (int i = 1; i < 250; ++i) {
-    name[0] = i;
-    default_group_name[0] = i;
+    char c = static_cast<char>(i);
+    name[0] = c;
+    default_group_name[0] = c;
     scoped_refptr<FieldTrial> trial =
         CreateFieldTrial(name, 10, default_group_name, NULL);
     int might_win = trial->AppendGroup("MightWin", 5);
@@ -249,7 +250,7 @@ TEST_F(FieldTrialTest, DisableProbability) {
   // Create a field trail that has expired.
   int default_group_number = -1;
   FieldTrial* trial = FieldTrialList::FactoryGetFieldTrial(
-      name, 1000000000, default_group_name, GetLastYear(), 1, 1,
+      name, 1000000000, default_group_name, OneYearBeforeBuildTime(), 1, 1,
       FieldTrial::SESSION_RANDOMIZED,
       &default_group_number);
   trial->AppendGroup(loser, 999999999);  // 99.9999999% chance of being chosen.
@@ -427,6 +428,12 @@ TEST_F(FieldTrialTest, BogusRestore) {
   EXPECT_FALSE(FieldTrialList::CreateTrialsFromString(
       "noname, only group/", FieldTrialList::DONT_ACTIVATE_TRIALS,
       std::set<std::string>()));
+  EXPECT_FALSE(FieldTrialList::CreateTrialsFromString(
+      "/emptyname", FieldTrialList::DONT_ACTIVATE_TRIALS,
+      std::set<std::string>()));
+  EXPECT_FALSE(FieldTrialList::CreateTrialsFromString(
+      "*/emptyname", FieldTrialList::DONT_ACTIVATE_TRIALS,
+      std::set<std::string>()));
 }
 
 TEST_F(FieldTrialTest, DuplicateRestore) {
@@ -485,6 +492,23 @@ TEST_F(FieldTrialTest, CreateTrialsFromStringNotActive) {
   ASSERT_EQ(2U, active_groups.size());
   EXPECT_EQ("Abc", active_groups[0].trial_name);
   EXPECT_EQ("def", active_groups[0].group_name);
+  EXPECT_EQ("Xyz", active_groups[1].trial_name);
+  EXPECT_EQ("zyx", active_groups[1].group_name);
+}
+
+TEST_F(FieldTrialTest, CreateTrialsFromStringForceActivation) {
+  ASSERT_FALSE(FieldTrialList::TrialExists("Abc"));
+  ASSERT_FALSE(FieldTrialList::TrialExists("def"));
+  ASSERT_FALSE(FieldTrialList::TrialExists("Xyz"));
+  ASSERT_TRUE(FieldTrialList::CreateTrialsFromString(
+      "*Abc/cba/def/fed/*Xyz/zyx/", FieldTrialList::DONT_ACTIVATE_TRIALS,
+      std::set<std::string>()));
+
+  FieldTrial::ActiveGroups active_groups;
+  FieldTrialList::GetActiveFieldTrialGroups(&active_groups);
+  ASSERT_EQ(2U, active_groups.size());
+  EXPECT_EQ("Abc", active_groups[0].trial_name);
+  EXPECT_EQ("cba", active_groups[0].group_name);
   EXPECT_EQ("Xyz", active_groups[1].trial_name);
   EXPECT_EQ("zyx", active_groups[1].group_name);
 }
@@ -961,7 +985,7 @@ TEST_F(FieldTrialTest, CreateSimulatedFieldTrial) {
     { 0.95, kDefaultGroupName },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(test_cases); ++i) {
+  for (size_t i = 0; i < arraysize(test_cases); ++i) {
     TestFieldTrialObserver observer;
     scoped_refptr<FieldTrial> trial(
        FieldTrial::CreateSimulatedFieldTrial(kTrialName, 100, kDefaultGroupName,
@@ -989,5 +1013,16 @@ TEST_F(FieldTrialTest, CreateSimulatedFieldTrial) {
     EXPECT_TRUE(states.empty());
   }
 }
+
+#if GTEST_HAS_DEATH_TEST
+TEST(FieldTrialDeathTest, OneTimeRandomizedTrialWithoutFieldTrialList) {
+  // Trying to instantiate a one-time randomized field trial before the
+  // FieldTrialList is created should crash.
+  EXPECT_DEATH(FieldTrialList::FactoryGetFieldTrial(
+      "OneTimeRandomizedTrialWithoutFieldTrialList", 100, kDefaultGroupName,
+      base::FieldTrialList::kNoExpirationYear, 1, 1,
+      base::FieldTrial::ONE_TIME_RANDOMIZED, NULL), "");
+}
+#endif
 
 }  // namespace base

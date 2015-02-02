@@ -6,7 +6,6 @@
 #include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/path_service.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -74,8 +73,7 @@ class MockScreenshotManager : public content::NavigationEntryScreenshotManager {
         encoding_screenshot_in_progress_(false) {
   }
 
-  virtual ~MockScreenshotManager() {
-  }
+  ~MockScreenshotManager() override {}
 
   void TakeScreenshotFor(content::NavigationEntryImpl* entry) {
     SkBitmap bitmap;
@@ -100,12 +98,10 @@ class MockScreenshotManager : public content::NavigationEntryScreenshotManager {
 
  private:
   // Overridden from content::NavigationEntryScreenshotManager:
-  virtual void TakeScreenshotImpl(
-      content::RenderViewHost* host,
-      content::NavigationEntryImpl* entry) OVERRIDE {
-  }
+  void TakeScreenshotImpl(content::RenderViewHost* host,
+                          content::NavigationEntryImpl* entry) override {}
 
-  virtual void OnScreenshotSet(content::NavigationEntryImpl* entry) OVERRIDE {
+  void OnScreenshotSet(content::NavigationEntryImpl* entry) override {
     encoding_screenshot_in_progress_ = false;
     NavigationEntryScreenshotManager::OnScreenshotSet(entry);
     if (message_loop_runner_.get())
@@ -188,7 +184,7 @@ class NavigationControllerTest
   NavigationControllerTest() : navigation_entry_committed_counter_(0) {
   }
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     RenderViewHostImplTestHarness::SetUp();
     WebContents* web_contents = RenderViewHostImplTestHarness::web_contents();
     ASSERT_TRUE(web_contents);  // The WebContents should be created by now.
@@ -196,14 +192,14 @@ class NavigationControllerTest
   }
 
   // WebContentsObserver:
-  virtual void DidStartNavigationToPendingEntry(
+  void DidStartNavigationToPendingEntry(
       const GURL& url,
-      NavigationController::ReloadType reload_type) OVERRIDE {
+      NavigationController::ReloadType reload_type) override {
     navigated_url_ = url;
   }
 
-  virtual void NavigationEntryCommitted(
-      const LoadCommittedDetails& load_details) OVERRIDE {
+  void NavigationEntryCommitted(
+      const LoadCommittedDetails& load_details) override {
     navigation_entry_committed_counter_++;
   }
 
@@ -247,12 +243,12 @@ class TestWebContentsDelegate : public WebContentsDelegate {
   }
 
   // Keep track of whether the tab has notified us of a navigation state change.
-  virtual void NavigationStateChanged(const WebContents* source,
-                                      InvalidateTypes changed_flags) OVERRIDE {
+  void NavigationStateChanged(const WebContents* source,
+                              InvalidateTypes changed_flags) override {
     navigation_state_change_count_++;
   }
 
-  virtual void ShowRepostFormWarningDialog(WebContents* source) OVERRIDE {
+  void ShowRepostFormWarningDialog(WebContents* source) override {
     repost_form_warning_count_++;
   }
 
@@ -418,7 +414,7 @@ TEST_F(NavigationControllerTest, LoadURL) {
 
   // Simulate the beforeunload ack for the cross-site transition, and then the
   // commit.
-  test_rvh()->SendBeforeUnloadACK(true);
+  main_test_rfh()->SendBeforeUnloadACK(true);
   contents()->GetPendingMainFrame()->SendNavigate(1, url2);
   EXPECT_EQ(1U, navigation_entry_committed_counter_);
   navigation_entry_committed_counter_ = 0;
@@ -470,7 +466,7 @@ TEST_F(NavigationControllerTest, LoadURLSameTime) {
 
   // Simulate the beforeunload ack for the cross-site transition, and then the
   // commit.
-  test_rvh()->SendBeforeUnloadACK(true);
+  main_test_rfh()->SendBeforeUnloadACK(true);
   main_test_rfh()->SendNavigate(1, url2);
   EXPECT_EQ(1U, navigation_entry_committed_counter_);
   navigation_entry_committed_counter_ = 0;
@@ -756,7 +752,7 @@ TEST_F(NavigationControllerTest, LoadURL_NewPending) {
   EXPECT_EQ(0U, notifications.size());
 
   // After the beforeunload but before it commits, do a new navigation.
-  test_rvh()->SendBeforeUnloadACK(true);
+  main_test_rfh()->SendBeforeUnloadACK(true);
   const GURL kNewURL("http://see");
   contents()->GetPendingMainFrame()->SendNavigate(3, kNewURL);
 
@@ -826,7 +822,7 @@ TEST_F(NavigationControllerTest, LoadURL_PrivilegedPending) {
   controller.LoadURL(
       kExistingURL1, Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
   // Pretend it has bindings so we can tell if we incorrectly copy it.
-  test_rvh()->AllowBindings(2);
+  main_test_rfh()->GetRenderViewHost()->AllowBindings(2);
   main_test_rfh()->SendNavigate(0, kExistingURL1);
   EXPECT_EQ(1U, navigation_entry_committed_counter_);
   navigation_entry_committed_counter_ = 0;
@@ -835,7 +831,7 @@ TEST_F(NavigationControllerTest, LoadURL_PrivilegedPending) {
   const GURL kExistingURL2("http://foo/eh");
   controller.LoadURL(
       kExistingURL2, Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
-  test_rvh()->SendBeforeUnloadACK(true);
+  main_test_rfh()->SendBeforeUnloadACK(true);
   TestRenderFrameHost* foo_rfh = contents()->GetPendingMainFrame();
   foo_rfh->SendNavigate(1, kExistingURL2);
   EXPECT_EQ(1U, navigation_entry_committed_counter_);
@@ -844,7 +840,7 @@ TEST_F(NavigationControllerTest, LoadURL_PrivilegedPending) {
   // Now make a pending back/forward navigation to a privileged entry.
   // The zeroth entry should be pending.
   controller.GoBack();
-  foo_rfh->GetRenderViewHost()->SendBeforeUnloadACK(true);
+  foo_rfh->SendBeforeUnloadACK(true);
   EXPECT_EQ(0U, notifications.size());
   EXPECT_EQ(0, controller.GetPendingEntryIndex());
   EXPECT_EQ(1, controller.GetLastCommittedEntryIndex());
@@ -1095,19 +1091,18 @@ TEST_F(NavigationControllerTest, LoadURL_WithBindings) {
   EXPECT_EQ(0, NavigationEntryImpl::FromNavigationEntry(
       controller.GetLastCommittedEntry())->bindings());
 
-  // Manually increase the number of active views in the SiteInstance
+  // Manually increase the number of active frames in the SiteInstance
   // that orig_rfh belongs to, to prevent it from being destroyed when
   // it gets swapped out, so that we can reuse orig_rfh when the
   // controller goes back.
-  static_cast<SiteInstanceImpl*>(orig_rfh->GetSiteInstance())->
-      increment_active_view_count();
+  orig_rfh->GetSiteInstance()->increment_active_frame_count();
 
   // Navigate to a second URL, simulate the beforeunload ack for the cross-site
   // transition, and set bindings on the pending RenderViewHost to simulate a
   // privileged url.
   controller.LoadURL(
       url2, Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
-  orig_rfh->GetRenderViewHost()->SendBeforeUnloadACK(true);
+  orig_rfh->SendBeforeUnloadACK(true);
   TestRenderFrameHost* new_rfh = contents()->GetPendingMainFrame();
   new_rfh->GetRenderViewHost()->AllowBindings(1);
   new_rfh->SendNavigate(1, url2);
@@ -1121,7 +1116,7 @@ TEST_F(NavigationControllerTest, LoadURL_WithBindings) {
 
   // Going back, the first entry should still appear unprivileged.
   controller.GoBack();
-  new_rfh->GetRenderViewHost()->SendBeforeUnloadACK(true);
+  new_rfh->SendBeforeUnloadACK(true);
   orig_rfh->SendNavigate(0, url1);
   EXPECT_EQ(0, controller.GetLastCommittedEntryIndex());
   EXPECT_EQ(0, NavigationEntryImpl::FromNavigationEntry(
@@ -2279,7 +2274,7 @@ TEST_F(NavigationControllerTest, PushStateWithoutPreviousEntry)
   params.url = url;
   params.page_state = PageState::CreateFromURL(url);
   params.was_within_same_page = true;
-  test_rvh()->SendNavigateWithParams(&params);
+  contents()->GetMainFrame()->SendNavigateWithParams(&params);
   // We pass if we don't crash.
 }
 
@@ -2293,9 +2288,9 @@ class PrunedListener : public NotificationObserver {
                    Source<NavigationController>(controller));
   }
 
-  virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE {
+  void Observe(int type,
+               const NotificationSource& source,
+               const NotificationDetails& details) override {
     if (type == NOTIFICATION_NAV_LIST_PRUNED) {
       notification_count_++;
       details_ = *(Details<PrunedDetails>(details).ptr());
@@ -2610,6 +2605,45 @@ TEST_F(NavigationControllerTest, RemoveEntry) {
   // This should leave us with only the last committed entry.
   EXPECT_EQ(1, controller.GetEntryCount());
   EXPECT_EQ(0, controller.GetLastCommittedEntryIndex());
+}
+
+TEST_F(NavigationControllerTest, RemoveEntryWithPending) {
+  NavigationControllerImpl& controller = controller_impl();
+  const GURL url1("http://foo/1");
+  const GURL url2("http://foo/2");
+  const GURL url3("http://foo/3");
+  const GURL default_url("http://foo/default");
+
+  controller.LoadURL(
+      url1, Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
+  main_test_rfh()->SendNavigate(0, url1);
+  controller.LoadURL(
+      url2, Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
+  main_test_rfh()->SendNavigate(1, url2);
+  controller.LoadURL(
+      url3, Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
+  main_test_rfh()->SendNavigate(2, url3);
+
+  // Go back, but don't commit yet. Check that we can't delete the current
+  // and pending entries.
+  controller.GoBack();
+  EXPECT_FALSE(controller.RemoveEntryAtIndex(2));
+  EXPECT_FALSE(controller.RemoveEntryAtIndex(1));
+
+  // Remove the first entry, while there is a pending entry.  This is expected
+  // to discard the pending entry.
+  EXPECT_TRUE(controller.RemoveEntryAtIndex(0));
+  EXPECT_FALSE(controller.GetPendingEntry());
+  EXPECT_EQ(-1, controller.GetPendingEntryIndex());
+
+  // We should update the last committed entry index.
+  EXPECT_EQ(1, controller.GetLastCommittedEntryIndex());
+
+  // Now commit and ensure we land on the right entry.
+  main_test_rfh()->SendNavigate(1, url2);
+  EXPECT_EQ(2, controller.GetEntryCount());
+  EXPECT_EQ(0, controller.GetLastCommittedEntryIndex());
+  EXPECT_FALSE(controller.GetPendingEntry());
 }
 
 // Tests the transient entry, making sure it goes away with all navigations.
@@ -3254,15 +3288,44 @@ TEST_F(NavigationControllerTest, LazyReload) {
   const GURL url("http://foo");
   NavigateAndCommit(url);
   ASSERT_FALSE(controller.NeedsReload());
+  EXPECT_NE(ui::PAGE_TRANSITION_RELOAD,
+            controller.GetLastCommittedEntry()->GetTransitionType());
 
   // Request a reload to happen when the controller becomes active (e.g. after
   // the renderer gets killed in background on Android).
   controller.SetNeedsReload();
   ASSERT_TRUE(controller.NeedsReload());
+  EXPECT_EQ(ui::PAGE_TRANSITION_RELOAD,
+            controller.GetLastCommittedEntry()->GetTransitionType());
 
   // Set the controller as active, triggering the requested reload.
   controller.SetActive(true);
   ASSERT_FALSE(controller.NeedsReload());
+  EXPECT_EQ(ui::PAGE_TRANSITION_RELOAD,
+            controller.GetPendingEntry()->GetTransitionType());
+}
+
+// Test requesting and triggering a lazy reload without any committed entry.
+TEST_F(NavigationControllerTest, LazyReloadWithoutCommittedEntry) {
+  NavigationControllerImpl& controller = controller_impl();
+  const GURL url("http://foo");
+  controller.LoadURL(url, Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
+  ASSERT_FALSE(controller.NeedsReload());
+  EXPECT_EQ(ui::PAGE_TRANSITION_TYPED,
+            controller.GetPendingEntry()->GetTransitionType());
+
+  // Request a reload to happen when the controller becomes active (e.g. after
+  // the renderer gets killed in background on Android).
+  controller.SetNeedsReload();
+  ASSERT_TRUE(controller.NeedsReload());
+  EXPECT_EQ(ui::PAGE_TRANSITION_TYPED,
+            controller.GetPendingEntry()->GetTransitionType());
+
+  // Set the controller as active, triggering the requested reload.
+  controller.SetActive(true);
+  ASSERT_FALSE(controller.NeedsReload());
+  EXPECT_EQ(ui::PAGE_TRANSITION_TYPED,
+            controller.GetPendingEntry()->GetTransitionType());
 }
 
 // Tests a subframe navigation while a toplevel navigation is pending.
@@ -3896,7 +3959,7 @@ TEST_F(NavigationControllerTest, HistoryNavigate) {
   ASSERT_TRUE(message != NULL);
   Tuple1<FrameMsg_Navigate_Params> nav_params;
   FrameMsg_Navigate::Read(message, &nav_params);
-  EXPECT_EQ(url1, nav_params.a.url);
+  EXPECT_EQ(url1, nav_params.a.common_params.url);
   process()->sink().ClearMessages();
 
   // Now test history.forward()
@@ -3908,7 +3971,7 @@ TEST_F(NavigationControllerTest, HistoryNavigate) {
   message = process()->sink().GetFirstMessageMatching(FrameMsg_Navigate::ID);
   ASSERT_TRUE(message != NULL);
   FrameMsg_Navigate::Read(message, &nav_params);
-  EXPECT_EQ(url3, nav_params.a.url);
+  EXPECT_EQ(url3, nav_params.a.common_params.url);
   process()->sink().ClearMessages();
 
   controller.DiscardNonCommittedEntries();
@@ -4247,7 +4310,7 @@ TEST_F(NavigationControllerTest, MAYBE_PurgeScreenshot) {
 
 TEST_F(NavigationControllerTest, PushStateUpdatesTitleAndFavicon) {
   // Navigate.
-  test_rvh()->SendNavigate(1, GURL("http://foo"));
+  contents()->GetMainFrame()->SendNavigate(1, GURL("http://foo"));
 
   // Set title and favicon.
   base::string16 title(base::ASCIIToUTF16("Title"));
@@ -4264,7 +4327,7 @@ TEST_F(NavigationControllerTest, PushStateUpdatesTitleAndFavicon) {
   params.url = url;
   params.page_state = PageState::CreateFromURL(url);
   params.was_within_same_page = true;
-  test_rvh()->SendNavigateWithParams(&params);
+  contents()->GetMainFrame()->SendNavigateWithParams(&params);
 
   // The title should immediately be visible on the new NavigationEntry.
   base::string16 new_title =
@@ -4309,8 +4372,8 @@ TEST_F(NavigationControllerTest, ClearHistoryList) {
   ASSERT_TRUE(entry);
   EXPECT_TRUE(entry->should_clear_history_list());
 
-  // Assume that the RV correctly cleared its history and commit the navigation.
-  contents()->GetPendingMainFrame()->GetRenderViewHost()->
+  // Assume that the RF correctly cleared its history and commit the navigation.
+  contents()->GetPendingMainFrame()->
       set_simulate_history_list_was_cleared(true);
   contents()->CommitPendingNavigation();
 
@@ -4341,7 +4404,7 @@ TEST_F(NavigationControllerTest, PostThenReplaceStateThenReload) {
   params.was_within_same_page = false;
   params.is_post = true;
   params.post_id = 2;
-  test_rvh()->SendNavigateWithParams(&params);
+  contents()->GetMainFrame()->SendNavigateWithParams(&params);
 
   // history.replaceState() is called.
   GURL replace_url("http://foo#foo");
@@ -4353,7 +4416,7 @@ TEST_F(NavigationControllerTest, PostThenReplaceStateThenReload) {
   params.was_within_same_page = true;
   params.is_post = false;
   params.post_id = -1;
-  test_rvh()->SendNavigateWithParams(&params);
+  contents()->GetMainFrame()->SendNavigateWithParams(&params);
 
   // Now reload. replaceState overrides the POST, so we should not show a
   // repost warning dialog.

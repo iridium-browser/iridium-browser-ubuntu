@@ -9,7 +9,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/extensions/api/dial/dial_device_data.h"
 #include "chrome/browser/extensions/api/dial/dial_registry.h"
-#include "components/keyed_service/content/refcounted_browser_context_keyed_service.h"
+#include "components/keyed_service/core/refcounted_keyed_service.h"
 #include "extensions/browser/api/async_api_function.h"
 #include "extensions/browser/event_router.h"
 
@@ -21,7 +21,7 @@ class DialRegistry;
 // the DIAL registry. It takes care of creating the registry on the IO thread
 // and is an observer of the registry. It makes sure devices events are sent out
 // to extension listeners on the right thread.
-class DialAPI : public RefcountedBrowserContextKeyedService,
+class DialAPI : public RefcountedKeyedService,
                 public EventRouter::Observer,
                 public DialRegistry::Observer {
  public:
@@ -37,19 +37,18 @@ class DialAPI : public RefcountedBrowserContextKeyedService,
   void SendErrorOnUIThread(const DialRegistry::DialErrorCode type);
 
  private:
-  virtual ~DialAPI();
+  ~DialAPI() override;
 
-  // RefcountedBrowserContextKeyedService:
-  virtual void ShutdownOnUIThread() OVERRIDE;
+  // RefcountedKeyedService:
+  void ShutdownOnUIThread() override;
 
   // EventRouter::Observer:
-  virtual void OnListenerAdded(const EventListenerInfo& details) OVERRIDE;
-  virtual void OnListenerRemoved(const EventListenerInfo& details) OVERRIDE;
+  void OnListenerAdded(const EventListenerInfo& details) override;
+  void OnListenerRemoved(const EventListenerInfo& details) override;
 
   // DialRegistry::Observer:
-  virtual void OnDialDeviceEvent(
-      const DialRegistry::DeviceList& devices) OVERRIDE;
-  virtual void OnDialError(DialRegistry::DialErrorCode type) OVERRIDE;
+  void OnDialDeviceEvent(const DialRegistry::DeviceList& devices) override;
+  void OnDialError(DialRegistry::DialErrorCode type) override;
 
   // Methods to notify the DialRegistry on the correct thread of new/removed
   // listeners.
@@ -75,12 +74,12 @@ class DialDiscoverNowFunction : public AsyncApiFunction {
   DialDiscoverNowFunction();
 
  protected:
-  virtual ~DialDiscoverNowFunction() {}
+  ~DialDiscoverNowFunction() override {}
 
   // AsyncApiFunction:
-  virtual bool Prepare() OVERRIDE;
-  virtual void Work() OVERRIDE;
-  virtual bool Respond() OVERRIDE;
+  bool Prepare() override;
+  void Work() override;
+  bool Respond() override;
 
  private:
   DECLARE_EXTENSION_FUNCTION("dial.discoverNow", DIAL_DISCOVERNOW)

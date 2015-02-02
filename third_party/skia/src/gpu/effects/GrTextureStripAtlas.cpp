@@ -80,6 +80,7 @@ GrTextureStripAtlas::GrTextureStripAtlas(GrTextureStripAtlas::Desc desc)
     , fLRUBack(NULL) {
     SkASSERT(fNumRows * fDesc.fRowHeight == fDesc.fHeight);
     this->initLRU();
+    fNormalizedYHeight = SK_Scalar1 / fDesc.fHeight;
     VALIDATE;
 }
 
@@ -155,13 +156,12 @@ int GrTextureStripAtlas::lockRow(const SkBitmap& data) {
 
         // Pass in the kDontFlush flag, since we know we're writing to a part of this texture
         // that is not currently in use
-        fDesc.fContext->writeTexturePixels(fTexture,
-                                           0,  rowNumber * fDesc.fRowHeight,
-                                           fDesc.fWidth, fDesc.fRowHeight,
-                                           SkImageInfo2GrPixelConfig(data.info()),
-                                           data.getPixels(),
-                                           data.rowBytes(),
-                                           GrContext::kDontFlush_PixelOpsFlag);
+        fTexture->writePixels(0,  rowNumber * fDesc.fRowHeight,
+                              fDesc.fWidth, fDesc.fRowHeight,
+                              SkImageInfo2GrPixelConfig(data.info()),
+                              data.getPixels(),
+                              data.rowBytes(),
+                              GrContext::kDontFlush_PixelOpsFlag);
     }
 
     SkASSERT(rowNumber >= 0);
@@ -191,7 +191,7 @@ GrTextureStripAtlas::AtlasRow* GrTextureStripAtlas::getLRU() {
 
 void GrTextureStripAtlas::lockTexture() {
     GrTextureParams params;
-    GrTextureDesc texDesc;
+    GrSurfaceDesc texDesc;
     texDesc.fWidth = fDesc.fWidth;
     texDesc.fHeight = fDesc.fHeight;
     texDesc.fConfig = fDesc.fConfig;
@@ -216,7 +216,6 @@ void GrTextureStripAtlas::unlockTexture() {
     SkASSERT(fTexture && 0 == fLockedRows);
     fTexture->unref();
     fTexture = NULL;
-    fDesc.fContext->purgeCache();
 }
 
 void GrTextureStripAtlas::initLRU() {

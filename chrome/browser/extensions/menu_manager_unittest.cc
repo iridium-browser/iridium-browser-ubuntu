@@ -8,7 +8,6 @@
 #include "base/json/json_reader.h"
 #include "base/memory/scoped_vector.h"
 #include "base/message_loop/message_loop.h"
-#include "base/path_service.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
@@ -55,7 +54,7 @@ class MenuManagerTest : public testing::Test {
         prefs_(message_loop_.message_loop_proxy().get()),
         next_id_(1) {}
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     prefs_.pref_service()->CommitPendingWrite();
     message_loop_.RunUntilIdle();
   }
@@ -488,7 +487,7 @@ class MockExtensionSystem : public TestExtensionSystem {
   explicit MockExtensionSystem(Profile* profile)
       : TestExtensionSystem(profile) {}
 
-  virtual EventRouter* event_router() OVERRIDE {
+  EventRouter* event_router() override {
     if (!mock_event_router_)
       mock_event_router_.reset(new MockEventRouter(profile_));
     return mock_event_router_.get();

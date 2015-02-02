@@ -3,6 +3,9 @@
 # found in the LICENSE file.
 
 {
+  'includes': [
+    'domain_reliability/baked_in_configs.gypi',
+  ],
   'targets': [
     {
       # GN version: //components/domain_reliability
@@ -53,65 +56,6 @@
             'bake_in_configs_script': 'domain_reliability/bake_in_configs.py',
             'baked_in_configs_cc':
                 '<(INTERMEDIATE_DIR)/domain_reliability/baked_in_configs.cc',
-            'baked_in_configs': [
-              'domain_reliability/baked_in_configs/accounts_google_com.json',
-              'domain_reliability/baked_in_configs/ad_doubleclick_net.json',
-              'domain_reliability/baked_in_configs/apis_google_com.json',
-              'domain_reliability/baked_in_configs/c_admob_com.json',
-              'domain_reliability/baked_in_configs/csi_gstatic_com.json',
-              'domain_reliability/baked_in_configs/ddm_google_com.json',
-              'domain_reliability/baked_in_configs/docs_google_com.json',
-              'domain_reliability/baked_in_configs/drive_google_com.json',
-              'domain_reliability/baked_in_configs/e_admob_com.json',
-              'domain_reliability/baked_in_configs/fonts_googleapis_com.json',
-              'domain_reliability/baked_in_configs/googleads4_g_doubleclick_net.json',
-              'domain_reliability/baked_in_configs/googleads_g_doubleclick_net.json',
-              'domain_reliability/baked_in_configs/gstatic_com.json',
-              'domain_reliability/baked_in_configs/lh3_ggpht_com.json',
-              'domain_reliability/baked_in_configs/lh4_ggpht_com.json',
-              'domain_reliability/baked_in_configs/lh5_ggpht_com.json',
-              'domain_reliability/baked_in_configs/lh6_ggpht_com.json',
-              'domain_reliability/baked_in_configs/mail_google_com.json',
-              'domain_reliability/baked_in_configs/media_admob_com.json',
-              'domain_reliability/baked_in_configs/pagead2_googlesyndication_com.json',
-              'domain_reliability/baked_in_configs/partner_googleadservices_com.json',
-              'domain_reliability/baked_in_configs/pubads_g_doubleclick_net.json',
-              'domain_reliability/baked_in_configs/redirector_googlevideo_com.json',
-              'domain_reliability/baked_in_configs/s0_2mdn_net.json',
-              'domain_reliability/baked_in_configs/ssl_gstatic_com.json',
-              'domain_reliability/baked_in_configs/star_admob_com.json',
-              'domain_reliability/baked_in_configs/star_doubleclick_net.json',
-              'domain_reliability/baked_in_configs/star_g_doubleclick_net.json',
-              'domain_reliability/baked_in_configs/star_ggpht_com.json',
-              'domain_reliability/baked_in_configs/star_google_cn.json',
-              'domain_reliability/baked_in_configs/star_google_co_uk.json',
-              'domain_reliability/baked_in_configs/star_google_com.json',
-              'domain_reliability/baked_in_configs/star_google_com_au.json',
-              'domain_reliability/baked_in_configs/star_google_de.json',
-              'domain_reliability/baked_in_configs/star_google_fr.json',
-              'domain_reliability/baked_in_configs/star_google_it.json',
-              'domain_reliability/baked_in_configs/star_google_jp.json',
-              'domain_reliability/baked_in_configs/star_google_org.json',
-              'domain_reliability/baked_in_configs/star_google_ru.json',
-              'domain_reliability/baked_in_configs/star_googleadservices_com.json',
-              'domain_reliability/baked_in_configs/star_googleapis_com.json',
-              'domain_reliability/baked_in_configs/star_googlesyndication_com.json',
-              'domain_reliability/baked_in_configs/star_googleusercontent_com.json',
-              'domain_reliability/baked_in_configs/star_googlevideo_com.json',
-              'domain_reliability/baked_in_configs/star_gstatic_com.json',
-              'domain_reliability/baked_in_configs/star_gvt1_com.json',
-              'domain_reliability/baked_in_configs/star_youtube_com.json',
-              'domain_reliability/baked_in_configs/star_ytimg_com.json',
-              'domain_reliability/baked_in_configs/t0_gstatic_com.json',
-              'domain_reliability/baked_in_configs/t1_gstatic_com.json',
-              'domain_reliability/baked_in_configs/t2_gstatic_com.json',
-              'domain_reliability/baked_in_configs/t3_gstatic_com.json',
-              'domain_reliability/baked_in_configs/themes_googleusercontent_com.json',
-              'domain_reliability/baked_in_configs/www_google_com.json',
-              'domain_reliability/baked_in_configs/www_googleadservices_com.json',
-              'domain_reliability/baked_in_configs/www_gstatic_com.json',
-              'domain_reliability/baked_in_configs/www_youtube_com.json',
-            ],
           },
           'inputs': [
             '<(bake_in_configs_script)',
@@ -120,9 +64,13 @@
           'outputs': [
             '<(baked_in_configs_cc)'
           ],
+          # The actual list of JSON files will overflow the command line length
+          # limit on Windows, so pass the name of the .gypi file and
+          # bake_in_configs.py will read the filenames out of it manually.
           'action': ['python',
                      '<(bake_in_configs_script)',
-                     '<@(baked_in_configs)',
+                     '.',
+                     'domain_reliability/baked_in_configs.gypi',
                      '<(baked_in_configs_cc)'],
           'process_outputs_as_sources': 1,
           'message': 'Baking in Domain Reliability configs',

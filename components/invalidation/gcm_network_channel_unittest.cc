@@ -17,25 +17,25 @@ class TestGCMNetworkChannelDelegate : public GCMNetworkChannelDelegate {
   TestGCMNetworkChannelDelegate()
       : register_call_count_(0) {}
 
-  virtual void Initialize(
-      GCMNetworkChannelDelegate::ConnectionStateCallback callback) OVERRIDE {
+  void Initialize(
+      GCMNetworkChannelDelegate::ConnectionStateCallback callback) override {
     connection_state_callback = callback;
   }
 
-  virtual void RequestToken(RequestTokenCallback callback) OVERRIDE {
+  void RequestToken(RequestTokenCallback callback) override {
     request_token_callback = callback;
   }
 
-  virtual void InvalidateToken(const std::string& token) OVERRIDE {
+  void InvalidateToken(const std::string& token) override {
     invalidated_token = token;
   }
 
-  virtual void Register(RegisterCallback callback) OVERRIDE {
+  void Register(RegisterCallback callback) override {
     ++register_call_count_;
     register_callback = callback;
   }
 
-  virtual void SetMessageReceiver(MessageCallback callback) OVERRIDE {
+  void SetMessageReceiver(MessageCallback callback) override {
     message_callback = callback;
   }
 
@@ -86,7 +86,7 @@ class TestGCMNetworkChannel : public GCMNetworkChannel {
  protected:
   // On Android GCMNetworkChannel::BuildUrl hits NOTREACHED(). I still want
   // tests to run.
-  virtual GURL BuildUrl(const std::string& registration_id) OVERRIDE {
+  GURL BuildUrl(const std::string& registration_id) override {
     return GURL("http://test.url.com");
   }
 };
@@ -110,7 +110,7 @@ class TestNetworkChannelURLFetcher : public net::FakeURLFetcher {
                             status),
         test_(test) {}
 
-  virtual void AddExtraRequestHeader(const std::string& header_line) OVERRIDE;
+  void AddExtraRequestHeader(const std::string& header_line) override;
 
  private:
   GCMNetworkChannelTest* test_;
@@ -125,10 +125,9 @@ class GCMNetworkChannelTest
         url_fetchers_created_count_(0),
         last_invalidator_state_(TRANSIENT_INVALIDATION_ERROR) {}
 
-  virtual ~GCMNetworkChannelTest() {
-  }
+  ~GCMNetworkChannelTest() override {}
 
-  virtual void SetUp() {
+  void SetUp() override {
     request_context_getter_ = new net::TestURLRequestContextGetter(
         base::MessageLoopProxy::current());
     // Ownership of delegate goes to GCNMentworkChannel but test needs pointer
@@ -147,9 +146,7 @@ class GCMNetworkChannelTest
             base::Unretained(this))));
   }
 
-  virtual void TearDown() {
-    gcm_network_channel_->RemoveObserver(this);
-  }
+  void TearDown() override { gcm_network_channel_->RemoveObserver(this); }
 
   // Helper functions to call private methods from test
   GURL BuildUrl(const std::string& registration_id) {
@@ -166,8 +163,8 @@ class GCMNetworkChannelTest
     return GCMNetworkChannel::Base64DecodeURLSafe(input, output);
   }
 
-  virtual void OnNetworkChannelStateChanged(
-      InvalidatorState invalidator_state) OVERRIDE {
+  void OnNetworkChannelStateChanged(
+      InvalidatorState invalidator_state) override {
     last_invalidator_state_ = invalidator_state;
   }
 

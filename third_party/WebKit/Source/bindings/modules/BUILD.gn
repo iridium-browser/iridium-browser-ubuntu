@@ -65,10 +65,15 @@ make_names("bindings_modules_generated_event_target_modules_names") {
 # GYP version: Source/bindings/modules/generated.gyp:interfaces_info_individual_modules
 compute_interfaces_info_individual("interfaces_info_individual_modules") {
   sources_static = modules_static_idl_files
-  # No generated files currently, will add with constructors
-  sources_generated = []
-  output_file =
-    "$bindings_modules_output_dir/InterfacesInfoModulesIndividual.pickle"
+  sources_generated = modules_generated_dependency_idl_files
+  interfaces_info_file =
+    "$bindings_modules_output_dir/InterfacesInfoOverallIndividual.pickle"
+  component_wide_info_file =
+    "$bindings_modules_output_dir/ComponentInfoModules.pickle"
+  deps = [
+    ":modules_core_global_constructors_idls",
+    ":modules_global_constructors_idls",
+  ]
 }
 
 # GYP version: Source/bindings/modules/generated.gyp:interfaces_info
@@ -77,10 +82,10 @@ action("interfaces_info") {
 
   inputs = [
     "$bindings_core_output_dir/InterfacesInfoCoreIndividual.pickle",
-    "$bindings_modules_output_dir/InterfacesInfoModulesIndividual.pickle",
+    "$bindings_modules_output_dir/InterfacesInfoOverallIndividual.pickle",
   ]
   outputs = [
-    "$bindings_modules_output_dir/InterfacesInfoModules.pickle",
+    "$bindings_modules_output_dir/InterfacesInfoOverall.pickle",
   ]
 
   args = [
@@ -90,10 +95,10 @@ action("interfaces_info") {
         "$bindings_core_output_dir/InterfacesInfoCoreIndividual.pickle",
         root_build_dir),
     rebase_path(
-        "$bindings_modules_output_dir/InterfacesInfoModulesIndividual.pickle",
+        "$bindings_modules_output_dir/InterfacesInfoOverallIndividual.pickle",
         root_build_dir),
     rebase_path(
-        "$bindings_modules_output_dir/InterfacesInfoModules.pickle",
+        "$bindings_modules_output_dir/InterfacesInfoOverall.pickle",
         root_build_dir),
   ]
 
@@ -101,4 +106,32 @@ action("interfaces_info") {
     ":interfaces_info_individual_modules",
     "//third_party/WebKit/Source/bindings/core:interfaces_info_individual_core",
   ]
+}
+
+# GYP version: Source/bindings/modules/generated.gyp:modules_global_objects
+compute_global_objects("modules_global_objects") {
+  sources = modules_idl_files
+  sources_generated = [ "$bindings_core_output_dir/GlobalObjectsCore.pickle" ]
+  output_file = "$bindings_modules_output_dir/GlobalObjectsModules.pickle"
+  deps = [ "//third_party/WebKit/Source/bindings/core:core_global_objects" ]
+}
+
+# GYP version: Source/bindings/modules/generated.gyp:modules_core_global_constructors_idls
+generate_global_constructors("modules_core_global_constructors_idls") {
+  sources = core_idl_files + core_idl_with_modules_dependency_files
+  global_objects_file = "$bindings_modules_output_dir/GlobalObjectsModules.pickle"
+  interfaces = modules_core_global_constructors_original_interfaces
+  component = "Core"
+  output_dir = blink_modules_output_dir
+  deps = [ ":modules_global_objects" ]
+}
+
+# GYP version: Source/bindings/modules/generated.gyp:modules_global_constructors_idls
+generate_global_constructors("modules_global_constructors_idls") {
+  sources = modules_idl_files
+  global_objects_file = "$bindings_modules_output_dir/GlobalObjectsModules.pickle"
+  interfaces = modules_global_constructors_original_interfaces
+  component = "Modules"
+  output_dir = blink_modules_output_dir
+  deps = [ ":modules_global_objects" ]
 }

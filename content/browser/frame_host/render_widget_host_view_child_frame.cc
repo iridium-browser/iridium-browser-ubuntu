@@ -91,7 +91,7 @@ RenderWidgetHostViewChildFrame::GetNativeViewAccessible() {
   return NULL;
 }
 
-void RenderWidgetHostViewChildFrame::SetBackgroundOpaque(bool opaque) {
+void RenderWidgetHostViewChildFrame::SetBackgroundColor(SkColor color) {
 }
 
 gfx::Size RenderWidgetHostViewChildFrame::GetPhysicalBackingSize() const {
@@ -116,7 +116,7 @@ void RenderWidgetHostViewChildFrame::ImeCancelComposition() {
   NOTREACHED();
 }
 
-#if defined(OS_MACOSX) || defined(USE_AURA)
+#if defined(OS_MACOSX) || defined(USE_AURA) || defined(OS_ANDROID)
 void RenderWidgetHostViewChildFrame::ImeCompositionRangeChanged(
     const gfx::Range& range,
     const std::vector<gfx::Rect>& character_bounds) {
@@ -153,7 +153,8 @@ void RenderWidgetHostViewChildFrame::SetIsLoading(bool is_loading) {
 void RenderWidgetHostViewChildFrame::TextInputTypeChanged(
     ui::TextInputType type,
     ui::TextInputMode input_mode,
-    bool can_compose_inline) {
+    bool can_compose_inline,
+    int flags) {
   NOTREACHED();
 }
 
@@ -190,13 +191,6 @@ void RenderWidgetHostViewChildFrame::SelectionBoundsChanged(
     const ViewHostMsg_SelectionBounds_Params& params) {
 }
 
-#if defined(OS_ANDROID) || defined(TOOLKIT_VIEWS) || defined(USE_AURA)
-void RenderWidgetHostViewChildFrame::ShowDisambiguationPopup(
-    const gfx::Rect& rect_pixels,
-    const SkBitmap& zoomed_bitmap) {
-}
-#endif
-
 #if defined(OS_ANDROID)
 void RenderWidgetHostViewChildFrame::LockCompositingSurface() {
 }
@@ -204,21 +198,6 @@ void RenderWidgetHostViewChildFrame::LockCompositingSurface() {
 void RenderWidgetHostViewChildFrame::UnlockCompositingSurface() {
 }
 #endif
-
-void RenderWidgetHostViewChildFrame::AcceleratedSurfaceInitialized(int host_id,
-                                                              int route_id) {
-}
-
-void RenderWidgetHostViewChildFrame::AcceleratedSurfaceBuffersSwapped(
-    const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params,
-    int gpu_host_id) {
-  NOTREACHED();
-}
-
-void RenderWidgetHostViewChildFrame::AcceleratedSurfacePostSubBuffer(
-    const GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params& params,
-    int gpu_host_id) {
-}
 
 void RenderWidgetHostViewChildFrame::OnSwapCompositorFrame(
       uint32 output_surface_id,
@@ -258,9 +237,6 @@ void RenderWidgetHostViewChildFrame::UnlockMouse() {
 
 #if defined(OS_MACOSX)
 void RenderWidgetHostViewChildFrame::SetActive(bool active) {
-}
-
-void RenderWidgetHostViewChildFrame::SetTakesFocusOnlyOnMouseDown(bool flag) {
 }
 
 void RenderWidgetHostViewChildFrame::SetWindowVisibility(bool visible) {
@@ -312,20 +288,13 @@ bool RenderWidgetHostViewChildFrame::CanCopyToVideoFrame() const {
   return false;
 }
 
-void RenderWidgetHostViewChildFrame::AcceleratedSurfaceSuspend() {
-  NOTREACHED();
-}
-
-void RenderWidgetHostViewChildFrame::AcceleratedSurfaceRelease() {
-}
-
 bool RenderWidgetHostViewChildFrame::HasAcceleratedSurface(
       const gfx::Size& desired_size) {
   return false;
 }
 
 gfx::GLSurfaceHandle RenderWidgetHostViewChildFrame::GetCompositingSurface() {
-  return gfx::GLSurfaceHandle(gfx::kNullPluginWindow, gfx::TEXTURE_TRANSPORT);
+  return gfx::GLSurfaceHandle(gfx::kNullPluginWindow, gfx::NULL_TRANSPORT);
 }
 
 #if defined(OS_WIN)

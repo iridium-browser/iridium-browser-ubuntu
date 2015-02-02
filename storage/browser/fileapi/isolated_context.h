@@ -141,22 +141,21 @@ class STORAGE_EXPORT IsolatedContext : public MountPoints {
                           std::vector<MountPointInfo>* files) const;
 
   // MountPoints overrides.
-  virtual bool HandlesFileSystemMountType(FileSystemType type) const OVERRIDE;
-  virtual bool RevokeFileSystem(const std::string& filesystem_id) OVERRIDE;
-  virtual bool GetRegisteredPath(const std::string& filesystem_id,
-                                 base::FilePath* path) const OVERRIDE;
-  virtual bool CrackVirtualPath(
-      const base::FilePath& virtual_path,
-      std::string* filesystem_id,
-      FileSystemType* type,
-      std::string* cracked_id,
-      base::FilePath* path,
-      FileSystemMountOption* mount_option) const OVERRIDE;
-  virtual FileSystemURL CrackURL(const GURL& url) const OVERRIDE;
-  virtual FileSystemURL CreateCrackedFileSystemURL(
+  bool HandlesFileSystemMountType(FileSystemType type) const override;
+  bool RevokeFileSystem(const std::string& filesystem_id) override;
+  bool GetRegisteredPath(const std::string& filesystem_id,
+                         base::FilePath* path) const override;
+  bool CrackVirtualPath(const base::FilePath& virtual_path,
+                        std::string* filesystem_id,
+                        FileSystemType* type,
+                        std::string* cracked_id,
+                        base::FilePath* path,
+                        FileSystemMountOption* mount_option) const override;
+  FileSystemURL CrackURL(const GURL& url) const override;
+  FileSystemURL CreateCrackedFileSystemURL(
       const GURL& origin,
       FileSystemType type,
-      const base::FilePath& path) const OVERRIDE;
+      const base::FilePath& path) const override;
 
   // Returns the virtual root path that looks like /<filesystem_id>.
   base::FilePath CreateVirtualRootPath(const std::string& filesystem_id) const;
@@ -174,11 +173,10 @@ class STORAGE_EXPORT IsolatedContext : public MountPoints {
 
   // Obtain an instance of this class via GetInstance().
   IsolatedContext();
-  virtual ~IsolatedContext();
+  ~IsolatedContext() override;
 
   // MountPoints overrides.
-  virtual FileSystemURL CrackFileSystemURL(
-      const FileSystemURL& url) const OVERRIDE;
+  FileSystemURL CrackFileSystemURL(const FileSystemURL& url) const override;
 
   // Unregisters a file system of given |filesystem_id|. Must be called with
   // lock_ held.  Returns true if the file system is unregistered.

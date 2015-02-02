@@ -20,8 +20,9 @@ namespace content {
 class FontLoadingTestCase : public MacSandboxTestCase {
  public:
   FontLoadingTestCase() : font_data_length_(-1) {}
-  virtual bool BeforeSandboxInit() OVERRIDE;
-  virtual bool SandboxedTest() OVERRIDE;
+  bool BeforeSandboxInit() override;
+  bool SandboxedTest() override;
+
  private:
   scoped_ptr<base::SharedMemory> font_shmem_;
   size_t font_data_length_;

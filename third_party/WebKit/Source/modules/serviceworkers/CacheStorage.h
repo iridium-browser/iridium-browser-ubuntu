@@ -17,15 +17,14 @@ namespace blink {
 class Cache;
 class WebServiceWorkerCacheStorage;
 
-class CacheStorage FINAL : public GarbageCollected<CacheStorage>, public ScriptWrappable {
+class CacheStorage final : public GarbageCollected<CacheStorage>, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
     WTF_MAKE_NONCOPYABLE(CacheStorage);
 public:
     static CacheStorage* create(WebServiceWorkerCacheStorage*);
 
-    ScriptPromise get(ScriptState*, const String& cacheName);
+    ScriptPromise open(ScriptState*, const String& cacheName);
     ScriptPromise has(ScriptState*, const String& cacheName);
-    ScriptPromise createFunction(ScriptState*, const String& cacheName);
     ScriptPromise deleteFunction(ScriptState*, const String& cacheName);
     ScriptPromise keys(ScriptState*);
 

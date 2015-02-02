@@ -45,12 +45,12 @@ class NativeViewGLSurfaceOSMesa : public GLSurfaceOSMesa {
   virtual ~NativeViewGLSurfaceOSMesa();
 
   // Implement subset of GLSurface.
-  virtual bool Initialize() OVERRIDE;
-  virtual void Destroy() OVERRIDE;
-  virtual bool IsOffscreen() OVERRIDE;
-  virtual bool SwapBuffers() OVERRIDE;
-  virtual bool SupportsPostSubBuffer() OVERRIDE;
-  virtual bool PostSubBuffer(int x, int y, int width, int height) OVERRIDE;
+  virtual bool Initialize() override;
+  virtual void Destroy() override;
+  virtual bool IsOffscreen() override;
+  virtual bool SwapBuffers() override;
+  virtual bool SupportsPostSubBuffer() override;
+  virtual bool PostSubBuffer(int x, int y, int width, int height) override;
 
  private:
   gfx::AcceleratedWidget window_;
@@ -59,43 +59,91 @@ class NativeViewGLSurfaceOSMesa : public GLSurfaceOSMesa {
   DISALLOW_COPY_AND_ASSIGN(NativeViewGLSurfaceOSMesa);
 };
 
-class DWMVSyncProvider : public VSyncProvider {
+class WinVSyncProvider : public VSyncProvider {
  public:
-  explicit DWMVSyncProvider() {}
+  explicit WinVSyncProvider(gfx::AcceleratedWidget window) :
+    window_(window)
+  {
+    use_dwm_ = (base::win::GetVersion() >= base::win::VERSION_WIN7);
+  }
 
-  virtual ~DWMVSyncProvider() {}
+  virtual ~WinVSyncProvider() {}
 
   virtual void GetVSyncParameters(const UpdateVSyncCallback& callback) {
-    TRACE_EVENT0("gpu", "DWMVSyncProvider::GetVSyncParameters");
-    DWM_TIMING_INFO timing_info;
-    timing_info.cbSize = sizeof(timing_info);
-    HRESULT result = DwmGetCompositionTimingInfo(NULL, &timing_info);
-    if (result != S_OK)
-      return;
+    TRACE_EVENT0("gpu", "WinVSyncProvider::GetVSyncParameters");
 
     base::TimeTicks timebase;
-    // If FrameTime is not high resolution, we do not want to translate the
-    // QPC value provided by DWM into the low-resolution timebase, which
-    // would be error prone and jittery. As a fallback, we assume the timebase
-    // is zero.
-    if (gfx::FrameTime::TimestampsAreHighRes()) {
-      timebase = gfx::FrameTime::FromQPCValue(
-          static_cast<LONGLONG>(timing_info.qpcVBlank));
+    base::TimeDelta interval;
+    bool dwm_active = false;
+
+    // Query the DWM timing info first if available. This will provide the most
+    // precise values.
+    if (use_dwm_) {
+      DWM_TIMING_INFO timing_info;
+      timing_info.cbSize = sizeof(timing_info);
+      HRESULT result = DwmGetCompositionTimingInfo(NULL, &timing_info);
+      if (result == S_OK) {
+        dwm_active = true;
+        if (gfx::FrameTime::TimestampsAreHighRes()) {
+          // qpcRefreshPeriod is very accurate but noisy, and must be used with
+          // a high resolution timebase to avoid frequently missing Vsync.
+          timebase = gfx::FrameTime::FromQPCValue(
+              static_cast<LONGLONG>(timing_info.qpcVBlank));
+          interval = base::TimeDelta::FromQPCValue(
+              static_cast<LONGLONG>(timing_info.qpcRefreshPeriod));
+        } else if (timing_info.rateRefresh.uiDenominator > 0 &&
+            timing_info.rateRefresh.uiNumerator > 0) {
+          // If FrameTime is not high resolution, we do not want to translate
+          // the QPC value provided by DWM into the low-resolution timebase,
+          // which would be error prone and jittery. As a fallback, we assume
+          // the timebase is zero and use rateRefresh, which may be rounded but
+          // isn't noisy like qpcRefreshPeriod, instead. The fact that we don't
+          // have a timebase here may lead to brief periods of jank when our
+          // scheduling becomes offset from the hardware vsync.
+
+          // Swap the numerator/denominator to convert frequency to period.
+          interval = base::TimeDelta::FromMicroseconds(
+              timing_info.rateRefresh.uiDenominator *
+              base::Time::kMicrosecondsPerSecond /
+              timing_info.rateRefresh.uiNumerator);
+        }
+      }
     }
 
-    // Swap the numerator/denominator to convert frequency to period.
-    if (timing_info.rateRefresh.uiDenominator > 0 &&
-        timing_info.rateRefresh.uiNumerator > 0) {
-      base::TimeDelta interval = base::TimeDelta::FromMicroseconds(
-          timing_info.rateRefresh.uiDenominator *
-          base::Time::kMicrosecondsPerSecond /
-          timing_info.rateRefresh.uiNumerator);
+    if (!dwm_active) {
+      // When DWM compositing is active all displays are normalized to the
+      // refresh rate of the primary display, and won't composite any faster.
+      // If DWM compositing is disabled, though, we can use the refresh rates
+      // reported by each display, which will help systems that have mis-matched
+      // displays that run at different frequencies.
+      HMONITOR monitor = MonitorFromWindow(window_, MONITOR_DEFAULTTONEAREST);
+      MONITORINFOEX monitor_info;
+      monitor_info.cbSize = sizeof(MONITORINFOEX);
+      BOOL result = GetMonitorInfo(monitor, &monitor_info);
+      if (result) {
+        DEVMODE display_info;
+        display_info.dmSize = sizeof(DEVMODE);
+        display_info.dmDriverExtra = 0;
+        result = EnumDisplaySettings(monitor_info.szDevice,
+            ENUM_CURRENT_SETTINGS, &display_info);
+        if (result && display_info.dmDisplayFrequency > 1) {
+          interval = base::TimeDelta::FromMicroseconds(
+              (1.0 / static_cast<double>(display_info.dmDisplayFrequency)) *
+              base::Time::kMicrosecondsPerSecond);
+        }
+      }
+    }
+
+    if (interval.ToInternalValue() != 0) {
       callback.Run(timebase, interval);
     }
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(DWMVSyncProvider);
+  DISALLOW_COPY_AND_ASSIGN(WinVSyncProvider);
+
+  gfx::AcceleratedWidget window_;
+  bool use_dwm_;
 };
 
 // Helper routine that does one-off initialization like determining the
@@ -245,8 +293,7 @@ scoped_refptr<GLSurface> GLSurface::CreateViewGLSurface(
       scoped_refptr<NativeViewGLSurfaceEGL> surface(
           new NativeViewGLSurfaceEGL(window));
       scoped_ptr<VSyncProvider> sync_provider;
-      if (base::win::GetVersion() >= base::win::VERSION_VISTA)
-        sync_provider.reset(new DWMVSyncProvider);
+      sync_provider.reset(new WinVSyncProvider(window));
       if (!surface->Initialize(sync_provider.Pass()))
         return NULL;
 

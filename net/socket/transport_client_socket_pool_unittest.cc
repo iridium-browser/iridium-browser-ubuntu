@@ -57,7 +57,7 @@ class TransportClientSocketPoolTest : public testing::Test {
               NULL) {
   }
 
-  virtual ~TransportClientSocketPoolTest() {
+  ~TransportClientSocketPoolTest() override {
     internal::ClientSocketPoolBaseHelper::set_connect_backup_jobs_enabled(
         connect_backup_jobs_enabled_);
   }
@@ -465,7 +465,7 @@ class RequestSocketCallback : public TestCompletionCallbackBase {
                              base::Unretained(this))) {
   }
 
-  virtual ~RequestSocketCallback() {}
+  ~RequestSocketCallback() override {}
 
   const CompletionCallback& callback() const { return callback_; }
 

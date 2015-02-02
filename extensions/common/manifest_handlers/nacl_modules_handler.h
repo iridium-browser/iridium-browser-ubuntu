@@ -28,12 +28,12 @@ struct NaClModuleInfo {
 class NaClModulesHandler : public ManifestHandler {
  public:
   NaClModulesHandler();
-  virtual ~NaClModulesHandler();
+  ~NaClModulesHandler() override;
 
-  virtual bool Parse(Extension* extension, base::string16* error) OVERRIDE;
+  bool Parse(Extension* extension, base::string16* error) override;
 
  private:
-  virtual const std::vector<std::string> Keys() const OVERRIDE;
+  const std::vector<std::string> Keys() const override;
 };
 
 }  // namespace extensions

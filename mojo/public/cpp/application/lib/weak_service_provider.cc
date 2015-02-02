@@ -12,8 +12,8 @@ namespace internal {
 
 WeakServiceProvider::WeakServiceProvider(ServiceProviderImpl* creator,
                                          ServiceProvider* service_provider)
-      : creator_(creator),
-        service_provider_(service_provider) {}
+    : creator_(creator), service_provider_(service_provider) {
+}
 
 WeakServiceProvider::~WeakServiceProvider() {
   if (creator_)
@@ -21,8 +21,8 @@ WeakServiceProvider::~WeakServiceProvider() {
 }
 
 void WeakServiceProvider::Clear() {
-  creator_ = NULL;
-  service_provider_ = NULL;
+  creator_ = nullptr;
+  service_provider_ = nullptr;
 }
 
 void WeakServiceProvider::ConnectToService(

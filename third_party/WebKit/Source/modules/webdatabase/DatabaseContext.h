@@ -30,32 +30,29 @@
 
 #include "core/dom/ActiveDOMObject.h"
 #include "platform/heap/Handle.h"
-#include "wtf/PassRefPtr.h"
-#include "wtf/ThreadSafeRefCounted.h"
 
 namespace blink {
 
-class Database;
 class DatabaseContext;
 class TaskSynchronizer;
 class DatabaseThread;
 class ExecutionContext;
 class SecurityOrigin;
 
-class DatabaseContext FINAL
-    : public ThreadSafeRefCountedWillBeGarbageCollectedFinalized<DatabaseContext>
+class DatabaseContext final
+    : public GarbageCollectedFinalized<DatabaseContext>
     , public ActiveDOMObject {
 public:
     friend class DatabaseManager;
 
-    static PassRefPtrWillBeRawPtr<DatabaseContext> create(ExecutionContext*);
+    static DatabaseContext* create(ExecutionContext*);
 
     virtual ~DatabaseContext();
     void trace(Visitor*);
 
     // For life-cycle management (inherited from ActiveDOMObject):
-    virtual void contextDestroyed() OVERRIDE;
-    virtual void stop() OVERRIDE;
+    virtual void contextDestroyed() override;
+    virtual void stop() override;
 
     DatabaseContext* backend();
     DatabaseThread* databaseThread();
@@ -73,7 +70,7 @@ public:
 private:
     explicit DatabaseContext(ExecutionContext*);
 
-    RefPtrWillBeMember<DatabaseThread> m_databaseThread;
+    Member<DatabaseThread> m_databaseThread;
     bool m_hasOpenDatabases; // This never changes back to false, even after the database thread is closed.
     bool m_hasRequestedTermination;
 };

@@ -52,6 +52,41 @@ class PListWriterUnittest(writer_unittest_common.WriterUnittestCommon):
   </dict>
 </plist>''' % (product_name, bundle_id, policies)
 
+  def _GetExpectedOutputsWithVersion(self, product_name, bundle_id, policies,
+                                     version):
+    '''Substitutes the variable parts into a plist template. The result
+    of this function can be used as an expected result to test the output
+    of PListWriter.
+
+    Args:
+      product_name: The name of the product, normally Chromium or Google Chrome.
+      bundle_id: The mac bundle id of the product.
+      policies: The list of policies.
+
+    Returns:
+      The text of a plist template with the variable parts substituted.
+    '''
+    return '''
+<?xml version="1.0" ?>
+<!DOCTYPE plist  PUBLIC '-//Apple//DTD PLIST 1.0//EN'  'http://www.apple.com/DTDs/PropertyList-1.0.dtd'>
+<plist version="1">
+  <dict>
+    <key>pfm_name</key>
+    <string>%s</string>
+    <key>pfm_description</key>
+    <string/>
+    <key>pfm_title</key>
+    <string/>
+    <key>pfm_version</key>
+    <string>1</string>
+    <key>pfm_domain</key>
+    <string>%s</string>
+    <key>pfm_subkeys</key>
+    %s
+  </dict>
+  <!--%s-->
+</plist>''' % (product_name, bundle_id, policies, version)
+
   def testEmpty(self):
     # Test PListWriter in case of empty polices.
     grd = self.PrepareTest('''
@@ -69,6 +104,30 @@ class PListWriterUnittest(writer_unittest_common.WriterUnittestCommon):
         'en')
     expected_output = self._GetExpectedOutputs(
         'Chromium', 'com.example.Test', '<array/>')
+    self.assertEquals(output.strip(), expected_output.strip())
+
+  def testEmptyVersion(self):
+    # Test PListWriter in case of empty polices.
+    grd = self.PrepareTest('''
+      {
+        'policy_definitions': [],
+        'placeholders': [],
+        'messages': {},
+      }''')
+
+    output = self.GetOutput(
+        grd,
+        'fr',
+        {'_chromium': '1',
+         'mac_bundle_id': 'com.example.Test',
+         'version': '39.0.0.0'},
+        'plist',
+        'en')
+    expected_output = self._GetExpectedOutputsWithVersion(
+        'Chromium',
+        'com.example.Test',
+        '<array/>',
+        'chromium version: 39.0.0.0')
     self.assertEquals(output.strip(), expected_output.strip())
 
   def testMainPolicy(self):

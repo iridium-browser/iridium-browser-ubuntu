@@ -18,10 +18,10 @@ class WMState;
 class ChromeBrowserMainExtraPartsViews : public ChromeBrowserMainExtraParts {
  public:
   ChromeBrowserMainExtraPartsViews();
-  virtual ~ChromeBrowserMainExtraPartsViews();
+  ~ChromeBrowserMainExtraPartsViews() override;
 
   // Overridden from ChromeBrowserMainExtraParts:
-  virtual void ToolkitInitialized() OVERRIDE;
+  void ToolkitInitialized() override;
 
  private:
 #if defined(USE_AURA)

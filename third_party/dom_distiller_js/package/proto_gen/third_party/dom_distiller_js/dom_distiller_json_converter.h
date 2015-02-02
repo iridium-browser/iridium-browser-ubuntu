@@ -36,7 +36,7 @@ namespace dom_distiller {
           if (message.has_html()) {
             dict->SetString("1", message.html());
           }
-          return dict.PassAs<base::Value>();
+          return dict.Pass();
         }
       };
 
@@ -83,7 +83,7 @@ namespace dom_distiller {
           if (message.has_canonical_page()) {
             dict->SetString("3", message.canonical_page());
           }
-          return dict.PassAs<base::Value>();
+          return dict.Pass();
         }
       };
 
@@ -158,7 +158,7 @@ namespace dom_distiller {
           for (int i = 0; i < message.authors_size(); ++i) {
             field_list->AppendString(message.authors(i));
           }
-          return dict.PassAs<base::Value>();
+          return dict.Pass();
         }
       };
 
@@ -235,7 +235,7 @@ namespace dom_distiller {
           if (message.has_height()) {
             dict->SetInteger("6", message.height());
           }
-          return dict.PassAs<base::Value>();
+          return dict.Pass();
         }
       };
 
@@ -358,7 +358,7 @@ namespace dom_distiller {
                 dom_distiller::proto::json::MarkupImage::WriteToValue(message.images(i));
             field_list->Append(inner_message_value.release());
           }
-          return dict.PassAs<base::Value>();
+          return dict.Pass();
         }
       };
 
@@ -425,7 +425,7 @@ namespace dom_distiller {
           if (message.has_total_time()) {
             dict->SetDouble("5", message.total_time());
           }
-          return dict.PassAs<base::Value>();
+          return dict.Pass();
         }
       };
 
@@ -452,7 +452,7 @@ namespace dom_distiller {
           if (message.has_log()) {
             dict->SetString("1", message.log());
           }
-          return dict.PassAs<base::Value>();
+          return dict.Pass();
         }
       };
 
@@ -479,7 +479,7 @@ namespace dom_distiller {
           if (message.has_word_count()) {
             dict->SetInteger("1", message.word_count());
           }
-          return dict.PassAs<base::Value>();
+          return dict.Pass();
         }
       };
 
@@ -562,6 +562,13 @@ namespace dom_distiller {
               goto error;
             }
           }
+          if (dict->HasKey("9")) {
+            std::string field_value;
+            if (!dict->GetString("9", &field_value)) {
+              goto error;
+            }
+            message->set_text_direction(field_value);
+          }
           return true;
 
         error:
@@ -608,7 +615,10 @@ namespace dom_distiller {
                 dom_distiller::proto::json::StatisticsInfo::WriteToValue(message.statistics_info());
             dict->Set("8", inner_message_value.release());
           }
-          return dict.PassAs<base::Value>();
+          if (message.has_text_direction()) {
+            dict->SetString("9", message.text_direction());
+          }
+          return dict.Pass();
         }
       };
 
@@ -631,6 +641,13 @@ namespace dom_distiller {
             }
             message->set_debug_level(field_value);
           }
+          if (dict->HasKey("3")) {
+            std::string field_value;
+            if (!dict->GetString("3", &field_value)) {
+              goto error;
+            }
+            message->set_original_domain(field_value);
+          }
           return true;
 
         error:
@@ -645,7 +662,10 @@ namespace dom_distiller {
           if (message.has_debug_level()) {
             dict->SetInteger("2", message.debug_level());
           }
-          return dict.PassAs<base::Value>();
+          if (message.has_original_domain()) {
+            dict->SetString("3", message.original_domain());
+          }
+          return dict.Pass();
         }
       };
 

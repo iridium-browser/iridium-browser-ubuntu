@@ -6,6 +6,7 @@ package org.chromium.ui;
 
 import android.content.Context;
 import android.graphics.Rect;
+import android.util.Log;
 import android.view.View;
 import android.view.View.MeasureSpec;
 import android.view.View.OnLayoutChangeListener;
@@ -15,7 +16,10 @@ import android.widget.ListAdapter;
 import android.widget.ListPopupWindow;
 import android.widget.PopupWindow;
 
+import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.ui.base.ViewAndroidDelegate;
+
+import java.lang.reflect.Method;
 
 /**
  * The dropdown list popup window.
@@ -29,6 +33,7 @@ public class DropdownPopupWindow extends ListPopupWindow {
     private float mAnchorHeight;
     private float mAnchorX;
     private float mAnchorY;
+    private boolean mRtl;
     private OnLayoutChangeListener mLayoutChangeListener;
     private PopupWindow.OnDismissListener mOnDismissListener;
     ListAdapter mAdapter;
@@ -69,11 +74,15 @@ public class DropdownPopupWindow extends ListPopupWindow {
         });
 
         setAnchorView(mAnchorView);
+        Rect originalPadding = new Rect();
+        getBackground().getPadding(originalPadding);
+        setVerticalOffset(-originalPadding.top);
     }
 
     /**
      * Sets the location and the size of the anchor view that the DropdownPopupWindow will use to
-     * attach itself.
+     * attach itself. Calling this method can cause a layout change, so the adapter should not be
+     * null.
      * @param x X coordinate of the top left corner of the anchor view.
      * @param y Y coordinate of the top left corner of the anchor view.
      * @param width The width of the anchor view.
@@ -96,13 +105,17 @@ public class DropdownPopupWindow extends ListPopupWindow {
         super.setAdapter(adapter);
     }
 
+    /**
+     * Shows the popup. The adapter should be set before calling this method.
+     */
     @Override
     public void show() {
         // An ugly hack to keep the popup from expanding on top of the keyboard.
         setInputMethodMode(INPUT_METHOD_NEEDED);
+
         int contentWidth = measureContentWidth();
-        float contentWidthInDip = contentWidth /
-                mContext.getResources().getDisplayMetrics().density;
+        float contentWidthInDip = contentWidth
+                / mContext.getResources().getDisplayMetrics().density;
         if (contentWidthInDip > mAnchorWidth) {
             setContentWidth(contentWidth);
             final Rect displayFrame = new Rect();
@@ -117,6 +130,22 @@ public class DropdownPopupWindow extends ListPopupWindow {
                 mAnchorHeight);
         super.show();
         getListView().setDividerHeight(0);
+        ApiCompatibilityUtils.setLayoutDirection(getListView(),
+                mRtl ? View.LAYOUT_DIRECTION_RTL : View.LAYOUT_DIRECTION_LTR);
+
+        // HACK: The ListPopupWindow's mPopup automatically dismisses on an outside tap. There's
+        // no way to override it or prevent it, except reaching into ListPopupWindow's hidden
+        // API. This allows the C++ controller to completely control showing/hiding the popup.
+        // See http://crbug.com/400601
+        try {
+            Method setForceIgnoreOutsideTouch = ListPopupWindow.class.getMethod(
+                    "setForceIgnoreOutsideTouch", new Class[] { boolean.class });
+            setForceIgnoreOutsideTouch.invoke(this, new Object[] { true });
+        } catch (Exception e) {
+            Log.e("AutofillPopup",
+                    "ListPopupWindow.setForceIgnoreOutsideTouch not found",
+                    e);
+        }
     }
 
     @Override
@@ -125,18 +154,27 @@ public class DropdownPopupWindow extends ListPopupWindow {
     }
 
     /**
-     * Measures the width of the list content.
+     * Sets the text direction in the dropdown. Should be called before show().
+     * @param isRtl If true, then dropdown text direciton is right to left.
+     */
+    public void setRtl(boolean isRtl) {
+        mRtl = isRtl;
+    }
+
+    /**
+     * Measures the width of the list content. The adapter should not be null.
      * @return The popup window width in pixels.
      */
     private int measureContentWidth() {
+        assert mAdapter != null : "Set the adapter before showing the popup.";
         int maxWidth = 0;
-        View itemView = null;
-        if (mAdapter == null)
-          return 0;
+        View[] itemViews = new View[mAdapter.getViewTypeCount()];
         final int widthMeasureSpec = MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED);
         final int heightMeasureSpec = MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED);
         for (int i = 0; i < mAdapter.getCount(); i++) {
-            itemView = mAdapter.getView(i, itemView, null);
+            int type = mAdapter.getItemViewType(i);
+            itemViews[type] = mAdapter.getView(i, itemViews[type], null);
+            View itemView = itemViews[type];
             LinearLayout.LayoutParams params =
                     new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
                             LinearLayout.LayoutParams.WRAP_CONTENT);

@@ -9,8 +9,8 @@
 #include "bindings/core/v8/SerializedScriptValue.h"
 #include "bindings/core/v8/V8Binding.h"
 #include "bindings/core/v8/V8BindingMacros.h"
+#include "core/dom/DOMArrayBuffer.h"
 #include "core/dom/MessagePort.h"
-#include "wtf/ArrayBuffer.h"
 #include <v8.h>
 
 namespace blink {
@@ -26,7 +26,7 @@ void postMessageMethodCommon(const char* interfaceName, Type* instance, const v8
     ArrayBufferArray arrayBuffers;
     if (info.Length() > 1) {
         const int transferablesArgIndex = 1;
-        if (!SerializedScriptValue::extractTransferables(info[transferablesArgIndex], transferablesArgIndex, ports, arrayBuffers, exceptionState, info.GetIsolate())) {
+        if (!SerializedScriptValue::extractTransferables(info.GetIsolate(), info[transferablesArgIndex], transferablesArgIndex, ports, arrayBuffers, exceptionState)) {
             exceptionState.throwIfNeeded();
             return;
         }

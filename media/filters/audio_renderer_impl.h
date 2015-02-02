@@ -67,27 +67,27 @@ class MEDIA_EXPORT AudioRendererImpl
       const SetDecryptorReadyCB& set_decryptor_ready_cb,
       const AudioHardwareConfig& hardware_params,
       const scoped_refptr<MediaLog>& media_log);
-  virtual ~AudioRendererImpl();
+  ~AudioRendererImpl() override;
 
   // TimeSource implementation.
-  virtual void StartTicking() OVERRIDE;
-  virtual void StopTicking() OVERRIDE;
-  virtual void SetPlaybackRate(float rate) OVERRIDE;
-  virtual void SetMediaTime(base::TimeDelta time) OVERRIDE;
-  virtual base::TimeDelta CurrentMediaTime() OVERRIDE;
-  virtual base::TimeDelta CurrentMediaTimeForSyncingVideo() OVERRIDE;
+  void StartTicking() override;
+  void StopTicking() override;
+  void SetPlaybackRate(float rate) override;
+  void SetMediaTime(base::TimeDelta time) override;
+  base::TimeDelta CurrentMediaTime() override;
+  base::TimeDelta CurrentMediaTimeForSyncingVideo() override;
 
   // AudioRenderer implementation.
-  virtual void Initialize(DemuxerStream* stream,
-                          const PipelineStatusCB& init_cb,
-                          const StatisticsCB& statistics_cb,
-                          const BufferingStateCB& buffering_state_cb,
-                          const base::Closure& ended_cb,
-                          const PipelineStatusCB& error_cb) OVERRIDE;
-  virtual TimeSource* GetTimeSource() OVERRIDE;
-  virtual void Flush(const base::Closure& callback) OVERRIDE;
-  virtual void StartPlaying() OVERRIDE;
-  virtual void SetVolume(float volume) OVERRIDE;
+  void Initialize(DemuxerStream* stream,
+                  const PipelineStatusCB& init_cb,
+                  const StatisticsCB& statistics_cb,
+                  const BufferingStateCB& buffering_state_cb,
+                  const base::Closure& ended_cb,
+                  const PipelineStatusCB& error_cb) override;
+  TimeSource* GetTimeSource() override;
+  void Flush(const base::Closure& callback) override;
+  void StartPlaying() override;
+  void SetVolume(float volume) override;
 
  private:
   friend class AudioRendererImplTest;
@@ -151,9 +151,8 @@ class MEDIA_EXPORT AudioRendererImpl
   // timestamp in the pipeline will be ahead of the actual audio playback. In
   // this case |audio_delay_milliseconds| should be used to indicate when in the
   // future should the filled buffer be played.
-  virtual int Render(AudioBus* audio_bus,
-                     int audio_delay_milliseconds) OVERRIDE;
-  virtual void OnRenderError() OVERRIDE;
+  int Render(AudioBus* audio_bus, int audio_delay_milliseconds) override;
+  void OnRenderError() override;
 
   // Helper methods that schedule an asynchronous read from the decoder as long
   // as there isn't a pending read.

@@ -23,14 +23,13 @@ class IpcNetworkManager : public rtc::NetworkManagerBase,
  public:
   // Constructor doesn't take ownership of the |network_list_manager|.
   CONTENT_EXPORT IpcNetworkManager(NetworkListManager* network_list_manager);
-  virtual ~IpcNetworkManager();
+  ~IpcNetworkManager() override;
 
-  virtual void StartUpdating() OVERRIDE;
-  virtual void StopUpdating() OVERRIDE;
+  void StartUpdating() override;
+  void StopUpdating() override;
 
   // P2PSocketDispatcher::NetworkListObserver interface.
-  virtual void OnNetworkListChanged(
-      const net::NetworkInterfaceList& list) OVERRIDE;
+  void OnNetworkListChanged(const net::NetworkInterfaceList& list) override;
 
  private:
   void SendNetworksChangedSignal();

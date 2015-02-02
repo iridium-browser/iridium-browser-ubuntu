@@ -5,16 +5,17 @@
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_SCREENS_MOCK_NETWORK_SCREEN_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_SCREENS_MOCK_NETWORK_SCREEN_H_
 
+#include "chrome/browser/chromeos/login/screens/base_screen_delegate.h"
 #include "chrome/browser/chromeos/login/screens/network_screen.h"
 #include "chrome/browser/chromeos/login/screens/network_screen_actor.h"
-#include "chrome/browser/chromeos/login/screens/screen_observer.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 namespace chromeos {
 
 class MockNetworkScreen : public NetworkScreen {
  public:
-  MockNetworkScreen(ScreenObserver* observer, NetworkScreenActor* actor);
+  MockNetworkScreen(BaseScreenDelegate* base_screen_delegate,
+                    NetworkScreenActor* actor);
   virtual ~MockNetworkScreen();
 };
 
@@ -34,8 +35,12 @@ class MockNetworkScreenActor : public NetworkScreenActor {
   MOCK_METHOD2(ShowConnectingStatus,
                void(bool connecting, const base::string16& network_id));
   MOCK_METHOD1(EnableContinue, void(bool enabled));
-  MOCK_CONST_METHOD0(IsContinueEnabled, bool());
-  MOCK_CONST_METHOD0(IsConnecting, bool());
+  MOCK_CONST_METHOD0(GetApplicationLocale, std::string());
+  MOCK_CONST_METHOD0(GetInputMethod, std::string());
+  MOCK_CONST_METHOD0(GetTimezone, std::string());
+  MOCK_METHOD1(SetApplicationLocale, void(const std::string& locale));
+  MOCK_METHOD1(SetInputMethod, void(const std::string& input_method));
+  MOCK_METHOD1(SetTimezone, void(const std::string& timezone));
 
   private:
    Delegate* delegate_;

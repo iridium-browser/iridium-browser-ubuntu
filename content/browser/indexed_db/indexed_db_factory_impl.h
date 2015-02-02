@@ -20,62 +20,60 @@ class CONTENT_EXPORT IndexedDBFactoryImpl : public IndexedDBFactory {
   explicit IndexedDBFactoryImpl(IndexedDBContextImpl* context);
 
   // content::IndexedDBFactory overrides:
-  virtual void ReleaseDatabase(const IndexedDBDatabase::Identifier& identifier,
-                               bool forcedClose) OVERRIDE;
+  void ReleaseDatabase(const IndexedDBDatabase::Identifier& identifier,
+                       bool forcedClose) override;
 
-  virtual void GetDatabaseNames(
-      scoped_refptr<IndexedDBCallbacks> callbacks,
+  void GetDatabaseNames(scoped_refptr<IndexedDBCallbacks> callbacks,
+                        const GURL& origin_url,
+                        const base::FilePath& data_directory,
+                        net::URLRequestContext* request_context) override;
+  void Open(const base::string16& name,
+            const IndexedDBPendingConnection& connection,
+            net::URLRequestContext* request_context,
+            const GURL& origin_url,
+            const base::FilePath& data_directory) override;
+
+  void DeleteDatabase(const base::string16& name,
+                      net::URLRequestContext* request_context,
+                      scoped_refptr<IndexedDBCallbacks> callbacks,
+                      const GURL& origin_url,
+                      const base::FilePath& data_directory) override;
+
+  void HandleBackingStoreFailure(const GURL& origin_url) override;
+  void HandleBackingStoreCorruption(
       const GURL& origin_url,
-      const base::FilePath& data_directory,
-      net::URLRequestContext* request_context) OVERRIDE;
-  virtual void Open(const base::string16& name,
-                    const IndexedDBPendingConnection& connection,
-                    net::URLRequestContext* request_context,
-                    const GURL& origin_url,
-                    const base::FilePath& data_directory) OVERRIDE;
+      const IndexedDBDatabaseError& error) override;
 
-  virtual void DeleteDatabase(const base::string16& name,
-                              net::URLRequestContext* request_context,
-                              scoped_refptr<IndexedDBCallbacks> callbacks,
-                              const GURL& origin_url,
-                              const base::FilePath& data_directory) OVERRIDE;
+  OriginDBs GetOpenDatabasesForOrigin(const GURL& origin_url) const override;
 
-  virtual void HandleBackingStoreFailure(const GURL& origin_url) OVERRIDE;
-  virtual void HandleBackingStoreCorruption(
-      const GURL& origin_url,
-      const IndexedDBDatabaseError& error) OVERRIDE;
-
-  virtual OriginDBs GetOpenDatabasesForOrigin(
-      const GURL& origin_url) const OVERRIDE;
-
-  virtual void ForceClose(const GURL& origin_url) OVERRIDE;
+  void ForceClose(const GURL& origin_url) override;
 
   // Called by the IndexedDBContext destructor so the factory can do cleanup.
-  virtual void ContextDestroyed() OVERRIDE;
+  void ContextDestroyed() override;
 
   // Called by the IndexedDBActiveBlobRegistry.
-  virtual void ReportOutstandingBlobs(const GURL& origin_url,
-                                      bool blobs_outstanding) OVERRIDE;
+  void ReportOutstandingBlobs(const GURL& origin_url,
+                              bool blobs_outstanding) override;
 
   // Called by an IndexedDBDatabase when it is actually deleted.
-  virtual void DatabaseDeleted(
-      const IndexedDBDatabase::Identifier& identifier) OVERRIDE;
+  void DatabaseDeleted(
+      const IndexedDBDatabase::Identifier& identifier) override;
 
-  virtual size_t GetConnectionCount(const GURL& origin_url) const OVERRIDE;
+  size_t GetConnectionCount(const GURL& origin_url) const override;
 
  protected:
-  virtual ~IndexedDBFactoryImpl();
+  ~IndexedDBFactoryImpl() override;
 
-  virtual scoped_refptr<IndexedDBBackingStore> OpenBackingStore(
+  scoped_refptr<IndexedDBBackingStore> OpenBackingStore(
       const GURL& origin_url,
       const base::FilePath& data_directory,
       net::URLRequestContext* request_context,
       blink::WebIDBDataLoss* data_loss,
       std::string* data_loss_reason,
       bool* disk_full,
-      leveldb::Status* s) OVERRIDE;
+      leveldb::Status* s) override;
 
-  virtual scoped_refptr<IndexedDBBackingStore> OpenBackingStoreHelper(
+  scoped_refptr<IndexedDBBackingStore> OpenBackingStoreHelper(
       const GURL& origin_url,
       const base::FilePath& data_directory,
       net::URLRequestContext* request_context,
@@ -83,7 +81,7 @@ class CONTENT_EXPORT IndexedDBFactoryImpl : public IndexedDBFactory {
       std::string* data_loss_message,
       bool* disk_full,
       bool first_time,
-      leveldb::Status* s) OVERRIDE;
+      leveldb::Status* s) override;
 
   void ReleaseBackingStore(const GURL& origin_url, bool immediate);
   void CloseBackingStore(const GURL& origin_url);

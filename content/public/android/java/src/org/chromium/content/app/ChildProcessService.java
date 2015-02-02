@@ -161,13 +161,15 @@ public class ChildProcessService extends Service {
                         android.os.Debug.waitForDebugger();
                     }
 
+                    boolean loadAtFixedAddressFailed = false;
                     try {
                         LibraryLoader.loadNow(getApplicationContext(), false);
                         isLoaded = true;
                     } catch (ProcessInitException e) {
                         if (requestedSharedRelro) {
                             Log.w(TAG, "Failed to load native library with shared RELRO, " +
-                                  "retrying without");
+                                    "retrying without");
+                            loadAtFixedAddressFailed = true;
                         } else {
                             Log.e(TAG, "Failed to load native library", e);
                         }
@@ -184,6 +186,9 @@ public class ChildProcessService extends Service {
                     if (!isLoaded) {
                         System.exit(-1);
                     }
+                    LibraryLoader.registerRendererProcessHistogram(
+                            requestedSharedRelro,
+                            loadAtFixedAddressFailed);
                     LibraryLoader.initialize();
                     synchronized (mMainThread) {
                         mLibraryInitialized = true;
@@ -320,14 +325,47 @@ public class ChildProcessService extends Service {
 
     @SuppressWarnings("unused")
     @CalledByNative
-    private Surface getSurfaceTextureSurface(int primaryId, int secondaryId) {
+    private void createSurfaceTextureSurface(
+            int surfaceTextureId, int clientId, SurfaceTexture surfaceTexture) {
+        if (mCallback == null) {
+            Log.e(TAG, "No callback interface has been provided.");
+            return;
+        }
+
+        Surface surface = new Surface(surfaceTexture);
+        try {
+            mCallback.registerSurfaceTextureSurface(surfaceTextureId, clientId, surface);
+        } catch (RemoteException e) {
+            Log.e(TAG, "Unable to call registerSurfaceTextureSurface: " + e);
+        }
+        surface.release();
+    }
+
+    @SuppressWarnings("unused")
+    @CalledByNative
+    private void destroySurfaceTextureSurface(int surfaceTextureId, int clientId) {
+        if (mCallback == null) {
+            Log.e(TAG, "No callback interface has been provided.");
+            return;
+        }
+
+        try {
+            mCallback.unregisterSurfaceTextureSurface(surfaceTextureId, clientId);
+        } catch (RemoteException e) {
+            Log.e(TAG, "Unable to call unregisterSurfaceTextureSurface: " + e);
+        }
+    }
+
+    @SuppressWarnings("unused")
+    @CalledByNative
+    private Surface getSurfaceTextureSurface(int surfaceTextureId) {
         if (mCallback == null) {
             Log.e(TAG, "No callback interface has been provided.");
             return null;
         }
 
         try {
-            return mCallback.getSurfaceTextureSurface(primaryId, secondaryId).getSurface();
+            return mCallback.getSurfaceTextureSurface(surfaceTextureId).getSurface();
         } catch (RemoteException e) {
             Log.e(TAG, "Unable to call getSurfaceTextureSurface: " + e);
             return null;

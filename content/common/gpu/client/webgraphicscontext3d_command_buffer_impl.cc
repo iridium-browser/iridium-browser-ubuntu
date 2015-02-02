@@ -22,6 +22,7 @@
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
+#include "base/tracked_objects.h"
 #include "content/common/gpu/client/gpu_channel_host.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/content_switches.h"
@@ -127,8 +128,18 @@ bool WebGraphicsContext3DCommandBufferImpl::MaybeInitializeGL() {
 
   TRACE_EVENT0("gpu", "WebGfxCtx3DCmdBfrImpl::MaybeInitializeGL");
 
+  // Below, we perform an expensive one-time initialization that is required to
+  // get first pixels to the screen. This can't be called "jank" since there is
+  // nothing on the screen. Using TaskStopwatch to exclude the operation from
+  // jank calculations.
+  tracked_objects::TaskStopwatch stopwatch;
+  stopwatch.Start();
+
   if (!CreateContext(surface_id_ != 0)) {
     Destroy();
+
+    stopwatch.Stop();
+
     initialize_failed_ = true;
     return false;
   }
@@ -145,6 +156,8 @@ bool WebGraphicsContext3DCommandBufferImpl::MaybeInitializeGL() {
                  weak_ptr_factory_.GetWeakPtr()));
 
   real_gl_->SetErrorMessageCallback(getErrorMessageCallback());
+
+  stopwatch.Stop();
 
   visible_ = true;
   initialized_ = true;
@@ -240,13 +253,16 @@ bool WebGraphicsContext3DCommandBufferImpl::CreateContext(bool onscreen) {
   DCHECK(host_.get());
 
   // Create the object exposing the OpenGL API.
-  bool bind_generates_resources = false;
+  const bool bind_generates_resources = false;
+  const bool support_client_side_arrays = false;
+
   real_gl_.reset(
       new gpu::gles2::GLES2Implementation(gles2_helper_.get(),
                                           gles2_share_group.get(),
                                           transfer_buffer_.get(),
                                           bind_generates_resources,
                                           lose_context_when_out_of_memory_,
+                                          support_client_side_arrays,
                                           command_buffer_.get()));
   setGLInterface(real_gl_.get());
 

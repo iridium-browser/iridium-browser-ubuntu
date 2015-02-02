@@ -10,57 +10,95 @@
 SkTileGrid::SkTileGrid(int xTiles, int yTiles, const SkTileGridFactory::TileGridInfo& info)
     : fXTiles(xTiles)
     , fYTiles(yTiles)
-    , fInfo(info)
-    , fCount(0)
-    , fTiles(SkNEW_ARRAY(SkTDArray<Entry>, xTiles * yTiles)) {
-    // Margin is offset by 1 as a provision for AA and
-    // to cancel-out the outset applied by getClipDeviceBounds.
-    fInfo.fMargin.fHeight++;
-    fInfo.fMargin.fWidth++;
-}
+    , fInvWidth( SkScalarInvert(info.fTileInterval.width()))
+    , fInvHeight(SkScalarInvert(info.fTileInterval.height()))
+    , fMarginWidth (info.fMargin.fWidth +1)  // Margin is offset by 1 as a provision for AA and
+    , fMarginHeight(info.fMargin.fHeight+1)  // to cancel the outset applied by getClipDeviceBounds.
+    , fOffset(SkPoint::Make(info.fOffset.fX, info.fOffset.fY))
+    , fGridBounds(SkRect::MakeWH(xTiles * info.fTileInterval.width(),
+                                 yTiles * info.fTileInterval.height()))
+    , fTiles(SkNEW_ARRAY(SkTDArray<unsigned>, xTiles * yTiles)) {}
 
 SkTileGrid::~SkTileGrid() {
     SkDELETE_ARRAY(fTiles);
 }
 
-void SkTileGrid::insert(void* data, const SkRect& fbounds, bool) {
-    SkASSERT(!fbounds.isEmpty());
-    SkIRect dilatedBounds;
-    if (fbounds.isLargest()) {
-        // Dilating the largest SkIRect will overflow.  Other nearly-largest rects may overflow too,
-        // but we don't make active use of them like we do the largest.
-        dilatedBounds.setLargest();
-    } else {
-        fbounds.roundOut(&dilatedBounds);
-        dilatedBounds.outset(fInfo.fMargin.width(), fInfo.fMargin.height());
-        dilatedBounds.offset(fInfo.fOffset);
+void SkTileGrid::reserve(int opCount) {
+    if (fXTiles * fYTiles == 0) {
+        return;  // A tileless tile grid is nonsensical, but happens in at least cc_unittests.
     }
 
-    const SkIRect gridBounds =
-        { 0, 0, fInfo.fTileInterval.width() * fXTiles, fInfo.fTileInterval.height() * fYTiles };
-    if (!SkIRect::Intersects(dilatedBounds, gridBounds)) {
-        return;
+    // If we assume every op we're about to try to insert() falls within our grid bounds,
+    // then every op has to hit at least one tile.  In fact, a quick scan over our small
+    // SKP set shows that in the average SKP, each op hits two 256x256 tiles.
+
+    // If we take those observations and further assume the ops are distributed evenly
+    // across the picture, we get this guess for number of ops per tile:
+    const int opsPerTileGuess = (2 * opCount) / (fXTiles * fYTiles);
+
+    for (SkTDArray<unsigned>* tile = fTiles; tile != fTiles + (fXTiles * fYTiles); tile++) {
+        tile->setReserve(opsPerTileGuess);
     }
 
-    // Note: SkIRects are non-inclusive of the right() column and bottom() row,
-    // hence the "-1"s in the computations of maxX and maxY.
-    int minX = SkMax32(0, SkMin32(dilatedBounds.left() / fInfo.fTileInterval.width(), fXTiles - 1));
-    int minY = SkMax32(0, SkMin32(dilatedBounds.top() / fInfo.fTileInterval.height(), fYTiles - 1));
-    int maxX = SkMax32(0, SkMin32((dilatedBounds.right()  - 1) / fInfo.fTileInterval.width(),
-                                  fXTiles - 1));
-    int maxY = SkMax32(0, SkMin32((dilatedBounds.bottom() - 1) / fInfo.fTileInterval.height(),
-                                  fYTiles - 1));
+    // In practice, this heuristic means we'll temporarily allocate about 30% more bytes
+    // than if we made no setReserve() calls, but time spent in insert() drops by about 50%.
+}
 
-    Entry entry = { fCount++, data };
-    for (int y = minY; y <= maxY; y++) {
-        for (int x = minX; x <= maxX; x++) {
-            fTiles[y * fXTiles + x].push(entry);
-        }
+void SkTileGrid::shrinkToFit() {
+    for (SkTDArray<unsigned>* tile = fTiles; tile != fTiles + (fXTiles * fYTiles); tile++) {
+        tile->shrinkToFit();
     }
 }
 
-static int divide_ceil(int x, int y) {
-    return (x + y - 1) / y;
+// Adjustments to user-provided bounds common to both insert() and search().
+// Call this after making insert- or search- specific adjustments.
+void SkTileGrid::commonAdjust(SkRect* rect) const {
+    // Apply our offset.
+    rect->offset(fOffset);
+
+    // Scrunch the bounds in just a little to make the right and bottom edges
+    // exclusive.  We want bounds of exactly one tile to hit exactly one tile.
+    rect->fRight  -= SK_ScalarNearlyZero;
+    rect->fBottom -= SK_ScalarNearlyZero;
+}
+
+// Convert user-space bounds to grid tiles they cover (LT and RB both inclusive).
+void SkTileGrid::userToGrid(const SkRect& user, SkIRect* grid) const {
+    grid->fLeft   = SkPin32(user.left()   * fInvWidth , 0, fXTiles - 1);
+    grid->fTop    = SkPin32(user.top()    * fInvHeight, 0, fYTiles - 1);
+    grid->fRight  = SkPin32(user.right()  * fInvWidth , 0, fXTiles - 1);
+    grid->fBottom = SkPin32(user.bottom() * fInvHeight, 0, fYTiles - 1);
+}
+
+void SkTileGrid::insert(SkAutoTMalloc<SkRect>* boundsArray, int N) {
+    this->reserve(N);
+
+    for (int i = 0; i < N; i++) {
+        SkRect bounds = (*boundsArray)[i];
+        bounds.outset(fMarginWidth, fMarginHeight);
+        this->commonAdjust(&bounds);
+
+        // TODO(mtklein): can we assert this instead to save an intersection in Release mode,
+        // or just allow out-of-bound insertions to insert anyway (clamped to nearest tile)?
+        if (!SkRect::Intersects(bounds, fGridBounds)) {
+            continue;
+        }
+
+        SkIRect grid;
+        this->userToGrid(bounds, &grid);
+
+        // This is just a loop over y then x.  This compiles to a slightly faster and
+        // more compact loop than if we just did fTiles[y * fXTiles + x].push(i).
+        SkTDArray<unsigned>* row = &fTiles[grid.fTop * fXTiles + grid.fLeft];
+        for (int y = 0; y <= grid.fBottom - grid.fTop; y++) {
+            SkTDArray<unsigned>* tile = row;
+            for (int x = 0; x <= grid.fRight - grid.fLeft; x++) {
+                (tile++)->push(i);
+            }
+            row += fXTiles;
+        }
+    }
+    this->shrinkToFit();
 }
 
 // Number of tiles for which data is allocated on the stack in
@@ -69,57 +107,43 @@ static int divide_ceil(int x, int y) {
 // require 512 tiles of size 256 x 256 pixels.
 static const int kStackAllocationTileCount = 1024;
 
-void SkTileGrid::search(const SkRect& query, SkTDArray<void*>* results) const {
-    SkIRect adjusted;
-    query.roundOut(&adjusted);
+void SkTileGrid::search(const SkRect& originalQuery, SkTDArray<unsigned>* results) const {
+    // The inset counteracts the outset that applied in 'insert', which optimizes
+    // for lookups of size 'tileInterval + 2 * margin' (aligned with the tile grid).
+    SkRect query = originalQuery;
+    query.inset(fMarginWidth, fMarginHeight);
+    this->commonAdjust(&query);
 
-    // The inset is to counteract the outset that was applied in 'insert'
-    // The outset/inset is to optimize for lookups of size
-    // 'tileInterval + 2 * margin' that are aligned with the tile grid.
-    adjusted.inset(fInfo.fMargin.width(), fInfo.fMargin.height());
-    adjusted.offset(fInfo.fOffset);
-    adjusted.sort();  // in case the inset inverted the rectangle
+    // The inset may have inverted the rectangle, so sort().
+    // TODO(mtklein): It looks like we only end up with inverted bounds in unit tests
+    // that make explicitly inverted queries, not from insetting.  If we can drop support for
+    // unsorted bounds (i.e. we don't see them outside unit tests), I think we can drop this.
+    query.sort();
 
-    // Convert the query rectangle from device coordinates to tile coordinates
-    // by rounding outwards to the nearest tile boundary so that the resulting tile
-    // region includes the query rectangle.
-    int startX = adjusted.left() / fInfo.fTileInterval.width(),
-        startY = adjusted.top()  / fInfo.fTileInterval.height();
-    int endX = divide_ceil(adjusted.right(),  fInfo.fTileInterval.width()),
-        endY = divide_ceil(adjusted.bottom(), fInfo.fTileInterval.height());
+    // No intersection check.  We optimize for queries that are in bounds.
+    // We're safe anyway: userToGrid() will clamp out-of-bounds queries to nearest tile.
+    SkIRect grid;
+    this->userToGrid(query, &grid);
 
-    // Logically, we could pin endX to [startX, fXTiles], but we force it
-    // up to (startX, fXTiles] to make sure we hit at least one tile.
-    // This snaps just-out-of-bounds queries to the neighboring border tile.
-    // I don't know if this is an important feature outside of unit tests.
-    startX = SkPin32(startX, 0, fXTiles - 1);
-    startY = SkPin32(startY, 0, fYTiles - 1);
-    endX   = SkPin32(endX, startX + 1, fXTiles);
-    endY   = SkPin32(endY, startY + 1, fYTiles);
-
-    const int tilesHit = (endX - startX) * (endY - startY);
+    const int tilesHit = (grid.fRight - grid.fLeft + 1) * (grid.fBottom - grid.fTop + 1);
     SkASSERT(tilesHit > 0);
 
     if (tilesHit == 1) {
         // A performance shortcut.  The merging code below would work fine here too.
-        const SkTDArray<Entry>& tile = fTiles[startY * fXTiles + startX];
-        results->setCount(tile.count());
-        for (int i = 0; i < tile.count(); i++) {
-            (*results)[i] = tile[i].data;
-        }
+        *results = fTiles[grid.fTop * fXTiles + grid.fLeft];
         return;
     }
 
     // We've got to merge the data in many tiles into a single sorted and deduplicated stream.
-    // We do a simple k-way merge based on the order the data was inserted.
+    // We do a simple k-way merge based on the value of opIndex.
 
     // Gather pointers to the starts and ends of the tiles to merge.
-    SkAutoSTArray<kStackAllocationTileCount, const Entry*> starts(tilesHit), ends(tilesHit);
+    SkAutoSTArray<kStackAllocationTileCount, const unsigned*> starts(tilesHit), ends(tilesHit);
     int i = 0;
-    for (int x = startX; x < endX; x++) {
-        for (int y = startY; y < endY; y++) {
+    for (int y = grid.fTop; y <= grid.fBottom; y++) {
+        for (int x = grid.fLeft; x <= grid.fRight; x++) {
             starts[i] = fTiles[y * fXTiles + x].begin();
-            ends[i]  = fTiles[y * fXTiles + x].end();
+            ends[i]   = fTiles[y * fXTiles + x].end();
             i++;
         }
     }
@@ -127,43 +151,27 @@ void SkTileGrid::search(const SkRect& query, SkTDArray<void*>* results) const {
     // Merge tiles into results until they're fully consumed.
     results->reset();
     while (true) {
-        // The tiles themselves are already ordered, so the earliest is at the front of some tile.
-        // It may be at the front of several, even all, tiles.
-        const Entry* earliest = NULL;
+        // The tiles themselves are already ordered, so the earliest op is at the front of some
+        // tile. It may be at the front of several, even all, tiles.
+        unsigned earliest = SK_MaxU32;
         for (int i = 0; i < starts.count(); i++) {
             if (starts[i] < ends[i]) {
-                if (NULL == earliest || starts[i]->order < earliest->order) {
-                    earliest = starts[i];
-                }
+                earliest = SkTMin(earliest, *starts[i]);
             }
         }
 
-        // If we didn't find an earliest entry, there isn't anything left to merge.
-        if (NULL == earliest) {
+        // If we didn't find an earliest op, there isn't anything left to merge.
+        if (SK_MaxU32 == earliest) {
             return;
         }
 
-        // We did find an earliest entry. Output it, and step forward every tile that contains it.
-        results->push(earliest->data);
+        // We did find an earliest op. Output it, and step forward every tile that contains it.
+        results->push(earliest);
         for (int i = 0; i < starts.count(); i++) {
-            if (starts[i] < ends[i] && starts[i]->order == earliest->order) {
+            if (starts[i] < ends[i] && *starts[i] == earliest) {
                 starts[i]++;
             }
         }
     }
 }
 
-void SkTileGrid::clear() {
-    for (int i = 0; i < fXTiles * fYTiles; i++) {
-        fTiles[i].reset();
-    }
-}
-
-void SkTileGrid::rewindInserts() {
-    SkASSERT(fClient);
-    for (int i = 0; i < fXTiles * fYTiles; i++) {
-        while (!fTiles[i].isEmpty() && fClient->shouldRewind(fTiles[i].top().data)) {
-            fTiles[i].pop();
-        }
-    }
-}

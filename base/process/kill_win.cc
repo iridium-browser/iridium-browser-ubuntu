@@ -12,6 +12,7 @@
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
 #include "base/process/process_iterator.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/win/object_watcher.h"
 
 namespace base {
@@ -71,6 +72,10 @@ void TimerExpiredTask::TimedOut() {
 }
 
 void TimerExpiredTask::OnObjectSignaled(HANDLE object) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/418183 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("TimerExpiredTask_OnObjectSignaled"));
+
   CloseHandle(process_);
   process_ = NULL;
 }
@@ -187,7 +192,8 @@ bool WaitForExitCode(ProcessHandle handle, int* exit_code) {
 bool WaitForExitCodeWithTimeout(ProcessHandle handle,
                                 int* exit_code,
                                 base::TimeDelta timeout) {
-  if (::WaitForSingleObject(handle, timeout.InMilliseconds()) != WAIT_OBJECT_0)
+  if (::WaitForSingleObject(
+      handle, static_cast<DWORD>(timeout.InMilliseconds())) != WAIT_OBJECT_0)
     return false;
   DWORD temp_code;  // Don't clobber out-parameters in case of failure.
   if (!::GetExitCodeProcess(handle, &temp_code))
@@ -206,8 +212,9 @@ bool WaitForProcessesToExit(const FilePath::StringType& executable_name,
   NamedProcessIterator iter(executable_name, filter);
   for (const ProcessEntry* entry = iter.NextProcessEntry(); entry;
        entry = iter.NextProcessEntry()) {
-    DWORD remaining_wait = std::max<int64>(
-        0, wait.InMilliseconds() - (GetTickCount() - start_time));
+    DWORD remaining_wait = static_cast<DWORD>(std::max(
+        static_cast<int64>(0),
+        wait.InMilliseconds() - (GetTickCount() - start_time)));
     HANDLE process = OpenProcess(SYNCHRONIZE,
                                  FALSE,
                                  entry->th32ProcessID);

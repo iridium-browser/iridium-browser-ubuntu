@@ -49,7 +49,7 @@ class StyleRuleFontFace;
 class TreeScopeStyleSheetCollection : public StyleSheetCollection {
 public:
     void addStyleSheetCandidateNode(Node*, bool createdByParser);
-    void removeStyleSheetCandidateNode(Node*, ContainerNode* scopingNode);
+    void removeStyleSheetCandidateNode(Node* node) { m_styleSheetCandidateNodes.remove(node); }
     bool hasStyleSheetCandidateNodes() const { return !m_styleSheetCandidateNodes.isEmpty(); }
 
     bool usesRemUnits() const { return m_usesRemUnits; }
@@ -59,7 +59,7 @@ public:
     void clearMediaQueryRuleSetStyleSheets();
     void enableExitTransitionStylesheets();
 
-    virtual void trace(Visitor*) OVERRIDE;
+    virtual void trace(Visitor*) override;
 
 protected:
     explicit TreeScopeStyleSheetCollection(TreeScope&);

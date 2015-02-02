@@ -41,7 +41,9 @@ config("libvpx_config") {
     "//third_party/libvpx/source/libvpx",
     "$root_gen_dir/third_party/libvpx", # Provides vpx_rtcd.h.
   ]
-  cflags = [ "-Wno-unused-function", "-Wno-sign-compare" ]
+  if (!is_win) {
+    cflags = [ "-Wno-unused-function", "-Wno-sign-compare" ]
+  }
 }
 
 # This config is applied to targets that depend on libvpx.
@@ -56,6 +58,8 @@ executable("libvpx_obj_int_extract") {
     "//third_party/libvpx/source/libvpx/build/make/obj_int_extract.c"
   ]
   configs += [ ":libvpx_config" ]
+  configs -= [ "//build/config/compiler:chromium_code" ]
+  configs += [ "//build/config/compiler:no_chromium_code" ]
   if (is_android_webview_build) {
     defines += [ "FORCE_PARSE_ELF" ]
     include_dirs += [ "//third_party/libvpx/include" ]
@@ -69,6 +73,8 @@ static_library("libvpx_asm_offsets") {
     "//third_party/libvpx/source/libvpx/vpx_scale/vpx_scale_asm_offsets.c"
   ]
   configs += [ ":libvpx_config" ]
+  configs -= [ "//build/config/compiler:chromium_code" ]
+  configs += [ "//build/config/compiler:no_chromium_code" ]
   if (is_clang) {
     cflags = [ "-Wno-unused-function" ]
   }
@@ -93,11 +99,17 @@ template("obj_int_extract") {
       args += [ "-f", "rvds" ]
     }
 
+    if (is_win) {
+      obj_extension = "obj"
+    } else {
+      obj_extension = "o"
+    }
+
     args += [
       "-b",
       rebase_path(get_label_info(":libvpx_asm_offsets", "target_out_dir")) +
           "/" + invoker.src_dir + "/libvpx_asm_offsets." +
-          invoker.obj_file_root + ".o"
+          invoker.obj_file_root + ".${obj_extension}"
     ]
     out_file = "$target_gen_dir/" + invoker.obj_file_root + ".asm"
     args += [ "-o", rebase_path(out_file) ]
@@ -143,7 +155,11 @@ if (cpu_arch == "x86" || cpu_arch == "x64") {
 
 static_library("libvpx_intrinsics_mmx") {
   configs += [ ":libvpx_config" ]
-  cflags = [ "-mmmx" ]
+  configs -= [ "//build/config/compiler:chromium_code" ]
+  configs += [ "//build/config/compiler:no_chromium_code" ]
+  if (!is_win) {
+    cflags = [ "-mmmx" ]
+  }
   if (cpu_arch == "x86") {
     sources = libvpx_srcs_x86_mmx
   } else if (cpu_arch == "x64") {
@@ -153,7 +169,11 @@ static_library("libvpx_intrinsics_mmx") {
 
 static_library("libvpx_intrinsics_sse2") {
   configs += [ ":libvpx_config" ]
-  cflags = [ "-msse2" ]
+  configs -= [ "//build/config/compiler:chromium_code" ]
+  configs += [ "//build/config/compiler:no_chromium_code" ]
+  if (!is_win) {
+    cflags = [ "-msse2" ]
+  }
   if (cpu_arch == "x86") {
     sources = libvpx_srcs_x86_sse2
   } else if (cpu_arch == "x64") {
@@ -163,7 +183,11 @@ static_library("libvpx_intrinsics_sse2") {
 
 static_library("libvpx_intrinsics_ssse3") {
   configs += [ ":libvpx_config" ]
-  cflags = [ "-mssse3" ]
+  configs -= [ "//build/config/compiler:chromium_code" ]
+  configs += [ "//build/config/compiler:no_chromium_code" ]
+  if (!is_win) {
+    cflags = [ "-mssse3" ]
+  }
   if (cpu_arch == "x86") {
     sources = libvpx_srcs_x86_ssse3
   } else if (cpu_arch == "x64") {
@@ -173,7 +197,11 @@ static_library("libvpx_intrinsics_ssse3") {
 
 static_library("libvpx_intrinsics_sse4_1") {
   configs += [ ":libvpx_config" ]
-  cflags = [ "-msse4.1" ]
+  configs -= [ "//build/config/compiler:chromium_code" ]
+  configs += [ "//build/config/compiler:no_chromium_code" ]
+  if (!is_win) {
+    cflags = [ "-msse4.1" ]
+  }
   if (cpu_arch == "x86") {
     sources = libvpx_srcs_x86_sse4_1
   } else if (cpu_arch == "x64") {
@@ -255,6 +283,8 @@ static_library("libvpx") {
     sources = libvpx_srcs_arm64
   }
   configs += [ ":libvpx_config" ]
+  configs -= [ "//build/config/compiler:chromium_code" ]
+  configs += [ "//build/config/compiler:no_chromium_code" ]
   deps = []
   if (cpu_arch == "x86" || (cpu_arch == "x64" && !is_msan)) {
     deps += [

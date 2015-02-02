@@ -51,8 +51,7 @@ class TestingURLBlacklistManager : public URLBlacklistManager {
         update_called_(0),
         set_blacklist_called_(false) {}
 
-  virtual ~TestingURLBlacklistManager() {
-  }
+  ~TestingURLBlacklistManager() override {}
 
   // Make this method public for testing.
   using URLBlacklistManager::ScheduleUpdate;
@@ -66,12 +65,12 @@ class TestingURLBlacklistManager : public URLBlacklistManager {
   }
 
   // URLBlacklistManager overrides:
-  virtual void SetBlacklist(scoped_ptr<URLBlacklist> blacklist) OVERRIDE {
+  void SetBlacklist(scoped_ptr<URLBlacklist> blacklist) override {
     set_blacklist_called_ = true;
     URLBlacklistManager::SetBlacklist(blacklist.Pass());
   }
 
-  virtual void Update() OVERRIDE {
+  void Update() override {
     update_called_++;
     URLBlacklistManager::Update();
   }
@@ -90,14 +89,14 @@ class URLBlacklistManagerTest : public testing::Test {
  protected:
   URLBlacklistManagerTest() {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     pref_service_.registry()->RegisterListPref(policy_prefs::kUrlBlacklist);
     pref_service_.registry()->RegisterListPref(policy_prefs::kUrlWhitelist);
     blacklist_manager_.reset(new TestingURLBlacklistManager(&pref_service_));
     loop_.RunUntilIdle();
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     if (blacklist_manager_.get())
       blacklist_manager_->ShutdownOnUIThread();
     loop_.RunUntilIdle();

@@ -25,16 +25,14 @@ class MessageCenterSettingsControllerTest : public testing::Test {
  protected:
   MessageCenterSettingsControllerTest()
       : testing_profile_manager_(TestingBrowserProcess::GetGlobal()) {};
-  virtual ~MessageCenterSettingsControllerTest() {};
+  ~MessageCenterSettingsControllerTest() override{};
 
   base::FilePath GetProfilePath(const std::string& base_name) {
     return testing_profile_manager_.profile_manager()->user_data_dir()
         .AppendASCII(base_name);
   }
 
-  virtual void SetUp() OVERRIDE {
-    ASSERT_TRUE(testing_profile_manager_.SetUp());
-  }
+  void SetUp() override { ASSERT_TRUE(testing_profile_manager_.SetUp()); }
 
   virtual void CreateProfile(const std::string& name) {
     testing_profile_manager_.CreateTestingProfile(name);
@@ -67,7 +65,7 @@ class MessageCenterSettingsControllerChromeOSTest
   MessageCenterSettingsControllerChromeOSTest() {}
   virtual ~MessageCenterSettingsControllerChromeOSTest() {}
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     MessageCenterSettingsControllerTest::SetUp();
 
     // Initialize the UserManager singleton to a fresh FakeUserManager instance.
@@ -75,12 +73,12 @@ class MessageCenterSettingsControllerChromeOSTest
         new chromeos::ScopedUserManagerEnabler(new chromeos::FakeUserManager));
   }
 
-  virtual void TearDown() OVERRIDE {
+  virtual void TearDown() override {
     ResetController();
     MessageCenterSettingsControllerTest::TearDown();
   }
 
-  virtual void CreateProfile(const std::string& name) OVERRIDE {
+  virtual void CreateProfile(const std::string& name) override {
     MessageCenterSettingsControllerTest::CreateProfile(name);
 
     GetFakeUserManager()->AddUser(name);

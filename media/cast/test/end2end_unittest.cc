@@ -171,10 +171,10 @@ class LoopBackPacketPipe : public test::PacketPipe {
   LoopBackPacketPipe(const PacketReceiverCallback& packet_receiver)
       : packet_receiver_(packet_receiver) {}
 
-  virtual ~LoopBackPacketPipe() {}
+  ~LoopBackPacketPipe() override {}
 
   // PacketPipe implementations.
-  virtual void Send(scoped_ptr<Packet> packet) OVERRIDE {
+  void Send(scoped_ptr<Packet> packet) override {
     packet_receiver_.Run(packet.Pass());
   }
 
@@ -206,8 +206,7 @@ class LoopBackTransport : public PacketSender {
     packet_pipe_->InitOnIOThread(task_runner, clock);
   }
 
-  virtual bool SendPacket(PacketRef packet,
-                          const base::Closure& cb) OVERRIDE {
+  bool SendPacket(PacketRef packet, const base::Closure& cb) override {
     DCHECK(cast_environment_->CurrentlyOn(CastEnvironment::MAIN));
     if (!send_packets_)
       return true;
@@ -224,9 +223,7 @@ class LoopBackTransport : public PacketSender {
     return true;
   }
 
-  virtual int64 GetBytesSent() OVERRIDE {
-    return bytes_sent_;
-  }
+  int64 GetBytesSent() override { return bytes_sent_; }
 
   void SetSendPackets(bool send_packets) { send_packets_ = send_packets; }
 
@@ -547,16 +544,16 @@ class End2EndTest : public ::testing::Test {
     for (int i = 0; i < count; ++i) {
       scoped_ptr<AudioBus> audio_bus(audio_bus_factory_->NextAudioBus(
           base::TimeDelta::FromMilliseconds(kAudioFrameDurationMs)));
-      const base::TimeTicks capture_time =
+      const base::TimeTicks reference_time =
           testing_clock_sender_->NowTicks() +
               i * base::TimeDelta::FromMilliseconds(kAudioFrameDurationMs);
       if (will_be_checked) {
         test_receiver_audio_callback_->AddExpectedResult(
             *audio_bus,
-            capture_time +
+            reference_time +
                 base::TimeDelta::FromMilliseconds(kTargetPlayoutDelayMs));
       }
-      audio_frame_input_->InsertAudio(audio_bus.Pass(), capture_time);
+      audio_frame_input_->InsertAudio(audio_bus.Pass(), reference_time);
     }
   }
 
@@ -565,14 +562,14 @@ class End2EndTest : public ::testing::Test {
     for (int i = 0; i < count; ++i) {
       scoped_ptr<AudioBus> audio_bus(audio_bus_factory_->NextAudioBus(
           base::TimeDelta::FromMilliseconds(kAudioFrameDurationMs)));
-      const base::TimeTicks capture_time =
+      const base::TimeTicks reference_time =
           testing_clock_sender_->NowTicks() +
               i * base::TimeDelta::FromMilliseconds(kAudioFrameDurationMs);
       test_receiver_audio_callback_->AddExpectedResult(
           *audio_bus,
-          capture_time + delay +
+          reference_time + delay +
               base::TimeDelta::FromMilliseconds(kTargetPlayoutDelayMs));
-      audio_frame_input_->InsertAudio(audio_bus.Pass(), capture_time);
+      audio_frame_input_->InsertAudio(audio_bus.Pass(), reference_time);
     }
   }
 
@@ -633,34 +630,43 @@ class End2EndTest : public ::testing::Test {
                                 kSoundVolume));
   }
 
-  virtual ~End2EndTest() {
+  ~End2EndTest() override {
     cast_environment_sender_->Logging()->RemoveRawEventSubscriber(
         &event_subscriber_sender_);
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     cast_sender_.reset();
     cast_receiver_.reset();
     task_runner_->RunTasks();
   }
 
-  void SendVideoFrame(int start_value, const base::TimeTicks& capture_time) {
+  void SendVideoFrame(int start_value, const base::TimeTicks& reference_time) {
     if (start_time_.is_null())
-      start_time_ = capture_time;
-    base::TimeDelta time_diff = capture_time - start_time_;
+      start_time_ = reference_time;
+    // TODO(miu): Consider using a slightly skewed clock for the media timestamp
+    // since the video clock may not be the same as the reference clock.
+    const base::TimeDelta time_diff = reference_time - start_time_;
     gfx::Size size(video_sender_config_.width, video_sender_config_.height);
     EXPECT_TRUE(VideoFrame::IsValidConfig(
         VideoFrame::I420, size, gfx::Rect(size), size));
     scoped_refptr<media::VideoFrame> video_frame =
         media::VideoFrame::CreateFrame(
-            VideoFrame::I420, size, gfx::Rect(size), size, time_diff);
+            VideoFrame::I420, size, gfx::Rect(size), size,
+            time_diff);
     PopulateVideoFrame(video_frame.get(), start_value);
-    video_frame_input_->InsertRawVideoFrame(video_frame, capture_time);
+    video_frame_input_->InsertRawVideoFrame(video_frame, reference_time);
   }
 
-  void SendFakeVideoFrame(const base::TimeTicks& capture_time) {
-    video_frame_input_->InsertRawVideoFrame(
-        media::VideoFrame::CreateBlackFrame(gfx::Size(2, 2)), capture_time);
+  void SendFakeVideoFrame(const base::TimeTicks& reference_time) {
+    if (start_time_.is_null())
+      start_time_ = reference_time;
+    const scoped_refptr<media::VideoFrame> black_frame =
+        media::VideoFrame::CreateBlackFrame(gfx::Size(2, 2));
+    // TODO(miu): Consider using a slightly skewed clock for the media timestamp
+    // since the video clock may not be the same as the reference clock.
+    black_frame->set_timestamp(reference_time - start_time_);
+    video_frame_input_->InsertRawVideoFrame(black_frame, reference_time);
   }
 
   void RunTasks(int ms) {
@@ -1004,20 +1010,19 @@ TEST_F(End2EndTest, DropEveryOtherFrame3Buffers) {
   sender_to_receiver_.DropAllPacketsBelongingToOddFrames();
 
   int video_start = kVideoStart;
-  base::TimeTicks capture_time;
+  base::TimeTicks reference_time;
 
   int i = 0;
   for (; i < 20; ++i) {
-    capture_time = testing_clock_sender_->NowTicks();
-    SendVideoFrame(video_start, capture_time);
+    reference_time = testing_clock_sender_->NowTicks();
+    SendVideoFrame(video_start, reference_time);
 
     if (i % 2 == 0) {
       test_receiver_video_callback_->AddExpectedResult(
           video_start,
           video_sender_config_.width,
           video_sender_config_.height,
-          capture_time +
-              base::TimeDelta::FromMilliseconds(target_delay),
+          reference_time + base::TimeDelta::FromMilliseconds(target_delay),
           i == 0);
 
       // GetRawVideoFrame will not return the frame until we are close in
@@ -1051,14 +1056,15 @@ TEST_F(End2EndTest, CryptoVideo) {
 
   int frames_counter = 0;
   for (; frames_counter < 3; ++frames_counter) {
-    const base::TimeTicks capture_time = testing_clock_sender_->NowTicks();
-    SendVideoFrame(frames_counter, capture_time);
+    const base::TimeTicks reference_time = testing_clock_sender_->NowTicks();
+    SendVideoFrame(frames_counter, reference_time);
 
     test_receiver_video_callback_->AddExpectedResult(
         frames_counter,
         video_sender_config_.width,
         video_sender_config_.height,
-        capture_time + base::TimeDelta::FromMilliseconds(kTargetPlayoutDelayMs),
+        reference_time +
+            base::TimeDelta::FromMilliseconds(kTargetPlayoutDelayMs),
         true);
 
     RunTasks(kFrameTimerMs);
@@ -1108,15 +1114,16 @@ TEST_F(End2EndTest, VideoLogging) {
   int video_start = kVideoStart;
   const int num_frames = 5;
   for (int i = 0; i < num_frames; ++i) {
-    base::TimeTicks capture_time = testing_clock_sender_->NowTicks();
+    base::TimeTicks reference_time = testing_clock_sender_->NowTicks();
     test_receiver_video_callback_->AddExpectedResult(
         video_start,
         video_sender_config_.width,
         video_sender_config_.height,
-        capture_time + base::TimeDelta::FromMilliseconds(kTargetPlayoutDelayMs),
+        reference_time +
+            base::TimeDelta::FromMilliseconds(kTargetPlayoutDelayMs),
         true);
 
-    SendVideoFrame(video_start, capture_time);
+    SendVideoFrame(video_start, reference_time);
     RunTasks(kFrameTimerMs);
 
     cast_receiver_->RequestDecodedVideoFrame(
@@ -1489,7 +1496,7 @@ TEST_F(End2EndTest, TestSetPlayoutDelay) {
     int64 delta = (video_ticks_[i].second -
                    video_ticks_[i-1].second).InMilliseconds();
     if (delta > 100) {
-      EXPECT_EQ(delta, kNewDelay - kTargetPlayoutDelayMs + kFrameTimerMs);
+      EXPECT_EQ(kNewDelay - kTargetPlayoutDelayMs + kFrameTimerMs, delta);
       EXPECT_EQ(0u, jump);
       jump = i;
     }

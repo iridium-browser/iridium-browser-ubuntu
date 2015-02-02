@@ -49,7 +49,7 @@
 #include "content/renderer/render_frame_proxy.h"
 #include "content/renderer/render_process.h"
 #include "content/renderer/render_thread_impl.h"
-#include "content/renderer/renderer_webkitplatformsupport_impl.h"
+#include "content/renderer/renderer_blink_platform_impl.h"
 #include "content/renderer/resizing_mode_selector.h"
 #include "ipc/ipc_sync_message.h"
 #include "skia/ext/platform_canvas.h"
@@ -77,6 +77,7 @@
 
 #if defined(OS_ANDROID)
 #include <android/keycodes.h>
+#include "base/android/build_info.h"
 #include "content/renderer/android/synchronous_compositor_factory.h"
 #endif
 
@@ -403,6 +404,7 @@ RenderWidget::RenderWidget(blink::WebPopupType popup_type,
       input_method_is_active_(false),
       text_input_type_(ui::TEXT_INPUT_TYPE_NONE),
       text_input_mode_(ui::TEXT_INPUT_MODE_DEFAULT),
+      text_input_flags_(0),
       can_compose_inline_(true),
       popup_type_(popup_type),
       pending_window_rect_count_(0),
@@ -608,6 +610,7 @@ bool RenderWidget::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(ViewMsg_Close, OnClose)
     IPC_MESSAGE_HANDLER(ViewMsg_CreatingNew_ACK, OnCreatingNewAck)
     IPC_MESSAGE_HANDLER(ViewMsg_Resize, OnResize)
+    IPC_MESSAGE_HANDLER(ViewMsg_ColorProfile, OnColorProfile)
     IPC_MESSAGE_HANDLER(ViewMsg_ChangeResizeRect, OnChangeResizeRect)
     IPC_MESSAGE_HANDLER(ViewMsg_WasHidden, OnWasHidden)
     IPC_MESSAGE_HANDLER(ViewMsg_WasShown, OnWasShown)
@@ -680,6 +683,8 @@ void RenderWidget::Resize(const gfx::Size& new_size,
     WillToggleFullscreen();
   is_fullscreen_ = is_fullscreen;
 
+  webwidget_->setTopControlsLayoutHeight(top_controls_layout_height);
+
   if (size_ != new_size) {
     size_ = new_size;
 
@@ -713,11 +718,13 @@ void RenderWidget::Resize(const gfx::Size& new_size,
   DCHECK(resize_ack != SEND_RESIZE_ACK || next_paint_is_resize_ack());
 }
 
-void RenderWidget::ResizeSynchronously(const gfx::Rect& new_position) {
+void RenderWidget::ResizeSynchronously(
+    const gfx::Rect& new_position,
+    const gfx::Size& visible_viewport_size) {
   Resize(new_position.size(),
          new_position.size(),
          top_controls_layout_height_,
-         visible_viewport_size_,
+         visible_viewport_size,
          gfx::Rect(),
          is_fullscreen_,
          NO_RESIZE_ACK);
@@ -779,6 +786,10 @@ void RenderWidget::OnResize(const ViewMsg_Resize_Params& params) {
 
   if (orientation_changed)
     OnOrientationChange();
+}
+
+void RenderWidget::OnColorProfile(const std::vector<char>& color_profile) {
+  SetDeviceColorProfile(color_profile);
 }
 
 void RenderWidget::OnChangeResizeRect(const gfx::Rect& resizer_rect) {
@@ -946,7 +957,8 @@ void RenderWidget::OnHandleInputEvent(const blink::WebInputEvent* input_event,
     const WebKeyboardEvent& key_event =
         *static_cast<const WebKeyboardEvent*>(input_event);
     // Some keys are special and it's essential that no events get blocked.
-    if (key_event.nativeKeyCode != AKEYCODE_TAB)
+    if (key_event.nativeKeyCode != AKEYCODE_TAB &&
+        key_event.nativeKeyCode != AKEYCODE_DPAD_CENTER)
       ime_event_guard_maybe.reset(new ImeEventGuard(this));
   }
 #endif
@@ -1215,12 +1227,17 @@ void RenderWidget::initializeLayerTreeView() {
     StartCompositor();
 }
 
-void RenderWidget::DestroyLayerTreeView() {
+void RenderWidget::WillCloseLayerTreeView() {
+  if (host_closing_)
+    return;
+
+  // Prevent new compositors or output surfaces from being created.
+  host_closing_ = true;
+
   // Always send this notification to prevent new layer tree views from
   // being created, even if one hasn't been created yet.
   if (webwidget_)
     webwidget_->willCloseLayerTreeView();
-  compositor_.reset();
 }
 
 blink::WebLayerTreeView* RenderWidget::layerTreeView() {
@@ -1269,7 +1286,7 @@ scoped_ptr<cc::SwapPromise> RenderWidget::QueueMessageImpl(
       // don't have any now, no other thread will add any.
       frame_swap_message_queue->Empty()) {
     sync_message_filter->Send(msg);
-    return scoped_ptr<cc::SwapPromise>();
+    return nullptr;
   }
 
   bool first_message_for_frame = false;
@@ -1280,9 +1297,9 @@ scoped_ptr<cc::SwapPromise> RenderWidget::QueueMessageImpl(
   if (first_message_for_frame) {
     scoped_ptr<cc::SwapPromise> promise(new QueueMessageSwapPromise(
         sync_message_filter, frame_swap_message_queue, source_frame_number));
-    return promise.PassAs<cc::SwapPromise>();
+    return promise;
   }
-  return scoped_ptr<cc::SwapPromise>();
+  return nullptr;
 }
 
 void RenderWidget::QueueMessage(IPC::Message* msg,
@@ -1387,12 +1404,7 @@ void RenderWidget::didBlur() {
 }
 
 void RenderWidget::DoDeferredClose() {
-  // No more compositing is possible.  This prevents shutdown races between
-  // previously posted CreateOutputSurface tasks and the host being unable to
-  // create them because the close message was handled.
-  DestroyLayerTreeView();
-  // Also prevent new compositors from being created.
-  host_closing_ = true;
+  WillCloseLayerTreeView();
   Send(new ViewHostMsg_Close(routing_id_));
 }
 
@@ -1413,7 +1425,7 @@ void RenderWidget::closeWidgetSoon() {
   // could be closed before the JS finishes executing.  So instead, post a
   // message back to the message loop, which won't run until the JS is
   // complete, and then the Close message can be sent.
-  base::MessageLoop::current()->PostNonNestableTask(
+  base::MessageLoop::current()->PostTask(
       FROM_HERE, base::Bind(&RenderWidget::DoDeferredClose, this));
 }
 
@@ -1432,7 +1444,8 @@ void RenderWidget::QueueSyntheticGesture(
 
 void RenderWidget::Close() {
   screen_metrics_emulator_.reset();
-  DestroyLayerTreeView();
+  WillCloseLayerTreeView();
+  compositor_.reset();
   if (webwidget_) {
     webwidget_->close();
     webwidget_ = NULL;
@@ -1469,7 +1482,7 @@ void RenderWidget::setWindowRect(const WebRect& rect) {
       initial_pos_ = pos;
     }
   } else {
-    ResizeSynchronously(pos);
+    ResizeSynchronously(pos, visible_viewport_size_);
   }
 }
 
@@ -1529,7 +1542,7 @@ void RenderWidget::OnImeSetComposition(
     // sure we are in a consistent state.
     Send(new InputHostMsg_ImeCancelComposition(routing_id()));
   }
-#if defined(OS_MACOSX) || defined(USE_AURA)
+#if defined(OS_MACOSX) || defined(USE_AURA) || defined(OS_ANDROID)
   UpdateCompositionInfo(true);
 #endif
 }
@@ -1548,7 +1561,7 @@ void RenderWidget::OnImeConfirmComposition(const base::string16& text,
   else
     webwidget_->confirmComposition(WebWidget::DoNotKeepSelection);
   handling_input_event_ = false;
-#if defined(OS_MACOSX) || defined(USE_AURA)
+#if defined(OS_MACOSX) || defined(USE_AURA) || defined(OS_ANDROID)
   UpdateCompositionInfo(true);
 #endif
 }
@@ -1677,8 +1690,11 @@ void RenderWidget::SetHidden(bool hidden) {
   if (is_hidden_ == hidden)
     return;
 
-  // The status has changed.  Tell the RenderThread about it.
+  // The status has changed.  Tell the RenderThread about it and ensure
+  // throttled acks are released in case frame production ceases.
   is_hidden_ = hidden;
+  FlushPendingInputEventAck();
+
   if (is_hidden_)
     RenderThreadImpl::current()->WidgetHidden();
   else
@@ -1768,17 +1784,21 @@ void RenderWidget::UpdateTextInputType() {
   if (webwidget_)
     new_info = webwidget_->textInputInfo();
   const ui::TextInputMode new_mode = ConvertInputMode(new_info.inputMode);
+  int new_flags = new_info.flags;
 
   if (text_input_type_ != new_type
       || can_compose_inline_ != new_can_compose_inline
-      || text_input_mode_ != new_mode) {
+      || text_input_mode_ != new_mode
+      || text_input_flags_ != new_flags) {
     Send(new ViewHostMsg_TextInputTypeChanged(routing_id(),
                                               new_type,
                                               new_mode,
-                                              new_can_compose_inline));
+                                              new_can_compose_inline,
+                                              new_flags));
     text_input_type_ = new_type;
     can_compose_inline_ = new_can_compose_inline;
     text_input_mode_ = new_mode;
+    text_input_flags_ = new_flags;
   }
 }
 
@@ -1833,13 +1853,15 @@ void RenderWidget::UpdateTextInputState(ShowIme show_ime,
     Send(new ViewHostMsg_TextInputTypeChanged(routing_id(),
                                               new_type,
                                               text_input_mode_,
-                                              new_can_compose_inline));
+                                              new_can_compose_inline,
+                                              new_info.flags));
 #endif
     Send(new ViewHostMsg_TextInputStateChanged(routing_id(), p));
 
     text_input_info_ = new_info;
     text_input_type_ = new_type;
     can_compose_inline_ = new_can_compose_inline;
+    text_input_flags_ = new_info.flags;
   }
 }
 #endif
@@ -1874,7 +1896,7 @@ void RenderWidget::UpdateSelectionBounds() {
     }
   }
 
-#if defined(OS_MACOSX) || defined(USE_AURA)
+#if defined(OS_MACOSX) || defined(USE_AURA) || defined(OS_ANDROID)
   UpdateCompositionInfo(false);
 #endif
 }
@@ -1929,8 +1951,15 @@ ui::TextInputType RenderWidget::GetTextInputType() {
   return ui::TEXT_INPUT_TYPE_NONE;
 }
 
-#if defined(OS_MACOSX) || defined(USE_AURA)
+#if defined(OS_MACOSX) || defined(USE_AURA) || defined(OS_ANDROID)
 void RenderWidget::UpdateCompositionInfo(bool should_update_range) {
+#if defined(OS_ANDROID)
+  // Sending composition info makes sense only in Lollipop (API level 21)
+  // and above due to the API availability.
+  if (base::android::BuildInfo::GetInstance()->sdk_int() < 21)
+    return;
+#endif
+
   gfx::Range range = gfx::Range();
   if (should_update_range) {
     GetCompositionRange(&range);
@@ -2022,7 +2051,7 @@ void RenderWidget::resetInputMethod() {
       Send(new InputHostMsg_ImeCancelComposition(routing_id()));
   }
 
-#if defined(OS_MACOSX) || defined(USE_AURA)
+#if defined(OS_MACOSX) || defined(USE_AURA) || defined(OS_ANDROID)
   UpdateCompositionInfo(true);
 #endif
 }

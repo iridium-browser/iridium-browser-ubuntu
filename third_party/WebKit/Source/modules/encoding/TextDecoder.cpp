@@ -29,10 +29,10 @@
  */
 
 #include "config.h"
-
 #include "modules/encoding/TextDecoder.h"
 
 #include "bindings/core/v8/ExceptionState.h"
+#include "core/dom/DOMArrayBufferView.h"
 #include "core/dom/ExceptionCode.h"
 #include "wtf/StringExtras.h"
 #include "wtf/text/TextEncodingRegistry.h"
@@ -76,7 +76,7 @@ String TextDecoder::encoding() const
     return name;
 }
 
-String TextDecoder::decode(ArrayBufferView* input, const TextDecodeOptions& options, ExceptionState& exceptionState)
+String TextDecoder::decode(DOMArrayBufferView* input, const TextDecodeOptions& options, ExceptionState& exceptionState)
 {
     const char* start = input ? static_cast<const char*>(input->baseAddress()) : 0;
     size_t length = input ? input->byteLength() : 0;
@@ -106,8 +106,8 @@ String TextDecoder::decode(ArrayBufferView* input, const TextDecodeOptions& opti
 
 String TextDecoder::decode(ExceptionState& exceptionState)
 {
-    TextDecodeOptions* options = TextDecodeOptions::create();
-    return decode(0, *options, exceptionState);
+    TextDecodeOptions options;
+    return decode(0, options, exceptionState);
 }
 
 } // namespace blink

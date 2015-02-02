@@ -41,7 +41,7 @@ enum ShouldIncludeTypingStyle {
     IgnoreTypingStyle
 };
 
-class ApplyStyleCommand FINAL : public CompositeEditCommand {
+class ApplyStyleCommand final : public CompositeEditCommand {
 public:
     enum EPropertyLevel { PropertyDefault, ForceBlockProperties };
     enum InlineStyleRemovalMode { RemoveIfNeeded, RemoveAlways, RemoveNone };
@@ -65,7 +65,7 @@ public:
         return adoptRefWillBeNoop(new ApplyStyleCommand(document, style, isInlineElementToRemoveFunction, action));
     }
 
-    virtual void trace(Visitor*) OVERRIDE;
+    virtual void trace(Visitor*) override;
 
 private:
     ApplyStyleCommand(Document&, const EditingStyle*, EditAction, EPropertyLevel);
@@ -73,18 +73,18 @@ private:
     ApplyStyleCommand(PassRefPtrWillBeRawPtr<Element>, bool removeOnly, EditAction);
     ApplyStyleCommand(Document&, const EditingStyle*, bool (*isInlineElementToRemove)(const Element*), EditAction);
 
-    virtual void doApply() OVERRIDE;
-    virtual EditAction editingAction() const OVERRIDE;
+    virtual void doApply() override;
+    virtual EditAction editingAction() const override;
 
     // style-removal helpers
     bool isStyledInlineElementToRemove(Element*) const;
     bool shouldApplyInlineStyleToRun(EditingStyle*, Node* runStart, Node* pastEndNode);
     void removeConflictingInlineStyleFromRun(EditingStyle*, RefPtrWillBeMember<Node>& runStart, RefPtrWillBeMember<Node>& runEnd, PassRefPtrWillBeRawPtr<Node> pastEndNode);
-    bool removeInlineStyleFromElement(EditingStyle*, PassRefPtrWillBeRawPtr<HTMLElement>, InlineStyleRemovalMode = RemoveIfNeeded, EditingStyle* extractedStyle = 0);
+    bool removeInlineStyleFromElement(EditingStyle*, PassRefPtrWillBeRawPtr<HTMLElement>, InlineStyleRemovalMode = RemoveIfNeeded, EditingStyle* extractedStyle = nullptr);
     inline bool shouldRemoveInlineStyleFromElement(EditingStyle* style, HTMLElement* element) {return removeInlineStyleFromElement(style, element, RemoveNone);}
     void replaceWithSpanOrRemoveIfWithoutAttributes(HTMLElement*);
     bool removeImplicitlyStyledElement(EditingStyle*, HTMLElement*, InlineStyleRemovalMode, EditingStyle* extractedStyle);
-    bool removeCSSStyle(EditingStyle*, HTMLElement*, InlineStyleRemovalMode = RemoveIfNeeded, EditingStyle* extractedStyle = 0);
+    bool removeCSSStyle(EditingStyle*, HTMLElement*, InlineStyleRemovalMode = RemoveIfNeeded, EditingStyle* extractedStyle = nullptr);
     HTMLElement* highestAncestorWithConflictingInlineStyle(EditingStyle*, Node*);
     void applyInlineStyleToPushDown(Node*, EditingStyle*);
     void pushDownInlineStyleAroundNode(EditingStyle*, Node*);

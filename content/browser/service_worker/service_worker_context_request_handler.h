@@ -21,19 +21,22 @@ class CONTENT_EXPORT ServiceWorkerContextRequestHandler
       base::WeakPtr<ServiceWorkerProviderHost> provider_host,
       base::WeakPtr<storage::BlobStorageContext> blob_storage_context,
       ResourceType resource_type);
-  virtual ~ServiceWorkerContextRequestHandler();
+  ~ServiceWorkerContextRequestHandler() override;
 
   // Called via custom URLRequestJobFactory.
-  virtual net::URLRequestJob* MaybeCreateJob(
+  net::URLRequestJob* MaybeCreateJob(
       net::URLRequest* request,
-      net::NetworkDelegate* network_delegate) OVERRIDE;
+      net::NetworkDelegate* network_delegate,
+      ResourceContext* resource_context) override;
 
-  virtual void GetExtraResponseInfo(
+  void GetExtraResponseInfo(
       bool* was_fetched_via_service_worker,
+      bool* was_fallback_required_by_service_worker,
       GURL* original_url_via_service_worker,
+      blink::WebServiceWorkerResponseType* response_type_via_service_worker,
       base::TimeTicks* fetch_start_time,
       base::TimeTicks* fetch_ready_time,
-      base::TimeTicks* fetch_end_time) const OVERRIDE;
+      base::TimeTicks* fetch_end_time) const override;
 
  private:
   bool ShouldAddToScriptCache(const GURL& url);

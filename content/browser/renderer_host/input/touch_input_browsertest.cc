@@ -97,7 +97,7 @@ class InputEventMessageFilter : public BrowserMessageFilter {
   InputEventAckState last_ack_state() const { return state_; }
 
  protected:
-  virtual ~InputEventMessageFilter() {}
+  ~InputEventMessageFilter() override {}
 
  private:
   void ReceivedEventAck(WebInputEvent::Type type, InputEventAckState state) {
@@ -108,7 +108,7 @@ class InputEventMessageFilter : public BrowserMessageFilter {
   }
 
   // BrowserMessageFilter:
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE {
+  bool OnMessageReceived(const IPC::Message& message) override {
     if (message.type() == InputHostMsg_HandleInputEvent_ACK::ID) {
       InputHostMsg_HandleInputEvent_ACK::Param params;
       InputHostMsg_HandleInputEvent_ACK::Read(&message, &params);
@@ -131,7 +131,7 @@ class InputEventMessageFilter : public BrowserMessageFilter {
 class TouchInputBrowserTest : public ContentBrowserTest {
  public:
   TouchInputBrowserTest() {}
-  virtual ~TouchInputBrowserTest() {}
+  ~TouchInputBrowserTest() override {}
 
   RenderWidgetHostImpl* GetWidgetHost() {
     return RenderWidgetHostImpl::From(shell()->web_contents()->
@@ -159,7 +159,7 @@ class TouchInputBrowserTest : public ContentBrowserTest {
     host->GetProcess()->AddFilter(filter_.get());
   }
 
-  virtual void SetUpCommandLine(CommandLine* cmd) OVERRIDE {
+  void SetUpCommandLine(CommandLine* cmd) override {
     cmd->AppendSwitchASCII(switches::kTouchEvents,
                            switches::kTouchEventsEnabled);
   }

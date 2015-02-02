@@ -2,10 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import "mojo/services/public/interfaces/geometry/geometry.mojom"
-import "mojo/services/public/interfaces/surfaces/surface_id.mojom"
+module mojo;
 
-module mojo {
+import "mojo/services/public/interfaces/geometry/geometry.mojom";
+import "mojo/services/public/interfaces/surfaces/surface_id.mojom";
 
 struct Color {
   uint32 rgba;
@@ -28,7 +28,8 @@ struct RenderPassQuadState {
 
   // If nonzero, resource id of mask to use when drawing this pass.
   uint32 mask_resource_id;
-  RectF mask_uv_rect;
+  PointF mask_uv_scale;
+  Size mask_texture_size;
 
   // Post-processing filters, applied to the pixels in the render pass' texture.
   // TODO(jamesr): Support
@@ -61,7 +62,7 @@ struct TextureQuadState {
   PointF uv_top_left;
   PointF uv_bottom_right;
   Color background_color;
-  float[4] vertex_opacity;
+  array<float, 4> vertex_opacity;
   bool flipped;
 };
 
@@ -123,7 +124,7 @@ struct Quad {
 
   // Index into the containing pass' shared quad state array which has state
   // (transforms etc) shared by multiple quads.
-  int32 shared_quad_state_index;
+  uint32 shared_quad_state_index;
 
   // Only one of the following will be set, depending on the material.
   CheckerboardQuadState? checkerboard_quad_state;
@@ -203,8 +204,6 @@ struct Pass {
   Rect damage_rect;
   Transform transform_to_root_target;
   bool has_transparent_background;
-  Quad[] quads;
-  SharedQuadState[] shared_quad_states;
+  array<Quad> quads;
+  array<SharedQuadState> shared_quad_states;
 };
-
-}

@@ -69,6 +69,7 @@ NSDictionary* attributeToMethodNameMap = nil;
     { NSAccessibilityDisclosureLevelAttribute, @"disclosureLevel" },
     { NSAccessibilityDisclosedRowsAttribute, @"disclosedRows" },
     { NSAccessibilityEnabledAttribute, @"enabled" },
+    { NSAccessibilityExpandedAttribute, @"expanded" },
     { NSAccessibilityFocusedAttribute, @"focused" },
     { NSAccessibilityHeaderAttribute, @"header" },
     { NSAccessibilityHelpAttribute, @"help" },
@@ -329,6 +330,11 @@ NSDictionary* attributeToMethodNameMap = nil;
       GetState(browserAccessibility_, ui::AX_STATE_ENABLED)];
 }
 
+- (NSNumber*)expanded {
+  return [NSNumber numberWithBool:
+      GetState(browserAccessibility_, ui::AX_STATE_EXPANDED)];
+}
+
 - (NSNumber*)focused {
   BrowserAccessibilityManager* manager = browserAccessibility_->manager();
   NSNumber* ret = [NSNumber numberWithBool:
@@ -575,9 +581,30 @@ NSDictionary* attributeToMethodNameMap = nil;
   }
 
   switch([self internalRole]) {
+  case ui::AX_ROLE_ARTICLE:
+    return base::SysUTF16ToNSString(content_client->GetLocalizedString(
+        IDS_AX_ROLE_ARTICLE));
+  case ui::AX_ROLE_BANNER:
+    return base::SysUTF16ToNSString(content_client->GetLocalizedString(
+        IDS_AX_ROLE_BANNER));
+  case ui::AX_ROLE_COMPLEMENTARY:
+    return base::SysUTF16ToNSString(content_client->GetLocalizedString(
+        IDS_AX_ROLE_COMPLEMENTARY));
+  case ui::AX_ROLE_CONTENT_INFO:
+    return base::SysUTF16ToNSString(content_client->GetLocalizedString(
+        IDS_AX_ROLE_ADDRESS));
   case ui::AX_ROLE_FOOTER:
     return base::SysUTF16ToNSString(content_client->GetLocalizedString(
         IDS_AX_ROLE_FOOTER));
+  case ui::AX_ROLE_MAIN:
+    return base::SysUTF16ToNSString(content_client->GetLocalizedString(
+        IDS_AX_ROLE_MAIN_CONTENT));
+  case ui::AX_ROLE_NAVIGATION:
+    return base::SysUTF16ToNSString(content_client->GetLocalizedString(
+        IDS_AX_ROLE_NAVIGATIONAL_LINK));
+  case ui::AX_ROLE_REGION:
+    return base::SysUTF16ToNSString(content_client->GetLocalizedString(
+        IDS_AX_ROLE_REGION));
   case ui::AX_ROLE_SPIN_BUTTON:
     // This control is similar to what VoiceOver calls a "stepper".
     return base::SysUTF16ToNSString(content_client->GetLocalizedString(
@@ -700,16 +727,11 @@ NSDictionary* attributeToMethodNameMap = nil;
     return @"AXSecureTextField";
   }
 
-  NSString* htmlTag = NSStringForStringAttribute(
-      browserAccessibility_, ui::AX_ATTR_HTML_TAG);
+  if (browserAccessibilityRole == ui::AX_ROLE_DESCRIPTION_LIST)
+    return @"AXDescriptionList";
 
-  if (browserAccessibilityRole == ui::AX_ROLE_LIST) {
-    if ([htmlTag isEqualToString:@"dl"]) {
-      return @"AXDescriptionList";
-    } else {
-      return @"AXContentList";
-    }
-  }
+  if (browserAccessibilityRole == ui::AX_ROLE_LIST)
+    return @"AXContentList";
 
   return [AXPlatformNodeCocoa nativeSubroleFromAXRole:browserAccessibilityRole];
 }
@@ -1168,6 +1190,7 @@ NSDictionary* attributeToMethodNameMap = nil;
       NSAccessibilityChildrenAttribute,
       NSAccessibilityDescriptionAttribute,
       NSAccessibilityEnabledAttribute,
+      NSAccessibilityExpandedAttribute,
       NSAccessibilityFocusedAttribute,
       NSAccessibilityHelpAttribute,
       NSAccessibilityLinkedUIElementsAttribute,
@@ -1346,7 +1369,7 @@ NSDictionary* attributeToMethodNameMap = nil;
   return NO;
 }
 
-// Returns whether or not this object should be ignored in the accessibilty
+// Returns whether or not this object should be ignored in the accessibility
 // tree.
 - (BOOL)accessibilityIsIgnored {
   if (!browserAccessibility_)
@@ -1355,7 +1378,7 @@ NSDictionary* attributeToMethodNameMap = nil;
   return [self isIgnored];
 }
 
-// Performs the given accessibilty action on the webkit accessibility object
+// Performs the given accessibility action on the webkit accessibility object
 // that backs this object.
 - (void)accessibilityPerformAction:(NSString*)action {
   if (!browserAccessibility_)

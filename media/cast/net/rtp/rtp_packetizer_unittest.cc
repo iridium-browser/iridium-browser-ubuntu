@@ -37,7 +37,7 @@ class TestRtpPacketTransport : public PacketSender {
         expected_number_of_packets_(0),
         expected_packet_id_(0),
         expected_frame_id_(0),
-        expectd_rtp_timestamp_(0) {}
+        expected_rtp_timestamp_(0) {}
 
   void VerifyRtpHeader(const RtpCastTestHeader& rtp_header) {
     VerifyCommonRtpHeader(rtp_header);
@@ -47,7 +47,7 @@ class TestRtpPacketTransport : public PacketSender {
   void VerifyCommonRtpHeader(const RtpCastTestHeader& rtp_header) {
     EXPECT_EQ(kPayload, rtp_header.payload_type);
     EXPECT_EQ(sequence_number_, rtp_header.sequence_number);
-    EXPECT_EQ(expectd_rtp_timestamp_, rtp_header.rtp_timestamp);
+    EXPECT_EQ(expected_rtp_timestamp_, rtp_header.rtp_timestamp);
     EXPECT_EQ(config_.ssrc, rtp_header.ssrc);
     EXPECT_EQ(0, rtp_header.num_csrcs);
   }
@@ -61,7 +61,7 @@ class TestRtpPacketTransport : public PacketSender {
     EXPECT_EQ(expected_frame_id_ - 1u, rtp_header.reference_frame_id);
   }
 
-  virtual bool SendPacket(PacketRef packet, const base::Closure& cb) OVERRIDE {
+  bool SendPacket(PacketRef packet, const base::Closure& cb) override {
     ++packets_sent_;
     RtpHeaderParser parser(&packet->data[0], packet->data.size());
     RtpCastTestHeader rtp_header;
@@ -72,9 +72,7 @@ class TestRtpPacketTransport : public PacketSender {
     return true;
   }
 
-  virtual int64 GetBytesSent() OVERRIDE {
-    return 0;
-  }
+  int64 GetBytesSent() override { return 0; }
 
   size_t number_of_packets_received() const { return packets_sent_; }
 
@@ -83,7 +81,7 @@ class TestRtpPacketTransport : public PacketSender {
   }
 
   void set_rtp_timestamp(uint32 rtp_timestamp) {
-    expectd_rtp_timestamp_ = rtp_timestamp;
+    expected_rtp_timestamp_ = rtp_timestamp;
   }
 
   RtpPacketizerConfig config_;
@@ -94,7 +92,7 @@ class TestRtpPacketTransport : public PacketSender {
   // Assuming packets arrive in sequence.
   int expected_packet_id_;
   uint32 expected_frame_id_;
-  uint32 expectd_rtp_timestamp_;
+  uint32 expected_rtp_timestamp_;
 
   DISALLOW_COPY_AND_ASSIGN(TestRtpPacketTransport);
 };
@@ -121,8 +119,7 @@ class RtpPacketizerTest : public ::testing::Test {
     video_frame_.frame_id = 0;
     video_frame_.referenced_frame_id = kStartFrameId;
     video_frame_.data.assign(kFrameSize, 123);
-    video_frame_.rtp_timestamp =
-        GetVideoRtpTimestamp(testing_clock_.NowTicks());
+    video_frame_.rtp_timestamp = 0x0055aa11;
   }
 
   void RunTasks(int during_ms) {

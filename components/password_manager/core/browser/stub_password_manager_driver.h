@@ -15,26 +15,26 @@ namespace password_manager {
 class StubPasswordManagerDriver : public PasswordManagerDriver {
  public:
   StubPasswordManagerDriver();
-  virtual ~StubPasswordManagerDriver();
+  ~StubPasswordManagerDriver() override;
 
   // PasswordManagerDriver:
-  virtual void FillPasswordForm(
-      const autofill::PasswordFormFillData& form_data) OVERRIDE;
-  virtual bool DidLastPageLoadEncounterSSLErrors() OVERRIDE;
-  virtual bool IsOffTheRecord() OVERRIDE;
-  virtual void AllowPasswordGenerationForForm(
-      const autofill::PasswordForm& form) OVERRIDE;
-  virtual void AccountCreationFormsFound(
-      const std::vector<autofill::FormData>& forms) OVERRIDE;
-  virtual void FillSuggestion(const base::string16& username,
-                              const base::string16& password) OVERRIDE;
-  virtual void PreviewSuggestion(const base::string16& username,
-                                 const base::string16& password) OVERRIDE;
-  virtual void ClearPreviewedForm() OVERRIDE;
-  virtual PasswordGenerationManager* GetPasswordGenerationManager() OVERRIDE;
-  virtual PasswordManager* GetPasswordManager() OVERRIDE;
-  virtual PasswordAutofillManager* GetPasswordAutofillManager() OVERRIDE;
-  virtual autofill::AutofillManager* GetAutofillManager() OVERRIDE;
+  void FillPasswordForm(
+      const autofill::PasswordFormFillData& form_data) override;
+  bool DidLastPageLoadEncounterSSLErrors() override;
+  bool IsOffTheRecord() override;
+  void AllowPasswordGenerationForForm(
+      const autofill::PasswordForm& form) override;
+  void AccountCreationFormsFound(
+      const std::vector<autofill::FormData>& forms) override;
+  void FillSuggestion(const base::string16& username,
+                      const base::string16& password) override;
+  void PreviewSuggestion(const base::string16& username,
+                         const base::string16& password) override;
+  void ClearPreviewedForm() override;
+  PasswordGenerationManager* GetPasswordGenerationManager() override;
+  PasswordManager* GetPasswordManager() override;
+  PasswordAutofillManager* GetPasswordAutofillManager() override;
+  autofill::AutofillManager* GetAutofillManager() override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(StubPasswordManagerDriver);

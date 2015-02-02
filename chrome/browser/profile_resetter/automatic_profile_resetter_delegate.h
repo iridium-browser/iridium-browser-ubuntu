@@ -124,7 +124,7 @@ class AutomaticProfileResetterDelegateImpl
   explicit AutomaticProfileResetterDelegateImpl(
       Profile* profile,
       ProfileResetter::ResettableFlags resettable_aspects);
-  virtual ~AutomaticProfileResetterDelegateImpl();
+  ~AutomaticProfileResetterDelegateImpl() override;
 
   // Returns the brandcoded default settings; empty defaults if this is not a
   // branded build; or NULL if FetchBrandcodedDefaultSettingsIfNeeded() has not
@@ -134,35 +134,33 @@ class AutomaticProfileResetterDelegateImpl
   }
 
   // AutomaticProfileResetterDelegate:
-  virtual void EnumerateLoadedModulesIfNeeded() OVERRIDE;
-  virtual void RequestCallbackWhenLoadedModulesAreEnumerated(
-      const base::Closure& ready_callback) const OVERRIDE;
-  virtual void LoadTemplateURLServiceIfNeeded() OVERRIDE;
-  virtual void RequestCallbackWhenTemplateURLServiceIsLoaded(
-      const base::Closure& ready_callback) const OVERRIDE;
-  virtual void FetchBrandcodedDefaultSettingsIfNeeded() OVERRIDE;
-  virtual void RequestCallbackWhenBrandcodedDefaultsAreFetched(
-      const base::Closure& ready_callback) const OVERRIDE;
-  virtual scoped_ptr<base::ListValue>
-      GetLoadedModuleNameDigests() const OVERRIDE;
-  virtual scoped_ptr<base::DictionaryValue>
-      GetDefaultSearchProviderDetails() const OVERRIDE;
-  virtual bool IsDefaultSearchProviderManaged() const OVERRIDE;
-  virtual scoped_ptr<base::ListValue>
-      GetPrepopulatedSearchProvidersDetails() const OVERRIDE;
-  virtual bool TriggerPrompt() OVERRIDE;
-  virtual void TriggerProfileSettingsReset(
-      bool send_feedback,
-      const base::Closure& completion) OVERRIDE;
-  virtual void DismissPrompt() OVERRIDE;
+  void EnumerateLoadedModulesIfNeeded() override;
+  void RequestCallbackWhenLoadedModulesAreEnumerated(
+      const base::Closure& ready_callback) const override;
+  void LoadTemplateURLServiceIfNeeded() override;
+  void RequestCallbackWhenTemplateURLServiceIsLoaded(
+      const base::Closure& ready_callback) const override;
+  void FetchBrandcodedDefaultSettingsIfNeeded() override;
+  void RequestCallbackWhenBrandcodedDefaultsAreFetched(
+      const base::Closure& ready_callback) const override;
+  scoped_ptr<base::ListValue> GetLoadedModuleNameDigests() const override;
+  scoped_ptr<base::DictionaryValue> GetDefaultSearchProviderDetails()
+      const override;
+  bool IsDefaultSearchProviderManaged() const override;
+  scoped_ptr<base::ListValue> GetPrepopulatedSearchProvidersDetails()
+      const override;
+  bool TriggerPrompt() override;
+  void TriggerProfileSettingsReset(bool send_feedback,
+                                   const base::Closure& completion) override;
+  void DismissPrompt() override;
 
   // TemplateURLServiceObserver:
-  virtual void OnTemplateURLServiceChanged() OVERRIDE;
+  void OnTemplateURLServiceChanged() override;
 
   // content::NotificationObserver:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
  private:
   // Sends a feedback |report|, where |report| is supposed to be result of

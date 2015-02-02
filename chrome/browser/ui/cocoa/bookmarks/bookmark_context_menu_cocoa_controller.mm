@@ -25,16 +25,13 @@ class BookmarkContextMenuDelegateBridge :
       : controller_(controller) {
   }
 
-  virtual ~BookmarkContextMenuDelegateBridge() {
-  }
+  ~BookmarkContextMenuDelegateBridge() override {}
 
-  virtual void CloseMenu() OVERRIDE {
-    [controller_ cancelTracking];
-  }
+  void CloseMenu() override { [controller_ cancelTracking]; }
 
-  virtual void WillExecuteCommand(
+  void WillExecuteCommand(
       int command_id,
-      const std::vector<const BookmarkNode*>& bookmarks) OVERRIDE {
+      const std::vector<const BookmarkNode*>& bookmarks) override {
     [controller_ willExecuteCommand:command_id];
   }
 

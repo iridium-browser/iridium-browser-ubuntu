@@ -23,13 +23,6 @@ namespace content {
 
 namespace {
 
-// Time constant for AudioPowerMonitor.  See AudioPowerMonitor ctor comments
-// for semantics.  This value was arbitrarily chosen, but seems to work well.
-const int kPowerMonitorTimeConstantMs = 10;
-
-// The time between two audio power level samples.
-const int kPowerMonitorLogIntervalSeconds = 10;
-
 // Method to check if any of the data in |audio_source| has energy.
 bool HasDataEnergy(const media::AudioBus& audio_source) {
   for (int ch = 0; ch < audio_source.channels(); ++ch) {
@@ -234,9 +227,10 @@ WebRtcAudioCapturer::WebRtcAudioCapturer(
     WebRtcAudioDeviceImpl* audio_device,
     MediaStreamAudioSource* audio_source)
     : constraints_(constraints),
-      audio_processor_(
-          new rtc::RefCountedObject<MediaStreamAudioProcessor>(
-              constraints, device_info.device.input.effects, audio_device)),
+      audio_processor_(new rtc::RefCountedObject<MediaStreamAudioProcessor>(
+          constraints,
+          device_info.device.input.effects,
+          audio_device)),
       running_(false),
       render_view_id_(render_view_id),
       device_info_(device_info),
@@ -245,10 +239,7 @@ WebRtcAudioCapturer::WebRtcAudioCapturer(
       key_pressed_(false),
       need_audio_processing_(false),
       audio_device_(audio_device),
-      audio_source_(audio_source),
-      audio_power_monitor_(
-          device_info_.device.input.sample_rate,
-          base::TimeDelta::FromMilliseconds(kPowerMonitorTimeConstantMs)) {
+      audio_source_(audio_source) {
   DVLOG(1) << "WebRtcAudioCapturer::WebRtcAudioCapturer()";
 }
 
@@ -516,20 +507,6 @@ void WebRtcAudioCapturer::Capture(const media::AudioBus* audio_source,
     (*it)->SetAudioProcessor(audio_processor_);
   }
 
-  if ((base::TimeTicks::Now() - last_audio_level_log_time_).InSeconds() >
-          kPowerMonitorLogIntervalSeconds) {
-    audio_power_monitor_.Scan(*audio_source, audio_source->frames());
-
-    last_audio_level_log_time_ = base::TimeTicks::Now();
-
-    std::pair<float, bool> result =
-        audio_power_monitor_.ReadCurrentPowerAndClip();
-    WebRtcLogMessage(base::StringPrintf(
-        "WAC::Capture: current_audio_power=%.2fdBFS.", result.first));
-
-    audio_power_monitor_.Reset();
-  }
-
   // Figure out if the pre-processed data has any energy or not, the
   // information will be passed to the track to force the calculator
   // to report energy in case the post-processed data is zeroed by the audio
@@ -602,10 +579,13 @@ int WebRtcAudioCapturer::GetBufferSize(int sample_rate) const {
 
   // Use the native hardware buffer size in non peer connection mode when the
   // platform is using a native buffer size smaller than the PeerConnection
-  // buffer size.
+  // buffer size and audio processing is off.
   int hardware_buffer_size = device_info_.device.input.frames_per_buffer;
   if (!peer_connection_mode_ && hardware_buffer_size &&
-      hardware_buffer_size <= peer_connection_buffer_size) {
+      hardware_buffer_size <= peer_connection_buffer_size &&
+      !audio_processor_->has_audio_processing()) {
+    DVLOG(1) << "WebRtcAudioCapturer is using hardware buffer size "
+             << hardware_buffer_size;
     return hardware_buffer_size;
   }
 

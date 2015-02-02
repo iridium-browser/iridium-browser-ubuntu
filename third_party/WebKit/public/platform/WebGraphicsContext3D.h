@@ -60,6 +60,12 @@ typedef signed long int WGC3Dsizeiptr;
 // Typedef for server-side objects like OpenGL textures and program objects.
 typedef WGC3Duint WebGLId;
 
+struct WebGLInfo {
+    WebString vendorInfo;
+    WebString rendererInfo;
+    WebString driverVersion;
+};
+
 // This interface abstracts the operations performed by the
 // GraphicsContext3D in order to implement WebGL. Nearly all of the
 // methods exposed on this interface map directly to entry points in
@@ -127,14 +133,6 @@ public:
         virtual ~WebGraphicsErrorMessageCallback() { }
     };
 
-    class WebGraphicsSwapBuffersCompleteCallbackCHROMIUM {
-    public:
-        virtual void onSwapBuffersComplete() = 0;
-
-    protected:
-        virtual ~WebGraphicsSwapBuffersCompleteCallbackCHROMIUM() { }
-    };
-
     // This destructor needs to be public so that using classes can destroy instances if initialization fails.
     virtual ~WebGraphicsContext3D() { }
 
@@ -190,9 +188,6 @@ public:
     // GL_CHROMIUM_framebuffer_multisample
     virtual void blitFramebufferCHROMIUM(WGC3Dint srcX0, WGC3Dint srcY0, WGC3Dint srcX1, WGC3Dint srcY1, WGC3Dint dstX0, WGC3Dint dstY0, WGC3Dint dstX1, WGC3Dint dstY1, WGC3Dbitfield mask, WGC3Denum filter) = 0;
     virtual void renderbufferStorageMultisampleCHROMIUM(WGC3Denum target, WGC3Dsizei samples, WGC3Denum internalformat, WGC3Dsizei width, WGC3Dsizei height) = 0;
-
-    // GL_CHROMIUM_swapbuffers_complete_callback
-    virtual void setSwapBuffersCompleteCallbackCHROMIUM(WebGraphicsSwapBuffersCompleteCallbackCHROMIUM* callback) { }
 
     // GL_CHROMIUM_rate_limit_offscreen_context
     virtual void rateLimitOffscreenContextCHROMIUM() { }
@@ -450,12 +445,11 @@ public:
 
     virtual GrGLInterface* createGrGLInterface() { return 0; }
 
-    // GL_CHROMIUM_map_image
-    virtual WGC3Duint createImageCHROMIUM(WGC3Dsizei width, WGC3Dsizei height, WGC3Denum internalformat, WGC3Denum usage) { return 0; }
+    // GL_CHROMIUM_image
     virtual void destroyImageCHROMIUM(WGC3Duint imageId) { }
-    virtual void getImageParameterivCHROMIUM(WGC3Duint imageId, WGC3Denum pname, WGC3Dint* params) { }
-    virtual void* mapImageCHROMIUM(WGC3Duint imageId) { return 0; }
-    virtual void unmapImageCHROMIUM(WGC3Duint imageId) { }
+
+    // GL_CHROMIUM_gpu_memory_buffer_image
+    virtual WGC3Duint createGpuMemoryBufferImageCHROMIUM(WGC3Dsizei width, WGC3Dsizei height, WGC3Denum internalformat, WGC3Denum usage) { return 0; }
 
     // GL_ANGLE_instanced_arrays
     virtual void drawArraysInstancedANGLE(WGC3Denum mode, WGC3Dint first, WGC3Dsizei count, WGC3Dsizei primcount) { }

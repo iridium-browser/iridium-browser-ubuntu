@@ -17,40 +17,38 @@ class DictionaryPrefStore : public WriteablePrefStore {
   DictionaryPrefStore() : WriteablePrefStore() {}
 
   // Overrides from PrefStore.
-  virtual void AddObserver(Observer* observer) OVERRIDE {
+  void AddObserver(Observer* observer) override {
     observers_.AddObserver(observer);
   }
 
-  virtual void RemoveObserver(Observer* observer) OVERRIDE {
+  void RemoveObserver(Observer* observer) override {
     observers_.RemoveObserver(observer);
   }
 
-  virtual bool GetValue(const std::string& key,
-                        const base::Value** result) const OVERRIDE {
+  bool GetValue(const std::string& key,
+                const base::Value** result) const override {
     return prefs_.Get(key, result);
   }
 
   // Overrides from WriteablePrefStore.
-  virtual void SetValue(const std::string& key, base::Value* value) OVERRIDE {
+  void SetValue(const std::string& key, base::Value* value) override {
     DCHECK(value);
     prefs_.Set(key, value);
     ReportValueChanged(key);
   }
 
-  virtual void RemoveValue(const std::string& key) OVERRIDE {
+  void RemoveValue(const std::string& key) override {
     if (prefs_.RemovePath(key, NULL))
       ReportValueChanged(key);
   }
 
-  virtual bool GetMutableValue(const std::string& key,
-                               base::Value** result) OVERRIDE {
+  bool GetMutableValue(const std::string& key, base::Value** result) override {
     return prefs_.Get(key, result);
   }
 
-  virtual void ReportValueChanged(const std::string& key) OVERRIDE {}
+  void ReportValueChanged(const std::string& key) override {}
 
-  virtual void SetValueSilently(const std::string& key,
-                                base::Value* value) OVERRIDE {
+  void SetValueSilently(const std::string& key, base::Value* value) override {
     NOTIMPLEMENTED();
   }
 
@@ -60,7 +58,7 @@ class DictionaryPrefStore : public WriteablePrefStore {
   }
 
  private:
-  virtual ~DictionaryPrefStore() {}
+  ~DictionaryPrefStore() override {}
 
   base::DictionaryValue prefs_;
   ObserverList<PrefStore::Observer, true> observers_;

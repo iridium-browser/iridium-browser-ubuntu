@@ -12,8 +12,8 @@
 #include "cc/resources/prioritized_resource.h"
 #include "cc/resources/resource_provider.h"
 #include "cc/resources/resource_update_queue.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace cc {
 
@@ -25,12 +25,12 @@ class FakeLayerUpdater : public LayerUpdater {
    public:
     Resource(FakeLayerUpdater* updater,
              scoped_ptr<PrioritizedResource> resource);
-    virtual ~Resource();
+    ~Resource() override;
 
-    virtual void Update(ResourceUpdateQueue* queue,
-                        const gfx::Rect& source_rect,
-                        const gfx::Vector2d& dest_offset,
-                        bool partial_update) OVERRIDE;
+    void Update(ResourceUpdateQueue* queue,
+                const gfx::Rect& source_rect,
+                const gfx::Vector2d& dest_offset,
+                bool partial_update) override;
 
    private:
     FakeLayerUpdater* layer_;
@@ -41,14 +41,14 @@ class FakeLayerUpdater : public LayerUpdater {
 
   FakeLayerUpdater();
 
-  virtual scoped_ptr<LayerUpdater::Resource> CreateResource(
-      PrioritizedResourceManager* resource) OVERRIDE;
+  scoped_ptr<LayerUpdater::Resource> CreateResource(
+      PrioritizedResourceManager* resource) override;
 
-  virtual void PrepareToUpdate(const gfx::Size& content_size,
-                               const gfx::Rect& paint_rect,
-                               const gfx::Size& tile_size,
-                               float contents_width_scale,
-                               float contents_height_scale) OVERRIDE;
+  void PrepareToUpdate(const gfx::Size& content_size,
+                       const gfx::Rect& paint_rect,
+                       const gfx::Size& tile_size,
+                       float contents_width_scale,
+                       float contents_height_scale) override;
   // Sets the rect to invalidate during the next call to PrepareToUpdate().
   // After the next call to PrepareToUpdate() the rect is reset.
   void SetRectToInvalidate(const gfx::Rect& rect, FakeTiledLayer* layer);
@@ -68,7 +68,7 @@ class FakeLayerUpdater : public LayerUpdater {
   void Update() { update_count_++; }
 
  protected:
-  virtual ~FakeLayerUpdater();
+  ~FakeLayerUpdater() override;
 
  private:
   int prepare_count_;
@@ -84,7 +84,7 @@ class FakeLayerUpdater : public LayerUpdater {
 class FakeTiledLayerImpl : public TiledLayerImpl {
  public:
   FakeTiledLayerImpl(LayerTreeImpl* tree_impl, int id);
-  virtual ~FakeTiledLayerImpl();
+  ~FakeTiledLayerImpl() override;
 
   using TiledLayerImpl::HasTileAt;
   using TiledLayerImpl::HasResourceIdForTileAt;
@@ -102,15 +102,15 @@ class FakeTiledLayer : public TiledLayer {
   using TiledLayer::NumPaintedTiles;
   using TiledLayer::IdlePaintRect;
 
-  virtual void SetNeedsDisplayRect(const gfx::RectF& rect) OVERRIDE;
-  const gfx::RectF& last_needs_display_rect() const {
+  void SetNeedsDisplayRect(const gfx::Rect& rect) override;
+  const gfx::Rect& last_needs_display_rect() const {
     return last_needs_display_rect_;
   }
 
-  virtual void SetTexturePriorities(
-      const PriorityCalculator& priority_calculator) OVERRIDE;
+  void SetTexturePriorities(
+      const PriorityCalculator& priority_calculator) override;
 
-  virtual PrioritizedResourceManager* ResourceManager() OVERRIDE;
+  PrioritizedResourceManager* ResourceManager() override;
   FakeLayerUpdater* fake_layer_updater() { return fake_updater_.get(); }
   gfx::RectF update_rect() { return update_rect_; }
 
@@ -120,14 +120,14 @@ class FakeTiledLayer : public TiledLayer {
   void ResetNumDependentsNeedPushProperties();
 
  protected:
-  virtual LayerUpdater* Updater() const OVERRIDE;
-  virtual void CreateUpdaterIfNeeded() OVERRIDE {}
-  virtual ~FakeTiledLayer();
+  LayerUpdater* Updater() const override;
+  void CreateUpdaterIfNeeded() override {}
+  ~FakeTiledLayer() override;
 
  private:
   scoped_refptr<FakeLayerUpdater> fake_updater_;
   PrioritizedResourceManager* resource_manager_;
-  gfx::RectF last_needs_display_rect_;
+  gfx::Rect last_needs_display_rect_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeTiledLayer);
 };
@@ -138,13 +138,13 @@ class FakeTiledLayerWithScaledBounds : public FakeTiledLayer {
       PrioritizedResourceManager* resource_manager);
 
   void SetContentBounds(const gfx::Size& content_bounds);
-  virtual void CalculateContentsScale(float ideal_contents_scale,
-                                      float* contents_scale_x,
-                                      float* contents_scale_y,
-                                      gfx::Size* content_bounds) OVERRIDE;
+  void CalculateContentsScale(float ideal_contents_scale,
+                              float* contents_scale_x,
+                              float* contents_scale_y,
+                              gfx::Size* content_bounds) override;
 
  protected:
-  virtual ~FakeTiledLayerWithScaledBounds();
+  ~FakeTiledLayerWithScaledBounds() override;
   gfx::Size forced_content_bounds_;
 
  private:

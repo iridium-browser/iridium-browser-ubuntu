@@ -41,6 +41,8 @@ class EventRewriter : public ui::EventRewriter {
   enum DeviceType {
     kDeviceUnknown = 0,
     kDeviceAppleKeyboard,
+    kDeviceHotrodRemote,
+    kDeviceVirtualCoreKeyboard,  // X-server generated events.
   };
 
   // Does not take ownership of the |sticky_keys_controller|, which may also
@@ -75,10 +77,10 @@ class EventRewriter : public ui::EventRewriter {
   // EventRewriter overrides:
   virtual ui::EventRewriteStatus RewriteEvent(
       const ui::Event& event,
-      scoped_ptr<ui::Event>* rewritten_event) OVERRIDE;
+      scoped_ptr<ui::Event>* rewritten_event) override;
   virtual ui::EventRewriteStatus NextDispatchEvent(
       const ui::Event& last_event,
-      scoped_ptr<ui::Event>* new_event) OVERRIDE;
+      scoped_ptr<ui::Event>* new_event) override;
 
   // Generate a new key event from an original key event and the replacement
   // key code and flags determined by a key rewriter.
@@ -108,15 +110,21 @@ class EventRewriter : public ui::EventRewriter {
   const PrefService* GetPrefService() const;
 
   // Adds a device to |device_id_to_type_|.
-  void KeyboardDeviceAdded(int device_id);
+  DeviceType KeyboardDeviceAdded(int device_id);
 
-  // Checks the type of the |device_name|, and inserts a new entry to
-  // |device_id_to_type_|.
+  // Checks the type of the |device_name|, |vendor_id| and |product_id|, and
+  // inserts a new entry to |device_id_to_type_|.
   DeviceType KeyboardDeviceAddedInternal(int device_id,
-                                         const std::string& device_name);
+                                         const std::string& device_name,
+                                         int vendor_id,
+                                         int product_id);
 
   // Returns true if |last_keyboard_device_id_| is Apple's.
   bool IsAppleKeyboard() const;
+  // Returns true if |last_keyboard_device_id_| is Hotrod remote.
+  bool IsHotrodRemote() const;
+  // Returns true if |last_keyboard_device_id_| is of given |device_type|.
+  bool IsLastKeyboardOfType(DeviceType device_type) const;
 
   // Returns true if the target for |event| would prefer to receive raw function
   // keys instead of having them rewritten into back, forward, brightness,

@@ -35,7 +35,7 @@ class SOCKSClientSocketTest : public PlatformTest {
       HostResolver* host_resolver,
       const std::string& hostname, int port,
       NetLog* net_log);
-  virtual void SetUp();
+  void SetUp() override;
 
  protected:
   scoped_ptr<SOCKSClientSocket> user_sock_;
@@ -96,12 +96,12 @@ class HangingHostResolverWithCancel : public HostResolver {
  public:
   HangingHostResolverWithCancel() : outstanding_request_(NULL) {}
 
-  virtual int Resolve(const RequestInfo& info,
-                      RequestPriority priority,
-                      AddressList* addresses,
-                      const CompletionCallback& callback,
-                      RequestHandle* out_req,
-                      const BoundNetLog& net_log) OVERRIDE {
+  int Resolve(const RequestInfo& info,
+              RequestPriority priority,
+              AddressList* addresses,
+              const CompletionCallback& callback,
+              RequestHandle* out_req,
+              const BoundNetLog& net_log) override {
     DCHECK(addresses);
     DCHECK_EQ(false, callback.is_null());
     EXPECT_FALSE(HasOutstandingRequest());
@@ -110,14 +110,14 @@ class HangingHostResolverWithCancel : public HostResolver {
     return ERR_IO_PENDING;
   }
 
-  virtual int ResolveFromCache(const RequestInfo& info,
-                               AddressList* addresses,
-                               const BoundNetLog& net_log) OVERRIDE {
+  int ResolveFromCache(const RequestInfo& info,
+                       AddressList* addresses,
+                       const BoundNetLog& net_log) override {
     NOTIMPLEMENTED();
     return ERR_UNEXPECTED;
   }
 
-  virtual void CancelRequest(RequestHandle req) OVERRIDE {
+  void CancelRequest(RequestHandle req) override {
     EXPECT_TRUE(HasOutstandingRequest());
     EXPECT_EQ(outstanding_request_, req);
     outstanding_request_ = NULL;
@@ -214,7 +214,7 @@ TEST_F(SOCKSClientSocketTest, HandshakeFailures) {
 
   //---------------------------------------
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(tests); ++i) {
+  for (size_t i = 0; i < arraysize(tests); ++i) {
     MockWrite data_writes[] = {
         MockWrite(SYNCHRONOUS, kSOCKSOkRequest, arraysize(kSOCKSOkRequest)) };
     MockRead data_reads[] = {

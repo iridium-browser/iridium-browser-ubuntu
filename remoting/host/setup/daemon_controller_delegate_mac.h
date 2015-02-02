@@ -14,24 +14,22 @@ namespace remoting {
 class DaemonControllerDelegateMac : public DaemonController::Delegate {
  public:
   DaemonControllerDelegateMac();
-  virtual ~DaemonControllerDelegateMac();
+  ~DaemonControllerDelegateMac() override;
 
   // DaemonController::Delegate interface.
-  virtual DaemonController::State GetState() OVERRIDE;
-  virtual scoped_ptr<base::DictionaryValue> GetConfig() OVERRIDE;
-  virtual void InstallHost(
-      const DaemonController::CompletionCallback& done) OVERRIDE;
-  virtual void SetConfigAndStart(
+  DaemonController::State GetState() override;
+  scoped_ptr<base::DictionaryValue> GetConfig() override;
+  void InstallHost(const DaemonController::CompletionCallback& done) override;
+  void SetConfigAndStart(
       scoped_ptr<base::DictionaryValue> config,
       bool consent,
-      const DaemonController::CompletionCallback& done) OVERRIDE;
-  virtual void UpdateConfig(
-      scoped_ptr<base::DictionaryValue> config,
-      const DaemonController::CompletionCallback& done) OVERRIDE;
-  virtual void Stop(const DaemonController::CompletionCallback& done) OVERRIDE;
-  virtual void SetWindow(void* window_handle) OVERRIDE;
-  virtual std::string GetVersion() OVERRIDE;
-  virtual DaemonController::UsageStatsConsent GetUsageStatsConsent() OVERRIDE;
+      const DaemonController::CompletionCallback& done) override;
+  void UpdateConfig(scoped_ptr<base::DictionaryValue> config,
+                    const DaemonController::CompletionCallback& done) override;
+  void Stop(const DaemonController::CompletionCallback& done) override;
+  void SetWindow(void* window_handle) override;
+  std::string GetVersion() override;
+  DaemonController::UsageStatsConsent GetUsageStatsConsent() override;
 
  private:
   void ShowPreferencePane(const std::string& config_data,

@@ -33,7 +33,7 @@ class TestContentLayer : public Layer {
     SetIsDrawable(true);
   }
 
-  virtual SimpleEnclosedRegion VisibleContentOpaqueRegion() const OVERRIDE {
+  SimpleEnclosedRegion VisibleContentOpaqueRegion() const override {
     if (override_opaque_contents_rect_) {
       return SimpleEnclosedRegion(
           gfx::IntersectRects(opaque_contents_rect_, visible_content_rect()));
@@ -46,7 +46,7 @@ class TestContentLayer : public Layer {
   }
 
  private:
-  virtual ~TestContentLayer() {}
+  ~TestContentLayer() override {}
 
   bool override_opaque_contents_rect_;
   gfx::Rect opaque_contents_rect_;
@@ -59,7 +59,7 @@ class TestContentLayerImpl : public LayerImpl {
     SetDrawsContent(true);
   }
 
-  virtual SimpleEnclosedRegion VisibleContentOpaqueRegion() const OVERRIDE {
+  SimpleEnclosedRegion VisibleContentOpaqueRegion() const override {
     if (override_opaque_contents_rect_) {
       return SimpleEnclosedRegion(
           gfx::IntersectRects(opaque_contents_rect_, visible_content_rect()));
@@ -121,13 +121,8 @@ struct OcclusionTrackerTestMainThreadTypes {
     return make_scoped_refptr(new ContentLayerType());
   }
 
-  static LayerPtrType PassLayerPtr(ContentLayerPtrType* layer) {
-    LayerPtrType ref(*layer);
-    *layer = NULL;
-    return ref;
-  }
-
-  static LayerPtrType PassLayerPtr(LayerPtrType* layer) {
+  template <typename T>
+  static LayerPtrType PassLayerPtr(T* layer) {
     LayerPtrType ref(*layer);
     *layer = NULL;
     return ref;
@@ -156,12 +151,9 @@ struct OcclusionTrackerTestImplThreadTypes {
   }
   static int next_layer_impl_id;
 
-  static LayerPtrType PassLayerPtr(LayerPtrType* layer) {
+  template <typename T>
+  static LayerPtrType PassLayerPtr(T* layer) {
     return layer->Pass();
-  }
-
-  static LayerPtrType PassLayerPtr(ContentLayerPtrType* layer) {
-    return layer->PassAs<LayerType>();
   }
 
   static void DestroyLayer(LayerPtrType* layer) { layer->reset(); }
@@ -286,7 +278,7 @@ template <typename Types> class OcclusionTrackerTest : public testing::Test {
 
   void DestroyLayers() {
     Types::DestroyLayer(&root_);
-    render_surface_layer_list_.reset();
+    render_surface_layer_list_ = nullptr;
     render_surface_layer_list_impl_.clear();
     replica_layers_.clear();
     mask_layers_.clear();

@@ -108,7 +108,7 @@ class DesktopDragDropClientAuraX11::X11DragContext
   X11DragContext(ui::X11AtomCache* atom_cache,
                  ::Window local_window,
                  const XClientMessageEvent& event);
-  virtual ~X11DragContext();
+  ~X11DragContext() override;
 
   // When we receive an XdndPosition message, we need to have all the data
   // copied from the other window before we process the XdndPosition
@@ -144,8 +144,8 @@ class DesktopDragDropClientAuraX11::X11DragContext
   void MaskOperation(::Atom xdnd_operation, int* drag_operation) const;
 
   // ui::PlatformEventDispatcher:
-  virtual bool CanDispatchEvent(const ui::PlatformEvent& event) OVERRIDE;
-  virtual uint32_t DispatchEvent(const ui::PlatformEvent& event) OVERRIDE;
+  bool CanDispatchEvent(const ui::PlatformEvent& event) override;
+  uint32_t DispatchEvent(const ui::PlatformEvent& event) override;
 
   // The atom cache owned by our parent.
   ui::X11AtomCache* atom_cache_;
@@ -908,11 +908,23 @@ void DesktopDragDropClientAuraX11::DragTranslate(
   target_window_location_ = location;
   target_window_root_location_ = root_location;
 
+  int drag_op = target_current_context_->GetDragOperation();
+  // KDE-based file browsers such as Dolphin change the drag operation depending
+  // on whether alt/ctrl/shift was pressed. However once Chromium gets control
+  // over the X11 events, the source application does no longer receive X11
+  // events for key modifier changes, so the dnd operation gets stuck in an
+  // incorrect state. Blink can only dnd-open files of type DRAG_COPY, so the
+  // DRAG_COPY mask is added if the dnd object is a file.
+  if (drag_op & (ui::DragDropTypes::DRAG_MOVE | ui::DragDropTypes::DRAG_LINK) &&
+      data->get()->HasFile()) {
+    drag_op |= ui::DragDropTypes::DRAG_COPY;
+  }
+
   event->reset(new ui::DropTargetEvent(
       *(data->get()),
       location,
       root_location,
-      target_current_context_->GetDragOperation()));
+      drag_op));
   if (target_window_changed)
     (*delegate)->OnDragEntered(*event->get());
 }

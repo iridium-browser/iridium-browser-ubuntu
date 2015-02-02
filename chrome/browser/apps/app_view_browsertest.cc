@@ -4,7 +4,6 @@
 
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/apps/app_browsertest_util.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/test/browser_test_utils.h"
@@ -36,8 +35,8 @@ class TestGuestViewManager : public extensions::GuestViewManager {
 
  private:
   // GuestViewManager override:
-  virtual void AddGuest(int guest_instance_id,
-                        content::WebContents* guest_web_contents) OVERRIDE{
+  void AddGuest(int guest_instance_id,
+                content::WebContents* guest_web_contents) override {
     extensions::GuestViewManager::AddGuest(
         guest_instance_id, guest_web_contents);
     web_contents_ = guest_web_contents;
@@ -56,10 +55,10 @@ class TestGuestViewManagerFactory : public extensions::GuestViewManagerFactory {
   TestGuestViewManagerFactory() :
       test_guest_view_manager_(NULL) {}
 
-  virtual ~TestGuestViewManagerFactory() {}
+  ~TestGuestViewManagerFactory() override {}
 
-  virtual extensions::GuestViewManager* CreateGuestViewManager(
-      content::BrowserContext* context) OVERRIDE {
+  extensions::GuestViewManager* CreateGuestViewManager(
+      content::BrowserContext* context) override {
     return GetManager(context);
   }
 
@@ -131,8 +130,7 @@ class AppViewTest : public extensions::PlatformAppBrowserTest {
   }
 
  private:
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
-    command_line->AppendSwitch(extensions::switches::kEnableAppView);
+  void SetUpCommandLine(CommandLine* command_line) override {
     extensions::PlatformAppBrowserTest::SetUpCommandLine(command_line);
   }
 

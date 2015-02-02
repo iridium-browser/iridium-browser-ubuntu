@@ -112,7 +112,7 @@ class SasInjectorWin : public SasInjector {
   virtual ~SasInjectorWin();
 
   // SasInjector implementation.
-  virtual bool InjectSas() OVERRIDE;
+  virtual bool InjectSas() override;
 
  private:
   base::ScopedNativeLibrary sas_dll_;
@@ -128,7 +128,7 @@ class SasInjectorXp : public SasInjector {
   virtual ~SasInjectorXp();
 
   // SasInjector implementation.
-  virtual bool InjectSas() OVERRIDE;
+  virtual bool InjectSas() override;
 };
 
 SasInjectorWin::SasInjectorWin() : send_sas_(NULL) {
@@ -220,9 +220,9 @@ bool SasInjectorXp::InjectSas() {
 
 scoped_ptr<SasInjector> SasInjector::Create() {
   if (base::win::GetVersion() < base::win::VERSION_VISTA) {
-    return scoped_ptr<SasInjector>(new SasInjectorXp());
+    return make_scoped_ptr(new SasInjectorXp());
   } else {
-    return scoped_ptr<SasInjector>(new SasInjectorWin());
+    return make_scoped_ptr(new SasInjectorWin());
   }
 }
 

@@ -1,4 +1,6 @@
-<?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="sv">
+<?xml version="1.0" ?>
+<!DOCTYPE translationbundle>
+<translationbundle lang="sv">
 <translation id="777702478322588152">Prefektur</translation>
 <translation id="3713769522066937702">Postnummerformatet känns inte igen. Här är ett exempel på ett giltigt postnummer: <ph name="EXAMPLE"/>. Om du inte vet vilket postnummer du har tar du reda på det <ph name="BEGIN_LINK"/>här<ph name="END_LINK"/>.</translation>
 <translation id="7393381084163773901">Gatuadress</translation>

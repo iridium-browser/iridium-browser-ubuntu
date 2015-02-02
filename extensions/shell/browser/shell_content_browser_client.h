@@ -28,7 +28,7 @@ class ShellContentBrowserClient : public content::ContentBrowserClient {
  public:
   explicit ShellContentBrowserClient(
       ShellBrowserMainDelegate* browser_main_delegate);
-  virtual ~ShellContentBrowserClient();
+  ~ShellContentBrowserClient() override;
 
   // Returns the single instance.
   static ShellContentBrowserClient* Get();
@@ -37,31 +37,27 @@ class ShellContentBrowserClient : public content::ContentBrowserClient {
   content::BrowserContext* GetBrowserContext();
 
   // content::ContentBrowserClient overrides.
-  virtual content::BrowserMainParts* CreateBrowserMainParts(
-      const content::MainFunctionParams& parameters) OVERRIDE;
-  virtual void RenderProcessWillLaunch(
-      content::RenderProcessHost* host) OVERRIDE;
-  virtual bool ShouldUseProcessPerSite(content::BrowserContext* browser_context,
-                                       const GURL& effective_url) OVERRIDE;
-  virtual net::URLRequestContextGetter* CreateRequestContext(
+  content::BrowserMainParts* CreateBrowserMainParts(
+      const content::MainFunctionParams& parameters) override;
+  void RenderProcessWillLaunch(content::RenderProcessHost* host) override;
+  bool ShouldUseProcessPerSite(content::BrowserContext* browser_context,
+                               const GURL& effective_url) override;
+  net::URLRequestContextGetter* CreateRequestContext(
       content::BrowserContext* browser_context,
       content::ProtocolHandlerMap* protocol_handlers,
-      content::URLRequestInterceptorScopedVector request_interceptors) OVERRIDE;
+      content::URLRequestInterceptorScopedVector request_interceptors) override;
   // TODO(jamescook): Quota management?
   // TODO(jamescook): Speech recognition?
-  virtual bool IsHandledURL(const GURL& url) OVERRIDE;
-  virtual void SiteInstanceGotProcess(
-      content::SiteInstance* site_instance) OVERRIDE;
-  virtual void SiteInstanceDeleting(
-      content::SiteInstance* site_instance) OVERRIDE;
-  virtual void AppendExtraCommandLineSwitches(base::CommandLine* command_line,
-                                              int child_process_id) OVERRIDE;
-  virtual content::BrowserPpapiHost* GetExternalBrowserPpapiHost(
-      int plugin_process_id) OVERRIDE;
-  virtual void GetAdditionalAllowedSchemesForFileSystem(
-      std::vector<std::string>* additional_schemes) OVERRIDE;
-  virtual content::DevToolsManagerDelegate*
-      GetDevToolsManagerDelegate() OVERRIDE;
+  bool IsHandledURL(const GURL& url) override;
+  void SiteInstanceGotProcess(content::SiteInstance* site_instance) override;
+  void SiteInstanceDeleting(content::SiteInstance* site_instance) override;
+  void AppendExtraCommandLineSwitches(base::CommandLine* command_line,
+                                      int child_process_id) override;
+  content::BrowserPpapiHost* GetExternalBrowserPpapiHost(
+      int plugin_process_id) override;
+  void GetAdditionalAllowedSchemesForFileSystem(
+      std::vector<std::string>* additional_schemes) override;
+  content::DevToolsManagerDelegate* GetDevToolsManagerDelegate() override;
 
  private:
   // Appends command line switches for a renderer process.

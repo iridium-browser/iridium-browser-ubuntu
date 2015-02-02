@@ -69,12 +69,12 @@ class UploadDataPresenter {
 class RawDataPresenter : public UploadDataPresenter {
  public:
   RawDataPresenter();
-  virtual ~RawDataPresenter();
+  ~RawDataPresenter() override;
 
   // Implementation of UploadDataPresenter.
-  virtual void FeedNext(const net::UploadElementReader& reader) OVERRIDE;
-  virtual bool Succeeded() OVERRIDE;
-  virtual scoped_ptr<base::Value> Result() OVERRIDE;
+  void FeedNext(const net::UploadElementReader& reader) override;
+  bool Succeeded() override;
+  scoped_ptr<base::Value> Result() override;
 
  private:
   void FeedNextBytes(const char* bytes, size_t size);
@@ -99,12 +99,12 @@ class RawDataPresenter : public UploadDataPresenter {
 class ParsedDataPresenter : public UploadDataPresenter {
  public:
   explicit ParsedDataPresenter(const net::URLRequest& request);
-  virtual ~ParsedDataPresenter();
+  ~ParsedDataPresenter() override;
 
   // Implementation of UploadDataPresenter.
-  virtual void FeedNext(const net::UploadElementReader& reader) OVERRIDE;
-  virtual bool Succeeded() OVERRIDE;
-  virtual scoped_ptr<base::Value> Result() OVERRIDE;
+  void FeedNext(const net::UploadElementReader& reader) override;
+  bool Succeeded() override;
+  scoped_ptr<base::Value> Result() override;
 
   // Allows to create ParsedDataPresenter without the URLRequest. Uses the
   // parser for "application/x-www-form-urlencoded" form encoding. Only use this

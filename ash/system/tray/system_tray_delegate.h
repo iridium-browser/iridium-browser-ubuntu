@@ -10,6 +10,7 @@
 
 #include "ash/ash_export.h"
 #include "ash/system/user/login_status.h"
+#include "base/callback_forward.h"
 #include "base/files/file_path.h"
 #include "base/i18n/time_formatting.h"
 #include "base/memory/scoped_ptr.h"
@@ -22,6 +23,8 @@ class TimeTicks;
 }
 
 namespace ash {
+
+class CustodianInfoTrayObserver;
 
 struct ASH_EXPORT NetworkIconInfo {
   NetworkIconInfo();
@@ -75,6 +78,22 @@ struct ASH_EXPORT IMEInfo {
   base::string16 short_name;
 };
 
+struct ASH_EXPORT UpdateInfo {
+  enum UpdateSeverity {
+    UPDATE_NORMAL,
+    UPDATE_LOW_GREEN,
+    UPDATE_HIGH_ORANGE,
+    UPDATE_SEVERE_RED,
+  };
+
+  UpdateInfo();
+  ~UpdateInfo();
+
+  UpdateSeverity severity;
+  bool update_required;
+  bool factory_reset_required;
+};
+
 typedef std::vector<IMEInfo> IMEInfoList;
 
 class VolumeControlDelegate;
@@ -121,8 +140,8 @@ class ASH_EXPORT SystemTrayDelegate {
   // Returns true if the current user is supervised.
   virtual bool IsUserSupervised() const = 0;
 
-  // Returns whether a system upgrade is available.
-  virtual bool SystemShouldUpgrade() const = 0;
+  // Fills |info| structure with current update info.
+  virtual void GetSystemUpdateInfo(UpdateInfo* info) const = 0;
 
   // Returns the desired hour clock type.
   virtual base::HourClockType GetHourClockType() const = 0;
@@ -232,25 +251,11 @@ class ASH_EXPORT SystemTrayDelegate {
   // Activates an IME property.
   virtual void ActivateIMEProperty(const std::string& key) = 0;
 
-  // Shows UI to configure or activate the network specified by |network_id|,
-  // which may include showing Payment or Portal UI when appropriate.
-  virtual void ShowNetworkConfigure(const std::string& network_id) = 0;
-
-  // Shows UI to enroll the network specified by |network_id| if appropriate
-  // and returns true, otherwise returns false.
-  virtual bool EnrollNetwork(const std::string& network_id) = 0;
-
   // Shows UI to manage bluetooth devices.
   virtual void ManageBluetoothDevices() = 0;
 
   // Toggles bluetooth.
   virtual void ToggleBluetooth() = 0;
-
-  // Shows UI to unlock a mobile sim.
-  virtual void ShowMobileSimDialog() = 0;
-
-  // Shows UI to setup a mobile network.
-  virtual void ShowMobileSetupDialog(const std::string& service_path) = 0;
 
   // Shows UI to connect to an unlisted network of type |type|. On Chrome OS
   // |type| corresponds to a Shill network type.
@@ -295,6 +300,13 @@ class ASH_EXPORT SystemTrayDelegate {
   // Returns accounts delegate for given user.
   virtual tray::UserAccountsDelegate* GetUserAccountsDelegate(
       const std::string& user_id) = 0;
+
+  // Adding observers that are notified when supervised info is being changed.
+  virtual void AddCustodianInfoTrayObserver(
+      CustodianInfoTrayObserver* observer) = 0;
+
+  virtual void RemoveCustodianInfoTrayObserver(
+      CustodianInfoTrayObserver* observer) = 0;
 };
 
 }  // namespace ash

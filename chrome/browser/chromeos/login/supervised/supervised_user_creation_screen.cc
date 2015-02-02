@@ -4,15 +4,14 @@
 
 #include "chrome/browser/chromeos/login/supervised/supervised_user_creation_screen.h"
 
-#include "ash/desktop_background/desktop_background_controller.h"
-#include "ash/shell.h"
 #include "base/rand_util.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/camera_detector.h"
+#include "chrome/browser/chromeos/login/error_screens_histogram_helper.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/screen_manager.h"
+#include "chrome/browser/chromeos/login/screens/base_screen_delegate.h"
 #include "chrome/browser/chromeos/login/screens/error_screen.h"
-#include "chrome/browser/chromeos/login/screens/screen_observer.h"
 #include "chrome/browser/chromeos/login/signin_specifics.h"
 #include "chrome/browser/chromeos/login/supervised/supervised_user_authentication.h"
 #include "chrome/browser/chromeos/login/supervised/supervised_user_creation_controller.h"
@@ -28,6 +27,8 @@
 #include "chrome/browser/supervised_user/supervised_user_sync_service.h"
 #include "chrome/browser/supervised_user/supervised_user_sync_service_factory.h"
 #include "chrome/grit/generated_resources.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/session_manager_client.h"
 #include "chromeos/login/auth/key.h"
 #include "chromeos/login/auth/user_context.h"
 #include "chromeos/network/network_state.h"
@@ -37,6 +38,11 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/image/image_skia.h"
+
+#if !defined(USE_ATHENA)
+#include "ash/desktop_background/desktop_background_controller.h"
+#include "ash/shell.h"
+#endif
 
 namespace chromeos {
 
@@ -95,9 +101,9 @@ SupervisedUserCreationScreen* SupervisedUserCreationScreen::Get(
 }
 
 SupervisedUserCreationScreen::SupervisedUserCreationScreen(
-    ScreenObserver* observer,
+    BaseScreenDelegate* base_screen_delegate,
     SupervisedUserCreationScreenHandler* actor)
-    : WizardScreen(observer),
+    : BaseScreen(base_screen_delegate),
       actor_(actor),
       on_error_screen_(false),
       manager_signin_in_progress_(false),
@@ -106,6 +112,7 @@ SupervisedUserCreationScreen::SupervisedUserCreationScreen(
       image_decoder_(NULL),
       apply_photo_after_decoding_(false),
       selected_image_(0),
+      histogram_helper_(new ErrorScreensHistogramHelper("Supervised")),
       weak_factory_(this) {
   DCHECK(actor_);
   if (actor_)
@@ -143,6 +150,7 @@ void SupervisedUserCreationScreen::Show() {
   if (!on_error_screen_)
     NetworkPortalDetector::Get()->AddAndFireObserver(this);
   on_error_screen_ = false;
+  histogram_helper_->OnScreenShow();
 }
 
 void SupervisedUserCreationScreen::OnPageSelected(const std::string& page) {
@@ -153,13 +161,15 @@ void SupervisedUserCreationScreen::OnPortalDetectionCompleted(
     const NetworkState* network,
     const NetworkPortalDetector::CaptivePortalState& state)  {
   if (state.status == NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_ONLINE) {
-    get_screen_observer()->HideErrorScreen(this);
+    get_base_screen_delegate()->HideErrorScreen(this);
+    histogram_helper_->OnErrorHide();
   } else {
     on_error_screen_ = true;
-    ErrorScreen* screen = get_screen_observer()->GetErrorScreen();
+    ErrorScreen* screen = get_base_screen_delegate()->GetErrorScreen();
     ConfigureErrorScreen(screen, network, state.status);
     screen->SetUIState(ErrorScreen::UI_STATE_SUPERVISED);
-    get_screen_observer()->ShowErrorScreen();
+    get_base_screen_delegate()->ShowErrorScreen();
+    histogram_helper_->OnErrorShow(screen->GetErrorState());
   }
 }
 
@@ -194,10 +204,16 @@ std::string SupervisedUserCreationScreen::GetName() const {
 }
 
 void SupervisedUserCreationScreen::AbortFlow() {
+  DBusThreadManager::Get()
+      ->GetSessionManagerClient()
+      ->NotifySupervisedUserCreationFinished();
   controller_->CancelCreation();
 }
 
 void SupervisedUserCreationScreen::FinishFlow() {
+  DBusThreadManager::Get()
+      ->GetSessionManagerClient()
+      ->NotifySupervisedUserCreationFinished();
   controller_->FinishCreation();
 }
 
@@ -350,12 +366,17 @@ void SupervisedUserCreationScreen::OnManagerLoginFailure() {
 
 void SupervisedUserCreationScreen::OnManagerFullyAuthenticated(
     Profile* manager_profile) {
+  DBusThreadManager::Get()
+      ->GetSessionManagerClient()
+      ->NotifySupervisedUserCreationStarted();
   manager_signin_in_progress_ = false;
   DCHECK(controller_.get());
   // For manager user, move desktop to locked container so that windows created
   // during the user image picker step are below it.
+#if !defined(USE_ATHENA)
   ash::Shell::GetInstance()->
       desktop_background_controller()->MoveDesktopToLockedContainer();
+#endif
 
   controller_->SetManagerProfile(manager_profile);
   if (actor_)

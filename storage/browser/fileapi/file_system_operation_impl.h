@@ -28,71 +28,71 @@ class RecursiveOperationDelegate;
 class STORAGE_EXPORT FileSystemOperationImpl
     : public NON_EXPORTED_BASE(FileSystemOperation) {
  public:
-  virtual ~FileSystemOperationImpl();
+  ~FileSystemOperationImpl() override;
 
   // FileSystemOperation overrides.
-  virtual void CreateFile(const FileSystemURL& url,
-                          bool exclusive,
-                          const StatusCallback& callback) OVERRIDE;
-  virtual void CreateDirectory(const FileSystemURL& url,
-                               bool exclusive,
-                               bool recursive,
-                               const StatusCallback& callback) OVERRIDE;
-  virtual void Copy(const FileSystemURL& src_url,
-                    const FileSystemURL& dest_url,
-                    CopyOrMoveOption option,
-                    const CopyProgressCallback& progress_callback,
-                    const StatusCallback& callback) OVERRIDE;
-  virtual void Move(const FileSystemURL& src_url,
-                    const FileSystemURL& dest_url,
-                    CopyOrMoveOption option,
-                    const StatusCallback& callback) OVERRIDE;
-  virtual void DirectoryExists(const FileSystemURL& url,
-                               const StatusCallback& callback) OVERRIDE;
-  virtual void FileExists(const FileSystemURL& url,
-                          const StatusCallback& callback) OVERRIDE;
-  virtual void GetMetadata(const FileSystemURL& url,
-                           const GetMetadataCallback& callback) OVERRIDE;
-  virtual void ReadDirectory(const FileSystemURL& url,
-                             const ReadDirectoryCallback& callback) OVERRIDE;
-  virtual void Remove(const FileSystemURL& url, bool recursive,
-                      const StatusCallback& callback) OVERRIDE;
-  virtual void Write(const FileSystemURL& url,
-                     scoped_ptr<FileWriterDelegate> writer_delegate,
-                     scoped_ptr<net::URLRequest> blob_request,
-                     const WriteCallback& callback) OVERRIDE;
-  virtual void Truncate(const FileSystemURL& url, int64 length,
-                        const StatusCallback& callback) OVERRIDE;
-  virtual void TouchFile(const FileSystemURL& url,
-                         const base::Time& last_access_time,
-                         const base::Time& last_modified_time,
-                         const StatusCallback& callback) OVERRIDE;
-  virtual void OpenFile(const FileSystemURL& url,
-                        int file_flags,
-                        const OpenFileCallback& callback) OVERRIDE;
-  virtual void Cancel(const StatusCallback& cancel_callback) OVERRIDE;
-  virtual void CreateSnapshotFile(
-      const FileSystemURL& path,
-      const SnapshotFileCallback& callback) OVERRIDE;
-  virtual void CopyInForeignFile(const base::FilePath& src_local_disk_path,
-                                 const FileSystemURL& dest_url,
-                                 const StatusCallback& callback) OVERRIDE;
-  virtual void RemoveFile(const FileSystemURL& url,
-                          const StatusCallback& callback) OVERRIDE;
-  virtual void RemoveDirectory(const FileSystemURL& url,
-                               const StatusCallback& callback) OVERRIDE;
-  virtual void CopyFileLocal(const FileSystemURL& src_url,
-                             const FileSystemURL& dest_url,
-                             CopyOrMoveOption option,
-                             const CopyFileProgressCallback& progress_callback,
-                             const StatusCallback& callback) OVERRIDE;
-  virtual void MoveFileLocal(const FileSystemURL& src_url,
-                             const FileSystemURL& dest_url,
-                             CopyOrMoveOption option,
-                             const StatusCallback& callback) OVERRIDE;
-  virtual base::File::Error SyncGetPlatformPath(
-      const FileSystemURL& url,
-      base::FilePath* platform_path) OVERRIDE;
+  void CreateFile(const FileSystemURL& url,
+                  bool exclusive,
+                  const StatusCallback& callback) override;
+  void CreateDirectory(const FileSystemURL& url,
+                       bool exclusive,
+                       bool recursive,
+                       const StatusCallback& callback) override;
+  void Copy(const FileSystemURL& src_url,
+            const FileSystemURL& dest_url,
+            CopyOrMoveOption option,
+            const CopyProgressCallback& progress_callback,
+            const StatusCallback& callback) override;
+  void Move(const FileSystemURL& src_url,
+            const FileSystemURL& dest_url,
+            CopyOrMoveOption option,
+            const StatusCallback& callback) override;
+  void DirectoryExists(const FileSystemURL& url,
+                       const StatusCallback& callback) override;
+  void FileExists(const FileSystemURL& url,
+                  const StatusCallback& callback) override;
+  void GetMetadata(const FileSystemURL& url,
+                   const GetMetadataCallback& callback) override;
+  void ReadDirectory(const FileSystemURL& url,
+                     const ReadDirectoryCallback& callback) override;
+  void Remove(const FileSystemURL& url,
+              bool recursive,
+              const StatusCallback& callback) override;
+  void Write(const FileSystemURL& url,
+             scoped_ptr<FileWriterDelegate> writer_delegate,
+             scoped_ptr<net::URLRequest> blob_request,
+             const WriteCallback& callback) override;
+  void Truncate(const FileSystemURL& url,
+                int64 length,
+                const StatusCallback& callback) override;
+  void TouchFile(const FileSystemURL& url,
+                 const base::Time& last_access_time,
+                 const base::Time& last_modified_time,
+                 const StatusCallback& callback) override;
+  void OpenFile(const FileSystemURL& url,
+                int file_flags,
+                const OpenFileCallback& callback) override;
+  void Cancel(const StatusCallback& cancel_callback) override;
+  void CreateSnapshotFile(const FileSystemURL& path,
+                          const SnapshotFileCallback& callback) override;
+  void CopyInForeignFile(const base::FilePath& src_local_disk_path,
+                         const FileSystemURL& dest_url,
+                         const StatusCallback& callback) override;
+  void RemoveFile(const FileSystemURL& url,
+                  const StatusCallback& callback) override;
+  void RemoveDirectory(const FileSystemURL& url,
+                       const StatusCallback& callback) override;
+  void CopyFileLocal(const FileSystemURL& src_url,
+                     const FileSystemURL& dest_url,
+                     CopyOrMoveOption option,
+                     const CopyFileProgressCallback& progress_callback,
+                     const StatusCallback& callback) override;
+  void MoveFileLocal(const FileSystemURL& src_url,
+                     const FileSystemURL& dest_url,
+                     CopyOrMoveOption option,
+                     const StatusCallback& callback) override;
+  base::File::Error SyncGetPlatformPath(const FileSystemURL& url,
+                                        base::FilePath* platform_path) override;
 
   FileSystemContext* file_system_context() const {
     return file_system_context_.get();

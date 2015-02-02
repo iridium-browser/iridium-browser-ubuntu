@@ -1,4 +1,6 @@
-<?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="th">
+<?xml version="1.0" ?>
+<!DOCTYPE translationbundle>
+<translationbundle lang="th">
 <translation id="777702478322588152">เขตปกครอง</translation>
 <translation id="3713769522066937702">ไม่รู้จักรูปแบบรหัสไปรษณีย์นี้ ตัวอย่างรหัสไปรษณีย์ที่ถูกต้อง: <ph name="EXAMPLE"/> หากไม่ทราบรหัสไปรษณีย์ ให้ค้นหา<ph name="BEGIN_LINK"/>ที่นี่<ph name="END_LINK"/></translation>
 <translation id="7393381084163773901">ที่อยู่ถนน</translation>

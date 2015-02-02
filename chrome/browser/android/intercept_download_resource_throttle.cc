@@ -4,7 +4,7 @@
 
 #include "chrome/browser/android/intercept_download_resource_throttle.h"
 
-#include "components/data_reduction_proxy/common/data_reduction_proxy_headers.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_headers.h"
 #include "content/public/browser/android/download_controller_android.h"
 #include "content/public/browser/resource_controller.h"
 #include "net/http/http_request_headers.h"
@@ -36,6 +36,8 @@ const char* InterceptDownloadResourceThrottle::GetNameForLogging() const {
 }
 
 void InterceptDownloadResourceThrottle::ProcessDownloadRequest() {
+  // TODO(qinmin): add UMA stats for all reasons that downloads are not
+  // intercepted by the Android Download Manager. http://crbug.com/385272.
   if (request_->url_chain().empty())
     return;
 
@@ -56,12 +58,18 @@ void InterceptDownloadResourceThrottle::ProcessDownloadRequest() {
   // authenticate with the origin.
   if (request_->response_info().did_use_http_auth) {
     if (headers.HasHeader(net::HttpRequestHeaders::kAuthorization) ||
-        !(request_->response_info().headers &&
-            data_reduction_proxy::HasDataReductionProxyViaHeader(
-                request_->response_info().headers, NULL))) {
+        !(request_->response_info().headers.get() &&
+          data_reduction_proxy::HasDataReductionProxyViaHeader(
+              request_->response_info().headers.get(), NULL))) {
       return;
     }
   }
+
+  // If the cookie is possibly channel-bound, don't pass it to android download
+  // manager.
+  // TODO(qinmin): add a test for this. http://crbug.com/430541.
+  if (request_->ssl_info().channel_id_sent)
+    return;
 
   content::DownloadControllerAndroid::Get()->CreateGETDownload(
       render_process_id_, render_view_id_, request_id_);

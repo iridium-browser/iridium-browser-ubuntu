@@ -27,10 +27,9 @@ namespace {
 class NullModelTypeSyncWorker : public syncer::ModelTypeSyncWorker {
  public:
   NullModelTypeSyncWorker();
-  virtual ~NullModelTypeSyncWorker();
+  ~NullModelTypeSyncWorker() override;
 
-  virtual void EnqueueForCommit(
-      const syncer::CommitRequestDataList& list) OVERRIDE;
+  void EnqueueForCommit(const syncer::CommitRequestDataList& list) override;
 };
 
 NullModelTypeSyncWorker::NullModelTypeSyncWorker() {
@@ -80,14 +79,14 @@ class MockSyncContextProxy : public syncer::SyncContextProxy {
       : mock_sync_context_(sync_context),
         model_task_runner_(model_task_runner),
         sync_task_runner_(sync_task_runner) {}
-  virtual ~MockSyncContextProxy() {}
+  ~MockSyncContextProxy() override {}
 
-  virtual void ConnectTypeToSync(
+  void ConnectTypeToSync(
       syncer::ModelType type,
       const syncer::DataTypeState& data_type_state,
       const syncer::UpdateResponseDataList& saved_pending_updates,
       const base::WeakPtr<syncer::ModelTypeSyncProxyImpl>& type_proxy)
-      OVERRIDE {
+      override {
     // Normally we'd use MessageLoopProxy::current() as the TaskRunner argument
     // to Connect().  That won't work here in this test, so we use the
     // model_task_runner_ that was injected for this purpose instead.
@@ -99,14 +98,14 @@ class MockSyncContextProxy : public syncer::SyncContextProxy {
                                            type_proxy));
   }
 
-  virtual void Disconnect(syncer::ModelType type) OVERRIDE {
+  void Disconnect(syncer::ModelType type) override {
     sync_task_runner_->PostTask(FROM_HERE,
                                 base::Bind(&MockSyncContext::Disconnect,
                                            base::Unretained(mock_sync_context_),
                                            type));
   }
 
-  virtual scoped_ptr<SyncContextProxy> Clone() const OVERRIDE {
+  scoped_ptr<SyncContextProxy> Clone() const override {
     return scoped_ptr<SyncContextProxy>(new MockSyncContextProxy(
         mock_sync_context_, model_task_runner_, sync_task_runner_));
   }
@@ -129,7 +128,7 @@ class NonBlockingDataTypeControllerTest : public testing::Test {
         mock_context_proxy_(&mock_sync_context_, model_thread_, sync_thread_),
         auto_run_tasks_(true) {}
 
-  virtual ~NonBlockingDataTypeControllerTest() {}
+  ~NonBlockingDataTypeControllerTest() override {}
 
   // Connects the sync type proxy to the NonBlockingDataTypeController.
   void InitTypeSyncProxy() {

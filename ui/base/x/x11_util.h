@@ -20,7 +20,6 @@
 #include "ui/base/ui_base_export.h"
 #include "ui/events/event_constants.h"
 #include "ui/events/keycodes/keyboard_codes.h"
-#include "ui/gfx/point.h"
 #include "ui/gfx/x/x11_types.h"
 
 typedef unsigned long XSharedMemoryId;  // ShmSeg in the X headers.
@@ -30,6 +29,7 @@ typedef union _XEvent XEvent;
 
 namespace gfx {
 class Canvas;
+class Insets;
 class Point;
 class Rect;
 }
@@ -121,8 +121,17 @@ UI_BASE_EXPORT void ClearX11DefaultRootWindow();
 // Returns true if |window| is visible.
 UI_BASE_EXPORT bool IsWindowVisible(XID window);
 
-// Returns the bounds of |window|.
-UI_BASE_EXPORT bool GetWindowRect(XID window, gfx::Rect* rect);
+// Returns the inner bounds of |window| (excluding the non-client area).
+UI_BASE_EXPORT bool GetInnerWindowBounds(XID window, gfx::Rect* rect);
+
+// Returns the non-client area extents of |window|. This is a negative inset; it
+// represents the negative size of the window border on all sides.
+// InnerWindowBounds.Inset(WindowExtents) = OuterWindowBounds.
+// Returns false if the window manager does not provide extents information.
+UI_BASE_EXPORT bool GetWindowExtents(XID window, gfx::Insets* extents);
+
+// Returns the outer bounds of |window| (including the non-client area).
+UI_BASE_EXPORT bool GetOuterWindowBounds(XID window, gfx::Rect* rect);
 
 // Returns true if |window| contains the point |screen_loc|.
 UI_BASE_EXPORT bool WindowContainsPoint(XID window, gfx::Point screen_loc);
@@ -251,6 +260,7 @@ enum WindowManagerName {
   WM_BLACKBOX,
   WM_COMPIZ,
   WM_ENLIGHTENMENT,
+  WM_FLUXBOX,
   WM_I3,
   WM_ICE_WM,
   WM_ION3,
@@ -264,6 +274,7 @@ enum WindowManagerName {
   WM_QTILE,
   WM_RATPOISON,
   WM_STUMPWM,
+  WM_WMII,
   WM_XFWM4,
 };
 // Attempts to guess the window maager. Returns WM_UNKNOWN if we can't
@@ -294,11 +305,11 @@ class UI_BASE_EXPORT XRefcountedMemory : public base::RefCountedMemory {
       : x11_data_(length ? x11_data : NULL), length_(length) {}
 
   // Overridden from RefCountedMemory:
-  virtual const unsigned char* front() const OVERRIDE;
-  virtual size_t size() const OVERRIDE;
+  const unsigned char* front() const override;
+  size_t size() const override;
 
  private:
-  virtual ~XRefcountedMemory();
+  ~XRefcountedMemory() override;
 
   unsigned char* x11_data_;
   size_t length_;

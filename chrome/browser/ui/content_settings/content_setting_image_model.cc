@@ -4,11 +4,11 @@
 
 #include "chrome/browser/ui/content_settings/content_setting_image_model.h"
 
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "content/public/browser/web_contents.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -20,14 +20,14 @@ class ContentSettingBlockedImageModel : public ContentSettingImageModel {
   explicit ContentSettingBlockedImageModel(
       ContentSettingsType content_settings_type);
 
-  virtual void UpdateFromWebContents(WebContents* web_contents) OVERRIDE;
+  void UpdateFromWebContents(WebContents* web_contents) override;
 };
 
 class ContentSettingGeolocationImageModel : public ContentSettingImageModel {
  public:
   ContentSettingGeolocationImageModel();
 
-  virtual void UpdateFromWebContents(WebContents* web_contents) OVERRIDE;
+  void UpdateFromWebContents(WebContents* web_contents) override;
 };
 
 // Image model for displaying media icons in the location bar.
@@ -35,28 +35,28 @@ class ContentSettingMediaImageModel : public ContentSettingImageModel {
  public:
   explicit ContentSettingMediaImageModel(ContentSettingsType type);
 
-  virtual void UpdateFromWebContents(WebContents* web_contents) OVERRIDE;
+  void UpdateFromWebContents(WebContents* web_contents) override;
 };
 
 class ContentSettingRPHImageModel : public ContentSettingImageModel {
  public:
   ContentSettingRPHImageModel();
 
-  virtual void UpdateFromWebContents(WebContents* web_contents) OVERRIDE;
+  void UpdateFromWebContents(WebContents* web_contents) override;
 };
 
 class ContentSettingNotificationsImageModel : public ContentSettingImageModel {
  public:
   ContentSettingNotificationsImageModel();
 
-  virtual void UpdateFromWebContents(WebContents* web_contents) OVERRIDE;
+  void UpdateFromWebContents(WebContents* web_contents) override;
 };
 
 class ContentSettingMIDISysExImageModel : public ContentSettingImageModel {
  public:
   ContentSettingMIDISysExImageModel();
 
-  virtual void UpdateFromWebContents(WebContents* web_contents) OVERRIDE;
+  void UpdateFromWebContents(WebContents* web_contents) override;
 };
 
 namespace {
@@ -248,36 +248,28 @@ void ContentSettingMediaImageModel::UpdateFromWebContents(
   TabSpecificContentSettings::MicrophoneCameraState state =
       content_settings->GetMicrophoneCameraState();
 
-  switch (state) {
-    case TabSpecificContentSettings::MICROPHONE_CAMERA_NOT_ACCESSED:
-      // If neither the microphone nor the camera stream was accessed then no
-      // icon is displayed in the omnibox.
-      return;
-    case TabSpecificContentSettings::MICROPHONE_ACCESSED:
-      set_icon(IDR_ASK_MEDIA);
-      set_tooltip(l10n_util::GetStringUTF8(IDS_MICROPHONE_ACCESSED));
-      break;
-    case TabSpecificContentSettings::CAMERA_ACCESSED:
-      set_icon(IDR_ASK_MEDIA);
-      set_tooltip(l10n_util::GetStringUTF8(IDS_CAMERA_ACCESSED));
-      break;
-    case TabSpecificContentSettings::MICROPHONE_CAMERA_ACCESSED:
-      set_icon(IDR_ASK_MEDIA);
-      set_tooltip(l10n_util::GetStringUTF8(IDS_MICROPHONE_CAMERA_ALLOWED));
-      break;
-    case TabSpecificContentSettings::MICROPHONE_BLOCKED:
-      set_icon(IDR_BLOCKED_MEDIA);
-      set_tooltip(l10n_util::GetStringUTF8(IDS_MICROPHONE_BLOCKED));
-      break;
-    case TabSpecificContentSettings::CAMERA_BLOCKED:
-      set_icon(IDR_BLOCKED_MEDIA);
-      set_tooltip(l10n_util::GetStringUTF8(IDS_CAMERA_BLOCKED));
-      break;
-    case TabSpecificContentSettings::MICROPHONE_CAMERA_BLOCKED:
-      set_icon(IDR_BLOCKED_MEDIA);
-      set_tooltip(l10n_util::GetStringUTF8(IDS_MICROPHONE_CAMERA_BLOCKED));
-      break;
+  // If neither the microphone nor the camera stream was accessed then no icon
+  // is displayed in the omnibox.
+  if (state == TabSpecificContentSettings::MICROPHONE_CAMERA_NOT_ACCESSED)
+    return;
+
+  bool is_mic = (state & TabSpecificContentSettings::MICROPHONE_ACCESSED) != 0;
+  bool is_cam = (state & TabSpecificContentSettings::CAMERA_ACCESSED) != 0;
+  DCHECK(is_mic || is_cam);
+
+  int id = IDS_CAMERA_BLOCKED;
+  if (state & (TabSpecificContentSettings::MICROPHONE_BLOCKED |
+               TabSpecificContentSettings::CAMERA_BLOCKED)) {
+    set_icon(IDR_BLOCKED_MEDIA);
+    if (is_mic)
+      id = is_cam ? IDS_MICROPHONE_CAMERA_BLOCKED : IDS_MICROPHONE_BLOCKED;
+  } else {
+    set_icon(IDR_ASK_MEDIA);
+    id = IDS_CAMERA_ACCESSED;
+    if (is_mic)
+      id = is_cam ? IDS_MICROPHONE_CAMERA_ALLOWED : IDS_MICROPHONE_ACCESSED;
   }
+  set_tooltip(l10n_util::GetStringUTF8(id));
   set_visible(true);
 }
 

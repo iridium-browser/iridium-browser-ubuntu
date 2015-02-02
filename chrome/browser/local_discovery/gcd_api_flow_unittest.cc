@@ -48,10 +48,10 @@ class GCDApiFlowTest : public testing::Test {
             base::MessageLoopProxy::current())),
         account_id_(kAccountId) {}
 
-  virtual ~GCDApiFlowTest() {}
+  ~GCDApiFlowTest() override {}
 
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     token_service_.set_request_context(request_context_.get());
     token_service_.AddAccount(account_id_);
     ui_thread_.Stop();  // HACK: Fake being on the UI thread
@@ -63,7 +63,7 @@ class GCDApiFlowTest : public testing::Test {
             GURL("https://www.google.com/cloudprint/confirm?token=SomeToken")));
     gcd_flow_.reset(new GCDApiFlowImpl(
         request_context_.get(), &token_service_, account_id_));
-    gcd_flow_->Start(delegate.PassAs<GCDApiFlow::Request>());
+    gcd_flow_->Start(delegate.Pass());
   }
   base::MessageLoopForUI loop_;
   content::TestBrowserThread ui_thread_;

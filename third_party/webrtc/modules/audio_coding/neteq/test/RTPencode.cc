@@ -235,9 +235,6 @@ WebRtcVadInst *VAD_inst[2];
 #ifdef CODEC_CELT_32
   CELT_encinst_t *CELT32enc_inst[2];
 #endif
-#ifdef CODEC_G711
-    void *G711state[2]={NULL, NULL};
-#endif
 
 
 int main(int argc, char* argv[])
@@ -261,7 +258,7 @@ int main(int argc, char* argv[])
     uint32_t red_TS[2] = {0};
     uint16_t red_len[2] = {0};
     int RTPheaderLen=12;
-	unsigned char red_data[8000];
+    uint8_t red_data[8000];
 #ifdef INSERT_OLD_PACKETS
 	uint16_t old_length, old_plen;
 	int old_enc_len;
@@ -755,7 +752,8 @@ int main(int argc, char* argv[])
                 if(usedCodec==webrtc::kDecoderISAC)
                 {
                     assert(!usingStereo); // Cannot handle stereo yet
-                    red_len[0] = WebRtcIsac_GetRedPayload(ISAC_inst[0], (int16_t*)red_data);
+                    red_len[0] =
+                        WebRtcIsac_GetRedPayload(ISAC_inst[0], red_data);
                 }
                 else
                 {
@@ -1601,12 +1599,12 @@ int NetEQTest_encode(int coder, int16_t *indata, int frameLen, unsigned char * e
         /* Encode with the selected coder type */
         if (coder==webrtc::kDecoderPCMu) { /*g711 u-law */
 #ifdef CODEC_G711
-            cdlen = WebRtcG711_EncodeU(G711state[k], indata, frameLen, (int16_t*) encoded);
+            cdlen = WebRtcG711_EncodeU(indata, frameLen, (int16_t*) encoded);
 #endif
         }  
         else if (coder==webrtc::kDecoderPCMa) { /*g711 A-law */
 #ifdef CODEC_G711
-            cdlen = WebRtcG711_EncodeA(G711state[k], indata, frameLen, (int16_t*) encoded);
+            cdlen = WebRtcG711_EncodeA(indata, frameLen, (int16_t*) encoded);
         }
 #endif
 #ifdef CODEC_PCM16B

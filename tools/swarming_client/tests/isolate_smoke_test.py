@@ -23,8 +23,8 @@ import isolate
 import isolated_format
 from utils import file_path
 
+import test_utils
 
-VERBOSE = False
 
 ALGO = hashlib.sha1
 HASH_NULL = ALGO().hexdigest()
@@ -174,10 +174,10 @@ class Isolate(unittest.TestCase):
     modes = [m.group(1) for m in modes if m]
     EXPECTED_MODES = (
         'archive',
+        'batcharchive',
         'check',
         'help',
         'remap',
-        'rewrite',
         'run',
     )
     # If a new command is added it should at least has a bare test.
@@ -239,7 +239,6 @@ class IsolateTempdir(unittest.TestCase):
         item['m'] = 288
       item['s'] = 0
       if with_time:
-        item['T'] = True
         item.pop('t', None)
     return files
 
@@ -248,6 +247,7 @@ class IsolateTempdir(unittest.TestCase):
     expected = {
       u'algo': u'sha-1',
       u'files': self._gen_files(read_only, empty_file, False),
+      u'read_only': 1,
       u'relative_cwd': unicode(RELATIVE_CWD[self.case()]),
       u'version': unicode(isolated_format.ISOLATED_FILE_VERSION),
     }
@@ -320,7 +320,7 @@ class IsolateTempdir(unittest.TestCase):
     if 'ISOLATE_DEBUG' in env:
       del env['ISOLATE_DEBUG']
 
-    if need_output or not VERBOSE:
+    if need_output:
       stdout = subprocess.PIPE
       stderr = subprocess.PIPE
     else:
@@ -637,7 +637,7 @@ class IsolateNoOutdir(IsolateTempdir):
     if 'ISOLATE_DEBUG' in env:
       del env['ISOLATE_DEBUG']
 
-    if need_output or not VERBOSE:
+    if need_output:
       stdout = subprocess.PIPE
       stderr = subprocess.STDOUT
     else:
@@ -756,18 +756,14 @@ class IsolateOther(IsolateTempdir):
         sys.executable, 'isolate.py', 'check',
         '-s', os.path.join(self.tempdir, 'out.isolated'),
     ]
-    subprocess.check_call(cmd + ['-i', a_isolate])
+    subprocess.check_call(cmd + ['-i', a_isolate], cwd=ROOT_DIR)
 
     # Move the .isolate file aside and rerun the command with the new source but
     # same destination.
     b_isolate = os.path.join(self.tempdir, 'b.isolate')
     os.rename(a_isolate, b_isolate)
-    subprocess.check_call(cmd + ['-i', b_isolate])
+    subprocess.check_call(cmd + ['-i', b_isolate], cwd=ROOT_DIR)
 
 
 if __name__ == '__main__':
-  VERBOSE = '-v' in sys.argv
-  logging.basicConfig(level=logging.DEBUG if VERBOSE else logging.ERROR)
-  if VERBOSE:
-    unittest.TestCase.maxDiff = None
-  unittest.main()
+  test_utils.main()

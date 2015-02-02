@@ -105,7 +105,7 @@ dev_list="apache2.2-bin bison cdbs curl dpkg-dev elfutils devscripts fakeroot
           libpulse-dev libsctp-dev libspeechd-dev libsqlite3-dev libssl-dev
           libudev-dev libwww-perl libxslt1-dev libxss-dev libxt-dev libxtst-dev
           mesa-common-dev openbox patch perl php5-cgi pkg-config python
-          python-cherrypy3 python-crypto python-dev python-openssl
+          python-cherrypy3 python-crypto python-dev python-opencv python-openssl
           python-psutil rpm ruby subversion ttf-dejavu-core ttf-indic-fonts
           ttf-kochi-gothic ttf-kochi-mincho wdiff xfonts-mathml zip
           $chromeos_dev_list"
@@ -160,7 +160,7 @@ nacl_list="g++-mingw-w64-i686 lib32z1-dev
 # Hence we must match the same version or this entire script will fail.
 mesa_variant=""
 for variant in "-lts-quantal" "-lts-raring" "-lts-saucy" "-lts-trusty"; do
-  if $(dpkg-query -Wf'${Status}' libgl1-mesa-glx${variant} | \
+  if $(dpkg-query -Wf'${Status}' libgl1-mesa-glx${variant} 2>/dev/null | \
        grep -q " ok installed"); then
     mesa_variant="${variant}"
   fi

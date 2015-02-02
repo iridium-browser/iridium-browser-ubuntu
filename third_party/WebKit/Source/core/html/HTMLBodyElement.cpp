@@ -111,7 +111,7 @@ void HTMLBodyElement::parseAttribute(const QualifiedName& name, const AtomicStri
             }
         }
 
-        setNeedsStyleRecalc(SubtreeStyleChange);
+        setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::create(StyleChangeReason::LinkColorChange));
     } else if (name == onloadAttr)
         document().setWindowAttributeEventListener(EventTypeNames::load, createAttributeEventListener(document().frame(), name, value, eventParameterName()));
     else if (name == onbeforeunloadAttr)
@@ -247,6 +247,9 @@ void HTMLBodyElement::setScrollLeft(double scrollLeft)
     Document& document = this->document();
     document.updateLayoutIgnorePendingStylesheets();
 
+    if (std::isnan(scrollLeft))
+        return;
+
     if (RuntimeEnabledFeatures::scrollTopLeftInteropEnabled()) {
         RenderBox* render = renderBox();
         if (!render)
@@ -266,7 +269,7 @@ void HTMLBodyElement::setScrollLeft(double scrollLeft)
     FrameView* view = frame->view();
     if (!view)
         return;
-    view->setScrollPosition(IntPoint(static_cast<int>(scrollLeft * frame->pageZoomFactor()), view->scrollY()));
+    view->setScrollPosition(DoublePoint(scrollLeft * frame->pageZoomFactor(), view->scrollY()));
 }
 
 double HTMLBodyElement::scrollTop()
@@ -294,6 +297,9 @@ void HTMLBodyElement::setScrollTop(double scrollTop)
     Document& document = this->document();
     document.updateLayoutIgnorePendingStylesheets();
 
+    if (std::isnan(scrollTop))
+        return;
+
     if (RuntimeEnabledFeatures::scrollTopLeftInteropEnabled()) {
         RenderBox* render = renderBox();
         if (!render)
@@ -313,7 +319,7 @@ void HTMLBodyElement::setScrollTop(double scrollTop)
     FrameView* view = frame->view();
     if (!view)
         return;
-    view->setScrollPosition(IntPoint(view->scrollX(), static_cast<int>(scrollTop * frame->pageZoomFactor())));
+    view->setScrollPosition(DoublePoint(view->scrollX(), scrollTop * frame->pageZoomFactor()));
 }
 
 int HTMLBodyElement::scrollHeight()

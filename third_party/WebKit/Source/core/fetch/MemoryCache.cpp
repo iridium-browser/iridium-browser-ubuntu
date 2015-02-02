@@ -62,11 +62,8 @@ PassOwnPtrWillBeRawPtr<MemoryCache> replaceMemoryCacheForTesting(PassOwnPtrWillB
 {
 #if ENABLE(OILPAN)
     // Move m_liveResources content to keep Resource objects alive.
-    for (HeapHashSet<Member<Resource> >::iterator i = memoryCache()->m_liveResources.begin();
-        i != memoryCache()->m_liveResources.end();
-        ++i) {
-        cache->m_liveResources.add(*i);
-    }
+    for (const auto& resource : memoryCache()->m_liveResources)
+        cache->m_liveResources.add(resource);
     memoryCache()->m_liveResources.clear();
 #else
     // Make sure we have non-empty gMemoryCache.
@@ -84,6 +81,13 @@ void MemoryCacheEntry::trace(Visitor* visitor)
     visitor->trace(m_previousInAllResourcesList);
     visitor->trace(m_nextInAllResourcesList);
 }
+
+#if ENABLE(OILPAN)
+void MemoryCacheEntry::dispose()
+{
+    m_resource.clear();
+}
+#endif
 
 void MemoryCacheLRUList::trace(Visitor* visitor)
 {
@@ -130,7 +134,7 @@ void MemoryCache::trace(Visitor* visitor)
     visitor->trace(m_allResources);
     for (size_t i = 0; i < WTF_ARRAY_LENGTH(m_liveDecodedResources); ++i)
         visitor->trace(m_liveDecodedResources[i]);
-    visitor->trace(m_resources);
+    visitor->trace(m_resourceMaps);
     visitor->trace(m_liveResources);
 #endif
 }
@@ -149,12 +153,27 @@ KURL MemoryCache::removeFragmentIdentifierIfNeeded(const KURL& originalURL)
     return url;
 }
 
+String MemoryCache::defaultCacheIdentifier()
+{
+    return emptyString();
+}
+
+MemoryCache::ResourceMap* MemoryCache::ensureResourceMap(const String& cacheIdentifier)
+{
+    if (!m_resourceMaps.contains(cacheIdentifier)) {
+        ResourceMapIndex::AddResult result = m_resourceMaps.add(cacheIdentifier, adoptPtrWillBeNoop(new ResourceMap()));
+        RELEASE_ASSERT(result.isNewEntry);
+    }
+    return m_resourceMaps.get(cacheIdentifier);
+}
+
 void MemoryCache::add(Resource* resource)
 {
     ASSERT(WTF::isMainThread());
     ASSERT(resource->url().isValid());
-    RELEASE_ASSERT(!m_resources.contains(resource->url()));
-    m_resources.set(resource->url().string(), MemoryCacheEntry::create(resource));
+    ResourceMap* resources = ensureResourceMap(resource->cacheIdentifier());
+    RELEASE_ASSERT(!resources->contains(resource->url()));
+    resources->set(resource->url(), MemoryCacheEntry::create(resource));
     update(resource, 0, resource->size(), true);
 
     WTF_LOG(ResourceLoading, "MemoryCache::add Added '%s', resource %p\n", resource->url().string().latin1().data(), resource);
@@ -162,45 +181,63 @@ void MemoryCache::add(Resource* resource)
 
 void MemoryCache::replace(Resource* newResource, Resource* oldResource)
 {
-    if (MemoryCacheEntry* oldEntry = m_resources.get(oldResource->url()))
+    ASSERT(newResource->cacheIdentifier() == oldResource->cacheIdentifier());
+    ResourceMap* resources = ensureResourceMap(oldResource->cacheIdentifier());
+    if (MemoryCacheEntry* oldEntry = resources->get(oldResource->url()))
         evict(oldEntry);
     add(newResource);
     if (newResource->decodedSize() && newResource->hasClients())
-        insertInLiveDecodedResourcesList(m_resources.get(newResource->url()));
+        insertInLiveDecodedResourcesList(resources->get(newResource->url()));
 }
 
 void MemoryCache::remove(Resource* resource)
 {
     // The resource may have already been removed by someone other than our caller,
     // who needed a fresh copy for a reload.
-    if (!contains(resource))
-        return;
-    evict(m_resources.get(resource->url()));
+    if (MemoryCacheEntry* entry = getEntryForResource(resource))
+        evict(entry);
 }
 
 bool MemoryCache::contains(const Resource* resource) const
 {
-    if (resource->url().isNull())
-        return false;
-    const MemoryCacheEntry* entry = m_resources.get(resource->url());
-    return entry && entry->m_resource == resource;
+    return getEntryForResource(resource);
 }
 
 Resource* MemoryCache::resourceForURL(const KURL& resourceURL)
 {
+    return resourceForURL(resourceURL, defaultCacheIdentifier());
+}
+
+Resource* MemoryCache::resourceForURL(const KURL& resourceURL, const String& cacheIdentifier)
+{
     ASSERT(WTF::isMainThread());
+    ResourceMap* resources = m_resourceMaps.get(cacheIdentifier);
+    if (!resources)
+        return nullptr;
     KURL url = removeFragmentIdentifierIfNeeded(resourceURL);
-    MemoryCacheEntry* entry = m_resources.get(url);
+    MemoryCacheEntry* entry = resources->get(url);
     if (!entry)
-        return 0;
+        return nullptr;
     Resource* resource = entry->m_resource.get();
     if (resource && !resource->lock()) {
         ASSERT(!resource->hasClients());
         bool didEvict = evict(entry);
         ASSERT_UNUSED(didEvict, didEvict);
-        return 0;
+        return nullptr;
     }
     return resource;
+}
+
+WillBeHeapVector<Member<Resource>> MemoryCache::resourcesForURL(const KURL& resourceURL)
+{
+    ASSERT(WTF::isMainThread());
+    KURL url = removeFragmentIdentifierIfNeeded(resourceURL);
+    WillBeHeapVector<Member<Resource>> results;
+    for (const auto& resourceMapIter : m_resourceMaps) {
+        if (MemoryCacheEntry* entry = resourceMapIter.value->get(url))
+            results.append(entry->m_resource.get());
+    }
+    return results;
 }
 
 size_t MemoryCache::deadCapacity() const
@@ -370,14 +407,35 @@ bool MemoryCache::evict(MemoryCacheEntry* entry)
     update(resource, resource->size(), 0, false);
     removeFromLiveDecodedResourcesList(entry);
 
-    ResourceMap::iterator it = m_resources.find(resource->url());
-    ASSERT(it != m_resources.end());
-#if !ENABLE(OILPAN)
+    ResourceMap* resources = m_resourceMaps.get(resource->cacheIdentifier());
+    ASSERT(resources);
+    ResourceMap::iterator it = resources->find(resource->url());
+    ASSERT(it != resources->end());
+#if ENABLE(OILPAN)
+    MemoryCacheEntry* entryPtr = it->value;
+#else
     OwnPtr<MemoryCacheEntry> entryPtr;
     entryPtr.swap(it->value);
 #endif
-    m_resources.remove(it);
+    resources->remove(it);
+#if ENABLE(OILPAN)
+    if (entryPtr)
+        entryPtr->dispose();
+#endif
     return canDelete;
+}
+
+MemoryCacheEntry* MemoryCache::getEntryForResource(const Resource* resource) const
+{
+    if (resource->url().isNull() || resource->url().isEmpty())
+        return nullptr;
+    ResourceMap* resources = m_resourceMaps.get(resource->cacheIdentifier());
+    if (!resources)
+        return nullptr;
+    MemoryCacheEntry* entry = resources->get(resource->url());
+    if (!entry || entry->m_resource != resource)
+        return nullptr;
+    return entry;
 }
 
 MemoryCacheLRUList* MemoryCache::lruListFor(unsigned accessCount, size_t size)
@@ -391,17 +449,7 @@ MemoryCacheLRUList* MemoryCache::lruListFor(unsigned accessCount, size_t size)
 
 void MemoryCache::removeFromLRUList(MemoryCacheEntry* entry, MemoryCacheLRUList* list)
 {
-#if ENABLE(ASSERT)
-    // Verify that we are in fact in this list.
-    bool found = false;
-    for (MemoryCacheEntry* current = list->m_head; current; current = current->m_nextInAllResourcesList) {
-        if (current == entry) {
-            found = true;
-            break;
-        }
-    }
-    ASSERT(found);
-#endif
+    ASSERT(containedInLRUList(entry, list));
 
     MemoryCacheEntry* next = entry->m_nextInAllResourcesList;
     MemoryCacheEntry* previous = entry->m_previousInAllResourcesList;
@@ -417,11 +465,13 @@ void MemoryCache::removeFromLRUList(MemoryCacheEntry* entry, MemoryCacheLRUList*
         previous->m_nextInAllResourcesList = next;
     else
         list->m_head = next;
+
+    ASSERT(!containedInLRUList(entry, list));
 }
 
 void MemoryCache::insertInLRUList(MemoryCacheEntry* entry, MemoryCacheLRUList* list)
 {
-    ASSERT(!entry->m_nextInAllResourcesList && !entry->m_previousInAllResourcesList);
+    ASSERT(!containedInLRUList(entry, list));
 
     entry->m_nextInAllResourcesList = list->m_head;
     list->m_head = entry;
@@ -431,17 +481,17 @@ void MemoryCache::insertInLRUList(MemoryCacheEntry* entry, MemoryCacheLRUList* l
     else
         list->m_tail = entry;
 
-#if ENABLE(ASSERT)
-    // Verify that we are in now in the list like we should be.
-    bool found = false;
+    ASSERT(containedInLRUList(entry, list));
+}
+
+bool MemoryCache::containedInLRUList(MemoryCacheEntry* entry, MemoryCacheLRUList* list)
+{
     for (MemoryCacheEntry* current = list->m_head; current; current = current->m_nextInAllResourcesList) {
-        if (current == entry) {
-            found = true;
-            break;
-        }
+        if (current == entry)
+            return true;
     }
-    ASSERT(found);
-#endif
+    ASSERT(!entry->m_nextInAllResourcesList && !entry->m_previousInAllResourcesList);
+    return false;
 }
 
 void MemoryCache::removeFromLiveDecodedResourcesList(MemoryCacheEntry* entry)
@@ -449,21 +499,11 @@ void MemoryCache::removeFromLiveDecodedResourcesList(MemoryCacheEntry* entry)
     // If we've never been accessed, then we're brand new and not in any list.
     if (!entry->m_inLiveDecodedResourcesList)
         return;
+    ASSERT(containedInLiveDecodedResourcesList(entry));
+
     entry->m_inLiveDecodedResourcesList = false;
 
     MemoryCacheLRUList* list = &m_liveDecodedResources[entry->m_liveResourcePriority];
-
-#if ENABLE(ASSERT)
-    // Verify that we are in fact in this list.
-    bool found = false;
-    for (MemoryCacheEntry* current = list->m_head; current; current = current->m_nextInLiveResourcesList) {
-        if (current == entry) {
-            found = true;
-            break;
-        }
-    }
-    ASSERT(found);
-#endif
 
     MemoryCacheEntry* next = entry->m_nextInLiveResourcesList;
     MemoryCacheEntry* previous = entry->m_previousInLiveResourcesList;
@@ -480,12 +520,14 @@ void MemoryCache::removeFromLiveDecodedResourcesList(MemoryCacheEntry* entry)
         previous->m_nextInLiveResourcesList = next;
     else
         list->m_head = next;
+
+    ASSERT(!containedInLiveDecodedResourcesList(entry));
 }
 
 void MemoryCache::insertInLiveDecodedResourcesList(MemoryCacheEntry* entry)
 {
-    // Make sure we aren't in the list already.
-    ASSERT(!entry->m_nextInLiveResourcesList && !entry->m_previousInLiveResourcesList && !entry->m_inLiveDecodedResourcesList);
+    ASSERT(!containedInLiveDecodedResourcesList(entry));
+
     entry->m_inLiveDecodedResourcesList = true;
 
     MemoryCacheLRUList* list = &m_liveDecodedResources[entry->m_liveResourcePriority];
@@ -497,17 +539,20 @@ void MemoryCache::insertInLiveDecodedResourcesList(MemoryCacheEntry* entry)
     if (!entry->m_nextInLiveResourcesList)
         list->m_tail = entry;
 
-#if ENABLE(ASSERT)
-    // Verify that we are in now in the list like we should be.
-    bool found = false;
+    ASSERT(containedInLiveDecodedResourcesList(entry));
+}
+
+bool MemoryCache::containedInLiveDecodedResourcesList(MemoryCacheEntry* entry)
+{
+    MemoryCacheLRUList* list = &m_liveDecodedResources[entry->m_liveResourcePriority];
     for (MemoryCacheEntry* current = list->m_head; current; current = current->m_nextInLiveResourcesList) {
         if (current == entry) {
-            found = true;
-            break;
+            ASSERT(entry->m_inLiveDecodedResourcesList);
+            return true;
         }
     }
-    ASSERT(found);
-#endif
+    ASSERT(!entry->m_nextInLiveResourcesList && !entry->m_previousInLiveResourcesList && !entry->m_inLiveDecodedResourcesList);
+    return false;
 }
 
 void MemoryCache::makeLive(Resource* resource)
@@ -525,14 +570,14 @@ void MemoryCache::makeDead(Resource* resource)
         return;
     m_liveSize -= resource->size();
     m_deadSize += resource->size();
-    removeFromLiveDecodedResourcesList(m_resources.get(resource->url()));
+    removeFromLiveDecodedResourcesList(getEntryForResource(resource));
 }
 
 void MemoryCache::update(Resource* resource, size_t oldSize, size_t newSize, bool wasAccessed)
 {
-    if (!contains(resource))
+    MemoryCacheEntry* entry = getEntryForResource(resource);
+    if (!entry)
         return;
-    MemoryCacheEntry* entry = m_resources.get(resource->url());
 
     // The object must now be moved to a different queue, since either its size or its accessCount has been changed,
     // and both of those are used to determine which LRU queue the resource should be in.
@@ -555,9 +600,9 @@ void MemoryCache::update(Resource* resource, size_t oldSize, size_t newSize, boo
 
 void MemoryCache::updateDecodedResource(Resource* resource, UpdateReason reason, MemoryCacheLiveResourcePriority priority)
 {
-    if (!contains(resource))
+    MemoryCacheEntry* entry = getEntryForResource(resource);
+    if (!entry)
         return;
-    MemoryCacheEntry* entry = m_resources.get(resource->url());
 
     removeFromLiveDecodedResourcesList(entry);
     if (priority != MemoryCacheLiveResourcePriorityUnknown && priority != entry->m_liveResourcePriority)
@@ -576,9 +621,9 @@ void MemoryCache::updateDecodedResource(Resource* resource, UpdateReason reason,
 
 MemoryCacheLiveResourcePriority MemoryCache::priority(Resource* resource) const
 {
-    if (!contains(resource))
+    MemoryCacheEntry* entry = getEntryForResource(resource);
+    if (!entry)
         return MemoryCacheLiveResourcePriorityUnknown;
-    MemoryCacheEntry* entry = m_resources.get(resource->url());
     return entry->m_liveResourcePriority;
 }
 
@@ -594,7 +639,8 @@ void MemoryCache::removeURLFromCache(ExecutionContext* context, const KURL& url)
 
 void MemoryCache::removeURLFromCacheInternal(ExecutionContext*, const KURL& url)
 {
-    if (Resource* resource = memoryCache()->resourceForURL(url))
+    WillBeHeapVector<Member<Resource>> resources = memoryCache()->resourcesForURL(url);
+    for (Resource* resource : resources)
         memoryCache()->remove(resource);
 }
 
@@ -616,28 +662,29 @@ void MemoryCache::TypeStatistic::addResource(Resource* o)
 MemoryCache::Statistics MemoryCache::getStatistics()
 {
     Statistics stats;
-    ResourceMap::iterator e = m_resources.end();
-    for (ResourceMap::iterator i = m_resources.begin(); i != e; ++i) {
-        Resource* resource = i->value->m_resource.get();
-        switch (resource->type()) {
-        case Resource::Image:
-            stats.images.addResource(resource);
-            break;
-        case Resource::CSSStyleSheet:
-            stats.cssStyleSheets.addResource(resource);
-            break;
-        case Resource::Script:
-            stats.scripts.addResource(resource);
-            break;
-        case Resource::XSLStyleSheet:
-            stats.xslStyleSheets.addResource(resource);
-            break;
-        case Resource::Font:
-            stats.fonts.addResource(resource);
-            break;
-        default:
-            stats.other.addResource(resource);
-            break;
+    for (const auto& resourceMapIter : m_resourceMaps) {
+        for (const auto& resourceIter : *resourceMapIter.value) {
+            Resource* resource = resourceIter.value->m_resource.get();
+            switch (resource->type()) {
+            case Resource::Image:
+                stats.images.addResource(resource);
+                break;
+            case Resource::CSSStyleSheet:
+                stats.cssStyleSheets.addResource(resource);
+                break;
+            case Resource::Script:
+                stats.scripts.addResource(resource);
+                break;
+            case Resource::XSLStyleSheet:
+                stats.xslStyleSheets.addResource(resource);
+                break;
+            case Resource::Font:
+                stats.fonts.addResource(resource);
+                break;
+            default:
+                stats.other.addResource(resource);
+                break;
+            }
         }
     }
     return stats;
@@ -645,11 +692,18 @@ MemoryCache::Statistics MemoryCache::getStatistics()
 
 void MemoryCache::evictResources()
 {
-    for (;;) {
-        ResourceMap::iterator i = m_resources.begin();
-        if (i == m_resources.end())
+    while (true) {
+        ResourceMapIndex::iterator resourceMapIter = m_resourceMaps.begin();
+        if (resourceMapIter == m_resourceMaps.end())
             break;
-        evict(i->value.get());
+        ResourceMap* resources = resourceMapIter->value.get();
+        while (true) {
+            ResourceMap::iterator resourceIter = resources->begin();
+            if (resourceIter == resources->end())
+                break;
+            evict(resourceIter->value.get());
+        }
+        m_resourceMaps.remove(resourceMapIter);
     }
 }
 
@@ -693,8 +747,10 @@ void MemoryCache::prune(Resource* justReleasedResource)
         // while a prune is pending.
         // Main Resources in the cache are only substitue data that was
         // precached and should not be evicted.
-        if (contains(justReleasedResource) && justReleasedResource->type() != Resource::MainResource)
-            evict(m_resources.get(justReleasedResource->url()));
+        if (justReleasedResource->type() != Resource::MainResource) {
+            if (MemoryCacheEntry* entry = getEntryForResource(justReleasedResource))
+                evict(entry);
+        }
 
         // As a last resort, prune immediately
         if (m_deadSize > m_maxDeferredPruneDeadCapacity)

@@ -35,6 +35,7 @@
 #include "core/dom/Fullscreen.h"
 #include "core/frame/LocalFrame.h"
 #include "core/html/HTMLMediaElement.h"
+#include "core/html/HTMLVideoElement.h"
 #include "platform/LayoutTestSupport.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "public/web/WebFrame.h"
@@ -81,12 +82,14 @@ void FullscreenController::didEnterFullScreen()
     ASSERT(Fullscreen::currentFullScreenElementFrom(document) == element);
 
     if (RuntimeEnabledFeatures::overlayFullscreenVideoEnabled()) {
-        if (isHTMLMediaElement(element)) {
-            HTMLMediaElement* mediaElement = toHTMLMediaElement(element);
-            if (mediaElement->webMediaPlayer() && mediaElement->webMediaPlayer()->canEnterFullscreen()
+        if (isHTMLVideoElement(element)) {
+            HTMLVideoElement* videoElement = toHTMLVideoElement(element);
+            if (HTMLMediaElement::isMediaStreamURL(videoElement->sourceURL().string()))
+                return;
+            if (videoElement->webMediaPlayer() && videoElement->webMediaPlayer()->canEnterFullscreen()
                 // FIXME: There is no embedder-side handling in layout test mode.
                 && !LayoutTestSupport::isRunningLayoutTest()) {
-                mediaElement->webMediaPlayer()->enterFullscreen();
+                videoElement->webMediaPlayer()->enterFullscreen();
             }
             if (m_webViewImpl->layerTreeView())
                 m_webViewImpl->layerTreeView()->setHasTransparentBackground(true);
@@ -156,6 +159,16 @@ void FullscreenController::exitFullScreenForElement(Element* element)
         return;
     if (WebViewClient* client = m_webViewImpl->client())
         client->exitFullScreen();
+}
+
+void FullscreenController::updateSize()
+{
+    if (!isFullscreen())
+        return;
+
+    RenderFullScreen* renderer = Fullscreen::from(*m_fullScreenFrame->document()).fullScreenRenderer();
+    if (renderer)
+        renderer->updateStyle();
 }
 
 void FullscreenController::trace(Visitor* visitor)

@@ -4,66 +4,64 @@
 
 #include "content/browser/frame_host/navigation_request.h"
 
-#include "base/logging.h"
-#include "content/browser/loader/resource_dispatcher_host_impl.h"
+#include "content/browser/frame_host/frame_tree_node.h"
+#include "content/browser/frame_host/navigation_request_info.h"
+#include "content/browser/frame_host/navigator.h"
+#include "content/browser/loader/navigation_url_loader.h"
 #include "content/common/resource_request_body.h"
-#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/stream_handle.h"
+#include "net/url_request/redirect_info.h"
 
 namespace content {
 
-namespace {
-
-// The next available browser-global navigation request ID.
-static int64 next_navigation_request_id_ = 0;
-
-void OnBeginNavigation(const NavigationRequestInfo& info,
-                       scoped_refptr<ResourceRequestBody> request_body,
-                       int64 navigation_request_id,
-                       int64 frame_tree_node_id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  ResourceDispatcherHostImpl::Get()->StartNavigationRequest(
-      info, request_body, navigation_request_id, frame_tree_node_id);
-}
-
-void CancelNavigationRequest(int64 navigation_request_id,
-                             int64 frame_tree_node_id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  ResourceDispatcherHostImpl::Get()->CancelNavigationRequest(
-      navigation_request_id, frame_tree_node_id);
-}
-
-}  // namespace
-
-NavigationRequest::NavigationRequest(const NavigationRequestInfo& info,
-                                     int64 frame_tree_node_id)
-  : navigation_request_id_(++next_navigation_request_id_),
-    info_(info),
-    frame_tree_node_id_(frame_tree_node_id) {
+NavigationRequest::NavigationRequest(
+    FrameTreeNode* frame_tree_node,
+    const CommonNavigationParams& common_params,
+    const CommitNavigationParams& commit_params)
+    : frame_tree_node_(frame_tree_node),
+      common_params_(common_params),
+      commit_params_(commit_params) {
 }
 
 NavigationRequest::~NavigationRequest() {
 }
 
 void NavigationRequest::BeginNavigation(
+    scoped_ptr<NavigationRequestInfo> info,
     scoped_refptr<ResourceRequestBody> request_body) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  BrowserThread::PostTask(
-      BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(&OnBeginNavigation,
-                 info_,
-                 request_body,
-                 navigation_request_id_,
-                 frame_tree_node_id_));
+  DCHECK(!loader_);
+  loader_ = NavigationURLLoader::Create(
+      frame_tree_node_->navigator()->GetController()->GetBrowserContext(),
+      frame_tree_node_->frame_tree_node_id(), common_params_, info.Pass(),
+      request_body.get(), this);
+
+  // TODO(davidben): Fire (and add as necessary) observer methods such as
+  // DidStartProvisionalLoadForFrame for the navigation.
 }
 
-void NavigationRequest::CancelNavigation() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  BrowserThread::PostTask(
-      BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(&CancelNavigationRequest,
-                 navigation_request_id_, frame_tree_node_id_));
+void NavigationRequest::OnRequestRedirected(
+    const net::RedirectInfo& redirect_info,
+    const scoped_refptr<ResourceResponse>& response) {
+  // TODO(davidben): Track other changes from redirects. These are important
+  // for, e.g., reloads.
+  common_params_.url = redirect_info.new_url;
+
+  // TODO(davidben): This where prerender and navigation_interceptor should be
+  // integrated. For now, just always follow all redirects.
+  loader_->FollowRedirect();
+}
+
+void NavigationRequest::OnResponseStarted(
+    const scoped_refptr<ResourceResponse>& response,
+    scoped_ptr<StreamHandle> body) {
+  frame_tree_node_->navigator()->CommitNavigation(frame_tree_node_,
+                                                  response.get(), body.Pass());
+}
+
+void NavigationRequest::OnRequestFailed(int net_error) {
+  // TODO(davidben): Network failures should display a network error page.
+  NOTIMPLEMENTED();
 }
 
 }  // namespace content

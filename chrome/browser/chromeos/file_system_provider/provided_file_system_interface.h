@@ -6,13 +6,19 @@
 #define CHROME_BROWSER_CHROMEOS_FILE_SYSTEM_PROVIDER_PROVIDED_FILE_SYSTEM_INTERFACE_H_
 
 #include <string>
+#include <vector>
 
 #include "base/callback.h"
 #include "base/files/file.h"
 #include "base/files/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/observer_list.h"
+#include "chrome/browser/chromeos/file_system_provider/provided_file_system_observer.h"
+#include "chrome/browser/chromeos/file_system_provider/watcher.h"
 #include "storage/browser/fileapi/async_file_util.h"
+#include "storage/browser/fileapi/watcher_manager.h"
+#include "url/gurl.h"
 
 class EventRouter;
 
@@ -30,8 +36,7 @@ namespace file_system_provider {
 class ProvidedFileSystemInfo;
 class RequestManager;
 
-// Represents metadata for either a file or a directory. Returned by GetMetadata
-// method in ProvidedFileSystemInterface.
+// Represents metadata for either a file or a directory.
 struct EntryMetadata {
   EntryMetadata();
   ~EntryMetadata();
@@ -54,6 +59,8 @@ struct EntryMetadata {
 // fails synchronously.
 class ProvidedFileSystemInterface {
  public:
+  struct Change;
+
   // Mode of opening a file. Used by OpenFile().
   enum OpenFileMode { OPEN_FILE_MODE_READ, OPEN_FILE_MODE_WRITE };
 
@@ -170,11 +177,50 @@ class ProvidedFileSystemInterface {
       int length,
       const storage::AsyncFileUtil::StatusCallback& callback) = 0;
 
+  // Requests adding a watcher on an entry. |recursive| must not be true for
+  // files. |callback| is optional, but it can't be used for persistent
+  // watchers.
+  virtual AbortCallback AddWatcher(
+      const GURL& origin,
+      const base::FilePath& entry_path,
+      bool recursive,
+      bool persistent,
+      const storage::AsyncFileUtil::StatusCallback& callback,
+      const storage::WatcherManager::NotificationCallback&
+          notification_callback) = 0;
+
+  // Requests removing a watcher, which is immediately deleted from the internal
+  // list, hence the operation is not abortable.
+  virtual void RemoveWatcher(
+      const GURL& origin,
+      const base::FilePath& entry_path,
+      bool recursive,
+      const storage::AsyncFileUtil::StatusCallback& callback) = 0;
+
+  // Notifies about changes related to the watcher within the file system.
+  // Invoked by the file system implementation. Returns false if the
+  // notification arguments are malformed or the entry is not watched anymore.
+  // TODO(mtomasz): Replace [entry_path, recursive] with a watcher id.
+  virtual bool Notify(const base::FilePath& entry_path,
+                      bool recursive,
+                      storage::WatcherManager::ChangeType change_type,
+                      scoped_ptr<ProvidedFileSystemObserver::Changes> changes,
+                      const std::string& tag) = 0;
+
   // Returns a provided file system info for this file system.
   virtual const ProvidedFileSystemInfo& GetFileSystemInfo() const = 0;
 
+  // Returns a mutable list of watchers.
+  virtual Watchers* GetWatchers() = 0;
+
   // Returns a request manager for the file system.
   virtual RequestManager* GetRequestManager() = 0;
+
+  // Adds an observer on the file system.
+  virtual void AddObserver(ProvidedFileSystemObserver* observer) = 0;
+
+  // Removes an observer.
+  virtual void RemoveObserver(ProvidedFileSystemObserver* observer) = 0;
 
   // Returns a weak pointer to this object.
   virtual base::WeakPtr<ProvidedFileSystemInterface> GetWeakPtr() = 0;

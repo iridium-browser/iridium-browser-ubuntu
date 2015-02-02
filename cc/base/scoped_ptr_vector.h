@@ -72,19 +72,19 @@ class ScopedPtrVector {
 
   scoped_ptr<T> take(iterator position) {
     if (position == end())
-      return scoped_ptr<T>();
+      return nullptr;
     DCHECK(position < end());
 
     typename std::vector<T*>::iterator writable_position = position;
     scoped_ptr<T> ret(*writable_position);
-    *writable_position = NULL;
+    *writable_position = nullptr;
     return ret.Pass();
   }
 
   scoped_ptr<T> take_back() {
     DCHECK(!empty());
     if (empty())
-      return scoped_ptr<T>(NULL);
+      return nullptr;
     return take(end() - 1);
   }
 

@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
-
 /**
  * Object representing an image item (a photo).
  *
@@ -44,7 +42,7 @@ Gallery.Item = function(
    * The content cache is used for prefetching the next image when going through
    * the images sequentially. The real life photos can be large (18Mpix = 72Mb
    * pixel array) so we want only the minimum amount of caching.
-   * @type {Canvas}
+   * @type {HTMLCanvasElement}
    */
   this.screenImage = null;
 
@@ -53,7 +51,7 @@ Gallery.Item = function(
    * recently loaded image looks instant even if the image is not in the content
    * cache any more. Screen-scale images are small (~1Mpix) so we can afford to
    * cache more of them.
-   * @type {Canvas}
+   * @type {HTMLCanvasElement}
    */
   this.contentImage = null;
 
@@ -170,7 +168,7 @@ Gallery.Item.REGEXP_COPY_N =
  * Creates a name for an edited copy of the file.
  *
  * @param {DirectoryEntry} dirEntry Entry.
- * @param {function} callback Callback.
+ * @param {function(string)} callback Callback.
  * @private
  */
 Gallery.Item.prototype.createCopyName_ = function(dirEntry, callback) {

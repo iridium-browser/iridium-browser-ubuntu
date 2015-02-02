@@ -38,7 +38,7 @@ class MTPDeviceDelegateImplMac::DeviceListener
  public:
   DeviceListener(MTPDeviceDelegateImplMac* delegate)
       : delegate_(delegate) {}
-  virtual ~DeviceListener() {}
+  ~DeviceListener() override {}
 
   void OpenCameraSession(const std::string& device_id);
   void CloseCameraSessionAndDelete();
@@ -46,12 +46,12 @@ class MTPDeviceDelegateImplMac::DeviceListener
   void DownloadFile(const std::string& name, const base::FilePath& local_path);
 
   // ImageCaptureDeviceListener
-  virtual void ItemAdded(const std::string& name,
-                         const base::File::Info& info) OVERRIDE;
-  virtual void NoMoreItems() OVERRIDE;
-  virtual void DownloadedFile(const std::string& name,
-                              base::File::Error error) OVERRIDE;
-  virtual void DeviceRemoved() OVERRIDE;
+  void ItemAdded(const std::string& name,
+                 const base::File::Info& info) override;
+  void NoMoreItems() override;
+  void DownloadedFile(const std::string& name,
+                      base::File::Error error) override;
+  void DeviceRemoved() override;
 
   // Used during delegate destruction to ensure there are no more calls
   // to the delegate by the listener.

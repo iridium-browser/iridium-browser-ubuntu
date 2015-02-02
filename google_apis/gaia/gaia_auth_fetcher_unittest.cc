@@ -368,6 +368,25 @@ TEST_F(GaiaAuthFetcherTest, TwoFactorLogin) {
   auth.OnURLFetchComplete(&mock_fetcher);
 }
 
+TEST_F(GaiaAuthFetcherTest, WebLoginRequired) {
+  std::string response = base::StringPrintf("Error=BadAuthentication\n%s\n",
+      GaiaAuthFetcher::kWebLoginRequired);
+
+  GoogleServiceAuthError error =
+      GoogleServiceAuthError(GoogleServiceAuthError::WEB_LOGIN_REQUIRED);
+
+  MockGaiaConsumer consumer;
+  EXPECT_CALL(consumer, OnClientLoginFailure(error))
+      .Times(1);
+
+  GaiaAuthFetcher auth(&consumer, std::string(), GetRequestContext());
+  net::URLRequestStatus status(net::URLRequestStatus::SUCCESS, 0);
+  MockFetcher mock_fetcher(
+      client_login_source_, status, net::HTTP_FORBIDDEN, cookies_, response,
+      net::URLFetcher::GET, &auth);
+  auth.OnURLFetchComplete(&mock_fetcher);
+}
+
 TEST_F(GaiaAuthFetcherTest, CaptchaParse) {
   net::URLRequestStatus status(net::URLRequestStatus::SUCCESS, 0);
   std::string data = "Url=http://www.google.com/login/captcha\n"
@@ -788,7 +807,8 @@ TEST_F(GaiaAuthFetcherTest, ListAccounts) {
 
   GaiaAuthFetcher auth(&consumer, std::string(), GetRequestContext());
   net::URLRequestStatus status(net::URLRequestStatus::SUCCESS, 0);
-  MockFetcher mock_fetcher(GaiaUrls::GetInstance()->list_accounts_url(),
+  MockFetcher mock_fetcher(
+      GaiaUrls::GetInstance()->ListAccountsURLWithSource(std::string()),
       status, net::HTTP_OK, cookies_, data, net::URLFetcher::GET, &auth);
   auth.OnURLFetchComplete(&mock_fetcher);
 }
@@ -802,7 +822,8 @@ TEST_F(GaiaAuthFetcherTest, GetCheckConnectionInfo) {
   GaiaAuthFetcher auth(&consumer, std::string(), GetRequestContext());
   net::URLRequestStatus status(net::URLRequestStatus::SUCCESS, 0);
   MockFetcher mock_fetcher(
-      GaiaUrls::GetInstance()->get_check_connection_info_url(),
+      GaiaUrls::GetInstance()->GetCheckConnectionInfoURLWithSource(
+          std::string()),
       status, net::HTTP_OK, cookies_, data, net::URLFetcher::GET, &auth);
   auth.OnURLFetchComplete(&mock_fetcher);
 }

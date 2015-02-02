@@ -4,14 +4,14 @@
 
 #include "chrome/browser/ui/webui/options/website_settings_handler.h"
 
-#include "chrome/browser/content_settings/content_settings_utils.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_iterator.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/content_settings/core/browser/content_settings_utils.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/power/origin_power_map.h"
 #include "components/power/origin_power_map_factory.h"
 #include "content/public/browser/dom_storage_context.h"
@@ -207,8 +207,8 @@ void WebsiteSettingsHandler::HandleUpdateOrigins(const base::ListValue* args) {
   DCHECK(rv);
 
   ContentSettingsType content_type;
-  if (!content_settings::GetTypeFromName(content_setting_name, &content_type))
-    return;
+  rv = content_settings::GetTypeFromName(content_setting_name, &content_type);
+  DCHECK(rv);
   DCHECK_NE(
       kValidTypes + kValidTypesLength,
       std::find(kValidTypes, kValidTypes + kValidTypesLength, content_type));
@@ -278,8 +278,7 @@ void WebsiteSettingsHandler::UpdateOrigins() {
 
   ContentSettingsForOneType all_settings;
   ContentSettingsType last_setting;
-  if (!content_settings::GetTypeFromName(last_setting_, &last_setting))
-    return;
+  content_settings::GetTypeFromName(last_setting_, &last_setting);
 
   if (last_setting == CONTENT_SETTINGS_TYPE_MEDIASTREAM)
     last_setting = CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC;
@@ -372,8 +371,8 @@ void WebsiteSettingsHandler::HandleSetOriginPermission(
   bool rv = args->GetString(0, &setting_name);
   DCHECK(rv);
   ContentSettingsType settings_type;
-  if (!content_settings::GetTypeFromName(setting_name, &settings_type))
-    return;
+  rv = content_settings::GetTypeFromName(setting_name, &settings_type);
+  DCHECK(rv);
 
   std::string value;
   rv = args->GetString(1, &value);
@@ -459,8 +458,7 @@ void WebsiteSettingsHandler::HandleStopOrigin(const base::ListValue* args) {
 void WebsiteSettingsHandler::HandleUpdateDefaultSetting(
     const base::ListValue* args) {
   ContentSettingsType last_setting;
-  if (!content_settings::GetTypeFromName(last_setting_, &last_setting))
-    return;
+  content_settings::GetTypeFromName(last_setting_, &last_setting);
 
   base::DictionaryValue filter_settings;
   std::string provider_id;
@@ -484,8 +482,7 @@ void WebsiteSettingsHandler::HandleSetDefaultSetting(
       content_settings::ContentSettingFromString(setting);
 
   ContentSettingsType last_setting;
-  if (!content_settings::GetTypeFromName(last_setting_, &last_setting))
-    return;
+  content_settings::GetTypeFromName(last_setting_, &last_setting);
   Profile* profile = GetProfile();
 
   HostContentSettingsMap* map = profile->GetHostContentSettingsMap();
@@ -542,8 +539,8 @@ void WebsiteSettingsHandler::HandleSetGlobalToggle(
   DCHECK(rv);
 
   ContentSettingsType last_setting;
-  if (!content_settings::GetTypeFromName(last_setting_, &last_setting))
-    return;
+  rv = content_settings::GetTypeFromName(last_setting_, &last_setting);
+  DCHECK(rv);
 
   Profile* profile = GetProfile();
   HostContentSettingsMap* map = profile->GetHostContentSettingsMap();

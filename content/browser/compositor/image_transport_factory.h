@@ -22,6 +22,7 @@ class Size;
 }
 
 namespace ui {
+class Compositor;
 class ContextFactory;
 class Texture;
 }
@@ -72,7 +73,6 @@ class CONTENT_EXPORT ImageTransportFactory {
   virtual ui::ContextFactory* GetContextFactory() = 0;
 
   virtual gfx::GLSurfaceHandle GetSharedSurfaceHandle() = 0;
-  virtual scoped_ptr<cc::SurfaceIdAllocator> CreateSurfaceIdAllocator() = 0;
   virtual cc::SurfaceManager* GetSurfaceManager() = 0;
 
   // Gets a GLHelper instance, associated with the shared context. This
@@ -85,6 +85,13 @@ class CONTENT_EXPORT ImageTransportFactory {
 
 #if defined(OS_MACOSX)
   virtual void OnSurfaceDisplayed(int surface_id) = 0;
+  // Called when the ui::Compositor has been disconnected from an NSView and
+  // may be attached to another one. This ensures that content and frames
+  // intended for the old NSView will not appear in the new NSView.
+  virtual void OnCompositorRecycled(ui::Compositor* compositor) = 0;
+  // Used by GpuProcessHostUIShim to determine if a frame should not be
+  // displayed because it is targetted to an NSView that has been disconnected.
+  virtual bool SurfaceShouldNotShowFramesAfterRecycle(int surface_id) const = 0;
 #endif
 };
 

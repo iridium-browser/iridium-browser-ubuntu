@@ -20,7 +20,6 @@
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_messages.h"
-#include "extensions/common/feature_switch.h"
 #include "extensions/common/manifest_handlers/options_page_info.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "extensions/strings/grit/extensions_strings.h"
@@ -40,7 +39,8 @@ ExtensionOptionsGuest::ExtensionOptionsGuest(
     : GuestView<ExtensionOptionsGuest>(browser_context, guest_instance_id),
       extension_options_guest_delegate_(
           extensions::ExtensionsAPIClient::Get()
-              ->CreateExtensionOptionsGuestDelegate(this)) {
+              ->CreateExtensionOptionsGuestDelegate(this)),
+      has_navigated_(false) {
 }
 
 ExtensionOptionsGuest::~ExtensionOptionsGuest() {
@@ -50,9 +50,6 @@ ExtensionOptionsGuest::~ExtensionOptionsGuest() {
 extensions::GuestViewBase* ExtensionOptionsGuest::Create(
     content::BrowserContext* browser_context,
     int guest_instance_id) {
-  if (!extensions::FeatureSwitch::embedded_extension_options()->IsEnabled()) {
-    return NULL;
-  }
   return new ExtensionOptionsGuest(browser_context, guest_instance_id);
 }
 
@@ -90,6 +87,13 @@ void ExtensionOptionsGuest::CreateWebContents(
       extensions::ExtensionRegistry::Get(browser_context());
   const extensions::Extension* extension =
       registry->enabled_extensions().GetByID(extension_id);
+  if (!extension) {
+    // The ID was valid but the extension didn't exist. Typically this will
+    // happen when an extension is disabled.
+    callback.Run(NULL);
+    return;
+  }
+
   options_page_ = extensions::OptionsPageInfo::GetOptionsPage(extension);
   if (!options_page_.is_valid()) {
     callback.Run(NULL);
@@ -108,10 +112,16 @@ void ExtensionOptionsGuest::CreateWebContents(
 
 void ExtensionOptionsGuest::DidAttachToEmbedder() {
   SetUpAutoSize();
+
+  // We should not re-navigate on reattachment.
+  if (has_navigated_)
+    return;
+
   web_contents()->GetController().LoadURL(options_page_,
                                           content::Referrer(),
                                           ui::PAGE_TRANSITION_LINK,
                                           std::string());
+  has_navigated_ = true;
 }
 
 void ExtensionOptionsGuest::DidInitialize() {

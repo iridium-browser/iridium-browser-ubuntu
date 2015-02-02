@@ -35,10 +35,9 @@ class MockQuotaEvictionHandler : public storage::QuotaEvictionHandler {
         error_on_evict_origin_data_(false),
         error_on_get_usage_and_quota_(false) {}
 
-  virtual void EvictOriginData(
-      const GURL& origin,
-      StorageType type,
-      const EvictOriginDataCallback& callback) OVERRIDE {
+  void EvictOriginData(const GURL& origin,
+                       StorageType type,
+                       const EvictOriginDataCallback& callback) override {
     if (error_on_evict_origin_data_) {
       callback.Run(storage::kQuotaErrorInvalidModification);
       return;
@@ -49,8 +48,8 @@ class MockQuotaEvictionHandler : public storage::QuotaEvictionHandler {
     callback.Run(storage::kQuotaStatusOk);
   }
 
-  virtual void GetUsageAndQuotaForEviction(
-      const UsageAndQuotaCallback& callback) OVERRIDE {
+  void GetUsageAndQuotaForEviction(
+      const UsageAndQuotaCallback& callback) override {
     if (error_on_get_usage_and_quota_) {
       callback.Run(storage::kQuotaErrorInvalidAccess, UsageAndQuota());
       return;
@@ -61,9 +60,8 @@ class MockQuotaEvictionHandler : public storage::QuotaEvictionHandler {
     callback.Run(storage::kQuotaStatusOk, quota_and_usage);
   }
 
-  virtual void GetLRUOrigin(
-      StorageType type,
-      const GetLRUOriginCallback& callback) OVERRIDE {
+  void GetLRUOrigin(StorageType type,
+                    const GetLRUOriginCallback& callback) override {
     if (origin_order_.empty())
       callback.Run(GURL());
     else
@@ -143,7 +141,7 @@ class QuotaTemporaryStorageEvictorTest : public testing::Test {
       : num_get_usage_and_quota_for_eviction_(0),
         weak_factory_(this) {}
 
-  virtual void SetUp() {
+  void SetUp() override {
     quota_eviction_handler_.reset(new MockQuotaEvictionHandler(this));
 
     // Run multiple evictions in a single RunUntilIdle() when interval_ms == 0
@@ -151,7 +149,7 @@ class QuotaTemporaryStorageEvictorTest : public testing::Test {
         quota_eviction_handler_.get(), 0));
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     temporary_storage_evictor_.reset();
     quota_eviction_handler_.reset();
     base::RunLoop().RunUntilIdle();

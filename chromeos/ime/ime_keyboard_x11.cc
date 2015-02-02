@@ -2,30 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chromeos/ime/ime_keyboard.h"
-
-#include <cstdlib>
-#include <cstring>
-#include <queue>
-#include <set>
-#include <utility>
-
-#include "base/bind.h"
-#include "base/logging.h"
-#include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop.h"
-#include "base/process/kill.h"
-#include "base/process/launch.h"
-#include "base/process/process_handle.h"
-#include "base/strings/string_util.h"
-#include "base/strings/stringprintf.h"
-#include "base/sys_info.h"
-#include "base/threading/thread_checker.h"
-#include "ui/gfx/x/x11_types.h"
-
-// These includes conflict with base/tracked_objects.h so must come last.
-#include <X11/XKBlib.h>
-#include <X11/Xlib.h>
+#include "chromeos/ime/ime_keyboard_x11.h"
 
 namespace chromeos {
 namespace input_method {
@@ -41,54 +18,6 @@ const char kSetxkbmapCommand[] = "/usr/bin/setxkbmap";
 
 // A string for obtaining a mask value for Num Lock.
 const char kNumLockVirtualModifierString[] = "NumLock";
-
-const char *kISOLevel5ShiftLayoutIds[] = {
-  "ca(multix)",
-  "de(neo)",
-};
-
-const char *kAltGrLayoutIds[] = {
-  "be",
-  "be",
-  "be",
-  "bg",
-  "bg(phonetic)",
-  "br",
-  "ca",
-  "ca(eng)",
-  "ca(multix)",
-  "ch",
-  "ch(fr)",
-  "cz",
-  "de",
-  "de(neo)",
-  "dk",
-  "ee",
-  "es",
-  "es(cat)",
-  "fi",
-  "fr",
-  "gb(dvorak)",
-  "gb(extd)",
-  "gr",
-  "hr",
-  "il",
-  "it",
-  "latam",
-  "lt",
-  "no",
-  "pl",
-  "pt",
-  "ro",
-  "se",
-  "si",
-  "sk",
-  "tr",
-  "ua",
-  "us(altgr-intl)",
-  "us(intl)",
-};
-
 
 // Returns false if |layout_name| contains a bad character.
 bool CheckLayoutName(const std::string& layout_name) {
@@ -109,71 +38,7 @@ bool CheckLayoutName(const std::string& layout_name) {
   return true;
 }
 
-class ImeKeyboardX11 : public ImeKeyboard {
- public:
-  ImeKeyboardX11();
-  virtual ~ImeKeyboardX11() {}
-
-  // Adds/removes observer.
-  virtual void AddObserver(Observer* observer) OVERRIDE;
-  virtual void RemoveObserver(Observer* observer) OVERRIDE;
-
-  // ImeKeyboard:
-  virtual bool SetCurrentKeyboardLayoutByName(
-      const std::string& layout_name) OVERRIDE;
-  virtual bool ReapplyCurrentKeyboardLayout() OVERRIDE;
-  virtual void ReapplyCurrentModifierLockStatus() OVERRIDE;
-  virtual void DisableNumLock() OVERRIDE;
-  virtual void SetCapsLockEnabled(bool enable_caps_lock) OVERRIDE;
-  virtual bool CapsLockIsEnabled() OVERRIDE;
-  virtual bool IsISOLevel5ShiftAvailable() const OVERRIDE;
-  virtual bool IsAltGrAvailable() const OVERRIDE;
-  virtual bool SetAutoRepeatEnabled(bool enabled) OVERRIDE;
-  virtual bool SetAutoRepeatRate(const AutoRepeatRate& rate) OVERRIDE;
-
- private:
-  // Returns a mask for Num Lock (e.g. 1U << 4). Returns 0 on error.
-  unsigned int GetNumLockMask();
-
-  // Sets the caps-lock status. Note that calling this function always disables
-  // the num-lock.
-  void SetLockedModifiers(bool caps_lock_enabled);
-
-  // This function is used by SetLayout() and RemapModifierKeys(). Calls
-  // setxkbmap command if needed, and updates the last_full_layout_name_ cache.
-  bool SetLayoutInternal(const std::string& layout_name, bool force);
-
-  // Executes 'setxkbmap -layout ...' command asynchronously using a layout name
-  // in the |execute_queue_|. Do nothing if the queue is empty.
-  // TODO(yusukes): Use libxkbfile.so instead of the command (crosbug.com/13105)
-  void MaybeExecuteSetLayoutCommand();
-
-  // Polls to see setxkbmap process exits.
-  void PollUntilChildFinish(const base::ProcessHandle handle);
-
-  // Called when execve'd setxkbmap process exits.
-  void OnSetLayoutFinish();
-
-  const bool is_running_on_chrome_os_;
-  unsigned int num_lock_mask_;
-
-  // The current Caps Lock status. If true, enabled.
-  bool current_caps_lock_status_;
-
-  // The XKB layout name which we set last time like "us" and "us(dvorak)".
-  std::string current_layout_name_;
-
-  // A queue for executing setxkbmap one by one.
-  std::queue<std::string> execute_queue_;
-
-  base::ThreadChecker thread_checker_;
-
-  base::WeakPtrFactory<ImeKeyboardX11> weak_factory_;
-
-  ObserverList<Observer> observers_;
-
-  DISALLOW_COPY_AND_ASSIGN(ImeKeyboardX11);
-};
+}  // namespace
 
 ImeKeyboardX11::ImeKeyboardX11()
     : is_running_on_chrome_os_(base::SysInfo::IsRunningOnChromeOS()),
@@ -193,18 +58,12 @@ ImeKeyboardX11::ImeKeyboardX11()
         << "NumLock is not assigned to Mod2Mask.  : " << num_lock_mask_;
   }
 
-  current_caps_lock_status_ = CapsLockIsEnabled();
+  caps_lock_is_enabled_ = CapsLockIsEnabled();
   // Disable Num Lock on X start up for http://crosbug.com/29169.
   DisableNumLock();
 }
 
-void ImeKeyboardX11::AddObserver(Observer* observer) {
-  observers_.AddObserver(observer);
-}
-
-void ImeKeyboardX11::RemoveObserver(Observer* observer) {
-  observers_.RemoveObserver(observer);
-}
+ImeKeyboardX11::~ImeKeyboardX11() {}
 
 unsigned int ImeKeyboardX11::GetNumLockMask() {
   DCHECK(thread_checker_.CalledOnValidThread());
@@ -240,7 +99,7 @@ unsigned int ImeKeyboardX11::GetNumLockMask() {
   return real_mask;
 }
 
-void ImeKeyboardX11::SetLockedModifiers(bool caps_lock_enabled) {
+void ImeKeyboardX11::SetLockedModifiers() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   // Always turn off num lock.
@@ -248,8 +107,7 @@ void ImeKeyboardX11::SetLockedModifiers(bool caps_lock_enabled) {
   unsigned int value_mask = 0;
 
   affect_mask |= LockMask;
-  value_mask |= (caps_lock_enabled ? LockMask : 0);
-  current_caps_lock_status_ = caps_lock_enabled;
+  value_mask |= (caps_lock_is_enabled_ ? LockMask : 0);
 
   XkbLockModifiers(gfx::GetXDisplay(), XkbUseCoreKbd, affect_mask, value_mask);
 }
@@ -265,7 +123,7 @@ bool ImeKeyboardX11::SetLayoutInternal(const std::string& layout_name,
   if (!CheckLayoutName(layout_name))
     return false;
 
-  if (!force && (current_layout_name_ == layout_name)) {
+  if (!force && (last_layout_ == layout_name)) {
     DVLOG(1) << "The requested layout is already set: " << layout_name;
     return true;
   }
@@ -352,22 +210,6 @@ bool ImeKeyboardX11::CapsLockIsEnabled() {
   return (status.locked_mods & LockMask);
 }
 
-bool ImeKeyboardX11::IsISOLevel5ShiftAvailable() const {
-  for (size_t i = 0; i < arraysize(kISOLevel5ShiftLayoutIds); ++i) {
-    if (current_layout_name_ == kISOLevel5ShiftLayoutIds[i])
-      return true;
-  }
-  return false;
-}
-
-bool ImeKeyboardX11::IsAltGrAvailable() const {
-  for (size_t i = 0; i < arraysize(kAltGrLayoutIds); ++i) {
-    if (current_layout_name_ == kAltGrLayoutIds[i])
-      return true;
-  }
-  return false;
-}
-
 bool ImeKeyboardX11::SetAutoRepeatEnabled(bool enabled) {
   if (enabled)
     XAutoRepeatOn(gfx::GetXDisplay());
@@ -391,37 +233,33 @@ bool ImeKeyboardX11::SetAutoRepeatRate(const AutoRepeatRate& rate) {
 }
 
 void ImeKeyboardX11::SetCapsLockEnabled(bool enable_caps_lock) {
-  bool old_state = current_caps_lock_status_;
-  SetLockedModifiers(enable_caps_lock);
-  if (old_state != enable_caps_lock) {
-    FOR_EACH_OBSERVER(ImeKeyboard::Observer, observers_,
-                      OnCapsLockChanged(enable_caps_lock));
-  }
+  ImeKeyboard::SetCapsLockEnabled(enable_caps_lock);
+  SetLockedModifiers();
 }
 
 bool ImeKeyboardX11::SetCurrentKeyboardLayoutByName(
     const std::string& layout_name) {
   if (SetLayoutInternal(layout_name, false)) {
-    current_layout_name_ = layout_name;
+    last_layout_ = layout_name;
     return true;
   }
   return false;
 }
 
 bool ImeKeyboardX11::ReapplyCurrentKeyboardLayout() {
-  if (current_layout_name_.empty()) {
+  if (last_layout_.empty()) {
     DVLOG(1) << "Can't reapply XKB layout: layout unknown";
     return false;
   }
-  return SetLayoutInternal(current_layout_name_, true /* force */);
+  return SetLayoutInternal(last_layout_, true /* force */);
 }
 
 void ImeKeyboardX11::ReapplyCurrentModifierLockStatus() {
-  SetLockedModifiers(current_caps_lock_status_);
+  SetLockedModifiers();
 }
 
 void ImeKeyboardX11::DisableNumLock() {
-  SetCapsLockEnabled(current_caps_lock_status_);
+  SetCapsLockEnabled(caps_lock_is_enabled_);
 }
 
 void ImeKeyboardX11::OnSetLayoutFinish() {
@@ -433,8 +271,6 @@ void ImeKeyboardX11::OnSetLayoutFinish() {
   execute_queue_.pop();
   MaybeExecuteSetLayoutCommand();
 }
-
-}  // namespace
 
 // static
 bool ImeKeyboard::GetAutoRepeatEnabledForTesting() {

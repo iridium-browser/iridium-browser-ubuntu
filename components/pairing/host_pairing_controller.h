@@ -18,12 +18,11 @@ class HostPairingController {
     STAGE_INITIALIZATION_ERROR,
     STAGE_WAITING_FOR_CONTROLLER,
     STAGE_WAITING_FOR_CODE_CONFIRMATION,
-    STAGE_UPDATING,
     STAGE_WAITING_FOR_CONTROLLER_AFTER_UPDATE,
     STAGE_WAITING_FOR_CREDENTIALS,
     STAGE_ENROLLING,
     STAGE_ENROLLMENT_ERROR,
-    STAGE_PAIRING_DONE,
+    STAGE_ENROLLMENT_SUCCESS,
     STAGE_FINISHED
   };
 
@@ -32,6 +31,13 @@ class HostPairingController {
     UPDATE_STATUS_UPDATING,
     UPDATE_STATUS_REBOOTING,
     UPDATE_STATUS_UPDATED,
+  };
+
+  enum EnrollmentStatus {
+    ENROLLMENT_STATUS_UNKNOWN,
+    ENROLLMENT_STATUS_ENROLLING,
+    ENROLLMENT_STATUS_FAILURE,
+    ENROLLMENT_STATUS_SUCCESS,
   };
 
   class Observer {
@@ -77,11 +83,12 @@ class HostPairingController {
   virtual std::string GetEnrollmentDomain() = 0;
 
   // Notify that the update status has changed.
-  // Can be called on stage |STAGE_UPDATING|.
   virtual void OnUpdateStatusChanged(UpdateStatus update_status) = 0;
 
-  // Called when enrollment has completed.
-  virtual void SetEnrollmentComplete(bool success) = 0;
+  // Notify that enrollment status has changed.
+  // Can be called on stage |STAGE_WAITING_FOR_CREDENTIALS|.
+  virtual void OnEnrollmentStatusChanged(
+      EnrollmentStatus enrollment_status) = 0;
 
   virtual void AddObserver(Observer* observer) = 0;
   virtual void RemoveObserver(Observer* observer) = 0;

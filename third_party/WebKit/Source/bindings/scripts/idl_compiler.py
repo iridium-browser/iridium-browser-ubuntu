@@ -38,7 +38,7 @@ import os
 import cPickle as pickle
 import sys
 
-from code_generator_v8 import CodeGeneratorDictionaryImpl, CodeGeneratorV8
+from code_generator_v8 import CodeGeneratorDictionaryImpl, CodeGeneratorV8, CodeGeneratorUnionType
 from idl_reader import IdlReader
 from utilities import read_idl_files_list_from_file, write_file, idl_filename_to_component
 
@@ -47,11 +47,18 @@ def parse_options():
     parser = OptionParser()
     parser.add_option('--cache-directory',
                       help='cache directory, defaults to output directory')
-    parser.add_option('--generate-dictionary-impl',
+    parser.add_option('--generate-impl',
                       action="store_true", default=False)
     parser.add_option('--output-directory')
+    parser.add_option('--impl-output-directory')
     parser.add_option('--interfaces-info-file')
+    parser.add_option('--component-info-file')
     parser.add_option('--write-file-only-if-changed', type='int')
+    # FIXME: We should always explicitly specify --target-component and
+    # remove the default behavior.
+    parser.add_option('--target-component',
+                      help='target component to generate code, defaults to '
+                      'component of input idl file')
     # ensure output comes last, so command line easy to parse via regexes
     parser.disable_interspersed_args()
 
@@ -81,9 +88,10 @@ class IdlCompiler(object):
     """
     __metaclass__ = abc.ABCMeta
 
-    def __init__(self, output_directory, cache_directory='',
+    def __init__(self, output_directory, cache_directory=None,
                  code_generator=None, interfaces_info=None,
-                 interfaces_info_filename='', only_if_changed=False):
+                 interfaces_info_filename='', only_if_changed=False,
+                 target_component=None):
         """
         Args:
             interfaces_info:
@@ -91,7 +99,6 @@ class IdlCompiler(object):
                 (avoids auxiliary file in run-bindings-tests)
             interfaces_info_file: filename of pickled interfaces_info
         """
-        cache_directory = cache_directory or output_directory
         self.cache_directory = cache_directory
         self.code_generator = code_generator
         if interfaces_info_filename:
@@ -100,14 +107,16 @@ class IdlCompiler(object):
         self.interfaces_info = interfaces_info
         self.only_if_changed = only_if_changed
         self.output_directory = output_directory
+        self.target_component = target_component
         self.reader = IdlReader(interfaces_info, cache_directory)
 
     def compile_and_write(self, idl_filename):
         interface_name = idl_filename_to_interface_name(idl_filename)
-        component = idl_filename_to_component(idl_filename)
         definitions = self.reader.read_idl_definitions(idl_filename)
+        target_component = self.target_component or idl_filename_to_component(idl_filename)
+        target_definitions = definitions[target_component]
         output_code_list = self.code_generator.generate_code(
-            definitions[component], interface_name)
+            target_definitions, interface_name)
         for output_path, output_code in output_code_list:
             write_file(output_code, output_path, self.only_if_changed)
 
@@ -142,13 +151,14 @@ def generate_bindings(options, input_filename):
         options.output_directory,
         cache_directory=options.cache_directory,
         interfaces_info_filename=options.interfaces_info_file,
-        only_if_changed=options.write_file_only_if_changed)
+        only_if_changed=options.write_file_only_if_changed,
+        target_component=options.target_component)
     idl_compiler.compile_file(input_filename)
 
 
 def generate_dictionary_impl(options, input_filename):
     idl_compiler = IdlCompilerDictionaryImpl(
-        options.output_directory,
+        options.impl_output_directory,
         cache_directory=options.cache_directory,
         interfaces_info_filename=options.interfaces_info_file,
         only_if_changed=options.write_file_only_if_changed)
@@ -158,12 +168,31 @@ def generate_dictionary_impl(options, input_filename):
         idl_compiler.compile_file(idl_filename)
 
 
+def generate_union_type_containers(options):
+    if not (options.interfaces_info_file and options.component_info_file):
+        raise Exception('Interfaces info is required to generate '
+                        'union types containers')
+    with open(options.interfaces_info_file) as interfaces_info_file:
+        interfaces_info = pickle.load(interfaces_info_file)
+    with open(options.component_info_file) as component_info_file:
+        component_info = pickle.load(component_info_file)
+    generator = CodeGeneratorUnionType(
+        interfaces_info,
+        options.cache_directory,
+        options.output_directory,
+        options.target_component)
+    output_code_list = generator.generate_code(component_info['union_types'])
+    for output_path, output_code in output_code_list:
+        write_file(output_code, output_path, options.write_file_only_if_changed)
+
+
 def main():
     options, input_filename = parse_options()
-    if options.generate_dictionary_impl:
+    if options.generate_impl:
         # |input_filename| should be a file which contains a list of IDL
         # dictionary paths.
         generate_dictionary_impl(options, input_filename)
+        generate_union_type_containers(options)
     else:
         # |input_filename| should be a path of an IDL file.
         generate_bindings(options, input_filename)

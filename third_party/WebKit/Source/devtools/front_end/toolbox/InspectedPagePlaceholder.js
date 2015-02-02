@@ -58,8 +58,8 @@ WebInspector.InspectedPagePlaceholder.prototype = {
     _scheduleUpdate: function()
     {
         if (this._updateId)
-            window.cancelAnimationFrame(this._updateId);
-        this._updateId = window.requestAnimationFrame(this.update.bind(this));
+            this.element.window().cancelAnimationFrame(this._updateId);
+        this._updateId = this.element.window().requestAnimationFrame(this.update.bind(this));
     },
 
     /**
@@ -101,7 +101,7 @@ WebInspector.InspectedPagePlaceholder.prototype = {
     {
         var zoomFactor = WebInspector.zoomManager.zoomFactor();
         var rect = this.element.getBoundingClientRect();
-        var bodyRect = document.body.getBoundingClientRect();
+        var bodyRect = this.element.ownerDocument.body.getBoundingClientRect();
 
         var left = Math.max(rect.left * zoomFactor + this._margins.left, bodyRect.left * zoomFactor);
         var top = Math.max(rect.top * zoomFactor + this._margins.top, bodyRect.top * zoomFactor);

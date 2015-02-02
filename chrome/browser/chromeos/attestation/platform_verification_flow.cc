@@ -7,6 +7,7 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
+#include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
@@ -15,13 +16,13 @@
 #include "chrome/browser/chromeos/attestation/platform_verification_dialog.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/attestation/attestation_flow.h"
 #include "chromeos/cryptohome/async_method_caller.h"
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/user_manager/user.h"
@@ -37,6 +38,11 @@ namespace {
 
 const char kDefaultHttpsPort[] = "443";
 const int kTimeoutInSeconds = 8;
+const char kAttestationResultHistogram[] =
+    "ChromeOS.PlatformVerification.Result";
+const char kAttestationAvailableHistogram[] =
+    "ChromeOS.PlatformVerification.Available";
+const int kAttestationResultHistogramMax = 10;
 
 // A callback method to handle DBus errors.
 void DBusCallback(const base::Callback<void(bool)>& on_success,
@@ -56,6 +62,8 @@ void ReportError(
     const chromeos::attestation::PlatformVerificationFlow::ChallengeCallback&
         callback,
     chromeos::attestation::PlatformVerificationFlow::Result error) {
+  UMA_HISTOGRAM_ENUMERATION(kAttestationResultHistogram, error,
+                            kAttestationResultHistogramMax);
   callback.Run(error, std::string(), std::string(), std::string());
 }
 }  // namespace
@@ -72,15 +80,15 @@ class DefaultDelegate : public PlatformVerificationFlow::Delegate {
   virtual void ShowConsentPrompt(
       content::WebContents* web_contents,
       const PlatformVerificationFlow::Delegate::ConsentCallback& callback)
-      OVERRIDE {
+      override {
     PlatformVerificationDialog::ShowDialog(web_contents, callback);
   }
 
-  virtual PrefService* GetPrefs(content::WebContents* web_contents) OVERRIDE {
+  virtual PrefService* GetPrefs(content::WebContents* web_contents) override {
     return user_prefs::UserPrefs::Get(web_contents->GetBrowserContext());
   }
 
-  virtual const GURL& GetURL(content::WebContents* web_contents) OVERRIDE {
+  virtual const GURL& GetURL(content::WebContents* web_contents) override {
     const GURL& url = web_contents->GetLastCommittedURL();
     if (!url.is_valid())
       return web_contents->GetVisibleURL();
@@ -88,18 +96,18 @@ class DefaultDelegate : public PlatformVerificationFlow::Delegate {
   }
 
   virtual user_manager::User* GetUser(
-      content::WebContents* web_contents) OVERRIDE {
+      content::WebContents* web_contents) override {
     return ProfileHelper::Get()->GetUserByProfile(
         Profile::FromBrowserContext(web_contents->GetBrowserContext()));
   }
 
   virtual HostContentSettingsMap* GetContentSettings(
-      content::WebContents* web_contents) OVERRIDE {
+      content::WebContents* web_contents) override {
     return Profile::FromBrowserContext(web_contents->GetBrowserContext())->
         GetHostContentSettingsMap();
   }
 
-  virtual bool IsGuestOrIncognito(content::WebContents* web_contents) OVERRIDE {
+  virtual bool IsGuestOrIncognito(content::WebContents* web_contents) override {
     Profile* profile =
         Profile::FromBrowserContext(web_contents->GetBrowserContext());
     return (profile->IsOffTheRecord() || profile->IsGuestSession());
@@ -182,10 +190,26 @@ void PlatformVerificationFlow::ChallengePlatformKey(
     return;
   }
   ChallengeContext context(web_contents, service_id, challenge, callback);
+  // Check if the device has been prepared to use attestation.
+  BoolDBusMethodCallback dbus_callback = base::Bind(
+      &DBusCallback,
+      base::Bind(&PlatformVerificationFlow::CheckEnrollment, this, context),
+      base::Bind(&ReportError, callback, INTERNAL_ERROR));
+  cryptohome_client_->TpmAttestationIsPrepared(dbus_callback);
+}
+
+void PlatformVerificationFlow::CheckEnrollment(const ChallengeContext& context,
+                                               bool attestation_prepared) {
+  UMA_HISTOGRAM_BOOLEAN(kAttestationAvailableHistogram, attestation_prepared);
+  if (!attestation_prepared) {
+    // This device is not currently able to use attestation features.
+    ReportError(context.callback, PLATFORM_NOT_VERIFIED);
+    return;
+  }
   BoolDBusMethodCallback dbus_callback = base::Bind(
       &DBusCallback,
       base::Bind(&PlatformVerificationFlow::CheckConsent, this, context),
-      base::Bind(&ReportError, callback, INTERNAL_ERROR));
+      base::Bind(&ReportError, context.callback, INTERNAL_ERROR));
   cryptohome_client_->TpmAttestationIsEnrolled(dbus_callback);
 }
 
@@ -352,6 +376,8 @@ void PlatformVerificationFlow::OnChallengeReady(
     return;
   }
   VLOG(1) << "Platform verification successful.";
+  UMA_HISTOGRAM_ENUMERATION(kAttestationResultHistogram, SUCCESS,
+                            kAttestationResultHistogramMax);
   context.callback.Run(SUCCESS,
                        signed_data_pb.data(),
                        signed_data_pb.signature(),

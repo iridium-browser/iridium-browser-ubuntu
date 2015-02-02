@@ -30,7 +30,7 @@ class CanonicalCookie;
 class CookieInfoView : public views::View {
  public:
   CookieInfoView();
-  virtual ~CookieInfoView();
+  ~CookieInfoView() override;
 
   // Update the display from the specified CookieNode.
   void SetCookie(const std::string& domain,
@@ -48,8 +48,8 @@ class CookieInfoView : public views::View {
 
  protected:
   // views::View:
-  virtual void ViewHierarchyChanged(
-      const ViewHierarchyChangedDetails& details) OVERRIDE;
+  void ViewHierarchyChanged(
+      const ViewHierarchyChangedDetails& details) override;
 
  private:
   // Layout helper routines.

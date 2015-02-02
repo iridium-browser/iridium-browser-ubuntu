@@ -59,6 +59,8 @@ class NET_EXPORT_PRIVATE QuicReceivedPacketManager :
     void SetCumulativeEntropyUpTo(QuicPacketSequenceNumber sequence_number,
                                   QuicPacketEntropyHash entropy_hash);
 
+    size_t size() const { return packets_entropy_.size(); }
+
    private:
     friend class test::EntropyTrackerPeer;
 
@@ -96,7 +98,7 @@ class NET_EXPORT_PRIVATE QuicReceivedPacketManager :
   };
 
   explicit QuicReceivedPacketManager(QuicConnectionStats* stats);
-  virtual ~QuicReceivedPacketManager();
+  ~QuicReceivedPacketManager() override;
 
   // Updates the internal state concerning which packets have been received.
   // bytes: the packet size in bytes including Quic Headers.
@@ -128,8 +130,8 @@ class NET_EXPORT_PRIVATE QuicReceivedPacketManager :
   // QuicReceivedEntropyHashCalculatorInterface
   // Called by QuicFramer, when the outgoing ack gets truncated, to recalculate
   // the received entropy hash for the truncated ack frame.
-  virtual QuicPacketEntropyHash EntropyHash(
-      QuicPacketSequenceNumber sequence_number) const OVERRIDE;
+  QuicPacketEntropyHash EntropyHash(
+      QuicPacketSequenceNumber sequence_number) const override;
 
   // Updates internal state based on |stop_waiting|.
   void UpdatePacketInformationSentByPeer(
@@ -137,7 +139,10 @@ class NET_EXPORT_PRIVATE QuicReceivedPacketManager :
 
   // Returns true when there are new missing packets to be reported within 3
   // packets of the largest observed.
-  bool HasNewMissingPackets();
+  bool HasNewMissingPackets() const;
+
+  // Returns the number of packets being tracked in the EntropyTracker.
+  size_t NumTrackedPackets() const;
 
   QuicPacketSequenceNumber peer_least_packet_awaiting_ack() {
     return peer_least_packet_awaiting_ack_;

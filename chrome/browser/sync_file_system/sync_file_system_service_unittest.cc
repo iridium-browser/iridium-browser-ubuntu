@@ -90,8 +90,9 @@ class MockSyncEventObserver : public SyncEventObserver {
                void(const GURL& app_origin,
                     SyncServiceState state,
                     const std::string& description));
-  MOCK_METHOD4(OnFileSynced,
+  MOCK_METHOD5(OnFileSynced,
                void(const storage::FileSystemURL& url,
+                    SyncFileType file_type,
                     SyncFileStatus status,
                     SyncAction action,
                     SyncDirection direction));
@@ -130,7 +131,7 @@ class SyncFileSystemServiceTest : public testing::Test {
       : thread_bundle_(content::TestBrowserThreadBundle::REAL_FILE_THREAD |
                        content::TestBrowserThreadBundle::REAL_IO_THREAD) {}
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     in_memory_env_.reset(leveldb::NewMemEnv(leveldb::Env::Default()));
     file_system_.reset(new CannedSyncableFileSystem(
         GURL(kOrigin),
@@ -164,7 +165,7 @@ class SyncFileSystemServiceTest : public testing::Test {
     file_system_->SetUp(CannedSyncableFileSystem::QUOTA_ENABLED);
   }
 
-  virtual void TearDown() OVERRIDE {
+  virtual void TearDown() override {
     sync_service_->Shutdown();
     file_system_->TearDown();
     RevokeSyncableFileSystem();

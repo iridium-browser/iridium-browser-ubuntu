@@ -87,27 +87,27 @@ class SelectFileDialog : public ui::SelectFileDialog::Listener,
   }
 
   // ui::SelectFileDialog::Listener implementation.
-  virtual void FileSelected(const base::FilePath& path,
-                            int index,
-                            void* params) OVERRIDE {
+  void FileSelected(const base::FilePath& path,
+                    int index,
+                    void* params) override {
     selected_callback_.Run(path);
     Release();  // Balanced in ::Show.
   }
 
-  virtual void MultiFilesSelected(const std::vector<base::FilePath>& files,
-                                  void* params) OVERRIDE {
+  void MultiFilesSelected(const std::vector<base::FilePath>& files,
+                          void* params) override {
     Release();  // Balanced in ::Show.
     NOTREACHED() << "Should not be able to select multiple files";
   }
 
-  virtual void FileSelectionCanceled(void* params) OVERRIDE {
+  void FileSelectionCanceled(void* params) override {
     canceled_callback_.Run();
     Release();  // Balanced in ::Show.
   }
 
  private:
   friend class base::RefCounted<SelectFileDialog>;
-  virtual ~SelectFileDialog() {}
+  ~SelectFileDialog() override {}
 
   scoped_refptr<ui::SelectFileDialog> select_file_dialog_;
   SelectedCallback selected_callback_;
@@ -128,7 +128,7 @@ void AppendToFile(const base::FilePath& path, const std::string& content) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   DCHECK(!path.empty());
 
-  base::AppendToFile(path, content.c_str(), content.length());
+  base::AppendToFile(path, content.c_str(), content.size());
 }
 
 storage::IsolatedContext* isolated_context() {

@@ -28,6 +28,7 @@
 #include "chrome/browser/safe_browsing/malware_details.h"
 #include "chrome/browser/safe_browsing/ui_manager.h"
 #include "chrome/browser/tab_contents/tab_util.h"
+#include "chrome/browser/ui/zoom/zoom_controller.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -39,6 +40,7 @@
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/renderer_preferences.h"
 #include "grit/browser_resources.h"
 #include "net/base/escape.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -124,11 +126,11 @@ SafeBrowsingBlockingPageFactory* SafeBrowsingBlockingPage::factory_ = NULL;
 class SafeBrowsingBlockingPageFactoryImpl
     : public SafeBrowsingBlockingPageFactory {
  public:
-  virtual SafeBrowsingBlockingPage* CreateSafeBrowsingPage(
+  SafeBrowsingBlockingPage* CreateSafeBrowsingPage(
       SafeBrowsingUIManager* ui_manager,
       WebContents* web_contents,
       const SafeBrowsingBlockingPage::UnsafeResourceList& unsafe_resources)
-      OVERRIDE {
+      override {
     return new SafeBrowsingBlockingPage(ui_manager, web_contents,
         unsafe_resources);
   }
@@ -171,7 +173,7 @@ SafeBrowsingBlockingPage::SafeBrowsingBlockingPage(
     if (threat_type == SB_THREAT_TYPE_URL_MALWARE ||
         threat_type == SB_THREAT_TYPE_CLIENT_SIDE_MALWARE_URL) {
       malware = true;
-    } else if (threat_type == SB_THREAT_TYPE_URL_HARMFUL) {
+    } else if (threat_type == SB_THREAT_TYPE_URL_UNWANTED) {
       harmful = true;
     } else {
       DCHECK(threat_type == SB_THREAT_TYPE_URL_PHISHING ||
@@ -376,9 +378,11 @@ void SafeBrowsingBlockingPage::CommandReceived(const std::string& cmd) {
     diagnostic_url = google_util::AppendGoogleLocaleParam(
         diagnostic_url, g_browser_process->GetApplicationLocale());
     DCHECK(unsafe_resources_[element_index].threat_type ==
-           SB_THREAT_TYPE_URL_MALWARE ||
+               SB_THREAT_TYPE_URL_MALWARE ||
            unsafe_resources_[element_index].threat_type ==
-           SB_THREAT_TYPE_CLIENT_SIDE_MALWARE_URL);
+               SB_THREAT_TYPE_CLIENT_SIDE_MALWARE_URL ||
+           unsafe_resources_[element_index].threat_type ==
+               SB_THREAT_TYPE_URL_UNWANTED);
     OpenURLParams params(
         diagnostic_url, Referrer(), CURRENT_TAB, ui::PAGE_TRANSITION_LINK,
         false);
@@ -398,7 +402,8 @@ void SafeBrowsingBlockingPage::OverrideRendererPrefs(
       content::RendererPreferences* prefs) {
   Profile* profile = Profile::FromBrowserContext(
       web_contents_->GetBrowserContext());
-  renderer_preferences_util::UpdateFromSystemSettings(prefs, profile);
+  renderer_preferences_util::UpdateFromSystemSettings(
+      prefs, profile, web_contents_);
  }
 
 void SafeBrowsingBlockingPage::SetReportingPreference(bool report) {
@@ -689,7 +694,7 @@ std::string SafeBrowsingBlockingPage::GetHTMLContents() {
   // Fill in the shared values.
   base::DictionaryValue load_time_data;
   webui::SetFontAndTextDirection(&load_time_data);
-  load_time_data.SetBoolean("ssl", false);
+  load_time_data.SetString("type", "SAFEBROWSING");
   load_time_data.SetString(
       "tabTitle", l10n_util::GetStringUTF16(IDS_SAFEBROWSING_V3_TITLE));
   load_time_data.SetString(
@@ -719,8 +724,7 @@ std::string SafeBrowsingBlockingPage::GetHTMLContents() {
 
   base::StringPiece html(
       ResourceBundle::GetSharedInstance().GetRawDataResource(
-          IRD_SECURITY_INTERSTITIAL_HTML));
-  webui::UseVersion2 version;
+          IDR_SECURITY_INTERSTITIAL_HTML));
   return webui::GetI18nTemplateHtml(html, &load_time_data);
 }
 

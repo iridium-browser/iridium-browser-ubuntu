@@ -13,6 +13,7 @@
 #include "modules/geofencing/CircularGeofencingRegion.h"
 #include "modules/geofencing/GeofencingError.h"
 #include "modules/geofencing/GeofencingRegion.h"
+#include "modules/serviceworkers/ServiceWorkerRegistration.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebCircularGeofencingRegion.h"
 #include "public/platform/WebGeofencingProvider.h"
@@ -46,7 +47,8 @@ private:
 
 } // namespace
 
-Geofencing::Geofencing()
+Geofencing::Geofencing(ServiceWorkerRegistration* registration)
+    : m_registration(registration)
 {
 }
 
@@ -58,8 +60,11 @@ ScriptPromise Geofencing::registerRegion(ScriptState* scriptState, GeofencingReg
 
     RefPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
     ScriptPromise promise = resolver->promise();
-    // FIXME: somehow pass a reference to the current serviceworker to the provider.
-    provider->registerRegion(region->id(), toCircularGeofencingRegion(region)->webRegion(), new CallbackPromiseAdapter<void, GeofencingError>(resolver));
+    WebGeofencingCallbacks* callbacks = new CallbackPromiseAdapter<void, GeofencingError>(resolver);
+    WebServiceWorkerRegistration* serviceWorkerRegistration = nullptr;
+    if (m_registration)
+        serviceWorkerRegistration = m_registration->webRegistration();
+    provider->registerRegion(region->id(), toCircularGeofencingRegion(region)->webRegion(), serviceWorkerRegistration, callbacks);
     return promise;
 }
 
@@ -71,8 +76,11 @@ ScriptPromise Geofencing::unregisterRegion(ScriptState* scriptState, const Strin
 
     RefPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
     ScriptPromise promise = resolver->promise();
-    // FIXME: somehow pass a reference to the current serviceworker to the provider.
-    provider->unregisterRegion(regionId, new CallbackPromiseAdapter<void, GeofencingError>(resolver));
+    WebGeofencingCallbacks* callbacks = new CallbackPromiseAdapter<void, GeofencingError>(resolver);
+    WebServiceWorkerRegistration* serviceWorkerRegistration = nullptr;
+    if (m_registration)
+        serviceWorkerRegistration = m_registration->webRegistration();
+    provider->unregisterRegion(regionId, serviceWorkerRegistration, callbacks);
     return promise;
 }
 
@@ -84,9 +92,17 @@ ScriptPromise Geofencing::getRegisteredRegions(ScriptState* scriptState) const
 
     RefPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
     ScriptPromise promise = resolver->promise();
-    // FIXME: somehow pass a reference to the current serviceworker to the provider.
-    provider->getRegisteredRegions(new CallbackPromiseAdapter<RegionArray, GeofencingError>(resolver));
+    WebGeofencingRegionsCallbacks* callbacks = new CallbackPromiseAdapter<RegionArray, GeofencingError>(resolver);
+    WebServiceWorkerRegistration* serviceWorkerRegistration = nullptr;
+    if (m_registration)
+        serviceWorkerRegistration = m_registration->webRegistration();
+    provider->getRegisteredRegions(serviceWorkerRegistration, callbacks);
     return promise;
+}
+
+void Geofencing::trace(Visitor* visitor)
+{
+    visitor->trace(m_registration);
 }
 
 } // namespace blink

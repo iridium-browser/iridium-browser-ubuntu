@@ -51,35 +51,12 @@
       'common/custom_handlers/protocol_handler.cc',
       'common/custom_handlers/protocol_handler.h',
       'common/descriptors_android.h',
-      'common/extensions/chrome_extension_messages.h',
-      'common/extensions/chrome_extensions_client.cc',
-      'common/extensions/chrome_extensions_client.h',
-      'common/extensions/chrome_utility_extensions_messages.h',
-      'common/extensions/command.cc',
-      'common/extensions/command.h',
-      'common/extensions/extension_constants.cc',
-      'common/extensions/extension_constants.h',
-      'common/extensions/extension_process_policy.cc',
-      'common/extensions/extension_process_policy.h',
-      'common/extensions/features/chrome_channel_feature_filter.cc',
-      'common/extensions/features/chrome_channel_feature_filter.h',
-      'common/extensions/features/feature_channel.cc',
-      'common/extensions/features/feature_channel.h',
-      'common/extensions/image_writer/image_writer_util_mac.cc',
-      'common/extensions/image_writer/image_writer_util_mac.h',
-      'common/extensions/permissions/chrome_api_permissions.cc',
-      'common/extensions/permissions/chrome_api_permissions.h',
-      'common/extensions/permissions/chrome_permission_message_provider.cc',
-      'common/extensions/permissions/chrome_permission_message_provider.h',
-      'common/extensions/sync_helper.cc',
-      'common/extensions/sync_helper.h',
       'common/favicon/favicon_url_parser.cc',
       'common/favicon/favicon_url_parser.h',
       'common/icon_with_badge_image_source.cc',
       'common/icon_with_badge_image_source.h',
       'common/ini_parser.cc',
       'common/ini_parser.h',
-      'common/instant_restricted_id_cache.h',
       'common/instant_types.cc',
       'common/instant_types.h',
       'common/localized_error.cc',
@@ -136,6 +113,8 @@
       'common/tts_utterance_request.h',
       'common/url_constants.cc',
       'common/url_constants.h',
+      'common/v8_breakpad_support_win.cc',
+      'common/v8_breakpad_support_win.h',
       'common/variations/experiment_labels.cc',
       'common/variations/experiment_labels.h',
       'common/variations/uniformity_field_trials.cc',
@@ -152,16 +131,10 @@
       'common/extensions/api/commands/commands_handler.h',
       'common/extensions/api/extension_action/action_info.cc',
       'common/extensions/api/extension_action/action_info.h',
-      'common/extensions/api/extension_action/browser_action_handler.cc',
-      'common/extensions/api/extension_action/browser_action_handler.h',
-      'common/extensions/api/extension_action/page_action_handler.cc',
-      'common/extensions/api/extension_action/page_action_handler.h',
       'common/extensions/api/file_browser_handlers/file_browser_handler.cc',
       'common/extensions/api/file_browser_handlers/file_browser_handler.h',
       'common/extensions/api/i18n/default_locale_handler.cc',
       'common/extensions/api/i18n/default_locale_handler.h',
-      'common/extensions/api/identity/oauth2_manifest_handler.cc',
-      'common/extensions/api/identity/oauth2_manifest_handler.h',
       'common/extensions/api/input_ime/input_components_handler.cc',
       'common/extensions/api/input_ime/input_components_handler.h',
       'common/extensions/api/notifications/notification_style.cc',
@@ -184,10 +157,28 @@
       'common/extensions/api/url_handlers/url_handlers_parser.h',
       'common/extensions/api/webstore/webstore_api_constants.cc',
       'common/extensions/api/webstore/webstore_api_constants.h',
+      'common/extensions/chrome_extension_messages.h',
+      'common/extensions/chrome_extensions_client.cc',
+      'common/extensions/chrome_extensions_client.h',
       'common/extensions/chrome_manifest_handlers.cc',
       'common/extensions/chrome_manifest_handlers.h',
+      'common/extensions/chrome_manifest_url_handlers.cc',
+      'common/extensions/chrome_manifest_url_handlers.h',
+      'common/extensions/chrome_utility_extensions_messages.h',
+      'common/extensions/command.cc',
+      'common/extensions/command.h',
+      'common/extensions/extension_constants.cc',
+      'common/extensions/extension_constants.h',
       'common/extensions/extension_file_util.cc',
       'common/extensions/extension_file_util.h',
+      'common/extensions/extension_process_policy.cc',
+      'common/extensions/extension_process_policy.h',
+      'common/extensions/features/chrome_channel_feature_filter.cc',
+      'common/extensions/features/chrome_channel_feature_filter.h',
+      'common/extensions/features/feature_channel.cc',
+      'common/extensions/features/feature_channel.h',
+      'common/extensions/image_writer/image_writer_util_mac.cc',
+      'common/extensions/image_writer/image_writer_util_mac.h',
       'common/extensions/manifest_handlers/app_isolation_info.cc',
       'common/extensions/manifest_handlers/app_isolation_info.h',
       'common/extensions/manifest_handlers/app_launch_info.cc',
@@ -196,20 +187,24 @@
       'common/extensions/manifest_handlers/automation.h',
       'common/extensions/manifest_handlers/content_scripts_handler.cc',
       'common/extensions/manifest_handlers/content_scripts_handler.h',
+      'common/extensions/manifest_handlers/extension_action_handler.cc',
+      'common/extensions/manifest_handlers/extension_action_handler.h',
       'common/extensions/manifest_handlers/mime_types_handler.cc',
       'common/extensions/manifest_handlers/mime_types_handler.h',
       'common/extensions/manifest_handlers/minimum_chrome_version_checker.cc',
       'common/extensions/manifest_handlers/minimum_chrome_version_checker.h',
       'common/extensions/manifest_handlers/settings_overrides_handler.cc',
       'common/extensions/manifest_handlers/settings_overrides_handler.h',
-      'common/extensions/manifest_handlers/synthesize_browser_action_handler.cc',
-      'common/extensions/manifest_handlers/synthesize_browser_action_handler.h',
       'common/extensions/manifest_handlers/theme_handler.cc',
       'common/extensions/manifest_handlers/theme_handler.h',
       'common/extensions/manifest_handlers/ui_overrides_handler.cc',
       'common/extensions/manifest_handlers/ui_overrides_handler.h',
-      'common/extensions/manifest_url_handler.cc',
-      'common/extensions/manifest_url_handler.h',
+      'common/extensions/permissions/chrome_api_permissions.cc',
+      'common/extensions/permissions/chrome_api_permissions.h',
+      'common/extensions/permissions/chrome_permission_message_provider.cc',
+      'common/extensions/permissions/chrome_permission_message_provider.h',
+      'common/extensions/sync_helper.cc',
+      'common/extensions/sync_helper.h',
     ],
     'chrome_common_full_safe_browsing_sources': [
       'common/safe_browsing/download_protection_util.cc',
@@ -274,6 +269,7 @@
   },
   'targets': [
     {
+      # GN: //chrome/common:common
       'target_name': 'common',
       'type': 'static_library',
       'variables': {
@@ -315,8 +311,7 @@
         '<(DEPTH)/components/components.gyp:variations',
         '<(DEPTH)/content/content.gyp:content_common',
         '<(DEPTH)/crypto/crypto.gyp:crypto',
-        '<(DEPTH)/extensions/extensions_resources.gyp:extensions_resources',
-        '<(DEPTH)/extensions/extensions_strings.gyp:extensions_strings',
+        '<(DEPTH)/extensions/extensions.gyp:extensions_common_constants',
         '<(DEPTH)/media/cast/cast.gyp:cast_net',
         '<(DEPTH)/net/net.gyp:net',
         '<(DEPTH)/skia/skia.gyp:skia',
@@ -339,6 +334,9 @@
             '<(DEPTH)/device/usb/usb.gyp:device_usb',
             '<(DEPTH)/chrome/common/extensions/api/api.gyp:chrome_api',
             '<(DEPTH)/extensions/common/api/api.gyp:extensions_api',
+            '<(DEPTH)/extensions/extensions.gyp:extensions_common',
+            '<(DEPTH)/extensions/extensions_resources.gyp:extensions_resources',
+            '<(DEPTH)/extensions/extensions_strings.gyp:extensions_strings',
           ],
           'export_dependent_settings': [
             '<(DEPTH)/chrome/common/extensions/api/api.gyp:chrome_api',
@@ -365,7 +363,6 @@
             '<(DEPTH)/components/components.gyp:signin_core_common',
             '<(DEPTH)/components/components.gyp:translate_content_common',
             '<(DEPTH)/components/components.gyp:visitedlink_common',
-            '<(DEPTH)/extensions/extensions.gyp:extensions_common',
             '<(DEPTH)/ipc/ipc.gyp:ipc',
             '<(DEPTH)/third_party/re2/re2.gyp:re2',
             '<(DEPTH)/third_party/widevine/cdm/widevine_cdm.gyp:widevine_cdm_version_h',
@@ -417,7 +414,7 @@
             'common/pepper_permission_util.h',
           ],
         }],
-        ['enable_printing==0', {
+        ['enable_basic_printing==0 and enable_print_preview==0', {
           'sources!': [
             'common/print_messages.cc',
             'common/print_messages.h',
@@ -427,7 +424,7 @@
             '<(DEPTH)/printing/printing.gyp:printing',
           ],
         }],
-        ['enable_printing==1', {
+        ['enable_print_preview==1', {
           'sources': [ '<@(chrome_common_service_process_sources)' ],
         }],
         ['enable_service_discovery==1', {
@@ -446,9 +443,8 @@
           'sources!': [
             'common/badge_util.cc',
             'common/chrome_version_info_posix.cc',
-            'common/extensions/api/extension_action/browser_action_handler.cc',
-            'common/extensions/api/extension_action/page_action_handler.cc',
             'common/extensions/api/spellcheck/spellcheck_handler.cc',
+            'common/extensions/manifest_handlers/extension_action_handler.cc',
             'common/extensions/manifest_handlers/minimum_chrome_version_checker.cc',
             'common/icon_with_badge_image_source.cc',
             'common/media_galleries/metadata_types.h',
@@ -536,60 +532,56 @@
       # GN version: //chrome/common:version
       'target_name': 'common_version',
       'type': 'none',
-      'conditions': [
-        ['os_posix == 1 and OS != "mac" and OS != "ios"', {
-          'direct_dependent_settings': {
-            'include_dirs': [
-              '<(SHARED_INTERMEDIATE_DIR)',
-            ],
+      'direct_dependent_settings': {
+        'include_dirs': [
+          '<(SHARED_INTERMEDIATE_DIR)',
+        ],
+      },
+      # Because generate_version generates a header, we must set the
+      # hard_dependency flag.
+      'hard_dependency': 1,
+      'actions': [
+        {
+          'action_name': 'generate_version',
+          'variables': {
+            'lastchange_path': '<(DEPTH)/build/util/LASTCHANGE',
+            'version_py_path': '<(DEPTH)/build/util/version.py',
+            'version_path': 'VERSION',
+            'template_input_path': 'common/chrome_version_info_values.h.version',
           },
-          # Because posix_version generates a header, we must set the
-          # hard_dependency flag.
-          'hard_dependency': 1,
-          'actions': [
-            {
-              'action_name': 'posix_version',
+          'conditions': [
+            [ 'branding == "Chrome"', {
               'variables': {
-                'lastchange_path': '<(DEPTH)/build/util/LASTCHANGE',
-                'version_py_path': '<(DEPTH)/build/util/version.py',
-                'version_path': 'VERSION',
-                'template_input_path': 'common/chrome_version_info_posix.h.version',
+                  'branding_path':
+                    'app/theme/google_chrome/BRANDING',
               },
-              'conditions': [
-                [ 'branding == "Chrome"', {
-                  'variables': {
-                     'branding_path':
-                       'app/theme/google_chrome/BRANDING',
-                  },
-                }, { # else branding!="Chrome"
-                  'variables': {
-                     'branding_path':
-                       'app/theme/chromium/BRANDING',
-                  },
-                }],
-              ],
-              'inputs': [
-                '<(template_input_path)',
-                '<(version_path)',
-                '<(branding_path)',
-                '<(lastchange_path)',
-              ],
-              'outputs': [
-                '<(SHARED_INTERMEDIATE_DIR)/chrome/common/chrome_version_info_posix.h',
-              ],
-              'action': [
-                'python',
-                '<(version_py_path)',
-                '-f', '<(version_path)',
-                '-f', '<(branding_path)',
-                '-f', '<(lastchange_path)',
-                '<(template_input_path)',
-                '<@(_outputs)',
-              ],
-              'message': 'Generating version information',
-            },
+            }, { # else branding!="Chrome"
+              'variables': {
+                  'branding_path':
+                    'app/theme/chromium/BRANDING',
+              },
+            }],
           ],
-        }],
+          'inputs': [
+            '<(template_input_path)',
+            '<(version_path)',
+            '<(branding_path)',
+            '<(lastchange_path)',
+          ],
+          'outputs': [
+            '<(SHARED_INTERMEDIATE_DIR)/chrome/common/chrome_version_info_values.h',
+          ],
+          'action': [
+            'python',
+            '<(version_py_path)',
+            '-f', '<(version_path)',
+            '-f', '<(branding_path)',
+            '-f', '<(lastchange_path)',
+            '<(template_input_path)',
+            '<@(_outputs)',
+          ],
+          'message': 'Generating version information',
+        },
       ],
     },
     {
@@ -597,8 +589,6 @@
       'target_name': 'common_net',
       'type': 'static_library',
       'sources': [
-        'common/net/net_error_info.cc',
-        'common/net/net_error_info.h',
         'common/net/net_resource_provider.cc',
         'common/net/net_resource_provider.h',
         'common/net/predictor_common.h',
@@ -613,6 +603,7 @@
         '<(DEPTH)/base/base.gyp:base',
         '<(DEPTH)/chrome/chrome_resources.gyp:chrome_resources',
         '<(DEPTH)/chrome/chrome_resources.gyp:chrome_strings',
+        '<(DEPTH)/components/components.gyp:error_page_common',
         '<(DEPTH)/crypto/crypto.gyp:crypto',
         '<(DEPTH)/net/net.gyp:net_resources',
         '<(DEPTH)/net/net.gyp:net',

@@ -32,14 +32,14 @@ public:
 
     typedef GLCircleEffect GLProcessor;
 
-    virtual void getConstantColorComponents(GrColor* color, uint32_t* validFlags) const SK_OVERRIDE;
-
     virtual const GrBackendFragmentProcessorFactory& getFactory() const SK_OVERRIDE;
 
 private:
     CircleEffect(GrPrimitiveEdgeType, const SkPoint& center, SkScalar radius);
 
-    virtual bool onIsEqual(const GrProcessor&) const SK_OVERRIDE;
+    virtual bool onIsEqual(const GrFragmentProcessor&) const SK_OVERRIDE;
+
+    virtual void onComputeInvariantOutput(InvariantOutput* inout) const SK_OVERRIDE;
 
     SkPoint             fCenter;
     SkScalar            fRadius;
@@ -56,8 +56,8 @@ GrFragmentProcessor* CircleEffect::Create(GrPrimitiveEdgeType edgeType, const Sk
     return SkNEW_ARGS(CircleEffect, (edgeType, center, radius));
 }
 
-void CircleEffect::getConstantColorComponents(GrColor* color, uint32_t* validFlags) const {
-    *validFlags = 0;
+void CircleEffect::onComputeInvariantOutput(InvariantOutput* inout) const {
+    inout->mulByUnknownAlpha();
 }
 
 const GrBackendFragmentProcessorFactory& CircleEffect::getFactory() const {
@@ -71,7 +71,7 @@ CircleEffect::CircleEffect(GrPrimitiveEdgeType edgeType, const SkPoint& c, SkSca
     this->setWillReadFragmentPosition();
 }
 
-bool CircleEffect::onIsEqual(const GrProcessor& other) const {
+bool CircleEffect::onIsEqual(const GrFragmentProcessor& other) const {
     const CircleEffect& ce = other.cast<CircleEffect>();
     return fEdgeType == ce.fEdgeType && fCenter == ce.fCenter && fRadius == ce.fRadius;
 }
@@ -101,7 +101,7 @@ class GLCircleEffect : public GrGLFragmentProcessor {
 public:
     GLCircleEffect(const GrBackendProcessorFactory&, const GrProcessor&);
 
-    virtual void emitCode(GrGLProgramBuilder* builder,
+    virtual void emitCode(GrGLFPBuilder* builder,
                           const GrFragmentProcessor& fp,
                           const GrProcessorKey& key,
                           const char* outputColor,
@@ -127,7 +127,7 @@ GLCircleEffect::GLCircleEffect(const GrBackendProcessorFactory& factory,
     fPrevRadius = -1.f;
 }
 
-void GLCircleEffect::emitCode(GrGLProgramBuilder* builder,
+void GLCircleEffect::emitCode(GrGLFPBuilder* builder,
                               const GrFragmentProcessor& fp,
                               const GrProcessorKey& key,
                               const char* outputColor,
@@ -143,7 +143,7 @@ void GLCircleEffect::emitCode(GrGLProgramBuilder* builder,
                                          "circle",
                                          &circleName);
 
-    GrGLFragmentShaderBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+    GrGLFPFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
     const char* fragmentPos = fsBuilder->fragmentPosition();
 
     SkASSERT(kHairlineAA_GrProcessorEdgeType != ce.getEdgeType());
@@ -204,14 +204,14 @@ public:
 
     typedef GLEllipseEffect GLProcessor;
 
-    virtual void getConstantColorComponents(GrColor* color, uint32_t* validFlags) const SK_OVERRIDE;
-
     virtual const GrBackendFragmentProcessorFactory& getFactory() const SK_OVERRIDE;
 
 private:
     EllipseEffect(GrPrimitiveEdgeType, const SkPoint& center, SkScalar rx, SkScalar ry);
 
-    virtual bool onIsEqual(const GrProcessor&) const SK_OVERRIDE;
+    virtual bool onIsEqual(const GrFragmentProcessor&) const SK_OVERRIDE;
+
+    virtual void onComputeInvariantOutput(InvariantOutput* inout) const SK_OVERRIDE;
 
     SkPoint             fCenter;
     SkVector            fRadii;
@@ -230,8 +230,8 @@ GrFragmentProcessor* EllipseEffect::Create(GrPrimitiveEdgeType edgeType,
     return SkNEW_ARGS(EllipseEffect, (edgeType, center, rx, ry));
 }
 
-void EllipseEffect::getConstantColorComponents(GrColor* color, uint32_t* validFlags) const {
-    *validFlags = 0;
+void EllipseEffect::onComputeInvariantOutput(InvariantOutput* inout) const {
+    inout->mulByUnknownAlpha();
 }
 
 const GrBackendFragmentProcessorFactory& EllipseEffect::getFactory() const {
@@ -245,7 +245,7 @@ EllipseEffect::EllipseEffect(GrPrimitiveEdgeType edgeType, const SkPoint& c, SkS
     this->setWillReadFragmentPosition();
 }
 
-bool EllipseEffect::onIsEqual(const GrProcessor& other) const {
+bool EllipseEffect::onIsEqual(const GrFragmentProcessor& other) const {
     const EllipseEffect& ee = other.cast<EllipseEffect>();
     return fEdgeType == ee.fEdgeType && fCenter == ee.fCenter && fRadii == ee.fRadii;
 }
@@ -276,7 +276,7 @@ class GLEllipseEffect : public GrGLFragmentProcessor {
 public:
     GLEllipseEffect(const GrBackendProcessorFactory&, const GrProcessor&);
 
-    virtual void emitCode(GrGLProgramBuilder* builder,
+    virtual void emitCode(GrGLFPBuilder* builder,
                           const GrFragmentProcessor& fp,
                           const GrProcessorKey& key,
                           const char* outputColor,
@@ -302,7 +302,7 @@ GLEllipseEffect::GLEllipseEffect(const GrBackendProcessorFactory& factory,
     fPrevRadii.fX = -1.f;
 }
 
-void GLEllipseEffect::emitCode(GrGLProgramBuilder* builder,
+void GLEllipseEffect::emitCode(GrGLFPBuilder* builder,
                                const GrFragmentProcessor& fp,
                                const GrProcessorKey& key,
                                const char* outputColor,
@@ -317,7 +317,7 @@ void GLEllipseEffect::emitCode(GrGLProgramBuilder* builder,
                                          "ellipse",
                                          &ellipseName);
 
-    GrGLFragmentShaderBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+    GrGLFPFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
     const char* fragmentPos = fsBuilder->fragmentPosition();
 
     // d is the offset to the ellipse center

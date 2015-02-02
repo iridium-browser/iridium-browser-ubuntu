@@ -64,11 +64,10 @@ struct NetworkPerformanceParams {
 class FakeCursorShapeStub : public protocol::CursorShapeStub {
  public:
   FakeCursorShapeStub() {}
-  virtual ~FakeCursorShapeStub() {}
+  ~FakeCursorShapeStub() override {}
 
   // protocol::CursorShapeStub interface.
-  virtual void SetCursorShape(
-      const protocol::CursorShapeInfo& cursor_shape) OVERRIDE {};
+  void SetCursorShape(const protocol::CursorShapeInfo& cursor_shape) override{};
 };
 
 class ProtocolPerfTest
@@ -97,35 +96,31 @@ class ProtocolPerfTest
   }
 
   // ClientUserInterface interface.
-  virtual void OnConnectionState(protocol::ConnectionToHost::State state,
-                                 protocol::ErrorCode error) OVERRIDE {
+  void OnConnectionState(protocol::ConnectionToHost::State state,
+                         protocol::ErrorCode error) override {
     if (state == protocol::ConnectionToHost::CONNECTED) {
       client_connected_ = true;
       if (host_connected_)
         connecting_loop_->Quit();
     }
   }
-  virtual void OnConnectionReady(bool ready) OVERRIDE {}
-  virtual void OnRouteChanged(const std::string& channel_name,
-                              const protocol::TransportRoute& route) OVERRIDE {
-  }
-  virtual void SetCapabilities(const std::string& capabilities) OVERRIDE {}
-  virtual void SetPairingResponse(
-      const protocol::PairingResponse& pairing_response) OVERRIDE {}
-  virtual void DeliverHostMessage(
-      const protocol::ExtensionMessage& message) OVERRIDE {}
-  virtual protocol::ClipboardStub* GetClipboardStub() OVERRIDE {
-    return NULL;
-  }
-  virtual protocol::CursorShapeStub* GetCursorShapeStub() OVERRIDE {
+  void OnConnectionReady(bool ready) override {}
+  void OnRouteChanged(const std::string& channel_name,
+                      const protocol::TransportRoute& route) override {}
+  void SetCapabilities(const std::string& capabilities) override {}
+  void SetPairingResponse(
+      const protocol::PairingResponse& pairing_response) override {}
+  void DeliverHostMessage(const protocol::ExtensionMessage& message) override {}
+  protocol::ClipboardStub* GetClipboardStub() override { return NULL; }
+  protocol::CursorShapeStub* GetCursorShapeStub() override {
     return &cursor_shape_stub_;
   }
 
   // VideoRenderer interface.
-  virtual void Initialize(const protocol::SessionConfig& config) OVERRIDE {}
-  virtual ChromotingStats* GetStats() OVERRIDE { return NULL; }
-  virtual void ProcessVideoPacket(scoped_ptr<VideoPacket> video_packet,
-                                  const base::Closure& done) OVERRIDE {
+  void Initialize(const protocol::SessionConfig& config) override {}
+  ChromotingStats* GetStats() override { return NULL; }
+  void ProcessVideoPacket(scoped_ptr<VideoPacket> video_packet,
+                          const base::Closure& done) override {
     if (video_packet->data().empty()) {
       // Ignore keep-alive packets
       done.Run();
@@ -141,7 +136,7 @@ class ProtocolPerfTest
   }
 
   // HostStatusObserver interface.
-  virtual void OnClientConnected(const std::string& jid) OVERRIDE {
+  void OnClientConnected(const std::string& jid) override {
     message_loop_.PostTask(
         FROM_HERE,
         base::Bind(&ProtocolPerfTest::OnHostConnectedMainThread,
@@ -237,7 +232,7 @@ class ProtocolPerfTest
     scoped_ptr<protocol::TransportFactory> host_transport_factory(
         new protocol::LibjingleTransportFactory(
             host_signaling_.get(),
-            port_allocator.PassAs<cricket::HttpPortAllocatorBase>(),
+            port_allocator.Pass(),
             network_settings));
 
     scoped_ptr<protocol::SessionManager> session_manager(
@@ -308,7 +303,7 @@ class ProtocolPerfTest
     scoped_ptr<protocol::TransportFactory> client_transport_factory(
         new protocol::LibjingleTransportFactory(
             client_signaling_.get(),
-            port_allocator.PassAs<cricket::HttpPortAllocatorBase>(),
+            port_allocator.Pass(),
             network_settings));
 
     std::vector<protocol::AuthenticationMethod> auth_methods;
@@ -320,10 +315,10 @@ class ProtocolPerfTest
             std::string(),  // client_pairing_secret
             std::string(),  // authentication_tag
             base::Bind(&ProtocolPerfTest::FetchPin, base::Unretained(this)),
-            scoped_ptr<protocol::ThirdPartyClientAuthenticator::TokenFetcher>(),
+            nullptr,
             auth_methods));
-    client_.reset(new ChromotingClient(
-        client_context_.get(), this, this, scoped_ptr<AudioPlayer>()));
+    client_.reset(
+        new ChromotingClient(client_context_.get(), this, this, nullptr));
     client_->SetProtocolConfigForTests(protocol_config_->Clone());
     client_->Start(
         client_signaling_.get(), client_authenticator.Pass(),

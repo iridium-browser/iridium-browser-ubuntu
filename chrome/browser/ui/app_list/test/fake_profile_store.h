@@ -14,19 +14,18 @@
 class FakeProfileStore : public ProfileStore {
  public:
   explicit FakeProfileStore(const base::FilePath& user_data_dir);
-  virtual ~FakeProfileStore();
+  ~FakeProfileStore() override;
 
   void LoadProfile(Profile* profile);
   void RemoveProfile(Profile* profile);
 
   // ProfileStore overrides.
-  virtual void AddProfileObserver(ProfileInfoCacheObserver* observer) OVERRIDE;
-  virtual void LoadProfileAsync(
-      const base::FilePath& path,
-      base::Callback<void(Profile*)> callback) OVERRIDE;
-  virtual Profile* GetProfileByPath(const base::FilePath& path) OVERRIDE;
-  virtual base::FilePath GetUserDataDir() OVERRIDE;
-  virtual bool IsProfileSupervised(const base::FilePath& path) OVERRIDE;
+  void AddProfileObserver(ProfileInfoCacheObserver* observer) override;
+  void LoadProfileAsync(const base::FilePath& path,
+                        base::Callback<void(Profile*)> callback) override;
+  Profile* GetProfileByPath(const base::FilePath& path) override;
+  base::FilePath GetUserDataDir() override;
+  bool IsProfileSupervised(const base::FilePath& path) override;
 
  private:
   base::FilePath user_data_dir_;

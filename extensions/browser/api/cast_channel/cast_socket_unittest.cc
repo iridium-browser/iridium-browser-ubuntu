@@ -97,7 +97,7 @@ class MockTCPSocket : public net::TCPClientSocket {
     do_nothing_ = do_nothing;
   }
 
-  virtual int Connect(const net::CompletionCallback& callback) OVERRIDE {
+  virtual int Connect(const net::CompletionCallback& callback) override {
     if (do_nothing_) {
       // Stall the I/O event loop.
       return net::ERR_IO_PENDING;
@@ -114,12 +114,12 @@ class MockTCPSocket : public net::TCPClientSocket {
     }
   }
 
-  virtual bool SetKeepAlive(bool enable, int delay) OVERRIDE {
+  virtual bool SetKeepAlive(bool enable, int delay) override {
     // Always return true in tests
     return true;
   }
 
-  virtual bool SetNoDelay(bool no_delay) OVERRIDE {
+  virtual bool SetNoDelay(bool no_delay) override {
     // Always return true in tests
     return true;
   }
@@ -129,7 +129,7 @@ class MockTCPSocket : public net::TCPClientSocket {
   MOCK_METHOD3(Write,
                int(net::IOBuffer*, int, const net::CompletionCallback&));
 
-  virtual void Disconnect() OVERRIDE {
+  virtual void Disconnect() override {
     // Do nothing in tests
   }
 
@@ -204,7 +204,7 @@ class TestCastSocket : public CastSocket {
     return msg.length() - MessageFramer::MessageHeader::header_size();
   }
 
-  virtual ~TestCastSocket() {}
+  ~TestCastSocket() override {}
 
   // Helpers to set mock results for various operations.
   void SetupTcp1Connect(net::IoMode mode, int result) {
@@ -284,7 +284,7 @@ class TestCastSocket : public CastSocket {
   void DisallowVerifyChallengeResult() { verify_challenge_disallow_ = true; }
 
  private:
-  virtual scoped_ptr<net::TCPClientSocket> CreateTcpSocket() OVERRIDE {
+  scoped_ptr<net::TCPClientSocket> CreateTcpSocket() override {
     if (tcp_unresponsive_) {
       return scoped_ptr<net::TCPClientSocket>(new MockTCPSocket(true));
     } else {
@@ -294,8 +294,8 @@ class TestCastSocket : public CastSocket {
     }
   }
 
-  virtual scoped_ptr<net::SSLClientSocket> CreateSslSocket(
-      scoped_ptr<net::StreamSocket> socket) OVERRIDE {
+  scoped_ptr<net::SSLClientSocket> CreateSslSocket(
+      scoped_ptr<net::StreamSocket> socket) override {
     net::MockConnect* connect_data = ssl_connect_data_[connect_index_].get();
     connect_data->peer_addr = ip_;
     ++connect_index_;
@@ -309,20 +309,18 @@ class TestCastSocket : public CastSocket {
             net::AddressList(), &capturing_net_log_, ssl_data_.get()));
   }
 
-  virtual bool ExtractPeerCert(std::string* cert) OVERRIDE {
+  bool ExtractPeerCert(std::string* cert) override {
     if (extract_cert_result_)
       cert->assign("dummy_test_cert");
     return extract_cert_result_;
   }
 
-  virtual bool VerifyChallengeReply() OVERRIDE {
+  bool VerifyChallengeReply() override {
     EXPECT_FALSE(verify_challenge_disallow_);
     return verify_challenge_result_;
   }
 
-  virtual base::Timer* GetTimer() OVERRIDE {
-    return mock_timer_.get();
-  }
+  base::Timer* GetTimer() override { return mock_timer_.get(); }
 
   net::CapturingNetLog capturing_net_log_;
   net::IPEndPoint ip_;
@@ -351,9 +349,9 @@ class CastSocketTest : public testing::Test {
       : logger_(new Logger(
             scoped_ptr<base::TickClock>(new base::SimpleTestTickClock),
             base::TimeTicks())) {}
-  virtual ~CastSocketTest() {}
+  ~CastSocketTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     // Create a few test messages
     for (size_t i = 0; i < arraysize(test_messages_); i++) {
       CreateStringMessage("urn:cast", "1", "2", kTestData[i],
@@ -365,7 +363,7 @@ class CastSocketTest : public testing::Test {
     }
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     if (socket_.get()) {
       EXPECT_CALL(handler_, OnCloseComplete(net::OK));
       socket_->Close(base::Bind(&CompleteHandler::OnCloseComplete,

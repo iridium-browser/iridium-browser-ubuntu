@@ -39,7 +39,7 @@
 
 namespace blink {
 
-class DistributionPool FINAL {
+class DistributionPool final {
     STACK_ALLOCATED();
 public:
     explicit DistributionPool(const ContainerNode&);
@@ -254,7 +254,7 @@ const DestinationInsertionPoints* ElementShadow::destinationInsertionPointsFor(c
 
 void ElementShadow::distribute()
 {
-    host()->setNeedsStyleRecalc(SubtreeStyleChange);
+    host()->setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::create(StyleChangeReason::Shadow));
     WillBeHeapVector<RawPtrWillBeMember<HTMLShadowElement>, 32> shadowInsertionPoints;
     DistributionPool pool(*host());
 
@@ -318,12 +318,12 @@ void ElementShadow::collectSelectFeatureSetFrom(ShadowRoot& root)
     if (!root.containsShadowRoots() && !root.containsContentElements())
         return;
 
-    for (Element* element = ElementTraversal::firstWithin(root); element; element = ElementTraversal::next(*element, &root)) {
-        if (ElementShadow* shadow = element->shadow())
+    for (Element& element : ElementTraversal::descendantsOf(root)) {
+        if (ElementShadow* shadow = element.shadow())
             m_selectFeatures.add(shadow->ensureSelectFeatureSet());
-        if (!isHTMLContentElement(*element))
+        if (!isHTMLContentElement(element))
             continue;
-        const CSSSelectorList& list = toHTMLContentElement(*element).selectorList();
+        const CSSSelectorList& list = toHTMLContentElement(element).selectorList();
         for (const CSSSelector* selector = list.first(); selector; selector = CSSSelectorList::next(*selector)) {
             for (const CSSSelector* component = selector; component; component = component->tagHistory())
                 m_selectFeatures.collectFeaturesFromSelector(*component);

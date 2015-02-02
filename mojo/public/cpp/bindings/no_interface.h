@@ -37,12 +37,11 @@ class NoInterfaceStub : public MessageReceiverWithResponder {
  public:
   NoInterfaceStub() {}
   void set_sink(NoInterface* sink) {}
-  NoInterface* sink() { return NULL; }
-  virtual bool Accept(Message* message) MOJO_OVERRIDE;
-  virtual bool AcceptWithResponder(Message* message, MessageReceiver* responder)
-      MOJO_OVERRIDE;
+  NoInterface* sink() { return nullptr; }
+  bool Accept(Message* message) override;
+  bool AcceptWithResponder(Message* message,
+                           MessageReceiver* responder) override;
 };
-
 
 // AnyInterface is for use in cases where any interface would do (e.g., see the
 // Shell::Connect method).

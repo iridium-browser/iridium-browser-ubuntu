@@ -5,34 +5,41 @@
 #ifndef COMPONENTS_CRONET_ANDROID_URL_REQUEST_CONTEXT_ADAPTER_H_
 #define COMPONENTS_CRONET_ANDROID_URL_REQUEST_CONTEXT_ADAPTER_H_
 
+#include <queue>
 #include <string>
 
+#include "base/callback.h"
 #include "base/compiler_specific.h"
+#include "base/location.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/threading/thread.h"
 #include "net/base/net_log.h"
-#include "net/base/network_change_notifier.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 
 namespace net {
+
 class NetLogLogger;
+
+class ProxyConfigService;
+
 }  // namespace net
 
 namespace cronet {
 
 struct URLRequestContextConfig;
+typedef base::Callback<void(void)> RunAfterContextInitTask;
 
 // Implementation of the Chromium NetLog observer interface.
 class NetLogObserver : public net::NetLog::ThreadSafeObserver {
  public:
-  explicit NetLogObserver() {}
+  NetLogObserver() {}
 
   virtual ~NetLogObserver() {}
 
-  virtual void OnAddEntry(const net::NetLog::Entry& entry) OVERRIDE;
+  void OnAddEntry(const net::NetLog::Entry& entry) override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(NetLogObserver);
@@ -56,29 +63,54 @@ class URLRequestContextAdapter : public net::URLRequestContextGetter {
                            std::string user_agent);
   void Initialize(scoped_ptr<URLRequestContextConfig> config);
 
+  // Posts a task that might depend on the context being initialized
+  // to the network thread.
+  void PostTaskToNetworkThread(const tracked_objects::Location& posted_from,
+                               const RunAfterContextInitTask& callback);
+
+  // Runs a task that might depend on the context being initialized.
+  // This method should only be run on the network thread.
+  void RunTaskAfterContextInitOnNetworkThread(
+      const RunAfterContextInitTask& callback);
+
   const std::string& GetUserAgent(const GURL& url) const;
 
   // net::URLRequestContextGetter implementation:
-  virtual net::URLRequestContext* GetURLRequestContext() OVERRIDE;
-  virtual scoped_refptr<base::SingleThreadTaskRunner> GetNetworkTaskRunner()
-      const OVERRIDE;
+  net::URLRequestContext* GetURLRequestContext() override;
+  scoped_refptr<base::SingleThreadTaskRunner> GetNetworkTaskRunner()
+      const override;
 
   void StartNetLogToFile(const std::string& file_name);
   void StopNetLog();
+
+  // Called on main Java thread to initialize URLRequestContext.
+  void InitRequestContextOnMainThread();
 
  private:
   scoped_refptr<URLRequestContextAdapterDelegate> delegate_;
   scoped_ptr<net::URLRequestContext> context_;
   std::string user_agent_;
   base::Thread* network_thread_;
-  scoped_ptr<net::NetworkChangeNotifier> network_change_notifier_;
   scoped_ptr<NetLogObserver> net_log_observer_;
   scoped_ptr<net::NetLogLogger> net_log_logger_;
+  scoped_ptr<net::ProxyConfigService> proxy_config_service_;
+  scoped_ptr<URLRequestContextConfig> config_;
+
+  // A queue of tasks that need to be run after context has been initialized.
+  std::queue<RunAfterContextInitTask> tasks_waiting_for_context_;
+  bool is_context_initialized_ = false;
 
   virtual ~URLRequestContextAdapter();
 
   // Initializes |context_| on the Network thread.
-  void InitializeURLRequestContext(scoped_ptr<URLRequestContextConfig> config);
+  void InitRequestContextOnNetworkThread();
+
+  // Helper function to start writing NetLog data to file. This should only be
+  // run after context is initialized.
+  void StartNetLogToFileHelper(const std::string& file_name);
+  // Helper function to stop writing NetLog data to file. This should only be
+  // run after context is initialized.
+  void StopNetLogHelper();
 
   DISALLOW_COPY_AND_ASSIGN(URLRequestContextAdapter);
 };

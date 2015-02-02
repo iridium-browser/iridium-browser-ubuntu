@@ -6,9 +6,11 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/chromeos/file_system_provider/fileapi/buffering_file_stream_reader.h"
+#include "chrome/browser/chromeos/file_system_provider/fileapi/buffering_file_stream_writer.h"
 #include "chrome/browser/chromeos/file_system_provider/fileapi/file_stream_reader.h"
 #include "chrome/browser/chromeos/file_system_provider/fileapi/file_stream_writer.h"
 #include "chrome/browser/chromeos/file_system_provider/fileapi/provider_async_file_util.h"
+#include "chrome/browser/chromeos/file_system_provider/fileapi/watcher_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "storage/browser/blob/file_stream_reader.h"
 #include "storage/browser/fileapi/file_stream_writer.h"
@@ -24,10 +26,16 @@ namespace {
 // be read ahead of the requested data.
 const int kReaderBufferSize = 512 * 1024;  // 512KB.
 
+// Size of the stream writer internal buffer. At most this number of bytes will
+// be postponed for writing.
+const int kWriterBufferSize = 512 * 1024;  // 512KB.
+
 }  // namespace
 
 BackendDelegate::BackendDelegate()
-    : async_file_util_(new internal::ProviderAsyncFileUtil) {}
+    : async_file_util_(new internal::ProviderAsyncFileUtil),
+      watcher_manager_(new WatcherManager) {
+}
 
 BackendDelegate::~BackendDelegate() {}
 
@@ -61,14 +69,16 @@ scoped_ptr<storage::FileStreamWriter> BackendDelegate::CreateFileStreamWriter(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK_EQ(storage::kFileSystemTypeProvided, url.type());
 
-  return scoped_ptr<storage::FileStreamWriter>(
-      new FileStreamWriter(url, offset));
+  return scoped_ptr<storage::FileStreamWriter>(new BufferingFileStreamWriter(
+      scoped_ptr<storage::FileStreamWriter>(new FileStreamWriter(url, offset)),
+      kWriterBufferSize));
 }
 
 storage::WatcherManager* BackendDelegate::GetWatcherManager(
-    const storage::FileSystemURL& url) {
-  NOTIMPLEMENTED();
-  return NULL;
+    storage::FileSystemType type) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  DCHECK_EQ(storage::kFileSystemTypeProvided, type);
+  return watcher_manager_.get();
 }
 
 void BackendDelegate::GetRedirectURLForContents(

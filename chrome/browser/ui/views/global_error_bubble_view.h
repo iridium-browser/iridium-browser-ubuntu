@@ -22,17 +22,16 @@ class GlobalErrorBubbleView : public views::ButtonListener,
       views::BubbleBorder::Arrow arrow,
       Browser* browser,
       const base::WeakPtr<GlobalErrorWithStandardBubble>& error);
-  virtual ~GlobalErrorBubbleView();
+  ~GlobalErrorBubbleView() override;
 
   // views::ButtonListener implementation.
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE;
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // views::WidgetDelegate implementation.
-  virtual void WindowClosing() OVERRIDE;
+  void WindowClosing() override;
 
   // GlobalErrorBubbleViewBase implementation.
-  virtual void CloseBubbleView() OVERRIDE;
+  void CloseBubbleView() override;
 
  private:
   Browser* browser_;

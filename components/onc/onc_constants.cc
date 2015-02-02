@@ -177,6 +177,7 @@ const char kWebProxyAutoDiscoveryUrl[] = "WebProxyAutoDiscoveryUrl";
 }  // namespace ipconfig
 
 namespace wifi {
+const char kAllowGatewayARPPolling[] = "AllowGatewayARPPolling";
 const char kAutoConnect[] = "AutoConnect";
 const char kBSSID[] = "BSSID";
 const char kEAP[] = "EAP";
@@ -309,6 +310,8 @@ const char kKeyDirection[] = "KeyDirection";
 const char kNoInteract[] = "nointeract";
 const char kNone[] = "none";
 const char kNsCertType[] = "NsCertType";
+const char kOTP[] = "OTP";
+const char kPassword[] = "Password";
 const char kPort[] = "Port";
 const char kProto[] = "Proto";
 const char kPushPeerInfo[] = "PushPeerInfo";
@@ -327,10 +330,18 @@ const char kShaper[] = "Shaper";
 const char kStaticChallenge[] = "StaticChallenge";
 const char kTLSAuthContents[] = "TLSAuthContents";
 const char kTLSRemote[] = "TLSRemote";
+const char kUserAuthenticationType[] = "UserAuthenticationType";
 const char kVerb[] = "Verb";
 const char kVerifyHash[] = "VerifyHash";
 const char kVerifyX509[] = "VerifyX509";
 }  // namespace openvpn
+
+namespace openvpn_user_auth_type {
+const char kNone[] = "None";
+const char kOTP[] = "OTP";
+const char kPassword[] = "Password";
+const char kPasswordAndOTP[] = "PasswordAndOTP";
+}  // openvpn_user_auth_type
 
 namespace verify_x509 {
 const char kName[] = "Name";

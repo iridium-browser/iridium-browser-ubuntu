@@ -38,16 +38,16 @@ class TranslateInternalsHandler : public content::WebUIMessageHandler,
                                   public content::NotificationObserver {
  public:
   TranslateInternalsHandler();
-  virtual ~TranslateInternalsHandler();
+  ~TranslateInternalsHandler() override;
 
   // content::WebUIMessageHandler methods:
-  virtual void RegisterMessages() OVERRIDE;
+  void RegisterMessages() override;
 
  private:
   // content::NotificationObserver implementation:
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   // Callback for translate errors.
   void OnTranslateError(const translate::TranslateErrorDetails& details);

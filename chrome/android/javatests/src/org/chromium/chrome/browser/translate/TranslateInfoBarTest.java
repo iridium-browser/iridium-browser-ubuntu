@@ -34,8 +34,8 @@ public class TranslateInfoBarTest extends ChromeShellTestBase {
     }
 
     private static final String NEVER_TRANSLATE_MESSAGE =
-        "Would you like Google Chrome to offer to translate French pages from this" +
-        " site next time?";
+            "Would you like Google Chrome to offer to translate French pages from this" +
+            " site next time?";
 
     /**
      * Test the translate language panel.
@@ -49,11 +49,10 @@ public class TranslateInfoBarTest extends ChromeShellTestBase {
         loadUrlWithSanitization(TestHttpServerClient.getUrl(TRANSLATE_PAGE));
         assertTrue("InfoBar not opened.", mListener.addInfoBarAnimationFinished());
         InfoBar infoBar = infoBars.get(0);
-        assertTrue(InfoBarUtil.hasPrimaryButton(this, infoBar));
-        assertTrue(InfoBarUtil.hasSecondaryButton(this, infoBar));
+        assertTrue(InfoBarUtil.hasPrimaryButton(infoBar));
+        assertTrue(InfoBarUtil.hasSecondaryButton(infoBar));
         assertTrue("Language Panel not opened.", TranslateUtil.openLanguagePanel(this, infoBar));
     }
-
 
     /**
      * Test the "never translate" panel.
@@ -68,14 +67,14 @@ public class TranslateInfoBarTest extends ChromeShellTestBase {
         assertTrue("InfoBar not opened.", mListener.addInfoBarAnimationFinished());
         InfoBar infoBar = infoBars.get(0);
 
-        assertTrue(InfoBarUtil.clickCloseButton(this, infoBar));
+        assertTrue(InfoBarUtil.clickCloseButton(infoBar));
         assertTrue(mListener.removeInfoBarAnimationFinished());
 
         // Reload the page so the infobar shows again
         loadUrlWithSanitization(TestHttpServerClient.getUrl(TRANSLATE_PAGE));
         assertTrue("InfoBar not opened", mListener.addInfoBarAnimationFinished());
         infoBar = infoBars.get(0);
-        assertTrue(InfoBarUtil.clickCloseButton(this, infoBar));
+        assertTrue(InfoBarUtil.clickCloseButton(infoBar));
 
         assertTrue("Never Panel not opened.",
                 TranslateUtil.verifyInfoBarText(infoBar, NEVER_TRANSLATE_MESSAGE));

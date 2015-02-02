@@ -13,22 +13,39 @@
 
 namespace blink {
 
+class DOMFormData;
 class WebLocalCredential;
 
-class LocalCredential FINAL : public Credential {
+class LocalCredential final : public Credential {
     DEFINE_WRAPPERTYPEINFO();
 public:
+    static LocalCredential* create(const String& id, const String& password, ExceptionState& exceptionState)
+    {
+        return create(id, password, emptyString(), emptyString(), exceptionState);
+    }
+
+    static LocalCredential* create(const String& id, const String& password, const String& name, ExceptionState& exceptionState)
+    {
+        return create(id, password, name, emptyString(), exceptionState);
+    }
+
+    static LocalCredential* create(const String& id, const String& password, const String& name, const String& avatar, ExceptionState&);
     static LocalCredential* create(WebLocalCredential*);
-    static LocalCredential* create(const String& id, const String& name, const String& avatar, const String& password, ExceptionState&);
 
     // LocalCredential.idl
     const String& password() const;
+    DOMFormData* formData() const { return m_formData.get(); };
+
+    virtual void trace(Visitor*) override;
 
 private:
     LocalCredential(WebLocalCredential*);
-    LocalCredential(const String& id, const String& name, const KURL& avatar, const String& password);
+    LocalCredential(const String& id, const String& password, const String& name, const KURL& avatar);
+
+    // FIXME: Reconsider use of GarbageCollectedFinalized once this can be a Member.
+    RefPtrWillBeMember<DOMFormData> m_formData;
 };
 
 } // namespace blink
 
-#endif // Credential_h
+#endif // LocalCredential_h

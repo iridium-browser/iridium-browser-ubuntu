@@ -22,7 +22,7 @@ class AXTreeSourceAsh
     : public ui::AXTreeSource<views::AXAuraObjWrapper*> {
  public:
   AXTreeSourceAsh();
-  virtual ~AXTreeSourceAsh();
+  ~AXTreeSourceAsh() override;
 
   // A set of actions invoked on an Aura view.
   void DoDefault(int32 id);
@@ -31,19 +31,20 @@ class AXTreeSourceAsh
   void SetSelection(int32 id, int32 start, int32 end);
 
   // AXTreeSource implementation.
-  virtual views::AXAuraObjWrapper* GetRoot() const OVERRIDE;
-  virtual views::AXAuraObjWrapper* GetFromId(int32 id) const OVERRIDE;
-  virtual int32 GetId(views::AXAuraObjWrapper* node) const OVERRIDE;
-  virtual void GetChildren(views::AXAuraObjWrapper* node,
-      std::vector<views::AXAuraObjWrapper*>* out_children) const OVERRIDE;
-  virtual views::AXAuraObjWrapper* GetParent(
-      views::AXAuraObjWrapper* node) const OVERRIDE;
-  virtual bool IsValid(views::AXAuraObjWrapper* node) const OVERRIDE;
-  virtual bool IsEqual(views::AXAuraObjWrapper* node1,
-                       views::AXAuraObjWrapper* node2) const OVERRIDE;
-  virtual views::AXAuraObjWrapper* GetNull() const OVERRIDE;
-  virtual void SerializeNode(
-      views::AXAuraObjWrapper* node, ui::AXNodeData* out_data) const OVERRIDE;
+  views::AXAuraObjWrapper* GetRoot() const override;
+  views::AXAuraObjWrapper* GetFromId(int32 id) const override;
+  int32 GetId(views::AXAuraObjWrapper* node) const override;
+  void GetChildren(
+      views::AXAuraObjWrapper* node,
+      std::vector<views::AXAuraObjWrapper*>* out_children) const override;
+  views::AXAuraObjWrapper* GetParent(
+      views::AXAuraObjWrapper* node) const override;
+  bool IsValid(views::AXAuraObjWrapper* node) const override;
+  bool IsEqual(views::AXAuraObjWrapper* node1,
+               views::AXAuraObjWrapper* node2) const override;
+  views::AXAuraObjWrapper* GetNull() const override;
+  void SerializeNode(views::AXAuraObjWrapper* node,
+                     ui::AXNodeData* out_data) const override;
 
   // Useful for debugging.
   std::string ToString(views::AXAuraObjWrapper* root, std::string prefix);

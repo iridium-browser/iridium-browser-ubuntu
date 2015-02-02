@@ -9,11 +9,11 @@
 
 class SpeechRecognitionTest : public extensions::PlatformAppBrowserTest {
  public:
-   SpeechRecognitionTest() {}
-   virtual ~SpeechRecognitionTest() {}
+  SpeechRecognitionTest() {}
+  ~SpeechRecognitionTest() override {}
 
  protected:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     const testing::TestInfo* const test_info =
         testing::UnitTest::GetInstance()->current_test_info();
     // For SpeechRecognitionTest.SpeechFromBackgroundPage test, we need to
@@ -31,7 +31,7 @@ class SpeechRecognitionTest : public extensions::PlatformAppBrowserTest {
     extensions::PlatformAppBrowserTest::SetUp();
   }
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kUseFakeDeviceForMediaStream);
     command_line->AppendSwitch(switches::kUseFakeUIForMediaStream);
     extensions::PlatformAppBrowserTest::SetUpCommandLine(command_line);

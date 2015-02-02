@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-'use strict';
-
 /**
  * Progress center at the background page.
  * @constructor
@@ -11,7 +9,7 @@
 var ProgressCenter = function() {
   /**
    * Current items managed by the progress center.
-   * @type {Array.<ProgressItem>}
+   * @type {Array.<!ProgressCenterItem>}
    * @private
    */
   this.items_ = [];
@@ -76,11 +74,11 @@ ProgressCenter.Notifications_ = function(cancelCallback) {
  * @const
  * @private
  */
-ProgressCenter.Notifications_.NotificationState_ = Object.freeze({
+ProgressCenter.Notifications_.NotificationState_ = {
   VISIBLE: 'visible',
   DISMISSED: 'dismissed'
-});
-
+};
+Object.freeze(ProgressCenter.Notifications_.NotificationState_);
 /**
  * Updates the notification according to the item.
  * @param {ProgressCenterItem} item Item to contain new information.

@@ -49,31 +49,30 @@ class BackgroundContents : public content::WebContentsDelegate,
       Delegate* delegate,
       const std::string& partition_id,
       content::SessionStorageNamespace* session_storage_namespace);
-  virtual ~BackgroundContents();
+  ~BackgroundContents() override;
 
   content::WebContents* web_contents() const { return web_contents_.get(); }
   virtual const GURL& GetURL() const;
 
   // content::WebContentsDelegate implementation:
-  virtual void CloseContents(content::WebContents* source) OVERRIDE;
-  virtual bool ShouldSuppressDialogs() OVERRIDE;
-  virtual void DidNavigateMainFramePostCommit(
-      content::WebContents* tab) OVERRIDE;
-  virtual void AddNewContents(content::WebContents* source,
-                              content::WebContents* new_contents,
-                              WindowOpenDisposition disposition,
-                              const gfx::Rect& initial_pos,
-                              bool user_gesture,
-                              bool* was_blocked) OVERRIDE;
-  virtual bool IsNeverVisible(content::WebContents* web_contents) OVERRIDE;
+  void CloseContents(content::WebContents* source) override;
+  bool ShouldSuppressDialogs() override;
+  void DidNavigateMainFramePostCommit(content::WebContents* tab) override;
+  void AddNewContents(content::WebContents* source,
+                      content::WebContents* new_contents,
+                      WindowOpenDisposition disposition,
+                      const gfx::Rect& initial_pos,
+                      bool user_gesture,
+                      bool* was_blocked) override;
+  bool IsNeverVisible(content::WebContents* web_contents) override;
 
   // content::WebContentsObserver implementation:
-  virtual void RenderProcessGone(base::TerminationStatus status) OVERRIDE;
+  void RenderProcessGone(base::TerminationStatus status) override;
 
   // content::NotificationObserver
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
  protected:
   // Exposed for testing.

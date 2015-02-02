@@ -26,26 +26,24 @@ class WebstoreReinstaller : public WebstoreStandaloneInstaller,
   void BeginReinstall();
 
  private:
-  virtual ~WebstoreReinstaller();
+  ~WebstoreReinstaller() override;
 
   // WebstoreStandaloneInstaller:
-  virtual bool CheckRequestorAlive() const OVERRIDE;
-  virtual const GURL& GetRequestorURL() const OVERRIDE;
-  virtual bool ShouldShowPostInstallUI() const OVERRIDE;
-  virtual bool ShouldShowAppInstalledBubble() const OVERRIDE;
-  virtual content::WebContents* GetWebContents() const OVERRIDE;
-  virtual scoped_refptr<ExtensionInstallPrompt::Prompt> CreateInstallPrompt()
-      const OVERRIDE;
-  virtual bool CheckInlineInstallPermitted(
-      const base::DictionaryValue& webstore_data,
-      std::string* error) const OVERRIDE;
-  virtual bool CheckRequestorPermitted(
-      const base::DictionaryValue& webstore_data,
-      std::string* error) const OVERRIDE;
-  virtual void InstallUIProceed() OVERRIDE;
+  bool CheckRequestorAlive() const override;
+  const GURL& GetRequestorURL() const override;
+  bool ShouldShowPostInstallUI() const override;
+  bool ShouldShowAppInstalledBubble() const override;
+  content::WebContents* GetWebContents() const override;
+  scoped_refptr<ExtensionInstallPrompt::Prompt> CreateInstallPrompt()
+      const override;
+  bool CheckInlineInstallPermitted(const base::DictionaryValue& webstore_data,
+                                   std::string* error) const override;
+  bool CheckRequestorPermitted(const base::DictionaryValue& webstore_data,
+                               std::string* error) const override;
+  void InstallUIProceed() override;
 
   // content::WebContentsObserver:
-  virtual void WebContentsDestroyed() OVERRIDE;
+  void WebContentsDestroyed() override;
 
   // Called once all data from the old extension installation is removed.
   void OnDeletionDone();

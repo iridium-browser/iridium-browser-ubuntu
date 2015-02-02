@@ -21,10 +21,11 @@ class DeviceInfoDataTypeController : public UIDataTypeController {
       LocalDeviceInfoProvider* local_device_info_provider);
 
  private:
-  virtual ~DeviceInfoDataTypeController();
+  ~DeviceInfoDataTypeController() override;
 
   // UIDataTypeController implementations.
-  virtual bool StartModels() OVERRIDE;
+  bool StartModels() override;
+  void StopModels() override;
 
   // Called by LocalDeviceInfoProvider when the local device into becomes
   // available.

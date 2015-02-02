@@ -36,7 +36,7 @@ class BookmarkModelSQLHandlerTest : public testing::Test {
   virtual ~BookmarkModelSQLHandlerTest() {}
 
  protected:
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     // Setup the testing profile, so the bookmark_model_sql_handler could
     // get the bookmark model from it.
     ASSERT_TRUE(profile_manager_.SetUp());
@@ -47,7 +47,7 @@ class BookmarkModelSQLHandlerTest : public testing::Test {
     // Create the BookmarkModel that doesn't need to invoke load().
     testing_profile->CreateBookmarkModel(true);
     bookmark_model_ = BookmarkModelFactory::GetForProfile(testing_profile);
-    test::WaitForBookmarkModelToLoad(bookmark_model_);
+    bookmarks::test::WaitForBookmarkModelToLoad(bookmark_model_);
     ASSERT_TRUE(bookmark_model_);
     // Get the BookmarkModel from LastUsedProfile, this is the same way that
     // how the BookmarkModelSQLHandler gets the BookmarkModel.

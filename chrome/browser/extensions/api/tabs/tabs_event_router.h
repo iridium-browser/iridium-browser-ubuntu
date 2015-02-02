@@ -33,49 +33,47 @@ class TabsEventRouter : public TabStripModelObserver,
                         public ZoomObserver {
  public:
   explicit TabsEventRouter(Profile* profile);
-  virtual ~TabsEventRouter();
+  ~TabsEventRouter() override;
 
   // chrome::BrowserListObserver
-  virtual void OnBrowserAdded(Browser* browser) OVERRIDE;
-  virtual void OnBrowserRemoved(Browser* browser) OVERRIDE;
-  virtual void OnBrowserSetLastActive(Browser* browser) OVERRIDE;
+  void OnBrowserAdded(Browser* browser) override;
+  void OnBrowserRemoved(Browser* browser) override;
+  void OnBrowserSetLastActive(Browser* browser) override;
 
   // TabStripModelObserver
-  virtual void TabInsertedAt(content::WebContents* contents, int index,
-                             bool active) OVERRIDE;
-  virtual void TabClosingAt(TabStripModel* tab_strip_model,
-                            content::WebContents* contents,
-                            int index) OVERRIDE;
-  virtual void TabDetachedAt(content::WebContents* contents,
-                             int index) OVERRIDE;
-  virtual void ActiveTabChanged(content::WebContents* old_contents,
-                                content::WebContents* new_contents,
-                                int index,
-                                int reason) OVERRIDE;
-  virtual void TabSelectionChanged(
-      TabStripModel* tab_strip_model,
-      const ui::ListSelectionModel& old_model) OVERRIDE;
-  virtual void TabMoved(content::WebContents* contents,
-                        int from_index,
-                        int to_index) OVERRIDE;
-  virtual void TabChangedAt(content::WebContents* contents,
-                            int index,
-                            TabChangeType change_type) OVERRIDE;
-  virtual void TabReplacedAt(TabStripModel* tab_strip_model,
-                             content::WebContents* old_contents,
-                             content::WebContents* new_contents,
-                             int index) OVERRIDE;
-  virtual void TabPinnedStateChanged(content::WebContents* contents,
-                                     int index) OVERRIDE;
+  void TabInsertedAt(content::WebContents* contents,
+                     int index,
+                     bool active) override;
+  void TabClosingAt(TabStripModel* tab_strip_model,
+                    content::WebContents* contents,
+                    int index) override;
+  void TabDetachedAt(content::WebContents* contents, int index) override;
+  void ActiveTabChanged(content::WebContents* old_contents,
+                        content::WebContents* new_contents,
+                        int index,
+                        int reason) override;
+  void TabSelectionChanged(TabStripModel* tab_strip_model,
+                           const ui::ListSelectionModel& old_model) override;
+  void TabMoved(content::WebContents* contents,
+                int from_index,
+                int to_index) override;
+  void TabChangedAt(content::WebContents* contents,
+                    int index,
+                    TabChangeType change_type) override;
+  void TabReplacedAt(TabStripModel* tab_strip_model,
+                     content::WebContents* old_contents,
+                     content::WebContents* new_contents,
+                     int index) override;
+  void TabPinnedStateChanged(content::WebContents* contents,
+                             int index) override;
 
   // content::NotificationObserver.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   // ZoomObserver.
-  virtual void OnZoomChanged(
-      const ZoomController::ZoomChangedEventData& data) OVERRIDE;
+  void OnZoomChanged(const ZoomController::ZoomChangedEventData& data) override;
 
  private:
   // "Synthetic" event. Called from TabInsertedAt if new tab is detected.

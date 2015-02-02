@@ -190,7 +190,7 @@ scoped_ptr<FileTracker> CreateInitialAppRootTracker(
 
 scoped_ptr<FileTracker> CloneFileTracker(const FileTracker* obj) {
   if (!obj)
-    return scoped_ptr<FileTracker>();
+    return nullptr;
   return scoped_ptr<FileTracker>(new FileTracker(*obj));
 }
 
@@ -216,7 +216,7 @@ SyncStatusCode OpenDatabase(const base::FilePath& path,
   options.create_if_missing = true;
   if (env_override)
     options.env = env_override;
-  leveldb::DB* db = NULL;
+  leveldb::DB* db = nullptr;
   leveldb::Status db_status =
       leveldb::DB::Open(options, path.AsUTF8Unsafe(), &db);
   SyncStatusCode status = LevelDBStatusToSyncStatusCode(db_status);
@@ -566,7 +566,7 @@ SyncStatusCode MetadataDatabase::CreateForTesting(
   scoped_ptr<MetadataDatabase> metadata_database(
       new MetadataDatabase(base::FilePath(),
                            enable_on_disk_index,
-                           NULL));
+                           nullptr));
   metadata_database->db_ = db.Pass();
   SyncStatusCode status = metadata_database->Initialize();
   if (status == SYNC_STATUS_OK)
@@ -940,15 +940,15 @@ SyncStatusCode MetadataDatabase::UpdateByDeletedRemoteFileList(
 SyncStatusCode MetadataDatabase::ReplaceActiveTrackerWithNewResource(
     int64 parent_tracker_id,
     const google_apis::FileResource& resource) {
-  DCHECK(!index_->GetFileMetadata(resource.file_id(), NULL));
-  DCHECK(index_->GetFileTracker(parent_tracker_id, NULL));
+  DCHECK(!index_->GetFileMetadata(resource.file_id(), nullptr));
+  DCHECK(index_->GetFileTracker(parent_tracker_id, nullptr));
 
   UpdateByFileMetadata(
       FROM_HERE,
       CreateFileMetadataFromFileResource(GetLargestKnownChangeID(), resource),
       UPDATE_TRACKER_FOR_SYNCED_FILE);
 
-  DCHECK(index_->GetFileMetadata(resource.file_id(), NULL));
+  DCHECK(index_->GetFileMetadata(resource.file_id(), nullptr));
   DCHECK(!index_->GetFileTrackerIDsByFileID(resource.file_id()).has_active());
 
   TrackerIDSet same_path_trackers =
@@ -1077,7 +1077,7 @@ SyncStatusCode MetadataDatabase::UpdateTracker(
                   parent_tracker.tracker_id(),
                   updated_details.title()),
               tracker.file_id(),
-              NULL)) {
+              nullptr)) {
         RemoveFileTracker(tracker.tracker_id(),
                           MARK_NOTHING_DIRTY,
                           index_.get());
@@ -1348,7 +1348,7 @@ SyncStatusCode MetadataDatabase::Initialize() {
 void MetadataDatabase::CreateTrackerForParentAndFileID(
     const FileTracker& parent_tracker,
     const std::string& file_id) {
-  CreateTrackerInternal(parent_tracker, file_id, NULL,
+  CreateTrackerInternal(parent_tracker, file_id, nullptr,
                         UPDATE_TRACKER_FOR_UNSYNCED_FILE);
 }
 
@@ -1638,11 +1638,11 @@ scoped_ptr<base::ListValue> MetadataDatabase::DumpTrackers() {
   base::DictionaryValue* metadata = new base::DictionaryValue;
   const char *trackerKeys[] = {
     "tracker_id", "path", "file_id", "tracker_kind", "app_id",
-    "active", "dirty", "folder_listing",
+    "active", "dirty", "folder_listing", "demoted",
     "title", "kind", "md5", "etag", "missing", "change_id",
   };
   std::vector<std::string> key_strings(
-      trackerKeys, trackerKeys + ARRAYSIZE_UNSAFE(trackerKeys));
+      trackerKeys, trackerKeys + arraysize(trackerKeys));
   base::ListValue* keys = new base::ListValue;
   keys->AppendStrings(key_strings);
   metadata->SetString("title", "Trackers");
@@ -1677,6 +1677,9 @@ scoped_ptr<base::ListValue> MetadataDatabase::DumpTrackers() {
     dict->SetString("dirty", tracker.dirty() ? "true" : "false");
     dict->SetString("folder_listing",
                     tracker.needs_folder_listing() ? "needed" : "no");
+
+    bool is_demoted = index_->IsDemotedDirtyTracker(tracker.tracker_id());
+    dict->SetString("demoted", is_demoted ? "true" : "false");
     if (tracker.has_synced_details()) {
       const FileDetails& details = tracker.synced_details();
       dict->SetString("title", details.title());
@@ -1701,7 +1704,7 @@ scoped_ptr<base::ListValue> MetadataDatabase::DumpMetadata() {
     "change_id", "parents"
   };
   std::vector<std::string> key_strings(
-      fileKeys, fileKeys + ARRAYSIZE_UNSAFE(fileKeys));
+      fileKeys, fileKeys + arraysize(fileKeys));
   base::ListValue* keys = new base::ListValue;
   keys->AppendStrings(key_strings);
   metadata->SetString("title", "Metadata");

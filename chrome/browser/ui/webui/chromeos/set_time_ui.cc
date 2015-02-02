@@ -4,9 +4,6 @@
 
 #include "chrome/browser/ui/webui/chromeos/set_time_ui.h"
 
-#include "ash/shell.h"
-#include "ash/system/tray/system_tray_delegate.h"
-#include "ash/system/user/login_status.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/build_time.h"
@@ -18,6 +15,7 @@
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/system_clock_client.h"
+#include "chromeos/login/login_state.h"
 #include "chromeos/settings/timezone_settings.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
@@ -45,7 +43,7 @@ class SetTimeMessageHandler : public content::WebUIMessageHandler,
   }
 
   // WebUIMessageHandler:
-  virtual void RegisterMessages() OVERRIDE {
+  virtual void RegisterMessages() override {
     web_ui()->RegisterMessageCallback(
         "setTimeInSeconds",
         base::Bind(&SetTimeMessageHandler::OnSetTime, base::Unretained(this)));
@@ -57,12 +55,12 @@ class SetTimeMessageHandler : public content::WebUIMessageHandler,
 
  private:
   // system::SystemClockClient::Observer:
-  virtual void SystemClockUpdated() OVERRIDE {
+  virtual void SystemClockUpdated() override {
     web_ui()->CallJavascriptFunction("settime.TimeSetter.updateTime");
   }
 
   // system::TimezoneSettings::Observer:
-  virtual void TimezoneChanged(const icu::TimeZone& timezone) OVERRIDE {
+  virtual void TimezoneChanged(const icu::TimeZone& timezone) override {
     base::StringValue timezone_id(
         system::TimezoneSettings::GetTimezoneID(timezone));
     web_ui()->CallJavascriptFunction("settime.TimeSetter.setTimezone",
@@ -107,7 +105,6 @@ SetTimeUI::SetTimeUI(content::WebUI* web_ui) : WebDialogUI(web_ui) {
   // Set up the chrome://set-time source.
   content::WebUIDataSource* source =
       content::WebUIDataSource::Create(chrome::kChromeUISetTimeHost);
-  source->SetUseJsonJSFormatV2();
 
   source->AddLocalizedString("setTimeTitle", IDS_SET_TIME_TITLE);
   source->AddLocalizedString("prompt", IDS_SET_TIME_PROMPT);
@@ -123,10 +120,8 @@ SetTimeUI::SetTimeUI(content::WebUI* web_ui) : WebDialogUI(web_ui) {
   // If we are not logged in, we need to show the time zone dropdown.
   // Otherwise, we can leave |currentTimezoneId| blank.
   std::string current_timezone_id;
-  if (ash::Shell::GetInstance()->system_tray_delegate()->GetUserLoginStatus() ==
-      ash::user::LOGGED_IN_NONE) {
+  if (!LoginState::Get()->IsUserLoggedIn())
     CrosSettings::Get()->GetString(kSystemTimezone, &current_timezone_id);
-  }
   values.SetString("currentTimezoneId", current_timezone_id);
   values.SetDouble("buildTime", base::GetBuildTime().ToJsTime());
 

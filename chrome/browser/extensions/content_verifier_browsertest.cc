@@ -21,7 +21,7 @@ class UnloadObserver : public ExtensionRegistryObserver {
   explicit UnloadObserver(ExtensionRegistry* registry) : observer_(this) {
     observer_.Add(registry);
   }
-  virtual ~UnloadObserver() {}
+  ~UnloadObserver() override {}
 
   void WaitForUnload(const ExtensionId& id) {
     if (ContainsKey(observed_, id))
@@ -33,10 +33,9 @@ class UnloadObserver : public ExtensionRegistryObserver {
     loop_runner_->Run();
   }
 
-  virtual void OnExtensionUnloaded(
-      content::BrowserContext* browser_context,
-      const Extension* extension,
-      UnloadedExtensionInfo::Reason reason) OVERRIDE {
+  void OnExtensionUnloaded(content::BrowserContext* browser_context,
+                           const Extension* extension,
+                           UnloadedExtensionInfo::Reason reason) override {
     observed_.insert(extension->id());
     if (awaited_id_ == extension->id())
       loop_runner_->Quit();
@@ -60,9 +59,9 @@ class JobDelegate : public ContentVerifyJob::TestDelegate {
   void fail_next_read() { fail_next_read_ = true; }
   void fail_next_done() { fail_next_done_ = true; }
 
-  virtual ContentVerifyJob::FailureReason BytesRead(const ExtensionId& id,
-                                                    int count,
-                                                    const char* data) OVERRIDE {
+  ContentVerifyJob::FailureReason BytesRead(const ExtensionId& id,
+                                            int count,
+                                            const char* data) override {
     if (id == id_ && fail_next_read_) {
       fail_next_read_ = false;
       return ContentVerifyJob::HASH_MISMATCH;
@@ -70,8 +69,7 @@ class JobDelegate : public ContentVerifyJob::TestDelegate {
     return ContentVerifyJob::NONE;
   }
 
-  virtual ContentVerifyJob::FailureReason DoneReading(
-      const ExtensionId& id) OVERRIDE {
+  ContentVerifyJob::FailureReason DoneReading(const ExtensionId& id) override {
     if (id == id_ && fail_next_done_) {
       fail_next_done_ = false;
       return ContentVerifyJob::HASH_MISMATCH;
@@ -103,12 +101,12 @@ class JobObserver : public ContentVerifyJob::TestObserver {
   bool WaitForExpectedJobs();
 
   // ContentVerifyJob::TestObserver interface
-  virtual void JobStarted(const std::string& extension_id,
-                          const base::FilePath& relative_path) OVERRIDE;
+  void JobStarted(const std::string& extension_id,
+                  const base::FilePath& relative_path) override;
 
-  virtual void JobFinished(const std::string& extension_id,
-                           const base::FilePath& relative_path,
-                           bool failed) OVERRIDE;
+  void JobFinished(const std::string& extension_id,
+                   const base::FilePath& relative_path,
+                   bool failed) override;
 
  private:
   typedef std::pair<std::string, base::FilePath> ExtensionFile;
@@ -168,9 +166,9 @@ void JobObserver::JobFinished(const std::string& extension_id,
 class ContentVerifierTest : public ExtensionBrowserTest {
  public:
   ContentVerifierTest() {}
-  virtual ~ContentVerifierTest() {}
+  ~ContentVerifierTest() override {}
 
-  virtual void SetUpCommandLine(base::CommandLine* command_line) OVERRIDE {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     ExtensionBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitchASCII(
         switches::kExtensionContentVerification,
@@ -178,11 +176,11 @@ class ContentVerifierTest : public ExtensionBrowserTest {
   }
 
   // Setup our unload observer and JobDelegate, and install a test extension.
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     ExtensionBrowserTest::SetUpOnMainThread();
   }
 
-  virtual void TearDownOnMainThread() override {
+  void TearDownOnMainThread() override {
     ContentVerifyJob::SetDelegateForTests(NULL);
     ContentVerifyJob::SetObserverForTests(NULL);
     ExtensionBrowserTest::TearDownOnMainThread();

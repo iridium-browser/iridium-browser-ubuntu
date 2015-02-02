@@ -20,20 +20,23 @@ class CHROMEOS_EXPORT FakeEasyUnlockClient : public EasyUnlockClient {
                               const std::string& public_key);
 
   FakeEasyUnlockClient();
-  virtual ~FakeEasyUnlockClient();
+  ~FakeEasyUnlockClient() override;
 
   // EasyUnlockClient overrides
-  virtual void Init(dbus::Bus* bus) OVERRIDE;
-  virtual void GenerateEcP256KeyPair(const KeyPairCallback& callback) OVERRIDE;
-  virtual void PerformECDHKeyAgreement(const std::string& private_key,
-                                       const std::string& public_key,
-                                       const DataCallback& callback) OVERRIDE;
-  virtual void CreateSecureMessage(const std::string& payload,
-                                   const CreateSecureMessageOptions& options,
-                                   const DataCallback& callback) OVERRIDE;
-  virtual void UnwrapSecureMessage(const std::string& message,
-                                   const UnwrapSecureMessageOptions& options,
-                                   const DataCallback& callback) OVERRIDE;
+  void Init(dbus::Bus* bus) override;
+  void GenerateEcP256KeyPair(const KeyPairCallback& callback) override;
+  void WrapPublicKey(const std::string& key_algorithm,
+                     const std::string& public_key,
+                     const DataCallback& callback) override;
+  void PerformECDHKeyAgreement(const std::string& private_key,
+                               const std::string& public_key,
+                               const DataCallback& callback) override;
+  void CreateSecureMessage(const std::string& payload,
+                           const CreateSecureMessageOptions& options,
+                           const DataCallback& callback) override;
+  void UnwrapSecureMessage(const std::string& message,
+                           const UnwrapSecureMessageOptions& options,
+                           const DataCallback& callback) override;
 
  private:
   int generated_keys_count_;

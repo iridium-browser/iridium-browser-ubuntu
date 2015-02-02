@@ -4,6 +4,27 @@
 
 #include "base/metrics/histogram.h"
 #include "chrome/browser/content_settings/permission_context_uma_util.h"
+#include "content/public/browser/permission_type.h"
+#include "url/gurl.h"
+
+// UMA keys need to be statically initialized so plain function would not
+// work. Use a Macro instead.
+#define PERMISSION_ACTION_UMA(secure_origin,                                   \
+            permission, permission_secure, permission_insecure, action)        \
+    UMA_HISTOGRAM_ENUMERATION(                                                 \
+        permission,                                                            \
+        action,                                                                \
+        PERMISSION_ACTION_NUM);                                                \
+    if (secure_origin) {                                                       \
+        UMA_HISTOGRAM_ENUMERATION(permission_secure,                           \
+                                  action,                                      \
+                                  PERMISSION_ACTION_NUM);                      \
+    } else {                                                                   \
+        UMA_HISTOGRAM_ENUMERATION(permission_insecure,                         \
+                                  action,                                      \
+                                  PERMISSION_ACTION_NUM);                      \
+    }
+
 
 namespace {
 
@@ -20,42 +41,42 @@ enum PermissionAction {
   PERMISSION_ACTION_NUM,
 };
 
-// Enum for UMA purposes, make sure you update histograms.xml if you add new
-// permission actions. Never delete or reorder an entry; only add new entries
-// immediately before PERMISSION_NUM
-enum PermissionType {
-  PERMISSION_UNKNOWN = 0,
-  PERMISSION_MIDI_SYSEX = 1,
-  PERMISSION_PUSH_MESSAGING = 2,
-  PERMISSION_NOTIFICATIONS = 3,
-
-  // Always keep this at the end.
-  PERMISSION_NUM,
-};
-
 void RecordPermissionAction(
-      ContentSettingsType permission, PermissionAction action) {
+      ContentSettingsType permission,
+      PermissionAction action,
+      bool secure_origin) {
   switch (permission) {
       case CONTENT_SETTINGS_TYPE_GEOLOCATION:
-        // TODO(miguelg): support geolocation through
-        // the generic permission class.
+        PERMISSION_ACTION_UMA(
+            secure_origin,
+            "ContentSettings.PermissionActions_Geolocation",
+            "ContentSettings.PermissionActionsSecureOrigin_Geolocation",
+            "ContentSettings.PermissionActionsInsecureOrigin_Geolocation",
+            action);
         break;
       case CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
-        UMA_HISTOGRAM_ENUMERATION(
+        PERMISSION_ACTION_UMA(
+            secure_origin,
             "ContentSettings.PermissionActions_Notifications",
-            action,
-            PERMISSION_ACTION_NUM);
+            "ContentSettings.PermissionActionsSecureOrigin_Notifications",
+            "ContentSettings.PermissionActionsInsecureOrigin_Notifications",
+            action);
         break;
       case CONTENT_SETTINGS_TYPE_MIDI_SYSEX:
-        UMA_HISTOGRAM_ENUMERATION("ContentSettings.PermissionActions_MidiSysEx",
-                                  action,
-                                  PERMISSION_ACTION_NUM);
+        PERMISSION_ACTION_UMA(
+            secure_origin,
+            "ContentSettings.PermissionActions_MidiSysEx",
+            "ContentSettings.PermissionActionsSecureOrigin_MidiSysEx",
+            "ContentSettings.PermissionActionsInsecureOrigin_MidiSysEx",
+            action);
         break;
       case CONTENT_SETTINGS_TYPE_PUSH_MESSAGING:
-        UMA_HISTOGRAM_ENUMERATION(
+        PERMISSION_ACTION_UMA(
+            secure_origin,
             "ContentSettings.PermissionActions_PushMessaging",
-            action,
-            PERMISSION_ACTION_NUM);
+            "ContentSettings.PermissionActionsSecureOrigin_PushMessaging",
+            "ContentSettings.PermissionActionsInsecureOrigin_PushMessaging",
+            action);
         break;
 #if defined(OS_ANDROID)
       case CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER:
@@ -69,24 +90,38 @@ void RecordPermissionAction(
 }
 
 void RecordPermissionRequest(
-    ContentSettingsType permission) {
-  PermissionType type;
+    ContentSettingsType permission, bool secure_origin) {
+  content::PermissionType type;
   switch (permission) {
+    case CONTENT_SETTINGS_TYPE_GEOLOCATION:
+      type = content::PERMISSION_GEOLOCATION;
+      break;
     case CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
-      type = PERMISSION_NOTIFICATIONS;
+      type = content::PERMISSION_NOTIFICATIONS;
       break;
     case CONTENT_SETTINGS_TYPE_MIDI_SYSEX:
-      type = PERMISSION_MIDI_SYSEX;
+      type = content::PERMISSION_MIDI_SYSEX;
       break;
     case CONTENT_SETTINGS_TYPE_PUSH_MESSAGING:
-      type = PERMISSION_PUSH_MESSAGING;
+      type = content::PERMISSION_PUSH_MESSAGING;
       break;
     default:
       NOTREACHED() << "PERMISSION " << permission << " not accounted for";
-      type = PERMISSION_UNKNOWN;
+      return;
   }
-  UMA_HISTOGRAM_ENUMERATION("ContentSettings.PermissionRequested", type,
-                            PERMISSION_NUM);
+  UMA_HISTOGRAM_ENUMERATION(
+      "ContentSettings.PermissionRequested", type, content::PERMISSION_NUM);
+  if (secure_origin) {
+    UMA_HISTOGRAM_ENUMERATION(
+        "ContentSettings.PermissionRequested_SecureOrigin",
+        type,
+        content::PERMISSION_NUM);
+  } else {
+    UMA_HISTOGRAM_ENUMERATION(
+        "ContentSettings.PermissionRequested_InsecureOrigin",
+        type,
+        content::PERMISSION_NUM);
+  }
 }
 
 } // namespace
@@ -94,26 +129,30 @@ void RecordPermissionRequest(
 // Make sure you update histograms.xml permission histogram_suffix if you
 // add new permission
 void PermissionContextUmaUtil::PermissionRequested(
-    ContentSettingsType permission) {
-  RecordPermissionRequest(permission);
+    ContentSettingsType permission, const GURL& requesting_origin) {
+  RecordPermissionRequest(permission, requesting_origin.SchemeIsSecure());
 }
 
 void PermissionContextUmaUtil::PermissionGranted(
-    ContentSettingsType permission) {
-  RecordPermissionAction(permission, GRANTED);
+    ContentSettingsType permission, const GURL& requesting_origin) {
+  RecordPermissionAction(permission, GRANTED,
+                         requesting_origin.SchemeIsSecure());
 }
 
 void PermissionContextUmaUtil::PermissionDenied(
-    ContentSettingsType permission) {
-  RecordPermissionAction(permission, DENIED);
+    ContentSettingsType permission, const GURL& requesting_origin) {
+  RecordPermissionAction(permission, DENIED,
+                         requesting_origin.SchemeIsSecure());
 }
 
 void PermissionContextUmaUtil::PermissionDismissed(
-    ContentSettingsType permission) {
-  RecordPermissionAction(permission, DISMISSED);
+    ContentSettingsType permission, const GURL& requesting_origin) {
+  RecordPermissionAction(permission, DISMISSED,
+                         requesting_origin.SchemeIsSecure());
 }
 
 void PermissionContextUmaUtil::PermissionIgnored(
-    ContentSettingsType permission) {
-  RecordPermissionAction(permission, IGNORED);
+    ContentSettingsType permission, const GURL& requesting_origin) {
+  RecordPermissionAction(permission, IGNORED,
+                         requesting_origin.SchemeIsSecure());
 }

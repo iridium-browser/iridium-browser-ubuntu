@@ -45,31 +45,28 @@ class MutablePolicyValueStore : public PolicyValueStore {
       : PolicyValueStore(kTestExtensionId,
                          make_scoped_refptr(new SettingsObserverList()),
                          scoped_ptr<ValueStore>(new LeveldbValueStore(path))) {}
-  virtual ~MutablePolicyValueStore() {}
+  ~MutablePolicyValueStore() override {}
 
-  virtual WriteResult Set(
-      WriteOptions options,
-      const std::string& key,
-      const base::Value& value) OVERRIDE {
+  WriteResult Set(WriteOptions options,
+                  const std::string& key,
+                  const base::Value& value) override {
     return delegate()->Set(options, key, value);
   }
 
-  virtual WriteResult Set(
-      WriteOptions options, const base::DictionaryValue& values) OVERRIDE {
+  WriteResult Set(WriteOptions options,
+                  const base::DictionaryValue& values) override {
     return delegate()->Set(options, values);
   }
 
-  virtual WriteResult Remove(const std::string& key) OVERRIDE {
+  WriteResult Remove(const std::string& key) override {
     return delegate()->Remove(key);
   }
 
-  virtual WriteResult Remove(const std::vector<std::string>& keys) OVERRIDE {
+  WriteResult Remove(const std::vector<std::string>& keys) override {
     return delegate()->Remove(keys);
   }
 
-  virtual WriteResult Clear() OVERRIDE {
-    return delegate()->Clear();
-  }
+  WriteResult Clear() override { return delegate()->Clear(); }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MutablePolicyValueStore);
@@ -90,9 +87,9 @@ class PolicyValueStoreTest : public testing::Test {
  public:
   PolicyValueStoreTest()
       : file_thread_(content::BrowserThread::FILE, &loop_) {}
-  virtual ~PolicyValueStoreTest() {}
+  ~PolicyValueStoreTest() override {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     ASSERT_TRUE(scoped_temp_dir_.CreateUniqueTempDir());
     observers_ = new SettingsObserverList();
     observers_->AddObserver(&observer_);
@@ -103,7 +100,7 @@ class PolicyValueStoreTest : public testing::Test {
             new LeveldbValueStore(scoped_temp_dir_.path()))));
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     observers_->RemoveObserver(&observer_);
     store_.reset();
   }

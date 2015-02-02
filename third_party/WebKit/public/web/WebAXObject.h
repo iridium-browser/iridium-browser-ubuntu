@@ -97,6 +97,7 @@ public:
     BLINK_EXPORT bool isCollapsed() const;
     BLINK_EXPORT bool isControl() const;
     BLINK_EXPORT bool isEnabled() const;
+    BLINK_EXPORT WebAXExpanded isExpanded() const;
     BLINK_EXPORT bool isFocused() const;
     BLINK_EXPORT bool isHovered() const;
     BLINK_EXPORT bool isIndeterminate() const;
@@ -121,10 +122,6 @@ public:
     BLINK_EXPORT bool ariaFlowTo(WebVector<WebAXObject>& flowToElements) const;
     BLINK_EXPORT bool ariaHasPopup() const;
     BLINK_EXPORT bool ariaLabelledby(WebVector<WebAXObject>& labelledbyElements) const;
-    BLINK_EXPORT bool ariaLiveRegionAtomic() const;
-    BLINK_EXPORT bool ariaLiveRegionBusy() const;
-    BLINK_EXPORT WebString ariaLiveRegionRelevant() const;
-    BLINK_EXPORT WebString ariaLiveRegionStatus() const;
     BLINK_EXPORT bool ariaOwns(WebVector<WebAXObject>& ownsElements) const;
     BLINK_EXPORT WebRect boundingBoxRect() const;
     BLINK_EXPORT bool canvasHasFallbackContent() const;
@@ -146,6 +143,17 @@ public:
     BLINK_EXPORT WebAXObject titleUIElement() const;
     BLINK_EXPORT WebURL url() const;
 
+    // Live regions.
+    BLINK_EXPORT bool isInLiveRegion() const;
+    BLINK_EXPORT bool liveRegionAtomic() const;
+    BLINK_EXPORT bool liveRegionBusy() const;
+    BLINK_EXPORT WebString liveRegionRelevant() const;
+    BLINK_EXPORT WebString liveRegionStatus() const;
+    BLINK_EXPORT bool containerLiveRegionAtomic() const;
+    BLINK_EXPORT bool containerLiveRegionBusy() const;
+    BLINK_EXPORT WebString containerLiveRegionRelevant() const;
+    BLINK_EXPORT WebString containerLiveRegionStatus() const;
+
     BLINK_EXPORT bool supportsRangeValue() const;
     BLINK_EXPORT WebString valueDescription() const;
     BLINK_EXPORT float valueForRange() const;
@@ -158,6 +166,7 @@ public:
     BLINK_EXPORT WebString computedStyleDisplay() const;
     BLINK_EXPORT bool accessibilityIsIgnored() const;
     BLINK_EXPORT bool lineBreaks(WebVector<int>&) const;
+    BLINK_EXPORT WebString textInputType() const;
 
     // Actions
     BLINK_EXPORT WebString actionVerb() const; // The verb corresponding to performDefaultAction.
@@ -173,6 +182,7 @@ public:
     BLINK_EXPORT bool decrement() const;
     BLINK_EXPORT void setFocused(bool) const;
     BLINK_EXPORT void setSelectedTextRange(int selectionStart, int selectionEnd) const;
+    BLINK_EXPORT void setValue(WebString) const;
 
     // For a table
     BLINK_EXPORT unsigned columnCount() const;
@@ -195,6 +205,10 @@ public:
     BLINK_EXPORT unsigned cellColumnSpan() const;
     BLINK_EXPORT unsigned cellRowIndex() const;
     BLINK_EXPORT unsigned cellRowSpan() const;
+
+    // Load inline text boxes for just this subtree, even if
+    // settings->inlineTextBoxAccessibilityEnabled() is false.
+    BLINK_EXPORT void loadInlineTextBoxes() const;
 
     // For an inline text box.
     BLINK_EXPORT WebAXTextDirection textDirection() const;

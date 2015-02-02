@@ -36,7 +36,7 @@ class FindBarHost : public DropdownBarHost,
                     public FindBarTesting {
  public:
   explicit FindBarHost(BrowserView* browser_view);
-  virtual ~FindBarHost();
+  ~FindBarHost() override;
 
   // Forwards selected key events to the renderer. This is useful to make sure
   // that arrow keys and PageUp and PageDown result in scrolling, instead of
@@ -45,40 +45,37 @@ class FindBarHost : public DropdownBarHost,
   bool MaybeForwardKeyEventToWebpage(const ui::KeyEvent& key_event);
 
   // FindBar implementation:
-  virtual FindBarController* GetFindBarController() const OVERRIDE;
-  virtual void SetFindBarController(
-      FindBarController* find_bar_controller) OVERRIDE;
-  virtual void Show(bool animate) OVERRIDE;
-  virtual void Hide(bool animate) OVERRIDE;
-  virtual void SetFocusAndSelection() OVERRIDE;
-  virtual void ClearResults(const FindNotificationDetails& results) OVERRIDE;
-  virtual void StopAnimation() OVERRIDE;
-  virtual void MoveWindowIfNecessary(const gfx::Rect& selection_rect,
-                                     bool no_redraw) OVERRIDE;
-  virtual void SetFindTextAndSelectedRange(
-      const base::string16& find_text,
-      const gfx::Range& selected_range) OVERRIDE;
-  virtual base::string16 GetFindText() OVERRIDE;
-  virtual gfx::Range GetSelectedRange() OVERRIDE;
-  virtual void UpdateUIForFindResult(const FindNotificationDetails& result,
-                                     const base::string16& find_text) OVERRIDE;
-  virtual void AudibleAlert() OVERRIDE;
-  virtual bool IsFindBarVisible() OVERRIDE;
-  virtual void RestoreSavedFocus() OVERRIDE;
-  virtual bool HasGlobalFindPasteboard() OVERRIDE;
-  virtual void UpdateFindBarForChangedWebContents() OVERRIDE;
-  virtual FindBarTesting* GetFindBarTesting() OVERRIDE;
+  FindBarController* GetFindBarController() const override;
+  void SetFindBarController(FindBarController* find_bar_controller) override;
+  void Show(bool animate) override;
+  void Hide(bool animate) override;
+  void SetFocusAndSelection() override;
+  void ClearResults(const FindNotificationDetails& results) override;
+  void StopAnimation() override;
+  void MoveWindowIfNecessary(const gfx::Rect& selection_rect,
+                             bool no_redraw) override;
+  void SetFindTextAndSelectedRange(const base::string16& find_text,
+                                   const gfx::Range& selected_range) override;
+  base::string16 GetFindText() override;
+  gfx::Range GetSelectedRange() override;
+  void UpdateUIForFindResult(const FindNotificationDetails& result,
+                             const base::string16& find_text) override;
+  void AudibleAlert() override;
+  bool IsFindBarVisible() override;
+  void RestoreSavedFocus() override;
+  bool HasGlobalFindPasteboard() override;
+  void UpdateFindBarForChangedWebContents() override;
+  FindBarTesting* GetFindBarTesting() override;
 
   // Overridden from ui::AcceleratorTarget in DropdownBarHost class:
-  virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
-  virtual bool CanHandleAccelerators() const OVERRIDE;
+  bool AcceleratorPressed(const ui::Accelerator& accelerator) override;
+  bool CanHandleAccelerators() const override;
 
   // FindBarTesting implementation:
-  virtual bool GetFindBarWindowInfo(gfx::Point* position,
-                                    bool* fully_visible) OVERRIDE;
-  virtual base::string16 GetFindSelectedText() OVERRIDE;
-  virtual base::string16 GetMatchCountText() OVERRIDE;
-  virtual int GetWidth() OVERRIDE;
+  bool GetFindBarWindowInfo(gfx::Point* position, bool* fully_visible) override;
+  base::string16 GetFindSelectedText() override;
+  base::string16 GetMatchCountText() override;
+  int GetWidth() override;
 
   // Overridden from DropdownBarHost:
   // Returns the rectangle representing where to position the find bar. It uses
@@ -92,15 +89,13 @@ class FindBarHost : public DropdownBarHost,
   // the top of the page area, (it will be converted to coordinates relative to
   // the top of the browser window, when comparing against the dialog
   // coordinates). The returned value is relative to the browser window.
-  virtual gfx::Rect GetDialogPosition(
-      gfx::Rect avoid_overlapping_rect) OVERRIDE;
+  gfx::Rect GetDialogPosition(gfx::Rect avoid_overlapping_rect) override;
   // Moves the dialog window to the provided location, moves it to top in the
   // z-order (HWND_TOP, not HWND_TOPMOST) and shows the window (if hidden).
   // It then calls UpdateWindowEdges to make sure we don't overwrite the Chrome
   // window border. If |no_redraw| is set, the window is getting moved but not
   // sized, and should not be redrawn to reduce update flicker.
-  virtual void SetDialogPosition(const gfx::Rect& new_pos,
-                                 bool no_redraw) OVERRIDE;
+  void SetDialogPosition(const gfx::Rect& new_pos, bool no_redraw) override;
 
   // Retrieves the boundaries that the find bar widget has to work with
   // within the Chrome frame window. The resulting rectangle will be a
@@ -113,22 +108,19 @@ class FindBarHost : public DropdownBarHost,
   // window. If the function fails to determine the browser
   // window/client area rectangle or the rectangle for the page area
   // then |bounds| will be an empty rectangle.
-  virtual void GetWidgetBounds(gfx::Rect* bounds) OVERRIDE;
+  void GetWidgetBounds(gfx::Rect* bounds) override;
 
   // Additional accelerator handling (on top of what DropDownBarHost does).
-  virtual void RegisterAccelerators() OVERRIDE;
-  virtual void UnregisterAccelerators() OVERRIDE;
+  void RegisterAccelerators() override;
+  void UnregisterAccelerators() override;
 
  protected:
   // Overridden from DropdownBarHost:
-  virtual void OnVisibilityChanged() OVERRIDE;
+  void OnVisibilityChanged() override;
 
  private:
   // Allows implementation to tweak widget position.
   void GetWidgetPositionNative(gfx::Rect* avoid_overlapping_rect);
-
-  // Allows native implementation to prevent key events from being forwarded.
-  bool ShouldForwardKeyEventToWebpageNative(const ui::KeyEvent& key_event);
 
   // Returns the FindBarView.
   FindBarView* find_bar_view() { return static_cast<FindBarView*>(view()); }

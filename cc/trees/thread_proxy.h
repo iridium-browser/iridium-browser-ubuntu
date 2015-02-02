@@ -42,7 +42,7 @@ class CC_EXPORT ThreadProxy : public Proxy,
       scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> impl_task_runner);
 
-  virtual ~ThreadProxy();
+  ~ThreadProxy() override;
 
   struct BeginMainFrameAndCommitState {
     BeginMainFrameAndCommitState();
@@ -90,8 +90,6 @@ class CC_EXPORT ThreadProxy : public Proxy,
     LayerTreeHost* layer_tree_host;
     bool commit_waits_for_activation;
     bool main_thread_inside_commit;
-
-    base::TimeTicks last_monotonic_frame_begin_time;
   };
 
   struct CompositorThreadOnly {
@@ -129,8 +127,6 @@ class CC_EXPORT ThreadProxy : public Proxy,
 
     bool input_throttled_until_commit;
 
-    // Set when we freeze animations to avoid checkerboarding.
-    bool animations_frozen_until_next_draw;
     base::TimeTicks animation_time;
 
     // Whether a commit has been completed since the last time animations were
@@ -150,86 +146,82 @@ class CC_EXPORT ThreadProxy : public Proxy,
   const CompositorThreadOnly& impl() const;
 
   // Proxy implementation
-  virtual void FinishAllRendering() OVERRIDE;
-  virtual bool IsStarted() const OVERRIDE;
-  virtual void SetOutputSurface(scoped_ptr<OutputSurface>) OVERRIDE;
-  virtual void SetLayerTreeHostClientReady() OVERRIDE;
-  virtual void SetVisible(bool visible) OVERRIDE;
-  virtual const RendererCapabilities& GetRendererCapabilities() const OVERRIDE;
-  virtual void SetNeedsAnimate() OVERRIDE;
-  virtual void SetNeedsUpdateLayers() OVERRIDE;
-  virtual void SetNeedsCommit() OVERRIDE;
-  virtual void SetNeedsRedraw(const gfx::Rect& damage_rect) OVERRIDE;
-  virtual void SetNextCommitWaitsForActivation() OVERRIDE;
-  virtual void NotifyInputThrottledUntilCommit() OVERRIDE;
-  virtual void SetDeferCommits(bool defer_commits) OVERRIDE;
-  virtual bool CommitRequested() const OVERRIDE;
-  virtual bool BeginMainFrameRequested() const OVERRIDE;
-  virtual void MainThreadHasStoppedFlinging() OVERRIDE;
-  virtual void Start() OVERRIDE;
-  virtual void Stop() OVERRIDE;
-  virtual size_t MaxPartialTextureUpdates() const OVERRIDE;
-  virtual void ForceSerializeOnSwapBuffers() OVERRIDE;
-  virtual bool SupportsImplScrolling() const OVERRIDE;
-  virtual void SetDebugState(const LayerTreeDebugState& debug_state) OVERRIDE;
-  virtual void AsValueInto(base::debug::TracedValue* value) const OVERRIDE;
-  virtual bool MainFrameWillHappenForTesting() OVERRIDE;
+  void FinishAllRendering() override;
+  bool IsStarted() const override;
+  void SetOutputSurface(scoped_ptr<OutputSurface>) override;
+  void SetLayerTreeHostClientReady() override;
+  void SetVisible(bool visible) override;
+  const RendererCapabilities& GetRendererCapabilities() const override;
+  void SetNeedsAnimate() override;
+  void SetNeedsUpdateLayers() override;
+  void SetNeedsCommit() override;
+  void SetNeedsRedraw(const gfx::Rect& damage_rect) override;
+  void SetNextCommitWaitsForActivation() override;
+  void NotifyInputThrottledUntilCommit() override;
+  void SetDeferCommits(bool defer_commits) override;
+  bool CommitRequested() const override;
+  bool BeginMainFrameRequested() const override;
+  void MainThreadHasStoppedFlinging() override;
+  void Start() override;
+  void Stop() override;
+  size_t MaxPartialTextureUpdates() const override;
+  void ForceSerializeOnSwapBuffers() override;
+  bool SupportsImplScrolling() const override;
+  void SetDebugState(const LayerTreeDebugState& debug_state) override;
+  void AsValueInto(base::debug::TracedValue* value) const override;
+  bool MainFrameWillHappenForTesting() override;
 
   // LayerTreeHostImplClient implementation
-  virtual void UpdateRendererCapabilitiesOnImplThread() OVERRIDE;
-  virtual void DidLoseOutputSurfaceOnImplThread() OVERRIDE;
-  virtual void CommitVSyncParameters(base::TimeTicks timebase,
-                                     base::TimeDelta interval) OVERRIDE;
-  virtual void SetEstimatedParentDrawTime(base::TimeDelta draw_time) OVERRIDE;
-  virtual void BeginFrame(const BeginFrameArgs& args) OVERRIDE;
-  virtual void SetMaxSwapsPendingOnImplThread(int max) OVERRIDE;
-  virtual void DidSwapBuffersOnImplThread() OVERRIDE;
-  virtual void DidSwapBuffersCompleteOnImplThread() OVERRIDE;
-  virtual void OnCanDrawStateChanged(bool can_draw) OVERRIDE;
-  virtual void NotifyReadyToActivate() OVERRIDE;
+  void UpdateRendererCapabilitiesOnImplThread() override;
+  void DidLoseOutputSurfaceOnImplThread() override;
+  void CommitVSyncParameters(base::TimeTicks timebase,
+                             base::TimeDelta interval) override;
+  void SetEstimatedParentDrawTime(base::TimeDelta draw_time) override;
+  void SetMaxSwapsPendingOnImplThread(int max) override;
+  void DidSwapBuffersOnImplThread() override;
+  void DidSwapBuffersCompleteOnImplThread() override;
+  void OnCanDrawStateChanged(bool can_draw) override;
+  void NotifyReadyToActivate() override;
   // Please call these 3 functions through
   // LayerTreeHostImpl's SetNeedsRedraw(), SetNeedsRedrawRect() and
   // SetNeedsAnimate().
-  virtual void SetNeedsRedrawOnImplThread() OVERRIDE;
-  virtual void SetNeedsRedrawRectOnImplThread(const gfx::Rect& dirty_rect)
-      OVERRIDE;
-  virtual void SetNeedsAnimateOnImplThread() OVERRIDE;
-  virtual void SetNeedsManageTilesOnImplThread() OVERRIDE;
-  virtual void DidInitializeVisibleTileOnImplThread() OVERRIDE;
-  virtual void SetNeedsCommitOnImplThread() OVERRIDE;
-  virtual void PostAnimationEventsToMainThreadOnImplThread(
-      scoped_ptr<AnimationEventsVector> queue) OVERRIDE;
-  virtual bool ReduceContentsTextureMemoryOnImplThread(size_t limit_bytes,
-                                                       int priority_cutoff)
-      OVERRIDE;
-  virtual bool IsInsideDraw() OVERRIDE;
-  virtual void RenewTreePriority() OVERRIDE;
-  virtual void PostDelayedScrollbarFadeOnImplThread(
-      const base::Closure& start_fade,
-      base::TimeDelta delay) OVERRIDE;
-  virtual void DidActivateSyncTree() OVERRIDE;
-  virtual void DidManageTiles() OVERRIDE;
+  void SetNeedsRedrawOnImplThread() override;
+  void SetNeedsRedrawRectOnImplThread(const gfx::Rect& dirty_rect) override;
+  void SetNeedsAnimateOnImplThread() override;
+  void SetNeedsManageTilesOnImplThread() override;
+  void DidInitializeVisibleTileOnImplThread() override;
+  void SetNeedsCommitOnImplThread() override;
+  void PostAnimationEventsToMainThreadOnImplThread(
+      scoped_ptr<AnimationEventsVector> queue) override;
+  bool ReduceContentsTextureMemoryOnImplThread(size_t limit_bytes,
+                                               int priority_cutoff) override;
+  bool IsInsideDraw() override;
+  void RenewTreePriority() override;
+  void PostDelayedScrollbarFadeOnImplThread(const base::Closure& start_fade,
+                                            base::TimeDelta delay) override;
+  void DidActivateSyncTree() override;
+  void DidManageTiles() override;
 
   // SchedulerClient implementation
-  virtual void SetNeedsBeginFrame(bool enable) OVERRIDE;
-  virtual void WillBeginImplFrame(const BeginFrameArgs& args) OVERRIDE;
-  virtual void ScheduledActionSendBeginMainFrame() OVERRIDE;
-  virtual DrawResult ScheduledActionDrawAndSwapIfPossible() OVERRIDE;
-  virtual DrawResult ScheduledActionDrawAndSwapForced() OVERRIDE;
-  virtual void ScheduledActionAnimate() OVERRIDE;
-  virtual void ScheduledActionCommit() OVERRIDE;
-  virtual void ScheduledActionUpdateVisibleTiles() OVERRIDE;
-  virtual void ScheduledActionActivateSyncTree() OVERRIDE;
-  virtual void ScheduledActionBeginOutputSurfaceCreation() OVERRIDE;
-  virtual void ScheduledActionManageTiles() OVERRIDE;
-  virtual void DidAnticipatedDrawTimeChange(base::TimeTicks time) OVERRIDE;
-  virtual base::TimeDelta DrawDurationEstimate() OVERRIDE;
-  virtual base::TimeDelta BeginMainFrameToCommitDurationEstimate() OVERRIDE;
-  virtual base::TimeDelta CommitToActivateDurationEstimate() OVERRIDE;
-  virtual void DidBeginImplFrameDeadline() OVERRIDE;
+  BeginFrameSource* ExternalBeginFrameSource() override;
+  void WillBeginImplFrame(const BeginFrameArgs& args) override;
+  void ScheduledActionSendBeginMainFrame() override;
+  DrawResult ScheduledActionDrawAndSwapIfPossible() override;
+  DrawResult ScheduledActionDrawAndSwapForced() override;
+  void ScheduledActionAnimate() override;
+  void ScheduledActionCommit() override;
+  void ScheduledActionUpdateVisibleTiles() override;
+  void ScheduledActionActivateSyncTree() override;
+  void ScheduledActionBeginOutputSurfaceCreation() override;
+  void ScheduledActionManageTiles() override;
+  void DidAnticipatedDrawTimeChange(base::TimeTicks time) override;
+  base::TimeDelta DrawDurationEstimate() override;
+  base::TimeDelta BeginMainFrameToCommitDurationEstimate() override;
+  base::TimeDelta CommitToActivateDurationEstimate() override;
+  void DidBeginImplFrameDeadline() override;
 
   // ResourceUpdateControllerClient implementation
-  virtual void ReadyToFinalizeTextureUpdates() OVERRIDE;
+  void ReadyToFinalizeTextureUpdates() override;
 
  protected:
   ThreadProxy(LayerTreeHost* layer_tree_host,

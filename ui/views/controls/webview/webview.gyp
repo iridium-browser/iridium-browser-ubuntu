@@ -12,7 +12,6 @@
       'target_name': 'webview',
       'type': '<(component)',
       'dependencies': [
-        '../../../aura/aura.gyp:aura',
         '../../../../base/base.gyp:base',
         '../../../../base/base.gyp:base_i18n',
         '../../../../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
@@ -34,6 +33,7 @@
         'unhandled_keyboard_event_handler.cc',
         'unhandled_keyboard_event_handler.h',
         'unhandled_keyboard_event_handler_linux.cc',
+        'unhandled_keyboard_event_handler_mac.mm',
         'unhandled_keyboard_event_handler_win.cc',
         'web_dialog_view.cc',
         'web_dialog_view.h',

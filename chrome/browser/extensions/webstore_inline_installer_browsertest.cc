@@ -49,13 +49,13 @@ class ProgrammableInstallPrompt : public ExtensionInstallPrompt {
       : ExtensionInstallPrompt(contents)
   {}
 
-  virtual ~ProgrammableInstallPrompt() {}
+  ~ProgrammableInstallPrompt() override {}
 
-  virtual void ConfirmStandaloneInstall(
+  void ConfirmStandaloneInstall(
       Delegate* delegate,
       const Extension* extension,
       SkBitmap* icon,
-      scoped_refptr<ExtensionInstallPrompt::Prompt> prompt) OVERRIDE {
+      scoped_refptr<ExtensionInstallPrompt::Prompt> prompt) override {
     delegate_ = delegate;
   }
 
@@ -93,14 +93,13 @@ class WebstoreInlineInstallerForTest : public WebstoreInlineInstaller {
         programmable_prompt_(NULL) {
   }
 
-  virtual scoped_ptr<ExtensionInstallPrompt> CreateInstallUI() OVERRIDE {
+  scoped_ptr<ExtensionInstallPrompt> CreateInstallUI() override {
     programmable_prompt_ = new ProgrammableInstallPrompt(web_contents());
-    return make_scoped_ptr(programmable_prompt_).
-        PassAs<ExtensionInstallPrompt>();
+    return make_scoped_ptr(programmable_prompt_);
   }
 
  private:
-  virtual ~WebstoreInlineInstallerForTest() {}
+  ~WebstoreInlineInstallerForTest() override {}
 
   friend class base::RefCountedThreadSafe<WebstoreStandaloneInstaller>;
 
@@ -114,12 +113,12 @@ class WebstoreInlineInstallerForTest : public WebstoreInlineInstaller {
 
 class WebstoreInlineInstallerForTestFactory :
     public WebstoreInlineInstallerFactory {
-  virtual ~WebstoreInlineInstallerForTestFactory() {}
-  virtual WebstoreInlineInstaller* CreateInstaller(
+  ~WebstoreInlineInstallerForTestFactory() override {}
+  WebstoreInlineInstaller* CreateInstaller(
       WebContents* contents,
       const std::string& webstore_item_id,
       const GURL& requestor_url,
-      const WebstoreStandaloneInstaller::Callback& callback) OVERRIDE {
+      const WebstoreStandaloneInstaller::Callback& callback) override {
     return new WebstoreInlineInstallerForTest(
         contents, webstore_item_id, requestor_url, callback);
   }
@@ -170,7 +169,7 @@ IN_PROC_BROWSER_TEST_F(WebstoreInlineInstallerTest,
 class WebstoreInlineInstallerListenerTest : public WebstoreInlineInstallerTest {
  public:
   WebstoreInlineInstallerListenerTest() {}
-  virtual ~WebstoreInlineInstallerListenerTest() {}
+  ~WebstoreInlineInstallerListenerTest() override {}
 
  protected:
   void RunTest(const std::string& file_name) {

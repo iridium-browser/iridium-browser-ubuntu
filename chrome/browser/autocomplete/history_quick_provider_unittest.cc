@@ -28,7 +28,6 @@
 #include "chrome/browser/history/url_index_private_data.h"
 #include "chrome/browser/search_engines/chrome_template_url_service_client.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/bookmarks/test/bookmark_test_helpers.h"
@@ -131,12 +130,14 @@ class HistoryQuickProviderTest : public testing::Test {
     return new TemplateURLService(
         profile->GetPrefs(), make_scoped_ptr(new SearchTermsData), NULL,
         scoped_ptr<TemplateURLServiceClient>(
-            new ChromeTemplateURLServiceClient(profile)),
+            new ChromeTemplateURLServiceClient(
+                HistoryServiceFactory::GetForProfile(
+                    profile, Profile::EXPLICIT_ACCESS))),
         NULL, NULL, base::Closure());
   }
 
-  virtual void SetUp();
-  virtual void TearDown();
+  void SetUp() override;
+  void TearDown() override;
 
   virtual void GetTestData(size_t* data_count, TestURLInfo** test_data);
 
@@ -182,7 +183,7 @@ void HistoryQuickProviderTest::SetUp() {
   profile_.reset(new TestingProfile());
   ASSERT_TRUE(profile_->CreateHistoryService(true, false));
   profile_->CreateBookmarkModel(true);
-  test::WaitForBookmarkModelToLoad(
+  bookmarks::test::WaitForBookmarkModelToLoad(
       BookmarkModelFactory::GetForProfile(profile_.get()));
   profile_->BlockUntilHistoryIndexIsRefreshed();
   history_service_ =
@@ -287,8 +288,8 @@ void HistoryQuickProviderTest::RunTestWithCursor(
     base::string16 expected_autocompletion) {
   SCOPED_TRACE(text);  // Minimal hint to query being run.
   base::MessageLoop::current()->RunUntilIdle();
-  AutocompleteInput input(text, cursor_position, base::string16(),
-                          GURL(), metrics::OmniboxEventProto::INVALID_SPEC,
+  AutocompleteInput input(text, cursor_position, std::string(), GURL(),
+                          metrics::OmniboxEventProto::INVALID_SPEC,
                           prevent_inline_autocomplete, false, true, true,
                           ChromeAutocompleteSchemeClassifier(profile_.get()));
   provider_->Start(input, false);
@@ -752,8 +753,7 @@ TestURLInfo ordering_test_db[] = {
 
 class HQPOrderingTest : public HistoryQuickProviderTest {
  protected:
-  virtual void GetTestData(size_t* data_count,
-                           TestURLInfo** test_data) OVERRIDE;
+  void GetTestData(size_t* data_count, TestURLInfo** test_data) override;
 };
 
 void HQPOrderingTest::GetTestData(size_t* data_count, TestURLInfo** test_data) {

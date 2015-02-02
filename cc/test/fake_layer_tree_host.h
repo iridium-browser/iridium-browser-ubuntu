@@ -23,10 +23,10 @@ class FakeLayerTreeHost : public LayerTreeHost {
       FakeLayerTreeHostClient* client,
       const LayerTreeSettings& settings);
 
-  virtual ~FakeLayerTreeHost();
+  ~FakeLayerTreeHost() override;
 
-  virtual void SetNeedsCommit() OVERRIDE;
-  virtual void SetNeedsFullTreeSync() OVERRIDE {}
+  void SetNeedsCommit() override;
+  void SetNeedsFullTreeSync() override {}
 
   using LayerTreeHost::SetRootLayer;
   using LayerTreeHost::root_layer;

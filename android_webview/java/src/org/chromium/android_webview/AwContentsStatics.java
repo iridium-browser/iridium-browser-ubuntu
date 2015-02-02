@@ -74,6 +74,17 @@ public class AwContentsStatics {
         nativeSetRecordFullDocument(recordFullDocument);
     }
 
+    /*
+     * Register the signal handler that prints out the version code upon crash.
+     */
+    public static void registerCrashHandler(String version) {
+        nativeRegisterCrashHandler(version);
+    }
+
+    public static void setLegacyCacheRemovalDelayForTest(long timeoutMs) {
+        nativeSetLegacyCacheRemovalDelayForTest(timeoutMs);
+    }
+
     //--------------------------------------------------------------------------------------------
     //  Native methods
     //--------------------------------------------------------------------------------------------
@@ -82,4 +93,6 @@ public class AwContentsStatics {
     private static native void nativeSetDataReductionProxyEnabled(boolean enabled);
     private static native String nativeGetUnreachableWebDataUrl();
     private static native void nativeSetRecordFullDocument(boolean recordFullDocument);
+    private static native void nativeRegisterCrashHandler(String version);
+    private static native void nativeSetLegacyCacheRemovalDelayForTest(long timeoutMs);
 }

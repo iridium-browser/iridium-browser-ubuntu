@@ -40,14 +40,14 @@ GIT_REVISIONS = {
         'upstream-base': '237df3fa4a1d939e6fd1af0c3e5029a25a137310',
         },
     'gcc': {
-        'rev': '95260f2088fc67f43c329c864f03293a5718269a',
-        'upstream-branch': 'upstream/gcc-4_8-branch',
-        'upstream-name': 'gcc-4.8.3',
-         # Upstream tag gcc-4_8_3-release:
-        'upstream-base': '6bbf0dec66c0e719b06cd2fe67559fda6df09000',
+        'rev': 'daf66f6da8d77ceb3cc75e63f3a7156abb09d564',
+        'upstream-branch': 'upstream/gcc-4_9-branch',
+        'upstream-name': 'gcc-4.9.2',
+         # Upstream tag gcc-4_9_2-release:
+        'upstream-base': 'c1283af40b65f1ad862cf5b27e2d9ed10b2076b6',
         },
     'newlib': {
-        'rev': 'e7b1ccd4b5eec14e840f6bf875f4d6fa4cff045c',
+        'rev': 'bf66148d14c7fca26b9198dd5dc81e743893bb66',
         'upstream-branch': 'upstream/master',
         'upstream-name': 'newlib-2.1.0',
         # Upstream tag newlib_2_1_0:
@@ -252,8 +252,7 @@ GDB_INJECT_PACKAGES = [
 
 # These are extra arguments to pass gcc's configure that vary by target.
 TARGET_GCC_CONFIG = {
-# TODO(mcgrathr): Disabled tuning for now, tickling a constant-pool layout bug.
-#    'arm': ['--with-tune=cortex-a15'],
+    'arm': ['--with-tune=cortex-a15'],
     }
 
 PACKAGE_NAME = 'Native Client SDK [%(build_signature)s]'

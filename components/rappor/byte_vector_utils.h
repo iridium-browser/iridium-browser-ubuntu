@@ -62,7 +62,7 @@ class ByteVectorGenerator {
   DISALLOW_COPY_AND_ASSIGN(ByteVectorGenerator);
 };
 
-// A ByteVectorGenerator that uses a psuedo-random function to generate a
+// A ByteVectorGenerator that uses a pseudo-random function to generate a
 // deterministically random bits.  This class only implements a single request
 // from HMAC_DRBG and streams up to 2^19 bits from that request.
 // Ref: http://csrc.nist.gov/publications/nistpubs/800-90A/SP800-90A.pdf
@@ -80,7 +80,7 @@ class HmacByteVectorGenerator : public ByteVectorGenerator {
                           const std::string& entropy_input,
                           const std::string& personalization_string);
 
-  virtual ~HmacByteVectorGenerator();
+  ~HmacByteVectorGenerator() override;
 
   // Generates a random string suitable for passing to the constructor as
   // |entropy_input|.
@@ -95,7 +95,7 @@ class HmacByteVectorGenerator : public ByteVectorGenerator {
   explicit HmacByteVectorGenerator(const HmacByteVectorGenerator& prev_request);
 
   // ByteVector implementation:
-  virtual ByteVector GetRandomByteVector() OVERRIDE;
+  ByteVector GetRandomByteVector() override;
 
  private:
   // HMAC initalized with the value of "Key" HMAC_DRBG_Initialize.

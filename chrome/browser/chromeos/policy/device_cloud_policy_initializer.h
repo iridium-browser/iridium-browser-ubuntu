@@ -95,8 +95,8 @@ class DeviceCloudPolicyInitializer : public CloudPolicyStore::Observer {
   std::string GetForcedEnrollmentDomain() const;
 
   // CloudPolicyStore::Observer:
-  virtual void OnStoreLoaded(CloudPolicyStore* store) OVERRIDE;
-  virtual void OnStoreError(CloudPolicyStore* store) OVERRIDE;
+  virtual void OnStoreLoaded(CloudPolicyStore* store) override;
+  virtual void OnStoreError(CloudPolicyStore* store) override;
 
  private:
   // Handles completion signaled by |enrollment_handler_|.
@@ -109,9 +109,6 @@ class DeviceCloudPolicyInitializer : public CloudPolicyStore::Observer {
 
   void TryToCreateClient();
   void StartConnection(scoped_ptr<CloudPolicyClient> client);
-
-  // Gets the device restore mode as stored in |local_state_|.
-  std::string GetRestoreMode() const;
 
   PrefService* local_state_;
   DeviceManagementService* enterprise_service_;

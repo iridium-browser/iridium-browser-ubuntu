@@ -24,7 +24,7 @@
 #include "chrome/browser/sync/test/integration/sync_test.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/test/base/ui_test_utils.h"
+#include "content/public/test/test_utils.h"
 #include "url/gurl.h"
 
 using sync_datatype_helper::test;
@@ -136,16 +136,16 @@ class TabEventHandler : public browser_sync::LocalSessionEventHandler {
         TestTimeouts::action_max_timeout());
   }
 
-  virtual void OnLocalTabModified(
-      browser_sync::SyncedTabDelegate* modified_tab) OVERRIDE {
+  void OnLocalTabModified(
+      browser_sync::SyncedTabDelegate* modified_tab) override {
     // Unwind to ensure SessionsSyncManager has processed the event.
     base::MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(&TabEventHandler::QuitLoop, weak_factory_.GetWeakPtr()));
   }
 
-  virtual void OnFaviconPageUrlsUpdated(
-      const std::set<GURL>& updated_page_urls) OVERRIDE {
+  void OnFaviconPageUrlsUpdated(
+      const std::set<GURL>& updated_page_urls) override {
     // Unwind to ensure SessionsSyncManager has processed the event.
     base::MessageLoop::current()->PostTask(
         FROM_HERE,
@@ -289,11 +289,11 @@ bool NavigationEquals(const sessions::SerializedNavigationEntry& expected,
                << ", actual " << actual.virtual_url();
     return false;
   }
-  if (expected.referrer().url != actual.referrer().url) {
+  if (expected.referrer_url() != actual.referrer_url()) {
     LOG(ERROR) << "Expected referrer "
-               << expected.referrer().url
+               << expected.referrer_url()
                << ", actual "
-               << actual.referrer().url;
+               << actual.referrer_url();
     return false;
   }
   if (expected.title() != actual.title()) {
@@ -367,10 +367,11 @@ class CheckForeignSessionsChecker : public MultiClientStatusChangeChecker {
  public:
   CheckForeignSessionsChecker(int index,
                               const std::vector<ScopedWindowMap>& windows);
-  virtual ~CheckForeignSessionsChecker();
+  ~CheckForeignSessionsChecker() override;
 
-  virtual bool IsExitConditionSatisfied() OVERRIDE;
-  virtual std::string GetDebugMessage() const OVERRIDE;
+  bool IsExitConditionSatisfied() override;
+  std::string GetDebugMessage() const override;
+
  private:
   int index_;
   const std::vector<ScopedWindowMap>& windows_;

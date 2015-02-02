@@ -4,11 +4,13 @@
 
 #include "components/signin/core/browser/mutable_profile_oauth2_token_service.h"
 
+#include "base/profiler/scoped_tracker.h"
 #include "components/signin/core/browser/signin_client.h"
 #include "components/signin/core/browser/signin_metrics.h"
 #include "components/signin/core/browser/webdata/token_web_data.h"
 #include "components/webdata/common/web_data_service_base.h"
 #include "google_apis/gaia/gaia_auth_fetcher.h"
+#include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "google_apis/gaia/oauth2_access_token_fetcher_impl.h"
@@ -45,11 +47,11 @@ class MutableProfileOAuth2TokenService::RevokeServerRefreshToken
  public:
   RevokeServerRefreshToken(MutableProfileOAuth2TokenService* token_service,
                            const std::string& account_id);
-  virtual ~RevokeServerRefreshToken();
+  ~RevokeServerRefreshToken() override;
 
  private:
   // GaiaAuthConsumer overrides:
-  virtual void OnOAuth2RevokeTokenCompleted() OVERRIDE;
+  void OnOAuth2RevokeTokenCompleted() override;
 
   MutableProfileOAuth2TokenService* token_service_;
   GaiaAuthFetcher fetcher_;
@@ -157,6 +159,7 @@ MutableProfileOAuth2TokenService::CreateAccessTokenFetcher(
     const std::string& account_id,
     net::URLRequestContextGetter* getter,
     OAuth2AccessTokenConsumer* consumer) {
+  ValidateAccountId(account_id);
   std::string refresh_token = GetRefreshToken(account_id);
   DCHECK(!refresh_token.empty());
   return new OAuth2AccessTokenFetcherImpl(consumer, getter, refresh_token);
@@ -170,6 +173,7 @@ MutableProfileOAuth2TokenService::GetRequestContext() {
 void MutableProfileOAuth2TokenService::LoadCredentials(
     const std::string& primary_account_id) {
   DCHECK(!primary_account_id.empty());
+  ValidateAccountId(primary_account_id);
   DCHECK(loading_primary_account_id_.empty());
   DCHECK_EQ(0, web_data_service_request_);
 
@@ -184,6 +188,11 @@ void MutableProfileOAuth2TokenService::LoadCredentials(
 void MutableProfileOAuth2TokenService::OnWebDataServiceRequestDone(
     WebDataServiceBase::Handle handle,
     const WDTypedResult* result) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422460 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422460 MutableProfileOAuth2Token...::OnWebDataServiceRequestDone"));
+
   DCHECK_EQ(web_data_service_request_, handle);
   web_data_service_request_ = 0;
 
@@ -224,7 +233,7 @@ void MutableProfileOAuth2TokenService::LoadAllCredentialsIntoMemory(
   std::string old_login_token;
 
   {
-    ScopedBacthChange batch(this);
+    ScopedBatchChange batch(this);
 
     for (std::map<std::string, std::string>::const_iterator iter =
              db_tokens.begin();
@@ -243,10 +252,16 @@ void MutableProfileOAuth2TokenService::LoadAllCredentialsIntoMemory(
       } else {
         DCHECK(!refresh_token.empty());
         std::string account_id = RemoveAccountIdPrefix(prefixed_account_id);
+
+        // If the account_id is an email address, then canonicalize it.  This
+        // is to support legacy account_ids, and will not be needed after
+        // switching to gaia-ids.
+        if (account_id.find('@') != std::string::npos)
+          account_id = gaia::CanonicalizeEmail(account_id);
+
         refresh_tokens()[account_id].reset(
             new AccountInfo(this, account_id, refresh_token));
         FireRefreshTokenAvailable(account_id);
-        // TODO(fgorski): Notify diagnostic observers.
       }
     }
 
@@ -263,6 +278,8 @@ void MutableProfileOAuth2TokenService::LoadAllCredentialsIntoMemory(
 void MutableProfileOAuth2TokenService::UpdateAuthError(
     const std::string& account_id,
     const GoogleServiceAuthError& error) {
+  ValidateAccountId(account_id);
+
   // Do not report connection errors as these are not actually auth errors.
   // We also want to avoid masking a "real" auth error just because we
   // subsequently get a transient network error.
@@ -295,13 +312,14 @@ void MutableProfileOAuth2TokenService::UpdateCredentials(
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!account_id.empty());
   DCHECK(!refresh_token.empty());
+  ValidateAccountId(account_id);
 
   signin_metrics::LogSigninAddAccount();
 
   bool refresh_token_present = refresh_tokens_.count(account_id) > 0;
   if (!refresh_token_present ||
       refresh_tokens_[account_id]->refresh_token() != refresh_token) {
-    ScopedBacthChange batch(this);
+    ScopedBatchChange batch(this);
 
     // If token present, and different from the new one, cancel its requests,
     // and clear the entries in cache related to that account.
@@ -329,10 +347,11 @@ void MutableProfileOAuth2TokenService::UpdateCredentials(
 
 void MutableProfileOAuth2TokenService::RevokeCredentials(
     const std::string& account_id) {
+  ValidateAccountId(account_id);
   DCHECK(thread_checker_.CalledOnValidThread());
 
   if (refresh_tokens_.count(account_id) > 0) {
-    ScopedBacthChange batch(this);
+    ScopedBatchChange batch(this);
     RevokeCredentialsOnServer(refresh_tokens_[account_id]->refresh_token());
     CancelRequestsForAccount(account_id);
     ClearCacheForAccount(account_id);
@@ -364,7 +383,7 @@ void MutableProfileOAuth2TokenService::RevokeAllCredentials() {
     return;
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  ScopedBacthChange batch(this);
+  ScopedBatchChange batch(this);
 
   CancelWebTokenFetch();
   CancelAllRequests();

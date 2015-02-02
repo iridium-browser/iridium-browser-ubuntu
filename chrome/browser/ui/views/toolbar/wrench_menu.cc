@@ -8,6 +8,7 @@
 #include <cmath>
 #include <set>
 
+#include "base/metrics/histogram.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
@@ -106,7 +107,7 @@ class FullscreenButton : public ImageButton {
       : ImageButton(listener) { }
 
   // Overridden from ImageButton.
-  virtual gfx::Size GetPreferredSize() const OVERRIDE {
+  gfx::Size GetPreferredSize() const override {
     gfx::Size pref = ImageButton::GetPreferredSize();
     if (border()) {
       gfx::Insets insets = border()->GetInsets();
@@ -148,7 +149,7 @@ class InMenuButtonBackground : public views::Background {
   }
 
   // Overridden from views::Background.
-  virtual void Paint(gfx::Canvas* canvas, View* view) const OVERRIDE {
+  void Paint(gfx::Canvas* canvas, View* view) const override {
     CustomButton* button = CustomButton::AsCustomButton(view);
     views::Button::ButtonState state =
         button ? button->state() : views::Button::STATE_NORMAL;
@@ -258,7 +259,7 @@ class InMenuButton : public LabelButton {
  public:
   InMenuButton(views::ButtonListener* listener, const base::string16& text)
       : LabelButton(listener, text), in_menu_background_(NULL) {}
-  virtual ~InMenuButton() {}
+  ~InMenuButton() override {}
 
   void Init(InMenuButtonBackground::ButtonType type) {
     SetFocusable(true);
@@ -276,7 +277,7 @@ class InMenuButton : public LabelButton {
   }
 
   // views::LabelButton
-  virtual void OnNativeThemeChanged(const ui::NativeTheme* theme) OVERRIDE {
+  void OnNativeThemeChanged(const ui::NativeTheme* theme) override {
     const MenuConfig& menu_config = MenuConfig::instance(theme);
     SetBorder(views::Border::CreateEmptyBorder(
         0, kHorizontalPadding, 0, kHorizontalPadding));
@@ -319,13 +320,13 @@ class WrenchMenuView : public views::View,
     menu_->AddObserver(this);
   }
 
-  virtual ~WrenchMenuView() {
+  ~WrenchMenuView() override {
     if (menu_)
       menu_->RemoveObserver(this);
   }
 
   // Overridden from views::View.
-  virtual void SchedulePaintInRect(const gfx::Rect& r) OVERRIDE {
+  void SchedulePaintInRect(const gfx::Rect& r) override {
     // Normally when the mouse enters/exits a button the buttons invokes
     // SchedulePaint. As part of the button border (InMenuButtonBackground) is
     // rendered by the button to the left/right of it SchedulePaint on the the
@@ -364,7 +365,7 @@ class WrenchMenuView : public views::View,
   }
 
   // Overridden from WrenchMenuObserver:
-  virtual void WrenchMenuDestroyed() OVERRIDE {
+  void WrenchMenuDestroyed() override {
     menu_->RemoveObserver(this);
     menu_ = NULL;
     menu_model_ = NULL;
@@ -393,9 +394,9 @@ class HoveredImageSource : public gfx::ImageSkiaSource {
       : image_(image),
         color_(color) {
   }
-  virtual ~HoveredImageSource() {}
+  ~HoveredImageSource() override {}
 
-  virtual gfx::ImageSkiaRep GetImageForScale(float scale) OVERRIDE {
+  gfx::ImageSkiaRep GetImageForScale(float scale) override {
     const gfx::ImageSkiaRep& rep = image_.GetRepresentation(scale);
     SkBitmap bitmap = rep.sk_bitmap();
     SkBitmap white;
@@ -444,13 +445,13 @@ class WrenchMenu::CutCopyPasteView : public WrenchMenuView {
   }
 
   // Overridden from View.
-  virtual gfx::Size GetPreferredSize() const OVERRIDE {
+  gfx::Size GetPreferredSize() const override {
     // Returned height doesn't matter as MenuItemView forces everything to the
     // height of the menuitemview.
     return gfx::Size(GetMaxChildViewPreferredWidth() * child_count(), 0);
   }
 
-  virtual void Layout() OVERRIDE {
+  void Layout() override {
     // All buttons are given the same width.
     int width = GetMaxChildViewPreferredWidth();
     for (int i = 0; i < child_count(); ++i)
@@ -458,8 +459,7 @@ class WrenchMenu::CutCopyPasteView : public WrenchMenuView {
   }
 
   // Overridden from ButtonListener.
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE {
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override {
     menu()->CancelAndEvaluate(menu_model(), sender->tag());
   }
 
@@ -553,10 +553,10 @@ class WrenchMenu::ZoomView : public WrenchMenuView {
     UpdateZoomControls();
   }
 
-  virtual ~ZoomView() {}
+  ~ZoomView() override {}
 
   // Overridden from View.
-  virtual gfx::Size GetPreferredSize() const OVERRIDE {
+  gfx::Size GetPreferredSize() const override {
     // The increment/decrement button are forced to the same width.
     int button_width = std::max(increment_button_->GetPreferredSize().width(),
                                 decrement_button_->GetPreferredSize().width());
@@ -569,7 +569,7 @@ class WrenchMenu::ZoomView : public WrenchMenuView {
                      fullscreen_width, 0);
   }
 
-  virtual void Layout() OVERRIDE {
+  void Layout() override {
     int x = 0;
     int button_width = std::max(increment_button_->GetPreferredSize().width(),
                                 decrement_button_->GetPreferredSize().width());
@@ -594,7 +594,7 @@ class WrenchMenu::ZoomView : public WrenchMenuView {
     fullscreen_button_->SetBoundsRect(bounds);
   }
 
-  virtual void OnNativeThemeChanged(const ui::NativeTheme* theme) OVERRIDE {
+  void OnNativeThemeChanged(const ui::NativeTheme* theme) override {
     WrenchMenuView::OnNativeThemeChanged(theme);
 
     const MenuConfig& menu_config = MenuConfig::instance(theme);
@@ -622,8 +622,7 @@ class WrenchMenu::ZoomView : public WrenchMenuView {
   }
 
   // Overridden from ButtonListener.
-  virtual void ButtonPressed(views::Button* sender,
-                             const ui::Event& event) OVERRIDE {
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override {
     if (sender->tag() == fullscreen_index_) {
       menu()->CancelAndEvaluate(menu_model(), sender->tag());
     } else {
@@ -633,9 +632,7 @@ class WrenchMenu::ZoomView : public WrenchMenuView {
   }
 
   // Overridden from WrenchMenuObserver.
-  virtual void WrenchMenuDestroyed() OVERRIDE {
-    WrenchMenuView::WrenchMenuDestroyed();
-  }
+  void WrenchMenuDestroyed() override { WrenchMenuView::WrenchMenuDestroyed(); }
 
  private:
   void OnZoomLevelChanged(const HostZoomMap::ZoomLevelChange& change) {
@@ -723,7 +720,7 @@ class WrenchMenu::RecentTabsMenuModelDelegate : public ui::MenuModelDelegate {
     model_->SetMenuModelDelegate(this);
   }
 
-  virtual ~RecentTabsMenuModelDelegate() {
+  ~RecentTabsMenuModelDelegate() override {
     model_->SetMenuModelDelegate(NULL);
   }
 
@@ -739,7 +736,7 @@ class WrenchMenu::RecentTabsMenuModelDelegate : public ui::MenuModelDelegate {
 
   // ui::MenuModelDelegate implementation:
 
-  virtual void OnIconChanged(int index) OVERRIDE {
+  void OnIconChanged(int index) override {
     int command_id = model_->GetCommandIdAt(index);
     views::MenuItemView* item = menu_item_->GetMenuItemByID(command_id);
     DCHECK(item);
@@ -748,7 +745,7 @@ class WrenchMenu::RecentTabsMenuModelDelegate : public ui::MenuModelDelegate {
     item->SetIcon(*icon.ToImageSkia());
   }
 
-  virtual void OnMenuStructureChanged() OVERRIDE {
+  void OnMenuStructureChanged() override {
     if (menu_item_->HasSubmenu()) {
       // Remove all menu items from submenu.
       views::SubmenuView* submenu = menu_item_->GetSubmenu();
@@ -816,12 +813,12 @@ void WrenchMenu::Init(ui::MenuModel* model) {
                                // so we get the taller menu style.
   PopulateMenu(root_, model);
 
-#if defined(DEBUG)
+#if !defined(NDEBUG)
   // Verify that the reserved command ID's for bookmarks menu are not used.
-  for (int i = WrenchMenuModel:kMinBookmarkCommandId;
+  for (int i = WrenchMenuModel::kMinBookmarkCommandId;
        i <= WrenchMenuModel::kMaxBookmarkCommandId; ++i)
     DCHECK(command_id_to_entry_.find(i) == command_id_to_entry_.end());
-#endif  // defined(DEBUG)
+#endif  // !defined(NDEBUG)
 
   int32 types = views::MenuRunner::HAS_MNEMONICS;
   if (for_drop()) {
@@ -1005,6 +1002,10 @@ bool WrenchMenu::IsCommandEnabled(int command_id) const {
 
 void WrenchMenu::ExecuteCommand(int command_id, int mouse_event_flags) {
   if (IsBookmarkCommand(command_id)) {
+    UMA_HISTOGRAM_TIMES("WrenchMenu.TimeToAction.BookmarkOpen",
+                        menu_opened_timer_.Elapsed());
+    UMA_HISTOGRAM_ENUMERATION("WrenchMenu.MenuAction",
+                              MENU_ACTION_BOOKMARK_OPEN, LIMIT_MENU_ACTION);
     bookmark_menu_delegate_->ExecuteCommand(command_id, mouse_event_flags);
     return;
   }

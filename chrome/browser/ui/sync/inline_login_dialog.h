@@ -25,19 +25,18 @@ class InlineLoginDialog : public ui::WebDialogDelegate {
   explicit InlineLoginDialog(Profile* profile);
 
   // ui::WebDialogDelegate overrides:
-  virtual ui::ModalType GetDialogModalType() const OVERRIDE;
-  virtual base::string16 GetDialogTitle() const OVERRIDE;
-  virtual GURL GetDialogContentURL() const OVERRIDE;
-  virtual void GetWebUIMessageHandlers(
-      std::vector<content::WebUIMessageHandler*>* handlers) const OVERRIDE;
-  virtual void GetDialogSize(gfx::Size* size) const OVERRIDE;
-  virtual std::string GetDialogArgs() const OVERRIDE;
-  virtual void OnDialogClosed(const std::string& json_retval) OVERRIDE;
-  virtual void OnCloseContents(
-      content::WebContents* source, bool* out_close_dialog) OVERRIDE;
-  virtual bool ShouldShowDialogTitle() const OVERRIDE;
-  virtual bool HandleContextMenu(
-      const content::ContextMenuParams& params) OVERRIDE;
+  ui::ModalType GetDialogModalType() const override;
+  base::string16 GetDialogTitle() const override;
+  GURL GetDialogContentURL() const override;
+  void GetWebUIMessageHandlers(
+      std::vector<content::WebUIMessageHandler*>* handlers) const override;
+  void GetDialogSize(gfx::Size* size) const override;
+  std::string GetDialogArgs() const override;
+  void OnDialogClosed(const std::string& json_retval) override;
+  void OnCloseContents(content::WebContents* source,
+                       bool* out_close_dialog) override;
+  bool ShouldShowDialogTitle() const override;
+  bool HandleContextMenu(const content::ContextMenuParams& params) override;
 
   Profile* profile_;
 

@@ -20,6 +20,7 @@
 #include "content/browser/dom_storage/dom_storage_context_wrapper.h"
 #include "content/browser/dom_storage/session_storage_namespace_impl.h"
 #include "content/browser/download/download_stats.h"
+#include "content/browser/gpu/browser_gpu_memory_buffer_manager.h"
 #include "content/browser/gpu/gpu_data_manager_impl.h"
 #include "content/browser/loader/resource_dispatcher_host_impl.h"
 #include "content/browser/media/media_internals.h"
@@ -37,6 +38,7 @@
 #include "content/common/desktop_notification_messages.h"
 #include "content/common/frame_messages.h"
 #include "content/common/gpu/client/gpu_memory_buffer_impl.h"
+#include "content/common/host_discardable_shared_memory_manager.h"
 #include "content/common/host_shared_bitmap_manager.h"
 #include "content/common/media/media_param_traits.h"
 #include "content/common/view_messages.h"
@@ -87,8 +89,6 @@
 #include "content/common/sandbox_win.h"
 #endif
 #if defined(OS_ANDROID)
-#include "content/browser/renderer_host/compositor_impl_android.h"
-#include "content/common/gpu/client/gpu_memory_buffer_impl_surface_texture.h"
 #include "media/base/android/webaudio_media_codec_bridge.h"
 #endif
 
@@ -161,27 +161,23 @@ class OpenChannelToPpapiPluginCallback
         context_(context) {
   }
 
-  virtual void GetPpapiChannelInfo(base::ProcessHandle* renderer_handle,
-                                   int* renderer_id) OVERRIDE {
+  void GetPpapiChannelInfo(base::ProcessHandle* renderer_handle,
+                           int* renderer_id) override {
     *renderer_handle = filter()->PeerHandle();
     *renderer_id = filter()->render_process_id();
   }
 
-  virtual void OnPpapiChannelOpened(const IPC::ChannelHandle& channel_handle,
-                                    base::ProcessId plugin_pid,
-                                    int plugin_child_id) OVERRIDE {
+  void OnPpapiChannelOpened(const IPC::ChannelHandle& channel_handle,
+                            base::ProcessId plugin_pid,
+                            int plugin_child_id) override {
     ViewHostMsg_OpenChannelToPepperPlugin::WriteReplyParams(
         reply_msg(), channel_handle, plugin_pid, plugin_child_id);
     SendReplyAndDeleteThis();
   }
 
-  virtual bool OffTheRecord() OVERRIDE {
-    return filter()->OffTheRecord();
-  }
+  bool OffTheRecord() override { return filter()->OffTheRecord(); }
 
-  virtual ResourceContext* GetResourceContext() OVERRIDE {
-    return context_;
-  }
+  ResourceContext* GetResourceContext() override { return context_; }
 
  private:
   ResourceContext* context_;
@@ -196,26 +192,24 @@ class OpenChannelToPpapiBrokerCallback
         routing_id_(routing_id) {
   }
 
-  virtual ~OpenChannelToPpapiBrokerCallback() {}
+  ~OpenChannelToPpapiBrokerCallback() override {}
 
-  virtual void GetPpapiChannelInfo(base::ProcessHandle* renderer_handle,
-                                   int* renderer_id) OVERRIDE {
+  void GetPpapiChannelInfo(base::ProcessHandle* renderer_handle,
+                           int* renderer_id) override {
     *renderer_handle = filter_->PeerHandle();
     *renderer_id = filter_->render_process_id();
   }
 
-  virtual void OnPpapiChannelOpened(const IPC::ChannelHandle& channel_handle,
-                                    base::ProcessId plugin_pid,
-                                    int /* plugin_child_id */) OVERRIDE {
+  void OnPpapiChannelOpened(const IPC::ChannelHandle& channel_handle,
+                            base::ProcessId plugin_pid,
+                            int /* plugin_child_id */) override {
     filter_->Send(new ViewMsg_PpapiBrokerChannelCreated(routing_id_,
                                                         plugin_pid,
                                                         channel_handle));
     delete this;
   }
 
-  virtual bool OffTheRecord() OVERRIDE {
-    return filter_->OffTheRecord();
-  }
+  bool OffTheRecord() override { return filter_->OffTheRecord(); }
 
  private:
   scoped_refptr<RenderMessageFilter> filter_;
@@ -238,15 +232,11 @@ class RenderMessageFilter::OpenChannelToNpapiPluginCallback
         sent_plugin_channel_request_(false) {
   }
 
-  virtual int ID() OVERRIDE {
-    return filter()->render_process_id();
-  }
+  int ID() override { return filter()->render_process_id(); }
 
-  virtual ResourceContext* GetResourceContext() OVERRIDE {
-    return context_;
-  }
+  ResourceContext* GetResourceContext() override { return context_; }
 
-  virtual bool OffTheRecord() OVERRIDE {
+  bool OffTheRecord() override {
     if (filter()->OffTheRecord())
       return true;
     if (GetContentClient()->browser()->AllowSaveLocalState(context_))
@@ -260,26 +250,22 @@ class RenderMessageFilter::OpenChannelToNpapiPluginCallback
     return false;
   }
 
-  virtual void SetPluginInfo(const WebPluginInfo& info) OVERRIDE {
-    info_ = info;
-  }
+  void SetPluginInfo(const WebPluginInfo& info) override { info_ = info; }
 
-  virtual void OnFoundPluginProcessHost(PluginProcessHost* host) OVERRIDE {
+  void OnFoundPluginProcessHost(PluginProcessHost* host) override {
     DCHECK(host);
     host_ = host;
   }
 
-  virtual void OnSentPluginChannelRequest() OVERRIDE {
+  void OnSentPluginChannelRequest() override {
     sent_plugin_channel_request_ = true;
   }
 
-  virtual void OnChannelOpened(const IPC::ChannelHandle& handle) OVERRIDE {
+  void OnChannelOpened(const IPC::ChannelHandle& handle) override {
     WriteReplyAndDeleteThis(handle);
   }
 
-  virtual void OnError() OVERRIDE {
-    WriteReplyAndDeleteThis(IPC::ChannelHandle());
-  }
+  void OnError() override { WriteReplyAndDeleteThis(IPC::ChannelHandle()); }
 
   PluginProcessHost* host() const {
     return host_;
@@ -340,6 +326,11 @@ RenderMessageFilter::~RenderMessageFilter() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(plugin_host_clients_.empty());
   HostSharedBitmapManager::current()->ProcessRemoved(PeerHandle());
+  BrowserGpuMemoryBufferManager* gpu_memory_buffer_manager =
+      BrowserGpuMemoryBufferManager::current();
+  if (gpu_memory_buffer_manager)
+    gpu_memory_buffer_manager->ProcessRemoved(PeerHandle(), render_process_id_);
+  HostDiscardableSharedMemoryManager::current()->ProcessRemoved(PeerHandle());
 }
 
 void RenderMessageFilter::OnChannelClosing() {
@@ -360,9 +351,6 @@ void RenderMessageFilter::OnChannelClosing() {
   }
 #endif  // defined(ENABLE_PLUGINS)
   plugin_host_clients_.clear();
-#if defined(OS_ANDROID)
-  CompositorImpl::DestroyAllSurfaceTextures(render_process_id_);
-#endif
 }
 
 bool RenderMessageFilter::OnMessageReceived(const IPC::Message& message) {
@@ -427,6 +415,9 @@ bool RenderMessageFilter::OnMessageReceived(const IPC::Message& message) {
                         OnAllocatedSharedBitmap)
     IPC_MESSAGE_HANDLER(ChildProcessHostMsg_DeletedSharedBitmap,
                         OnDeletedSharedBitmap)
+    IPC_MESSAGE_HANDLER(
+        ChildProcessHostMsg_SyncAllocateLockedDiscardableSharedMemory,
+        OnAllocateLockedDiscardableSharedMemory)
 #if defined(OS_POSIX) && !defined(OS_ANDROID)
     IPC_MESSAGE_HANDLER(ViewHostMsg_AllocTransportDIB, OnAllocTransportDIB)
     IPC_MESSAGE_HANDLER(ViewHostMsg_FreeTransportDIB, OnFreeTransportDIB)
@@ -962,6 +953,14 @@ void RenderMessageFilter::OnDeletedSharedBitmap(const cc::SharedBitmapId& id) {
   HostSharedBitmapManager::current()->ChildDeletedSharedBitmap(id);
 }
 
+void RenderMessageFilter::OnAllocateLockedDiscardableSharedMemory(
+    uint32 size,
+    base::SharedMemoryHandle* handle) {
+  HostDiscardableSharedMemoryManager::current()
+      ->AllocateLockedDiscardableSharedMemoryForChild(
+          PeerHandle(), size, handle);
+}
+
 net::CookieStore* RenderMessageFilter::GetCookieStoreForURL(
     const GURL& url) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
@@ -1230,25 +1229,26 @@ void RenderMessageFilter::OnWebAudioMediaCodec(
 #endif
 
 void RenderMessageFilter::OnAddNavigationTransitionData(
-    int render_frame_id,
-    const std::string& allowed_destination_host_pattern,
-    const std::string& selector,
-    const std::string& markup) {
+    FrameHostMsg_AddNavigationTransitionData_Params params) {
+  if (params.elements.size() > TransitionRequestManager::kMaxNumOfElements)
+    return;
   TransitionRequestManager::GetInstance()->AddPendingTransitionRequestData(
-      render_process_id_, render_frame_id, allowed_destination_host_pattern,
-      selector, markup);
+      render_process_id_,
+      params.render_frame_id,
+      params.allowed_destination_host_pattern,
+      params.selector,
+      params.markup,
+      params.elements);
 }
 
-void RenderMessageFilter::OnAllocateGpuMemoryBuffer(uint32 width,
-                                                    uint32 height,
-                                                    uint32 internalformat,
-                                                    uint32 usage,
-                                                    IPC::Message* reply) {
-  if (!GpuMemoryBufferImpl::IsFormatValid(internalformat) ||
-      !GpuMemoryBufferImpl::IsUsageValid(usage)) {
-    GpuMemoryBufferAllocated(reply, gfx::GpuMemoryBufferHandle());
-    return;
-  }
+void RenderMessageFilter::OnAllocateGpuMemoryBuffer(
+    uint32 width,
+    uint32 height,
+    gfx::GpuMemoryBuffer::Format format,
+    gfx::GpuMemoryBuffer::Usage usage,
+    IPC::Message* reply) {
+  DCHECK(BrowserGpuMemoryBufferManager::current());
+
   base::CheckedNumeric<int> size = width;
   size *= height;
   if (!size.IsValid()) {
@@ -1256,36 +1256,15 @@ void RenderMessageFilter::OnAllocateGpuMemoryBuffer(uint32 width,
     return;
   }
 
-#if defined(OS_ANDROID)
-  // TODO(reveman): This should be moved to
-  // GpuMemoryBufferImpl::AllocateForChildProcess and
-  // GpuMemoryBufferImplSurfaceTexture when adding support for out-of-process
-  // GPU service. crbug.com/368716
-  if (GpuMemoryBufferImplSurfaceTexture::IsConfigurationSupported(
-          internalformat, usage)) {
-    // Each surface texture is associated with a render process id. This allows
-    // the GPU service and Java Binder IPC to verify that a renderer is not
-    // trying to use a surface texture it doesn't own.
-    int surface_texture_id =
-        CompositorImpl::CreateSurfaceTexture(render_process_id_);
-    if (surface_texture_id != -1) {
-      gfx::GpuMemoryBufferHandle handle;
-      handle.type = gfx::SURFACE_TEXTURE_BUFFER;
-      handle.surface_texture_id =
-          gfx::SurfaceTextureId(surface_texture_id, render_process_id_);
-      GpuMemoryBufferAllocated(reply, handle);
-      return;
-    }
-  }
-#endif
-
-  GpuMemoryBufferImpl::AllocateForChildProcess(
-      gfx::Size(width, height),
-      internalformat,
-      usage,
-      PeerHandle(),
-      render_process_id_,
-      base::Bind(&RenderMessageFilter::GpuMemoryBufferAllocated, this, reply));
+  BrowserGpuMemoryBufferManager::current()
+      ->AllocateGpuMemoryBufferForChildProcess(
+          gfx::Size(width, height),
+          format,
+          usage,
+          PeerHandle(),
+          render_process_id_,
+          base::Bind(
+              &RenderMessageFilter::GpuMemoryBufferAllocated, this, reply));
 }
 
 void RenderMessageFilter::GpuMemoryBufferAllocated(
@@ -1298,9 +1277,12 @@ void RenderMessageFilter::GpuMemoryBufferAllocated(
 }
 
 void RenderMessageFilter::OnDeletedGpuMemoryBuffer(
-    gfx::GpuMemoryBufferType type,
-    const gfx::GpuMemoryBufferId& id) {
-  GpuMemoryBufferImpl::DeletedByChildProcess(type, id, PeerHandle());
+    gfx::GpuMemoryBufferId id,
+    uint32 sync_point) {
+  DCHECK(BrowserGpuMemoryBufferManager::current());
+
+  BrowserGpuMemoryBufferManager::current()->ChildProcessDeletedGpuMemoryBuffer(
+      id, PeerHandle(), render_process_id_, sync_point);
 }
 
 }  // namespace content

@@ -31,19 +31,19 @@ class PepperFlashMenuHost : public ppapi::host::ResourceHost,
                       PP_Instance instance,
                       PP_Resource resource,
                       const ppapi::proxy::SerializedFlashMenu& serial_menu);
-  virtual ~PepperFlashMenuHost();
+  ~PepperFlashMenuHost() override;
 
-  virtual int32_t OnResourceMessageReceived(
+  int32_t OnResourceMessageReceived(
       const IPC::Message& msg,
-      ppapi::host::HostMessageContext* context) OVERRIDE;
+      ppapi::host::HostMessageContext* context) override;
 
  private:
   int32_t OnHostMsgShow(ppapi::host::HostMessageContext* context,
                         const PP_Point& location);
 
   // ContextMenuClient implementation.
-  virtual void OnMenuAction(int request_id, unsigned action) OVERRIDE;
-  virtual void OnMenuClosed(int request_id) OVERRIDE;
+  void OnMenuAction(int request_id, unsigned action) override;
+  void OnMenuClosed(int request_id) override;
 
   void SendMenuReply(int32_t result, int action);
 

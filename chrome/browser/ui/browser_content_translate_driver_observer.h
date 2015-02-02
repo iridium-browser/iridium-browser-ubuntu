@@ -20,11 +20,11 @@ class BrowserContentTranslateDriverObserver
  public:
   explicit BrowserContentTranslateDriverObserver(Browser* browser);
 
-  virtual ~BrowserContentTranslateDriverObserver();
+  ~BrowserContentTranslateDriverObserver() override;
 
   // Overridden from ContentTranslateDriver::Observer
-  virtual void OnIsPageTranslatedChanged(content::WebContents* source) OVERRIDE;
-  virtual void OnTranslateEnabledChanged(content::WebContents* source) OVERRIDE;
+  void OnIsPageTranslatedChanged(content::WebContents* source) override;
+  void OnTranslateEnabledChanged(content::WebContents* source) override;
 
  private:
   Browser* browser_;

@@ -82,13 +82,12 @@ class LoaderImpl : public Loader {
   LoaderImpl(const BuildSettings* build_settings);
 
   // Loader implementation.
-  virtual void Load(const SourceFile& file,
-                    const LocationRange& origin,
-                    const Label& toolchain_name) OVERRIDE;
-  virtual void ToolchainLoaded(const Toolchain* toolchain) OVERRIDE;
-  virtual Label GetDefaultToolchain() const OVERRIDE;
-  virtual const Settings* GetToolchainSettings(
-      const Label& label) const OVERRIDE;
+  void Load(const SourceFile& file,
+            const LocationRange& origin,
+            const Label& toolchain_name) override;
+  void ToolchainLoaded(const Toolchain* toolchain) override;
+  Label GetDefaultToolchain() const override;
+  const Settings* GetToolchainSettings(const Label& label) const override;
 
   // Sets the message loop corresponding to the main thread. By default this
   // class will use the thread active during construction, but there is not
@@ -115,7 +114,7 @@ class LoaderImpl : public Loader {
   struct LoadID;
   struct ToolchainRecord;
 
-  virtual ~LoaderImpl();
+  ~LoaderImpl() override;
 
   // Schedules the input file manager to load the given file.
   void ScheduleLoadFile(const Settings* settings,

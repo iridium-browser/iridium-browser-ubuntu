@@ -54,7 +54,8 @@ class HTMLImportsController;
 // HTMLImportLoader is owned by HTMLImportsController.
 //
 //
-class HTMLImportLoader FINAL : public NoBaseWillBeGarbageCollectedFinalized<HTMLImportLoader>, public ResourceOwner<RawResource>, public DocumentParserClient {
+class HTMLImportLoader final : public NoBaseWillBeGarbageCollectedFinalized<HTMLImportLoader>, public ResourceOwner<RawResource>, public DocumentParserClient {
+    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(HTMLImportLoader);
 public:
     enum State {
         StateLoading,
@@ -96,20 +97,20 @@ public:
 
     PassRefPtrWillBeRawPtr<CustomElementSyncMicrotaskQueue> microtaskQueue() const;
 
-    virtual void trace(Visitor*);
+    virtual void trace(Visitor*) override;
 
 private:
     HTMLImportLoader(HTMLImportsController*);
 
     // RawResourceClient
-    virtual void responseReceived(Resource*, const ResourceResponse&) OVERRIDE;
-    virtual void dataReceived(Resource*, const char* data, int length) OVERRIDE;
-    virtual void notifyFinished(Resource*) OVERRIDE;
+    virtual void responseReceived(Resource*, const ResourceResponse&, PassOwnPtr<WebDataConsumerHandle>) override;
+    virtual void dataReceived(Resource*, const char* data, unsigned length) override;
+    virtual void notifyFinished(Resource*) override;
 
     // DocumentParserClient
 
     // Called after document parse is complete after DOMContentLoaded was dispatched.
-    virtual void notifyParserStopped();
+    virtual void notifyParserStopped() override;
 
     State startWritingAndParsing(const ResourceResponse&);
     State finishWriting();
@@ -124,7 +125,7 @@ private:
 #endif
 
     RawPtrWillBeMember<HTMLImportsController> m_controller;
-    WillBeHeapVector<RawPtrWillBeMember<HTMLImportChild> > m_imports;
+    WillBeHeapVector<RawPtrWillBeMember<HTMLImportChild>> m_imports;
     State m_state;
     RefPtrWillBeMember<Document> m_document;
     RefPtrWillBeMember<DocumentWriter> m_writer;

@@ -24,6 +24,15 @@ TEMPLATE_HEADER="""\
 {
 """
 
+TEMPLATE_HEADER_WITH_VERSION="""\
+// chromium version: 39.0.0.0
+// Policy template for Linux.
+// Uncomment the policies you wish to activate and change their values to
+// something useful for your case. The provided values are for reference only
+// and do not provide meaningful defaults!
+{
+"""
+
 
 HEADER_DELIMETER="""\
   //-------------------------------------------------------------------------
@@ -55,8 +64,21 @@ class JsonWriterUnittest(writer_unittest_common.WriterUnittestCommon):
         '  "placeholders": [],'
         '  "messages": {},'
         '}')
-    output = self.GetOutput(grd, 'fr', {'_chromium': '1',}, 'json', 'en')
+    output = self.GetOutput(grd, 'fr', {'_chromium': '1'}, 'json', 'en')
     expected_output = TEMPLATE_HEADER + '}'
+    self.CompareOutputs(output, expected_output)
+
+  def testEmptyWithVersion(self):
+    # Test the handling of an empty policy list.
+    grd = self.PrepareTest(
+        '{'
+        '  "policy_definitions": [],'
+        '  "placeholders": [],'
+        '  "messages": {},'
+        '}')
+    output = self.GetOutput(
+        grd, 'fr', {'_chromium': '1', 'version':'39.0.0.0'}, 'json', 'en')
+    expected_output = TEMPLATE_HEADER_WITH_VERSION + '}'
     self.CompareOutputs(output, expected_output)
 
   def testMainPolicy(self):

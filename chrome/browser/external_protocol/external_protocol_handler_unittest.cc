@@ -21,15 +21,13 @@ class FakeExternalProtocolHandlerWorker
         os_state_(os_state) {}
 
  private:
-  virtual ~FakeExternalProtocolHandlerWorker() {}
+  ~FakeExternalProtocolHandlerWorker() override {}
 
-  virtual ShellIntegration::DefaultWebClientState CheckIsDefault() OVERRIDE {
+  ShellIntegration::DefaultWebClientState CheckIsDefault() override {
     return os_state_;
   }
 
-  virtual bool SetAsDefault(bool interactive_permitted) OVERRIDE {
-    return true;
-  }
+  bool SetAsDefault(bool interactive_permitted) override { return true; }
 
   ShellIntegration::DefaultWebClientState os_state_;
 };
@@ -44,38 +42,38 @@ class FakeExternalProtocolHandlerDelegate
         has_prompted_(false),
         has_blocked_ (false) {}
 
-  virtual ShellIntegration::DefaultProtocolClientWorker* CreateShellWorker(
+  ShellIntegration::DefaultProtocolClientWorker* CreateShellWorker(
       ShellIntegration::DefaultWebClientObserver* observer,
-      const std::string& protocol) OVERRIDE {
+      const std::string& protocol) override {
     return new FakeExternalProtocolHandlerWorker(observer, protocol, os_state_);
   }
 
-  virtual ExternalProtocolHandler::BlockState GetBlockState(
-      const std::string& scheme) OVERRIDE {
+  ExternalProtocolHandler::BlockState GetBlockState(
+      const std::string& scheme) override {
     return block_state_;
   }
 
-  virtual void BlockRequest() OVERRIDE {
+  void BlockRequest() override {
     ASSERT_TRUE(block_state_ == ExternalProtocolHandler::BLOCK ||
                 os_state_ == ShellIntegration::IS_DEFAULT);
     has_blocked_ = true;
   }
 
-  virtual void RunExternalProtocolDialog(const GURL& url,
-                                         int render_process_host_id,
-                                         int routing_id) OVERRIDE {
+  void RunExternalProtocolDialog(const GURL& url,
+                                 int render_process_host_id,
+                                 int routing_id) override {
     ASSERT_EQ(block_state_, ExternalProtocolHandler::UNKNOWN);
     ASSERT_NE(os_state_, ShellIntegration::IS_DEFAULT);
     has_prompted_ = true;
   }
 
-  virtual void LaunchUrlWithoutSecurityCheck(const GURL& url) OVERRIDE {
+  void LaunchUrlWithoutSecurityCheck(const GURL& url) override {
     ASSERT_EQ(block_state_, ExternalProtocolHandler::DONT_BLOCK);
     ASSERT_NE(os_state_, ShellIntegration::IS_DEFAULT);
     has_launched_ = true;
   }
 
-  virtual void FinishedProcessingCheck() OVERRIDE {
+  void FinishedProcessingCheck() override {
     base::MessageLoop::current()->Quit();
   }
 
@@ -105,11 +103,9 @@ class ExternalProtocolHandlerTest : public testing::Test {
       : ui_thread_(BrowserThread::UI, base::MessageLoop::current()),
         file_thread_(BrowserThread::FILE) {}
 
-  virtual void SetUp() {
-    file_thread_.Start();
-  }
+  void SetUp() override { file_thread_.Start(); }
 
-  virtual void TearDown() {
+  void TearDown() override {
     // Ensure that g_accept_requests gets set back to true after test execution.
     ExternalProtocolHandler::PermitLaunchUrl();
   }

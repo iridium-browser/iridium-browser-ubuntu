@@ -27,7 +27,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(USE_X11)
-#include "ui/events/x/device_data_manager_x11.h"
+#include "ui/events/devices/x11/device_data_manager_x11.h"
 #endif
 
 using chromeos::DBusThreadManager;
@@ -54,7 +54,7 @@ class ChromeOSMetricsProviderTest : public testing::Test {
   ChromeOSMetricsProviderTest() {}
 
  protected:
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
 #if defined(USE_X11)
     ui::DeviceDataManagerX11::CreateInstance();
 #endif
@@ -97,7 +97,7 @@ class ChromeOSMetricsProviderTest : public testing::Test {
       chromeos::LoginState::Initialize();
   }
 
-  virtual void TearDown() OVERRIDE {
+  virtual void TearDown() override {
     // Destroy the login state tracker if it was initialized.
     chromeos::LoginState::Shutdown();
 

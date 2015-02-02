@@ -7,13 +7,13 @@
 #include "chrome/browser/ui/host_desktop.h"
 #include "ui/aura/window.h"
 
-aura::Window* GetLocalProcessWindowAtPointAsh(
+gfx::NativeWindow GetLocalProcessWindowAtPointAsh(
     const gfx::Point& screen_point,
-    const std::set<aura::Window*>& ignore);
+    const std::set<gfx::NativeWindow>& ignore);
 
-aura::Window* GetLocalProcessWindowAtPoint(
+gfx::NativeWindow GetLocalProcessWindowAtPoint(
     chrome::HostDesktopType host_desktop_type,
     const gfx::Point& screen_point,
-    const std::set<aura::Window*>& ignore) {
+    const std::set<gfx::NativeWindow>& ignore) {
   return GetLocalProcessWindowAtPointAsh(screen_point, ignore);
 }

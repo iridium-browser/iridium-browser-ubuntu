@@ -59,14 +59,28 @@ public abstract class HttpUrlRequestFactory {
             int requestPriority, Map<String, String> headers,
             WritableByteChannel channel, HttpUrlRequestListener listener);
 
+    /**
+     * Starts NetLog logging to a file named |fileName| in the
+     * application temporary directory. |fileName| must not be empty. Log may
+     * contain user's personal information (PII). If the file exists it is
+     * truncated before starting. If actively logging the call is ignored.
+     */
+    public abstract void startNetLogToFile(String fileName);
+
+    /**
+     * Stops NetLog logging and flushes file to disk. If a logging session is
+     * not in progress this call is ignored.
+     */
+    public abstract void stopNetLog();
+
     private static HttpUrlRequestFactory createChromiumFactory(
             Context context, HttpUrlRequestFactoryConfig config) {
         HttpUrlRequestFactory factory = null;
         try {
             Class<? extends HttpUrlRequestFactory> factoryClass =
-                    HttpUrlRequestFactory.class.getClassLoader().
-                            loadClass(CHROMIUM_URL_REQUEST_FACTORY).
-                            asSubclass(HttpUrlRequestFactory.class);
+                    HttpUrlRequestFactory.class.getClassLoader()
+                            .loadClass(CHROMIUM_URL_REQUEST_FACTORY)
+                            .asSubclass(HttpUrlRequestFactory.class);
             Constructor<? extends HttpUrlRequestFactory> constructor =
                     factoryClass.getConstructor(
                             Context.class, HttpUrlRequestFactoryConfig.class);
@@ -79,8 +93,7 @@ public abstract class HttpUrlRequestFactory {
             // Leave as null
         } catch (Exception e) {
             throw new IllegalStateException(
-                    "Cannot instantiate: " +
-                    CHROMIUM_URL_REQUEST_FACTORY,
+                    "Cannot instantiate: " + CHROMIUM_URL_REQUEST_FACTORY,
                     e);
         }
         return factory;

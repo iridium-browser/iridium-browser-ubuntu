@@ -36,14 +36,11 @@
 namespace blink {
 
 class Resource;
-class ScriptResource;
 class Document;
 class Element;
-class LocalFrame;
 class HTMLScriptRunnerHost;
-class ScriptSourceCode;
 
-class HTMLScriptRunner FINAL : public NoBaseWillBeGarbageCollectedFinalized<HTMLScriptRunner>, private ScriptResourceClient {
+class HTMLScriptRunner final : public NoBaseWillBeGarbageCollectedFinalized<HTMLScriptRunner>, private ScriptResourceClient {
     WTF_MAKE_NONCOPYABLE(HTMLScriptRunner); WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
 public:
     static PassOwnPtrWillBeRawPtr<HTMLScriptRunner> create(Document* document, HTMLScriptRunnerHost* host)
@@ -66,7 +63,7 @@ public:
     bool isExecutingScript() const { return !!m_scriptNestingLevel; }
 
     // ResourceClient
-    virtual void notifyFinished(Resource*) OVERRIDE;
+    virtual void notifyFinished(Resource*) override;
 
     void trace(Visitor*);
 

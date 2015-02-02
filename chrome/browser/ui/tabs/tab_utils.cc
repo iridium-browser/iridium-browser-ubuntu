@@ -36,10 +36,10 @@ const int kIndicatorFadeOutDurationMs = 1000;
 // "in" state.
 class TabRecordingIndicatorAnimation : public gfx::MultiAnimation {
  public:
-  virtual ~TabRecordingIndicatorAnimation() {}
+  ~TabRecordingIndicatorAnimation() override {}
 
   // Overridden to provide alternating "towards in" and "towards out" behavior.
-  virtual double GetCurrentValue() const OVERRIDE;
+  double GetCurrentValue() const override;
 
   static scoped_ptr<TabRecordingIndicatorAnimation> Create();
 
@@ -183,7 +183,7 @@ scoped_ptr<gfx::Animation> CreateTabMediaIndicatorFadeAnimation(
     TabMediaState media_state) {
   if (media_state == TAB_MEDIA_STATE_RECORDING ||
       media_state == TAB_MEDIA_STATE_CAPTURING) {
-    return TabRecordingIndicatorAnimation::Create().PassAs<gfx::Animation>();
+    return TabRecordingIndicatorAnimation::Create();
   }
 
   // Note: While it seems silly to use a one-part MultiAnimation, it's the only
@@ -198,7 +198,7 @@ scoped_ptr<gfx::Animation> CreateTabMediaIndicatorFadeAnimation(
   scoped_ptr<gfx::MultiAnimation> animation(
       new gfx::MultiAnimation(parts, interval));
   animation->set_continuous(false);
-  return animation.PassAs<gfx::Animation>();
+  return animation.Pass();
 }
 
 base::string16 AssembleTabTooltipText(const base::string16& title,
@@ -234,12 +234,8 @@ base::string16 AssembleTabTooltipText(const base::string16& title,
 }
 
 bool IsTabAudioMutingFeatureEnabled() {
-#if defined(USE_AURA)
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kEnableTabAudioMuting);
-#else
-  return false;
-#endif
 }
 
 bool CanToggleAudioMute(content::WebContents* contents) {

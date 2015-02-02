@@ -14,28 +14,33 @@ class SerialIoHandlerPosix : public SerialIoHandler,
                              public base::MessageLoopForIO::Watcher {
  protected:
   // SerialIoHandler impl.
-  virtual void ReadImpl() OVERRIDE;
-  virtual void WriteImpl() OVERRIDE;
-  virtual void CancelReadImpl() OVERRIDE;
-  virtual void CancelWriteImpl() OVERRIDE;
-  virtual bool Flush() const OVERRIDE;
-  virtual serial::DeviceControlSignalsPtr GetControlSignals() const OVERRIDE;
-  virtual bool SetControlSignals(
-      const serial::HostControlSignals& control_signals) OVERRIDE;
-  virtual bool ConfigurePort(const serial::ConnectionOptions& options) OVERRIDE;
-  virtual serial::ConnectionInfoPtr GetPortInfo() const OVERRIDE;
-  virtual bool PostOpen() OVERRIDE;
+  void ReadImpl() override;
+  void WriteImpl() override;
+  void CancelReadImpl() override;
+  void CancelWriteImpl() override;
+  bool Flush() const override;
+  serial::DeviceControlSignalsPtr GetControlSignals() const override;
+  bool SetControlSignals(
+      const serial::HostControlSignals& control_signals) override;
+  bool ConfigurePort(const serial::ConnectionOptions& options) override;
+  serial::ConnectionInfoPtr GetPortInfo() const override;
+  void RequestAccess(
+      const std::string& port,
+      scoped_refptr<base::MessageLoopProxy> file_message_loop,
+      scoped_refptr<base::MessageLoopProxy> ui_message_loop) override;
+  bool PostOpen() override;
 
  private:
   friend class SerialIoHandler;
 
   SerialIoHandlerPosix(
-      scoped_refptr<base::MessageLoopProxy> file_thread_message_loop);
-  virtual ~SerialIoHandlerPosix();
+      scoped_refptr<base::MessageLoopProxy> file_thread_message_loop,
+      scoped_refptr<base::MessageLoopProxy> ui_thread_message_loop);
+  ~SerialIoHandlerPosix() override;
 
   // base::MessageLoopForIO::Watcher implementation.
-  virtual void OnFileCanWriteWithoutBlocking(int fd) OVERRIDE;
-  virtual void OnFileCanReadWithoutBlocking(int fd) OVERRIDE;
+  void OnFileCanWriteWithoutBlocking(int fd) override;
+  void OnFileCanReadWithoutBlocking(int fd) override;
 
   void EnsureWatchingReads();
   void EnsureWatchingWrites();

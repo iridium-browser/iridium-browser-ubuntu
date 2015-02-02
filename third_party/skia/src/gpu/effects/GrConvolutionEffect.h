@@ -64,12 +64,6 @@ public:
 
     virtual const GrBackendFragmentProcessorFactory& getFactory() const SK_OVERRIDE;
 
-    virtual void getConstantColorComponents(GrColor*, uint32_t* validFlags) const {
-        // If the texture was opaque we could know that the output color if we knew the sum of the
-        // kernel values.
-        *validFlags = 0;
-    }
-
     enum {
         // This was decided based on the min allowed value for the max texture
         // samples per fragment program run in DX9SM2 (32). A sigma param of 4.0
@@ -101,7 +95,13 @@ private:
                         bool useBounds,
                         float bounds[2]);
 
-    virtual bool onIsEqual(const GrProcessor&) const SK_OVERRIDE;
+    virtual bool onIsEqual(const GrFragmentProcessor&) const SK_OVERRIDE;
+
+    virtual void onComputeInvariantOutput(InvariantOutput* inout) const {
+        // If the texture was opaque we could know that the output color if we knew the sum of the
+        // kernel values.
+        inout->mulByUnknownColor();
+    }
 
     GR_DECLARE_FRAGMENT_PROCESSOR_TEST;
 

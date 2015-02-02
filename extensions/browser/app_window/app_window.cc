@@ -157,6 +157,7 @@ AppWindow::CreateParams::CreateParams()
       active_frame_color(SK_ColorBLACK),
       inactive_frame_color(SK_ColorBLACK),
       alpha_enabled(false),
+      is_ime_window(false),
       creator_process_id(0),
       state(ui::SHOW_STATE_DEFAULT),
       hidden(false),
@@ -281,7 +282,7 @@ void AppWindow::Init(const GURL& url,
 
   AppWindowClient* app_window_client = AppWindowClient::Get();
   native_app_window_.reset(
-      app_window_client->CreateNativeAppWindow(this, new_params));
+      app_window_client->CreateNativeAppWindow(this, &new_params));
 
   helper_.reset(new AppWebContentsHelper(
       browser_context_, extension_id_, web_contents, app_delegate_.get()));
@@ -315,18 +316,17 @@ void AppWindow::Init(const GURL& url,
   // When the render view host is changed, the native window needs to know
   // about it in case it has any setup to do to make the renderer appear
   // properly. In particular, on Windows, the view's clickthrough region needs
-  // to be set.
+  // to be set[
   ExtensionsBrowserClient* client = ExtensionsBrowserClient::Get();
   registrar_.Add(this,
                  NOTIFICATION_EXTENSION_UNLOADED_DEPRECATED,
                  content::Source<content::BrowserContext>(
                      client->GetOriginalContext(browser_context_)));
   // Update the app menu if an ephemeral app becomes installed.
-  registrar_.Add(
-      this,
-      NOTIFICATION_EXTENSION_WILL_BE_INSTALLED_DEPRECATED,
-      content::Source<content::BrowserContext>(
-          client->GetOriginalContext(browser_context_)));
+  registrar_.Add(this,
+                 NOTIFICATION_EXTENSION_WILL_BE_INSTALLED_DEPRECATED,
+                 content::Source<content::BrowserContext>(
+                     client->GetOriginalContext(browser_context_)));
 
   // Close when the browser process is exiting.
   app_delegate_->SetTerminatingCallback(
@@ -656,6 +656,7 @@ void AppWindow::SetContentSizeConstraints(const gfx::Size& min_size,
 }
 
 void AppWindow::Show(ShowType show_type) {
+  bool was_hidden = is_hidden_ || !has_been_shown_;
   is_hidden_ = false;
 
   if (CommandLine::ForCurrentProcess()->HasSwitch(
@@ -676,7 +677,7 @@ void AppWindow::Show(ShowType show_type) {
       GetBaseWindow()->ShowInactive();
       break;
   }
-  AppWindowRegistry::Get(browser_context_)->AppWindowShown(this);
+  AppWindowRegistry::Get(browser_context_)->AppWindowShown(this, was_hidden);
 
   has_been_shown_ = true;
   SendOnWindowShownIfShown();

@@ -15,7 +15,7 @@ namespace ash {
 // windows coordiantes.
 class ASH_EXPORT DefaultWindowResizer : public WindowResizer {
  public:
-  virtual ~DefaultWindowResizer();
+  ~DefaultWindowResizer() override;
 
   // Creates a new DefaultWindowResizer. The caller takes ownership of the
   // returned object.
@@ -29,9 +29,9 @@ class ASH_EXPORT DefaultWindowResizer : public WindowResizer {
   }
 
   // WindowResizer:
-  virtual void Drag(const gfx::Point& location, int event_flags) OVERRIDE;
-  virtual void CompleteDrag() OVERRIDE;
-  virtual void RevertDrag() OVERRIDE;
+  void Drag(const gfx::Point& location, int event_flags) override;
+  void CompleteDrag() override;
+  void RevertDrag() override;
 
  private:
   explicit DefaultWindowResizer(wm::WindowState* window_state);

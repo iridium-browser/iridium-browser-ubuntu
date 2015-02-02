@@ -60,7 +60,7 @@ import javax.net.ssl.X509TrustManager;
  *
  * Based heavily on the CTSWebServer in Android.
  */
-public final class TestWebServer {
+public class TestWebServer {
     private static final String TAG = "TestWebServer";
 
     public static final String SHUTDOWN_PREFIX = "/shutdown";
@@ -72,6 +72,7 @@ public final class TestWebServer {
     private final ServerThread mServerThread;
     private String mServerUri;
     private final boolean mSsl;
+    private final int mPort;
 
     private static class Response {
         final byte[] mResponseData;
@@ -100,10 +101,13 @@ public final class TestWebServer {
 
     /**
      * Create and start a local HTTP server instance.
+     * @param port Port number the server must use, or 0 to automatically choose a free port.
      * @param ssl True if the server should be using secure sockets.
      * @throws Exception
      */
-    public TestWebServer(boolean ssl) throws Exception {
+    private TestWebServer(int port, boolean ssl) throws Exception {
+        mPort = port;
+
         mSsl = ssl;
         if (mSsl) {
             mServerUri = "https:";
@@ -117,16 +121,50 @@ public final class TestWebServer {
             }
         }
 
-        setInstance(this, mSsl);
-        mServerThread = new ServerThread(this, mSsl);
-        mServerThread.start();
+        mServerThread = new ServerThread(this, mPort, mSsl);
         mServerUri += "//localhost:" + mServerThread.mSocket.getLocalPort();
+    }
+
+    public static TestWebServer start(int port) throws Exception {
+        if (sInstance != null) {
+            throw new IllegalStateException("Tried to start multiple TestWebServers");
+        }
+
+        TestWebServer server = new TestWebServer(port, false);
+        server.mServerThread.start();
+        setInstance(server);
+        return server;
+    }
+
+    public static TestWebServer start() throws Exception {
+        return start(0);
+    }
+
+    public static TestWebServer startSsl(int port) throws Exception {
+        if (sSecureInstance != null) {
+            throw new IllegalStateException("Tried to start multiple SSL TestWebServers");
+        }
+
+        TestWebServer server = new TestWebServer(port, true);
+        server.mServerThread.start();
+        setSecureInstance(server);
+        return server;
+    }
+
+    public static TestWebServer startSsl() throws Exception {
+        return startSsl(0);
     }
 
     /**
      * Terminate the http server.
      */
     public void shutdown() {
+        if (mSsl) {
+            setSecureInstance(null);
+        } else {
+            setInstance(null);
+        }
+
         try {
             // Avoid a deadlock between two threads where one is trying to call
             // close() and the other one is calling accept() by sending a GET
@@ -154,16 +192,17 @@ public final class TestWebServer {
         } catch (KeyManagementException e) {
             throw new IllegalStateException(e);
         }
-
-        setInstance(null, mSsl);
     }
 
-    private static void setInstance(TestWebServer instance, boolean isSsl) {
-        if (isSsl) {
-            sSecureInstance = instance;
-        } else {
-            sInstance = instance;
-        }
+    // Setting static variables from instance methods causes findbugs warnings. Calling static
+    // methods which set static variables from instance methods isn't any better, but it silences
+    // the warnings.
+    private static void setInstance(TestWebServer instance) {
+        sInstance = instance;
+    }
+
+    private static void setSecureInstance(TestWebServer instance) {
+        sSecureInstance = instance;
     }
 
     private static final int RESPONSE_STATUS_NORMAL = 0;
@@ -495,30 +534,30 @@ public final class TestWebServer {
          * single self-generated key. The subject name is "Test Server".
          */
         private static final String SERVER_KEYS_BKS =
-            "AAAAAQAAABQDkebzoP1XwqyWKRCJEpn/t8dqIQAABDkEAAVteWtleQAAARpYl20nAAAAAQAFWC41" +
-            "MDkAAAJNMIICSTCCAbKgAwIBAgIESEfU1jANBgkqhkiG9w0BAQUFADBpMQswCQYDVQQGEwJVUzET" +
-            "MBEGA1UECBMKQ2FsaWZvcm5pYTEMMAoGA1UEBxMDTVRWMQ8wDQYDVQQKEwZHb29nbGUxEDAOBgNV" +
-            "BAsTB0FuZHJvaWQxFDASBgNVBAMTC1Rlc3QgU2VydmVyMB4XDTA4MDYwNTExNTgxNFoXDTA4MDkw" +
-            "MzExNTgxNFowaTELMAkGA1UEBhMCVVMxEzARBgNVBAgTCkNhbGlmb3JuaWExDDAKBgNVBAcTA01U" +
-            "VjEPMA0GA1UEChMGR29vZ2xlMRAwDgYDVQQLEwdBbmRyb2lkMRQwEgYDVQQDEwtUZXN0IFNlcnZl" +
-            "cjCBnzANBgkqhkiG9w0BAQEFAAOBjQAwgYkCgYEA0LIdKaIr9/vsTq8BZlA3R+NFWRaH4lGsTAQy" +
-            "DPMF9ZqEDOaL6DJuu0colSBBBQ85hQTPa9m9nyJoN3pEi1hgamqOvQIWcXBk+SOpUGRZZFXwniJV" +
-            "zDKU5nE9MYgn2B9AoiH3CSuMz6HRqgVaqtppIe1jhukMc/kHVJvlKRNy9XMCAwEAATANBgkqhkiG" +
-            "9w0BAQUFAAOBgQC7yBmJ9O/eWDGtSH9BH0R3dh2NdST3W9hNZ8hIa8U8klhNHbUCSSktZmZkvbPU" +
-            "hse5LI3dh6RyNDuqDrbYwcqzKbFJaq/jX9kCoeb3vgbQElMRX8D2ID1vRjxwlALFISrtaN4VpWzV" +
-            "yeoHPW4xldeZmoVtjn8zXNzQhLuBqX2MmAAAAqwAAAAUvkUScfw9yCSmALruURNmtBai7kQAAAZx" +
-            "4Jmijxs/l8EBaleaUru6EOPioWkUAEVWCxjM/TxbGHOi2VMsQWqRr/DZ3wsDmtQgw3QTrUK666sR" +
-            "MBnbqdnyCyvM1J2V1xxLXPUeRBmR2CXorYGF9Dye7NkgVdfA+9g9L/0Au6Ugn+2Cj5leoIgkgApN" +
-            "vuEcZegFlNOUPVEs3SlBgUF1BY6OBM0UBHTPwGGxFBBcetcuMRbUnu65vyDG0pslT59qpaR0TMVs" +
-            "P+tcheEzhyjbfM32/vwhnL9dBEgM8qMt0sqF6itNOQU/F4WGkK2Cm2v4CYEyKYw325fEhzTXosck" +
-            "MhbqmcyLab8EPceWF3dweoUT76+jEZx8lV2dapR+CmczQI43tV9btsd1xiBbBHAKvymm9Ep9bPzM" +
-            "J0MQi+OtURL9Lxke/70/MRueqbPeUlOaGvANTmXQD2OnW7PISwJ9lpeLfTG0LcqkoqkbtLKQLYHI" +
-            "rQfV5j0j+wmvmpMxzjN3uvNajLa4zQ8l0Eok9SFaRr2RL0gN8Q2JegfOL4pUiHPsh64WWya2NB7f" +
-            "V+1s65eA5ospXYsShRjo046QhGTmymwXXzdzuxu8IlnTEont6P4+J+GsWk6cldGbl20hctuUKzyx" +
-            "OptjEPOKejV60iDCYGmHbCWAzQ8h5MILV82IclzNViZmzAapeeCnexhpXhWTs+xDEYSKEiG/camt" +
-            "bhmZc3BcyVJrW23PktSfpBQ6D8ZxoMfF0L7V2GQMaUg+3r7ucrx82kpqotjv0xHghNIm95aBr1Qw" +
-            "1gaEjsC/0wGmmBDg1dTDH+F1p9TInzr3EFuYD0YiQ7YlAHq3cPuyGoLXJ5dXYuSBfhDXJSeddUkl" +
-            "k1ufZyOOcskeInQge7jzaRfmKg3U94r+spMEvb0AzDQVOKvjjo1ivxMSgFRZaDb/4qw=";
+                "AAAAAQAAABQDkebzoP1XwqyWKRCJEpn/t8dqIQAABDkEAAVteWtleQAAARpYl20nAAAAAQAFWC41" +
+                "MDkAAAJNMIICSTCCAbKgAwIBAgIESEfU1jANBgkqhkiG9w0BAQUFADBpMQswCQYDVQQGEwJVUzET" +
+                "MBEGA1UECBMKQ2FsaWZvcm5pYTEMMAoGA1UEBxMDTVRWMQ8wDQYDVQQKEwZHb29nbGUxEDAOBgNV" +
+                "BAsTB0FuZHJvaWQxFDASBgNVBAMTC1Rlc3QgU2VydmVyMB4XDTA4MDYwNTExNTgxNFoXDTA4MDkw" +
+                "MzExNTgxNFowaTELMAkGA1UEBhMCVVMxEzARBgNVBAgTCkNhbGlmb3JuaWExDDAKBgNVBAcTA01U" +
+                "VjEPMA0GA1UEChMGR29vZ2xlMRAwDgYDVQQLEwdBbmRyb2lkMRQwEgYDVQQDEwtUZXN0IFNlcnZl" +
+                "cjCBnzANBgkqhkiG9w0BAQEFAAOBjQAwgYkCgYEA0LIdKaIr9/vsTq8BZlA3R+NFWRaH4lGsTAQy" +
+                "DPMF9ZqEDOaL6DJuu0colSBBBQ85hQTPa9m9nyJoN3pEi1hgamqOvQIWcXBk+SOpUGRZZFXwniJV" +
+                "zDKU5nE9MYgn2B9AoiH3CSuMz6HRqgVaqtppIe1jhukMc/kHVJvlKRNy9XMCAwEAATANBgkqhkiG" +
+                "9w0BAQUFAAOBgQC7yBmJ9O/eWDGtSH9BH0R3dh2NdST3W9hNZ8hIa8U8klhNHbUCSSktZmZkvbPU" +
+                "hse5LI3dh6RyNDuqDrbYwcqzKbFJaq/jX9kCoeb3vgbQElMRX8D2ID1vRjxwlALFISrtaN4VpWzV" +
+                "yeoHPW4xldeZmoVtjn8zXNzQhLuBqX2MmAAAAqwAAAAUvkUScfw9yCSmALruURNmtBai7kQAAAZx" +
+                "4Jmijxs/l8EBaleaUru6EOPioWkUAEVWCxjM/TxbGHOi2VMsQWqRr/DZ3wsDmtQgw3QTrUK666sR" +
+                "MBnbqdnyCyvM1J2V1xxLXPUeRBmR2CXorYGF9Dye7NkgVdfA+9g9L/0Au6Ugn+2Cj5leoIgkgApN" +
+                "vuEcZegFlNOUPVEs3SlBgUF1BY6OBM0UBHTPwGGxFBBcetcuMRbUnu65vyDG0pslT59qpaR0TMVs" +
+                "P+tcheEzhyjbfM32/vwhnL9dBEgM8qMt0sqF6itNOQU/F4WGkK2Cm2v4CYEyKYw325fEhzTXosck" +
+                "MhbqmcyLab8EPceWF3dweoUT76+jEZx8lV2dapR+CmczQI43tV9btsd1xiBbBHAKvymm9Ep9bPzM" +
+                "J0MQi+OtURL9Lxke/70/MRueqbPeUlOaGvANTmXQD2OnW7PISwJ9lpeLfTG0LcqkoqkbtLKQLYHI" +
+                "rQfV5j0j+wmvmpMxzjN3uvNajLa4zQ8l0Eok9SFaRr2RL0gN8Q2JegfOL4pUiHPsh64WWya2NB7f" +
+                "V+1s65eA5ospXYsShRjo046QhGTmymwXXzdzuxu8IlnTEont6P4+J+GsWk6cldGbl20hctuUKzyx" +
+                "OptjEPOKejV60iDCYGmHbCWAzQ8h5MILV82IclzNViZmzAapeeCnexhpXhWTs+xDEYSKEiG/camt" +
+                "bhmZc3BcyVJrW23PktSfpBQ6D8ZxoMfF0L7V2GQMaUg+3r7ucrx82kpqotjv0xHghNIm95aBr1Qw" +
+                "1gaEjsC/0wGmmBDg1dTDH+F1p9TInzr3EFuYD0YiQ7YlAHq3cPuyGoLXJ5dXYuSBfhDXJSeddUkl" +
+                "k1ufZyOOcskeInQge7jzaRfmKg3U94r+spMEvb0AzDQVOKvjjo1ivxMSgFRZaDb/4qw=";
 
         private static final String PASSWORD = "android";
 
@@ -542,7 +581,7 @@ public final class TestWebServer {
         }
 
 
-        public ServerThread(TestWebServer server, boolean ssl) throws Exception {
+        public ServerThread(TestWebServer server, int port, boolean ssl) throws Exception {
             super("ServerThread");
             mServer = server;
             mIsSsl = ssl;
@@ -552,9 +591,9 @@ public final class TestWebServer {
                     if (mIsSsl) {
                         mSslContext = SSLContext.getInstance("TLS");
                         mSslContext.init(getKeyManagers(), null, null);
-                        mSocket = mSslContext.getServerSocketFactory().createServerSocket(0);
+                        mSocket = mSslContext.getServerSocketFactory().createServerSocket(port);
                     } else {
-                        mSocket = new ServerSocket(0);
+                        mSocket = new ServerSocket(port);
                     }
                     return;
                 } catch (IOException e) {

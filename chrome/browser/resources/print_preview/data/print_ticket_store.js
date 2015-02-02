@@ -86,6 +86,14 @@ cr.define('print_preview', function() {
         new print_preview.ticket_items.Copies(this.destinationStore_);
 
     /**
+     * DPI ticket item.
+     * @type {!print_preview.ticket_items.Dpi}
+     * @private
+     */
+    this.dpi_ = new print_preview.ticket_items.Dpi(
+        this.appState_, this.destinationStore_);
+
+    /**
      * Duplex ticket item.
      * @type {!print_preview.ticket_items.Duplex}
      * @private
@@ -243,6 +251,10 @@ cr.define('print_preview', function() {
       return this.customMargins_;
     },
 
+    get dpi() {
+      return this.dpi_;
+    },
+
     get duplex() {
       return this.duplex_;
     },
@@ -305,52 +317,67 @@ cr.define('print_preview', function() {
       // Initialize ticket with user's previous values.
       if (this.appState_.hasField(
           print_preview.AppState.Field.IS_COLOR_ENABLED)) {
-        this.color_.updateValue(this.appState_.getField(
-            print_preview.AppState.Field.IS_COLOR_ENABLED));
+        this.color_.updateValue(
+            /** @type {!Object} */(this.appState_.getField(
+            print_preview.AppState.Field.IS_COLOR_ENABLED)));
+      }
+      if (this.appState_.hasField(print_preview.AppState.Field.DPI)) {
+        this.dpi_.updateValue(
+            /** @type {!Object} */(this.appState_.getField(
+            print_preview.AppState.Field.DPI)));
       }
       if (this.appState_.hasField(
           print_preview.AppState.Field.IS_DUPLEX_ENABLED)) {
-        this.duplex_.updateValue(this.appState_.getField(
-            print_preview.AppState.Field.IS_DUPLEX_ENABLED));
+        this.duplex_.updateValue(
+            /** @type {!Object} */(this.appState_.getField(
+            print_preview.AppState.Field.IS_DUPLEX_ENABLED)));
       }
       if (this.appState_.hasField(print_preview.AppState.Field.MEDIA_SIZE)) {
-        this.mediaSize_.updateValue(this.appState_.getField(
-            print_preview.AppState.Field.MEDIA_SIZE));
+        this.mediaSize_.updateValue(
+            /** @type {!Object} */(this.appState_.getField(
+            print_preview.AppState.Field.MEDIA_SIZE)));
       }
       if (this.appState_.hasField(
           print_preview.AppState.Field.IS_LANDSCAPE_ENABLED)) {
-        this.landscape_.updateValue(this.appState_.getField(
-            print_preview.AppState.Field.IS_LANDSCAPE_ENABLED));
+        this.landscape_.updateValue(
+            /** @type {!Object} */(this.appState_.getField(
+            print_preview.AppState.Field.IS_LANDSCAPE_ENABLED)));
       }
       // Initialize margins after landscape because landscape may reset margins.
       if (this.appState_.hasField(print_preview.AppState.Field.MARGINS_TYPE)) {
         this.marginsType_.updateValue(
-            this.appState_.getField(print_preview.AppState.Field.MARGINS_TYPE));
+            /** @type {!Object} */(this.appState_.getField(
+            print_preview.AppState.Field.MARGINS_TYPE)));
       }
       if (this.appState_.hasField(
           print_preview.AppState.Field.CUSTOM_MARGINS)) {
-        this.customMargins_.updateValue(this.appState_.getField(
-            print_preview.AppState.Field.CUSTOM_MARGINS));
+        this.customMargins_.updateValue(
+            /** @type {!Object} */(this.appState_.getField(
+            print_preview.AppState.Field.CUSTOM_MARGINS)));
       }
       if (this.appState_.hasField(
           print_preview.AppState.Field.IS_HEADER_FOOTER_ENABLED)) {
-        this.headerFooter_.updateValue(this.appState_.getField(
-            print_preview.AppState.Field.IS_HEADER_FOOTER_ENABLED));
+        this.headerFooter_.updateValue(
+            /** @type {!Object} */(this.appState_.getField(
+            print_preview.AppState.Field.IS_HEADER_FOOTER_ENABLED)));
       }
       if (this.appState_.hasField(
           print_preview.AppState.Field.IS_COLLATE_ENABLED)) {
-        this.collate_.updateValue(this.appState_.getField(
-            print_preview.AppState.Field.IS_COLLATE_ENABLED));
+        this.collate_.updateValue(
+            /** @type {!Object} */(this.appState_.getField(
+            print_preview.AppState.Field.IS_COLLATE_ENABLED)));
       }
       if (this.appState_.hasField(
           print_preview.AppState.Field.IS_CSS_BACKGROUND_ENABLED)) {
-        this.cssBackground_.updateValue(this.appState_.getField(
-            print_preview.AppState.Field.IS_CSS_BACKGROUND_ENABLED));
+        this.cssBackground_.updateValue(
+            /** @type {!Object} */(this.appState_.getField(
+            print_preview.AppState.Field.IS_CSS_BACKGROUND_ENABLED)));
       }
       if (this.appState_.hasField(
           print_preview.AppState.Field.VENDOR_OPTIONS)) {
-        this.vendorItems_.updateValue(this.appState_.getField(
-            print_preview.AppState.Field.VENDOR_OPTIONS));
+        this.vendorItems_.updateValue(
+            /** @type {!Object.<string, string>} */(this.appState_.getField(
+            print_preview.AppState.Field.VENDOR_OPTIONS)));
     }
     },
 
@@ -430,6 +457,14 @@ cr.define('print_preview', function() {
         cjt.print.page_orientation =
             {type: this.landscape.getValue() ? 'LANDSCAPE' : 'PORTRAIT'};
       }
+      if (this.dpi.isCapabilityAvailable()) {
+        var value = this.dpi.getValue();
+        cjt.print.dpi = {
+          horizontal_dpi: value.horizontal_dpi,
+          vertical_dpi: value.vertical_dpi,
+          vendor_id: value.vendor_id
+        };
+      }
       if (this.vendorItems.isCapabilityAvailable() &&
           this.vendorItems.isUserEdited()) {
         var items = this.vendorItems.ticketItems;
@@ -498,7 +533,8 @@ cr.define('print_preview', function() {
      * @private
      */
     onSelectedDestinationCapabilitiesReady_: function() {
-      var caps = this.destinationStore_.selectedDestination.capabilities;
+      var caps = assert(
+          this.destinationStore_.selectedDestination.capabilities);
       var isFirstUpdate = this.capabilitiesHolder_.get() == null;
       this.capabilitiesHolder_.set(caps);
       if (isFirstUpdate) {

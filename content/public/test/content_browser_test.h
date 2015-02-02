@@ -17,14 +17,14 @@ class ShellMainDelegate;
 class ContentBrowserTest : public BrowserTestBase {
  protected:
   ContentBrowserTest();
-  virtual ~ContentBrowserTest();
+  ~ContentBrowserTest() override;
 
   // testing::Test:
-  virtual void SetUp() OVERRIDE;
-  virtual void TearDown() OVERRIDE;
+  void SetUp() override;
+  void TearDown() override;
 
   // BrowserTestBase:
-  virtual void RunTestOnMainThreadLoop() OVERRIDE;
+  void RunTestOnMainThreadLoop() override;
 
  protected:
   // Creates a new window and loads about:blank.

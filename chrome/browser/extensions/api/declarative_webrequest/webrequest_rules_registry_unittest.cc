@@ -70,11 +70,9 @@ class TestWebRequestRulesRegistry : public WebRequestRulesRegistry {
   }
 
  protected:
-  virtual ~TestWebRequestRulesRegistry() {}
+  ~TestWebRequestRulesRegistry() override {}
 
-  virtual void ClearCacheOnNavigation() OVERRIDE {
-    ++num_clear_cache_calls_;
-  }
+  void ClearCacheOnNavigation() override { ++num_clear_cache_calls_; }
 
  private:
   int num_clear_cache_calls_;
@@ -86,11 +84,11 @@ class WebRequestRulesRegistryTest : public testing::Test {
       : ui_(content::BrowserThread::UI, &message_loop_),
         io_(content::BrowserThread::IO, &message_loop_) {}
 
-  virtual ~WebRequestRulesRegistryTest() {}
+  ~WebRequestRulesRegistryTest() override {}
 
-  virtual void SetUp() OVERRIDE;
+  void SetUp() override;
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     // Make sure that deletion traits of all registries are executed.
     message_loop_.RunUntilIdle();
   }
@@ -645,7 +643,7 @@ TEST_F(WebRequestRulesRegistryTest, GetMatchesDifferentUrls) {
     GURL("http://fpfc.example.com")  // matching
   };
   // Which rules should match in subsequent test iterations.
-  const char* matchingRuleIds[] = { kRuleId1, kRuleId2 };
+  const char* const matchingRuleIds[] = { kRuleId1, kRuleId2 };
   COMPILE_ASSERT(arraysize(urls) == arraysize(firstPartyUrls),
                  urls_and_firstPartyUrls_need_to_have_the_same_size);
   COMPILE_ASSERT(arraysize(urls) == arraysize(matchingRuleIds),

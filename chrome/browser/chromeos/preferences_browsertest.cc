@@ -32,7 +32,8 @@ namespace chromeos {
 
 namespace {
 
-const char* kTestUsers[] = {"test-user1@gmail.com", "test-user2@gmail.com"};
+const char* const kTestUsers[] = {"test-user1@gmail.com",
+                                  "test-user2@gmail.com"};
 
 }  // namespace
 
@@ -43,12 +44,12 @@ class PreferencesTest : public LoginManagerTest {
         input_settings_(NULL),
         keyboard_(NULL) {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) OVERRIDE {
+  virtual void SetUpCommandLine(CommandLine* command_line) override {
     LoginManagerTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kStubCrosSettings);
   }
 
-  virtual void SetUpOnMainThread() OVERRIDE {
+  virtual void SetUpOnMainThread() override {
     LoginManagerTest::SetUpOnMainThread();
     input_settings_ = new system::FakeInputDeviceSettings();
     system::InputDeviceSettings::SetSettingsForTesting(input_settings_);

@@ -120,12 +120,12 @@ class WebRtcLoggingHandlerHost : public content::BrowserMessageFilter {
   friend class content::BrowserThread;
   friend class base::DeleteHelper<WebRtcLoggingHandlerHost>;
 
-  virtual ~WebRtcLoggingHandlerHost();
+  ~WebRtcLoggingHandlerHost() override;
 
   // BrowserMessageFilter implementation.
-  virtual void OnChannelClosing() OVERRIDE;
-  virtual void OnDestruct() const OVERRIDE;
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  void OnChannelClosing() override;
+  void OnDestruct() const override;
+  bool OnMessageReceived(const IPC::Message& message) override;
 
   // Handles log message requests from renderer process.
   void OnAddLogMessages(const std::vector<WebRtcLoggingMessageData>& messages);

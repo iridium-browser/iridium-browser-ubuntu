@@ -9,7 +9,6 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/message_loop/message_loop.h"
-#include "base/path_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "chrome/browser/history/history_service.h"
@@ -160,7 +159,7 @@ class HistoryQueryTest : public testing::Test {
   }
 
  private:
-  virtual void SetUp() {
+  void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     history_dir_ = temp_dir_.path().AppendASCII("HistoryTest");
     ASSERT_TRUE(base::CreateDirectory(history_dir_));
@@ -180,7 +179,7 @@ class HistoryQueryTest : public testing::Test {
     }
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     if (history_) {
       history_->SetOnBackendDestroyTask(base::MessageLoop::QuitClosure());
       history_->Cleanup();
@@ -406,7 +405,7 @@ TEST_F(HistoryQueryTest, TextSearchIDN) {
                        L"\u0438\u0434\u0435\u043d\u0442.\u0440\u0444"), 1, },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(queries); ++i) {
+  for (size_t i = 0; i < arraysize(queries); ++i) {
     QueryHistory(queries[i].query, options, &results);
     EXPECT_EQ(queries[i].results_size, results.size());
   }

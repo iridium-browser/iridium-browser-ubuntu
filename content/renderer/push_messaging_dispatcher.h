@@ -11,6 +11,7 @@
 #include "content/public/common/push_messaging_status.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "third_party/WebKit/public/platform/WebPushClient.h"
+#include "third_party/WebKit/public/platform/WebPushPermissionStatus.h"
 
 class GURL;
 
@@ -20,10 +21,12 @@ class Message;
 
 namespace blink {
 class WebServiceWorkerProvider;
-class WebString;
 }  // namespace blink
 
 namespace content {
+
+struct Manifest;
+
 class PushMessagingDispatcher : public RenderFrameObserver,
                                 public blink::WebPushClient {
  public:
@@ -32,27 +35,34 @@ class PushMessagingDispatcher : public RenderFrameObserver,
 
  private:
   // RenderFrame::Observer implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& message) override;
 
   // WebPushClient implementation.
-  // TODO(mvanouwerkerk): Delete this method once its callers are gone and
-  // WebPushClient no longer defines it (as pure virtual).
   virtual void registerPushMessaging(
-      const blink::WebString& sender_id,
-      blink::WebPushRegistrationCallbacks* callbacks);
-  virtual void registerPushMessaging(
-      const blink::WebString& sender_id,
       blink::WebPushRegistrationCallbacks* callbacks,
-      blink::WebServiceWorkerProvider* service_worker_provider);
+      blink::WebServiceWorkerProvider* service_worker_provider);  // override
+  virtual void getPermissionStatus(
+      blink::WebPushPermissionStatusCallback* callback,
+      blink::WebServiceWorkerProvider* service_worker_provider);  // override
+
+  void DoRegister(blink::WebPushRegistrationCallbacks* callbacks,
+                  blink::WebServiceWorkerProvider* service_worker_provider,
+                  const Manifest& manifest);
 
   void OnRegisterSuccess(int32 callbacks_id,
                          const GURL& endpoint,
                          const std::string& registration_id);
 
-  void OnRegisterError(int32 callbacks_id, PushMessagingStatus status);
+  void OnRegisterError(int32 callbacks_id, PushRegistrationStatus status);
+
+  void OnPermissionStatus(int32 callback_id,
+                          blink::WebPushPermissionStatus status);
+  void OnPermissionStatusFailure(int32 callback_id);
 
   IDMap<blink::WebPushRegistrationCallbacks, IDMapOwnPointer>
       registration_callbacks_;
+  IDMap<blink::WebPushPermissionStatusCallback, IDMapOwnPointer>
+      permission_check_callbacks_;
 
   DISALLOW_COPY_AND_ASSIGN(PushMessagingDispatcher);
 };

@@ -33,8 +33,8 @@ public class JSUtils {
             public boolean isSatisfied() {
                 try {
                     String linkIsNotNull = executeJavaScriptAndWaitForResult(testCase, awContents,
-                        onEvaluateJavaScriptResultHelper,
-                        "document.getElementById('" + linkId + "') != null");
+                            onEvaluateJavaScriptResultHelper,
+                            "document.getElementById('" + linkId + "') != null");
                     return linkIsNotNull.equals("true");
                 } catch (Throwable t) {
                     t.printStackTrace();
@@ -47,12 +47,12 @@ public class JSUtils {
         testCase.getInstrumentation().runOnMainSync(new Runnable() {
             @Override
             public void run() {
-                awContents.getContentViewCore().evaluateJavaScript(
-                    "var evObj = document.createEvent('Events'); " +
-                    "evObj.initEvent('click', true, false); " +
-                    "document.getElementById('" + linkId + "').dispatchEvent(evObj);" +
-                    "console.log('element with id [" + linkId + "] clicked');",
-                    null);
+                awContents.getWebContents().evaluateJavaScript(
+                        "var evObj = document.createEvent('Events'); " +
+                        "evObj.initEvent('click', true, false); " +
+                        "document.getElementById('" + linkId + "').dispatchEvent(evObj);" +
+                        "console.log('element with id [" + linkId + "] clicked');",
+                        null);
             }
         });
     }
@@ -66,7 +66,7 @@ public class JSUtils {
             @Override
             public void run() {
                 onEvaluateJavaScriptResultHelper.evaluateJavaScript(
-                        awContents.getContentViewCore(), code);
+                        awContents.getWebContents(), code);
             }
         });
         onEvaluateJavaScriptResultHelper.waitUntilHasValue();

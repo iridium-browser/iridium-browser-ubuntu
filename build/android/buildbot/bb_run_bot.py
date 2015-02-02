@@ -116,11 +116,12 @@ def GetCommands(options, bot_config):
 def GetBotStepMap():
   compile_step = ['compile']
   chrome_proxy_tests = ['chrome_proxy']
-  chrome_sync_shell_tests = ['sync']
+  python_unittests = ['python_unittests']
   std_host_tests = ['check_webview_licenses', 'findbugs']
+  emma_coverage_tests = [x for x in std_host_tests if x is not 'findbugs']
   std_build_steps = ['compile', 'zip_build']
   std_test_steps = ['extract_build']
-  std_tests = ['ui', 'unit', 'mojo']
+  std_tests = ['ui', 'unit']
   telemetry_tests = ['telemetry_perf_unittests']
   flakiness_server = (
       '--flakiness-server=%s' % constants.UPSTREAM_FLAKINESS_SERVER)
@@ -160,13 +161,13 @@ def GetBotStepMap():
       B('fyi-x86-builder-dbg',
         H(compile_step + std_host_tests, experimental, target_arch='ia32')),
       B('fyi-builder-dbg',
-        H(std_build_steps + std_host_tests, experimental,
+        H(std_build_steps + emma_coverage_tests, experimental,
           extra_gyp='emma_coverage=1')),
       B('x86-builder-dbg',
         H(compile_step + std_host_tests, target_arch='ia32')),
       B('fyi-builder-rel', H(std_build_steps,  experimental)),
       B('fyi-tests', H(std_test_steps),
-        T(std_tests + chrome_sync_shell_tests,
+        T(std_tests + python_unittests,
                       ['--experimental', flakiness_server,
                       '--coverage-bucket', CHROMIUM_COVERAGE_BUCKET,
                       '--cleanup'])),

@@ -9,7 +9,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
-#include "media/base/cdm_promise.h"
+#include "media/base/cdm_callback_promise.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/media_keys.h"
 #include "media/base/media_switches.h"
@@ -29,6 +29,7 @@ using testing::SaveArg;
 namespace media {
 
 const char kSourceId[] = "SourceId";
+const char kCencInitDataType[] = "cenc";
 const uint8 kInitData[] = { 0x69, 0x6e, 0x69, 0x74 };
 
 const char kWebM[] = "video/webm; codecs=\"vp8,vorbis\"";
@@ -36,8 +37,6 @@ const char kWebMVP9[] = "video/webm; codecs=\"vp9\"";
 const char kAudioOnlyWebM[] = "video/webm; codecs=\"vorbis\"";
 const char kOpusAudioOnlyWebM[] = "video/webm; codecs=\"opus\"";
 const char kVideoOnlyWebM[] = "video/webm; codecs=\"vp8\"";
-const char kMP4VideoType[] = "video/mp4";
-const char kMP4AudioType[] = "audio/mp4";
 #if defined(USE_PROPRIETARY_CODECS)
 const char kADTS[] = "audio/aac";
 const char kMP4[] = "video/mp4; codecs=\"avc1.4D4041,mp4a.40.2\"";
@@ -212,7 +211,7 @@ class KeyProvidingApp : public FakeEncryptedMedia::AppBase {
   }
 
   scoped_ptr<SimpleCdmPromise> CreatePromise(PromiseResult expected) {
-    scoped_ptr<media::SimpleCdmPromise> promise(new media::SimpleCdmPromise(
+    scoped_ptr<media::SimpleCdmPromise> promise(new media::CdmCallbackPromise<>(
         base::Bind(
             &KeyProvidingApp::OnResolve, base::Unretained(this), expected),
         base::Bind(
@@ -223,7 +222,7 @@ class KeyProvidingApp : public FakeEncryptedMedia::AppBase {
   scoped_ptr<NewSessionCdmPromise> CreateSessionPromise(
       PromiseResult expected) {
     scoped_ptr<media::NewSessionCdmPromise> promise(
-        new media::NewSessionCdmPromise(
+        new media::CdmCallbackPromise<std::string>(
             base::Bind(&KeyProvidingApp::OnResolveWithSession,
                        base::Unretained(this),
                        expected),
@@ -232,27 +231,27 @@ class KeyProvidingApp : public FakeEncryptedMedia::AppBase {
     return promise.Pass();
   }
 
-  virtual void OnSessionMessage(const std::string& web_session_id,
-                                const std::vector<uint8>& message,
-                                const GURL& destination_url) OVERRIDE {
+  void OnSessionMessage(const std::string& web_session_id,
+                        const std::vector<uint8>& message,
+                        const GURL& destination_url) override {
     EXPECT_FALSE(web_session_id.empty());
     EXPECT_FALSE(message.empty());
     EXPECT_EQ(current_session_id_, web_session_id);
   }
 
-  virtual void OnSessionClosed(const std::string& web_session_id) OVERRIDE {
+  void OnSessionClosed(const std::string& web_session_id) override {
     EXPECT_EQ(current_session_id_, web_session_id);
   }
 
-  virtual void OnSessionKeysChange(const std::string& web_session_id,
-                                   bool has_additional_usable_key) OVERRIDE {
+  void OnSessionKeysChange(const std::string& web_session_id,
+                           bool has_additional_usable_key) override {
     EXPECT_EQ(current_session_id_, web_session_id);
     EXPECT_EQ(has_additional_usable_key, true);
   }
 
-  virtual void NeedKey(const std::string& type,
-                       const std::vector<uint8>& init_data,
-                       AesDecryptor* decryptor) OVERRIDE {
+  void NeedKey(const std::string& type,
+               const std::vector<uint8>& init_data,
+               AesDecryptor* decryptor) override {
     if (current_session_id_.empty()) {
       decryptor->CreateSession(type,
                                kInitData,
@@ -267,7 +266,7 @@ class KeyProvidingApp : public FakeEncryptedMedia::AppBase {
     // correct key ID.
     const uint8* key_id = init_data.empty() ? NULL : &init_data[0];
     size_t key_id_length = init_data.size();
-    if (type == kMP4AudioType || type == kMP4VideoType) {
+    if (type == kCencInitDataType) {
       key_id = kKeyId;
       key_id_length = arraysize(kKeyId);
     }
@@ -287,14 +286,14 @@ class KeyProvidingApp : public FakeEncryptedMedia::AppBase {
 class RotatingKeyProvidingApp : public KeyProvidingApp {
  public:
   RotatingKeyProvidingApp() : num_distint_need_key_calls_(0) {}
-  virtual ~RotatingKeyProvidingApp() {
+  ~RotatingKeyProvidingApp() override {
     // Expect that NeedKey is fired multiple times with different |init_data|.
     EXPECT_GT(num_distint_need_key_calls_, 1u);
   }
 
-  virtual void NeedKey(const std::string& type,
-                       const std::vector<uint8>& init_data,
-                       AesDecryptor* decryptor) OVERRIDE {
+  void NeedKey(const std::string& type,
+               const std::vector<uint8>& init_data,
+               AesDecryptor* decryptor) override {
     // Skip the request if the |init_data| has been seen.
     if (init_data == prev_init_data_)
       return;
@@ -359,29 +358,28 @@ class RotatingKeyProvidingApp : public KeyProvidingApp {
 // Ignores needkey and does not perform a license request
 class NoResponseApp : public FakeEncryptedMedia::AppBase {
  public:
-  virtual void OnSessionMessage(const std::string& web_session_id,
-                                const std::vector<uint8>& message,
-                                const GURL& default_url) OVERRIDE {
+  void OnSessionMessage(const std::string& web_session_id,
+                        const std::vector<uint8>& message,
+                        const GURL& default_url) override {
     EXPECT_FALSE(web_session_id.empty());
     EXPECT_FALSE(message.empty());
     FAIL() << "Unexpected Message";
   }
 
-  virtual void OnSessionClosed(const std::string& web_session_id) OVERRIDE {
+  void OnSessionClosed(const std::string& web_session_id) override {
     EXPECT_FALSE(web_session_id.empty());
     FAIL() << "Unexpected Closed";
   }
 
-  virtual void OnSessionKeysChange(const std::string& web_session_id,
-                                   bool has_additional_usable_key) OVERRIDE {
+  void OnSessionKeysChange(const std::string& web_session_id,
+                           bool has_additional_usable_key) override {
     EXPECT_FALSE(web_session_id.empty());
     EXPECT_EQ(has_additional_usable_key, true);
   }
 
-  virtual void NeedKey(const std::string& type,
-                       const std::vector<uint8>& init_data,
-                       AesDecryptor* decryptor) OVERRIDE {
-  }
+  void NeedKey(const std::string& type,
+               const std::vector<uint8>& init_data,
+               AesDecryptor* decryptor) override {}
 };
 
 // Helper class that emulates calls made on the ChunkDemuxer by the

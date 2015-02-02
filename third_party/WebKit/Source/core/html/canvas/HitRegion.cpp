@@ -10,12 +10,15 @@
 
 namespace blink {
 
-HitRegion::HitRegion(const HitRegionOptionsInternal& options)
-    : m_id(options.id)
-    , m_control(options.control)
-    , m_path(options.path)
-    , m_fillRule(options.fillRule)
+HitRegion::HitRegion(const Path& path, const HitRegionOptions& options)
+    : m_id(options.id())
+    , m_control(options.control())
+    , m_path(path)
 {
+    if (options.fillRule() != "evenodd")
+        m_fillRule = RULE_NONZERO;
+    else
+        m_fillRule = RULE_EVENODD;
 }
 
 void HitRegion::updateAccessibility(Element* canvas)
@@ -131,7 +134,7 @@ HitRegion* HitRegionManager::getHitRegionByControl(Element* control) const
     if (control)
         return m_hitRegionControlMap.get(control);
 
-    return 0;
+    return nullptr;
 }
 
 HitRegion* HitRegionManager::getHitRegionAtPoint(const LayoutPoint& point) const
@@ -144,7 +147,7 @@ HitRegion* HitRegionManager::getHitRegionAtPoint(const LayoutPoint& point) const
             return hitRegion.get();
     }
 
-    return 0;
+    return nullptr;
 }
 
 unsigned HitRegionManager::getHitRegionsCount() const

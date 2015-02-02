@@ -46,10 +46,9 @@ class GeometryCacheChangeHelper : AppWindowGeometryCache::Observer {
   }
 
   // Implements the content::NotificationObserver interface.
-  virtual void OnGeometryCacheChanged(const std::string& extension_id,
-                                      const std::string& window_id,
-                                      const gfx::Rect& bounds)
-      OVERRIDE {
+  void OnGeometryCacheChanged(const std::string& extension_id,
+                              const std::string& window_id,
+                              const gfx::Rect& bounds) override {
     if (extension_id != extension_id_ || window_id != window_id_)
       return;
 
@@ -142,6 +141,17 @@ IN_PROC_BROWSER_TEST_F(AppWindowAPITest, TestCloseEvent) {
 
 IN_PROC_BROWSER_TEST_F(AppWindowAPITest, DISABLED_TestMaximize) {
   ASSERT_TRUE(RunAppWindowAPITest("testMaximize")) << message_;
+}
+
+// Flaky on Linux. http://crbug.com/424399.
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+#define MAYBE_TestMinimize DISABLED_TestMinimize
+#else
+#define MAYBE_TestMinimize TestMinimize
+#endif
+
+IN_PROC_BROWSER_TEST_F(AppWindowAPITest, MAYBE_TestMinimize) {
+  ASSERT_TRUE(RunAppWindowAPITest("testMinimize")) << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(AppWindowAPITest, DISABLED_TestRestore) {
@@ -248,14 +258,6 @@ IN_PROC_BROWSER_TEST_F(AppWindowAPITest, TestBadging) {
 // TODO(benwells): Implement on Mac.
 #if defined(USE_AURA)
 IN_PROC_BROWSER_TEST_F(AppWindowAPITest, TestFrameColors) {
-  ASSERT_TRUE(RunAppWindowAPITest("testFrameColors")) << message_;
-}
-
-// TODO(benwells): Remove this test once all the things are merged together. It
-// is currently present as this feature was previously disabled on stable
-// channel, so the test is to ensure it has all been re-enabled properly.
-IN_PROC_BROWSER_TEST_F(AppWindowAPITest, TestFrameColorsInStable) {
-  extensions::ScopedCurrentChannel channel(chrome::VersionInfo::CHANNEL_STABLE);
   ASSERT_TRUE(RunAppWindowAPITest("testFrameColors")) << message_;
 }
 #endif

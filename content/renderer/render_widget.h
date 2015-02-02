@@ -16,8 +16,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "base/time/time.h"
-#include "base/timer/timer.h"
-#include "cc/debug/rendering_stats_instrumentation.h"
 #include "content/common/content_export.h"
 #include "content/common/cursors/webcursor.h"
 #include "content/common/gpu/client/webgraphicscontext3d_command_buffer_impl.h"
@@ -136,10 +134,10 @@ class CONTENT_EXPORT RenderWidget
 #endif  // defined(VIDEO_HOLE)
 
   // IPC::Listener
-  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
+  bool OnMessageReceived(const IPC::Message& msg) override;
 
   // IPC::Sender
-  virtual bool Send(IPC::Message* msg) OVERRIDE;
+  bool Send(IPC::Message* msg) override;
 
   // blink::WebWidgetClient
   virtual void willBeginCompositorFrame();
@@ -173,7 +171,7 @@ class CONTENT_EXPORT RenderWidget
   void StartCompositor();
 
   // Stop compositing.
-  void DestroyLayerTreeView();
+  void WillCloseLayerTreeView();
 
   // Called when a plugin is moved.  These events are queued up and sent with
   // the next paint or scroll message to the host.
@@ -293,16 +291,19 @@ class CONTENT_EXPORT RenderWidget
   void UpdateTextInputState(ShowIme show_ime, ChangeSource change_source);
 #endif
 
-#if defined(OS_MACOSX) || defined(USE_AURA)
+#if defined(OS_MACOSX) || defined(USE_AURA) || defined(OS_ANDROID)
   // Checks if the composition range or composition character bounds have been
   // changed. If they are changed, the new value will be sent to the browser
-  // process.
+  // process. This method does nothing when the browser process is not able to
+  // handle composition range and composition character bounds.
   void UpdateCompositionInfo(bool should_update_range);
 #endif
 
 #if defined(OS_ANDROID)
   void DidChangeBodyBackgroundColor(SkColor bg_color);
 #endif
+
+  bool host_closing() const { return host_closing_; }
 
  protected:
   // Friend RefCounted so that the dtor can be non-public. Using this class
@@ -322,7 +323,7 @@ class CONTENT_EXPORT RenderWidget
                bool hidden,
                bool never_visible);
 
-  virtual ~RenderWidget();
+  ~RenderWidget() override;
 
   // Initializes this view with the given opener.  CompleteInit must be called
   // later.
@@ -359,7 +360,9 @@ class CONTENT_EXPORT RenderWidget
               bool is_fullscreen,
               ResizeAck resize_ack);
   // Used to force the size of a window when running layout tests.
-  void ResizeSynchronously(const gfx::Rect& new_position);
+  void ResizeSynchronously(
+      const gfx::Rect& new_position,
+      const gfx::Size& visible_viewport_size);
   virtual void SetScreenMetricsEmulationParameters(
       float device_scale_factor,
       const gfx::Point& root_layer_offset,
@@ -379,6 +382,7 @@ class CONTENT_EXPORT RenderWidget
   virtual void OnClose();
   void OnCreatingNewAck();
   virtual void OnResize(const ViewMsg_Resize_Params& params);
+  void OnColorProfile(const std::vector<char>& color_profile);
   void OnChangeResizeRect(const gfx::Rect& resizer_rect);
   virtual void OnWasHidden();
   virtual void OnWasShown(bool needs_repainting,
@@ -471,7 +475,7 @@ class CONTENT_EXPORT RenderWidget
   virtual ui::TextInputType WebKitToUiTextInputType(
       blink::WebTextInputType type);
 
-#if defined(OS_MACOSX) || defined(USE_AURA)
+#if defined(OS_MACOSX) || defined(USE_AURA) || defined(OS_ANDROID)
   // Override point to obtain that the current composition character bounds.
   // In the case of surrogate pairs, the character is treated as two characters:
   // the bounds for first character is actual one, and the bounds for second
@@ -655,6 +659,9 @@ class CONTENT_EXPORT RenderWidget
 
   // Stores the current text input mode of |webwidget_|.
   ui::TextInputMode text_input_mode_;
+
+  // Stores the current text input flags of |webwidget_|.
+  int text_input_flags_;
 
   // Stores the current type of composition text rendering of |webwidget_|.
   bool can_compose_inline_;

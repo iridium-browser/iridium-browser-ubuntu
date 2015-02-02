@@ -8,20 +8,16 @@
 #include "athena/athena_export.h"
 #include "athena/home/home_card_gesture_manager.h"
 #include "athena/home/public/home_card.h"
+#include "athena/home/public/search_controller_factory.h"
 #include "athena/input/public/accelerator_manager.h"
 #include "athena/wm/public/window_manager_observer.h"
-#include "ui/wm/public/activation_change_observer.h"
 
 namespace app_list {
-class SearchProvider;
+class AppListViewDelegate;
 }
 
 namespace aura {
 class Window;
-
-namespace client {
-class ActivationClient;
-}
 }
 
 namespace gfx {
@@ -38,19 +34,17 @@ class Widget;
 
 namespace athena {
 class AppModelBuilder;
-class AppListViewDelegate;
 class HomeCardLayoutManager;
 class HomeCardView;
 
-class ATHENA_EXPORT HomeCardImpl
-    : public HomeCard,
-      public AcceleratorHandler,
-      public HomeCardGestureManager::Delegate,
-      public WindowManagerObserver,
-      public aura::client::ActivationChangeObserver {
+class ATHENA_EXPORT HomeCardImpl : public HomeCard,
+                                   public AcceleratorHandler,
+                                   public HomeCardGestureManager::Delegate,
+                                   public WindowManagerObserver {
  public:
-  explicit HomeCardImpl(AppModelBuilder* model_builder);
-  virtual ~HomeCardImpl();
+  HomeCardImpl(scoped_ptr<AppModelBuilder> model_builder,
+               scoped_ptr<SearchControllerFactory> search_factory);
+  ~HomeCardImpl() override;
 
   void Init();
 
@@ -62,38 +56,32 @@ class ATHENA_EXPORT HomeCardImpl
   };
   void InstallAccelerators();
 
+  void ResetQuery();
+
   // Overridden from HomeCard:
-  virtual void SetState(HomeCard::State state) OVERRIDE;
-  virtual State GetState() OVERRIDE;
-  virtual void RegisterSearchProvider(
-      app_list::SearchProvider* search_provider) OVERRIDE;
-  virtual void UpdateVirtualKeyboardBounds(
-      const gfx::Rect& bounds) OVERRIDE;
+  void SetState(HomeCard::State state) override;
+  State GetState() override;
+  void UpdateVirtualKeyboardBounds(const gfx::Rect& bounds) override;
 
   // AcceleratorHandler:
-  virtual bool IsCommandEnabled(int command_id) const OVERRIDE;
-  virtual bool OnAcceleratorFired(int command_id,
-                                  const ui::Accelerator& accelerator) OVERRIDE;
+  bool IsCommandEnabled(int command_id) const override;
+  bool OnAcceleratorFired(int command_id,
+                          const ui::Accelerator& accelerator) override;
 
   // HomeCardGestureManager::Delegate:
-  virtual void OnGestureEnded(HomeCard::State final_state,
-                              bool is_fling) OVERRIDE;
-  virtual void OnGestureProgressed(
-      HomeCard::State from_state,
-      HomeCard::State to_state,
-      float progress) OVERRIDE;
+  void OnGestureEnded(HomeCard::State final_state, bool is_fling) override;
+  void OnGestureProgressed(HomeCard::State from_state,
+                           HomeCard::State to_state,
+                           float progress) override;
 
   // WindowManagerObserver:
-  virtual void OnOverviewModeEnter() OVERRIDE;
-  virtual void OnOverviewModeExit() OVERRIDE;
-  virtual void OnSplitViewModeEnter() OVERRIDE;
-  virtual void OnSplitViewModeExit() OVERRIDE;
-
-  // aura::client::ActivationChangeObserver:
-  virtual void OnWindowActivated(aura::Window* gained_active,
-                                 aura::Window* lost_active) OVERRIDE;
+  void OnOverviewModeEnter() override;
+  void OnOverviewModeExit() override;
+  void OnSplitViewModeEnter() override;
+  void OnSplitViewModeExit() override;
 
   scoped_ptr<AppModelBuilder> model_builder_;
+  scoped_ptr<SearchControllerFactory> search_factory_;
 
   HomeCard::State state_;
 
@@ -103,14 +91,8 @@ class ATHENA_EXPORT HomeCardImpl
 
   views::Widget* home_card_widget_;
   HomeCardView* home_card_view_;
-  scoped_ptr<AppListViewDelegate> view_delegate_;
+  scoped_ptr<app_list::AppListViewDelegate> view_delegate_;
   HomeCardLayoutManager* layout_manager_;
-  aura::client::ActivationClient* activation_client_;  // Not owned
-  scoped_ptr<ui::LayerOwner> minimized_home_;
-
-  // Right now HomeCard allows only one search provider.
-  // TODO(mukai): port app-list's SearchController and Mixer.
-  scoped_ptr<app_list::SearchProvider> search_provider_;
 
   DISALLOW_COPY_AND_ASSIGN(HomeCardImpl);
 };

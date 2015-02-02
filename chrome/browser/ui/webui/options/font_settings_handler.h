@@ -27,25 +27,23 @@ class FontSettingsHandler : public OptionsPageUIHandler,
                             public extensions::ExtensionRegistryObserver {
  public:
   FontSettingsHandler();
-  virtual ~FontSettingsHandler();
+  ~FontSettingsHandler() override;
 
   // OptionsPageUIHandler implementation.
-  virtual void GetLocalizedValues(
-      base::DictionaryValue* localized_strings) OVERRIDE;
-  virtual void InitializeHandler() OVERRIDE;
-  virtual void InitializePage() OVERRIDE;
+  void GetLocalizedValues(base::DictionaryValue* localized_strings) override;
+  void InitializeHandler() override;
+  void InitializePage() override;
 
   // WebUIMessageHandler implementation.
-  virtual void RegisterMessages() OVERRIDE;
+  void RegisterMessages() override;
 
   // ExtensionRegistryObserver implementation.
-  virtual void OnExtensionLoaded(
-      content::BrowserContext* browser_context,
-      const extensions::Extension* extension) OVERRIDE;
-  virtual void OnExtensionUnloaded(
+  void OnExtensionLoaded(content::BrowserContext* browser_context,
+                         const extensions::Extension* extension) override;
+  void OnExtensionUnloaded(
       content::BrowserContext* browser_context,
       const extensions::Extension* extension,
-      extensions::UnloadedExtensionInfo::Reason reason) OVERRIDE;
+      extensions::UnloadedExtensionInfo::Reason reason) override;
 
  private:
   void HandleFetchFontsData(const base::ListValue* args);

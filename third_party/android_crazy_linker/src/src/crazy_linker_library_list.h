@@ -69,7 +69,20 @@ class LibraryList {
                            uintptr_t load_address,
                            off_t file_offset,
                            SearchPathList* search_path_list,
+                           bool no_map_exec_support_fallback_enabled,
                            Error* error);
+
+  // Return the full path of |lib_name| in the zip file
+  // (lib/<abi>/crazy.<lib_name>).
+  static String GetLibraryFilePathInZipFile(const char* lib_name);
+
+  // Find the location of a library in the zip file. If the name of the library
+  // is too long, an error occurs during the search, the library is not page
+  // aligned in the zip file or it is compressed, CRAZY_OFFSET_FAILED is
+  // returned. Otherwise, the offset of the library in the zip file is returned.
+  static int FindMappableLibraryInZipFile(const char* zip_file_path,
+                                          const char* lib_name,
+                                          Error* error);
 
   // Try to load a library from its location in the zip file.
   // On failure, returns NULL and sets the |error| message.
@@ -78,6 +91,7 @@ class LibraryList {
                                     int dlopen_flags,
                                     uintptr_t load_address,
                                     SearchPathList* search_path_list,
+                                    bool no_map_exec_support_fallback_enabled,
                                     Error* error);
 
   // Unload a given shared library. This really decrements the library's

@@ -507,6 +507,12 @@ void SyncBackendHostImpl::GetModelSafeRoutingInfo(
   }
 }
 
+void SyncBackendHostImpl::FlushDirectory() const {
+  DCHECK(initialized());
+  registrar_->sync_thread()->message_loop()->PostTask(FROM_HERE,
+      base::Bind(&SyncBackendHostCore::SaveChanges, core_));
+}
+
 void SyncBackendHostImpl::RequestBufferedProtocolEventsAndEnableForwarding() {
   registrar_->sync_thread()->message_loop()->PostTask(
       FROM_HERE,
@@ -624,14 +630,6 @@ void SyncBackendHostImpl::AddExperimentalTypes() {
   syncer::Experiments experiments;
   if (core_->sync_manager()->ReceivedExperiment(&experiments))
     frontend_->OnExperimentsChanged(experiments);
-}
-
-void SyncBackendHostImpl::HandleControlTypesDownloadRetry() {
-  DCHECK_EQ(base::MessageLoop::current(), frontend_loop_);
-  if (!frontend_)
-    return;
-
-  frontend_->OnSyncConfigureRetry();
 }
 
 void SyncBackendHostImpl::HandleInitializationSuccessOnFrontendLoop(

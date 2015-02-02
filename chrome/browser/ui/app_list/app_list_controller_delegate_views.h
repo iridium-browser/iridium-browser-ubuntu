@@ -14,14 +14,14 @@ class AppListServiceViews;
 class AppListControllerDelegateViews : public AppListControllerDelegateImpl {
  public:
   explicit AppListControllerDelegateViews(AppListServiceViews* service);
-  virtual ~AppListControllerDelegateViews();
+  ~AppListControllerDelegateViews() override;
 
   // AppListControllerDelegate overrides:
-  virtual gfx::Rect GetAppListBounds() OVERRIDE;
-  virtual void ViewClosing() OVERRIDE;
-  virtual void OnShowChildDialog() OVERRIDE;
-  virtual void OnCloseChildDialog() OVERRIDE;
-  virtual bool CanDoCreateShortcutsFlow() OVERRIDE;
+  gfx::Rect GetAppListBounds() override;
+  void ViewClosing() override;
+  void OnShowChildDialog() override;
+  void OnCloseChildDialog() override;
+  bool CanDoCreateShortcutsFlow() override;
 
  private:
   AppListServiceViews* service_;  // Weak. Owns us.

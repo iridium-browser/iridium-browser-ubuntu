@@ -23,14 +23,14 @@ class DebugExceptionHandler : public base::PlatformThread::Delegate {
         on_connected_(on_connected) {
   }
 
-  virtual void ThreadMain() OVERRIDE {
+  virtual void ThreadMain() override {
     // In the Windows API, the set of processes being debugged is
     // thread-local, so we have to attach to the process (using
     // DebugActiveProcess()) on the same thread on which
     // NaClDebugExceptionHandlerRun() receives debug events for the
     // process.
     bool attached = false;
-    int pid = GetProcessId(nacl_process_);
+    int pid = GetProcessId(nacl_process_.Get());
     if (pid == 0) {
       LOG(ERROR) << "Invalid process handle";
     } else {
@@ -44,7 +44,7 @@ class DebugExceptionHandler : public base::PlatformThread::Delegate {
 
     if (attached) {
       NaClDebugExceptionHandlerRun(
-          nacl_process_,
+          nacl_process_.Get(),
           reinterpret_cast<const void*>(startup_info_.data()),
           startup_info_.size());
     }

@@ -45,7 +45,6 @@
 #include "components/signin/core/browser/signin_manager_base.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/user_metrics.h"
-#include "google_apis/gaia/google_service_auth_error.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if defined(OS_CHROMEOS)
@@ -70,6 +69,22 @@
 using base::DictionaryValue;
 using base::UserMetricsAction;
 using content::BrowserThread;
+
+base::FilePath SupervisedUserService::Delegate::GetBlacklistPath() const {
+  return base::FilePath();
+}
+
+GURL SupervisedUserService::Delegate::GetBlacklistURL() const {
+  return GURL();
+}
+
+std::string SupervisedUserService::Delegate::GetSafeSitesCx() const {
+  return std::string();
+}
+
+std::string SupervisedUserService::Delegate::GetSafeSitesApiKey() const {
+  return std::string();
+}
 
 SupervisedUserService::URLFilterContext::URLFilterContext()
     : ui_url_filter_(new SupervisedUserURLFilter),
@@ -100,12 +115,11 @@ void SupervisedUserService::URLFilterContext::LoadWhitelists(
     ScopedVector<SupervisedUserSiteList> site_lists) {
   // SupervisedUserURLFilter::LoadWhitelists takes ownership of |site_lists|,
   // so we make an additional copy of it.
-  /// TODO(bauerb): This is kinda ugly.
+  // TODO(bauerb): This is kinda ugly.
   ScopedVector<SupervisedUserSiteList> site_lists_copy;
-  for (ScopedVector<SupervisedUserSiteList>::iterator it = site_lists.begin();
-       it != site_lists.end(); ++it) {
-    site_lists_copy.push_back((*it)->Clone());
-  }
+  for (const SupervisedUserSiteList* site_list : site_lists)
+    site_lists_copy.push_back(site_list->Clone());
+
   ui_url_filter_->LoadWhitelists(site_lists.Pass());
   BrowserThread::PostTask(
       BrowserThread::IO,
@@ -155,8 +169,21 @@ void SupervisedUserService::URLFilterContext::OnBlacklistLoaded() {
                  &blacklist_));
 }
 
+void SupervisedUserService::URLFilterContext::InitAsyncURLChecker(
+    net::URLRequestContextGetter* context,
+    const std::string& cx,
+    const std::string& api_key) {
+  ui_url_filter_->InitAsyncURLChecker(context, cx, api_key);
+  BrowserThread::PostTask(
+      BrowserThread::IO,
+      FROM_HERE,
+      base::Bind(&SupervisedUserURLFilter::InitAsyncURLChecker,
+                 io_url_filter_, context, cx, api_key));
+}
+
 SupervisedUserService::SupervisedUserService(Profile* profile)
-    : profile_(profile),
+    : includes_sync_sessions_type_(true),
+      profile_(profile),
       active_(false),
       delegate_(NULL),
 #if defined(ENABLE_EXTENSIONS)
@@ -282,28 +309,42 @@ void SupervisedUserService::GetCategoryNames(CategoryList* list) {
 }
 
 std::string SupervisedUserService::GetCustodianEmailAddress() const {
+  std::string custodian_email = profile_->GetPrefs()->GetString(
+      prefs::kSupervisedUserCustodianEmail);
 #if defined(OS_CHROMEOS)
-  return chromeos::ChromeUserManager::Get()
-      ->GetSupervisedUserManager()
-      ->GetManagerDisplayEmail(
-          user_manager::UserManager::Get()->GetActiveUser()->email());
-#else
-  return profile_->GetPrefs()->GetString(prefs::kSupervisedUserCustodianEmail);
+  if (custodian_email.empty()) {
+    custodian_email = chromeos::ChromeUserManager::Get()
+        ->GetSupervisedUserManager()
+        ->GetManagerDisplayEmail(
+            user_manager::UserManager::Get()->GetActiveUser()->email());
+  }
 #endif
+  return custodian_email;
 }
 
 std::string SupervisedUserService::GetCustodianName() const {
-#if defined(OS_CHROMEOS)
-  return base::UTF16ToUTF8(
-      chromeos::ChromeUserManager::Get()
-          ->GetSupervisedUserManager()
-          ->GetManagerDisplayName(
-              user_manager::UserManager::Get()->GetActiveUser()->email()));
-#else
   std::string name = profile_->GetPrefs()->GetString(
       prefs::kSupervisedUserCustodianName);
-  return name.empty() ? GetCustodianEmailAddress() : name;
+#if defined(OS_CHROMEOS)
+  if (name.empty()) {
+    name = base::UTF16ToUTF8(chromeos::ChromeUserManager::Get()
+        ->GetSupervisedUserManager()
+        ->GetManagerDisplayName(
+            user_manager::UserManager::Get()->GetActiveUser()->email()));
+  }
 #endif
+  return name.empty() ? GetCustodianEmailAddress() : name;
+}
+
+std::string SupervisedUserService::GetSecondCustodianEmailAddress() const {
+  return profile_->GetPrefs()->GetString(
+      prefs::kSupervisedUserSecondCustodianEmail);
+}
+
+std::string SupervisedUserService::GetSecondCustodianName() const {
+  std::string name = profile_->GetPrefs()->GetString(
+      prefs::kSupervisedUserSecondCustodianName);
+  return name.empty() ? GetSecondCustodianEmailAddress() : name;
 }
 
 void SupervisedUserService::AddNavigationBlockedCallback(
@@ -313,11 +354,8 @@ void SupervisedUserService::AddNavigationBlockedCallback(
 
 void SupervisedUserService::DidBlockNavigation(
     content::WebContents* web_contents) {
-  for (std::vector<NavigationBlockedCallback>::iterator it =
-           navigation_blocked_callbacks_.begin();
-       it != navigation_blocked_callbacks_.end(); ++it) {
-    it->Run(web_contents);
-  }
+  for (const auto& callback : navigation_blocked_callbacks_)
+    callback.Run(web_contents);
 }
 
 void SupervisedUserService::AddObserver(
@@ -328,6 +366,11 @@ void SupervisedUserService::AddObserver(
 void SupervisedUserService::RemoveObserver(
     SupervisedUserServiceObserver* observer) {
   observer_list_.RemoveObserver(observer);
+}
+
+void SupervisedUserService::AddPermissionRequestCreatorForTesting(
+    PermissionRequestCreator* creator) {
+  permissions_creators_.push_back(creator);
 }
 
 #if defined(ENABLE_EXTENSIONS)
@@ -400,7 +443,8 @@ syncer::ModelTypeSet SupervisedUserService::GetPreferredDataTypes() const {
     return syncer::ModelTypeSet();
 
   syncer::ModelTypeSet result;
-  result.Put(syncer::SESSIONS);
+  if (IncludesSyncSessionsType())
+    result.Put(syncer::SESSIONS);
   result.Put(syncer::EXTENSIONS);
   result.Put(syncer::EXTENSION_SETTINGS);
   result.Put(syncer::APPS);
@@ -410,10 +454,21 @@ syncer::ModelTypeSet SupervisedUserService::GetPreferredDataTypes() const {
   return result;
 }
 
+void SupervisedUserService::OnHistoryRecordingStateChanged() {
+  includes_sync_sessions_type_ =
+      profile_->GetPrefs()->GetBoolean(prefs::kRecordHistory);
+  ProfileSyncServiceFactory::GetForProfile(profile_)
+      ->ReconfigureDatatypeManager();
+}
+
+bool SupervisedUserService::IncludesSyncSessionsType() const {
+  return includes_sync_sessions_type_;
+}
+
 void SupervisedUserService::OnStateChanged() {
   ProfileSyncService* service =
       ProfileSyncServiceFactory::GetForProfile(profile_);
-  if (waiting_for_sync_initialization_ && service->sync_initialized() &&
+  if (waiting_for_sync_initialization_ && service->backend_initialized() &&
       service->backend_mode() == ProfileSyncService::SYNC) {
     waiting_for_sync_initialization_ = false;
     service->RemoveObserver(this);
@@ -445,7 +500,7 @@ void SupervisedUserService::FinishSetupSyncWhenReady() {
   // Continue in FinishSetupSync() once the Sync backend has been initialized.
   ProfileSyncService* service =
       ProfileSyncServiceFactory::GetForProfile(profile_);
-  if (service->sync_initialized() &&
+  if (service->backend_initialized() &&
       service->backend_mode() == ProfileSyncService::SYNC) {
     FinishSetupSync();
   } else {
@@ -457,8 +512,8 @@ void SupervisedUserService::FinishSetupSyncWhenReady() {
 void SupervisedUserService::FinishSetupSync() {
   ProfileSyncService* service =
       ProfileSyncServiceFactory::GetForProfile(profile_);
-  DCHECK(service->sync_initialized() &&
-         service->backend_mode() == ProfileSyncService::SYNC);
+  DCHECK(service->backend_initialized());
+  DCHECK(service->backend_mode() == ProfileSyncService::SYNC);
 
   // Sync nothing (except types which are set via GetPreferredDataTypes).
   bool sync_everything = false;
@@ -495,18 +550,15 @@ SupervisedUserService::GetActiveSiteLists() {
   if (!extension_service)
     return site_lists.Pass();
 
-  const extensions::ExtensionSet* extensions = extension_service->extensions();
-  for (extensions::ExtensionSet::const_iterator it = extensions->begin();
-       it != extensions->end(); ++it) {
-    const extensions::Extension* extension = it->get();
+  for (const scoped_refptr<const extensions::Extension>& extension :
+           *extension_service->extensions()) {
     if (!extension_service->IsExtensionEnabled(extension->id()))
       continue;
 
     extensions::ExtensionResource site_list =
-        extensions::SupervisedUserInfo::GetContentPackSiteList(extension);
+        extensions::SupervisedUserInfo::GetContentPackSiteList(extension.get());
     if (!site_list.empty()) {
-      site_lists.push_back(new SupervisedUserSiteList(extension->id(),
-                                                      site_list.GetFilePath()));
+      site_lists.push_back(new SupervisedUserSiteList(site_list.GetFilePath()));
     }
   }
 
@@ -536,6 +588,45 @@ void SupervisedUserService::SetExtensionsActive() {
 
 SupervisedUserSettingsService* SupervisedUserService::GetSettingsService() {
   return SupervisedUserSettingsServiceFactory::GetForProfile(profile_);
+}
+
+size_t SupervisedUserService::FindEnabledPermissionRequestCreator(
+    size_t start) {
+  for (size_t i = start; i < permissions_creators_.size(); ++i) {
+    if (permissions_creators_[i]->IsEnabled())
+      return i;
+  }
+  return permissions_creators_.size();
+}
+
+void SupervisedUserService::AddAccessRequestInternal(
+    const GURL& url,
+    const SuccessCallback& callback,
+    size_t index) {
+  // Find a permission request creator that is enabled.
+  size_t next_index = FindEnabledPermissionRequestCreator(index);
+  if (next_index >= permissions_creators_.size()) {
+    callback.Run(false);
+    return;
+  }
+
+  permissions_creators_[next_index]->CreatePermissionRequest(
+      url,
+      base::Bind(&SupervisedUserService::OnPermissionRequestIssued,
+                 weak_ptr_factory_.GetWeakPtr(), url, callback, next_index));
+}
+
+void SupervisedUserService::OnPermissionRequestIssued(
+    const GURL& url,
+    const SuccessCallback& callback,
+    size_t index,
+    bool success) {
+  if (success) {
+    callback.Run(true);
+    return;
+  }
+
+  AddAccessRequestInternal(url, callback, index + 1);
 }
 
 void SupervisedUserService::OnSupervisedUserIdChanged() {
@@ -600,63 +691,13 @@ void SupervisedUserService::OnBlacklistDownloadDone(const base::FilePath& path,
 }
 
 bool SupervisedUserService::AccessRequestsEnabled() {
-  ProfileSyncService* service =
-      ProfileSyncServiceFactory::GetForProfile(profile_);
-  GoogleServiceAuthError::State state = service->GetAuthError().state();
-  // We allow requesting access if Sync is working or has a transient error.
-  return (state == GoogleServiceAuthError::NONE ||
-          state == GoogleServiceAuthError::CONNECTION_FAILED ||
-          state == GoogleServiceAuthError::SERVICE_UNAVAILABLE);
+  return FindEnabledPermissionRequestCreator(0) < permissions_creators_.size();
 }
 
-void SupervisedUserService::OnPermissionRequestIssued() {
-  // TODO(akuegel): Figure out how to show the result of issuing the permission
-  // request in the UI. Currently, we assume the permission request was created
-  // successfully.
-}
-
-void SupervisedUserService::AddAccessRequest(const GURL& url) {
-  permissions_creator_->CreatePermissionRequest(
-      SupervisedUserURLFilter::Normalize(url),
-      base::Bind(&SupervisedUserService::OnPermissionRequestIssued,
-                 weak_ptr_factory_.GetWeakPtr()));
-}
-
-SupervisedUserService::ManualBehavior
-SupervisedUserService::GetManualBehaviorForHost(
-    const std::string& hostname) {
-  const base::DictionaryValue* dict =
-      profile_->GetPrefs()->GetDictionary(prefs::kSupervisedUserManualHosts);
-  bool allow = false;
-  if (!dict->GetBooleanWithoutPathExpansion(hostname, &allow))
-    return MANUAL_NONE;
-
-  return allow ? MANUAL_ALLOW : MANUAL_BLOCK;
-}
-
-SupervisedUserService::ManualBehavior
-SupervisedUserService::GetManualBehaviorForURL(
-    const GURL& url) {
-  const base::DictionaryValue* dict =
-      profile_->GetPrefs()->GetDictionary(prefs::kSupervisedUserManualURLs);
-  GURL normalized_url = SupervisedUserURLFilter::Normalize(url);
-  bool allow = false;
-  if (!dict->GetBooleanWithoutPathExpansion(normalized_url.spec(), &allow))
-    return MANUAL_NONE;
-
-  return allow ? MANUAL_ALLOW : MANUAL_BLOCK;
-}
-
-void SupervisedUserService::GetManualExceptionsForHost(
-    const std::string& host,
-    std::vector<GURL>* urls) {
-  const base::DictionaryValue* dict =
-      profile_->GetPrefs()->GetDictionary(prefs::kSupervisedUserManualURLs);
-  for (base::DictionaryValue::Iterator it(*dict); !it.IsAtEnd(); it.Advance()) {
-    GURL url(it.key());
-    if (url.host() == host)
-      urls->push_back(url);
-  }
+void SupervisedUserService::AddAccessRequest(const GURL& url,
+                                             const SuccessCallback& callback) {
+  AddAccessRequestInternal(SupervisedUserURLFilter::Normalize(url), callback,
+                           0);
 }
 
 void SupervisedUserService::InitSync(const std::string& refresh_token) {
@@ -680,6 +721,10 @@ void SupervisedUserService::Init() {
       prefs::kSupervisedUserId,
       base::Bind(&SupervisedUserService::OnSupervisedUserIdChanged,
           base::Unretained(this)));
+  pref_change_registrar_.Add(
+      prefs::kRecordHistory,
+      base::Bind(&SupervisedUserService::OnHistoryRecordingStateChanged,
+                 base::Unretained(this)));
 
   ProfileSyncService* sync_service =
       ProfileSyncServiceFactory::GetForProfile(profile_);
@@ -730,8 +775,7 @@ void SupervisedUserService::SetActive(bool active) {
       ProfileSyncServiceFactory::GetForProfile(profile_);
   sync_service->SetEncryptEverythingAllowed(!active_);
 
-  SupervisedUserSettingsService* settings_service = GetSettingsService();
-  settings_service->SetActive(active_);
+  GetSettingsService()->SetActive(active_);
 
 #if defined(ENABLE_EXTENSIONS)
   SetExtensionsActive();
@@ -740,16 +784,24 @@ void SupervisedUserService::SetActive(bool active) {
   if (active_) {
     if (CommandLine::ForCurrentProcess()->HasSwitch(
             switches::kPermissionRequestApiUrl)) {
-      permissions_creator_ =
-          PermissionRequestCreatorApiary::CreateWithProfile(profile_);
+      GURL url(CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          switches::kPermissionRequestApiUrl));
+      if (url.is_valid()) {
+        scoped_ptr<PermissionRequestCreator> creator =
+            PermissionRequestCreatorApiary::CreateWithProfile(profile_, url);
+        permissions_creators_.push_back(creator.release());
+      } else {
+        LOG(WARNING) << "Got invalid URL for "
+                     << switches::kPermissionRequestApiUrl;
+      }
     } else {
-      PrefService* pref_service = profile_->GetPrefs();
-      permissions_creator_.reset(new PermissionRequestCreatorSync(
-          settings_service,
+      permissions_creators_.push_back(new PermissionRequestCreatorSync(
+          GetSettingsService(),
           SupervisedUserSharedSettingsServiceFactory::GetForBrowserContext(
               profile_),
+          ProfileSyncServiceFactory::GetForProfile(profile_),
           GetSupervisedUserName(),
-          pref_service->GetString(prefs::kSupervisedUserId)));
+          profile_->GetPrefs()->GetString(prefs::kSupervisedUserId)));
     }
 
     pref_change_registrar_.Add(
@@ -801,6 +853,16 @@ void SupervisedUserService::SetActive(bool active) {
       if (!blacklist_path.empty())
         LoadBlacklist(blacklist_path, delegate_->GetBlacklistURL());
     }
+    bool use_safesites =
+        CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kEnableSupervisedUserSafeSites);
+    if (delegate_ && use_safesites) {
+      const std::string& cx = delegate_->GetSafeSitesCx();
+      if (!cx.empty()) {
+        url_filter_context_.InitAsyncURLChecker(
+            profile_->GetRequestContext(), cx, delegate_->GetSafeSitesApiKey());
+      }
+    }
 
 #if !defined(OS_ANDROID)
     // TODO(bauerb): Get rid of the platform-specific #ifdef here.
@@ -808,7 +870,7 @@ void SupervisedUserService::SetActive(bool active) {
     BrowserList::AddObserver(this);
 #endif
   } else {
-    permissions_creator_.reset();
+    permissions_creators_.clear();
 
     pref_change_registrar_.Remove(
         prefs::kDefaultSupervisedUserFilteringBehavior);

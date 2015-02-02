@@ -1,4 +1,6 @@
-<?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="uk">
+<?xml version="1.0" ?>
+<!DOCTYPE translationbundle>
+<translationbundle lang="uk">
 <translation id="777702478322588152">Префектура</translation>
 <translation id="3713769522066937702">Формат поштового індексу не розпізнано. Приклад дійсного поштового індексу: <ph name="EXAMPLE"/>. Не знаєте свій поштовий індекс? Знайдіть його <ph name="BEGIN_LINK"/>тут<ph name="END_LINK"/>.</translation>
 <translation id="7393381084163773901">Адреса (вулиця)</translation>

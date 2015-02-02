@@ -86,12 +86,7 @@ PassRefPtrWillBeRawPtr<EventSource> EventSource::create(ExecutionContext* contex
     }
 
     // FIXME: Convert this to check the isolated world's Content Security Policy once webkit.org/b/104520 is solved.
-    bool shouldBypassMainWorldCSP = false;
-    if (context->isDocument()) {
-        Document* document = toDocument(context);
-        shouldBypassMainWorldCSP = document->frame()->script().shouldBypassMainWorldCSP();
-    }
-    if (!shouldBypassMainWorldCSP && !context->contentSecurityPolicy()->allowConnectToSource(fullURL)) {
+    if (!ContentSecurityPolicy::shouldBypassMainWorld(context) && !context->contentSecurityPolicy()->allowConnectToSource(fullURL)) {
         // We can safely expose the URL to JavaScript, as this exception is generate synchronously before any redirects take place.
         exceptionState.throwSecurityError("Refused to connect to '" + fullURL.elidedString() + "' because it violates the document's Content Security Policy.");
         return nullptr;
@@ -220,8 +215,9 @@ ExecutionContext* EventSource::executionContext() const
     return ActiveDOMObject::executionContext();
 }
 
-void EventSource::didReceiveResponse(unsigned long, const ResourceResponse& response)
+void EventSource::didReceiveResponse(unsigned long, const ResourceResponse& response, PassOwnPtr<WebDataConsumerHandle> handle)
 {
+    ASSERT_UNUSED(handle, !handle);
     ASSERT(m_state == CONNECTING);
     ASSERT(m_requestInFlight);
 
@@ -262,7 +258,7 @@ void EventSource::didReceiveResponse(unsigned long, const ResourceResponse& resp
     }
 }
 
-void EventSource::didReceiveData(const char* data, int length)
+void EventSource::didReceiveData(const char* data, unsigned length)
 {
     ASSERT(m_state == OPEN);
     ASSERT(m_requestInFlight);

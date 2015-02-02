@@ -15,7 +15,7 @@ class GrGLMatrixConvolutionEffect : public GrGLFragmentProcessor {
 public:
     GrGLMatrixConvolutionEffect(const GrBackendProcessorFactory& factory,
                                 const GrProcessor&);
-    virtual void emitCode(GrGLProgramBuilder*,
+    virtual void emitCode(GrGLFPBuilder*,
                           const GrFragmentProcessor&,
                           const GrProcessorKey&,
                           const char* outputColor,
@@ -51,14 +51,13 @@ GrGLMatrixConvolutionEffect::GrGLMatrixConvolutionEffect(const GrBackendProcesso
     fConvolveAlpha = m.convolveAlpha();
 }
 
-void GrGLMatrixConvolutionEffect::emitCode(GrGLProgramBuilder* builder,
+void GrGLMatrixConvolutionEffect::emitCode(GrGLFPBuilder* builder,
                                            const GrFragmentProcessor& fp,
                                            const GrProcessorKey& key,
                                            const char* outputColor,
                                            const char* inputColor,
                                            const TransformedCoordsArray& coords,
                                            const TextureSamplerArray& samplers) {
-    sk_ignore_unused_variable(inputColor);
     const GrTextureDomain& domain = fp.cast<GrMatrixConvolutionEffect>().domain();
 
     fBoundsUni = builder->addUniform(GrGLProgramBuilder::kFragment_Visibility,
@@ -84,7 +83,7 @@ void GrGLMatrixConvolutionEffect::emitCode(GrGLProgramBuilder* builder,
     int kWidth = fKernelSize.width();
     int kHeight = fKernelSize.height();
 
-    GrGLFragmentShaderBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+    GrGLFPFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
     SkString coords2D = fsBuilder->ensureFSCoords2D(coords, 0);
     fsBuilder->codeAppend("vec4 sum = vec4(0, 0, 0, 0);");
     fsBuilder->codeAppendf("vec2 coord = %s - %s * %s;", coords2D.c_str(), kernelOffset,
@@ -116,7 +115,7 @@ void GrGLMatrixConvolutionEffect::emitCode(GrGLProgramBuilder* builder,
     }
 
     SkString modulate;
-    GrGLSLMulVarBy4f(&modulate, 2, outputColor, inputColor);
+    GrGLSLMulVarBy4f(&modulate, outputColor, inputColor);
     fsBuilder->codeAppend(modulate.c_str());
 }
 
@@ -177,10 +176,9 @@ const GrBackendFragmentProcessorFactory& GrMatrixConvolutionEffect::getFactory()
     return GrTBackendFragmentProcessorFactory<GrMatrixConvolutionEffect>::getInstance();
 }
 
-bool GrMatrixConvolutionEffect::onIsEqual(const GrProcessor& sBase) const {
+bool GrMatrixConvolutionEffect::onIsEqual(const GrFragmentProcessor& sBase) const {
     const GrMatrixConvolutionEffect& s = sBase.cast<GrMatrixConvolutionEffect>();
-    return this->texture(0) == s.texture(0) &&
-           fKernelSize == s.kernelSize() &&
+    return fKernelSize == s.kernelSize() &&
            !memcmp(fKernel, s.kernel(),
                    fKernelSize.width() * fKernelSize.height() * sizeof(float)) &&
            fGain == s.gain() &&

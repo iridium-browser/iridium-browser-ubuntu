@@ -29,7 +29,7 @@ class ManifestMessageFilter : public IPC::SyncMessageFilter {
             true /* manual_reset */, false /* initially_signaled */) {
   }
 
-  virtual bool Send(IPC::Message* message) OVERRIDE {
+  virtual bool Send(IPC::Message* message) override {
     // Wait until set up is actually done.
     connected_event_.Wait();
     return SyncMessageFilter::Send(message);
@@ -37,19 +37,19 @@ class ManifestMessageFilter : public IPC::SyncMessageFilter {
 
   // When set up is done, OnFilterAdded is called on IO thread. Unblocks the
   // Send().
-  virtual void OnFilterAdded(IPC::Sender* sender) OVERRIDE {
+  virtual void OnFilterAdded(IPC::Sender* sender) override {
     SyncMessageFilter::OnFilterAdded(sender);
     connected_event_.Signal();
   }
 
   // If an error is found, unblocks the Send(), too, to return an error.
-  virtual void OnChannelError() OVERRIDE {
+  virtual void OnChannelError() override {
     SyncMessageFilter::OnChannelError();
     connected_event_.Signal();
   }
 
   // Similar to OnChannelError, unblocks the Send() on the channel closing.
-  virtual void OnChannelClosing() OVERRIDE {
+  virtual void OnChannelClosing() override {
     SyncMessageFilter::OnChannelClosing();
     connected_event_.Signal();
   }
@@ -104,7 +104,7 @@ bool ManifestService::OpenResource(const char* file, int* fd) {
     return false;
   }
 
-#if defined(OS_NACL)
+#if defined(OS_NACL_SFI)
   // File tokens are used internally by NaClIPCAdapter and should have
   // been cleared from the message when it is received here.
   // Note that, on Non-SFI NaCl, the IPC channel is directly connected to the

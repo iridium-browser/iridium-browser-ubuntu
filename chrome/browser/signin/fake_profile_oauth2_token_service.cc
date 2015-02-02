@@ -57,7 +57,7 @@ void FakeProfileOAuth2TokenService::IssueRefreshToken(
 void FakeProfileOAuth2TokenService::IssueRefreshTokenForUser(
     const std::string& account_id,
     const std::string& token) {
-  ScopedBacthChange batch(this);
+  ScopedBatchChange batch(this);
   if (token.empty()) {
     refresh_tokens_.erase(account_id);
     FireRefreshTokenRevoked(account_id);
@@ -140,10 +140,9 @@ void FakeProfileOAuth2TokenService::CompleteRequests(
       GetPendingRequests();
 
   // Walk the requests and notify the callbacks.
-  for (std::vector<PendingRequest>::iterator it = pending_requests_.begin();
-       it != pending_requests_.end(); ++it) {
-    if (!it->request)
-      continue;
+  for (std::vector<PendingRequest>::iterator it = requests.begin();
+       it != requests.end(); ++it) {
+    DCHECK(it->request);
 
     bool scope_matches = all_scopes || it->scopes == scope;
     bool account_matches = account_id.empty() || account_id == it->account_id;

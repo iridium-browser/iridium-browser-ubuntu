@@ -14,14 +14,14 @@ namespace browser_sync {
 class InvalidationAdapter : public syncer::InvalidationInterface {
  public:
   explicit InvalidationAdapter(const syncer::Invalidation& invalidation);
-  virtual ~InvalidationAdapter();
+  ~InvalidationAdapter() override;
 
   // Implementation of InvalidationInterface.
-  virtual bool IsUnknownVersion() const OVERRIDE;
-  virtual const std::string& GetPayload() const OVERRIDE;
-  virtual int64 GetVersion() const OVERRIDE;
-  virtual void Acknowledge() OVERRIDE;
-  virtual void Drop() OVERRIDE;
+  bool IsUnknownVersion() const override;
+  const std::string& GetPayload() const override;
+  int64 GetVersion() const override;
+  void Acknowledge() override;
+  void Drop() override;
 
  private:
   syncer::Invalidation invalidation_;

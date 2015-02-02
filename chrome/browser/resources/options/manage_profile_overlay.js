@@ -97,18 +97,25 @@ cr.define('options', function() {
 
       $('create-profile-supervised-sign-in-link').onclick =
           function(event) {
-        // The signin process will open an overlay to configure sync, which
-        // would replace this overlay. It's smoother to close this one now.
-        // TODO(pamg): Move the sync-setup overlay to a higher layer so this one
-        // can stay open under it, after making sure that doesn't break anything
-        // else.
-        PageManager.closeOverlay();
+        // Without the new avatar menu, the signin process will open an overlay
+        // to configure sync, which would replace this overlay. It's smoother to
+        // close this one now.
+        // With the new avatar menu enabled, a sign-in flow in the avatar menu
+        // is triggered instead, which does not open any overlays, so there's no
+        // need to close this one.
+        if (!loadTimeData.getBoolean('newAvatarMenuEnabled')) {
+          // TODO(pamg): Move the sync-setup overlay to a higher layer so this
+          // one can stay open under it, after making sure that doesn't break
+          // anything else.
+          PageManager.closeOverlay();
+        }
         SyncSetupOverlay.startSignIn();
       };
 
       $('create-profile-supervised-sign-in-again-link').onclick =
           function(event) {
-        PageManager.closeOverlay();
+        if (!loadTimeData.getBoolean('newAvatarMenuEnabled'))
+          PageManager.closeOverlay();
         SyncSetupOverlay.showSetupUI();
       };
 
@@ -418,7 +425,7 @@ cr.define('options', function() {
      * @private
      */
     onSigninError_: function() {
-      this.updateSignedInStatus_(this.signedInEmail_, true);
+      this.updateSignedInStatus(this.signedInEmail_, true);
     },
 
     /**
@@ -461,8 +468,16 @@ cr.define('options', function() {
         options.SupervisedUserListData.resetPromise();
     },
 
-    /** @private */
-    updateSignedInStatus_: assertNotReached,
+    /**
+     * Abstract method. Should be overriden in subclasses.
+     * @param {string} email
+     * @param {boolean} hasError
+     * @protected
+     */
+    updateSignedInStatus: function(email, hasError) {
+      // TODO: Fix triggering the assert, crbug.com/423267
+      // assertNotReached();
+    },
 
     /**
      * Called when the user clicks "OK" or hits enter. Creates the profile
@@ -536,11 +551,14 @@ cr.define('options', function() {
 
     /**
      * Display the "Manage Profile" dialog.
+     * @param {boolean=} opt_updateHistory If we should update the history after
+     *     showing the dialog (defaults to true).
      * @private
      */
-    showManageDialog_: function() {
+    showManageDialog_: function(opt_updateHistory) {
+      var updateHistory = opt_updateHistory !== false;
       this.prepareForManageDialog_();
-      PageManager.showPageByName('manageProfile');
+      PageManager.showPageByName('manageProfile', updateHistory);
     },
 
     /**
@@ -766,6 +784,15 @@ cr.define('options', function() {
         PageManager.showPageByName('supervisedUserCreateConfirm', false);
         BrowserOptions.updateManagesSupervisedUsers(true);
       }
+    },
+
+    /**
+     * @param {string} email
+     * @param {boolean} hasError
+     * @override
+     */
+    updateSignedInStatus: function(email, hasError) {
+      this.updateSignedInStatus_(email, hasError);
     },
 
     /**

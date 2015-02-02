@@ -5,6 +5,7 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/bind.h"
 #include "remoting/base/constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -67,7 +68,7 @@ class ClipboardTestClient {
 
 class XServerClipboardTest : public testing::Test {
  public:
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     // XSynchronize() ensures that PumpXEvents() fully processes all X server
     // requests and responses before returning to the caller.
     Display* display1 = XOpenDisplay(NULL);
@@ -78,7 +79,7 @@ class XServerClipboardTest : public testing::Test {
     client2_.Init(display2);
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     XCloseDisplay(client1_.display());
     XCloseDisplay(client2_.display());
   }

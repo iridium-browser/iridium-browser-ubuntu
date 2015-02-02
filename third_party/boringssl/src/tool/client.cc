@@ -14,6 +14,9 @@
 
 #include <openssl/base.h>
 
+// TODO(davidben): bssl client does not work on Windows.
+#if !defined(OPENSSL_WINDOWS)
+
 #include <string>
 #include <vector>
 
@@ -26,6 +29,7 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <netdb.h>
+#include <netinet/in.h>
 #include <sys/select.h>
 #include <unistd.h>
 #else
@@ -44,6 +48,10 @@ static const struct argument kArguments[] = {
     {
      "-connect", true,
      "The hostname and port of the server to connect to, e.g. foo.com:443",
+    },
+    {
+     "-cipher", false,
+     "An OpenSSL-style cipher suite string that configures the offered ciphers",
     },
     {
      "", false, "",
@@ -264,6 +272,10 @@ bool Client(const std::vector<std::string> &args) {
     SSL_CTX_set_keylog_bio(ctx, keylog_bio);
   }
 
+  if (args_map.count("-cipher") != 0) {
+    SSL_CTX_set_cipher_list(ctx, args_map["-cipher"].c_str());
+  }
+
   int sock = -1;
   if (!Connect(&sock, args_map["-connect"])) {
     return false;
@@ -290,3 +302,5 @@ bool Client(const std::vector<std::string> &args) {
   SSL_CTX_free(ctx);
   return ok;
 }
+
+#endif  // !OPENSSL_WINDOWS

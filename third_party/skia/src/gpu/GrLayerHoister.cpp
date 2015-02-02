@@ -7,116 +7,167 @@
 
 #include "GrLayerCache.h"
 #include "GrLayerHoister.h"
-#include "SkCanvas.h"
-#include "SkRecordDraw.h"
 #include "GrRecordReplaceDraw.h"
+
+#include "SkCanvas.h"
 #include "SkGrPixelRef.h"
+#include "SkRecordDraw.h"
 #include "SkSurface.h"
 
-// Return true if any layers are suitable for hoisting
-bool GrLayerHoister::FindLayersToHoist(const SkPicture* topLevelPicture,
+// Create the layer information for the hoisted layer and secure the
+// required texture/render target resources.
+static void prepare_for_hoisting(GrLayerCache* layerCache, 
+                                 const SkPicture* topLevelPicture,
+                                 const GrAccelData::SaveLayerInfo& info,
+                                 const SkIRect& layerRect,
+                                 SkTDArray<GrHoistedLayer>* needRendering,
+                                 SkTDArray<GrHoistedLayer>* recycled,
+                                 bool attemptToAtlas) {
+    const SkPicture* pict = info.fPicture ? info.fPicture : topLevelPicture;
+
+    SkMatrix combined = SkMatrix::Concat(info.fPreMat, info.fLocalMat);
+
+    GrCachedLayer* layer = layerCache->findLayerOrCreate(pict->uniqueID(),
+                                                         info.fSaveLayerOpID,
+                                                         info.fRestoreOpID,
+                                                         layerRect,
+                                                         combined,
+                                                         info.fPaint);
+    GrSurfaceDesc desc;
+    desc.fFlags = kRenderTarget_GrSurfaceFlag;
+    desc.fWidth = layerRect.width();
+    desc.fHeight = layerRect.height();
+    desc.fConfig = kSkia8888_GrPixelConfig;
+    // TODO: need to deal with sample count
+
+    bool locked, needsRendering;
+    if (attemptToAtlas) {
+        locked = layerCache->tryToAtlas(layer, desc, &needsRendering);
+    } else {
+        locked = layerCache->lock(layer, desc, &needsRendering);
+    }
+    if (!locked) {
+        // GPU resources could not be secured for the hoisting of this layer
+        return;
+    }
+
+    if (attemptToAtlas) {
+        SkASSERT(layer->isAtlased());
+    }
+
+    GrHoistedLayer* hl;
+
+    if (needsRendering) {
+        if (!attemptToAtlas) {
+            SkASSERT(!layer->isAtlased());
+        }
+        hl = needRendering->append();
+    } else {
+        hl = recycled->append();
+    }
+    
+    layerCache->addUse(layer);
+    hl->fLayer = layer;
+    hl->fPicture = pict;
+    hl->fOffset = SkIPoint::Make(layerRect.fLeft, layerRect.fTop);
+    hl->fLocalMat = info.fLocalMat;
+    hl->fPreMat = info.fPreMat;
+}
+
+// Atlased layers must be small enough to fit in the atlas, not have a
+// paint with an image filter and be neither nested nor nesting.
+// TODO: allow leaf nested layers to appear in the atlas.
+void GrLayerHoister::FindLayersToAtlas(GrContext* context,
+                                       const SkPicture* topLevelPicture,
                                        const SkRect& query,
-                                       SkTDArray<HoistedLayer>* atlased,
-                                       SkTDArray<HoistedLayer>* nonAtlased,
-                                       GrLayerCache* layerCache) {
-    bool anyHoisted = false;
+                                       SkTDArray<GrHoistedLayer>* atlased,
+                                       SkTDArray<GrHoistedLayer>* recycled) {
+    GrLayerCache* layerCache = context->getLayerCache();
+
+    layerCache->processDeletedPictures();
 
     SkPicture::AccelData::Key key = GrAccelData::ComputeAccelDataKey();
 
     const SkPicture::AccelData* topLevelData = topLevelPicture->EXPERIMENTAL_getAccelData(key);
-    if (NULL == topLevelData) {
-        return false;
+    if (!topLevelData) {
+        return;
     }
 
     const GrAccelData *topLevelGPUData = static_cast<const GrAccelData*>(topLevelData);
     if (0 == topLevelGPUData->numSaveLayers()) {
-        return false;
+        return;
     }
 
-    // Layer hoisting pre-renders the entire layer since it will be cached and potentially
-    // reused with different clips (e.g., in different tiles). Because of this the
-    // clip will not be limiting the size of the pre-rendered layer. kSaveLayerMaxSize
-    // is used to limit which clips are pre-rendered.
-    static const int kSaveLayerMaxSize = 256;
+    atlased->setReserve(atlased->count() + topLevelGPUData->numSaveLayers());
 
-    SkAutoTArray<bool> pullForward(topLevelGPUData->numSaveLayers());
-
-    // Pre-render all the layers that intersect the query rect
     for (int i = 0; i < topLevelGPUData->numSaveLayers(); ++i) {
-        pullForward[i] = false;
-
         const GrAccelData::SaveLayerInfo& info = topLevelGPUData->saveLayerInfo(i);
 
-        SkRect layerRect = SkRect::MakeXYWH(SkIntToScalar(info.fOffset.fX),
-                                            SkIntToScalar(info.fOffset.fY),
-                                            SkIntToScalar(info.fSize.fWidth),
-                                            SkIntToScalar(info.fSize.fHeight));
+        // TODO: ignore perspective projected layers here?
+        bool disallowAtlasing = info.fHasNestedLayers || info.fIsNested ||
+                                (info.fPaint && info.fPaint->getImageFilter());
 
-        if (!SkRect::Intersects(query, layerRect)) {
+        if (disallowAtlasing) {
             continue;
         }
 
-        // TODO: once this code is more stable unsuitable layers can
-        // just be omitted during the optimization stage
-        if (!info.fValid ||
-            kSaveLayerMaxSize < info.fSize.fWidth ||
-            kSaveLayerMaxSize < info.fSize.fHeight ||
-            info.fIsNested) {
+        SkRect layerRect = info.fBounds;
+        if (!layerRect.intersect(query)) {
             continue;
         }
 
-        pullForward[i] = true;
-        anyHoisted = true;
+        SkIRect ir;
+        layerRect.roundOut(&ir);
+
+        if (!GrLayerCache::PlausiblyAtlasable(ir.width(), ir.height())) {
+            continue;
+        }
+
+        prepare_for_hoisting(layerCache, topLevelPicture, info, ir, atlased, recycled, true);
     }
 
-    if (!anyHoisted) {
-        return false;
+}
+
+void GrLayerHoister::FindLayersToHoist(GrContext* context,
+                                       const SkPicture* topLevelPicture,
+                                       const SkRect& query,
+                                       SkTDArray<GrHoistedLayer>* needRendering,
+                                       SkTDArray<GrHoistedLayer>* recycled) {
+    GrLayerCache* layerCache = context->getLayerCache();
+
+    layerCache->processDeletedPictures();
+
+    SkPicture::AccelData::Key key = GrAccelData::ComputeAccelDataKey();
+
+    const SkPicture::AccelData* topLevelData = topLevelPicture->EXPERIMENTAL_getAccelData(key);
+    if (!topLevelData) {
+        return;
     }
 
-    atlased->setReserve(atlased->reserved() + topLevelGPUData->numSaveLayers());
+    const GrAccelData *topLevelGPUData = static_cast<const GrAccelData*>(topLevelData);
+    if (0 == topLevelGPUData->numSaveLayers()) {
+        return;
+    }
 
-    // Generate the layer and/or ensure it is locked
+    // Find and prepare for hoisting all the layers that intersect the query rect
     for (int i = 0; i < topLevelGPUData->numSaveLayers(); ++i) {
-        if (pullForward[i]) {
-            const GrAccelData::SaveLayerInfo& info = topLevelGPUData->saveLayerInfo(i);
-            const SkPicture* pict = info.fPicture ? info.fPicture : topLevelPicture;
-
-            GrCachedLayer* layer = layerCache->findLayerOrCreate(pict->uniqueID(),
-                                                                 info.fSaveLayerOpID,
-                                                                 info.fRestoreOpID,
-                                                                 info.fOffset,
-                                                                 info.fOriginXform,
-                                                                 info.fPaint);
-
-            GrTextureDesc desc;
-            desc.fFlags = kRenderTarget_GrTextureFlagBit;
-            desc.fWidth = info.fSize.fWidth;
-            desc.fHeight = info.fSize.fHeight;
-            desc.fConfig = kSkia8888_GrPixelConfig;
-            // TODO: need to deal with sample count
-
-            bool needsRendering = layerCache->lock(layer, desc,
-                                                   info.fHasNestedLayers || info.fIsNested);
-            if (NULL == layer->texture()) {
-                continue;
-            }
-
-            if (needsRendering) {
-                HoistedLayer* info;
-
-                if (layer->isAtlased()) {
-                    info = atlased->append();
-                } else {
-                    info = nonAtlased->append();
-                }
-
-                info->fLayer = layer;
-                info->fPicture = pict;
-            }
+        const GrAccelData::SaveLayerInfo& info = topLevelGPUData->saveLayerInfo(i);
+        if (info.fIsNested) {
+            // Parent layers are currently hoisted while nested layers are not.
+            continue;
         }
-    }
 
-    return anyHoisted;
+        SkRect layerRect = info.fBounds;
+        if (!layerRect.intersect(query)) {
+            continue;
+        }
+
+        SkIRect ir;
+        layerRect.roundOut(&ir);
+
+        prepare_for_hoisting(layerCache, topLevelPicture, info, ir, 
+                             needRendering, recycled, false);
+    }
 }
 
 static void wrap_texture(GrTexture* texture, int width, int height, SkBitmap* result) {
@@ -125,14 +176,21 @@ static void wrap_texture(GrTexture* texture, int width, int height, SkBitmap* re
     result->setPixelRef(SkNEW_ARGS(SkGrPixelRef, (info, texture)))->unref();
 }
 
-static void convert_layers_to_replacements(const SkTDArray<GrLayerHoister::HoistedLayer>& layers,
-                                           GrReplacements* replacements) {
+void GrLayerHoister::ConvertLayersToReplacements(const SkTDArray<GrHoistedLayer>& layers,
+                                                 GrReplacements* replacements) {
     // TODO: just replace GrReplacements::ReplacementInfo with GrCachedLayer?
     for (int i = 0; i < layers.count(); ++i) {
-        GrReplacements::ReplacementInfo* layerInfo = replacements->push();
-        layerInfo->fStart = layers[i].fLayer->start();
-        layerInfo->fStop = layers[i].fLayer->stop();
-        layerInfo->fPos = layers[i].fLayer->offset();;
+        GrCachedLayer* layer = layers[i].fLayer;
+        const SkPicture* picture = layers[i].fPicture;
+
+        SkMatrix combined = SkMatrix::Concat(layers[i].fPreMat, layers[i].fLocalMat);
+
+        GrReplacements::ReplacementInfo* layerInfo =
+                    replacements->newReplacement(picture->uniqueID(),
+                                                 layer->start(),
+                                                 combined);
+        layerInfo->fStop = layer->stop();
+        layerInfo->fPos = layers[i].fOffset;
 
         SkBitmap bm;
         wrap_texture(layers[i].fLayer->texture(),
@@ -154,10 +212,8 @@ static void convert_layers_to_replacements(const SkTDArray<GrLayerHoister::Hoist
     }
 }
 
-void GrLayerHoister::DrawLayers(const SkTDArray<HoistedLayer>& atlased,
-                                const SkTDArray<HoistedLayer>& nonAtlased,
-                                GrReplacements* replacements) {
-    // Render the atlased layers that require it
+void GrLayerHoister::DrawLayersToAtlas(GrContext* context,
+                                       const SkTDArray<GrHoistedLayer>& atlased) {
     if (atlased.count() > 0) {
         // All the atlased layers are rendered into the same GrTexture
         SkAutoTUnref<SkSurface> surface(SkSurface::NewRenderTargetDirect(
@@ -165,13 +221,17 @@ void GrLayerHoister::DrawLayers(const SkTDArray<HoistedLayer>& atlased,
 
         SkCanvas* atlasCanvas = surface->getCanvas();
 
-        SkPaint paint;
-        paint.setColor(SK_ColorTRANSPARENT);
-        paint.setXfermode(SkXfermode::Create(SkXfermode::kSrc_Mode))->unref();
+        SkPaint clearPaint;
+        clearPaint.setColor(SK_ColorTRANSPARENT);
+        clearPaint.setXfermode(SkXfermode::Create(SkXfermode::kSrc_Mode))->unref();
 
         for (int i = 0; i < atlased.count(); ++i) {
-            GrCachedLayer* layer = atlased[i].fLayer;
+            const GrCachedLayer* layer = atlased[i].fLayer;
             const SkPicture* pict = atlased[i].fPicture;
+            const SkIPoint offset = atlased[i].fOffset;
+            SkDEBUGCODE(const SkPaint* layerPaint = layer->paint();)
+
+            SkASSERT(!layerPaint || !layerPaint->getImageFilter());
 
             atlasCanvas->save();
 
@@ -184,35 +244,34 @@ void GrLayerHoister::DrawLayers(const SkTDArray<HoistedLayer>& atlased,
             atlasCanvas->clipRect(bound);
 
             // Since 'clear' doesn't respect the clip we need to draw a rect
-            // TODO: ensure none of the atlased layers contain a clear call!
-            atlasCanvas->drawRect(bound, paint);
+            atlasCanvas->drawRect(bound, clearPaint);
 
-            // info.fCTM maps the layer's top/left to the origin.
+            // '-offset' maps the layer's top/left to the origin.
             // Since this layer is atlased, the top/left corner needs
             // to be offset to the correct location in the backing texture.
             SkMatrix initialCTM;
-            initialCTM.setTranslate(SkIntToScalar(-layer->offset().fX), 
-                                    SkIntToScalar(-layer->offset().fY));
-            initialCTM.postTranslate(bound.fLeft, bound.fTop);
-            
-            atlasCanvas->translate(SkIntToScalar(-layer->offset().fX), 
-                                   SkIntToScalar(-layer->offset().fY));
-            atlasCanvas->translate(bound.fLeft, bound.fTop);
-            atlasCanvas->concat(layer->ctm());
+            initialCTM.setTranslate(SkIntToScalar(-offset.fX), SkIntToScalar(-offset.fY));
+            initialCTM.preTranslate(bound.fLeft, bound.fTop);
+            initialCTM.preConcat(atlased[i].fPreMat);
+
+            atlasCanvas->setMatrix(initialCTM);
+            atlasCanvas->concat(atlased[i].fLocalMat);
 
             SkRecordPartialDraw(*pict->fRecord.get(), atlasCanvas, bound,
-                                layer->start()+1, layer->stop(), initialCTM);
+                                layer->start() + 1, layer->stop(), initialCTM);
 
             atlasCanvas->restore();
         }
 
         atlasCanvas->flush();
     }
+}
 
-    // Render the non-atlased layers that require it
-    for (int i = 0; i < nonAtlased.count(); ++i) {
-        GrCachedLayer* layer = nonAtlased[i].fLayer;
-        const SkPicture* pict = nonAtlased[i].fPicture;
+void GrLayerHoister::DrawLayers(GrContext* context, const SkTDArray<GrHoistedLayer>& layers) {
+    for (int i = 0; i < layers.count(); ++i) {
+        GrCachedLayer* layer = layers[i].fLayer;
+        const SkPicture* pict = layers[i].fPicture;
+        const SkIPoint& offset = layers[i].fOffset;
 
         // Each non-atlased layer has its own GrTexture
         SkAutoTUnref<SkSurface> surface(SkSurface::NewRenderTargetDirect(
@@ -220,65 +279,51 @@ void GrLayerHoister::DrawLayers(const SkTDArray<HoistedLayer>& atlased,
 
         SkCanvas* layerCanvas = surface->getCanvas();
 
+        SkASSERT(0 == layer->rect().fLeft && 0 == layer->rect().fTop);
+
         // Add a rect clip to make sure the rendering doesn't
-        // extend beyond the boundaries of the atlased sub-rect
+        // extend beyond the boundaries of the layer
         SkRect bound = SkRect::MakeXYWH(SkIntToScalar(layer->rect().fLeft),
                                         SkIntToScalar(layer->rect().fTop),
                                         SkIntToScalar(layer->rect().width()),
                                         SkIntToScalar(layer->rect().height()));
 
-        layerCanvas->clipRect(bound); // TODO: still useful?
+        layerCanvas->clipRect(bound);
 
         layerCanvas->clear(SK_ColorTRANSPARENT);
 
         SkMatrix initialCTM;
-        initialCTM.setTranslate(SkIntToScalar(-layer->offset().fX), 
-                                SkIntToScalar(-layer->offset().fY));
+        initialCTM.setTranslate(SkIntToScalar(-offset.fX), SkIntToScalar(-offset.fY));
+        initialCTM.preConcat(layers[i].fPreMat);
 
-        layerCanvas->translate(SkIntToScalar(-layer->offset().fX), 
-                               SkIntToScalar(-layer->offset().fY));
-        layerCanvas->concat(layer->ctm());
+        layerCanvas->setMatrix(initialCTM);
+        layerCanvas->concat(layers[i].fLocalMat);
 
         SkRecordPartialDraw(*pict->fRecord.get(), layerCanvas, bound,
                             layer->start()+1, layer->stop(), initialCTM);
 
         layerCanvas->flush();
     }
-
-    convert_layers_to_replacements(atlased, replacements);
-    convert_layers_to_replacements(nonAtlased, replacements);
 }
 
-static void unlock_layer_in_cache(GrLayerCache* layerCache,
-                                  const SkPicture* picture,
-                                  GrCachedLayer* layer) {
-    layerCache->unlock(layer);
+void GrLayerHoister::UnlockLayers(GrContext* context,
+                                  const SkTDArray<GrHoistedLayer>& layers) {
+    GrLayerCache* layerCache = context->getLayerCache();
 
-#if DISABLE_CACHING
-    // This code completely clears out the atlas. It is required when
-    // caching is disabled so the atlas doesn't fill up and force more
-    // free floating layers
-    layerCache->purge(picture->uniqueID());
-#endif
+    for (int i = 0; i < layers.count(); ++i) {
+        layerCache->removeUse(layers[i].fLayer);
+    }
+
+    SkDEBUGCODE(layerCache->validate();)
 }
 
-void GrLayerHoister::UnlockLayers(GrLayerCache* layerCache, 
-                                  const SkTDArray<HoistedLayer>& atlased,
-                                  const SkTDArray<HoistedLayer>& nonAtlased) {
+void GrLayerHoister::PurgeCache(GrContext* context) {
+#if !GR_CACHE_HOISTED_LAYERS
+    GrLayerCache* layerCache = context->getLayerCache();
 
-    for (int i = 0; i < atlased.count(); ++i) {
-        unlock_layer_in_cache(layerCache, atlased[i].fPicture, atlased[i].fLayer);
-    }
-
-    for (int i = 0; i < nonAtlased.count(); ++i) {
-        unlock_layer_in_cache(layerCache, nonAtlased[i].fPicture, nonAtlased[i].fLayer);
-    }
-
-#if DISABLE_CACHING
     // This code completely clears out the atlas. It is required when
     // caching is disabled so the atlas doesn't fill up and force more
     // free floating layers
     layerCache->purgeAll();
 #endif
 }
-

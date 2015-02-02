@@ -162,13 +162,11 @@ class ValidationMessageBubbleCocoa : public chrome::ValidationMessageBubble {
                      subText:sub_text] retain]);
   }
 
-  virtual ~ValidationMessageBubbleCocoa() {
-    [controller_.get() close];
-  }
+  ~ValidationMessageBubbleCocoa() override { [controller_.get() close]; }
 
-  virtual void SetPositionRelativeToAnchor(
+  void SetPositionRelativeToAnchor(
       content::RenderWidgetHost* widget_host,
-      const gfx::Rect& anchor_in_root_view) OVERRIDE {
+      const gfx::Rect& anchor_in_root_view) override {
     [controller_.get()
         setAnchorPoint:GetAnchorPoint(widget_host, anchor_in_root_view)];
   }

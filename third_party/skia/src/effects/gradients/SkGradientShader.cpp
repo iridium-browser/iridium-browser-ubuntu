@@ -956,7 +956,7 @@ GrGLGradientEffect::GrGLGradientEffect(const GrBackendProcessorFactory& factory)
 
 GrGLGradientEffect::~GrGLGradientEffect() { }
 
-void GrGLGradientEffect::emitUniforms(GrGLProgramBuilder* builder, uint32_t baseKey) {
+void GrGLGradientEffect::emitUniforms(GrGLFPBuilder* builder, uint32_t baseKey) {
 
     if (SkGradientShaderBase::kTwo_GpuColorType == ColorTypeFromKey(baseKey)) { // 2 Color case
         fColorStartUni = builder->addUniform(GrGLProgramBuilder::kFragment_Visibility,
@@ -1056,13 +1056,13 @@ uint32_t GrGLGradientEffect::GenBaseGradientKey(const GrProcessor& processor) {
     return key;
 }
 
-void GrGLGradientEffect::emitColor(GrGLProgramBuilder* builder,
+void GrGLGradientEffect::emitColor(GrGLFPBuilder* builder,
                                    const char* gradientTValue,
                                    uint32_t baseKey,
                                    const char* outputColor,
                                    const char* inputColor,
                                    const TextureSamplerArray& samplers) {
-    GrGLFragmentShaderBuilder* fsBuilder = builder->getFragmentShaderBuilder();
+    GrGLFPFragmentBuilder* fsBuilder = builder->getFragmentShaderBuilder();
     if (SkGradientShaderBase::kTwo_GpuColorType == ColorTypeFromKey(baseKey)){
         fsBuilder->codeAppendf("\tvec4 colorTemp = mix(%s, %s, clamp(%s, 0.0, 1.0));\n",
                                builder->getUniformVariable(fColorStartUni).c_str(),
@@ -1159,20 +1159,14 @@ GrGradientEffect::GrGradientEffect(GrContext* ctx,
 
         fRow = fAtlas->lockRow(bitmap);
         if (-1 != fRow) {
-            fYCoord = fAtlas->getYOffset(fRow) + SK_ScalarHalf *
-            fAtlas->getVerticalScaleFactor();
+            fYCoord = fAtlas->getYOffset(fRow) + SK_ScalarHalf * fAtlas->getNormalizedTexelHeight();
             fCoordTransform.reset(kCoordSet, matrix, fAtlas->getTexture());
             fTextureAccess.reset(fAtlas->getTexture(), params);
         } else {
-            GrTexture* texture = GrLockAndRefCachedBitmapTexture(ctx, bitmap, &params);
+            SkAutoTUnref<GrTexture> texture(GrRefCachedBitmapTexture(ctx, bitmap, &params));
             fCoordTransform.reset(kCoordSet, matrix, texture);
             fTextureAccess.reset(texture, params);
             fYCoord = SK_ScalarHalf;
-
-            // Unlock immediately, this is not great, but we don't have a way of
-            // knowing when else to unlock it currently, so it may get purged from
-            // the cache, but it'll still be ref'd until it's no longer being used.
-            GrUnlockAndUnrefCachedBitmapTexture(texture);
         }
         this->addTextureAccess(&fTextureAccess);
     }
@@ -1185,7 +1179,7 @@ GrGradientEffect::~GrGradientEffect() {
     }
 }
 
-bool GrGradientEffect::onIsEqual(const GrProcessor& processor) const {
+bool GrGradientEffect::onIsEqual(const GrFragmentProcessor& processor) const {
     const GrGradientEffect& s = processor.cast<GrGradientEffect>();
 
     if (this->fColorType == s.getColorType()){
@@ -1207,21 +1201,18 @@ bool GrGradientEffect::onIsEqual(const GrProcessor& processor) const {
             }
         }
 
-        return fTextureAccess.getTexture() == s.fTextureAccess.getTexture()  &&
-            fTextureAccess.getParams().getTileModeX() ==
-                s.fTextureAccess.getParams().getTileModeX() &&
-            this->useAtlas() == s.useAtlas() &&
-            fCoordTransform.getMatrix().cheapEqualTo(s.fCoordTransform.getMatrix());
+        SkASSERT(this->useAtlas() == s.useAtlas());
+        return true;
     }
 
     return false;
 }
 
-void GrGradientEffect::getConstantColorComponents(GrColor* color, uint32_t* validFlags) const {
-    if (fIsOpaque && (kA_GrColorComponentFlag & *validFlags) && 0xff == GrColorUnpackA(*color)) {
-        *validFlags = kA_GrColorComponentFlag;
+void GrGradientEffect::onComputeInvariantOutput(InvariantOutput* inout) const {
+    if (fIsOpaque) {
+        inout->mulByUnknownOpaqueColor();
     } else {
-        *validFlags = 0;
+        inout->mulByUnknownColor();
     }
 }
 

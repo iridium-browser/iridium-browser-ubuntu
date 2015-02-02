@@ -15,10 +15,10 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequenced_task_runner.h"
-#include "chrome/browser/extensions/updater/extension_downloader_delegate.h"
 #include "chrome/browser/extensions/updater/local_extension_cache.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "extensions/browser/updater/extension_downloader_delegate.h"
 
 namespace base {
 class DictionaryValue;
@@ -83,14 +83,14 @@ class ExternalCache : public content::NotificationObserver,
   // Implementation of content::NotificationObserver:
   virtual void Observe(int type,
                        const content::NotificationSource& source,
-                       const content::NotificationDetails& details) OVERRIDE;
+                       const content::NotificationDetails& details) override;
 
   // Implementation of ExtensionDownloaderDelegate:
   virtual void OnExtensionDownloadFailed(
       const std::string& id,
       Error error,
       const PingResult& ping_result,
-      const std::set<int>& request_ids) OVERRIDE;
+      const std::set<int>& request_ids) override;
 
   virtual void OnExtensionDownloadFinished(
       const std::string& id,
@@ -99,12 +99,12 @@ class ExternalCache : public content::NotificationObserver,
       const GURL& download_url,
       const std::string& version,
       const PingResult& ping_result,
-      const std::set<int>& request_ids) OVERRIDE;
+      const std::set<int>& request_ids) override;
 
-  virtual bool IsExtensionPending(const std::string& id) OVERRIDE;
+  virtual bool IsExtensionPending(const std::string& id) override;
 
   virtual bool GetExtensionExistingVersion(const std::string& id,
-                                           std::string* version) OVERRIDE;
+                                           std::string* version) override;
 
   // Shut down the cache. The |callback| will be invoked when the cache has shut
   // down completely and there are no more pending file I/O operations.

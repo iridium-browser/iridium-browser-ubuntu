@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-module mojo {
+module mojo;
 
 struct Point {
   int32 x;
@@ -35,7 +35,5 @@ struct RectF {
 
 struct Transform {
   // Row major order.
-  float[16]? matrix;
+  array<float, 16>? matrix;
 };
-
-}

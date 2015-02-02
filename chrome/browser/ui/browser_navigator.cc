@@ -12,7 +12,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_about_handler.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
@@ -30,10 +29,7 @@
 #include "chrome/browser/ui/status_bubble.h"
 #include "chrome/browser/ui/tab_helpers.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/web_applications/web_app.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "components/google/core/browser/google_url_tracker.h"
 #include "content/public/browser/browser_url_handler.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
@@ -49,6 +45,8 @@
 #endif
 
 #if defined(ENABLE_EXTENSIONS)
+#include "chrome/browser/extensions/tab_helper.h"
+#include "chrome/browser/web_applications/web_app.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_set.h"
@@ -154,6 +152,7 @@ Browser* GetBrowserForDisposition(chrome::NavigateParams* params) {
       // Make a new popup window.
       // Coerce app-style if |source| represents an app.
       std::string app_name;
+#if defined(ENABLE_EXTENSIONS)
       if (!params->extension_app_id.empty()) {
         app_name = web_app::GenerateApplicationNameFromExtensionId(
             params->extension_app_id);
@@ -167,6 +166,7 @@ Browser* GetBrowserForDisposition(chrome::NavigateParams* params) {
               extensions_tab_helper->extension_app()->id());
         }
       }
+#endif
       if (app_name.empty()) {
         Browser::CreateParams browser_params(
             Browser::TYPE_POPUP, profile, params->host_desktop_type);
@@ -292,11 +292,19 @@ class ScopedBrowserShower {
       : params_(params) {
   }
   ~ScopedBrowserShower() {
-    if (params_->window_action == chrome::NavigateParams::SHOW_WINDOW_INACTIVE)
+    if (params_->window_action ==
+        chrome::NavigateParams::SHOW_WINDOW_INACTIVE) {
       params_->browser->window()->ShowInactive();
-    else if (params_->window_action == chrome::NavigateParams::SHOW_WINDOW)
+    } else if (params_->window_action == chrome::NavigateParams::SHOW_WINDOW) {
       params_->browser->window()->Show();
+      // If a user gesture opened a popup window, focus the contents.
+      if (params_->user_gesture && params_->disposition == NEW_POPUP &&
+          params_->target_contents) {
+        params_->target_contents->Focus();
+      }
+    }
   }
+
  private:
   chrome::NavigateParams* params_;
   DISALLOW_COPY_AND_ASSIGN(ScopedBrowserShower);
@@ -364,8 +372,10 @@ content::WebContents* CreateTargetContents(const chrome::NavigateParams& params,
   // tab helpers, so the entire set of tab helpers needs to be set up
   // immediately.
   BrowserNavigatorWebContentsAdoption::AttachTabHelpers(target_contents);
+#if defined(ENABLE_EXTENSIONS)
   extensions::TabHelper::FromWebContents(target_contents)->
       SetExtensionAppById(params.extension_app_id);
+#endif
   return target_contents;
 }
 
@@ -730,6 +740,7 @@ bool IsURLAllowedInIncognito(const GURL& url,
   if (url.scheme() == content::kChromeUIScheme &&
       (url.host() == chrome::kChromeUISettingsHost ||
        url.host() == chrome::kChromeUISettingsFrameHost ||
+       url.host() == chrome::kChromeUIHelpHost ||
        url.host() == chrome::kChromeUIExtensionsHost ||
        url.host() == chrome::kChromeUIBookmarksHost ||
 #if !defined(OS_CHROMEOS)

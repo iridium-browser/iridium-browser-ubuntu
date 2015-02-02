@@ -156,7 +156,8 @@ SkColorType SkImageDecoder::getPrefColorType(SrcDepth srcDepth, bool srcHasAlpha
     return ct;
 }
 
-bool SkImageDecoder::decode(SkStream* stream, SkBitmap* bm, SkColorType pref, Mode mode) {
+SkImageDecoder::Result SkImageDecoder::decode(SkStream* stream, SkBitmap* bm, SkColorType pref,
+                                              Mode mode) {
     // we reset this to false before calling onDecode
     fShouldCancelDecode = false;
     // assign this, for use by getPrefColorType(), in case fUsePrefTable is false
@@ -164,12 +165,12 @@ bool SkImageDecoder::decode(SkStream* stream, SkBitmap* bm, SkColorType pref, Mo
 
     // pass a temporary bitmap, so that if we return false, we are assured of
     // leaving the caller's bitmap untouched.
-    SkBitmap    tmp;
-    if (!this->onDecode(stream, &tmp, mode)) {
-        return false;
+    SkBitmap tmp;
+    const Result result = this->onDecode(stream, &tmp, mode);
+    if (kFailure != result) {
+        bm->swap(tmp);
     }
-    bm->swap(tmp);
-    return true;
+    return result;
 }
 
 bool SkImageDecoder::decodeSubset(SkBitmap* bm, const SkIRect& rect, SkColorType pref) {
@@ -272,7 +273,7 @@ bool SkImageDecoder::DecodeStream(SkStreamRewindable* stream, SkBitmap* bm, SkCo
     SkImageDecoder* codec = SkImageDecoder::Factory(stream);
 
     if (codec) {
-        success = codec->decode(stream, bm, pref, mode);
+        success = codec->decode(stream, bm, pref, mode) != kFailure;
         if (success && format) {
             *format = codec->getFormat();
             if (kUnknown_Format == *format) {
@@ -284,4 +285,12 @@ bool SkImageDecoder::DecodeStream(SkStreamRewindable* stream, SkBitmap* bm, SkCo
         delete codec;
     }
     return success;
+}
+
+bool SkImageDecoder::decodeYUV8Planes(SkStream* stream, SkISize componentSizes[3], void* planes[3],
+                                      size_t rowBytes[3], SkYUVColorSpace* colorSpace) {
+    // we reset this to false before calling onDecodeYUV8Planes
+    fShouldCancelDecode = false;
+
+    return this->onDecodeYUV8Planes(stream, componentSizes, planes, rowBytes, colorSpace);
 }

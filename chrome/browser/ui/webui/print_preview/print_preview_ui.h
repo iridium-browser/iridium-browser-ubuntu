@@ -35,7 +35,7 @@ struct PageSizeMargins;
 class PrintPreviewUI : public ConstrainedWebDialogUI {
  public:
   explicit PrintPreviewUI(content::WebUI* web_ui);
-  virtual ~PrintPreviewUI();
+  ~PrintPreviewUI() override;
 
   // Gets the print preview |data|. |index| is zero-based, and can be
   // |printing::COMPLETE_PREVIEW_DOCUMENT_INDEX| to get the entire preview
@@ -84,10 +84,10 @@ class PrintPreviewUI : public ConstrainedWebDialogUI {
   // Notifies the Web UI of a print preview request with |request_id|.
   void OnPrintPreviewRequest(int request_id);
 
-#if !defined(DISABLE_BASIC_PRINTING)
+#if defined(ENABLE_BASIC_PRINTING)
   // Notifies the Web UI to show the system dialog.
   void OnShowSystemDialog();
-#endif  // !DISABLE_BASIC_PRINTING
+#endif  // ENABLE_BASIC_PRINTING
 
   // Notifies the Web UI about the page count of the request preview.
   void OnDidGetPreviewPageCount(

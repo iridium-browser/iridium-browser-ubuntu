@@ -120,6 +120,14 @@ public:
     virtual void initialize();
     virtual void uninitialize();
 
+    // Clear internal state when the node is disabled. When a node is disabled,
+    // it is no longer pulled so any internal state is never updated. But some
+    // nodes (DynamicsCompressorNode) have internal state that is still
+    // accessible by the user. Update the internal state as if the node were
+    // still connected but processing all zeroes. This gives a consistent view
+    // to the user.
+    virtual void clearInternalStateWhenDisabled();
+
     bool isInitialized() const { return m_isInitialized; }
 
     unsigned numberOfInputs() const { return m_inputs.size(); }
@@ -171,7 +179,7 @@ public:
     virtual void setChannelCount(unsigned long, ExceptionState&);
 
     String channelCountMode();
-    void setChannelCountMode(const String&, ExceptionState&);
+    virtual void setChannelCountMode(const String&, ExceptionState&);
 
     String channelInterpretation();
     void setChannelInterpretation(const String&, ExceptionState&);
@@ -180,12 +188,12 @@ public:
     AudioBus::ChannelInterpretation internalChannelInterpretation() const { return m_channelInterpretation; }
 
     // EventTarget
-    virtual const AtomicString& interfaceName() const OVERRIDE FINAL;
-    virtual ExecutionContext* executionContext() const OVERRIDE FINAL;
+    virtual const AtomicString& interfaceName() const override final;
+    virtual ExecutionContext* executionContext() const override final;
 
     void updateChannelCountMode();
 
-    virtual void trace(Visitor*) OVERRIDE;
+    virtual void trace(Visitor*) override;
 
 protected:
     // Inputs and outputs must be created before the AudioNode is initialized.
@@ -221,13 +229,13 @@ private:
 #endif
     static unsigned s_instanceCount;
 
-    // The new channel count mode that will be used to set the actual mode in the pre or post
-    // rendering phase.
-    ChannelCountMode m_newChannelCountMode;
 protected:
     unsigned m_channelCount;
     ChannelCountMode m_channelCountMode;
     AudioBus::ChannelInterpretation m_channelInterpretation;
+    // The new channel count mode that will be used to set the actual mode in the pre or post
+    // rendering phase.
+    ChannelCountMode m_newChannelCountMode;
 };
 
 } // namespace blink

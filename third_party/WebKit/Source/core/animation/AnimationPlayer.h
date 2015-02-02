@@ -41,7 +41,7 @@ namespace blink {
 class AnimationTimeline;
 class ExceptionState;
 
-class AnimationPlayer FINAL : public RefCountedWillBeGarbageCollectedFinalized<AnimationPlayer>
+class AnimationPlayer final : public RefCountedWillBeGarbageCollectedFinalized<AnimationPlayer>
     , public ActiveDOMObject
     , public EventTargetWithInlineData {
     DEFINE_WRAPPERTYPEINFO();
@@ -74,31 +74,31 @@ public:
     double currentTime();
     void setCurrentTime(double newCurrentTime);
 
-    double calculateCurrentTime() const;
-    double currentTimeInternal();
-    void setCurrentTimeInternal(double newCurrentTime, TimingUpdateReason = TimingUpdateOnDemand);
+    double currentTimeInternal() const;
 
+    void setCurrentTimeInternal(double newCurrentTime, TimingUpdateReason = TimingUpdateOnDemand);
     bool paused() const { return m_paused && !m_isPausedForTesting; }
-    String playState();
-    AnimationPlayState playStateInternal();
+    static const char* playStateString(AnimationPlayState);
+    String playState() { return playStateString(playStateInternal()); }
+    AnimationPlayState playStateInternal() const;
 
     void pause();
     void play();
     void reverse();
     void finish(ExceptionState&);
-    bool finished() { return !m_idle && limited(currentTimeInternal()); }
-    bool playing() { return !(finished() || m_paused || m_isPausedForTesting || m_idle); }
+    bool finished() const { return m_playState != Idle && limited(currentTimeInternal()); }
+    bool playing() const { return !(playStateInternal() == Idle || finished() || m_paused || m_isPausedForTesting); }
     // FIXME: Resolve whether finished() should just return the flag, and
     // remove this method.
     bool finishedInternal() const { return m_finished; }
 
     DEFINE_ATTRIBUTE_EVENT_LISTENER(finish);
 
-    virtual const AtomicString& interfaceName() const OVERRIDE;
-    virtual ExecutionContext* executionContext() const OVERRIDE;
-    virtual bool hasPendingActivity() const OVERRIDE;
-    virtual void stop() OVERRIDE;
-    virtual bool dispatchEvent(PassRefPtrWillBeRawPtr<Event>) OVERRIDE;
+    virtual const AtomicString& interfaceName() const override;
+    virtual ExecutionContext* executionContext() const override;
+    virtual bool hasPendingActivity() const override;
+    virtual void stop() override;
+    virtual bool dispatchEvent(PassRefPtrWillBeRawPtr<Event>) override;
 
     double playbackRate() const;
     void setPlaybackRate(double);
@@ -136,6 +136,7 @@ public:
     bool hasActiveAnimationsOnCompositor();
     void setCompositorPending(bool sourceChanged = false);
     void notifyCompositorStartTime(double timelineTime);
+    void notifyStartTime(double timelineTime);
 
 
     void preCommit(bool startOnCompositor);
@@ -154,22 +155,27 @@ public:
     bool canFree() const;
 #endif
 
-    virtual bool addEventListener(const AtomicString& eventType, PassRefPtr<EventListener>, bool useCapture = false) OVERRIDE;
+    virtual bool addEventListener(const AtomicString& eventType, PassRefPtr<EventListener>, bool useCapture = false) override;
 
-    virtual void trace(Visitor*) OVERRIDE;
+    virtual void trace(Visitor*) override;
 
 private:
     AnimationPlayer(ExecutionContext*, AnimationTimeline&, AnimationNode*);
+
     double sourceEnd() const;
     bool limited(double currentTime) const;
-    void setPlaybackRateInternal(double);
-    void updateCurrentTimingState(TimingUpdateReason);
+
+    AnimationPlayState calculatePlayState();
+    double calculateCurrentTime() const;
+
     void unpauseInternal();
     void uncancel();
-    void setFinished(bool);
+    void setPlaybackRateInternal(double);
+    void updateCurrentTimingState(TimingUpdateReason);
 
+
+    AnimationPlayState m_playState;
     double m_playbackRate;
-
     double m_startTime;
     double m_holdTime;
 
@@ -215,13 +221,29 @@ private:
         CompositorAction pendingAction;
     };
 
+    enum CompositorPendingChange {
+        SetCompositorPending,
+        SetCompositorPendingWithSourceChanged,
+        DoNotSetCompositorPending,
+    };
+
+    class PlayStateUpdateScope {
+        STACK_ALLOCATED();
+    public:
+        PlayStateUpdateScope(AnimationPlayer&, TimingUpdateReason, CompositorPendingChange = SetCompositorPending);
+        ~PlayStateUpdateScope();
+    private:
+        AnimationPlayer& m_player;
+        AnimationPlayState m_initial;
+        CompositorPendingChange m_compositorPendingChange;
+    };
+
     // This mirrors the known compositor state. It is created when a compositor
     // animation is started. Updated once the start time is known and each time
     // modifications are pushed to the compositor.
     OwnPtr<CompositorState> m_compositorState;
     bool m_compositorPending;
     bool m_currentTimePending;
-    bool m_idle;
 };
 
 } // namespace blink

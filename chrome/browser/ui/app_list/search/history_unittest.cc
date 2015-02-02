@@ -4,20 +4,19 @@
 
 #include "base/basictypes.h"
 #include "base/bind.h"
+#include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/platform_thread.h"
-#include "chrome/browser/ui/app_list/search/common/dictionary_data_store.h"
-#include "chrome/browser/ui/app_list/search/history.h"
-#include "chrome/browser/ui/app_list/search/history_data.h"
-#include "chrome/browser/ui/app_list/search/history_data_observer.h"
-#include "chrome/browser/ui/app_list/search/history_data_store.h"
 #include "chrome/browser/ui/app_list/search/history_factory.h"
-#include "chrome/test/base/testing_profile.h"
-#include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/app_list/search/dictionary_data_store.h"
+#include "ui/app_list/search/history.h"
+#include "ui/app_list/search/history_data.h"
+#include "ui/app_list/search/history_data_observer.h"
+#include "ui/app_list/search/history_data_store.h"
 
 namespace app_list {
 namespace test {
@@ -34,7 +33,7 @@ const size_t kMaxSecondary = 2;
 class HistoryDataLoadWaiter : public HistoryDataObserver {
  public:
   explicit HistoryDataLoadWaiter(HistoryData* data) : data_(data)  {}
-  virtual ~HistoryDataLoadWaiter() {}
+  ~HistoryDataLoadWaiter() override {}
 
   void Wait() {
     data_->AddObserver(this);
@@ -47,9 +46,7 @@ class HistoryDataLoadWaiter : public HistoryDataObserver {
 
  private:
   // HistoryDataObserver overrides:
-  virtual void OnHistoryDataLoadedFromStore() OVERRIDE {
-    run_loop_->Quit();
-  }
+  void OnHistoryDataLoadedFromStore() override { run_loop_->Quit(); }
 
   HistoryData* data_;  // Not owned.
   scoped_ptr<base::RunLoop> run_loop_;
@@ -89,25 +86,23 @@ class StoreFlushWaiter {
 
 class SearchHistoryTest : public testing::Test {
  public:
-  SearchHistoryTest()
-      : ui_thread_(content::BrowserThread::UI, &message_loop_) {}
-  virtual ~SearchHistoryTest() {}
+  SearchHistoryTest() {}
+  ~SearchHistoryTest() override {}
 
   // testing::Test overrides:
-  virtual void SetUp() OVERRIDE {
-    profile_.reset(new TestingProfile);
+  void SetUp() override {
+    worker_pool_ = new base::SequencedWorkerPool(1, "AppLauncherTest");
+    ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     CreateHistory();
   }
-  virtual void TearDown() OVERRIDE {
-    Flush();
-  }
+  void TearDown() override { Flush(); }
 
   void CreateHistory() {
     const char kStoreDataFileName[] = "app-launcher-test";
     const base::FilePath data_file =
-        profile_->GetPath().AppendASCII(kStoreDataFileName);
+        temp_dir_.path().AppendASCII(kStoreDataFileName);
     scoped_refptr<DictionaryDataStore> dictionary_data_store(
-        new DictionaryDataStore(data_file));
+        new DictionaryDataStore(data_file, worker_pool_.get()));
     history_.reset(new History(scoped_refptr<HistoryDataStore>(
         new HistoryDataStore(dictionary_data_store))));
 
@@ -143,8 +138,8 @@ class SearchHistoryTest : public testing::Test {
 
  private:
   base::MessageLoopForUI message_loop_;
-  content::TestBrowserThread ui_thread_;
-  scoped_ptr<TestingProfile> profile_;
+  base::ScopedTempDir temp_dir_;
+  scoped_refptr<base::SequencedWorkerPool> worker_pool_;
 
   scoped_ptr<History> history_;
   scoped_ptr<KnownResults> known_results_;

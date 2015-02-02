@@ -13,11 +13,11 @@ class ChromeBrowserMainPartsPosix : public ChromeBrowserMainParts {
       const content::MainFunctionParams& parameters);
 
   // content::BrowserMainParts overrides.
-  virtual void PreEarlyInitialization() OVERRIDE;
-  virtual void PostMainMessageLoopStart() OVERRIDE;
+  void PreEarlyInitialization() override;
+  void PostMainMessageLoopStart() override;
 
   // ChromeBrowserMainParts overrides.
-  virtual void ShowMissingLocaleMessageBox() OVERRIDE;
+  void ShowMissingLocaleMessageBox() override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ChromeBrowserMainPartsPosix);

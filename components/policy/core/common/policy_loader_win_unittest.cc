@@ -20,7 +20,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/json/json_writer.h"
 #include "base/path_service.h"
-#include "base/process/process.h"
+#include "base/process/process_handle.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -155,7 +155,7 @@ class ScopedGroupPolicyRegistrySandbox {
   // Deletes the sandbox keys.
   void DeleteKeys();
 
-  std::wstring key_name_;
+  base::string16 key_name_;
 
   // Keys are created for the lifetime of a test to contain
   // the sandboxed HKCU and HKLM hives, respectively.
@@ -173,35 +173,35 @@ class RegistryTestHarness : public PolicyProviderTestHarness,
   virtual ~RegistryTestHarness();
 
   // PolicyProviderTestHarness:
-  virtual void SetUp() OVERRIDE;
+  virtual void SetUp() override;
 
   virtual ConfigurationPolicyProvider* CreateProvider(
       SchemaRegistry* registry,
-      scoped_refptr<base::SequencedTaskRunner> task_runner) OVERRIDE;
+      scoped_refptr<base::SequencedTaskRunner> task_runner) override;
 
-  virtual void InstallEmptyPolicy() OVERRIDE;
+  virtual void InstallEmptyPolicy() override;
   virtual void InstallStringPolicy(const std::string& policy_name,
-                                   const std::string& policy_value) OVERRIDE;
+                                   const std::string& policy_value) override;
   virtual void InstallIntegerPolicy(const std::string& policy_name,
-                                    int policy_value) OVERRIDE;
+                                    int policy_value) override;
   virtual void InstallBooleanPolicy(const std::string& policy_name,
-                                    bool policy_value) OVERRIDE;
+                                    bool policy_value) override;
   virtual void InstallStringListPolicy(
       const std::string& policy_name,
-      const base::ListValue* policy_value) OVERRIDE;
+      const base::ListValue* policy_value) override;
   virtual void InstallDictionaryPolicy(
       const std::string& policy_name,
-      const base::DictionaryValue* policy_value) OVERRIDE;
+      const base::DictionaryValue* policy_value) override;
   virtual void Install3rdPartyPolicy(
-      const base::DictionaryValue* policies) OVERRIDE;
+      const base::DictionaryValue* policies) override;
 
   // AppliedGPOListProvider:
   virtual DWORD GetAppliedGPOList(DWORD flags,
                                   LPCTSTR machine_name,
                                   PSID sid_user,
                                   GUID* extension_guid,
-                                  PGROUP_POLICY_OBJECT* gpo_list) OVERRIDE;
-  virtual BOOL FreeGPOList(PGROUP_POLICY_OBJECT gpo_list) OVERRIDE;
+                                  PGROUP_POLICY_OBJECT* gpo_list) override;
+  virtual BOOL FreeGPOList(PGROUP_POLICY_OBJECT gpo_list) override;
 
   // Creates a harness instance that will install policy in HKCU or HKLM,
   // respectively.
@@ -224,35 +224,35 @@ class PRegTestHarness : public PolicyProviderTestHarness,
   virtual ~PRegTestHarness();
 
   // PolicyProviderTestHarness:
-  virtual void SetUp() OVERRIDE;
+  virtual void SetUp() override;
 
   virtual ConfigurationPolicyProvider* CreateProvider(
       SchemaRegistry* registry,
-      scoped_refptr<base::SequencedTaskRunner> task_runner) OVERRIDE;
+      scoped_refptr<base::SequencedTaskRunner> task_runner) override;
 
-  virtual void InstallEmptyPolicy() OVERRIDE;
+  virtual void InstallEmptyPolicy() override;
   virtual void InstallStringPolicy(const std::string& policy_name,
-                                   const std::string& policy_value) OVERRIDE;
+                                   const std::string& policy_value) override;
   virtual void InstallIntegerPolicy(const std::string& policy_name,
-                                    int policy_value) OVERRIDE;
+                                    int policy_value) override;
   virtual void InstallBooleanPolicy(const std::string& policy_name,
-                                    bool policy_value) OVERRIDE;
+                                    bool policy_value) override;
   virtual void InstallStringListPolicy(
       const std::string& policy_name,
-      const base::ListValue* policy_value) OVERRIDE;
+      const base::ListValue* policy_value) override;
   virtual void InstallDictionaryPolicy(
       const std::string& policy_name,
-      const base::DictionaryValue* policy_value) OVERRIDE;
+      const base::DictionaryValue* policy_value) override;
   virtual void Install3rdPartyPolicy(
-      const base::DictionaryValue* policies) OVERRIDE;
+      const base::DictionaryValue* policies) override;
 
   // AppliedGPOListProvider:
   virtual DWORD GetAppliedGPOList(DWORD flags,
                                   LPCTSTR machine_name,
                                   PSID sid_user,
                                   GUID* extension_guid,
-                                  PGROUP_POLICY_OBJECT* gpo_list) OVERRIDE;
-  virtual BOOL FreeGPOList(PGROUP_POLICY_OBJECT gpo_list) OVERRIDE;
+                                  PGROUP_POLICY_OBJECT* gpo_list) override;
+  virtual BOOL FreeGPOList(PGROUP_POLICY_OBJECT gpo_list) override;
 
   // Creates a harness instance.
   static PolicyProviderTestHarness* Create();
@@ -296,9 +296,8 @@ ScopedGroupPolicyRegistrySandbox::ScopedGroupPolicyRegistrySandbox() {
   // Generate a unique registry key for the override for each test. This
   // makes sure that tests executing in parallel won't delete each other's
   // key, at DeleteKeys().
-  key_name_ = base::ASCIIToWide(base::StringPrintf(
-        "SOFTWARE\\chromium unittest %d",
-        base::Process::Current().pid()));
+  key_name_ = base::ASCIIToUTF16(base::StringPrintf(
+        "SOFTWARE\\chromium unittest %d", base::GetCurrentProcId()));
   std::wstring hklm_key_name = key_name_ + L"\\HKLM";
   std::wstring hkcu_key_name = key_name_ + L"\\HKCU";
 
@@ -588,11 +587,10 @@ void PRegTestHarness::AppendRecordToPRegFile(const base::string16& path,
   buffer.insert(buffer.end(), data, data + size);
   AppendChars(&buffer, L"]");
 
-  ASSERT_EQ(buffer.size(),
-            base::AppendToFile(
-                preg_file_path_,
-                reinterpret_cast<const char*>(vector_as_array(&buffer)),
-                buffer.size()));
+  ASSERT_TRUE(base::AppendToFile(
+      preg_file_path_,
+      reinterpret_cast<const char*>(vector_as_array(&buffer)),
+      buffer.size()));
 }
 
 void PRegTestHarness::AppendDWORDToPRegFile(const base::string16& path,
@@ -704,7 +702,7 @@ class PolicyLoaderWinTest : public PolicyTestBase,
         gpo_list_status_(ERROR_ACCESS_DENIED) {}
   virtual ~PolicyLoaderWinTest() {}
 
-  virtual void SetUp() OVERRIDE {
+  virtual void SetUp() override {
     base::win::SetDomainStateForTesting(false);
     PolicyTestBase::SetUp();
 
@@ -721,11 +719,11 @@ class PolicyLoaderWinTest : public PolicyTestBase,
                                   LPCTSTR machine_name,
                                   PSID sid_user,
                                   GUID* extension_guid,
-                                  PGROUP_POLICY_OBJECT* gpo_list) OVERRIDE {
+                                  PGROUP_POLICY_OBJECT* gpo_list) override {
     *gpo_list = gpo_list_;
     return gpo_list_status_;
   }
-  virtual BOOL FreeGPOList(PGROUP_POLICY_OBJECT gpo_list) OVERRIDE {
+  virtual BOOL FreeGPOList(PGROUP_POLICY_OBJECT gpo_list) override {
     return TRUE;
   }
 

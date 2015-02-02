@@ -287,8 +287,10 @@ void PrivetNotificationService::PrivetNotify(bool has_multiple,
 
 void PrivetNotificationService::PrivetRemoveNotification() {
   ReportPrivetUmaEvent(PRIVET_NOTIFICATION_CANCELED);
+  Profile* profile_object = Profile::FromBrowserContext(profile_);
   g_browser_process->notification_ui_manager()->CancelById(
-      kPrivetNotificationID);
+      kPrivetNotificationID,
+      NotificationUIManager::GetProfileID(profile_object));
 }
 
 void PrivetNotificationService::Start() {
@@ -366,23 +368,6 @@ PrivetNotificationDelegate::~PrivetNotificationDelegate() {
 
 std::string PrivetNotificationDelegate::id() const {
   return kPrivetNotificationID;
-}
-
-content::WebContents* PrivetNotificationDelegate::GetWebContents() const {
-  return NULL;
-}
-
-void PrivetNotificationDelegate::Display() {
-}
-
-void PrivetNotificationDelegate::Error() {
-  LOG(ERROR) << "Error displaying privet notification";
-}
-
-void PrivetNotificationDelegate::Close(bool by_user) {
-}
-
-void PrivetNotificationDelegate::Click() {
 }
 
 void PrivetNotificationDelegate::ButtonClick(int button_index) {

@@ -25,21 +25,21 @@ namespace ash {
 class WindowSelectorWindow : public WindowSelectorItem {
  public:
   explicit WindowSelectorWindow(aura::Window* window);
-  virtual ~WindowSelectorWindow();
+  ~WindowSelectorWindow() override;
 
   // WindowSelectorItem:
-  virtual aura::Window* GetRootWindow() OVERRIDE;
-  virtual bool HasSelectableWindow(const aura::Window* window) OVERRIDE;
-  virtual bool Contains(const aura::Window* target) OVERRIDE;
-  virtual void RestoreWindowOnExit(aura::Window* window) OVERRIDE;
-  virtual aura::Window* SelectionWindow() OVERRIDE;
-  virtual void RemoveWindow(const aura::Window* window) OVERRIDE;
-  virtual bool empty() const OVERRIDE;
-  virtual void PrepareForOverview() OVERRIDE;
-  virtual void SetItemBounds(aura::Window* root_window,
-                             const gfx::Rect& target_bounds,
-                             bool animate) OVERRIDE;
-  virtual void SetOpacity(float opacity) OVERRIDE;
+  aura::Window* GetRootWindow() override;
+  bool HasSelectableWindow(const aura::Window* window) override;
+  bool Contains(const aura::Window* target) override;
+  void RestoreWindowOnExit(aura::Window* window) override;
+  aura::Window* SelectionWindow() override;
+  void RemoveWindow(const aura::Window* window) override;
+  bool empty() const override;
+  void PrepareForOverview() override;
+  void SetItemBounds(aura::Window* root_window,
+                     const gfx::Rect& target_bounds,
+                     bool animate) override;
+  void SetOpacity(float opacity) override;
 
  private:
   // The window with a scoped transform represented by this selector item.

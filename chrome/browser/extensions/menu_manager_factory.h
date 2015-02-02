@@ -29,14 +29,14 @@ class MenuManagerFactory : public BrowserContextKeyedServiceFactory {
   friend struct DefaultSingletonTraits<MenuManagerFactory>;
 
   MenuManagerFactory();
-  virtual ~MenuManagerFactory();
+  ~MenuManagerFactory() override;
 
-  virtual KeyedService* BuildServiceInstanceFor(
-      content::BrowserContext* context) const OVERRIDE;
-  virtual content::BrowserContext* GetBrowserContextToUse(
-      content::BrowserContext* context) const OVERRIDE;
-  virtual bool ServiceIsCreatedWithBrowserContext() const OVERRIDE;
-  virtual bool ServiceIsNULLWhileTesting() const OVERRIDE;
+  KeyedService* BuildServiceInstanceFor(
+      content::BrowserContext* context) const override;
+  content::BrowserContext* GetBrowserContextToUse(
+      content::BrowserContext* context) const override;
+  bool ServiceIsCreatedWithBrowserContext() const override;
+  bool ServiceIsNULLWhileTesting() const override;
 };
 
 }  // namespace extensions

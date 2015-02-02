@@ -21,6 +21,7 @@ namespace switches {
 
 // Please keep alphabetized.
 CHROMEOS_EXPORT extern const char kAppOemManifestFile[];
+CHROMEOS_EXPORT extern const char kArtifactsDir[];
 CHROMEOS_EXPORT extern const char kAshWebUIInit[];
 CHROMEOS_EXPORT extern const char kConsumerDeviceManagementUrl[];
 CHROMEOS_EXPORT extern const char kDbusStub[];
@@ -29,7 +30,7 @@ CHROMEOS_EXPORT extern const char kDerelictDetectionTimeout[];
 CHROMEOS_EXPORT extern const char kDerelictIdleTimeout[];
 CHROMEOS_EXPORT extern const char kDisableBootAnimation[];
 CHROMEOS_EXPORT extern const char kDisableDemoMode[];
-CHROMEOS_EXPORT extern const char kDisableEasySignin[];
+CHROMEOS_EXPORT extern const char kDisableDeviceDisabling[];
 CHROMEOS_EXPORT extern const char kDisableGaiaServices[];
 CHROMEOS_EXPORT extern const char kDisableHIDDetectionOnOOBE[];
 CHROMEOS_EXPORT extern const char kDisableLoginAnimations[];
@@ -37,18 +38,23 @@ CHROMEOS_EXPORT extern const char kDisableLoginScrollIntoView[];
 CHROMEOS_EXPORT extern const char kDisableNetworkPortalNotification[];
 CHROMEOS_EXPORT extern const char kDisableNewChannelSwitcherUI[];
 CHROMEOS_EXPORT extern const char kDisableNewKioskUI[];
+CHROMEOS_EXPORT extern const char kDisableNewZIPUnpacker[];
 CHROMEOS_EXPORT extern const char kDisableOfficeEditingComponentApp[];
+CHROMEOS_EXPORT extern const char kDisableRollbackOption[];
 CHROMEOS_EXPORT extern const char kDisableVolumeAdjustSound[];
 CHROMEOS_EXPORT extern const char kEnableCarrierSwitching[];
 CHROMEOS_EXPORT extern const char kEnableChromeVoxNext[];
+CHROMEOS_EXPORT extern const char kEnableCloudBackup[];
 CHROMEOS_EXPORT extern const char kEnableConsumerManagement[];
 CHROMEOS_EXPORT extern const char kEnableEmbeddedSignin[];
 CHROMEOS_EXPORT extern const char kEnableExtensionAssetsSharing[];
 CHROMEOS_EXPORT extern const char kEnableFirstRunUITransitions[];
 CHROMEOS_EXPORT extern const char kEnableKioskMode[];
 CHROMEOS_EXPORT extern const char kEnableNetworkPortalNotification[];
+CHROMEOS_EXPORT extern const char kEnableNewKoreanIme[];
+CHROMEOS_EXPORT extern const char kEnablePhysicalKeyboardAutocorrect[];
 CHROMEOS_EXPORT extern const char kEnableRequestTabletSite[];
-CHROMEOS_EXPORT extern const char kEnableRollbackOption[];
+CHROMEOS_EXPORT extern const char kEnableScreenshotTestingWithMode[];
 CHROMEOS_EXPORT extern const char kEnableTouchpadThreeFingerClick[];
 CHROMEOS_EXPORT extern const char kEnableVideoPlayerChromecastSupport[];
 CHROMEOS_EXPORT extern const char kEnterpriseEnableForcedReEnrollment[];
@@ -58,6 +64,7 @@ CHROMEOS_EXPORT extern const char kEnterpriseEnrollmentSkipRobotAuth[];
 CHROMEOS_EXPORT extern const char kFirstExecAfterBoot[];
 CHROMEOS_EXPORT extern const char kForceFirstRunUI[];
 CHROMEOS_EXPORT extern const char kForceLoginManagerInTests[];
+CHROMEOS_EXPORT extern const char kGoldenScreenshotsDir[];
 CHROMEOS_EXPORT extern const char kGuestSession[];
 CHROMEOS_EXPORT extern const char kHasChromeOSDiamondKey[];
 CHROMEOS_EXPORT extern const char kHasChromeOSKeyboard[];
@@ -78,9 +85,6 @@ CHROMEOS_EXPORT extern const char kSmsTestMessages[];
 CHROMEOS_EXPORT extern const char kStubCrosSettings[];
 CHROMEOS_EXPORT extern const char kTestAutoUpdateUI[];
 CHROMEOS_EXPORT extern const char kWakeOnPackets[];
-CHROMEOS_EXPORT extern const char kEnableScreenshotTestingWithMode[];
-CHROMEOS_EXPORT extern const char kGoldenScreenshotsDir[];
-CHROMEOS_EXPORT extern const char kArtifactsDir[];
 
 }  // namespace switches
 }  // namespace chromeos

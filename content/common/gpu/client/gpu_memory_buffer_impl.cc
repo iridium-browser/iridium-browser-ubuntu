@@ -8,56 +8,51 @@
 
 namespace content {
 
-GpuMemoryBufferImpl::GpuMemoryBufferImpl(const gfx::Size& size,
-                                         unsigned internalformat,
+GpuMemoryBufferImpl::GpuMemoryBufferImpl(gfx::GpuMemoryBufferId id,
+                                         const gfx::Size& size,
+                                         Format format,
                                          const DestructionCallback& callback)
-    : size_(size),
-      internalformat_(internalformat),
+    : id_(id),
+      size_(size),
+      format_(format),
       callback_(callback),
-      mapped_(false) {
-  DCHECK(IsFormatValid(internalformat));
+      mapped_(false),
+      destruction_sync_point_(0) {
 }
 
 GpuMemoryBufferImpl::~GpuMemoryBufferImpl() {
-  callback_.Run();
+  callback_.Run(destruction_sync_point_);
 }
 
 // static
-bool GpuMemoryBufferImpl::IsFormatValid(unsigned internalformat) {
-  switch (internalformat) {
-    case GL_BGRA8_EXT:
-    case GL_RGBA8_OES:
-    case GL_RGB8_OES:
-      return true;
-    default:
-      return false;
-  }
+GpuMemoryBufferImpl* GpuMemoryBufferImpl::FromClientBuffer(
+    ClientBuffer buffer) {
+  return reinterpret_cast<GpuMemoryBufferImpl*>(buffer);
 }
 
 // static
-bool GpuMemoryBufferImpl::IsUsageValid(unsigned usage) {
-  switch (usage) {
-    case GL_IMAGE_MAP_CHROMIUM:
-    case GL_IMAGE_SCANOUT_CHROMIUM:
-      return true;
-    default:
-      return false;
-  }
-}
-
-// static
-size_t GpuMemoryBufferImpl::BytesPerPixel(unsigned internalformat) {
-  switch (internalformat) {
-    case GL_BGRA8_EXT:
-    case GL_RGBA8_OES:
-    case GL_RGB8_OES:
+size_t GpuMemoryBufferImpl::BytesPerPixel(Format format) {
+  switch (format) {
+    case RGBA_8888:
+    case RGBX_8888:
+    case BGRA_8888:
       return 4;
-    default:
-      NOTREACHED();
-      return 0;
   }
+
+  NOTREACHED();
+  return 0;
 }
 
-bool GpuMemoryBufferImpl::IsMapped() const { return mapped_; }
+gfx::GpuMemoryBuffer::Format GpuMemoryBufferImpl::GetFormat() const {
+  return format_;
+}
+
+bool GpuMemoryBufferImpl::IsMapped() const {
+  return mapped_;
+}
+
+ClientBuffer GpuMemoryBufferImpl::AsClientBuffer() {
+  return reinterpret_cast<ClientBuffer>(this);
+}
 
 }  // namespace content

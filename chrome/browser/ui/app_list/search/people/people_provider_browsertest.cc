@@ -11,14 +11,15 @@
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/ui/app_list/search/chrome_search_result.h"
 #include "chrome/browser/ui/app_list/search/people/people_provider.h"
+#include "chrome/browser/ui/app_list/test/test_app_list_controller_delegate.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
+#include "ui/app_list/search_result.h"
 
 using content::BrowserThread;
 using net::test_server::BasicHttpResponse;
@@ -162,10 +163,10 @@ const char kThreeValidResults[] = "{"
 class PeopleProviderTest : public InProcessBrowserTest {
  public:
   PeopleProviderTest() {}
-  virtual ~PeopleProviderTest() {}
+  ~PeopleProviderTest() override {}
 
   // InProcessBrowserTest overrides:
-  virtual void SetUpOnMainThread() OVERRIDE {
+  void SetUpOnMainThread() override {
     test_server_.reset(new EmbeddedTestServer);
 
     ASSERT_TRUE(test_server_->InitializeAndWaitUntilReady());
@@ -174,7 +175,7 @@ class PeopleProviderTest : public InProcessBrowserTest {
                    base::Unretained(this)));
 
     people_provider_.reset(new PeopleProvider(
-        ProfileManager::GetActiveUserProfile()));
+        ProfileManager::GetActiveUserProfile(), &test_controller_));
 
     people_provider_->SetupForTest(
         base::Bind(&PeopleProviderTest::OnSearchResultsFetched,
@@ -183,7 +184,7 @@ class PeopleProviderTest : public InProcessBrowserTest {
     people_provider_->set_use_throttling(false);
   }
 
-  virtual void TearDownOnMainThread() OVERRIDE {
+  void TearDownOnMainThread() override {
     EXPECT_TRUE(test_server_->ShutdownAndWaitUntilComplete());
     test_server_.reset();
   }
@@ -228,7 +229,7 @@ class PeopleProviderTest : public InProcessBrowserTest {
     response->set_code(net::HTTP_OK);
     response->set_content(mock_server_response_);
 
-    return response.PassAs<HttpResponse>();
+    return response.Pass();
   }
 
   void OnSearchResultsFetched() {
@@ -242,6 +243,7 @@ class PeopleProviderTest : public InProcessBrowserTest {
   std::string mock_server_response_;
 
   scoped_ptr<PeopleProvider> people_provider_;
+  ::test::TestAppListControllerDelegate test_controller_;
 
   DISALLOW_COPY_AND_ASSIGN(PeopleProviderTest);
 };
@@ -256,7 +258,7 @@ IN_PROC_BROWSER_TEST_F(PeopleProviderTest, Basic) {
     {"person", kThreeValidResults, "first person,second person,third person" },
   };
 
-  for (size_t i = 0; i < ARRAYSIZE_UNSAFE(kTestCases); ++i) {
+  for (size_t i = 0; i < arraysize(kTestCases); ++i) {
     EXPECT_EQ(kTestCases[i].expected_results_content,
               RunQuery(kTestCases[i].query,
                        kTestCases[i].mock_server_response))

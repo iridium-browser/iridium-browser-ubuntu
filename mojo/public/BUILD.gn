@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//mojo/public/mojo.gni")
+
 group("public") {
   # Meta-target, don't link into production code.
   testonly = true
@@ -13,11 +15,18 @@ group("public") {
     "//mojo/public/cpp/environment:standalone",
     "//mojo/public/cpp/utility",
     "//mojo/public/interfaces/bindings/tests:test_interfaces",
+    "//mojo/public/sky",
   ]
 
   if (is_linux) {
     deps += [
       "//mojo/public/python",
+    ]
+  }
+
+  if (mojo_use_dart) {
+    deps += [
+      "//mojo/public/dart",
     ]
   }
 
@@ -37,7 +46,7 @@ group("sdk") {
     "//mojo/public/cpp/environment:standalone",
     "//mojo/public/cpp/utility",
     "//mojo/public/interfaces/application",
-    "//mojo/public/js/bindings",
+    "//mojo/public/js",
   ]
 }
 

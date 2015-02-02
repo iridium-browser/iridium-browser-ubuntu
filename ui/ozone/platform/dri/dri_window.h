@@ -9,55 +9,60 @@
 #include "ui/events/platform/platform_event_dispatcher.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/ozone/platform/dri/channel_observer.h"
 #include "ui/platform_window/platform_window.h"
 
 namespace ui {
 
 class DriWindowDelegate;
-class DriWindowDelegateManager;
 class DriWindowManager;
 class EventFactoryEvdev;
+class DriGpuPlatformSupportHost;
 
 class DriWindow : public PlatformWindow,
-                  public PlatformEventDispatcher {
+                  public PlatformEventDispatcher,
+                  public ChannelObserver {
  public:
   DriWindow(PlatformWindowDelegate* delegate,
             const gfx::Rect& bounds,
-            scoped_ptr<DriWindowDelegate> dri_window_delegate,
+            DriGpuPlatformSupportHost* sender,
             EventFactoryEvdev* event_factory,
-            DriWindowDelegateManager* window_delegate_manager,
             DriWindowManager* window_manager);
-  virtual ~DriWindow();
+  ~DriWindow() override;
 
   void Initialize();
 
   // PlatformWindow:
-  virtual void Show() OVERRIDE;
-  virtual void Hide() OVERRIDE;
-  virtual void Close() OVERRIDE;
-  virtual void SetBounds(const gfx::Rect& bounds) OVERRIDE;
-  virtual gfx::Rect GetBounds() OVERRIDE;
-  virtual void SetCapture() OVERRIDE;
-  virtual void ReleaseCapture() OVERRIDE;
-  virtual void ToggleFullscreen() OVERRIDE;
-  virtual void Maximize() OVERRIDE;
-  virtual void Minimize() OVERRIDE;
-  virtual void Restore() OVERRIDE;
-  virtual void SetCursor(PlatformCursor cursor) OVERRIDE;
-  virtual void MoveCursorTo(const gfx::Point& location) OVERRIDE;
+  void Show() override;
+  void Hide() override;
+  void Close() override;
+  void SetBounds(const gfx::Rect& bounds) override;
+  gfx::Rect GetBounds() override;
+  void SetCapture() override;
+  void ReleaseCapture() override;
+  void ToggleFullscreen() override;
+  void Maximize() override;
+  void Minimize() override;
+  void Restore() override;
+  void SetCursor(PlatformCursor cursor) override;
+  void MoveCursorTo(const gfx::Point& location) override;
 
   // PlatformEventDispatcher:
-  virtual bool CanDispatchEvent(const PlatformEvent& event) OVERRIDE;
-  virtual uint32_t DispatchEvent(const PlatformEvent& event) OVERRIDE;
+  bool CanDispatchEvent(const PlatformEvent& event) override;
+  uint32_t DispatchEvent(const PlatformEvent& event) override;
+
+  // ChannelObserver:
+  void OnChannelEstablished() override;
+  void OnChannelDestroyed() override;
 
  private:
-  PlatformWindowDelegate* delegate_;
+  PlatformWindowDelegate* delegate_;   // Not owned.
+  DriGpuPlatformSupportHost* sender_;  // Not owned.
+  EventFactoryEvdev* event_factory_;   // Not owned.
+  DriWindowManager* window_manager_;   // Not owned.
+
   gfx::Rect bounds_;
   gfx::AcceleratedWidget widget_;
-  DriWindowDelegate* dri_window_delegate_;
-  EventFactoryEvdev* event_factory_;
-  DriWindowDelegateManager* window_delegate_manager_;
-  DriWindowManager* window_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(DriWindow);
 };

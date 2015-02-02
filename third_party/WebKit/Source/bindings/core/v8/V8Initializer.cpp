@@ -30,6 +30,7 @@
 #include "bindings/core/v8/ScriptCallStackFactory.h"
 #include "bindings/core/v8/ScriptController.h"
 #include "bindings/core/v8/ScriptProfiler.h"
+#include "bindings/core/v8/ScriptValue.h"
 #include "bindings/core/v8/V8Binding.h"
 #include "bindings/core/v8/V8DOMException.h"
 #include "bindings/core/v8/V8ErrorEvent.h"
@@ -45,11 +46,16 @@
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
+#include "core/inspector/ConsoleMessage.h"
+#include "core/inspector/ScriptArguments.h"
 #include "core/inspector/ScriptCallStack.h"
 #include "platform/EventDispatchForbiddenScope.h"
+#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/TraceEvent.h"
+#include "platform/scheduler/Scheduler.h"
 #include "public/platform/Platform.h"
 #include "wtf/RefPtr.h"
+#include "wtf/ThreadSpecific.h"
 #include "wtf/text/WTFString.h"
 #include <v8-debug.h>
 
@@ -138,7 +144,7 @@ static void messageHandlerInMainThread(v8::Handle<v8::Message> message, v8::Hand
     // FIXME: Can we even get here during initialization now that we bail out when GetEntered returns an empty handle?
     LocalFrame* frame = enteredWindow->document()->frame();
     if (frame && frame->script().existingWindowProxy(scriptState->world())) {
-        V8ErrorHandler::storeExceptionOnErrorEventWrapper(event.get(), data, scriptState->context()->Global(), isolate);
+        V8ErrorHandler::storeExceptionOnErrorEventWrapper(isolate, event.get(), data, scriptState->context()->Global());
     }
 
     if (scriptState->world().isPrivateScriptIsolatedWorld()) {
@@ -153,6 +159,140 @@ static void messageHandlerInMainThread(v8::Handle<v8::Message> message, v8::Hand
     } else {
         enteredWindow->document()->reportException(event.release(), scriptId, callStack, corsStatus);
     }
+}
+
+namespace {
+
+class PromiseRejectMessage {
+    ALLOW_ONLY_INLINE_ALLOCATION();
+public:
+    PromiseRejectMessage(const ScriptValue& promise, PassRefPtrWillBeRawPtr<ScriptCallStack> callStack)
+        : m_promise(promise)
+        , m_callStack(callStack)
+    {
+    }
+
+    void trace(Visitor* visitor)
+    {
+        visitor->trace(m_callStack);
+    }
+
+    const ScriptValue m_promise;
+    const RefPtrWillBeMember<ScriptCallStack> m_callStack;
+};
+
+} // namespace
+
+typedef Deque<PromiseRejectMessage> PromiseRejectMessageQueue;
+
+static PromiseRejectMessageQueue& promiseRejectMessageQueue()
+{
+    AtomicallyInitializedStatic(ThreadSpecific<PromiseRejectMessageQueue>*, queue = new ThreadSpecific<PromiseRejectMessageQueue>);
+    return **queue;
+}
+
+void V8Initializer::reportRejectedPromises()
+{
+    PromiseRejectMessageQueue& queue = promiseRejectMessageQueue();
+    while (!queue.isEmpty()) {
+        PromiseRejectMessage message = queue.takeFirst();
+        ScriptState* scriptState = message.m_promise.scriptState();
+        if (!scriptState->contextIsValid())
+            continue;
+        // If execution termination has been triggered, quietly bail out.
+        if (v8::V8::IsExecutionTerminating(scriptState->isolate()))
+            continue;
+        ExecutionContext* executionContext = scriptState->executionContext();
+        if (!executionContext)
+            continue;
+
+        ScriptState::Scope scope(scriptState);
+
+        ASSERT(!message.m_promise.isEmpty());
+        v8::Handle<v8::Value> value = message.m_promise.v8Value();
+        ASSERT(!value.IsEmpty() && value->IsPromise());
+        if (v8::Handle<v8::Promise>::Cast(value)->HasHandler())
+            continue;
+
+        const String errorMessage = "Unhandled promise rejection";
+        Vector<ScriptValue> args;
+        args.append(ScriptValue(scriptState, v8String(scriptState->isolate(), errorMessage)));
+        args.append(message.m_promise);
+        RefPtrWillBeRawPtr<ScriptArguments> arguments = ScriptArguments::create(scriptState, args);
+
+        RefPtrWillBeRawPtr<ConsoleMessage> consoleMessage = ConsoleMessage::create(JSMessageSource, ErrorMessageLevel, errorMessage);
+        consoleMessage->setScriptArguments(arguments);
+        consoleMessage->setCallStack(message.m_callStack);
+        executionContext->addConsoleMessage(consoleMessage.release());
+    }
+}
+
+static void promiseRejectHandlerInMainThread(v8::PromiseRejectMessage message)
+{
+    ASSERT(isMainThread());
+
+    if (message.GetEvent() != v8::kPromiseRejectWithNoHandler)
+        return;
+
+    // It's possible that promiseRejectHandlerInMainThread() is invoked while we're initializing a window.
+    // In that half-baked situation, we don't have a valid context nor a valid world,
+    // so just return immediately.
+    if (DOMWrapperWorld::windowIsBeingInitialized())
+        return;
+
+    v8::Handle<v8::Promise> promise = message.GetPromise();
+
+    // Bail out if called during context initialization.
+    v8::Isolate* isolate = promise->GetIsolate();
+    v8::Handle<v8::Context> context = isolate->GetCurrentContext();
+    if (context.IsEmpty())
+        return;
+    v8::Handle<v8::Value> global = V8Window::findInstanceInPrototypeChain(context->Global(), context->GetIsolate());
+    if (global.IsEmpty())
+        return;
+    if (!toFrameIfNotDetached(context))
+        return;
+
+    RefPtrWillBeRawPtr<ScriptCallStack> callStack = nullptr;
+    v8::Handle<v8::StackTrace> stackTrace = message.GetStackTrace();
+    if (!stackTrace.IsEmpty() && stackTrace->GetFrameCount() > 0)
+        callStack = createScriptCallStack(stackTrace, ScriptCallStack::maxCallStackSizeToCapture, isolate);
+
+    if (!callStack && V8DOMWrapper::isDOMWrapper(message.GetValue())) {
+        // Try to get the stack from a wrapped exception object (e.g. DOMException).
+        v8::Handle<v8::Object> obj = v8::Handle<v8::Object>::Cast(message.GetValue());
+        v8::Handle<v8::Value> error = V8HiddenValue::getHiddenValue(isolate, obj, V8HiddenValue::error(isolate));
+        if (!error.IsEmpty()) {
+            stackTrace = v8::Exception::GetStackTrace(error);
+            if (!stackTrace.IsEmpty() && stackTrace->GetFrameCount() > 0)
+                callStack = createScriptCallStack(stackTrace, ScriptCallStack::maxCallStackSizeToCapture, isolate);
+        }
+    }
+
+    ScriptState* scriptState = ScriptState::from(context);
+    promiseRejectMessageQueue().append(PromiseRejectMessage(ScriptValue(scriptState, promise), callStack));
+}
+
+static void promiseRejectHandlerInWorker(v8::PromiseRejectMessage message)
+{
+    if (message.GetEvent() != v8::kPromiseRejectWithNoHandler)
+        return;
+
+    v8::Handle<v8::Promise> promise = message.GetPromise();
+
+    // Bail out if called during context initialization.
+    v8::Isolate* isolate = promise->GetIsolate();
+    v8::Handle<v8::Context> context = isolate->GetCurrentContext();
+    if (context.IsEmpty())
+        return;
+
+    RefPtrWillBeRawPtr<ScriptCallStack> callStack = nullptr;
+    v8::Handle<v8::StackTrace> stackTrace = message.GetStackTrace();
+    if (!stackTrace.IsEmpty() && stackTrace->GetFrameCount() > 0)
+        callStack = createScriptCallStack(stackTrace, ScriptCallStack::maxCallStackSizeToCapture, isolate);
+
+    ScriptState* scriptState = ScriptState::from(context);
+    promiseRejectMessageQueue().append(PromiseRejectMessage(ScriptValue(scriptState, promise), callStack));
 }
 
 static void failedAccessCheckCallbackInMainThread(v8::Local<v8::Object> host, v8::AccessType type, v8::Local<v8::Value> data)
@@ -176,6 +316,31 @@ static bool codeGenerationCheckCallbackInMainThread(v8::Local<v8::Context> conte
             return policy->allowEval(ScriptState::from(context));
     }
     return false;
+}
+
+static void idleGCTaskInMainThread(double deadlineSeconds);
+
+static void postIdleGCTaskMainThread()
+{
+    if (RuntimeEnabledFeatures::v8IdleTasksEnabled()) {
+        Scheduler* scheduler = Scheduler::shared();
+        if (scheduler)
+            scheduler->postIdleTask(FROM_HERE, WTF::bind<double>(idleGCTaskInMainThread));
+    }
+}
+
+static void idleGCTaskInMainThread(double deadlineSeconds)
+{
+    ASSERT(isMainThread());
+    ASSERT(RuntimeEnabledFeatures::v8IdleTasksEnabled());
+    v8::Isolate* isolate = v8::Isolate::GetCurrent();
+    // FIXME: Change V8's API to take a deadline - http://crbug.com/417668
+    double idleTimeInSeconds = deadlineSeconds - Platform::current()->monotonicallyIncreasingTime();
+    int idleTimeInMillis = static_cast<int>(idleTimeInSeconds * 1000);
+    if (idleTimeInMillis > 0)
+        isolate->IdleNotification(idleTimeInMillis);
+    // FIXME: only repost if there is more work to do.
+    postIdleGCTaskMainThread();
 }
 
 static void timerTraceProfilerInMainThread(const char* name, int status)
@@ -217,7 +382,10 @@ void V8Initializer::initializeMainThreadIfNeeded()
     v8::V8::SetFailedAccessCheckCallbackFunction(failedAccessCheckCallbackInMainThread);
     v8::V8::SetAllowCodeGenerationFromStringsCallback(codeGenerationCheckCallbackInMainThread);
 
+    postIdleGCTaskMainThread();
+
     isolate->SetEventLogger(timerTraceProfilerInMainThread);
+    isolate->SetPromiseRejectCallback(promiseRejectHandlerInMainThread);
 
     ScriptProfiler::initialize();
 }
@@ -230,14 +398,14 @@ static void reportFatalErrorInWorker(const char* location, const char* message)
 
 static void messageHandlerInWorker(v8::Handle<v8::Message> message, v8::Handle<v8::Value> data)
 {
-    static bool isReportingException = false;
+    v8::Isolate* isolate = v8::Isolate::GetCurrent();
+    V8PerIsolateData* perIsolateData = V8PerIsolateData::from(isolate);
     // Exceptions that occur in error handler should be ignored since in that case
     // WorkerGlobalScope::reportException will send the exception to the worker object.
-    if (isReportingException)
+    if (perIsolateData->isReportingException())
         return;
-    isReportingException = true;
+    perIsolateData->setReportingException(true);
 
-    v8::Isolate* isolate = v8::Isolate::GetCurrent();
     ScriptState* scriptState = ScriptState::current(isolate);
     // During the frame teardown, there may not be a valid context.
     if (ExecutionContext* context = scriptState->executionContext()) {
@@ -251,12 +419,12 @@ static void messageHandlerInWorker(v8::Handle<v8::Message> message, v8::Handle<v
         // If execution termination has been triggered as part of constructing
         // the error event from the v8::Message, quietly leave.
         if (!v8::V8::IsExecutionTerminating(isolate)) {
-            V8ErrorHandler::storeExceptionOnErrorEventWrapper(event.get(), data, scriptState->context()->Global(), isolate);
+            V8ErrorHandler::storeExceptionOnErrorEventWrapper(isolate, event.get(), data, scriptState->context()->Global());
             context->reportException(event.release(), scriptId, nullptr, corsStatus);
         }
     }
 
-    isReportingException = false;
+    perIsolateData->setReportingException(false);
 }
 
 static const int kWorkerMaxStackSize = 500 * 1024;
@@ -270,6 +438,7 @@ void V8Initializer::initializeWorker(v8::Isolate* isolate)
 
     uint32_t here;
     isolate->SetStackLimit(reinterpret_cast<uintptr_t>(&here - kWorkerMaxStackSize / sizeof(uint32_t*)));
+    isolate->SetPromiseRejectCallback(promiseRejectHandlerInWorker);
 }
 
 } // namespace blink

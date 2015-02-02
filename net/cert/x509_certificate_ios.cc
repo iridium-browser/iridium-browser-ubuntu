@@ -186,6 +186,22 @@ SHA1HashValue X509Certificate::CalculateFingerprint(
 }
 
 // static
+SHA256HashValue X509Certificate::CalculateFingerprint256(OSCertHandle cert) {
+  SHA256HashValue sha256;
+  memset(sha256.data, 0, sizeof(sha256.data));
+
+  ScopedCFTypeRef<CFDataRef> cert_data(SecCertificateCopyData(cert));
+  if (!cert_data)
+    return sha256;
+  DCHECK(CFDataGetBytePtr(cert_data));
+  DCHECK_NE(0, CFDataGetLength(cert_data));
+  CC_SHA256(
+      CFDataGetBytePtr(cert_data), CFDataGetLength(cert_data), sha256.data);
+
+  return sha256;
+}
+
+// static
 SHA1HashValue X509Certificate::CalculateCAFingerprint(
     const OSCertHandles& intermediates) {
   SHA1HashValue sha1;
@@ -232,6 +248,17 @@ void X509Certificate::GetPublicKeyInfo(OSCertHandle cert_handle,
                                        PublicKeyType* type) {
   x509_util_ios::NSSCertificate nss_cert(cert_handle);
   x509_util::GetPublicKeyInfo(nss_cert.cert_handle(), size_bits, type);
+}
+
+// static
+bool X509Certificate::IsSelfSigned(OSCertHandle cert_handle) {
+  x509_util_ios::NSSCertificate nss_cert(cert_handle);
+  crypto::ScopedSECKEYPublicKey public_key(
+      CERT_ExtractPublicKey(nss_cert.cert_handle()));
+  if (!public_key.get())
+    return false;
+  return SECSuccess == CERT_VerifySignedDataWithPublicKey(
+      &nss_cert.cert_handle()->signatureWrap, public_key.get(), NULL);
 }
 
 }  // namespace net

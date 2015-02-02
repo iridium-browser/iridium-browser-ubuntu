@@ -434,7 +434,7 @@ void ChannelProxy::ClearIPCTaskRunner() {
   context()->ClearIPCTaskRunner();
 }
 
-#if defined(OS_POSIX) && !defined(OS_NACL)
+#if defined(OS_POSIX) && !defined(OS_NACL_SFI)
 // See the TODO regarding lazy initialization of the channel in
 // ChannelProxy::Init().
 int ChannelProxy::GetClientFileDescriptor() {
@@ -446,7 +446,7 @@ int ChannelProxy::GetClientFileDescriptor() {
   return channel->GetClientFileDescriptor();
 }
 
-int ChannelProxy::TakeClientFileDescriptor() {
+base::ScopedFD ChannelProxy::TakeClientFileDescriptor() {
   DCHECK(CalledOnValidThread());
 
   Channel* channel = context_.get()->channel_.get();
