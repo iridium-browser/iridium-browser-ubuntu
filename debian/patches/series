@@ -20,7 +20,6 @@ arm-neon.patch
 ###: end lp:unity-chromium-extension
 breakpad
 gsettings-display-scaling
-touch-v35
 display-scaling-default-value
 display-scaling-report-hardware-info
 flash-redirection

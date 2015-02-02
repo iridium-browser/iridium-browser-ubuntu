@@ -1,6 +1,8 @@
---- a/ui/base/resource/data_pack.cc
-+++ b/ui/base/resource/data_pack.cc
-@@ -155,9 +155,11 @@ bool DataPack::LoadImpl() {
+Index: iridium-browser/ui/base/resource/data_pack.cc
+===================================================================
+--- iridium-browser.orig/ui/base/resource/data_pack.cc	2015-02-02 15:02:32.000000000 +0100
++++ iridium-browser/ui/base/resource/data_pack.cc	2015-02-02 15:03:02.000000000 +0100
+@@ -155,9 +155,11 @@
    // 2) Verify the entries are within the appropriate bounds. There's an extra
    // entry after the last item which gives us the length of the last item.
    for (size_t i = 0; i < resource_count_ + 1; ++i) {

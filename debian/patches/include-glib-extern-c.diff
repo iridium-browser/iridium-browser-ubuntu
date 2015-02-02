@@ -1,7 +1,7 @@
 Index: iridium-browser/ui/views/widget/desktop_aura/desktop_screen_x11.cc
 ===================================================================
---- iridium-browser.orig/ui/views/widget/desktop_aura/desktop_screen_x11.cc	2014-11-20 12:26:51.000000000 +0100
-+++ iridium-browser/ui/views/widget/desktop_aura/desktop_screen_x11.cc	2014-11-20 12:27:31.000000000 +0100
+--- iridium-browser.orig/ui/views/widget/desktop_aura/desktop_screen_x11.cc	2015-02-02 15:03:18.000000000 +0100
++++ iridium-browser/ui/views/widget/desktop_aura/desktop_screen_x11.cc	2015-02-02 15:03:23.000000000 +0100
 @@ -8,8 +8,10 @@
  #include <X11/Xlib.h>
  

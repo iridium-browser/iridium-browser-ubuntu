@@ -1,6 +1,8 @@
---- a/base/cpu.cc
-+++ b/base/cpu.cc
-@@ -135,7 +135,7 @@ class LazyCpuInfoValue {
+Index: iridium-browser/base/cpu.cc
+===================================================================
+--- iridium-browser.orig/base/cpu.cc	2015-02-02 15:02:32.000000000 +0100
++++ iridium-browser/base/cpu.cc	2015-02-02 15:03:20.000000000 +0100
+@@ -135,7 +135,7 @@
          brand_.assign(line.substr(strlen(kModelNamePrefix)));
        }
  
