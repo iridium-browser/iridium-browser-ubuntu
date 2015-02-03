@@ -271,7 +271,7 @@ Index: iridium-browser/ui/views/widget/native_widget_aura.h
        internal::NativeWidgetPrivate* native_widget,
        aura::Window* window);
  
-+  virtual void SetSessionID(uint32 sessionid) OVERRIDE;
++  virtual void SetSessionID(uint32 sessionid) override;
 +
    // Overridden from internal::NativeWidgetPrivate:
    void InitNativeWidget(const Widget::InitParams& params) override;
