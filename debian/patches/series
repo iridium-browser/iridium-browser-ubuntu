@@ -28,7 +28,7 @@ disable-sse2
 lp-translations-paths
 #gyp-icu-m32-test
 #mir-support
-macro-templates-not-match
+#macro-templates-not-match
 ### start: iridium-browser specific changes
 iridium-browser.diff
 include-glib-extern-c.diff
