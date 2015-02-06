@@ -33,4 +33,5 @@ lp-translations-paths
 iridium-browser.diff
 include-glib-extern-c.diff
 chromium-master-prefs-path.diff
+openmax_dl-arm-non-neon.diff
 ### end: iridium-browser specific changes
