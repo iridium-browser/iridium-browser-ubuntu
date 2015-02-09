@@ -1,3 +1,10 @@
+iridium-browser (40.0.2214.93-0iridium40.0+2) precise; urgency=low
+
+  * Disable patch that is no longer needed.
+  * Fixed wrong #defines when compiling openmax_dl for ARM on Linux.
+
+ -- Joachim Bauch <bauch@struktur.de>  Mon, 09 Feb 2015 09:43:05 +0100
+
 iridium-browser (40.0.2214.93-0iridium40.0+1) precise; urgency=low
 
   * Imported Upstream version 40.0.2214.93
