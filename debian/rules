@@ -313,17 +313,16 @@ ifeq (1,$(COMPONENT_SHARED_LIB_BUILD))
 endif
 
 	# Icons
-	cp -a $(DEB_TAR_SRCDIR)/chrome/app/theme/chromium/product_logo_48.png debian/iridium-browser/usr/share/pixmaps/iridium-browser.png
+	cp -a $(CURDIR)/debian/icons/sph48.png debian/iridium-browser/usr/share/pixmaps/iridium-browser.png
 	for size in 22 24 32 48 64 128 256 ; do \
-	  if test -f "$(DEB_TAR_SRCDIR)/chrome/app/theme/chromium/product_logo_$$size.png"; then \
+	  if test -f "$(CURDIR)/debian/icons/sph$$size.png"; then \
 	    dh_installdirs --package=iridium-browser usr/share/icons/hicolor/$${size}x$${size}/apps ; \
-	    cp -a $(DEB_TAR_SRCDIR)/chrome/app/theme/chromium/product_logo_$$size.png  \
+	    cp -a $(CURDIR)/debian/icons/sph$$size.png  \
 	      debian/iridium-browser/usr/share/icons/hicolor/$${size}x$${size}/apps/iridium-browser.png ; \
 	  else \
 	    echo "There is no size $${size} icon. We expected one."; \
 	  fi; \
 	done
-	cp -a debian/iridium-browser.svg debian/iridium-browser/usr/share/icons/hicolor/scalable/apps
 
 	##### Copy installed to package ####
 	(cd debian/tmp/$(LIB_DIR); tar cf - . --exclude=chromedriver;) | (cd debian/iridium-browser/$(LIB_DIR); tar xvf -;)
@@ -513,7 +512,6 @@ PACKAGED_NOT_FROM_TREE_MATCH += ^usr/share/doc/iridium-browser/copyright.problem
 PACKAGED_NOT_FROM_TREE_MATCH += ^usr/share/doc/.\*/buildinfo_.\*.gz$$
 PACKAGED_NOT_FROM_TREE_MATCH += ^usr/share/gnome-control-center/default-apps/iridium-browser.xml$$
 PACKAGED_NOT_FROM_TREE_MATCH += ^usr/share/.\*/iridium-browser.png$$
-PACKAGED_NOT_FROM_TREE_MATCH += ^usr/share/.\*/iridium-browser.svg$$
 PACKAGED_NOT_FROM_TREE_MATCH += ^usr/share/doc/.\*/copyright$$
 PACKAGED_NOT_FROM_TREE_MATCH += ^usr/share/doc/.\*/changelog.Debian.gz$$
 PACKAGED_NOT_FROM_TREE_MATCH += ^usr/bin/iridium-browser$$

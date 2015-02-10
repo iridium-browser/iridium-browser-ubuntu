@@ -1,3 +1,10 @@
+debian/icons/sph22.png
+debian/icons/sph24.png
+debian/icons/sph32.png
+debian/icons/sph48.png
+debian/icons/sph64.png
+debian/icons/sph128.png
+debian/icons/sph256.png
 debian/tests/testdata/1-normal-extension-active.sikuli/Extensions.png
 debian/tests/testdata/1-normal-extension-active.sikuli/menu-button.png
 debian/tests/testdata/1-normal-extension-active.sikuli/Settings-1.png
