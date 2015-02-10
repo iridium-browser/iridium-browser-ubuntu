@@ -1,9 +1,7 @@
 
-Index: iridium-browser/tools/find_depot_tools.py
-===================================================================
---- iridium-browser.orig/tools/find_depot_tools.py	2015-02-02 15:02:32.000000000 +0100
-+++ iridium-browser/tools/find_depot_tools.py	2015-02-02 15:03:16.000000000 +0100
-@@ -40,6 +40,3 @@
+--- a/tools/find_depot_tools.py
++++ b/tools/find_depot_tools.py
+@@ -40,6 +40,3 @@ def add_depot_tools_to_path():
    return None
  
  add_depot_tools_to_path()

@@ -5,29 +5,42 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 
 --- a/chrome/browser/metrics/chrome_browser_main_extra_parts_metrics.cc
 +++ b/chrome/browser/metrics/chrome_browser_main_extra_parts_metrics.cc
-@@ -124,7 +124,7 @@ void RecordLinuxGlibcVersion() {
- }
+@@ -26,7 +26,7 @@
+ #include "ui/events/event_switches.h"
+ #include "ui/gfx/screen.h"
  
- void RecordLinuxWindowManager() {
 -#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
 +#if defined(OS_LINUX) && !defined(OS_CHROMEOS) && 0
-   ui::WindowManagerName name = ui::GuessWindowManager();
-   UMALinuxWindowManager uma_name = UMA_LINUX_WINDOW_MANAGER_OTHER;
-   switch (name) {
---- /dev/null
-+++ b/chrome/browser/metrics/chrome_browser_main_extra_parts_metrics.cc.rej
-@@ -0,0 +1,11 @@
-+--- chrome/browser/metrics/chrome_browser_main_extra_parts_metrics.cc
-++++ chrome/browser/metrics/chrome_browser_main_extra_parts_metrics.cc
-+@@ -124,7 +124,7 @@
-+ }
-+ 
-+ void RecordLinuxWindowManager() {
-+-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
-++#if defined(USE_X11) && !defined(OS_CHROMEOS)
-+   ui::WindowManagerName name = ui::GuessWindowManager();
-+   UMALinuxWindowManager uma_name = UMA_LINUX_WINDOW_MANAGER_OTHER;
-+   switch (name) {
+ #include <gnu/libc-version.h>
+ 
+ #include "base/version.h"
+@@ -119,7 +119,7 @@ void RecordStartupMetricsOnBlockingPool(
+ }
+ 
+ void RecordLinuxGlibcVersion() {
+-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
++#if defined(OS_LINUX) && !defined(OS_CHROMEOS) && 0
+   Version version(gnu_get_libc_version());
+ 
+   UMALinuxGlibcVersion glibc_version_result = UMA_LINUX_GLIBC_NOT_PARSEABLE;
+@@ -145,7 +145,7 @@ void RecordLinuxGlibcVersion() {
+ #endif
+ }
+ 
+-#if defined(USE_X11) && !defined(OS_CHROMEOS)
++#if defined(USE_X11) && !defined(OS_CHROMEOS) && 0
+ UMALinuxWindowManager GetLinuxWindowManager() {
+   switch (ui::GuessWindowManager()) {
+     case ui::WM_UNKNOWN:
+@@ -243,7 +243,7 @@ void ChromeBrowserMainExtraPartsMetrics:
+ 
+ void ChromeBrowserMainExtraPartsMetrics::PostBrowserStart() {
+   RecordLinuxGlibcVersion();
+-#if defined(USE_X11) && !defined(OS_CHROMEOS)
++#if defined(USE_X11) && !defined(OS_CHROMEOS) && 0
+   UMA_HISTOGRAM_ENUMERATION("Linux.WindowManager",
+                             GetLinuxWindowManager(),
+                             UMA_LINUX_WINDOW_MANAGER_COUNT);
 --- a/chrome/browser/ui/aura/active_desktop_monitor.cc
 +++ b/chrome/browser/ui/aura/active_desktop_monitor.cc
 @@ -11,6 +11,8 @@
@@ -155,18 +168,18 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +#endif  // CHROME_BROWSER_UI_VIEWS_FRAME_BROWSER_DESKTOP_ROOT_WINDOW_HOST_OZONE_H_
 --- a/chrome/chrome_browser_ui.gypi
 +++ b/chrome/chrome_browser_ui.gypi
-@@ -1674,6 +1674,8 @@
-         'browser/ui/views/frame/desktop_browser_frame_aura.cc',
-         'browser/ui/views/frame/desktop_browser_frame_aura.h',
-         'browser/ui/views/frame/browser_desktop_window_tree_host.h',
-+        'browser/ui/views/frame/browser_desktop_root_window_host_ozone.cc',
-+        'browser/ui/views/frame/browser_desktop_root_window_host_ozone.h',
-         'browser/ui/views/frame/browser_desktop_window_tree_host_win.cc',
-         'browser/ui/views/frame/browser_desktop_window_tree_host_win.h',
-         'browser/ui/views/frame/browser_desktop_window_tree_host_x11.cc',
+@@ -2513,6 +2513,8 @@
+       'browser/ui/views/first_run_dialog.cc',
+       'browser/ui/views/first_run_dialog.h',
+       'browser/ui/views/frame/browser_desktop_window_tree_host.h',
++      'browser/ui/views/frame/browser_desktop_root_window_host_ozone.cc',
++      'browser/ui/views/frame/browser_desktop_root_window_host_ozone.h',
+       'browser/ui/views/frame/browser_desktop_window_tree_host_x11.cc',
+       'browser/ui/views/frame/browser_desktop_window_tree_host_x11.h',
+       'browser/ui/views/frame/native_browser_frame_factory_auralinux.cc',
 --- a/content/browser/browser_main_loop.cc
 +++ b/content/browser/browser_main_loop.cc
-@@ -125,6 +125,10 @@
+@@ -128,6 +128,10 @@
  #include "ui/gfx/x/x11_types.h"
  #endif
  
@@ -177,7 +190,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
  // One of the linux specific headers defines this as a macro.
  #ifdef DestroyAll
  #undef DestroyAll
-@@ -872,6 +876,11 @@ void BrowserMainLoop::ShutdownThreadsAnd
+@@ -924,6 +928,11 @@ void BrowserMainLoop::ShutdownThreadsAnd
      TRACE_EVENT0("shutdown", "BrowserMainLoop::Subsystem:GPUChannelFactory");
      if (BrowserGpuChannelHostFactory::instance())
        BrowserGpuChannelHostFactory::Terminate();
@@ -189,7 +202,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
    }
  
    // Must happen after the I/O thread is shutdown since this class lives on the
-@@ -1048,6 +1057,13 @@ int BrowserMainLoop::BrowserThreadsStart
+@@ -1104,6 +1113,13 @@ int BrowserMainLoop::BrowserThreadsStart
    }
  #endif  // defined(OS_MACOSX)
  
@@ -205,7 +218,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
    return result_code_;
 --- a/content/content_common.gypi
 +++ b/content/content_common.gypi
-@@ -724,6 +724,25 @@
+@@ -829,6 +829,25 @@
          },
       ]
      }],
@@ -233,7 +246,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
          '../media/media.gyp:media',
 --- a/content/gpu/gpu_main.cc
 +++ b/content/gpu/gpu_main.cc
-@@ -60,6 +60,10 @@
+@@ -63,6 +63,10 @@
  #include <sanitizer/asan_interface.h>
  #endif
  
@@ -244,7 +257,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
  const int kGpuTimeout = 10000;
  
  namespace content {
-@@ -353,6 +357,11 @@ int GpuMain(const MainFunctionParams& pa
+@@ -372,6 +376,11 @@ int GpuMain(const MainFunctionParams& pa
  
    {
      TRACE_EVENT0("gpu", "Run Message Loop");
@@ -491,9 +504,9 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +                                             ui::KeyboardCode code,
 +                                             uint16 CharacterCodeFromNativeKey,
 +                                             unsigned modifiers) {
-+  ui::KeyEvent keyev(type, code, modifiers, false);
-+  keyev.set_character(CharacterCodeFromNativeKey);
-+  data->DispatchEvent(&keyev);
++  //ui::KeyEvent keyev(type, modifiers, ?, ?, code);  // FIXME(chad): WTF strings  chrome/test/chromedriver/chrome/ui_events.cc
++  //keyev.set_character(CharacterCodeFromNativeKey);
++  //data->DispatchEvent(&keyev);
 +}
 +
 +void EventConverterInProcess::NotifyTouchEvent(EventConverterInProcess* data,
@@ -731,7 +744,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +#include "ozone/content/messages.h"
 --- /dev/null
 +++ b/ozone/content/messages.h
-@@ -0,0 +1,123 @@
+@@ -0,0 +1,124 @@
 +// Copyright 2013 Intel Corporation. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -834,8 +847,9 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +
 +IPC_MESSAGE_ROUTED0(WaylandWindow_ImeReset)  // NOLINT(readability/fn_size)
 +
-+IPC_MESSAGE_ROUTED1(WaylandWindow_ImeCaretBoundsChanged, // NOLINT(readability/
-+                    gfx::Rect /* ImeCaretBoundsChanged */)  //     fn_size)
++// FIXME(chad): Rect is not templated
++//IPC_MESSAGE_ROUTED1(WaylandWindow_ImeCaretBoundsChanged, // NOLINT(readability/
++//                    gfx::Rect /* ImeCaretBoundsChanged */)  //     fn_size)
 +
 +IPC_MESSAGE_ROUTED0(WaylandWindow_ShowInputPanel)  // NOLINT(readability/
 +                                                   //        fn_size)
@@ -1697,7 +1711,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +#endif  // OZONE_CONTENT_REMOTE_EVENT_DISPATCHER_H_
 --- /dev/null
 +++ b/ozone/content/remote_state_change_handler.cc
-@@ -0,0 +1,154 @@
+@@ -0,0 +1,155 @@
 +// Copyright 2014 Intel Corporation. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1812,7 +1826,8 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +    return;
 +  }
 +
-+  Send(new WaylandWindow_ImeCaretBoundsChanged(CHANNEL_ROUTE_ID, rect));
++  VLOG(1) << "Wanted to set IME carat bounds changed, but no Rect templated for IPC messages.";
++  //Send(new WaylandWindow_ImeCaretBoundsChanged(CHANNEL_ROUTE_ID, rect));
 +}
 +
 +void RemoteStateChangeHandler::HideInputPanel() {
@@ -1982,7 +1997,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +}
 --- /dev/null
 +++ b/ozone/mir/mir_display.cc
-@@ -0,0 +1,332 @@
+@@ -0,0 +1,319 @@
 +// Copyright 2014 The Chromium Authors. All rights reserved.
 +// Copyright 2014 Canonical LTD. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
@@ -2016,7 +2031,23 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +
 +om::Display::Display() : connection_(NULL) {
 +  gfx::OzoneDisplay::SetInstance(this);
-+  LOG(ERROR) << "ozonemir::Display::Display";
++
++  LOG(ERROR) << "ozonemir::Display::ctor  setting window-state-change instance";
++  ui::WindowStateChangeHandler::SetInstance(this);
++  //
++  // TODO: Does this really belong here?
++  LOG(ERROR) << "ozonemir::Display::ctor  setting IME-state-change instance";
++  ui::IMEStateChangeHandler::SetInstance(new NullIMEStateChangeHandler);
++    
++  LOG(ERROR) << "ozonemir::Display::ctor  connecting";
++  connection_ = mir_connect_sync("/tmp/mir_socket", "Chromium");
++  LOG(ERROR) << "ozonemir::Display::ctor  connected!";
++  if (!mir_connection_is_valid(connection_)) {
++    LOG(ERROR) << "SurfaceFactoryMir failed to initialize connection to remote Mir Server: "
++      << mir_connection_get_error_message(connection_);
++  }
++  
++  LOG(ERROR) << "ozonemir::Display::ctor  done, ret INITIALIZED";
 +  // TODO: Leak
 +}
 +
@@ -2028,36 +2059,6 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +//  ui::WindowStateChangeHandler::SetInstance(NULL);
 +}
 +
-+ui::SurfaceFactoryOzone::HardwareState
-+om::Display::InitializeHardware() {
-+  LOG(ERROR) << "ozonemir::Display::InitializeHardware";
-+  if (connection_) {
-+    LOG(ERROR) << "ozonemir::Display::InitializeHardware  already has connection, ret INITIALIZED";
-+    return ui::SurfaceFactoryOzone::INITIALIZED;
-+  }
-+  LOG(ERROR) << "ozonemir::Display::InitializeHardware  setting window-state-change instance";
-+  ui::WindowStateChangeHandler::SetInstance(this);
-+  // TODO: Does this really belong here?
-+  LOG(ERROR) << "ozonemir::Display::InitializeHardware  setting IME-state-change instance";
-+  ui::IMEStateChangeHandler::SetInstance(new NullIMEStateChangeHandler);
-+    
-+  LOG(ERROR) << "ozonemir::Display::InitializeHardware  connecting";
-+  connection_ = mir_connect_sync("/tmp/mir_socket", "Chromium");
-+  LOG(ERROR) << "ozonemir::Display::InitializeHardware  connected!";
-+  if (!mir_connection_is_valid(connection_)) {
-+    LOG(ERROR) << "SurfaceFactoryMir failed to initialize connection to remote Mir Server: "
-+      << mir_connection_get_error_message(connection_);
-+    return ui::SurfaceFactoryOzone::FAILED;
-+  }
-+  
-+  LOG(ERROR) << "ozonemir::Display::InitializeHardware  done, ret INITIALIZED";
-+  return ui::SurfaceFactoryOzone::INITIALIZED;
-+}
-+
-+void om::Display::ShutdownHardware() {
-+  LOG(ERROR) << "ozonemir::Display::ShutdownHardware";
-+  Terminate();
-+}
 +
 +intptr_t om::Display::GetNativeDisplay() {
 +  LOG(ERROR) << "ozonemir::Display::GetNativeDisplay";
@@ -2065,6 +2066,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +  return reinterpret_cast<intptr_t>(mir_connection_get_egl_native_display(connection_));
 +}
 +
++/*
 +gfx::AcceleratedWidget om::Display::GetAcceleratedWidget() {
 +  LOG(ERROR) << "ozonemir::Display::GetAccelleratedWidget";
 +  static int opaque_handle = 0; // TODO: Can this be called from multiple threads.
@@ -2079,6 +2081,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +    
 +  return (gfx::AcceleratedWidget)opaque_handle;
 +}
++*/
 +
 +scoped_ptr<ui::SurfaceOzoneEGL> om::Display::CreateEGLSurfaceForWidget(
 +    gfx::AcceleratedWidget w) {
@@ -2106,7 +2109,6 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +void om::Display::Terminate() {
 +  LOG(ERROR) << "ozonemir::Display::Terminate";
 +  DCHECK(mir_connection_is_valid(connection_));
-+  mir_connection_release(connection_);
 +}
 +
 +om::Window* om::Display::GetWidget(unsigned w) {
@@ -2317,7 +2319,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +}
 --- /dev/null
 +++ b/ozone/mir/mir_display.h
-@@ -0,0 +1,82 @@
+@@ -0,0 +1,83 @@
 +// Copyright 2014 The Chromium Authors. All rights reserved.
 +// Copyright 2014 Canonical LTD. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
@@ -2339,6 +2341,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +#include <functional>
 +
 +namespace ozonemir {
++
 +class Window;
 +
 +class Display : public gfx::OzoneDisplay, public ui::WindowStateChangeHandler {
@@ -2347,11 +2350,11 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +  virtual ~Display();
 +
 +  // gfx::OzoneDisplay
-+  virtual ui::SurfaceFactoryOzone::HardwareState InitializeHardware() OVERRIDE;
-+  virtual void ShutdownHardware() OVERRIDE;
++  //virtual HardwareState InitializeHardware() OVERRIDE;
++  //virtual void ShutdownHardware() OVERRIDE;
 +  virtual intptr_t GetNativeDisplay() OVERRIDE;
 +
-+  virtual gfx::AcceleratedWidget GetAcceleratedWidget() OVERRIDE;
++  //virtual gfx::AcceleratedWidget GetAcceleratedWidget() OVERRIDE;
 +  scoped_ptr<ui::SurfaceOzoneEGL> CreateEGLSurfaceForWidget(gfx::AcceleratedWidget w) OVERRIDE;
 +  virtual void LookAheadOutputGeometry() OVERRIDE;
 +  
@@ -3278,7 +3281,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +}  // namespace ui
 --- /dev/null
 +++ b/ozone/platform/ozone_platform_mir.h
-@@ -0,0 +1,71 @@
+@@ -0,0 +1,76 @@
 +// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -3295,7 +3298,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +#include "ozone/mir/mir_display.h"
 +#include "ui/ozone/public/cursor_factory_ozone.h"
 +//#include "ui/ozone/ime/input_method_context_factory_ozone.h"
-+#include "ui/ozone/ozone_platform.h"
++#include "ui/ozone/public/ozone_platform.h"
 +
 +namespace ui {
 +
@@ -3307,21 +3310,25 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +  OzonePlatformMir();
 +  ~OzonePlatformMir();
 +
++  virtual scoped_ptr<PlatformWindow> CreatePlatformWindow(
++      PlatformWindowDelegate* delegate,
++      const gfx::Rect& bounds) OVERRIDE {
++    // FIXME(chad): implement
++  }
++
 +  virtual inline ui::SurfaceFactoryOzone* GetSurfaceFactoryOzone() OVERRIDE {
 +      return &hardware_display_;
 +  }
 +
-+  virtual inline ui::EventFactoryOzone* GetEventFactoryOzone() OVERRIDE {
-+    return &event_factory_ozone_;
-+  }
-+
 +  virtual inline ui::CursorFactoryOzone* GetCursorFactoryOzone() OVERRIDE {
-+    return &cursor_factory_ozone_;
++    return NULL; // FIXME(chad)   def?    &cursor_factory_ozone_;
 +  }
 +
-+//  virtual inline ui::InputMethodContextFactoryOzone* GetInputMethodContextFactoryOzone() OVERRIDE {
-+//    return &input_method_context_factory_ozone_;
-+//  }
++#if 0
++  virtual inline ui::InputMethodContextFactoryOzone* GetInputMethodContextFactoryOzone() OVERRIDE {
++    return &input_method_context_factory_ozone_;
++  }
++#endif
 +
 +  virtual void InitializeGPU() OVERRIDE {}
 +
@@ -3330,13 +3337,14 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +  virtual ui::GpuPlatformSupport* GetGpuPlatformSupport() { return NULL; }
 +
 +  virtual ui::GpuPlatformSupportHost* GetGpuPlatformSupportHost() { return NULL; }
-+
 +  
 + private:
 +  ozonemir::Display hardware_display_;
++#if 0
 +  ui::EventFactoryOzoneWayland event_factory_ozone_;
 +  ui::CursorFactoryOzoneWayland cursor_factory_ozone_;
-+//  ui::InputMethodContextFactoryOzone input_method_context_factory_ozone_;
++  ui::InputMethodContextFactoryOzone input_method_context_factory_ozone_;
++#endif
 +#if defined(TOOLKIT_VIEWS) && !defined(OS_CHROMEOS)
 +  views::DesktopFactoryWayland desktop_factory_ozone_;
 +#endif
@@ -3352,7 +3360,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +#endif  // OZONE_PLATFORM_OZONE_PLATFORM_MIR_H_
 --- /dev/null
 +++ b/ozone/platform/ozone_platform_wayland.cc
-@@ -0,0 +1,93 @@
+@@ -0,0 +1,96 @@
 +// Copyright (c) 2013 The Chromium Authors. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -3368,7 +3376,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +#include "ozone/wayland/display.h"
 +#include "ozone/wayland/proxy_display.h"
 +#include "ui/ozone/public/cursor_factory_ozone.h"
-+#include "ui/ozone/ozone_platform.h"
++#include "ui/ozone/public/ozone_platform.h"
 +
 +namespace ui {
 +
@@ -3389,10 +3397,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +  virtual ui::SurfaceFactoryOzone* GetSurfaceFactoryOzone() OVERRIDE {
 +    return wayland_display_.get();
 +  }
-+  virtual EventFactoryOzone* GetEventFactoryOzone() OVERRIDE {
-+    return event_factory_ozone_.get();
-+  }
-+  virtual CursorFactoryOzone* GetCursorFactoryOzone() OVERRIDE {
++  virtual ui::CursorFactoryOzone* GetCursorFactoryOzone() OVERRIDE {
 +    return cursor_factory_ozone_.get();
 +  }
 +
@@ -3427,6 +3432,12 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +      event_factory_ozone_.reset(new ui::EventFactoryOzoneWayland());
 +  }
 +
++  virtual scoped_ptr<PlatformWindow> CreatePlatformWindow(
++      PlatformWindowDelegate* delegate,
++      const gfx::Rect& bounds) OVERRIDE {
++    // FIXME(chad): implement
++  }
++  //
 +  //virtual bool IsTranslucentWindowOpacitySupported() const { return true; }
 +
 + private:
@@ -3640,9 +3651,9 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +void CursorFactoryOzoneWayland::UnrefImageCursor(PlatformCursor cursor) {
 +}
 +
-+void CursorFactoryOzoneWayland::SetCursor(gfx::AcceleratedWidget widget,
-+                                   PlatformCursor cursor) {
-+}
++//void CursorFactoryOzoneWayland::SetCursor(gfx::AcceleratedWidget widget,
++                                   //PlatformCursor cursor) {
++//}
 +
 +}  // namespace ui
 --- /dev/null
@@ -3669,8 +3680,8 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +                                           const gfx::Point& hotspot) OVERRIDE;
 +  virtual void RefImageCursor(PlatformCursor cursor) OVERRIDE;
 +  virtual void UnrefImageCursor(PlatformCursor cursor) OVERRIDE;
-+  virtual void SetCursor(gfx::AcceleratedWidget widget,
-+                         PlatformCursor cursor) OVERRIDE;
++  //virtual void SetCursor(gfx::AcceleratedWidget widget,
++                         //PlatformCursor cursor) OVERRIDE;
 +};
 +
 +}  // namespace ui
@@ -4104,7 +4115,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +#endif  // OZONE_IMPL_DESKTOP_AURA_DESKTOP_SCREEN_WAYLAND_H__
 --- /dev/null
 +++ b/ozone/ui/desktop_aura/desktop_window_tree_host_wayland.cc
-@@ -0,0 +1,823 @@
+@@ -0,0 +1,820 @@
 +// Copyright 2013 The Chromium Authors. All rights reserved.
 +// Copyright 2013 Intel Corporation. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
@@ -4218,9 +4229,9 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +
 +void DesktopWindowTreeHostWayland::InitWaylandWindow(
 +    const Widget::InitParams& params) {
-+  ui::SurfaceFactoryOzone* surface_factory =
-+          ui::SurfaceFactoryOzone::GetInstance();
-+  window_ = surface_factory->GetAcceleratedWidget();
++  //ui::SurfaceFactoryOzone* surface_factory = ui::SurfaceFactoryOzone::GetInstance();
++  //window_ = surface_factory->GetAcceleratedWidget();
++  
 +  // Maintain parent child relation as done in X11 version.
 +  // If we have a parent, record the parent/child relationship. We use this
 +  // data during destruction to make sure that when we try to close a parent
@@ -4304,8 +4315,6 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +
 +  InitWaylandWindow(sanitized_params);
 +}
-+
-+void DesktopWindowTreeHostWayland::SetSessionID(uint32 sessionid) { }
 +
 +void DesktopWindowTreeHostWayland::OnNativeWidgetCreated(
 +    const Widget::InitParams& params) {
@@ -4394,7 +4403,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +  desktop_native_widget_aura_->OnHostClosed();
 +}
 +
-+views::NonClientFrameView* DesktopWindowTreeHostWayland::CreateNonClientFrameView() { return NULL; }
++//views::NonClientFrameView* DesktopWindowTreeHostWayland::CreateNonClientFrameView() { return NULL; }
 +
 +aura::WindowTreeHost* DesktopWindowTreeHostWayland::AsWindowTreeHost() {
 +  return this;
@@ -4752,9 +4761,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +  NOTIMPLEMENTED();
 +}
 +
-+void DesktopWindowTreeHostWayland::OnRootViewLayout() const {
-+  NOTIMPLEMENTED();
-+}
++//void DesktopWindowTreeHostWayland::OnRootViewLayout() const { NOTIMPLEMENTED(); }
 +
 +void DesktopWindowTreeHostWayland::OnNativeWidgetFocus() {
 +  native_widget_delegate_->AsWidget()->GetInputMethod()->OnFocus();
@@ -4855,9 +4862,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +  NOTIMPLEMENTED();
 +}
 +
-+void DesktopWindowTreeHostWayland::OnDeviceScaleFactorChanged(
-+    float device_scale_factor) {
-+}
++//void DesktopWindowTreeHostWayland::OnDeviceScaleFactorChanged( float device_scale_factor) { }
 +
 +////////////////////////////////////////////////////////////////////////////////
 +// DesktopWindowTreeHostWayland, Private implementation:
@@ -4927,10 +4932,13 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +
 +bool DesktopWindowTreeHostWayland::IsTranslucentWindowOpacitySupported() const { return true; }
 +
++void DesktopWindowTreeHostWayland::SizeConstraintsChanged() {}
++void DesktopWindowTreeHostWayland::OnRootViewLayout() {}
++
 +}  // namespace views
 --- /dev/null
 +++ b/ozone/ui/desktop_aura/desktop_window_tree_host_wayland.h
-@@ -0,0 +1,191 @@
+@@ -0,0 +1,193 @@
 +// Copyright 2013 The Chromium Authors. All rights reserved.
 +// Copyright 2013 Intel Corporation. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
@@ -4976,12 +4984,15 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +  static const std::vector<aura::Window*>& GetAllOpenWindows();
 +
 +  // Accepts a opaque handle widget and returns associated aura::Window.
-+  static aura::Window* GetContentWindowForAcceleratedWidget(
++    static aura::Window* GetContentWindowForAcceleratedWidget(
 +      gfx::AcceleratedWidget widget);
 +
 +  // Returns window bounds. This is used by Screen to determine if a point
 +  // belongs to a particular window.
 +  gfx::Rect GetBoundsInScreen() const;
++
++  virtual void OnRootViewLayout() OVERRIDE;
++  virtual void SizeConstraintsChanged() OVERRIDE;
 +
 + private:
 +  enum {
@@ -5050,7 +5061,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +      views::Widget::MoveLoopSource source,
 +      views::Widget::MoveLoopEscapeBehavior escape_behavior) OVERRIDE;
 +  virtual void EndMoveLoop() OVERRIDE;
-+  virtual NonClientFrameView* CreateNonClientFrameView() OVERRIDE;
++  //virtual NonClientFrameView* CreateNonClientFrameView() OVERRIDE;
 +  virtual void SetVisibilityChangedAnimationsEnabled(bool value) OVERRIDE;
 +  virtual bool ShouldUseNativeFrame() const OVERRIDE;
 +  virtual bool ShouldWindowContentsBeTransparent() const OVERRIDE;
@@ -5062,11 +5073,10 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +                              const gfx::ImageSkia& app_icon) OVERRIDE;
 +  virtual void InitModalType(ui::ModalType modal_type) OVERRIDE;
 +  virtual void FlashFrame(bool flash_frame) OVERRIDE;
-+  virtual void OnRootViewLayout() const OVERRIDE;
++  //virtual void OnRootViewLayout() const OVERRIDE;
 +  virtual void OnNativeWidgetFocus() OVERRIDE;
 +  virtual void OnNativeWidgetBlur() OVERRIDE;
 +  virtual bool IsAnimatingClosed() const OVERRIDE;
-+  void SetSessionID(uint32 sessionid) OVERRIDE;
 +
 +  // Overridden from aura::WindowTreeHost:
 +  virtual ui::EventSource* GetEventSource() OVERRIDE;
@@ -5082,7 +5092,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +  virtual void OnCursorVisibilityChangedNative(bool show) OVERRIDE;
 +  virtual void MoveCursorToNative(const gfx::Point& location) OVERRIDE;
 +  virtual void PostNativeEvent(const base::NativeEvent& native_event) OVERRIDE;
-+  virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE;
++  //virtual void OnDeviceScaleFactorChanged(float device_scale_factor) OVERRIDE;
 +  virtual bool IsTranslucentWindowOpacitySupported() const OVERRIDE;
 +
 +  void HandleNativeWidgetActivationChanged(bool active);
@@ -5258,7 +5268,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +  }
 +}
 +
-+NonClientFrameView* WindowTreeHostDelegateWayland::CreateNonClientFrameView() { return NULL; }
++//NonClientFrameView* WindowTreeHostDelegateWayland::CreateNonClientFrameView() { return NULL; }
 +
 +void WindowTreeHostDelegateWayland::OnRootWindowClosed(unsigned handle) {
 +  open_windows().remove(handle);
@@ -5604,7 +5614,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +  bool handle_event_ :1;
 +  bool stop_propogation_ :1;
 +
-+  virtual NonClientFrameView* CreateNonClientFrameView() OVERRIDE;
++  //virtual NonClientFrameView* CreateNonClientFrameView() OVERRIDE;
 +
 +  // Current dispatcher.
 +  DesktopWindowTreeHostWayland* current_dispatcher_;
@@ -5843,7 +5853,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +}  // namespace ui
 --- /dev/null
 +++ b/ozone/ui/events/event_factory_ozone_wayland.h
-@@ -0,0 +1,49 @@
+@@ -0,0 +1,50 @@
 +// Copyright 2014 Intel Corporation. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -5853,14 +5863,14 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +
 +#include "ozone/ui/events/event_converter_ozone_wayland.h"
 +#include "ozone/platform/ozone_export_wayland.h"
-+#include "ui/ozone/public/event_factory_ozone.h"
++//#include "ui/ozone/public/event_factory_ozone.h"
 +
 +namespace ui {
 +
 +class WindowChangeObserver;
 +class OutputChangeObserver;
 +
-+class OZONE_WAYLAND_EXPORT EventFactoryOzoneWayland : public EventFactoryOzone {
++class OZONE_WAYLAND_EXPORT EventFactoryOzoneWayland /*: public EventFactoryOzone */ {
 + public:
 +  EventFactoryOzoneWayland();
 +  virtual ~EventFactoryOzoneWayland();
@@ -5889,6 +5899,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +  OutputChangeObserver* output_observer_;
 +  static EventFactoryOzoneWayland* impl_;  // not owned
 +};
++
 +
 +}  // namespace ui
 +
@@ -6755,7 +6766,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +}
 --- /dev/null
 +++ b/ozone/ui/gfx/ozone_display.cc
-@@ -0,0 +1,74 @@
+@@ -0,0 +1,75 @@
 +// Copyright 2013 Intel Corporation. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -6790,18 +6801,18 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +void OzoneDisplay::LookAheadOutputGeometry() {
 +}
 +
-+ui::SurfaceFactoryOzone::HardwareState
-+OzoneDisplay::InitializeHardware() {
-+  return ui::SurfaceFactoryOzone::FAILED;
-+}
++//ui::SurfaceFactoryOzone::HardwareState
++//OzoneDisplay::InitializeHardware() {
++//  return ui::SurfaceFactoryOzone::FAILED;
++//}
 +
-+void OzoneDisplay::ShutdownHardware() {
-+}
++//void OzoneDisplay::ShutdownHardware() { }
 +
 +intptr_t OzoneDisplay::GetNativeDisplay() {
 +  return (intptr_t)NULL;
 +}
 +
++#ifdef BEFOREDECEMBER
 +gfx::AcceleratedWidget OzoneDisplay::GetAcceleratedWidget() {
 +  static int opaque_handle = 0;
 +  opaque_handle++;
@@ -6812,6 +6823,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +
 +  return (gfx::AcceleratedWidget)opaque_handle;
 +}
++#endif
 +
 +scoped_ptr<ui::SurfaceOzoneEGL> OzoneDisplay::CreateEGLSurfaceForWidget(
 +    gfx::AcceleratedWidget w) {
@@ -6833,7 +6845,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 --- /dev/null
 +++ b/ozone/ui/gfx/ozone_display.h
 @@ -0,0 +1,55 @@
-+// Copyright 2013 Intel Corporation. All rights reserved.
++// Copyright 2015 Intel Corporation. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
 +
@@ -6863,11 +6875,11 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +  virtual void LookAheadOutputGeometry();
 +
 +  // Ozone Display implementation:
-+  virtual ui::SurfaceFactoryOzone::HardwareState InitializeHardware() OVERRIDE;
-+  virtual void ShutdownHardware() OVERRIDE;
++  //virtual ui::SurfaceFactoryOzone::HardwareState InitializeHardware() OVERRIDE;
++  //virtual void ShutdownHardware() OVERRIDE;
 +  virtual intptr_t GetNativeDisplay() OVERRIDE;
 +
-+  virtual gfx::AcceleratedWidget GetAcceleratedWidget() OVERRIDE;
++  //virtual gfx::AcceleratedWidget GetAcceleratedWidget() OVERRIDE;
 +
 +  // Ownership is passed to the caller.
 +  virtual scoped_ptr<ui::SurfaceOzoneEGL> CreateEGLSurfaceForWidget(
@@ -7149,7 +7161,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +tiago.vignatti@intel.com
 --- /dev/null
 +++ b/ozone/wayland/display.cc
-@@ -0,0 +1,415 @@
+@@ -0,0 +1,419 @@
 +// Copyright 2013 The Chromium Authors. All rights reserved.
 +// Copyright 2013 Intel Corporation. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
@@ -7239,6 +7251,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +  return (gfx::AcceleratedWidget)widget->egl_window();
 +}
 +
++#if 0
 +ui::SurfaceFactoryOzone::HardwareState
 +WaylandDisplay::InitializeHardware() {
 +  LOG(ERROR) << "ozonewayland::WaylandDisplay::InitializeHardware";
@@ -7254,12 +7267,14 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +void WaylandDisplay::ShutdownHardware() {
 +  Terminate();
 +}
++#endif
 +
 +intptr_t WaylandDisplay::GetNativeDisplay() {
 +  LOG(ERROR) << "ozonewayland::WaylandDisplay::GetNativeDisplay";
 +  return (intptr_t)display_;
 +}
 +
++/*
 +gfx::AcceleratedWidget WaylandDisplay::GetAcceleratedWidget() {
 +  static int opaque_handle = 0;
 +  opaque_handle++;
@@ -7270,6 +7285,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +
 +  return (gfx::AcceleratedWidget)opaque_handle;
 +}
++*/
 +
 +scoped_ptr<ui::SurfaceOzoneEGL> WaylandDisplay::CreateEGLSurfaceForWidget(
 +    gfx::AcceleratedWidget w) {
@@ -7647,11 +7663,11 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +  void FlushDisplay();
 +
 +  // Ozone Display implementation:
-+  virtual ui::SurfaceFactoryOzone::HardwareState InitializeHardware() OVERRIDE;
-+  virtual void ShutdownHardware() OVERRIDE;
++  //virtual ui::SurfaceFactoryOzone::HardwareState InitializeHardware() OVERRIDE;
++  //virtual void ShutdownHardware() OVERRIDE;
 +  virtual intptr_t GetNativeDisplay() OVERRIDE;
 +
-+  virtual gfx::AcceleratedWidget GetAcceleratedWidget() OVERRIDE;
++  //virtual gfx::AcceleratedWidget GetAcceleratedWidget() OVERRIDE;
 +
 +  // Ownership is passed to the caller.
 +  virtual scoped_ptr<ui::SurfaceOzoneEGL> CreateEGLSurfaceForWidget(
@@ -11050,8 +11066,8 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +    if (!WaylandDisplay::GetInstance())
 +      return;
 +
-+    ui::EventFactoryOzoneWayland::GetInstance()->EventConverter()->
-+        OutputSizeChanged(width, height);
++    //ui::EventFactoryOzoneWayland::GetInstance()->EventConverter()->
++    //    OutputSizeChanged(width, height);
 +  }
 +}
 +
@@ -12406,7 +12422,7 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
 +      'target_name': 'wayland_toolkit',
 +      'type': 'static_library',
 +      'variables': {
-+        'WAYLAND_VERSION': '1.5.0',
++        'WAYLAND_VERSION': '1.6.0',
 +        'MESA_VERSION': '9.1.3',
 +        'wayland_packages': [
 +          'egl >= <(MESA_VERSION)',
@@ -12701,11 +12717,11 @@ X-rev-id: 166346ab7a00e8dbd23a9f32ddb5741ad5afb41f
    'variables': {
      'chromium_code': 1,
 +    'external_ozone_views_files': [],
-   },
-   'target_defaults': {
-     'conditions': [
-@@ -543,6 +544,9 @@
-           ],
+     # Sources lists shared with GN build.
+     'views_sources': [
+       'accessibility/native_view_accessibility.cc',
+@@ -658,6 +659,9 @@
+           'msvs_disabled_warnings': [ 4267, ],
          }],
          ['use_ozone==1', {
 +          'sources': [

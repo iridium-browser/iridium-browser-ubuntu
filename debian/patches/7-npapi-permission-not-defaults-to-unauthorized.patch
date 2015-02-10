@@ -1,7 +1,5 @@
-Index: iridium-browser/chrome/browser/browser_resources.grd
-===================================================================
---- iridium-browser.orig/chrome/browser/browser_resources.grd	2015-02-02 15:02:32.000000000 +0100
-+++ iridium-browser/chrome/browser/browser_resources.grd	2015-02-02 15:03:16.000000000 +0100
+--- a/chrome/browser/browser_resources.grd
++++ b/chrome/browser/browser_resources.grd
 @@ -243,6 +243,7 @@
        </if>
        <if expr="desktop_linux or (is_android and enable_plugins)">
@@ -10,11 +8,9 @@ Index: iridium-browser/chrome/browser/browser_resources.grd
        </if>
        <if expr="is_android">
          <include name="IDR_POLICY_CSS" file="resources\policy_android.css" type="BINDATA"/>
-Index: iridium-browser/chrome/browser/plugins/plugin_finder.cc
-===================================================================
---- iridium-browser.orig/chrome/browser/plugins/plugin_finder.cc	2015-02-02 15:02:32.000000000 +0100
-+++ iridium-browser/chrome/browser/plugins/plugin_finder.cc	2015-02-02 15:03:16.000000000 +0100
-@@ -128,6 +128,29 @@
+--- a/chrome/browser/plugins/plugin_finder.cc
++++ b/chrome/browser/plugins/plugin_finder.cc
+@@ -128,6 +128,29 @@ PluginMetadata* CreatePluginMetadata(
    return plugin;
  }
  
@@ -44,7 +40,7 @@ Index: iridium-browser/chrome/browser/plugins/plugin_finder.cc
  }  // namespace
  
  // static
-@@ -135,6 +158,16 @@
+@@ -135,6 +158,16 @@ void PluginFinder::RegisterPrefs(PrefReg
    registry->RegisterBooleanPref(prefs::kDisablePluginFinder, false);
  }
  
@@ -61,7 +57,7 @@ Index: iridium-browser/chrome/browser/plugins/plugin_finder.cc
  // static
  PluginFinder* PluginFinder::GetInstance() {
    // PluginFinder::GetInstance() is the only method that's allowed to call
-@@ -156,23 +189,13 @@
+@@ -156,23 +189,13 @@ void PluginFinder::Init() {
  }
  
  // static
@@ -91,7 +87,7 @@ Index: iridium-browser/chrome/browser/plugins/plugin_finder.cc
  }
  
  PluginFinder::~PluginFinder() {
-@@ -238,16 +261,21 @@
+@@ -238,16 +261,21 @@ void PluginFinder::ReinitializePlugins(
    if (version <= version_)
      return;
  
@@ -115,11 +111,9 @@ Index: iridium-browser/chrome/browser/plugins/plugin_finder.cc
        DCHECK(!identifier_plugin_[identifier]);
        identifier_plugin_[identifier] = CreatePluginMetadata(identifier, plugin);
  
-Index: iridium-browser/chrome/browser/plugins/plugin_finder.h
-===================================================================
---- iridium-browser.orig/chrome/browser/plugins/plugin_finder.h	2015-02-02 15:02:32.000000000 +0100
-+++ iridium-browser/chrome/browser/plugins/plugin_finder.h	2015-02-02 15:03:16.000000000 +0100
-@@ -80,6 +80,15 @@
+--- a/chrome/browser/plugins/plugin_finder.h
++++ b/chrome/browser/plugins/plugin_finder.h
+@@ -80,6 +80,15 @@ class PluginFinder {
    // Returns NULL if the plug-in list couldn't be parsed.
    static base::DictionaryValue* LoadBuiltInPluginList();
  
@@ -135,10 +129,8 @@ Index: iridium-browser/chrome/browser/plugins/plugin_finder.h
  #if defined(ENABLE_PLUGIN_INSTALLATION)
    std::map<std::string, PluginInstaller*> installers_;
  #endif
-Index: iridium-browser/chrome/browser/resources/plugin_metadata/plugins_ubuntu_linux.json
-===================================================================
---- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ iridium-browser/chrome/browser/resources/plugin_metadata/plugins_ubuntu_linux.json	2015-02-02 15:03:16.000000000 +0100
+--- /dev/null
++++ b/chrome/browser/resources/plugin_metadata/plugins_ubuntu_linux.json
 @@ -0,0 +1,18 @@
 +{
 +  "libunity_npapi_plugin.so": {

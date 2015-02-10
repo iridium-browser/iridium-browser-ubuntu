@@ -67,6 +67,9 @@ GYP_DEFINES += werror=$(NULL)
 # autodetection for arm.
 GYP_DEFINES += sysroot=
 
+# Link directly to library instead of using dlopen.
+GYP_DEFINES += linux_link_gsettings=1
+
 # Disable NaCl until we figure out what to do with the private toolchain
 GYP_DEFINES += disable_nacl=1
 
@@ -78,7 +81,7 @@ GYP_DEFINES += enable_webrtc=1
 
 # get resources for high dpi and touch
 GYP_DEFINES += use_aura=1
-GYP_DEFINES += enable_hidpi=0
+GYP_DEFINES += enable_hidpi=1
 GYP_DEFINES += enable_touch_ui=1
 
 # Prefer gcc/g++ over clang until clang is better tested in Ubuntu.
@@ -89,7 +92,9 @@ else
 GYP_DEFINES += clang=0
 endif
 
-#GYP_DEFINES += use_ozone=1 ozone_platform_mir=1 ozone_platform_wayland=0 ozone_platform_dri=0 ozone_platform_test=0 ozone_platform_caca=0
+#GYP_DEFINES += use_ozone=1 ozone_auto_platforms=0 ozone_platform_mir=1 ozone_platform_wayland=0
+#GYP_DEFINES += use_ozone=1 #ozone_auto_platforms=1 #ozone_platform_mir=1 #ozone_platform_wayland=0
+#GYP_DEFINES += ozone_platform_mir=1 #ozone_platform_wayland=0
 
 # Intentional configuration, not bug work-arounds.
 ifeq (arm,$(DEB_HOST_ARCH_CPU))

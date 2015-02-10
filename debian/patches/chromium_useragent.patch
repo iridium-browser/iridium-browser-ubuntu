@@ -1,11 +1,9 @@
 Description: Add "Chromium" and "Ubuntu" to the user-agent text.
 Author: Chad Miller <chad.miller@canonical.com>
 
-Index: iridium-browser/content/common/user_agent.cc
-===================================================================
---- iridium-browser.orig/content/common/user_agent.cc	2015-02-02 15:02:32.000000000 +0100
-+++ iridium-browser/content/common/user_agent.cc	2015-02-02 15:02:58.000000000 +0100
-@@ -181,13 +181,21 @@
+--- a/content/common/user_agent.cc
++++ b/content/common/user_agent.cc
+@@ -181,13 +181,21 @@ std::string BuildUserAgentFromOSAndProdu
    // Derived from Safari's UA string.
    // This is done to expose our product name in a manner that is maximally
    // compatible with Safari, we hope!!

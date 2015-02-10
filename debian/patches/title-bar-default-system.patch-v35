@@ -1,11 +1,9 @@
 Description: Never default to using the custom title bar. Chromium should
   integrate, not be a special little snowflake.
 
-Index: iridium-browser/ui/base/x/x11_util.cc
-===================================================================
---- iridium-browser.orig/ui/base/x/x11_util.cc	2015-02-02 15:02:33.000000000 +0100
-+++ iridium-browser/ui/base/x/x11_util.cc	2015-02-02 15:02:44.000000000 +0100
-@@ -1036,6 +1036,8 @@
+--- a/ui/base/x/x11_util.cc
++++ b/ui/base/x/x11_util.cc
+@@ -1036,6 +1036,8 @@ void SetWindowRole(XDisplay* display, XI
  }
  
  bool GetCustomFramePrefDefault() {

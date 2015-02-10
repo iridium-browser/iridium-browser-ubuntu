@@ -2,10 +2,8 @@ Description: Avoid a linker bug where symbols are not found.
  > /usr/bin/ld.bfd.real: out/Release/obj.target/net/libnet.so: undefined reference to symbol 'SSL_ForceHandshake'
  > out/Release/obj.target/net/third_party/nss/libcrssl.so: error adding symbols: DSO missing from command line
 
-Index: iridium-browser/build/common.gypi
-===================================================================
---- iridium-browser.orig/build/common.gypi	2015-02-02 15:02:48.000000000 +0100
-+++ iridium-browser/build/common.gypi	2015-02-02 15:03:01.000000000 +0100
+--- a/build/common.gypi
++++ b/build/common.gypi
 @@ -3641,7 +3641,7 @@
                    '-fomit-frame-pointer',
                  ],

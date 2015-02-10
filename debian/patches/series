@@ -10,16 +10,13 @@ arm.patch
 arm-neon.patch
 #ffmpeg-gyp-config.patch
 #additional-search-engines.patch  # also modified by iridium-browser.diff
-###: start lp:unity-chromium-extension
-#2-get-domain-tld.patch
 3-chrome-xid.patch
-#4-chromeless-window-launch-option.patch
 5-desktop-integration-settings.patch
 6-passwordless-install-support.patch
 7-npapi-permission-not-defaults-to-unauthorized.patch
-###: end lp:unity-chromium-extension
 breakpad
 gsettings-display-scaling
+touch-v35
 display-scaling-default-value
 display-scaling-report-hardware-info
 flash-redirection
@@ -28,10 +25,11 @@ disable-sse2
 lp-translations-paths
 #gyp-icu-m32-test
 #mir-support
-#macro-templates-not-match
+#mir-ozone-module
+#wayland-ozone
+dri3-within-sandbox
 ### start: iridium-browser specific changes
 iridium-browser.diff
 include-glib-extern-c.diff
 chromium-master-prefs-path.diff
-openmax_dl-arm-non-neon.diff
 ### end: iridium-browser specific changes

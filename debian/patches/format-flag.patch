@@ -2,10 +2,8 @@ Description: GCC doesn't allow -Wno-format with hardening
   -Werror=format-security .
 Author: Chad Miller <chad.miller@canonical.com>
 
-Index: iridium-browser/build/common.gypi
-===================================================================
---- iridium-browser.orig/build/common.gypi	2015-02-02 15:02:32.000000000 +0100
-+++ iridium-browser/build/common.gypi	2015-02-02 15:02:48.000000000 +0100
+--- a/build/common.gypi
++++ b/build/common.gypi
 @@ -3051,9 +3051,6 @@
                '-Wno-deprecated',
              ],

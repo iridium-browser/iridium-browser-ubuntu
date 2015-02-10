@@ -1,9 +1,7 @@
-Index: iridium-browser/chrome/app/generated_resources.grd
-===================================================================
---- iridium-browser.orig/chrome/app/generated_resources.grd	2015-02-02 15:02:32.000000000 +0100
-+++ iridium-browser/chrome/app/generated_resources.grd	2015-02-02 15:03:11.000000000 +0100
-@@ -7870,6 +7870,35 @@
-         Reload
+--- a/chrome/app/generated_resources.grd
++++ b/chrome/app/generated_resources.grd
+@@ -5165,6 +5165,35 @@ Keep your key file in a safe place. You
+         Hide Details
        </message>
  
 +      <!-- Desktop integration -->
@@ -35,10 +33,10 @@ Index: iridium-browser/chrome/app/generated_resources.grd
 +        Add Integrated Website
 +      </message>
 +
-       <!-- Mac and Chrome OS users do not close their browser. Mac users quit it and Chrome OS users log out. -->
-       <if expr="not is_macosx and not chromeos">
-         <message name="IDS_COOKIES_CLEAR_WHEN_CLOSE_CHKBOX" desc="A checkbox in the Content Settings dialog for removing all cookies on when browser is closed.">
-@@ -12065,6 +12094,9 @@
+       <!-- Strings for the extensions permission dialog experiment -->
+       <!-- TODO(meacer): Remove these once the experiments are completed. -->
+       <message name="IDS_EXTENSION_PROMPT_EXPERIMENT_EXPLANATION1">
+@@ -12065,6 +12094,9 @@ Some features may be unavailable.  Pleas
        <message name="IDS_OPTIONS_ADVANCED_SECTION_TITLE_CONTENT">
          Web content
        </message>
@@ -48,10 +46,8 @@ Index: iridium-browser/chrome/app/generated_resources.grd
        <message name="IDS_OPTIONS_ADVANCED_SECTION_TITLE_CERTIFICATES">
          HTTPS/SSL
        </message>
-Index: iridium-browser/chrome/browser/resources/options/browser_options.html
-===================================================================
---- iridium-browser.orig/chrome/browser/resources/options/browser_options.html	2015-02-02 15:02:32.000000000 +0100
-+++ iridium-browser/chrome/browser/resources/options/browser_options.html	2015-02-02 15:03:11.000000000 +0100
+--- a/chrome/browser/resources/options/browser_options.html
++++ b/chrome/browser/resources/options/browser_options.html
 @@ -502,6 +502,20 @@
      </div>
    </section>
@@ -73,11 +69,9 @@ Index: iridium-browser/chrome/browser/resources/options/browser_options.html
    <section id="passwords-and-autofill-section">
      <h3 i18n-content="passwordsAndAutofillGroupName"></h3>
      <div class="checkbox controlled-setting-with-label">
-Index: iridium-browser/chrome/browser/resources/options/browser_options.js
-===================================================================
---- iridium-browser.orig/chrome/browser/resources/options/browser_options.js	2015-02-02 15:02:32.000000000 +0100
-+++ iridium-browser/chrome/browser/resources/options/browser_options.js	2015-02-02 15:03:11.000000000 +0100
-@@ -577,6 +577,23 @@
+--- a/chrome/browser/resources/options/browser_options.js
++++ b/chrome/browser/resources/options/browser_options.js
+@@ -577,6 +577,23 @@ cr.define('options', function() {
              [String(event.target.options[event.target.selectedIndex].value)]);
        };
  
@@ -101,7 +95,7 @@ Index: iridium-browser/chrome/browser/resources/options/browser_options.js
        // Languages section.
        var showLanguageOptions = function(event) {
          PageManager.showPageByName('languages');
-@@ -1623,6 +1640,24 @@
+@@ -1623,6 +1640,24 @@ cr.define('options', function() {
      },
  
      /**
@@ -126,7 +120,7 @@ Index: iridium-browser/chrome/browser/resources/options/browser_options.js
       * Set the checked state of the metrics reporting checkbox.
       * @private
       */
-@@ -2078,6 +2113,7 @@
+@@ -2078,6 +2113,7 @@ cr.define('options', function() {
    cr.makePublic(BrowserOptions, [
      'addBluetoothDevice',
      'deleteCurrentProfile',
@@ -134,7 +128,7 @@ Index: iridium-browser/chrome/browser/resources/options/browser_options.js
      'enableCertificateButton',
      'enableDisplayButton',
      'enableFactoryResetSection',
-@@ -2099,6 +2135,7 @@
+@@ -2099,6 +2135,7 @@ cr.define('options', function() {
      'setNativeThemeButtonEnabled',
      'setNetworkPredictionValue',
      'setHighContrastCheckboxState',
@@ -142,10 +136,8 @@ Index: iridium-browser/chrome/browser/resources/options/browser_options.js
      'setMetricsReportingCheckboxState',
      'setMetricsReportingSettingVisibility',
      'setProfilesInfo',
-Index: iridium-browser/chrome/browser/resources/options/desktop_integration_add_website_overlay.html
-===================================================================
---- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ iridium-browser/chrome/browser/resources/options/desktop_integration_add_website_overlay.html	2015-02-02 15:03:11.000000000 +0100
+--- /dev/null
++++ b/chrome/browser/resources/options/desktop_integration_add_website_overlay.html
 @@ -0,0 +1,15 @@
 +<div id="add-desktop-integration-website-overlay-page" class="page" hidden>
 +  <div class="close-button"></div>
@@ -162,10 +154,8 @@ Index: iridium-browser/chrome/browser/resources/options/desktop_integration_add_
 +    <button id="add-integration-website-overlay-ok-button" i18n-content="ok"></button>
 +  </div>
 +</div>
-Index: iridium-browser/chrome/browser/resources/options/desktop_integration_add_website_overlay.js
-===================================================================
---- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ iridium-browser/chrome/browser/resources/options/desktop_integration_add_website_overlay.js	2015-02-02 15:03:11.000000000 +0100
+--- /dev/null
++++ b/chrome/browser/resources/options/desktop_integration_add_website_overlay.js
 @@ -0,0 +1,48 @@
 +// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
@@ -215,10 +205,8 @@ Index: iridium-browser/chrome/browser/resources/options/desktop_integration_add_
 +    AddDesktopIntegrationWebsiteOverlay: AddDesktopIntegrationWebsiteOverlay
 +  };
 +});
-Index: iridium-browser/chrome/browser/resources/options/desktop_integration_overlay.css
-===================================================================
---- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ iridium-browser/chrome/browser/resources/options/desktop_integration_overlay.css	2015-02-02 15:03:11.000000000 +0100
+--- /dev/null
++++ b/chrome/browser/resources/options/desktop_integration_overlay.css
 @@ -0,0 +1,75 @@
 +/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
 + * Use of this source code is governed by a BSD-style license that can be
@@ -295,10 +283,8 @@ Index: iridium-browser/chrome/browser/resources/options/desktop_integration_over
 +  padding-bottom: 2px;
 +  padding-top: 2px;
 +}
-Index: iridium-browser/chrome/browser/resources/options/desktop_integration_overlay.html
-===================================================================
---- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ iridium-browser/chrome/browser/resources/options/desktop_integration_overlay.html	2015-02-02 15:03:11.000000000 +0100
+--- /dev/null
++++ b/chrome/browser/resources/options/desktop_integration_overlay.html
 @@ -0,0 +1,26 @@
 +<div id="desktop-integration-area" class="page" hidden>
 +
@@ -326,10 +312,8 @@ Index: iridium-browser/chrome/browser/resources/options/desktop_integration_over
 +
 +</div>
 +
-Index: iridium-browser/chrome/browser/resources/options/desktop_integration_overlay.js
-===================================================================
---- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ iridium-browser/chrome/browser/resources/options/desktop_integration_overlay.js	2015-02-02 15:03:11.000000000 +0100
+--- /dev/null
++++ b/chrome/browser/resources/options/desktop_integration_overlay.js
 @@ -0,0 +1,207 @@
 +// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
@@ -538,10 +522,8 @@ Index: iridium-browser/chrome/browser/resources/options/desktop_integration_over
 +  };
 +});
 +
-Index: iridium-browser/chrome/browser/resources/options/options.html
-===================================================================
---- iridium-browser.orig/chrome/browser/resources/options/options.html	2015-02-02 15:02:32.000000000 +0100
-+++ iridium-browser/chrome/browser/resources/options/options.html	2015-02-02 15:03:11.000000000 +0100
+--- a/chrome/browser/resources/options/options.html
++++ b/chrome/browser/resources/options/options.html
 @@ -24,6 +24,7 @@
  <link rel="stylesheet" href="content_settings.css">
  <link rel="stylesheet" href="controlled_setting.css">
@@ -566,11 +548,9 @@ Index: iridium-browser/chrome/browser/resources/options/options.html
    <include src="handler_options.html">
    <include src="language_add_language_overlay.html">
    <include src="supervised_user_import.html">
-Index: iridium-browser/chrome/browser/resources/options/options.js
-===================================================================
---- iridium-browser.orig/chrome/browser/resources/options/options.js	2015-02-02 15:02:32.000000000 +0100
-+++ iridium-browser/chrome/browser/resources/options/options.js	2015-02-02 15:03:11.000000000 +0100
-@@ -15,6 +15,8 @@
+--- a/chrome/browser/resources/options/options.js
++++ b/chrome/browser/resources/options/options.js
+@@ -15,6 +15,8 @@ var ContentSettingsExceptionsArea =
      options.contentSettings.ContentSettingsExceptionsArea;
  var ContentSettings = options.ContentSettings;
  var CookiesView = options.CookiesView;
@@ -579,7 +559,7 @@ Index: iridium-browser/chrome/browser/resources/options/options.js
  var CreateProfileOverlay = options.CreateProfileOverlay;
  var EditDictionaryOverlay = cr.IsMac ? null : options.EditDictionaryOverlay;
  var EasyUnlockTurnOffOverlay = options.EasyUnlockTurnOffOverlay;
-@@ -139,6 +141,17 @@
+@@ -139,6 +141,17 @@ function load() {
    PageManager.registerOverlay(FontSettings.getInstance(),
                                BrowserOptions.getInstance(),
                                [$('fontSettingsCustomizeFontsButton')]);
@@ -597,11 +577,9 @@ Index: iridium-browser/chrome/browser/resources/options/options.js
    if (HandlerOptions && $('manage-handlers-button')) {
      PageManager.registerOverlay(HandlerOptions.getInstance(),
                                  ContentSettings.getInstance(),
-Index: iridium-browser/chrome/browser/resources/options/options_bundle.js
-===================================================================
---- iridium-browser.orig/chrome/browser/resources/options/options_bundle.js	2015-02-02 15:02:32.000000000 +0100
-+++ iridium-browser/chrome/browser/resources/options/options_bundle.js	2015-02-02 15:03:11.000000000 +0100
-@@ -81,6 +81,8 @@
+--- a/chrome/browser/resources/options/options_bundle.js
++++ b/chrome/browser/resources/options/options_bundle.js
+@@ -81,6 +81,8 @@ var CertificateImportErrorOverlay = opti
  <include src="content_settings_ui.js">
  <include src="cookies_list.js">
  <include src="cookies_view.js">
@@ -610,11 +588,9 @@ Index: iridium-browser/chrome/browser/resources/options/options_bundle.js
  <include src="easy_unlock_turn_off_overlay.js">
  <include src="factory_reset_overlay.js">
  <include src="font_settings.js">
-Index: iridium-browser/chrome/browser/ui/webui/options/browser_options_handler.cc
-===================================================================
---- iridium-browser.orig/chrome/browser/ui/webui/options/browser_options_handler.cc	2015-02-02 15:02:32.000000000 +0100
-+++ iridium-browser/chrome/browser/ui/webui/options/browser_options_handler.cc	2015-02-02 15:03:11.000000000 +0100
-@@ -218,6 +218,8 @@
+--- a/chrome/browser/ui/webui/options/browser_options_handler.cc
++++ b/chrome/browser/ui/webui/options/browser_options_handler.cc
+@@ -218,6 +218,8 @@ void BrowserOptionsHandler::GetLocalized
        IDS_OPTIONS_ADVANCED_SECTION_TITLE_CERTIFICATES },
      { "advancedSectionTitleContent",
        IDS_OPTIONS_ADVANCED_SECTION_TITLE_CONTENT },
@@ -623,7 +599,7 @@ Index: iridium-browser/chrome/browser/ui/webui/options/browser_options_handler.c
      { "advancedSectionTitleLanguages",
        IDS_OPTIONS_ADVANCED_SECTION_TITLE_LANGUAGES },
      { "advancedSectionTitleNetwork",
-@@ -235,6 +237,10 @@
+@@ -235,6 +237,10 @@ void BrowserOptionsHandler::GetLocalized
      { "defaultFontSizeLabel", IDS_OPTIONS_DEFAULT_FONT_SIZE_LABEL },
      { "defaultSearchManageEngines", IDS_OPTIONS_DEFAULTSEARCH_MANAGE_ENGINES },
      { "defaultZoomFactorLabel", IDS_OPTIONS_DEFAULT_ZOOM_LEVEL_LABEL },
@@ -634,7 +610,7 @@ Index: iridium-browser/chrome/browser/ui/webui/options/browser_options_handler.c
  #if defined(OS_CHROMEOS)
      { "disableGData", IDS_OPTIONS_DISABLE_GDATA },
  #endif
-@@ -316,6 +322,8 @@
+@@ -316,6 +322,8 @@ void BrowserOptionsHandler::GetLocalized
      { "profilesManage", IDS_PROFILES_MANAGE_BUTTON_LABEL },
      { "profilesSupervisedDashboardTip",
        IDS_PROFILES_SUPERVISED_USER_DASHBOARD_TIP },
@@ -643,10 +619,8 @@ Index: iridium-browser/chrome/browser/ui/webui/options/browser_options_handler.c
  #if defined(ENABLE_SETTINGS_APP)
      { "profilesAppListSwitch", IDS_SETTINGS_APP_PROFILES_SWITCH_BUTTON_LABEL },
  #endif
-Index: iridium-browser/chrome/browser/ui/webui/options/desktop_integration_settings_handler.cc
-===================================================================
---- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ iridium-browser/chrome/browser/ui/webui/options/desktop_integration_settings_handler.cc	2015-02-02 15:03:11.000000000 +0100
+--- /dev/null
++++ b/chrome/browser/ui/webui/options/desktop_integration_settings_handler.cc
 @@ -0,0 +1,273 @@
 +// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
@@ -921,10 +895,8 @@ Index: iridium-browser/chrome/browser/ui/webui/options/desktop_integration_setti
 +}
 +
 +}  // namespace options
-Index: iridium-browser/chrome/browser/ui/webui/options/desktop_integration_settings_handler.h
-===================================================================
---- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ iridium-browser/chrome/browser/ui/webui/options/desktop_integration_settings_handler.h	2015-02-02 15:03:11.000000000 +0100
+--- /dev/null
++++ b/chrome/browser/ui/webui/options/desktop_integration_settings_handler.h
 @@ -0,0 +1,76 @@
 +// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 +// Use of this source code is governed by a BSD-style license that can be
@@ -1002,10 +974,8 @@ Index: iridium-browser/chrome/browser/ui/webui/options/desktop_integration_setti
 +}  // namespace options
 +
 +#endif  // CHROME_BROWSER_UI_WEBUI_OPTIONS_DESKTOP_INTEGRATION_SETTINGS_HANDLER2_H_
-Index: iridium-browser/chrome/browser/ui/webui/options/options_ui.cc
-===================================================================
---- iridium-browser.orig/chrome/browser/ui/webui/options/options_ui.cc	2015-02-02 15:02:32.000000000 +0100
-+++ iridium-browser/chrome/browser/ui/webui/options/options_ui.cc	2015-02-02 15:03:11.000000000 +0100
+--- a/chrome/browser/ui/webui/options/options_ui.cc
++++ b/chrome/browser/ui/webui/options/options_ui.cc
 @@ -110,6 +110,10 @@
  #include "chrome/browser/ui/webui/options/geolocation_options_handler.h"
  #endif
@@ -1017,7 +987,7 @@ Index: iridium-browser/chrome/browser/ui/webui/options/options_ui.cc
  using content::RenderViewHost;
  
  namespace {
-@@ -283,6 +287,8 @@
+@@ -283,6 +287,8 @@ OptionsUI::OptionsUI(content::WebUI* web
    AddOptionsPageUIHandler(localized_strings, new CookiesViewHandler());
    AddOptionsPageUIHandler(localized_strings, new CreateProfileHandler());
    AddOptionsPageUIHandler(localized_strings, new EasyUnlockHandler());
@@ -1026,10 +996,8 @@ Index: iridium-browser/chrome/browser/ui/webui/options/options_ui.cc
    AddOptionsPageUIHandler(localized_strings, new FontSettingsHandler());
  #if defined(ENABLE_GOOGLE_NOW)
    AddOptionsPageUIHandler(localized_strings, new GeolocationOptionsHandler());
-Index: iridium-browser/chrome/chrome_browser_ui.gypi
-===================================================================
---- iridium-browser.orig/chrome/chrome_browser_ui.gypi	2015-02-02 15:02:32.000000000 +0100
-+++ iridium-browser/chrome/chrome_browser_ui.gypi	2015-02-02 15:03:11.000000000 +0100
+--- a/chrome/chrome_browser_ui.gypi
++++ b/chrome/chrome_browser_ui.gypi
 @@ -1694,6 +1694,8 @@
        'browser/ui/webui/options/core_options_handler.h',
        'browser/ui/webui/options/create_profile_handler.cc',
