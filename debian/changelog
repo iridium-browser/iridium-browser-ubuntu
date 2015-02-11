@@ -1,3 +1,12 @@
+iridium-browser (40.0.2214.93-0iridium40.0+3) precise; urgency=low
+
+  * Updated patches from Ubuntu trusty upstream (40.0.2214.94-0ubuntu0.14.04.1.1068).
+  * Updated dependencies.
+  * Added iridium-browser icons.
+  * Update list of known gyp flags from upstream 40.0.2214.94-0ubuntu0.14.04.1.1068.
+
+ -- Joachim Bauch <bauch@struktur.de>  Wed, 11 Feb 2015 11:59:51 +0100
+
 iridium-browser (40.0.2214.93-0iridium40.0+2) precise; urgency=low
 
   * Disable patch that is no longer needed.
