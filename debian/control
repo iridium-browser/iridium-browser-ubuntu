@@ -34,8 +34,10 @@ Build-Depends:
 	libexif-dev,
 	libgcrypt-dev,
 	libkrb5-dev,
+	libxkbcommon-dev,
 	libssl-dev,
 	chrpath,
+	gcc-4.8 | clang-3.5 | clang-3.4,
 	g++-4.8 | clang-3.5 | clang-3.4,
 	xdg-utils
 Standards-Version: 3.9.3
