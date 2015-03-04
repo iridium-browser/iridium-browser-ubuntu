@@ -845,6 +845,7 @@ public class Linker {
      */
     public static boolean checkMapExecSupport(String apkFile) {
         assert apkFile != null;
+
         synchronized (Linker.class) {
             ensureInitializedLocked();
 

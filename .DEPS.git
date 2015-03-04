@@ -7,7 +7,7 @@ vars = {
     'eyes-free':
          'http://eyes-free.googlecode.com/svn',
     'webkit_rev':
-         '@819deb2bf8d87714c56106287cb27f2defdbfed4',
+         '@7408c7855fa5235f63fb36835682e32901eca22c',
     'blink':
          'http://src.chromium.org/blink',
     'skia':
@@ -69,7 +69,7 @@ vars = {
     'jsr-305':
          'http://jsr-305.googlecode.com/svn',
     'angle_revision':
-         '98c643d80776db7caa81170a0b45e318377c9f98',
+         'd77bd1632e4c3bbe326be4fb32fe6c53187cd5dd',
     'bidichecker':
          'http://bidichecker.googlecode.com/svn',
     'git_url':
@@ -158,7 +158,7 @@ deps = {
     'src/third_party/bidichecker':
         Var('git_url') + '/external/bidichecker/lib.git@97f2aa645b74c28c57eca56992235c79850fa9e0',
     'src/third_party/boringssl/src':
-        'https://boringssl.googlesource.com/boringssl.git@817ec3462e246b8301a73e44854e2bb3df90d5e6',
+        'https://boringssl.googlesource.com/boringssl.git@54e455157a6e1899eb6fef9440d2410cb7fedeff',
     'src/third_party/brotli/src':
         Var('git_url') + '/external/font-compression-reference.git@65cb3326e30ef8a67eb1d4411ec563e91be6e9ae',
     'src/third_party/cacheinvalidation/src':
@@ -168,7 +168,7 @@ deps = {
     'src/third_party/colorama/src':
         Var('git_url') + '/external/colorama.git@799604a1041e9b3bc5d2789ecbd7e8db2e18e6b8',
     'src/third_party/ffmpeg':
-        Var('git_url') + '/chromium/third_party/ffmpeg.git@54550829595927790fc7497cd9203111953725bd',
+        Var('git_url') + '/chromium/third_party/ffmpeg.git@4982e01ab3185c0f3279a0fd4772fd4e1c273eb2',
     'src/third_party/flac':
         Var('git_url') + '/chromium/deps/flac.git@0635a091379d9677f1ddde5f2eec85d0f096f219',
     'src/third_party/hunspell':
@@ -204,7 +204,7 @@ deps = {
     'src/third_party/libsrtp':
         Var('git_url') + '/chromium/deps/libsrtp.git@6446144c7f083552f21cc4e6768e891bcb767574',
     'src/third_party/libvpx':
-        Var('git_url') + '/chromium/deps/libvpx.git@2e5ced5fd62a73f4f5687ab19520b3aad1c53f6f',
+        Var('git_url') + '/chromium/deps/libvpx.git@715db78484f91a05fbd0584c0ed6e9d2ffc9be06',
     'src/third_party/libwebm/source':
         Var('git_url') + '/webm/libwebm.git@0d4cb404ea4195e5e21d04db2c955615535ce62e',
     'src/third_party/libyuv':
@@ -264,7 +264,7 @@ deps = {
     'src/tools/swarming_client':
         Var('git_url') + '/external/swarming.client.git@1f8ba359e84dc7f26b1ba286dfb4e28674efbff4',
     'src/v8':
-        Var('git_url') + '/v8/v8.git@1bf660fafd6c66fe862d5eef0b06e53e9967621b',
+        Var('git_url') + '/v8/v8.git@9dc11c782b183920f94a64fb7fbfd9c63864525e',
 }
 
 deps_os = {
