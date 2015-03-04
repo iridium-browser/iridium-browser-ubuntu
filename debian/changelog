@@ -1,3 +1,12 @@
+iridium-browser (40.0.2214.111-0iridium40.2+1) precise; urgency=low
+
+  * Removed file too large for Github - only used for tests anyway.
+  * Imported Upstream version 40.0.2214.111
+  * Updated dependencies to match upstream from Ubuntu.
+  * Updated iridium-browser patch to 40.2
+
+ -- Joachim Bauch <bauch@struktur.de>  Wed, 04 Mar 2015 12:27:55 +0100
+
 iridium-browser (40.0.2214.93-0iridium40.0+3) precise; urgency=low
 
   * Updated patches from Ubuntu trusty upstream (40.0.2214.94-0ubuntu0.14.04.1.1068).
