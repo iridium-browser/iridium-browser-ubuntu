@@ -12,6 +12,8 @@ import org.chromium.base.CommandLine;
 import org.chromium.base.JNINamespace;
 import org.chromium.base.TraceEvent;
 
+import java.util.Locale;
+
 import javax.annotation.Nullable;
 
 /**
@@ -58,6 +60,13 @@ public class LibraryLoader {
     // One-way switch becomes true if the device supports memory mapping the
     // APK file with executable permissions.
     private static boolean sMapApkWithExecPermission = false;
+
+    // One-way switch to indicate whether we probe for memory mapping the APK
+    // file with executable permissions. We suppress the probe under some
+    // conditions.
+    // For more, see:
+    //   https://code.google.com/p/chromium/issues/detail?id=448084
+    private static boolean sProbeMapApkWithExecPermission = true;
 
     // One-way switch becomes true if the Chromium library was loaded from the
     // APK file directly.
@@ -178,11 +187,24 @@ public class LibraryLoader {
                     String apkFilePath = null;
                     boolean useMapExecSupportFallback = false;
 
+                    // If manufacturer is Samsung then skip the mmap exec check.
+                    //
+                    // For more, see:
+                    //   https://code.google.com/p/chromium/issues/detail?id=448084
+                    final String manufacturer = android.os.Build.MANUFACTURER;
+                    if (manufacturer != null
+                            && manufacturer.toLowerCase(Locale.ENGLISH).contains("samsung")) {
+                        Log.w(TAG, "Suppressed load from APK support check on this device");
+                        sProbeMapApkWithExecPermission = false;
+                    }
+
                     // Check if the device supports memory mapping the APK file
                     // with executable permissions.
                     if (context != null) {
                         apkFilePath = context.getApplicationInfo().sourceDir;
-                        sMapApkWithExecPermission = Linker.checkMapExecSupport(apkFilePath);
+                        if (sProbeMapApkWithExecPermission) {
+                            sMapApkWithExecPermission = Linker.checkMapExecSupport(apkFilePath);
+                        }
                         if (!sMapApkWithExecPermission && Linker.isInZipFile()) {
                             Log.w(TAG, "the no map executable support fallback will be used because"
                                     + " memory mapping the APK file with executable permissions is"
@@ -403,6 +425,10 @@ public class LibraryLoader {
 
         if (context == null) {
             Log.w(TAG, "Unknown APK filename due to null context");
+            return LibraryLoadFromApkStatusCodes.UNKNOWN;
+        }
+
+        if (!sProbeMapApkWithExecPermission) {
             return LibraryLoadFromApkStatusCodes.UNKNOWN;
         }
 
