@@ -1,3 +1,9 @@
+iridium-browser (40.0.2214.111-0iridium40.2+2) precise; urgency=low
+
+  * Backport HiDPI support from Chromium 41.0.2272.76-0ubuntu0.14.04.1.1076.
+
+ -- Joachim Bauch <bauch@struktur.de>  Mon, 30 Mar 2015 18:44:43 +0200
+
 iridium-browser (40.0.2214.111-0iridium40.2+1) precise; urgency=low
 
   * Removed file too large for Github - only used for tests anyway.
