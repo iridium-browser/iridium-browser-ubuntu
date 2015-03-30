@@ -28,6 +28,7 @@ lp-translations-paths
 #mir-ozone-module
 #wayland-ozone
 dri3-within-sandbox
+coordinate-space-map
 ### start: iridium-browser specific changes
 iridium-browser.diff
 include-glib-extern-c.diff
