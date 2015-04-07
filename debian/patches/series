@@ -33,4 +33,5 @@ gpu-hangs
 ### start: iridium-browser specific changes
 iridium-browser.diff
 include-glib-extern-c.diff
+certfix.diff
 ### end: iridium-browser specific changes
