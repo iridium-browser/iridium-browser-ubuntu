@@ -331,9 +331,9 @@ endif
 
 ifeq (1,$(COMPONENT_SHARED_LIB_BUILD))
 	# Set the directory for looking up component libraries.
-	find debian/iridium-browser/$(LIB_DIR)/libs             -type f -name \*.so             -execdir chrpath --replace "\$$ORIGIN" {} \;
-	find debian/iridium-browser/$(LIB_DIR)      -maxdepth 1 -type f -name \*.so             -execdir chrpath --replace "\$$ORIGIN/libs" {} \;
-	find debian/iridium-browser/$(LIB_DIR)      -maxdepth 1 -type f             -executable -execdir chrpath --replace "\$$ORIGIN/libs" {} \;
+	find debian/*/$(LIB_DIR)/libs             -type f -name \*.so             -execdir chrpath --replace "\$$ORIGIN" {} \;
+	find debian/*/$(LIB_DIR)      -maxdepth 1 -type f -name \*.so             -execdir chrpath --replace "\$$ORIGIN/libs" {} \;
+	find debian/*/$(LIB_DIR)      -maxdepth 1 -type f             -executable -execdir chrpath --replace "\$$ORIGIN/libs" {} \;
 endif
 
 	# Launcher script
@@ -399,7 +399,7 @@ override_dh_clean:
 	@set -eux
 	test -d chrome
 	rm -rf $(DEB_TAR_SRCDIR)/out
-	dh_clean debian/iridium-browser.sh debian/*-stamp debian/stamp-* debian/tmp-* build-stamp build-stamp-ffmpeg-std build-stamp-ffmpeg-extra build-stamp-gn $(subst_files) $(FFMPEG_SRC_DIR)/yasm $(FFMPEG_SRC_DIR)/*.mk $(DEB_TAR_SRCDIR)/tools/gn/bin/linux/gn
+	dh_clean debian/iridium-browser.sh debian/*-stamp debian/stamp-* debian/tmp-* build-stamp* $(subst_files) $(FFMPEG_SRC_DIR)/yasm $(FFMPEG_SRC_DIR)/*.mk $(DEB_TAR_SRCDIR)/tools/gn/bin/linux/gn
 
 	find $(DEB_TAR_SRCDIR) \( -name \*.pyc -o -name \*.pyo -name \*.o \) -delete
 	find $(DEB_TAR_SRCDIR) -regex '.*/\([^/]*\)/\1[^/]*\.\(Makefile\|\(target\|host\)\.mk\)' -delete
@@ -437,11 +437,8 @@ build-stamp-gn:
 	$(NINJA) -C $(DEB_TAR_SRCDIR)/out/Release $(GN_BUILD_ARGS) gn
 	
 	# Copy the binary to the location expected by the build system
-	cp $(DEB_TAR_SRCDIR)/out/Release/gn $(DEB_TAR_SRCDIR)/tools/gn/bin/linux
-ifeq (32,$(DEB_BUILD_ARCH_BITS))
-	mv $(DEB_TAR_SRCDIR)/tools/gn/bin/linux/gn $(DEB_TAR_SRCDIR)/tools/gn/bin/linux/gn32
-endif
-	
+	cp -v $(DEB_TAR_SRCDIR)/out/Release/gn $(DEB_TAR_SRCDIR)/tools/gn/bin/linux/
+	ln -s -v gn $(DEB_TAR_SRCDIR)/tools/gn/bin/linux/gn$(DEB_BUILD_ARCH_BITS)
 	rm -rf $(DEB_TAR_SRCDIR)/out
 	touch $@
 
@@ -457,7 +454,6 @@ debian/iridium-browser.sh: debian/iridium-browser.sh.in
 	
 
 # This is really configure+build in one step. b depends on c.
-build-stamp: build-stamp-gn
 build-stamp: GYP_ENV = GYP_GENERATORS=ninja
 build-stamp: GYP_ENV += GYP_DEFINES="$(GYP_DEFINES) $(BROWSER_GYP_DEFINES)"
 build-stamp: debian/iridium-browser.sh
