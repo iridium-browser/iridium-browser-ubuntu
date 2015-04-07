@@ -14,6 +14,9 @@
 #include "../GrGLProgramDataManager.h"
 #include "../GrGLUniformHandle.h"
 #include "../GrGLGeometryProcessor.h"
+#include "../GrGLXferProcessor.h"
+#include "../../GrOptDrawState.h"
+#include "../../GrPendingFragmentStage.h"
 
 /*
  * This is the base class for a series of interfaces.  This base class *MUST* remain abstract with
@@ -28,9 +31,9 @@
 class GrGLUniformBuilder {
 public:
     enum ShaderVisibility {
-        kVertex_Visibility   = 0x1,
-        kGeometry_Visibility = 0x2,
-        kFragment_Visibility = 0x4,
+        kVertex_Visibility   = 1 << kVertex_GrShaderType,
+        kGeometry_Visibility = 1 << kGeometry_GrShaderType,
+        kFragment_Visibility = 1 << kFragment_GrShaderType,
     };
 
     virtual ~GrGLUniformBuilder() {}
@@ -43,15 +46,21 @@ public:
         supported at this time. The actual uniform name will be mangled. If outName is not NULL then
         it will refer to the final uniform name after return. Use the addUniformArray variant to add
         an array of uniforms. */
-    virtual UniformHandle addUniform(uint32_t visibility,
-                                     GrSLType type,
-                                     const char* name,
-                                     const char** outName = NULL) = 0;
-    virtual UniformHandle addUniformArray(uint32_t visibility,
-                                          GrSLType type,
-                                          const char* name,
-                                          int arrayCount,
-                                          const char** outName = NULL) = 0;
+    UniformHandle addUniform(uint32_t visibility,
+                             GrSLType type,
+                             GrSLPrecision precision,
+                             const char* name,
+                             const char** outName = NULL) {
+        return this->addUniformArray(visibility, type, precision, name, 0, outName);
+    }
+
+    virtual UniformHandle addUniformArray(
+        uint32_t visibility,
+        GrSLType type,
+        GrSLPrecision precision,
+        const char* name,
+        int arrayCount,
+        const char** outName = NULL) = 0;
 
     virtual const GrGLShaderVar& getUniformVariable(UniformHandle u) const = 0;
 
@@ -62,7 +71,7 @@ public:
 
     virtual const GrGLContextInfo& ctxInfo() const = 0;
 
-    virtual GrGpuGL* gpu() const = 0;
+    virtual GrGLGpu* gpu() const = 0;
 
     /*
      * *NOTE* NO MEMBERS ALLOWED, MULTIPLE INHERITANCE
@@ -103,6 +112,7 @@ private:
 
     friend class GrGLVertexBuilder;
     friend class GrGLGeometryBuilder;
+    friend class GrGLXferBuilder;
     friend class GrGLFragmentShaderBuilder;
 };
 
@@ -124,9 +134,24 @@ struct GrGLGeoToFrag : public GrGLVarying {
 /* a specialization of the above for GPs.  Lets the user add uniforms, varyings, and VS / FS code */
 class GrGLGPBuilder : public virtual GrGLUniformBuilder {
 public:
+    /*
+     * addVarying allows fine grained control for setting up varyings between stages.  If you just
+     * need to take an attribute and pass it through to an output value in a fragment shader, use
+     * addPassThroughAttribute.
+     * TODO convert most uses of addVarying to addPassThroughAttribute
+     */
     virtual void addVarying(const char* name,
                             GrGLVarying*,
-                            GrGLShaderVar::Precision fsPrecision=GrGLShaderVar::kDefault_Precision) = 0;
+                            GrSLPrecision fsPrecision = kDefault_GrSLPrecision) = 0;
+
+    /*
+     * This call can be used by GP to pass an attribute through all shaders directly to 'output' in
+     * the fragment shader.  Though this call effects both the vertex shader and fragment shader,
+     * it expects 'output' to be defined in the fragment shader before this call is made.
+     * TODO it might be nicer behavior to have a flag to declare output inside this call
+     */
+    virtual void addPassThroughAttribute(const GrGeometryProcessor::GrAttribute*,
+                                         const char* output) = 0;
 
     // TODO rename getFragmentBuilder
     virtual GrGLGPFragmentBuilder* getFragmentShaderBuilder() = 0;
@@ -147,8 +172,18 @@ public:
      */
 };
 
+/* a specializations for XPs. Lets the user add uniforms and FS code */
+class GrGLXPBuilder : public virtual GrGLUniformBuilder {
+public:
+    virtual GrGLFPFragmentBuilder* getFragmentShaderBuilder() = 0;
+
+    /*
+     * *NOTE* NO MEMBERS ALLOWED, MULTIPLE INHERITANCE
+     */
+};
 struct GrGLInstalledProc;
 struct GrGLInstalledGeoProc;
+struct GrGLInstalledXferProc;
 struct GrGLInstalledFragProc;
 struct GrGLInstalledFragProcs;
 
@@ -160,7 +195,8 @@ struct GrGLInstalledFragProcs;
  * respective builders
 */
 class GrGLProgramBuilder : public GrGLGPBuilder,
-                           public GrGLFPBuilder {
+                           public GrGLFPBuilder,
+                           public GrGLXPBuilder {
 public:
     /** Generates a shader program.
      *
@@ -169,46 +205,42 @@ public:
      * to be used.
      * @return true if generation was successful.
      */
-    static GrGLProgram* CreateProgram(const GrOptDrawState&, GrGpu::DrawType, GrGpuGL*);
+    static GrGLProgram* CreateProgram(const GrOptDrawState&, GrGLGpu*);
 
-    virtual UniformHandle addUniform(uint32_t visibility,
-                                     GrSLType type,
-                                     const char* name,
-                                     const char** outName = NULL) SK_OVERRIDE {
-        return this->addUniformArray(visibility, type, name, GrGLShaderVar::kNonArray, outName);
-    }
-    virtual UniformHandle addUniformArray(uint32_t visibility,
-                                          GrSLType type,
-                                          const char* name,
-                                          int arrayCount,
-                                          const char** outName = NULL) SK_OVERRIDE;
+    UniformHandle addUniformArray(uint32_t visibility,
+                                  GrSLType type,
+                                  GrSLPrecision precision,
+                                  const char* name,
+                                  int arrayCount,
+                                  const char** outName) SK_OVERRIDE;
 
-    virtual const GrGLShaderVar& getUniformVariable(UniformHandle u) const SK_OVERRIDE {
+    const GrGLShaderVar& getUniformVariable(UniformHandle u) const SK_OVERRIDE {
         return fUniforms[u.toShaderBuilderIndex()].fVariable;
     }
 
-    virtual const char* getUniformCStr(UniformHandle u) const SK_OVERRIDE {
+    const char* getUniformCStr(UniformHandle u) const SK_OVERRIDE {
         return this->getUniformVariable(u).c_str();
     }
 
-    virtual const GrGLContextInfo& ctxInfo() const SK_OVERRIDE;
+    const GrGLContextInfo& ctxInfo() const SK_OVERRIDE;
 
-    virtual GrGpuGL* gpu() const SK_OVERRIDE { return fGpu; }
+    GrGLGpu* gpu() const SK_OVERRIDE { return fGpu; }
 
-    virtual GrGLFPFragmentBuilder* getFragmentShaderBuilder() SK_OVERRIDE { return &fFS; }
-    virtual GrGLVertexBuilder* getVertexShaderBuilder() SK_OVERRIDE { return &fVS; }
+    GrGLFPFragmentBuilder* getFragmentShaderBuilder() SK_OVERRIDE { return &fFS; }
+    GrGLVertexBuilder* getVertexShaderBuilder() SK_OVERRIDE { return &fVS; }
 
-    virtual void addVarying(
+    void addVarying(
             const char* name,
             GrGLVarying*,
-            GrGLShaderVar::Precision fsPrecision=GrGLShaderVar::kDefault_Precision) SK_OVERRIDE;
+            GrSLPrecision fsPrecision = kDefault_GrSLPrecision) SK_OVERRIDE;
+
+    void addPassThroughAttribute(const GrGeometryProcessor::GrAttribute*,
+                                         const char* output) SK_OVERRIDE;
+
 
     // Handles for program uniforms (other than per-effect uniforms)
     struct BuiltinUniformHandles {
-        UniformHandle       fViewMatrixUni;
         UniformHandle       fRTAdjustmentUni;
-        UniformHandle       fColorUni;
-        UniformHandle       fCoverageUni;
 
         // We use the render target height to provide a y-down frag coord when specifying
         // origin_upper_left is not supported.
@@ -221,16 +253,14 @@ public:
     };
 
 protected:
-    typedef GrProgramDesc::ProcKeyProvider ProcKeyProvider;
     typedef GrGLProgramDataManager::UniformInfo UniformInfo;
     typedef GrGLProgramDataManager::UniformInfoArray UniformInfoArray;
 
     static GrGLProgramBuilder* CreateProgramBuilder(const GrOptDrawState&,
-                                                    GrGpu::DrawType,
                                                     bool hasGeometryProcessor,
-                                                    GrGpuGL*);
+                                                    GrGLGpu*);
 
-    GrGLProgramBuilder(GrGpuGL*, const GrOptDrawState&);
+    GrGLProgramBuilder(GrGLGpu*, const GrOptDrawState&);
 
     const GrOptDrawState& optState() const { return fOptState; }
     const GrProgramDesc& desc() const { return fDesc; }
@@ -240,35 +270,41 @@ protected:
     // char (unless the prefix is '\0'). It also mangles the name to be stage-specific if we're
     // generating stage code.
     void nameVariable(SkString* out, char prefix, const char* name);
-    void setupUniformColorAndCoverageIfNeeded(GrGLSLExpr4* inputColor, GrGLSLExpr1* inputCoverage);
-    void emitAndInstallProcs(const GrOptDrawState& optState,
-                             GrGLSLExpr4* inputColor,
+    // Generates a possibly mangled name for a stage variable and writes it to the fragment shader.
+    // If GrGLSLExpr4 has a valid name then it will use that instead
+    void nameExpression(GrGLSLExpr4*, const char* baseName);
+    void emitAndInstallProcs(GrGLSLExpr4* inputColor,
                              GrGLSLExpr4* inputCoverage);
     void emitAndInstallFragProcs(int procOffset, int numProcs, GrGLSLExpr4* inOut);
-    template <class Proc>
-    void emitAndInstallProc(const Proc&,
+    void emitAndInstallProc(const GrPendingFragmentStage&,
                             int index,
-                            const ProcKeyProvider&,
                             const GrGLSLExpr4& input,
                             GrGLSLExpr4* output);
 
+    void emitAndInstallProc(const GrPrimitiveProcessor&,
+                            GrGLSLExpr4* outputColor,
+                            GrGLSLExpr4* outputCoverage);
+
     // these emit functions help to keep the createAndEmitProcessors template general
-    void emitAndInstallProc(const GrFragmentStage&,
-                            const GrProcessorKey&,
+    void emitAndInstallProc(const GrPendingFragmentStage&,
                             const char* outColor,
                             const char* inColor);
-    void emitAndInstallProc(const GrGeometryProcessor&,
-                            const GrProcessorKey&,
+    void emitAndInstallProc(const GrPrimitiveProcessor&,
                             const char* outColor,
-                            const char* inColor);
-    void verify(const GrGeometryProcessor&);
+                            const char* outCoverage);
+    void emitAndInstallXferProc(const GrXferProcessor&,
+                                const GrGLSLExpr4& colorIn,
+                                const GrGLSLExpr4& coverageIn);
+
+    void verify(const GrPrimitiveProcessor&);
+    void verify(const GrXferProcessor&);
     void verify(const GrFragmentProcessor&);
     void emitSamplers(const GrProcessor&,
                       GrGLProcessor::TextureSamplerArray* outSamplers,
                       GrGLInstalledProc*);
 
     // each specific program builder has a distinct transform and must override this function
-    virtual void emitTransforms(const GrFragmentStage&,
+    virtual void emitTransforms(const GrPendingFragmentStage&,
                                 GrGLProcessor::TransformedCoordsArray* outCoords,
                                 GrGLInstalledFragProc*);
     GrGLProgram* finalize();
@@ -314,6 +350,16 @@ protected:
     void enterStage() { fOutOfStage = false; }
     int stageIndex() const { return fStageIndex; }
 
+    struct TransformVarying {
+        TransformVarying(const GrGLVarying& v, const char* uniName, GrCoordSet coordSet)
+            : fV(v), fUniName(uniName), fCoordSet(coordSet) {}
+        GrGLVarying fV;
+        SkString fUniName;
+        GrCoordSet fCoordSet;
+    };
+
+    const char* rtAdjustment() const { return "rtAdjustment"; }
+
     // number of each input/output type in a single allocation block, used by many builders
     static const int kVarsPerBlock;
 
@@ -325,12 +371,14 @@ protected:
     int fStageIndex;
 
     GrGLInstalledGeoProc* fGeometryProcessor;
+    GrGLInstalledXferProc* fXferProcessor;
     SkAutoTUnref<GrGLInstalledFragProcs> fFragmentProcessors;
 
     const GrOptDrawState& fOptState;
     const GrProgramDesc& fDesc;
-    GrGpuGL* fGpu;
+    GrGLGpu* fGpu;
     UniformInfoArray fUniforms;
+    SkSTArray<16, TransformVarying, true> fCoordVaryings;
 
     friend class GrGLShaderBuilder;
     friend class GrGLVertexBuilder;
@@ -357,8 +405,12 @@ struct GrGLInstalledGeoProc : public GrGLInstalledProc {
     SkAutoTDelete<GrGLGeometryProcessor> fGLProc;
 };
 
+struct GrGLInstalledXferProc : public GrGLInstalledProc {
+    SkAutoTDelete<GrGLXferProcessor> fGLProc;
+};
+
 struct GrGLInstalledFragProc : public GrGLInstalledProc {
-    GrGLInstalledFragProc(bool useLocalCoords) : fGLProc(NULL), fLocalCoordAttrib(useLocalCoords) {}
+    GrGLInstalledFragProc() : fGLProc(NULL) {}
     class ShaderVarHandle {
     public:
         bool isValid() const { return fHandle > -1; }
@@ -383,7 +435,6 @@ struct GrGLInstalledFragProc : public GrGLInstalledProc {
 
     SkAutoTDelete<GrGLFragmentProcessor> fGLProc;
     SkSTArray<2, Transform, true>        fTransforms;
-    bool                                 fLocalCoordAttrib;
 };
 
 struct GrGLInstalledFragProcs : public SkRefCnt {

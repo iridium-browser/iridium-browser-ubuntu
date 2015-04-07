@@ -25,6 +25,7 @@ extern "C" void NSAccessibilityUnregisterUniqueIdForUIElement(id element);
 
 using ui::AXNodeData;
 using content::BrowserAccessibility;
+using content::BrowserAccessibilityDelegate;
 using content::BrowserAccessibilityManager;
 using content::BrowserAccessibilityManagerMac;
 using content::ContentClient;
@@ -111,6 +112,7 @@ NSDictionary* attributeToMethodNameMap = nil;
     { @"AXInvalid", @"invalid" },
     { @"AXLoaded", @"loaded" },
     { @"AXLoadingProgress", @"loadingProgress" },
+    { @"AXPlaceholder", @"placeholder" },
     { @"AXRequired", @"required" },
     { @"AXVisited", @"visited" },
   };
@@ -151,9 +153,8 @@ NSDictionary* attributeToMethodNameMap = nil;
 }
 
 - (NSNumber*)ariaBusy {
-  bool boolValue = browserAccessibility_->GetBoolAttribute(
-      ui::AX_ATTR_LIVE_BUSY);
-  return [NSNumber numberWithBool:boolValue];
+  return [NSNumber numberWithBool:
+      GetState(browserAccessibility_, ui::AX_STATE_BUSY)];
 }
 
 - (NSString*)ariaLive {
@@ -402,6 +403,11 @@ NSDictionary* attributeToMethodNameMap = nil;
   return invalid;
 }
 
+- (NSString*)placeholder {
+  return NSStringForStringAttribute(
+      browserAccessibility_, ui::AX_ATTR_PLACEHOLDER);
+}
+
 - (void)addLinkedUIElementsFromAttribute:(ui::AXIntListAttribute)attribute
                                    addTo:(NSMutableArray*)outArray {
   const std::vector<int32>& attributeValues =
@@ -447,20 +453,12 @@ NSDictionary* attributeToMethodNameMap = nil;
 }
 
 - (NSString*)orientation {
-  // We present a spin button as a vertical slider, with a role description
-  // of "spin button".
-  if ([self internalRole] == ui::AX_ROLE_SPIN_BUTTON)
-    return NSAccessibilityVerticalOrientationValue;
-
-  if ([self internalRole] == ui::AX_ROLE_LIST ||
-      [self internalRole] == ui::AX_ROLE_LIST_BOX) {
-    return NSAccessibilityVerticalOrientationValue;
-  }
-
   if (GetState(browserAccessibility_, ui::AX_STATE_VERTICAL))
     return NSAccessibilityVerticalOrientationValue;
-  else
+  else if (GetState(browserAccessibility_, ui::AX_STATE_HORIZONTAL))
     return NSAccessibilityHorizontalOrientationValue;
+
+  return @"";
 }
 
 - (NSNumber*)numberOfCharacters {
@@ -517,9 +515,17 @@ NSDictionary* attributeToMethodNameMap = nil;
   if (!browserAccessibility_)
     return NSZeroPoint;
 
-  gfx::Rect bounds(origin.x, origin.y, size.width, size.height);
-  gfx::Point point = [self delegate]->AccessibilityOriginInScreen(bounds);
-  return NSMakePoint(point.x(), point.y());
+  // Get the delegate for the topmost BrowserAccessibilityManager, because
+  // that's the only one that can convert points to their origin in the screen.
+  BrowserAccessibilityDelegate* delegate =
+      browserAccessibility_->manager()->GetDelegateFromRootManager();
+  if (delegate) {
+    gfx::Rect bounds(origin.x, origin.y, size.width, size.height);
+    gfx::Point point = delegate->AccessibilityOriginInScreen(bounds);
+    return NSMakePoint(point.x(), point.y());
+  } else {
+    return NSZeroPoint;
+  }
 }
 
 // Returns a string indicating the NSAccessibility role of this object.
@@ -541,6 +547,13 @@ NSDictionary* attributeToMethodNameMap = nil;
     else
       return NSAccessibilityButtonRole;
   }
+
+  // If this is a web area for a presentational iframe, give it a role of
+  // something other than WebArea so that the fact that it's a separate doc
+  // is not exposed to AT.
+  if (browserAccessibility_->IsWebAreaForPresentationalIframe())
+    return NSAccessibilityGroupRole;
+
   return [AXPlatformNodeCocoa nativeRoleFromAXRole:role];
 }
 
@@ -566,8 +579,9 @@ NSDictionary* attributeToMethodNameMap = nil;
         IDS_AX_ROLE_HEADING));
   }
 
-  if ([role isEqualToString:NSAccessibilityGroupRole] ||
-      [role isEqualToString:NSAccessibilityRadioButtonRole]) {
+  if (([role isEqualToString:NSAccessibilityGroupRole] ||
+       [role isEqualToString:NSAccessibilityRadioButtonRole]) &&
+      !browserAccessibility_->IsWebAreaForPresentationalIframe()) {
     std::string role;
     if (browserAccessibility_->GetHtmlAttribute("role", &role)) {
       ui::AXRole internalRole = [self internalRole];
@@ -593,12 +607,30 @@ NSDictionary* attributeToMethodNameMap = nil;
   case ui::AX_ROLE_CONTENT_INFO:
     return base::SysUTF16ToNSString(content_client->GetLocalizedString(
         IDS_AX_ROLE_ADDRESS));
+  case ui::AX_ROLE_DESCRIPTION_LIST:
+    return base::SysUTF16ToNSString(content_client->GetLocalizedString(
+        IDS_AX_ROLE_DESCRIPTION_LIST));
+  case ui::AX_ROLE_DESCRIPTION_LIST_DETAIL:
+    return base::SysUTF16ToNSString(content_client->GetLocalizedString(
+        IDS_AX_ROLE_DESCRIPTION_DETAIL));
+  case ui::AX_ROLE_DESCRIPTION_LIST_TERM:
+    return base::SysUTF16ToNSString(content_client->GetLocalizedString(
+        IDS_AX_ROLE_DESCRIPTION_TERM));
+  case ui::AX_ROLE_FIGURE:
+    return base::SysUTF16ToNSString(content_client->GetLocalizedString(
+        IDS_AX_ROLE_FIGURE));
   case ui::AX_ROLE_FOOTER:
     return base::SysUTF16ToNSString(content_client->GetLocalizedString(
         IDS_AX_ROLE_FOOTER));
+  case ui::AX_ROLE_FORM:
+    return base::SysUTF16ToNSString(content_client->GetLocalizedString(
+        IDS_AX_ROLE_FORM));
   case ui::AX_ROLE_MAIN:
     return base::SysUTF16ToNSString(content_client->GetLocalizedString(
         IDS_AX_ROLE_MAIN_CONTENT));
+  case ui::AX_ROLE_MATH:
+    return base::SysUTF16ToNSString(content_client->GetLocalizedString(
+        IDS_AX_ROLE_MATH));
   case ui::AX_ROLE_NAVIGATION:
     return base::SysUTF16ToNSString(content_client->GetLocalizedString(
         IDS_AX_ROLE_NAVIGATIONAL_LINK));
@@ -609,6 +641,9 @@ NSDictionary* attributeToMethodNameMap = nil;
     // This control is similar to what VoiceOver calls a "stepper".
     return base::SysUTF16ToNSString(content_client->GetLocalizedString(
         IDS_AX_ROLE_STEPPER));
+  case ui::AX_ROLE_STATUS:
+    return base::SysUTF16ToNSString(content_client->GetLocalizedString(
+        IDS_AX_ROLE_STATUS));
   case ui::AX_ROLE_TOGGLE_BUTTON:
     return base::SysUTF16ToNSString(content_client->GetLocalizedString(
         IDS_AX_ROLE_TOGGLE_BUTTON));
@@ -728,7 +763,7 @@ NSDictionary* attributeToMethodNameMap = nil;
   }
 
   if (browserAccessibilityRole == ui::AX_ROLE_DESCRIPTION_LIST)
-    return @"AXDescriptionList";
+    return @"AXDefinitionList";
 
   if (browserAccessibilityRole == ui::AX_ROLE_LIST)
     return @"AXContentList";
@@ -834,6 +869,7 @@ NSDictionary* attributeToMethodNameMap = nil;
     return [NSNumber numberWithInt:value];
   } else if ([role isEqualToString:NSAccessibilityProgressIndicatorRole] ||
              [role isEqualToString:NSAccessibilitySliderRole] ||
+             [role isEqualToString:NSAccessibilityIncrementorRole] ||
              [role isEqualToString:NSAccessibilityScrollBarRole]) {
     float floatValue;
     if (browserAccessibility_->GetFloatAttribute(
@@ -1190,7 +1226,6 @@ NSDictionary* attributeToMethodNameMap = nil;
       NSAccessibilityChildrenAttribute,
       NSAccessibilityDescriptionAttribute,
       NSAccessibilityEnabledAttribute,
-      NSAccessibilityExpandedAttribute,
       NSAccessibilityFocusedAttribute,
       NSAccessibilityHelpAttribute,
       NSAccessibilityLinkedUIElementsAttribute,
@@ -1206,7 +1241,6 @@ NSDictionary* attributeToMethodNameMap = nil;
       NSAccessibilityWindowAttribute,
       @"AXAccessKey",
       @"AXInvalid",
-      @"AXRequired",
       @"AXVisited",
       nil];
 
@@ -1255,11 +1289,11 @@ NSDictionary* attributeToMethodNameMap = nil;
     [ret addObject:NSAccessibilityTabsAttribute];
   } else if ([role isEqualToString:NSAccessibilityProgressIndicatorRole] ||
              [role isEqualToString:NSAccessibilitySliderRole] ||
+             [role isEqualToString:NSAccessibilityIncrementorRole] ||
              [role isEqualToString:NSAccessibilityScrollBarRole]) {
     [ret addObjectsFromArray:[NSArray arrayWithObjects:
         NSAccessibilityMaxValueAttribute,
         NSAccessibilityMinValueAttribute,
-        NSAccessibilityOrientationAttribute,
         NSAccessibilityValueDescriptionAttribute,
         nil]];
   } else if ([subrole isEqualToString:NSAccessibilityOutlineRowSubrole]) {
@@ -1290,7 +1324,6 @@ NSDictionary* attributeToMethodNameMap = nil;
     }
   } else if ([role isEqualToString:NSAccessibilityListRole]) {
     [ret addObjectsFromArray:[NSArray arrayWithObjects:
-        NSAccessibilityOrientationAttribute,
         NSAccessibilitySelectedChildrenAttribute,
         NSAccessibilityVisibleChildrenAttribute,
         nil]];
@@ -1308,15 +1341,49 @@ NSDictionary* attributeToMethodNameMap = nil;
           ui::AX_ATTR_LIVE_STATUS)) {
     [ret addObjectsFromArray:[NSArray arrayWithObjects:
         @"AXARIALive",
-        @"AXARIARelevant",
         nil]];
   }
   if (browserAccessibility_->HasStringAttribute(
-          ui::AX_ATTR_CONTAINER_LIVE_STATUS)) {
+          ui::AX_ATTR_LIVE_RELEVANT)) {
+    [ret addObjectsFromArray:[NSArray arrayWithObjects:
+        @"AXARIARelevant",
+        nil]];
+  }
+  if (browserAccessibility_->HasBoolAttribute(
+          ui::AX_ATTR_LIVE_ATOMIC)) {
     [ret addObjectsFromArray:[NSArray arrayWithObjects:
         @"AXARIAAtomic",
+        nil]];
+  }
+  if (browserAccessibility_->HasBoolAttribute(
+          ui::AX_ATTR_LIVE_BUSY)) {
+    [ret addObjectsFromArray:[NSArray arrayWithObjects:
         @"AXARIABusy",
         nil]];
+  }
+
+  //Add expanded attribute only if it has expanded or collapsed state.
+  if (GetState(browserAccessibility_, ui::AX_STATE_EXPANDED) ||
+        GetState(browserAccessibility_, ui::AX_STATE_COLLAPSED)) {
+    [ret addObjectsFromArray:[NSArray arrayWithObjects:
+        NSAccessibilityExpandedAttribute,
+        nil]];
+  }
+
+  if (GetState(browserAccessibility_, ui::AX_STATE_VERTICAL)
+      || GetState(browserAccessibility_, ui::AX_STATE_HORIZONTAL)) {
+    [ret addObjectsFromArray:[NSArray arrayWithObjects:
+        NSAccessibilityOrientationAttribute, nil]];
+  }
+
+  if (browserAccessibility_->HasStringAttribute(ui::AX_ATTR_PLACEHOLDER)) {
+    [ret addObjectsFromArray:[NSArray arrayWithObjects:
+        @"AXPlaceholder", nil]];
+  }
+
+  if (GetState(browserAccessibility_, ui::AX_STATE_REQUIRED)) {
+    [ret addObjectsFromArray:[NSArray arrayWithObjects:
+        @"AXRequired", nil]];
   }
 
   // Title UI Element.
@@ -1480,4 +1547,3 @@ NSDictionary* attributeToMethodNameMap = nil;
 }
 
 @end
-

@@ -12,16 +12,20 @@
 
 namespace blink {
 
+class ExceptionState;
 class ExecutionContext;
 class ScriptState;
 class ScriptValue;
 
 // Created for each ExtendableEvent instance.
 class WaitUntilObserver final : public GarbageCollectedFinalized<WaitUntilObserver>, public ContextLifecycleObserver {
+    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(WaitUntilObserver);
 public:
     enum EventType {
         Activate,
-        Install
+        Install,
+        NotificationClick,
+        Push
     };
 
     static WaitUntilObserver* create(ExecutionContext*, EventType, int eventID);
@@ -32,9 +36,9 @@ public:
 
     // Observes the promise and delays calling the continuation until
     // the given promise is resolved or rejected.
-    void waitUntil(ScriptState*, const ScriptValue&);
+    void waitUntil(ScriptState*, const ScriptValue&, ExceptionState&);
 
-    void trace(Visitor*) { }
+    virtual void trace(Visitor*) override;
 
 private:
     class ThenFunction;
@@ -50,6 +54,7 @@ private:
     int m_eventID;
     int m_pendingActivity;
     bool m_hasError;
+    bool m_eventDispatched;
 };
 
 } // namespace blink

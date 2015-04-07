@@ -13,6 +13,7 @@ namespace ui {
 
 class DriWindowDelegate;
 class DriWindowDelegateManager;
+class ScreenManager;
 
 class GbmSurfaceFactory : public DriSurfaceFactory {
  public:
@@ -26,6 +27,7 @@ class GbmSurfaceFactory : public DriSurfaceFactory {
 
   // DriSurfaceFactory:
   intptr_t GetNativeDisplay() override;
+  int GetDrmFd() override;
   const int32_t* GetEGLSurfaceProperties(const int32_t* desired_list) override;
   bool LoadEGLGLES2Bindings(
       AddGLLibraryCallback add_gl_library,
@@ -35,8 +37,10 @@ class GbmSurfaceFactory : public DriSurfaceFactory {
   scoped_ptr<SurfaceOzoneEGL> CreateSurfacelessEGLSurfaceForWidget(
       gfx::AcceleratedWidget widget) override;
   scoped_refptr<ui::NativePixmap> CreateNativePixmap(
+      gfx::AcceleratedWidget widget,
       gfx::Size size,
-      BufferFormat format) override;
+      BufferFormat format,
+      BufferUsage usage) override;
   OverlayCandidatesOzone* GetOverlayCandidates(
       gfx::AcceleratedWidget w) override;
   bool ScheduleOverlayPlane(gfx::AcceleratedWidget widget,
@@ -46,10 +50,12 @@ class GbmSurfaceFactory : public DriSurfaceFactory {
                             const gfx::Rect& display_bounds,
                             const gfx::RectF& crop_rect) override;
   bool CanShowPrimaryPlaneAsOverlay() override;
+  bool CanCreateNativePixmap(BufferUsage usage) override;
 
  private:
   DriWindowDelegate* GetOrCreateWindowDelegate(gfx::AcceleratedWidget widget);
 
+  ScreenManager* screen_manager_;  // Not owned.
   gbm_device* device_;  // Not owned.
   bool allow_surfaceless_;
 

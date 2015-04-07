@@ -94,6 +94,10 @@ _auth_lock = threading.Lock()
 _auth_method = None
 _auth_method_config = None
 
+# A class to use to send HTTP requests. Can be changed by 'set_engine_class'.
+# Default is RequestsLibEngine.
+_request_engine_cls = None
+
 
 class NetError(IOError):
   """Generic network related error."""
@@ -101,26 +105,7 @@ class NetError(IOError):
   def __init__(self, inner_exc=None):
     super(NetError, self).__init__(str(inner_exc or self.__doc__))
     self.inner_exc = inner_exc
-
-  def format(self, verbose=False):
-    """Human readable description with detailed information about the error."""
-    out = [str(self.inner_exc)]
-    if verbose:
-      headers = None
-      body = None
-      if isinstance(self.inner_exc, requests.HTTPError):
-        headers = self.inner_exc.response.headers.items()
-        body = self.inner_exc.response.content
-      if headers or body:
-        out.append('----------')
-        if headers:
-          for header, value in headers:
-            if not header.startswith('x-'):
-              out.append('%s: %s' % (header.capitalize(), value))
-          out.append('')
-        out.append(body or '<empty body>')
-        out.append('----------')
-    return '\n'.join(out)
+    self.verbose_info = None
 
 
 class TimeoutError(NetError):
@@ -137,6 +122,24 @@ class HttpError(NetError):
   def __init__(self, code, inner_exc=None):
     super(HttpError, self).__init__(inner_exc)
     self.code = code
+
+
+def set_engine_class(engine_cls):
+  """Globally changes a class to use to execute HTTP requests.
+
+  Default engine is RequestsLibEngine that uses 'requests' library. Changing the
+  engine on the fly is not supported. It must be set before the first request.
+
+  Custom engine class should support same public interface as RequestsLibEngine.
+  """
+  global _request_engine_cls
+  assert _request_engine_cls is None
+  _request_engine_cls = engine_cls
+
+
+def get_engine_class():
+  """Returns a class to use to execute HTTP requests."""
+  return _request_engine_cls or RequestsLibEngine
 
 
 def url_open(url, **kwargs):  # pylint: disable=W0621
@@ -218,15 +221,34 @@ def split_server_request_url(url):
   return urlhost, urlpath
 
 
+def fix_url(url):
+  """Fixes an url to https."""
+  parts = urlparse.urlparse(url, 'https')
+  if parts.query:
+    raise ValueError('doesn\'t support query parameter.')
+  if parts.fragment:
+    raise ValueError('doesn\'t support fragment in the url.')
+  # urlparse('foo.com') will result in netloc='', path='foo.com', which is not
+  # what is desired here.
+  new = list(parts)
+  if not new[1] and new[2]:
+    new[1] = new[2].rstrip('/')
+    new[2] = ''
+  new[2] = new[2].rstrip('/')
+  return urlparse.urlunparse(new)
+
+
 def get_http_service(urlhost, allow_cached=True):
   """Returns existing or creates new instance of HttpService that can send
   requests to given base urlhost.
   """
   def new_service():
+    engine_cls = get_engine_class()
+    auth = None if engine_cls.provides_auth else create_authenticator(urlhost)
     return HttpService(
         urlhost,
-        engine=RequestsLibEngine(),
-        authenticator=create_authenticator(urlhost))
+        engine=engine_cls(),
+        authenticator=auth)
 
   # Ensure consistency in url naming.
   urlhost = str(urlhost).lower().rstrip('/')
@@ -249,6 +271,9 @@ def get_default_auth_config():
 
   Returns pair (auth method name, auth method config).
   """
+  engine = get_engine_class()
+  if engine.provides_auth:
+    return 'none', None
   if tools.is_headless():
     return 'bot', None
   else:
@@ -257,6 +282,9 @@ def get_default_auth_config():
 
 def configure_auth(method, config=None):
   """Defines what authentication methods to use.
+
+  If request engine (see get_engine_class) provides authentication already (as
+  indicated by its 'provides_auth=True' class property) this setting is ignored.
 
   Possible authentication methods are:
     'bot' - use HMAC authentication based on a secret key.
@@ -403,7 +431,8 @@ class HttpService(object):
       read_timeout=URL_READ_TIMEOUT,
       stream=True,
       method=None,
-      headers=None):
+      headers=None,
+      follow_redirects=True):
     """Attempts to open the given url multiple times.
 
     |urlpath| is relative to the server root, i.e. '/some/request?param=1'.
@@ -428,6 +457,10 @@ class HttpService(object):
 
     If |headers| is given, it should be a dict with HTTP headers to append
     to request. Caller is responsible for providing headers that make sense.
+
+    If |follow_redirects| is True, will transparently follow HTTP redirects,
+    otherwise redirect response will be returned as is. It can be recognized
+    by the presence of 'Location' response header.
 
     If |read_timeout| is not None will configure underlying socket to
     raise TimeoutError exception whenever there's no response from the server
@@ -479,10 +512,11 @@ class HttpService(object):
         # Prepare and send a new request.
         request = HttpRequest(
             method, resource_url, query_params, body,
-            headers, read_timeout, stream)
+            headers, read_timeout, stream, follow_redirects)
         if self.authenticator:
           self.authenticator.authorize(request)
         response = self.engine.perform_request(request)
+        response._timeout_exc_classes = self.engine.timeout_exception_classes()
         logging.debug('Request %s succeeded', request.get_full_url())
         return response
 
@@ -490,7 +524,7 @@ class HttpService(object):
         last_error = e
         logging.warning(
             'Unable to open url %s on attempt %d.\n%s',
-            request.get_full_url(), attempt.attempt, e.format())
+            request.get_full_url(), attempt.attempt, self._format_error(e))
         continue
 
       except HttpError as e:
@@ -500,7 +534,7 @@ class HttpService(object):
         if e.code in (401, 403):
           logging.warning(
               'Authentication is required for %s on attempt %d.\n%s',
-              request.get_full_url(), attempt.attempt, e.format())
+              request.get_full_url(), attempt.attempt, self._format_error(e))
           # Try to authenticate only once. If it doesn't help, then server does
           # not support authentication or user doesn't have required access.
           if not auth_attempted:
@@ -511,29 +545,33 @@ class HttpService(object):
               continue
           # Authentication attempt was unsuccessful.
           logging.error(
-              'Unable to authenticate to %s (%s). Use auth.py to login: '
-              'python auth.py login --service=%s',
-              self.urlhost, e.format(), self.urlhost)
+              'Unable to authenticate to %s (%s).',
+              self.urlhost, self._format_error(e))
+          if self.authenticator:
+            logging.error(
+                'Use auth.py to login: python auth.py login --service=%s',
+                self.urlhost)
           return None
 
         # Hit a error that can not be retried -> stop retry loop.
         if not self.is_transient_http_error(e.code, retry_404, retry_50x):
           # This HttpError means we reached the server and there was a problem
           # with the request, so don't retry.
-          logging.error(
+          logging.warning(
               'Able to connect to %s but an exception was thrown.\n%s',
-              request.get_full_url(), e.format(verbose=True))
+              request.get_full_url(), self._format_error(e, verbose=True))
           return None
 
         # Retry all other errors.
         logging.warning(
             'Server responded with error on %s on attempt %d.\n%s',
-            request.get_full_url(), attempt.attempt, e.format())
+            request.get_full_url(), attempt.attempt, self._format_error(e))
         continue
 
     logging.error(
         'Unable to open given url, %s, after %d attempts.\n%s',
-        request.get_full_url(), max_attempts, last_error.format(verbose=True))
+        request.get_full_url(), max_attempts,
+        self._format_error(last_error, verbose=True))
     return None
 
   def json_request(self, urlpath, data=None, **kwargs):
@@ -565,11 +603,37 @@ class HttpService(object):
       logging.error('Not a JSON response when calling %s: %s', urlpath, text)
       return None
 
+  def _format_error(self, exc, verbose=False):
+    """Returns readable description of a NetError."""
+    if not isinstance(exc, NetError):
+      return str(exc)
+    if not verbose:
+      return str(exc.inner_exc or exc)
+    # Avoid making multiple calls to parse_request_exception since they may
+    # have side effects on the exception, e.g. urllib2 based exceptions are in
+    # fact file-like objects that can not be read twice.
+    if exc.verbose_info is None:
+      out = [str(exc.inner_exc or exc)]
+      headers, body = self.engine.parse_request_exception(exc.inner_exc)
+      if headers or body:
+        out.append('----------')
+        if headers:
+          for header, value in headers:
+            if not header.startswith('x-'):
+              out.append('%s: %s' % (header.capitalize(), value))
+          out.append('')
+        out.append(body or '<empty body>')
+        out.append('----------')
+      exc.verbose_info = '\n'.join(out)
+    return exc.verbose_info
+
 
 class HttpRequest(object):
   """Request to HttpService."""
 
-  def __init__(self, method, url, params, body, headers, timeout, stream):
+  def __init__(
+      self, method, url, params, body,
+      headers, timeout, stream, follow_redirects):
     """Arguments:
       |method| - HTTP method to use
       |url| - relative URL to the resource, without query parameters
@@ -578,6 +642,7 @@ class HttpRequest(object):
       |headers| - dict with request headers
       |timeout| - socket read timeout (None to disable)
       |stream| - True to stream response from socket
+      |follow_redirects| - True to follow HTTP redirects.
     """
     self.method = method
     self.url = url
@@ -586,6 +651,7 @@ class HttpRequest(object):
     self.headers = headers.copy()
     self.timeout = timeout
     self.stream = stream
+    self.follow_redirects = follow_redirects
     self._cookies = None
 
   @property
@@ -615,6 +681,7 @@ class HttpResponse(object):
     self._url = url
     self._headers = get_case_insensitive_dict(headers)
     self._read = 0
+    self._timeout_exc_classes = ()
 
   @property
   def content_length(self):
@@ -633,12 +700,14 @@ class HttpResponse(object):
 
     Raises TimeoutError on read timeout.
     """
+    assert isinstance(self._timeout_exc_classes, tuple)
+    assert all(issubclass(e, Exception) for e in self._timeout_exc_classes)
     try:
       # cStringIO has a bug: stream.read(None) is not the same as stream.read().
       data = self._stream.read() if size is None else self._stream.read(size)
       self._read += len(data)
       return data
-    except (socket.timeout, ssl.SSLError, requests.Timeout) as e:
+    except self._timeout_exc_classes as e:
       logging.error('Timeout while reading from %s, read %d of %s: %s',
           self._url, self._read, self.content_length, e)
       raise TimeoutError(e)
@@ -668,12 +737,24 @@ class Authenticator(object):
 class RequestsLibEngine(object):
   """Class that knows how to execute HttpRequests via requests library."""
 
-  # Preferred number of connections in a connection pool.
-  CONNECTION_POOL_SIZE = 64
-  # If True will not open more than CONNECTION_POOL_SIZE connections.
-  CONNECTION_POOL_BLOCK = False
-  # Maximum number of internal connection retries in a connection pool.
-  CONNECTION_RETRIES = 0
+  # This engine doesn't know how to authenticate requests on transport level.
+  provides_auth = False
+
+  @classmethod
+  def parse_request_exception(cls, exc):
+    """Extracts HTTP headers and body from inner exceptions put in HttpError."""
+    if isinstance(exc, requests.HTTPError):
+      return exc.response.headers.items(), exc.response.content
+    return None, None
+
+  @classmethod
+  def timeout_exception_classes(cls):
+    """A tuple of exception classes that represent timeout.
+
+    Will be caught while reading a streaming response in HttpResponse.read and
+    transformed to TimeoutError.
+    """
+    return (socket.timeout, ssl.SSLError, requests.Timeout)
 
   def __init__(self):
     super(RequestsLibEngine, self).__init__()
@@ -684,10 +765,10 @@ class RequestsLibEngine(object):
     # Configure connection pools.
     for protocol in ('https://', 'http://'):
       self.session.mount(protocol, adapters.HTTPAdapter(
-          pool_connections=self.CONNECTION_POOL_SIZE,
-          pool_maxsize=self.CONNECTION_POOL_SIZE,
-          max_retries=self.CONNECTION_RETRIES,
-          pool_block=self.CONNECTION_POOL_BLOCK))
+          pool_connections=64,
+          pool_maxsize=64,
+          max_retries=0,
+          pool_block=False))
 
   def perform_request(self, request):
     """Sends a HttpRequest to the server and reads back the response.
@@ -708,7 +789,8 @@ class RequestsLibEngine(object):
           headers=request.headers,
           cookies=request.cookies,
           timeout=request.timeout,
-          stream=request.stream)
+          stream=request.stream,
+          allow_redirects=request.follow_redirects)
       response.raise_for_status()
       if request.stream:
         stream = response.raw

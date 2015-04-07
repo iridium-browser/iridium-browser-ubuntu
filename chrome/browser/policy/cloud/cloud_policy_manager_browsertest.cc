@@ -50,7 +50,7 @@ class CloudPolicyManagerTest : public InProcessBrowserTest {
   ~CloudPolicyManagerTest() override {}
 
   void SetUpInProcessBrowserTestFixture() override {
-    CommandLine* command_line = CommandLine::ForCurrentProcess();
+    base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
     command_line->AppendSwitchASCII(switches::kDeviceManagementUrl,
                                     "http://localhost");
   }
@@ -129,8 +129,8 @@ class CloudPolicyManagerTest : public InProcessBrowserTest {
         em::DeviceRegisterRequest::BROWSER;
 #endif
     policy_manager()->core()->client()->Register(
-        registration_type, "bogus", std::string(), false, std::string(),
-        std::string());
+        registration_type, em::DeviceRegisterRequest::FLAVOR_USER_REGISTRATION,
+        "bogus", std::string(), std::string(), std::string());
     run_loop.Run();
     Mock::VerifyAndClearExpectations(&observer);
     policy_manager()->core()->client()->RemoveObserver(&observer);

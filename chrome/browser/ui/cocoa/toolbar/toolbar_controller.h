@@ -20,6 +20,7 @@
 @class BackForwardMenuController;
 class Browser;
 @class BrowserActionsContainerView;
+class BrowserActionsContainerViewSizeDelegate;
 @class BrowserActionsController;
 class CommandUpdater;
 class LocationBarViewMac;
@@ -68,6 +69,8 @@ class NotificationBridge;
   base::scoped_nsobject<BackForwardMenuController> backMenuController_;
   base::scoped_nsobject<BackForwardMenuController> forwardMenuController_;
   base::scoped_nsobject<BrowserActionsController> browserActionsController_;
+  scoped_ptr<BrowserActionsContainerViewSizeDelegate>
+      browserActionsContainerDelegate_;
 
   // Lazily-instantiated menu controller.
   base::scoped_nsobject<WrenchMenuController> wrenchMenuController_;
@@ -119,11 +122,18 @@ class NotificationBridge;
 // restore any previous location bar state (such as user editing) as well.
 - (void)updateToolbarWithContents:(content::WebContents*)tab;
 
+// Resets the state for |tab|.
+- (void)resetTabState:(content::WebContents*)tab;
+
 // Sets whether or not the current page in the frontmost tab is bookmarked.
 - (void)setStarredState:(BOOL)isStarred;
 
 // Sets whether or not the current page is translated.
 - (void)setTranslateIconLit:(BOOL)on;
+
+// Sets whether or not an overflowed toolbar action wants to run.
+// Only used if the extension toolbar redesign is on.
+- (void)setOverflowedToolbarActionWantsToRun:(BOOL)overflowedActionWantsToRun;
 
 // Happens when the zoom for the active tab changes, the active tab switches, or
 // a new tab or browser window is created. |canShowBubble| indicates if it is
@@ -164,6 +174,9 @@ class NotificationBridge;
 // Returns the wrench button.
 - (NSView*)wrenchButton;
 
+// Returns the wrench menu controller.
+- (WrenchMenuController*)wrenchMenuController;
+
 @end
 
 // A set of private methods used by subclasses. Do not call these directly
@@ -184,7 +197,6 @@ class NotificationBridge;
 - (NSArray*)toolbarViews;
 - (void)showOptionalHomeButton;
 - (void)installWrenchMenu;
-- (WrenchMenuController*)wrenchMenuController;
 // Return a hover button for the current event.
 - (NSButton*)hoverButtonForEvent:(NSEvent*)theEvent;
 @end

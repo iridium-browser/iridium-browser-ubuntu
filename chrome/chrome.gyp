@@ -39,6 +39,24 @@
           '../content/content.gyp:content_ppapi_plugin',
           '../third_party/WebKit/public/blink_devtools.gyp:blink_devtools_frontend_resources',
         ],
+        'conditions': [
+          [ 'cld_version==0 or cld_version==2', {
+            'chromium_child_dependencies': [
+              # Use whatever CLD2 data access mode that the application
+              # embedder is using.
+              '<(DEPTH)/third_party/cld_2/cld_2.gyp:cld2_platform_impl', ],
+          }],
+          ['enable_plugins==1 and disable_nacl==0', {
+            'chromium_child_dependencies': [
+              '<(DEPTH)/ppapi/native_client/src/trusted/plugin/plugin.gyp:nacl_trusted_plugin',
+            ],
+          }],
+          ['remoting==1', {
+            'chromium_child_dependencies': [
+              '../remoting/remoting.gyp:remoting_client_plugin',
+            ],
+          }],
+        ],
       }],
       ['enable_basic_printing==1 or enable_print_preview==1', {
         'chromium_browser_dependencies': [
@@ -244,12 +262,6 @@
                 'STRIPFLAGS': '-s $(CHROMIUM_STRIP_SAVE_FILE)',
               },
             }],
-            ['asan==1', {
-              'xcode_settings': {
-                # Override the outer definition of CHROMIUM_STRIP_SAVE_FILE.
-                'CHROMIUM_STRIP_SAVE_FILE': 'app/app_asan.saves',
-              },
-            }],
             ['component=="shared_library"', {
               'xcode_settings': {
                 'LD_RUNPATH_SEARCH_PATHS': [
@@ -392,7 +404,6 @@
             '../content/content_shell_and_tests.gyp:content_unittests',
             '../net/net.gyp:net_unittests',
             '../ui/base/ui_base_tests.gyp:ui_base_unittests',
-            '../ui/base/ui_base_tests.gyp:ui_unittests',
           ],
         },
         {
@@ -499,9 +510,11 @@
           'type': 'executable',
           'dependencies': [
             '../base/base.gyp:base',
+            '../crypto/crypto.gyp:crypto',
             'safe_browsing_proto',
           ],
           'sources': [
+            'browser/safe_browsing/binary_feature_extractor.cc',
             'browser/safe_browsing/binary_feature_extractor.h',
             'browser/safe_browsing/binary_feature_extractor_win.cc',
             'browser/safe_browsing/pe_image_reader_win.cc',
@@ -512,6 +525,7 @@
       ],  # 'targets'
       'includes': [
         'app_shim/app_shim_win.gypi',
+        'chrome_watcher/chrome_watcher.gypi',
         'chrome_process_finder.gypi',
         'metro_utils.gypi',
       ],
@@ -588,6 +602,7 @@
             'chrome_resources.gyp:chrome_strings',
             'chrome_strings_grd',
             'chrome_version_java',
+            'document_tab_model_info_proto_java',
             'profile_account_management_metrics_java',
             'content_setting_java',
             'content_settings_type_java',
@@ -599,6 +614,7 @@
             '../base/base.gyp:base',
             '../components/components.gyp:bookmarks_java',
             '../components/components.gyp:dom_distiller_core_java',
+            '../components/components.gyp:enhanced_bookmarks_launch_location_srcjar',
             '../components/components.gyp:gcm_driver_java',
             '../components/components.gyp:invalidation_java',
             '../components/components.gyp:navigation_interception_java',
@@ -609,6 +625,7 @@
             '../sync/sync.gyp:sync_java',
             '../third_party/android_tools/android_tools.gyp:android_support_v7_appcompat_javalib',
             '../third_party/android_tools/android_tools.gyp:android_support_v13_javalib',
+            '../third_party/libaddressinput/libaddressinput.gyp:android_addressinput_widget',
             '../ui/android/ui_android.gyp:ui_java',
           ],
           'variables': {

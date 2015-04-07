@@ -42,6 +42,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/policy/configuration_policy_handler_chromeos.h"
+#include "chromeos/chromeos_pref_names.h"
 #include "chromeos/dbus/power_policy_controller.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
@@ -96,6 +97,12 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     base::Value::TYPE_BOOLEAN },
   { key::kForceSafeSearch,
     prefs::kForceSafeSearch,
+    base::Value::TYPE_BOOLEAN },
+  { key::kForceGoogleSafeSearch,
+    prefs::kForceGoogleSafeSearch,
+    base::Value::TYPE_BOOLEAN },
+  { key::kForceYouTubeSafetyMode,
+    prefs::kForceYouTubeSafetyMode,
     base::Value::TYPE_BOOLEAN },
   { key::kPasswordManagerEnabled,
     password_manager::prefs::kPasswordManagerSavingEnabled,
@@ -409,7 +416,7 @@ const PolicyToPreferenceMapEntry kSimplePolicyMap[] = {
     prefs::kExternalStorageDisabled,
     base::Value::TYPE_BOOLEAN },
   { key::kAudioOutputAllowed,
-    prefs::kAudioOutputAllowed,
+    chromeos::prefs::kAudioOutputAllowed,
     base::Value::TYPE_BOOLEAN },
   { key::kShowLogoutButtonInTray,
     prefs::kShowLogoutButtonInTray,
@@ -532,7 +539,7 @@ void GetDeprecatedFeaturesMap(
     ScopedVector<StringMappingListPolicyHandler::MappingEntry>* result) {
   // Maps feature tags as specified in policy to the corresponding switch to
   // re-enable them.
-  // TODO: Remove after 2015-04-30 per http://crbug.com/374782.
+  // TODO(atwilson): Remove after 2015-04-30 per http://crbug.com/374782.
   result->push_back(new StringMappingListPolicyHandler::MappingEntry(
       "ShowModalDialog_EffectiveUntil20150430",
       scoped_ptr<base::Value>(new base::StringValue(

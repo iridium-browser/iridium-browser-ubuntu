@@ -59,8 +59,8 @@ class MockConnectionToClientEventHandler :
                void(ConnectionToClient* connection));
   MOCK_METHOD2(OnConnectionClosed, void(ConnectionToClient* connection,
                                         ErrorCode error));
-  MOCK_METHOD2(OnSequenceNumberUpdated, void(ConnectionToClient* connection,
-                                             int64 sequence_number));
+  MOCK_METHOD2(OnEventTimestamp,
+               void(ConnectionToClient* connection, int64 timestamp));
   MOCK_METHOD3(OnRouteChange, void(ConnectionToClient* connection,
                                    const std::string& channel_name,
                                    const TransportRoute& route));
@@ -142,6 +142,17 @@ class MockClientStub : public ClientStub {
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockClientStub);
+};
+
+class MockCursorShapeStub : public CursorShapeStub {
+ public:
+  MockCursorShapeStub();
+  virtual ~MockCursorShapeStub();
+
+  MOCK_METHOD1(SetCursorShape, void(const CursorShapeInfo& cursor_shape));
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MockCursorShapeStub);
 };
 
 class MockVideoStub : public VideoStub {

@@ -13,7 +13,6 @@
     'internal_ozone_platforms': [
       'dri',
     ],
-    'use_drm_atomic_flip%': 0,
   },
   'targets': [
     {
@@ -28,6 +27,7 @@
         '../display/display.gyp:display_util',
         '../events/events.gyp:events',
         '../events/ozone/events_ozone.gyp:events_ozone_evdev',
+        '../events/ozone/events_ozone.gyp:events_ozone_layout',
         '../gfx/gfx.gyp:gfx',
         '../gfx/gfx.gyp:gfx_geometry',
       ],
@@ -38,6 +38,9 @@
         'channel_observer.h',
         'crtc_controller.cc',
         'crtc_controller.h',
+        'display_change_observer.h',
+        'display_manager.cc',
+        'display_manager.h',
         'display_mode_dri.cc',
         'display_mode_dri.h',
         'display_snapshot_dri.cc',
@@ -73,8 +76,16 @@
         'dri_wrapper.h',
         'hardware_display_controller.cc',
         'hardware_display_controller.h',
+        'hardware_display_plane.cc',
+        'hardware_display_plane.h',
+        'hardware_display_plane_manager.cc',
+        'hardware_display_plane_manager.h',
+        'hardware_display_plane_manager_legacy.cc',
+        'hardware_display_plane_manager_legacy.h',
         'native_display_delegate_dri.cc',
         'native_display_delegate_dri.h',
+        'native_display_delegate_proxy.cc',
+        'native_display_delegate_proxy.h',
         'overlay_plane.cc',
         'overlay_plane.h',
         'ozone_platform_dri.cc',
@@ -84,16 +95,6 @@
         'screen_manager.cc',
         'screen_manager.h',
         'scanout_buffer.h',
-      ],
-      'conditions': [
-        ['use_drm_atomic_flip==1', {
-          'sources': [
-            'hardware_display_plane.cc',
-            'hardware_display_plane.h',
-            'hardware_display_plane_manager.cc',
-            'hardware_display_plane_manager.h',
-          ],
-        }],
       ],
     },
     {
@@ -112,9 +113,10 @@
       ],
       'direct_dependent_settings': {
         'sources': [
-          'dri_surface_factory_unittest.cc',
           'dri_surface_unittest.cc',
+          'dri_window_delegate_impl_unittest.cc',
           'hardware_display_controller_unittest.cc',
+          'hardware_display_plane_manager_unittest.cc',
           'screen_manager_unittest.cc',
           'test/mock_dri_wrapper.cc',
           'test/mock_dri_wrapper.h',

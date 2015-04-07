@@ -48,6 +48,7 @@ WebInspector.InspectElementModeController.createShortcut = function()
 
 WebInspector.InspectElementModeController.prototype = {
     /**
+     * @override
      * @param {!WebInspector.Target} target
      */
     targetAdded: function(target)
@@ -59,6 +60,7 @@ WebInspector.InspectElementModeController.prototype = {
     },
 
     /**
+     * @override
      * @param {!WebInspector.Target} target
      */
     targetRemoved: function(target)
@@ -70,7 +72,7 @@ WebInspector.InspectElementModeController.prototype = {
      */
     enabled: function()
     {
-        return this._toggleSearchButton.toggled;
+        return this._toggleSearchButton.toggled();
     },
 
     disable: function()
@@ -82,7 +84,7 @@ WebInspector.InspectElementModeController.prototype = {
     _toggleSearch: function()
     {
         var enabled = !this.enabled();
-        this._toggleSearchButton.toggled = enabled;
+        this._toggleSearchButton.setToggled(enabled);
 
         var targets = WebInspector.targetManager.targets();
         for (var i = 0; i < targets.length; ++i)
@@ -100,6 +102,7 @@ WebInspector.InspectElementModeController.ToggleSearchActionDelegate = function(
 
 WebInspector.InspectElementModeController.ToggleSearchActionDelegate.prototype = {
     /**
+     * @override
      * @return {boolean}
      */
     handleAction: function()
@@ -121,6 +124,7 @@ WebInspector.InspectElementModeController.ToggleButtonProvider = function()
 
 WebInspector.InspectElementModeController.ToggleButtonProvider.prototype = {
     /**
+     * @override
      * @return {?WebInspector.StatusBarItem}
      */
     item: function()

@@ -98,7 +98,7 @@ class UpdateEngineClientImpl : public UpdateEngineClient {
     observers_.RemoveObserver(observer);
   }
 
-  virtual bool HasObserver(Observer* observer) override {
+  virtual bool HasObserver(const Observer* observer) const override {
     return observers_.HasObserver(observer);
   }
 
@@ -412,7 +412,9 @@ class UpdateEngineClientStubImpl : public UpdateEngineClient {
   virtual void Init(dbus::Bus* bus) override {}
   virtual void AddObserver(Observer* observer) override {}
   virtual void RemoveObserver(Observer* observer) override {}
-  virtual bool HasObserver(Observer* observer) override { return false; }
+  virtual bool HasObserver(const Observer* observer) const override {
+    return false;
+  }
 
   virtual void RequestUpdateCheck(
       const UpdateCheckCallback& callback) override {
@@ -467,7 +469,7 @@ class UpdateEngineClientFakeImpl : public UpdateEngineClientStubImpl {
       observers_.RemoveObserver(observer);
   }
 
-  virtual bool HasObserver(Observer* observer) override {
+  virtual bool HasObserver(const Observer* observer) const override {
     return observers_.HasObserver(observer);
   }
 
@@ -562,7 +564,8 @@ UpdateEngineClient* UpdateEngineClient::Create(
   if (type == REAL_DBUS_CLIENT_IMPLEMENTATION)
     return new UpdateEngineClientImpl();
   DCHECK_EQ(STUB_DBUS_CLIENT_IMPLEMENTATION, type);
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kTestAutoUpdateUI))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kTestAutoUpdateUI))
     return new UpdateEngineClientFakeImpl();
   else
     return new UpdateEngineClientStubImpl();

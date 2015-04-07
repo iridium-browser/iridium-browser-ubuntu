@@ -132,7 +132,7 @@ struct st_CRYPTO_EX_DATA_IMPL {
 };
 
 
-#if defined(OPENSSL_WINDOWS)
+#if defined(_MSC_VER)
 #define OPENSSL_U64(x) x##UI64
 #else
 
@@ -142,12 +142,157 @@ struct st_CRYPTO_EX_DATA_IMPL {
 #define OPENSSL_U64(x) x##ULL
 #endif
 
-#endif  /* OPENSSL_WINDOWS */
+#endif  /* defined(_MSC_VER) */
 
 #if defined(OPENSSL_X86) || defined(OPENSSL_X86_64)
 /* OPENSSL_cpuid_setup initializes OPENSSL_ia32cap_P. */
 void OPENSSL_cpuid_setup(void);
 #endif
+
+#if !defined(inline)
+#define inline __inline
+#endif
+
+
+/* Constant-time utility functions.
+ *
+ * The following methods return a bitmask of all ones (0xff...f) for true and 0
+ * for false. This is useful for choosing a value based on the result of a
+ * conditional in constant time. For example,
+ *
+ * if (a < b) {
+ *   c = a;
+ * } else {
+ *   c = b;
+ * }
+ *
+ * can be written as
+ *
+ * unsigned int lt = constant_time_lt(a, b);
+ * c = constant_time_select(lt, a, b); */
+
+/* constant_time_msb returns the given value with the MSB copied to all the
+ * other bits. */
+static inline unsigned int constant_time_msb(unsigned int a) {
+  return (unsigned int)((int)(a) >> (sizeof(int) * 8 - 1));
+}
+
+/* constant_time_lt returns 0xff..f if a < b and 0 otherwise. */
+static inline unsigned int constant_time_lt(unsigned int a, unsigned int b) {
+  /* Consider the two cases of the problem:
+   *   msb(a) == msb(b): a < b iff the MSB of a - b is set.
+   *   msb(a) != msb(b): a < b iff the MSB of b is set.
+   *
+   * If msb(a) == msb(b) then the following evaluates as:
+   *   msb(a^((a^b)|((a-b)^a))) ==
+   *   msb(a^((a-b) ^ a))       ==   (because msb(a^b) == 0)
+   *   msb(a^a^(a-b))           ==   (rearranging)
+   *   msb(a-b)                      (because ∀x. x^x == 0)
+   *
+   * Else, if msb(a) != msb(b) then the following evaluates as:
+   *   msb(a^((a^b)|((a-b)^a))) ==
+   *   msb(a^(𝟙 | ((a-b)^a)))   ==   (because msb(a^b) == 1 and 𝟙
+   *                                  represents a value s.t. msb(𝟙) = 1)
+   *   msb(a^𝟙)                 ==   (because ORing with 1 results in 1)
+   *   msb(b)
+   *
+   *
+   * Here is an SMT-LIB verification of this formula:
+   *
+   * (define-fun lt ((a (_ BitVec 32)) (b (_ BitVec 32))) (_ BitVec 32)
+   *   (bvxor a (bvor (bvxor a b) (bvxor (bvsub a b) a)))
+   * )
+   *
+   * (declare-fun a () (_ BitVec 32))
+   * (declare-fun b () (_ BitVec 32))
+   *
+   * (assert (not (= (= #x00000001 (bvlshr (lt a b) #x0000001f)) (bvult a b))))
+   * (check-sat)
+   * (get-model)
+   */
+  return constant_time_msb(a^((a^b)|((a-b)^a)));
+}
+
+/* constant_time_lt_8 acts like |constant_time_lt| but returns an 8-bit mask. */
+static inline uint8_t constant_time_lt_8(unsigned int a, unsigned int b) {
+  return (uint8_t)(constant_time_lt(a, b));
+}
+
+/* constant_time_gt returns 0xff..f if a >= b and 0 otherwise. */
+static inline unsigned int constant_time_ge(unsigned int a, unsigned int b) {
+  return ~constant_time_lt(a, b);
+}
+
+/* constant_time_ge_8 acts like |constant_time_ge| but returns an 8-bit mask. */
+static inline uint8_t constant_time_ge_8(unsigned int a, unsigned int b) {
+  return (uint8_t)(constant_time_ge(a, b));
+}
+
+/* constant_time_is_zero returns 0xff..f if a == 0 and 0 otherwise. */
+static inline unsigned int constant_time_is_zero(unsigned int a) {
+  /* Here is an SMT-LIB verification of this formula:
+   *
+   * (define-fun is_zero ((a (_ BitVec 32))) (_ BitVec 32)
+   *   (bvand (bvnot a) (bvsub a #x00000001))
+   * )
+   *
+   * (declare-fun a () (_ BitVec 32))
+   *
+   * (assert (not (= (= #x00000001 (bvlshr (is_zero a) #x0000001f)) (= a #x00000000))))
+   * (check-sat)
+   * (get-model)
+   */
+  return constant_time_msb(~a & (a - 1));
+}
+
+/* constant_time_is_zero_8 acts like constant_time_is_zero but returns an 8-bit
+ * mask. */
+static inline uint8_t constant_time_is_zero_8(unsigned int a) {
+  return (uint8_t)(constant_time_is_zero(a));
+}
+
+/* constant_time_eq returns 0xff..f if a == b and 0 otherwise. */
+static inline unsigned int constant_time_eq(unsigned int a, unsigned int b) {
+  return constant_time_is_zero(a ^ b);
+}
+
+/* constant_time_eq_8 acts like |constant_time_eq| but returns an 8-bit mask. */
+static inline uint8_t constant_time_eq_8(unsigned int a, unsigned int b) {
+  return (uint8_t)(constant_time_eq(a, b));
+}
+
+/* constant_time_eq_int acts like |constant_time_eq| but works on int values. */
+static inline unsigned int constant_time_eq_int(int a, int b) {
+  return constant_time_eq((unsigned)(a), (unsigned)(b));
+}
+
+/* constant_time_eq_int_8 acts like |constant_time_eq_int| but returns an 8-bit
+ * mask. */
+static inline uint8_t constant_time_eq_int_8(int a, int b) {
+  return constant_time_eq_8((unsigned)(a), (unsigned)(b));
+}
+
+/* constant_time_select returns (mask & a) | (~mask & b). When |mask| is all 1s
+ * or all 0s (as returned by the methods above), the select methods return
+ * either |a| (if |mask| is nonzero) or |b| (if |mask| is zero). */
+static inline unsigned int constant_time_select(unsigned int mask,
+                                                unsigned int a, unsigned int b) {
+  return (mask & a) | (~mask & b);
+}
+
+/* constant_time_select_8 acts like |constant_time_select| but operates on
+ * 8-bit values. */
+static inline uint8_t constant_time_select_8(uint8_t mask, uint8_t a,
+                                             uint8_t b) {
+  return (uint8_t)(constant_time_select(mask, a, b));
+}
+
+/* constant_time_select_int acts like |constant_time_select| but operates on
+ * ints. */
+static inline int constant_time_select_int(unsigned int mask, int a, int b) {
+  return (int)(constant_time_select(mask, (unsigned)(a), (unsigned)(b)));
+}
+
 
 #if defined(__cplusplus)
 }  /* extern C */

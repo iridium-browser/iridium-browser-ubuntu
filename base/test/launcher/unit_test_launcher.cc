@@ -118,8 +118,8 @@ class UnitTestLauncherDelegate : public TestLauncherDelegate {
     FilePath output_file;
   };
 
-  bool ShouldRunTest(const testing::TestCase* test_case,
-                     const testing::TestInfo* test_info) override {
+  bool ShouldRunTest(const std::string& test_case_name,
+                     const std::string& test_name) override {
     DCHECK(thread_checker_.CalledOnValidThread());
 
     // There is no additional logic to disable specific tests.
@@ -475,15 +475,6 @@ int LaunchUnitTestsInternal(const RunTestSuiteCallback& run_test_suite,
       fprintf(stdout,
               "Debugger detected, switching to single process mode.\n"
               "Pass --test-launcher-debug-launcher to debug the launcher "
-              "itself.\n");
-      fflush(stdout);
-      force_single_process = true;
-    }
-
-    if (RunningOnValgrind()) {
-      fprintf(stdout,
-              "Valgrind detected, switching to single process mode.\n"
-              "Pass --test-launcher-debug-launcher to valgrind the launcher "
               "itself.\n");
       fflush(stdout);
       force_single_process = true;

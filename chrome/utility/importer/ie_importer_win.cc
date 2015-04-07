@@ -114,7 +114,7 @@ LPCITEMIDLIST BinaryReadItemIDList(size_t offset, size_t idlist_size,
 struct IEOrderBookmarkComparator {
   bool operator()(const ImportedBookmarkEntry& lhs,
                   const ImportedBookmarkEntry& rhs) const {
-    static const uint32 kNotSorted = 0xfffffffb; // IE uses this magic value.
+    static const uint32 kNotSorted = 0xfffffffb;  // IE uses this magic value.
     base::FilePath lhs_prefix;
     base::FilePath rhs_prefix;
     for (size_t i = 0; i <= lhs.path.size() && i <= rhs.path.size(); ++i) {
@@ -184,7 +184,7 @@ bool ParseFavoritesOrderBlob(
     // Read the size (number of bytes) of the current item.
     uint32 item_size = 0;
     if (!BinaryRead(&item_size, base_offset + kSizeOffset, blob) ||
-        base_offset + item_size <= base_offset || // checking overflow
+        base_offset + item_size <= base_offset ||  // checking overflow
         base_offset + item_size > blob.size())
       return false;
 
@@ -276,7 +276,7 @@ bool LoadInternetShortcut(
     return false;
 
   base::win::ScopedComPtr<IPersistFile> persist_file;
-  if (FAILED(persist_file.QueryFrom(url_locator)))
+  if (FAILED(persist_file.QueryFrom(url_locator.get())))
     return false;
 
   // Loads the Internet Shortcut from persistent storage.
@@ -292,7 +292,7 @@ GURL ReadURLFromInternetShortcut(IUniformResourceLocator* url_locator) {
   base::win::ScopedCoMem<wchar_t> url;
   // GetURL can return S_FALSE (FAILED(S_FALSE) is false) when url == NULL.
   return (FAILED(url_locator->GetURL(&url)) || !url) ?
-      GURL() : GURL(base::WideToUTF16(std::wstring(url)));
+      GURL() : GURL(base::WideToUTF16(url.get()));
 }
 
 // Reads the URL of the favicon of the internet shortcut.
@@ -477,18 +477,24 @@ void IEImporter::ImportHistory() {
   int total_schemes = arraysize(kSchemes);
 
   base::win::ScopedComPtr<IUrlHistoryStg2> url_history_stg2;
-  HRESULT result;
-  result = url_history_stg2.CreateInstance(CLSID_CUrlHistory, NULL,
-                                           CLSCTX_INPROC_SERVER);
-  if (FAILED(result))
+  if (FAILED(url_history_stg2.CreateInstance(CLSID_CUrlHistory, NULL,
+                                             CLSCTX_INPROC_SERVER))) {
     return;
+  }
   base::win::ScopedComPtr<IEnumSTATURL> enum_url;
-  if (SUCCEEDED(result = url_history_stg2->EnumUrls(enum_url.Receive()))) {
+  if (SUCCEEDED(url_history_stg2->EnumUrls(enum_url.Receive()))) {
     std::vector<ImporterURLRow> rows;
     STATURL stat_url;
-    ULONG fetched;
+
+    // IEnumSTATURL::Next() doesn't fill STATURL::dwFlags by default. Need to
+    // call IEnumSTATURL::SetFilter() with STATURL_QUERYFLAG_TOPLEVEL flag to
+    // specify how STATURL structure will be filled.
+    // The first argument of IEnumSTATURL::SetFilter() specifies the URL prefix
+    // that is used by IEnumSTATURL::Next() for filtering items by URL.
+    // So need to pass an empty string here to get all history items.
+    enum_url->SetFilter(L"", STATURL_QUERYFLAG_TOPLEVEL);
     while (!cancelled() &&
-           (result = enum_url->Next(1, &stat_url, &fetched)) == S_OK) {
+           enum_url->Next(1, &stat_url, NULL) == S_OK) {
       base::string16 url_string;
       if (stat_url.pwcsUrl) {
         url_string = stat_url.pwcsUrl;
@@ -510,10 +516,13 @@ void IEImporter::ImportHistory() {
       ImporterURLRow row(url);
       row.title = title_string;
       row.last_visit = base::Time::FromFileTime(stat_url.ftLastVisited);
-      if (stat_url.dwFlags == STATURL_QUERYFLAG_TOPLEVEL) {
+      if (stat_url.dwFlags == STATURLFLAG_ISTOPLEVEL) {
         row.visit_count = 1;
         row.hidden = false;
       } else {
+        // dwFlags should only contain the STATURLFLAG_ISTOPLEVEL bit per
+        // the filter set above.
+        DCHECK(!stat_url.dwFlags);
         row.hidden = true;
       }
 
@@ -821,7 +830,7 @@ void IEImporter::ParseFavoritesFolder(
     base::win::ScopedComPtr<IUniformResourceLocator> url_locator;
     if (!LoadInternetShortcut(*it, &url_locator))
       continue;
-    GURL url = ReadURLFromInternetShortcut(url_locator);
+    GURL url = ReadURLFromInternetShortcut(url_locator.get());
     if (!url.is_valid())
       continue;
     // Skip default bookmarks. go.microsoft.com redirects to
@@ -832,7 +841,7 @@ void IEImporter::ParseFavoritesFolder(
     if (url.host() == "go.microsoft.com")
       continue;
     // Read favicon.
-    UpdateFaviconMap(*it, url, url_locator, &favicon_map);
+    UpdateFaviconMap(*it, url, url_locator.get(), &favicon_map);
 
     // Make the relative path from the Favorites folder, without the basename.
     // ex. Suppose that the Favorites folder is C:\Users\Foo\Favorites.

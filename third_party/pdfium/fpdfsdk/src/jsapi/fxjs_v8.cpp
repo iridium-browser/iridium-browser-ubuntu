@@ -21,8 +21,11 @@
 #define VALUE_NAME_NULL			L"null"
 #define VALUE_NAME_UNDEFINED	L"undefined"
 
-static FX_DWORD g_nan[2] = {0,0x7FF80000 };
-double g_NaN = (*(double *)g_nan);
+const static FX_DWORD g_nan[2] = {0,0x7FF80000 };
+static double GetNan()
+{
+  return *(double*)g_nan;
+}
 
 
 class CJS_PrivateData: public CFX_Object
@@ -93,7 +96,7 @@ int JS_DefineObjMethod(IJS_Runtime* pJSRuntime, int nObjDefnID, const wchar_t* s
 	v8::Isolate::Scope isolate_scope(isolate);
 	v8::HandleScope handle_scope(isolate);
 
-	CFX_WideString ws = CFX_WideString((FX_LPCWSTR)sMethodName);
+	CFX_WideString ws = CFX_WideString(sMethodName);
 	CFX_ByteString bsMethodName = ws.UTF8Encode();
 
 	CFX_PtrArray* pArray = (CFX_PtrArray*)isolate->GetData(0);
@@ -113,7 +116,7 @@ int JS_DefineObjProperty(IJS_Runtime* pJSRuntime, int nObjDefnID, const wchar_t*
 	v8::Isolate::Scope isolate_scope(isolate);
 	v8::HandleScope handle_scope(isolate);
 
-	CFX_WideString ws = CFX_WideString((FX_LPCWSTR)sPropName);
+	CFX_WideString ws = CFX_WideString(sPropName);
 	CFX_ByteString bsPropertyName = ws.UTF8Encode();
 
 	CFX_PtrArray* pArray = (CFX_PtrArray*)isolate->GetData(0);
@@ -153,7 +156,7 @@ int JS_DefineObjConst(IJS_Runtime* pJSRuntime, int nObjDefnID, const wchar_t* sC
 	CFX_PtrArray* pArray = (CFX_PtrArray*)isolate->GetData(0);
 	if(!pArray) return 0;
 
-	CFX_WideString ws = CFX_WideString((FX_LPCWSTR)sConstName);
+	CFX_WideString ws = CFX_WideString(sConstName);
 	CFX_ByteString bsConstName = ws.UTF8Encode();
 
 	if(nObjDefnID<0 || nObjDefnID>= pArray->GetSize()) return 0;
@@ -188,7 +191,7 @@ int JS_DefineGlobalMethod(IJS_Runtime* pJSRuntime, const wchar_t* sMethodName, v
 	v8::Isolate::Scope isolate_scope(isolate);
 	v8::HandleScope handle_scope(isolate);
 
-	CFX_WideString ws = CFX_WideString((FX_LPCWSTR)sMethodName);
+	CFX_WideString ws = CFX_WideString(sMethodName);
 	CFX_ByteString bsMethodName = ws.UTF8Encode();
 
 	v8::Local<v8::FunctionTemplate> funTempl = v8::FunctionTemplate::New(isolate, pMethodCall);
@@ -212,7 +215,7 @@ int JS_DefineGlobalConst(IJS_Runtime* pJSRuntime, const wchar_t* sConstName, v8:
 	v8::Isolate::Scope isolate_scope(isolate);
 	v8::HandleScope handle_scope(isolate);
 
-	CFX_WideString ws = CFX_WideString((FX_LPCWSTR)sConstName);
+	CFX_WideString ws = CFX_WideString(sConstName);
 	CFX_ByteString bsConst= ws.UTF8Encode();
 
 	v8::Local<v8::ObjectTemplate> objTemp;
@@ -251,7 +254,7 @@ void JS_InitialRuntime(IJS_Runtime* pJSRuntime,IFXJS_Runtime* pFXRuntime, IFXJS_
 		CJS_ObjDefintion* pObjDef = (CJS_ObjDefintion*)pArray->GetAt(i);
 		CFX_WideString ws = CFX_WideString(pObjDef->objName);
 		CFX_ByteString bs = ws.UTF8Encode();
-		v8::Handle<v8::String> objName = v8::String::NewFromUtf8(isolate,(FX_LPCSTR)bs, v8::String::kNormalString, bs.GetLength());
+		v8::Handle<v8::String> objName = v8::String::NewFromUtf8(isolate, bs.c_str(), v8::String::kNormalString, bs.GetLength());
 
 
 		if(pObjDef->objType == JS_DYNAMIC)
@@ -309,9 +312,6 @@ void JS_ReleaseRuntime(IJS_Runtime* pJSRuntime, v8::Persistent<v8::Context>& v8P
 
 void JS_Initial() 
 {
-#ifndef FOXIT_CHROME_BUILD
-	v8::V8::InitializeICU();
-#endif
 }
 void JS_Release()
 {
@@ -327,7 +327,7 @@ int JS_Parse(IJS_Runtime* pJSRuntime, IFXJS_Context* pJSContext, const wchar_t* 
 	CFX_ByteString bsScript = wsScript.UTF8Encode();
 
 
-	v8::Handle<v8::Script> compiled_script = v8::Script::Compile(v8::String::NewFromUtf8(isolate,(FX_LPCSTR)bsScript,v8::String::kNormalString, bsScript.GetLength()));
+	v8::Handle<v8::Script> compiled_script = v8::Script::Compile(v8::String::NewFromUtf8(isolate, bsScript.c_str(), v8::String::kNormalString, bsScript.GetLength()));
 	if (compiled_script.IsEmpty()) {
 		v8::String::Utf8Value error(try_catch.Exception());
 		return -1;
@@ -344,7 +344,7 @@ int JS_Execute(IJS_Runtime* pJSRuntime, IFXJS_Context* pJSContext, const wchar_t
 	CFX_WideString wsScript(script);
 	CFX_ByteString bsScript = wsScript.UTF8Encode();
 
-	v8::Handle<v8::Script> compiled_script = v8::Script::Compile(v8::String::NewFromUtf8(isolate,(FX_LPCSTR)bsScript,v8::String::kNormalString, bsScript.GetLength()));
+    v8::Handle<v8::Script> compiled_script = v8::Script::Compile(v8::String::NewFromUtf8(isolate, bsScript.c_str(), v8::String::kNormalString, bsScript.GetLength()));
 	if (compiled_script.IsEmpty()) {
 		v8::String::Utf8Value error(try_catch.Exception());
 		return -1;
@@ -556,7 +556,7 @@ v8::Handle<v8::String> WSToJSString(IJS_Runtime* pJSRuntime, const wchar_t* Prop
 	CFX_WideString ws = CFX_WideString(PropertyName,Len);
 	CFX_ByteString bs = ws.UTF8Encode();
 	if(!pJSRuntime) pJSRuntime = v8::Isolate::GetCurrent();
-	return v8::String::NewFromUtf8(pJSRuntime, (FX_LPCSTR)bs);
+	return v8::String::NewFromUtf8(pJSRuntime, bs.c_str());
 }
 
 v8::Handle<v8::Value> JS_GetObjectElement(IJS_Runtime* pJSRuntime, v8::Handle<v8::Object> pObj,const wchar_t* PropertyName)
@@ -995,7 +995,7 @@ double JS_DateParse(const wchar_t* string)
 double JS_MakeDay(int nYear, int nMonth, int nDate)
 {
 	if (!_isfinite(nYear) || !_isfinite(nMonth) ||!_isfinite(nDate))
-		return g_NaN;
+		return GetNan();
 	double y = _toInteger(nYear);
 	double m = _toInteger(nMonth);
 	double dt = _toInteger(nDate);
@@ -1005,14 +1005,14 @@ double JS_MakeDay(int nYear, int nMonth, int nDate)
 	double t = _TimeFromYearMonth((int)ym,(int)mn);
 
 	if (_YearFromTime(t) != ym || _MonthFromTime(t) != mn ||_DateFromTime(t) != 1)
-		return g_NaN;
+		return GetNan();
 	return _Day(t)+dt-1;
 }
 
 double JS_MakeTime(int nHour, int nMin, int nSec, int nMs)
 {
 	if (!_isfinite(nHour) ||!_isfinite(nMin) ||!_isfinite(nSec) ||!_isfinite(nMs))
-		return g_NaN;
+		return GetNan();
 
 	double h = _toInteger(nHour);
 	double m = _toInteger(nMin);
@@ -1025,7 +1025,7 @@ double JS_MakeTime(int nHour, int nMin, int nSec, int nMs)
 double JS_MakeDate(double day, double time)
 {
 	if (!_isfinite(day) ||!_isfinite(time))
-		return g_NaN;
+		return GetNan();
 
 	return day * 86400000 + time;
 }

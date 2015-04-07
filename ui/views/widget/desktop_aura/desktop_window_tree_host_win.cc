@@ -16,11 +16,11 @@
 #include "ui/base/ime/input_method.h"
 #include "ui/base/win/shell.h"
 #include "ui/compositor/compositor_constants.h"
-#include "ui/gfx/insets.h"
+#include "ui/gfx/geometry/insets.h"
+#include "ui/gfx/geometry/vector2d.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/path.h"
 #include "ui/gfx/path_win.h"
-#include "ui/gfx/vector2d.h"
 #include "ui/gfx/win/dpi.h"
 #include "ui/native_theme/native_theme_aura.h"
 #include "ui/native_theme/native_theme_win.h"
@@ -39,6 +39,8 @@
 #include "ui/wm/core/input_method_event_filter.h"
 #include "ui/wm/core/window_animations.h"
 #include "ui/wm/public/scoped_tooltip_disabler.h"
+
+DECLARE_WINDOW_PROPERTY_TYPE(views::DesktopWindowTreeHostWin*);
 
 namespace views {
 
@@ -170,14 +172,14 @@ void DesktopWindowTreeHostWin::OnNativeWidgetCreated(
 scoped_ptr<corewm::Tooltip> DesktopWindowTreeHostWin::CreateTooltip() {
   DCHECK(!tooltip_);
   tooltip_ = new corewm::TooltipWin(GetAcceleratedWidget());
-  return scoped_ptr<corewm::Tooltip>(tooltip_);
+  return make_scoped_ptr(tooltip_);
 }
 
 scoped_ptr<aura::client::DragDropClient>
 DesktopWindowTreeHostWin::CreateDragDropClient(
     DesktopNativeCursorManager* cursor_manager) {
   drag_drop_client_ = new DesktopDragDropClientWin(window(), GetHWND());
-  return scoped_ptr<aura::client::DragDropClient>(drag_drop_client_).Pass();
+  return make_scoped_ptr(drag_drop_client_);
 }
 
 void DesktopWindowTreeHostWin::Close() {
@@ -941,7 +943,7 @@ bool DesktopWindowTreeHostWin::HandleScrollEvent(
 
 void DesktopWindowTreeHostWin::HandleWindowSizeChanging() {
   if (compositor() && need_synchronous_paint_) {
-    compositor()->FinishAllRendering();
+    compositor()->DisableSwapUntilResize();
     // If we received the window size changing notification due to a restore or
     // maximize operation, then we can reset the need_synchronous_paint_ flag
     // here. For a sizing operation, the flag will be reset at the end of the

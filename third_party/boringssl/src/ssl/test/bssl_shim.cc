@@ -41,8 +41,8 @@ static int usage(const char *program) {
 
 static int g_ex_data_index = 0;
 
-static void SetConfigPtr(SSL *ssl, const TestConfig *config) {
-  SSL_set_ex_data(ssl, g_ex_data_index, (void *)config);
+static bool SetConfigPtr(SSL *ssl, const TestConfig *config) {
+  return SSL_set_ex_data(ssl, g_ex_data_index, (void *)config) == 1;
 }
 
 static const TestConfig *GetConfigPtr(SSL *ssl) {
@@ -162,6 +162,10 @@ static int alpn_select_callback(SSL* ssl,
 }
 
 static int cookie_generate_callback(SSL *ssl, uint8_t *cookie, size_t *cookie_len) {
+  if (*cookie_len < 32) {
+    fprintf(stderr, "Insufficient space for cookie\n");
+    return 0;
+  }
   *cookie_len = 32;
   memset(cookie, 42, *cookie_len);
   return 1;
@@ -227,25 +231,7 @@ static SSL_CTX *setup_ctx(const TestConfig *config) {
   SSL_CTX *ssl_ctx = NULL;
   DH *dh = NULL;
 
-  const SSL_METHOD *method;
-  if (config->is_dtls) {
-    // TODO(davidben): Get DTLS 1.2 working and test the version negotiation
-    // codepath. This doesn't currently work because
-    // - Session resumption is broken: https://crbug.com/403378
-    // - DTLS hasn't been updated for EVP_AEAD.
-    if (config->is_server) {
-      method = DTLSv1_server_method();
-    } else {
-      method = DTLSv1_client_method();
-    }
-  } else {
-    if (config->is_server) {
-      method = SSLv23_server_method();
-    } else {
-      method = SSLv23_client_method();
-    }
-  }
-  ssl_ctx = SSL_CTX_new(method);
+  ssl_ctx = SSL_CTX_new(config->is_dtls ? DTLS_method() : TLS_method());
   if (ssl_ctx == NULL) {
     goto err;
   }
@@ -267,7 +253,8 @@ static SSL_CTX *setup_ctx(const TestConfig *config) {
   }
 
   dh = DH_get_2048_256(NULL);
-  if (!SSL_CTX_set_tmp_dh(ssl_ctx, dh)) {
+  if (dh == NULL ||
+      !SSL_CTX_set_tmp_dh(ssl_ctx, dh)) {
     goto err;
   }
 
@@ -335,7 +322,10 @@ static int do_exchange(SSL_SESSION **out_session,
     return 1;
   }
 
-  SetConfigPtr(ssl, config);
+  if (!SetConfigPtr(ssl, config)) {
+    BIO_print_errors_fp(stdout);
+    return 1;
+  }
 
   if (config->fallback_scsv) {
     if (!SSL_enable_fallback_scsv(ssl)) {
@@ -388,6 +378,9 @@ static int do_exchange(SSL_SESSION **out_session,
   if (config->tls_d5_bug) {
     SSL_set_options(ssl, SSL_OP_TLS_D5_BUG);
   }
+  if (config->allow_unsafe_legacy_renegotiation) {
+    SSL_set_options(ssl, SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION);
+  }
   if (!config->expected_channel_id.empty()) {
     SSL_enable_tls_channel_id(ssl);
   }
@@ -416,11 +409,32 @@ static int do_exchange(SSL_SESSION **out_session,
     SSL_set_psk_client_callback(ssl, psk_client_callback);
     SSL_set_psk_server_callback(ssl, psk_server_callback);
   }
-  if (!config->psk_identity.empty()) {
-    if (!SSL_use_psk_identity_hint(ssl, config->psk_identity.c_str())) {
-      BIO_print_errors_fp(stdout);
-      return 1;
-    }
+  if (!config->psk_identity.empty() &&
+      !SSL_use_psk_identity_hint(ssl, config->psk_identity.c_str())) {
+    BIO_print_errors_fp(stdout);
+    return 1;
+  }
+  if (!config->srtp_profiles.empty() &&
+      !SSL_set_srtp_profiles(ssl, config->srtp_profiles.c_str())) {
+    BIO_print_errors_fp(stdout);
+    return 1;
+  }
+  if (config->enable_ocsp_stapling &&
+      !SSL_enable_ocsp_stapling(ssl)) {
+    BIO_print_errors_fp(stdout);
+    return 1;
+  }
+  if (config->enable_signed_cert_timestamps &&
+      !SSL_enable_signed_cert_timestamps(ssl)) {
+    BIO_print_errors_fp(stdout);
+    return 1;
+  }
+  SSL_enable_fastradio_padding(ssl, config->fastradio_padding);
+  if (config->min_version != 0) {
+    SSL_set_min_version(ssl, (uint16_t)config->min_version);
+  }
+  if (config->max_version != 0) {
+    SSL_set_max_version(ssl, (uint16_t)config->max_version);
   }
 
   BIO *bio = BIO_new_fd(fd, 1 /* take ownership */);
@@ -462,7 +476,7 @@ static int do_exchange(SSL_SESSION **out_session,
     return 2;
   }
 
-  if (is_resume && (SSL_session_reused(ssl) == config->expect_session_miss)) {
+  if (is_resume && (!!SSL_session_reused(ssl) == config->expect_session_miss)) {
     fprintf(stderr, "session was%s reused\n",
             SSL_session_reused(ssl) ? "" : " not");
     return 2;
@@ -538,6 +552,29 @@ static int do_exchange(SSL_SESSION **out_session,
   if (config->expect_extended_master_secret) {
     if (!ssl->session->extended_master_secret) {
       fprintf(stderr, "No EMS for session when expected");
+      return 2;
+    }
+  }
+
+  if (!config->expected_ocsp_response.empty()) {
+    const uint8_t *data;
+    size_t len;
+    SSL_get0_ocsp_response(ssl, &data, &len);
+    if (config->expected_ocsp_response.size() != len ||
+        memcmp(config->expected_ocsp_response.data(), data, len) != 0) {
+      fprintf(stderr, "OCSP response mismatch\n");
+      return 2;
+    }
+  }
+
+  if (!config->expected_signed_cert_timestamps.empty()) {
+    const uint8_t *data;
+    size_t len;
+    SSL_get0_signed_cert_timestamp_list(ssl, &data, &len);
+    if (config->expected_signed_cert_timestamps.size() != len ||
+        memcmp(config->expected_signed_cert_timestamps.data(),
+               data, len) != 0) {
+      fprintf(stderr, "SCT list mismatch\n");
       return 2;
     }
   }
@@ -656,6 +693,9 @@ int main(int argc, char **argv) {
     return 1;
   }
   g_ex_data_index = SSL_get_ex_new_index(0, NULL, NULL, NULL, NULL);
+  if (g_ex_data_index < 0) {
+    return 1;
+  }
 
   TestConfig config;
   if (!ParseConfig(argc - 1, argv + 1, &config)) {

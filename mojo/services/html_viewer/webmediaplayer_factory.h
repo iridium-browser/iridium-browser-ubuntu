@@ -17,6 +17,7 @@ class SingleThreadTaskRunner;
 }
 
 namespace blink {
+class WebContentDecryptionModule;
 class WebMediaPlayer;
 class WebLocalFrame;
 class WebURL;
@@ -29,8 +30,10 @@ class AudioRendererSink;
 }
 
 namespace mojo {
-
 class Shell;
+}
+
+namespace html_viewer {
 
 // Helper class used to create blink::WebMediaPlayer objects.
 // This class stores the "global state" shared across all WebMediaPlayer
@@ -46,7 +49,8 @@ class WebMediaPlayerFactory {
       blink::WebLocalFrame* frame,
       const blink::WebURL& url,
       blink::WebMediaPlayerClient* client,
-      Shell* shell);
+      blink::WebContentDecryptionModule* initial_cdm,
+      mojo::Shell* shell);
 
  private:
   const media::AudioHardwareConfig& GetAudioHardwareConfig();
@@ -63,6 +67,6 @@ class WebMediaPlayerFactory {
   DISALLOW_COPY_AND_ASSIGN(WebMediaPlayerFactory);
 };
 
-}  // namespace mojo
+}  // namespace html_viewer
 
 #endif  // MOJO_SERVICES_HTML_VIEWER_WEBMEDIAPLAYER_FACTORY_H_

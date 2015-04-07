@@ -54,6 +54,7 @@ public:
         virtual void didDraw(const Image*) override { }
         virtual bool shouldPauseAnimation(const Image*) override { return false; }
         virtual void animationAdvanced(const Image*) override { }
+
         virtual void changedInRect(const Image*, const IntRect&) { }
 
         int m_lastDecodedSizeChangedDelta;

@@ -15,8 +15,8 @@ import unittest
 from telemetry import benchmark as benchmark_module
 from telemetry.core import discover
 from telemetry.page import page_test
-from telemetry.unittest import options_for_unittests
-from telemetry.unittest import progress_reporter
+from telemetry.unittest_util import options_for_unittests
+from telemetry.unittest_util import progress_reporter
 
 
 def SmokeTestGenerator(benchmark):
@@ -77,8 +77,8 @@ def load_tests(_, _2, _3):
       benchmarks_dir, top_level_dir, benchmark_module.Benchmark,
       index_by_class_name=False).values()
   for benchmark in all_benchmarks:
-    if benchmark.PageTestClass() not in all_measurements:
-      # If the benchmark is not in measurements, then it is not composable.
+    if hasattr(benchmark, 'test') and benchmark.test not in all_measurements:
+      # If the benchmark does not have a measurement, then it is not composable.
       # Ideally we'd like to test these as well, but the non-composable
       # benchmarks are usually long-running benchmarks.
       continue

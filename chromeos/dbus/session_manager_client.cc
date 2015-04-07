@@ -84,7 +84,7 @@ class SessionManagerClientImpl : public SessionManagerClient {
     observers_.RemoveObserver(observer);
   }
 
-  virtual bool HasObserver(Observer* observer) override {
+  virtual bool HasObserver(const Observer* observer) const override {
     return observers_.HasObserver(observer);
   }
 
@@ -593,7 +593,7 @@ class SessionManagerClientStubImpl : public SessionManagerClient {
   virtual void RemoveObserver(Observer* observer) override {
     observers_.RemoveObserver(observer);
   }
-  virtual bool HasObserver(Observer* observer) override {
+  virtual bool HasObserver(const Observer* observer) const override {
     return observers_.HasObserver(observer);
   }
   virtual void EmitLoginPromptVisible() override {}

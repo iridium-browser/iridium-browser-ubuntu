@@ -16,12 +16,12 @@
 #include "chrome/browser/chromeos/base/locale_util.h"
 #include "chrome/browser/chromeos/login/signin/oauth2_login_manager.h"
 #include "chromeos/dbus/session_manager_client.h"
-#include "chromeos/ime/input_method_manager.h"
 #include "chromeos/login/auth/authenticator.h"
 #include "chromeos/login/auth/user_context.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "net/base/network_change_notifier.h"
+#include "ui/base/ime/chromeos/input_method_manager.h"
 
 class GURL;
 class PrefRegistrySimple;
@@ -37,6 +37,8 @@ class User;
 namespace chromeos {
 
 class EasyUnlockKeyManager;
+class InputEventsBlocker;
+class LoginDisplayHost;
 
 class UserSessionManagerDelegate {
  public:
@@ -46,10 +48,6 @@ class UserSessionManagerDelegate {
   virtual void OnProfilePrepared(Profile* profile,
                                  bool browser_launched) = 0;
 
-#if defined(ENABLE_RLZ)
-  // Called after post-profile RLZ initialization.
-  virtual void OnRlzInitialized();
-#endif
  protected:
   virtual ~UserSessionManagerDelegate();
 };
@@ -144,13 +142,12 @@ class UserSessionManager
   // and start certificate loader with it.
   void InitializeCerts(Profile* profile);
 
-  // TODO(nkostylev): Drop these methods once LoginUtilsImpl::AttemptRestart()
-  // is migrated.
-  OAuth2LoginManager::SessionRestoreStrategy GetSigninSessionRestoreStrategy();
-  bool exit_after_session_restore() { return exit_after_session_restore_; }
-  void set_exit_after_session_restore(bool value) {
-    exit_after_session_restore_ = value;
-  }
+  // Starts loading CRL set.
+  void InitializeCRLSetFetcher(const user_manager::User* user);
+
+  // Starts loading EV Certificates whitelist.
+  void InitializeEVCertificatesWhitelistComponent(
+      const user_manager::User* user);
 
   // Invoked when the user is logging in for the first time, or is logging in to
   // an ephemeral session type, such as guest or a public session.
@@ -167,12 +164,28 @@ class UserSessionManager
       const std::string& chrome_client_id,
       const std::string& chrome_client_secret);
 
+  // Thin wrapper around StartupBrowserCreator::LaunchBrowser().  Meant to be
+  // used in a Task posted to the UI thread.  Once the browser is launched the
+  // login host is deleted.
+  void DoBrowserLaunch(Profile* profile, LoginDisplayHost* login_host);
+
   // Changes browser locale (selects best suitable locale from different
   // user settings). Returns true if callback will be called.
   bool RespectLocalePreference(
       Profile* profile,
       const user_manager::User* user,
-      scoped_ptr<locale_util::SwitchLanguageCallback> callback) const;
+      const locale_util::SwitchLanguageCallback& callback) const;
+
+  // Restarts Chrome if needed. This happens when user session has custom
+  // flags/switches enabled. Another case when owner has setup custom flags,
+  // they are applied on login screen as well but not to user session.
+  // |early_restart| is true if this restart attempt happens before user profile
+  // is fully initialized.
+  // Might not return if restart is possible right now.
+  // Returns true if restart was scheduled.
+  // Returns false if no restart is needed.
+  bool RestartToApplyPerSessionFlagsIfNeed(Profile* profile,
+                                           bool early_restart);
 
   // Returns true if Easy unlock keys needs to be updated.
   bool NeedsToUpdateEasyUnlockKeys() const;
@@ -197,6 +210,9 @@ class UserSessionManager
   // Update Easy unlock cryptohome keys for given user context.
   void UpdateEasyUnlockKeys(const UserContext& user_context);
 
+  // Removes a profile from the per-user input methods states map.
+  void RemoveProfileForTesting(Profile* profile);
+
  private:
   friend struct DefaultSingletonTraits<UserSessionManager>;
 
@@ -209,7 +225,6 @@ class UserSessionManager
   virtual void OnSessionRestoreStateChanged(
       Profile* user_profile,
       OAuth2LoginManager::SessionRestoreState state) override;
-  virtual void OnNewRefreshTokenAvaiable(Profile* user_profile) override;
 
   // net::NetworkChangeNotifier::ConnectionTypeObserver overrides:
   virtual void OnConnectionTypeChanged(
@@ -276,9 +291,6 @@ class UserSessionManager
   // Initializes RLZ. If |disabled| is true, RLZ pings are disabled.
   void InitRlzImpl(Profile* profile, bool disabled);
 
-  // Starts loading CRL set.
-  void InitializeCRLSetFetcher(const user_manager::User* user);
-
   // Callback to process RetrieveActiveSessions() request results.
   void OnRestoreActiveSessions(
       const SessionManagerClient::ActiveSessionsMap& sessions,
@@ -293,9 +305,30 @@ class UserSessionManager
   // Notifies observers that user pending sessions restore has finished.
   void NotifyPendingUserSessionsRestoreFinished();
 
+  // Attempts restarting the browser process and esures that this does
+  // not happen while we are still fetching new OAuth refresh tokens.
+  void AttemptRestart(Profile* profile);
+
   // Callback invoked when Easy unlock key operations are finished.
   void OnEasyUnlockKeyOpsFinished(const std::string& user_id,
                                   bool success);
+
+  // Internal implementation of DoBrowserLaunch. Initially should be called with
+  // |locale_pref_checked| set to false which will result in postponing browser
+  // launch till user locale is applied if needed. After locale check has
+  // completed this method is called with |locale_pref_checked| set to true.
+  void DoBrowserLaunchInternal(Profile* profile,
+                               LoginDisplayHost* login_host,
+                               bool locale_pref_checked);
+
+  // Switch to the locale that |profile| wishes to use and invoke |callback|.
+  void RespectLocalePreferenceWrapper(Profile* profile,
+                                      const base::Closure& callback);
+
+  static void RunCallbackOnLocaleLoaded(
+      const base::Closure& callback,
+      InputEventsBlocker* input_events_blocker,
+      const locale_util::LanguageSwitchResult& result);
 
   UserSessionManagerDelegate* delegate_;
 

@@ -33,9 +33,7 @@ class GrOvalRenderer;
 class GrPath;
 class GrPathRenderer;
 class GrResourceEntry;
-class GrResourceCache;
 class GrResourceCache2;
-class GrStencilBuffer;
 class GrTestTarget;
 class GrTextContext;
 class GrTextureParams;
@@ -389,34 +387,6 @@ public:
      GrRenderTarget* wrapBackendRenderTarget(const GrBackendRenderTargetDesc& desc);
 
     ///////////////////////////////////////////////////////////////////////////
-    // Matrix state
-
-    /**
-     * Gets the current transformation matrix.
-     * @return the current matrix.
-     */
-    const SkMatrix& getMatrix() const { return fViewMatrix; }
-
-    /**
-     * Sets the transformation matrix.
-     * @param m the matrix to set.
-     */
-    void setMatrix(const SkMatrix& m) { fViewMatrix = m; }
-
-    /**
-     * Sets the current transformation matrix to identity.
-     */
-    void setIdentityMatrix() { fViewMatrix.reset(); }
-
-    /**
-     * Concats the current matrix. The passed matrix is applied before the
-     * current matrix.
-     * @param m the matrix to concat.
-     */
-    void concatMatrix(const SkMatrix& m) { fViewMatrix.preConcat(m); }
-
-
-    ///////////////////////////////////////////////////////////////////////////
     // Clip state
     /**
      * Gets the current clip.
@@ -446,11 +416,12 @@ public:
     /**
      *  Draw everywhere (respecting the clip) with the paint.
      */
-    void drawPaint(const GrPaint& paint);
+    void drawPaint(const GrPaint&, const SkMatrix& viewMatrix);
 
     /**
      *  Draw the rect using a paint.
      *  @param paint        describes how to color pixels.
+     *  @param viewMatrix   transformation matrix
      *  @param strokeInfo   the stroke information (width, join, cap), and.
      *                      the dash information (intervals, count, phase).
      *                      If strokeInfo == NULL, then the rect is filled.
@@ -460,34 +431,47 @@ public:
      *  The rects coords are used to access the paint (through texture matrix)
      */
     void drawRect(const GrPaint& paint,
+                  const SkMatrix& viewMatrix,
                   const SkRect&,
                   const GrStrokeInfo* strokeInfo = NULL);
 
     /**
-     * Maps a rect of local coordinates onto the a rect of destination
-     * coordinates. The localRect is stretched over the dstRect. The dstRect is
-     * transformed by the context's matrix. An additional optional matrix can be
-     *  provided to transform the local rect.
+     * Maps a rectangle of shader coordinates to a rectangle and draws that rectangle
      *
      * @param paint         describes how to color pixels.
-     * @param dstRect       the destination rect to draw.
-     * @param localRect     rect of local coordinates to be mapped onto dstRect
-     * @param localMatrix   Optional matrix to transform localRect.
+     * @param viewMatrix    transformation matrix which applies to rectToDraw
+     * @param rectToDraw    the rectangle to draw
+     * @param localRect     the rectangle of shader coordinates applied to rectToDraw
+     * @param localMatrix   an optional matrix to transform the shader coordinates before applying
+     *                      to rectToDraw
      */
-    void drawRectToRect(const GrPaint& paint,
-                        const SkRect& dstRect,
-                        const SkRect& localRect,
-                        const SkMatrix* localMatrix = NULL);
+    void drawNonAARectToRect(const GrPaint& paint,
+                             const SkMatrix& viewMatrix,
+                             const SkRect& rectToDraw,
+                             const SkRect& localRect,
+                             const SkMatrix* localMatrix = NULL);
+
+    /**
+     * Draws a non-AA rect with paint and a localMatrix
+     */
+    void drawNonAARectWithLocalMatrix(const GrPaint& paint,
+                                      const SkMatrix& viewMatrix,
+                                      const SkRect& rect,
+                                      const SkMatrix& localMatrix) {
+        this->drawNonAARectToRect(paint, viewMatrix, rect, rect, &localMatrix);
+    }
 
     /**
      *  Draw a roundrect using a paint.
      *
      *  @param paint        describes how to color pixels.
+     *  @param viewMatrix   transformation matrix
      *  @param rrect        the roundrect to draw
      *  @param strokeInfo   the stroke information (width, join, cap) and
      *                      the dash information (intervals, count, phase).
      */
-    void drawRRect(const GrPaint& paint, const SkRRect& rrect, const GrStrokeInfo& strokeInfo);
+    void drawRRect(const GrPaint&, const SkMatrix& viewMatrix, const SkRRect& rrect,
+                   const GrStrokeInfo&);
 
     /**
      *  Shortcut for drawing an SkPath consisting of nested rrects using a paint.
@@ -495,26 +479,30 @@ public:
      *  inner.
      *
      *  @param paint        describes how to color pixels.
+     *  @param viewMatrix   transformation matrix
      *  @param outer        the outer roundrect
      *  @param inner        the inner roundrect
      */
-    void drawDRRect(const GrPaint& paint, const SkRRect& outer, const SkRRect& inner);
+    void drawDRRect(const GrPaint&, const SkMatrix& viewMatrix, const SkRRect& outer,
+                    const SkRRect& inner);
 
 
     /**
      * Draws a path.
      *
      * @param paint         describes how to color pixels.
+     * @param viewMatrix    transformation matrix
      * @param path          the path to draw
      * @param strokeInfo    the stroke information (width, join, cap) and
      *                      the dash information (intervals, count, phase).
      */
-    void drawPath(const GrPaint& paint, const SkPath& path, const GrStrokeInfo& strokeInfo);
+    void drawPath(const GrPaint&, const SkMatrix& viewMatrix, const SkPath&, const GrStrokeInfo&);
 
     /**
      * Draws vertices with a paint.
      *
      * @param   paint           describes how to color pixels.
+     * @param   viewMatrix      transformation matrix
      * @param   primitiveType   primitives type to draw.
      * @param   vertexCount     number of vertices.
      * @param   positions       array of vertex positions, required.
@@ -528,6 +516,7 @@ public:
      *                          number of indices.
      */
     void drawVertices(const GrPaint& paint,
+                      const SkMatrix& viewMatrix,
                       GrPrimitiveType primitiveType,
                       int vertexCount,
                       const SkPoint positions[],
@@ -540,11 +529,13 @@ public:
      * Draws an oval.
      *
      * @param paint         describes how to color pixels.
+     * @param viewMatrix    transformation matrix
      * @param oval          the bounding rect of the oval.
      * @param strokeInfo    the stroke information (width, join, cap) and
      *                      the dash information (intervals, count, phase).
      */
     void drawOval(const GrPaint& paint,
+                  const SkMatrix& viewMatrix,
                   const SkRect& oval,
                   const GrStrokeInfo& strokeInfo);
 
@@ -711,113 +702,6 @@ public:
         GrRenderTarget* fPrevTarget;
     };
 
-    /**
-     * Save/restore the view-matrix in the context. It can optionally adjust a paint to account
-     * for a coordinate system change. Here is an example of how the paint param can be used:
-     *
-     * A GrPaint is setup with GrProcessors. The stages will have access to the pre-matrix source
-     * geometry positions when the draw is executed. Later on a decision is made to transform the
-     * geometry to device space on the CPU. The effects now need to know that the space in which
-     * the geometry will be specified has changed.
-     *
-     * Note that when restore is called (or in the destructor) the context's matrix will be
-     * restored. However, the paint will not be restored. The caller must make a copy of the
-     * paint if necessary. Hint: use SkTCopyOnFirstWrite if the AutoMatrix is conditionally
-     * initialized.
-     */
-    class AutoMatrix : public ::SkNoncopyable {
-    public:
-        AutoMatrix() : fContext(NULL) {}
-
-        ~AutoMatrix() { this->restore(); }
-
-        /**
-         * Initializes by pre-concat'ing the context's current matrix with the preConcat param.
-         */
-        void setPreConcat(GrContext* context, const SkMatrix& preConcat, GrPaint* paint = NULL) {
-            SkASSERT(context);
-
-            this->restore();
-
-            fContext = context;
-            fMatrix = context->getMatrix();
-            this->preConcat(preConcat, paint);
-        }
-
-        /**
-         * Sets the context's matrix to identity. Returns false if the inverse matrix is required to
-         * update a paint but the matrix cannot be inverted.
-         */
-        bool setIdentity(GrContext* context, GrPaint* paint = NULL) {
-            SkASSERT(context);
-
-            this->restore();
-
-            if (paint) {
-                if (!paint->localCoordChangeInverse(context->getMatrix())) {
-                    return false;
-                }
-            }
-            fMatrix = context->getMatrix();
-            fContext = context;
-            context->setIdentityMatrix();
-            return true;
-        }
-
-        /**
-         * Replaces the context's matrix with a new matrix. Returns false if the inverse matrix is
-         * required to update a paint but the matrix cannot be inverted.
-         */
-        bool set(GrContext* context, const SkMatrix& newMatrix, GrPaint* paint = NULL) {
-            if (paint) {
-                if (!this->setIdentity(context, paint)) {
-                    return false;
-                }
-                this->preConcat(newMatrix, paint);
-            } else {
-                this->restore();
-                fContext = context;
-                fMatrix = context->getMatrix();
-                context->setMatrix(newMatrix);
-            }
-            return true;
-        }
-
-        /**
-         * If this has been initialized then the context's matrix will be further updated by
-         * pre-concat'ing the preConcat param. The matrix that will be restored remains unchanged.
-         * The paint is assumed to be relative to the context's matrix at the time this call is
-         * made, not the matrix at the time AutoMatrix was first initialized. In other words, this
-         * performs an incremental update of the paint.
-         */
-        void preConcat(const SkMatrix& preConcat, GrPaint* paint = NULL) {
-            if (paint) {
-                paint->localCoordChange(preConcat);
-            }
-            fContext->concatMatrix(preConcat);
-        }
-
-        /**
-         * Returns false if never initialized or the inverse matrix was required to update a paint
-         * but the matrix could not be inverted.
-         */
-        bool succeeded() const { return SkToBool(fContext); }
-
-        /**
-         * If this has been initialized then the context's original matrix is restored.
-         */
-        void restore() {
-            if (fContext) {
-                fContext->setMatrix(fMatrix);
-                fContext = NULL;
-            }
-        }
-
-    private:
-        GrContext*  fContext;
-        SkMatrix    fMatrix;
-    };
-
     class AutoClip : public ::SkNoncopyable {
     public:
         // This enum exists to require a caller of the constructor to acknowledge that the clip will
@@ -827,7 +711,7 @@ public:
             kWideOpen_InitialClip,
         };
 
-        AutoClip(GrContext* context, InitialClip initialState)
+        AutoClip(GrContext* context, InitialClip SkDEBUGCODE(initialState))
         : fContext(context) {
             SkASSERT(kWideOpen_InitialClip == initialState);
             fNewClipData.fClipStack = &fNewClipStack;
@@ -863,15 +747,11 @@ public:
         AutoWideOpenIdentityDraw(GrContext* ctx, GrRenderTarget* rt)
             : fAutoClip(ctx, AutoClip::kWideOpen_InitialClip)
             , fAutoRT(ctx, rt) {
-            fAutoMatrix.setIdentity(ctx);
-            // should never fail with no paint param.
-            SkASSERT(fAutoMatrix.succeeded());
         }
 
     private:
         AutoClip fAutoClip;
         AutoRenderTarget fAutoRT;
-        AutoMatrix fAutoMatrix;
     };
 
     ///////////////////////////////////////////////////////////////////////////
@@ -883,7 +763,6 @@ public:
     GrDrawTarget* getTextTarget();
     const GrIndexBuffer* getQuadIndexBuffer() const;
     GrAARectRenderer* getAARectRenderer() { return fAARectRenderer; }
-    GrResourceCache* getResourceCache() { return fResourceCache; }
     GrResourceCache2* getResourceCache2() { return fResourceCache2; }
 
     // Called by tests that draw directly to the context via GrDrawTarget
@@ -892,17 +771,12 @@ public:
     void addGpuTraceMarker(const GrGpuTraceMarker* marker);
     void removeGpuTraceMarker(const GrGpuTraceMarker* marker);
 
-    /**
-     * Stencil buffers add themselves to the cache using addStencilBuffer. findStencilBuffer is
-     * called to check the cache for a SB that matches an RT's criteria.
-     */
-    void addStencilBuffer(GrStencilBuffer* sb);
-    GrStencilBuffer* findStencilBuffer(int width, int height, int sampleCnt);
-
     GrPathRenderer* getPathRenderer(
+                    const GrDrawTarget* target,
+                    const GrDrawState*,
+                    const SkMatrix& viewMatrix,
                     const SkPath& path,
                     const SkStrokeRec& stroke,
-                    const GrDrawTarget* target,
                     bool allowSW,
                     GrPathRendererChain::DrawType drawType = GrPathRendererChain::kColor_DrawType,
                     GrPathRendererChain::StencilSupport* stencilSupport = NULL);
@@ -943,12 +817,9 @@ public:
 
 private:
     GrGpu*                          fGpu;
-    SkMatrix                        fViewMatrix;
     SkAutoTUnref<GrRenderTarget>    fRenderTarget;
     const GrClipData*               fClip;  // TODO: make this ref counted
-    GrDrawState*                    fDrawState;
 
-    GrResourceCache*                fResourceCache;
     GrResourceCache2*               fResourceCache2;
     GrFontCache*                    fFontCache;
     SkAutoTDelete<GrLayerCache>     fLayerCache;
@@ -962,7 +833,6 @@ private:
 
     // Set by OverbudgetCB() to request that GrContext flush before exiting a draw.
     bool                            fFlushToReduceCacheSize;
-
     GrAARectRenderer*               fAARectRenderer;
     GrOvalRenderer*                 fOvalRenderer;
 
@@ -988,22 +858,24 @@ private:
 
     void setupDrawBuffer();
 
-    class AutoRestoreEffects;
     class AutoCheckFlush;
     /// Sets the paint and returns the target to draw into. The paint can be NULL in which case the
     /// draw state is left unmodified.
-    GrDrawTarget* prepareToDraw(const GrPaint*, AutoRestoreEffects*, AutoCheckFlush*);
+    GrDrawTarget* prepareToDraw(GrDrawState* ds, const GrPaint* paint, const AutoCheckFlush*);
 
-    void internalDrawPath(GrDrawTarget* target, bool useAA, const SkPath& path,
-                          const GrStrokeInfo& stroke);
+    void internalDrawPath(GrDrawTarget*,
+                          GrDrawState*,
+                          const SkMatrix& viewMatrix,
+                          GrColor,
+                          bool useAA,
+                          const SkPath&,
+                          const GrStrokeInfo&);
 
     GrTexture* createResizedTexture(const GrSurfaceDesc& desc,
                                     const GrCacheID& cacheID,
                                     const void* srcData,
                                     size_t rowBytes,
                                     bool filter);
-
-    GrTexture* createNewScratchTexture(const GrSurfaceDesc& desc);
 
     /**
      * These functions create premul <-> unpremul effects if it is possible to generate a pair
@@ -1015,9 +887,9 @@ private:
 
     /**
      *  This callback allows the resource cache to callback into the GrContext
-     *  when the cache is still overbudget after a purge.
+     *  when the cache is still over budget after a purge.
      */
-    static bool OverbudgetCB(void* data);
+    static void OverBudgetCB(void* data);
 
     typedef SkRefCnt INHERITED;
 };

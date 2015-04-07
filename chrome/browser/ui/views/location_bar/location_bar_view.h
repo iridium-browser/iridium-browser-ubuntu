@@ -22,7 +22,7 @@
 #include "components/search_engines/template_url_service_observer.h"
 #include "ui/gfx/animation/animation_delegate.h"
 #include "ui/gfx/font.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/drag_controller.h"
 
@@ -237,6 +237,9 @@ class LocationBarView : public LocationBar,
                                       int* popup_width,
                                       int* left_margin,
                                       int* right_margin);
+
+  // Clears the location bar's state for |contents|.
+  void ResetTabState(content::WebContents* contents);
 
   // LocationBar:
   void FocusLocation(bool select_all) override;
@@ -546,6 +549,10 @@ class LocationBarView : public LocationBar,
   // from the width of the hostname to the ending value.
   int current_omnibox_width_;
   int ending_omnibox_width_;
+
+  // This is a debug state variable that stores if the WebContents was null
+  // during the last RefreshPageAction.
+  bool web_contents_null_at_last_refresh_;
 
   DISALLOW_COPY_AND_ASSIGN(LocationBarView);
 };

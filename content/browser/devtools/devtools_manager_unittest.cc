@@ -6,8 +6,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
 #include "content/browser/devtools/devtools_manager.h"
-#include "content/browser/devtools/embedded_worker_devtools_manager.h"
 #include "content/browser/devtools/render_view_devtools_agent_host.h"
+#include "content/browser/devtools/shared_worker_devtools_manager.h"
 #include "content/browser/shared_worker/shared_worker_instance.h"
 #include "content/browser/shared_worker/worker_storage_partition.h"
 #include "content/common/view_messages.h"
@@ -206,10 +206,12 @@ class DevToolsManagerTest : public RenderViewHostImplTestHarness {
     RenderViewHostImplTestHarness::SetUp();
     TestDevToolsClientHost::ResetCounters();
     old_browser_client_ = SetBrowserClientForTesting(&browser_client_);
+    DevToolsManager::GetInstance()->SetUpForTest(DevToolsManager::Scheduler());
   }
 
   void TearDown() override {
     SetBrowserClientForTesting(old_browser_client_);
+    DevToolsManager::GetInstance()->SetUpForTest(DevToolsManager::Scheduler());
     RenderViewHostImplTestHarness::TearDown();
   }
 
@@ -385,7 +387,7 @@ TEST_F(DevToolsManagerTest, TestObserver) {
 
   TestDevToolsManagerScheduler scheduler;
   DevToolsManager* manager = DevToolsManager::GetInstance();
-  manager->SetSchedulerForTest(scheduler.callback());
+  manager->SetUpForTest(scheduler.callback());
 
   contents()->NavigateAndCommit(url1);
   RunAllPendingInMessageLoop();
@@ -427,7 +429,7 @@ TEST_F(DevToolsManagerTest, TestObserver) {
       blink::WebContentSecurityPolicyTypeReport,
       browser_context()->GetResourceContext(),
       partition_id);
-  EmbeddedWorkerDevToolsManager::GetInstance()->SharedWorkerCreated(
+  SharedWorkerDevToolsManager::GetInstance()->WorkerCreated(
       1, 1, shared_worker);
   contents()->NavigateAndCommit(url2);
 
@@ -439,7 +441,7 @@ TEST_F(DevToolsManagerTest, TestObserver) {
             observer->hosts()[1]->GetType());
   EXPECT_EQ(shared_worker_url.spec(), observer->hosts()[1]->GetURL().spec());
 
-  EmbeddedWorkerDevToolsManager::GetInstance()->WorkerDestroyed(1, 1);
+  SharedWorkerDevToolsManager::GetInstance()->WorkerDestroyed(1, 1);
   scheduler.Run();
   EXPECT_EQ(4, observer->updates_count());
   ASSERT_EQ(1u, observer->hosts().size());
@@ -454,7 +456,6 @@ TEST_F(DevToolsManagerTest, TestObserver) {
   manager->RemoveObserver(observer.get());
 
   EXPECT_TRUE(scheduler.IsEmpty());
-  manager->SetSchedulerForTest(DevToolsManager::Scheduler());
 }
 
 }  // namespace content

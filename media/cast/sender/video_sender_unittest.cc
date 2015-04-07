@@ -15,6 +15,7 @@
 #include "media/cast/net/cast_transport_config.h"
 #include "media/cast/net/cast_transport_sender_impl.h"
 #include "media/cast/net/pacing/paced_sender.h"
+#include "media/cast/sender/video_frame_factory.h"
 #include "media/cast/sender/video_sender.h"
 #include "media/cast/test/fake_single_thread_task_runner.h"
 #include "media/cast/test/fake_video_encode_accelerator.h"
@@ -147,11 +148,13 @@ class VideoSenderTest : public ::testing::Test {
         NULL,
         testing_clock_,
         dummy_endpoint,
+        dummy_endpoint,
         make_scoped_ptr(new base::DictionaryValue),
         base::Bind(&UpdateCastTransportStatus),
         BulkRawEventsCallback(),
         base::TimeDelta(),
         task_runner_,
+        PacketReceiverCallback(),
         &transport_));
   }
 
@@ -172,7 +175,7 @@ class VideoSenderTest : public ::testing::Test {
                                        bool expect_init_success) {
     VideoSenderConfig video_config;
     video_config.ssrc = 1;
-    video_config.incoming_feedback_ssrc = 2;
+    video_config.receiver_ssrc = 2;
     video_config.rtp_payload_type = 127;
     video_config.use_external_encoder = external;
     video_config.width = kWidth;
@@ -534,6 +537,11 @@ TEST_F(VideoSenderTest, AcksCancelRetransmits) {
   transport_.SetPause(false);
   RunTasks(33);
   EXPECT_EQ(0, transport_.number_of_rtp_packets());
+}
+
+TEST_F(VideoSenderTest, CheckVideoFrameFactoryIsNull) {
+  EXPECT_EQ(STATUS_VIDEO_INITIALIZED, InitEncoder(false, true));
+  EXPECT_EQ(nullptr, video_sender_->CreateVideoFrameFactory().get());
 }
 
 }  // namespace cast

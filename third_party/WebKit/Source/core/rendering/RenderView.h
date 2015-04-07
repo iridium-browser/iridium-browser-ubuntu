@@ -22,8 +22,8 @@
 #ifndef RenderView_h
 #define RenderView_h
 
+#include "core/dom/Position.h"
 #include "core/frame/FrameView.h"
-#include "core/paint/ViewDisplayList.h"
 #include "core/rendering/LayoutState.h"
 #include "core/rendering/PaintInvalidationState.h"
 #include "core/rendering/RenderBlockFlow.h"
@@ -34,7 +34,6 @@
 
 namespace blink {
 
-class FlowThreadController;
 class RenderLayerCompositor;
 class RenderQuote;
 
@@ -96,17 +95,20 @@ public:
 
     void invalidatePaintForViewAndCompositedLayers();
 
-    virtual void paint(PaintInfo&, const LayoutPoint&) override;
-    virtual void paintBoxDecorationBackground(PaintInfo&, const LayoutPoint&) override;
+    virtual void paint(const PaintInfo&, const LayoutPoint&) override;
+    virtual void paintBoxDecorationBackground(const PaintInfo&, const LayoutPoint&) override;
 
     enum SelectionPaintInvalidationMode { PaintInvalidationNewXOROld, PaintInvalidationNewMinusOld };
     void setSelection(RenderObject* start, int startPos, RenderObject*, int endPos, SelectionPaintInvalidationMode = PaintInvalidationNewXOROld);
     void clearSelection();
-    RenderObject* selectionStart() const { return m_selectionStart; }
-    RenderObject* selectionEnd() const { return m_selectionEnd; }
-    IntRect selectionBounds() const;
-    void selectionStartEnd(int& startPos, int& endPos) const;
-    void invalidatePaintForSelection() const;
+    void setSelection(const FrameSelection&);
+    bool hasPendingSelection() const { return m_pendingSelection.m_hasPendingSelection; }
+    void commitPendingSelection();
+    RenderObject* selectionStart();
+    RenderObject* selectionEnd();
+    IntRect selectionBounds();
+    void selectionStartEnd(int& startPos, int& endPos);
+    void invalidatePaintForSelection();
 
     virtual void absoluteRects(Vector<IntRect>&, const LayoutPoint& accumulatedOffset) const override;
     virtual void absoluteQuads(Vector<FloatQuad>&, bool* wasFixed) const override;
@@ -144,8 +146,6 @@ public:
     // Renderer that paints the root background has background-images which all have background-attachment: fixed.
     bool rootBackgroundIsEntirelyFixed() const;
 
-    FlowThreadController* flowThreadController();
-
     IntervalArena* intervalArena();
 
     void setRenderQuoteHead(RenderQuote* head) { m_renderQuoteHead = head; }
@@ -164,17 +164,9 @@ public:
     double layoutViewportWidth() const;
     double layoutViewportHeight() const;
 
-    void pushLayoutState(LayoutState&);
-    void popLayoutState();
+    void pushLayoutState(LayoutState& layoutState) { m_layoutState = &layoutState; }
+    void popLayoutState() { ASSERT(m_layoutState); m_layoutState = m_layoutState->next(); }
     virtual void invalidateTreeIfNeeded(const PaintInvalidationState&) override final;
-
-    ViewDisplayList& viewDisplayList()
-    {
-        ASSERT(RuntimeEnabledFeatures::slimmingPaintEnabled());
-        if (!m_viewDisplayList)
-            m_viewDisplayList = adoptPtr(new ViewDisplayList());
-        return *m_viewDisplayList;
-    }
 
 private:
     virtual void mapLocalToContainer(const RenderLayerModelObject* paintInvalidationContainer, TransformState&, MapCoordinatesFlags = ApplyContainerFlip, bool* wasFixed = 0, const PaintInvalidationState* = 0) const override;
@@ -205,14 +197,34 @@ private:
     bool m_pageLogicalHeightChanged;
     LayoutState* m_layoutState;
     OwnPtr<RenderLayerCompositor> m_compositor;
-    OwnPtr<FlowThreadController> m_flowThreadController;
     RefPtr<IntervalArena> m_intervalArena;
 
     RawPtrWillBeMember<RenderQuote> m_renderQuoteHead;
     unsigned m_renderCounterCount;
 
     unsigned m_hitTestCount;
-    OwnPtr<ViewDisplayList> m_viewDisplayList;
+
+    class PendingSelection final {
+        DISALLOW_ALLOCATION();
+    public:
+        PendingSelection();
+        void setSelection(const FrameSelection&);
+        void clear();
+
+        void trace(Visitor* visitor)
+        {
+            visitor->trace(m_start);
+            visitor->trace(m_end);
+            visitor->trace(m_extent);
+        }
+
+        Position m_start;
+        Position m_end;
+        Position m_extent;
+        EAffinity m_affinity;
+        bool m_hasPendingSelection : 1;
+        bool m_shouldShowBlockCursor : 1;
+    } m_pendingSelection;
 };
 
 DEFINE_RENDER_OBJECT_TYPE_CASTS(RenderView, isRenderView());

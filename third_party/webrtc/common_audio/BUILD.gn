@@ -110,7 +110,7 @@ source_set("common_audio") {
       "signal_processing/spl_sqrt_floor_arm.S",
     ]
 
-    if (arm_version == 7) {
+    if (arm_version >= 7) {
       deps += [ ":common_audio_neon" ]
       sources += [ "signal_processing/filter_ar_fast_q12_armv7.S" ]
     } else {
@@ -196,7 +196,6 @@ if (rtc_build_armv7_neon) {
       "signal_processing/cross_correlation_neon.S",
       "signal_processing/downsample_fast_neon.S",
       "signal_processing/min_max_operations_neon.S",
-      "signal_processing/vector_scaling_operations_neon.S",
     ]
 
     configs += [ "..:common_config" ]
@@ -211,7 +210,6 @@ if (rtc_build_armv7_neon) {
     # Remove the -mfpu=vfpv3-d16 cflag.
     configs -= [ "//build/config/compiler:compiler_arm_fpu" ]
     cflags = [
-      "-flax-vector-conversions",
       "-mfpu=neon",
     ]
 

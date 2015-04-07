@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<!--
+Copyright (c) 2014 The Chromium Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+
+<link rel="import" href="/base/polymer_utils.html">
+<link rel="import" href="/base/iteration_helpers.html">
+<link rel="import" href="/core/analysis/tab_view.html">
+<link rel="import" href="/core/analysis/analysis_sub_view.html">
+
+<!-- Sub Views. -->
+<link rel="import" href="/core/analysis/single_slice_sub_view.html">
+<link rel="import" href="/core/analysis/multi_slice_sub_view.html">
+
+<link rel="import" href="/core/analysis/single_thread_time_slice_sub_view.html">
+<link rel="import" href="/core/analysis/single_cpu_slice_sub_view.html">
+
+<link rel="import" href="/core/analysis/single_instant_event_sub_view.html">
+<link rel="import" href="/core/analysis/multi_instant_event_sub_view.html">
+
+<link rel="import" href="/core/analysis/counter_sample_sub_view.html">
+
+<link rel="import" href="/core/analysis/single_flow_event_sub_view.html">
+<link rel="import" href="/core/analysis/multi_flow_event_sub_view.html">
+
+<link rel="import" href="/core/analysis/single_object_instance_sub_view.html">
+<link rel="import" href="/core/analysis/single_object_snapshot_sub_view.html">
+<link rel="import" href="/core/analysis/multi_object_sub_view.html">
+
+<link rel="import" href="/core/analysis/single_sample_sub_view.html">
+<link rel="import" href="/core/analysis/multi_sample_sub_view.html">
+
+<!--
+@fileoverview A component used to display an analysis of a selection,
+using custom elements specialized for different event types.
+-->
+<polymer-element name="tracing-analysis-view"
+    constructor="TracingAnalysisView">
+  <template>
+    <style>
+      :host {
+        background-color: white;
+        display: flex;
+        flex-direction: column;
+        height: 275px;
+        overflow: auto;
+      }
+
+      :host(.tall-mode) {
+        height: 525px;
+      }
+
+      ::content > * {
+        flex: 1 0 auto;
+      }
+    </style>
+    <content></content>
+  </template>
+  <script>
+  'use strict';
+  (function() {
+    var EventRegistry = tv.c.trace_model.EventRegistry;
+
+    /**
+     * Utility function used to convert camelCase to Title Case.
+     */
+    function convertCamelCaseToTitleCase(name) {
+      var result = name.replace(/[A-Z]/g, ' $&');
+      result = result.charAt(0).toUpperCase() + result.slice(1);
+      return result;
+    }
+
+    Polymer({
+      ready: function() {
+        this.tabView_ = document.createElement(
+            'tracing-analysis-tab-view');
+        this.tabView_.style.flex = '1 1 auto';
+        this.tabView_.addEventListener(
+          'selected-tab-change',
+          this.onSelectedTabChange_.bind(this));
+        this.appendChild(this.tabView_);
+        this.currentSelection_ = undefined;
+      },
+
+      set tallMode(value) {
+        if (value)
+          this.classList.add('tall-mode');
+        else
+          this.classList.remove('tall-mode');
+      },
+
+      get tallMode() {
+        return this.classList.contains('tall-mode');
+      },
+
+      get tabView() {
+        return this.tabView_;
+      },
+
+      get selection() {
+        return this.currentSelection_;
+      },
+
+      set selection(selection) {
+        var lastSelectedTabTagName;
+        var lastSelectedTabTypeName;
+        if (this.tabView_.selectedTab) {
+          lastSelectedTabTagName = this.tabView_.selectedTab.tagName;
+          lastSelectedTabTypeName = this.tabView_.selectedTab._eventTypeName;
+        }
+
+        this.tallMode = false;
+        this.tabView_.textContent = '';
+
+        var eventsByBaseTypeName = selection.getEventsOrganizedByBaseType(true);
+
+        var numBaseTypesToAnalyze = tv.b.dictionaryLength(eventsByBaseTypeName);
+
+        for (var eventTypeName in eventsByBaseTypeName) {
+          var subSelection = eventsByBaseTypeName[eventTypeName];
+          var subView = this.createSubViewForSelection_(
+            eventTypeName, subSelection);
+          // Store the eventTypeName for future tab restoration.
+          subView._eventTypeName = eventTypeName;
+          this.tabView_.appendChild(subView);
+
+          subView.selection = subSelection;
+        }
+
+        // Restore the tab type that was previously selected. First try by tag
+        // name.
+        var tab;
+        if (lastSelectedTabTagName)
+          tab = this.tabView_.querySelector(lastSelectedTabTagName);
+
+        // If that fails, look for a tab with that typeName.
+        if (!tab && lastSelectedTabTypeName) {
+          var tab = tv.b.findFirstInArray(this.tabView_.children, function(tab) {
+            return tab._eventTypeName === lastSelectedTabTypeName;
+          });
+        }
+        // If all else fails, pick the first tab.
+        if (!tab)
+          tab = this.tabView_.firstChild;
+        this.tabView_.selectedTab = tab;
+      },
+
+      createSubViewForSelection_: function(eventTypeName, subSelection) {
+        // Find.
+        var eventTypeInfo = EventRegistry.getEventTypeInfoByTypeName(eventTypeName);
+        var singleMode = subSelection.length == 1;
+        var tagName;
+        if (subSelection.length === 1)
+          tagName = eventTypeInfo.metadata.singleViewElementName;
+        else
+          tagName = eventTypeInfo.metadata.multiViewElementName;
+
+        if (!tv.b.getPolymerElementNamed(tagName))
+          throw new Error('Element not registered: ' + tagName);
+
+        // Create.
+        var subView = document.createElement(tagName);
+
+        // Set label.
+        var camelLabel;
+        if (subSelection.length === 1)
+          camelLabel = eventTypeInfo.metadata.name;
+        else
+          camelLabel = eventTypeInfo.metadata.pluralName;
+
+        subView.tabLabel = convertCamelCaseToTitleCase(camelLabel);
+
+        return subView;
+      },
+
+      onSelectedTabChange_: function() {
+        if (this.tabView_.selectedTab)
+          this.tallMode = this.tabView_.selectedTab.requiresTallView;
+        else
+          this.tallMode = false;
+      },
+    });
+  })();
+  </script>
+</polymer-element>

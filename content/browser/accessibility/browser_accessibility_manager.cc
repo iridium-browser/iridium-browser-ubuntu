@@ -290,10 +290,24 @@ BrowserAccessibility* BrowserAccessibilityManager::GetActiveDescendantFocus(
 
 BrowserAccessibility* BrowserAccessibilityManager::GetFocus(
     BrowserAccessibility* root) {
-  if (focus_ && (!root || focus_->IsDescendantOf(root->node())))
-    return GetFromAXNode(focus_);
+  if (!focus_)
+    return NULL;
 
-  return NULL;
+  if (root && !focus_->IsDescendantOf(root->node()))
+    return NULL;
+
+  if (!delegate())
+    return NULL;
+
+  BrowserAccessibility* obj = GetFromAXNode(focus_);
+  if (obj->HasBoolAttribute(ui::AX_ATTR_IS_AX_TREE_HOST)) {
+    BrowserAccessibilityManager* child_manager =
+        delegate()->AccessibilityGetChildFrame(obj->GetId());
+    if (child_manager)
+      return child_manager->GetFocus(child_manager->GetRoot());
+  }
+
+  return obj;
 }
 
 void BrowserAccessibilityManager::SetFocus(ui::AXNode* node, bool notify) {
@@ -348,8 +362,9 @@ void BrowserAccessibilityManager::SetTextSelection(
 }
 
 gfx::Rect BrowserAccessibilityManager::GetViewBounds() {
-  if (delegate_)
-    return delegate_->AccessibilityGetViewBounds();
+  BrowserAccessibilityDelegate* delegate = GetDelegateFromRootManager();
+  if (delegate)
+    return delegate->AccessibilityGetViewBounds();
   return gfx::Rect();
 }
 
@@ -417,6 +432,19 @@ void BrowserAccessibilityManager::OnNodeCreationFinished(ui::AXNode* node) {
 
 void BrowserAccessibilityManager::OnNodeChangeFinished(ui::AXNode* node) {
   GetFromAXNode(node)->OnUpdateFinished();
+}
+
+BrowserAccessibilityDelegate*
+    BrowserAccessibilityManager::GetDelegateFromRootManager() {
+  BrowserAccessibilityManager* manager = this;
+  while (manager->delegate()) {
+    BrowserAccessibility* host_node_in_parent_frame =
+        manager->delegate()->AccessibilityGetParentFrame();
+    if (!host_node_in_parent_frame)
+      break;
+    manager = host_node_in_parent_frame->manager();
+  }
+  return manager->delegate();
 }
 
 ui::AXTreeUpdate BrowserAccessibilityManager::SnapshotAXTreeForTesting() {

@@ -137,8 +137,14 @@ class ASH_EXPORT SystemTrayDelegate {
   // Returns the notification for supervised users.
   virtual const base::string16 GetSupervisedUserMessage() const = 0;
 
-  // Returns true if the current user is supervised.
+  // Returns true if the current user is supervised: has legacy supervised
+  // account or kid account.
   virtual bool IsUserSupervised() const = 0;
+
+  // Returns true if the current user is child.
+  // TODO(merkulova): remove on FakeUserManager componentization.
+  // crbug.com/443119
+  virtual bool IsUserChild() const = 0;
 
   // Fills |info| structure with current update info.
   virtual void GetSystemUpdateInfo(UpdateInfo* info) const = 0;
@@ -198,19 +204,6 @@ class ASH_EXPORT SystemTrayDelegate {
 
   // Shows login UI to add other users to this session.
   virtual void ShowUserLogin() = 0;
-
-  // Shows the spring charger replacement dialog if necessary.
-  // Returns true if the dialog is shown by the call.
-  virtual bool ShowSpringChargerReplacementDialog() = 0;
-
-  // True if the spring charger replacement dialog is visible.
-  virtual bool IsSpringChargerReplacementDialogVisible() = 0;
-
-  // True if user has confirmed using safe spring charger.
-  virtual bool HasUserConfirmedSafeSpringCharger() = 0;
-
-  // Attempts to shut down the system.
-  virtual void ShutDown() = 0;
 
   // Attempts to sign out the user.
   virtual void SignOut() = 0;

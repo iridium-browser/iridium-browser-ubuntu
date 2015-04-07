@@ -6,6 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/json/json_reader.h"
+#include "base/json/json_writer.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -25,6 +26,10 @@
 
 namespace content {
 
+// This constant should be in sync with
+// the constant at devtools_ui_bindings.cc.
+const size_t kMaxMessageChunkSize = IPC::Channel::kMaximumMessageSize / 4;
+
 // static
 ShellDevToolsFrontend* ShellDevToolsFrontend::Show(
     WebContents* inspected_contents) {
@@ -33,7 +38,6 @@ ShellDevToolsFrontend* ShellDevToolsFrontend::Show(
   Shell* shell = Shell::CreateNewWindow(inspected_contents->GetBrowserContext(),
                                         GURL(),
                                         NULL,
-                                        MSG_ROUTING_NONE,
                                         gfx::Size());
   ShellDevToolsFrontend* devtools_frontend = new ShellDevToolsFrontend(
       shell,
@@ -42,7 +46,7 @@ ShellDevToolsFrontend* ShellDevToolsFrontend::Show(
   DevToolsHttpHandler* http_handler = ShellContentBrowserClient::Get()
                                           ->shell_browser_main_parts()
                                           ->devtools_http_handler();
-  shell->LoadURL(http_handler->GetFrontendURL());
+  shell->LoadURL(http_handler->GetFrontendURL("/devtools/devtools.html"));
 
   return devtools_frontend;
 }
@@ -76,14 +80,10 @@ ShellDevToolsFrontend::~ShellDevToolsFrontend() {
 void ShellDevToolsFrontend::RenderViewCreated(
     RenderViewHost* render_view_host) {
   if (!frontend_host_) {
-    frontend_host_.reset(DevToolsFrontendHost::Create(render_view_host, this));
+    frontend_host_.reset(
+        DevToolsFrontendHost::Create(web_contents()->GetMainFrame(), this));
     agent_host_->AttachClient(this);
   }
-}
-
-void ShellDevToolsFrontend::DocumentOnLoadCompletedInMainFrame() {
-  web_contents()->GetMainFrame()->ExecuteJavaScript(
-      base::ASCIIToUTF16("InspectorFrontendAPI.setUseSoftMenu(true);"));
 }
 
 void ShellDevToolsFrontend::WebContentsDestroyed() {
@@ -94,30 +94,31 @@ void ShellDevToolsFrontend::WebContentsDestroyed() {
 void ShellDevToolsFrontend::HandleMessageFromDevToolsFrontend(
     const std::string& message) {
   std::string method;
-  std::string browser_message;
   int id = 0;
-
   base::ListValue* params = NULL;
   base::DictionaryValue* dict = NULL;
   scoped_ptr<base::Value> parsed_message(base::JSONReader::Read(message));
   if (!parsed_message ||
       !parsed_message->GetAsDictionary(&dict) ||
-      !dict->GetString("method", &method) ||
-      !dict->GetList("params", &params)) {
+      !dict->GetString("method", &method)) {
+    return;
+  }
+  dict->GetList("params", &params);
+
+  std::string browser_message;
+  if (method == "sendMessageToBrowser" && params &&
+      params->GetSize() == 1 && params->GetString(0, &browser_message)) {
+    agent_host_->DispatchProtocolMessage(browser_message);
+  } else if (method == "loadCompleted") {
+    web_contents()->GetMainFrame()->ExecuteJavaScript(
+        base::ASCIIToUTF16("DevToolsAPI.setUseSoftMenu(true);"));
+  } else {
     return;
   }
 
-  if (method != "sendMessageToBrowser" ||
-      params->GetSize() != 1 ||
-      !params->GetString(0, &browser_message)) {
-    return;
-  }
   dict->GetInteger("id", &id);
-
-  agent_host_->DispatchProtocolMessage(browser_message);
-
   if (id) {
-    std::string code = "InspectorFrontendAPI.embedderMessageAck(" +
+    std::string code = "DevToolsAPI.embedderMessageAck(" +
         base::IntToString(id) + ",\"\");";
     base::string16 javascript = base::UTF8ToUTF16(code);
     web_contents()->GetMainFrame()->ExecuteJavaScript(javascript);
@@ -131,9 +132,23 @@ void ShellDevToolsFrontend::HandleMessageFromDevToolsFrontendToBackend(
 
 void ShellDevToolsFrontend::DispatchProtocolMessage(
     DevToolsAgentHost* agent_host, const std::string& message) {
-  std::string code = "InspectorFrontendAPI.dispatchMessage(" + message + ");";
-  base::string16 javascript = base::UTF8ToUTF16(code);
-  web_contents()->GetMainFrame()->ExecuteJavaScript(javascript);
+
+  if (message.length() < kMaxMessageChunkSize) {
+    base::string16 javascript = base::UTF8ToUTF16(
+        "DevToolsAPI.dispatchMessage(" + message + ");");
+    web_contents()->GetMainFrame()->ExecuteJavaScript(javascript);
+    return;
+  }
+
+  base::FundamentalValue total_size(static_cast<int>(message.length()));
+  for (size_t pos = 0; pos < message.length(); pos += kMaxMessageChunkSize) {
+    base::StringValue message_value(message.substr(pos, kMaxMessageChunkSize));
+    std::string param;
+    base::JSONWriter::Write(&message_value, &param);
+    std::string code = "DevToolsAPI.dispatchMessageChunk(" + param + ");";
+    base::string16 javascript = base::UTF8ToUTF16(code);
+    web_contents()->GetMainFrame()->ExecuteJavaScript(javascript);
+  }
 }
 
 void ShellDevToolsFrontend::AgentHostClosed(

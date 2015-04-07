@@ -46,6 +46,7 @@
 #include "core/XLinkNames.h"
 #include "core/XMLNSNames.h"
 #include "core/XMLNames.h"
+#include "core/css/parser/CSSParserTokenRange.h"
 #include "core/dom/Document.h"
 #include "core/dom/StyleChangeReason.h"
 #include "core/events/EventFactory.h"
@@ -55,7 +56,6 @@
 #include "platform/FontFamilyNames.h"
 #include "platform/Partitions.h"
 #include "platform/PlatformThreadData.h"
-#include "platform/heap/Heap.h"
 #include "wtf/text/StringStatics.h"
 
 namespace blink {
@@ -92,6 +92,8 @@ void CoreInitializer::init()
     MediaFeatureNames::init();
     MediaTypeNames::init();
 
+    CSSParserTokenRange::initStaticEOFToken();
+
     // It would make logical sense to do this in WTF::initialize() but there are
     // ordering dependencies, e.g. about "xmlns".
     WTF::StringStatics::init();
@@ -118,9 +120,8 @@ void CoreInitializer::init()
 
 void CoreInitializer::shutdown()
 {
-    // Make sure we stop the HTMLParserThread and ScriptStreamerThread before
-    // Platform::current() is cleared.
-    ScriptStreamerThread::shutdown();
+    // Make sure we stop the HTMLParserThread before Platform::current() is
+    // cleared.
     HTMLParserThread::shutdown();
 
     Partitions::shutdown();

@@ -10,10 +10,12 @@
 #include <vector>
 
 #include "base/callback.h"
+#include "base/files/file.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/task/cancelable_task_tracker.h"
+#include "chrome/browser/chromeos/file_system_provider/abort_callback.h"
 #include "chrome/browser/chromeos/file_system_provider/provided_file_system_info.h"
 #include "chrome/browser/chromeos/file_system_provider/provided_file_system_interface.h"
 #include "chrome/browser/chromeos/file_system_provider/provided_file_system_observer.h"
@@ -39,7 +41,7 @@ class RequestManager;
 
 // Path of a sample fake file, which is added to the fake file system by
 // default.
-extern const char kFakeFilePath[];
+extern const base::FilePath::CharType kFakeFilePath[];
 
 // Represents a file or a directory on a fake file system.
 struct FakeEntry {
@@ -146,11 +148,13 @@ class FakeProvidedFileSystem : public ProvidedFileSystemInterface {
   virtual Watchers* GetWatchers() override;
   virtual void AddObserver(ProvidedFileSystemObserver* observer) override;
   virtual void RemoveObserver(ProvidedFileSystemObserver* observer) override;
-  virtual bool Notify(const base::FilePath& entry_path,
-                      bool recursive,
-                      storage::WatcherManager::ChangeType change_type,
-                      scoped_ptr<ProvidedFileSystemObserver::Changes> changes,
-                      const std::string& tag) override;
+  virtual void Notify(
+      const base::FilePath& entry_path,
+      bool recursive,
+      storage::WatcherManager::ChangeType change_type,
+      scoped_ptr<ProvidedFileSystemObserver::Changes> changes,
+      const std::string& tag,
+      const storage::AsyncFileUtil::StatusCallback& callback) override;
   virtual base::WeakPtr<ProvidedFileSystemInterface> GetWeakPtr() override;
 
   // Factory callback, to be used in Service::SetFileSystemFactory(). The

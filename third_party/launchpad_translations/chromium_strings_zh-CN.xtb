@@ -5,7 +5,7 @@
 <translation id="5065199687811594072">您希望 Chromium 保存该信用卡信息以便填写网络表单吗？</translation>
 <translation id="6510925080656968729">卸载 Chromium</translation>
 <translation id="2615699638672665509">此计算机很快将停止接收Chromium更新，因为其硬件不再受支持。</translation>
-<translation id="5532301346661895910">Chromium 会将此密码存储在 |Google 保存的密码| 中，并会在您下次需要时自动填充此密码。</translation>
+<translation id="5532301346661895910">Chromium 会将此密码存储在 |Google 保存的密码|中，并会在您下次需要时自动填充此密码。</translation>
 <translation id="6893813176749746474">Chromium 已更新，但您已经至少 30 天未使用它了。</translation>
 <translation id="1550579416447684632">启动 Chromium 应用</translation>
 <translation id="2732467638532545152">您的计算机运行的是旧版Microsoft Windows，无法处理此网站的安全证书。因此，Chromium无法确定该证书是来自<ph name="SITE"/>，还是来自您所在的网络中假冒<ph name="SITE"/>的用户。请将您的计算机更新到更高版本的Windows。</translation>
@@ -32,7 +32,6 @@
 <translation id="3883381313049582448">使用由Chromium生成的密码</translation>
 <translation id="3549345495227188780">Chromium 操作系统使用入门</translation>
 <translation id="1668054258064581266">从Chromium移除您的帐户后，您可能需要重新加载已打开的标签页才能使其正常显示。</translation>
-<translation id="6953661834318318668">Chromium 工具栏</translation>
 <translation id="4285930937574705105">未知错误导致安装失败。如果 Chromium 正在运行，请将其关闭，然后重试。</translation>
 <translation id="1396446129537741364">Chromium 正尝试显示密码。</translation>
 <translation id="8987477933582888019">网络浏览器</translation>
@@ -77,6 +76,7 @@
 <translation id="7473891865547856676">不，谢谢</translation>
 <translation id="9191268552238695869">管理员已在此系统上安装了 Chromium 以供所有用户使用。系统级 Chromium 将替换您安装的用户级版本。</translation>
 <translation id="3509308970982693815">请关闭所有 Chromium 窗口并重试。</translation>
+<translation id="8851136666856101339">主体内容</translation>
 <translation id="4077262827416206768">请关闭所有 Chromium 窗口，然后重新启动 Chromium，以便让此更改生效。</translation>
 <translation id="6475912303565314141">它还能够控制Chromium启动后显示的页面。</translation>
 <translation id="1725059042853530269"><ph name="FILE_NAME"/>会影响您的浏览体验，因此Chromium已将其阻止。</translation>
@@ -139,6 +139,7 @@
 <translation id="275588974610408078">Chromium 未提供崩溃报告。</translation>
 <translation id="5909170354645388250">未在 Chromium 中使用。该占位符用于在同步中保留资源映射。要求使用一个参数：$1。</translation>
 <translation id="1144202035120576837"><ph name="SITE"/> 通常使用加密技术来保护您的信息。Chromium 此次尝试连接到 <ph name="SITE"/> 时，此网站返回了异常的错误凭据。这可能是因为有攻击程序在试图冒充 <ph name="SITE"/>，或 Wi-Fi 登录屏幕中断了此次连接。请放心，您的信息仍然是安全的，因为 Chromium 尚未进行任何数据交换便停止了连接。</translation>
+<translation id="2316129865977710310">不用了，谢谢</translation>
 <translation id="7937630085815544518">您之前登录 Chromium 时使用的帐户为 <ph name="USER_EMAIL_ADDRESS"/>，请使用同一帐户再次登录。</translation>
 <translation id="2685838254101182273">Chromium 已停止更新，并且不再支持您的操作系统版本。</translation>
 <translation id="8684913864886094367">Chromium 未正确关闭。</translation>
@@ -152,6 +153,7 @@
 <translation id="2648074677641340862">安装过程中出现操作系统错误。请重新下载 Chromium。</translation>
 <translation id="5942520288919337908">“<ph name="EXTENSION_NAME"/>”已添加到 Chromium。</translation>
 <translation id="549669000822060376">Chromium正在安装最新的系统更新，请稍候。</translation>
+<translation id="1240763998429950591">Chromium 无法更新到最新版本，因此其中缺少一些新功能并且未更正某些安全性问题。您需要更新 Chromium。</translation>
 <translation id="6930860321615955692">https://support.google.com/chrome/?p=ib_chromeframe</translation>
 <translation id="3281987435599047980">向 Google 搜索发送某个字词及其相关上下文，系统将返回相应的定义、图片、搜索结果和其他详细信息。</translation>
 <translation id="4559775032954821361">依次转到 Chromium 菜单 &gt;“<ph name="SETTINGS_TITLE"/>”&gt;“<ph name="ADVANCED_TITLE"/>”&gt;“<ph name="PROXIES_TITLE"/>”&gt;“LAN 设置”，然后取消选中“为 LAN 使用代理服务器”复选框。</translation>
@@ -180,6 +182,7 @@
 <translation id="2966088006374919794">Chromium 必须启动外部应用才能处理 <ph name="SCHEME"/> 链接。请求的链接是 <ph name="PROTOLINK"/>。</translation>
 <translation id="2558235863893655150">要让 Chromium 保存您的密码吗？</translation>
 <translation id="6485906693002546646">您在使用<ph name="PROFILE_EMAIL"/>同步自己的Chromium资料和数据。要更新您的同步偏好设置或在不登录Google帐户的情况下使用Chromium，请前往<ph name="SETTINGS_LINK"/>部分。</translation>
+<translation id="705851970750939768">更新 Chromium</translation>
 <translation id="5772805321386874569">（需要<ph name="BEGIN_BUTTON"/>重新启动<ph name="END_BUTTON"/> Chromium）</translation>
 <translation id="1688750314291223739">您可以设置同步以将个性化浏览器功能保存到网上，以便在任意计算机上的 Chromium 中使用这些功能。</translation>
 <translation id="8610831143142469229">对防火墙或防病毒软件进行设置，以允许 Chromium 访问该网络。</translation>

@@ -75,9 +75,12 @@ int StartMe2MeNativeMessagingHost() {
 #endif  // defined(OS_MACOSX)
 
 #if defined(OS_LINUX)
-  // g_type_init() is needed prior to GTK 2.36, which includes Ubuntu 12.04
-  // (Precise Pangolin) systems.
+// g_type_init will be deprecated in 2.36. 2.35 is the development
+// version for 2.36, hence do not call g_type_init starting 2.35.
+// http://developer.gnome.org/gobject/unstable/gobject-Type-Information.html#g-type-init
+#if !GLIB_CHECK_VERSION(2, 35, 0)
   g_type_init();
+#endif
 #endif  // defined(OS_LINUX)
 
   // Required to find the ICU data file, used by some file_util routines.
@@ -148,18 +151,18 @@ int StartMe2MeNativeMessagingHost() {
     std::wstring output_pipe_name =
       command_line->GetSwitchValueNative(kOutputSwitchName);
 
-    // A NULL SECURITY_ATTRIBUTES signifies that the handle can't be inherited
-    read_file = base::File(CreateFile(
-        input_pipe_name.c_str(), GENERIC_READ, 0, NULL, OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL, NULL));
+    // A NULL SECURITY_ATTRIBUTES signifies that the handle can't be inherited.
+    read_file =
+        base::File(CreateFile(input_pipe_name.c_str(), GENERIC_READ, 0, nullptr,
+                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
     if (!read_file.IsValid()) {
       PLOG(ERROR) << "CreateFile failed on '" << input_pipe_name << "'";
       return kInitializationFailed;
     }
 
     write_file = base::File(CreateFile(
-        output_pipe_name.c_str(), GENERIC_WRITE, 0, NULL, OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL, NULL));
+        output_pipe_name.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL, nullptr));
     if (!write_file.IsValid()) {
       PLOG(ERROR) << "CreateFile failed on '" << output_pipe_name << "'";
       return kInitializationFailed;
@@ -180,8 +183,8 @@ int StartMe2MeNativeMessagingHost() {
     // the STD* handles at startup. So any LoadLibrary request can potentially
     // be blocked. To prevent that from happening we close STDIN and STDOUT
     // handles as soon as we retrieve the corresponding file handles.
-    SetStdHandle(STD_INPUT_HANDLE, NULL);
-    SetStdHandle(STD_OUTPUT_HANDLE, NULL);
+    SetStdHandle(STD_INPUT_HANDLE, nullptr);
+    SetStdHandle(STD_OUTPUT_HANDLE, nullptr);
   }
 #elif defined(OS_POSIX)
   // The files will be automatically closed.
@@ -214,24 +217,24 @@ int StartMe2MeNativeMessagingHost() {
   }
 
   base::win::RegKey unprivileged;
-  result = unprivileged.Open(root.Handle(), kPairingRegistrySecretsKeyName,
+  result = unprivileged.Open(root.Handle(), kPairingRegistryClientsKeyName,
                              needs_elevation ? KEY_READ : KEY_READ | KEY_WRITE);
   if (result != ERROR_SUCCESS) {
     SetLastError(result);
-    PLOG(ERROR) << "Failed to open HKLM\\" << kPairingRegistrySecretsKeyName
-                << "\\" << kPairingRegistrySecretsKeyName;
+    PLOG(ERROR) << "Failed to open HKLM\\" << kPairingRegistryKeyName
+                << "\\" << kPairingRegistryClientsKeyName;
     return kInitializationFailed;
   }
 
   // Only try to open the privileged key if the current process is elevated.
   base::win::RegKey privileged;
   if (!needs_elevation) {
-    result = privileged.Open(root.Handle(), kPairingRegistryClientsKeyName,
+    result = privileged.Open(root.Handle(), kPairingRegistrySecretsKeyName,
                              KEY_READ | KEY_WRITE);
     if (result != ERROR_SUCCESS) {
       SetLastError(result);
       PLOG(ERROR) << "Failed to open HKLM\\" << kPairingRegistryKeyName << "\\"
-                  << kPairingRegistryClientsKeyName;
+                  << kPairingRegistrySecretsKeyName;
       return kInitializationFailed;
     }
   }

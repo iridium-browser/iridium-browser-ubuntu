@@ -60,9 +60,10 @@ public:
     void reportPendingActivity(bool hasPendingActivity);
 
     // WorkerReportingProxy overrides.
-    virtual void reportException(const String& errorMessage, int lineNumber, int columnNumber, const String& sourceURL) override;
+    virtual void reportException(const String& errorMessage, int lineNumber, int columnNumber, const String& sourceURL, int exceptionId) override;
     virtual void reportConsoleMessage(PassRefPtrWillBeRawPtr<ConsoleMessage>) override;
     virtual void postMessageToPageInspector(const String&) override;
+    virtual void postWorkerConsoleAgentEnabled() override;
     virtual void didEvaluateWorkerScript(bool success) override { };
     virtual void workerGlobalScopeStarted(WorkerGlobalScope*) override { }
     virtual void workerGlobalScopeClosed() override;

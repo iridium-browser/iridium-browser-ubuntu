@@ -123,7 +123,7 @@ def SafeUnlink(path, sudo=False):
   if sudo:
     try:
       cros_build_lib.SudoRunCommand(
-          ['rm', '--',  path], print_cmd=False, redirect_stderr=True)
+          ['rm', '--', path], print_cmd=False, redirect_stderr=True)
       return True
     except cros_build_lib.RunCommandError:
       if os.path.exists(path):
@@ -289,7 +289,7 @@ def IteratePathParents(start_path):
     yield path
 
 
-def FindInPathParents(path_to_find, start_path, test_func=None):
+def FindInPathParents(path_to_find, start_path, test_func=None, end_path=None):
   """Look for a relative path, ascending through parent directories.
 
   Ascend through parent directories of current path looking for a relative
@@ -316,10 +316,15 @@ def FindInPathParents(path_to_find, start_path, test_func=None):
       os.path.exists.  The function will be passed one argument - the target
       path to test.  A True return value will cause AscendingLookup to return
       the target.
+    end_path: The path to stop searching.
   """
+  if end_path is not None:
+    end_path = os.path.abspath(end_path)
   if test_func is None:
     test_func = os.path.exists
   for path in IteratePathParents(start_path):
+    if path == end_path:
+      return None
     target = os.path.join(path, path_to_find)
     if test_func(target):
       return target
@@ -525,7 +530,7 @@ MS_SLAVE = 1 << 19
 MS_SHARED = 1 << 20
 MS_RELATIME = 1 << 21
 MS_KERNMOUNT = 1 << 22
-MS_I_VERSION =  1 << 23
+MS_I_VERSION = 1 << 23
 MS_STRICTATIME = 1 << 24
 MS_ACTIVE = 1 << 30
 MS_NOUSER = 1 << 31
@@ -746,23 +751,6 @@ def GetDeviceSize(device_path, in_bytes=False):
       return int(d.SIZE) if in_bytes else d.SIZE
 
   raise ValueError('No size info of %s is found.' % device_path)
-
-
-def GetExitStatus(status):
-  """Get the exit status of a child from an os.waitpid call.
-
-  Args:
-    status: The return value of os.waitpid(pid, 0)[1]
-
-  Returns:
-    The exit status of the process. If the process exited with a signal,
-    the return value will be 128 plus the signal number.
-  """
-  if os.WIFSIGNALED(status):
-    return 128 + os.WTERMSIG(status)
-  else:
-    assert os.WIFEXITED(status), 'Unexpected exit status %r' % status
-    return os.WEXITSTATUS(status)
 
 
 FileInfo = collections.namedtuple(
@@ -998,7 +986,8 @@ class MountImageContext(object):
     self._CleanUp()
 
 
-MountInfo = collections.namedtuple('MountInfo',
+MountInfo = collections.namedtuple(
+    'MountInfo',
     'source destination filesystem options')
 
 
@@ -1012,7 +1001,7 @@ def IterateMountPoints(proc_file='/proc/mounts'):
   Returns:
     A generator that yields MountInfo objects.
   """
-  with open(proc_file, 'rt') as f:
+  with open(proc_file) as f:
     for line in f:
       # Escape any \xxx to a char.
       source, destination, filesystem, options, _, _ = [

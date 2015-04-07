@@ -7,6 +7,7 @@
 #include "base/auto_reset.h"
 #include "base/debug/trace_event.h"
 #include "base/debug/trace_event_argument.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
 #include "cc/scheduler/delay_based_time_source.h"
@@ -79,9 +80,9 @@ void BeginFrameSourceMixIn::SetNeedsBeginFrames(bool needs_begin_frames) {
                "new state",
                needs_begin_frames);
   if (needs_begin_frames_ != needs_begin_frames) {
+    needs_begin_frames_ = needs_begin_frames;
     OnNeedsBeginFramesChange(needs_begin_frames);
   }
-  needs_begin_frames_ = needs_begin_frames;
 }
 
 void BeginFrameSourceMixIn::AddObserver(BeginFrameObserver* obs) {
@@ -145,9 +146,9 @@ scoped_ptr<BackToBackBeginFrameSource> BackToBackBeginFrameSource::Create(
 BackToBackBeginFrameSource::BackToBackBeginFrameSource(
     base::SingleThreadTaskRunner* task_runner)
     : BeginFrameSourceMixIn(),
-      weak_factory_(this),
       task_runner_(task_runner),
-      send_begin_frame_posted_(false) {
+      send_begin_frame_posted_(false),
+      weak_factory_(this) {
   DCHECK(task_runner);
   DCHECK_EQ(needs_begin_frames_, false);
   DCHECK_EQ(send_begin_frame_posted_, false);
@@ -181,10 +182,9 @@ void BackToBackBeginFrameSource::BeginFrame() {
     return;
 
   base::TimeTicks now = Now();
-  BeginFrameArgs args =
-      BeginFrameArgs::Create(now,
-                             now + BeginFrameArgs::DefaultInterval(),
-                             BeginFrameArgs::DefaultInterval());
+  BeginFrameArgs args = BeginFrameArgs::Create(
+      BEGINFRAME_FROM_HERE, now, now + BeginFrameArgs::DefaultInterval(),
+      BeginFrameArgs::DefaultInterval(), BeginFrameArgs::NORMAL);
   CallOnBeginFrame(args);
 }
 
@@ -243,8 +243,8 @@ BeginFrameArgs SyntheticBeginFrameSource::CreateBeginFrameArgs(
     base::TimeTicks frame_time,
     BeginFrameArgs::BeginFrameArgsType type) {
   base::TimeTicks deadline = time_source_->NextTickTime();
-  return BeginFrameArgs::CreateTyped(
-      frame_time, deadline, time_source_->Interval(), type);
+  return BeginFrameArgs::Create(BEGINFRAME_FROM_HERE, frame_time, deadline,
+                                time_source_->Interval(), type);
 }
 
 // TimeSourceClient support

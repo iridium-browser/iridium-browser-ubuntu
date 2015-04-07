@@ -50,6 +50,9 @@ class CONTENT_EXPORT RtcDataChannelHandler
   virtual blink::WebString protocol() const override;
   virtual bool negotiated() const override;
   virtual unsigned short id() const override;
+  // TODO(bemasc): Mark |state()| as |override| once https://codereview.chromium.org/782843003/
+  // lands in Blink and rolls into Chromium.
+  virtual blink::WebRTCDataChannelHandlerClient::ReadyState state() const;
   virtual unsigned long bufferedAmount() override;
   virtual bool sendStringData(const blink::WebString& data) override;
   virtual bool sendRawData(const char* data, size_t length) override;
@@ -74,7 +77,10 @@ class CONTENT_EXPORT RtcDataChannelHandler
     const scoped_refptr<base::SingleThreadTaskRunner>& main_thread() const;
     const scoped_refptr<webrtc::DataChannelInterface>& channel() const;
 
-    void ClearHandler();
+    // Clears the internal |handler_| pointer so that no further callbacks
+    // will be attempted, disassociates this observer from the channel and
+    // releases the channel pointer. Must be called on the main thread.
+    void Unregister();
 
    private:
     friend class base::RefCountedThreadSafe<RtcDataChannelHandler::Observer>;
@@ -89,7 +95,7 @@ class CONTENT_EXPORT RtcDataChannelHandler
 
     RtcDataChannelHandler* handler_;
     const scoped_refptr<base::SingleThreadTaskRunner> main_thread_;
-    const scoped_refptr<webrtc::DataChannelInterface> channel_;
+    scoped_refptr<webrtc::DataChannelInterface> channel_;
   };
 
   scoped_refptr<Observer> observer_;

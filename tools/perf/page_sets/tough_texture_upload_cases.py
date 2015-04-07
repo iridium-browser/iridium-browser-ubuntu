@@ -14,7 +14,7 @@ class ToughTextureUploadCasesPage(page_module.Page):
         url=url,
         page_set=page_set)
 
-  def RunSmoothness(self, action_runner):
+  def RunPageInteractions(self, action_runner):
     interaction = action_runner.BeginGestureInteraction(
         'ScrollAction', is_smooth=True)
     action_runner.ScrollPage()
@@ -39,5 +39,5 @@ class ToughTextureUploadCasesPageSet(page_set_module.PageSet):
       # pylint: disable=C0301
       'file://tough_texture_upload_cases/background_color_animation_with_gradient_and_transform_animation.html']
     for url in urls_list:
-      self.AddPage(ToughTextureUploadCasesPage(url, self))
+      self.AddUserStory(ToughTextureUploadCasesPage(url, self))
 

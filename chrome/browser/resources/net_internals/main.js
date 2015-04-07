@@ -21,6 +21,8 @@ var LoadFlag = null;
 var CertStatusFlag = null;
 var LoadState = null;
 var AddressFamily = null;
+var SdchProblemCode = null;
+var DataReductionProxyBypassEventType = null;
 
 /**
  * Dictionary of all constants, used for saving log files.
@@ -192,20 +194,16 @@ var MainView = (function() {
       addTab(SocketsView);
       addTab(SpdyView);
       addTab(QuicView);
+      addTab(SdchView);
       addTab(HttpCacheView);
       addTab(ModulesView);
       addTab(TestView);
-      addTab(CrosLogVisualizerView);
       addTab(HSTSView);
-      addTab(LogsView);
       addTab(BandwidthView);
       addTab(PrerenderView);
       addTab(CrosView);
 
-      this.tabSwitcher_.showMenuItem(LogsView.TAB_ID, cr.isChromeOS);
       this.tabSwitcher_.showMenuItem(CrosView.TAB_ID, cr.isChromeOS);
-      this.tabSwitcher_.showMenuItem(CrosLogVisualizerView.TAB_ID,
-                                     cr.isChromeOS);
     },
 
     /**
@@ -311,6 +309,9 @@ ConstantsObserver.prototype.onReceivedConstants = function(receivedConstants) {
   QuicRstStreamError = Constants.quicRstStreamError;
   AddressFamily = Constants.addressFamily;
   LoadState = Constants.loadState;
+  SdchProblemCode = Constants.sdchProblemCode;
+  DataReductionProxyBypassEventType =
+      Constants.dataReductionProxyBypassEventType;
   // certStatusFlag may not be present when loading old log Files
   if (typeof(Constants.certStatusFlag) == 'object')
     CertStatusFlag = Constants.certStatusFlag;
@@ -385,4 +386,16 @@ function addressFamilyToString(family) {
   // All the address family start with ADDRESS_FAMILY_*.
   // Strip that prefix since it is redundant and only clutters the output.
   return str.replace(/^ADDRESS_FAMILY_/, '');
+}
+
+/**
+ * Returns the name for sdchProblemCode.
+ *
+ * Example: sdchProblemCodeToString(5) should return
+ * "DECODE_BODY_ERROR".
+ * @param {number} sdchProblemCode The SDCH problem code.
+ * @return {string} The name of the given problem code.
+ */
+function sdchProblemCodeToString(sdchProblemCode) {
+  return getKeyWithValue(SdchProblemCode, sdchProblemCode);
 }

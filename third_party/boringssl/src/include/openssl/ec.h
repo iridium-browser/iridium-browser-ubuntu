@@ -85,10 +85,7 @@ typedef enum {
 	 *  which solution of the quadratic equation y is  */
 	POINT_CONVERSION_COMPRESSED = 2,
 	/** the point is encoded as z||x||y, where z is the octet 0x02  */
-	POINT_CONVERSION_UNCOMPRESSED = 4,
-	/** the point is encoded as z||x||y, where the octet z specifies
-         *  which solution of the quadratic equation y is  */
-	POINT_CONVERSION_HYBRID = 6
+	POINT_CONVERSION_UNCOMPRESSED = 4
 } point_conversion_form_t;
 
 
@@ -123,8 +120,8 @@ OPENSSL_EXPORT int EC_GROUP_cmp(const EC_GROUP *a, const EC_GROUP *b);
  * in |group| that specifies the generator for the group. */
 OPENSSL_EXPORT const EC_POINT *EC_GROUP_get0_generator(const EC_GROUP *group);
 
-/* EC_GROUP_get_order sets |*order| to the order of |group| using |ctx|, if
- * it's not NULL. It returns one on success and zero otherwise. */
+/* EC_GROUP_get_order sets |*order| to the order of |group|, if it's not
+ * NULL. It returns one on success and zero otherwise. |ctx| is ignored. */
 OPENSSL_EXPORT int EC_GROUP_get_order(const EC_GROUP *group, BIGNUM *order,
                                       BN_CTX *ctx);
 
@@ -148,11 +145,6 @@ OPENSSL_EXPORT int EC_GROUP_get_curve_name(const EC_GROUP *group);
 /* EC_GROUP_get_degree returns the number of bits needed to represent an
  * element of the field underlying |group|. */
 OPENSSL_EXPORT int EC_GROUP_get_degree(const EC_GROUP *group);
-
-/* EC_GROUP_set_point_conversion_form sets the form that serialised points will
- * take as one of the |POINT_CONVERSION_*| values. */
-OPENSSL_EXPORT void EC_GROUP_set_point_conversion_form(
-    EC_GROUP *group, point_conversion_form_t form);
 
 /* EC_GROUP_precompute_mult precomputes multiplies of the generator in order to
  * speed up operations that involve calculating generator multiples. It returns

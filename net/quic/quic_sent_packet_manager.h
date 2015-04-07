@@ -16,6 +16,7 @@
 #include "net/quic/congestion_control/loss_detection_interface.h"
 #include "net/quic/congestion_control/rtt_stats.h"
 #include "net/quic/congestion_control/send_algorithm_interface.h"
+#include "net/quic/crypto/cached_network_parameters.h"
 #include "net/quic/quic_ack_notifier_manager.h"
 #include "net/quic/quic_protocol.h"
 #include "net/quic/quic_sustained_bandwidth_recorder.h"
@@ -55,7 +56,7 @@ class NET_EXPORT_PRIVATE QuicSentPacketManager {
         const QuicAckFrame& ack_frame,
         QuicTime ack_receive_time,
         QuicPacketSequenceNumber largest_observed,
-        bool largest_observed_acked,
+        bool rtt_updated,
         QuicPacketSequenceNumber least_unacked_sent_packet) {}
   };
 
@@ -68,7 +69,10 @@ class NET_EXPORT_PRIVATE QuicSentPacketManager {
 
     // Called when congestion window may have changed.
     virtual void OnCongestionWindowChange() = 0;
-    // TODO(jri): Add OnRttStatsChange() to this class as well.
+
+    // Called when RTT may have changed, including when an RTT is read from
+    // the config.
+    virtual void OnRttChange() = 0;
   };
 
   // Struct to store the pending retransmission information.
@@ -93,10 +97,16 @@ class NET_EXPORT_PRIVATE QuicSentPacketManager {
                         const QuicClock* clock,
                         QuicConnectionStats* stats,
                         CongestionControlType congestion_control_type,
-                        LossDetectionType loss_type);
+                        LossDetectionType loss_type,
+                        bool is_secure);
   virtual ~QuicSentPacketManager();
 
   virtual void SetFromConfig(const QuicConfig& config);
+
+  // Pass the CachedNetworkParameters to the send algorithm.
+  // Returns true if this changes the initial connection state.
+  bool ResumeConnectionState(
+      const CachedNetworkParameters& cached_network_params);
 
   void SetNumOpenStreams(size_t num_streams);
 
@@ -110,6 +120,13 @@ class NET_EXPORT_PRIVATE QuicSentPacketManager {
   bool IsUnacked(QuicPacketSequenceNumber sequence_number) const;
 
   // Requests retransmission of all unacked packets of |retransmission_type|.
+  // The behavior of this method depends on the value of |retransmission_type|:
+  // ALL_UNACKED_RETRANSMISSION - All unacked packets will be retransmitted.
+  // This can happen, for example, after a version negotiation packet has been
+  // received and all packets needs to be retransmitted with the new version.
+  // ALL_INITIAL_RETRANSMISSION - Only initially encrypted packets will be
+  // retransmitted. This can happen, for example, when a CHLO has been rejected
+  // and the previously encrypted data needs to be encrypted with a new key.
   void RetransmitUnackedPackets(TransmissionType retransmission_type);
 
   // Retransmits the oldest pending packet there is still a tail loss probe
@@ -129,7 +146,8 @@ class NET_EXPORT_PRIVATE QuicSentPacketManager {
   // Returns true if there are pending retransmissions.
   bool HasPendingRetransmissions() const;
 
-  // Retrieves the next pending retransmission.
+  // Retrieves the next pending retransmission.  You must ensure that
+  // there are pending retransmissions prior to calling this function.
   PendingRetransmission NextPendingRetransmission();
 
   bool HasUnackedPackets() const;
@@ -351,6 +369,7 @@ class NET_EXPORT_PRIVATE QuicSentPacketManager {
   QuicConnectionStats* stats_;
   DebugDelegate* debug_delegate_;
   NetworkChangeVisitor* network_change_visitor_;
+  const QuicPacketCount initial_congestion_window_;
   RttStats rtt_stats_;
   scoped_ptr<SendAlgorithmInterface> send_algorithm_;
   scoped_ptr<LossDetectionInterface> loss_algorithm_;

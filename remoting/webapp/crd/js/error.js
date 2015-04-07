@@ -31,5 +31,30 @@ remoting.Error = {
   NOT_AUTHENTICATED: /*i18n-content*/'ERROR_NOT_AUTHENTICATED',
   INVALID_HOST_DOMAIN: /*i18n-content*/'ERROR_INVALID_HOST_DOMAIN',
   P2P_FAILURE: /*i18n-content*/'ERROR_P2P_FAILURE',
-  REGISTRATION_FAILED: /*i18n-content*/'ERROR_HOST_REGISTRATION_FAILED'
+  REGISTRATION_FAILED: /*i18n-content*/'ERROR_HOST_REGISTRATION_FAILED',
+  NOT_AUTHORIZED: /*i18n-content*/'ERROR_NOT_AUTHORIZED'
+};
+
+/**
+ * @param {number} httpStatus An HTTP status code.
+ * @return {remoting.Error} The remoting.Error enum corresponding to the
+ *     specified HTTP status code.
+ */
+remoting.Error.fromHttpStatus = function(httpStatus) {
+  if (httpStatus == 0) {
+    return remoting.Error.NETWORK_FAILURE;
+  } else if (httpStatus >= 200 && httpStatus < 300) {
+    return remoting.Error.NONE;
+  } else if (httpStatus == 400 || httpStatus == 401) {
+    return remoting.Error.AUTHENTICATION_FAILED;
+  } else if (httpStatus >= 500 && httpStatus < 600) {
+    return remoting.Error.SERVICE_UNAVAILABLE;
+  } else {
+    console.warn('Unexpected HTTP error code: ' + httpStatus);
+    // Return AUTHENTICATION_FAILED by default, so that the user can try to
+    // recover from an unexpected failure by signing in again.
+    // TODO(jamiewalch): Return UNEXPECTED here and let calling code treat that
+    // as "sign-in required" if necessary.
+    return remoting.Error.AUTHENTICATION_FAILED;
+  }
 };

@@ -5,29 +5,40 @@
 #include "config.h"
 #include "core/paint/EllipsisBoxPainter.h"
 
+#include "core/paint/RenderDrawingRecorder.h"
+#include "core/paint/TextPainter.h"
 #include "core/rendering/EllipsisBox.h"
-#include "core/rendering/InlineTextBox.h"
 #include "core/rendering/PaintInfo.h"
 #include "core/rendering/RootInlineBox.h"
-#include "core/rendering/TextPainter.h"
 #include "core/rendering/TextRunConstructor.h"
 #include "platform/graphics/GraphicsContextStateSaver.h"
 
 namespace blink {
 
-void EllipsisBoxPainter::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset, LayoutUnit lineTop, LayoutUnit lineBottom)
+void EllipsisBoxPainter::paint(const PaintInfo& paintInfo, const LayoutPoint& paintOffset, LayoutUnit lineTop, LayoutUnit lineBottom)
+{
+    RenderStyle* style = m_ellipsisBox.renderer().style(m_ellipsisBox.isFirstLineStyle());
+    paintEllipsis(paintInfo, paintOffset, lineTop, lineBottom, style);
+    paintMarkupBox(paintInfo, paintOffset, lineTop, lineBottom, style);
+}
+
+void EllipsisBoxPainter::paintEllipsis(const PaintInfo& paintInfo, const LayoutPoint& paintOffset, LayoutUnit lineTop, LayoutUnit lineBottom, RenderStyle* style)
 {
     GraphicsContext* context = paintInfo.context;
-    RenderStyle* style = m_ellipsisBox.renderer().style(m_ellipsisBox.isFirstLineStyle());
-    const Font& font = style->font();
     FloatPoint boxOrigin = m_ellipsisBox.locationIncludingFlipping();
     boxOrigin.moveBy(FloatPoint(paintOffset));
     if (!m_ellipsisBox.isHorizontal())
         boxOrigin.move(0, -m_ellipsisBox.virtualLogicalHeight());
-    FloatRect boxRect(boxOrigin, LayoutSize(m_ellipsisBox.logicalWidth(), m_ellipsisBox.virtualLogicalHeight()));
+    FloatRect boxRect(boxOrigin, FloatSize(m_ellipsisBox.logicalWidth(), m_ellipsisBox.virtualLogicalHeight()));
+
+    RenderDrawingRecorder recorder(context, m_ellipsisBox.renderer(), paintInfo.phase, boxRect);
+    if (recorder.canUseCachedDrawing())
+        return;
+
     GraphicsContextStateSaver stateSaver(*context);
     if (!m_ellipsisBox.isHorizontal())
-        context->concatCTM(InlineTextBox::rotation(boxRect, InlineTextBox::Clockwise));
+        context->concatCTM(TextPainter::rotation(boxRect, TextPainter::Clockwise));
+    const Font& font = style->font();
     FloatPoint textOrigin(boxOrigin.x(), boxOrigin.y() + font.fontMetrics().ascent());
 
     bool isPrinting = m_ellipsisBox.renderer().document().printing();
@@ -45,11 +56,9 @@ void EllipsisBoxPainter::paint(PaintInfo& paintInfo, const LayoutPoint& paintOff
     TextRun textRun = constructTextRun(&m_ellipsisBox.renderer(), font, m_ellipsisBox.ellipsisStr(), style, TextRun::AllowTrailingExpansion);
     TextPainter textPainter(context, font, textRun, textOrigin, boxRect, m_ellipsisBox.isHorizontal());
     textPainter.paint(0, m_ellipsisBox.ellipsisStr().length(), m_ellipsisBox.ellipsisStr().length(), textStyle);
-
-    paintMarkupBox(paintInfo, paintOffset, lineTop, lineBottom, style);
 }
 
-void EllipsisBoxPainter::paintMarkupBox(PaintInfo& paintInfo, const LayoutPoint& paintOffset, LayoutUnit lineTop, LayoutUnit lineBottom, RenderStyle* style)
+void EllipsisBoxPainter::paintMarkupBox(const PaintInfo& paintInfo, const LayoutPoint& paintOffset, LayoutUnit lineTop, LayoutUnit lineBottom, RenderStyle* style)
 {
     InlineBox* markupBox = m_ellipsisBox.markupBox();
     if (!markupBox)

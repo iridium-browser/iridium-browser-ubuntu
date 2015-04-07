@@ -29,14 +29,14 @@
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "core/dom/ContextLifecycleObserver.h"
+#include "core/dom/DOMArrayPiece.h"
 #include "platform/Timer.h"
 #include "wtf/Forward.h"
 #include "wtf/text/WTFString.h"
 
 namespace blink {
 
-class DOMArrayBuffer;
-class DOMArrayBufferView;
+class ExceptionState;
 class ExecutionContext;
 class MediaKeySession;
 class ScriptState;
@@ -45,34 +45,29 @@ class WebContentDecryptionModule;
 // References are held by JS and HTMLMediaElement.
 // The WebContentDecryptionModule has the same lifetime as this object.
 class MediaKeys : public GarbageCollectedFinalized<MediaKeys>, public ContextLifecycleObserver, public ScriptWrappable {
+    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(MediaKeys);
     DEFINE_WRAPPERTYPEINFO();
 public:
-    MediaKeys(ExecutionContext*, const String& keySystem, PassOwnPtr<blink::WebContentDecryptionModule>);
+    MediaKeys(ExecutionContext*, const String& keySystem, PassOwnPtr<WebContentDecryptionModule>);
     virtual ~MediaKeys();
 
     // FIXME: This should be removed after crbug.com/425186 is fully
     // implemented.
     const String& keySystem() const { return m_keySystem; }
 
-    MediaKeySession* createSession(ScriptState*, const String& sessionType);
+    MediaKeySession* createSession(ScriptState*, const String& sessionType, ExceptionState&);
 
-    ScriptPromise setServerCertificate(ScriptState*, DOMArrayBuffer* serverCertificate);
-    ScriptPromise setServerCertificate(ScriptState*, DOMArrayBufferView* serverCertificate);
-
-    // FIXME: Remove this method since it's not in the spec anymore.
-    static bool isTypeSupported(const String& keySystem, const String& contentType);
+    ScriptPromise setServerCertificate(ScriptState*, const DOMArrayPiece& serverCertificate);
 
     blink::WebContentDecryptionModule* contentDecryptionModule();
 
-    void trace(Visitor*);
+    virtual void trace(Visitor*) override;
 
     // ContextLifecycleObserver
     virtual void contextDestroyed() override;
 
 private:
     class PendingAction;
-
-    ScriptPromise setServerCertificateInternal(ScriptState*, PassRefPtr<DOMArrayBuffer> initData);
 
     void timerFired(Timer<MediaKeys>*);
 

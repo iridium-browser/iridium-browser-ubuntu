@@ -1,4 +1,4 @@
-<!DOCTYPE HTML>
+<!doctype html>
 <html i18n-values="dir:textdirection;">
 <head>
   <meta charset="utf-8">
@@ -7,11 +7,14 @@
   <!-- This has to come after chrome_shared.css -->
   <link rel="stylesheet" href="downloads.css">
   <script src="chrome://resources/js/action_link.js"></script>
+  <script src="chrome://resources/js/cr.js"></script>
+  <script src="chrome://resources/js/cr/ui.js"></script>
+  <script src="chrome://resources/js/cr/ui/command.js"></script>
   <script src="chrome://resources/js/load_time_data.js"></script>
   <script src="chrome://resources/js/util.js"></script>
   <script src="chrome://downloads/downloads.js"></script>
 </head>
-<body i18n-values=".style.fontFamily:fontfamily;.style.fontSize:fontsize">
+<body>
   <header>
     <h1 i18n-content="downloads"></h1>
     <input id="term" type="search" tabindex=1
@@ -23,12 +26,19 @@
       <span id="downloads-actions">
         <a is="action-link" id="open-downloads-folder"
             i18n-content="open_downloads_folder"></a>
-        <span id="clear-all-holder"></span>
+        <a is="action-link" id="clear-all" i18n-content="clear_all" hidden></a>
       </span>
     </div>
     <div id="downloads-display"></div>
     <div id="no-downloads-or-results"></div>
   </div>
+  <command id="clear-all-command" shortcut="Alt-U+0043"><!-- Alt+C -->
+<if expr="is_macosx">
+  <command id="undo-command" shortcut="Meta-U+005A"><!-- Command+Z -->
+</if>
+<if expr="not is_macosx">
+  <command id="undo-command" shortcut="Ctrl-U+005A"><!-- Ctrl+Z -->
+</if>
   <script src="chrome://downloads/strings.js"></script>
   <script src="chrome://resources/js/i18n_template2.js"></script>
 </body>

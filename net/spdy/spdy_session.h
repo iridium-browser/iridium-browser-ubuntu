@@ -105,6 +105,8 @@ enum SpdyProtocolErrorDetails {
   STATUS_CODE_SETTINGS_TIMEOUT = 32,
   STATUS_CODE_CONNECT_ERROR = 33,
   STATUS_CODE_ENHANCE_YOUR_CALM = 34,
+  STATUS_CODE_INADEQUATE_SECURITY = 35,
+  STATUS_CODE_HTTP_1_1_REQUIRED = 36,
 
   // SpdySession errors
   PROTOCOL_ERROR_UNEXPECTED_PING = 22,
@@ -116,7 +118,7 @@ enum SpdyProtocolErrorDetails {
   PROTOCOL_ERROR_RECEIVE_WINDOW_VIOLATION = 28,
 
   // Next free value.
-  NUM_SPDY_PROTOCOL_ERROR_DETAILS = 35,
+  NUM_SPDY_PROTOCOL_ERROR_DETAILS = 37,
 };
 SpdyProtocolErrorDetails NET_EXPORT_PRIVATE
     MapFramerErrorToProtocolError(SpdyFramer::SpdyError error);
@@ -129,7 +131,7 @@ SpdyGoAwayStatus NET_EXPORT_PRIVATE MapNetErrorToGoAwayStatus(Error err);
 // to be updated with new values, as do the mapping functions above.
 COMPILE_ASSERT(12 == SpdyFramer::LAST_ERROR,
                SpdyProtocolErrorDetails_SpdyErrors_mismatch);
-COMPILE_ASSERT(15 == RST_STREAM_NUM_STATUS_CODES,
+COMPILE_ASSERT(17 == RST_STREAM_NUM_STATUS_CODES,
                SpdyProtocolErrorDetails_RstStreamStatus_mismatch);
 
 // Splits pushed |headers| into request and response parts. Request headers are
@@ -509,6 +511,10 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
     return buffered_spdy_framer_->GetDataFrameMaximumPayload();
   }
 
+  static int32 GetInitialWindowSize(NextProto protocol) {
+    return protocol < kProtoSPDY4MinimumVersion ? 65536 : 65535;
+  }
+
   // https://http2.github.io/http2-spec/#TLSUsage mandates minimum security
   // standards for TLS.
   bool HasAcceptableTransportSecurity() const;
@@ -723,7 +729,7 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
                              RequestPriority priority);
 
   // Send the PING frame.
-  void WritePingFrame(uint32 unique_id, bool is_ack);
+  void WritePingFrame(SpdyPingId unique_id, bool is_ack);
 
   // Post a CheckPingStatus call after delay. Don't post if there is already
   // CheckPingStatus running.
@@ -942,7 +948,7 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
 
   int64 pings_in_flight() const { return pings_in_flight_; }
 
-  uint32 next_ping_id() const { return next_ping_id_; }
+  SpdyPingId next_ping_id() const { return next_ping_id_; }
 
   base::TimeTicks last_activity_time() const { return last_activity_time_; }
 
@@ -1079,7 +1085,7 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
   int64 pings_in_flight_;
 
   // This is the next ping_id (unique_id) to be sent in PING frame.
-  uint32 next_ping_id_;
+  SpdyPingId next_ping_id_;
 
   // This is the last time we have sent a PING.
   base::TimeTicks last_ping_sent_time_;

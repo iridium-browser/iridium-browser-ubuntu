@@ -62,32 +62,54 @@ public:
     typedef DefaultAllocatorQuantizer Quantizer;
     typedef DefaultAllocatorDummyVisitor Visitor;
     static const bool isGarbageCollected = false;
-    template<typename T, typename Traits>
-    struct VectorBackingHelper {
-        typedef void Type;
-    };
-    template<typename T>
-    struct HashTableBackingHelper {
-        typedef void Type;
-    };
-    template <typename Return, typename Metadata>
-    static Return backingMalloc(size_t size)
+
+    template <typename T>
+    static T* allocateVectorBacking(size_t size)
     {
-        return reinterpret_cast<Return>(backingAllocate(size));
+        return reinterpret_cast<T*>(allocateBacking(size));
     }
-    template <typename Return, typename Metadata>
-    static Return zeroedBackingMalloc(size_t size)
+    WTF_EXPORT static void freeVectorBacking(void* address);
+    static inline bool expandVectorBacking(void*, size_t)
     {
-        void* result = backingAllocate(size);
+        return false;
+    }
+
+    static inline bool shrinkVectorBacking(void* address, size_t quantizedCurrentSize, size_t quantizedShrunkSize)
+    {
+        // Optimization: if we're downsizing inside the same allocator bucket,
+        // we can skip reallocation.
+        return quantizedCurrentSize == quantizedShrunkSize;
+    }
+    template <typename T>
+    static T* allocateInlineVectorBacking(size_t size) { return allocateVectorBacking<T>(size); }
+    static inline void freeInlineVectorBacking(void* address) { freeVectorBacking(address); }
+    static inline bool expandInlineVectorBacking(void*, size_t) { return false; }
+    static inline bool shrinkInlineVectorBacking(void* address, size_t quantizedCurrentSize, size_t quantizedShrunkSize) { return shrinkVectorBacking(address, quantizedCurrentSize, quantizedShrunkSize); }
+
+    template <typename T, typename HashTable>
+    static T* allocateHashTableBacking(size_t size)
+    {
+        return reinterpret_cast<T*>(allocateBacking(size));
+    }
+    template <typename T, typename HashTable>
+    static T* allocateZeroedHashTableBacking(size_t size)
+    {
+        void* result = allocateBacking(size);
         memset(result, 0, size);
-        return reinterpret_cast<Return>(result);
+        return reinterpret_cast<T*>(result);
     }
+    WTF_EXPORT static void freeHashTableBacking(void* address);
+
     template <typename Return, typename Metadata>
     static Return malloc(size_t size)
     {
         return reinterpret_cast<Return>(fastMalloc(size));
     }
-    WTF_EXPORT static void backingFree(void* address);
+
+    WTF_EXPORT static inline bool expandHashTableBacking(void*, size_t)
+    {
+        return false;
+    }
     static void free(void* address)
     {
         fastFree(address);
@@ -154,7 +176,7 @@ public:
     static void leaveNoAllocationScope() { }
 
 private:
-    WTF_EXPORT static void* backingAllocate(size_t);
+    WTF_EXPORT static void* allocateBacking(size_t);
 };
 
 // The Windows compiler seems to be very eager to instantiate things it won't

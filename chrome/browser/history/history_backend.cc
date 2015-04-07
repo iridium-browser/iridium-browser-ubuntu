@@ -25,23 +25,23 @@
 #include "base/time/time.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/history/download_row.h"
-#include "chrome/browser/history/history_db_task.h"
-#include "chrome/browser/history/history_db_task.h"
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/in_memory_history_backend.h"
 #include "chrome/browser/history/in_memory_history_backend.h"
 #include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/history/typed_url_syncable_service.h"
 #include "chrome/browser/history/typed_url_syncable_service.h"
-#include "chrome/browser/history/visit_filter.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/importer/imported_favicon_usage.h"
 #include "chrome/common/url_constants.h"
 #include "components/favicon_base/select_favicon_frames.h"
 #include "components/history/core/browser/history_backend_observer.h"
 #include "components/history/core/browser/history_client.h"
+#include "components/history/core/browser/history_constants.h"
+#include "components/history/core/browser/history_db_task.h"
 #include "components/history/core/browser/keyword_search_term.h"
 #include "components/history/core/browser/page_usage_data.h"
+#include "components/history/core/browser/visit_filter.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "sql/error_delegate_util.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -78,14 +78,6 @@ void RunUnlessCanceled(
 }
 }  // namespace
 
-#if defined(OS_ANDROID)
-// How long we keep segment data for in days. Currently 3 months.
-// This value needs to be greater or equal to
-// MostVisitedModel::kMostVisitedScope but we don't want to introduce a direct
-// dependency between MostVisitedModel and the history backend.
-const int kSegmentDataRetention = 90;
-#endif
-
 // How long we'll wait to do a commit, so that things are batched together.
 const int kCommitIntervalSeconds = 10;
 
@@ -99,11 +91,6 @@ const int kMaxRedirectCount = 32;
 // The number of days old a history entry can be before it is considered "old"
 // and is deleted.
 const int kExpireDaysThreshold = 90;
-
-#if defined(OS_ANDROID)
-// The maximum number of top sites to track when recording top page visit stats.
-const size_t kPageVisitStatsMaxTopSites = 50;
-#endif
 
 // Converts from PageUsageData to MostVisitedURL. |redirects| is a
 // list of redirects for this URL. Empty list means no redirects.
@@ -250,9 +237,6 @@ void HistoryBackend::Init(const std::string& languages, bool force_fail) {
   typed_url_syncable_service_.reset(new TypedUrlSyncableService(this));
   memory_pressure_listener_.reset(new base::MemoryPressureListener(
       base::Bind(&HistoryBackend::OnMemoryPressure, base::Unretained(this))));
-#if defined(OS_ANDROID)
-  PopulateMostVisitedURLMap();
-#endif
 }
 
 void HistoryBackend::SetOnBackendDestroyTask(base::MessageLoop* message_loop,
@@ -278,20 +262,20 @@ void HistoryBackend::ClearCachedDataForContextID(ContextID context_id) {
 }
 
 base::FilePath HistoryBackend::GetThumbnailFileName() const {
-  return history_dir_.Append(chrome::kThumbnailsFilename);
+  return history_dir_.Append(history::kThumbnailsFilename);
 }
 
 base::FilePath HistoryBackend::GetFaviconsFileName() const {
-  return history_dir_.Append(chrome::kFaviconsFilename);
+  return history_dir_.Append(history::kFaviconsFilename);
 }
 
 base::FilePath HistoryBackend::GetArchivedFileName() const {
-  return history_dir_.Append(chrome::kArchivedHistoryFilename);
+  return history_dir_.Append(history::kArchivedHistoryFilename);
 }
 
 #if defined(OS_ANDROID)
 base::FilePath HistoryBackend::GetAndroidCacheFileName() const {
-  return history_dir_.Append(chrome::kAndroidCacheFilename);
+  return history_dir_.Append(history::kAndroidCacheFilename);
 }
 #endif
 
@@ -396,11 +380,11 @@ SegmentID HistoryBackend::UpdateSegments(
 }
 
 void HistoryBackend::UpdateWithPageEndTime(ContextID context_id,
-                                           int32 page_id,
+                                           int nav_entry_id,
                                            const GURL& url,
                                            Time end_ts) {
   // Will be filled with the URL ID and the visit ID of the last addition.
-  VisitID visit_id = tracker_.GetLastVisit(context_id, page_id, url);
+  VisitID visit_id = tracker_.GetLastVisit(context_id, nav_entry_id, url);
   UpdateVisitDuration(visit_id, end_ts);
 }
 
@@ -424,7 +408,7 @@ void HistoryBackend::AddPage(const HistoryAddPageArgs& request) {
 
   // Will be filled with the URL ID and the visit ID of the last addition.
   std::pair<URLID, VisitID> last_ids(0, tracker_.GetLastVisit(
-      request.context_id, request.page_id, request.referrer));
+      request.context_id, request.nav_entry_id, request.referrer));
 
   VisitID from_visit_id = last_ids.second;
 
@@ -587,7 +571,7 @@ void HistoryBackend::AddPage(const HistoryAddPageArgs& request) {
   if (stripped_transition != ui::PAGE_TRANSITION_AUTO_SUBFRAME &&
       stripped_transition != ui::PAGE_TRANSITION_MANUAL_SUBFRAME &&
       !is_keyword_generated) {
-    tracker_.AddVisit(request.context_id, request.page_id, request.url,
+    tracker_.AddVisit(request.context_id, request.nav_entry_id, request.url,
                       last_ids.second);
   }
 
@@ -604,7 +588,7 @@ void HistoryBackend::InitImpl(const std::string& languages) {
   TimeTicks beginning_time = TimeTicks::Now();
 
   // Compute the file names.
-  base::FilePath history_name = history_dir_.Append(chrome::kHistoryFilename);
+  base::FilePath history_name = history_dir_.Append(history::kHistoryFilename);
   base::FilePath thumbnail_name = GetFaviconsFileName();
   base::FilePath archived_name = GetArchivedFileName();
 
@@ -700,7 +684,7 @@ void HistoryBackend::InitImpl(const std::string& languages) {
                                    db_.get(),
                                    thumbnail_db_.get(),
                                    history_client_,
-                                   delegate_.get()));
+                                   this));
   }
 #endif
 
@@ -752,15 +736,6 @@ std::pair<URLID, VisitID> HistoryBackend::AddPageVisit(
       transition_type == ui::PAGE_TRANSITION_KEYWORD_GENERATED)
     typed_increment = 1;
 
-#if defined(OS_ANDROID)
-  // Only count the page visit if it came from user browsing and only count it
-  // once when cycling through a redirect chain.
-  if (visit_source == SOURCE_BROWSED &&
-      (transition & ui::PAGE_TRANSITION_CHAIN_END) != 0) {
-    RecordTopPageVisitStats(url);
-  }
-#endif
-
   // See if this URL is already in the DB.
   URLRow url_info(url);
   URLID url_id = db_->GetRowForURL(url, &url_info);
@@ -810,8 +785,8 @@ std::pair<URLID, VisitID> HistoryBackend::AddPageVisit(
     // QueryRedirectsTo(url, &redirects);
     NotifyURLVisited(transition, url_info, redirects, time);
   } else {
-    VLOG(0) << "Failed to build visit insert statement:  "
-            << "url_id = " << url_id;
+    DVLOG(0) << "Failed to build visit insert statement:  "
+             << "url_id = " << url_id;
   }
 
   return std::make_pair(url_id, visit_id);
@@ -1229,15 +1204,15 @@ void HistoryBackend::QueryHistoryBasic(const QueryOptions& options,
 
     // Add a result row for this visit, get the URL info from the DB.
     if (!db_->GetURLRow(visit.url_id, &url_result)) {
-      VLOG(0) << "Failed to get id " << visit.url_id
-              << " from history.urls.";
+      DVLOG(0) << "Failed to get id " << visit.url_id
+               << " from history.urls.";
       continue;  // DB out of sync and URL doesn't exist, try to recover.
     }
 
     if (!url_result.url().is_valid()) {
-      VLOG(0) << "Got invalid URL from history.urls with id "
-              << visit.url_id << ":  "
-              << url_result.url().possibly_invalid_spec();
+      DVLOG(0) << "Got invalid URL from history.urls with id "
+               << visit.url_id << ":  "
+               << url_result.url().possibly_invalid_spec();
       continue;  // Don't report invalid URLs in case of corruption.
     }
 
@@ -1889,9 +1864,9 @@ void HistoryBackend::SetImportedFavicons(
     }
   }
 
-  if (!favicons_changed.empty() && delegate_) {
+  if (!favicons_changed.empty()) {
     // Send the notification about the changed favicon URLs.
-    delegate_->NotifyFaviconChanged(favicons_changed);
+    NotifyFaviconChanged(favicons_changed);
   }
 }
 
@@ -2230,9 +2205,9 @@ void HistoryBackend::SendFaviconChangedNotificationForPageAndRedirects(
     const GURL& page_url) {
   history::RedirectList redirect_list;
   GetCachedRecentRedirects(page_url, &redirect_list);
-  if (!redirect_list.empty() && delegate_) {
+  if (!redirect_list.empty()) {
     std::set<GURL> favicons_changed(redirect_list.begin(), redirect_list.end());
-    delegate_->NotifyFaviconChanged(favicons_changed);
+    NotifyFaviconChanged(favicons_changed);
   }
 }
 
@@ -2512,6 +2487,11 @@ void HistoryBackend::BroadcastNotifications(
     delegate_->BroadcastNotifications(type, details.Pass());
 }
 
+void HistoryBackend::NotifyFaviconChanged(const std::set<GURL>& urls) {
+  if (delegate_)
+    delegate_->NotifyFaviconChanged(urls);
+}
+
 void HistoryBackend::NotifyURLVisited(ui::PageTransition transition,
                                       const URLRow& row,
                                       const RedirectList& redirects,
@@ -2533,14 +2513,18 @@ void HistoryBackend::NotifyURLVisited(ui::PageTransition transition,
 }
 
 void HistoryBackend::NotifyURLsModified(const URLRows& rows) {
-  scoped_ptr<URLsModifiedDetails> details(new URLsModifiedDetails);
-  details->changed_urls = rows;
-
+  URLRows changed_urls(rows);
   if (typed_url_syncable_service_.get())
-    typed_url_syncable_service_->OnUrlsModified(&details->changed_urls);
+    typed_url_syncable_service_->OnUrlsModified(&changed_urls);
 
-  BroadcastNotifications(chrome::NOTIFICATION_HISTORY_URLS_MODIFIED,
-                         details.Pass());
+  FOR_EACH_OBSERVER(
+      HistoryBackendObserver, observers_, OnURLsModified(this, changed_urls));
+
+  // TODO(sdefresne): turn HistoryBackend::Delegate from HistoryService into
+  // an HistoryBackendObserver and register it so that we can remove this
+  // method.
+  if (delegate_)
+    delegate_->NotifyURLsModified(changed_urls);
 }
 
 void HistoryBackend::NotifyURLsDeleted(bool all_history,
@@ -2652,7 +2636,7 @@ bool HistoryBackend::ClearAllThumbnailHistory(const URLRows& kept_urls) {
 
 #if defined(OS_ANDROID)
   // TODO (michaelbai): Add the unit test once AndroidProviderBackend is
-  // avaliable in HistoryBackend.
+  // available in HistoryBackend.
   db_->ClearAndroidURLRows();
 #endif
 
@@ -2711,29 +2695,5 @@ void HistoryBackend::NotifyVisitObservers(const VisitRow& visit) {
   if (delegate_)
     delegate_->NotifyAddVisit(info);
 }
-
-#if defined(OS_ANDROID)
-void HistoryBackend::PopulateMostVisitedURLMap() {
-  MostVisitedURLList most_visited_urls;
-  QueryMostVisitedURLs(
-      kPageVisitStatsMaxTopSites, kSegmentDataRetention, &most_visited_urls);
-
-  DCHECK_LE(most_visited_urls.size(), kPageVisitStatsMaxTopSites);
-  for (size_t i = 0; i < most_visited_urls.size(); ++i) {
-    most_visited_urls_map_[most_visited_urls[i].url] = i;
-    for (size_t j = 0; j < most_visited_urls[i].redirects.size(); ++j)
-      most_visited_urls_map_[most_visited_urls[i].redirects[j]] = i;
-  }
-}
-
-void HistoryBackend::RecordTopPageVisitStats(const GURL& url) {
-  int rank = kPageVisitStatsMaxTopSites;
-  std::map<GURL, int>::const_iterator it = most_visited_urls_map_.find(url);
-  if (it != most_visited_urls_map_.end())
-    rank = (*it).second;
-  UMA_HISTOGRAM_ENUMERATION("History.TopSitesVisitsByRank",
-                            rank, kPageVisitStatsMaxTopSites + 1);
-}
-#endif
 
 }  // namespace history

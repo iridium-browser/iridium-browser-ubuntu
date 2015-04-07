@@ -8,7 +8,11 @@
 #include <vector>
 
 #include "base/strings/string16.h"
-#include "ui/gfx/rect.h"
+#include "third_party/WebKit/public/platform/WebVector.h"
+#include "third_party/WebKit/public/web/WebElementCollection.h"
+#include "ui/gfx/geometry/rect.h"
+
+class GURL;
 
 namespace blink {
 class WebDocument;
@@ -79,17 +83,15 @@ bool IsWebNodeVisible(const blink::WebNode& node);
 // attribute.
 const base::string16 GetFormIdentifier(const blink::WebFormElement& form);
 
-// Returns true if the element specified by |click_element| was successfully
-// clicked.
-bool ClickElement(const blink::WebDocument& document,
-                  const WebElementDescriptor& element_descriptor);
+// Returns all the auto-fillable form control elements in |control_elements|.
+std::vector<blink::WebFormControlElement> ExtractAutofillableElementsFromSet(
+    const blink::WebVector<blink::WebFormControlElement>& control_elements,
+    RequirementsMask requirements);
 
-// Fills |autofillable_elements| with all the auto-fillable form control
-// elements in |form_element|.
-void ExtractAutofillableElements(
+// Returns all the auto-fillable form control elements in |form_element|.
+std::vector<blink::WebFormControlElement> ExtractAutofillableElementsInForm(
     const blink::WebFormElement& form_element,
-    RequirementsMask requirements,
-    std::vector<blink::WebFormControlElement>* autofillable_elements);
+    RequirementsMask requirements);
 
 // Fills out a FormField object from a given WebFormControlElement.
 // |extract_mask|: See the enum ExtractMask above for details.
@@ -113,8 +115,31 @@ bool WebFormElementToFormData(
     FormData* form,
     FormFieldData* field);
 
-// Finds the form that contains |element| and returns it in |form|.  Fills
-// |field| with the |FormField| representation for element.
+// Get all form control elements from |elements| that are not part of a form.
+// If |fieldsets| is not NULL, also append the fieldsets encountered that are
+// not part of a form.
+std::vector<blink::WebFormControlElement>
+GetUnownedAutofillableFormFieldElements(
+    const blink::WebElementCollection& elements,
+    std::vector<blink::WebElement>* fieldsets);
+
+// Fills |form| with the form data derived from |fieldsets|, |control_elements|
+// and |origin|. If |field| is non-NULL, fill it with the FormField
+// representation for |element|.
+// |extract_mask| usage and the return value are the same as
+// WebFormElementToFormData() above.
+bool UnownedFormElementsAndFieldSetsToFormData(
+    const std::vector<blink::WebElement>& fieldsets,
+    const std::vector<blink::WebFormControlElement>& control_elements,
+    const blink::WebFormControlElement* element,
+    const GURL& origin,
+    RequirementsMask requirements,
+    ExtractMask extract_mask,
+    FormData* form,
+    FormFieldData* field);
+
+// Finds the form that contains |element| and returns it in |form|.  If |field|
+// is non-NULL, fill it with the FormField representation for |element|.
 // Returns false if the form is not found or cannot be serialized.
 bool FindFormAndFieldForFormControlElement(
     const blink::WebFormControlElement& element,
@@ -133,12 +158,6 @@ void FillFormIncludingNonFocusableElements(
     const FormData& form_data,
     const blink::WebFormElement& form_element);
 
-// Fills all (including disabled, read-only and non-focusable) form control
-// elements within |form_element| with field data from |form_data|.
-void FillFormForAllElements(
-    const FormData& form_data,
-    const blink::WebFormElement& form_element);
-
 // Previews the form represented by |form|.  |element| is the input element that
 // initiated the preview process.
 void PreviewForm(const FormData& form,
@@ -150,9 +169,6 @@ void PreviewForm(const FormData& form,
 // not found.
 bool ClearPreviewedFormWithElement(const blink::WebFormControlElement& element,
                                    bool was_autofilled);
-
-// Returns true if |form| has any auto-filled fields.
-bool FormWithElementIsAutofilled(const blink::WebInputElement& element);
 
 // Checks if the webpage is empty.
 // This kind of webpage is considered as empty:

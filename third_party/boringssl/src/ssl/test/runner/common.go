@@ -72,17 +72,19 @@ const (
 
 // TLS extension numbers
 const (
-	extensionServerName           uint16 = 0
-	extensionStatusRequest        uint16 = 5
-	extensionSupportedCurves      uint16 = 10
-	extensionSupportedPoints      uint16 = 11
-	extensionSignatureAlgorithms  uint16 = 13
-	extensionALPN                 uint16 = 16
-	extensionExtendedMasterSecret uint16 = 23
-	extensionSessionTicket        uint16 = 35
-	extensionNextProtoNeg         uint16 = 13172 // not IANA assigned
-	extensionRenegotiationInfo    uint16 = 0xff01
-	extensionChannelID            uint16 = 30032 // not IANA assigned
+	extensionServerName                 uint16 = 0
+	extensionStatusRequest              uint16 = 5
+	extensionSupportedCurves            uint16 = 10
+	extensionSupportedPoints            uint16 = 11
+	extensionSignatureAlgorithms        uint16 = 13
+	extensionUseSRTP                    uint16 = 14
+	extensionALPN                       uint16 = 16
+	extensionSignedCertificateTimestamp uint16 = 18
+	extensionExtendedMasterSecret       uint16 = 23
+	extensionSessionTicket              uint16 = 35
+	extensionNextProtoNeg               uint16 = 13172 // not IANA assigned
+	extensionRenegotiationInfo          uint16 = 0xff01
+	extensionChannelID                  uint16 = 30032 // not IANA assigned
 )
 
 // TLS signaling cipher suite values
@@ -128,8 +130,12 @@ const (
 
 // Hash functions for TLS 1.2 (See RFC 5246, section A.4.1)
 const (
+	hashMD5    uint8 = 1
 	hashSHA1   uint8 = 2
+	hashSHA224 uint8 = 3
 	hashSHA256 uint8 = 4
+	hashSHA384 uint8 = 5
+	hashSHA512 uint8 = 6
 )
 
 // Signature algorithms for TLS 1.2 (See RFC 5246, section A.4.1)
@@ -161,6 +167,12 @@ var supportedClientCertSignatureAlgorithms = []signatureAndHash{
 	{signatureECDSA, hashSHA256},
 }
 
+// SRTP protection profiles (See RFC 5764, section 4.1.2)
+const (
+	SRTP_AES128_CM_HMAC_SHA1_80 uint16 = 0x0001
+	SRTP_AES128_CM_HMAC_SHA1_32        = 0x0002
+)
+
 // ConnectionState records basic TLS details about the connection.
 type ConnectionState struct {
 	Version                    uint16                // TLS version used by the connection (e.g. VersionTLS12)
@@ -174,6 +186,7 @@ type ConnectionState struct {
 	PeerCertificates           []*x509.Certificate   // certificate chain presented by remote peer
 	VerifiedChains             [][]*x509.Certificate // verified chains built from PeerCertificates
 	ChannelID                  *ecdsa.PublicKey      // the channel ID for this connection
+	SRTPProtectionProfile      uint16                // the negotiated DTLS-SRTP protection profile
 }
 
 // ClientAuthType declares the policy the server will follow for
@@ -191,6 +204,7 @@ const (
 // ClientSessionState contains the state needed by clients to resume TLS
 // sessions.
 type ClientSessionState struct {
+	sessionId            []uint8             // Session ID supplied by the server. nil if the session has a ticket.
 	sessionTicket        []uint8             // Encrypted ticket used for session resumption with server
 	vers                 uint16              // SSL/TLS version negotiated for the session
 	cipherSuite          uint16              // Ciphersuite negotiated for the session
@@ -211,6 +225,19 @@ type ClientSessionCache interface {
 
 	// Put adds the ClientSessionState to the cache with the given key.
 	Put(sessionKey string, cs *ClientSessionState)
+}
+
+// ServerSessionCache is a cache of sessionState objects that can be used by a
+// client to resume a TLS session with a given server. ServerSessionCache
+// implementations should expect to be called concurrently from different
+// goroutines.
+type ServerSessionCache interface {
+	// Get searches for a sessionState associated with the given session
+	// ID. On return, ok is true if one was found.
+	Get(sessionId string) (session *sessionState, ok bool)
+
+	// Put adds the sessionState to the cache with the given session ID.
+	Put(sessionId string, session *sessionState)
 }
 
 // A Config structure is used to configure a TLS client or server.
@@ -299,9 +326,13 @@ type Config struct {
 	// connections using that key are compromised.
 	SessionTicketKey [32]byte
 
-	// SessionCache is a cache of ClientSessionState entries for TLS session
-	// resumption.
+	// ClientSessionCache is a cache of ClientSessionState entries
+	// for TLS session resumption.
 	ClientSessionCache ClientSessionCache
+
+	// ServerSessionCache is a cache of sessionState entries for TLS session
+	// resumption.
+	ServerSessionCache ServerSessionCache
 
 	// MinVersion contains the minimum SSL/TLS version that is acceptable.
 	// If zero, then SSLv3 is taken as the minimum.
@@ -333,6 +364,15 @@ type Config struct {
 	// PreSharedKeyIdentity, if not empty, is the identity to use
 	// with the PSK cipher suites.
 	PreSharedKeyIdentity string
+
+	// SRTPProtectionProfiles, if not nil, is the list of SRTP
+	// protection profiles to offer in DTLS-SRTP.
+	SRTPProtectionProfiles []uint16
+
+	// SignatureAndHashes, if not nil, overrides the default set of
+	// supported signature and hash algorithms to advertise in
+	// CertificateRequest.
+	SignatureAndHashes []signatureAndHash
 
 	// Bugs specifies optional misbehaviour to be used for testing other
 	// implementations.
@@ -431,6 +471,13 @@ type ProtocolBugs struct {
 	// the first 6 bytes of the ClientHello.
 	FragmentClientVersion bool
 
+	// FragmentAlert will cause all alerts to be fragmented across
+	// two records.
+	FragmentAlert bool
+
+	// SendSpuriousAlert will cause an spurious, unwanted alert to be sent.
+	SendSpuriousAlert bool
+
 	// RsaClientKeyExchangeVersion, if non-zero, causes the client to send a
 	// ClientKeyExchange with the specified version rather than the
 	// client_version when performing the RSA key exchange.
@@ -488,7 +535,7 @@ type ProtocolBugs struct {
 	// the extended master secret option.
 	RequireExtendedMasterSecret bool
 
-	// NoExtendedMasterSecret causes the client and server to behave is if
+	// NoExtendedMasterSecret causes the client and server to behave as if
 	// they didn't support an extended master secret.
 	NoExtendedMasterSecret bool
 
@@ -499,6 +546,50 @@ type ProtocolBugs struct {
 	// BadRenegotiationInfo causes the renegotiation extension value in a
 	// renegotiation handshake to be incorrect.
 	BadRenegotiationInfo bool
+
+	// NoRenegotiationInfo causes the client to behave as if it
+	// didn't support the renegotiation info extension.
+	NoRenegotiationInfo bool
+
+	// SequenceNumberIncrement, if non-zero, causes outgoing sequence
+	// numbers in DTLS to increment by that value rather by 1. This is to
+	// stress the replay bitmap window by simulating extreme packet loss and
+	// retransmit at the record layer.
+	SequenceNumberIncrement uint64
+
+	// RSAServerKeyExchange, if true, causes the server to send a
+	// ServerKeyExchange message in the plain RSA key exchange.
+	RSAServerKeyExchange bool
+
+	// SRTPMasterKeyIdentifer, if not empty, is the SRTP MKI value that the
+	// client offers when negotiating SRTP. MKI support is still missing so
+	// the peer must still send none.
+	SRTPMasterKeyIdentifer string
+
+	// SendSRTPProtectionProfile, if non-zero, is the SRTP profile that the
+	// server sends in the ServerHello instead of the negotiated one.
+	SendSRTPProtectionProfile uint16
+
+	// NoSignatureAndHashes, if true, causes the client to omit the
+	// signature and hashes extension.
+	//
+	// For a server, it will cause an empty list to be sent in the
+	// CertificateRequest message. None the less, the configured set will
+	// still be enforced.
+	NoSignatureAndHashes bool
+
+	// RequireSameRenegoClientVersion, if true, causes the server
+	// to require that all ClientHellos match in offered version
+	// across a renego.
+	RequireSameRenegoClientVersion bool
+
+	// RequireFastradioPadding, if true, requires that ClientHello messages
+	// be at least 1000 bytes long.
+	RequireFastradioPadding bool
+
+	// ExpectInitialRecordVersion, if non-zero, is the expected
+	// version of the records before the version is determined.
+	ExpectInitialRecordVersion uint16
 }
 
 func (c *Config) serverInit() {
@@ -613,6 +704,20 @@ func (c *Config) getCertificateForName(name string) *Certificate {
 	return &c.Certificates[0]
 }
 
+func (c *Config) signatureAndHashesForServer() []signatureAndHash {
+	if c != nil && c.SignatureAndHashes != nil {
+		return c.SignatureAndHashes
+	}
+	return supportedClientCertSignatureAlgorithms
+}
+
+func (c *Config) signatureAndHashesForClient() []signatureAndHash {
+	if c != nil && c.SignatureAndHashes != nil {
+		return c.SignatureAndHashes
+	}
+	return supportedSKXSignatureAlgorithms
+}
+
 // BuildNameToCertificate parses c.Certificates and builds c.NameToCertificate
 // from the CommonName and SubjectAlternateName fields of each of the leaf
 // certificates.
@@ -640,6 +745,10 @@ type Certificate struct {
 	// OCSPStaple contains an optional OCSP response which will be served
 	// to clients that request it.
 	OCSPStaple []byte
+	// SignedCertificateTimestampList contains an optional encoded
+	// SignedCertificateTimestampList structure which will be
+	// served to clients that request it.
+	SignedCertificateTimestampList []byte
 	// Leaf is the parsed form of the leaf certificate, which may be
 	// initialized using x509.ParseCertificate to reduce per-handshake
 	// processing for TLS clients doing client authentication. If nil, the
@@ -659,8 +768,8 @@ type handshakeMessage interface {
 	unmarshal([]byte) bool
 }
 
-// lruSessionCache is a ClientSessionCache implementation that uses an LRU
-// caching strategy.
+// lruSessionCache is a client or server session cache implementation
+// that uses an LRU caching strategy.
 type lruSessionCache struct {
 	sync.Mutex
 
@@ -671,27 +780,11 @@ type lruSessionCache struct {
 
 type lruSessionCacheEntry struct {
 	sessionKey string
-	state      *ClientSessionState
-}
-
-// NewLRUClientSessionCache returns a ClientSessionCache with the given
-// capacity that uses an LRU strategy. If capacity is < 1, a default capacity
-// is used instead.
-func NewLRUClientSessionCache(capacity int) ClientSessionCache {
-	const defaultSessionCacheCapacity = 64
-
-	if capacity < 1 {
-		capacity = defaultSessionCacheCapacity
-	}
-	return &lruSessionCache{
-		m:        make(map[string]*list.Element),
-		q:        list.New(),
-		capacity: capacity,
-	}
+	state      interface{}
 }
 
 // Put adds the provided (sessionKey, cs) pair to the cache.
-func (c *lruSessionCache) Put(sessionKey string, cs *ClientSessionState) {
+func (c *lruSessionCache) Put(sessionKey string, cs interface{}) {
 	c.Lock()
 	defer c.Unlock()
 
@@ -717,9 +810,9 @@ func (c *lruSessionCache) Put(sessionKey string, cs *ClientSessionState) {
 	c.m[sessionKey] = elem
 }
 
-// Get returns the ClientSessionState value associated with a given key. It
-// returns (nil, false) if no value is found.
-func (c *lruSessionCache) Get(sessionKey string) (*ClientSessionState, bool) {
+// Get returns the value associated with a given key. It returns (nil,
+// false) if no value is found.
+func (c *lruSessionCache) Get(sessionKey string) (interface{}, bool) {
 	c.Lock()
 	defer c.Unlock()
 
@@ -728,6 +821,78 @@ func (c *lruSessionCache) Get(sessionKey string) (*ClientSessionState, bool) {
 		return elem.Value.(*lruSessionCacheEntry).state, true
 	}
 	return nil, false
+}
+
+// lruClientSessionCache is a ClientSessionCache implementation that
+// uses an LRU caching strategy.
+type lruClientSessionCache struct {
+	lruSessionCache
+}
+
+func (c *lruClientSessionCache) Put(sessionKey string, cs *ClientSessionState) {
+	c.lruSessionCache.Put(sessionKey, cs)
+}
+
+func (c *lruClientSessionCache) Get(sessionKey string) (*ClientSessionState, bool) {
+	cs, ok := c.lruSessionCache.Get(sessionKey)
+	if !ok {
+		return nil, false
+	}
+	return cs.(*ClientSessionState), true
+}
+
+// lruServerSessionCache is a ServerSessionCache implementation that
+// uses an LRU caching strategy.
+type lruServerSessionCache struct {
+	lruSessionCache
+}
+
+func (c *lruServerSessionCache) Put(sessionId string, session *sessionState) {
+	c.lruSessionCache.Put(sessionId, session)
+}
+
+func (c *lruServerSessionCache) Get(sessionId string) (*sessionState, bool) {
+	cs, ok := c.lruSessionCache.Get(sessionId)
+	if !ok {
+		return nil, false
+	}
+	return cs.(*sessionState), true
+}
+
+// NewLRUClientSessionCache returns a ClientSessionCache with the given
+// capacity that uses an LRU strategy. If capacity is < 1, a default capacity
+// is used instead.
+func NewLRUClientSessionCache(capacity int) ClientSessionCache {
+	const defaultSessionCacheCapacity = 64
+
+	if capacity < 1 {
+		capacity = defaultSessionCacheCapacity
+	}
+	return &lruClientSessionCache{
+		lruSessionCache{
+			m:        make(map[string]*list.Element),
+			q:        list.New(),
+			capacity: capacity,
+		},
+	}
+}
+
+// NewLRUServerSessionCache returns a ServerSessionCache with the given
+// capacity that uses an LRU strategy. If capacity is < 1, a default capacity
+// is used instead.
+func NewLRUServerSessionCache(capacity int) ServerSessionCache {
+	const defaultSessionCacheCapacity = 64
+
+	if capacity < 1 {
+		capacity = defaultSessionCacheCapacity
+	}
+	return &lruServerSessionCache{
+		lruSessionCache{
+			m:        make(map[string]*list.Element),
+			q:        list.New(),
+			capacity: capacity,
+		},
+	}
 }
 
 // TODO(jsing): Make these available to both crypto/x509 and crypto/tls.
@@ -763,4 +928,13 @@ func initDefaultCipherSuites() {
 
 func unexpectedMessageError(wanted, got interface{}) error {
 	return fmt.Errorf("tls: received unexpected handshake message of type %T when waiting for %T", got, wanted)
+}
+
+func isSupportedSignatureAndHash(sigHash signatureAndHash, sigHashes []signatureAndHash) bool {
+	for _, s := range sigHashes {
+		if s == sigHash {
+			return true
+		}
+	}
+	return false
 }

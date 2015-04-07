@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <vector>
 
+#include "base/command_line.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -15,6 +16,7 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
@@ -23,7 +25,6 @@
 #include "ui/gfx/screen.h"
 
 #if defined(OS_LINUX)
-#include "base/command_line.h"
 #include "content/public/common/content_switches.h"
 #endif
 
@@ -111,10 +112,11 @@ bool PDFBrowserTest::VerifySnapshot(const std::string& expected_filename) {
   return !snapshot_different_;
 }
 
-void PDFBrowserTest::CopyFromBackingStoreCallback(bool success,
-                                                  const SkBitmap& bitmap) {
+void PDFBrowserTest::CopyFromBackingStoreCallback(
+    const SkBitmap& bitmap,
+    content::ReadbackResponse response) {
   base::MessageLoopForUI::current()->Quit();
-  ASSERT_EQ(success, true);
+  ASSERT_EQ(response, content::READBACK_SUCCESS);
   base::FilePath reference = ui_test_utils::GetTestFilePath(
       base::FilePath(FILE_PATH_LITERAL("pdf_private")),
       base::FilePath().AppendASCII(expected_filename_));
@@ -184,6 +186,10 @@ void PDFBrowserTest::Observe(int type,
 }
 
 void PDFBrowserTest::SetUpCommandLine(base::CommandLine* command_line) {
+  // Due to the changed architecture of the OOP PDF plugin, these tests don't
+  // pass and need to be reworked. crbug.com/436444.
+  command_line->AppendSwitch(switches::kDisableOutOfProcessPdf);
+
 #if defined(OS_LINUX)
   // Calling RenderWidgetHost::CopyFromBackingStore() with the GPU enabled
   // fails on Linux.

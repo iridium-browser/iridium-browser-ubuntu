@@ -12,6 +12,7 @@
 #include "ash/system/tray/system_tray_delegate.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_popup_header_button.h"
+#include "ash/wm/lock_state_controller.h"
 #include "grit/ash_resources.h"
 #include "grit/ash_strings.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -62,8 +63,7 @@ DateDefaultView::DateDefaultView(ash::user::LoginStatus login)
   view->AddButton(help_);
 
 #if !defined(OS_WIN)
-  if (login != ash::user::LOGGED_IN_LOCKED &&
-      login != ash::user::LOGGED_IN_RETAIL_MODE) {
+  if (login != ash::user::LOGGED_IN_LOCKED) {
     shutdown_ = new TrayPopupHeaderButton(this,
                                           IDR_AURA_UBER_TRAY_SHUTDOWN,
                                           IDR_AURA_UBER_TRAY_SHUTDOWN,
@@ -112,7 +112,8 @@ void DateDefaultView::ButtonPressed(views::Button* sender,
     tray_delegate->ShowHelp();
   } else if (sender == shutdown_) {
     shell->metrics()->RecordUserMetricsAction(ash::UMA_TRAY_SHUT_DOWN);
-    tray_delegate->ShutDown();
+    ash::Shell::GetInstance()->lock_state_controller()->RequestShutdown(
+        ash::LockStateController::POWER_OFF);
   } else if (sender == lock_) {
     shell->metrics()->RecordUserMetricsAction(ash::UMA_TRAY_LOCK_SCREEN);
     tray_delegate->RequestLockScreen();

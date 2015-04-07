@@ -15,23 +15,27 @@
 <translation id="3622586652998721735">Đặt làm giao thức mặc định</translation>
 <translation id="2179565792157161713">Mở mô tả dài trong tab mới</translation>
 <translation id="2471847333270902538">Lược đồ màu dành cho <ph name="SITE"/>:</translation>
+<translation id="381767806621926835">Nhấp chuột phải vào bất cứ nội dung nào có thuộc tính &quot;longdesc&quot; hoặc &quot;aria-describedat&quot; để truy cập vào mô tả dài của nội dung đó.</translation>
+<translation id="786423340267544509">Thêm đường viền vào phần tử có thuộc tính aria-describedat hoặc longdesc.</translation>
 <translation id="690628312087070417">Khi con nháy nhảy một khoảng cách rộng:</translation>
 <translation id="5331422999063554397">Màu đảo ngược</translation>
 <translation id="2648340354586434750">Nhấn và giữ &lt;span class='key'&gt;Tùy chọn&lt;/span&gt; để di chuyển theo từ.</translation>
+<translation id="4769065380738716500">Hình ảnh đã được thay thế bởi văn bản thay thế của hình ảnh.</translation>
 <translation id="5287723860611749454">&lt;p&gt;Sử dụng các phím mũi tên để di chuyển trong toàn bộ tài liệu. &lt;/p&gt;&lt;p&gt;Nhấp vào nơi bất kỳ để di chuyển con trỏ tới vị trí đó. &lt;/p&gt; &lt;p&gt;   Nhấn &lt;span class='key'&gt;Shift&lt;/span&gt; + các mũi tên để chọn văn bản.&lt;/p&gt;</translation>
 <translation id="5558600050691192317">Lệnh bàn phím</translation>
 <translation id="633394792577263429">Nhấn và giữ &lt;span class='key'&gt;Control&lt;/span&gt; để di chuyển theo từ.</translation>
+<translation id="2079545284768500474">Hoàn tác</translation>
 <translation id="8254860724243898966">Nhấn &lt;span class='key'&gt;Alt&lt;/span&gt; + &lt;img src='increase_brightness.png'&gt; (phím Tăng độ sáng hoặc F7) để bật chế độ Duyệt với con nháy. Nhấn lại để tắt.</translation>
 <translation id="3812541808639806898">Trình xem văn bản thay thế hình ảnh</translation>
 <translation id="1287053896835709737">Vàng trên nền đen</translation>
 <translation id="4896660567607030658">Không có phản hồi, chỉ hiển thị con trỏ.</translation>
 <translation id="5631241868147802353">Lược đồ màu mặc định:</translation>
-<translation id="625377550964694810">Mọi phần tử HTML có thuộc tính &quot;longdesc&quot; hoặc &quot;aria-describedat&quot; đều sẽ có một đường viền dày sống động và nếu bạn nhấp chuột phải vào đường viền đó thì tùy chọn xem mô tả dài sẽ được thêm vào menu ngữ cảnh.</translation>
 <translation id="5173942593318174089">Đánh dấu vị trí con trỏ bằng hoạt ảnh.</translation>
 <translation id="894241283505723656">Mô tả dài trong menu ngữ cảnh</translation>
 <translation id="5555153510860501336">Độ tương phản cao đang bị tắt</translation>
 <translation id="1703735871906654364">Duyệt với con nháy</translation>
 <translation id="7384431257964758081">Độ tương phản cao đang được bật</translation>
+<translation id="6550675742724504774">Tùy chọn</translation>
 <translation id="5650358096585648000">Phản hồi trực quan</translation>
 <translation id="4388820049312272371">Đánh dấu nhanh vị trí con trỏ.</translation>
 <translation id="4023902424053835668">Duyệt qua văn bản của trang web bằng các phím mũi tên.</translation>

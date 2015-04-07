@@ -43,6 +43,8 @@
     '../third_party/skia/src/fonts/SkRemotableFontMgr.cpp',
     '../third_party/skia/src/ports/SkRemotableFontMgr_win_dw.cpp',
 
+    '../third_party/skia/src/ports/SkImageGenerator_none.cpp',
+
     '../third_party/skia/src/ports/SkFontHost_FreeType.cpp',
     '../third_party/skia/src/ports/SkFontHost_FreeType_common.cpp',
     '../third_party/skia/src/ports/SkFontHost_FreeType_common.h',
@@ -105,7 +107,6 @@
   '../third_party/skia/include/utils/SkParsePaint.h',
   '../third_party/skia/include/utils/SkParsePath.h',
   '../third_party/skia/include/utils/SkRandom.h',
-  '../third_party/skia/include/utils/SkWGL.h',
 
   '../third_party/skia/src/utils/SkBitmapHasher.cpp',
   '../third_party/skia/src/utils/SkBitmapHasher.h',
@@ -168,6 +169,7 @@
     '../third_party/skia/src/core',
     '../third_party/skia/src/opts',
     '../third_party/skia/src/image',
+    '../third_party/skia/src/pdf',
     '../third_party/skia/src/ports',
     '../third_party/skia/src/sfnt',
     '../third_party/skia/src/utils',
@@ -189,7 +191,8 @@
     }],
     ['skia_support_pdf == 0', {
       'sources/': [
-        ['exclude', '../third_party/skia/src/pdf/']
+        ['exclude', '../third_party/skia/src/doc/SkDocument_PDF.cpp'],
+        ['exclude', '../third_party/skia/src/pdf/'],
       ],
     }],
     ['skia_support_pdf == 1', {
@@ -360,6 +363,13 @@
         ['include', 'SkStream_mac\\.cpp$',],
         ['include', 'SkCreateCGImageRef\\.cpp$',],
       ],
+      'xcode_settings' : {
+        'WARNING_CFLAGS': [
+          # SkFontHost_mac.cpp uses API deprecated in iOS 7.
+          # crbug.com/408571
+          '-Wno-deprecated-declarations',
+        ],
+      },
     }],
   ],
 

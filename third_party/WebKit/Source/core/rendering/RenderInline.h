@@ -41,13 +41,14 @@ public:
     RenderObject* lastChild() const { ASSERT(children() == virtualChildren()); return children()->lastChild(); }
 
     // If you have a RenderInline, use firstChild or lastChild instead.
-    void slowFirstChild() const WTF_DELETED_FUNCTION;
-    void slowLastChild() const WTF_DELETED_FUNCTION;
+    void slowFirstChild() const = delete;
+    void slowLastChild() const = delete;
 
     virtual void addChild(RenderObject* newChild, RenderObject* beforeChild = 0) override;
 
     Element* node() const { return toElement(RenderBoxModelObject::node()); }
 
+    virtual LayoutRectOutsets marginBoxOutsets() const override final;
     virtual LayoutUnit marginLeft() const override final;
     virtual LayoutUnit marginRight() const override final;
     virtual LayoutUnit marginTop() const override final;
@@ -84,7 +85,7 @@ public:
 
     LayoutSize offsetForInFlowPositionedInline(const RenderBox& child) const;
 
-    virtual void addFocusRingRects(Vector<LayoutRect>&, const LayoutPoint& additionalOffset, const RenderLayerModelObject* paintContainer) const override final;
+    virtual void addFocusRingRects(Vector<LayoutRect>&, const LayoutPoint& additionalOffset) const override final;
 
     using RenderBoxModelObject::continuation;
     using RenderBoxModelObject::setContinuation;
@@ -126,6 +127,8 @@ private:
     void addChildToContinuation(RenderObject* newChild, RenderObject* beforeChild);
     virtual void addChildIgnoringContinuation(RenderObject* newChild, RenderObject* beforeChild = 0) override final;
 
+    void moveChildrenToIgnoringContinuation(RenderInline* to, RenderObject* startChild);
+
     void splitInlines(RenderBlock* fromBlock, RenderBlock* toBlock, RenderBlock* middleBlock,
                       RenderObject* beforeChild, RenderBoxModelObject* oldCont);
     void splitFlow(RenderObject* beforeChild, RenderBlock* newBlockBox,
@@ -133,7 +136,7 @@ private:
 
     virtual void layout() override final { ASSERT_NOT_REACHED(); } // Do nothing for layout()
 
-    virtual void paint(PaintInfo&, const LayoutPoint&) override final;
+    virtual void paint(const PaintInfo&, const LayoutPoint&) override final;
 
     virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction) override final;
 

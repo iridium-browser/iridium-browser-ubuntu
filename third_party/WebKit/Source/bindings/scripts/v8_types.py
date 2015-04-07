@@ -185,7 +185,7 @@ def cpp_type(idl_type, extended_attributes=None, raw_type=False, used_as_rvalue_
         return idl_type.implemented_as + '*'
     if idl_type.is_interface_type:
         implemented_as_class = idl_type.implemented_as
-        if raw_type:
+        if raw_type or (used_as_rvalue_type and idl_type.is_garbage_collected):
             return implemented_as_class + '*'
         new_type = 'Member' if used_in_cpp_sequence else 'RawPtr'
         ptr_type = cpp_ptr_type(('PassRefPtr' if used_as_rvalue_type else 'RefPtr'), new_type, idl_type.gc_type)
@@ -193,7 +193,15 @@ def cpp_type(idl_type, extended_attributes=None, raw_type=False, used_as_rvalue_
     if idl_type.is_dictionary:
         return base_idl_type
     if idl_type.is_union_type:
-        return idl_type.name
+        # Avoid "AOrNullOrB" for cpp type of (A? or B) because we generate
+        # V8AOrBOrNull to handle nulle for (A? or B), (A or B?) and (A or B)?
+        def member_cpp_name(idl_type):
+            if idl_type.is_nullable:
+                return idl_type.inner_type.name
+            return idl_type.name
+        idl_type_name = "Or".join(member_cpp_name(member)
+                                  for member in idl_type.member_types)
+        return 'const %s&' % idl_type_name if used_as_rvalue_type else idl_type_name
 
     # Default, assume native type is a pointer with same type name as idl type
     return base_idl_type + '*'
@@ -316,9 +324,14 @@ IdlTypeBase.gc_type = property(gc_type)
 
 def is_traceable(idl_type):
     return (idl_type.is_garbage_collected
-            or idl_type.is_will_be_garbage_collected)
+            or idl_type.is_will_be_garbage_collected
+            or idl_type.is_dictionary)
 
 IdlTypeBase.is_traceable = property(is_traceable)
+IdlUnionType.is_traceable = property(
+    lambda self: any((member_type.is_traceable for member_type in self.member_types)))
+IdlArrayOrSequenceType.is_traceable = property(
+    lambda self: self.element_type.is_traceable)
 
 
 ################################################################################
@@ -350,7 +363,8 @@ INCLUDES_FOR_TYPE = {
                      'core/dom/StaticNodeList.h',
                      'core/html/LabelsNodeList.h']),
     'Promise': set(['bindings/core/v8/ScriptPromise.h']),
-    'SerializedScriptValue': set(['bindings/core/v8/SerializedScriptValue.h']),
+    'SerializedScriptValue': set(['bindings/core/v8/SerializedScriptValue.h',
+                                  'bindings/core/v8/SerializedScriptValueFactory.h']),
     'ScriptValue': set(['bindings/core/v8/ScriptValue.h']),
 }
 
@@ -428,9 +442,19 @@ def impl_includes_for_type(idl_type, interfaces_info):
         includes_for_type.add(interface_info['include_path'])
     if base_idl_type in INCLUDES_FOR_TYPE:
         includes_for_type.update(INCLUDES_FOR_TYPE[base_idl_type])
+    if idl_type.is_typed_array:
+        return set(['core/dom/DOMTypedArray.h'])
+    return includes_for_type
+
+
+def impl_includes_for_type_union(idl_type, interfaces_info):
+    includes_for_type = set()
+    for member_type in idl_type.member_types:
+        includes_for_type.update(member_type.impl_includes_for_type(interfaces_info))
     return includes_for_type
 
 IdlTypeBase.impl_includes_for_type = impl_includes_for_type
+IdlUnionType.impl_includes_for_type = impl_includes_for_type_union
 
 
 component_dir = {}
@@ -464,13 +488,13 @@ V8_VALUE_TO_CPP_VALUE = {
     'long long': 'toInt64({arguments})',
     'unsigned long long': 'toUInt64({arguments})',
     # Interface types
-    'Dictionary': 'Dictionary({v8_value}, {isolate})',
-    'EventTarget': 'V8DOMWrapper::isDOMWrapper({v8_value}) ? toWrapperTypeInfo(v8::Handle<v8::Object>::Cast({v8_value}))->toEventTarget(v8::Handle<v8::Object>::Cast({v8_value})) : 0',
+    'Dictionary': 'Dictionary({v8_value}, {isolate}, exceptionState)',
+    'EventTarget': 'toEventTarget({isolate}, {v8_value})',
     'NodeFilter': 'toNodeFilter({v8_value}, info.Holder(), ScriptState::current({isolate}))',
     'Promise': 'ScriptPromise::cast(ScriptState::current({isolate}), {v8_value})',
-    'SerializedScriptValue': 'SerializedScriptValue::create({v8_value}, 0, 0, exceptionState, {isolate})',
+    'SerializedScriptValue': 'SerializedScriptValueFactory::instance().create({v8_value}, 0, 0, exceptionState, {isolate})',
     'ScriptValue': 'ScriptValue(ScriptState::current({isolate}), {v8_value})',
-    'Window': 'toDOMWindow({v8_value}, {isolate})',
+    'Window': 'toDOMWindow({isolate}, {v8_value})',
     'XPathNSResolver': 'toXPathNSResolver({isolate}, {v8_value})',
 }
 
@@ -478,7 +502,7 @@ V8_VALUE_TO_CPP_VALUE = {
 def v8_conversion_needs_exception_state(idl_type):
     return (idl_type.is_numeric_type or
             idl_type.is_dictionary or
-            idl_type.name in ('ByteString', 'USVString', 'SerializedScriptValue'))
+            idl_type.name in ('ByteString', 'Dictionary', 'USVString', 'SerializedScriptValue'))
 
 IdlType.v8_conversion_needs_exception_state = property(v8_conversion_needs_exception_state)
 IdlArrayOrSequenceType.v8_conversion_needs_exception_state = True
@@ -505,19 +529,19 @@ def v8_conversion_is_trivial(idl_type):
 IdlType.v8_conversion_is_trivial = property(v8_conversion_is_trivial)
 
 
-def v8_value_to_cpp_value(idl_type, extended_attributes, v8_value, variable_name, needs_type_check, index, isolate):
+def v8_value_to_cpp_value(idl_type, extended_attributes, v8_value, variable_name, index, isolate):
     if idl_type.name == 'void':
         return ''
 
     # Array or sequence types
     native_array_element_type = idl_type.native_array_element_type
     if native_array_element_type:
-        return v8_value_to_cpp_value_array_or_sequence(native_array_element_type, v8_value, index)
+        return v8_value_to_cpp_value_array_or_sequence(native_array_element_type, v8_value, index, isolate)
 
     # Simple types
     idl_type = idl_type.preprocessed_type
     add_includes_for_type(idl_type)
-    base_idl_type = idl_type.name if idl_type.is_union_type else idl_type.base_type
+    base_idl_type = idl_type.as_union_type.name if idl_type.is_union_type else idl_type.base_type
 
     if 'EnforceRange' in extended_attributes:
         arguments = ', '.join([v8_value, 'EnforceRange', 'exceptionState'])
@@ -533,15 +557,14 @@ def v8_value_to_cpp_value(idl_type, extended_attributes, v8_value, variable_name
     elif idl_type.is_array_buffer_or_view:
         cpp_expression_format = (
             '{v8_value}->Is{idl_type}() ? '
-            'V8{idl_type}::toImpl(v8::Handle<v8::{idl_type}>::Cast({v8_value})) : 0')
-    elif idl_type.is_dictionary or idl_type.is_union_type:
+            'V8{idl_type}::toImpl(v8::Local<v8::{idl_type}>::Cast({v8_value})) : 0')
+    elif idl_type.use_output_parameter_for_result:
+        if idl_type.includes_nullable_type:
+            base_idl_type = idl_type.cpp_type + 'OrNull'
         cpp_expression_format = 'V8{idl_type}::toImpl({isolate}, {v8_value}, {variable_name}, exceptionState)'
-    elif needs_type_check:
-        cpp_expression_format = (
-            'V8{idl_type}::toImplWithTypeCheck({isolate}, {v8_value})')
     else:
         cpp_expression_format = (
-            'V8{idl_type}::toImpl(v8::Handle<v8::Object>::Cast({v8_value}))')
+            'V8{idl_type}::toImplWithTypeCheck({isolate}, {v8_value})')
 
     return cpp_expression_format.format(arguments=arguments, idl_type=base_idl_type, v8_value=v8_value, variable_name=variable_name, isolate=isolate)
 
@@ -568,7 +591,7 @@ def v8_value_to_cpp_value_array_or_sequence(native_array_element_type, v8_value,
 
 
 # FIXME: this function should be refactored, as this takes too many flags.
-def v8_value_to_local_cpp_value(idl_type, extended_attributes, v8_value, variable_name=None, needs_type_check=True, index=None, declare_variable=True, isolate='info.GetIsolate()', used_in_private_script=False, return_promise=False, needs_exception_state_for_string=False):
+def v8_value_to_local_cpp_value(idl_type, extended_attributes, v8_value, variable_name=None, index=None, declare_variable=True, isolate='info.GetIsolate()', used_in_private_script=False, return_promise=False, needs_exception_state_for_string=False):
     """Returns an expression that converts a V8 value to a C++ value and stores it as a local value."""
 
     this_cpp_type = idl_type.cpp_type_args(extended_attributes=extended_attributes, raw_type=True)
@@ -577,7 +600,7 @@ def v8_value_to_local_cpp_value(idl_type, extended_attributes, v8_value, variabl
     if idl_type.base_type in ('void', 'object', 'EventHandler', 'EventListener'):
         return '/* no V8 -> C++ conversion for IDL type: %s */' % idl_type.name
 
-    cpp_value = v8_value_to_cpp_value(idl_type, extended_attributes, v8_value, variable_name, needs_type_check, index, isolate)
+    cpp_value = v8_value_to_cpp_value(idl_type, extended_attributes, v8_value, variable_name, index, isolate)
 
     if idl_type.is_dictionary or idl_type.is_union_type:
         return 'TONATIVE_VOID_EXCEPTIONSTATE_ARGINTERNAL(%s, exceptionState)' % cpp_value
@@ -689,6 +712,11 @@ def v8_conversion_type(idl_type, extended_attributes):
     """
     extended_attributes = extended_attributes or {}
 
+    # Nullable dictionaries need to be handled differently than either
+    # non-nullable dictionaries or unions.
+    if idl_type.is_dictionary and idl_type.is_nullable:
+        return 'NullableDictionary'
+
     if idl_type.is_dictionary or idl_type.is_union_type:
         return 'DictionaryOrUnion'
 
@@ -719,6 +747,9 @@ def v8_conversion_type(idl_type, extended_attributes):
         raise 'Unrecognized TreatReturnedNullStringAs value: "%s"' % treat_returned_null_string_as
     if idl_type.is_basic_type or base_idl_type == 'ScriptValue':
         return base_idl_type
+    # Generic dictionary type
+    if base_idl_type == 'Dictionary':
+        return 'Dictionary'
 
     # Data type with potential additional includes
     add_includes_for_type(idl_type)
@@ -758,6 +789,10 @@ V8_SET_RETURN_VALUE = {
     'DOMWrapperForMainWorld': 'v8SetReturnValueForMainWorld(info, WTF::getPtr({cpp_value}))',
     'DOMWrapperFast': 'v8SetReturnValueFast(info, WTF::getPtr({cpp_value}), {script_wrappable})',
     'DOMWrapperDefault': 'v8SetReturnValue(info, {cpp_value})',
+    # Generic dictionary type
+    'Dictionary': 'v8SetReturnValue(info, {cpp_value})',
+    # Nullable dictionaries
+    'NullableDictionary': 'v8SetReturnValue(info, result.get())',
     # Union types or dictionaries
     'DictionaryOrUnion': 'v8SetReturnValue(info, result)',
 }
@@ -812,15 +847,25 @@ CPP_VALUE_TO_V8_VALUE = {
     'unrestricted double': 'v8::Number::New({isolate}, {cpp_value})',
     'void': 'v8Undefined()',
     # [TreatReturnedNullStringAs]
-    'StringOrNull': '{cpp_value}.isNull() ? v8::Handle<v8::Value>(v8::Null({isolate})) : v8String({isolate}, {cpp_value})',
+    'StringOrNull': '{cpp_value}.isNull() ? v8::Local<v8::Value>(v8::Null({isolate})) : v8String({isolate}, {cpp_value})',
     'StringOrUndefined': '{cpp_value}.isNull() ? v8Undefined() : v8String({isolate}, {cpp_value})',
     # Special cases
-    'EventHandler': '{cpp_value} ? v8::Handle<v8::Value>(V8AbstractEventListener::cast({cpp_value})->getListenerObject(impl->executionContext())) : v8::Handle<v8::Value>(v8::Null({isolate}))',
+    'Dictionary': '{cpp_value}.v8Value()',
+    'EventHandler': '{cpp_value} ? v8::Local<v8::Value>(V8AbstractEventListener::cast({cpp_value})->getListenerObject(impl->executionContext())) : v8::Local<v8::Value>(v8::Null({isolate}))',
     'ScriptValue': '{cpp_value}.v8Value()',
-    'SerializedScriptValue': '{cpp_value} ? {cpp_value}->deserialize() : v8::Handle<v8::Value>(v8::Null({isolate}))',
+    'SerializedScriptValue': '{cpp_value} ? {cpp_value}->deserialize() : v8::Local<v8::Value>(v8::Null({isolate}))',
     # General
-    'array': 'v8Array({cpp_value}, {creation_context}, {isolate})',
+    'array': 'toV8({cpp_value}, {creation_context}, {isolate})',
     'DOMWrapper': 'toV8({cpp_value}, {creation_context}, {isolate})',
+    # Passing nullable dictionaries isn't a pattern currently used
+    # anywhere in the web platform, and more work would be needed in
+    # the code generator to distinguish between passing null, and
+    # passing an object which happened to not contain any of the
+    # dictionary's defined attributes. For now, don't define
+    # NullableDictionary here, which will cause an exception to be
+    # thrown during code generation if an argument to a method is a
+    # nullable dictionary type.
+    #
     # Union types or dictionaries
     'DictionaryOrUnion': 'toV8({cpp_value}, {creation_context}, {isolate})',
 }
@@ -860,9 +905,11 @@ def cpp_type_has_null_value(idl_type):
     # - Enum types, as they are implemented as Strings.
     # - Wrapper types (raw pointer or RefPtr/PassRefPtr) represent null as
     #   a null pointer.
+    # - Union types, as thier container classes can represent null value.
     # - 'Object' type. We use ScriptValue for object type.
     return (idl_type.is_string_type or idl_type.is_wrapper_type or
-            idl_type.is_enum or idl_type.base_type == 'object')
+            idl_type.is_enum or idl_type.is_union_type
+            or idl_type.base_type == 'object')
 
 IdlTypeBase.cpp_type_has_null_value = property(cpp_type_has_null_value)
 
@@ -880,3 +927,27 @@ def is_explicit_nullable(idl_type):
 IdlTypeBase.is_implicit_nullable = property(is_implicit_nullable)
 IdlUnionType.is_implicit_nullable = False
 IdlTypeBase.is_explicit_nullable = property(is_explicit_nullable)
+
+
+def number_of_nullable_member_types_union(idl_type):
+    # http://heycam.github.io/webidl/#dfn-number-of-nullable-member-types
+    count = 0
+    for member in idl_type.member_types:
+        if member.is_nullable:
+            count += 1
+            member = member.inner_type
+        if member.is_union_type:
+            count += number_of_nullable_member_types_union(member)
+    return count
+
+IdlUnionType.number_of_nullable_member_types = property(
+    number_of_nullable_member_types_union)
+
+
+def includes_nullable_type_union(idl_type):
+    # http://heycam.github.io/webidl/#dfn-includes-a-nullable-type
+    return idl_type.number_of_nullable_member_types == 1
+
+IdlTypeBase.includes_nullable_type = False
+IdlNullableType.includes_nullable_type = True
+IdlUnionType.includes_nullable_type = property(includes_nullable_type_union)

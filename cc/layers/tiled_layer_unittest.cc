@@ -45,18 +45,10 @@ class TestOcclusionTracker : public OcclusionTracker<Layer> {
   }
 };
 
-class SynchronousOutputSurfaceLayerTreeHost : public LayerTreeHost {
+class SynchronousOutputSurfaceClient : public FakeLayerTreeHostClient {
  public:
-  static scoped_ptr<SynchronousOutputSurfaceLayerTreeHost> Create(
-      LayerTreeHostClient* client,
-      SharedBitmapManager* manager,
-      const LayerTreeSettings& settings,
-      scoped_refptr<base::SingleThreadTaskRunner> impl_task_runner) {
-    return make_scoped_ptr(new SynchronousOutputSurfaceLayerTreeHost(
-        client, manager, settings, impl_task_runner));
-  }
-
-  ~SynchronousOutputSurfaceLayerTreeHost() override {}
+  SynchronousOutputSurfaceClient()
+      : FakeLayerTreeHostClient(FakeLayerTreeHostClient::DIRECT_3D) {}
 
   bool EnsureOutputSurfaceCreated() {
     base::MessageLoop::current()->PostDelayedTask(
@@ -67,24 +59,19 @@ class SynchronousOutputSurfaceLayerTreeHost : public LayerTreeHost {
     return output_surface_created_;
   }
 
-  void OnCreateAndInitializeOutputSurfaceAttempted(bool success) override {
-    LayerTreeHost::OnCreateAndInitializeOutputSurfaceAttempted(success);
-    output_surface_created_ = success;
+  void DidInitializeOutputSurface() override {
+    FakeLayerTreeHostClient::DidInitializeOutputSurface();
+    output_surface_created_ = true;
+    run_loop_.Quit();
+  }
+
+  void DidFailToInitializeOutputSurface() override {
+    FakeLayerTreeHostClient::DidFailToInitializeOutputSurface();
+    output_surface_created_ = false;
     run_loop_.Quit();
   }
 
  private:
-  SynchronousOutputSurfaceLayerTreeHost(
-      LayerTreeHostClient* client,
-      SharedBitmapManager* manager,
-      const LayerTreeSettings& settings,
-      scoped_refptr<base::SingleThreadTaskRunner> impl_task_runner)
-      : LayerTreeHost(client, manager, NULL, settings),
-        output_surface_created_(false) {
-    LayerTreeHost::InitializeThreaded(base::MessageLoopProxy::current(),
-                                      impl_task_runner);
-  }
-
   bool output_surface_created_;
   base::RunLoop run_loop_;
 };
@@ -96,25 +83,25 @@ class TiledLayerTest : public testing::Test {
         output_surface_(FakeOutputSurface::Create3d()),
         queue_(make_scoped_ptr(new ResourceUpdateQueue)),
         impl_thread_("ImplThread"),
-        fake_layer_tree_host_client_(FakeLayerTreeHostClient::DIRECT_3D),
         occlusion_(nullptr) {
     settings_.max_partial_texture_updates = std::numeric_limits<size_t>::max();
     settings_.layer_transforms_should_scale_layer_contents = true;
+    settings_.verify_property_trees = true;
   }
 
-  virtual void SetUp() {
+  void SetUp() override {
     impl_thread_.Start();
     shared_bitmap_manager_.reset(new TestSharedBitmapManager());
-    layer_tree_host_ = SynchronousOutputSurfaceLayerTreeHost::Create(
-        &fake_layer_tree_host_client_,
-        shared_bitmap_manager_.get(),
-        settings_,
-        impl_thread_.message_loop_proxy());
-    fake_layer_tree_host_client_.SetLayerTreeHost(layer_tree_host_.get());
+    layer_tree_host_ = LayerTreeHost::CreateThreaded(
+        &synchonous_output_surface_client_, shared_bitmap_manager_.get(),
+        nullptr, settings_, base::MessageLoopProxy::current(),
+        impl_thread_.message_loop_proxy(), nullptr);
+    synchonous_output_surface_client_.SetLayerTreeHost(layer_tree_host_.get());
     proxy_ = layer_tree_host_->proxy();
     resource_manager_ = PrioritizedResourceManager::Create(proxy_);
     layer_tree_host_->SetLayerTreeHostClientReady();
-    CHECK(layer_tree_host_->EnsureOutputSurfaceCreated());
+    CHECK(synchonous_output_surface_client_.EnsureOutputSurfaceCreated());
+
     layer_tree_host_->SetRootLayer(Layer::Create());
 
     CHECK(output_surface_->BindToClient(&output_surface_client_));
@@ -132,7 +119,7 @@ class TiledLayerTest : public testing::Test {
         new FakeLayerTreeHostImpl(proxy_, shared_bitmap_manager_.get()));
   }
 
-  virtual ~TiledLayerTest() {
+  ~TiledLayerTest() override {
     ResourceManagerClearAllMemory(resource_manager_.get(),
                                   resource_provider_.get());
 
@@ -252,8 +239,8 @@ class TiledLayerTest : public testing::Test {
   scoped_ptr<ResourceUpdateQueue> queue_;
   PriorityCalculator priority_calculator_;
   base::Thread impl_thread_;
-  FakeLayerTreeHostClient fake_layer_tree_host_client_;
-  scoped_ptr<SynchronousOutputSurfaceLayerTreeHost> layer_tree_host_;
+  SynchronousOutputSurfaceClient synchonous_output_surface_client_;
+  scoped_ptr<LayerTreeHost> layer_tree_host_;
   scoped_ptr<FakeLayerTreeHostImpl> host_impl_;
   scoped_ptr<PrioritizedResourceManager> resource_manager_;
   TestOcclusionTracker* occlusion_;
@@ -1671,8 +1658,7 @@ class UpdateTrackingTiledLayer : public FakeTiledLayer {
       : FakeTiledLayer(manager) {
     scoped_ptr<TrackingLayerPainter> painter(TrackingLayerPainter::Create());
     tracking_layer_painter_ = painter.get();
-    layer_updater_ = BitmapContentLayerUpdater::Create(
-        painter.Pass(), &stats_instrumentation_, 0);
+    layer_updater_ = BitmapContentLayerUpdater::Create(painter.Pass(), 0);
   }
 
   TrackingLayerPainter* tracking_layer_painter() const {
@@ -1685,7 +1671,6 @@ class UpdateTrackingTiledLayer : public FakeTiledLayer {
 
   TrackingLayerPainter* tracking_layer_painter_;
   scoped_refptr<BitmapContentLayerUpdater> layer_updater_;
-  FakeRenderingStatsInstrumentation stats_instrumentation_;
 };
 
 TEST_F(TiledLayerTest, NonIntegerContentsScaleIsNotDistortedDuringPaint) {
@@ -1712,7 +1697,7 @@ TEST_F(TiledLayerTest, NonIntegerContentsScaleIsNotDistortedDuringPaint) {
   layer->Update(queue_.get(), nullptr);
   layer->tracking_layer_painter()->ResetPaintedRect();
 
-  EXPECT_RECT_EQ(gfx::Rect(), layer->tracking_layer_painter()->PaintedRect());
+  EXPECT_EQ(gfx::Rect(), layer->tracking_layer_painter()->PaintedRect());
   UpdateTextures();
 
   // Invalidate the entire layer in content space. When painting, the rect given
@@ -1723,8 +1708,8 @@ TEST_F(TiledLayerTest, NonIntegerContentsScaleIsNotDistortedDuringPaint) {
   // Rounding leads to an extra pixel.
   gfx::Rect expanded_layer_rect(layer_rect);
   expanded_layer_rect.set_height(32);
-  EXPECT_RECT_EQ(expanded_layer_rect,
-                 layer->tracking_layer_painter()->PaintedRect());
+  EXPECT_EQ(expanded_layer_rect,
+            layer->tracking_layer_painter()->PaintedRect());
 }
 
 TEST_F(TiledLayerTest,
@@ -1751,7 +1736,7 @@ TEST_F(TiledLayerTest,
   layer->Update(queue_.get(), nullptr);
   layer->tracking_layer_painter()->ResetPaintedRect();
 
-  EXPECT_RECT_EQ(gfx::Rect(), layer->tracking_layer_painter()->PaintedRect());
+  EXPECT_EQ(gfx::Rect(), layer->tracking_layer_painter()->PaintedRect());
   UpdateTextures();
 
   // Invalidate the entire layer in layer space. When painting, the rect given
@@ -1762,8 +1747,8 @@ TEST_F(TiledLayerTest,
   // Rounding leads to an extra pixel.
   gfx::Rect expanded_layer_rect(layer_rect);
   expanded_layer_rect.set_height(32);
-  EXPECT_RECT_EQ(expanded_layer_rect,
-                 layer->tracking_layer_painter()->PaintedRect());
+  EXPECT_EQ(expanded_layer_rect,
+            layer->tracking_layer_painter()->PaintedRect());
 }
 
 }  // namespace

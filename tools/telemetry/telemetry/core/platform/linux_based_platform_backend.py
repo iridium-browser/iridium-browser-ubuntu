@@ -82,14 +82,6 @@ class LinuxBasedPlatformBackend(platform_backend.PlatformBackend):
             'WorkingSetSize': wss,
             'WorkingSetSizePeak': wss_peak}
 
-  def GetIOStats(self, pid):
-    io_contents = self._GetProcFileForPid(pid, 'io')
-    io = self._GetProcFileDict(io_contents)
-    return {'ReadOperationCount': int(io['syscr']),
-            'WriteOperationCount': int(io['syscw']),
-            'ReadTransferCount': int(io['rchar']),
-            'WriteTransferCount': int(io['wchar'])}
-
   @decorators.Cache
   def GetClockTicks(self):
     """Returns the number of clock ticks per second.
@@ -107,6 +99,13 @@ class LinuxBasedPlatformBackend(platform_backend.PlatformBackend):
     raise NotImplementedError()
 
   def RunCommand(self, cmd):
+    """Runs the specified command.
+
+    Args:
+        cmd: A list of program arguments or the path string of the program.
+    Returns:
+        A string whose content is the output of the command.
+    """
     raise NotImplementedError()
 
   @staticmethod
@@ -138,7 +137,7 @@ class LinuxBasedPlatformBackend(platform_backend.PlatformBackend):
       raise
 
   def _ConvertKbToByte(self, value):
-    return int(value.replace('kB','')) * 1024
+    return int(value.replace('kB', '')) * 1024
 
   def _GetProcFileDict(self, contents):
     retval = {}

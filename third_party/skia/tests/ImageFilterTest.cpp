@@ -55,16 +55,10 @@ public:
         return true;
     }
 
+    SK_TO_STRING_OVERRIDE()
     SK_DECLARE_PUBLIC_FLATTENABLE_DESERIALIZATION_PROCS(MatrixTestImageFilter)
 
 protected:
-#ifdef SK_SUPPORT_LEGACY_DEEPFLATTENING
-    explicit MatrixTestImageFilter(SkReadBuffer& buffer) : SkImageFilter(0, NULL) {
-        fReporter = static_cast<skiatest::Reporter*>(buffer.readFunctionPtr());
-        buffer.readMatrix(&fExpectedMatrix);
-    }
-#endif
-
     virtual void flatten(SkWriteBuffer& buffer) const SK_OVERRIDE {
         this->INHERITED::flatten(buffer);
         buffer.writeFunctionPtr(fReporter);
@@ -74,7 +68,7 @@ protected:
 private:
     skiatest::Reporter* fReporter;
     SkMatrix fExpectedMatrix;
-    
+
     typedef SkImageFilter INHERITED;
 };
 
@@ -87,6 +81,13 @@ SkFlattenable* MatrixTestImageFilter::CreateProc(SkReadBuffer& buffer) {
     buffer.readMatrix(&matrix);
     return SkNEW_ARGS(MatrixTestImageFilter, (reporter, matrix));
 }
+
+#ifndef SK_IGNORE_TO_STRING
+void MatrixTestImageFilter::toString(SkString* str) const {
+    str->appendf("MatrixTestImageFilter: (");
+    str->append(")");
+}
+#endif
 
 static void make_small_bitmap(SkBitmap& bitmap) {
     bitmap.allocN32Pixels(kBitmapSize, kBitmapSize);
@@ -235,7 +236,7 @@ static void test_crop_rects(SkBaseDevice* device, skiatest::Reporter* reporter) 
     SkBitmap bitmap;
     bitmap.allocN32Pixels(100, 100);
     bitmap.eraseARGB(0, 0, 0, 0);
-    SkDeviceImageFilterProxy proxy(device);
+    SkDeviceImageFilterProxy proxy(device, SkSurfaceProps(SkSurfaceProps::kLegacyFontHost_InitType));
 
     SkImageFilter::CropRect inputCropRect(SkRect::MakeXYWH(8, 13, 80, 80));
     SkImageFilter::CropRect cropRect(SkRect::MakeXYWH(20, 30, 60, 60));
@@ -315,7 +316,7 @@ static void test_negative_blur_sigma(SkBaseDevice* device, skiatest::Reporter* r
     // Check that SkBlurImageFilter will accept a negative sigma, either in
     // the given arguments or after CTM application.
     int width = 32, height = 32;
-    SkDeviceImageFilterProxy proxy(device);
+    SkDeviceImageFilterProxy proxy(device, SkSurfaceProps(SkSurfaceProps::kLegacyFontHost_InitType));
     SkScalar five = SkIntToScalar(5);
 
     SkAutoTUnref<SkBlurImageFilter> positiveFilter(
@@ -487,7 +488,7 @@ DEF_TEST(ImageFilterDrawTiled, reporter) {
     }
 }
 
-static void draw_saveLayer_picture(int width, int height, int tileSize, 
+static void draw_saveLayer_picture(int width, int height, int tileSize,
                                    SkBBHFactory* factory, SkBitmap* result) {
 
     SkMatrix matrix;
@@ -501,8 +502,8 @@ static void draw_saveLayer_picture(int width, int height, int tileSize,
     paint.setImageFilter(imageFilter.get());
     SkPictureRecorder recorder;
     SkRect bounds = SkRect::Make(SkIRect::MakeXYWH(0, 0, 50, 50));
-    SkCanvas* recordingCanvas = recorder.beginRecording(SkIntToScalar(width), 
-                                                        SkIntToScalar(height), 
+    SkCanvas* recordingCanvas = recorder.beginRecording(SkIntToScalar(width),
+                                                        SkIntToScalar(height),
                                                         factory, 0);
     recordingCanvas->translate(-55, 0);
     recordingCanvas->saveLayer(&bounds, &paint);
@@ -625,11 +626,11 @@ DEF_TEST(ImageFilterDrawTiledBlurRTree, reporter) {
 
     SkPictureRecorder recorder1, recorder2;
     // The only difference between these two pictures is that one has RTree aceleration.
-    SkCanvas* recordingCanvas1 = recorder1.beginRecording(SkIntToScalar(width), 
-                                                          SkIntToScalar(height), 
+    SkCanvas* recordingCanvas1 = recorder1.beginRecording(SkIntToScalar(width),
+                                                          SkIntToScalar(height),
                                                           NULL, 0);
-    SkCanvas* recordingCanvas2 = recorder2.beginRecording(SkIntToScalar(width), 
-                                                          SkIntToScalar(height), 
+    SkCanvas* recordingCanvas2 = recorder2.beginRecording(SkIntToScalar(width),
+                                                          SkIntToScalar(height),
                                                           &factory, 0);
     draw_blurred_rect(recordingCanvas1);
     draw_blurred_rect(recordingCanvas2);
@@ -801,8 +802,12 @@ DEF_TEST(ImageFilterCrossProcessPictureImageFilter, reporter) {
     canvas.clear(0x0);
     canvas.drawPicture(crossProcessPicture);
     pixel = *bitmap.getAddr32(0, 0);
+#ifdef SK_DISALLOW_CROSSPROCESS_PICTUREIMAGEFILTERS
     // The result here should not be green, since the filter draws nothing.
     REPORTER_ASSERT(reporter, pixel != SK_ColorGREEN);
+#else
+    REPORTER_ASSERT(reporter, pixel == SK_ColorGREEN);
+#endif
 }
 
 DEF_TEST(ImageFilterClippedPictureImageFilter, reporter) {
@@ -825,7 +830,7 @@ DEF_TEST(ImageFilterClippedPictureImageFilter, reporter) {
     SkBitmap bitmap;
     bitmap.allocN32Pixels(2, 2);
     SkBitmapDevice device(bitmap);
-    SkDeviceImageFilterProxy proxy(&device);
+    SkDeviceImageFilterProxy proxy(&device, SkSurfaceProps(SkSurfaceProps::kLegacyFontHost_InitType));
     REPORTER_ASSERT(reporter, !imageFilter->filterImage(&proxy, bitmap, ctx, &result, &offset));
 }
 
@@ -1069,36 +1074,40 @@ const SkSurfaceProps gProps = SkSurfaceProps(SkSurfaceProps::kLegacyFontHost_Ini
 DEF_GPUTEST(ImageFilterCropRectGPU, reporter, factory) {
     GrContext* context = factory->get(static_cast<GrContextFactory::GLContextType>(0));
     SkAutoTUnref<SkGpuDevice> device(SkGpuDevice::Create(context,
+                                                         SkSurface::kNo_Budgeted,
                                                          SkImageInfo::MakeN32Premul(100, 100),
-                                                         gProps,
-                                                         0));
+                                                         0,
+                                                         &gProps));
     test_crop_rects(device, reporter);
 }
 
 DEF_GPUTEST(HugeBlurImageFilterGPU, reporter, factory) {
     GrContext* context = factory->get(static_cast<GrContextFactory::GLContextType>(0));
     SkAutoTUnref<SkGpuDevice> device(SkGpuDevice::Create(context,
+                                                         SkSurface::kNo_Budgeted,
                                                          SkImageInfo::MakeN32Premul(100, 100),
-                                                         gProps,
-                                                         0));
+                                                         0,
+                                                         &gProps));
     test_huge_blur(device, reporter);
 }
 
 DEF_GPUTEST(XfermodeImageFilterCroppedInputGPU, reporter, factory) {
     GrContext* context = factory->get(static_cast<GrContextFactory::GLContextType>(0));
     SkAutoTUnref<SkGpuDevice> device(SkGpuDevice::Create(context,
+                                                         SkSurface::kNo_Budgeted,
                                                          SkImageInfo::MakeN32Premul(1, 1),
-                                                         gProps,
-                                                         0));
+                                                         0,
+                                                         &gProps));
     test_xfermode_cropped_input(device, reporter);
 }
 
 DEF_GPUTEST(TestNegativeBlurSigmaGPU, reporter, factory) {
     GrContext* context = factory->get(static_cast<GrContextFactory::GLContextType>(0));
     SkAutoTUnref<SkGpuDevice> device(SkGpuDevice::Create(context,
+                                                         SkSurface::kNo_Budgeted,
                                                          SkImageInfo::MakeN32Premul(1, 1),
-                                                         gProps,
-                                                         0));
+                                                         0,
+                                                         &gProps));
     test_negative_blur_sigma(device, reporter);
 }
 #endif

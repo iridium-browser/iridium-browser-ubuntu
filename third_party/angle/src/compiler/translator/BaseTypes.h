@@ -4,8 +4,8 @@
 // found in the LICENSE file.
 //
 
-#ifndef _BASICTYPES_INCLUDED_
-#define _BASICTYPES_INCLUDED_
+#ifndef COMPILER_TRANSLATOR_BASETYPES_H_
+#define COMPILER_TRANSLATOR_BASETYPES_H_
 
 #include <assert.h>
 
@@ -307,6 +307,10 @@ enum TQualifier
     EvqFragData,
     EvqFragDepth,
 
+    // built-ins written by the shader_framebuffer_fetch extension(s)
+    EvqLastFragColor,
+    EvqLastFragData,
+
     // GLSL ES 3.0 vertex output and fragment input
     EvqSmooth,        // Incomplete qualifier, smooth is the default
     EvqFlat,          // Incomplete qualifier
@@ -396,6 +400,8 @@ inline const char* getQualifierString(TQualifier q)
     case EvqSmoothIn:       return "smooth in";      break;
     case EvqCentroidIn:     return "centroid in";    break;
     case EvqFlatIn:         return "flat in";        break;
+    case EvqLastFragColor:  return "LastFragColor";  break;
+    case EvqLastFragData:   return "LastFragData";   break;
     default:                return "unknown qualifier";
     }
 }
@@ -437,4 +443,4 @@ inline const char* getInterpolationString(TQualifier q)
     }
 }
 
-#endif // _BASICTYPES_INCLUDED_
+#endif // COMPILER_TRANSLATOR_BASETYPES_H_

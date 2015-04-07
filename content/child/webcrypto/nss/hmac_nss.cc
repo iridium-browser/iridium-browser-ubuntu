@@ -8,7 +8,6 @@
 #include <sechash.h>
 
 #include "base/logging.h"
-#include "base/numerics/safe_math.h"
 #include "base/stl_util.h"
 #include "content/child/webcrypto/algorithm_implementation.h"
 #include "content/child/webcrypto/crypto_data.h"
@@ -59,7 +58,7 @@ class HmacImplementation : public AlgorithmImplementation {
                      bool extractable,
                      blink::WebCryptoKeyUsageMask usages,
                      GenerateKeyResult* result) const override {
-    Status status = CheckKeyCreationUsages(kAllKeyUsages, usages);
+    Status status = CheckKeyCreationUsages(kAllKeyUsages, usages, false);
     if (status.IsError())
       return status;
 
@@ -78,11 +77,7 @@ class HmacImplementation : public AlgorithmImplementation {
 
     return GenerateSecretKeyNss(
         blink::WebCryptoKeyAlgorithm::createHmac(hash.id(), keylen_bits),
-        extractable,
-        usages,
-        keylen_bits / 8,
-        mechanism,
-        result);
+        extractable, usages, keylen_bits, mechanism, result);
   }
 
   Status VerifyKeyUsagesBeforeImportKey(
@@ -91,7 +86,7 @@ class HmacImplementation : public AlgorithmImplementation {
     switch (format) {
       case blink::WebCryptoKeyFormatRaw:
       case blink::WebCryptoKeyFormatJwk:
-        return CheckKeyCreationUsages(kAllKeyUsages, usages);
+        return CheckKeyCreationUsages(kAllKeyUsages, usages, false);
       default:
         return Status::ErrorUnsupportedImportKeyFormat();
     }
@@ -102,27 +97,35 @@ class HmacImplementation : public AlgorithmImplementation {
                       bool extractable,
                       blink::WebCryptoKeyUsageMask usages,
                       blink::WebCryptoKey* key) const override {
-    const blink::WebCryptoAlgorithm& hash =
-        algorithm.hmacImportParams()->hash();
+    const blink::WebCryptoHmacImportParams* params =
+        algorithm.hmacImportParams();
 
     CK_MECHANISM_TYPE mechanism = CKM_INVALID_MECHANISM;
-    if (!WebCryptoHashToHMACMechanism(hash, &mechanism))
+    if (!WebCryptoHashToHMACMechanism(params->hash(), &mechanism))
       return Status::ErrorUnsupported();
 
-    base::CheckedNumeric<unsigned int> keylen_bits(key_data.byte_length());
-    keylen_bits *= 8;
+    unsigned int keylen_bits = 0;
+    Status status = GetHmacImportKeyLengthBits(params, key_data.byte_length(),
+                                               &keylen_bits);
+    if (status.IsError())
+      return status;
 
-    if (!keylen_bits.IsValid())
-      return Status::ErrorDataTooLarge();
+    const blink::WebCryptoKeyAlgorithm key_algorithm =
+        blink::WebCryptoKeyAlgorithm::createHmac(params->hash().id(),
+                                                 keylen_bits);
 
-    return ImportKeyRawNss(key_data,
-                           blink::WebCryptoKeyAlgorithm::createHmac(
-                               hash.id(), keylen_bits.ValueOrDie()),
-                           extractable,
-                           usages,
-                           mechanism,
-                           CKF_SIGN | CKF_VERIFY,
-                           key);
+    // If no bit truncation was requested, then done!
+    if ((keylen_bits % 8) == 0) {
+      return ImportKeyRawNss(key_data, key_algorithm, extractable, usages,
+                             mechanism, key);
+    }
+
+    // Otherwise zero out the unused bits in the key data before importing.
+    std::vector<uint8_t> modified_key_data(
+        key_data.bytes(), key_data.bytes() + key_data.byte_length());
+    TruncateToBitLength(keylen_bits, &modified_key_data);
+    return ImportKeyRawNss(CryptoData(modified_key_data), key_algorithm,
+                           extractable, usages, mechanism, key);
   }
 
   Status ImportKeyJwk(const CryptoData& key_data,
@@ -136,13 +139,13 @@ class HmacImplementation : public AlgorithmImplementation {
       return Status::ErrorUnexpected();
 
     std::vector<uint8_t> raw_data;
-    Status status = ReadSecretKeyJwk(
-        key_data, algorithm_name, extractable, usages, &raw_data);
+    Status status = ReadSecretKeyJwk(key_data, algorithm_name, extractable,
+                                     usages, &raw_data);
     if (status.IsError())
       return status;
 
-    return ImportKeyRaw(
-        CryptoData(raw_data), algorithm, extractable, usages, key);
+    return ImportKeyRaw(CryptoData(raw_data), algorithm, extractable, usages,
+                        key);
   }
 
   Status ExportKeyRaw(const blink::WebCryptoKey& key,
@@ -161,11 +164,8 @@ class HmacImplementation : public AlgorithmImplementation {
     if (!algorithm_name)
       return Status::ErrorUnexpected();
 
-    WriteSecretKeyJwk(CryptoData(raw_data),
-                      algorithm_name,
-                      key.extractable(),
-                      key.usages(),
-                      buffer);
+    WriteSecretKeyJwk(CryptoData(raw_data), algorithm_name, key.extractable(),
+                      key.usages(), buffer);
 
     return Status::Success();
   }
@@ -187,9 +187,8 @@ class HmacImplementation : public AlgorithmImplementation {
     // First call is to figure out the length.
     SECItem signature_item = {siBuffer, NULL, 0};
 
-    if (PK11_SignWithSymKey(
-            sym_key, mechanism, &param_item, &signature_item, &data_item) !=
-        SECSuccess) {
+    if (PK11_SignWithSymKey(sym_key, mechanism, &param_item, &signature_item,
+                            &data_item) != SECSuccess) {
       return Status::OperationError();
     }
 
@@ -198,9 +197,8 @@ class HmacImplementation : public AlgorithmImplementation {
     buffer->resize(signature_item.len);
     signature_item.data = vector_as_array(buffer);
 
-    if (PK11_SignWithSymKey(
-            sym_key, mechanism, &param_item, &signature_item, &data_item) !=
-        SECSuccess) {
+    if (PK11_SignWithSymKey(sym_key, mechanism, &param_item, &signature_item,
+                            &data_item) != SECSuccess) {
       return Status::OperationError();
     }
 
@@ -220,12 +218,39 @@ class HmacImplementation : public AlgorithmImplementation {
       return status;
 
     // Do not allow verification of truncated MACs.
-    *signature_match = result.size() == signature.byte_length() &&
-                       crypto::SecureMemEqual(vector_as_array(&result),
-                                              signature.bytes(),
-                                              signature.byte_length());
+    *signature_match =
+        result.size() == signature.byte_length() &&
+        crypto::SecureMemEqual(vector_as_array(&result), signature.bytes(),
+                               signature.byte_length());
 
     return Status::Success();
+  }
+
+  Status SerializeKeyForClone(
+      const blink::WebCryptoKey& key,
+      blink::WebVector<uint8_t>* key_data) const override {
+    key_data->assign(SymKeyNss::Cast(key)->serialized_key_data());
+    return Status::Success();
+  }
+
+  Status DeserializeKeyForClone(const blink::WebCryptoKeyAlgorithm& algorithm,
+                                blink::WebCryptoKeyType type,
+                                bool extractable,
+                                blink::WebCryptoKeyUsageMask usages,
+                                const CryptoData& key_data,
+                                blink::WebCryptoKey* key) const override {
+    CK_MECHANISM_TYPE mechanism = CKM_INVALID_MECHANISM;
+    if (!WebCryptoHashToHMACMechanism(algorithm.hmacParams()->hash(),
+                                      &mechanism))
+      return Status::ErrorUnsupported();
+    return ImportKeyRawNss(key_data, algorithm, extractable, usages, mechanism,
+                           key);
+  }
+
+  Status GetKeyLength(const blink::WebCryptoAlgorithm& key_length_algorithm,
+                      bool* has_length_bits,
+                      unsigned int* length_bits) const override {
+    return GetHmacKeyLength(key_length_algorithm, has_length_bits, length_bits);
   }
 };
 

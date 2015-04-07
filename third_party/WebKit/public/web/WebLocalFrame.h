@@ -9,7 +9,10 @@
 
 namespace blink {
 
+class WebAutofillClient;
+class WebFrameClient;
 class WebScriptExecutionCallback;
+struct WebPrintPresetOptions;
 
 // Interface for interacting with in process frames. This contains methods that
 // require interacting with a frame's document.
@@ -41,6 +44,9 @@ public:
     // swapped into the frame tree if it commits.
     virtual void initializeToReplaceRemoteFrame(WebRemoteFrame*) = 0;
 
+    virtual void setAutofillClient(WebAutofillClient*) = 0;
+    virtual WebAutofillClient* autofillClient() = 0;
+
 
     // Navigation Ping --------------------------------------------------------
     virtual void sendPings(const WebNode& linkNode, const WebURL& destinationURL) = 0;
@@ -66,6 +72,12 @@ public:
 
     // Notify the frame that the screen orientation has changed.
     virtual void sendOrientationChangeEvent() = 0;
+
+
+    // Printing ------------------------------------------------------------
+
+    // Returns true on success and sets the out parameter to the print preset options for the document.
+    virtual bool getPrintPresetOptionsForPlugin(const WebNode&, WebPrintPresetOptions*) = 0;
 
 
     // Scripting --------------------------------------------------------------

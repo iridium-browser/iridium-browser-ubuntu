@@ -16,6 +16,10 @@
 #include "ui/ozone/platform/dri/dri_util.h"
 #include "ui/ozone/platform/dri/dri_wrapper.h"
 
+#if !defined(DRM_MODE_CONNECTOR_DSI)
+#define DRM_MODE_CONNECTOR_DSI 16
+#endif
+
 namespace ui {
 
 namespace {
@@ -30,6 +34,7 @@ DisplayConnectionType GetDisplayType(drmModeConnector* connector) {
       return DISPLAY_CONNECTION_TYPE_DVI;
     case DRM_MODE_CONNECTOR_LVDS:
     case DRM_MODE_CONNECTOR_eDP:
+    case DRM_MODE_CONNECTOR_DSI:
       return DISPLAY_CONNECTION_TYPE_INTERNAL;
     case DRM_MODE_CONNECTOR_DisplayPort:
       return DISPLAY_CONNECTION_TYPE_DISPLAYPORT;
@@ -122,8 +127,9 @@ DisplaySnapshotDri::~DisplaySnapshotDri() {
 
 std::string DisplaySnapshotDri::ToString() const {
   return base::StringPrintf(
-      "[type=%d, connector=%" PRIu32 ", crtc=%" PRIu32 ", mode=%s, dim=%s]",
-      type_, connector_, crtc_,
+      "[type=%d, connector=%" PRIu32 ", crtc=%" PRIu32
+      ", origin=%s, mode=%s, dim=%s]",
+      type_, connector_, crtc_, origin_.ToString().c_str(),
       current_mode_ ? current_mode_->ToString().c_str() : "NULL",
       physical_size_.ToString().c_str());
 }

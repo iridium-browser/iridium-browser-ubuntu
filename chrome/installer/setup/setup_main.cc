@@ -91,7 +91,7 @@ namespace {
 // returns a patch helper configured to uncompress and patch.
 scoped_ptr<installer::ArchivePatchHelper> CreateChromeArchiveHelper(
     const base::FilePath& setup_exe,
-    const CommandLine& command_line,
+    const base::CommandLine& command_line,
     const installer::InstallerState& installer_state,
     const base::FilePath& working_directory) {
   // A compressed archive is ordinarily given on the command line by the mini
@@ -288,83 +288,6 @@ installer::InstallStatus RenameChromeExecutables(
   VLOG(1) << "Deleting temporary directory " << temp_path.path().value();
 
   return ret;
-}
-
-// For each product that is being updated (i.e., already installed at an earlier
-// version), see if that product has an update policy override that differs from
-// that for the binaries.  If any are found, fail with an error indicating that
-// the Group Policy settings are in an inconsistent state.  Do not do this test
-// for same-version installs, since it would be unkind to block attempts to
-// repair a corrupt installation.  This function returns false when installation
-// should be halted, in which case |status| contains the relevant exit code and
-// the proper installer result has been written to the registry.
-bool CheckGroupPolicySettings(const InstallationState& original_state,
-                              const InstallerState& installer_state,
-                              const Version& new_version,
-                              installer::InstallStatus* status) {
-#if !defined(GOOGLE_CHROME_BUILD)
-  // Chromium builds are not updated via Google Update, so there are no
-  // Group Policy settings to consult.
-  return true;
-#else
-  DCHECK(status);
-
-  // Single installs are always in good shape.
-  if (!installer_state.is_multi_install())
-    return true;
-
-  bool settings_are_valid = true;
-  const bool is_system_install = installer_state.system_install();
-  BrowserDistribution* const binaries_dist =
-      installer_state.multi_package_binaries_distribution();
-
-  // Get the update policy for the binaries.
-  const GoogleUpdateSettings::UpdatePolicy binaries_policy =
-      GoogleUpdateSettings::GetAppUpdatePolicy(binaries_dist->GetAppGuid(),
-                                               NULL);
-
-  // Check for differing update policies for all of the products being updated.
-  const Products& products = installer_state.products();
-  Products::const_iterator scan = products.begin();
-  for (Products::const_iterator end = products.end(); scan != end; ++scan) {
-    BrowserDistribution* dist = (*scan)->distribution();
-    const ProductState* product_state =
-        original_state.GetProductState(is_system_install, dist->GetType());
-    // Is an earlier version of this product already installed?
-    if (product_state != NULL &&
-        product_state->version().CompareTo(new_version) < 0) {
-      bool is_overridden = false;
-      GoogleUpdateSettings::UpdatePolicy app_policy =
-          GoogleUpdateSettings::GetAppUpdatePolicy(dist->GetAppGuid(),
-                                                   &is_overridden);
-      if (is_overridden && app_policy != binaries_policy) {
-        LOG(ERROR) << "Found legacy Group Policy setting for "
-                   << dist->GetDisplayName() << " (value: " << app_policy
-                   << ") that does not match the setting for "
-                   << binaries_dist->GetDisplayName()
-                   << " (value: " << binaries_policy << ").";
-        settings_are_valid = false;
-      }
-    }
-  }
-
-  if (!settings_are_valid) {
-    // TODO(grt): add " See http://goo.gl/+++ for details." to the end of this
-    // log message and to the IDS_INSTALL_INCONSISTENT_UPDATE_POLICY string once
-    // we have a help center article that explains why this error is being
-    // reported and how to resolve it.
-    LOG(ERROR) << "Cannot apply update on account of inconsistent "
-                  "Google Update Group Policy settings. Use the Group Policy "
-                  "Editor to set the update policy override for the "
-               << binaries_dist->GetDisplayName()
-               << " application and try again.";
-    *status = installer::INCONSISTENT_UPDATE_POLICY;
-    installer_state.WriteInstallerResult(
-        *status, IDS_INSTALL_INCONSISTENT_UPDATE_POLICY_BASE, NULL);
-  }
-
-  return settings_are_valid;
-#endif  // defined(GOOGLE_CHROME_BUILD)
 }
 
 // If only the binaries are being updated, fail.
@@ -583,11 +506,11 @@ bool CheckPreInstallConditions(const InstallationState& original_state,
             *status = installer::EXISTING_VERSION_LAUNCHED;
             base::FilePath chrome_exe =
                 install_path.Append(installer::kChromeExe);
-            CommandLine cmd(chrome_exe);
+            base::CommandLine cmd(chrome_exe);
             cmd.AppendSwitch(switches::kForceFirstRun);
             installer_state->WriteInstallerResult(*status, 0, NULL);
             VLOG(1) << "Launching existing system-level chrome instead.";
-            base::LaunchProcess(cmd, base::LaunchOptions(), NULL);
+            base::LaunchProcess(cmd, base::LaunchOptions());
           }
         } else {
           // It's no longer possible for |product| to be anything other than
@@ -644,7 +567,7 @@ installer::InstallStatus UninstallProduct(
     const InstallationState& original_state,
     const InstallerState& installer_state,
     const base::FilePath& setup_exe,
-    const CommandLine& cmd_line,
+    const base::CommandLine& cmd_line,
     bool remove_all,
     bool force_uninstall,
     const Product& product) {
@@ -669,12 +592,12 @@ installer::InstallStatus UninstallProducts(
     const InstallationState& original_state,
     const InstallerState& installer_state,
     const base::FilePath& setup_exe,
-    const CommandLine& cmd_line) {
+    const base::CommandLine& cmd_line) {
   const Products& products = installer_state.products();
 
   // System-level Chrome will be launched via this command if its program gets
   // set below.
-  CommandLine system_level_cmd(CommandLine::NO_PROGRAM);
+  base::CommandLine system_level_cmd(base::CommandLine::NO_PROGRAM);
 
   const Product* chrome =
       installer_state.FindProduct(BrowserDistribution::CHROME_BROWSER);
@@ -729,7 +652,7 @@ installer::InstallStatus UninstallProducts(
     InstallUtil::TriggerActiveSetupCommand();
 
   if (!system_level_cmd.GetProgram().empty())
-    base::LaunchProcess(system_level_cmd, base::LaunchOptions(), NULL);
+    base::LaunchProcess(system_level_cmd, base::LaunchOptions());
 
   // Tell Google Update that an uninstall has taken place.
   // Ignore the return value: success or failure of Google Update
@@ -758,7 +681,7 @@ void UninstallBinariesIfUnused(
   const ProductState* binaries_state =
       original_state.GetProductState(installer_state.system_install(),
                                      BrowserDistribution::CHROME_BINARIES);
-  const CommandLine& uninstall_cmd(binaries_state->uninstall_command());
+  const base::CommandLine& uninstall_cmd(binaries_state->uninstall_command());
   MasterPreferences uninstall_prefs(uninstall_cmd);
   InstallerState uninstall_state;
   uninstall_state.Initialize(uninstall_cmd, uninstall_prefs, original_state);
@@ -778,7 +701,7 @@ void UninstallBinariesIfUnused(
 installer::InstallStatus InstallProducts(
     const InstallationState& original_state,
     const base::FilePath& setup_exe,
-    const CommandLine& cmd_line,
+    const base::CommandLine& cmd_line,
     const MasterPreferences& prefs,
     InstallerState* installer_state,
     base::FilePath* installer_directory) {
@@ -872,8 +795,8 @@ bool CreateEULASentinel(BrowserDistribution* dist) {
 void ActivateMetroChrome() {
   // Check to see if we're per-user or not. Need to do this since we may
   // not have been invoked with --system-level even for a machine install.
-  wchar_t exe_path[MAX_PATH * 2] = {};
-  GetModuleFileName(NULL, exe_path, arraysize(exe_path));
+  base::FilePath exe_path;
+  PathService::Get(base::FILE_EXE, &exe_path);
   bool is_per_user_install = InstallUtil::IsPerUserInstall(exe_path);
 
   base::string16 app_model_id = ShellUtil::GetBrowserModelId(
@@ -895,7 +818,7 @@ installer::InstallStatus RegisterDevChrome(
     const InstallationState& original_state,
     const InstallerState& installer_state,
     const base::FilePath& setup_exe,
-    const CommandLine& cmd_line) {
+    const base::CommandLine& cmd_line) {
   BrowserDistribution* chrome_dist =
       BrowserDistribution::GetSpecificDistribution(
           BrowserDistribution::CHROME_BROWSER);
@@ -953,10 +876,10 @@ installer::InstallStatus RegisterDevChrome(
         delegate_execute_list.get());
     delegate_execute_list->Do();
     if (ShellUtil::CanMakeChromeDefaultUnattended()) {
-      ShellUtil::MakeChromeDefault(
-          chrome_dist, ShellUtil::CURRENT_USER, chrome_exe.value(), true);
+      ShellUtil::MakeChromeDefault(chrome_dist, ShellUtil::CURRENT_USER,
+                                   chrome_exe, true);
     } else {
-      ShellUtil::ShowMakeChromeDefaultSystemUI(chrome_dist, chrome_exe.value());
+      ShellUtil::ShowMakeChromeDefaultSystemUI(chrome_dist, chrome_exe);
     }
   } else {
     LOG(ERROR) << "Path not found: " << chrome_exe.value();
@@ -971,7 +894,7 @@ installer::InstallStatus RegisterDevChrome(
 // has been found and processed (so setup.exe should exit at that point).
 bool HandleNonInstallCmdLineOptions(const InstallationState& original_state,
                                     const base::FilePath& setup_exe,
-                                    const CommandLine& cmd_line,
+                                    const base::CommandLine& cmd_line,
                                     InstallerState* installer_state,
                                     int* exit_code) {
   // TODO(gab): Add a local |status| variable which each block below sets;
@@ -1077,7 +1000,7 @@ bool HandleNonInstallCmdLineOptions(const InstallationState& original_state,
       // These options should only be used when setup.exe is launched with admin
       // rights. We do not make any user specific changes with this option.
       DCHECK(IsUserAnAdmin());
-      base::string16 chrome_exe(cmd_line.GetSwitchValueNative(
+      base::FilePath chrome_exe(cmd_line.GetSwitchValuePath(
           installer::switches::kRegisterChromeBrowser));
       base::string16 suffix;
       if (cmd_line.HasSwitch(
@@ -1325,7 +1248,7 @@ scoped_ptr<google_breakpad::ExceptionHandler> InitializeCrashReporting(
 // binaries will be uninstalled during later processing if they are not in-use
 // (see UninstallBinariesIfUnused). |original_state| and |installer_state| are
 // updated to reflect the state of the world following the operation.
-void UninstallMultiChromeFrameIfPresent(const CommandLine& cmd_line,
+void UninstallMultiChromeFrameIfPresent(const base::CommandLine& cmd_line,
                                         const MasterPreferences& prefs,
                                         InstallationState* original_state,
                                         InstallerState* installer_state) {
@@ -1347,7 +1270,8 @@ void UninstallMultiChromeFrameIfPresent(const CommandLine& cmd_line,
 
   // Uninstall Chrome Frame without touching the multi-install binaries.
   // Simulate the uninstall as coming from the installed version.
-  const CommandLine& uninstall_cmd(chrome_frame_state->uninstall_command());
+  const base::CommandLine& uninstall_cmd(
+      chrome_frame_state->uninstall_command());
   MasterPreferences uninstall_prefs(uninstall_cmd);
   InstallerState uninstall_state;
   uninstall_state.Initialize(uninstall_cmd, uninstall_prefs, *original_state);
@@ -1381,15 +1305,14 @@ void UninstallMultiChromeFrameIfPresent(const CommandLine& cmd_line,
 
 namespace installer {
 
-InstallStatus InstallProductsHelper(
-    const InstallationState& original_state,
-    const base::FilePath& setup_exe,
-    const CommandLine& cmd_line,
-    const MasterPreferences& prefs,
-    const InstallerState& installer_state,
-    base::FilePath* installer_directory,
-    ArchiveType* archive_type,
-    bool* delegated_to_existing) {
+InstallStatus InstallProductsHelper(const InstallationState& original_state,
+                                    const base::FilePath& setup_exe,
+                                    const base::CommandLine& cmd_line,
+                                    const MasterPreferences& prefs,
+                                    const InstallerState& installer_state,
+                                    base::FilePath* installer_directory,
+                                    ArchiveType* archive_type,
+                                    bool* delegated_to_existing) {
   DCHECK(archive_type);
   DCHECK(delegated_to_existing);
   const bool system_install = installer_state.system_install();
@@ -1523,7 +1446,6 @@ InstallStatus InstallProductsHelper(
       COMPILE_ASSERT(BrowserDistribution::NUM_TYPES == 4,
                      add_support_for_new_products_here_);
       const uint32 kBrowserBit = 1 << BrowserDistribution::CHROME_BROWSER;
-      const uint32 kAppHostBit = 1 << BrowserDistribution::CHROME_APP_HOST;
       int message_id = 0;
 
       proceed_with_installation = false;
@@ -1539,11 +1461,6 @@ InstallStatus InstallProductsHelper(
 
       installer_state.WriteInstallerResult(install_status, message_id, NULL);
     }
-
-    proceed_with_installation =
-        proceed_with_installation &&
-        CheckGroupPolicySettings(original_state, installer_state,
-                                 *installer_version, &install_status);
 
     if (proceed_with_installation) {
       // If Google Update is absent at user-level, install it using the
@@ -1570,7 +1487,7 @@ InstallStatus InstallProductsHelper(
           *installer_version);
 
       int install_msg_base = IDS_INSTALL_FAILED_BASE;
-      base::string16 chrome_exe;
+      base::FilePath chrome_exe;
       base::string16 quoted_chrome_exe;
       if (install_status == SAME_VERSION_REPAIR_FAILED) {
         install_msg_base = IDS_SAME_VERSION_REPAIR_FAILED_BASE;
@@ -1581,8 +1498,8 @@ InstallStatus InstallProductsHelper(
           install_msg_base = IDS_INSTALL_OS_ERROR_BASE;
           install_status = OS_ERROR;
         } else {
-          chrome_exe = installer_state.target_path().Append(kChromeExe).value();
-          quoted_chrome_exe = L"\"" + chrome_exe + L"\"";
+          chrome_exe = installer_state.target_path().Append(kChromeExe);
+          quoted_chrome_exe = L"\"" + chrome_exe.value() + L"\"";
           install_msg_base = 0;
         }
       }
@@ -1626,7 +1543,7 @@ InstallStatus InstallProductsHelper(
         const Product* chrome = installer_state.FindProduct(
             BrowserDistribution::CHROME_BROWSER);
         if (chrome != NULL) {
-          DCHECK_NE(chrome_exe, base::string16());
+          DCHECK_NE(chrome_exe.value(), base::string16());
           RemoveChromeLegacyRegistryKeys(chrome->distribution(), chrome_exe);
         }
       }
@@ -1684,7 +1601,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
 
   // The exit manager is in charge of calling the dtors of singletons.
   base::AtExitManager exit_manager;
-  CommandLine::Init(0, NULL);
+  base::CommandLine::Init(0, NULL);
 
   // install_util uses chrome paths.
   chrome::RegisterPathProvider();
@@ -1692,7 +1609,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
   const MasterPreferences& prefs = MasterPreferences::ForCurrentProcess();
   installer::InitInstallerLogging(prefs);
 
-  const CommandLine& cmd_line = *CommandLine::ForCurrentProcess();
+  const base::CommandLine& cmd_line = *base::CommandLine::ForCurrentProcess();
   VLOG(1) << "Command Line: " << cmd_line.GetCommandLineString();
 
   VLOG(1) << "multi install is " << prefs.is_multi_install();
@@ -1754,10 +1671,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
   // extension), in which case CommandLineToArgv will not yield an argv with the
   // true path to the program at position 0.
   base::FilePath setup_exe;
-  if (!PathService::Get(base::FILE_EXE, &setup_exe)) {
-    NOTREACHED();
-    return installer::OS_ERROR;
-  }
+  PathService::Get(base::FILE_EXE, &setup_exe);
 
   int exit_code = 0;
   if (HandleNonInstallCmdLineOptions(
@@ -1768,7 +1682,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
   if (system_install && !IsUserAnAdmin()) {
     if (base::win::GetVersion() >= base::win::VERSION_VISTA &&
         !cmd_line.HasSwitch(installer::switches::kRunAsAdmin)) {
-      CommandLine new_cmd(CommandLine::NO_PROGRAM);
+      base::CommandLine new_cmd(base::CommandLine::NO_PROGRAM);
       new_cmd.AppendArguments(cmd_line, true);
       // Append --run-as-admin flag to let the new instance of setup.exe know
       // that we already tried to launch ourselves as admin.

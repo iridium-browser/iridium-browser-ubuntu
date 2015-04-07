@@ -121,9 +121,14 @@ VideoDecoderConfig DecryptingDemuxerStream::video_decoder_config() {
   return video_config_;
 }
 
-DemuxerStream::Type DecryptingDemuxerStream::type() {
+DemuxerStream::Type DecryptingDemuxerStream::type() const {
   DCHECK(state_ != kUninitialized && state_ != kDecryptorRequested) << state_;
   return demuxer_stream_->type();
+}
+
+DemuxerStream::Liveness DecryptingDemuxerStream::liveness() const {
+  DCHECK(state_ != kUninitialized && state_ != kDecryptorRequested) << state_;
+  return demuxer_stream_->liveness();
 }
 
 void DecryptingDemuxerStream::EnableBitstreamConverter() {
@@ -244,6 +249,9 @@ void DecryptingDemuxerStream::DecryptBuffer(
         buffer->data(), buffer->data_size());
     decrypted->set_timestamp(buffer->timestamp());
     decrypted->set_duration(buffer->duration());
+    if (buffer->is_key_frame())
+      decrypted->set_is_key_frame(true);
+
     state_ = kIdle;
     base::ResetAndReturn(&read_cb_).Run(kOk, decrypted);
     return;
@@ -307,6 +315,12 @@ void DecryptingDemuxerStream::DeliverBuffer(
   }
 
   DCHECK_EQ(status, Decryptor::kSuccess);
+
+  // Copy the key frame flag from the encrypted to decrypted buffer, assuming
+  // that the decryptor initialized the flag to false.
+  if (pending_buffer_to_decrypt_->is_key_frame())
+    decrypted_buffer->set_is_key_frame(true);
+
   pending_buffer_to_decrypt_ = NULL;
   state_ = kIdle;
   base::ResetAndReturn(&read_cb_).Run(kOk, decrypted_buffer);

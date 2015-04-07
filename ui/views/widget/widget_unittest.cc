@@ -19,11 +19,12 @@
 #include "ui/events/event_processor.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/test/event_generator.h"
+#include "ui/gfx/geometry/point.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/gfx/point.h"
 #include "ui/views/bubble/bubble_delegate.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/test/test_views_delegate.h"
+#include "ui/views/test/test_widget_observer.h"
 #include "ui/views/test/widget_test.h"
 #include "ui/views/views_delegate.h"
 #include "ui/views/widget/native_widget_delegate.h"
@@ -234,6 +235,22 @@ TEST_F(WidgetTest, WidgetInitParams) {
   EXPECT_EQ(Widget::InitParams::INFER_OPACITY, init1.opacity);
 }
 
+TEST_F(WidgetTest, NativeWindowProperty) {
+  const char* key = "foo";
+  int value = 3;
+
+  Widget* widget = CreateTopLevelPlatformWidget();
+  EXPECT_EQ(nullptr, widget->GetNativeWindowProperty(key));
+
+  widget->SetNativeWindowProperty(key, &value);
+  EXPECT_EQ(&value, widget->GetNativeWindowProperty(key));
+
+  widget->SetNativeWindowProperty(key, nullptr);
+  EXPECT_EQ(nullptr, widget->GetNativeWindowProperty(key));
+
+  widget->CloseNow();
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Widget::GetTopLevelWidget tests.
 
@@ -287,18 +304,121 @@ TEST_F(WidgetTest, Visibility) {
   EXPECT_FALSE(toplevel->IsVisible());
   EXPECT_FALSE(child->IsVisible());
 
+  // Showing a child with a hidden parent keeps the child hidden.
   child->Show();
-
   EXPECT_FALSE(toplevel->IsVisible());
   EXPECT_FALSE(child->IsVisible());
 
+  // Showing a hidden parent with a visible child shows both.
   toplevel->Show();
-
   EXPECT_TRUE(toplevel->IsVisible());
   EXPECT_TRUE(child->IsVisible());
 
+  // Hiding a parent hides both parent and child.
+  toplevel->Hide();
+  EXPECT_FALSE(toplevel->IsVisible());
+  EXPECT_FALSE(child->IsVisible());
+
+  // Hiding a child while the parent is hidden keeps the child hidden when the
+  // parent is shown.
+  child->Hide();
+  toplevel->Show();
+  EXPECT_TRUE(toplevel->IsVisible());
+  EXPECT_FALSE(child->IsVisible());
+
   toplevel->CloseNow();
   // |child| should be automatically destroyed with |toplevel|.
+}
+
+// Test that child widgets are positioned relative to their parent.
+TEST_F(WidgetTest, ChildBoundsRelativeToParent) {
+  Widget* toplevel = CreateTopLevelPlatformWidget();
+  Widget* child = CreateChildPlatformWidget(toplevel->GetNativeView());
+
+  toplevel->SetBounds(gfx::Rect(160, 100, 320, 200));
+  child->SetBounds(gfx::Rect(0, 0, 320, 200));
+
+  child->Show();
+  toplevel->Show();
+
+  gfx::Rect toplevel_bounds = toplevel->GetWindowBoundsInScreen();
+
+  // Check the parent origin. If it was (0, 0) the test wouldn't be interesting.
+  EXPECT_NE(gfx::Vector2d(0, 0), toplevel_bounds.OffsetFromOrigin());
+
+  // The child's origin is at (0, 0), but the same size, so bounds should match.
+  EXPECT_EQ(toplevel_bounds, child->GetWindowBoundsInScreen());
+
+  toplevel->CloseNow();
+}
+
+// Test z-order of child widgets relative to their parent.
+TEST_F(WidgetTest, ChildStackedRelativeToParent) {
+  Widget* parent = CreateTopLevelPlatformWidget();
+  Widget* child = CreateChildPlatformWidget(parent->GetNativeView());
+
+  parent->SetBounds(gfx::Rect(160, 100, 320, 200));
+  child->SetBounds(gfx::Rect(50, 50, 30, 20));
+
+  // Child shown first. Initially not visible, but on top of parent when shown.
+  // Use ShowInactive whenever showing the child, otherwise the usual activation
+  // logic will just put it on top anyway. Here, we want to ensure it is on top
+  // of its parent regardless.
+  child->ShowInactive();
+  EXPECT_FALSE(child->IsVisible());
+
+  parent->Show();
+  EXPECT_TRUE(child->IsVisible());
+  EXPECT_TRUE(IsWindowStackedAbove(child, parent));
+  EXPECT_FALSE(IsWindowStackedAbove(parent, child));  // Sanity check.
+
+  Widget* popover = CreateTopLevelPlatformWidget();
+  popover->SetBounds(gfx::Rect(150, 90, 340, 240));
+  popover->Show();
+
+  EXPECT_TRUE(IsWindowStackedAbove(popover, child));
+  EXPECT_TRUE(IsWindowStackedAbove(child, parent));
+
+  // Showing the parent again should raise it and its child above the popover.
+  parent->Show();
+  EXPECT_TRUE(IsWindowStackedAbove(child, parent));
+  EXPECT_TRUE(IsWindowStackedAbove(parent, popover));
+
+  // Test grandchildren.
+  Widget* grandchild = CreateChildPlatformWidget(child->GetNativeView());
+  grandchild->SetBounds(gfx::Rect(5, 5, 15, 10));
+  grandchild->ShowInactive();
+  EXPECT_TRUE(IsWindowStackedAbove(grandchild, child));
+  EXPECT_TRUE(IsWindowStackedAbove(child, parent));
+  EXPECT_TRUE(IsWindowStackedAbove(parent, popover));
+
+  popover->Show();
+  EXPECT_TRUE(IsWindowStackedAbove(popover, grandchild));
+  EXPECT_TRUE(IsWindowStackedAbove(grandchild, child));
+
+  parent->Show();
+  EXPECT_TRUE(IsWindowStackedAbove(grandchild, child));
+  EXPECT_TRUE(IsWindowStackedAbove(child, popover));
+
+  // Test hiding and reshowing.
+  parent->Hide();
+  EXPECT_FALSE(grandchild->IsVisible());
+  parent->Show();
+
+  EXPECT_TRUE(IsWindowStackedAbove(grandchild, child));
+  EXPECT_TRUE(IsWindowStackedAbove(child, parent));
+  EXPECT_TRUE(IsWindowStackedAbove(parent, popover));
+
+  grandchild->Hide();
+  EXPECT_FALSE(grandchild->IsVisible());
+  grandchild->ShowInactive();
+
+  EXPECT_TRUE(IsWindowStackedAbove(grandchild, child));
+  EXPECT_TRUE(IsWindowStackedAbove(child, parent));
+  EXPECT_TRUE(IsWindowStackedAbove(parent, popover));
+
+  popover->CloseNow();
+  parent->CloseNow();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -695,20 +815,26 @@ TEST_F(WidgetWithDestroyedNativeViewTest, Test) {
 class WidgetObserverTest : public WidgetTest, public WidgetObserver {
  public:
   WidgetObserverTest()
-      : active_(NULL),
-        widget_closed_(NULL),
-        widget_activated_(NULL),
-        widget_shown_(NULL),
-        widget_hidden_(NULL),
-        widget_bounds_changed_(NULL) {
+      : active_(nullptr),
+        widget_closed_(nullptr),
+        widget_activated_(nullptr),
+        widget_shown_(nullptr),
+        widget_hidden_(nullptr),
+        widget_bounds_changed_(nullptr),
+        widget_to_close_on_hide_(nullptr) {
   }
 
   ~WidgetObserverTest() override {}
 
+  // Set a widget to Close() the next time the Widget being observed is hidden.
+  void CloseOnNextHide(Widget* widget) {
+    widget_to_close_on_hide_ = widget;
+  }
+
   // Overridden from WidgetObserver:
   void OnWidgetDestroying(Widget* widget) override {
     if (active_ == widget)
-      active_ = NULL;
+      active_ = nullptr;
     widget_closed_ = widget;
   }
 
@@ -720,16 +846,21 @@ class WidgetObserverTest : public WidgetTest, public WidgetObserver {
       active_ = widget;
     } else {
       if (widget_activated_ == widget)
-        widget_activated_ = NULL;
+        widget_activated_ = nullptr;
       widget_deactivated_ = widget;
     }
   }
 
   void OnWidgetVisibilityChanged(Widget* widget, bool visible) override {
-    if (visible)
+    if (visible) {
       widget_shown_ = widget;
-    else
-      widget_hidden_ = widget;
+      return;
+    }
+    widget_hidden_ = widget;
+    if (widget_to_close_on_hide_) {
+      widget_to_close_on_hide_->Close();
+      widget_to_close_on_hide_ = nullptr;
+    }
   }
 
   void OnWidgetBoundsChanged(Widget* widget,
@@ -738,13 +869,13 @@ class WidgetObserverTest : public WidgetTest, public WidgetObserver {
   }
 
   void reset() {
-    active_ = NULL;
-    widget_closed_ = NULL;
-    widget_activated_ = NULL;
-    widget_deactivated_ = NULL;
-    widget_shown_ = NULL;
-    widget_hidden_ = NULL;
-    widget_bounds_changed_ = NULL;
+    active_ = nullptr;
+    widget_closed_ = nullptr;
+    widget_activated_ = nullptr;
+    widget_deactivated_ = nullptr;
+    widget_shown_ = nullptr;
+    widget_hidden_ = nullptr;
+    widget_bounds_changed_ = nullptr;
   }
 
   Widget* NewWidget() {
@@ -770,6 +901,8 @@ class WidgetObserverTest : public WidgetTest, public WidgetObserver {
   Widget* widget_shown_;
   Widget* widget_hidden_;
   Widget* widget_bounds_changed_;
+
+  Widget* widget_to_close_on_hide_;
 };
 
 TEST_F(WidgetObserverTest, DISABLED_ActivationChange) {
@@ -853,6 +986,80 @@ TEST_F(WidgetObserverTest, WidgetBoundsChanged) {
 
   child2->OnNativeWidgetSizeChanged(gfx::Size());
   EXPECT_EQ(child2, widget_bounds_changed());
+}
+
+// An extension to WidgetBoundsChanged to ensure notifications are forwarded
+// by the NativeWidget implementation.
+TEST_F(WidgetObserverTest, WidgetBoundsChangedNative) {
+  // Don't use NewWidget(), so that the Init() flow can be observed to ensure
+  // consistency across platforms.
+  Widget* widget = new Widget();  // Note: owned by NativeWidget.
+  widget->AddObserver(this);
+
+  EXPECT_FALSE(widget_bounds_changed());
+
+  // Init causes a bounds change, even while not showing.
+  widget->Init(CreateParams(Widget::InitParams::TYPE_WINDOW));
+  EXPECT_TRUE(widget_bounds_changed());
+  reset();
+
+  // Resizing while hidden, triggers a change.
+  widget->SetSize(gfx::Size(160, 100));
+  EXPECT_FALSE(widget->IsVisible());
+  EXPECT_TRUE(widget_bounds_changed());
+  reset();
+
+  // Setting the same size does nothing.
+  widget->SetSize(gfx::Size(160, 100));
+  EXPECT_FALSE(widget_bounds_changed());
+  reset();
+
+  // Showing does nothing to the bounds.
+  widget->Show();
+  EXPECT_TRUE(widget->IsVisible());
+  EXPECT_FALSE(widget_bounds_changed());
+  reset();
+
+  // Resizing while shown.
+  widget->SetSize(gfx::Size(170, 100));
+  EXPECT_TRUE(widget_bounds_changed());
+  reset();
+
+  // Resize to the same thing while shown does nothing.
+  widget->SetSize(gfx::Size(170, 100));
+  EXPECT_FALSE(widget_bounds_changed());
+  reset();
+
+  // No bounds change when closing.
+  widget->CloseNow();
+  EXPECT_FALSE(widget_bounds_changed());
+}
+
+// Test correct behavior when widgets close themselves in response to visibility
+// changes.
+TEST_F(WidgetObserverTest, ClosingOnHiddenParent) {
+  Widget* parent = NewWidget();
+  Widget* child = CreateChildPlatformWidget(parent->GetNativeView());
+
+  TestWidgetObserver child_observer(child);
+
+  EXPECT_FALSE(parent->IsVisible());
+  EXPECT_FALSE(child->IsVisible());
+
+  // Note |child| is TYPE_CONTROL, which start shown. So no need to show the
+  // child separately.
+  parent->Show();
+  EXPECT_TRUE(parent->IsVisible());
+  EXPECT_TRUE(child->IsVisible());
+
+  // Simulate a child widget that closes itself when the parent is hidden.
+  CloseOnNextHide(child);
+  EXPECT_FALSE(child_observer.widget_closed());
+  parent->Hide();
+  RunPendingMessages();
+  EXPECT_TRUE(child_observer.widget_closed());
+
+  parent->CloseNow();
 }
 
 // Tests that SetBounds() and GetWindowBoundsInScreen() is symmetric when the
@@ -951,8 +1158,18 @@ TEST_F(WidgetTest, GetRestoredBounds) {
 }
 #endif
 
+// ExitFullscreenRestoreState doesn't use DesktopAura widgets. On Mac, there are
+// currently only Desktop widgets and fullscreen changes need to occur in an
+// interactive test to avoid flakes. Maximize on mac is also (intentionally) a
+// no-op.
+#if defined(OS_MACOSX) && !defined(USE_AURA)
+#define MAYBE_ExitFullscreenRestoreState DISABLED_ExitFullscreenRestoreState
+#else
+#define MAYBE_ExitFullscreenRestoreState ExitFullscreenRestoreState
+#endif
+
 // Test that window state is not changed after getting out of full screen.
-TEST_F(WidgetTest, ExitFullscreenRestoreState) {
+TEST_F(WidgetTest, MAYBE_ExitFullscreenRestoreState) {
   Widget* toplevel = CreateTopLevelPlatformWidget();
 
   toplevel->Show();
@@ -969,9 +1186,6 @@ TEST_F(WidgetTest, ExitFullscreenRestoreState) {
   // And it should still be in normal state after getting out of full screen.
   EXPECT_EQ(ui::SHOW_STATE_NORMAL, GetWidgetShowState(toplevel));
 
-// On Mac, a "maximized" state is indistinguishable from a window that just
-// fills the screen, so nothing to check there.
-#if !defined(OS_MACOSX)
   // Now, make it maximized.
   toplevel->Maximize();
   EXPECT_EQ(ui::SHOW_STATE_MAXIMIZED, GetWidgetShowState(toplevel));
@@ -983,7 +1197,6 @@ TEST_F(WidgetTest, ExitFullscreenRestoreState) {
 
   // And it stays maximized after getting out of full screen.
   EXPECT_EQ(ui::SHOW_STATE_MAXIMIZED, GetWidgetShowState(toplevel));
-#endif
 
   // Clean up.
   toplevel->Close();
@@ -1083,9 +1296,10 @@ TEST_F(WidgetTest, BubbleControlsResetOnInit) {
   anchor->CloseNow();
 }
 
-// Desktop native widget Aura tests are for non Chrome OS platforms.
-#if !defined(OS_CHROMEOS)
-// Test to ensure that after minimize, view width is set to zero.
+#if defined(OS_WIN)
+// Test to ensure that after minimize, view width is set to zero. This is only
+// the case for desktop widgets on Windows. Other platforms retain the window
+// size while minimized.
 TEST_F(WidgetTest, TestViewWidthAfterMinimizingWidget) {
   // Create a widget.
   Widget widget;
@@ -1100,11 +1314,17 @@ TEST_F(WidgetTest, TestViewWidthAfterMinimizingWidget) {
   NonClientView* non_client_view = widget.non_client_view();
   NonClientFrameView* frame_view = new MinimumSizeFrameView(&widget);
   non_client_view->SetFrameView(frame_view);
+  // Setting the frame view doesn't do a layout, so force one.
+  non_client_view->Layout();
   widget.Show();
+  EXPECT_NE(0, frame_view->width());
   widget.Minimize();
   EXPECT_EQ(0, frame_view->width());
 }
+#endif
 
+// Desktop native widget Aura tests are for non Chrome OS platforms.
+#if !defined(OS_CHROMEOS)
 // This class validates whether paints are received for a visible Widget.
 // To achieve this it overrides the Show and Close methods on the Widget class
 // and sets state whether subsequent paints are expected.
@@ -1889,6 +2109,31 @@ TEST_F(WidgetTest, CloseWidgetWhileAnimating) {
   }
   EXPECT_TRUE(animation_observer.animation_completed());
   EXPECT_EQ(widget_observer.bounds(), bounds);
+}
+
+// Tests that we do not crash when a Widget is destroyed by going out of
+// scope (as opposed to being explicitly deleted by its NativeWidget).
+TEST_F(WidgetTest, NoCrashOnWidgetDelete) {
+  scoped_ptr<Widget> widget(new Widget);
+  Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_POPUP);
+  params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  widget->Init(params);
+}
+
+// Tests that we do not crash when a Widget is destroyed before it finishes
+// processing of pending input events in the message loop.
+TEST_F(WidgetTest, NoCrashOnWidgetDeleteWithPendingEvents) {
+  scoped_ptr<Widget> widget(new Widget);
+  Widget::InitParams params = CreateParams(Widget::InitParams::TYPE_WINDOW);
+  params.bounds = gfx::Rect(0, 0, 200, 200);
+  params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  widget->Init(params);
+  widget->Show();
+
+  ui::test::EventGenerator generator(GetContext(), widget->GetNativeWindow());
+  generator.MoveMouseTo(10, 10);
+  generator.PressTouch();
+  widget.reset();
 }
 
 // A view that consumes mouse-pressed event and gesture-tap-down events.

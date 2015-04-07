@@ -12,6 +12,7 @@
 #include "base/strings/string16.h"
 #include "content/common/content_export.h"
 #include "net/base/network_change_notifier.h"
+#include "ui/base/touch/touch_device.h"
 #include "url/gurl.h"
 
 namespace blink {
@@ -32,11 +33,17 @@ enum EditingBehavior {
   EDITING_BEHAVIOR_LAST = EDITING_BEHAVIOR_ANDROID
 };
 
+// Cache options for V8. See V8CacheOptions.h for information on the options.
 enum V8CacheOptions {
-  V8_CACHE_OPTIONS_OFF,
+  V8_CACHE_OPTIONS_DEFAULT,
   V8_CACHE_OPTIONS_PARSE,
   V8_CACHE_OPTIONS_CODE,
-  V8_CACHE_OPTIONS_LAST = V8_CACHE_OPTIONS_CODE
+  V8_CACHE_OPTIONS_CODE_COMPRESSED,
+  V8_CACHE_OPTIONS_NONE,
+  V8_CACHE_OPTIONS_PARSE_MEMORY,
+  V8_CACHE_OPTIONS_HEURISTICS,
+  V8_CACHE_OPTIONS_HEURISTICS_MOBILE,
+  V8_CACHE_OPTIONS_LAST = V8_CACHE_OPTIONS_HEURISTICS_MOBILE
 };
 
 enum V8ScriptStreamingMode {
@@ -110,7 +117,6 @@ struct CONTENT_EXPORT WebPreferences {
   bool privileged_webgl_extensions_enabled;
   bool webgl_errors_to_console_enabled;
   bool mock_scrollbars_enabled;
-  bool layer_squashing_enabled;
   bool asynchronous_spell_checking_enabled;
   bool unified_textchecker_enabled;
   bool accelerated_2d_canvas_enabled;
@@ -124,6 +130,10 @@ struct CONTENT_EXPORT WebPreferences {
   bool text_blobs_enabled;
   bool allow_displaying_insecure_content;
   bool allow_running_insecure_content;
+  // Strict mixed content checking disables both displaying and running insecure
+  // mixed content, and disables embedder notifications that such content was
+  // requested (thereby preventing user override).
+  bool strict_mixed_content_checking;
   bool password_echo_enabled;
   bool should_print_backgrounds;
   bool should_clear_document_background;
@@ -131,10 +141,16 @@ struct CONTENT_EXPORT WebPreferences {
   bool css_variables_enabled;
   bool region_based_columns_enabled;
   bool touch_enabled;
+  // TODO(mustaq): Nuke when the new API is ready
   bool device_supports_touch;
+  // TODO(mustaq): Nuke when the new API is ready
   bool device_supports_mouse;
   bool touch_adjustment_enabled;
   int pointer_events_max_touch_points;
+  int available_pointer_types;
+  ui::PointerType primary_pointer_type;
+  int available_hover_types;
+  ui::HoverType primary_hover_type;
   bool sync_xhr_in_documents_enabled;
   bool deferred_image_decoding_enabled;
   bool image_color_profiles_enabled;
@@ -150,6 +166,7 @@ struct CONTENT_EXPORT WebPreferences {
   bool spatial_navigation_enabled;
   bool pinch_virtual_viewport_enabled;
   int pinch_overlay_scrollbar_thickness;
+  bool rubber_banding_on_compositor_thread;
   bool use_solid_color_scrollbars;
   bool navigate_on_drag_drop;
   V8CacheOptions v8_cache_options;

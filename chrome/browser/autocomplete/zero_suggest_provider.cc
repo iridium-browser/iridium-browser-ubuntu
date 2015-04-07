@@ -91,9 +91,11 @@ void ZeroSuggestProvider::RegisterProfilePrefs(
 }
 
 void ZeroSuggestProvider::Start(const AutocompleteInput& input,
-                                bool minimal_changes) {
+                                bool minimal_changes,
+                                bool called_due_to_focus) {
   matches_.clear();
-  if (input.type() == metrics::OmniboxInputType::INVALID)
+  if (!called_due_to_focus ||
+      input.type() == metrics::OmniboxInputType::INVALID)
     return;
 
   Stop(true);
@@ -153,7 +155,7 @@ void ZeroSuggestProvider::Stop(bool clear_cached_results) {
   if (clear_cached_results) {
     // We do not call Clear() on |results_| to retain |verbatim_relevance|
     // value in the |results_| object. |verbatim_relevance| is used at the
-    // beginning of the next StartZeroSuggest() call to determine the current
+    // beginning of the next OnOmniboxFocused() call to determine the current
     // url match relevance.
     results_.suggest_results.clear();
     results_.navigation_results.clear();

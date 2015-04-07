@@ -86,8 +86,16 @@ class RemoteDesktopBrowserTest : public extensions::PlatformAppBrowserTest {
   // Test whether the chromoting extension is installed.
   void VerifyChromotingLoaded(bool expected);
 
-  // Launch the chromoting app.
-  void LaunchChromotingApp();
+  // Launch the Chromoting app. If |defer_start| is true, an additional URL
+  // parameter is passed to the application, causing it to defer start-up
+  // until StartChromotingApp is invoked. Test code can execute arbitrary
+  // JavaScript in the context of the app between these two calls, for example
+  // to set up appropriate mocks.
+  void LaunchChromotingApp(bool defer_start);
+
+  // If the Chromoting app was launched in deferred mode, tell it to continue
+  // its regular start-up sequence.
+  void StartChromotingApp();
 
   // Authorize: grant extended access permission to the user's computer.
   void Authorize();
@@ -134,6 +142,10 @@ class RemoteDesktopBrowserTest : public extensions::PlatformAppBrowserTest {
 
   // Install the chromoting extension
   void Install();
+
+  // Load the browser-test support JavaScript files, including helper functions
+  // and mocks.
+  void LoadBrowserTestJavaScript(content::WebContents* content);
 
   // Perform all necessary steps (installation, authorization, authentication,
   // expanding the me2me section) so that the app is ready for a me2me
@@ -223,19 +235,16 @@ class RemoteDesktopBrowserTest : public extensions::PlatformAppBrowserTest {
 
   // Helper to construct the starting URL of the installed chromoting webapp.
   GURL Chromoting_Main_URL() {
-    if (is_platform_app())
-      // The v2 remoting app recently (M38 at the latest) started adding a
-      // query-string parameter to the main extension page. So we'll create a
-      // different expected URL for it.
-      return GURL("chrome-extension://" + ChromotingID() +
-        "/main.html?isKioskSession=false");
-    else
-      return GURL("chrome-extension://" + ChromotingID() + "/main.html");
+    return GURL("chrome-extension://" + ChromotingID() + "/main.html");
   }
 
-  // Helper to retrieve the current URL in the active WebContents.
+  // Helper to retrieve the current URL in the active WebContents. This function
+  // strips all query parameters from the URL.
   GURL GetCurrentURL() {
-    return active_web_contents()->GetURL();
+    GURL current_url = active_web_contents()->GetURL();
+    GURL::Replacements strip_query;
+    strip_query.ClearQuery();
+    return current_url.ReplaceComponents(strip_query);
   }
 
   // Helpers to execute JavaScript code on a web page.
@@ -311,6 +320,9 @@ class RemoteDesktopBrowserTest : public extensions::PlatformAppBrowserTest {
 
   // Checking whether the localHost has been initialized.
   bool IsLocalHostReady();
+
+  // Checking whether the hosts list has been initialized.
+  bool IsHostListReady();
 
   // Callback used by EnterPin to check whether the pin form is visible
   // and to dismiss the host-needs-update dialog.

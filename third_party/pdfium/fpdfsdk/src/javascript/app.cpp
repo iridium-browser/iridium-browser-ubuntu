@@ -480,23 +480,7 @@ FX_BOOL app::popUpMenuEx(OBJ_METHOD_PARAMS)
 
 FX_BOOL app::fs(OBJ_PROP_PARAMS)
 {
-#ifdef FOXIT_CHROME_BUILD
 	return FALSE;
-#else
-	CJS_Context* pContext = (CJS_Context*)cc;
-	ASSERT(pContext != NULL);
-	CJS_Runtime* pRuntime = pContext->GetJSRuntime();
-	ASSERT(pRuntime != NULL);
-
-	if (vp.IsGetting())
-	{
-		return TRUE;
-	}
-	else
-	{
-		return TRUE;
-	}
-#endif
 }
 
 FX_BOOL app::setInterval(OBJ_METHOD_PARAMS)
@@ -512,7 +496,7 @@ FX_BOOL app::setInterval(OBJ_METHOD_PARAMS)
 	CJS_Runtime* pRuntime = pContext->GetJSRuntime();
 	ASSERT(pRuntime != NULL);
 
-	CFX_WideString script = params.size() > 0 ?  (FX_LPCWSTR)(params[0].operator CFX_WideString()) : (FX_LPCWSTR)L"";
+	CFX_WideString script = params.size() > 0 ?  (FX_LPCWSTR)(params[0].operator CFX_WideString()) : L"";
 	if (script.IsEmpty()) 
 	{
 		sError = JSGetStringFromID((CJS_Context*)cc, IDS_STRING_JSAFNUMBER_KEYSTROKE);
@@ -561,7 +545,7 @@ FX_BOOL app::setTimeOut(OBJ_METHOD_PARAMS)
 	CJS_Runtime* pRuntime = pContext->GetJSRuntime();
 	ASSERT(pRuntime != NULL);
 	
-	CFX_WideString script = params.size() > 0 ?  (FX_LPCWSTR)(params[0].operator CFX_WideString()) : (FX_LPCWSTR)L"";
+	CFX_WideString script = params.size() > 0 ?  (FX_LPCWSTR)(params[0].operator CFX_WideString()) : L"";
 	if (script.IsEmpty()) 
 	{
 		sError = JSGetStringFromID((CJS_Context*)cc, IDS_STRING_JSAFNUMBER_KEYSTROKE);
@@ -813,7 +797,7 @@ FX_BOOL app::mailMsg(OBJ_METHOD_PARAMS)
 	ASSERT(pApp != NULL);
 
 	pRuntime->BeginBlock();
-	pApp->JS_docmailForm(NULL, 0, bUI, (FX_LPCWSTR)cTo, (FX_LPCWSTR)cSubject, (FX_LPCWSTR)cCc, (FX_LPCWSTR)cBcc, (FX_LPCWSTR)cMsg);
+	pApp->JS_docmailForm(NULL, 0, bUI, cTo.c_str(), cSubject.c_str(), cCc.c_str(), cBcc.c_str(), cMsg.c_str());
 	///////////////////////////////////////////////////////////////////////////////////////////////
 	pRuntime->EndBlock();
 
@@ -989,7 +973,7 @@ CFX_WideString app::PDFPathToSysPath(const CFX_WideString& sOldPath)
 		wchar_t c_Drive = strOPath.GetAt(1);
 		if ((c_Drive >= L'a' && c_Drive <= L'z' )||( c_Drive >= L'A' && c_Drive <= L'Z'))
 		{
-			strOPath.Replace((FX_LPCWSTR)L"/",(FX_LPCWSTR)L"\\");
+			strOPath.Replace(L"/",L"\\");
 			//strOPath.SetAt(0,'');
 			strOPath.Insert(2,':');
 			strOPath.Delete(0);
@@ -1030,11 +1014,7 @@ FX_BOOL app::response(OBJ_METHOD_PARAMS)
 {
 	CFX_WideString swQuestion = L"";
 	CFX_WideString swLabel = L"";
-#ifndef FOXIT_CHROME_BUILD
-	CFX_WideString swTitle = L"Foxit";
-#else
 	CFX_WideString swTitle = L"PDF";
-#endif
 	CFX_WideString swDefault = L"";
 	bool bPassWord = false;
 

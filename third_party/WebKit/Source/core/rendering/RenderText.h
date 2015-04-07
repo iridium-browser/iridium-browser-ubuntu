@@ -61,7 +61,8 @@ public:
     String plainText() const;
 
     InlineTextBox* createInlineTextBox(int start, unsigned short length);
-    void dirtyLineBoxes(bool fullLayout);
+    void dirtyOrDeleteLineBoxesIfNeeded(bool fullLayout);
+    void dirtyLineBoxes();
 
     virtual void absoluteRects(Vector<IntRect>&, const LayoutPoint& accumulatedOffset) const override final;
     void absoluteRectsForRange(Vector<IntRect>&, unsigned startOffset = 0, unsigned endOffset = INT_MAX, bool useSelectionHeight = false, bool* wasFixed = 0);
@@ -163,7 +164,7 @@ private:
     // callers with a RenderObject* can continue to use length().
     virtual unsigned length() const override final { return textLength(); }
 
-    virtual void paint(PaintInfo&, const LayoutPoint&) override final { ASSERT_NOT_REACHED(); }
+    virtual void paint(const PaintInfo&, const LayoutPoint&) override final { ASSERT_NOT_REACHED(); }
     virtual void layout() override final { ASSERT_NOT_REACHED(); }
     virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const HitTestLocation&, const LayoutPoint&, HitTestAction) override final { ASSERT_NOT_REACHED(); return false; }
 
@@ -174,7 +175,7 @@ private:
 
     void secureText(UChar mask);
 
-    bool isText() const WTF_DELETED_FUNCTION; // This will catch anyone doing an unnecessary check.
+    bool isText() const = delete; // This will catch anyone doing an unnecessary check.
 
     virtual LayoutRect clippedOverflowRectForPaintInvalidation(const RenderLayerModelObject* paintInvalidationContainer, const PaintInvalidationState* = 0) const override;
 

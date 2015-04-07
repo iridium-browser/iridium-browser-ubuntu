@@ -32,8 +32,8 @@
 #define LayoutRect_h
 
 #include "platform/geometry/IntRect.h"
-#include "platform/geometry/LayoutBoxExtent.h"
 #include "platform/geometry/LayoutPoint.h"
+#include "platform/geometry/LayoutRectOutsets.h"
 #include "wtf/Vector.h"
 
 namespace blink {
@@ -88,23 +88,29 @@ public:
     LayoutPoint center() const { return LayoutPoint(x() + width() / 2, y() + height() / 2); }
 
     void move(const LayoutSize& size) { m_location += size; }
+    void move(const IntSize& size) { m_location.move(size.width(), size.height()); }
     void moveBy(const LayoutPoint& offset) { m_location.move(offset.x(), offset.y()); }
     void move(LayoutUnit dx, LayoutUnit dy) { m_location.move(dx, dy); }
 
     void expand(const LayoutSize& size) { m_size += size; }
-    void expand(const LayoutBoxExtent& box)
+    void expand(const LayoutRectOutsets& box)
     {
         m_location.move(-box.left(), -box.top());
         m_size.expand(box.left() + box.right(), box.top() + box.bottom());
     }
     void expand(LayoutUnit dw, LayoutUnit dh) { m_size.expand(dw, dh); }
-    void contract(const LayoutSize& size) { m_size -= size; }
-    void contract(const LayoutBoxExtent& box)
+    void expandEdges(LayoutUnit top, LayoutUnit right, LayoutUnit bottom, LayoutUnit left)
     {
-        m_location.move(box.left(), box.top());
-        m_size.shrink(box.left() + box.right(), box.top() + box.bottom());
+        m_location.move(-left, -top);
+        m_size.expand(left + right, top + bottom);
     }
+    void contract(const LayoutSize& size) { m_size -= size; }
     void contract(LayoutUnit dw, LayoutUnit dh) { m_size.expand(-dw, -dh); }
+    void contractEdges(LayoutUnit top, LayoutUnit right, LayoutUnit bottom, LayoutUnit left)
+    {
+        m_location.move(left, top);
+        m_size.shrink(left + right, top + bottom);
+    }
 
     void shiftXEdgeTo(LayoutUnit edge)
     {
@@ -166,7 +172,16 @@ public:
     static LayoutRect infiniteRect()
     {
         // Return a rect that is slightly smaller than the true max rect to allow pixelSnapping to round up to the nearest IntRect without overflowing.
-        return LayoutRect(LayoutUnit::nearlyMin() / 2, LayoutUnit::nearlyMin() / 2, LayoutUnit::nearlyMax(), LayoutUnit::nearlyMax());
+        // FIXME(crbug.com/440143): Remove this hack.
+        static LayoutRect infiniteRect(LayoutUnit::nearlyMin() / 2, LayoutUnit::nearlyMin() / 2, LayoutUnit::nearlyMax(), LayoutUnit::nearlyMax());
+        return infiniteRect;
+    }
+
+    static IntRect infiniteIntRect()
+    {
+        // Due to saturated arithemetic this value is not the same as LayoutRect(IntRect(INT_MIN/2, INT_MIN/2, INT_MAX/2, INT_MAX/2)).
+        static IntRect infiniteIntRect(infiniteRect());
+        return infiniteIntRect;
     }
 
 #ifndef NDEBUG

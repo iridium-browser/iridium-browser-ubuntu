@@ -59,10 +59,10 @@ class RendererAccessibilityTest : public RenderViewTest {
     const IPC::Message* message =
         sink_->GetUniqueMessageMatching(AccessibilityHostMsg_Events::ID);
     ASSERT_TRUE(message);
-    Tuple2<std::vector<AccessibilityHostMsg_EventParams>, int> param;
+    Tuple<std::vector<AccessibilityHostMsg_EventParams>, int> param;
     AccessibilityHostMsg_Events::Read(message, &param);
-    ASSERT_GE(param.a.size(), 1U);
-    *params = param.a[0];
+    ASSERT_GE(get<0>(param).size(), 1U);
+    *params = get<0>(param)[0];
   }
 
   int CountAccessibilityNodesSentToBrowser() {
@@ -178,7 +178,8 @@ TEST_F(RendererAccessibilityTest,
   accessibility->HandleAXEvent(
       root_obj,
       ui::AX_EVENT_VALUE_CHANGED);
-  view()->GetMainRenderFrame()->OnSwapOut(kProxyRoutingId);
+  view()->GetMainRenderFrame()->OnSwapOut(kProxyRoutingId, true,
+                                          content::FrameReplicationState());
   accessibility->SendPendingAccessibilityEvents();
   EXPECT_FALSE(sink_->GetUniqueMessageMatching(
       AccessibilityHostMsg_Events::ID));
@@ -404,9 +405,9 @@ TEST_F(RendererAccessibilityTest, EventOnObjectNotInTree) {
   const IPC::Message* message =
       sink_->GetUniqueMessageMatching(AccessibilityHostMsg_Events::ID);
   ASSERT_TRUE(message);
-  Tuple2<std::vector<AccessibilityHostMsg_EventParams>, int> param;
+  Tuple<std::vector<AccessibilityHostMsg_EventParams>, int> param;
   AccessibilityHostMsg_Events::Read(message, &param);
-  ASSERT_EQ(0U, param.a.size());
+  ASSERT_EQ(0U, get<0>(param).size());
 }
 
 }  // namespace content

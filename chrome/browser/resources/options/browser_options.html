@@ -164,7 +164,7 @@
                   pref="hotword.always_on_search_enabled" type="checkbox">
               <span i18n-content="hotwordSearchEnable"></span>
             </label>
-            <a target="_blank" class="hotword-learn-more-link"
+            <a target="_blank" class="hotword-link"
                 i18n-content="learnMore"
                 i18n-values="href:hotwordLearnMoreURL">
             </a>
@@ -187,7 +187,7 @@
                   pref="hotword.search_enabled_2" type="checkbox">
               <span i18n-content="hotwordSearchEnable"></span>
             </label>
-            <a target="_blank" class="hotword-learn-more-link"
+            <a target="_blank" class="hotword-link"
                 i18n-content="learnMore"
                 i18n-values="href:hotwordLearnMoreURL">
             </a>
@@ -200,12 +200,20 @@
             </div>
           </div>
         </div>
-        <div id="audio-logging" hidden>
-          <div class="checkbox controlled-setting-with-label">
-            <label>
-              <input pref="hotword.audio_history_enabled" type="checkbox">
-              <span i18n-content="hotwordAudioHistoryEnable"></span>
+        <div id="audio-history" hidden>
+          <div class="settings-row">
+            <label class="hotword-audio-history">
+              <span id="audio-history-label"></span>
             </label>
+            <a target="_blank" class="hotword-link"
+               i18n-content="hotwordAudioHistoryManage"
+               i18n-values="href:hotwordManageAudioHistoryURL">
+            </a>
+          </div>
+          <div class="settings-row" id="audio-history-always-on-description">
+            <span class="hotword-description"
+                  i18n-content="hotwordAlwaysOnAudioHistoryDescription">
+            </span>
           </div>
         </div>
       </div>
@@ -284,13 +292,14 @@
           <select class="control"
               i18n-options="timezoneList" data-type="string"
               pref="cros.system.timezone"
-              aria-labelledby="timezone-value-label"></select>
+              aria-labelledby="timezone-value-label"
+              metric="Options_TimezoneSelect"></select>
         </div>
       </div>
       <div class="checkbox settings-row">
         <label>
           <input id="use-24hour-clock" pref="settings.clock.use_24hour_clock"
-              type="checkbox">
+              metric="Options_Use24HourClockCheckbox" type="checkbox">
           <span i18n-content="use24HourClock"></span>
         </label>
       </div>
@@ -472,6 +481,22 @@
           </label>
         </div>
       </div>
+<if expr="chromeos">
+      <div id="wake-on-wifi" hidden
+          class="checkbox controlled-setting-with-label">
+        <label>
+          <input id="wake-on-wifi-checkbox" type="checkbox"
+              metric="Options_WakeOnWifiSsid"
+              pref="settings.internet.wake_on_wifi_ssid">
+          <span>
+            <span i18n-content="wakeOnWifiLabel"></span>
+            <span id="wake-on-wifi-indicator"
+                class="controlled-setting-indicator"
+                pref="settings.internet.wake_on_wifi_ssid"></span>
+          </span>
+        </label>
+      </div>
+</if>
     </div>
   </section>
 <if expr="chromeos">
@@ -482,7 +507,8 @@
     <div id="bluetooth-options-div">
       <div class="checkbox">
         <label>
-          <input type="checkbox" id="enable-bluetooth">
+          <input type="checkbox" id="enable-bluetooth"
+                 metric="Options_BluetoothEnabled">
           <span i18n-content="enableBluetooth">
         </label>
       </div>

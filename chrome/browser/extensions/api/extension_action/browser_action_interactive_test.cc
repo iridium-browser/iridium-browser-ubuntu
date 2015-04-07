@@ -7,7 +7,7 @@
 #include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_tab_util.h"
+#include "chrome/browser/extensions/extension_toolbar_model.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
@@ -100,12 +100,9 @@ IN_PROC_BROWSER_TEST_F(BrowserActionInteractiveTest, TestOpenPopup) {
         browser()->OpenURL(content::OpenURLParams(
             GURL("about:"), content::Referrer(), NEW_WINDOW,
             ui::PAGE_TRANSITION_TYPED, false)));
-#if defined(OS_WIN)
-    // Hide all the buttons to test that it opens even when browser action is
-    // in the overflow bucket.
-    // TODO(justinlin): Implement for other platforms.
-    browserActionBar.SetIconVisibilityCount(0);
-#endif
+    // Hide all the buttons to test that it opens even when the browser action
+    // is in the overflow bucket.
+    extensions::ExtensionToolbarModel::Get(profile())->SetVisibleIconCount(0);
     frame_observer.Wait();
   }
 
@@ -336,10 +333,9 @@ IN_PROC_BROWSER_TEST_F(BrowserActionInteractiveTest,
   EXPECT_EQ(TRUE, ::IsWindow(hwnd));
 
   // Create a new browser window to prevent the message loop from terminating.
-  Browser* new_browser = chrome::FindBrowserWithWebContents(
-      browser()->OpenURL(content::OpenURLParams(
-          GURL("about:"), content::Referrer(), NEW_WINDOW,
-          ui::PAGE_TRANSITION_TYPED, false)));
+  browser()->OpenURL(content::OpenURLParams(GURL("about:"), content::Referrer(),
+                                            NEW_WINDOW,
+                                            ui::PAGE_TRANSITION_TYPED, false));
 
   // Forcibly closing the browser HWND should not cause a crash.
   EXPECT_EQ(TRUE, ::CloseWindow(hwnd));

@@ -250,7 +250,7 @@ bool RLZTracker::InitRlzFromProfileDelayed(Profile* profile,
   // iOS does not have a notion of startpages.
   SessionStartupPref session_startup_prefs =
       StartupBrowserCreator::GetSessionStartupPref(
-          *CommandLine::ForCurrentProcess(), profile);
+          *base::CommandLine::ForCurrentProcess(), profile);
   if (session_startup_prefs.type == SessionStartupPref::URLS) {
     is_google_in_startpages =
         std::count_if(session_startup_prefs.urls.begin(),
@@ -288,7 +288,7 @@ bool RLZTracker::Init(bool first_run,
   send_ping_immediately_ = send_ping_immediately;
 
   // Enable zero delays for testing.
-  if (CommandLine::ForCurrentProcess()->HasSwitch(::switches::kTestType))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(::switches::kTestType))
     EnableZeroDelayForTesting();
 
   delay = std::min(kMaxInitDelay, std::max(min_init_delay_, delay));
@@ -570,7 +570,7 @@ bool RLZTracker::GetAccessPointRlzImpl(rlz_lib::AccessPoint point,
   if (!rlz_lib::GetAccessPointRlz(point, str_rlz, rlz_lib::kMaxRlzLength))
     return false;
 
-  base::string16 rlz_local(base::ASCIIToUTF16(std::string(str_rlz)));
+  base::string16 rlz_local(base::ASCIIToUTF16(str_rlz));
   if (rlz)
     *rlz = rlz_local;
 

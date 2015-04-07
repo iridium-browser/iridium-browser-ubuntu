@@ -36,9 +36,7 @@ scoped_refptr<ContentLayer> ContentLayer::Create(ContentLayerClient* client) {
 }
 
 ContentLayer::ContentLayer(ContentLayerClient* client)
-    : TiledLayer(),
-      client_(client),
-      can_use_lcd_text_last_frame_(can_use_lcd_text()) {
+    : TiledLayer(), client_(client) {
 }
 
 ContentLayer::~ContentLayer() {}
@@ -57,13 +55,6 @@ void ContentLayer::SetLayerTreeHost(LayerTreeHost* host) {
 
   if (!updater_.get())
     return;
-
-  if (host) {
-    updater_->set_rendering_stats_instrumentation(
-        host->rendering_stats_instrumentation());
-  } else {
-    updater_->set_rendering_stats_instrumentation(nullptr);
-  }
 }
 
 void ContentLayer::SetTexturePriorities(
@@ -81,7 +72,6 @@ bool ContentLayer::Update(ResourceUpdateQueue* queue,
                                                   true);
 
     CreateUpdaterIfNeeded();
-    UpdateCanUseLCDText();
   }
 
   bool updated = TiledLayer::Update(queue, occlusion);
@@ -108,7 +98,6 @@ void ContentLayer::CreateUpdaterIfNeeded() {
   } else {
     updater_ = BitmapContentLayerUpdater::Create(
         painter.Pass(),
-        rendering_stats_instrumentation(),
         id());
   }
   updater_->SetOpaque(contents_opaque());
@@ -124,15 +113,6 @@ void ContentLayer::SetContentsOpaque(bool opaque) {
   Layer::SetContentsOpaque(opaque);
   if (updater_.get())
     updater_->SetOpaque(opaque);
-}
-
-void ContentLayer::UpdateCanUseLCDText() {
-  if (can_use_lcd_text_last_frame_ == can_use_lcd_text())
-    return;
-
-  can_use_lcd_text_last_frame_ = can_use_lcd_text();
-  if (client_)
-    client_->DidChangeLayerCanUseLCDText();
 }
 
 bool ContentLayer::SupportsLCDText() const {

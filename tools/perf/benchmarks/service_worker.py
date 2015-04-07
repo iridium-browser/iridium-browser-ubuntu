@@ -85,8 +85,9 @@ class _ServiceWorkerTimelineMetric(object):
 class _ServiceWorkerMeasurement(page_test.PageTest):
   """Measure Speed Index and TRACE_EVENTs"""
 
-  def __init__(self, *args, **kwargs):
-    super(_ServiceWorkerMeasurement, self).__init__(*args, **kwargs)
+  def __init__(self):
+    super(_ServiceWorkerMeasurement, self).__init__(
+        action_name_to_run='RunPageInteractions')
     self._timeline_controller = timeline_controller.TimelineController()
     self._speed_index = speedindex.SpeedIndexMetric()
     self._page_open_times = collections.defaultdict(int)
@@ -103,7 +104,7 @@ class _ServiceWorkerMeasurement(page_test.PageTest):
 
   def ValidateAndMeasurePage(self, page, tab, results):
     tab.WaitForDocumentReadyStateToBeComplete(40)
-    self._timeline_controller.Stop(tab)
+    self._timeline_controller.Stop(tab, results)
 
     # Retrieve TRACE_EVENTs
     timeline_metric = _ServiceWorkerTimelineMetric()
@@ -137,9 +138,9 @@ class _ServiceWorkerMeasurement(page_test.PageTest):
 class _ServiceWorkerMicroBenchmarkMeasurement(page_test.PageTest):
   """Measure JS land values and TRACE_EVENTs"""
 
-  def __init__(self, *args, **kwargs):
-    super(_ServiceWorkerMicroBenchmarkMeasurement, self).__init__(*args,
-                                                                  **kwargs)
+  def __init__(self):
+    super(_ServiceWorkerMicroBenchmarkMeasurement, self).__init__(
+        action_name_to_run='RunPageInteractions')
     self._timeline_controller = timeline_controller.TimelineController()
 
   def CustomizeBrowserOptions(self, options):
@@ -153,7 +154,7 @@ class _ServiceWorkerMicroBenchmarkMeasurement(page_test.PageTest):
 
   def ValidateAndMeasurePage(self, page, tab, results):
     tab.WaitForJavaScriptExpression('window.done', 40)
-    self._timeline_controller.Stop(tab)
+    self._timeline_controller.Stop(tab, results)
 
     # Measure JavaScript-land
     json = tab.EvaluateJavaScript('window.results || {}')
@@ -173,16 +174,22 @@ class _ServiceWorkerMicroBenchmarkMeasurement(page_test.PageTest):
         browser_process, 'IOThread', filter_text , results)
 
 
-@benchmark.Enabled('android')
 class ServiceWorkerPerfTest(benchmark.Benchmark):
   """Performance test on public applications using ServiceWorker"""
   test = _ServiceWorkerMeasurement
   page_set = page_sets.ServiceWorkerPageSet
 
 
-# FIXME(nhiroki): Temporary disable the benchmark (http://crbug.com/430232).
-@benchmark.Disabled
+# Disabled due to redness on the tree. crbug.com/442752
+@benchmark.Disabled('reference', 'xp')
 class ServiceWorkerMicroBenchmarkPerfTest(benchmark.Benchmark):
-  """Service Worker performance test using a micro benchmark page set"""
+  """This test measures the performance of pages using ServiceWorker.
+
+  As a page set, two benchamrk pages (many registration, many concurrent
+  fetching) and one application (Trained-to-thrill:
+  https://jakearchibald.github.io/trained-to-thrill/) are included. Execution
+  time of these pages will be shown as Speed Index, and TRACE_EVENTs are
+  subsidiary information to know more detail performance regression.
+  """
   test = _ServiceWorkerMicroBenchmarkMeasurement
   page_set = page_sets.ServiceWorkerMicroBenchmarkPageSet

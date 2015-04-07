@@ -63,9 +63,6 @@ void testTokens(const String& string, const CSSParserToken& token1, const CSSPar
 
     Vector<CSSParserToken> actualTokens;
     CSSTokenizer::tokenize(string, actualTokens);
-    ASSERT_FALSE(actualTokens.isEmpty());
-    ASSERT_EQ(EOFToken, actualTokens.last().type());
-    actualTokens.removeLast();
 
     ASSERT_EQ(expectedTokens.size(), actualTokens.size());
     for (size_t i = 0; i < expectedTokens.size(); ++i)
@@ -73,6 +70,7 @@ void testTokens(const String& string, const CSSParserToken& token1, const CSSPar
 }
 
 static CSSParserToken ident(const String& string) { return CSSParserToken(IdentToken, string); }
+static CSSParserToken atKeyword(const String& string) { return CSSParserToken(AtKeywordToken, string); }
 static CSSParserToken string(const String& string) { return CSSParserToken(StringToken, string); }
 static CSSParserToken function(const String& string) { return CSSParserToken(FunctionToken, string); }
 static CSSParserToken url(const String& string) { return CSSParserToken(UrlToken, string); }
@@ -103,6 +101,12 @@ DEFINE_STATIC_LOCAL(CSSParserToken, whitespace, (WhitespaceToken));
 DEFINE_STATIC_LOCAL(CSSParserToken, colon, (ColonToken));
 DEFINE_STATIC_LOCAL(CSSParserToken, semicolon, (SemicolonToken));
 DEFINE_STATIC_LOCAL(CSSParserToken, comma, (CommaToken));
+DEFINE_STATIC_LOCAL(CSSParserToken, includeMatch, (IncludeMatchToken));
+DEFINE_STATIC_LOCAL(CSSParserToken, dashMatch, (DashMatchToken));
+DEFINE_STATIC_LOCAL(CSSParserToken, prefixMatch, (PrefixMatchToken));
+DEFINE_STATIC_LOCAL(CSSParserToken, suffixMatch, (SuffixMatchToken));
+DEFINE_STATIC_LOCAL(CSSParserToken, substringMatch, (SubstringMatchToken));
+DEFINE_STATIC_LOCAL(CSSParserToken, column, (ColumnToken));
 DEFINE_STATIC_LOCAL(CSSParserToken, leftParenthesis, (LeftParenthesisToken));
 DEFINE_STATIC_LOCAL(CSSParserToken, rightParenthesis, (RightParenthesisToken));
 DEFINE_STATIC_LOCAL(CSSParserToken, leftBracket, (LeftBracketToken));
@@ -135,14 +139,31 @@ TEST(CSSTokenizerTest, SingleCharacterTokens)
     TEST_TOKENS(",,", comma, comma);
 }
 
+TEST(CSSTokenizerTest, MultipleCharacterTokens)
+{
+    TEST_TOKENS("~=", includeMatch);
+    TEST_TOKENS("|=", dashMatch);
+    TEST_TOKENS("^=", prefixMatch);
+    TEST_TOKENS("$=", suffixMatch);
+    TEST_TOKENS("*=", substringMatch);
+    TEST_TOKENS("||", column);
+    TEST_TOKENS("|||", column, delim('|'));
+}
+
 TEST(CSSTokenizerTest, DelimiterToken)
 {
+    TEST_TOKENS("^", delim('^'));
     TEST_TOKENS("*", delim('*'));
     TEST_TOKENS("%", delim('%'));
     TEST_TOKENS("~", delim('~'));
     TEST_TOKENS("&", delim('&'));
+    TEST_TOKENS("|", delim('|'));
     TEST_TOKENS("\x7f", delim('\x7f'));
     TEST_TOKENS("\1", delim('\x1'));
+    TEST_TOKENS("~-", delim('~'), delim('-'));
+    TEST_TOKENS("^|", delim('^'), delim('|'));
+    TEST_TOKENS("$~", delim('$'), delim('~'));
+    TEST_TOKENS("*^", delim('*'), delim('^'));
 }
 
 TEST(CSSTokenizerTest, WhitespaceTokens)
@@ -220,23 +241,43 @@ TEST(CSSTokenizerTest, FunctionToken)
     TEST_TOKENS("url(  \'bar.gif\'", function("url"), string("bar.gif"));
 }
 
+TEST(CSSTokenizerTest, AtKeywordToken)
+{
+    TEST_TOKENS("@at-keyword", atKeyword("at-keyword"));
+    TEST_TOKENS("@testing123", atKeyword("testing123"));
+    TEST_TOKENS("@hello!", atKeyword("hello"), delim('!'));
+    TEST_TOKENS("@-text", atKeyword("-text"));
+    TEST_TOKENS("@--abc", atKeyword("--abc"));
+    TEST_TOKENS("@--", atKeyword("--"));
+    TEST_TOKENS("@--11", atKeyword("--11"));
+    TEST_TOKENS("@---", atKeyword("---"));
+    TEST_TOKENS("@\\ ", atKeyword(" "));
+    TEST_TOKENS("@-\\ ", atKeyword("- "));
+    TEST_TOKENS("@@", delim('@'), delim('@'));
+    TEST_TOKENS("@2", delim('@'), number(IntegerValueType, 2));
+    TEST_TOKENS("@-1", delim('@'), number(IntegerValueType, -1));
+}
+
 TEST(CSSTokenizerTest, UrlToken)
 {
     TEST_TOKENS("url(foo.gif)", url("foo.gif"));
-    TEST_TOKENS("url(https://example.com/cats.png)", url("https://example.com/cats.png"));
-    TEST_TOKENS("url(what-a.crazy^URL~this\\ is!)", url("what-a.crazy^URL~this is!"));
-    TEST_TOKENS("url(123#test)", url("123#test"));
-    TEST_TOKENS("url(escapes\\ \\\"\\'\\)\\()", url("escapes \"')("));
-    TEST_TOKENS("url(   whitespace   )", url("whitespace"));
-    TEST_TOKENS("url( whitespace-eof ", url("whitespace-eof"));
-    TEST_TOKENS("url(eof)", url("eof"));
-    TEST_TOKENS("url(white space),", badUrl, comma);
-    TEST_TOKENS("url(b(ad),", badUrl, comma);
-    TEST_TOKENS("url(ba'd):", badUrl, colon);
-    TEST_TOKENS("url(b\"ad):", badUrl, colon);
-    TEST_TOKENS("url(b\"ad):", badUrl, colon);
-    TEST_TOKENS("url(b\\\rad):", badUrl, colon);
+    TEST_TOKENS("urL(https://example.com/cats.png)", url("https://example.com/cats.png"));
+    TEST_TOKENS("uRl(what-a.crazy^URL~this\\ is!)", url("what-a.crazy^URL~this is!"));
+    TEST_TOKENS("uRL(123#test)", url("123#test"));
+    TEST_TOKENS("Url(escapes\\ \\\"\\'\\)\\()", url("escapes \"')("));
+    TEST_TOKENS("UrL(   whitespace   )", url("whitespace"));
+    TEST_TOKENS("URl( whitespace-eof ", url("whitespace-eof"));
+    TEST_TOKENS("URL(eof", url("eof"));
+    TEST_TOKENS("url(not/*a*/comment)", url("not/*a*/comment"));
+    TEST_TOKENS("urL()", url(""));
+    TEST_TOKENS("uRl(white space),", badUrl, comma);
+    TEST_TOKENS("Url(b(ad),", badUrl, comma);
+    TEST_TOKENS("uRl(ba'd):", badUrl, colon);
+    TEST_TOKENS("urL(b\"ad):", badUrl, colon);
+    TEST_TOKENS("uRl(b\"ad):", badUrl, colon);
+    TEST_TOKENS("Url(b\\\rad):", badUrl, colon);
     TEST_TOKENS("url(b\\\nad):", badUrl, colon);
+    TEST_TOKENS("url(/*'bad')*/", badUrl, delim('*'), delim('/'));
     TEST_TOKENS("url(ba'd\\\\))", badUrl, rightParenthesis);
 }
 
@@ -313,7 +354,7 @@ TEST(CSSTokenizerTest, DimensionToken)
     TEST_TOKENS("5\\ ", dimension(IntegerValueType, 5, " "));
     TEST_TOKENS("40\\70\\78", dimension(IntegerValueType, 40, "px"));
     TEST_TOKENS("4e3e2", dimension(NumberValueType, 4000, "e2"));
-    TEST_TOKENS("0x10px", dimension(IntegerValueType, 0, "x1px"));
+    TEST_TOKENS("0x10px", dimension(IntegerValueType, 0, "x10px"));
     TEST_TOKENS("4unit ", dimension(IntegerValueType, 4, "unit"), whitespace);
     TEST_TOKENS("5e+", dimension(IntegerValueType, 5, "e"), delim('+'));
     TEST_TOKENS("2e.5", dimension(IntegerValueType, 2, "e"), number(NumberValueType, 0.5));

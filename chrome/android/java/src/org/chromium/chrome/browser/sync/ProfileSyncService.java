@@ -17,7 +17,7 @@ import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.identity.UniqueIdentificationGenerator;
 import org.chromium.chrome.browser.invalidation.InvalidationServiceFactory;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.sync.internal_api.pub.SyncDecryptionPassphraseType;
+import org.chromium.sync.internal_api.pub.PassphraseType;
 import org.chromium.sync.internal_api.pub.base.ModelType;
 
 import java.util.HashSet;
@@ -137,26 +137,6 @@ public class ProfileSyncService {
         syncStateChanged();
     }
 
-    /**
-     * Signs in to sync, using the existing auth token.
-     */
-    @Deprecated
-    public void syncSignIn(String account) {
-        syncSignIn();
-    }
-
-    /**
-     * Signs in to sync.
-     *
-     * @param account   The username of the account that is signing in.
-     * @param authToken Not used. ProfileSyncService switched to OAuth2 tokens.
-     * Deprecated. Use syncSignIn instead.
-     */
-    @Deprecated
-    public void syncSignInWithAuthToken(String account, String authToken) {
-        syncSignIn(account);
-    }
-
     // TODO(maxbogue): Remove once downstream use is removed. See http://crbug.com/259559.
     // Callers should use InvalidationService.requestSyncFromNativeChromeForAllTypes() instead.
     @Deprecated
@@ -178,49 +158,29 @@ public class ProfileSyncService {
         ThreadUtils.assertOnUiThread();
         String uniqueTag = generator.getUniqueId(null);
         if (uniqueTag.isEmpty()) {
-            Log.e(TAG, "Unable to get unique tag for sync. " +
-                    "This may lead to unexpected tab sync behavior.");
+            Log.e(TAG, "Unable to get unique tag for sync. "
+                    + "This may lead to unexpected tab sync behavior.");
             return;
         }
         String sessionTag = SESSION_TAG_PREFIX + uniqueTag;
         if (!nativeSetSyncSessionsId(mNativeProfileSyncServiceAndroid, sessionTag)) {
-            Log.e(TAG, "Unable to write session sync tag. " +
-                    "This may lead to unexpected tab sync behavior.");
+            Log.e(TAG, "Unable to write session sync tag. "
+                    + "This may lead to unexpected tab sync behavior.");
         }
     }
 
     /**
-     * Checks if a password or a passphrase is required for decryption of sync data.
+     * Returns the actual passphrase type being used for encryption.
+     * The sync backend must be running (isSyncInitialized() returns true) before
+     * calling this function.
      * <p/>
-     * Returns NONE if the state is unavailable, or decryption passphrase/password is not required.
-     *
-     * @return the enum describing the decryption passphrase type required
+     * This method should only be used if you want to know the raw value. For checking whether
+     * we should ask the user for a passphrase, use isPassphraseRequiredForDecryption().
      */
-    public SyncDecryptionPassphraseType getSyncDecryptionPassphraseTypeIfRequired() {
-        // ProfileSyncService::IsUsingSecondaryPassphrase() requires the sync backend to be
-        // initialized, and that happens just after OnPassphraseRequired(). Therefore, we need to
-        // guard that call with a check of the sync backend since we can not be sure which
-        // passphrase type we should tell the user we need.
-        // This is tracked in:
-        // http://code.google.com/p/chromium/issues/detail?id=108127
-        if (isSyncInitialized() && isPassphraseRequiredForDecryption()) {
-            return getSyncDecryptionPassphraseType();
-        }
-        return SyncDecryptionPassphraseType.NONE;
-    }
-
-    /**
-     * Returns the actual passphrase type being used for encryption. The sync backend must be
-     * running (isSyncInitialized() returns true) before calling this function.
-     * <p/>
-     * This method should only be used if you want to know the raw value. For checking whether we
-     * should ask the user for a passphrase, you should instead use
-     * getSyncDecryptionPassphraseTypeIfRequired().
-     */
-    public SyncDecryptionPassphraseType getSyncDecryptionPassphraseType() {
+    public PassphraseType getPassphraseType() {
         assert isSyncInitialized();
         int passphraseType = nativeGetPassphraseType(mNativeProfileSyncServiceAndroid);
-        return SyncDecryptionPassphraseType.fromInternalValue(passphraseType);
+        return PassphraseType.fromInternalValue(passphraseType);
     }
 
     public boolean isSyncKeystoreMigrationDone() {
@@ -420,6 +380,9 @@ public class ProfileSyncService {
         }
         if ((modelTypeSelection & ModelTypeSelection.SUPERVISED_USER_SETTING) != 0) {
             syncTypes.add(ModelType.MANAGED_USER_SETTING);
+        }
+        if ((modelTypeSelection & ModelTypeSelection.SUPERVISED_USER_WHITELIST) != 0) {
+            syncTypes.add(ModelType.MANAGED_USER_WHITELIST);
         }
         return syncTypes;
     }

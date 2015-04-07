@@ -12,7 +12,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/scoped_observer.h"
-#include "chrome/browser/tab_contents/background_contents.h"
+#include "chrome/browser/background/background_contents.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -109,6 +109,7 @@ class BackgroundContentsService : private content::NotificationObserver,
   BackgroundContents* CreateBackgroundContents(
       content::SiteInstance* site,
       int route_id,
+      int main_frame_route_id,
       Profile* profile,
       const base::string16& frame_name,
       const base::string16& application_id,

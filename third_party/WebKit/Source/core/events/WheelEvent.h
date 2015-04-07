@@ -27,22 +27,12 @@
 
 #include "core/events/EventDispatchMediator.h"
 #include "core/events/MouseEvent.h"
+#include "core/events/WheelEventInit.h"
 #include "platform/geometry/FloatPoint.h"
 
 namespace blink {
 
 class PlatformWheelEvent;
-
-struct WheelEventInit : public MouseEventInit {
-    WheelEventInit();
-
-    double deltaX;
-    double deltaY;
-    double deltaZ;
-    int wheelDeltaX; // Deprecated.
-    int wheelDeltaY; // Deprecated.
-    unsigned deltaMode;
-};
 
 class WheelEvent final : public MouseEvent {
     DEFINE_WRAPPERTYPEINFO();
@@ -67,11 +57,11 @@ public:
 
     static PassRefPtrWillBeRawPtr<WheelEvent> create(const FloatPoint& wheelTicks,
         const FloatPoint& rawDelta, unsigned deltaMode, PassRefPtrWillBeRawPtr<AbstractView> view,
-        const IntPoint& screenLocation, const IntPoint& pageLocation,
-        bool ctrlKey, bool altKey, bool shiftKey, bool metaKey)
+        const IntPoint& screenLocation, const IntPoint& windowLocation,
+        bool ctrlKey, bool altKey, bool shiftKey, bool metaKey, unsigned short buttons, bool canScroll, bool hasPreciseScrollingDeltas)
     {
         return adoptRefWillBeNoop(new WheelEvent(wheelTicks, rawDelta, deltaMode, view,
-        screenLocation, pageLocation, ctrlKey, altKey, shiftKey, metaKey));
+            screenLocation, windowLocation, ctrlKey, altKey, shiftKey, metaKey, buttons, canScroll, hasPreciseScrollingDeltas));
     }
 
     double deltaX() const { return m_deltaX; } // Positive when scrolling right.
@@ -83,6 +73,8 @@ public:
     unsigned deltaMode() const { return m_deltaMode; }
     float ticksX() const { return static_cast<float>(m_wheelDelta.x()) / TickMultiplier; }
     float ticksY() const { return static_cast<float>(m_wheelDelta.y()) / TickMultiplier; }
+    bool canScroll() const { return m_canScroll; }
+    bool hasPreciseScrollingDeltas() const { return m_hasPreciseScrollingDeltas; }
 
     virtual const AtomicString& interfaceName() const override;
     virtual bool isMouseEvent() const override;
@@ -94,14 +86,16 @@ private:
     WheelEvent();
     WheelEvent(const AtomicString&, const WheelEventInit&);
     WheelEvent(const FloatPoint& wheelTicks, const FloatPoint& rawDelta,
-        unsigned, PassRefPtrWillBeRawPtr<AbstractView>, const IntPoint& screenLocation, const IntPoint& pageLocation,
-        bool ctrlKey, bool altKey, bool shiftKey, bool metaKey);
+        unsigned, PassRefPtrWillBeRawPtr<AbstractView>, const IntPoint& screenLocation, const IntPoint& windowLocation,
+        bool ctrlKey, bool altKey, bool shiftKey, bool metaKey, unsigned short buttons, bool canScroll, bool hasPreciseScrollingDeltas);
 
     IntPoint m_wheelDelta;
     double m_deltaX;
     double m_deltaY;
     double m_deltaZ;
     unsigned m_deltaMode;
+    bool m_canScroll;
+    bool m_hasPreciseScrollingDeltas;
 };
 
 DEFINE_EVENT_TYPE_CASTS(WheelEvent);
@@ -111,8 +105,8 @@ public:
     static PassRefPtrWillBeRawPtr<WheelEventDispatchMediator> create(const PlatformWheelEvent&, PassRefPtrWillBeRawPtr<AbstractView>);
 private:
     WheelEventDispatchMediator(const PlatformWheelEvent&, PassRefPtrWillBeRawPtr<AbstractView>);
-    WheelEvent* event() const;
-    virtual bool dispatchEvent(EventDispatcher*) const override;
+    WheelEvent& event() const;
+    virtual bool dispatchEvent(EventDispatcher&) const override;
 };
 
 } // namespace blink

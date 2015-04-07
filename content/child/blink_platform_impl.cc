@@ -30,11 +30,15 @@
 #include "blink/public/resources/grit/blink_resources.h"
 #include "content/app/resources/grit/content_resources.h"
 #include "content/app/strings/grit/content_strings.h"
+#include "content/child/bluetooth/web_bluetooth_impl.h"
 #include "content/child/child_thread.h"
 #include "content/child/content_child_helpers.h"
 #include "content/child/geofencing/web_geofencing_provider_impl.h"
+#include "content/child/navigator_connect/navigator_connect_provider.h"
 #include "content/child/notifications/notification_dispatcher.h"
 #include "content/child/notifications/notification_manager.h"
+#include "content/child/push_messaging/push_dispatcher.h"
+#include "content/child/push_messaging/push_provider.h"
 #include "content/child/thread_safe_sender.h"
 #include "content/child/web_discardable_memory_impl.h"
 #include "content/child/web_gesture_curve_impl.h"
@@ -55,10 +59,6 @@
 #include "third_party/WebKit/public/platform/WebWaitableEvent.h"
 #include "third_party/WebKit/public/web/WebSecurityOrigin.h"
 #include "ui/base/layout.h"
-
-#if !defined(NO_TCMALLOC) && defined(USE_TCMALLOC) && !defined(OS_WIN)
-#include "third_party/tcmalloc/chromium/src/gperftools/heap-profiler.h"
-#endif
 
 using blink::WebData;
 using blink::WebFallbackThemeEngine;
@@ -243,8 +243,10 @@ static int ToMessageID(WebLocalizedString::Name name) {
       return IDS_AX_MEDIA_PLAY_BUTTON_HELP;
     case WebLocalizedString::AXMediaPauseButtonHelp:
       return IDS_AX_MEDIA_PAUSE_BUTTON_HELP;
-    case WebLocalizedString::AXMediaSliderHelp:
-      return IDS_AX_MEDIA_SLIDER_HELP;
+    case WebLocalizedString::AXMediaAudioSliderHelp:
+      return IDS_AX_MEDIA_AUDIO_SLIDER_HELP;
+    case WebLocalizedString::AXMediaVideoSliderHelp:
+      return IDS_AX_MEDIA_VIDEO_SLIDER_HELP;
     case WebLocalizedString::AXMediaSliderThumbHelp:
       return IDS_AX_MEDIA_SLIDER_THUMB_HELP;
     case WebLocalizedString::AXMediaCurrentTimeDisplayHelp:
@@ -418,19 +420,42 @@ static int ToMessageID(WebLocalizedString::Name name) {
 }
 
 BlinkPlatformImpl::BlinkPlatformImpl()
-    : main_loop_(base::MessageLoop::current()),
+    : main_thread_task_runner_(base::MessageLoopProxy::current()),
       shared_timer_func_(NULL),
       shared_timer_fire_time_(0.0),
       shared_timer_fire_time_was_set_while_suspended_(false),
       shared_timer_suspended_(0),
       current_thread_slot_(&DestroyCurrentThread) {
+  InternalInit();
+}
+
+BlinkPlatformImpl::BlinkPlatformImpl(
+    scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner)
+    : main_thread_task_runner_(main_thread_task_runner),
+      shared_timer_func_(NULL),
+      shared_timer_fire_time_(0.0),
+      shared_timer_fire_time_was_set_while_suspended_(false),
+      shared_timer_suspended_(0),
+      current_thread_slot_(&DestroyCurrentThread) {
+  // TODO(alexclarke): Use c++11 delegated constructors when allowed.
+  InternalInit();
+}
+
+void BlinkPlatformImpl::InternalInit() {
   // ChildThread may not exist in some tests.
   if (ChildThread::current()) {
     geofencing_provider_.reset(new WebGeofencingProviderImpl(
         ChildThread::current()->thread_safe_sender()));
+    bluetooth_.reset(
+        new WebBluetoothImpl(ChildThread::current()->thread_safe_sender()));
     thread_safe_sender_ = ChildThread::current()->thread_safe_sender();
     notification_dispatcher_ =
         ChildThread::current()->notification_dispatcher();
+    push_dispatcher_ = ChildThread::current()->push_dispatcher();
+  }
+
+  if (main_thread_task_runner_.get()) {
+    shared_timer_.SetTaskRunner(main_thread_task_runner_);
   }
 }
 
@@ -442,7 +467,8 @@ WebURLLoader* BlinkPlatformImpl::createURLLoader() {
   // There may be no child thread in RenderViewTests.  These tests can still use
   // data URLs to bypass the ResourceDispatcher.
   return new WebURLLoaderImpl(
-      child_thread ? child_thread->resource_dispatcher() : NULL);
+      child_thread ? child_thread->resource_dispatcher() : NULL,
+      MainTaskRunnerForCurrentThread());
 }
 
 blink::WebSocketHandle* BlinkPlatformImpl::createWebSocketHandle() {
@@ -490,12 +516,12 @@ blink::WebThread* BlinkPlatformImpl::currentThread() {
   if (thread)
     return (thread);
 
-  scoped_refptr<base::MessageLoopProxy> message_loop =
-      base::MessageLoopProxy::current();
-  if (!message_loop.get())
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner =
+      MainTaskRunnerForCurrentThread();
+  if (!task_runner.get())
     return NULL;
 
-  thread = new WebThreadImplForMessageLoop(message_loop.get());
+  thread = new WebThreadImplForMessageLoop(task_runner);
   current_thread_slot_.Set(thread);
   return thread;
 }
@@ -851,6 +877,8 @@ const DataResource kDataResources[] = {
     ui::SCALE_FACTOR_NONE },
   { "DocumentExecCommand.js", IDR_PRIVATE_SCRIPT_DOCUMENTEXECCOMMAND_JS,
     ui::SCALE_FACTOR_NONE },
+  { "DocumentXMLTreeViewer.css", IDR_PRIVATE_SCRIPT_DOCUMENTXMLTREEVIEWER_CSS,
+    ui::SCALE_FACTOR_NONE },
   { "DocumentXMLTreeViewer.js", IDR_PRIVATE_SCRIPT_DOCUMENTXMLTREEVIEWER_JS,
     ui::SCALE_FACTOR_NONE },
   { "HTMLMarqueeElement.js", IDR_PRIVATE_SCRIPT_HTMLMARQUEEELEMENT_JS,
@@ -994,17 +1022,20 @@ void BlinkPlatformImpl::stopSharedTimer() {
 
 void BlinkPlatformImpl::callOnMainThread(
     void (*func)(void*), void* context) {
-  main_loop_->PostTask(FROM_HERE, base::Bind(func, context));
+  main_thread_task_runner_->PostTask(FROM_HERE, base::Bind(func, context));
 }
 
 blink::WebGestureCurve* BlinkPlatformImpl::createFlingAnimationCurve(
     blink::WebGestureDevice device_source,
     const blink::WebFloatPoint& velocity,
     const blink::WebSize& cumulative_scroll) {
-  auto curve = WebGestureCurveImpl::CreateFromDefaultPlatformCurve(
-      gfx::Vector2dF(velocity.x, velocity.y),
-      gfx::Vector2dF(cumulative_scroll.width, cumulative_scroll.height));
-  return curve.release();
+  bool is_main_thread =
+      main_thread_task_runner_.get() &&
+      main_thread_task_runner_->BelongsToCurrentThread();
+  return WebGestureCurveImpl::CreateFromDefaultPlatformCurve(
+             gfx::Vector2dF(velocity.x, velocity.y),
+             gfx::Vector2dF(cumulative_scroll.width, cumulative_scroll.height),
+             is_main_thread).release();
 }
 
 void BlinkPlatformImpl::didStartWorkerRunLoop(
@@ -1027,6 +1058,10 @@ blink::WebGeofencingProvider* BlinkPlatformImpl::geofencingProvider() {
   return geofencing_provider_.get();
 }
 
+blink::WebBluetooth* BlinkPlatformImpl::bluetooth() {
+  return bluetooth_.get();
+}
+
 blink::WebNotificationManager*
 BlinkPlatformImpl::notificationManager() {
   if (!thread_safe_sender_.get() || !notification_dispatcher_.get())
@@ -1034,7 +1069,25 @@ BlinkPlatformImpl::notificationManager() {
 
   return NotificationManager::ThreadSpecificInstance(
       thread_safe_sender_.get(),
+      main_thread_task_runner_.get(),
       notification_dispatcher_.get());
+}
+
+blink::WebPushProvider* BlinkPlatformImpl::pushProvider() {
+  if (!thread_safe_sender_.get() || !push_dispatcher_.get())
+    return nullptr;
+
+  return PushProvider::ThreadSpecificInstance(thread_safe_sender_.get(),
+                                              push_dispatcher_.get());
+}
+
+blink::WebNavigatorConnectProvider*
+BlinkPlatformImpl::navigatorConnectProvider() {
+  if (!thread_safe_sender_.get())
+    return nullptr;
+
+  return NavigatorConnectProvider::ThreadSpecificInstance(
+      thread_safe_sender_.get(), main_thread_task_runner_);
 }
 
 WebThemeEngine* BlinkPlatformImpl::themeEngine() {
@@ -1127,38 +1180,6 @@ size_t BlinkPlatformImpl::numberOfProcessors() {
   return static_cast<size_t>(base::SysInfo::NumberOfProcessors());
 }
 
-void BlinkPlatformImpl::startHeapProfiling(
-  const blink::WebString& prefix) {
-  // FIXME(morrita): Make this built on windows.
-#if !defined(NO_TCMALLOC) && defined(USE_TCMALLOC) && !defined(OS_WIN)
-  HeapProfilerStart(prefix.utf8().data());
-#endif
-}
-
-void BlinkPlatformImpl::stopHeapProfiling() {
-#if !defined(NO_TCMALLOC) && defined(USE_TCMALLOC) && !defined(OS_WIN)
-  HeapProfilerStop();
-#endif
-}
-
-void BlinkPlatformImpl::dumpHeapProfiling(
-  const blink::WebString& reason) {
-#if !defined(NO_TCMALLOC) && defined(USE_TCMALLOC) && !defined(OS_WIN)
-  HeapProfilerDump(reason.utf8().data());
-#endif
-}
-
-WebString BlinkPlatformImpl::getHeapProfile() {
-#if !defined(NO_TCMALLOC) && defined(USE_TCMALLOC) && !defined(OS_WIN)
-  char* data = GetHeapProfile();
-  WebString result = WebString::fromUTF8(std::string(data));
-  free(data);
-  return result;
-#else
-  return WebString();
-#endif
-}
-
 bool BlinkPlatformImpl::processMemorySizesInBytes(
     size_t* private_bytes,
     size_t* shared_bytes) {
@@ -1212,6 +1233,16 @@ void BlinkPlatformImpl::ResumeSharedTimer() {
     shared_timer_fire_time_was_set_while_suspended_ = false;
     setSharedTimerFireInterval(
         shared_timer_fire_time_ - monotonicallyIncreasingTime());
+  }
+}
+
+scoped_refptr<base::SingleThreadTaskRunner>
+BlinkPlatformImpl::MainTaskRunnerForCurrentThread() {
+  if (main_thread_task_runner_.get() &&
+      main_thread_task_runner_->BelongsToCurrentThread()) {
+    return main_thread_task_runner_;
+  } else {
+    return base::MessageLoopProxy::current();
   }
 }
 

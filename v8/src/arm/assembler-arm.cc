@@ -127,6 +127,11 @@ void CpuFeatures::ProbeImpl(bool cross_compile) {
   }
 
   if (FLAG_enable_32dregs && cpu.has_vfp3_d32()) supported_ |= 1u << VFP32DREGS;
+
+  if (cpu.implementer() == base::CPU::NVIDIA &&
+      cpu.variant() == base::CPU::NVIDIA_DENVER) {
+    supported_ |= 1u << COHERENT_CACHE;
+  }
 #endif
 
   DCHECK(!IsSupported(VFP3) || IsSupported(ARMv7));
@@ -188,14 +193,15 @@ void CpuFeatures::PrintTarget() {
 void CpuFeatures::PrintFeatures() {
   printf(
     "ARMv7=%d VFP3=%d VFP32DREGS=%d NEON=%d SUDIV=%d UNALIGNED_ACCESSES=%d "
-    "MOVW_MOVT_IMMEDIATE_LOADS=%d",
+    "MOVW_MOVT_IMMEDIATE_LOADS=%d COHERENT_CACHE=%d",
     CpuFeatures::IsSupported(ARMv7),
     CpuFeatures::IsSupported(VFP3),
     CpuFeatures::IsSupported(VFP32DREGS),
     CpuFeatures::IsSupported(NEON),
     CpuFeatures::IsSupported(SUDIV),
     CpuFeatures::IsSupported(UNALIGNED_ACCESSES),
-    CpuFeatures::IsSupported(MOVW_MOVT_IMMEDIATE_LOADS));
+    CpuFeatures::IsSupported(MOVW_MOVT_IMMEDIATE_LOADS),
+    CpuFeatures::IsSupported(COHERENT_CACHE));
 #ifdef __arm__
   bool eabi_hardfloat = base::OS::ArmUsingHardFloat();
 #elif USE_EABI_HARDFLOAT
@@ -1798,71 +1804,119 @@ void Assembler::pkhtb(Register dst,
 }
 
 
-void Assembler::uxtb(Register dst,
-                     const Operand& src,
-                     Condition cond) {
+void Assembler::sxtb(Register dst, Register src, int rotate, Condition cond) {
+  // Instruction details available in ARM DDI 0406C.b, A8.8.233.
+  // cond(31-28) | 01101010(27-20) | 1111(19-16) |
+  // Rd(15-12) | rotate(11-10) | 00(9-8)| 0111(7-4) | Rm(3-0)
+  DCHECK(!dst.is(pc));
+  DCHECK(!src.is(pc));
+  DCHECK(rotate == 0 || rotate == 8 || rotate == 16 || rotate == 24);
+  emit(cond | 0x6A * B20 | 0xF * B16 | dst.code() * B12 |
+       ((rotate >> 1) & 0xC) * B8 | 7 * B4 | src.code());
+}
+
+
+void Assembler::sxtab(Register dst, Register src1, Register src2, int rotate,
+                      Condition cond) {
+  // Instruction details available in ARM DDI 0406C.b, A8.8.233.
+  // cond(31-28) | 01101010(27-20) | Rn(19-16) |
+  // Rd(15-12) | rotate(11-10) | 00(9-8)| 0111(7-4) | Rm(3-0)
+  DCHECK(!dst.is(pc));
+  DCHECK(!src1.is(pc));
+  DCHECK(!src2.is(pc));
+  DCHECK(rotate == 0 || rotate == 8 || rotate == 16 || rotate == 24);
+  emit(cond | 0x6A * B20 | src1.code() * B16 | dst.code() * B12 |
+       ((rotate >> 1) & 0xC) * B8 | 7 * B4 | src2.code());
+}
+
+
+void Assembler::sxth(Register dst, Register src, int rotate, Condition cond) {
+  // Instruction details available in ARM DDI 0406C.b, A8.8.235.
+  // cond(31-28) | 01101011(27-20) | 1111(19-16) |
+  // Rd(15-12) | rotate(11-10) | 00(9-8)| 0111(7-4) | Rm(3-0)
+  DCHECK(!dst.is(pc));
+  DCHECK(!src.is(pc));
+  DCHECK(rotate == 0 || rotate == 8 || rotate == 16 || rotate == 24);
+  emit(cond | 0x6B * B20 | 0xF * B16 | dst.code() * B12 |
+       ((rotate >> 1) & 0xC) * B8 | 7 * B4 | src.code());
+}
+
+
+void Assembler::sxtah(Register dst, Register src1, Register src2, int rotate,
+                      Condition cond) {
+  // Instruction details available in ARM DDI 0406C.b, A8.8.235.
+  // cond(31-28) | 01101011(27-20) | Rn(19-16) |
+  // Rd(15-12) | rotate(11-10) | 00(9-8)| 0111(7-4) | Rm(3-0)
+  DCHECK(!dst.is(pc));
+  DCHECK(!src1.is(pc));
+  DCHECK(!src2.is(pc));
+  DCHECK(rotate == 0 || rotate == 8 || rotate == 16 || rotate == 24);
+  emit(cond | 0x6B * B20 | src1.code() * B16 | dst.code() * B12 |
+       ((rotate >> 1) & 0xC) * B8 | 7 * B4 | src2.code());
+}
+
+
+void Assembler::uxtb(Register dst, Register src, int rotate, Condition cond) {
   // Instruction details available in ARM DDI 0406C.b, A8.8.274.
   // cond(31-28) | 01101110(27-20) | 1111(19-16) |
   // Rd(15-12) | rotate(11-10) | 00(9-8)| 0111(7-4) | Rm(3-0)
   DCHECK(!dst.is(pc));
-  DCHECK(!src.rm().is(pc));
-  DCHECK(!src.rm().is(no_reg));
-  DCHECK(src.rs().is(no_reg));
-  DCHECK((src.shift_imm_ == 0) ||
-         (src.shift_imm_ == 8) ||
-         (src.shift_imm_ == 16) ||
-         (src.shift_imm_ == 24));
-  // Operand maps ROR #0 to LSL #0.
-  DCHECK((src.shift_op() == ROR) ||
-         ((src.shift_op() == LSL) && (src.shift_imm_ == 0)));
-  emit(cond | 0x6E*B20 | 0xF*B16 | dst.code()*B12 |
-       ((src.shift_imm_ >> 1)&0xC)*B8 | 7*B4 | src.rm().code());
+  DCHECK(!src.is(pc));
+  DCHECK(rotate == 0 || rotate == 8 || rotate == 16 || rotate == 24);
+  emit(cond | 0x6E * B20 | 0xF * B16 | dst.code() * B12 |
+       ((rotate >> 1) & 0xC) * B8 | 7 * B4 | src.code());
 }
 
 
-void Assembler::uxtab(Register dst,
-                      Register src1,
-                      const Operand& src2,
+void Assembler::uxtab(Register dst, Register src1, Register src2, int rotate,
                       Condition cond) {
   // Instruction details available in ARM DDI 0406C.b, A8.8.271.
   // cond(31-28) | 01101110(27-20) | Rn(19-16) |
   // Rd(15-12) | rotate(11-10) | 00(9-8)| 0111(7-4) | Rm(3-0)
   DCHECK(!dst.is(pc));
   DCHECK(!src1.is(pc));
-  DCHECK(!src2.rm().is(pc));
-  DCHECK(!src2.rm().is(no_reg));
-  DCHECK(src2.rs().is(no_reg));
-  DCHECK((src2.shift_imm_ == 0) ||
-         (src2.shift_imm_ == 8) ||
-         (src2.shift_imm_ == 16) ||
-         (src2.shift_imm_ == 24));
-  // Operand maps ROR #0 to LSL #0.
-  DCHECK((src2.shift_op() == ROR) ||
-         ((src2.shift_op() == LSL) && (src2.shift_imm_ == 0)));
-  emit(cond | 0x6E*B20 | src1.code()*B16 | dst.code()*B12 |
-       ((src2.shift_imm_ >> 1) &0xC)*B8 | 7*B4 | src2.rm().code());
+  DCHECK(!src2.is(pc));
+  DCHECK(rotate == 0 || rotate == 8 || rotate == 16 || rotate == 24);
+  emit(cond | 0x6E * B20 | src1.code() * B16 | dst.code() * B12 |
+       ((rotate >> 1) & 0xC) * B8 | 7 * B4 | src2.code());
 }
 
 
-void Assembler::uxtb16(Register dst,
-                       const Operand& src,
-                       Condition cond) {
+void Assembler::uxtb16(Register dst, Register src, int rotate, Condition cond) {
   // Instruction details available in ARM DDI 0406C.b, A8.8.275.
   // cond(31-28) | 01101100(27-20) | 1111(19-16) |
   // Rd(15-12) | rotate(11-10) | 00(9-8)| 0111(7-4) | Rm(3-0)
   DCHECK(!dst.is(pc));
-  DCHECK(!src.rm().is(pc));
-  DCHECK(!src.rm().is(no_reg));
-  DCHECK(src.rs().is(no_reg));
-  DCHECK((src.shift_imm_ == 0) ||
-         (src.shift_imm_ == 8) ||
-         (src.shift_imm_ == 16) ||
-         (src.shift_imm_ == 24));
-  // Operand maps ROR #0 to LSL #0.
-  DCHECK((src.shift_op() == ROR) ||
-         ((src.shift_op() == LSL) && (src.shift_imm_ == 0)));
-  emit(cond | 0x6C*B20 | 0xF*B16 | dst.code()*B12 |
-       ((src.shift_imm_ >> 1)&0xC)*B8 | 7*B4 | src.rm().code());
+  DCHECK(!src.is(pc));
+  DCHECK(rotate == 0 || rotate == 8 || rotate == 16 || rotate == 24);
+  emit(cond | 0x6C * B20 | 0xF * B16 | dst.code() * B12 |
+       ((rotate >> 1) & 0xC) * B8 | 7 * B4 | src.code());
+}
+
+
+void Assembler::uxth(Register dst, Register src, int rotate, Condition cond) {
+  // Instruction details available in ARM DDI 0406C.b, A8.8.276.
+  // cond(31-28) | 01101111(27-20) | 1111(19-16) |
+  // Rd(15-12) | rotate(11-10) | 00(9-8)| 0111(7-4) | Rm(3-0)
+  DCHECK(!dst.is(pc));
+  DCHECK(!src.is(pc));
+  DCHECK(rotate == 0 || rotate == 8 || rotate == 16 || rotate == 24);
+  emit(cond | 0x6F * B20 | 0xF * B16 | dst.code() * B12 |
+       ((rotate >> 1) & 0xC) * B8 | 7 * B4 | src.code());
+}
+
+
+void Assembler::uxtah(Register dst, Register src1, Register src2, int rotate,
+                      Condition cond) {
+  // Instruction details available in ARM DDI 0406C.b, A8.8.273.
+  // cond(31-28) | 01101111(27-20) | Rn(19-16) |
+  // Rd(15-12) | rotate(11-10) | 00(9-8)| 0111(7-4) | Rm(3-0)
+  DCHECK(!dst.is(pc));
+  DCHECK(!src1.is(pc));
+  DCHECK(!src2.is(pc));
+  DCHECK(rotate == 0 || rotate == 8 || rotate == 16 || rotate == 24);
+  emit(cond | 0x6F * B20 | src1.code() * B16 | dst.code() * B12 |
+       ((rotate >> 1) & 0xC) * B8 | 7 * B4 | src2.code());
 }
 
 
@@ -2437,6 +2491,12 @@ void  Assembler::vstm(BlockAddrMode am,
 }
 
 
+void Assembler::vmov(const SwVfpRegister dst, float imm) {
+  mov(ip, Operand(bit_cast<int32_t>(imm)));
+  vmov(dst, ip);
+}
+
+
 static void DoubleAsTwoUInt32(double d, uint32_t* lo, uint32_t* hi) {
   uint64_t i;
   memcpy(&i, &d, 8);
@@ -2545,27 +2605,20 @@ void Assembler::vmov(const DwVfpRegister dst,
     uint32_t lo, hi;
     DoubleAsTwoUInt32(imm, &lo, &hi);
 
-    if (scratch.is(no_reg)) {
-      if (dst.code() < 16) {
-        const LowDwVfpRegister loc = LowDwVfpRegister::from_code(dst.code());
-        // Move the low part of the double into the lower of the corresponsing S
-        // registers of D register dst.
-        mov(ip, Operand(lo));
-        vmov(loc.low(), ip);
-
-        // Move the high part of the double into the higher of the
-        // corresponsing S registers of D register dst.
-        mov(ip, Operand(hi));
-        vmov(loc.high(), ip);
+    if (lo == hi) {
+      // Move the low and high parts of the double to a D register in one
+      // instruction.
+      mov(ip, Operand(lo));
+      vmov(dst, ip, ip);
+    } else if (scratch.is(no_reg)) {
+      mov(ip, Operand(lo));
+      vmov(dst, VmovIndexLo, ip);
+      if ((lo & 0xffff) == (hi & 0xffff)) {
+        movt(ip, hi >> 16);
       } else {
-        // D16-D31 does not have S registers, so move the low and high parts
-        // directly to the D register using vmov.32.
-        // Note: This may be slower, so we only do this when we have to.
-        mov(ip, Operand(lo));
-        vmov(dst, VmovIndexLo, ip);
         mov(ip, Operand(hi));
-        vmov(dst, VmovIndexHi, ip);
       }
+      vmov(dst, VmovIndexHi, ip);
     } else {
       // Move the low and high parts of the double to a D register in one
       // instruction.

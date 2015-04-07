@@ -14,7 +14,6 @@
 #include "SkDeviceProperties.h"
 #include "SkDraw.h"
 #include "SkFontDescriptor.h"
-#include "SkFontHost.h"
 #include "SkGlyphCache.h"
 #include "SkImageFilter.h"
 #include "SkMaskFilter.h"
@@ -1237,12 +1236,26 @@ void SkPaint::getPosTextPath(const void* textData, size_t length,
     }
 }
 
+SkRect SkPaint::getFontBounds() const {
+    SkMatrix m;
+    m.setScale(fTextSize * fTextScaleX, fTextSize);
+    m.postSkew(fTextSkewX, 0);
+
+    SkTypeface* typeface = this->getTypeface();
+    if (NULL == typeface) {
+        typeface = SkTypeface::GetDefaultTypeface();
+    }
+
+    SkRect bounds;
+    m.mapRect(&bounds, typeface->getBounds());
+    return bounds;
+}
+
 static void add_flattenable(SkDescriptor* desc, uint32_t tag,
                             SkWriteBuffer* buffer) {
     buffer->writeToMemory(desc->addEntry(tag, buffer->bytesWritten(), NULL));
 }
 
-// SkFontHost can override this choice in FilterRec()
 static SkMask::Format computeMaskFormat(const SkPaint& paint) {
     uint32_t flags = paint.getFlags();
 
@@ -1407,7 +1420,7 @@ void SkScalerContext::MakeRec(const SkPaint& paint,
 
     rec->fMaskFormat = SkToU8(computeMaskFormat(paint));
 
-    if (SkMask::kLCD16_Format == rec->fMaskFormat || SkMask::kLCD32_Format == rec->fMaskFormat) {
+    if (SkMask::kLCD16_Format == rec->fMaskFormat) {
         if (too_big_for_lcd(*rec, checkPost2x2)) {
             rec->fMaskFormat = SkMask::kA8_Format;
             flags |= SkScalerContext::kGenA8FromLCD_Flag;
@@ -1553,8 +1566,7 @@ void SkScalerContext::PostMakeRec(const SkPaint&, SkScalerContext::Rec* rec) {
      *  the lum of one of them.
      */
     switch (rec->fMaskFormat) {
-        case SkMask::kLCD16_Format:
-        case SkMask::kLCD32_Format: {
+        case SkMask::kLCD16_Format: {
             // filter down the luminance color to a finite number of bits
             SkColor color = rec->getLuminanceColor();
             rec->setLuminanceColor(SkMaskGamma::CanonicalColor(color));
@@ -1800,11 +1812,10 @@ static uint32_t pack_4(unsigned a, unsigned b, unsigned c, unsigned d) {
 #endif
 
 enum FlatFlags {
-    kHasTypeface_FlatFlag                      = 0x01,
-    kHasEffects_FlatFlag                       = 0x02,
-    kHasNonDefaultPaintOptionsAndroid_FlatFlag = 0x04,
+    kHasTypeface_FlatFlag = 0x1,
+    kHasEffects_FlatFlag  = 0x2,
 
-    kFlatFlagMask = 0x7,
+    kFlatFlagMask         = 0x3,
 };
 
 enum BitsPerField {
@@ -1837,37 +1848,6 @@ static FlatFlags unpack_paint_flags(SkPaint* paint, uint32_t packed) {
     paint->setHinting((SkPaint::Hinting)((packed >> 14) & BPF_Mask(kHint_BPF)));
     paint->setTextAlign((SkPaint::Align)((packed >> 12) & BPF_Mask(kAlign_BPF)));
     paint->setFilterLevel((SkPaint::FilterLevel)((packed >> 10) & BPF_Mask(kFilter_BPF)));
-    return (FlatFlags)(packed & kFlatFlagMask);
-}
-
-// V22_COMPATIBILITY_CODE
-static FlatFlags unpack_paint_flags_v22(SkPaint* paint, uint32_t packed) {
-    enum {
-        kFilterBitmap_Flag    = 0x02,
-        kHighQualityFilterBitmap_Flag = 0x4000,
-
-        kAll_Flags = kFilterBitmap_Flag | kHighQualityFilterBitmap_Flag
-    };
-
-    // previously flags:16, textAlign:8, flatFlags:8
-    // now flags:16, hinting:4, textAlign:4, flatFlags:8
-    unsigned flags = packed >> 16;
-    int filter = 0;
-    if (flags & kFilterBitmap_Flag) {
-        filter |= 1;
-    }
-    if (flags & kHighQualityFilterBitmap_Flag) {
-        filter |= 2;
-    }
-    paint->setFilterLevel((SkPaint::FilterLevel)filter);
-    flags &= ~kAll_Flags;   // remove these (now dead) bit flags
-
-    paint->setFlags(flags);
-
-    // hinting added later. 0 in this nibble means use the default.
-    uint32_t hinting = (packed >> 12) & 0xF;
-    paint->setHinting(0 == hinting ? SkPaint::kNormal_Hinting : static_cast<SkPaint::Hinting>(hinting-1));
-    paint->setTextAlign(static_cast<SkPaint::Align>((packed >> 8) & 0xF));
     return (FlatFlags)(packed & kFlatFlagMask);
 }
 
@@ -1949,12 +1929,7 @@ void SkPaint::unflatten(SkReadBuffer& buffer) {
     this->setStrokeMiter(read_scalar(pod));
     this->setColor(*pod++);
 
-    unsigned flatFlags = 0;
-    if (buffer.isVersionLT(SkReadBuffer::kFilterLevelIsEnum_Version)) {
-        flatFlags = unpack_paint_flags_v22(this, *pod++);
-    } else {
-        flatFlags = unpack_paint_flags(this, *pod++);
-    }
+    unsigned flatFlags = unpack_paint_flags(this, *pod++);
 
     uint32_t tmp = *pod++;
     this->setStrokeCap(static_cast<Cap>((tmp >> 24) & 0xFF));
@@ -1990,14 +1965,6 @@ void SkPaint::unflatten(SkReadBuffer& buffer) {
         this->setRasterizer(NULL);
         this->setLooper(NULL);
         this->setImageFilter(NULL);
-    }
-
-    if (buffer.isVersionLT(SkReadBuffer::kRemoveAndroidPaintOpts_Version) &&
-            flatFlags & kHasNonDefaultPaintOptionsAndroid_FlatFlag) {
-        SkString tag;
-        buffer.readUInt();
-        buffer.readString(&tag);
-        buffer.readBool();
     }
 }
 
@@ -2193,6 +2160,7 @@ void SkPaint::toString(SkString* str) const {
     SkImageFilter* imageFilter = this->getImageFilter();
     if (imageFilter) {
         str->append("<dt>ImageFilter:</dt><dd>");
+        imageFilter->toString(str);
         str->append("</dd>");
     }
 
@@ -2377,6 +2345,18 @@ bool SkTextToPathIter::next(const SkPath** path, SkScalar* xpos) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
+// return true if the filter exists, and may affect alpha
+static bool affects_alpha(const SkColorFilter* cf) {
+    return cf && !(cf->getFlags() & SkColorFilter::kAlphaUnchanged_Flag);
+}
+
+// return true if the filter exists, and may affect alpha
+static bool affects_alpha(const SkImageFilter* imf) {
+    // TODO: check if we should allow imagefilters to broadcast that they don't affect alpha
+    // ala colorfilters
+    return imf != NULL;
+}
+
 bool SkPaint::nothingToDraw() const {
     if (fLooper) {
         return false;
@@ -2389,7 +2369,10 @@ bool SkPaint::nothingToDraw() const {
             case SkXfermode::kDstOut_Mode:
             case SkXfermode::kDstOver_Mode:
             case SkXfermode::kPlus_Mode:
-                return 0 == this->getAlpha();
+                if (0 == this->getAlpha()) {
+                    return !affects_alpha(fColorFilter) && !affects_alpha(fImageFilter);
+                }
+                break;
             case SkXfermode::kDst_Mode:
                 return true;
             default:

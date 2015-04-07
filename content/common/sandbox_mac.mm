@@ -19,6 +19,7 @@ extern "C" {
 #include "base/files/file_util.h"
 #include "base/files/scoped_file.h"
 #include "base/mac/bundle_locations.h"
+#include "base/mac/foundation_util.h"
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
@@ -31,6 +32,7 @@ extern "C" {
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/sys_info.h"
+#include "content/common/gpu/media/vt_video_decode_accelerator.h"
 #include "content/grit/content_resources.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
@@ -323,6 +325,9 @@ void Sandbox::SandboxWarmup(int sandbox_type) {
     // Preload either the desktop GL or the osmesa so, depending on the
     // --use-gl flag.
     gfx::GLSurface::InitializeOneOff();
+
+    // Preload VideoToolbox.
+    InitializeVideoToolbox();
   }
 
   if (sandbox_type == SANDBOX_TYPE_PPAPI) {

@@ -38,9 +38,6 @@ namespace blink {
 
 class WebString;
 struct WebDeviceEmulationParams;
-struct WebDevToolsMessageData;
-struct WebRect;
-struct WebSize;
 
 class WebDevToolsAgentClient {
 public:
@@ -87,8 +84,6 @@ public:
 
     // Cancel emulation started via |enableDeviceEmulation| call.
     virtual void disableDeviceEmulation() { }
-
-    virtual void setTouchEventEmulationEnabled(bool enabled, bool allowPinch) { }
 
 protected:
     ~WebDevToolsAgentClient() { }

@@ -6,6 +6,7 @@
 
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/process/kill.h"
 #include "base/win/windows_version.h"
 
 namespace base {
@@ -36,6 +37,18 @@ Process Process::Current() {
   Process process;
   process.is_current_process_ = true;
   return process.Pass();
+}
+
+// static
+Process Process::DeprecatedGetProcessFromHandle(ProcessHandle handle) {
+  DCHECK_NE(handle, ::GetCurrentProcess());
+  ProcessHandle out_handle;
+  if (!::DuplicateHandle(GetCurrentProcess(), handle,
+                         GetCurrentProcess(), &out_handle,
+                         0, FALSE, DUPLICATE_SAME_ACCESS)) {
+    return Process();
+  }
+  return Process(out_handle);
 }
 
 // static
@@ -96,6 +109,18 @@ void Process::Terminate(int result_code) {
   TerminateProcessPtr terminate_process = reinterpret_cast<TerminateProcessPtr>(
       GetProcAddress(module, "NtTerminateProcess"));
   terminate_process(Handle(), result_code);
+}
+
+bool Process::WaitForExit(int* exit_code) {
+  return WaitForExitWithTimeout(TimeDelta::FromMilliseconds(INFINITE),
+                                exit_code);
+}
+
+bool Process::WaitForExitWithTimeout(TimeDelta timeout, int* exit_code) {
+  // TODO(rvargas) crbug.com/417532: Move the implementation here.
+  if (timeout > TimeDelta::FromMilliseconds(INFINITE))
+    timeout = TimeDelta::FromMilliseconds(INFINITE);
+  return base::WaitForExitCodeWithTimeout(Handle(), exit_code, timeout);
 }
 
 bool Process::IsProcessBackgrounded() const {

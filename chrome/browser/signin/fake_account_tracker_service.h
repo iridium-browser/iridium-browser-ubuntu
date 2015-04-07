@@ -20,11 +20,18 @@ class FakeAccountTrackerService : public AccountTrackerService {
  public:
   static KeyedService* Build(content::BrowserContext* context);
 
+  void FakeUserInfoFetchSuccess(const std::string& account_id,
+                                const std::string& email,
+                                const std::string& gaia,
+                                const std::string& hosted_domain);
+
  private:
   FakeAccountTrackerService();
   ~FakeAccountTrackerService() override;
 
   void StartFetchingUserInfo(const std::string& account_id) override;
+  void SendRefreshTokenAnnotationRequest(
+      const std::string& account_id) override;
 
   DISALLOW_COPY_AND_ASSIGN(FakeAccountTrackerService);
 };

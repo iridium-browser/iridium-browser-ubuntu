@@ -111,10 +111,12 @@ class TestProfileIOData : public ProfileIOData {
   }
 
   // ProfileIOData overrides:
-  void InitializeInternal(ProfileParams* profile_params,
-                          content::ProtocolHandlerMap* protocol_handlers,
-                          content::URLRequestInterceptorScopedVector
-                              request_interceptors) const override {
+  void InitializeInternal(
+      scoped_ptr<ChromeNetworkDelegate> chrome_network_delegate,
+      ProfileParams* profile_params,
+      content::ProtocolHandlerMap* protocol_handlers,
+      content::URLRequestInterceptorScopedVector
+      request_interceptors) const override {
     NOTREACHED();
   }
   void InitializeExtensionsRequestContext(
@@ -663,7 +665,7 @@ TEST_F(OneClickSigninHelperIncognitoTest, ShowInfoBarUIThreadIncognito) {
 
   OneClickSigninHelper::ShowInfoBarUIThread(
       "session_index", "email", OneClickSigninHelper::AUTO_ACCEPT_ACCEPTED,
-      signin::SOURCE_UNKNOWN, GURL(), process()->GetID(),
+      signin_metrics::SOURCE_UNKNOWN, GURL(), process()->GetID(),
       rvh()->GetRoutingID());
 }
 
@@ -673,7 +675,7 @@ TEST_F(OneClickSigninHelperIncognitoTest, ShowInfoBarUIThreadIncognito) {
 TEST_F(OneClickSigninHelperTest, CleanTransientStateOnNavigate) {
   content::WebContents* contents = web_contents();
 
-  OneClickSigninHelper::CreateForWebContentsWithPasswordManager(contents, NULL);
+  OneClickSigninHelper::CreateForWebContents(contents);
   OneClickSigninHelper* helper =
       OneClickSigninHelper::FromWebContents(contents);
   helper->SetDoNotClearPendingEmailForTesting();
@@ -701,7 +703,7 @@ TEST_F(OneClickSigninHelperTest, NoRedirectToNTPWithPendingEntry) {
   EXPECT_CALL(delegate, OpenURLFromTab(_, _)).Times(0);
   web_contents()->SetDelegate(&delegate);
   OneClickSigninHelper::RedirectToNtpOrAppsPage(
-      web_contents(), signin::SOURCE_UNKNOWN);
+      web_contents(), signin_metrics::SOURCE_UNKNOWN);
 
   EXPECT_EQ(fooWebUIURL, controller.GetPendingEntry()->GetURL());
 }

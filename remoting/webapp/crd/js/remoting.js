@@ -7,8 +7,6 @@
 /** @suppress {duplicate} */
 var remoting = remoting || {};
 
-/** @type {remoting.HostSession} */ remoting.hostSession = null;
-
 /**
  * @type {base.EventSource} An event source object for handling global events.
  *    This is an interim hack.  Eventually, we should move functionalities
@@ -17,98 +15,31 @@ var remoting = remoting || {};
 remoting.testEvents;
 
 /**
- * Show the authorization consent UI and register a one-shot event handler to
- * continue the authorization process.
- *
- * @param {function():void} authContinue Callback to invoke when the user
- *     clicks "Continue".
+ * Initialization tasks that are common to all remoting apps.
  */
-function consentRequired_(authContinue) {
-  /** @type {HTMLElement} */
-  var dialog = document.getElementById('auth-dialog');
-  /** @type {HTMLElement} */
-  var button = document.getElementById('auth-button');
-  var consentGranted = function(event) {
-    dialog.hidden = true;
-    button.removeEventListener('click', consentGranted, false);
-    authContinue();
-  };
-  dialog.hidden = false;
-  button.addEventListener('click', consentGranted, false);
-}
-
-/**
- * Entry point for app initialization.
- */
-remoting.init = function() {
+remoting.initGlobalObjects = function() {
   if (base.isAppsV2()) {
     var htmlNode = /** @type {HTMLElement} */ (document.body.parentNode);
     htmlNode.classList.add('apps-v2');
-  } else {
-    migrateLocalToChromeStorage_();
   }
 
   console.log(remoting.getExtensionInfo());
   l10n.localize();
 
-  // Create global objects.
-  remoting.ClientPlugin.factory = new remoting.DefaultClientPluginFactory();
-  remoting.SessionConnector.factory =
-      new remoting.DefaultSessionConnectorFactory();
-  remoting.settings = new remoting.Settings();
   if (base.isAppsV2()) {
-    remoting.identity = new remoting.Identity(consentRequired_);
     remoting.fullscreen = new remoting.FullscreenAppsV2();
-    remoting.windowFrame = new remoting.WindowFrame(
-        document.getElementById('title-bar'));
-    remoting.optionsMenu = remoting.windowFrame.createOptionsMenu();
   } else {
-    remoting.oauth2 = new remoting.OAuth2();
-    if (!remoting.oauth2.isAuthenticated()) {
-      document.getElementById('auth-dialog').hidden = false;
-    }
-    remoting.identity = remoting.oauth2;
     remoting.fullscreen = new remoting.FullscreenAppsV1();
-    remoting.toolbar = new remoting.Toolbar(
-        document.getElementById('session-toolbar'));
-    remoting.optionsMenu = remoting.toolbar.createOptionsMenu();
   }
+
   remoting.stats = new remoting.ConnectionStats(
       document.getElementById('statistics'));
   remoting.formatIq = new remoting.FormatIq();
-  remoting.hostList = new remoting.HostList(
-      document.getElementById('host-list'),
-      document.getElementById('host-list-empty'),
-      document.getElementById('host-list-error-message'),
-      document.getElementById('host-list-refresh-failed-button'),
-      document.getElementById('host-list-loading-indicator'));
+
   remoting.clipboard = new remoting.Clipboard();
   var sandbox = /** @type {HTMLIFrameElement} */
       document.getElementById('wcs-sandbox');
   remoting.wcsSandbox = new remoting.WcsSandboxContainer(sandbox.contentWindow);
-  var homeFeedback = new remoting.MenuButton(
-      document.getElementById('help-feedback-main'));
-  var toolbarFeedback = new remoting.MenuButton(
-      document.getElementById('help-feedback-toolbar'));
-  remoting.manageHelpAndFeedback(
-      document.getElementById('title-bar'));
-  remoting.manageHelpAndFeedback(
-      document.getElementById('help-feedback-toolbar'));
-  remoting.manageHelpAndFeedback(
-      document.getElementById('help-feedback-main'));
-
-  /** @param {remoting.Error} error */
-  var onGetEmailError = function(error) {
-    // No need to show the error message for NOT_AUTHENTICATED
-    // because we will show "auth-dialog".
-    if (error != remoting.Error.NOT_AUTHENTICATED) {
-      remoting.showErrorMessage(error);
-    }
-  }
-  remoting.identity.getEmail(remoting.onEmail, onGetEmailError);
-
-  remoting.showOrHideIT2MeUi();
-  remoting.showOrHideMe2MeUi();
 
   // The plugin's onFocus handler sends a paste command to |window|, because
   // it can't send one to the plugin element itself.
@@ -117,95 +48,13 @@ remoting.init = function() {
 
   remoting.initModalDialogs();
 
-  isHostModeSupported_().then(
-    /** @param {Boolean} supported */
-    function(supported){
-      if (supported) {
-        var noShare = document.getElementById('chrome-os-no-share');
-        noShare.parentNode.removeChild(noShare);
-      } else {
-        var button = document.getElementById('share-button');
-        button.disabled = true;
-      }
-    });
-
-  /**
-   * @return {Promise} A promise that resolves to the id of the current
-   * containing tab/window.
-   */
-  var getCurrentId = function () {
-    if (base.isAppsV2()) {
-      return Promise.resolve(chrome.app.window.current().id);
-    }
-
-    /**
-     * @param {function(*=):void} resolve
-     * @param {function(*=):void} reject
-     */
-    return new Promise(function(resolve, reject) {
-      /** @param {chrome.Tab} tab */
-      chrome.tabs.getCurrent(function(tab){
-        if (tab) {
-          resolve(String(tab.id));
-        }
-        reject('Cannot retrieve the current tab.');
-      });
-    });
-  };
-
-  var onLoad = function() {
-    // Parse URL parameters.
-    var urlParams = getUrlParameters_();
-    if ('mode' in urlParams) {
-      if (urlParams['mode'] === 'me2me') {
-        var hostId = urlParams['hostId'];
-        remoting.connectMe2Me(hostId);
-        return;
-      } else if (urlParams['mode'] === 'hangout') {
-        /** @param {*} id */
-        getCurrentId().then(function(id) {
-          /** @type {string} */
-          var accessCode = urlParams['accessCode'];
-          remoting.ensureSessionConnector_();
-          remoting.setMode(remoting.AppMode.CLIENT_CONNECTING);
-          remoting.connector.connectIT2Me(accessCode);
-
-          document.body.classList.add('hangout-remote-desktop');
-          var senderId = /** @type {string} */ String(id);
-          var hangoutSession = new remoting.HangoutSession(senderId);
-          hangoutSession.init();
-        });
-        return;
-      }
-    }
-    // No valid URL parameters, start up normally.
-    remoting.initHomeScreenUi();
-  }
-  remoting.hostList.load(onLoad);
-
-  // For Apps v1, check the tab type to warn the user if they are not getting
-  // the best keyboard experience.
-  if (!base.isAppsV2() && !remoting.platformIsMac()) {
-    /** @param {boolean} isWindowed */
-    var onIsWindowed = function(isWindowed) {
-      if (!isWindowed) {
-        document.getElementById('startup-mode-box-me2me').hidden = false;
-        document.getElementById('startup-mode-box-it2me').hidden = false;
-      }
-    };
-    isWindowed_(onIsWindowed);
-  }
-
   remoting.testEvents = new base.EventSource();
-
   /** @enum {string} */
   remoting.testEvents.Names = {
     uiModeChanged: 'uiModeChanged'
   };
   remoting.testEvents.defineEvents(base.values(remoting.testEvents.Names));
-
-  remoting.ClientPlugin.factory.preloadPlugin();
-};
+}
 
 /**
  * Returns true if the current platform is fully supported. It's only used when
@@ -223,97 +72,6 @@ remoting.isMe2MeInstallable = function() {
   // installed.
   return remoting.platformIsWindows() || remoting.platformIsMac();
 }
-
-/**
- * Display the user's email address and allow access to the rest of the app,
- * including parsing URL parameters.
- *
- * @param {string} email The user's email address.
- * @return {void} Nothing.
- */
-remoting.onEmail = function(email) {
-  document.getElementById('current-email').innerText = email;
-  document.getElementById('get-started-it2me').disabled = false;
-  document.getElementById('get-started-me2me').disabled = false;
-};
-
-/**
- * initHomeScreenUi is called if the app is not starting up in session mode,
- * and also if the user cancels pin entry or the connection in session mode.
- */
-remoting.initHomeScreenUi = function() {
-  remoting.hostController = new remoting.HostController();
-  remoting.setMode(remoting.AppMode.HOME);
-  remoting.hostSetupDialog =
-      new remoting.HostSetupDialog(remoting.hostController);
-  var dialog = document.getElementById('paired-clients-list');
-  var message = document.getElementById('paired-client-manager-message');
-  var deleteAll = document.getElementById('delete-all-paired-clients');
-  var close = document.getElementById('close-paired-client-manager-dialog');
-  var working = document.getElementById('paired-client-manager-dialog-working');
-  var error = document.getElementById('paired-client-manager-dialog-error');
-  var noPairedClients = document.getElementById('no-paired-clients');
-  remoting.pairedClientManager =
-      new remoting.PairedClientManager(remoting.hostController, dialog, message,
-                                       deleteAll, close, noPairedClients,
-                                       working, error);
-  // Display the cached host list, then asynchronously update and re-display it.
-  remoting.updateLocalHostState();
-  remoting.hostList.refresh(remoting.updateLocalHostState);
-  remoting.butterBar = new remoting.ButterBar();
-};
-
-/**
- * Fetches local host state and updates the DOM accordingly.
- */
-remoting.updateLocalHostState = function() {
-  /**
-   * @param {remoting.HostController.State} state Host state.
-   */
-  var onHostState = function(state) {
-    if (state == remoting.HostController.State.STARTED) {
-      remoting.hostController.getLocalHostId(onHostId.bind(null, state));
-    } else {
-      onHostId(state, null);
-    }
-  };
-
-  /**
-   * @param {remoting.HostController.State} state Host state.
-   * @param {string?} hostId Host id.
-   */
-  var onHostId = function(state, hostId) {
-    remoting.hostList.setLocalHostStateAndId(state, hostId);
-    remoting.hostList.display();
-  };
-
-  /**
-   * @param {boolean} response True if the feature is present.
-   */
-  var onHasFeatureResponse = function(response) {
-    /**
-     * @param {remoting.Error} error
-     */
-    var onError = function(error) {
-      console.error('Failed to get pairing status: ' + error);
-      remoting.pairedClientManager.setPairedClients([]);
-    };
-
-    if (response) {
-      remoting.hostController.getPairedClients(
-          remoting.pairedClientManager.setPairedClients.bind(
-              remoting.pairedClientManager),
-          onError);
-    } else {
-      console.log('Pairing registry not supported by host.');
-      remoting.pairedClientManager.setPairedClients([]);
-    }
-  };
-
-  remoting.hostController.hasFeature(
-      remoting.HostController.Feature.PAIRING_REGISTRY, onHasFeatureResponse);
-  remoting.hostController.getLocalHostState(onHostState);
-};
 
 /**
  * @return {string} Information about the current extension.
@@ -335,19 +93,18 @@ remoting.getExtensionInfo = function() {
  * the more intuitive way to end a Me2Me session, and re-connecting is easy.
  */
 remoting.promptClose = function() {
-  if (!remoting.clientSession ||
-      remoting.clientSession.getMode() == remoting.ClientSession.Mode.ME2ME) {
-    return null;
-  }
-  switch (remoting.currentMode) {
-    case remoting.AppMode.CLIENT_CONNECTING:
-    case remoting.AppMode.HOST_WAITING_FOR_CODE:
-    case remoting.AppMode.HOST_WAITING_FOR_CONNECTION:
-    case remoting.AppMode.HOST_SHARED:
-    case remoting.AppMode.IN_SESSION:
-      return chrome.i18n.getMessage(/*i18n-content*/'CLOSE_PROMPT');
-    default:
-      return null;
+  if (remoting.clientSession &&
+      remoting.clientSession.getMode() == remoting.ClientSession.Mode.IT2ME) {
+    switch (remoting.currentMode) {
+      case remoting.AppMode.CLIENT_CONNECTING:
+      case remoting.AppMode.HOST_WAITING_FOR_CODE:
+      case remoting.AppMode.HOST_WAITING_FOR_CONNECTION:
+      case remoting.AppMode.HOST_SHARED:
+      case remoting.AppMode.IN_SESSION:
+        return chrome.i18n.getMessage(/*i18n-content*/'CLOSE_PROMPT');
+      default:
+        return null;
+    }
   }
 };
 
@@ -391,23 +148,6 @@ function pluginGotCopy_(eventUncast) {
       event.preventDefault();
     }
   }
-}
-
-/**
- * Returns whether Host mode is supported on this platform for It2me.
- * TODO(kelvinp): Remove this function once It2me is enabled on Chrome OS (See
- * crbug.com/429860).
- *
- * @return {Promise} Resolves to true if Host mode is supported.
- */
-function isHostModeSupported_() {
-  if (!remoting.platformIsChromeOS()) {
-    return Promise.resolve(true);
-  }
-  // Sharing on Chrome OS is currently behind a flag.
-  // isInstalled() will return false if the flag is disabled.
-  var hostInstaller = new remoting.HostInstaller();
-  return hostInstaller.isInstalled();
 }
 
 /**
@@ -491,64 +231,3 @@ function isWindowed_(callback) {
   }
 }
 
-/**
- * Migrate settings in window.localStorage to chrome.storage.local so that
- * users of older web-apps that used the former do not lose their settings.
- */
-function migrateLocalToChromeStorage_() {
-  // The OAuth2 class still uses window.localStorage, so don't migrate any of
-  // those settings.
-  var oauthSettings = [
-      'oauth2-refresh-token',
-      'oauth2-refresh-token-revokable',
-      'oauth2-access-token',
-      'oauth2-xsrf-token',
-      'remoting-email'
-  ];
-  for (var setting in window.localStorage) {
-    if (oauthSettings.indexOf(setting) == -1) {
-      var copy = {}
-      copy[setting] = window.localStorage.getItem(setting);
-      chrome.storage.local.set(copy);
-      window.localStorage.removeItem(setting);
-    }
-  }
-}
-
-/**
- * Tests whether we are running on Mac.
- *
- * @return {boolean} True if the platform is Mac.
- */
-remoting.platformIsMac = function() {
-  return navigator.platform.indexOf('Mac') != -1;
-}
-
-/**
- * Tests whether we are running on Windows.
- *
- * @return {boolean} True if the platform is Windows.
- */
-remoting.platformIsWindows = function() {
-  return (navigator.platform.indexOf('Win32') != -1) ||
-         (navigator.platform.indexOf('Win64') != -1);
-}
-
-/**
- * Tests whether we are running on Linux.
- *
- * @return {boolean} True if the platform is Linux.
- */
-remoting.platformIsLinux = function() {
-  return (navigator.platform.indexOf('Linux') != -1) &&
-         !remoting.platformIsChromeOS();
-}
-
-/**
- * Tests whether we are running on ChromeOS.
- *
- * @return {boolean} True if the platform is ChromeOS.
- */
-remoting.platformIsChromeOS = function() {
-  return navigator.userAgent.match(/\bCrOS\b/) != null;
-}

@@ -39,17 +39,23 @@ source_set("usb") {
   ]
 
   if (is_linux) {
-    configs += [ "//build/config/linux:udev" ]
+    deps += [ "//device/udev_linux" ]
   }
 }
 
 action("usb_device_ids") {
   script = "//device/usb/tools/usb_ids.py"
-  inputs = [ source_ids ]
-  outputs = [ generated_ids ]
+  inputs = [
+    source_ids,
+  ]
+  outputs = [
+    generated_ids,
+  ]
   args = [
-    "-i", rebase_path(source_ids,  root_build_dir),
-    "-o", rebase_path(generated_ids, root_build_dir),
+    "-i",
+    rebase_path(source_ids, root_build_dir),
+    "-o",
+    rebase_path(generated_ids, root_build_dir),
   ]
 
   # Only the device_usb target can depend on us.

@@ -28,12 +28,16 @@
       <output filename="remoting/resources/en-AU.pak" lang="en-AU" type="data_package"/>
     </if>
     <output filename="remoting/resources/en-GB.pak" lang="en-GB" type="data_package"/>
-    <if expr="chromeos">
+    <if expr="chromeos or is_ios">
       <output filename="remoting/resources/en-US.pak" lang="en" type="data_package"/>
     </if>
     <output filename="remoting/resources/en.pak" lang="en" type="data_package"/>
     <if expr="use_third_party_translations">
       <output filename="remoting/resources/eo.pak" lang="eo" type="data_package"/>
+    </if>
+    <if expr="is_ios">
+      <!-- iOS uses es-MX for es-419 -->
+      <output filename="remoting/resources/es-MX.pak" lang="es-419" type="data_package"/>
     </if>
     <output filename="remoting/resources/es-419.pak" lang="es-419" type="data_package"/>
     <output filename="remoting/resources/es.pak" lang="es" type="data_package"/>
@@ -79,6 +83,10 @@
     <output filename="remoting/resources/nb.pak" lang="no" type="data_package"/>
     <output filename="remoting/resources/nl.pak" lang="nl" type="data_package"/>
     <output filename="remoting/resources/pl.pak" lang="pl" type="data_package"/>
+    <if expr="is_ios">
+      <!-- iOS uses pt for pt-BR -->
+      <output filename="remoting/resources/pt.pak" lang="pt-BR" type="data_package"/>
+    </if>
     <output filename="remoting/resources/pt-BR.pak" lang="pt-BR" type="data_package"/>
     <output filename="remoting/resources/pt-PT.pak" lang="pt-PT" type="data_package"/>
     <output filename="remoting/resources/ro.pak" lang="ro" type="data_package"/>
@@ -254,7 +262,7 @@
   <release allow_pseudo="false" seq="1">
     <messages fallback_to_english="true">
       <if expr="_google_chrome">
-        <if expr="is_android">
+        <if expr="is_android or is_ios">
           <message desc="Message shown in popup dialog on Android when there are no Google accounts on the device" name="IDS_NOACCOUNTS_MESSAGE" formatter_data="android_java">
           To use Chrome Remote Desktop, you'll need to add a Google Account to your device.
           </message>
@@ -290,6 +298,9 @@
         <message desc="Error displayed when an operation is attempted that requires a signed-in user, but no-one is currently signed in." name="IDS_ERROR_NOT_AUTHENTICATED">
           You are not signed in to Chrome Remote Desktop. Please sign in and try again.
         </message>
+        <message desc="Error displayed when a user attempts to connect to an application that they have not been authorized to access." name="IDS_ERROR_NOT_AUTHORIZED">
+          You are not authorized to access this application.
+        </message>
         <message desc="Error displayed if the client plugin fails to load." name="IDS_ERROR_MISSING_PLUGIN">
           Some components required for Chrome Remote Desktop are missing. Please make sure you're running the latest version of Chrome and try again.
         </message>
@@ -304,6 +315,9 @@
         </message>
         <message desc="Message displayed to the user if there are no hosts registered to their account, informing them how to set up a host on another computer." name="IDS_HOST_LIST_EMPTY_HOSTING_UNSUPPORTED">
           You have no computers registered. To enable remote connections to a computer, install Chrome Remote Desktop there and click “<ph name="BUTTON_NAME">$1<ex>Enable remote connections</ex></ph>”.
+        </message>
+        <message desc="Message displayed to the user if there are no hosts registered to her account.  If the user has previously signed-in to the v1 app with an account other than her profile, she will lose access to all her hosts once they upgrade to the v2 app.  This message informs her to sign in to the chrome with that account and re-install Chromoting." name="IDS_HOST_LIST_EMPTY_V2_MIGRATION">
+          You have previously signed in as <ph name="USER_NAME">$1<ex>John Doe</ex></ph> (<ph name="USER_EMAIL">$2<ex>john.doe@gmail.com</ex></ph>).  To access your computers in that account, <ph name="LINK_BEGIN">$3<ex>&lt;a href="https://support.google.com/chrome/answer/2364824?hl=en"&gt;</ex></ph>sign in to Google Chrome<ph name="LINK_END">$4<ex>&lt;/a&gt;</ex></ph> with that account and re-install Chrome Remote Desktop.
         </message>
         <message desc="Message displayed next to the checkbox that the user can select to allow crash dump collection and reporting." name="IDS_HOST_SETUP_CRASH_REPORTING_MESSAGE">
           Help us improve Chrome Remote Desktop by allowing us to collect usage statistics and crash reports.
@@ -356,7 +370,7 @@
       </if>
 
       <if expr="not _google_chrome">
-        <if expr="is_android">
+        <if expr="is_android or is_ios">
           <message desc="Message shown in popup dialog on Android when there are no Google accounts on the device" name="IDS_NOACCOUNTS_MESSAGE" formatter_data="android_java">
             To use Chromoting, you'll need to add a Google Account to your device.
           </message>
@@ -406,6 +420,9 @@
         </message>
         <message desc="Message displayed to the user if there are no hosts registered to their account, informing them how to set up a host on another computer." name="IDS_HOST_LIST_EMPTY_HOSTING_UNSUPPORTED">
           You have no computers registered. To enable remote connections to a computer, install Chromoting there and click “<ph name="BUTTON_NAME">$1<ex>Enable remote connections</ex></ph>”.
+        </message>
+        <message desc="Message displayed to the user if there are no hosts registered to her account.  If the user has previously signed-in to the v1 app with an account other than her profile, she will lose access to all her hosts once they upgrade to the v2 app.  This message informs her to sign in to the chrome with that account and re-install Chromoting." name="IDS_HOST_LIST_EMPTY_V2_MIGRATION">
+          You have previously signed in as <ph name="USER_NAME">$1<ex>John Doe</ex></ph> (<ph name="USER_EMAIL">$2<ex>john.doe@gmail.com</ex></ph>).  To access your computers in that account, <ph name="LINK_BEGIN">$3<ex>&lt;a href="https://support.google.com/chrome/answer/2364824?hl=en"&gt;</ex></ph>sign in to Chromium<ph name="LINK_END">$4<ex>&lt;/a&gt;</ex></ph> with that account and re-install Chromoting.
         </message>
         <message desc="Message displayed next to the checkbox that the user can select to allow crash dump collection and reporting." name="IDS_HOST_SETUP_CRASH_REPORTING_MESSAGE">
           Help us improve Chromoting by allowing us to collect usage statistics and crash reports.
@@ -457,7 +474,7 @@
         </message>
       </if>
 
-      <if expr="is_android">
+      <if expr="is_android or is_ios">
         <message desc="Button to show or hide the on-screen keyboard." name="IDS_SHOW_HIDE_KEYBOARD" formatter_data="android_java">
           Show/hide keyboard.
         </message>
@@ -528,6 +545,27 @@ For information about privacy, please see the Google Privacy Policy (http://goo.
         </message>
         <message name="IDS_PLAY_STORE_CHANGES" desc="List of what's changed in this release of Chrome Remote Desktop for Android. [CHAR-LIMIT=500] [NAME=play_store_changes]">
 • Fixes for Android Lollipop.
+        </message>
+      </if>
+
+      <if expr="is_ios">
+        <message desc="Initial screen's title, welcoming the user." name="IDS_WELCOME">
+          Welcome
+        </message>
+        <message desc="Initial screen's subtitle, with a short description of the app" name="IDS_SHORT_DESCRIPTION">
+          Access your computer securely over the Internet
+        </message>
+        <message desc="Subtitle shown in the host list when host is offline, and for which no last-online status is available." name ="IDS_HOST_OFFLINE_SUBTITLE">
+          offline
+        </message>
+        <message desc="Subtitle shown in the host list when host is offline. Indicates when host was last seen online." name ="IDS_LAST_ONLINE_SUBTITLE">
+          last online <ph name="DATE">$1<ex>1/6/13</ex></ph>
+        </message>
+        <message desc="Menu item to select the Touch input mode. In this mode, there is not visible mouse pointer and the user must tap on the screen to simulate a left-click." name ="IDS_SELECT_TOUCH_MODE">
+          Touch mode
+        </message>
+        <message desc="Menu item to select the Trackpad input mode. In this mode, the mouse cursor is visible and the screen acts as a laptop's trackpad." name ="IDS_SELECT_TRACKPAD_MODE">
+          Trackpad mode
         </message>
       </if>
 
@@ -932,6 +970,15 @@ For information about privacy, please see the Google Privacy Policy (http://goo.
       </message>
       <message desc="Label for button to decline remote assistance.  This button appears in the Hangouts confirm dialog." name="IDS_HANGOUTS_CONFIRM_DIALOG_DECLINE" >
         Decline
+      </message>
+      <message desc="Message displayed before sharing computer in 'It2Me' mode." name="IDS_SHARE_CONFIRM_DIALOG_MESSAGE" >
+        Would you like to share this computer for another user to see and control?
+      </message>
+      <message desc="Label for the button to accept sharing the computer in 'It2Me' mode." name="IDS_SHARE_CONFIRM_DIALOG_CONFIRM" >
+        Share
+      </message>
+      <message desc="Label for the button to decline sharing the computer in 'It2Me' mode." name="IDS_SHARE_CONFIRM_DIALOG_DECLINE" >
+        Cancel
       </message>
     </messages>
   </release>

@@ -16,16 +16,36 @@
 
 namespace blink {
 
+namespace {
+
+class ConstUndefined : public ScriptFunction {
+public:
+    static v8::Handle<v8::Function> create(ScriptState* scriptState)
+    {
+        return (new ConstUndefined(scriptState))->bindToV8Function();
+    }
+
+private:
+    explicit ConstUndefined(ScriptState* scriptState) : ScriptFunction(scriptState) { }
+    ScriptValue call(ScriptValue value) override
+    {
+        return ScriptValue(scriptState(), v8::Undefined(scriptState()->isolate()));
+    }
+};
+
+} // namespace
+
 ReadableStream::ReadableStream(ExecutionContext* executionContext, UnderlyingSource* source)
-    : m_source(source)
+    : ActiveDOMObject(executionContext)
+    , m_source(source)
     , m_isStarted(false)
     , m_isDraining(false)
     , m_isPulling(false)
-    , m_isSchedulingPull(false)
     , m_state(Waiting)
-    , m_wait(new WaitPromise(executionContext, this, WaitPromise::Ready))
+    , m_ready(new WaitPromise(executionContext, this, WaitPromise::Ready))
     , m_closed(new ClosedPromise(executionContext, this, ClosedPromise::Closed))
 {
+    suspendIfNeeded();
 }
 
 ReadableStream::~ReadableStream()
@@ -48,35 +68,46 @@ String ReadableStream::stateString() const
     return String();
 }
 
-bool ReadableStream::enqueuePreliminaryCheck(size_t chunkSize)
+bool ReadableStream::enqueuePreliminaryCheck()
 {
+    // This is a bit different from what spec says: it says we should throw
+    // an exception here. But sometimes a caller is not in any JavaScript
+    // context, and we don't want to throw an exception in such a case.
     if (m_state == Errored || m_state == Closed || m_isDraining)
         return false;
 
-    // FIXME: Query strategy.
     return true;
 }
 
-bool ReadableStream::enqueuePostAction(size_t totalQueueSize)
+bool ReadableStream::enqueuePostAction()
 {
     m_isPulling = false;
 
-    // FIXME: Set needsMore correctly.
-    bool needsMore = true;
+    bool shouldApplyBackpressure = this->shouldApplyBackpressure();
+    // this->shouldApplyBackpressure may call this->error().
+    if (m_state == Errored)
+        return false;
 
     if (m_state == Waiting) {
+        // ReadableStream::hasPendingActivity return value gets false when
+        // |m_state| is changed to Closed or Errored from Waiting or Readable.
+        // On the other hand, the wrappers should be kept alive when |m_ready|
+        // and |m_close| resolution and rejection are called. Hence we call
+        // ScriptPromiseProperty::resolve and ScriptPromiseProperty::reject
+        // *before* changing state, no matter if the state change actually
+        // changes hasPendingActivity return value.
+        m_ready->resolve(ToV8UndefinedGenerator());
         m_state = Readable;
-        m_wait->resolve(V8UndefinedType());
     }
 
-    return needsMore;
+    return !shouldApplyBackpressure;
 }
 
 void ReadableStream::close()
 {
     if (m_state == Waiting) {
-        m_wait->resolve(V8UndefinedType());
-        m_closed->resolve(V8UndefinedType());
+        m_ready->resolve(ToV8UndefinedGenerator());
+        m_closed->resolve(ToV8UndefinedGenerator());
         m_state = Closed;
     } else if (m_state == Readable) {
         m_isDraining = true;
@@ -104,48 +135,35 @@ void ReadableStream::readPostAction()
     ASSERT(m_state == Readable);
     if (isQueueEmpty()) {
         if (m_isDraining) {
+            m_closed->resolve(ToV8UndefinedGenerator());
             m_state = Closed;
-            m_wait->reset();
-            m_wait->resolve(V8UndefinedType());
-            m_closed->resolve(V8UndefinedType());
         } else {
+            m_ready->reset();
             m_state = Waiting;
-            m_wait->reset();
-            callOrSchedulePull();
         }
     }
+    callPullIfNeeded();
 }
 
-ScriptPromise ReadableStream::wait(ScriptState* scriptState)
+ScriptPromise ReadableStream::ready(ScriptState* scriptState)
 {
-    if (m_state == Waiting)
-        callOrSchedulePull();
-    return m_wait->promise(scriptState->world());
+    return m_ready->promise(scriptState->world());
 }
 
 ScriptPromise ReadableStream::cancel(ScriptState* scriptState, ScriptValue reason)
 {
-    if (m_state == Errored) {
-        RefPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
-        ScriptPromise promise = resolver->promise();
-        resolver->reject(m_exception);
-        return promise;
-    }
     if (m_state == Closed)
         return ScriptPromise::cast(scriptState, v8::Undefined(scriptState->isolate()));
+    if (m_state == Errored)
+        return ScriptPromise::rejectWithDOMException(scriptState, m_exception);
 
-    if (m_state == Waiting) {
-        m_wait->resolve(V8UndefinedType());
-    } else {
-        ASSERT(m_state == Readable);
-        m_wait->reset();
-        m_wait->resolve(V8UndefinedType());
-    }
-
+    ASSERT(m_state == Readable || m_state == Waiting);
+    if (m_state == Waiting)
+        m_ready->resolve(ToV8UndefinedGenerator());
     clearQueue();
+    m_closed->resolve(ToV8UndefinedGenerator());
     m_state = Closed;
-    m_closed->resolve(V8UndefinedType());
-    return m_source->cancelSource(scriptState, reason);
+    return m_source->cancelSource(scriptState, reason).then(ConstUndefined::create(scriptState));
 }
 
 ScriptPromise ReadableStream::closed(ScriptState* scriptState)
@@ -155,45 +173,57 @@ ScriptPromise ReadableStream::closed(ScriptState* scriptState)
 
 void ReadableStream::error(PassRefPtrWillBeRawPtr<DOMException> exception)
 {
-    if (m_state == Readable) {
-        clearQueue();
-        m_wait->reset();
-    }
-
-    if (m_state == Waiting || m_state == Readable) {
-        m_state = Errored;
+    switch (m_state) {
+    case Waiting:
         m_exception = exception;
-        if (m_wait->state() == m_wait->Pending)
-            m_wait->reject(m_exception);
+        m_ready->reject(m_exception);
         m_closed->reject(m_exception);
+        m_state = Errored;
+        break;
+    case Readable:
+        clearQueue();
+        m_exception = exception;
+        m_ready->reset();
+        m_ready->reject(m_exception);
+        m_closed->reject(m_exception);
+        m_state = Errored;
+        break;
+    default:
+        break;
     }
 }
 
 void ReadableStream::didSourceStart()
 {
     m_isStarted = true;
-    if (m_isSchedulingPull)
-        m_source->pullSource();
+    callPullIfNeeded();
 }
 
-void ReadableStream::callOrSchedulePull()
+void ReadableStream::callPullIfNeeded()
 {
-    if (m_isPulling)
+    if (m_isPulling || m_isDraining || !m_isStarted || m_state == Closed || m_state == Errored)
+        return;
+
+    bool shouldApplyBackpressure = this->shouldApplyBackpressure();
+    // this->shouldApplyBackpressure may call this->error().
+    if (shouldApplyBackpressure || m_state == Errored)
         return;
     m_isPulling = true;
-    if (m_isStarted)
-        m_source->pullSource();
-    else
-        m_isSchedulingPull = true;
+    m_source->pullSource();
+}
+
+bool ReadableStream::hasPendingActivity() const
+{
+    return m_state == Waiting || m_state == Readable;
 }
 
 void ReadableStream::trace(Visitor* visitor)
 {
     visitor->trace(m_source);
-    visitor->trace(m_wait);
+    visitor->trace(m_ready);
     visitor->trace(m_closed);
     visitor->trace(m_exception);
+    ActiveDOMObject::trace(visitor);
 }
 
 } // namespace blink
-

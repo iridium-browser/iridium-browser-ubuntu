@@ -172,7 +172,7 @@ TEST_F(GLRendererShaderPixelTest, AllShadersCompile) { TestShaders(); }
 class FakeRendererGL : public GLRenderer {
  public:
   FakeRendererGL(RendererClient* client,
-                 const LayerTreeSettings* settings,
+                 const RendererSettings* settings,
                  OutputSurface* output_surface,
                  ResourceProvider* resource_provider)
       : GLRenderer(client,
@@ -215,7 +215,7 @@ class GLRendererWithDefaultHarnessTest : public GLRendererTest {
 
   void SwapBuffers() { renderer_->SwapBuffers(CompositorFrameMetadata()); }
 
-  LayerTreeSettings settings_;
+  RendererSettings settings_;
   FakeOutputSurfaceClient output_surface_client_;
   scoped_ptr<FakeOutputSurface> output_surface_;
   FakeRendererClient renderer_client_;
@@ -336,7 +336,7 @@ class GLRendererShaderTest : public GLRendererTest {
               renderer_->program_shadow_);
   }
 
-  LayerTreeSettings settings_;
+  RendererSettings settings_;
   FakeOutputSurfaceClient output_surface_client_;
   scoped_ptr<FakeOutputSurface> output_surface_;
   FakeRendererClient renderer_client_;
@@ -543,7 +543,7 @@ TEST_F(GLRendererTest, InitializationDoesNotMakeSynchronousCalls) {
                                false,
                                1));
 
-  LayerTreeSettings settings;
+  RendererSettings settings;
   FakeRendererClient renderer_client;
   FakeRendererGL renderer(&renderer_client,
                           &settings,
@@ -583,7 +583,7 @@ TEST_F(GLRendererTest, InitializationWithQuicklyLostContextDoesNotAssert) {
                                false,
                                1));
 
-  LayerTreeSettings settings;
+  RendererSettings settings;
   FakeRendererClient renderer_client;
   FakeRendererGL renderer(&renderer_client,
                           &settings,
@@ -622,7 +622,7 @@ TEST_F(GLRendererTest, OpaqueBackground) {
                                false,
                                1));
 
-  LayerTreeSettings settings;
+  RendererSettings settings;
   FakeRendererClient renderer_client;
   FakeRendererGL renderer(&renderer_client,
                           &settings,
@@ -674,7 +674,7 @@ TEST_F(GLRendererTest, TransparentBackground) {
                                false,
                                1));
 
-  LayerTreeSettings settings;
+  RendererSettings settings;
   FakeRendererClient renderer_client;
   FakeRendererGL renderer(&renderer_client,
                           &settings,
@@ -719,7 +719,7 @@ TEST_F(GLRendererTest, OffscreenOutputSurface) {
                                false,
                                1));
 
-  LayerTreeSettings settings;
+  RendererSettings settings;
   FakeRendererClient renderer_client;
   FakeRendererGL renderer(&renderer_client,
                           &settings,
@@ -804,7 +804,7 @@ TEST_F(GLRendererTest, VisibilityChangeIsLastCall) {
                                false,
                                1));
 
-  LayerTreeSettings settings;
+  RendererSettings settings;
   FakeRendererClient renderer_client;
   FakeRendererGL renderer(&renderer_client,
                           &settings,
@@ -875,7 +875,7 @@ TEST_F(GLRendererTest, ActiveTextureState) {
                                false,
                                1));
 
-  LayerTreeSettings settings;
+  RendererSettings settings;
   FakeRendererClient renderer_client;
   FakeRendererGL renderer(&renderer_client,
                           &settings,
@@ -966,7 +966,7 @@ TEST_F(GLRendererTest, ShouldClearRootRenderPass) {
                                false,
                                1));
 
-  LayerTreeSettings settings;
+  RendererSettings settings;
   settings.should_clear_root_render_pass = false;
 
   FakeRendererClient renderer_client;
@@ -1064,7 +1064,7 @@ TEST_F(GLRendererTest, ScissorTestWhenClearing) {
                                false,
                                1));
 
-  LayerTreeSettings settings;
+  RendererSettings settings;
   FakeRendererClient renderer_client;
   FakeRendererGL renderer(&renderer_client,
                           &settings,
@@ -1162,7 +1162,7 @@ TEST_F(GLRendererTest, NoDiscardOnPartialUpdates) {
                                false,
                                1));
 
-  LayerTreeSettings settings;
+  RendererSettings settings;
   settings.partial_swap_enabled = true;
   FakeRendererClient renderer_client;
   FakeRendererGL renderer(&renderer_client,
@@ -1351,7 +1351,7 @@ TEST_F(GLRendererTest, ScissorAndViewportWithinNonreshapableSurface) {
                                false,
                                1));
 
-  LayerTreeSettings settings;
+  RendererSettings settings;
   FakeRendererClient renderer_client;
   FakeRendererGL renderer(&renderer_client,
                           &settings,
@@ -1376,6 +1376,54 @@ TEST_F(GLRendererTest, ScissorAndViewportWithinNonreshapableSurface) {
                      device_viewport_rect,
                      device_viewport_rect,
                      false);
+}
+
+TEST_F(GLRendererTest, DrawFramePreservesFramebuffer) {
+  // When using render-to-FBO to display the surface, all rendering is done
+  // to a non-zero FBO. Make sure that the framebuffer is always restored to
+  // the correct framebuffer during rendering, if changed.
+  // Note: there is one path that will set it to 0, but that is after the render
+  // has finished.
+  FakeOutputSurfaceClient output_surface_client;
+  scoped_ptr<FakeOutputSurface> output_surface(
+      FakeOutputSurface::Create3d(TestWebGraphicsContext3D::Create().Pass()));
+  CHECK(output_surface->BindToClient(&output_surface_client));
+
+  scoped_ptr<SharedBitmapManager> shared_bitmap_manager(
+      new TestSharedBitmapManager());
+  scoped_ptr<ResourceProvider> resource_provider(ResourceProvider::Create(
+      output_surface.get(), shared_bitmap_manager.get(), NULL, NULL, 0, false,
+      1));
+
+  RendererSettings settings;
+  FakeRendererClient renderer_client;
+  FakeRendererGL renderer(&renderer_client, &settings, output_surface.get(),
+                          resource_provider.get());
+  EXPECT_FALSE(renderer.Capabilities().using_partial_swap);
+
+  gfx::Rect device_viewport_rect(0, 0, 100, 100);
+  gfx::Rect viewport_rect(device_viewport_rect.size());
+  gfx::Rect quad_rect = gfx::Rect(20, 20, 20, 20);
+
+  RenderPassId root_pass_id(1, 0);
+  TestRenderPass* root_pass =
+      AddRenderPass(&render_passes_in_draw_order_, root_pass_id, viewport_rect,
+                    gfx::Transform());
+  AddClippedQuad(root_pass, quad_rect, SK_ColorGREEN);
+
+  unsigned fbo;
+  gpu::gles2::GLES2Interface* gl =
+      output_surface->context_provider()->ContextGL();
+  gl->GenFramebuffers(1, &fbo);
+  output_surface->set_framebuffer(fbo);
+
+  renderer.DecideRenderPassAllocationsForFrame(render_passes_in_draw_order_);
+  renderer.DrawFrame(&render_passes_in_draw_order_, 1.f, device_viewport_rect,
+                     device_viewport_rect, false);
+
+  int bound_fbo;
+  gl->GetIntegerv(GL_FRAMEBUFFER_BINDING, &bound_fbo);
+  EXPECT_EQ(static_cast<int>(fbo), bound_fbo);
 }
 
 TEST_F(GLRendererShaderTest, DrawRenderPassQuadShaderPermutations) {
@@ -1814,7 +1862,7 @@ class MockOutputSurfaceTest : public GLRendererTest {
             ->TestContext3d());
   }
 
-  LayerTreeSettings settings_;
+  RendererSettings settings_;
   FakeOutputSurfaceClient output_surface_client_;
   StrictMock<MockOutputSurface> output_surface_;
   scoped_ptr<SharedBitmapManager> shared_bitmap_manager_;

@@ -12,10 +12,9 @@ fixup_path.FixupPath()
 
 from chromite.lib import cros_test_lib
 from chromite.lib.paygen import dryrun_lib
-from chromite.lib.paygen import unittest_lib
 
 
-# pylint: disable-msg=W0212
+# pylint: disable=W0212
 
 
 class FuncClass(object):
@@ -25,7 +24,7 @@ class FuncClass(object):
     """Dummy function."""
 
 
-class TestDryRunMgr(unittest_lib.MoxTestCase):
+class TestDryRunMgr(cros_test_lib.MoxTestCase):
   """Test cases for dryrun_lib."""
 
   def testNonzero(self):

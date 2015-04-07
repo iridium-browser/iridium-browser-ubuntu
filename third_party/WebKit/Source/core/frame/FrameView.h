@@ -104,7 +104,7 @@ public:
     bool canInvalidatePaintDuringPerformLayout() const { return m_canInvalidatePaintDuringPerformLayout; }
 
     RenderObject* layoutRoot(bool onlyDuringLayout = false) const;
-    void clearLayoutSubtreeRoot() { m_layoutSubtreeRoot = 0; }
+    void clearLayoutSubtreeRoot() { m_layoutSubtreeRoot = nullptr; }
     int layoutCount() const { return m_layoutCount; }
 
     bool needsLayout() const;
@@ -134,6 +134,7 @@ public:
     void prepareForDetach();
     void detachCustomScrollbars();
     void recalculateCustomScrollbarStyle();
+    void invalidateAllCustomScrollbarsOnActiveChanged();
     virtual void recalculateScrollbarOverlayStyle();
 
     void clear();
@@ -163,7 +164,11 @@ public:
 
     void setScrollPosition(const DoublePoint&, ScrollBehavior = ScrollBehaviorInstant);
     virtual bool isRubberBandInProgress() const override;
+    virtual bool rubberBandingOnCompositorThread() const override;
     void setScrollPositionNonProgrammatically(const IntPoint&);
+
+    FloatSize elasticOverscroll() const { return m_elasticOverscroll; }
+    void setElasticOverscroll(const FloatSize&);
 
     // This is different than visibleContentRect() in that it ignores negative (or overly positive)
     // offsets from rubber-banding, and it takes zooming into account.
@@ -287,6 +292,10 @@ public:
     void removeScrollableArea(ScrollableArea*);
     const ScrollableAreaSet* scrollableAreas() const { return m_scrollableAreas.get(); }
 
+    void addAnimatingScrollableArea(ScrollableArea*);
+    void removeAnimatingScrollableArea(ScrollableArea*);
+    const ScrollableAreaSet* animatingScrollableAreas() const { return m_animatingScrollableAreas.get(); }
+
     // With CSS style "resize:" enabled, a little resizer handle will appear at the bottom
     // right of the object. We keep track of these resizer areas for checking if touches
     // (implemented using Scroll gesture) are targeting the resizer.
@@ -303,10 +312,11 @@ public:
     bool inProgrammaticScroll() const { return m_inProgrammaticScroll; }
     void setInProgrammaticScroll(bool programmaticScroll) { m_inProgrammaticScroll = programmaticScroll; }
 
+    virtual bool shouldUseIntegerScrollOffset() const override;
+
     virtual bool isActive() const override;
 
-    // DEPRECATED: Use viewportConstrainedVisibleContentRect() instead.
-    IntSize scrollOffsetForFixedPosition() const;
+    IntSize scrollOffsetForViewportConstrainedObjects() const;
 
     // Override scrollbar notifications to update the AXObject cache.
     virtual void didAddScrollbar(Scrollbar*, ScrollbarOrientation) override;
@@ -354,7 +364,7 @@ public:
     // Returns a clip rect in host window coordinates. Used to clip the blit on a scroll.
     IntRect windowClipRect(IncludeScrollbarsInRect = ExcludeScrollbars) const;
 
-    typedef WillBeHeapHashSet<RefPtrWillBeMember<Widget> > ChildrenWidgetSet;
+    typedef WillBeHeapHashSet<RefPtrWillBeMember<Widget>> ChildrenWidgetSet;
 
     // Functions for child manipulation and inspection.
     virtual void setParent(Widget*) override;
@@ -378,9 +388,8 @@ public:
     void setScrollbarModes(ScrollbarMode horizontalMode, ScrollbarMode verticalMode, bool horizontalLock = false, bool verticalLock = false);
     void setHorizontalScrollbarMode(ScrollbarMode mode, bool lock = false) { setScrollbarModes(mode, verticalScrollbarMode(), lock, verticalScrollbarLock()); }
     void setVerticalScrollbarMode(ScrollbarMode mode, bool lock = false) { setScrollbarModes(horizontalScrollbarMode(), mode, horizontalScrollbarLock(), lock); };
-    void scrollbarModes(ScrollbarMode& horizontalMode, ScrollbarMode& verticalMode) const;
-    ScrollbarMode horizontalScrollbarMode() const { ScrollbarMode horizontal, vertical; scrollbarModes(horizontal, vertical); return horizontal; }
-    ScrollbarMode verticalScrollbarMode() const { ScrollbarMode horizontal, vertical; scrollbarModes(horizontal, vertical); return vertical; }
+    ScrollbarMode horizontalScrollbarMode() const { return m_horizontalScrollbarMode; }
+    ScrollbarMode verticalScrollbarMode() const { return m_verticalScrollbarMode; }
 
     void setHorizontalScrollbarLock(bool lock = true) { m_horizontalScrollbarLock = lock; }
     bool horizontalScrollbarLock() const { return m_horizontalScrollbarLock; }
@@ -418,10 +427,11 @@ public:
     int contentsHeight() const { return contentsSize().height(); }
 
     // Functions for querying the current scrolled position (both as a point, a size, or as individual X and Y values).
-    // FIXME: Remove the IntPoint version. crbug.com/414283.
+    // Be careful in using the Double version scrollPositionDouble() and scrollOffsetDouble(). They are meant to be
+    // used to communicate the fractional scroll position/offset with chromium compositor which can do sub-pixel positioning.
+    // Do not call these if the scroll position/offset is used in Blink for positioning. Use the Int version instead.
     virtual IntPoint scrollPosition() const override { return visibleContentRect().location(); }
     virtual DoublePoint scrollPositionDouble() const override { return m_scrollPosition; }
-    // FIXME: Remove scrollOffset(). crbug.com/414283.
     IntSize scrollOffset() const { return toIntSize(visibleContentRect().location()); } // Gets the scrolled position as an IntSize. Convenient for adding to other sizes.
     DoubleSize scrollOffsetDouble() const { return DoubleSize(m_scrollPosition.x(), m_scrollPosition.y()); }
     DoubleSize pendingScrollDelta() const { return m_pendingScrollDelta; }
@@ -429,8 +439,8 @@ public:
     // Adjust the passed in scroll position to keep it between the minimum and maximum positions.
     IntPoint adjustScrollPositionWithinRange(const IntPoint&) const;
     DoublePoint adjustScrollPositionWithinRange(const DoublePoint&) const;
-    double scrollX() const { return scrollPositionDouble().x(); }
-    double scrollY() const { return scrollPositionDouble().y(); }
+    int scrollX() const { return scrollPosition().x(); }
+    int scrollY() const { return scrollPosition().y(); }
 
     virtual IntSize overhangAmount() const override;
 
@@ -639,8 +649,18 @@ private:
     static bool computeCompositedSelectionBounds(LocalFrame&, CompositedSelectionBound& start, CompositedSelectionBound& end);
     void updateCompositedSelectionBoundsIfNeeded();
 
-    bool hasCustomScrollbars() const;
-    bool shouldUseCustomScrollbars(Element*& customScrollbarElement, LocalFrame*& customScrollbarFrame);
+    // Returns true if the FrameView's own scrollbars overlay its content when visible.
+    bool hasOverlayScrollbars() const;
+
+    // Returns true if the frame should use custom scrollbars. If true, one of
+    // either |customScrollbarElement| or |customScrollbarFrame| will be set to
+    // the element or frame which owns the scrollbar with the other set to null.
+    bool shouldUseCustomScrollbars(Element*& customScrollbarElement, LocalFrame*& customScrollbarFrame) const;
+
+    // Returns true if a scrollbar needs to go from native -> custom or vice versa.
+    bool needsScrollbarReconstruction() const;
+
+    bool shouldIgnoreOverflowHidden() const;
 
     void updateScrollCorner();
 
@@ -673,11 +693,11 @@ private:
 
     LayoutSize m_size;
 
-    typedef WillBeHeapHashSet<RefPtrWillBeMember<RenderEmbeddedObject> > EmbeddedObjectSet;
-    WillBeHeapHashSet<RefPtrWillBeMember<RenderEmbeddedObject> > m_partUpdateSet;
+    typedef WillBeHeapHashSet<RefPtrWillBeMember<RenderEmbeddedObject>> EmbeddedObjectSet;
+    WillBeHeapHashSet<RefPtrWillBeMember<RenderEmbeddedObject>> m_partUpdateSet;
 
     // FIXME: These are just "children" of the FrameView and should be RefPtrWillBeMember<Widget> instead.
-    WillBeHeapHashSet<RefPtrWillBeMember<RenderPart> > m_parts;
+    WillBeHeapHashSet<RefPtrWillBeMember<RenderPart>> m_parts;
 
     // The RefPtr cycle between LocalFrame and FrameView is broken
     // when a LocalFrame is detached by FrameLoader::detachFromParent().
@@ -745,6 +765,7 @@ private:
     RawPtrWillBeMember<RenderScrollbarPart> m_scrollCorner;
 
     OwnPtr<ScrollableAreaSet> m_scrollableAreas;
+    OwnPtr<ScrollableAreaSet> m_animatingScrollableAreas;
     OwnPtr<ResizerAreaSet> m_resizerAreas;
     OwnPtr<ViewportConstrainedObjectSet> m_viewportConstrainedObjects;
     OwnPtrWillBeMember<FrameViewAutoSizeInfo> m_autoSizeInfo;
@@ -786,6 +807,8 @@ private:
 
     int m_scrollbarsAvoidingResizer;
     bool m_scrollbarsSuppressed;
+
+    FloatSize m_elasticOverscroll;
 
     bool m_inUpdateScrollbars;
 

@@ -20,10 +20,11 @@
 #include "base/task/cancelable_task_tracker.h"
 #include "chrome/browser/history/expire_history_backend.h"
 #include "chrome/browser/history/history_database.h"
-#include "chrome/browser/history/thumbnail_database.h"
-#include "chrome/browser/history/visit_tracker.h"
+#include "components/history/core/browser/history_backend_notifier.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/history/core/browser/keyword_id.h"
+#include "components/history/core/browser/thumbnail_database.h"
+#include "components/history/core/browser/visit_tracker.h"
 #include "components/visitedlink/browser/visitedlink_delegate.h"
 #include "sql/init_status.h"
 
@@ -100,7 +101,7 @@ class QueuedHistoryDBTask {
 // functions in the history service. These functions are not documented
 // here, see the history service for behavior.
 class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
-                       public ExpireHistoryBackendDelegate {
+                       public HistoryBackendNotifier {
  public:
   // Interface implemented by the owner of the HistoryBackend object. Normally,
   // the history service implements this to send stuff back to the main thread.
@@ -137,6 +138,10 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
                                   const URLRow& row,
                                   const RedirectList& redirects,
                                   base::Time visit_time) = 0;
+
+    // Notify HistoryService that some URLs have been modified. The event will
+    // be forwarded to the HistoryServiceObservers in the correct thread.
+    virtual void NotifyURLsModified(const URLRows& changed_urls) = 0;
 
     // Broadcasts the specified notification to the notification service.
     // This is implemented here because notifications must only be sent from
@@ -188,7 +193,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   virtual void SetPageTitle(const GURL& url, const base::string16& title);
   void AddPageNoVisitForBookmark(const GURL& url, const base::string16& title);
   void UpdateWithPageEndTime(ContextID context_id,
-                             int32 page_id,
+                             int nav_entry_id,
                              const GURL& url,
                              base::Time end_ts);
 
@@ -520,13 +525,6 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
  protected:
   ~HistoryBackend() override;
 
-  // Notify HistoryBackendObserver that |transition| to |row| occurred at
-  // |visit_time| following |redirects| (empty if there is no redirects).
-  void NotifyURLVisited(ui::PageTransition transition,
-                        const URLRow& row,
-                        const RedirectList& redirects,
-                        base::Time visit_time);
-
  private:
   friend class base::RefCountedThreadSafe<HistoryBackend>;
   friend class CommitLaterTask;  // The commit task needs to call Commit().
@@ -598,18 +596,6 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 #if defined(OS_ANDROID)
   // Returns the name of android cache database.
   base::FilePath GetAndroidCacheFileName() const;
-
-  // Populate a map from a |MostVisitedURLList|. The map assigns a rank to each
-  // top URL and its redirects. This should only be done once at backend
-  // initialization.
-  // This can be removed for M31. (See issue 248761.)
-
-  void PopulateMostVisitedURLMap();
-  // Record counts of page visits by rank. If a url is not ranked, record the
-  // page visit in a slot corresponding to |max_top_url_count|, which should
-  // be one greater than the largest rank of any url in |top_urls|.
-  // This can be removed for M31. (See issue 248761.)
-  void RecordTopPageVisitStats(const GURL& url);
 #endif
 
   class URLQuerier;
@@ -801,7 +787,12 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // running.
   void BroadcastNotifications(int type, scoped_ptr<HistoryDetails> details);
 
-  // ExpireHistoryBackendDelegate:
+  // HistoryBackendNotifier:
+  void NotifyFaviconChanged(const std::set<GURL>& urls) override;
+  void NotifyURLVisited(ui::PageTransition transition,
+                        const URLRow& row,
+                        const RedirectList& redirects,
+                        base::Time visit_time) override;
   void NotifyURLsModified(const URLRows& rows) override;
   void NotifyURLsDeleted(bool all_history,
                          bool expired,
@@ -905,12 +896,6 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 #if defined(OS_ANDROID)
   // Used to provide the Android ContentProvider APIs.
   scoped_ptr<AndroidProviderBackend> android_provider_backend_;
-
-  // Used to provide UMA on the number of page visits that are to the most
-  // visited URLs. This is here because the backend both has access to this
-  // information and is notified of page visits. The top sites service should
-  // be used instead whenever possible.
-  std::map<GURL, int> most_visited_urls_map_;
 #endif
 
   // Used to manage syncing of the typed urls datatype. This will be NULL

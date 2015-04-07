@@ -125,7 +125,7 @@ class TraceEventTestFixture : public testing::Test {
                    base::Unretained(flush_complete_event)));
   }
 
-  virtual void SetUp() override {
+  void SetUp() override {
     const char* name = PlatformThread::GetName();
     old_thread_name_ = name ? strdup(name) : NULL;
 
@@ -136,7 +136,7 @@ class TraceEventTestFixture : public testing::Test {
     trace_buffer_.SetOutputCallback(json_output_.GetCallback());
     event_watch_notification_ = 0;
   }
-  virtual void TearDown() override {
+  void TearDown() override {
     if (TraceLog::GetInstance())
       EXPECT_FALSE(TraceLog::GetInstance()->IsEnabled());
     PlatformThread::SetName(old_thread_name_ ? old_thread_name_ : "");
@@ -1366,8 +1366,7 @@ TEST_F(TraceEventTestFixture, AsyncBeginEndPointerMangling) {
 TEST_F(TraceEventTestFixture, StaticStringVsString) {
   TraceLog* tracer = TraceLog::GetInstance();
   // Make sure old events are flushed:
-  EndTraceAndFlush();
-  EXPECT_EQ(0u, tracer->GetEventsSize());
+  EXPECT_EQ(0u, tracer->GetStatus().event_count);
   const unsigned char* category_group_enabled =
       TRACE_EVENT_API_GET_CATEGORY_GROUP_ENABLED("cat");
 
@@ -1384,8 +1383,7 @@ TEST_F(TraceEventTestFixture, StaticStringVsString) {
             TRACE_EVENT_PHASE_INSTANT, category_group_enabled, "name2", 0, 0,
             "arg1", TRACE_STR_COPY("argval"),
             "arg2", TRACE_STR_COPY("argval"));
-    size_t num_events = tracer->GetEventsSize();
-    EXPECT_GT(num_events, 1u);
+    EXPECT_GT(tracer->GetStatus().event_count, 1u);
     const TraceEvent* event1 = tracer->GetEventByHandle(handle1);
     const TraceEvent* event2 = tracer->GetEventByHandle(handle2);
     ASSERT_TRUE(event1);
@@ -1414,8 +1412,7 @@ TEST_F(TraceEventTestFixture, StaticStringVsString) {
             TRACE_EVENT_PHASE_INSTANT, category_group_enabled, "name2", 0, 0,
             "arg1", TRACE_STR_COPY(str1),
             "arg2", TRACE_STR_COPY(str2));
-    size_t num_events = tracer->GetEventsSize();
-    EXPECT_GT(num_events, 1u);
+    EXPECT_GT(tracer->GetStatus().event_count, 1u);
     const TraceEvent* event1 = tracer->GetEventByHandle(handle1);
     const TraceEvent* event2 = tracer->GetEventByHandle(handle2);
     ASSERT_TRUE(event1);
@@ -1617,6 +1614,22 @@ TEST_F(TraceEventTestFixture, DisabledCategories) {
     ListValue& trace_parsed = trace_parsed_;
     EXPECT_FIND_("disabled-by-default-cc");
     EXPECT_FIND_("other_included");
+  }
+
+  Clear();
+
+  BeginSpecificTrace("other_included");
+  TRACE_EVENT_INSTANT0(TRACE_DISABLED_BY_DEFAULT("cc") ",other_included",
+                       "first", TRACE_EVENT_SCOPE_THREAD);
+  TRACE_EVENT_INSTANT0("other_included," TRACE_DISABLED_BY_DEFAULT("cc"),
+                       "second", TRACE_EVENT_SCOPE_THREAD);
+  EndTraceAndFlush();
+
+  {
+    const DictionaryValue* item = NULL;
+    ListValue& trace_parsed = trace_parsed_;
+    EXPECT_FIND_("disabled-by-default-cc,other_included");
+    EXPECT_FIND_("other_included,disabled-by-default-cc");
   }
 }
 
@@ -2202,12 +2215,12 @@ TEST_F(TraceEventTestFixture, PrimitiveArgs) {
 
 class TraceEventCallbackTest : public TraceEventTestFixture {
  public:
-  virtual void SetUp() override {
+  void SetUp() override {
     TraceEventTestFixture::SetUp();
     ASSERT_EQ(NULL, s_instance);
     s_instance = this;
   }
-  virtual void TearDown() override {
+  void TearDown() override {
     TraceLog::GetInstance()->SetDisabled();
     ASSERT_TRUE(!!s_instance);
     s_instance = NULL;

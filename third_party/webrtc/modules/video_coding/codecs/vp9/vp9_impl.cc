@@ -103,7 +103,7 @@ int VP9EncoderImpl::SetRates(uint32_t new_bitrate_kbit,
 
 int VP9EncoderImpl::InitEncode(const VideoCodec* inst,
                                int number_of_cores,
-                               uint32_t /*max_payload_size*/) {
+                               size_t /*max_payload_size*/) {
   if (inst == NULL) {
     return WEBRTC_VIDEO_CODEC_ERR_PARAMETER;
   }
@@ -378,7 +378,7 @@ int VP9DecoderImpl::InitDecode(const VideoCodec* inst, int number_of_cores) {
     return ret_val;
   }
   if (decoder_ == NULL) {
-    decoder_ = new vpx_dec_ctx_t;
+    decoder_ = new vpx_codec_ctx_t;
   }
   vpx_codec_dec_cfg_t  cfg;
   // Setting number of threads to a constant value (1)
@@ -428,7 +428,7 @@ int VP9DecoderImpl::Decode(const EncodedImage& input_image,
   }
   if (vpx_codec_decode(decoder_,
                        buffer,
-                       input_image._length,
+                       static_cast<unsigned int>(input_image._length),
                        0,
                        VPX_DL_REALTIME)) {
     return WEBRTC_VIDEO_CODEC_ERROR;

@@ -59,15 +59,15 @@ static void ReleaseCallback(
   *release_main_thread_task_runner = main_thread_task_runner;
 }
 
-static void SharedMemoryReleaseCallback(
-    scoped_ptr<base::SharedMemory> memory,
+static void SharedBitmapReleaseCallback(
+    scoped_ptr<SharedBitmap> bitmap,
     uint32 sync_point,
     bool lost_resource,
     BlockingTaskRunner* main_thread_task_runner) {
 }
 
-static void ReleaseSharedMemoryCallback(
-    scoped_ptr<base::SharedMemory> shared_memory,
+static void ReleaseSharedBitmapCallback(
+    scoped_ptr<SharedBitmap> shared_bitmap,
     bool* release_called,
     uint32* release_sync_point,
     bool* lost_resource_result,
@@ -79,15 +79,16 @@ static void ReleaseSharedMemoryCallback(
   *lost_resource_result = lost_resource;
 }
 
-static scoped_ptr<base::SharedMemory> CreateAndFillSharedMemory(
+static scoped_ptr<SharedBitmap> CreateAndFillSharedBitmap(
+    SharedBitmapManager* manager,
     const gfx::Size& size,
     uint32_t value) {
-  scoped_ptr<base::SharedMemory> shared_memory(new base::SharedMemory);
-  CHECK(shared_memory->CreateAndMapAnonymous(4 * size.GetArea()));
-  uint32_t* pixels = reinterpret_cast<uint32_t*>(shared_memory->memory());
+  scoped_ptr<SharedBitmap> shared_bitmap = manager->AllocateSharedBitmap(size);
+  CHECK(shared_bitmap);
+  uint32_t* pixels = reinterpret_cast<uint32_t*>(shared_bitmap->pixels());
   CHECK(pixels);
   std::fill_n(pixels, size.GetArea(), value);
-  return shared_memory.Pass();
+  return shared_bitmap.Pass();
 }
 
 class TextureStateTrackingContext : public TestWebGraphicsContext3D {
@@ -103,11 +104,11 @@ class TextureStateTrackingContext : public TestWebGraphicsContext3D {
 
   // Force all textures to be consecutive numbers starting at "1",
   // so we easily can test for them.
-  virtual GLuint NextTextureId() override {
+  GLuint NextTextureId() override {
     base::AutoLock lock(namespace_->lock);
     return namespace_->next_texture_id++;
   }
-  virtual void RetireTextureId(GLuint) override {}
+  void RetireTextureId(GLuint) override {}
 };
 
 // Shared data between multiple ResourceProviderContext. This contains mailbox
@@ -466,32 +467,26 @@ class ResourceProviderTest
       *sync_point = child_context_->insertSyncPoint();
       EXPECT_LT(0u, *sync_point);
 
-      scoped_ptr<base::SharedMemory> shared_memory;
+      scoped_ptr<SharedBitmap> shared_bitmap;
       scoped_ptr<SingleReleaseCallbackImpl> callback =
-          SingleReleaseCallbackImpl::Create(
-              base::Bind(ReleaseSharedMemoryCallback,
-                         base::Passed(&shared_memory),
-                         release_called,
-                         release_sync_point,
-                         lost_resource));
+          SingleReleaseCallbackImpl::Create(base::Bind(
+              ReleaseSharedBitmapCallback, base::Passed(&shared_bitmap),
+              release_called, release_sync_point, lost_resource));
       return child_resource_provider_->CreateResourceFromTextureMailbox(
           TextureMailbox(gpu_mailbox, GL_TEXTURE_2D, *sync_point),
           callback.Pass());
     } else {
       gfx::Size size(64, 64);
-      scoped_ptr<base::SharedMemory> shared_memory(
-          CreateAndFillSharedMemory(size, 0));
+      scoped_ptr<SharedBitmap> shared_bitmap(
+          CreateAndFillSharedBitmap(shared_bitmap_manager_.get(), size, 0));
 
-      base::SharedMemory* shared_memory_ptr = shared_memory.get();
+      SharedBitmap* shared_bitmap_ptr = shared_bitmap.get();
       scoped_ptr<SingleReleaseCallbackImpl> callback =
-          SingleReleaseCallbackImpl::Create(
-              base::Bind(ReleaseSharedMemoryCallback,
-                         base::Passed(&shared_memory),
-                         release_called,
-                         release_sync_point,
-                         lost_resource));
+          SingleReleaseCallbackImpl::Create(base::Bind(
+              ReleaseSharedBitmapCallback, base::Passed(&shared_bitmap),
+              release_called, release_sync_point, lost_resource));
       return child_resource_provider_->CreateResourceFromTextureMailbox(
-          TextureMailbox(shared_memory_ptr, size), callback.Pass());
+          TextureMailbox(shared_bitmap_ptr, size), callback.Pass());
     }
   }
 
@@ -982,14 +977,14 @@ TEST_P(ResourceProviderTest, TransferSoftwareResources) {
   uint8_t data2[4] = { 5, 5, 5, 5 };
   child_resource_provider_->SetPixels(id2, data2, rect, rect, gfx::Vector2d());
 
-  scoped_ptr<base::SharedMemory> shared_memory(new base::SharedMemory());
-  shared_memory->CreateAndMapAnonymous(1);
-  base::SharedMemory* shared_memory_ptr = shared_memory.get();
+  scoped_ptr<SharedBitmap> shared_bitmap(CreateAndFillSharedBitmap(
+      shared_bitmap_manager_.get(), gfx::Size(1, 1), 0));
+  SharedBitmap* shared_bitmap_ptr = shared_bitmap.get();
   ResourceProvider::ResourceId id3 =
       child_resource_provider_->CreateResourceFromTextureMailbox(
-          TextureMailbox(shared_memory_ptr, gfx::Size(1, 1)),
+          TextureMailbox(shared_bitmap_ptr, gfx::Size(1, 1)),
           SingleReleaseCallbackImpl::Create(base::Bind(
-              &SharedMemoryReleaseCallback, base::Passed(&shared_memory))));
+              &SharedBitmapReleaseCallback, base::Passed(&shared_bitmap))));
 
   ReturnedResourceArray returned_to_child;
   int child_id =
@@ -2556,8 +2551,8 @@ TEST_P(ResourceProviderTest, TextureMailbox_SharedMemory) {
 
   gfx::Size size(64, 64);
   const uint32_t kBadBeef = 0xbadbeef;
-  scoped_ptr<base::SharedMemory> shared_memory(
-      CreateAndFillSharedMemory(size, kBadBeef));
+  scoped_ptr<SharedBitmap> shared_bitmap(
+      CreateAndFillSharedBitmap(shared_bitmap_manager_.get(), size, kBadBeef));
 
   FakeOutputSurfaceClient output_surface_client;
   scoped_ptr<OutputSurface> output_surface(
@@ -2582,7 +2577,7 @@ TEST_P(ResourceProviderTest, TextureMailbox_SharedMemory) {
                                                    &release_sync_point,
                                                    &lost_resource,
                                                    &main_thread_task_runner));
-  TextureMailbox mailbox(shared_memory.get(), size);
+  TextureMailbox mailbox(shared_bitmap.get(), size);
 
   ResourceProvider::ResourceId id =
       resource_provider->CreateResourceFromTextureMailbox(
@@ -2603,89 +2598,156 @@ TEST_P(ResourceProviderTest, TextureMailbox_SharedMemory) {
   EXPECT_EQ(main_thread_task_runner_.get(), main_thread_task_runner);
 }
 
-TEST_P(ResourceProviderTest, TextureMailbox_GLTexture2D) {
+class ResourceProviderTestTextureMailboxGLFilters
+    : public ResourceProviderTest {
+ public:
+  static void RunTest(TestSharedBitmapManager* shared_bitmap_manager,
+                      TestGpuMemoryBufferManager* gpu_memory_buffer_manager,
+                      BlockingTaskRunner* main_thread_task_runner,
+                      bool mailbox_nearest_neighbor,
+                      GLenum sampler_filter) {
+    scoped_ptr<TextureStateTrackingContext> context_owned(
+        new TextureStateTrackingContext);
+    TextureStateTrackingContext* context = context_owned.get();
+
+    FakeOutputSurfaceClient output_surface_client;
+    scoped_ptr<OutputSurface> output_surface(
+        FakeOutputSurface::Create3d(context_owned.Pass()));
+    CHECK(output_surface->BindToClient(&output_surface_client));
+
+    scoped_ptr<ResourceProvider> resource_provider(
+        ResourceProvider::Create(output_surface.get(),
+                                 shared_bitmap_manager,
+                                 gpu_memory_buffer_manager,
+                                 main_thread_task_runner,
+                                 0,
+                                 false,
+                                 1));
+
+    unsigned texture_id = 1;
+    uint32 sync_point = 30;
+    unsigned target = GL_TEXTURE_2D;
+
+    EXPECT_CALL(*context, bindTexture(_, _)).Times(0);
+    EXPECT_CALL(*context, waitSyncPoint(_)).Times(0);
+    EXPECT_CALL(*context, insertSyncPoint()).Times(0);
+    EXPECT_CALL(*context, produceTextureCHROMIUM(_, _)).Times(0);
+    EXPECT_CALL(*context, consumeTextureCHROMIUM(_, _)).Times(0);
+
+    gpu::Mailbox gpu_mailbox;
+    memcpy(gpu_mailbox.name, "Hello world", strlen("Hello world") + 1);
+    uint32 release_sync_point = 0;
+    bool lost_resource = false;
+    BlockingTaskRunner* mailbox_task_runner = NULL;
+    scoped_ptr<SingleReleaseCallbackImpl> callback =
+        SingleReleaseCallbackImpl::Create(base::Bind(&ReleaseCallback,
+                                                     &release_sync_point,
+                                                     &lost_resource,
+                                                     &mailbox_task_runner));
+
+    TextureMailbox mailbox(gpu_mailbox, target, sync_point);
+    mailbox.set_nearest_neighbor(mailbox_nearest_neighbor);
+
+    ResourceProvider::ResourceId id =
+        resource_provider->CreateResourceFromTextureMailbox(mailbox,
+                                                            callback.Pass());
+    EXPECT_NE(0u, id);
+
+    Mock::VerifyAndClearExpectations(context);
+
+    {
+      // Mailbox sync point WaitSyncPoint before using the texture.
+      EXPECT_CALL(*context, waitSyncPoint(sync_point));
+      resource_provider->WaitSyncPointIfNeeded(id);
+      Mock::VerifyAndClearExpectations(context);
+
+      // Using the texture does a consume of the mailbox.
+      EXPECT_CALL(*context, bindTexture(target, texture_id)).Times(2);
+      EXPECT_CALL(*context, consumeTextureCHROMIUM(target, _));
+
+      EXPECT_CALL(*context, insertSyncPoint()).Times(0);
+      EXPECT_CALL(*context, produceTextureCHROMIUM(_, _)).Times(0);
+
+      // The sampler will reset these if |mailbox_nearest_neighbor| does not
+      // match |sampler_filter|.
+      if (mailbox_nearest_neighbor != (sampler_filter == GL_NEAREST)) {
+        EXPECT_CALL(*context, texParameteri(
+            GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, sampler_filter));
+        EXPECT_CALL(*context, texParameteri(
+            GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, sampler_filter));
+      }
+
+      ResourceProvider::ScopedSamplerGL lock(
+          resource_provider.get(), id, sampler_filter);
+      Mock::VerifyAndClearExpectations(context);
+
+      // When done with it, a sync point should be inserted, but no produce is
+      // necessary.
+      EXPECT_CALL(*context, bindTexture(_, _)).Times(0);
+      EXPECT_CALL(*context, insertSyncPoint());
+      EXPECT_CALL(*context, produceTextureCHROMIUM(_, _)).Times(0);
+
+      EXPECT_CALL(*context, waitSyncPoint(_)).Times(0);
+      EXPECT_CALL(*context, consumeTextureCHROMIUM(_, _)).Times(0);
+    }
+
+    resource_provider->DeleteResource(id);
+    EXPECT_EQ(0u, release_sync_point);
+    EXPECT_FALSE(lost_resource);
+    EXPECT_EQ(main_thread_task_runner, mailbox_task_runner);
+  }
+};
+
+TEST_P(ResourceProviderTest, TextureMailbox_GLTexture2D_LinearToLinear) {
   // Mailboxing is only supported for GL textures.
   if (GetParam() != ResourceProvider::GLTexture)
     return;
 
-  scoped_ptr<TextureStateTrackingContext> context_owned(
-      new TextureStateTrackingContext);
-  TextureStateTrackingContext* context = context_owned.get();
+  ResourceProviderTestTextureMailboxGLFilters::RunTest(
+      shared_bitmap_manager_.get(),
+      gpu_memory_buffer_manager_.get(),
+      main_thread_task_runner_.get(),
+      false,
+      GL_LINEAR);
+}
 
-  FakeOutputSurfaceClient output_surface_client;
-  scoped_ptr<OutputSurface> output_surface(
-      FakeOutputSurface::Create3d(context_owned.Pass()));
-  CHECK(output_surface->BindToClient(&output_surface_client));
+TEST_P(ResourceProviderTest, TextureMailbox_GLTexture2D_NearestToNearest) {
+  // Mailboxing is only supported for GL textures.
+  if (GetParam() != ResourceProvider::GLTexture)
+    return;
 
-  scoped_ptr<ResourceProvider> resource_provider(
-      ResourceProvider::Create(output_surface.get(),
-                               shared_bitmap_manager_.get(),
-                               gpu_memory_buffer_manager_.get(),
-                               main_thread_task_runner_.get(),
-                               0,
-                               false,
-                               1));
+  ResourceProviderTestTextureMailboxGLFilters::RunTest(
+      shared_bitmap_manager_.get(),
+      gpu_memory_buffer_manager_.get(),
+      main_thread_task_runner_.get(),
+      true,
+      GL_NEAREST);
+}
 
-  unsigned texture_id = 1;
-  uint32 sync_point = 30;
-  unsigned target = GL_TEXTURE_2D;
+TEST_P(ResourceProviderTest, TextureMailbox_GLTexture2D_NearestToLinear) {
+  // Mailboxing is only supported for GL textures.
+  if (GetParam() != ResourceProvider::GLTexture)
+    return;
 
-  EXPECT_CALL(*context, bindTexture(_, _)).Times(0);
-  EXPECT_CALL(*context, waitSyncPoint(_)).Times(0);
-  EXPECT_CALL(*context, insertSyncPoint()).Times(0);
-  EXPECT_CALL(*context, produceTextureCHROMIUM(_, _)).Times(0);
-  EXPECT_CALL(*context, consumeTextureCHROMIUM(_, _)).Times(0);
+  ResourceProviderTestTextureMailboxGLFilters::RunTest(
+      shared_bitmap_manager_.get(),
+      gpu_memory_buffer_manager_.get(),
+      main_thread_task_runner_.get(),
+      true,
+      GL_LINEAR);
+}
 
-  gpu::Mailbox gpu_mailbox;
-  memcpy(gpu_mailbox.name, "Hello world", strlen("Hello world") + 1);
-  uint32 release_sync_point = 0;
-  bool lost_resource = false;
-  BlockingTaskRunner* main_thread_task_runner = NULL;
-  scoped_ptr<SingleReleaseCallbackImpl> callback =
-      SingleReleaseCallbackImpl::Create(base::Bind(&ReleaseCallback,
-                                                   &release_sync_point,
-                                                   &lost_resource,
-                                                   &main_thread_task_runner));
+TEST_P(ResourceProviderTest, TextureMailbox_GLTexture2D_LinearToNearest) {
+  // Mailboxing is only supported for GL textures.
+  if (GetParam() != ResourceProvider::GLTexture)
+    return;
 
-  TextureMailbox mailbox(gpu_mailbox, target, sync_point);
-
-  ResourceProvider::ResourceId id =
-      resource_provider->CreateResourceFromTextureMailbox(
-          mailbox, callback.Pass());
-  EXPECT_NE(0u, id);
-
-  Mock::VerifyAndClearExpectations(context);
-
-  {
-    // Mailbox sync point WaitSyncPoint before using the texture.
-    EXPECT_CALL(*context, waitSyncPoint(sync_point));
-    resource_provider->WaitSyncPointIfNeeded(id);
-    Mock::VerifyAndClearExpectations(context);
-
-    // Using the texture does a consume of the mailbox.
-    EXPECT_CALL(*context, bindTexture(target, texture_id));
-    EXPECT_CALL(*context, consumeTextureCHROMIUM(target, _));
-
-    EXPECT_CALL(*context, insertSyncPoint()).Times(0);
-    EXPECT_CALL(*context, produceTextureCHROMIUM(_, _)).Times(0);
-
-    ResourceProvider::ScopedReadLockGL lock(resource_provider.get(), id);
-    Mock::VerifyAndClearExpectations(context);
-
-    // When done with it, a sync point should be inserted, but no produce is
-    // necessary.
-    EXPECT_CALL(*context, bindTexture(_, _)).Times(0);
-    EXPECT_CALL(*context, insertSyncPoint());
-    EXPECT_CALL(*context, produceTextureCHROMIUM(_, _)).Times(0);
-
-    EXPECT_CALL(*context, waitSyncPoint(_)).Times(0);
-    EXPECT_CALL(*context, consumeTextureCHROMIUM(_, _)).Times(0);
-  }
-
-  resource_provider->DeleteResource(id);
-  EXPECT_EQ(0u, release_sync_point);
-  EXPECT_FALSE(lost_resource);
-  EXPECT_EQ(main_thread_task_runner_.get(), main_thread_task_runner);
+  ResourceProviderTestTextureMailboxGLFilters::RunTest(
+      shared_bitmap_manager_.get(),
+      gpu_memory_buffer_manager_.get(),
+      main_thread_task_runner_.get(),
+      false,
+      GL_NEAREST);
 }
 
 TEST_P(ResourceProviderTest, TextureMailbox_GLTextureExternalOES) {
@@ -3416,6 +3478,10 @@ TEST_P(ResourceProviderTest, CopyResource_GLTexture) {
       .WillOnce(Return(kDestTextureId))
       .RetiresOnSaturation();
   EXPECT_CALL(*context, bindTexture(GL_TEXTURE_2D, kDestTextureId))
+      .Times(2)
+      .RetiresOnSaturation();
+  EXPECT_CALL(*context, texImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, 0, GL_RGBA,
+                                   GL_UNSIGNED_BYTE, nullptr))
       .Times(1)
       .RetiresOnSaturation();
   EXPECT_CALL(*context, NextTextureId())

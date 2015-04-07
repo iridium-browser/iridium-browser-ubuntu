@@ -6,6 +6,9 @@ import("//components/data_reduction_proxy/core/common/version.gni")
 
 static_library("common") {
   sources = [
+    "data_reduction_proxy_bypass_type_list.h",
+    "data_reduction_proxy_event_store.cc",
+    "data_reduction_proxy_event_store.h",
     "data_reduction_proxy_headers.cc",
     "data_reduction_proxy_headers.h",
     "data_reduction_proxy_params.cc",
@@ -16,38 +19,51 @@ static_library("common") {
     "data_reduction_proxy_switches.h",
   ]
 
-  deps = [
+  public_deps = [
     ":version_header",
+  ]
+  deps = [
     "//base",
+    "//net",
+    "//url",
   ]
 }
 
-static_library("test_support") {
+source_set("test_support") {
   testonly = true
   sources = [
+    "data_reduction_proxy_headers_test_utils.cc",
+    "data_reduction_proxy_headers_test_utils.h",
     "data_reduction_proxy_params_test_utils.cc",
     "data_reduction_proxy_params_test_utils.h",
   ]
 
-  deps = [
+  public_deps = [
     ":common",
+  ]
+  deps = [
     "//base",
     "//net",
     "//net:test_support",
     "//testing/gmock",
     "//testing/gtest",
- ]
+  ]
 }
 
 source_set("unit_tests") {
   testonly = true
   sources = [
+    "data_reduction_proxy_event_store_unittest.cc",
     "data_reduction_proxy_headers_unittest.cc",
     "data_reduction_proxy_params_unittest.cc",
   ]
 
   deps = [
     ":common",
+    ":test_support",
+    "//base",
+    "//base/test:test_support",
+    "//net:test_support",
     "//testing/gtest",
   ]
 }
@@ -55,5 +71,4 @@ source_set("unit_tests") {
 process_version("version_header") {
   source = "version.h.in"
   output = "$target_gen_dir/version.h"
-} 
-
+}

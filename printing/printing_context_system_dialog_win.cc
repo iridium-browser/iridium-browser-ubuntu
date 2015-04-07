@@ -4,6 +4,7 @@
 
 #include "printing/printing_context_system_dialog_win.h"
 
+#include "base/auto_reset.h"
 #include "base/message_loop/message_loop.h"
 #include "printing/backend/win_helper.h"
 #include "printing/print_settings_initializer_win.h"
@@ -21,6 +22,7 @@ PrintingContextSytemDialogWin::~PrintingContextSytemDialogWin() {
 void PrintingContextSytemDialogWin::AskUserForSettings(
     int max_pages,
     bool has_selection,
+    bool is_scripted,
     const PrintSettingsCallback& callback) {
   DCHECK(!in_print_job_);
   dialog_box_dismissed_ = false;
@@ -83,6 +85,13 @@ void PrintingContextSytemDialogWin::Cancel() {
 }
 
 HRESULT PrintingContextSytemDialogWin::ShowPrintDialog(PRINTDLGEX* options) {
+  // Runs always on the UI thread.
+  static bool is_dialog_shown = false;
+  if (is_dialog_shown)
+    return E_FAIL;
+  // Block opening dialog from nested task. It crashes PrintDlgEx.
+  base::AutoReset<bool> auto_reset(&is_dialog_shown, true);
+
   // Note that this cannot use ui::BaseShellDialog as the print dialog is
   // system modal: opening it from a background thread can cause Windows to
   // get the wrong Z-order which will make the print dialog appear behind the

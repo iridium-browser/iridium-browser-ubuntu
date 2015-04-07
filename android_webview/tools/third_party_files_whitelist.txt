@@ -8,6 +8,9 @@
 # New third-party code should be added under a directory named 'third_party',
 # so additions to this file should be rare. See
 # http://www.chromium.org/developers/adding-3rd-party-libraries.
+#
+# Please always use forward slashes '/' as path separators, even if you are
+# on Windows.
 
 # Contains test strings that look like copyrights.
 android_webview/tools/copyright_scanner_unittest.py
@@ -18,6 +21,8 @@ base/i18n/icu_string_conversions.cc
 base/logging.h
 # Copyright Ron Rivest, public domain.
 base/md5.cc
+# Copyright Apple Inc; BSD license. Moved from third_party/WebKit/.
+cc/input/scroll_elasticity_helper.h
 # Copyright Netscape Communications Corporation; MPL, GPL v2 or LGPL v2
 # license. This third-party code is taken from Mozilla, the license for which
 # we already pick up from third_party/npapi/.
@@ -74,6 +79,10 @@ content/renderer/input/input_scroll_elasticity_controller.cc
 content/renderer/input/input_scroll_elasticity_controller.h
 # Copyright Google Inc, no license. Not used on Android.
 google_update/google_update_idl.idl
+# Copyright WebM Project authors; BSD license. Copied and modified from
+# third_party/libvpx. Not used on Android.
+media/filters/vp8_bool_decoder.h
+media/filters/vp8_bool_decoder.cc
 # Native client not used in Android. Contains the word "Copyright"
 native_client_sdk/doc_generated/rest-devsite-examples.html
 # String '(c)' used in certificates organization names
@@ -158,6 +167,10 @@ tools/symsrc/pefile.py
 tools/traceline/traceline/assembler.h
 # Copyright Google Inc; BSD license. Tool only.
 tools/traceline/traceline/sidestep/mini_disassembler.cc
+# Copyright Marijn Haverbeke. MIT license. Tool only, not used on Android.
+tools/win/sizeviewer/clike.js
+# Copyright Marijn Haverbeke. MIT license. Tool only, not used on Android.
+tools/win/sizeviewer/codemirror.js
 # Copyright The Chromium Authors, Apple Inc; BSD license. Not used on Android.
 ui/base/clipboard/clipboard_util_win.cc
 # Copyright The Chromium Authors, Apple Inc; BSD license. Not used on Android.

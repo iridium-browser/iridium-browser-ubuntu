@@ -20,6 +20,7 @@ WorkerInspectorProxy::WorkerInspectorProxy()
     : m_workerThread(nullptr)
     , m_executionContext(nullptr)
     , m_pageInspector(nullptr)
+    , m_workerGlobalScopeProxy(nullptr)
 {
 }
 
@@ -87,11 +88,11 @@ void WorkerInspectorProxy::sendMessageToInspector(const String& message)
     m_workerThread->interruptAndDispatchInspectorCommands();
 }
 
-void WorkerInspectorProxy::writeTimelineStartedEvent(const String& sessionId)
+void WorkerInspectorProxy::writeTimelineStartedEvent(const String& sessionId, int workerId)
 {
     if (!m_workerThread)
         return;
-    TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "TracingSessionIdForWorker", "data", InspectorTracingSessionIdForWorkerEvent::data(sessionId, m_workerThread));
+    TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "TracingSessionIdForWorker", "data", InspectorTracingSessionIdForWorkerEvent::data(sessionId, workerId, m_workerThread));
 }
 
 } // namespace blink

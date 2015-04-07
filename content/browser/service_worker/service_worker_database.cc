@@ -4,8 +4,6 @@
 
 #include "content/browser/service_worker/service_worker_database.h"
 
-#include <string>
-
 #include "base/files/file_util.h"
 #include "base/location.h"
 #include "base/logging.h"
@@ -53,6 +51,15 @@
 //     (ex. "REG:http://example.com\x00123456")
 //   value: <ServiceWorkerRegistrationData serialized as a string>
 //
+//   key: "REG_HAS_USER_DATA:" + <std::string 'user_data_name'> + '\x00'
+//            + <int64 'registration_id'>
+//   value: <empty>
+//
+//   key: "REG_USER_DATA:" + <int64 'registration_id'> + '\x00'
+//            + <std::string user_data_name>
+//     (ex. "REG_USER_DATA:123456\x00foo_bar")
+//   value: <std::string user_data>
+//
 //   key: "RES:" + <int64 'version_id'> + '\x00' + <int64 'resource_id'>
 //     (ex. "RES:123456\x00654321")
 //   value: <ServiceWorkerResourceRecord serialized as a string>
@@ -71,6 +78,8 @@ const char kNextVerIdKey[] = "INITDATA_NEXT_VERSION_ID";
 const char kUniqueOriginKey[] = "INITDATA_UNIQUE_ORIGIN:";
 
 const char kRegKeyPrefix[] = "REG:";
+const char kRegUserDataKeyPrefix[] = "REG_USER_DATA:";
+const char kRegHasUserDataKeyPrefix[] = "REG_HAS_USER_DATA:";
 const char kResKeyPrefix[] = "RES:";
 const char kKeySeparator = '\x00';
 
@@ -118,6 +127,29 @@ std::string CreateUniqueOriginKey(const GURL& origin) {
 std::string CreateResourceIdKey(const char* key_prefix, int64 resource_id) {
   return base::StringPrintf(
       "%s%s", key_prefix, base::Int64ToString(resource_id).c_str());
+}
+
+std::string CreateUserDataKeyPrefix(int64 registration_id) {
+  return base::StringPrintf("%s%s%c",
+                            kRegUserDataKeyPrefix,
+                            base::Int64ToString(registration_id).c_str(),
+                            kKeySeparator);
+}
+
+std::string CreateUserDataKey(int64 registration_id,
+                              const std::string& user_data_name) {
+  return CreateUserDataKeyPrefix(registration_id).append(user_data_name);
+}
+
+std::string CreateHasUserDataKeyPrefix(const std::string& user_data_name) {
+  return base::StringPrintf("%s%s%c", kRegHasUserDataKeyPrefix,
+                            user_data_name.c_str(), kKeySeparator);
+}
+
+std::string CreateHasUserDataKey(int64 registration_id,
+                                 const std::string& user_data_name) {
+  return CreateHasUserDataKeyPrefix(user_data_name)
+      .append(base::Int64ToString(registration_id));
 }
 
 void PutRegistrationDataToBatch(
@@ -473,7 +505,9 @@ ServiceWorkerDatabase::Status ServiceWorkerDatabase::ReadRegistration(
   DCHECK(resources);
 
   Status status = LazyOpen(false);
-  if (IsNewOrNonexistentDatabase(status) || status != STATUS_OK)
+  if (IsNewOrNonexistentDatabase(status))
+    return STATUS_ERROR_NOT_FOUND;
+  if (status != STATUS_OK)
     return status;
 
   RegistrationData value;
@@ -506,7 +540,7 @@ ServiceWorkerDatabase::Status ServiceWorkerDatabase::WriteRegistration(
   BumpNextVersionIdIfNeeded(registration.version_id, &batch);
 
   PutUniqueOriginToBatch(registration.scope.GetOrigin(), &batch);
-#if DCHECK_IS_ON
+#if DCHECK_IS_ON()
   int64_t total_size_bytes = 0;
   for (const auto& resource : resources) {
     total_size_bytes += resource.size_bytes;
@@ -647,7 +681,7 @@ ServiceWorkerDatabase::Status ServiceWorkerDatabase::DeleteRegistration(
   // Delete a registration specified by |registration_id|.
   batch.Delete(CreateRegistrationKey(registration_id, origin));
 
-  // Delete resource records associated with the registration.
+  // Delete resource records and user data associated with the registration.
   for (const auto& registration : registrations) {
     if (registration.registration_id == registration_id) {
       *deleted_version = registration;
@@ -655,11 +689,137 @@ ServiceWorkerDatabase::Status ServiceWorkerDatabase::DeleteRegistration(
           registration.version_id, newly_purgeable_resources, &batch);
       if (status != STATUS_OK)
         return status;
+
+      status = DeleteUserDataForRegistration(registration_id, &batch);
+      if (status != STATUS_OK)
+        return status;
       break;
     }
   }
 
   return WriteBatch(&batch);
+}
+
+ServiceWorkerDatabase::Status ServiceWorkerDatabase::ReadUserData(
+    int64 registration_id,
+    const std::string& user_data_name,
+    std::string* user_data) {
+  DCHECK(sequence_checker_.CalledOnValidSequencedThread());
+  DCHECK_NE(kInvalidServiceWorkerRegistrationId, registration_id);
+  DCHECK(!user_data_name.empty());
+  DCHECK(user_data);
+
+  Status status = LazyOpen(false);
+  if (IsNewOrNonexistentDatabase(status))
+    return STATUS_ERROR_NOT_FOUND;
+  if (status != STATUS_OK)
+    return status;
+
+  const std::string key = CreateUserDataKey(registration_id, user_data_name);
+  status = LevelDBStatusToStatus(
+      db_->Get(leveldb::ReadOptions(), key, user_data));
+  HandleReadResult(FROM_HERE,
+                   status == STATUS_ERROR_NOT_FOUND ? STATUS_OK : status);
+  return status;
+}
+
+ServiceWorkerDatabase::Status ServiceWorkerDatabase::WriteUserData(
+    int64 registration_id,
+    const GURL& origin,
+    const std::string& user_data_name,
+    const std::string& user_data) {
+  DCHECK(sequence_checker_.CalledOnValidSequencedThread());
+  DCHECK_NE(kInvalidServiceWorkerRegistrationId, registration_id);
+  DCHECK(!user_data_name.empty());
+
+  Status status = LazyOpen(false);
+  if (IsNewOrNonexistentDatabase(status))
+    return STATUS_ERROR_NOT_FOUND;
+  if (status != STATUS_OK)
+    return status;
+
+  // There should be the registration specified by |registration_id|.
+  RegistrationData registration;
+  status = ReadRegistrationData(registration_id, origin, &registration);
+  if (status != STATUS_OK)
+    return status;
+
+  leveldb::WriteBatch batch;
+  batch.Put(CreateUserDataKey(registration_id, user_data_name), user_data);
+  batch.Put(CreateHasUserDataKey(registration_id, user_data_name), "");
+  return WriteBatch(&batch);
+}
+
+ServiceWorkerDatabase::Status ServiceWorkerDatabase::DeleteUserData(
+    int64 registration_id,
+    const std::string& user_data_name) {
+  DCHECK(sequence_checker_.CalledOnValidSequencedThread());
+  DCHECK_NE(kInvalidServiceWorkerRegistrationId, registration_id);
+  DCHECK(!user_data_name.empty());
+
+  Status status = LazyOpen(false);
+  if (IsNewOrNonexistentDatabase(status))
+    return STATUS_OK;
+  if (status != STATUS_OK)
+    return status;
+
+  leveldb::WriteBatch batch;
+  batch.Delete(CreateUserDataKey(registration_id, user_data_name));
+  batch.Delete(CreateHasUserDataKey(registration_id, user_data_name));
+  return WriteBatch(&batch);
+}
+
+ServiceWorkerDatabase::Status
+ServiceWorkerDatabase::ReadUserDataForAllRegistrations(
+    const std::string& user_data_name,
+    std::vector<std::pair<int64, std::string>>* user_data) {
+  DCHECK(sequence_checker_.CalledOnValidSequencedThread());
+  DCHECK(user_data->empty());
+
+  Status status = LazyOpen(false);
+  if (IsNewOrNonexistentDatabase(status))
+    return STATUS_OK;
+  if (status != STATUS_OK)
+    return status;
+
+  std::string key_prefix = CreateHasUserDataKeyPrefix(user_data_name);
+  scoped_ptr<leveldb::Iterator> itr(db_->NewIterator(leveldb::ReadOptions()));
+  for (itr->Seek(key_prefix); itr->Valid(); itr->Next()) {
+    status = LevelDBStatusToStatus(itr->status());
+    if (status != STATUS_OK) {
+      HandleReadResult(FROM_HERE, status);
+      user_data->clear();
+      return status;
+    }
+
+    std::string registration_id_string;
+    if (!RemovePrefix(itr->key().ToString(), key_prefix,
+                      &registration_id_string)) {
+      break;
+    }
+
+    int64 registration_id;
+    status = ParseId(registration_id_string, &registration_id);
+    if (status != STATUS_OK) {
+      HandleReadResult(FROM_HERE, status);
+      user_data->clear();
+      return status;
+    }
+
+    std::string value;
+    status = LevelDBStatusToStatus(
+        db_->Get(leveldb::ReadOptions(),
+                 CreateUserDataKey(registration_id, user_data_name), &value));
+    if (status != STATUS_OK) {
+      HandleReadResult(FROM_HERE, status);
+      user_data->clear();
+      return status;
+    }
+    user_data->push_back(std::make_pair(registration_id, value));
+  }
+
+  HandleReadResult(FROM_HERE, status);
+  return status;
 }
 
 ServiceWorkerDatabase::Status
@@ -729,11 +889,16 @@ ServiceWorkerDatabase::Status ServiceWorkerDatabase::DeleteAllDataForOrigins(
     if (status != STATUS_OK)
       return status;
 
-    // Delete registrations and resource records.
+    // Delete registrations, resource records and user data.
     for (const RegistrationData& data : registrations) {
       batch.Delete(CreateRegistrationKey(data.registration_id, origin));
+
       status = DeleteResourceRecords(
           data.version_id, newly_purgeable_resources, &batch);
+      if (status != STATUS_OK)
+        return status;
+
+      status = DeleteUserDataForRegistration(data.registration_id, &batch);
       if (status != STATUS_OK)
         return status;
     }
@@ -1042,6 +1207,32 @@ ServiceWorkerDatabase::Status ServiceWorkerDatabase::DeleteResourceIdsInBatch(
     batch->Delete(CreateResourceIdKey(id_key_prefix, *itr));
   }
   return STATUS_OK;
+}
+
+ServiceWorkerDatabase::Status
+ServiceWorkerDatabase::DeleteUserDataForRegistration(
+    int64 registration_id,
+    leveldb::WriteBatch* batch) {
+  DCHECK(batch);
+  Status status = STATUS_OK;
+  const std::string prefix = CreateUserDataKeyPrefix(registration_id);
+
+  scoped_ptr<leveldb::Iterator> itr(db_->NewIterator(leveldb::ReadOptions()));
+  for (itr->Seek(prefix); itr->Valid(); itr->Next()) {
+    status = LevelDBStatusToStatus(itr->status());
+    if (status != STATUS_OK) {
+      HandleReadResult(FROM_HERE, status);
+      return status;
+    }
+
+    const std::string key = itr->key().ToString();
+    std::string user_data_name;
+    if (!RemovePrefix(key, prefix, &user_data_name))
+      break;
+    batch->Delete(key);
+    batch->Delete(CreateHasUserDataKey(registration_id, user_data_name));
+  }
+  return status;
 }
 
 ServiceWorkerDatabase::Status ServiceWorkerDatabase::ReadDatabaseVersion(

@@ -326,7 +326,7 @@ bool ShouldShowNotificationForVolume(
 
   // If the disable-default-apps flag is on, Files.app is not opened
   // automatically on device mount not to obstruct the manual test.
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisableDefaultApps)) {
     return false;
   }
@@ -888,8 +888,6 @@ void EventRouter::DispatchDirectoryChangeEventWithEntryDefinition(
     const std::string* extension_id,
     bool watcher_error,
     const EntryDefinition& entry_definition) {
-  typedef std::map<base::FilePath, drive::FileChange::ChangeList> ChangeListMap;
-
   // TODO(mtomasz): Add support for watching files in File System Provider API.
   if (entry_definition.error != base::File::FILE_OK ||
       !entry_definition.is_directory) {

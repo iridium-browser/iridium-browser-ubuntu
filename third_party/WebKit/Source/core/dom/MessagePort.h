@@ -53,9 +53,10 @@ typedef WillBeHeapVector<RefPtrWillBeMember<MessagePort>, 1> MessagePortArray;
 // Not to be confused with WebMessagePortChannelArray; this one uses Vector and OwnPtr instead of WebVector and raw pointers.
 typedef Vector<OwnPtr<WebMessagePortChannel>, 1> MessagePortChannelArray;
 
-class MessagePort final : public RefCountedWillBeGarbageCollectedFinalized<MessagePort>
+class MessagePort final
+    : public EventTargetWithInlineData
+    , public RefCountedWillBeNoBase<MessagePort>
     , public ActiveDOMObject
-    , public EventTargetWithInlineData
     , public WebMessagePortChannelClient {
     DEFINE_WRAPPERTYPEINFO();
     REFCOUNTED_EVENT_TARGET(MessagePort);
@@ -103,6 +104,8 @@ public:
 
     // A port gets neutered when it is transferred to a new owner via postMessage().
     bool isNeutered() const { return !m_entangledChannel; }
+
+    virtual void trace(Visitor*) override;
 
 private:
     explicit MessagePort(ExecutionContext&);

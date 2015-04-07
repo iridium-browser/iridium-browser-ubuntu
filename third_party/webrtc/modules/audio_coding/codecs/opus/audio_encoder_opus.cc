@@ -36,7 +36,9 @@ int16_t CastInt16(size_t x) {
 
 }  // namespace
 
-AudioEncoderOpus::Config::Config() : frame_size_ms(20), num_channels(1) {}
+AudioEncoderOpus::Config::Config()
+    : frame_size_ms(20), num_channels(1), payload_type(120) {
+}
 
 bool AudioEncoderOpus::Config::IsOk() const {
   if (frame_size_ms <= 0 || frame_size_ms % 10 != 0)
@@ -49,6 +51,7 @@ bool AudioEncoderOpus::Config::IsOk() const {
 AudioEncoderOpus::AudioEncoderOpus(const Config& config)
     : num_10ms_frames_per_packet_(DivExact(config.frame_size_ms, 10)),
       num_channels_(config.num_channels),
+      payload_type_(config.payload_type),
       samples_per_10ms_frame_(DivExact(kSampleRateHz, 100) * num_channels_) {
   CHECK(config.IsOk());
   input_buffer_.reserve(num_10ms_frames_per_packet_ * samples_per_10ms_frame_);
@@ -71,19 +74,22 @@ int AudioEncoderOpus::Num10MsFramesInNextPacket() const {
   return num_10ms_frames_per_packet_;
 }
 
-bool AudioEncoderOpus::Encode(uint32_t timestamp,
-                              const int16_t* audio,
-                              size_t max_encoded_bytes,
-                              uint8_t* encoded,
-                              size_t* encoded_bytes,
-                              uint32_t* encoded_timestamp) {
+int AudioEncoderOpus::Max10MsFramesInAPacket() const {
+  return num_10ms_frames_per_packet_;
+}
+
+bool AudioEncoderOpus::EncodeInternal(uint32_t timestamp,
+                                      const int16_t* audio,
+                                      size_t max_encoded_bytes,
+                                      uint8_t* encoded,
+                                      EncodedInfo* info) {
   if (input_buffer_.empty())
     first_timestamp_in_buffer_ = timestamp;
   input_buffer_.insert(input_buffer_.end(), audio,
                        audio + samples_per_10ms_frame_);
   if (input_buffer_.size() < (static_cast<size_t>(num_10ms_frames_per_packet_) *
                               samples_per_10ms_frame_)) {
-    *encoded_bytes = 0;
+    info->encoded_bytes = 0;
     return true;
   }
   CHECK_EQ(input_buffer_.size(),
@@ -96,8 +102,9 @@ bool AudioEncoderOpus::Encode(uint32_t timestamp,
   input_buffer_.clear();
   if (r < 0)
     return false;
-  *encoded_bytes = r;
-  *encoded_timestamp = first_timestamp_in_buffer_;
+  info->encoded_bytes = r;
+  info->encoded_timestamp = first_timestamp_in_buffer_;
+  info->payload_type = payload_type_;
   return true;
 }
 

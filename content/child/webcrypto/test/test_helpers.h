@@ -105,7 +105,7 @@ blink::WebCryptoAlgorithm GetDigestAlgorithm(const base::DictionaryValue* dict,
                                              const char* property_name);
 
 // Returns true if any of the vectors in the input list have identical content.
-bool CopiesExist(const std::vector<std::vector<uint8_t> >& bufs);
+bool CopiesExist(const std::vector<std::vector<uint8_t>>& bufs);
 
 blink::WebCryptoAlgorithm CreateAesKeyGenAlgorithm(
     blink::WebCryptoAlgorithmId aes_alg_id,
@@ -199,6 +199,11 @@ blink::WebCryptoKeyFormat GetKeyFormatFromJsonTestCase(
 std::vector<uint8_t> GetKeyDataFromJsonTestCase(
     const base::DictionaryValue* test,
     blink::WebCryptoKeyFormat key_format);
+
+// Reads the "crv" string from a JSON test case and returns it as a
+// WebCryptoNamedCurve.
+blink::WebCryptoNamedCurve GetCurveNameFromDictionary(
+    const base::DictionaryValue* dict);
 
 }  // namespace webcrypto
 

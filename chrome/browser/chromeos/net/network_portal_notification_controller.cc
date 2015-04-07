@@ -15,8 +15,14 @@
 #include "base/metrics/histogram.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/mobile/mobile_activator.h"
+#include "chrome/browser/chromeos/net/network_portal_web_dialog.h"
+#include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
+#include "chrome/browser/chromeos/policy/consumer_management_service.h"
+#include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/grit/generated_resources.h"
@@ -30,6 +36,7 @@
 #include "ui/message_center/notification.h"
 #include "ui/message_center/notification_types.h"
 #include "ui/message_center/notifier_settings.h"
+#include "ui/views/widget/widget.h"
 
 using message_center::Notification;
 
@@ -38,7 +45,7 @@ namespace chromeos {
 namespace {
 
 bool IsPortalNotificationEnabled() {
-  return !CommandLine::ForCurrentProcess()->HasSwitch(
+  return !base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kDisableNetworkPortalNotification);
 }
 
@@ -51,7 +58,9 @@ void CloseNotification() {
 class NetworkPortalNotificationControllerDelegate
     : public message_center::NotificationDelegate {
  public:
-  NetworkPortalNotificationControllerDelegate(): clicked_(false) {}
+  explicit NetworkPortalNotificationControllerDelegate(
+      base::WeakPtr<NetworkPortalNotificationController> controller)
+      : clicked_(false), controller_(controller) {}
 
   // Overridden from message_center::NotificationDelegate:
   virtual void Display() override;
@@ -62,6 +71,8 @@ class NetworkPortalNotificationControllerDelegate
   virtual ~NetworkPortalNotificationControllerDelegate() {}
 
   bool clicked_;
+
+  base::WeakPtr<NetworkPortalNotificationController> controller_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkPortalNotificationControllerDelegate);
 };
@@ -93,14 +104,29 @@ void NetworkPortalNotificationControllerDelegate::Click() {
       NetworkPortalNotificationController::USER_ACTION_METRIC_CLICKED,
       NetworkPortalNotificationController::USER_ACTION_METRIC_COUNT);
 
-  Profile* profile = ProfileManager::GetActiveUserProfile();
-  if (!profile)
-    return;
-  chrome::ScopedTabbedBrowserDisplayer displayer(profile,
-                                                 chrome::HOST_DESKTOP_TYPE_ASH);
-  GURL url(captive_portal::CaptivePortalDetector::kDefaultURL);
-  chrome::ShowSingletonTab(displayer.browser(), url);
+  // ConsumerManagementService may not exist in tests.
+  const policy::ConsumerManagementService* consumer_management_service =
+      g_browser_process->platform_part()
+          ->browser_policy_connector_chromeos()
+          ->GetConsumerManagementService();
+  const bool enrolled = consumer_management_service &&
+                        consumer_management_service->GetStatus() ==
+                            policy::ConsumerManagementService::STATUS_ENROLLED;
 
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          chromeos::switches::kEnableCaptivePortalBypassProxy) &&
+      !enrolled) {
+    if (controller_)
+      controller_->ShowDialog();
+  } else {
+    Profile* profile = ProfileManager::GetActiveUserProfile();
+    if (!profile)
+      return;
+    chrome::ScopedTabbedBrowserDisplayer displayer(
+        profile, chrome::HOST_DESKTOP_TYPE_ASH);
+    GURL url(captive_portal::CaptivePortalDetector::kDefaultURL);
+    chrome::ShowSingletonTab(displayer.browser(), url);
+  }
   CloseNotification();
 }
 
@@ -118,7 +144,9 @@ const char NetworkPortalNotificationController::kNotificationMetric[] =
 const char NetworkPortalNotificationController::kUserActionMetric[] =
     "CaptivePortal.Notification.UserAction";
 
-NetworkPortalNotificationController::NetworkPortalNotificationController() {}
+NetworkPortalNotificationController::NetworkPortalNotificationController()
+    : dialog_(nullptr) {
+}
 
 NetworkPortalNotificationController::~NetworkPortalNotificationController() {}
 
@@ -131,6 +159,10 @@ void NetworkPortalNotificationController::OnPortalDetectionCompleted(
   if (!network ||
       state.status != NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_PORTAL) {
     last_network_path_.clear();
+
+    if (dialog_)
+      dialog_->Close();
+
     CloseNotification();
     return;
   }
@@ -152,16 +184,13 @@ void NetworkPortalNotificationController::OnPortalDetectionCompleted(
       ash::system_notifier::kNotifierNetworkPortalDetector);
 
   scoped_ptr<Notification> notification(new Notification(
-      message_center::NOTIFICATION_TYPE_SIMPLE,
-      kNotificationId,
+      message_center::NOTIFICATION_TYPE_SIMPLE, kNotificationId,
       l10n_util::GetStringUTF16(IDS_PORTAL_DETECTION_NOTIFICATION_TITLE),
       l10n_util::GetStringFUTF16(IDS_PORTAL_DETECTION_NOTIFICATION_MESSAGE,
                                  base::UTF8ToUTF16(network->name())),
-      icon,
-      base::string16() /* display_source */,
-      notifier_id,
+      icon, base::string16() /* display_source */, notifier_id,
       message_center::RichNotificationData(),
-      new NetworkPortalNotificationControllerDelegate()));
+      new NetworkPortalNotificationControllerDelegate(AsWeakPtr())));
   notification->SetSystemPriority();
 
   if (ash::Shell::HasInstance()) {
@@ -171,6 +200,24 @@ void NetworkPortalNotificationController::OnPortalDetectionCompleted(
   }
 
   message_center::MessageCenter::Get()->AddNotification(notification.Pass());
+}
+
+void NetworkPortalNotificationController::ShowDialog() {
+  if (dialog_)
+    return;
+
+  Profile* signin_profile = ProfileHelper::GetSigninProfile();
+  dialog_ = new NetworkPortalWebDialog(AsWeakPtr());
+  dialog_->SetWidget(views::Widget::GetWidgetForNativeWindow(
+      chrome::ShowWebDialog(nullptr, signin_profile, dialog_)));
+}
+
+void NetworkPortalNotificationController::OnDialogDestroyed(
+    const NetworkPortalWebDialog* dialog) {
+  if (dialog == dialog_) {
+    dialog_ = nullptr;
+    ProfileHelper::Get()->ClearSigninProfile(base::Closure());
+  }
 }
 
 }  // namespace chromeos

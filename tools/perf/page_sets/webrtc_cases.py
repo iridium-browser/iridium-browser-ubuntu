@@ -23,12 +23,11 @@ class Page1(WebrtcCasesPage):
 
   def __init__(self, page_set):
     super(Page1, self).__init__(
-      url=('http://googlechrome.github.io/webrtc/samples/web/content/'
-           'getusermedia-resolution/'),
+        url=('http://googlechrome.github.io/webrtc/samples/web/content/'
+             'getusermedia/gum/'),
       page_set=page_set)
 
   def RunPageInteractions(self, action_runner):
-    action_runner.ClickElement('button[id="vga"]')
     action_runner.Wait(10)
 
 
@@ -39,7 +38,7 @@ class Page2(WebrtcCasesPage):
   def __init__(self, page_set):
     super(Page2, self).__init__(
       url=('http://googlechrome.github.io/webrtc/samples/web/content/'
-           'peerconnection/'),
+           'peerconnection/pc1/'),
       page_set=page_set)
 
   def RunPageInteractions(self, action_runner):
@@ -49,6 +48,7 @@ class Page2(WebrtcCasesPage):
     action_runner.Wait(10)
     action_runner.ClickElement('button[id="hangupButton"]')
 
+
 class Page3(WebrtcCasesPage):
 
   """ Why: Acquires a high definition local stream. """
@@ -56,11 +56,75 @@ class Page3(WebrtcCasesPage):
   def __init__(self, page_set):
     super(Page3, self).__init__(
       url=('http://googlechrome.github.io/webrtc/samples/web/content/'
-           'getusermedia-resolution/'),
+           'getusermedia/resolution/'),
       page_set=page_set)
 
   def RunPageInteractions(self, action_runner):
     action_runner.ClickElement('button[id="hd"]')
+    action_runner.Wait(10)
+
+
+class Page4(WebrtcCasesPage):
+
+  """ Why: Sets up a WebRTC audio call with Opus. """
+
+  def __init__(self, page_set):
+    super(Page4, self).__init__(
+      url=('http://googlechrome.github.io/webrtc/samples/web/content/'
+           'peerconnection/audio/?codec=OPUS'),
+      page_set=page_set)
+
+  def RunPageInteractions(self, action_runner):
+    action_runner.ExecuteJavaScript('codecSelector.value="OPUS";')
+    action_runner.ClickElement('button[id="callButton"]')
+    action_runner.Wait(10)
+
+
+class Page5(WebrtcCasesPage):
+
+  """ Why: Sets up a WebRTC audio call with G722. """
+
+  def __init__(self, page_set):
+    super(Page5, self).__init__(
+      url=('http://googlechrome.github.io/webrtc/samples/web/content/'
+           'peerconnection/audio/?codec=G722'),
+      page_set=page_set)
+
+  def RunPageInteractions(self, action_runner):
+    action_runner.ExecuteJavaScript('codecSelector.value="G722";')
+    action_runner.ClickElement('button[id="callButton"]')
+    action_runner.Wait(10)
+
+
+class Page6(WebrtcCasesPage):
+
+  """ Why: Sets up a WebRTC audio call with PCMU. """
+
+  def __init__(self, page_set):
+    super(Page6, self).__init__(
+      url=('http://googlechrome.github.io/webrtc/samples/web/content/'
+           'peerconnection/audio/?codec=PCMU'),
+      page_set=page_set)
+
+  def RunPageInteractions(self, action_runner):
+    action_runner.ExecuteJavaScript('codecSelector.value="PCMU";')
+    action_runner.ClickElement('button[id="callButton"]')
+    action_runner.Wait(10)
+
+
+class Page7(WebrtcCasesPage):
+
+  """ Why: Sets up a WebRTC audio call with iSAC 16K. """
+
+  def __init__(self, page_set):
+    super(Page7, self).__init__(
+      url=('http://googlechrome.github.io/webrtc/samples/web/content/'
+           'peerconnection/audio/?codec=ISAC_16K'),
+      page_set=page_set)
+
+  def RunPageInteractions(self, action_runner):
+    action_runner.ExecuteJavaScript('codecSelector.value="ISAC/16000";')
+    action_runner.ClickElement('button[id="callButton"]')
     action_runner.Wait(10)
 
 
@@ -73,6 +137,13 @@ class WebrtcCasesPageSet(page_set_module.PageSet):
       archive_data_file='data/webrtc_cases.json',
       bucket=page_set_module.PUBLIC_BUCKET)
 
-    self.AddPage(Page1(self))
-    self.AddPage(Page2(self))
-    self.AddPage(Page3(self))
+    self.AddUserStory(Page1(self))
+    self.AddUserStory(Page2(self))
+    self.AddUserStory(Page3(self))
+    self.AddUserStory(Page1(self))
+    self.AddUserStory(Page2(self))
+    self.AddUserStory(Page3(self))
+    self.AddUserStory(Page4(self))
+    self.AddUserStory(Page5(self))
+    self.AddUserStory(Page6(self))
+    self.AddUserStory(Page7(self))

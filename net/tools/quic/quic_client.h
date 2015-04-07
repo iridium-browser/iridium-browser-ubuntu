@@ -44,7 +44,7 @@ class QuicClient : public EpollCallbackInterface,
     virtual ~ResponseListener() {}
     virtual void OnCompleteResponse(QuicStreamId id,
                                     const BalsaHeaders& response_headers,
-                                    const string& response_body) = 0;
+                                    const std::string& response_body) = 0;
   };
 
   // Create a quic client, which will have events managed by an externally owned
@@ -75,7 +75,7 @@ class QuicClient : public EpollCallbackInterface,
   // Start the crypto handshake.  This can be done in place of the synchronous
   // Connect(), but callers are responsible for making sure the crypto handshake
   // completes.
-  bool StartConnect();
+  void StartConnect();
 
   // Returns true if the crypto handshake has yet to establish encryption.
   // Returns false if encryption is active (even if the server hasn't confirmed
@@ -120,6 +120,7 @@ class QuicClient : public EpollCallbackInterface,
   QuicClientSession* session() { return session_.get(); }
 
   bool connected() const;
+  bool goaway_received() const;
 
   void set_bind_to_address(IPAddressNumber address) {
     bind_to_address_ = address;
@@ -142,7 +143,7 @@ class QuicClient : public EpollCallbackInterface,
     server_id_ = server_id;
   }
 
-  void SetUserAgentID(const string& user_agent_id) {
+  void SetUserAgentID(const std::string& user_agent_id) {
     crypto_config_.set_user_agent_id(user_agent_id);
   }
 
@@ -203,6 +204,9 @@ class QuicClient : public EpollCallbackInterface,
   // and binds the socket to our address.
   bool CreateUDPSocket();
 
+  // If the socket has been created, then unregister and close() the FD.
+  void CleanUpUDPSocket();
+
   // Read a UDP packet and hand it to the framer.
   bool ReadAndProcessPacket();
 
@@ -246,9 +250,8 @@ class QuicClient : public EpollCallbackInterface,
   bool initialized_;
 
   // If overflow_supported_ is true, this will be the number of packets dropped
-  // during the lifetime of the server.  This may overflow if enough packets
-  // are dropped.
-  uint32 packets_dropped_;
+  // during the lifetime of the server.
+  QuicPacketCount packets_dropped_;
 
   // True if the kernel supports SO_RXQ_OVFL, the number of packets dropped
   // because the socket would otherwise overflow.

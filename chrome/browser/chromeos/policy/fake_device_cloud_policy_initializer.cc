@@ -4,8 +4,6 @@
 
 #include "chrome/browser/chromeos/policy/fake_device_cloud_policy_initializer.h"
 
-#include "base/bind.h"
-#include "base/bind_helpers.h"
 #include "base/memory/ref_counted.h"
 #include "base/sequenced_task_runner.h"
 #include "components/policy/core/common/cloud/device_management_service.h"
@@ -23,9 +21,7 @@ FakeDeviceCloudPolicyInitializer::FakeDeviceCloudPolicyInitializer()
           NULL,  // state_keys_broker
           NULL,  // device_store
           NULL,  // manager
-          NULL,  // device_settings_service
-          // on_connected_callback
-          base::Bind(&base::DoNothing)),
+          NULL),  // device_settings_service
       was_start_enrollment_called_(false),
       enrollment_status_(EnrollmentStatus::ForStatus(
           EnrollmentStatus::STATUS_SUCCESS)) {
@@ -38,10 +34,11 @@ void FakeDeviceCloudPolicyInitializer::Shutdown() {
 }
 
 void FakeDeviceCloudPolicyInitializer::StartEnrollment(
-    enterprise_management::PolicyData::ManagementMode management_mode,
+    ManagementMode management_mode,
     DeviceManagementService* device_management_service,
+    chromeos::OwnerSettingsServiceChromeOS* owner_settings_service,
+    const EnrollmentConfig& enrollment_config,
     const std::string& auth_token,
-    bool is_auto_enrollment,
     const AllowedDeviceModes& allowed_modes,
     const EnrollmentCallback& enrollment_callback) {
   was_start_enrollment_called_ = true;

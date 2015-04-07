@@ -43,9 +43,9 @@ class TestBitrateObserver: public BitrateObserver {
         last_rtt_(0) {
   }
 
-  virtual void OnNetworkChanged(const uint32_t bitrate,
-                                const uint8_t fraction_loss,
-                                const uint32_t rtt) {
+  virtual void OnNetworkChanged(uint32_t bitrate,
+                                uint8_t fraction_loss,
+                                uint32_t rtt) {
     last_bitrate_ = bitrate;
     last_fraction_loss_ = fraction_loss;
     last_rtt_ = rtt;
@@ -81,27 +81,6 @@ TEST_F(BitrateControllerTest, Basic) {
   TestBitrateObserver bitrate_observer;
   controller_->SetBitrateObserver(&bitrate_observer, 200000, 100000, 300000);
   controller_->RemoveBitrateObserver(&bitrate_observer);
-}
-
-TEST_F(BitrateControllerTest, InitialRemb) {
-  TestBitrateObserver bitrate_observer;
-  controller_->SetBitrateObserver(&bitrate_observer, 200000, 100000, 1500000);
-  const uint32_t kRemb = 1000000u;
-  const uint32_t kSecondRemb = kRemb + 500000u;
-
-  // Initial REMB applies immediately.
-  bandwidth_observer_->OnReceivedEstimatedBitrate(kRemb);
-  webrtc::ReportBlockList report_blocks;
-  report_blocks.push_back(CreateReportBlock(1, 2, 0, 1));
-  bandwidth_observer_->OnReceivedRtcpReceiverReport(report_blocks, 50, 1);
-  report_blocks.clear();
-  EXPECT_EQ(kRemb, bitrate_observer.last_bitrate_);
-
-  // Second REMB doesn't apply immediately.
-  bandwidth_observer_->OnReceivedEstimatedBitrate(kRemb + 500000);
-  report_blocks.push_back(CreateReportBlock(1, 2, 0, 21));
-  bandwidth_observer_->OnReceivedRtcpReceiverReport(report_blocks, 50, 2001);
-  EXPECT_LT(bitrate_observer.last_bitrate_, kSecondRemb);
 }
 
 TEST_F(BitrateControllerTest, UpdatingBitrateObserver) {

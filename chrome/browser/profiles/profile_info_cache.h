@@ -77,12 +77,15 @@ class ProfileInfoCache : public ProfileInfoInterface,
   const gfx::Image* GetGAIAPictureOfProfileAtIndex(size_t index) const override;
   bool IsUsingGAIAPictureOfProfileAtIndex(size_t index) const override;
   bool ProfileIsSupervisedAtIndex(size_t index) const override;
+  bool ProfileIsChildAtIndex(size_t index) const override;
+  bool ProfileIsLegacySupervisedAtIndex(size_t index) const override;
   bool IsOmittedProfileAtIndex(size_t index) const override;
   bool ProfileIsSigninRequiredAtIndex(size_t index) const override;
   std::string GetSupervisedUserIdOfProfileAtIndex(size_t index) const override;
   bool ProfileIsEphemeralAtIndex(size_t index) const override;
   bool ProfileIsUsingDefaultNameAtIndex(size_t index) const override;
   bool ProfileIsUsingDefaultAvatarAtIndex(size_t index) const override;
+  bool ProfileIsAuthErrorAtIndex(size_t index) const;
 
   size_t GetAvatarIconIndexOfProfileAtIndex(size_t index) const;
 
@@ -111,6 +114,7 @@ class ProfileInfoCache : public ProfileInfoInterface,
   void SetProfileIsEphemeralAtIndex(size_t index, bool value);
   void SetProfileIsUsingDefaultNameAtIndex(size_t index, bool value);
   void SetProfileIsUsingDefaultAvatarAtIndex(size_t index, bool value);
+  void SetProfileIsAuthErrorAtIndex(size_t index, bool value);
 
   // Determines whether |name| is one of the default assigned names.
   bool IsDefaultProfileName(const base::string16& name) const;
@@ -134,10 +138,10 @@ class ProfileInfoCache : public ProfileInfoInterface,
   // Register cache related preferences in Local State.
   static void RegisterPrefs(PrefRegistrySimple* registry);
 
-  // Starts downloading the high res avatar at index |icon_index| for profile
-  // with path |profile_path|.
-  void DownloadHighResAvatar(size_t icon_index,
-                             const base::FilePath& profile_path);
+  // Checks whether the high res avatar at index |icon_index| exists, and
+  // if it does not, calls |DownloadHighResAvatar|.
+  void DownloadHighResAvatarIfNeeded(size_t icon_index,
+                                     const base::FilePath& profile_path);
 
   // Saves the avatar |image| at |image_path|. This is used both for the
   // GAIA profile pictures and the ProfileAvatarDownloader that is used to
@@ -182,6 +186,11 @@ class ProfileInfoCache : public ProfileInfoInterface,
   // generic profile avatar.
   const gfx::Image* GetHighResAvatarOfProfileAtIndex(size_t index) const;
 
+  // Starts downloading the high res avatar at index |icon_index| for profile
+  // with path |profile_path|.
+  void DownloadHighResAvatar(size_t icon_index,
+                             const base::FilePath& profile_path);
+
   // Returns the decoded image at |image_path|. Used both by the GAIA profile
   // image and the high res avatars.
   const gfx::Image* LoadAvatarPictureFromPath(
@@ -222,7 +231,7 @@ class ProfileInfoCache : public ProfileInfoInterface,
   // This prevents a picture from being downloaded multiple times. The
   // ProfileAvatarDownloader instances are deleted when the download completes
   // or when the ProfileInfoCache is destroyed.
-  mutable std::map<std::string, ProfileAvatarDownloader*>
+  std::map<std::string, ProfileAvatarDownloader*>
       avatar_images_downloads_in_progress_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileInfoCache);

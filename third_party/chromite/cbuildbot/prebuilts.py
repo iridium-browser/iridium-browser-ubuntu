@@ -138,8 +138,8 @@ def UploadPrebuilts(category, chrome_rev, private_bucket, buildroot, **kwargs):
 
   if category == constants.CHROME_PFQ_TYPE:
     extra_args += ['--packages=%s' % x
-                   for x in [constants.CHROME_PN] +
-                            constants.OTHER_CHROME_PACKAGES]
+                   for x in ([constants.CHROME_PN] +
+                             constants.OTHER_CHROME_PACKAGES)]
 
   kwargs.setdefault('extra_args', []).extend(extra_args)
   return _UploadPrebuilts(buildroot=buildroot, **kwargs)
@@ -147,7 +147,6 @@ def UploadPrebuilts(category, chrome_rev, private_bucket, buildroot, **kwargs):
 
 class PackageFileMissing(Exception):
   """Raised when the dev installer package file is missing."""
-  pass
 
 
 def UploadDevInstallerPrebuilts(binhost_bucket, binhost_key, binhost_base_url,
@@ -190,12 +189,8 @@ def _UploadPrebuilts(buildroot, board, extra_args):
     board: Board type that was built on this machine.
     extra_args: Extra args to pass to prebuilts script.
   """
-  cwd = constants.CHROMITE_BIN_DIR
-  cmd = ['./upload_prebuilts',
-         '--build-path', buildroot]
-
+  cmd = ['upload_prebuilts', '--build-path', buildroot]
   if board:
     cmd.extend(['--board', board])
-
   cmd.extend(extra_args)
-  commands.RunBuildScript(buildroot, cmd, cwd=cwd)
+  commands.RunBuildScript(buildroot, cmd, chromite_cmd=True)

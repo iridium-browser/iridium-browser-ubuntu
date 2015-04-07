@@ -61,7 +61,7 @@ class BasicBlock FINAL : public ZoneObject {
       DCHECK(IsValid());
       return static_cast<size_t>(index_);
     }
-    bool IsValid() const { return index_ != kInvalidRpoNumber; }
+    bool IsValid() const { return index_ >= 0; }
     static RpoNumber FromInt(int index) { return RpoNumber(index); }
     static RpoNumber Invalid() { return RpoNumber(kInvalidRpoNumber); }
 
@@ -145,40 +145,47 @@ class BasicBlock FINAL : public ZoneObject {
   bool deferred() const { return deferred_; }
   void set_deferred(bool deferred) { deferred_ = deferred; }
 
+  int32_t dominator_depth() const { return dominator_depth_; }
+  void set_dominator_depth(int32_t depth) { dominator_depth_ = depth; }
+
   BasicBlock* dominator() const { return dominator_; }
-  void set_dominator(BasicBlock* dominator);
+  void set_dominator(BasicBlock* dominator) { dominator_ = dominator; }
+
+  BasicBlock* rpo_next() const { return rpo_next_; }
+  void set_rpo_next(BasicBlock* rpo_next) { rpo_next_ = rpo_next; }
 
   BasicBlock* loop_header() const { return loop_header_; }
   void set_loop_header(BasicBlock* loop_header);
 
+  BasicBlock* loop_end() const { return loop_end_; }
+  void set_loop_end(BasicBlock* loop_end);
+
   int32_t loop_depth() const { return loop_depth_; }
   void set_loop_depth(int32_t loop_depth);
 
-  int32_t loop_end() const { return loop_end_; }
-  void set_loop_end(int32_t loop_end);
-
-  RpoNumber GetAoNumber() const { return RpoNumber::FromInt(ao_number_); }
-  int32_t ao_number() const { return ao_number_; }
-  void set_ao_number(int32_t ao_number) { ao_number_ = ao_number; }
+  int32_t loop_number() const { return loop_number_; }
+  void set_loop_number(int32_t loop_number) { loop_number_ = loop_number; }
 
   RpoNumber GetRpoNumber() const { return RpoNumber::FromInt(rpo_number_); }
   int32_t rpo_number() const { return rpo_number_; }
   void set_rpo_number(int32_t rpo_number);
 
   // Loop membership helpers.
-  inline bool IsLoopHeader() const { return loop_end_ >= 0; }
+  inline bool IsLoopHeader() const { return loop_end_ != NULL; }
   bool LoopContains(BasicBlock* block) const;
 
  private:
-  int32_t ao_number_;        // assembly order number of the block.
+  int32_t loop_number_;      // loop number of the block.
   int32_t rpo_number_;       // special RPO number of the block.
   bool deferred_;            // true if the block contains deferred code.
+  int32_t dominator_depth_;  // Depth within the dominator tree.
   BasicBlock* dominator_;    // Immediate dominator of the block.
+  BasicBlock* rpo_next_;     // Link to next block in special RPO order.
   BasicBlock* loop_header_;  // Pointer to dominating loop header basic block,
                              // NULL if none. For loop headers, this points to
                              // enclosing loop header.
+  BasicBlock* loop_end_;     // end of the loop, if this block is a loop header.
   int32_t loop_depth_;       // loop nesting, 0 is top-level
-  int32_t loop_end_;         // end of the loop, if this block is a loop header.
 
   Control control_;          // Control at the end of the block.
   Node* control_input_;      // Input value for control.
@@ -261,8 +268,6 @@ class Schedule FINAL : public ZoneObject {
 
  private:
   friend class Scheduler;
-  friend class CodeGenerator;
-  friend class ScheduleVisualizer;
   friend class BasicBlockInstrumentor;
 
   void AddSuccessor(BasicBlock* block, BasicBlock* succ);

@@ -23,12 +23,14 @@ content_app_sources = [
 content_app_deps = [
   "//base",
   "//base:i18n",
+
   # This is needed by app/content_main_runner.cc
   # TODO(brettw) this shouldn't be here, only final executables should be
   # picking the allocator.
   "//base/allocator",
   "//content:export",
   "//content/public/common:common_sources",
+  "//content/public/common:mojo_bindings",
   "//crypto",
   "//ui/base",
   "//ui/gfx",
@@ -42,7 +44,8 @@ if (is_win) {
   content_app_deps += [
     "//content/public/android:jni",
     "//skia",
-    "//third_party/android_tools:cpu_features"
+    "//third_party/android_tools:cpu_features",
+    "//ui/android",
   ]
 }
 

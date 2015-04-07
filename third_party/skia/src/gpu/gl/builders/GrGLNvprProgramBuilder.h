@@ -12,7 +12,7 @@
 
 class GrGLNvprProgramBuilder : public GrGLProgramBuilder {
 public:
-    GrGLNvprProgramBuilder(GrGpuGL*, const GrOptDrawState&);
+    GrGLNvprProgramBuilder(GrGLGpu*, const GrOptDrawState&);
 
     /*
      * The separable varying info must be passed to GrGLProgram so this must
@@ -25,10 +25,10 @@ public:
 
     typedef GrTAllocator<SeparableVaryingInfo> SeparableVaryingInfoArray;
 
-    virtual GrGLProgram* createProgram(GrGLuint programID);
+    virtual GrGLProgram* createProgram(GrGLuint programID) SK_OVERRIDE;
 
 private:
-    virtual void emitTransforms(const GrFragmentStage&,
+    virtual void emitTransforms(const GrPendingFragmentStage&,
                                 GrGLProcessor::TransformedCoordsArray* outCoords,
                                 GrGLInstalledFragProc*) SK_OVERRIDE;
 

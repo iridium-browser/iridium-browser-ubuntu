@@ -14,8 +14,8 @@ class EvictionOrderComparator {
       : tree_priority_(tree_priority) {}
 
   bool operator()(
-      const EvictionTilePriorityQueue::PairedPictureLayerQueue* a,
-      const EvictionTilePriorityQueue::PairedPictureLayerQueue* b) const {
+      const EvictionTilePriorityQueue::PairedTilingSetQueue* a,
+      const EvictionTilePriorityQueue::PairedTilingSetQueue* b) const {
     // Note that in this function, we have to return true if and only if
     // b is strictly lower priority than a. Note that for the sake of
     // completeness, empty queue is considered to have lowest priority.
@@ -23,15 +23,15 @@ class EvictionOrderComparator {
       return b->IsEmpty() < a->IsEmpty();
 
     WhichTree a_tree = a->NextTileIteratorTree(tree_priority_);
-    const PictureLayerImpl::LayerEvictionTileIterator* a_iterator =
-        a_tree == ACTIVE_TREE ? &a->active_iterator : &a->pending_iterator;
+    const TilingSetEvictionQueue* a_queue =
+        a_tree == ACTIVE_TREE ? a->active_queue.get() : a->pending_queue.get();
 
     WhichTree b_tree = b->NextTileIteratorTree(tree_priority_);
-    const PictureLayerImpl::LayerEvictionTileIterator* b_iterator =
-        b_tree == ACTIVE_TREE ? &b->active_iterator : &b->pending_iterator;
+    const TilingSetEvictionQueue* b_queue =
+        b_tree == ACTIVE_TREE ? b->active_queue.get() : b->pending_queue.get();
 
-    const Tile* a_tile = **a_iterator;
-    const Tile* b_tile = **b_iterator;
+    const Tile* a_tile = a_queue->Top();
+    const Tile* b_tile = b_queue->Top();
 
     const TilePriority& a_priority =
         a_tile->priority_for_tree_priority(tree_priority_);
@@ -94,7 +94,7 @@ void EvictionTilePriorityQueue::Build(
        it != paired_layers.end();
        ++it) {
     paired_queues_.push_back(
-        make_scoped_ptr(new PairedPictureLayerQueue(*it, tree_priority_)));
+        make_scoped_ptr(new PairedTilingSetQueue(*it, tree_priority_)));
   }
 
   paired_queues_.make_heap(EvictionOrderComparator(tree_priority_));
@@ -117,94 +117,75 @@ void EvictionTilePriorityQueue::Pop() {
   DCHECK(!IsEmpty());
 
   paired_queues_.pop_heap(EvictionOrderComparator(tree_priority_));
-  PairedPictureLayerQueue* paired_queue = paired_queues_.back();
+  PairedTilingSetQueue* paired_queue = paired_queues_.back();
   paired_queue->Pop(tree_priority_);
   paired_queues_.push_heap(EvictionOrderComparator(tree_priority_));
 }
 
-EvictionTilePriorityQueue::PairedPictureLayerQueue::PairedPictureLayerQueue() {
+EvictionTilePriorityQueue::PairedTilingSetQueue::PairedTilingSetQueue() {
 }
 
-EvictionTilePriorityQueue::PairedPictureLayerQueue::PairedPictureLayerQueue(
+EvictionTilePriorityQueue::PairedTilingSetQueue::PairedTilingSetQueue(
     const PictureLayerImpl::Pair& layer_pair,
-    TreePriority tree_priority)
-    : active_iterator(
-          layer_pair.active
-              ? PictureLayerImpl::LayerEvictionTileIterator(layer_pair.active,
-                                                            tree_priority)
-              : PictureLayerImpl::LayerEvictionTileIterator()),
-      pending_iterator(
-          layer_pair.pending
-              ? PictureLayerImpl::LayerEvictionTileIterator(layer_pair.pending,
-                                                            tree_priority)
-              : PictureLayerImpl::LayerEvictionTileIterator()) {
+    TreePriority tree_priority) {
+  if (layer_pair.active)
+    active_queue = layer_pair.active->CreateEvictionQueue(tree_priority);
+  if (layer_pair.pending)
+    pending_queue = layer_pair.pending->CreateEvictionQueue(tree_priority);
 }
 
-EvictionTilePriorityQueue::PairedPictureLayerQueue::~PairedPictureLayerQueue() {
+EvictionTilePriorityQueue::PairedTilingSetQueue::~PairedTilingSetQueue() {
 }
 
-bool EvictionTilePriorityQueue::PairedPictureLayerQueue::IsEmpty() const {
-  return !active_iterator && !pending_iterator;
+bool EvictionTilePriorityQueue::PairedTilingSetQueue::IsEmpty() const {
+  return (!active_queue || active_queue->IsEmpty()) &&
+         (!pending_queue || pending_queue->IsEmpty());
 }
 
-Tile* EvictionTilePriorityQueue::PairedPictureLayerQueue::Top(
+Tile* EvictionTilePriorityQueue::PairedTilingSetQueue::Top(
     TreePriority tree_priority) {
   DCHECK(!IsEmpty());
 
   WhichTree next_tree = NextTileIteratorTree(tree_priority);
-  PictureLayerImpl::LayerEvictionTileIterator* next_iterator =
-      next_tree == ACTIVE_TREE ? &active_iterator : &pending_iterator;
-  DCHECK(*next_iterator);
+  TilingSetEvictionQueue* next_queue =
+      next_tree == ACTIVE_TREE ? active_queue.get() : pending_queue.get();
+  DCHECK(next_queue && !next_queue->IsEmpty());
 
-  Tile* tile = **next_iterator;
-  DCHECK(std::find(returned_shared_tiles.begin(),
-                   returned_shared_tiles.end(),
-                   tile) == returned_shared_tiles.end());
+  Tile* tile = next_queue->Top();
+  DCHECK(returned_tiles_for_debug.find(tile) == returned_tiles_for_debug.end());
   return tile;
 }
 
-void EvictionTilePriorityQueue::PairedPictureLayerQueue::Pop(
+void EvictionTilePriorityQueue::PairedTilingSetQueue::Pop(
     TreePriority tree_priority) {
   DCHECK(!IsEmpty());
 
   WhichTree next_tree = NextTileIteratorTree(tree_priority);
-  PictureLayerImpl::LayerEvictionTileIterator* next_iterator =
-      next_tree == ACTIVE_TREE ? &active_iterator : &pending_iterator;
-  DCHECK(*next_iterator);
-  returned_shared_tiles.push_back(**next_iterator);
-  ++(*next_iterator);
+  TilingSetEvictionQueue* next_queue =
+      next_tree == ACTIVE_TREE ? active_queue.get() : pending_queue.get();
+  DCHECK(next_queue && !next_queue->IsEmpty());
+  DCHECK(returned_tiles_for_debug.insert(next_queue->Top()).second);
+  next_queue->Pop();
 
-  if (IsEmpty())
-    return;
-
-  next_tree = NextTileIteratorTree(tree_priority);
-  next_iterator =
-      next_tree == ACTIVE_TREE ? &active_iterator : &pending_iterator;
-  while (std::find(returned_shared_tiles.begin(),
-                   returned_shared_tiles.end(),
-                   **next_iterator) != returned_shared_tiles.end()) {
-    ++(*next_iterator);
-    if (IsEmpty())
-      break;
-    next_tree = NextTileIteratorTree(tree_priority);
-    next_iterator =
-        next_tree == ACTIVE_TREE ? &active_iterator : &pending_iterator;
-  }
+  // If not empty, use Top to DCHECK the next iterator.
+  DCHECK_IMPLIES(!IsEmpty(), Top(tree_priority));
 }
 
 WhichTree
-EvictionTilePriorityQueue::PairedPictureLayerQueue::NextTileIteratorTree(
+EvictionTilePriorityQueue::PairedTilingSetQueue::NextTileIteratorTree(
     TreePriority tree_priority) const {
   DCHECK(!IsEmpty());
 
   // If we only have one iterator with tiles, return it.
-  if (!active_iterator)
+  if (!active_queue || active_queue->IsEmpty())
     return PENDING_TREE;
-  if (!pending_iterator)
+  if (!pending_queue || pending_queue->IsEmpty())
     return ACTIVE_TREE;
 
-  const Tile* active_tile = *active_iterator;
-  const Tile* pending_tile = *pending_iterator;
+  const Tile* active_tile = active_queue->Top();
+  const Tile* pending_tile = pending_queue->Top();
+
+  // If tiles are the same, it doesn't matter which tree we return.
   if (active_tile == pending_tile)
     return ACTIVE_TREE;
 
@@ -213,6 +194,15 @@ EvictionTilePriorityQueue::PairedPictureLayerQueue::NextTileIteratorTree(
   const TilePriority& pending_priority =
       pending_tile->priority_for_tree_priority(tree_priority);
 
+  // If the bins are the same and activation differs, then return the tree of
+  // the tile not required for activation.
+  if (active_priority.priority_bin == pending_priority.priority_bin &&
+      active_tile->required_for_activation() !=
+          pending_tile->required_for_activation()) {
+    return active_tile->required_for_activation() ? PENDING_TREE : ACTIVE_TREE;
+  }
+
+  // Return tile with a lower priority.
   if (pending_priority.IsHigherPriorityThan(active_priority))
     return ACTIVE_TREE;
   return PENDING_TREE;

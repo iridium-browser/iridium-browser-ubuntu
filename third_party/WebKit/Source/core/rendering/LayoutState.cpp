@@ -26,6 +26,7 @@
 #include "config.h"
 #include "core/rendering/LayoutState.h"
 
+#include "core/rendering/RenderFlowThread.h"
 #include "core/rendering/RenderInline.h"
 #include "core/rendering/RenderLayer.h"
 #include "core/rendering/RenderView.h"
@@ -37,6 +38,7 @@ LayoutState::LayoutState(LayoutUnit pageLogicalHeight, bool pageLogicalHeightCha
     : m_isPaginated(pageLogicalHeight)
     , m_pageLogicalHeightChanged(pageLogicalHeightChanged)
     , m_containingBlockLogicalWidthChanged(false)
+    , m_flowThread(0)
     , m_columnInfo(0)
     , m_next(0)
     , m_pageLogicalHeight(pageLogicalHeight)
@@ -52,6 +54,7 @@ LayoutState::LayoutState(RenderBox& renderer, const LayoutSize& offset, LayoutUn
     , m_next(renderer.view()->layoutState())
     , m_renderer(renderer)
 {
+    m_flowThread = renderer.isRenderFlowThread() ? toRenderFlowThread(&renderer) : m_next->flowThread();
     renderer.view()->pushLayoutState(*this);
     bool fixed = renderer.isOutOfFlowPositioned() && renderer.style()->position() == FixedPosition;
     if (fixed) {
@@ -72,7 +75,7 @@ LayoutState::LayoutState(RenderBox& renderer, const LayoutSize& offset, LayoutUn
     // We can compare this later on to figure out what part of the page we're actually on,
     if (pageLogicalHeight || m_columnInfo || renderer.isRenderFlowThread()) {
         m_pageLogicalHeight = pageLogicalHeight;
-        bool isFlipped = renderer.style()->slowIsFlippedBlocksWritingMode();
+        bool isFlipped = renderer.style()->isFlippedBlocksWritingMode();
         m_pageOffset = LayoutSize(m_layoutOffset.width() + (!isFlipped ? renderer.borderLeft() + renderer.paddingLeft() : renderer.borderRight() + renderer.paddingRight()),
             m_layoutOffset.height() + (!isFlipped ? renderer.borderTop() + renderer.paddingTop() : renderer.borderBottom() + renderer.paddingBottom()));
         m_pageLogicalHeightChanged = pageLogicalHeightChanged;
@@ -103,13 +106,13 @@ LayoutState::LayoutState(RenderObject& root)
     : m_isPaginated(false)
     , m_pageLogicalHeightChanged(false)
     , m_containingBlockLogicalWidthChanged(false)
+    , m_flowThread(0)
     , m_columnInfo(0)
     , m_next(root.view()->layoutState())
     , m_pageLogicalHeight(0)
     , m_renderer(root)
 {
-    // FIXME: Why does RenderTableSection create this wonky LayoutState?
-    ASSERT(!m_next || root.isTableSection());
+    ASSERT(!m_next);
     // We'll end up pushing in RenderView itself, so don't bother adding it.
     if (root.isRenderView())
         return;

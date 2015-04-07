@@ -8,6 +8,7 @@
 #define NET_TOOLS_QUIC_QUIC_SERVER_SESSION_H_
 
 #include <set>
+#include <string>
 #include <vector>
 
 #include "base/basictypes.h"
@@ -33,7 +34,7 @@ class QuicServerSessionPeer;
 
 // An interface from the session to the entity owning the session.
 // This lets the session notify its owner (the Dispatcher) when the connection
-// is closed or blocked.
+// is closed, blocked, or added/removed from the time-wait list.
 class QuicServerSessionVisitor {
  public:
   virtual ~QuicServerSessionVisitor() {}
@@ -41,14 +42,19 @@ class QuicServerSessionVisitor {
   virtual void OnConnectionClosed(QuicConnectionId connection_id,
                                   QuicErrorCode error) = 0;
   virtual void OnWriteBlocked(QuicBlockedWriterInterface* blocked_writer) = 0;
+  // Called after the given connection is added to the time-wait list.
+  virtual void OnConnectionAddedToTimeWaitList(QuicConnectionId connection_id) {
+  }
+  // Called after the given connection is removed from the time-wait list.
+  virtual void OnConnectionRemovedFromTimeWaitList(
+      QuicConnectionId connection_id) {}
 };
 
 class QuicServerSession : public QuicSession {
  public:
   QuicServerSession(const QuicConfig& config,
                     QuicConnection* connection,
-                    QuicServerSessionVisitor* visitor,
-                    bool is_secure);
+                    QuicServerSessionVisitor* visitor);
 
   // Override the base class to notify the owner of the connection close.
   void OnConnectionClosed(QuicErrorCode error, bool from_peer) override;
@@ -69,7 +75,7 @@ class QuicServerSession : public QuicSession {
   // Override base class to process FEC config received from client.
   void OnConfigNegotiated() override;
 
-  void set_serving_region(string serving_region) {
+  void set_serving_region(std::string serving_region) {
     serving_region_ = serving_region;
   }
 
@@ -98,7 +104,7 @@ class QuicServerSession : public QuicSession {
 
   // Text describing server location. Sent to the client as part of the bandwith
   // estimate in the source-address token. Optional, can be left empty.
-  string serving_region_;
+  std::string serving_region_;
 
   // Time at which we send the last SCUP to the client.
   QuicTime last_scup_time_;

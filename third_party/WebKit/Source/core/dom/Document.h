@@ -45,7 +45,9 @@
 #include "core/dom/UserActionElementSet.h"
 #include "core/dom/ViewportDescription.h"
 #include "core/dom/custom/CustomElement.h"
+#include "core/frame/LocalDOMWindow.h"
 #include "core/html/CollectionType.h"
+#include "core/html/parser/ParserSynchronizationPolicy.h"
 #include "core/page/FocusType.h"
 #include "core/page/PageVisibilityState.h"
 #include "platform/Length.h"
@@ -76,6 +78,7 @@ class ContextFeatures;
 class CustomElementMicrotaskRunQueue;
 class CustomElementRegistrationContext;
 class DOMImplementation;
+class DOMWindow;
 class DocumentFragment;
 class DocumentLifecycleNotifier;
 class DocumentLoader;
@@ -114,7 +117,6 @@ class HitTestRequest;
 class LayoutPoint;
 class LiveNodeListBase;
 class Locale;
-class LocalDOMWindow;
 class LocalFrame;
 class Location;
 class MainThreadTaskRunner;
@@ -317,7 +319,6 @@ public:
 
     String defaultCharset() const;
 
-    AtomicString inputEncoding() const { return Document::encodingName(); }
     AtomicString charset() const { return Document::encodingName(); }
     AtomicString characterSet() const { return Document::encodingName(); }
 
@@ -348,7 +349,10 @@ public:
 
     virtual KURL baseURI() const override final;
 
+    String origin() const { return securityOrigin()->toString(); }
+
     String visibilityState() const;
+    PageVisibilityState pageVisibilityState() const;
     bool hidden() const;
     void didChangeVisibilityState();
 
@@ -383,13 +387,20 @@ public:
     bool isMobileDocument() const { return m_isMobileDocument; }
 
     bool isTransitionDocument() const { return m_isTransitionDocument; }
-    void setIsTransitionDocument() { m_isTransitionDocument = true; }
+    void setIsTransitionDocument(bool isTransitionDocument) { m_isTransitionDocument = isTransitionDocument; }
     void hideTransitionElements(const AtomicString& cssSelector);
+    void showTransitionElements(const AtomicString& cssSelector);
+
+    struct TransitionElement {
+        String id;
+        IntRect rect;
+    };
 
     struct TransitionElementData {
         String scope;
         String selector;
         String markup;
+        Vector<TransitionElement> elements;
     };
     void getTransitionElementData(Vector<TransitionElementData>&);
 
@@ -485,7 +496,7 @@ public:
     void prepareForDestruction();
 
     // If you have a Document, use renderView() instead which is faster.
-    void renderer() const WTF_DELETED_FUNCTION;
+    void renderer() const = delete;
 
     RenderView* renderView() const { return m_renderView; }
 
@@ -500,7 +511,7 @@ public:
     DocumentLoader* loader() const;
 
     void open(Document* ownerDocument = nullptr, ExceptionState& = ASSERT_NO_EXCEPTION);
-    PassRefPtrWillBeRawPtr<DocumentParser> implicitOpen();
+    PassRefPtrWillBeRawPtr<DocumentParser> implicitOpen(ParserSynchronizationPolicy);
 
     // close() is the DOM API document.close()
     void close(ExceptionState& = ASSERT_NO_EXCEPTION);
@@ -548,9 +559,6 @@ public:
     virtual String userAgent(const KURL&) const override final;
     virtual void disableEval(const String& errorMessage) override final;
 
-    bool canNavigate(const Frame& targetFrame);
-    LocalFrame* findUnsafeParentScrollPropagationBoundary();
-
     CSSStyleSheet& elementSheet();
 
     virtual PassRefPtrWillBeRawPtr<DocumentParser> createParser();
@@ -584,8 +592,14 @@ public:
     void setReadyState(ReadyState);
     bool isLoadCompleted();
 
-    void setParsing(bool);
-    bool parsing() const { return m_isParsing; }
+    enum ParsingState {
+        Parsing,
+        InDOMContentLoaded,
+        FinishedParsing
+    };
+    void setParsingState(ParsingState);
+    bool parsing() const { return m_parsingState == Parsing; }
+    bool isInDOMContentLoaded() const { return m_parsingState == InDOMContentLoaded; }
 
     bool shouldScheduleLayout() const;
     int elapsedTime() const;
@@ -647,7 +661,7 @@ public:
     void nodeChildrenWillBeRemoved(ContainerNode&);
     // nodeWillBeRemoved is only safe when removing one node at a time.
     void nodeWillBeRemoved(Node&);
-    bool canReplaceChild(const Node& newChild, const Node& oldChild) const;
+    bool canAcceptChild(const Node& newChild, const Node* oldChild, ExceptionState&) const;
 
     void didInsertText(Node*, unsigned offset, unsigned length);
     void didRemoveText(Node*, unsigned offset, unsigned length);
@@ -692,7 +706,7 @@ public:
     bool hasMutationObservers() const { return m_mutationObserverTypes; }
     void addMutationObserverTypes(MutationObserverOptions types) { m_mutationObserverTypes |= types; }
 
-    CSSStyleDeclaration* getOverrideStyle(Element*, const String& pseudoElt);
+    CSSStyleDeclaration* getOverrideStyle() { return 0; }
 
     /**
      * Handles a HTTP header equivalent set by a meta tag using <meta http-equiv="..." content="...">. This is called
@@ -778,15 +792,7 @@ public:
 
     DocumentMarkerController& markers() const { return *m_markers; }
 
-    bool directionSetOnDocumentElement() const { return m_directionSetOnDocumentElement; }
-    bool writingModeSetOnDocumentElement() const { return m_writingModeSetOnDocumentElement; }
-    void setDirectionSetOnDocumentElement(bool b) { m_directionSetOnDocumentElement = b; }
-    void setWritingModeSetOnDocumentElement(bool b) { m_writingModeSetOnDocumentElement = b; }
-
-    bool containsAnyRareWritingMode() const { return m_containsAnyRareWritingMode; }
-    void setContainsAnyRareWritingMode(bool b) { m_containsAnyRareWritingMode = b; }
-
-    bool execCommand(const String& command, bool userInterface = false, const String& value = String());
+    bool execCommand(const String& command, bool showUI, const String& value);
     bool queryCommandEnabled(const String& command);
     bool queryCommandIndeterm(const String& command);
     bool queryCommandState(const String& command);
@@ -812,10 +818,6 @@ public:
     HTMLScriptElement* currentScript() const { return !m_currentScriptStack.isEmpty() ? m_currentScriptStack.last().get() : nullptr; }
     void pushCurrentScript(PassRefPtrWillBeRawPtr<HTMLScriptElement>);
     void popCurrentScript();
-
-    void applyXSLTransform(ProcessingInstruction* pi);
-    PassRefPtrWillBeRawPtr<Document> transformSourceDocument() { return m_transformSourceDocument; }
-    void setTransformSourceDocument(Document* doc) { m_transformSourceDocument = doc; }
 
     void setTransformSource(PassOwnPtr<TransformSource>);
     TransformSource* transformSource() const { return m_transformSource.get(); }
@@ -939,7 +941,7 @@ public:
     bool isDelayingLoadEvent();
     void loadPluginsSoon();
 
-    PassRefPtrWillBeRawPtr<Touch> createTouch(LocalDOMWindow*, EventTarget*, int identifier, double pageX, double pageY, double screenX, double screenY, double radiusX, double radiusY, float rotationAngle, float force) const;
+    PassRefPtrWillBeRawPtr<Touch> createTouch(DOMWindow*, EventTarget*, int identifier, double pageX, double pageY, double screenX, double screenY, double radiusX, double radiusY, float rotationAngle, float force) const;
     PassRefPtrWillBeRawPtr<TouchList> createTouchList(WillBeHeapVector<RefPtrWillBeMember<Touch>>&) const;
 
     const DocumentTiming& timing() const { return m_documentTiming; }
@@ -1009,7 +1011,10 @@ public:
     Document& ensureTemplateDocument();
     Document* templateDocumentHost() { return m_templateDocumentHost; }
 
+    // TODO(thestig): Rename these and related functions, since we can call them
+    // for labels and input fields outside of forms as well.
     void didAssociateFormControl(Element*);
+    void removeFormAssociation(Element*);
 
     virtual void addConsoleMessage(PassRefPtrWillBeRawPtr<ConsoleMessage>) override final;
 
@@ -1047,8 +1052,10 @@ public:
 
     AtomicString convertLocalName(const AtomicString&);
 
+    void platformColorsChanged();
+
     virtual v8::Handle<v8::Object> wrap(v8::Handle<v8::Object> creationContext, v8::Isolate*) override;
-    virtual v8::Handle<v8::Object> associateWithWrapper(const WrapperTypeInfo*, v8::Handle<v8::Object> wrapper, v8::Isolate*) override;
+    virtual v8::Handle<v8::Object> associateWithWrapper(v8::Isolate*, const WrapperTypeInfo*, v8::Handle<v8::Object> wrapper) override;
 
 protected:
     Document(const DocumentInit&, DocumentClassFlags = DefaultDocumentClass);
@@ -1065,14 +1072,14 @@ protected:
 
     bool importContainerNodeChildren(ContainerNode* oldContainerNode, PassRefPtrWillBeRawPtr<ContainerNode> newContainerNode, ExceptionState&);
     void lockCompatibilityMode() { m_compatibilityModeLocked = true; }
+    ParserSynchronizationPolicy parserSynchronizationPolicy() const { return m_parserSyncPolicy; }
 
 private:
-    friend class Node;
     friend class IgnoreDestructiveWriteCountIncrementer;
 
-    bool isDocumentFragment() const WTF_DELETED_FUNCTION; // This will catch anyone doing an unnecessary check.
-    bool isDocumentNode() const WTF_DELETED_FUNCTION; // This will catch anyone doing an unnecessary check.
-    bool isElementNode() const WTF_DELETED_FUNCTION; // This will catch anyone doing an unnecessary check.
+    bool isDocumentFragment() const = delete; // This will catch anyone doing an unnecessary check.
+    bool isDocumentNode() const = delete; // This will catch anyone doing an unnecessary check.
+    bool isElementNode() const = delete; // This will catch anyone doing an unnecessary check.
 
     ScriptedAnimationController& ensureScriptedAnimationController();
     virtual SecurityContext& securityContext() override final { return *this; }
@@ -1131,8 +1138,6 @@ private:
     void loadEventDelayTimerFired(Timer<Document>*);
     void pluginLoadingTimerFired(Timer<Document>*);
 
-    PageVisibilityState pageVisibilityState() const;
-
     // Note that dispatching a window load event may cause the LocalDOMWindow to be detached from
     // the LocalFrame, so callers should take a reference to the LocalDOMWindow (which owns us) to
     // prevent the Document from getting blown away from underneath them.
@@ -1159,6 +1164,8 @@ private:
 
     using EventFactorySet = HashSet<OwnPtr<EventFactoryBase>>;
     static EventFactorySet& eventFactories();
+
+    void updateElementOpacity(const AtomicString& cssSelector, double opacity);
 
     DocumentLifecycle m_lifecycle;
 
@@ -1239,7 +1246,7 @@ private:
 
     bool m_visuallyOrdered;
     ReadyState m_readyState;
-    bool m_isParsing;
+    ParsingState m_parsingState;
 
     bool m_gotoAnchorNeededAfterStylesheetsLoad;
     bool m_isDNSPrefetchEnabled;
@@ -1271,7 +1278,6 @@ private:
     WillBeHeapVector<RefPtrWillBeMember<HTMLScriptElement>> m_currentScriptStack;
 
     OwnPtr<TransformSource> m_transformSource;
-    RefPtrWillBeMember<Document> m_transformSourceDocument;
 
     String m_xmlEncoding;
     String m_xmlVersion;
@@ -1334,12 +1340,8 @@ private:
     ViewportDescription m_legacyViewportDescription;
     Length m_viewportDefaultMinWidth;
 
-    bool m_didSetReferrerPolicy;
     ReferrerPolicy m_referrerPolicy;
 
-    bool m_directionSetOnDocumentElement;
-    bool m_writingModeSetOnDocumentElement;
-    bool m_containsAnyRareWritingMode;
     DocumentTiming m_documentTiming;
     RefPtrWillBeMember<MediaQueryMatcher> m_mediaQueryMatcher;
     bool m_writeRecursionIsTooDeep;
@@ -1382,6 +1384,8 @@ private:
     DocumentVisibilityObserverSet m_visibilityObservers;
 
     int m_styleRecalcElementCounter;
+
+    ParserSynchronizationPolicy m_parserSyncPolicy;
 };
 
 inline bool Document::shouldOverrideLegacyDescription(ViewportDescription::Type origin)

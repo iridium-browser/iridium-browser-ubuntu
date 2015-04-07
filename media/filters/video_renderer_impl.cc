@@ -22,15 +22,11 @@ namespace media {
 VideoRendererImpl::VideoRendererImpl(
     const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
     ScopedVector<VideoDecoder> decoders,
-    const SetDecryptorReadyCB& set_decryptor_ready_cb,
-    const PaintCB& paint_cb,
     bool drop_frames,
     const scoped_refptr<MediaLog>& media_log)
     : task_runner_(task_runner),
-      video_frame_stream_(new VideoFrameStream(task_runner,
-                                               decoders.Pass(),
-                                               set_decryptor_ready_cb,
-                                               media_log)),
+      video_frame_stream_(
+          new VideoFrameStream(task_runner, decoders.Pass(), media_log)),
       low_delay_(false),
       received_end_of_stream_(false),
       rendered_end_of_stream_(false),
@@ -40,14 +36,12 @@ VideoRendererImpl::VideoRendererImpl(
       pending_read_(false),
       drop_frames_(drop_frames),
       buffering_state_(BUFFERING_HAVE_NOTHING),
-      paint_cb_(paint_cb),
       last_timestamp_(kNoTimestamp()),
       last_painted_timestamp_(kNoTimestamp()),
       frames_decoded_(0),
       frames_dropped_(0),
       is_shutting_down_(false),
       weak_factory_(this) {
-  DCHECK(!paint_cb_.is_null());
 }
 
 VideoRendererImpl::~VideoRendererImpl() {
@@ -106,14 +100,16 @@ void VideoRendererImpl::StartPlayingFrom(base::TimeDelta timestamp) {
   AttemptRead_Locked();
 }
 
-void VideoRendererImpl::Initialize(DemuxerStream* stream,
-                                   bool low_delay,
-                                   const PipelineStatusCB& init_cb,
-                                   const StatisticsCB& statistics_cb,
-                                   const BufferingStateCB& buffering_state_cb,
-                                   const base::Closure& ended_cb,
-                                   const PipelineStatusCB& error_cb,
-                                   const TimeDeltaCB& get_time_cb) {
+void VideoRendererImpl::Initialize(
+    DemuxerStream* stream,
+    const PipelineStatusCB& init_cb,
+    const SetDecryptorReadyCB& set_decryptor_ready_cb,
+    const StatisticsCB& statistics_cb,
+    const BufferingStateCB& buffering_state_cb,
+    const PaintCB& paint_cb,
+    const base::Closure& ended_cb,
+    const PipelineStatusCB& error_cb,
+    const TimeDeltaCB& get_time_cb) {
   DCHECK(task_runner_->BelongsToCurrentThread());
   base::AutoLock auto_lock(lock_);
   DCHECK(stream);
@@ -121,11 +117,12 @@ void VideoRendererImpl::Initialize(DemuxerStream* stream,
   DCHECK(!init_cb.is_null());
   DCHECK(!statistics_cb.is_null());
   DCHECK(!buffering_state_cb.is_null());
+  DCHECK(!paint_cb.is_null());
   DCHECK(!ended_cb.is_null());
   DCHECK(!get_time_cb.is_null());
   DCHECK_EQ(kUninitialized, state_);
 
-  low_delay_ = low_delay;
+  low_delay_ = (stream->liveness() == DemuxerStream::LIVENESS_LIVE);
 
   // Always post |init_cb_| because |this| could be destroyed if initialization
   // failed.
@@ -133,17 +130,28 @@ void VideoRendererImpl::Initialize(DemuxerStream* stream,
 
   statistics_cb_ = statistics_cb;
   buffering_state_cb_ = buffering_state_cb;
+  paint_cb_ = paint_cb,
   ended_cb_ = ended_cb;
   error_cb_ = error_cb;
   get_time_cb_ = get_time_cb;
   state_ = kInitializing;
 
   video_frame_stream_->Initialize(
-      stream,
-      low_delay,
-      statistics_cb,
-      base::Bind(&VideoRendererImpl::OnVideoFrameStreamInitialized,
-                 weak_factory_.GetWeakPtr()));
+      stream, base::Bind(&VideoRendererImpl::OnVideoFrameStreamInitialized,
+                         weak_factory_.GetWeakPtr()),
+      set_decryptor_ready_cb, statistics_cb);
+}
+
+void VideoRendererImpl::CreateVideoThread() {
+  // This may fail and cause a crash if there are too many threads created in
+  // the current process. See http://crbug.com/443291
+  CHECK(base::PlatformThread::Create(0, this, &thread_));
+
+#if defined(OS_WIN)
+  // Bump up our priority so our sleeping is more accurate.
+  // TODO(scherkus): find out if this is necessary, but it seems to help.
+  ::SetThreadPriority(thread_.platform_handle(), THREAD_PRIORITY_ABOVE_NORMAL);
+#endif  // defined(OS_WIN)
 }
 
 void VideoRendererImpl::OnVideoFrameStreamInitialized(bool success) {
@@ -163,14 +171,8 @@ void VideoRendererImpl::OnVideoFrameStreamInitialized(bool success) {
   // have not populated any buffers yet.
   state_ = kFlushed;
 
-  // Create our video thread.
-  CHECK(base::PlatformThread::Create(0, this, &thread_));
+  CreateVideoThread();
 
-#if defined(OS_WIN)
-  // Bump up our priority so our sleeping is more accurate.
-  // TODO(scherkus): find out if this is necessary, but it seems to help.
-  ::SetThreadPriority(thread_.platform_handle(), THREAD_PRIORITY_ABOVE_NORMAL);
-#endif  // defined(OS_WIN)
   base::ResetAndReturn(&init_cb_).Run(PIPELINE_OK);
 }
 

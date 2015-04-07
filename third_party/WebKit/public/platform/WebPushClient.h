@@ -7,27 +7,23 @@
 
 #include "public/platform/WebCallbacks.h"
 #include "public/platform/WebPushError.h"
-#include "public/platform/WebPushPermissionStatus.h"
 
 namespace blink {
 
-class WebServiceWorkerProvider;
-struct WebPushRegistration;
+class WebServiceWorkerRegistration;
+struct WebPushSubscription;
 
-typedef WebCallbacks<WebPushRegistration, WebPushError> WebPushRegistrationCallbacks;
-typedef WebCallbacks<WebPushPermissionStatus, void> WebPushPermissionStatusCallback;
+using WebPushSubscriptionCallbacks = WebCallbacks<WebPushSubscription, WebPushError>;
+// FIXME: Remove when no longer used by the embedder - https://crbug.com/446883.
+using WebPushRegistrationCallbacks = WebPushSubscriptionCallbacks;
 
 class WebPushClient {
 public:
     virtual ~WebPushClient() { }
 
-    // Ownership of the WebPushRegistrationCallbacks is transferred to the
-    // client. Ownership of the WebServiceWorkerProvider is not transferred.
-    virtual void registerPushMessaging(WebPushRegistrationCallbacks*, WebServiceWorkerProvider*) { }
-
-    // Ownership of the WebPushPermissionStatusCallback is transferred to the
-    // client. Ownership of the WebServiceWorkerProvider is not transferred.
-    virtual void getPermissionStatus(WebPushPermissionStatusCallback*, WebServiceWorkerProvider*) { }
+    // Ownership of the WebServiceWorkerRegistration is not transferred.
+    // Ownership of the callbacks is transferred to the client.
+    virtual void registerPushMessaging(WebServiceWorkerRegistration*, WebPushRegistrationCallbacks*) { BLINK_ASSERT_NOT_REACHED(); }
 };
 
 } // namespace blink

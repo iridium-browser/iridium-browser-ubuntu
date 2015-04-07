@@ -14,7 +14,7 @@
 #include "base/threading/thread.h"
 #include "net/base/cache_type.h"
 #include "net/base/net_errors.h"
-#include "net/base/network_delegate.h"
+#include "net/base/network_delegate_impl.h"
 #include "net/cert/cert_verifier.h"
 #include "net/cookies/cookie_monster.h"
 #include "net/dns/host_resolver.h"
@@ -48,7 +48,7 @@ namespace net {
 
 namespace {
 
-class BasicNetworkDelegate : public NetworkDelegate {
+class BasicNetworkDelegate : public NetworkDelegateImpl {
  public:
   BasicNetworkDelegate() {}
   ~BasicNetworkDelegate() override {}
@@ -120,11 +120,6 @@ class BasicNetworkDelegate : public NetworkDelegate {
     // Returning true will only enable throttling if there's also a
     // URLRequestThrottlerManager, which there isn't, by default.
     return true;
-  }
-
-  int OnBeforeSocketStreamConnect(SocketStream* stream,
-                                  const CompletionCallback& callback) override {
-    return OK;
   }
 
   DISALLOW_COPY_AND_ASSIGN(BasicNetworkDelegate);
@@ -354,6 +349,8 @@ URLRequestContext* URLRequestContextBuilder::Build() {
       http_network_session_params_.trusted_spdy_proxy;
   network_session_params.next_protos = http_network_session_params_.next_protos;
   network_session_params.enable_quic = http_network_session_params_.enable_quic;
+  network_session_params.quic_connection_options =
+      http_network_session_params_.quic_connection_options;
 
   HttpTransactionFactory* http_transaction_factory = NULL;
   if (http_cache_enabled_) {

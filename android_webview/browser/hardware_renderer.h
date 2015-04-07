@@ -43,15 +43,18 @@ class HardwareRenderer : public cc::LayerTreeHostClient,
   virtual void DidBeginMainFrame() override;
   virtual void BeginMainFrame(const cc::BeginFrameArgs& args) override {}
   virtual void Layout() override {}
-  virtual void ApplyViewportDeltas(const gfx::Vector2d& inner_delta,
-                                   const gfx::Vector2d& outer_delta,
-                                   float page_scale,
-                                   float top_controls_delta) override {}
+  virtual void ApplyViewportDeltas(
+      const gfx::Vector2d& inner_delta,
+      const gfx::Vector2d& outer_delta,
+      const gfx::Vector2dF& elastic_overscroll_delta,
+      float page_scale,
+      float top_controls_delta) override {}
   virtual void ApplyViewportDeltas(const gfx::Vector2d& scroll_delta,
                                    float page_scale,
                                    float top_controls_delta) override {}
-  virtual void RequestNewOutputSurface(bool fallback) override;
+  virtual void RequestNewOutputSurface() override;
   virtual void DidInitializeOutputSurface() override {}
+  virtual void DidFailToInitializeOutputSurface() override;
   virtual void WillCommit() override {}
   virtual void DidCommit() override {}
   virtual void DidCommitAndDrawFrame() override {}

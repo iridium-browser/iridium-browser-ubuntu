@@ -23,6 +23,15 @@
 var remoting = remoting || {};
 
 /**
+ * Interval that determines how often the web-app should send a new access token
+ * to the host.
+ *
+ * @const
+ * @type {number}
+ */
+remoting.ACCESS_TOKEN_RESEND_INTERVAL_MS = 15 * 60 * 1000;
+
+/**
  * True if Cast capability is supported.
  *
  * @type {boolean}
@@ -30,15 +39,16 @@ var remoting = remoting || {};
 remoting.enableCast = false;
 
 /**
- * True to enable MediaSource rendering, if available.
- * The plugin also needs to support MediaSource rendering.
- *
- * TODO(sergeyu): Remove mediaSource renderer from the plugin and
- * everywhere else.
+ * True to enable mouse lock.
+ * This is currently disabled because the current client plugin does not
+ * properly handle mouse lock and delegated large cursors at the same time.
+ * This should be re-enabled (by removing this flag) once a version of
+ * the plugin that supports both has reached Chrome Stable channel.
+ * (crbug.com/429322).
  *
  * @type {boolean}
  */
-remoting.enableMediaSourceRendering = false;
+remoting.enableMouseLock = false;
 
 /**
  * @param {remoting.SignalStrategy} signalStrategy Signal strategy.
@@ -64,6 +74,8 @@ remoting.enableMediaSourceRendering = false;
  *     pairing id for this client, as issued by the host.
  * @param {string} clientPairedSecret For paired Me2Me connections, the
  *     paired secret for this client, as issued by the host.
+ * @param {string} defaultRemapKeys The default set of remap keys, to use
+ *     when the client doesn't define any.
  * @constructor
  * @extends {base.EventSource}
  */
@@ -71,7 +83,7 @@ remoting.ClientSession = function(signalStrategy, container, hostDisplayName,
                                   accessCode, fetchPin, fetchThirdPartyToken,
                                   authenticationMethods, hostId, hostJid,
                                   hostPublicKey, mode, clientPairingId,
-                                  clientPairedSecret) {
+                                  clientPairedSecret, defaultRemapKeys) {
   /** @private */
   this.state_ = remoting.ClientSession.State.CREATED;
 
@@ -105,6 +117,9 @@ remoting.ClientSession = function(signalStrategy, container, hostDisplayName,
   /** @private */
   this.clientPairedSecret_ = clientPairedSecret;
   /** @private */
+  this.defaultRemapKeys_ = defaultRemapKeys;
+
+  /** @private */
   this.sessionId_ = '';
   /** @type {remoting.ClientPlugin}
     * @private */
@@ -113,6 +128,8 @@ remoting.ClientSession = function(signalStrategy, container, hostDisplayName,
   this.shrinkToFit_ = true;
   /** @private */
   this.resizeToClient_ = true;
+  /** @private */
+  this.desktopScale_ = 1.0;
   /** @private */
   this.remapKeys_ = '';
   /** @private */
@@ -154,9 +171,6 @@ remoting.ClientSession = function(signalStrategy, container, hostDisplayName,
   this.callPluginGotFocus_ = this.pluginGotFocus_.bind(this);
   /** @private */
   this.callOnFullScreenChanged_ = this.onFullScreenChanged_.bind(this)
-
-  /** @type {HTMLMediaElement} @private */
-  this.video_ = null;
 
   /** @type {Element} @private */
   this.mouseCursorOverlay_ =
@@ -209,6 +223,11 @@ remoting.ClientSession.prototype.getHostDisplayName = function() {
  * fixed.
  */
 remoting.ClientSession.prototype.updateScrollbarVisibility = function() {
+  var scroller = document.getElementById('scroller');
+  if (!scroller) {
+    return;
+  }
+
   var needsVerticalScroll = false;
   var needsHorizontalScroll = false;
   if (!this.shrinkToFit_) {
@@ -227,7 +246,6 @@ remoting.ClientSession.prototype.updateScrollbarVisibility = function() {
     }
   }
 
-  var scroller = document.getElementById('scroller');
   if (needsHorizontalScroll) {
     scroller.classList.remove('no-horizontal-scroll');
   } else {
@@ -322,7 +340,8 @@ remoting.ClientSession.ConnectionError.fromString = function(error) {
 /** @enum {number} */
 remoting.ClientSession.Mode = {
   IT2ME: 0,
-  ME2ME: 1
+  ME2ME: 1,
+  APP_REMOTING: 2
 };
 
 /**
@@ -358,6 +377,7 @@ remoting.ClientSession.STATS_KEY_ROUNDTRIP_LATENCY = 'roundtripLatency';
 remoting.ClientSession.KEY_REMAP_KEYS = 'remapKeys';
 remoting.ClientSession.KEY_RESIZE_TO_CLIENT = 'resizeToClient';
 remoting.ClientSession.KEY_SHRINK_TO_FIT = 'shrinkToFit';
+remoting.ClientSession.KEY_DESKTOP_SCALE = 'desktopScale';
 
 /**
  * Set of capabilities for which hasCapability_() can be used to test.
@@ -369,9 +389,22 @@ remoting.ClientSession.Capability = {
   // resolution to the host once connection has been established. See
   // this.plugin_.notifyClientResolution().
   SEND_INITIAL_RESOLUTION: 'sendInitialResolution',
+
+  // Let the host know that we're interested in knowing whether or not it
+  // rate limits desktop-resize requests.
   RATE_LIMIT_RESIZE_REQUESTS: 'rateLimitResizeRequests',
+
+  // Indicates that host/client supports Google Drive integration, and that the
+  // client should send to the host the OAuth tokens to be used by Google Drive
+  // on the host.
+  GOOGLE_DRIVE: "googleDrive",
+
+  // Indicates that the client supports the video frame-recording extension.
   VIDEO_RECORDER: 'videoRecorder',
-  CAST: 'casting'
+
+  // Indicates that the client supports 'cast'ing the video stream to a
+  // cast-enabled device.
+  CAST: 'casting',
 };
 
 /**
@@ -425,12 +458,14 @@ remoting.ClientSession.prototype.pluginLostFocus_ = function() {
  * @param {function(string, string):boolean} onExtensionMessage The handler for
  *     protocol extension messages. Returns true if a message is recognized;
  *     false otherwise.
+ * @param {Array.<string>} requiredCapabilities A list of capabilities
+ *     required by this application.
  */
 remoting.ClientSession.prototype.createPluginAndConnect =
-    function(onExtensionMessage) {
+    function(onExtensionMessage, requiredCapabilities) {
   this.plugin_ = remoting.ClientPlugin.factory.createPlugin(
       this.container_.querySelector('.client-plugin-container'),
-      onExtensionMessage);
+      onExtensionMessage, requiredCapabilities);
   remoting.HostSettings.load(this.hostId_,
                              this.onHostSettingsLoaded_.bind(this));
 };
@@ -458,6 +493,12 @@ remoting.ClientSession.prototype.onHostSettingsLoaded_ = function(options) {
           'boolean') {
     this.shrinkToFit_ = /** @type {boolean} */
         options[remoting.ClientSession.KEY_SHRINK_TO_FIT];
+  }
+  if (remoting.ClientSession.KEY_DESKTOP_SCALE in options &&
+      typeof(options[remoting.ClientSession.KEY_DESKTOP_SCALE]) ==
+          'number') {
+    this.desktopScale_ = /** @type {number} */
+        options[remoting.ClientSession.KEY_DESKTOP_SCALE];
   }
 
   /** @param {boolean} result */
@@ -508,7 +549,8 @@ remoting.ClientSession.prototype.onPluginInitialized_ = function(initialized) {
           remoting.ClientPlugin.Feature.INJECT_KEY_EVENT)) {
     var sendKeysElement = document.getElementById('send-keys-menu');
     sendKeysElement.hidden = true;
-  } else if (this.mode_ != remoting.ClientSession.Mode.ME2ME) {
+  } else if (this.mode_ != remoting.ClientSession.Mode.ME2ME &&
+      this.mode_ != remoting.ClientSession.Mode.APP_REMOTING) {
     var sendCadElement = document.getElementById('send-ctrl-alt-del');
     sendCadElement.hidden = true;
   }
@@ -518,25 +560,11 @@ remoting.ClientSession.prototype.onPluginInitialized_ = function(initialized) {
     this.applyRemapKeys_(true);
   }
 
-  // Enable MediaSource-based rendering on Chrome 37 and above.
-  var chromeVersionMajor =
-      parseInt((remoting.getChromeVersion() || '0').split('.')[0], 10);
-  if (chromeVersionMajor >= 37 &&
-      remoting.enableMediaSourceRendering &&
-      this.plugin_.hasFeature(
-          remoting.ClientPlugin.Feature.MEDIA_SOURCE_RENDERING)) {
-    this.video_ = /** @type {HTMLMediaElement} */(
-        this.container_.querySelector('video'));
-    // Make sure that the <video> element is hidden until we get the first
-    // frame.
-    this.video_.style.width = '0px';
-    this.video_.style.height = '0px';
-
-    var renderer = new remoting.MediaSourceRenderer(this.video_);
-    this.plugin_.enableMediaSourceRendering(renderer);
-    this.container_.classList.add('mediasource-rendering');
-  } else {
-    this.container_.classList.remove('mediasource-rendering');
+  // TODO(wez): Only allow mouse lock if the app has the pointerLock permission.
+  // Enable automatic mouse-lock.
+  if (remoting.enableMouseLock &&
+      this.plugin_.hasFeature(remoting.ClientPlugin.Feature.ALLOW_MOUSE_LOCK)) {
+    this.plugin_.allowMouseLock();
   }
 
   this.plugin_.setOnOutgoingIqHandler(this.sendIq_.bind(this));
@@ -546,6 +574,8 @@ remoting.ClientSession.prototype.onPluginInitialized_ = function(initialized) {
       this.onConnectionStatusUpdate_.bind(this));
   this.plugin_.setRouteChangedHandler(this.onRouteChanged_.bind(this));
   this.plugin_.setConnectionReadyHandler(this.onConnectionReady_.bind(this));
+  this.plugin_.setDesktopShapeUpdateHandler(
+      this.onDesktopShapeChanged_.bind(this));
   this.plugin_.setDesktopSizeUpdateHandler(
       this.onDesktopSizeChanged_.bind(this));
   this.plugin_.setCapabilitiesHandler(this.onSetCapabilities_.bind(this));
@@ -581,22 +611,35 @@ remoting.ClientSession.prototype.removePlugin = function() {
       function() {
         remoting.fullscreen.removeListener(listener);
       });
-  if (remoting.windowFrame) {
-    remoting.windowFrame.setClientSession(null);
-  } else {
-    remoting.toolbar.setClientSession(null);
-  }
-  remoting.optionsMenu.setClientSession(null);
-  document.body.classList.remove('connected');
-
-  // Remove mediasource-rendering class from the container - this will also
-  // hide the <video> element.
-  this.container_.classList.remove('mediasource-rendering');
+  this.updateClientSessionUi_(null);
 
   this.container_.removeEventListener('mousemove',
                                       this.updateMouseCursorPosition_,
                                       true);
 };
+
+/**
+ * @param {remoting.ClientSession} clientSession The active session, or null if
+ *     there is no connection.
+ */
+remoting.ClientSession.prototype.updateClientSessionUi_ = function(
+    clientSession) {
+  if (remoting.windowFrame) {
+    remoting.windowFrame.setClientSession(clientSession);
+  }
+  if (remoting.toolbar) {
+    remoting.toolbar.setClientSession(clientSession);
+  }
+  if (remoting.optionsMenu) {
+    remoting.optionsMenu.setClientSession(clientSession);
+  }
+
+  if (clientSession == null) {
+    document.body.classList.remove('connected');
+  } else {
+    document.body.classList.add('connected');
+  }
+}
 
 /**
  * Disconnect the current session with a particular |error|.  The session will
@@ -617,6 +660,7 @@ remoting.ClientSession.prototype.disconnect = function(error) {
   this.logToServer.logClientSessionStateChange(state, error);
   this.error_ = error;
   this.setState_(state);
+  remoting.app.onDisconnected();
 };
 
 /**
@@ -700,6 +744,26 @@ remoting.ClientSession.prototype.sendPrintScreen = function() {
 }
 
 /**
+ * Sets and stores the scale factor to apply to host sizing requests.
+ * The desktopScale applies to the dimensions reported to the host, not
+ * to the client DPI reported to it.
+ *
+ * @param {number} desktopScale Scale factor to apply.
+ */
+remoting.ClientSession.prototype.setDesktopScale = function(desktopScale) {
+  this.desktopScale_ = desktopScale;
+
+  // onResize() will update the plugin size and scrollbars for the new
+  // scaled plugin dimensions, and send a client resolution notification.
+  this.onResize();
+
+  // Save the new desktop scale setting.
+  var options = {};
+  options[remoting.ClientSession.KEY_DESKTOP_SCALE] = this.desktopScale_;
+  remoting.HostSettings.save(this.hostId_, options);
+}
+
+/**
  * Sets and stores the key remapping setting for the current host.
  *
  * @param {string} remappings Comma separated list of key remappings.
@@ -722,15 +786,12 @@ remoting.ClientSession.prototype.setRemapKeys = function(remappings) {
  * @param {boolean} apply True to apply remappings, false to cancel them.
  */
 remoting.ClientSession.prototype.applyRemapKeys_ = function(apply) {
-  // By default, under ChromeOS, remap the right Control key to the right
-  // Win / Cmd key.
   var remapKeys = this.remapKeys_;
-  if (remapKeys == '' && remoting.platformIsChromeOS()) {
-    remapKeys = '0x0700e4>0x0700e7';
-  }
-
   if (remapKeys == '') {
-    return;
+    remapKeys = this.defaultRemapKeys_;
+    if (remapKeys == '') {
+      return;
+    }
   }
 
   var remappings = remapKeys.split(',');
@@ -773,10 +834,7 @@ remoting.ClientSession.prototype.applyRemapKeys_ = function(apply) {
 remoting.ClientSession.prototype.setScreenMode =
     function(shrinkToFit, resizeToClient) {
   if (resizeToClient && !this.resizeToClient_) {
-    var clientArea = this.getClientArea_();
-    this.plugin_.notifyClientResolution(clientArea.width,
-                                        clientArea.height,
-                                        window.devicePixelRatio);
+    this.notifyClientResolution_();
   }
 
   // If enabling shrink, reset bump-scroll offsets.
@@ -939,21 +997,11 @@ remoting.ClientSession.prototype.onConnectionStatusUpdate_ =
     this.setFocusHandlers_();
     this.onDesktopSizeChanged_();
     if (this.resizeToClient_) {
-      var clientArea = this.getClientArea_();
-      this.plugin_.notifyClientResolution(clientArea.width,
-                                          clientArea.height,
-                                          window.devicePixelRatio);
+      this.notifyClientResolution_();
     }
     // Activate full-screen related UX.
     remoting.fullscreen.addListener(this.callOnFullScreenChanged_);
-    if (remoting.windowFrame) {
-      remoting.windowFrame.setClientSession(this);
-    } else {
-      remoting.toolbar.setClientSession(this);
-    }
-    remoting.optionsMenu.setClientSession(this);
-    document.body.classList.add('connected');
-
+    this.updateClientSessionUi_(this);
     this.container_.addEventListener('mousemove',
                                      this.updateMouseCursorPosition_,
                                      true);
@@ -1042,10 +1090,10 @@ remoting.ClientSession.prototype.onSetCapabilities_ = function(capabilities) {
   this.capabilities_ = capabilities;
   if (this.hasCapability_(
       remoting.ClientSession.Capability.SEND_INITIAL_RESOLUTION)) {
-    var clientArea = this.getClientArea_();
-    this.plugin_.notifyClientResolution(clientArea.width,
-                                        clientArea.height,
-                                        window.devicePixelRatio);
+    this.notifyClientResolution_();
+  }
+  if (this.hasCapability_(remoting.ClientSession.Capability.GOOGLE_DRIVE)) {
+    this.sendGoogleDriveAccessToken_();
   }
   if (this.hasCapability_(
       remoting.ClientSession.Capability.VIDEO_RECORDER)) {
@@ -1111,10 +1159,7 @@ remoting.ClientSession.prototype.onResize = function() {
     }
     var clientArea = this.getClientArea_();
     this.notifyClientResolutionTimer_ = window.setTimeout(
-        this.plugin_.notifyClientResolution.bind(this.plugin_,
-                                                 clientArea.width,
-                                                 clientArea.height,
-                                                 window.devicePixelRatio),
+        this.notifyClientResolution_.bind(this),
         kResizeRateLimitMs);
   }
 
@@ -1167,6 +1212,30 @@ remoting.ClientSession.prototype.onDesktopSizeChanged_ = function() {
 };
 
 /**
+ * Sets the non-click-through area of the client in response to notifications
+ * from the plugin of desktop shape changes.
+ *
+ * @private
+ * @param {Array.<Array.<number>>} rects List of rectangles comprising the
+ *     desktop shape.
+ * @return {void} Nothing.
+ */
+remoting.ClientSession.prototype.onDesktopShapeChanged_ = function(rects) {
+  // Build the list of rects for the input region.
+  var inputRegion = [];
+  for (var i = 0; i < rects.length; ++i) {
+    var rect = {};
+    rect.left = rects[i][0];
+    rect.top = rects[i][1];
+    rect.width = rects[i][2];
+    rect.height = rects[i][3];
+    inputRegion.push(rect);
+  }
+
+  remoting.windowShape.setDesktopRects(inputRegion);
+};
+
+/**
  * Refreshes the plugin's dimensions, taking into account the sizes of the
  * remote desktop and client window, and the current scale-to-fit setting.
  *
@@ -1197,6 +1266,10 @@ remoting.ClientSession.prototype.updateDimensions = function() {
   var hostPixelRatioX = Math.ceil(this.plugin_.getDesktopXDpi() / 96);
   var hostPixelRatioY = Math.ceil(this.plugin_.getDesktopYDpi() / 96);
   var hostPixelRatio = Math.min(hostPixelRatioX, hostPixelRatioY);
+
+  // Include the desktopScale in the hostPixelRatio before comparing it with
+  // the client devicePixelRatio to determine the "natural" scale to use.
+  hostPixelRatio *= this.desktopScale_;
 
   // Down-scale by the smaller of the client and host ratios.
   var scale = 1.0 / Math.min(window.devicePixelRatio, hostPixelRatio);
@@ -1231,11 +1304,6 @@ remoting.ClientSession.prototype.updateDimensions = function() {
   var pluginWidth = Math.round(desktopWidth * scale);
   var pluginHeight = Math.round(desktopHeight * scale);
 
-  if (this.video_) {
-    this.video_.style.width = pluginWidth + 'px';
-    this.video_.style.height = pluginHeight + 'px';
-  }
-
   // Resize the plugin if necessary.
   // TODO(wez): Handle high-DPI to high-DPI properly (crbug.com/135089).
   this.plugin_.element().style.width = pluginWidth + 'px';
@@ -1251,6 +1319,10 @@ remoting.ClientSession.prototype.updateDimensions = function() {
               parentNode.style.left + ',' +
               parentNode.style.top + '-' +
               pluginWidth + 'x' + pluginHeight + '.');
+
+  // When we receive the first plugin dimensions from the host, we know that
+  // remote host has started.
+  remoting.app.onVideoStreamingStarted();
 };
 
 /**
@@ -1305,13 +1377,7 @@ remoting.ClientSession.prototype.requestPairing = function(clientName, onDone) {
  * @private
  */
 remoting.ClientSession.prototype.onFullScreenChanged_ = function (fullscreen) {
-  var htmlNode = /** @type {HTMLElement} */ (document.documentElement);
   this.enableBumpScroll_(fullscreen);
-  if (fullscreen) {
-    htmlNode.classList.add('full-screen');
-  } else {
-    htmlNode.classList.remove('full-screen');
-  }
 };
 
 /**
@@ -1456,6 +1522,18 @@ remoting.ClientSession.prototype.sendClipboardItem = function(mimeType, item) {
 };
 
 /**
+ * Sends an extension message to the host.
+ *
+ * @param {string} type The message type.
+ * @param {string} message The message payload.
+ */
+remoting.ClientSession.prototype.sendClientMessage = function(type, message) {
+  if (!this.plugin_)
+    return;
+  this.plugin_.sendClientMessage(type, message);
+};
+
+/**
  * Send a gnubby-auth extension message to the host.
  * @param {Object} data The gnubby-auth message data.
  */
@@ -1497,6 +1575,30 @@ remoting.ClientSession.prototype.createGnubbyAuthHandler_ = function() {
 };
 
 /**
+ * Timer callback to send the access token to the host.
+ * @private
+ */
+remoting.ClientSession.prototype.sendGoogleDriveAccessToken_ = function() {
+  if (this.state_ != remoting.ClientSession.State.CONNECTED) {
+    return;
+  }
+  /** @type {remoting.ClientSession} */
+  var that = this;
+
+  /** @param {string} token */
+  var sendToken = function(token) {
+    remoting.clientSession.sendClientMessage('accessToken', token);
+  };
+  /** @param {remoting.Error} error */
+  var sendError = function(error) {
+    console.log('Failed to refresh access token: ' + error);
+  }
+  remoting.identity.callWithNewToken(sendToken, sendError);
+  window.setTimeout(this.sendGoogleDriveAccessToken_.bind(this),
+                    remoting.ACCESS_TOKEN_RESEND_INTERVAL_MS);
+};
+
+/**
  * @return {{width: number, height: number}} The height of the window's client
  *     area. This differs between apps v1 and apps v2 due to the custom window
  *     borders used by the latter.
@@ -1507,6 +1609,18 @@ remoting.ClientSession.prototype.getClientArea_ = function() {
       remoting.windowFrame.getClientArea() :
       { 'width': window.innerWidth, 'height': window.innerHeight };
 };
+
+/**
+ * Notifies the host of the client's current dimensions and DPI.
+ * Also takes into account per-host scaling factor, if configured.
+ * @private
+ */
+remoting.ClientSession.prototype.notifyClientResolution_ = function() {
+  var clientArea = this.getClientArea_();
+  this.plugin_.notifyClientResolution(clientArea.width * this.desktopScale_,
+                                      clientArea.height * this.desktopScale_,
+                                      window.devicePixelRatio);
+}
 
 /**
  * @param {string} url
@@ -1604,13 +1718,13 @@ remoting.ClientSession.prototype.startStopRecording = function() {
 /**
  * Handles protocol extension messages.
  * @param {string} type Type of extension message.
- * @param {string} data Contents of the extension message.
+ * @param {Object} message The parsed extension message data.
  * @return {boolean} True if the message was recognized, false otherwise.
  */
 remoting.ClientSession.prototype.handleExtensionMessage =
-    function(type, data) {
+    function(type, message) {
   if (this.videoFrameRecorder_) {
-    return this.videoFrameRecorder_.handleMessage(type, data);
+    return this.videoFrameRecorder_.handleMessage(type, message);
   }
   return false;
 }

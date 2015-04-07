@@ -226,6 +226,10 @@ bool ShareHandleToSelLdr(
   return true;
 }
 
+void CloseFile(base::File file) {
+  // The base::File destructor will close the file for us.
+}
+
 }  // namespace
 
 unsigned NaClProcessHost::keepalive_throttle_interval_milliseconds_ =
@@ -269,7 +273,7 @@ NaClProcessHost::NaClProcessHost(const GURL& manifest_url,
   // for this use case.
   process_->SetName(net::FormatUrl(manifest_url_, std::string()));
 
-  enable_debug_stub_ = CommandLine::ForCurrentProcess()->HasSwitch(
+  enable_debug_stub_ = base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kEnableNaClDebug);
   DCHECK(process_type_ != kUnknownNaClProcessType);
   enable_crash_throttling_ = process_type_ != kNativeNaClProcessType;
@@ -306,7 +310,7 @@ NaClProcessHost::~NaClProcessHost() {
 
 void NaClProcessHost::OnProcessCrashed(int exit_status) {
   if (enable_crash_throttling_ &&
-      !CommandLine::ForCurrentProcess()->HasSwitch(
+      !base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisablePnaclCrashThrottling)) {
     NaClBrowser::GetInstance()->OnProcessCrashed();
   }
@@ -322,7 +326,7 @@ void NaClProcessHost::EarlyStartup() {
   // under us by autoupdate.
   NaClBrowser::GetInstance()->EnsureIrtAvailable();
 #endif
-  CommandLine* cmd = CommandLine::ForCurrentProcess();
+  base::CommandLine* cmd = base::CommandLine::ForCurrentProcess();
   UMA_HISTOGRAM_BOOLEAN(
       "NaCl.nacl-gdb",
       !cmd->GetSwitchValuePath(switches::kNaClGdb).empty());
@@ -360,7 +364,7 @@ void NaClProcessHost::Launch(
   // Do not launch the requested NaCl module if NaCl is marked "unstable" due
   // to too many crashes within a given time period.
   if (enable_crash_throttling_ &&
-      !CommandLine::ForCurrentProcess()->HasSwitch(
+      !base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisablePnaclCrashThrottling) &&
       NaClBrowser::GetInstance()->IsThrottled()) {
     SendErrorToRenderer("Process creation was throttled due to excessive"
@@ -369,7 +373,7 @@ void NaClProcessHost::Launch(
     return;
   }
 
-  const CommandLine* cmd = CommandLine::ForCurrentProcess();
+  const base::CommandLine* cmd = base::CommandLine::ForCurrentProcess();
 #if defined(OS_WIN)
   if (cmd->HasSwitch(switches::kEnableNaClDebug) &&
       !cmd->HasSwitch(switches::kNoSandbox)) {
@@ -451,7 +455,7 @@ void NaClProcessHost::Launch(
 }
 
 void NaClProcessHost::OnChannelConnected(int32 peer_pid) {
-  if (!CommandLine::ForCurrentProcess()->GetSwitchValuePath(
+  if (!base::CommandLine::ForCurrentProcess()->GetSwitchValuePath(
           switches::kNaClGdb).empty()) {
     LaunchNaClGdb();
   }
@@ -478,19 +482,21 @@ bool NaClProcessHost::Send(IPC::Message* msg) {
   return process_->Send(msg);
 }
 
-bool NaClProcessHost::LaunchNaClGdb() {
+void NaClProcessHost::LaunchNaClGdb() {
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
 #if defined(OS_WIN)
   base::FilePath nacl_gdb =
-      CommandLine::ForCurrentProcess()->GetSwitchValuePath(switches::kNaClGdb);
-  CommandLine cmd_line(nacl_gdb);
+      command_line.GetSwitchValuePath(switches::kNaClGdb);
+  base::CommandLine cmd_line(nacl_gdb);
 #else
-  CommandLine::StringType nacl_gdb =
-      CommandLine::ForCurrentProcess()->GetSwitchValueNative(
-          switches::kNaClGdb);
-  CommandLine::StringVector argv;
+  base::CommandLine::StringType nacl_gdb =
+      command_line.GetSwitchValueNative(switches::kNaClGdb);
+  base::CommandLine::StringVector argv;
   // We don't support spaces inside arguments in --nacl-gdb switch.
-  base::SplitString(nacl_gdb, static_cast<CommandLine::CharType>(' '), &argv);
-  CommandLine cmd_line(argv);
+  base::SplitString(nacl_gdb, static_cast<base::CommandLine::CharType>(' '),
+                    &argv);
+  base::CommandLine cmd_line(argv);
 #endif
   cmd_line.AppendArg("--eval-command");
   base::FilePath::StringType irt_path(
@@ -510,13 +516,13 @@ bool NaClProcessHost::LaunchNaClGdb() {
   }
   cmd_line.AppendArg("--eval-command");
   cmd_line.AppendArg("target remote :4014");
-  base::FilePath script = CommandLine::ForCurrentProcess()->GetSwitchValuePath(
-      switches::kNaClGdbScript);
+  base::FilePath script =
+      command_line.GetSwitchValuePath(switches::kNaClGdbScript);
   if (!script.empty()) {
     cmd_line.AppendArg("--command");
     cmd_line.AppendArgNative(script.value());
   }
-  return base::LaunchProcess(cmd_line, base::LaunchOptions(), NULL);
+  base::LaunchProcess(cmd_line, base::LaunchOptions());
 }
 
 bool NaClProcessHost::LaunchSelLdr() {
@@ -583,7 +589,7 @@ bool NaClProcessHost::LaunchSelLdr() {
   }
 #endif
 
-  scoped_ptr<CommandLine> cmd_line(new CommandLine(exe_path));
+  scoped_ptr<base::CommandLine> cmd_line(new base::CommandLine(exe_path));
   CopyNaClCommandLineArguments(cmd_line.get());
 
   cmd_line->AppendSwitchASCII(switches::kProcessType,
@@ -628,10 +634,8 @@ bool NaClProcessHost::OnMessageReceived(const IPC::Message& msg) {
                           OnQueryKnownToValidate)
       IPC_MESSAGE_HANDLER(NaClProcessMsg_SetKnownToValidate,
                           OnSetKnownToValidate)
-      IPC_MESSAGE_HANDLER_DELAY_REPLY(NaClProcessMsg_ResolveFileToken,
-                                      OnResolveFileToken)
-      IPC_MESSAGE_HANDLER(NaClProcessMsg_ResolveFileTokenAsync,
-                          OnResolveFileTokenAsync)
+      IPC_MESSAGE_HANDLER(NaClProcessMsg_ResolveFileToken,
+                          OnResolveFileToken)
 
 #if defined(OS_WIN)
       IPC_MESSAGE_HANDLER_DELAY_REPLY(
@@ -757,7 +761,7 @@ void NaClProcessHost::SetDebugStubPort(int port) {
 
 #if defined(OS_POSIX)
 // TCP port we chose for NaCl debug stub. It can be any other number.
-static const int kInitialDebugStubPort = 4014;
+static const uint16_t kInitialDebugStubPort = 4014;
 
 net::SocketDescriptor NaClProcessHost::GetDebugStubSocketHandle() {
   net::SocketDescriptor s = net::kInvalidSocket;
@@ -765,7 +769,7 @@ net::SocketDescriptor NaClProcessHost::GetDebugStubSocketHandle() {
   // allocate any available port.
   // On success, if the test system has register a handler
   // (GdbDebugStubPortListener), we fire a notification.
-  int port = kInitialDebugStubPort;
+  uint16 port = kInitialDebugStubPort;
   s = net::TCPListenSocket::CreateAndBind("127.0.0.1", port);
   if (s == net::kInvalidSocket) {
     s = net::TCPListenSocket::CreateAndBindAnyPort("127.0.0.1", &port);
@@ -804,6 +808,8 @@ bool NaClProcessHost::StartNaClExecution() {
   // Enable PPAPI proxy channel creation only for renderer processes.
   params.enable_ipc_proxy = enable_ppapi_proxy();
   params.process_type = process_type_;
+  bool enable_nacl_debug = enable_debug_stub_ &&
+      NaClBrowser::GetDelegate()->URLMatchesDebugPatterns(manifest_url_);
   if (uses_nonsfi_mode_) {
     // Currently, non-SFI mode is supported only on Linux.
 #if defined(OS_LINUX)
@@ -811,17 +817,17 @@ bool NaClProcessHost::StartNaClExecution() {
     // not created.
     DCHECK(!socket_for_sel_ldr_.IsValid());
 #endif
+    if (enable_nacl_debug) {
+      base::ProcessId pid = base::GetProcId(process_->GetData().handle);
+      LOG(WARNING) << "nonsfi nacl plugin running in " << pid;
+    }
   } else {
     params.validation_cache_enabled = nacl_browser->ValidationCacheIsEnabled();
     params.validation_cache_key = nacl_browser->GetValidationCacheKey();
     params.version = NaClBrowser::GetDelegate()->GetVersionString();
-    params.enable_debug_stub = enable_debug_stub_ &&
-        NaClBrowser::GetDelegate()->URLMatchesDebugPatterns(manifest_url_);
-
-    // TODO(teravest): Resolve the file tokens right now instead of making the
-    // loader send IPC to resolve them later.
-    params.nexe_token_lo = nexe_token_.lo;
-    params.nexe_token_hi = nexe_token_.hi;
+    params.enable_debug_stub = enable_nacl_debug;
+    params.enable_mojo = base::CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kEnableNaClMojo);
 
     const ChildProcessData& data = process_->GetData();
     if (!ShareHandleToSelLdr(data.handle,
@@ -873,16 +879,61 @@ bool NaClProcessHost::StartNaClExecution() {
 #endif
   }
 
-  params.nexe_file = IPC::TakeFileHandleForProcess(nexe_file_.Pass(),
-                                                   process_->GetData().handle);
   if (!crash_info_shmem_.ShareToProcess(process_->GetData().handle,
                                         &params.crash_info_shmem_handle)) {
     DLOG(ERROR) << "Failed to ShareToProcess() a shared memory buffer";
     return false;
   }
 
+  base::FilePath file_path;
+  // Don't retrieve the file path when using nonsfi mode; there's no validation
+  // caching in that case, so it's unnecessary work, and would expose the file
+  // path to the plugin.
+  if (!uses_nonsfi_mode_ &&
+      NaClBrowser::GetInstance()->GetFilePath(nexe_token_.lo,
+                                              nexe_token_.hi,
+                                              &file_path)) {
+    // We have to reopen the file in the browser process; we don't want a
+    // compromised renderer to pass an arbitrary fd that could get loaded
+    // into the plugin process.
+    if (base::PostTaskAndReplyWithResult(
+           content::BrowserThread::GetBlockingPool(),
+           FROM_HERE,
+           base::Bind(OpenNaClReadExecImpl,
+                      file_path,
+                      true /* is_executable */),
+           base::Bind(&NaClProcessHost::StartNaClFileResolved,
+                      weak_factory_.GetWeakPtr(),
+                      params,
+                      file_path))) {
+      return true;
+    }
+  }
+
+  params.nexe_file = IPC::TakeFileHandleForProcess(nexe_file_.Pass(),
+                                                   process_->GetData().handle);
   process_->Send(new NaClProcessMsg_Start(params));
   return true;
+}
+
+void NaClProcessHost::StartNaClFileResolved(
+    NaClStartParams params,
+    const base::FilePath& file_path,
+    base::File checked_nexe_file) {
+  if (checked_nexe_file.IsValid()) {
+    // Release the file received from the renderer. This has to be done on a
+    // thread where IO is permitted, though.
+    content::BrowserThread::GetBlockingPool()->PostTask(
+        FROM_HERE,
+        base::Bind(&CloseFile, base::Passed(nexe_file_.Pass())));
+    params.nexe_file_path_metadata = file_path;
+    params.nexe_file = IPC::TakeFileHandleForProcess(
+        checked_nexe_file.Pass(), process_->GetData().handle);
+  } else {
+    params.nexe_file = IPC::TakeFileHandleForProcess(
+        nexe_file_.Pass(), process_->GetData().handle);
+  }
+  process_->Send(new NaClProcessMsg_Start(params));
 }
 
 // This method is called when NaClProcessHostMsg_PpapiChannelCreated is
@@ -925,7 +976,7 @@ void NaClProcessHost::OnPpapiChannelsCreated(
     args.permissions = permissions_;
     args.keepalive_throttle_interval_milliseconds =
         keepalive_throttle_interval_milliseconds_;
-    CommandLine* cmdline = CommandLine::ForCurrentProcess();
+    base::CommandLine* cmdline = base::CommandLine::ForCurrentProcess();
     DCHECK(cmdline);
     std::string flag_whitelist[] = {
       switches::kV,
@@ -988,8 +1039,7 @@ void NaClProcessHost::OnSetKnownToValidate(const std::string& signature) {
 }
 
 void NaClProcessHost::OnResolveFileToken(uint64 file_token_lo,
-                                         uint64 file_token_hi,
-                                         IPC::Message* reply_msg) {
+                                         uint64 file_token_hi) {
   // Was the file registered?
   //
   // Note that the file path cache is of bounded size, and old entries can get
@@ -1017,40 +1067,7 @@ void NaClProcessHost::OnResolveFileToken(uint64 file_token_lo,
   base::FilePath file_path;
   if (!NaClBrowser::GetInstance()->GetFilePath(
         file_token_lo, file_token_hi, &file_path)) {
-    NaClProcessMsg_ResolveFileToken::WriteReplyParams(
-        reply_msg,
-        IPC::InvalidPlatformFileForTransit(),
-        base::FilePath());
-    Send(reply_msg);
-    return;
-  }
-
-  // Open the file.
-  if (!base::PostTaskAndReplyWithResult(
-          content::BrowserThread::GetBlockingPool(),
-          FROM_HERE,
-          base::Bind(OpenNaClReadExecImpl, file_path, true /* is_executable */),
-          base::Bind(&NaClProcessHost::FileResolved,
-                     weak_factory_.GetWeakPtr(),
-                     file_path,
-                     reply_msg))) {
-     NaClProcessMsg_ResolveFileToken::WriteReplyParams(
-         reply_msg,
-         IPC::InvalidPlatformFileForTransit(),
-         base::FilePath());
-     Send(reply_msg);
-  }
-}
-
-void NaClProcessHost::OnResolveFileTokenAsync(uint64 file_token_lo,
-                                              uint64 file_token_hi) {
-  // See the comment at OnResolveFileToken() for details of the file path cache
-  // behavior.
-  CHECK(!uses_nonsfi_mode_);
-  base::FilePath file_path;
-  if (!NaClBrowser::GetInstance()->GetFilePath(
-        file_token_lo, file_token_hi, &file_path)) {
-    Send(new NaClProcessMsg_ResolveFileTokenAsyncReply(
+    Send(new NaClProcessMsg_ResolveFileTokenReply(
              file_token_lo,
              file_token_hi,
              IPC::PlatformFileForTransit(),
@@ -1063,12 +1080,12 @@ void NaClProcessHost::OnResolveFileTokenAsync(uint64 file_token_lo,
           content::BrowserThread::GetBlockingPool(),
           FROM_HERE,
           base::Bind(OpenNaClReadExecImpl, file_path, true /* is_executable */),
-          base::Bind(&NaClProcessHost::FileResolvedAsync,
+          base::Bind(&NaClProcessHost::FileResolved,
                      weak_factory_.GetWeakPtr(),
                      file_token_lo,
                      file_token_hi,
                      file_path))) {
-    Send(new NaClProcessMsg_ResolveFileTokenAsyncReply(
+    Send(new NaClProcessMsg_ResolveFileTokenReply(
             file_token_lo,
             file_token_hi,
             IPC::PlatformFileForTransit(),
@@ -1077,27 +1094,6 @@ void NaClProcessHost::OnResolveFileTokenAsync(uint64 file_token_lo,
 }
 
 void NaClProcessHost::FileResolved(
-    const base::FilePath& file_path,
-    IPC::Message* reply_msg,
-    base::File file) {
-  if (file.IsValid()) {
-    IPC::PlatformFileForTransit handle = IPC::TakeFileHandleForProcess(
-        file.Pass(),
-        process_->GetData().handle);
-    NaClProcessMsg_ResolveFileToken::WriteReplyParams(
-        reply_msg,
-        handle,
-        file_path);
-  } else {
-    NaClProcessMsg_ResolveFileToken::WriteReplyParams(
-        reply_msg,
-        IPC::InvalidPlatformFileForTransit(),
-        base::FilePath());
-  }
-  Send(reply_msg);
-}
-
-void NaClProcessHost::FileResolvedAsync(
     uint64_t file_token_lo,
     uint64_t file_token_hi,
     const base::FilePath& file_path,
@@ -1112,7 +1108,7 @@ void NaClProcessHost::FileResolvedAsync(
   } else {
     out_handle = IPC::InvalidPlatformFileForTransit();
   }
-  Send(new NaClProcessMsg_ResolveFileTokenAsyncReply(
+  Send(new NaClProcessMsg_ResolveFileTokenReply(
            file_token_lo,
            file_token_hi,
            out_handle,

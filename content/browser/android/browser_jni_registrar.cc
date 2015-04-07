@@ -30,6 +30,7 @@
 #include "content/browser/geolocation/location_api_adapter_android.h"
 #include "content/browser/media/android/media_drm_credential_manager.h"
 #include "content/browser/media/android/media_resource_getter_impl.h"
+#include "content/browser/mojo/service_registrar_android.h"
 #include "content/browser/mojo/service_registry_android.h"
 #include "content/browser/power_save_blocker_android.h"
 #include "content/browser/renderer_host/ime_adapter_android.h"
@@ -38,7 +39,6 @@
 #include "content/browser/screen_orientation/screen_orientation_delegate_android.h"
 #include "content/browser/speech/speech_recognizer_impl_android.h"
 #include "content/browser/time_zone_monitor_android.h"
-#include "content/browser/vibration/vibration_provider_android.h"
 #include "content/browser/web_contents/web_contents_android.h"
 #include "mojo/android/system/core_impl.h"
 
@@ -61,8 +61,9 @@ base::android::RegistrationMethod kContentRegisteredMethods[] = {
     {"DateTimePickerAndroid", content::RegisterDateTimeChooserAndroid},
     {"DownloadControllerAndroidImpl",
      content::DownloadControllerAndroidImpl::RegisterDownloadController},
-    {"GamepadList", content::GamepadPlatformDataFetcherAndroid::
-                        RegisterGamepadPlatformDataFetcherAndroid},
+    {"GamepadList",
+     content::GamepadPlatformDataFetcherAndroid::
+         RegisterGamepadPlatformDataFetcherAndroid},
     {"HandleViewResources",
      content::CompositedTouchHandleDrawable::RegisterHandleViewResources},
     {"InterstitialPageDelegateAndroid",
@@ -84,6 +85,7 @@ base::android::RegistrationMethod kContentRegisteredMethods[] = {
     {"ScreenOrientationProvider",
      content::ScreenOrientationDelegateAndroid::Register},
     {"SensorManagerAndroid", content::SensorManagerAndroid::Register},
+    {"ServiceRegistrarAndroid", content::ServiceRegistrarAndroid::Register},
     {"ServiceRegistryAndroid", content::ServiceRegistryAndroid::Register},
     {"SpeechRecognizerImplAndroid",
      content::SpeechRecognizerImplAndroid::RegisterSpeechRecognizer},
@@ -91,7 +93,6 @@ base::android::RegistrationMethod kContentRegisteredMethods[] = {
     {"TouchEventSynthesizer",
      content::SyntheticGestureTargetAndroid::RegisterTouchEventSynthesizer},
     {"TracingControllerAndroid", content::RegisterTracingControllerAndroid},
-    {"VibrationProvider", content::VibrationProviderAndroid::Register},
     {"WebContentsAndroid", content::WebContentsAndroid::Register},
     {"WebContentsObserver", content::RegisterWebContentsObserverAndroid},
     {"WebViewStatics", content::RegisterWebViewStatics},

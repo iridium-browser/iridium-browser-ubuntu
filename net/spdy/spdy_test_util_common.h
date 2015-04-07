@@ -222,7 +222,6 @@ struct SpdySessionDependencies {
   bool force_spdy_over_ssl;
   bool force_spdy_always;
   bool use_alternate_protocols;
-  bool enable_websocket_over_spdy;
   NetLog* net_log;
 };
 
@@ -437,7 +436,8 @@ class SpdyTestUtil {
   SpdyFrame* ConstructSpdyConnect(const char* const extra_headers[],
                                   int extra_header_count,
                                   int stream_id,
-                                  RequestPriority priority) const;
+                                  RequestPriority priority,
+                                  const HostPortPair& host_port_pair) const;
 
   // Constructs a standard SPDY push SYN frame.
   // |extra_headers| are the extra header-value pairs, which typically
@@ -552,8 +552,9 @@ class SpdyTestUtil {
 
   NextProto protocol() const { return protocol_; }
   SpdyMajorVersion spdy_version() const { return spdy_version_; }
-  bool is_spdy2() const { return protocol_ < kProtoSPDY3; }
-  bool include_version_header() const { return protocol_ < kProtoSPDY4; }
+  bool include_version_header() const {
+    return protocol_ < kProtoSPDY4MinimumVersion;
+  }
   scoped_ptr<SpdyFramer> CreateFramer(bool compressed) const;
 
   const char* GetMethodKey() const;

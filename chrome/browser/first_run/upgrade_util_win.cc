@@ -117,8 +117,9 @@ RelaunchMode RelaunchModeStringToEnum(const std::string& relaunch_mode) {
   // On Windows 7 if the current browser is in Chrome OS mode, then restart
   // into Chrome OS mode.
   if ((base::win::GetVersion() == base::win::VERSION_WIN7) &&
-       CommandLine::ForCurrentProcess()->HasSwitch(switches::kViewerConnect) &&
-       !g_browser_process->local_state()->HasPrefPath(prefs::kRelaunchMode)) {
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kViewerConnect) &&
+      !g_browser_process->local_state()->HasPrefPath(prefs::kRelaunchMode)) {
     // TODO(ananta)
     // On Windows 8, the delegate execute process looks up the previously
     // launched mode from the registry and relaunches into that mode. We need
@@ -132,7 +133,7 @@ RelaunchMode RelaunchModeStringToEnum(const std::string& relaunch_mode) {
   return RELAUNCH_MODE_DEFAULT;
 }
 
-bool RelaunchChromeHelper(const CommandLine& command_line,
+bool RelaunchChromeHelper(const base::CommandLine& command_line,
                           const RelaunchMode& relaunch_mode) {
   scoped_ptr<base::Environment> env(base::Environment::Create());
   std::string version_str;
@@ -151,15 +152,16 @@ bool RelaunchChromeHelper(const CommandLine& command_line,
 
   // Explicitly make sure to relaunch chrome.exe rather than old_chrome.exe.
   // This can happen when old_chrome.exe is launched by a user.
-  CommandLine chrome_exe_command_line = command_line;
+  base::CommandLine chrome_exe_command_line = command_line;
   chrome_exe_command_line.SetProgram(
       chrome_exe.DirName().Append(installer::kChromeExe));
 
   if (base::win::GetVersion() < base::win::VERSION_WIN8 &&
       relaunch_mode != RELAUNCH_MODE_METRO &&
-      relaunch_mode != RELAUNCH_MODE_DESKTOP)
+      relaunch_mode != RELAUNCH_MODE_DESKTOP) {
     return base::LaunchProcess(chrome_exe_command_line,
-                               base::LaunchOptions(), NULL);
+                               base::LaunchOptions()).IsValid();
+  }
 
   // On Windows 8 we always use the delegate_execute for re-launching chrome.
   // On Windows 7 we use delegate_execute for re-launching chrome into Windows
@@ -185,7 +187,7 @@ bool RelaunchChromeHelper(const CommandLine& command_line,
     return false;
   }
 
-  CommandLine relaunch_cmd(CommandLine::NO_PROGRAM);
+  base::CommandLine relaunch_cmd(base::CommandLine::NO_PROGRAM);
   relaunch_cmd.AppendSwitchPath(switches::kRelaunchShortcut,
       ShellIntegration::GetStartMenuShortcut(chrome_exe));
   relaunch_cmd.AppendSwitchNative(switches::kWaitForMutex, mutex_name);
@@ -220,11 +222,11 @@ bool RelaunchChromeHelper(const CommandLine& command_line,
   return true;
 }
 
-bool RelaunchChromeBrowser(const CommandLine& command_line) {
+bool RelaunchChromeBrowser(const base::CommandLine& command_line) {
   return RelaunchChromeHelper(command_line, RELAUNCH_MODE_DEFAULT);
 }
 
-bool RelaunchChromeWithMode(const CommandLine& command_line,
+bool RelaunchChromeWithMode(const base::CommandLine& command_line,
                             const RelaunchMode& relaunch_mode) {
   return RelaunchChromeHelper(command_line, relaunch_mode);
 }
@@ -247,8 +249,7 @@ bool SwapNewChromeExeIfPresent() {
     return false;
 
   // Open up the registry key containing current version and rename information.
-  bool user_install =
-      InstallUtil::IsPerUserInstall(cur_chrome_exe.value().c_str());
+  bool user_install = InstallUtil::IsPerUserInstall(cur_chrome_exe);
   HKEY reg_root = user_install ? HKEY_CURRENT_USER : HKEY_LOCAL_MACHINE;
   BrowserDistribution *dist = BrowserDistribution::GetDistribution();
   base::win::RegKey key;
@@ -258,13 +259,13 @@ bool SwapNewChromeExeIfPresent() {
     std::wstring rename_cmd;
     if (key.ReadValue(google_update::kRegRenameCmdField,
                       &rename_cmd) == ERROR_SUCCESS) {
-      base::win::ScopedHandle handle;
       base::LaunchOptions options;
       options.wait = true;
       options.start_hidden = true;
-      if (base::LaunchProcess(rename_cmd, options, &handle)) {
+      base::Process process = base::LaunchProcess(rename_cmd, options);
+      if (process.IsValid()) {
         DWORD exit_code;
-        ::GetExitCodeProcess(handle.Get(), &exit_code);
+        ::GetExitCodeProcess(process.Handle(), &exit_code);
         if (exit_code == installer::RENAME_SUCCESSFUL)
           return true;
       }
@@ -294,7 +295,7 @@ bool IsRunningOldChrome() {
                                                 installer::kChromeOldExe);
 }
 
-bool DoUpgradeTasks(const CommandLine& command_line) {
+bool DoUpgradeTasks(const base::CommandLine& command_line) {
   // The DelegateExecute verb handler finalizes pending in-use updates for
   // metro mode launches, as Chrome cannot be gracefully relaunched when
   // running in this mode.

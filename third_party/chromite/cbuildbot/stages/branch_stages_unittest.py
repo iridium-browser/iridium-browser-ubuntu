@@ -101,7 +101,6 @@ upstream="old-special-branch"/>
                       special_revision2=SPECIAL_REVISION2)
 
 
-# pylint: disable=W0212,R0901
 class BranchUtilStageTest(generic_stages_unittest.AbstractStageTest,
                           cros_test_lib.LoggingTestCase):
   """Tests for branch creation/deletion."""
@@ -206,11 +205,11 @@ class BranchUtilStageTest(generic_stages_unittest.AbstractStageTest,
     # Verify that manifests were branched properly. Notice that external
     # is pinned to a SHA1, not an actual branch.
     branch_names = {
-      'chromite': self.norm_name,
-      'external': '12345',
-      'src/special-new': self.norm_name + '-new-special-branch',
-      'src/special-old': self.norm_name + '-old-special-branch',
-      'unpinned': 'refs/heads/master',
+        'chromite': self.norm_name,
+        'external': '12345',
+        'src/special-new': self.norm_name + '-new-special-branch',
+        'src/special-old': self.norm_name + '-old-special-branch',
+        'unpinned': 'refs/heads/master',
     }
     for m in ['manifest/default.xml', 'manifest-internal/official.xml']:
       manifest = git.Manifest(os.path.join(self.build_root, m))
@@ -218,7 +217,7 @@ class BranchUtilStageTest(generic_stages_unittest.AbstractStageTest,
         branch_name = branch_names[project_data['path']]
         msg = (
             'Branch name for %s should be %r, but got %r' %
-                (project_data['path'], branch_name, project_data['revision'])
+            (project_data['path'], branch_name, project_data['revision'])
         )
         self.assertEquals(project_data['revision'], branch_name, msg)
 
@@ -317,6 +316,7 @@ class BranchUtilStageTest(generic_stages_unittest.AbstractStageTest,
     self.rc_mock.AddCmdResult(partial_mock.In('push'), returncode=128)
     stage = self.ConstructStage()
     args = (overlay_dir, 'gerrit', 'refs/heads/master')
+    # pylint: disable=protected-access
     stage._IncrementVersionOnDiskForSourceBranch(*args)
 
   def testSourceIncrementWarning(self):

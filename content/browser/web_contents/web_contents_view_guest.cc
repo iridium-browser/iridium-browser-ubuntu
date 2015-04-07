@@ -17,10 +17,10 @@
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/context_menu_params.h"
 #include "content/public/common/drop_data.h"
+#include "ui/gfx/geometry/point.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/gfx/image/image_skia.h"
-#include "ui/gfx/point.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/size.h"
 
 #if defined(USE_AURA)
 #include "ui/aura/window.h"

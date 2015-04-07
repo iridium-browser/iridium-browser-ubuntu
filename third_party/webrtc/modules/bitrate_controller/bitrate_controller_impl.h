@@ -21,6 +21,7 @@
 #include <map>
 #include <utility>
 
+#include "webrtc/modules/bitrate_controller/remb_suppressor.h"
 #include "webrtc/modules/bitrate_controller/send_side_bandwidth_estimation.h"
 #include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
 #include "webrtc/system_wrappers/interface/scoped_ptr.h"
@@ -37,17 +38,22 @@ class BitrateControllerImpl : public BitrateController {
   virtual RtcpBandwidthObserver* CreateRtcpBandwidthObserver() OVERRIDE;
 
   virtual void SetBitrateObserver(BitrateObserver* observer,
-                                  const uint32_t start_bitrate,
-                                  const uint32_t min_bitrate,
-                                  const uint32_t max_bitrate) OVERRIDE;
+                                  uint32_t start_bitrate,
+                                  uint32_t min_bitrate,
+                                  uint32_t max_bitrate) OVERRIDE;
 
   virtual void RemoveBitrateObserver(BitrateObserver* observer) OVERRIDE;
 
   virtual void EnforceMinBitrate(bool enforce_min_bitrate) OVERRIDE;
   virtual void SetReservedBitrate(uint32_t reserved_bitrate_bps) OVERRIDE;
 
-  virtual int32_t TimeUntilNextProcess() OVERRIDE;
+  virtual int64_t TimeUntilNextProcess() OVERRIDE;
   virtual int32_t Process() OVERRIDE;
+
+  // Current bitrate actually being sent.
+  virtual void SetBitrateSent(uint32_t bitrate_sent_bps) OVERRIDE;
+
+  virtual void SetCodecMode(webrtc::VideoCodecMode mode) OVERRIDE;
 
  private:
   class RtcpBandwidthObserverImpl;
@@ -80,18 +86,18 @@ class BitrateControllerImpl : public BitrateController {
   void UpdateMinMaxBitrate() EXCLUSIVE_LOCKS_REQUIRED(*critsect_);
 
   // Called by BitrateObserver's direct from the RTCP module.
-  void OnReceivedEstimatedBitrate(const uint32_t bitrate);
+  void OnReceivedEstimatedBitrate(uint32_t bitrate);
 
-  void OnReceivedRtcpReceiverReport(const uint8_t fraction_loss,
-                                    const uint32_t rtt,
-                                    const int number_of_packets,
-                                    const uint32_t now_ms);
+  void OnReceivedRtcpReceiverReport(uint8_t fraction_loss,
+                                    uint32_t rtt,
+                                    int number_of_packets,
+                                    int64_t now_ms);
 
   void MaybeTriggerOnNetworkChanged() EXCLUSIVE_LOCKS_REQUIRED(*critsect_);
 
-  void OnNetworkChanged(const uint32_t bitrate,
-                        const uint8_t fraction_loss,  // 0 - 255.
-                        const uint32_t rtt)
+  void OnNetworkChanged(uint32_t bitrate,
+                        uint8_t fraction_loss,  // 0 - 255.
+                        uint32_t rtt)
       EXCLUSIVE_LOCKS_REQUIRED(*critsect_);
 
   void NormalRateAllocation(uint32_t bitrate,
@@ -113,7 +119,7 @@ class BitrateControllerImpl : public BitrateController {
 
   // Used by process thread.
   Clock* clock_;
-  uint32_t last_bitrate_update_ms_;
+  int64_t last_bitrate_update_ms_;
 
   CriticalSectionWrapper* critsect_;
   SendSideBandwidthEstimation bandwidth_estimation_ GUARDED_BY(*critsect_);
@@ -127,6 +133,7 @@ class BitrateControllerImpl : public BitrateController {
   bool last_enforce_min_bitrate_ GUARDED_BY(*critsect_);
   bool bitrate_observers_modified_ GUARDED_BY(*critsect_);
   uint32_t last_reserved_bitrate_bps_ GUARDED_BY(*critsect_);
+  scoped_ptr<RembSuppressor> remb_suppressor_ GUARDED_BY(*critsect_);
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(BitrateControllerImpl);
 };

@@ -57,15 +57,11 @@ class MEDIA_EXPORT AudioRendererImpl
   // |sink| is used as the destination for the rendered audio.
   //
   // |decoders| contains the AudioDecoders to use when initializing.
-  //
-  // |set_decryptor_ready_cb| is fired when the audio decryptor is available
-  // (only applicable if the stream is encrypted and we have a decryptor).
   AudioRendererImpl(
       const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
       AudioRendererSink* sink,
       ScopedVector<AudioDecoder> decoders,
-      const SetDecryptorReadyCB& set_decryptor_ready_cb,
-      const AudioHardwareConfig& hardware_params,
+      const AudioHardwareConfig& hardware_config,
       const scoped_refptr<MediaLog>& media_log);
   ~AudioRendererImpl() override;
 
@@ -80,6 +76,7 @@ class MEDIA_EXPORT AudioRendererImpl
   // AudioRenderer implementation.
   void Initialize(DemuxerStream* stream,
                   const PipelineStatusCB& init_cb,
+                  const SetDecryptorReadyCB& set_decryptor_ready_cb,
                   const StatisticsCB& statistics_cb,
                   const BufferingStateCB& buffering_state_cb,
                   const base::Closure& ended_cb,
@@ -259,6 +256,10 @@ class MEDIA_EXPORT AudioRendererImpl
   // Set every Render() and used to provide an interpolated time value to
   // CurrentMediaTimeForSyncingVideo().
   base::TimeTicks last_render_ticks_;
+
+  // Set upon receipt of the first decoded buffer after a StartPlayingFrom().
+  // Used to determine how long to delay playback.
+  base::TimeDelta first_packet_timestamp_;
 
   // End variables which must be accessed under |lock_|. ----------------------
 

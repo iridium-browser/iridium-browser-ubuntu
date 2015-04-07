@@ -12,18 +12,20 @@ namespace blink {
 
 TestDictionary::TestDictionary()
 {
+    setEnumMember(String("foo"));
     setLongMember(1);
     setStringOrNullMember(String("default string value"));
-    setEnumMember(String("foo"));
 }
 
 void TestDictionary::trace(Visitor* visitor)
 {
+    visitor->trace(m_elementOrNullMember);
+    visitor->trace(m_eventTargetMember);
+    visitor->trace(m_internalDictionarySequenceMember);
     visitor->trace(m_testInterfaceGarbageCollectedMember);
     visitor->trace(m_testInterfaceGarbageCollectedOrNullMember);
     visitor->trace(m_testInterfaceWillBeGarbageCollectedMember);
     visitor->trace(m_testInterfaceWillBeGarbageCollectedOrNullMember);
-    visitor->trace(m_elementOrNullMember);
 }
 
 } // namespace blink

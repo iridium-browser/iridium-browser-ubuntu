@@ -412,7 +412,7 @@ void GpuDataManagerImplPrivate::RegisterSwiftShaderPath(
 
 bool GpuDataManagerImplPrivate::ShouldUseWarp() const {
   return use_warp_ ||
-      CommandLine::ForCurrentProcess()->HasSwitch(switches::kUseWarp);
+         base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kUseWarp);
 }
 
 void GpuDataManagerImplPrivate::AddObserver(GpuDataManagerObserver* observer) {
@@ -495,8 +495,7 @@ void GpuDataManagerImplPrivate::Initialize() {
     return;
   }
 
-  const base::CommandLine* command_line =
-      base::CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kSkipGpuDataLoading))
     return;
 
@@ -540,6 +539,12 @@ void GpuDataManagerImplPrivate::Initialize() {
   InitializeImpl(gpu_blacklist_string,
                  gpu_driver_bug_list_string,
                  gpu_info);
+
+  if (command_line->HasSwitch(switches::kSingleProcess) ||
+      command_line->HasSwitch(switches::kInProcessGPU)) {
+    command_line->AppendSwitch(switches::kDisableGpuWatchdog);
+    AppendGpuCommandLine(command_line);
+  }
 }
 
 void GpuDataManagerImplPrivate::UpdateGpuInfoHelper() {
@@ -756,14 +761,16 @@ void GpuDataManagerImplPrivate::GetBlacklistReasons(
     gpu_driver_bug_list_->GetReasons(reasons, "workarounds");
 }
 
-void GpuDataManagerImplPrivate::GetDriverBugWorkarounds(
-    base::ListValue* workarounds) const {
+std::vector<std::string>
+GpuDataManagerImplPrivate::GetDriverBugWorkarounds() const {
+  std::vector<std::string> workarounds;
   for (std::set<int>::const_iterator it = gpu_driver_bugs_.begin();
        it != gpu_driver_bugs_.end(); ++it) {
-    workarounds->AppendString(
+    workarounds.push_back(
         gpu::GpuDriverBugWorkaroundTypeToString(
             static_cast<gpu::GpuDriverBugWorkaroundType>(*it)));
   }
+  return workarounds;
 }
 
 void GpuDataManagerImplPrivate::AddLogMessage(
@@ -844,7 +851,7 @@ bool GpuDataManagerImplPrivate::UpdateActiveGpu(
 }
 
 bool GpuDataManagerImplPrivate::CanUseGpuBrowserCompositor() const {
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisableGpuCompositing))
     return false;
   if (ShouldUseWarp())
@@ -1013,9 +1020,9 @@ void GpuDataManagerImplPrivate::EnableWarpIfNecessary() {
     return;
   // We should only use WARP if we are unable to use the regular GPU for
   // compositing, and if we in Metro mode.
-  use_warp_ =
-      CommandLine::ForCurrentProcess()->HasSwitch(switches::kViewerConnect) &&
-      !CanUseGpuBrowserCompositor();
+  use_warp_ = base::CommandLine::ForCurrentProcess()->HasSwitch(
+                  switches::kViewerConnect) &&
+              !CanUseGpuBrowserCompositor();
 #endif
 }
 

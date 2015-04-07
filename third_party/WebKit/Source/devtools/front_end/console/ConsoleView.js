@@ -38,6 +38,7 @@ WebInspector.ConsoleView = function()
 {
     WebInspector.VBox.call(this);
     this.registerRequiredCSS("ui/filter.css");
+    this.registerRequiredCSS("console/consoleView.css");
 
     this._searchableView = new WebInspector.SearchableView(this);
     this._searchableView.setMinimalSearchQuerySize(0);
@@ -64,12 +65,13 @@ WebInspector.ConsoleView = function()
 
     this._filterBar = new WebInspector.FilterBar();
 
-    this._preserveLogCheckbox = new WebInspector.StatusBarCheckbox(WebInspector.UIString("Preserve log"));
-    WebInspector.SettingsUI.bindCheckbox(this._preserveLogCheckbox.inputElement, WebInspector.settings.preserveConsoleLog);
-    this._preserveLogCheckbox.element.title = WebInspector.UIString("Do not clear log on page reload / navigation.");
+    this._preserveLogCheckbox = new WebInspector.StatusBarCheckbox(WebInspector.UIString("Preserve log"), WebInspector.UIString("Do not clear log on page reload / navigation."), WebInspector.settings.preserveConsoleLog);
 
-    var statusBarElement = this._contentsElement.createChild("div", "console-status-bar");
-    statusBarElement.appendChildren(this._clearConsoleButton.element, this._filterBar.filterButton().element, this._executionContextSelector.element, this._preserveLogCheckbox.element);
+    var statusBar = new WebInspector.StatusBar(this._contentsElement);
+    statusBar.appendStatusBarItem(this._clearConsoleButton);
+    statusBar.appendStatusBarItem(this._filterBar.filterButton());
+    statusBar.appendStatusBarItem(this._executionContextSelector);
+    statusBar.appendStatusBarItem(this._preserveLogCheckbox);
 
     this._filtersContainer = this._contentsElement.createChild("div", "console-filters-header hidden");
     this._filtersContainer.appendChild(this._filterBar.filtersElement());
@@ -113,7 +115,7 @@ WebInspector.ConsoleView = function()
 
     this._showAllMessagesCheckbox.element.classList.add("hidden");
 
-    statusBarElement.appendChild(this._showAllMessagesCheckbox.element);
+    statusBar.appendStatusBarItem(this._showAllMessagesCheckbox);
 
     this._registerShortcuts();
 
@@ -189,6 +191,7 @@ WebInspector.ConsoleView.prototype = {
     },
 
     /**
+     * @override
      * @return {number}
      */
     itemCount: function()
@@ -197,6 +200,7 @@ WebInspector.ConsoleView.prototype = {
     },
 
     /**
+     * @override
      * @param {number} index
      * @return {?WebInspector.ViewportElement}
      */
@@ -206,6 +210,7 @@ WebInspector.ConsoleView.prototype = {
     },
 
     /**
+     * @override
      * @param {number} index
      * @return {number}
      */
@@ -215,6 +220,7 @@ WebInspector.ConsoleView.prototype = {
     },
 
     /**
+     * @override
      * @return {number}
      */
     minimumRowHeight: function()
@@ -223,6 +229,7 @@ WebInspector.ConsoleView.prototype = {
     },
 
     /**
+     * @override
      * @param {!WebInspector.Target} target
      */
     targetAdded: function(target)
@@ -234,6 +241,7 @@ WebInspector.ConsoleView.prototype = {
     },
 
     /**
+     * @override
      * @param {!WebInspector.Target} target
      */
     targetRemoved: function(target)
@@ -289,11 +297,12 @@ WebInspector.ConsoleView.prototype = {
     },
 
     /**
+     * @override
      * @return {!Element}
      */
     defaultFocusedElement: function()
     {
-        return this._promptElement
+        return this._promptElement;
     },
 
     _onFiltersToggled: function(event)
@@ -429,8 +438,7 @@ WebInspector.ConsoleView.prototype = {
 
     willHide: function()
     {
-        this._prompt.hideSuggestBox();
-        this._prompt.clearAutoComplete(true);
+        this._hidePromptSuggestBox();
     },
 
     wasShown: function()
@@ -459,9 +467,15 @@ WebInspector.ConsoleView.prototype = {
     onResize: function()
     {
         this._scheduleViewportRefresh();
-        this._prompt.hideSuggestBox();
+        this._hidePromptSuggestBox();
         if (this._viewport.scrolledToBottom())
             this._immediatelyScrollToBottom();
+    },
+
+    _hidePromptSuggestBox: function()
+    {
+        this._prompt.hideSuggestBox();
+        this._prompt.clearAutoComplete(true);
     },
 
     _scheduleViewportRefresh: function()
@@ -532,7 +546,7 @@ WebInspector.ConsoleView.prototype = {
             this._urlToMessageCount[message.url] = 1;
 
         if (!insertedInMiddle) {
-            this._appendMessageToEnd(viewMessage)
+            this._appendMessageToEnd(viewMessage);
             this._updateFilterStatus();
         } else {
             this._needsFullUpdate = true;
@@ -609,6 +623,7 @@ WebInspector.ConsoleView.prototype = {
         this._clearCurrentSearchResultHighlight();
         this._consoleMessages = [];
         this._updateMessageList();
+        this._hidePromptSuggestBox();
 
         if (this._searchRegex)
             this._searchableView.updateSearchMatchesCount(0);
@@ -635,12 +650,12 @@ WebInspector.ConsoleView.prototype = {
         var filterSubMenu = contextMenu.appendSubMenuItem(WebInspector.UIString("Filter"));
 
         if (consoleMessage && consoleMessage.url) {
-            var menuTitle = WebInspector.UIString(WebInspector.useLowerCaseMenuTitles() ? "Hide messages from %s" : "Hide Messages from %s", new WebInspector.ParsedURL(consoleMessage.url).displayName);
+            var menuTitle = WebInspector.UIString.capitalize("Hide ^messages from %s", new WebInspector.ParsedURL(consoleMessage.url).displayName);
             filterSubMenu.appendItem(menuTitle, this._filter.addMessageURLFilter.bind(this._filter, consoleMessage.url));
         }
 
         filterSubMenu.appendSeparator();
-        var unhideAll = filterSubMenu.appendItem(WebInspector.UIString(WebInspector.useLowerCaseMenuTitles() ? "Unhide all" : "Unhide All"), this._filter.removeMessageURLFilter.bind(this._filter));
+        var unhideAll = filterSubMenu.appendItem(WebInspector.UIString.capitalize("Unhide ^all"), this._filter.removeMessageURLFilter.bind(this._filter));
         filterSubMenu.appendSeparator();
 
         var hasFilters = false;
@@ -654,7 +669,7 @@ WebInspector.ConsoleView.prototype = {
         unhideAll.setEnabled(hasFilters);
 
         contextMenu.appendSeparator();
-        contextMenu.appendItem(WebInspector.UIString(WebInspector.useLowerCaseMenuTitles() ? "Clear console" : "Clear Console"), this._requestClearMessages.bind(this));
+        contextMenu.appendItem(WebInspector.UIString.capitalize("Clear ^console"), this._requestClearMessages.bind(this));
 
         var request = consoleMessage ? consoleMessage.request : null;
         if (request && request.resourceType() === WebInspector.resourceTypes.XHR) {
@@ -711,7 +726,7 @@ WebInspector.ConsoleView.prototype = {
      */
     _messagesClicked: function(event)
     {
-        if (!this._prompt.isCaretInsidePrompt() && window.getSelection().isCollapsed)
+        if (!this._prompt.isCaretInsidePrompt() && event.target.window().getSelection().isCollapsed)
             this._prompt.moveCaretToEndOfPrompt();
         var groupMessage = event.target.enclosingNodeOrSelfWithClass("console-group-title");
         if (!groupMessage)
@@ -889,6 +904,7 @@ WebInspector.ConsoleView.prototype = {
     },
 
     /**
+     * @override
      * @return {!Array.<!Element>}
      */
     elementsToRestoreScrollPositionsFor: function()
@@ -896,6 +912,9 @@ WebInspector.ConsoleView.prototype = {
         return [this._messagesElement];
     },
 
+    /**
+     * @override
+     */
     searchCanceled: function()
     {
         this._clearCurrentSearchResultHighlight();
@@ -905,6 +924,7 @@ WebInspector.ConsoleView.prototype = {
     },
 
     /**
+     * @override
      * @param {!WebInspector.SearchableView.SearchConfig} searchConfig
      * @param {boolean} shouldJump
      * @param {boolean=} jumpBackwards
@@ -929,6 +949,9 @@ WebInspector.ConsoleView.prototype = {
         this._viewport.refresh();
     },
 
+    /**
+     * @override
+     */
     jumpToNextSearchResult: function()
     {
         if (!this._searchResults || !this._searchResults.length)
@@ -936,6 +959,9 @@ WebInspector.ConsoleView.prototype = {
         this._jumpToSearchResult(this._currentSearchResultIndex + 1);
     },
 
+    /**
+     * @override
+     */
     jumpToPreviousSearchResult: function()
     {
         if (!this._searchResults || !this._searchResults.length)
@@ -944,6 +970,7 @@ WebInspector.ConsoleView.prototype = {
     },
 
     /**
+     * @override
      * @return {boolean}
      */
     supportsCaseSensitiveSearch: function()
@@ -952,6 +979,7 @@ WebInspector.ConsoleView.prototype = {
     },
 
     /**
+     * @override
      * @return {boolean}
      */
     supportsRegexSearch: function()
@@ -1157,6 +1185,7 @@ WebInspector.ConsoleCommand.prototype = {
     },
 
     /**
+     * @override
      * @param {!RegExp} regexObject
      * @return {boolean}
      */
@@ -1167,6 +1196,7 @@ WebInspector.ConsoleCommand.prototype = {
     },
 
     /**
+     * @override
      * @return {!Element}
      */
     contentElement: function()
@@ -1214,6 +1244,7 @@ WebInspector.ConsoleCommandResult.prototype = {
     },
 
     /**
+     * @override
      * @return {!Element}
      */
     contentElement: function()
@@ -1283,6 +1314,7 @@ WebInspector.ConsoleView.ShowConsoleActionDelegate = function()
 
 WebInspector.ConsoleView.ShowConsoleActionDelegate.prototype = {
     /**
+     * @override
      * @return {boolean}
      */
     handleAction: function()

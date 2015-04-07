@@ -734,22 +734,33 @@ class UploadTestArtifactsStage(generic_stages.BoardSpecificBuilderStage,
                          self._current_board, constants.AUTOTEST_BUILD_PATH,
                          '..'))
 
-        # Find the control files in autotest/
-        control_files = commands.FindFilesWithPattern(
-            'control*', target='autotest', cwd=cwd)
+        control_files_tarball = commands.BuildAutotestControlFilesTarball(
+            self._build_root, cwd, tempdir)
+        queue.put([control_files_tarball])
 
-        # Tar the control files and the packages.
-        autotest_tarball = os.path.join(tempdir, 'autotest.tar')
-        input_list = control_files + ['autotest/packages']
-        commands.BuildTarball(self._build_root, input_list, autotest_tarball,
-                              cwd=cwd, compressed=False)
-        queue.put([autotest_tarball])
+        packages_tarball = commands.BuildAutotestPackagesTarball(
+            self._build_root, cwd, tempdir)
+        queue.put([packages_tarball])
 
         # Tar up the test suites.
-        test_suites_tarball = os.path.join(tempdir, 'test_suites.tar.bz2')
-        commands.BuildTarball(self._build_root, ['autotest/test_suites'],
-                              test_suites_tarball, cwd=cwd)
+        test_suites_tarball = commands.BuildAutotestTestSuitesTarball(
+            self._build_root, cwd, tempdir)
         queue.put([test_suites_tarball])
+
+  def _GeneratePayloads(self, image_name, **kwargs):
+    """Generate and upload payloads for |image_name|.
+
+    Args:
+      image_name: The image to use.
+      **kwargs: Keyword arguments to pass to commands.GeneratePayloads.
+    """
+    with osutils.TempDir(prefix='cbuildbot-payloads') as tempdir:
+      with self.ArtifactUploader() as queue:
+        image_path = os.path.join(self.GetImageDirSymlink(), image_name)
+        commands.GeneratePayloads(self._build_root, image_path, tempdir,
+                                  **kwargs)
+        for payload in os.listdir(tempdir):
+          queue.put([os.path.join(tempdir, payload)])
 
   def BuildUpdatePayloads(self):
     """Archives update payloads when they are ready."""
@@ -757,21 +768,17 @@ class UploadTestArtifactsStage(generic_stages.BoardSpecificBuilderStage,
     if not got_images:
       return
 
-    with osutils.TempDir(prefix='cbuildbot-payloads') as tempdir:
-      with self.ArtifactUploader() as queue:
-        if 'test' in self._run.config.images:
-          image_name = 'chromiumos_test_image.bin'
-        elif 'dev' in self._run.config.images:
-          image_name = 'chromiumos_image.bin'
-        else:
-          image_name = 'chromiumos_base_image.bin'
-
-        logging.info('Generating payloads to upload for %s', image_name)
-        image_path = os.path.join(self.GetImageDirSymlink(), image_name)
-        commands.GeneratePayloads(self._build_root, image_path, tempdir)
-
-        for payload in os.listdir(tempdir):
-          queue.put([os.path.join(tempdir, payload)])
+    if 'test' in self._run.config.images:
+      image_name = 'chromiumos_test_image.bin'
+    elif 'dev' in self._run.config.images:
+      image_name = 'chromiumos_image.bin'
+    else:
+      image_name = 'chromiumos_base_image.bin'
+    logging.info('Generating payloads to upload for %s', image_name)
+    self._GeneratePayloads(image_name, full=True, stateful=True)
+    self.board_runattrs.SetParallel('payloads_generated', True)
+    self._GeneratePayloads(image_name, delta=True)
+    self.board_runattrs.SetParallel('delta_payloads_generated', True)
 
   @failures_lib.SetFailureType(failures_lib.InfrastructureFailure)
   def PerformStage(self):
@@ -785,6 +792,13 @@ class UploadTestArtifactsStage(generic_stages.BoardSpecificBuilderStage,
       steps.append(self.BuildUpdatePayloads)
 
     parallel.RunParallelSteps(steps)
+
+  def _HandleStageException(self, exc_info):
+    # Tell the HWTestStage not to wait for payloads to be uploaded
+    # in case UploadHWTestArtifacts throws an exception.
+    self.board_runattrs.SetParallelDefault('payloads_generated', False)
+    self.board_runattrs.SetParallelDefault('delta_payloads_generated', False)
+    return super(UploadTestArtifactsStage, self)._HandleStageException(exc_info)
 
 
 # TODO(mtennant): This class continues to exist only for subclasses that still

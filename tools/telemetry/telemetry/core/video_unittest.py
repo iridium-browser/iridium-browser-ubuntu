@@ -6,16 +6,16 @@ import logging
 import os
 import unittest
 
-from telemetry import benchmark
-from telemetry.core import bitmap
+from telemetry import decorators
+from telemetry.image_processing import image_util
 from telemetry.core import platform
 from telemetry.core import util
 from telemetry.core import video
 
 
-class VideoTest(unittest.TestCase) :
+class VideoTest(unittest.TestCase):
 
-  @benchmark.Disabled
+  @decorators.Disabled
   def testFramesFromMp4(self):
     host_platform = platform.GetHostPlatform()
 
@@ -45,6 +45,6 @@ class VideoTest(unittest.TestCase) :
     for i, timestamp_bitmap in enumerate(video_obj._FramesFromMp4(vid)):
       timestamp, bmp = timestamp_bitmap
       self.assertEquals(timestamp, expected_timestamps[i])
-      expected_bitmap = bitmap.Bitmap.FromPngFile(os.path.join(
+      expected_bitmap = image_util.FromPngFile(os.path.join(
           util.GetUnittestDataDir(), 'frame%d.png' % i))
-      self.assertTrue(expected_bitmap.IsEqual(bmp))
+      self.assertTrue(image_util.AreEqual(expected_bitmap, bmp))

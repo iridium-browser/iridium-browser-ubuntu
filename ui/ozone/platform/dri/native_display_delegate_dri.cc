@@ -5,13 +5,10 @@
 #include "ui/ozone/platform/dri/native_display_delegate_dri.h"
 
 #include "base/bind.h"
-#include "third_party/skia/include/core/SkCanvas.h"
 #include "ui/display/types/native_display_observer.h"
 #include "ui/events/ozone/device/device_event.h"
-#include "ui/events/ozone/device/device_manager.h"
 #include "ui/ozone/platform/dri/display_mode_dri.h"
 #include "ui/ozone/platform/dri/display_snapshot_dri.h"
-#include "ui/ozone/platform/dri/dri_console_buffer.h"
 #include "ui/ozone/platform/dri/dri_util.h"
 #include "ui/ozone/platform/dri/dri_wrapper.h"
 #include "ui/ozone/platform/dri/screen_manager.h"
@@ -19,8 +16,6 @@
 namespace ui {
 
 namespace {
-
-const size_t kMaxDisplayCount = 2;
 
 const char kContentProtection[] = "Content Protection";
 
@@ -54,37 +49,32 @@ uint32_t GetContentProtectionValue(drmModePropertyRes* property,
 
 class DisplaySnapshotComparator {
  public:
-  DisplaySnapshotComparator(const DisplaySnapshotDri* snapshot)
-      : snapshot_(snapshot) {}
+  explicit DisplaySnapshotComparator(const DisplaySnapshotDri* snapshot)
+      : crtc_(snapshot->crtc()), connector_(snapshot->connector()) {}
+
+  DisplaySnapshotComparator(uint32_t crtc, uint32_t connector)
+      : crtc_(crtc), connector_(connector) {}
 
   bool operator()(const DisplaySnapshotDri* other) const {
-    if (snapshot_->connector() == other->connector() &&
-        snapshot_->crtc() == other->crtc())
-      return true;
-
-    return false;
+    return connector_ == other->connector() && crtc_ == other->crtc();
   }
 
  private:
-  const DisplaySnapshotDri* snapshot_;
+  uint32_t crtc_;
+  uint32_t connector_;
 };
 
 }  // namespace
 
 NativeDisplayDelegateDri::NativeDisplayDelegateDri(
     DriWrapper* dri,
-    ScreenManager* screen_manager,
-    DeviceManager* device_manager)
-    : dri_(dri),
-      screen_manager_(screen_manager),
-      device_manager_(device_manager) {
+    ScreenManager* screen_manager)
+    : dri_(dri), screen_manager_(screen_manager) {
   // TODO(dnicoara): Remove when async display configuration is supported.
   screen_manager_->ForceInitializationOfPrimaryDisplay();
 }
 
 NativeDisplayDelegateDri::~NativeDisplayDelegateDri() {
-  if (device_manager_)
-    device_manager_->RemoveObserver(this);
 }
 
 DisplaySnapshot* NativeDisplayDelegateDri::FindDisplaySnapshot(int64_t id) {
@@ -109,26 +99,6 @@ const DisplayMode* NativeDisplayDelegateDri::FindDisplayMode(
 }
 
 void NativeDisplayDelegateDri::Initialize() {
-  if (device_manager_)
-    device_manager_->AddObserver(this);
-
-  ScopedVector<HardwareDisplayControllerInfo> displays =
-      GetAvailableDisplayControllerInfos(dri_->get_fd());
-
-  // By default all displays show the same console buffer.
-  console_buffer_.reset(
-      new DriConsoleBuffer(dri_, displays[0]->crtc()->buffer_id));
-  if (!console_buffer_->Initialize()) {
-    VLOG(1) << "Failed to initialize console buffer";
-    console_buffer_.reset();
-  } else {
-    // Clear the console buffer such that restarting Chrome will show a
-    // predetermined background.
-    //
-    // Black was chosen since Chrome's first buffer paints start with a black
-    // background.
-    console_buffer_->canvas()->clear(SK_ColorBLACK);
-  }
 }
 
 void NativeDisplayDelegateDri::GrabServer() {
@@ -157,29 +127,32 @@ void NativeDisplayDelegateDri::SyncWithServer() {
 }
 
 void NativeDisplayDelegateDri::SetBackgroundColor(uint32_t color_argb) {
-  if (console_buffer_)
-    console_buffer_->canvas()->clear(color_argb);
 }
 
 void NativeDisplayDelegateDri::ForceDPMSOn() {
-  for (size_t i = 0; i < cached_displays_.size(); ++i) {
-    DisplaySnapshotDri* dri_output = cached_displays_[i];
-    if (dri_output->dpms_property())
-      dri_->SetProperty(dri_output->connector(),
-                        dri_output->dpms_property()->prop_id, DRM_MODE_DPMS_ON);
-  }
 }
 
 std::vector<DisplaySnapshot*> NativeDisplayDelegateDri::GetDisplays() {
   ScopedVector<DisplaySnapshotDri> old_displays(cached_displays_.Pass());
-  cached_modes_.clear();
+  ScopedVector<const DisplayMode> old_modes(cached_modes_.Pass());
 
   ScopedVector<HardwareDisplayControllerInfo> displays =
       GetAvailableDisplayControllerInfos(dri_->get_fd());
-  for (size_t i = 0;
-       i < displays.size() && cached_displays_.size() < kMaxDisplayCount; ++i) {
+  for (size_t i = 0; i < displays.size(); ++i) {
     DisplaySnapshotDri* display = new DisplaySnapshotDri(
         dri_, displays[i]->connector(), displays[i]->crtc(), i);
+
+    // If the display exists make sure to sync up the new snapshot with the old
+    // one to keep the user configured details.
+    auto it = std::find_if(
+        old_displays.begin(), old_displays.end(),
+        DisplaySnapshotComparator(displays[i]->crtc()->crtc_id,
+                                  displays[i]->connector()->connector_id));
+    // Origin is only used within the platform code to keep track of the display
+    // location.
+    if (it != old_displays.end())
+      display->set_origin((*it)->origin());
+
     cached_displays_.push_back(display);
     cached_modes_.insert(cached_modes_.end(), display->modes().begin(),
                          display->modes().end());
@@ -190,6 +163,11 @@ std::vector<DisplaySnapshot*> NativeDisplayDelegateDri::GetDisplays() {
   std::vector<DisplaySnapshot*> generic_displays(cached_displays_.begin(),
                                                  cached_displays_.end());
   return generic_displays;
+}
+
+void NativeDisplayDelegateDri::GetDisplays(
+    const GetDisplaysCallback& callback) {
+  NOTREACHED();
 }
 
 void NativeDisplayDelegateDri::AddMode(const DisplaySnapshot& output,
@@ -215,7 +193,17 @@ bool NativeDisplayDelegateDri::Configure(const DisplaySnapshot& output,
               << " connector=" << dri_output.connector();
       return false;
     }
+
+    if (dri_output.dpms_property()) {
+      dri_->SetProperty(dri_output.connector(),
+                        dri_output.dpms_property()->prop_id, DRM_MODE_DPMS_ON);
+    }
   } else {
+    if (dri_output.dpms_property()) {
+      dri_->SetProperty(dri_output.connector(),
+                        dri_output.dpms_property()->prop_id, DRM_MODE_DPMS_OFF);
+    }
+
     if (!screen_manager_->DisableDisplayController(dri_output.crtc())) {
       VLOG(1) << "Failed to disable crtc=" << dri_output.crtc();
       return false;
@@ -223,6 +211,13 @@ bool NativeDisplayDelegateDri::Configure(const DisplaySnapshot& output,
   }
 
   return true;
+}
+
+void NativeDisplayDelegateDri::Configure(const DisplaySnapshot& output,
+                                         const DisplayMode* mode,
+                                         const gfx::Point& origin,
+                                         const ConfigureCallback& callback) {
+  NOTREACHED();
 }
 
 void NativeDisplayDelegateDri::CreateFrameBuffer(const gfx::Size& size) {
@@ -306,17 +301,6 @@ void NativeDisplayDelegateDri::AddObserver(NativeDisplayObserver* observer) {
 
 void NativeDisplayDelegateDri::RemoveObserver(NativeDisplayObserver* observer) {
   observers_.RemoveObserver(observer);
-}
-
-void NativeDisplayDelegateDri::OnDeviceEvent(const DeviceEvent& event) {
-  if (event.device_type() != DeviceEvent::DISPLAY)
-    return;
-
-  if (event.action_type() == DeviceEvent::CHANGE) {
-    VLOG(1) << "Got display changed event";
-    FOR_EACH_OBSERVER(NativeDisplayObserver, observers_,
-                      OnConfigurationChanged());
-  }
 }
 
 void NativeDisplayDelegateDri::NotifyScreenManager(

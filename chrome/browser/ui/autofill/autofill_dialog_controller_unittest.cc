@@ -18,7 +18,6 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/tuple.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_controller_impl.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_i18n_input.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_view.h"
@@ -256,14 +255,12 @@ class TestAutofillDialogController
       content::WebContents* contents,
       const FormData& form_structure,
       const GURL& source_url,
-      const AutofillMetrics& metric_logger,
       const AutofillClient::ResultCallback& callback,
       MockNewCreditCardBubbleController* mock_new_card_bubble_controller)
       : AutofillDialogControllerImpl(contents,
                                      form_structure,
                                      source_url,
                                      callback),
-        metric_logger_(metric_logger),
         mock_wallet_client_(
             Profile::FromBrowserContext(contents->GetBrowserContext())
                 ->GetRequestContext(),
@@ -374,12 +371,6 @@ class TestAutofillDialogController
   }
 
  private:
-  // To specify our own metric logger.
-  virtual const AutofillMetrics& GetMetricLogger() const override {
-    return metric_logger_;
-  }
-
-  const AutofillMetrics& metric_logger_;
   TestPersonalDataManager test_manager_;
   testing::NiceMock<wallet::MockWalletClient> mock_wallet_client_;
 
@@ -456,7 +447,6 @@ class AutofillDialogControllerTest : public ChromeRenderViewHostTestHarness {
         web_contents(),
         form_data,
         GURL(kSourceUrl),
-        metric_logger_,
         callback,
         mock_new_card_bubble_controller_.get()))->AsWeakPtr();
     controller_->Init(profile());
@@ -663,9 +653,6 @@ class AutofillDialogControllerTest : public ChromeRenderViewHostTestHarness {
 
   // The controller owns itself.
   base::WeakPtr<TestAutofillDialogController> controller_;
-
-  // Must outlive the controller.
-  AutofillMetrics metric_logger_;
 
   // Returned when the dialog closes successfully.
   const FormStructure* form_structure_;
@@ -2541,7 +2528,7 @@ TEST_F(AutofillDialogControllerTest, NotProdNotification) {
   controller()->OnDidGetWalletItems(
       wallet::GetTestWalletItems(wallet::AMEX_DISALLOWED));
 
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   ASSERT_EQ(
       "",
       command_line->GetSwitchValueASCII(switches::kWalletServiceUseSandbox));
@@ -2556,7 +2543,7 @@ TEST_F(AutofillDialogControllerTest, NoNotProdNotification) {
   controller()->OnDidGetWalletItems(
       wallet::GetTestWalletItems(wallet::AMEX_DISALLOWED));
 
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   ASSERT_EQ(
       "",
       command_line->GetSwitchValueASCII(switches::kWalletServiceUseSandbox));
@@ -3208,10 +3195,8 @@ TEST_F(AutofillDialogControllerTest, IconReservedForCreditCardField) {
   // supported credit card issuers.
   const int kSupportedCardIdrs[] = {
     IDR_AUTOFILL_CC_AMEX,
-    IDR_AUTOFILL_CC_DINERS,
     IDR_AUTOFILL_CC_DISCOVER,
     IDR_AUTOFILL_CC_GENERIC,
-    IDR_AUTOFILL_CC_JCB,
     IDR_AUTOFILL_CC_MASTERCARD,
     IDR_AUTOFILL_CC_VISA,
   };

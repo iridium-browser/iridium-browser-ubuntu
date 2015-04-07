@@ -12,10 +12,10 @@
 #include "base/prefs/scoped_user_pref_update.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/background/background_contents.h"
 #include "chrome/browser/background/background_contents_service.h"
 #include "chrome/browser/background/background_contents_service_factory.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/tab_contents/background_contents.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/extensions/extension_test_util.h"
 #include "chrome/common/pref_names.h"
@@ -43,7 +43,7 @@ class BackgroundContentsServiceTest : public testing::Test {
   BackgroundContentsServiceTest() {}
   ~BackgroundContentsServiceTest() override {}
   void SetUp() override {
-    command_line_.reset(new CommandLine(CommandLine::NO_PROGRAM));
+    command_line_.reset(new base::CommandLine(base::CommandLine::NO_PROGRAM));
   }
 
   const base::DictionaryValue* GetPrefs(Profile* profile) {
@@ -62,7 +62,7 @@ class BackgroundContentsServiceTest : public testing::Test {
     return url;
   }
 
-  scoped_ptr<CommandLine> command_line_;
+  scoped_ptr<base::CommandLine> command_line_;
 };
 
 class MockBackgroundContents : public BackgroundContents {

@@ -5,22 +5,24 @@
 #include "mojo/edk/system/channel_endpoint.h"
 
 #include "base/logging.h"
+#include "base/threading/platform_thread.h"
 #include "mojo/edk/system/channel.h"
-#include "mojo/edk/system/message_pipe.h"
-#include "mojo/edk/system/transport_data.h"
+#include "mojo/edk/system/channel_endpoint_client.h"
 
 namespace mojo {
 namespace system {
 
-ChannelEndpoint::ChannelEndpoint(MessagePipe* message_pipe,
-                                 unsigned port,
+ChannelEndpoint::ChannelEndpoint(ChannelEndpointClient* client,
+                                 unsigned client_port,
                                  MessageInTransitQueue* message_queue)
-    : message_pipe_(message_pipe), port_(port), channel_(nullptr) {
-  DCHECK(message_pipe_.get() || message_queue);
-  DCHECK(port_ == 0 || port_ == 1);
+    : client_(client),
+      client_port_(client_port),
+      channel_(nullptr),
+      is_detached_from_channel_(false) {
+  DCHECK(client_ || message_queue);
 
   if (message_queue)
-    paused_message_queue_.Swap(message_queue);
+    channel_message_queue_.Swap(message_queue);
 }
 
 bool ChannelEndpoint::EnqueueMessage(scoped_ptr<MessageInTransit> message) {
@@ -28,38 +30,40 @@ bool ChannelEndpoint::EnqueueMessage(scoped_ptr<MessageInTransit> message) {
 
   base::AutoLock locker(lock_);
 
-  if (!channel_ || !remote_id_.is_valid()) {
-    // We may reach here if we haven't been attached or run yet.
+  if (!channel_) {
+    // We may reach here if we haven't been attached/run yet.
     // TODO(vtl): We may also reach here if the channel is shut down early for
-    // some reason (with live message pipes on it). We can't check |state_| yet,
-    // until it's protected under lock, but in this case we should return false
-    // (and not enqueue any messages).
-    paused_message_queue_.AddMessage(message.Pass());
+    // some reason (with live message pipes on it). Ideally, we'd return false
+    // (and not enqueue the message), but we currently don't have a way to check
+    // this.
+    channel_message_queue_.AddMessage(message.Pass());
     return true;
   }
-
-  // TODO(vtl): Currently, this only works in the "running" case.
-  DCHECK(remote_id_.is_valid());
 
   return WriteMessageNoLock(message.Pass());
 }
 
-void ChannelEndpoint::DetachFromMessagePipe() {
-  {
-    base::AutoLock locker(lock_);
-    DCHECK(message_pipe_.get());
-    message_pipe_ = nullptr;
+bool ChannelEndpoint::ReplaceClient(ChannelEndpointClient* client,
+                                    unsigned client_port) {
+  DCHECK(client);
 
-    if (!channel_)
-      return;
-    DCHECK(local_id_.is_valid());
-    // TODO(vtl): Once we combine "run" into "attach", |remote_id_| should valid
-    // here as well.
-    channel_->DetachEndpoint(this, local_id_, remote_id_);
-    channel_ = nullptr;
-    local_id_ = ChannelEndpointId();
-    remote_id_ = ChannelEndpointId();
-  }
+  base::AutoLock locker(lock_);
+  DCHECK(client_);
+  DCHECK(client != client_.get() || client_port != client_port_);
+  client_ = client;
+  client_port_ = client_port;
+  return !is_detached_from_channel_;
+}
+
+void ChannelEndpoint::DetachFromClient() {
+  base::AutoLock locker(lock_);
+  DCHECK(client_);
+  client_ = nullptr;
+
+  if (!channel_)
+    return;
+  channel_->DetachEndpoint(this, local_id_, remote_id_);
+  ResetChannelNoLock();
 }
 
 void ChannelEndpoint::AttachAndRun(Channel* channel,
@@ -77,86 +81,91 @@ void ChannelEndpoint::AttachAndRun(Channel* channel,
   local_id_ = local_id;
   remote_id_ = remote_id;
 
-  while (!paused_message_queue_.IsEmpty()) {
-    LOG_IF(WARNING, !WriteMessageNoLock(paused_message_queue_.GetMessage()))
+  while (!channel_message_queue_.IsEmpty()) {
+    LOG_IF(WARNING, !WriteMessageNoLock(channel_message_queue_.GetMessage()))
         << "Failed to write enqueue message to channel";
   }
 
-  if (!message_pipe_.get()) {
+  if (!client_) {
     channel_->DetachEndpoint(this, local_id_, remote_id_);
-    channel_ = nullptr;
-    local_id_ = ChannelEndpointId();
-    remote_id_ = ChannelEndpointId();
+    ResetChannelNoLock();
   }
 }
 
-bool ChannelEndpoint::OnReadMessage(
-    const MessageInTransit::View& message_view,
-    embedder::ScopedPlatformHandleVectorPtr platform_handles) {
-  scoped_ptr<MessageInTransit> message(new MessageInTransit(message_view));
-  scoped_refptr<MessagePipe> message_pipe;
-  unsigned port;
-  {
-    base::AutoLock locker(lock_);
-    DCHECK(channel_);
-    if (!message_pipe_.get()) {
-      // This isn't a failure per se. (It just means that, e.g., the other end
-      // of the message point closed first.)
-      return true;
+void ChannelEndpoint::OnReadMessage(scoped_ptr<MessageInTransit> message) {
+  scoped_refptr<ChannelEndpointClient> client;
+  unsigned client_port = 0;
+
+  // This loop is to make |ReplaceClient()| work. We can't call the client's
+  // |OnReadMessage()| under our lock, so by the time we do that, |client| may
+  // no longer be our client.
+  //
+  // In that case, |client| must return false. We'll then yield, and retry with
+  // the new client. (Theoretically, the client could be replaced again.)
+  //
+  // This solution isn't terribly elegant, but it's the least costly way of
+  // handling/avoiding this (very unlikely) race. (Other solutions -- e.g.,
+  // adding a client message queue, which the client only fetches messages from
+  // -- impose significant cost in the common case.)
+  for (;;) {
+    {
+      base::AutoLock locker(lock_);
+      if (!channel_ || !client_) {
+        // This isn't a failure per se. (It just means that, e.g., the other end
+        // of the message point closed first.)
+        return;
+      }
+
+      // If we get here in a second (third, etc.) iteration of the loop, it's
+      // because |ReplaceClient()| was called.
+      DCHECK(client_ != client || client_port_ != client_port);
+
+      // Take a ref, and call |OnReadMessage()| outside the lock.
+      client = client_;
+      client_port = client_port_;
     }
 
-    if (message_view.transport_data_buffer_size() > 0) {
-      DCHECK(message_view.transport_data_buffer());
-      message->SetDispatchers(TransportData::DeserializeDispatchers(
-          message_view.transport_data_buffer(),
-          message_view.transport_data_buffer_size(),
-          platform_handles.Pass(),
-          channel_));
+    if (client->OnReadMessage(client_port, message.get())) {
+      ignore_result(message.release());
+      break;
     }
 
-    // Take a ref, and call |EnqueueMessage()| outside the lock.
-    message_pipe = message_pipe_;
-    port = port_;
+    base::PlatformThread::YieldCurrentThread();
   }
-
-  MojoResult result = message_pipe->EnqueueMessage(
-      MessagePipe::GetPeerPort(port), message.Pass());
-  return (result == MOJO_RESULT_OK);
-}
-
-void ChannelEndpoint::OnDisconnect() {
-  scoped_refptr<MessagePipe> message_pipe;
-  unsigned port;
-  {
-    base::AutoLock locker(lock_);
-    if (!message_pipe_.get())
-      return;
-
-    // Take a ref, and call |Close()| outside the lock.
-    message_pipe = message_pipe_;
-    port = port_;
-  }
-  message_pipe->Close(port);
 }
 
 void ChannelEndpoint::DetachFromChannel() {
-  base::AutoLock locker(lock_);
-  // This may already be null if we already detached from the channel in
-  // |DetachFromMessagePipe()| by calling |Channel::DetachEndpoint()| (and there
-  // are racing detaches).
-  if (!channel_)
-    return;
+  scoped_refptr<ChannelEndpointClient> client;
+  unsigned client_port = 0;
+  {
+    base::AutoLock locker(lock_);
 
-  DCHECK(local_id_.is_valid());
-  // TODO(vtl): Once we combine "run" into "attach", |remote_id_| should valid
-  // here as well.
-  channel_ = nullptr;
-  local_id_ = ChannelEndpointId();
-  remote_id_ = ChannelEndpointId();
+    if (client_) {
+      // Take a ref, and call |OnDetachFromChannel()| outside the lock.
+      client = client_;
+      client_port = client_port_;
+    }
+
+    // |channel_| may already be null if we already detached from the channel in
+    // |DetachFromClient()| by calling |Channel::DetachEndpoint()| (and there
+    // are racing detaches).
+    if (channel_)
+      ResetChannelNoLock();
+    else
+      DCHECK(is_detached_from_channel_);
+  }
+
+  // If |ReplaceClient()| is called (from another thread) after the above locked
+  // section but before we call |OnDetachFromChannel()|, |ReplaceClient()|
+  // return false to notify the caller that the channel was already detached.
+  // (The old client has to accept the arguably-spurious call to
+  // |OnDetachFromChannel()|.)
+  if (client)
+    client->OnDetachFromChannel(client_port);
 }
 
 ChannelEndpoint::~ChannelEndpoint() {
-  DCHECK(!message_pipe_.get());
+  DCHECK(!client_);
   DCHECK(!channel_);
   DCHECK(!local_id_.is_valid());
   DCHECK(!remote_id_.is_valid());
@@ -175,6 +184,18 @@ bool ChannelEndpoint::WriteMessageNoLock(scoped_ptr<MessageInTransit> message) {
   message->set_source_id(local_id_);
   message->set_destination_id(remote_id_);
   return channel_->WriteMessage(message.Pass());
+}
+
+void ChannelEndpoint::ResetChannelNoLock() {
+  DCHECK(channel_);
+  DCHECK(local_id_.is_valid());
+  DCHECK(remote_id_.is_valid());
+  DCHECK(!is_detached_from_channel_);
+
+  channel_ = nullptr;
+  local_id_ = ChannelEndpointId();
+  remote_id_ = ChannelEndpointId();
+  is_detached_from_channel_ = true;
 }
 
 }  // namespace system

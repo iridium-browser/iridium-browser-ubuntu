@@ -13,8 +13,19 @@ goog.provide('global');
 goog.require('AutomationPredicate');
 goog.require('AutomationUtil');
 goog.require('Output');
+goog.require('Output.EventType');
 goog.require('cursors.Cursor');
+goog.require('cvox.ChromeVoxEditableTextBase');
 goog.require('cvox.TabsApiHandler');
+
+// Define types here due to editable_text.js's implicit dependency with
+// ChromeVoxEventWatcher.
+/** @type {Object} */
+cvox.ChromeVoxEventWatcher;
+/** @type {function(boolean)} */
+cvox.ChromeVoxEventWatcher.handleTextChanged;
+/** @type {function()} */
+cvox.ChromeVoxEventWatcher.setUpTextHandler;
 
 goog.scope(function() {
 var AutomationNode = chrome.automation.AutomationNode;
@@ -36,7 +47,7 @@ Background = function() {
    * @type {!Array.<string>}
    * @private
    */
-  this.whitelist_ = ['http://www.chromevox.com/', 'chromevox_next_test'];
+  this.whitelist_ = ['chromevox_next_test'];
 
   /**
    * @type {cvox.TabsApiHandler}
@@ -59,12 +70,6 @@ Background = function() {
    */
   this.active_ = false;
 
-  /**
-   * @type {!Output}
-   * @private
-   */
-  this.output_ = new Output();
-
   // Only needed with unmerged ChromeVox classic loaded before.
   global.accessibility.setAccessibilityEnabled(false);
 
@@ -79,8 +84,15 @@ Background = function() {
    * @type {!Object.<EventType, function(Object) : void>}
    */
   this.listeners_ = {
-    focus: this.onFocus,
-    loadComplete: this.onLoadComplete
+    alert: this.onEventDefault,
+    focus: this.onEventDefault,
+    hover: this.onEventDefault,
+    menuStart: this.onEventDefault,
+    menuEnd: this.onEventDefault,
+    loadComplete: this.onLoadComplete,
+    textChanged: this.onTextOrTextSelectionChanged,
+    textSelectionChanged: this.onTextOrTextSelectionChanged,
+    valueChanged: this.onEventDefault
   };
 
   // Register listeners for ...
@@ -89,9 +101,6 @@ Background = function() {
 
   // Tabs.
   chrome.tabs.onUpdated.addListener(this.onTabUpdated);
-
-  // Commands.
-  chrome.commands.onCommand.addListener(this.onGotCommand);
 };
 
 Background.prototype = {
@@ -108,6 +117,7 @@ Background.prototype = {
         return;
 
       var next = this.isWhitelisted_(tab.url);
+
       this.toggleChromeVoxVersion({next: next, classic: !next});
     }.bind(this));
   },
@@ -122,7 +132,8 @@ Background.prototype = {
       root.addEventListener(eventType, this.listeners_[eventType], true);
 
     if (root.attributes.docLoaded) {
-      this.onLoadComplete({target: root});
+      this.onLoadComplete(
+          {target: root, type: chrome.automation.EventType.loadComplete});
     }
   },
 
@@ -184,19 +195,24 @@ Background.prototype = {
         current = current.move(cursors.Unit.NODE, Dir.BACKWARD);
         break;
       case 'goToBeginning':
-      var node = AutomationUtil.findNodePost(current.getStart().getNode().root,
-            Dir.FORWARD,
-            AutomationPredicate.leaf);
-      if (node)
-        current = cursors.Range.fromNode(node);
-        break;
-      case 'goToEnd':
       var node =
           AutomationUtil.findNodePost(current.getStart().getNode().root,
-            Dir.BACKWARD,
-            AutomationPredicate.leaf);
-      if (node)
-        current = cursors.Range.fromNode(node);
+                                      Dir.FORWARD,
+                                      AutomationPredicate.leaf);
+        if (node)
+          current = cursors.Range.fromNode(node);
+        break;
+      case 'goToEnd':
+        var node =
+            AutomationUtil.findNodePost(current.getStart().getNode().root,
+                                        Dir.BACKWARD,
+                                        AutomationPredicate.leaf);
+        if (node)
+          current = cursors.Range.fromNode(node);
+        break;
+      case 'doDefault':
+        if (this.currentRange_)
+          this.currentRange_.getStart().getNode().doDefault();
         break;
     }
 
@@ -212,8 +228,9 @@ Background.prototype = {
       // TODO(dtseng): Figure out what it means to focus a range.
       current.getStart().getNode().focus();
 
+      var prevRange = this.currentRange_;
       this.currentRange_ = current;
-      this.output_.output(this.currentRange_);
+      new Output(this.currentRange_, prevRange, Output.EventType.NAVIGATE);
     }
   },
 
@@ -221,13 +238,20 @@ Background.prototype = {
    * Provides all feedback once ChromeVox's focus changes.
    * @param {Object} evt
    */
-  onFocus: function(evt) {
+  onEventDefault: function(evt) {
     var node = evt.target;
+
     if (!node)
       return;
 
+    var prevRange = this.currentRange_;
     this.currentRange_ = cursors.Range.fromNode(node);
-    this.output_.output(this.currentRange_);
+
+    // Don't process nodes inside of web content if ChromeVox Next is inactive.
+    if (node.root.role != chrome.automation.RoleType.desktop && !this.active_)
+      return;
+
+    new Output(this.currentRange_, prevRange, evt.type);
   },
 
   /**
@@ -235,7 +259,9 @@ Background.prototype = {
    * @param {Object} evt
    */
   onLoadComplete: function(evt) {
-    if (this.currentRange_)
+    // Don't process nodes inside of web content if ChromeVox Next is inactive.
+    if (evt.target.root.role != chrome.automation.RoleType.desktop &&
+        !this.active_)
       return;
 
     var node = AutomationUtil.findNodePost(evt.target,
@@ -245,7 +271,45 @@ Background.prototype = {
       this.currentRange_ = cursors.Range.fromNode(node);
 
     if (this.currentRange_)
-      this.output_.output(this.currentRange_);
+      new Output(this.currentRange_, null, evt.type);
+  },
+
+  /**
+   * Provides all feedback once a text selection change event fires.
+   * @param {Object} evt
+   */
+  onTextOrTextSelectionChanged: function(evt) {
+    // Don't process nodes inside of web content if ChromeVox Next is inactive.
+    if (evt.target.root.role != chrome.automation.RoleType.desktop &&
+        !this.active_)
+      return;
+
+    if (!evt.target.state.focused)
+      return;
+
+    if (!this.currentRange_) {
+      this.onEventDefault(evt);
+      this.currentRange_ = cursors.Range.fromNode(evt.target);
+    }
+
+    var textChangeEvent = new cvox.TextChangeEvent(
+        evt.target.attributes.value,
+        evt.target.attributes.textSelStart,
+        evt.target.attributes.textSelEnd,
+        true);  // triggered by user
+    if (!this.editableTextHandler ||
+        evt.target != this.currentRange_.getStart().getNode()) {
+      this.editableTextHandler =
+          new cvox.ChromeVoxEditableTextBase(
+              textChangeEvent.value,
+              textChangeEvent.start,
+              textChangeEvent.end,
+              evt.target.state['protected'],
+              cvox.ChromeVox.tts);
+    }
+
+    this.editableTextHandler.changed(textChangeEvent);
+    new Output(this.currentRange_, null, evt.type, {braille: true});
   },
 
   /**
@@ -282,9 +346,16 @@ Background.prototype = {
     }
 
     if (opt_options.next) {
-      chrome.automation.getTree(this.onGotTree);
+      if (!chrome.commands.onCommand.hasListener(this.onGotCommand))
+        chrome.commands.onCommand.addListener(this.onGotCommand);
+
+      if (!this.active_)
+        chrome.automation.getTree(this.onGotTree);
       this.active_ = true;
     } else {
+      if (chrome.commands.onCommand.hasListener(this.onGotCommand))
+        chrome.commands.onCommand.removeListener(this.onGotCommand);
+
       if (this.active_) {
         for (var eventType in this.listeners_) {
           this.currentRange_.getStart().getNode().root.removeEventListener(
@@ -296,50 +367,16 @@ Background.prototype = {
 
     chrome.tabs.query({active: true}, function(tabs) {
       if (opt_options.classic) {
-        cvox.ChromeVox.injectChromeVoxIntoTabs(tabs);
+        // This case should do nothing because Classic gets injected by the
+        // extension system via our manifest. Once ChromeVox Next is enabled
+        // for tabs, re-enable.
+        // cvox.ChromeVox.injectChromeVoxIntoTabs(tabs);
       } else {
         tabs.forEach(function(tab) {
           this.disableClassicChromeVox_(tab.id);
         }.bind(this));
       }
     }.bind(this));
-  },
-
-  /**
-   * Handles output of a Range.
-   * @param {!cursors.Range} range Current location.
-   */
-  handleOutput: function(range) {
-    // TODO(dtseng): This is just placeholder logic for generating descriptions
-    // pending further design discussion.
-    function getCursorDesc(cursor) {
-      var node = cursor.getNode();
-      var container = node;
-      while (container &&
-          (container.role == chrome.automation.RoleType.inlineTextBox ||
-          container.role == chrome.automation.RoleType.staticText))
-        container = container.parent();
-
-      var role = container ? container.role : node.role;
-      return [node.attributes.name, node.attributes.value, role].join(', ');
-    }
-
-    // Walk the range and collect descriptions.
-    var output = '';
-    var cursor = range.getStart();
-    var nodeLocations = [];
-    while (cursor.getNode() != range.getEnd().getNode()) {
-      output += getCursorDesc(cursor);
-      nodeLocations.push(cursor.getNode().location);
-      cursor = cursor.move(
-          cursors.Unit.NODE, cursors.Movement.DIRECTIONAL, Dir.FORWARD);
-    }
-    output += getCursorDesc(range.getEnd());
-    nodeLocations.push(range.getEnd().getNode().location);
-
-    cvox.ChromeVox.tts.speak(output, cvox.QueueMode.FLUSH);
-    cvox.ChromeVox.braille.write(cvox.NavBraille.fromText(output));
-    chrome.accessibilityPrivate.setFocusRing(nodeLocations);
   }
 };
 

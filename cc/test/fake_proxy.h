@@ -26,6 +26,7 @@ class FakeProxy : public Proxy {
   void SetOutputSurface(scoped_ptr<OutputSurface>) override {}
   void SetLayerTreeHostClientReady() override {}
   void SetVisible(bool visible) override {}
+  void SetThrottleFrameProduction(bool throttle) override {}
   const RendererCapabilities& GetRendererCapabilities() const override;
   void SetNeedsAnimate() override {}
   void SetNeedsUpdateLayers() override {}
@@ -45,6 +46,7 @@ class FakeProxy : public Proxy {
   void SetDebugState(const LayerTreeDebugState& debug_state) override {}
   bool MainFrameWillHappenForTesting() override;
   void AsValueInto(base::debug::TracedValue* state) const override;
+  void SetChildrenNeedBeginFrames(bool children_need_begin_frames) override {}
 
   virtual RendererCapabilities& GetRendererCapabilities();
   void SetMaxPartialTextureUpdates(size_t max);

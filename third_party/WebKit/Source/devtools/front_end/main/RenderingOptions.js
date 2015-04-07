@@ -49,6 +49,7 @@ WebInspector.RenderingOptions = function()
 
 WebInspector.RenderingOptions.prototype = {
     /**
+     * @override
      * @param {!WebInspector.Target} target
      */
     targetAdded: function(target)
@@ -64,6 +65,7 @@ WebInspector.RenderingOptions.prototype = {
     },
 
     /**
+     * @override
      * @param {!WebInspector.Target} target
      */
     targetRemoved: function(target)
@@ -95,7 +97,7 @@ WebInspector.RenderingOptions.prototype = {
 WebInspector.RenderingOptions.View = function()
 {
     WebInspector.VBox.call(this);
-    this.registerRequiredCSS("components/helpScreen.css");
+    this.registerRequiredCSS("ui/helpScreen.css");
     this.element.classList.add("help-indent-labels");
 
     var div = this.element.createChild("div", "settings-tab help-content help-container help-no-columns");

@@ -4,6 +4,8 @@
 
 """Perform various tasks related to updating Portage packages."""
 
+# pylint: disable=bad-continuation
+
 from __future__ import print_function
 
 import filecmp
@@ -409,9 +411,9 @@ class Upgrader(object):
     envvars = {}
     if arch:
       if unstable_ok:
-        envvars['ACCEPT_KEYWORDS'] =  arch + ' ~' + arch
+        envvars['ACCEPT_KEYWORDS'] = arch + ' ~' + arch
       else:
-        envvars['ACCEPT_KEYWORDS'] =  arch
+        envvars['ACCEPT_KEYWORDS'] = arch
 
     if portdir is not None:
       envvars['PORTDIR'] = portdir
@@ -1764,6 +1766,7 @@ class Upgrader(object):
       self._master_table = mps.MergeTables(tables)
     else:
       self._master_table = self._curr_table
+      # pylint: disable=protected-access
       self._master_table._arch = None
 
   def WriteTableFiles(self, csv=None):
@@ -1947,7 +1950,7 @@ def main(argv):
 
   # Check that all boards have been setup first.
   for board in boards:
-    if (board != Upgrader.HOST_BOARD and not _BoardIsSetUp(board)):
+    if board != Upgrader.HOST_BOARD and not _BoardIsSetUp(board):
       parser.print_usage()
       oper.Die('You must setup the %s board first.' % board)
 

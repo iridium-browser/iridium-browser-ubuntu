@@ -12,10 +12,6 @@
 #include "base/memory/ref_counted.h"
 #include "components/password_manager/core/browser/password_store.h"
 
-namespace content {
-class BrowserContext;
-}
-
 namespace password_manager {
 
 // A very simple PasswordStore implementation that keeps all of the passwords
@@ -55,6 +51,8 @@ class TestPasswordStore : public PasswordStore {
                      PasswordStore::AuthorizationPromptPolicy prompt_policy,
                      const ConsumerCallbackRunner& runner) override;
   void WrapModificationTask(ModificationTask task) override;
+  void GetAutofillableLoginsImpl(
+      PasswordStore::GetLoginsRequest* request) override;
 
   // Unused portions of PasswordStore interface
   void ReportMetricsImpl(const std::string& sync_username,
@@ -65,8 +63,6 @@ class TestPasswordStore : public PasswordStore {
   PasswordStoreChangeList RemoveLoginsSyncedBetweenImpl(
       base::Time delete_begin,
       base::Time delete_end) override;
-  void GetAutofillableLoginsImpl(
-      PasswordStore::GetLoginsRequest* request) override {}
   void GetBlacklistLoginsImpl(
       PasswordStore::GetLoginsRequest* request) override {}
   bool FillAutofillableLogins(

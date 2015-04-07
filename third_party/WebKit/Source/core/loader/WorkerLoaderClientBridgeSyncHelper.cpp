@@ -34,7 +34,6 @@
 #include "core/workers/WorkerGlobalScope.h"
 #include "core/workers/WorkerLoaderProxy.h"
 #include "public/platform/WebWaitableEvent.h"
-#include "wtf/ArrayBuffer.h"
 #include "wtf/Functional.h"
 #include "wtf/MainThread.h"
 #include "wtf/OwnPtr.h"
@@ -58,7 +57,7 @@ void WorkerLoaderClientBridgeSyncHelper::run()
     // This must be called only after m_event is signalled.
     ASSERT(m_done);
     for (size_t i = 0; i < m_clientTasks.size(); ++i)
-        m_clientTasks[i]();
+        (*m_clientTasks[i])();
 }
 
 void WorkerLoaderClientBridgeSyncHelper::didSendData(unsigned long long bytesSent, unsigned long long totalBytesToBeSent)

@@ -8,6 +8,7 @@ import StringIO
 import unittest
 
 from telemetry import benchmark
+from telemetry import page as page_module
 from telemetry.results import chart_json_output_formatter
 from telemetry.results import page_test_results
 from telemetry.page import page_set
@@ -17,15 +18,16 @@ from telemetry.value import list_of_scalar_values
 
 def _MakePageSet():
   ps = page_set.PageSet(file_path=os.path.dirname(__file__))
-  ps.AddPageWithDefaultRunNavigate('http://www.foo.com/')
-  ps.AddPageWithDefaultRunNavigate('http://www.bar.com/')
+  ps.AddUserStory(page_module.Page('http://www.foo.com/', ps, ps.base_dir))
+  ps.AddUserStory(page_module.Page('http://www.bar.com/', ps, ps.base_dir))
   return ps
 
 class ChartJsonTest(unittest.TestCase):
   def setUp(self):
     self._output = StringIO.StringIO()
     self._page_set = _MakePageSet()
-    self._benchmark_metadata = benchmark.BenchmarkMetadata('benchmark_name')
+    self._benchmark_metadata = benchmark.BenchmarkMetadata(
+        'benchmark_name', 'benchmark_description')
     self._formatter = chart_json_output_formatter.ChartJsonOutputFormatter(
         self._output, self._benchmark_metadata)
 
@@ -65,6 +67,18 @@ class ChartJsonTest(unittest.TestCase):
 
     self.assertEquals(d['format_version'], '0.1')
     self.assertEquals(d['benchmark_name'], 'benchmark_name')
+    self.assertEquals(d['benchmark_description'], 'benchmark_description')
+
+  def testAsChartDictNoDescription(self):
+    page_specific_values = []
+    summary_values = []
+
+    d = chart_json_output_formatter._ResultsAsChartDict( # pylint: disable=W0212
+        benchmark.BenchmarkMetadata('benchmark_name', ''),
+        page_specific_values,
+        summary_values)
+
+    self.assertEquals('', d['benchmark_description'])
 
   def testAsChartDictPageSpecificValuesSamePage(self):
     v0 = scalar.ScalarValue(self._page_set[0], 'foo', 'seconds', 3)

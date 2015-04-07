@@ -7,6 +7,7 @@
 
 #include <string>
 #include <vector>
+
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
@@ -91,6 +92,16 @@ class NET_EXPORT HttpServerPropertiesManager : public HttpServerProperties {
   // persisitent store. Should only be called from IO thread.
   void SetSupportsSpdy(const HostPortPair& server, bool support_spdy) override;
 
+  // Returns true if |server| has required HTTP/1.1 via HTTP/2 error code.
+  bool RequiresHTTP11(const HostPortPair& server) override;
+
+  // Require HTTP/1.1 on subsequent connections.  Not persisted.
+  void SetHTTP11Required(const HostPortPair& server) override;
+
+  // Modify SSLConfig to force HTTP/1.1 if necessary.
+  void MaybeForceHTTP11(const HostPortPair& server,
+                        SSLConfig* ssl_config) override;
+
   // Returns true if |server| has an Alternate-Protocol header.
   bool HasAlternateProtocol(const HostPortPair& server) override;
 
@@ -154,10 +165,12 @@ class NET_EXPORT HttpServerPropertiesManager : public HttpServerProperties {
   const SupportsQuicMap& supports_quic_map() const override;
 
   void SetServerNetworkStats(const HostPortPair& host_port_pair,
-                             NetworkStats stats) override;
+                             ServerNetworkStats stats) override;
 
-  const NetworkStats* GetServerNetworkStats(
-      const HostPortPair& host_port_pair) const override;
+  const ServerNetworkStats* GetServerNetworkStats(
+      const HostPortPair& host_port_pair) override;
+
+  const ServerNetworkStatsMap& server_network_stats_map() const override;
 
  protected:
   // --------------------
@@ -185,6 +198,7 @@ class NET_EXPORT HttpServerPropertiesManager : public HttpServerProperties {
       SpdySettingsMap* spdy_settings_map,
       AlternateProtocolMap* alternate_protocol_map,
       SupportsQuicMap* supports_quic_map,
+      ServerNetworkStatsMap* server_network_stats_map,
       bool detected_corrupted_prefs);
 
   // These are used to delay updating the preferences when cached data in
@@ -213,6 +227,7 @@ class NET_EXPORT HttpServerPropertiesManager : public HttpServerProperties {
                                SpdySettingsMap* spdy_settings_map,
                                AlternateProtocolMap* alternate_protocol_map,
                                SupportsQuicMap* supports_quic_map,
+                               ServerNetworkStatsMap* server_network_stats_map,
                                const base::Closure& completion);
 
  private:

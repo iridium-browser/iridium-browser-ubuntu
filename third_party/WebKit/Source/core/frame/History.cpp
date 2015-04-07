@@ -106,13 +106,13 @@ void History::go(ExecutionContext* context, int distance)
     if (!activeDocument)
         return;
 
-    if (!activeDocument->canNavigate(*m_frame))
+    if (!activeDocument->frame() || !activeDocument->frame()->canNavigate(*m_frame))
         return;
 
     if (distance)
         m_frame->loader().client()->navigateBackForward(distance);
     else
-        m_frame->navigationScheduler().scheduleReload();
+        m_frame->reload(NormalReload, ClientRedirect);
 }
 
 KURL History::urlForState(const String& urlString)

@@ -10,8 +10,8 @@
 #include "components/web_modal/single_web_contents_dialog_manager.h"
 #include "components/web_modal/web_contents_modal_dialog_host.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
-#include "ui/gfx/point.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/point.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/views/border.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
@@ -103,7 +103,7 @@ class NativeWebContentsModalDialogManagerViews
 #endif
     // Host may be NULL during tab drag on Views/Win32.
     if (host_)
-      UpdateWebContentsModalDialogPosition(widget, host_);
+      constrained_window::UpdateWebContentsModalDialogPosition(widget, host_);
     widget->Show();
     Focus();
 
@@ -148,7 +148,7 @@ class NativeWebContentsModalDialogManagerViews
     for (std::set<views::Widget*>::iterator it = observed_widgets_.begin();
          it != observed_widgets_.end();
          ++it) {
-      UpdateWebContentsModalDialogPosition(*it, host_);
+      constrained_window::UpdateWebContentsModalDialogPosition(*it, host_);
     }
   }
 

@@ -10,6 +10,7 @@
 #include <sys/types.h>
 
 #include <list>
+#include <string>
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
@@ -67,7 +68,7 @@ class NET_EXPORT_PRIVATE ReliableQuicStream {
   // Called to close the entire connection from this end.
   virtual void CloseConnection(QuicErrorCode error);
   virtual void CloseConnectionWithDetails(QuicErrorCode error,
-                                          const string& details);
+                                          const std::string& details);
 
   // Returns the effective priority for the stream.  This value may change
   // during the life of the stream.
@@ -103,17 +104,17 @@ class NET_EXPORT_PRIVATE ReliableQuicStream {
 
   // Called when we see a frame which could increase the highest offset.
   // Returns true if the highest offset did increase.
-  bool MaybeIncreaseHighestReceivedOffset(uint64 new_offset);
+  bool MaybeIncreaseHighestReceivedOffset(QuicStreamOffset new_offset);
   // Called when bytese are sent to the peer.
-  void AddBytesSent(uint64 bytes);
+  void AddBytesSent(QuicByteCount bytes);
   // Called by the stream sequencer as bytes are consumed from the buffer.
   // If our receive window has dropped below the threshold, then send a
   // WINDOW_UPDATE frame.
-  void AddBytesConsumed(uint64 bytes);
+  void AddBytesConsumed(QuicByteCount bytes);
 
   // Updates the flow controller's send window offset and calls OnCanWrite if
   // it was blocked before.
-  void UpdateSendWindowOffset(uint64 new_offset);
+  void UpdateSendWindowOffset(QuicStreamOffset new_offset);
 
   // Returns true if the stream is flow control blocked, by the stream flow
   // control window or the connection flow control window.
@@ -166,11 +167,6 @@ class NET_EXPORT_PRIVATE ReliableQuicStream {
   const QuicStreamSequencer* sequencer() const { return &sequencer_; }
   QuicStreamSequencer* sequencer() { return &sequencer_; }
 
-  // TODO(rjshade): Remove this method when removing QUIC_VERSION_19.
-  void DisableFlowControl() {
-    flow_controller_.Disable();
-  }
-
   void DisableConnectionFlowControlForThisStream() {
     stream_contributes_to_connection_flow_control_ = false;
   }
@@ -181,11 +177,11 @@ class NET_EXPORT_PRIVATE ReliableQuicStream {
   class ProxyAckNotifierDelegate;
 
   struct PendingData {
-    PendingData(string data_in,
+    PendingData(std::string data_in,
                 scoped_refptr<ProxyAckNotifierDelegate> delegate_in);
     ~PendingData();
 
-    string data;
+    std::string data;
     // Delegate that should be notified when the pending data is acked.
     // Can be nullptr.
     scoped_refptr<ProxyAckNotifierDelegate> delegate;

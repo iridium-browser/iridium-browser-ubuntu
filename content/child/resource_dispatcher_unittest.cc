@@ -152,7 +152,7 @@ class TestRequestPeer : public RequestPeer {
 // Sets up the message sender override for the unit test.
 class ResourceDispatcherTest : public testing::Test, public IPC::Sender {
  public:
-  ResourceDispatcherTest() : dispatcher_(this) {}
+  ResourceDispatcherTest() : dispatcher_(this, message_loop_.task_runner()) {}
 
   ~ResourceDispatcherTest() override {
     STLDeleteContainerPairSecondPointers(shared_memory_map_.begin(),
@@ -183,60 +183,60 @@ class ResourceDispatcherTest : public testing::Test, public IPC::Sender {
       ADD_FAILURE() << "Expected ResourceHostMsg_RequestResource message";
       return -1;
     }
-    ResourceHostMsg_Request request = params.c;
+    ResourceHostMsg_Request request = get<2>(params);
     EXPECT_EQ(kTestPageUrl, request.url.spec());
     message_queue_.erase(message_queue_.begin());
-    return params.b;
+    return get<1>(params);
   }
 
   void ConsumeFollowRedirect(int expected_request_id) {
     ASSERT_FALSE(message_queue_.empty());
-    Tuple1<int> args;
+    Tuple<int> args;
     ASSERT_EQ(ResourceHostMsg_FollowRedirect::ID, message_queue_[0].type());
     ASSERT_TRUE(ResourceHostMsg_FollowRedirect::Read(
         &message_queue_[0], &args));
-    EXPECT_EQ(expected_request_id, args.a);
+    EXPECT_EQ(expected_request_id, get<0>(args));
     message_queue_.erase(message_queue_.begin());
   }
 
   void ConsumeDataReceived_ACK(int expected_request_id) {
     ASSERT_FALSE(message_queue_.empty());
-    Tuple1<int> args;
+    Tuple<int> args;
     ASSERT_EQ(ResourceHostMsg_DataReceived_ACK::ID, message_queue_[0].type());
     ASSERT_TRUE(ResourceHostMsg_DataReceived_ACK::Read(
         &message_queue_[0], &args));
-    EXPECT_EQ(expected_request_id, args.a);
+    EXPECT_EQ(expected_request_id, get<0>(args));
     message_queue_.erase(message_queue_.begin());
   }
 
   void ConsumeDataDownloaded_ACK(int expected_request_id) {
     ASSERT_FALSE(message_queue_.empty());
-    Tuple1<int> args;
+    Tuple<int> args;
     ASSERT_EQ(ResourceHostMsg_DataDownloaded_ACK::ID, message_queue_[0].type());
     ASSERT_TRUE(ResourceHostMsg_DataDownloaded_ACK::Read(
         &message_queue_[0], &args));
-    EXPECT_EQ(expected_request_id, args.a);
+    EXPECT_EQ(expected_request_id, get<0>(args));
     message_queue_.erase(message_queue_.begin());
   }
 
   void ConsumeReleaseDownloadedFile(int expected_request_id) {
     ASSERT_FALSE(message_queue_.empty());
-    Tuple1<int> args;
+    Tuple<int> args;
     ASSERT_EQ(ResourceHostMsg_ReleaseDownloadedFile::ID,
               message_queue_[0].type());
     ASSERT_TRUE(ResourceHostMsg_ReleaseDownloadedFile::Read(
         &message_queue_[0], &args));
-    EXPECT_EQ(expected_request_id, args.a);
+    EXPECT_EQ(expected_request_id, get<0>(args));
     message_queue_.erase(message_queue_.begin());
   }
 
   void ConsumeCancelRequest(int expected_request_id) {
     ASSERT_FALSE(message_queue_.empty());
-    Tuple1<int> args;
+    Tuple<int> args;
     ASSERT_EQ(ResourceHostMsg_CancelRequest::ID, message_queue_[0].type());
     ASSERT_TRUE(ResourceHostMsg_CancelRequest::Read(
         &message_queue_[0], &args));
-    EXPECT_EQ(expected_request_id, args.a);
+    EXPECT_EQ(expected_request_id, get<0>(args));
     message_queue_.erase(message_queue_.begin());
   }
 
@@ -322,12 +322,13 @@ class ResourceDispatcherTest : public testing::Test, public IPC::Sender {
     request_info.method = "GET";
     request_info.url = GURL(kTestPageUrl);
     request_info.first_party_for_cookies = GURL(kTestPageUrl);
-    request_info.referrer = GURL();
+    request_info.referrer = Referrer();
     request_info.headers = std::string();
     request_info.load_flags = 0;
     request_info.requestor_pid = 0;
     request_info.request_type = RESOURCE_TYPE_SUB_RESOURCE;
     request_info.appcache_host_id = kAppCacheNoHostId;
+    request_info.should_reset_appcache = false;
     request_info.routing_id = 0;
     request_info.download_to_file = download_to_file;
     RequestExtraData extra_data;
@@ -340,8 +341,8 @@ class ResourceDispatcherTest : public testing::Test, public IPC::Sender {
   std::map<int, base::SharedMemory*> shared_memory_map_;
 
   std::vector<IPC::Message> message_queue_;
-  ResourceDispatcher dispatcher_;
   base::MessageLoop message_loop_;
+  ResourceDispatcher dispatcher_;
 };
 
 // Does a simple request and tests that the correct data is received.  Simulates

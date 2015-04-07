@@ -6,33 +6,51 @@
 #define DOMWindow_h
 
 #include "core/events/EventTarget.h"
+#include "core/frame/DOMWindowBase64.h"
 #include "platform/heap/Handle.h"
+#include "platform/scroll/ScrollableArea.h"
+
+#include "wtf/Forward.h"
 
 namespace blink {
 
 class ApplicationCache;
 class BarProp;
+class CSSRuleList;
+class CSSStyleDeclaration;
 class Console;
+class DOMSelection;
 class DOMWindowCSS;
 class Document;
+class Element;
 class Frame;
 class History;
+class LocalDOMWindow;
 class Location;
+class MediaQueryList;
 class Navigator;
 class Performance;
+class RequestAnimationFrameCallback;
 class Screen;
+class ScrollToOptions;
+class SerializedScriptValue;
 class Storage;
 class StyleMedia;
 
-class DOMWindow : public RefCountedWillBeGarbageCollectedFinalized<DOMWindow>, public EventTargetWithInlineData {
+typedef WillBeHeapVector<RefPtrWillBeMember<MessagePort>, 1> MessagePortArray;
+
+class DOMWindow : public EventTargetWithInlineData, public RefCountedWillBeNoBase<DOMWindow>, public DOMWindowBase64 {
+    DEFINE_WRAPPERTYPEINFO();
     REFCOUNTED_EVENT_TARGET(DOMWindow);
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(DOMWindow);
 public:
     // RefCountedWillBeGarbageCollectedFinalized overrides:
     void trace(Visitor* visitor) override
     {
         EventTargetWithInlineData::trace(visitor);
     }
+
+    virtual bool isLocalDOMWindow() const { return false; }
+    virtual bool isRemoteDOMWindow() const { return false; }
 
     virtual Frame* frame() const = 0;
 
@@ -47,7 +65,8 @@ public:
     virtual BarProp* toolbar() const = 0;
     virtual Navigator* navigator() const = 0;
     Navigator* clientInformation() const { return navigator(); }
-    virtual Location& location() const = 0;
+    // FIXME: Temporary, until window.location is implemented for remote frames.
+    virtual Location* location() const = 0;
 
     virtual bool offscreenBuffering() const = 0;
 
@@ -64,9 +83,11 @@ public:
     double pageXOffset() const { return scrollX(); }
     double pageYOffset() const { return scrollY(); }
 
-    virtual bool closed() const = 0;
+    bool closed() const;
 
-    virtual unsigned length() const = 0;
+    // FIXME: This is not listed as a cross-origin accessible attribute, but in
+    // Blink, it's currently marked as DoNotCheckSecurity.
+    unsigned length() const;
 
     virtual const AtomicString& name() const = 0;
     virtual void setName(const AtomicString&) = 0;
@@ -77,13 +98,13 @@ public:
     virtual void setDefaultStatus(const String&) = 0;
 
     // Self-referential attributes
-    virtual DOMWindow* self() const = 0;
+    DOMWindow* self() const;
     DOMWindow* window() const { return self(); }
     DOMWindow* frames() const { return self(); }
 
-    virtual DOMWindow* opener() const = 0;
-    virtual DOMWindow* parent() const = 0;
-    virtual DOMWindow* top() const = 0;
+    DOMWindow* opener() const;
+    DOMWindow* parent() const;
+    DOMWindow* top() const;
 
     // DOM Level 2 AbstractView Interface
     virtual Document* document() const = 0;
@@ -109,6 +130,78 @@ public:
     virtual Performance* performance() const = 0;
 
     virtual DOMWindowCSS* css() const = 0;
+
+    virtual DOMSelection* getSelection() = 0;
+
+    virtual void focus(ExecutionContext*) = 0;
+    virtual void blur() = 0;
+    virtual void close(ExecutionContext*) = 0;
+    virtual void print() = 0;
+    virtual void stop() = 0;
+
+    virtual void alert(const String& message = String()) = 0;
+    virtual bool confirm(const String& message) = 0;
+    virtual String prompt(const String& message, const String& defaultValue) = 0;
+
+    virtual bool find(const String&, bool caseSensitive, bool backwards, bool wrap, bool wholeWord, bool searchInFrames, bool showDialog) const = 0;
+
+    virtual void scrollBy(double x, double y, ScrollBehavior = ScrollBehaviorAuto) const = 0;
+    virtual void scrollBy(const ScrollToOptions&) const = 0;
+    virtual void scrollTo(double x, double y) const = 0;
+    virtual void scrollTo(const ScrollToOptions&) const = 0;
+    void scroll(double x, double y) const { scrollTo(x, y); }
+    void scroll(const ScrollToOptions& scrollToOptions) const { scrollTo(scrollToOptions); }
+    virtual void moveBy(float x, float y) const = 0;
+    virtual void moveTo(float x, float y) const = 0;
+
+    virtual void resizeBy(float x, float y) const = 0;
+    virtual void resizeTo(float width, float height) const = 0;
+
+    virtual PassRefPtrWillBeRawPtr<MediaQueryList> matchMedia(const String&) = 0;
+
+    // DOM Level 2 Style Interface
+    virtual PassRefPtrWillBeRawPtr<CSSStyleDeclaration> getComputedStyle(Element*, const String& pseudoElt) const = 0;
+
+    // WebKit extensions
+    virtual PassRefPtrWillBeRawPtr<CSSRuleList> getMatchedCSSRules(Element*, const String& pseudoElt) const = 0;
+
+    // WebKit animation extensions
+    virtual int requestAnimationFrame(RequestAnimationFrameCallback*) = 0;
+    virtual int webkitRequestAnimationFrame(RequestAnimationFrameCallback*) = 0;
+    virtual void cancelAnimationFrame(int id) = 0;
+
+    void captureEvents() { }
+    void releaseEvents() { }
+
+    // FIXME: This handles both window[index] and window.frames[index]. However,
+    // the spec exposes window.frames[index] across origins but not
+    // window[index]...
+    DOMWindow* anonymousIndexedGetter(uint32_t) const;
+
+    virtual void postMessage(PassRefPtr<SerializedScriptValue> message, const MessagePortArray*, const String& targetOrigin, LocalDOMWindow* source, ExceptionState&) = 0;
+
+    // FIXME: These should be non-virtual, but this is blocked on the security
+    // origin replication work.
+    virtual String sanitizedCrossDomainAccessErrorMessage(LocalDOMWindow* callingWindow) = 0;
+    virtual String crossDomainAccessErrorMessage(LocalDOMWindow* callingWindow) = 0;
+
+    DEFINE_ATTRIBUTE_EVENT_LISTENER(animationend);
+    DEFINE_ATTRIBUTE_EVENT_LISTENER(animationiteration);
+    DEFINE_ATTRIBUTE_EVENT_LISTENER(animationstart);
+    DEFINE_ATTRIBUTE_EVENT_LISTENER(search);
+    DEFINE_ATTRIBUTE_EVENT_LISTENER(transitionend);
+    DEFINE_ATTRIBUTE_EVENT_LISTENER(wheel);
+
+    DEFINE_MAPPED_ATTRIBUTE_EVENT_LISTENER(webkitanimationstart, webkitAnimationStart);
+    DEFINE_MAPPED_ATTRIBUTE_EVENT_LISTENER(webkitanimationiteration, webkitAnimationIteration);
+    DEFINE_MAPPED_ATTRIBUTE_EVENT_LISTENER(webkitanimationend, webkitAnimationEnd);
+    DEFINE_MAPPED_ATTRIBUTE_EVENT_LISTENER(webkittransitionend, webkitTransitionEnd);
+
+    DEFINE_ATTRIBUTE_EVENT_LISTENER(orientationchange);
+    DEFINE_ATTRIBUTE_EVENT_LISTENER(touchstart);
+    DEFINE_ATTRIBUTE_EVENT_LISTENER(touchmove);
+    DEFINE_ATTRIBUTE_EVENT_LISTENER(touchend);
+    DEFINE_ATTRIBUTE_EVENT_LISTENER(touchcancel);
 };
 
 } // namespace blink

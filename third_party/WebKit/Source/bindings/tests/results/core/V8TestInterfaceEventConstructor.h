@@ -8,6 +8,7 @@
 #define V8TestInterfaceEventConstructor_h
 
 #include "bindings/core/v8/ScriptWrappable.h"
+#include "bindings/core/v8/ToV8.h"
 #include "bindings/core/v8/V8Binding.h"
 #include "bindings/core/v8/V8DOMWrapper.h"
 #include "bindings/core/v8/V8Event.h"
@@ -20,34 +21,30 @@ namespace blink {
 class Dictionary;
 class V8TestInterfaceEventConstructor {
 public:
-    static bool hasInstance(v8::Handle<v8::Value>, v8::Isolate*);
-    static v8::Handle<v8::Object> findInstanceInPrototypeChain(v8::Handle<v8::Value>, v8::Isolate*);
-    static v8::Handle<v8::FunctionTemplate> domTemplate(v8::Isolate*);
-    static TestInterfaceEventConstructor* toImpl(v8::Handle<v8::Object> object)
+    static bool hasInstance(v8::Local<v8::Value>, v8::Isolate*);
+    static v8::Local<v8::Object> findInstanceInPrototypeChain(v8::Local<v8::Value>, v8::Isolate*);
+    static v8::Local<v8::FunctionTemplate> domTemplate(v8::Isolate*);
+    static TestInterfaceEventConstructor* toImpl(v8::Local<v8::Object> object)
     {
-        return blink::toScriptWrappableBase(object)->toImpl<TestInterfaceEventConstructor>();
+        return blink::toScriptWrappable(object)->toImpl<TestInterfaceEventConstructor>();
     }
-    static TestInterfaceEventConstructor* toImplWithTypeCheck(v8::Isolate*, v8::Handle<v8::Value>);
+    static TestInterfaceEventConstructor* toImplWithTypeCheck(v8::Isolate*, v8::Local<v8::Value>);
     static const WrapperTypeInfo wrapperTypeInfo;
-    static void refObject(ScriptWrappableBase*);
-    static void derefObject(ScriptWrappableBase*);
-    static void trace(Visitor* visitor, ScriptWrappableBase* scriptWrappableBase)
+    static void refObject(ScriptWrappable*);
+    static void derefObject(ScriptWrappable*);
+    static void trace(Visitor* visitor, ScriptWrappable* scriptWrappable)
     {
 #if ENABLE(OILPAN)
-        visitor->trace(scriptWrappableBase->toImpl<TestInterfaceEventConstructor>());
+        visitor->trace(scriptWrappable->toImpl<TestInterfaceEventConstructor>());
 #endif
     }
     static void constructorCallback(const v8::FunctionCallbackInfo<v8::Value>&);
     static const int internalFieldCount = v8DefaultWrapperInternalFieldCount + 0;
-    static inline ScriptWrappableBase* toScriptWrappableBase(TestInterfaceEventConstructor* impl)
-    {
-        return impl->toScriptWrappableBase();
-    }
-    static void installConditionallyEnabledProperties(v8::Handle<v8::Object>, v8::Isolate*) { }
-    static void installConditionallyEnabledMethods(v8::Handle<v8::Object>, v8::Isolate*) { }
+    static void installConditionallyEnabledProperties(v8::Local<v8::Object>, v8::Isolate*) { }
+    static void installConditionallyEnabledMethods(v8::Local<v8::Object>, v8::Isolate*) { }
 };
 
-bool initializeTestInterfaceEventConstructor(TestInterfaceEventConstructorInit&, const Dictionary&, ExceptionState&, const v8::FunctionCallbackInfo<v8::Value>& info, const String& = "");
+bool initializeTestInterfaceEventConstructor(TestInterfaceEventConstructorInit&, const Dictionary&, ExceptionState&, const v8::FunctionCallbackInfo<v8::Value>& info);
 
 } // namespace blink
 

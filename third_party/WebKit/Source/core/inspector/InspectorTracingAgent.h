@@ -16,16 +16,19 @@ namespace blink {
 
 class InspectorClient;
 class InspectorWorkerAgent;
+class Page;
 
 class InspectorTracingAgent final
     : public InspectorBaseAgent<InspectorTracingAgent>
     , public InspectorBackendDispatcher::TracingCommandHandler {
     WTF_MAKE_NONCOPYABLE(InspectorTracingAgent);
 public:
-    static PassOwnPtrWillBeRawPtr<InspectorTracingAgent> create(InspectorClient* client, InspectorWorkerAgent* workerAgent)
+    static PassOwnPtrWillBeRawPtr<InspectorTracingAgent> create(InspectorClient* client, InspectorWorkerAgent* workerAgent, Page* page)
     {
-        return adoptPtrWillBeNoop(new InspectorTracingAgent(client, workerAgent));
+        return adoptPtrWillBeNoop(new InspectorTracingAgent(client, workerAgent, page));
     }
+
+    void trace(Visitor*) override;
 
     // Base agent methods.
     virtual void restore() override;
@@ -40,7 +43,7 @@ public:
     void setLayerTreeId(int);
 
 private:
-    InspectorTracingAgent(InspectorClient*, InspectorWorkerAgent*);
+    InspectorTracingAgent(InspectorClient*, InspectorWorkerAgent*, Page*);
 
     void emitMetadataEvents();
     void resetSessionId();
@@ -49,9 +52,10 @@ private:
     int m_layerTreeId;
     InspectorClient* m_client;
     InspectorFrontend::Tracing* m_frontend;
-    InspectorWorkerAgent* m_workerAgent;
+    RawPtrWillBeMember<InspectorWorkerAgent> m_workerAgent;
+    RawPtrWillBeMember<Page> m_page;
 };
 
-}
+} // namespace blink
 
 #endif // InspectorTracingAgent_h

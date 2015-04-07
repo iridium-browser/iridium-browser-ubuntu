@@ -66,6 +66,7 @@ EventGenerator::EventGenerator(gfx::NativeWindow root_window)
       flags_(0),
       grab_(false),
       async_(false),
+      targeting_application_(false),
       tick_clock_(new base::DefaultTickClock()) {
   Init(root_window, NULL);
 }
@@ -77,6 +78,7 @@ EventGenerator::EventGenerator(gfx::NativeWindow root_window,
       flags_(0),
       grab_(false),
       async_(false),
+      targeting_application_(false),
       tick_clock_(new base::DefaultTickClock()) {
   Init(root_window, NULL);
 }
@@ -87,6 +89,7 @@ EventGenerator::EventGenerator(gfx::NativeWindow root_window,
       flags_(0),
       grab_(false),
       async_(false),
+      targeting_application_(false),
       tick_clock_(new base::DefaultTickClock()) {
   Init(root_window, window);
 }
@@ -97,6 +100,7 @@ EventGenerator::EventGenerator(EventGeneratorDelegate* delegate)
       flags_(0),
       grab_(false),
       async_(false),
+      targeting_application_(false),
       tick_clock_(new base::DefaultTickClock()) {
   Init(NULL, NULL);
 }
@@ -123,10 +127,11 @@ void EventGenerator::ClickLeftButton() {
 }
 
 void EventGenerator::DoubleClickLeftButton() {
+  flags_ &= ~ui::EF_IS_DOUBLE_CLICK;
+  ClickLeftButton();
   flags_ |= ui::EF_IS_DOUBLE_CLICK;
-  PressLeftButton();
-  flags_ ^= ui::EF_IS_DOUBLE_CLICK;
-  ReleaseLeftButton();
+  ClickLeftButton();
+  flags_ &= ~ui::EF_IS_DOUBLE_CLICK;
 }
 
 void EventGenerator::PressRightButton() {
@@ -278,6 +283,16 @@ void EventGenerator::GestureTapDownAndUp(const gfx::Point& location) {
       ui::ET_TOUCH_RELEASED, location, kTouchId,
       press.time_stamp() + base::TimeDelta::FromMilliseconds(1000));
   Dispatch(&release);
+}
+
+base::TimeDelta EventGenerator::CalculateScrollDurationForFlingVelocity(
+    const gfx::Point& start,
+    const gfx::Point& end,
+    float velocity,
+    int steps) {
+  const float kGestureDistance = (start - end).Length();
+  const float kFlingStepDelay = (kGestureDistance / velocity) / steps * 1000000;
+  return base::TimeDelta::FromMicroseconds(kFlingStepDelay);
 }
 
 void EventGenerator::GestureScrollSequence(const gfx::Point& start,

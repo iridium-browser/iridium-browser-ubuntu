@@ -1,7 +1,9 @@
 include_rules = [
   "+content",
   "+device/battery",
+  "+device/vibration",
   # For loading V8's initial snapshot from external files.
   "+gin/public/isolate_holder.h",
+  "+gin/public/snapshot_fd_data.h",
   "+media/base",  # For initializing media library.
 ]

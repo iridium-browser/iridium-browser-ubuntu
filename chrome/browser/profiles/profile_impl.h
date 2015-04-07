@@ -76,6 +76,8 @@ class ProfileImpl : public Profile {
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
   // content::BrowserContext implementation:
+  scoped_ptr<content::ZoomLevelDelegate> CreateZoomLevelDelegate(
+      const base::FilePath& partition_path) override;
   base::FilePath GetPath() const override;
   content::DownloadManagerDelegate* GetDownloadManagerDelegate() override;
   net::URLRequestContextGetter* GetRequestContext() override;
@@ -105,6 +107,8 @@ class ProfileImpl : public Profile {
   bool HasOffTheRecordProfile() override;
   Profile* GetOriginalProfile() override;
   bool IsSupervised() override;
+  bool IsChild() override;
+  bool IsLegacySupervised() override;
   history::TopSites* GetTopSites() override;
   history::TopSites* GetTopSitesWithoutCreating() override;
   ExtensionSpecialStoragePolicy* GetExtensionSpecialStoragePolicy() override;
@@ -150,7 +154,6 @@ class ProfileImpl : public Profile {
   friend class chromeos::SupervisedUserTestBase;
 #endif
   friend class Profile;
-  friend class BetterSessionRestoreCrashTest;
   FRIEND_TEST_ALL_PREFIXES(StartupBrowserCreatorTest,
                            ProfilesLaunchedAfterCrash);
   FRIEND_TEST_ALL_PREFIXES(ProfileBrowserTest, DISABLED_ProfileReadmeCreated);
@@ -169,10 +172,6 @@ class ProfileImpl : public Profile {
   // Does final initialization. Should be called after prefs were loaded.
   void DoFinalInit();
 
-  // TODO(wjmaclean): Delete this once the HostZoomMap moves to
-  // StoragePartition.
-  void InitHostZoomMap();
-
   // Does final prefs initialization and calls Init().
   void OnPrefsLoaded(bool success);
 
@@ -188,7 +187,6 @@ class ProfileImpl : public Profile {
   }
 
   // Updates the ProfileInfoCache with data from this profile.
-  void UpdateProfileUserNameCache();
   void UpdateProfileSupervisedUserIdCache();
   void UpdateProfileNameCache();
   void UpdateProfileAvatarCache();
@@ -235,10 +233,6 @@ class ProfileImpl : public Profile {
   scoped_refptr<user_prefs::PrefRegistrySyncable> pref_registry_;
   scoped_ptr<PrefServiceSyncable> prefs_;
   scoped_ptr<PrefServiceSyncable> otr_prefs_;
-  // TODO(wjmaclean): This is only here temporarily until HostZoomMap moves
-  // into StoragePartition, after which it will also move to StoragePartition.
-  // Must declare this here so it is destroyed before the profile prefs service.
-  scoped_ptr<chrome::ChromeZoomLevelPrefs> zoom_level_prefs_;
   ProfileImplIOData::Handle io_data_;
 #if defined(ENABLE_EXTENSIONS)
   scoped_refptr<ExtensionSpecialStoragePolicy>

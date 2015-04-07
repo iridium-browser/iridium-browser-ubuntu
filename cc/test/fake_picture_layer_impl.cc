@@ -10,37 +10,43 @@
 
 namespace cc {
 
-FakePictureLayerImpl::FakePictureLayerImpl(LayerTreeImpl* tree_impl,
-                                           int id,
-                                           scoped_refptr<PicturePileImpl> pile)
-    : PictureLayerImpl(tree_impl, id),
+FakePictureLayerImpl::FakePictureLayerImpl(
+    LayerTreeImpl* tree_impl,
+    int id,
+    scoped_refptr<RasterSource> raster_source,
+    bool is_mask)
+    : PictureLayerImpl(tree_impl, id, is_mask),
       append_quads_count_(0),
       did_become_active_call_count_(0),
       has_valid_tile_priorities_(false),
       use_set_valid_tile_priorities_flag_(false),
       release_resources_count_(0) {
-  pile_ = pile;
-  SetBounds(pile_->tiling_size());
-  SetContentBounds(pile_->tiling_size());
+  SetBounds(raster_source->GetSize());
+  SetContentBounds(raster_source->GetSize());
+  SetRasterSourceOnPending(raster_source, Region());
 }
 
-FakePictureLayerImpl::FakePictureLayerImpl(LayerTreeImpl* tree_impl,
-                                           int id,
-                                           scoped_refptr<PicturePileImpl> pile,
-                                           const gfx::Size& layer_bounds)
-    : PictureLayerImpl(tree_impl, id),
+FakePictureLayerImpl::FakePictureLayerImpl(
+    LayerTreeImpl* tree_impl,
+    int id,
+    scoped_refptr<RasterSource> raster_source,
+    bool is_mask,
+    const gfx::Size& layer_bounds)
+    : PictureLayerImpl(tree_impl, id, is_mask),
       append_quads_count_(0),
       did_become_active_call_count_(0),
       has_valid_tile_priorities_(false),
       use_set_valid_tile_priorities_flag_(false),
       release_resources_count_(0) {
-  pile_ = pile;
   SetBounds(layer_bounds);
   SetContentBounds(layer_bounds);
+  SetRasterSourceOnPending(raster_source, Region());
 }
 
-FakePictureLayerImpl::FakePictureLayerImpl(LayerTreeImpl* tree_impl, int id)
-    : PictureLayerImpl(tree_impl, id),
+FakePictureLayerImpl::FakePictureLayerImpl(LayerTreeImpl* tree_impl,
+                                           int id,
+                                           bool is_mask)
+    : PictureLayerImpl(tree_impl, id, is_mask),
       append_quads_count_(0),
       did_become_active_call_count_(0),
       has_valid_tile_priorities_(false),
@@ -50,7 +56,14 @@ FakePictureLayerImpl::FakePictureLayerImpl(LayerTreeImpl* tree_impl, int id)
 
 scoped_ptr<LayerImpl> FakePictureLayerImpl::CreateLayerImpl(
     LayerTreeImpl* tree_impl) {
-  return make_scoped_ptr(new FakePictureLayerImpl(tree_impl, id()));
+  return make_scoped_ptr(new FakePictureLayerImpl(tree_impl, id(), is_mask_));
+}
+
+void FakePictureLayerImpl::PushPropertiesTo(LayerImpl* layer_impl) {
+  FakePictureLayerImpl* picture_layer_impl =
+      static_cast<FakePictureLayerImpl*>(layer_impl);
+  picture_layer_impl->fixed_tile_size_ = fixed_tile_size_;
+  PictureLayerImpl::PushPropertiesTo(layer_impl);
 }
 
 void FakePictureLayerImpl::AppendQuads(
@@ -97,14 +110,18 @@ PictureLayerTiling* FakePictureLayerImpl::LowResTiling() const {
   return result;
 }
 
-void FakePictureLayerImpl::SetPile(scoped_refptr<PicturePileImpl> pile) {
-  pile_.swap(pile);
-  if (tilings()) {
-    for (size_t i = 0; i < num_tilings(); ++i) {
-      tilings()->tiling_at(i)->UpdateTilesToCurrentPile(Region(),
-                                                        pile_->tiling_size());
-    }
-  }
+void FakePictureLayerImpl::SetRasterSourceOnPending(
+    scoped_refptr<RasterSource> raster_source,
+    const Region& invalidation) {
+  DCHECK(layer_tree_impl()->IsPendingTree());
+  Region invalidation_temp = invalidation;
+  const PictureLayerTilingSet* pending_set = nullptr;
+  UpdateRasterSource(raster_source, &invalidation_temp, pending_set);
+}
+
+void FakePictureLayerImpl::CreateAllTiles() {
+  for (size_t i = 0; i < num_tilings(); ++i)
+    tilings_->tiling_at(i)->CreateAllTilesForTesting();
 }
 
 void FakePictureLayerImpl::SetAllTilesVisible() {
@@ -157,26 +174,9 @@ void FakePictureLayerImpl::SetAllTilesReadyInTiling(
 }
 
 void FakePictureLayerImpl::SetTileReady(Tile* tile) {
-  ManagedTileState& state = tile->managed_state();
-  state.draw_info.SetSolidColorForTesting(true);
+  TileDrawInfo& draw_info = tile->draw_info();
+  draw_info.SetSolidColorForTesting(true);
   DCHECK(tile->IsReadyToDraw());
-}
-
-void FakePictureLayerImpl::CreateDefaultTilingsAndTiles() {
-  layer_tree_impl()->UpdateDrawProperties();
-
-  if (CanHaveTilings()) {
-    DCHECK_EQ(tilings()->num_tilings(),
-              layer_tree_impl()->settings().create_low_res_tiling ? 2u : 1u);
-    DCHECK_EQ(tilings()->tiling_at(0)->resolution(), HIGH_RESOLUTION);
-    HighResTiling()->CreateAllTilesForTesting();
-    if (layer_tree_impl()->settings().create_low_res_tiling) {
-      DCHECK_EQ(tilings()->tiling_at(1)->resolution(), LOW_RESOLUTION);
-      LowResTiling()->CreateAllTilesForTesting();
-    }
-  } else {
-    DCHECK_EQ(tilings()->num_tilings(), 0u);
-  }
 }
 
 void FakePictureLayerImpl::DidBecomeActive() {
@@ -188,6 +188,65 @@ bool FakePictureLayerImpl::HasValidTilePriorities() const {
   return use_set_valid_tile_priorities_flag_
              ? has_valid_tile_priorities_
              : PictureLayerImpl::HasValidTilePriorities();
+}
+
+size_t FakePictureLayerImpl::CountTilesRequired(
+    TileRequirementCheck is_tile_required_callback) const {
+  if (!HasValidTilePriorities())
+    return 0;
+
+  if (!tilings_)
+    return 0;
+
+  if (visible_rect_for_tile_priority_.IsEmpty())
+    return 0;
+
+  gfx::Rect rect = viewport_rect_for_tile_priority_in_content_space_;
+  rect.Intersect(visible_rect_for_tile_priority_);
+
+  size_t count = 0;
+
+  for (size_t i = 0; i < tilings_->num_tilings(); ++i) {
+    PictureLayerTiling* tiling = tilings_->tiling_at(i);
+    if (tiling->resolution() != HIGH_RESOLUTION &&
+        tiling->resolution() != LOW_RESOLUTION)
+      continue;
+
+    for (PictureLayerTiling::CoverageIterator iter(tiling, 1.f, rect); iter;
+         ++iter) {
+      const Tile* tile = *iter;
+      // A null tile (i.e. missing recording) can just be skipped.
+      // TODO(vmpstr): Verify this is true if we create tiles in raster
+      // iterators.
+      if (!tile)
+        continue;
+
+      // We can't check tile->required_for_activation, because that value might
+      // be out of date. It is updated in the raster/eviction iterators.
+      // TODO(vmpstr): Remove the comment once you can't access this information
+      // from the tile.
+      if ((tiling->*is_tile_required_callback)(tile))
+        ++count;
+    }
+  }
+
+  return count;
+}
+
+size_t FakePictureLayerImpl::CountTilesRequiredForActivation() const {
+  if (!layer_tree_impl()->IsPendingTree())
+    return 0;
+
+  return CountTilesRequired(
+      &PictureLayerTiling::IsTileRequiredForActivationIfVisible);
+}
+
+size_t FakePictureLayerImpl::CountTilesRequiredForDraw() const {
+  if (!layer_tree_impl()->IsActiveTree())
+    return 0;
+
+  return CountTilesRequired(
+      &PictureLayerTiling::IsTileRequiredForDrawIfVisible);
 }
 
 void FakePictureLayerImpl::ReleaseResources() {

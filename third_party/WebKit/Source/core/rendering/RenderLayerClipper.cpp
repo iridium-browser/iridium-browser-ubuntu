@@ -73,7 +73,7 @@ static void applyClipRects(const ClipRectsContext& context, RenderObject& render
     RenderView* view = renderer.view();
     ASSERT(view);
     if (clipRects.fixed() && context.rootLayer->renderer() == view)
-        offset -= view->frameView()->scrollOffsetForFixedPosition();
+        offset -= view->frameView()->scrollOffsetForViewportConstrainedObjects();
 
     if (renderer.hasOverflowClip()) {
         ClipRect newOverflowClip = toRenderBox(renderer).overflowClipRect(offset, context.scrollbarRelevancy);
@@ -113,8 +113,8 @@ ClipRects* RenderLayerClipper::clipRectsIfCached(const ClipRectsContext& context
     // This code is useful to check cached clip rects, but is too expensive to leave enabled in debug builds by default.
     ClipRectsContext tempContext(context);
     tempContext.cacheSlot = UncachedClipRects;
-    ClipRects clipRects;
-    calculateClipRects(tempContext, clipRects);
+    RefPtr<ClipRects> clipRects = ClipRects::create();
+    calculateClipRects(tempContext, *clipRects);
     ASSERT(clipRects == *entry.clipRects);
 #endif
 
@@ -153,9 +153,9 @@ ClipRects* RenderLayerClipper::getClipRects(const ClipRectsContext& context) con
     if (context.rootLayer != m_renderer.layer() && m_renderer.layer()->parent())
         parentClipRects = m_renderer.layer()->parent()->clipper().getClipRects(context);
 
-    ClipRects clipRects;
-    calculateClipRects(context, clipRects);
-    return storeClipRectsInCache(context, parentClipRects, clipRects);
+    RefPtr<ClipRects> clipRects = ClipRects::create();
+    calculateClipRects(context, *clipRects);
+    return storeClipRectsInCache(context, parentClipRects, *clipRects);
 }
 
 void RenderLayerClipper::clearClipRectsIncludingDescendants()
@@ -195,10 +195,10 @@ LayoutRect RenderLayerClipper::localClipRect() const
     LayoutRect layerBounds;
     ClipRect backgroundRect, foregroundRect, outlineRect;
     ClipRectsContext context(clippingRootLayer, PaintingClipRects);
-    calculateRects(context, PaintInfo::infiniteRect(), layerBounds, backgroundRect, foregroundRect, outlineRect);
+    calculateRects(context, LayoutRect::infiniteIntRect(), layerBounds, backgroundRect, foregroundRect, outlineRect);
 
     LayoutRect clipRect = backgroundRect.rect();
-    if (clipRect == PaintInfo::infiniteRect())
+    if (clipRect == LayoutRect::infiniteIntRect())
         return clipRect;
 
     LayoutPoint clippingRootOffset;
@@ -229,7 +229,7 @@ void RenderLayerClipper::calculateRects(const ClipRectsContext& context, const L
         offset = *offsetFromRoot;
     else
         m_renderer.layer()->convertToLayerCoords(context.rootLayer, offset);
-    layerBounds = LayoutRect(offset, m_renderer.layer()->size());
+    layerBounds = LayoutRect(offset, LayoutSize(m_renderer.layer()->size()));
 
     // Update the clip rects that will be passed to child layers.
     if (m_renderer.hasOverflowClip()) {
@@ -276,7 +276,7 @@ void RenderLayerClipper::calculateClipRects(const ClipRectsContext& context, Cli
     bool rootLayerScrolls = m_renderer.document().settings() && m_renderer.document().settings()->rootLayerScrolls();
     if (!m_renderer.layer()->parent() && !rootLayerScrolls) {
         // The root layer's clip rect is always infinite.
-        clipRects.reset(PaintInfo::infiniteRect());
+        clipRects.reset(LayoutRect::infiniteIntRect());
         return;
     }
 
@@ -295,12 +295,11 @@ void RenderLayerClipper::calculateClipRects(const ClipRectsContext& context, Cli
             parentLayer->clipper().calculateClipRects(context, clipRects);
         }
     } else {
-        clipRects.reset(PaintInfo::infiniteRect());
+        clipRects.reset(LayoutRect::infiniteIntRect());
     }
 
     adjustClipRectsForChildren(m_renderer, clipRects);
 
-    // FIXME: This logic looks wrong. We'll apply overflow clip rects even if we were told to IgnoreOverflowClip if m_renderer.hasClip().
     if ((m_renderer.hasOverflowClip() && (context.respectOverflowClip == RespectOverflowClip || !isClippingRoot)) || m_renderer.hasClip()) {
         // This offset cannot use convertToLayerCoords, because sometimes our rootLayer may be across
         // some transformed layer boundary, for example, in the RenderLayerCompositor overlapMap, where
@@ -325,17 +324,17 @@ ClipRect RenderLayerClipper::backgroundClipRect(const ClipRectsContext& context)
     ASSERT(m_renderer.layer()->parent());
     ASSERT(m_renderer.view());
 
-    ClipRects parentClipRects;
+    RefPtr<ClipRects> parentClipRects = ClipRects::create();
     if (m_renderer.layer() == context.rootLayer)
-        parentClipRects.reset(PaintInfo::infiniteRect());
+        parentClipRects->reset(LayoutRect::infiniteIntRect());
     else
-        m_renderer.layer()->parent()->clipper().getOrCalculateClipRects(context, parentClipRects);
+        m_renderer.layer()->parent()->clipper().getOrCalculateClipRects(context, *parentClipRects);
 
-    ClipRect result = backgroundClipRectForPosition(parentClipRects, m_renderer.style()->position());
+    ClipRect result = backgroundClipRectForPosition(*parentClipRects, m_renderer.style()->position());
 
     // Note: infinite clipRects should not be scrolled here, otherwise they will accidentally no longer be considered infinite.
-    if (parentClipRects.fixed() && context.rootLayer->renderer() == m_renderer.view() && result != PaintInfo::infiniteRect())
-        result.move(m_renderer.view()->frameView()->scrollOffsetForFixedPosition());
+    if (parentClipRects->fixed() && context.rootLayer->renderer() == m_renderer.view() && result != LayoutRect::infiniteIntRect())
+        result.move(m_renderer.view()->frameView()->scrollOffsetForViewportConstrainedObjects());
 
     return result;
 }

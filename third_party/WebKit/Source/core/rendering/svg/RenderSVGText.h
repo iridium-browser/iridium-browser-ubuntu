@@ -62,15 +62,13 @@ private:
     virtual const char* renderName() const override { return "RenderSVGText"; }
     virtual bool isOfType(RenderObjectType type) const override { return type == RenderObjectSVGText || RenderSVGBlock::isOfType(type); }
 
-    virtual void paint(PaintInfo&, const LayoutPoint&) override;
+    virtual void paint(const PaintInfo&, const LayoutPoint&) override;
     virtual bool nodeAtFloatPoint(const HitTestRequest&, HitTestResult&, const FloatPoint& pointInParent, HitTestAction) override;
     virtual PositionWithAffinity positionForPoint(const LayoutPoint&) override;
 
     virtual void layout() override;
 
     virtual void absoluteQuads(Vector<FloatQuad>&, bool* wasFixed) const override;
-
-    virtual void mapRectToPaintInvalidationBacking(const RenderLayerModelObject* paintInvalidationContainer, LayoutRect&, const PaintInvalidationState*) const override;
 
     virtual void addChild(RenderObject* child, RenderObject* beforeChild = 0) override;
     virtual void removeChild(RenderObject*) override;

@@ -27,11 +27,15 @@
 #define WebGLRenderingContextBase_h
 
 #include "bindings/core/v8/Nullable.h"
+#include "bindings/core/v8/ScriptState.h"
+#include "bindings/core/v8/ScriptValue.h"
+#include "bindings/core/v8/ScriptWrappable.h"
 #include "core/dom/ActiveDOMObject.h"
 #include "core/dom/DOMTypedArray.h"
 #include "core/html/canvas/CanvasRenderingContext.h"
+#include "core/html/canvas/WebGLContextAttributes.h"
 #include "core/html/canvas/WebGLExtensionName.h"
-#include "core/html/canvas/WebGLGetInfo.h"
+#include "core/html/canvas/WebGLVertexArrayObjectOES.h"
 #include "core/page/Page.h"
 #include "core/rendering/RenderBoxModelObject.h"
 #include "platform/Timer.h"
@@ -51,6 +55,8 @@ class WebLayer;
 namespace blink {
 
 class ANGLEInstancedArrays;
+class CHROMIUMSubscribeUniform;
+class CHROMIUMValuebuffer;
 class EXTBlendMinMax;
 class EXTFragDepth;
 class EXTShaderTextureLOD;
@@ -75,7 +81,6 @@ class WebGLCompressedTextureATC;
 class WebGLCompressedTextureETC1;
 class WebGLCompressedTexturePVRTC;
 class WebGLCompressedTextureS3TC;
-class WebGLContextAttributes;
 class WebGLContextGroup;
 class WebGLContextObject;
 class WebGLDebugRendererInfo;
@@ -99,7 +104,7 @@ class WebGLVertexArrayObjectOES;
 class WebGLRenderingContextLostCallback;
 class WebGLRenderingContextErrorMessageCallback;
 
-class WebGLRenderingContextBase: public CanvasRenderingContext, public ActiveDOMObject, public Page::MultisamplingChangedObserver {
+class WebGLRenderingContextBase: public CanvasRenderingContext, public ActiveDOMObject, public Page::MultisamplingChangedObserver, public ScriptWrappable {
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(WebGLRenderingContextBase);
 public:
     virtual ~WebGLRenderingContextBase();
@@ -188,24 +193,24 @@ public:
     bool getAttachedShaders(WebGLProgram*, WillBeHeapVector<RefPtrWillBeMember<WebGLShader>>&);
     Nullable<WillBeHeapVector<RefPtrWillBeMember<WebGLShader>>> getAttachedShaders(WebGLProgram*);
     GLint getAttribLocation(WebGLProgram*, const String& name);
-    WebGLGetInfo getBufferParameter(GLenum target, GLenum pname);
-    PassRefPtrWillBeRawPtr<WebGLContextAttributes> getContextAttributes();
+    ScriptValue getBufferParameter(ScriptState*, GLenum target, GLenum pname);
+    void getContextAttributes(Nullable<WebGLContextAttributes>&);
     GLenum getError();
     PassRefPtrWillBeRawPtr<WebGLExtension> getExtension(const String& name);
-    WebGLGetInfo getFramebufferAttachmentParameter(GLenum target, GLenum attachment, GLenum pname);
-    WebGLGetInfo getParameter(GLenum pname);
-    WebGLGetInfo getProgramParameter(WebGLProgram*, GLenum pname);
+    ScriptValue getFramebufferAttachmentParameter(ScriptState*, GLenum target, GLenum attachment, GLenum pname);
+    ScriptValue getParameter(ScriptState*, GLenum pname);
+    ScriptValue getProgramParameter(ScriptState*, WebGLProgram*, GLenum pname);
     String getProgramInfoLog(WebGLProgram*);
-    WebGLGetInfo getRenderbufferParameter(GLenum target, GLenum pname);
-    WebGLGetInfo getShaderParameter(WebGLShader*, GLenum pname);
+    ScriptValue getRenderbufferParameter(ScriptState*, GLenum target, GLenum pname);
+    ScriptValue getShaderParameter(ScriptState*, WebGLShader*, GLenum pname);
     String getShaderInfoLog(WebGLShader*);
     PassRefPtrWillBeRawPtr<WebGLShaderPrecisionFormat> getShaderPrecisionFormat(GLenum shaderType, GLenum precisionType);
     String getShaderSource(WebGLShader*);
     Nullable<Vector<String>> getSupportedExtensions();
-    WebGLGetInfo getTexParameter(GLenum target, GLenum pname);
-    WebGLGetInfo getUniform(WebGLProgram*, const WebGLUniformLocation*);
+    ScriptValue getTexParameter(ScriptState*, GLenum target, GLenum pname);
+    ScriptValue getUniform(ScriptState*, WebGLProgram*, const WebGLUniformLocation*);
     PassRefPtrWillBeRawPtr<WebGLUniformLocation> getUniformLocation(WebGLProgram*, const String&);
-    WebGLGetInfo getVertexAttrib(GLuint index, GLenum pname);
+    ScriptValue getVertexAttrib(ScriptState*, GLuint index, GLenum pname);
     long long getVertexAttribOffset(GLuint index, GLenum pname);
 
     void hint(GLenum target, GLenum mode);
@@ -263,50 +268,50 @@ public:
 
     void uniform1f(const WebGLUniformLocation*, GLfloat x);
     void uniform1fv(const WebGLUniformLocation*, DOMFloat32Array* v);
-    void uniform1fv(const WebGLUniformLocation*, GLfloat* v, GLsizei);
+    void uniform1fv(const WebGLUniformLocation*, Vector<GLfloat>&);
     void uniform1i(const WebGLUniformLocation*, GLint x);
     void uniform1iv(const WebGLUniformLocation*, DOMInt32Array* v);
-    void uniform1iv(const WebGLUniformLocation*, GLint* v, GLsizei);
+    void uniform1iv(const WebGLUniformLocation*, Vector<GLint>&);
     void uniform2f(const WebGLUniformLocation*, GLfloat x, GLfloat y);
     void uniform2fv(const WebGLUniformLocation*, DOMFloat32Array* v);
-    void uniform2fv(const WebGLUniformLocation*, GLfloat* v, GLsizei);
+    void uniform2fv(const WebGLUniformLocation*, Vector<GLfloat>&);
     void uniform2i(const WebGLUniformLocation*, GLint x, GLint y);
     void uniform2iv(const WebGLUniformLocation*, DOMInt32Array* v);
-    void uniform2iv(const WebGLUniformLocation*, GLint* v, GLsizei);
+    void uniform2iv(const WebGLUniformLocation*, Vector<GLint>&);
     void uniform3f(const WebGLUniformLocation*, GLfloat x, GLfloat y, GLfloat z);
     void uniform3fv(const WebGLUniformLocation*, DOMFloat32Array* v);
-    void uniform3fv(const WebGLUniformLocation*, GLfloat* v, GLsizei);
+    void uniform3fv(const WebGLUniformLocation*, Vector<GLfloat>&);
     void uniform3i(const WebGLUniformLocation*, GLint x, GLint y, GLint z);
     void uniform3iv(const WebGLUniformLocation*, DOMInt32Array* v);
-    void uniform3iv(const WebGLUniformLocation*, GLint* v, GLsizei);
+    void uniform3iv(const WebGLUniformLocation*, Vector<GLint>&);
     void uniform4f(const WebGLUniformLocation*, GLfloat x, GLfloat y, GLfloat z, GLfloat w);
     void uniform4fv(const WebGLUniformLocation*, DOMFloat32Array* v);
-    void uniform4fv(const WebGLUniformLocation*, GLfloat* v, GLsizei);
+    void uniform4fv(const WebGLUniformLocation*, Vector<GLfloat>&);
     void uniform4i(const WebGLUniformLocation*, GLint x, GLint y, GLint z, GLint w);
     void uniform4iv(const WebGLUniformLocation*, DOMInt32Array* v);
-    void uniform4iv(const WebGLUniformLocation*, GLint* v, GLsizei);
+    void uniform4iv(const WebGLUniformLocation*, Vector<GLint>&);
     void uniformMatrix2fv(const WebGLUniformLocation*, GLboolean transpose, DOMFloat32Array* value);
-    void uniformMatrix2fv(const WebGLUniformLocation*, GLboolean transpose, GLfloat* value, GLsizei);
+    void uniformMatrix2fv(const WebGLUniformLocation*, GLboolean transpose, Vector<GLfloat>& value);
     void uniformMatrix3fv(const WebGLUniformLocation*, GLboolean transpose, DOMFloat32Array* value);
-    void uniformMatrix3fv(const WebGLUniformLocation*, GLboolean transpose, GLfloat* value, GLsizei);
+    void uniformMatrix3fv(const WebGLUniformLocation*, GLboolean transpose, Vector<GLfloat>& value);
     void uniformMatrix4fv(const WebGLUniformLocation*, GLboolean transpose, DOMFloat32Array* value);
-    void uniformMatrix4fv(const WebGLUniformLocation*, GLboolean transpose, GLfloat* value, GLsizei);
+    void uniformMatrix4fv(const WebGLUniformLocation*, GLboolean transpose, Vector<GLfloat>& value);
 
     void useProgram(WebGLProgram*);
     void validateProgram(WebGLProgram*);
 
     void vertexAttrib1f(GLuint index, GLfloat x);
     void vertexAttrib1fv(GLuint index, DOMFloat32Array* values);
-    void vertexAttrib1fv(GLuint index, GLfloat* values, GLsizei);
+    void vertexAttrib1fv(GLuint index, Vector<GLfloat>& values);
     void vertexAttrib2f(GLuint index, GLfloat x, GLfloat y);
     void vertexAttrib2fv(GLuint index, DOMFloat32Array* values);
-    void vertexAttrib2fv(GLuint index, GLfloat* values, GLsizei);
+    void vertexAttrib2fv(GLuint index, Vector<GLfloat>& values);
     void vertexAttrib3f(GLuint index, GLfloat x, GLfloat y, GLfloat z);
     void vertexAttrib3fv(GLuint index, DOMFloat32Array* values);
-    void vertexAttrib3fv(GLuint index, GLfloat* values, GLsizei);
+    void vertexAttrib3fv(GLuint index, Vector<GLfloat>& values);
     void vertexAttrib4f(GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat w);
     void vertexAttrib4fv(GLuint index, DOMFloat32Array* values);
-    void vertexAttrib4fv(GLuint index, GLfloat* values, GLsizei);
+    void vertexAttrib4fv(GLuint index, Vector<GLfloat>& values);
     void vertexAttribPointer(GLuint index, GLint size, GLenum type, GLboolean normalized,
         GLsizei stride, long long offset);
 
@@ -348,7 +353,7 @@ public:
     void reshape(int width, int height);
 
     void markLayerComposited();
-    PassRefPtrWillBeRawPtr<ImageData> paintRenderingResultsToImageData();
+    PassRefPtrWillBeRawPtr<ImageData> paintRenderingResultsToImageData(SourceDrawingBuffer);
 
     void removeSharedObject(WebGLSharedObject*);
     void removeContextObject(WebGLContextObject*);
@@ -359,7 +364,19 @@ public:
     virtual bool hasPendingActivity() const override;
     virtual void stop() override;
 
+    // GL_CHROMIUM_subscribe_uniform
+    PassRefPtrWillBeRawPtr<CHROMIUMValuebuffer> createValuebufferCHROMIUM();
+    void deleteValuebufferCHROMIUM(CHROMIUMValuebuffer*);
+    GLboolean isValuebufferCHROMIUM(CHROMIUMValuebuffer*);
+    void bindValuebufferCHROMIUM(GLenum target, CHROMIUMValuebuffer*);
+    void subscribeValueCHROMIUM(GLenum target, GLenum subscription);
+    void populateSubscribedValuesCHROMIUM(GLenum target);
+    void uniformValuebufferCHROMIUM(const WebGLUniformLocation*, GLenum target, GLenum subscription);
+
     virtual void trace(Visitor*) override;
+
+    // Returns approximate gpu memory allocated per pixel.
+    int externallyAllocatedBytesPerPixel();
 
     class TextureUnitState {
         ALLOW_ONLY_INLINE_ALLOCATION();
@@ -369,6 +386,8 @@ public:
 
         void trace(Visitor*);
     };
+
+    void setFilterLevel(SkPaint::FilterLevel);
 
 protected:
     friend class WebGLDrawBuffers;
@@ -384,8 +403,9 @@ protected:
     friend class WebGLRenderingContextErrorMessageCallback;
     friend class WebGLVertexArrayObjectOES;
     friend class ScopedTexture2DRestorer;
+    friend class ScopedFramebufferRestorer;
 
-    WebGLRenderingContextBase(HTMLCanvasElement*, PassOwnPtr<blink::WebGraphicsContext3D>, WebGLContextAttributes*);
+    WebGLRenderingContextBase(HTMLCanvasElement*, PassOwnPtr<blink::WebGraphicsContext3D>, const WebGLContextAttributes&);
     PassRefPtr<DrawingBuffer> createDrawingBuffer(PassOwnPtr<blink::WebGraphicsContext3D>);
     void initializeNewContext();
     void setupFlags();
@@ -398,7 +418,7 @@ protected:
     virtual bool is3d() const override { return true; }
     virtual bool isAccelerated() const override { return true; }
     virtual void setIsHidden(bool) override;
-    virtual void paintRenderingResultsToCanvas(SourceBuffer) override;
+    bool paintRenderingResultsToCanvas(SourceDrawingBuffer) override;
     virtual blink::WebLayer* platformLayer() const override;
 
     void addSharedObject(WebGLSharedObject*);
@@ -501,6 +521,7 @@ protected:
     RefPtrWillBeMember<WebGLProgram> m_currentProgram;
     RefPtrWillBeMember<WebGLFramebuffer> m_framebufferBinding;
     RefPtrWillBeMember<WebGLRenderbuffer> m_renderbufferBinding;
+    RefPtrWillBeMember<CHROMIUMValuebuffer> m_valuebufferBinding;
 
     WillBeHeapVector<TextureUnitState> m_textureUnits;
     unsigned long m_activeTextureUnit;
@@ -541,9 +562,8 @@ protected:
     bool m_unpackFlipY;
     bool m_unpackPremultiplyAlpha;
     GLenum m_unpackColorspaceConversion;
-    RefPtrWillBeMember<WebGLContextAttributes> m_requestedAttributes;
+    WebGLContextAttributes m_requestedAttributes;
 
-    bool m_layerCleared;
     GLfloat m_clearColor[4];
     bool m_scissorEnabled;
     GLfloat m_clearDepth;
@@ -695,18 +715,27 @@ protected:
     Vector<GLenum> m_lostContextErrors;
 
     // Helpers for getParameter and others
-    WebGLGetInfo getBooleanParameter(GLenum);
-    WebGLGetInfo getBooleanArrayParameter(GLenum);
-    WebGLGetInfo getFloatParameter(GLenum);
-    WebGLGetInfo getIntParameter(GLenum);
-    WebGLGetInfo getUnsignedIntParameter(GLenum);
-    WebGLGetInfo getWebGLFloatArrayParameter(GLenum);
-    WebGLGetInfo getWebGLIntArrayParameter(GLenum);
+    ScriptValue getBooleanParameter(ScriptState*, GLenum);
+    ScriptValue getBooleanArrayParameter(ScriptState*, GLenum);
+    ScriptValue getFloatParameter(ScriptState*, GLenum);
+    ScriptValue getIntParameter(ScriptState*, GLenum);
+    ScriptValue getUnsignedIntParameter(ScriptState*, GLenum);
+    ScriptValue getWebGLFloatArrayParameter(ScriptState*, GLenum);
+    ScriptValue getWebGLIntArrayParameter(ScriptState*, GLenum);
 
     // Clear the backbuffer if it was composited since the last operation.
     // clearMask is set to the bitfield of any clear that would happen anyway at this time
-    // and the function returns true if that clear is now unnecessary.
-    bool clearIfComposited(GLbitfield clearMask = 0);
+    // and the function returns |CombinedClear| if that clear is now unnecessary.
+    enum HowToClear {
+        // Skip clearing the backbuffer.
+        Skipped,
+        // Clear the backbuffer.
+        JustClear,
+        // Combine webgl.clear() API with the backbuffer clear, so webgl.clear()
+        // doesn't have to call glClear() again.
+        CombinedClear
+    };
+    HowToClear clearIfComposited(GLbitfield clearMask = 0);
 
     // Helper to restore state that clearing the framebuffer may destroy.
     void restoreStateAfterClear();
@@ -718,6 +747,14 @@ protected:
     void texImage2DImpl(GLenum target, GLint level, GLenum internalformat, GLenum format, GLenum type, Image*, WebGLImageConversion::ImageHtmlDomSource, bool flipY, bool premultiplyAlpha, ExceptionState&);
     void texSubImage2DBase(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width, GLsizei height, GLenum format, GLenum type, const void* pixels, ExceptionState&);
     void texSubImage2DImpl(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLenum format, GLenum type, Image*, WebGLImageConversion::ImageHtmlDomSource, bool flipY, bool premultiplyAlpha, ExceptionState&);
+
+    enum TexImageFunctionType {
+        NotTexSubImage2D,
+        TexSubImage2D,
+    };
+    // Copy from the canvas element directly to the texture via the GPU, without a read-back to system memory.
+    void texImage2DCanvasByGPU(TexImageFunctionType, WebGLTexture*, GLenum target, GLint level,
+        GLenum internalformat, GLenum type, GLint xoffset, GLint yoffset, HTMLCanvasElement*);
 
     void handleTextureCompleteness(const char*, bool);
     void createFallbackBlackTextures1x1();
@@ -758,11 +795,6 @@ protected:
     // Generates GL error and returns false if not.
     bool validateValueFitNonNegInt32(const char* functionName, const char* paramName, long long value);
 
-    enum TexFuncValidationFunctionType {
-        NotTexSubImage2D,
-        TexSubImage2D,
-    };
-
     enum TexFuncValidationSourceType {
         SourceArrayBufferView,
         SourceImageData,
@@ -773,16 +805,16 @@ protected:
 
     // Helper function for tex{Sub}Image2D to check if the input format/type/level/target/width/height/border/xoffset/yoffset are valid.
     // Otherwise, it would return quickly without doing other work.
-    bool validateTexFunc(const char* functionName, TexFuncValidationFunctionType, TexFuncValidationSourceType, GLenum target, GLint level, GLenum internalformat, GLsizei width,
+    bool validateTexFunc(const char* functionName, TexImageFunctionType, TexFuncValidationSourceType, GLenum target, GLint level, GLenum internalformat, GLsizei width,
         GLsizei height, GLint border, GLenum format, GLenum type, GLint xoffset, GLint yoffset);
 
     // Helper function to check input width and height for functions {copy, compressed}Tex{Sub}Image.
     // Generates GL error and returns false if width or height is invalid.
-    bool validateTexFuncDimensions(const char* functionName, TexFuncValidationFunctionType, GLenum target, GLint level, GLsizei width, GLsizei height);
+    bool validateTexFuncDimensions(const char* functionName, TexImageFunctionType, GLenum target, GLint level, GLsizei width, GLsizei height);
 
     // Helper function to check input parameters for functions {copy}Tex{Sub}Image.
     // Generates GL error and returns false if parameters are invalid.
-    bool validateTexFuncParameters(const char* functionName, TexFuncValidationFunctionType, GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type);
+    bool validateTexFuncParameters(const char* functionName, TexImageFunctionType, GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type);
 
     enum NullDisposition {
         NullAllowed,
@@ -809,7 +841,7 @@ protected:
 
     // Helper function to validate compressed texture dimensions are valid for
     // the given format.
-    bool validateCompressedTexDimensions(const char* functionName, TexFuncValidationFunctionType, GLenum target, GLint level, GLsizei width, GLsizei height, GLenum format);
+    bool validateCompressedTexDimensions(const char* functionName, TexImageFunctionType, GLenum target, GLint level, GLsizei width, GLsizei height, GLenum format);
 
     // Helper function to validate compressed texture dimensions are valid for
     // the given format.

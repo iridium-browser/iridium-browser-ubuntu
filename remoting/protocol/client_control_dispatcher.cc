@@ -38,8 +38,8 @@ bool CursorShapeIsValid(const CursorShapeInfo& cursor_shape) {
 
   // Verify that |width| and |height| are within sane limits. Otherwise integer
   // overflow can occur while calculating |cursor_total_bytes| below.
-  if (width <= 0 || width > (SHRT_MAX / 2) ||
-      height <= 0 || height > (SHRT_MAX / 2)) {
+  if (width < 0 || width > (SHRT_MAX / 2) ||
+      height < 0 || height > (SHRT_MAX / 2)) {
     LOG(ERROR) << "Cursor dimensions are out of bounds for SetCursor: "
                << width << "x" << height;
     return false;
@@ -60,8 +60,8 @@ bool CursorShapeIsValid(const CursorShapeInfo& cursor_shape) {
 
 ClientControlDispatcher::ClientControlDispatcher()
     : ChannelDispatcherBase(kControlChannelName),
-      client_stub_(NULL),
-      clipboard_stub_(NULL) {
+      client_stub_(nullptr),
+      clipboard_stub_(nullptr) {
 }
 
 ClientControlDispatcher::~ClientControlDispatcher() {

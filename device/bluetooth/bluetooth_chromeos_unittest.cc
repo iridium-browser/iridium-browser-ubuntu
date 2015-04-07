@@ -143,6 +143,13 @@ class TestObserver : public BluetoothAdapter::Observer {
   scoped_refptr<BluetoothAdapter> adapter_;
 };
 
+// Callback for BluetoothDevice::GetConnectionInfo() that simply saves the
+// connection info to the bound argument.
+void SaveConnectionInfo(BluetoothDevice::ConnectionInfo* out,
+                        const BluetoothDevice::ConnectionInfo& conn_info) {
+  *out = conn_info;
+};
+
 }  // namespace
 
 class TestPairingDelegate : public BluetoothDevice::PairingDelegate {
@@ -575,6 +582,37 @@ TEST_F(BluetoothChromeOSTest, BecomeNotPowered) {
   EXPECT_FALSE(adapter_->IsPowered());
 }
 
+TEST_F(BluetoothChromeOSTest, SetPoweredWhenNotPresent) {
+  GetAdapter();
+  ASSERT_TRUE(adapter_->IsPresent());
+
+  // Install an observer; expect the AdapterPresentChanged to be called
+  // with false, and IsPresent() to return false.
+  TestObserver observer(adapter_);
+
+  fake_bluetooth_adapter_client_->SetVisible(false);
+
+  EXPECT_EQ(1, observer.present_changed_count_);
+  EXPECT_FALSE(observer.last_present_);
+
+  EXPECT_FALSE(adapter_->IsPresent());
+  EXPECT_FALSE(adapter_->IsPowered());
+
+  adapter_->SetPowered(
+      true,
+      base::Bind(&BluetoothChromeOSTest::Callback,
+                 base::Unretained(this)),
+      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
+                 base::Unretained(this)));
+  EXPECT_EQ(0, callback_count_);
+  EXPECT_EQ(1, error_callback_count_);
+
+  EXPECT_EQ(0, observer.powered_changed_count_);
+  EXPECT_FALSE(observer.last_powered_);
+
+  EXPECT_FALSE(adapter_->IsPowered());
+}
+
 TEST_F(BluetoothChromeOSTest, ChangeAdapterName) {
   GetAdapter();
 
@@ -590,6 +628,34 @@ TEST_F(BluetoothChromeOSTest, ChangeAdapterName) {
   EXPECT_EQ(0, error_callback_count_);
 
   EXPECT_EQ(new_name, adapter_->GetName());
+}
+
+TEST_F(BluetoothChromeOSTest, ChangeAdapterNameWhenNotPresent) {
+  GetAdapter();
+  ASSERT_TRUE(adapter_->IsPresent());
+
+  // Install an observer; expect the AdapterPresentChanged to be called
+  // with false, and IsPresent() to return false.
+  TestObserver observer(adapter_);
+
+  fake_bluetooth_adapter_client_->SetVisible(false);
+
+  EXPECT_EQ(1, observer.present_changed_count_);
+  EXPECT_FALSE(observer.last_present_);
+
+  EXPECT_FALSE(adapter_->IsPresent());
+  EXPECT_FALSE(adapter_->IsPowered());
+
+  adapter_->SetName(
+      "^o^",
+      base::Bind(&BluetoothChromeOSTest::Callback,
+                 base::Unretained(this)),
+      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
+                 base::Unretained(this)));
+  EXPECT_EQ(0, callback_count_);
+  EXPECT_EQ(1, error_callback_count_);
+
+  EXPECT_EQ("", adapter_->GetName());
 }
 
 TEST_F(BluetoothChromeOSTest, BecomeDiscoverable) {
@@ -642,6 +708,37 @@ TEST_F(BluetoothChromeOSTest, BecomeNotDiscoverable) {
   EXPECT_EQ(0, error_callback_count_);
 
   EXPECT_EQ(1, observer.discoverable_changed_count_);
+
+  EXPECT_FALSE(adapter_->IsDiscoverable());
+}
+
+TEST_F(BluetoothChromeOSTest, SetDiscoverableWhenNotPresent) {
+  GetAdapter();
+  ASSERT_TRUE(adapter_->IsPresent());
+  ASSERT_FALSE(adapter_->IsDiscoverable());
+
+  // Install an observer; expect the AdapterDiscoverableChanged to be called
+  // with true, and IsDiscoverable() to return true.
+  TestObserver observer(adapter_);
+
+  fake_bluetooth_adapter_client_->SetVisible(false);
+
+  EXPECT_EQ(1, observer.present_changed_count_);
+  EXPECT_FALSE(observer.last_present_);
+
+  EXPECT_FALSE(adapter_->IsPresent());
+  EXPECT_FALSE(adapter_->IsDiscoverable());
+
+  adapter_->SetDiscoverable(
+      true,
+      base::Bind(&BluetoothChromeOSTest::Callback,
+                 base::Unretained(this)),
+      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
+                 base::Unretained(this)));
+  EXPECT_EQ(0, callback_count_);
+  EXPECT_EQ(1, error_callback_count_);
+
+  EXPECT_EQ(0, observer.discoverable_changed_count_);
 
   EXPECT_FALSE(adapter_->IsDiscoverable());
 }
@@ -3180,6 +3277,45 @@ TEST_F(BluetoothChromeOSTest, DeviceId) {
   EXPECT_EQ(0, device->GetVendorID());
   EXPECT_EQ(0, device->GetProductID());
   EXPECT_EQ(0, device->GetDeviceID());
+}
+
+TEST_F(BluetoothChromeOSTest, GetConnectionInfoForDisconnectedDevice) {
+  GetAdapter();
+  BluetoothDevice* device =
+      adapter_->GetDevice(FakeBluetoothDeviceClient::kPairedDeviceAddress);
+
+  // Calling GetConnectionInfo for an unconnected device should return a result
+  // in which all fields are filled with BluetoothDevice::kUnknownPower.
+  BluetoothDevice::ConnectionInfo conn_info(0, 0, 0);
+  device->GetConnectionInfo(base::Bind(&SaveConnectionInfo, &conn_info));
+  int unknown_power = BluetoothDevice::kUnknownPower;
+  EXPECT_NE(0, unknown_power);
+  EXPECT_EQ(unknown_power, conn_info.rssi);
+  EXPECT_EQ(unknown_power, conn_info.transmit_power);
+  EXPECT_EQ(unknown_power, conn_info.max_transmit_power);
+}
+
+TEST_F(BluetoothChromeOSTest, GetConnectionInfoForConnectedDevice) {
+  GetAdapter();
+  BluetoothDevice* device =
+      adapter_->GetDevice(FakeBluetoothDeviceClient::kPairedDeviceAddress);
+
+  device->Connect(
+      NULL,
+      base::Bind(&BluetoothChromeOSTest::Callback,
+                 base::Unretained(this)),
+      base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
+                 base::Unretained(this)));
+  EXPECT_TRUE(device->IsConnected());
+
+  // Calling GetConnectionInfo for a connected device should return valid
+  // results.
+  fake_bluetooth_device_client_->UpdateConnectionInfo(-10, 3, 4);
+  BluetoothDevice::ConnectionInfo conn_info;
+  device->GetConnectionInfo(base::Bind(&SaveConnectionInfo, &conn_info));
+  EXPECT_EQ(-10, conn_info.rssi);
+  EXPECT_EQ(3, conn_info.transmit_power);
+  EXPECT_EQ(4, conn_info.max_transmit_power);
 }
 
 }  // namespace chromeos

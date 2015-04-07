@@ -14,9 +14,22 @@ bool IsPendingState(State state) {
          state == PENDING_PASSWORD_STATE;
 }
 
+bool IsAskSubmitURLState(State state) {
+  return state == ASK_USER_REPORT_URL_STATE ||
+         state == ASK_USER_REPORT_URL_BUBBLE_SHOWN_BEFORE_TRANSITION_STATE ||
+         state == ASK_USER_REPORT_URL_BUBBLE_SHOWN_STATE;
+}
+
+bool IsCredentialsState(State state) {
+  return (state == CREDENTIAL_REQUEST_STATE ||
+          state == CREDENTIAL_REQUEST_AND_BUBBLE_STATE);
+}
+
 bool IsAutomaticDisplayState(State state) {
   return state == PENDING_PASSWORD_AND_BUBBLE_STATE ||
-         state == CONFIRMATION_STATE;
+         state == ASK_USER_REPORT_URL_STATE ||
+         state == CONFIRMATION_STATE ||
+         state == CREDENTIAL_REQUEST_AND_BUBBLE_STATE;
 }
 
 State GetEndStateForAutomaticState(State state) {
@@ -24,10 +37,12 @@ State GetEndStateForAutomaticState(State state) {
   switch (state) {
     case PENDING_PASSWORD_AND_BUBBLE_STATE:
       return PENDING_PASSWORD_STATE;
-      break;
     case CONFIRMATION_STATE:
       return MANAGE_STATE;
-      break;
+    case CREDENTIAL_REQUEST_AND_BUBBLE_STATE:
+      return CREDENTIAL_REQUEST_STATE;
+    case ASK_USER_REPORT_URL_STATE:
+      return ASK_USER_REPORT_URL_BUBBLE_SHOWN_BEFORE_TRANSITION_STATE;
     default:
       NOTREACHED();
       return INACTIVE_STATE;

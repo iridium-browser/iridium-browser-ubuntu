@@ -14,13 +14,12 @@
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
 #include "chrome/browser/chromeos/login/lock/screen_locker_delegate.h"
+#include "chrome/browser/chromeos/login/signin_screen_controller.h"
 #include "chrome/browser/chromeos/login/signin_specifics.h"
 #include "chrome/browser/chromeos/login/ui/lock_window.h"
 #include "chrome/browser/chromeos/login/ui/login_display.h"
 #include "chrome/browser/chromeos/login/ui/webui_login_view.h"
 #include "chromeos/dbus/power_manager_client.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
 #include "ui/keyboard/keyboard_controller_observer.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_observer.h"
@@ -87,6 +86,7 @@ class WebUIScreenLocker : public WebUILoginView,
   virtual void MigrateUserData(const std::string& old_password) override;
   virtual void OnSigninScreenReady() override;
   virtual void OnStartEnterpriseEnrollment() override;
+  virtual void OnStartEnableDebuggingScreen() override;
   virtual void OnStartKioskEnableScreen() override;
   virtual void OnStartKioskAutolaunchScreen() override;
   virtual void ShowWrongHWIDScreen() override;
@@ -94,11 +94,6 @@ class WebUIScreenLocker : public WebUILoginView,
   virtual void ResyncUserData() override;
   virtual void SetDisplayEmail(const std::string& email) override;
   virtual void Signout() override;
-
-  // content::NotificationObserver (via WebUILoginView) implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) override;
 
   // LockWindow::Observer implementation.
   virtual void OnLockWindowReady() override;
@@ -113,6 +108,7 @@ class WebUIScreenLocker : public WebUILoginView,
   virtual void OnWidgetDestroying(views::Widget* widget) override;
 
   // PowerManagerClient::Observer overrides:
+  virtual void SuspendImminent() override;
   virtual void SuspendDone(const base::TimeDelta& sleep_duration) override;
   virtual void LidEventReceived(bool open,
                                 const base::TimeTicks& time) override;
@@ -139,14 +135,17 @@ class WebUIScreenLocker : public WebUILoginView,
   // Ensures that user pod is focused.
   void FocusUserPod();
 
+  // Reset user pod and ensures that user pod is focused.
+  void ResetAndFocusUserPod();
+
   // The screen locker window.
   views::Widget* lock_window_;
 
+  // Sign-in Screen controller instance (owns login screens).
+  scoped_ptr<SignInScreenController> signin_screen_controller_;
+
   // Login UI implementation instance.
   scoped_ptr<WebUILoginDisplay> login_display_;
-
-  // Used for user image changed notifications.
-  content::NotificationRegistrar registrar_;
 
   // Tracks when the lock window is displayed and ready.
   bool lock_ready_;

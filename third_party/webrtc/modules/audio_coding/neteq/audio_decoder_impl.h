@@ -19,6 +19,7 @@
 #include "webrtc/engine_configurations.h"
 #endif
 #include "webrtc/base/constructormagic.h"
+#include "webrtc/modules/audio_coding/codecs/audio_decoder.h"
 #include "webrtc/modules/audio_coding/codecs/cng/include/webrtc_cng.h"
 #ifdef WEBRTC_CODEC_G722
 #include "webrtc/modules/audio_coding/codecs/g722/include/g722_interface.h"
@@ -26,16 +27,9 @@
 #ifdef WEBRTC_CODEC_ILBC
 #include "webrtc/modules/audio_coding/codecs/ilbc/interface/ilbc.h"
 #endif
-#ifdef WEBRTC_CODEC_ISACFX
-#include "webrtc/modules/audio_coding/codecs/isac/fix/interface/isacfix.h"
-#endif
-#ifdef WEBRTC_CODEC_ISAC
-#include "webrtc/modules/audio_coding/codecs/isac/main/interface/isac.h"
-#endif
 #ifdef WEBRTC_CODEC_OPUS
 #include "webrtc/modules/audio_coding/codecs/opus/interface/opus_interface.h"
 #endif
-#include "webrtc/modules/audio_coding/neteq/interface/audio_decoder.h"
 #include "webrtc/typedefs.h"
 
 namespace webrtc {
@@ -125,54 +119,8 @@ class AudioDecoderIlbc : public AudioDecoder {
   virtual int Init();
 
  private:
-  iLBC_decinst_t* dec_state_;
+  IlbcDecoderInstance* dec_state_;
   DISALLOW_COPY_AND_ASSIGN(AudioDecoderIlbc);
-};
-#endif
-
-#ifdef WEBRTC_CODEC_ISAC
-class AudioDecoderIsac : public AudioDecoder {
- public:
-  explicit AudioDecoderIsac(int decode_sample_rate_hz);
-  virtual ~AudioDecoderIsac();
-  virtual int Decode(const uint8_t* encoded, size_t encoded_len,
-                     int16_t* decoded, SpeechType* speech_type);
-  virtual int DecodeRedundant(const uint8_t* encoded, size_t encoded_len,
-                              int16_t* decoded, SpeechType* speech_type);
-  virtual bool HasDecodePlc() const { return true; }
-  virtual int DecodePlc(int num_frames, int16_t* decoded);
-  virtual int Init();
-  virtual int IncomingPacket(const uint8_t* payload,
-                             size_t payload_len,
-                             uint16_t rtp_sequence_number,
-                             uint32_t rtp_timestamp,
-                             uint32_t arrival_timestamp);
-  virtual int ErrorCode();
-
- private:
-  ISACStruct* isac_state_;
-  DISALLOW_COPY_AND_ASSIGN(AudioDecoderIsac);
-};
-#endif
-
-#ifdef WEBRTC_CODEC_ISACFX
-class AudioDecoderIsacFix : public AudioDecoder {
- public:
-  AudioDecoderIsacFix();
-  virtual ~AudioDecoderIsacFix();
-  virtual int Decode(const uint8_t* encoded, size_t encoded_len,
-                     int16_t* decoded, SpeechType* speech_type);
-  virtual int Init();
-  virtual int IncomingPacket(const uint8_t* payload,
-                             size_t payload_len,
-                             uint16_t rtp_sequence_number,
-                             uint32_t rtp_timestamp,
-                             uint32_t arrival_timestamp);
-  virtual int ErrorCode();
-
- private:
-  ISACFIX_MainStruct* isac_state_;
-  DISALLOW_COPY_AND_ASSIGN(AudioDecoderIsacFix);
 };
 #endif
 
@@ -213,23 +161,6 @@ class AudioDecoderG722Stereo : public AudioDecoder {
   G722DecInst* dec_state_right_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioDecoderG722Stereo);
-};
-#endif
-
-#ifdef WEBRTC_CODEC_CELT
-class AudioDecoderCelt : public AudioDecoder {
- public:
-  explicit AudioDecoderCelt(int num_channels);
-  virtual ~AudioDecoderCelt();
-
-  virtual int Decode(const uint8_t* encoded, size_t encoded_len,
-                     int16_t* decoded, SpeechType* speech_type);
-  virtual int Init();
-  virtual bool HasDecodePlc() const;
-  virtual int DecodePlc(int num_frames, int16_t* decoded);
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(AudioDecoderCelt);
 };
 #endif
 
@@ -279,6 +210,48 @@ class AudioDecoderCng : public AudioDecoder {
   CNG_dec_inst* dec_state_;
   DISALLOW_COPY_AND_ASSIGN(AudioDecoderCng);
 };
+
+enum NetEqDecoder {
+  kDecoderPCMu,
+  kDecoderPCMa,
+  kDecoderPCMu_2ch,
+  kDecoderPCMa_2ch,
+  kDecoderILBC,
+  kDecoderISAC,
+  kDecoderISACswb,
+  kDecoderISACfb,
+  kDecoderPCM16B,
+  kDecoderPCM16Bwb,
+  kDecoderPCM16Bswb32kHz,
+  kDecoderPCM16Bswb48kHz,
+  kDecoderPCM16B_2ch,
+  kDecoderPCM16Bwb_2ch,
+  kDecoderPCM16Bswb32kHz_2ch,
+  kDecoderPCM16Bswb48kHz_2ch,
+  kDecoderPCM16B_5ch,
+  kDecoderG722,
+  kDecoderG722_2ch,
+  kDecoderRED,
+  kDecoderAVT,
+  kDecoderCNGnb,
+  kDecoderCNGwb,
+  kDecoderCNGswb32kHz,
+  kDecoderCNGswb48kHz,
+  kDecoderArbitrary,
+  kDecoderOpus,
+  kDecoderOpus_2ch,
+};
+
+// Returns true if |codec_type| is supported.
+bool CodecSupported(NetEqDecoder codec_type);
+
+// Returns the sample rate for |codec_type|.
+int CodecSampleRateHz(NetEqDecoder codec_type);
+
+// Creates an AudioDecoder object of type |codec_type|. Returns NULL for for
+// unsupported codecs, and when creating an AudioDecoder is not applicable
+// (e.g., for RED and DTMF/AVT types).
+AudioDecoder* CreateAudioDecoder(NetEqDecoder codec_type);
 
 }  // namespace webrtc
 #endif  // WEBRTC_MODULES_AUDIO_CODING_NETEQ_AUDIO_DECODER_IMPL_H_

@@ -46,10 +46,10 @@ public:
     explicit RenderSVGModelObject(SVGElement*);
 
     virtual bool isChildAllowed(RenderObject*, RenderStyle*) const override;
-    virtual bool canHaveWhitespaceChildren() const override { return false; }
 
     virtual LayoutRect clippedOverflowRectForPaintInvalidation(const RenderLayerModelObject* paintInvalidationContainer, const PaintInvalidationState* = 0) const override;
-    virtual void computeFloatRectForPaintInvalidation(const RenderLayerModelObject* paintInvalidationContainer, FloatRect&, const PaintInvalidationState*) const override final;
+
+    virtual FloatRect paintInvalidationRectInLocalCoordinates() const override final { return m_paintInvalidationBoundingBox; }
 
     virtual void absoluteRects(Vector<IntRect>&, const LayoutPoint& accumulatedOffset) const override final;
     virtual void absoluteQuads(Vector<FloatQuad>&, bool* wasFixed) const override;
@@ -70,13 +70,16 @@ protected:
 
 private:
     // RenderSVGModelObject subclasses should use element() instead.
-    void node() const WTF_DELETED_FUNCTION;
+    void node() const = delete;
 
     // This method should never be called, SVG uses a different nodeAtPoint method
     virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction) override final;
     virtual IntRect absoluteFocusRingBoundingBoxRect() const override final;
 
     virtual void invalidateTreeIfNeeded(const PaintInvalidationState&) override final;
+
+protected:
+    FloatRect m_paintInvalidationBoundingBox;
 };
 
 }

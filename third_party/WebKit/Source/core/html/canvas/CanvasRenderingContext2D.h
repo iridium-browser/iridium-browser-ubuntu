@@ -27,10 +27,13 @@
 #define CanvasRenderingContext2D_h
 
 #include "bindings/core/v8/ScriptWrappable.h"
+#include "bindings/core/v8/UnionTypesCore.h"
 #include "core/css/CSSFontSelectorClient.h"
 #include "core/html/canvas/Canvas2DContextAttributes.h"
+#include "core/html/canvas/CanvasContextCreationAttributes.h"
 #include "core/html/canvas/CanvasPathMethods.h"
 #include "core/html/canvas/CanvasRenderingContext.h"
+#include "core/html/canvas/ClipList.h"
 #include "core/html/canvas/HitRegion.h"
 #include "core/svg/SVGMatrixTearOff.h"
 #include "platform/fonts/Font.h"
@@ -64,22 +67,24 @@ class HTMLVideoElement;
 class ImageData;
 class TextMetrics;
 
+typedef HTMLImageElementOrHTMLVideoElementOrHTMLCanvasElementOrImageBitmap CanvasImageSourceUnion;
+
 typedef WillBeHeapHashMap<String, RefPtrWillBeMember<MutableStylePropertySet>> MutableStylePropertyMap;
 
 class CanvasRenderingContext2D final: public CanvasRenderingContext, public ScriptWrappable, public CanvasPathMethods {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static PassOwnPtrWillBeRawPtr<CanvasRenderingContext2D> create(HTMLCanvasElement* canvas, const Canvas2DContextAttributes* attrs, Document& document)
+    static PassOwnPtrWillBeRawPtr<CanvasRenderingContext2D> create(HTMLCanvasElement* canvas, const CanvasContextCreationAttributes& attrs, Document& document)
     {
         return adoptPtrWillBeNoop(new CanvasRenderingContext2D(canvas, attrs, document));
     }
     virtual ~CanvasRenderingContext2D();
 
-    CanvasStyle* strokeStyle() const;
-    void setStrokeStyle(PassRefPtrWillBeRawPtr<CanvasStyle>);
+    void strokeStyle(StringOrCanvasGradientOrCanvasPattern&) const;
+    void setStrokeStyle(const StringOrCanvasGradientOrCanvasPattern&);
 
-    CanvasStyle* fillStyle() const;
-    void setFillStyle(PassRefPtrWillBeRawPtr<CanvasStyle>);
+    void fillStyle(StringOrCanvasGradientOrCanvasPattern&) const;
+    void setFillStyle(const StringOrCanvasGradientOrCanvasPattern&);
 
     float lineWidth() const;
     void setLineWidth(float);
@@ -122,11 +127,11 @@ public:
     void save() { ++m_stateStack.last()->m_unrealizedSaveCount; }
     void restore();
 
-    PassRefPtr<SVGMatrixTearOff> currentTransform() const
+    PassRefPtrWillBeRawPtr<SVGMatrixTearOff> currentTransform() const
     {
         return SVGMatrixTearOff::create(state().m_transform);
     }
-    void setCurrentTransform(PassRefPtr<SVGMatrixTearOff>);
+    void setCurrentTransform(PassRefPtrWillBeRawPtr<SVGMatrixTearOff>);
 
     void scale(float sx, float sy);
     void rotate(float angleInRadians);
@@ -134,20 +139,6 @@ public:
     void transform(float m11, float m12, float m21, float m22, float dx, float dy);
     void setTransform(float m11, float m12, float m21, float m22, float dx, float dy);
     void resetTransform();
-
-    void setStrokeColor(const String& color);
-    void setStrokeColor(float grayLevel);
-    void setStrokeColor(const String& color, float alpha);
-    void setStrokeColor(float grayLevel, float alpha);
-    void setStrokeColor(float r, float g, float b, float a);
-    void setStrokeColor(float c, float m, float y, float k, float a);
-
-    void setFillColor(const String& color);
-    void setFillColor(float grayLevel);
-    void setFillColor(const String& color, float alpha);
-    void setFillColor(float grayLevel, float alpha);
-    void setFillColor(float r, float g, float b, float a);
-    void setFillColor(float c, float m, float y, float k, float a);
 
     void beginPath();
 
@@ -170,30 +161,13 @@ public:
     void fillRect(float x, float y, float width, float height);
     void strokeRect(float x, float y, float width, float height);
 
-    void setShadow(float width, float height, float blur);
-    void setShadow(float width, float height, float blur, const String& color);
-    void setShadow(float width, float height, float blur, float grayLevel);
-    void setShadow(float width, float height, float blur, const String& color, float alpha);
-    void setShadow(float width, float height, float blur, float grayLevel, float alpha);
-    void setShadow(float width, float height, float blur, float r, float g, float b, float a);
-    void setShadow(float width, float height, float blur, float c, float m, float y, float k, float a);
-
-    void clearShadow();
-
-    void drawImage(CanvasImageSource*, float x, float y, ExceptionState&);
-    void drawImage(CanvasImageSource*, float x, float y, float width, float height, ExceptionState&);
-    void drawImage(CanvasImageSource*, float sx, float sy, float sw, float sh, float dx, float dy, float dw, float dh, ExceptionState&);
-
-    void drawImageFromRect(HTMLImageElement*, float sx = 0, float sy = 0, float sw = 0, float sh = 0,
-                           float dx = 0, float dy = 0, float dw = 0, float dh = 0, const String& compositeOperation = emptyString());
-
-    void setAlpha(float);
-
-    void setCompositeOperation(const String&);
+    void drawImage(const CanvasImageSourceUnion&, float x, float y, ExceptionState&);
+    void drawImage(const CanvasImageSourceUnion&, float x, float y, float width, float height, ExceptionState&);
+    void drawImage(const CanvasImageSourceUnion&, float sx, float sy, float sw, float sh, float dx, float dy, float dw, float dh, ExceptionState&);
 
     PassRefPtrWillBeRawPtr<CanvasGradient> createLinearGradient(float x0, float y0, float x1, float y1);
     PassRefPtrWillBeRawPtr<CanvasGradient> createRadialGradient(float x0, float y0, float r0, float x1, float y1, float r1, ExceptionState&);
-    PassRefPtrWillBeRawPtr<CanvasPattern> createPattern(CanvasImageSource*, const String& repetitionType, ExceptionState&);
+    PassRefPtrWillBeRawPtr<CanvasPattern> createPattern(const CanvasImageSourceUnion&, const String& repetitionType, ExceptionState&);
 
     PassRefPtrWillBeRawPtr<ImageData> createImageData(PassRefPtrWillBeRawPtr<ImageData>) const;
     PassRefPtrWillBeRawPtr<ImageData> createImageData(float width, float height, ExceptionState&) const;
@@ -227,7 +201,7 @@ public:
     bool imageSmoothingEnabled() const;
     void setImageSmoothingEnabled(bool);
 
-    PassRefPtrWillBeRawPtr<Canvas2DContextAttributes> getContextAttributes() const;
+    void getContextAttributes(Canvas2DContextAttributes&) const;
 
     void drawFocusIfNeeded(Element*);
     void drawFocusIfNeeded(Path2D*, Element*);
@@ -241,6 +215,8 @@ public:
     void loseContext();
     void restoreContext();
 
+    void restoreCanvasMatrixClipStack();
+
     virtual void trace(Visitor*) override;
 
 private:
@@ -250,12 +226,17 @@ private:
         DirectionLTR
     };
 
+    enum ClipListCopyMode {
+        CopyClipList,
+        DontCopyClipList
+    };
+
     class State final : public CSSFontSelectorClient {
     public:
         State();
         virtual ~State();
 
-        State(const State&);
+        State(const State&, ClipListCopyMode = CopyClipList);
         State& operator=(const State&);
 
         // CSSFontSelectorClient implementation
@@ -295,9 +276,11 @@ private:
         bool m_realizedFont;
 
         bool m_hasClip;
+
+        ClipList m_clipList;
     };
 
-    CanvasRenderingContext2D(HTMLCanvasElement*, const Canvas2DContextAttributes* attrs, Document&);
+    CanvasRenderingContext2D(HTMLCanvasElement*, const CanvasContextCreationAttributes& attrs, Document&);
 
     State& modifiableState() { ASSERT(!state().m_unrealizedSaveCount); return *m_stateStack.last(); }
     const State& state() const { return *m_stateStack.last(); }
@@ -344,7 +327,7 @@ private:
 
     void inflateStrokeRect(FloatRect&) const;
 
-    void fullCanvasCompositedDraw(const Closure& draw);
+    void fullCanvasCompositedDraw(PassOwnPtr<Closure> draw);
 
     void drawFocusIfNeededInternal(const Path&, Element*);
     bool focusRingCallIsValid(const Path&, Element*);
@@ -367,11 +350,10 @@ private:
     WillBeHeapVector<OwnPtrWillBeMember<State>> m_stateStack;
     OwnPtrWillBeMember<HitRegionManager> m_hitRegionManager;
     bool m_usesCSSCompatibilityParseMode;
-    GraphicsContext::AntiAliasingMode m_clipAntialiasing;
+    AntiAliasingMode m_clipAntialiasing;
     bool m_hasAlpha;
     bool m_isContextLost;
     bool m_contextRestorable;
-    Canvas2DContextStorage m_storageMode;
     MutableStylePropertyMap m_fetchedFonts;
     ListHashSet<String> m_fetchedFontsLRUList;
     unsigned m_tryRestoreContextAttemptCount;

@@ -131,6 +131,7 @@ using webrtc::SessionDescriptionInterface;
 using webrtc::SetSessionDescriptionObserver;
 using webrtc::StatsObserver;
 using webrtc::StatsReport;
+using webrtc::StatsReports;
 using webrtc::VideoRendererInterface;
 using webrtc::VideoSourceInterface;
 using webrtc::VideoTrackInterface;
@@ -163,6 +164,7 @@ static pthread_key_t g_jni_ptr;
 #if defined(ANDROID) && !defined(WEBRTC_CHROMIUM_BUILD)
 // Set in PeerConnectionFactory_initializeAndroidGlobals().
 static bool factory_static_initialized = false;
+static bool vp8_hw_acceleration_enabled = true;
 #endif
 
 
@@ -984,7 +986,7 @@ class StatsObserverWrapper : public StatsObserver {
 
   virtual ~StatsObserverWrapper() {}
 
-  virtual void OnComplete(const std::vector<StatsReport>& reports) OVERRIDE {
+  virtual void OnComplete(const StatsReports& reports) OVERRIDE {
     ScopedLocalRefFrame local_ref_frame(jni());
     jobjectArray j_reports = ReportsToJava(jni(), reports);
     jmethodID m = GetMethodID(jni(), *j_observer_class_, "onComplete",
@@ -995,22 +997,22 @@ class StatsObserverWrapper : public StatsObserver {
 
  private:
   jobjectArray ReportsToJava(
-      JNIEnv* jni, const std::vector<StatsReport>& reports) {
+      JNIEnv* jni, const StatsReports& reports) {
     jobjectArray reports_array = jni->NewObjectArray(
         reports.size(), *j_stats_report_class_, NULL);
-    for (int i = 0; i < reports.size(); ++i) {
+    int i = 0;
+    for (const auto* report : reports) {
       ScopedLocalRefFrame local_ref_frame(jni);
-      const StatsReport& report = reports[i];
-      jstring j_id = JavaStringFromStdString(jni, report.id);
-      jstring j_type = JavaStringFromStdString(jni, report.type);
-      jobjectArray j_values = ValuesToJava(jni, report.values);
+      jstring j_id = JavaStringFromStdString(jni, report->id);
+      jstring j_type = JavaStringFromStdString(jni, report->type);
+      jobjectArray j_values = ValuesToJava(jni, report->values);
       jobject j_report = jni->NewObject(*j_stats_report_class_,
                                         j_stats_report_ctor_,
                                         j_id,
                                         j_type,
-                                        report.timestamp,
+                                        report->timestamp,
                                         j_values);
-      jni->SetObjectArrayElement(reports_array, i, j_report);
+      jni->SetObjectArrayElement(reports_array, i++, j_report);
     }
     return reports_array;
   }
@@ -1021,7 +1023,9 @@ class StatsObserverWrapper : public StatsObserver {
     for (int i = 0; i < values.size(); ++i) {
       ScopedLocalRefFrame local_ref_frame(jni);
       const StatsReport::Value& value = values[i];
-      jstring j_name = JavaStringFromStdString(jni, value.name);
+      // Should we use the '.name' enum value here instead of converting the
+      // name to a string?
+      jstring j_name = JavaStringFromStdString(jni, value.display_name());
       jstring j_value = JavaStringFromStdString(jni, value.value);
       jobject j_element_value =
           jni->NewObject(*j_value_class_, j_value_ctor_, j_name, j_value);
@@ -1258,7 +1262,7 @@ class MediaCodecVideoEncoder : public webrtc::VideoEncoder,
   // |codec_thread_| for execution.
   virtual int32_t InitEncode(const webrtc::VideoCodec* codec_settings,
                              int32_t /* number_of_cores */,
-                             uint32_t /* max_payload_size */) OVERRIDE;
+                             size_t /* max_payload_size */) OVERRIDE;
   virtual int32_t Encode(
       const webrtc::I420VideoFrame& input_image,
       const webrtc::CodecSpecificInfo* /* codec_specific_info */,
@@ -1433,7 +1437,7 @@ MediaCodecVideoEncoder::MediaCodecVideoEncoder(JNIEnv* jni)
 int32_t MediaCodecVideoEncoder::InitEncode(
     const webrtc::VideoCodec* codec_settings,
     int32_t /* number_of_cores */,
-    uint32_t /* max_payload_size */) {
+    size_t /* max_payload_size */) {
   // Factory should guard against other codecs being used with us.
   CHECK(codec_settings->codecType == kVideoCodecVP8) << "Unsupported codec";
 
@@ -2814,9 +2818,10 @@ JOW(jlong, PeerConnectionFactory_nativeCreateObserver)(
 JOW(jboolean, PeerConnectionFactory_initializeAndroidGlobals)(
     JNIEnv* jni, jclass, jobject context,
     jboolean initialize_audio, jboolean initialize_video,
-    jobject render_egl_context) {
+    jboolean vp8_hw_acceleration, jobject render_egl_context) {
   CHECK(g_jvm) << "JNI_OnLoad failed to run?";
   bool failure = false;
+  vp8_hw_acceleration_enabled = vp8_hw_acceleration;
   if (!factory_static_initialized) {
     if (initialize_video) {
       failure |= webrtc::SetCaptureAndroidVM(g_jvm, context);
@@ -2876,8 +2881,10 @@ JOW(jlong, PeerConnectionFactory_nativeCreatePeerConnectionFactory)(
   scoped_ptr<cricket::WebRtcVideoEncoderFactory> encoder_factory;
   scoped_ptr<cricket::WebRtcVideoDecoderFactory> decoder_factory;
 #if defined(ANDROID) && !defined(WEBRTC_CHROMIUM_BUILD)
-  encoder_factory.reset(new MediaCodecVideoEncoderFactory());
-  decoder_factory.reset(new MediaCodecVideoDecoderFactory());
+  if (vp8_hw_acceleration_enabled) {
+    encoder_factory.reset(new MediaCodecVideoEncoderFactory());
+    decoder_factory.reset(new MediaCodecVideoDecoderFactory());
+  }
 #endif
   rtc::scoped_refptr<PeerConnectionFactoryInterface> factory(
       webrtc::CreatePeerConnectionFactory(worker_thread,

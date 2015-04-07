@@ -17,8 +17,8 @@
 #include "content/child/npapi/webplugin_delegate.h"
 #include "content/common/cursors/webcursor.h"
 #include "third_party/npapi/bindings/npapi.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/gfx/rect.h"
 
 namespace base {
 class FilePath;
@@ -121,7 +121,7 @@ class WebPluginDelegateImpl : public WebPluginDelegate {
                 const std::string& method,
                 const char* buf,
                 unsigned int len,
-                const GURL& referrer,
+                const Referrer& referrer,
                 bool notify_redirects,
                 bool is_plugin_src_load,
                 int origin_pid,

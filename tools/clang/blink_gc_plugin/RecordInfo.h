@@ -92,16 +92,23 @@ class RecordInfo {
   bool IsStackAllocated();
   bool IsNonNewable();
   bool IsOnlyPlacementNewable();
+  bool IsGCMixinInstance();
   clang::CXXMethodDecl* DeclaresNewOperator();
 
   bool RequiresTraceMethod();
   bool NeedsFinalization();
+  bool DeclaresGCMixinMethods();
+  bool DeclaresLocalTraceMethod();
   TracingStatus NeedsTracing(Edge::NeedsTracingOption);
   clang::CXXMethodDecl* InheritsNonVirtualTrace();
   bool IsConsideredAbstract();
 
+  static clang::CXXRecordDecl* GetDependentTemplatedDecl(const clang::Type&);
+
  private:
   RecordInfo(clang::CXXRecordDecl* record, RecordCache* cache);
+
+  void walkBases();
 
   Fields* CollectFields();
   Bases* CollectBases();
@@ -122,6 +129,8 @@ class RecordInfo {
   CachedBool is_non_newable_;
   CachedBool is_only_placement_newable_;
   CachedBool does_need_finalization_;
+  CachedBool has_gc_mixin_methods_;
+  CachedBool is_declaring_local_trace_;
 
   bool determined_trace_methods_;
   clang::CXXMethodDecl* trace_method_;
@@ -129,7 +138,8 @@ class RecordInfo {
   clang::CXXMethodDecl* finalize_dispatch_method_;
 
   bool is_gc_derived_;
-  clang::CXXBasePaths* base_paths_;
+
+  std::vector<std::string> gc_base_names_;
 
   friend class RecordCache;
 };

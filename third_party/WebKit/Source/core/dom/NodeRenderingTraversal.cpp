@@ -29,7 +29,7 @@
 
 #include "core/HTMLNames.h"
 #include "core/dom/PseudoElement.h"
-#include "core/dom/shadow/ComposedTreeWalker.h"
+#include "core/dom/shadow/ComposedTreeTraversal.h"
 #include "core/rendering/RenderObject.h"
 
 namespace blink {
@@ -52,199 +52,205 @@ void ParentDetails::didTraverseInsertionPoint(const InsertionPoint* insertionPoi
     }
 }
 
-ContainerNode* parent(const Node* node, ParentDetails* details)
+ContainerNode* parent(const Node& node, ParentDetails* details)
 {
-    ASSERT(node);
-    ASSERT(!node->document().childNeedsDistributionRecalc());
-    if (isActiveInsertionPoint(*node))
+    ASSERT(!node.document().childNeedsDistributionRecalc());
+    ASSERT(!node.isShadowRoot());
+    if (isActiveInsertionPoint(node))
         return 0;
-    ComposedTreeWalker walker(node, ComposedTreeWalker::CanStartFromShadowBoundary);
-    return toContainerNode(walker.traverseParent(walker.get(), details));
+    return ComposedTreeTraversal::parent(node, details);
 }
 
-bool contains(const ContainerNode* container, const Node* node)
+bool contains(const ContainerNode& container, const Node& node)
 {
-    while (node) {
-        if (node == container)
+    for (const Node* current = &node; current; current = NodeRenderingTraversal::parent(*current)) {
+        if (current == &container)
             return true;
-        node = NodeRenderingTraversal::parent(node);
     }
     return false;
 }
 
-Node* nextSibling(const Node* node)
+Node* nextSibling(const Node& node)
 {
-    ComposedTreeWalker walker(node);
-    if (node->isBeforePseudoElement()) {
-        walker.parent();
-        walker.firstChild();
-    } else
-        walker.nextSibling();
+    if (node.isBeforePseudoElement()) {
+        if (Node* next = ComposedTreeTraversal::firstChild(*ComposedTreeTraversal::parent(node)))
+            return next;
+    } else {
+        if (Node* next = ComposedTreeTraversal::nextSibling(node))
+            return next;
+        if (node.isAfterPseudoElement())
+            return 0;
+    }
 
-    if (walker.get() || node->isAfterPseudoElement())
-        return walker.get();
-
-    Node* parent = walker.traverseParent(node);
+    Node* parent = ComposedTreeTraversal::parent(node);
     if (parent && parent->isElementNode())
         return toElement(parent)->pseudoElement(AFTER);
 
     return 0;
 }
 
-Node* previousSibling(const Node* node)
+Node* previousSibling(const Node& node)
 {
-    ComposedTreeWalker walker(node);
-    if (node->isAfterPseudoElement()) {
-        walker.parent();
-        walker.lastChild();
-    } else
-        walker.previousSibling();
+    if (node.isAfterPseudoElement()) {
+        if (Node* previous = ComposedTreeTraversal::lastChild(*ComposedTreeTraversal::parent(node)))
+            return previous;
+    } else {
+        if (Node* previous = ComposedTreeTraversal::previousSibling(node))
+            return previous;
+        if (node.isBeforePseudoElement())
+            return 0;
+    }
 
-    if (walker.get() || node->isBeforePseudoElement())
-        return walker.get();
-
-    Node* parent = walker.traverseParent(node);
+    Node* parent = ComposedTreeTraversal::parent(node);
     if (parent && parent->isElementNode())
         return toElement(parent)->pseudoElement(BEFORE);
 
     return 0;
 }
 
-static Node* lastChild(const Node* node)
+static Node* lastChild(const Node& node)
 {
-    ComposedTreeWalker walker(node);
-    walker.lastChild();
-    return walker.get();
+    return ComposedTreeTraversal::lastChild(node);
 }
 
-static Node* pseudoAwarePreviousSibling(const Node* node)
+static Node* pseudoAwarePreviousSibling(const Node& node)
 {
     Node* previousNode = previousSibling(node);
     Node* parentNode = parent(node);
 
     if (parentNode && parentNode->isElementNode() && !previousNode) {
-        if (node->isAfterPseudoElement()) {
-            if (Node* child = lastChild(parentNode))
+        if (node.isAfterPseudoElement()) {
+            if (Node* child = lastChild(*parentNode))
                 return child;
         }
-        if (!node->isBeforePseudoElement())
+        if (!node.isBeforePseudoElement())
             return toElement(parentNode)->pseudoElement(BEFORE);
     }
     return previousNode;
 }
 
-static Node* pseudoAwareLastChild(const Node* node)
+static Node* pseudoAwareLastChild(const Node& node)
 {
-    if (node->isElementNode()) {
-        const Element* currentElement = toElement(node);
-        Node* last = currentElement->pseudoElement(AFTER);
+    if (node.isElementNode()) {
+        const Element& currentElement = toElement(node);
+        Node* last = currentElement.pseudoElement(AFTER);
         if (last)
             return last;
 
         last = lastChild(currentElement);
         if (!last)
-            last = currentElement->pseudoElement(BEFORE);
+            last = currentElement.pseudoElement(BEFORE);
         return last;
     }
 
     return lastChild(node);
 }
 
-Node* previous(const Node* node, const Node* stayWithin)
+Node* previous(const Node& node, const Node* stayWithin)
 {
     if (node == stayWithin)
         return 0;
 
     if (Node* previousNode = pseudoAwarePreviousSibling(node)) {
-        while (Node* previousLastChild = pseudoAwareLastChild(previousNode))
+        while (Node* previousLastChild = pseudoAwareLastChild(*previousNode))
             previousNode = previousLastChild;
         return previousNode;
     }
     return parent(node);
 }
 
-Node* firstChild(const Node* node)
+Node* firstChild(const Node& node)
 {
-    ComposedTreeWalker walker(node);
-    walker.firstChild();
-    return walker.get();
+    return ComposedTreeTraversal::firstChild(node);
 }
 
-static Node* pseudoAwareNextSibling(const Node* node)
+static Node* pseudoAwareNextSibling(const Node& node)
 {
     Node* parentNode = parent(node);
     Node* nextNode = nextSibling(node);
 
     if (parentNode && parentNode->isElementNode() && !nextNode) {
-        if (node->isBeforePseudoElement()) {
-            if (Node* child = firstChild(parentNode))
+        if (node.isBeforePseudoElement()) {
+            if (Node* child = firstChild(*parentNode))
                 return child;
         }
-        if (!node->isAfterPseudoElement())
+        if (!node.isAfterPseudoElement())
             return toElement(parentNode)->pseudoElement(AFTER);
     }
     return nextNode;
 }
 
-static Node* pseudoAwareFirstChild(const Node* node)
+static Node* pseudoAwareFirstChild(const Node& node)
 {
-    if (node->isElementNode()) {
-        const Element* currentElement = toElement(node);
-        Node* first = currentElement->pseudoElement(BEFORE);
+    if (node.isElementNode()) {
+        const Element& currentElement = toElement(node);
+        Node* first = currentElement.pseudoElement(BEFORE);
         if (first)
             return first;
         first = firstChild(currentElement);
         if (!first)
-            first = currentElement->pseudoElement(AFTER);
+            first = currentElement.pseudoElement(AFTER);
         return first;
     }
 
     return firstChild(node);
 }
 
-Node* next(const Node* node, const Node* stayWithin)
+static Node* nextAncestorSibling(const Node& node, const Node* stayWithin)
 {
-    if (Node* child = pseudoAwareFirstChild(node))
-        return child;
-    if (node == stayWithin)
-        return 0;
-    if (Node* nextNode = pseudoAwareNextSibling(node))
-        return nextNode;
-    for (Node* parentNode = parent(node); parentNode; parentNode = parent(parentNode)) {
+    ASSERT(!pseudoAwareNextSibling(node));
+    ASSERT(node != stayWithin);
+    for (Node* parentNode = parent(node); parentNode; parentNode = parent(*parentNode)) {
         if (parentNode == stayWithin)
             return 0;
-        if (Node* nextNode = pseudoAwareNextSibling(parentNode))
+        if (Node* nextNode = pseudoAwareNextSibling(*parentNode))
             return nextNode;
     }
     return 0;
 }
 
-RenderObject* nextSiblingRenderer(const Node* node)
+Node* nextSkippingChildren(const Node& node, const Node* stayWithin)
 {
-    for (Node* sibling = NodeRenderingTraversal::nextSibling(node); sibling; sibling = NodeRenderingTraversal::nextSibling(sibling)) {
-        RenderObject* renderer = sibling->renderer();
-        if (renderer && !isRendererReparented(renderer))
-            return renderer;
-    }
-    return 0;
-}
-
-RenderObject* previousSiblingRenderer(const Node* node)
-{
-    for (Node* sibling = NodeRenderingTraversal::previousSibling(node); sibling; sibling = NodeRenderingTraversal::previousSibling(sibling)) {
-        RenderObject* renderer = sibling->renderer();
-        if (renderer && !isRendererReparented(renderer))
-            return renderer;
-    }
-    return 0;
-}
-
-RenderObject* nextInTopLayer(const Element* element)
-{
-    if (!element->isInTopLayer())
+    if (node == stayWithin)
         return 0;
-    const WillBeHeapVector<RefPtrWillBeMember<Element> >& topLayerElements = element->document().topLayerElements();
-    size_t position = topLayerElements.find(element);
+    if (Node* nextNode = pseudoAwareNextSibling(node))
+        return nextNode;
+    return nextAncestorSibling(node, stayWithin);
+}
+
+Node* next(const Node& node, const Node* stayWithin)
+{
+    if (Node* child = pseudoAwareFirstChild(node))
+        return child;
+    return nextSkippingChildren(node, stayWithin);
+}
+
+RenderObject* nextSiblingRenderer(const Node& node)
+{
+    for (Node* sibling = NodeRenderingTraversal::nextSibling(node); sibling; sibling = NodeRenderingTraversal::nextSibling(*sibling)) {
+        RenderObject* renderer = sibling->renderer();
+        if (renderer && !isRendererReparented(renderer))
+            return renderer;
+    }
+    return 0;
+}
+
+RenderObject* previousSiblingRenderer(const Node& node)
+{
+    for (Node* sibling = NodeRenderingTraversal::previousSibling(node); sibling; sibling = NodeRenderingTraversal::previousSibling(*sibling)) {
+        RenderObject* renderer = sibling->renderer();
+        if (renderer && !isRendererReparented(renderer))
+            return renderer;
+    }
+    return 0;
+}
+
+RenderObject* nextInTopLayer(const Element& element)
+{
+    if (!element.isInTopLayer())
+        return 0;
+    const WillBeHeapVector<RefPtrWillBeMember<Element> >& topLayerElements = element.document().topLayerElements();
+    size_t position = topLayerElements.find(&element);
     ASSERT(position != kNotFound);
     for (size_t i = position + 1; i < topLayerElements.size(); ++i) {
         if (RenderObject* renderer = topLayerElements[i]->renderer())

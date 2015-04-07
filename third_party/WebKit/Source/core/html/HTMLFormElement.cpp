@@ -78,6 +78,7 @@ HTMLFormElement::HTMLFormElement(Document& document)
     , m_shouldSubmit(false)
     , m_isInResetFunction(false)
     , m_wasDemoted(false)
+    , m_invalidControlsCount(0)
     , m_pendingAutocompleteEventsQueue(GenericEventQueue::create(this))
 {
 }
@@ -208,11 +209,11 @@ void HTMLFormElement::removedFrom(ContainerNode* insertionPoint)
     HTMLElement::removedFrom(insertionPoint);
 }
 
-void HTMLFormElement::handleLocalEvents(Event* event)
+void HTMLFormElement::handleLocalEvents(Event& event)
 {
-    Node* targetNode = event->target()->toNode();
-    if (event->eventPhase() != Event::CAPTURING_PHASE && targetNode && targetNode != this && (event->type() == EventTypeNames::submit || event->type() == EventTypeNames::reset)) {
-        event->stopPropagation();
+    Node* targetNode = event.target()->toNode();
+    if (event.eventPhase() != Event::CAPTURING_PHASE && targetNode && targetNode != this && (event.type() == EventTypeNames::submit || event.type() == EventTypeNames::reset)) {
+        event.stopPropagation();
         return;
     }
     HTMLElement::handleLocalEvents(event);
@@ -433,7 +434,7 @@ void HTMLFormElement::scheduleFormSubmission(PassRefPtrWillBeRawPtr<FormSubmissi
         return;
     }
 
-    LocalFrame* targetFrame = document().frame()->loader().findFrameForNavigation(submission->target(), submission->state()->sourceDocument());
+    Frame* targetFrame = document().frame()->findFrameForNavigation(submission->target(), *submission->state()->sourceDocument()->frame());
     if (!targetFrame) {
         if (!LocalDOMWindow::allowPopUp(*document().frame()) && !UserGestureIndicator::processingUserGesture())
             return;
@@ -441,18 +442,16 @@ void HTMLFormElement::scheduleFormSubmission(PassRefPtrWillBeRawPtr<FormSubmissi
     } else {
         submission->clearTarget();
     }
-    if (!targetFrame->page())
+    if (!targetFrame->host())
         return;
 
-    if (MixedContentChecker::isMixedContent(document().securityOrigin(), submission->action())) {
-        UseCounter::count(document(), UseCounter::MixedContentFormsSubmitted);
-        if (!document().frame()->loader().mixedContentChecker()->canSubmitToInsecureForm(document().securityOrigin(), submission->action()))
-            return;
-    } else {
-        UseCounter::count(document(), UseCounter::FormsSubmitted);
-    }
+    UseCounter::count(document(), UseCounter::FormsSubmitted);
+    if (MixedContentChecker::isMixedFormAction(document().frame(), submission->action()))
+        UseCounter::count(document().frame(), UseCounter::MixedContentFormsSubmitted);
 
-    targetFrame->navigationScheduler().scheduleFormSubmission(submission);
+    // FIXME: Plumb form submission for remote frames.
+    if (targetFrame->isLocalFrame())
+        toLocalFrame(targetFrame)->navigationScheduler().scheduleFormSubmission(submission);
 }
 
 void HTMLFormElement::reset()
@@ -521,8 +520,8 @@ void HTMLFormElement::parseAttribute(const QualifiedName& name, const AtomicStri
         // If the new action attribute is pointing to insecure "action" location from a secure page
         // it is marked as "passive" mixed content.
         KURL actionURL = document().completeURL(m_attributes.action().isEmpty() ? document().url().string() : m_attributes.action());
-        if (document().frame() && MixedContentChecker::isMixedContent(document().securityOrigin(), actionURL))
-            document().frame()->loader().mixedContentChecker()->canSubmitToInsecureForm(document().securityOrigin(), actionURL);
+        if (MixedContentChecker::isMixedFormAction(document().frame(), actionURL))
+            UseCounter::count(document().frame(), UseCounter::MixedContentFormPresent);
     } else if (name == targetAttr)
         m_attributes.setTarget(value);
     else if (name == methodAttr)
@@ -715,13 +714,29 @@ HTMLFormControlElement* HTMLFormElement::defaultButton() const
     return 0;
 }
 
-void HTMLFormElement::setNeedsValidityCheck()
+void HTMLFormElement::setNeedsValidityCheck(ValidityRecalcReason reason, bool isValid)
 {
-    // For now unconditionally order style recalculation, which triggers
-    // validity recalculation. In the near future, implement validity cache and
-    // recalculate style only if it changed.
-    pseudoStateChanged(CSSSelector::PseudoValid);
-    pseudoStateChanged(CSSSelector::PseudoInvalid);
+    bool formWasInvalid = m_invalidControlsCount > 0;
+    switch (reason) {
+    case ElementRemoval:
+        if (!isValid)
+            --m_invalidControlsCount;
+        break;
+    case ElementAddition:
+        if (!isValid)
+            ++m_invalidControlsCount;
+        break;
+    case ElementModification:
+        if (isValid)
+            --m_invalidControlsCount;
+        else
+            ++m_invalidControlsCount;
+        break;
+    }
+    if (formWasInvalid && !m_invalidControlsCount)
+        pseudoStateChanged(CSSSelector::PseudoValid);
+    if (!formWasInvalid && m_invalidControlsCount)
+        pseudoStateChanged(CSSSelector::PseudoInvalid);
 }
 
 bool HTMLFormElement::checkValidity()
@@ -731,6 +746,9 @@ bool HTMLFormElement::checkValidity()
 
 bool HTMLFormElement::checkInvalidControlsAndCollectUnhandled(WillBeHeapVector<RefPtrWillBeMember<HTMLFormControlElement>>* unhandledInvalidControls, CheckValidityEventBehavior eventBehavior)
 {
+    if (!unhandledInvalidControls && eventBehavior == CheckValidityDispatchNoEvent)
+        return m_invalidControlsCount;
+
     RefPtrWillBeRawPtr<HTMLFormElement> protector(this);
     // Copy associatedElements because event handlers called from
     // HTMLFormControlElement::checkValidity() might change associatedElements.
@@ -739,15 +757,17 @@ bool HTMLFormElement::checkInvalidControlsAndCollectUnhandled(WillBeHeapVector<R
     elements.reserveCapacity(associatedElements.size());
     for (unsigned i = 0; i < associatedElements.size(); ++i)
         elements.append(associatedElements[i]);
-    bool hasInvalidControls = false;
+    int invalidControlsCount = 0;
     for (unsigned i = 0; i < elements.size(); ++i) {
         if (elements[i]->form() == this && elements[i]->isFormControlElement()) {
             HTMLFormControlElement* control = toHTMLFormControlElement(elements[i].get());
             if (!control->checkValidity(unhandledInvalidControls, eventBehavior) && control->formOwner() == this)
-                hasInvalidControls = true;
+                ++invalidControlsCount;
         }
     }
-    return hasInvalidControls;
+    if (eventBehavior == CheckValidityDispatchNoEvent)
+        ASSERT(invalidControlsCount == m_invalidControlsCount);
+    return invalidControlsCount;
 }
 
 bool HTMLFormElement::reportValidity()

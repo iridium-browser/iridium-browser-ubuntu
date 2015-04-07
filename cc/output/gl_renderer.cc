@@ -27,6 +27,7 @@
 #include "cc/quads/stream_video_draw_quad.h"
 #include "cc/quads/texture_draw_quad.h"
 #include "cc/resources/layer_quad.h"
+#include "cc/resources/scoped_gpu_raster.h"
 #include "cc/resources/scoped_resource.h"
 #include "cc/resources/texture_mailbox_deleter.h"
 #include "gpu/GLES2/gl2extchromium.h"
@@ -155,12 +156,15 @@ class GLRenderer::ScopedUseGrContext {
  public:
   static scoped_ptr<ScopedUseGrContext> Create(GLRenderer* renderer,
                                                DrawingFrame* frame) {
-    if (!renderer->output_surface_->context_provider()->GrContext())
-      return nullptr;
     return make_scoped_ptr(new ScopedUseGrContext(renderer, frame));
   }
 
-  ~ScopedUseGrContext() { PassControlToGLRenderer(); }
+  ~ScopedUseGrContext() {
+    // Pass context control back to GLrenderer.
+    scoped_gpu_raster_ = nullptr;
+    renderer_->RestoreGLState();
+    renderer_->RestoreFramebuffer(frame_);
+  }
 
   GrContext* context() const {
     return renderer_->output_surface_->context_provider()->GrContext();
@@ -168,17 +172,14 @@ class GLRenderer::ScopedUseGrContext {
 
  private:
   ScopedUseGrContext(GLRenderer* renderer, DrawingFrame* frame)
-      : renderer_(renderer), frame_(frame) {
-    PassControlToSkia();
+      : scoped_gpu_raster_(
+            new ScopedGpuRaster(renderer->output_surface_->context_provider())),
+        renderer_(renderer),
+        frame_(frame) {
+    // scoped_gpu_raster_ passes context control to Skia.
   }
 
-  void PassControlToSkia() { context()->resetContext(); }
-
-  void PassControlToGLRenderer() {
-    renderer_->RestoreGLState();
-    renderer_->RestoreFramebuffer(frame_);
-  }
-
+  scoped_ptr<ScopedGpuRaster> scoped_gpu_raster_;
   GLRenderer* renderer_;
   DrawingFrame* frame_;
 
@@ -290,7 +291,7 @@ class GLRenderer::SyncQuery {
 
 scoped_ptr<GLRenderer> GLRenderer::Create(
     RendererClient* client,
-    const LayerTreeSettings* settings,
+    const RendererSettings* settings,
     OutputSurface* output_surface,
     ResourceProvider* resource_provider,
     TextureMailboxDeleter* texture_mailbox_deleter,
@@ -304,7 +305,7 @@ scoped_ptr<GLRenderer> GLRenderer::Create(
 }
 
 GLRenderer::GLRenderer(RendererClient* client,
-                       const LayerTreeSettings* settings,
+                       const RendererSettings* settings,
                        OutputSurface* output_surface,
                        ResourceProvider* resource_provider,
                        TextureMailboxDeleter* texture_mailbox_deleter,
@@ -1628,7 +1629,8 @@ void GLRenderer::DrawContentQuadAA(const DrawingFrame* frame,
   SetupQuadForAntialiasing(device_transform, quad, &local_quad, edge);
 
   ResourceProvider::ScopedSamplerGL quad_resource_lock(
-      resource_provider_, resource_id, GL_LINEAR);
+      resource_provider_, resource_id,
+      quad->nearest_neighbor ? GL_NEAREST : GL_LINEAR);
   SamplerType sampler =
       SamplerTypeFromTextureTarget(quad_resource_lock.target());
 
@@ -1712,7 +1714,8 @@ void GLRenderer::DrawContentQuadNoAA(const DrawingFrame* frame,
 
   bool scaled = (tex_to_geom_scale_x != 1.f || tex_to_geom_scale_y != 1.f);
   GLenum filter =
-      (scaled || !quad->quadTransform().IsIdentityOrIntegerTranslation())
+      (scaled || !quad->quadTransform().IsIdentityOrIntegerTranslation()) &&
+              !quad->nearest_neighbor
           ? GL_LINEAR
           : GL_NEAREST;
 
@@ -1983,8 +1986,8 @@ void GLRenderer::DrawPictureQuad(const DrawingFrame* frame,
   }
 
   SkCanvas canvas(on_demand_tile_raster_bitmap_);
-  quad->picture_pile->PlaybackToCanvas(&canvas, quad->content_rect,
-                                       quad->contents_scale);
+  quad->raster_source->PlaybackToCanvas(&canvas, quad->content_rect,
+                                        quad->contents_scale);
 
   uint8_t* bitmap_pixels = NULL;
   SkBitmap on_demand_tile_raster_bitmap_dest;
@@ -2054,14 +2057,17 @@ void GLRenderer::FlushTextureQuadCache() {
   GLC(gl_, gl_->Uniform1i(draw_cache_.sampler_location, 0));
 
   // Assume the current active textures is 0.
-  ResourceProvider::ScopedReadLockGL locked_quad(resource_provider_,
-                                                 draw_cache_.resource_id);
+  ResourceProvider::ScopedSamplerGL locked_quad(
+      resource_provider_,
+      draw_cache_.resource_id,
+      draw_cache_.nearest_neighbor ? GL_NEAREST : GL_LINEAR);
   DCHECK_EQ(GL_TEXTURE0, GetActiveTextureUnit(gl_));
   GLC(gl_, gl_->BindTexture(GL_TEXTURE_2D, locked_quad.texture_id()));
 
-  COMPILE_ASSERT(sizeof(Float4) == 4 * sizeof(float), struct_is_densely_packed);
-  COMPILE_ASSERT(sizeof(Float16) == 16 * sizeof(float),
-                 struct_is_densely_packed);
+  static_assert(sizeof(Float4) == 4 * sizeof(float),
+                "Float4 struct should be densely packed");
+  static_assert(sizeof(Float16) == 16 * sizeof(float),
+                "Float16 struct should be densely packed");
 
   // Upload the tranforms for both points and uvs.
   GLC(gl_,
@@ -2133,12 +2139,14 @@ void GLRenderer::EnqueueTextureQuad(const DrawingFrame* frame,
   if (draw_cache_.program_id != binding.program_id ||
       draw_cache_.resource_id != resource_id ||
       draw_cache_.needs_blending != quad->ShouldDrawWithBlending() ||
+      draw_cache_.nearest_neighbor != quad->nearest_neighbor ||
       draw_cache_.background_color != quad->background_color ||
       draw_cache_.matrix_data.size() >= 8) {
     FlushTextureQuadCache();
     draw_cache_.program_id = binding.program_id;
     draw_cache_.resource_id = resource_id;
     draw_cache_.needs_blending = quad->ShouldDrawWithBlending();
+    draw_cache_.nearest_neighbor = quad->nearest_neighbor;
     draw_cache_.background_color = quad->background_color;
 
     draw_cache_.uv_xform_location = binding.tex_transform_location;

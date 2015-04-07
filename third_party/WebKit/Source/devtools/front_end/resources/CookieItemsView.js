@@ -37,30 +37,33 @@ WebInspector.CookieItemsView = function(treeElement, cookieDomain)
 
     this.element.classList.add("storage-view");
 
-    this._deleteButton = new WebInspector.StatusBarButton(WebInspector.UIString("Delete"), "delete-storage-status-bar-item");
-    this._deleteButton.visible = false;
+    this._deleteButton = new WebInspector.StatusBarButton(WebInspector.UIString("Delete"), "delete-status-bar-item");
+    this._deleteButton.setVisible(false);
     this._deleteButton.addEventListener("click", this._deleteButtonClicked, this);
 
-    this._clearButton = new WebInspector.StatusBarButton(WebInspector.UIString("Clear"), "clear-storage-status-bar-item");
-    this._clearButton.visible = false;
+    this._clearButton = new WebInspector.StatusBarButton(WebInspector.UIString("Clear"), "clear-status-bar-item");
+    this._clearButton.setVisible(false);
     this._clearButton.addEventListener("click", this._clearButtonClicked, this);
 
-    this._refreshButton = new WebInspector.StatusBarButton(WebInspector.UIString("Refresh"), "refresh-storage-status-bar-item");
+    this._refreshButton = new WebInspector.StatusBarButton(WebInspector.UIString("Refresh"), "refresh-status-bar-item");
     this._refreshButton.addEventListener("click", this._refreshButtonClicked, this);
 
     this._treeElement = treeElement;
     this._cookieDomain = cookieDomain;
 
-    this._emptyView = new WebInspector.EmptyView(WebInspector.UIString("This site has no cookies."));
+    this._emptyView = new WebInspector.EmptyView(cookieDomain ? WebInspector.UIString("This site has no cookies.") : WebInspector.UIString("By default cookies are disabled for local files.\nYou could override this by starting the browser with --enable-file-cookies command line flag."));
     this._emptyView.show(this.element);
 
     this.element.addEventListener("contextmenu", this._contextMenu.bind(this), true);
 }
 
 WebInspector.CookieItemsView.prototype = {
-    get statusBarItems()
+    /**
+     * @return {!Array.<!WebInspector.StatusBarItem>}
+     */
+    statusBarItems: function()
     {
-        return [this._refreshButton.element, this._clearButton.element, this._deleteButton.element];
+        return [this._refreshButton, this._clearButton, this._deleteButton];
     },
 
     wasShown: function()
@@ -70,7 +73,7 @@ WebInspector.CookieItemsView.prototype = {
 
     willHide: function()
     {
-        this._deleteButton.visible = false;
+        this._deleteButton.setVisible(false);
     },
 
     _update: function()
@@ -88,8 +91,8 @@ WebInspector.CookieItemsView.prototype = {
         if (!this._cookies.length) {
             // Nothing to show.
             this._emptyView.show(this.element);
-            this._clearButton.visible = false;
-            this._deleteButton.visible = false;
+            this._clearButton.setVisible(false);
+            this._deleteButton.setVisible(false);
             if (this._cookiesTable)
                 this._cookiesTable.detach();
             return;
@@ -103,8 +106,8 @@ WebInspector.CookieItemsView.prototype = {
         this._cookiesTable.show(this.element);
         this._treeElement.subtitle = String.sprintf(WebInspector.UIString("%d cookies (%s)"), this._cookies.length,
             Number.bytesToString(this._totalSize));
-        this._clearButton.visible = true;
-        this._deleteButton.visible = !!this._cookiesTable.selectedCookie();
+        this._clearButton.setVisible(true);
+        this._deleteButton.setVisible(!!this._cookiesTable.selectedCookie());
     },
 
     /**
@@ -157,7 +160,7 @@ WebInspector.CookieItemsView.prototype = {
 
     _showDeleteButton: function()
     {
-        this._deleteButton.visible = true;
+        this._deleteButton.setVisible(true);
     },
 
     _deleteButtonClicked: function()

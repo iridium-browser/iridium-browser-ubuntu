@@ -52,15 +52,15 @@ PassRefPtrWillBeRawPtr<AnimationEffect> EffectInput::convert(Element* element, c
     StringKeyframeVector keyframes;
     double lastOffset = 0;
 
-    for (size_t i = 0; i < keyframeDictionaryVector.size(); ++i) {
+    for (const auto& keyframeDictionary : keyframeDictionaryVector) {
         RefPtrWillBeRawPtr<StringKeyframe> keyframe = StringKeyframe::create();
 
         ScriptValue scriptValue;
-        bool frameHasOffset = DictionaryHelper::get(keyframeDictionaryVector[i], "offset", scriptValue) && !scriptValue.isNull();
+        bool frameHasOffset = DictionaryHelper::get(keyframeDictionary, "offset", scriptValue) && !scriptValue.isNull();
 
         if (frameHasOffset) {
             double offset;
-            DictionaryHelper::get(keyframeDictionaryVector[i], "offset", offset);
+            DictionaryHelper::get(keyframeDictionary, "offset", offset);
 
             // Keyframes with offsets outside the range [0.0, 1.0] are an error.
             if (std::isnan(offset)) {
@@ -84,32 +84,35 @@ PassRefPtrWillBeRawPtr<AnimationEffect> EffectInput::convert(Element* element, c
         keyframes.append(keyframe);
 
         String compositeString;
-        DictionaryHelper::get(keyframeDictionaryVector[i], "composite", compositeString);
+        DictionaryHelper::get(keyframeDictionary, "composite", compositeString);
         if (compositeString == "add")
             keyframe->setComposite(AnimationEffect::CompositeAdd);
 
         String timingFunctionString;
-        if (DictionaryHelper::get(keyframeDictionaryVector[i], "easing", timingFunctionString)) {
+        if (DictionaryHelper::get(keyframeDictionary, "easing", timingFunctionString)) {
             if (RefPtr<TimingFunction> timingFunction = AnimationInputHelpers::parseTimingFunction(timingFunctionString))
                 keyframe->setEasing(timingFunction);
         }
 
         Vector<String> keyframeProperties;
-        keyframeDictionaryVector[i].getPropertyNames(keyframeProperties);
-        for (size_t j = 0; j < keyframeProperties.size(); ++j) {
-            String property = keyframeProperties[j];
+        keyframeDictionary.getPropertyNames(keyframeProperties);
+        for (const auto& property : keyframeProperties) {
             CSSPropertyID id = AnimationInputHelpers::keyframeAttributeToCSSPropertyID(property);
             if (id == CSSPropertyInvalid)
                 continue;
             String value;
-            DictionaryHelper::get(keyframeDictionaryVector[i], property, value);
+            DictionaryHelper::get(keyframeDictionary, property, value);
             keyframe->setPropertyValue(id, value, styleSheetContents);
         }
     }
 
     RefPtrWillBeRawPtr<StringKeyframeEffectModel> keyframeEffectModel = StringKeyframeEffectModel::create(keyframes);
-    if (!keyframeEffectModel->isReplaceOnly()) {
+    if (keyframeEffectModel->hasSyntheticKeyframes()) {
         exceptionState.throwDOMException(NotSupportedError, "Partial keyframes are not supported.");
+        return nullptr;
+    }
+    if (!keyframeEffectModel->isReplaceOnly()) {
+        exceptionState.throwDOMException(NotSupportedError, "Additive animations are not supported.");
         return nullptr;
     }
     keyframeEffectModel->forceConversionsToAnimatableValues(element);

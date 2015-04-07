@@ -35,6 +35,7 @@
 #include "core/animation/AnimationClock.h"
 #include "core/dom/Document.h"
 #include "core/frame/FrameView.h"
+#include "core/inspector/InspectorInstrumentation.h"
 #include "core/loader/DocumentLoader.h"
 #include "core/page/Page.h"
 #include "platform/TraceEvent.h"
@@ -63,6 +64,10 @@ PassRefPtrWillBeRawPtr<AnimationTimeline> AnimationTimeline::create(Document* do
 AnimationTimeline::AnimationTimeline(Document* document, PassOwnPtrWillBeRawPtr<PlatformTiming> timing)
     : m_document(document)
     , m_zeroTime(0)
+    , m_documentCurrentTimeSnapshot(0)
+    , m_zeroTimeOffset(0)
+    , m_playbackRate(1)
+    , m_lastCurrentTimeInternal(0)
 {
     if (!timing)
         m_timing = adoptPtrWillBeNoop(new AnimationTimelineTiming(this));
@@ -86,6 +91,7 @@ AnimationPlayer* AnimationTimeline::createAnimationPlayer(AnimationNode* child)
     AnimationPlayer* result = player.get();
     m_players.add(result);
     setOutdatedAnimationPlayer(result);
+    InspectorInstrumentation::didCreateAnimationPlayer(m_document, *result);
     return result;
 }
 
@@ -101,7 +107,7 @@ WillBeHeapVector<RefPtrWillBeMember<AnimationPlayer>> AnimationTimeline::getAnim
 {
     WillBeHeapVector<RefPtrWillBeMember<AnimationPlayer>> animationPlayers;
     for (const auto& player : m_players) {
-        if (player->source() && player->source()->isCurrent())
+        if (player->source() && (player->source()->isCurrent() || player->source()->isInEffect()))
             animationPlayers.append(player);
     }
     std::sort(animationPlayers.begin(), animationPlayers.end(), compareAnimationPlayers);
@@ -117,9 +123,9 @@ void AnimationTimeline::serviceAnimations(TimingUpdateReason reason)
 {
     TRACE_EVENT0("blink", "AnimationTimeline::serviceAnimations");
 
-    m_timing->cancelWake();
+    m_lastCurrentTimeInternal = currentTimeInternal();
 
-    double timeToNextEffect = std::numeric_limits<double>::infinity();
+    m_timing->cancelWake();
 
     WillBeHeapVector<RawPtrWillBeMember<AnimationPlayer>> players;
     players.reserveInitialCapacity(m_playersNeedingUpdate.size());
@@ -129,18 +135,27 @@ void AnimationTimeline::serviceAnimations(TimingUpdateReason reason)
     std::sort(players.begin(), players.end(), AnimationPlayer::hasLowerPriority);
 
     for (AnimationPlayer* player : players) {
-        if (player->update(reason))
-            timeToNextEffect = std::min(timeToNextEffect, player->timeToEffectChange());
-        else
+        if (!player->update(reason))
             m_playersNeedingUpdate.remove(player);
     }
 
-    if (timeToNextEffect < s_minimumDelay)
-        m_timing->serviceOnNextFrame();
-    else if (timeToNextEffect != std::numeric_limits<double>::infinity())
-        m_timing->wakeAfter(timeToNextEffect - s_minimumDelay);
-
     ASSERT(!hasOutdatedAnimationPlayer());
+}
+
+void AnimationTimeline::scheduleNextService()
+{
+    ASSERT(!hasOutdatedAnimationPlayer());
+
+    double timeToNextEffect = std::numeric_limits<double>::infinity();
+    for (const auto& player : m_playersNeedingUpdate) {
+        timeToNextEffect = std::min(timeToNextEffect, player->timeToEffectChange());
+    }
+
+    if (timeToNextEffect < s_minimumDelay) {
+        m_timing->serviceOnNextFrame();
+    } else if (timeToNextEffect != std::numeric_limits<double>::infinity()) {
+        m_timing->wakeAfter(timeToNextEffect - s_minimumDelay);
+    }
 }
 
 void AnimationTimeline::AnimationTimelineTiming::wakeAfter(double duration)
@@ -170,7 +185,7 @@ double AnimationTimeline::zeroTime()
     if (!m_zeroTime && m_document && m_document->loader()) {
         m_zeroTime = m_document->loader()->timing()->referenceMonotonicTime();
     }
-    return m_zeroTime;
+    return m_zeroTime + m_zeroTimeOffset;
 }
 
 double AnimationTimeline::currentTime(bool& isNull)
@@ -184,7 +199,9 @@ double AnimationTimeline::currentTimeInternal(bool& isNull)
         isNull = true;
         return std::numeric_limits<double>::quiet_NaN();
     }
-    double result = m_document->animationClock().currentTime() - zeroTime();
+    // New currentTime = currentTime when the playback rate was last changed + time delta since then * playback rate
+    double delta = document()->animationClock().currentTime() - m_documentCurrentTimeSnapshot;
+    double result = m_documentCurrentTimeSnapshot - zeroTime() + delta * playbackRate();
     isNull = std::isnan(result);
     return result;
 }
@@ -198,6 +215,16 @@ double AnimationTimeline::currentTimeInternal()
 {
     bool isNull;
     return currentTimeInternal(isNull);
+}
+
+void AnimationTimeline::setCurrentTime(double currentTime)
+{
+    setCurrentTimeInternal(currentTime / 1000);
+}
+
+void AnimationTimeline::setCurrentTimeInternal(double currentTime)
+{
+    m_zeroTimeOffset = document()->animationClock().currentTime() - m_zeroTime - currentTime;
 }
 
 double AnimationTimeline::effectiveTime()
@@ -222,12 +249,35 @@ bool AnimationTimeline::hasOutdatedAnimationPlayer() const
     return false;
 }
 
+bool AnimationTimeline::needsAnimationTimingUpdate()
+{
+    return m_playersNeedingUpdate.size() && currentTimeInternal() != m_lastCurrentTimeInternal;
+}
+
 void AnimationTimeline::setOutdatedAnimationPlayer(AnimationPlayer* player)
 {
     ASSERT(player->outdated());
     m_playersNeedingUpdate.add(player);
     if (m_document && m_document->page() && !m_document->page()->animator().isServicingAnimations())
         m_timing->serviceOnNextFrame();
+}
+
+void AnimationTimeline::setPlaybackRate(double playbackRate)
+{
+    // FIXME: floating point error difference between current time before and after the playback rate changes
+    if (!m_documentCurrentTimeSnapshot)
+        m_documentCurrentTimeSnapshot = m_zeroTime;
+    m_zeroTimeOffset += (document()->animationClock().currentTime() - m_documentCurrentTimeSnapshot) * (1 - m_playbackRate);
+    m_documentCurrentTimeSnapshot = document()->animationClock().currentTime();
+    m_playbackRate = playbackRate;
+    for (const auto& player : m_players) {
+        player->setCompositorPending(true);
+    }
+}
+
+double AnimationTimeline::playbackRate() const
+{
+    return m_playbackRate;
 }
 
 #if !ENABLE(OILPAN)

@@ -40,7 +40,7 @@ class MediaQuerySet;
 // retrieve the current value of the given media query and to add/remove listeners that
 // will be called whenever the value of the query changes.
 
-class MediaQueryList final : public RefCountedWillBeGarbageCollectedFinalized<MediaQueryList>, public EventTargetWithInlineData, public ActiveDOMObject {
+class MediaQueryList final : public EventTargetWithInlineData, public RefCountedWillBeNoBase<MediaQueryList>, public ActiveDOMObject {
     DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCounted<MediaQueryList>);
     DEFINE_WRAPPERTYPEINFO();
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(MediaQueryList);
@@ -65,7 +65,7 @@ public:
     // Will return true if a DOM event should be scheduled.
     bool mediaFeaturesChanged(WillBeHeapVector<RefPtrWillBeMember<MediaQueryListListener> >* listenersToNotify);
 
-    void trace(Visitor*);
+    virtual void trace(Visitor*) override;
 
     // From ActiveDOMObject
     virtual bool hasPendingActivity() const override;

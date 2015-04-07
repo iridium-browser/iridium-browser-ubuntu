@@ -30,7 +30,7 @@ public:
     static PassRefPtrWillBeRawPtr<ImmutableStylePropertySet> parseInlineStyleDeclaration(const String&, Element*);
 
     static PassOwnPtr<Vector<double> > parseKeyframeKeyList(const String&);
-    static PassRefPtrWillBeRawPtr<StyleKeyframe> parseKeyframeRule(const CSSParserContext&, StyleSheetContents*, const String&);
+    static PassRefPtrWillBeRawPtr<StyleRuleKeyframe> parseKeyframeRule(const CSSParserContext&, StyleSheetContents*, const String&);
 
     static bool parseSupportsCondition(const String&);
 
@@ -42,6 +42,8 @@ private:
     static bool parseValue(MutableStylePropertySet*, CSSPropertyID, const String&, bool important, const CSSParserContext&);
     static bool parseFastPath(MutableStylePropertySet*, CSSPropertyID, const String&, bool important, CSSParserMode);
 
+    // FIXME: We should store an OwnPtr<BisonCSSParser> and CSSParserContext here
+    // to avoid initializing the BisonCSSParser when using the new CSS parser.
     BisonCSSParser m_bisonParser;
 };
 

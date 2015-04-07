@@ -74,15 +74,19 @@ private:
     void updatePredictedBaseURL(const Token&);
 
     struct Checkpoint {
-        Checkpoint(const KURL& predictedBaseElementURL, bool inStyle, size_t templateCount)
+        Checkpoint(const KURL& predictedBaseElementURL, bool inStyle, bool isAppCacheEnabled, bool isCSPEnabled, size_t templateCount)
             : predictedBaseElementURL(predictedBaseElementURL)
             , inStyle(inStyle)
+            , isAppCacheEnabled(isAppCacheEnabled)
+            , isCSPEnabled(isCSPEnabled)
             , templateCount(templateCount)
         {
         }
 
         KURL predictedBaseElementURL;
         bool inStyle;
+        bool isAppCacheEnabled;
+        bool isCSPEnabled;
         size_t templateCount;
     };
 
@@ -91,6 +95,8 @@ private:
     KURL m_predictedBaseElementURL;
     bool m_inStyle;
     bool m_inPicture;
+    bool m_isAppCacheEnabled;
+    bool m_isCSPEnabled;
     String m_pictureSourceURL;
     size_t m_templateCount;
     RefPtr<MediaValues> m_mediaValues;

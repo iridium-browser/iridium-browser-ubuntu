@@ -42,10 +42,10 @@
 #include "third_party/skia/include/core/SkShader.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/pango_util.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/size.h"
 #include "ui/gfx/skbitmap_operations.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/resources/grit/ui_resources.h"
@@ -396,7 +396,7 @@ views::LinuxUI::NonClientMiddleClickAction GetDefaultMiddleClickAction() {
 }  // namespace
 
 Gtk2UI::Gtk2UI() : middle_click_action_(GetDefaultMiddleClickAction()) {
-  GtkInitFromCommandLine(*CommandLine::ForCurrentProcess());
+  GtkInitFromCommandLine(*base::CommandLine::ForCurrentProcess());
 }
 
 void Gtk2UI::Initialize() {
@@ -1146,8 +1146,6 @@ SkBitmap Gtk2UI::GenerateFrameImage(
     SkColor lighter = gradient_top_color ?
         GdkColorToSkColor(*gradient_top_color) :
         color_utils::HSLShift(base, kGtkFrameShift);
-    if (gradient_top_color)
-      gdk_color_free(gradient_top_color);
     skia::RefPtr<SkShader> shader = gfx::CreateGradientShader(
         0, gradient_size, lighter, base);
     SkPaint paint;
@@ -1157,6 +1155,9 @@ SkBitmap Gtk2UI::GenerateFrameImage(
 
     canvas.DrawRect(gfx::Rect(0, 0, kToolbarImageWidth, gradient_size), paint);
   }
+
+  if (gradient_top_color)
+    gdk_color_free(gradient_top_color);
 
   canvas.FillRect(gfx::Rect(0, gradient_size, kToolbarImageWidth,
                             kToolbarImageHeight - gradient_size), base);

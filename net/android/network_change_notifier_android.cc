@@ -114,8 +114,18 @@ NetworkChangeNotifierAndroid::GetCurrentConnectionType() const {
   return delegate_->GetCurrentConnectionType();
 }
 
+double NetworkChangeNotifierAndroid::GetCurrentMaxBandwidth() const {
+  return delegate_->GetCurrentMaxBandwidth();
+}
+
 void NetworkChangeNotifierAndroid::OnConnectionTypeChanged() {
   DnsConfigServiceThread::NotifyNetworkChangeNotifierObservers();
+}
+
+void NetworkChangeNotifierAndroid::OnMaxBandwidthChanged(
+    double max_bandwidth_mbps) {
+  NetworkChangeNotifier::NotifyObserversOfMaxBandwidthChange(
+      max_bandwidth_mbps);
 }
 
 // static

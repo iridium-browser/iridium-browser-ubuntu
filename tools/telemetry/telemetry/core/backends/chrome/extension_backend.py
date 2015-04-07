@@ -5,19 +5,20 @@
 import collections
 
 from telemetry.core import extension_page
-from telemetry.core.backends.chrome import inspector_backend_list
+from telemetry.core.backends.chrome_inspector import inspector_backend_list
 
 
 class ExtensionBackendList(inspector_backend_list.InspectorBackendList):
   """A dynamic sequence of extension_page.ExtensionPages."""
 
   def __init__(self, browser_backend):
-    super(ExtensionBackendList, self).__init__(
-        browser_backend, backend_wrapper=extension_page.ExtensionPage)
+    super(ExtensionBackendList, self).__init__(browser_backend)
 
   def ShouldIncludeContext(self, context):
     return context['url'].startswith('chrome-extension://')
 
+  def CreateWrapper(self, inspector_backend):
+    return extension_page.ExtensionPage(inspector_backend)
 
 class ExtensionBackendDict(collections.Mapping):
   """A dynamic mapping of extension_id to extension_page.ExtensionPages."""

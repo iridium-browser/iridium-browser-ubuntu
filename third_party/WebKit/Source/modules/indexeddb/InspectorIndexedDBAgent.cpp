@@ -178,7 +178,7 @@ public:
 
         IDBDatabase* idbDatabase = requestResult->idbDatabase();
         m_executableWithDatabase->execute(idbDatabase);
-        V8PerIsolateData::from(m_executableWithDatabase->scriptState()->isolate())->ensureIDBPendingTransactionMonitor()->deactivateNewTransactions();
+        V8PerIsolateData::from(m_executableWithDatabase->scriptState()->isolate())->runEndOfScopeTasks();
         idbDatabase->close();
     }
 
@@ -204,7 +204,9 @@ void ExecutableWithDatabase::start(IDBFactory* idbFactory, SecurityOrigin*, cons
 static IDBTransaction* transactionForDatabase(ScriptState* scriptState, IDBDatabase* idbDatabase, const String& objectStoreName, const String& mode = IndexedDBNames::readonly)
 {
     TrackExceptionState exceptionState;
-    IDBTransaction* idbTransaction = idbDatabase->transaction(scriptState, objectStoreName, mode, exceptionState);
+    StringOrStringSequenceOrDOMStringList scope;
+    scope.setString(objectStoreName);
+    IDBTransaction* idbTransaction = idbDatabase->transaction(scriptState, scope, mode, exceptionState);
     if (exceptionState.hadException())
         return 0;
     return idbTransaction;

@@ -27,7 +27,7 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
 #include "ui/base/window_open_disposition.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 
 #if defined(OS_MACOSX)
 #include "chrome/browser/ui/browser_commands_mac.h"
@@ -200,7 +200,7 @@ WebContents* OpenWebAppTab(const AppLaunchParams& launch_params,
     if (launch_type == extensions::LAUNCH_TYPE_FULLSCREEN &&
         !browser->window()->IsFullscreen()) {
 #if defined(OS_MACOSX)
-      chrome::ToggleFullscreenWithChromeOrFallback(browser);
+      chrome::ToggleFullscreenWithToolbarOrFallback(browser);
 #else
       chrome::ToggleFullscreenMode(browser);
 #endif

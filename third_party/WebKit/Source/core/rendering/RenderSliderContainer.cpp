@@ -82,7 +82,7 @@ void RenderSliderContainer::computeLogicalHeight(LayoutUnit logicalHeight, Layou
             trackHeight *= zoomFactor;
 
         // FIXME: The trackHeight should have been added before updateLogicalHeight was called to avoid this hack.
-        updateIntrinsicContentLogicalHeight(trackHeight);
+        setIntrinsicContentLogicalHeight(trackHeight);
 
         RenderBox::computeLogicalHeight(trackHeight, logicalTop, computedValues);
         return;
@@ -91,7 +91,7 @@ void RenderSliderContainer::computeLogicalHeight(LayoutUnit logicalHeight, Layou
         logicalHeight = RenderSlider::defaultTrackLength;
 
     // FIXME: The trackHeight should have been added before updateLogicalHeight was called to avoid this hack.
-    updateIntrinsicContentLogicalHeight(logicalHeight);
+    setIntrinsicContentLogicalHeight(logicalHeight);
 
     RenderBox::computeLogicalHeight(logicalHeight, logicalTop, computedValues);
 }
@@ -129,11 +129,11 @@ void RenderSliderContainer::layout()
 
     double percentageOffset = sliderPosition(input).toDouble();
     LayoutUnit availableExtent = isVertical ? track->contentHeight() : track->contentWidth();
-    availableExtent -= isVertical ? thumb->height() : thumb->width();
+    availableExtent -= isVertical ? thumb->size().height() : thumb->size().width();
     LayoutUnit offset = percentageOffset * availableExtent;
     LayoutPoint thumbLocation = thumb->location();
     if (isVertical)
-        thumbLocation.setY(thumbLocation.y() + track->contentHeight() - thumb->height() - offset);
+        thumbLocation.setY(thumbLocation.y() + track->contentHeight() - thumb->size().height() - offset);
     else if (style()->isLeftToRightDirection())
         thumbLocation.setX(thumbLocation.x() + offset);
     else

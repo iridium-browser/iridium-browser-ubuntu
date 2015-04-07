@@ -514,8 +514,8 @@ VisiblePosition VisiblePosition::skipToStartOfEditingBoundary(const VisiblePosit
     if (highestRootOfPos == highestRoot)
         return pos;
 
-    // If |pos| has an editable root, skip to the start
-    if (highestRootOfPos)
+    // If this is not editable but |pos| has an editable root, skip to the start
+    if (!highestRoot && highestRootOfPos)
         return VisiblePosition(previousVisuallyDistinctCandidate(Position(highestRootOfPos, Position::PositionIsBeforeAnchor).parentAnchoredEquivalent()));
 
     // That must mean that |pos| is not editable. Return the last position before pos that is in the same editable region as this position
@@ -534,8 +534,8 @@ VisiblePosition VisiblePosition::skipToEndOfEditingBoundary(const VisiblePositio
     if (highestRootOfPos == highestRoot)
         return pos;
 
-    // If |pos| has an editable root, skip to the end
-    if (highestRootOfPos)
+    // If this is not editable but |pos| has an editable root, skip to the end
+    if (!highestRoot && highestRootOfPos)
         return VisiblePosition(Position(highestRootOfPos, Position::PositionIsAfterAnchor).parentAnchoredEquivalent());
 
     // That must mean that |pos| is not editable. Return the next position after pos that is in the same editable region as this position
@@ -671,7 +671,7 @@ int VisiblePosition::lineDirectionPointForBlockDirectionNavigation() const
     // This ignores transforms on purpose, for now. Vertical navigation is done
     // without consulting transforms, so that 'up' in transformed text is 'up'
     // relative to the text, not absolute 'up'.
-    FloatPoint caretPoint = renderer->localToAbsolute(localRect.location());
+    FloatPoint caretPoint = renderer->localToAbsolute(FloatPoint(localRect.location()));
     RenderObject* containingBlock = renderer->containingBlock();
     if (!containingBlock)
         containingBlock = renderer; // Just use ourselves to determine the writing mode if we have no containing block.

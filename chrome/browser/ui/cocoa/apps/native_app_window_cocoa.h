@@ -17,7 +17,7 @@
 #include "extensions/browser/app_window/size_constraints.h"
 #include "extensions/common/draggable_region.h"
 #include "ui/base/accelerators/accelerator_manager.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 
 class ExtensionKeybindingRegistryCocoa;
 class NativeAppWindowCocoa;
@@ -137,6 +137,7 @@ class NativeAppWindowCocoa : public extensions::NativeAppWindow,
   SkColor InactiveFrameColor() const override;
   gfx::Insets GetFrameInsets() const override;
   bool CanHaveAlphaEnabled() const override;
+  void SetInterceptAllKeys(bool want_all_keys) override;
 
   // These are used to simulate Mac-style hide/show. Since windows can be hidden
   // and shown using the app.window API, this sets is_hidden_with_app_ to

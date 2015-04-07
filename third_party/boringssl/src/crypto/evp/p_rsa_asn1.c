@@ -153,6 +153,10 @@ static int rsa_opaque(const EVP_PKEY *pkey) {
   return RSA_is_opaque(pkey->pkey.rsa);
 }
 
+static int rsa_supports_digest(const EVP_PKEY *pkey, const EVP_MD *md) {
+  return RSA_supports_digest(pkey->pkey.rsa, md);
+}
+
 static int int_rsa_size(const EVP_PKEY *pkey) {
   return RSA_size(pkey->pkey.rsa);
 }
@@ -406,24 +410,6 @@ static int rsa_sig_print(BIO *bp, const X509_ALGOR *sigalg,
   if (sig) {
     return X509_signature_dump(bp, sig, indent);
   }
-  return 1;
-}
-
-static int rsa_pkey_ctrl(EVP_PKEY *pkey, int op, long arg1, void *arg2) {
-  X509_ALGOR *alg = NULL;
-  switch (op) {
-    case ASN1_PKEY_CTRL_DEFAULT_MD_NID:
-      *(int *)arg2 = NID_sha1;
-      return 1;
-
-    default:
-      return -2;
-  }
-
-  if (alg) {
-    X509_ALGOR_set0(alg, OBJ_nid2obj(NID_rsaEncryption), V_ASN1_NULL, 0);
-  }
-
   return 1;
 }
 
@@ -701,6 +687,7 @@ const EVP_PKEY_ASN1_METHOD rsa_asn1_meth = {
   rsa_priv_print,
 
   rsa_opaque,
+  rsa_supports_digest,
 
   int_rsa_size,
   rsa_bits,
@@ -709,7 +696,6 @@ const EVP_PKEY_ASN1_METHOD rsa_asn1_meth = {
 
   rsa_sig_print,
   int_rsa_free,
-  rsa_pkey_ctrl,
 
   old_rsa_priv_decode,
   old_rsa_priv_encode,

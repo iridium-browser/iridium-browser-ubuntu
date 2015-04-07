@@ -5,25 +5,98 @@
 /**
  * The current selection object.
  *
- * @param {FileManager} fileManager FileManager instance.
- * @param {Array.<number>} indexes Selected indexes.
+ * @param {!FileManager} fileManager FileManager instance.
+ * @param {!Array.<number>} indexes Selected indexes.
  * @constructor
+ * @struct
  */
 function FileSelection(fileManager, indexes) {
+  /**
+   * @type {!FileManager}
+   * @private
+   * @const
+   */
   this.fileManager_ = fileManager;
+
+  /**
+   * @type {number}
+   * @private
+   */
   this.computeBytesSequence_ = 0;
+
+  /**
+   * @type {!Array.<number>}
+   * @const
+   */
   this.indexes = indexes;
+
+  /**
+   * @type {!Array.<!Entry>}
+   * @const
+   */
   this.entries = [];
+
+  /**
+   * @type {number}
+   */
   this.totalCount = 0;
+
+  /**
+   * @type {number}
+   */
   this.fileCount = 0;
+
+  /**
+   * @type {number}
+   */
   this.directoryCount = 0;
+
+  /**
+   * @type {number}
+   */
   this.bytes = 0;
+
+  /**
+   * @type {boolean}
+   */
   this.showBytes = false;
-  this.allDriveFilesPresent = false,
+
+  /**
+   * @type {boolean}
+   */
+  this.allDriveFilesPresent = false;
+
+  /**
+   * @type {?string}
+   */
   this.iconType = null;
+
+  /**
+   * @type {boolean}
+   */
   this.bytesKnown = false;
+
+  /**
+   * @type {boolean}
+   * @private
+   */
   this.mustBeHidden_ = false;
+
+  /**
+   * @type {Array.<string>}
+   */
   this.mimeTypes = null;
+
+  /**
+   * @type {!FileTasks}
+   */
+  this.tasks = new FileTasks(this.fileManager_);
+
+  /**
+   * @type {Promise}
+   * @private
+   */
+  this.asyncInitPromise_ = null;
 
   // Synchronously compute what we can.
   for (var i = 0; i < this.indexes.length; i++) {
@@ -49,39 +122,42 @@ function FileSelection(fileManager, indexes) {
     }
     this.totalCount++;
   }
-
-  this.tasks = new FileTasks(this.fileManager_);
-
-  Object.seal(this);
 }
 
 /**
  * Computes data required to get file tasks and requests the tasks.
- *
- * @param {function()} callback The callback.
+ * @return {!Promise}
  */
-FileSelection.prototype.createTasks = function(callback) {
-  if (!this.fileManager_.isOnDrive()) {
-    this.tasks.init(this.entries);
-    callback();
-    return;
-  }
-
-  this.fileManager_.metadataCache_.get(
-      this.entries, 'external', function(props) {
+FileSelection.prototype.completeInit = function() {
+  if (!this.asyncInitPromise_) {
+    if (!this.fileManager_.isOnDrive()) {
+      this.asyncInitPromise_ = Promise.all(this.entries.map(function(entry) {
+        return new Promise(function(fulfill) {
+          chrome.fileManagerPrivate.getMimeType(entry.toURL(), fulfill);
+        });
+      }.bind(this))).then(function(mimeTypes) {
+        this.allDriveFilesPresent = true;
+        this.mimeTypes = mimeTypes;
+        return this.tasks.init(this.entries, this.mimeTypes);
+      }.bind(this));
+    } else {
+      this.asyncInitPromise_ = new Promise(function(fulfill) {
+        this.fileManager_.metadataCache.get(this.entries, 'external', fulfill);
+      }.bind(this)).then(function(props) {
         var present = props.filter(function(p) {
           return p && p.availableOffline;
         });
         this.allDriveFilesPresent = present.length == props.length;
-
-        // Collect all of the mime types and push that info into the selection.
+        // Collect all of the mime types and push that info into the
+        // selection.
         this.mimeTypes = props.map(function(value) {
           return (value && value.contentMimeType) || '';
         });
-
-        this.tasks.init(this.entries, this.mimeTypes);
-        callback();
+        return this.tasks.init(this.entries, this.mimeTypes);
       }.bind(this));
+    }
+  }
+  return this.asyncInitPromise_;
 };
 
 /**
@@ -150,42 +226,58 @@ FileSelection.prototype.cancelComputing_ = function() {
 /**
  * This object encapsulates everything related to current selection.
  *
- * @param {FileManager} fileManager File manager instance.
+ * @param {!FileManager} fileManager File manager instance.
  * @extends {cr.EventTarget}
  * @constructor
+ * @struct
+ * @suppress {checkStructDictInheritance}
  */
 function FileSelectionHandler(fileManager) {
+  cr.EventTarget.call(this);
+
   this.fileManager_ = fileManager;
   // TODO(dgozman): create a shared object with most of UI elements.
-  this.okButton_ = fileManager.ui.dialogFooter.okButton;
-  this.filenameInput_ = fileManager.ui.dialogFooter.filenameInput;
   this.previewPanel_ = fileManager.ui.previewPanel;
-  this.taskItems_ = fileManager.taskItems_;
+  this.taskMenuButton_ = fileManager.ui.taskMenuButton;
   this.selection = new FileSelection(this.fileManager_, []);
+
+  /**
+   * @private
+   * @type {number}
+   */
+  this.selectionUpdateTimer_ = 0;
+
+  /**
+   * @private
+   * @type {!Date}
+   */
+  this.lastFileSelectionTime_ = new Date();
+
+  util.addEventListenerToBackgroundComponent(
+      assert(fileManager.fileOperationManager),
+      'entries-changed',
+      this.onFileSelectionChanged.bind(this));
+  // Register evnets to update file selections.
+  fileManager.directoryModel.addEventListener(
+      'directory-changed', this.onFileSelectionChanged.bind(this));
 }
 
 /**
- * Create the temporary disabled action menu item.
- * @return {Object} Created disabled item.
- * @private
+ * @enum {string}
  */
-FileSelectionHandler.createTemporaryDisabledActionMenuItem_ = function() {
-  if (!FileSelectionHandler.cachedDisabledActionMenuItem_) {
-    FileSelectionHandler.cachedDisabledActionMenuItem_ = {
-      label: str('ACTION_OPEN'),
-      disabled: true
-    };
-  }
+FileSelectionHandler.EventType = {
+  /**
+   * Dispatched every time when selection is changed.
+   */
+  CHANGE: 'change',
 
-  return FileSelectionHandler.cachedDisabledActionMenuItem_;
+  /**
+   * Dispatched 200ms later after the selecton is changed.
+   * If multiple changes are happened during the term, only one CHANGE_THROTTLED
+   * event is dispatched.
+   */
+  CHANGE_THROTTLED: 'changethrottled'
 };
-
-/**
- * Cached the temporary disabled action menu item. Used inside
- * FileSelectionHandler.createTemporaryDisabledActionMenuItem_().
- * @private
- */
-FileSelectionHandler.cachedDisabledActionMenuItem_ = null;
 
 /**
  * FileSelectionHandler extends cr.EventTarget.
@@ -215,21 +307,10 @@ FileSelectionHandler.IMAGE_HOVER_PREVIEW_SIZE = 200;
 FileSelectionHandler.prototype.onFileSelectionChanged = function() {
   var indexes =
       this.fileManager_.getCurrentList().selectionModel.selectedIndexes;
-  if (this.selection) this.selection.cancelComputing_();
+  if (this.selection)
+    this.selection.cancelComputing_();
   var selection = new FileSelection(this.fileManager_, indexes);
   this.selection = selection;
-
-  if (this.fileManager_.dialogType == DialogType.SELECT_SAVEAS_FILE) {
-    // If this is a save-as dialog, copy the selected file into the filename
-    // input text box.
-    if (this.selection.totalCount == 1 &&
-        this.selection.entries[0].isFile &&
-        this.filenameInput_.value != this.selection.entries[0].name) {
-      this.filenameInput_.value = this.selection.entries[0].name;
-    }
-  }
-
-  this.updateOkButton();
 
   if (this.selectionUpdateTimer_) {
     clearTimeout(this.selectionUpdateTimer_);
@@ -248,99 +329,24 @@ FileSelectionHandler.prototype.onFileSelectionChanged = function() {
   }
   this.lastFileSelectionTime_ = now;
 
-  if (this.fileManager_.dialogType === DialogType.FULL_PAGE &&
-      selection.directoryCount === 0 && selection.fileCount > 0) {
-    // Show disabled items for position calculation of the menu. They will be
-    // overridden in this.updateFileSelectionAsync().
-    this.fileManager_.updateContextMenuActionItems(
-        FileSelectionHandler.createTemporaryDisabledActionMenuItem_(), true);
-  } else {
-    // Update context menu.
-    this.fileManager_.updateContextMenuActionItems(null, false);
-  }
-
   this.selectionUpdateTimer_ = setTimeout(function() {
     this.selectionUpdateTimer_ = null;
     if (this.selection == selection)
-      this.updateFileSelectionAsync(selection);
+      this.updateFileSelectionAsync_(selection);
   }.bind(this), updateDelay);
-};
 
-/**
- * Updates the Ok button enabled state.
- *
- * @return {boolean} Whether button is enabled.
- */
-FileSelectionHandler.prototype.updateOkButton = function() {
-  var selectable;
-  var dialogType = this.fileManager_.dialogType;
-
-  if (DialogType.isFolderDialog(dialogType)) {
-    // In SELECT_FOLDER mode, we allow to select current directory
-    // when nothing is selected.
-    selectable = this.selection.directoryCount <= 1 &&
-        this.selection.fileCount == 0;
-  } else if (dialogType == DialogType.SELECT_OPEN_FILE) {
-    selectable = (this.isFileSelectionAvailable() &&
-                  this.selection.directoryCount == 0 &&
-                  this.selection.fileCount == 1);
-  } else if (dialogType == DialogType.SELECT_OPEN_MULTI_FILE) {
-    selectable = (this.isFileSelectionAvailable() &&
-                  this.selection.directoryCount == 0 &&
-                  this.selection.fileCount >= 1);
-  } else if (dialogType == DialogType.SELECT_SAVEAS_FILE) {
-    if (this.fileManager_.isOnReadonlyDirectory()) {
-      selectable = false;
-    } else {
-      selectable = !!this.filenameInput_.value;
-    }
-  } else if (dialogType == DialogType.FULL_PAGE) {
-    // No "select" buttons on the full page UI.
-    selectable = true;
-  } else {
-    throw new Error('Unknown dialog type');
-  }
-
-  this.okButton_.disabled = !selectable;
-  return selectable;
-};
-
-/**
-  * Check if all the files in the current selection are available. The only
-  * case when files might be not available is when the selection contains
-  * uncached Drive files and the browser is offline.
-  *
-  * @return {boolean} True if all files in the current selection are
-  *                   available.
-  */
-FileSelectionHandler.prototype.isFileSelectionAvailable = function() {
-  var isDriveOffline =
-      this.fileManager_.volumeManager.getDriveConnectionState().type ===
-          VolumeManagerCommon.DriveConnectionType.OFFLINE;
-  return !this.fileManager_.isOnDrive() || !isDriveOffline ||
-      this.selection.allDriveFilesPresent;
+  cr.dispatchSimpleEvent(this, FileSelectionHandler.EventType.CHANGE);
 };
 
 /**
  * Calculates async selection stats and updates secondary UI elements.
  *
  * @param {FileSelection} selection The selection object.
+ * @private
  */
-FileSelectionHandler.prototype.updateFileSelectionAsync = function(selection) {
-  if (this.selection != selection) return;
-
-  // Update the file tasks.
-  if (this.fileManager_.dialogType === DialogType.FULL_PAGE &&
-      selection.directoryCount === 0 && selection.fileCount > 0) {
-    selection.createTasks(function() {
-      if (this.selection != selection)
-        return;
-      selection.tasks.display(this.taskItems_);
-      selection.tasks.updateMenuItem();
-    }.bind(this));
-  } else {
-    this.taskItems_.hidden = true;
-  }
+FileSelectionHandler.prototype.updateFileSelectionAsync_ = function(selection) {
+  if (this.selection !== selection)
+    return;
 
   // Update preview panels.
   var wasVisible = this.previewPanel_.visible;
@@ -356,8 +362,17 @@ FileSelectionHandler.prototype.updateFileSelectionAsync = function(selection) {
   if (this.fileManager_.commandHandler)
     this.fileManager_.commandHandler.updateAvailability();
 
-  // Inform tests it's OK to click buttons now.
-  if (selection.totalCount > 0) {
-    util.testSendMessage('selection-change-complete');
-  }
+  cr.dispatchSimpleEvent(this, FileSelectionHandler.EventType.CHANGE_THROTTLED);
+};
+
+/**
+ * Returns whether all the selected files are available currently or not.
+ * Should be called after the selection initialized.
+ * @return {boolean}
+ */
+FileSelectionHandler.prototype.isAvailable = function() {
+  return !this.fileManager_.isOnDrive() ||
+      this.fileManager_.volumeManager.getDriveConnectionState().type !==
+          VolumeManagerCommon.DriveConnectionType.OFFLINE ||
+      this.selection.allDriveFilesPresent;
 };

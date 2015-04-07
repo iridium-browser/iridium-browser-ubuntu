@@ -12,6 +12,7 @@
 
 #include "base/basictypes.h"
 #include "net/base/net_export.h"
+#include "net/quic/crypto/cached_network_parameters.h"
 #include "net/quic/quic_bandwidth.h"
 #include "net/quic/quic_clock.h"
 #include "net/quic/quic_config.h"
@@ -29,14 +30,17 @@ class NET_EXPORT_PRIVATE SendAlgorithmInterface {
   typedef std::vector<std::pair<QuicPacketSequenceNumber, TransmissionInfo>>
       CongestionVector;
 
-  static SendAlgorithmInterface* Create(const QuicClock* clock,
-                                        const RttStats* rtt_stats,
-                                        CongestionControlType type,
-                                        QuicConnectionStats* stats);
+  static SendAlgorithmInterface* Create(
+      const QuicClock* clock,
+      const RttStats* rtt_stats,
+      CongestionControlType type,
+      QuicConnectionStats* stats,
+      QuicPacketCount initial_congestion_window);
 
   virtual ~SendAlgorithmInterface() {}
 
-  virtual void SetFromConfig(const QuicConfig& config, bool is_server) = 0;
+  virtual void SetFromConfig(
+      const QuicConfig& config, bool is_server, bool using_pacing) = 0;
 
   // Sets the number of connections to emulate when doing congestion control,
   // particularly for congestion avoidance.  Can be set any time.
@@ -110,6 +114,11 @@ class NET_EXPORT_PRIVATE SendAlgorithmInterface {
   virtual QuicByteCount GetSlowStartThreshold() const = 0;
 
   virtual CongestionControlType GetCongestionControlType() const = 0;
+
+  // Called by the Session when we get a bandwidth estimate from the client.
+  // Returns true if initial connection state is changed as a result.
+  virtual bool ResumeConnectionState(
+      const CachedNetworkParameters& cached_network_params) = 0;
 };
 
 }  // namespace net

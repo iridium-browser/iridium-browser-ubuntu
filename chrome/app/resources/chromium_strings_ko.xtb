@@ -5,7 +5,7 @@
 <translation id="5065199687811594072">웹 양식을 작성하기 위해 Chromium에서 신용카드 정보를 저장해도 되겠습니까?</translation>
 <translation id="6510925080656968729">Chromium 설치 제거</translation>
 <translation id="2615699638672665509">이 컴퓨터의 하드웨어가 더 이상 지원되지 않으므로 Chromium 업데이트가 곧 중단됩니다.</translation>
-<translation id="5532301346661895910">Chromium이 비밀번호를 |Google에 저장된 비밀번호|에 저장하고 다음에 필요할 때 기억할 것입니다.</translation>
+<translation id="5532301346661895910">Chromium은 비밀번호를 |Google에 저장된 비밀번호|에 저장하여 다음에 필요할 때 제공합니다.</translation>
 <translation id="6893813176749746474">Chromium이 업데이트되었지만, 최소 30일 동안 사용하지 않았습니다.</translation>
 <translation id="1550579416447684632">Chromium 앱 실행</translation>
 <translation id="2732467638532545152">컴퓨터에서 이 웹사이트의 보안 인증서를 처리할 수 없는 이전 버전의 Microsoft Windows를 실행 중입니다. 이 문제로 인해 <ph name="SITE"/>에서 제공한 인증서인지 <ph name="SITE"/>(으)로 위장한 네트워크의 사용자가 제공한 인증서인지 Chromium에서 확인할 수 없습니다. 컴퓨터를 최신 버전의 Windows로 업데이트하시기 바랍니다.</translation>
@@ -40,7 +40,6 @@
 <translation id="3883381313049582448">Chromium에서 생성한 비밀번호 사용</translation>
 <translation id="3549345495227188780">Chromium OS 시작하기</translation>
 <translation id="1668054258064581266">Chromium에서 계정을 삭제한 후 열려 있는 탭을 새로고침해야 적용됩니다.</translation>
-<translation id="6953661834318318668">Chromium 툴바</translation>
 <translation id="4285930937574705105">확인되지 않은 오류로 설치에 실패했습니다. Chromium이 실행 중인 경우 종료한 후 다시 실행하세요.</translation>
 <translation id="1396446129537741364">Chromium이 비밀번호를 표시하려고 합니다.</translation>
 <translation id="8987477933582888019">웹브라우저</translation>
@@ -94,6 +93,7 @@
 <translation id="7473891865547856676">건너뛰기</translation>
 <translation id="9191268552238695869">관리자가 Chromium을 시스템에 설치하여 모든 사용자가 사용할 수 있습니다. 시스템 수준의 Chromium은 사용자 수준의 설치를 대체합니다.</translation>
 <translation id="3509308970982693815">Chromium 창을 모두 닫고 다시 시도해 보세요.</translation>
+<translation id="8851136666856101339">main</translation>
 <translation id="4077262827416206768">모든 Chromium 창을 닫은 뒤 다시 Chromium을 실행하면 변경 사항이 반영됩니다.</translation>
 <translation id="6475912303565314141">또한 Chromium을 시작할 때 표시되는 페이지를 설정합니다.</translation>
 <translation id="1725059042853530269"><ph name="FILE_NAME"/>이(가) 인터넷 사용 환경을 손상할 수 있어서 Chromium에서 차단했습니다.</translation>
@@ -157,6 +157,7 @@
 <translation id="5909170354645388250">Chromium에서 사용되지 않았습니다. 자리표시자는 리소스 맵을 동기화 상태로 유지합니다. 하나의 인수($1)가 발생할 수 있습니다.</translation>
 <translation id="1144202035120576837"><ph name="SITE"/>은(는) 사용자 정보를 보호하기 위해 일반적으로 암호화를 사용합니다. Chromium이 이번에 <ph name="SITE"/>에 연결을 시도했을 때 웹사이트에서 비정상적이고
 잘못된 사용자 인증 정보를 반환했습니다. 공격자가 <ph name="SITE"/>인 것처럼 가장하고 있거나 Wi-Fi 로그인 화면이 연결을 차단했기 때문일 수 있습니다. 데이터 교환이 이뤄지기 전에 Chromium에서 연결을 차단했기 때문에 사용자 정보는 안전합니다.</translation>
+<translation id="2316129865977710310">아니요, 괜찮습니다.</translation>
 <translation id="7937630085815544518"><ph name="USER_EMAIL_ADDRESS"/>(으)로 Chromium에 로그인되어 있습니다. 같은 계정으로 다시 로그인해 주세요.</translation>
 <translation id="2685838254101182273">Chromium에서 업데이트를 중단했으며 이 버전의 운영체제를 더 이상 지원하지 않습니다.</translation>
 <translation id="8684913864886094367">Chromium이 제대로 종료되지 않았습니다.</translation>
@@ -170,6 +171,7 @@
 <translation id="2648074677641340862">설치 중 운영체제 오류가 발생했습니다. Chromium을 다시 다운로드하세요.</translation>
 <translation id="5942520288919337908"><ph name="EXTENSION_NAME"/>이(가) Chromium에 추가되었습니다.</translation>
 <translation id="549669000822060376">Chromium에서 최신 시스템 업데이트를 설치하는 동안 잠시 기다려 주세요.</translation>
+<translation id="1240763998429950591">Chromium을 최신 버전으로 업데이트하지 못했기 때문에 새로운 기능과 보안 수정 사항이 누락될 수 있습니다. Chromium을 업데이트해야 합니다.</translation>
 <translation id="6930860321615955692">https://support.google.com/chrome/?p=ib_chromeframe</translation>
 <translation id="3281987435599047980">단어 및 주변 내용을 Google 검색에 전송하며 정의, 사진, 검색결과, 기타 세부정보를 표시합니다.</translation>
 <translation id="4559775032954821361">Chromium 메뉴 &gt;
@@ -207,6 +209,7 @@
 <translation id="2966088006374919794"><ph name="SCHEME"/> 링크 처리를 위해 Chrome에서 외부 응용 프로그램을 실행해야 합니다. 요청 링크는 <ph name="PROTOLINK"/>입니다.</translation>
 <translation id="2558235863893655150">Chromium을 통해 비밀번호를 저장하시겠습니까?</translation>
 <translation id="6485906693002546646">Chromium 콘텐츠를 동기화하기 위해 <ph name="PROFILE_EMAIL"/>을(를) 사용 중입니다. 동기화 환경설정을 업데이트하거나 Google 계정 없이 Chromium을 사용하려면 <ph name="SETTINGS_LINK"/>(으)로 이동하세요.</translation>
+<translation id="705851970750939768">Chromium 업데이트</translation>
 <translation id="5772805321386874569">(Chromium을 <ph name="BEGIN_BUTTON"/>다시 시작<ph name="END_BUTTON"/>해야 함)</translation>
 <translation id="1688750314291223739">맞춤설정한 브라우저 기능을 웹에 저장하고 모든 컴퓨터의 Chromium에서 액세스할 수 있도록 동기화를 설정합니다.</translation>
 <translation id="8610831143142469229">Chromium이 방화벽이나 바이러스 백신이 설정된
@@ -244,7 +247,7 @@
 <translation id="1967743265616885482">같은 이름의 모듈이 Chromium과 충돌하는 것으로 알려져 있습니다.</translation>
 <translation id="7962572577636132072">Chromium은 자동으로 업데이트되므로 항상 최신 버전을 사용할 수 있습니다.</translation>
 <translation id="722928257909516027">Chromium 메뉴 표시</translation>
-<translation id="3744899669254331632">웹사이트가 Chromium이 처리할 수 없는 암호화된 사용자 인증 정보를 전송하였으므로 지금은 <ph name="SITE"/>에 방문할 수 없습니다. 네트워크 오류와 공격은 대체로 일시적인 문제이기 때문에 이 페이지는 이후에 다시 작동할 가능성이 높습니다.</translation>
+<translation id="3744899669254331632">웹사이트가 Chromium이 처리할 수 없는 암호화된 사용자 인증 정보를 전송하였으므로 지금은 <ph name="SITE"/>에 방문할 수 없습니다. 네트워크 오류와 공격은 대체로 일시적인 문제이기 때문에 이후에는 이 페이지가 제대로 작동할 가능성이 높습니다.</translation>
 <translation id="8704119203788522458">나만의 Chromium</translation>
 <translation id="8269379391216269538">Chromium 개선에 참여</translation>
 <translation id="4224199872375172890">Chromium이 최신 버전입니다.</translation>

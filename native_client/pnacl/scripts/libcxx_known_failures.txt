@@ -53,19 +53,12 @@ libc++::utilities/memory/unique.ptr/unique.ptr.single/unique.ptr.single.ctor/poi
 #  - atomic_init of aggregates is broken.
 #  - EmitAtomicExpr calls EmitCall which causes clang to generate an
 #    invalid cast and assert out.
-# Some of these issues are fixed by upstream r186049 which doesn't apply
-# as-is without other patches.
-libc++::atomics/atomics.types.generic/address.pass.cpp
 libc++::atomics/atomics.types.operations/atomics.types.operations.req/atomic_compare_exchange_strong.pass.cpp
 libc++::atomics/atomics.types.operations/atomics.types.operations.req/atomic_compare_exchange_strong_explicit.pass.cpp
 libc++::atomics/atomics.types.operations/atomics.types.operations.req/atomic_compare_exchange_weak.pass.cpp
 libc++::atomics/atomics.types.operations/atomics.types.operations.req/atomic_compare_exchange_weak_explicit.pass.cpp
 libc++::atomics/atomics.types.operations/atomics.types.operations.req/atomic_exchange.pass.cpp
 libc++::atomics/atomics.types.operations/atomics.types.operations.req/atomic_exchange_explicit.pass.cpp
-libc++::atomics/atomics.types.operations/atomics.types.operations.req/atomic_fetch_add.pass.cpp
-libc++::atomics/atomics.types.operations/atomics.types.operations.req/atomic_fetch_add_explicit.pass.cpp
-libc++::atomics/atomics.types.operations/atomics.types.operations.req/atomic_fetch_sub.pass.cpp
-libc++::atomics/atomics.types.operations/atomics.types.operations.req/atomic_fetch_sub_explicit.pass.cpp
 libc++::atomics/atomics.types.operations/atomics.types.operations.req/atomic_init.pass.cpp
 libc++::atomics/atomics.types.operations/atomics.types.operations.req/atomic_load.pass.cpp
 libc++::atomics/atomics.types.operations/atomics.types.operations.req/atomic_load_explicit.pass.cpp
@@ -148,9 +141,5 @@ libc++::input.output/iostream.objects/wide.stream.objects/wcout.pass.cpp
 libc++::input.output/iostream.objects/wide.stream.objects/wclog.pass.cpp
 libc++::input.output/iostream.objects/narrow.stream.objects/clog.pass.cpp
 
-# These are new since the merge to 3.5
-# TODO(jfb): Check them again after the merge
+# This relies on sigaction to capture SIGALRM.
 libc++::thread/thread.threads/thread.thread.this/sleep_for.pass.cpp
-libc++::experimental/string.view/string.view.access/at.pass.cpp
-libc++::atomics/atomics.types.generic/trivially_copyable.pass.cpp
-libc++::language.support/support.limits/limits/numeric.limits.members/traps.pass.cpp

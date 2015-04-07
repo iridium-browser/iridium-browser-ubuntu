@@ -4,11 +4,12 @@
 
 import subprocess
 
-from telemetry.core import bitmap
 from telemetry.core import platform
+from telemetry.image_processing import image_util
+from telemetry.image_processing import rgba_color
 from telemetry.util import cloud_storage
 
-HIGHLIGHT_ORANGE_FRAME = bitmap.WEB_PAGE_TEST_ORANGE
+HIGHLIGHT_ORANGE_FRAME = rgba_color.WEB_PAGE_TEST_ORANGE
 
 class BoundingBoxNotFoundException(Exception):
   pass
@@ -38,10 +39,11 @@ class Video(object):
     tab content boundaries and then omits all frames displaying the flash.
 
     Yields:
-      (time_ms, bitmap) tuples representing each video keyframe. Only the first
-      frame in a run of sequential duplicate bitmaps is typically included.
+      (time_ms, image) tuples representing each video keyframe. Only the first
+      frame is a run of sequential duplicate bitmaps is typically included.
         time_ms is milliseconds since navigationStart.
-        bitmap is a telemetry.core.Bitmap.
+        image may be a telemetry.core.Bitmap, or a numpy array depending on
+        whether numpy is installed.
     """
     frame_generator = self._FramesFromMp4(self._video_file_obj.name)
 
@@ -61,12 +63,12 @@ class Video(object):
     timestamp = 0
     for timestamp, bmp in frame_generator:
       if not self._FindHighlightBoundingBox(bmp, HIGHLIGHT_ORANGE_FRAME):
-        yield 0, bmp.Crop(*content_box)
+        yield 0, image_util.Crop(bmp, *content_box)
         break
 
     start_time = timestamp
     for timestamp, bmp in frame_generator:
-      yield timestamp - start_time, bmp.Crop(*content_box)
+      yield timestamp - start_time, image_util.Crop(bmp, *content_box)
 
   def _FindHighlightBoundingBox(self, bmp, color, bounds_tolerance=8,
                                 color_tolerance=8):
@@ -75,7 +77,7 @@ class Video(object):
     Raises:
       BoundingBoxNotFoundException if the hightlight could not be found.
     """
-    content_box, pixel_count = bmp.GetBoundingBox(color,
+    content_box, pixel_count = image_util.GetBoundingBox(bmp, color,
         tolerance=color_tolerance)
 
     if not content_box:
@@ -166,4 +168,4 @@ class Video(object):
         raise StopIteration
       assert num_read == len(frame_data), 'Unexpected frame size: %d' % num_read
       yield (GetFrameTimestampMs(proc.stderr),
-             bitmap.Bitmap(3, dimensions[0], dimensions[1], frame_data))
+             image_util.FromRGBPixels(dimensions[0], dimensions[1], frame_data))

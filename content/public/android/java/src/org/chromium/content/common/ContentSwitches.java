@@ -27,10 +27,6 @@ public abstract class ContentSwitches {
     // Change the url of the JavaScript that gets injected when accessibility mode is enabled.
     public static final String ACCESSIBILITY_JAVASCRIPT_URL = "accessibility-js-url";
 
-    // Whether to ignore signature mismatches when connecting to BrailleBack's
-    // SelfBrailleService.
-    public static final String ACCESSIBILITY_DEBUG_BRAILLE_SERVICE = "debug-braille-service";
-
     // Indicates Chrome is running for performance benchmark.
     public static final String RUNNING_PERFORMANCE_BENCHMARK =
             "running-performance-benchmark";
@@ -49,9 +45,6 @@ public abstract class ContentSwitches {
     public static final String ENABLE_TOP_CONTROLS_POSITION_CALCULATION =
             "enable-top-controls-position-calculation";
 
-    // The height of the movable top controls.
-    public static final String TOP_CONTROLS_HEIGHT = "top-controls-height";
-
     // How much of the top controls need to be shown before they will auto show.
     public static final String TOP_CONTROLS_SHOW_THRESHOLD = "top-controls-show-threshold";
 
@@ -60,9 +53,6 @@ public abstract class ContentSwitches {
 
     // Native switch - chrome_switches::kEnableInstantExtendedAPI
     public static final String ENABLE_INSTANT_EXTENDED_API = "enable-instant-extended-api";
-
-    // Native switch - content_switches::kEnableSpeechRecognition
-    public static final String ENABLE_SPEECH_RECOGNITION = "enable-speech-recognition";
 
     // Native switch - shell_switches::kDumpRenderTree
     public static final String DUMP_RENDER_TREE = "dump-render-tree";
@@ -73,6 +63,9 @@ public abstract class ContentSwitches {
     // Native switch - gfx_switches::kForceDeviceScaleFactor
     public static final String FORCE_DEVICE_SCALE_FACTOR =
             "force-device-scale-factor";
+
+    // Enable mouse hover emulation by holding your finger just over the screen.
+    public static final String ENABLE_TOUCH_HOVER = "enable-touch-hover";
 
     // Prevent instantiation.
     private ContentSwitches() {}

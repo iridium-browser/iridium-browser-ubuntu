@@ -20,7 +20,7 @@
 
 namespace blink {
 
-const WrapperTypeInfo V8TestInterfaceDocument::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceDocument::domTemplate, V8TestInterfaceDocument::refObject, V8TestInterfaceDocument::derefObject, V8TestInterfaceDocument::trace, 0, V8TestInterfaceDocument::toEventTarget, 0, V8TestInterfaceDocument::installConditionallyEnabledMethods, V8TestInterfaceDocument::installConditionallyEnabledProperties, &V8Document::wrapperTypeInfo, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::NodeClassId, WrapperTypeInfo::Dependent, WrapperTypeInfo::WillBeGarbageCollectedObject };
+const WrapperTypeInfo V8TestInterfaceDocument::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceDocument::domTemplate, V8TestInterfaceDocument::refObject, V8TestInterfaceDocument::derefObject, V8TestInterfaceDocument::trace, 0, 0, V8TestInterfaceDocument::installConditionallyEnabledMethods, V8TestInterfaceDocument::installConditionallyEnabledProperties, &V8Document::wrapperTypeInfo, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::NodeClassId, WrapperTypeInfo::InheritFromEventTarget, WrapperTypeInfo::Dependent, WrapperTypeInfo::WillBeGarbageCollectedObject };
 
 // This static member must be declared by DEFINE_WRAPPERTYPEINFO in TestInterfaceDocument.h.
 // For details, see the comment of DEFINE_WRAPPERTYPEINFO in
@@ -31,16 +31,15 @@ namespace TestInterfaceDocumentV8Internal {
 
 } // namespace TestInterfaceDocumentV8Internal
 
-static void installV8TestInterfaceDocumentTemplate(v8::Handle<v8::FunctionTemplate> functionTemplate, v8::Isolate* isolate)
+static void installV8TestInterfaceDocumentTemplate(v8::Local<v8::FunctionTemplate> functionTemplate, v8::Isolate* isolate)
 {
     functionTemplate->ReadOnlyPrototype();
 
     v8::Local<v8::Signature> defaultSignature;
-    defaultSignature = V8DOMConfiguration::installDOMClassTemplate(functionTemplate, "TestInterfaceDocument", V8Document::domTemplate(isolate), V8TestInterfaceDocument::internalFieldCount,
+    defaultSignature = V8DOMConfiguration::installDOMClassTemplate(isolate, functionTemplate, "TestInterfaceDocument", V8Document::domTemplate(isolate), V8TestInterfaceDocument::internalFieldCount,
         0, 0,
         0, 0,
-        0, 0,
-        isolate);
+        0, 0);
     v8::Local<v8::ObjectTemplate> instanceTemplate = functionTemplate->InstanceTemplate();
     ALLOW_UNUSED_LOCAL(instanceTemplate);
     v8::Local<v8::ObjectTemplate> prototypeTemplate = functionTemplate->PrototypeTemplate();
@@ -50,49 +49,38 @@ static void installV8TestInterfaceDocumentTemplate(v8::Handle<v8::FunctionTempla
     functionTemplate->Set(v8AtomicString(isolate, "toString"), V8PerIsolateData::from(isolate)->toStringTemplate());
 }
 
-v8::Handle<v8::FunctionTemplate> V8TestInterfaceDocument::domTemplate(v8::Isolate* isolate)
+v8::Local<v8::FunctionTemplate> V8TestInterfaceDocument::domTemplate(v8::Isolate* isolate)
 {
     return V8DOMConfiguration::domClassTemplate(isolate, const_cast<WrapperTypeInfo*>(&wrapperTypeInfo), installV8TestInterfaceDocumentTemplate);
 }
 
-bool V8TestInterfaceDocument::hasInstance(v8::Handle<v8::Value> v8Value, v8::Isolate* isolate)
+bool V8TestInterfaceDocument::hasInstance(v8::Local<v8::Value> v8Value, v8::Isolate* isolate)
 {
     return V8PerIsolateData::from(isolate)->hasInstance(&wrapperTypeInfo, v8Value);
 }
 
-v8::Handle<v8::Object> V8TestInterfaceDocument::findInstanceInPrototypeChain(v8::Handle<v8::Value> v8Value, v8::Isolate* isolate)
+v8::Local<v8::Object> V8TestInterfaceDocument::findInstanceInPrototypeChain(v8::Local<v8::Value> v8Value, v8::Isolate* isolate)
 {
     return V8PerIsolateData::from(isolate)->findInstanceInPrototypeChain(&wrapperTypeInfo, v8Value);
 }
 
-TestInterfaceDocument* V8TestInterfaceDocument::toImplWithTypeCheck(v8::Isolate* isolate, v8::Handle<v8::Value> value)
+TestInterfaceDocument* V8TestInterfaceDocument::toImplWithTypeCheck(v8::Isolate* isolate, v8::Local<v8::Value> value)
 {
-    return hasInstance(value, isolate) ? blink::toScriptWrappableBase(v8::Handle<v8::Object>::Cast(value))->toImpl<TestInterfaceDocument>() : 0;
+    return hasInstance(value, isolate) ? toImpl(v8::Local<v8::Object>::Cast(value)) : 0;
 }
 
-EventTarget* V8TestInterfaceDocument::toEventTarget(v8::Handle<v8::Object> object)
-{
-    return toImpl(object);
-}
-
-void V8TestInterfaceDocument::refObject(ScriptWrappableBase* scriptWrappableBase)
+void V8TestInterfaceDocument::refObject(ScriptWrappable* scriptWrappable)
 {
 #if !ENABLE(OILPAN)
-    scriptWrappableBase->toImpl<TestInterfaceDocument>()->ref();
+    scriptWrappable->toImpl<TestInterfaceDocument>()->ref();
 #endif
 }
 
-void V8TestInterfaceDocument::derefObject(ScriptWrappableBase* scriptWrappableBase)
+void V8TestInterfaceDocument::derefObject(ScriptWrappable* scriptWrappable)
 {
 #if !ENABLE(OILPAN)
-    scriptWrappableBase->toImpl<TestInterfaceDocument>()->deref();
+    scriptWrappable->toImpl<TestInterfaceDocument>()->deref();
 #endif
-}
-
-template<>
-v8::Handle<v8::Value> toV8NoInline(TestInterfaceDocument* impl, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
-{
-    return toV8(impl, creationContext, isolate);
 }
 
 } // namespace blink

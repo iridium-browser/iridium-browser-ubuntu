@@ -77,6 +77,7 @@ class PepperDeviceTest;
 class SkBitmap;
 struct PP_NetAddress_Private;
 struct FrameMsg_Navigate_Params;
+struct ViewMsg_New_Params;
 struct ViewMsg_PostMessage_Params;
 struct ViewMsg_Resize_Params;
 struct ViewMsg_StopFinding_Params;
@@ -120,12 +121,10 @@ class WebHitTestResult;
 
 namespace content {
 
-class BrowserPluginManager;
 class DevToolsAgent;
 class DocumentState;
 class HistoryController;
 class HistoryEntry;
-class ImageResourceFetcher;
 class MouseLockDispatcher;
 class NavigationState;
 class PageState;
@@ -164,30 +163,14 @@ class CONTENT_EXPORT RenderViewImpl
   // |opener_id| will be MSG_ROUTING_NONE. When |swapped_out| is true, the
   // |proxy_routing_id| is specified, so a RenderFrameProxy can be created for
   // this RenderView's main RenderFrame.
-  static RenderViewImpl* Create(int32 opener_id,
-                                bool window_was_created_with_opener,
-                                const RendererPreferences& renderer_prefs,
-                                const WebPreferences& webkit_prefs,
-                                int32 routing_id,
-                                int32 main_frame_routing_id,
-                                int32 surface_id,
-                                int64 session_storage_namespace_id,
-                                const base::string16& frame_name,
-                                bool is_renderer_created,
-                                bool swapped_out,
-                                int32 proxy_routing_id,
-                                bool hidden,
-                                bool never_visible,
-                                int32 next_page_id,
-                                const ViewMsg_Resize_Params& initial_size,
-                                bool enable_auto_resize,
-                                const gfx::Size& min_size,
-                                const gfx::Size& max_size);
+  static RenderViewImpl* Create(const ViewMsg_New_Params& params,
+                                CompositorDependencies* compositor_deps,
+                                bool was_created_by_renderer);
 
   // Used by content_layouttest_support to hook into the creation of
   // RenderViewImpls.
   static void InstallCreateHook(
-      RenderViewImpl* (*create_render_view_impl)(RenderViewImplParams*));
+      RenderViewImpl* (*create_render_view_impl)(const ViewMsg_New_Params&));
 
   // Returns the RenderViewImpl containing the given WebView.
   static RenderViewImpl* FromWebView(blink::WebView* webview);
@@ -199,8 +182,6 @@ class CONTENT_EXPORT RenderViewImpl
 
   // May return NULL when the view is closing.
   blink::WebView* webview() const;
-
-  int history_list_offset() const { return history_list_offset_; }
 
   const WebPreferences& webkit_preferences() const {
     return webkit_preferences_;
@@ -221,9 +202,6 @@ class CONTENT_EXPORT RenderViewImpl
   HistoryController* history_controller() {
     return history_controller_.get();
   }
-
-  // Lazily initialize this view's BrowserPluginManager and return it.
-  BrowserPluginManager* GetBrowserPluginManager();
 
   // Functions to add and remove observers for this object.
   void AddObserver(RenderViewObserver* observer);
@@ -431,7 +409,6 @@ class CONTENT_EXPORT RenderViewImpl
   virtual void unregisterProtocolHandler(const blink::WebString& scheme,
                                          const blink::WebURL& url);
   virtual blink::WebPageVisibilityState visibilityState() const;
-  virtual blink::WebPushClient* webPushClient();
   virtual void draggableRegionsChanged();
 
 #if defined(OS_ANDROID)
@@ -490,11 +467,6 @@ class CONTENT_EXPORT RenderViewImpl
   // appropriate section, add it there. If not, there are some random functions
   // nearer to the top you can add it to.
 
-  // Cannot use std::set unfortunately since linked_ptr<> does not support
-  // operator<.
-  typedef std::vector<linked_ptr<ImageResourceFetcher> >
-      ImageResourceFetcherList;
-
  protected:
   // RenderWidget overrides:
   void OnClose() override;
@@ -527,11 +499,9 @@ class CONTENT_EXPORT RenderViewImpl
   void OnOrientationChange() override;
   ui::TextInputType GetTextInputType() override;
   void GetSelectionBounds(gfx::Rect* start, gfx::Rect* end) override;
-#if defined(OS_MACOSX) || defined(USE_AURA) || defined(OS_ANDROID)
   void GetCompositionCharacterBounds(
       std::vector<gfx::Rect>* character_bounds) override;
   void GetCompositionRange(gfx::Range* range) override;
-#endif
   bool CanComposeInline() override;
   void DidCommitCompositorFrame() override;
   void InstrumentWillBeginFrame(int frame_id) override;
@@ -540,9 +510,11 @@ class CONTENT_EXPORT RenderViewImpl
   void InstrumentWillComposite() override;
 
  protected:
-  explicit RenderViewImpl(RenderViewImplParams* params);
+  explicit RenderViewImpl(const ViewMsg_New_Params& params);
 
-  void Initialize(RenderViewImplParams* params);
+  void Initialize(const ViewMsg_New_Params& params,
+                  CompositorDependencies* compositor_deps,
+                  bool was_created_by_renderer);
   void SetScreenMetricsEmulationParameters(float device_scale_factor,
                                            const gfx::Point& root_layer_offset,
                                            float root_layer_scale) override;
@@ -562,13 +534,12 @@ class CONTENT_EXPORT RenderViewImpl
   // code away from this class.
   friend class RenderFrameImpl;
 
+  FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, RenderFrameMessageAfterDetach);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, DecideNavigationPolicyForWebUI);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest,
                            DidFailProvisionalLoadWithErrorForError);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest,
                            DidFailProvisionalLoadWithErrorForCancellation);
-  FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest,
-                           DontIgnoreBackAfterNavEntryLimit);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, ImeComposition);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, InsertCharacters);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, JSBlockSentAfterPageLoad);
@@ -581,6 +552,8 @@ class CONTENT_EXPORT RenderViewImpl
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest,
                            SetEditableSelectionAndComposition);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, StaleNavigationsIgnored);
+  FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest,
+                           DontIgnoreBackAfterNavEntryLimit);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, UpdateTargetURLWithInvalidURL);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest,
                            GetCompositionCharacterBoundsTest);
@@ -590,7 +563,7 @@ class CONTENT_EXPORT RenderViewImpl
 #if defined(OS_MACOSX)
   FRIEND_TEST_ALL_PREFIXES(RenderViewTest, MacTestCmdUp);
 #endif
-  FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, SetHistoryLengthAndPrune);
+  FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, SetHistoryLengthAndOffset);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, ZoomLimit);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, NavigateFrame);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, BasicRenderFrame);
@@ -701,7 +674,7 @@ class CONTENT_EXPORT RenderViewImpl
   void OnSetActive(bool active);
   void OnSetBackgroundOpaque(bool opaque);
   void OnExitFullscreen();
-  void OnSetHistoryLengthAndPrune(int history_length, int32 minimum_page_id);
+  void OnSetHistoryOffsetAndLength(int history_offset, int history_length);
   void OnSetInitialFocus(bool reverse);
   void OnSetPageEncoding(const std::string& encoding_name);
   void OnSetRendererPrefs(const RendererPreferences& renderer_prefs);
@@ -748,16 +721,6 @@ class CONTENT_EXPORT RenderViewImpl
   // Returns NULL if there is no such WebPlugin.
   blink::WebPlugin* GetWebPluginForFind();
 
-  // Returns true if the |params| navigation is to an entry that has been
-  // cropped due to a recent navigation the browser did not know about.
-  bool IsBackForwardToStaleEntry(const PageState& state,
-                                 int pending_history_list_offset,
-                                 int32 page_id,
-                                 bool is_reload);
-
-  // Make the given |frame| show an empty, unscriptable page.
-  // TODO(creis): Move this to RenderFrame.
-  void NavigateToSwappedOutURL(blink::WebFrame* frame);
 
   // If we initiated a navigation, this function will populate |document_state|
   // with the navigation information saved in OnNavigate().
@@ -787,7 +750,7 @@ class CONTENT_EXPORT RenderViewImpl
   // Starts nav_state_sync_timer_ if it isn't already running.
   void StartNavStateSyncTimerIfNecessary();
 
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_WIN) || (defined(OS_POSIX) && !defined(OS_MACOSX))
   void UpdateFontRenderingFromRendererPrefs();
 #else
   void UpdateFontRenderingFromRendererPrefs() {}
@@ -924,12 +887,6 @@ class CONTENT_EXPORT RenderViewImpl
   // are gone.
   int frames_in_progress_;
 
-  // The list of page IDs for each history item this RenderView knows about.
-  // Some entries may be -1 if they were rendered by other processes or were
-  // restored from a previous session.  This lets us detect attempts to
-  // navigate to stale entries that have been cropped from our history.
-  std::vector<int32> history_page_ids_;
-
   // UI state ------------------------------------------------------------------
 
   // The state of our target_url transmissions. When we receive a request to
@@ -996,9 +953,6 @@ class CONTENT_EXPORT RenderViewImpl
   // The speech recognition dispatcher attached to this view, lazily
   // initialized.
   SpeechRecognitionDispatcher* speech_recognition_dispatcher_;
-
-  // BrowserPluginManager attached to this view; lazily initialized.
-  scoped_refptr<BrowserPluginManager> browser_plugin_manager_;
 
   DevToolsAgent* devtools_agent_;
 

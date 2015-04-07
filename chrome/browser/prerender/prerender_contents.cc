@@ -40,7 +40,7 @@
 #include "content/public/common/frame_navigate_params.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "ui/base/page_transition_types.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 
 using content::BrowserThread;
 using content::DownloadItem;
@@ -150,6 +150,7 @@ class PrerenderContents::WebContentsDelegateImpl
   bool ShouldCreateWebContents(
       WebContents* web_contents,
       int route_id,
+      int main_frame_route_id,
       WindowContainerType window_container_type,
       const base::string16& frame_name,
       const GURL& target_url,
@@ -171,7 +172,7 @@ class PrerenderContents::WebContentsDelegateImpl
     return false;
   }
 
-  bool ShouldSuppressDialogs() override {
+  bool ShouldSuppressDialogs(WebContents* source) override {
     // We still want to show the user the message when they navigate to this
     // page, so cancel this prerender.
     prerender_contents_->Destroy(FINAL_STATUS_JAVASCRIPT_ALERT);
@@ -240,7 +241,6 @@ PrerenderContents::PrerenderContents(
       route_id_(-1),
       origin_(origin),
       experiment_id_(experiment_id),
-      creator_child_id_(-1),
       cookie_status_(0),
       cookie_send_type_(COOKIE_SEND_TYPE_NONE),
       network_bytes_(0) {
@@ -292,7 +292,6 @@ PrerenderContents* PrerenderContents::FromWebContents(
 }
 
 void PrerenderContents::StartPrerendering(
-    int creator_child_id,
     const gfx::Size& size,
     SessionStorageNamespace* session_storage_namespace,
     net::URLRequestContextGetter* request_context) {
@@ -300,11 +299,9 @@ void PrerenderContents::StartPrerendering(
   DCHECK(!size.IsEmpty());
   DCHECK(!prerendering_has_started_);
   DCHECK(prerender_contents_.get() == NULL);
-  DCHECK_EQ(-1, creator_child_id_);
   DCHECK(size_.IsEmpty());
   DCHECK_EQ(1U, alias_urls_.size());
 
-  creator_child_id_ = creator_child_id;
   session_storage_namespace_id_ = session_storage_namespace->id();
   size_ = size;
 
@@ -679,7 +676,7 @@ void PrerenderContents::DidNavigateMainFrame(
 }
 
 void PrerenderContents::DidGetRedirectForResourceRequest(
-    RenderViewHost* render_view_host,
+    content::RenderFrameHost* render_frame_host,
     const content::ResourceRedirectDetails& details) {
   // DidGetRedirectForResourceRequest can come for any resource on a page.  If
   // it's a redirect on the top-level resource, the name needs to be remembered

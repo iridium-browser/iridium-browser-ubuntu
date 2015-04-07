@@ -15,12 +15,16 @@ class MemoryMobile(benchmark.Benchmark):
 
 @benchmark.Disabled
 class MemoryTop7Stress(benchmark.Benchmark):
+  """Use (recorded) real world web sites and measure memory consumption."""
   test = memory.Memory
   page_set = page_sets.Top7StressPageSet
 
 
 @benchmark.Disabled
 class Reload2012Q3(benchmark.Benchmark):
+  """Memory consumption for a set of top pages from 2012.
+
+  Performs reloading and garbage collecting on each page load."""
   tag = 'reload'
   test = memory.Memory
   page_set = page_sets.Top2012Q3StressPageSet
@@ -32,7 +36,8 @@ class MemoryToughDomMemoryCases(benchmark.Benchmark):
   page_set = page_sets.ToughDomMemoryCasesPageSet
 
 
-@benchmark.Enabled('android', 'has tabs')
+@benchmark.Disabled('chromeos', 'linux', 'mac', 'win')
+@benchmark.Enabled('has tabs')
 class TypicalMobileSites(benchmark.Benchmark):
   """Long memory test."""
   test = memory.Memory

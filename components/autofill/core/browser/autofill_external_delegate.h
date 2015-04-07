@@ -8,12 +8,14 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
 #include "components/autofill/core/browser/autofill_popup_delegate.h"
+#include "components/autofill/core/browser/suggestion.h"
 #include "components/autofill/core/common/form_data.h"
 #include "components/autofill/core/common/form_field_data.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 
 namespace autofill {
 
@@ -25,8 +27,7 @@ class AutofillManager;
 // this logic. See http://crbug.com/51644
 
 // Delegate for in-browser Autocomplete and Autofill display and selection.
-class AutofillExternalDelegate
-    : public AutofillPopupDelegate {
+class AutofillExternalDelegate : public AutofillPopupDelegate {
  public:
   // Creates an AutofillExternalDelegate for the specified AutofillManager and
   // AutofillDriver.
@@ -61,10 +62,7 @@ class AutofillExternalDelegate
   // to be displayed.  Called when an Autofill query result is available.
   virtual void OnSuggestionsReturned(
       int query_id,
-      const std::vector<base::string16>& values,
-      const std::vector<base::string16>& labels,
-      const std::vector<base::string16>& icons,
-      const std::vector<int>& unique_ids);
+      const std::vector<Suggestion>& suggestions);
 
   // Set the data list value associated with the current field.
   void SetCurrentDataListValues(
@@ -86,6 +84,14 @@ class AutofillExternalDelegate
   base::WeakPtr<AutofillExternalDelegate> GetWeakPtr();
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(AutofillExternalDelegateUnitTest,
+                           FillCreditCardForm);
+
+  // Called when a credit card is scanned using device camera.
+  void OnCreditCardScanned(const base::string16& card_number,
+                           int expiration_month,
+                           int expiration_year);
+
   // Fills the form with the Autofill data corresponding to |unique_id|.
   // If |is_preview| is true then this is just a preview to show the user what
   // would be selected and if |is_preview| is false then the user has selected
@@ -93,25 +99,16 @@ class AutofillExternalDelegate
   void FillAutofillFormData(int unique_id, bool is_preview);
 
   // Handle applying any Autofill warnings to the Autofill popup.
-  void ApplyAutofillWarnings(std::vector<base::string16>* values,
-                             std::vector<base::string16>* labels,
-                             std::vector<base::string16>* icons,
-                             std::vector<int>* unique_ids);
+  void ApplyAutofillWarnings(std::vector<Suggestion>* suggestions);
 
   // Handle applying any Autofill option listings to the Autofill popup.
   // This function should only get called when there is at least one
   // multi-field suggestion in the list of suggestions.
-  void ApplyAutofillOptions(std::vector<base::string16>* values,
-                            std::vector<base::string16>* labels,
-                            std::vector<base::string16>* icons,
-                            std::vector<int>* unique_ids);
+  void ApplyAutofillOptions(std::vector<Suggestion>* suggestions);
 
   // Insert the data list values at the start of the given list, including
   // any required separators.
-  void InsertDataListValues(std::vector<base::string16>* values,
-                            std::vector<base::string16>* labels,
-                            std::vector<base::string16>* icons,
-                            std::vector<int>* unique_ids);
+  void InsertDataListValues(std::vector<Suggestion>* suggestions);
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
   // Pings the renderer.
@@ -145,13 +142,16 @@ class AutofillExternalDelegate
   // currently editing?  Used to keep track of state for metrics logging.
   bool has_shown_popup_for_current_edit_;
 
-  // The current data list values.
-  std::vector<base::string16> data_list_values_;
-  std::vector<base::string16> data_list_labels_;
+  // FIXME
+  bool should_show_scan_credit_card_;
 
   // Whether the access Address Book prompt has ever been shown for the current
   // |query_form_|. This variable is only used on OSX.
   bool has_shown_address_book_prompt;
+
+  // The current data list values.
+  std::vector<base::string16> data_list_values_;
+  std::vector<base::string16> data_list_labels_;
 
   base::WeakPtrFactory<AutofillExternalDelegate> weak_ptr_factory_;
 

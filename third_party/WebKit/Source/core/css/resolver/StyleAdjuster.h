@@ -28,6 +28,7 @@ namespace blink {
 
 class CachedUAStyle;
 class Element;
+class HTMLElement;
 class RenderStyle;
 
 // Certain CSS Properties/Values do not apply to certain elements
@@ -43,8 +44,9 @@ public:
     void adjustRenderStyle(RenderStyle* styleToAdjust, RenderStyle* parentStyle, Element*, const CachedUAStyle*);
 
 private:
+    void adjustStyleForFirstLetter(RenderStyle*);
     void adjustStyleForDisplay(RenderStyle* styleToAdjust, RenderStyle* parentStyle);
-    void adjustStyleForTagName(RenderStyle* styleToAdjust, RenderStyle* parentStyle, Element&);
+    void adjustStyleForHTMLElement(RenderStyle* styleToAdjust, RenderStyle* parentStyle, HTMLElement&);
     void adjustOverflow(RenderStyle* styleToAdjust);
     void adjustStyleForAlignment(RenderStyle& styleToAdjust, const RenderStyle& parentStyle);
 

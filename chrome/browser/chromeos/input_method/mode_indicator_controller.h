@@ -6,8 +6,8 @@
 #define CHROME_BROWSER_CHROMEOS_INPUT_METHOD_MODE_INDICATOR_CONTROLLER_H_
 
 #include "base/memory/scoped_ptr.h"
-#include "chromeos/ime/input_method_manager.h"
-#include "ui/gfx/rect.h"
+#include "ui/base/ime/chromeos/input_method_manager.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/views/widget/widget_observer.h"
 
 namespace chromeos {

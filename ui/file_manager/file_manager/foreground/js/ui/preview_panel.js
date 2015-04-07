@@ -4,18 +4,22 @@
 
 /**
  * PreviewPanel UI class.
- * @param {Element} element DOM Element of preview panel.
- * @param {PreviewPanel.VisibilityType} visibilityType Initial value of the
+ * @param {!Element} element DOM Element of preview panel.
+ * @param {PreviewPanelModel.VisibilityType} visibilityType Initial value of the
  *     visibility type.
  * @param {MetadataCache} metadataCache Metadata cache.
  * @param {VolumeManagerWrapper} volumeManager Volume manager.
+ * @param {!importer.HistoryLoader} historyLoader
  * @constructor
  * @extends {cr.EventTarget}
  */
 var PreviewPanel = function(element,
                             visibilityType,
                             metadataCache,
-                            volumeManager) {
+                            volumeManager,
+                            historyLoader) {
+  cr.EventTarget.call(this);
+
   /**
    * The cached height of preview panel.
    * @type {number}
@@ -25,32 +29,32 @@ var PreviewPanel = function(element,
 
   /**
    * Visibility type of the preview panel.
-   * @type {PreviewPanel.VisibilityType}
+   * @type {!PreviewPanelModel}
+   * @const
    * @private
    */
-  this.visibilityType_ = visibilityType;
-
-  /**
-   * Current entry to be displayed.
-   * @type {Entry}
-   * @private
-   */
-  this.currentEntry_ = null;
+  this.model_ = new PreviewPanelModel(visibilityType, [
+    util.queryDecoratedElement('#share', cr.ui.Command),
+    util.queryDecoratedElement('#cloud-import', cr.ui.Command)
+  ]);
 
   /**
    * Dom element of the preview panel.
-   * @type {Element}
+   * @type {!Element}
+   * @const
    * @private
    */
   this.element_ = element;
 
   /**
-   * @type {PreviewPanel.Thumbnails}
+   * @type {!PreviewPanel.Thumbnails}
+   * @const
    */
   this.thumbnails = new PreviewPanel.Thumbnails(
       element.querySelector('.preview-thumbnails'),
       metadataCache,
-      volumeManager);
+      volumeManager,
+      historyLoader);
 
   /**
    * @type {Element}
@@ -77,7 +81,20 @@ var PreviewPanel = function(element,
    * @private
    */
   this.selection_ = /** @type {FileSelection} */
-      ({entries: [], computeBytes: function() {}});
+      ({entries: [], computeBytes: function() {}, totalCount: 0});
+
+  /**
+   * @type {!PromiseSlot}
+   * @const
+   * @private
+   */
+  this.visibilityPromiseSlot_ = new PromiseSlot(function(visible) {
+    if (this.element_.getAttribute('visibility') ===
+        PreviewPanel.Visibility_.HIDING) {
+      this.element_.setAttribute('visibility', PreviewPanel.Visibility_.HIDDEN);
+    }
+    cr.dispatchSimpleEvent(this, PreviewPanel.Event.VISIBILITY_CHANGE);
+  }.bind(this), function(error) { console.error(error.stack || error); });
 
   /**
    * Sequence value that is incremented by every selection update and is used to
@@ -94,6 +111,9 @@ var PreviewPanel = function(element,
   this.volumeManager_ = volumeManager;
 
   cr.EventTarget.call(this);
+  this.model_.addEventListener(
+      PreviewPanelModel.EventType.CHANGE, this.onModelChanged_.bind(this));
+  this.onModelChanged_();
 };
 
 /**
@@ -105,61 +125,27 @@ PreviewPanel.Event = {
   // Event to be triggered at the end of visibility change.
   VISIBILITY_CHANGE: 'visibilityChange'
 };
-Object.freeze(PreviewPanel.Event);
-
-/**
- * Visibility type of the preview panel.
- * @enum {string}
- * @const
- */
-PreviewPanel.VisibilityType = {
-  // Preview panel always shows.
-  ALWAYS_VISIBLE: 'alwaysVisible',
-  // Preview panel shows when the selection property are set.
-  AUTO: 'auto',
-  // Preview panel does not show.
-  ALWAYS_HIDDEN: 'alwaysHidden'
-};
-Object.freeze(PreviewPanel.VisibilityType);
 
 /**
  * @enum {string}
  * @const
- * @private
  */
 PreviewPanel.Visibility_ = {
   VISIBLE: 'visible',
   HIDING: 'hiding',
   HIDDEN: 'hidden'
 };
-Object.freeze(PreviewPanel.Visibility_);
 
 PreviewPanel.prototype = {
   __proto__: cr.EventTarget.prototype,
 
   /**
-   * Setter for the current entry.
-   * @param {Entry} entry New entry.
-   */
-  set currentEntry(entry) {
-    if (util.isSameEntry(this.currentEntry_, entry))
-      return;
-    this.currentEntry_ = entry;
-    this.updateVisibility_();
-    this.updatePreviewArea_();
-  },
-
-  /**
    * Setter for the visibility type.
-   * @param {PreviewPanel.VisibilityType} visibilityType New value of visibility
-   *     type.
+   * @param {PreviewPanelModel.VisibilityType} visibilityType New value of
+   *     visibility type.
    */
   set visibilityType(visibilityType) {
-    this.visibilityType_ = visibilityType;
-    this.updateVisibility_();
-    // Also update the preview area contents, because the update is suppressed
-    // while the visibility is hiding or hidden.
-    this.updatePreviewArea_();
+    this.model_.setVisibilityType(visibilityType);
   },
 
   get visible() {
@@ -178,63 +164,60 @@ PreviewPanel.prototype = {
 };
 
 /**
- * Initializes the element.
- */
-PreviewPanel.prototype.initialize = function() {
-  this.element_.addEventListener('webkitTransitionEnd',
-                                 this.onTransitionEnd_.bind(this));
-  this.updateVisibility_();
-  // Also update the preview area contents, because the update is suppressed
-  // while the visibility is hiding or hidden.
-  this.updatePreviewArea_();
-};
-
-/**
  * Apply the selection and update the view of the preview panel.
  * @param {FileSelection} selection Selection to be applied.
  */
 PreviewPanel.prototype.setSelection = function(selection) {
   this.sequence_++;
   this.selection_ = selection;
-  this.updateVisibility_();
+  this.model_.setSelection(selection);
   this.updatePreviewArea_();
 };
 
 /**
- * Update the visibility of the preview panel.
+ * webkitTransitionEnd does not always fire (e.g. when animation is aborted or
+ * when no paint happens during the animation).  This function sets up a timer
+ * and call the fulfill callback of the returned promise when the timer expires.
  * @private
  */
-PreviewPanel.prototype.updateVisibility_ = function() {
-  // Get the new visibility value.
-  var visibility = this.element_.getAttribute('visibility');
-  var newVisible = null;
-  switch (this.visibilityType_) {
-    case PreviewPanel.VisibilityType.ALWAYS_VISIBLE:
-      newVisible = true;
-      break;
-    case PreviewPanel.VisibilityType.AUTO:
-      newVisible = this.selection_.entries.length !== 0;
-      break;
-    case PreviewPanel.VisibilityType.ALWAYS_HIDDEN:
-      newVisible = false;
-      break;
-    default:
-      console.error('Invalid visibilityType.');
-      return;
-  }
+PreviewPanel.prototype.waitForTransitionEnd_ = function() {
+  // Keep this sync with CSS.
+  var PREVIEW_PANEL_TRANSITION_MS = 220;
 
-  // If the visibility has been already the new value, just return.
-  if ((visibility == PreviewPanel.Visibility_.VISIBLE && newVisible) ||
-      (visibility == PreviewPanel.Visibility_.HIDDEN && !newVisible))
-    return;
+  return new Promise(function(fulfill) {
+    var timeoutId;
+    var onTransitionEnd = function(event) {
+      if (event &&
+          (event.target !== this.element_ ||
+           event.propertyName !== 'opacity')) {
+        return;
+      }
+      this.element_.removeEventListener('webkitTransitionEnd', onTransitionEnd);
+      clearTimeout(timeoutId);
+      fulfill();
+    }.bind(this);
+    this.element_.addEventListener('webkitTransitionEnd', onTransitionEnd);
+    timeoutId = setTimeout(onTransitionEnd, PREVIEW_PANEL_TRANSITION_MS);
+  }.bind(this));
+};
 
-  // Set the new visibility value.
-  if (newVisible) {
-    this.element_.setAttribute('visibility', PreviewPanel.Visibility_.VISIBLE);
-    cr.dispatchSimpleEvent(this, PreviewPanel.Event.VISIBILITY_CHANGE);
+/**
+ * Handles the model change event and update the visibility of the preview
+ * panel.
+ * @private
+ */
+PreviewPanel.prototype.onModelChanged_ = function() {
+  var promise;
+  if (this.model_.visible) {
+    this.element_.setAttribute(
+        'visibility', PreviewPanel.Visibility_.VISIBLE);
+    this.updatePreviewArea_();
+    promise = Promise.resolve();
   } else {
     this.element_.setAttribute('visibility', PreviewPanel.Visibility_.HIDING);
+    promise = this.waitForTransitionEnd_();
   }
+  this.visibilityPromiseSlot_.setPromise(promise);
 };
 
 /**
@@ -261,7 +244,8 @@ PreviewPanel.prototype.updatePreviewArea_ = function() {
     this.thumbnails.selection = selection;
     this.calculatingSizeLabel_.hidden = true;
     this.previewText_.textContent = util.getEntryLabel(
-        this.volumeManager_, selection.entries[0]);
+        this.volumeManager_.getLocationInfo(selection.entries[0]),
+        selection.entries[0]);
     return;
   }
 
@@ -295,21 +279,6 @@ PreviewPanel.prototype.updatePreviewArea_ = function() {
       this.updatePreviewArea_();
     }.bind(this, this.sequence_));
   }
-};
-
-/**
- * Event handler to be called at the end of hiding transition.
- * @param {Event} event The webkitTransitionEnd event.
- * @private
- */
-PreviewPanel.prototype.onTransitionEnd_ = function(event) {
-  if (event.target != this.element_ || event.propertyName != 'opacity')
-    return;
-  var visibility = this.element_.getAttribute('visibility');
-  if (visibility != PreviewPanel.Visibility_.HIDING)
-    return;
-  this.element_.setAttribute('visibility', PreviewPanel.Visibility_.HIDDEN);
-  cr.dispatchSimpleEvent(this, PreviewPanel.Event.VISIBILITY_CHANGE);
 };
 
 /**
@@ -378,13 +347,27 @@ PreviewPanel.CalculatingSizeLabel.prototype.onStep_ = function() {
  * @param {Element} element DOM Element of thumbnail container.
  * @param {MetadataCache} metadataCache MetadataCache.
  * @param {VolumeManagerWrapper} volumeManager Volume manager instance.
+ * @param {!importer.HistoryLoader} historyLoader
  * @constructor
  */
-PreviewPanel.Thumbnails = function(element, metadataCache, volumeManager) {
+PreviewPanel.Thumbnails = function(
+    element, metadataCache, volumeManager, historyLoader) {
+
+  /** @private {Element} */
   this.element_ = element;
+
+  /** @private {MetadataCache} */
   this.metadataCache_ = metadataCache;
+
+  /** @private {VolumeManagerWrapper} */
   this.volumeManager_ = volumeManager;
-  this.sequence_ = 0;
+
+  /** @private {!importer.HistoryLoader} */
+  this.historyLoader_ = historyLoader;
+
+  /** @private {string} */
+  this.lastEntriesHash_ = '';
+
   Object.seal(this);
 };
 
@@ -412,7 +395,6 @@ PreviewPanel.Thumbnails.prototype = {
    * @param {FileSelection} value Entries.
    */
   set selection(value) {
-    this.sequence_++;
     this.loadThumbnails_(value);
   },
 
@@ -433,35 +415,61 @@ PreviewPanel.Thumbnails.prototype = {
  */
 PreviewPanel.Thumbnails.prototype.loadThumbnails_ = function(selection) {
   var entries = selection.entries;
-  this.element_.classList.remove('has-zoom');
-  this.element_.innerText = '';
+  var length = Math.min(
+      entries.length, PreviewPanel.Thumbnails.MAX_THUMBNAIL_COUNT);
   var clickHandler = selection.tasks &&
       selection.tasks.executeDefault.bind(selection.tasks);
-  var length = Math.min(entries.length,
-                        PreviewPanel.Thumbnails.MAX_THUMBNAIL_COUNT);
-  for (var i = 0; i < length; i++) {
-    // Create a box.
-    var box = this.element_.ownerDocument.createElement('div');
-    box.style.zIndex = PreviewPanel.Thumbnails.MAX_THUMBNAIL_COUNT + 1 - i;
+  var hash = selection.entries.
+      slice(0, PreviewPanel.Thumbnails.MAX_THUMBNAIL_COUNT).
+      map(function(entry) { return entry.toURL(); }).
+      sort().
+      join('\n');
+  var entrySetChanged = hash !== this.lastEntriesHash_;
 
+  this.lastEntriesHash_ = hash;
+  this.element_.classList.remove('has-zoom');
+
+  // Create new thumbnail image if the selection is changed.
+  var boxList;
+  if (entrySetChanged) {
+    this.element_.innerText = '';
+    boxList = [];
+    for (var i = 0; i < length; i++) {
+      // Create a box.
+      var box = this.element_.ownerDocument.createElement('div');
+      box.style.zIndex = PreviewPanel.Thumbnails.MAX_THUMBNAIL_COUNT + 1 - i;
+
+      // Register the click handler.
+      if (clickHandler) {
+        box.addEventListener('click', function(event) {
+          clickHandler();
+        });
+      }
+
+      // Append
+      this.element_.appendChild(box);
+      boxList.push(box);
+    }
+  } else {
+    boxList = this.element_.querySelectorAll('.img-container');
+    assert(length === boxList.length);
+  }
+
+  // Update images in the boxes.
+  for (var i = 0; i < length; i++) {
     // Load the image.
     if (entries[i]) {
       FileGrid.decorateThumbnailBox(
-          box,
+          boxList[i],
           entries[i],
           this.metadataCache_,
           this.volumeManager_,
+          this.historyLoader_,
           ThumbnailLoader.FillMode.FILL,
           FileGrid.ThumbnailQuality.LOW,
+          /* animation */ entrySetChanged,
           i == 0 && length == 1 ? this.setZoomedImage_.bind(this) : undefined);
     }
-
-    // Register the click handler.
-    if (clickHandler)
-      box.addEventListener('click', clickHandler);
-
-    // Append
-    this.element_.appendChild(box);
   }
 };
 
@@ -470,7 +478,8 @@ PreviewPanel.Thumbnails.prototype.loadThumbnails_ = function(selection) {
  * zoomed image.
  *
  * @param {HTMLImageElement} image Image to be source of the zoomed image.
- * @param {Object=} opt_transform Transformation to be applied to the image.
+ * @param {util.Transform=} opt_transform Transformation to be applied to the
+ *     image.
  * @private
  */
 PreviewPanel.Thumbnails.prototype.setZoomedImage_ = function(image,
@@ -490,7 +499,12 @@ PreviewPanel.Thumbnails.prototype.setZoomedImage_ = function(image,
                            Math.max(width, height));
   var imageWidth = ~~(width * scale);
   var imageHeight = ~~(height * scale);
-  var zoomedImage = this.element_.ownerDocument.createElement('img');
+  var zoomedBox =
+      this.element_.querySelector('.popup') ||
+      this.element_.ownerDocument.createElement('div');
+  var zoomedImage =
+      this.element_.querySelector('.popup img') ||
+      this.element_.ownerDocument.createElement('img');
 
   if (scale < 0.3) {
     // Scaling large images kills animation. Downscale it in advance.
@@ -521,7 +535,6 @@ PreviewPanel.Thumbnails.prototype.setZoomedImage_ = function(image,
   if (opt_transform)
     util.applyTransform(zoomedImage, opt_transform);
 
-  var zoomedBox = this.element_.ownerDocument.createElement('div');
   zoomedBox.className = 'popup';
   zoomedBox.style.width = boxWidth + 'px';
   zoomedBox.style.height = boxHeight + 'px';

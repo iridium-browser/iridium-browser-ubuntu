@@ -33,11 +33,12 @@
 
 #include "core/dom/ActiveDOMObject.h"
 #include "modules/EventTargetModules.h"
-#include "modules/notifications/NotificationClient.h"
 #include "platform/AsyncMethodRunner.h"
 #include "platform/heap/Handle.h"
 #include "platform/text/TextDirection.h"
 #include "platform/weborigin/KURL.h"
+#include "public/platform/WebNotificationDelegate.h"
+#include "public/platform/WebNotificationPermission.h"
 #include "wtf/PassOwnPtr.h"
 #include "wtf/RefCounted.h"
 
@@ -46,13 +47,19 @@ namespace blink {
 class ExecutionContext;
 class NotificationOptions;
 class NotificationPermissionCallback;
+struct WebNotificationData;
 
-class Notification : public RefCountedGarbageCollectedWillBeGarbageCollectedFinalized<Notification>, public ActiveDOMObject, public EventTargetWithInlineData {
+class Notification final : public RefCountedGarbageCollectedEventTargetWithInlineData<Notification>, public ActiveDOMObject, public WebNotificationDelegate {
     DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollected<Notification>);
-    DEFINE_WRAPPERTYPEINFO();
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(Notification);
+    DEFINE_WRAPPERTYPEINFO();
 public:
+    // Used for JavaScript instantiations of the Notification object. Will automatically schedule for
+    // the notification to be displayed to the user.
     static Notification* create(ExecutionContext*, const String& title, const NotificationOptions&);
+
+    // Used for embedder-created Notification objects. Will initialize the Notification's state as showing.
+    static Notification* create(ExecutionContext*, const String& persistentId, const WebNotificationData&);
 
     virtual ~Notification();
 
@@ -63,10 +70,11 @@ public:
     DEFINE_ATTRIBUTE_EVENT_LISTENER(error);
     DEFINE_ATTRIBUTE_EVENT_LISTENER(close);
 
-    void dispatchShowEvent();
-    void dispatchClickEvent();
-    void dispatchErrorEvent();
-    void dispatchCloseEvent();
+    // WebNotificationDelegate implementation.
+    void dispatchShowEvent() override;
+    void dispatchClickEvent() override;
+    void dispatchErrorEvent() override;
+    void dispatchCloseEvent() override;
 
     String title() const { return m_title; }
     String dir() const { return m_dir; }
@@ -78,8 +86,9 @@ public:
     TextDirection direction() const;
     KURL iconURL() const { return m_iconUrl; }
 
-    static const String& permissionString(NotificationClient::Permission);
+    static const String& permissionString(WebNotificationPermission);
     static const String& permission(ExecutionContext*);
+    static WebNotificationPermission checkPermission(ExecutionContext*);
     static void requestPermission(ExecutionContext*, NotificationPermissionCallback* = nullptr);
 
     // EventTarget interface.
@@ -91,8 +100,12 @@ public:
     virtual void stop() override;
     virtual bool hasPendingActivity() const override;
 
+    virtual void trace(Visitor*) override;
+
 private:
-    Notification(const String& title, ExecutionContext*, NotificationClient*);
+    Notification(const String& title, ExecutionContext*);
+
+    void scheduleShow();
 
     // Calling show() may start asynchronous operation. If this object has
     // a V8 wrapper, hasPendingActivity() prevents the wrapper from being
@@ -107,6 +120,8 @@ private:
     void setIconUrl(KURL iconUrl) { m_iconUrl = iconUrl; }
     void setTag(const String& tag) { m_tag = tag; }
 
+    void setPersistentId(const String& persistentId) { m_persistentId = persistentId; }
+
 private:
     String m_title;
     String m_dir;
@@ -116,15 +131,23 @@ private:
 
     KURL m_iconUrl;
 
+    // Notifications can either be bound to the page, which means they're identified by
+    // their delegate, or persistent, which means they're identified by a persistent Id
+    // given to us by the embedder. This influences how we close the notification.
+    String m_persistentId;
+
     enum NotificationState {
         NotificationStateIdle,
         NotificationStateShowing,
+        NotificationStateClosing,
         NotificationStateClosed
     };
 
-    NotificationState m_state;
+    // Only to be used by the Notification::create() method when notifications were created
+    // by the embedder rather than by Blink.
+    void setState(NotificationState state) { m_state = state; }
 
-    NotificationClient* m_client;
+    NotificationState m_state;
 
     AsyncMethodRunner<Notification> m_asyncRunner;
 };

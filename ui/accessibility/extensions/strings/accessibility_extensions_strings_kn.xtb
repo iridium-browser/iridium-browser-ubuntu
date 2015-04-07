@@ -15,23 +15,27 @@
 <translation id="3622586652998721735">ಡೀಫಾಲ್ಟ್ ಯೋಜನೆಯಂತೆ ಹೊಂದಿಸಿ</translation>
 <translation id="2179565792157161713">ದೀರ್ಘ ವಿವರಣೆಯನ್ನು ಹೊಸ ಟ್ಯಾಬ್‌ನಲ್ಲಿ ತೆರೆಯಿರಿ</translation>
 <translation id="2471847333270902538"><ph name="SITE"/> ಗೆ ಬಣ್ಣದ ಯೋಜನೆ:</translation>
+<translation id="381767806621926835">ಅದರ ದೀರ್ಘ ವಿವರಣೆಯನ್ನು ಪ್ರವೇಶಿಸಲು &quot;longdesc&quot; ಅಥವಾ &quot;aria-describedat&quot; ಗುಣಲಕ್ಷಣದೊಂದಿಗೆ ಯಾವುದರ ಮೇಲಾದರೂ ರೈಟ್-ಕ್ಲಿಕ್ ಮಾಡಿ.</translation>
+<translation id="786423340267544509">aria-describedat ಅಥವಾ longdesc ಗುಣಲಕ್ಷಣಗಳ ಜೊತೆಗೆ ಅಂಶಗಳಿಗೆ ಅಂಚು ಸೇರಿಸಿ.</translation>
 <translation id="690628312087070417">ದೀರ್ಘವಾದ ಅಂತರದಿಂದ ಕೆರೆಟ್ ಮುಂದಕ್ಕೆ ಸಾಗಿದಾಗ:</translation>
 <translation id="5331422999063554397">ತಿರುಗುಮುರುಗಾದ ಬಣ್ಣ</translation>
 <translation id="2648340354586434750">ಪದಗಳ ಮೂಲಕ ಸರಿಸಲು &lt;span class='key'&gt;ಆಯ್ಕೆ&lt;/span&gt; ಅನ್ನು ಹಿಡಿದುಕೊಳ್ಳಿ.</translation>
+<translation id="4769065380738716500">ಚಿತ್ರಗಳನ್ನು ಅದರ ಪರ್ಯಾಯ ಪಠ್ಯದೊಂದಿಗೆ ಮರುಸ್ಥಾನಗೊಳಿಸಲಾಗಿದೆ.</translation>
 <translation id="5287723860611749454">&lt;p&gt;ಡಾಕ್ಯುಮೆಂಟ್‌ನಾದ್ಯಂತ ಸರಿಸಲು ಬಾಣದ ಗುರುತುಗಳನ್ನು ಬಳಸಿ. &lt;/p&gt;&lt;p&gt;ಕರ್ಸರ್ ಅನ್ನು ಆ ಸ್ಥಳಕ್ಕೆ ಸರಿಸಲು ಎಲ್ಲಾದರೂ ಕ್ಲಿಕ್ ಮಾಡಿ. &lt;/p&gt; &lt;p&gt;   ಪಠ್ಯವನ್ನು ಆಯ್ಕೆಮಾಡಲು &lt;span class='key'&gt;Shift&lt;/span&gt; + ಬಾಣಗಳನ್ನು ಒತ್ತಿರಿ.&lt;/p&gt;</translation>
 <translation id="5558600050691192317">ಕೀಬೋರ್ಡ್ ಆದೇಶಗಳು</translation>
 <translation id="633394792577263429">ಪದಗಳ ಮೂಲಕ ಸರಿಸಲು &lt;span class='key'&gt;Control&lt;/span&gt; ಅನ್ನು ಹಿಡಿದುಕೊಳ್ಳಿ.</translation>
+<translation id="2079545284768500474">ರದ್ದುಮಾಡು</translation>
 <translation id="8254860724243898966">ಕೆರೆಟ್ ಬ್ರೌಸಿಂಗ್ ಅನ್ನು ಆನ್ ಮಾಡಲು &lt;span class='key'&gt;Alt&lt;/span&gt; + &lt;img src='increase_brightness.png'&gt; (ಪ್ರಕಾಶಮಾನ ಅಧಿಕಗೊಳಿಸುವ ಕೀ, ಅಥವಾ F7) ಅನ್ನು ಒತ್ತಿ. ಆಫ್ ಮಾಡಲು ಅದನ್ನು ಪುನಃ ಒತ್ತಿ.</translation>
 <translation id="3812541808639806898">ಚಿತ್ರ Alt ಪಠ್ಯ ವೀಕ್ಷಕ</translation>
 <translation id="1287053896835709737">ಕಪ್ಪು ಬಣ್ಣದ ಮೇಲೆ ಹಳದಿ</translation>
 <translation id="4896660567607030658">ಪ್ರತಿಕ್ರಿಯೆ ನೀಡದೆ, ಕೇವಲ ಕರ್ಸರ್ ಅನ್ನು ತೋರಿಸಿ.</translation>
 <translation id="5631241868147802353">ಡೀಫಾಲ್ಟ್ ಬಣ್ಣ ಯೋಜನೆ:</translation>
-<translation id="625377550964694810">ಯಾವುದೇ HTML ಅಂಶವು &quot;longdesc&quot; ಅಥವಾ &quot;aria-describedat&quot; ಗುಣಲಕ್ಷಣದ ಜೊತೆಗೆ ದಪ್ಪವಾದ ವೈಬ್ರಂಟ್ ಗಡಿಯನ್ನು ಪಡೆಯುತ್ತದೆ, ಮತ್ತು ನೀವು ಅದರ ಮೇಲೆ ಬಲಗಡೆ ಕ್ಲಿಕ್ ಮಾಡಿದಾಗ, ಸಂದರ್ಭ ಮೆನುಗೆ ದೀರ್ಘ ವಿವರಣೆಯನ್ನು ವೀಕ್ಷಿಸುವುದಕ್ಕಾಗಿ ಆಯ್ಕೆಯನ್ನು ಸೇರಿಸಲಾಗುತ್ತದೆ.</translation>
 <translation id="5173942593318174089">ಅನಿಮೇಷನ್ ಜೊತೆಗೆ ಕರ್ಸರ್ ಸ್ಥಾನವನ್ನು ಹೈಲೈಟ್ ಮಾಡಿ.</translation>
 <translation id="894241283505723656">ಸಂದರ್ಭ ಮೆನುವಿನಲ್ಲಿ ದೀರ್ಘ ವಿವರಣೆಗಳು</translation>
 <translation id="5555153510860501336">ಅಧಿಕ ವೈದೃಶ್ಯವನ್ನು ನಿಷ್ಕ್ರಿಯಗೊಳಿಸಲಾಗಿದೆ</translation>
 <translation id="1703735871906654364">ಕೆರೆಟ್ ಬ್ರೌಸಿಂಗ್</translation>
 <translation id="7384431257964758081">ಅಧಿಕ ವೈದೃಶ್ಯವನ್ನು ಸಕ್ರಿಯಗೊಳಿಸಲಾಗಿದೆ</translation>
+<translation id="6550675742724504774">ಆಯ್ಕೆಗಳು</translation>
 <translation id="5650358096585648000">ದೃಶ್ಯಾವಳಿ ಪ್ರತಿಕ್ರಿಯೆ</translation>
 <translation id="4388820049312272371">ತ್ವರಿತ ಫ್ಲಾಶ್ ಜೊತೆಗೆ ಕರ್ಸರ್ ಸ್ಥಾನವನ್ನು ಹೈಲೈಟ್ ಮಾಡಿ.</translation>
 <translation id="4023902424053835668">ಬಾಣದ ಕೀಗಳನ್ನು ಬಳಸುವ ಮೂಲಕ ವೆಬ್ ಪುಟಗಳ ಪಠ್ಯವನ್ನು ಬ್ರೌಸ್ ಮಾಡಿ.</translation>

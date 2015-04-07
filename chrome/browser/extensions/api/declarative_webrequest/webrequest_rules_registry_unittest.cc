@@ -18,6 +18,7 @@
 #include "chrome/common/extensions/extension_test_util.h"
 #include "components/url_matcher/url_matcher_constants.h"
 #include "content/public/test/test_browser_thread.h"
+#include "extensions/browser/api/declarative/rules_registry_service.h"
 #include "extensions/browser/api/declarative_webrequest/webrequest_constants.h"
 #include "extensions/browser/api/web_request/web_request_api_helpers.h"
 #include "net/base/request_priority.h"
@@ -50,11 +51,10 @@ namespace keys2 = url_matcher::url_matcher_constants;
 
 class TestWebRequestRulesRegistry : public WebRequestRulesRegistry {
  public:
-  TestWebRequestRulesRegistry(
-      scoped_refptr<InfoMap> extension_info_map)
+  TestWebRequestRulesRegistry(scoped_refptr<InfoMap> extension_info_map)
       : WebRequestRulesRegistry(NULL /*profile*/,
                                 NULL /* cache_delegate */,
-                                WebViewKey(0, 0)),
+                                RulesRegistryService::kDefaultRulesRegistryID),
         num_clear_cache_calls_(0) {
     SetExtensionInfoMapForTesting(extension_info_map);
   }
@@ -644,10 +644,12 @@ TEST_F(WebRequestRulesRegistryTest, GetMatchesDifferentUrls) {
   };
   // Which rules should match in subsequent test iterations.
   const char* const matchingRuleIds[] = { kRuleId1, kRuleId2 };
-  COMPILE_ASSERT(arraysize(urls) == arraysize(firstPartyUrls),
-                 urls_and_firstPartyUrls_need_to_have_the_same_size);
-  COMPILE_ASSERT(arraysize(urls) == arraysize(matchingRuleIds),
-                 urls_and_matchingRuleIds_need_to_have_the_same_size);
+  static_assert(arraysize(urls) == arraysize(firstPartyUrls),
+                "urls and firstPartyUrls must have the same number "
+                "of elements");
+  static_assert(arraysize(urls) == arraysize(matchingRuleIds),
+                "urls and matchingRuleIds must have the same number "
+                "of elements");
   net::TestURLRequestContext context;
 
   for (size_t i = 0; i < arraysize(matchingRuleIds); ++i) {

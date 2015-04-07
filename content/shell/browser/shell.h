@@ -15,8 +15,8 @@
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "ipc/ipc_channel.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/gfx/size.h"
 
 #if defined(OS_ANDROID)
 #include "base/android/scoped_java_ref.h"
@@ -84,7 +84,6 @@ class Shell : public WebContentsDelegate,
   static Shell* CreateNewWindow(BrowserContext* browser_context,
                                 const GURL& url,
                                 SiteInstance* site_instance,
-                                int routing_id,
                                 const gfx::Size& initial_size);
 
   // Returns the Shell object corresponding to the given RenderViewHost.
@@ -137,7 +136,8 @@ class Shell : public WebContentsDelegate,
   void CloseContents(WebContents* source) override;
   bool CanOverscrollContent() const override;
   void DidNavigateMainFramePostCommit(WebContents* web_contents) override;
-  JavaScriptDialogManager* GetJavaScriptDialogManager() override;
+  JavaScriptDialogManager* GetJavaScriptDialogManager(
+      WebContents* source) override;
 #if defined(OS_MACOSX)
   void HandleKeyboardEvent(WebContents* source,
                            const NativeWebKeyboardEvent& event) override;

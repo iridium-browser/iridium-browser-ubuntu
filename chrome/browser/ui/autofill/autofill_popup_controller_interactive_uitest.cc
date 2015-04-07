@@ -10,13 +10,14 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/autofill/content/browser/content_autofill_driver.h"
+#include "components/autofill/content/browser/content_autofill_driver_factory.h"
 #include "components/autofill/core/browser/autofill_manager.h"
 #include "components/autofill/core/browser/test_autofill_external_delegate.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/test/test_utils.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/vector2d.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/vector2d.h"
 
 namespace autofill {
 namespace {
@@ -78,7 +79,8 @@ class AutofillPopupControllerBrowserTest
     Observe(web_contents);
 
     ContentAutofillDriver* driver =
-        ContentAutofillDriver::FromWebContents(web_contents);
+        ContentAutofillDriverFactory::FromWebContents(web_contents)
+            ->DriverForFrame(web_contents->GetMainFrame());
     autofill_external_delegate_.reset(
        new TestAutofillExternalDelegate(
            web_contents,
@@ -112,18 +114,10 @@ IN_PROC_BROWSER_TEST_F(AutofillPopupControllerBrowserTest,
 }
 #endif // !defined(OS_MACOSX)
 
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS) && defined(USE_AURA)
-// TODO(erg): linux_aura bringup: http://crbug.com/163931
-#define MAYBE_DeleteDelegateBeforePopupHidden \
-  DISABLED_DeleteDelegateBeforePopupHidden
-#else
-#define MAYBE_DeleteDelegateBeforePopupHidden DeleteDelegateBeforePopupHidden
-#endif
-
 // This test checks that the browser doesn't crash if the delegate is deleted
 // before the popup is hidden.
 IN_PROC_BROWSER_TEST_F(AutofillPopupControllerBrowserTest,
-                       MAYBE_DeleteDelegateBeforePopupHidden){
+                       DeleteDelegateBeforePopupHidden){
   GenerateTestAutofillPopup(autofill_external_delegate_.get());
 
   // Delete the external delegate here so that is gets deleted before popup is

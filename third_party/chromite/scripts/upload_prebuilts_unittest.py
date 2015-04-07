@@ -21,6 +21,10 @@ from chromite.lib import cros_test_lib
 from chromite.lib import gs
 from chromite.lib import binpkg
 from chromite.lib import osutils
+from chromite.lib import portage_util
+
+import mock
+
 
 # pylint: disable=E1120,W0212,R0904
 PUBLIC_PACKAGES = [{'CPV': 'gtk+/public1', 'SHA1': '1', 'MTIME': '1'},
@@ -42,12 +46,13 @@ class TestUpdateFile(cros_test_lib.TempDirTestCase):
   """Tests for the UpdateLocalFile function."""
 
   def setUp(self):
-    self.contents_str = ['# comment that should be skipped',
-                         'PKGDIR="/var/lib/portage/pkgs"',
-                         'PORTAGE_BINHOST="http://no.thanks.com"',
-                         'portage portage-20100310.tar.bz2',
-                         'COMPILE_FLAGS="some_value=some_other"',
-                         ]
+    self.contents_str = [
+        '# comment that should be skipped',
+        'PKGDIR="/var/lib/portage/pkgs"',
+        'PORTAGE_BINHOST="http://no.thanks.com"',
+        'portage portage-20100310.tar.bz2',
+        'COMPILE_FLAGS="some_value=some_other"',
+    ]
     self.version_file = os.path.join(self.tempdir, 'version')
     osutils.WriteFile(self.version_file, '\n'.join(self.contents_str))
 
@@ -108,19 +113,30 @@ class TestUpdateFile(cros_test_lib.TempDirTestCase):
         os.remove(non_existent_file)
 
 
-class TestPrebuilt(cros_test_lib.MoxTestCase):
+class TestPrebuilt(cros_test_lib.MockTestCase):
   """Tests for Prebuilt logic."""
 
+  def setUp(self):
+    self._base_local_path = '/b/cbuild/build/chroot/build/x86-dogfood/'
+    self._gs_bucket_path = 'gs://chromeos-prebuilt/host/version'
+    self._local_path = os.path.join(self._base_local_path, 'public1.tbz2')
+
   def testGenerateUploadDict(self):
-    base_local_path = '/b/cbuild/build/chroot/build/x86-dogfood/'
-    gs_bucket_path = 'gs://chromeos-prebuilt/host/version'
-    local_path = os.path.join(base_local_path, 'public1.tbz2')
-    self.mox.StubOutWithMock(prebuilt.os.path, 'exists')
-    prebuilt.os.path.exists(local_path).AndReturn(True)
-    self.mox.ReplayAll()
-    pkgs = [{ 'CPV': 'public1' }]
-    result = prebuilt.GenerateUploadDict(base_local_path, gs_bucket_path, pkgs)
-    expected = { local_path: gs_bucket_path + '/public1.tbz2' }
+    self.PatchObject(prebuilt.os.path, 'exists', return_true=True)
+    pkgs = [{'CPV': 'public1'}]
+    result = prebuilt.GenerateUploadDict(self._base_local_path,
+                                         self._gs_bucket_path, pkgs)
+    expected = {self._local_path: self._gs_bucket_path + '/public1.tbz2', }
+    self.assertEqual(result, expected)
+
+  def testGenerateUploadDictWithDebug(self):
+    self.PatchObject(prebuilt.os.path, 'exists', return_true=True)
+    pkgs = [{'CPV': 'public1', 'DEBUG_SYMBOLS': 'yes'}]
+    result = prebuilt.GenerateUploadDict(self._base_local_path,
+                                         self._gs_bucket_path, pkgs)
+    expected = {self._local_path: self._gs_bucket_path + '/public1.tbz2',
+                self._local_path.replace('.tbz2', '.debug.tbz2'):
+                self._gs_bucket_path + '/public1.debug.tbz2'}
     self.assertEqual(result, expected)
 
   def testDeterminePrebuiltConfHost(self):
@@ -184,13 +200,11 @@ class TestPopulateDuplicateDB(TestPkgIndex):
     self.assertRaises(KeyError, self.pkgindex._PopulateDuplicateDB, self.db, 0)
 
 
-class TestResolveDuplicateUploads(cros_test_lib.MoxTestCase, TestPkgIndex):
+class TestResolveDuplicateUploads(cros_test_lib.MockTestCase, TestPkgIndex):
   """Tests for the ResolveDuplicateUploads function."""
 
   def setUp(self):
-    self.mox.StubOutWithMock(binpkg.time, 'time')
-    binpkg.time.time().AndReturn(binpkg.TWO_WEEKS)
-    self.mox.ReplayAll()
+    self.PatchObject(binpkg.time, 'time', return_value=binpkg.TWO_WEEKS)
     self.db = {}
     self.dup = SimplePackageIndex()
     self.expected_pkgindex = SimplePackageIndex()
@@ -255,15 +269,28 @@ class TestResolveDuplicateUploads(cros_test_lib.MoxTestCase, TestPkgIndex):
     del self.expected_pkgindex.packages[0]['MTIME']
     self.assertEqual(self.pkgindex.packages, self.expected_pkgindex.packages)
 
+  def testSymbolsAvailable(self):
+    """If symbols are available remotely, re-use them and set DEBUG_SYMBOLS."""
+    self.dup.packages[0]['DEBUG_SYMBOLS'] = 'yes'
 
-class TestWritePackageIndex(cros_test_lib.MoxTestCase, TestPkgIndex):
+    uploads = self.pkgindex.ResolveDuplicateUploads([self.dup])
+    self.assertEqual(uploads, [])
+    self.assertEqual(self.pkgindex.packages[0].get('DEBUG_SYMBOLS'), 'yes')
+
+  def testSymbolsAvailableLocallyOnly(self):
+    """If the symbols are only available locally, reupload them."""
+    self.pkgindex.packages[0]['DEBUG_SYMBOLS'] = 'yes'
+
+    uploads = self.pkgindex.ResolveDuplicateUploads([self.dup])
+    self.assertEqual(uploads, [self.pkgindex.packages[0]])
+
+
+class TestWritePackageIndex(cros_test_lib.MockTestCase, TestPkgIndex):
   """Tests for the WriteToNamedTemporaryFile function."""
 
   def testSimple(self):
     """Test simple call of WriteToNamedTemporaryFile()"""
-    self.mox.StubOutWithMock(self.pkgindex, 'Write')
-    self.pkgindex.Write(mox.IgnoreArg())
-    self.mox.ReplayAll()
+    self.PatchObject(self.pkgindex, 'Write')
     f = self.pkgindex.WriteToNamedTemporaryFile()
     self.assertEqual(f.read(), '')
 
@@ -290,7 +317,8 @@ class TestUploadPrebuilt(cros_test_lib.MoxTestCase):
   def testSuccessfulGsUpload(self):
     uploads = {'/packages/private.tbz2': 'gs://foo/private.tbz2'}
     self.mox.StubOutWithMock(prebuilt, 'GenerateUploadDict')
-    prebuilt.GenerateUploadDict('/packages', 'gs://foo/suffix',
+    prebuilt.GenerateUploadDict(
+        '/packages', 'gs://foo/suffix',
         PRIVATE_PACKAGES).AndReturn(uploads)
     uploads = uploads.copy()
     uploads['fake'] = 'gs://foo/suffix/Packages'
@@ -325,11 +353,14 @@ class TestSyncPrebuilts(cros_test_lib.MoxTestCase):
     slave_targets = [prebuilt.BuildTarget('x86-bar', 'aura')]
     package_path = os.path.join(self.build_path,
                                 prebuilt._HOST_PACKAGES_PATH)
-    url_suffix = prebuilt._REL_HOST_PATH % {'version': self.version,
-        'host_arch': prebuilt._HOST_ARCH, 'target': target}
+    url_suffix = prebuilt._REL_HOST_PATH % {
+        'version': self.version,
+        'host_arch': prebuilt._HOST_ARCH,
+        'target': target,
+    }
     packages_url_suffix = '%s/packages' % url_suffix.rstrip('/')
-    prebuilt.PrebuiltUploader._UploadPrebuilt(package_path,
-        packages_url_suffix).AndReturn(True)
+    prebuilt.PrebuiltUploader._UploadPrebuilt(
+        package_path, packages_url_suffix).AndReturn(True)
     url_value = '%s/%s/' % (self.binhost.rstrip('/'),
                             packages_url_suffix.rstrip('/'))
     urls = [url_value.replace('foo', 'bar'), url_value]
@@ -350,8 +381,10 @@ class TestSyncPrebuilts(cros_test_lib.MoxTestCase):
     board_path = os.path.join(
         self.build_path, prebuilt._BOARD_PATH % {'board': board})
     package_path = os.path.join(board_path, 'packages')
-    url_suffix = prebuilt._REL_BOARD_PATH % {'version': self.version,
-        'target': target}
+    url_suffix = prebuilt._REL_BOARD_PATH % {
+        'version': self.version,
+        'target': target,
+    }
     packages_url_suffix = '%s/packages' % url_suffix.rstrip('/')
     self.mox.StubOutWithMock(multiprocessing.Process, '__init__')
     self.mox.StubOutWithMock(multiprocessing.Process, 'exitcode')
@@ -411,7 +444,7 @@ class TestMain(cros_test_lib.MoxTestCase):
     options.skip_upload = False
     options.filters = True
     options.key = 'PORTAGE_BINHOST'
-    options.binhost_conf_dir = 'foo'
+    options.binhost_conf_dir = None
     options.sync_binhost_conf = True
     options.slave_targets = [prebuilt.BuildTarget('x86-bar', 'aura')]
     self.mox.StubOutWithMock(prebuilt, 'ParseOptions')
@@ -419,16 +452,17 @@ class TestMain(cros_test_lib.MoxTestCase):
     self.mox.StubOutWithMock(binpkg, 'GrabRemotePackageIndex')
     binpkg.GrabRemotePackageIndex(old_binhost).AndReturn(True)
     self.mox.StubOutWithMock(prebuilt.PrebuiltUploader, '__init__')
-    self.mox.StubOutWithMock(prebuilt, 'GetBoardOverlay')
+    self.mox.StubOutWithMock(portage_util, 'FindOverlayFile')
     fake_overlay_path = '/fake_path'
-    prebuilt.GetBoardOverlay(
-        options.build_path, options.board).AndReturn(fake_overlay_path)
     expected_gs_acl_path = os.path.join(fake_overlay_path,
-                                        prebuilt._GOOGLESTORAGE_ACL_FILE)
+                                        prebuilt._GOOGLESTORAGE_GSUTIL_FILE)
+    portage_util.FindOverlayFile(
+        prebuilt._GOOGLESTORAGE_GSUTIL_FILE, board=options.board,
+        buildroot=options.build_path).AndReturn(expected_gs_acl_path)
     prebuilt.PrebuiltUploader.__init__(options.upload, expected_gs_acl_path,
                                        options.upload, mox.IgnoreArg(),
                                        options.build_path, options.packages,
-                                       False, options.binhost_conf_dir, False,
+                                       False, None, False,
                                        target, options.slave_targets,
                                        mox.IgnoreArg())
     self.mox.StubOutWithMock(prebuilt.PrebuiltUploader, 'SyncHostPrebuilts')
@@ -442,12 +476,15 @@ class TestMain(cros_test_lib.MoxTestCase):
     prebuilt.main([])
 
 
-class TestSdk(cros_test_lib.MoxTestCase):
+class TestSdk(cros_test_lib.MockTestCase):
   """Test logic related to uploading SDK binaries"""
 
   def setUp(self):
-    self.mox.StubOutWithMock(prebuilt, '_GsUpload')
-    self.mox.StubOutWithMock(prebuilt, 'UpdateBinhostConfFile')
+    self.PatchObject(prebuilt, '_GsUpload',
+                     side_effect=Exception('should not get called'))
+    self.PatchObject(prebuilt, 'UpdateBinhostConfFile',
+                     side_effect=Exception('should not get called'))
+    self.upload_mock = self.PatchObject(prebuilt.PrebuiltUploader, '_Upload')
 
     self.acl = 'magic-acl'
 
@@ -456,24 +493,27 @@ class TestSdk(cros_test_lib.MoxTestCase):
         'gs://foo', self.acl, 'prebuilt', [], '/', [],
         False, 'foo', False, 'x86-foo', [], 'chroot-1234')
 
-  def testSdkUpload(self, cb=lambda:None, tc_tarballs=(),
-                    tc_upload_path=None):
+  def testSdkUpload(self, tc_tarballs=(), tc_upload_path=None):
     """Make sure we can upload just an SDK tarball"""
     tar = 'sdk.tar.xz'
     ver = '1234'
     vtar = 'cros-sdk-%s.tar.xz' % ver
 
-    prebuilt._GsUpload(mox.IgnoreArg(), self.acl, '%s.Manifest' % tar,
-                       'gs://chromiumos-sdk/%s.Manifest' % vtar)
-    prebuilt._GsUpload(mox.IgnoreArg(), self.acl, tar,
-                       'gs://chromiumos-sdk/%s' % vtar)
-    cb()
-    prebuilt._GsUpload(mox.IgnoreArg(), self.acl, mox.IgnoreArg(),
-                       'gs://chromiumos-sdk/cros-sdk-latest.conf')
-    self.mox.ReplayAll()
+    calls = [
+        mock.call('%s.Manifest' % tar,
+                  'gs://chromiumos-sdk/%s.Manifest' % vtar),
+        mock.call(tar, 'gs://chromiumos-sdk/%s' % vtar),
+    ]
+    for tc in tc_tarballs:
+      tc = tc.split(':')
+      calls.append(mock.call(
+          tc[1], ('gs://chromiumos-sdk/' + tc_upload_path) % {'target': tc[0]}))
+    calls.append(mock.call(
+        mock.ANY, 'gs://chromiumos-sdk/cros-sdk-latest.conf'))
 
     self.uploader._UploadSdkTarball('amd64-host', '',
                                     tar, tc_tarballs, tc_upload_path)
+    self.upload_mock.assert_has_calls(calls)
 
   def testTarballUpload(self):
     """Make sure processing of toolchain tarballs works"""
@@ -482,13 +522,7 @@ class TestSdk(cros_test_lib.MoxTestCase):
         'arm-none:/some/arm.tar.xz',
     )
     tc_upload_path = '1994/04/%(target)s-1994.04.02.tar.xz'
-    def cb():
-      for tc in tc_tarballs:
-        tc = tc.split(':')
-        prebuilt._GsUpload(
-            mox.IgnoreArg(), self.acl, tc[1],
-            ('gs://chromiumos-sdk/' + tc_upload_path) % {'target': tc[0]})
-    self.testSdkUpload(cb, tc_tarballs, tc_upload_path)
+    self.testSdkUpload(tc_tarballs, tc_upload_path)
 
 
 if __name__ == '__main__':

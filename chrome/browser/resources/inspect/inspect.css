@@ -1,16 +1,17 @@
-/*
- * Copyright (c) 2012 The Chromium Authors. All rights reserved.
+/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
- * found in the LICENSE file.
- */
+ * found in the LICENSE file. */
 
 body {
   color: rgb(48, 57, 66);
-  font-family: Arial, sans-serif;
   font-size: 13px;
   margin: 0;
   min-width: 47em;
   padding: 20px 20px 65px 0;
+}
+
+.hidden {
+    display: none !important;
 }
 
 img {
@@ -108,9 +109,9 @@ img {
 }
 
 .port-icon {
-  -webkit-border-radius: 6px;
   background-color: rgb(64, 192, 64);
   border: 0 solid transparent;
+  border-radius: 6px;
   height: 12px;
   margin: 2px;
   width: 12px;
@@ -149,8 +150,8 @@ img {
 }
 
 .used-for-port-forwarding {
-  background-image: -webkit-image-set(url('chrome://theme/IDR_INFO') 1x,
-                                      url('chrome://theme/IDR_INFO@2x') 2x);
+  background-image: -webkit-image-set(url(chrome://theme/IDR_INFO) 1x,
+                                      url(chrome://theme/IDR_INFO@2x) 2x);
   height: 15px;
   margin-left: 20px;
   width: 15px;
@@ -181,6 +182,7 @@ img {
 
 .webview-thumbnail {
   display: inline-block;
+  flex-shrink: 0;
   margin-right: 5px;
   overflow: hidden;
   position: relative;
@@ -284,8 +286,8 @@ img {
 }
 
 .warning {
-  background-image: -webkit-image-set(url('chrome://theme/IDR_WARNING') 1x,
-                                      url('chrome://theme/IDR_WARNING@2x') 2x);
+  background-image: -webkit-image-set(url(chrome://theme/IDR_WARNING) 1x,
+                                      url(chrome://theme/IDR_WARNING@2x) 2x);
   background-position: 0 center;
   background-repeat: no-repeat;
   background-size: 24px 21px;
@@ -298,8 +300,8 @@ img {
 }
 
 #port-forwarding-config {
-  -webkit-border-radius: 3px;
   background: white;
+  border-radius: 3px;
   box-shadow: 0 4px 23px 5px rgba(0, 0, 0, 0.2), 0 2px 6px rgba(0,0,0,0.15);
   color: #333;
   padding: 17px 17px 12px;
@@ -307,17 +309,17 @@ img {
 }
 
 .close-button {
-  background-image: url('chrome://theme/IDR_CLOSE_DIALOG');
+  background-image: url(chrome://theme/IDR_CLOSE_DIALOG);
   height: 14px;
   width: 14px;
 }
 
 .close-button:active {
-  background-image: url('chrome://theme/IDR_CLOSE_DIALOG_P');
+  background-image: url(chrome://theme/IDR_CLOSE_DIALOG_P);
 }
 
 .close-button:hover {
-  background-image: url('chrome://theme/IDR_CLOSE_DIALOG_H');
+  background-image: url(chrome://theme/IDR_CLOSE_DIALOG_H);
 }
 
 #port-forwarding-config > .close-button {

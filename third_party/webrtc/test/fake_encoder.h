@@ -30,7 +30,7 @@ class FakeEncoder : public VideoEncoder {
 
   virtual int32_t InitEncode(const VideoCodec* config,
                              int32_t number_of_cores,
-                             uint32_t max_payload_size) OVERRIDE;
+                             size_t max_payload_size) OVERRIDE;
   virtual int32_t Encode(
      const I420VideoFrame& input_image,
      const CodecSpecificInfo* codec_specific_info,
@@ -42,7 +42,7 @@ class FakeEncoder : public VideoEncoder {
   virtual int32_t SetRates(uint32_t new_target_bitrate,
                            uint32_t framerate) OVERRIDE;
 
- private:
+ protected:
   Clock* const clock_;
   VideoCodec config_;
   EncodedImageCallback* callback_;
@@ -61,13 +61,27 @@ class FakeH264Encoder : public FakeEncoder, public EncodedImageCallback {
       EncodedImageCallback* callback) OVERRIDE;
 
   virtual int32_t Encoded(
-      EncodedImage& encodedImage,
-      const CodecSpecificInfo* codecSpecificInfo = NULL,
-      const RTPFragmentationHeader* fragments = NULL) OVERRIDE;
+      const EncodedImage& encodedImage,
+      const CodecSpecificInfo* codecSpecificInfo,
+      const RTPFragmentationHeader* fragments) OVERRIDE;
 
  private:
   EncodedImageCallback* callback_;
   int idr_counter_;
+};
+
+class DelayedEncoder : public test::FakeEncoder {
+ public:
+  DelayedEncoder(Clock* clock, int delay_ms);
+  virtual ~DelayedEncoder() {}
+
+  virtual int32_t Encode(
+      const I420VideoFrame& input_image,
+      const CodecSpecificInfo* codec_specific_info,
+      const std::vector<VideoFrameType>* frame_types) OVERRIDE;
+
+ private:
+  const int delay_ms_;
 };
 }  // namespace test
 }  // namespace webrtc

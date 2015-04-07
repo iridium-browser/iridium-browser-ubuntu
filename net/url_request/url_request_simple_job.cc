@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
+#include "base/memory/ref_counted_memory.h"
 #include "base/message_loop/message_loop.h"
 #include "base/profiler/scoped_tracker.h"
 #include "net/base/io_buffer.h"
@@ -46,14 +47,38 @@ URLRequestSimpleJob::~URLRequestSimpleJob() {}
 
 bool URLRequestSimpleJob::ReadRawData(IOBuffer* buf, int buf_size,
                                       int* bytes_read) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/422489 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422489 URLRequestSimpleJob::ReadRawData"));
+
   DCHECK(bytes_read);
-  int remaining = byte_range_.last_byte_position() - data_offset_ + 1;
-  if (buf_size > remaining)
-    buf_size = remaining;
-  memcpy(buf->data(), data_.data() + data_offset_, buf_size);
+  buf_size = static_cast<int>(std::min(
+      static_cast<int64>(buf_size),
+      byte_range_.last_byte_position() - data_offset_ + 1));
+  memcpy(buf->data(), data_->front() + data_offset_, buf_size);
   data_offset_ += buf_size;
   *bytes_read = buf_size;
   return true;
+}
+
+int URLRequestSimpleJob::GetData(std::string* mime_type,
+                                 std::string* charset,
+                                 std::string* data,
+                                 const CompletionCallback& callback) const {
+  NOTREACHED();
+  return ERR_UNEXPECTED;
+}
+
+int URLRequestSimpleJob::GetRefCountedData(
+    std::string* mime_type,
+    std::string* charset,
+    scoped_refptr<base::RefCountedMemory>* data,
+    const CompletionCallback& callback) const {
+  scoped_refptr<base::RefCountedString> str_data(new base::RefCountedString());
+  int result = GetData(mime_type, charset, &str_data->data(), callback);
+  *data = str_data;
+  return result;
 }
 
 void URLRequestSimpleJob::StartAsync() {
@@ -82,11 +107,10 @@ void URLRequestSimpleJob::StartAsync() {
         FROM_HERE_WITH_EXPLICIT_FUNCTION(
             "422489 URLRequestSimpleJob::StartAsync 2"));
 
-    result = GetData(&mime_type_,
-                     &charset_,
-                     &data_,
-                     base::Bind(&URLRequestSimpleJob::OnGetDataCompleted,
-                                weak_factory_.GetWeakPtr()));
+    result =
+        GetRefCountedData(&mime_type_, &charset_, &data_,
+                          base::Bind(&URLRequestSimpleJob::OnGetDataCompleted,
+                                     weak_factory_.GetWeakPtr()));
   }
 
   if (result != ERR_IO_PENDING) {
@@ -107,16 +131,15 @@ void URLRequestSimpleJob::OnGetDataCompleted(int result) {
 
   if (result == OK) {
     // Notify that the headers are complete
-    if (!byte_range_.ComputeBounds(data_.size())) {
+    if (!byte_range_.ComputeBounds(data_->size())) {
       NotifyDone(URLRequestStatus(URLRequestStatus::FAILED,
                  ERR_REQUEST_RANGE_NOT_SATISFIABLE));
       return;
     }
 
     data_offset_ = byte_range_.first_byte_position();
-    int remaining_bytes = byte_range_.last_byte_position() -
-        byte_range_.first_byte_position() + 1;
-    set_expected_content_size(remaining_bytes);
+    set_expected_content_size(
+        byte_range_.last_byte_position() - data_offset_ + 1);
     NotifyHeadersComplete();
   } else {
     NotifyStartError(URLRequestStatus(URLRequestStatus::FAILED, result));

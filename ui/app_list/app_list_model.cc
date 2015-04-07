@@ -19,7 +19,8 @@ AppListModel::AppListModel()
       results_(new SearchResults),
       status_(STATUS_NORMAL),
       state_(INVALID_STATE),
-      folders_enabled_(false) {
+      folders_enabled_(false),
+      custom_launcher_page_enabled_(true) {
   top_level_item_list_->AddObserver(this);
 }
 
@@ -308,6 +309,12 @@ void AppListModel::SetFoldersEnabled(bool folders_enabled) {
     DeleteItem(folder_ids[i]);
 }
 
+void AppListModel::SetCustomLauncherPageEnabled(bool enabled) {
+  custom_launcher_page_enabled_ = enabled;
+  FOR_EACH_OBSERVER(AppListModelObserver, observers_,
+                    OnCustomLauncherPageEnabledStateChanged(enabled));
+}
+
 std::vector<SearchResult*> AppListModel::FilterSearchResultsByDisplayType(
     SearchResults* results,
     SearchResult::DisplayType display_type,
@@ -322,6 +329,22 @@ std::vector<SearchResult*> AppListModel::FilterSearchResultsByDisplayType(
     }
   }
   return matches;
+}
+
+void AppListModel::PushCustomLauncherPageSubpage() {
+  custom_launcher_page_subpage_depth_++;
+}
+
+bool AppListModel::PopCustomLauncherPageSubpage() {
+  if (custom_launcher_page_subpage_depth_ == 0)
+    return false;
+
+  --custom_launcher_page_subpage_depth_;
+  return true;
+}
+
+void AppListModel::ClearCustomLauncherPageSubpages() {
+  custom_launcher_page_subpage_depth_ = 0;
 }
 
 // Private methods

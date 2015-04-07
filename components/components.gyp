@@ -21,6 +21,7 @@
     'cronet.gypi',
     'crx_file.gypi',
     'data_reduction_proxy.gypi',
+    'dns_prefetch.gypi',
     'dom_distiller.gypi',
     'domain_reliability.gypi',
     'enhanced_bookmarks.gypi',
@@ -28,6 +29,7 @@
     'favicon.gypi',
     'favicon_base.gypi',
     'google.gypi',
+    'handoff.gypi',
     'history.gypi',
     'infobars.gypi',
     'json_schema.gypi',
@@ -38,10 +40,10 @@
     'metrics.gypi',
     'navigation_metrics.gypi',
     'network_time.gypi',
-    'omaha_query_params.gypi',
     'onc.gypi',
     'os_crypt.gypi',
     'ownership.gypi',
+    'packed_ct_ev_whitelist.gypi',
     'password_manager.gypi',
     'policy.gypi',
     'precache.gypi',
@@ -55,18 +57,22 @@
     'startup_metric_utils.gypi',
     'suggestions.gypi',
     'translate.gypi',
+    'ui_zoom.gypi',
+    'update_client.gypi',
     'url_fixer.gypi',
     'url_matcher.gypi',
     'user_prefs.gypi',
     'variations.gypi',
+    'wallpaper.gypi',
     'webdata.gypi',
+    'web_resource.gypi',
   ],
   'conditions': [
     ['OS != "ios"', {
       'includes': [
-        'app_modal_dialogs.gypi',
+        'app_modal.gypi',
         'cdm.gypi',
-        'copresence_sockets.gypi',
+        'copresence_endpoints.gypi',
         'navigation_interception.gypi',
         'plugins.gypi',
         'power.gypi',
@@ -74,6 +80,11 @@
         'web_cache.gypi',
         'web_contents_delegate_android.gypi',
         'web_modal.gypi',
+      ],
+    }],
+    ['OS == "ios"', {
+      'includes': [
+        'webp_transcode.gypi',
       ],
     }],
     ['OS != "android"', {
@@ -92,11 +103,17 @@
       'includes': [
         'pairing.gypi',
         'timers.gypi',
+        'wifi_sync.gypi',
       ],
     }],
     ['OS == "win" or OS == "mac"', {
       'includes': [
         'wifi.gypi',
+      ],
+    }],
+    ['OS == "win"', {
+      'includes': [
+        'browser_watcher.gypi',
       ],
     }],
     ['chromeos == 1 or use_ash == 1', {
@@ -120,6 +137,7 @@
         'search_engines.gypi',
         'sync_driver.gypi',
         'invalidation.gypi',
+        'webdata_services.gypi',
       ],
     }],
     ['enable_plugins==1', {

@@ -10,7 +10,10 @@
 namespace app_list {
 
 SearchResultContainerView::SearchResultContainerView()
-    : results_(NULL), update_factory_(this) {
+    : selected_index_(-1),
+      num_results_(0),
+      results_(NULL),
+      update_factory_(this) {
 }
 
 SearchResultContainerView::~SearchResultContainerView() {
@@ -27,7 +30,24 @@ void SearchResultContainerView::SetResults(
   if (results_)
     results_->AddObserver(this);
 
-  Update();
+  DoUpdate();
+}
+
+void SearchResultContainerView::SetSelectedIndex(int selected_index) {
+  DCHECK(IsValidSelectionIndex(selected_index));
+  int old_selected = selected_index_;
+  selected_index_ = selected_index;
+  UpdateSelectedIndex(old_selected, selected_index_);
+}
+
+void SearchResultContainerView::ClearSelectedIndex() {
+  int old_selected = selected_index_;
+  selected_index_ = -1;
+  UpdateSelectedIndex(old_selected, selected_index_);
+}
+
+bool SearchResultContainerView::IsValidSelectionIndex(int index) const {
+  return index >= 0 && index <= num_results() - 1;
 }
 
 void SearchResultContainerView::ScheduleUpdate() {
@@ -59,7 +79,9 @@ void SearchResultContainerView::ListItemsChanged(size_t start, size_t count) {
 }
 
 void SearchResultContainerView::DoUpdate() {
-  Update();
+  num_results_ = Update();
+  Layout();
+  PreferredSizeChanged();
   update_factory_.InvalidateWeakPtrs();
 }
 

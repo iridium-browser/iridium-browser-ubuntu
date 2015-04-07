@@ -26,12 +26,12 @@
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/devtools_ui.h"
-#include "chrome/browser/ui/zoom/zoom_controller.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/ui/zoom/zoom_controller.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/native_web_keyboard_event.h"
@@ -45,6 +45,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/url_constants.h"
+#include "net/base/escape.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/events/keycodes/keyboard_codes.h"
@@ -248,7 +249,7 @@ bool DevToolsEventForwarder::ForwardEvent(
   event_data.SetInteger("keyCode", key_code);
   event_data.SetInteger("modifiers", event.modifiers);
   devtools_window_->bindings_->CallClientFunction(
-      "InspectorFrontendAPI.keyEventUnhandled", &event_data, NULL, NULL);
+      "DevToolsAPI.keyEventUnhandled", &event_data, NULL, NULL);
   return true;
 }
 
@@ -418,7 +419,7 @@ DevToolsWindow* DevToolsWindow::OpenDevToolsWindowForWorker(
 DevToolsWindow* DevToolsWindow::CreateDevToolsWindowForWorker(
     Profile* profile) {
   content::RecordAction(base::UserMetricsAction("DevTools_InspectWorker"));
-  return Create(profile, GURL(), NULL, true, false, false, "");
+  return Create(profile, GURL(), NULL, true, std::string(), false, "");
 }
 
 // static
@@ -459,8 +460,8 @@ void DevToolsWindow::OpenExternalFrontend(
     bool isWorker) {
   DevToolsWindow* window = FindDevToolsWindow(agent_host.get());
   if (!window) {
-    window = Create(profile, DevToolsUI::GetProxyURL(frontend_url), NULL,
-                    isWorker, true, false, "");
+    window = Create(profile, GURL(), NULL, isWorker,
+                    DevToolsUI::GetProxyURL(frontend_url).spec(), false, "");
     window->bindings_->AttachTo(agent_host);
   }
   window->ScheduleShow(DevToolsToggleAction::Show());
@@ -481,8 +482,8 @@ DevToolsWindow* DevToolsWindow::ToggleDevToolsWindow(
         inspected_web_contents->GetBrowserContext());
     content::RecordAction(
         base::UserMetricsAction("DevTools_InspectRenderer"));
-    window = Create(
-        profile, GURL(), inspected_web_contents, false, false, true, settings);
+    window = Create(profile, GURL(), inspected_web_contents,
+                    false, std::string(), true, settings);
     window->bindings_->AttachTo(agent.get());
     do_open = true;
   }
@@ -692,8 +693,8 @@ DevToolsWindow::DevToolsWindow(Profile* profile,
   bindings_->SetDelegate(this);
   // DevTools uses chrome_page_zoom::Zoom(), so main_web_contents_ requires a
   // ZoomController.
-  ZoomController::CreateForWebContents(main_web_contents_);
-  ZoomController::FromWebContents(main_web_contents_)
+  ui_zoom::ZoomController::CreateForWebContents(main_web_contents_);
+  ui_zoom::ZoomController::FromWebContents(main_web_contents_)
       ->SetShowsNotificationBubble(false);
 
   g_instances.Get().push_back(this);
@@ -722,7 +723,7 @@ DevToolsWindow* DevToolsWindow::Create(
     const GURL& frontend_url,
     content::WebContents* inspected_web_contents,
     bool shared_worker_frontend,
-    bool external_frontend,
+    const std::string& remote_frontend,
     bool can_dock,
     const std::string& settings) {
   if (inspected_web_contents) {
@@ -739,7 +740,7 @@ DevToolsWindow* DevToolsWindow::Create(
   // Create WebContents with devtools.
   GURL url(GetDevToolsURL(profile, frontend_url,
                           shared_worker_frontend,
-                          external_frontend,
+                          remote_frontend,
                           can_dock, settings));
   return new DevToolsWindow(profile, url, inspected_web_contents, can_dock);
 }
@@ -748,7 +749,7 @@ DevToolsWindow* DevToolsWindow::Create(
 GURL DevToolsWindow::GetDevToolsURL(Profile* profile,
                                     const GURL& base_url,
                                     bool shared_worker_frontend,
-                                    bool external_frontend,
+                                    const std::string& remote_frontend,
                                     bool can_dock,
                                     const std::string& settings) {
   // Compatibility errors are encoded with data urls, pass them
@@ -763,8 +764,10 @@ GURL DevToolsWindow::GetDevToolsURL(Profile* profile,
       ((frontend_url.find("?") == std::string::npos) ? "?" : "&"));
   if (shared_worker_frontend)
     url_string += "&isSharedWorker=true";
-  if (external_frontend)
+  if (remote_frontend.size()) {
     url_string += "&remoteFrontend=true";
+    url_string += "&remoteFrontendUrl=" + net::EscapePath(remote_frontend);
+  }
   if (can_dock)
     url_string += "&can_dock=true";
   if (settings.size())
@@ -929,11 +932,13 @@ void DevToolsWindow::HandleKeyboardEvent(
     inspected_window->HandleKeyboardEvent(event);
 }
 
-content::JavaScriptDialogManager* DevToolsWindow::GetJavaScriptDialogManager() {
+content::JavaScriptDialogManager* DevToolsWindow::GetJavaScriptDialogManager(
+    WebContents* source) {
   WebContents* inspected_web_contents = GetInspectedWebContents();
-  return (inspected_web_contents && inspected_web_contents->GetDelegate()) ?
-      inspected_web_contents->GetDelegate()->GetJavaScriptDialogManager() :
-      content::WebContentsDelegate::GetJavaScriptDialogManager();
+  return (inspected_web_contents && inspected_web_contents->GetDelegate())
+             ? inspected_web_contents->GetDelegate()
+                   ->GetJavaScriptDialogManager(inspected_web_contents)
+             : content::WebContentsDelegate::GetJavaScriptDialogManager(source);
 }
 
 content::ColorChooser* DevToolsWindow::OpenColorChooser(
@@ -995,16 +1000,6 @@ void DevToolsWindow::InspectElementCompleted() {
     UMA_HISTOGRAM_TIMES("DevTools.InspectElement",
         base::TimeTicks::Now() - inspect_element_start_time_);
     inspect_element_start_time_ = base::TimeTicks();
-  }
-}
-
-void DevToolsWindow::MoveWindow(int x, int y) {
-  if (life_stage_ != kLoadCompleted)
-    return;
-  if (!is_docked_) {
-    gfx::Rect bounds = browser_->window()->GetBounds();
-    bounds.Offset(x, y);
-    browser_->window()->SetBounds(bounds);
   }
 }
 
@@ -1110,8 +1105,8 @@ void DevToolsWindow::OnLoadCompleted() {
         SessionTabHelper::FromWebContents(inspected_web_contents);
     if (session_tab_helper) {
       base::FundamentalValue tabId(session_tab_helper->session_id().id());
-      bindings_->CallClientFunction("WebInspector.setInspectedTabId",
-          &tabId, NULL, NULL);
+      bindings_->CallClientFunction("DevToolsAPI.setInspectedTabId",
+                                    &tabId, NULL, NULL);
     }
   }
 
@@ -1165,12 +1160,12 @@ void DevToolsWindow::DoAction(const DevToolsToggleAction& action) {
   switch (action.type()) {
     case DevToolsToggleAction::kShowConsole:
       bindings_->CallClientFunction(
-          "InspectorFrontendAPI.showConsole", NULL, NULL, NULL);
+          "DevToolsAPI.showConsole", NULL, NULL, NULL);
       break;
 
     case DevToolsToggleAction::kInspect:
       bindings_->CallClientFunction(
-          "InspectorFrontendAPI.enterInspectElementMode", NULL, NULL, NULL);
+          "DevToolsAPI.enterInspectElementMode", NULL, NULL, NULL);
       break;
 
     case DevToolsToggleAction::kShow:
@@ -1186,7 +1181,7 @@ void DevToolsWindow::DoAction(const DevToolsToggleAction& action) {
       base::FundamentalValue line_value(static_cast<int>(params->line_number));
       base::FundamentalValue column_value(
           static_cast<int>(params->column_number));
-      bindings_->CallClientFunction("InspectorFrontendAPI.revealSourceLine",
+      bindings_->CallClientFunction("DevToolsAPI.revealSourceLine",
                                     &url_value, &line_value, &column_value);
       break;
     }

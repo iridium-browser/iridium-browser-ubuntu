@@ -14,7 +14,7 @@ class ToughPinchZoomCasesPage(page_module.Page):
     self.user_agent_type = 'desktop'
     self.archive_data_file = 'data/tough_pinch_zoom_cases.json'
 
-  def RunSmoothness(self, action_runner):
+  def RunPageInteractions(self, action_runner):
     interaction = action_runner.BeginGestureInteraction(
         'PinchAction', is_smooth=True)
     action_runner.PinchPage()
@@ -68,7 +68,7 @@ class GoogleCalendarPage(ToughPinchZoomCasesPage):
     action_runner.NavigateToPage(self)
     action_runner.Wait(2)
 
-  def RunSmoothness(self, action_runner):
+  def RunPageInteractions(self, action_runner):
     interaction = action_runner.BeginGestureInteraction(
         'PinchAction', is_smooth=True)
     action_runner.PinchPage(left_anchor_ratio=0.1, top_anchor_ratio=0.3)
@@ -102,7 +102,7 @@ class GooglePlusPage(ToughPinchZoomCasesPage):
     action_runner.NavigateToPage(self)
     action_runner.WaitForElement(text='Home')
 
-  def RunSmoothness(self, action_runner):
+  def RunPageInteractions(self, action_runner):
     interaction = action_runner.BeginGestureInteraction(
         'PinchAction', is_smooth=True)
     action_runner.PinchElement(selector='[id="110031535020051778989-tab-bar"]')
@@ -233,7 +233,7 @@ class YahooAnswersPage(ToughPinchZoomCasesPage):
       url='http://answers.yahoo.com',
       page_set=page_set)
 
-  def RunSmoothness(self, action_runner):
+  def RunPageInteractions(self, action_runner):
     interaction = action_runner.BeginGestureInteraction(
         'PinchAction', is_smooth=True)
     action_runner.PinchElement(selector='#ya-content-apps')
@@ -250,40 +250,40 @@ class ToughPinchZoomCasesPageSet(page_set_module.PageSet):
       archive_data_file='data/tough_pinch_zoom_cases.json',
       bucket=page_set_module.PARTNER_BUCKET)
 
-    self.AddPage(GoogleSearchPage(self))
-    self.AddPage(GmailPage(self))
-    self.AddPage(GoogleCalendarPage(self))
-    self.AddPage(GoogleImageSearchPage(self))
-    self.AddPage(GooglePlusPage(self))
-    self.AddPage(YoutubePage(self))
-    self.AddPage(BlogSpotPage(self))
-    self.AddPage(FacebookPage(self))
-    self.AddPage(LinkedinPage(self))
-    self.AddPage(WikipediaPage(self))
-    self.AddPage(TwitterPage(self))
-    self.AddPage(ESPNPage(self))
+    self.AddUserStory(GoogleSearchPage(self))
+    self.AddUserStory(GmailPage(self))
+    self.AddUserStory(GoogleCalendarPage(self))
+    self.AddUserStory(GoogleImageSearchPage(self))
+    self.AddUserStory(GooglePlusPage(self))
+    self.AddUserStory(YoutubePage(self))
+    self.AddUserStory(BlogSpotPage(self))
+    self.AddUserStory(FacebookPage(self))
+    self.AddUserStory(LinkedinPage(self))
+    self.AddUserStory(WikipediaPage(self))
+    self.AddUserStory(TwitterPage(self))
+    self.AddUserStory(ESPNPage(self))
 
     # Why: #1 news worldwide (Alexa global)
-    self.AddPage(ToughPinchZoomCasesPage('http://news.yahoo.com', self))
+    self.AddUserStory(ToughPinchZoomCasesPage('http://news.yahoo.com', self))
 
     # Why: #2 news worldwide
-    self.AddPage(ToughPinchZoomCasesPage('http://www.cnn.com', self))
+    self.AddUserStory(ToughPinchZoomCasesPage('http://www.cnn.com', self))
 
-    self.AddPage(WeatherDotComPage(self))
+    self.AddUserStory(WeatherDotComPage(self))
 
     # Why: #1 world commerce website by visits; #3 commerce in the US by time
     # spent
-    self.AddPage(ToughPinchZoomCasesPage('http://www.amazon.com', self))
+    self.AddUserStory(ToughPinchZoomCasesPage('http://www.amazon.com', self))
 
     # Why: #1 commerce website by time spent by users in US
-    self.AddPage(ToughPinchZoomCasesPage('http://www.ebay.com', self))
+    self.AddUserStory(ToughPinchZoomCasesPage('http://www.ebay.com', self))
 
-    self.AddPage(YahooGamePage(self))
+    self.AddUserStory(YahooGamePage(self))
 
     # Why: #1 Alexa recreation
-    self.AddPage(ToughPinchZoomCasesPage('http://booking.com', self))
+    self.AddUserStory(ToughPinchZoomCasesPage('http://booking.com', self))
 
-    self.AddPage(YahooAnswersPage(self))
+    self.AddUserStory(YahooAnswersPage(self))
 
     # Why: #1 Alexa sports
-    self.AddPage(ToughPinchZoomCasesPage('http://sports.yahoo.com/', self))
+    self.AddUserStory(ToughPinchZoomCasesPage('http://sports.yahoo.com/', self))

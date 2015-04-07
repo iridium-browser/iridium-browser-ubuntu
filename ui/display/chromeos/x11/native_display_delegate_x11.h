@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include <map>
+#include <set>
 #include <vector>
 
 #include "base/compiler_specific.h"
@@ -76,12 +77,13 @@ class DISPLAY_EXPORT NativeDisplayDelegateX11 : public NativeDisplayDelegate {
   virtual void SyncWithServer() override;
   virtual void SetBackgroundColor(uint32_t color_argb) override;
   virtual void ForceDPMSOn() override;
-  virtual std::vector<DisplaySnapshot*> GetDisplays() override;
+  virtual void GetDisplays(const GetDisplaysCallback& callback) override;
   virtual void AddMode(const DisplaySnapshot& output,
                        const DisplayMode* mode) override;
-  virtual bool Configure(const DisplaySnapshot& output,
+  virtual void Configure(const DisplaySnapshot& output,
                          const DisplayMode* mode,
-                         const gfx::Point& origin) override;
+                         const gfx::Point& origin,
+                         const ConfigureCallback& callback) override;
   virtual void CreateFrameBuffer(const gfx::Size& size) override;
   virtual bool GetHDCPState(const DisplaySnapshot& output,
                             HDCPState* state) override;
@@ -106,7 +108,7 @@ class DISPLAY_EXPORT NativeDisplayDelegateX11 : public NativeDisplayDelegate {
   // on the passed-in information.
   DisplaySnapshotX11* InitDisplaySnapshot(RROutput id,
                                           XRROutputInfo* info,
-                                          RRCrtc* last_used_crtc,
+                                          std::set<RRCrtc>* last_used_crtcs,
                                           int index);
 
   // Destroys unused CRTCs.

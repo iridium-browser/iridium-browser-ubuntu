@@ -63,9 +63,6 @@ class WebData;
 class WebDataSource;
 class WebDocument;
 class WebElement;
-class WebFormElement;
-class WebFrameClient;
-class WebInputElement;
 class WebLayer;
 class WebLocalFrame;
 class WebPerformance;
@@ -154,6 +151,9 @@ public:
     // Initializes the various client interfaces.
     virtual void setPermissionClient(WebPermissionClient*) = 0;
     virtual void setSharedWorkerRepositoryClient(WebSharedWorkerRepositoryClient*) = 0;
+
+    // The security origin of this frame.
+    BLINK_EXPORT WebSecurityOrigin securityOrigin() const;
 
     // Geometry -----------------------------------------------------------
 
@@ -495,9 +495,6 @@ public:
     // plugin whose content indicates that printed output should not be scaled,
     // return true, otherwise return false.
     virtual bool isPrintScalingDisabledForPlugin(const WebNode& = WebNode()) = 0;
-
-    // Returns the number of copies to be printed.
-    virtual int getPrintCopiesForPlugin(const WebNode& = WebNode()) = 0;
 
     // CSS3 Paged Media ----------------------------------------------------
 

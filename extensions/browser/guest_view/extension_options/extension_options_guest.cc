@@ -4,11 +4,14 @@
 
 #include "extensions/browser/guest_view/extension_options/extension_options_guest.h"
 
+#include "base/metrics/user_metrics.h"
 #include "base/values.h"
 #include "components/crx_file/id_util.h"
+#include "content/public/browser/navigation_details.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/result_codes.h"
 #include "extensions/browser/api/extensions_api_client.h"
 #include "extensions/browser/extension_function_dispatcher.h"
 #include "extensions/browser/extension_registry.h"
@@ -35,8 +38,11 @@ const char ExtensionOptionsGuest::Type[] = "extensionoptions";
 
 ExtensionOptionsGuest::ExtensionOptionsGuest(
     content::BrowserContext* browser_context,
+    content::WebContents* owner_web_contents,
     int guest_instance_id)
-    : GuestView<ExtensionOptionsGuest>(browser_context, guest_instance_id),
+    : GuestView<ExtensionOptionsGuest>(browser_context,
+                                       owner_web_contents,
+                                       guest_instance_id),
       extension_options_guest_delegate_(
           extensions::ExtensionsAPIClient::Get()
               ->CreateExtensionOptionsGuestDelegate(this)),
@@ -49,14 +55,14 @@ ExtensionOptionsGuest::~ExtensionOptionsGuest() {
 // static
 extensions::GuestViewBase* ExtensionOptionsGuest::Create(
     content::BrowserContext* browser_context,
+    content::WebContents* owner_web_contents,
     int guest_instance_id) {
-  return new ExtensionOptionsGuest(browser_context, guest_instance_id);
+  return new ExtensionOptionsGuest(browser_context,
+                                   owner_web_contents,
+                                   guest_instance_id);
 }
 
 void ExtensionOptionsGuest::CreateWebContents(
-    const std::string& embedder_extension_id,
-    int embedder_render_process_id,
-    const GURL& embedder_site_url,
     const base::DictionaryValue& create_params,
     const WebContentsCreatedCallback& callback) {
   // Get the extension's base URL.
@@ -68,6 +74,7 @@ void ExtensionOptionsGuest::CreateWebContents(
     return;
   }
 
+  std::string embedder_extension_id = GetOwnerSiteURL().host();
   if (crx_file::id_util::IdIsValid(embedder_extension_id) &&
       extension_id != embedder_extension_id) {
     // Extensions cannot embed other extensions' options pages.
@@ -111,8 +118,6 @@ void ExtensionOptionsGuest::CreateWebContents(
 }
 
 void ExtensionOptionsGuest::DidAttachToEmbedder() {
-  SetUpAutoSize();
-
   // We should not re-navigate on reattachment.
   if (has_navigated_)
     return;
@@ -149,16 +154,30 @@ int ExtensionOptionsGuest::GetTaskPrefix() const {
 void ExtensionOptionsGuest::GuestSizeChangedDueToAutoSize(
     const gfx::Size& old_size,
     const gfx::Size& new_size) {
-  scoped_ptr<base::DictionaryValue> args(new base::DictionaryValue());
-  args->SetInteger(extensionoptions::kNewWidth, new_size.width());
-  args->SetInteger(extensionoptions::kNewHeight, new_size.height());
-  args->SetInteger(extensionoptions::kOldWidth, old_size.width());
-  args->SetInteger(extensionoptions::kOldHeight, old_size.height());
+  extension_options_internal::SizeChangedOptions options;
+  options.old_width = old_size.width();
+  options.old_height = old_size.height();
+  options.new_width = new_size.width();
+  options.new_height = new_size.height();
   DispatchEventToEmbedder(new extensions::GuestViewBase::Event(
-      extension_options_internal::OnSizeChanged::kEventName, args.Pass()));
+      extension_options_internal::OnSizeChanged::kEventName,
+      options.ToValue()));
+}
+
+void ExtensionOptionsGuest::OnPreferredSizeChanged(const gfx::Size& pref_size) {
+  extension_options_internal::PreferredSizeChangedOptions options;
+  options.width = pref_size.width();
+  options.height = pref_size.height();
+  DispatchEventToEmbedder(new extensions::GuestViewBase::Event(
+      extension_options_internal::OnPreferredSizeChanged::kEventName,
+      options.ToValue()));
 }
 
 bool ExtensionOptionsGuest::IsAutoSizeSupported() const {
+  return true;
+}
+
+bool ExtensionOptionsGuest::IsPreferredSizeModeEnabled() const {
   return true;
 }
 
@@ -205,6 +224,7 @@ bool ExtensionOptionsGuest::HandleContextMenu(
 bool ExtensionOptionsGuest::ShouldCreateWebContents(
     content::WebContents* web_contents,
     int route_id,
+    int main_frame_route_id,
     WindowContainerType window_container_type,
     const base::string16& frame_name,
     const GURL& target_url,
@@ -228,6 +248,16 @@ bool ExtensionOptionsGuest::ShouldCreateWebContents(
   return false;
 }
 
+void ExtensionOptionsGuest::DidNavigateMainFrame(
+    const content::LoadCommittedDetails& details,
+    const content::FrameNavigateParams& params) {
+  if (attached() && (params.url.GetOrigin() != options_page_.GetOrigin())) {
+    base::RecordAction(base::UserMetricsAction("BadMessageTerminate_EOG"));
+    web_contents()->GetRenderProcessHost()->Shutdown(
+        content::RESULT_CODE_KILLED_BAD_MESSAGE, false /* wait */);
+  }
+}
+
 bool ExtensionOptionsGuest::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(ExtensionOptionsGuest, message)
@@ -241,31 +271,6 @@ void ExtensionOptionsGuest::OnRequest(
     const ExtensionHostMsg_Request_Params& params) {
   extension_function_dispatcher_->Dispatch(params,
                                            web_contents()->GetRenderViewHost());
-}
-
-void ExtensionOptionsGuest::SetUpAutoSize() {
-  // Read the autosize parameters passed in from the embedder.
-  bool auto_size_enabled = false;
-  attach_params()->GetBoolean(extensionoptions::kAttributeAutoSize,
-                              &auto_size_enabled);
-
-  int max_height = 0;
-  int max_width = 0;
-  attach_params()->GetInteger(extensionoptions::kAttributeMaxHeight,
-                              &max_height);
-  attach_params()->GetInteger(extensionoptions::kAttributeMaxWidth, &max_width);
-
-  int min_height = 0;
-  int min_width = 0;
-  attach_params()->GetInteger(extensionoptions::kAttributeMinHeight,
-                              &min_height);
-  attach_params()->GetInteger(extensionoptions::kAttributeMinWidth, &min_width);
-
-  // Call SetAutoSize to apply all the appropriate validation and clipping of
-  // values.
-  SetAutoSize(auto_size_enabled,
-              gfx::Size(min_width, min_height),
-              gfx::Size(max_width, max_height));
 }
 
 }  // namespace extensions

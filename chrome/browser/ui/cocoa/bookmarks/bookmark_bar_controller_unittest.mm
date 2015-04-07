@@ -284,16 +284,15 @@ class BookmarkBarControllerTestBase : public CocoaProfileTest {
   base::scoped_nsobject<NSView> parent_view_;
   base::scoped_nsobject<ViewResizerPong> resizeDelegate_;
 
-  virtual void SetUp() {
+  void SetUp() override {
     CocoaProfileTest::SetUp();
     ASSERT_TRUE(profile());
 
     base::FilePath extension_dir;
     static_cast<extensions::TestExtensionSystem*>(
-        extensions::ExtensionSystem::Get(profile()))->
-        CreateExtensionService(
-            CommandLine::ForCurrentProcess(),
-            extension_dir, false);
+        extensions::ExtensionSystem::Get(profile()))
+        ->CreateExtensionService(base::CommandLine::ForCurrentProcess(),
+                                 extension_dir, false);
     resizeDelegate_.reset([[ViewResizerPong alloc] init]);
     NSRect parent_frame = NSMakeRect(0, 0, 800, 50);
     parent_view_.reset([[NSView alloc] initWithFrame:parent_frame]);
@@ -326,7 +325,7 @@ class BookmarkBarControllerTest : public BookmarkBarControllerTestBase {
  public:
   base::scoped_nsobject<BookmarkBarControllerNoOpen> bar_;
 
-  virtual void SetUp() override {
+  void SetUp() override {
     BookmarkBarControllerTestBase::SetUp();
     ASSERT_TRUE(browser());
     AddCommandLineSwitches();
@@ -1659,7 +1658,7 @@ TEST_F(BookmarkBarControllerTest, ManagedShowAppsShortcutInBookmarksBar) {
 
 class BookmarkBarControllerOpenAllTest : public BookmarkBarControllerTest {
 public:
-  virtual void SetUp() {
+ void SetUp() override {
     BookmarkBarControllerTest::SetUp();
     ASSERT_TRUE(profile());
 
@@ -1726,7 +1725,7 @@ TEST_F(BookmarkBarControllerOpenAllTest, CommandClickOnFolder) {
 
 class BookmarkBarControllerNotificationTest : public CocoaProfileTest {
  public:
-  virtual void SetUp() {
+  void SetUp() override {
     CocoaProfileTest::SetUp();
     ASSERT_TRUE(browser());
 
@@ -1792,7 +1791,7 @@ class BookmarkBarControllerDragDropTest : public BookmarkBarControllerTestBase {
  public:
   base::scoped_nsobject<BookmarkBarControllerDragData> bar_;
 
-  virtual void SetUp() {
+  void SetUp() override {
     BookmarkBarControllerTestBase::SetUp();
     ASSERT_TRUE(browser());
 

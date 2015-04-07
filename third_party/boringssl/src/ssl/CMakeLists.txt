@@ -8,17 +8,11 @@ add_library(
 
 	d1_both.c
 	d1_clnt.c
-	d1_enc.c
 	d1_lib.c
 	d1_meth.c
 	d1_pkt.c
 	d1_srtp.c
 	d1_srvr.c
-	s23_clnt.c
-	s23_lib.c
-	s23_meth.c
-	s23_pkt.c
-	s23_srvr.c
 	s3_both.c
 	s3_cbc.c
 	s3_clnt.c

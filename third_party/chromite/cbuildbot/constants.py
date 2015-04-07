@@ -8,6 +8,7 @@ from __future__ import print_function
 
 import os
 
+
 def _FindSourceRoot():
   """Try and find the root check out of the chromiumos tree"""
   source_root = path = os.path.realpath(os.path.join(
@@ -42,11 +43,128 @@ CIDB_PROD_BOT_CREDS = os.path.join(HOME_DIRECTORY, '.cidb_creds',
 CIDB_DEBUG_BOT_CREDS = os.path.join(HOME_DIRECTORY, '.cidb_creds',
                                     'debug_cidb_bot')
 
-CIDB_KNOWN_WATERFALLS = ('chromeos',
-                         'chromiumos',
-                         'chromiumos.tryserver',
-                         'chromeos_release',
-                         'chromeos.branch')
+WATERFALL_INTERNAL = 'chromeos'
+WATERFALL_EXTERNAL = 'chromiumos'
+WATERFALL_TRYBOT = 'chromiumos.tryserver'
+WATERFALL_RELEASE = 'chromeos_release'
+WATERFALL_BRANCH = 'chromeos.branch'
+# This waterfall is not yet using cidb.
+WATERFALL_CHROMIUM = 'chromiumos.chromium'
+
+CIDB_KNOWN_WATERFALLS = (WATERFALL_INTERNAL,
+                         WATERFALL_EXTERNAL,
+                         WATERFALL_TRYBOT,
+                         WATERFALL_RELEASE,
+                         WATERFALL_BRANCH)
+
+ALL_WATERFALLS = CIDB_KNOWN_WATERFALLS + (WATERFALL_CHROMIUM,)
+
+# URLs to the various waterfalls.
+BUILD_DASHBOARD = 'http://build.chromium.org/p/chromiumos'
+BUILD_INT_DASHBOARD = 'https://uberchromegw.corp.google.com/i/chromeos'
+TRYBOT_DASHBOARD = 'https://uberchromegw.corp.google.com/i/chromiumos.tryserver'
+RELEASE_DASHBOARD = 'https://uberchromegw.corp.google.com/i/chromeos_release'
+BRANCH_DASHBOARD = 'https://uberchromegw.corp.google.com/i/chromeos.branch'
+CHROMIUM_DASHBOARD = ('https://uberchromegw.corp.google.com/'
+                      'i/chromiumos.chromium')
+
+# Waterfall to dashboard URL mapping.
+WATERFALL_TO_DASHBOARD = {
+    WATERFALL_INTERNAL: BUILD_INT_DASHBOARD,
+    WATERFALL_EXTERNAL: BUILD_DASHBOARD,
+    WATERFALL_TRYBOT: TRYBOT_DASHBOARD,
+    WATERFALL_RELEASE: RELEASE_DASHBOARD,
+    WATERFALL_BRANCH: BRANCH_DASHBOARD,
+    WATERFALL_CHROMIUM: CHROMIUM_DASHBOARD,
+}
+
+# Builder status strings
+BUILDER_STATUS_FAILED = 'fail'
+BUILDER_STATUS_PASSED = 'pass'
+BUILDER_STATUS_INFLIGHT = 'inflight'
+BUILDER_STATUS_MISSING = 'missing'
+BUILDER_STATUS_ABORTED = 'aborted'
+# The following statuses are currently only used for build stages.
+BUILDER_STATUS_PLANNED = 'planned'
+BUILDER_STATUS_SKIPPED = 'skipped'
+BUILDER_STATUS_FORGIVEN = 'forgiven'
+BUILDER_COMPLETED_STATUSES = (BUILDER_STATUS_PASSED,
+                              BUILDER_STATUS_FAILED,
+                              BUILDER_STATUS_ABORTED,
+                              BUILDER_STATUS_SKIPPED,
+                              BUILDER_STATUS_FORGIVEN)
+BUILDER_ALL_STATUSES = (BUILDER_STATUS_FAILED,
+                        BUILDER_STATUS_PASSED,
+                        BUILDER_STATUS_INFLIGHT,
+                        BUILDER_STATUS_MISSING,
+                        BUILDER_STATUS_ABORTED,
+                        BUILDER_STATUS_PLANNED,
+                        BUILDER_STATUS_SKIPPED,
+                        BUILDER_STATUS_FORGIVEN)
+
+# CL status strings
+CL_STATUS_FAILED = BUILDER_STATUS_FAILED
+CL_STATUS_INFLIGHT = BUILDER_STATUS_INFLIGHT
+CL_STATUS_PASSED = BUILDER_STATUS_PASSED
+CL_STATUS_LAUNCHING = 'launching'
+CL_STATUS_WAITING = 'waiting'
+CL_STATUS_READY_TO_SUBMIT = 'ready-to-submit'
+CL_STATUS_FULLY_VERIFIED = 'fully-verified'
+
+# Change sources
+CHANGE_SOURCE_INTERNAL = 'internal'
+CHANGE_SOURCE_EXTERNAL = 'external'
+
+# Build failure categories
+FAILURE_CATEGORY_BAD_CL = 'bad_cl'
+FAILURE_CATEGORY_BUG_IN_TOT = 'bug_in_tot'
+FAILURE_CATEGORY_MERGE_CONFLICT = 'merge_conflict'
+FAILURE_CATEGORY_TREE_CLOSED = 'tree_closed'
+FAILURE_CATEGORY_SCHEDULED_ABORT = 'scheduled_abort'
+FAILURE_CATEGORY_CL_NOT_READY = 'cl_not_ready'
+FAILURE_CATEGORY_BAD_CHROME = 'bad_chrome'
+FAILURE_CATEGORY_INFRA_FAILURE = 'infra_failure'
+FAILURE_CATEGORY_TEST_FLAKE = 'test_flake'
+FAILURE_CATEGORY_GERRIT_FAILURE = 'gerrit_failure'
+FAILURE_CATEGORY_GS_FAILURE = 'gs_failure'
+FAILURE_CATEGORY_LAB_FAILURE = 'lab_failure'
+FAILURE_CATEGORY_BAD_BINARY_PACKAGE = 'bad_binary_package'
+FAILURE_CATEGORY_BUILD_FLAKE = 'build_flake'
+FAILURE_CATEGORY_MYSTERY = 'mystery'
+
+FAILURE_CATEGORY_ALL_CATEGORIES = (
+    FAILURE_CATEGORY_BAD_CL,
+    FAILURE_CATEGORY_BUG_IN_TOT,
+    FAILURE_CATEGORY_MERGE_CONFLICT,
+    FAILURE_CATEGORY_TREE_CLOSED,
+    FAILURE_CATEGORY_SCHEDULED_ABORT,
+    FAILURE_CATEGORY_CL_NOT_READY,
+    FAILURE_CATEGORY_BAD_CHROME,
+    FAILURE_CATEGORY_INFRA_FAILURE,
+    FAILURE_CATEGORY_TEST_FLAKE,
+    FAILURE_CATEGORY_GERRIT_FAILURE,
+    FAILURE_CATEGORY_GS_FAILURE,
+    FAILURE_CATEGORY_LAB_FAILURE,
+    FAILURE_CATEGORY_BAD_BINARY_PACKAGE,
+    FAILURE_CATEGORY_BUILD_FLAKE,
+    FAILURE_CATEGORY_MYSTERY,
+)
+
+
+# Exception categories, as recorded in cidb
+EXCEPTION_CATEGORY_UNKNOWN = 'unknown'
+EXCEPTION_CATEGORY_BUILD = 'build'
+EXCEPTION_CATEGORY_TEST = 'test'
+EXCEPTION_CATEGORY_INFRA = 'infra'
+EXCEPTION_CATEGORY_LAB = 'lab'
+
+EXCEPTION_CATEGORY_ALL_CATEGORIES = (
+    EXCEPTION_CATEGORY_UNKNOWN,
+    EXCEPTION_CATEGORY_BUILD,
+    EXCEPTION_CATEGORY_TEST,
+    EXCEPTION_CATEGORY_INFRA,
+    EXCEPTION_CATEGORY_LAB,
+)
 
 # TODO: Eliminate these or merge with manifest_version.py:STATUS_PASSED
 # crbug.com/318930
@@ -100,6 +218,12 @@ INTERNAL_GERRIT_HOST = GOB_HOST % INTERNAL_GERRIT_INSTANCE
 INTERNAL_GOB_URL = 'https://%s' % INTERNAL_GOB_HOST
 INTERNAL_GERRIT_URL = 'https://%s' % INTERNAL_GERRIT_HOST
 
+GOB_COOKIE_PATH = os.path.expanduser('~/.git-credential-cache/cookie')
+
+# Timestamps in the JSON from GoB's web interface is of the form 'Tue
+# Dec 02 17:48:06 2014' and is assumed to be in UTC.
+GOB_COMMIT_TIME_FORMAT = '%a %b %d %H:%M:%S %Y'
+
 REPO_PROJECT = 'external/repo'
 REPO_URL = '%s/%s' % (EXTERNAL_GOB_URL, REPO_PROJECT)
 
@@ -125,6 +249,8 @@ SHARED_CACHE_ENVVAR = 'CROS_CACHEDIR'
 # CrOS remotes specified in the manifests.
 EXTERNAL_REMOTE = 'cros'
 INTERNAL_REMOTE = 'cros-internal'
+# TODO(dgarrett): Reconsider when crbug.com/428215 is fixed.
+KAYLE_INTERNAL_REMOTE = 'kayle-cros-internal'
 CHROMIUM_REMOTE = 'chromium'
 CHROME_REMOTE = 'chrome'
 
@@ -133,9 +259,12 @@ GERRIT_HOSTS = {
     INTERNAL_REMOTE: INTERNAL_GERRIT_HOST,
 }
 
+# Only remotes listed in CROS_REMOTES are considered branchable.
+# CROS_REMOTES and BRANCHABLE_PROJECTS must be kept in sync.
 CROS_REMOTES = {
     EXTERNAL_REMOTE: EXTERNAL_GOB_URL,
     INTERNAL_REMOTE: INTERNAL_GOB_URL,
+    KAYLE_INTERNAL_REMOTE: INTERNAL_GOB_URL,
 }
 
 GIT_REMOTES = {
@@ -166,6 +295,7 @@ EXTERNAL_REMOTES = (EXTERNAL_REMOTE, CHROMIUM_REMOTE)
 BRANCHABLE_PROJECTS = {
     EXTERNAL_REMOTE: r'chromiumos/(.+)',
     INTERNAL_REMOTE: r'chromeos/(.+)',
+    KAYLE_INTERNAL_REMOTE: r'chromeos/(.+)',
 }
 
 # TODO(sosa): Move to manifest-versions-external once its created
@@ -284,8 +414,15 @@ VALID_BUILD_TYPES = (
     PAYLOADS_TYPE,
 )
 
-# The name of the builder used to launch the pre-CQ.
-PRE_CQ_BUILDER_NAME = 'pre-cq-group'
+# The name of the standard pre-cq testing config.
+PRE_CQ_GROUP_CONFIG = 'pre-cq-group'
+
+# The default list of pre-cq configs to use.
+PRE_CQ_DEFAULT_CONFIGS = ['rambi-pre-cq', 'mixed-a-pre-cq', 'mixed-b-pre-cq',
+                          'mixed-c-pre-cq']
+
+# The name of the pre-cq launching config.
+PRE_CQ_LAUNCHER_CONFIG = 'pre-cq-launcher'
 
 # The name of the Pre-CQ launcher on the waterfall.
 PRE_CQ_LAUNCHER_NAME = 'Pre-CQ Launcher'
@@ -302,6 +439,16 @@ HWTEST_CHROME_PERF_POOL = 'chromeperf'
 HWTEST_TRYBOT_POOL = 'try-bot'
 
 
+# Master build timeouts in seconds. This is the overall timeout set by the
+# master for the lock-step master-slave builds.
+MASTER_BUILD_TIMEOUT_SECONDS = {
+    PFQ_TYPE: 20 * 60,
+    # Canaries are scheduled to run every 8 hours. Leave some gap.
+    CANARY_TYPE: (7 * 60 + 50) * 60,
+}
+MASTER_BUILD_TIMEOUT_DEFAULT_SECONDS = 4 * 60 * 60
+
+
 # Defines for the various hardware test suites:
 #   AU: Blocking suite run against all canaries; tests basic AU
 #       functionality.
@@ -312,11 +459,13 @@ HWTEST_TRYBOT_POOL = 'try-bot'
 #       a non-blocking suite on canaries.
 #   CANARY:  Non-blocking suite run only against the canaries.
 #   AFDO:  Non-blocking suite run only AFDO builders.
+#   MOBLAB: Blocking Suite run only on *_moblab builders.
 HWTEST_AU_SUITE = 'au'
 HWTEST_BVT_SUITE = 'bvt-inline'
 HWTEST_COMMIT_SUITE = 'bvt-cq'
 HWTEST_CANARY_SUITE = 'bvt-perbuild'
 HWTEST_AFDO_SUITE = 'AFDO_record'
+HWTEST_MOBLAB_SUITE = 'moblab'
 
 
 # Additional timeout to wait for autotest to abort a suite if the test takes
@@ -387,39 +536,52 @@ TREE_MAINTENANCE = 'maintenance'
 VALID_TREE_STATUSES = (TREE_OPEN, TREE_THROTTLED, TREE_CLOSED, TREE_MAINTENANCE)
 
 
-_GERRIT_QUERY_TEMPLATE = ('status:open AND '
-                          'label:Code-Review=+2 AND '
-                          'label:Verified=+1 AND '
-                          'label:Commit-Queue>=%+i AND '
-                          'NOT ( label:CodeReview=-2 OR label:Verified=-1 OR '
-                          'is:draft )')
+# Common parts of query used for CQ, THROTTLED_CQ, and PRECQ.
+# "NOT is:draft" in this query doesn't work, it finds any non-draft revision.
+# We want to match drafts anyway, so we can comment on them.
+_QUERIES = {
+    # CLs that are open and not vetoed.
+    'open': 'status:open AND -label:CodeReview=-2 AND -label:Verified=-1',
+
+    # CLs that are approved and verified.
+    'approved': 'label:Code-Review=+2 AND label:Verified=+1',
+}
+
+#
+# Please note that requiring the +2 code review (or Trybot-Ready) for all CQ
+# and PreCQ runs is a security requirement. Otherwise arbitrary people can
+# run code on our servers.
+#
+# The Verified and Commit-Queue flags can be set by any registered user (you
+# don't need commit access to set them.)
+#
+
 
 # Default gerrit query used to find changes for CQ.
 # Permits CQ+1 or CQ+2 changes.
-DEFAULT_CQ_READY_QUERY = _GERRIT_QUERY_TEMPLATE % 1
+CQ_READY_QUERY = (
+    '%(open)s AND %(approved)s AND label:Commit-Queue>=1' % _QUERIES,
+    lambda change: change.IsMergeable())
 
 # Gerrit query used to find changes for CQ when tree is throttled.
 # Permits only CQ+2 changes.
-THROTTLED_CQ_READY_QUERY = _GERRIT_QUERY_TEMPLATE % 2
+THROTTLED_CQ_READY_QUERY = (
+    '%(open)s AND %(approved)s AND label:Commit-Queue>=2' % _QUERIES,
+    lambda change: change.IsMergeable() and change.HasApproval('COMR', '2'))
 
-# Default filter rules for verifying that Gerrit returned results that matched
-# our query. This used for working around Gerrit bugs.
-DEFAULT_CQ_READY_FIELDS = {
-    'CRVW': '2',
-    'VRIF': '1',
-    'COMR': ('1', '2'),
-}
-
-DEFAULT_CQ_SHOULD_REJECT_FIELDS = {
-    'CRVW': '-2',
-    'VRIF': '-1',
-}
+# The PreCQ does not require the CQ bit to be set if it's a recent CL, or if
+# the Trybot-Ready flag has been set.
+PRECQ_READY_QUERY = (
+    '%(open)s AND (%(approved)s AND label:Commit-Queue>=1 OR '
+    'label:Code-Review=+2 AND -age:2h OR label:Trybot-Ready=+1)' % _QUERIES,
+    lambda change: (change.HasApproval('CRVW', '2') or
+                    change.HasApproval('TRY', '1')))
 
 GERRIT_ON_BORG_LABELS = {
     'Code-Review': 'CRVW',
     'Commit-Queue': 'COMR',
     'Verified': 'VRIF',
-    'Trybot-Verified': 'TBVF',
+    'Trybot-Ready': 'TRY',
 }
 
 # Actions that a CQ run can take on a CL
@@ -428,6 +590,7 @@ CL_ACTION_SUBMITTED = 'submitted'         # CL submitted successfully
 CL_ACTION_KICKED_OUT = 'kicked_out'       # CL CQ-Ready value set to zero
 CL_ACTION_SUBMIT_FAILED = 'submit_failed' # CL submitted but submit failed
 CL_ACTION_VERIFIED = 'verified'           # CL was verified by the builder
+CL_ACTION_FORGIVEN = 'forgiven'           # Build failed, but CL not kicked out
 
 # Actions the Pre-CQ Launcher can take on a CL
 # See cbuildbot/stages/sync_stages.py:PreCQLauncherStage for more info
@@ -436,7 +599,39 @@ CL_ACTION_PRE_CQ_PASSED = 'pre_cq_passed'
 CL_ACTION_PRE_CQ_FAILED = 'pre_cq_failed'
 CL_ACTION_PRE_CQ_LAUNCHING = 'pre_cq_launching'
 CL_ACTION_PRE_CQ_WAITING = 'pre_cq_waiting'
+CL_ACTION_PRE_CQ_FULLY_VERIFIED = 'pre_cq_fully_verified'
 CL_ACTION_PRE_CQ_READY_TO_SUBMIT = 'pre_cq_ready_to_submit'
+
+# Miscellaneous actions
+
+# Recorded by pre-cq launcher for a change when it is noticed that a previously
+# rejected change is again in the queue.
+# This is a best effort detection for developers re-marking their changes, to
+# help calculate true CQ handling time. It is susceptible to developers
+# un-marking their change after is requeued or to the CQ picking up a CL before
+# it is seen by the pre-cq-launcher.
+CL_ACTION_REQUEUED = 'requeued'
+
+# Recorded by pre-cq launcher when it begins handling a change that isn't marked
+# as CQ+1. This indicates that all actions between this and the next
+# CL_ACTION_REQUEUED action have occured on a non-CQ+1 change.
+CL_ACTION_SPECULATIVE = 'speculative'
+
+# Recorded by pre-cq launcher when it has screened a change for necessary
+# tryjobs
+CL_ACTION_SCREENED_FOR_PRE_CQ = 'screened_for_pre_cq'
+# Recorded by pre-cq launcher for each tryjob config necessary to validate
+# a change, with |reason| field specifying the config.
+CL_ACTION_VALIDATION_PENDING_PRE_CQ = 'validation_pending_pre_cq'
+
+# Recorded by CQ slaves builds when a picked-up CL is determined to be
+# irrelevant to that slave build.
+CL_ACTION_IRRELEVANT_TO_SLAVE = 'irrelevant_to_slave'
+
+# Recorded by pre-cq-launcher when it launches a tryjob with a particular
+# config. The |reason| field of the action will be the config.
+CL_ACTION_TRYBOT_LAUNCHING = 'trybot_launching'
+
 
 CL_ACTIONS = [CL_ACTION_PICKED_UP,
               CL_ACTION_SUBMITTED,
@@ -448,7 +643,27 @@ CL_ACTIONS = [CL_ACTION_PICKED_UP,
               CL_ACTION_PRE_CQ_FAILED,
               CL_ACTION_PRE_CQ_LAUNCHING,
               CL_ACTION_PRE_CQ_WAITING,
-              CL_ACTION_PRE_CQ_READY_TO_SUBMIT]
+              CL_ACTION_PRE_CQ_READY_TO_SUBMIT,
+              CL_ACTION_REQUEUED,
+              CL_ACTION_SCREENED_FOR_PRE_CQ,
+              CL_ACTION_VALIDATION_PENDING_PRE_CQ,
+              CL_ACTION_IRRELEVANT_TO_SLAVE,
+              CL_ACTION_TRYBOT_LAUNCHING,
+              CL_ACTION_SPECULATIVE,
+              CL_ACTION_FORGIVEN,
+              CL_ACTION_PRE_CQ_FULLY_VERIFIED]
+
+# Per-config status strings for a CL.
+CL_PRECQ_CONFIG_STATUS_PENDING = 'pending'
+CL_PRECQ_CONFIG_STATUS_LAUNCHED = 'launched'
+CL_PRECQ_CONFIG_STATUS_INFLIGHT = CL_STATUS_INFLIGHT
+CL_PRECQ_CONFIG_STATUS_FAILED = BUILDER_STATUS_FAILED
+CL_PRECQ_CONFIG_STATUS_VERIFIED = CL_ACTION_VERIFIED
+CL_PRECQ_CONFIG_STATUSES = (CL_PRECQ_CONFIG_STATUS_PENDING,
+                            CL_PRECQ_CONFIG_STATUS_LAUNCHED,
+                            CL_PRECQ_CONFIG_STATUS_INFLIGHT,
+                            CL_PRECQ_CONFIG_STATUS_FAILED,
+                            CL_PRECQ_CONFIG_STATUS_VERIFIED)
 
 # CQ types.
 CQ = 'cq'
@@ -463,26 +678,26 @@ ENV_PASSTHRU = ('CROS_SUDO_KEEP_ALIVE', SHARED_CACHE_ENVVAR)
 # chroot_version_hooks.d upgrade script that symlinks to 45_rewrite_sudoers.d
 # should be created.
 CHROOT_ENVIRONMENT_WHITELIST = (
-  'CHROMEOS_OFFICIAL',
-  'CHROMEOS_VERSION_AUSERVER',
-  'CHROMEOS_VERSION_DEVSERVER',
-  'CHROMEOS_VERSION_TRACK',
-  'GCC_GITHASH',
-  'GIT_AUTHOR_EMAIL',
-  'GIT_AUTHOR_NAME',
-  'GIT_COMMITTER_EMAIL',
-  'GIT_COMMITTER_NAME',
-  'GIT_PROXY_COMMAND',
-  'GIT_SSH',
-  'RSYNC_PROXY',
-  'SSH_AGENT_PID',
-  'SSH_AUTH_SOCK',
-  'USE',
-  'all_proxy',
-  'ftp_proxy',
-  'http_proxy',
-  'https_proxy',
-  'no_proxy',
+    'CHROMEOS_OFFICIAL',
+    'CHROMEOS_VERSION_AUSERVER',
+    'CHROMEOS_VERSION_DEVSERVER',
+    'CHROMEOS_VERSION_TRACK',
+    'GCC_GITHASH',
+    'GIT_AUTHOR_EMAIL',
+    'GIT_AUTHOR_NAME',
+    'GIT_COMMITTER_EMAIL',
+    'GIT_COMMITTER_NAME',
+    'GIT_PROXY_COMMAND',
+    'GIT_SSH',
+    'RSYNC_PROXY',
+    'SSH_AGENT_PID',
+    'SSH_AUTH_SOCK',
+    'USE',
+    'all_proxy',
+    'ftp_proxy',
+    'http_proxy',
+    'https_proxy',
+    'no_proxy',
 )
 
 # Paths for Chrome LKGM which are relative to the Chromium base url.
@@ -530,11 +745,6 @@ LAB_STATUS_URL = 'http://chromiumos-lab.appspot.com/current?format=json'
 
 GOLO_SMTP_SERVER = 'mail.golo.chromium.org'
 
-# URLs to the various waterfalls.
-BUILD_DASHBOARD = 'http://build.chromium.org/p/chromiumos'
-BUILD_INT_DASHBOARD = 'https://uberchromegw.corp.google.com/i/chromeos'
-TRYBOT_DASHBOARD = 'https://uberchromegw.corp.google.com/i/chromiumos.tryserver'
-
 # Valid sherrif types.
 TREE_SHERIFF = 'tree'
 BUILD_DEPUTY = 'build'
@@ -558,6 +768,9 @@ SHERIFF_TYPE_TO_URL = {
 
 # Useful config targets.
 CQ_MASTER = 'master-paladin'
+CANARY_MASTER = 'master-release'
+PFQ_MASTER = 'master-chromium-pfq'
+
 
 # Useful google storage locations.
 PRE_CQ_GROUP_GS_LOCATION = 'trybot-pre-cq-group'
@@ -580,3 +793,4 @@ EXTRA_BUCKETS_FILES_BLACKLIST = [
 # AFDO common constants.
 # How long does the AFDO_record autotest have to generate the AFDO perf data.
 AFDO_GENERATE_TIMEOUT = 90 * 60
+

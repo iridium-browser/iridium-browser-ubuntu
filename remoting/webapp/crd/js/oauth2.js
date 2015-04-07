@@ -33,9 +33,9 @@ remoting.OAuth2.prototype.KEY_REFRESH_TOKEN_ = 'oauth2-refresh-token';
 /** @private */
 remoting.OAuth2.prototype.KEY_ACCESS_TOKEN_ = 'oauth2-access-token';
 /** @private */
-remoting.OAuth2.prototype.KEY_XSRF_TOKEN_ = 'oauth2-xsrf-token';
-/** @private */
 remoting.OAuth2.prototype.KEY_EMAIL_ = 'remoting-email';
+/** @private */
+remoting.OAuth2.prototype.KEY_FULLNAME_ = 'remoting-fullname';
 
 // Constants for parameters used in retrieving the OAuth2 credentials.
 /** @private */
@@ -49,7 +49,7 @@ remoting.OAuth2.prototype.SCOPE_ =
  *  @return {string} OAuth2 redirect URI.
  */
 remoting.OAuth2.prototype.getRedirectUri_ = function() {
-  return remoting.settings.OAUTH2_REDIRECT_URL;
+  return remoting.settings.OAUTH2_REDIRECT_URL();
 };
 
 /** @private
@@ -88,6 +88,7 @@ remoting.OAuth2.prototype.isAuthenticated = function() {
  */
 remoting.OAuth2.prototype.clear = function() {
   window.localStorage.removeItem(this.KEY_EMAIL_);
+  window.localStorage.removeItem(this.KEY_FULLNAME_);
   this.clearAccessToken_();
   this.clearRefreshToken_();
 };
@@ -102,6 +103,7 @@ remoting.OAuth2.prototype.clear = function() {
 remoting.OAuth2.prototype.setRefreshToken_ = function(token) {
   window.localStorage.setItem(this.KEY_REFRESH_TOKEN_, escape(token));
   window.localStorage.removeItem(this.KEY_EMAIL_);
+  window.localStorage.removeItem(this.KEY_FULLNAME_);
   this.clearAccessToken_();
 };
 
@@ -235,16 +237,14 @@ remoting.OAuth2.prototype.onTokens_ =
 };
 
 /**
- * Redirect page to get a new OAuth2 Refresh Token.
+ * Redirect page to get a new OAuth2 authorization code
  *
- * @param {function():void} onDone Completion callback.
+ * @param {function(?string):void} onDone Completion callback to receive
+ *     the authorization code, or null on error.
  * @return {void} Nothing.
  */
-remoting.OAuth2.prototype.doAuthRedirect = function(onDone) {
-  /** @type {remoting.OAuth2} */
-  var that = this;
+remoting.OAuth2.prototype.getAuthorizationCode = function(onDone) {
   var xsrf_token = base.generateXsrfToken();
-  window.localStorage.setItem(this.KEY_XSRF_TOKEN_, xsrf_token);
   var GET_CODE_URL = this.getOAuth2AuthEndpoint_() + '?' +
     remoting.xhr.urlencodeParamHash({
           'client_id': this.getClientId_(),
@@ -265,8 +265,12 @@ remoting.OAuth2.prototype.doAuthRedirect = function(onDone) {
    */
   function oauth2MessageListener(message, sender, sendResponse) {
     if ('code' in message && 'state' in message) {
-      that.exchangeCodeForToken(
-          message['code'], message['state'], onDone);
+      if (message['state'] == xsrf_token) {
+        onDone(message['code']);
+      } else {
+        console.error('Invalid XSRF token.');
+        onDone(null);
+      }
     } else {
       if ('error' in message) {
         console.error(
@@ -276,6 +280,7 @@ remoting.OAuth2.prototype.doAuthRedirect = function(onDone) {
         // it, we can't tell if it has sensitive data.
         console.error('Invalid oauth2 response.');
       }
+      onDone(null);
     }
     chrome.extension.onMessage.removeListener(oauth2MessageListener);
     sendResponse(null);
@@ -285,29 +290,62 @@ remoting.OAuth2.prototype.doAuthRedirect = function(onDone) {
 };
 
 /**
+ * Redirect page to get a new OAuth Refresh Token.
+ *
+ * @param {function():void} onDone Completion callback.
+ * @return {void} Nothing.
+ */
+remoting.OAuth2.prototype.doAuthRedirect = function(onDone) {
+  /** @type {remoting.OAuth2} */
+  var that = this;
+  /** @param {?string} code */
+  var onAuthorizationCode = function(code) {
+    if (code) {
+      that.exchangeCodeForToken(code, onDone);
+    } else {
+      onDone();
+    }
+  };
+  this.getAuthorizationCode(onAuthorizationCode);
+};
+
+/**
  * Asynchronously exchanges an authorization code for a refresh token.
  *
  * @param {string} code The OAuth2 authorization code.
- * @param {string} state The state parameter received from the OAuth redirect.
  * @param {function():void} onDone Callback to invoke on completion.
  * @return {void} Nothing.
  */
-remoting.OAuth2.prototype.exchangeCodeForToken = function(code, state, onDone) {
-  var xsrf_token = window.localStorage.getItem(this.KEY_XSRF_TOKEN_);
-  window.localStorage.removeItem(this.KEY_XSRF_TOKEN_);
-  if (xsrf_token == undefined || state != xsrf_token) {
-    // Invalid XSRF token, or unexpected OAuth2 redirect. Abort.
-    onDone();
-  }
+remoting.OAuth2.prototype.exchangeCodeForToken = function(code, onDone) {
   /** @param {remoting.Error} error */
   var onError = function(error) {
     console.error('Unable to exchange code for token: ', error);
   };
 
-  remoting.OAuth2Api.exchangeCodeForTokens(
+  remoting.oauth2Api.exchangeCodeForTokens(
       this.onTokens_.bind(this, onDone), onError,
       this.getClientId_(), this.getClientSecret_(), code,
       this.getRedirectUri_());
+};
+
+/**
+ * Print a command-line that can be used to register a host on Linux platforms.
+ */
+remoting.OAuth2.prototype.printStartHostCommandLine = function() {
+  /** @type {string} */
+  var redirectUri = this.getRedirectUri_();
+  /** @param {?string} code */
+  var onAuthorizationCode = function(code) {
+    if (code) {
+      console.log('Run the following command to register a host:');
+      console.log(
+          '%c/opt/google/chrome-remote-desktop/start-host' +
+          ' --code=' + code +
+          ' --redirect-url=' + redirectUri +
+          ' --name=$HOSTNAME', 'font-weight: bold;');
+    }
+  };
+  this.getAuthorizationCode(onAuthorizationCode);
 };
 
 /**
@@ -324,7 +362,7 @@ remoting.OAuth2.prototype.callWithToken = function(onOk, onError) {
   var refreshToken = this.getRefreshToken();
   if (refreshToken) {
     if (this.needsNewAccessToken_()) {
-      remoting.OAuth2Api.refreshAccessToken(
+      remoting.oauth2Api.refreshAccessToken(
           this.onAccessToken_.bind(this, onOk), onError,
           this.getClientId_(), this.getClientSecret_(),
           refreshToken);
@@ -356,21 +394,71 @@ remoting.OAuth2.prototype.getEmail = function(onOk, onError) {
   /** @param {string} email */
   var onResponse = function(email) {
     window.localStorage.setItem(that.KEY_EMAIL_, email);
+    window.localStorage.setItem(that.KEY_FULLNAME_, '');
     onOk(email);
   };
 
   this.callWithToken(
-      remoting.OAuth2Api.getEmail.bind(null, onResponse, onError), onError);
+      remoting.oauth2Api.getEmail.bind(remoting.oauth2Api, onResponse, onError),
+      onError);
+};
+
+/**
+ * Get the user's email address and full name.
+ *
+ * @param {function(string,string):void} onOk Callback invoked when the user's
+ *     email address and full name are available.
+ * @param {function(remoting.Error):void} onError Callback invoked if an
+ *     error occurs.
+ * @return {void} Nothing.
+ */
+remoting.OAuth2.prototype.getUserInfo = function(onOk, onError) {
+  var cachedEmail = window.localStorage.getItem(this.KEY_EMAIL_);
+  var cachedName = window.localStorage.getItem(this.KEY_FULLNAME_);
+  if (typeof cachedEmail == 'string' && typeof cachedName == 'string') {
+    onOk(cachedEmail, cachedName);
+    return;
+  }
+  /** @type {remoting.OAuth2} */
+  var that = this;
+  /**
+   * @param {string} email
+   * @param {string} name
+   */
+  var onResponse = function(email, name) {
+    window.localStorage.setItem(that.KEY_EMAIL_, email);
+    window.localStorage.setItem(that.KEY_FULLNAME_, name);
+    onOk(email, name);
+  };
+
+  this.callWithToken(
+      remoting.oauth2Api.getUserInfo.bind(
+          remoting.oauth2Api, onResponse, onError),
+      onError);
 };
 
 /**
  * If the user's email address is cached, return it, otherwise return null.
  *
  * @return {?string} The email address, if it has been cached by a previous call
- *     to getEmail, otherwise null.
+ *     to getEmail or getUserInfo, otherwise null.
  */
 remoting.OAuth2.prototype.getCachedEmail = function() {
   var value = window.localStorage.getItem(this.KEY_EMAIL_);
+  if (typeof value == 'string') {
+    return value;
+  }
+  return null;
+};
+
+/**
+ * If the user's full name is cached, return it, otherwise return null.
+ *
+ * @return {?string} The user's full name, if it has been cached by a previous
+ * call to getUserInfo, otherwise null.
+ */
+remoting.OAuth2.prototype.getCachedUserFullName = function() {
+  var value = window.localStorage.getItem(this.KEY_FULLNAME_);
   if (typeof value == 'string') {
     return value;
   }

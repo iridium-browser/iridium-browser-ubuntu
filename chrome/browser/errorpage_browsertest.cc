@@ -297,7 +297,7 @@ class ErrorPageTest : public InProcessBrowserTest {
 
   // Navigates the active tab to a mock url created for the file at |file_path|.
   // Needed for StaleCacheStatus and StaleCacheStatusFailedCorrections tests.
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kEnableOfflineLoadStaleCache);
   }
 
@@ -845,9 +845,8 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, StaleCacheStatus) {
       base::Bind(&InterceptNetworkTransactions, url_request_context_getter,
                  net::ERR_FAILED));
 
-  ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
       // With no navigation corrections to load, there's only one navigation.
-      browser(), test_url, 1);
+  ui_test_utils::NavigateToURL(browser(), test_url);
   EXPECT_TRUE(ProbeStaleCopyValue(true));
   EXPECT_TRUE(IsDisplayingText(browser(), GetLoadStaleButtonLabel()));
   EXPECT_NE(base::ASCIIToUTF16("Nocache Test Page"),
@@ -867,8 +866,7 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, StaleCacheStatus) {
       BrowsingDataRemover::CreateForUnboundedRange(browser()->profile());
   remover->Remove(BrowsingDataRemover::REMOVE_CACHE,
                   BrowsingDataHelper::UNPROTECTED_WEB);
-  ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
-      browser(), test_url, 1);
+  ui_test_utils::NavigateToURL(browser(), test_url);
   EXPECT_TRUE(ProbeStaleCopyValue(false));
   EXPECT_FALSE(IsDisplayingText(browser(), GetLoadStaleButtonLabel()));
   EXPECT_EQ(0, link_doctor_interceptor()->num_requests());
@@ -876,7 +874,7 @@ IN_PROC_BROWSER_TEST_F(ErrorPageTest, StaleCacheStatus) {
 
 class ErrorPageAutoReloadTest : public InProcessBrowserTest {
  public:
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kEnableOfflineAutoReload);
   }
 
@@ -930,6 +928,28 @@ IN_PROC_BROWSER_TEST_F(ErrorPageAutoReloadTest, AutoReload) {
   // this becomes racey.
   EXPECT_EQ(kRequestsToFail, interceptor()->failures());
   EXPECT_EQ(kRequestsToFail + 1, interceptor()->requests());
+}
+
+IN_PROC_BROWSER_TEST_F(ErrorPageAutoReloadTest, ManualReloadNotSuppressed) {
+  GURL test_url("http://error.page.auto.reload");
+  const int kRequestsToFail = 3;
+  InstallInterceptor(test_url, kRequestsToFail);
+  ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
+      browser(), test_url, 2);
+
+  EXPECT_EQ(2, interceptor()->failures());
+  EXPECT_EQ(2, interceptor()->requests());
+
+  ToggleHelpBox(browser());
+  EXPECT_TRUE(IsDisplayingNetError(browser(), net::ERR_CONNECTION_RESET));
+
+  content::WebContents* web_contents =
+    browser()->tab_strip_model()->GetActiveWebContents();
+  content::TestNavigationObserver nav_observer(web_contents, 1);
+  web_contents->GetMainFrame()->ExecuteJavaScript(
+      base::ASCIIToUTF16("document.getElementById('reload-button').click();"));
+  nav_observer.Wait();
+  EXPECT_FALSE(IsDisplayingNetError(browser(), net::ERR_CONNECTION_RESET));
 }
 
 // Interceptor that fails all requests with net::ERR_ADDRESS_UNREACHABLE.
@@ -1094,11 +1114,10 @@ const char ErrorPageForIDNTest::kHostnameJSUnicode[] =
 // Make sure error page shows correct unicode for IDN.
 IN_PROC_BROWSER_TEST_F(ErrorPageForIDNTest, IDN) {
   // ERR_UNSAFE_PORT will not trigger navigation corrections.
-  ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
+  ui_test_utils::NavigateToURL(
       browser(),
       URLRequestFailedJob::GetMockHttpUrlForHostname(net::ERR_UNSAFE_PORT,
-                                                     kHostname),
-      1);
+                                                     kHostname));
 
   ToggleHelpBox(browser());
   EXPECT_TRUE(IsDisplayingText(browser(), kHostnameJSUnicode));

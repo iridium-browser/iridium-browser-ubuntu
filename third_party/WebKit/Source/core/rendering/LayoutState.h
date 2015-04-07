@@ -35,8 +35,8 @@ namespace blink {
 
 class ForceHorriblySlowRectMapping;
 class RenderBox;
+class RenderFlowThread;
 class RenderObject;
-class RenderInline;
 class RenderView;
 
 class LayoutState {
@@ -44,7 +44,7 @@ class LayoutState {
 public:
     // Constructor for root LayoutState created by RenderView
     LayoutState(LayoutUnit pageLogicalHeight, bool pageLogicalHeightChanged, RenderView&);
-    // Constructor for sub-tree Layout and RenderTableSections
+    // Constructor for sub-tree layout
     explicit LayoutState(RenderObject& root);
 
     LayoutState(RenderBox&, const LayoutSize& offset, LayoutUnit pageLogicalHeight = 0, bool pageHeightLogicalChanged = false, ColumnInfo* = 0, bool containingBlockLogicalWidthChanged = false);
@@ -73,6 +73,8 @@ public:
 
     bool needsBlockDirectionLocationSetBeforeLayout() const { return m_isPaginated && m_pageLogicalHeight; }
 
+    RenderFlowThread* flowThread() const { return m_flowThread; }
+
     ColumnInfo* columnInfo() const { return m_columnInfo; }
 
     RenderObject& renderer() const { return m_renderer; }
@@ -85,6 +87,8 @@ private:
     // If our page height has changed, this will force all blocks to relayout.
     bool m_pageLogicalHeightChanged : 1;
     bool m_containingBlockLogicalWidthChanged : 1;
+
+    RenderFlowThread* m_flowThread;
 
     // If the enclosing pagination model is a column model, then this will store column information for easy retrieval/manipulation.
     ColumnInfo* m_columnInfo;

@@ -91,6 +91,8 @@ class QuicConnectionPeer {
   static void SetPeerAddress(QuicConnection* connection,
                              const IPEndPoint& peer_address);
 
+  static bool IsSilentCloseEnabled(QuicConnection* connection);
+
   static void SwapCrypters(QuicConnection* connection, QuicFramer* framer);
 
   static QuicConnectionHelperInterface* GetHelper(QuicConnection* connection);
@@ -123,6 +125,8 @@ class QuicConnectionPeer {
 
   static void SetSequenceNumberOfLastSentPacket(
       QuicConnection* connection, QuicPacketSequenceNumber number);
+
+  static QuicConnectionStats* GetStats(QuicConnection* connection);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(QuicConnectionPeer);

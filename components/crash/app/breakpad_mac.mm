@@ -17,6 +17,7 @@
 #include "base/files/file_util.h"
 #import "base/logging.h"
 #include "base/mac/bundle_locations.h"
+#include "base/mac/foundation_util.h"
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
 #import "base/mac/scoped_nsautorelease_pool.h"
@@ -167,7 +168,7 @@ void InitCrashReporter(const std::string& process_type) {
   NSBundle* main_bundle = base::mac::FrameworkBundle();
   bool is_browser = !base::mac::IsBackgroundOnlyProcess();
   bool enable_breakpad = false;
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
 
   if (is_browser) {
     // Since the configuration management infrastructure is possibly not

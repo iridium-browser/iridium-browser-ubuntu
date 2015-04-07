@@ -5,16 +5,15 @@
 package org.chromium.chrome.shell;
 
 import android.content.Intent;
-import android.util.Log;
 
 import org.chromium.base.CommandLine;
 import org.chromium.base.PathUtils;
 import org.chromium.base.ResourceExtractor;
 import org.chromium.chrome.browser.ChromiumApplication;
 import org.chromium.chrome.browser.PKCS11AuthenticationManager;
-import org.chromium.chrome.browser.Tab;
 import org.chromium.chrome.browser.UmaUtils;
 import org.chromium.chrome.browser.invalidation.UniqueIdInvalidationClientNameGenerator;
+import org.chromium.chrome.shell.preferences.ChromeShellPreferences;
 
 import java.util.ArrayList;
 
@@ -23,7 +22,6 @@ import java.util.ArrayList;
  * loading the right resources.
  */
 public class ChromeShellApplication extends ChromiumApplication {
-    private static final String TAG = "ChromeShellApplication";
 
     private static final String PRIVATE_DATA_DIRECTORY_SUFFIX = "chromeshell";
     /**
@@ -54,13 +52,20 @@ public class ChromeShellApplication extends ChromiumApplication {
         UmaUtils.recordMainEntryPointTime();
         super.onCreate();
 
-        ResourceExtractor.setMandatoryPaksToExtract(CHROME_MANDATORY_PAKS);
-        PathUtils.setPrivateDataDirectorySuffix(PRIVATE_DATA_DIRECTORY_SUFFIX);
+        // Assume that application start always leads to meaningful UMA startup metrics. This is not
+        // the case for the official Chrome on Android.
+        UmaUtils.setRunningApplicationStart(true);
 
         mObservers = new ArrayList<ChromeShellApplicationObserver>();
 
         // Initialize the invalidations ID, just like we would in the downstream code.
         UniqueIdInvalidationClientNameGenerator.doInitializeAndInstallGenerator(this);
+    }
+
+    @Override
+    protected void initializeLibraryDependencies() {
+        ResourceExtractor.setMandatoryPaksToExtract(CHROME_MANDATORY_PAKS);
+        PathUtils.setPrivateDataDirectorySuffix(PRIVATE_DATA_DIRECTORY_SUFFIX);
     }
 
     @Override
@@ -89,28 +94,8 @@ public class ChromeShellApplication extends ChromiumApplication {
     }
 
     @Override
-    protected void openProtectedContentSettings() {
-    }
-
-    @Override
-    protected void showSyncSettings() {
-    }
-
-    @Override
-    protected void showAutofillSettings() {
-    }
-
-    @Override
-    protected void showPasswordSettings() {
-    }
-
-    @Override
-    protected void showTermsOfServiceDialog() {
-    }
-
-    @Override
-    protected void openClearBrowsingData(Tab tab) {
-        Log.e(TAG, "Clear browsing data not currently supported in Chrome Shell");
+    public String getSettingsActivityName() {
+        return ChromeShellPreferences.class.getName();
     }
 
     @Override

@@ -32,8 +32,8 @@
 #define HarfBuzzShaper_h
 
 #include "hb.h"
-#include "platform/geometry/FloatBoxExtent.h"
 #include "platform/geometry/FloatPoint.h"
+#include "platform/geometry/FloatRect.h"
 #include "platform/text/TextRun.h"
 #include "wtf/HashSet.h"
 #include "wtf/OwnPtr.h"
@@ -63,7 +63,7 @@ public:
     float totalWidth() { return m_totalWidth; }
     int offsetForPosition(float targetX);
     FloatRect selectionRect(const FloatPoint&, int height, int from, int to);
-    FloatBoxExtent glyphBoundingBox() const { return m_glyphBoundingBox; }
+    const FloatRect& glyphBoundingBox() const { return m_glyphBoundingBox; }
 
 private:
     class HarfBuzzRun {
@@ -87,15 +87,12 @@ private:
         unsigned startIndex() const { return m_startIndex; }
         unsigned numCharacters() const { return m_numCharacters; }
         unsigned numGlyphs() const { return m_numGlyphs; }
-        uint16_t* glyphs() { return &m_glyphs[0]; }
-        float* advances() { return &m_advances[0]; }
-        FloatSize* offsets() { return &m_offsets[0]; }
-        bool hasGlyphToCharacterIndexes() const
-        {
-            return m_glyphToCharacterIndexes.size() > 0;
-        }
+        uint16_t* glyphs() { ASSERT(m_numGlyphs); return &m_glyphs[0]; }
+        float* advances() { ASSERT(m_numGlyphs); return &m_advances[0]; }
+        FloatSize* offsets() { ASSERT(m_numGlyphs); return &m_offsets[0]; }
         uint16_t* glyphToCharacterIndexes()
         {
+            ASSERT(m_numGlyphs);
             return &m_glyphToCharacterIndexes[0];
         }
         float width() { return m_width; }
@@ -119,7 +116,7 @@ private:
         float m_width;
     };
 
-    int determineWordBreakSpacing();
+    float determineWordBreakSpacing();
     // setPadding sets a number of pixels to be distributed across the TextRun.
     // WebKit uses this to justify text.
     void setPadding(int);
@@ -129,8 +126,8 @@ private:
     bool createHarfBuzzRuns();
     bool shapeHarfBuzzRuns();
     bool fillGlyphBuffer(GlyphBuffer*);
-    void fillGlyphBufferFromHarfBuzzRun(GlyphBuffer*, HarfBuzzRun*, float& carryAdvance);
-    void fillGlyphBufferForTextEmphasis(GlyphBuffer*, HarfBuzzRun* currentRun);
+    float fillGlyphBufferFromHarfBuzzRun(GlyphBuffer*, HarfBuzzRun*, float initialAdvance);
+    float fillGlyphBufferForTextEmphasis(GlyphBuffer*, HarfBuzzRun*, float initialAdvance);
     void setGlyphPositionsForHarfBuzzRun(HarfBuzzRun*, hb_buffer_t*);
     void addHarfBuzzRun(unsigned startCharacter, unsigned endCharacter, const SimpleFontData*, UScriptCode);
 
@@ -154,7 +151,7 @@ private:
     ForTextEmphasisOrNot m_forTextEmphasis;
 
     float m_totalWidth;
-    FloatBoxExtent m_glyphBoundingBox;
+    FloatRect m_glyphBoundingBox;
     HashSet<const SimpleFontData*>* m_fallbackFonts;
 
     friend struct CachedShapingResults;

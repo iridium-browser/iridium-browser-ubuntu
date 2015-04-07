@@ -12,6 +12,10 @@
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
 
+namespace content {
+class RenderFrameHost;
+}
+
 namespace gfx {
 class Rect;
 class RectF;
@@ -22,13 +26,14 @@ class PrefService;
 
 namespace autofill {
 
-class AutofillMetrics;
 class AutofillPopupDelegate;
 class AutofillWebDataService;
+class CardUnmaskDelegate;
 class CreditCard;
 class FormStructure;
 class PersonalDataManager;
 struct FormData;
+struct Suggestion;
 
 // A client interface that needs to be supplied to the Autofill component by the
 // embedder.
@@ -51,6 +56,10 @@ class AutofillClient {
                               const base::string16&,
                               const FormStructure*)> ResultCallback;
 
+  typedef base::Callback<void(const base::string16& /* card number */,
+                              int /* exp month */,
+                              int /* exp year */)> CreditCardScanCallback;
+
   virtual ~AutofillClient() {}
 
   // Gets the PersonalDataManager instance associated with the client.
@@ -68,16 +77,30 @@ class AutofillClient {
   // Causes the Autofill settings UI to be shown.
   virtual void ShowAutofillSettings() = 0;
 
+  // A user has attempted to use a masked card. Prompt them for further
+  // information to proceed.
+  virtual void ShowUnmaskPrompt(const CreditCard& card,
+                                base::WeakPtr<CardUnmaskDelegate> delegate) = 0;
+  virtual void OnUnmaskVerificationResult(bool success) = 0;
+
   // Run |save_card_callback| if the credit card should be imported as personal
   // data. |metric_logger| can be used to log user actions.
   virtual void ConfirmSaveCreditCard(
-      const AutofillMetrics& metric_logger,
       const base::Closure& save_card_callback) = 0;
+
+  // Returns true if both the platform and the device support scanning credit
+  // cards. Should be called before ScanCreditCard().
+  virtual bool HasCreditCardScanFeature() = 0;
+
+  // Shows the user interface for scanning a credit card. Invokes the |callback|
+  // when a credit card is scanned successfully. Should be called only if
+  // HasCreditCardScanFeature() returns true.
+  virtual void ScanCreditCard(const CreditCardScanCallback& callback) = 0;
 
   // Causes the dialog for request autocomplete feature to be shown.
   virtual void ShowRequestAutocompleteDialog(
       const FormData& form,
-      const GURL& source_url,
+      content::RenderFrameHost* render_frame_host,
       const ResultCallback& callback) = 0;
 
   // Shows an Autofill popup with the given |values|, |labels|, |icons|, and
@@ -86,10 +109,7 @@ class AutofillClient {
   virtual void ShowAutofillPopup(
       const gfx::RectF& element_bounds,
       base::i18n::TextDirection text_direction,
-      const std::vector<base::string16>& values,
-      const std::vector<base::string16>& labels,
-      const std::vector<base::string16>& icons,
-      const std::vector<int>& identifiers,
+      const std::vector<Suggestion>& suggestions,
       base::WeakPtr<AutofillPopupDelegate> delegate) = 0;
 
   // Update the data list values shown by the Autofill popup, if visible.
@@ -106,12 +126,16 @@ class AutofillClient {
   // Pass the form structures to the password generation manager to detect
   // account creation forms.
   virtual void DetectAccountCreationForms(
+      content::RenderFrameHost* rfh,
       const std::vector<autofill::FormStructure*>& forms) = 0;
 
   // Inform the client that the field has been filled.
   virtual void DidFillOrPreviewField(
       const base::string16& autofilled_value,
       const base::string16& profile_full_name) = 0;
+
+  // Informs the client that a user gesture has been observed.
+  virtual void OnFirstUserGestureObserved() = 0;
 };
 
 }  // namespace autofill

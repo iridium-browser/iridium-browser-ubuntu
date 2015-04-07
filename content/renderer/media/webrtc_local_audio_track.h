@@ -13,7 +13,11 @@
 #include "base/threading/thread_checker.h"
 #include "content/renderer/media/media_stream_track.h"
 #include "content/renderer/media/tagged_list.h"
-#include "content/renderer/media/webrtc_audio_device_impl.h"
+#include "media/audio/audio_parameters.h"
+
+namespace media {
+class AudioBus;
+}
 
 namespace content {
 
@@ -22,7 +26,6 @@ class MediaStreamAudioProcessor;
 class MediaStreamAudioSink;
 class MediaStreamAudioSinkOwner;
 class MediaStreamAudioTrackSink;
-class PeerConnectionAudioSink;
 class WebAudioCapturerSource;
 class WebRtcAudioCapturer;
 class WebRtcLocalAudioTrackAdapter;
@@ -50,12 +53,6 @@ class CONTENT_EXPORT WebRtcLocalAudioTrack
   // Called on the main render thread.
   void RemoveSink(MediaStreamAudioSink* sink);
 
-  // Add/remove PeerConnection sink to/from the track.
-  // TODO(xians): Remove these two methods after PeerConnection can use the
-  // same sink interface as MediaStreamAudioSink.
-  void AddSink(PeerConnectionAudioSink* sink);
-  void RemoveSink(PeerConnectionAudioSink* sink);
-
   // Starts the local audio track. Called on the main render thread and
   // should be called only once when audio track is created.
   void Start();
@@ -72,11 +69,8 @@ class CONTENT_EXPORT WebRtcLocalAudioTrack
 
   // Method called by the capturer to deliver the capture data.
   // Called on the capture audio thread.
-  void Capture(const int16* audio_data,
-               base::TimeDelta delay,
-               int volume,
-               bool key_pressed,
-               bool need_audio_processing,
+  void Capture(const media::AudioBus& audio_bus,
+               base::TimeTicks estimated_capture_time,
                bool force_report_nonzero_energy);
 
   // Method called by the capturer to set the audio parameters used by source

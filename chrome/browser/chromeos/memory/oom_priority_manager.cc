@@ -13,6 +13,7 @@
 #include "ash/shell.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/chromeos/memory_pressure_observer_chromeos.h"
 #include "base/command_line.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
@@ -40,6 +41,7 @@
 #include "chrome/common/url_constants.h"
 #include "chromeos/chromeos_switches.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/memory_pressure_observer.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
@@ -101,6 +103,11 @@ void RecordLinearHistogram(const std::string& name,
       bucket_count + 2,  // Account for the underflow and overflow bins.
       base::Histogram::kUmaTargetedHistogramFlag);
   counter->Add(sample);
+}
+
+// Gets the MemoryPressureObserver - if it exists.
+base::MemoryPressureObserverChromeOS* GetMemoryPressureObserver() {
+  return content::GetMemoryPressureObserver();
 }
 
 }  // namespace
@@ -171,10 +178,14 @@ OomPriorityManager::TabStats::~TabStats() {
 }
 
 OomPriorityManager::OomPriorityManager()
-    : focused_tab_pid_(0),
-      low_memory_observer_(new LowMemoryObserver),
+    : focused_tab_process_info_(std::make_pair(0, 0)),
       discard_count_(0),
       recent_tab_discard_(false) {
+  // Use the old |LowMemoryObserver| when there is no
+  // |MemoryPressureObserverChromeOS|.
+  if (!GetMemoryPressureObserver())
+    low_memory_observer_.reset(new LowMemoryObserver);
+
   registrar_.Add(this,
       content::NOTIFICATION_RENDERER_PROCESS_CLOSED,
       content::NotificationService::AllBrowserContextsAndSources());
@@ -204,9 +215,26 @@ void OomPriorityManager::Start() {
         this,
         &OomPriorityManager::RecordRecentTabDiscard);
   }
-  if (low_memory_observer_.get())
-    low_memory_observer_->Start();
   start_time_ = TimeTicks::Now();
+  // If a |LowMemoryObserver| exists we use the old system, otherwise we create
+  // a |MemoryPressureListener| to listen for memory events.
+  if (low_memory_observer_.get()) {
+    low_memory_observer_->Start();
+  } else {
+    base::MemoryPressureObserverChromeOS* observer =
+        GetMemoryPressureObserver();
+    if (observer) {
+      memory_pressure_listener_.reset(new base::MemoryPressureListener(
+          base::Bind(&OomPriorityManager::OnMemoryPressure,
+                     base::Unretained(this))));
+      base::MemoryPressureListener::MemoryPressureLevel level =
+          observer->GetCurrentPressureLevel();
+      if (level ==
+          base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_CRITICAL) {
+        OnMemoryPressure(level);
+      }
+    }
+  }
 }
 
 void OomPriorityManager::Stop() {
@@ -214,18 +242,20 @@ void OomPriorityManager::Stop() {
   recent_tab_discard_timer_.Stop();
   if (low_memory_observer_.get())
     low_memory_observer_->Stop();
+  else
+    memory_pressure_listener_.reset();
 }
 
 std::vector<base::string16> OomPriorityManager::GetTabTitles() {
   TabStatsList stats = GetTabStatsOnUIThread();
-  base::AutoLock pid_to_oom_score_autolock(pid_to_oom_score_lock_);
+  base::AutoLock oom_score_autolock(oom_score_lock_);
   std::vector<base::string16> titles;
   titles.reserve(stats.size());
   TabStatsList::iterator it = stats.begin();
   for ( ; it != stats.end(); ++it) {
     base::string16 str;
     str.reserve(4096);
-    int score = pid_to_oom_score_[it->renderer_handle];
+    int score = oom_score_map_[it->child_process_host_id];
     str += base::IntToString16(score);
     str += base::ASCIIToUTF16(" - ");
     str += it->title;
@@ -401,13 +431,14 @@ void OomPriorityManager::PurgeBrowserMemory() {
   // have been too slow to use in OOM situations (V8 garbage collection) or
   // do not lead to persistent decreased usage (image/bitmap caches). This
   // function therefore only targets large blocks of memory in the browser.
+  // Note that other objects will listen to MemoryPressureListener events
+  // to release memory.
   for (TabContentsIterator it; !it.done(); it.Next()) {
     WebContents* web_contents = *it;
     // Screenshots can consume ~5 MB per web contents for platforms that do
     // touch back/forward.
     web_contents->GetController().ClearAllScreenshots();
   }
-  // TODO(jamescook): Are there other things we could flush? Drive metadata?
 }
 
 int OomPriorityManager::GetTabCount() const {
@@ -456,10 +487,12 @@ bool OomPriorityManager::CompareTabStats(TabStats first,
 
 void OomPriorityManager::AdjustFocusedTabScoreOnFileThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-  base::AutoLock pid_to_oom_score_autolock(pid_to_oom_score_lock_);
+  base::AutoLock oom_score_autolock(oom_score_lock_);
+  base::ProcessHandle pid = focused_tab_process_info_.second;
   content::ZygoteHost::GetInstance()->AdjustRendererOOMScore(
-      focused_tab_pid_, chrome::kLowestRendererOomScore);
-  pid_to_oom_score_[focused_tab_pid_] = chrome::kLowestRendererOomScore;
+      pid, chrome::kLowestRendererOomScore);
+  oom_score_map_[focused_tab_process_info_.first] =
+      chrome::kLowestRendererOomScore;
 }
 
 void OomPriorityManager::OnFocusTabScoreAdjustmentTimeout() {
@@ -472,35 +505,45 @@ void OomPriorityManager::OnFocusTabScoreAdjustmentTimeout() {
 void OomPriorityManager::Observe(int type,
                                  const content::NotificationSource& source,
                                  const content::NotificationDetails& details) {
-  base::ProcessHandle handle = 0;
-  base::AutoLock pid_to_oom_score_autolock(pid_to_oom_score_lock_);
+  base::AutoLock oom_score_autolock(oom_score_lock_);
   switch (type) {
-    case content::NOTIFICATION_RENDERER_PROCESS_CLOSED: {
-      handle =
-          content::Details<content::RenderProcessHost::RendererClosedDetails>(
-              details)->handle;
-      pid_to_oom_score_.erase(handle);
-      break;
-    }
+    case content::NOTIFICATION_RENDERER_PROCESS_CLOSED:
     case content::NOTIFICATION_RENDERER_PROCESS_TERMINATED: {
-      handle = content::Source<content::RenderProcessHost>(source)->
-          GetHandle();
-      pid_to_oom_score_.erase(handle);
+      content::RenderProcessHost* host =
+          content::Source<content::RenderProcessHost>(source).ptr();
+      oom_score_map_.erase(host->GetID());
+      if (!low_memory_observer_.get()) {
+        // Coming here we know that a renderer was just killed and memory should
+        // come back into the pool. However - the memory pressure observer did
+        // not yet update its status and therefore we ask it to redo the
+        // measurement, calling us again if we have to release more.
+        // Note: We do not only accelerate the discarding speed by doing another
+        // check in short succession - we also accelerate it because the timer
+        // driven MemoryPressureObserver will continue to produce timed events
+        // on top. So as longer as the cleanup phase takes, as more tabs will
+        // get discarded in parallel.
+        base::MemoryPressureObserverChromeOS* observer =
+            GetMemoryPressureObserver();
+        if (observer)
+          observer->ScheduleEarlyCheck();
+      }
       break;
     }
     case content::NOTIFICATION_RENDER_WIDGET_VISIBILITY_CHANGED: {
       bool visible = *content::Details<bool>(details).ptr();
       if (visible) {
-        focused_tab_pid_ =
+        content::RenderProcessHost* render_host =
             content::Source<content::RenderWidgetHost>(source).ptr()->
-            GetProcess()->GetHandle();
+            GetProcess();
+        focused_tab_process_info_ = std::make_pair(render_host->GetID(),
+                                                   render_host->GetHandle());
 
         // If the currently focused tab already has a lower score, do not
         // set it. This can happen in case the newly focused tab is script
         // connected to the previous tab.
         ProcessScoreMap::iterator it;
-        it = pid_to_oom_score_.find(focused_tab_pid_);
-        if (it == pid_to_oom_score_.end()
+        it = oom_score_map_.find(focused_tab_process_info_.first);
+        if (it == oom_score_map_.end()
             || it->second != chrome::kLowestRendererOomScore) {
           // By starting a timer we guarantee that the tab is focused for
           // certain amount of time. Secondly, it also does not add overhead
@@ -581,6 +624,7 @@ OomPriorityManager::TabStatsList OomPriorityManager::GetTabStatsOnUIThread() {
         stats.is_discarded = model->IsTabDiscarded(i);
         stats.last_active = contents->GetLastActiveTime();
         stats.renderer_handle = contents->GetRenderProcessHost()->GetHandle();
+        stats.child_process_host_id = contents->GetRenderProcessHost()->GetID();
         stats.title = contents->GetTitle();
         stats.tab_contents_id = IdFromWebContents(contents);
         stats_list.push_back(stats);
@@ -596,9 +640,10 @@ OomPriorityManager::TabStatsList OomPriorityManager::GetTabStatsOnUIThread() {
 }
 
 // static
-std::vector<base::ProcessHandle> OomPriorityManager::GetProcessHandles(
+std::vector<OomPriorityManager::ProcessInfo>
+    OomPriorityManager::GetChildProcessInfos(
     const TabStatsList& stats_list) {
-  std::vector<base::ProcessHandle> process_handles;
+  std::vector<ProcessInfo> process_infos;
   std::set<base::ProcessHandle> already_seen;
   for (TabStatsList::const_iterator iterator = stats_list.begin();
        iterator != stats_list.end(); ++iterator) {
@@ -613,21 +658,21 @@ std::vector<base::ProcessHandle> OomPriorityManager::GetProcessHandles(
       continue;
     }
 
-    process_handles.push_back(iterator->renderer_handle);
+    process_infos.push_back(std::make_pair(
+        iterator->child_process_host_id, iterator->renderer_handle));
   }
-  return process_handles;
+  return process_infos;
 }
 
 void OomPriorityManager::AdjustOomPrioritiesOnFileThread(
     TabStatsList stats_list) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-  base::AutoLock pid_to_oom_score_autolock(pid_to_oom_score_lock_);
+  base::AutoLock oom_score_autolock(oom_score_lock_);
 
   // Remove any duplicate PIDs. Order of the list is maintained, so each
   // renderer process will take on the oom_score_adj of the most important
   // (least likely to be killed) tab.
-  std::vector<base::ProcessHandle> process_handles =
-      GetProcessHandles(stats_list);
+  std::vector<ProcessInfo> process_infos = GetChildProcessInfos(stats_list);
 
   // Now we assign priorities based on the sorted list.  We're
   // assigning priorities in the range of kLowestRendererOomScore to
@@ -643,21 +688,31 @@ void OomPriorityManager::AdjustOomPrioritiesOnFileThread(
   const int kPriorityRange = chrome::kHighestRendererOomScore -
                              chrome::kLowestRendererOomScore;
   float priority_increment =
-      static_cast<float>(kPriorityRange) / process_handles.size();
-  for (std::vector<base::ProcessHandle>::iterator iterator =
-           process_handles.begin();
-       iterator != process_handles.end(); ++iterator) {
+      static_cast<float>(kPriorityRange) / process_infos.size();
+  for (const auto& process_info : process_infos) {
     int score = static_cast<int>(priority + 0.5f);
-    ProcessScoreMap::iterator it = pid_to_oom_score_.find(*iterator);
+    ProcessScoreMap::iterator it =
+        oom_score_map_.find(process_info.first);
     // If a process has the same score as the newly calculated value,
     // do not set it.
-    if (it == pid_to_oom_score_.end() || it->second != score) {
-      content::ZygoteHost::GetInstance()->AdjustRendererOOMScore(*iterator,
-                                                                 score);
-      pid_to_oom_score_[*iterator] = score;
+    if (it == oom_score_map_.end() || it->second != score) {
+      content::ZygoteHost::GetInstance()->AdjustRendererOOMScore(
+          process_info.second, score);
+      oom_score_map_[process_info.first] = score;
     }
     priority += priority_increment;
   }
+}
+
+void OomPriorityManager::OnMemoryPressure(
+    base::MemoryPressureListener::MemoryPressureLevel memory_pressure_level) {
+  // For the moment we only do something when we reach a critical state.
+  if (memory_pressure_level ==
+      base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_CRITICAL) {
+    LogMemoryAndDiscardTab();
+  }
+  // TODO(skuhne): If more memory pressure levels are introduced, we might
+  // consider to call PurgeBrowserMemory() before CRITICAL is reached.
 }
 
 }  // namespace chromeos

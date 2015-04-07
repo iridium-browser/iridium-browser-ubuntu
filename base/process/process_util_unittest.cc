@@ -325,7 +325,7 @@ TEST_F(ProcessUtilTest, GetAppOutput) {
   expected += "\r\n";
 
   FilePath cmd(L"cmd.exe");
-  CommandLine cmd_line(cmd);
+  base::CommandLine cmd_line(cmd);
   cmd_line.AppendArg("/c");
   cmd_line.AppendArg("echo " + message + "");
   std::string output;
@@ -333,7 +333,7 @@ TEST_F(ProcessUtilTest, GetAppOutput) {
   EXPECT_EQ(expected, output);
 
   // Let's make sure stderr is ignored.
-  CommandLine other_cmd_line(cmd);
+  base::CommandLine other_cmd_line(cmd);
   other_cmd_line.AppendArg("/c");
   // http://msdn.microsoft.com/library/cc772622.aspx
   cmd_line.AppendArg("echo " + message + " >&2");
@@ -348,22 +348,23 @@ TEST_F(ProcessUtilTest, LaunchAsUser) {
   ASSERT_TRUE(OpenProcessToken(GetCurrentProcess(), TOKEN_ALL_ACCESS, &token));
   base::LaunchOptions options;
   options.as_user = token;
-  EXPECT_TRUE(base::LaunchProcess(MakeCmdLine("SimpleChildProcess"), options,
-                                  NULL));
+  EXPECT_TRUE(base::LaunchProcess(MakeCmdLine("SimpleChildProcess"),
+                                  options).IsValid());
 }
 
 static const char kEventToTriggerHandleSwitch[] = "event-to-trigger-handle";
 
 MULTIPROCESS_TEST_MAIN(TriggerEventChildProcess) {
   std::string handle_value_string =
-      CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
           kEventToTriggerHandleSwitch);
   CHECK(!handle_value_string.empty());
 
   uint64 handle_value_uint64;
   CHECK(base::StringToUint64(handle_value_string, &handle_value_uint64));
   // Give ownership of the handle to |event|.
-  base::WaitableEvent event(reinterpret_cast<HANDLE>(handle_value_uint64));
+  base::WaitableEvent event(base::win::ScopedHandle(
+      reinterpret_cast<HANDLE>(handle_value_uint64)));
 
   event.Signal();
 
@@ -378,26 +379,26 @@ TEST_F(ProcessUtilTest, InheritSpecifiedHandles) {
   security_attributes.bInheritHandle = true;
 
   // Takes ownership of the event handle.
-  base::WaitableEvent event(
-      CreateEvent(&security_attributes, true, false, NULL));
+  base::WaitableEvent event(base::win::ScopedHandle(
+      CreateEvent(&security_attributes, true, false, NULL)));
   base::HandlesToInheritVector handles_to_inherit;
   handles_to_inherit.push_back(event.handle());
   base::LaunchOptions options;
   options.handles_to_inherit = &handles_to_inherit;
 
-  CommandLine cmd_line = MakeCmdLine("TriggerEventChildProcess");
+  base::CommandLine cmd_line = MakeCmdLine("TriggerEventChildProcess");
   cmd_line.AppendSwitchASCII(kEventToTriggerHandleSwitch,
       base::Uint64ToString(reinterpret_cast<uint64>(event.handle())));
 
   // This functionality actually requires Vista or later. Make sure that it
   // fails properly on XP.
   if (base::win::GetVersion() < base::win::VERSION_VISTA) {
-    EXPECT_FALSE(base::LaunchProcess(cmd_line, options, NULL));
+    EXPECT_FALSE(base::LaunchProcess(cmd_line, options).IsValid());
     return;
   }
 
   // Launch the process and wait for it to trigger the event.
-  ASSERT_TRUE(base::LaunchProcess(cmd_line, options, NULL));
+  ASSERT_TRUE(base::LaunchProcess(cmd_line, options).IsValid());
   EXPECT_TRUE(event.TimedWait(TestTimeouts::action_max_timeout()));
 }
 #endif  // defined(OS_WIN)
@@ -710,27 +711,29 @@ TEST_F(ProcessUtilTest, GetAppOutput) {
   argv.push_back("-c");
 
   argv.push_back("exit 0");
-  EXPECT_TRUE(base::GetAppOutput(CommandLine(argv), &output));
+  EXPECT_TRUE(base::GetAppOutput(base::CommandLine(argv), &output));
   EXPECT_STREQ("", output.c_str());
 
   argv[2] = "exit 1";
-  EXPECT_FALSE(base::GetAppOutput(CommandLine(argv), &output));
+  EXPECT_FALSE(base::GetAppOutput(base::CommandLine(argv), &output));
   EXPECT_STREQ("", output.c_str());
 
   argv[2] = "echo foobar42";
-  EXPECT_TRUE(base::GetAppOutput(CommandLine(argv), &output));
+  EXPECT_TRUE(base::GetAppOutput(base::CommandLine(argv), &output));
   EXPECT_STREQ("foobar42\n", output.c_str());
 #else
-  EXPECT_TRUE(base::GetAppOutput(CommandLine(FilePath("true")), &output));
+  EXPECT_TRUE(base::GetAppOutput(base::CommandLine(FilePath("true")),
+                                 &output));
   EXPECT_STREQ("", output.c_str());
 
-  EXPECT_FALSE(base::GetAppOutput(CommandLine(FilePath("false")), &output));
+  EXPECT_FALSE(base::GetAppOutput(base::CommandLine(FilePath("false")),
+                                  &output));
 
   std::vector<std::string> argv;
   argv.push_back("/bin/echo");
   argv.push_back("-n");
   argv.push_back("foobar42");
-  EXPECT_TRUE(base::GetAppOutput(CommandLine(argv), &output));
+  EXPECT_TRUE(base::GetAppOutput(base::CommandLine(argv), &output));
   EXPECT_STREQ("foobar42", output.c_str());
 #endif  // defined(OS_ANDROID)
 }
@@ -754,34 +757,39 @@ TEST_F(ProcessUtilTest, MAYBE_GetAppOutputRestricted) {
   // need absolute paths).
   argv.push_back("exit 0");   // argv[2]; equivalent to "true"
   std::string output = "abc";
-  EXPECT_TRUE(base::GetAppOutputRestricted(CommandLine(argv), &output, 100));
+  EXPECT_TRUE(base::GetAppOutputRestricted(base::CommandLine(argv), &output,
+                                           100));
   EXPECT_STREQ("", output.c_str());
 
   argv[2] = "exit 1";  // equivalent to "false"
   output = "before";
-  EXPECT_FALSE(base::GetAppOutputRestricted(CommandLine(argv),
-                                            &output, 100));
+  EXPECT_FALSE(base::GetAppOutputRestricted(base::CommandLine(argv), &output,
+                                            100));
   EXPECT_STREQ("", output.c_str());
 
   // Amount of output exactly equal to space allowed.
   argv[2] = "echo 123456789";  // (the sh built-in doesn't take "-n")
   output.clear();
-  EXPECT_TRUE(base::GetAppOutputRestricted(CommandLine(argv), &output, 10));
+  EXPECT_TRUE(base::GetAppOutputRestricted(base::CommandLine(argv), &output,
+                                           10));
   EXPECT_STREQ("123456789\n", output.c_str());
 
   // Amount of output greater than space allowed.
   output.clear();
-  EXPECT_TRUE(base::GetAppOutputRestricted(CommandLine(argv), &output, 5));
+  EXPECT_TRUE(base::GetAppOutputRestricted(base::CommandLine(argv), &output,
+                                           5));
   EXPECT_STREQ("12345", output.c_str());
 
   // Amount of output less than space allowed.
   output.clear();
-  EXPECT_TRUE(base::GetAppOutputRestricted(CommandLine(argv), &output, 15));
+  EXPECT_TRUE(base::GetAppOutputRestricted(base::CommandLine(argv), &output,
+                                           15));
   EXPECT_STREQ("123456789\n", output.c_str());
 
   // Zero space allowed.
   output = "abc";
-  EXPECT_TRUE(base::GetAppOutputRestricted(CommandLine(argv), &output, 0));
+  EXPECT_TRUE(base::GetAppOutputRestricted(base::CommandLine(argv), &output,
+                                           0));
   EXPECT_STREQ("", output.c_str());
 }
 
@@ -796,11 +804,13 @@ TEST_F(ProcessUtilTest, GetAppOutputRestrictedSIGPIPE) {
   argv.push_back("-c");
 #if defined(OS_ANDROID)
   argv.push_back("while echo 12345678901234567890; do :; done");
-  EXPECT_TRUE(base::GetAppOutputRestricted(CommandLine(argv), &output, 10));
+  EXPECT_TRUE(base::GetAppOutputRestricted(base::CommandLine(argv), &output,
+                                           10));
   EXPECT_STREQ("1234567890", output.c_str());
 #else
   argv.push_back("yes");
-  EXPECT_TRUE(base::GetAppOutputRestricted(CommandLine(argv), &output, 10));
+  EXPECT_TRUE(base::GetAppOutputRestricted(base::CommandLine(argv), &output,
+                                           10));
   EXPECT_STREQ("y\ny\ny\ny\ny\n", output.c_str());
 #endif
 }
@@ -826,14 +836,16 @@ TEST_F(ProcessUtilTest, MAYBE_GetAppOutputRestrictedNoZombies) {
   // 10.5) times with an output buffer big enough to capture all output.
   for (int i = 0; i < 300; i++) {
     std::string output;
-    EXPECT_TRUE(base::GetAppOutputRestricted(CommandLine(argv), &output, 100));
+    EXPECT_TRUE(base::GetAppOutputRestricted(base::CommandLine(argv), &output,
+                                             100));
     EXPECT_STREQ("123456789012345678901234567890\n", output.c_str());
   }
 
   // Ditto, but with an output buffer too small to capture all output.
   for (int i = 0; i < 300; i++) {
     std::string output;
-    EXPECT_TRUE(base::GetAppOutputRestricted(CommandLine(argv), &output, 10));
+    EXPECT_TRUE(base::GetAppOutputRestricted(base::CommandLine(argv), &output,
+                                             10));
     EXPECT_STREQ("1234567890", output.c_str());
   }
 }
@@ -846,7 +858,7 @@ TEST_F(ProcessUtilTest, GetAppOutputWithExitCode) {
   argv.push_back(std::string(kShellPath));  // argv[0]
   argv.push_back("-c");  // argv[1]
   argv.push_back("echo foo");  // argv[2];
-  EXPECT_TRUE(base::GetAppOutputWithExitCode(CommandLine(argv), &output,
+  EXPECT_TRUE(base::GetAppOutputWithExitCode(base::CommandLine(argv), &output,
                                              &exit_code));
   EXPECT_STREQ("foo\n", output.c_str());
   EXPECT_EQ(exit_code, 0);
@@ -855,7 +867,7 @@ TEST_F(ProcessUtilTest, GetAppOutputWithExitCode) {
   // code.
   output.clear();
   argv[2] = "echo foo; exit 2";
-  EXPECT_TRUE(base::GetAppOutputWithExitCode(CommandLine(argv), &output,
+  EXPECT_TRUE(base::GetAppOutputWithExitCode(base::CommandLine(argv), &output,
                                              &exit_code));
   EXPECT_STREQ("foo\n", output.c_str());
   EXPECT_EQ(exit_code, 2);
@@ -876,14 +888,14 @@ bool IsProcessDead(base::ProcessHandle child) {
 }
 
 TEST_F(ProcessUtilTest, DelayedTermination) {
-  base::ProcessHandle child_process = SpawnChild("process_util_test_never_die");
-  ASSERT_TRUE(child_process);
-  base::EnsureProcessTerminated(child_process);
-  base::WaitForSingleProcess(child_process, base::TimeDelta::FromSeconds(5));
+  base::Process child_process(SpawnChild("process_util_test_never_die"));
+  ASSERT_TRUE(child_process.IsValid());
+  base::EnsureProcessTerminated(child_process.Duplicate());
+  base::WaitForSingleProcess(child_process.Handle(),
+                             base::TimeDelta::FromSeconds(5));
 
   // Check that process was really killed.
-  EXPECT_TRUE(IsProcessDead(child_process));
-  base::CloseProcessHandle(child_process);
+  EXPECT_TRUE(IsProcessDead(child_process.Handle()));
 }
 
 MULTIPROCESS_TEST_MAIN(process_util_test_never_die) {
@@ -894,16 +906,14 @@ MULTIPROCESS_TEST_MAIN(process_util_test_never_die) {
 }
 
 TEST_F(ProcessUtilTest, ImmediateTermination) {
-  base::ProcessHandle child_process =
-      SpawnChild("process_util_test_die_immediately");
-  ASSERT_TRUE(child_process);
+  base::Process child_process(SpawnChild("process_util_test_die_immediately"));
+  ASSERT_TRUE(child_process.IsValid());
   // Give it time to die.
   sleep(2);
-  base::EnsureProcessTerminated(child_process);
+  base::EnsureProcessTerminated(child_process.Duplicate());
 
   // Check that process was really killed.
-  EXPECT_TRUE(IsProcessDead(child_process));
-  base::CloseProcessHandle(child_process);
+  EXPECT_TRUE(IsProcessDead(child_process.Handle()));
 }
 
 MULTIPROCESS_TEST_MAIN(process_util_test_die_immediately) {

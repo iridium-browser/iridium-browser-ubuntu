@@ -11,9 +11,9 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
-#include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/common/custom_handlers/protocol_handler.h"
 #include "components/content_settings/core/common/content_settings.h"
+#include "components/content_settings/core/common/content_settings_types.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/common/media_stream_request.h"
@@ -207,6 +207,7 @@ class ContentSettingTitleAndLinkModel : public ContentSettingBubbleModel {
   Delegate* delegate_;
 };
 
+// RPH stands for Register Protocol Handler.
 class ContentSettingRPHBubbleModel : public ContentSettingTitleAndLinkModel {
  public:
   ContentSettingRPHBubbleModel(Delegate* delegate,
@@ -219,14 +220,6 @@ class ContentSettingRPHBubbleModel : public ContentSettingTitleAndLinkModel {
   void OnDoneClicked() override;
 
  private:
-  // These states must match the order of appearance of the radio buttons
-  // in the XIB file for the Mac port.
-  enum RPHState {
-    RPH_ALLOW = 0,
-    RPH_BLOCK,
-    RPH_IGNORE,
-  };
-
   void RegisterProtocolHandler();
   void UnregisterProtocolHandler();
   void IgnoreProtocolHandler();

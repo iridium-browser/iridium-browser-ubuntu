@@ -320,8 +320,8 @@ class BASE_EXPORT CategoryFilter {
   // categories are distinguished from included categories by the prefix '-'.
   std::string ToString() const;
 
-  // Determines whether category group would be enabled or
-  // disabled by this category filter.
+  // Returns true if at least one category in the list is enabled by this
+  // category filter.
   bool IsCategoryGroupEnabled(const char* category_group) const;
 
   // Return a list of the synthetic delays specified in this category filter.
@@ -341,6 +341,9 @@ class BASE_EXPORT CategoryFilter {
  private:
   FRIEND_TEST_ALL_PREFIXES(TraceEventTestFixture, CategoryFilter);
 
+  // Returns true if category is enable according to this filter.
+  bool IsCategoryEnabled(const char* category_name) const;
+
   static bool IsEmptyOrContainsLeadingOrTrailingWhitespace(
       const std::string& str);
 
@@ -350,9 +353,6 @@ class BASE_EXPORT CategoryFilter {
                    bool included) const;
   void WriteString(const StringList& delays, std::string* out) const;
   bool HasIncludedPatterns() const;
-
-  bool DoesCategoryGroupContainCategory(const char* category_group,
-                                        const char* category) const;
 
   StringList included_;
   StringList disabled_;
@@ -418,6 +418,13 @@ struct BASE_EXPORT TraceOptions {
   TraceRecordMode record_mode;
   bool enable_sampling;
   bool enable_systrace;
+};
+
+struct BASE_EXPORT TraceLogStatus {
+  TraceLogStatus();
+  ~TraceLogStatus();
+  size_t event_capacity;
+  size_t event_count;
 };
 
 class BASE_EXPORT TraceLog {
@@ -495,7 +502,7 @@ class BASE_EXPORT TraceLog {
   void RemoveEnabledStateObserver(EnabledStateObserver* listener);
   bool HasEnabledStateObserver(EnabledStateObserver* listener) const;
 
-  float GetBufferPercentFull() const;
+  TraceLogStatus GetStatus() const;
   bool BufferIsFull() const;
 
   // Not using base::Callback because of its limited by 7 parameters.
@@ -603,7 +610,6 @@ class BASE_EXPORT TraceLog {
   static void DeleteForTesting();
 
   // Allow tests to inspect TraceEvents.
-  size_t GetEventsSize() const { return logged_events_->Size(); }
   TraceEvent* GetEventByHandle(TraceEventHandle handle);
 
   void SetProcessID(int process_id);

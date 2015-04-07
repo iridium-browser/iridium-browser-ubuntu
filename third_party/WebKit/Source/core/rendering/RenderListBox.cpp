@@ -31,9 +31,9 @@
 #include "core/rendering/RenderListBox.h"
 
 #include "core/HTMLNames.h"
-#include "core/accessibility/AXObjectCache.h"
 #include "core/css/CSSFontSelector.h"
 #include "core/css/resolver/StyleResolver.h"
+#include "core/dom/AXObjectCache.h"
 #include "core/dom/Document.h"
 #include "core/dom/ElementTraversal.h"
 #include "core/dom/NodeRenderStyle.h"
@@ -118,14 +118,14 @@ LayoutUnit RenderListBox::itemHeight() const
         return defaultItemHeight();
     if (!baseItemRenderer || !baseItemRenderer->isBox())
         return defaultItemHeight();
-    return toRenderBox(baseItemRenderer)->height();
+    return toRenderBox(baseItemRenderer)->size().height();
 }
 
 void RenderListBox::computeLogicalHeight(LayoutUnit, LayoutUnit logicalTop, LogicalExtentComputedValues& computedValues) const
 {
     LayoutUnit height = itemHeight() * size();
     // FIXME: The item height should have been added before updateLogicalHeight was called to avoid this hack.
-    updateIntrinsicContentLogicalHeight(height);
+    setIntrinsicContentLogicalHeight(height);
 
     height += borderAndPaddingHeight();
 

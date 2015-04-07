@@ -3,10 +3,24 @@
 # found in the LICENSE file.
 
 import("//build/config/features.gni")
+import("//build/config/linux/pkg_config.gni")
 import("//build/config/ui.gni")
+
+declare_args() {
+  # Optional system libraries.
+  use_xkbcommon = false
+}
+
+if (use_xkbcommon) {
+  pkg_config("xkbcommon") {
+    packages = [ "xkbcommon" ]
+  }
+}
 
 component("events_ozone") {
   sources = [
+    "chromeos/cursor_controller.cc",
+    "chromeos/cursor_controller.h",
     "device/device_event.cc",
     "device/device_event.h",
     "device/device_event_observer.h",
@@ -21,11 +35,10 @@ component("events_ozone") {
 
   deps = [
     "//base",
+    "//base/third_party/dynamic_annotations",
   ]
 
-  defines = [
-    "EVENTS_OZONE_IMPLEMENTATION",
-  ]
+  defines = [ "EVENTS_OZONE_IMPLEMENTATION" ]
 
   if (!use_udev) {
     sources -= [
@@ -35,10 +48,16 @@ component("events_ozone") {
   }
 
   if (use_ozone_evdev && use_udev) {
-    deps += [
-      "//device/udev_linux",
-    ]
+    deps += [ "//device/udev_linux" ]
   }
+}
+
+config("evdev") {
+  defines = [ "USE_EVDEV" ]
+}
+
+config("evdev_gestures") {
+  defines = [ "USE_EVDEV_GESTURES" ]
 }
 
 component("events_ozone_evdev") {
@@ -54,29 +73,35 @@ component("events_ozone_evdev") {
     "evdev/event_modifiers_evdev.cc",
     "evdev/event_modifiers_evdev.h",
     "evdev/events_ozone_evdev_export.h",
+    "evdev/input_controller_evdev.cc",
+    "evdev/input_controller_evdev.h",
+    "evdev/input_device_settings_evdev.cc",
+    "evdev/input_device_settings_evdev.h",
+    "evdev/input_injector_evdev.cc",
+    "evdev/input_injector_evdev.h",
     "evdev/keyboard_evdev.cc",
     "evdev/keyboard_evdev.h",
+    "evdev/mouse_button_map_evdev.cc",
+    "evdev/mouse_button_map_evdev.h",
+    "evdev/tablet_event_converter_evdev.cc",
+    "evdev/tablet_event_converter_evdev.h",
     "evdev/touch_event_converter_evdev.cc",
     "evdev/touch_event_converter_evdev.h",
   ]
 
-  defines = [
-    "EVENTS_OZONE_EVDEV_IMPLEMENTATION",
-  ]
+  defines = [ "EVENTS_OZONE_EVDEV_IMPLEMENTATION" ]
 
   deps = [
     ":events_ozone",
+    ":events_ozone_layout",
     "//base",
+    "//ui/events:dom4_keycode_converter",
     "//ui/events/devices",
     "//ui/events/platform",
     "//ui/gfx",
   ]
 
-  if (use_ozone_evdev) {
-    defines += [
-      "USE_OZONE_EVDEV=1"
-    ]
-  }
+  public_configs = [ ":evdev" ]
 
   if (use_ozone_evdev && use_evdev_gestures) {
     sources += [
@@ -92,13 +117,59 @@ component("events_ozone_evdev") {
       "evdev/libgestures_glue/gesture_timer_provider.h",
     ]
 
-    defines += [
-      "USE_EVDEV_GESTURES",
-    ]
+    public_configs += [ ":evdev_gestures" ]
 
     configs += [
       "//build/config/linux:libevdev-cros",
       "//build/config/linux:libgestures",
+    ]
+  }
+}
+
+config("events_ozone_layout_config") {
+  if (use_xkbcommon) {
+    defines = [ "USE_XKBCOMMON" ]
+  }
+}
+
+component("events_ozone_layout") {
+  sources = [
+    "layout/events_ozone_layout_export.h",
+    "layout/keyboard_layout_engine.h",
+    "layout/keyboard_layout_engine_manager.cc",
+    "layout/keyboard_layout_engine_manager.h",
+    "layout/layout_util.cc",
+    "layout/layout_util.h",
+    "layout/no/no_keyboard_layout_engine.cc",
+    "layout/no/no_keyboard_layout_engine.h",
+    "layout/stub/stub_keyboard_layout_engine.cc",
+    "layout/stub/stub_keyboard_layout_engine.h",
+  ]
+
+  defines = [ "EVENTS_OZONE_LAYOUT_IMPLEMENTATION" ]
+
+  deps = [
+    "//base",
+    "//ui/events:dom4_keycode_converter",
+    "//ui/events:events_base",
+  ]
+
+  public_configs = [ ":events_ozone_layout_config" ]
+
+  if (use_xkbcommon) {
+    configs += [ ":xkbcommon" ]
+
+    sources += [
+      "layout/xkb/xkb.h",
+      "layout/xkb/xkb_evdev_codes.cc",
+      "layout/xkb/xkb_evdev_codes.h",
+      "layout/xkb/xkb_key_code_converter.h",
+      "layout/xkb/xkb_keyboard_code_conversion.cc",
+      "layout/xkb/xkb_keyboard_code_conversion.h",
+      "layout/xkb/xkb_keyboard_layout_engine.cc",
+      "layout/xkb/xkb_keyboard_layout_engine.h",
+      "layout/xkb/xkb_keysym.h",
+      "layout/xkb/scoped_xkb.h",
     ]
   }
 }

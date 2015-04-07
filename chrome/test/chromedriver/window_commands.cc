@@ -435,8 +435,7 @@ Status ExecuteGoBack(
     WebView* web_view,
     const base::DictionaryValue& params,
     scoped_ptr<base::Value>* value) {
-  return web_view->EvaluateScript(
-      std::string(), "window.history.back();", value);
+  return web_view->TraverseHistory(-1);
 }
 
 Status ExecuteGoForward(
@@ -444,8 +443,7 @@ Status ExecuteGoForward(
     WebView* web_view,
     const base::DictionaryValue& params,
     scoped_ptr<base::Value>* value) {
-  return web_view->EvaluateScript(
-      std::string(), "window.history.forward();", value);
+  return web_view->TraverseHistory(1);
 }
 
 Status ExecuteRefresh(
@@ -753,10 +751,11 @@ Status ExecuteScreenshot(
     return status;
 
   std::string screenshot;
-  if (session->chrome->GetAsDesktop() && !session->force_devtools_screenshot) {
+  ChromeDesktopImpl* desktop = NULL;
+  status = session->chrome->GetAsDesktop(&desktop);
+  if (status.IsOk() && !session->force_devtools_screenshot) {
     AutomationExtension* extension = NULL;
-    status =
-        session->chrome->GetAsDesktop()->GetAutomationExtension(&extension);
+    status = desktop->GetAutomationExtension(&extension);
     if (status.IsError())
       return status;
     status = extension->CaptureScreenshot(&screenshot);

@@ -9,8 +9,6 @@
 #include "chrome/browser/dom_distiller/dom_distiller_service_factory.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/notifications/sync_notifier/chrome_notifier_service.h"
-#include "chrome/browser/notifications/sync_notifier/chrome_notifier_service_factory.h"
 #include "chrome/browser/password_manager/password_store_factory.h"
 #include "chrome/browser/pref_service_flags_storage.h"
 #include "chrome/browser/prefs/pref_model_associator.h"
@@ -41,11 +39,11 @@
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/themes/theme_syncable_service.h"
-#include "chrome/browser/webdata/autocomplete_syncable_service.h"
 #include "chrome/browser/webdata/web_data_service_factory.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/pref_names.h"
+#include "components/autofill/core/browser/webdata/autocomplete_syncable_service.h"
 #include "components/autofill/core/browser/webdata/autofill_profile_syncable_service.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "components/dom_distiller/core/dom_distiller_service.h"
@@ -76,26 +74,33 @@
 
 #if defined(ENABLE_EXTENSIONS)
 #include "chrome/browser/extensions/api/storage/settings_sync_util.h"
-#include "chrome/browser/extensions/api/synced_notifications_private/synced_notifications_shim.h"
 #include "chrome/browser/extensions/extension_sync_service.h"
 #include "chrome/browser/sync/glue/extension_backed_data_type_controller.h"
 #include "chrome/browser/sync/glue/extension_data_type_controller.h"
 #include "chrome/browser/sync/glue/extension_setting_data_type_controller.h"
 #endif
 
-#if defined(ENABLE_MANAGED_USERS)
+#if defined(ENABLE_SUPERVISED_USERS)
+#include "chrome/browser/supervised_user/legacy/supervised_user_shared_settings_service.h"
+#include "chrome/browser/supervised_user/legacy/supervised_user_shared_settings_service_factory.h"
+#include "chrome/browser/supervised_user/legacy/supervised_user_sync_service.h"
+#include "chrome/browser/supervised_user/legacy/supervised_user_sync_service_factory.h"
+#include "chrome/browser/supervised_user/supervised_user_service.h"
+#include "chrome/browser/supervised_user/supervised_user_service_factory.h"
 #include "chrome/browser/supervised_user/supervised_user_settings_service.h"
 #include "chrome/browser/supervised_user/supervised_user_settings_service_factory.h"
-#include "chrome/browser/supervised_user/supervised_user_shared_settings_service.h"
-#include "chrome/browser/supervised_user/supervised_user_shared_settings_service_factory.h"
 #include "chrome/browser/supervised_user/supervised_user_sync_data_type_controller.h"
-#include "chrome/browser/supervised_user/supervised_user_sync_service.h"
-#include "chrome/browser/supervised_user/supervised_user_sync_service_factory.h"
+#include "chrome/browser/supervised_user/supervised_user_whitelist_service.h"
 #endif
 
 #if defined(ENABLE_SPELLCHECK)
 #include "chrome/browser/spellchecker/spellcheck_factory.h"
 #include "chrome/browser/spellchecker/spellcheck_service.h"
+#endif
+
+#if defined(OS_CHROMEOS)
+#include "components/wifi_sync/wifi_credential_syncable_service.h"
+#include "components/wifi_sync/wifi_credential_syncable_service_factory.h"
 #endif
 
 using browser_sync::AutofillDataTypeController;
@@ -132,7 +137,7 @@ using sync_driver::UIDataTypeController;
 namespace {
 
 syncer::ModelTypeSet GetDisabledTypesFromCommandLine(
-    const CommandLine& command_line) {
+    const base::CommandLine& command_line) {
   syncer::ModelTypeSet disabled_types;
   std::string disabled_types_str =
       command_line.GetSwitchValueASCII(switches::kDisableSyncTypes);
@@ -141,11 +146,8 @@ syncer::ModelTypeSet GetDisabledTypesFromCommandLine(
 }
 
 syncer::ModelTypeSet GetEnabledTypesFromCommandLine(
-    const CommandLine& command_line) {
+    const base::CommandLine& command_line) {
   syncer::ModelTypeSet enabled_types;
-  if (command_line.HasSwitch(switches::kEnableSyncSyncedNotifications)) {
-    enabled_types.Put(syncer::SYNCED_NOTIFICATIONS);
-  }
   return enabled_types;
 }
 
@@ -153,14 +155,15 @@ syncer::ModelTypeSet GetEnabledTypesFromCommandLine(
 
 ProfileSyncComponentsFactoryImpl::ProfileSyncComponentsFactoryImpl(
     Profile* profile,
-    CommandLine* command_line,
+    base::CommandLine* command_line,
     const GURL& sync_service_url,
     OAuth2TokenService* token_service,
     net::URLRequestContextGetter* url_request_context_getter)
     : profile_(profile),
       command_line_(command_line),
       web_data_service_(WebDataServiceFactory::GetAutofillWebDataForProfile(
-          profile_, Profile::EXPLICIT_ACCESS)),
+          profile_,
+          Profile::EXPLICIT_ACCESS)),
       sync_service_url_(sync_service_url),
       token_service_(token_service),
       url_request_context_getter_(url_request_context_getter),
@@ -283,10 +286,15 @@ void ProfileSyncComponentsFactoryImpl::RegisterCommonDataTypes(
             this));
   }
 
-#if defined(ENABLE_MANAGED_USERS)
+#if defined(ENABLE_SUPERVISED_USERS)
   pss->RegisterDataTypeController(
       new SupervisedUserSyncDataTypeController(
           syncer::SUPERVISED_USER_SETTINGS,
+          this,
+          profile_));
+  pss->RegisterDataTypeController(
+      new SupervisedUserSyncDataTypeController(
+          syncer::SUPERVISED_USER_WHITELISTS,
           this,
           profile_));
 #endif
@@ -374,25 +382,6 @@ void ProfileSyncComponentsFactoryImpl::RegisterDesktopDataTypes(
   }
 #endif
 
-  // Synced Notifications are disabled by default.
-#if defined(ENABLE_EXTENSIONS) && defined(ENABLE_NOTIFICATIONS)
-  if (enabled_types.Has(syncer::SYNCED_NOTIFICATIONS)) {
-    pss->RegisterDataTypeController(
-        new ExtensionBackedDataTypeController(
-              syncer::SYNCED_NOTIFICATIONS,
-              "",  // TODO(dewittj): pass the extension hash here.
-              this,
-              profile_));
-
-    pss->RegisterDataTypeController(
-        new ExtensionBackedDataTypeController(
-              syncer::SYNCED_NOTIFICATION_APP_INFO,
-              "",  // TODO(dewittj): pass the extension hash here.
-              this,
-              profile_));
-  }
-#endif
-
 #if defined(OS_LINUX) || defined(OS_WIN) || defined(OS_CHROMEOS)
   // Dictionary sync is enabled by default.
   if (!disabled_types.Has(syncer::DICTIONARY)) {
@@ -405,7 +394,7 @@ void ProfileSyncComponentsFactoryImpl::RegisterDesktopDataTypes(
   }
 #endif
 
-#if defined(ENABLE_MANAGED_USERS)
+#if defined(ENABLE_SUPERVISED_USERS)
   pss->RegisterDataTypeController(
       new SupervisedUserSyncDataTypeController(
           syncer::SUPERVISED_USERS,
@@ -416,6 +405,18 @@ void ProfileSyncComponentsFactoryImpl::RegisterDesktopDataTypes(
           syncer::SUPERVISED_USER_SHARED_SETTINGS,
           this,
           profile_));
+#endif
+
+#if defined(OS_CHROMEOS)
+  if (command_line_->HasSwitch(switches::kEnableWifiCredentialSync) &&
+      !disabled_types.Has(syncer::WIFI_CREDENTIALS)) {
+    pss->RegisterDataTypeController(
+        new UIDataTypeController(
+            BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI),
+            base::Bind(&ChromeReportUnrecoverableError),
+            syncer::WIFI_CREDENTIALS,
+            this));
+  }
 #endif
 }
 
@@ -472,7 +473,7 @@ base::WeakPtr<syncer::SyncableService> ProfileSyncComponentsFactoryImpl::
       if (!web_data_service_.get())
         return base::WeakPtr<syncer::SyncableService>();
       if (type == syncer::AUTOFILL) {
-        return AutocompleteSyncableService::FromWebDataService(
+        return autofill::AutocompleteSyncableService::FromWebDataService(
             web_data_service_.get())->AsWeakPtr();
       } else {
         return autofill::AutofillProfileSyncableService::FromWebDataService(
@@ -506,15 +507,6 @@ base::WeakPtr<syncer::SyncableService> ProfileSyncComponentsFactoryImpl::
               profile_, Profile::EXPLICIT_ACCESS);
       return history ? history->AsWeakPtr() : base::WeakPtr<HistoryService>();
     }
-#if defined(ENABLE_EXTENSIONS)
-    case syncer::SYNCED_NOTIFICATIONS:
-    case syncer::SYNCED_NOTIFICATION_APP_INFO: {
-      return notifier::ChromeNotifierServiceFactory::GetForProfile(
-                 profile_, Profile::IMPLICIT_ACCESS)
-          ->GetSyncedNotificationsShim()
-          ->AsWeakPtr();
-    }
-#endif
 #if defined(ENABLE_SPELLCHECK)
     case syncer::DICTIONARY:
       return SpellcheckServiceFactory::GetForContext(profile_)->
@@ -528,7 +520,7 @@ base::WeakPtr<syncer::SyncableService> ProfileSyncComponentsFactoryImpl::
       return favicons ? favicons->AsWeakPtr()
                       : base::WeakPtr<syncer::SyncableService>();
     }
-#if defined(ENABLE_MANAGED_USERS)
+#if defined(ENABLE_SUPERVISED_USERS)
     case syncer::SUPERVISED_USER_SETTINGS:
       return SupervisedUserSettingsServiceFactory::GetForProfile(profile_)->
           AsWeakPtr();
@@ -538,6 +530,10 @@ base::WeakPtr<syncer::SyncableService> ProfileSyncComponentsFactoryImpl::
     case syncer::SUPERVISED_USER_SHARED_SETTINGS:
       return SupervisedUserSharedSettingsServiceFactory::GetForBrowserContext(
           profile_)->AsWeakPtr();
+    case syncer::SUPERVISED_USER_WHITELISTS:
+      return SupervisedUserServiceFactory::GetForProfile(profile_)
+          ->GetWhitelistService()
+          ->AsWeakPtr();
 #endif
     case syncer::ARTICLES: {
       dom_distiller::DomDistillerService* service =
@@ -562,6 +558,11 @@ base::WeakPtr<syncer::SyncableService> ProfileSyncComponentsFactoryImpl::
       return base::WeakPtr<syncer::SyncableService>();
 #endif
     }
+#if defined(OS_CHROMEOS)
+    case syncer::WIFI_CREDENTIALS:
+      return wifi_sync::WifiCredentialSyncableServiceFactory::
+          GetForBrowserContext(profile_)->AsWeakPtr();
+#endif
     default:
       // The following datatypes still need to be transitioned to the
       // syncer::SyncableService API:
@@ -613,6 +614,8 @@ scoped_ptr<syncer::AttachmentService>
 ProfileSyncComponentsFactoryImpl::CreateAttachmentService(
     const scoped_refptr<syncer::AttachmentStore>& attachment_store,
     const syncer::UserShare& user_share,
+    const std::string& store_birthday,
+    syncer::ModelType model_type,
     syncer::AttachmentService::Delegate* delegate) {
   scoped_ptr<syncer::AttachmentUploader> attachment_uploader;
   scoped_ptr<syncer::AttachmentDownloader> attachment_downloader;
@@ -630,22 +633,20 @@ ProfileSyncComponentsFactoryImpl::CreateAttachmentService(
     // AttachmentUploader and AttachmentDownloader instead of creating a new one
     // per AttachmentService (bug 369536).
     attachment_uploader.reset(new syncer::AttachmentUploaderImpl(
-        sync_service_url_,
-        url_request_context_getter_,
+        sync_service_url_, url_request_context_getter_,
         user_share.sync_credentials.email,
-        user_share.sync_credentials.scope_set,
-        token_service_provider));
+        user_share.sync_credentials.scope_set, token_service_provider,
+        store_birthday, model_type));
 
     token_service_provider = new TokenServiceProvider(
         content::BrowserThread::GetMessageLoopProxyForThread(
             content::BrowserThread::UI),
         token_service_);
     attachment_downloader = syncer::AttachmentDownloader::Create(
-        sync_service_url_,
-        url_request_context_getter_,
+        sync_service_url_, url_request_context_getter_,
         user_share.sync_credentials.email,
-        user_share.sync_credentials.scope_set,
-        token_service_provider);
+        user_share.sync_credentials.scope_set, token_service_provider,
+        store_birthday, model_type);
   }
 
   // It is important that the initial backoff delay is relatively large.  For

@@ -20,7 +20,6 @@
 #include "chrome/browser/history/history_database.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/history/in_memory_url_index_types.h"
 #include "chrome/browser/history/scored_history_match.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
@@ -30,6 +29,7 @@
 #include "chrome/common/url_constants.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
 #include "components/history/core/browser/history_types.h"
+#include "components/history/core/browser/in_memory_url_index_types.h"
 #include "components/metrics/proto/omnibox_input_type.pb.h"
 #include "components/omnibox/autocomplete_match.h"
 #include "components/omnibox/autocomplete_provider_listener.h"
@@ -481,7 +481,8 @@ HistoryURLProvider::HistoryURLProvider(AutocompleteProviderListener* listener,
 }
 
 void HistoryURLProvider::Start(const AutocompleteInput& input,
-                               bool minimal_changes) {
+                               bool minimal_changes,
+                               bool called_due_to_focus) {
   // NOTE: We could try hard to do less work in the |minimal_changes| case
   // here; some clever caching would let us reuse the raw matches from the
   // history DB without re-querying.  However, we'd still have to go back to
@@ -496,7 +497,8 @@ void HistoryURLProvider::Start(const AutocompleteInput& input,
 
   matches_.clear();
 
-  if ((input.type() == metrics::OmniboxInputType::INVALID) ||
+  if (called_due_to_focus ||
+      (input.type() == metrics::OmniboxInputType::INVALID) ||
       (input.type() == metrics::OmniboxInputType::FORCED_QUERY))
     return;
 

@@ -110,7 +110,8 @@ class CONTENT_EXPORT RenderViewHostDelegate {
                            const PageState& state) {}
 
   // The destination URL has changed should be updated.
-  virtual void UpdateTargetURL(const GURL& url) {}
+  virtual void UpdateTargetURL(RenderViewHost* render_view_host,
+                               const GURL& url) {}
 
   // The page is trying to close the RenderView's representation in the client.
   virtual void Close(RenderViewHost* render_view_host) {}
@@ -279,6 +280,13 @@ class CONTENT_EXPORT RenderViewHostDelegate {
   // TODO(ajwong): Remove once the main frame RenderFrameHost is no longer
   // created by the RenderViewHost.
   virtual FrameTree* GetFrameTree();
+
+  // Optional state storage for if the Virtual Keyboard has been requested by
+  // this page or not. If it has, this can be used to suppress things like the
+  // link disambiguation dialog, which doesn't interact well with the virtual
+  // keyboard.
+  virtual void SetIsVirtualKeyboardRequested(bool requested) {}
+  virtual bool IsVirtualKeyboardRequested();
 
  protected:
   virtual ~RenderViewHostDelegate() {}

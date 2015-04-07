@@ -31,7 +31,7 @@ class AudioRecorderImpl final
       public media::AudioInputStream::AudioInputCallback,
       public media::AudioConverter::InputCallback {
  public:
-  typedef base::Callback<void(const std::string&)> RecordedSamplesCallback;
+  using RecordedSamplesCallback = base::Callback<void(const std::string&)>;
 
   AudioRecorderImpl();
 
@@ -40,7 +40,6 @@ class AudioRecorderImpl final
   void Record() override;
   void Stop() override;
   void Finalize() override;
-  bool IsRecording() override;
 
   // Takes ownership of the stream.
   void set_input_stream_for_testing(

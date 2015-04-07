@@ -38,7 +38,8 @@ from chromite.cbuildbot import archive_lib
 from chromite.cbuildbot import metadata_lib
 from chromite.cbuildbot import constants
 from chromite.cbuildbot import manifest_version
-from chromite.cbuildbot import validation_pool
+from chromite.cbuildbot import tree_status
+from chromite.lib import cidb
 from chromite.lib import portage_util
 
 
@@ -159,8 +160,11 @@ class RunAttributes(object):
       'breakpad_symbols_generated', # Set by DebugSymbolsStage.
       'debug_tarball_generated',    # Set by DebugSymbolsStage.
       'images_generated',           # Set by BuildImageStage.
+      'payloads_generated',         # Set by UploadHWTestArtifacts.
+      'delta_payloads_generated',   # Set by UploadHWTestArtifacts.
       'instruction_urls_per_channel', # Set by ArchiveStage
       'success',                    # Set by cbuildbot.py:Builder
+      'packages_under_test',        # Set by BuildPackagesStage.
   ))
 
   # Attributes that need to be set by stages that can run in parallel
@@ -187,6 +191,10 @@ class RunAttributes(object):
   )
 
   def __init__(self, multiprocess_manager):
+    # The __slots__ logic above confuses pylint.
+    # https://bitbucket.org/logilab/pylint/issue/380/
+    # pylint: disable=assigning-non-slot
+
     # Create queues for all non-board-specific parallel attributes now.
     # Parallel board attributes must wait for the board to be registered.
     self._manager = multiprocess_manager
@@ -606,6 +614,10 @@ class _BuilderRunBase(object):
     if self.options.remote_trybot:
       self.debug = self.options.debug_forced
 
+    # The __slots__ logic above confuses pylint.
+    # https://bitbucket.org/logilab/pylint/issue/380/
+    # pylint: disable=assigning-non-slot
+
     # Certain run attributes have sensible defaults which can be set here.
     # This allows all code to safely assume that the run attribute exists.
     attrs.chrome_version = None
@@ -642,6 +654,16 @@ class _BuilderRunBase(object):
     """Create a BoardRunAttributes object for this run and given |board|."""
     return BoardRunAttributes(self.attrs, board, self.config.name)
 
+  def GetWaterfall(self):
+    """Gets the waterfall of the current build."""
+    # Metadata dictionary may not have been written at this time (it
+    # should be written in the BuildStartStage), fall back to get the
+    # environment variable in that case. Assume we are on the trybot
+    # waterfall no waterfall can be found.
+    return (self.attrs.metadata.GetDict().get('buildbot-master-name') or
+            os.environ.get('BUILDBOT_MASTERNAME') or
+            constants.WATERFALL_TRYBOT)
+
   def ConstructDashboardURL(self, stage=None):
     """Return the dashboard URL
 
@@ -653,8 +675,8 @@ class _BuilderRunBase(object):
     Returns:
       The fully formed URL
     """
-    return validation_pool.ValidationPool.ConstructDashboardURL(
-        self.config.overlays, self.options.remote_trybot,
+    return tree_status.ConstructDashboardURL(
+        self.GetWaterfall(),
         os.environ.get('BUILDBOT_BUILDERNAME', self.config.name),
         self.options.buildnumber, stage=stage)
 
@@ -665,6 +687,27 @@ class _BuilderRunBase(object):
   def ShouldUploadPrebuilts(self):
     """Return True if this run should upload prebuilts."""
     return self.options.prebuilts and self.config.prebuilts
+
+  def GetCIDBHandle(self):
+    """Get the build_id and cidb handle, if available.
+
+    Returns:
+      A (build_id, CIDBConnection) tuple if cidb is set up and a build_id is
+      known in metadata. Otherwise, (None, None).
+    """
+    try:
+      build_id = self.attrs.metadata.GetValue('build_id')
+    except KeyError:
+      return (None, None)
+
+    if not cidb.CIDBConnectionFactory.IsCIDBSetup():
+      return (None, None)
+
+    cidb_handle = cidb.CIDBConnectionFactory.GetCIDBConnectionForBuilder()
+    if cidb_handle:
+      return (build_id, cidb_handle)
+    else:
+      return (None, None)
 
   def ShouldReexecAfterSync(self):
     """Return True if this run should re-exec itself after sync stage."""

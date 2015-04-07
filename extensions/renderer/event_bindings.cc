@@ -13,6 +13,7 @@
 #include "base/bind.h"
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
+#include "components/crx_file/id_util.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/render_view.h"
 #include "content/public/renderer/v8_value_converter.h"
@@ -52,6 +53,31 @@ base::LazyInstance<std::map<std::string, FilteredEventListenerCounts> >
     g_filtered_listener_counts = LAZY_INSTANCE_INITIALIZER;
 
 base::LazyInstance<EventFilter> g_event_filter = LAZY_INSTANCE_INITIALIZER;
+
+std::string GetKeyForScriptContext(ScriptContext* script_context) {
+  const std::string& extension_id = script_context->GetExtensionID();
+  CHECK(crx_file::id_util::IdIsValid(extension_id) ||
+        script_context->GetURL().is_valid());
+  return crx_file::id_util::IdIsValid(extension_id)
+             ? extension_id
+             : script_context->GetURL().spec();
+}
+
+// Increments the number of event-listeners for the given |event_name| and
+// ScriptContext. Returns the count after the increment.
+int IncrementEventListenerCount(ScriptContext* script_context,
+                                const std::string& event_name) {
+  return ++g_listener_counts
+               .Get()[GetKeyForScriptContext(script_context)][event_name];
+}
+
+// Decrements the number of event-listeners for the given |event_name| and
+// ScriptContext. Returns the count after the increment.
+int DecrementEventListenerCount(ScriptContext* script_context,
+                                const std::string& event_name) {
+  return --g_listener_counts
+               .Get()[GetKeyForScriptContext(script_context)][event_name];
+}
 
 bool IsLazyBackgroundPage(content::RenderView* render_view,
                           const Extension* extension) {
@@ -142,14 +168,13 @@ void EventBindings::AttachEvent(
   CHECK_EQ(1, args.Length());
   CHECK(args[0]->IsString());
 
-  std::string event_name = *v8::String::Utf8Value(args[0]->ToString());
+  std::string event_name = *v8::String::Utf8Value(args[0]);
 
   if (!dispatcher_->CheckContextAccessToExtensionAPI(event_name, context()))
     return;
 
-  std::string extension_id = context()->GetExtensionID();
-  EventListenerCounts& listener_counts = g_listener_counts.Get()[extension_id];
-  if (++listener_counts[event_name] == 1) {
+  const std::string& extension_id = context()->GetExtensionID();
+  if (IncrementEventListenerCount(context(), event_name) == 1) {
     content::RenderThread::Get()->Send(new ExtensionHostMsg_AddListener(
         extension_id, context()->GetURL(), event_name));
   }
@@ -173,10 +198,8 @@ void EventBindings::DetachEvent(
   std::string event_name = *v8::String::Utf8Value(args[0]);
   bool is_manual = args[1]->BooleanValue();
 
-  std::string extension_id = context()->GetExtensionID();
-  EventListenerCounts& listener_counts = g_listener_counts.Get()[extension_id];
-
-  if (--listener_counts[event_name] == 0) {
+  const std::string& extension_id = context()->GetExtensionID();
+  if (DecrementEventListenerCount(context(), event_name) == 0) {
     content::RenderThread::Get()->Send(new ExtensionHostMsg_RemoveListener(
         extension_id, context()->GetURL(), event_name));
   }
@@ -216,8 +239,8 @@ void EventBindings::AttachFilteredEvent(
       content::V8ValueConverter::create());
 
   base::DictionaryValue* filter_dict = NULL;
-  base::Value* filter_value =
-      converter->FromV8Value(args[1]->ToObject(), context()->v8_context());
+  base::Value* filter_value = converter->FromV8Value(
+      v8::Local<v8::Object>::Cast(args[1]), context()->v8_context());
   if (!filter_value) {
     args.GetReturnValue().Set(static_cast<int32_t>(-1));
     return;
@@ -276,8 +299,9 @@ void EventBindings::MatchAgainstEventFilter(
   v8::Isolate* isolate = args.GetIsolate();
   typedef std::set<EventFilter::MatcherID> MatcherIDs;
   EventFilter& event_filter = g_event_filter.Get();
-  std::string event_name = *v8::String::Utf8Value(args[0]->ToString());
-  EventFilteringInfo info = ParseFromObject(args[1]->ToObject(), isolate);
+  std::string event_name = *v8::String::Utf8Value(args[0]);
+  EventFilteringInfo info =
+      ParseFromObject(args[1]->ToObject(isolate), isolate);
   // Only match events routed to this context's RenderView or ones that don't
   // have a routingId in their filter.
   MatcherIDs matched_event_filters = event_filter.MatchEvent(

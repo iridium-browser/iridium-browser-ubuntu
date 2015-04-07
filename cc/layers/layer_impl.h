@@ -208,8 +208,11 @@ class CC_EXPORT LayerImpl : public LayerAnimationValueObserver,
   virtual RenderPassId FirstContributingRenderPassId() const;
   virtual RenderPassId NextContributingRenderPassId(RenderPassId id) const;
 
-  virtual void UpdateTiles(const Occlusion& occlusion_in_layer_space,
-                           bool resourceless_software_draw) {}
+  // Updates the layer's tiles. This should return true if meaningful work was
+  // done. That is, if an early-out was hit and as a result the internal state
+  // of tiles didn't change, this function should return false.
+  virtual bool UpdateTiles(const Occlusion& occlusion_in_layer_space,
+                           bool resourceless_software_draw);
   virtual void NotifyTileStateChanged(const Tile* tile) {}
 
   virtual ScrollbarLayerImplBase* ToScrollbarLayer();
@@ -221,9 +224,6 @@ class CC_EXPORT LayerImpl : public LayerAnimationValueObserver,
   int NumDescendantsThatDrawContent() const;
   void SetHideLayerAndSubtree(bool hide);
   bool hide_layer_and_subtree() const { return hide_layer_and_subtree_; }
-
-  bool force_render_surface() const { return force_render_surface_; }
-  void SetForceRenderSurface(bool force) { force_render_surface_ = force; }
 
   void SetTransformOrigin(const gfx::Point3F& transform_origin);
   gfx::Point3F transform_origin() const { return transform_origin_; }
@@ -303,9 +303,10 @@ class CC_EXPORT LayerImpl : public LayerAnimationValueObserver,
   // These invalidate the host's render surface layer list.  The caller
   // is responsible for calling set_needs_update_draw_properties on the tree
   // so that its list can be recreated.
-  void CreateRenderSurface();
-  void ClearRenderSurface();
   void ClearRenderSurfaceLayerList();
+  void SetHasRenderSurface(bool has_render_surface);
+
+  RenderSurfaceImpl* render_surface() const { return render_surface_.get(); }
 
   DrawProperties<LayerImpl>& draw_properties() {
     return draw_properties_;
@@ -323,6 +324,9 @@ class CC_EXPORT LayerImpl : public LayerAnimationValueObserver,
     return draw_properties_.screen_space_transform;
   }
   float draw_opacity() const { return draw_properties_.opacity; }
+  SkXfermode::Mode draw_blend_mode() const {
+    return draw_properties_.blend_mode;
+  }
   bool draw_opacity_is_animating() const {
     return draw_properties_.opacity_is_animating;
   }
@@ -354,9 +358,7 @@ class CC_EXPORT LayerImpl : public LayerAnimationValueObserver,
            draw_properties_.render_target->render_surface());
     return draw_properties_.render_target;
   }
-  RenderSurfaceImpl* render_surface() const {
-    return draw_properties_.render_surface.get();
-  }
+
   int num_unclipped_descendants() const {
     return draw_properties_.num_unclipped_descendants;
   }
@@ -644,7 +646,6 @@ class CC_EXPORT LayerImpl : public LayerAnimationValueObserver,
   bool draw_checkerboard_for_missing_tiles_ : 1;
   bool draws_content_ : 1;
   bool hide_layer_and_subtree_ : 1;
-  bool force_render_surface_ : 1;
 
   // Cache transform_'s invertibility.
   bool transform_is_invertible_ : 1;
@@ -718,7 +719,7 @@ class CC_EXPORT LayerImpl : public LayerAnimationValueObserver,
   DrawProperties<LayerImpl> draw_properties_;
 
   scoped_refptr<base::debug::ConvertableToTraceFormat> debug_info_;
-
+  scoped_ptr<RenderSurfaceImpl> render_surface_;
   DISALLOW_COPY_AND_ASSIGN(LayerImpl);
 };
 

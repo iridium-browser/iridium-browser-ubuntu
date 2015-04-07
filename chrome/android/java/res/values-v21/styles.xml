@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright 2014 The Chromium Authors. All rights reserved.
+     Use of this source code is governed by a BSD-style license that can be
+     found in the LICENSE file. -->
+
+<resources>
+    <!-- Preferences -->
+    <style name="PreferencesTheme" parent="ThemeWithActionBar">
+        <item name="android:textColorLink">@color/pref_accent_color</item>
+        <item name="android:buttonStyle">@style/PreferenceButtonStyle</item>
+        <item name="android:alertDialogTheme">@style/PreferencesDialogTheme</item>
+        <item name="android:colorButtonNormal">@color/btn_default_preferences</item>
+        <item name="android:editTextBackground">@drawable/abc_edit_text_material</item>
+        <item name="android:editTextStyle">@style/PreferenceEditTextStyle</item>
+    </style>
+    <style name="PreferencesDialogTheme" parent="@android:style/Theme.Material.Light.Dialog.Alert">
+        <item name="android:colorAccent">@color/pref_accent_color</item>
+    </style>
+    <style name="PreferenceButtonStyle" parent="@android:style/Widget.Material.Light.Button">
+        <item name="android:textColor">#fff</item>
+    </style>
+    <style name="PreferenceCategoryWithButtonStyle">
+        <item name="android:paddingStart">?android:attr/listPreferredItemPaddingStart</item>
+        <item name="android:paddingEnd">4dp</item>
+    </style>
+    <style name="PreferenceCategoryTextStyle">
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:textColor">@color/pref_accent_color</item>
+        <item name="android:textSize">14sp</item>
+    </style>
+    <style name="PreferenceEditTextStyle" parent="Widget.AppCompat.EditText">
+        <item name="android:backgroundTint">@color/edit_text_tint</item>
+    </style>
+    <style name="PreferenceTitle">
+        <item name="android:ellipsize">end</item>
+        <item name="android:singleLine">true</item>
+        <item name="android:textAppearance">?android:attr/textAppearanceListItem</item>
+    </style>
+    <style name="PreferenceSummary">
+        <item name="android:textAppearance">?android:attr/textAppearanceListItemSecondary</item>
+        <item name="android:textColor">?android:attr/textColorSecondary</item>
+    </style>
+    <style name="PreferenceLayoutBase">
+        <item name="android:background">?android:attr/activatedBackgroundIndicator</item>
+        <item name="android:minHeight">?android:attr/listPreferredItemHeightSmall</item>
+        <item name="android:paddingTop">16dp</item>
+        <item name="android:paddingBottom">16dp</item>
+        <item name="android:paddingStart">?android:attr/listPreferredItemPaddingStart</item>
+        <item name="android:paddingEnd">?android:attr/listPreferredItemPaddingEnd</item>
+    </style>
+    <style name="PreferenceLayout" parent="PreferenceLayoutBase" />
+
+</resources>

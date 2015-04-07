@@ -40,7 +40,7 @@ GIT_REVISIONS = {
         'upstream-base': '237df3fa4a1d939e6fd1af0c3e5029a25a137310',
         },
     'gcc': {
-        'rev': 'daf66f6da8d77ceb3cc75e63f3a7156abb09d564',
+        'rev': 'b23dd79950a5453d3b3b5a0030d7a1894cafcffe',
         'upstream-branch': 'upstream/gcc-4_9-branch',
         'upstream-name': 'gcc-4.9.2',
          # Upstream tag gcc-4_9_2-release:
@@ -246,8 +246,10 @@ GDB_INJECT_HOSTS = [
   ]
 
 GDB_INJECT_PACKAGES = [
-  ('nacl_x86_newlib', ['naclsdk.tgz']),
-  ('nacl_x86_glibc', ['toolchain.tar.bz2']),
+  ('nacl_x86_newlib', ['core_sdk.tgz', 'naclsdk.tgz']),
+  ('nacl_x86_glibc', ['core_sdk.tar.bz2', 'toolchain.tar.bz2']),
+  ('nacl_x86_newlib_raw', ['naclsdk.tgz']),
+  ('nacl_x86_glibc_raw', ['toolchain.tar.bz2']),
   ]
 
 # These are extra arguments to pass gcc's configure that vary by target.
@@ -375,7 +377,7 @@ def InstallDocFiles(subdir, files):
   return commands
 
 
-def NewlibLibcScript(arch):
+def NewlibLibcScript(arch, elfclass_x86_64='elf32'):
   template = """/*
  * This is a linker script that gets installed as libc.a for the
  * newlib-based NaCl toolchain.  It brings in the constituent
@@ -393,7 +395,7 @@ GROUP ( libnacl.a libcrt_common.a )
   elif arch == 'i686':
     format_list = ['elf32-i386-nacl']
   elif arch == 'x86_64':
-    format_list = ['elf32-x86_64-nacl']
+    format_list = ['%s-x86-64-nacl' % elfclass_x86_64]
   else:
     raise Exception('TODO(mcgrathr): OUTPUT_FORMAT for %s' % arch)
   return template % ', '.join(['"' + fmt + '"' for fmt in format_list])
@@ -605,6 +607,54 @@ HOST_GCC_LIBS_DEPS = ['gmp', 'mpfr', 'mpc', 'isl', 'cloog']
 
 def HostGccLibsDeps(host):
   return [ForHost(package, host) for package in HOST_GCC_LIBS_DEPS]
+
+
+def SDKLibs(host, target):
+  def H(component_name):
+    return ForHost(component_name, host)
+  components = ['newlib_%s' % target,
+                'gcc_libs_%s' % target,
+                H('binutils_%s' % target),
+                H('gcc_%s' % target),
+                ]
+  sdk_compiler = {
+    H('sdk_compiler_%s' % target): {
+        'type': 'work',
+        'dependencies': components,
+        'commands': [command.CopyRecursive('%(' + item + ')s', '%(output)s')
+                     for item in components],
+    },
+  }
+  sdk_libs = {
+    'sdk_libs_%s' % target: {
+        'type': 'build',
+        'dependencies': [H('sdk_compiler_%s' % target)],
+        'inputs': {
+            'src_untrusted': os.path.join(NACL_DIR, 'src', 'untrusted'),
+            'src_include': os.path.join(NACL_DIR, 'src', 'include'),
+            'scons.py': os.path.join(NACL_DIR, 'scons.py'),
+            'site_scons': os.path.join(NACL_DIR, 'site_scons'),
+            'prep_nacl_sdk':
+                os.path.join(NACL_DIR, 'build', 'prep_nacl_sdk.py'),
+        },
+        'commands': [
+          command.Command(
+              [sys.executable, '%(scons.py)s',
+               '--verbose', 'MODE=nacl', '-j%(cores)s', 'naclsdk_validate=0',
+               'platform=%s' % target,
+               'nacl_newlib_dir=%(abs_' + H('sdk_compiler_%s' % target) + ')s',
+               'DESTINATION_ROOT=%(work_dir)s',
+               'includedir=' + command.path.join('%(output)s',
+                                                 target + '-nacl', 'include'),
+               'libdir=' + command.path.join('%(output)s',
+                                             target + '-nacl', 'lib'),
+               'install'],
+              cwd=NACL_DIR),
+        ],
+    },
+  }
+
+  return dict(sdk_compiler.items() + sdk_libs.items())
 
 
 def ConfigureCommand(source_component):
@@ -949,6 +999,7 @@ def GetPackageTargets():
       # These packages are added inside of TargetLibs(host, target).
       newlib_package = 'newlib_%s' % target_arch
       gcc_lib_package = 'gcc_libs_%s' % target_arch
+      sdk_lib_packages = ['sdk_libs_%s' % target_arch]
       shared_packages = [newlib_package, gcc_lib_package]
 
       # Each package target contains arm binutils and gcc.
@@ -961,7 +1012,8 @@ def GetPackageTargets():
 
       # Create a list of packages for a target.
       platform_packages = [binutils_package, gcc_package, gdb_package]
-      combined_packages = shared_packages + platform_packages
+      raw_packages = shared_packages + platform_packages
+      all_packages = raw_packages + sdk_lib_packages
 
       os_name = pynacl.platform.GetOS(host_target.os)
       if host_target.differ3264:
@@ -971,9 +1023,12 @@ def GetPackageTargets():
       package_target = '%s_%s' % (os_name, arch_name)
       package_name = '%snacl_%s_newlib' % (package_prefix,
                                            pynacl.platform.GetArch(target_arch))
+      raw_package_name = package_name + '_raw'
 
+      # Toolchains by default are "raw" unless they include the Core SDK
       package_target_dict = package_targets.setdefault(package_target, {})
-      package_target_dict.setdefault(package_name, []).extend(combined_packages)
+      package_target_dict.setdefault(raw_package_name, []).extend(raw_packages)
+      package_target_dict.setdefault(package_name, []).extend(all_packages)
 
   # GDB is a special and shared, we will inject it into various other packages.
   for platform, arch in GDB_INJECT_HOSTS:
@@ -991,12 +1046,14 @@ def GetPackageTargets():
 
   return dict(package_targets)
 
+
 def CollectPackagesForHost(host, targets):
   packages = HostGccLibs(host).copy()
   for target in targets:
     packages.update(HostTools(host, target))
     if BuildTargetLibsOn(host):
       packages.update(TargetLibs(host, target))
+      packages.update(SDKLibs(host, target))
   return packages
 
 

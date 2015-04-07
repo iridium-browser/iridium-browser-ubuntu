@@ -74,12 +74,12 @@ static void updatePathFromLineElement(SVGElement* element, Path& path)
 
 static void updatePathFromPathElement(SVGElement* element, Path& path)
 {
-    buildPathFromByteStream(toSVGPathElement(element)->pathByteStream(), path);
+    buildPathFromByteStream(*toSVGPathElement(element)->pathByteStream(), path);
 }
 
 static void updatePathFromPolylineElement(SVGElement* element, Path& path)
 {
-    RefPtr<SVGPointList> points = toSVGPolyElement(element)->points()->currentValue();
+    RefPtrWillBeRawPtr<SVGPointList> points = toSVGPolyElement(element)->points()->currentValue();
     if (points->isEmpty())
         return;
 

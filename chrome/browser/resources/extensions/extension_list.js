@@ -47,11 +47,13 @@
  *            order: number,
  *            packagedApp: boolean,
  *            path: (string|undefined),
+ *            policyText: (string|undefined),
  *            prettifiedPath: (string|undefined),
  *            recommendedInstall: boolean,
  *            runtimeErrors: (Array.<RuntimeError>|undefined),
  *            suspiciousInstall: boolean,
  *            terminated: boolean,
+ *            updateRequiredByPolicy: boolean,
  *            version: string,
  *            views: Array.<{renderViewId: number, renderProcessId: number,
  *                path: string, incognito: boolean,
@@ -101,7 +103,6 @@ cr.define('options', function() {
      */
     optionsShown_: false,
 
-    /** @override */
     decorate: function() {
       this.textContent = '';
 
@@ -169,15 +170,19 @@ cr.define('options', function() {
       if (!extension.enabled || extension.terminated)
         node.classList.add('inactive-extension');
 
-      if (extension.managedInstall ||
-          extension.dependentExtensions.length > 0) {
-        node.classList.add('may-not-modify');
-        node.classList.add('may-not-remove');
+      var classes = [];
+      if (extension.managedInstall) {
+        classes.push('policy-controlled', 'may-not-modify');
+      } else if (extension.dependentExtensions.length > 0) {
+        classes.push('may-not-remove', 'may-not-modify');
       } else if (extension.recommendedInstall) {
-        node.classList.add('may-not-remove');
-      } else if (extension.suspiciousInstall || extension.corruptInstall) {
-        node.classList.add('may-not-modify');
+        classes.push('may-not-remove');
+      } else if (extension.suspiciousInstall ||
+                 extension.corruptInstall ||
+                 extension.updateRequiredByPolicy) {
+        classes.push('may-not-modify');
       }
+      node.classList.add.apply(node.classList, classes);
 
       var idToHighlight = this.getIdQueryParam_();
       if (node.id == idToHighlight)
@@ -356,8 +361,17 @@ cr.define('options', function() {
         var enableCheckboxDisabled = extension.managedInstall ||
                                      extension.suspiciousInstall ||
                                      extension.corruptInstall ||
+                                     extension.updateRequiredByPolicy ||
                                      extension.dependentExtensions.length > 0;
         enable.querySelector('input').disabled = enableCheckboxDisabled;
+
+        if (extension.managedInstall) {
+          var indicator = new cr.ui.ControlledIndicator();
+          indicator.classList.add('controlled-extension-indicator');
+          indicator.setAttribute('controlled-by', 'policy');
+          indicator.setAttribute('textpolicy', extension.policyText || '');
+          node.querySelector('.enable-controls').appendChild(indicator);
+        }
 
         if (!enableCheckboxDisabled) {
           enable.addEventListener('click', function(e) {
@@ -424,7 +438,18 @@ cr.define('options', function() {
         }
       }
 
+      // Then the 'An update required by enterprise policy' message. Note that
+      // a force-installed extension might be disabled due to being outdated
+      // as well.
+      if (extension.updateRequiredByPolicy) {
+        node.querySelector('.update-required-message').hidden = false;
+        // We would like to hide managed installed message since this
+        // extension is disabled.
+        node.querySelector('.managed-message').hidden = true;
+      }
+
       if (extension.dependentExtensions.length > 0) {
+        node.classList.add('developer-extras');
         var dependentMessage =
             node.querySelector('.dependent-extensions-message');
         dependentMessage.hidden = false;

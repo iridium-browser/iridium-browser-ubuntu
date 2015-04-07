@@ -31,6 +31,7 @@
 #include "core/rendering/style/BorderEdge.h"
 #include "core/rendering/style/ContentData.h"
 #include "core/rendering/style/DataEquivalency.h"
+#include "core/rendering/style/PathStyleMotionPath.h"
 #include "core/rendering/style/QuotesData.h"
 #include "core/rendering/style/RenderStyleConstants.h"
 #include "core/rendering/style/ShadowList.h"
@@ -50,7 +51,7 @@ struct SameSizeAsBorderValue {
     unsigned m_width;
 };
 
-COMPILE_ASSERT(sizeof(BorderValue) == sizeof(SameSizeAsBorderValue), BorderValue_should_not_grow);
+static_assert(sizeof(BorderValue) == sizeof(SameSizeAsBorderValue), "BorderValue should stay small");
 
 struct SameSizeAsRenderStyle : public RefCounted<SameSizeAsRenderStyle> {
     void* dataRefs[7];
@@ -66,7 +67,7 @@ struct SameSizeAsRenderStyle : public RefCounted<SameSizeAsRenderStyle> {
     } noninherited_flags;
 };
 
-COMPILE_ASSERT(sizeof(RenderStyle) == sizeof(SameSizeAsRenderStyle), RenderStyle_should_stay_small);
+static_assert(sizeof(RenderStyle) == sizeof(SameSizeAsRenderStyle), "RenderStyle should stay small");
 
 inline RenderStyle* defaultStyle()
 {
@@ -109,8 +110,8 @@ ALWAYS_INLINE RenderStyle::RenderStyle()
     , m_svgStyle(defaultStyle()->m_svgStyle)
 {
     setBitDefaults(); // Would it be faster to copy this from the default style?
-    COMPILE_ASSERT((sizeof(InheritedFlags) <= 8), InheritedFlags_does_not_grow);
-    COMPILE_ASSERT((sizeof(NonInheritedFlags) <= 8), NonInheritedFlags_does_not_grow);
+    static_assert((sizeof(InheritedFlags) <= 8), "InheritedFlags should not grow");
+    static_assert((sizeof(NonInheritedFlags) <= 8), "NonInheritedFlags should not grow");
 }
 
 ALWAYS_INLINE RenderStyle::RenderStyle(DefaultStyleTag)
@@ -186,13 +187,13 @@ StyleRecalcChange RenderStyle::stylePropagationDiff(const RenderStyle* oldStyle,
         || oldStyle->alignItems() != newStyle->alignItems())
         return Reattach;
 
-    if (*oldStyle == *newStyle)
-        return diffPseudoStyles(oldStyle, newStyle);
-
     if (oldStyle->inheritedNotEqual(newStyle)
         || oldStyle->hasExplicitlyInheritedProperties()
         || newStyle->hasExplicitlyInheritedProperties())
         return Inherit;
+
+    if (*oldStyle == *newStyle)
+        return diffPseudoStyles(oldStyle, newStyle);
 
     return NoInherit;
 }
@@ -339,9 +340,10 @@ void RenderStyle::removeCachedPseudoStyle(PseudoId pid)
 bool RenderStyle::inheritedNotEqual(const RenderStyle* other) const
 {
     return inherited_flags != other->inherited_flags
-           || inherited != other->inherited
-           || m_svgStyle->inheritedNotEqual(other->m_svgStyle.get())
-           || rareInheritedData != other->rareInheritedData;
+        || inherited != other->inherited
+        || font().loadingCustomFonts() != other->font().loadingCustomFonts()
+        || m_svgStyle->inheritedNotEqual(other->m_svgStyle.get())
+        || rareInheritedData != other->rareInheritedData;
 }
 
 bool RenderStyle::inheritedDataShared(const RenderStyle* other) const
@@ -351,35 +353,6 @@ bool RenderStyle::inheritedDataShared(const RenderStyle* other) const
         && inherited.get() == other->inherited.get()
         && m_svgStyle.get() == other->m_svgStyle.get()
         && rareInheritedData.get() == other->rareInheritedData.get();
-}
-
-static bool positionedObjectMovedOnly(const LengthBox& a, const LengthBox& b, const Length& width)
-{
-    // If any unit types are different, then we can't guarantee
-    // that this was just a movement.
-    if (a.left().type() != b.left().type()
-        || a.right().type() != b.right().type()
-        || a.top().type() != b.top().type()
-        || a.bottom().type() != b.bottom().type())
-        return false;
-
-    // Only one unit can be non-auto in the horizontal direction and
-    // in the vertical direction.  Otherwise the adjustment of values
-    // is changing the size of the box.
-    if (!a.left().isIntrinsicOrAuto() && !a.right().isIntrinsicOrAuto())
-        return false;
-    if (!a.top().isIntrinsicOrAuto() && !a.bottom().isIntrinsicOrAuto())
-        return false;
-    // If our width is auto and left or right is specified and changed then this
-    // is not just a movement - we need to resize to our container.
-    if (width.isIntrinsicOrAuto()
-        && ((!a.left().isIntrinsicOrAuto() && a.left() != b.left())
-            || (!a.right().isIntrinsicOrAuto() && a.right() != b.right())))
-        return false;
-
-    // One of the units is fixed or percent in both directions and stayed
-    // that way in the new style.  Therefore all we are doing is moving.
-    return true;
 }
 
 StyleDifference RenderStyle::visualInvalidationDiff(const RenderStyle& other) const
@@ -410,10 +383,7 @@ StyleDifference RenderStyle::visualInvalidationDiff(const RenderStyle& other) co
 
     if (!diff.needsFullLayout() && position() != StaticPosition && surround->offset != other.surround->offset) {
         // Optimize for the case where a positioned layer is moving but not changing size.
-        if (positionedObjectMovedOnly(surround->offset, other.surround->offset, m_box->width()))
-            diff.setNeedsPositionedMovementLayout();
-        else
-            diff.setNeedsFullLayout();
+        diff.setNeedsPositionedMovementLayout();
     }
 
     if (diffNeedsPaintInvalidationLayer(other))
@@ -538,6 +508,9 @@ bool RenderStyle::diffNeedsFullLayoutAndPaintInvalidation(const RenderStyle& oth
     }
 
     if (inherited->textAutosizingMultiplier != other.inherited->textAutosizingMultiplier)
+        return true;
+
+    if (inherited->font.loadingCustomFonts() != other.inherited->font.loadingCustomFonts())
         return true;
 
     if (inherited.get() != other.inherited.get()) {
@@ -834,46 +807,6 @@ void RenderStyle::setContent(QuoteType quote, bool add)
     rareNonInheritedData.access()->m_content = ContentData::create(quote);
 }
 
-WebBlendMode RenderStyle::blendMode() const
-{
-    if (RuntimeEnabledFeatures::cssCompositingEnabled())
-        return static_cast<WebBlendMode>(rareNonInheritedData->m_effectiveBlendMode);
-    return WebBlendModeNormal;
-}
-
-void RenderStyle::setBlendMode(WebBlendMode v)
-{
-    if (RuntimeEnabledFeatures::cssCompositingEnabled())
-        rareNonInheritedData.access()->m_effectiveBlendMode = v;
-}
-
-bool RenderStyle::hasBlendMode() const
-{
-    if (RuntimeEnabledFeatures::cssCompositingEnabled())
-        return static_cast<WebBlendMode>(rareNonInheritedData->m_effectiveBlendMode) != WebBlendModeNormal;
-    return false;
-}
-
-EIsolation RenderStyle::isolation() const
-{
-    if (RuntimeEnabledFeatures::cssCompositingEnabled())
-        return static_cast<EIsolation>(rareNonInheritedData->m_isolation);
-    return IsolationAuto;
-}
-
-void RenderStyle::setIsolation(EIsolation v)
-{
-    if (RuntimeEnabledFeatures::cssCompositingEnabled())
-        rareNonInheritedData.access()->m_isolation = v;
-}
-
-bool RenderStyle::hasIsolation() const
-{
-    if (RuntimeEnabledFeatures::cssCompositingEnabled())
-        return rareNonInheritedData->m_isolation != IsolationAuto;
-    return false;
-}
-
 bool RenderStyle::hasWillChangeCompositingHint() const
 {
     for (size_t i = 0; i < rareNonInheritedData->m_willChange->m_properties.size(); ++i) {
@@ -893,13 +826,16 @@ bool RenderStyle::hasWillChangeCompositingHint() const
     return false;
 }
 
-inline bool requireTransformOrigin(const Vector<RefPtr<TransformOperation> >& transformOperations, RenderStyle::ApplyTransformOrigin applyOrigin)
+inline bool requireTransformOrigin(const Vector<RefPtr<TransformOperation> >& transformOperations, RenderStyle::ApplyTransformOrigin applyOrigin, RenderStyle::ApplyMotionPath applyMotionPath)
 {
     // transform-origin brackets the transform with translate operations.
     // Optimize for the case where the only transform is a translation, since the transform-origin is irrelevant
     // in that case.
     if (applyOrigin != RenderStyle::IncludeTransformOrigin)
         return false;
+
+    if (applyMotionPath == RenderStyle::IncludeMotionPath)
+        return true;
 
     unsigned size = transformOperations.size();
     for (unsigned i = 0; i < size; ++i) {
@@ -915,15 +851,17 @@ inline bool requireTransformOrigin(const Vector<RefPtr<TransformOperation> >& tr
     return false;
 }
 
-void RenderStyle::applyTransform(TransformationMatrix& transform, const LayoutSize& borderBoxSize, ApplyTransformOrigin applyOrigin) const
+void RenderStyle::applyTransform(TransformationMatrix& transform, const LayoutSize& borderBoxSize, ApplyTransformOrigin applyOrigin, ApplyMotionPath applyMotionPath) const
 {
-    applyTransform(transform, FloatRect(FloatPoint(), borderBoxSize), applyOrigin);
+    applyTransform(transform, FloatRect(FloatPoint(), FloatSize(borderBoxSize)), applyOrigin, applyMotionPath);
 }
 
-void RenderStyle::applyTransform(TransformationMatrix& transform, const FloatRect& boundingBox, ApplyTransformOrigin applyOrigin) const
+void RenderStyle::applyTransform(TransformationMatrix& transform, const FloatRect& boundingBox, ApplyTransformOrigin applyOrigin, ApplyMotionPath applyMotionPath) const
 {
+    if (!hasMotionPath())
+        applyMotionPath = ExcludeMotionPath;
     const Vector<RefPtr<TransformOperation> >& transformOperations = rareNonInheritedData->m_transform->m_operations.operations();
-    bool applyTransformOrigin = requireTransformOrigin(transformOperations, applyOrigin);
+    bool applyTransformOrigin = requireTransformOrigin(transformOperations, applyOrigin, applyMotionPath);
 
     float offsetX = transformOriginX().type() == Percent ? boundingBox.x() : 0;
     float offsetY = transformOriginY().type() == Percent ? boundingBox.y() : 0;
@@ -933,6 +871,9 @@ void RenderStyle::applyTransform(TransformationMatrix& transform, const FloatRec
             floatValueForLength(transformOriginY(), boundingBox.height()) + offsetY,
             transformOriginZ());
     }
+
+    if (applyMotionPath == RenderStyle::IncludeMotionPath)
+        applyMotionPathTransform(transform);
 
     unsigned size = transformOperations.size();
     for (unsigned i = 0; i < size; ++i)
@@ -945,6 +886,25 @@ void RenderStyle::applyTransform(TransformationMatrix& transform, const FloatRec
     }
 }
 
+void RenderStyle::applyMotionPathTransform(TransformationMatrix& transform) const
+{
+    const StyleMotionData& motionData = rareNonInheritedData->m_transform->m_motion;
+    ASSERT(motionData.m_path && motionData.m_path->isPathStyleMotionPath());
+    const PathStyleMotionPath& motionPath = toPathStyleMotionPath(*motionData.m_path);
+    float pathLength = motionPath.length();
+    float length = clampTo<float>(floatValueForLength(motionData.m_position, pathLength), 0, pathLength);
+
+    FloatPoint point;
+    float angle;
+    if (!motionPath.path().pointAndNormalAtLength(length, point, angle))
+        return;
+    if (motionData.m_rotationType == MotionRotationFixed)
+        angle = 0;
+
+    transform.translate(point.x(), point.y());
+    transform.rotate(angle + motionData.m_rotation);
+}
+
 void RenderStyle::setTextShadow(PassRefPtr<ShadowList> s)
 {
     rareInheritedData.access()->textShadow = s;
@@ -955,9 +915,9 @@ void RenderStyle::setBoxShadow(PassRefPtr<ShadowList> s)
     rareNonInheritedData.access()->m_boxShadow = s;
 }
 
-static RoundedRect::Radii calcRadiiFor(const BorderData& border, IntSize size)
+static FloatRoundedRect::Radii calcRadiiFor(const BorderData& border, LayoutSize size)
 {
-    return RoundedRect::Radii(
+    return FloatRoundedRect::Radii(
         IntSize(valueForLength(border.topLeft().width(), size.width()),
             valueForLength(border.topLeft().height(), size.height())),
         IntSize(valueForLength(border.topRight().width(), size.width()),
@@ -985,19 +945,18 @@ short RenderStyle::verticalBorderSpacing() const { return inherited->vertical_bo
 void RenderStyle::setHorizontalBorderSpacing(short v) { SET_VAR(inherited, horizontal_border_spacing, v); }
 void RenderStyle::setVerticalBorderSpacing(short v) { SET_VAR(inherited, vertical_border_spacing, v); }
 
-RoundedRect RenderStyle::getRoundedBorderFor(const LayoutRect& borderRect, bool includeLogicalLeftEdge, bool includeLogicalRightEdge) const
+FloatRoundedRect RenderStyle::getRoundedBorderFor(const LayoutRect& borderRect, bool includeLogicalLeftEdge, bool includeLogicalRightEdge) const
 {
-    IntRect snappedBorderRect(pixelSnappedIntRect(borderRect));
-    RoundedRect roundedRect(snappedBorderRect);
+    FloatRoundedRect roundedRect(pixelSnappedIntRect(borderRect));
     if (hasBorderRadius()) {
-        RoundedRect::Radii radii = calcRadiiFor(surround->border, snappedBorderRect.size());
-        radii.scale(calcBorderRadiiConstraintScaleFor(borderRect, radii));
+        FloatRoundedRect::Radii radii = calcRadiiFor(surround->border, borderRect.size());
         roundedRect.includeLogicalEdges(radii, isHorizontalWritingMode(), includeLogicalLeftEdge, includeLogicalRightEdge);
+        roundedRect.constrainRadii();
     }
     return roundedRect;
 }
 
-RoundedRect RenderStyle::getRoundedInnerBorderFor(const LayoutRect& borderRect, bool includeLogicalLeftEdge, bool includeLogicalRightEdge) const
+FloatRoundedRect RenderStyle::getRoundedInnerBorderFor(const LayoutRect& borderRect, bool includeLogicalLeftEdge, bool includeLogicalRightEdge) const
 {
     bool horizontal = isHorizontalWritingMode();
 
@@ -1009,7 +968,7 @@ RoundedRect RenderStyle::getRoundedInnerBorderFor(const LayoutRect& borderRect, 
     return getRoundedInnerBorderFor(borderRect, topWidth, bottomWidth, leftWidth, rightWidth, includeLogicalLeftEdge, includeLogicalRightEdge);
 }
 
-RoundedRect RenderStyle::getRoundedInnerBorderFor(const LayoutRect& borderRect,
+FloatRoundedRect RenderStyle::getRoundedInnerBorderFor(const LayoutRect& borderRect,
     int topWidth, int bottomWidth, int leftWidth, int rightWidth, bool includeLogicalLeftEdge, bool includeLogicalRightEdge) const
 {
     LayoutRect innerRect(borderRect.x() + leftWidth,
@@ -1017,10 +976,10 @@ RoundedRect RenderStyle::getRoundedInnerBorderFor(const LayoutRect& borderRect,
                borderRect.width() - leftWidth - rightWidth,
                borderRect.height() - topWidth - bottomWidth);
 
-    RoundedRect roundedRect(pixelSnappedIntRect(innerRect));
+    FloatRoundedRect roundedRect(pixelSnappedIntRect(innerRect));
 
     if (hasBorderRadius()) {
-        RoundedRect::Radii radii = getRoundedBorderFor(borderRect).radii();
+        FloatRoundedRect::Radii radii = getRoundedBorderFor(borderRect).radii();
         radii.shrink(topWidth, bottomWidth, leftWidth, rightWidth);
         roundedRect.includeLogicalEdges(radii, isHorizontalWritingMode(), includeLogicalLeftEdge, includeLogicalRightEdge);
     }
@@ -1225,10 +1184,11 @@ void RenderStyle::setLetterSpacing(float letterSpacing)
     font().update(currentFontSelector);
 }
 
-void RenderStyle::setFontSize(float size)
+void RenderStyle::setTextAutosizingMultiplier(float multiplier)
 {
-    // size must be specifiedSize if Text Autosizing is enabled, but computedSize if text
-    // zoom is enabled (if neither is enabled it's irrelevant as they're probably the same).
+    SET_VAR(inherited, textAutosizingMultiplier, multiplier);
+
+    float size = specifiedFontSize();
 
     ASSERT(std::isfinite(size));
     if (!std::isfinite(size) || size < 0)
@@ -1241,21 +1201,11 @@ void RenderStyle::setFontSize(float size)
     desc.setSpecifiedSize(size);
     desc.setComputedSize(size);
 
-    float multiplier = textAutosizingMultiplier();
     if (multiplier > 1) {
         float autosizedFontSize = TextAutosizer::computeAutosizedFontSize(size, multiplier);
         desc.setComputedSize(std::min(maximumAllowedFontSize, autosizedFontSize));
     }
 
-    setFontDescription(desc);
-    font().update(currentFontSelector);
-}
-
-void RenderStyle::setFontWeight(FontWeight weight)
-{
-    FontSelector* currentFontSelector = font().fontSelector();
-    FontDescription desc(fontDescription());
-    desc.setWeight(weight);
     setFontDescription(desc);
     font().update(currentFontSelector);
 }
@@ -1283,7 +1233,7 @@ void RenderStyle::applyTextDecorations()
         return;
 
     TextDecorationStyle style = textDecorationStyle();
-    StyleColor styleColor = visitedDependentDecorationStyleColor();
+    StyleColor styleColor = decorationColorIncludingFallback(insideLink() == InsideVisitedLink);
 
     int decorations = textDecoration();
 
@@ -1311,115 +1261,27 @@ void RenderStyle::clearAppliedTextDecorations()
         rareInheritedData.access()->appliedTextDecorations = nullptr;
 }
 
-void RenderStyle::setFontStretch(FontStretch stretch)
+void RenderStyle::clearMultiCol()
 {
-    FontSelector* currentFontSelector = font().fontSelector();
-    FontDescription desc(fontDescription());
-    desc.setStretch(stretch);
-    setFontDescription(desc);
-    font().update(currentFontSelector);
+    rareNonInheritedData.access()->m_multiCol = nullptr;
+    rareNonInheritedData.access()->m_multiCol.init();
 }
 
-void RenderStyle::getShadowExtent(const ShadowList* shadowList, LayoutUnit &top, LayoutUnit &right, LayoutUnit &bottom, LayoutUnit &left) const
+StyleColor RenderStyle::decorationColorIncludingFallback(bool visitedLink) const
 {
-    top = 0;
-    right = 0;
-    bottom = 0;
-    left = 0;
-
-    size_t shadowCount = shadowList ? shadowList->shadows().size() : 0;
-    for (size_t i = 0; i < shadowCount; ++i) {
-        const ShadowData& shadow = shadowList->shadows()[i];
-        if (shadow.style() == Inset)
-            continue;
-        float blurAndSpread = shadow.blur() + shadow.spread();
-
-        top = std::min<LayoutUnit>(top, shadow.y() - blurAndSpread);
-        right = std::max<LayoutUnit>(right, shadow.x() + blurAndSpread);
-        bottom = std::max<LayoutUnit>(bottom, shadow.y() + blurAndSpread);
-        left = std::min<LayoutUnit>(left, shadow.x() - blurAndSpread);
-    }
-}
-
-LayoutBoxExtent RenderStyle::getShadowInsetExtent(const ShadowList* shadowList) const
-{
-    LayoutUnit top = 0;
-    LayoutUnit right = 0;
-    LayoutUnit bottom = 0;
-    LayoutUnit left = 0;
-
-    size_t shadowCount = shadowList ? shadowList->shadows().size() : 0;
-    for (size_t i = 0; i < shadowCount; ++i) {
-        const ShadowData& shadow = shadowList->shadows()[i];
-        if (shadow.style() == Normal)
-            continue;
-        float blurAndSpread = shadow.blur() + shadow.spread();
-        top = std::max<LayoutUnit>(top, shadow.y() + blurAndSpread);
-        right = std::min<LayoutUnit>(right, shadow.x() - blurAndSpread);
-        bottom = std::min<LayoutUnit>(bottom, shadow.y() - blurAndSpread);
-        left = std::max<LayoutUnit>(left, shadow.x() + blurAndSpread);
-    }
-
-    return LayoutBoxExtent(top, right, bottom, left);
-}
-
-void RenderStyle::getShadowHorizontalExtent(const ShadowList* shadowList, LayoutUnit &left, LayoutUnit &right) const
-{
-    left = 0;
-    right = 0;
-
-    size_t shadowCount = shadowList ? shadowList->shadows().size() : 0;
-    for (size_t i = 0; i < shadowCount; ++i) {
-        const ShadowData& shadow = shadowList->shadows()[i];
-        if (shadow.style() == Inset)
-            continue;
-        float blurAndSpread = shadow.blur() + shadow.spread();
-
-        left = std::min<LayoutUnit>(left, shadow.x() - blurAndSpread);
-        right = std::max<LayoutUnit>(right, shadow.x() + blurAndSpread);
-    }
-}
-
-void RenderStyle::getShadowVerticalExtent(const ShadowList* shadowList, LayoutUnit &top, LayoutUnit &bottom) const
-{
-    top = 0;
-    bottom = 0;
-
-    size_t shadowCount = shadowList ? shadowList->shadows().size() : 0;
-    for (size_t i = 0; i < shadowCount; ++i) {
-        const ShadowData& shadow = shadowList->shadows()[i];
-        if (shadow.style() == Inset)
-            continue;
-        float blurAndSpread = shadow.blur() + shadow.spread();
-
-        top = std::min<LayoutUnit>(top, shadow.y() - blurAndSpread);
-        bottom = std::max<LayoutUnit>(bottom, shadow.y() + blurAndSpread);
-    }
-}
-
-StyleColor RenderStyle::visitedDependentDecorationStyleColor() const
-{
-    bool isVisited = insideLink() == InsideVisitedLink;
-
-    StyleColor styleColor = isVisited ? visitedLinkTextDecorationColor() : textDecorationColor();
+    StyleColor styleColor = visitedLink ? visitedLinkTextDecorationColor() : textDecorationColor();
 
     if (!styleColor.isCurrentColor())
         return styleColor;
 
     if (textStrokeWidth()) {
         // Prefer stroke color if possible, but not if it's fully transparent.
-        StyleColor textStrokeStyleColor = isVisited ? visitedLinkTextStrokeColor() : textStrokeColor();
+        StyleColor textStrokeStyleColor = visitedLink ? visitedLinkTextStrokeColor() : textStrokeColor();
         if (!textStrokeStyleColor.isCurrentColor() && textStrokeStyleColor.color().alpha())
             return textStrokeStyleColor;
     }
 
-    return isVisited ? visitedLinkTextFillColor() : textFillColor();
-}
-
-Color RenderStyle::visitedDependentDecorationColor() const
-{
-    bool isVisited = insideLink() == InsideVisitedLink;
-    return visitedDependentDecorationStyleColor().resolve(isVisited ? visitedLinkColor() : color());
+    return visitedLink ? visitedLinkTextFillColor() : textFillColor();
 }
 
 Color RenderStyle::colorIncludingFallback(int colorProperty, bool visitedLink) const
@@ -1475,6 +1337,9 @@ Color RenderStyle::colorIncludingFallback(int colorProperty, bool visitedLink) c
         break;
     case CSSPropertyWebkitTapHighlightColor:
         result = tapHighlightColor();
+        break;
+    case CSSPropertyTextDecorationColor:
+        result = decorationColorIncludingFallback(visitedLink);
         break;
     default:
         ASSERT_NOT_REACHED();
@@ -1633,6 +1498,17 @@ void RenderStyle::setMarginEnd(const Length& margin)
     }
 }
 
+void RenderStyle::setMotionPath(PassRefPtr<StyleMotionPath> path)
+{
+    ASSERT(path);
+    rareNonInheritedData.access()->m_transform.access()->m_motion.m_path = path;
+}
+
+void RenderStyle::resetMotionPath()
+{
+    rareNonInheritedData.access()->m_transform.access()->m_motion.m_path = nullptr;
+}
+
 TextEmphasisMark RenderStyle::textEmphasisMark() const
 {
     TextEmphasisMark mark = static_cast<TextEmphasisMark>(rareInheritedData->textEmphasisMark);
@@ -1650,12 +1526,21 @@ Color RenderStyle::initialTapHighlightColor()
     return RenderTheme::tapHighlightColor();
 }
 
-LayoutBoxExtent RenderStyle::imageOutsets(const NinePieceImage& image) const
+#if ENABLE(OILPAN)
+const FilterOperations& RenderStyle::initialFilter()
 {
-    return LayoutBoxExtent(NinePieceImage::computeOutset(image.outset().top(), borderTopWidth()),
-                           NinePieceImage::computeOutset(image.outset().right(), borderRightWidth()),
-                           NinePieceImage::computeOutset(image.outset().bottom(), borderBottomWidth()),
-                           NinePieceImage::computeOutset(image.outset().left(), borderLeftWidth()));
+    DEFINE_STATIC_LOCAL(Persistent<FilterOperationsWrapper>, ops, (FilterOperationsWrapper::create()));
+    return ops->operations();
+}
+#endif
+
+LayoutRectOutsets RenderStyle::imageOutsets(const NinePieceImage& image) const
+{
+    return LayoutRectOutsets(
+        NinePieceImage::computeOutset(image.outset().top(), borderTopWidth()),
+        NinePieceImage::computeOutset(image.outset().right(), borderRightWidth()),
+        NinePieceImage::computeOutset(image.outset().bottom(), borderBottomWidth()),
+        NinePieceImage::computeOutset(image.outset().left(), borderLeftWidth()));
 }
 
 void RenderStyle::setBorderImageSource(PassRefPtr<StyleImage> image)
@@ -1684,38 +1569,6 @@ void RenderStyle::setBorderImageOutset(const BorderImageLengthBox& outset)
     if (surround->border.m_image.outset() == outset)
         return;
     surround.access()->border.m_image.setOutset(outset);
-}
-
-float calcBorderRadiiConstraintScaleFor(const FloatRect& rect, const FloatRoundedRect::Radii& radii)
-{
-    // Constrain corner radii using CSS3 rules:
-    // http://www.w3.org/TR/css3-background/#the-border-radius
-
-    float factor = 1;
-    float radiiSum;
-
-    // top
-    radiiSum = radii.topLeft().width() + radii.topRight().width(); // Casts to avoid integer overflow.
-    if (radiiSum > rect.width())
-        factor = std::min(rect.width() / radiiSum, factor);
-
-    // bottom
-    radiiSum = radii.bottomLeft().width() + radii.bottomRight().width();
-    if (radiiSum > rect.width())
-        factor = std::min(rect.width() / radiiSum, factor);
-
-    // left
-    radiiSum = radii.topLeft().height() + radii.bottomLeft().height();
-    if (radiiSum > rect.height())
-        factor = std::min(rect.height() / radiiSum, factor);
-
-    // right
-    radiiSum = radii.topRight().height() + radii.bottomRight().height();
-    if (radiiSum > rect.height())
-        factor = std::min(rect.height() / radiiSum, factor);
-
-    ASSERT(factor <= 1);
-    return factor;
 }
 
 bool RenderStyle::borderObscuresBackground() const

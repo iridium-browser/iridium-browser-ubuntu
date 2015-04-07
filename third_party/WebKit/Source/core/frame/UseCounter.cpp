@@ -31,7 +31,6 @@
 #include "core/css/StyleSheetContents.h"
 #include "core/dom/Document.h"
 #include "core/dom/ExecutionContext.h"
-#include "core/frame/LocalDOMWindow.h"
 #include "core/frame/FrameConsole.h"
 #include "core/frame/FrameHost.h"
 #include "core/frame/LocalFrame.h"
@@ -269,12 +268,8 @@ int UseCounter::mapCSSPropertyIdToCSSSampleIdForHistogram(int id)
     case CSSPropertyWebkitColumnSpan: return 225;
     case CSSPropertyWebkitColumnWidth: return 226;
     case CSSPropertyWebkitColumns: return 227;
-#if defined(ENABLE_CSS_BOX_DECORATION_BREAK) && ENABLE_CSS_BOX_DECORATION_BREAK
-    case CSSPropertyWebkitBoxDecorationBreak: return 228;
-#endif
-#if defined(ENABLE_CSS_FILTERS) && ENABLE_CSS_FILTERS
-    case CSSPropertyWebkitFilter: return 229;
-#endif
+    // 228 was CSSPropertyWebkitBoxDecorationBreak (duplicated due to #ifdef).
+    // 229 was CSSPropertyWebkitFilter (duplicated due to #ifdef).
     case CSSPropertyAlignContent: return 230;
     case CSSPropertyAlignItems: return 231;
     case CSSPropertyAlignSelf: return 232;
@@ -390,12 +385,8 @@ int UseCounter::mapCSSPropertyIdToCSSSampleIdForHistogram(int id)
     // case CSSPropertyWebkitWrapFlow: return 350;
     // case CSSPropertyWebkitWrapThrough: return 351;
     // CSSPropertyWebkitWrap was 352.
-#if defined(ENABLE_TOUCH_EVENTS) && ENABLE_TOUCH_EVENTS
-    case CSSPropertyWebkitTapHighlightColor: return 353;
-#endif
-#if defined(ENABLE_DRAGGABLE_REGION) && ENABLE_DRAGGABLE_REGION
-    case CSSPropertyWebkitAppRegion: return 354;
-#endif
+    // 353 was CSSPropertyWebkitTapHighlightColor (duplicated due to #ifdef).
+    // 354 was CSSPropertyWebkitAppRegion (duplicated due to #ifdef).
     case CSSPropertyClipPath: return 355;
     case CSSPropertyClipRule: return 356;
     case CSSPropertyMask: return 357;
@@ -485,7 +476,7 @@ int UseCounter::mapCSSPropertyIdToCSSSampleIdForHistogram(int id)
     case CSSPropertyShapeImageThreshold: return 439;
     case CSSPropertyColumnFill: return 440;
     case CSSPropertyTextJustify: return 441;
-    case CSSPropertyTouchActionDelay: return 442;
+    // CSSPropertyTouchActionDelay was 442
     case CSSPropertyJustifySelf: return 443;
     case CSSPropertyScrollBehavior: return 444;
     case CSSPropertyWillChange: return 445;
@@ -499,6 +490,11 @@ int UseCounter::mapCSSPropertyIdToCSSSampleIdForHistogram(int id)
     case CSSPropertyGrid: return 453;
     case CSSPropertyAll: return 454;
     case CSSPropertyJustifyItems: return 455;
+    case CSSPropertyScrollBlocksOn: return 456;
+    case CSSPropertyMotionPath: return 457;
+    case CSSPropertyMotionPosition: return 458;
+    case CSSPropertyMotionRotation: return 459;
+    case CSSPropertyMotion: return 460;
 
     // 1. Add new features above this line (don't change the assigned numbers of the existing
     // items).
@@ -515,7 +511,7 @@ int UseCounter::mapCSSPropertyIdToCSSSampleIdForHistogram(int id)
     return 0;
 }
 
-static int maximumCSSSampleId() { return 455; }
+static int maximumCSSSampleId() { return 460; }
 
 void UseCounter::muteForInspector()
 {
@@ -577,14 +573,21 @@ void UseCounter::didCommitLoad()
     updateMeasurements();
 }
 
-void UseCounter::count(const Document& document, Feature feature)
+void UseCounter::count(const Frame* frame, Feature feature)
 {
-    FrameHost* host = document.frameHost();
+    if (!frame)
+        return;
+    FrameHost* host = frame->host();
     if (!host)
         return;
 
     ASSERT(host->useCounter().deprecationMessage(feature).isEmpty());
     host->useCounter().recordMeasurement(feature);
+}
+
+void UseCounter::count(const Document& document, Feature feature)
+{
+    count(document.frame(), feature);
 }
 
 void UseCounter::count(const ExecutionContext* context, Feature feature)
@@ -597,6 +600,13 @@ void UseCounter::count(const ExecutionContext* context, Feature feature)
     }
     if (context->isWorkerGlobalScope())
         toWorkerGlobalScope(context)->countFeature(feature);
+}
+
+void UseCounter::countIfNotPrivateScript(v8::Isolate* isolate, const Frame* frame, Feature feature)
+{
+    if (DOMWrapperWorld::current(isolate).isPrivateScriptIsolatedWorld())
+        return;
+    UseCounter::count(frame, feature);
 }
 
 void UseCounter::countIfNotPrivateScript(v8::Isolate* isolate, const Document& document, Feature feature)
@@ -613,6 +623,20 @@ void UseCounter::countIfNotPrivateScript(v8::Isolate* isolate, const ExecutionCo
     UseCounter::count(context, feature);
 }
 
+void UseCounter::countDeprecation(const LocalFrame* frame, Feature feature)
+{
+    if (!frame)
+        return;
+    FrameHost* host = frame->host();
+    if (!host)
+        return;
+
+    if (host->useCounter().recordMeasurement(feature)) {
+        ASSERT(!host->useCounter().deprecationMessage(feature).isEmpty());
+        frame->console().addMessage(ConsoleMessage::create(DeprecationMessageSource, WarningMessageLevel, host->useCounter().deprecationMessage(feature)));
+    }
+}
+
 void UseCounter::countDeprecation(ExecutionContext* context, Feature feature)
 {
     if (!context)
@@ -625,24 +649,9 @@ void UseCounter::countDeprecation(ExecutionContext* context, Feature feature)
         toWorkerGlobalScope(context)->countDeprecation(feature);
 }
 
-void UseCounter::countDeprecation(const LocalDOMWindow* window, Feature feature)
-{
-    if (!window || !window->document())
-        return;
-    UseCounter::countDeprecation(*window->document(), feature);
-}
-
 void UseCounter::countDeprecation(const Document& document, Feature feature)
 {
-    FrameHost* host = document.frameHost();
-    LocalFrame* frame = document.frame();
-    if (!host || !frame)
-        return;
-
-    if (host->useCounter().recordMeasurement(feature)) {
-        ASSERT(!host->useCounter().deprecationMessage(feature).isEmpty());
-        frame->console().addMessage(ConsoleMessage::create(DeprecationMessageSource, WarningMessageLevel, host->useCounter().deprecationMessage(feature)));
-    }
+    UseCounter::countDeprecation(document.frame(), feature);
 }
 
 void UseCounter::countDeprecationIfNotPrivateScript(v8::Isolate* isolate, ExecutionContext* context, Feature feature)
@@ -699,12 +708,6 @@ String UseCounter::deprecationMessage(Feature feature)
     case PrefixedVideoExitFullScreen:
         return "'HTMLVideoElement.webkitExitFullScreen()' is deprecated. Please use 'Document.exitFullscreen()' and 'Document.webkitExitFullscreen()' instead.";
 
-    case MediaErrorEncrypted:
-        return "'MediaError.MEDIA_ERR_ENCRYPTED' is deprecated. This error code is never used.";
-
-    case PrefixedGamepad:
-        return replacedBy("navigator.webkitGetGamepads", "navigator.getGamepads");
-
     case PrefixedIndexedDB:
         return replacedBy("webkitIndexedDB", "indexedDB");
 
@@ -741,38 +744,14 @@ String UseCounter::deprecationMessage(Feature feature)
     case PrefixedCancelRequestAnimationFrame:
         return "'webkitCancelRequestAnimationFrame' is vendor-specific. Please use the standard 'cancelAnimationFrame' instead.";
 
-    case DocumentCreateAttributeNS:
-        return "'Document.createAttributeNS' is deprecated and has been removed from DOM4 (http://w3.org/tr/dom).";
-
-    case AttributeOwnerElement:
-        return "'Attr.ownerElement' is deprecated and has been removed from DOM4 (http://w3.org/tr/dom).";
-
-    case ElementSetAttributeNodeNS:
-        return "'Element.setAttributeNodeNS' is deprecated and has been removed from DOM4 (http://w3.org/tr/dom).";
-
     case NodeIteratorDetach:
         return "'NodeIterator.detach' is now a no-op, as per DOM (http://dom.spec.whatwg.org/#dom-nodeiterator-detach).";
-
-    case AttrNodeValue:
-        return replacedBy("Attr.nodeValue", "value");
-
-    case AttrTextContent:
-        return replacedBy("Attr.textContent", "value");
-
-    case NodeIteratorExpandEntityReferences:
-        return "'NodeIterator.expandEntityReferences' is deprecated and has been removed from DOM. It always returns false.";
-
-    case TreeWalkerExpandEntityReferences:
-        return "'TreeWalker.expandEntityReferences' is deprecated and has been removed from DOM. It always returns false.";
 
     case RangeDetach:
         return "'Range.detach' is now a no-op, as per DOM (http://dom.spec.whatwg.org/#dom-range-detach).";
 
     case OverflowChangedEvent:
         return "The 'overflowchanged' event is deprecated and may be removed. Please do not use it.";
-
-    case ElementSetPrefix:
-        return "Setting 'Element.prefix' is deprecated, as it is read-only per DOM (http://dom.spec.whatwg.org/#element).";
 
     case SyncXHRWithCredentials:
         return "Setting 'XMLHttpRequest.withCredentials' for synchronous requests is deprecated.";
@@ -807,8 +786,50 @@ String UseCounter::deprecationMessage(Feature feature)
     case XMLHttpRequestSynchronousInNonWorkerOutsideBeforeUnload:
         return "Synchronous XMLHttpRequest on the main thread is deprecated because of its detrimental effects to the end user's experience. For more help, check http://xhr.spec.whatwg.org/.";
 
-    case FontFaceSetReady:
-        return "document.fonts.ready() method is going to be replaced with document.fonts.ready attribute in future releases. Please be prepared. For more help, check https://code.google.com/p/chromium/issues/detail?id=392077#c3 .";
+    case DOMImplementationHasFeatureReturnFalse:
+        return "'DOMImplementation.hasFeature()' returning false is deprecated. Please do not use it, as per DOM it should always return true (https://dom.spec.whatwg.org/#dom-domimplementation-hasfeature).";
+
+    case GetMatchedCSSRules:
+        return "'getMatchedCSSRules()' is deprecated. For more help, check https://code.google.com/p/chromium/issues/detail?id=437569#c2";
+
+    case DocumentSetCharset:
+        return "Setting 'Document.charset' is deprecated. Please use '<meta charset=\"UTF-8\">' instead.";
+
+    case PrefixedImageSmoothingEnabled:
+        return replacedBy("CanvasRenderingContext2D.webkitImageSmoothingEnabled", "CanvasRenderingContext2D.imageSmoothingEnabled");
+
+    case AudioListenerDopplerFactor:
+        return "dopplerFactor is deprecated and will be removed in M45 when all doppler effects are removed";
+
+    case AudioListenerSpeedOfSound:
+        return "speedOfSound is deprecated and will be removed in M45 when all doppler effects are removed";
+
+    case AudioListenerSetVelocity:
+        return "setVelocity() is deprecated and will be removed in M45 when all doppler effects are removed";
+
+    case ShadowRootGetElementsByClassName:
+        return "ShadowRoot.getElementsByClassName() is deprecated. Please use 'querySelectorAll' instead";
+
+    case ShadowRootGetElementsByTagName:
+        return "ShadowRoot.getElementsByTagName() is deprecated. Please use 'querySelectorAll' instead";
+
+    case ShadowRootGetElementsByTagNameNS:
+        return "ShadowRoot.getElementsByTagNameNS() is deprecated. Please use 'querySelectorAll' instead";
+
+    case PrefixedWindowURL:
+        return replacedBy("webkitURL", "URL");
+
+    case PrefixedAudioContext:
+        return replacedBy("webkitAudioContext", "AudioContext");
+
+    case PrefixedOfflineAudioContext:
+        return replacedBy("webkitOfflineAudioContext", "OfflineAudioContext");
+
+    case RangeCompareNode:
+        return replacedBy("Range.compareNode()", "Range.compareBoundaryPoints()");
+
+    case RangeExpand:
+        return replacedBy("Range.expand()", "Selection.modify()");
 
     // Features that aren't deprecated don't have a deprecation message.
     default:

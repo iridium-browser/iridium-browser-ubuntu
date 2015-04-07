@@ -30,9 +30,9 @@ bool ActivateMetroChrome() {
     return false;
   }
 
-  base::string16 app_id = ShellUtil::GetBrowserModelId(
-      BrowserDistribution::GetDistribution(),
-      InstallUtil::IsPerUserInstall(chrome_exe.value().c_str()));
+  base::string16 app_id =
+      ShellUtil::GetBrowserModelId(BrowserDistribution::GetDistribution(),
+                                   InstallUtil::IsPerUserInstall(chrome_exe));
   if (app_id.empty()) {
     NOTREACHED() << "Failed to get chrome app user model id.";
     return false;
@@ -41,7 +41,7 @@ bool ActivateMetroChrome() {
   base::win::ScopedComPtr<IApplicationActivationManager> activation_manager;
   HRESULT hr = activation_manager.CreateInstance(
       CLSID_ApplicationActivationManager);
-  if (!activation_manager) {
+  if (!activation_manager.get()) {
     NOTREACHED() << "Failed to cocreate activation manager. Error: "
                  << std::showbase << std::hex << hr;
     return false;

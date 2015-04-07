@@ -56,7 +56,10 @@ ImageResource::ImageResource(const ResourceRequest& resourceRequest)
 
 ImageResource::ImageResource(blink::Image* image)
     : Resource(ResourceRequest(""), Image)
+    , m_devicePixelRatioHeaderValue(1.0)
     , m_image(image)
+    , m_loadingMultipartContent(false)
+    , m_hasDevicePixelRatioHeaderValue(false)
 {
     WTF_LOG(Timers, "new ImageResource(Image) %p", this);
     setStatus(Cached);
@@ -261,16 +264,16 @@ LayoutSize ImageResource::imageSizeForRenderer(const RenderObject* renderer, flo
     ASSERT(!isPurgeable());
 
     if (!m_image)
-        return IntSize();
+        return LayoutSize();
 
     LayoutSize imageSize;
 
     if (m_image->isBitmapImage() && (renderer && renderer->shouldRespectImageOrientation() == RespectImageOrientation))
-        imageSize = toBitmapImage(m_image.get())->sizeRespectingOrientation();
+        imageSize = LayoutSize(toBitmapImage(m_image.get())->sizeRespectingOrientation());
     else if (m_image->isSVGImage() && sizeType == NormalSize)
-        imageSize = m_svgImageCache->imageSizeForRenderer(renderer);
+        imageSize = LayoutSize(m_svgImageCache->imageSizeForRenderer(renderer));
     else
-        imageSize = m_image->size();
+        imageSize = LayoutSize(m_image->size());
 
     if (multiplier == 1.0f)
         return imageSize;
@@ -470,6 +473,24 @@ void ImageResource::animationAdvanced(const blink::Image* image)
     notifyObservers();
 }
 
+void ImageResource::updateImageAnimationPolicy()
+{
+    if (!m_image)
+        return;
+
+    ImageAnimationPolicy newPolicy = ImageAnimationPolicyAllowed;
+    ResourceClientWalker<ImageResourceClient> w(m_clients);
+    while (ImageResourceClient* c = w.next()) {
+        if (c->getImageAnimationPolicy(this, newPolicy))
+            break;
+    }
+
+    if (m_image->animationPolicy() != newPolicy) {
+        m_image->resetAnimation();
+        m_image->setAnimationPolicy(newPolicy);
+    }
+}
+
 void ImageResource::changedInRect(const blink::Image* image, const IntRect& rect)
 {
     if (!image || image != m_image)
@@ -480,18 +501,20 @@ void ImageResource::changedInRect(const blink::Image* image, const IntRect& rect
 bool ImageResource::currentFrameKnownToBeOpaque(const RenderObject* renderer)
 {
     blink::Image* image = imageForRenderer(renderer);
-    if (image->isBitmapImage())
+    if (image->isBitmapImage()) {
+        TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "PaintImage", "data", InspectorPaintImageEvent::data(renderer, *this));
         image->nativeImageForCurrentFrame(); // force decode
+    }
     return image->currentFrameKnownToBeOpaque();
 }
 
-bool ImageResource::isAccessAllowed(SecurityOrigin* securityOrigin)
+bool ImageResource::isAccessAllowed(ExecutionContext* context, SecurityOrigin* securityOrigin)
 {
     if (response().wasFetchedViaServiceWorker())
         return response().serviceWorkerResponseType() != WebServiceWorkerResponseTypeOpaque;
     if (!image()->currentFrameHasSingleSecurityOrigin())
         return false;
-    if (passesAccessControlCheck(securityOrigin))
+    if (passesAccessControlCheck(context, securityOrigin))
         return true;
     return !securityOrigin->taintsCanvas(response().url());
 }

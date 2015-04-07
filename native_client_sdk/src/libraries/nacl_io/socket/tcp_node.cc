@@ -156,9 +156,12 @@ class TcpRecvWork : public TcpWork {
     if (!stream)
       return;
 
-    if (length_error <= 0) {
+    if (length_error < 0) {
       stream->SetError_Locked(length_error);
       return;
+    } else if (length_error == 0) {
+      stream->SetStreamFlags(SSF_RECV_ENDOFSTREAM);
+      emitter_->SetRecvEndOfStream_Locked();
     }
 
     // If we successfully received, queue more input
@@ -403,6 +406,9 @@ void TcpNode::QueueConnect() {
 }
 
 void TcpNode::QueueInput() {
+  if (TestStreamFlags(SSF_RECV_ENDOFSTREAM))
+    return;
+
   StreamFs::Work* work = new TcpRecvWork(emitter_);
   stream()->EnqueueWork(work);
 }
@@ -447,9 +453,11 @@ Error TcpNode::Accept(const HandleAttr& attr,
   emitter_->ClearEvents_Locked(POLLIN);
 
   // Set the out paramaters
-  PP_Resource remote_addr = TCPInterface()->GetRemoteAddress(*out_sock);
-  *len = ResourceToSockAddr(remote_addr, *len, addr);
-  filesystem_->ppapi()->ReleaseResource(remote_addr);
+  if (addr && len) {
+    PP_Resource remote_addr = TCPInterface()->GetRemoteAddress(*out_sock);
+    *len = ResourceToSockAddr(remote_addr, *len, addr);
+    filesystem_->ppapi()->ReleaseResource(remote_addr);
+  }
 
   QueueAccept();
   return 0;

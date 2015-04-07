@@ -38,10 +38,14 @@ class CC_EXPORT LayerTreeHostCommon {
                         float device_scale_factor,
                         float page_scale_factor,
                         const LayerType* page_scale_application_layer,
+                        const gfx::Vector2dF& elastic_overscroll,
+                        const LayerType* elastic_overscroll_application_layer,
                         int max_texture_size,
                         bool can_use_lcd_text,
+                        bool layers_always_allowed_lcd_text,
                         bool can_render_to_separate_surface,
                         bool can_adjust_raster_scales,
+                        bool verify_property_trees,
                         RenderSurfaceLayerListType* render_surface_layer_list,
                         int current_render_surface_layer_list_id)
         : root_layer(root_layer),
@@ -50,10 +54,15 @@ class CC_EXPORT LayerTreeHostCommon {
           device_scale_factor(device_scale_factor),
           page_scale_factor(page_scale_factor),
           page_scale_application_layer(page_scale_application_layer),
+          elastic_overscroll(elastic_overscroll),
+          elastic_overscroll_application_layer(
+              elastic_overscroll_application_layer),
           max_texture_size(max_texture_size),
           can_use_lcd_text(can_use_lcd_text),
+          layers_always_allowed_lcd_text(layers_always_allowed_lcd_text),
           can_render_to_separate_surface(can_render_to_separate_surface),
           can_adjust_raster_scales(can_adjust_raster_scales),
+          verify_property_trees(verify_property_trees),
           render_surface_layer_list(render_surface_layer_list),
           current_render_surface_layer_list_id(
               current_render_surface_layer_list_id) {}
@@ -64,10 +73,14 @@ class CC_EXPORT LayerTreeHostCommon {
     float device_scale_factor;
     float page_scale_factor;
     const LayerType* page_scale_application_layer;
+    gfx::Vector2dF elastic_overscroll;
+    const LayerType* elastic_overscroll_application_layer;
     int max_texture_size;
     bool can_use_lcd_text;
+    bool layers_always_allowed_lcd_text;
     bool can_render_to_separate_surface;
     bool can_adjust_raster_scales;
+    bool verify_property_trees;
     RenderSurfaceLayerListType* render_surface_layer_list;
     int current_render_surface_layer_list_id;
   };
@@ -93,6 +106,14 @@ class CC_EXPORT LayerTreeHostCommon {
       CalcDrawPropsMainInputs;
   typedef CalcDrawPropsInputsForTesting<Layer, RenderSurfaceLayerList>
       CalcDrawPropsMainInputsForTesting;
+  static void UpdateRenderSurfaces(Layer* root_layer,
+                                   bool can_render_to_separate_surface,
+                                   const gfx::Transform& transform,
+                                   bool preserves_2d_axis_alignment);
+  static void UpdateRenderSurface(Layer* layer,
+                                  bool can_render_to_separate_surface,
+                                  gfx::Transform* transform,
+                                  bool* animation_preserves_axis_alignment);
   static void CalculateDrawProperties(CalcDrawPropsMainInputs* inputs);
 
   typedef CalcDrawPropsInputs<LayerImpl, LayerImplList> CalcDrawPropsImplInputs;
@@ -142,6 +163,7 @@ struct CC_EXPORT ScrollAndScaleSet {
 
   std::vector<LayerTreeHostCommon::ScrollUpdateInfo> scrolls;
   float page_scale_delta;
+  gfx::Vector2dF elastic_overscroll_delta;
   float top_controls_delta;
   ScopedPtrVector<SwapPromise> swap_promises;
 };
@@ -220,10 +242,14 @@ LayerTreeHostCommon::CalcDrawPropsInputsForTesting<LayerType,
           1.f,
           1.f,
           NULL,
+          gfx::Vector2dF(),
+          NULL,
           std::numeric_limits<int>::max() / 2,
+          false,
           false,
           true,
           false,
+          true,
           render_surface_layer_list,
           0) {
   DCHECK(root_layer);
@@ -244,10 +270,14 @@ LayerTreeHostCommon::CalcDrawPropsInputsForTesting<LayerType,
           1.f,
           1.f,
           NULL,
+          gfx::Vector2dF(),
+          NULL,
           std::numeric_limits<int>::max() / 2,
+          false,
           false,
           true,
           false,
+          true,
           render_surface_layer_list,
           0) {
   DCHECK(root_layer);

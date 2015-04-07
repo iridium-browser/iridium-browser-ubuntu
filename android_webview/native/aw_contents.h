@@ -97,7 +97,11 @@ class AwContents : public FindHelper::Listener,
   void AddVisitedLinks(JNIEnv* env, jobject obj, jobjectArray jvisited_links);
   base::android::ScopedJavaLocalRef<jbyteArray> GetCertificate(
       JNIEnv* env, jobject obj);
-  void RequestNewHitTestDataAt(JNIEnv* env, jobject obj, jint x, jint y);
+  void RequestNewHitTestDataAt(JNIEnv* env,
+                               jobject obj,
+                               jfloat x,
+                               jfloat y,
+                               jfloat touch_major);
   void UpdateLastHitTestData(JNIEnv* env, jobject obj);
   void OnSizeChanged(JNIEnv* env, jobject obj, int w, int h, int ow, int oh);
   void SetViewVisibility(JNIEnv* env, jobject obj, bool visible);
@@ -189,8 +193,6 @@ class AwContents : public FindHelper::Listener,
   virtual bool RequestDrawGL(bool wait_for_completion) override;
   virtual void PostInvalidate() override;
   virtual void InvalidateOnFunctorDestroy() override;
-  virtual void UpdateParentDrawConstraints() override;
-  virtual void DidSkipCommitFrame() override;
   virtual void OnNewPicture() override;
   virtual gfx::Point GetLocationOnScreen() override;
   virtual void ScrollContainerViewTo(gfx::Vector2d new_value) override;
@@ -217,6 +219,11 @@ class AwContents : public FindHelper::Listener,
 
   void SetJsOnlineProperty(JNIEnv* env, jobject obj, jboolean network_up);
   void TrimMemory(JNIEnv* env, jobject obj, jint level, jboolean visible);
+
+  void PostMessageToFrame(JNIEnv* env, jobject obj, jstring frame_id,
+      jstring message, jstring source_origin, jstring target_origin,
+      jintArray msgPorts);
+  void CreateMessageChannel(JNIEnv* env, jobject obj, jobject callback);
 
  private:
   void InitDataReductionProxyIfNecessary();
@@ -245,7 +252,6 @@ class AwContents : public FindHelper::Listener,
   // The first element in the list is always the currently pending request.
   std::list<OriginCallback> pending_geolocation_prompts_;
 
-  base::Lock render_thread_lock_;
   GLViewRendererManager::Key renderer_manager_key_;
 
   DISALLOW_COPY_AND_ASSIGN(AwContents);

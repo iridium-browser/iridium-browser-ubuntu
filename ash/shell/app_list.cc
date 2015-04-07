@@ -349,6 +349,10 @@ class ExampleAppListViewDelegate : public app_list::AppListViewDelegate {
     return std::vector<views::View*>();
   }
 
+  void CustomLauncherPageAnimationChanged(double progress) override {}
+
+  void CustomLauncherPagePopSubpage() override {}
+
   bool IsSpeechRecognitionEnabled() override { return false; }
 
   scoped_ptr<app_list::AppListModel> model_;

@@ -17,12 +17,12 @@
 #include "ui/compositor/dip_util.h"
 #include "ui/compositor/layer.h"
 #include "ui/gfx/display.h"
-#include "ui/gfx/insets.h"
-#include "ui/gfx/point.h"
-#include "ui/gfx/point3_f.h"
-#include "ui/gfx/point_conversions.h"
+#include "ui/gfx/geometry/insets.h"
+#include "ui/gfx/geometry/point.h"
+#include "ui/gfx/geometry/point3_f.h"
+#include "ui/gfx/geometry/point_conversions.h"
+#include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/screen.h"
-#include "ui/gfx/size_conversions.h"
 
 namespace aura {
 
@@ -152,7 +152,7 @@ void WindowTreeHost::OnCursorVisibilityChanged(bool show) {
   // will trigger its own mouse enter.
   if (!show) {
     ui::EventDispatchDetails details = dispatcher()->DispatchMouseExitAtPoint(
-        dispatcher()->GetLastMouseLocationInRoot());
+        nullptr, dispatcher()->GetLastMouseLocationInRoot());
     if (details.dispatcher_destroyed)
       return;
   }

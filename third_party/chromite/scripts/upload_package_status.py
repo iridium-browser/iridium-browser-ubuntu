@@ -4,6 +4,8 @@
 
 """Support uploading a csv file to a Google Docs spreadsheet."""
 
+# pylint: disable=bad-continuation
+
 from __future__ import print_function
 
 import optparse
@@ -150,7 +152,7 @@ class Uploader(object):
       ss_package = gdata_lib.ScrubValFromSS(ss_row[self.SS_ID_COL])
 
       # See whether this row is in csv table.
-      csv_rows = self._csv_table.GetRowsByValue({ self.ID_COL: ss_package })
+      csv_rows = self._csv_table.GetRowsByValue({self.ID_COL: ss_package})
       if not csv_rows:
         # Row needs to be deleted from spreadsheet.
         owner_val = None

@@ -30,6 +30,7 @@
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
 #include "core/HTMLNames.h"
 #include "core/dom/Document.h"
+#include "core/dom/FirstLetterPseudoElement.h"
 #include "core/dom/NodeTraversal.h"
 #include "core/dom/shadow/ShadowRoot.h"
 #include "core/editing/VisiblePosition.h"
@@ -37,6 +38,8 @@
 #include "core/editing/htmlediting.h"
 #include "core/frame/FrameView.h"
 #include "core/html/HTMLElement.h"
+#include "core/html/HTMLImageElement.h"
+#include "core/html/HTMLInputElement.h"
 #include "core/html/HTMLTextFormControlElement.h"
 #include "core/rendering/InlineTextBox.h"
 #include "core/rendering/RenderImage.h"
@@ -469,6 +472,7 @@ void TextIterator::advance()
                     || (m_node && m_node->isHTMLElement()
                     && (isHTMLFormControlElement(toHTMLElement(*m_node))
                     || isHTMLLegendElement(toHTMLElement(*m_node))
+                    || isHTMLImageElement(toHTMLElement(*m_node))
                     || isHTMLMeterElement(toHTMLElement(*m_node))
                     || isHTMLProgressElement(toHTMLElement(*m_node)))))) {
                     handledNode = handleReplacedElement();
@@ -678,80 +682,98 @@ bool TextIterator::handleTextNode()
 void TextIterator::handleTextBox()
 {
     RenderText* renderer = m_firstLetterText ? m_firstLetterText.get() : toRenderText(m_node->renderer());
+
     if (renderer->style()->visibility() != VISIBLE && !m_ignoresStyleVisibility) {
         m_textBox = 0;
-        return;
-    }
-    String str = renderer->text();
-    unsigned start = m_offset;
-    unsigned end = (m_node == m_endContainer) ? static_cast<unsigned>(m_endOffset) : INT_MAX;
-    while (m_textBox) {
-        unsigned textBoxStart = m_textBox->start();
-        unsigned runStart = std::max(textBoxStart, start);
+    } else {
+        String str = renderer->text();
+        unsigned start = m_offset;
+        unsigned end = (m_node == m_endContainer) ? static_cast<unsigned>(m_endOffset) : INT_MAX;
+        while (m_textBox) {
+            unsigned textBoxStart = m_textBox->start();
+            unsigned runStart = std::max(textBoxStart, start);
 
-        // Check for collapsed space at the start of this run.
-        InlineTextBox* firstTextBox = renderer->containsReversedText() ? (m_sortedTextBoxes.isEmpty() ? 0 : m_sortedTextBoxes[0]) : renderer->firstTextBox();
-        bool needSpace = m_lastTextNodeEndedWithCollapsedSpace
-            || (m_textBox == firstTextBox && textBoxStart == runStart && runStart > 0);
-        if (needSpace && !renderer->style()->isCollapsibleWhiteSpace(m_lastCharacter) && m_lastCharacter) {
-            if (m_lastTextNode == m_node && runStart > 0 && str[runStart - 1] == ' ') {
-                unsigned spaceRunStart = runStart - 1;
-                while (spaceRunStart > 0 && str[spaceRunStart - 1] == ' ')
-                    --spaceRunStart;
-                emitText(m_node, renderer, spaceRunStart, spaceRunStart + 1);
-            } else {
-                emitCharacter(space, m_node, 0, runStart, runStart);
-            }
-            return;
-        }
-        unsigned textBoxEnd = textBoxStart + m_textBox->len();
-        unsigned runEnd = std::min(textBoxEnd, end);
-
-        // Determine what the next text box will be, but don't advance yet
-        InlineTextBox* nextTextBox = nullptr;
-        if (renderer->containsReversedText()) {
-            if (m_sortedTextBoxesPosition + 1 < m_sortedTextBoxes.size())
-                nextTextBox = m_sortedTextBoxes[m_sortedTextBoxesPosition + 1];
-        } else {
-            nextTextBox = m_textBox->nextTextBox();
-        }
-        ASSERT(!nextTextBox || nextTextBox->renderer() == renderer);
-
-        if (runStart < runEnd) {
-            // Handle either a single newline character (which becomes a space),
-            // or a run of characters that does not include a newline.
-            // This effectively translates newlines to spaces without copying the text.
-            if (str[runStart] == '\n') {
-                emitCharacter(space, m_node, 0, runStart, runStart + 1);
-                m_offset = runStart + 1;
-            } else {
-                size_t subrunEnd = str.find('\n', runStart);
-                if (subrunEnd == kNotFound || subrunEnd > runEnd)
-                    subrunEnd = runEnd;
-
-                m_offset = subrunEnd;
-                emitText(m_node, renderer, runStart, subrunEnd);
-            }
-
-            // If we are doing a subrun that doesn't go to the end of the text box,
-            // come back again to finish handling this text box; don't advance to the next one.
-            if (static_cast<unsigned>(m_positionEndOffset) < textBoxEnd)
+            // Check for collapsed space at the start of this run.
+            InlineTextBox* firstTextBox = renderer->containsReversedText() ? (m_sortedTextBoxes.isEmpty() ? 0 : m_sortedTextBoxes[0]) : renderer->firstTextBox();
+            bool needSpace = m_lastTextNodeEndedWithCollapsedSpace
+                || (m_textBox == firstTextBox && textBoxStart == runStart && runStart > 0);
+            if (needSpace && !renderer->style()->isCollapsibleWhiteSpace(m_lastCharacter) && m_lastCharacter) {
+                if (m_lastTextNode == m_node && runStart > 0 && str[runStart - 1] == ' ') {
+                    unsigned spaceRunStart = runStart - 1;
+                    while (spaceRunStart > 0 && str[spaceRunStart - 1] == ' ')
+                        --spaceRunStart;
+                    emitText(m_node, renderer, spaceRunStart, spaceRunStart + 1);
+                } else {
+                    emitCharacter(space, m_node, 0, runStart, runStart);
+                }
                 return;
+            }
+            unsigned textBoxEnd = textBoxStart + m_textBox->len();
+            unsigned runEnd = std::min(textBoxEnd, end);
 
-            // Advance and return
-            unsigned nextRunStart = nextTextBox ? nextTextBox->start() : str.length();
-            if (nextRunStart > runEnd)
-                m_lastTextNodeEndedWithCollapsedSpace = true; // collapsed space between runs or at the end
+            // Determine what the next text box will be, but don't advance yet
+            InlineTextBox* nextTextBox = nullptr;
+            if (renderer->containsReversedText()) {
+                if (m_sortedTextBoxesPosition + 1 < m_sortedTextBoxes.size())
+                    nextTextBox = m_sortedTextBoxes[m_sortedTextBoxesPosition + 1];
+            } else {
+                nextTextBox = m_textBox->nextTextBox();
+            }
+
+            // FIXME: Based on the outcome of crbug.com/446502 it's possible we can
+            //   remove this block. The reason we new it now is because BIDI and
+            //   FirstLetter seem to have different ideas of where things can split.
+            //   FirstLetter takes the punctuation + first letter, and BIDI will
+            //   split out the punctuation and possibly reorder it.
+            if (nextTextBox && nextTextBox->renderer() != renderer) {
+                if (runStart < runEnd && static_cast<unsigned>(m_positionEndOffset) < textBoxEnd)
+                    return;
+
+                m_textBox = nextTextBox;
+                if (renderer->containsReversedText())
+                    ++m_sortedTextBoxesPosition;
+                continue;
+            }
+            ASSERT(!nextTextBox || nextTextBox->renderer() == renderer);
+
+            if (runStart < runEnd) {
+                // Handle either a single newline character (which becomes a space),
+                // or a run of characters that does not include a newline.
+                // This effectively translates newlines to spaces without copying the text.
+                if (str[runStart] == '\n') {
+                    emitCharacter(space, m_node, 0, runStart, runStart + 1);
+                    m_offset = runStart + 1;
+                } else {
+                    size_t subrunEnd = str.find('\n', runStart);
+                    if (subrunEnd == kNotFound || subrunEnd > runEnd)
+                        subrunEnd = runEnd;
+
+                    m_offset = subrunEnd;
+                    emitText(m_node, renderer, runStart, subrunEnd);
+                }
+
+                // If we are doing a subrun that doesn't go to the end of the text box,
+                // come back again to finish handling this text box; don't advance to the next one.
+                if (static_cast<unsigned>(m_positionEndOffset) < textBoxEnd)
+                    return;
+
+                // Advance and return
+                unsigned nextRunStart = nextTextBox ? nextTextBox->start() : str.length();
+                if (nextRunStart > runEnd)
+                    m_lastTextNodeEndedWithCollapsedSpace = true; // collapsed space between runs or at the end
+
+                m_textBox = nextTextBox;
+                if (renderer->containsReversedText())
+                    ++m_sortedTextBoxesPosition;
+                return;
+            }
+            // Advance and continue
             m_textBox = nextTextBox;
             if (renderer->containsReversedText())
                 ++m_sortedTextBoxesPosition;
-            return;
         }
-        // Advance and continue
-        m_textBox = nextTextBox;
-        if (renderer->containsReversedText())
-            ++m_sortedTextBoxesPosition;
     }
+
     if (!m_textBox && m_remainingTextBox) {
         m_textBox = m_remainingTextBox;
         m_remainingTextBox = 0;
@@ -761,34 +783,42 @@ void TextIterator::handleTextBox()
     }
 }
 
-static inline RenderText* firstRenderTextInFirstLetter(RenderBoxModelObject* firstLetter)
-{
-    if (!firstLetter)
-        return 0;
-
-    // FIXME: Should this check descendent objects?
-    for (RenderObject* current = firstLetter->slowFirstChild(); current; current = current->nextSibling()) {
-        if (current->isText())
-            return toRenderText(current);
-    }
-    return 0;
-}
-
 void TextIterator::handleTextNodeFirstLetter(RenderTextFragment* renderer)
 {
-    if (renderer->firstLetter()) {
-        RenderBoxModelObject* r = renderer->firstLetter();
-        if (r->style()->visibility() != VISIBLE && !m_ignoresStyleVisibility)
-            return;
-        if (RenderText* firstLetter = firstRenderTextInFirstLetter(r)) {
-            m_handledFirstLetter = true;
-            m_remainingTextBox = m_textBox;
-            m_textBox = firstLetter->firstTextBox();
-            m_sortedTextBoxes.clear();
-            m_firstLetterText = firstLetter;
-        }
-    }
     m_handledFirstLetter = true;
+
+    if (!renderer->isRemainingTextRenderer())
+        return;
+
+    FirstLetterPseudoElement* firstLetterElement = renderer->firstLetterPseudoElement();
+    if (!firstLetterElement)
+        return;
+
+    RenderObject* pseudoRenderer = firstLetterElement->renderer();
+    if (pseudoRenderer->style()->visibility() != VISIBLE && !m_ignoresStyleVisibility)
+        return;
+
+    RenderObject* firstLetter = pseudoRenderer->slowFirstChild();
+    ASSERT(firstLetter);
+
+    m_remainingTextBox = m_textBox;
+    m_textBox = toRenderText(firstLetter)->firstTextBox();
+    m_sortedTextBoxes.clear();
+    m_firstLetterText = toRenderText(firstLetter);
+}
+
+static bool supportsAltText(Node* m_node)
+{
+    if (!m_node->isHTMLElement())
+        return false;
+    HTMLElement& element = toHTMLElement(*m_node);
+
+    // FIXME: Add isSVGImageElement.
+    if (isHTMLImageElement(element))
+        return true;
+    if (isHTMLInputElement(toHTMLElement(*m_node)) && toHTMLInputElement(*m_node).isImage())
+        return true;
+    return false;
 }
 
 bool TextIterator::handleReplacedElement()
@@ -831,8 +861,8 @@ bool TextIterator::handleReplacedElement()
     m_positionEndOffset = 1;
     m_singleCharacterBuffer = 0;
 
-    if (m_emitsImageAltText && renderer->isImage() && renderer->isRenderImage()) {
-        m_text = toRenderImage(renderer)->altText();
+    if (m_emitsImageAltText && supportsAltText(m_node)) {
+        m_text = toHTMLElement(m_node)->altText();
         if (!m_text.isEmpty()) {
             m_textLength = m_text.length();
             m_lastCharacter = m_text[m_textLength - 1];
@@ -850,12 +880,16 @@ bool TextIterator::hasVisibleTextNode(RenderText* renderer)
 {
     if (renderer->style()->visibility() == VISIBLE)
         return true;
-    if (renderer->isTextFragment()) {
-        RenderTextFragment* fragment = toRenderTextFragment(renderer);
-        if (fragment->firstLetter() && fragment->firstLetter()->style()->visibility() == VISIBLE)
-            return true;
-    }
-    return false;
+
+    if (!renderer->isTextFragment())
+        return false;
+
+    RenderTextFragment* fragment = toRenderTextFragment(renderer);
+    if (!fragment->isRemainingTextRenderer())
+        return false;
+
+    RenderObject* pseudoElementRenderer = fragment->firstLetterPseudoElement()->renderer();
+    return pseudoElementRenderer && pseudoElementRenderer->style()->visibility() == VISIBLE;
 }
 
 static bool shouldEmitTabBeforeNode(Node* node)
@@ -1049,7 +1083,7 @@ bool TextIterator::shouldRepresentNodeOffsetZero()
     // Additionally, if the range we are iterating over contains huge sections of unrendered content,
     // we would create VisiblePositions on every call to this function without this check.
     if (!m_node->renderer() || m_node->renderer()->style()->visibility() != VISIBLE
-        || (m_node->renderer()->isRenderBlockFlow() && !toRenderBlock(m_node->renderer())->height() && !isHTMLBodyElement(*m_node)))
+        || (m_node->renderer()->isRenderBlockFlow() && !toRenderBlock(m_node->renderer())->size().height() && !isHTMLBodyElement(*m_node)))
         return false;
 
     // The startPos.isNotNull() check is needed because the start could be before the body,
@@ -1409,7 +1443,7 @@ void SimplifiedBackwardsTextIterator::advance()
                 // FIXME: What about CDATA_SECTION_NODE?
                 if (renderer->style()->visibility() == VISIBLE && m_offset > 0)
                     m_handledNode = handleTextNode();
-            } else if (renderer && (renderer->isImage() || renderer->isRenderPart())) {
+            } else if (renderer && (renderer->isRenderPart() || supportsAltText(m_node))) {
                 if (renderer->style()->visibility() == VISIBLE && m_offset > 0)
                     m_handledNode = handleReplacedElement();
             } else {
@@ -1528,7 +1562,14 @@ RenderText* SimplifiedBackwardsTextIterator::handleFirstLetter(int& startOffset,
 
     m_shouldHandleFirstLetter = false;
     offsetInNode = 0;
-    RenderText* firstLetterRenderer = firstRenderTextInFirstLetter(fragment->firstLetter());
+
+    ASSERT(fragment->isRemainingTextRenderer());
+    ASSERT(fragment->firstLetterPseudoElement());
+
+    RenderObject* pseudoElementRenderer = fragment->firstLetterPseudoElement()->renderer();
+    ASSERT(pseudoElementRenderer);
+    ASSERT(pseudoElementRenderer->slowFirstChild());
+    RenderText* firstLetterRenderer = toRenderText(pseudoElementRenderer->slowFirstChild());
 
     m_offset = firstLetterRenderer->caretMaxOffset();
     m_offset += collapsedSpaceLength(firstLetterRenderer, m_offset);

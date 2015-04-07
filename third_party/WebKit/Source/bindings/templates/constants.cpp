@@ -32,25 +32,25 @@ static const V8DOMConfiguration::ConstantConfiguration {{v8_class}}Constants[] =
     {{constant_configuration(constant)}},
     {% endfor %}
 };
-V8DOMConfiguration::installConstants(functionTemplate, prototypeTemplate, {{v8_class}}Constants, WTF_ARRAY_LENGTH({{v8_class}}Constants), isolate);
+V8DOMConfiguration::installConstants(isolate, functionTemplate, prototypeTemplate, {{v8_class}}Constants, WTF_ARRAY_LENGTH({{v8_class}}Constants));
 {% endif %}
 {# Runtime-enabled constants #}
 {% for constant in runtime_enabled_constants %}
 {% filter runtime_enabled(constant.runtime_enabled_function) %}
 static const V8DOMConfiguration::ConstantConfiguration constantConfiguration = {{constant_configuration(constant)}};
-V8DOMConfiguration::installConstants(functionTemplate, prototypeTemplate, &constantConfiguration, 1, isolate);
+V8DOMConfiguration::installConstants(isolate, functionTemplate, prototypeTemplate, &constantConfiguration, 1);
 {% endfilter %}
 {% endfor %}
 {# Constants with [DeprecateAs] or [MeasureAs] #}
 {% for constant in special_getter_constants %}
-V8DOMConfiguration::installConstant(functionTemplate, prototypeTemplate, "{{constant.name}}", {{cpp_class}}V8Internal::{{constant.name}}ConstantGetterCallback, isolate);
+V8DOMConfiguration::installConstant(isolate, functionTemplate, prototypeTemplate, "{{constant.name}}", {{cpp_class}}V8Internal::{{constant.name}}ConstantGetterCallback);
 {% endfor %}
 {# Check constants #}
 {% if not do_not_check_constants %}
 {% for constant in constants %}
 {% if constant.idl_type not in ('Double', 'Float', 'String') %}
 {% set constant_cpp_class = constant.cpp_class or cpp_class %}
-COMPILE_ASSERT({{constant.value}} == {{constant_cpp_class}}::{{constant.reflected_name}}, TheValueOf{{cpp_class}}_{{constant.reflected_name}}DoesntMatchWithImplementation);
+static_assert({{constant.value}} == {{constant_cpp_class}}::{{constant.reflected_name}}, "the value of {{cpp_class}}_{{constant.reflected_name}} does not match with implementation");
 {% endif %}
 {% endfor %}
 {% endif %}

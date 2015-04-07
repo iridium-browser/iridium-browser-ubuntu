@@ -29,8 +29,13 @@ ChromeBrowserMainPartsAndroid::ChromeBrowserMainPartsAndroid(
 ChromeBrowserMainPartsAndroid::~ChromeBrowserMainPartsAndroid() {
 }
 
-void ChromeBrowserMainPartsAndroid::PreProfileInit() {
-  TRACE_EVENT0("startup", "ChromeBrowserMainPartsAndroid::PreProfileInit")
+int ChromeBrowserMainPartsAndroid::PreCreateThreads() {
+  TRACE_EVENT0("startup", "ChromeBrowserMainPartsAndroid::PreCreateThreads")
+
+  // The CrashDumpManager must be initialized before any child process is
+  // created (as they need to access it during creation). Such processes
+  // are created on the PROCESS_LAUNCHER thread, and so the manager is
+  // initialized before that thread is created.
 #if defined(GOOGLE_CHROME_BUILD)
   // TODO(jcivelli): we should not initialize the crash-reporter when it was not
   // enabled. Right now if it is disabled we still generate the minidumps but we
@@ -42,8 +47,8 @@ void ChromeBrowserMainPartsAndroid::PreProfileInit() {
 
   // Allow Breakpad to be enabled in Chromium builds for testing purposes.
   if (!breakpad_enabled)
-    breakpad_enabled = CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableCrashReporterForTesting);
+    breakpad_enabled = base::CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kEnableCrashReporterForTesting);
 
   if (breakpad_enabled) {
     base::FilePath crash_dump_dir;
@@ -51,7 +56,7 @@ void ChromeBrowserMainPartsAndroid::PreProfileInit() {
     crash_dump_manager_.reset(new breakpad::CrashDumpManager(crash_dump_dir));
   }
 
-  ChromeBrowserMainParts::PreProfileInit();
+  return ChromeBrowserMainParts::PreCreateThreads();
 }
 
 void ChromeBrowserMainPartsAndroid::PostProfileInit() {

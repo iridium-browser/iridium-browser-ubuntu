@@ -63,9 +63,17 @@ DEFINE_NODE_FACTORY(SVGFilterElement)
 void SVGFilterElement::trace(Visitor* visitor)
 {
 #if ENABLE(OILPAN)
+    visitor->trace(m_x);
+    visitor->trace(m_y);
+    visitor->trace(m_width);
+    visitor->trace(m_height);
+    visitor->trace(m_filterUnits);
+    visitor->trace(m_primitiveUnits);
+    visitor->trace(m_filterRes);
     visitor->trace(m_clientsToAdd);
 #endif
     SVGElement::trace(visitor);
+    SVGURIReference::trace(visitor);
 }
 
 void SVGFilterElement::setFilterRes(unsigned x, unsigned y)
@@ -133,9 +141,8 @@ RenderObject* SVGFilterElement::createRenderer(RenderStyle*)
 {
     RenderSVGResourceFilter* renderer = new RenderSVGResourceFilter(this);
 
-    WillBeHeapHashSet<RefPtrWillBeMember<Node> >::iterator layerEnd = m_clientsToAdd.end();
-    for (WillBeHeapHashSet<RefPtrWillBeMember<Node> >::iterator it = m_clientsToAdd.begin(); it != layerEnd; ++it)
-        renderer->addClientRenderLayer(it->get());
+    for (const RefPtrWillBeMember<Node>& node : m_clientsToAdd)
+        renderer->addClientRenderLayer(node.get());
     m_clientsToAdd.clear();
 
     return renderer;

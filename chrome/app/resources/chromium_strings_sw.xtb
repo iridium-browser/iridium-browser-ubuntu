@@ -38,7 +38,6 @@ Baadhi ya vipengele huenda visipatikane na mabadiliko katika mapendeleo hayatahi
 <translation id="3883381313049582448">Tumia nenosiri lililozalishwa na Chromium</translation>
 <translation id="3549345495227188780">Anza kutumia Chromium OS</translation>
 <translation id="1668054258064581266">Baada ya kuondoa akaunti yako kwenye Chromium, huenda ukahitajika kupakia upya vichupo vyako vilivyo wazi ili kuanza kufanya kazi.</translation>
-<translation id="6953661834318318668">Upauzana wa Chromium</translation>
 <translation id="4285930937574705105">Usanidi umeshindwa kwa sababu ya hitilafu isiyojulikana. Ikiwa Chromium inaendesha sasa, tafadhali ifunge na ujaribu tena.</translation>
 <translation id="1396446129537741364">Chromium inajaribu kuonyesha manenosiri.</translation>
 <translation id="8987477933582888019">Kivinjari cha Wavuti</translation>
@@ -94,6 +93,7 @@ Baadhi ya vipengele huenda visipatikane na mabadiliko katika mapendeleo hayatahi
 <translation id="7473891865547856676">La Asante</translation>
 <translation id="9191268552238695869">Msimamizi amesakinisha Chromium kwenye mfumo, na inapatikana kwa watumiaji wote. Chromium ya kiwango cha mfumo itabadilisha usakinishaji wa kiwango cha mtumiaji sasa.</translation>
 <translation id="3509308970982693815">Tafadhali funga madirisha yote ya Chromium na ujaribu tena.</translation>
+<translation id="8851136666856101339">kuu</translation>
 <translation id="4077262827416206768">Tafadhali funga madirisha yote ya Chromium na uizindue upya Chromium ili mabadiliko haya yaanze kufanya kazi.</translation>
 <translation id="6475912303565314141">Pia inadhibiti ukurasa unaoonyeshwa unapoanzisha Chromium.</translation>
 <translation id="1725059042853530269"><ph name="FILE_NAME"/> inaweza kudhuru hali yako ya kuvinjari, kwa hivyo Chromium imeizuia.</translation>
@@ -156,6 +156,7 @@ Baadhi ya vipengele huenda visipatikane na mabadiliko katika mapendeleo hayatahi
 <translation id="275588974610408078">Kuripoti uharibifu hakupatikana katika Chromium.</translation>
 <translation id="5909170354645388250">Haitumiki katika Chromium. Kishika nafasi cha kuweka ramani za raslimali zikiwa zimesawazishwa. Inatarajia hoja moja: $1.</translation>
 <translation id="1144202035120576837">Kwa kawaida <ph name="SITE"/> hutumia usimbaji fiche ili kulinda maelezo yako. Chromium ilipojaribu kuunganisha kwenye <ph name="SITE"/> wakati huu, tovuti ilituma kitambulisho kisicho cha kawaida na batili. Huenda mvamizi anajaribu kujifanya kuwa <ph name="SITE"/>, au skrini ya kuingia kwenye Wi-Fi imeingilia muunganisho. Maelezo yako yangali salama kwa sababu Chromium ilisimamisha muunganisho kabla data yoyote haijabadilishwa.</translation>
+<translation id="2316129865977710310">La, asante</translation>
 <translation id="7937630085815544518">Uliingia kwenye Chromium kama <ph name="USER_EMAIL_ADDRESS"/>. Tafadhali tumia akaunti hiyo hiyo kuingia tena.</translation>
 <translation id="2685838254101182273">Chromium imekoma kusasisha na haiwezi kutumiwa tena na toleo hili la mfumo wako wa uendeshaji.</translation>
 <translation id="8684913864886094367">Chromium haikuzimika kwa njia sahihi.</translation>
@@ -166,9 +167,10 @@ Baadhi ya vipengele huenda visipatikane na mabadiliko katika mapendeleo hayatahi
 <translation id="2673087257647337101">Inakaribia kusasishwa! Anzisha Chromium upya ili kukamilisha kusasisha.</translation>
 <translation id="1293235220023151515">Usakinishi tatanishi wa Chromium ulipatikana kwenye mfumo. Tafadhali uondoe na ujaribu tena.</translation>
 <translation id="5398878173008909840">Kuna toleo jipya la Chromium linalopatikana.</translation>
-<translation id="2648074677641340862">Hitilafu ya mfumo wa uendeshaji ilitokea wakati wa usakinishaji. Tafadhali pakua Chromium tena.</translation>
+<translation id="2648074677641340862">Hitilafu ya mfumo wa uendeshaji imetokea wakati wa usakinishaji. Tafadhali pakua Chromium tena.</translation>
 <translation id="5942520288919337908"><ph name="EXTENSION_NAME"/> imeongezwa kwenye Chromium.</translation>
 <translation id="549669000822060376">Tafadhali subiri Chromium inaposakinisha sasisho mpya ya mfumo.</translation>
+<translation id="1240763998429950591">Chromium haikuweza kupata toleo jipya, kwa hivyo unakosa vipengele vipya na kurekebishwa kwa usalama. Unahitaji kusasisha Chromium.</translation>
 <translation id="6930860321615955692">https://support.google.com/chrome/?p=ib_chromeframe</translation>
 <translation id="3281987435599047980">hutuma neno na maudhui yanayoizingira kwa Huduma ya Tafuta na Google, kurudisha ufafanuzi, picha, matokeo ya utafutaji, na maelezo mengine.</translation>
 <translation id="4559775032954821361">Nenda kwenye
@@ -207,6 +209,7 @@ Baadhi ya vipengele huenda visipatikane. Tafadhali bainisha saraka tofauti ya wa
 <translation id="2966088006374919794">Chromium inahitaji kuzindua programu ya nje ili kushughulikia viungo vya <ph name="SCHEME"/>. Kiungo kilichoombwa ni <ph name="PROTOLINK"/>.</translation>
 <translation id="2558235863893655150">Je, unataka Chrome ihifadhi nenosiri lako?</translation>
 <translation id="6485906693002546646">Unatumia <ph name="PROFILE_EMAIL"/> kusawazisha vitu vyako vya Chromium. Ili usasishe mapendeleo yako ya usawazishaji au utumie Chromium bila akaunti ya Google, tembelea <ph name="SETTINGS_LINK"/>.</translation>
+<translation id="705851970750939768">Sasisha Chromium</translation>
 <translation id="5772805321386874569">(inahitaji uanzishaji upya wa  <ph name="BEGIN_BUTTON"/>Chromium<ph name="END_BUTTON"/>)</translation>
 <translation id="1688750314291223739">Sanidi Usawazishaji ili uhifadhi vipengele vyako vya kivinjari vilivyobinafsishwa kwenye mtandao na uvifikie kutoka Chromium katika kompyuta yoyote</translation>
 <translation id="8610831143142469229">Ruhusu Chromium ifikie mtandao kwenye mipangilio yako ya ngome au kingavirusi.</translation>

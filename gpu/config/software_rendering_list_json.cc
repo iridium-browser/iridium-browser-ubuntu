@@ -18,7 +18,7 @@ const char kSoftwareRenderingListJson[] = LONG_STRING_CONST(
 {
   "name": "software rendering list",
   // Please update the version number whenever you change this file.
-  "version": "9.13",
+  "version": "9.18",
   "entries": [
     {
       "id": 1,
@@ -808,15 +808,14 @@ LONG_STRING_CONST(
     {
       "id": 78,
       "description": "Accelerated video decode interferes with GPU sandbox on older Intel drivers",
-      "cr_bugs": [180695],
+      "cr_bugs": [180695, 298968, 436968],
       "os": {
         "type": "win"
       },
       "vendor_id": "0x8086",
       "driver_version": {
-        "op": "between",
-        "value": "8.15.10.1883",
-        "value2": "8.15.10.2702"
+        "op": "<=",
+        "value": "8.15.10.2702"
       },
       "features": [
         "accelerated_video_decode"
@@ -1050,23 +1049,35 @@ LONG_STRING_CONST(
     },
     {
       "id": 96,
-      "description": "GPU rasterization is whitelisted on select devices on Android",
-      "cr_bugs": [362779],
+      "description": "GPU rasterization whitelist",
+      "cr_bugs": [362779,424970],
       "os": {
         "type": "android"
       },
       "exceptions": [
         {
-          "machine_model_name": ["Nexus 4", "Nexus 5", "Nexus 7",
-                                 "XT1049", "XT1050", "XT1052", "XT1053",
-                                 "XT1055", "XT1056", "XT1058", "XT1060",
-                                 "HTC One",
-                                 "C5303", "C6603", "C6903",
-                                 "GT-I9195",
-                                 "GT-I9505",
-                                 "SAMSUNG-SCH-I337", "SCH-I545", "SGH-M919",
-                                 "SM-N900", "SM-N9005", "SPH-L720",
-                                 "XT907", "XT1032", "XT1033", "XT1080"]
+          "os": {
+            "type": "android"
+          },
+          "gl_renderer": "Adreno (TM) 3.*"
+        },
+        {
+          "os": {
+            "type": "android"
+          },
+          "gl_renderer": "NVIDIA.*"
+        },
+        {
+          "os": {
+            "type": "android"
+          },
+          "gl_renderer": "VideoCore IV.*"
+        },
+        {
+          "os": {
+            "type": "android"
+          },
+          "gl_renderer": "Immersion.*"
         },
         {
           "os": {
@@ -1178,6 +1189,19 @@ LONG_STRING_CONST(
         }
       },
       "gl_renderer": "PowerVR Rogue.*",
+      "features": [
+        "accelerated_2d_canvas",
+        "gpu_rasterization"
+      ]
+    },
+    {
+      "id": 105,
+      "description": "GPU raster broken on PowerVR SGX even on Lollipop",
+      "cr_bugs": [461456],
+      "os": {
+        "type": "android"
+      },
+      "gl_renderer": "PowerVR SGX.*",
       "features": [
         "accelerated_2d_canvas",
         "gpu_rasterization"

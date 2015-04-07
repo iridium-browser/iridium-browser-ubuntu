@@ -59,16 +59,19 @@ const QuicByteCount kMaxPacketSize = 1452;
 // Default maximum packet size used in Linux TCP implementations.
 const QuicByteCount kDefaultTCPMSS = 1460;
 
-// Maximum size of the initial congestion window in packets.
-const QuicPacketCount kDefaultInitialWindow = 10;
-const QuicPacketCount kMaxInitialWindow = 100;
+// We match SPDY's use of 32 when secure (since we'd compete with SPDY).
+const QuicPacketCount kInitialCongestionWindowSecure = 32;
+// Be conservative, and just use double a typical TCP ICWND for HTTP.
+const QuicPacketCount kInitialCongestionWindowInsecure = 20;
 
-// Default size of initial flow control window, for both stream and session.
-const uint32 kDefaultFlowControlSendWindow = 16 * 1024;  // 16 KB
+// Minimum size of initial flow control window, for both stream and session.
+const uint32 kMinimumFlowControlSendWindow = 16 * 1024;  // 16 KB
 
-// Maximum size of the congestion window, in packets, for TCP congestion control
-// algorithms.
-const size_t kMaxTcpCongestionWindow = 200;
+// Minimum size of the CWND, in packets, when doing bandwidth resumption.
+const QuicPacketCount kMinCongestionWindowForBandwidthResumption = 10;
+
+// Maximum size of the CWND, in packets, for TCP congestion control algorithms.
+const QuicPacketCount kMaxTcpCongestionWindow = 200;
 
 // Default size of the socket receive buffer in bytes.
 const QuicByteCount kDefaultSocketReceiveBuffer = 256 * 1024;
@@ -307,7 +310,6 @@ enum QuicVersion {
   // Special case to indicate unknown/unsupported QUIC version.
   QUIC_VERSION_UNSUPPORTED = 0,
 
-  QUIC_VERSION_19 = 19,  // Connection level flow control.
   QUIC_VERSION_21 = 21,  // Headers/crypto streams are flow controlled.
   QUIC_VERSION_22 = 22,  // Send Server Config Update messages on crypto stream.
   QUIC_VERSION_23 = 23,  // Timestamp in the ack frame.
@@ -321,8 +323,7 @@ enum QuicVersion {
 // IMPORTANT: if you are adding to this list, follow the instructions at
 // http://sites/quic/adding-and-removing-versions
 static const QuicVersion kSupportedQuicVersions[] = {QUIC_VERSION_23,
-                                                     QUIC_VERSION_22,
-                                                     QUIC_VERSION_19};
+                                                     QUIC_VERSION_22};
 
 typedef std::vector<QuicVersion> QuicVersionVector;
 
@@ -1086,7 +1087,7 @@ struct NET_EXPORT_PRIVATE TransmissionInfo {
   QuicTime sent_time;
   // Zero when the packet is serialized, non-zero once it's sent.
   QuicByteCount bytes_sent;
-  size_t nack_count;
+  QuicPacketCount nack_count;
   // Reason why this packet was transmitted.
   TransmissionType transmission_type;
   // Stores the sequence numbers of all transmissions of this packet.
@@ -1096,6 +1097,8 @@ struct NET_EXPORT_PRIVATE TransmissionInfo {
   bool in_flight;
   // True if the packet can never be acked, so it can be removed.
   bool is_unackable;
+  // True if the packet is an FEC packet.
+  bool is_fec_packet;
 };
 
 }  // namespace net

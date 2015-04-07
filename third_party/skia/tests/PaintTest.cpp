@@ -21,7 +21,7 @@
 static size_t uni_to_utf8(const SkUnichar src[], void* dst, int count) {
     char* u8 = (char*)dst;
     for (int i = 0; i < count; ++i) {
-        int n = SkUTF8_FromUnichar(src[i], u8);
+        int n = SkToInt(SkUTF8_FromUnichar(src[i], u8));
         u8 += n;
     }
     return u8 - (char*)dst;
@@ -30,7 +30,7 @@ static size_t uni_to_utf8(const SkUnichar src[], void* dst, int count) {
 static size_t uni_to_utf16(const SkUnichar src[], void* dst, int count) {
     uint16_t* u16 = (uint16_t*)dst;
     for (int i = 0; i < count; ++i) {
-        int n = SkUTF16_FromUnichar(src[i], u16);
+        int n = SkToInt(SkUTF16_FromUnichar(src[i], u16));
         u16 += n;
     }
     return (char*)u16 - (char*)dst;
@@ -344,3 +344,30 @@ DEF_TEST(Paint_getHash, r) {
     paint.setHinting(SkPaint::kNormal_Hinting);
     REPORTER_ASSERT(r, paint.getHash() == defaultHash);
 }
+
+#include "SkColorMatrixFilter.h"
+
+DEF_TEST(Paint_nothingToDraw, r) {
+    SkPaint paint;
+
+    REPORTER_ASSERT(r, !paint.nothingToDraw());
+    paint.setAlpha(0);
+    REPORTER_ASSERT(r, paint.nothingToDraw());
+
+    paint.setAlpha(0xFF);
+    paint.setXfermodeMode(SkXfermode::kDst_Mode);
+    REPORTER_ASSERT(r, paint.nothingToDraw());
+
+    paint.setAlpha(0);
+    paint.setXfermodeMode(SkXfermode::kSrcOver_Mode);
+
+    SkColorMatrix cm;
+    cm.setIdentity();   // does not change alpha
+    paint.setColorFilter(SkColorMatrixFilter::Create(cm))->unref();
+    REPORTER_ASSERT(r, paint.nothingToDraw());
+
+    cm.postTranslate(0, 0, 0, 1);    // wacks alpha
+    paint.setColorFilter(SkColorMatrixFilter::Create(cm))->unref();
+    REPORTER_ASSERT(r, !paint.nothingToDraw());
+}
+

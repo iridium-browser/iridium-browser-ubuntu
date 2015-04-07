@@ -64,8 +64,10 @@ namespace {
 const char kDevToolsChannelNameFormat[] = "%s_devtools_remote";
 
 const char kFrontEndURL[] =
-    "http://chrome-devtools-frontend.appspot.com/serve_rev/%s/devtools.html";
+    "http://chrome-devtools-frontend.appspot.com/serve_rev/%s/inspector.html";
 const char kTetheringSocketName[] = "chrome_devtools_tethering_%d_%d";
+
+const int kBackLog = 10;
 
 bool AuthorizeSocketAccessWithDebugPermission(
     const net::UnixDomainServerSocket::Credentials& credentials) {
@@ -86,7 +88,7 @@ class DevToolsServerDelegate : public content::DevToolsHttpHandlerDelegate {
         auth_callback_(auth_callback) {
   }
 
-  virtual std::string GetDiscoveryPageHTML() override {
+  std::string GetDiscoveryPageHTML() override {
     // TopSites updates itself after a delay. Ask TopSites to update itself
     // when we're about to show the remote debugging landing page.
     content::BrowserThread::PostTask(
@@ -97,22 +99,24 @@ class DevToolsServerDelegate : public content::DevToolsHttpHandlerDelegate {
         IDR_DEVTOOLS_DISCOVERY_PAGE_HTML).as_string();
   }
 
-  virtual bool BundlesFrontendResources() override {
+  bool BundlesFrontendResources() override {
     return false;
   }
 
-  virtual base::FilePath GetDebugFrontendDir() override {
+  base::FilePath GetDebugFrontendDir() override {
     return base::FilePath();
   }
 
-  virtual scoped_ptr<net::StreamListenSocket> CreateSocketForTethering(
-      net::StreamListenSocket::Delegate* delegate,
-      std::string* name) override {
+  scoped_ptr<net::ServerSocket>
+  CreateSocketForTethering(std::string* name) override {
     *name = base::StringPrintf(
         kTetheringSocketName, getpid(), ++last_tethering_socket_);
-    return net::deprecated::UnixDomainListenSocket::
-        CreateAndListenWithAbstractNamespace(
-            *name, "", delegate, auth_callback_);
+    scoped_ptr<net::UnixDomainServerSocket> socket(
+        new net::UnixDomainServerSocket(auth_callback_, true));
+    if (socket->ListenWithAddressAndPort(*name, 0, kBackLog) != net::OK)
+      return scoped_ptr<net::ServerSocket>();
+
+    return socket.Pass();
   }
 
  private:
@@ -177,10 +181,10 @@ class UnixDomainServerSocketFactory
 
 DevToolsServer::DevToolsServer(const std::string& socket_name_prefix)
     : socket_name_(base::StringPrintf(kDevToolsChannelNameFormat,
-                                      socket_name_prefix.c_str())),
-      protocol_handler_(NULL) {
+                                      socket_name_prefix.c_str())) {
   // Override the socket name if one is specified on the command line.
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch(switches::kRemoteDebuggingSocketName)) {
     socket_name_ = command_line.GetSwitchValueASCII(
         switches::kRemoteDebuggingSocketName);
@@ -201,20 +205,15 @@ void DevToolsServer::Start(bool allow_debug_permission) {
           base::Bind(&content::CanUserConnectToDevTools);
   scoped_ptr<content::DevToolsHttpHandler::ServerSocketFactory> factory(
       new UnixDomainServerSocketFactory(socket_name_, auth_callback));
-  protocol_handler_ = content::DevToolsHttpHandler::Start(
+  protocol_handler_.reset(content::DevToolsHttpHandler::Start(
       factory.Pass(),
       base::StringPrintf(kFrontEndURL, content::GetWebKitRevision().c_str()),
       new DevToolsServerDelegate(auth_callback),
-      base::FilePath());
+      base::FilePath()));
 }
 
 void DevToolsServer::Stop() {
-  if (!protocol_handler_)
-    return;
-  // Note that the call to Stop() below takes care of |protocol_handler_|
-  // deletion.
-  protocol_handler_->Stop();
-  protocol_handler_ = NULL;
+  protocol_handler_.reset();
 }
 
 bool DevToolsServer::IsStarted() const {

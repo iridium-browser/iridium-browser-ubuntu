@@ -18,6 +18,7 @@
 #include "gpu/command_buffer/client/transfer_buffer.h"
 #include "gpu/command_buffer/common/constants.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
+#include "gpu/command_buffer/common/value_state.h"
 #include "gpu/command_buffer/service/command_buffer_service.h"
 #include "gpu/command_buffer/service/context_group.h"
 #include "gpu/command_buffer/service/gl_context_virtual.h"
@@ -26,6 +27,7 @@
 #include "gpu/command_buffer/service/image_manager.h"
 #include "gpu/command_buffer/service/mailbox_manager_impl.h"
 #include "gpu/command_buffer/service/memory_tracking.h"
+#include "gpu/command_buffer/service/valuebuffer_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/gpu_memory_buffer.h"
 #include "ui/gl/gl_context.h"
@@ -139,6 +141,10 @@ scoped_ptr<gfx::GpuMemoryBuffer> GLManager::CreateGpuMemoryBuffer(
 }
 
 void GLManager::Initialize(const GLManager::Options& options) {
+  InitializeWithCommandLine(options, nullptr);
+}
+void GLManager::InitializeWithCommandLine(const GLManager::Options& options,
+                                          base::CommandLine* command_line) {
   const int32 kCommandBufferSize = 1024 * 1024;
   const size_t kStartTransferBufferSize = 4 * 1024 * 1024;
   const size_t kMinTransferBufferSize = 1 * 256 * 1024;
@@ -186,13 +192,20 @@ void GLManager::Initialize(const GLManager::Options& options) {
   attrib_helper.blue_size = 8;
   attrib_helper.alpha_size = 8;
   attrib_helper.depth_size = 16;
+  attrib_helper.stencil_size = 8;
   attrib_helper.Serialize(&attribs);
 
+  DCHECK(!command_line || !context_group);
   if (!context_group) {
+    scoped_refptr<gles2::FeatureInfo> feature_info;
+    if (command_line)
+      feature_info = new gles2::FeatureInfo(*command_line);
     context_group =
         new gles2::ContextGroup(mailbox_manager_.get(),
                                 NULL,
                                 new gpu::gles2::ShaderTranslatorCache,
+                                feature_info,
+                                NULL,
                                 NULL,
                                 options.bind_generates_resource);
   }
@@ -323,7 +336,11 @@ const gpu::gles2::FeatureInfo::Workarounds& GLManager::workarounds() const {
 }
 
 void GLManager::PumpCommands() {
-  decoder_->MakeCurrent();
+  if (!decoder_->MakeCurrent()) {
+    command_buffer_->SetContextLostReason(decoder_->GetContextLostReason());
+    command_buffer_->SetParseError(::gpu::error::kLostContext);
+    return;
+  }
   gpu_scheduler_->PutChanged();
   ::gpu::CommandBuffer::State state = command_buffer_->GetLastState();
   if (!context_lost_allowed_) {

@@ -6,11 +6,14 @@ pdf_use_skia = false
 
 config("pdfium_config") {
   cflags = []
+  include_dirs = [
+    "third_party/freetype/include"
+  ]
   defines = [
-    "FOXIT_CHROME_BUILD",
-    "_FXFT_VERSION_=2501",
+    "FT2_BUILD_LIBRARY",
     "_FPDFSDK_LIB",
     "_NO_GDIPLUS_",  # workaround text rendering issues on Windows
+    "OPJ_STATIC",
   ]
 
   if (pdf_use_skia) {
@@ -42,7 +45,6 @@ static_library("pdfium") {
     "fpdfsdk/include/fpdfdoc.h",
     "fpdfsdk/include/fpdfedit.h",
     "fpdfsdk/include/fpdfformfill.h",
-    "fpdfsdk/include/fpdfoom.h",
     "fpdfsdk/include/fpdftext.h",
     "fpdfsdk/include/fpdfview.h",
     "fpdfsdk/include/fpdf_dataavail.h",
@@ -60,7 +62,6 @@ static_library("pdfium") {
     "fpdfsdk/src/fpdfeditimg.cpp",
     "fpdfsdk/src/fpdfeditpage.cpp",
     "fpdfsdk/src/fpdfformfill.cpp",
-    "fpdfsdk/src/fpdfoom.cpp",
     "fpdfsdk/src/fpdfppo.cpp",
     "fpdfsdk/src/fpdfsave.cpp",
     "fpdfsdk/src/fpdftext.cpp",
@@ -88,7 +89,9 @@ static_library("pdfium") {
   configs += [ ":pdfium_config", "//build/config/compiler:no_chromium_code" ]
 
   deps = [
-    ":safemath",
+    "third_party:bigint",
+    "third_party:freetype",
+    "third_party:safemath",
     ":fdrm",
     ":formfiller",
     ":fpdfapi",
@@ -114,18 +117,6 @@ static_library("pdfium") {
 
 # Targets below this are only visible within this file.
 visibility = [ ":*" ]
-
-component("safemath") {
-  sources = [
-    "third_party/logging.h",
-    "third_party/macros.h",
-    "third_party/template_util.h",
-    "third_party/numerics/safe_conversions.h",
-    "third_party/numerics/safe_conversions_impl.h",
-    "third_party/numerics/safe_math.h",
-    "third_party/numerics/safe_math_impl.h",
-  ]
-}
 
 static_library("fdrm") {
   sources = [
@@ -265,7 +256,6 @@ static_library("fpdfapi") {
     "core/src/fpdfapi/fpdf_page/fpdf_page_graph_state.cpp",
     "core/src/fpdfapi/fpdf_page/fpdf_page_image.cpp",
     "core/src/fpdfapi/fpdf_page/fpdf_page_parser.cpp",
-    "core/src/fpdfapi/fpdf_page/fpdf_page_parser_new.cpp",
     "core/src/fpdfapi/fpdf_page/fpdf_page_parser_old.cpp",
     "core/src/fpdfapi/fpdf_page/fpdf_page_path.cpp",
     "core/src/fpdfapi/fpdf_page/fpdf_page_pattern.cpp",
@@ -585,34 +575,7 @@ static_library("fxge") {
     "core/src/fxge/fontdata/chromefontdata/FoxitSerifItalic.c",
     "core/src/fxge/fontdata/chromefontdata/FoxitSerifMM.c",
     "core/src/fxge/fontdata/chromefontdata/FoxitSymbol.c",
-    "core/src/fxge/fx_freetype/include/fxft_cffobjs.h",
-    "core/src/fxge/fx_freetype/include/fxft_cfftypes.h",
-    "core/src/fxge/fx_freetype/include/fxft_freetype.h",
-    "core/src/fxge/fx_freetype/include/fxft_ft2build.h",
-    "core/src/fxge/fx_freetype/include/fxft_ftmm.h",
-    "core/src/fxge/fx_freetype/include/fxft_ftobjs.h",
-    "core/src/fxge/fx_freetype/include/fxft_ftotval.h",
-    "core/src/fxge/fx_freetype/include/fxft_ftoutln.h",
-    "core/src/fxge/fx_freetype/include/fxft_ftstream.h",
-    "core/src/fxge/fx_freetype/include/fxft_tttables.h",
-    "core/src/fxge/fx_freetype/include/fxft_tttypes.h",
-    "core/src/fxge/fx_freetype/src/fxft_cff.c",
-    "core/src/fxge/fx_freetype/src/fxft_ftbase.c",
-    "core/src/fxge/fx_freetype/src/fxft_ftbitmap.c",
-    "core/src/fxge/fx_freetype/src/fxft_ftglyph.c",
-    "core/src/fxge/fx_freetype/src/fxft_ftinit.c",
-    "core/src/fxge/fx_freetype/src/fxft_ftlcdfil.c",
-    "core/src/fxge/fx_freetype/src/fxft_ftmm.c",
-    "core/src/fxge/fx_freetype/src/fxft_ftsystem.c",
-    "core/src/fxge/fx_freetype/src/fxft_psaux.c",
-    "core/src/fxge/fx_freetype/src/fxft_pshinter.c",
-    "core/src/fxge/fx_freetype/src/fxft_psmodule.c",
-    "core/src/fxge/fx_freetype/src/fxft_raster.c",
-    "core/src/fxge/fx_freetype/src/fxft_sfnt.c",
-    "core/src/fxge/fx_freetype/src/fxft_smooth.c",
-    "core/src/fxge/fx_freetype/src/fxft_truetype.c",
-    "core/src/fxge/fx_freetype/src/fxft_type1.c",
-    "core/src/fxge/fx_freetype/src/fxft_type1cid.c",
+    "core/src/fxge/freetype/fx_freetype.c",
     "core/src/fxge/ge/fx_ge.cpp",
     "core/src/fxge/ge/fx_ge_device.cpp",
     "core/src/fxge/ge/fx_ge_font.cpp",
@@ -657,7 +620,6 @@ static_library("fxge") {
     ]
     configs -= [
       "//build/config/win:lean_and_mean",
-      "//build/config/win:nominmax",
     ]
   }
 }
@@ -826,6 +788,22 @@ static_library("formfiller") {
     "fpdfsdk/src/formfiller/FFL_TextField.cpp",
     "fpdfsdk/src/formfiller/FFL_Utils.cpp",
   ]
+  configs -= [ "//build/config/compiler:chromium_code" ]
+  configs += [ ":pdfium_config", "//build/config/compiler:no_chromium_code" ]
+}
+
+test("pdfium_unittests") {
+  sources = [
+    "core/src/fxcrt/fx_basic_bstring_unittest.cpp",
+    "testing/fx_string_testhelpers.cpp",
+    "testing/fx_string_testhelpers.h",
+  ]
+  deps = [
+    "//testing/gtest",
+    "//testing/gtest:gtest_main",
+    ":pdfium"
+  ]
+  include_dirs = [ "." ]
   configs -= [ "//build/config/compiler:chromium_code" ]
   configs += [ ":pdfium_config", "//build/config/compiler:no_chromium_code" ]
 }

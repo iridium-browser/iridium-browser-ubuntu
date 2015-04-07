@@ -21,6 +21,7 @@
 #include "cc/layers/texture_layer_client.h"
 #include "content/common/content_export.h"
 #include "content/public/renderer/pepper_plugin_instance.h"
+#include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "content/renderer/mouse_lock_dispatcher.h"
 #include "gin/handle.h"
@@ -58,7 +59,7 @@
 #include "third_party/WebKit/public/web/WebUserGestureToken.h"
 #include "ui/base/ime/text_input_type.h"
 #include "ui/events/latency_info.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 #include "url/gurl.h"
 #include "v8/include/v8.h"
 
@@ -136,6 +137,8 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
 
   blink::WebPluginContainer* container() const { return container_; }
 
+  PepperPluginInstanceThrottler* throttler() const { return throttler_.get(); }
+
   // Returns the PP_Instance uniquely identifying this instance. Guaranteed
   // nonzero.
   PP_Instance pp_instance() const { return pp_instance_; }
@@ -196,7 +199,8 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
   // PPP_Instance and PPP_Instance_Private.
   bool Initialize(const std::vector<std::string>& arg_names,
                   const std::vector<std::string>& arg_values,
-                  bool full_frame);
+                  bool full_frame,
+                  RenderFrame::PluginPowerSaverMode power_saver_mode);
   bool HandleDocumentLoad(const blink::WebURLResponse& response);
   bool HandleInputEvent(const blink::WebInputEvent& event,
                         blink::WebCursorInfo* cursor_info);
@@ -228,11 +232,9 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
   // Notification about page visibility. The default is "visible".
   void PageVisibilityChanged(bool is_visible);
 
-  // Notifications that the view has started painting, and has flushed the
-  // painted content to the screen. These messages are used to send Flush
-  // callbacks to the plugin for DeviceContext2D/3D.
+  // Notifications that the view has started painting. This message is used to
+  // send Flush callbacks to the plugin for Graphics2D/3D.
   void ViewInitiatedPaint();
-  void ViewFlushedPaint();
 
   // Tracks all live PluginObjects.
   void AddPluginObject(PluginObject* plugin_object);
@@ -253,6 +255,8 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
   int PrintBegin(const blink::WebPrintParams& print_params);
   bool PrintPage(int page_number, blink::WebCanvas* canvas);
   void PrintEnd();
+  bool GetPrintPresetOptionsFromDocument(
+      blink::WebPrintPresetOptions* preset_options);
 
   bool CanRotateView();
   void RotateView(blink::WebPlugin::RotationType type);
@@ -467,9 +471,6 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
   void PromiseResolvedWithSession(PP_Instance instance,
                                   uint32 promise_id,
                                   PP_Var web_session_id_var) override;
-  void PromiseResolvedWithKeyIds(PP_Instance instance,
-                                 uint32 promise_id,
-                                 PP_Var key_ids_var) override;
   void PromiseRejected(PP_Instance instance,
                        uint32 promise_id,
                        PP_CdmExceptionCode exception_code,
@@ -477,15 +478,18 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
                        PP_Var error_description_var) override;
   void SessionMessage(PP_Instance instance,
                       PP_Var web_session_id_var,
+                      PP_CdmMessageType message_type,
                       PP_Var message_var,
-                      PP_Var destination_url_var) override;
-  void SessionKeysChange(PP_Instance instance,
-                         PP_Var web_session_id_var,
-                         PP_Bool has_additional_usable_key) override;
+                      PP_Var legacy_destination_url) override;
+  void SessionKeysChange(
+      PP_Instance instance,
+      PP_Var web_session_id_var,
+      PP_Bool has_additional_usable_key,
+      uint32_t key_count,
+      const struct PP_KeyInformation key_information[]) override;
   void SessionExpirationChange(PP_Instance instance,
                                PP_Var web_session_id_var,
                                PP_Time new_expiry_time) override;
-  void SessionReady(PP_Instance instance, PP_Var web_session_id_var) override;
   void SessionClosed(PP_Instance instance, PP_Var web_session_id_var) override;
   void SessionError(PP_Instance instance,
                     PP_Var web_session_id_var,
@@ -687,8 +691,7 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
                                  int pending_host_id,
                                  const ppapi::URLResponseInfoData& data);
 
-  void SetPluginThrottled(bool throttled);
-  void DisablePowerSaverByRetroactiveWhitelist();
+  void RecordFlashJavaScriptUse();
 
   RenderFrameImpl* render_frame_;
   base::Closure instance_deleted_callback_;
@@ -713,23 +716,11 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
   // Plugin URL.
   GURL plugin_url_;
 
-  // Set to true first time plugin is clicked. Used to collect metrics.
-  bool has_been_clicked_;
+  // Used to track Flash-specific metrics.
+  bool is_flash_plugin_;
 
-  // Indicates whether this plugin may be throttled to reduce power consumption.
-  // |power_saver_enabled_| implies |is_peripheral_content_|.
-  bool power_saver_enabled_;
-
-  // Indicates whether this plugin was found to be peripheral content.
-  // This is separately tracked from |power_saver_enabled_| to collect UMAs.
-  // Always true if |power_saver_enabled_| is true.
-  bool is_peripheral_content_;
-
-  // Indicates if the plugin is currently throttled.
-  bool plugin_throttled_;
-
-  // Fake view data used by the Power Saver feature to throttle plugins.
-  const ppapi::ViewData empty_view_data_;
+  // Used to track if JavaScript has ever been used for this plugin instance.
+  bool javascript_used_;
 
   // Responsible for turning on throttling if Power Saver is on.
   scoped_ptr<PepperPluginInstanceThrottler> throttler_;

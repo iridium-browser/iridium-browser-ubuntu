@@ -149,6 +149,8 @@ static_library("gn_lib") {
     "substitution_type.h",
     "substitution_writer.cc",
     "substitution_writer.h",
+    "switches.cc",
+    "switches.h",
     "target.cc",
     "target.h",
     "target_generator.cc",
@@ -186,10 +188,14 @@ action("last_commit_position") {
   script = "last_commit_position.py"
 
   # This dependency forces a re-run when the code is synced.
-  inputs = [ "//build/util/LASTCHANGE" ]
+  inputs = [
+    "//build/util/LASTCHANGE",
+  ]
 
   outfile = "$target_gen_dir/last_commit_position.h"
-  outputs = [ outfile ]
+  outputs = [
+    outfile,
+  ]
 
   args = [
     rebase_path("//", root_build_dir),
@@ -206,6 +212,7 @@ executable("gn") {
   deps = [
     ":gn_lib",
     ":last_commit_position",
+    "//base",
   ]
 }
 
@@ -269,6 +276,10 @@ test("gn_unittests") {
 }
 
 executable("generate_test_gn_data") {
-  sources = [ "generate_test_gn_data.cc" ]
-  deps = [ "//base" ]
+  sources = [
+    "generate_test_gn_data.cc",
+  ]
+  deps = [
+    "//base",
+  ]
 }

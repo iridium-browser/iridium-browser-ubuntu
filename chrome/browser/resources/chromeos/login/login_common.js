@@ -6,6 +6,7 @@
  * @fileoverview Common OOBE controller methods.
  */
 
+<include src="test_util.js">
 <include src="../../../../../ui/login/screen.js">
 <include src="screen_context.js">
 <include src="../user_images_grid.js">
@@ -103,6 +104,9 @@ cr.define('cr.ui', function() {
     } else {
       document.body.classList.remove('oobe-display');
       Oobe.getInstance().prepareForLoginDisplay_();
+      // Ensure header bar is visible when switching to Login UI from oobe.
+      if (Oobe.getInstance().displayType == DISPLAY_TYPE.OOBE)
+        login.HeaderBar.animateIn();
     }
 
     Oobe.getInstance().headerHidden = false;
@@ -290,6 +294,13 @@ cr.define('cr.ui', function() {
   Oobe.addUserForTesting = function() {
     Oobe.skipToLoginForTesting();
     chrome.send('addUser');
+  };
+
+  /**
+   * Shows the add user dialog. Used in browser tests.
+   */
+  Oobe.showAddUserForTesting = function() {
+    chrome.send('showAddUser');
   };
 
   /**

@@ -58,8 +58,7 @@ typedef uint32_t SkGdiRGB;
 //#define SK_ENFORCE_ROTATED_TEXT_AA_ON_WINDOWS
 
 static bool isLCD(const SkScalerContext::Rec& rec) {
-    return SkMask::kLCD16_Format == rec.fMaskFormat ||
-           SkMask::kLCD32_Format == rec.fMaskFormat;
+    return SkMask::kLCD16_Format == rec.fMaskFormat;
 }
 
 static bool bothZero(SkScalar a, SkScalar b) {
@@ -590,7 +589,6 @@ static BYTE compute_quality(const SkScalerContext::Rec& rec) {
         case SkMask::kBW_Format:
             return NONANTIALIASED_QUALITY;
         case SkMask::kLCD16_Format:
-        case SkMask::kLCD32_Format:
             return CLEARTYPE_QUALITY;
         default:
             if (rec.fFlags & SkScalerContext::kGenA8FromLCD_Flag) {
@@ -619,55 +617,39 @@ SkScalerContext_GDI::SkScalerContext_GDI(SkTypeface* rawTypeface,
     SetGraphicsMode(fDDC, GM_ADVANCED);
     SetBkMode(fDDC, TRANSPARENT);
 
-    SkPoint h = SkPoint::Make(SK_Scalar1, 0);
-    // A is the total matrix.
+    // When GDI hinting, remove the entire Y scale from sA and GsA. (Prevents 'linear' metrics.)
+    // When not hinting, remove only the integer Y scale from sA and GsA. (Applied by GDI.)
+    SkScalerContextRec::PreMatrixScale scaleConstraints =
+        (fRec.getHinting() == SkPaint::kNo_Hinting || fRec.getHinting() == SkPaint::kSlight_Hinting)
+                   ? SkScalerContextRec::kVerticalInteger_PreMatrixScale
+                   : SkScalerContextRec::kVertical_PreMatrixScale;
+    SkVector scale;
+    SkMatrix sA;
+    SkMatrix GsA;
     SkMatrix A;
-    fRec.getSingleMatrix(&A);
-    A.mapPoints(&h, 1);
-
-    // G is the Givens Matrix for A (rotational matrix where GA[0][1] == 0).
-    SkMatrix G;
-    SkComputeGivensRotation(h, &G);
-
-    // GA is the matrix A with rotation removed.
-    SkMatrix GA(G);
-    GA.preConcat(A);
-
-    // realTextSize is the actual device size we want (as opposed to the size the user requested).
-    // gdiTextSize is the size we request from GDI.
-    // If the scale is negative, this means the matrix will do the flip anyway.
-    SkScalar realTextSize = SkScalarAbs(GA.get(SkMatrix::kMScaleY));
-    SkScalar gdiTextSize = SkScalarRoundToScalar(realTextSize);
-    if (gdiTextSize == 0) {
-        gdiTextSize = SK_Scalar1;
-    }
-
-    // When not hinting, remove only the gdiTextSize scale which will be applied by GDI.
-    // When GDI hinting, remove the entire Y scale to prevent 'subpixel' metrics.
-    SkScalar scale = (fRec.getHinting() == SkPaint::kNo_Hinting ||
-                      fRec.getHinting() == SkPaint::kSlight_Hinting)
-                   ? SkScalarInvert(gdiTextSize)
-                   : SkScalarInvert(realTextSize);
-
-    // sA is the total matrix A without the textSize (so GDI knows the text size separately).
-    // When this matrix is used with GetGlyphOutline, no further processing is needed.
-    SkMatrix sA(A);
-    sA.preScale(scale, scale); //remove text size
-
-    // GsA is the non-rotational part of A without the text height scale.
-    // This is what is used to find the magnitude of advances.
-    SkMatrix GsA(GA);
-    GsA.preScale(scale, scale); //remove text size, G is rotational so reorders with the scale.
+    fRec.computeMatrices(scaleConstraints, &scale, &sA, &GsA, &fG_inv, &A);
 
     fGsA.eM11 = SkScalarToFIXED(GsA.get(SkMatrix::kMScaleX));
     fGsA.eM12 = SkScalarToFIXED(-GsA.get(SkMatrix::kMSkewY)); // This should be ~0.
     fGsA.eM21 = SkScalarToFIXED(-GsA.get(SkMatrix::kMSkewX));
     fGsA.eM22 = SkScalarToFIXED(GsA.get(SkMatrix::kMScaleY));
 
-    // fG_inv is G inverse, which is fairly simple since G is 2x2 rotational.
-    fG_inv.setAll(G.get(SkMatrix::kMScaleX), -G.get(SkMatrix::kMSkewX), G.get(SkMatrix::kMTransX),
-                  -G.get(SkMatrix::kMSkewY), G.get(SkMatrix::kMScaleY), G.get(SkMatrix::kMTransY),
-                  G.get(SkMatrix::kMPersp0), G.get(SkMatrix::kMPersp1), G.get(SkMatrix::kMPersp2));
+    // When not hinting, scale was computed with kVerticalInteger, so is already an integer.
+    // The sA and GsA transforms will be used to create 'linear' metrics.
+
+    // When hinting, scale was computed with kVertical, stating that our port can handle
+    // non-integer scales. This is done so that sA and GsA are computed without any 'residual'
+    // scale in them, preventing 'linear' metrics. However, GDI cannot actually handle non-integer
+    // scales so we need to round in this case. This is fine, since all of the scale has been
+    // removed from sA and GsA, so GDI will be handling the scale completely.
+    SkScalar gdiTextSize = SkScalarRoundToScalar(scale.fY);
+
+    // GDI will not accept a size of zero, so round the range [0, 1] to 1.
+    // If the size was non-zero, the scale factors will also be non-zero and 1px tall text is drawn.
+    // If the size actually was zero, the scale factors will also be zero, so GDI will draw nothing.
+    if (gdiTextSize == 0) {
+        gdiTextSize = SK_Scalar1;
+    }
 
     LOGFONT lf = typeface->fLogFont;
     lf.lfHeight = -SkScalarTruncToInt(gdiTextSize);
@@ -886,7 +868,7 @@ void SkScalerContext_GDI::generateMetrics(SkGlyph* glyph) {
                      -SkFIXEDToScalar(fMat22.eM12), SkFIXEDToScalar(fMat22.eM22), 0,
                      0,  0, SkScalarToPersp(SK_Scalar1));
             m.mapRect(&bounds);
-            bounds.roundOut();
+            bounds.roundOut(&bounds);
             glyph->fLeft = SkScalarTruncToInt(bounds.fLeft);
             glyph->fTop = SkScalarTruncToInt(bounds.fTop);
             glyph->fWidth = SkScalarTruncToInt(bounds.width());
@@ -1133,19 +1115,6 @@ static inline uint16_t rgb_to_lcd16(SkGdiRGB rgb, const uint8_t* tableR,
     return SkPack888ToRGB16(r, g, b);
 }
 
-template<bool APPLY_PREBLEND>
-static inline SkPMColor rgb_to_lcd32(SkGdiRGB rgb, const uint8_t* tableR,
-                                                   const uint8_t* tableG,
-                                                   const uint8_t* tableB) {
-    U8CPU r = sk_apply_lut_if<APPLY_PREBLEND>((rgb >> 16) & 0xFF, tableR);
-    U8CPU g = sk_apply_lut_if<APPLY_PREBLEND>((rgb >>  8) & 0xFF, tableG);
-    U8CPU b = sk_apply_lut_if<APPLY_PREBLEND>((rgb >>  0) & 0xFF, tableB);
-#if SK_SHOW_TEXT_BLIT_COVERAGE
-    r = SkMax32(r, 10); g = SkMax32(g, 10); b = SkMax32(b, 10);
-#endif
-    return SkPackARGB32(0xFF, r, g, b);
-}
-
 // Is this GDI color neither black nor white? If so, we have to keep this
 // image as is, rather than smashing it down to a BW mask.
 //
@@ -1258,22 +1227,6 @@ static void rgb_to_lcd16(const SkGdiRGB* SK_RESTRICT src, size_t srcRB, const Sk
     }
 }
 
-template<bool APPLY_PREBLEND>
-static void rgb_to_lcd32(const SkGdiRGB* SK_RESTRICT src, size_t srcRB, const SkGlyph& glyph,
-                         const uint8_t* tableR, const uint8_t* tableG, const uint8_t* tableB) {
-    const size_t dstRB = glyph.rowBytes();
-    const int width = glyph.fWidth;
-    uint32_t* SK_RESTRICT dst = (uint32_t*)((char*)glyph.fImage + (glyph.fHeight - 1) * dstRB);
-
-    for (int y = 0; y < glyph.fHeight; y++) {
-        for (int i = 0; i < width; i++) {
-            dst[i] = rgb_to_lcd32<APPLY_PREBLEND>(src[i], tableR, tableG, tableB);
-        }
-        src = SkTAddOffset<const SkGdiRGB>(src, srcRB);
-        dst = (uint32_t*)((char*)dst - dstRB);
-    }
-}
-
 static inline unsigned clamp255(unsigned x) {
     SkASSERT(x <= 256);
     return x - (x >> 8);
@@ -1356,23 +1309,13 @@ void SkScalerContext_GDI::generateImage(const SkGlyph& glyph) {
             rgb_to_bw(src, srcRB, glyph);
             ((SkGlyph*)&glyph)->fMaskFormat = SkMask::kBW_Format;
         } else {
-            if (SkMask::kLCD16_Format == glyph.fMaskFormat) {
-                if (fPreBlend.isApplicable()) {
-                    rgb_to_lcd16<true>(src, srcRB, glyph,
-                                       fPreBlend.fR, fPreBlend.fG, fPreBlend.fB);
-                } else {
-                    rgb_to_lcd16<false>(src, srcRB, glyph,
-                                        fPreBlend.fR, fPreBlend.fG, fPreBlend.fB);
-                }
+            SkASSERT(SkMask::kLCD16_Format == glyph.fMaskFormat);
+            if (fPreBlend.isApplicable()) {
+                rgb_to_lcd16<true>(src, srcRB, glyph,
+                                   fPreBlend.fR, fPreBlend.fG, fPreBlend.fB);
             } else {
-                SkASSERT(SkMask::kLCD32_Format == glyph.fMaskFormat);
-                if (fPreBlend.isApplicable()) {
-                    rgb_to_lcd32<true>(src, srcRB, glyph,
-                                       fPreBlend.fR, fPreBlend.fG, fPreBlend.fB);
-                } else {
-                    rgb_to_lcd32<false>(src, srcRB, glyph,
-                                        fPreBlend.fR, fPreBlend.fG, fPreBlend.fB);
-                }
+                rgb_to_lcd16<false>(src, srcRB, glyph,
+                                    fPreBlend.fR, fPreBlend.fG, fPreBlend.fB);
             }
         }
     }
@@ -2533,6 +2476,12 @@ protected:
         // could be in base impl
         SkAutoTUnref<SkFontStyleSet> sset(this->matchFamily(familyName));
         return sset->matchStyle(fontstyle);
+    }
+
+    virtual SkTypeface* onMatchFamilyStyleCharacter(const char familyName[], const SkFontStyle&,
+                                                    const char* bcp47[], int bcp47Count,
+                                                    SkUnichar character) const SK_OVERRIDE {
+        return NULL;
     }
 
     virtual SkTypeface* onMatchFaceStyle(const SkTypeface* familyMember,

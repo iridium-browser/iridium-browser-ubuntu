@@ -13,8 +13,10 @@
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/scoped_observer.h"
 #include "chrome/browser/history/download_row.h"
 #include "chrome/browser/safe_browsing/incident_reporting/download_metadata_manager.h"
+#include "components/history/core/browser/history_service_observer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
@@ -36,7 +38,8 @@ class ClientIncidentReport_DownloadDetails;
 
 // Finds the most recent executable downloaded by any on-the-record profile with
 // history that participates in safe browsing.
-class LastDownloadFinder : public content::NotificationObserver {
+class LastDownloadFinder : public content::NotificationObserver,
+                           public history::HistoryServiceObserver {
  public:
   typedef base::Callback<void(
       content::BrowserContext* context,
@@ -87,11 +90,6 @@ class LastDownloadFinder : public content::NotificationObserver {
       Profile* profile,
       scoped_ptr<ClientIncidentReport_DownloadDetails> details);
 
-  // Initiates a search in |profile| if it is in the set of profiles to be
-  // searched.
-  void OnProfileHistoryLoaded(Profile* profile,
-                              HistoryService* history_service);
-
   // Abandons the search for downloads in |profile|, reporting results if there
   // are no more pending queries.
   void AbandonSearchInProfile(Profile* profile);
@@ -116,6 +114,10 @@ class LastDownloadFinder : public content::NotificationObserver {
                const content::NotificationSource& source,
                const content::NotificationDetails& details) override;
 
+  // history::HistoryServiceObserver:
+  void OnHistoryServiceLoaded(HistoryService* service) override;
+  void HistoryServiceBeingDeleted(HistoryService* history_service) override;
+
   // Caller-supplied callback to make an asynchronous request for a profile's
   // persistent download details.
   DownloadDetailsGetter download_details_getter_;
@@ -136,6 +138,10 @@ class LastDownloadFinder : public content::NotificationObserver {
 
   // The most recent download, updated progressively as query results arrive.
   history::DownloadRow most_recent_row_;
+
+  // HistoryServiceObserver
+  ScopedObserver<HistoryService, HistoryServiceObserver>
+      history_service_observer_;
 
   // A factory for asynchronous operations on profiles' HistoryService.
   base::WeakPtrFactory<LastDownloadFinder> weak_ptr_factory_;

@@ -8,8 +8,8 @@
 #include "base/memory/ref_counted.h"
 #include "content/common/content_export.h"
 #include "gpu/command_buffer/service/in_process_command_buffer.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size.h"
 
 class SkCanvas;
 
@@ -40,12 +40,6 @@ class CONTENT_EXPORT SynchronousCompositor {
   // instance as needed, but only if |client| is non-NULL.
   static void SetClientForWebContents(WebContents* contents,
                                       SynchronousCompositorClient* client);
-
-  // Allows changing or resetting the client to NULL (this must be used if
-  // the client is being deleted prior to the DidDestroyCompositor() call
-  // being received by the client). Ownership of |client| remains with
-  // the caller.
-  virtual void SetClient(SynchronousCompositorClient* client) = 0;
 
   static void SetGpuService(
       scoped_refptr<gpu::InProcessCommandBuffer::Service> service);

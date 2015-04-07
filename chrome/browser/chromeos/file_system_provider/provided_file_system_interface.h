@@ -14,6 +14,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
+#include "chrome/browser/chromeos/file_system_provider/abort_callback.h"
 #include "chrome/browser/chromeos/file_system_provider/provided_file_system_observer.h"
 #include "chrome/browser/chromeos/file_system_provider/watcher.h"
 #include "storage/browser/fileapi/async_file_util.h"
@@ -79,9 +80,6 @@ class ProvidedFileSystemInterface {
 
   typedef base::Callback<void(scoped_ptr<EntryMetadata> entry_metadata,
                               base::File::Error result)> GetMetadataCallback;
-
-  typedef base::Callback<void(
-      const storage::AsyncFileUtil::StatusCallback& callback)> AbortCallback;
 
   // Mask of fields requested from the GetMetadata() call.
   typedef int MetadataFieldMask;
@@ -198,14 +196,17 @@ class ProvidedFileSystemInterface {
       const storage::AsyncFileUtil::StatusCallback& callback) = 0;
 
   // Notifies about changes related to the watcher within the file system.
-  // Invoked by the file system implementation. Returns false if the
-  // notification arguments are malformed or the entry is not watched anymore.
+  // Invoked by the file system implementation. Returns an error code via the
+  // callback if the notification arguments are malformed or the entry is not
+  // watched anymore. On success, returns base::File::FILE_OK.
   // TODO(mtomasz): Replace [entry_path, recursive] with a watcher id.
-  virtual bool Notify(const base::FilePath& entry_path,
-                      bool recursive,
-                      storage::WatcherManager::ChangeType change_type,
-                      scoped_ptr<ProvidedFileSystemObserver::Changes> changes,
-                      const std::string& tag) = 0;
+  virtual void Notify(
+      const base::FilePath& entry_path,
+      bool recursive,
+      storage::WatcherManager::ChangeType change_type,
+      scoped_ptr<ProvidedFileSystemObserver::Changes> changes,
+      const std::string& tag,
+      const storage::AsyncFileUtil::StatusCallback& callback) = 0;
 
   // Returns a provided file system info for this file system.
   virtual const ProvidedFileSystemInfo& GetFileSystemInfo() const = 0;

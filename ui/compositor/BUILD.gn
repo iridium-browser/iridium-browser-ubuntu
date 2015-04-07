@@ -43,6 +43,7 @@ component("compositor") {
     "layer_tree_owner.cc",
     "layer_tree_owner.h",
     "layer_type.h",
+    "reflector.cc",
     "reflector.h",
     "scoped_animation_duration_scale_mode.cc",
     "scoped_animation_duration_scale_mode.h",
@@ -59,6 +60,7 @@ component("compositor") {
     "//base/third_party/dynamic_annotations",
     "//cc",
     "//cc/surfaces",
+    "//cc/surfaces:surface_id",
     "//gpu/command_buffer/common",
     "//skia",
     "//ui/gfx",
@@ -111,6 +113,7 @@ source_set("test_support") {
     "//cc",
     "//cc/surfaces",
     "//cc:test_support",
+    "//gpu/blink",
     "//skia",
     "//testing/gtest",
     "//third_party/WebKit/public:blink_minimal",
@@ -132,7 +135,6 @@ source_set("test_support") {
     sources += [ "test/test_compositor_host_x11.cc" ]
   }
 }
-
 # TODO(GYP) enable this when all dependencies are complete and it links.
 #test("compositor_unittests") {
 #  sources = [

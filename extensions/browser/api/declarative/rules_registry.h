@@ -40,18 +40,6 @@ class RulesCacheDelegate;
 class RulesRegistry : public base::RefCountedThreadSafe<RulesRegistry> {
  public:
   typedef extensions::core_api::events::Rule Rule;
-  struct WebViewKey {
-    int embedder_process_id;
-    int webview_instance_id;
-    WebViewKey(int embedder_process_id, int webview_instance_id)
-        : embedder_process_id(embedder_process_id),
-          webview_instance_id(webview_instance_id) {}
-    bool operator<(const WebViewKey& other) const {
-      return embedder_process_id < other.embedder_process_id ||
-          ((embedder_process_id == other.embedder_process_id) &&
-           (webview_instance_id < other.webview_instance_id));
-    }
-  };
 
   enum Defaults { DEFAULT_PRIORITY = 100 };
   // After the RulesCacheDelegate object (the part of the registry which runs on
@@ -63,7 +51,7 @@ class RulesRegistry : public base::RefCountedThreadSafe<RulesRegistry> {
                 const std::string& event_name,
                 content::BrowserThread::ID owner_thread,
                 RulesCacheDelegate* cache_delegate,
-                const WebViewKey& webview_key);
+                int id);
 
   const OneShotEvent& ready() const {
     return ready_;
@@ -145,11 +133,8 @@ class RulesRegistry : public base::RefCountedThreadSafe<RulesRegistry> {
   // The name of the event with which rules are registered.
   const std::string& event_name() const { return event_name_; }
 
-  // The key that identifies the webview (or tabs) in which these rules apply.
-  // If the rules apply to the main browser, then this returns the tuple (0, 0).
-  const WebViewKey& webview_key() const {
-    return webview_key_;
-  }
+  // The unique identifier for this RulesRegistry object.
+  int id() const { return id_; }
 
  protected:
   virtual ~RulesRegistry();
@@ -233,26 +218,13 @@ class RulesRegistry : public base::RefCountedThreadSafe<RulesRegistry> {
   const std::string event_name_;
 
   // The key that identifies the context in which these rules apply.
-  WebViewKey webview_key_;
+  int id_;
 
   RulesDictionary rules_;
 
   // Signaled when we have finished reading from storage for all extensions that
   // are loaded on startup.
   OneShotEvent ready_;
-
-  // The factory needs to be declared before |cache_delegate_|, so that it can
-  // produce a pointer as a construction argument for |cache_delegate_|.
-  base::WeakPtrFactory<RulesRegistry> weak_ptr_factory_;
-
-  // |cache_delegate_| is owned by the registry service. If |cache_delegate_| is
-  // NULL, then the storage functionality is disabled (this is used in tests).
-  // This registry cannot own |cache_delegate_| because during the time after
-  // rules registry service shuts down on UI thread, and the registry is
-  // destroyed on its thread, the use of the |cache_delegate_| would not be
-  // safe. The registry only ever associates with one RulesCacheDelegate
-  // instance.
-  base::WeakPtr<RulesCacheDelegate> cache_delegate_;
 
   ProcessStateMap process_changed_rules_requested_;
 
@@ -287,6 +259,17 @@ class RulesRegistry : public base::RefCountedThreadSafe<RulesRegistry> {
   typedef std::map<ExtensionId, std::set<RuleIdentifier> > RuleIdentifiersMap;
   RuleIdentifiersMap used_rule_identifiers_;
   int last_generated_rule_identifier_id_;
+
+  // |cache_delegate_| is owned by the registry service. If |cache_delegate_| is
+  // NULL, then the storage functionality is disabled (this is used in tests).
+  // This registry cannot own |cache_delegate_| because during the time after
+  // rules registry service shuts down on UI thread, and the registry is
+  // destroyed on its thread, the use of the |cache_delegate_| would not be
+  // safe. The registry only ever associates with one RulesCacheDelegate
+  // instance.
+  base::WeakPtr<RulesCacheDelegate> cache_delegate_;
+
+  base::WeakPtrFactory<RulesRegistry> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(RulesRegistry);
 };

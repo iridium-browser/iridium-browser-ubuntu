@@ -66,7 +66,7 @@ void AppListViewDelegate::GetShortcutPathForApp(
 
 void AppListViewDelegate::StartSearch() {
   if (search_controller_)
-    search_controller_->Start();
+    search_controller_->Start(false);
 }
 
 void AppListViewDelegate::StopSearch() {
@@ -146,6 +146,12 @@ views::View* AppListViewDelegate::CreateStartPageWebView(
 std::vector<views::View*> AppListViewDelegate::CreateCustomPageWebViews(
     const gfx::Size& size) {
   return std::vector<views::View*>();
+}
+
+void AppListViewDelegate::CustomLauncherPageAnimationChanged(double progress) {
+}
+
+void AppListViewDelegate::CustomLauncherPagePopSubpage() {
 }
 
 bool AppListViewDelegate::IsSpeechRecognitionEnabled() {

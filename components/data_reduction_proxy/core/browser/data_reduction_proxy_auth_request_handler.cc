@@ -11,7 +11,6 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_protocol.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_headers.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
@@ -48,7 +47,8 @@ const char* GetString(Client client) {
 
 // static
 bool DataReductionProxyAuthRequestHandler::IsKeySetOnCommandLine() {
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
   return command_line.HasSwitch(
       data_reduction_proxy::switches::kDataReductionProxyKey);
 }
@@ -214,7 +214,8 @@ void DataReductionProxyAuthRequestHandler::InitAuthentication(
 }
 
 std::string DataReductionProxyAuthRequestHandler::GetDefaultKey() const {
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
   std::string key =
     command_line.GetSwitchValueASCII(switches::kDataReductionProxyKey);
 // Android and iOS get the default key from a preprocessor constant. All other

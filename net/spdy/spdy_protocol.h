@@ -11,6 +11,7 @@
 #ifndef NET_SPDY_SPDY_PROTOCOL_H_
 #define NET_SPDY_SPDY_PROTOCOL_H_
 
+#include <limits>
 #include <map>
 #include <string>
 #include <vector>
@@ -397,7 +398,9 @@ enum SpdyRstStreamStatus {
   RST_STREAM_SETTINGS_TIMEOUT = 12,
   RST_STREAM_CONNECT_ERROR = 13,
   RST_STREAM_ENHANCE_YOUR_CALM = 14,
-  RST_STREAM_NUM_STATUS_CODES = 15
+  RST_STREAM_INADEQUATE_SECURITY = 15,
+  RST_STREAM_HTTP_1_1_REQUIRED = 16,
+  RST_STREAM_NUM_STATUS_CODES = 17
 };
 
 // Status codes for GOAWAY frames.
@@ -415,7 +418,8 @@ enum SpdyGoAwayStatus {
   GOAWAY_COMPRESSION_ERROR = 9,
   GOAWAY_CONNECT_ERROR = 10,
   GOAWAY_ENHANCE_YOUR_CALM = 11,
-  GOAWAY_INADEQUATE_SECURITY = 12
+  GOAWAY_INADEQUATE_SECURITY = 12,
+  GOAWAY_HTTP_1_1_REQUIRED = 13
 };
 
 // A SPDY priority is a number between 0 and 7 (inclusive).
@@ -428,6 +432,8 @@ typedef std::map<std::string, std::string> SpdyNameValueBlock;
 typedef uint64 SpdyPingId;
 
 typedef std::string SpdyProtocolId;
+
+enum class SpdyHeaderValidatorType { REQUEST, RESPONSE };
 
 // TODO(hkhalil): Add direct testing for this? It won't increase coverage any,
 // but is good to do anyway.
@@ -980,12 +986,8 @@ class NET_EXPORT_PRIVATE SpdyAltSvcIR : public SpdyFrameWithStreamIdIR {
   void set_protocol_id(SpdyProtocolId protocol_id) {
     protocol_id_ = protocol_id;
   }
-  void set_host(std::string host) {
-    host_ = host;
-  }
-  void set_origin(std::string origin) {
-    origin_ = origin;
-  }
+  void set_host(std::string host) { host_ = host; }
+  void set_origin(std::string origin) { origin_ = origin; }
 
   void Visit(SpdyFrameVisitor* visitor) const override;
 

@@ -37,6 +37,12 @@ RenderVTTCue::RenderVTTCue(VTTCueBox* element)
 {
 }
 
+void RenderVTTCue::trace(Visitor* visitor)
+{
+    visitor->trace(m_cue);
+    RenderBlockFlow::trace(visitor);
+}
+
 void RenderVTTCue::layout()
 {
     RenderBlockFlow::layout();
@@ -74,7 +80,7 @@ bool RenderVTTCue::initializeLayoutParameters(InlineFlowBox* firstLineBox, Layou
 
     // 1. Horizontal: Let step be the height of the first line box in boxes.
     //    Vertical: Let step be the width of the first line box in boxes.
-    step = m_cue->getWritingDirection() == VTTCue::Horizontal ? firstLineBox->height() : firstLineBox->width();
+    step = m_cue->getWritingDirection() == VTTCue::Horizontal ? firstLineBox->size().height() : firstLineBox->size().width();
 
     // 2. If step is zero, then jump to the step labeled done positioning below.
     if (!step)
@@ -93,7 +99,7 @@ bool RenderVTTCue::initializeLayoutParameters(InlineFlowBox* firstLineBox, Layou
     // 6. Vertical Growing Left: Decrease position by the width of the
     // bounding box of the boxes in boxes, then increase position by step.
     if (m_cue->getWritingDirection() == VTTCue::VerticalGrowingLeft) {
-        position -= width();
+        position -= size().width();
         position += step;
     }
 
@@ -101,7 +107,7 @@ bool RenderVTTCue::initializeLayoutParameters(InlineFlowBox* firstLineBox, Layou
     if (linePosition < 0) {
         // Horizontal / Vertical: ... then increase position by the
         // height / width of the video's rendering area ...
-        position += m_cue->getWritingDirection() == VTTCue::Horizontal ? parentBlock->height() : parentBlock->width();
+        position += m_cue->getWritingDirection() == VTTCue::Horizontal ? parentBlock->size().height() : parentBlock->size().width();
 
         // ... and negate step.
         step = -step;
@@ -115,10 +121,10 @@ void RenderVTTCue::placeBoxInDefaultPosition(LayoutUnit position, bool& switched
     // 8. Move all boxes in boxes ...
     if (m_cue->getWritingDirection() == VTTCue::Horizontal) {
         // Horizontal: ... down by the distance given by position
-        setY(y() + position);
+        setY(location().y() + position);
     } else {
         // Vertical: ... right by the distance given by position
-        setX(x() + position);
+        setX(location().x() + position);
     }
 
     // 9. Default: Remember the position of all the boxes in boxes as their
@@ -149,17 +155,17 @@ bool RenderVTTCue::isOverlapping() const
 
 bool RenderVTTCue::shouldSwitchDirection(InlineFlowBox* firstLineBox, LayoutUnit step) const
 {
-    LayoutUnit top = y();
-    LayoutUnit left = x();
-    LayoutUnit bottom = top + firstLineBox->height();
-    LayoutUnit right = left + firstLineBox->width();
+    LayoutUnit top = location().y();
+    LayoutUnit left = location().x();
+    LayoutUnit bottom = top + firstLineBox->size().height();
+    LayoutUnit right = left + firstLineBox->size().width();
 
     // 12. Horizontal: If step is negative and the top of the first line
     // box in boxes is now above the top of the video's rendering area,
     // or if step is positive and the bottom of the first line box in
     // boxes is now below the bottom of the video's rendering area, jump
     // to the step labeled switch direction.
-    LayoutUnit parentHeight = containingBlock()->height();
+    LayoutUnit parentHeight = containingBlock()->size().height();
     if (m_cue->getWritingDirection() == VTTCue::Horizontal && ((step < 0 && top < 0) || (step > 0 && bottom > parentHeight)))
         return true;
 
@@ -168,7 +174,7 @@ bool RenderVTTCue::shouldSwitchDirection(InlineFlowBox* firstLineBox, LayoutUnit
     // rendering area, or if step is positive and the right edge of the
     // first line box in boxes is now to the right of the right edge of
     // the video's rendering area, jump to the step labeled switch direction.
-    LayoutUnit parentWidth = containingBlock()->width();
+    LayoutUnit parentWidth = containingBlock()->size().width();
     if (m_cue->getWritingDirection() != VTTCue::Horizontal && ((step < 0 && left < 0) || (step > 0 && right > parentWidth)))
         return true;
 
@@ -181,13 +187,13 @@ void RenderVTTCue::moveBoxesByStep(LayoutUnit step)
     // given by step. (If step is negative, then this will actually
     // result in an upwards movement of the boxes in absolute terms.)
     if (m_cue->getWritingDirection() == VTTCue::Horizontal)
-        setY(y() + step);
+        setY(location().y() + step);
 
     // 13. Vertical: Move all the boxes in boxes right by the distance
     // given by step. (If step is negative, then this will actually
     // result in a leftwards movement of the boxes in absolute terms.)
     else
-        setX(x() + step);
+        setX(location().x() + step);
 }
 
 bool RenderVTTCue::switchDirection(bool& switched, LayoutUnit& step)
@@ -256,7 +262,7 @@ void RenderVTTCue::repositionCueSnapToLinesSet()
             adjustment = bottomOverflow;
 
         if (adjustment)
-            setY(y() + adjustment);
+            setY(location().y() + adjustment);
     }
 }
 

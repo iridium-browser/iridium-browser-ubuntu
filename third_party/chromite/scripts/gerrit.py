@@ -13,6 +13,7 @@ from __future__ import print_function
 
 import inspect
 import os
+import pprint
 import re
 
 from chromite.cbuildbot import constants
@@ -30,7 +31,7 @@ GERRIT_APPROVAL_MAP = {
     'COMR': ['CQ', 'Commit Queue   ',],
     'CRVW': ['CR', 'Code Review    ',],
     'SUBM': ['S ', 'Submitted      ',],
-    'TBVF': ['TV', 'Trybot Verified',],
+    'TRY':  ['T ', 'Trybot Ready   ',],
     'VRIF': ['V ', 'Verified       ',],
 }
 
@@ -165,6 +166,9 @@ def FilteredQuery(opts, query):
   """Query gerrit and filter/clean up the results"""
   ret = []
 
+  if opts.branch is not None:
+    query += ' branch:%s' % opts.branch
+
   helper, _ = GetGerrit(opts)
   for cl in helper.Query(query, raw=True, bypass_cache=False):
     # Gerrit likes to return a stats record too.
@@ -211,8 +215,8 @@ def IsApprover(cl, users):
 def UserActTodo(opts):
   """List CLs needing your review"""
   emails, reviewers, owners = _MyUserInfo()
-  cls = FilteredQuery(opts, '( %s ) status:open NOT ( %s )' %
-                            (' OR '.join(reviewers), ' OR '.join(owners)))
+  cls = FilteredQuery(opts, ('( %s ) status:open NOT ( %s )' %
+                             (' OR '.join(reviewers), ' OR '.join(owners))))
   cls = [x for x in cls if not IsApprover(x, emails)]
   lims = limits(cls)
   for cl in cls:
@@ -268,6 +272,15 @@ def UserActReady(opts, *args):
     helper, cl = GetGerrit(opts, arg)
     helper.SetReview(cl, labels={'Commit-Queue': num}, dryrun=opts.dryrun)
 UserActReady.arg_min = 2
+
+
+def UserActTrybotready(opts, *args):
+  """Mark CL <n> [n ...] with trybot-ready status <0,1>"""
+  num = args[-1]
+  for arg in args[:-1]:
+    helper, cl = GetGerrit(opts, arg)
+    helper.SetReview(cl, labels={'Trybot-Ready': num}, dryrun=opts.dryrun)
+UserActTrybotready.arg_min = 2
 
 
 def UserActSubmit(opts, *args):
@@ -329,6 +342,12 @@ def UserActDeletedraft(opts, *args):
     helper.DeleteDraft(cl, dryrun=opts.dryrun)
 
 
+def UserActAccount(opts):
+  """Get user account information."""
+  helper, _ = GetGerrit(opts)
+  pprint.PrettyPrinter().pprint(helper.GetAccount())
+
+
 def main(argv):
   # Locate actions that are exposed to the user.  All functions that start
   # with "UserAct" are fair game.
@@ -360,8 +379,12 @@ ready.
 Actions:"""
   indent = max([len(x) - len(act_pfx) for x in actions])
   for a in sorted(actions):
-    usage += '\n  %-*s: %s' % (indent, a[len(act_pfx):].lower(),
-                               globals()[a].__doc__)
+    cmd = a[len(act_pfx):]
+    # Sanity check for devs adding new commands.  Should be quick.
+    if cmd != cmd.lower().capitalize():
+      raise RuntimeError('callback "%s" is misnamed; should be "%s"' %
+                         (cmd, cmd.lower().capitalize()))
+    usage += '\n  %-*s: %s' % (indent, cmd.lower(), globals()[a].__doc__)
 
   parser = commandline.ArgumentParser(usage=usage)
   parser.add_argument('-i', '--internal', dest='gob', action='store_const',
@@ -370,8 +393,8 @@ Actions:"""
                       help='Query internal Chromium Gerrit instance')
   parser.add_argument('-g', '--gob',
                       default=constants.EXTERNAL_GOB_INSTANCE,
-                      help='Gerrit (on borg) instance to query (default: %s)' %
-                           (constants.EXTERNAL_GOB_INSTANCE))
+                      help=('Gerrit (on borg) instance to query (default: %s)' %
+                            (constants.EXTERNAL_GOB_INSTANCE)))
   parser.add_argument('--sort', default='number',
                       help='Key to sort on (number, project)')
   parser.add_argument('--raw', default=False, action='store_true',
@@ -381,6 +404,8 @@ Actions:"""
                       help='Show what would be done, but do not make changes')
   parser.add_argument('-v', '--verbose', default=False, action='store_true',
                       help='Be more verbose in output')
+  parser.add_argument('-b', '--branch',
+                      help='Limit output to the specific branch')
   parser.add_argument('args', nargs='+')
   opts = parser.parse_args(argv)
 

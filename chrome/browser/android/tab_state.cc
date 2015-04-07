@@ -17,9 +17,9 @@
 #include "chrome/browser/android/tab_android.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/sessions/session_command.h"
 #include "components/sessions/content/content_serialized_navigation_builder.h"
 #include "components/sessions/serialized_navigation_entry.h"
+#include "components/sessions/session_command.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
@@ -336,7 +336,7 @@ ScopedJavaLocalRef<jobject> WebContentsState::WriteNavigationsAsByteBuffer(
     Pickle tab_navigation_pickle;
     // Max size taken from BaseSessionService::CreateUpdateTabNavigationCommand.
     static const size_t max_state_size =
-        std::numeric_limits<SessionCommand::size_type>::max() - 1024;
+        std::numeric_limits<sessions::SessionCommand::size_type>::max() - 1024;
     sessions::ContentSerializedNavigationBuilder::FromNavigationEntry(
         i, *navigations[i])
         .WriteToPickle(max_state_size, &tab_navigation_pickle);
@@ -549,6 +549,22 @@ static jstring GetVirtualUrlFromByteBuffer(JNIEnv* env,
       WebContentsState::GetVirtualUrlFromByteBuffer(
           env, data, size, saved_state_version);
   return result.Release();
+}
+
+// Creates a historical tab entry from the serialized tab contents contained
+// within |state|.
+static void CreateHistoricalTab(JNIEnv* env,
+                                jclass clazz,
+                                jobject state,
+                                jint saved_state_version) {
+  scoped_ptr<WebContents> web_contents(
+      WebContentsState::RestoreContentsFromByteBuffer(env,
+                                                      clazz,
+                                                      state,
+                                                      saved_state_version,
+                                                      true));
+  if (web_contents.get())
+    TabAndroid::CreateHistoricalTabFromContents(web_contents.get());
 }
 
 bool RegisterTabState(JNIEnv* env) {

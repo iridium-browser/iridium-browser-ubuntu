@@ -122,12 +122,6 @@ a:focus {
   position: relative;
 }
 
-/* The style applied when a modal dialog box overlap the dialog container. */
-.dialog-container.disable-header-drag .dialog-navigation-list-header,
-.dialog-container.disable-header-drag .dialog-header {
-  -webkit-app-region: no-drag;
-}
-
 /* List/grid and preview are inside this container. */
 .dialog-main {
   align-items: stretch;
@@ -151,7 +145,6 @@ a:focus {
 }
 
 .dialog-navigation-list-header {
-  -webkit-app-region: drag;
   flex: none;
   height: 48px;  /* Keep in sync with #dialog-header. */
   line-height: 45px;
@@ -293,8 +286,8 @@ div.splitter {
 
 #directory-tree .tree-row > div.root-eject {
   background: -webkit-image-set(
-      url('../images/files/ui/eject.png') 1x,
-      url('../images/files/ui/2x/eject.png') 2x) no-repeat center;
+      url(../images/files/ui/eject.png) 1x,
+      url(../images/files/ui/2x/eject.png) 2x) no-repeat center;
   cursor: pointer;
   flex: none;
   height: 20px;
@@ -306,8 +299,8 @@ div.splitter {
 
 #directory-tree:focus .tree-row[selected] > div.root-eject {
   background: -webkit-image-set(
-      url('../images/files/ui/eject_white.png') 1x,
-      url('../images/files/ui/2x/eject_white.png') 2x) no-repeat center;
+      url(../images/files/ui/eject_white.png) 1x,
+      url(../images/files/ui/2x/eject_white.png) 2x) no-repeat center;
   opacity: 1;
 }
 
@@ -318,7 +311,6 @@ div.splitter {
 
 /* Breadcrumbs and things under the title but above the list view. */
 .dialog-header {
-  -webkit-app-region: drag;
   align-items: center;
   display: flex;
   flex: none;
@@ -349,7 +341,6 @@ div.splitter {
 }
 
 #search-box input {
-  -webkit-app-region: no-drag;
   background-color: #fff;
   border-style: none;
   color: #333;
@@ -375,7 +366,6 @@ div.splitter {
 }
 
 #search-box .clear {
-  -webkit-app-region: no-drag;
   -webkit-margin-end: 30px;
   align-self: center;
   background: -webkit-image-set(
@@ -427,14 +417,14 @@ div.splitter {
 
 .topbutton-bar .view-button.table {
   background-image: -webkit-image-set(
-      url('../images/files/ui/button_list_view.png') 1x,
-      url('../images/files/ui/2x/button_list_view.png') 2x);
+      url(../images/files/ui/button_list_view.png) 1x,
+      url(../images/files/ui/2x/button_list_view.png) 2x);
 }
 
 .topbutton-bar .view-button.grid {
   background-image: -webkit-image-set(
-      url('../images/files/ui/button_mosaic_view.png') 1x,
-      url('../images/files/ui/2x/button_mosaic_view.png') 2x);
+      url(../images/files/ui/button_mosaic_view.png) 1x,
+      url(../images/files/ui/2x/button_mosaic_view.png) 2x);
 }
 
 /* Container for the detail and thumbnail list views. */
@@ -531,8 +521,8 @@ div.splitter {
 
 .breadcrumbs .separator {
   background-image: -webkit-image-set(
-    url('../images/files/ui/breadcrumb-separator.png') 1x,
-    url('../images/files/ui/2x/breadcrumb-separator.png') 2x);
+    url(../images/files/ui/breadcrumb-separator.png) 1x,
+    url(../images/files/ui/2x/breadcrumb-separator.png) 2x);
   background-position: center center;
   background-repeat: no-repeat;
   flex: none;
@@ -619,8 +609,8 @@ html[dir='rtl'] .breadcrumbs .separator {
   align-items: center;
   background-color: #f0f0f0;
   background-image: -webkit-image-set(
-    url('../images/files/ui/warning_icon_square.png') 1x,
-    url('../images/files/ui/2x/warning_icon_square.png') 2x);
+    url(../images/files/ui/warning_icon_square.png) 1x,
+    url(../images/files/ui/2x/warning_icon_square.png) 2x);
   background-position: 15px center;
   background-repeat: no-repeat;
   color: #666;
@@ -670,8 +660,8 @@ html[dir='rtl'] .breadcrumbs .separator {
 
 .volume-warning .drive-icon {
   background-image: -webkit-image-set(
-    url('../images/files/ui/drive_logo.png') 1x,
-    url('../images/files/ui/2x/drive_logo.png') 2x);
+    url(../images/files/ui/drive_logo.png) 1x,
+    url(../images/files/ui/2x/drive_logo.png) 2x);
   background-position: center;
   background-repeat: no-repeat;
   background-size: 25px 22px;
@@ -758,6 +748,36 @@ body[type='full-page'] .detail-name .detail-icon {
   background: rgba(0, 0, 0, 0.55);
   color: #fff;
   height: 30px;
+}
+
+.badge {
+  height: 16px;
+  position: absolute;
+  right: 7px;
+  top: 7px;
+  width: 16px;
+}
+
+.copied .badge {
+  background-image: -webkit-image-set(
+      url(../images/files/ui/copied_badge.png) 1x,
+      url(../images/files/ui/2x/copied_badge.png) 2x);
+}
+
+.imported .badge {
+  background-image: -webkit-image-set(
+      url(../images/files/ui/drive_badge.png) 1x,
+      url(../images/files/ui/2x/drive_badge.png) 2x);
+  height: 16px;
+  position: absolute;
+  right: 7px;
+  top: 7px;
+  width: 16px;
+}
+
+.imported .filename-label,
+.copied .filename-label {
+  margin-right: 14px;
 }
 
 /* Padding counterweights negative margins of items, thus eliminating scroll
@@ -985,6 +1005,10 @@ li[renaming=''] .filename-label {
   -webkit-animation: fadeIn 180ms ease-in-out;
 }
 
+.preview-thumbnails img.cached {
+  -webkit-animation: fadeIn 0;
+}
+
 .preview-thumbnails > .popup > img {
   flex: 1 1 0;
   -webkit-user-drag: none;
@@ -993,8 +1017,8 @@ li[renaming=''] .filename-label {
 /* Table splitter element */
 .table-header-splitter {
   background-image: -webkit-image-set(
-    url('../images/files/ui/vertical_separator.png') 1x,
-    url('../images/files/ui/2x/vertical_separator.png') 2x);
+    url(../images/files/ui/vertical_separator.png) 1x,
+    url(../images/files/ui/2x/vertical_separator.png) 2x);
   background-position: center;
   background-repeat: repeat-y;
   height: 20px;
@@ -1016,8 +1040,8 @@ li[renaming=''] .filename-label {
 .table-header-sort-image-desc::after {
   -webkit-padding-start: 13px;
   background-image: -webkit-image-set(
-    url('../images/files/ui/sort_desc.png') 1x,
-    url('../images/files/ui/2x/sort_desc.png') 2x);
+    url(../images/files/ui/sort_desc.png) 1x,
+    url(../images/files/ui/2x/sort_desc.png) 2x);
   background-position: center center;
   background-repeat: no-repeat;
   color: #888;
@@ -1029,8 +1053,8 @@ li[renaming=''] .filename-label {
 .table-header-sort-image-asc::after {
   -webkit-padding-start: 13px;
   background-image: -webkit-image-set(
-    url('../images/files/ui/sort_asc.png') 1x,
-    url('../images/files/ui/2x/sort_asc.png') 2x);
+    url(../images/files/ui/sort_asc.png) 1x,
+    url(../images/files/ui/2x/sort_asc.png) 2x);
   background-position: center center;
   background-repeat: no-repeat;
   color: #888;
@@ -1122,7 +1146,7 @@ li[renaming=''] .filename-label {
   display: none;
 }
 
-#tasks-menu menuitem:not(.change-default) {
+#tasks-menu cr-menu-item:not(.change-default) {
   background-position: left 10px center;
   padding-left: 32px;
 }
@@ -1230,11 +1254,11 @@ body[drive] .dialog-container[connection='offline'] .dim-offline {
   white-space: nowrap;
 }
 
-menu.file-context-menu {
+cr-menu.file-context-menu {
   z-index: 600;  /* Must be below the overlay pane (1000). */
 }
 
-menu.chrome-menu hr {
+cr-menu.chrome-menu hr {
   color: transparent;
   font-size: 0;
 }
@@ -1484,15 +1508,15 @@ list.autocomplete-suggestions > li > div.detail-text em {
 
 list.autocomplete-suggestions > li > div[search-icon] {
   background: -webkit-image-set(
-      url('../images/files/ui/search_icon_active.png') 1x,
-      url('../images/files/ui/2x/search_icon_active.png') 2x) center no-repeat;
+      url(../images/files/ui/search_icon_active.png) 1x,
+      url(../images/files/ui/2x/search_icon_active.png) 2x) center no-repeat;
 }
 
 list.autocomplete-suggestions > li[selected] > div[search-icon],
 list.autocomplete-suggestions > li[lead] > div[search-icon] {
   background: -webkit-image-set(
-      url('../images/files/ui/search_icon_white.png') 1x,
-      url('../images/files/ui/2x/search_icon_white.png') 2x) center no-repeat;
+      url(../images/files/ui/search_icon_white.png) 1x,
+      url(../images/files/ui/2x/search_icon_white.png) 2x) center no-repeat;
 }
 
 list.autocomplete-suggestions > [selected],
@@ -1510,7 +1534,7 @@ list.autocomplete-suggestions > [lead] > div.detail-text em {
   margin-top: 8px;
 }
 
-#gear-menu > menuitem:not(.menuitem-button) {
+#gear-menu > cr-menu-item:not(.menuitem-button) {
   -webkit-margin-end: 50px;
 }
 
@@ -1567,8 +1591,8 @@ list.autocomplete-suggestions > [lead] > div.detail-text em {
   -webkit-padding-end: 10px;
   -webkit-padding-start: 36px;
   background-image: -webkit-image-set(
-    url('chrome://theme/IDR_WEBSTORE_ICON_16') 1x,
-    url('chrome://theme/IDR_WEBSTORE_ICON_16@2x') 2x);
+    url(chrome://theme/IDR_WEBSTORE_ICON_16) 1x,
+    url(chrome://theme/IDR_WEBSTORE_ICON_16@2x) 2x);
   background-position: 12px center;
   background-repeat: no-repeat;
   color: #00f;
@@ -1585,8 +1609,8 @@ list.autocomplete-suggestions > [lead] > div.detail-text em {
 
 .error-dialog-frame .error-dialog-img {
   background-image: -webkit-image-set(
-    url('chrome://theme/IDR_ERROR_NETWORK_GENERIC') 1x,
-    url('chrome://theme/IDR_ERROR_NETWORK_GENERIC@2x') 2x);
+    url(chrome://theme/IDR_ERROR_NETWORK_GENERIC) 1x,
+    url(chrome://theme/IDR_ERROR_NETWORK_GENERIC@2x) 2x);
   background-position: center;
   background-repeat: no-repeat;
   height: 40px;

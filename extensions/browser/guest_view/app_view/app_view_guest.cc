@@ -9,6 +9,7 @@
 #include "content/public/common/renderer_preferences.h"
 #include "extensions/browser/api/app_runtime/app_runtime_api.h"
 #include "extensions/browser/api/extensions_api_client.h"
+#include "extensions/browser/app_window/app_delegate.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_registry.h"
@@ -88,16 +89,24 @@ bool AppViewGuest::CompletePendingRequest(
 
 // static
 GuestViewBase* AppViewGuest::Create(content::BrowserContext* browser_context,
+                                    content::WebContents* owner_web_contents,
                                     int guest_instance_id) {
-  return new AppViewGuest(browser_context, guest_instance_id);
+  return new AppViewGuest(browser_context,
+                          owner_web_contents,
+                          guest_instance_id);
 }
 
 AppViewGuest::AppViewGuest(content::BrowserContext* browser_context,
+                           content::WebContents* owner_web_contents,
                            int guest_instance_id)
-    : GuestView<AppViewGuest>(browser_context, guest_instance_id),
+    : GuestView<AppViewGuest>(browser_context,
+                              owner_web_contents,
+                              guest_instance_id),
       app_view_guest_delegate_(
           ExtensionsAPIClient::Get()->CreateAppViewGuestDelegate()),
       weak_ptr_factory_(this) {
+  if (app_view_guest_delegate_)
+    app_delegate_.reset(app_view_guest_delegate_->CreateAppDelegate());
 }
 
 AppViewGuest::~AppViewGuest() {
@@ -127,6 +136,41 @@ bool AppViewGuest::HandleContextMenu(const content::ContextMenuParams& params) {
   return false;
 }
 
+void AppViewGuest::RequestMediaAccessPermission(
+    content::WebContents* web_contents,
+    const content::MediaStreamRequest& request,
+    const content::MediaResponseCallback& callback) {
+  if (!app_delegate_) {
+    WebContentsDelegate::RequestMediaAccessPermission(web_contents, request,
+                                                      callback);
+    return;
+  }
+  const ExtensionSet& enabled_extensions =
+      ExtensionRegistry::Get(browser_context())->enabled_extensions();
+  const Extension* guest_extension =
+      enabled_extensions.GetByID(guest_extension_id_);
+
+  app_delegate_->RequestMediaAccessPermission(web_contents, request, callback,
+                                              guest_extension);
+}
+
+bool AppViewGuest::CheckMediaAccessPermission(
+    content::WebContents* web_contents,
+    const GURL& security_origin,
+    content::MediaStreamType type) {
+  if (!app_delegate_) {
+    return WebContentsDelegate::CheckMediaAccessPermission(
+        web_contents, security_origin, type);
+  }
+  const ExtensionSet& enabled_extensions =
+      ExtensionRegistry::Get(browser_context())->enabled_extensions();
+  const Extension* guest_extension =
+      enabled_extensions.GetByID(guest_extension_id_);
+
+  return app_delegate_->CheckMediaAccessPermission(
+      web_contents, security_origin, type, guest_extension);
+}
+
 const char* AppViewGuest::GetAPINamespace() const {
   return appview::kEmbedderAPINamespace;
 }
@@ -136,9 +180,6 @@ int AppViewGuest::GetTaskPrefix() const {
 }
 
 void AppViewGuest::CreateWebContents(
-    const std::string& embedder_extension_id,
-    int embedder_render_process_id,
-    const GURL& embedder_site_url,
     const base::DictionaryValue& create_params,
     const WebContentsCreatedCallback& callback) {
   std::string app_id;
@@ -157,7 +198,7 @@ void AppViewGuest::CreateWebContents(
       ExtensionRegistry::Get(browser_context())->enabled_extensions();
   const Extension* guest_extension = enabled_extensions.GetByID(app_id);
   const Extension* embedder_extension =
-      enabled_extensions.GetByID(embedder_extension_id);
+      enabled_extensions.GetByID(GetOwnerSiteURL().host());
 
   if (!guest_extension || !guest_extension->is_platform_app() ||
       !embedder_extension | !embedder_extension->is_platform_app()) {
@@ -249,10 +290,14 @@ void AppViewGuest::LaunchAppAndFireEvent(
 
   scoped_ptr<base::DictionaryValue> embed_request(new base::DictionaryValue());
   embed_request->SetInteger(appview::kGuestInstanceID, guest_instance_id());
-  embed_request->SetString(appview::kEmbedderID, embedder_extension_id());
+  embed_request->SetString(appview::kEmbedderID, owner_extension_id());
   embed_request->Set(appview::kData, data.release());
   AppRuntimeEventRouter::DispatchOnEmbedRequestedEvent(
       browser_context(), embed_request.Pass(), extension_host->extension());
+}
+
+void AppViewGuest::SetAppDelegateForTest(AppDelegate* delegate) {
+  app_delegate_.reset(delegate);
 }
 
 }  // namespace extensions

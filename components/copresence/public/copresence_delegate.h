@@ -28,19 +28,17 @@ class WhispernetClient;
 enum CopresenceStatus { SUCCESS, FAIL, AUDIO_FAIL };
 
 // Callback type to send a status.
-typedef base::Callback<void(CopresenceStatus)> StatusCallback;
+using StatusCallback = base::Callback<void(CopresenceStatus)>;
 
 // A delegate interface for users of Copresence.
 class CopresenceDelegate {
  public:
-  virtual ~CopresenceDelegate() {}
-
   // This method will be called when we have subscribed messages
   // that need to be sent to their respective apps.
   virtual void HandleMessages(
       const std::string& app_id,
       const std::string& subscription_id,
-      const std::vector<Message>& message) = 0;
+      const std::vector<Message>& messages) = 0;
 
   virtual void HandleStatusUpdate(CopresenceStatus status) = 0;
 
@@ -49,7 +47,10 @@ class CopresenceDelegate {
 
   virtual const std::string GetPlatformVersionString() const = 0;
 
+  // This is deprecated. Clients should pass in the project ID instead.
   virtual const std::string GetAPIKey(const std::string& app_id) const = 0;
+
+  virtual const std::string GetProjectId(const std::string& app_id) const = 0;
 
   // Thw WhispernetClient must outlive the CopresenceManager.
   virtual WhispernetClient* GetWhispernetClient() = 0;
@@ -57,6 +58,18 @@ class CopresenceDelegate {
   // Clients may optionally provide a GCMDriver to receive messages from.
   // If no driver is available, this can return null.
   virtual gcm::GCMDriver* GetGCMDriver() = 0;
+
+  // Get the copresence device ID for authenticated or anonymous calls,
+  // as specified. If none exists, return the empty string.
+  virtual const std::string GetDeviceId(bool authenticated) = 0;
+
+  // Save a copresence device ID for authenticated or anonymous calls.
+  // If the device ID is empty, any stored ID should be deleted.
+  virtual void SaveDeviceId(bool authenticated,
+                            const std::string& device_id) = 0;
+
+ protected:
+  virtual ~CopresenceDelegate() {}
 };
 
 }  // namespace copresence

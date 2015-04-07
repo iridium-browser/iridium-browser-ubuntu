@@ -42,8 +42,8 @@ public:
     RenderObject* lastChild() const { ASSERT(children() == virtualChildren()); return children()->lastChild(); }
 
     // If you have a RenderMedia, use firstChild or lastChild instead.
-    void slowFirstChild() const WTF_DELETED_FUNCTION;
-    void slowLastChild() const WTF_DELETED_FUNCTION;
+    void slowFirstChild() const = delete;
+    void slowLastChild() const = delete;
 
     const RenderObjectChildList* children() const { return &m_children; }
     RenderObjectChildList* children() { return &m_children; }
@@ -69,7 +69,9 @@ private:
 
     virtual const char* renderName() const override { return "RenderMedia"; }
     virtual bool isImage() const override final { return false; }
-    virtual void paintReplaced(PaintInfo&, const LayoutPoint&) override;
+    virtual void paintReplaced(const PaintInfo&, const LayoutPoint&) override;
+
+    virtual bool backgroundShouldAlwaysBeClipped() const override final { return false; }
 
     RenderObjectChildList m_children;
 };

@@ -10,7 +10,6 @@
 #include "base/strings/string16.h"
 #include "skia/ext/bitmap_platform_device.h"
 #include "skia/ext/skia_utils_win.h"
-#include "third_party/skia/include/core/SkFontHost.h"
 #include "third_party/skia/include/core/SkPathEffect.h"
 #include "third_party/skia/include/core/SkTemplates.h"
 #include "third_party/skia/include/core/SkUtils.h"
@@ -684,22 +683,17 @@ void VectorPlatformDeviceEmf::setMatrixClip(const SkMatrix& transform,
     LoadClipRegion();
 }
 
-void VectorPlatformDeviceEmf::DrawToNativeContext(HDC dc, int x, int y,
-                                                  const RECT* src_rect) {
-  SkASSERT(false);
-}
-
 void VectorPlatformDeviceEmf::LoadClipRegion() {
   SkMatrix t;
   t.reset();
   LoadClippingRegionToDC(hdc_, clip_region_, t);
 }
 
-SkBaseDevice* VectorPlatformDeviceEmf::onCreateDevice(const SkImageInfo& info,
-                                                      Usage /*usage*/) {
-  SkASSERT(info.colorType() == kN32_SkColorType);
+SkBaseDevice* VectorPlatformDeviceEmf::onCreateCompatibleDevice(
+                                                    const CreateInfo& info) {
+  SkASSERT(info.fInfo.colorType() == kN32_SkColorType);
   return VectorPlatformDeviceEmf::CreateDevice(
-      info.width(), info.height(), info.isOpaque(), NULL);
+      info.fInfo.width(), info.fInfo.height(), info.fInfo.isOpaque(), NULL);
 }
 
 bool VectorPlatformDeviceEmf::CreateBrush(bool use_brush, COLORREF color) {

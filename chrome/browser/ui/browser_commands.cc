@@ -40,17 +40,18 @@
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
 #include "chrome/browser/ui/find_bar/find_bar.h"
 #include "chrome/browser/ui/find_bar/find_bar_controller.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
-#include "chrome/browser/ui/fullscreen/fullscreen_controller.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
+#include "chrome/browser/ui/passwords/manage_passwords_ui_controller.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/browser/ui/search/search_tab_helper.h"
 #include "chrome/browser/ui/status_bubble.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
+#include "chrome/browser/ui/tab_dialogs.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/zoom/zoom_controller.h"
 #include "chrome/browser/upgrade_detector.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
@@ -60,6 +61,7 @@
 #include "components/bookmarks/browser/bookmark_utils.h"
 #include "components/google/core/browser/google_util.h"
 #include "components/translate/core/browser/language_state.h"
+#include "components/ui/zoom/zoom_controller.h"
 #include "components/web_modal/popup_manager.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/navigation_controller.h"
@@ -86,8 +88,8 @@
 #include "chrome/browser/extensions/api/commands/command_service.h"
 #include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
 #include "chrome/browser/extensions/tab_helper.h"
-#include "chrome/browser/ui/webui/ntp/core_app_launcher_handler.h"
 #include "chrome/browser/web_applications/web_app.h"
+#include "chrome/common/extensions/extension_metrics.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
@@ -96,11 +98,9 @@
 #endif
 
 #if defined(ENABLE_PRINTING)
+#include "chrome/browser/printing/print_view_manager_common.h"
 #if defined(ENABLE_PRINT_PREVIEW)
 #include "chrome/browser/printing/print_preview_dialog_controller.h"
-#include "chrome/browser/printing/print_view_manager.h"
-#else
-#include "chrome/browser/printing/print_view_manager_basic.h"
 #endif  // defined(ENABLE_PRINT_PREVIEW)
 #endif  // defined(ENABLE_PRINTING)
 
@@ -155,10 +155,9 @@ bool GetBookmarkOverrideCommand(
        ++i) {
     extensions::Command prospective_command;
     extensions::CommandService::ExtensionCommandType prospective_command_type;
-    if (command_service->GetBoundExtensionCommand((*i)->id(),
-                                                  bookmark_page_accelerator,
-                                                  &prospective_command,
-                                                  &prospective_command_type)) {
+    if (command_service->GetSuggestedExtensionCommand(
+            (*i)->id(), bookmark_page_accelerator, &prospective_command,
+            &prospective_command_type)) {
       *extension = i->get();
       *command = prospective_command;
       *command_type = prospective_command_type;
@@ -168,38 +167,6 @@ bool GetBookmarkOverrideCommand(
   return false;
 }
 #endif
-
-void BookmarkCurrentPageInternal(Browser* browser) {
-  content::RecordAction(UserMetricsAction("Star"));
-
-  BookmarkModel* model =
-      BookmarkModelFactory::GetForProfile(browser->profile());
-  if (!model || !model->loaded())
-    return;  // Ignore requests until bookmarks are loaded.
-
-  GURL url;
-  base::string16 title;
-  WebContents* web_contents =
-      browser->tab_strip_model()->GetActiveWebContents();
-  GetURLAndTitleToBookmark(web_contents, &url, &title);
-  bool is_bookmarked_by_any = model->IsBookmarked(url);
-  if (!is_bookmarked_by_any &&
-      web_contents->GetBrowserContext()->IsOffTheRecord()) {
-    // If we're incognito the favicon may not have been saved. Save it now
-    // so that bookmarks have an icon for the page.
-    FaviconTabHelper::FromWebContents(web_contents)->SaveFavicon();
-  }
-  bool was_bookmarked_by_user = bookmarks::IsBookmarkedByUser(model, url);
-  bookmarks::AddIfNotBookmarked(model, url, title);
-  bool is_bookmarked_by_user = bookmarks::IsBookmarkedByUser(model, url);
-  // Make sure the model actually added a bookmark before showing the star. A
-  // bookmark isn't created if the url is invalid.
-  if (browser->window()->IsActive() && is_bookmarked_by_user) {
-    // Only show the bubble if the window is active, otherwise we may get into
-    // weird situations where the bubble is deleted as soon as it is shown.
-    browser->window()->ShowBookmarkBubble(url, was_bookmarked_by_user);
-  }
-}
 
 // Based on |disposition|, creates a new tab as necessary, and returns the
 // appropriate tab to navigate.  If that tab is the current tab, reverts the
@@ -353,9 +320,9 @@ void NewEmptyWindow(Profile* profile, HostDesktopType desktop_type) {
       incognito = false;
     }
   } else if (profile->IsGuestSession() ||
-      (browser_defaults::kAlwaysOpenIncognitoWindow &&
-      IncognitoModePrefs::ShouldLaunchIncognito(
-          *CommandLine::ForCurrentProcess(), prefs))) {
+             (browser_defaults::kAlwaysOpenIncognitoWindow &&
+              IncognitoModePrefs::ShouldLaunchIncognito(
+                  *base::CommandLine::ForCurrentProcess(), prefs))) {
     incognito = true;
   }
 
@@ -542,9 +509,8 @@ void OpenCurrentURL(Browser* browser) {
       extensions::ExtensionRegistry::Get(browser->profile())
           ->enabled_extensions().GetAppByURL(url);
   if (extension) {
-    CoreAppLauncherHandler::RecordAppLaunchType(
-        extension_misc::APP_LAUNCH_OMNIBOX_LOCATION,
-        extension->GetType());
+    extensions::RecordAppLaunchType(extension_misc::APP_LAUNCH_OMNIBOX_LOCATION,
+                                    extension->GetType());
   }
 #endif
 }
@@ -599,19 +565,22 @@ void CloseTab(Browser* browser) {
 }
 
 bool CanZoomIn(content::WebContents* contents) {
-  ZoomController* zoom_controller = ZoomController::FromWebContents(contents);
+  ui_zoom::ZoomController* zoom_controller =
+      ui_zoom::ZoomController::FromWebContents(contents);
   return zoom_controller->GetZoomPercent() !=
       contents->GetMaximumZoomPercent() + 1;
 }
 
 bool CanZoomOut(content::WebContents* contents) {
-  ZoomController* zoom_controller = ZoomController::FromWebContents(contents);
+  ui_zoom::ZoomController* zoom_controller =
+      ui_zoom::ZoomController::FromWebContents(contents);
   return zoom_controller->GetZoomPercent() !=
       contents->GetMinimumZoomPercent();
 }
 
 bool ActualSize(content::WebContents* contents) {
-  ZoomController* zoom_controller = ZoomController::FromWebContents(contents);
+  ui_zoom::ZoomController* zoom_controller =
+      ui_zoom::ZoomController::FromWebContents(contents);
   return zoom_controller->GetZoomPercent() != 100.0f;
 }
 
@@ -744,7 +713,39 @@ void Exit() {
   chrome::AttemptUserExit();
 }
 
-void BookmarkCurrentPage(Browser* browser) {
+void BookmarkCurrentPageIgnoringExtensionOverrides(Browser* browser) {
+  content::RecordAction(UserMetricsAction("Star"));
+
+  BookmarkModel* model =
+      BookmarkModelFactory::GetForProfile(browser->profile());
+  if (!model || !model->loaded())
+    return;  // Ignore requests until bookmarks are loaded.
+
+  GURL url;
+  base::string16 title;
+  WebContents* web_contents =
+      browser->tab_strip_model()->GetActiveWebContents();
+  GetURLAndTitleToBookmark(web_contents, &url, &title);
+  bool is_bookmarked_by_any = model->IsBookmarked(url);
+  if (!is_bookmarked_by_any &&
+      web_contents->GetBrowserContext()->IsOffTheRecord()) {
+    // If we're incognito the favicon may not have been saved. Save it now
+    // so that bookmarks have an icon for the page.
+    FaviconTabHelper::FromWebContents(web_contents)->SaveFavicon();
+  }
+  bool was_bookmarked_by_user = bookmarks::IsBookmarkedByUser(model, url);
+  bookmarks::AddIfNotBookmarked(model, url, title);
+  bool is_bookmarked_by_user = bookmarks::IsBookmarkedByUser(model, url);
+  // Make sure the model actually added a bookmark before showing the star. A
+  // bookmark isn't created if the url is invalid.
+  if (browser->window()->IsActive() && is_bookmarked_by_user) {
+    // Only show the bubble if the window is active, otherwise we may get into
+    // weird situations where the bubble is deleted as soon as it is shown.
+    browser->window()->ShowBookmarkBubble(url, was_bookmarked_by_user);
+  }
+}
+
+void BookmarkCurrentPageAllowingExtensionOverrides(Browser* browser) {
   DCHECK(!chrome::ShouldRemoveBookmarkThisPageUI(browser->profile()));
 
 #if defined(ENABLE_EXTENSIONS)
@@ -770,8 +771,7 @@ void BookmarkCurrentPage(Browser* browser) {
     return;
   }
 #endif
-
-  BookmarkCurrentPageInternal(browser);
+  BookmarkCurrentPageIgnoringExtensionOverrides(browser);
 }
 
 bool CanBookmarkCurrentPage(const Browser* browser) {
@@ -779,6 +779,7 @@ bool CanBookmarkCurrentPage(const Browser* browser) {
 }
 
 void BookmarkAllTabs(Browser* browser) {
+  content::RecordAction(UserMetricsAction("BookmarkAllTabs"));
   chrome::ShowBookmarkAllTabsDialog(browser);
 }
 
@@ -814,7 +815,11 @@ void ManagePasswordsForPage(Browser* browser) {
 
   WebContents* web_contents =
       browser->tab_strip_model()->GetActiveWebContents();
-  chrome::ShowManagePasswordsBubble(web_contents);
+  ManagePasswordsUIController* controller =
+      ManagePasswordsUIController::FromWebContents(web_contents);
+  TabDialogs::FromWebContents(web_contents)
+      ->ShowManagePasswordsBubble(
+          !password_manager::ui::IsAutomaticDisplayState(controller->state()));
 }
 
 #if defined(OS_WIN)
@@ -859,25 +864,10 @@ void ShowWebsiteSettings(Browser* browser,
 
 void Print(Browser* browser) {
 #if defined(ENABLE_PRINTING)
-  WebContents* contents = browser->tab_strip_model()->GetActiveWebContents();
-
-#if defined(ENABLE_PRINT_PREVIEW)
-  printing::PrintViewManager* print_view_manager =
-      printing::PrintViewManager::FromWebContents(contents);
-  if (!browser->profile()->GetPrefs()->GetBoolean(
-          prefs::kPrintPreviewDisabled)) {
-    print_view_manager->PrintPreviewNow(false);
-    return;
-  }
-#else   // ENABLE_PRINT_PREVIEW
-  printing::PrintViewManagerBasic* print_view_manager =
-      printing::PrintViewManagerBasic::FromWebContents(contents);
-#endif  // ENABLE_PRINT_PREVIEW
-
-#if defined(ENABLE_BASIC_PRINTING)
-  print_view_manager->PrintNow();
-#endif  // ENABLE_BASIC_PRINTING
-
+  printing::StartPrint(
+      browser->tab_strip_model()->GetActiveWebContents(),
+      browser->profile()->GetPrefs()->GetBoolean(prefs::kPrintPreviewDisabled),
+      false);
 #endif  // defined(ENABLE_PRINTING)
 }
 
@@ -895,12 +885,7 @@ bool CanPrint(Browser* browser) {
 
 #if defined(ENABLE_BASIC_PRINTING)
 void BasicPrint(Browser* browser) {
-#if defined(ENABLE_PRINT_PREVIEW)
-  printing::PrintViewManager* print_view_manager =
-      printing::PrintViewManager::FromWebContents(
-          browser->tab_strip_model()->GetActiveWebContents());
-  print_view_manager->BasicPrint();
-#endif
+  printing::StartBasicPrint(browser->tab_strip_model()->GetActiveWebContents());
 }
 
 bool CanBasicPrint(Browser* browser) {

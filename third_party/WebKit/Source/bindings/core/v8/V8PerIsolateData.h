@@ -31,7 +31,6 @@
 #include "bindings/core/v8/V8HiddenValue.h"
 #include "bindings/core/v8/WrapperTypeInfo.h"
 #include "gin/public/isolate_holder.h"
-#include "modules/indexeddb/IDBPendingTransactionMonitor.h"
 #include "wtf/HashMap.h"
 #include "wtf/OwnPtr.h"
 #include "wtf/Vector.h"
@@ -48,6 +47,12 @@ typedef WTF::Vector<DOMDataStore*> DOMDataStoreList;
 
 class V8PerIsolateData {
 public:
+    class EndOfScopeTask {
+    public:
+        virtual ~EndOfScopeTask() { }
+        virtual void run() = 0;
+    };
+
     static v8::Isolate* initialize();
     static V8PerIsolateData* from(v8::Isolate* isolate)
     {
@@ -95,14 +100,20 @@ public:
     void setDOMTemplate(void* domTemplateKey, v8::Handle<v8::FunctionTemplate>);
 
     bool hasInstance(const WrapperTypeInfo*, v8::Handle<v8::Value>);
-    v8::Handle<v8::Object> findInstanceInPrototypeChain(const WrapperTypeInfo*, v8::Handle<v8::Value>);
+    v8::Local<v8::Object> findInstanceInPrototypeChain(const WrapperTypeInfo*, v8::Local<v8::Value>);
 
     v8::Local<v8::Context> ensureScriptRegexpContext();
 
     const char* previousSamplingState() const { return m_previousSamplingState; }
     void setPreviousSamplingState(const char* name) { m_previousSamplingState = name; }
 
-    IDBPendingTransactionMonitor* ensureIDBPendingTransactionMonitor();
+    // EndOfScopeTasks are run by V8RecursionScope when control is returning
+    // to C++ from script, after executing a script task (e.g. callback,
+    // event) or microtasks (e.g. promise). This is explicitly needed for
+    // Indexed DB transactions per spec, but should in general be avoided.
+    void addEndOfScopeTask(PassOwnPtr<EndOfScopeTask>);
+    void runEndOfScopeTasks();
+    void clearEndOfScopeTasks();
 
 private:
     V8PerIsolateData();
@@ -111,7 +122,7 @@ private:
     typedef HashMap<const void*, v8::Eternal<v8::FunctionTemplate> > DOMTemplateMap;
     DOMTemplateMap& currentDOMTemplateMap();
     bool hasInstance(const WrapperTypeInfo*, v8::Handle<v8::Value>, DOMTemplateMap&);
-    v8::Handle<v8::Object> findInstanceInPrototypeChain(const WrapperTypeInfo*, v8::Handle<v8::Value>, DOMTemplateMap&);
+    v8::Local<v8::Object> findInstanceInPrototypeChain(const WrapperTypeInfo*, v8::Local<v8::Value>, DOMTemplateMap&);
 
     bool m_destructionPending;
     OwnPtr<gin::IsolateHolder> m_isolateHolder;
@@ -138,7 +149,7 @@ private:
     OwnPtr<GCEventData> m_gcEventData;
     bool m_performingMicrotaskCheckpoint;
 
-    OwnPtr<IDBPendingTransactionMonitor> m_idbPendingTransactionMonitor;
+    Vector<OwnPtr<EndOfScopeTask>> m_endOfScopeTasks;
 };
 
 } // namespace blink

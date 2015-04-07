@@ -18,7 +18,7 @@
           '<(PRODUCT_DIR)/libffmpegsumo.so',
           '<(PRODUCT_DIR)/libosmesa.so',
           '<(PRODUCT_DIR)/libppapi_tests.so',
-          '<(PRODUCT_DIR)/pyproto/',
+          '<(PRODUCT_DIR)/pyproto/google/',
         ],
       },
     }],
@@ -83,7 +83,7 @@
       'variables': {
         'files': [
           '<(PRODUCT_DIR)/chrome_elf.dll',
-          '<(PRODUCT_DIR)/d3dcompiler_46.dll',
+          '<(PRODUCT_DIR)/d3dcompiler_47.dll',
           '<(PRODUCT_DIR)/ffmpegsumo.dll',
           '<(PRODUCT_DIR)/libEGL.dll',
           '<(PRODUCT_DIR)/libGLESv2.dll',

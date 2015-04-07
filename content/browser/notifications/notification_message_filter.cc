@@ -11,6 +11,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/desktop_notification_delegate.h"
+#include "content/public/browser/platform_notification_service.h"
 #include "content/public/common/content_client.h"
 
 namespace content {
@@ -37,8 +38,12 @@ bool NotificationMessageFilter::OnMessageReceived(const IPC::Message& message) {
                         OnCheckNotificationPermission)
     IPC_MESSAGE_HANDLER(PlatformNotificationHostMsg_Show,
                         OnShowPlatformNotification)
+    IPC_MESSAGE_HANDLER(PlatformNotificationHostMsg_ShowPersistent,
+                        OnShowPersistentNotification)
     IPC_MESSAGE_HANDLER(PlatformNotificationHostMsg_Close,
                         OnClosePlatformNotification)
+    IPC_MESSAGE_HANDLER(PlatformNotificationHostMsg_ClosePersistent,
+                        OnClosePersistentNotification)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -48,33 +53,72 @@ bool NotificationMessageFilter::OnMessageReceived(const IPC::Message& message) {
 void NotificationMessageFilter::OverrideThreadForMessage(
     const IPC::Message& message, content::BrowserThread::ID* thread) {
   if (message.type() == PlatformNotificationHostMsg_Show::ID ||
-      message.type() == PlatformNotificationHostMsg_Close::ID)
+      message.type() == PlatformNotificationHostMsg_ShowPersistent::ID ||
+      message.type() == PlatformNotificationHostMsg_Close::ID ||
+      message.type() == PlatformNotificationHostMsg_ClosePersistent::ID)
     *thread = BrowserThread::UI;
 }
 
 void NotificationMessageFilter::OnCheckNotificationPermission(
     const GURL& origin, blink::WebNotificationPermission* permission) {
-  *permission =
-      GetContentClient()->browser()->CheckDesktopNotificationPermission(
-          origin,
-          resource_context_,
-          process_id_);
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  PlatformNotificationService* service =
+      GetContentClient()->browser()->GetPlatformNotificationService();
+  if (service) {
+    *permission = service->CheckPermission(resource_context_,
+                                           origin,
+                                           process_id_);
+  } else {
+    *permission = blink::WebNotificationPermissionDenied;
+  }
 }
 
 void NotificationMessageFilter::OnShowPlatformNotification(
-    int notification_id, const ShowDesktopNotificationHostMsgParams& params) {
+    int notification_id,
+    const GURL& origin,
+    const SkBitmap& icon,
+    const PlatformNotificationData& notification_data) {
   scoped_ptr<DesktopNotificationDelegate> delegate(
       new PageNotificationDelegate(process_id_, notification_id));
 
+  PlatformNotificationService* service =
+      GetContentClient()->browser()->GetPlatformNotificationService();
+  DCHECK(service);
+
+  // TODO(peter): Verify that permission has been granted for |origin|.
+
   base::Closure close_closure;
-  GetContentClient()->browser()->ShowDesktopNotification(params,
-                                                         browser_context_,
-                                                         process_id_,
-                                                         delegate.Pass(),
-                                                         &close_closure);
+  service->DisplayNotification(browser_context_,
+                               origin,
+                               icon,
+                               notification_data,
+                               delegate.Pass(),
+                               process_id_,
+                               &close_closure);
 
   if (!close_closure.is_null())
     close_closures_[notification_id] = close_closure;
+}
+
+void NotificationMessageFilter::OnShowPersistentNotification(
+    int64 service_worker_registration_id,
+    const GURL& origin,
+    const SkBitmap& icon,
+    const PlatformNotificationData& notification_data) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  PlatformNotificationService* service =
+      GetContentClient()->browser()->GetPlatformNotificationService();
+  DCHECK(service);
+
+  // TODO(peter): Verify that permission has been granted for |origin|.
+
+  service->DisplayPersistentNotification(browser_context_,
+                                         service_worker_registration_id,
+                                         origin,
+                                         icon,
+                                         notification_data,
+                                         process_id_);
 }
 
 void NotificationMessageFilter::OnClosePlatformNotification(
@@ -84,6 +128,18 @@ void NotificationMessageFilter::OnClosePlatformNotification(
 
   close_closures_[notification_id].Run();
   close_closures_.erase(notification_id);
+}
+
+void NotificationMessageFilter::OnClosePersistentNotification(
+    const std::string& persistent_notification_id) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  PlatformNotificationService* service =
+      GetContentClient()->browser()->GetPlatformNotificationService();
+  DCHECK(service);
+
+  service->ClosePersistentNotification(browser_context_,
+                                       persistent_notification_id);
 }
 
 }  // namespace content

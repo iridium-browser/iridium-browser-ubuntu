@@ -21,6 +21,7 @@ from __future__ import print_function
 
 import datetime
 import functools
+import glob
 import multiprocessing
 import os
 import sys
@@ -45,6 +46,11 @@ _RETRIES = 10
 # (1*sleep) the first time, then (2*sleep), continuing via attempt * sleep.
 _SLEEP_TIME = 60
 
+# The length of time (in seconds) that Portage should wait before refetching
+# binpkgs from the same binhost. We don't ever modify binhosts, so this should
+# be something big.
+_BINPKG_TTL = 60 * 60 * 24 * 365
+
 _HOST_PACKAGES_PATH = 'chroot/var/lib/portage/pkgs'
 _CATEGORIES_PATH = 'chroot/etc/portage/categories'
 _PYM_PATH = 'chroot/usr/lib/portage/pym'
@@ -55,7 +61,6 @@ _REL_HOST_PATH = 'host/%(host_arch)s/%(target)s/%(version)s'
 # Private overlays to look at for builds to filter
 # relative to build path
 _PRIVATE_OVERLAY_DIR = 'src/private-overlays'
-_GOOGLESTORAGE_ACL_FILE = 'googlestorage_acl.xml'
 _GOOGLESTORAGE_GSUTIL_FILE = 'googlestorage_acl.txt'
 _BINHOST_BASE_URL = 'gs://chromeos-prebuilt'
 _PREBUILT_BASE_DIR = 'src/third_party/chromiumos-overlay/chromeos/config/'
@@ -96,6 +101,9 @@ def UpdateLocalFile(filename, value, key='PORTAGE_BINHOST'):
     filename: Name of file to modify.
     value: Value to write with the key.
     key: The variable key to update. (Default: PORTAGE_BINHOST)
+
+  Returns:
+    True if changes were made to the file.
   """
   if os.path.exists(filename):
     file_fh = open(filename)
@@ -103,6 +111,7 @@ def UpdateLocalFile(filename, value, key='PORTAGE_BINHOST'):
     file_fh = open(filename, 'w+')
   file_lines = []
   found = False
+  made_changes = False
   keyval_str = '%(key)s=%(value)s'
   for line in file_fh:
     # Strip newlines from end of line. We already add newlines below.
@@ -118,17 +127,20 @@ def UpdateLocalFile(filename, value, key='PORTAGE_BINHOST'):
       found = True
       print('Updating %s=%s to %s="%s"' % (file_var, file_val, key, value))
       value = '"%s"' % value
+      made_changes |= (file_val != value)
       file_lines.append(keyval_str % {'key': key, 'value': value})
     else:
       file_lines.append(keyval_str % {'key': file_var, 'value': file_val})
 
   if not found:
     value = '"%s"' % value
+    made_changes = True
     file_lines.append(keyval_str % {'key': key, 'value': value})
 
   file_fh.close()
   # write out new file
   osutils.WriteFile(filename, '\n'.join(file_lines) + '\n')
+  return made_changes
 
 
 def RevGitFile(filename, data, retries=5, dryrun=False):
@@ -229,8 +241,13 @@ def GenerateUploadDict(base_local_path, base_remote_path, pkgs):
     suffix = pkg['CPV'] + '.tbz2'
     local_path = os.path.join(base_local_path, suffix)
     assert os.path.exists(local_path)
-    remote_path = '%s/%s' % (base_remote_path.rstrip('/'), suffix)
-    upload_files[local_path] = remote_path
+    upload_files[local_path] = os.path.join(base_remote_path, suffix)
+
+    if pkg.get('DEBUG_SYMBOLS') == 'yes':
+      debugsuffix = pkg['CPV'] + '.debug.tbz2'
+      local_path = os.path.join(base_local_path, debugsuffix)
+      assert os.path.exists(local_path)
+      upload_files[local_path] = os.path.join(base_remote_path, debugsuffix)
 
   return upload_files
 
@@ -285,17 +302,15 @@ def UpdateBinhostConfFile(path, key, value):
     key: Key to update.
     value: New value for key.
   """
-  cwd = os.path.dirname(os.path.abspath(path))
-  filename = os.path.basename(path)
+  cwd, filename = os.path.split(os.path.abspath(path))
   osutils.SafeMakedirs(cwd)
   if not git.GetCurrentBranch(cwd):
     git.CreatePushBranch(constants.STABLE_EBUILD_BRANCH, cwd, sync=False)
   osutils.WriteFile(path, '', mode='a')
-  UpdateLocalFile(path, value, key)
-  git.RunGit(cwd, ['add', filename])
-  description = '%s: updating %s' % (os.path.basename(filename), key)
-  git.RunGit(cwd, ['commit', '-m', description])
-
+  if UpdateLocalFile(path, value, key):
+    desc = '%s: %s %s' % (filename, 'updating' if value else 'clearing', key)
+    git.AddPath(path)
+    git.Commit(cwd, desc)
 
 def GenerateHtmlIndex(files, index, board, version):
   """Given the list of |files|, generate an index.html at |index|.
@@ -421,6 +436,7 @@ class PrebuiltUploader(object):
       cros_build_lib.Warning('unable to match packages: %r' % unmatched_pkgs)
 
     # Write Packages file.
+    pkg_index.header['TTL'] = _BINPKG_TTL
     tmp_packages_file = pkg_index.WriteToNamedTemporaryFile()
 
     remote_location = '%s/%s' % (self._upload_location.rstrip('/'), url_suffix)
@@ -535,12 +551,11 @@ class PrebuiltUploader(object):
 
     binhost = ' '.join(binhost_urls)
     if git_sync:
-      git_file = os.path.join(self._build_path,
-          _PREBUILT_MAKE_CONF[_HOST_ARCH])
+      git_file = os.path.join(self._build_path, _PREBUILT_MAKE_CONF[_HOST_ARCH])
       RevGitFile(git_file, {key: binhost}, dryrun=self._dryrun)
     if sync_binhost_conf:
-      binhost_conf = os.path.join(self._build_path, self._binhost_conf_dir,
-          'host', '%s-%s.conf' % (_HOST_ARCH, key))
+      binhost_conf = os.path.join(
+          self._binhost_conf_dir, 'host', '%s-%s.conf' % (_HOST_ARCH, key))
       UpdateBinhostConfFile(binhost_conf, key, binhost)
 
   def SyncBoardPrebuilts(self, key, git_sync, sync_binhost_conf,
@@ -559,6 +574,7 @@ class PrebuiltUploader(object):
       toolchain_tarballs: A list of toolchain tarballs to upload.
       toolchain_upload_path: Path under the bucket to place toolchain tarballs.
     """
+    updated_binhosts = set()
     for target in self._GetTargets():
       board_path = os.path.join(self._build_path,
                                 _BOARD_PATH % {'board': target.board_variant})
@@ -593,7 +609,7 @@ class PrebuiltUploader(object):
           assert tar_process.exitcode == 0
           # TODO(zbehan): This should be done cleaner.
           if target.board == constants.CHROOT_BUILDER_BOARD:
-            sdk_conf = os.path.join(self._build_path, self._binhost_conf_dir,
+            sdk_conf = os.path.join(self._binhost_conf_dir,
                                     'host/sdk_version.conf')
             sdk_settings = {
                 'SDK_LATEST_VERSION': version_str,
@@ -611,9 +627,18 @@ class PrebuiltUploader(object):
 
       if sync_binhost_conf:
         # Update the binhost configuration file in git.
-        binhost_conf = os.path.join(self._build_path, self._binhost_conf_dir,
-            'target', '%s-%s.conf' % (target, key))
+        binhost_conf = os.path.join(
+            self._binhost_conf_dir, 'target', '%s-%s.conf' % (target, key))
+        updated_binhosts.add(binhost_conf)
         UpdateBinhostConfFile(binhost_conf, key, url_value)
+
+    if sync_binhost_conf:
+      # Clear all old binhosts. The files must be left empty in case anybody
+      # is referring to them.
+      all_binhosts = set(glob.glob(os.path.join(
+          self._binhost_conf_dir, 'target', '*-%s.conf' % key)))
+      for binhost_conf in all_binhosts - updated_binhosts:
+        UpdateBinhostConfFile(binhost_conf, key, '')
 
 
 def _AddSlaveBoard(_option, _opt_str, value, parser):
@@ -799,17 +824,19 @@ def main(argv):
   if options.private:
     binhost_base_url = options.upload
     if target:
-      board_path = GetBoardOverlay(options.build_path, target)
-      # Use the gsutil acl ch argument file if it exists, or fall back to the
-      # XML acl file.
-      acl = os.path.join(board_path, _GOOGLESTORAGE_GSUTIL_FILE)
-      if not os.path.isfile(acl):
-        acl = os.path.join(board_path, _GOOGLESTORAGE_ACL_FILE)
+      acl = portage_util.FindOverlayFile(_GOOGLESTORAGE_GSUTIL_FILE,
+                                         board=target.board_variant,
+                                         buildroot=options.build_path)
+
+  binhost_conf_dir = None
+  if options.binhost_conf_dir:
+    binhost_conf_dir = os.path.join(options.build_path,
+                                    options.binhost_conf_dir)
 
   uploader = PrebuiltUploader(options.upload, acl, binhost_base_url,
                               pkg_indexes, options.build_path,
                               options.packages, options.skip_upload,
-                              options.binhost_conf_dir, options.dryrun,
+                              binhost_conf_dir, options.dryrun,
                               target, options.slave_targets, version)
 
   if options.sync_host:

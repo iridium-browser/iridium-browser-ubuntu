@@ -11,10 +11,11 @@
 #include "base/containers/hash_tables.h"
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
+#include "base/scoped_observer.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "base/timer/timer.h"
-#include "chrome/browser/history/visit_database.h"
 #include "components/history/core/browser/history_service_observer.h"
+#include "components/history/core/browser/visit_database.h"
 #include "content/public/browser/session_storage_namespace.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "url/gurl.h"
@@ -220,10 +221,6 @@ class PrerenderLocalPredictor : public history::HistoryServiceObserver,
   // database thread early on when Chrome is starting up.
   static const int kInitDelayMs = 5 * 1000;
 
-  // Whether we're registered with the history service as a
-  // history::HistoryServiceObserver.
-  bool is_history_service_observer_;
-
   base::CancelableTaskTracker history_db_tracker_;
 
   scoped_ptr<std::vector<history::BriefVisitInfo> > visit_history_;
@@ -235,9 +232,12 @@ class PrerenderLocalPredictor : public history::HistoryServiceObserver,
 
   base::hash_set<int64> url_whitelist_;
 
-  base::WeakPtrFactory<PrerenderLocalPredictor> weak_factory_;
-
   scoped_ptr<PrefetchList> prefetch_list_;
+
+  ScopedObserver<HistoryService, HistoryServiceObserver>
+      history_service_observer_;
+
+  base::WeakPtrFactory<PrerenderLocalPredictor> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PrerenderLocalPredictor);
 };

@@ -39,6 +39,7 @@
 #include "core/rendering/style/RenderStyle.h"
 #include "core/svg/graphics/SVGImage.h"
 #include "platform/LengthFunctions.h"
+#include "platform/geometry/FloatRoundedRect.h"
 #include "platform/geometry/FloatSize.h"
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/GraphicsTypes.h"
@@ -160,9 +161,10 @@ PassOwnPtr<Shape> Shape::createShape(const BasicShape* basicShape, const LayoutS
         FloatSize bottomRightRadius = physicalSizeToLogical(floatSizeForLengthSize(inset.bottomRightRadius(), boxSize), writingMode);
         FloatRoundedRect::Radii cornerRadii(topLeftRadius, topRightRadius, bottomLeftRadius, bottomRightRadius);
 
-        cornerRadii.scale(calcBorderRadiiConstraintScaleFor(logicalRect, cornerRadii));
-
-        shape = createInsetShape(FloatRoundedRect(logicalRect, cornerRadii));
+        FloatRoundedRect finalRect(logicalRect, cornerRadii);
+        finalRect.constrainRadii();
+        
+        shape = createInsetShape(finalRect);
         break;
     }
 
@@ -232,7 +234,7 @@ PassOwnPtr<Shape> Shape::createRasterShape(Image* image, float threshold, const 
     return rasterShape.release();
 }
 
-PassOwnPtr<Shape> Shape::createLayoutBoxShape(const RoundedRect& roundedRect, WritingMode writingMode, float margin)
+PassOwnPtr<Shape> Shape::createLayoutBoxShape(const FloatRoundedRect& roundedRect, WritingMode writingMode, float margin)
 {
     FloatRect rect(0, 0, roundedRect.rect().width(), roundedRect.rect().height());
     FloatRoundedRect bounds(rect, roundedRect.radii());

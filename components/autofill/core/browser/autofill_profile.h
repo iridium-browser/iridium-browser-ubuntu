@@ -28,7 +28,19 @@ namespace autofill {
 // to the requested form group type.
 class AutofillProfile : public AutofillDataModel {
  public:
+  enum RecordType {
+    // A profile stored and editable locally.
+    LOCAL_PROFILE,
+
+    // A profile synced down from the server. These are read-only locally.
+    SERVER_PROFILE,
+  };
+
   AutofillProfile(const std::string& guid, const std::string& origin);
+
+  // Server profile constructor. The type must be SERVER_PROFILE (this serves
+  // to differentiate this constructor).
+  AutofillProfile(RecordType type, const std::string& server_id);
 
   // For use in STL containers.
   AutofillProfile();
@@ -54,6 +66,9 @@ class AutofillProfile : public AutofillDataModel {
       const AutofillType& type,
       size_t variant,
       const std::string& app_locale) const override;
+
+  // How this card is stored.
+  RecordType record_type() const { return record_type_; }
 
   // Multi-value equivalents to |GetInfo| and |SetInfo|.
   void SetRawMultiInfo(ServerFieldType type,
@@ -110,6 +125,13 @@ class AutofillProfile : public AutofillDataModel {
   void OverwriteWithOrAddTo(const AutofillProfile& profile,
                             const std::string& app_locale);
 
+  // Sets |name_| to the user-input values in |names|, but uses names in |from|
+  // as a starting point. If the full names are equivalent, the parsing in
+  // |from| will take precedence. |from| can be null.
+  void CopyAndUpdateNameList(const std::vector<base::string16> names,
+                             const AutofillProfile* from,
+                             const std::string& app_locale);
+
   // Returns |true| if |type| accepts multi-values.
   static bool SupportsMultiValue(ServerFieldType type);
 
@@ -144,6 +166,23 @@ class AutofillProfile : public AutofillDataModel {
   void set_language_code(const std::string& language_code) {
     language_code_ = language_code;
   }
+
+  // Nonempty only when type() == SERVER_PROFILE.
+  const std::string& server_id() const { return server_id_; }
+
+  // Returns a standardized representation of the given string for comparison
+  // purposes. The resulting string will be lower-cased with all punctuation
+  // substituted by spaces. Whitespace will be converted to ASCII space, and
+  // multiple whitespace characters will be collapsed.
+  //
+  // This string is designed for comparison purposes only and isn't suitable
+  // for storing or displaying to the user.
+  static base::string16 CanonicalizeProfileString(const base::string16& str);
+
+  // Returns true if the given two profile strings are similar enough that
+  // they probably refer to the same thing.
+  static bool AreProfileStringsSimilar(const base::string16& a,
+                                       const base::string16& b);
 
  private:
   typedef std::vector<const FormGroup*> FormGroupList;
@@ -192,6 +231,8 @@ class AutofillProfile : public AutofillDataModel {
   void OverwriteOrAppendNames(const std::vector<NameInfo>& names,
                               const std::string& app_locale);
 
+  RecordType record_type_;
+
   // Personal information for this profile.
   std::vector<NameInfo> name_;
   std::vector<EmailInfo> email_;
@@ -201,6 +242,9 @@ class AutofillProfile : public AutofillDataModel {
 
   // The BCP 47 language code that can be used to format |address_| for display.
   std::string language_code_;
+
+  // ID assigned by the server. This will be set only for WALLET_PROFILEs.
+  std::string server_id_;
 };
 
 // So we can compare AutofillProfiles with EXPECT_EQ().

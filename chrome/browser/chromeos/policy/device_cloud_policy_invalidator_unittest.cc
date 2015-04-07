@@ -80,7 +80,7 @@ class DeviceCloudPolicyInvalidatorTest : public testing::Test {
   virtual void TearDown() override;
 
   // Ownership is not passed. The Profile is owned by the global ProfileManager.
-  Profile *LogInAndReturnProfile(const std::string& user_id);
+  Profile* LogInAndReturnProfile(const std::string& user_id);
 
   invalidation::TiclInvalidationService* GetDeviceInvalidationService();
   bool HasDeviceInvalidationServiceObserver() const;
@@ -131,7 +131,6 @@ DeviceCloudPolicyInvalidatorTest::~DeviceCloudPolicyInvalidatorTest() {
 void DeviceCloudPolicyInvalidatorTest::SetUp() {
   chromeos::SystemSaltGetter::Initialize();
   chromeos::DBusThreadManager::Initialize();
-  chromeos::DeviceOAuth2TokenServiceFactory::Initialize();
   TestingBrowserProcess::GetGlobal()->SetSystemRequestContext(
       system_request_context_.get());
   ASSERT_TRUE(profile_manager_.SetUp());
@@ -139,6 +138,8 @@ void DeviceCloudPolicyInvalidatorTest::SetUp() {
   test_device_settings_service_.reset(new
       chromeos::ScopedTestDeviceSettingsService);
   test_cros_settings_.reset(new chromeos::ScopedTestCrosSettings);
+  chromeos::DeviceOAuth2TokenServiceFactory::Initialize();
+
   scoped_refptr<ownership::MockOwnerKeyUtil> owner_key_util(
       new ownership::MockOwnerKeyUtil);
   owner_key_util->SetPublicKeyFromPrivateKey(
@@ -172,15 +173,15 @@ void DeviceCloudPolicyInvalidatorTest::TearDown() {
   base::RunLoop().RunUntilIdle();
 
   invalidation::ProfileInvalidationProviderFactory::GetInstance()->
-      RegisterTestingFactory(NULL);
+      RegisterTestingFactory(nullptr);
   chromeos::DeviceSettingsService::Get()->UnsetSessionManager();
-  TestingBrowserProcess::GetGlobal()->SetBrowserPolicyConnector(NULL);
+  TestingBrowserProcess::GetGlobal()->SetBrowserPolicyConnector(nullptr);
   chromeos::DeviceOAuth2TokenServiceFactory::Shutdown();
   chromeos::DBusThreadManager::Shutdown();
   chromeos::SystemSaltGetter::Shutdown();
 }
 
-Profile *DeviceCloudPolicyInvalidatorTest::LogInAndReturnProfile(
+Profile* DeviceCloudPolicyInvalidatorTest::LogInAndReturnProfile(
     const std::string& user_id) {
   fake_user_manager_->AddUser(user_id);
   Profile* profile = profile_manager_.CreateTestingProfile(user_id);
@@ -196,8 +197,8 @@ DeviceCloudPolicyInvalidatorTest::GetDeviceInvalidationService() {
   return invalidator_->device_invalidation_service_.get();
 }
 
-bool DeviceCloudPolicyInvalidatorTest::HasDeviceInvalidationServiceObserver(
-    ) const {
+bool DeviceCloudPolicyInvalidatorTest::HasDeviceInvalidationServiceObserver()
+    const {
   return invalidator_->device_invalidation_service_observer_.get();
 }
 
@@ -209,7 +210,7 @@ DeviceCloudPolicyInvalidatorTest::GetProfileInvalidationService(
           invalidation::ProfileInvalidationProviderFactory::GetInstance()->
               GetServiceForBrowserContext(profile, false));
   if (!invalidation_provider)
-    return NULL;
+    return nullptr;
   return static_cast<invalidation::FakeInvalidationService*>(
       invalidation_provider->GetInvalidationService());
 }

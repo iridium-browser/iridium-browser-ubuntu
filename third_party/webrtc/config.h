@@ -21,28 +21,17 @@
 
 namespace webrtc {
 
-struct RtpStatistics {
-  RtpStatistics()
-      : ssrc(0),
-        fraction_loss(0),
-        cumulative_loss(0),
-        extended_max_sequence_number(0) {}
-  uint32_t ssrc;
-  int fraction_loss;
-  int cumulative_loss;
-  int extended_max_sequence_number;
-};
-
 struct SsrcStats {
   SsrcStats()
-      : key_frames(0),
-        delta_frames(0),
+      : sent_width(0),
+        sent_height(0),
         total_bitrate_bps(0),
         retransmit_bitrate_bps(0),
         avg_delay_ms(0),
         max_delay_ms(0) {}
-  uint32_t key_frames;
-  uint32_t delta_frames;
+  FrameCounts frame_counts;
+  int sent_width;
+  int sent_height;
   // TODO(holmer): Move bitrate_bps out to the webrtc::Call layer.
   int total_bitrate_bps;
   int retransmit_bitrate_bps;

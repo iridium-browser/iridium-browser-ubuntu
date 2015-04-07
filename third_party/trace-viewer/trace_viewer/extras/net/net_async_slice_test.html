@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<!--
+Copyright (c) 2013 The Chromium Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+
+<link rel="import" href="/extras/net/net.html">
+<link rel="import" href="/core/trace_model/trace_model.html">
+<link rel="import" href="/extras/importer/trace_event_importer.html">
+<script>
+'use strict';
+
+tv.b.unittest.testSuite(function() {
+  var AsyncSlice = tv.c.trace_model.AsyncSlice;
+  var NetAsyncSlice = tv.e.net.NetAsyncSlice;
+
+  test('basic', function() {
+    var s = new NetAsyncSlice('netlog', 'HTTP_STREAM_JOB', 7, 0, {});
+    s.duration = 100;
+
+    assertEquals(NetAsyncSlice,
+                 AsyncSlice.getConstructor('netlog', 'HTTP_STREAM_JOB'));
+    assertEquals('NetLog', s.viewSubGroupTitle);
+  });
+
+  test('import', function() {
+    var events = [
+      {name: 'HTTP_STREAM_JOB', args: {}, pid: 1, ts: 100, cat: 'netlog', tid: 2,
+        ph: 'b', id: 71},
+      {name: 'HTTP_STREAM_JOB', args: {}, pid: 1, ts: 200, cat: 'netlog', tid: 2,
+        ph: 'e', id: 71}
+    ];
+    var m = new tv.c.TraceModel(events);
+    var t2 = m.getOrCreateProcess(1).getOrCreateThread(2);
+    assertEquals(1, t2.asyncSliceGroup.length);
+    assertTrue(t2.asyncSliceGroup.slices[0] instanceof NetAsyncSlice);
+  });
+
+  test('ExposeURLBasic', function() {
+    var slice = new NetAsyncSlice('', 'a', 0, 1,
+                                  {params: {url: "https://google.com"},
+                                   source_type: "b"});
+    slice.isTopLevel = true;
+    assertEquals("https://google.com", slice.title);
+  });
+
+  test('ExposeURLNested', function() {
+    var slice = new NetAsyncSlice('', 'a', 0, 1, {params: {}, source_type: "HELLO"});
+    slice.isTopLevel = true;
+    var childSlice = new NetAsyncSlice('', 'b', 0, 1,
+                                       {params: {url: "http://test.url"}});
+    slice.subSlices = [childSlice];
+    assertEquals("http://test.url", slice.title);
+    assertEquals("b", childSlice.title);
+  });
+
+  test('ExposeURLNestedNoURL', function() {
+    var slice = new NetAsyncSlice('', 'a', 0, 1, {params: {}});
+    slice.isTopLevel = true;
+    var childSlice = new NetAsyncSlice('', 'b', 0, 1,{params: {}});
+    slice.subSlices = [childSlice];
+    assertEquals("a", slice.title);
+    assertEquals("b", childSlice.title);
+  });
+
+  test('ExposeURLNestedBothChildrenHaveURL', function() {
+    var slice = new NetAsyncSlice('', 'a', 0, 1, {params: {}});
+    slice.isTopLevel = true;
+    var childSlice1 = new NetAsyncSlice('', 'b', 0, 1,
+                                   {params: {url: "http://test.url.net"}});
+    var childSlice2 = new NetAsyncSlice('', 'c', 0, 1,
+                                   {params: {url: "http://test.url.com"}});
+    slice.subSlices = [childSlice1, childSlice2];
+    // Parent should take the first url param that it finds.
+    assertEquals("http://test.url.net", slice.title);
+    assertEquals("b", childSlice1.title);
+    assertEquals("c", childSlice2.title);
+  });
+
+  test('ExposeURLNestedBothParentAndChildHaveURL', function() {
+    var slice = new NetAsyncSlice('', 'a', 0, 1,
+                                  {params: {url: "parent123.url.com"}});
+    slice.isTopLevel = true;
+    var childSlice1 = new NetAsyncSlice('', 'b', 0, 1,
+                                        {params: {url: "http://test.url.net"}});
+    var childSlice2 = new NetAsyncSlice('', 'c', 0, 1);
+
+    slice.subSlices = [childSlice1, childSlice2];
+    // Parent should take its own url param if there is one.
+    assertEquals("parent123.url.com", slice.title);
+    assertEquals("b", childSlice1.title);
+    assertEquals("c", childSlice2.title);
+  });
+
+  test('ExposeURLDoNotComputeUrlTwice', function() {
+    var slice = new NetAsyncSlice('', 'a', 0, 1, {params: {}});
+    slice.isTopLevel = true;
+    var childSlice1 = new NetAsyncSlice('', 'b', 0, 1,
+                                        {params: {url: "http://test.url.net"}});
+    var childSlice2 = new NetAsyncSlice('', 'c', 0, 1);
+
+    slice.subSlices = [childSlice1, childSlice2];
+    // Parent should take its child's url param.
+    assertEquals("http://test.url.net", slice.title);
+    assertEquals("b", childSlice1.title);
+    assertEquals("c", childSlice2.title);
+    // Now if we change the url param of the child, the parent's title should
+    // remain the same. We do not recompute.
+    childSlice1.args.params.url = "example.com";
+    assertEquals("http://test.url.net", slice.title);
+    assertEquals("b", childSlice1.title);
+    assertEquals("c", childSlice2.title);
+  });
+
+  test('ExposeSourceTypeAsTitle', function() {
+    var slice = new NetAsyncSlice('', 'a', 0, 1,
+                                  {params: {}, source_type: "UDP_SOCKET"});
+    slice.isTopLevel = true;
+    var childSlice1 = new NetAsyncSlice('', 'b', 0, 1,
+                                        {params: {}, source_type: "SOCKET"});
+    var childSlice2 = new NetAsyncSlice('', 'c', 0, 1);
+
+    slice.subSlices = [childSlice1, childSlice2];
+    // Parent should take its own source_type.
+    assertEquals("UDP_SOCKET", slice.title);
+    assertEquals("b", childSlice1.title);
+    assertEquals("c", childSlice2.title);
+  });
+});
+</script>

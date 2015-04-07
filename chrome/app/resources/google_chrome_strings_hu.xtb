@@ -45,6 +45,7 @@
 <translation id="568643307450491754">Könyvjelzőit megtalálhatja a Chrome menüben vagy a könyvjelzősávon.</translation>
 <translation id="8556340503434111824">Elérhető a Google Chrome új verziója, amely gyorsabb, mint ezelőtt bármikor.</translation>
 <translation id="8987477933582888019">Webböngésző</translation>
+<translation id="3749644715096758981">A Chrome nem tudott frissülni a legújabb verzióra, így Ön lemarad az új szolgáltatásokról és biztonsági javításokról. Frissítenie kell a Chrome-ot.</translation>
 <translation id="4728575227883772061">A telepítés váratlan hiba miatt nem sikerült. Ha a Google Chrome jelenleg fut, zárja be, majd próbálkozzon újra.</translation>
 <translation id="3080151273017101988">A háttéralkalmazások továbbfuttatása, ha a Google Chrome-ot bezárják</translation>
 <translation id="4149882025268051530">Nem sikerült a telepítőnek kibontani a tömörített állományt. Kérjük, töltse le újra a Google Chrome böngészőt.</translation>
@@ -83,6 +84,7 @@
 <translation id="225614027745146050">Üdvözöljük</translation>
 <translation id="7473891865547856676">Nem, köszönöm</translation>
 <translation id="3149510190863420837">Chrome-alkalmazások</translation>
+<translation id="8851136666856101339">fő</translation>
 <translation id="7473136999113284234">A Chrome automatikusan frissít, így Ön mindig a legújabb verzióval rendelkezik.</translation>
 <translation id="7084448929020576097">A(z) <ph name="FILE_NAME"/> fájl rosszindulatú, ezért a Chrome letiltotta.</translation>
 <translation id="6368958679917195344">A Chrome OS-hez egyéb <ph name="BEGIN_LINK_CROS_OSS"/>nyílt forráskódú szoftver<ph name="END_LINK_CROS_OSS"/> is hozzájárult.</translation>
@@ -142,7 +144,6 @@ Ha mindenképp bejelentkezik, akkor egyesíti a(z) <ph name="ACCOUNT_EMAIL_NEW"/
 <translation id="5855036575689098185">A számítógépén futó szoftver nem kompatibilis a Google Chrome-mal.</translation>
 <translation id="7164397146364144019">Az esetleges biztonsági események adatainak automatikus jelentésével segítséget nyújthat a Google-nak a Chrome használatának biztonságosabbá és egyszerűbbé tételéhez.</translation>
 <translation id="8008534537613507642">A Chrome újratelepítése</translation>
-<translation id="2044287590254833138">Google Chrome Eszköztár</translation>
 <translation id="8862326446509486874">Nincsenek meg a megfelelő jogai a rendszerszintű telepítéshez. Indítsa újra a telepítőt rendszergazdaként.</translation>
 <translation id="2874156562296220396">A Google Chrome a <ph name="BEGIN_LINK_CHROMIUM"/>Chromium<ph name="END_LINK_CHROMIUM"/> nyílt forráskódú projektnek és további <ph name="BEGIN_LINK_OSS"/>nyílt forráskódú szoftvereknek<ph name="END_LINK_OSS"/> köszönhetően jött létre.</translation>
 <translation id="7191567847629796517">A Google Chrome OS nem támogatja külső alkalmazás indítását a(z) <ph name="SCHEME"/> linkek kezelésére. A kért link: <ph name="PROTOLINK"/>.</translation>
@@ -154,6 +155,7 @@ Ha mindenképp bejelentkezik, akkor egyesíti a(z) <ph name="ACCOUNT_EMAIL_NEW"/
 <translation id="2290095356545025170">Biztos benne, hogy eltávolítja a Google Chrome-ot?</translation>
 <translation id="7062966102157262887">Folyamatban van egy letöltés. Szeretne kilépni a Google Chrome-ból, és megszakítja a letöltést?</translation>
 <translation id="4273752058983339720">A Google Chrome úgy van beállítva, hogy automatikusan elinduljon a számítógép indításakor.</translation>
+<translation id="2316129865977710310">Köszönöm, nem</translation>
 <translation id="415994390253732730">Furcsán viselkedik a Chrome?</translation>
 <translation id="1104959162601287462">A &amp;Chrome OS névjegye</translation>
 <translation id="5328989068199000832">Google Chrome Binaries</translation>
@@ -254,6 +256,7 @@ Ha mindenképp bejelentkezik, akkor egyesíti a(z) <ph name="ACCOUNT_EMAIL_NEW"/
 <translation id="6626317981028933585">Sajnos a Mozilla Firefox beállításai nem érhetők el, amikor a böngésző fut. Ahhoz, hogy importálhassa ezeket a beállításokat a Google Chrome-ba, mentse el, amin dolgozik, majd zárja be az összes Firefox ablakot. Ezután kattintson a &quot;Folytatás&quot; gombra.</translation>
 <translation id="7242029209006116544">Kezelt fiókkal jelentkezik be, és annak adminisztrátora számára hozzáférést biztosít Google Chrome-profiljához. Chrome-adatait – például alkalmazásait, könyvjelzőit, előzményeit, jelszavait és más beállításait – a rendszer véglegesen társítja a(z) <ph name="USER_NAME"/> fiókhoz. Ezen adatokat a Google-fiók Irányítópultján törölheti, de más fiókhoz nem társíthatja őket. Létrehozhat egy új profilt is meglévő Chrome-adatainak külön tárolásához. <ph name="LEARN_MORE"/></translation>
 <translation id="5386244825306882791">Továbbá azt is szabályozza, hogy melyik oldal jelenik meg a Chrome indításakor vagy a cím- és keresősávban indított kereséskor.</translation>
+<translation id="1553358976309200471">A Chrome böngésző frissítése</translation>
 <translation id="8540666473246803645">Google Chrome</translation>
 <translation id="2334084861041072223">Copyright <ph name="YEAR"/> Google Inc. Minden jog fenntartva.</translation>
 <translation id="1698376642261615901">A Google Chrome olyan böngésző, amely villámgyorsan futtatja a weboldalakat és az alkalmazásokat. Gyors, stabil és könnyen használható. A beépített, adathalászat és a kártékony programok elleni védelemmel biztonságosabban böngészhet az interneten.</translation>

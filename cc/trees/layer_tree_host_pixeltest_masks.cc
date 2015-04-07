@@ -24,8 +24,6 @@ class MaskContentLayerClient : public ContentLayerClient {
   explicit MaskContentLayerClient(const gfx::Size& bounds) : bounds_(bounds) {}
   ~MaskContentLayerClient() override {}
 
-  void DidChangeLayerCanUseLCDText() override {}
-
   bool FillsBoundsCompletely() const override { return false; }
 
   void PaintContents(
@@ -49,9 +47,19 @@ class MaskContentLayerClient : public ContentLayerClient {
     }
   }
 
+  scoped_refptr<DisplayItemList> PaintContentsToDisplayList(
+      const gfx::Rect& clip,
+      GraphicsContextStatus gc_status) override {
+    NOTIMPLEMENTED();
+    return DisplayItemList::Create();
+  }
+
  private:
   gfx::Size bounds_;
 };
+
+// TODO(enne): these time out on Windows.  http://crbug.com/435632
+#if !defined(OS_WIN)
 
 TEST_P(LayerTreeHostMasksPixelTest, MaskOfLayer) {
   scoped_refptr<SolidColorLayer> background = CreateSolidColorLayer(
@@ -273,6 +281,8 @@ TEST_P(LayerTreeHostMasksPixelTest, MaskOfReplicaOfClippedLayer) {
                        base::FilePath(FILE_PATH_LITERAL(
                            "mask_of_replica_of_clipped_layer.png")));
 }
+
+#endif  // !defined(OS_WIN)
 
 }  // namespace
 }  // namespace cc

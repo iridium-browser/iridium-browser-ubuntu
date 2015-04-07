@@ -448,8 +448,7 @@ static int aes_gcm_ctrl(EVP_CIPHER_CTX *c, int type, int arg, void *ptr) {
       if (arg) {
         memcpy(gctx->iv, ptr, arg);
       }
-      if (c->encrypt &&
-          RAND_pseudo_bytes(gctx->iv + arg, gctx->ivlen - arg) <= 0) {
+      if (c->encrypt && !RAND_bytes(gctx->iv + arg, gctx->ivlen - arg)) {
         return 0;
       }
       gctx->iv_gen = 1;
@@ -1103,7 +1102,7 @@ static int aead_aes_key_wrap_seal(const EVP_AEAD_CTX *ctx, uint8_t *out,
   /* The code below only handles a 32-bit |t| thus 6*|n| must be less than
    * 2^32, where |n| is |in_len| / 8. So in_len < 4/3 * 2^32 and we
    * conservatively cap it to 2^32-16 to stop 32-bit platforms complaining that
-   * a comparision is always true. */
+   * a comparison is always true. */
   if (in_len > 0xfffffff0) {
     OPENSSL_PUT_ERROR(CIPHER, aead_aes_key_wrap_seal, CIPHER_R_TOO_LARGE);
     return 0;
@@ -1198,7 +1197,7 @@ static int aead_aes_key_wrap_open(const EVP_AEAD_CTX *ctx, uint8_t *out,
   /* The code below only handles a 32-bit |t| thus 6*|n| must be less than
    * 2^32, where |n| is |in_len| / 8. So in_len < 4/3 * 2^32 and we
    * conservatively cap it to 2^32-8 to stop 32-bit platforms complaining that
-   * a comparision is always true. */
+   * a comparison is always true. */
   if (in_len > 0xfffffff8) {
     OPENSSL_PUT_ERROR(CIPHER, aead_aes_key_wrap_open, CIPHER_R_TOO_LARGE);
     return 0;

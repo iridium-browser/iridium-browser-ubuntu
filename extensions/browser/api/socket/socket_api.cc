@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/containers/hash_tables.h"
+#include "base/profiler/scoped_tracker.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/resource_context.h"
 #include "extensions/browser/api/dns/host_resolver_wrapper.h"
@@ -49,7 +50,7 @@ const char kMulticastSocketTypeError[] = "Only UDP socket supports multicast.";
 const char kSecureSocketTypeError[] = "Only TCP sockets are supported for TLS.";
 const char kSocketNotConnectedError[] = "Socket not connected";
 const char kWildcardAddress[] = "*";
-const int kWildcardPort = 0;
+const uint16 kWildcardPort = 0;
 
 SocketAsyncApiFunction::SocketAsyncApiFunction() {}
 
@@ -129,6 +130,11 @@ void SocketExtensionWithDnsLookupFunction::StartDnsLookup(
 }
 
 void SocketExtensionWithDnsLookupFunction::OnDnsLookup(int resolve_result) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436634 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "436634 SocketExtensionWithDnsLookupFunction::OnDnsLookup"));
+
   if (resolve_result == net::OK) {
     DCHECK(!addresses_->empty());
     resolved_address_ = addresses_->front().ToStringWithoutPort();
@@ -192,7 +198,10 @@ SocketConnectFunction::~SocketConnectFunction() {}
 bool SocketConnectFunction::Prepare() {
   EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &socket_id_));
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(1, &hostname_));
-  EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(2, &port_));
+  int port;
+  EXTENSION_FUNCTION_VALIDATE(
+      args_->GetInteger(2, &port) && port >= 0 && port <= 65535);
+  port_ = static_cast<uint16>(port);
   return true;
 }
 
@@ -278,7 +287,10 @@ void SocketDisconnectFunction::Work() {
 bool SocketBindFunction::Prepare() {
   EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &socket_id_));
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(1, &address_));
-  EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(2, &port_));
+  int port;
+  EXTENSION_FUNCTION_VALIDATE(
+      args_->GetInteger(2, &port) && port >= 0 && port <= 65535);
+  port_ = static_cast<uint16>(port);
   return true;
 }
 
@@ -480,7 +492,7 @@ void SocketRecvFromFunction::AsyncWorkStart() {
 void SocketRecvFromFunction::OnCompleted(int bytes_read,
                                          scoped_refptr<net::IOBuffer> io_buffer,
                                          const std::string& address,
-                                         int port) {
+                                         uint16 port) {
   base::DictionaryValue* result = new base::DictionaryValue();
   result->SetInteger(kResultCodeKey, bytes_read);
   if (bytes_read > 0) {
@@ -508,7 +520,10 @@ bool SocketSendToFunction::Prepare() {
   base::BinaryValue* data = NULL;
   EXTENSION_FUNCTION_VALIDATE(args_->GetBinary(1, &data));
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(2, &hostname_));
-  EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(3, &port_));
+  int port;
+  EXTENSION_FUNCTION_VALIDATE(
+      args_->GetInteger(3, &port) && port >= 0 && port <= 65535);
+  port_ = static_cast<uint16>(port);
 
   io_buffer_size_ = data->GetSize();
   io_buffer_ = new net::WrappedIOBuffer(data->GetBuffer());
@@ -711,7 +726,7 @@ void SocketGetNetworkListFunction::SendResponseOnUIThread(
         make_linked_ptr(new core_api::socket::NetworkInterface);
     info->name = i->name;
     info->address = net::IPAddressToString(i->address);
-    info->prefix_length = i->network_prefix;
+    info->prefix_length = i->prefix_length;
     create_arg.push_back(info);
   }
 

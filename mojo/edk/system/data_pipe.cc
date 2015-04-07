@@ -10,20 +10,24 @@
 #include <limits>
 
 #include "base/logging.h"
-#include "mojo/edk/system/constants.h"
+#include "mojo/edk/system/awakable_list.h"
+#include "mojo/edk/system/configuration.h"
 #include "mojo/edk/system/memory.h"
 #include "mojo/edk/system/options_validation.h"
-#include "mojo/edk/system/waiter_list.h"
 
 namespace mojo {
 namespace system {
 
 // static
-const MojoCreateDataPipeOptions DataPipe::kDefaultCreateOptions = {
-    static_cast<uint32_t>(sizeof(MojoCreateDataPipeOptions)),
-    MOJO_CREATE_DATA_PIPE_OPTIONS_FLAG_NONE,
-    1u,
-    static_cast<uint32_t>(kDefaultDataPipeCapacityBytes)};
+MojoCreateDataPipeOptions DataPipe::GetDefaultCreateOptions() {
+  MojoCreateDataPipeOptions result = {
+      static_cast<uint32_t>(sizeof(MojoCreateDataPipeOptions)),
+      MOJO_CREATE_DATA_PIPE_OPTIONS_FLAG_NONE,
+      1u,
+      static_cast<uint32_t>(
+          GetConfiguration().default_data_pipe_capacity_bytes)};
+  return result;
+}
 
 // static
 MojoResult DataPipe::ValidateCreateOptions(
@@ -32,7 +36,7 @@ MojoResult DataPipe::ValidateCreateOptions(
   const MojoCreateDataPipeOptionsFlags kKnownFlags =
       MOJO_CREATE_DATA_PIPE_OPTIONS_FLAG_MAY_DISCARD;
 
-  *out_options = kDefaultCreateOptions;
+  *out_options = GetDefaultCreateOptions();
   if (in_options.IsNull())
     return MOJO_RESULT_OK;
 
@@ -48,38 +52,41 @@ MojoResult DataPipe::ValidateCreateOptions(
 
   // Checks for fields beyond |flags|:
 
-  if (!OPTIONS_STRUCT_HAS_MEMBER(
-          MojoCreateDataPipeOptions, element_num_bytes, reader))
+  if (!OPTIONS_STRUCT_HAS_MEMBER(MojoCreateDataPipeOptions, element_num_bytes,
+                                 reader))
     return MOJO_RESULT_OK;
   if (reader.options().element_num_bytes == 0)
     return MOJO_RESULT_INVALID_ARGUMENT;
   out_options->element_num_bytes = reader.options().element_num_bytes;
 
-  if (!OPTIONS_STRUCT_HAS_MEMBER(
-          MojoCreateDataPipeOptions, capacity_num_bytes, reader) ||
+  if (!OPTIONS_STRUCT_HAS_MEMBER(MojoCreateDataPipeOptions, capacity_num_bytes,
+                                 reader) ||
       reader.options().capacity_num_bytes == 0) {
     // Round the default capacity down to a multiple of the element size (but at
     // least one element).
+    size_t default_data_pipe_capacity_bytes =
+        GetConfiguration().default_data_pipe_capacity_bytes;
     out_options->capacity_num_bytes =
-        std::max(static_cast<uint32_t>(kDefaultDataPipeCapacityBytes -
-                                       (kDefaultDataPipeCapacityBytes %
+        std::max(static_cast<uint32_t>(default_data_pipe_capacity_bytes -
+                                       (default_data_pipe_capacity_bytes %
                                         out_options->element_num_bytes)),
                  out_options->element_num_bytes);
     return MOJO_RESULT_OK;
   }
   if (reader.options().capacity_num_bytes % out_options->element_num_bytes != 0)
     return MOJO_RESULT_INVALID_ARGUMENT;
-  if (reader.options().capacity_num_bytes > kMaxDataPipeCapacityBytes)
+  if (reader.options().capacity_num_bytes >
+      GetConfiguration().max_data_pipe_capacity_bytes)
     return MOJO_RESULT_RESOURCE_EXHAUSTED;
   out_options->capacity_num_bytes = reader.options().capacity_num_bytes;
 
   return MOJO_RESULT_OK;
 }
 
-void DataPipe::ProducerCancelAllWaiters() {
+void DataPipe::ProducerCancelAllAwakables() {
   base::AutoLock locker(lock_);
   DCHECK(has_local_producer_no_lock());
-  producer_waiter_list_->CancelAllWaiters();
+  producer_awakable_list_->CancelAll();
 }
 
 void DataPipe::ProducerClose() {
@@ -87,13 +94,13 @@ void DataPipe::ProducerClose() {
   DCHECK(producer_open_);
   producer_open_ = false;
   DCHECK(has_local_producer_no_lock());
-  producer_waiter_list_.reset();
+  producer_awakable_list_.reset();
   // Not a bug, except possibly in "user" code.
   DVLOG_IF(2, producer_in_two_phase_write_no_lock())
       << "Producer closed with active two-phase write";
   producer_two_phase_max_num_bytes_written_ = 0;
   ProducerCloseImplNoLock();
-  AwakeConsumerWaitersForStateChangeNoLock(
+  AwakeConsumerAwakablesForStateChangeNoLock(
       ConsumerGetHandleSignalsStateImplNoLock());
 }
 
@@ -125,7 +132,7 @@ MojoResult DataPipe::ProducerWriteData(UserPointer<const void> elements,
   HandleSignalsState new_consumer_state =
       ConsumerGetHandleSignalsStateImplNoLock();
   if (!new_consumer_state.equals(old_consumer_state))
-    AwakeConsumerWaitersForStateChangeNoLock(new_consumer_state);
+    AwakeConsumerAwakablesForStateChangeNoLock(new_consumer_state);
   return rv;
 }
 
@@ -148,14 +155,14 @@ MojoResult DataPipe::ProducerBeginWriteData(
       return MOJO_RESULT_INVALID_ARGUMENT;
   }
 
-  MojoResult rv = ProducerBeginWriteDataImplNoLock(
-      buffer, buffer_num_bytes, min_num_bytes_to_write);
+  MojoResult rv = ProducerBeginWriteDataImplNoLock(buffer, buffer_num_bytes,
+                                                   min_num_bytes_to_write);
   if (rv != MOJO_RESULT_OK)
     return rv;
-  // Note: No need to awake producer waiters, even though we're going from
+  // Note: No need to awake producer awakables, even though we're going from
   // writable to non-writable (since you can't wait on non-writability).
   // Similarly, though this may have discarded data (in "may discard" mode),
-  // making it non-readable, there's still no need to awake consumer waiters.
+  // making it non-readable, there's still no need to awake consumer awakables.
   DCHECK(producer_in_two_phase_write_no_lock());
   return MOJO_RESULT_OK;
 }
@@ -182,15 +189,15 @@ MojoResult DataPipe::ProducerEndWriteData(uint32_t num_bytes_written) {
   // Two-phase write ended even on failure.
   DCHECK(!producer_in_two_phase_write_no_lock());
   // If we're now writable, we *became* writable (since we weren't writable
-  // during the two-phase write), so awake producer waiters.
+  // during the two-phase write), so awake producer awakables.
   HandleSignalsState new_producer_state =
       ProducerGetHandleSignalsStateImplNoLock();
   if (new_producer_state.satisfies(MOJO_HANDLE_SIGNAL_WRITABLE))
-    AwakeProducerWaitersForStateChangeNoLock(new_producer_state);
+    AwakeProducerAwakablesForStateChangeNoLock(new_producer_state);
   HandleSignalsState new_consumer_state =
       ConsumerGetHandleSignalsStateImplNoLock();
   if (!new_consumer_state.equals(old_consumer_state))
-    AwakeConsumerWaitersForStateChangeNoLock(new_consumer_state);
+    AwakeConsumerAwakablesForStateChangeNoLock(new_consumer_state);
   return rv;
 }
 
@@ -200,10 +207,10 @@ HandleSignalsState DataPipe::ProducerGetHandleSignalsState() {
   return ProducerGetHandleSignalsStateImplNoLock();
 }
 
-MojoResult DataPipe::ProducerAddWaiter(Waiter* waiter,
-                                       MojoHandleSignals signals,
-                                       uint32_t context,
-                                       HandleSignalsState* signals_state) {
+MojoResult DataPipe::ProducerAddAwakable(Awakable* awakable,
+                                         MojoHandleSignals signals,
+                                         uint32_t context,
+                                         HandleSignalsState* signals_state) {
   base::AutoLock locker(lock_);
   DCHECK(has_local_producer_no_lock());
 
@@ -219,15 +226,15 @@ MojoResult DataPipe::ProducerAddWaiter(Waiter* waiter,
     return MOJO_RESULT_FAILED_PRECONDITION;
   }
 
-  producer_waiter_list_->AddWaiter(waiter, signals, context);
+  producer_awakable_list_->Add(awakable, signals, context);
   return MOJO_RESULT_OK;
 }
 
-void DataPipe::ProducerRemoveWaiter(Waiter* waiter,
-                                    HandleSignalsState* signals_state) {
+void DataPipe::ProducerRemoveAwakable(Awakable* awakable,
+                                      HandleSignalsState* signals_state) {
   base::AutoLock locker(lock_);
   DCHECK(has_local_producer_no_lock());
-  producer_waiter_list_->RemoveWaiter(waiter);
+  producer_awakable_list_->Remove(awakable);
   if (signals_state)
     *signals_state = ProducerGetHandleSignalsStateImplNoLock();
 }
@@ -237,10 +244,10 @@ bool DataPipe::ProducerIsBusy() const {
   return producer_in_two_phase_write_no_lock();
 }
 
-void DataPipe::ConsumerCancelAllWaiters() {
+void DataPipe::ConsumerCancelAllAwakables() {
   base::AutoLock locker(lock_);
   DCHECK(has_local_consumer_no_lock());
-  consumer_waiter_list_->CancelAllWaiters();
+  consumer_awakable_list_->CancelAll();
 }
 
 void DataPipe::ConsumerClose() {
@@ -248,13 +255,13 @@ void DataPipe::ConsumerClose() {
   DCHECK(consumer_open_);
   consumer_open_ = false;
   DCHECK(has_local_consumer_no_lock());
-  consumer_waiter_list_.reset();
+  consumer_awakable_list_.reset();
   // Not a bug, except possibly in "user" code.
   DVLOG_IF(2, consumer_in_two_phase_read_no_lock())
       << "Consumer closed with active two-phase read";
   consumer_two_phase_max_num_bytes_read_ = 0;
   ConsumerCloseImplNoLock();
-  AwakeProducerWaitersForStateChangeNoLock(
+  AwakeProducerAwakablesForStateChangeNoLock(
       ProducerGetHandleSignalsStateImplNoLock());
 }
 
@@ -284,7 +291,7 @@ MojoResult DataPipe::ConsumerReadData(UserPointer<void> elements,
   HandleSignalsState new_producer_state =
       ProducerGetHandleSignalsStateImplNoLock();
   if (!new_producer_state.equals(old_producer_state))
-    AwakeProducerWaitersForStateChangeNoLock(new_producer_state);
+    AwakeProducerAwakablesForStateChangeNoLock(new_producer_state);
   return rv;
 }
 
@@ -313,7 +320,7 @@ MojoResult DataPipe::ConsumerDiscardData(UserPointer<uint32_t> num_bytes,
   HandleSignalsState new_producer_state =
       ProducerGetHandleSignalsStateImplNoLock();
   if (!new_producer_state.equals(old_producer_state))
-    AwakeProducerWaitersForStateChangeNoLock(new_producer_state);
+    AwakeProducerAwakablesForStateChangeNoLock(new_producer_state);
   return rv;
 }
 
@@ -345,8 +352,8 @@ MojoResult DataPipe::ConsumerBeginReadData(
       return MOJO_RESULT_INVALID_ARGUMENT;
   }
 
-  MojoResult rv = ConsumerBeginReadDataImplNoLock(
-      buffer, buffer_num_bytes, min_num_bytes_to_read);
+  MojoResult rv = ConsumerBeginReadDataImplNoLock(buffer, buffer_num_bytes,
+                                                  min_num_bytes_to_read);
   if (rv != MOJO_RESULT_OK)
     return rv;
   DCHECK(consumer_in_two_phase_read_no_lock());
@@ -373,15 +380,15 @@ MojoResult DataPipe::ConsumerEndReadData(uint32_t num_bytes_read) {
   // Two-phase read ended even on failure.
   DCHECK(!consumer_in_two_phase_read_no_lock());
   // If we're now readable, we *became* readable (since we weren't readable
-  // during the two-phase read), so awake consumer waiters.
+  // during the two-phase read), so awake consumer awakables.
   HandleSignalsState new_consumer_state =
       ConsumerGetHandleSignalsStateImplNoLock();
   if (new_consumer_state.satisfies(MOJO_HANDLE_SIGNAL_READABLE))
-    AwakeConsumerWaitersForStateChangeNoLock(new_consumer_state);
+    AwakeConsumerAwakablesForStateChangeNoLock(new_consumer_state);
   HandleSignalsState new_producer_state =
       ProducerGetHandleSignalsStateImplNoLock();
   if (!new_producer_state.equals(old_producer_state))
-    AwakeProducerWaitersForStateChangeNoLock(new_producer_state);
+    AwakeProducerAwakablesForStateChangeNoLock(new_producer_state);
   return rv;
 }
 
@@ -391,10 +398,10 @@ HandleSignalsState DataPipe::ConsumerGetHandleSignalsState() {
   return ConsumerGetHandleSignalsStateImplNoLock();
 }
 
-MojoResult DataPipe::ConsumerAddWaiter(Waiter* waiter,
-                                       MojoHandleSignals signals,
-                                       uint32_t context,
-                                       HandleSignalsState* signals_state) {
+MojoResult DataPipe::ConsumerAddAwakable(Awakable* awakable,
+                                         MojoHandleSignals signals,
+                                         uint32_t context,
+                                         HandleSignalsState* signals_state) {
   base::AutoLock locker(lock_);
   DCHECK(has_local_consumer_no_lock());
 
@@ -410,15 +417,15 @@ MojoResult DataPipe::ConsumerAddWaiter(Waiter* waiter,
     return MOJO_RESULT_FAILED_PRECONDITION;
   }
 
-  consumer_waiter_list_->AddWaiter(waiter, signals, context);
+  consumer_awakable_list_->Add(awakable, signals, context);
   return MOJO_RESULT_OK;
 }
 
-void DataPipe::ConsumerRemoveWaiter(Waiter* waiter,
-                                    HandleSignalsState* signals_state) {
+void DataPipe::ConsumerRemoveAwakable(Awakable* awakable,
+                                      HandleSignalsState* signals_state) {
   base::AutoLock locker(lock_);
   DCHECK(has_local_consumer_no_lock());
-  consumer_waiter_list_->RemoveWaiter(waiter);
+  consumer_awakable_list_->Remove(awakable);
   if (signals_state)
     *signals_state = ConsumerGetHandleSignalsStateImplNoLock();
 }
@@ -437,8 +444,10 @@ DataPipe::DataPipe(bool has_local_producer,
       capacity_num_bytes_(validated_options.capacity_num_bytes),
       producer_open_(true),
       consumer_open_(true),
-      producer_waiter_list_(has_local_producer ? new WaiterList() : nullptr),
-      consumer_waiter_list_(has_local_consumer ? new WaiterList() : nullptr),
+      producer_awakable_list_(has_local_producer ? new AwakableList()
+                                                 : nullptr),
+      consumer_awakable_list_(has_local_consumer ? new AwakableList()
+                                                 : nullptr),
       producer_two_phase_max_num_bytes_written_(0),
       consumer_two_phase_max_num_bytes_read_(0) {
   // Check that the passed in options actually are validated.
@@ -450,24 +459,24 @@ DataPipe::DataPipe(bool has_local_producer,
 DataPipe::~DataPipe() {
   DCHECK(!producer_open_);
   DCHECK(!consumer_open_);
-  DCHECK(!producer_waiter_list_);
-  DCHECK(!consumer_waiter_list_);
+  DCHECK(!producer_awakable_list_);
+  DCHECK(!consumer_awakable_list_);
 }
 
-void DataPipe::AwakeProducerWaitersForStateChangeNoLock(
+void DataPipe::AwakeProducerAwakablesForStateChangeNoLock(
     const HandleSignalsState& new_producer_state) {
   lock_.AssertAcquired();
   if (!has_local_producer_no_lock())
     return;
-  producer_waiter_list_->AwakeWaitersForStateChange(new_producer_state);
+  producer_awakable_list_->AwakeForStateChange(new_producer_state);
 }
 
-void DataPipe::AwakeConsumerWaitersForStateChangeNoLock(
+void DataPipe::AwakeConsumerAwakablesForStateChangeNoLock(
     const HandleSignalsState& new_consumer_state) {
   lock_.AssertAcquired();
   if (!has_local_consumer_no_lock())
     return;
-  consumer_waiter_list_->AwakeWaitersForStateChange(new_consumer_state);
+  consumer_awakable_list_->AwakeForStateChange(new_consumer_state);
 }
 
 }  // namespace system

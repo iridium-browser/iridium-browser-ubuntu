@@ -129,7 +129,9 @@ bool AreURLsInPageNavigation(const GURL& existing_url,
                         // for now.
                         existing_url == GURL(url::kAboutBlankURL) ||
                         existing_url.GetOrigin() == new_url.GetOrigin() ||
-                        !prefs.web_security_enabled;
+                        !prefs.web_security_enabled ||
+                        (prefs.allow_universal_access_from_file_urls &&
+                         existing_url.SchemeIs(url::kFileScheme));
   if (!is_same_origin && renderer_says_in_page)
       rfh->GetProcess()->ReceivedBadMessage();
   return is_same_origin && renderer_says_in_page;
@@ -655,7 +657,7 @@ void NavigationControllerImpl::LoadURLWithParams(const LoadURLParams& params) {
   if (HandleDebugURL(params.url, params.transition_type)) {
     // If Telemetry is running, allow the URL load to proceed as if it's
     // unhandled, otherwise Telemetry can't tell if Navigation completed.
-    if (!CommandLine::ForCurrentProcess()->HasSwitch(
+    if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
             cc::switches::kEnableGpuBenchmarking))
       return;
   }
@@ -721,15 +723,27 @@ void NavigationControllerImpl::LoadURLWithParams(const LoadURLParams& params) {
           browser_context_));
   if (params.frame_tree_node_id != -1)
     entry->set_frame_tree_node_id(params.frame_tree_node_id);
+  entry->set_source_site_instance(
+      static_cast<SiteInstanceImpl*>(params.source_site_instance.get()));
   if (params.redirect_chain.size() > 0)
     entry->SetRedirectChain(params.redirect_chain);
-  if (params.should_replace_current_entry)
+  // Don't allow an entry replacement if there is no entry to replace.
+  // http://crbug.com/457149
+  if (params.should_replace_current_entry && entries_.size() > 0)
     entry->set_should_replace_entry(true);
   entry->set_should_clear_history_list(params.should_clear_history_list);
   entry->SetIsOverridingUserAgent(override);
   entry->set_transferred_global_request_id(
       params.transferred_global_request_id);
   entry->SetFrameToNavigate(params.frame_name);
+
+#if defined(OS_ANDROID)
+  if (params.intent_received_timestamp > 0) {
+    entry->set_intent_received_timestamp(
+        base::TimeTicks() +
+        base::TimeDelta::FromMilliseconds(params.intent_received_timestamp));
+  }
+#endif
 
   switch (params.load_type) {
     case LOAD_TYPE_DEFAULT:
@@ -1317,19 +1331,8 @@ void NavigationControllerImpl::CopyStateFromAndPrune(
 
   NavigationControllerImpl* source =
       static_cast<NavigationControllerImpl*>(temp);
-  // The SiteInstance and page_id of the last committed entry needs to be
-  // remembered at this point, in case there is only one committed entry
-  // and it is pruned.  We use a scoped_refptr to ensure the SiteInstance
-  // can't be freed during this time period.
-  NavigationEntryImpl* last_committed =
-      NavigationEntryImpl::FromNavigationEntry(GetLastCommittedEntry());
-  scoped_refptr<SiteInstance> site_instance(
-      last_committed->site_instance());
-  int32 minimum_page_id = last_committed->GetPageID();
-  int32 max_page_id =
-      delegate_->GetMaxPageIDForSiteInstance(site_instance.get());
 
-  // Remove all the entries leaving the active entry.
+  // Remove all the entries leaving the last committed entry.
   PruneAllButLastCommittedInternal();
 
   // We now have one entry, possibly with a new pending entry.  Ensure that
@@ -1339,7 +1342,7 @@ void NavigationControllerImpl::CopyStateFromAndPrune(
     source->PruneOldestEntryIfFull();
 
   // Insert the entries from source. Don't use source->GetCurrentEntryIndex as
-  // we don't want to copy over the transient entry.  Ignore any pending entry,
+  // we don't want to copy over the transient entry. Ignore any pending entry,
   // since it has not committed in source.
   int max_source_index = source->last_committed_entry_index_;
   if (max_source_index == -1)
@@ -1358,22 +1361,20 @@ void NavigationControllerImpl::CopyStateFromAndPrune(
   // Adjust indices such that the last entry and pending are at the end now.
   last_committed_entry_index_ = GetEntryCount() - 1;
 
-  delegate_->SetHistoryLengthAndPrune(site_instance.get(),
-                                      max_source_index,
-                                      minimum_page_id);
+  delegate_->SetHistoryOffsetAndLength(last_committed_entry_index_,
+                                       GetEntryCount());
 
-  // Copy the max page id map from the old tab to the new tab.  This ensures
-  // that new and existing navigations in the tab's current SiteInstances
-  // are identified properly.
+  // Copy the max page id map from the old tab to the new tab. This ensures that
+  // new and existing navigations in the tab's current SiteInstances are
+  // identified properly.
+  NavigationEntryImpl* last_committed =
+      NavigationEntryImpl::FromNavigationEntry(GetLastCommittedEntry());
+  int32 site_max_page_id =
+      delegate_->GetMaxPageIDForSiteInstance(last_committed->site_instance());
   delegate_->CopyMaxPageIDsFrom(source->delegate()->GetWebContents());
+  delegate_->UpdateMaxPageIDForSiteInstance(last_committed->site_instance(),
+                                            site_max_page_id);
   max_restored_page_id_ = source->max_restored_page_id_;
-
-  // If there is a last committed entry, be sure to include it in the new
-  // max page ID map.
-  if (max_page_id > -1) {
-    delegate_->UpdateMaxPageIDForSiteInstance(site_instance.get(),
-                                              max_page_id);
-  }
 }
 
 bool NavigationControllerImpl::CanPruneAllButLastCommitted() {
@@ -1400,18 +1401,11 @@ bool NavigationControllerImpl::CanPruneAllButLastCommitted() {
 void NavigationControllerImpl::PruneAllButLastCommitted() {
   PruneAllButLastCommittedInternal();
 
-  // We should still have a last committed entry.
-  DCHECK_NE(-1, last_committed_entry_index_);
+  DCHECK_EQ(0, last_committed_entry_index_);
+  DCHECK_EQ(1, GetEntryCount());
 
-  // We pass 0 instead of GetEntryCount() for the history_length parameter of
-  // SetHistoryLengthAndPrune, because it will create history_length additional
-  // history entries.
-  // TODO(jochen): This API is confusing and we should clean it up.
-  // http://crbug.com/178491
-  NavigationEntryImpl* entry =
-      NavigationEntryImpl::FromNavigationEntry(GetVisibleEntry());
-  delegate_->SetHistoryLengthAndPrune(
-      entry->site_instance(), 0, entry->GetPageID());
+  delegate_->SetHistoryOffsetAndLength(last_committed_entry_index_,
+                                       GetEntryCount());
 }
 
 void NavigationControllerImpl::PruneAllButLastCommittedInternal() {
@@ -1561,6 +1555,7 @@ void NavigationControllerImpl::InsertOrReplaceEntry(NavigationEntryImpl* entry,
   DiscardNonCommittedEntriesInternal();
 
   int current_size = static_cast<int>(entries_.size());
+  DCHECK(current_size > 0 || !replace);
 
   if (current_size > 0) {
     // Prune any entries which are in front of the current entry.

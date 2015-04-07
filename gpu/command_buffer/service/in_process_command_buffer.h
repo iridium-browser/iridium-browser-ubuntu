@@ -46,11 +46,13 @@ class StreamTextureManagerInProcess;
 #endif
 
 namespace gpu {
+class ValueStateMap;
 
 namespace gles2 {
 class GLES2Decoder;
 class MailboxManager;
 class ShaderTranslatorCache;
+class SubscriptionRefSet;
 }
 
 class CommandBufferServiceBase;
@@ -138,9 +140,13 @@ class GPU_EXPORT InProcessCommandBuffer : public CommandBuffer,
     virtual scoped_refptr<gles2::ShaderTranslatorCache>
         shader_translator_cache() = 0;
     scoped_refptr<gles2::MailboxManager> mailbox_manager();
+    scoped_refptr<gles2::SubscriptionRefSet> subscription_ref_set();
+    scoped_refptr<gpu::ValueStateMap> pending_valuebuffer_state();
 
    private:
     scoped_refptr<gles2::MailboxManager> mailbox_manager_;
+    scoped_refptr<gles2::SubscriptionRefSet> subscription_ref_set_;
+    scoped_refptr<gpu::ValueStateMap> pending_valuebuffer_state_;
   };
 
 #if defined(OS_ANDROID)
@@ -206,8 +212,6 @@ class GPU_EXPORT InProcessCommandBuffer : public CommandBuffer,
   bool GetBufferChanged(int32 transfer_buffer_id);
   void PumpCommands();
   void PerformIdleWork();
-
-  static scoped_refptr<Service> GetDefaultService();
 
   // Members accessed on the gpu thread (possibly with the exception of
   // creation):

@@ -37,7 +37,7 @@
 #include "printing/page_size_margins.h"
 #include "printing/print_job_constants.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/web_dialogs/web_dialog_delegate.h"
 #include "ui/web_dialogs/web_dialog_ui.h"
 
@@ -628,9 +628,11 @@ void PrintPreviewUI::OnReloadPrintersList() {
 
 void PrintPreviewUI::OnSetOptionsFromDocument(
     const PrintHostMsg_SetOptionsFromDocument_Params& params) {
-  // Notify WebUI that print scaling is disabled
-  if (params.is_scaling_disabled)
-    web_ui()->CallJavascriptFunction("printScalingDisabledForSourcePDF");
+  base::DictionaryValue options;
+  options.SetBoolean(printing::kSettingDisableScaling,
+                     params.is_scaling_disabled);
+  options.SetInteger(printing::kSettingCopies, params.copies);
+  web_ui()->CallJavascriptFunction("printPresetOptionsFromDocument", options);
 }
 
 // static

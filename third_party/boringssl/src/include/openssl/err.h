@@ -403,6 +403,7 @@ enum {
   ERR_LIB_DIGEST,
   ERR_LIB_CIPHER,
   ERR_LIB_USER,
+  ERR_LIB_HKDF,
   ERR_NUM_LIBS
 };
 
@@ -442,6 +443,7 @@ enum {
 #define ERR_R_USER_LIB ERR_LIB_USER
 #define ERR_R_DIGEST_LIB ERR_LIB_DIGEST
 #define ERR_R_CIPHER_LIB ERR_LIB_CIPHER
+#define ERR_R_HKDF_LIB ERR_LIB_HKDF
 
 /* Global reasons. */
 #define ERR_R_FATAL 64
@@ -521,6 +523,15 @@ struct ERR_FNS_st {
  *
  * TODO(fork): remove. libjingle calls this. */
 OPENSSL_EXPORT void ERR_load_BIO_strings(void);
+
+
+/* Android compatibility section.
+ *
+ * These functions are declared, temporarily, for Android because
+ * wpa_supplicant will take a little time to sync with upstream. Outside of
+ * Android they'll have no definition. */
+
+OPENSSL_EXPORT void ERR_remove_state(unsigned long pid);
 
 
 #if defined(__cplusplus)

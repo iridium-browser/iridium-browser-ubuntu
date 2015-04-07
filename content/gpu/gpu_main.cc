@@ -10,7 +10,6 @@
 #endif
 
 #include "base/debug/trace_event.h"
-#include "base/environment.h"
 #include "base/lazy_instance.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
@@ -70,8 +69,8 @@ namespace content {
 namespace {
 
 void GetGpuInfoFromCommandLine(gpu::GPUInfo& gpu_info,
-                               const CommandLine& command_line);
-bool WarmUpSandbox(const CommandLine& command_line);
+                               const base::CommandLine& command_line);
+bool WarmUpSandbox(const base::CommandLine& command_line);
 
 #if !defined(OS_MACOSX)
 bool CollectGraphicsInfo(gpu::GPUInfo& gpu_info);
@@ -109,7 +108,7 @@ int GpuMain(const MainFunctionParams& parameters) {
   base::debug::TraceLog::GetInstance()->SetProcessSortIndex(
       kTraceEventGpuProcessSortIndex);
 
-  const CommandLine& command_line = parameters.command_line;
+  const base::CommandLine& command_line = parameters.command_line;
   if (command_line.HasSwitch(switches::kGpuStartupDialog)) {
     ChildProcess::WaitForDebugger("Gpu");
   }
@@ -213,16 +212,6 @@ int GpuMain(const MainFunctionParams& parameters) {
     watchdog_thread->StartWithOptions(options);
   }
 
-  // Temporarily disable DRI3 on desktop Linux.
-  // The GPU process is crashing on DRI3-enabled desktop Linux systems.
-  // TODO(jorgelo): remove this when crbug.com/415681 is fixed.
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
-  {
-    scoped_ptr<base::Environment> env(base::Environment::Create());
-    env->SetVar("LIBGL_DRI3_DISABLE", "1");
-  }
-#endif
-
   gpu::GPUInfo gpu_info;
   // Get vendor_id, device_id, driver_version from browser process through
   // commandline switches.
@@ -288,7 +277,7 @@ int GpuMain(const MainFunctionParams& parameters) {
       // on systems where vendor_id/device_id aren't available.
       if (!command_line.HasSwitch(switches::kDisableGpuDriverBugWorkarounds)) {
         gpu::ApplyGpuDriverBugWorkarounds(
-            gpu_info, const_cast<CommandLine*>(&command_line));
+            gpu_info, const_cast<base::CommandLine*>(&command_line));
       }
 #endif
 
@@ -383,7 +372,7 @@ int GpuMain(const MainFunctionParams& parameters) {
 namespace {
 
 void GetGpuInfoFromCommandLine(gpu::GPUInfo& gpu_info,
-                               const CommandLine& command_line) {
+                               const base::CommandLine& command_line) {
   DCHECK(command_line.HasSwitch(switches::kGpuVendorID) &&
          command_line.HasSwitch(switches::kGpuDeviceID) &&
          command_line.HasSwitch(switches::kGpuDriverVersion));
@@ -402,7 +391,7 @@ void GetGpuInfoFromCommandLine(gpu::GPUInfo& gpu_info,
   GetContentClient()->SetGpuInfo(gpu_info);
 }
 
-bool WarmUpSandbox(const CommandLine& command_line) {
+bool WarmUpSandbox(const base::CommandLine& command_line) {
   {
     TRACE_EVENT0("gpu", "Warm up rand");
     // Warm up the random subsystem, which needs to be done pre-sandbox on all
@@ -422,7 +411,7 @@ bool CollectGraphicsInfo(gpu::GPUInfo& gpu_info) {
       res = false;
       break;
     case gpu::kCollectInfoNonFatalFailure:
-      VLOG(1) << "gpu::CollectGraphicsInfo failed (non-fatal).";
+      DVLOG(1) << "gpu::CollectGraphicsInfo failed (non-fatal).";
       break;
     case gpu::kCollectInfoNone:
       NOTREACHED();
@@ -441,7 +430,7 @@ bool CanAccessNvidiaDeviceFile() {
   bool res = true;
   base::ThreadRestrictions::AssertIOAllowed();
   if (access("/dev/nvidiactl", R_OK) != 0) {
-    VLOG(1) << "NVIDIA device file /dev/nvidiactl access denied";
+    DVLOG(1) << "NVIDIA device file /dev/nvidiactl access denied";
     res = false;
   }
   return res;
@@ -452,7 +441,7 @@ void CreateDummyGlContext() {
   scoped_refptr<gfx::GLSurface> surface(
       gfx::GLSurface::CreateOffscreenGLSurface(gfx::Size()));
   if (!surface.get()) {
-    VLOG(1) << "gfx::GLSurface::CreateOffscreenGLSurface failed";
+    DVLOG(1) << "gfx::GLSurface::CreateOffscreenGLSurface failed";
     return;
   }
 
@@ -461,7 +450,7 @@ void CreateDummyGlContext() {
   scoped_refptr<gfx::GLContext> context(gfx::GLContext::CreateGLContext(
       NULL, surface.get(), gfx::PreferDiscreteGpu));
   if (!context.get()) {
-    VLOG(1) << "gfx::GLContext::CreateGLContext failed";
+    DVLOG(1) << "gfx::GLContext::CreateGLContext failed";
     return;
   }
 
@@ -469,7 +458,7 @@ void CreateDummyGlContext() {
   if (context->MakeCurrent(surface.get())) {
     context->ReleaseCurrent(surface.get());
   } else {
-    VLOG(1)  << "gfx::GLContext::MakeCurrent failed";
+    DVLOG(1)  << "gfx::GLContext::MakeCurrent failed";
   }
 }
 

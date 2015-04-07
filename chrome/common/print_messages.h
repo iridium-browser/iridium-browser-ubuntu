@@ -15,9 +15,9 @@
 #include "printing/page_size_margins.h"
 #include "printing/print_job_constants.h"
 #include "third_party/WebKit/public/web/WebPrintScalingOption.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/ipc/gfx_param_traits.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/gfx/rect.h"
 
 #ifndef CHROME_COMMON_PRINT_MESSAGES_H_
 #define CHROME_COMMON_PRINT_MESSAGES_H_
@@ -294,11 +294,14 @@ IPC_STRUCT_BEGIN(PrintHostMsg_DidPrintPage_Params)
   IPC_STRUCT_MEMBER(gfx::Rect, content_area)
 IPC_STRUCT_END()
 
+// TODO(dgn) Rename *ScriptedPrint messages because they are not called only
+//           from scripts.
 // Parameters for the IPC message ViewHostMsg_ScriptedPrint
 IPC_STRUCT_BEGIN(PrintHostMsg_ScriptedPrint_Params)
   IPC_STRUCT_MEMBER(int, cookie)
   IPC_STRUCT_MEMBER(int, expected_pages_count)
   IPC_STRUCT_MEMBER(bool, has_selection)
+  IPC_STRUCT_MEMBER(bool, is_scripted)
   IPC_STRUCT_MEMBER(printing::MarginType, margin_type)
 IPC_STRUCT_END()
 

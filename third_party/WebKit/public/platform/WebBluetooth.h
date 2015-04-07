@@ -9,10 +9,12 @@
 
 namespace blink {
 
+struct WebBluetoothDevice;
 struct WebBluetoothError;
 
-// FIXME: Return a WebBluetoothDevice http://crbug.com/420284
-typedef WebCallbacks<void, WebBluetoothError> WebBluetoothRequestDeviceCallbacks;
+// Success and failure callbacks for requestDevice.
+// WebBluetoothDevice and WebBluetoothError object ownership is transfered.
+typedef WebCallbacks<WebBluetoothDevice, WebBluetoothError> WebBluetoothRequestDeviceCallbacks;
 
 class WebBluetooth {
 public:

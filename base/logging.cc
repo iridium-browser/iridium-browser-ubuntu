@@ -19,7 +19,7 @@ typedef HANDLE MutexHandle;
 #include <mach-o/dyld.h>
 #elif defined(OS_POSIX)
 #if defined(OS_NACL)
-#include <sys/time.h> // timespec doesn't seem to be in <time.h>
+#include <sys/time.h>  // timespec doesn't seem to be in <time.h>
 #else
 #include <sys/syscall.h>
 #endif
@@ -76,8 +76,7 @@ VlogInfo* g_vlog_info_prev = NULL;
 const char* const log_severity_names[LOG_NUM_SEVERITIES] = {
   "INFO", "WARNING", "ERROR", "FATAL" };
 
-const char* log_severity_name(int severity)
-{
+const char* log_severity_name(int severity) {
   if (severity >= 0 && severity < LOG_NUM_SEVERITIES)
     return log_severity_names[severity];
   return "UNKNOWN";
@@ -152,7 +151,7 @@ uint64 TickCount() {
 void DeleteFilePath(const PathString& log_name) {
 #if defined(OS_WIN)
   DeleteFile(log_name.c_str());
-#elif defined (OS_NACL)
+#elif defined(OS_NACL)
   // Do nothing; unlink() isn't supported on NaCl.
 #else
   unlink(log_name.c_str());
@@ -359,7 +358,7 @@ bool BaseInitLoggingImpl(const LoggingSettings& settings) {
   // Can log only to the system debug log.
   CHECK_EQ(settings.logging_dest & ~LOG_TO_SYSTEM_DEBUG_LOG, 0);
 #endif
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   // Don't bother initializing g_vlog_info unless we use one of the
   // vlog switches.
   if (command_line->HasSwitch(switches::kV) ||
@@ -660,7 +659,7 @@ void LogMessage::Init(const char* file, int line) {
   if (log_timestamp) {
     time_t t = time(NULL);
     struct tm local_time = {0};
-#if _MSC_VER >= 1400
+#ifdef _MSC_VER
     localtime_s(&local_time, &t);
 #else
     localtime_r(&t, &local_time);
@@ -706,8 +705,8 @@ SystemErrorCode GetLastSystemErrorCode() {
 
 #if defined(OS_WIN)
 BASE_EXPORT std::string SystemErrorCodeToString(SystemErrorCode error_code) {
-  const int error_message_buffer_size = 256;
-  char msgbuf[error_message_buffer_size];
+  const int kErrorMessageBufferSize = 256;
+  char msgbuf[kErrorMessageBufferSize];
   DWORD flags = FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS;
   DWORD len = FormatMessageA(flags, NULL, error_code, 0, msgbuf,
                              arraysize(msgbuf), NULL);
@@ -808,5 +807,5 @@ std::wstring GetLogFileFullPath() {
 }  // namespace logging
 
 std::ostream& std::operator<<(std::ostream& out, const wchar_t* wstr) {
-  return out << base::WideToUTF8(std::wstring(wstr));
+  return out << base::WideToUTF8(wstr);
 }

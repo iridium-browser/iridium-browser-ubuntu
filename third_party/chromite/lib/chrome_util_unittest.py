@@ -20,6 +20,7 @@ from chromite.lib import chrome_util
 # Convenience alias
 Dir = cros_test_lib.Directory
 
+
 class CopyTest(cros_test_lib.TempDirTestCase):
   """Unittests for chrome_util Copy."""
   def setUp(self):
@@ -219,16 +220,17 @@ class DirCopyTest(FileCopyTest):
   ELEMENT_SRC = Dir(ELEMENT_SRC_NAME, FILES)
   ELEMENTS_SRC = [
       # Add .svn directory to test black list functionality.
-      Dir('monkey1', FILES + [Dir('.svn', FILES)]) , Dir('monkey2', FILES),
+      Dir('monkey1', FILES + [Dir('.svn', FILES)]), Dir('monkey2', FILES),
       Dir('monkey3', FILES),
-      Dir('foon1', []), Dir('foon2', []), Dir('foon3', [])]
+      Dir('foon1', []), Dir('foon2', []), Dir('foon3', [])
+  ]
   ELEMENTS_GLOB = 'monkey*'
   DIR_SRC_NAME = 'dir_src'
 
   ELEMENT_DEST_NAME = 'monkey_dest'
   ELEMENT_DEST = Dir(ELEMENT_DEST_NAME, FILES)
   ELEMENTS_DEST = [
-      Dir('monkey1', FILES) , Dir('monkey2', FILES), Dir('monkey3', FILES)]
+      Dir('monkey1', FILES), Dir('monkey2', FILES), Dir('monkey3', FILES)]
   DIR_DEST_NAME = 'dir_dest'
 
 

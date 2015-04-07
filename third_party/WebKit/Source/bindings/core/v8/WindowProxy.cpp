@@ -75,12 +75,12 @@ static void checkDocumentWrapper(v8::Handle<v8::Object> wrapper, Document* docum
     ASSERT(!document->isHTMLDocument() || (V8Document::toImpl(v8::Handle<v8::Object>::Cast(wrapper->GetPrototype())) == document));
 }
 
-PassOwnPtrWillBeRawPtr<WindowProxy> WindowProxy::create(LocalFrame* frame, DOMWrapperWorld& world, v8::Isolate* isolate)
+PassOwnPtrWillBeRawPtr<WindowProxy> WindowProxy::create(Frame* frame, DOMWrapperWorld& world, v8::Isolate* isolate)
 {
     return adoptPtrWillBeNoop(new WindowProxy(frame, &world, isolate));
 }
 
-WindowProxy::WindowProxy(LocalFrame* frame, PassRefPtr<DOMWrapperWorld> world, v8::Isolate* isolate)
+WindowProxy::WindowProxy(Frame* frame, PassRefPtr<DOMWrapperWorld> world, v8::Isolate* isolate)
     : m_frame(frame)
     , m_isolate(isolate)
     , m_world(world)
@@ -105,7 +105,11 @@ void WindowProxy::disposeContext(GlobalDetachmentBehavior behavior)
 
     v8::HandleScope handleScope(m_isolate);
     v8::Handle<v8::Context> context = m_scriptState->context();
-    m_frame->loader().client()->willReleaseScriptContext(context, m_world->worldId());
+    if (m_frame->isLocalFrame()) {
+        LocalFrame* frame = toLocalFrame(m_frame);
+        frame->loader().client()->willReleaseScriptContext(context, m_world->worldId());
+        InspectorInstrumentation::willReleaseScriptContext(frame, m_scriptState.get());
+    }
 
     if (behavior == DetachGlobal)
         m_scriptState->detachGlobalObject();
@@ -137,8 +141,8 @@ void WindowProxy::clearForNavigation()
     m_document.clear();
 
     // Clear the document wrapper cache before turning on access checks on
-    // the old LocalDOMWindow wrapper. This way, access to the document wrapper
-    // will be protected by the security checks on the LocalDOMWindow wrapper.
+    // the old DOMWindow wrapper. This way, access to the document wrapper
+    // will be protected by the security checks on the DOMWindow wrapper.
     clearDocumentProperty();
 
     v8::Handle<v8::Object> windowWrapper = V8Window::findInstanceInPrototypeChain(m_global.newLocal(m_isolate), m_isolate);
@@ -149,16 +153,16 @@ void WindowProxy::clearForNavigation()
 
 // Create a new environment and setup the global object.
 //
-// The global object corresponds to a LocalDOMWindow instance. However, to
-// allow properties of the JS LocalDOMWindow instance to be shadowed, we
-// use a shadow object as the global object and use the JS LocalDOMWindow
-// instance as the prototype for that shadow object. The JS LocalDOMWindow
+// The global object corresponds to a DOMWindow instance. However, to
+// allow properties of the JS DOMWindow instance to be shadowed, we
+// use a shadow object as the global object and use the JS DOMWindow
+// instance as the prototype for that shadow object. The JS DOMWindow
 // instance is undetectable from JavaScript code because the __proto__
 // accessors skip that object.
 //
-// The shadow object and the LocalDOMWindow instance are seen as one object
+// The shadow object and the DOMWindow instance are seen as one object
 // from JavaScript. The JavaScript object that corresponds to a
-// LocalDOMWindow instance is the shadow object. When mapping a LocalDOMWindow
+// DOMWindow instance is the shadow object. When mapping a DOMWindow
 // instance to a V8 object, we return the shadow object.
 //
 // To implement split-window, see
@@ -222,55 +226,62 @@ bool WindowProxy::initialize()
         return false;
     }
 
+    SecurityOrigin* origin = 0;
     if (m_world->isMainWorld()) {
         // ActivityLogger for main world is updated within updateDocument().
         updateDocument();
-        if (m_frame->document()) {
-            setSecurityToken(m_frame->document()->securityOrigin());
-            ContentSecurityPolicy* csp = m_frame->document()->contentSecurityPolicy();
-            context->AllowCodeGenerationFromStrings(csp->allowEval(0, ContentSecurityPolicy::SuppressReport));
-            context->SetErrorMessageForCodeGenerationFromStrings(v8String(m_isolate, csp->evalDisabledErrorMessage()));
-        }
+        origin = m_frame->securityContext()->securityOrigin();
+        // FIXME: Can this be removed when CSP moves to browser?
+        ContentSecurityPolicy* csp = m_frame->securityContext()->contentSecurityPolicy();
+        context->AllowCodeGenerationFromStrings(csp->allowEval(0, ContentSecurityPolicy::SuppressReport));
+        context->SetErrorMessageForCodeGenerationFromStrings(v8String(m_isolate, csp->evalDisabledErrorMessage()));
     } else {
         updateActivityLogger();
-        SecurityOrigin* origin = m_world->isolatedWorldSecurityOrigin();
+        origin = m_world->isolatedWorldSecurityOrigin();
         setSecurityToken(origin);
-        if (origin && InspectorInstrumentation::hasFrontends()) {
-            InspectorInstrumentation::didCreateIsolatedContext(m_frame, m_scriptState.get(), origin);
-        }
     }
-    m_frame->loader().client()->didCreateScriptContext(context, m_world->extensionGroup(), m_world->worldId());
+    if (m_frame->isLocalFrame()) {
+        LocalFrame* frame = toLocalFrame(m_frame);
+        InspectorInstrumentation::didCreateScriptContext(frame, m_scriptState.get(), origin, m_world->isMainWorld());
+        frame->loader().client()->didCreateScriptContext(context, m_world->extensionGroup(), m_world->worldId());
+    }
     return true;
 }
 
 void WindowProxy::createContext()
 {
-    // The documentLoader pointer could be 0 during frame shutdown.
-    // FIXME: Can we remove this check?
-    if (!m_frame->loader().documentLoader())
+    // This can get called after a frame is already detached...
+    // FIXME: Fix the code so we don't need this check.
+    if (m_frame->isLocalFrame() && !toLocalFrame(m_frame)->loader().documentLoader())
         return;
 
     // Create a new environment using an empty template for the shadow
     // object. Reuse the global object if one has been created earlier.
-    v8::Handle<v8::ObjectTemplate> globalTemplate = V8Window::getShadowObjectTemplate(m_isolate);
+    v8::Local<v8::ObjectTemplate> globalTemplate = V8Window::getShadowObjectTemplate(m_isolate);
     if (globalTemplate.IsEmpty())
         return;
 
     double contextCreationStartInSeconds = currentTime();
 
-    // Dynamically tell v8 about our extensions now.
-    const V8Extensions& extensions = ScriptController::registeredExtensions();
-    OwnPtr<const char*[]> extensionNames = adoptArrayPtr(new const char*[extensions.size()]);
-    int index = 0;
-    int extensionGroup = m_world->extensionGroup();
-    int worldId = m_world->worldId();
-    for (size_t i = 0; i < extensions.size(); ++i) {
-        if (!m_frame->loader().client()->allowScriptExtension(extensions[i]->name(), extensionGroup, worldId))
-            continue;
+    // FIXME: It's not clear what the right thing to do for remote frames is.
+    // The extensions registered don't generally seem to make sense for remote
+    // frames, so skip it for now.
+    Vector<const char*> extensionNames;
+    if (m_frame->isLocalFrame()) {
+        LocalFrame* frame = toLocalFrame(m_frame);
+        // Dynamically tell v8 about our extensions now.
+        const V8Extensions& extensions = ScriptController::registeredExtensions();
+        extensionNames.reserveInitialCapacity(extensions.size());
+        int extensionGroup = m_world->extensionGroup();
+        int worldId = m_world->worldId();
+        for (const auto* extension : extensions) {
+            if (!frame->loader().client()->allowScriptExtension(extension->name(), extensionGroup, worldId))
+                continue;
 
-        extensionNames[index++] = extensions[i]->name();
+            extensionNames.append(extension->name());
+        }
     }
-    v8::ExtensionConfiguration extensionConfiguration(index, extensionNames.get());
+    v8::ExtensionConfiguration extensionConfiguration(extensionNames.size(), extensionNames.data());
 
     v8::Handle<v8::Context> context = v8::Context::New(m_isolate, &extensionConfiguration, globalTemplate, m_global.newLocal(m_isolate));
     if (context.IsEmpty())
@@ -297,22 +308,22 @@ bool WindowProxy::installDOMWindow()
     if (windowWrapper.IsEmpty())
         return false;
 
-    V8DOMWrapper::setNativeInfo(v8::Handle<v8::Object>::Cast(windowWrapper->GetPrototype()), wrapperTypeInfo, window->toScriptWrappableBase());
+    V8DOMWrapper::setNativeInfo(v8::Handle<v8::Object>::Cast(windowWrapper->GetPrototype()), wrapperTypeInfo, window);
 
     // Install the windowWrapper as the prototype of the innerGlobalObject.
     // The full structure of the global object is as follows:
     //
     // outerGlobalObject (Empty object, remains after navigation)
     //   -- has prototype --> innerGlobalObject (Holds global variables, changes during navigation)
-    //   -- has prototype --> LocalDOMWindow instance
+    //   -- has prototype --> DOMWindow instance
     //   -- has prototype --> Window.prototype
     //   -- has prototype --> Object.prototype
     //
     // Note: Much of this prototype structure is hidden from web content. The
-    //       outer, inner, and LocalDOMWindow instance all appear to be the same
+    //       outer, inner, and DOMWindow instance all appear to be the same
     //       JavaScript object.
     v8::Handle<v8::Object> innerGlobalObject = toInnerGlobalObject(m_scriptState->context());
-    V8DOMWrapper::setNativeInfo(innerGlobalObject, wrapperTypeInfo, window->toScriptWrappableBase());
+    V8DOMWrapper::setNativeInfo(innerGlobalObject, wrapperTypeInfo, window);
     innerGlobalObject->SetPrototype(windowWrapper);
     V8DOMWrapper::associateObjectWithWrapper(m_isolate, window, wrapperTypeInfo, windowWrapper);
     wrapperTypeInfo->installConditionallyEnabledProperties(windowWrapper, m_isolate);
@@ -330,13 +341,19 @@ void WindowProxy::updateDocumentProperty()
     if (!m_world->isMainWorld())
         return;
 
+    if (m_frame->isRemoteFrame()) {
+        clearDocumentProperty();
+        return;
+    }
+
     ScriptState::Scope scope(m_scriptState.get());
     v8::Handle<v8::Context> context = m_scriptState->context();
-    v8::Handle<v8::Value> documentWrapper = toV8(m_frame->document(), context->Global(), context->GetIsolate());
+    LocalFrame* frame = toLocalFrame(m_frame);
+    v8::Handle<v8::Value> documentWrapper = toV8(frame->document(), context->Global(), context->GetIsolate());
     ASSERT(documentWrapper == m_document.newLocal(m_isolate) || m_document.isEmpty());
     if (m_document.isEmpty())
         updateDocumentWrapper(v8::Handle<v8::Object>::Cast(documentWrapper));
-    checkDocumentWrapper(m_document.newLocal(m_isolate), m_frame->document());
+    checkDocumentWrapper(m_document.newLocal(m_isolate), frame->document());
 
     // If instantiation of the document wrapper fails, clear the cache
     // and let the LocalDOMWindow accessor handle access to the document.
@@ -360,12 +377,13 @@ void WindowProxy::clearDocumentProperty()
         return;
     v8::HandleScope handleScope(m_isolate);
     m_scriptState->context()->Global()->ForceDelete(v8AtomicString(m_isolate, "document"));
+    V8HiddenValue::deleteHiddenValue(m_isolate, toInnerGlobalObject(m_scriptState->context()), V8HiddenValue::document(m_isolate));
 }
 
 void WindowProxy::updateActivityLogger()
 {
     m_scriptState->perContextData()->setActivityLogger(V8DOMActivityLogger::activityLogger(
-        m_world->worldId(), m_frame->document() ? m_frame->document()->baseURI() : KURL()));
+        m_world->worldId(), m_frame->isLocalFrame() && toLocalFrame(m_frame)->document() ? toLocalFrame(m_frame)->document()->baseURI() : KURL()));
 }
 
 void WindowProxy::setSecurityToken(SecurityOrigin* origin)
@@ -374,12 +392,15 @@ void WindowProxy::setSecurityToken(SecurityOrigin* origin)
     // If two tokens are not equal, then we have to call canAccess.
     // Note: we can't use the HTTPOrigin if it was set from the DOM.
     String token;
-    // We stick with an empty token if document.domain was modified or if we
-    // are in the initial empty document, so that we can do a full canAccess
-    // check in those cases.
+    // There are several situations where v8 needs to do a full canAccess check,
+    // so set an empty security token instead:
+    // - document.domain was modified
+    // - the frame is showing the initial empty document
+    // - the frame is remote
     bool delaySet = m_world->isMainWorld()
         && (origin->domainWasSetInDOM()
-            || m_frame->loader().stateMachine()->isDisplayingInitialEmptyDocument());
+            || m_frame->isRemoteFrame()
+            || toLocalFrame(m_frame)->loader().stateMachine()->isDisplayingInitialEmptyDocument());
     if (origin && !delaySet)
         token = origin->toString();
 
@@ -414,7 +435,7 @@ void WindowProxy::updateDocument()
         return;
     updateActivityLogger();
     updateDocumentProperty();
-    updateSecurityOrigin(m_frame->document()->securityOrigin());
+    updateSecurityOrigin(m_frame->securityContext()->securityOrigin());
 }
 
 static v8::Handle<v8::Value> getNamedProperty(HTMLDocument* htmlDocument, const AtomicString& key, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)

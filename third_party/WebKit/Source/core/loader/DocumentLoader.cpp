@@ -42,6 +42,7 @@
 #include "core/frame/LocalFrame.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/html/HTMLFrameOwnerElement.h"
+#include "core/html/parser/HTMLDocumentParser.h"
 #include "core/html/parser/TextResourceDecoder.h"
 #include "core/inspector/InspectorInstrumentation.h"
 #include "core/loader/FrameLoader.h"
@@ -83,6 +84,7 @@ DocumentLoader::DocumentLoader(LocalFrame* frame, const ResourceRequest& req, co
     , m_committed(false)
     , m_isClientRedirect(false)
     , m_replacesCurrentHistoryItem(false)
+    , m_navigationType(NavigationTypeOther)
     , m_loadingMainResource(false)
     , m_timeOfLastDataReceived(0.0)
     , m_applicationCacheHost(ApplicationCacheHost::create(this))
@@ -170,7 +172,7 @@ void DocumentLoader::mainReceivedError(const ResourceError& error)
         return;
     setMainDocumentError(error);
     clearMainResourceLoader();
-    frameLoader()->receivedMainResourceError(error);
+    frameLoader()->receivedMainResourceError(this, error);
     clearMainResourceHandle();
 }
 
@@ -301,7 +303,7 @@ bool DocumentLoader::isRedirectAfterPost(const ResourceRequest& newRequest, cons
     return false;
 }
 
-bool DocumentLoader::shouldContinueForNavigationPolicy(const ResourceRequest& request, ContentSecurityPolicyCheck shouldCheckMainWorldContentSecurityPolicy, bool isTransitionNavigation)
+bool DocumentLoader::shouldContinueForNavigationPolicy(const ResourceRequest& request, ContentSecurityPolicyDisposition shouldCheckMainWorldContentSecurityPolicy, NavigationPolicy policy, bool isTransitionNavigation)
 {
     // Don't ask if we are loading an empty URL.
     if (request.url().isEmpty() || m_substituteData.isValid())
@@ -319,7 +321,6 @@ bool DocumentLoader::shouldContinueForNavigationPolicy(const ResourceRequest& re
         return false;
     }
 
-    NavigationPolicy policy = m_triggeringAction.policy();
     policy = frameLoader()->client()->decidePolicyForNavigation(request, this, policy, isTransitionNavigation);
     if (policy == NavigationPolicyCurrentTab)
         return true;
@@ -355,7 +356,7 @@ void DocumentLoader::willSendRequest(ResourceRequest& newRequest, const Resource
     // deferrals plays less of a part in this function in preventing the bad behavior deferring
     // callbacks is meant to prevent.
     ASSERT(!newRequest.isNull());
-    if (isFormSubmission(m_triggeringAction.type()) && !m_frame->document()->contentSecurityPolicy()->allowFormAction(newRequest.url())) {
+    if (isFormSubmission(m_navigationType) && !m_frame->document()->contentSecurityPolicy()->allowFormAction(newRequest.url())) {
         cancelMainResourceLoad(ResourceError::cancelledError(newRequest.url()));
         return;
     }
@@ -520,11 +521,9 @@ void DocumentLoader::ensureWriter(const AtomicString& mimeType, const KURL& over
     m_frame->loader().clear();
     ASSERT(m_frame->page());
 
-    m_writer = createWriterFor(0, init, mimeType, encoding, false);
+    ParserSynchronizationPolicy parsingPolicy = (m_substituteData.isValid() && m_substituteData.forceSynchronousLoad()) ? ForceSynchronousParsing : AllowAsynchronousParsing;
+    m_writer = createWriterFor(0, init, mimeType, encoding, false, parsingPolicy);
     m_writer->setDocumentWasLoadedAsPartOfNavigation();
-
-    if (m_substituteData.isValid() && m_substituteData.forceSynchronousLoad())
-        m_writer->forceSynchronousParse();
 
     // This should be set before receivedFirstData().
     if (!overridingURL.isEmpty())
@@ -558,10 +557,10 @@ void DocumentLoader::dataReceived(Resource* resource, const char* data, unsigned
     m_applicationCacheHost->mainResourceDataReceived(data, length);
     m_timeOfLastDataReceived = monotonicallyIncreasingTime();
 
+    if (isArchiveMIMEType(response().mimeType()))
+        return;
     commitIfReady();
     if (!frameLoader())
-        return;
-    if (isArchiveMIMEType(response().mimeType()))
         return;
     commitData(data, length);
 
@@ -797,7 +796,7 @@ void DocumentLoader::endWriting(DocumentWriter* writer)
     m_writer.clear();
 }
 
-PassRefPtrWillBeRawPtr<DocumentWriter> DocumentLoader::createWriterFor(const Document* ownerDocument, const DocumentInit& init, const AtomicString& mimeType, const AtomicString& encoding, bool dispatch)
+PassRefPtrWillBeRawPtr<DocumentWriter> DocumentLoader::createWriterFor(const Document* ownerDocument, const DocumentInit& init, const AtomicString& mimeType, const AtomicString& encoding, bool dispatch, ParserSynchronizationPolicy parsingPolicy)
 {
     LocalFrame* frame = init.frame();
 
@@ -807,17 +806,17 @@ PassRefPtrWillBeRawPtr<DocumentWriter> DocumentLoader::createWriterFor(const Doc
     if (!init.shouldReuseDefaultView())
         frame->setDOMWindow(LocalDOMWindow::create(*frame));
 
-    RefPtrWillBeRawPtr<Document> document = frame->domWindow()->installNewDocument(mimeType, init);
+    RefPtrWillBeRawPtr<Document> document = frame->localDOMWindow()->installNewDocument(mimeType, init);
     if (ownerDocument) {
         document->setCookieURL(ownerDocument->cookieURL());
         document->setSecurityOrigin(ownerDocument->securityOrigin());
         if (ownerDocument->isTransitionDocument())
-            document->setIsTransitionDocument();
+            document->setIsTransitionDocument(true);
     }
 
     frame->loader().didBeginDocument(dispatch);
 
-    return DocumentWriter::create(document.get(), mimeType, encoding);
+    return DocumentWriter::create(document.get(), parsingPolicy, mimeType, encoding);
 }
 
 const AtomicString& DocumentLoader::mimeType() const
@@ -836,7 +835,7 @@ void DocumentLoader::setUserChosenEncoding(const String& charset)
 // This is only called by FrameLoader::replaceDocumentWhileExecutingJavaScriptURL()
 void DocumentLoader::replaceDocumentWhileExecutingJavaScriptURL(const DocumentInit& init, const String& source, Document* ownerDocument)
 {
-    m_writer = createWriterFor(ownerDocument, init, mimeType(), m_writer ? m_writer->encoding() : emptyAtom, true);
+    m_writer = createWriterFor(ownerDocument, init, mimeType(), m_writer ? m_writer->encoding() : emptyAtom, true, ForceSynchronousParsing);
     if (!source.isNull())
         m_writer->appendReplacingData(source);
     endWriting(m_writer.get());

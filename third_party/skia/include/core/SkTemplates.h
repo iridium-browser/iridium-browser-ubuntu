@@ -10,6 +10,7 @@
 #ifndef SkTemplates_DEFINED
 #define SkTemplates_DEFINED
 
+#include "SkMath.h"
 #include "SkTypes.h"
 #include <limits.h>
 #include <new>
@@ -106,6 +107,10 @@ template <typename T, int (*P)(T*)> class SkAutoTCallIProc : SkNoncopyable {
 public:
     SkAutoTCallIProc(T* obj): fObj(obj) {}
     ~SkAutoTCallIProc() { if (fObj) P(fObj); }
+
+    operator T*() const { return fObj; }
+    T* operator->() const { SkASSERT(fObj); return fObj; }
+
     T* detach() { T* obj = fObj; fObj = NULL; return obj; }
 private:
     T* fObj;
@@ -292,7 +297,12 @@ public:
             }
 
             if (count > N) {
-                fArray = (T*) sk_malloc_throw(count * sizeof(T));
+                const uint64_t size64 = sk_64_mul(count, sizeof(T));
+                const size_t size = static_cast<size_t>(size64);
+                if (size != size64) {
+                    sk_out_of_memory();
+                }
+                fArray = (T*) sk_malloc_throw(size);
             } else if (count > 0) {
                 fArray = (T*) fStorage;
             } else {
@@ -464,6 +474,7 @@ private:
 template <size_t N> class SkAlignedSStorage : SkNoncopyable {
 public:
     void* get() { return fData; }
+    const void* get() const { return fData; }
 private:
     union {
         void*   fPtr;

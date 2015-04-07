@@ -40,12 +40,12 @@
 #include "ui/gfx/animation/throb_animation.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/display.h"
+#include "ui/gfx/geometry/rect_conversions.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/path.h"
-#include "ui/gfx/rect_conversions.h"
 #include "ui/gfx/screen.h"
-#include "ui/gfx/size.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/masked_targeter_delegate.h"
@@ -58,6 +58,7 @@
 #include "ui/views/window/non_client_view.h"
 
 #if defined(OS_WIN)
+#include "ui/gfx/win/dpi.h"
 #include "ui/gfx/win/hwnd_util.h"
 #include "ui/views/widget/monitor_win.h"
 #include "ui/views/win/hwnd_util.h"
@@ -297,6 +298,7 @@ void NewTabButton::OnMouseReleased(const ui::MouseEvent& event) {
   if (event.IsOnlyRightMouseButton()) {
     gfx::Point point = event.location();
     views::View::ConvertPointToScreen(this, &point);
+    point = gfx::win::DIPToScreenPoint(point);
     bool destroyed = false;
     destroyed_ = &destroyed;
     gfx::ShowSystemMenuAtPoint(views::HWNDForView(this), point);
@@ -1294,8 +1296,16 @@ void TabStrip::PaintChildren(gfx::Canvas* canvas,
     paint.setColor(SkColorSetARGB(alpha, 255, 255, 255));
     paint.setXfermodeMode(SkXfermode::kDstIn_Mode);
     paint.setStyle(SkPaint::kFill_Style);
+
+    // The tab graphics include some shadows at the top, so the actual
+    // tabstrip top is 4 px. above the apparent top of the tab, to provide room
+    // to draw these. Exclude this region when trying to make tabs transparent
+    // as it's transparent enough already, and drawing in this region can
+    // overlap the avatar button, leading to visual artifacts.
+    const int kTopOffset = 4;
     // The tabstrip area overlaps the toolbar area by 2 px.
-    canvas->DrawRect(gfx::Rect(0, 0, width(), height() - 2), paint);
+    canvas->DrawRect(
+        gfx::Rect(0, kTopOffset, width(), height() - kTopOffset - 2), paint);
   }
 
   // Now selected but not active. We don't want these dimmed if using native

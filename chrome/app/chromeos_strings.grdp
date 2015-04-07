@@ -442,6 +442,18 @@ Press any key to continue exploring.
   <message name="IDS_FILE_BROWSER_SHARE_BUTTON_LABEL" desc="Menu item label, showing dialog to share the selected file.">
     Share
   </message>
+  <message name="IDS_FILE_BROWSER_CLOUD_IMPORT_BUTTON_LABEL" desc="Label for button that initiates media backup to the cloud.">
+    Import photos &amp; videos to Google Drive
+  </message>
+  <message name="IDS_FILE_BROWSER_CLOUD_IMPORT_INSUFFICIENT_SPACE_BUTTON_LABEL" desc="Label for button that tells user there is not enough space to perform a cloud import.">
+    Insufficient space on your device!
+  </message>
+  <message name="IDS_FILE_BROWSER_CLOUD_IMPORT_SCANNING_BUTTON_LABEL" desc="Label for button showing that scanning is in progress...prior to being enabled when scanning is complete.">
+    Scanning your media...
+  </message>
+  <message name="IDS_FILE_BROWSER_CLOUD_IMPORT_ITEMS_REMAINING" desc="File Manager status message.">
+    Importing $1 files...
+  </message>
 
   <message name="IDS_FILE_BROWSER_COPY_FILE_NAME" desc="File Manager status message.">
     Copying <ph name="FILE_NAME">$1<ex>movie.avi</ex></ph>...
@@ -632,10 +644,10 @@ Press any key to continue exploring.
     You are offline
   </message>
   <message name="IDS_FILE_BROWSER_OFFLINE_MESSAGE" desc="Message informing the user how to make the selected file available offline.">
-    To save this file for offline use, get back online and&lt;br&gt;select the <ph name="OFFLINE_CHECKBOX_NAME">'$1'<ex>'Available offline'</ex></ph> checkbox for this file.
+    To save this file for offline use, get back online, right-click the file, and select the <ph name="OFFLINE_CHECKBOX_NAME">'$1'<ex>'Available offline'</ex></ph> option.
   </message>
   <message name="IDS_FILE_BROWSER_OFFLINE_MESSAGE_PLURAL" desc="Message informing the user how to make multiple selected files available offline.">
-    To save these files for offline use, get back online and&lt;br&gt;select the <ph name="OFFLINE_CHECKBOX_NAME">'$1'<ex>'Available offline'</ex></ph> checkbox for these files.
+    To save these files for offline use, get back online, right-click the files, and select the <ph name="OFFLINE_CHECKBOX_NAME">'$1'<ex>'Available offline'</ex></ph> option.
   </message>
   <message name="IDS_FILE_BROWSER_HOSTED_OFFLINE_MESSAGE" desc="Message informing the user that the selected file is only available online.">
     You must be online to access this file.
@@ -1108,6 +1120,12 @@ Press any key to continue exploring.
   <message name="IDS_FLAGS_DISABLE_DISPLAY_COLOR_CALIBRATION_DESCRIPTION" desc="Description for the flag to disable the color calibration of the display.">
     Disable calibrating the color of the display even if the display supports the feature.
   </message>
+  <message name="IDS_FLAGS_USE_MEMORY_PRESSURE_NAME" desc="Name for the flag to enable memory pressure handling on ChromeOS.">
+    Enable memory pressure handling
+  </message>
+  <message name="IDS_FLAGS_USE_MEMORY_PRESSURE_DESCRIPTION" desc="Description for the flag to enable memory pressure handling on ChromeOS.">
+    Enables enhanced memory pressure handling on ChromeOS.
+  </message>
   <message name="IDS_FLAGS_WAKE_ON_PACKETS_NAME" desc="Name for the flag to enable wake on packets.">
     Wake On Packets
   </message>
@@ -1228,6 +1246,9 @@ Press any key to continue exploring.
   <message name="IDS_KIOSK_ENABLE_SCREEN_ENABLE_BUTTON" desc="Enable button text">
     Enable
   </message>
+  <message name="IDS_EXCLAMATION_ICON_TITLE" desc="Accessible title of the reset screen icon depicting exclamation mark.">
+    Exclamation mark icon
+  </message>
   <message name="IDS_RESET_SCREEN_TITLE" desc="Title of the reset screen">
     Factory reset
   </message>
@@ -1324,6 +1345,9 @@ Press any key to continue exploring.
   <message name="IDS_NETWORK_SELECTION_CONTINUE_BUTTON" desc="Text shown on continue button" meaning="Continue button label of network screen.">
     Continue
   </message>
+  <message name="IDS_NETWORK_ENABLE_DEV_FEATURES_LINK" desc="Text shown on continue button" meaning="Link shown on OOBE screens that opens enable debugging features dialog">
+    Enable debugging features
+  </message>
   <message name="IDS_NETWORK_SELECTION_ERROR" desc="Error shown when connection to network failed or timed out.">
     <ph name="PRODUCT_NAME">$1<ex>Chrome OS</ex></ph> was unable to connect to <ph name="NETWORK_ID">$2<ex>Public Wifi</ex></ph>. Please select another network or try again.
   </message>
@@ -1389,9 +1413,6 @@ Press any key to continue exploring.
   </message>
   <message name="IDS_APP_START_BAILOUT_SHORTCUT_FORMAT" desc="Message displayed at the bottom of app launch splash screen to show user the shortcut key to bailout the launch.">
   Press Ctrl + Alt + S to switch to <ph name="IDS_SHORT_PRODUCT_OS_NAME">$1<ex>Chrome OS</ex></ph>
-  </message>
-  <message name="IDS_KIOSK_MODE_LOGIN_MESSAGE">
-    Click to start
   </message>
   <message name="IDS_LOGIN_CHANGE_PHOTO">
     Change picture
@@ -1513,6 +1534,9 @@ Press any key to continue exploring.
   </message>
   <message name="IDS_CREATE_SUPERVISED_USER_CREATION_RESTRICTED_TEXT" desc="Text shown when supervised user can be created, but owner of the device restricted supervised user creation or whitelist has been enabled for this device.">
     Creation of supervised users is restricted by the owner of this device.
+  </message>
+  <message name="IDS_CREATE_SUPERVISED_USER_NO_MANAGER_EXCEPT_KIDS_TEXT" desc="Text shown when supervised user can be created, but no users except kids that can be manager exist.">
+    Sorry, you need to add at least one Google account to this device before you can create a supervised user. Google accounts for kids cannot be used to create a supervised user.
   </message>
   <message name="IDS_CREATE_SUPERVISED_INTRO_TEXT_TITLE" desc="Supervised user dialog, intro page, title">
     What is a supervised user?
@@ -1666,6 +1690,12 @@ Press any key to continue exploring.
   </message>
   <message name="IDS_USER_IS_SUPERVISED_BY_NOTICE" desc="Text for notifications showing that this user is supervised">
     Usage and history of this user can be reviewed by the manager (<ph name="MANAGER_EMAIL">$1<ex>user@example.com</ex></ph>) on chrome.com.
+  </message>
+  <message name="IDS_CHILD_USER_IS_MANAGED_BY_ONE_PARENT_NOTICE" desc="Text for notifications showing that this child user is managed by parent's account.">
+    This is an account for kids managed by <ph name="MANAGER_EMAIL">$1<ex>user@example.com</ex></ph>
+  </message>
+  <message name="IDS_CHILD_USER_IS_MANAGED_BY_TWO_PARENTS_NOTICE" desc="Text for notifications showing that this child user is managed by two parents' accounts.">
+    This is an account for kids managed by <ph name="FIRST_PARENT_EMAIL">$1<ex>first@example.com</ex></ph> and <ph name="SECOND_PARENT_EMAIL">$2<ex>second@example.com</ex></ph>
   </message>
   <message name="IDS_SUPERVISED_USER_EXPIRED_TOKEN_WARNING" desc="Warning text that is shown on login screen trying to sign in as a supervised user that has expired token">
     This supervised user may have been deleted or disabled by the manager. Please contact the manager if you would like to continue signing in as this user.
@@ -1915,6 +1945,9 @@ Press any key to continue exploring.
   </message>
   <message name="IDS_OPTIONS_SETTINGS_PRIMARY_MOUSE_RIGHT_DESCRIPTION" desc="In the settings tab, the text next to the checkbox to set the primary mouse button to the right button.">
     Swap primary mouse button
+  </message>
+  <message name="IDS_OPTIONS_SETTINGS_WAKE_ON_WIFI_DESCRIPTION" desc="In the settings tab, the text next to the checkbox for enabling quickly reconnecting to known Wi-Fi SSIDs.">
+    Keep Wi-Fi on during sleep
   </message>
   <message name="IDS_OPTIONS_SETTINGS_BLUETOOTH_DISABLE">
     Disable Bluetooth
@@ -2739,6 +2772,69 @@ Press any key to continue exploring.
   </message>
   <message name="IDS_EULA_TPM_DISABLED" desc="Tooltip text describing why 'System security setting' link is disabled.">
     Trusted Platform Module (TPM) chip is disabled or absent.
+  </message>
+
+  <message name="IDS_ENABLE_DEBUGGING_SCREEN_TITLE" desc="Title of the enable debugging features screen">
+    Enable debugging features
+  </message>
+  <message name="IDS_ENABLE_DEBUGGING_SCREEN_WARNING_MSG" desc="Warning text shown on enable debugging features screen above the exclamation icon.">
+    Enable debugging features on this <ph name="IDS_SHORT_PRODUCT_NAME">$1<ex>Chrome</ex></ph> device
+  </message>
+  <message name="IDS_ENABLE_DEBUGGING_SCREEN_ROOTFS_REMOVE_MSG" desc="Text shown on enable debugging features screen below warning messages if device needs extra restart before powerwash.">
+    A removal of rootfs protection and restart is required before enabling other debugging features.
+  </message>
+  <message name="IDS_ENABLE_DEBUGGING_LEARN_MORE" desc="Learn more link text in the enable debugging features dialog.">
+    Learn more.
+  </message>
+  <message name="IDS_ENABLE_DEBUGGING_REMOVE_ROOTFS_BUTTON" desc="Button for rootfs protection removal shown on enable debugging dialog.">
+    Proceed
+  </message>
+  <message name="IDS_ENABLE_DEBUGGING_ENABLE_BUTTON" desc="Button for enabling debugging features shown on enable debugging dialog.">
+    Enable
+  </message>
+  <message name="IDS_ENABLE_DEBUGGING_SETUP_MESSAGE" desc="Setup message in dialog for enabling debugging features.">
+   You are enabling Chrome OS debugging features which will set up sshd daemon and enable booting from USB drives.
+  </message>
+  <message name="IDS_ENABLE_DEBUGGING_DONE_MESSAGE" desc="Completion message in dialog for enabling debugging features.">
+    You have successfully enabled debugging features on this <ph name="IDS_SHORT_PRODUCT_NAME">$1<ex>Chrome</ex></ph> device.
+  </message>
+  <message name="IDS_ENABLE_DEBUGGING_ERROR_TITLE" desc="Title message when enabling of debugging features fails.">
+    Something went wrong
+  </message>
+  <message name="IDS_ENABLE_DEBUGGING_ERROR_MESSAGE" desc="Error message when enabling of debugging features fails.">
+    Debugging features were not completely enabled on this <ph name="IDS_SHORT_PRODUCT_NAME">$1<ex>Chrome</ex></ph> device.
+  </message>
+  <message name="IDS_ENABLE_DEBUGGING_ROOT_PASSWORD_LABEL" desc="Text for root password entry field label from enable debugging features dialog.">
+   root password
+  </message>
+  <message name="IDS_ENABLE_DEBUGGING_CONFIRM_PASSWORD_LABEL" desc="Text for root password entry field label from enable debugging features dialog.">
+   confirm password
+  </message>
+  <message name="IDS_ENABLE_DEBUGGING_WAIT_MESSAGE" desc="Confirmation message in dialog for enabling debugging features.">
+    Please wait...
+  </message>
+  <message name="IDS_ENABLE_DEBUGGING_EMPTY_ROOT_PASSWORD_LABEL" desc="Text for root password entry field label from enable debugging features dialog.">
+    leave empty if you want to set the root password to the default test image value
+  </message>
+  <message name="IDS_ENABLE_DEBUGGING_HELP" desc="Help content of the enable debugging features dialog.">
+    <ph name="BEGIN_H3">&lt;h3&gt;</ph>Debugging Features<ph name="END_H3">&lt;/h3&gt;</ph>
+    <ph name="BR">&lt;br&gt;</ph>
+    You can enable the debugging features on your Chrome OS Device in order to install and test custom code on your device.  This will allow you to:<ph name="BR">&lt;br&gt;</ph>
+    <ph name="BEGIN_LIST">&lt;ul&gt;</ph>
+      <ph name="LIST_ITEM">&lt;li&gt;</ph>Remove rootfs verification so you can modify OS files
+      <ph name="LIST_ITEM">&lt;li&gt;</ph>Enable SSH access to the device using the standard test keys so you can use tools such as <ph name="BEGIN_CODE">&lt;span style=&quot;color:grey;font-family:monospace&quot;&gt;</ph>&apos;cros flash&apos;<ph name="END_CODE">&lt;/span&gt;</ph> to access the device
+      <ph name="LIST_ITEM">&lt;li&gt;</ph>Enable booting from USB so you can install an OS image from a USB drive
+      <ph name="LIST_ITEM">&lt;li&gt;</ph>Set both the dev and the system root login password to a custom value so you can manually SSH into the device
+    <ph name="END_LIST">&lt;/ul&gt;</ph>
+    <ph name="BR">&lt;br&gt;</ph>
+    Once enabled, most of the debugging features will remain enabled even after performing a powerwash or wiping the data on an enterprise managed device.  To fully disable all debugging features, complete the Chrome OS recovery process (https://support.google.com/chromebook/answer/1080595).
+    <ph name="BR">&lt;br&gt;</ph>
+    <ph name="BR">&lt;br&gt;</ph>
+    For more information about the debugging features see:<ph name="BR">&lt;br&gt;</ph>
+    http://www.chromium.org/chromium-os/how-tos-and-troubleshooting/debugging-features
+    <ph name="BR">&lt;br&gt;</ph>
+    <ph name="BR">&lt;br&gt;</ph>
+    <ph name="BEGIN_BOLD">&lt;b&gt;</ph>Note:<ph name="END_BOLD">&lt;/b&gt;</ph>  The system will reboot during the process.
   </message>
 
   <message name="IDS_RESET_SCREEN_WARNING_MSG" desc="Warning text shown on reset screen above the exclamation icon.">
@@ -3787,9 +3883,6 @@ Battery full
   <message name="IDS_CHROMEOS_ACC_LOGIN_SIGNIN_OFFRECORD" desc="Status when signing in incognito.">
     Entering as Guest.
   </message>
-  <message name="IDS_CHROMEOS_ACC_LOGIN_SIGNIN_DEMOUSER" desc="Status when signing in the demo user.">
-    Entering Demo.
-  </message>
   <message name="IDS_CHROMEOS_ACC_LOGIN_SIGNIN_PUBLIC_ACCOUNT" desc="Status when signing in into a public account.">
     Entering public session.
   </message>
@@ -3809,8 +3902,14 @@ Battery full
   <message name="IDS_REMOVABLE_DEVICE_NAVIGATION_MESSAGE" desc="Text of notification message to navigate users to Files.app. If user clicks a button in the notification, Files.app opens.">
     Explore the device's content in the Files app.
   </message>
-  <message name="IDS_REMOVABLE_DEVICE_NAVIGATION_BUTTON_LABEL" desc="Text of a button label in a notification to navigate users to FIles.app. If user clicks the button, Files.app opens.">
+  <message name="IDS_REMOVABLE_DEVICE_NAVIGATION_BUTTON_LABEL" desc="Text of a button label in a notification to navigate users to Files.app. If user clicks the button, Files.app opens.">
     Open Files app
+  </message>
+  <message name="IDS_REMOVABLE_DEVICE_IMPORT_MESSAGE" desc="Text of notification message to start the media import flow. If user clicks a button in the notification, the import flow begins.">
+    Back up media from the device using the Files app.
+  </message>
+  <message name="IDS_REMOVABLE_DEVICE_IMPORT_BUTTON_LABEL" desc="Text of a button label in a notification to start the import flow. If user clicks the button, the import flow begins.">
+    View/Backup media
   </message>
   <message name="IDS_REMOVABLE_DEVICE_HARD_UNPLUG_TITLE" desc="Text of notification message which is shown when user removes removable device (SD card, USB key...) without clicking the eject icon">
     You removed your device too soon!
@@ -4688,6 +4787,9 @@ Battery full
   <message name="IDS_IME_NAME_KEYBOARD_MONGOLIAN" desc="The input method name shows in system tray menu, this shows [Mongolian keyboard].">
     Mongolian keyboard
   </message>
+  <message name="IDS_IME_NAME_KEYBOARD_NETHERLANDS" desc="The input method name shows in system tray menu, this shows [Netherlands keyboard].">
+    Netherlands keyboard
+  </message>
   <message name="IDS_IME_NAME_KEYBOARD_NORWEGIAN" desc="The input method name shows in system tray menu, this shows [Norwegian keyboard].">
     Norwegian keyboard
   </message>
@@ -5300,134 +5402,6 @@ All users must sign out to continue.
     Next
   </message>
 
-  <!-- Charger replacement dialog -->
-  <message name="IDS_CHARGER_REPLACEMENT_CHECK_CHARGER_TITLE" desc="Title on the check charger page">
-    Check your charger
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_CHECK_CHARGER_DAMAGE" desc="Text on check charger page describing the charger may be damaged">
-    We've received a small number of user reports that some original HP Chromebook 11 chargers have been damaged due to overheating. To be safe, we're replacing all original chargers for free.
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_CHECK_ORIGNAL_CHARGER" desc="Text on check charger page asking users to check if they are using the original spring charger.">
-    We'd like you to check if you're using one of the original chargers.
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_WHERE_DEVICE_PURCHASED" desc="Text on check charger page asking user where the device is purchased">
-    Where did you purchase this HP Chromebook 11?
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_CHECK_CHARGER_SELECT_CHARGER" desc="Tex on check charger page instructing user to select one of the charger matched the charger picture">
-    Select the charger that's plugged in to your Chromebook now:
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_SELECT_A_COUNTRY" desc="The text in the select country drop down box asking user to select a country">
-    Please select a country
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_US" desc="The text in the select country drop down as us">
-    United States
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_CA" desc="The text in the select country drop down as canada">
-    Canada
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_UK" desc="The text in the select country drop down as uk">
-    United Kingdom
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_AU" desc="The text in the select country drop down as australia">
-    Australia
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_IRE" desc="The text in the select country drop down as ireland">
-    Ireland
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_NEXT_STEP" desc="Text on the button leading user to the next step">
-    Next
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_CONFIRM_SAFE_CHARGER_TITLE" desc="Title on the confirm safe charger page">
-    Your charger is up to date.
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_CONFIRM_SAFE_CHARGER_TO_GO" desc="Text on confirm user has a safe charger to go with">
-    You're good to go.
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_SAFE_CHARGER_CONFIRM_CHECKBOX_TEXT" desc="Text for confirming safe charger checkbox">
-    I confirm I am using a charger with a green sticker on it.
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_NO_MOPE_MESSAGE_SHOW" desc="Text for checkbox that user does not want the message be shown again">
-    Do not show me this message again.
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_PREVIOUS_STEP" desc="Text on the button that leads user back to the previous step">
-    Back
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_FINISH" desc="Text on the button that completes the UI flow and close the UI">
-    Finish
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_CHARGER_UPDATE_TITLE" desc="Title of charger update page.">
-    Important update on your HP Chromebook 11
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_CHARGER_UPDATE_P1" desc="The first paragraph on the charger update page">
-    With guidance and approval from the CPSC and other regulatory agencies, Google and HP are recalling the original charger for the HP Chromebook 11.
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_CHARGER_STOP_USING_RECALLED_CHARGER" desc="Text to ask users to stop using recalled charger">
-    Please stop using the recalled charger.
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_CHARGER_UPDATE_P2" desc="The 2nd paragraph on the charger update page">
-    If you purchased an HP Chromebook 11 before December 1, 2013, we'll mail you a free replacement charger. You will also receive a prepaid shipping package to return the original charger so that we can dispose of it properly.
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_CHARGER_UPDATE_FAQ" desc="Text about charger update FAQs">
-    In the meantime, you may refer to the <ph name="BEGIN_LINK">&lt;a class="link" href="#"&gt;</ph>FAQs<ph name="END_LINK">&lt;/a&gt;</ph> and continue to use your HP Chromebook 11 with any other certified micro-USB charger, for example one provided with a tablet or smartphone. We apologize again for the inconvenience. Your safety is a top priority.
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_CHARGER_ORDER_NEW_CHARGER" desc="Text of the radio button for ordering new charger">
-    Please send me a new charger
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_CHARGER_NOT_ORDER_NEW_CHARGER" desc="Text of the radio button for not ordering new charger">
-    I do not want to replace my recalled charger
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_CHARGER_CONIFRM_NOT_ORDER_CHARGER" desc="Text for checkbox that confirm user do not want to order new charger">
-    I confirm that I do not want to receive a free replacement charger.
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_ONLINE_ORDER_CONFIRMATION_TITLE" desc="Title of the online charger order form confirmation page">
-    Thanks!
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_ONLINE_ORDER_CONFIRMATION_MESSAGE" desc="Text for the charger online order confirmation">
-    We've received your information, and we're processing your request.
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_FIND_MORE_INFORMATION" desc="Text for finding more information about the charger">
-    In the meantime, you can find more info at
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_FINISH_NOT_ORDER_CHARGER_TITLE" desc="Title of the finishing page for user choosing not to order new charger">
-    OK, we won't ask you again
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_FINISH_NOT_ORDER_CHARGER_P2" desc="Text of the 2nd paragraph for finishing not order charger page">
-    You may refer to the <ph name="BEGIN_LINK">&lt;a class="link" href="#"&gt;</ph>FAQs<ph name="END_LINK">&lt;/a&gt;</ph> and continue to use your HP Chromebook 11 with any other certified micro-USB charger, for example one provided with a tablet or smartphone. We apologize again for the inconvenience. Your safety is a top priority.
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_FINISH_NOT_ORDER_CHARGER_MORE_INFO" desc="Text on for finishing not order charger page for user to look for more info befpre the more info link">
-    You can find more info at
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_OFFLINE_ORDER_TITLE" desc="Title of the offline charger order page">
-    HP Chromebook 11 power charger request form
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_OFFLINE_ORDER_P1" desc="1st paragraph of text on the offline charger order form">
-    With guidance and approval from the CPSC and other regulatory agencies, Google and HP are recalling the original charger for the HP Chromebook 11.
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_OFFLINE_ORDER_P2" desc="2nd paragraph of text on the offline charger order form">
-    If you purchased an HP Chromebook 11 before December 1, 2013, we'll mail you a free replacement charger. You will also receive a prepaid shipping package to return the original charger so that we can dispose of it properly.
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_OFFLINE_ORDER_CONFIRM" desc="Text for the check box that confirms user has ordered the charger offline">
-    I have called the number and requested a replacement charger.
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_TEXT_PRIVACY_POLICY" desc="Text refer to privacy policy">
-    Refer to the  <ph name="BEGIN_LINK">&lt;a class="link" id="privacy-link" href="#"&gt;</ph>Privacy Policy<ph name="END_LINK">&lt;/a&gt;</ph> for more details on how we handle this information.
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_OFFLINE_ORDER_PHONE_NUMBER" desc="Text for offline charger order phone numbers">
-    Please call (866) 628-1371 (US), (866) 628-1372 (Canada), or 0800 026 0613 (UK) to request your free replacement charger.
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_CHARGER_STILL_BAD" desc="Title of the page warning user if they keep plug in bad charger.">
-    Your order is being processed
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_CHARGER_ORDERED" desc="Text for telling user we see they already ordered a new charger.">
-    We see that you've ordered a replacement charger.
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_CHARGER_MORE_INFO" desc="Text for fining more info for charger">
-    You can find more info at
-  </message>
-  <message name="IDS_CHARGER_REPLACEMENT_DIALOG_TITLE" desc="Title of the charger replacement UI dialg">
-    Check charger
-  </message>
-
   <!-- Network portal notification -->
   <message name="IDS_FLAGS_NETWORK_PORTAL_NOTIFICATION_NAME" desc="Title for the flag to enable/disable notifications about captive portals.">
     Notifications about captive portals
@@ -5724,9 +5698,6 @@ All users must sign out to continue.
   <message name="IDS_ENTERPRISE_ENROLLMENT_AUTH_INSECURE_URL_ERROR" desc="Error message to show when a redirect to an insecure URL was detected and blocked when authenticating for enrollment.">
     Oops!  Authentication failed because it was configured to use a non-secure URL (<ph name="BLOCKED_URL">$1<ex>http://www.example.com/login.html</ex></ph>).  Please contact your administrator.
   </message>
-  <message name="IDS_ENTERPRISE_AUTO_ENROLLMENT_BAD_MODE" desc="Error message to show when auto-enrollment is not supported for the enrollment mode supplied by the DMServer.">
-    Oops!  Something went wrong while auto-enrolling this device.  Please try again from the sign-in screen using the Ctrl-Alt-E key combination, or contact your support representative.
-  </message>
   <message name="IDS_ENTERPRISE_ENROLLMENT_FATAL_ENROLLMENT_ERROR" desc="Error message to show when there is an unrecoverable error while performing enrollment.">
     Oops!  Something went really wrong while enrolling this device.  Please try again or contact your support representative.
   </message>
@@ -5757,6 +5728,9 @@ All users must sign out to continue.
   <message name="IDS_ENTERPRISE_ENROLLMENT_CANCEL" desc="Label for the cancel button on the enterprise enrollment dialog.">
     Cancel
   </message>
+  <message name="IDS_ENTERPRISE_ENROLLMENT_BACK" desc="Label for the back button on the enterprise enrollment dialog.">
+    Back
+  </message>
   <message name="IDS_ENTERPRISE_ENROLLMENT_DONE" desc="Label for the done button on the success screen in the enterprise enrollment dialog.">
     Done
   </message>
@@ -5766,70 +5740,89 @@ All users must sign out to continue.
   <message name="IDS_ENTERPRISE_ENROLLMENT_WORKING" desc="Status message to show while enterprise enrollment is underway.">
     Enrolling the device. Please wait...
   </message>
-  <message name="IDS_ENTERPRISE_ENROLLMENT_RESUMING_LOGIN" desc="Status message to show after enterprise enrollment is complete and the first user sign-in is prepared.">
-    Preparing for first enterprise sign-in...
-  </message>
-  <message name="IDS_ENTERPRISE_ENROLLMENT_EXPLAIN" desc="Explanatory text describing what enterprise enrollment is and guiding the user to sign in with an account from the enterprise domain.">
-    Welcome to your managed Chromebook!
-
-    To complete the setup of this Chromebook, you must sign in with a username given to you by your organization.
-
-    Contact your system administrator for more information.
-
-    If this device does not belong to your organization, and is your personal device, you can press Ctrl+Alt+E now to cancel enrollment of the device and go back to the sign-in screen.
-  </message>
-  <message name="IDS_ENTERPRISE_ENROLLMENT_EXPLAIN_LINK" desc="Text on the link to the screen that explain what enterprise enrollment is.">
+  <message name="IDS_ENTERPRISE_ENROLLMENT_EXPLAIN_LINK" desc="Text on the link to the enterprise enrollment help article.">
     Learn more about Enterprise Enrollment
-  </message>
-  <message name="IDS_ENTERPRISE_ENROLLMENT_EXPLAIN_BUTTON" desc="Text on the button that closes the explanatory dialog and sends to user back to the sign-in screen.">
-    Sign in now
-  </message>
-  <message name="IDS_ENTERPRISE_ENROLLMENT_CANCEL_AUTO_REALLY" desc="Message asking the user to confirm if he really wants to cancel auto enrollment.">
-    Please confirm that this is not an enterprise device. Enterprise enrollment will be cancelled.
-  </message>
-  <message name="IDS_ENTERPRISE_ENROLLMENT_CANCEL_AUTO_CONFIRM" desc="Text on the button that confirms opting out of auto enrollment.">
-    Cancel enterprise enrollment
-  </message>
-  <message name="IDS_ENTERPRISE_ENROLLMENT_CANCEL_AUTO_GO_BACK" desc="Text on the button that goes back to enrollment from the confirmation dialog.">
-    Back
   </message>
 
   <!-- About network UI display strings -->
-  <message name="IDS_NETWORK_TITLE" desc="Title of the page">
+  <message name="IDS_NETWORK_UI_TITLE" desc="Title of the page">
     Network
   </message>
-  <message name="IDS_NETWORK_AUTO_REFRESH" desc="A instruction of how to auto-refresh the page">
+  <message name="IDS_NETWORK_UI_AUTO_REFRESH" desc="Instructions for how to auto-refresh the page">
     Add a query param in URL to auto-refresh the page: chrome://network/?refresh=&lt;sec&gt;
   </message>
-  <message name="IDS_NETWORK_LOG_REFRESH" desc="Button to refresh network log">
+  <message name="IDS_NETWORK_UI_REFRESH" desc="Button label for refreshing networks">
+    Refresh Networks
+  </message>
+  <message name="IDS_NETWORK_UI_EXPAND" desc="Button label for expanding network properties">
+    Click '+' to get network properties
+  </message>
+  <message name="IDS_NETWORK_UI_PROPERTY_FORMAT" desc="Drowpdown label for network property format">
+    Property format:
+  </message>
+  <message name="IDS_NETWORK_UI_FORMAT_NORMAL" desc="Label in network property format dropdown for unmanaged ONC properties">
+    ONC
+  </message>
+  <message name="IDS_NETWORK_UI_FORMAT_MANAGED" desc="Label in network property format dropdown for managed ONC properties">
+    Managed ONC
+  </message>
+  <message name="IDS_NETWORK_UI_FORMAT_SHILL" desc="Label in network property format dropdown for Shill properties">
+    Shill
+  </message>
+  <message name="IDS_NETWORK_UI_VISIBLE_NETWORKS" desc="Label for list of visible networks">
+    Visible Networks:
+  </message>
+  <message name="IDS_NETWORK_UI_FAVORITE_NETWORKS" desc="Label for list of favorite networks">
+    Favorite Networks:
+  </message>
+
+  <message name="IDS_DEVICE_LOG_LINK_TEXT" desc="Message preceeding link to chrome://device-log">
+    For network logs, see: <ph name="DEVICE_LOG_LINK">&lt;a href="chrome://device-log"&gt;chrome://device-log&lt;/a&gt;</ph>
+  </message>
+
+  <message name="IDS_DEVICE_LOG_TITLE" desc="Title of the chrome://device-log page">
+    Device Log
+  </message>
+  <message name="IDS_DEVICE_AUTO_REFRESH" desc="Instructions for how to auto-refresh the page">
+    Add a query param in URL to auto-refresh the page: chrome://device-log/?refresh=&lt;sec&gt;
+  </message>
+  <message name="IDS_DEVICE_LOG_REFRESH" desc="Button to refresh device log">
     Refresh
   </message>
-  <message name="IDS_NETWORK_LOG_LEVEL_SHOW" desc="'Show' label before logging level checkboxes">
+  <message name="IDS_DEVICE_LOG_LEVEL_SHOW" desc="'Show' label before logging level checkboxes">
     Show:
   </message>
-  <message name="IDS_NETWORK_LOG_LEVEL_ERROR" desc="Error logging level checkbox">
+  <message name="IDS_DEVICE_LOG_LEVEL_ERROR" desc="Error logging level checkbox">
     Error
   </message>
-  <message name="IDS_NETWORK_LOG_LEVEL_USER" desc="User logging level checkbox">
+  <message name="IDS_DEVICE_LOG_LEVEL_USER" desc="User logging level checkbox">
     User
   </message>
-  <message name="IDS_NETWORK_LOG_LEVEL_EVENT" desc="Event logging level checkbox">
+  <message name="IDS_DEVICE_LOG_LEVEL_EVENT" desc="Event logging level checkbox">
     Event
   </message>
-  <message name="IDS_NETWORK_LOG_LEVEL_DEBUG" desc="Debug logging level checkbox">
+  <message name="IDS_DEVICE_LOG_LEVEL_DEBUG" desc="Debug logging level checkbox">
     Debug
   </message>
-  <message name="IDS_NETWORK_LOG_LEVEL_FILEINFO" desc="File info checkbox in network event log">
+  <message name="IDS_DEVICE_LOG_TYPE_LOGIN" desc="Checkbox to enable showing events of type LOGIN">
+    Login
+  </message>
+  <message name="IDS_DEVICE_LOG_TYPE_NETWORK" desc="Checkbox to enable showing events of type NETWORK">
+    Network
+  </message>
+  <message name="IDS_DEVICE_LOG_TYPE_POWER" desc="Checkbox to enable showing events of type POWER">
+    Power
+  </message>
+  <message name="IDS_DEVICE_LOG_FILEINFO" desc="File info checkbox in device event log">
     File Info
   </message>
-  <message name="IDS_NETWORK_LOG_LEVEL_TIME_DETAIL" desc="Detailed timestamps checkbox in network event log">
+  <message name="IDS_DEVICE_LOG_TIME_DETAIL" desc="Detailed timestamps checkbox in device event log">
     Detailed Timestamps
   </message>
-  <message name="IDS_NETWORK_LOG_ENTRY" desc="The log entry displayed in network event log table.">
+  <message name="IDS_DEVICE_LOG_ENTRY" desc="Format string for lines in chrome://device-log.">
     [<ph name="TIMESTAMP">$1<ex>Timestamp</ex></ph>]
     <ph name="FILE_INFO">$2<ex>file:123</ex></ph>
-    <ph name="EVENT_NAME">$3<ex>Event Name</ex></ph>
-    <ph name="DESCRIPTION">$4<ex>Description</ex></ph>
+    <ph name="EVENT_NAME">$3<ex>Event Description</ex></ph>
   </message>
 
   <!-- About NFC Debug UI display strings. They aren't being internationalized bacause this page is meant for debugging only. -->

@@ -22,11 +22,14 @@
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_message_utils.h"
 #include "third_party/WebKit/public/web/WebFormElement.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/ipc/gfx_param_traits.h"
-#include "ui/gfx/rect.h"
 #include "url/gurl.h"
 
 #define IPC_MESSAGE_START AutofillMsgStart
+
+IPC_ENUM_TRAITS_MAX_VALUE(autofill::FormFieldData::RoleAttribute,
+                          autofill::FormFieldData::ROLE_ATTRIBUTE_OTHER)
 
 IPC_ENUM_TRAITS_MAX_VALUE(base::i18n::TextDirection,
                           base::i18n::TEXT_DIRECTION_NUM_DIRECTIONS - 1)
@@ -45,6 +48,7 @@ IPC_STRUCT_TRAITS_BEGIN(autofill::FormFieldData)
   IPC_STRUCT_TRAITS_MEMBER(value)
   IPC_STRUCT_TRAITS_MEMBER(form_control_type)
   IPC_STRUCT_TRAITS_MEMBER(autocomplete_attribute)
+  IPC_STRUCT_TRAITS_MEMBER(role)
   IPC_STRUCT_TRAITS_MEMBER(max_length)
   IPC_STRUCT_TRAITS_MEMBER(is_autofilled)
   IPC_STRUCT_TRAITS_MEMBER(is_checked)
@@ -77,7 +81,12 @@ IPC_STRUCT_TRAITS_BEGIN(autofill::UsernamesCollectionKey)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(autofill::PasswordFormFillData)
-  IPC_STRUCT_TRAITS_MEMBER(basic_data)
+  IPC_STRUCT_TRAITS_MEMBER(name)
+  IPC_STRUCT_TRAITS_MEMBER(origin)
+  IPC_STRUCT_TRAITS_MEMBER(action)
+  IPC_STRUCT_TRAITS_MEMBER(user_submitted)
+  IPC_STRUCT_TRAITS_MEMBER(username_field)
+  IPC_STRUCT_TRAITS_MEMBER(password_field)
   IPC_STRUCT_TRAITS_MEMBER(preferred_realm)
   IPC_STRUCT_TRAITS_MEMBER(additional_logins)
   IPC_STRUCT_TRAITS_MEMBER(other_possible_usernames)
@@ -94,6 +103,10 @@ IPC_ENUM_TRAITS_MAX_VALUE(
     blink::WebFormElement::AutocompleteResultErrorInvalid)
 
 // Autofill messages sent from the browser to the renderer.
+
+// Tells the render frame that a user gesture was observed somewhere in the tab
+// (including in a different frame).
+IPC_MESSAGE_ROUTED0(AutofillMsg_FirstUserGestureObservedInTab)
 
 // Instructs the renderer to immediately return an IPC acknowledging the ping.
 // This is used to correctly sequence events, since IPCs are guaranteed to be
@@ -187,6 +200,9 @@ IPC_MESSAGE_ROUTED1(AutofillMsg_AccountCreationFormsDetected,
 // TODO(creis): check in the browser that the renderer actually has permission
 // for the URL to avoid compromised renderers talking to the browser.
 
+// Notification that there has been a user gesture.
+IPC_MESSAGE_ROUTED0(AutofillHostMsg_FirstUserGestureObserved)
+
 // Notification that forms have been seen that are candidates for
 // filling/submitting by the AutofillManager.
 IPC_MESSAGE_ROUTED2(AutofillHostMsg_FormsSeen,
@@ -212,6 +228,11 @@ IPC_MESSAGE_ROUTED0(AutofillHostMsg_PasswordAutofillAgentConstructed)
 
 // Notification that this password form was submitted by the user.
 IPC_MESSAGE_ROUTED1(AutofillHostMsg_PasswordFormSubmitted,
+                    autofill::PasswordForm /* form */)
+
+// Notification that in-page navigation happened and at this moment we have
+// filled password form. We use this as a signal for successful login.
+IPC_MESSAGE_ROUTED1(AutofillHostMsg_InPageNavigation,
                     autofill::PasswordForm /* form */)
 
 // Sends |log| to browser for displaying to the user. Only strings passed as an
@@ -251,13 +272,8 @@ IPC_MESSAGE_ROUTED1(AutofillHostMsg_DidFillAutofillFormData,
                     base::TimeTicks /* timestamp */)
 
 // Sent when a form receives a request to do interactive autocomplete.
-IPC_MESSAGE_ROUTED2(AutofillHostMsg_RequestAutocomplete,
-                    autofill::FormData /* form_data */,
-                    GURL /* frame_url */)
-
-// Sent when interactive autocomplete is cancelled (e.g. because the invoking
-// frame was navigated to a different URL).
-IPC_MESSAGE_ROUTED0(AutofillHostMsg_CancelRequestAutocomplete)
+IPC_MESSAGE_ROUTED1(AutofillHostMsg_RequestAutocomplete,
+                    autofill::FormData /* form_data */)
 
 // Send when a text field is done editing.
 IPC_MESSAGE_ROUTED0(AutofillHostMsg_DidEndTextFieldEditing)
@@ -286,12 +302,13 @@ IPC_MESSAGE_ROUTED0(AutofillHostMsg_HidePasswordGenerationPopup)
 // Instruct the browser to show a popup with suggestions filled from data
 // associated with |key|. The popup will use |text_direction| for displaying
 // text.
-IPC_MESSAGE_ROUTED5(AutofillHostMsg_ShowPasswordSuggestions,
-                    int /* key */,
-                    base::i18n::TextDirection /*text_direction */,
-                    base::string16 /* username typed by user */,
-                    bool /* show all suggestions */,
-                    gfx::RectF /* input field bounds, window-relative */)
+IPC_MESSAGE_ROUTED5(
+    AutofillHostMsg_ShowPasswordSuggestions,
+    int /* key */,
+    base::i18n::TextDirection /* text_direction */,
+    base::string16 /* username typed by user */,
+    int /* options bitmask of autofill::ShowPasswordSuggestionsOptions */,
+    gfx::RectF /* input field bounds, window-relative */)
 
 // Inform browser of data list values for the curent field.
 IPC_MESSAGE_ROUTED2(AutofillHostMsg_SetDataList,

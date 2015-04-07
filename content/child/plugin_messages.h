@@ -12,9 +12,9 @@
 #include "content/public/common/common_param_traits.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_message_macros.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/ipc/gfx_param_traits.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/gfx/rect.h"
 
 #if defined(OS_POSIX)
 #include "base/file_descriptor_posix.h"
@@ -61,6 +61,7 @@ IPC_STRUCT_BEGIN(PluginMsg_FetchURL_Params)
   IPC_STRUCT_MEMBER(std::string, method)
   IPC_STRUCT_MEMBER(std::vector<char>, post_data)
   IPC_STRUCT_MEMBER(GURL, referrer)
+  IPC_STRUCT_MEMBER(blink::WebReferrerPolicy, referrer_policy)
   IPC_STRUCT_MEMBER(bool, notify_redirect)
   IPC_STRUCT_MEMBER(bool, is_plugin_src_load)
   IPC_STRUCT_MEMBER(int, render_frame_id)

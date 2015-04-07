@@ -61,14 +61,6 @@ class TestBlinkWebUnitTestSupport : public blink::WebUnitTestSupport,
 
   virtual blink::WebCompositorSupport* compositorSupport();
 
-  WebURLLoaderMockFactory* url_loader_factory() {
-    return url_loader_factory_.get();
-  }
-
-  const base::FilePath& file_system_root() const {
-    return file_system_root_.path();
-  }
-
   virtual blink::WebGestureCurve* createFlingAnimationCurve(
       blink::WebGestureDevice device_source,
       const blink::WebFloatPoint& velocity,
@@ -89,6 +81,8 @@ class TestBlinkWebUnitTestSupport : public blink::WebUnitTestSupport,
   virtual blink::WebString webKitRootDir();
   virtual blink::WebLayerTreeView* createLayerTreeViewForTesting();
   virtual blink::WebData readFromFile(const blink::WebString& path);
+  virtual bool getBlobItems(const blink::WebString& uuid,
+                            blink::WebVector<blink::WebBlobData::Item*>* items);
 
  private:
   MockWebBlobRegistryImpl blob_registry_;

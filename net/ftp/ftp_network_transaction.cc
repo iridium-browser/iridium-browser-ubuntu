@@ -8,6 +8,7 @@
 #include "base/bind_helpers.h"
 #include "base/compiler_specific.h"
 #include "base/metrics/histogram.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/string_split.h"
@@ -372,6 +373,11 @@ void FtpNetworkTransaction::DoCallback(int rv) {
 }
 
 void FtpNetworkTransaction::OnIOComplete(int result) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436634 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "436634 FtpNetworkTransaction::OnIOComplete"));
+
   int rv = DoLoop(result);
   if (rv != ERR_IO_PENDING)
     DoCallback(rv);
@@ -965,14 +971,16 @@ int FtpNetworkTransaction::ProcessResponseEPSV(
   switch (GetErrorClass(response.status_code)) {
     case ERROR_CLASS_INITIATED:
       return Stop(ERR_INVALID_RESPONSE);
-    case ERROR_CLASS_OK:
-      if (!ExtractPortFromEPSVResponse( response, &data_connection_port_))
+    case ERROR_CLASS_OK: {
+      int port;
+      if (!ExtractPortFromEPSVResponse(response, &port))
         return Stop(ERR_INVALID_RESPONSE);
-      if (data_connection_port_ < 1024 ||
-          !IsPortAllowedByFtp(data_connection_port_))
+      if (port < 1024 || !IsPortAllowedByFtp(port))
         return Stop(ERR_UNSAFE_PORT);
+      data_connection_port_ = static_cast<uint16>(port);
       next_state_ = STATE_DATA_CONNECT;
       break;
+    }
     case ERROR_CLASS_INFO_NEEDED:
       return Stop(ERR_INVALID_RESPONSE);
     case ERROR_CLASS_TRANSIENT_ERROR:
@@ -999,14 +1007,16 @@ int FtpNetworkTransaction::ProcessResponsePASV(
   switch (GetErrorClass(response.status_code)) {
     case ERROR_CLASS_INITIATED:
       return Stop(ERR_INVALID_RESPONSE);
-    case ERROR_CLASS_OK:
-      if (!ExtractPortFromPASVResponse(response, &data_connection_port_))
+    case ERROR_CLASS_OK: {
+      int port;
+      if (!ExtractPortFromPASVResponse(response, &port))
         return Stop(ERR_INVALID_RESPONSE);
-      if (data_connection_port_ < 1024 ||
-          !IsPortAllowedByFtp(data_connection_port_))
+      if (port < 1024 || !IsPortAllowedByFtp(port))
         return Stop(ERR_UNSAFE_PORT);
+      data_connection_port_ = static_cast<uint16>(port);
       next_state_ = STATE_DATA_CONNECT;
       break;
+    }
     case ERROR_CLASS_INFO_NEEDED:
       return Stop(ERR_INVALID_RESPONSE);
     case ERROR_CLASS_TRANSIENT_ERROR:

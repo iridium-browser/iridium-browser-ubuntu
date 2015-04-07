@@ -299,7 +299,7 @@ class ClickToPlayPluginTest : public ContentSettingsTest {
   ClickToPlayPluginTest() {}
 
 #if defined(OS_MACOSX)
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     base::FilePath plugin_dir;
     PathService::Get(base::DIR_MODULE, &plugin_dir);
     plugin_dir = plugin_dir.AppendASCII("plugins");
@@ -470,7 +470,7 @@ class PepperContentSettingsSpecialCasesTest : public ContentSettingsTest {
   static const char* const kExternalClearKeyMimeType;
 
   // Registers any CDM plugins not registered by default.
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
 #if defined(ENABLE_PEPPER_CDMS)
     // Platform-specific filename relative to the chrome executable.
 #if defined(OS_WIN)
@@ -594,17 +594,15 @@ class PepperContentSettingsSpecialCasesTest : public ContentSettingsTest {
     EXPECT_TRUE(base::PathExists(plugin_lib));
 
     base::FilePath::StringType pepper_plugin = plugin_lib.value();
-    pepper_plugin.append(FILE_PATH_LITERAL("#"));
+    std::string string_to_append = "#";
+    string_to_append.append(display_name);
+    string_to_append.append("#A CDM#0.1.0.0;");
+    string_to_append.append(mime_type);
+
 #if defined(OS_WIN)
-    pepper_plugin.append(base::ASCIIToWide(display_name));
+    pepper_plugin.append(base::ASCIIToUTF16(string_to_append));
 #else
-    pepper_plugin.append(display_name);
-#endif
-    pepper_plugin.append(FILE_PATH_LITERAL("#A CDM#0.1.0.0;"));
-#if defined(OS_WIN)
-    pepper_plugin.append(base::ASCIIToWide(mime_type));
-#else
-    pepper_plugin.append(mime_type);
+    pepper_plugin.append(string_to_append);
 #endif
 
     return pepper_plugin;
@@ -643,7 +641,8 @@ class PepperContentSettingsSpecialCasesJavaScriptBlockedTest
 IN_PROC_BROWSER_TEST_F(PepperContentSettingsSpecialCasesTest, Baseline) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
   browser()->profile()->GetHostContentSettingsMap()->SetDefaultContentSetting(
@@ -662,7 +661,8 @@ IN_PROC_BROWSER_TEST_F(PepperContentSettingsSpecialCasesPluginsBlockedTest,
                        Normal) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
   RunLoadPepperPluginTest(kExternalClearKeyMimeType, false);
@@ -673,7 +673,8 @@ IN_PROC_BROWSER_TEST_F(PepperContentSettingsSpecialCasesPluginsBlockedTest,
                        WidevineCdm) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
   RunLoadPepperPluginTest(kWidevineCdmPluginMimeType, true);
@@ -686,7 +687,8 @@ IN_PROC_BROWSER_TEST_F(PepperContentSettingsSpecialCasesPluginsBlockedTest,
                        NaCl) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
   RunLoadPepperPluginTest("application/x-nacl", true);
@@ -702,7 +704,8 @@ IN_PROC_BROWSER_TEST_F(PepperContentSettingsSpecialCasesJavaScriptBlockedTest,
                        Normal) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
   RunJavaScriptBlockedTest("load_clearkey_no_js.html", false);
@@ -713,7 +716,8 @@ IN_PROC_BROWSER_TEST_F(PepperContentSettingsSpecialCasesJavaScriptBlockedTest,
                        WidevineCdm) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
   RunJavaScriptBlockedTest("load_widevine_no_js.html", true);
@@ -726,7 +730,8 @@ IN_PROC_BROWSER_TEST_F(PepperContentSettingsSpecialCasesJavaScriptBlockedTest,
                        NaCl) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
   RunJavaScriptBlockedTest("load_nacl_no_js.html", true);

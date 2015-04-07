@@ -171,6 +171,21 @@ FileTableColumnModel.prototype.setWidthAndKeepTotal = function(
 };
 
 /**
+ * Obtains a column by the specified horizontal position.
+ * @param {number} x Horizontal position.
+ * @return {Object} The object that contains column index, column width, and
+ *     hitPosition where the horizontal position is hit in the column.
+ */
+FileTableColumnModel.prototype.getHitColumn = function(x) {
+  for (var i = 0; x >= this.columns_[i].width; i++) {
+    x -= this.columns_[i].width;
+  }
+  if (i >= this.columns_.length)
+    return null;
+  return {index: i, hitPosition: x, width: this.columns_[i].width};
+};
+
+/**
  * Custom splitter that resizes column with retaining the sum of all the column
  * width.
  */
@@ -254,58 +269,8 @@ FileTable.decorate = function(self, metadataCache, volumeManager, fullPage) {
   columns[3].renderFunction = self.renderDate_.bind(self);
   columns[3].defaultOrder = 'desc';
 
-  var columnModel = Object.create(FileTableColumnModel.prototype, {
-    /**
-     * The number of columns.
-     * @type {number}
-     */
-    size: {
-      /**
-       * @this {FileTableColumnModel}
-       * @return {number} Number of columns.
-       */
-      get: function() {
-        return this.totalSize;
-      }
-    },
+  var columnModel = new FileTableColumnModel(columns);
 
-    /**
-     * The number of columns.
-     * @type {number}
-     */
-    totalSize: {
-      /**
-       * @this {FileTableColumnModel}
-       * @return {number} Number of columns.
-       */
-      get: function() {
-        return columns.length;
-      }
-    },
-
-    /**
-     * Obtains a column by the specified horizontal position.
-     */
-    getHitColumn: {
-      /**
-       * @this {FileTableColumnModel}
-       * @param {number} x Horizontal position.
-       * @return {Object} The object that contains column index, column width,
-       *     and hitPosition where the horizontal position is hit in the column.
-       */
-      value: function(x) {
-        for (var i = 0; x >= this.columns_[i].width; i++) {
-          x -= this.columns_[i].width;
-        }
-        if (i >= this.columns_.length)
-          return null;
-        return {index: i, hitPosition: x, width: this.columns_[i].width};
-      }
-    }
-  });
-
-  FileTableColumnModel.call(
-      /** @type {FileTableColumnModel} */ (columnModel), columns);
   self.columnModel = columnModel;
   self.setDateTimeFormat(true);
   self.setRenderFunction(self.renderTableRow_.bind(self,
@@ -371,48 +336,38 @@ FileTable.decorate = function(self, metadataCache, volumeManager, fullPage) {
  * @override
  */
 FileTable.prototype.fitColumn = function(index) {
-  var list = this.list_;
-  var listHeight = list.clientHeight;
-
-  var cm = this.columnModel;
-  var dm = this.dataModel;
-  var columnId = cm.getId(index);
-  var doc = this.ownerDocument;
-  var render = cm.getRenderFunction(index);
-  var table = this;
+  var render = this.columnModel.getRenderFunction(index);
   var MAXIMUM_ROWS_TO_MEASURE = 1000;
 
   // Create a temporaty list item, put all cells into it and measure its
   // width. Then remove the item. It fits "list > *" CSS rules.
-  var container = doc.createElement('li');
+  var container = this.ownerDocument.createElement('li');
   container.style.display = 'inline-block';
   container.style.textAlign = 'start';
   // The container will have width of the longest cell.
   container.style.webkitBoxOrient = 'vertical';
 
-  // Ensure all needed data available.
-  dm.prepareSort(columnId, function() {
-    // Select at most MAXIMUM_ROWS_TO_MEASURE items around visible area.
-    var items = list.getItemsInViewPort(list.scrollTop, listHeight);
-    var firstIndex = Math.floor(Math.max(0,
-        (items.last + items.first - MAXIMUM_ROWS_TO_MEASURE) / 2));
-    var lastIndex = Math.min(dm.length,
-                             firstIndex + MAXIMUM_ROWS_TO_MEASURE);
-    for (var i = firstIndex; i < lastIndex; i++) {
-      var item = dm.item(i);
-      var div = doc.createElement('div');
-      div.className = 'table-row-cell';
-      div.appendChild(render(item, columnId, table));
-      container.appendChild(div);
-    }
-    list.appendChild(container);
-    var width = parseFloat(window.getComputedStyle(container).width);
-    list.removeChild(container);
+  // Select at most MAXIMUM_ROWS_TO_MEASURE items around visible area.
+  var items = this.list.getItemsInViewPort(this.list.scrollTop,
+                                           this.list.clientHeight);
+  var firstIndex = Math.floor(Math.max(0,
+      (items.last + items.first - MAXIMUM_ROWS_TO_MEASURE) / 2));
+  var lastIndex = Math.min(this.dataModel.length,
+                           firstIndex + MAXIMUM_ROWS_TO_MEASURE);
+  for (var i = firstIndex; i < lastIndex; i++) {
+    var item = this.dataModel.item(i);
+    var div = this.ownerDocument.createElement('div');
+    div.className = 'table-row-cell';
+    div.appendChild(render(item, this.columnModel.getId(index), this));
+    container.appendChild(div);
+  }
+  this.list.appendChild(container);
+  var width = parseFloat(window.getComputedStyle(container).width);
+  this.list.removeChild(container);
 
-    cm.initializeColumnPos();
-    cm.setWidthAndKeepTotal(index, Math.ceil(width));
-    cm.destroyColumnPos();
-  });
+  this.columnModel.initializeColumnPos();
+  this.columnModel.setWidthAndKeepTotal(index, Math.ceil(width));
+  this.columnModel.destroyColumnPos();
 };
 
 /**

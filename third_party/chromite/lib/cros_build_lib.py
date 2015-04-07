@@ -4,14 +4,19 @@
 
 """Common python commands used by various build scripts."""
 
+# pylint: disable=bad-continuation
+
 from __future__ import print_function
 
+import __main__
 import collections
 import contextlib
 from datetime import datetime
 import email.utils
 import errno
 import functools
+import getpass
+import hashlib
 import logging
 import operator
 import os
@@ -109,6 +114,7 @@ def ShellQuote(s):
 
 def ShellUnquote(s):
   """Do the opposite of ShellQuote.
+
   This function assumes that the input is a valid escaped string. The behaviour
   is undefined on malformed strings.
 
@@ -301,9 +307,9 @@ def SudoRunCommand(cmd, user='root', **kwargs):
   return RunCommand(sudo_cmd, **kwargs)
 
 
-def _KillChildProcess(proc, kill_timeout, cmd, original_handler, signum, frame):
-  """Functor that when curried w/ the appropriate arguments, is used as a signal
-  handler by RunCommand.
+def _KillChildProcess(proc, int_timeout, kill_timeout, cmd, original_handler,
+                      signum, frame):
+  """Used as a signal handler by RunCommand.
 
   This is internal to Runcommand.  No other code should use this.
   """
@@ -319,6 +325,10 @@ def _KillChildProcess(proc, kill_timeout, cmd, original_handler, signum, frame):
   # the Popen instance was created, but no process was generated.
   if proc.returncode is None and proc.pid is not None:
     try:
+      while proc.poll() is None and int_timeout >= 0:
+        time.sleep(0.1)
+        int_timeout -= 0.1
+
       proc.terminate()
       while proc.poll() is None and kill_timeout >= 0:
         time.sleep(0.1)
@@ -392,8 +402,9 @@ def RunCommand(cmd, print_cmd=True, error_message=None, redirect_stdout=False,
                shell=False, env=None, extra_env=None, ignore_sigint=False,
                combine_stdout_stderr=False, log_stdout_to_file=None,
                chroot_args=None, debug_level=logging.INFO,
-               error_code_ok=False, kill_timeout=1, log_output=False,
-               stdout_to_pipe=False, capture_output=False, quiet=False):
+               error_code_ok=False, int_timeout=1, kill_timeout=1,
+               log_output=False, stdout_to_pipe=False, capture_output=False,
+               quiet=False):
   """Runs a command.
 
   Args:
@@ -433,9 +444,10 @@ def RunCommand(cmd, print_cmd=True, error_message=None, redirect_stdout=False,
                    exit code.  Instead, returns the CommandResult object
                    containing the exit code. Note: will still raise an
                    exception if the cmd file does not exist.
-    kill_timeout: If we're interrupted, how long should we give the invoked
-                  process to shutdown from a SIGTERM before we SIGKILL it.
-                  Specified in seconds.
+    int_timeout: If we're interrupted, how long (in seconds) should we give the
+      invoked process to clean up before we send a SIGTERM.
+    kill_timeout: If we're interrupted, how long (in seconds) should we give the
+      invoked process to shutdown from a SIGTERM before we SIGKILL it.
     log_output: Log the command and its output automatically.
     stdout_to_pipe: Redirect stdout to pipe.
     capture_output: Set |redirect_stdout| and |redirect_stderr| to True.
@@ -452,7 +464,7 @@ def RunCommand(cmd, print_cmd=True, error_message=None, redirect_stdout=False,
     redirect_stdout, redirect_stderr = True, True
 
   if quiet:
-    print_cmd = False
+    debug_level = logging.DEBUG
     stdout_to_pipe, combine_stdout_stderr = True, True
 
   # Set default for variables.
@@ -515,8 +527,16 @@ def RunCommand(cmd, print_cmd=True, error_message=None, redirect_stdout=False,
   # If we are using enter_chroot we need to use enterchroot pass env through
   # to the final command.
   env = env.copy() if env is not None else os.environ.copy()
+  env.update(extra_env if extra_env else {})
   if enter_chroot and not IsInsideChroot():
     wrapper = ['cros_sdk']
+    if cwd:
+      # If the current working directory is set, try to find cros_sdk relative
+      # to cwd. Generally cwd will be the buildroot therefore we want to use
+      # {cwd}/chromite/bin/cros_sdk. For more info PTAL at crbug.com/432620
+      path = os.path.join(cwd, constants.CHROMITE_BIN_SUBDIR, 'cros_sdk')
+      if os.path.exists(path):
+        wrapper = [path]
 
     if chroot_args:
       wrapper += chroot_args
@@ -525,9 +545,6 @@ def RunCommand(cmd, print_cmd=True, error_message=None, redirect_stdout=False,
       wrapper.extend('%s=%s' % (k, v) for k, v in extra_env.iteritems())
 
     cmd = wrapper + ['--'] + cmd
-
-  elif extra_env:
-    env.update(extra_env)
 
   for var in constants.ENV_PASSTHRU:
     if var not in env and var in os.environ:
@@ -558,13 +575,13 @@ def RunCommand(cmd, print_cmd=True, error_message=None, redirect_stdout=False,
       else:
         old_sigint = signal.getsignal(signal.SIGINT)
         signal.signal(signal.SIGINT,
-                      functools.partial(_KillChildProcess, proc, kill_timeout,
-                                        cmd, old_sigint))
+                      functools.partial(_KillChildProcess, proc, int_timeout,
+                                        kill_timeout, cmd, old_sigint))
 
       old_sigterm = signal.getsignal(signal.SIGTERM)
       signal.signal(signal.SIGTERM,
-                    functools.partial(_KillChildProcess, proc, kill_timeout,
-                                      cmd, old_sigterm))
+                    functools.partial(_KillChildProcess, proc, int_timeout,
+                                      kill_timeout, cmd, old_sigterm))
 
     try:
       (cmd_result.output, cmd_result.error) = proc.communicate(input)
@@ -587,9 +604,9 @@ def RunCommand(cmd, print_cmd=True, error_message=None, redirect_stdout=False,
 
     if log_output:
       if cmd_result.output:
-        logger.log(debug_level, '(stdout):\n%s' % cmd_result.output)
+        logger.log(debug_level, '(stdout):\n%s', cmd_result.output)
       if cmd_result.error:
-        logger.log(debug_level, '(stderr):\n%s' % cmd_result.error)
+        logger.log(debug_level, '(stderr):\n%s', cmd_result.error)
 
     if not error_code_ok and proc.returncode:
       msg = ('Failed command "%s", cwd=%s, extra env=%r'
@@ -605,7 +622,7 @@ def RunCommand(cmd, print_cmd=True, error_message=None, redirect_stdout=False,
   finally:
     if proc is not None:
       # Ensure the process is dead.
-      _KillChildProcess(proc, kill_timeout, cmd, None, None, None)
+      _KillChildProcess(proc, int_timeout, kill_timeout, cmd, None, None, None)
 
   return cmd_result
 
@@ -789,17 +806,33 @@ def TimedCommand(functor, *args, **kwargs):
     functor: The function to run.
     args: The args to pass to the function.
     kwargs: Optional args to pass to the function.
-    timed_log_level: The log level to use (defaults to info).
-    timed_log_msg: The message to log with timing info appended (defaults to
-                   details about the call made).  It must include a %s to hold
-                   the time delta details.
+    timed_log_level: The log level to use (defaults to logging.INFO).
+    timed_log_msg: The message to log after the command completes.  It may have
+      keywords: "name" (the function name), "args" (the args passed to the
+      func), "kwargs" (the kwargs passed to the func), "ret" (the return value
+      from the func), and "delta" (the timing delta).
+    timed_log_callback: Function to call upon completion (instead of logging).
+      Will be passed (log_level, log_msg, result, datetime.timedelta).
   """
-  log_msg = kwargs.pop('timed_log_msg', '%s(*%r, **%r) took: %%s'
-                       % (functor.__name__, args, kwargs))
+  log_msg = kwargs.pop(
+      'timed_log_msg',
+      '%(name)s(*%(args)r, **%(kwargs)r)=%(ret)s took: %(delta)s')
   log_level = kwargs.pop('timed_log_level', logging.INFO)
+  log_callback = kwargs.pop('timed_log_callback', None)
   start = datetime.now()
   ret = functor(*args, **kwargs)
-  logger.log(log_level, log_msg, datetime.now() - start)
+  delta = datetime.now() - start
+  log_msg %= {
+      'name': functor.__name__,
+      'args': args,
+      'kwargs': kwargs,
+      'ret': ret,
+      'delta': delta,
+  }
+  if log_callback is None:
+    logging.log(log_level, log_msg)
+  else:
+    log_callback(log_level, log_msg, ret, delta)
   return ret
 
 
@@ -947,37 +980,54 @@ def GetInput(prompt):
   return raw_input(prompt)
 
 
-def GetChoice(prompt, options):
+def GetChoice(title, options, group_size=0):
   """Ask user to choose an option from the list.
 
+  When |group_size| is 0, then all items in |options| will be extracted and
+  shown at the same time.  Otherwise, the items will be extracted |group_size|
+  at a time, and then shown to the user.  This makes it easier to support
+  generators that are slow, extremely large, or people usually want to pick
+  from the first few choices.
+
   Args:
-    prompt: The text to display before listing options.
-    options: The list of options to display.
+    title: The text to display before listing options.
+    options: Iterable which provides options to display.
+    group_size: How many options to show before asking the user to choose.
 
   Returns:
-    An integer.
+    An integer of the index in |options| the user picked.
   """
-  prompt = prompt[:]
+  def PromptForChoice(max_choice, more):
+    prompt = 'Please choose an option [0-%d]' % max_choice
+    if more:
+      prompt += ' (Enter for more options)'
+    prompt += ': '
 
+    while True:
+      choice = GetInput(prompt)
+      if more and not choice.strip():
+        return None
+      try:
+        choice = int(choice)
+      except ValueError:
+        print('Input is not an integer')
+        continue
+      if choice < 0 or choice > max_choice:
+        print('Choice %d out of range (0-%d)' % (choice, max_choice))
+        continue
+      return choice
+
+  print(title)
+  max_choice = 0
   for i, opt in enumerate(options):
-    prompt += '\n  [%d]: %s' % (i, opt)
+    if i and group_size and not i % group_size:
+      choice = PromptForChoice(i - 1, True)
+      if choice is not None:
+        return choice
+    print('  [%d]: %s' % (i, opt))
+    max_choice = i
 
-  prompt = '%s\nEnter your choice to continue [0-%d]: ' % (
-      prompt, len(options) - 1)
-
-  while True:
-    try:
-      choice = int(GetInput(prompt))
-    except ValueError:
-      print('Input value is not an integer')
-      continue
-
-    if choice < 0 or choice >= len(options):
-      print('Input value is out of range')
-    else:
-      break
-
-  return choice
+  return PromptForChoice(max_choice, False)
 
 
 def BooleanPrompt(prompt='Do you want to continue?', default=True,
@@ -1445,8 +1495,8 @@ def MemoizedSingleCall(functor):
   notice updates to the cache.
   """
   # TODO(build): Should we rebase to snakeoil.klass.cached* functionality?
+  # pylint: disable=protected-access
   def f(obj):
-    # pylint: disable=W0212
     key = f._cache_key
     val = getattr(obj, key, None)
     if val is None:
@@ -1646,6 +1696,7 @@ class FrozenAttributesClass(type):
 
     # Add new cls.Freeze method.
     def Freeze(obj):
+      # pylint: disable=protected-access
       obj._frozen = True
     cls.Freeze = Freeze
 
@@ -1903,3 +1954,37 @@ def GetImageDiskPartitionInfo(image_path, unit='MB', key_selector='name'):
   infos = func(lines, unit)
   selector = operator.attrgetter(key_selector)
   return dict((selector(x), x) for x in infos)
+
+
+def GetRandomString(length=20):
+  """Returns a random string of |length|."""
+  md5 = hashlib.md5(os.urandom(length))
+  md5.update(UserDateTimeFormat())
+  return md5.hexdigest()
+
+
+def MachineDetails():
+  """Returns a string to help identify the source of a job.
+
+  This is not meant for machines to parse; instead, we want content that is easy
+  for humans to read when trying to figure out where "something" is coming from.
+  For example, when a service has grabbed a lock in Google Storage, and we want
+  to see what process actually triggered that (in case it is a test gone rogue),
+  the content in here should help triage.
+
+  Note: none of the details included may be secret so they can be freely pasted
+  into bug reports/chats/logs/etc...
+
+  Note: this content should not be large
+
+  Returns:
+    A string with content that helps identify this system/process/etc...
+  """
+  return '\n'.join((
+      'PROG=%s' % __main__.__file__,
+      'USER=%s' % getpass.getuser(),
+      'HOSTNAME=%s' % GetHostName(fully_qualified=True),
+      'PID=%s' % os.getpid(),
+      'TIMESTAMP=%s' % UserDateTimeFormat(),
+      'RANDOM_JUNK=%s' % GetRandomString(),
+  )) + '\n'

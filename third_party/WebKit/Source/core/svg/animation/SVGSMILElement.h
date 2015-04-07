@@ -44,6 +44,7 @@ typedef EventSender<SVGSMILElement> SMILEventSender;
 
 // This class implements SMIL interval timing model as needed for SVG animation.
 class SVGSMILElement : public SVGElement, public SVGTests {
+    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(SVGSMILElement);
 public:
     SVGSMILElement(const QualifiedName&, Document&);
     virtual ~SVGSMILElement();
@@ -237,13 +238,13 @@ private:
 
     RawPtrWillBeMember<SVGElement> m_targetElement;
 
-    WillBeHeapVector<OwnPtrWillBeMember<Condition> > m_conditions;
+    WillBeHeapVector<OwnPtrWillBeMember<Condition>> m_conditions;
     bool m_syncBaseConditionsConnected;
     bool m_hasEndEventConditions;
 
     bool m_isWaitingForFirstInterval;
 
-    typedef WillBeHeapHashSet<RawPtrWillBeMember<SVGSMILElement> > TimeDependentSet;
+    using TimeDependentSet = WillBeHeapHashSet<RawPtrWillBeMember<SVGSMILElement>>;
     TimeDependentSet m_syncBaseDependents;
 
     // Instance time lists

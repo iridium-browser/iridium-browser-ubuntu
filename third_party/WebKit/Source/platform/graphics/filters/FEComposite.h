@@ -36,12 +36,13 @@ enum CompositeOperationType {
     FECOMPOSITE_OPERATOR_OUT        = 3,
     FECOMPOSITE_OPERATOR_ATOP       = 4,
     FECOMPOSITE_OPERATOR_XOR        = 5,
-    FECOMPOSITE_OPERATOR_ARITHMETIC = 6
+    FECOMPOSITE_OPERATOR_ARITHMETIC = 6,
+    FECOMPOSITE_OPERATOR_LIGHTER    = 7
 };
 
 class PLATFORM_EXPORT FEComposite : public FilterEffect {
 public:
-    static PassRefPtr<FEComposite> create(Filter*, const CompositeOperationType&, float, float, float, float);
+    static PassRefPtrWillBeRawPtr<FEComposite> create(Filter*, const CompositeOperationType&, float, float, float, float);
 
     CompositeOperationType operation() const;
     bool setOperation(CompositeOperationType);

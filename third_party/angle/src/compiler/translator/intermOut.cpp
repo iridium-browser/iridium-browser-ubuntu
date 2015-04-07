@@ -131,6 +131,9 @@ bool TOutputTraverser::visitBinary(Visit visit, TIntermBinary *node)
       case EOpDivAssign:
         out << "divide second child into first child";
         break;
+      case EOpModAssign:
+        out << "modulo second child into first child";
+        break;
       case EOpIndexDirect:
         out << "direct index";
         break;
@@ -158,6 +161,9 @@ bool TOutputTraverser::visitBinary(Visit visit, TIntermBinary *node)
         break;
       case EOpDiv:
         out << "divide";
+        break;
+      case EOpMod:
+        out << "modulo";
         break;
       case EOpEqual:
         out << "Compare Equal";
@@ -211,6 +217,36 @@ bool TOutputTraverser::visitBinary(Visit visit, TIntermBinary *node)
 
     out << "\n";
 
+    // Special handling for direct indexes. Because constant
+    // unions are not aware they are struct indexes, treat them
+    // here where we have that contextual knowledge.
+    if (node->getOp() == EOpIndexDirectStruct ||
+        node->getOp() == EOpIndexDirectInterfaceBlock)
+    {
+        mDepth++;
+        node->getLeft()->traverse(this);
+        mDepth--;
+
+        TIntermConstantUnion *intermConstantUnion = node->getRight()->getAsConstantUnion();
+        ASSERT(intermConstantUnion);
+
+        OutputTreeText(out, intermConstantUnion, mDepth + 1);
+
+        // The following code finds the field name from the constant union
+        const ConstantUnion *constantUnion = intermConstantUnion->getUnionArrayPointer();
+        const TStructure *structure = node->getLeft()->getType().getStruct();
+        const TInterfaceBlock *interfaceBlock = node->getLeft()->getType().getInterfaceBlock();
+        ASSERT(structure || interfaceBlock);
+
+        const TFieldList &fields = structure ? structure->fields() : interfaceBlock->fields();
+
+        const TField *field = fields[constantUnion->getIConst()];
+
+        out << constantUnion->getIConst() << " (field '" << field->name() << "')";
+
+        return false;
+    }
+
     return true;
 }
 
@@ -254,6 +290,11 @@ bool TOutputTraverser::visitUnary(Visit visit, TIntermUnary *node)
       case EOpCeil:           out << "Ceiling";              break;
       case EOpFract:          out << "Fraction";             break;
 
+      case EOpFloatBitsToInt: out << "float bits to int";    break;
+      case EOpFloatBitsToUint: out << "float bits to uint";  break;
+      case EOpIntBitsToFloat: out << "int bits to float";    break;
+      case EOpUintBitsToFloat: out << "uint bits to float";  break;
+
       case EOpLength:         out << "length";               break;
       case EOpNormalize:      out << "normalize";            break;
       // case EOpDPdx:           out << "dPdx";                 break;
@@ -295,6 +336,7 @@ bool TOutputTraverser::visitAggregate(Visit visit, TIntermAggregate *node)
       case EOpFunction:      out << "Function Definition: " << node->getName(); break;
       case EOpFunctionCall:  out << "Function Call: " << node->getName(); break;
       case EOpParameters:    out << "Function Parameters: ";              break;
+      case EOpPrototype:     out << "Function Prototype: " << node->getName(); break;
 
       case EOpConstructFloat: out << "Construct float"; break;
       case EOpConstructVec2:  out << "Construct vec2";  break;

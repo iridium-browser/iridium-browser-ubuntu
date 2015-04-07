@@ -46,13 +46,15 @@ const int kTokenTimeoutMs = 2000;
 AudioManagerImpl::AudioManagerImpl()
     : whispernet_client_(nullptr), recorder_(nullptr) {
   // TODO(rkc): Move all of these into initializer lists once it is allowed.
-  playing_[AUDIBLE] = false;
-  playing_[INAUDIBLE] = false;
-  recording_[AUDIBLE] = false;
-  recording_[INAUDIBLE] = false;
+  should_be_playing_[AUDIBLE] = false;
+  should_be_playing_[INAUDIBLE] = false;
+  should_be_recording_[AUDIBLE] = false;
+  should_be_recording_[INAUDIBLE] = false;
 
   player_[AUDIBLE] = nullptr;
   player_[INAUDIBLE] = nullptr;
+  token_length_[0] = 0;
+  token_length_[1] = 0;
 }
 
 void AudioManagerImpl::Initialize(WhispernetClient* whispernet_client,
@@ -81,9 +83,8 @@ void AudioManagerImpl::Initialize(WhispernetClient* whispernet_client,
     player_[INAUDIBLE] = new AudioPlayerImpl();
   player_[INAUDIBLE]->Initialize();
 
-  decode_cancelable_cb_.Reset(base::Bind(&WhispernetClient::DecodeSamples,
-                                         base::Unretained(whispernet_client_),
-                                         BOTH));
+  decode_cancelable_cb_.Reset(base::Bind(
+      &AudioManagerImpl::DecodeSamplesConnector, base::Unretained(this)));
   if (!recorder_)
     recorder_ = new AudioRecorderImpl();
   recorder_->Initialize(decode_cancelable_cb_.callback());
@@ -97,58 +98,54 @@ AudioManagerImpl::~AudioManagerImpl() {
   if (recorder_)
     recorder_->Finalize();
 
-  DCHECK(whispernet_client_);
-  whispernet_client_->RegisterTokensCallback(TokensCallback());
-  whispernet_client_->RegisterSamplesCallback(SamplesCallback());
+  // Whispernet initialization may never have completed.
+  if (whispernet_client_) {
+    whispernet_client_->RegisterTokensCallback(TokensCallback());
+    whispernet_client_->RegisterSamplesCallback(SamplesCallback());
+  }
 }
 
 void AudioManagerImpl::StartPlaying(AudioType type) {
   DCHECK(type == AUDIBLE || type == INAUDIBLE);
-  playing_[type] = true;
-  started_playing_[type] = base::Time::Now();
+  should_be_playing_[type] = true;
   // If we don't have our token encoded yet, this check will be false, for now.
   // Once our token is encoded, OnTokenEncoded will call UpdateToken, which
   // will call this code again (if we're still supposed to be playing).
-  if (samples_cache_[type]->HasKey(playing_token_[type]) &&
-      !player_[type]->IsPlaying()) {
+  if (samples_cache_[type]->HasKey(playing_token_[type])) {
     DCHECK(!playing_token_[type].empty());
+    started_playing_[type] = base::Time::Now();
     player_[type]->Play(samples_cache_[type]->GetValue(playing_token_[type]));
     // If we're playing, we always record to hear what we are playing.
-    if (!recorder_->IsRecording())
-      recorder_->Record();
+    recorder_->Record();
   }
 }
 
 void AudioManagerImpl::StopPlaying(AudioType type) {
   DCHECK(type == AUDIBLE || type == INAUDIBLE);
-  playing_[type] = false;
-  if (player_[type]->IsPlaying()) {
-    player_[type]->Stop();
-    // If we were only recording to hear our own played tokens, stop.
-    if (recorder_->IsRecording() && !recording_[AUDIBLE] &&
-        !recording_[INAUDIBLE])
-      recorder_->Stop();
-  }
+  should_be_playing_[type] = false;
+  player_[type]->Stop();
+  // If we were only recording to hear our own played tokens, stop.
+  if (!should_be_recording_[AUDIBLE] && !should_be_recording_[INAUDIBLE])
+    recorder_->Stop();
+  playing_token_[type] = std::string();
 }
 
 void AudioManagerImpl::StartRecording(AudioType type) {
   DCHECK(type == AUDIBLE || type == INAUDIBLE);
-  recording_[type] = true;
-  if (!recorder_->IsRecording())
-    recorder_->Record();
+  should_be_recording_[type] = true;
+  recorder_->Record();
 }
 
 void AudioManagerImpl::StopRecording(AudioType type) {
   DCHECK(type == AUDIBLE || type == INAUDIBLE);
-  recording_[type] = false;
-  if (recorder_->IsRecording())
-    recorder_->Stop();
+  should_be_recording_[type] = false;
+  recorder_->Stop();
 }
 
 void AudioManagerImpl::SetToken(AudioType type,
-                                const std::string& url_unsafe_token) {
+                                const std::string& url_safe_token) {
   DCHECK(type == AUDIBLE || type == INAUDIBLE);
-  std::string token = FromUrlSafe(url_unsafe_token);
+  std::string token = FromUrlSafe(url_safe_token);
   if (!samples_cache_[type]->HasKey(token)) {
     whispernet_client_->EncodeToken(token, type);
   } else {
@@ -158,14 +155,6 @@ void AudioManagerImpl::SetToken(AudioType type,
 
 const std::string AudioManagerImpl::GetToken(AudioType type) {
   return playing_token_[type];
-}
-
-bool AudioManagerImpl::IsRecording(AudioType type) {
-  return recording_[type];
-}
-
-bool AudioManagerImpl::IsPlaying(AudioType type) {
-  return playing_[type];
 }
 
 bool AudioManagerImpl::IsPlayingTokenHeard(AudioType type) {
@@ -178,6 +167,10 @@ bool AudioManagerImpl::IsPlayingTokenHeard(AudioType type) {
     return true;
 
   return base::Time::Now() - heard_own_token_[type] < tokenTimeout;
+}
+
+void AudioManagerImpl::SetTokenLength(AudioType type, size_t token_length) {
+  token_length_[type] = token_length;
 }
 
 // Private methods.
@@ -197,9 +190,9 @@ void AudioManagerImpl::OnTokensFound(const std::vector<AudioToken>& tokens) {
     if (playing_token_[type] == token.token)
       heard_own_token_[type] = base::Time::Now();
 
-    if (recording_[AUDIBLE] && token.audible) {
+    if (should_be_recording_[AUDIBLE] && token.audible) {
       tokens_to_report.push_back(token);
-    } else if (recording_[INAUDIBLE] && !token.audible) {
+    } else if (should_be_recording_[INAUDIBLE] && !token.audible) {
       tokens_to_report.push_back(token);
     }
   }
@@ -216,12 +209,44 @@ void AudioManagerImpl::UpdateToken(AudioType type, const std::string& token) {
   // Update token.
   playing_token_[type] = token;
 
-  // out playback with the new samples.
   // If we are supposed to be playing this token type at this moment, switch
-  if (playing_[type]) {
-    if (player_[type]->IsPlaying())
-      player_[type]->Stop();
-    StartPlaying(type);
+  // out playback with the new samples.
+  if (should_be_playing_[type])
+    RestartPlaying(type);
+}
+
+void AudioManagerImpl::RestartPlaying(AudioType type) {
+  DCHECK(type == AUDIBLE || type == INAUDIBLE);
+  // We should already have this token in the cache. This function is not
+  // called from anywhere except update token and only once we have our samples
+  // in the cache.
+  DCHECK(samples_cache_[type]->HasKey(playing_token_[type]));
+
+  started_playing_[type] = base::Time::Now();
+  player_[type]->Stop();
+  player_[type]->Play(samples_cache_[type]->GetValue(playing_token_[type]));
+  // If we're playing, we always record to hear what we are playing.
+  recorder_->Record();
+}
+
+void AudioManagerImpl::DecodeSamplesConnector(const std::string& samples) {
+  // If we are either supposed to be recording *or* playing, audible or
+  // inaudible, we should be decoding that type. This is so that if we are
+  // just playing, we will still decode our recorded token so we can check
+  // if we heard our own token. Whether or not we report the token to the
+  // server is checked for and handled in OnTokensFound.
+
+  bool decode_audible =
+      should_be_recording_[AUDIBLE] || should_be_playing_[AUDIBLE];
+  bool decode_inaudible =
+      should_be_recording_[INAUDIBLE] || should_be_playing_[INAUDIBLE];
+
+  if (decode_audible && decode_inaudible) {
+    whispernet_client_->DecodeSamples(BOTH, samples, token_length_);
+  } else if (decode_audible) {
+    whispernet_client_->DecodeSamples(AUDIBLE, samples, token_length_);
+  } else if (decode_inaudible) {
+    whispernet_client_->DecodeSamples(INAUDIBLE, samples, token_length_);
   }
 }
 

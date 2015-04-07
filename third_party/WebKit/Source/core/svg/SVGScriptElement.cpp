@@ -92,8 +92,7 @@ void SVGScriptElement::childrenChanged(const ChildrenChange& change)
 
 void SVGScriptElement::didMoveToNewDocument(Document& oldDocument)
 {
-    if (RefPtrWillBeRawPtr<Document> contextDocument = document().contextDocument().get())
-        oldDocument.scriptRunner()->movePendingAsyncScript(contextDocument->scriptRunner(), m_loader.get());
+    ScriptRunner::movePendingAsyncScript(oldDocument, document(), m_loader.get());
     SVGElement::didMoveToNewDocument(oldDocument);
 }
 
@@ -182,6 +181,7 @@ void SVGScriptElement::trace(Visitor* visitor)
 {
     visitor->trace(m_loader);
     SVGElement::trace(visitor);
+    SVGURIReference::trace(visitor);
 }
 
 } // namespace blink

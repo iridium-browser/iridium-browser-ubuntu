@@ -654,16 +654,16 @@ void MacroAssembler::CheckMap(Register obj,
 }
 
 
-void MacroAssembler::DispatchMap(Register obj,
-                                 Register unused,
-                                 Handle<Map> map,
-                                 Handle<Code> success,
-                                 SmiCheckType smi_check_type) {
+void MacroAssembler::DispatchWeakMap(Register obj, Register scratch1,
+                                     Register scratch2, Handle<WeakCell> cell,
+                                     Handle<Code> success,
+                                     SmiCheckType smi_check_type) {
   Label fail;
   if (smi_check_type == DO_SMI_CHECK) {
     JumpIfSmi(obj, &fail);
   }
-  cmp(FieldOperand(obj, HeapObject::kMapOffset), Immediate(map));
+  mov(scratch1, FieldOperand(obj, HeapObject::kMapOffset));
+  CmpWeakValue(scratch1, cell, scratch2);
   j(equal, success);
 
   bind(&fail);
@@ -762,6 +762,13 @@ void MacroAssembler::X87SetRC(int rc) {
   fnstcw(MemOperand(esp, 0));
   and_(MemOperand(esp, 0), Immediate(0xF3FF));
   or_(MemOperand(esp, 0), Immediate(rc));
+  fldcw(MemOperand(esp, 0));
+  add(esp, Immediate(kPointerSize));
+}
+
+
+void MacroAssembler::X87SetFPUCW(int cw) {
+  push(Immediate(cw));
   fldcw(MemOperand(esp, 0));
   add(esp, Immediate(kPointerSize));
 }
@@ -1314,10 +1321,10 @@ void MacroAssembler::LoadFromNumberDictionary(Label* miss,
   }
 
   bind(&done);
-  // Check that the value is a normal propety.
+  // Check that the value is a field property.
   const int kDetailsOffset =
       SeededNumberDictionary::kElementsStartOffset + 2 * kPointerSize;
-  DCHECK_EQ(NORMAL, 0);
+  DCHECK_EQ(FIELD, 0);
   test(FieldOperand(elements, r2, times_pointer_size, kDetailsOffset),
        Immediate(PropertyDetails::TypeField::kMask << kSmiTagSize));
   j(not_zero, miss);
@@ -2537,6 +2544,21 @@ void MacroAssembler::PushHeapObject(Handle<HeapObject> object) {
 }
 
 
+void MacroAssembler::CmpWeakValue(Register value, Handle<WeakCell> cell,
+                                  Register scratch) {
+  mov(scratch, cell);
+  cmp(value, FieldOperand(scratch, WeakCell::kValueOffset));
+}
+
+
+void MacroAssembler::LoadWeakValue(Register value, Handle<WeakCell> cell,
+                                   Label* miss) {
+  mov(value, cell);
+  mov(value, FieldOperand(value, WeakCell::kValueOffset));
+  JumpIfSmi(value, miss);
+}
+
+
 void MacroAssembler::Ret() {
   ret(0);
 }
@@ -3062,18 +3084,6 @@ void MacroAssembler::CheckPageFlagForMap(
     test(Operand::StaticVariable(reference), Immediate(mask));
   }
   j(cc, condition_met, condition_met_distance);
-}
-
-
-void MacroAssembler::CheckMapDeprecated(Handle<Map> map,
-                                        Register scratch,
-                                        Label* if_deprecated) {
-  if (map->CanBeDeprecated()) {
-    mov(scratch, map);
-    mov(scratch, FieldOperand(scratch, Map::kBitField3Offset));
-    and_(scratch, Immediate(Map::Deprecated::kMask));
-    j(not_zero, if_deprecated);
-  }
 }
 
 

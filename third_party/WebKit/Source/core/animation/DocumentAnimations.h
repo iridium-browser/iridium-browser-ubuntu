@@ -36,14 +36,13 @@
 namespace blink {
 
 class Document;
-class FrameView;
 class Node;
 
 class DocumentAnimations {
 public:
     static void updateAnimationTimingForAnimationFrame(Document&, double monotonicAnimationStartTime);
     static bool needsOutdatedAnimationPlayerUpdate(const Document&);
-    static void updateOutdatedAnimationPlayersIfNeeded(Document&);
+    static void updateAnimationTimingIfNeeded(Document&);
     static void updateAnimationTimingForGetComputedStyle(Node&, CSSPropertyID);
     static void startPendingAnimations(Document&);
 

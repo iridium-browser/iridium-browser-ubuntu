@@ -148,19 +148,25 @@ VideoReceiveStream::VideoReceiveStream(webrtc::VideoEngine* video_engine,
     }
   }
 
-  stats_proxy_.reset(new ReceiveStatisticsProxy(
-      config_.rtp.local_ssrc, clock_, rtp_rtcp_, codec_, channel_));
+  stats_proxy_.reset(
+      new ReceiveStatisticsProxy(config_.rtp.local_ssrc, clock_));
 
   if (rtp_rtcp_->RegisterReceiveChannelRtcpStatisticsCallback(
-          channel_, stats_proxy_.get()) != 0)
+          channel_, stats_proxy_.get()) != 0) {
     abort();
+  }
 
   if (rtp_rtcp_->RegisterReceiveChannelRtpStatisticsCallback(
-          channel_, stats_proxy_.get()) != 0)
+          channel_, stats_proxy_.get()) != 0) {
     abort();
+  }
 
-  if (codec_->RegisterDecoderObserver(channel_, *stats_proxy_) != 0)
+  if (codec_->RegisterDecoderObserver(channel_, *stats_proxy_) != 0) {
     abort();
+  }
+
+  video_engine_base_->RegisterReceiveStatisticsProxy(channel_,
+                                                     stats_proxy_.get());
 
   external_codec_ = ViEExternalCodec::GetInterface(video_engine);
   assert(!config_.decoders.empty());
@@ -257,13 +263,12 @@ VideoReceiveStream::Stats VideoReceiveStream::GetStats() const {
 }
 
 bool VideoReceiveStream::DeliverRtcp(const uint8_t* packet, size_t length) {
-  return network_->ReceivedRTCPPacket(
-             channel_, packet, static_cast<int>(length)) == 0;
+  return network_->ReceivedRTCPPacket(channel_, packet, length) == 0;
 }
 
 bool VideoReceiveStream::DeliverRtp(const uint8_t* packet, size_t length) {
-  return network_->ReceivedRTPPacket(
-             channel_, packet, static_cast<int>(length), PacketTime()) == 0;
+  return network_->ReceivedRTPPacket(channel_, packet, length, PacketTime()) ==
+      0;
 }
 
 void VideoReceiveStream::FrameCallback(I420VideoFrame* video_frame) {

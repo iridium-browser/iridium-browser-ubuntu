@@ -51,21 +51,6 @@ using namespace HTMLNames;
 
 // -----------------------------------------------------------------
 
-static inline bool isSelectorMatchingHTMLBasedOnRuleHash(const CSSSelector& selector)
-{
-    if (selector.match() == CSSSelector::Tag) {
-        const AtomicString& selectorNamespace = selector.tagQName().namespaceURI();
-        if (selectorNamespace != starAtom && selectorNamespace != xhtmlNamespaceURI)
-            return false;
-        if (selector.relation() == CSSSelector::SubSelector && selector.tagHistory())
-            return isSelectorMatchingHTMLBasedOnRuleHash(*selector.tagHistory());
-        return true;
-    }
-    if (SelectorChecker::isCommonPseudoClassSelector(selector))
-        return true;
-    return selector.match() == CSSSelector::Id || selector.match() == CSSSelector::Class;
-}
-
 static inline bool selectorListContainsUncommonAttributeSelector(const CSSSelector* selector)
 {
     const CSSSelectorList* selectorList = selector->selectorList();
@@ -127,8 +112,6 @@ RuleData::RuleData(StyleRule* rule, unsigned selectorIndex, unsigned position, A
     , m_isLastInArray(false)
     , m_position(position)
     , m_specificity(selector().specificity())
-    , m_hasMultipartSelector(!!selector().tagHistory())
-    , m_hasRightmostSelectorMatchingHTMLBasedOnRuleHash(isSelectorMatchingHTMLBasedOnRuleHash(selector()))
     , m_containsUncommonAttributeSelector(blink::containsUncommonAttributeSelector(selector()))
     , m_linkMatchType(SelectorChecker::determineLinkMatchType(selector()))
     , m_hasDocumentSecurityOrigin(addRuleFlags & RuleHasDocumentSecurityOrigin)
@@ -228,6 +211,10 @@ bool RuleSet::findBestRuleSetAndAdd(const CSSSelector& component, RuleData& rule
         return true;
     }
 
+    if (component.isHostPseudoClass()) {
+        m_shadowHostRules.append(ruleData);
+        return true;
+    }
     return false;
 }
 
@@ -354,6 +341,7 @@ void RuleSet::compactRules()
     m_cuePseudoRules.shrinkToFit();
     m_focusPseudoClassRules.shrinkToFit();
     m_universalRules.shrinkToFit();
+    m_shadowHostRules.shrinkToFit();
     m_pageRules.shrinkToFit();
     m_viewportRules.shrinkToFit();
     m_fontFaceRules.shrinkToFit();
@@ -393,6 +381,7 @@ void RuleSet::trace(Visitor* visitor)
     visitor->trace(m_cuePseudoRules);
     visitor->trace(m_focusPseudoClassRules);
     visitor->trace(m_universalRules);
+    visitor->trace(m_shadowHostRules);
     visitor->trace(m_features);
     visitor->trace(m_pageRules);
     visitor->trace(m_viewportRules);

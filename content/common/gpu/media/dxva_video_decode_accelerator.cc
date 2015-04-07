@@ -14,27 +14,78 @@
 #include <mferror.h>
 #include <wmcodecdsp.h>
 
+#include "base/base_paths_win.h"
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
 #include "base/file_version_info.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/shared_memory.h"
 #include "base/message_loop/message_loop.h"
+#include "base/path_service.h"
 #include "base/win/windows_version.h"
 #include "media/video/video_decode_accelerator.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_surface_egl.h"
 #include "ui/gl/gl_switches.h"
 
-namespace content {
+namespace {
 
-// We only request 5 picture buffers from the client which are used to hold the
-// decoded samples. These buffers are then reused when the client tells us that
-// it is done with the buffer.
-static const int kNumPictureBuffers = 5;
+// Path is appended on to the PROGRAM_FILES base path.
+const wchar_t kVPXDecoderDLLPath[] = L"Intel\\Media SDK\\";
+
+const wchar_t kVP8DecoderDLLName[] =
+#if defined(ARCH_CPU_X86)
+  L"mfx_mft_vp8vd_32.dll";
+#elif defined(ARCH_CPU_X86_64)
+  L"mfx_mft_vp8vd_64.dll";
+#else
+#error Unsupported Windows CPU Architecture
+#endif
+
+const wchar_t kVP9DecoderDLLName[] =
+#if defined(ARCH_CPU_X86)
+  L"mfx_mft_vp9vd_32.dll";
+#elif defined(ARCH_CPU_X86_64)
+  L"mfx_mft_vp9vd_64.dll";
+#else
+#error Unsupported Windows CPU Architecture
+#endif
+
+const CLSID CLSID_WebmMfVp8Dec = {
+  0x451e3cb7,
+  0x2622,
+  0x4ba5,
+  { 0x8e, 0x1d, 0x44, 0xb3, 0xc4, 0x1d, 0x09, 0x24 }
+};
+
+const CLSID CLSID_WebmMfVp9Dec = {
+  0x07ab4bd2,
+  0x1979,
+  0x4fcd,
+  { 0xa6, 0x97, 0xdf, 0x9a, 0xd1, 0x5b, 0x34, 0xfe }
+};
+
+const CLSID MEDIASUBTYPE_VP80 = {
+  0x30385056,
+  0x0000,
+  0x0010,
+  { 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71 }
+};
+
+const CLSID MEDIASUBTYPE_VP90 = {
+  0x30395056,
+  0x0000,
+  0x0010,
+  { 0x80, 0x00, 0x00, 0xaa, 0x00, 0x38, 0x9b, 0x71 }
+};
+
+}
+
+namespace content {
 
 #define RETURN_ON_FAILURE(result, log, ret)  \
   do {                                       \
@@ -63,10 +114,18 @@ static const int kNumPictureBuffers = 5;
                                log << ", HRESULT: 0x" << std::hex << result, \
                                error_code, ret);
 
-// Maximum number of iterations we allow before aborting the attempt to flush
-// the batched queries to the driver and allow torn/corrupt frames to be
-// rendered.
-enum { kMaxIterationsForD3DFlush = 10 };
+enum {
+  // Maximum number of iterations we allow before aborting the attempt to flush
+  // the batched queries to the driver and allow torn/corrupt frames to be
+  // rendered.
+  kFlushDecoderSurfaceTimeoutMs = 1,
+  // Maximum iterations where we try to flush the d3d device.
+  kMaxIterationsForD3DFlush = 4,
+  // We only request 5 picture buffers from the client which are used to hold
+  // the decoded samples. These buffers are then reused when the client tells
+  // us that it is done with the buffer.
+  kNumPictureBuffers = 5,
+};
 
 static IMFSample* CreateEmptySample() {
   base::win::ScopedComPtr<IMFSample> sample;
@@ -96,7 +155,7 @@ static IMFSample* CreateEmptySampleWithBuffer(int buffer_length, int align) {
   }
   RETURN_ON_HR_FAILURE(hr, "Failed to create memory buffer for sample", NULL);
 
-  hr = sample->AddBuffer(buffer);
+  hr = sample->AddBuffer(buffer.get());
   RETURN_ON_HR_FAILURE(hr, "Failed to add buffer to sample", NULL);
 
   return sample.Detach();
@@ -114,7 +173,7 @@ static IMFSample* CreateInputSample(const uint8* stream, int size,
   base::win::ScopedComPtr<IMFSample> sample;
   sample.Attach(CreateEmptySampleWithBuffer(std::max(min_size, size),
                                             alignment));
-  RETURN_ON_FAILURE(sample, "Failed to create empty sample", NULL);
+  RETURN_ON_FAILURE(sample.get(), "Failed to create empty sample", NULL);
 
   base::win::ScopedComPtr<IMFMediaBuffer> buffer;
   HRESULT hr = sample->GetBufferByIndex(0, buffer.Receive());
@@ -168,8 +227,9 @@ struct DXVAVideoDecodeAccelerator::DXVAPictureBuffer {
   // client.
   // The dest_surface parameter contains the decoded bits.
   bool CopyOutputSampleDataToPictureBuffer(
-      const DXVAVideoDecodeAccelerator& decoder,
-      IDirect3DSurface9* dest_surface);
+      DXVAVideoDecodeAccelerator* decoder,
+      IDirect3DSurface9* dest_surface,
+      int input_buffer_id);
 
   bool available() const {
     return available_;
@@ -187,6 +247,11 @@ struct DXVAVideoDecodeAccelerator::DXVAPictureBuffer {
     return picture_buffer_.size();
   }
 
+  // Called when the source surface |src_surface| is copied to the destination
+  // |dest_surface|
+  void CopySurfaceComplete(IDirect3DSurface9* src_surface,
+                           IDirect3DSurface9* dest_surface);
+
  private:
   explicit DXVAPictureBuffer(const media::PictureBuffer& buffer);
 
@@ -194,6 +259,14 @@ struct DXVAVideoDecodeAccelerator::DXVAPictureBuffer {
   media::PictureBuffer picture_buffer_;
   EGLSurface decoding_surface_;
   base::win::ScopedComPtr<IDirect3DTexture9> decoding_texture_;
+
+  // The following |IDirect3DSurface9| interface pointers are used to hold
+  // references on the surfaces during the course of a StretchRect operation
+  // to copy the source surface to the target. The references are released
+  // when the StretchRect operation i.e. the copy completes.
+  base::win::ScopedComPtr<IDirect3DSurface9> decoder_surface_;
+  base::win::ScopedComPtr<IDirect3DSurface9> target_surface_;
+
   // Set to true if RGB is supported by the texture.
   // Defaults to true.
   bool use_rgb_;
@@ -242,6 +315,7 @@ DXVAVideoDecodeAccelerator::DXVAPictureBuffer::Create(
                     "Failed to query ANGLE surface pointer",
                     linked_ptr<DXVAPictureBuffer>(NULL));
 
+  // TODO(dshwang): after moving to D3D11, use RGBA surface. crbug.com/438691
   HRESULT hr = decoder.device_->CreateTexture(
       buffer.size().width(),
       buffer.size().height(),
@@ -289,13 +363,16 @@ void DXVAVideoDecodeAccelerator::DXVAPictureBuffer::ReusePictureBuffer() {
     egl_display,
     decoding_surface_,
     EGL_BACK_BUFFER);
+  decoder_surface_.Release();
+  target_surface_.Release();
   set_available(true);
 }
 
 bool DXVAVideoDecodeAccelerator::DXVAPictureBuffer::
     CopyOutputSampleDataToPictureBuffer(
-        const DXVAVideoDecodeAccelerator& decoder,
-        IDirect3DSurface9* dest_surface) {
+        DXVAVideoDecodeAccelerator* decoder,
+        IDirect3DSurface9* dest_surface,
+        int input_buffer_id) {
   DCHECK(dest_surface);
 
   D3DSURFACE_DESC surface_desc;
@@ -311,13 +388,35 @@ bool DXVAVideoDecodeAccelerator::DXVAPictureBuffer::
     return false;
   }
 
-  hr = decoder.d3d9_->CheckDeviceFormatConversion(
+  hr = decoder->d3d9_->CheckDeviceFormatConversion(
       D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, surface_desc.Format,
       use_rgb_ ? D3DFMT_X8R8G8B8 : D3DFMT_A8R8G8B8);
   RETURN_ON_HR_FAILURE(hr, "Device does not support format converision", false);
 
-  // This function currently executes in the context of IPC handlers in the
-  // GPU process which ensures that there is always an OpenGL context.
+  // The same picture buffer can be reused for a different frame. Release the
+  // target surface and the decoder references here.
+  target_surface_.Release();
+  decoder_surface_.Release();
+
+  // Grab a reference on the decoder surface and the target surface. These
+  // references will be released when we receive a notification that the
+  // copy was completed or when the DXVAPictureBuffer instance is destroyed.
+  // We hold references here as it is easier to manage their lifetimes.
+  hr = decoding_texture_->GetSurfaceLevel(0, target_surface_.Receive());
+  RETURN_ON_HR_FAILURE(hr, "Failed to get surface from texture", false);
+
+  decoder_surface_ = dest_surface;
+
+  decoder->CopySurface(decoder_surface_.get(), target_surface_.get(), id(),
+                       input_buffer_id);
+  return true;
+}
+
+void DXVAVideoDecodeAccelerator::DXVAPictureBuffer::CopySurfaceComplete(
+    IDirect3DSurface9* src_surface,
+    IDirect3DSurface9* dest_surface) {
+  DCHECK(!available());
+
   GLint current_texture = 0;
   glGetIntegerv(GL_TEXTURE_BINDING_2D, &current_texture);
 
@@ -325,51 +424,26 @@ bool DXVAVideoDecodeAccelerator::DXVAPictureBuffer::
 
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 
-  base::win::ScopedComPtr<IDirect3DSurface9> d3d_surface;
-  hr = decoding_texture_->GetSurfaceLevel(0, d3d_surface.Receive());
-  RETURN_ON_HR_FAILURE(hr, "Failed to get surface from texture", false);
+  DCHECK_EQ(src_surface, decoder_surface_.get());
+  DCHECK_EQ(dest_surface, target_surface_.get());
 
-  hr = decoder.device_->StretchRect(
-      dest_surface, NULL, d3d_surface, NULL, D3DTEXF_NONE);
-  RETURN_ON_HR_FAILURE(hr, "Colorspace conversion via StretchRect failed",
-                        false);
+  decoder_surface_.Release();
+  target_surface_.Release();
 
-  // Ideally, this should be done immediately before the draw call that uses
-  // the texture. Flush it once here though.
-  hr = decoder.query_->Issue(D3DISSUE_END);
-  RETURN_ON_HR_FAILURE(hr, "Failed to issue END", false);
-
-  // The DXVA decoder has its own device which it uses for decoding. ANGLE
-  // has its own device which we don't have access to.
-  // The above code attempts to copy the decoded picture into a surface
-  // which is owned by ANGLE. As there are multiple devices involved in
-  // this, the StretchRect call above is not synchronous.
-  // We attempt to flush the batched operations to ensure that the picture is
-  // copied to the surface owned by ANGLE.
-  // We need to do this in a loop and call flush multiple times.
-  // We have seen the GetData call for flushing the command buffer fail to
-  // return success occassionally on multi core machines, leading to an
-  // infinite loop.
-  // Workaround is to have an upper limit of 10 on the number of iterations to
-  // wait for the Flush to finish.
-  int iterations = 0;
-  while ((decoder.query_->GetData(NULL, 0, D3DGETDATA_FLUSH) == S_FALSE) &&
-         ++iterations < kMaxIterationsForD3DFlush) {
-    Sleep(1);  // Poor-man's Yield().
-  }
   EGLDisplay egl_display = gfx::GLSurfaceEGL::GetHardwareDisplay();
   eglBindTexImage(
       egl_display,
       decoding_surface_,
       EGL_BACK_BUFFER);
+
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glBindTexture(GL_TEXTURE_2D, current_texture);
-  return true;
 }
 
 DXVAVideoDecodeAccelerator::PendingSampleInfo::PendingSampleInfo(
     int32 buffer_id, IMFSample* sample)
-    : input_buffer_id(buffer_id) {
+    : input_buffer_id(buffer_id),
+      picture_buffer_id(-1) {
   output_sample.Attach(sample);
 }
 
@@ -410,7 +484,7 @@ bool DXVAVideoDecodeAccelerator::CreateD3DDevManager() {
                                          device_manager_.Receive());
   RETURN_ON_HR_FAILURE(hr, "DXVA2CreateDirect3DDeviceManager9 failed", false);
 
-  hr = device_manager_->ResetDevice(device_, dev_manager_reset_token_);
+  hr = device_manager_->ResetDevice(device_.get(), dev_manager_reset_token_);
   RETURN_ON_HR_FAILURE(hr, "Failed to reset device", false);
 
   hr = device_->CreateQuery(D3DQUERYTYPE_EVENT, query_.Receive());
@@ -430,8 +504,13 @@ DXVAVideoDecodeAccelerator::DXVAVideoDecodeAccelerator(
       state_(kUninitialized),
       pictures_requested_(false),
       inputs_before_decode_(0),
+      sent_drain_message_(false),
       make_context_current_(make_context_current),
-      weak_this_factory_(this) {
+      codec_(media::kUnknownVideoCodec),
+      decoder_thread_("DXVAVideoDecoderThread"),
+      weak_this_factory_(this),
+      weak_ptr_(weak_this_factory_.GetWeakPtr()),
+      pending_flush_(false) {
   memset(&input_stream_info_, 0, sizeof(input_stream_info_));
   memset(&output_stream_info_, 0, sizeof(output_stream_info_));
 }
@@ -441,10 +520,10 @@ DXVAVideoDecodeAccelerator::~DXVAVideoDecodeAccelerator() {
 }
 
 bool DXVAVideoDecodeAccelerator::Initialize(media::VideoCodecProfile profile,
-                                            Client* client) {
-  DCHECK(CalledOnValidThread());
-
+                                           Client* client) {
   client_ = client;
+
+  main_thread_task_runner_ = base::MessageLoop::current()->task_runner();
 
   // Not all versions of Windows 7 and later include Media Foundation DLLs.
   // Instead of crashing while delay loading the DLL when calling MFStartup()
@@ -454,13 +533,13 @@ bool DXVAVideoDecodeAccelerator::Initialize(media::VideoCodecProfile profile,
   HMODULE mfplat_dll = ::LoadLibrary(L"MFPlat.dll");
   RETURN_ON_FAILURE(mfplat_dll, "MFPlat.dll is required for decoding", false);
 
-  // TODO(ananta)
-  // H264PROFILE_HIGH video decoding is janky at times. Needs more
-  // investigation. http://crbug.com/426707
   if (profile != media::H264PROFILE_BASELINE &&
-      profile != media::H264PROFILE_MAIN) {
+      profile != media::H264PROFILE_MAIN &&
+      profile != media::H264PROFILE_HIGH &&
+      profile != media::VP8PROFILE_ANY &&
+      profile != media::VP9PROFILE_ANY) {
     RETURN_AND_NOTIFY_ON_FAILURE(false,
-        "Unsupported h264 profile", PLATFORM_FAILURE, false);
+        "Unsupported h.264, vp8, or vp9 profile", PLATFORM_FAILURE, false);
   }
 
   RETURN_AND_NOTIFY_ON_FAILURE(
@@ -469,8 +548,9 @@ bool DXVAVideoDecodeAccelerator::Initialize(media::VideoCodecProfile profile,
       PLATFORM_FAILURE,
       false);
 
-  RETURN_AND_NOTIFY_ON_FAILURE((state_ == kUninitialized),
-      "Initialize: invalid state: " << state_, ILLEGAL_STATE, false);
+  State state = GetState();
+  RETURN_AND_NOTIFY_ON_FAILURE((state == kUninitialized),
+      "Initialize: invalid state: " << state, ILLEGAL_STATE, false);
 
   HRESULT hr = MFStartup(MF_VERSION, MFSTARTUP_FULL);
   RETURN_AND_NOTIFY_ON_HR_FAILURE(hr, "MFStartup failed.", PLATFORM_FAILURE,
@@ -497,37 +577,44 @@ bool DXVAVideoDecodeAccelerator::Initialize(media::VideoCodecProfile profile,
       "Send MFT_MESSAGE_NOTIFY_START_OF_STREAM notification failed",
       PLATFORM_FAILURE, false);
 
-  state_ = kNormal;
+  SetState(kNormal);
+
+  StartDecoderThread();
   return true;
 }
 
 void DXVAVideoDecodeAccelerator::Decode(
     const media::BitstreamBuffer& bitstream_buffer) {
-  DCHECK(CalledOnValidThread());
+  DCHECK(main_thread_task_runner_->BelongsToCurrentThread());
 
-  RETURN_AND_NOTIFY_ON_FAILURE((state_ == kNormal || state_ == kStopped ||
-                                state_ == kFlushing),
-      "Invalid state: " << state_, ILLEGAL_STATE,);
+  State state = GetState();
+  RETURN_AND_NOTIFY_ON_FAILURE((state == kNormal || state == kStopped ||
+                                state == kFlushing),
+           "Invalid state: " << state, ILLEGAL_STATE,);
 
   base::win::ScopedComPtr<IMFSample> sample;
   sample.Attach(CreateSampleFromInputBuffer(bitstream_buffer,
                                             input_stream_info_.cbSize,
                                             input_stream_info_.cbAlignment));
-  RETURN_AND_NOTIFY_ON_FAILURE(sample, "Failed to create input sample",
-                               PLATFORM_FAILURE,);
+  RETURN_AND_NOTIFY_ON_FAILURE(sample.get(), "Failed to create input sample",
+                               PLATFORM_FAILURE, );
 
   RETURN_AND_NOTIFY_ON_HR_FAILURE(sample->SetSampleTime(bitstream_buffer.id()),
       "Failed to associate input buffer id with sample", PLATFORM_FAILURE,);
 
-  DecodeInternal(sample);
+  decoder_thread_task_runner_->PostTask(
+      FROM_HERE,
+      base::Bind(&DXVAVideoDecodeAccelerator::DecodeInternal,
+                 base::Unretained(this), sample));
 }
 
 void DXVAVideoDecodeAccelerator::AssignPictureBuffers(
     const std::vector<media::PictureBuffer>& buffers) {
-  DCHECK(CalledOnValidThread());
+  DCHECK(main_thread_task_runner_->BelongsToCurrentThread());
 
-  RETURN_AND_NOTIFY_ON_FAILURE((state_ != kUninitialized),
-      "Invalid state: " << state_, ILLEGAL_STATE,);
+  State state = GetState();
+  RETURN_AND_NOTIFY_ON_FAILURE((state != kUninitialized),
+      "Invalid state: " << state, ILLEGAL_STATE,);
   RETURN_AND_NOTIFY_ON_FAILURE((kNumPictureBuffers == buffers.size()),
       "Failed to provide requested picture buffers. (Got " << buffers.size() <<
       ", requested " << kNumPictureBuffers << ")", INVALID_ARGUMENT,);
@@ -546,16 +633,21 @@ void DXVAVideoDecodeAccelerator::AssignPictureBuffers(
     DCHECK(inserted);
   }
   ProcessPendingSamples();
-  if (state_ == kFlushing && pending_output_samples_.empty())
-    FlushInternal();
+  if (pending_flush_) {
+    decoder_thread_task_runner_->PostTask(
+        FROM_HERE,
+        base::Bind(&DXVAVideoDecodeAccelerator::FlushInternal,
+                   base::Unretained(this)));
+  }
 }
 
 void DXVAVideoDecodeAccelerator::ReusePictureBuffer(
     int32 picture_buffer_id) {
-  DCHECK(CalledOnValidThread());
+  DCHECK(main_thread_task_runner_->BelongsToCurrentThread());
 
-  RETURN_AND_NOTIFY_ON_FAILURE((state_ != kUninitialized),
-      "Invalid state: " << state_, ILLEGAL_STATE,);
+  State state = GetState();
+  RETURN_AND_NOTIFY_ON_FAILURE((state != kUninitialized),
+      "Invalid state: " << state, ILLEGAL_STATE,);
 
   if (output_picture_buffers_.empty() && stale_output_picture_buffers_.empty())
     return;
@@ -571,47 +663,70 @@ void DXVAVideoDecodeAccelerator::ReusePictureBuffer(
     it = stale_output_picture_buffers_.find(picture_buffer_id);
     RETURN_AND_NOTIFY_ON_FAILURE(it != stale_output_picture_buffers_.end(),
         "Invalid picture id: " << picture_buffer_id, INVALID_ARGUMENT,);
-    base::MessageLoop::current()->PostTask(FROM_HERE,
+    main_thread_task_runner_->PostTask(
+        FROM_HERE,
         base::Bind(&DXVAVideoDecodeAccelerator::DeferredDismissStaleBuffer,
-            weak_this_factory_.GetWeakPtr(), picture_buffer_id));
+                   weak_this_factory_.GetWeakPtr(), picture_buffer_id));
     return;
   }
 
   it->second->ReusePictureBuffer();
   ProcessPendingSamples();
-
-  if (state_ == kFlushing && pending_output_samples_.empty())
-    FlushInternal();
+  if (pending_flush_) {
+    decoder_thread_task_runner_->PostTask(
+        FROM_HERE,
+        base::Bind(&DXVAVideoDecodeAccelerator::FlushInternal,
+                   base::Unretained(this)));
+  }
 }
 
 void DXVAVideoDecodeAccelerator::Flush() {
-  DCHECK(CalledOnValidThread());
+  DCHECK(main_thread_task_runner_->BelongsToCurrentThread());
 
   DVLOG(1) << "DXVAVideoDecodeAccelerator::Flush";
 
-  RETURN_AND_NOTIFY_ON_FAILURE((state_ == kNormal || state_ == kStopped),
-      "Unexpected decoder state: " << state_, ILLEGAL_STATE,);
+  State state = GetState();
+  RETURN_AND_NOTIFY_ON_FAILURE((state == kNormal || state == kStopped),
+      "Unexpected decoder state: " << state, ILLEGAL_STATE,);
 
-  state_ = kFlushing;
+  SetState(kFlushing);
 
-  RETURN_AND_NOTIFY_ON_FAILURE(SendMFTMessage(MFT_MESSAGE_COMMAND_DRAIN, 0),
-      "Failed to send drain message", PLATFORM_FAILURE,);
+  pending_flush_ = true;
 
-  if (!pending_output_samples_.empty())
-    return;
-
-  FlushInternal();
+  decoder_thread_task_runner_->PostTask(
+      FROM_HERE,
+      base::Bind(&DXVAVideoDecodeAccelerator::FlushInternal,
+                  base::Unretained(this)));
 }
 
 void DXVAVideoDecodeAccelerator::Reset() {
-  DCHECK(CalledOnValidThread());
+  DCHECK(main_thread_task_runner_->BelongsToCurrentThread());
 
   DVLOG(1) << "DXVAVideoDecodeAccelerator::Reset";
 
-  RETURN_AND_NOTIFY_ON_FAILURE((state_ == kNormal || state_ == kStopped),
-      "Reset: invalid state: " << state_, ILLEGAL_STATE,);
+  State state = GetState();
+  RETURN_AND_NOTIFY_ON_FAILURE((state == kNormal || state == kStopped),
+      "Reset: invalid state: " << state, ILLEGAL_STATE,);
 
-  state_ = kResetting;
+  decoder_thread_.Stop();
+
+  SetState(kResetting);
+
+  // If we have pending output frames waiting for display then we drop those
+  // frames and set the corresponding picture buffer as available.
+  PendingOutputSamples::iterator index;
+  for (index = pending_output_samples_.begin();
+       index != pending_output_samples_.end();
+       ++index) {
+    if (index->picture_buffer_id != -1) {
+      OutputBuffers::iterator it = output_picture_buffers_.find(
+          index->picture_buffer_id);
+      if (it != output_picture_buffers_.end()) {
+        DXVAPictureBuffer* picture_buffer = it->second.get();
+        picture_buffer->ReusePictureBuffer();
+      }
+    }
+  }
 
   pending_output_samples_.clear();
 
@@ -620,16 +735,17 @@ void DXVAVideoDecodeAccelerator::Reset() {
   RETURN_AND_NOTIFY_ON_FAILURE(SendMFTMessage(MFT_MESSAGE_COMMAND_FLUSH, 0),
       "Reset: Failed to send message.", PLATFORM_FAILURE,);
 
-  base::MessageLoop::current()->PostTask(
+  main_thread_task_runner_->PostTask(
       FROM_HERE,
       base::Bind(&DXVAVideoDecodeAccelerator::NotifyResetDone,
                  weak_this_factory_.GetWeakPtr()));
 
-  state_ = DXVAVideoDecodeAccelerator::kNormal;
+  StartDecoderThread();
+  SetState(kNormal);
 }
 
 void DXVAVideoDecodeAccelerator::Destroy() {
-  DCHECK(CalledOnValidThread());
+  DCHECK(main_thread_task_runner_->BelongsToCurrentThread());
   Invalidate();
   delete this;
 }
@@ -638,31 +754,56 @@ bool DXVAVideoDecodeAccelerator::CanDecodeOnIOThread() {
   return false;
 }
 
+GLenum DXVAVideoDecodeAccelerator::GetSurfaceInternalFormat() const {
+  return GL_BGRA_EXT;
+}
+
 bool DXVAVideoDecodeAccelerator::InitDecoder(media::VideoCodecProfile profile) {
-  if (profile < media::H264PROFILE_MIN || profile > media::H264PROFILE_MAX)
-    return false;
+  HMODULE decoder_dll = NULL;
 
-  // We mimic the steps CoCreateInstance uses to instantiate the object. This
-  // was previously done because it failed inside the sandbox, and now is done
-  // as a more minimal approach to avoid other side-effects CCI might have (as
-  // we are still in a reduced sandbox).
-  HMODULE decoder_dll = ::LoadLibrary(L"msmpeg2vdec.dll");
-  RETURN_ON_FAILURE(decoder_dll,
-                    "msmpeg2vdec.dll required for decoding is not loaded",
-                    false);
+  // Profile must fall within the valid range for one of the supported codecs.
+  if (profile >= media::H264PROFILE_MIN && profile <= media::H264PROFILE_MAX) {
+    // We mimic the steps CoCreateInstance uses to instantiate the object. This
+    // was previously done because it failed inside the sandbox, and now is done
+    // as a more minimal approach to avoid other side-effects CCI might have (as
+    // we are still in a reduced sandbox).
+    decoder_dll = ::LoadLibrary(L"msmpeg2vdec.dll");
+    RETURN_ON_FAILURE(decoder_dll,
+                      "msmpeg2vdec.dll required for decoding is not loaded",
+                      false);
 
-  // Check version of DLL, version 6.7.7140 is blacklisted due to high crash
-  // rates in browsers loading that DLL. If that is the version installed we
-  // fall back to software decoding. See crbug/403440.
-  FileVersionInfo* version_info =
-      FileVersionInfo::CreateFileVersionInfoForModule(decoder_dll);
-  RETURN_ON_FAILURE(version_info,
-                    "unable to get version of msmpeg2vdec.dll",
-                    false);
-  base::string16 file_version = version_info->file_version();
-  RETURN_ON_FAILURE(file_version.find(L"6.1.7140") == base::string16::npos,
-                    "blacklisted version of msmpeg2vdec.dll 6.7.7140",
-                    false);
+    // Check version of DLL, version 6.7.7140 is blacklisted due to high crash
+    // rates in browsers loading that DLL. If that is the version installed we
+    // fall back to software decoding. See crbug/403440.
+    FileVersionInfo* version_info =
+        FileVersionInfo::CreateFileVersionInfoForModule(decoder_dll);
+    RETURN_ON_FAILURE(version_info,
+                      "unable to get version of msmpeg2vdec.dll",
+                      false);
+    base::string16 file_version = version_info->file_version();
+    RETURN_ON_FAILURE(file_version.find(L"6.1.7140") == base::string16::npos,
+                      "blacklisted version of msmpeg2vdec.dll 6.7.7140",
+                      false);
+    codec_ = media::kCodecH264;
+  } else if (profile == media::VP8PROFILE_ANY ||
+             profile == media::VP9PROFILE_ANY) {
+    base::FilePath dll_path;
+    RETURN_ON_FAILURE(PathService::Get(base::DIR_PROGRAM_FILES, &dll_path),
+        "failed to get path for DIR_PROGRAM_FILES", false);
+    dll_path = dll_path.Append(kVPXDecoderDLLPath);
+    if (profile == media::VP8PROFILE_ANY) {
+      codec_ = media::kCodecVP8;
+      dll_path = dll_path.Append(kVP8DecoderDLLName);
+    } else {
+      codec_ = media::kCodecVP9;
+      dll_path = dll_path.Append(kVP9DecoderDLLName);
+    }
+    decoder_dll = ::LoadLibraryEx(dll_path.value().data(), NULL,
+        LOAD_WITH_ALTERED_SEARCH_PATH);
+    RETURN_ON_FAILURE(decoder_dll, "vpx decoder dll is not loaded", false);
+  } else {
+    RETURN_ON_FAILURE(false, "Unsupported codec.", false);
+  }
 
   typedef HRESULT(WINAPI * GetClassObject)(
       const CLSID & clsid, const IID & iid, void * *object);
@@ -673,9 +814,22 @@ bool DXVAVideoDecodeAccelerator::InitDecoder(media::VideoCodecProfile profile) {
       get_class_object, "Failed to get DllGetClassObject pointer", false);
 
   base::win::ScopedComPtr<IClassFactory> factory;
-  HRESULT hr = get_class_object(__uuidof(CMSH264DecoderMFT),
-                                __uuidof(IClassFactory),
-                                reinterpret_cast<void**>(factory.Receive()));
+  HRESULT hr;
+  if (codec_ == media::kCodecH264) {
+    hr  = get_class_object(__uuidof(CMSH264DecoderMFT),
+                           __uuidof(IClassFactory),
+                           reinterpret_cast<void**>(factory.Receive()));
+  } else if (codec_ == media::kCodecVP8) {
+    hr  = get_class_object(CLSID_WebmMfVp8Dec,
+                           __uuidof(IClassFactory),
+                           reinterpret_cast<void**>(factory.Receive()));
+  } else if (codec_ == media::kCodecVP9) {
+    hr  = get_class_object(CLSID_WebmMfVp9Dec,
+                           __uuidof(IClassFactory),
+                           reinterpret_cast<void**>(factory.Receive()));
+  } else {
+    RETURN_ON_FAILURE(false, "Unsupported codec.", false);
+  }
   RETURN_ON_HR_FAILURE(hr, "DllGetClassObject for decoder failed", false);
 
   hr = factory->CreateInstance(NULL,
@@ -725,8 +879,11 @@ bool DXVAVideoDecodeAccelerator::CheckDecoderDxvaSupport() {
   hr = attributes->GetUINT32(MF_SA_D3D_AWARE, &dxva);
   RETURN_ON_HR_FAILURE(hr, "Failed to check if decoder supports DXVA", false);
 
-  hr = attributes->SetUINT32(CODECAPI_AVDecVideoAcceleration_H264, TRUE);
-  RETURN_ON_HR_FAILURE(hr, "Failed to enable DXVA H/W decoding", false);
+  if (codec_ == media::kCodecH264) {
+    hr = attributes->SetUINT32(CODECAPI_AVDecVideoAcceleration_H264, TRUE);
+    RETURN_ON_HR_FAILURE(hr, "Failed to enable DXVA H/W decoding", false);
+  }
+
   return true;
 }
 
@@ -744,7 +901,16 @@ bool DXVAVideoDecodeAccelerator::SetDecoderInputMediaType() {
   hr = media_type->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
   RETURN_ON_HR_FAILURE(hr, "Failed to set major input type", false);
 
-  hr = media_type->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264);
+  if (codec_ == media::kCodecH264) {
+    hr = media_type->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264);
+  } else if (codec_ == media::kCodecVP8) {
+    hr = media_type->SetGUID(MF_MT_SUBTYPE, MEDIASUBTYPE_VP80);
+  } else if (codec_ == media::kCodecVP9) {
+    hr = media_type->SetGUID(MF_MT_SUBTYPE, MEDIASUBTYPE_VP90);
+  } else {
+    NOTREACHED();
+    RETURN_ON_FAILURE(false, "Unsupported codec on input media type.", false);
+  }
   RETURN_ON_HR_FAILURE(hr, "Failed to set subtype", false);
 
   // Not sure about this. msdn recommends setting this value on the input
@@ -753,7 +919,7 @@ bool DXVAVideoDecodeAccelerator::SetDecoderInputMediaType() {
                              MFVideoInterlace_MixedInterlaceOrProgressive);
   RETURN_ON_HR_FAILURE(hr, "Failed to set interlace mode", false);
 
-  hr = decoder_->SetInputType(0, media_type, 0);  // No flags
+  hr = decoder_->SetInputType(0, media_type.get(), 0);  // No flags
   RETURN_ON_HR_FAILURE(hr, "Failed to set decoder input type", false);
   return true;
 }
@@ -771,7 +937,7 @@ bool DXVAVideoDecodeAccelerator::SetDecoderOutputMediaType(
     RETURN_ON_HR_FAILURE(hr, "Failed to get output major type", false);
 
     if (out_subtype == subtype) {
-      hr = decoder_->SetOutputType(0, out_media_type, 0);  // No flags
+      hr = decoder_->SetOutputType(0, out_media_type.get(), 0);  // No flags
       RETURN_ON_HR_FAILURE(hr, "Failed to set decoder output type", false);
       return true;
     }
@@ -798,10 +964,12 @@ bool DXVAVideoDecodeAccelerator::GetStreamsInfoAndBufferReqs() {
 
   DVLOG(1) << "Input stream info: ";
   DVLOG(1) << "Max latency: " << input_stream_info_.hnsMaxLatency;
-  // There should be three flags, one for requiring a whole frame be in a
-  // single sample, one for requiring there be one buffer only in a single
-  // sample, and one that specifies a fixed sample size. (as in cbSize)
-  CHECK_EQ(input_stream_info_.dwFlags, 0x7u);
+  if (codec_ == media::kCodecH264) {
+    // There should be three flags, one for requiring a whole frame be in a
+    // single sample, one for requiring there be one buffer only in a single
+    // sample, and one that specifies a fixed sample size. (as in cbSize)
+    CHECK_EQ(input_stream_info_.dwFlags, 0x7u);
+  }
 
   DVLOG(1) << "Min buffer size: " << input_stream_info_.cbSize;
   DVLOG(1) << "Max lookahead: " << input_stream_info_.cbMaxLookahead;
@@ -813,18 +981,22 @@ bool DXVAVideoDecodeAccelerator::GetStreamsInfoAndBufferReqs() {
   // allocate its own sample.
   DVLOG(1) << "Flags: "
           << std::hex << std::showbase << output_stream_info_.dwFlags;
-  CHECK_EQ(output_stream_info_.dwFlags, 0x107u);
+  if (codec_ == media::kCodecH264) {
+    CHECK_EQ(output_stream_info_.dwFlags, 0x107u);
+  }
   DVLOG(1) << "Min buffer size: " << output_stream_info_.cbSize;
   DVLOG(1) << "Alignment: " << output_stream_info_.cbAlignment;
   return true;
 }
 
 void DXVAVideoDecodeAccelerator::DoDecode() {
+  DCHECK(decoder_thread_task_runner_->BelongsToCurrentThread());
   // This function is also called from FlushInternal in a loop which could
   // result in the state transitioning to kStopped due to no decoded output.
-  RETURN_AND_NOTIFY_ON_FAILURE((state_ == kNormal || state_ == kFlushing ||
-                                state_ == kStopped),
-      "DoDecode: not in normal/flushing/stopped state", ILLEGAL_STATE,);
+  State state = GetState();
+  RETURN_AND_NOTIFY_ON_FAILURE(
+      (state == kNormal || state == kFlushing || state == kStopped),
+          "DoDecode: not in normal/flushing/stopped state", ILLEGAL_STATE,);
 
   MFT_OUTPUT_DATA_BUFFER output_data_buffer = {0};
   DWORD status = 0;
@@ -835,7 +1007,7 @@ void DXVAVideoDecodeAccelerator::DoDecode() {
                                        &status);
   IMFCollection* events = output_data_buffer.pEvents;
   if (events != NULL) {
-    VLOG(1) << "Got events from ProcessOuput, but discarding";
+    DVLOG(1) << "Got events from ProcessOuput, but discarding";
     events->Release();
   }
   if (FAILED(hr)) {
@@ -846,7 +1018,7 @@ void DXVAVideoDecodeAccelerator::DoDecode() {
         // Decoder didn't let us set NV12 output format. Not sure as to why
         // this can happen. Give up in disgust.
         NOTREACHED() << "Failed to set decoder output media type to NV12";
-        state_ = kStopped;
+        SetState(kStopped);
       } else {
         DVLOG(1) << "Received output format change from the decoder."
                     " Recursively invoking DoDecode";
@@ -855,7 +1027,7 @@ void DXVAVideoDecodeAccelerator::DoDecode() {
       return;
     } else if (hr == MF_E_TRANSFORM_NEED_MORE_INPUT) {
       // No more output from the decoder. Stop playback.
-      state_ = kStopped;
+      SetState(kStopped);
       return;
     } else {
       NOTREACHED() << "Unhandled error in DoDecode()";
@@ -881,7 +1053,7 @@ bool DXVAVideoDecodeAccelerator::ProcessOutputSample(IMFSample* sample) {
   RETURN_ON_HR_FAILURE(hr, "Failed to get buffer from output sample", false);
 
   base::win::ScopedComPtr<IDirect3DSurface9> surface;
-  hr = MFGetService(output_buffer, MR_BUFFER_SERVICE,
+  hr = MFGetService(output_buffer.get(), MR_BUFFER_SERVICE,
                     IID_PPV_ARGS(surface.Receive()));
   RETURN_ON_HR_FAILURE(hr, "Failed to get D3D surface from output sample",
                        false);
@@ -891,17 +1063,19 @@ bool DXVAVideoDecodeAccelerator::ProcessOutputSample(IMFSample* sample) {
                        "Failed to get input buffer id associated with sample",
                        false);
 
-  pending_output_samples_.push_back(
-      PendingSampleInfo(input_buffer_id, sample));
-
-  // If we have available picture buffers to copy the output data then use the
-  // first one and then flag it as not being available for use.
-  if (output_picture_buffers_.size()) {
-    ProcessPendingSamples();
-    return true;
+  {
+    base::AutoLock lock(decoder_lock_);
+    DCHECK(pending_output_samples_.empty());
+    pending_output_samples_.push_back(
+        PendingSampleInfo(input_buffer_id, sample));
   }
+
   if (pictures_requested_) {
     DVLOG(1) << "Waiting for picture slots from the client.";
+    main_thread_task_runner_->PostTask(
+        FROM_HERE,
+        base::Bind(&DXVAVideoDecodeAccelerator::ProcessPendingSamples,
+                   weak_this_factory_.GetWeakPtr()));
     return true;
   }
 
@@ -913,7 +1087,7 @@ bool DXVAVideoDecodeAccelerator::ProcessOutputSample(IMFSample* sample) {
   RETURN_ON_HR_FAILURE(hr, "Failed to get surface description", false);
 
   // Go ahead and request picture buffers.
-  base::MessageLoop::current()->PostTask(
+  main_thread_task_runner_->PostTask(
       FROM_HERE,
       base::Bind(&DXVAVideoDecodeAccelerator::RequestPictureBuffers,
                  weak_this_factory_.GetWeakPtr(),
@@ -925,6 +1099,11 @@ bool DXVAVideoDecodeAccelerator::ProcessOutputSample(IMFSample* sample) {
 }
 
 void DXVAVideoDecodeAccelerator::ProcessPendingSamples() {
+  DCHECK(main_thread_task_runner_->BelongsToCurrentThread());
+
+  if (!output_picture_buffers_.size())
+    return;
+
   RETURN_AND_NOTIFY_ON_FAILURE(make_context_current_.Run(),
       "Failed to make context current", PLATFORM_FAILURE,);
 
@@ -932,19 +1111,27 @@ void DXVAVideoDecodeAccelerator::ProcessPendingSamples() {
 
   for (index = output_picture_buffers_.begin();
        index != output_picture_buffers_.end() &&
-       !pending_output_samples_.empty();
+       OutputSamplesPresent();
        ++index) {
     if (index->second->available()) {
-      PendingSampleInfo sample_info = pending_output_samples_.front();
+      PendingSampleInfo* pending_sample = NULL;
+      {
+        base::AutoLock lock(decoder_lock_);
+
+        PendingSampleInfo& sample_info = pending_output_samples_.front();
+        if (sample_info.picture_buffer_id != -1)
+          continue;
+        pending_sample = &sample_info;
+      }
 
       base::win::ScopedComPtr<IMFMediaBuffer> output_buffer;
-      HRESULT hr = sample_info.output_sample->GetBufferByIndex(
+      HRESULT hr = pending_sample->output_sample->GetBufferByIndex(
           0, output_buffer.Receive());
       RETURN_AND_NOTIFY_ON_HR_FAILURE(
           hr, "Failed to get buffer from output sample", PLATFORM_FAILURE,);
 
       base::win::ScopedComPtr<IDirect3DSurface9> surface;
-      hr = MFGetService(output_buffer, MR_BUFFER_SERVICE,
+      hr = MFGetService(output_buffer.get(), MR_BUFFER_SERVICE,
                         IID_PPV_ARGS(surface.Receive()));
       RETURN_AND_NOTIFY_ON_HR_FAILURE(
           hr, "Failed to get D3D surface from output sample",
@@ -963,49 +1150,44 @@ void DXVAVideoDecodeAccelerator::ProcessPendingSamples() {
         return;
       }
 
-      RETURN_AND_NOTIFY_ON_FAILURE(
-          index->second->CopyOutputSampleDataToPictureBuffer(*this, surface),
-          "Failed to copy output sample",
-          PLATFORM_FAILURE, );
+      pending_sample->picture_buffer_id = index->second->id();
 
-      media::Picture output_picture(index->second->id(),
-                                    sample_info.input_buffer_id,
-                                    gfx::Rect(index->second->size()));
-      base::MessageLoop::current()->PostTask(
-          FROM_HERE,
-          base::Bind(&DXVAVideoDecodeAccelerator::NotifyPictureReady,
-                     weak_this_factory_.GetWeakPtr(),
-                     output_picture));
+      RETURN_AND_NOTIFY_ON_FAILURE(
+          index->second->CopyOutputSampleDataToPictureBuffer(
+              this,
+              surface.get(),
+              pending_sample->input_buffer_id),
+          "Failed to copy output sample", PLATFORM_FAILURE, );
 
       index->second->set_available(false);
-      pending_output_samples_.pop_front();
     }
-  }
-
-  if (!pending_input_buffers_.empty() && pending_output_samples_.empty()) {
-    base::MessageLoop::current()->PostTask(
-        FROM_HERE,
-        base::Bind(&DXVAVideoDecodeAccelerator::DecodePendingInputBuffers,
-                   weak_this_factory_.GetWeakPtr()));
   }
 }
 
 void DXVAVideoDecodeAccelerator::StopOnError(
   media::VideoDecodeAccelerator::Error error) {
-  DCHECK(CalledOnValidThread());
+  if (!main_thread_task_runner_->BelongsToCurrentThread()) {
+    main_thread_task_runner_->PostTask(
+        FROM_HERE,
+        base::Bind(&DXVAVideoDecodeAccelerator::StopOnError,
+                   weak_this_factory_.GetWeakPtr(),
+                   error));
+    return;
+  }
 
   if (client_)
     client_->NotifyError(error);
   client_ = NULL;
 
-  if (state_ != kUninitialized) {
+  if (GetState() != kUninitialized) {
     Invalidate();
   }
 }
 
 void DXVAVideoDecodeAccelerator::Invalidate() {
-  if (state_ == kUninitialized)
+  if (GetState() == kUninitialized)
     return;
+  decoder_thread_.Stop();
   weak_this_factory_.InvalidateWeakPtrs();
   output_picture_buffers_.clear();
   stale_output_picture_buffers_.clear();
@@ -1013,27 +1195,38 @@ void DXVAVideoDecodeAccelerator::Invalidate() {
   pending_input_buffers_.clear();
   decoder_.Release();
   MFShutdown();
-  state_ = kUninitialized;
+  SetState(kUninitialized);
 }
 
 void DXVAVideoDecodeAccelerator::NotifyInputBufferRead(int input_buffer_id) {
+  DCHECK(main_thread_task_runner_->BelongsToCurrentThread());
   if (client_)
     client_->NotifyEndOfBitstreamBuffer(input_buffer_id);
 }
 
 void DXVAVideoDecodeAccelerator::NotifyFlushDone() {
-  if (client_)
+  DCHECK(main_thread_task_runner_->BelongsToCurrentThread());
+  if (client_ && pending_flush_) {
+    pending_flush_ = false;
+    {
+      base::AutoLock lock(decoder_lock_);
+      sent_drain_message_ = false;
+    }
+
     client_->NotifyFlushDone();
+  }
 }
 
 void DXVAVideoDecodeAccelerator::NotifyResetDone() {
+  DCHECK(main_thread_task_runner_->BelongsToCurrentThread());
   if (client_)
     client_->NotifyResetDone();
 }
 
 void DXVAVideoDecodeAccelerator::RequestPictureBuffers(int width, int height) {
+  DCHECK(main_thread_task_runner_->BelongsToCurrentThread());
   // This task could execute after the decoder has been torn down.
-  if (state_ != kUninitialized && client_) {
+  if (GetState() != kUninitialized && client_) {
     client_->ProvidePictureBuffers(
         kNumPictureBuffers,
         gfx::Size(width, height),
@@ -1042,14 +1235,22 @@ void DXVAVideoDecodeAccelerator::RequestPictureBuffers(int width, int height) {
 }
 
 void DXVAVideoDecodeAccelerator::NotifyPictureReady(
-    const media::Picture& picture) {
+    int picture_buffer_id,
+    int input_buffer_id,
+    const gfx::Rect& picture_buffer_size) {
+  DCHECK(main_thread_task_runner_->BelongsToCurrentThread());
   // This task could execute after the decoder has been torn down.
-  if (state_ != kUninitialized && client_)
+  if (GetState() != kUninitialized && client_) {
+    media::Picture picture(picture_buffer_id,
+                           input_buffer_id,
+                           picture_buffer_size);
     client_->PictureReady(picture);
+  }
 }
 
 void DXVAVideoDecodeAccelerator::NotifyInputBuffersDropped() {
-  if (!client_ || !pending_output_samples_.empty())
+  DCHECK(main_thread_task_runner_->BelongsToCurrentThread());
+  if (!client_)
     return;
 
   for (PendingInputs::iterator it = pending_input_buffers_.begin();
@@ -1063,10 +1264,12 @@ void DXVAVideoDecodeAccelerator::NotifyInputBuffersDropped() {
 }
 
 void DXVAVideoDecodeAccelerator::DecodePendingInputBuffers() {
-  RETURN_AND_NOTIFY_ON_FAILURE((state_ != kUninitialized),
-      "Invalid state: " << state_, ILLEGAL_STATE,);
+  DCHECK(decoder_thread_task_runner_->BelongsToCurrentThread());
+  State state = GetState();
+  RETURN_AND_NOTIFY_ON_FAILURE((state != kUninitialized),
+      "Invalid state: " << state, ILLEGAL_STATE,);
 
-  if (pending_input_buffers_.empty() || !pending_output_samples_.empty())
+  if (pending_input_buffers_.empty() || OutputSamplesPresent())
     return;
 
   PendingInputs pending_input_buffers_copy;
@@ -1079,33 +1282,62 @@ void DXVAVideoDecodeAccelerator::DecodePendingInputBuffers() {
 }
 
 void DXVAVideoDecodeAccelerator::FlushInternal() {
-  // The DoDecode function sets the state to kStopped when the decoder returns
-  // MF_E_TRANSFORM_NEED_MORE_INPUT.
-  // The MFT decoder can buffer upto 30 frames worth of input before returning
-  // an output frame. This loop here attempts to retrieve as many output frames
-  // as possible from the buffered set.
-  while (state_ != kStopped) {
-    DoDecode();
-    if (!pending_output_samples_.empty())
-      return;
+  DCHECK(decoder_thread_task_runner_->BelongsToCurrentThread());
+
+  // We allow only one output frame to be present at any given time. If we have
+  // an output frame, then we cannot complete the flush at this time.
+  if (OutputSamplesPresent())
+    return;
+
+  // First drain the pending input because once the drain message is sent below,
+  // the decoder will ignore further input until it's drained.
+  if (!pending_input_buffers_.empty()) {
+    decoder_thread_task_runner_->PostTask(
+        FROM_HERE,
+        base::Bind(&DXVAVideoDecodeAccelerator::DecodePendingInputBuffers,
+                    base::Unretained(this)));
+    decoder_thread_task_runner_->PostTask(
+        FROM_HERE,
+        base::Bind(&DXVAVideoDecodeAccelerator::FlushInternal,
+                    base::Unretained(this)));
+    return;
   }
 
-  base::MessageLoop::current()->PostTask(
+  {
+    base::AutoLock lock(decoder_lock_);
+    if (!sent_drain_message_) {
+      RETURN_AND_NOTIFY_ON_FAILURE(SendMFTMessage(MFT_MESSAGE_COMMAND_DRAIN, 0),
+                                   "Failed to send drain message",
+                                   PLATFORM_FAILURE,);
+      sent_drain_message_ = true;
+    }
+  }
+
+  // Attempt to retrieve an output frame from the decoder. If we have one,
+  // return and proceed when the output frame is processed. If we don't have a
+  // frame then we are done.
+  DoDecode();
+  if (OutputSamplesPresent())
+    return;
+
+  SetState(kFlushing);
+
+  main_thread_task_runner_->PostTask(
       FROM_HERE,
       base::Bind(&DXVAVideoDecodeAccelerator::NotifyFlushDone,
                  weak_this_factory_.GetWeakPtr()));
 
-  state_ = kNormal;
+  SetState(kNormal);
 }
 
 void DXVAVideoDecodeAccelerator::DecodeInternal(
     const base::win::ScopedComPtr<IMFSample>& sample) {
-  DCHECK(CalledOnValidThread());
+  DCHECK(decoder_thread_task_runner_->BelongsToCurrentThread());
 
-  if (state_ == kUninitialized)
+  if (GetState() == kUninitialized)
     return;
 
-  if (!pending_output_samples_.empty() || !pending_input_buffers_.empty()) {
+  if (OutputSamplesPresent() || !pending_input_buffers_.empty()) {
     pending_input_buffers_.push_back(sample);
     return;
   }
@@ -1115,7 +1347,7 @@ void DXVAVideoDecodeAccelerator::DecodeInternal(
   }
   inputs_before_decode_++;
 
-  HRESULT hr = decoder_->ProcessInput(0, sample, 0);
+  HRESULT hr = decoder_->ProcessInput(0, sample.get(), 0);
   // As per msdn if the decoder returns MF_E_NOTACCEPTING then it means that it
   // has enough data to produce one or more output samples. In this case the
   // recommended options are to
@@ -1127,10 +1359,16 @@ void DXVAVideoDecodeAccelerator::DecodeInternal(
   // decoder failure.
   if (hr == MF_E_NOTACCEPTING) {
     DoDecode();
-    RETURN_AND_NOTIFY_ON_FAILURE((state_ == kStopped || state_ == kNormal),
-        "Failed to process output. Unexpected decoder state: " << state_,
-        PLATFORM_FAILURE,);
-    hr = decoder_->ProcessInput(0, sample, 0);
+    // If the DoDecode call resulted in an output frame then we should not
+    // process any more input until that frame is copied to the target surface.
+    if (!OutputSamplesPresent()) {
+      State state = GetState();
+      RETURN_AND_NOTIFY_ON_FAILURE((state == kStopped || state == kNormal ||
+                                    state == kFlushing),
+          "Failed to process output. Unexpected decoder state: " << state,
+          PLATFORM_FAILURE,);
+      hr = decoder_->ProcessInput(0, sample.get(), 0);
+    }
     // If we continue to get the MF_E_NOTACCEPTING error we do the following:-
     // 1. Add the input sample to the pending queue.
     // 2. If we don't have any output samples we post the
@@ -1142,12 +1380,10 @@ void DXVAVideoDecodeAccelerator::DecodeInternal(
     // decoder where it recycles the output Decoder surfaces.
     if (hr == MF_E_NOTACCEPTING) {
       pending_input_buffers_.push_back(sample);
-      if (pending_output_samples_.empty()) {
-        base::MessageLoop::current()->PostTask(
-            FROM_HERE,
-            base::Bind(&DXVAVideoDecodeAccelerator::DecodePendingInputBuffers,
-                       weak_this_factory_.GetWeakPtr()));
-      }
+      decoder_thread_task_runner_->PostTask(
+          FROM_HERE,
+          base::Bind(&DXVAVideoDecodeAccelerator::DecodePendingInputBuffers,
+                      base::Unretained(this)));
       return;
     }
   }
@@ -1156,8 +1392,10 @@ void DXVAVideoDecodeAccelerator::DecodeInternal(
 
   DoDecode();
 
-  RETURN_AND_NOTIFY_ON_FAILURE((state_ == kStopped || state_ == kNormal),
-      "Failed to process output. Unexpected decoder state: " << state_,
+  State state = GetState();
+  RETURN_AND_NOTIFY_ON_FAILURE((state == kStopped || state == kNormal ||
+                                state == kFlushing),
+      "Failed to process output. Unexpected decoder state: " << state,
       ILLEGAL_STATE,);
 
   LONGLONG input_buffer_id = 0;
@@ -1173,7 +1411,7 @@ void DXVAVideoDecodeAccelerator::DecodeInternal(
   // decoder to emit an output packet for every input packet.
   // http://code.google.com/p/chromium/issues/detail?id=108121
   // http://code.google.com/p/chromium/issues/detail?id=150925
-  base::MessageLoop::current()->PostTask(
+  main_thread_task_runner_->PostTask(
       FROM_HERE,
       base::Bind(&DXVAVideoDecodeAccelerator::NotifyInputBufferRead,
                  weak_this_factory_.GetWeakPtr(),
@@ -1182,12 +1420,12 @@ void DXVAVideoDecodeAccelerator::DecodeInternal(
 
 void DXVAVideoDecodeAccelerator::HandleResolutionChanged(int width,
                                                          int height) {
-  base::MessageLoop::current()->PostTask(
+  main_thread_task_runner_->PostTask(
       FROM_HERE,
       base::Bind(&DXVAVideoDecodeAccelerator::DismissStaleBuffers,
                  weak_this_factory_.GetWeakPtr()));
 
-  base::MessageLoop::current()->PostTask(
+  main_thread_task_runner_->PostTask(
       FROM_HERE,
       base::Bind(&DXVAVideoDecodeAccelerator::RequestPictureBuffers,
                  weak_this_factory_.GetWeakPtr(),
@@ -1222,6 +1460,170 @@ void DXVAVideoDecodeAccelerator::DeferredDismissStaleBuffer(
   DVLOG(1) << "Dismissing picture id: " << it->second->id();
   client_->DismissPictureBuffer(it->second->id());
   stale_output_picture_buffers_.erase(it);
+}
+
+DXVAVideoDecodeAccelerator::State
+DXVAVideoDecodeAccelerator::GetState() {
+  static_assert(sizeof(State) == sizeof(long), "mismatched type sizes");
+  State state = static_cast<State>(
+      InterlockedAdd(reinterpret_cast<volatile long*>(&state_), 0));
+  return state;
+}
+
+void DXVAVideoDecodeAccelerator::SetState(State new_state) {
+  if (!main_thread_task_runner_->BelongsToCurrentThread()) {
+    main_thread_task_runner_->PostTask(
+        FROM_HERE,
+        base::Bind(&DXVAVideoDecodeAccelerator::SetState,
+                   weak_this_factory_.GetWeakPtr(),
+                   new_state));
+    return;
+  }
+
+  static_assert(sizeof(State) == sizeof(long), "mismatched type sizes");
+  ::InterlockedExchange(reinterpret_cast<volatile long*>(&state_),
+                        new_state);
+  DCHECK_EQ(state_, new_state);
+}
+
+void DXVAVideoDecodeAccelerator::StartDecoderThread() {
+  decoder_thread_.init_com_with_mta(false);
+  decoder_thread_.Start();
+  decoder_thread_task_runner_ = decoder_thread_.task_runner();
+}
+
+bool DXVAVideoDecodeAccelerator::OutputSamplesPresent() {
+  base::AutoLock lock(decoder_lock_);
+  return !pending_output_samples_.empty();
+}
+
+void DXVAVideoDecodeAccelerator::CopySurface(IDirect3DSurface9* src_surface,
+                                             IDirect3DSurface9* dest_surface,
+                                             int picture_buffer_id,
+                                             int input_buffer_id) {
+  if (!decoder_thread_task_runner_->BelongsToCurrentThread()) {
+    decoder_thread_task_runner_->PostTask(
+        FROM_HERE,
+        base::Bind(&DXVAVideoDecodeAccelerator::CopySurface,
+                   base::Unretained(this),
+                   src_surface,
+                   dest_surface,
+                   picture_buffer_id,
+                   input_buffer_id));
+    return;
+  }
+
+  HRESULT hr = device_->StretchRect(src_surface, NULL, dest_surface,
+                                    NULL, D3DTEXF_NONE);
+  RETURN_ON_HR_FAILURE(hr, "Colorspace conversion via StretchRect failed",);
+
+  // Ideally, this should be done immediately before the draw call that uses
+  // the texture. Flush it once here though.
+  hr = query_->Issue(D3DISSUE_END);
+  RETURN_ON_HR_FAILURE(hr, "Failed to issue END",);
+
+  // Flush the decoder device to ensure that the decoded frame is copied to the
+  // target surface.
+  decoder_thread_task_runner_->PostDelayedTask(
+      FROM_HERE,
+      base::Bind(&DXVAVideoDecodeAccelerator::FlushDecoder,
+                 base::Unretained(this), 0, src_surface, dest_surface,
+                 picture_buffer_id, input_buffer_id),
+      base::TimeDelta::FromMilliseconds(kFlushDecoderSurfaceTimeoutMs));
+}
+
+void DXVAVideoDecodeAccelerator::CopySurfaceComplete(
+    IDirect3DSurface9* src_surface,
+    IDirect3DSurface9* dest_surface,
+    int picture_buffer_id,
+    int input_buffer_id) {
+  DCHECK(main_thread_task_runner_->BelongsToCurrentThread());
+
+  // The output buffers may have changed in the following scenarios:-
+  // 1. A resolution change.
+  // 2. Decoder instance was destroyed.
+  // Ignore copy surface notifications for such buffers.
+  // copy surface notifications for such buffers.
+  OutputBuffers::iterator it = output_picture_buffers_.find(picture_buffer_id);
+  if (it == output_picture_buffers_.end())
+    return;
+
+  // If the picture buffer is marked as available it probably means that there
+  // was a Reset operation which dropped the output frame.
+  DXVAPictureBuffer* picture_buffer = it->second.get();
+  if (picture_buffer->available())
+    return;
+
+  RETURN_AND_NOTIFY_ON_FAILURE(make_context_current_.Run(),
+      "Failed to make context current", PLATFORM_FAILURE,);
+
+  DCHECK(!output_picture_buffers_.empty());
+
+  picture_buffer->CopySurfaceComplete(src_surface,
+                                      dest_surface);
+
+  NotifyPictureReady(picture_buffer->id(),
+                     input_buffer_id,
+                     gfx::Rect(picture_buffer->size()));
+
+  {
+    base::AutoLock lock(decoder_lock_);
+    if (!pending_output_samples_.empty())
+      pending_output_samples_.pop_front();
+  }
+
+  if (pending_flush_) {
+    decoder_thread_task_runner_->PostTask(
+        FROM_HERE,
+        base::Bind(&DXVAVideoDecodeAccelerator::FlushInternal,
+                   base::Unretained(this)));
+    return;
+  }
+  decoder_thread_task_runner_->PostTask(
+      FROM_HERE,
+      base::Bind(&DXVAVideoDecodeAccelerator::DecodePendingInputBuffers,
+                 base::Unretained(this)));
+}
+
+void DXVAVideoDecodeAccelerator::FlushDecoder(
+    int iterations,
+    IDirect3DSurface9* src_surface,
+    IDirect3DSurface9* dest_surface,
+    int picture_buffer_id,
+    int input_buffer_id) {
+  DCHECK(decoder_thread_task_runner_->BelongsToCurrentThread());
+
+  // The DXVA decoder has its own device which it uses for decoding. ANGLE
+  // has its own device which we don't have access to.
+  // The above code attempts to copy the decoded picture into a surface
+  // which is owned by ANGLE. As there are multiple devices involved in
+  // this, the StretchRect call above is not synchronous.
+  // We attempt to flush the batched operations to ensure that the picture is
+  // copied to the surface owned by ANGLE.
+  // We need to do this in a loop and call flush multiple times.
+  // We have seen the GetData call for flushing the command buffer fail to
+  // return success occassionally on multi core machines, leading to an
+  // infinite loop.
+  // Workaround is to have an upper limit of 4 on the number of iterations to
+  // wait for the Flush to finish.
+  HRESULT hr = query_->GetData(NULL, 0, D3DGETDATA_FLUSH);
+  if ((hr == S_FALSE) && (++iterations < kMaxIterationsForD3DFlush)) {
+    decoder_thread_task_runner_->PostDelayedTask(
+        FROM_HERE,
+        base::Bind(&DXVAVideoDecodeAccelerator::FlushDecoder,
+                   base::Unretained(this), iterations, src_surface,
+                   dest_surface, picture_buffer_id, input_buffer_id),
+        base::TimeDelta::FromMilliseconds(kFlushDecoderSurfaceTimeoutMs));
+    return;
+  }
+  main_thread_task_runner_->PostTask(
+    FROM_HERE,
+    base::Bind(&DXVAVideoDecodeAccelerator::CopySurfaceComplete,
+               weak_this_factory_.GetWeakPtr(),
+               src_surface,
+               dest_surface,
+               picture_buffer_id,
+               input_buffer_id));
 }
 
 }  // namespace content

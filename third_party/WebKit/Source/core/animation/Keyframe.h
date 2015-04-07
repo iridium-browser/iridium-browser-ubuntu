@@ -97,6 +97,6 @@ protected:
     RefPtr<TimingFunction> m_easing;
 };
 
-}
+} // namespace blink
 
-#endif
+#endif // Keyframe_h

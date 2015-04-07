@@ -14,7 +14,7 @@ class Typical10MobilePage(page_module.Page):
     self.user_agent_type = 'mobile'
     self.archive_data_file = 'data/typical_10_mobile.json'
 
-  def RunPowerPageInteractions(self, action_runner):
+  def RunPageInteractions(self, action_runner):
     action_runner.Wait(20)
     action_runner.ScrollPage()
     action_runner.Wait(20)
@@ -53,4 +53,4 @@ class Typical10MobilePageSet(page_set_module.PageSet):
     ]
 
     for url in urls_list:
-      self.AddPage(Typical10MobilePage(url, self))
+      self.AddUserStory(Typical10MobilePage(url, self))

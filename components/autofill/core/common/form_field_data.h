@@ -17,18 +17,24 @@ namespace autofill {
 
 // Stores information about a field in a form.
 struct FormFieldData {
+  enum RoleAttribute {
+    // "presentation"
+    ROLE_ATTRIBUTE_PRESENTATION,
+    // Anything else.
+    ROLE_ATTRIBUTE_OTHER,
+  };
+
   FormFieldData();
   ~FormFieldData();
 
-  // Equality tests for identity which does not include |value| or
-  // |is_autofilled|.
-  // TODO(dhollowa): These operators need to be revised when we implement field
-  // ids.
-  bool operator==(const FormFieldData& field) const;
-  bool operator!=(const FormFieldData& field) const;
+  // Returns true if two form fields are the same, not counting the value.
+  bool SameFieldAs(const FormFieldData& field) const;
+
   // Comparison operator exposed for STL map. Uses label, then name to sort.
   bool operator<(const FormFieldData& field) const;
 
+  // If you add more, be sure to update the comparison operator, SameFieldAs,
+  // serializing functions (in the .cc file) and the constructor.
   base::string16 label;
   base::string16 name;
   base::string16 value;
@@ -40,6 +46,7 @@ struct FormFieldData {
   bool is_checkable;
   bool is_focusable;
   bool should_autocomplete;
+  RoleAttribute role;
   base::i18n::TextDirection text_direction;
 
   // For the HTML snippet |<option value="US">United States</option>|, the

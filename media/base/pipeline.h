@@ -6,11 +6,13 @@
 #define MEDIA_BASE_PIPELINE_H_
 
 #include "base/gtest_prod_util.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/default_tick_clock.h"
 #include "media/base/buffering_state.h"
+#include "media/base/cdm_context.h"
 #include "media/base/demuxer.h"
 #include "media/base/media_export.h"
 #include "media/base/pipeline_status.h"
@@ -18,7 +20,7 @@
 #include "media/base/serial_runner.h"
 #include "media/base/text_track.h"
 #include "media/base/video_rotation.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace base {
 class SingleThreadTaskRunner;
@@ -32,6 +34,7 @@ class Renderer;
 class TextRenderer;
 class TextTrackConfig;
 class TimeDeltaInterpolator;
+class VideoFrame;
 
 // Metadata describing a pipeline once it has been initialized.
 struct PipelineMetadata {
@@ -76,6 +79,9 @@ typedef base::Callback<void(PipelineMetadata)> PipelineMetadataCB;
 // "Stopped" state.
 class MEDIA_EXPORT Pipeline : public DemuxerHost {
  public:
+  // Used to paint VideoFrame.
+  typedef base::Callback<void(const scoped_refptr<VideoFrame>&)> PaintCB;
+
   // Constructs a media pipeline that will execute on |task_runner|.
   Pipeline(const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
            MediaLog* media_log);
@@ -94,6 +100,8 @@ class MEDIA_EXPORT Pipeline : public DemuxerHost {
   //                 video in supported formats are known.
   //   |buffering_state_cb| will be executed whenever there are changes in the
   //                        overall buffering state of the pipeline.
+  //   |paint_cb| will be executed whenever there is a VideoFrame to be painted.
+  //              It's safe to call this callback from any thread.
   //   |duration_change_cb| optional callback that will be executed whenever the
   //                        presentation duration changes.
   //   |add_text_track_cb| will be executed whenever a text track is added.
@@ -105,6 +113,7 @@ class MEDIA_EXPORT Pipeline : public DemuxerHost {
              const PipelineStatusCB& seek_cb,
              const PipelineMetadataCB& metadata_cb,
              const BufferingStateCB& buffering_state_cb,
+             const PaintCB& paint_cb,
              const base::Closure& duration_change_cb,
              const AddTextTrackCB& add_text_track_cb);
 
@@ -172,6 +181,8 @@ class MEDIA_EXPORT Pipeline : public DemuxerHost {
   // Gets the current pipeline statistics.
   PipelineStatistics GetStatistics() const;
 
+  void SetCdm(CdmContext* cdm_context, const CdmAttachedCB& cdm_attached_cb);
+
   void SetErrorForTesting(PipelineStatus status);
   bool HasWeakPtrsForTesting() const;
 
@@ -238,6 +249,13 @@ class MEDIA_EXPORT Pipeline : public DemuxerHost {
 
   // Carries out notifying filters that we are seeking to a new timestamp.
   void SeekTask(base::TimeDelta time, const PipelineStatusCB& seek_cb);
+
+  // Carries out setting the |cdm_context| in |renderer_|, and then fires
+  // |cdm_attached_cb| with the result. If |renderer_| is null,
+  // |cdm_attached_cb| will be fired immediately with true, and |cdm_context|
+  // will be set in |renderer_| later when |renderer_| is created.
+  void SetCdmTask(CdmContext* cdm_context,
+                  const CdmAttachedCB& cdm_attached_cb);
 
   // Callbacks executed when a renderer has ended.
   void OnRendererEnded();
@@ -342,6 +360,7 @@ class MEDIA_EXPORT Pipeline : public DemuxerHost {
   PipelineStatusCB error_cb_;
   PipelineMetadataCB metadata_cb_;
   BufferingStateCB buffering_state_cb_;
+  PaintCB paint_cb_;
   base::Closure duration_change_cb_;
   AddTextTrackCB add_text_track_cb_;
 
@@ -356,6 +375,11 @@ class MEDIA_EXPORT Pipeline : public DemuxerHost {
   PipelineStatistics statistics_;
 
   scoped_ptr<SerialRunner> pending_callbacks_;
+
+  // CdmContext to be used to decrypt (and decode) encrypted stream in this
+  // pipeline. Non-null only when SetCdm() is called and the pipeline has not
+  // been started. Then during Start(), this value will be set on |renderer_|.
+  CdmContext* pending_cdm_context_;
 
   base::ThreadChecker thread_checker_;
 

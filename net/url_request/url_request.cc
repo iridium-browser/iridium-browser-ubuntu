@@ -142,31 +142,6 @@ void ConvertRealLoadTimesToBlockingTimes(
 
 }  // namespace
 
-void URLRequest::Deprecated::RegisterRequestInterceptor(
-    Interceptor* interceptor) {
-  URLRequest::RegisterRequestInterceptor(interceptor);
-}
-
-void URLRequest::Deprecated::UnregisterRequestInterceptor(
-    Interceptor* interceptor) {
-  URLRequest::UnregisterRequestInterceptor(interceptor);
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// URLRequest::Interceptor
-
-URLRequestJob* URLRequest::Interceptor::MaybeInterceptRedirect(
-    URLRequest* request,
-    NetworkDelegate* network_delegate,
-    const GURL& location) {
-  return NULL;
-}
-
-URLRequestJob* URLRequest::Interceptor::MaybeInterceptResponse(
-    URLRequest* request, NetworkDelegate* network_delegate) {
-  return NULL;
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // URLRequest::Delegate
 
@@ -624,17 +599,6 @@ URLRequest::URLRequest(const GURL& url,
   net_log_.BeginEvent(NetLog::TYPE_REQUEST_ALIVE);
 }
 
-// static
-void URLRequest::RegisterRequestInterceptor(Interceptor* interceptor) {
-  URLRequestJobManager::GetInstance()->RegisterRequestInterceptor(interceptor);
-}
-
-// static
-void URLRequest::UnregisterRequestInterceptor(Interceptor* interceptor) {
-  URLRequestJobManager::GetInstance()->UnregisterRequestInterceptor(
-      interceptor);
-}
-
 void URLRequest::BeforeRequestComplete(int error) {
   DCHECK(!job_.get());
   DCHECK_NE(ERR_IO_PENDING, error);
@@ -686,12 +650,8 @@ void URLRequest::StartJob(URLRequestJob* job) {
 
   response_info_.was_cached = false;
 
-  // If the referrer is secure, but the requested URL is not, the referrer
-  // policy should be something non-default. If you hit this, please file a
-  // bug.
-  if (referrer_policy_ ==
-          CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE &&
-      GURL(referrer_).SchemeIsSecure() && !url().SchemeIsSecure()) {
+  if (GURL(referrer_) != URLRequestJob::ComputeReferrerForRedirect(
+                             referrer_policy_, referrer_, url())) {
     if (!network_delegate_ ||
         !network_delegate_->CancelURLRequestWithPolicyViolatingReferrerHeader(
             *this, url(), GURL(referrer_))) {
@@ -808,9 +768,18 @@ bool URLRequest::Read(IOBuffer* dest, int dest_size, int* bytes_read) {
     return true;
   }
 
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("423948 URLRequest::Read1"));
+
   bool rv = job_->Read(dest, dest_size, bytes_read);
   // If rv is false, the status cannot be success.
   DCHECK(rv || status_.status() != URLRequestStatus::SUCCESS);
+
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+  tracked_objects::ScopedTracker tracking_profile2(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("423948 URLRequest::Read2"));
+
   if (rv && *bytes_read <= 0 && status_.is_success())
     NotifyRequestCompleted();
   return rv;

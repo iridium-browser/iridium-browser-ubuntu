@@ -98,14 +98,16 @@ class SourceState {
   SourceState(
       scoped_ptr<StreamParser> stream_parser,
       scoped_ptr<FrameProcessor> frame_processor, const LogCB& log_cb,
-      const CreateDemuxerStreamCB& create_demuxer_stream_cb);
+      const CreateDemuxerStreamCB& create_demuxer_stream_cb,
+      const scoped_refptr<MediaLog>& media_log);
 
   ~SourceState();
 
   void Init(const StreamParser::InitCB& init_cb,
             bool allow_audio,
             bool allow_video,
-            const StreamParser::NeedKeyCB& need_key_cb,
+            const StreamParser::EncryptedMediaInitDataCB&
+                encrypted_media_init_data_cb,
             const NewTextTrackCB& new_text_track_cb);
 
   // Appends new data to the StreamParser.
@@ -235,6 +237,7 @@ class SourceState {
 
   scoped_ptr<FrameProcessor> frame_processor_;
   LogCB log_cb_;
+  scoped_refptr<MediaLog> media_log_;
   StreamParser::InitCB init_cb_;
 
   // During Append(), OnNewConfigs() will trigger the initialization segment
@@ -256,7 +259,8 @@ class SourceState {
 SourceState::SourceState(scoped_ptr<StreamParser> stream_parser,
                          scoped_ptr<FrameProcessor> frame_processor,
                          const LogCB& log_cb,
-                         const CreateDemuxerStreamCB& create_demuxer_stream_cb)
+                         const CreateDemuxerStreamCB& create_demuxer_stream_cb,
+                         const scoped_refptr<MediaLog>& media_log)
     : create_demuxer_stream_cb_(create_demuxer_stream_cb),
       timestamp_offset_during_append_(NULL),
       new_media_segment_(false),
@@ -266,6 +270,7 @@ SourceState::SourceState(scoped_ptr<StreamParser> stream_parser,
       video_(NULL),
       frame_processor_(frame_processor.release()),
       log_cb_(log_cb),
+      media_log_(media_log),
       auto_update_timestamp_offset_(false) {
   DCHECK(!create_demuxer_stream_cb_.is_null());
   DCHECK(frame_processor_);
@@ -277,23 +282,21 @@ SourceState::~SourceState() {
   STLDeleteValues(&text_stream_map_);
 }
 
-void SourceState::Init(const StreamParser::InitCB& init_cb,
-                       bool allow_audio,
-                       bool allow_video,
-                       const StreamParser::NeedKeyCB& need_key_cb,
-                       const NewTextTrackCB& new_text_track_cb) {
+void SourceState::Init(
+    const StreamParser::InitCB& init_cb,
+    bool allow_audio,
+    bool allow_video,
+    const StreamParser::EncryptedMediaInitDataCB& encrypted_media_init_data_cb,
+    const NewTextTrackCB& new_text_track_cb) {
   new_text_track_cb_ = new_text_track_cb;
   init_cb_ = init_cb;
 
   stream_parser_->Init(
       base::Bind(&SourceState::OnSourceInitDone, base::Unretained(this)),
-      base::Bind(&SourceState::OnNewConfigs,
-                 base::Unretained(this),
-                 allow_audio,
-                 allow_video),
+      base::Bind(&SourceState::OnNewConfigs, base::Unretained(this),
+                 allow_audio, allow_video),
       base::Bind(&SourceState::OnNewBuffers, base::Unretained(this)),
-      new_text_track_cb_.is_null(),
-      need_key_cb,
+      new_text_track_cb_.is_null(), encrypted_media_init_data_cb,
       base::Bind(&SourceState::OnNewMediaSegment, base::Unretained(this)),
       base::Bind(&SourceState::OnEndOfMediaSegment, base::Unretained(this)),
       log_cb_);
@@ -592,6 +595,15 @@ bool SourceState::OnNewConfigs(
   bool success = true;
   if (audio_config.IsValidConfig()) {
     if (!audio_) {
+      media_log_->SetBooleanProperty("found_audio_stream", true);
+    }
+    if (!audio_ ||
+        audio_->audio_decoder_config().codec() != audio_config.codec()) {
+      media_log_->SetStringProperty("audio_codec_name",
+                                    audio_config.GetHumanReadableCodecName());
+    }
+
+    if (!audio_) {
       audio_ = create_demuxer_stream_cb_.Run(DemuxerStream::AUDIO);
 
       if (!audio_) {
@@ -610,6 +622,15 @@ bool SourceState::OnNewConfigs(
   }
 
   if (video_config.IsValidConfig()) {
+    if (!video_) {
+      media_log_->SetBooleanProperty("found_video_stream", true);
+    }
+    if (!video_ ||
+        video_->video_decoder_config().codec() != video_config.codec()) {
+      media_log_->SetStringProperty("video_codec_name",
+                                    video_config.GetHumanReadableCodecName());
+    }
+
     if (!video_) {
       video_ = create_demuxer_stream_cb_.Run(DemuxerStream::VIDEO);
 
@@ -773,8 +794,11 @@ void SourceState::OnSourceInitDone(bool success,
   base::ResetAndReturn(&init_cb_).Run(success, params);
 }
 
-ChunkDemuxerStream::ChunkDemuxerStream(Type type, bool splice_frames_enabled)
+ChunkDemuxerStream::ChunkDemuxerStream(Type type,
+                                       Liveness liveness,
+                                       bool splice_frames_enabled)
     : type_(type),
+      liveness_(liveness),
       state_(UNINITIALIZED),
       splice_frames_enabled_(splice_frames_enabled),
       partial_append_window_trimming_enabled_(false) {
@@ -972,7 +996,12 @@ void ChunkDemuxerStream::Read(const ReadCB& read_cb) {
   CompletePendingReadIfPossible_Locked();
 }
 
-DemuxerStream::Type ChunkDemuxerStream::type() { return type_; }
+DemuxerStream::Type ChunkDemuxerStream::type() const { return type_; }
+
+DemuxerStream::Liveness ChunkDemuxerStream::liveness() const {
+  base::AutoLock auto_lock(lock_);
+  return liveness_;
+}
 
 AudioDecoderConfig ChunkDemuxerStream::audio_decoder_config() {
   CHECK_EQ(type_, AUDIO);
@@ -988,14 +1017,19 @@ VideoDecoderConfig ChunkDemuxerStream::video_decoder_config() {
 
 bool ChunkDemuxerStream::SupportsConfigChanges() { return true; }
 
+VideoRotation ChunkDemuxerStream::video_rotation() {
+  return VIDEO_ROTATION_0;
+}
+
 TextTrackConfig ChunkDemuxerStream::text_track_config() {
   CHECK_EQ(type_, TEXT);
   base::AutoLock auto_lock(lock_);
   return stream_->GetCurrentTextTrackConfig();
 }
 
-VideoRotation ChunkDemuxerStream::video_rotation() {
-  return VIDEO_ROTATION_0;
+void ChunkDemuxerStream::SetLiveness(Liveness liveness) {
+  base::AutoLock auto_lock(lock_);
+  liveness_ = liveness;
 }
 
 void ChunkDemuxerStream::ChangeState_Locked(State state) {
@@ -1023,19 +1057,29 @@ void ChunkDemuxerStream::CompletePendingReadIfPossible_Locked() {
       switch (stream_->GetNextBuffer(&buffer)) {
         case SourceBufferStream::kSuccess:
           status = DemuxerStream::kOk;
+          DVLOG(2) << __FUNCTION__ << ": returning kOk, type " << type_
+                   << ", dts " << buffer->GetDecodeTimestamp().InSecondsF()
+                   << ", pts " << buffer->timestamp().InSecondsF()
+                   << ", dur " << buffer->duration().InSecondsF()
+                   << ", key " << buffer->is_key_frame();
           break;
         case SourceBufferStream::kNeedBuffer:
           // Return early without calling |read_cb_| since we don't have
           // any data to return yet.
+          DVLOG(2) << __FUNCTION__ << ": returning kNeedBuffer, type "
+                   << type_;
           return;
         case SourceBufferStream::kEndOfStream:
           status = DemuxerStream::kOk;
           buffer = StreamParserBuffer::CreateEOSBuffer();
+          DVLOG(2) << __FUNCTION__ << ": returning kOk with EOS buffer, type "
+                   << type_;
           break;
         case SourceBufferStream::kConfigChange:
-          DVLOG(2) << "Config change reported to ChunkDemuxerStream.";
           status = kConfigChanged;
           buffer = NULL;
+          DVLOG(2) << __FUNCTION__ << ": returning kConfigChange, type "
+                   << type_;
           break;
       }
       break;
@@ -1045,33 +1089,39 @@ void ChunkDemuxerStream::CompletePendingReadIfPossible_Locked() {
       // because they are associated with the seek.
       status = DemuxerStream::kAborted;
       buffer = NULL;
+      DVLOG(2) << __FUNCTION__ << ": returning kAborted, type " << type_;
       break;
     case SHUTDOWN:
       status = DemuxerStream::kOk;
       buffer = StreamParserBuffer::CreateEOSBuffer();
+      DVLOG(2) << __FUNCTION__ << ": returning kOk with EOS buffer, type "
+               << type_;
       break;
   }
 
   base::ResetAndReturn(&read_cb_).Run(status, buffer);
 }
 
-ChunkDemuxer::ChunkDemuxer(const base::Closure& open_cb,
-                           const NeedKeyCB& need_key_cb,
-                           const LogCB& log_cb,
-                           bool splice_frames_enabled)
+ChunkDemuxer::ChunkDemuxer(
+    const base::Closure& open_cb,
+    const EncryptedMediaInitDataCB& encrypted_media_init_data_cb,
+    const LogCB& log_cb,
+    const scoped_refptr<MediaLog>& media_log,
+    bool splice_frames_enabled)
     : state_(WAITING_FOR_INIT),
       cancel_next_seek_(false),
       host_(NULL),
       open_cb_(open_cb),
-      need_key_cb_(need_key_cb),
+      encrypted_media_init_data_cb_(encrypted_media_init_data_cb),
       enable_text_(false),
       log_cb_(log_cb),
+      media_log_(media_log),
       duration_(kNoTimestamp()),
       user_specified_duration_(-1),
-      liveness_(LIVENESS_UNKNOWN),
+      liveness_(DemuxerStream::LIVENESS_UNKNOWN),
       splice_frames_enabled_(splice_frames_enabled) {
   DCHECK(!open_cb_.is_null());
-  DCHECK(!need_key_cb_.is_null());
+  DCHECK(!encrypted_media_init_data_cb_.is_null());
 }
 
 void ChunkDemuxer::Initialize(
@@ -1152,10 +1202,6 @@ TimeDelta ChunkDemuxer::GetStartTime() const {
   return TimeDelta();
 }
 
-Demuxer::Liveness ChunkDemuxer::GetLiveness() const {
-  return liveness_;
-}
-
 void ChunkDemuxer::StartWaitingForSeek(TimeDelta seek_time) {
   DVLOG(1) << "StartWaitingForSeek()";
   base::AutoLock auto_lock(lock_);
@@ -1228,7 +1274,8 @@ ChunkDemuxer::Status ChunkDemuxer::AddId(const std::string& id,
       new SourceState(stream_parser.Pass(),
                       frame_processor.Pass(), log_cb_,
                       base::Bind(&ChunkDemuxer::CreateDemuxerStream,
-                                 base::Unretained(this))));
+                                 base::Unretained(this)),
+                      media_log_));
 
   SourceState::NewTextTrackCB new_text_track_cb;
 
@@ -1239,10 +1286,7 @@ ChunkDemuxer::Status ChunkDemuxer::AddId(const std::string& id,
 
   source_state->Init(
       base::Bind(&ChunkDemuxer::OnSourceInitDone, base::Unretained(this)),
-      has_audio,
-      has_video,
-      need_key_cb_,
-      new_text_track_cb);
+      has_audio, has_video, encrypted_media_init_data_cb_, new_text_track_cb);
 
   source_state_map_[id] = source_state.release();
   return kOk;
@@ -1636,15 +1680,22 @@ void ChunkDemuxer::OnSourceInitDone(
     timeline_offset_ = params.timeline_offset;
   }
 
-  if (params.liveness != LIVENESS_UNKNOWN) {
-    if (liveness_ != LIVENESS_UNKNOWN && params.liveness != liveness_) {
+  if (params.liveness != DemuxerStream::LIVENESS_UNKNOWN) {
+    if (liveness_ != DemuxerStream::LIVENESS_UNKNOWN &&
+        params.liveness != liveness_) {
       MEDIA_LOG(log_cb_)
           << "Liveness is not the same across all SourceBuffers.";
       ReportError_Locked(DEMUXER_ERROR_COULD_NOT_OPEN);
       return;
     }
 
-    liveness_ = params.liveness;
+    if (liveness_ != params.liveness) {
+      liveness_ = params.liveness;
+      if (audio_)
+        audio_->SetLiveness(liveness_);
+      if (video_)
+        video_->SetLiveness(liveness_);
+    }
   }
 
   // Wait until all streams have initialized.
@@ -1670,19 +1721,19 @@ ChunkDemuxer::CreateDemuxerStream(DemuxerStream::Type type) {
     case DemuxerStream::AUDIO:
       if (audio_)
         return NULL;
-      audio_.reset(
-          new ChunkDemuxerStream(DemuxerStream::AUDIO, splice_frames_enabled_));
+      audio_.reset(new ChunkDemuxerStream(DemuxerStream::AUDIO, liveness_,
+                                          splice_frames_enabled_));
       return audio_.get();
       break;
     case DemuxerStream::VIDEO:
       if (video_)
         return NULL;
-      video_.reset(
-          new ChunkDemuxerStream(DemuxerStream::VIDEO, splice_frames_enabled_));
+      video_.reset(new ChunkDemuxerStream(DemuxerStream::VIDEO, liveness_,
+                                          splice_frames_enabled_));
       return video_.get();
       break;
     case DemuxerStream::TEXT: {
-      return new ChunkDemuxerStream(DemuxerStream::TEXT,
+      return new ChunkDemuxerStream(DemuxerStream::TEXT, liveness_,
                                     splice_frames_enabled_);
       break;
     }

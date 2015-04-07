@@ -13,12 +13,16 @@
 #include <map>
 
 #include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
+#include "webrtc/system_wrappers/interface/logging.h"
 
 namespace webrtc {
 
-SendStatisticsProxy::SendStatisticsProxy(
-    const VideoSendStream::Config& config)
-    : config_(config),
+const int SendStatisticsProxy::kStatsTimeoutMs = 5000;
+
+SendStatisticsProxy::SendStatisticsProxy(Clock* clock,
+                                         const VideoSendStream::Config& config)
+    : clock_(clock),
+      config_(config),
       crit_(CriticalSectionWrapper::CreateCriticalSection()) {
 }
 
@@ -43,9 +47,24 @@ void SendStatisticsProxy::CapturedFrameRate(const int capture_id,
   stats_.input_frame_rate = frame_rate;
 }
 
-VideoSendStream::Stats SendStatisticsProxy::GetStats() const {
+VideoSendStream::Stats SendStatisticsProxy::GetStats() {
   CriticalSectionScoped lock(crit_.get());
+  PurgeOldStats();
   return stats_;
+}
+
+void SendStatisticsProxy::PurgeOldStats() {
+  int64_t current_time_ms = clock_->TimeInMilliseconds();
+  for (std::map<uint32_t, SsrcStats>::iterator it = stats_.substreams.begin();
+       it != stats_.substreams.end(); ++it) {
+    uint32_t ssrc = it->first;
+    if (update_times_[ssrc].resolution_update_ms + kStatsTimeoutMs >
+        current_time_ms)
+      continue;
+
+    it->second.sent_width = 0;
+    it->second.sent_height = 0;
+  }
 }
 
 SsrcStats* SendStatisticsProxy::GetStatsEntry(uint32_t ssrc) {
@@ -64,6 +83,28 @@ SsrcStats* SendStatisticsProxy::GetStatsEntry(uint32_t ssrc) {
   return &stats_.substreams[ssrc];  // Insert new entry and return ptr.
 }
 
+void SendStatisticsProxy::OnSendEncodedImage(
+    const EncodedImage& encoded_image,
+    const RTPVideoHeader* rtp_video_header) {
+  size_t simulcast_idx =
+      rtp_video_header != NULL ? rtp_video_header->simulcastIdx : 0;
+  if (simulcast_idx >= config_.rtp.ssrcs.size()) {
+    LOG(LS_ERROR) << "Encoded image outside simulcast range (" << simulcast_idx
+                  << " >= " << config_.rtp.ssrcs.size() << ").";
+    return;
+  }
+  uint32_t ssrc = config_.rtp.ssrcs[simulcast_idx];
+
+  CriticalSectionScoped lock(crit_.get());
+  SsrcStats* stats = GetStatsEntry(ssrc);
+  if (stats == NULL)
+    return;
+
+  stats->sent_width = encoded_image._encodedWidth;
+  stats->sent_height = encoded_image._encodedHeight;
+  update_times_[ssrc].resolution_update_ms = clock_->TimeInMilliseconds();
+}
+
 void SendStatisticsProxy::StatisticsUpdated(const RtcpStatistics& statistics,
                                             uint32_t ssrc) {
   CriticalSectionScoped lock(crit_.get());
@@ -72,6 +113,9 @@ void SendStatisticsProxy::StatisticsUpdated(const RtcpStatistics& statistics,
     return;
 
   stats->rtcp_stats = statistics;
+}
+
+void SendStatisticsProxy::CNameChanged(const char* cname, uint32_t ssrc) {
 }
 
 void SendStatisticsProxy::DataCountersUpdated(
@@ -97,26 +141,14 @@ void SendStatisticsProxy::Notify(const BitrateStatistics& total_stats,
   stats->retransmit_bitrate_bps = retransmit_stats.bitrate_bps;
 }
 
-void SendStatisticsProxy::FrameCountUpdated(FrameType frame_type,
-                                            uint32_t frame_count,
-                                            const unsigned int ssrc) {
+void SendStatisticsProxy::FrameCountUpdated(const FrameCounts& frame_counts,
+                                            uint32_t ssrc) {
   CriticalSectionScoped lock(crit_.get());
   SsrcStats* stats = GetStatsEntry(ssrc);
   if (stats == NULL)
     return;
 
-  switch (frame_type) {
-    case kVideoFrameDelta:
-      stats->delta_frames = frame_count;
-      break;
-    case kVideoFrameKey:
-      stats->key_frames = frame_count;
-      break;
-    case kFrameEmpty:
-    case kAudioFrameSpeech:
-    case kAudioFrameCN:
-      break;
-  }
+  stats->frame_counts = frame_counts;
 }
 
 void SendStatisticsProxy::SendSideDelayUpdated(int avg_delay_ms,

@@ -35,13 +35,13 @@
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/profile_sync_test_util.h"
 #include "chrome/browser/sync/test_profile_sync_service.h"
-#include "chrome/browser/webdata/autocomplete_syncable_service.h"
 #include "chrome/browser/webdata/web_data_service_factory.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "components/autofill/core/browser/autofill_test_utils.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
+#include "components/autofill/core/browser/webdata/autocomplete_syncable_service.h"
 #include "components/autofill/core/browser/webdata/autofill_change.h"
 #include "components/autofill/core/browser/webdata/autofill_entry.h"
 #include "components/autofill/core/browser/webdata/autofill_profile_syncable_service.h"
@@ -49,8 +49,8 @@
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/sync_driver/data_type_controller.h"
-#include "components/webdata/common/web_data_service_test_util.h"
 #include "components/webdata/common/web_database.h"
+#include "components/webdata_services/web_data_service_test_util.h"
 #include "content/public/test/test_browser_thread.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "sync/internal_api/public/base/model_type.h"
@@ -65,6 +65,7 @@
 #include "sync/test/engine/test_id_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
+using autofill::AutocompleteSyncableService;
 using autofill::AutofillChange;
 using autofill::AutofillChangeList;
 using autofill::AutofillEntry;

@@ -217,10 +217,13 @@ cr.define('print_preview', function() {
         'NA_LEDGER': 'Tabloid'
       };
       for (var i = 0, media; media = mediaSize.option[i]; i++) {
-        media.custom_display_name =
-            media.custom_display_name ||
-            mediaDisplayNames[media.name] ||
-            media.name;
+        // No need to patch capabilities with localized names provided.
+        if (!media.custom_display_name_localized) {
+          media.custom_display_name =
+              media.custom_display_name ||
+              mediaDisplayNames[media.name] ||
+              media.name;
+        }
       }
     }
     return capabilities;
@@ -291,11 +294,10 @@ cr.define('print_preview', function() {
           !this.appState_.selectedDestinationOrigin) {
         this.selectDefaultDestination_();
       } else {
-        assert(typeof this.appState_.selectedDestinationAccount == 'string');
         var key = this.getDestinationKey_(
             this.appState_.selectedDestinationOrigin,
             this.appState_.selectedDestinationId,
-            this.appState_.selectedDestinationAccount);
+            this.appState_.selectedDestinationAccount || '');
         var candidate = this.destinationMap_[key];
         if (candidate != null) {
           this.selectDestination(candidate);
@@ -311,7 +313,7 @@ cr.define('print_preview', function() {
           this.cloudPrintInterface_.printer(
               this.appState_.selectedDestinationId,
               this.appState_.selectedDestinationOrigin,
-              this.appState_.selectedDestinationAccount);
+              this.appState_.selectedDestinationAccount || '');
         } else if (this.appState_.selectedDestinationOrigin ==
                    print_preview.Destination.Origin.PRIVET) {
           // TODO(noamsml): Resolve a specific printer instead of listing all

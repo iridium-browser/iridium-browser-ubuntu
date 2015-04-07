@@ -52,13 +52,13 @@ public:
     {
         return WTF::String::format("http://bla.com/bla%d", counter);
     }
-    unsigned tagForParserCache() const
+    unsigned tagForParserCache(Resource* resource) const
     {
-        return StringHash::hash(v8::V8::GetVersion()) * 2;
+        return V8ScriptRunner::tagForParserCache(resource);
     }
-    unsigned tagForCodeCache() const
+    unsigned tagForCodeCache(Resource* resource) const
     {
-        return tagForParserCache() + 1;
+        return V8ScriptRunner::tagForCodeCache(resource);
     }
 
     bool compileScript(V8CacheOptions cacheOptions)
@@ -72,13 +72,13 @@ public:
     void setEmptyResource()
     {
         m_resourceRequest = WTF::adoptPtr(new ResourceRequest);
-        m_resource = adoptPtrWillBeNoop(new ScriptResource(*m_resourceRequest.get(), "text/utf-8"));
+        m_resource = ScriptResource::create(*m_resourceRequest.get(), "UTF-8");
     }
 
     void setResource()
     {
         m_resourceRequest = WTF::adoptPtr(new ResourceRequest(url()));
-        m_resource = adoptPtrWillBeNoop(new ScriptResource(*m_resourceRequest.get(), "text/utf-8"));
+        m_resource = ScriptResource::create(*m_resourceRequest.get(), "UTF-8");
     }
 
 protected:
@@ -93,7 +93,8 @@ int V8ScriptRunnerTest::counter = 0;
 
 TEST_F(V8ScriptRunnerTest, resourcelessShouldPass)
 {
-    EXPECT_TRUE(compileScript(V8CacheOptionsOff));
+    EXPECT_TRUE(compileScript(V8CacheOptionsNone));
+    EXPECT_TRUE(compileScript(V8CacheOptionsParseMemory));
     EXPECT_TRUE(compileScript(V8CacheOptionsParse));
     EXPECT_TRUE(compileScript(V8CacheOptionsCode));
 }
@@ -101,44 +102,61 @@ TEST_F(V8ScriptRunnerTest, resourcelessShouldPass)
 TEST_F(V8ScriptRunnerTest, emptyResourceDoesNothing)
 {
     setEmptyResource();
-    EXPECT_TRUE(compileScript(V8CacheOptionsOff));
-    EXPECT_FALSE(m_resource->cachedMetadata(tagForParserCache()));
-    EXPECT_FALSE(m_resource->cachedMetadata(tagForCodeCache()));
+    EXPECT_TRUE(compileScript(V8CacheOptionsDefault));
+    EXPECT_FALSE(m_resource->cachedMetadata(tagForParserCache(m_resource.get())));
+    EXPECT_FALSE(m_resource->cachedMetadata(tagForCodeCache(m_resource.get())));
 
     EXPECT_TRUE(compileScript(V8CacheOptionsParse));
-    EXPECT_FALSE(m_resource->cachedMetadata(tagForParserCache()));
-    EXPECT_FALSE(m_resource->cachedMetadata(tagForCodeCache()));
+    EXPECT_FALSE(m_resource->cachedMetadata(tagForParserCache(m_resource.get())));
+    EXPECT_FALSE(m_resource->cachedMetadata(tagForCodeCache(m_resource.get())));
 
     EXPECT_TRUE(compileScript(V8CacheOptionsCode));
-    EXPECT_FALSE(m_resource->cachedMetadata(tagForParserCache()));
-    EXPECT_FALSE(m_resource->cachedMetadata(tagForCodeCache()));
+    EXPECT_FALSE(m_resource->cachedMetadata(tagForParserCache(m_resource.get())));
+    EXPECT_FALSE(m_resource->cachedMetadata(tagForCodeCache(m_resource.get())));
 }
 
-TEST_F(V8ScriptRunnerTest, defaultOptions)
+TEST_F(V8ScriptRunnerTest, parseMemoryOption)
 {
     setResource();
-    EXPECT_TRUE(compileScript(V8CacheOptionsOff));
-    EXPECT_TRUE(m_resource->cachedMetadata(tagForParserCache()));
-    EXPECT_FALSE(m_resource->cachedMetadata(tagForCodeCache()));
+    EXPECT_TRUE(compileScript(V8CacheOptionsParseMemory));
+    EXPECT_TRUE(m_resource->cachedMetadata(tagForParserCache(m_resource.get())));
+    EXPECT_FALSE(m_resource->cachedMetadata(tagForCodeCache(m_resource.get())));
+    // The cached data is associated with the encoding.
+    ResourceRequest request(url());
+    OwnPtrWillBeRawPtr<ScriptResource> anotherResource = ScriptResource::create(request, "UTF-16");
+    EXPECT_FALSE(m_resource->cachedMetadata(tagForParserCache(anotherResource.get())));
 }
 
-TEST_F(V8ScriptRunnerTest, parseOptions)
+TEST_F(V8ScriptRunnerTest, parseOption)
 {
     setResource();
     EXPECT_TRUE(compileScript(V8CacheOptionsParse));
-    EXPECT_TRUE(m_resource->cachedMetadata(tagForParserCache()));
-    EXPECT_FALSE(m_resource->cachedMetadata(tagForCodeCache()));
+    EXPECT_TRUE(m_resource->cachedMetadata(tagForParserCache(m_resource.get())));
+    EXPECT_FALSE(m_resource->cachedMetadata(tagForCodeCache(m_resource.get())));
+    // The cached data is associated with the encoding.
+    ResourceRequest request(url());
+    OwnPtrWillBeRawPtr<ScriptResource> anotherResource = ScriptResource::create(request, "UTF-16");
+    EXPECT_FALSE(m_resource->cachedMetadata(tagForParserCache(anotherResource.get())));
 }
 
-TEST_F(V8ScriptRunnerTest, codeOptions)
+TEST_F(V8ScriptRunnerTest, codeOption)
 {
     setResource();
     EXPECT_TRUE(compileScript(V8CacheOptionsCode));
-    EXPECT_FALSE(m_resource->cachedMetadata(tagForParserCache()));
+    EXPECT_FALSE(m_resource->cachedMetadata(tagForParserCache(m_resource.get())));
+    EXPECT_TRUE(m_resource->cachedMetadata(tagForCodeCache(m_resource.get())));
+    // The cached data is associated with the encoding.
+    ResourceRequest request(url());
+    OwnPtrWillBeRawPtr<ScriptResource> anotherResource = ScriptResource::create(request, "UTF-16");
+    EXPECT_FALSE(m_resource->cachedMetadata(tagForCodeCache(anotherResource.get())));
+}
 
-    // FIXME: Code caching is presently still disabled.
-    //        Enable EXPECT when code caching lands.
-    // EXPECT_TRUE(m_resource->cachedMetadata(tagForCodeCache()));
+TEST_F(V8ScriptRunnerTest, codeCompressedOptions)
+{
+    setResource();
+    EXPECT_TRUE(compileScript(V8CacheOptionsCodeCompressed));
+    EXPECT_FALSE(m_resource->cachedMetadata(tagForParserCache(m_resource.get())));
+    EXPECT_FALSE(m_resource->cachedMetadata(tagForCodeCache(m_resource.get())));
 }
 
 } // namespace

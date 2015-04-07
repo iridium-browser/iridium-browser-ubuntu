@@ -27,7 +27,10 @@ action("regexes") {
     "$target_gen_dir/autofill_regex_constants.cc",
   ]
 
-  args = [ "-o", rebase_path(target_gen_dir, root_build_dir) ]
+  args = [
+    "-o",
+    rebase_path(target_gen_dir, root_build_dir),
+  ]
   args += rebase_path(inputs, root_build_dir)
 }
 
@@ -72,6 +75,8 @@ static_library("browser") {
     "autofill_scanner.cc",
     "autofill_scanner.h",
     "autofill_server_field_info.h",
+    "autofill_sync_constants.cc",
+    "autofill_sync_constants.h",
     "autofill_type.cc",
     "autofill_type.h",
     "autofill_xml_parser.cc",
@@ -108,8 +113,12 @@ static_library("browser") {
     "popup_item_ids.h",
     "state_names.cc",
     "state_names.h",
+    "suggestion.cc",
+    "suggestion.h",
     "validation.cc",
     "validation.h",
+    "webdata/autocomplete_syncable_service.cc",
+    "webdata/autocomplete_syncable_service.h",
     "webdata/autofill_change.cc",
     "webdata/autofill_change.h",
     "webdata/autofill_entry.cc",
@@ -143,6 +152,7 @@ static_library("browser") {
     "//components/strings",
     "//components/webdata/common",
     "//google_apis",
+    "//net",
     "//skia",
     "//sql",
     "//third_party/fips181",
@@ -162,6 +172,8 @@ static_library("browser") {
     deps += [ "//sync" ]
   } else {
     sources -= [
+      "webdata/autocomplete_syncable_service.cc",
+      "webdata/autocomplete_syncable_service.h",
       "webdata/autofill_profile_syncable_service.cc",
       "webdata/autofill_profile_syncable_service.h",
     ]
@@ -180,6 +192,7 @@ static_library("test_support") {
     "autofill_test_utils.h",
     "data_driven_test.cc",
     "data_driven_test.h",
+    "suggestion_test_helpers.h",
     "test_autofill_client.cc",
     "test_autofill_client.h",
     "test_autofill_driver.cc",
@@ -192,8 +205,14 @@ static_library("test_support") {
 
   deps = [
     ":browser",
+    "//base",
+    "//base:prefs",
+    "//base:prefs_test_support",
+    "//base/test:test_support",
     "//components/autofill/core/browser",
     "//components/autofill/core/common",
+    "//components/os_crypt",
+    "//components/pref_registry",
     "//skia",
     "//testing/gtest",
   ]
@@ -238,10 +257,23 @@ source_set("unit_tests") {
   deps = [
     ":browser",
     ":test_support",
+    "//base",
+    "//base:prefs",
+    "//base/test:test_support",
+    "//components/autofill/core/common",
+    "//components/os_crypt",
     "//components/resources",
     "//components/strings",
+    "//components/webdata/common",
+    "//net:test_support",
+    "//sql",
+    "//sync",
+    "//sync:test_support_sync_api",
     "//testing/gmock",
+    "//testing/gtest",
     "//third_party/libphonenumber",
-    "//third_party/libjingle"
+    "//third_party/libjingle",
+    "//ui/base",
+    "//url",
   ]
 }

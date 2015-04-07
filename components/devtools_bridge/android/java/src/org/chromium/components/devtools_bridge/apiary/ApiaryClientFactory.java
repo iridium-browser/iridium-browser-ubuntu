@@ -6,10 +6,13 @@ package org.chromium.components.devtools_bridge.apiary;
 
 import android.net.http.AndroidHttpClient;
 
+import org.chromium.base.JNINamespace;
+
 /**
  * Factory for creating clients for external APIs.
  */
-public abstract class ApiaryClientFactory {
+@JNINamespace("devtools_bridge::android")
+public class ApiaryClientFactory {
     private static final String USER_AGENT = "DevTools bridge";
 
     public static final String OAUTH_SCOPE = "https://www.googleapis.com/auth/clouddevices";
@@ -28,29 +31,31 @@ public abstract class ApiaryClientFactory {
      * device credentials for finalizing registration.
      */
     public GCDClient newAnonymousGCDClient() {
-        return new GCDClient(mHttpClient, getAPIKey());
+        return new GCDClient(mHttpClient, nativeGetAPIKey());
     }
 
     public OAuthClient newOAuthClient() {
         return new OAuthClient(
-                mHttpClient, OAUTH_SCOPE, getOAuthClientId(), getOAuthClientSecret());
+                mHttpClient, OAUTH_SCOPE, getOAuthClientId(), nativeGetOAuthClientSecret());
     }
 
     public BlockingGCMRegistrar newGCMRegistrar() {
-        return new BlockingGCMRegistrar() {
-                    @Override
-                    protected String[] getSenderIds() {
-                        return getGCMSenderIds();
-                    }
-                };
+        return new BlockingGCMRegistrar();
     }
 
     public void close() {
         mHttpClient.close();
     }
 
-    public abstract String getAPIKey();
-    public abstract String getOAuthClientId();
-    public abstract String getOAuthClientSecret();
-    public abstract String[] getGCMSenderIds();
+    public String getOAuthClientId() {
+        return nativeGetOAuthClientId();
+    }
+
+    protected String getAPIKey() {
+        return nativeGetAPIKey();
+    }
+
+    private native String nativeGetAPIKey();
+    private native String nativeGetOAuthClientId();
+    private native String nativeGetOAuthClientSecret();
 }

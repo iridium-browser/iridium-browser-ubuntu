@@ -51,7 +51,7 @@ class MockPrefNotifier : public PrefNotifierImpl {
 
   MOCK_METHOD1(FireObservers, void(const std::string& path));
 
-  size_t CountObserver(const char* path, PrefObserver* obs) {
+  size_t CountObserver(const std::string& path, PrefObserver* obs) {
     PrefObserverMap::const_iterator observer_iterator =
         pref_observers()->find(path);
     if (observer_iterator == pref_observers()->end())
@@ -85,7 +85,7 @@ class PrefObserverMock : public PrefObserver {
 // Test fixture class.
 class PrefNotifierTest : public testing::Test {
  protected:
-  virtual void SetUp() {
+  void SetUp() override {
     pref_service_.registry()->RegisterBooleanPref(kChangedPref, true);
     pref_service_.registry()->RegisterBooleanPref(kUnchangedPref, true);
   }

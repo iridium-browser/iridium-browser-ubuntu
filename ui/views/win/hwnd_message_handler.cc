@@ -12,6 +12,9 @@
 
 #include "base/bind.h"
 #include "base/debug/trace_event.h"
+#include "base/profiler/scoped_tracker.h"
+#include "base/tracked_objects.h"
+#include "base/win/scoped_gdi_object.h"
 #include "base/win/win_util.h"
 #include "base/win/windows_version.h"
 #include "ui/base/touch/touch_enabled.h"
@@ -26,8 +29,8 @@
 #include "ui/events/keycodes/keyboard_code_conversion_win.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/canvas_skia_paint.h"
+#include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/icon_util.h"
-#include "ui/gfx/insets.h"
 #include "ui/gfx/path.h"
 #include "ui/gfx/path_win.h"
 #include "ui/gfx/screen.h"
@@ -146,11 +149,10 @@ LRESULT CALLBACK MoveLoopMouseWatcher::KeyHook(int n_code,
   if (n_code == HC_ACTION && w_param == VK_ESCAPE) {
     if (base::win::GetVersion() >= base::win::VERSION_VISTA) {
       int value = TRUE;
-      HRESULT result = DwmSetWindowAttribute(
-          instance_->host_->hwnd(),
-          DWMWA_TRANSITIONS_FORCEDISABLED,
-          &value,
-          sizeof(value));
+      DwmSetWindowAttribute(instance_->host_->hwnd(),
+                            DWMWA_TRANSITIONS_FORCEDISABLED,
+                            &value,
+                            sizeof(value));
     }
     if (instance_->hide_on_escape_)
       instance_->host_->Hide();
@@ -597,6 +599,9 @@ void HWNDMessageHandler::ShowWindowWithState(ui::WindowShowState show_state) {
     case ui::SHOW_STATE_MINIMIZED:
       native_show_state = SW_SHOWMINIMIZED;
       break;
+    case ui::SHOW_STATE_NORMAL:
+      native_show_state = SW_SHOWNORMAL;
+      break;
     default:
       native_show_state = delegate_->GetInitialShowState();
       break;
@@ -632,6 +637,11 @@ void HWNDMessageHandler::ShowMaximizedWithBounds(const gfx::Rect& bounds) {
   placement.showCmd = SW_SHOWMAXIMIZED;
   placement.rcNormalPosition = bounds.ToRECT();
   SetWindowPlacement(hwnd(), &placement);
+
+  // We need to explicitly activate the window, because if we're opened from a
+  // desktop shortcut while an existing window is already running it doesn't
+  // seem to be enough to use SW_SHOWMAXIMIZED to activate the window.
+  Activate();
 }
 
 void HWNDMessageHandler::Hide() {
@@ -871,10 +881,13 @@ void HWNDMessageHandler::SetFullscreen(bool fullscreen) {
 void HWNDMessageHandler::SizeConstraintsChanged() {
   LONG style = GetWindowLong(hwnd(), GWL_STYLE);
   // Ignore if this is not a standard window.
-  if (!(style & WS_OVERLAPPED))
+  if (style & (WS_POPUP | WS_CHILD))
     return;
 
-  if (delegate_->CanResize()) {
+  LONG exstyle = GetWindowLong(hwnd(), GWL_EXSTYLE);
+  // Windows cannot have WS_THICKFRAME set if WS_EX_COMPOSITED is set.
+  // See CalculateWindowStylesFromInitParams().
+  if (delegate_->CanResize() && (exstyle & WS_EX_COMPOSITED) == 0) {
     style |= WS_THICKFRAME | WS_MAXIMIZEBOX;
     if (!delegate_->CanMaximize())
       style &= ~WS_MAXIMIZEBOX;
@@ -901,9 +914,18 @@ void HWNDMessageHandler::DispatchKeyEventPostIME(const ui::KeyEvent& key) {
 
 HICON HWNDMessageHandler::GetDefaultWindowIcon() const {
   if (use_system_default_icon_)
-    return NULL;
-  return ViewsDelegate::views_delegate ?
-      ViewsDelegate::views_delegate->GetDefaultWindowIcon() : NULL;
+    return nullptr;
+  return ViewsDelegate::views_delegate
+             ? ViewsDelegate::views_delegate->GetDefaultWindowIcon()
+             : nullptr;
+}
+
+HICON HWNDMessageHandler::GetSmallWindowIcon() const {
+  if (use_system_default_icon_)
+    return nullptr;
+  return ViewsDelegate::views_delegate
+             ? ViewsDelegate::views_delegate->GetSmallWindowIcon()
+             : nullptr;
 }
 
 LRESULT HWNDMessageHandler::OnWndProc(UINT message,
@@ -1128,14 +1150,14 @@ void HWNDMessageHandler::ResetWindowRegion(bool force, bool redraw) {
 
   // Changing the window region is going to force a paint. Only change the
   // window region if the region really differs.
-  HRGN current_rgn = CreateRectRgn(0, 0, 0, 0);
-  int current_rgn_result = GetWindowRgn(hwnd(), current_rgn);
+  base::win::ScopedRegion current_rgn(CreateRectRgn(0, 0, 0, 0));
+  GetWindowRgn(hwnd(), current_rgn);
 
   RECT window_rect;
   GetWindowRect(hwnd(), &window_rect);
-  HRGN new_region;
+  base::win::ScopedRegion new_region;
   if (custom_window_region_) {
-    new_region = ::CreateRectRgn(0, 0, 0, 0);
+    new_region.Set(::CreateRectRgn(0, 0, 0, 0));
     ::CombineRgn(new_region, custom_window_region_.Get(), NULL, RGN_COPY);
   } else if (IsMaximized()) {
     HMONITOR monitor = MonitorFromWindow(hwnd(), MONITOR_DEFAULTTONEAREST);
@@ -1144,23 +1166,23 @@ void HWNDMessageHandler::ResetWindowRegion(bool force, bool redraw) {
     GetMonitorInfo(monitor, &mi);
     RECT work_rect = mi.rcWork;
     OffsetRect(&work_rect, -window_rect.left, -window_rect.top);
-    new_region = CreateRectRgnIndirect(&work_rect);
+    new_region.Set(CreateRectRgnIndirect(&work_rect));
   } else {
     gfx::Path window_mask;
     delegate_->GetWindowMask(gfx::Size(window_rect.right - window_rect.left,
                                        window_rect.bottom - window_rect.top),
                              &window_mask);
-    new_region = gfx::CreateHRGNFromSkPath(window_mask);
+    if (!window_mask.isEmpty())
+      new_region.Set(gfx::CreateHRGNFromSkPath(window_mask));
   }
 
-  if (current_rgn_result == ERROR || !EqualRgn(current_rgn, new_region)) {
+  const bool has_current_region = current_rgn != 0;
+  const bool has_new_region = new_region != 0;
+  if (has_current_region != has_new_region ||
+      (has_current_region && !EqualRgn(current_rgn, new_region))) {
     // SetWindowRgn takes ownership of the HRGN created by CreateNativeRegion.
-    SetWindowRgn(hwnd(), new_region, redraw);
-  } else {
-    DeleteObject(new_region);
+    SetWindowRgn(hwnd(), new_region.release(), redraw);
   }
-
-  DeleteObject(current_rgn);
 }
 
 void HWNDMessageHandler::UpdateDwmNcRenderingPolicy() {
@@ -2065,6 +2087,11 @@ void HWNDMessageHandler::OnSize(UINT param, const gfx::Size& size) {
 
 void HWNDMessageHandler::OnSysCommand(UINT notification_code,
                                       const gfx::Point& point) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/440919 is fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "440919 HWNDMessageHandler::OnSysCommand1"));
+
   if (!delegate_->ShouldHandleSystemCommands())
     return;
 
@@ -2115,9 +2142,25 @@ void HWNDMessageHandler::OnSysCommand(UINT notification_code,
     // with the mouse/touch/keyboard, we flag as being in a size loop.
     if ((notification_code & sc_mask) == SC_SIZE)
       in_size_loop_ = true;
+    const bool runs_nested_loop = ((notification_code & sc_mask) == SC_SIZE) ||
+                                  ((notification_code & sc_mask) == SC_MOVE);
     base::WeakPtr<HWNDMessageHandler> ref(weak_factory_.GetWeakPtr());
+
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/440919 is fixed.
+    tracked_objects::ScopedTracker tracking_profile2(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "440919 HWNDMessageHandler::OnSysCommand2"));
+
+    // Use task stopwatch to exclude the time spend in the move/resize loop from
+    // the current task, if any.
+    tracked_objects::TaskStopwatch stopwatch;
+    if (runs_nested_loop)
+      stopwatch.Start();
     DefWindowProc(hwnd(), WM_SYSCOMMAND, notification_code,
                   MAKELPARAM(point.x(), point.y()));
+    if (runs_nested_loop)
+      stopwatch.Stop();
+
     if (!ref.get())
       return;
     in_size_loop_ = false;
@@ -2217,6 +2260,11 @@ LRESULT HWNDMessageHandler::OnTouchEvent(UINT message,
 }
 
 void HWNDMessageHandler::OnWindowPosChanging(WINDOWPOS* window_pos) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/440919 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "440919 HWNDMessageHandler::OnWindowPosChanging"));
+
   if (ignore_window_pos_changes_) {
     // If somebody's trying to toggle our visibility, change the nonclient area,
     // change our Z-order, or activate us, we should probably let it go through.
@@ -2282,8 +2330,15 @@ void HWNDMessageHandler::OnWindowPosChanging(WINDOWPOS* window_pos) {
     }
   }
 
-  if (DidClientAreaSizeChange(window_pos))
+  RECT window_rect;
+  gfx::Size old_size;
+  if (GetWindowRect(hwnd(), &window_rect))
+    old_size = gfx::Rect(window_rect).size();
+  gfx::Size new_size = gfx::Size(window_pos->cx, window_pos->cy);
+  if ((old_size != new_size && !(window_pos->flags & SWP_NOSIZE)) ||
+      window_pos->flags & SWP_FRAMECHANGED) {
     delegate_->HandleWindowSizeChanging();
+  }
 
   if (ScopedFullscreenVisibility::IsHiddenForFullscreen(hwnd())) {
     // Prevent the window from being made visible if we've been asked to do so.

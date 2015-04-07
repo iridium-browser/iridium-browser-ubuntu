@@ -242,12 +242,19 @@ cr.define('options', function() {
         inputFields['state'] || '',
         inputFields['postalCode'] || '',
         inputFields['sortingCode'] || '',
-        inputFields['country'] || '',
+        inputFields['country'] || loadTimeData.getString('defaultCountryCode'),
         inputFields['phone'] || [],
         inputFields['email'] || [],
         this.languageCode_,
       ];
       chrome.send('setAddress', address);
+
+      // If the GUID is empty, this form is being used to add a new address,
+      // rather than edit an existing one.
+      if (!this.guid_.length) {
+        chrome.send('coreOptionsUserMetricsAction',
+                    ['Options_AutofillAddressAdded']);
+      }
     },
 
     /**

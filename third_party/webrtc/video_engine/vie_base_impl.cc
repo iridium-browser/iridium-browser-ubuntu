@@ -329,7 +329,7 @@ int ViEBaseImpl::StopReceive(const int video_channel) {
 
 int ViEBaseImpl::GetVersion(char version[1024]) {
   assert(version != NULL);
-  strcpy(version, "VideoEngine 39");
+  strcpy(version, "VideoEngine 40");
   return 0;
 }
 
@@ -358,4 +358,32 @@ int ViEBaseImpl::CreateChannel(int& video_channel,  // NOLINT
   return 0;
 }
 
+void ViEBaseImpl::RegisterSendStatisticsProxy(
+    int channel,
+    SendStatisticsProxy* send_statistics_proxy) {
+  LOG_F(LS_VERBOSE) << "RegisterSendStatisticsProxy on channel " << channel;
+  ViEChannelManagerScoped cs(*(shared_data_.channel_manager()));
+  ViEChannel* vie_channel = cs.Channel(channel);
+  if (!vie_channel) {
+    shared_data_.SetLastError(kViEBaseInvalidChannelId);
+    return;
+  }
+  ViEEncoder* vie_encoder = cs.Encoder(channel);
+  assert(vie_encoder);
+
+  vie_encoder->RegisterSendStatisticsProxy(send_statistics_proxy);
+}
+
+void ViEBaseImpl::RegisterReceiveStatisticsProxy(
+    int channel,
+    ReceiveStatisticsProxy* receive_statistics_proxy) {
+  LOG_F(LS_VERBOSE) << "RegisterReceiveStatisticsProxy on channel " << channel;
+  ViEChannelManagerScoped cs(*(shared_data_.channel_manager()));
+  ViEChannel* vie_channel = cs.Channel(channel);
+  if (!vie_channel) {
+    shared_data_.SetLastError(kViEBaseInvalidChannelId);
+    return;
+  }
+  vie_channel->RegisterReceiveStatisticsProxy(receive_statistics_proxy);
+}
 }  // namespace webrtc

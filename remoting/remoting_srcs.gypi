@@ -5,8 +5,6 @@
 {
   'variables': {
     'remoting_base_sources': [
-      # Note: sources list duplicated in GN build.
-      # See remoting/base/BUILD.gn
       'base/auth_token_util.cc',
       'base/auth_token_util.h',
       'base/auto_thread.cc',
@@ -71,8 +69,6 @@
     ],
 
     'remoting_protocol_sources': [
-      # Note: sources list duplicated in GN build.
-      # See remoting/protocol/BUILD.gn
       'protocol/audio_reader.cc',
       'protocol/audio_reader.h',
       'protocol/audio_stub.h',
@@ -207,8 +203,6 @@
     ],
 
     'remoting_client_sources': [
-      # Note: sources list duplicated in GN build.
-      # See remoting/client/BUILD.gn
       'client/audio_decode_scheduler.cc',
       'client/audio_decode_scheduler.h',
       'client/audio_player.cc',
@@ -238,14 +232,12 @@
     ],
 
     'remoting_client_plugin_sources': [
-      # Note: sources list duplicated in GN build.
-      # See remoting/client/plugin/BUILD.gn
       'client/plugin/chromoting_instance.cc',
       'client/plugin/chromoting_instance.h',
       'client/plugin/delegating_signal_strategy.cc',
       'client/plugin/delegating_signal_strategy.h',
-      'client/plugin/media_source_video_renderer.cc',
-      'client/plugin/media_source_video_renderer.h',
+      'client/plugin/empty_cursor_filter.cc',
+      'client/plugin/empty_cursor_filter.h',
       'client/plugin/normalizing_input_filter_cros.cc',
       'client/plugin/normalizing_input_filter_cros.h',
       'client/plugin/normalizing_input_filter_mac.cc',
@@ -254,8 +246,12 @@
       'client/plugin/pepper_address_resolver.h',
       'client/plugin/pepper_audio_player.cc',
       'client/plugin/pepper_audio_player.h',
+      'client/plugin/pepper_cursor_setter.cc',
+      'client/plugin/pepper_cursor_setter.h',
       'client/plugin/pepper_input_handler.cc',
       'client/plugin/pepper_input_handler.h',
+      'client/plugin/pepper_mouse_locker.cc',
+      'client/plugin/pepper_mouse_locker.h',
       'client/plugin/pepper_network_manager.cc',
       'client/plugin/pepper_network_manager.h',
       'client/plugin/pepper_packet_socket_factory.cc',
@@ -266,8 +262,11 @@
       'client/plugin/pepper_port_allocator.h',
       'client/plugin/pepper_util.cc',
       'client/plugin/pepper_util.h',
-      'client/plugin/pepper_view.cc',
-      'client/plugin/pepper_view.h',
+      'client/plugin/pepper_video_renderer.h',
+      'client/plugin/pepper_video_renderer_2d.cc',
+      'client/plugin/pepper_video_renderer_2d.h',
+      'client/plugin/pepper_video_renderer_3d.cc',
+      'client/plugin/pepper_video_renderer_3d.h',
     ],
   }
 }

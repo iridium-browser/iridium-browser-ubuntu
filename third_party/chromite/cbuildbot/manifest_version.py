@@ -2,8 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-"""A library to generate and store the manifests for cros builders to use.
-"""
+"""A library to generate and store the manifests for cros builders to use."""
 
 from __future__ import print_function
 
@@ -307,18 +306,6 @@ class VersionInfo(object):
 
 class BuilderStatus(object):
   """Object representing the status of a build."""
-  # Various statuses builds can be in.  These status values are retrieved from
-  # Google Storage, which each builder writes to.  The MISSING status is used
-  # for the status of any builder which has no value in Google Storage.
-  STATUS_FAILED = 'fail'
-  STATUS_PASSED = 'pass'
-  STATUS_INFLIGHT = 'inflight'
-  STATUS_MISSING = 'missing' # i.e. never started.
-  STATUS_ABORTED = 'aborted'
-  COMPLETED_STATUSES = (STATUS_PASSED, STATUS_FAILED, STATUS_ABORTED)
-  ALL_STATUSES = (STATUS_FAILED, STATUS_PASSED, STATUS_INFLIGHT,
-                  STATUS_MISSING, STATUS_ABORTED)
-
   MISSING_MESSAGE = ('Unknown run, it probably never started:'
                      ' %(builder)s, version %(version)s')
 
@@ -340,23 +327,23 @@ class BuilderStatus(object):
 
   def Failed(self):
     """Returns True if the Builder failed."""
-    return self.status == BuilderStatus.STATUS_FAILED
+    return self.status == constants.BUILDER_STATUS_FAILED
 
   def Passed(self):
     """Returns True if the Builder passed."""
-    return self.status == BuilderStatus.STATUS_PASSED
+    return self.status == constants.BUILDER_STATUS_PASSED
 
   def Inflight(self):
     """Returns True if the Builder is still inflight."""
-    return self.status == BuilderStatus.STATUS_INFLIGHT
+    return self.status == constants.BUILDER_STATUS_INFLIGHT
 
   def Missing(self):
     """Returns True if the Builder is missing any status."""
-    return self.status == BuilderStatus.STATUS_MISSING
+    return self.status == constants.BUILDER_STATUS_MISSING
 
   def Completed(self):
     """Returns True if the Builder has completed."""
-    return self.status in BuilderStatus.COMPLETED_STATUSES
+    return self.status in constants.BUILDER_COMPLETED_STATUSES
 
   @classmethod
   def GetCompletedStatus(cls, success):
@@ -366,9 +353,9 @@ class BuilderStatus(object):
       success: Whether the build was successful or not.
     """
     if success:
-      return cls.STATUS_PASSED
+      return constants.BUILDER_STATUS_PASSED
     else:
-      return cls.STATUS_FAILED
+      return constants.BUILDER_STATUS_FAILED
 
   def AsFlatDict(self):
     """Returns a flat json-able representation of this builder status.
@@ -395,7 +382,7 @@ class BuilderStatus(object):
 class BuildSpecsManager(object):
   """A Class to manage buildspecs and their states."""
 
-  SLEEP_TIMEOUT = 2 * 60
+  SLEEP_TIMEOUT = 1 * 60
 
   def __init__(self, source_repo, manifest_repo, build_names, incr_type, force,
                branch, manifest=constants.DEFAULT_MANIFEST, dry_run=True,
@@ -506,10 +493,12 @@ class BuildSpecsManager(object):
     self.pass_dirs, self.fail_dirs = [], []
     for build_name in self.build_names:
       specs_for_build = specs_for_builder % {'builder': build_name}
-      self.pass_dirs.append(os.path.join(specs_for_build,
-                                         BuilderStatus.STATUS_PASSED, dir_pfx))
-      self.fail_dirs.append(os.path.join(specs_for_build,
-                                         BuilderStatus.STATUS_FAILED, dir_pfx))
+      self.pass_dirs.append(
+          os.path.join(specs_for_build, constants.BUILDER_STATUS_PASSED,
+                       dir_pfx))
+      self.fail_dirs.append(
+          os.path.join(specs_for_build, constants.BUILDER_STATUS_FAILED,
+                       dir_pfx))
 
     # Calculate the status of the latest build, and whether the build was
     # processed.
@@ -529,8 +518,7 @@ class BuildSpecsManager(object):
     return VersionInfo(version_file=version_file_path, incr_type=self.incr_type)
 
   def HasCheckoutBeenBuilt(self):
-    """Checks to see if we've previously built this checkout.
-    """
+    """Checks to see if we've previously built this checkout."""
     if self._latest_status and self._latest_status.Passed():
       latest_spec_file = '%s.xml' % os.path.join(
           self.all_specs_dir, self.latest)
@@ -542,8 +530,7 @@ class BuildSpecsManager(object):
       return False
 
   def CreateManifest(self):
-    """Returns the path to a new manifest based on the current source checkout.
-    """
+    """Returns the path to a new manifest based on the current checkout."""
     new_manifest = tempfile.mkstemp('manifest_versions.manifest')[1]
     osutils.WriteFile(new_manifest,
                       self.cros_source.ExportManifest(mark_revision=True))
@@ -553,8 +540,8 @@ class BuildSpecsManager(object):
     """Returns the next version string that should be built."""
     version = version_info.VersionString()
     if self.latest == version:
-      message = ('Automatic: %s - Updating to a new version number from %s' % (
-                 self.build_names[0], version))
+      message = ('Automatic: %s - Updating to a new version number from %s' %
+                 (self.build_names[0], version))
       version = version_info.IncrementVersion()
       version_info.UpdateVersionFile(message, dry_run=self.dry_run)
       assert version != self.latest
@@ -616,7 +603,7 @@ class BuildSpecsManager(object):
     try:
       output = ctx.Cat(url)
     except gs.GSNoSuchKey:
-      return BuilderStatus(BuilderStatus.STATUS_MISSING, None)
+      return BuilderStatus(constants.BUILDER_STATUS_MISSING, None)
 
     return BuildSpecsManager._UnpickleBuildStatus(output)
 
@@ -666,7 +653,7 @@ class BuildSpecsManager(object):
 
       latest_completed = set(
           [b for b, s in status_dict.iteritems() if s in
-           BuilderStatus.COMPLETED_STATUSES and b in builders_array])
+           constants.BUILDER_COMPLETED_STATUSES and b in builders_array])
       for builder in sorted(latest_completed - builders_completed):
         logging.info('Builder %s completed with status "%s".',
                      builder, status_dict[builder])
@@ -679,8 +666,8 @@ class BuildSpecsManager(object):
       else:
         return 'Builds completed.'
 
-    def _PrintRemainingTime(minutes_left):
-      logging.info('%d more minutes until timeout...', minutes_left)
+    def _PrintRemainingTime(remaining):
+      logging.info('%s until timeout...', remaining)
 
     # Check for build completion until all builders report in.
     try:
@@ -718,7 +705,7 @@ class BuildSpecsManager(object):
       # In addition to the exceptions listed in the doc, we've also observed
       # TypeError in the wild.
       logging.warning('Failed with %r to unpickle status file.', e)
-      return BuilderStatus(BuilderStatus.STATUS_FAILED, message=None)
+      return BuilderStatus(constants.BUILDER_STATUS_FAILED, message=None)
 
     return BuilderStatus(**status_dict)
 
@@ -746,8 +733,7 @@ class BuildSpecsManager(object):
     return None
 
   def BootstrapFromVersion(self, version):
-    """Initializes spec data from release version and returns path to manifest.
-    """
+    """Initialize a manifest from a release version returning the path to it."""
     # Only refresh the manifest checkout if needed.
     if not self.InitializeManifestVariables(version=version):
       self.RefreshManifestCheckout()
@@ -765,13 +751,11 @@ class BuildSpecsManager(object):
     """Syncs the cros source to the latest git hashes for the branch."""
     self.cros_source.Sync(self.manifest)
 
-  def GetNextBuildSpec(self, retries=NUM_RETRIES, dashboard_url=None,
-                       build_id=None):
+  def GetNextBuildSpec(self, retries=NUM_RETRIES, build_id=None):
     """Returns a path to the next manifest to build.
 
     Args:
       retries: Number of retries for updating the status.
-      dashboard_url: Optional url linking to builder dashboard for this build.
       build_id: Optional integer cidb id of this build, which will be used to
                 annotate the manifest-version commit if one is created.
 
@@ -801,7 +785,6 @@ class BuildSpecsManager(object):
         else:
           version = self.latest_unprocessed
 
-        self.SetInFlight(version, dashboard_url=dashboard_url)
         self.current_version = version
         return self.GetLocalManifest(version)
       except cros_build_lib.RunCommandError as e:
@@ -809,10 +792,10 @@ class BuildSpecsManager(object):
         logging.error(last_error)
         logging.error('Retrying to generate buildspec:  Retry %d/%d', index + 1,
                       retries)
-    else:
-      # Cleanse any failed local changes and throw an exception.
-      self.RefreshManifestCheckout()
-      raise GenerateBuildSpecException(last_error)
+
+    # Cleanse any failed local changes and throw an exception.
+    self.RefreshManifestCheckout()
+    raise GenerateBuildSpecException(last_error)
 
   @staticmethod
   def _GetStatusUrl(builder, version):
@@ -833,16 +816,24 @@ class BuildSpecsManager(object):
     """
     data = BuilderStatus(status, message, dashboard_url).AsPickledDict()
 
+    gs_version = None
     # This HTTP header tells Google Storage to return the PreconditionFailed
-    # error message if the file already exists.
-    gs_version = 0 if fail_if_exists else None
+    # error message if the file already exists. Unfortunately, with new versions
+    # of gsutil, PreconditionFailed is sometimes returned erroneously, so we've
+    # replaced this check with # an Exists check below instead.
+    # TODO(davidjames): Revert CL:223267 when Google Storage is fixed.
+    #if fail_if_exists:
+    #  gs_version = 0
 
     logging.info('Recording status %s for %s', status, self.build_names)
     for build_name in self.build_names:
       url = BuildSpecsManager._GetStatusUrl(build_name, version)
 
-      # Do the actual upload.
       ctx = gs.GSContext(dry_run=self.dry_run)
+      # Check if the file already exists.
+      if fail_if_exists and not self.dry_run and ctx.Exists(url):
+        raise GenerateBuildSpecException('Builder already inflight')
+      # Do the actual upload.
       ctx.Copy('-', url, input=data, version=gs_version)
 
   def UploadStatus(self, success, message=None, dashboard_url=None):
@@ -861,7 +852,7 @@ class BuildSpecsManager(object):
   def SetInFlight(self, version, dashboard_url=None):
     """Marks the buildspec as inflight in Google Storage."""
     try:
-      self._UploadStatus(version, BuilderStatus.STATUS_INFLIGHT,
+      self._UploadStatus(version, constants.BUILDER_STATUS_INFLIGHT,
                          fail_if_exists=True,
                          dashboard_url=dashboard_url)
     except gs.GSContextPreconditionFailed:
@@ -927,7 +918,7 @@ class BuildSpecsManager(object):
         # Upload status to Google Storage as well.
         self.UploadStatus(success, message=message, dashboard_url=dashboard_url)
         return
-    else:
-      # Cleanse any failed local changes and throw an exception.
-      self.RefreshManifestCheckout()
-      raise StatusUpdateException(last_error)
+
+    # Cleanse any failed local changes and throw an exception.
+    self.RefreshManifestCheckout()
+    raise StatusUpdateException(last_error)

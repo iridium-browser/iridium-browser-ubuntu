@@ -40,16 +40,11 @@ source_set("hid") {
 
   deps = [
     "//base",
+    "//device/core",
     "//net",
   ]
 
   if (is_linux) {
-    configs += [
-      "//build/config/linux:udev"
-    ]
-
-    deps += [
-      "//device/udev_linux",
-    ]
+    deps += [ "//device/udev_linux" ]
   }
 }

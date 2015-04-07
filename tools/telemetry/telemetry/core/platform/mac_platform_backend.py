@@ -5,6 +5,7 @@
 import ctypes
 import os
 import platform
+import sys
 import time
 
 from telemetry import decorators
@@ -27,14 +28,9 @@ class MacPlatformBackend(posix_platform_backend.PosixPlatformBackend):
     self._power_monitor = powermetrics_power_monitor.PowerMetricsPowerMonitor(
         self)
 
-  def StartRawDisplayFrameRateMeasurement(self):
-    raise NotImplementedError()
-
-  def StopRawDisplayFrameRateMeasurement(self):
-    raise NotImplementedError()
-
-  def GetRawDisplayFrameRateMeasurements(self):
-    raise NotImplementedError()
+  @classmethod
+  def IsPlatformBackendForHost(cls):
+    return sys.platform == 'darwin'
 
   def IsThermallyThrottled(self):
     raise NotImplementedError()
@@ -79,7 +75,7 @@ class MacPlatformBackend(posix_platform_backend.PosixPlatformBackend):
       PROC_PIDTASKINFO = 4
       def __init__(self):
         self.size = ctypes.sizeof(self)
-        super(ProcTaskInfo, self).__init__()
+        super(ProcTaskInfo, self).__init__()  # pylint: disable=bad-super-call
 
     proc_info = ProcTaskInfo()
     if not self.libproc:

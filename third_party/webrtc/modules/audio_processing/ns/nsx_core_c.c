@@ -23,11 +23,10 @@ static const int16_t kIndicatorTable[17] = {
 // speech/noise probability is returned in: probSpeechFinal
 //snrLocPrior is the prior SNR for each frequency (in Q11)
 //snrLocPost is the post SNR for each frequency (in Q11)
-void WebRtcNsx_SpeechNoiseProb(NsxInst_t* inst,
+void WebRtcNsx_SpeechNoiseProb(NoiseSuppressionFixedC* inst,
                                uint16_t* nonSpeechProbFinal,
                                uint32_t* priorLocSnr,
                                uint32_t* postLocSnr) {
-
   uint32_t zeros, num, den, tmpU32no1, tmpU32no2, tmpU32no3;
   int32_t invLrtFX, indPriorFX, tmp32, tmp32no1, tmp32no2, besselTmpFX32;
   int32_t frac32, logTmp;
@@ -108,7 +107,7 @@ void WebRtcNsx_SpeechNoiseProb(NsxInst_t* inst,
       tmpIndFX = 8192 + tmp16no2; // Q14
     }
   }
-  indPriorFX = WEBRTC_SPL_MUL_16_16(inst->weightLogLrt, tmpIndFX); // 6*Q14
+  indPriorFX = inst->weightLogLrt * tmpIndFX;  // 6*Q14
 
   //spectral flatness feature
   if (inst->weightSpecFlat) {
@@ -140,7 +139,7 @@ void WebRtcNsx_SpeechNoiseProb(NsxInst_t* inst,
         tmpIndFX = 8192 - tmp16no2; // Q14
       }
     }
-    indPriorFX += WEBRTC_SPL_MUL_16_16(inst->weightSpecFlat, tmpIndFX); // 6*Q14
+    indPriorFX += inst->weightSpecFlat * tmpIndFX;  // 6*Q14
   }
 
   //for template spectral-difference
@@ -188,7 +187,7 @@ void WebRtcNsx_SpeechNoiseProb(NsxInst_t* inst,
         tmpIndFX = 8192 - tmp16no2;
       }
     }
-    indPriorFX += WEBRTC_SPL_MUL_16_16(inst->weightSpecDiff, tmpIndFX); // 6*Q14
+    indPriorFX += inst->weightSpecDiff * tmpIndFX;  // 6*Q14
   }
 
   //combine the indicator function with the feature weights

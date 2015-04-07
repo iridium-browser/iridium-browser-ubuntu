@@ -139,7 +139,6 @@ base::FilePath ChildProcessHost::GetChildPath(int flags) {
 
 ChildProcessHostImpl::ChildProcessHostImpl(ChildProcessHostDelegate* delegate)
     : delegate_(delegate),
-      peer_handle_(base::kNullProcessHandle),
       opening_channel_(false) {
 #if defined(OS_WIN)
   AddFilter(new FontCacheDispatcher());
@@ -151,8 +150,6 @@ ChildProcessHostImpl::~ChildProcessHostImpl() {
     filters_[i]->OnChannelClosing();
     filters_[i]->OnFilterRemoved();
   }
-
-  base::CloseProcessHandle(peer_handle_);
 }
 
 void ChildProcessHostImpl::AddFilter(IPC::MessageFilter* filter) {
@@ -277,10 +274,18 @@ bool ChildProcessHostImpl::OnMessageReceived(const IPC::Message& msg) {
 }
 
 void ChildProcessHostImpl::OnChannelConnected(int32 peer_pid) {
-  if (!peer_handle_ &&
-      !base::OpenPrivilegedProcessHandle(peer_pid, &peer_handle_)) {
-    peer_handle_ = delegate_->GetHandle();
-    DCHECK(peer_handle_);
+  if (!peer_process_.IsValid()) {
+    base::ProcessHandle peer_handle_;
+    if (base::OpenPrivilegedProcessHandle(peer_pid, &peer_handle_)) {
+      // TODO(rvargas) crbug.com/417532: don't go through a ProcessHandle.
+      if (peer_handle_ == base::GetCurrentProcessHandle())
+        peer_process_ = base::Process::Current();
+      else
+        peer_process_ = base::Process(peer_handle_);
+    } else {
+      peer_process_ = delegate_->GetProcess().Duplicate();
+    }
+    DCHECK(peer_process_.IsValid());
   }
   opening_channel_ = false;
   delegate_->OnChannelConnected(peer_pid);
@@ -306,7 +311,7 @@ void ChildProcessHostImpl::OnBadMessageReceived(const IPC::Message& message) {
 void ChildProcessHostImpl::OnAllocateSharedMemory(
     uint32 buffer_size,
     base::SharedMemoryHandle* handle) {
-  AllocateSharedMemory(buffer_size, peer_handle_, handle);
+  AllocateSharedMemory(buffer_size, peer_process_.Handle(), handle);
 }
 
 void ChildProcessHostImpl::OnShutdownRequest() {
@@ -320,30 +325,24 @@ void ChildProcessHostImpl::OnAllocateGpuMemoryBuffer(
     gfx::GpuMemoryBuffer::Format format,
     gfx::GpuMemoryBuffer::Usage usage,
     IPC::Message* reply) {
-  base::CheckedNumeric<int> size = width;
-  size *= height;
-  if (!size.IsValid()) {
-    GpuMemoryBufferAllocated(reply, gfx::GpuMemoryBufferHandle());
-    return;
-  }
-
   // TODO(reveman): Add support for other types of GpuMemoryBuffers.
-  if (!GpuMemoryBufferImplSharedMemory::IsConfigurationSupported(
-          gfx::Size(width, height), format, usage)) {
-    GpuMemoryBufferAllocated(reply, gfx::GpuMemoryBufferHandle());
-    return;
+
+  gfx::GpuMemoryBufferHandle handle;
+  // AllocateForChildProcess() will check if |width| and |height| are valid
+  // and handle failure in a controlled way when not. We just need to make
+  // sure |format| and |usage| are supported here.
+  if (GpuMemoryBufferImplSharedMemory::IsFormatSupported(format) &&
+      usage == gfx::GpuMemoryBuffer::MAP) {
+    handle = GpuMemoryBufferImplSharedMemory::AllocateForChildProcess(
+        g_next_gpu_memory_buffer_id.GetNext(),
+        gfx::Size(width, height),
+        format,
+        peer_process_.Handle());
   }
 
-  // Note: It is safe to use base::Unretained here as the shared memory
-  // implementation of AllocateForChildProcess() calls this synchronously.
-  GpuMemoryBufferImplSharedMemory::AllocateForChildProcess(
-      g_next_gpu_memory_buffer_id.GetNext(),
-      gfx::Size(width, height),
-      format,
-      peer_handle_,
-      base::Bind(&ChildProcessHostImpl::GpuMemoryBufferAllocated,
-                 base::Unretained(this),
-                 reply));
+  ChildProcessHostMsg_SyncAllocateGpuMemoryBuffer::WriteReplyParams(reply,
+                                                                    handle);
+  Send(reply);
 }
 
 void ChildProcessHostImpl::OnDeletedGpuMemoryBuffer(
@@ -351,14 +350,6 @@ void ChildProcessHostImpl::OnDeletedGpuMemoryBuffer(
     uint32 sync_point) {
   // Note: Nothing to do here as ownership of shared memory backed
   // GpuMemoryBuffers is passed with IPC.
-}
-
-void ChildProcessHostImpl::GpuMemoryBufferAllocated(
-    IPC::Message* reply,
-    const gfx::GpuMemoryBufferHandle& handle) {
-  ChildProcessHostMsg_SyncAllocateGpuMemoryBuffer::WriteReplyParams(reply,
-                                                                    handle);
-  Send(reply);
 }
 
 }  // namespace content

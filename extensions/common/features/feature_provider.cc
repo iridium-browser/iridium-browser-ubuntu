@@ -34,6 +34,8 @@ class Static {
         make_linked_ptr(client->CreateFeatureProvider("manifest").release());
     feature_providers_["permission"] =
         make_linked_ptr(client->CreateFeatureProvider("permission").release());
+    feature_providers_["behavior"] =
+        make_linked_ptr(client->CreateFeatureProvider("behavior").release());
   }
 
   typedef std::map<std::string, linked_ptr<FeatureProvider> >
@@ -44,11 +46,22 @@ class Static {
 
 base::LazyInstance<Static> g_static = LAZY_INSTANCE_INITIALIZER;
 
+const Feature* GetFeatureFromProviderByName(const std::string& provider_name,
+                                            const std::string& feature_name) {
+  const Feature* feature =
+      FeatureProvider::GetByName(provider_name)->GetFeature(feature_name);
+  CHECK(feature) << "FeatureProvider '" << provider_name
+                 << "' does not contain Feature '" << feature_name << "'";
+  return feature;
+}
+
 }  // namespace
 
 // static
 const FeatureProvider* FeatureProvider::GetByName(const std::string& name) {
-  return g_static.Get().GetFeatures(name);
+  const FeatureProvider* feature_provider = g_static.Get().GetFeatures(name);
+  CHECK(feature_provider) << "FeatureProvider '" << name << "' not found";
+  return feature_provider;
 }
 
 // static
@@ -64,6 +77,31 @@ const FeatureProvider* FeatureProvider::GetManifestFeatures() {
 // static
 const FeatureProvider* FeatureProvider::GetPermissionFeatures() {
   return GetByName("permission");
+}
+
+// static
+const FeatureProvider* FeatureProvider::GetBehaviorFeatures() {
+  return GetByName("behavior");
+}
+
+// static
+const Feature* FeatureProvider::GetAPIFeature(const std::string& name) {
+  return GetFeatureFromProviderByName("api", name);
+}
+
+// static
+const Feature* FeatureProvider::GetManifestFeature(const std::string& name) {
+  return GetFeatureFromProviderByName("manifest", name);
+}
+
+// static
+const Feature* FeatureProvider::GetPermissionFeature(const std::string& name) {
+  return GetFeatureFromProviderByName("permission", name);
+}
+
+// static
+const Feature* FeatureProvider::GetBehaviorFeature(const std::string& name) {
+  return GetFeatureFromProviderByName("behavior", name);
 }
 
 }  // namespace extensions

@@ -4,6 +4,8 @@
 
 package org.chromium.chrome.browser.preferences;
 
+import android.text.TextUtils;
+
 import org.chromium.base.CalledByNative;
 import org.chromium.base.ThreadUtils;
 import org.chromium.chrome.browser.search_engines.TemplateUrlService;
@@ -29,7 +31,7 @@ public final class PrefServiceBridge {
     public static final int SUPERVISED_USER_FILTERING_WARN = 1;
     public static final int SUPERVISED_USER_FILTERING_BLOCK = 2;
 
-    private static String sProfilePathValue;
+    private static String sProfilePath;
 
     // Object to notify when "clear browsing data" completes.
     private OnClearBrowsingDataListener mClearBrowsingDataListener;
@@ -71,6 +73,16 @@ public final class PrefServiceBridge {
         public String getOSVersion() {
             return mOSVersion;
         }
+    }
+
+    /**
+     * Callback to receive the profile path.
+     */
+    public interface ProfilePathCallback {
+        /**
+         * Called with the profile path, once it's available.
+         */
+        void onGotProfilePath(String profilePath);
     }
 
     /**
@@ -131,18 +143,21 @@ public final class PrefServiceBridge {
     }
 
     /**
-     * @return the About Chrome value for profile path.
+     * Returns the path to the user's profile directory via a callback. The callback may be
+     * called synchronously or asynchronously.
      */
-    public String getProfilePathValue() {
-        return sProfilePathValue;
+    public void getProfilePath(ProfilePathCallback callback) {
+        if (!TextUtils.isEmpty(sProfilePath)) {
+            callback.onGotProfilePath(sProfilePath);
+        } else {
+            nativeGetProfilePath(callback);
+        }
     }
 
-    /**
-     * Set the About Chrome value for profile path.
-     */
     @CalledByNative
-    public static void setProfilePathValue(String pathValue) {
-        sProfilePathValue = pathValue;
+    private static void onGotProfilePath(String profilePath, ProfilePathCallback callback) {
+        sProfilePath = profilePath;
+        callback.onGotProfilePath(profilePath);
     }
 
     public boolean isAcceptCookiesEnabled() {
@@ -179,17 +194,32 @@ public final class PrefServiceBridge {
     }
 
     /**
-     * @return whether geolocation informatoin can be shared with content
+     * @return whether push notifications are enabled.
+     */
+    public boolean isPushNotificationsEnabled() {
+        return nativeGetPushNotificationsEnabled();
+    }
+
+    /**
+     * @return whether geolocation information can be shared with content
      */
     public boolean isAllowLocationEnabled() {
         return nativeGetAllowLocationEnabled();
     }
 
     /**
-     * @return whether the location preference is configured by policy
+     * @return whether the location preference is modifiable by the user.
      */
-    public boolean isAllowLocationManaged() {
-        return nativeGetAllowLocationManaged();
+    public boolean isAllowLocationUserModifiable() {
+        return nativeGetAllowLocationUserModifiable();
+    }
+
+    /**
+     * @return whether the location preference is
+     * being managed by the custodian of the supervised account.
+     */
+    public boolean isAllowLocationManagedByCustodian() {
+        return nativeGetAllowLocationManagedByCustodian();
     }
 
     /**
@@ -503,6 +533,10 @@ public final class PrefServiceBridge {
         nativeSetRememberPasswordsEnabled(allow);
     }
 
+    public void setPushNotificationsEnabled(boolean allow) {
+        nativeSetPushNotificationsEnabled(allow);
+    }
+
     public void setAllowLocationEnabled(boolean allow) {
         nativeSetAllowLocationEnabled(allow);
     }
@@ -532,6 +566,35 @@ public final class PrefServiceBridge {
      */
     public void setAllowPopupsEnabled(boolean allow) {
         nativeSetAllowPopupsEnabled(allow);
+    }
+
+    /**
+     * @return Whether the camera/microphone permission is enabled.
+     */
+    public boolean isCameraMicEnabled() {
+        return nativeGetCameraMicEnabled();
+    }
+
+    /**
+     * Sets the preferences on whether to enable/disable camera and microphone
+     */
+    public void setCameraMicEnabled(boolean enabled) {
+        nativeSetCameraMicEnabled(enabled);
+    }
+
+    /**
+     * @return Whether the camera/microphone permission is managed
+     * by the custodian of the supervised account.
+     */
+    public boolean isCameraMicManagedByCustodian() {
+        return nativeGetCameraMicManagedByCustodian();
+    }
+
+    /**
+     * @return Whether the camera/microphone permission is editable by the user.
+     */
+    public boolean isCameraMicUserModifiable() {
+        return nativeGetCameraMicUserModifiable();
     }
 
     /**
@@ -608,15 +671,6 @@ public final class PrefServiceBridge {
     }
 
     /**
-     * Set profile path value needed for about chrome.
-     */
-    public void setPathValuesForAboutChrome() {
-        if (sProfilePathValue == null) {
-            nativeSetPathValuesForAboutChrome();
-        }
-    }
-
-    /**
      * Reset accept-languages to its default value.
      *
      * @param defaultLocale A fall-back value such as en_US, de_DE, zh_CN, etc.
@@ -669,11 +723,14 @@ public final class PrefServiceBridge {
     private native boolean nativeGetBlockThirdPartyCookiesManaged();
     private native boolean nativeGetRememberPasswordsEnabled();
     private native boolean nativeGetRememberPasswordsManaged();
-    private native boolean nativeGetAllowLocationManaged();
+    private native boolean nativeGetAllowLocationUserModifiable();
+    private native boolean nativeGetAllowLocationManagedByCustodian();
     private native boolean nativeGetDoNotTrackEnabled();
     private native boolean nativeGetPasswordEchoEnabled();
     private native boolean nativeGetFirstRunEulaAccepted();
     private native boolean nativeGetJavaScriptManaged();
+    private native boolean nativeGetCameraMicUserModifiable();
+    private native boolean nativeGetCameraMicManagedByCustodian();
     private native boolean nativeGetTranslateEnabled();
     private native boolean nativeGetTranslateManaged();
     private native boolean nativeGetResolveNavigationErrorEnabled();
@@ -697,7 +754,10 @@ public final class PrefServiceBridge {
     private native void nativeSetRememberPasswordsEnabled(boolean allow);
     private native void nativeSetProtectedMediaIdentifierEnabled(boolean enabled);
     private native boolean nativeGetAllowLocationEnabled();
+    private native boolean nativeGetPushNotificationsEnabled();
     private native void nativeSetAllowLocationEnabled(boolean allow);
+    private native void nativeSetCameraMicEnabled(boolean allow);
+    private native void nativeSetPushNotificationsEnabled(boolean allow);
     private native void nativeSetPasswordEchoEnabled(boolean enabled);
     private native boolean nativeGetAllowPopupsEnabled();
     private native boolean nativeGetAllowPopupsManaged();
@@ -705,12 +765,13 @@ public final class PrefServiceBridge {
     private native void nativeSetPopupException(String pattern, boolean allow);
     private native void nativeRemovePopupException(String pattern);
     private native void nativeGetPopupExceptions(Object list);
+    private native boolean nativeGetCameraMicEnabled();
     private native boolean nativeGetAutologinEnabled();
     private native void nativeSetAutologinEnabled(boolean autologinEnabled);
     private native void nativeSetCrashReporting(boolean reporting);
     private native boolean nativeCanPredictNetworkActions();
     private native AboutVersionStrings nativeGetAboutVersionStrings();
-    private native void nativeSetPathValuesForAboutChrome();
+    private native void nativeGetProfilePath(ProfilePathCallback callback);
     private native void nativeSetContextualSearchPreference(String preference);
     private native String nativeGetContextualSearchPreference();
     private native boolean nativeGetContextualSearchPreferenceIsManaged();

@@ -113,32 +113,23 @@ class StreamCollectionInterface : public rtc::RefCountInterface {
 
 class StatsObserver : public rtc::RefCountInterface {
  public:
-  // TODO(tommi): Remove.
-  virtual void OnComplete(const std::vector<StatsReport>& reports) {}
-
-  // TODO(tommi): Make pure virtual and remove implementation.
-  virtual void OnComplete(const StatsReports& reports) {
-    std::vector<StatsReportCopyable> report_copies;
-    for (size_t i = 0; i < reports.size(); ++i)
-      report_copies.push_back(StatsReportCopyable(*reports[i]));
-    std::vector<StatsReport>* r =
-        reinterpret_cast<std::vector<StatsReport>*>(&report_copies);
-     OnComplete(*r);
-   }
+  virtual void OnComplete(const StatsReports& reports) = 0;
 
  protected:
   virtual ~StatsObserver() {}
 };
 
-class UMAObserver : public rtc::RefCountInterface {
+class MetricsObserverInterface : public rtc::RefCountInterface {
  public:
-  virtual void IncrementCounter(PeerConnectionUMAMetricsCounter type) = 0;
-  virtual void AddHistogramSample(PeerConnectionUMAMetricsName type,
+  virtual void IncrementCounter(PeerConnectionMetricsCounter type) = 0;
+  virtual void AddHistogramSample(PeerConnectionMetricsName type,
                                   int value) = 0;
 
  protected:
-  virtual ~UMAObserver() {}
+  virtual ~MetricsObserverInterface() {}
 };
+
+typedef MetricsObserverInterface UMAObserver;
 
 class PeerConnectionInterface : public rtc::RefCountInterface {
  public:

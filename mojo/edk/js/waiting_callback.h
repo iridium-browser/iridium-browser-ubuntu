@@ -2,9 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef MOJO_BINDINGS_JS_WAITING_CALLBACK_H_
-#define MOJO_BINDINGS_JS_WAITING_CALLBACK_H_
+#ifndef MOJO_EDK_JS_WAITING_CALLBACK_H_
+#define MOJO_EDK_JS_WAITING_CALLBACK_H_
 
+#include "base/memory/weak_ptr.h"
 #include "gin/handle.h"
 #include "gin/runner.h"
 #include "gin/wrappable.h"
@@ -49,10 +50,14 @@ class WaitingCallback : public gin::Wrappable<WaitingCallback>,
   // still in progress.
   void OnWillCloseHandle() override;
 
+  void ClearWaitId();
+  void CallCallback(MojoResult result);
+
   base::WeakPtr<gin::Runner> runner_;
   MojoAsyncWaitID wait_id_;
 
   HandleWrapper* handle_wrapper_;
+  base::WeakPtrFactory<WaitingCallback> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(WaitingCallback);
 };
@@ -60,4 +65,4 @@ class WaitingCallback : public gin::Wrappable<WaitingCallback>,
 }  // namespace js
 }  // namespace mojo
 
-#endif  // MOJO_BINDINGS_JS_WAITING_CALLBACK_H_
+#endif  // MOJO_EDK_JS_WAITING_CALLBACK_H_

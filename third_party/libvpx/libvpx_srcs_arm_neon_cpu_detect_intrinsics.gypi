@@ -33,6 +33,7 @@
         '<(libvpx_source)/vp8/common/arm/neon/variance_neon.c',
         '<(libvpx_source)/vp8/common/arm/neon/vp8_subpixelvariance_neon.c',
         '<(libvpx_source)/vp8/encoder/arm/neon/denoising_neon.c',
+        '<(libvpx_source)/vp8/encoder/arm/neon/fastquantizeb_neon.c',
         '<(libvpx_source)/vp8/encoder/arm/neon/shortfdct_neon.c',
         '<(libvpx_source)/vp8/encoder/arm/neon/subtract_neon.c',
         '<(libvpx_source)/vp8/encoder/arm/neon/vp8_mse16x16_neon.c',

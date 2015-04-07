@@ -34,7 +34,10 @@ void FakeVideoCaptureDevice::AllocateAndStart(
     const VideoCaptureParams& params,
     scoped_ptr<VideoCaptureDevice::Client> client) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(!capture_thread_.IsRunning());
+  if (capture_thread_.IsRunning()) {
+    NOTREACHED();
+    return;
+  }
 
   capture_thread_.Start();
   capture_thread_.message_loop()->PostTask(
@@ -47,7 +50,10 @@ void FakeVideoCaptureDevice::AllocateAndStart(
 
 void FakeVideoCaptureDevice::StopAndDeAllocate() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(capture_thread_.IsRunning());
+  if (!capture_thread_.IsRunning()) {
+    NOTREACHED();
+    return;
+  }
   capture_thread_.message_loop()->PostTask(
       FROM_HERE,
       base::Bind(&FakeVideoCaptureDevice::OnStopAndDeAllocate,
@@ -75,7 +81,9 @@ void FakeVideoCaptureDevice::OnAllocateAndStart(
   DCHECK_EQ(params.requested_format.pixel_format, PIXEL_FORMAT_I420);
   capture_format_.pixel_format = params.requested_format.pixel_format;
   capture_format_.frame_rate = 30;
-  if (params.requested_format.frame_size.width() > 640)
+  if (params.requested_format.frame_size.width() > 720)
+      capture_format_.frame_size.SetSize(1920, 1080);
+  else if (params.requested_format.frame_size.width() > 640)
       capture_format_.frame_size.SetSize(1280, 720);
   else if (params.requested_format.frame_size.width() > 320)
     capture_format_.frame_size.SetSize(640, 480);

@@ -15,23 +15,27 @@
 <translation id="3622586652998721735">ตั้งค่าเป็นรูปแบบเริ่มต้น</translation>
 <translation id="2179565792157161713">เปิดคำอธิบายแบบยาวในแท็บใหม่</translation>
 <translation id="2471847333270902538">รูปแบบชุดสีสำหรับ <ph name="SITE"/>:</translation>
+<translation id="381767806621926835">คลิกขวาที่ใดก็ได้ด้วยแอตทริบิวต์ &quot;longdesc&quot; หรือ &quot;aria-describedat&quot; เพื่อเข้าถึงคำอธิบายแบบยาว</translation>
+<translation id="786423340267544509">เพิ่มขอบให้กับองค์ประกอบด้วยแอตทริบิวต์ aria-describedat หรือ longdesc</translation>
 <translation id="690628312087070417">เมื่อเครื่องหมาย caret ข้ามไปยังระยะที่ห่างมาก</translation>
 <translation id="5331422999063554397">สีสลับ</translation>
 <translation id="2648340354586434750">กด&lt;span class='key'&gt;ตัวเลือก&lt;/span&gt;ค้างไว้เพื่อเลื่อนไปทีละคำ</translation>
+<translation id="4769065380738716500">มีการแทนที่รูปภาพด้วยข้อความ alt ของรูปภาพเหล่านั้น</translation>
 <translation id="5287723860611749454">&lt;p&gt;ใช้คีย์ลูกศรเพื่อเลื่อนไปยังส่วนต่างๆ ของเอกสาร &lt;/p&gt;&lt;p&gt;คลิกตำแหน่งหนึ่งๆ เพื่อย้ายเคอร์เซอร์ไปยังตำแหน่งนั้น&lt;/p&gt; &lt;p&gt;   กด &lt;span class='key'&gt;Shift&lt;/span&gt; + ลูกศร เพื่อเลือกข้อความ&lt;/p&gt;</translation>
 <translation id="5558600050691192317">คำสั่งแป้นพิมพ์</translation>
 <translation id="633394792577263429">กด &lt;span class='key'&gt;Control&lt;/span&gt; ค้างไว้เพื่อเลื่อนไปทีละคำ</translation>
+<translation id="2079545284768500474">เลิกทำ</translation>
 <translation id="8254860724243898966">กด &lt;span class='key'&gt;Alt&lt;/span&gt; + &lt;img src='increase_brightness.png'&gt; (คีย์เพิ่มความสว่างหรือ F7) เพื่อเปิดการเรียกดูด้วยแป้นพิมพ์ กดอีกครั้งเพื่อปิด</translation>
 <translation id="3812541808639806898">โปรแกรมดูข้อความของภาพ Alt</translation>
 <translation id="1287053896835709737">สีเหลืองบนสีดำ</translation>
 <translation id="4896660567607030658">ไม่มีการตอบสนอง แสดงเคอร์เซอร์เท่านั้น</translation>
 <translation id="5631241868147802353">รูปแบบชุดสีเริ่มต้น:</translation>
-<translation id="625377550964694810">องค์ประกอบ HTML ใดๆ ที่มีแอตทริบิวต์ &quot;longdesc&quot; หรือ &quot;aria-describedat&quot; จะมีขอบหนาและชัดเจน และหากคุณคลิกขวาบนองค์ประกอบนั้น จะมีการเพิ่มตัวเลือกในการดูคำอธิบายแบบยาวไปยังเมนูบริบท</translation>
 <translation id="5173942593318174089">ไฮไลต์ตำแหน่งเคอร์เซอร์ที่มีภาพเคลื่อนไหว</translation>
 <translation id="894241283505723656">คำอธิบายแบบยาวในเมนูบริบท</translation>
 <translation id="5555153510860501336">ปิดความเปรียบต่างสูงอยู่</translation>
 <translation id="1703735871906654364">การเรียกดูด้วยแป้นพิมพ์</translation>
 <translation id="7384431257964758081">เปิดความเปรียบต่างอยู่</translation>
+<translation id="6550675742724504774">ตัวเลือก</translation>
 <translation id="5650358096585648000">การตอบสนองที่เป็นภาพ</translation>
 <translation id="4388820049312272371">ไฮไลต์ตำแหน่งเคอร์เซอร์ด้วยการกะพริบเร็วๆ</translation>
 <translation id="4023902424053835668">เรียกดูข้อความของหน้าเว็บโดยใช้แป้นลูกศร</translation>

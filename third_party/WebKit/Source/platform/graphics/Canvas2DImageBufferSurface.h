@@ -44,6 +44,8 @@ public:
         , m_layerBridge(Canvas2DLayerBridge::create(size, opacityMode, msaaSampleCount))
     {
         clear();
+        if (isValid())
+            m_layerBridge->flush();
     }
 
     virtual ~Canvas2DImageBufferSurface()
@@ -61,6 +63,7 @@ public:
     virtual WebLayer* layer() const override { return m_layerBridge->layer(); }
     virtual Platform3DObject getBackingTexture() const override { return m_layerBridge->getBackingTexture(); }
     virtual bool isAccelerated() const override { return m_layerBridge->isAccelerated(); }
+    virtual void setFilterLevel(SkPaint::FilterLevel filterLevel) override { m_layerBridge->setFilterLevel(filterLevel); };
     virtual void setIsHidden(bool hidden) override { m_layerBridge->setIsHidden(hidden); }
     virtual void setImageBuffer(ImageBuffer* imageBuffer) override { m_layerBridge->setImageBuffer(imageBuffer); }
 

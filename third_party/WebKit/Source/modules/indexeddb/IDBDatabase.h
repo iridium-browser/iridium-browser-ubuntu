@@ -26,8 +26,8 @@
 #ifndef IDBDatabase_h
 #define IDBDatabase_h
 
-#include "bindings/core/v8/Dictionary.h"
 #include "bindings/core/v8/ScriptState.h"
+#include "bindings/modules/v8/UnionTypesModules.h"
 #include "core/dom/ActiveDOMObject.h"
 #include "core/dom/DOMStringList.h"
 #include "modules/EventModules.h"
@@ -35,6 +35,7 @@
 #include "modules/indexeddb/IDBDatabaseCallbacks.h"
 #include "modules/indexeddb/IDBMetadata.h"
 #include "modules/indexeddb/IDBObjectStore.h"
+#include "modules/indexeddb/IDBObjectStoreParameters.h"
 #include "modules/indexeddb/IDBTransaction.h"
 #include "modules/indexeddb/IndexedDB.h"
 #include "platform/heap/Handle.h"
@@ -51,12 +52,11 @@ class ExceptionState;
 class ExecutionContext;
 
 class IDBDatabase final
-    : public RefCountedGarbageCollectedWillBeGarbageCollectedFinalized<IDBDatabase>
-    , public EventTargetWithInlineData
+    : public RefCountedGarbageCollectedEventTargetWithInlineData<IDBDatabase>
     , public ActiveDOMObject {
     DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollected<IDBDatabase>);
-    DEFINE_WRAPPERTYPEINFO();
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(IDBDatabase);
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static IDBDatabase* create(ExecutionContext*, PassOwnPtr<WebIDBDatabase>, IDBDatabaseCallbacks*);
     virtual ~IDBDatabase();
@@ -70,14 +70,11 @@ public:
 
     // Implement the IDL
     const String& name() const { return m_metadata.name; }
-    ScriptValue version(ScriptState*) const;
+    void version(UnsignedLongLongOrString& result) const;
     PassRefPtrWillBeRawPtr<DOMStringList> objectStoreNames() const;
 
-    IDBObjectStore* createObjectStore(const String& name, const Dictionary&, ExceptionState&);
-    IDBObjectStore* createObjectStore(const String& name, const IDBKeyPath&, bool autoIncrement, ExceptionState&);
-    IDBTransaction* transaction(ScriptState* scriptState, PassRefPtrWillBeRawPtr<DOMStringList> scope, const String& mode, ExceptionState& exceptionState) { return transaction(scriptState, *scope, mode, exceptionState); }
-    IDBTransaction* transaction(ScriptState*, const Vector<String>&, const String& mode, ExceptionState&);
-    IDBTransaction* transaction(ScriptState*, const String&, const String& mode, ExceptionState&);
+    IDBObjectStore* createObjectStore(const String& name, const IDBObjectStoreParameters& options, ExceptionState& exceptionState) { return createObjectStore(name, IDBKeyPath(options.keyPath()), options.autoIncrement(), exceptionState); }
+    IDBTransaction* transaction(ScriptState*, const StringOrStringSequenceOrDOMStringList&, const String& mode, ExceptionState&);
     void deleteObjectStore(const String& name, ExceptionState&);
     void close();
 
@@ -140,6 +137,7 @@ public:
 private:
     IDBDatabase(ExecutionContext*, PassOwnPtr<WebIDBDatabase>, IDBDatabaseCallbacks*);
 
+    IDBObjectStore* createObjectStore(const String& name, const IDBKeyPath&, bool autoIncrement, ExceptionState&);
     void closeConnection();
 
     IDBDatabaseMetadata m_metadata;

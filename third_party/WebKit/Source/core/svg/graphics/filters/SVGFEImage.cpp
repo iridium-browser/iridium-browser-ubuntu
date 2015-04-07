@@ -25,22 +25,22 @@
 
 #include "core/svg/graphics/filters/SVGFEImage.h"
 
-#include "SkBitmapSource.h"
-#include "SkPictureImageFilter.h"
 #include "core/rendering/RenderObject.h"
 #include "core/rendering/svg/SVGRenderingContext.h"
 #include "core/svg/SVGElement.h"
 #include "core/svg/SVGURIReference.h"
-#include "platform/graphics/DisplayList.h"
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/filters/Filter.h"
 #include "platform/graphics/filters/SkiaImageFilterBuilder.h"
 #include "platform/text/TextStream.h"
 #include "platform/transforms/AffineTransform.h"
+#include "third_party/skia/include/core/SkPicture.h"
+#include "third_party/skia/include/effects/SkBitmapSource.h"
+#include "third_party/skia/include/effects/SkPictureImageFilter.h"
 
 namespace blink {
 
-FEImage::FEImage(Filter* filter, PassRefPtr<Image> image, PassRefPtr<SVGPreserveAspectRatio> preserveAspectRatio)
+FEImage::FEImage(Filter* filter, PassRefPtr<Image> image, PassRefPtrWillBeRawPtr<SVGPreserveAspectRatio> preserveAspectRatio)
     : FilterEffect(filter)
     , m_image(image)
     , m_treeScope(0)
@@ -48,7 +48,7 @@ FEImage::FEImage(Filter* filter, PassRefPtr<Image> image, PassRefPtr<SVGPreserve
 {
 }
 
-FEImage::FEImage(Filter* filter, TreeScope& treeScope, const String& href, PassRefPtr<SVGPreserveAspectRatio> preserveAspectRatio)
+FEImage::FEImage(Filter* filter, TreeScope& treeScope, const String& href, PassRefPtrWillBeRawPtr<SVGPreserveAspectRatio> preserveAspectRatio)
     : FilterEffect(filter)
     , m_treeScope(&treeScope)
     , m_href(href)
@@ -56,14 +56,20 @@ FEImage::FEImage(Filter* filter, TreeScope& treeScope, const String& href, PassR
 {
 }
 
-PassRefPtr<FEImage> FEImage::createWithImage(Filter* filter, PassRefPtr<Image> image, PassRefPtr<SVGPreserveAspectRatio> preserveAspectRatio)
+void FEImage::trace(Visitor* visitor)
 {
-    return adoptRef(new FEImage(filter, image, preserveAspectRatio));
+    visitor->trace(m_preserveAspectRatio);
+    FilterEffect::trace(visitor);
 }
 
-PassRefPtr<FEImage> FEImage::createWithIRIReference(Filter* filter, TreeScope& treeScope, const String& href, PassRefPtr<SVGPreserveAspectRatio> preserveAspectRatio)
+PassRefPtrWillBeRawPtr<FEImage> FEImage::createWithImage(Filter* filter, PassRefPtr<Image> image, PassRefPtrWillBeRawPtr<SVGPreserveAspectRatio> preserveAspectRatio)
 {
-    return adoptRef(new FEImage(filter, treeScope, href, preserveAspectRatio));
+    return adoptRefWillBeNoop(new FEImage(filter, image, preserveAspectRatio));
+}
+
+PassRefPtrWillBeRawPtr<FEImage> FEImage::createWithIRIReference(Filter* filter, TreeScope& treeScope, const String& href, PassRefPtrWillBeRawPtr<SVGPreserveAspectRatio> preserveAspectRatio)
+{
+    return adoptRefWillBeNoop(new FEImage(filter, treeScope, href, preserveAspectRatio));
 }
 
 static FloatRect getRendererRepaintRect(RenderObject* renderer)
@@ -170,9 +176,9 @@ PassRefPtr<SkImageFilter> FEImage::createImageFilterForRenderer(RenderObject* re
     context->beginRecording(bounds);
     context->concatCTM(transform);
     SVGRenderingContext::renderSubtree(context, renderer);
-    RefPtr<DisplayList> displayList = context->endRecording();
+    RefPtr<const SkPicture> picture = context->endRecording();
     context->restore();
-    RefPtr<SkImageFilter> result = adoptRef(SkPictureImageFilter::Create(displayList->picture().get(), dstRect));
+    RefPtr<SkImageFilter> result = adoptRef(SkPictureImageFilter::Create(picture.get(), dstRect));
     return result.release();
 }
 

@@ -7,6 +7,7 @@ import os
 import urlparse
 
 from telemetry import user_story
+from telemetry.page import shared_page_state
 from telemetry.util import cloud_storage
 from telemetry.util import path
 
@@ -14,7 +15,7 @@ from telemetry.util import path
 def _UpdateCredentials(credentials_path):
   # Attempt to download the credentials file.
   try:
-    cloud_storage.GetIfChanged(credentials_path)
+    cloud_storage.GetIfChanged(credentials_path, cloud_storage.PUBLIC_BUCKET)
   except (cloud_storage.CredentialsError, cloud_storage.PermissionError,
           cloud_storage.CloudStorageError) as e:
     logging.warning('Cannot retrieve credential file %s due to cloud storage '
@@ -23,9 +24,15 @@ def _UpdateCredentials(credentials_path):
 
 class Page(user_story.UserStory):
   def __init__(self, url, page_set=None, base_dir=None, name='',
-               credentials_path=None, labels=None):
-    super(Page, self).__init__(name)
+               credentials_path=None, labels=None, startup_url='',
+               make_javascript_deterministic=True):
     self._url = url
+
+    super(Page, self).__init__(
+        shared_page_state.SharedPageState, name=name, labels=labels,
+        is_local=self._scheme in ['file', 'chrome', 'about'],
+        make_javascript_deterministic=make_javascript_deterministic)
+
     self._page_set = page_set
     # Default value of base_dir is the directory of the file that defines the
     # class of this page instance.
@@ -40,28 +47,22 @@ class Page(user_story.UserStory):
         logging.error('Invalid credentials path: %s' % credentials_path)
         credentials_path = None
     self._credentials_path = credentials_path
-    if labels is None:
-      labels = set([])
-    elif isinstance(labels, list):
-      labels = set(labels)
-    self._labels = labels
 
     # These attributes can be set dynamically by the page.
     self.synthetic_delays = dict()
-    self.startup_url = page_set.startup_url if page_set else ''
+    self._startup_url = startup_url
     self.credentials = None
     self.skip_waits = False
     self.script_to_evaluate_on_commit = None
     self._SchemeErrorCheck()
 
-
-  @property
-  def labels(self):
-    return self._labels
-
   @property
   def credentials_path(self):
     return self._credentials_path
+
+  @property
+  def startup_url(self):
+    return self._startup_url
 
   def _SchemeErrorCheck(self):
     if not self._scheme:
@@ -92,10 +93,19 @@ class Page(user_story.UserStory):
       return
     self._page_set.pages.remove(self)
     self._page_set = another_page_set
-    self._page_set.AddPage(self)
+    self._page_set.AddUserStory(self)
 
   def RunNavigateSteps(self, action_runner):
     action_runner.NavigateToPage(self)
+
+  def RunPageInteractions(self, action_runner):
+    """Override this to define custom interactions with the page.
+    e.g:
+      def RunPageInteractions(self, action_runner):
+        action_runner.ScrollPage()
+        action_runner.TapElement(text='Next')
+    """
+    pass
 
   def CanRunOnBrowser(self, browser_info):
     """Override this to returns whether this page can be run on specific
@@ -159,11 +169,6 @@ class Page(user_story.UserStory):
     return self._scheme == 'file'
 
   @property
-  def is_local(self):
-    """Returns True iff this URL is local. This includes chrome:// URLs."""
-    return self._scheme in ['file', 'chrome', 'about']
-
-  @property
   def file_path(self):
     """Returns the path of the file, stripping the scheme and query string."""
     assert self.is_file
@@ -205,7 +210,3 @@ class Page(user_story.UserStory):
     all_urls = [p.url.rstrip('/') for p in self.page_set if p.is_file]
     common_prefix = os.path.dirname(os.path.commonprefix(all_urls))
     return self.url[len(common_prefix):].strip('/')
-
-  @property
-  def archive_path(self):
-    return self.page_set.WprFilePathForPage(self)

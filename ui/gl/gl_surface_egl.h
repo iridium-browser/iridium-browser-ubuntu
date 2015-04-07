@@ -13,7 +13,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/time/time.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/gfx/vsync_provider.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_surface.h"
@@ -29,6 +29,7 @@ class GL_EXPORT GLSurfaceEGL : public GLSurface {
   GLSurfaceEGL();
 
   // Implement GLSurface.
+  void DestroyAndTerminateDisplay() override;
   EGLDisplay GetDisplay() override;
 
   static bool InitializeOneOff();
@@ -82,7 +83,7 @@ class GL_EXPORT NativeViewGLSurfaceEGL : public GLSurfaceEGL {
 
   EGLNativeWindowType window_;
 
-  virtual void SetSwapInterval(int interval) override;
+  void OnSetSwapInterval(int interval) override;
 
  private:
   EGLSurface surface_;
@@ -93,8 +94,15 @@ class GL_EXPORT NativeViewGLSurfaceEGL : public GLSurfaceEGL {
   scoped_ptr<VSyncProvider> vsync_provider_;
 
   int swap_interval_;
+
+#if defined(OS_WIN)
+  bool vsync_override_;
+
   unsigned int swap_generation_;
   static unsigned int current_swap_generation_;
+  static unsigned int swaps_this_generation_;
+  static unsigned int last_multiswap_generation_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(NativeViewGLSurfaceEGL);
 };

@@ -129,6 +129,14 @@ WebDataServiceBase::Handle AutofillWebDataService::GetAutofillProfiles(
       consumer);
 }
 
+WebDataServiceBase::Handle AutofillWebDataService::GetAutofillServerProfiles(
+    WebDataServiceConsumer* consumer) {
+  return wdbs_->ScheduleDBTaskWithResult(FROM_HERE,
+      Bind(&AutofillWebDataBackendImpl::GetAutofillServerProfiles,
+           autofill_backend_),
+      consumer);
+}
+
 void AutofillWebDataService::UpdateAutofillEntries(
     const std::vector<autofill::AutofillEntry>& autofill_entries) {
   wdbs_->ScheduleDBTask(FROM_HERE,
@@ -164,6 +172,30 @@ WebDataServiceBase::Handle AutofillWebDataService::GetCreditCards(
   return wdbs_->ScheduleDBTaskWithResult(FROM_HERE,
       Bind(&AutofillWebDataBackendImpl::GetCreditCards, autofill_backend_),
       consumer);
+}
+
+WebDataServiceBase::Handle AutofillWebDataService::GetServerCreditCards(
+    WebDataServiceConsumer* consumer) {
+  return wdbs_->ScheduleDBTaskWithResult(FROM_HERE,
+      Bind(&AutofillWebDataBackendImpl::GetServerCreditCards,
+           autofill_backend_),
+      consumer);
+}
+
+void AutofillWebDataService::UnmaskServerCreditCard(
+    const std::string& id,
+    const base::string16& full_number) {
+  wdbs_->ScheduleDBTask(
+      FROM_HERE,
+      Bind(&AutofillWebDataBackendImpl::UnmaskServerCreditCard,
+           autofill_backend_, id, full_number));
+}
+
+void AutofillWebDataService::MaskServerCreditCard(const std::string& id) {
+  wdbs_->ScheduleDBTask(
+      FROM_HERE,
+      Bind(&AutofillWebDataBackendImpl::MaskServerCreditCard,
+           autofill_backend_, id));
 }
 
 void AutofillWebDataService::RemoveAutofillDataModifiedBetween(

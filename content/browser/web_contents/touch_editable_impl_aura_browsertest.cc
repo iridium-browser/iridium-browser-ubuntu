@@ -25,6 +25,7 @@
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/test/event_generator.h"
+#include "ui/wm/core/default_screen_position_client.h"
 
 using blink::WebInputEvent;
 
@@ -49,15 +50,15 @@ class TestTouchEditableImplAura : public TouchEditableImplAura {
     waiting_for_fling_stop_callback_ = false;
   }
 
-  virtual void OnSelectionOrCursorChanged(const gfx::Rect& anchor,
-                                          const gfx::Rect& focus) override {
+  void OnSelectionOrCursorChanged(const ui::SelectionBound& anchor,
+                                  const ui::SelectionBound& focus) override {
     selection_changed_callback_arrived_ = true;
     TouchEditableImplAura::OnSelectionOrCursorChanged(anchor, focus);
     if (waiting_for_selection_changed_callback_)
       selection_changed_wait_run_loop_->Quit();
   }
 
-  virtual void GestureEventAck(int gesture_event_type) override {
+  void GestureEventAck(int gesture_event_type) override {
     last_gesture_ack_type_ =
         static_cast<WebInputEvent::Type>(gesture_event_type);
     TouchEditableImplAura::GestureEventAck(gesture_event_type);
@@ -65,7 +66,7 @@ class TestTouchEditableImplAura : public TouchEditableImplAura {
       gesture_ack_wait_run_loop_->Quit();
   }
 
-  virtual void DidStopFlinging() override {
+  void DidStopFlinging() override {
     fling_stop_callback_arrived_ = true;
     TouchEditableImplAura::DidStopFlinging();
     if (waiting_for_fling_stop_callback_)
@@ -118,7 +119,13 @@ class TouchEditableImplAuraTest : public ContentBrowserTest {
   TouchEditableImplAuraTest() {}
 
  protected:
-  virtual void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpOnMainThread() override {
+    ContentBrowserTest::SetUpOnMainThread();
+    aura::client::SetScreenPositionClient(shell()->window()->GetRootWindow(),
+                                          &screen_position_client_);
+  }
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kEnableTouchEditing);
   }
 
@@ -145,7 +152,7 @@ class TouchEditableImplAuraTest : public ContentBrowserTest {
     return touch_editable->rwhva_;
   }
 
-  ui::TouchSelectionController* GetTouchSelectionController(
+  ui::TouchEditingControllerDeprecated* GetTouchSelectionController(
       TouchEditableImplAura* touch_editable) {
     return touch_editable->touch_selection_controller_.get();
   }
@@ -155,6 +162,8 @@ class TouchEditableImplAuraTest : public ContentBrowserTest {
   }
 
  private:
+  wm::DefaultScreenPositionClient screen_position_client_;
+
   DISALLOW_COPY_AND_ASSIGN(TouchEditableImplAuraTest);
 };
 
@@ -193,9 +202,17 @@ IN_PROC_BROWSER_TEST_F(TouchEditableImplAuraTest,
 
   // Lets move the handles a bit to modify the selection
   touch_editable->Reset();
+  ui::SelectionBound anchor, focus;
+  touch_editable->GetSelectionEndPoints(&anchor, &focus);
+  // The distance by which a handle image is offset from the bottom of the
+  // selection/text baseline.
+  const int kSelectionHandleVerticalVisualOffset = 2;
+  int handle_grab_x = bounds.x() + anchor.edge_bottom_rounded().x();
+  int handle_grab_y = bounds.y() + anchor.edge_bottom_rounded().y() +
+                      kSelectionHandleVerticalVisualOffset + 1;
   generator.GestureScrollSequence(
-      gfx::Point(10, 47),
-      gfx::Point(30, 47),
+      gfx::Point(handle_grab_x, handle_grab_y),
+      gfx::Point(handle_grab_x + 20, handle_grab_y),
       base::TimeDelta::FromMilliseconds(20),
       5);
   touch_editable->WaitForSelectionChangeCallback();

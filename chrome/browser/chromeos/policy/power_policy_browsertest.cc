@@ -155,10 +155,11 @@ class PowerPolicyLoginScreenBrowserTest : public PowerPolicyBrowserTestBase {
   PowerPolicyLoginScreenBrowserTest();
 
   // PowerPolicyBrowserTestBase:
-  virtual void SetUpCommandLine(CommandLine* command_line) override;
+  virtual void SetUpCommandLine(base::CommandLine* command_line) override;
   virtual void SetUpOnMainThread() override;
   virtual void TearDownOnMainThread() override;
 
+ private:
   DISALLOW_COPY_AND_ASSIGN(PowerPolicyLoginScreenBrowserTest);
 };
 
@@ -169,6 +170,7 @@ class PowerPolicyInSessionBrowserTest : public PowerPolicyBrowserTestBase {
   // PowerPolicyBrowserTestBase:
   virtual void SetUpOnMainThread() override;
 
+ private:
   DISALLOW_COPY_AND_ASSIGN(PowerPolicyInSessionBrowserTest);
 };
 
@@ -275,7 +277,7 @@ PowerPolicyLoginScreenBrowserTest::PowerPolicyLoginScreenBrowserTest() {
 }
 
 void PowerPolicyLoginScreenBrowserTest::SetUpCommandLine(
-    CommandLine* command_line) {
+    base::CommandLine* command_line) {
   PowerPolicyBrowserTestBase::SetUpCommandLine(command_line);
   command_line->AppendSwitch(chromeos::switches::kLoginManager);
   command_line->AppendSwitch(chromeos::switches::kForceLoginManagerInTests);

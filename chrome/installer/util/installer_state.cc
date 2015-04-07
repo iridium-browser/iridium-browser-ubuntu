@@ -88,7 +88,7 @@ InstallerState::InstallerState(Level level)
   set_level(level);
 }
 
-void InstallerState::Initialize(const CommandLine& command_line,
+void InstallerState::Initialize(const base::CommandLine& command_line,
                                 const MasterPreferences& prefs,
                                 const InstallationState& machine_state) {
   Clear();
@@ -240,7 +240,6 @@ void InstallerState::Initialize(const CommandLine& command_line,
             keep_binaries = true;
             break;
           }
-
         }
       }
 
@@ -582,8 +581,7 @@ bool InstallerState::AreBinariesInUse(
 
 base::FilePath InstallerState::GetInstallerDirectory(
     const Version& version) const {
-  return target_path().Append(base::ASCIIToWide(version.GetString()))
-      .Append(kInstallerDir);
+  return target_path().AppendASCII(version.GetString()).Append(kInstallerDir);
 }
 
 // static

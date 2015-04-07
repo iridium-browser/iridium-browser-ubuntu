@@ -15,6 +15,7 @@
 #include "base/process/kill.h"
 #include "base/process/launch.h"
 #include "base/process/process_handle.h"
+#include "base/strings/string_util.h"
 #include "base/test/test_reg_util_win.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
@@ -26,6 +27,7 @@
 #include "chrome/installer/util/google_update_constants.h"
 #include "chrome/installer/util/installation_state.h"
 #include "chrome/installer/util/installer_state.h"
+#include "chrome/installer/util/updating_app_registration_data.h"
 #include "chrome/installer/util/util_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -227,14 +229,13 @@ ScopedPriorityClass::~ScopedPriorityClass() {
 }
 
 PriorityClassChangeResult RelaunchAndDoProcessPriorityAdjustment() {
-  CommandLine cmd_line(*CommandLine::ForCurrentProcess());
+  base::CommandLine cmd_line(*base::CommandLine::ForCurrentProcess());
   cmd_line.AppendSwitch(kAdjustProcessPriority);
-  base::ProcessHandle process_handle = NULL;
+  base::Process process = base::LaunchProcess(cmd_line, base::LaunchOptions());
   int exit_code = 0;
-  if (!base::LaunchProcess(cmd_line, base::LaunchOptions(),
-                           &process_handle)) {
+  if (!process.IsValid()) {
     ADD_FAILURE() << " to launch subprocess.";
-  } else if (!base::WaitForExitCode(process_handle, &exit_code)) {
+  } else if (!process.WaitForExit(&exit_code)) {
     ADD_FAILURE() << " to wait for subprocess to exit.";
   } else {
     return static_cast<PriorityClassChangeResult>(exit_code);
@@ -284,7 +285,7 @@ class FindArchiveToPatchTest : public SetupUtilTestWithDir {
         version_.reset();
     }
 
-    void set_uninstall_command(const CommandLine& uninstall_command) {
+    void set_uninstall_command(const base::CommandLine& uninstall_command) {
       uninstall_command_ = uninstall_command;
     }
   };
@@ -341,10 +342,11 @@ class FindArchiveToPatchTest : public SetupUtilTestWithDir {
                                                      kProductType_));
 
     product->set_version(product_version_);
-    CommandLine uninstall_command(
-        test_dir_.path().AppendASCII(product_version_.GetString())
-        .Append(installer::kInstallerDir)
-        .Append(installer::kSetupExe));
+    base::CommandLine uninstall_command(
+        test_dir_.path()
+            .AppendASCII(product_version_.GetString())
+            .Append(installer::kInstallerDir)
+            .Append(installer::kSetupExe));
     uninstall_command.AppendSwitch(installer::switches::kUninstall);
     product->set_uninstall_command(uninstall_command);
   }
@@ -489,9 +491,17 @@ TEST_F(MigrateMultiToSingleTest, ChromeFrame) {
 
 TEST(SetupUtilTest, ContainsUnsupportedSwitch) {
   EXPECT_FALSE(installer::ContainsUnsupportedSwitch(
-      CommandLine::FromString(L"foo.exe")));
+      base::CommandLine::FromString(L"foo.exe")));
   EXPECT_FALSE(installer::ContainsUnsupportedSwitch(
-      CommandLine::FromString(L"foo.exe --multi-install --chrome")));
+      base::CommandLine::FromString(L"foo.exe --multi-install --chrome")));
   EXPECT_TRUE(installer::ContainsUnsupportedSwitch(
-      CommandLine::FromString(L"foo.exe --chrome-frame")));
+      base::CommandLine::FromString(L"foo.exe --chrome-frame")));
+}
+
+TEST(SetupUtilTest, GetRegistrationDataCommandKey) {
+  base::string16 app_guid = L"{AAAAAAAA-BBBB-1111-0123-456789ABCDEF}";
+  UpdatingAppRegistrationData reg_data(app_guid);
+  base::string16 key =
+      installer::GetRegistrationDataCommandKey(reg_data, L"test_name");
+  EXPECT_TRUE(EndsWith(key, app_guid + L"\\Commands\\test_name", true));
 }

@@ -6,8 +6,10 @@ library bindings;
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:core';
 import 'dart:mirrors';
+import 'dart:mojo_core' as core;
 import 'dart:typed_data';
 
+part 'src/client.dart';
 part 'src/codec.dart';
+part 'src/interface.dart';

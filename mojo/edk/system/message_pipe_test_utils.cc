@@ -21,14 +21,15 @@ MojoResult WaitIfNecessary(scoped_refptr<MessagePipe> mp,
   Waiter waiter;
   waiter.Init();
 
-  MojoResult add_result = mp->AddWaiter(0, &waiter, signals, 0, signals_state);
+  MojoResult add_result =
+      mp->AddAwakable(0, &waiter, signals, 0, signals_state);
   if (add_result != MOJO_RESULT_OK) {
     return (add_result == MOJO_RESULT_ALREADY_EXISTS) ? MOJO_RESULT_OK
                                                       : add_result;
   }
 
   MojoResult wait_result = waiter.Wait(MOJO_DEADLINE_INDEFINITE, nullptr);
-  mp->RemoveWaiter(0, &waiter, signals_state);
+  mp->RemoveAwakable(0, &waiter, signals_state);
   return wait_result;
 }
 
@@ -46,14 +47,12 @@ void ChannelThread::Start(embedder::ScopedPlatformHandle platform_handle,
   test_io_thread_.Start();
   test_io_thread_.PostTaskAndWait(
       FROM_HERE,
-      base::Bind(&ChannelThread::InitChannelOnIOThread,
-                 base::Unretained(this),
-                 base::Passed(&platform_handle),
-                 channel_endpoint));
+      base::Bind(&ChannelThread::InitChannelOnIOThread, base::Unretained(this),
+                 base::Passed(&platform_handle), channel_endpoint));
 }
 
 void ChannelThread::Stop() {
-  if (channel_.get()) {
+  if (channel_) {
     // Hack to flush write buffers before quitting.
     // TODO(vtl): Remove this once |Channel| has a
     // |FlushWriteBufferAndShutdown()| (or whatever).
@@ -61,9 +60,8 @@ void ChannelThread::Stop() {
       base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(20));
 
     test_io_thread_.PostTaskAndWait(
-        FROM_HERE,
-        base::Bind(&ChannelThread::ShutdownChannelOnIOThread,
-                   base::Unretained(this)));
+        FROM_HERE, base::Bind(&ChannelThread::ShutdownChannelOnIOThread,
+                              base::Unretained(this)));
   }
   test_io_thread_.Stop();
 }
@@ -78,17 +76,17 @@ void ChannelThread::InitChannelOnIOThread(
   channel_ = new Channel(platform_support_);
   CHECK(channel_->Init(RawChannel::Create(platform_handle.Pass())));
 
-  // Attach and run the endpoint.
+  // Start the bootstrap endpoint.
   // Note: On the "server" (parent process) side, we need not attach/run the
   // endpoint immediately. However, on the "client" (child process) side, this
   // *must* be done here -- otherwise, the |Channel| may receive/process
   // messages (which it can do as soon as it's hooked up to the IO thread
   // message loop, and that message loop runs) before the endpoint is attached.
-  channel_->AttachAndRunEndpoint(channel_endpoint, true);
+  channel_->SetBootstrapEndpoint(channel_endpoint);
 }
 
 void ChannelThread::ShutdownChannelOnIOThread() {
-  CHECK(channel_.get());
+  CHECK(channel_);
   channel_->Shutdown();
   channel_ = nullptr;
 }

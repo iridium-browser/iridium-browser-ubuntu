@@ -27,7 +27,7 @@
 #include "ui/compositor/layer_animation_delegate.h"
 #include "ui/compositor/layer_delegate.h"
 #include "ui/compositor/layer_type.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/transform.h"
 
 class SkCanvas;
@@ -274,6 +274,8 @@ class COMPOSITOR_EXPORT Layer
                          scoped_ptr<cc::SingleReleaseCallback> release_callback,
                          gfx::Size texture_size_in_dip);
   void SetTextureSize(gfx::Size texture_size_in_dip);
+  void SetTextureFlipped(bool flipped);
+  bool TextureFlipped() const;
 
   // Begins showing delegated frames from the |frame_provider|.
   void SetShowDelegatedContent(cc::DelegatedFrameProvider* frame_provider,
@@ -284,6 +286,7 @@ class COMPOSITOR_EXPORT Layer
                       const cc::SurfaceLayer::SatisfyCallback& satisfy_callback,
                       const cc::SurfaceLayer::RequireCallback& require_callback,
                       gfx::Size surface_size,
+                      float scale,
                       gfx::Size frame_size_in_dip);
 
   bool has_external_content() {
@@ -338,7 +341,9 @@ class COMPOSITOR_EXPORT Layer
       SkCanvas* canvas,
       const gfx::Rect& clip,
       ContentLayerClient::GraphicsContextStatus gc_status) override;
-  void DidChangeLayerCanUseLCDText() override {}
+  scoped_refptr<cc::DisplayItemList> PaintContentsToDisplayList(
+      const gfx::Rect& clip,
+      GraphicsContextStatus gc_status) override;
   bool FillsBoundsCompletely() const override;
 
   cc::Layer* cc_layer() { return cc_layer_; }

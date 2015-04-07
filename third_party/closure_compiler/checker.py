@@ -14,6 +14,7 @@ import tempfile
 
 import build.inputs
 import processor
+import error_filter
 
 
 class Checker(object):
@@ -66,6 +67,7 @@ class Checker(object):
     self._runner_jar = os.path.join(current_dir, "runner", "runner.jar")
     self._temp_files = []
     self._verbose = verbose
+    self._error_filter = error_filter.PromiseErrorFilter()
 
   def _clean_up(self):
     if not self._temp_files:
@@ -136,7 +138,7 @@ class Checker(object):
         error: A Closure compiler error (2 line string with error and source).
 
     Return:
-        The fixed up erorr string (blank if it should be ignored).
+        The fixed up error string (blank if it should be ignored).
     """
     if " first declared in " in error:
       # Ignore "Variable x first declared in /same/file".
@@ -210,11 +212,17 @@ class Checker(object):
     (_, stderr) = runner_cmd.communicate()
 
     errors = stderr.strip().split("\n\n")
+
+    # Filter out false-positive promise chain errors.
+    # See https://github.com/google/closure-compiler/issues/715 for details.
+    errors = self._error_filter.filter(errors);
+
     self._debug("Summary: %s" % errors.pop())
 
     output = self._format_errors(map(self._fix_up_error, errors))
     if errors:
-      self._error("Error in: %s%s" % (source_file, "\n" + output if output else ""))
+      prefix = "\n" if output else ""
+      self._error("Error in: %s%s%s" % (source_file, prefix, output))
     elif output:
       self._debug("Output: %s" % output)
 

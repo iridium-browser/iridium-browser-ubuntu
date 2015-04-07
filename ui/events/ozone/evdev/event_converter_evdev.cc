@@ -7,13 +7,15 @@
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
+#include "ui/events/devices/input_device.h"
 
 namespace ui {
 
 EventConverterEvdev::EventConverterEvdev(int fd,
                                          const base::FilePath& path,
-                                         int id)
-    : fd_(fd), path_(path), id_(id) {
+                                         int id,
+                                         InputDeviceType type)
+    : fd_(fd), path_(path), id_(id), type_(type) {
 }
 
 EventConverterEvdev::~EventConverterEvdev() {
@@ -33,6 +35,18 @@ void EventConverterEvdev::OnFileCanWriteWithoutBlocking(int fd) {
   NOTREACHED();
 }
 
+bool EventConverterEvdev::HasKeyboard() const {
+  return false;
+}
+
+bool EventConverterEvdev::HasTouchpad() const {
+  return false;
+}
+
+bool EventConverterEvdev::HasMouse() const {
+  return false;
+}
+
 bool EventConverterEvdev::HasTouchscreen() const {
   return false;
 }
@@ -40,10 +54,6 @@ bool EventConverterEvdev::HasTouchscreen() const {
 gfx::Size EventConverterEvdev::GetTouchscreenSize() const {
   NOTREACHED();
   return gfx::Size();
-}
-
-bool EventConverterEvdev::IsInternal() const {
-  return false;
 }
 
 }  // namespace ui

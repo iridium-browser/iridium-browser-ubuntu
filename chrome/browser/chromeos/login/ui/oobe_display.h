@@ -14,22 +14,25 @@ namespace chromeos {
 
 class AppLaunchSplashScreenActor;
 class AutoEnrollmentCheckScreenActor;
-class CoreOobeActor;
 class ControllerPairingScreenActor;
+class CoreOobeActor;
 class DeviceDisabledScreenActor;
+class EnableDebuggingScreenActor;
 class EnrollmentScreenActor;
 class ErrorScreenActor;
-class EulaScreenActor;
+class EulaView;
+class GaiaScreenHandler;
 class HIDDetectionScreenActor;
 class HostPairingScreenActor;
 class KioskAutolaunchScreenActor;
 class KioskEnableScreenActor;
-class NetworkScreenActor;
+class NetworkView;
 class ResetScreenActor;
 class SupervisedUserCreationScreenHandler;
 class TermsOfServiceScreenActor;
 class UpdateScreenActor;
 class UserImageScreenActor;
+class UserBoardView;
 class WrongHWIDScreenActor;
 
 // Interface which is used by WizardController to do actual OOBE screens
@@ -41,6 +44,7 @@ class OobeDisplay {
     SCREEN_OOBE_NETWORK,
     SCREEN_OOBE_EULA,
     SCREEN_OOBE_UPDATE,
+    SCREEN_OOBE_ENABLE_DEBUGGING,
     SCREEN_OOBE_ENROLLMENT,
     SCREEN_OOBE_RESET,
     SCREEN_GAIA_SIGNIN,
@@ -71,8 +75,9 @@ class OobeDisplay {
   // must be owned by the OobeDisplay implementation.
   virtual CoreOobeActor* GetCoreOobeActor() = 0;
   virtual UpdateScreenActor* GetUpdateScreenActor() = 0;
-  virtual NetworkScreenActor* GetNetworkScreenActor() = 0;
-  virtual EulaScreenActor* GetEulaScreenActor() = 0;
+  virtual NetworkView* GetNetworkView() = 0;
+  virtual EulaView* GetEulaView() = 0;
+  virtual EnableDebuggingScreenActor* GetEnableDebuggingScreenActor() = 0;
   virtual EnrollmentScreenActor* GetEnrollmentScreenActor() = 0;
   virtual ResetScreenActor* GetResetScreenActor() = 0;
   virtual KioskAutolaunchScreenActor* GetKioskAutolaunchScreenActor() = 0;
@@ -90,6 +95,8 @@ class OobeDisplay {
   virtual ControllerPairingScreenActor* GetControllerPairingScreenActor() = 0;
   virtual HostPairingScreenActor* GetHostPairingScreenActor() = 0;
   virtual DeviceDisabledScreenActor* GetDeviceDisabledScreenActor() = 0;
+  virtual GaiaScreenHandler* GetGaiaScreenActor() = 0;
+  virtual UserBoardView* GetUserBoardScreenActor() = 0;
 
   // Returns if JS side is fully loaded and ready to accept messages.
   // If |false| is returned, then |display_is_ready_callback| is stored

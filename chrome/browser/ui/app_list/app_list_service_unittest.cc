@@ -22,7 +22,7 @@
 
 class TestingAppListServiceImpl : public AppListServiceImpl {
  public:
-  TestingAppListServiceImpl(const CommandLine& command_line,
+  TestingAppListServiceImpl(const base::CommandLine& command_line,
                             PrefService* local_state,
                             scoped_ptr<ProfileStore> profile_store)
       : AppListServiceImpl(command_line, local_state, profile_store.Pass()),
@@ -55,6 +55,8 @@ class TestingAppListServiceImpl : public AppListServiceImpl {
     RecordAppListLaunch();
   }
 
+  void ShowForCustomLauncherPage(Profile* profile) override {}
+
   void DismissAppList() override { showing_for_profile_ = NULL; }
 
   bool IsAppListVisible() const override { return !!showing_for_profile_; }
@@ -78,11 +80,11 @@ class AppListServiceUnitTest : public testing::Test {
   AppListServiceUnitTest() {}
 
   void SetUp() override {
-    SetupWithCommandLine(CommandLine(CommandLine::NO_PROGRAM));
+    SetupWithCommandLine(base::CommandLine(base::CommandLine::NO_PROGRAM));
   }
 
  protected:
-  void SetupWithCommandLine(const CommandLine& command_line) {
+  void SetupWithCommandLine(const base::CommandLine& command_line) {
     user_data_dir_ = base::FilePath(FILE_PATH_LITERAL("udd"));
     profile1_.reset(
         new FakeProfile("p1", user_data_dir_.AppendASCII("profile1")));
@@ -175,7 +177,7 @@ TEST_F(AppListServiceUnitTest, SwitchingProfilesPersists) {
 }
 
 TEST_F(AppListServiceUnitTest, EnableViaCommandLineFlag) {
-  CommandLine command_line(CommandLine::NO_PROGRAM);
+  base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
   command_line.AppendSwitch(switches::kEnableAppList);
   SetupWithCommandLine(command_line);
   service_->PerformStartupChecks(profile1_.get());
@@ -183,7 +185,7 @@ TEST_F(AppListServiceUnitTest, EnableViaCommandLineFlag) {
 }
 
 TEST_F(AppListServiceUnitTest, DisableViaCommandLineFlag) {
-  CommandLine command_line(CommandLine::NO_PROGRAM);
+  base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
   command_line.AppendSwitch(switches::kResetAppListInstallState);
   SetupWithCommandLine(command_line);
   service_->PerformStartupChecks(profile1_.get());

@@ -552,6 +552,9 @@ class CookieMonster::DeleteTask : public CookieMonsterTask {
   // CookieMonsterTask:
   virtual void Run() override;
 
+ protected:
+  ~DeleteTask() override;
+
  private:
   // Runs the delete task and returns a result.
   virtual Result RunDeleteTask() = 0;
@@ -564,8 +567,12 @@ class CookieMonster::DeleteTask : public CookieMonsterTask {
 };
 
 template <typename Result>
-base::Closure CookieMonster::DeleteTask<Result>::
-RunDeleteTaskAndBindCallback() {
+CookieMonster::DeleteTask<Result>::~DeleteTask() {
+}
+
+template <typename Result>
+base::Closure
+CookieMonster::DeleteTask<Result>::RunDeleteTaskAndBindCallback() {
   Result result = RunDeleteTask();
   if (callback_.is_null())
     return base::Closure();
@@ -1162,6 +1169,7 @@ CookieList CookieMonster::GetAllCookiesForURLWithOptions(
   std::sort(cookie_ptrs.begin(), cookie_ptrs.end(), CookieSorter);
 
   CookieList cookies;
+  cookies.reserve(cookie_ptrs.size());
   for (std::vector<CanonicalCookie*>::const_iterator it = cookie_ptrs.begin();
        it != cookie_ptrs.end(); it++)
     cookies.push_back(**it);
@@ -1319,15 +1327,11 @@ std::string CookieMonster::GetCookiesWithOptions(const GURL& url,
   if (!HasCookieableScheme(url))
     return std::string();
 
-  TimeTicks start_time(TimeTicks::Now());
-
   std::vector<CanonicalCookie*> cookies;
   FindCookiesForHostAndDomain(url, options, true, &cookies);
   std::sort(cookies.begin(), cookies.end(), CookieSorter);
 
   std::string cookie_line = BuildCookieLine(cookies);
-
-  histogram_time_get_->AddTime(TimeTicks::Now() - start_time);
 
   VLOG(kVlogGetCookies) << "GetCookies() result: " << cookie_line;
 
@@ -2245,9 +2249,6 @@ void CookieMonster::InitializeHistograms() {
       base::Histogram::kUmaTargetedHistogramFlag);
 
   // From UMA_HISTOGRAM_{CUSTOM_,}TIMES
-  histogram_time_get_ = base::Histogram::FactoryTimeGet("Cookie.TimeGet",
-      base::TimeDelta::FromMilliseconds(1), base::TimeDelta::FromMinutes(1),
-      50, base::Histogram::kUmaTargetedHistogramFlag);
   histogram_time_blocked_on_load_ = base::Histogram::FactoryTimeGet(
       "Cookie.TimeBlockedOnLoad",
       base::TimeDelta::FromMilliseconds(1), base::TimeDelta::FromMinutes(1),

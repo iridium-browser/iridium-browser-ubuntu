@@ -31,12 +31,12 @@ sys.path.append(os.path.join(constants.DIR_SOURCE_ROOT,
 import errors
 
 def KillHostHeartbeat():
-  ps = subprocess.Popen(['ps', 'aux'], stdout = subprocess.PIPE)
+  ps = subprocess.Popen(['ps', 'aux'], stdout=subprocess.PIPE)
   stdout, _ = ps.communicate()
   matches = re.findall('\\n.*host_heartbeat.*', stdout)
   for match in matches:
     logging.info('An instance of host heart beart running... will kill')
-    pid = re.findall('(\S+)', match)[1]
+    pid = re.findall(r'(\S+)', match)[1]
     subprocess.call(['kill', str(pid)])
 
 
@@ -179,7 +179,7 @@ def ProvisionDevice(device, options, is_perf):
         logging.error('Unable to obtain battery info for %s, %s',
                       str(device), e)
 
-      while int(battery_info.get('level', 100)) < 95:
+      while int(battery_info.get('level', 100)) < options.min_battery_level:
         if not device.old_interface.IsDeviceCharging():
           if device.old_interface.CanControlUsbCharging():
             device.old_interface.EnableUsbCharging()
@@ -190,8 +190,9 @@ def ProvisionDevice(device, options, is_perf):
                      battery_info.get('level', 0))
         time.sleep(60)
         battery_info = device.old_interface.GetBatteryInfo()
-    # TODO(jbudorick): Tune the timeout per OS version.
-    device.Reboot(True, timeout=600, retries=0)
+    if not options.skip_wipe:
+      # TODO(jbudorick): Tune the timeout per OS version.
+      device.Reboot(True, timeout=600, retries=0)
     device.RunShellCommand('date -s %s' % time.strftime('%Y%m%d.%H%M%S',
                                                         time.gmtime()),
                            as_root=True)
@@ -206,7 +207,7 @@ def ProvisionDevice(device, options, is_perf):
                  str(device))
     # Device black list is reset by bb_device_status_check.py per build.
     device_blacklist.ExtendBlacklist([str(device)])
-  except (device_errors.CommandFailedError):
+  except device_errors.CommandFailedError:
     logging.exception('Failed to provision device %s. Adding to blacklist.',
                       str(device))
     device_blacklist.ExtendBlacklist([str(device)])
@@ -236,6 +237,9 @@ def main(argv):
   logging.getLogger().setLevel(logging.INFO)
 
   parser = optparse.OptionParser()
+  parser.add_option('--min-battery-level', default=95, type='int',
+                    help="Minimum battery level for performance testing "
+                         "(default: 95).")
   parser.add_option('--skip-wipe', action='store_true', default=False,
                     help="Don't wipe device data during provisioning.")
   parser.add_option('--disable-location', action='store_true', default=False,

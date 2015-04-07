@@ -7,6 +7,8 @@
 #ifndef NET_QUIC_QUIC_SESSION_H_
 #define NET_QUIC_QUIC_SESSION_H_
 
+#include <map>
+#include <string>
 #include <vector>
 
 #include "base/compiler_specific.h"
@@ -52,9 +54,7 @@ class NET_EXPORT_PRIVATE QuicSession : public QuicConnectionVisitorInterface {
     HANDSHAKE_CONFIRMED,
   };
 
-  QuicSession(QuicConnection* connection,
-              const QuicConfig& config,
-              bool is_secure);
+  QuicSession(QuicConnection* connection, const QuicConfig& config);
   void InitializeSession();
 
   ~QuicSession() override;
@@ -68,7 +68,7 @@ class NET_EXPORT_PRIVATE QuicSession : public QuicConnectionVisitorInterface {
   void OnBlockedFrames(const std::vector<QuicBlockedFrame>& frames) override;
   void OnConnectionClosed(QuicErrorCode error, bool from_peer) override;
   void OnWriteBlocked() override {}
-  void OnSuccessfulVersionNegotiation(const QuicVersion& version) override;
+  void OnSuccessfulVersionNegotiation(const QuicVersion& version) override {}
   void OnCanWrite() override;
   void OnCongestionWindowChange(QuicTime now) override {}
   bool WillingAndAbleToWrite() const override;
@@ -212,8 +212,8 @@ class NET_EXPORT_PRIVATE QuicSession : public QuicConnectionVisitorInterface {
   bool IsStreamFlowControlBlocked();
 
   // Returns true if this is a secure QUIC session.
-  bool is_secure() const {
-    return is_secure_;
+  bool IsSecure() const {
+    return connection()->is_secure();
   }
 
   size_t get_max_open_streams() const { return max_open_streams_; }
@@ -282,11 +282,11 @@ class NET_EXPORT_PRIVATE QuicSession : public QuicConnectionVisitorInterface {
 
   // Called in OnConfigNegotiated when we receive a new stream level flow
   // control window in a negotiated config. Closes the connection if invalid.
-  void OnNewStreamFlowControlWindow(uint32 new_window);
+  void OnNewStreamFlowControlWindow(QuicStreamOffset new_window);
 
   // Called in OnConfigNegotiated when we receive a new session level flow
   // control window in a negotiated config. Closes the connection if invalid.
-  void OnNewSessionFlowControlWindow(uint32 new_window);
+  void OnNewSessionFlowControlWindow(QuicStreamOffset new_window);
 
   // Keep track of highest received byte offset of locally closed streams, while
   // waiting for a definitive final highest offset from the peer.
@@ -322,6 +322,9 @@ class NET_EXPORT_PRIVATE QuicSession : public QuicConnectionVisitorInterface {
   // The latched error with which the connection was closed.
   QuicErrorCode error_;
 
+  // Used for session level flow control.
+  scoped_ptr<QuicFlowController> flow_controller_;
+
   // Whether a GoAway has been received.
   bool goaway_received_;
   // Whether a GoAway has been sent.
@@ -329,12 +332,6 @@ class NET_EXPORT_PRIVATE QuicSession : public QuicConnectionVisitorInterface {
 
   // Indicate if there is pending data for the crypto stream.
   bool has_pending_handshake_;
-
-  // Used for session level flow control.
-  scoped_ptr<QuicFlowController> flow_controller_;
-
-  // True if this is a secure (HTTPS) QUIC session.
-  bool is_secure_;
 
   DISALLOW_COPY_AND_ASSIGN(QuicSession);
 };

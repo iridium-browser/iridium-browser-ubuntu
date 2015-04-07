@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<!--
+Copyright (c) 2013 The Chromium Authors. All rights reserved.
+Use of this source code is governed by a BSD-style license that can be
+found in the LICENSE file.
+-->
+
+<link rel="import" href="/core/analysis/single_sample_sub_view.html">
+<link rel="import" href="/core/analysis/stub_analysis_results.html">
+<link rel="import" href="/core/selection.html">
+<link rel="import" href="/core/test_utils.html">
+<link rel="import" href="/core/trace_model/trace_model.html">
+
+<script>
+'use strict';
+
+tv.b.unittest.testSuite(function() {
+  var Model = tv.c.TraceModel;
+  var Selection = tv.c.Selection;
+  var StubAnalysisResults = tv.c.analysis.StubAnalysisResults;
+  var newSampleNamed = tv.c.test_utils.newSampleNamed;
+
+  var createSelectionWithSingleSample = function() {
+    var model = new Model();
+    var t53;
+    model.importTraces([], false, false, function() {
+      t53 = model.getOrCreateProcess(52).getOrCreateThread(53);
+      model.samples.push(newSampleNamed(t53, 'X', 'my-category',
+                                        ['a', 'b', 'c'], 0.184));
+    });
+
+    var t53track = {};
+    t53track.thread = t53;
+
+    var selection = new Selection();
+
+    assertEquals(0, selection.length);
+    selection.push(t53.samples[0]);
+    assertEquals(1, selection.length);
+
+    return selection;
+  };
+
+  test('instantiate_withSingleSample', function() {
+    var selection = createSelectionWithSingleSample();
+
+    var view = document.createElement('tv-c-single-sample-sub-view');
+    view.selection = selection;
+    this.addHTMLOutput(view);
+  });
+
+  test('analyzeSelectionWithSingleSample', function() {
+    var selection = createSelectionWithSingleSample();
+
+    var view = document.createElement('tv-c-single-sample-sub-view');
+
+    var results = new StubAnalysisResults();
+    view.analyzeSingleSampleEvent_(results, selection[0], 'Sample Event');
+    assertEquals(1, results.tables.length);
+    var table = results.tables[0];
+    var header = results.headers[0];
+    assertEquals('Selected Sample Event:', header.label);
+    assertEquals(3, table.rows.length);
+
+    assertEquals('X', table.rows[0].text);
+    assertEquals(0.184, table.rows[1].time);
+    assertEquals('my-category: a', table.rows[2].text[0]);
+    assertEquals('my-category: b', table.rows[2].text[1]);
+    assertEquals('my-category: c', table.rows[2].text[2]);
+  });
+});
+</script>

@@ -8,12 +8,14 @@
 #ifndef GrAARectRenderer_DEFINED
 #define GrAARectRenderer_DEFINED
 
+#include "GrColor.h"
 #include "SkMatrix.h"
 #include "SkRect.h"
 #include "SkRefCnt.h"
 #include "SkStrokeRec.h"
 
 class GrGpu;
+class GrDrawState;
 class GrDrawTarget;
 class GrIndexBuffer;
 
@@ -41,50 +43,43 @@ public:
     // between them by passing in stroke (==NULL means fill).
 
     void fillAARect(GrDrawTarget* target,
+                    GrDrawState* ds,
+                    GrColor color,
+                    const SkMatrix& viewMatrix,
                     const SkRect& rect,
-                    const SkMatrix& combinedMatrix,
                     const SkRect& devRect) {
-#ifdef SHADER_AA_FILL_RECT
-        if (combinedMatrix.rectStaysRect()) {
-            this->shaderFillAlignedAARect(gpu, target,
-                                          rect, combinedMatrix);
-        } else {
-            this->shaderFillAARect(gpu, target,
-                                   rect, combinedMatrix);
-        }
-#else
-        this->geometryFillAARect(target, rect, combinedMatrix, devRect);
-#endif
+        this->geometryFillAARect(target, ds, color, viewMatrix, rect, devRect);
     }
 
-    void strokeAARect(GrDrawTarget* target,
+    void strokeAARect(GrDrawTarget*,
+                      GrDrawState*,
+                      GrColor,
+                      const SkMatrix& viewMatrix,
                       const SkRect& rect,
-                      const SkMatrix& combinedMatrix,
                       const SkRect& devRect,
                       const SkStrokeRec& stroke);
 
     // First rect is outer; second rect is inner
-    void fillAANestedRects(GrDrawTarget* target,
-                           const SkRect rects[2],
-                           const SkMatrix& combinedMatrix);
+    void fillAANestedRects(GrDrawTarget*,
+                           GrDrawState*,
+                           GrColor,
+                           const SkMatrix& viewMatrix,
+                           const SkRect rects[2]);
 
 private:
     GrIndexBuffer* aaStrokeRectIndexBuffer(bool miterStroke);
 
-    void geometryFillAARect(GrDrawTarget* target,
+    void geometryFillAARect(GrDrawTarget*,
+                            GrDrawState*,
+                            GrColor,
+                            const SkMatrix& viewMatrix,
                             const SkRect& rect,
-                            const SkMatrix& combinedMatrix,
                             const SkRect& devRect);
 
-    void shaderFillAARect(GrDrawTarget* target,
-                          const SkRect& rect,
-                          const SkMatrix& combinedMatrix);
-
-    void shaderFillAlignedAARect(GrDrawTarget* target,
-                                 const SkRect& rect,
-                                 const SkMatrix& combinedMatrix);
-
-    void geometryStrokeAARect(GrDrawTarget* target,
+    void geometryStrokeAARect(GrDrawTarget*,
+                              GrDrawState*,
+                              GrColor,
+                              const SkMatrix& viewMatrix,
                               const SkRect& devOutside,
                               const SkRect& devOutsideAssist,
                               const SkRect& devInside,

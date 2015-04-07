@@ -44,6 +44,16 @@ SVGTextPositioningElement::SVGTextPositioningElement(const QualifiedName& tagNam
     addToPropertyMap(m_rotate);
 }
 
+void SVGTextPositioningElement::trace(Visitor* visitor)
+{
+    visitor->trace(m_x);
+    visitor->trace(m_y);
+    visitor->trace(m_dx);
+    visitor->trace(m_dy);
+    visitor->trace(m_rotate);
+    SVGTextContentElement::trace(visitor);
+}
+
 bool SVGTextPositioningElement::isSupportedAttribute(const QualifiedName& attrName)
 {
     DEFINE_STATIC_LOCAL(HashSet<QualifiedName>, supportedAttributes, ());
@@ -90,15 +100,12 @@ void SVGTextPositioningElement::svgAttributeChanged(const QualifiedName& attrNam
     markForLayoutAndParentResourceInvalidation(renderer);
 }
 
-SVGTextPositioningElement* SVGTextPositioningElement::elementFromRenderer(RenderObject* renderer)
+SVGTextPositioningElement* SVGTextPositioningElement::elementFromRenderer(RenderObject& renderer)
 {
-    if (!renderer)
+    if (!renderer.isSVGText() && !renderer.isSVGInline())
         return 0;
 
-    if (!renderer->isSVGText() && !renderer->isSVGInline())
-        return 0;
-
-    Node* node = renderer->node();
+    Node* node = renderer.node();
     ASSERT(node);
     ASSERT(node->isSVGElement());
 

@@ -5,9 +5,10 @@
 
 """Test gspaths library."""
 
-from __future__ import print_function
+# pylint: disable=bad-continuation
+# pylint: disable=bad-whitespace
 
-import mox
+from __future__ import print_function
 
 import fixup_path
 fixup_path.FixupPath()
@@ -16,10 +17,8 @@ from chromite.lib import cros_test_lib
 from chromite.lib.paygen import gspaths
 
 
-class GsPathsDataTest(mox.MoxTestBase):
+class GsPathsDataTest(cros_test_lib.TestCase):
   """Tests for structs defined in GsPaths."""
-  def setUp(self):
-    self.mox = mox.Mox()
 
   def testBuild(self):
     default_input = { 'channel': 'foo-channel',
@@ -41,7 +40,7 @@ class GsPathsDataTest(mox.MoxTestBase):
     self.assertEqual(expected_str, str(build))
 
 
-class GsPathsChromeosReleasesTest(mox.MoxTestBase):
+class GsPathsChromeosReleasesTest(cros_test_lib.TestCase):
   """Tests for gspaths.ChromeosReleases."""
   # Standard Chrome OS releases names.
   _CHROMEOS_RELEASES_BUCKET = 'chromeos-releases'
@@ -82,8 +81,6 @@ class GsPathsChromeosReleasesTest(mox.MoxTestBase):
       (_GS_PAYLOADS_PATH_TEMPLATE, _DELTA_PAYLOAD_NAME_TEMPLATE))
 
   def setUp(self):
-    self.mox = mox.Mox()
-
     # Shared attributes (signed + unsigned images).
     self.bucket = 'crt'
     self.channel = 'foo-channel'
@@ -123,9 +120,6 @@ class GsPathsChromeosReleasesTest(mox.MoxTestBase):
                           src_version=self.src_version,
                           random_str=self.random_str,
                           **self.unsigned_image_archive_attrs)
-
-  def tearDown(self):
-    self.mox.UnsetStubs()
 
   def _Populate(self, template, **kwargs):
     """Populates a template string with override attributes.
@@ -568,7 +562,7 @@ class GsPathsChromeosReleasesTest(mox.MoxTestBase):
         })
 
 
-class GsPathsTest(mox.MoxTestBase):
+class GsPathsTest(cros_test_lib.TestCase):
   """Test general gspaths utilities."""
   def testVersionKey(self):
     """Test VersionKey, especially for new-style versus old-style."""

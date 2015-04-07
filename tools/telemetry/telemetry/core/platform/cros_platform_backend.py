@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from telemetry.core import platform
+from telemetry.core import util
 from telemetry.core.platform import cros_device
 from telemetry.core.platform import cros_interface
 from telemetry.core.platform import linux_based_platform_backend
@@ -11,7 +13,6 @@ from telemetry.core.platform.power_monitor import cros_power_monitor
 
 class CrosPlatformBackend(
     linux_based_platform_backend.LinuxBasedPlatformBackend):
-
   def __init__(self, device=None):
     super(CrosPlatformBackend, self).__init__(device)
     if device:
@@ -23,21 +24,21 @@ class CrosPlatformBackend(
     self._powermonitor = cros_power_monitor.CrosPowerMonitor(self)
 
   @classmethod
+  def IsPlatformBackendForHost(cls):
+    return util.IsRunningOnCrosDevice()
+
+  @classmethod
   def SupportsDevice(cls, device):
     return isinstance(device, cros_device.CrOSDevice)
+
+  @classmethod
+  def CreatePlatformForDevice(cls, device):
+    assert cls.SupportsDevice(device)
+    return platform.Platform(CrosPlatformBackend(device))
 
   @property
   def cri(self):
     return self._cri
-
-  def StartRawDisplayFrameRateMeasurement(self):
-    raise NotImplementedError()
-
-  def StopRawDisplayFrameRateMeasurement(self):
-    raise NotImplementedError()
-
-  def GetRawDisplayFrameRateMeasurements(self):
-    raise NotImplementedError()
 
   def IsThermallyThrottled(self):
     raise NotImplementedError()
@@ -46,13 +47,22 @@ class CrosPlatformBackend(
     raise NotImplementedError()
 
   def RunCommand(self, args):
-    return self._cri.RunCmdOnDevice(args)[0]
+    if not isinstance(args, list):
+      args = [args]
+    stdout, stderr = self._cri.RunCmdOnDevice(args)
+    if stderr:
+      raise IOError('Failed to run: cmd = %s, stderr = %s' %
+                    (str(args), stderr))
+    return stdout
 
   def GetFileContents(self, filename):
     try:
       return self.RunCommand(['cat', filename])
     except AssertionError:
       return ''
+
+  def GetPsOutput(self, columns, pid=None):
+    return ps_util.GetPsOutputWithPlatformBackend(self, columns, pid)
 
   @staticmethod
   def ParseCStateSample(sample):
@@ -83,11 +93,6 @@ class CrosPlatformBackend(
       sample_stats[cpu] = cstates
     return sample_stats
 
-  def GetIOStats(self, pid):
-    # There is no '/proc/<pid>/io' file on CrOS platforms
-    # Returns empty dict as it does in PlatformBackend.
-    return {}
-
   def GetOSName(self):
     return 'chromeos'
 
@@ -111,8 +116,11 @@ class CrosPlatformBackend(
   def FlushEntireSystemCache(self):
     raise NotImplementedError()
 
-  def FlushSystemCacheForDirectory(self, directory, ignoring=None):
-    raise NotImplementedError()
+  def FlushSystemCacheForDirectory(self, directory):
+    flush_command = (
+        '/usr/local/telemetry/src/src/out/Release/clear_system_cache')
+    self.RunCommand(['chmod', '+x', flush_command])
+    self.RunCommand([flush_command, '--recurse', directory])
 
   def CanMonitorPower(self):
     return self._powermonitor.CanMonitorPower()

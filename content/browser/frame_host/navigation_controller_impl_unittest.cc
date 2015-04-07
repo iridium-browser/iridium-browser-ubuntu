@@ -4,6 +4,7 @@
 
 #include "base/basictypes.h"
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/stl_util.h"
@@ -25,6 +26,7 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/common/page_state.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/mock_render_process_host.h"
@@ -81,7 +83,7 @@ class MockScreenshotManager : public content::NavigationEntryScreenshotManager {
         1, 1, kAlpha_8_SkColorType, kPremul_SkAlphaType));
     bitmap.eraseARGB(0, 0, 0, 0);
     encoding_screenshot_in_progress_ = true;
-    OnScreenshotTaken(entry->GetUniqueID(), true, bitmap);
+    OnScreenshotTaken(entry->GetUniqueID(), bitmap, content::READBACK_SUCCESS);
     WaitUntilScreenshotIsReady();
   }
 
@@ -211,6 +213,27 @@ class NavigationControllerTest
     return static_cast<NavigationControllerImpl&>(controller());
   }
 
+  const IPC::Message* GetLastNavigationRequest() {
+    if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kEnableBrowserSideNavigation)) {
+      return process()->sink().GetFirstMessageMatching(
+          FrameMsg_RequestNavigation::ID);
+    }
+    return process()->sink().GetFirstMessageMatching(FrameMsg_Navigate::ID);
+  }
+
+  const GURL GetNavigationURLFromIPC(const IPC::Message* message) {
+    if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kEnableBrowserSideNavigation)) {
+      Tuple<CommonNavigationParams, RequestNavigationParams> nav_params;
+      FrameMsg_RequestNavigation::Read(message, &nav_params);
+      return get<0>(nav_params).url;
+    }
+    Tuple<FrameMsg_Navigate_Params> nav_params;
+    FrameMsg_Navigate::Read(message, &nav_params);
+    return get<0>(nav_params).common_params.url;
+  }
+
  protected:
   GURL navigated_url_;
   size_t navigation_entry_committed_counter_;
@@ -243,7 +266,7 @@ class TestWebContentsDelegate : public WebContentsDelegate {
   }
 
   // Keep track of whether the tab has notified us of a navigation state change.
-  void NavigationStateChanged(const WebContents* source,
+  void NavigationStateChanged(WebContents* source,
                               InvalidateTypes changed_flags) override {
     navigation_state_change_count_++;
   }
@@ -374,6 +397,7 @@ TEST_F(NavigationControllerTest, LoadURL) {
   // We should have gotten no notifications from the preceeding checks.
   EXPECT_EQ(0U, notifications.size());
 
+  main_test_rfh()->PrepareForCommit(url1);
   main_test_rfh()->SendNavigate(0, url1);
   EXPECT_EQ(1U, navigation_entry_committed_counter_);
   navigation_entry_committed_counter_ = 0;
@@ -414,7 +438,7 @@ TEST_F(NavigationControllerTest, LoadURL) {
 
   // Simulate the beforeunload ack for the cross-site transition, and then the
   // commit.
-  main_test_rfh()->SendBeforeUnloadACK(true);
+  main_test_rfh()->PrepareForCommit(url2);
   contents()->GetPendingMainFrame()->SendNavigate(1, url2);
   EXPECT_EQ(1U, navigation_entry_committed_counter_);
   navigation_entry_committed_counter_ = 0;
@@ -752,9 +776,9 @@ TEST_F(NavigationControllerTest, LoadURL_NewPending) {
   EXPECT_EQ(0U, notifications.size());
 
   // After the beforeunload but before it commits, do a new navigation.
-  main_test_rfh()->SendBeforeUnloadACK(true);
+  main_test_rfh()->PrepareForCommit(kExistingURL2);
   const GURL kNewURL("http://see");
-  contents()->GetPendingMainFrame()->SendNavigate(3, kNewURL);
+  contents()->GetMainFrame()->SendNavigate(3, kNewURL);
 
   // There should no longer be any pending entry, and the third navigation we
   // just made should be committed.
@@ -797,7 +821,6 @@ TEST_F(NavigationControllerTest, LoadURL_ExistingPending) {
 
   // Before that commits, do a new navigation.
   const GURL kNewURL("http://foo/see");
-  LoadCommittedDetails details;
   main_test_rfh()->SendNavigate(3, kNewURL);
 
   // There should no longer be any pending entry, and the third navigation we
@@ -823,6 +846,7 @@ TEST_F(NavigationControllerTest, LoadURL_PrivilegedPending) {
       kExistingURL1, Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
   // Pretend it has bindings so we can tell if we incorrectly copy it.
   main_test_rfh()->GetRenderViewHost()->AllowBindings(2);
+  main_test_rfh()->PrepareForCommit(kExistingURL1);
   main_test_rfh()->SendNavigate(0, kExistingURL1);
   EXPECT_EQ(1U, navigation_entry_committed_counter_);
   navigation_entry_committed_counter_ = 0;
@@ -831,7 +855,7 @@ TEST_F(NavigationControllerTest, LoadURL_PrivilegedPending) {
   const GURL kExistingURL2("http://foo/eh");
   controller.LoadURL(
       kExistingURL2, Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
-  main_test_rfh()->SendBeforeUnloadACK(true);
+  main_test_rfh()->PrepareForCommit(kExistingURL2);
   TestRenderFrameHost* foo_rfh = contents()->GetPendingMainFrame();
   foo_rfh->SendNavigate(1, kExistingURL2);
   EXPECT_EQ(1U, navigation_entry_committed_counter_);
@@ -849,7 +873,6 @@ TEST_F(NavigationControllerTest, LoadURL_PrivilegedPending) {
 
   // Before that commits, do a new navigation.
   const GURL kNewURL("http://foo/bee");
-  LoadCommittedDetails details;
   foo_rfh->SendNavigate(3, kNewURL);
 
   // There should no longer be any pending entry, and the third navigation we
@@ -1085,6 +1108,7 @@ TEST_F(NavigationControllerTest, LoadURL_WithBindings) {
 
   // Commit.
   TestRenderFrameHost* orig_rfh = contents()->GetMainFrame();
+  orig_rfh->PrepareForCommit(url1);
   orig_rfh->SendNavigate(0, url1);
   EXPECT_EQ(controller.GetEntryCount(), 1);
   EXPECT_EQ(0, controller.GetLastCommittedEntryIndex());
@@ -1102,7 +1126,7 @@ TEST_F(NavigationControllerTest, LoadURL_WithBindings) {
   // privileged url.
   controller.LoadURL(
       url2, Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
-  orig_rfh->SendBeforeUnloadACK(true);
+  orig_rfh->PrepareForCommit(url2);
   TestRenderFrameHost* new_rfh = contents()->GetPendingMainFrame();
   new_rfh->GetRenderViewHost()->AllowBindings(1);
   new_rfh->SendNavigate(1, url2);
@@ -1304,6 +1328,15 @@ TEST_F(NavigationControllerTest, ReloadOriginalRequestURL) {
 // commit.
 TEST_F(NavigationControllerTest, ResetEntryValuesAfterCommit) {
   NavigationControllerImpl& controller = controller_impl();
+
+  // The value of "should replace entry" will be tested, but it's an error to
+  // specify it when there are no entries. Create a simple entry to be replaced.
+  const GURL url0("http://foo0");
+  controller.LoadURL(
+      url0, Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
+  main_test_rfh()->SendNavigate(0, url0);
+
+  // Set up the pending entry.
   const GURL url1("http://foo1");
   controller.LoadURL(
       url1, Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
@@ -1316,8 +1349,6 @@ TEST_F(NavigationControllerTest, ResetEntryValuesAfterCommit) {
   scoped_refptr<base::RefCountedBytes> post_data =
       base::RefCountedBytes::TakeVector(&post_data_vector);
   GlobalRequestID transfer_id(3, 4);
-  std::vector<GURL> redirects;
-  redirects.push_back(GURL("http://foo2"));
 
   // Set non-persisted values on the pending entry.
   NavigationEntryImpl* pending_entry =
@@ -1333,7 +1364,8 @@ TEST_F(NavigationControllerTest, ResetEntryValuesAfterCommit) {
   EXPECT_TRUE(pending_entry->should_replace_entry());
   EXPECT_TRUE(pending_entry->should_clear_history_list());
 
-  main_test_rfh()->SendNavigate(0, url1);
+  // Fake a commit response.
+  main_test_rfh()->SendNavigate(1, url1);
 
   // Certain values that are only used for pending entries get reset after
   // commit.
@@ -3172,15 +3204,41 @@ TEST_F(NavigationControllerTest, IsInPageNavigation) {
   EXPECT_TRUE(controller.IsURLInPageNavigation(other_url, true,
       main_test_rfh()));
 
-  // Don't believe the renderer if it claims a cross-origin navigation is
-  // in-page.
+  // Test allow_universal_access_from_file_urls flag.
   const GURL different_origin_url("http://www.example.com");
   MockRenderProcessHost* rph =
       static_cast<MockRenderProcessHost*>(main_test_rfh()->GetProcess());
+  WebPreferences prefs = test_rvh()->GetWebkitPreferences();
+  prefs.allow_universal_access_from_file_urls = true;
+  test_rvh()->UpdateWebkitPreferences(prefs);
+  prefs = test_rvh()->GetWebkitPreferences();
+  EXPECT_TRUE(prefs.allow_universal_access_from_file_urls);
+  // Allow in page navigation if existing URL is file scheme.
+  const GURL file_url("file:///foo/index.html");
+  main_test_rfh()->SendNavigate(0, file_url);
   EXPECT_EQ(0, rph->bad_msg_count());
+  EXPECT_TRUE(controller.IsURLInPageNavigation(different_origin_url, true,
+      main_test_rfh()));
+  EXPECT_EQ(0, rph->bad_msg_count());
+  // Don't honor allow_universal_access_from_file_urls if existing URL is
+  // not file scheme.
+  main_test_rfh()->SendNavigate(0, url);
   EXPECT_FALSE(controller.IsURLInPageNavigation(different_origin_url, true,
       main_test_rfh()));
   EXPECT_EQ(1, rph->bad_msg_count());
+
+  // Remove allow_universal_access_from_file_urls flag.
+  prefs.allow_universal_access_from_file_urls = false;
+  test_rvh()->UpdateWebkitPreferences(prefs);
+  prefs = test_rvh()->GetWebkitPreferences();
+  EXPECT_FALSE(prefs.allow_universal_access_from_file_urls);
+
+  // Don't believe the renderer if it claims a cross-origin navigation is
+  // in-page.
+  EXPECT_EQ(1, rph->bad_msg_count());
+  EXPECT_FALSE(controller.IsURLInPageNavigation(different_origin_url, true,
+      main_test_rfh()));
+  EXPECT_EQ(2, rph->bad_msg_count());
 }
 
 // Some pages can have subframes with the same base URL (minus the reference) as
@@ -3444,9 +3502,7 @@ TEST_F(NavigationControllerTest, CopyStateFromAndPrune) {
       static_cast<TestWebContents*>(CreateTestWebContents()));
   NavigationControllerImpl& other_controller = other_contents->GetController();
   other_contents->NavigateAndCommit(url3);
-  other_contents->ExpectSetHistoryLengthAndPrune(
-      GetSiteInstanceFromEntry(other_controller.GetEntryAtIndex(0)), 2,
-      other_controller.GetEntryAtIndex(0)->GetPageID());
+  other_contents->ExpectSetHistoryOffsetAndLength(2, 3);
   other_controller.CopyStateFromAndPrune(&controller, false);
 
   // other_controller should now contain the 3 urls: url1, url2 and url3.
@@ -3492,9 +3548,7 @@ TEST_F(NavigationControllerTest, CopyStateFromAndPrune2) {
       static_cast<TestWebContents*>(CreateTestWebContents()));
   NavigationControllerImpl& other_controller = other_contents->GetController();
   other_contents->NavigateAndCommit(url3);
-  other_contents->ExpectSetHistoryLengthAndPrune(
-      GetSiteInstanceFromEntry(other_controller.GetEntryAtIndex(0)), 1,
-      other_controller.GetEntryAtIndex(0)->GetPageID());
+  other_contents->ExpectSetHistoryOffsetAndLength(1, 2);
   other_controller.CopyStateFromAndPrune(&controller, false);
 
   // other_controller should now contain: url1, url3
@@ -3530,9 +3584,7 @@ TEST_F(NavigationControllerTest, CopyStateFromAndPrune3) {
   NavigationControllerImpl& other_controller = other_contents->GetController();
   other_contents->NavigateAndCommit(url3);
   other_contents->NavigateAndCommit(url4);
-  other_contents->ExpectSetHistoryLengthAndPrune(
-      GetSiteInstanceFromEntry(other_controller.GetEntryAtIndex(1)), 2,
-      other_controller.GetEntryAtIndex(0)->GetPageID());
+  other_contents->ExpectSetHistoryOffsetAndLength(2, 3);
   other_controller.CopyStateFromAndPrune(&controller, false);
 
   // other_controller should now contain: url1, url2, url4
@@ -3570,9 +3622,7 @@ TEST_F(NavigationControllerTest, CopyStateFromAndPruneNotLast) {
   other_contents->NavigateAndCommit(url4);
   other_controller.GoBack();
   other_contents->CommitPendingNavigation();
-  other_contents->ExpectSetHistoryLengthAndPrune(
-      GetSiteInstanceFromEntry(other_controller.GetEntryAtIndex(0)), 2,
-      other_controller.GetEntryAtIndex(0)->GetPageID());
+  other_contents->ExpectSetHistoryOffsetAndLength(2, 3);
   other_controller.CopyStateFromAndPrune(&controller, false);
 
   // other_controller should now contain: url1, url2, url3
@@ -3611,9 +3661,7 @@ TEST_F(NavigationControllerTest, CopyStateFromAndPruneTargetPending) {
   other_contents->NavigateAndCommit(url3);
   other_controller.LoadURL(
       url4, Referrer(), ui::PAGE_TRANSITION_TYPED, std::string());
-  other_contents->ExpectSetHistoryLengthAndPrune(
-      GetSiteInstanceFromEntry(other_controller.GetEntryAtIndex(0)), 1,
-      other_controller.GetEntryAtIndex(0)->GetPageID());
+  other_contents->ExpectSetHistoryOffsetAndLength(1, 2);
   other_controller.CopyStateFromAndPrune(&controller, false);
 
   // other_controller should now contain url1, url3, and a pending entry
@@ -3658,9 +3706,7 @@ TEST_F(NavigationControllerTest, CopyStateFromAndPruneTargetPending2) {
   other_controller.GetPendingEntry()->SetPageID(
       other_controller.GetLastCommittedEntry()->GetPageID());
 
-  other_contents->ExpectSetHistoryLengthAndPrune(
-      GetSiteInstanceFromEntry(other_controller.GetEntryAtIndex(0)), 1,
-      other_controller.GetEntryAtIndex(0)->GetPageID());
+  other_contents->ExpectSetHistoryOffsetAndLength(1, 2);
   other_controller.CopyStateFromAndPrune(&controller, false);
 
   // other_controller should now contain url1, url2a, and a pending entry
@@ -3702,9 +3748,7 @@ TEST_F(NavigationControllerTest, CopyStateFromAndPruneSourcePending) {
       static_cast<TestWebContents*>(CreateTestWebContents()));
   NavigationControllerImpl& other_controller = other_contents->GetController();
   other_contents->NavigateAndCommit(url3);
-  other_contents->ExpectSetHistoryLengthAndPrune(
-      GetSiteInstanceFromEntry(other_controller.GetEntryAtIndex(0)), 2,
-      other_controller.GetEntryAtIndex(0)->GetPageID());
+  other_contents->ExpectSetHistoryOffsetAndLength(2, 3);
   other_controller.CopyStateFromAndPrune(&controller, false);
 
   // other_controller should now contain: url1, url2, url3
@@ -3749,9 +3793,7 @@ TEST_F(NavigationControllerTest, CopyStateFromAndPruneMaxEntries) {
       static_cast<TestWebContents*>(CreateTestWebContents()));
   NavigationControllerImpl& other_controller = other_contents->GetController();
   other_contents->NavigateAndCommit(url4);
-  other_contents->ExpectSetHistoryLengthAndPrune(
-      GetSiteInstanceFromEntry(other_controller.GetEntryAtIndex(0)), 2,
-      other_controller.GetEntryAtIndex(0)->GetPageID());
+  other_contents->ExpectSetHistoryOffsetAndLength(2, 3);
   other_controller.CopyStateFromAndPrune(&controller, false);
 
   // We should have received a pruned notification.
@@ -3800,9 +3842,7 @@ TEST_F(NavigationControllerTest, CopyStateFromAndPruneReplaceEntry) {
       static_cast<TestWebContents*>(CreateTestWebContents()));
   NavigationControllerImpl& other_controller = other_contents->GetController();
   other_contents->NavigateAndCommit(url3);
-  other_contents->ExpectSetHistoryLengthAndPrune(
-      GetSiteInstanceFromEntry(other_controller.GetEntryAtIndex(0)), 1,
-      other_controller.GetEntryAtIndex(0)->GetPageID());
+  other_contents->ExpectSetHistoryOffsetAndLength(1, 2);
   other_controller.CopyStateFromAndPrune(&controller, true);
 
   // other_controller should now contain the 2 urls: url1 and url3.
@@ -3854,9 +3894,7 @@ TEST_F(NavigationControllerTest, CopyStateFromAndPruneMaxEntriesReplaceEntry) {
       static_cast<TestWebContents*>(CreateTestWebContents()));
   NavigationControllerImpl& other_controller = other_contents->GetController();
   other_contents->NavigateAndCommit(url4);
-  other_contents->ExpectSetHistoryLengthAndPrune(
-      GetSiteInstanceFromEntry(other_controller.GetEntryAtIndex(0)), 2,
-      other_controller.GetEntryAtIndex(0)->GetPageID());
+  other_contents->ExpectSetHistoryOffsetAndLength(2, 3);
   other_controller.CopyStateFromAndPrune(&controller, true);
 
   // We should have received no pruned notification.
@@ -3911,9 +3949,7 @@ TEST_F(NavigationControllerTest, CopyRestoredStateAndNavigate) {
 
   // Load a page, then copy state from |source_contents|.
   NavigateAndCommit(kInitialUrl);
-  contents()->ExpectSetHistoryLengthAndPrune(
-      GetSiteInstanceFromEntry(controller_impl().GetEntryAtIndex(0)), 2,
-      controller_impl().GetEntryAtIndex(0)->GetPageID());
+  contents()->ExpectSetHistoryOffsetAndLength(2, 3);
   controller_impl().CopyStateFromAndPrune(&source_controller, false);
   ASSERT_EQ(3, controller_impl().GetEntryCount());
 
@@ -3946,6 +3982,7 @@ TEST_F(NavigationControllerTest, HistoryNavigate) {
   NavigateAndCommit(url3);
   controller.GoBack();
   contents()->CommitPendingNavigation();
+  process()->sink().ClearMessages();
 
   // Simulate the page calling history.back(). It should create a pending entry.
   contents()->OnGoToEntryAtOffset(-1);
@@ -3954,12 +3991,10 @@ TEST_F(NavigationControllerTest, HistoryNavigate) {
   // it unloaded, simulate that.
   contents()->ProceedWithCrossSiteNavigation();
   // Also make sure we told the page to navigate.
-  const IPC::Message* message =
-      process()->sink().GetFirstMessageMatching(FrameMsg_Navigate::ID);
+  const IPC::Message* message = GetLastNavigationRequest();
   ASSERT_TRUE(message != NULL);
-  Tuple1<FrameMsg_Navigate_Params> nav_params;
-  FrameMsg_Navigate::Read(message, &nav_params);
-  EXPECT_EQ(url1, nav_params.a.common_params.url);
+  GURL nav_url = GetNavigationURLFromIPC(message);
+  EXPECT_EQ(url1, nav_url);
   process()->sink().ClearMessages();
 
   // Now test history.forward()
@@ -3968,10 +4003,10 @@ TEST_F(NavigationControllerTest, HistoryNavigate) {
   // The actual cross-navigation is suspended until the current RVH tells us
   // it unloaded, simulate that.
   contents()->ProceedWithCrossSiteNavigation();
-  message = process()->sink().GetFirstMessageMatching(FrameMsg_Navigate::ID);
+  message = GetLastNavigationRequest();
   ASSERT_TRUE(message != NULL);
-  FrameMsg_Navigate::Read(message, &nav_params);
-  EXPECT_EQ(url3, nav_params.a.common_params.url);
+  nav_url = GetNavigationURLFromIPC(message);
+  EXPECT_EQ(url3, nav_url);
   process()->sink().ClearMessages();
 
   controller.DiscardNonCommittedEntries();
@@ -3979,7 +4014,7 @@ TEST_F(NavigationControllerTest, HistoryNavigate) {
   // Make sure an extravagant history.go() doesn't break.
   contents()->OnGoToEntryAtOffset(120);  // Out of bounds.
   EXPECT_EQ(-1, controller.GetPendingEntryIndex());
-  message = process()->sink().GetFirstMessageMatching(FrameMsg_Navigate::ID);
+  message = GetLastNavigationRequest();
   EXPECT_TRUE(message == NULL);
 }
 
@@ -3989,9 +4024,7 @@ TEST_F(NavigationControllerTest, PruneAllButLastCommittedForSingle) {
   const GURL url1("http://foo1");
   NavigateAndCommit(url1);
 
-  contents()->ExpectSetHistoryLengthAndPrune(
-      GetSiteInstanceFromEntry(controller.GetEntryAtIndex(0)), 0,
-      controller.GetEntryAtIndex(0)->GetPageID());
+  contents()->ExpectSetHistoryOffsetAndLength(0, 1);
 
   controller.PruneAllButLastCommitted();
 
@@ -4013,9 +4046,7 @@ TEST_F(NavigationControllerTest, PruneAllButLastCommittedForFirst) {
   controller.GoBack();
   contents()->CommitPendingNavigation();
 
-  contents()->ExpectSetHistoryLengthAndPrune(
-      GetSiteInstanceFromEntry(controller.GetEntryAtIndex(0)), 0,
-      controller.GetEntryAtIndex(0)->GetPageID());
+  contents()->ExpectSetHistoryOffsetAndLength(0, 1);
 
   controller.PruneAllButLastCommitted();
 
@@ -4036,9 +4067,7 @@ TEST_F(NavigationControllerTest, PruneAllButLastCommittedForIntermediate) {
   controller.GoBack();
   contents()->CommitPendingNavigation();
 
-  contents()->ExpectSetHistoryLengthAndPrune(
-      GetSiteInstanceFromEntry(controller.GetEntryAtIndex(1)), 0,
-      controller.GetEntryAtIndex(1)->GetPageID());
+  contents()->ExpectSetHistoryOffsetAndLength(0, 1);
 
   controller.PruneAllButLastCommitted();
 
@@ -4063,8 +4092,7 @@ TEST_F(NavigationControllerTest, PruneAllButLastCommittedForPendingNotInList) {
   EXPECT_TRUE(controller.GetPendingEntry());
   EXPECT_EQ(2, controller.GetEntryCount());
 
-  contents()->ExpectSetHistoryLengthAndPrune(
-      NULL, 0, controller.GetPendingEntry()->GetPageID());
+  contents()->ExpectSetHistoryOffsetAndLength(0, 1);
   controller.PruneAllButLastCommitted();
 
   // We should only have the last committed and pending entries at this point,
@@ -4373,6 +4401,10 @@ TEST_F(NavigationControllerTest, ClearHistoryList) {
   EXPECT_TRUE(entry->should_clear_history_list());
 
   // Assume that the RF correctly cleared its history and commit the navigation.
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableBrowserSideNavigation)) {
+    contents()->GetMainFrame()->PrepareForCommit(entry->GetURL());
+  }
   contents()->GetPendingMainFrame()->
       set_simulate_history_list_was_cleared(true);
   contents()->CommitPendingNavigation();

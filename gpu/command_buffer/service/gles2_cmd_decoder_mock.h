@@ -9,11 +9,11 @@
 
 #include <vector>
 
+#include "base/callback_forward.h"
 #include "gpu/command_buffer/common/mailbox.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
-#include "base/callback_forward.h"
 #include "testing/gmock/include/gmock/gmock.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace gfx {
 class GLContext;
@@ -78,6 +78,7 @@ class MockGLES2Decoder : public GLES2Decoder {
   MOCK_METHOD0(GetQueryManager, gpu::gles2::QueryManager*());
   MOCK_METHOD0(GetVertexArrayManager, gpu::gles2::VertexArrayManager*());
   MOCK_METHOD0(GetImageManager, gpu::gles2::ImageManager*());
+  MOCK_METHOD0(GetValuebufferManager, gpu::gles2::ValuebufferManager*());
   MOCK_METHOD1(
       SetResizeCallback, void(const base::Callback<void(gfx::Size, float)>&));
   MOCK_METHOD0(GetAsyncPixelTransferDelegate,

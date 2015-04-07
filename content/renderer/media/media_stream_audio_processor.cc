@@ -4,13 +4,11 @@
 
 #include "content/renderer/media/media_stream_audio_processor.h"
 
-#include "base/command_line.h"
 #include "base/debug/trace_event.h"
 #if defined(OS_MACOSX)
 #include "base/metrics/field_trial.h"
 #endif
 #include "base/metrics/histogram.h"
-#include "content/public/common/content_switches.h"
 #include "content/renderer/media/media_stream_audio_processor_options.h"
 #include "content/renderer/media/rtc_media_constraints.h"
 #include "content/renderer/media/webrtc_audio_device_impl.h"
@@ -21,6 +19,10 @@
 #include "third_party/WebKit/public/platform/WebMediaConstraints.h"
 #include "third_party/libjingle/source/talk/app/webrtc/mediaconstraintsinterface.h"
 #include "third_party/webrtc/modules/audio_processing/typing_detection.h"
+
+#if defined(OS_CHROMEOS)
+#include "base/sys_info.h"
+#endif
 
 namespace content {
 
@@ -122,13 +124,16 @@ class MediaStreamAudioFifo {
   MediaStreamAudioFifo(int source_channels,
                        int destination_channels,
                        int source_frames,
-                       int destination_frames)
+                       int destination_frames,
+                       int sample_rate)
      : source_channels_(source_channels),
        source_frames_(source_frames),
+       sample_rate_(sample_rate),
        destination_(
            new MediaStreamAudioBus(destination_channels, destination_frames)),
        data_available_(false) {
     DCHECK_GE(source_channels, destination_channels);
+    DCHECK_GT(sample_rate_, 0);
 
     if (source_channels > destination_channels) {
       audio_source_intermediate_ =
@@ -147,34 +152,38 @@ class MediaStreamAudioFifo {
     thread_checker_.DetachFromThread();
   }
 
-  void Push(const media::AudioBus* source) {
+  void Push(const media::AudioBus& source, base::TimeDelta audio_delay) {
     DCHECK(thread_checker_.CalledOnValidThread());
-    DCHECK_EQ(source->channels(), source_channels_);
-    DCHECK_EQ(source->frames(), source_frames_);
+    DCHECK_EQ(source.channels(), source_channels_);
+    DCHECK_EQ(source.frames(), source_frames_);
 
-    const media::AudioBus* source_to_push = source;
+    const media::AudioBus* source_to_push = &source;
 
     if (audio_source_intermediate_) {
       for (int i = 0; i < destination_->bus()->channels(); ++i) {
         audio_source_intermediate_->SetChannelData(
             i,
-            const_cast<float*>(source->channel(i)));
+            const_cast<float*>(source.channel(i)));
       }
-      audio_source_intermediate_->set_frames(source->frames());
+      audio_source_intermediate_->set_frames(source.frames());
       source_to_push = audio_source_intermediate_.get();
     }
 
     if (fifo_) {
+      next_audio_delay_ = audio_delay +
+          fifo_->frames() * base::TimeDelta::FromSeconds(1) / sample_rate_;
       fifo_->Push(source_to_push);
     } else {
       source_to_push->CopyTo(destination_->bus());
+      next_audio_delay_ = audio_delay;
       data_available_ = true;
     }
   }
 
   // Returns true if there are destination_frames() of data available to be
   // consumed, and otherwise false.
-  bool Consume(MediaStreamAudioBus** destination) {
+  bool Consume(MediaStreamAudioBus** destination,
+               base::TimeDelta* audio_delay) {
     DCHECK(thread_checker_.CalledOnValidThread());
 
     if (fifo_) {
@@ -182,10 +191,14 @@ class MediaStreamAudioFifo {
         return false;
 
       fifo_->Consume(destination_->bus(), 0, destination_->bus()->frames());
+      *audio_delay = next_audio_delay_;
+      next_audio_delay_ -=
+          destination_->bus()->frames() * base::TimeDelta::FromSeconds(1) /
+              sample_rate_;
     } else {
       if (!data_available_)
         return false;
-
+      *audio_delay = next_audio_delay_;
       // The data was already copied to |destination_| in this case.
       data_available_ = false;
     }
@@ -198,17 +211,20 @@ class MediaStreamAudioFifo {
   base::ThreadChecker thread_checker_;
   const int source_channels_;  // For a DCHECK.
   const int source_frames_;  // For a DCHECK.
+  const int sample_rate_;
   scoped_ptr<media::AudioBus> audio_source_intermediate_;
   scoped_ptr<MediaStreamAudioBus> destination_;
   scoped_ptr<media::AudioFifo> fifo_;
-  // Only used when the FIFO is disabled;
+
+  // When using |fifo_|, this is the audio delay of the first sample to be
+  // consumed next from the FIFO.  When not using |fifo_|, this is the audio
+  // delay of the first sample in |destination_|.
+  base::TimeDelta next_audio_delay_;
+
+  // True when |destination_| contains the data to be returned by the next call
+  // to Consume().  Only used when the FIFO is disabled.
   bool data_available_;
 };
-
-bool MediaStreamAudioProcessor::IsAudioTrackProcessingEnabled() {
-  return !CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kDisableAudioTrackProcessing);
-}
 
 MediaStreamAudioProcessor::MediaStreamAudioProcessor(
     const blink::WebMediaConstraints& constraints,
@@ -222,14 +238,13 @@ MediaStreamAudioProcessor::MediaStreamAudioProcessor(
   capture_thread_checker_.DetachFromThread();
   render_thread_checker_.DetachFromThread();
   InitializeAudioProcessingModule(constraints, effects);
-  if (IsAudioTrackProcessingEnabled()) {
-    aec_dump_message_filter_ = AecDumpMessageFilter::Get();
-    // In unit tests not creating a message filter, |aec_dump_message_filter_|
-    // will be NULL. We can just ignore that. Other unit tests and browser tests
-    // ensure that we do get the filter when we should.
-    if (aec_dump_message_filter_.get())
-      aec_dump_message_filter_->AddDelegate(this);
-  }
+
+  aec_dump_message_filter_ = AecDumpMessageFilter::Get();
+  // In unit tests not creating a message filter, |aec_dump_message_filter_|
+  // will be NULL. We can just ignore that. Other unit tests and browser tests
+  // ensure that we do get the filter when we should.
+  if (aec_dump_message_filter_.get())
+    aec_dump_message_filter_->AddDelegate(this);
 }
 
 MediaStreamAudioProcessor::~MediaStreamAudioProcessor() {
@@ -251,20 +266,28 @@ void MediaStreamAudioProcessor::OnCaptureFormatChanged(
 }
 
 void MediaStreamAudioProcessor::PushCaptureData(
-    const media::AudioBus* audio_source) {
+    const media::AudioBus& audio_source,
+    base::TimeDelta capture_delay) {
   DCHECK(capture_thread_checker_.CalledOnValidThread());
 
-  capture_fifo_->Push(audio_source);
+  capture_fifo_->Push(audio_source, capture_delay);
 }
 
 bool MediaStreamAudioProcessor::ProcessAndConsumeData(
-    base::TimeDelta capture_delay, int volume, bool key_pressed,
-    int* new_volume, int16** out) {
+    int volume,
+    bool key_pressed,
+    media::AudioBus** processed_data,
+    base::TimeDelta* capture_delay,
+    int* new_volume) {
   DCHECK(capture_thread_checker_.CalledOnValidThread());
+  DCHECK(processed_data);
+  DCHECK(capture_delay);
+  DCHECK(new_volume);
+
   TRACE_EVENT0("audio", "MediaStreamAudioProcessor::ProcessAndConsumeData");
 
   MediaStreamAudioBus* process_bus;
-  if (!capture_fifo_->Consume(&process_bus))
+  if (!capture_fifo_->Consume(&process_bus, capture_delay))
     return false;
 
   // Use the process bus directly if audio processing is disabled.
@@ -273,7 +296,7 @@ bool MediaStreamAudioProcessor::ProcessAndConsumeData(
   if (audio_processing_) {
     output_bus = output_bus_.get();
     *new_volume = ProcessData(process_bus->channel_ptrs(),
-                              process_bus->bus()->frames(), capture_delay,
+                              process_bus->bus()->frames(), *capture_delay,
                               volume, key_pressed, output_bus->channel_ptrs());
   }
 
@@ -284,10 +307,7 @@ bool MediaStreamAudioProcessor::ProcessAndConsumeData(
     output_bus->bus()->SwapChannels(0, 1);
   }
 
-  output_bus->bus()->ToInterleaved(output_bus->bus()->frames(),
-                                   sizeof(int16),
-                                   output_data_.get());
-  *out = output_data_.get();
+  *processed_data = output_bus->bus();
 
   return true;
 }
@@ -362,9 +382,12 @@ void MediaStreamAudioProcessor::OnPlayoutData(media::AudioBus* audio_bus,
   InitializeRenderFifoIfNeeded(sample_rate, audio_bus->channels(),
                                audio_bus->frames());
 
-  render_fifo_->Push(audio_bus);
+  render_fifo_->Push(
+      *audio_bus, base::TimeDelta::FromMilliseconds(audio_delay_milliseconds));
   MediaStreamAudioBus* analysis_bus;
-  while (render_fifo_->Consume(&analysis_bus)) {
+  base::TimeDelta audio_delay;
+  while (render_fifo_->Consume(&analysis_bus, &audio_delay)) {
+    // TODO(ajm): Should AnalyzeReverseStream() account for the |audio_delay|?
     audio_processing_->AnalyzeReverseStream(
         analysis_bus->channel_ptrs(),
         analysis_bus->bus()->frames(),
@@ -401,11 +424,6 @@ void MediaStreamAudioProcessor::InitializeAudioProcessingModule(
   audio_mirroring_ = audio_constraints.GetProperty(
       MediaAudioConstraints::kGoogAudioMirroring);
 
-  if (!IsAudioTrackProcessingEnabled()) {
-    RecordProcessingState(AUDIO_PROCESSING_IN_WEBRTC);
-    return;
-  }
-
 #if defined(OS_IOS)
   // On iOS, VPIO provides built-in AGC and AEC.
   const bool echo_cancellation = false;
@@ -431,13 +449,15 @@ void MediaStreamAudioProcessor::InitializeAudioProcessingModule(
       MediaAudioConstraints::kGoogNoiseSuppression);
   const bool goog_experimental_ns = audio_constraints.GetProperty(
       MediaAudioConstraints::kGoogExperimentalNoiseSuppression);
+  const bool goog_beamforming = audio_constraints.GetProperty(
+      MediaAudioConstraints::kGoogBeamforming);
  const bool goog_high_pass_filter = audio_constraints.GetProperty(
      MediaAudioConstraints::kGoogHighpassFilter);
 
   // Return immediately if no goog constraint is enabled.
   if (!echo_cancellation && !goog_experimental_aec && !goog_ns &&
       !goog_high_pass_filter && !goog_typing_detection &&
-      !goog_agc && !goog_experimental_ns) {
+      !goog_agc && !goog_experimental_ns && !goog_beamforming) {
     RecordProcessingState(AUDIO_PROCESSING_DISABLED);
     return;
   }
@@ -452,6 +472,9 @@ void MediaStreamAudioProcessor::InitializeAudioProcessingModule(
   if (base::FieldTrialList::FindFullName("NoReportedDelayOnMac") == "Enabled")
     config.Set<webrtc::ReportedDelay>(new webrtc::ReportedDelay(false));
 #endif
+  if (goog_beamforming) {
+    ConfigureBeamforming(&config);
+  }
 
   // Create and configure the webrtc::AudioProcessing.
   audio_processing_.reset(webrtc::AudioProcessing::Create(config));
@@ -485,6 +508,23 @@ void MediaStreamAudioProcessor::InitializeAudioProcessingModule(
     EnableAutomaticGainControl(audio_processing_.get());
 
   RecordProcessingState(AUDIO_PROCESSING_ENABLED);
+}
+
+void MediaStreamAudioProcessor::ConfigureBeamforming(webrtc::Config* config) {
+  bool enabled = false;
+  std::vector<webrtc::Point> geometry(1, webrtc::Point(0.f, 0.f, 0.f));
+#if defined(OS_CHROMEOS)
+  const std::string board = base::SysInfo::GetLsbReleaseBoard();
+  if (board == "peach_pi") {
+    enabled = true;
+    geometry.push_back(webrtc::Point(0.050f, 0.f, 0.f));
+  } else if (board == "swanky") {
+    // TODO(aluebs): Verify beamforming works on Swanky and enable.
+    enabled = false;
+    geometry.push_back(webrtc::Point(0.052f, 0.f, 0.f));
+  }
+#endif
+  config->Set<webrtc::Beamforming>(new webrtc::Beamforming(enabled, geometry));
 }
 
 void MediaStreamAudioProcessor::InitializeCaptureFifo(
@@ -546,14 +586,13 @@ void MediaStreamAudioProcessor::InitializeCaptureFifo(
       new MediaStreamAudioFifo(input_format.channels(),
                                fifo_output_channels,
                                input_format.frames_per_buffer(),
-                               processing_frames));
+                               processing_frames,
+                               input_format.sample_rate()));
 
   if (audio_processing_) {
     output_bus_.reset(new MediaStreamAudioBus(output_format_.channels(),
                                               output_frames));
   }
-  output_data_.reset(new int16[output_format_.GetBytesPerBuffer() /
-                               sizeof(int16)]);
 }
 
 void MediaStreamAudioProcessor::InitializeRenderFifoIfNeeded(
@@ -579,7 +618,8 @@ void MediaStreamAudioProcessor::InitializeRenderFifoIfNeeded(
       new MediaStreamAudioFifo(number_of_channels,
                                number_of_channels,
                                frames_per_buffer,
-                               analysis_frames));
+                               analysis_frames,
+                               sample_rate));
 }
 
 int MediaStreamAudioProcessor::ProcessData(const float* const* process_ptrs,

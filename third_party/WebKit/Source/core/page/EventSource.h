@@ -50,7 +50,7 @@ class ResourceResponse;
 class TextResourceDecoder;
 class ThreadableLoader;
 
-class EventSource final : public RefCountedWillBeGarbageCollectedFinalized<EventSource>, public EventTargetWithInlineData, private ThreadableLoaderClient, public ActiveDOMObject {
+class EventSource final : public EventTargetWithInlineData, public RefCountedWillBeNoBase<EventSource>, private ThreadableLoaderClient, public ActiveDOMObject {
     DEFINE_WRAPPERTYPEINFO();
     REFCOUNTED_EVENT_TARGET(EventSource);
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(EventSource);
@@ -89,6 +89,8 @@ public:
     virtual void stop() override;
 
     virtual bool hasPendingActivity() const override;
+
+    virtual void trace(Visitor*) override;
 
 private:
     EventSource(ExecutionContext*, const KURL&, const EventSourceInit&);

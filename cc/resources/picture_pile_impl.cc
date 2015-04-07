@@ -4,65 +4,71 @@
 
 #include <algorithm>
 #include <limits>
+#include <set>
 
 #include "base/debug/trace_event.h"
 #include "cc/base/region.h"
 #include "cc/debug/debug_colors.h"
 #include "cc/resources/picture_pile_impl.h"
+#include "cc/resources/raster_source_helper.h"
 #include "skia/ext/analysis_canvas.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkPictureRecorder.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 
+namespace {
+
+#ifdef NDEBUG
+const bool kDefaultClearCanvasSetting = false;
+#else
+const bool kDefaultClearCanvasSetting = true;
+#endif
+
+}  // namespace
+
 namespace cc {
 
-scoped_refptr<PicturePileImpl> PicturePileImpl::Create() {
-  return make_scoped_refptr(new PicturePileImpl);
-}
-
-scoped_refptr<PicturePileImpl> PicturePileImpl::CreateFromOther(
-    const PicturePileBase* other) {
+scoped_refptr<PicturePileImpl> PicturePileImpl::CreateFromPicturePile(
+    const PicturePile* other) {
   return make_scoped_refptr(new PicturePileImpl(other));
 }
 
 PicturePileImpl::PicturePileImpl()
     : background_color_(SK_ColorTRANSPARENT),
-      contents_opaque_(false),
-      contents_fill_bounds_completely_(false),
+      requires_clear_(true),
+      can_use_lcd_text_(false),
       is_solid_color_(false),
       solid_color_(SK_ColorTRANSPARENT),
       has_any_recordings_(false),
-      is_mask_(false),
-      clear_canvas_with_debug_color_(false),
+      clear_canvas_with_debug_color_(kDefaultClearCanvasSetting),
       min_contents_scale_(0.f),
       slow_down_raster_scale_factor_for_debug_(0),
-      likely_to_be_used_for_transform_animation_(false) {
+      should_attempt_to_use_distance_field_text_(false) {
 }
 
-PicturePileImpl::PicturePileImpl(const PicturePileBase* other)
+PicturePileImpl::PicturePileImpl(const PicturePile* other)
     : picture_map_(other->picture_map_),
       tiling_(other->tiling_),
-      background_color_(other->background_color_),
-      contents_opaque_(other->contents_opaque_),
-      contents_fill_bounds_completely_(other->contents_fill_bounds_completely_),
+      background_color_(SK_ColorTRANSPARENT),
+      requires_clear_(true),
+      can_use_lcd_text_(other->can_use_lcd_text_),
       is_solid_color_(other->is_solid_color_),
       solid_color_(other->solid_color_),
       recorded_viewport_(other->recorded_viewport_),
       has_any_recordings_(other->has_any_recordings_),
-      is_mask_(other->is_mask_),
-      clear_canvas_with_debug_color_(other->clear_canvas_with_debug_color_),
+      clear_canvas_with_debug_color_(kDefaultClearCanvasSetting),
       min_contents_scale_(other->min_contents_scale_),
       slow_down_raster_scale_factor_for_debug_(
           other->slow_down_raster_scale_factor_for_debug_),
-      likely_to_be_used_for_transform_animation_(false) {
+      should_attempt_to_use_distance_field_text_(false) {
 }
 
 PicturePileImpl::~PicturePileImpl() {
 }
 
-void PicturePileImpl::RasterDirect(SkCanvas* canvas,
-                                   const gfx::Rect& canvas_rect,
-                                   float contents_scale) const {
+void PicturePileImpl::PlaybackToSharedCanvas(SkCanvas* canvas,
+                                             const gfx::Rect& canvas_rect,
+                                             float contents_scale) const {
   RasterCommon(canvas,
                NULL,
                canvas_rect,
@@ -79,62 +85,9 @@ void PicturePileImpl::RasterForAnalysis(skia::AnalysisCanvas* canvas,
 void PicturePileImpl::PlaybackToCanvas(SkCanvas* canvas,
                                        const gfx::Rect& canvas_rect,
                                        float contents_scale) const {
-  canvas->discard();
-  if (clear_canvas_with_debug_color_) {
-    // Any non-painted areas in the content bounds will be left in this color.
-    canvas->clear(DebugColors::NonPaintedFillColor());
-  }
-
-  // If this picture has opaque contents, it is guaranteeing that it will
-  // draw an opaque rect the size of the layer.  If it is not, then we must
-  // clear this canvas ourselves.
-  if (contents_opaque_ || contents_fill_bounds_completely_) {
-    // Even if completely covered, for rasterizations that touch the edge of the
-    // layer, we also need to raster the background color underneath the last
-    // texel (since the recording won't cover it) and outside the last texel
-    // (due to linear filtering when using this texture).
-    gfx::Rect content_tiling_rect = gfx::ToEnclosingRect(
-        gfx::ScaleRect(gfx::Rect(tiling_.tiling_size()), contents_scale));
-
-    // The final texel of content may only be partially covered by a
-    // rasterization; this rect represents the content rect that is fully
-    // covered by content.
-    gfx::Rect deflated_content_tiling_rect = content_tiling_rect;
-    deflated_content_tiling_rect.Inset(0, 0, 1, 1);
-    if (!deflated_content_tiling_rect.Contains(canvas_rect)) {
-      if (clear_canvas_with_debug_color_) {
-        // Any non-painted areas outside of the content bounds are left in
-        // this color.  If this is seen then it means that cc neglected to
-        // rerasterize a tile that used to intersect with the content rect
-        // after the content bounds grew.
-        canvas->save();
-        canvas->translate(-canvas_rect.x(), -canvas_rect.y());
-        canvas->clipRect(gfx::RectToSkRect(content_tiling_rect),
-                         SkRegion::kDifference_Op);
-        canvas->drawColor(DebugColors::MissingResizeInvalidations(),
-                          SkXfermode::kSrc_Mode);
-        canvas->restore();
-      }
-
-      // Drawing at most 2 x 2 x (canvas width + canvas height) texels is 2-3X
-      // faster than clearing, so special case this.
-      canvas->save();
-      canvas->translate(-canvas_rect.x(), -canvas_rect.y());
-      gfx::Rect inflated_content_tiling_rect = content_tiling_rect;
-      inflated_content_tiling_rect.Inset(0, 0, -1, -1);
-      canvas->clipRect(gfx::RectToSkRect(inflated_content_tiling_rect),
-                       SkRegion::kReplace_Op);
-      canvas->clipRect(gfx::RectToSkRect(deflated_content_tiling_rect),
-                       SkRegion::kDifference_Op);
-      canvas->drawColor(background_color_, SkXfermode::kSrc_Mode);
-      canvas->restore();
-    }
-  } else {
-    TRACE_EVENT_INSTANT0("cc", "SkCanvas::clear", TRACE_EVENT_SCOPE_THREAD);
-    // Clearing is about ~4x faster than drawing a rect even if the content
-    // isn't covering a majority of the canvas.
-    canvas->clear(SK_ColorTRANSPARENT);
-  }
+  RasterSourceHelper::PrepareForPlaybackToCanvas(
+      canvas, canvas_rect, gfx::Rect(tiling_.tiling_size()), contents_scale,
+      background_color_, clear_canvas_with_debug_color_, requires_clear_);
 
   RasterCommon(canvas,
                NULL,
@@ -311,6 +264,19 @@ skia::RefPtr<SkPicture> PicturePileImpl::GetFlattenedPicture() {
   return picture;
 }
 
+size_t PicturePileImpl::GetPictureMemoryUsage() const {
+  // Place all pictures in a set to de-dupe.
+  size_t total_size = 0;
+  std::set<const Picture*> pictures_seen;
+  for (const auto& map_value : picture_map_) {
+    const Picture* picture = map_value.second.GetPicture();
+    if (picture && pictures_seen.insert(picture).second)
+      total_size += picture->ApproximateMemoryUsage();
+  }
+
+  return total_size;
+}
+
 void PicturePileImpl::PerformSolidColorAnalysis(
     const gfx::Rect& content_rect,
     float contents_scale,
@@ -359,6 +325,23 @@ bool PicturePileImpl::CoversRect(const gfx::Rect& content_rect,
   return CanRasterSlowTileCheck(layer_rect);
 }
 
+gfx::Size PicturePileImpl::GetSize() const {
+  return tiling_.tiling_size();
+}
+
+bool PicturePileImpl::IsSolidColor() const {
+  return is_solid_color_;
+}
+
+SkColor PicturePileImpl::GetSolidColor() const {
+  DCHECK(IsSolidColor());
+  return solid_color_;
+}
+
+bool PicturePileImpl::HasRecordings() const {
+  return has_any_recordings_;
+}
+
 gfx::Rect PicturePileImpl::PaddedRect(const PictureMapKey& key) const {
   gfx::Rect padded_rect = tiling_.TileBounds(key.first, key.second);
   padded_rect.Inset(-buffer_pixels(), -buffer_pixels(), -buffer_pixels(),
@@ -380,8 +363,20 @@ bool PicturePileImpl::CanRasterSlowTileCheck(
   return true;
 }
 
-bool PicturePileImpl::SuitableForDistanceFieldText() const {
-  return likely_to_be_used_for_transform_animation_;
+void PicturePileImpl::SetShouldAttemptToUseDistanceFieldText() {
+  should_attempt_to_use_distance_field_text_ = true;
+}
+
+void PicturePileImpl::SetBackgoundColor(SkColor background_color) {
+  background_color_ = background_color;
+}
+
+void PicturePileImpl::SetRequiresClear(bool requires_clear) {
+  requires_clear_ = requires_clear;
+}
+
+bool PicturePileImpl::ShouldAttemptToUseDistanceFieldText() const {
+  return should_attempt_to_use_distance_field_text_;
 }
 
 void PicturePileImpl::AsValueInto(base::debug::TracedValue* pictures) const {
@@ -400,6 +395,10 @@ void PicturePileImpl::AsValueInto(base::debug::TracedValue* pictures) const {
       TracedValue::AppendIDRef(picture, pictures);
     }
   }
+}
+
+bool PicturePileImpl::CanUseLCDText() const {
+  return can_use_lcd_text_;
 }
 
 PicturePileImpl::PixelRefIterator::PixelRefIterator(

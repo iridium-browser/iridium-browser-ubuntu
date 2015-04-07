@@ -36,6 +36,7 @@
 #include "bindings/core/v8/ScriptSourceCode.h"
 #include "core/frame/FrameConsole.h"
 #include "core/frame/LocalFrame.h"
+#include "core/inspector/InjectedScript.h"
 #include "core/inspector/InspectorOverlay.h"
 #include "core/inspector/InspectorPageAgent.h"
 #include "core/inspector/InstrumentingAgents.h"
@@ -130,11 +131,6 @@ InjectedScript PageDebuggerAgent::injectedScriptForEval(ErrorString* errorString
     if (injectedScript.isEmpty())
         *errorString = "Execution context with given id not found.";
     return injectedScript;
-}
-
-void PageDebuggerAgent::setOverlayMessage(ErrorString*, const String* message)
-{
-    m_overlay->setPausedInDebuggerMessage(message);
 }
 
 void PageDebuggerAgent::didClearDocumentOfWindowObject(LocalFrame* frame)

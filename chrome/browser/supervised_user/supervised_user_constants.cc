@@ -6,11 +6,13 @@
 
 namespace supervised_users {
 
+const char kCameraMicAllowed[] = "CameraMicAllowed";
 const char kContentPackDefaultFilteringBehavior[] =
     "ContentPackDefaultFilteringBehavior";
 const char kContentPackManualBehaviorHosts[] = "ContentPackManualBehaviorHosts";
 const char kContentPackManualBehaviorURLs[] = "ContentPackManualBehaviorURLs";
 const char kForceSafeSearch[] = "ForceSafeSearch";
+const char kGeolocationAllowed[] = "GeolocationAllowed";
 const char kRecordHistory[] = "RecordHistory";
 const char kSigninAllowed[] = "SigninAllowed";
 const char kUserName[] = "UserName";
@@ -18,6 +20,8 @@ const char kUserName[] = "UserName";
 const char kUserPasswordRecord[] = "UserPasswordRecord";
 
 const char kSupervisedUserPseudoEmail[] = "managed_user@localhost";
+
+const char kChildAccountSUID[] = "ChildAccountSUID";
 
 const char kChromeAvatarIndex[] = "chrome-avatar-index";
 const char kChromeOSAvatarIndex[] = "chromeos-avatar-index";

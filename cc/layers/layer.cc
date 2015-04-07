@@ -49,6 +49,9 @@ Layer::Layer()
       layer_tree_host_(nullptr),
       scroll_clip_layer_id_(INVALID_ID),
       num_descendants_that_draw_content_(0),
+      transform_tree_index_(-1),
+      opacity_tree_index_(-1),
+      clip_tree_index_(-1),
       should_scroll_on_main_thread_(false),
       have_wheel_event_handlers_(false),
       have_scroll_event_handlers_(false),
@@ -67,6 +70,7 @@ Layer::Layer()
       draw_checkerboard_for_missing_tiles_(false),
       force_render_surface_(false),
       transform_is_invertible_(true),
+      has_render_surface_(false),
       background_color_(0),
       opacity_(1.f),
       blend_mode_(SkXfermode::kSrcOver_Mode),
@@ -590,6 +594,10 @@ void Layer::SetTransformOrigin(const gfx::Point3F& transform_origin) {
   SetNeedsCommit();
 }
 
+bool Layer::AnimationsPreserveAxisAlignment() const {
+  return layer_animation_controller_->AnimationsPreserveAxisAlignment();
+}
+
 bool Layer::TransformIsAnimating() const {
   return layer_animation_controller_->IsAnimatingProperty(Animation::Transform);
 }
@@ -877,9 +885,9 @@ void Layer::PushPropertiesTo(LayerImpl* layer) {
   layer->SetDoubleSided(double_sided_);
   layer->SetDrawCheckerboardForMissingTiles(
       draw_checkerboard_for_missing_tiles_);
-  layer->SetForceRenderSurface(force_render_surface_);
   layer->SetDrawsContent(DrawsContent());
   layer->SetHideLayerAndSubtree(hide_layer_and_subtree_);
+  layer->SetHasRenderSurface(has_render_surface_);
   if (!layer->FilterIsAnimatingOnImplOnly() && !FilterIsAnimating())
     layer->SetFilters(filters_);
   DCHECK(!(FilterIsAnimating() && layer->FilterIsAnimatingOnImplOnly()));
@@ -1080,19 +1088,27 @@ scoped_refptr<base::debug::ConvertableToTraceFormat> Layer::TakeDebugInfo() {
     return nullptr;
 }
 
+void Layer::SetHasRenderSurface(bool has_render_surface) {
+  if (has_render_surface_ == has_render_surface)
+    return;
+  has_render_surface_ = has_render_surface;
+  // We do not need SetNeedsCommit here, since this is only ever called
+  // during a commit, from CalculateDrawProperties.
+  SetNeedsPushProperties();
+}
+
 void Layer::CreateRenderSurface() {
-  DCHECK(!draw_properties_.render_surface);
-  draw_properties_.render_surface = make_scoped_ptr(new RenderSurface(this));
-  draw_properties_.render_target = this;
+  DCHECK(!render_surface_);
+  render_surface_ = make_scoped_ptr(new RenderSurface(this));
 }
 
 void Layer::ClearRenderSurface() {
-  draw_properties_.render_surface = nullptr;
+  render_surface_ = nullptr;
 }
 
 void Layer::ClearRenderSurfaceLayerList() {
-  if (draw_properties_.render_surface)
-    draw_properties_.render_surface->layer_list().clear();
+  if (render_surface_)
+    render_surface_->ClearLayerLists();
 }
 
 gfx::ScrollOffset Layer::ScrollOffsetForAnimation() const {
@@ -1239,6 +1255,32 @@ void Layer::RunMicroBenchmark(MicroBenchmark* benchmark) {
 
 bool Layer::HasDelegatedContent() const {
   return false;
+}
+
+gfx::Transform Layer::screen_space_transform_from_property_trees(
+    const TransformTree& tree) const {
+  gfx::Transform xform(1, 0, 0, 1, offset_to_transform_parent().x(),
+                       offset_to_transform_parent().y());
+  if (transform_tree_index() >= 0) {
+    gfx::Transform ssxform = tree.Node(transform_tree_index())->data.to_screen;
+    xform.ConcatTransform(ssxform);
+  }
+  xform.Scale(1.0 / contents_scale_x(), 1.0 / contents_scale_y());
+  return xform;
+}
+
+gfx::Transform Layer::draw_transform_from_property_trees(
+    const TransformTree& tree) const {
+  gfx::Transform xform(1, 0, 0, 1, offset_to_transform_parent().x(),
+                       offset_to_transform_parent().y());
+  if (transform_tree_index() >= 0) {
+    const TransformNode* node = tree.Node(transform_tree_index());
+    gfx::Transform ssxform;
+    tree.ComputeTransform(node->id, node->data.target_id, &ssxform);
+    xform.ConcatTransform(ssxform);
+  }
+  xform.Scale(1.0 / contents_scale_x(), 1.0 / contents_scale_y());
+  return xform;
 }
 
 }  // namespace cc

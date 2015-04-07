@@ -25,7 +25,7 @@
 
 namespace blink {
 
-const WrapperTypeInfo V8TestInterfaceNode::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceNode::domTemplate, V8TestInterfaceNode::refObject, V8TestInterfaceNode::derefObject, V8TestInterfaceNode::trace, 0, V8TestInterfaceNode::toEventTarget, 0, V8TestInterfaceNode::installConditionallyEnabledMethods, V8TestInterfaceNode::installConditionallyEnabledProperties, &V8Node::wrapperTypeInfo, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::NodeClassId, WrapperTypeInfo::Dependent, WrapperTypeInfo::WillBeGarbageCollectedObject };
+const WrapperTypeInfo V8TestInterfaceNode::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterfaceNode::domTemplate, V8TestInterfaceNode::refObject, V8TestInterfaceNode::derefObject, V8TestInterfaceNode::trace, 0, 0, V8TestInterfaceNode::installConditionallyEnabledMethods, V8TestInterfaceNode::installConditionallyEnabledProperties, &V8Node::wrapperTypeInfo, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::NodeClassId, WrapperTypeInfo::InheritFromEventTarget, WrapperTypeInfo::Dependent, WrapperTypeInfo::WillBeGarbageCollectedObject };
 
 // This static member must be declared by DEFINE_WRAPPERTYPEINFO in TestInterfaceNode.h.
 // For details, see the comment of DEFINE_WRAPPERTYPEINFO in
@@ -36,7 +36,7 @@ namespace TestInterfaceNodeV8Internal {
 
 static void stringAttributeAttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceNode* impl = V8TestInterfaceNode::toImpl(holder);
     v8SetReturnValueString(info, impl->stringAttribute(), info.GetIsolate());
 }
@@ -50,7 +50,7 @@ static void stringAttributeAttributeGetterCallback(v8::Local<v8::String>, const 
 
 static void stringAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceNode* impl = V8TestInterfaceNode::toImpl(holder);
     TOSTRING_VOID(V8StringResource<>, cppValue, v8Value);
     impl->setStringAttribute(cppValue);
@@ -65,7 +65,7 @@ static void stringAttributeAttributeSetterCallback(v8::Local<v8::String>, v8::Lo
 
 static void readonlyTestInterfaceEmptyAttributeAttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceNode* impl = V8TestInterfaceNode::toImpl(holder);
     v8SetReturnValueFast(info, WTF::getPtr(impl->readonlyTestInterfaceEmptyAttribute()), impl);
 }
@@ -79,10 +79,10 @@ static void readonlyTestInterfaceEmptyAttributeAttributeGetterCallback(v8::Local
 
 static void eventHandlerAttributeAttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceNode* impl = V8TestInterfaceNode::toImpl(holder);
     EventListener* cppValue(impl->eventHandlerAttribute());
-    v8SetReturnValue(info, cppValue ? v8::Handle<v8::Value>(V8AbstractEventListener::cast(cppValue)->getListenerObject(impl->executionContext())) : v8::Handle<v8::Value>(v8::Null(info.GetIsolate())));
+    v8SetReturnValue(info, cppValue ? v8::Local<v8::Value>(V8AbstractEventListener::cast(cppValue)->getListenerObject(impl->executionContext())) : v8::Local<v8::Value>(v8::Null(info.GetIsolate())));
 }
 
 static void eventHandlerAttributeAttributeGetterCallback(v8::Local<v8::String>, const v8::PropertyCallbackInfo<v8::Value>& info)
@@ -94,7 +94,7 @@ static void eventHandlerAttributeAttributeGetterCallback(v8::Local<v8::String>, 
 
 static void eventHandlerAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceNode* impl = V8TestInterfaceNode::toImpl(holder);
     impl->setEventHandlerAttribute(V8EventListenerList::getEventListener(ScriptState::current(info.GetIsolate()), v8Value, true, ListenerFindOrCreate));
 }
@@ -108,7 +108,7 @@ static void eventHandlerAttributeAttributeSetterCallback(v8::Local<v8::String>, 
 
 static void perWorldBindingsReadonlyTestInterfaceEmptyAttributeAttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceNode* impl = V8TestInterfaceNode::toImpl(holder);
     v8SetReturnValueFast(info, WTF::getPtr(impl->perWorldBindingsReadonlyTestInterfaceEmptyAttribute()), impl);
 }
@@ -122,7 +122,7 @@ static void perWorldBindingsReadonlyTestInterfaceEmptyAttributeAttributeGetterCa
 
 static void perWorldBindingsReadonlyTestInterfaceEmptyAttributeAttributeGetterForMainWorld(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceNode* impl = V8TestInterfaceNode::toImpl(holder);
     v8SetReturnValueForMainWorld(info, WTF::getPtr(impl->perWorldBindingsReadonlyTestInterfaceEmptyAttribute()));
 }
@@ -136,7 +136,7 @@ static void perWorldBindingsReadonlyTestInterfaceEmptyAttributeAttributeGetterCa
 
 static void reflectStringAttributeAttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     Element* impl = V8Element::toImpl(holder);
     v8SetReturnValueString(info, impl->fastGetAttribute(HTMLNames::reflectstringattributeAttr), info.GetIsolate());
 }
@@ -150,7 +150,7 @@ static void reflectStringAttributeAttributeGetterCallback(v8::Local<v8::String>,
 
 static void reflectStringAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     Element* impl = V8Element::toImpl(holder);
     TOSTRING_VOID(V8StringResource<>, cppValue, v8Value);
     impl->setAttribute(HTMLNames::reflectstringattributeAttr, cppValue);
@@ -166,7 +166,7 @@ static void reflectStringAttributeAttributeSetterCallback(v8::Local<v8::String>,
 
 static void reflectUrlStringAttributeAttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceNode* impl = V8TestInterfaceNode::toImpl(holder);
     v8SetReturnValueString(info, impl->getURLAttribute(HTMLNames::reflecturlstringattributeAttr), info.GetIsolate());
 }
@@ -180,7 +180,7 @@ static void reflectUrlStringAttributeAttributeGetterCallback(v8::Local<v8::Strin
 
 static void reflectUrlStringAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     Element* impl = V8Element::toImpl(holder);
     TOSTRING_VOID(V8StringResource<>, cppValue, v8Value);
     impl->setAttribute(HTMLNames::reflecturlstringattributeAttr, cppValue);
@@ -292,16 +292,15 @@ static const V8DOMConfiguration::MethodConfiguration V8TestInterfaceNodeMethods[
     {"perWorldBindingsTestInterfaceEmptyMethodOptionalBooleanArg", TestInterfaceNodeV8Internal::perWorldBindingsTestInterfaceEmptyMethodOptionalBooleanArgMethodCallback, TestInterfaceNodeV8Internal::perWorldBindingsTestInterfaceEmptyMethodOptionalBooleanArgMethodCallbackForMainWorld, 0, V8DOMConfiguration::ExposedToAllScripts},
 };
 
-static void installV8TestInterfaceNodeTemplate(v8::Handle<v8::FunctionTemplate> functionTemplate, v8::Isolate* isolate)
+static void installV8TestInterfaceNodeTemplate(v8::Local<v8::FunctionTemplate> functionTemplate, v8::Isolate* isolate)
 {
     functionTemplate->ReadOnlyPrototype();
 
     v8::Local<v8::Signature> defaultSignature;
-    defaultSignature = V8DOMConfiguration::installDOMClassTemplate(functionTemplate, "TestInterfaceNode", V8Node::domTemplate(isolate), V8TestInterfaceNode::internalFieldCount,
+    defaultSignature = V8DOMConfiguration::installDOMClassTemplate(isolate, functionTemplate, "TestInterfaceNode", V8Node::domTemplate(isolate), V8TestInterfaceNode::internalFieldCount,
         V8TestInterfaceNodeAttributes, WTF_ARRAY_LENGTH(V8TestInterfaceNodeAttributes),
         0, 0,
-        V8TestInterfaceNodeMethods, WTF_ARRAY_LENGTH(V8TestInterfaceNodeMethods),
-        isolate);
+        V8TestInterfaceNodeMethods, WTF_ARRAY_LENGTH(V8TestInterfaceNodeMethods));
     v8::Local<v8::ObjectTemplate> instanceTemplate = functionTemplate->InstanceTemplate();
     ALLOW_UNUSED_LOCAL(instanceTemplate);
     v8::Local<v8::ObjectTemplate> prototypeTemplate = functionTemplate->PrototypeTemplate();
@@ -311,49 +310,38 @@ static void installV8TestInterfaceNodeTemplate(v8::Handle<v8::FunctionTemplate> 
     functionTemplate->Set(v8AtomicString(isolate, "toString"), V8PerIsolateData::from(isolate)->toStringTemplate());
 }
 
-v8::Handle<v8::FunctionTemplate> V8TestInterfaceNode::domTemplate(v8::Isolate* isolate)
+v8::Local<v8::FunctionTemplate> V8TestInterfaceNode::domTemplate(v8::Isolate* isolate)
 {
     return V8DOMConfiguration::domClassTemplate(isolate, const_cast<WrapperTypeInfo*>(&wrapperTypeInfo), installV8TestInterfaceNodeTemplate);
 }
 
-bool V8TestInterfaceNode::hasInstance(v8::Handle<v8::Value> v8Value, v8::Isolate* isolate)
+bool V8TestInterfaceNode::hasInstance(v8::Local<v8::Value> v8Value, v8::Isolate* isolate)
 {
     return V8PerIsolateData::from(isolate)->hasInstance(&wrapperTypeInfo, v8Value);
 }
 
-v8::Handle<v8::Object> V8TestInterfaceNode::findInstanceInPrototypeChain(v8::Handle<v8::Value> v8Value, v8::Isolate* isolate)
+v8::Local<v8::Object> V8TestInterfaceNode::findInstanceInPrototypeChain(v8::Local<v8::Value> v8Value, v8::Isolate* isolate)
 {
     return V8PerIsolateData::from(isolate)->findInstanceInPrototypeChain(&wrapperTypeInfo, v8Value);
 }
 
-TestInterfaceNode* V8TestInterfaceNode::toImplWithTypeCheck(v8::Isolate* isolate, v8::Handle<v8::Value> value)
+TestInterfaceNode* V8TestInterfaceNode::toImplWithTypeCheck(v8::Isolate* isolate, v8::Local<v8::Value> value)
 {
-    return hasInstance(value, isolate) ? blink::toScriptWrappableBase(v8::Handle<v8::Object>::Cast(value))->toImpl<TestInterfaceNode>() : 0;
+    return hasInstance(value, isolate) ? toImpl(v8::Local<v8::Object>::Cast(value)) : 0;
 }
 
-EventTarget* V8TestInterfaceNode::toEventTarget(v8::Handle<v8::Object> object)
-{
-    return toImpl(object);
-}
-
-void V8TestInterfaceNode::refObject(ScriptWrappableBase* scriptWrappableBase)
+void V8TestInterfaceNode::refObject(ScriptWrappable* scriptWrappable)
 {
 #if !ENABLE(OILPAN)
-    scriptWrappableBase->toImpl<TestInterfaceNode>()->ref();
+    scriptWrappable->toImpl<TestInterfaceNode>()->ref();
 #endif
 }
 
-void V8TestInterfaceNode::derefObject(ScriptWrappableBase* scriptWrappableBase)
+void V8TestInterfaceNode::derefObject(ScriptWrappable* scriptWrappable)
 {
 #if !ENABLE(OILPAN)
-    scriptWrappableBase->toImpl<TestInterfaceNode>()->deref();
+    scriptWrappable->toImpl<TestInterfaceNode>()->deref();
 #endif
-}
-
-template<>
-v8::Handle<v8::Value> toV8NoInline(TestInterfaceNode* impl, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
-{
-    return toV8(impl, creationContext, isolate);
 }
 
 } // namespace blink

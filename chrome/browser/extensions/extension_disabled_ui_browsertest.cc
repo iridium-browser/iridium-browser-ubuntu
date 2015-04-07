@@ -23,7 +23,6 @@
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/extension.h"
 #include "net/url_request/test_url_request_interceptor.h"
-#include "net/url_request/url_fetcher.h"
 #include "sync/protocol/extension_specifics.pb.h"
 #include "sync/protocol/sync.pb.h"
 
@@ -34,7 +33,7 @@ using extensions::ExtensionPrefs;
 
 class ExtensionDisabledGlobalErrorTest : public ExtensionBrowserTest {
  protected:
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     ExtensionBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitchASCII(switches::kAppsGalleryUpdateURL,
                                     "http://localhost/autoupdate/updates.xml");
@@ -153,45 +152,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionDisabledGlobalErrorTest, UserDisabled) {
   ASSERT_FALSE(GetExtensionDisabledGlobalError());
 }
 
-// Test that no error appears if the disable reason is unknown
-// (but probably was by the user).
-IN_PROC_BROWSER_TEST_F(ExtensionDisabledGlobalErrorTest,
-                       UnknownReasonSamePermissions) {
-  const Extension* extension = InstallIncreasingPermissionExtensionV1();
-  DisableExtension(extension->id());
-  // Clear disable reason to simulate legacy disables.
-  ExtensionPrefs::Get(browser()->profile())
-      ->ClearDisableReasons(extension->id());
-  // Upgrade to version 2. Infer from version 1 having the same permissions
-  // granted by the user that it was disabled by the user.
-  extension = UpdateIncreasingPermissionExtension(extension, path_v2_, 0);
-  ASSERT_TRUE(extension);
-  ASSERT_FALSE(GetExtensionDisabledGlobalError());
-}
-
-// Test that an error appears if the disable reason is unknown
-// (but probably was for increased permissions).
-IN_PROC_BROWSER_TEST_F(ExtensionDisabledGlobalErrorTest,
-                       UnknownReasonHigherPermissions) {
-  const Extension* extension = InstallAndUpdateIncreasingPermissionsExtension();
-  // Clear disable reason to simulate legacy disables.
-  ExtensionPrefs::Get(service_->profile())
-      ->ClearDisableReasons(extension->id());
-  // We now have version 2 but only accepted permissions for version 1.
-  GlobalError* error = GetExtensionDisabledGlobalError();
-  ASSERT_TRUE(error);
-  // Also, remove the upgrade error for version 2.
-  GlobalErrorServiceFactory::GetForProfile(browser()->profile())->
-      RemoveGlobalError(error);
-  delete error;
-  // Upgrade to version 3, with even higher permissions. Infer from
-  // version 2 having higher-than-granted permissions that it was disabled
-  // for permissions increase.
-  extension = UpdateIncreasingPermissionExtension(extension, path_v3_, 0);
-  ASSERT_TRUE(extension);
-  ASSERT_TRUE(GetExtensionDisabledGlobalError());
-}
-
 // Test that an error appears if the extension gets disabled because a
 // version with higher permissions was installed by sync.
 IN_PROC_BROWSER_TEST_F(ExtensionDisabledGlobalErrorTest,
@@ -214,7 +174,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionDisabledGlobalErrorTest,
       BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO),
       BrowserThread::GetBlockingPool()->GetTaskRunnerWithShutdownBehavior(
           base::SequencedWorkerPool::SKIP_ON_SHUTDOWN));
-  net::URLFetcher::SetEnableInterceptionForTests(true);
   interceptor.SetResponseIgnoreQuery(
       GURL("http://localhost/autoupdate/updates.xml"),
       test_data_dir_.AppendASCII("permissions_increase")
@@ -253,7 +212,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionDisabledGlobalErrorTest, RemoteInstall) {
       BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO),
       BrowserThread::GetBlockingPool()->GetTaskRunnerWithShutdownBehavior(
           base::SequencedWorkerPool::SKIP_ON_SHUTDOWN));
-  net::URLFetcher::SetEnableInterceptionForTests(true);
   interceptor.SetResponseIgnoreQuery(
       GURL("http://localhost/autoupdate/updates.xml"),
       test_data_dir_.AppendASCII("permissions_increase")

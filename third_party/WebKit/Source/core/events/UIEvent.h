@@ -26,18 +26,13 @@
 
 #include "core/events/Event.h"
 #include "core/events/EventDispatchMediator.h"
-#include "core/frame/LocalDOMWindow.h"
+#include "core/events/UIEventInit.h"
+#include "core/frame/DOMWindow.h"
 
 namespace blink {
 
-typedef LocalDOMWindow AbstractView;
-
-struct UIEventInit : public EventInit {
-    UIEventInit();
-
-    RefPtrWillBeMember<AbstractView> view;
-    int detail;
-};
+// FIXME: Get rid of this typedef.
+typedef DOMWindow AbstractView;
 
 class UIEvent : public Event {
     DEFINE_WRAPPERTYPEINFO();

@@ -22,6 +22,7 @@
 #include <list>
 #include <map>
 
+#include "webrtc/base/thread_annotations.h"
 #include "webrtc/modules/video_render/include/video_render_defines.h"
 
 #import "webrtc/modules/video_render/mac/cocoa_full_screen_window.h"
@@ -46,7 +47,8 @@ public:
     // A new frame is delivered
     virtual int DeliverFrame(const I420VideoFrame& videoFrame);
 
-    // Called when the incomming frame size and/or number of streams in mix changes
+    // Called when the incoming frame size and/or number of streams in mix
+    // changes.
     virtual int FrameSizeChange(int width, int height, int numberOfStreams);
 
     virtual int UpdateSize(int width, int height);
@@ -89,8 +91,8 @@ private:
     int _oldStretchedHeight;
     int _oldStretchedWidth;
     unsigned char* _buffer;
-    int _bufferSize;
-    int _incommingBufferSize;
+    size_t _bufferSize;
+    size_t _incomingBufferSize;
     bool _bufferIsUpdated;
     int _numberOfStreams;
     GLenum _pixelFormat;
@@ -118,8 +120,8 @@ public: // methods
     bool HasChannels();
     bool HasChannel(int channel);
     int GetChannels(std::list<int>& channelList);
-    void LockAGLCntx();
-    void UnlockAGLCntx();
+    void LockAGLCntx() EXCLUSIVE_LOCK_FUNCTION(_nsglContextCritSec);
+    void UnlockAGLCntx() UNLOCK_FUNCTION(_nsglContextCritSec);
 
     // ********** new module functions ************ //
     int ChangeWindow(CocoaRenderView* newWindowRef);

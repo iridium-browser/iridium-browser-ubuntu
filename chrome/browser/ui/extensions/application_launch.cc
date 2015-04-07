@@ -24,6 +24,7 @@
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/features/feature.h"
 #include "extensions/common/features/feature_provider.h"
@@ -143,9 +144,6 @@ WebContents* OpenEnabledApplication(const AppLaunchParams& params) {
   ExtensionPrefs* prefs = ExtensionPrefs::Get(profile);
   prefs->SetActiveBit(extension->id(), true);
 
-  UMA_HISTOGRAM_ENUMERATION(
-      "Extensions.AppLaunchContainer", params.container, 100);
-
   if (CanLaunchViaEvent(extension)) {
     // Remember what desktop the launch happened on so that when the app opens a
     // window we can open them on the right desktop.
@@ -159,6 +157,10 @@ WebContents* OpenEnabledApplication(const AppLaunchParams& params) {
                                            params.source);
     return NULL;
   }
+
+  UMA_HISTOGRAM_ENUMERATION("Extensions.HostedAppLaunchContainer",
+                            params.container,
+                            extensions::NUM_LAUNCH_CONTAINERS);
 
   // Record v1 app launch. Platform app launch is recorded when dispatching
   // the onLaunched event.
@@ -220,11 +222,10 @@ void OpenApplicationWithReenablePrompt(const AppLaunchParams& params) {
 
 WebContents* OpenAppShortcutWindow(Profile* profile,
                                    const GURL& url) {
-  AppLaunchParams launch_params(
-      profile,
-      NULL,  // this is a URL app.  No extension.
-      extensions::LAUNCH_CONTAINER_WINDOW,
-      NEW_WINDOW);
+  AppLaunchParams launch_params(profile,
+                                NULL,  // this is a URL app.  No extension.
+                                extensions::LAUNCH_CONTAINER_WINDOW, NEW_WINDOW,
+                                extensions::SOURCE_COMMAND_LINE);
   launch_params.override_url = url;
 
   WebContents* tab = OpenWebAppWindow(launch_params, url);
@@ -238,8 +239,7 @@ WebContents* OpenAppShortcutWindow(Profile* profile,
 }
 
 bool CanLaunchViaEvent(const extensions::Extension* extension) {
-  const extensions::FeatureProvider* feature_provider =
-      extensions::FeatureProvider::GetAPIFeatures();
-  extensions::Feature* feature = feature_provider->GetFeature("app.runtime");
+  const extensions::Feature* feature =
+      extensions::FeatureProvider::GetAPIFeature("app.runtime");
   return feature->IsAvailableToExtension(extension).is_available();
 }

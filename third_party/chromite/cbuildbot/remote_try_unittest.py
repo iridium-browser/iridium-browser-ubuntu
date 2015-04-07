@@ -8,7 +8,6 @@
 from __future__ import print_function
 
 import json
-import mox
 import os
 import sys
 import shutil
@@ -23,17 +22,20 @@ from chromite.cbuildbot import remote_try
 from chromite.cbuildbot import repository
 from chromite.scripts import cbuildbot
 
+
 class RemoteTryJobMock(remote_try.RemoteTryJob):
   """Helper for Mocking out a RemoteTryJob."""
 
-# pylint: disable=W0212,R0904,E1101
-class RemoteTryTests(cros_test_lib.MoxTempDirTestCase):
+
+@cros_test_lib.NetworkTest()
+class RemoteTryTests(cros_test_lib.MockTempDirTestCase):
   """Test cases related to remote try jobs."""
 
   PATCHES = ('5555', '6666')
   BOTS = ('x86-generic-paladin', 'arm-generic-paladin')
 
   def setUp(self):
+    # pylint: disable=protected-access
     self.parser = cbuildbot._CreateParser()
     args = ['-r', '/tmp/test_build1', '-g', '5555', '-g',
             '6666', '--remote']
@@ -118,9 +120,7 @@ class RemoteTryTests(cros_test_lib.MoxTempDirTestCase):
       work_dir = os.path.join(self.tempdir, dirname)
       return os.path.basename(self._SubmitJob(work_dir, job))
 
-    self.mox.StubOutWithMock(repository, 'IsARepoRoot')
-    repository.IsARepoRoot(mox.IgnoreArg()).AndReturn(False)
-    self.mox.ReplayAll()
+    self.PatchObject(repository, 'IsARepoRoot', return_value=False)
     job = self._CreateJob()
 
     file1 = submit_helper('test1')
@@ -132,12 +132,9 @@ class RemoteTryTests(cros_test_lib.MoxTempDirTestCase):
 
   def testSimpleTryJob(self, version=None):
     """Test that a tryjob spec file is created and pushed properly."""
-    self.mox.StubOutWithMock(repository, 'IsARepoRoot')
-    repository.IsARepoRoot(mox.IgnoreArg()).AndReturn(True)
-    self.mox.StubOutWithMock(repository, 'IsInternalRepoCheckout')
-    repository.IsInternalRepoCheckout(mox.IgnoreArg()).AndReturn(False)
+    self.PatchObject(repository, 'IsARepoRoot', return_value=True)
+    self.PatchObject(repository, 'IsInternalRepoCheckout', return_value=False)
 
-    self.mox.ReplayAll()
     try:
       os.environ["GIT_AUTHOR_EMAIL"] = "Elmer Fudd <efudd@google.com>"
       os.environ["GIT_COMMITTER_EMAIL"] = "Elmer Fudd <efudd@google.com>"
@@ -153,8 +150,8 @@ class RemoteTryTests(cros_test_lib.MoxTempDirTestCase):
 
     for patch in self.PATCHES:
       self.assertTrue(patch in values['extra_args'],
-                      msg="expected patch %s in args %s" %
-                          (patch, values['extra_args']))
+                      msg=("expected patch %s in args %s" %
+                           (patch, values['extra_args'])))
 
     self.assertTrue(set(self.BOTS).issubset(values['bot']))
 
@@ -171,12 +168,9 @@ class RemoteTryTests(cros_test_lib.MoxTempDirTestCase):
 
   def testInternalTryJob(self):
     """Verify internal tryjobs are pushed properly."""
-    self.mox.StubOutWithMock(repository, 'IsARepoRoot')
-    repository.IsARepoRoot(mox.IgnoreArg()).AndReturn(True)
-    self.mox.StubOutWithMock(repository, 'IsInternalRepoCheckout')
-    repository.IsInternalRepoCheckout(mox.IgnoreArg()).AndReturn(True)
+    self.PatchObject(repository, 'IsARepoRoot', return_value=True)
+    self.PatchObject(repository, 'IsInternalRepoCheckout', return_value=True)
 
-    self.mox.ReplayAll()
     job = self._CreateJob()
     self._SubmitJob(self.checkout_dir, job)
 
@@ -187,11 +181,10 @@ class RemoteTryTests(cros_test_lib.MoxTempDirTestCase):
 
   def testBareTryJob(self):
     """Verify submitting a tryjob from just a chromite checkout works."""
-    self.mox.StubOutWithMock(repository, 'IsARepoRoot')
-    repository.IsARepoRoot(mox.IgnoreArg()).AndReturn(False)
-    self.mox.StubOutWithMock(repository, 'IsInternalRepoCheckout')
+    self.PatchObject(repository, 'IsARepoRoot', return_value=False)
+    self.PatchObject(repository, 'IsInternalRepoCheckout',
+                     side_effect=Exception('should not be called'))
 
-    self.mox.ReplayAll()
     job = self._CreateJob(mirror=False)
     self.assertEqual(job.repo_url, remote_try.RemoteTryJob.EXTERNAL_URL)
 

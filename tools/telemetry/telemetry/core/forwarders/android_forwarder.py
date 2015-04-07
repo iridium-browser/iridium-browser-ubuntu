@@ -18,8 +18,10 @@ from telemetry.util import support_binaries
 util.AddDirToPythonPath(util.GetChromiumSrcDir(), 'build', 'android')
 try:
   from pylib import forwarder  # pylint: disable=F0401
-except Exception:
+except ImportError:
   forwarder = None
+
+from pylib.device import device_errors  # pylint: disable=F0401
 
 
 class AndroidForwarderFactory(forwarders.ForwarderFactory):
@@ -131,7 +133,7 @@ class AndroidRndisForwarder(forwarders.Forwarder):
     self._adb.device().SetProp('net.dns2', dns2)
     dnschange = self._adb.device().GetProp('net.dnschange')
     if dnschange:
-      self._adb.device().SetProp('net.dnschange', int(dnschange) + 1)
+      self._adb.device().SetProp('net.dnschange', str(int(dnschange) + 1))
     # Since commit 8b47b3601f82f299bb8c135af0639b72b67230e6 to frameworks/base
     # the net.dns1 properties have been replaced with explicit commands for netd
     self._adb.RunShellCommand('netd resolver setifdns %s %s %s' %
@@ -242,8 +244,29 @@ class AndroidRndisConfigurator(object):
         ['/usr/bin/sudo', 'bash', '-c',
          'echo -e "%s" > %s' % (contents, file_path)])
 
+  def _LoadInstalledHoRNDIS(self):
+    """Attempt to load HoRNDIS if installed.
+    If kext could not be loaded or if HoRNDIS is not installed, return False.
+    """
+    if not os.path.isdir('/System/Library/Extensions/HoRNDIS.kext'):
+      logging.info('HoRNDIS not present on system.')
+      return False
+
+    def HoRNDISLoaded():
+      return 'HoRNDIS' in subprocess.check_output(['kextstat'])
+
+    if HoRNDISLoaded():
+      return True
+
+    logging.info('HoRNDIS installed but not running, trying to load manually.')
+    subprocess.check_call(
+        ['/usr/bin/sudo', 'kextload', '-b', 'com.joshuawise.kexts.HoRNDIS'])
+
+    return HoRNDISLoaded()
+
   def _InstallHorndis(self, arch_name):
-    if 'HoRNDIS' in subprocess.check_output(['kextstat']):
+    if self._LoadInstalledHoRNDIS():
+      logging.info('HoRNDIS kext loaded successfully.')
       return
     logging.info('Installing HoRNDIS...')
     pkg_path = support_binaries.FindPath('HoRNDIS-rel5.pkg', arch_name, 'mac')
@@ -251,7 +274,11 @@ class AndroidRndisConfigurator(object):
         ['/usr/bin/sudo', 'installer', '-pkg', pkg_path, '-target', '/'])
 
   def _DisableRndis(self):
-    self._device.SetProp('sys.usb.config', 'adb')
+    try:
+      self._device.SetProp('sys.usb.config', 'adb')
+    except device_errors.AdbCommandFailedError:
+      # Ignore exception due to USB connection being reset.
+      pass
     self._WaitForDevice()
 
   def _EnableRndis(self):
@@ -289,7 +316,7 @@ function doit() {
 
 doit &
     """ % {'dev': self._RNDIS_DEVICE, 'functions': 'rndis,adb',
-           'prefix': script_prefix }
+           'prefix': script_prefix}
     self._device.WriteFile('%s.sh' % script_prefix, script)
     # TODO(szym): run via su -c if necessary.
     self._device.RunShellCommand('rm %s.log' % script_prefix)
@@ -337,13 +364,13 @@ doit &
     for line in interface_list:
       if not line.startswith((' ', '\t')):
         found_iface = iface in line
-      match = re.search('(?<=inet )\S+', line)
+      match = re.search(r'(?<=inet )\S+', line)
       if match:
         address = match.group(0)
         if '/' in address:
           address = self._IpPrefix2AddressMask(address)
         else:
-          match = re.search('(?<=netmask )\S+', line)
+          match = re.search(r'(?<=netmask )\S+', line)
           address = self._Ip2Long(address), int(match.group(0), 16)
         if found_iface:
           assert not iface_address, (
@@ -427,12 +454,12 @@ doit &
           self._WriteProtectedFile(interface_conf_file, interface_conf)
           subprocess.check_call(['/usr/bin/sudo', 'ifup', host_iface])
       logging.info('Waiting for RNDIS connectivity...')
-      util.WaitFor(HasHostAddress, 10)
+      util.WaitFor(HasHostAddress, 30)
 
     addresses, host_address = self._GetHostAddresses(host_iface)
     assert host_address, 'Interface %s could not be configured.' % host_iface
 
-    host_ip, netmask = host_address
+    host_ip, netmask = host_address  # pylint: disable=unpacking-non-sequence
     network = host_ip & netmask
 
     if not _IsNetworkUnique(network, addresses):
@@ -478,7 +505,7 @@ doit &
     packets from reaching the rndis interface
     """
     policies = self._device.RunShellCommand('ip rule')
-    if len(policies) > 1 and not ('lookup main' in policies[1]):
+    if len(policies) > 1 and not 'lookup main' in policies[1]:
       self._device.RunShellCommand('ip rule add prio 1 from all table main')
       self._device.RunShellCommand('ip route flush cache')
 
@@ -495,8 +522,10 @@ doit &
       device_iface, host_iface = self._CheckEnableRndis(force)
       self._ConfigureNetwork(device_iface, host_iface)
       self.OverrideRoutingPolicy()
-      if self._TestConnectivity():
-        return
+      # Sometimes the first packet will wake up the connection.
+      for _ in range(3):
+        if self._TestConnectivity():
+          return
       force = True
     self.RestoreRoutingPolicy()
     raise Exception('No connectivity, giving up.')

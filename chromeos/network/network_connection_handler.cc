@@ -91,7 +91,7 @@ std::string GetDefaultUserProfilePath(const NetworkState* network) {
       (LoginState::IsInitialized() &&
        !LoginState::Get()->UserHasNetworkProfile()) ||
       (network && network->type() == shill::kTypeWifi &&
-       network->security() == shill::kSecurityNone)) {
+       network->security_class() == shill::kSecurityNone)) {
     return NetworkProfileHandler::GetSharedProfilePath();
   }
   const NetworkProfile* profile  =
@@ -211,7 +211,6 @@ void NetworkConnectionHandler::LoggedInStateChanged() {
   if (logged_in_ || !login_state->IsUserLoggedIn())
     return;
 
-  NET_LOG_EVENT("Logged In", "");
   logged_in_ = true;
   logged_in_time_ = base::TimeTicks::Now();
 }
@@ -368,10 +367,10 @@ void NetworkConnectionHandler::VerifyConfiguredAndConnect(
     return;
   }
 
-  std::string type, security;
+  std::string type, security_class;
   service_properties.GetStringWithoutPathExpansion(shill::kTypeProperty, &type);
   service_properties.GetStringWithoutPathExpansion(
-      shill::kSecurityProperty, &security);
+      shill::kSecurityClassProperty, &security_class);
   bool connectable = false;
   service_properties.GetBooleanWithoutPathExpansion(
       shill::kConnectableProperty, &connectable);
@@ -437,7 +436,8 @@ void NetworkConnectionHandler::VerifyConfiguredAndConnect(
         client_cert_type = client_cert::CONFIG_TYPE_IPSEC;
       }
     }
-  } else if (type == shill::kTypeWifi && security == shill::kSecurity8021x) {
+  } else if (type == shill::kTypeWifi &&
+             security_class == shill::kSecurity8021x) {
     client_cert_type = client_cert::CONFIG_TYPE_EAP;
   }
 
@@ -503,6 +503,7 @@ void NetworkConnectionHandler::VerifyConfiguredAndConnect(
     configuration_handler_->SetProperties(
         service_path,
         config_properties,
+        NetworkConfigurationObserver::SOURCE_USER_ACTION,
         base::Bind(&NetworkConnectionHandler::CallShillConnect,
                    AsWeakPtr(),
                    service_path),
@@ -670,6 +671,7 @@ void NetworkConnectionHandler::CheckPendingRequest(
       configuration_handler_->SetNetworkProfile(
           service_path,
           request->profile_path,
+          NetworkConfigurationObserver::SOURCE_USER_ACTION,
           base::Bind(&base::DoNothing),
           chromeos::network_handler::ErrorCallback());
     }

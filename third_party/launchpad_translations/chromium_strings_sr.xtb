@@ -41,7 +41,6 @@
 <translation id="3883381313049582448">Користите лозинку коју је Chromium генерисао</translation>
 <translation id="3549345495227188780">Почетни кораци за Chromium ОС</translation>
 <translation id="1668054258064581266">Када уклоните налог из Chromium-а, можда ћете морати поново да учитате отворене картице да би то ступило на снагу.</translation>
-<translation id="6953661834318318668">Chromium трака с алаткама</translation>
 <translation id="4285930937574705105">Инсталација није успела због неодређене грешке. Ако је Chromium тренутно отворен, затворите га и покушајте поново.</translation>
 <translation id="1396446129537741364">Chromium покушава да прикаже лозинке.</translation>
 <translation id="8987477933582888019">Веб-прегледач</translation>
@@ -96,6 +95,7 @@
 <translation id="7473891865547856676">Не, хвала</translation>
 <translation id="9191268552238695869">Администратор је инсталирао Chromium у овом систему и он је доступан за све кориснике. Chromium на нивоу система ће сада заменити инсталацију на нивоу корисника.</translation>
 <translation id="3509308970982693815">Затворите све Chromium прозоре и покушајте поново.</translation>
+<translation id="8851136666856101339">main</translation>
 <translation id="4077262827416206768">Затворите све Chromium прозоре и рестартујте Chromium да би ова промена ступила на снагу.</translation>
 <translation id="6475912303565314141">Контролише и страницу која се приказује када покренете Chromium.</translation>
 <translation id="1725059042853530269">Датотека <ph name="FILE_NAME"/> може негативно да утиче на доживљај прегледања, па ју је Chromium блокирао.</translation>
@@ -159,6 +159,7 @@
 <translation id="5909170354645388250">Не користи се у Chromium-у. Резервисано место за очување синхронизације мапа ресурса. Очекује један аргумент: $1.</translation>
 <translation id="1144202035120576837"><ph name="SITE"/> нормално шифровањем штити ваше информације. Када је Chromium овај пут покушао да се повеже на <ph name="SITE"/>, веб-сајт је вратио неуобичајене
 и нетачне акредитиве. То значи или да се неки нападач претвара да је <ph name="SITE"/> или да је екран за пријављивање на Wi-Fi прекинуо везу. Ваше информације су и даље безбедне јер је Chromium прекинуо везу пре било какве размене података.</translation>
+<translation id="2316129865977710310">Не, хвала</translation>
 <translation id="7937630085815544518">Били сте пријављени на Chromium као <ph name="USER_EMAIL_ADDRESS"/>. Користите исти налог да бисте се поново пријавили.</translation>
 <translation id="2685838254101182273">Chromium је престао да се ажурира и не подржава више ову верзију оперативног система.</translation>
 <translation id="8684913864886094367">Chromium се није исправно затворио.</translation>
@@ -172,6 +173,7 @@
 <translation id="2648074677641340862">Током инсталације је дошло до грешке у оперативном систему. Преузмите Chromium поново.</translation>
 <translation id="5942520288919337908">Додатак <ph name="EXTENSION_NAME"/> је додат у Chromium.</translation>
 <translation id="549669000822060376">Сачекајте да Chromium инсталира најновија ажурирања система.</translation>
+<translation id="1240763998429950591">Chromium није успео да се ажурира на најновију верзију, па пропуштате нове функције и безбедносне исправке. Треба да ажурирате Chromium.</translation>
 <translation id="6930860321615955692">https://support.google.com/chrome/?p=ib_chromeframe</translation>
 <translation id="3281987435599047980">шаље реч и околни контекст Google претрази, а приказује дефиниције, слике, резултате претраге и друге детаље.</translation>
 <translation id="4559775032954821361">Идите у
@@ -209,6 +211,7 @@
 <translation id="2966088006374919794">Chromium мора да покрене спољну апликацију ради обраде <ph name="SCHEME"/> веза. Захтевана веза је <ph name="PROTOLINK"/>.</translation>
 <translation id="2558235863893655150">Да ли желите да Chromium сачува лозинку?</translation>
 <translation id="6485906693002546646">Користите <ph name="PROFILE_EMAIL"/> за синхронизацију Chromium садржаја. Да бисте ажурирали подешавање синхронизације или користили Chromium без Google налога, посетите <ph name="SETTINGS_LINK"/>.</translation>
+<translation id="705851970750939768">Ажурирај Chromium</translation>
 <translation id="5772805321386874569">(захтева <ph name="BEGIN_BUTTON"/>поновно покретање<ph name="END_BUTTON"/> Chromium-а)</translation>
 <translation id="1688750314291223739">Подесите Синхронизацију како бисте сачували персонализоване функције прегледача на Веб и приступали им из Chromium-а на било ком рачунару.</translation>
 <translation id="8610831143142469229">Дозволите Chromium-у да приступа мрежи у заштитном зиду или антивирусним

@@ -62,6 +62,8 @@
         'app/chrome_exe_main_mac.cc',
         'app/chrome_exe_main_win.cc',
         'app/chrome_exe_resource.h',
+        'app/chrome_watcher_command_line_win.cc',
+        'app/chrome_watcher_command_line_win.h',
         'app/client_util.cc',
         'app/client_util.h',
         'app/signature_validator_win.cc',
@@ -97,6 +99,12 @@
                 '-Wl,-section-ordering-file=<(order_text_section)' ],
             }],
           ]
+        }],
+        ['OS == "win"', {
+          'dependencies': [
+            'chrome_watcher',
+            '../components/components.gyp:browser_watcher_client',
+          ],
         }],
         ['OS == "android"', {
           # Don't put the 'chrome' target in 'all' on android
@@ -448,12 +456,6 @@
         }],
         ['chrome_multiple_dll', {
           'defines': ['CHROME_MULTIPLE_DLL'],
-        }],
-        ['OS=="mac" and asan==1', {
-          'xcode_settings': {
-            # Override the outer definition of CHROMIUM_STRIP_SAVE_FILE.
-            'CHROMIUM_STRIP_SAVE_FILE': 'app/app_asan.saves',
-          },
         }],
         ['OS=="linux"', {
           'conditions': [

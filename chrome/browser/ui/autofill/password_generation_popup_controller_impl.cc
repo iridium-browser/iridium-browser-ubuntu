@@ -28,7 +28,7 @@
 #include "content/public/browser/web_contents.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/events/keycodes/keyboard_codes.h"
-#include "ui/gfx/rect_conversions.h"
+#include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/text_utils.h"
 
 #if defined(OS_ANDROID)
@@ -44,6 +44,7 @@ PasswordGenerationPopupControllerImpl::GetOrCreate(
     const PasswordForm& form,
     int max_length,
     password_manager::PasswordManager* password_manager,
+    password_manager::PasswordManagerDriver* driver,
     PasswordGenerationPopupObserver* observer,
     content::WebContents* web_contents,
     gfx::NativeView container_view) {
@@ -59,13 +60,8 @@ PasswordGenerationPopupControllerImpl::GetOrCreate(
 
   PasswordGenerationPopupControllerImpl* controller =
       new PasswordGenerationPopupControllerImpl(
-          bounds,
-          form,
-          max_length,
-          password_manager,
-          observer,
-          web_contents,
-          container_view);
+          bounds, form, max_length, password_manager, driver, observer,
+          web_contents, container_view);
   return controller->GetWeakPtr();
 }
 
@@ -74,12 +70,14 @@ PasswordGenerationPopupControllerImpl::PasswordGenerationPopupControllerImpl(
     const PasswordForm& form,
     int max_length,
     password_manager::PasswordManager* password_manager,
+    password_manager::PasswordManagerDriver* driver,
     PasswordGenerationPopupObserver* observer,
     content::WebContents* web_contents,
     gfx::NativeView container_view)
     : view_(NULL),
       form_(form),
       password_manager_(password_manager),
+      driver_(driver),
       observer_(observer),
       generator_(new PasswordGenerator(max_length)),
       controller_common_(bounds, container_view, web_contents),
@@ -151,11 +149,8 @@ void PasswordGenerationPopupControllerImpl::PasswordAccepted() {
   if (!display_password_)
     return;
 
-  web_contents()->GetRenderViewHost()->Send(
-      new AutofillMsg_GeneratedPasswordAccepted(
-          web_contents()->GetRenderViewHost()->GetRoutingID(),
-          current_password_));
-  password_manager_->SetFormHasGeneratedPassword(form_);
+  driver_->GeneratedPasswordAccepted(current_password_);
+  password_manager_->SetFormHasGeneratedPassword(driver_, form_);
   Hide();
 }
 

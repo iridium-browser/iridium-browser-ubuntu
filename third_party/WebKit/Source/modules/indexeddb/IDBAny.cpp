@@ -44,11 +44,6 @@ IDBAny* IDBAny::createNull()
     return new IDBAny(NullType);
 }
 
-IDBAny* IDBAny::createString(const String& value)
-{
-    return new IDBAny(value);
-}
-
 IDBAny::IDBAny(Type type)
     : m_type(type)
     , m_integer(0)
@@ -104,12 +99,6 @@ IDBObjectStore* IDBAny::idbObjectStore() const
     return m_idbObjectStore.get();
 }
 
-IDBTransaction* IDBAny::idbTransaction() const
-{
-    ASSERT(m_type == IDBTransactionType);
-    return m_idbTransaction.get();
-}
-
 const IDBKey* IDBAny::key() const
 {
     ASSERT(m_type == KeyType || m_type == BufferKeyAndKeyPathType);
@@ -132,12 +121,6 @@ const Vector<WebBlobInfo>* IDBAny::blobInfo() const
 {
     ASSERT(m_type == BufferType || m_type == BufferKeyAndKeyPathType);
     return m_blobInfo;
-}
-
-const String& IDBAny::string() const
-{
-    ASSERT(m_type == StringType);
-    return m_string;
 }
 
 int64_t IDBAny::integer() const
@@ -170,13 +153,6 @@ IDBAny::IDBAny(IDBDatabase* value)
 IDBAny::IDBAny(IDBIndex* value)
     : m_type(IDBIndexType)
     , m_idbIndex(value)
-    , m_integer(0)
-{
-}
-
-IDBAny::IDBAny(IDBTransaction* value)
-    : m_type(IDBTransactionType)
-    , m_idbTransaction(value)
     , m_integer(0)
 {
 }
@@ -220,13 +196,6 @@ IDBAny::IDBAny(const IDBKeyPath& value)
 {
 }
 
-IDBAny::IDBAny(const String& value)
-    : m_type(StringType)
-    , m_string(value)
-    , m_integer(0)
-{
-}
-
 IDBAny::IDBAny(int64_t value)
     : m_type(IntegerType)
     , m_integer(value)
@@ -240,7 +209,6 @@ void IDBAny::trace(Visitor* visitor)
     visitor->trace(m_idbDatabase);
     visitor->trace(m_idbIndex);
     visitor->trace(m_idbObjectStore);
-    visitor->trace(m_idbTransaction);
     visitor->trace(m_idbKey);
 }
 

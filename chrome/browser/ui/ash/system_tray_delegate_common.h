@@ -39,6 +39,7 @@ class SystemTrayDelegateCommon : public ash::SystemTrayDelegate,
   const base::string16 GetSupervisedUserManagerName() const override;
   const base::string16 GetSupervisedUserMessage() const override;
   bool IsUserSupervised() const override;
+  bool IsUserChild() const override;
   void GetSystemUpdateInfo(ash::UpdateInfo* info) const override;
   base::HourClockType GetHourClockType() const override;
   void ShowSettings() override;
@@ -58,10 +59,6 @@ class SystemTrayDelegateCommon : public ash::SystemTrayDelegate,
   void ShowSupervisedUserInfo() override;
   void ShowEnterpriseInfo() override;
   void ShowUserLogin() override;
-  bool ShowSpringChargerReplacementDialog() override;
-  bool IsSpringChargerReplacementDialogVisible() override;
-  bool HasUserConfirmedSafeSpringCharger() override;
-  void ShutDown() override;
   void SignOut() override;
   void RequestLockScreen() override;
   void RequestRestartForUpdate() override;

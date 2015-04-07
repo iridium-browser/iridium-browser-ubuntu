@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
@@ -37,12 +38,15 @@
 #include "grit/browser_resources.h"
 
 #if defined(OS_CHROMEOS)
+#include "base/sys_info.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_key_manager.h"
+#include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_tpm_key_manager.h"
+#include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_tpm_key_manager_factory.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
-#include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power_manager_client.h"
+#include "components/user_manager/user_manager.h"
 #endif
 
 namespace {
@@ -81,8 +85,8 @@ EasyUnlockService* EasyUnlockService::GetForUser(
 
 // static
 bool EasyUnlockService::IsSignInEnabled() {
-  return !CommandLine::ForCurrentProcess()->HasSwitch(
-      proximity_auth::switches::kDisableEasySignin);
+  return !base::CommandLine::ForCurrentProcess()->HasSwitch(
+      proximity_auth::switches::kDisableEasyUnlock);
 }
 
 class EasyUnlockService::BluetoothDetector
@@ -147,6 +151,18 @@ class EasyUnlockService::PowerMonitor
         RemoveObserver(this);
   }
 
+  // Called when the remote device has been authenticated to record the time
+  // delta from waking up. No time will be recorded if the start-up time has
+  // already been recorded or if the system never went to sleep previously.
+  void RecordStartUpTime() {
+    if (wake_up_time_.is_null())
+      return;
+    UMA_HISTOGRAM_MEDIUM_TIMES(
+        "EasyUnlock.StartupTimeFromSuspend",
+        base::Time::Now() - wake_up_time_);
+    wake_up_time_ = base::Time();
+  }
+
   bool waking_up() const { return waking_up_; }
 
  private:
@@ -157,6 +173,7 @@ class EasyUnlockService::PowerMonitor
 
   virtual void SuspendDone(const base::TimeDelta& sleep_duration) override {
     waking_up_ = true;
+    wake_up_time_ = base::Time::Now();
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&PowerMonitor::ResetWakingUp,
@@ -173,6 +190,7 @@ class EasyUnlockService::PowerMonitor
 
   EasyUnlockService* service_;
   bool waking_up_;
+  base::Time wake_up_time_;
   base::WeakPtrFactory<PowerMonitor> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PowerMonitor);
@@ -183,6 +201,7 @@ EasyUnlockService::EasyUnlockService(Profile* profile)
     : profile_(profile),
       bluetooth_detector_(new BluetoothDetector(this)),
       shut_down_(false),
+      tpm_key_checked_(false),
       weak_ptr_factory_(this) {
   extensions::ExtensionSystem::Get(profile_)->ready().Post(
       FROM_HERE,
@@ -217,6 +236,9 @@ void EasyUnlockService::RegisterProfilePrefs(
 // static
 void EasyUnlockService::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterDictionaryPref(prefs::kEasyUnlockHardlockState);
+#if defined(OS_CHROMEOS)
+  EasyUnlockTpmKeyManager::RegisterLocalStatePrefs(registry);
+#endif
 }
 
 // static
@@ -229,13 +251,17 @@ void EasyUnlockService::ResetLocalStateForUser(const std::string& user_id) {
 
   DictionaryPrefUpdate update(local_state, prefs::kEasyUnlockHardlockState);
   update->RemoveWithoutPathExpansion(user_id, NULL);
+
+#if defined(OS_CHROMEOS)
+  EasyUnlockTpmKeyManager::ResetLocalStateForUser(user_id);
+#endif
 }
 
 bool EasyUnlockService::IsAllowed() {
   if (shut_down_)
     return false;
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           proximity_auth::switches::kDisableEasyUnlock)) {
     return false;
   }
@@ -333,8 +359,14 @@ bool EasyUnlockService::UpdateScreenlockState(
 
   handler->ChangeState(state);
 
-  if (state != EasyUnlockScreenlockStateHandler::STATE_AUTHENTICATED &&
-      auth_attempt_.get()) {
+  if (state == EasyUnlockScreenlockStateHandler::STATE_AUTHENTICATED) {
+#if defined(OS_CHROMEOS)
+    if (power_monitor_)
+      power_monitor_->RecordStartUpTime();
+#endif
+  } else if (auth_attempt_.get()) {
+    // Clean up existing auth attempt if we can no longer authenticate the
+    // remote device.
     auth_attempt_.reset();
 
     if (!handler->InStateValidOnRemoteAuthFailure())
@@ -465,6 +497,15 @@ void  EasyUnlockService::Shutdown() {
 void EasyUnlockService::LoadApp() {
   DCHECK(IsAllowed());
 
+#if defined(OS_CHROMEOS)
+  // TODO(xiyuan): Remove this when the app is bundled with chrome.
+  if (!base::SysInfo::IsRunningOnChromeOS() &&
+      !base::CommandLine::ForCurrentProcess()->HasSwitch(
+          proximity_auth::switches::kForceLoadEasyUnlockAppInTests)) {
+    return;
+  }
+#endif
+
 #if defined(GOOGLE_CHROME_BUILD)
   base::FilePath easy_unlock_path;
 #if defined(OS_CHROMEOS)
@@ -473,7 +514,8 @@ void EasyUnlockService::LoadApp() {
 
 #ifndef NDEBUG
   // Only allow app path override switch for debug build.
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
+  const base::CommandLine* command_line =
+      base::CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kEasyUnlockAppPath)) {
     easy_unlock_path =
         command_line->GetSwitchValuePath(switches::kEasyUnlockAppPath);
@@ -524,6 +566,7 @@ void EasyUnlockService::ReloadApp() {
 
 void EasyUnlockService::UpdateAppState() {
   if (IsAllowed()) {
+    EnsureTpmKeyPresentIfNeeded();
     LoadApp();
 
 #if defined(OS_CHROMEOS)
@@ -662,3 +705,24 @@ void EasyUnlockService::PrepareForSuspend() {
   }
 }
 
+void EasyUnlockService::EnsureTpmKeyPresentIfNeeded() {
+  if (tpm_key_checked_ || GetType() != TYPE_REGULAR || GetUserEmail().empty())
+    return;
+
+#if defined(OS_CHROMEOS)
+  // If this is called before the session is started, the chances are Chrome
+  // is restarting in order to apply user flags. Don't check TPM keys in this
+  // case.
+  if (!user_manager::UserManager::Get() ||
+      !user_manager::UserManager::Get()->IsSessionStarted())
+    return;
+
+  // TODO(tbarzic): Set check_private_key only if previous sign-in attempt
+  // failed.
+  EasyUnlockTpmKeyManagerFactory::GetInstance()->Get(profile_)
+      ->PrepareTpmKey(true /* check_private_key */,
+                      base::Closure());
+#endif  // defined(OS_CHROMEOS)
+
+  tpm_key_checked_ = true;
+}

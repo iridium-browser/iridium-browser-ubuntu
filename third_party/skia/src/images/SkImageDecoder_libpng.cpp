@@ -413,8 +413,8 @@ SkImageDecoder::Result SkPNGImageDecoder::onDecode(SkStream* sk_stream, SkBitmap
             even if our decodedBitmap doesn't, due to the request that we
             upscale png's palette to a direct model
          */
-        SkAutoLockColors ctLock(colorTable);
-        if (!sampler.begin(decodedBitmap, sc, *this, ctLock.colors())) {
+        const SkPMColor* colors = colorTable ? colorTable->readColors() : NULL;
+        if (!sampler.begin(decodedBitmap, sc, *this, colors)) {
             return kFailure;
         }
         const int height = decodedBitmap->height();
@@ -613,12 +613,6 @@ bool SkPNGImageDecoder::getBitmapColorType(png_structp png_ptr, png_infop info_p
             return false;
         }
     }
-
-#ifdef SK_SUPPORT_LEGACY_IMAGEDECODER_CHOOSER
-    if (!this->chooseFromOneChoice(*colorTypep, origWidth, origHeight)) {
-        return false;
-    }
-#endif
 
     // If the image has alpha and the decoder wants unpremultiplied
     // colors, the only supported colortype is 8888.
@@ -894,8 +888,8 @@ bool SkPNGImageDecoder::onDecodeSubset(SkBitmap* bm, const SkIRect& region) {
             even if our decodedBitmap doesn't, due to the request that we
             upscale png's palette to a direct model
          */
-        SkAutoLockColors ctLock(colorTable);
-        if (!sampler.begin(&decodedBitmap, sc, *this, ctLock.colors())) {
+        const SkPMColor* colors = colorTable ? colorTable->readColors() : NULL;
+        if (!sampler.begin(&decodedBitmap, sc, *this, colors)) {
             return false;
         }
         const int height = decodedBitmap.height();
@@ -1047,8 +1041,7 @@ static int computeBitDepth(int colorCount) {
 static inline int pack_palette(SkColorTable* ctable,
                                png_color* SK_RESTRICT palette,
                                png_byte* SK_RESTRICT trans, bool hasAlpha) {
-    SkAutoLockColors alc(ctable);
-    const SkPMColor* SK_RESTRICT colors = alc.colors();
+    const SkPMColor* SK_RESTRICT colors = ctable ? ctable->readColors() : NULL;
     const int ctCount = ctable->count();
     int i, num_trans = 0;
 

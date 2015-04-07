@@ -56,11 +56,6 @@ LayoutRect RenderSVGModelObject::clippedOverflowRectForPaintInvalidation(const R
     return SVGRenderSupport::clippedOverflowRectForPaintInvalidation(this, paintInvalidationContainer, paintInvalidationState);
 }
 
-void RenderSVGModelObject::computeFloatRectForPaintInvalidation(const RenderLayerModelObject* paintInvalidationContainer, FloatRect& paintInvalidationRect, const PaintInvalidationState* paintInvalidationState) const
-{
-    SVGRenderSupport::computeFloatRectForPaintInvalidation(this, paintInvalidationContainer, paintInvalidationRect, paintInvalidationState);
-}
-
 void RenderSVGModelObject::mapLocalToContainer(const RenderLayerModelObject* paintInvalidationContainer, TransformState& transformState, MapCoordinatesFlags, bool* wasFixed, const PaintInvalidationState* paintInvalidationState) const
 {
     SVGRenderSupport::mapLocalToContainer(this, paintInvalidationContainer, transformState, wasFixed, paintInvalidationState);
@@ -106,6 +101,12 @@ void RenderSVGModelObject::styleDidChange(StyleDifference diff, const RenderStyl
         setNeedsBoundariesUpdate();
         if (style()->hasTransform())
             setNeedsTransformUpdate();
+    }
+
+    if (isBlendingAllowed()) {
+        bool hasBlendModeChanged = (oldStyle && oldStyle->hasBlendMode()) == !style()->hasBlendMode();
+        if (parent() && hasBlendModeChanged)
+            parent()->descendantIsolationRequirementsChanged(style()->hasBlendMode() ? DescendantIsolationRequired : DescendantIsolationNeedsUpdate);
     }
 
     RenderObject::styleDidChange(diff, oldStyle);

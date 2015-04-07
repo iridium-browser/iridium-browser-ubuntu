@@ -32,6 +32,7 @@ class StyleRuleFontFace;
 class StyleRuleCSSStyleDeclaration;
 
 class CSSFontFaceRule final : public CSSRule {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<CSSFontFaceRule> create(StyleRuleFontFace* rule, CSSStyleSheet* sheet)
     {
@@ -40,7 +41,6 @@ public:
 
     virtual ~CSSFontFaceRule();
 
-    virtual CSSRule::Type type() const override { return FONT_FACE_RULE; }
     virtual String cssText() const override;
     virtual void reattach(StyleRuleBase*) override;
 
@@ -52,6 +52,8 @@ public:
 
 private:
     CSSFontFaceRule(StyleRuleFontFace*, CSSStyleSheet* parent);
+
+    virtual CSSRule::Type type() const override { return FONT_FACE_RULE; }
 
     RefPtrWillBeMember<StyleRuleFontFace> m_fontFaceRule;
     mutable RefPtrWillBeMember<StyleRuleCSSStyleDeclaration> m_propertiesCSSOMWrapper;

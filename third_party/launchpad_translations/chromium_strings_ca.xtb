@@ -39,7 +39,6 @@
 <translation id="3883381313049582448">Utilitza la contrasenya generada per Chromium</translation>
 <translation id="3549345495227188780">Introducció a Chromium OS</translation>
 <translation id="1668054258064581266">Després de suprimir el vostre compte de Chromium, pot ser que hàgiu de tornar a carregar les pestanyes obertes.</translation>
-<translation id="6953661834318318668">Barra d'eines de Chromium</translation>
 <translation id="4285930937574705105">S'ha produït un error no especificat durant la instal·lació. Si Chromium s'està executant en aquests moments, tanqueu-lo i torneu-ho a provar.</translation>
 <translation id="1396446129537741364">Chromium està provant de mostrar les contrasenyes.</translation>
 <translation id="8987477933582888019">Navegador web</translation>
@@ -67,7 +66,7 @@
 <translation id="4222580632002216401">Heu iniciat la sessió a Chromium. El vostre administrador ha desactivat la sincronització.</translation>
 <translation id="4207043877577553402"><ph name="BEGIN_BOLD"/>Advertiment:<ph name="END_BOLD"/> Chromium no pot evitar que les extensions registrin l'historial de navegació. Per desactivar l'extensió en mode d'incògnit, anul·leu la selecció de l'opció corresponent.</translation>
 <translation id="985602178874221306">Els autors de Chromium</translation>
-<translation id="8628626585870903697">Chromium no inclou el lector de PDF que és necessari perquè la visualització prèvia funcioni.</translation>
+<translation id="8628626585870903697">Chromium no inclou el lector de PDF que és necessari perquè la previsualització funcioni.</translation>
 <translation id="7138853919861947730">Chromium pot utilitzar serveis web per millorar l'experiència de navegació dels usuaris.</translation>
 <translation id="4743926867934016338">Accepta i cerca</translation>
 <translation id="3849925841547750267">Lamentablement, la vostra configuració de Mozilla Firefox no està disponible mentre el navegador estigui en funcionament. Per importar la configuració a Chromium, deseu el treball i tanqueu totes les finestres de Firefox. A continuació, feu clic a Continua.</translation>
@@ -94,6 +93,7 @@
 <translation id="7473891865547856676">No, gràcies</translation>
 <translation id="9191268552238695869">Un administrador ha instal·lat Chromium en aquest sistema i està disponible per a tots els usuaris. El Chromium a nivell de sistema substituirà ara la vostra instal·lació a nivell d'usuari.</translation>
 <translation id="3509308970982693815">Tanqueu totes les finestres de Chromium i torneu-ho a provar.</translation>
+<translation id="8851136666856101339">principal</translation>
 <translation id="4077262827416206768">Tanqueu totes les finestres de Chromium i torneu-lo a iniciar perquè s'apliqui aquest canvi.</translation>
 <translation id="6475912303565314141">També controla la pàgina que es mostra quan inicieu Chromium.</translation>
 <translation id="1725059042853530269"><ph name="FILE_NAME"/> podria perjudicar la vostra experiència de navegació i, per això, Chromium l'ha bloquejat.</translation>
@@ -156,6 +156,7 @@
 <translation id="275588974610408078">La creació d'informes de bloqueig no està disponible a Chromium.</translation>
 <translation id="5909170354645388250">No s'utilitza a Chromium. Espai reservat per mantenir els mapes de recursos sincronitzats. Espera un argument: $1.</translation>
 <translation id="1144202035120576837">Normalment, a la pàgina <ph name="SITE"/> es fa servir l'encriptació per protegir la vostra informació. Quan Chromium ha provat de connectar-se a la pàgina <ph name="SITE"/>, el lloc web ha enviat credencials poc comunes i incorrectes. Pot ser que un atacant estigui provant de fer-se passar pel lloc <ph name="SITE"/> o que una pantalla d'inici de sessió a la xarxa Wi-Fi hagi interromput la connexió. De totes maneres, la vostra informació continua estant segura, perquè Chromium ha aturat la connexió abans no s'intercanviés cap dada.</translation>
+<translation id="2316129865977710310">No, gràcies</translation>
 <translation id="7937630085815544518">Teníeu la sessió iniciada a Chromium com a <ph name="USER_EMAIL_ADDRESS"/>. Utilitzeu el mateix compte per tornar a iniciar-hi la sessió.</translation>
 <translation id="2685838254101182273">Chromium ha deixat d'actualitzar-se i ja no admet aquesta versió del vostre sistema operatiu.</translation>
 <translation id="8684913864886094367">Chromium no s'ha tancat correctament.</translation>
@@ -169,6 +170,7 @@
 <translation id="2648074677641340862">S'ha produït un error en el sistema operatiu durant la instal·lació. Torneu a baixar Chromium.</translation>
 <translation id="5942520288919337908"><ph name="EXTENSION_NAME"/> s'ha afegit a Chromium.</translation>
 <translation id="549669000822060376">Espereu mentre Chromium instal·la les darreres actualitzacions del sistema.</translation>
+<translation id="1240763998429950591">Chromium no ha pogut actualitzar-se a la darrera versió, així que no podeu gaudir de les funcions noves ni de les correccions de seguretat. Heu d'actualitzar Chromium.</translation>
 <translation id="6930860321615955692">https://support.google.com/chrome/?p=ib_chromeframe</translation>
 <translation id="3281987435599047980">Envia una paraula i el context que l'envolta a Cerca de Google i, a continuació, s'ofereixen definicions, imatges, resultats de la cerca i altres detalls.</translation>
 <translation id="4559775032954821361">Aneu al
@@ -208,6 +210,7 @@
 <translation id="2966088006374919794">Chromium necessita iniciar una aplicació externa per gestionar els enllaços <ph name="SCHEME"/>. L'enllaç sol·licitat és <ph name="PROTOLINK"/>.</translation>
 <translation id="2558235863893655150">Voleu que Chromium desi la vostra contrasenya?</translation>
 <translation id="6485906693002546646">Utilitzeu <ph name="PROFILE_EMAIL"/> per sincronitzar el contingut de Chromium. Per modificar la preferència de sincronització o per utilitzar Chromium sense cap compte de Google, dirigiu-vos a <ph name="SETTINGS_LINK"/>.</translation>
+<translation id="705851970750939768">Actualitza Chromium</translation>
 <translation id="5772805321386874569">(cal <ph name="BEGIN_BUTTON"/>reiniciar<ph name="END_BUTTON"/> Chromium)</translation>
 <translation id="1688750314291223739">Configureu la sincronització per desar al web les funcions personalitzades del navegador i per accedir-hi des de qualsevol equip mitjançant Chromium.</translation>
 <translation id="8610831143142469229">Configureu el tallafoc o l'antivirus per permetre que Chrome accedeixi a la xarxa.</translation>

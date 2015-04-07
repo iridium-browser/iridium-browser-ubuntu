@@ -35,7 +35,6 @@
 #include "wtf/HashCountedSet.h"
 #include "wtf/HashMap.h"
 #include "wtf/Noncopyable.h"
-#include "wtf/Vector.h"
 #include "wtf/text/StringHash.h"
 
 namespace blink {
@@ -46,7 +45,6 @@ class DocumentLoader;
 class LocalFrame;
 class InspectorFrontend;
 class InjectedScriptManager;
-class InspectorTimelineAgent;
 class ScriptProfile;
 class ThreadableLoaderClient;
 class XMLHttpRequest;
@@ -56,12 +54,12 @@ typedef String ErrorString;
 class InspectorConsoleAgent : public InspectorBaseAgent<InspectorConsoleAgent>, public InspectorBackendDispatcher::ConsoleCommandHandler {
     WTF_MAKE_NONCOPYABLE(InspectorConsoleAgent);
 public:
-    InspectorConsoleAgent(InspectorTimelineAgent*, InjectedScriptManager*);
+    explicit InspectorConsoleAgent(InjectedScriptManager*);
     virtual ~InspectorConsoleAgent();
     virtual void trace(Visitor*) override;
 
-    virtual void enable(ErrorString*) override final;
-    virtual void disable(ErrorString*) override final;
+    virtual void enable(ErrorString*) override;
+    virtual void disable(ErrorString*) override;
     virtual void clearMessages(ErrorString*) override;
     bool enabled() { return m_enabled; }
 
@@ -71,10 +69,6 @@ public:
 
     void addMessageToConsole(ConsoleMessage*);
     void consoleMessagesCleared();
-
-    void setTracingBasedTimeline(ErrorString*, bool enabled);
-    void consoleTimeline(ExecutionContext*, const String& title, ScriptState*);
-    void consoleTimelineEnd(ExecutionContext*, const String& title, ScriptState*);
 
     void didCommitLoad(LocalFrame*, DocumentLoader*);
 
@@ -93,12 +87,12 @@ protected:
     void sendConsoleMessageToFrontend(ConsoleMessage*, bool generatePreview);
     virtual ConsoleMessageStorage* messageStorage() = 0;
 
-    RawPtrWillBeMember<InspectorTimelineAgent> m_timelineAgent;
+    virtual void enableStackCapturingIfNeeded() = 0;
+    virtual void disableStackCapturingIfNeeded() = 0;
+
     RawPtrWillBeMember<InjectedScriptManager> m_injectedScriptManager;
     InspectorFrontend::Console* m_frontend;
     bool m_enabled;
-private:
-    static int s_enabledAgentCount;
 };
 
 } // namespace blink

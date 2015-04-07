@@ -49,6 +49,7 @@ Event::Event()
     , m_eventPhase(0)
     , m_currentTarget(nullptr)
     , m_createTime(convertSecondsToDOMTimeStamp(currentTime()))
+    , m_uiCreateTime(0)
 {
 }
 
@@ -64,6 +65,7 @@ Event::Event(const AtomicString& eventType, bool canBubbleArg, bool cancelableAr
     , m_eventPhase(0)
     , m_currentTarget(nullptr)
     , m_createTime(convertSecondsToDOMTimeStamp(currentTime()))
+    , m_uiCreateTime(0)
 {
 }
 
@@ -79,6 +81,23 @@ Event::Event(const AtomicString& eventType, const EventInit& initializer)
     , m_eventPhase(0)
     , m_currentTarget(nullptr)
     , m_createTime(convertSecondsToDOMTimeStamp(currentTime()))
+    , m_uiCreateTime(0)
+{
+}
+
+Event::Event(const AtomicString& eventType, const EventInitDictionary& initializer)
+    : m_type(eventType)
+    , m_canBubble(initializer.bubbles())
+    , m_cancelable(initializer.cancelable())
+    , m_propagationStopped(false)
+    , m_immediatePropagationStopped(false)
+    , m_defaultPrevented(false)
+    , m_defaultHandled(false)
+    , m_cancelBubble(false)
+    , m_eventPhase(0)
+    , m_currentTarget(nullptr)
+    , m_createTime(convertSecondsToDOMTimeStamp(currentTime()))
+    , m_uiCreateTime(0)
 {
 }
 
@@ -212,11 +231,9 @@ void Event::setUnderlyingEvent(PassRefPtrWillBeRawPtr<Event> ue)
     m_underlyingEvent = ue;
 }
 
-EventPath& Event::ensureEventPath()
+void Event::initEventPath(Node& node)
 {
-    if (!m_eventPath)
-        m_eventPath = adoptPtrWillBeNoop(new EventPath(this));
-    return *m_eventPath;
+    m_eventPath = adoptPtrWillBeNoop(new EventPath(node, this));
 }
 
 PassRefPtrWillBeRawPtr<StaticNodeList> Event::path() const

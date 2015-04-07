@@ -34,28 +34,31 @@
 
 namespace blink {
 
-PassRefPtrWillBeRawPtr<InertAnimation> InertAnimation::create(PassRefPtrWillBeRawPtr<AnimationEffect> effect, const Timing& timing, bool paused)
+PassRefPtrWillBeRawPtr<InertAnimation> InertAnimation::create(PassRefPtrWillBeRawPtr<AnimationEffect> effect, const Timing& timing, bool paused, double inheritedTime)
 {
-    return adoptRefWillBeNoop(new InertAnimation(effect, timing, paused));
+    return adoptRefWillBeNoop(new InertAnimation(effect, timing, paused, inheritedTime));
 }
 
-InertAnimation::InertAnimation(PassRefPtrWillBeRawPtr<AnimationEffect> effect, const Timing& timing, bool paused)
+InertAnimation::InertAnimation(PassRefPtrWillBeRawPtr<AnimationEffect> effect, const Timing& timing, bool paused, double inheritedTime)
     : AnimationNode(timing)
     , m_effect(effect)
     , m_paused(paused)
+    , m_inheritedTime(inheritedTime)
 {
 }
 
-PassOwnPtrWillBeRawPtr<WillBeHeapVector<RefPtrWillBeMember<Interpolation> > > InertAnimation::sample(double inheritedTime)
+void InertAnimation::sample(OwnPtrWillBeRawPtr<WillBeHeapVector<RefPtrWillBeMember<Interpolation>>>& result)
 {
-    updateInheritedTime(inheritedTime, TimingUpdateOnDemand);
-    if (!isInEffect())
-        return nullptr;
+    updateInheritedTime(m_inheritedTime, TimingUpdateOnDemand);
+    if (!isInEffect()) {
+        result.clear();
+        return;
+    }
 
     double iteration = currentIteration();
     ASSERT(iteration >= 0);
     // FIXME: Handle iteration values which overflow int.
-    return m_effect->sample(static_cast<int>(iteration), timeFraction(), iterationDuration());
+    return m_effect->sample(static_cast<int>(iteration), timeFraction(), iterationDuration(), result);
 }
 
 double InertAnimation::calculateTimeToEffectChange(bool, double, double) const

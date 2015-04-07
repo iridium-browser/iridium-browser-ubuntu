@@ -44,6 +44,7 @@ extern "C" {
 #endif
 
 #define DEFAULT_GF_INTERVAL         10
+#define INVALID_REF_BUFFER_IDX      -1  // Marks an invalid reference buffer id.
 
 typedef struct {
   int nmvjointcost[MV_JOINTS];
@@ -109,6 +110,11 @@ typedef enum {
   AQ_MODE_COUNT  // This should always be the last member of the enum
 } AQ_MODE;
 
+typedef enum {
+  RESIZE_NONE = 0,    // No frame resizing allowed (except for SVC).
+  RESIZE_FIXED = 1,   // All frames are coded at the specified dimension.
+  RESIZE_DYNAMIC = 2  // Coded size of each frame is determined by the codec.
+} RESIZE_TYPE;
 
 typedef struct VP9EncoderConfig {
   BITSTREAM_PROFILE profile;
@@ -122,7 +128,12 @@ typedef struct VP9EncoderConfig {
   int noise_sensitivity;  // pre processing blur: recommendation 0
   int sharpness;  // sharpening output: recommendation 0:
   int speed;
+  // maximum allowed bitrate for any intra frame in % of bitrate target.
   unsigned int rc_max_intra_bitrate_pct;
+  // maximum allowed bitrate for any inter frame in % of bitrate target.
+  unsigned int rc_max_inter_bitrate_pct;
+  // percent of rate boost for golden frame in CBR mode.
+  unsigned int gf_cbr_boost_pct;
 
   MODE mode;
   int pass;
@@ -159,7 +170,7 @@ typedef struct VP9EncoderConfig {
   AQ_MODE aq_mode;  // Adaptive Quantization mode
 
   // Internal frame size scaling.
-  int allow_spatial_resampling;
+  RESIZE_TYPE resize_mode;
   int scaled_frame_width;
   int scaled_frame_height;
 
@@ -178,13 +189,12 @@ typedef struct VP9EncoderConfig {
   int ts_number_layers;  // Number of temporal layers.
   // Bitrate allocation for spatial layers.
   int ss_target_bitrate[VPX_SS_MAX_LAYERS];
-  int ss_play_alternate[VPX_SS_MAX_LAYERS];
+  int ss_enable_auto_arf[VPX_SS_MAX_LAYERS];
   // Bitrate allocation (CBR mode) and framerate factor, for temporal layers.
   int ts_target_bitrate[VPX_TS_MAX_LAYERS];
   int ts_rate_decimator[VPX_TS_MAX_LAYERS];
 
-  // these parameters aren't to be used in final build don't use!!!
-  int play_alternate;
+  int enable_auto_arf;
 
   int encode_breakout;  // early breakout : for video conf recommend 800
 
@@ -224,9 +234,33 @@ static INLINE int is_lossless_requested(const VP9EncoderConfig *cfg) {
   return cfg->best_allowed_q == 0 && cfg->worst_allowed_q == 0;
 }
 
+// TODO(jingning) All spatially adaptive variables should go to TileDataEnc.
+typedef struct TileDataEnc {
+  TileInfo tile_info;
+  int thresh_freq_fact[BLOCK_SIZES][MAX_MODES];
+  int mode_map[BLOCK_SIZES][MAX_MODES];
+} TileDataEnc;
+
+typedef struct RD_COUNTS {
+  vp9_coeff_count coef_counts[TX_SIZES][PLANE_TYPES];
+  int64_t comp_pred_diff[REFERENCE_MODES];
+  int64_t tx_select_diff[TX_MODES];
+  int64_t filter_diff[SWITCHABLE_FILTER_CONTEXTS];
+} RD_COUNTS;
+
+typedef struct ThreadData {
+  MACROBLOCK mb;
+  RD_COUNTS rd_counts;
+  FRAME_COUNTS *counts;
+
+  PICK_MODE_CONTEXT *leaf_tree;
+  PC_TREE *pc_tree;
+  PC_TREE *pc_root;
+} ThreadData;
+
 typedef struct VP9_COMP {
   QUANTS quants;
-  MACROBLOCK mb;
+  ThreadData td;
   VP9_COMMON common;
   VP9EncoderConfig oxcf;
   struct lookahead_ctx    *lookahead;
@@ -239,10 +273,12 @@ typedef struct VP9_COMP {
   YV12_BUFFER_CONFIG *unscaled_last_source;
   YV12_BUFFER_CONFIG scaled_last_source;
 
+  TileDataEnc *tile_data;
+
   // For a still frame, this flag is set to 1 to skip partition search.
   int partition_search_skippable_frame;
 
-  int scaled_ref_idx[3];
+  int scaled_ref_idx[MAX_REF_FRAMES];
   int lst_fb_idx;
   int gld_fb_idx;
   int alt_fb_idx;
@@ -261,7 +297,7 @@ typedef struct VP9_COMP {
 
   YV12_BUFFER_CONFIG last_frame_uf;
 
-  TOKENEXTRA *tok;
+  TOKENEXTRA *tile_tok[4][1 << 6];
   unsigned int tok_count[4][1 << 6];
 
   // Ambient reconstruction err target for force key frames
@@ -286,7 +322,6 @@ typedef struct VP9_COMP {
   RATE_CONTROL rc;
   double framerate;
 
-  vp9_coeff_count coef_counts[TX_SIZES][PLANE_TYPES];
   int interp_filter_selected[MAX_REF_FRAMES][SWITCHABLE];
 
   struct vpx_codec_pkt_list  *output_pkt_list;
@@ -319,7 +354,6 @@ typedef struct VP9_COMP {
 
   fractional_mv_step_fp *find_fractional_mv_step;
   vp9_full_search_fn_t full_search_sad;
-  vp9_refining_search_fn_t refining_search_sad;
   vp9_diamond_search_fn_t diamond_search_sad;
   vp9_variance_fn_ptr_t fn_ptr[BLOCK_SIZES];
   uint64_t time_receive_data;
@@ -375,6 +409,10 @@ typedef struct VP9_COMP {
 
   int initial_width;
   int initial_height;
+  int initial_mbs;  // Number of MBs in the full-size frame; to be used to
+                    // normalize the firstpass stats. This will differ from the
+                    // number of MBs in the current frame when the frame is
+                    // scaled.
 
   int use_svc;
 
@@ -395,10 +433,6 @@ typedef struct VP9_COMP {
   int intra_uv_mode_cost[FRAME_TYPES][INTRA_MODES];
   int y_mode_costs[INTRA_MODES][INTRA_MODES][INTRA_MODES];
   int switchable_interp_costs[SWITCHABLE_FILTER_CONTEXTS][SWITCHABLE_FILTERS];
-
-  PICK_MODE_CONTEXT *leaf_tree;
-  PC_TREE *pc_tree;
-  PC_TREE *pc_root;
   int partition_cost[PARTITION_CONTEXTS][PARTITION_TYPES];
 
   int multi_arf_allowed;
@@ -453,6 +487,12 @@ int vp9_set_size_literal(VP9_COMP *cpi, unsigned int width,
 void vp9_set_svc(VP9_COMP *cpi, int use_svc);
 
 int vp9_get_quantizer(struct VP9_COMP *cpi);
+
+static INLINE int frame_is_kf_gf_arf(const VP9_COMP *cpi) {
+  return frame_is_intra_only(&cpi->common) ||
+         cpi->refresh_alt_ref_frame ||
+         (cpi->refresh_golden_frame && !cpi->rc.is_src_frame_alt_ref);
+}
 
 static INLINE int get_ref_frame_idx(const VP9_COMP *cpi,
                                     MV_REFERENCE_FRAME ref_frame) {
@@ -513,16 +553,15 @@ void vp9_apply_encoding_flags(VP9_COMP *cpi, vpx_enc_frame_flags_t flags);
 
 static INLINE int is_two_pass_svc(const struct VP9_COMP *const cpi) {
   return cpi->use_svc &&
-         (cpi->svc.number_temporal_layers > 1 ||
-          cpi->svc.number_spatial_layers > 1) &&
-         (cpi->oxcf.pass == 1 || cpi->oxcf.pass == 2);
+         ((cpi->svc.number_spatial_layers > 1) ||
+         (cpi->svc.number_temporal_layers > 1 && cpi->oxcf.pass != 0));
 }
 
 static INLINE int is_altref_enabled(const VP9_COMP *const cpi) {
   return cpi->oxcf.mode != REALTIME && cpi->oxcf.lag_in_frames > 0 &&
-         (cpi->oxcf.play_alternate &&
+         (cpi->oxcf.enable_auto_arf &&
           (!is_two_pass_svc(cpi) ||
-           cpi->oxcf.ss_play_alternate[cpi->svc.spatial_layer_id]));
+           cpi->oxcf.ss_enable_auto_arf[cpi->svc.spatial_layer_id]));
 }
 
 static INLINE void set_ref_ptrs(VP9_COMMON *cm, MACROBLOCKD *xd,

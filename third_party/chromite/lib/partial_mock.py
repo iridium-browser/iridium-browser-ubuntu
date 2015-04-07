@@ -4,6 +4,8 @@
 
 """Contains functionality used to implement a partial mock."""
 
+# pylint: disable=bad-continuation
+
 from __future__ import print_function
 
 import collections
@@ -21,7 +23,7 @@ class Comparator(object):
 
   def Match(self, arg):
     """Match the comparator against an argument."""
-    raise NotImplementedError, 'method must be implemented by a subclass.'
+    raise NotImplementedError('method must be implemented by a subclass.')
 
   def Equals(self, rhs):
     """Returns whether rhs compares the same thing."""
@@ -296,8 +298,8 @@ class MockedCallResults(object):
       raise AssertionError("%s: %r not mocked!" % (self.name, params))
 
     if side_effect:
-      assert(hook_args is not None)
-      assert(hook_kwargs is not None)
+      assert hook_args is not None
+      assert hook_kwargs is not None
       hook_result = side_effect(*hook_args, **hook_kwargs)
       if hook_result is not None:
         return hook_result

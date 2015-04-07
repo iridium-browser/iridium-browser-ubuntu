@@ -65,14 +65,14 @@ const char* kVideoWindowWidth = "1280";
 const char* kVideoWindowHeight = "720";
 #endif  // defined(USE_X11)
 
-void GetPorts(int* tx_port, int* rx_port) {
+void GetPorts(uint16* tx_port, uint16* rx_port) {
   test::InputBuilder tx_input(
-      "Enter send port.", DEFAULT_SEND_PORT, 1, INT_MAX);
-  *tx_port = tx_input.GetIntInput();
+      "Enter send port.", DEFAULT_SEND_PORT, 1, 65535);
+  *tx_port = static_cast<uint16>(tx_input.GetIntInput());
 
   test::InputBuilder rx_input(
-      "Enter receive port.", DEFAULT_RECEIVE_PORT, 1, INT_MAX);
-  *rx_port = rx_input.GetIntInput();
+      "Enter receive port.", DEFAULT_RECEIVE_PORT, 1, 65535);
+  *rx_port = static_cast<uint16>(rx_input.GetIntInput());
 }
 
 std::string GetIpAddress(const std::string display_text) {
@@ -194,7 +194,7 @@ class NaivePlayer : public InProcessReceiver,
         // Maximum age is the duration of 3 video frames.  3 was chosen
         // arbitrarily, but seems to work well.
         max_frame_age_(base::TimeDelta::FromSeconds(1) * 3 /
-                           video_config.max_frame_rate),
+                           video_config.target_frame_rate),
 #if defined(USE_X11)
         render_(0, 0, window_width, window_height, "Cast_receiver"),
 #endif  // defined(USE_X11)
@@ -540,7 +540,7 @@ class NaivePlayer : public InProcessReceiver,
 
 int main(int argc, char** argv) {
   base::AtExitManager at_exit;
-  CommandLine::Init(argc, argv);
+  base::CommandLine::Init(argc, argv);
   InitLogging(logging::LoggingSettings());
 
   scoped_refptr<media::cast::CastEnvironment> cast_environment(
@@ -558,7 +558,7 @@ int main(int argc, char** argv) {
       media::cast::GetVideoReceiverConfig();
 
   // Determine local and remote endpoints.
-  int remote_port, local_port;
+  uint16 remote_port, local_port;
   media::cast::GetPorts(&remote_port, &local_port);
   if (!local_port) {
     LOG(ERROR) << "Invalid local port.";

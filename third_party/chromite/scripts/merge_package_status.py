@@ -2,9 +2,12 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-"""Merge multiple csv files representing Portage package data into
-one csv file, in preparation for uploading to a Google Docs spreadsheet.
+"""Merge multiple package status CSV files into one csv file.
+
+This simplifies uploading to a Google Docs spreadsheet.
 """
+
+# pylint: disable=bad-continuation
 
 from __future__ import print_function
 
@@ -210,7 +213,7 @@ def FinalizeTable(csv_table):
   for row in csv_table:
     # If the row is not unique when just the package
     # name is considered, then add a ':<slot>' suffix to the package name.
-    id_values = { COL_PACKAGE: row[COL_PACKAGE] }
+    id_values = {COL_PACKAGE: row[COL_PACKAGE]}
     matching_rows = csv_table.GetRowsByValue(id_values)
     if len(matching_rows) > 1:
       for mr in matching_rows:

@@ -5,6 +5,10 @@
 /**
  * @fileoverview
  * A class of server log entries.
+ *
+ * Any changes to the values here need to be coordinated with the host and
+ * server/log proto code.
+ * See remoting/signaling/server_log_entry.{cc|h}
  */
 
 'use strict';
@@ -75,6 +79,8 @@ remoting.ServerLogEntry.KEY_CONNECTION_ERROR_ = 'connection-error';
  */
 remoting.ServerLogEntry.getValueForError =
     function(connectionError) {
+  // Directory service should be updated if a new string is added here as
+  // otherwise the error code will be ignored (i.e. recorded as 0 instead).
   switch(connectionError) {
     case remoting.Error.NONE:
       return 'none';
@@ -157,6 +163,8 @@ remoting.ServerLogEntry.KEY_MODE_ = 'mode';
 remoting.ServerLogEntry.VALUE_MODE_IT2ME_ = 'it2me';
 /** @private */
 remoting.ServerLogEntry.VALUE_MODE_ME2ME_ = 'me2me';
+/** @private */
+remoting.ServerLogEntry.VALUE_MODE_APP_REMOTING_ = 'lgapp';
 /** @private */
 remoting.ServerLogEntry.VALUE_MODE_UNKNOWN_ = 'unknown';
 
@@ -465,6 +473,8 @@ remoting.ServerLogEntry.getModeField = function(mode) {
       return remoting.ServerLogEntry.VALUE_MODE_IT2ME_;
     case remoting.ClientSession.Mode.ME2ME:
       return remoting.ServerLogEntry.VALUE_MODE_ME2ME_;
+    case remoting.ClientSession.Mode.APP_REMOTING:
+      return remoting.ServerLogEntry.VALUE_MODE_APP_REMOTING_;
     default:
       return remoting.ServerLogEntry.VALUE_MODE_UNKNOWN_;
   }

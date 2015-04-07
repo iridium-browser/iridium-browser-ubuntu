@@ -25,15 +25,11 @@ enum LatencyComponentType {
   // Timestamp when a scroll update for the main thread is begun.
   INPUT_EVENT_LATENCY_BEGIN_SCROLL_UPDATE_MAIN_COMPONENT,
   // ---------------------------NORMAL COMPONENT-------------------------------
-  // Timestamp when the scroll update gesture event is sent from RWH to
-  // renderer. In Aura, touch event's LatencyInfo is carried over to the gesture
-  // event. So gesture event's INPUT_EVENT_LATENCY_RWH_COMPONENT is the
-  // timestamp when its original touch events is sent from RWH to renderer.
-  // In non-aura platform, INPUT_EVENT_LATENCY_SCROLL_UPDATE_RWH_COMPONENT
-  // is the same as INPUT_EVENT_LATENCY_RWH_COMPONENT.
-  INPUT_EVENT_LATENCY_SCROLL_UPDATE_RWH_COMPONENT,
   // The original timestamp of the touch event which converts to scroll update.
   INPUT_EVENT_LATENCY_SCROLL_UPDATE_ORIGINAL_COMPONENT,
+  // The original timestamp of the touch event which converts to the *first*
+  // scroll update in a scroll gesture sequence.
+  INPUT_EVENT_LATENCY_FIRST_SCROLL_UPDATE_ORIGINAL_COMPONENT,
   // Original timestamp for input event (e.g. timestamp from kernel).
   INPUT_EVENT_LATENCY_ORIGINAL_COMPONENT,
   // Timestamp when the UI event is created.
@@ -54,6 +50,12 @@ enum LatencyComponentType {
   WINDOW_OLD_SNAPSHOT_FRAME_NUMBER_COMPONENT,
   // Timestamp when a tab is requested to be shown.
   TAB_SHOW_COMPONENT,
+  // Timestamp of when the browser process receives a buffer swap notification
+  // from the renderer.
+  INPUT_EVENT_BROWSER_RECEIVED_RENDERER_SWAP_COMPONENT,
+  // Timestamp of when the gpu service began swap buffers, unlike
+  // INPUT_EVENT_LATENCY_TERMINATED_FRAME_SWAP_COMPONENT which measures after.
+  INPUT_EVENT_GPU_SWAP_BUFFER_COMPONENT,
   // ---------------------------TERMINAL COMPONENT-----------------------------
   // TERMINAL COMPONENT is when we show the latency end in chrome://tracing.
   // Timestamp when the mouse event is acked from renderer and it does not
@@ -104,7 +106,7 @@ struct EVENTS_BASE_EXPORT LatencyInfo {
   };
 
   // Empirically determined constant based on a typical scroll sequence.
-  enum { kTypicalMaxComponentsPerLatencyInfo = 6 };
+  enum { kTypicalMaxComponentsPerLatencyInfo = 9 };
 
   enum { kMaxInputCoordinates = 2 };
 

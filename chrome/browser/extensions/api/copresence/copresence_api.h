@@ -28,15 +28,20 @@ namespace gcm {
 class GCMDriver;
 }
 
+namespace user_prefs {
+class PrefRegistrySyncable;
+}
+
 namespace extensions {
 
-class CopresenceService : public BrowserContextKeyedAPI,
-                          public copresence::CopresenceDelegate {
+class CopresenceService final : public BrowserContextKeyedAPI,
+                                public copresence::CopresenceDelegate {
  public:
   explicit CopresenceService(content::BrowserContext* context);
   ~CopresenceService() override;
 
   // BrowserContextKeyedAPI implementation.
+  static const bool kServiceHasOwnInstanceInIncognito = true;
   void Shutdown() override;
 
   // These accessors will always return an object (except during shutdown).
@@ -49,18 +54,23 @@ class CopresenceService : public BrowserContextKeyedAPI,
     return apps_by_subscription_id_;
   }
 
+  const std::string auth_token(const std::string& app_id) const;
+
   void set_api_key(const std::string& app_id,
                    const std::string& api_key);
 
-  std::string auth_token() const {
-    return auth_token_;
-  }
+  void set_auth_token(const std::string& app_id,
+                      const std::string& token);
 
-  void set_auth_token(const std::string& token);
+  // Delete all current copresence data, including stored device IDs.
+  void ResetState();
 
   // Manager override for testing.
   void set_manager_for_testing(
       scoped_ptr<copresence::CopresenceManager> manager);
+
+  // Registers the preference for saving our device IDs.
+  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
   // BrowserContextKeyedAPI implementation.
   static BrowserContextKeyedAPIFactory<CopresenceService>* GetFactoryInstance();
@@ -76,21 +86,24 @@ class CopresenceService : public BrowserContextKeyedAPI,
   net::URLRequestContextGetter* GetRequestContext() const override;
   const std::string GetPlatformVersionString() const override;
   const std::string GetAPIKey(const std::string& app_id) const override;
+  const std::string GetProjectId(const std::string& app_id) const override;
   copresence::WhispernetClient* GetWhispernetClient() override;
   gcm::GCMDriver* GetGCMDriver() override;
+  const std::string GetDeviceId(bool authenticated) override;
+  void SaveDeviceId(bool authenticated, const std::string& device_id) override;
 
   // BrowserContextKeyedAPI implementation.
   static const char* service_name() { return "CopresenceService"; }
 
+  PrefService* GetPrefService();
+
   bool is_shutting_down_;
+  content::BrowserContext* const browser_context_;
+
   std::map<std::string, std::string> apps_by_subscription_id_;
 
-  content::BrowserContext* const browser_context_;
   std::map<std::string, std::string> api_keys_by_app_;
-
-  // TODO(ckehoe): This is a temporary hack.
-  // Auth tokens from different apps needs to be separated properly.
-  std::string auth_token_;
+  std::map<std::string, std::string> auth_tokens_by_app_;
 
   scoped_ptr<copresence::CopresenceManager> manager_;
   scoped_ptr<ChromeWhispernetClient> whispernet_client_;
@@ -129,7 +142,7 @@ class CopresenceSetAuthTokenFunction : public ChromeUIThreadExtensionFunction {
                              COPRESENCE_SETAUTHTOKEN);
 
  protected:
-  virtual ~CopresenceSetAuthTokenFunction() {}
+  ~CopresenceSetAuthTokenFunction() override {}
   ExtensionFunction::ResponseAction Run() override;
 };
 

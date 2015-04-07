@@ -65,10 +65,11 @@ void PageWidgetDelegate::paint(Page& page, PageOverlayList* overlays, WebCanvas*
 {
     if (rect.isEmpty())
         return;
-    GraphicsContext gc(canvas);
+    GraphicsContext gc(canvas, nullptr);
     gc.setCertainlyOpaque(background == Opaque);
-    gc.applyDeviceScaleFactor(page.deviceScaleFactor());
-    gc.setDeviceScaleFactor(page.deviceScaleFactor());
+    float scaleFactor = page.deviceScaleFactor();
+    gc.scale(scaleFactor, scaleFactor);
+    gc.setDeviceScaleFactor(scaleFactor);
     IntRect dirtyRect(rect);
     gc.save(); // Needed to save the canvas, not the GraphicsContext.
     FrameView* view = root.view();
@@ -128,7 +129,6 @@ bool PageWidgetDelegate::handleInputEvent(PageWidgetEventHandler& handler, const
     case WebInputEvent::GestureScrollBegin:
     case WebInputEvent::GestureScrollEnd:
     case WebInputEvent::GestureScrollUpdate:
-    case WebInputEvent::GestureScrollUpdateWithoutPropagation:
     case WebInputEvent::GestureFlingStart:
     case WebInputEvent::GestureFlingCancel:
     case WebInputEvent::GestureTap:

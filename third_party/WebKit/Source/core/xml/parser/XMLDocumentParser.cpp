@@ -53,6 +53,7 @@
 #include "core/loader/FrameLoader.h"
 #include "core/loader/ImageLoader.h"
 #include "core/svg/graphics/SVGImage.h"
+#include "core/xml/DocumentXSLT.h"
 #include "core/xml/parser/SharedBufferReader.h"
 #include "core/xml/parser/XMLDocumentParserScope.h"
 #include "core/xml/parser/XMLParserInput.h"
@@ -102,7 +103,7 @@ static inline AtomicString toAtomicString(const xmlChar* string)
 
 static inline bool hasNoStyleInformation(Document* document)
 {
-    if (document->sawElementsInKnownNamespaces() || document->transformSourceDocument())
+    if (document->sawElementsInKnownNamespaces() || DocumentXSLT::hasTransformSourceDocument(*document))
         return false;
 
     if (!document->frame() || !document->frame()->page())
@@ -346,9 +347,9 @@ void XMLDocumentParser::insert(const SegmentedString&)
     ASSERT_NOT_REACHED();
 }
 
-void XMLDocumentParser::append(PassRefPtr<StringImpl> inputSource)
+void XMLDocumentParser::append(const String& inputSource)
 {
-    SegmentedString source(inputSource);
+    const SegmentedString source(inputSource);
     if (m_sawXSLTransform || !m_sawFirstElement)
         m_originalSourceForTransform.append(source);
 
@@ -821,12 +822,11 @@ XMLDocumentParser::XMLDocumentParser(DocumentFragment* fragment, Element* parent
     for (; !elemStack.isEmpty(); elemStack.removeLast()) {
         Element* element = elemStack.last();
         AttributeCollection attributes = element->attributes();
-        AttributeCollection::iterator end = attributes.end();
-        for (AttributeCollection::iterator it = attributes.begin(); it != end; ++it) {
-            if (it->localName() == xmlnsAtom)
-                m_defaultNamespaceURI = it->value();
-            else if (it->prefix() == xmlnsAtom)
-                m_prefixToNamespaceMap.set(it->localName(), it->value());
+        for (auto& attribute : attributes) {
+            if (attribute.localName() == xmlnsAtom)
+                m_defaultNamespaceURI = attribute.value();
+            else if (attribute.prefix() == xmlnsAtom)
+                m_prefixToNamespaceMap.set(attribute.localName(), attribute.value());
         }
     }
 
@@ -915,7 +915,7 @@ static inline void handleNamespaceAttributes(Vector<Attribute>& prefixedAttribut
         AtomicString namespaceQName = xmlnsAtom;
         AtomicString namespaceURI = toAtomicString(namespaces[i].uri);
         if (namespaces[i].prefix)
-            namespaceQName = WTF::xmlnsWithColon + namespaces[i].prefix;
+            namespaceQName = WTF::xmlnsWithColon + toAtomicString(namespaces[i].prefix);
 
         QualifiedName parsedName = anyName;
         if (!Element::parseAttributeName(parsedName, XMLNSNames::xmlnsNamespaceURI, namespaceQName, exceptionState))
@@ -1165,7 +1165,7 @@ void XMLDocumentParser::processingInstruction(const String& target, const String
         return;
 
     m_sawXSLTransform = !m_sawFirstElement && pi->isXSL();
-    if (m_sawXSLTransform && !document()->transformSourceDocument()) {
+    if (m_sawXSLTransform && !DocumentXSLT::hasTransformSourceDocument(*document())) {
         // This behavior is very tricky. We call stopParsing() here because we
         // want to stop processing the document until we're ready to apply the
         // transform, but we actually still want to be fed decoded string pieces
@@ -1291,15 +1291,6 @@ static void warningHandler(void* closure, const char* message, ...)
     va_list args;
     va_start(args, message);
     getParser(closure)->error(XMLErrors::ErrorTypeWarning, message, args);
-    va_end(args);
-}
-
-WTF_ATTRIBUTE_PRINTF(2, 3)
-static void fatalErrorHandler(void* closure, const char* message, ...)
-{
-    va_list args;
-    va_start(args, message);
-    getParser(closure)->error(XMLErrors::ErrorTypeFatal, message, args);
     va_end(args);
 }
 
@@ -1432,8 +1423,12 @@ void XMLDocumentParser::initializeParserContext(const CString& chunk)
     xmlSAXHandler sax;
     memset(&sax, 0, sizeof(sax));
 
+    // According to http://xmlsoft.org/html/libxml-tree.html#xmlSAXHandler and
+    // http://xmlsoft.org/html/libxml-parser.html#fatalErrorSAXFunc the SAX
+    // fatalError callback is unused; error gets all the errors. Use normalErrorHandler
+    // for both the error and fatalError callbacks.
     sax.error = normalErrorHandler;
-    sax.fatalError = fatalErrorHandler;
+    sax.fatalError = normalErrorHandler;
     sax.characters = charactersHandler;
     sax.processingInstruction = processingInstructionHandler;
     sax.cdataBlock = cdataBlockHandler;
@@ -1486,7 +1481,7 @@ void XMLDocumentParser::doEnd()
         xmlDocPtr doc = xmlDocPtrForString(document()->fetcher(), m_originalSourceForTransform.toString(), document()->url().string());
         document()->setTransformSource(adoptPtr(new TransformSource(doc)));
         // Make the document think it's done, so it will apply XSL stylesheets.
-        document()->setParsing(false);
+        document()->setParsingState(Document::FinishedParsing);
         document()->styleResolverChanged();
 
         // styleResolverChanged() call can detach the parser and null out its
@@ -1494,7 +1489,7 @@ void XMLDocumentParser::doEnd()
         if (isDetached())
             return;
 
-        document()->setParsing(true);
+        document()->setParsingState(Document::Parsing);
         DocumentParser::stopParsing();
     }
 }

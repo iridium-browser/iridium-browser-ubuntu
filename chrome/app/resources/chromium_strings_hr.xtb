@@ -39,7 +39,6 @@
 <translation id="3883381313049582448">Upotrijebite zaporku koju generira Chromium</translation>
 <translation id="3549345495227188780">Počnite s upotrebom OS-a Chromium</translation>
 <translation id="1668054258064581266">Nakon uklanjanja računa s Chromiuma možda ćete morati ponovo učitati otvorene kartice kako bi nastupile promjene.</translation>
-<translation id="6953661834318318668">Alatna traka preglednika Chromium</translation>
 <translation id="4285930937574705105">Instalacija nije uspjela zbog nepoznate pogreške. Ako je Chromium trenutačno otvoren, zatvorite ga i pokušajte ponovo.</translation>
 <translation id="1396446129537741364">Chromium pokušava prikazati zaporke.</translation>
 <translation id="8987477933582888019">Web-preglednik</translation>
@@ -94,6 +93,7 @@
 <translation id="7473891865547856676">Ne, hvala</translation>
 <translation id="9191268552238695869">Administrator je instalirao Chromium u ovom sustavu i on je dostupan svim korisnicima. Chromium na razini sustava sada će zamijeniti vašu instalaciju na razini korisnika.</translation>
 <translation id="3509308970982693815">Zatvorite sve prozore preglednika Chromium i pokušajte ponovo.</translation>
+<translation id="8851136666856101339">glav</translation>
 <translation id="4077262827416206768">Zatvorite sve prozore preglednika Chromium i ponovo pokrenite Chromium da bi ta promjena postala aktivna.</translation>
 <translation id="6475912303565314141">Upravlja i time koja se stranica prikazuje prilikom pokretanja Chromiuma.</translation>
 <translation id="1725059042853530269">Datoteka <ph name="FILE_NAME"/> može uzrokovati štetu prilikom pregledavanja, pa ju je Chromium blokirao.</translation>
@@ -156,6 +156,7 @@
 <translation id="275588974610408078">Prijavljivanje padova nije dostupno u pregledniku Chromium.</translation>
 <translation id="5909170354645388250">Ne upotrebljava se u Chromiumu. Rezervirano mjesto za održavanje sinkronizacije karata resursa. Očekuje se jedan argument: $1.</translation>
 <translation id="1144202035120576837"><ph name="SITE"/> obično upotrebljava enkripciju radi zaštite vaših podataka. Prilikom ovog pokušaja povezivanja s web-lokacijom <ph name="SITE"/>, web-lokacija je Chromiumu vratila neuobičajene i netočne vjerodajnice. To može značiti dvije stvari: napadač se pokušava predstaviti kao <ph name="SITE"/> ili je zaslon za prijavu na Wi-Fi prekinuo vezu. Vaši su podaci još uvijek sigurni jer je Chrome zaustavio povezivanje prije razmjene podataka.</translation>
+<translation id="2316129865977710310">Ne, hvala</translation>
 <translation id="7937630085815544518">Bili ste prijavljeni na Chromium kao <ph name="USER_EMAIL_ADDRESS"/>. Prijavite se ponovo istim računom.</translation>
 <translation id="2685838254101182273">Chromium se prestao ažurirati i više ne podržava ovu verziju vašeg operativnog sustava.</translation>
 <translation id="8684913864886094367">Chromium se nije ispravno zatvorio.</translation>
@@ -169,6 +170,7 @@
 <translation id="2648074677641340862">Došlo je do pogreške operativnog sustava tijekom instalacije. Ponovo preuzmite Chromium.</translation>
 <translation id="5942520288919337908">Proširenje <ph name="EXTENSION_NAME"/> dodano je u Chromium.</translation>
 <translation id="549669000822060376">Pričekajte da Chromium instalira najnovija ažuriranja sustava.</translation>
+<translation id="1240763998429950591">Chromium se nije mogao ažurirati na najnoviju verziju, pa propuštate nove značajke i sigurnosne popravke. Morate ažurirati Chromium.</translation>
 <translation id="6930860321615955692">https://support.google.com/chrome/?p=ib_chromeframe</translation>
 <translation id="3281987435599047980">šalje riječ i njezin okolni kontekst na Google pretraživanje te vraća definicije, slike, rezultate pretraživanja i ostale pojedinosti.</translation>
 <translation id="4559775032954821361">Idite na
@@ -208,6 +210,7 @@ Neke su značajke možda nedostupne. Navedite neki drugi direktorij profila ili 
 <translation id="2966088006374919794">Chromium mora pokrenuti vanjsku aplikaciju za obradu veza <ph name="SCHEME"/>. Zatražena je veza <ph name="PROTOLINK"/>.</translation>
 <translation id="2558235863893655150">Želite li da Chromium spremi zaporku?</translation>
 <translation id="6485906693002546646">Upotrebljavate <ph name="PROFILE_EMAIL"/> za sinkronizaciju sadržaja u Chromiumu. Za ažuriranje postavki sinkroniziranja ili upotrebu Chromiuma bez Google računa posjetite <ph name="SETTINGS_LINK"/>.</translation>
+<translation id="705851970750939768">Ažuriraj Chromium</translation>
 <translation id="5772805321386874569">(potrebno je <ph name="BEGIN_BUTTON"/>ponovo pokrenuti<ph name="END_BUTTON"/> Chromium)</translation>
 <translation id="1688750314291223739">Postavite sinkronizaciju da biste spremili svoje prilagođene značajke preglednika na web i pristupali im s preglednika Chromium na bilo kojem računalu.</translation>
 <translation id="8610831143142469229">U postavkama vatrozida ili antivirusnog programa omogućite Chromiumu da pristupa mreži.</translation>

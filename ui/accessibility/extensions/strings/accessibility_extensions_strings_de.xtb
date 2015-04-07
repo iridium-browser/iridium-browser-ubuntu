@@ -15,23 +15,27 @@
 <translation id="3622586652998721735">Als Standardschema festlegen</translation>
 <translation id="2179565792157161713">Ausführliche Beschreibung in neuem Tab öffnen</translation>
 <translation id="2471847333270902538">Farbschema für <ph name="SITE"/>:</translation>
+<translation id="381767806621926835">Klicken Sie mit der rechten Maustaste auf Elemente mit einem &quot;longdesc&quot;- oder &quot;aria-describedat&quot;-Attribut, um die ausführliche Beschreibung aufzurufen.</translation>
+<translation id="786423340267544509">Rahmen zu Elementen mit &quot;aria-describedat&quot;- oder &quot;longdesc&quot;-Attribut hinzufügen</translation>
 <translation id="690628312087070417">Wenn der Cursor zu einer weit entfernten Stelle springt:</translation>
 <translation id="5331422999063554397">Farbumkehrung</translation>
 <translation id="2648340354586434750">Halten Sie die &lt;span class='key'&gt;Wahltaste&lt;/span&gt; gedrückt, um Wort für Wort vorzugehen.</translation>
+<translation id="4769065380738716500">Bilder wurden durch ihren &quot;ALT&quot;-Text ersetzt.</translation>
 <translation id="5287723860611749454">&lt;p&gt;Mit den Pfeiltasten können Sie durch das Dokument navigieren. &lt;/p&gt;&lt;p&gt;Klicken Sie an einer Stelle, um den Cursor dort zu platzieren. &lt;/p&gt; &lt;p&gt;   Mit &lt;span class='key'&gt;Shift&lt;/span&gt; + Pfeiltaste können Sie Text auswählen.&lt;/p&gt;</translation>
 <translation id="5558600050691192317">Tastaturbefehle</translation>
 <translation id="633394792577263429">Halten Sie die &lt;span class='key'&gt;Strg-Taste&lt;/span&gt; gedrückt, um Wort für Wort vorzugehen.</translation>
+<translation id="2079545284768500474">Rückgängig</translation>
 <translation id="8254860724243898966">Drücken Sie &lt;span class='key'&gt;Alt&lt;/span&gt; + &lt;img src='increase_brightness.png'&gt; (die Taste zum Erhöhen der Helligkeit oder F7), um die Tastaturnavigation zu aktivieren. Durch erneutes Drücken können Sie sie wieder deaktivieren.</translation>
 <translation id="3812541808639806898">ALT-Textanzeige für Bilder</translation>
 <translation id="1287053896835709737">Gelb auf Schwarz</translation>
 <translation id="4896660567607030658">Kein Feedback, nur den Cursor zeigen</translation>
 <translation id="5631241868147802353">Standardfarbschema:</translation>
-<translation id="625377550964694810">Alle HTML-Elemente mit dem Attribut &quot;longdesc&quot; oder &quot;aria-describedat&quot; erhalten einen starken Rahmen. Bei einem Rechtsklick wird dem Kontextmenü eine Option zur Anzeige der ausführlichen Beschreibung hinzugefügt.</translation>
 <translation id="5173942593318174089">Cursorposition mit Animation markieren</translation>
 <translation id="894241283505723656">Ausführliche Beschreibungen im Kontextmenü</translation>
 <translation id="5555153510860501336">Hoher Kontrast ist deaktiviert.</translation>
 <translation id="1703735871906654364">Tastaturnavigation</translation>
 <translation id="7384431257964758081">Hoher Kontrast ist aktiviert.</translation>
+<translation id="6550675742724504774">Optionen</translation>
 <translation id="5650358096585648000">Visuelles Feedback</translation>
 <translation id="4388820049312272371">Cursorposition mit einem kurzen Blitz markieren</translation>
 <translation id="4023902424053835668">Navigieren Sie mit den Pfeiltasten durch Webseitentext.</translation>

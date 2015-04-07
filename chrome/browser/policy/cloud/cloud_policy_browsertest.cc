@@ -43,6 +43,7 @@
 #include "policy/policy_constants.h"
 #include "policy/proto/chrome_settings.pb.h"
 #include "policy/proto/cloud_policy.pb.h"
+#include "policy/proto/device_management_backend.pb.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -209,7 +210,7 @@ class CloudPolicyTest : public InProcessBrowserTest,
 
     std::string url = test_server_->GetServiceURL().spec();
 
-    CommandLine* command_line = CommandLine::ForCurrentProcess();
+    base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
     command_line->AppendSwitchASCII(switches::kDeviceManagementUrl, url);
 
     invalidation::ProfileInvalidationProviderFactory::GetInstance()->
@@ -266,8 +267,8 @@ class CloudPolicyTest : public InProcessBrowserTest,
         em::DeviceRegisterRequest::BROWSER;
 #endif
     policy_manager->core()->client()->Register(
-        registration_type, "bogus", std::string(), false, std::string(),
-        std::string());
+        registration_type, em::DeviceRegisterRequest::FLAVOR_USER_REGISTRATION,
+        "bogus", std::string(), std::string(), std::string());
     run_loop.Run();
     Mock::VerifyAndClearExpectations(&observer);
     policy_manager->core()->client()->RemoveObserver(&observer);

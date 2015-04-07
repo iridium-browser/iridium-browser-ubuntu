@@ -106,10 +106,16 @@ class DefaultUnsignalledSsrcHandler : public UnsignalledSsrcHandler {
   VideoRenderer* default_renderer_;
 };
 
+// TODO(pbos): Remove this class and just inline configuring code.
 class WebRtcVideoEncoderFactory2 {
  public:
   virtual ~WebRtcVideoEncoderFactory2();
   virtual std::vector<webrtc::VideoStream> CreateVideoStreams(
+      const VideoCodec& codec,
+      const VideoOptions& options,
+      size_t num_streams);
+
+  std::vector<webrtc::VideoStream> CreateSimulcastVideoStreams(
       const VideoCodec& codec,
       const VideoOptions& options,
       size_t num_streams);
@@ -463,7 +469,8 @@ class WebRtcVideoChannel2 : public rtc::MessageHandler,
 
   void FillSenderStats(VideoMediaInfo* info);
   void FillReceiverStats(VideoMediaInfo* info);
-  void FillBandwidthEstimationStats(VideoMediaInfo* info);
+  void FillBandwidthEstimationStats(const webrtc::Call::Stats& stats,
+                                    VideoMediaInfo* info);
 
   uint32_t rtcp_receiver_report_ssrc_;
   bool sending_;
@@ -491,6 +498,7 @@ class WebRtcVideoChannel2 : public rtc::MessageHandler,
   WebRtcVideoEncoderFactory2* const encoder_factory_;
   std::vector<VideoCodecSettings> recv_codecs_;
   std::vector<webrtc::RtpExtension> recv_rtp_extensions_;
+  webrtc::Call::Config::BitrateConfig bitrate_config_;
   VideoOptions options_;
 };
 

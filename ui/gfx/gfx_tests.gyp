@@ -147,6 +147,7 @@
             'font_fallback_win_unittest.cc',
             'icon_util_unittest.cc',
             'icon_util_unittests.rc',
+            'path_win_unittest.cc',
             'platform_font_win_unittest.cc',
           ],
           'msvs_settings': {
@@ -187,6 +188,30 @@
             'test_suite_name': 'gfx_unittests',
           },
           'includes': [ '../../build/apk_test.gypi' ],
+        },
+      ],
+    }],
+    ['test_isolation_mode != "noop"', {
+      'targets': [
+        {
+          'target_name': 'gfx_unittests_run',
+          'type': 'none',
+          'dependencies': [
+            'gfx_unittests',
+          ],
+          'includes': [
+            '../../build/isolate.gypi',
+          ],
+          'sources': [
+            'gfx_unittests.isolate',
+          ],
+          'conditions': [
+            ['use_x11 == 1', {
+              'dependencies': [
+                '../../tools/xdisplaycheck/xdisplaycheck.gyp:xdisplaycheck',
+              ],
+            }],
+          ],
         },
       ],
     }],

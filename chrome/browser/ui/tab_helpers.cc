@@ -28,8 +28,9 @@
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
 #include "chrome/browser/ui/search/search_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
+#include "chrome/browser/ui/tab_dialogs.h"
 #include "chrome/common/chrome_switches.h"
-#include "components/autofill/content/browser/content_autofill_driver.h"
+#include "components/autofill/content/browser/content_autofill_driver_factory.h"
 #include "components/autofill/core/browser/autofill_manager.h"
 #include "components/dom_distiller/content/web_contents_main_frame_observer.h"
 #include "components/password_manager/core/browser/password_manager.h"
@@ -52,8 +53,8 @@
 #include "chrome/browser/ui/search_engines/search_engine_tab_helper.h"
 #include "chrome/browser/ui/sync/tab_contents_synced_tab_delegate.h"
 #include "chrome/browser/ui/website_settings/permission_bubble_manager.h"
-#include "chrome/browser/ui/zoom/zoom_controller.h"
 #include "components/pdf/browser/pdf_web_contents_helper.h"
+#include "components/ui/zoom/zoom_controller.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #endif  // defined(OS_ANDROID)
 
@@ -72,7 +73,7 @@
 #include "extensions/browser/view_type_utils.h"
 #endif
 
-#if defined(ENABLE_MANAGED_USERS)
+#if defined(ENABLE_SUPERVISED_USERS)
 #include "chrome/browser/supervised_user/supervised_user_navigation_observer.h"
 #endif
 
@@ -123,13 +124,13 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
 #if !defined(OS_ANDROID)
   // ZoomController comes before common tab helpers since ChromeAutofillClient
   // may want to register as a ZoomObserver with it.
-  ZoomController::CreateForWebContents(web_contents);
+  ui_zoom::ZoomController::CreateForWebContents(web_contents);
 #endif
 
   // --- Common tab helpers ---
 
   autofill::ChromeAutofillClient::CreateForWebContents(web_contents);
-  autofill::ContentAutofillDriver::CreateForWebContentsAndDelegate(
+  autofill::ContentAutofillDriverFactory::CreateForWebContentsAndDelegate(
       web_contents,
       autofill::ChromeAutofillClient::FromWebContents(web_contents),
       g_browser_process->GetApplicationLocale(),
@@ -148,9 +149,7 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
   NavigationMetricsRecorder::CreateForWebContents(web_contents);
   PopupBlockerTabHelper::CreateForWebContents(web_contents);
   PrefsTabHelper::CreateForWebContents(web_contents);
-  prerender::PrerenderTabHelper::CreateForWebContentsWithPasswordManager(
-      web_contents,
-      ChromePasswordManagerClient::GetManagerFromWebContents(web_contents));
+  prerender::PrerenderTabHelper::CreateForWebContents(web_contents);
   SearchTabHelper::CreateForWebContents(web_contents);
   // TODO(vabr): Remove TabSpecificContentSettings from here once their function
   // is taken over by ChromeContentSettingsClient. http://crbug.com/387075
@@ -182,6 +181,7 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
   safe_browsing::SafeBrowsingTabObserver::CreateForWebContents(web_contents);
   SearchEngineTabHelper::CreateForWebContents(web_contents);
   TabContentsSyncedTabDelegate::CreateForWebContents(web_contents);
+  TabDialogs::CreateForWebContents(web_contents);
   ThumbnailTabHelper::CreateForWebContents(web_contents);
   web_modal::WebContentsModalDialogManager::CreateForWebContents(web_contents);
 #endif
@@ -200,7 +200,7 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
   extensions::TabHelper::CreateForWebContents(web_contents);
 #endif
 
-#if defined(ENABLE_MANAGED_USERS)
+#if defined(ENABLE_SUPERVISED_USERS)
   SupervisedUserNavigationObserver::CreateForWebContents(web_contents);
 #endif
 
@@ -213,7 +213,7 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
 #endif  // defined(ENABLE_PRINT_PREVIEW)
 #endif  // defined(ENABLE_PRINTING) && !defined(OS_ANDROID)
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnableDomDistiller)) {
     dom_distiller::WebContentsMainFrameObserver::CreateForWebContents(
         web_contents);
@@ -230,9 +230,7 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
                                      OneClickSigninHelper::CAN_OFFER_FOR_ALL,
                                      std::string(),
                                      NULL)) {
-    OneClickSigninHelper::CreateForWebContentsWithPasswordManager(
-        web_contents,
-        ChromePasswordManagerClient::GetManagerFromWebContents(web_contents));
+    OneClickSigninHelper::CreateForWebContents(web_contents);
   }
 #endif
 

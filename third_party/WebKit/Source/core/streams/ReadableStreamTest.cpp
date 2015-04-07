@@ -46,10 +46,10 @@ private:
     {
     }
 
-    virtual ScriptValue call(ScriptValue value) override
+    ScriptValue call(ScriptValue value) override
     {
         ASSERT(!value.isEmpty());
-        *m_value = toCoreString(value.v8Value()->ToString());
+        *m_value = toCoreString(value.v8Value()->ToString(scriptState()->isolate()));
         return value;
     }
 
@@ -59,10 +59,27 @@ private:
 class MockUnderlyingSource : public GarbageCollectedFinalized<MockUnderlyingSource>, public UnderlyingSource {
     USING_GARBAGE_COLLECTED_MIXIN(MockUnderlyingSource);
 public:
-    virtual ~MockUnderlyingSource() { }
+    ~MockUnderlyingSource() override { }
+    virtual void trace(Visitor* visitor) override
+    {
+        UnderlyingSource::trace(visitor);
+    }
 
     MOCK_METHOD0(pullSource, void());
     MOCK_METHOD2(cancelSource, ScriptPromise(ScriptState*, ScriptValue));
+};
+
+class PermissiveStrategy : public StringStream::Strategy {
+public:
+    bool shouldApplyBackpressure(size_t, ReadableStream*) override { return false; }
+};
+
+class MockStrategy : public StringStream::Strategy {
+public:
+    static ::testing::StrictMock<MockStrategy>* create() { return new ::testing::StrictMock<MockStrategy>; }
+
+    MOCK_METHOD2(shouldApplyBackpressure, bool(size_t, ReadableStream*));
+    MOCK_METHOD2(size, size_t(const String&, ReadableStream*));
 };
 
 class ThrowError {
@@ -91,7 +108,7 @@ public:
     {
     }
 
-    virtual ~ReadableStreamTest()
+    ~ReadableStreamTest() override
     {
     }
 
@@ -103,10 +120,34 @@ public:
         return StringCapturingFunction::createFunction(scriptState(), value);
     }
 
+    StringStream* construct(MockStrategy* strategy)
+    {
+        Checkpoint checkpoint;
+        {
+            InSequence s;
+            EXPECT_CALL(checkpoint, Call(0));
+            EXPECT_CALL(*strategy, shouldApplyBackpressure(0, _)).WillOnce(Return(true));
+            EXPECT_CALL(checkpoint, Call(1));
+        }
+        StringStream* stream = new StringStream(scriptState()->executionContext(), m_underlyingSource, strategy);
+        checkpoint.Call(0);
+        stream->didSourceStart();
+        checkpoint.Call(1);
+        return stream;
+    }
     StringStream* construct()
     {
-        StringStream* stream = new StringStream(scriptState()->executionContext(), m_underlyingSource);
+        Checkpoint checkpoint;
+        {
+            InSequence s;
+            EXPECT_CALL(checkpoint, Call(0));
+            EXPECT_CALL(*m_underlyingSource, pullSource()).Times(1);
+            EXPECT_CALL(checkpoint, Call(1));
+        }
+        StringStream* stream = new StringStream(scriptState()->executionContext(), m_underlyingSource, new PermissiveStrategy);
+        checkpoint.Call(0);
         stream->didSourceStart();
+        checkpoint.Call(1);
         return stream;
     }
 
@@ -118,6 +159,14 @@ public:
 
 TEST_F(ReadableStreamTest, Start)
 {
+    Checkpoint checkpoint;
+    {
+        InSequence s;
+        EXPECT_CALL(checkpoint, Call(0));
+        EXPECT_CALL(*m_underlyingSource, pullSource()).Times(1);
+        EXPECT_CALL(checkpoint, Call(1));
+    }
+
     StringStream* stream = new StringStream(scriptState()->executionContext(), m_underlyingSource);
     EXPECT_FALSE(m_exceptionState.hadException());
     EXPECT_FALSE(stream->isStarted());
@@ -125,12 +174,18 @@ TEST_F(ReadableStreamTest, Start)
     EXPECT_FALSE(stream->isPulling());
     EXPECT_EQ(stream->state(), ReadableStream::Waiting);
 
+    checkpoint.Call(0);
     stream->didSourceStart();
+    checkpoint.Call(1);
 
     EXPECT_TRUE(stream->isStarted());
     EXPECT_FALSE(stream->isDraining());
-    EXPECT_FALSE(stream->isPulling());
+    EXPECT_TRUE(stream->isPulling());
     EXPECT_EQ(stream->state(), ReadableStream::Waiting);
+
+    // We need to call |error| in order to make
+    // ActiveDOMObject::hasPendingActivity return false.
+    stream->error(DOMException::create(AbortError, "done"));
 }
 
 TEST_F(ReadableStreamTest, StartFail)
@@ -157,23 +212,15 @@ TEST_F(ReadableStreamTest, WaitOnWaiting)
 
     EXPECT_EQ(ReadableStream::Waiting, stream->state());
     EXPECT_TRUE(stream->isStarted());
-    EXPECT_FALSE(stream->isPulling());
+    EXPECT_TRUE(stream->isPulling());
 
-    {
-        InSequence s;
-        EXPECT_CALL(checkpoint, Call(0));
-        EXPECT_CALL(*m_underlyingSource, pullSource()).Times(1);
-        EXPECT_CALL(checkpoint, Call(1));
-    }
-
-    checkpoint.Call(0);
-    ScriptPromise p = stream->wait(scriptState());
-    ScriptPromise q = stream->wait(scriptState());
-    checkpoint.Call(1);
+    ScriptPromise p = stream->ready(scriptState());
+    ScriptPromise q = stream->ready(scriptState());
 
     EXPECT_EQ(ReadableStream::Waiting, stream->state());
-    EXPECT_TRUE(stream->isPulling());
     EXPECT_EQ(q, p);
+
+    stream->error(DOMException::create(AbortError, "done"));
 }
 
 TEST_F(ReadableStreamTest, WaitDuringStarting)
@@ -188,20 +235,20 @@ TEST_F(ReadableStreamTest, WaitDuringStarting)
     {
         InSequence s;
         EXPECT_CALL(checkpoint, Call(0));
-        EXPECT_CALL(checkpoint, Call(1));
         EXPECT_CALL(*m_underlyingSource, pullSource()).Times(1);
+        EXPECT_CALL(checkpoint, Call(1));
     }
 
+    stream->ready(scriptState());
     checkpoint.Call(0);
-    stream->wait(scriptState());
+    stream->didSourceStart();
     checkpoint.Call(1);
 
-    EXPECT_TRUE(stream->isPulling());
-
-    stream->didSourceStart();
-
     EXPECT_EQ(ReadableStream::Waiting, stream->state());
+    EXPECT_TRUE(stream->isStarted());
     EXPECT_TRUE(stream->isPulling());
+
+    stream->error(DOMException::create(AbortError, "done"));
 }
 
 TEST_F(ReadableStreamTest, WaitAndError)
@@ -209,12 +256,7 @@ TEST_F(ReadableStreamTest, WaitAndError)
     StringStream* stream = construct();
     String onFulfilled, onRejected;
 
-    {
-        InSequence s;
-        EXPECT_CALL(*m_underlyingSource, pullSource()).Times(1);
-    }
-
-    ScriptPromise promise = stream->wait(scriptState());
+    ScriptPromise promise = stream->ready(scriptState());
     promise.then(createCaptor(&onFulfilled), createCaptor(&onRejected));
     EXPECT_EQ(ReadableStream::Waiting, stream->state());
     EXPECT_TRUE(stream->isPulling());
@@ -226,7 +268,7 @@ TEST_F(ReadableStreamTest, WaitAndError)
 
     isolate()->RunMicrotasks();
     EXPECT_TRUE(onFulfilled.isNull());
-    EXPECT_EQ(promise, stream->wait(scriptState()));
+    EXPECT_EQ(promise, stream->ready(scriptState()));
     EXPECT_EQ("NotFoundError: hello, error", onRejected);
 }
 
@@ -264,7 +306,7 @@ TEST_F(ReadableStreamTest, EnqueueAndWait)
     EXPECT_TRUE(result);
     EXPECT_EQ(ReadableStream::Readable, stream->state());
 
-    stream->wait(scriptState()).then(createCaptor(&onFulfilled), createCaptor(&onRejected));
+    stream->ready(scriptState()).then(createCaptor(&onFulfilled), createCaptor(&onRejected));
     EXPECT_EQ(ReadableStream::Readable, stream->state());
     EXPECT_FALSE(stream->isPulling());
     EXPECT_TRUE(onFulfilled.isNull());
@@ -275,6 +317,8 @@ TEST_F(ReadableStreamTest, EnqueueAndWait)
     EXPECT_FALSE(stream->isPulling());
     EXPECT_EQ("undefined", onFulfilled);
     EXPECT_TRUE(onRejected.isNull());
+
+    stream->error(DOMException::create(AbortError, "done"));
 }
 
 TEST_F(ReadableStreamTest, WaitAndEnqueue)
@@ -283,12 +327,7 @@ TEST_F(ReadableStreamTest, WaitAndEnqueue)
     String onFulfilled, onRejected;
     EXPECT_EQ(ReadableStream::Waiting, stream->state());
 
-    {
-        InSequence s;
-        EXPECT_CALL(*m_underlyingSource, pullSource()).Times(1);
-    }
-
-    stream->wait(scriptState()).then(createCaptor(&onFulfilled), createCaptor(&onRejected));
+    stream->ready(scriptState()).then(createCaptor(&onFulfilled), createCaptor(&onRejected));
     isolate()->RunMicrotasks();
 
     EXPECT_EQ(ReadableStream::Waiting, stream->state());
@@ -306,6 +345,8 @@ TEST_F(ReadableStreamTest, WaitAndEnqueue)
     isolate()->RunMicrotasks();
     EXPECT_EQ("undefined", onFulfilled);
     EXPECT_TRUE(onRejected.isNull());
+
+    stream->error(DOMException::create(AbortError, "done"));
 }
 
 TEST_F(ReadableStreamTest, WaitAndEnqueueAndError)
@@ -314,12 +355,7 @@ TEST_F(ReadableStreamTest, WaitAndEnqueueAndError)
     String onFulfilled, onRejected;
     EXPECT_EQ(ReadableStream::Waiting, stream->state());
 
-    {
-        InSequence s;
-        EXPECT_CALL(*m_underlyingSource, pullSource()).Times(1);
-    }
-
-    ScriptPromise promise = stream->wait(scriptState());
+    ScriptPromise promise = stream->ready(scriptState());
     promise.then(createCaptor(&onFulfilled), createCaptor(&onRejected));
     isolate()->RunMicrotasks();
 
@@ -342,7 +378,7 @@ TEST_F(ReadableStreamTest, WaitAndEnqueueAndError)
     stream->error(DOMException::create(NotFoundError, "error"));
     EXPECT_EQ(ReadableStream::Errored, stream->state());
 
-    EXPECT_NE(promise, stream->wait(scriptState()));
+    EXPECT_NE(promise, stream->ready(scriptState()));
 }
 
 TEST_F(ReadableStreamTest, CloseWhenWaiting)
@@ -352,13 +388,8 @@ TEST_F(ReadableStreamTest, CloseWhenWaiting)
 
     StringStream* stream = construct();
 
-    {
-        InSequence s;
-        EXPECT_CALL(*m_underlyingSource, pullSource()).Times(1);
-    }
-
     EXPECT_EQ(ReadableStream::Waiting, stream->state());
-    stream->wait(scriptState()).then(createCaptor(&onWaitFulfilled), createCaptor(&onWaitRejected));
+    stream->ready(scriptState()).then(createCaptor(&onWaitFulfilled), createCaptor(&onWaitRejected));
     stream->closed(scriptState()).then(createCaptor(&onClosedFulfilled), createCaptor(&onClosedRejected));
 
     isolate()->RunMicrotasks();
@@ -404,6 +435,8 @@ TEST_F(ReadableStreamTest, ReadWhenWaiting)
     EXPECT_TRUE(m_exceptionState.hadException());
     EXPECT_EQ(V8TypeError, m_exceptionState.code());
     EXPECT_EQ("read is called while state is waiting", m_exceptionState.message());
+
+    stream->error(DOMException::create(AbortError, "done"));
 }
 
 TEST_F(ReadableStreamTest, ReadWhenClosed)
@@ -453,7 +486,7 @@ TEST_F(ReadableStreamTest, EnqueuedAndRead)
     }
 
     stream->enqueue("hello");
-    ScriptPromise promise = stream->wait(scriptState());
+    ScriptPromise promise = stream->ready(scriptState());
     EXPECT_EQ(ReadableStream::Readable, stream->state());
     EXPECT_FALSE(stream->isPulling());
 
@@ -467,15 +500,18 @@ TEST_F(ReadableStreamTest, EnqueuedAndRead)
     EXPECT_TRUE(stream->isPulling());
     EXPECT_FALSE(stream->isDraining());
 
-    ScriptPromise newPromise = stream->wait(scriptState());
+    ScriptPromise newPromise = stream->ready(scriptState());
     newPromise.then(createCaptor(&onFulfilled), createCaptor(&onRejected));
     isolate()->RunMicrotasks();
     EXPECT_NE(promise, newPromise);
     EXPECT_TRUE(onFulfilled.isNull());
     EXPECT_TRUE(onRejected.isNull());
+
+    stream->error(DOMException::create(AbortError, "done"));
+    isolate()->RunMicrotasks();
 }
 
-TEST_F(ReadableStreamTest, EnqueTwiceAndRead)
+TEST_F(ReadableStreamTest, EnqueueTwiceAndRead)
 {
     StringStream* stream = construct();
     Checkpoint checkpoint;
@@ -483,33 +519,35 @@ TEST_F(ReadableStreamTest, EnqueTwiceAndRead)
     {
         InSequence s;
         EXPECT_CALL(checkpoint, Call(0));
+        EXPECT_CALL(*m_underlyingSource, pullSource()).Times(1);
         EXPECT_CALL(checkpoint, Call(1));
     }
 
     EXPECT_TRUE(stream->enqueue("hello"));
     EXPECT_TRUE(stream->enqueue("bye"));
-    ScriptPromise promise = stream->wait(scriptState());
+    ScriptPromise promise = stream->ready(scriptState());
     EXPECT_EQ(ReadableStream::Readable, stream->state());
     EXPECT_FALSE(stream->isPulling());
 
-    checkpoint.Call(0);
     String chunk;
+    checkpoint.Call(0);
     EXPECT_TRUE(stream->read(scriptState(), m_exceptionState).toString(chunk));
     checkpoint.Call(1);
     EXPECT_FALSE(m_exceptionState.hadException());
     EXPECT_EQ("hello", chunk);
     EXPECT_EQ(ReadableStream::Readable, stream->state());
-    EXPECT_FALSE(stream->isPulling());
+    EXPECT_TRUE(stream->isPulling());
     EXPECT_FALSE(stream->isDraining());
 
-    ScriptPromise newPromise = stream->wait(scriptState());
+    ScriptPromise newPromise = stream->ready(scriptState());
     EXPECT_EQ(promise, newPromise);
+
+    stream->error(DOMException::create(AbortError, "done"));
 }
 
 TEST_F(ReadableStreamTest, CloseWhenReadable)
 {
     StringStream* stream = construct();
-    String onWaitFulfilled, onWaitRejected;
     String onClosedFulfilled, onClosedRejected;
 
     stream->closed(scriptState()).then(createCaptor(&onClosedFulfilled), createCaptor(&onClosedRejected));
@@ -518,7 +556,7 @@ TEST_F(ReadableStreamTest, CloseWhenReadable)
     stream->close();
     EXPECT_FALSE(stream->enqueue("should be ignored"));
 
-    ScriptPromise promise = stream->wait(scriptState());
+    ScriptPromise promise = stream->ready(scriptState());
     EXPECT_EQ(ReadableStream::Readable, stream->state());
     EXPECT_FALSE(stream->isPulling());
     EXPECT_TRUE(stream->isDraining());
@@ -526,7 +564,7 @@ TEST_F(ReadableStreamTest, CloseWhenReadable)
     String chunk;
     EXPECT_TRUE(stream->read(scriptState(), m_exceptionState).toString(chunk));
     EXPECT_EQ("hello", chunk);
-    EXPECT_EQ(promise, stream->wait(scriptState()));
+    EXPECT_EQ(promise, stream->ready(scriptState()));
 
     isolate()->RunMicrotasks();
 
@@ -538,21 +576,16 @@ TEST_F(ReadableStreamTest, CloseWhenReadable)
     EXPECT_EQ("bye", chunk);
     EXPECT_FALSE(m_exceptionState.hadException());
 
-    EXPECT_NE(promise, stream->wait(scriptState()));
-    stream->wait(scriptState()).then(createCaptor(&onWaitFulfilled), createCaptor(&onWaitRejected));
+    EXPECT_EQ(promise, stream->ready(scriptState()));
 
     EXPECT_EQ(ReadableStream::Closed, stream->state());
     EXPECT_FALSE(stream->isPulling());
     EXPECT_TRUE(stream->isDraining());
 
-    EXPECT_TRUE(onWaitFulfilled.isNull());
-    EXPECT_TRUE(onWaitRejected.isNull());
     EXPECT_TRUE(onClosedFulfilled.isNull());
     EXPECT_TRUE(onClosedRejected.isNull());
 
     isolate()->RunMicrotasks();
-    EXPECT_EQ("undefined", onWaitFulfilled);
-    EXPECT_TRUE(onWaitRejected.isNull());
     EXPECT_EQ("undefined", onClosedFulfilled);
     EXPECT_TRUE(onClosedRejected.isNull());
 }
@@ -604,17 +637,16 @@ TEST_F(ReadableStreamTest, CancelWhenWaiting)
 
     {
         InSequence s;
-        EXPECT_CALL(*m_underlyingSource, pullSource()).Times(1);
         EXPECT_CALL(*m_underlyingSource, cancelSource(scriptState(), reason)).WillOnce(Return(promise));
     }
 
     EXPECT_EQ(ReadableStream::Waiting, stream->state());
-    ScriptPromise wait = stream->wait(scriptState());
-    EXPECT_EQ(promise, stream->cancel(scriptState(), reason));
+    ScriptPromise ready = stream->ready(scriptState());
+    EXPECT_NE(promise, stream->cancel(scriptState(), reason));
     EXPECT_EQ(ReadableStream::Closed, stream->state());
-    EXPECT_EQ(stream->wait(scriptState()), wait);
+    EXPECT_EQ(stream->ready(scriptState()), ready);
 
-    wait.then(createCaptor(&onFulfilled), createCaptor(&onRejected));
+    ready.then(createCaptor(&onFulfilled), createCaptor(&onRejected));
     EXPECT_TRUE(onFulfilled.isNull());
     EXPECT_TRUE(onRejected.isNull());
 
@@ -627,6 +659,7 @@ TEST_F(ReadableStreamTest, CancelWhenReadable)
 {
     StringStream* stream = construct();
     String onFulfilled, onRejected;
+    String onCancelFulfilled, onCancelRejected;
     ScriptValue reason(scriptState(), v8String(scriptState()->isolate(), "reason"));
     ScriptPromise promise = ScriptPromise::cast(scriptState(), v8String(scriptState()->isolate(), "hello"));
 
@@ -636,26 +669,113 @@ TEST_F(ReadableStreamTest, CancelWhenReadable)
     }
 
     stream->enqueue("hello");
-    ScriptPromise wait = stream->wait(scriptState());
+    ScriptPromise ready = stream->ready(scriptState());
     EXPECT_EQ(ReadableStream::Readable, stream->state());
-    EXPECT_EQ(promise, stream->cancel(scriptState(), reason));
+
+    ScriptPromise cancelResult = stream->cancel(scriptState(), reason);
+    cancelResult.then(createCaptor(&onCancelFulfilled), createCaptor(&onCancelRejected));
+
+    EXPECT_NE(promise, cancelResult);
     EXPECT_EQ(ReadableStream::Closed, stream->state());
 
-    EXPECT_NE(stream->wait(scriptState()), wait);
+    EXPECT_EQ(stream->ready(scriptState()), ready);
 
-    stream->wait(scriptState()).then(createCaptor(&onFulfilled), createCaptor(&onRejected));
-    EXPECT_TRUE(onFulfilled.isNull());
-    EXPECT_TRUE(onRejected.isNull());
+    EXPECT_TRUE(onCancelFulfilled.isNull());
+    EXPECT_TRUE(onCancelRejected.isNull());
 
     isolate()->RunMicrotasks();
-    EXPECT_EQ("undefined", onFulfilled);
-    EXPECT_TRUE(onRejected.isNull());
+    EXPECT_EQ("undefined", onCancelFulfilled);
+    EXPECT_TRUE(onCancelRejected.isNull());
 }
 
 TEST_F(ReadableStreamTest, ReadableArrayBufferCompileTest)
 {
-    // This test tests if ReadableStreamImpl<DOMArrayBuffer> can be instantiated.
-    new ReadableStreamImpl<ReadableStreamChunkTypeTraits<DOMArrayBuffer> >(scriptState()->executionContext(), m_underlyingSource);
+    // This test tests if ReadableStreamImpl<DOMArrayBuffer> can be
+    // instantiated.
+    new ReadableStreamImpl<ReadableStreamChunkTypeTraits<DOMArrayBuffer>>(scriptState()->executionContext(), m_underlyingSource);
+}
+
+TEST_F(ReadableStreamTest, BackpressureOnEnqueueing)
+{
+    auto strategy = MockStrategy::create();
+    Checkpoint checkpoint;
+
+    StringStream* stream = construct(strategy);
+    EXPECT_EQ(ReadableStream::Waiting, stream->state());
+
+    {
+        InSequence s;
+        EXPECT_CALL(checkpoint, Call(0));
+        EXPECT_CALL(*strategy, size(String("hello"), stream)).WillOnce(Return(1));
+        EXPECT_CALL(*strategy, shouldApplyBackpressure(1, stream)).WillOnce(Return(false));
+        EXPECT_CALL(checkpoint, Call(1));
+        EXPECT_CALL(checkpoint, Call(2));
+        EXPECT_CALL(*strategy, size(String("world"), stream)).WillOnce(Return(2));
+        EXPECT_CALL(*strategy, shouldApplyBackpressure(3, stream)).WillOnce(Return(true));
+        EXPECT_CALL(checkpoint, Call(3));
+    }
+    checkpoint.Call(0);
+    bool result = stream->enqueue("hello");
+    checkpoint.Call(1);
+    EXPECT_TRUE(result);
+
+    checkpoint.Call(2);
+    result = stream->enqueue("world");
+    checkpoint.Call(3);
+    EXPECT_FALSE(result);
+
+    stream->error(DOMException::create(AbortError, "done"));
+}
+
+TEST_F(ReadableStreamTest, BackpressureOnReading)
+{
+    auto strategy = MockStrategy::create();
+    Checkpoint checkpoint;
+
+    StringStream* stream = construct(strategy);
+    EXPECT_EQ(ReadableStream::Waiting, stream->state());
+
+    {
+        InSequence s;
+        EXPECT_CALL(*strategy, size(String("hello"), stream)).WillOnce(Return(2));
+        EXPECT_CALL(*strategy, shouldApplyBackpressure(2, stream)).WillOnce(Return(false));
+        EXPECT_CALL(*strategy, size(String("world"), stream)).WillOnce(Return(3));
+        EXPECT_CALL(*strategy, shouldApplyBackpressure(5, stream)).WillOnce(Return(false));
+
+        EXPECT_CALL(checkpoint, Call(0));
+        EXPECT_CALL(*strategy, shouldApplyBackpressure(3, stream)).WillOnce(Return(false));
+        EXPECT_CALL(*m_underlyingSource, pullSource()).Times(1);
+        EXPECT_CALL(checkpoint, Call(1));
+        // shouldApplyBackpressure and pullSource are not called because the
+        // stream is pulling.
+        EXPECT_CALL(checkpoint, Call(2));
+        EXPECT_CALL(*strategy, size(String("foo"), stream)).WillOnce(Return(4));
+        EXPECT_CALL(*strategy, shouldApplyBackpressure(4, stream)).WillOnce(Return(true));
+        EXPECT_CALL(*strategy, size(String("bar"), stream)).WillOnce(Return(5));
+        EXPECT_CALL(*strategy, shouldApplyBackpressure(9, stream)).WillOnce(Return(true));
+        EXPECT_CALL(checkpoint, Call(3));
+        EXPECT_CALL(*strategy, shouldApplyBackpressure(5, stream)).WillOnce(Return(true));
+        EXPECT_CALL(checkpoint, Call(4));
+    }
+    stream->enqueue("hello");
+    stream->enqueue("world");
+
+    String chunk;
+    checkpoint.Call(0);
+    EXPECT_TRUE(stream->read(scriptState(), m_exceptionState).toString(chunk));
+    EXPECT_EQ("hello", chunk);
+    checkpoint.Call(1);
+    EXPECT_TRUE(stream->read(scriptState(), m_exceptionState).toString(chunk));
+    EXPECT_EQ("world", chunk);
+    checkpoint.Call(2);
+    stream->enqueue("foo");
+    stream->enqueue("bar");
+    checkpoint.Call(3);
+    EXPECT_TRUE(stream->read(scriptState(), m_exceptionState).toString(chunk));
+    EXPECT_EQ("foo", chunk);
+    checkpoint.Call(4);
+
+    stream->error(DOMException::create(AbortError, "done"));
 }
 
 } // namespace blink

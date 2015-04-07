@@ -12,12 +12,9 @@
 #include "{{filename}}"
 {% endfor %}
 
-{% block initialize_script_wrappable %}{% endblock %}
 namespace blink {
 {% set to_active_dom_object = '%s::toActiveDOMObject' % v8_class
                               if is_active_dom_object else '0' %}
-{% set to_event_target = '%s::toEventTarget' % v8_class
-                         if is_event_target else '0' %}
 {% set visit_dom_wrapper = '%s::visitDOMWrapper' % v8_class
                            if has_visit_dom_wrapper else '0' %}
 {% set parent_wrapper_type_info = '&V8%s::wrapperTypeInfo' % parent_interface
@@ -28,9 +25,8 @@ namespace blink {
 
 {% set wrapper_type_info_const = '' if has_partial_interface else 'const ' %}
 {% if not is_partial %}
-{{wrapper_type_info_const}}WrapperTypeInfo {{v8_class}}::wrapperTypeInfo = { gin::kEmbedderBlink, {{dom_template}}, {{v8_class}}::refObject, {{v8_class}}::derefObject, {{v8_class}}::trace, {{to_active_dom_object}}, {{to_event_target}}, {{visit_dom_wrapper}}, {{v8_class}}::installConditionallyEnabledMethods, {{v8_class}}::installConditionallyEnabledProperties, {{parent_wrapper_type_info}}, WrapperTypeInfo::{{wrapper_type_prototype}}, WrapperTypeInfo::{{wrapper_class_id}}, WrapperTypeInfo::{{lifetime}}, WrapperTypeInfo::{{gc_type}} };
+{{wrapper_type_info_const}}WrapperTypeInfo {{v8_class}}::wrapperTypeInfo = { gin::kEmbedderBlink, {{dom_template}}, {{v8_class}}::refObject, {{v8_class}}::derefObject, {{v8_class}}::trace, {{to_active_dom_object}}, {{visit_dom_wrapper}}, {{v8_class}}::installConditionallyEnabledMethods, {{v8_class}}::installConditionallyEnabledProperties, {{parent_wrapper_type_info}}, WrapperTypeInfo::{{wrapper_type_prototype}}, WrapperTypeInfo::{{wrapper_class_id}}, WrapperTypeInfo::{{event_target_inheritance}}, WrapperTypeInfo::{{lifetime}}, WrapperTypeInfo::{{gc_type}} };
 
-{% if is_script_wrappable %}
 // This static member must be declared by DEFINE_WRAPPERTYPEINFO in {{cpp_class}}.h.
 // For details, see the comment of DEFINE_WRAPPERTYPEINFO in
 // bindings/core/v8/ScriptWrappable.h.
@@ -39,7 +35,6 @@ template<>
 {% endif %}
 const WrapperTypeInfo& {{cpp_class}}::s_wrapperTypeInfo = {{v8_class}}::wrapperTypeInfo;
 
-{% endif %}
 {% endif %}
 {% if not is_array_buffer_or_view %}
 namespace {{cpp_class_or_partial}}V8Internal {
@@ -83,7 +78,7 @@ static void (*{{method.name}}MethodForPartialInterface)(const v8::FunctionCallba
 {% if has_constructor_attributes %}
 static void {{cpp_class}}ConstructorGetter(v8::Local<v8::String>, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    v8::Handle<v8::Value> data = info.Data();
+    v8::Local<v8::Value> data = info.Data();
     ASSERT(data->IsExternal());
     V8PerContextData* perContextData = V8PerContextData::from(info.Holder()->CreationContext());
     if (!perContextData)
@@ -114,7 +109,7 @@ static void {{cpp_class}}ForceSetAttributeOnThis(v8::Local<v8::String> name, v8:
     }
     {% endif %}
     if (info.This()->IsObject())
-        v8::Handle<v8::Object>::Cast(info.This())->ForceSet(name, v8Value);
+        v8::Local<v8::Object>::Cast(info.This())->ForceSet(name, v8Value);
 }
 
 static void {{cpp_class}}ForceSetAttributeOnThisCallback(v8::Local<v8::String> name, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
@@ -145,7 +140,7 @@ bool namedSecurityCheck(v8::Local<v8::Object> host, v8::Local<v8::Value> key, v8
 {# Methods #}
 {% from 'methods.cpp' import generate_method, overload_resolution_method,
        method_callback, origin_safe_method_getter, generate_constructor,
-       method_implemented_in_private_script
+       method_implemented_in_private_script, runtime_determined_length_method
        with context %}
 {% for method in methods %}
 {% if method.should_be_exposed_to_script %}
@@ -154,6 +149,9 @@ bool namedSecurityCheck(v8::Local<v8::Object> host, v8::Local<v8::Value> key, v8
 {{generate_method(method, world_suffix)}}
 {% endif %}
 {% if method.overloads and method.overloads.visible %}
+{% if method.overloads.runtime_determined_lengths %}
+{{runtime_determined_length_method(method.overloads)}}
+{% endif %}
 {{overload_resolution_method(method.overloads, world_suffix)}}
 {% endif %}
 {% if not method.overload_index or method.overloads %}
@@ -265,9 +263,9 @@ static const V8DOMConfiguration::MethodConfiguration {{v8_class}}Methods[] = {
 {% from 'attributes.cpp' import attribute_configuration with context %}
 {% from 'constants.cpp' import install_constants with context %}
 {% if has_partial_interface or is_partial %}
-void {{v8_class_or_partial}}::install{{v8_class}}Template(v8::Handle<v8::FunctionTemplate> functionTemplate, v8::Isolate* isolate)
+void {{v8_class_or_partial}}::install{{v8_class}}Template(v8::Local<v8::FunctionTemplate> functionTemplate, v8::Isolate* isolate)
 {% else %}
-static void install{{v8_class}}Template(v8::Handle<v8::FunctionTemplate> functionTemplate, v8::Isolate* isolate)
+static void install{{v8_class}}Template(v8::Local<v8::FunctionTemplate> functionTemplate, v8::Isolate* isolate)
 {% endif %}
 {
     {% if is_partial %}
@@ -282,12 +280,12 @@ static void install{{v8_class}}Template(v8::Handle<v8::FunctionTemplate> functio
            if parent_interface else 'v8::Local<v8::FunctionTemplate>()' %}
     {% if runtime_enabled_function %}
     if (!{{runtime_enabled_function}}())
-        defaultSignature = V8DOMConfiguration::installDOMClassTemplate(functionTemplate, "", {{parent_template}}, {{v8_class}}::internalFieldCount, 0, 0, 0, 0, 0, 0, isolate);
+        defaultSignature = V8DOMConfiguration::installDOMClassTemplate(isolate, functionTemplate, "", {{parent_template}}, {{v8_class}}::internalFieldCount, 0, 0, 0, 0, 0, 0);
     else
     {% endif %}
     {% set runtime_enabled_indent = 4 if runtime_enabled_function else 0 %}
     {% filter indent(runtime_enabled_indent, true) %}
-    defaultSignature = V8DOMConfiguration::installDOMClassTemplate(functionTemplate, "{{interface_name}}", {{parent_template}}, {{v8_class}}::internalFieldCount,
+    defaultSignature = V8DOMConfiguration::installDOMClassTemplate(isolate, functionTemplate, "{{interface_name}}", {{parent_template}}, {{v8_class}}::internalFieldCount,
         {# Test needed as size 0 arrays definitions are not allowed per standard
            (so objects have distinct addresses), which is enforced by MSVC.
            8.5.1 Aggregates [dcl.init.aggr]
@@ -308,8 +306,7 @@ static void install{{v8_class}}Template(v8::Handle<v8::FunctionTemplate> functio
            if method_configuration_methods else (0, 0) %}
         {{attributes_name}}, {{attributes_length}},
         {{accessors_name}}, {{accessors_length}},
-        {{methods_name}}, {{methods_length}},
-        isolate);
+        {{methods_name}}, {{methods_length}});
     {% endfilter %}
 
     {% if constructors or has_custom_constructor or has_event_constructor %}
@@ -361,7 +358,13 @@ static void install{{v8_class}}Template(v8::Handle<v8::FunctionTemplate> functio
     {% set indexed_property_enumerator_callback =
            'indexedPropertyEnumerator<%s>' % cpp_class
            if indexed_property_getter.is_enumerable else '0' %}
-    functionTemplate->{{set_on_template}}()->SetIndexedPropertyHandler({{indexed_property_getter_callback}}, {{indexed_property_setter_callback}}, {{indexed_property_query_callback}}, {{indexed_property_deleter_callback}}, {{indexed_property_enumerator_callback}});
+    {
+        v8::IndexedPropertyHandlerConfiguration config({{indexed_property_getter_callback}}, {{indexed_property_setter_callback}}, {{indexed_property_query_callback}}, {{indexed_property_deleter_callback}}, {{indexed_property_enumerator_callback}});
+        {% if indexed_property_getter.do_not_check_security %}
+        config.flags = v8::PropertyHandlerFlags::kAllCanRead;
+        {% endif %}
+        functionTemplate->{{set_on_template}}()->SetHandler(config);
+    }
     {% endif %}
     {% if named_property_getter %}
     {# if have named properties, MUST have a named property getter #}
@@ -379,7 +382,13 @@ static void install{{v8_class}}Template(v8::Handle<v8::FunctionTemplate> functio
     {% set named_property_enumerator_callback =
            '%sV8Internal::namedPropertyEnumeratorCallback' % cpp_class
            if named_property_getter.is_enumerable else '0' %}
-    functionTemplate->{{set_on_template}}()->SetNamedPropertyHandler({{named_property_getter_callback}}, {{named_property_setter_callback}}, {{named_property_query_callback}}, {{named_property_deleter_callback}}, {{named_property_enumerator_callback}});
+    {
+        v8::NamedPropertyHandlerConfiguration config({{named_property_getter_callback}}, {{named_property_setter_callback}}, {{named_property_query_callback}}, {{named_property_deleter_callback}}, {{named_property_enumerator_callback}});
+        {% if named_property_getter.do_not_check_security %}
+        config.flags = v8::PropertyHandlerFlags::kAllCanRead;
+        {% endif %}
+        functionTemplate->{{set_on_template}}()->SetHandler(config);
+    }
     {% endif %}
     {% if iterator_method %}
     static const V8DOMConfiguration::SymbolKeyedMethodConfiguration symbolKeyedIteratorConfiguration = { v8::Symbol::GetIterator, {{cpp_class_or_partial}}V8Internal::iteratorMethodCallback, 0, V8DOMConfiguration::ExposedToAllScripts };
@@ -396,6 +405,12 @@ static void install{{v8_class}}Template(v8::Handle<v8::FunctionTemplate> functio
     {% for method in custom_registration_methods %}
     {# install_custom_signature #}
     {% filter conditional(method.conditional_string) %}
+    {% filter per_context_enabled(method.overloads.per_context_enabled_function_all
+                                  if method.overloads else
+                                  method.per_context_enabled_function) %}
+    {% filter exposed(method.overloads.exposed_test_all
+                      if method.overloads else
+                      method.exposed_test) %}
     {% filter runtime_enabled(method.overloads.runtime_enabled_function_all
                               if method.overloads else
                               method.runtime_enabled_function) %}
@@ -405,13 +420,15 @@ static void install{{v8_class}}Template(v8::Handle<v8::FunctionTemplate> functio
     {{install_custom_signature(method) | indent}}
     {% endif %}{# is_do_not_check_security #}
     {% endfilter %}{# runtime_enabled() #}
+    {% endfilter %}{# exposed() #}
+    {% endfilter %}{# per_context_enabled() #}
     {% endfilter %}{# conditional() #}
     {% endfor %}
     {% for attribute in attributes if attribute.is_static %}
     {% set getter_callback = '%sV8Internal::%sAttributeGetterCallback' %
            (cpp_class, attribute.name) %}
     {% filter conditional(attribute.conditional_string) %}
-    functionTemplate->SetNativeDataProperty(v8AtomicString(isolate, "{{attribute.name}}"), {{getter_callback}}, {{attribute.setter_callback}}, v8::External::New(isolate, 0), static_cast<v8::PropertyAttribute>(v8::None), v8::Handle<v8::AccessorSignature>(), static_cast<v8::AccessControl>(v8::DEFAULT));
+    functionTemplate->SetNativeDataProperty(v8AtomicString(isolate, "{{attribute.name}}"), {{getter_callback}}, {{attribute.setter_callback}}, v8::External::New(isolate, 0), static_cast<v8::PropertyAttribute>(v8::None), v8::Local<v8::AccessorSignature>(), static_cast<v8::AccessControl>(v8::DEFAULT));
     {% endfilter %}
     {% endfor %}
     {# Special interfaces #}
@@ -455,9 +472,8 @@ static void install{{v8_class}}Template(v8::Handle<v8::FunctionTemplate> functio
 {% endblock %}
 {##############################################################################}
 {% block to_active_dom_object %}{% endblock %}
-{% block to_event_target %}{% endblock %}
 {% block get_shadow_object_template %}{% endblock %}
-{% block deref_object_and_to_v8_no_inline %}{% endblock %}
+{% block ref_object_and_deref_object %}{% endblock %}
 {% for method in methods if method.is_implemented_in_private_script %}
 {{method_implemented_in_private_script(method)}}
 {% endfor %}

@@ -57,12 +57,15 @@ const wchar_t* const kTroublesomeDlls[] = {
   L"cooliris.dll",                // CoolIris.
   L"dockshellhook.dll",           // Stardock Objectdock.
   L"easyhook32.dll",              // GDIPP and others.
+  L"esspd.dll",                   // Samsung Smart Security ESCORT.
   L"googledesktopnetwork3.dll",   // Google Desktop Search v5.
   L"fwhook.dll",                  // PC Tools Firewall Plus.
   L"hookprocesscreation.dll",     // Blumentals Program protector.
   L"hookterminateapis.dll",       // Blumentals and Cyberprinter.
   L"hookprintapis.dll",           // Cyberprinter.
   L"imon.dll",                    // NOD32 Antivirus.
+  L"icatcdll.dll",                // Samsung Smart Security ESCORT.
+  L"icdcnl.dll",                  // Samsung Smart Security ESCORT.
   L"ioloHL.dll",                  // Iolo (System Mechanic).
   L"kloehk.dll",                  // Kaspersky Internet Security.
   L"lawenforcer.dll",             // Spyware-Browser AntiSpyware (Spybro).
@@ -577,7 +580,7 @@ bool InitTargetServices(sandbox::TargetServices* target_services) {
   return sandbox::SBOX_ALL_OK == result;
 }
 
-base::ProcessHandle StartSandboxedProcess(
+base::Process StartSandboxedProcess(
     SandboxedProcessLauncherDelegate* delegate,
     base::CommandLine* cmd_line) {
   const base::CommandLine& browser_command_line =
@@ -602,10 +605,11 @@ base::ProcessHandle StartSandboxedProcess(
   if ((delegate && !delegate->ShouldSandbox()) ||
       browser_command_line.HasSwitch(switches::kNoSandbox) ||
       cmd_line->HasSwitch(switches::kNoSandbox)) {
-    base::ProcessHandle process = 0;
-    base::LaunchProcess(*cmd_line, base::LaunchOptions(), &process);
-    g_broker_services->AddTargetPeer(process);
-    return process;
+    base::Process process =
+        base::LaunchProcess(*cmd_line, base::LaunchOptions());
+    // TODO(rvargas) crbug.com/417532: Don't share a raw handle.
+    g_broker_services->AddTargetPeer(process.Handle());
+    return process.Pass();
   }
 
   sandbox::TargetPolicy* policy = g_broker_services->CreatePolicy();
@@ -616,26 +620,25 @@ base::ProcessHandle StartSandboxedProcess(
                                          sandbox::MITIGATION_DEP_NO_ATL_THUNK |
                                          sandbox::MITIGATION_SEHOP;
 
- if (base::win::GetVersion() >= base::win::VERSION_WIN8 &&
-     type_str == switches::kRendererProcess &&
-     browser_command_line.HasSwitch(
-        switches::kEnableWin32kRendererLockDown)) {
+  if (base::win::GetVersion() >= base::win::VERSION_WIN8 &&
+      type_str == switches::kRendererProcess &&
+      switches::IsWin32kRendererLockdownEnabled()) {
     if (policy->AddRule(sandbox::TargetPolicy::SUBSYS_WIN32K_LOCKDOWN,
                         sandbox::TargetPolicy::FAKE_USER_GDI_INIT,
                         NULL) != sandbox::SBOX_ALL_OK) {
-      return 0;
+      return base::Process();
     }
     mitigations |= sandbox::MITIGATION_WIN32K_DISABLE;
   }
 
   if (policy->SetProcessMitigations(mitigations) != sandbox::SBOX_ALL_OK)
-    return 0;
+    return base::Process();
 
   mitigations = sandbox::MITIGATION_STRICT_HANDLE_CHECKS |
                 sandbox::MITIGATION_DLL_SEARCH_ORDER;
 
   if (policy->SetDelayedProcessMitigations(mitigations) != sandbox::SBOX_ALL_OK)
-    return 0;
+    return base::Process();
 
   SetJobLevel(*cmd_line, sandbox::JOB_LOCKDOWN, 0, policy);
 
@@ -645,7 +648,7 @@ base::ProcessHandle StartSandboxedProcess(
     delegate->PreSandbox(&disable_default_policy, &exposed_dir);
 
   if (!disable_default_policy && !AddPolicyForSandboxedProcess(policy))
-    return 0;
+    return base::Process();
 
   if (type_str == switches::kRendererProcess) {
 #if !defined(NACL_WIN64)
@@ -670,19 +673,19 @@ base::ProcessHandle StartSandboxedProcess(
                              sandbox::TargetPolicy::FILES_ALLOW_ANY,
                              exposed_dir.value().c_str());
     if (result != sandbox::SBOX_ALL_OK)
-      return 0;
+      return base::Process();
 
     base::FilePath exposed_files = exposed_dir.AppendASCII("*");
     result = policy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
                              sandbox::TargetPolicy::FILES_ALLOW_ANY,
                              exposed_files.value().c_str());
     if (result != sandbox::SBOX_ALL_OK)
-      return 0;
+      return base::Process();
   }
 
   if (!AddGenericPolicy(policy)) {
     NOTREACHED();
-    return 0;
+    return base::Process();
   }
 
   if (browser_command_line.HasSwitch(switches::kEnableLogging)) {
@@ -696,7 +699,7 @@ base::ProcessHandle StartSandboxedProcess(
     bool success = true;
     delegate->PreSpawnTarget(policy, &success);
     if (!success)
-      return 0;
+      return base::Process();
   }
 
   TRACE_EVENT_BEGIN_ETW("StartProcessWithAccess::LAUNCHPROCESS", 0, 0);
@@ -716,7 +719,7 @@ base::ProcessHandle StartSandboxedProcess(
       DPLOG(ERROR) << "Failed to launch process";
     else
       DLOG(ERROR) << "Failed to launch process. Error: " << result;
-    return 0;
+    return base::Process();
   }
 
   if (delegate)
@@ -724,7 +727,7 @@ base::ProcessHandle StartSandboxedProcess(
 
   CHECK(ResumeThread(target.thread_handle()) != -1);
   TRACE_EVENT_END_ETW("StartProcessWithAccess", 0, type_str);
-  return target.TakeProcessHandle();
+  return base::Process(target.TakeProcessHandle());
 }
 
 bool BrokerDuplicateHandle(HANDLE source_handle,

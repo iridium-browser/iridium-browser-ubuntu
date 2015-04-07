@@ -11,7 +11,7 @@
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bar.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/fullscreen/fullscreen_exit_bubble_type.h"
+#include "chrome/browser/ui/exclusive_access/exclusive_access_bubble_type.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/sync/one_click_signin_sync_starter.h"
 #include "components/content_settings/core/common/content_settings_types.h"
@@ -21,12 +21,13 @@
 #include "ui/gfx/native_widget_types.h"
 
 class Browser;
-class BrowserWindowTesting;
 class DownloadShelf;
 class FindBar;
+class GlobalErrorBubbleViewBase;
 class GURL;
 class LocationBar;
 class Profile;
+class ProfileResetGlobalError;
 class StatusBubble;
 class TemplateURL;
 
@@ -82,10 +83,6 @@ class BrowserWindow : public ui::BaseWindow {
   //////////////////////////////////////////////////////////////////////////////
   // Browser specific methods:
 
-  // Returns a pointer to the testing interface to the Browser window, or NULL
-  // if there is none.
-  virtual BrowserWindowTesting* GetBrowserWindowTesting() = 0;
-
   // Return the status bubble associated with the frame
   virtual StatusBubble* GetStatusBubble() = 0;
 
@@ -127,13 +124,16 @@ class BrowserWindow : public ui::BaseWindow {
   // + or - in the wrench menu to change zoom).
   virtual void ZoomChangedForActiveTab(bool can_show_bubble) = 0;
 
-  // Accessors for fullscreen mode state.
+  // Methods that change fullscreen state.
+  // On Mac, the tab strip and toolbar will be shown if |with_toolbar| is true,
+  // |with_toolbar| is ignored on other platforms.
   virtual void EnterFullscreen(const GURL& url,
-                               FullscreenExitBubbleType bubble_type) = 0;
+                               ExclusiveAccessBubbleType bubble_type,
+                               bool with_toolbar) = 0;
   virtual void ExitFullscreen() = 0;
   virtual void UpdateFullscreenExitBubbleContent(
       const GURL& url,
-      FullscreenExitBubbleType bubble_type) = 0;
+      ExclusiveAccessBubbleType bubble_type) = 0;
 
   // Windows and GTK remove the top controls in fullscreen, but Mac and Ash
   // keep the controls in a slide-down panel.
@@ -141,6 +141,13 @@ class BrowserWindow : public ui::BaseWindow {
 
   // Returns true if the fullscreen bubble is visible.
   virtual bool IsFullscreenBubbleVisible() const = 0;
+
+  // Show or hide the tab strip, toolbar and bookmark bar when in browser
+  // fullscreen.
+  // Currently only supported on Mac.
+  virtual bool SupportsFullscreenWithToolbar() const = 0;
+  virtual void UpdateFullscreenWithToolbar(bool with_toolbar) = 0;
+  virtual bool IsFullscreenWithToolbar() const = 0;
 
 #if defined(OS_WIN)
   // Sets state for entering or exiting Win8 Metro snap mode.
@@ -163,6 +170,9 @@ class BrowserWindow : public ui::BaseWindow {
 
   // Updates the toolbar with the state for the specified |contents|.
   virtual void UpdateToolbar(content::WebContents* contents) = 0;
+
+  // Resets the toolbar's tab state for |contents|.
+  virtual void ResetToolbarTabState(content::WebContents* contents) = 0;
 
   // Focuses the toolbar (for accessibility).
   virtual void FocusToolbar() = 0;
@@ -229,6 +239,16 @@ class BrowserWindow : public ui::BaseWindow {
       translate::TranslateStep step,
       translate::TranslateErrors::Type error_type,
       bool is_user_gesture) = 0;
+
+  // Create a session recovery bubble if the last session crashed. It also
+  // offers the option to enable metrics reporting if it's not already enabled.
+  // Returns true if a bubble is created, returns false if nothing is created.
+  virtual bool ShowSessionCrashedBubble() = 0;
+
+  // Shows the profile reset bubble on the platforms that support it.
+  virtual bool IsProfileResetBubbleSupported() const = 0;
+  virtual GlobalErrorBubbleViewBase* ShowProfileResetBubble(
+      const base::WeakPtr<ProfileResetGlobalError>& global_error) = 0;
 
 #if defined(ENABLE_ONE_CLICK_SIGNIN)
   enum OneClickSigninBubbleType {
@@ -312,18 +332,6 @@ class BrowserWindow : public ui::BaseWindow {
   virtual void Copy() = 0;
   virtual void Paste() = 0;
 
-#if defined(OS_MACOSX)
-  // The following two methods cause the browser window to enter AppKit
-  // Fullscreen. The methods are idempotent. The methods are invalid to call on
-  // OSX 10.6. One method displays chrome (e.g. omnibox, tabstrip), whereas the
-  // other method hides it.
-  virtual void EnterFullscreenWithChrome() = 0;
-  virtual void EnterFullscreenWithoutChrome() = 0;
-
-  virtual bool IsFullscreenWithChrome() = 0;
-  virtual bool IsFullscreenWithoutChrome() = 0;
-#endif
-
   // Return the correct disposition for a popup window based on |bounds|.
   virtual WindowOpenDisposition GetDispositionForPopupBounds(
       const gfx::Rect& bounds) = 0;
@@ -356,12 +364,6 @@ class BrowserWindow : public ui::BaseWindow {
   // while Chrome is running in Metro mode. Otherwise returns |desktop_type|.
   static chrome::HostDesktopType AdjustHostDesktopType(
       chrome::HostDesktopType desktop_type);
-
-  // Shows the avatar bubble inside |web_contents|. The bubble is positioned
-  // relative to |rect|. |rect| should be in the |web_contents| coordinate
-  // system.
-  virtual void ShowAvatarBubble(content::WebContents* web_contents,
-                                const gfx::Rect& rect) = 0;
 
   // Shows the avatar bubble on the window frame off of the avatar button with
   // the given mode. The Service Type specified by GAIA is provided as well.

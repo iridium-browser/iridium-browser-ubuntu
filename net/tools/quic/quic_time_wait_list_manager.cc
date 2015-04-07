@@ -114,17 +114,22 @@ void QuicTimeWaitListManager::AddConnectionIdToTimeWait(
     QuicConnectionId connection_id,
     QuicVersion version,
     QuicEncryptedPacket* close_packet) {
-  DVLOG(1) << "Adding " << connection_id << " to the time wait list.";
   int num_packets = 0;
   ConnectionIdMap::iterator it = connection_id_map_.find(connection_id);
-  if (it != connection_id_map_.end()) {  // Replace record if it is reinserted.
+  const bool new_connection_id = it == connection_id_map_.end();
+  if (!new_connection_id) {  // Replace record if it is reinserted.
     num_packets = it->second.num_packets;
     delete it->second.close_packet;
     connection_id_map_.erase(it);
   }
-  ConnectionIdData data(num_packets, version, clock_.ApproximateNow(),
+  ConnectionIdData data(num_packets,
+                        version,
+                        clock_.ApproximateNow(),
                         close_packet);
   connection_id_map_.insert(make_pair(connection_id, data));
+  if (new_connection_id) {
+    visitor_->OnConnectionAddedToTimeWaitList(connection_id);
+  }
 }
 
 bool QuicTimeWaitListManager::IsConnectionIdInTimeWait(
@@ -168,12 +173,12 @@ void QuicTimeWaitListManager::ProcessPacket(
     return;
   }
   if (it->second.close_packet) {
-     QueuedPacket* queued_packet =
-         new QueuedPacket(server_address,
-                          client_address,
-                          it->second.close_packet->Clone());
-     // Takes ownership of the packet.
-     SendOrQueuePacket(queued_packet);
+    QueuedPacket* queued_packet =
+        new QueuedPacket(server_address,
+                         client_address,
+                         it->second.close_packet->Clone());
+    // Takes ownership of the packet.
+    SendOrQueuePacket(queued_packet);
   } else {
     SendPublicReset(server_address,
                     client_address,
@@ -281,10 +286,11 @@ void QuicTimeWaitListManager::CleanUpOldConnectionIds() {
     if (now.Subtract(oldest_connection_id) < kTimeWaitPeriod_) {
       break;
     }
+    const QuicConnectionId connection_id = it->first;
     // This connection_id has lived its age, retire it now.
-    DVLOG(1) << "Retiring " << it->first << " from the time-wait state.";
     delete it->second.close_packet;
     connection_id_map_.erase(it);
+    visitor_->OnConnectionRemovedFromTimeWaitList(connection_id);
   }
   SetConnectionIdCleanUpAlarm();
 }

@@ -216,7 +216,7 @@ inline void setStaticPositions(RenderBlockFlow* block, RenderBox* child)
         // container changing width.
         child->moveWithEdgeOfInlineContainerIfNecessary(child->isHorizontalWritingMode());
     }
-    block->updateStaticInlinePositionForChild(child, blockHeight);
+    block->updateStaticInlinePositionForChild(*child, blockHeight);
     child->layer()->setStaticBlockPosition(blockHeight);
 }
 
@@ -233,7 +233,7 @@ inline void BreakingContext::skipTrailingWhitespace(InlineIterator& iterator, co
         if (object->isOutOfFlowPositioned())
             setStaticPositions(m_block, toRenderBox(object));
         else if (object->isFloating())
-            m_block->insertFloatingObject(toRenderBox(object));
+            m_block->insertFloatingObject(*toRenderBox(object));
         iterator.increment();
     }
 }
@@ -342,7 +342,7 @@ inline void BreakingContext::handleOutOfFlowPositioned(Vector<RenderBox*>& posit
     RenderBox* box = toRenderBox(m_current.object());
     bool isInlineType = box->style()->isOriginalDisplayInlineType();
     if (!isInlineType) {
-        m_block->setStaticInlinePositionForChild(box, m_block->startOffsetForContent());
+        m_block->setStaticInlinePositionForChild(*box, m_block->startOffsetForContent());
     } else {
         // If our original display was an INLINE type, then we can go ahead
         // and determine our static y position now.
@@ -366,7 +366,7 @@ inline void BreakingContext::handleOutOfFlowPositioned(Vector<RenderBox*>& posit
 inline void BreakingContext::handleFloat()
 {
     RenderBox* floatBox = toRenderBox(m_current.object());
-    FloatingObject* floatingObject = m_block->insertFloatingObject(floatBox);
+    FloatingObject* floatingObject = m_block->insertFloatingObject(*floatBox);
     // check if it fits in the current line.
     // If it does, position it now, otherwise, position
     // it after moving to next line (in newLine() func)
@@ -461,7 +461,7 @@ inline void BreakingContext::handleReplaced()
 
     // Optimize for a common case. If we can't find whitespace after the list
     // item, then this is all moot.
-    LayoutUnit replacedLogicalWidth = m_block->logicalWidthForChild(replacedBox) + m_block->marginStartForChild(replacedBox) + m_block->marginEndForChild(replacedBox) + inlineLogicalWidth(m_current.object());
+    LayoutUnit replacedLogicalWidth = m_block->logicalWidthForChild(*replacedBox) + m_block->marginStartForChild(*replacedBox) + m_block->marginEndForChild(*replacedBox) + inlineLogicalWidth(m_current.object());
     if (m_current.object()->isListMarker()) {
         if (m_blockStyle->collapseWhiteSpace() && shouldSkipWhitespaceAfterStartObject(m_block, m_current.object(), m_lineMidpointState)) {
             // Like with inline flows, we start ignoring spaces to make sure that any
@@ -615,7 +615,7 @@ inline bool BreakingContext::handleText(WordMeasurements& wordMeasurements, bool
 
         bool applyWordSpacing = false;
 
-        if ((breakAll || breakWords) && !midWordBreak) {
+        if (breakWords && !midWordBreak) {
             wrapW += charWidth;
             bool midWordBreakIsBeforeSurrogatePair = U16_IS_LEAD(c) && m_current.offset() + 1 < renderText->textLength() && U16_IS_TRAIL((*renderText)[m_current.offset() + 1]);
             charWidth = textWidth(renderText, m_current.offset(), midWordBreakIsBeforeSurrogatePair ? 2 : 1, font, m_width.committedWidth() + wrapW, isFixedPitch, m_collapseWhiteSpace);
@@ -623,7 +623,7 @@ inline bool BreakingContext::handleText(WordMeasurements& wordMeasurements, bool
         }
 
         int nextBreakablePosition = m_current.nextBreakablePosition();
-        bool betweenWords = c == '\n' || (m_currWS != PRE && !m_atStart && isBreakable(m_renderTextInfo.m_lineBreakIterator, m_current.offset(), nextBreakablePosition));
+        bool betweenWords = c == '\n' || (m_currWS != PRE && !m_atStart && isBreakable(m_renderTextInfo.m_lineBreakIterator, m_current.offset(), nextBreakablePosition, breakAll ? LineBreakType::BreakAll : LineBreakType::Normal));
         m_current.setNextBreakablePosition(nextBreakablePosition);
 
         if (betweenWords || midWordBreak) {

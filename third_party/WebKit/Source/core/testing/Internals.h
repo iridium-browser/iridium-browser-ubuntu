@@ -46,18 +46,15 @@ class ClientRect;
 class ClientRectList;
 class DOMArrayBuffer;
 class DOMPoint;
-class DOMStringList;
 class DictionaryTest;
 class Document;
 class DocumentFragment;
 class DocumentMarker;
 class Element;
 class ExceptionState;
-class ExecutionContext;
 class GCObservation;
 class HTMLElement;
 class HTMLMediaElement;
-class InternalProfilers;
 class InternalRuntimeFlags;
 class InternalSettings;
 class Iterator;
@@ -66,7 +63,7 @@ class LocalDOMWindow;
 class LocalFrame;
 class Node;
 class Page;
-class PagePopupController;
+class PluginPlaceholderOptions;
 class PrivateScriptTest;
 class Range;
 class SerializedScriptValue;
@@ -78,6 +75,7 @@ typedef StaticNodeTypeList<Node> StaticNodeList;
 
 class Internals final : public GarbageCollectedFinalized<Internals>, public ScriptWrappable, public ContextLifecycleObserver {
     DEFINE_WRAPPERTYPEINFO();
+    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(Internals);
 public:
     static Internals* create(Document*);
     virtual ~Internals();
@@ -121,12 +119,11 @@ public:
     bool hasSelectorForPseudoClassInShadow(Element* host, const String& pseudoClass, ExceptionState&);
     unsigned short compareTreeScopePosition(const Node*, const Node*, ExceptionState&) const;
 
-    // FIXME: Rename these functions if walker is preferred.
-    Node* nextSiblingByWalker(Node*);
-    Node* firstChildByWalker(Node*);
-    Node* lastChildByWalker(Node*);
-    Node* nextNodeByWalker(Node*);
-    Node* previousNodeByWalker(Node*);
+    Node* nextSiblingInComposedTree(Node*, ExceptionState&);
+    Node* firstChildInComposedTree(Node*, ExceptionState&);
+    Node* lastChildInComposedTree(Node*, ExceptionState&);
+    Node* nextInComposedTree(Node*, ExceptionState&);
+    Node* previousInComposedTree(Node*, ExceptionState&);
 
     unsigned updateStyleAndReturnAffectedElementCount(ExceptionState&) const;
     unsigned needsLayoutCount(ExceptionState&) const;
@@ -139,9 +136,7 @@ public:
     bool hasAutofocusRequest();
     Vector<String> formControlStateOfHistoryItem(ExceptionState&);
     void setFormControlStateOfHistoryItem(const Vector<String>&, ExceptionState&);
-    void setEnableMockPagePopup(bool, ExceptionState&);
-    PassRefPtrWillBeRawPtr<PagePopupController> pagePopupController();
-    LocalDOMWindow* pagePopupWindow() const;
+    DOMWindow* pagePopupWindow() const;
 
     PassRefPtrWillBeRawPtr<ClientRect> absoluteCaretBounds(ExceptionState&);
 
@@ -189,6 +184,11 @@ public:
     unsigned touchEventHandlerCount(Document*);
     LayerRectList* touchEventTargetLayerRects(Document*, ExceptionState&);
 
+    AtomicString htmlNamespace();
+    Vector<AtomicString> htmlTags();
+    AtomicString svgNamespace();
+    Vector<AtomicString> svgTags();
+
     // This is used to test rect based hit testing like what's done on touch screens.
     PassRefPtrWillBeRawPtr<StaticNodeList> nodesFromRect(Document*, int x, int y, unsigned topPadding, unsigned rightPadding,
         unsigned bottomPadding, unsigned leftPadding, bool ignoreClipping, bool allowChildFrameContent, ExceptionState&) const;
@@ -208,7 +208,6 @@ public:
 
     InternalSettings* settings() const;
     InternalRuntimeFlags* runtimeFlags() const;
-    InternalProfilers* profilers();
     unsigned workerThreadCount() const;
 
     void setDeviceProximity(Document*, const String& eventType, double value, double min, double max, ExceptionState&);
@@ -258,6 +257,7 @@ public:
     void mediaPlayerPlayingRemotelyChanged(HTMLMediaElement*, bool);
 
     void registerURLSchemeAsBypassingContentSecurityPolicy(const String& scheme);
+    void registerURLSchemeAsBypassingContentSecurityPolicy(const String& scheme, const Vector<String>& policyAreas);
     void removeURLSchemeRegisteredAsBypassingContentSecurityPolicy(const String& scheme);
 
     TypeConversions* typeConversions() const;
@@ -324,15 +324,26 @@ public:
     void setNetworkStateNotifierTestOnly(bool);
     // Test must call setNetworkStateNotifierTestOnly(true) before calling setNetworkConnectionInfo.
     void setNetworkConnectionInfo(const String&, ExceptionState&);
+
+    PassRefPtrWillBeRawPtr<ClientRect> boundsInRootViewSpace(Element*);
     String serializeNavigationMarkup();
+    Vector<String> getTransitionElementIds();
+    PassRefPtrWillBeRawPtr<ClientRectList> getTransitionElementRects();
     void hideAllTransitionElements();
+    void showAllTransitionElements();
+    void setExitTransitionStylesheetsEnabled(bool);
 
     unsigned countHitRegions(CanvasRenderingContext2D*);
 
     void forcePluginPlaceholder(HTMLElement* plugin, PassRefPtrWillBeRawPtr<DocumentFragment>, ExceptionState&);
-    void forcePluginPlaceholder(HTMLElement* plugin, const Dictionary& options, ExceptionState&);
+    void forcePluginPlaceholder(HTMLElement* plugin, const PluginPlaceholderOptions&, ExceptionState&);
 
     Iterator* iterator(ScriptState*, ExceptionState&);
+
+    // Scheudle a forced Blink GC run (Oilpan) at the end of event loop.
+    // Note: This is designed to be only used from PerformanceTests/BlinkGC to explicitly measure only Blink GC time.
+    //       Normal LayoutTests should use gc() instead as it would trigger both Blink GC and V8 GC.
+    void forceBlinkGCWithoutV8GC();
 
 private:
     explicit Internals(Document*);
@@ -343,7 +354,6 @@ private:
 
     DocumentMarker* markerAt(Node*, const String& markerType, unsigned index, ExceptionState&);
     Member<InternalRuntimeFlags> m_runtimeFlags;
-    Member<InternalProfilers> m_profilers;
 };
 
 } // namespace blink

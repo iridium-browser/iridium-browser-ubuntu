@@ -5,7 +5,10 @@
 #include "mojo/edk/system/message_pipe.h"
 
 #include "base/logging.h"
+#include "mojo/edk/system/channel.h"
 #include "mojo/edk/system/channel_endpoint.h"
+#include "mojo/edk/system/channel_endpoint_id.h"
+#include "mojo/edk/system/incoming_endpoint.h"
 #include "mojo/edk/system/local_message_pipe_endpoint.h"
 #include "mojo/edk/system/message_in_transit.h"
 #include "mojo/edk/system/message_pipe_dispatcher.h"
@@ -26,7 +29,7 @@ MessagePipe* MessagePipe::CreateLocalLocal() {
 // static
 MessagePipe* MessagePipe::CreateLocalProxy(
     scoped_refptr<ChannelEndpoint>* channel_endpoint) {
-  DCHECK(!channel_endpoint->get());  // Not technically wrong, but unlikely.
+  DCHECK(!*channel_endpoint);  // Not technically wrong, but unlikely.
   MessagePipe* message_pipe = new MessagePipe();
   message_pipe->endpoints_[0].reset(new LocalMessagePipeEndpoint());
   *channel_endpoint = new ChannelEndpoint(message_pipe, 1);
@@ -36,9 +39,33 @@ MessagePipe* MessagePipe::CreateLocalProxy(
 }
 
 // static
+MessagePipe* MessagePipe::CreateLocalProxyFromExisting(
+    MessageInTransitQueue* message_queue,
+    ChannelEndpoint* channel_endpoint) {
+  DCHECK(message_queue);
+  MessagePipe* message_pipe = new MessagePipe();
+  message_pipe->endpoints_[0].reset(
+      new LocalMessagePipeEndpoint(message_queue));
+  if (channel_endpoint) {
+    bool attached_to_channel = channel_endpoint->ReplaceClient(message_pipe, 1);
+    message_pipe->endpoints_[1].reset(
+        new ProxyMessagePipeEndpoint(channel_endpoint));
+    if (!attached_to_channel)
+      message_pipe->OnDetachFromChannel(1);
+  } else {
+    // This means that the proxy side was already closed; we only need to inform
+    // the local side of this.
+    // TODO(vtl): This is safe to do without locking (but perhaps slightly
+    // dubious), since no other thread has access to |message_pipe| yet.
+    message_pipe->endpoints_[0]->OnPeerClose();
+  }
+  return message_pipe;
+}
+
+// static
 MessagePipe* MessagePipe::CreateProxyLocal(
     scoped_refptr<ChannelEndpoint>* channel_endpoint) {
-  DCHECK(!channel_endpoint->get());  // Not technically wrong, but unlikely.
+  DCHECK(!*channel_endpoint);  // Not technically wrong, but unlikely.
   MessagePipe* message_pipe = new MessagePipe();
   *channel_endpoint = new ChannelEndpoint(message_pipe, 0);
   message_pipe->endpoints_[0].reset(
@@ -53,6 +80,30 @@ unsigned MessagePipe::GetPeerPort(unsigned port) {
   return port ^ 1;
 }
 
+// static
+bool MessagePipe::Deserialize(Channel* channel,
+                              const void* source,
+                              size_t size,
+                              scoped_refptr<MessagePipe>* message_pipe,
+                              unsigned* port) {
+  DCHECK(!*message_pipe);  // Not technically wrong, but unlikely.
+
+  if (size != channel->GetSerializedEndpointSize()) {
+    LOG(ERROR) << "Invalid serialized message pipe";
+    return false;
+  }
+
+  scoped_refptr<IncomingEndpoint> incoming_endpoint =
+      channel->DeserializeEndpoint(source);
+  if (!incoming_endpoint)
+    return false;
+
+  *message_pipe = incoming_endpoint->ConvertToMessagePipe();
+  DCHECK(*message_pipe);
+  *port = 0;
+  return true;
+}
+
 MessagePipeEndpoint::Type MessagePipe::GetType(unsigned port) {
   DCHECK(port == 0 || port == 1);
   base::AutoLock locker(lock_);
@@ -61,18 +112,18 @@ MessagePipeEndpoint::Type MessagePipe::GetType(unsigned port) {
   return endpoints_[port]->GetType();
 }
 
-void MessagePipe::CancelAllWaiters(unsigned port) {
+void MessagePipe::CancelAllAwakables(unsigned port) {
   DCHECK(port == 0 || port == 1);
 
   base::AutoLock locker(lock_);
   DCHECK(endpoints_[port]);
-  endpoints_[port]->CancelAllWaiters();
+  endpoints_[port]->CancelAllAwakables();
 }
 
 void MessagePipe::Close(unsigned port) {
   DCHECK(port == 0 || port == 1);
 
-  unsigned destination_port = GetPeerPort(port);
+  unsigned peer_port = GetPeerPort(port);
 
   base::AutoLock locker(lock_);
   // The endpoint's |OnPeerClose()| may have been called first and returned
@@ -81,9 +132,9 @@ void MessagePipe::Close(unsigned port) {
     return;
 
   endpoints_[port]->Close();
-  if (endpoints_[destination_port]) {
-    if (!endpoints_[destination_port]->OnPeerClose())
-      endpoints_[destination_port].reset();
+  if (endpoints_[peer_port]) {
+    if (!endpoints_[peer_port]->OnPeerClose())
+      endpoints_[peer_port].reset();
   }
   endpoints_[port].reset();
 }
@@ -96,13 +147,13 @@ MojoResult MessagePipe::WriteMessage(
     std::vector<DispatcherTransport>* transports,
     MojoWriteMessageFlags flags) {
   DCHECK(port == 0 || port == 1);
-  return EnqueueMessageInternal(
+
+  base::AutoLock locker(lock_);
+  return EnqueueMessageNoLock(
       GetPeerPort(port),
       make_scoped_ptr(new MessageInTransit(
-          MessageInTransit::kTypeMessagePipeEndpoint,
-          MessageInTransit::kSubtypeMessagePipeEndpointData,
-          num_bytes,
-          bytes)),
+          MessageInTransit::kTypeEndpoint,
+          MessageInTransit::kSubtypeEndpointData, num_bytes, bytes)),
       transports);
 }
 
@@ -117,8 +168,8 @@ MojoResult MessagePipe::ReadMessage(unsigned port,
   base::AutoLock locker(lock_);
   DCHECK(endpoints_[port]);
 
-  return endpoints_[port]->ReadMessage(
-      bytes, num_bytes, dispatchers, num_dispatchers, flags);
+  return endpoints_[port]->ReadMessage(bytes, num_bytes, dispatchers,
+                                       num_dispatchers, flags);
 }
 
 HandleSignalsState MessagePipe::GetHandleSignalsState(unsigned port) const {
@@ -130,74 +181,123 @@ HandleSignalsState MessagePipe::GetHandleSignalsState(unsigned port) const {
   return endpoints_[port]->GetHandleSignalsState();
 }
 
-MojoResult MessagePipe::AddWaiter(unsigned port,
-                                  Waiter* waiter,
-                                  MojoHandleSignals signals,
-                                  uint32_t context,
-                                  HandleSignalsState* signals_state) {
+MojoResult MessagePipe::AddAwakable(unsigned port,
+                                    Awakable* awakable,
+                                    MojoHandleSignals signals,
+                                    uint32_t context,
+                                    HandleSignalsState* signals_state) {
   DCHECK(port == 0 || port == 1);
 
   base::AutoLock locker(lock_);
   DCHECK(endpoints_[port]);
 
-  return endpoints_[port]->AddWaiter(waiter, signals, context, signals_state);
+  return endpoints_[port]->AddAwakable(awakable, signals, context,
+                                       signals_state);
 }
 
-void MessagePipe::RemoveWaiter(unsigned port,
-                               Waiter* waiter,
-                               HandleSignalsState* signals_state) {
+void MessagePipe::RemoveAwakable(unsigned port,
+                                 Awakable* awakable,
+                                 HandleSignalsState* signals_state) {
   DCHECK(port == 0 || port == 1);
 
   base::AutoLock locker(lock_);
   DCHECK(endpoints_[port]);
 
-  endpoints_[port]->RemoveWaiter(waiter, signals_state);
+  endpoints_[port]->RemoveAwakable(awakable, signals_state);
 }
 
-scoped_refptr<ChannelEndpoint> MessagePipe::ConvertLocalToProxy(unsigned port) {
+void MessagePipe::StartSerialize(unsigned /*port*/,
+                                 Channel* channel,
+                                 size_t* max_size,
+                                 size_t* max_platform_handles) {
+  *max_size = channel->GetSerializedEndpointSize();
+  *max_platform_handles = 0;
+}
+
+bool MessagePipe::EndSerialize(
+    unsigned port,
+    Channel* channel,
+    void* destination,
+    size_t* actual_size,
+    embedder::PlatformHandleVector* /*platform_handles*/) {
   DCHECK(port == 0 || port == 1);
 
   base::AutoLock locker(lock_);
   DCHECK(endpoints_[port]);
+
+  // The port being serialized must be local.
   DCHECK_EQ(endpoints_[port]->GetType(), MessagePipeEndpoint::kTypeLocal);
 
-  // The local peer is already closed, so just make a |ChannelEndpoint| that'll
-  // send the already-queued messages.
-  if (!endpoints_[GetPeerPort(port)]) {
-    scoped_refptr<ChannelEndpoint> channel_endpoint(new ChannelEndpoint(
-        nullptr,
-        0,
-        static_cast<LocalMessagePipeEndpoint*>(endpoints_[port].get())
-            ->message_queue()));
-    endpoints_[port]->Close();
-    endpoints_[port].reset();
-    return channel_endpoint;
+  unsigned peer_port = GetPeerPort(port);
+  MessageInTransitQueue* message_queue =
+      static_cast<LocalMessagePipeEndpoint*>(endpoints_[port].get())
+          ->message_queue();
+  // The replacement for |endpoints_[port]|, if any.
+  MessagePipeEndpoint* replacement_endpoint = nullptr;
+
+  // The three cases below correspond to the ones described above
+  // |Channel::SerializeEndpoint...()| (in channel.h).
+  if (!endpoints_[peer_port]) {
+    // Case 1: (known-)closed peer port. There's no reason for us to continue to
+    // exist afterwards.
+    channel->SerializeEndpointWithClosedPeer(destination, message_queue);
+  } else if (endpoints_[peer_port]->GetType() ==
+             MessagePipeEndpoint::kTypeLocal) {
+    // Case 2: local peer port. We replace |port|'s |LocalMessagePipeEndpoint|
+    // with a |ProxyMessagePipeEndpoint| hooked up to the |ChannelEndpoint| that
+    // the |Channel| returns to us.
+    scoped_refptr<ChannelEndpoint> channel_endpoint =
+        channel->SerializeEndpointWithLocalPeer(destination, message_queue,
+                                                this, port);
+    replacement_endpoint = new ProxyMessagePipeEndpoint(channel_endpoint.get());
+  } else {
+    // Case 3: remote peer port. We get the |peer_port|'s |ChannelEndpoint| and
+    // pass it to the |Channel|. There's no reason for us to continue to exist
+    // afterwards.
+    DCHECK_EQ(endpoints_[peer_port]->GetType(),
+              MessagePipeEndpoint::kTypeProxy);
+    ProxyMessagePipeEndpoint* peer_endpoint =
+        static_cast<ProxyMessagePipeEndpoint*>(endpoints_[peer_port].get());
+    scoped_refptr<ChannelEndpoint> peer_channel_endpoint =
+        peer_endpoint->ReleaseChannelEndpoint();
+    channel->SerializeEndpointWithRemotePeer(destination, message_queue,
+                                             peer_channel_endpoint);
+    // No need to call |Close()| after |ReleaseChannelEndpoint()|.
+    endpoints_[peer_port].reset();
   }
 
-  // TODO(vtl): Allowing this case is a temporary hack. It'll set up a
-  // |MessagePipe| with two proxy endpoints, which will then act as a proxy
-  // (rather than trying to connect the two ends directly).
-  DLOG_IF(WARNING,
-          endpoints_[GetPeerPort(port)]->GetType() !=
-              MessagePipeEndpoint::kTypeLocal)
-      << "Direct message pipe passing across multiple channels not yet "
-         "implemented; will proxy";
+  endpoints_[port]->Close();
+  endpoints_[port].reset(replacement_endpoint);
 
-  scoped_ptr<MessagePipeEndpoint> old_endpoint(endpoints_[port].Pass());
-  scoped_refptr<ChannelEndpoint> channel_endpoint(new ChannelEndpoint(
-      this,
-      port,
-      static_cast<LocalMessagePipeEndpoint*>(old_endpoint.get())
-          ->message_queue()));
-  endpoints_[port].reset(new ProxyMessagePipeEndpoint(channel_endpoint.get()));
-  old_endpoint->Close();
-
-  return channel_endpoint;
+  *actual_size = channel->GetSerializedEndpointSize();
+  return true;
 }
 
-MojoResult MessagePipe::EnqueueMessage(unsigned port,
-                                       scoped_ptr<MessageInTransit> message) {
-  return EnqueueMessageInternal(port, message.Pass(), nullptr);
+bool MessagePipe::OnReadMessage(unsigned port, MessageInTransit* message) {
+  base::AutoLock locker(lock_);
+
+  if (!endpoints_[port]) {
+    // This will happen only on the rare occasion that the call to
+    // |OnReadMessage()| is racing with us calling
+    // |ChannelEndpoint::ReplaceClient()|, in which case we reject the message,
+    // and the |ChannelEndpoint| can retry (calling the new client's
+    // |OnReadMessage()|).
+    return false;
+  }
+
+  // This is called when the |ChannelEndpoint| for the
+  // |ProxyMessagePipeEndpoint| |port| receives a message (from the |Channel|).
+  // We need to pass this message on to its peer port (typically a
+  // |LocalMessagePipeEndpoint|).
+  MojoResult result = EnqueueMessageNoLock(GetPeerPort(port),
+                                           make_scoped_ptr(message), nullptr);
+  DLOG_IF(WARNING, result != MOJO_RESULT_OK)
+      << "EnqueueMessageNoLock() failed (result  = " << result << ")";
+  return true;
+}
+
+void MessagePipe::OnDetachFromChannel(unsigned port) {
+  Close(port);
 }
 
 MessagePipe::MessagePipe() {
@@ -211,21 +311,14 @@ MessagePipe::~MessagePipe() {
   DCHECK(!endpoints_[1]);
 }
 
-MojoResult MessagePipe::EnqueueMessageInternal(
+MojoResult MessagePipe::EnqueueMessageNoLock(
     unsigned port,
     scoped_ptr<MessageInTransit> message,
     std::vector<DispatcherTransport>* transports) {
   DCHECK(port == 0 || port == 1);
   DCHECK(message);
 
-  if (message->type() == MessageInTransit::kTypeMessagePipe) {
-    DCHECK(!transports);
-    return HandleControlMessage(port, message.Pass());
-  }
-
-  DCHECK_EQ(message->type(), MessageInTransit::kTypeMessagePipeEndpoint);
-
-  base::AutoLock locker(lock_);
+  DCHECK_EQ(message->type(), MessageInTransit::kTypeEndpoint);
   DCHECK(endpoints_[GetPeerPort(port)]);
 
   // The destination port need not be open, unlike the source port.
@@ -280,19 +373,11 @@ MojoResult MessagePipe::AttachTransportsNoLock(
           (*transports)[i].CreateEquivalentDispatcherAndClose());
     } else {
       LOG(WARNING) << "Enqueueing null dispatcher";
-      dispatchers->push_back(scoped_refptr<Dispatcher>());
+      dispatchers->push_back(nullptr);
     }
   }
   message->SetDispatchers(dispatchers.Pass());
   return MOJO_RESULT_OK;
-}
-
-MojoResult MessagePipe::HandleControlMessage(
-    unsigned /*port*/,
-    scoped_ptr<MessageInTransit> message) {
-  LOG(WARNING) << "Unrecognized MessagePipe control message subtype "
-               << message->subtype();
-  return MOJO_RESULT_UNKNOWN;
 }
 
 }  // namespace system

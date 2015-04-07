@@ -311,10 +311,17 @@ class AsyncMethodCallerImpl : public AsyncMethodCaller {
         base::Bind(it->second.data_callback, return_status, return_data));
     data_callback_map_.erase(it);
   }
-
   // Registers a callback which is called when the result for AsyncXXX is ready.
   void RegisterAsyncCallback(
       Callback callback, const char* error, int async_id) {
+    if (async_id == chromeos::CryptohomeClient::kNotReadyAsyncId) {
+      base::MessageLoopProxy::current()->PostTask(
+          FROM_HERE, base::Bind(callback,
+                                false,  // return status
+                                cryptohome::MOUNT_ERROR_FATAL));
+      return;
+    }
+
     if (async_id == 0) {
       LOG(ERROR) << error;
       return;
@@ -328,6 +335,13 @@ class AsyncMethodCallerImpl : public AsyncMethodCaller {
   // Registers a callback which is called when the result for AsyncXXX is ready.
   void RegisterAsyncDataCallback(
       DataCallback callback, const char* error, int async_id) {
+    if (async_id == chromeos::CryptohomeClient::kNotReadyAsyncId) {
+      base::MessageLoopProxy::current()->PostTask(
+          FROM_HERE, base::Bind(callback,
+                                false,  // return status
+                                std::string()));
+      return;
+    }
     if (async_id == 0) {
       LOG(ERROR) << error;
       return;
@@ -338,9 +352,9 @@ class AsyncMethodCallerImpl : public AsyncMethodCaller {
     data_callback_map_[async_id] = DataCallbackElement(callback);
   }
 
-  base::WeakPtrFactory<AsyncMethodCallerImpl> weak_ptr_factory_;
   CallbackMap callback_map_;
   DataCallbackMap data_callback_map_;
+  base::WeakPtrFactory<AsyncMethodCallerImpl> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(AsyncMethodCallerImpl);
 };

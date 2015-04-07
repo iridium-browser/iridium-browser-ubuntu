@@ -15,6 +15,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "device/bluetooth/bluetooth_adapter.h"
+#include "device/bluetooth/bluetooth_export.h"
 #include "device/bluetooth/bluetooth_task_manager_win.h"
 
 namespace base {
@@ -28,8 +29,9 @@ class BluetoothAdapterWinTest;
 class BluetoothDevice;
 class BluetoothSocketThread;
 
-class BluetoothAdapterWin : public BluetoothAdapter,
-                            public BluetoothTaskManagerWin::Observer {
+class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterWin
+    : public BluetoothAdapter,
+      public BluetoothTaskManagerWin::Observer {
  public:
   static base::WeakPtr<BluetoothAdapter> CreateAdapter(
       const InitCallback& init_callback);
@@ -87,6 +89,7 @@ class BluetoothAdapterWin : public BluetoothAdapter,
       device::BluetoothDevice::PairingDelegate* pairing_delegate) override;
 
  private:
+  friend class base::DeleteHelper<BluetoothAdapterWin>;
   friend class BluetoothAdapterWinTest;
 
   enum DiscoveryStatus {
@@ -100,6 +103,7 @@ class BluetoothAdapterWin : public BluetoothAdapter,
   virtual ~BluetoothAdapterWin();
 
   // BluetoothAdapter:
+  void DeleteOnCorrectThread() const override;
   virtual void AddDiscoverySession(
       const base::Closure& callback,
       const ErrorCallback& error_callback) override;

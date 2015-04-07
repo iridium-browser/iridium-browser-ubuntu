@@ -11,12 +11,12 @@
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/background/background_contents.h"
 #include "chrome/browser/background/background_contents_service.h"
 #include "chrome/browser/background/background_contents_service_factory.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/tab_contents/background_contents.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
@@ -163,6 +163,7 @@ class DriveWebContentsManager : public content::WebContentsObserver,
   virtual bool ShouldCreateWebContents(
       content::WebContents* web_contents,
       int route_id,
+      int main_frame_route_id,
       WindowContainerType window_container_type,
       const base::string16& frame_name,
       const GURL& target_url,
@@ -276,6 +277,7 @@ void DriveWebContentsManager::DidFailLoad(
 bool DriveWebContentsManager::ShouldCreateWebContents(
     content::WebContents* web_contents,
     int route_id,
+    int main_frame_route_id,
     WindowContainerType window_container_type,
     const base::string16& frame_name,
     const GURL& target_url,
@@ -305,6 +307,7 @@ bool DriveWebContentsManager::ShouldCreateWebContents(
   BackgroundContents* contents = background_contents_service
       ->CreateBackgroundContents(content::SiteInstance::Create(profile_),
                                  route_id,
+                                 main_frame_route_id,
                                  profile_,
                                  frame_name,
                                  base::ASCIIToUTF16(app_id_),
@@ -360,7 +363,7 @@ void DriveFirstRunController::EnableOfflineMode() {
     return;
   }
 
-  if (!user_manager::UserManager::Get()->IsLoggedInAsRegularUser()) {
+  if (!user_manager::UserManager::Get()->IsLoggedInAsUserWithGaiaAccount()) {
     LOG(ERROR) << "Attempting to enable offline access "
                   "but not logged in a regular user.";
     OnOfflineInit(false, OUTCOME_WRONG_USER_TYPE);

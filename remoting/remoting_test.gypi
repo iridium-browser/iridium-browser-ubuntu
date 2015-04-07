@@ -26,6 +26,7 @@
         'host/fake_host_status_monitor.h',
         'host/fake_mouse_cursor_monitor.cc',
         'host/fake_mouse_cursor_monitor.h',
+        'host/mock_callback.h',
         'host/policy_hack/fake_policy_watcher.cc',
         'host/policy_hack/fake_policy_watcher.h',
         'host/policy_hack/mock_policy_callback.cc',
@@ -121,6 +122,7 @@
         'client/audio_player_unittest.cc',
         'client/client_status_logger_unittest.cc',
         'client/key_event_mapper_unittest.cc',
+        'client/plugin/empty_cursor_filter_unittest.cc',
         'client/plugin/normalizing_input_filter_cros_unittest.cc',
         'client/plugin/normalizing_input_filter_mac_unittest.cc',
         'client/server_log_entry_client_unittest.cc',
@@ -136,10 +138,10 @@
         'host/branding.h',
         'host/capture_scheduler_unittest.cc',
         'host/chromeos/aura_desktop_capturer_unittest.cc',
+        'host/chromeos/clipboard_aura_unittest.cc',
         'host/chromoting_host_context_unittest.cc',
         'host/chromoting_host_unittest.cc',
         'host/client_session_unittest.cc',
-        'host/clipboard_aura_unittest.cc',
         'host/config_file_watcher_unittest.cc',
         'host/daemon_process_unittest.cc',
         'host/desktop_process_unittest.cc',
@@ -152,13 +154,13 @@
         'host/gnubby_auth_handler_posix_unittest.cc',
         'host/heartbeat_sender_unittest.cc',
         'host/host_change_notification_listener_unittest.cc',
+        'host/host_config_unittest.cc',
         'host/host_extension_session_manager_unittest.cc',
         'host/host_mock_objects.cc',
         'host/host_status_logger_unittest.cc',
-        'host/host_status_sender_unittest.cc',
         'host/ipc_desktop_environment_unittest.cc',
+        'host/it2me/it2me_confirmation_dialog_proxy_unittest.cc',
         'host/it2me/it2me_native_messaging_host_unittest.cc',
-        'host/json_host_config_unittest.cc',
         'host/linux/audio_pipe_reader_unittest.cc',
         'host/linux/unicode_to_keysym_unittest.cc',
         'host/linux/x_server_clipboard_unittest.cc',
@@ -251,6 +253,16 @@
             'host/chromeos/aura_desktop_capturer_unittest.cc',
             'host/clipboard_aura_unittest.cc',
           ],
+        }, { # chromeos==1
+          'sources!': [
+            'host/linux/x_server_clipboard_unittest.cc',
+            'host/local_input_monitor_unittest.cc',
+          ],
+        }],
+        [ 'use_ozone==1', {
+          'sources!': [
+            'host/local_input_monitor_unittest.cc',
+          ],
         }],
         ['enable_remoting_host == 0', {
           'dependencies!': [
@@ -321,7 +333,7 @@
       'variables': {
         'output_dir': '<(PRODUCT_DIR)/remoting/unittests',
         'webapp_js_files': [
-          '<@(remoting_webapp_main_html_js_files)',
+          '<@(remoting_webapp_shared_main_html_js_files)',
           '<@(remoting_webapp_js_wcs_sandbox_files)',
           '<@(remoting_webapp_background_js_files)',
         ]

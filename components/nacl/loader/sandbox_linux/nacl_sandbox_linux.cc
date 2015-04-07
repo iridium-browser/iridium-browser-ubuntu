@@ -14,6 +14,7 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
+#include "base/files/scoped_file.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/posix/eintr_wrapper.h"
@@ -21,7 +22,8 @@
 #include "components/nacl/common/nacl_switches.h"
 #include "components/nacl/loader/nonsfi/nonsfi_sandbox.h"
 #include "components/nacl/loader/sandbox_linux/nacl_bpf_sandbox_linux.h"
-#include "sandbox/linux/services/credentials.h"
+#include "sandbox/linux/seccomp-bpf/sandbox_bpf.h"
+#include "sandbox/linux/services/proc_util.h"
 #include "sandbox/linux/services/thread_helpers.h"
 #include "sandbox/linux/suid/client/setuid_sandbox_client.h"
 
@@ -37,6 +39,15 @@ bool IsSandboxed() {
     return false;
   }
   return true;
+}
+
+// Open a new file descriptor to /proc/self/task/ by using
+// |proc_fd|.
+base::ScopedFD GetProcSelfTask(int proc_fd) {
+  base::ScopedFD proc_self_task(HANDLE_EINTR(
+      openat(proc_fd, "self/task/", O_RDONLY | O_DIRECTORY | O_CLOEXEC)));
+  PCHECK(proc_self_task.is_valid());
+  return proc_self_task.Pass();
 }
 
 }  // namespace
@@ -58,16 +69,13 @@ NaClSandbox::~NaClSandbox() {
 
 bool NaClSandbox::IsSingleThreaded() {
   CHECK(proc_fd_.is_valid());
-  base::ScopedFD proc_self_task(HANDLE_EINTR(openat(
-      proc_fd_.get(), "self/task/", O_RDONLY | O_DIRECTORY | O_CLOEXEC)));
-  PCHECK(proc_self_task.is_valid());
+  base::ScopedFD proc_self_task(GetProcSelfTask(proc_fd_.get()));
   return sandbox::ThreadHelpers::IsSingleThreaded(proc_self_task.get());
 }
 
 bool NaClSandbox::HasOpenDirectory() {
   CHECK(proc_fd_.is_valid());
-  sandbox::Credentials credentials;
-  return credentials.HasOpenDirectory(proc_fd_.get());
+  return sandbox::ProcUtil::HasOpenDirectory(proc_fd_.get());
 }
 
 void NaClSandbox::InitializeLayerOneSandbox() {
@@ -82,6 +90,7 @@ void NaClSandbox::InitializeLayerOneSandbox() {
     CHECK(!HasOpenDirectory());
 
     // Get sandboxed.
+    CHECK(setuid_sandbox_client_->CreateNewSession());
     CHECK(setuid_sandbox_client_->ChrootMe());
     CHECK(IsSandboxed());
     layer_one_enabled_ = true;
@@ -102,8 +111,7 @@ void NaClSandbox::CheckForExpectedNumberOfOpenFds() {
     //
     // This sanity check ensures that dynamically loaded libraries don't
     // leave any FDs open before we enable the sandbox.
-    sandbox::Credentials credentials;
-    CHECK_EQ(7, credentials.CountOpenFds(proc_fd_.get()));
+    CHECK_EQ(7, sandbox::ProcUtil::CountOpenFds(proc_fd_.get()));
   }
 }
 
@@ -114,11 +122,14 @@ void NaClSandbox::InitializeLayerTwoSandbox(bool uses_nonsfi_mode) {
   CHECK(IsSingleThreaded());
   CheckForExpectedNumberOfOpenFds();
 
+  base::ScopedFD proc_self_task(GetProcSelfTask(proc_fd_.get()));
+
   if (uses_nonsfi_mode) {
-    layer_two_enabled_ = nacl::nonsfi::InitializeBPFSandbox();
+    layer_two_enabled_ =
+        nacl::nonsfi::InitializeBPFSandbox(proc_self_task.Pass());
     layer_two_is_nonsfi_ = true;
   } else {
-    layer_two_enabled_ = nacl::InitializeBPFSandbox();
+    layer_two_enabled_ = nacl::InitializeBPFSandbox(proc_self_task.Pass());
   }
 }
 
@@ -138,7 +149,7 @@ void NaClSandbox::CheckSandboxingStateWithPolicy() {
       " this is not allowed in this configuration.";
 
   const bool no_sandbox_for_nonsfi_ok =
-      CommandLine::ForCurrentProcess()->HasSwitch(
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kNaClDangerousNoSandboxNonSfi);
   const bool can_be_no_sandbox =
       !layer_two_is_nonsfi_ || no_sandbox_for_nonsfi_ok;

@@ -5,6 +5,8 @@
 #ifndef UI_OZONE_PLATFORM_DRI_NATIVE_DISPLAY_DELEGATE_PROXY_H_
 #define UI_OZONE_PLATFORM_DRI_NATIVE_DISPLAY_DELEGATE_PROXY_H_
 
+#include <map>
+
 #include "base/macros.h"
 #include "base/memory/scoped_vector.h"
 #include "base/observer_list.h"
@@ -15,6 +17,7 @@
 namespace ui {
 
 class DeviceManager;
+class DisplayManager;
 class DriGpuPlatformSupportHost;
 
 struct DisplaySnapshot_Params;
@@ -24,7 +27,8 @@ class NativeDisplayDelegateProxy : public NativeDisplayDelegate,
                                    public GpuPlatformSupportHost {
  public:
   NativeDisplayDelegateProxy(DriGpuPlatformSupportHost* proxy,
-                             DeviceManager* device_manager);
+                             DeviceManager* device_manager,
+                             DisplayManager* display_manager);
   ~NativeDisplayDelegateProxy() override;
 
   // NativeDisplayDelegate overrides:
@@ -36,11 +40,12 @@ class NativeDisplayDelegateProxy : public NativeDisplayDelegate,
   void SyncWithServer() override;
   void SetBackgroundColor(uint32_t color_argb) override;
   void ForceDPMSOn() override;
-  std::vector<DisplaySnapshot*> GetDisplays() override;
+  void GetDisplays(const GetDisplaysCallback& callback) override;
   void AddMode(const DisplaySnapshot& output, const DisplayMode* mode) override;
-  bool Configure(const DisplaySnapshot& output,
+  void Configure(const DisplaySnapshot& output,
                  const DisplayMode* mode,
-                 const gfx::Point& origin) override;
+                 const gfx::Point& origin,
+                 const ConfigureCallback& callback) override;
   void CreateFrameBuffer(const gfx::Size& size) override;
   bool GetHDCPState(const DisplaySnapshot& output, HDCPState* state) override;
   bool SetHDCPState(const DisplaySnapshot& output, HDCPState state) override;
@@ -55,7 +60,10 @@ class NativeDisplayDelegateProxy : public NativeDisplayDelegate,
   void OnDeviceEvent(const DeviceEvent& event) override;
 
   // GpuPlatformSupportHost:
-  void OnChannelEstablished(int host_id, IPC::Sender* sender) override;
+  void OnChannelEstablished(
+      int host_id,
+      scoped_refptr<base::SingleThreadTaskRunner> send_runner,
+      const base::Callback<void(IPC::Message*)>& send_callback) override;
   void OnChannelDestroyed(int host_id) override;
 
   // IPC::Listener overrides:
@@ -64,11 +72,23 @@ class NativeDisplayDelegateProxy : public NativeDisplayDelegate,
  private:
   void OnUpdateNativeDisplays(
       const std::vector<DisplaySnapshot_Params>& displays);
+  void OnDisplayConfigured(int64_t display_id, bool status);
 
   DriGpuPlatformSupportHost* proxy_;  // Not owned.
   DeviceManager* device_manager_;     // Not owned.
+  DisplayManager* display_manager_;   // Not owned.
+
+  // Keeps track if there is a dummy display. This happens on initialization
+  // when there is no connection to the GPU to update the displays.
+  bool has_dummy_display_;
+
   ScopedVector<DisplaySnapshot> displays_;
   ObserverList<NativeDisplayObserver> observers_;
+
+  GetDisplaysCallback get_displays_callback_;
+
+  // Map between display_id and the configuration callback.
+  std::map<int64_t, ConfigureCallback> configure_callback_map_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeDisplayDelegateProxy);
 };

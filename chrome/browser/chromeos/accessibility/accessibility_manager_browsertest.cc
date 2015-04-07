@@ -25,13 +25,13 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chromeos/chromeos_switches.h"
-#include "chromeos/ime/component_extension_ime_manager.h"
-#include "chromeos/ime/input_method_manager.h"
 #include "chromeos/login/user_names.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/base/ime/chromeos/component_extension_ime_manager.h"
+#include "ui/base/ime/chromeos/input_method_manager.h"
 
 using chromeos::input_method::InputMethodManager;
 using chromeos::input_method::InputMethodUtil;
@@ -226,7 +226,7 @@ class AccessibilityManagerTest : public InProcessBrowserTest {
   AccessibilityManagerTest() : default_autoclick_delay_(0) {}
   virtual ~AccessibilityManagerTest() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) override {
+  virtual void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(chromeos::switches::kLoginManager);
     command_line->AppendSwitchASCII(chromeos::switches::kLoginProfile,
                                     TestingProfile::kTestUserProfileDir);

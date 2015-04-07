@@ -18,12 +18,17 @@ PassRefPtrWillBeRawPtr<MediaQuerySet> MediaQueryParser::parseMediaQuerySet(const
     // or better yet, replace the MediaQueryParser with a generic thread-safe CSS parser.
     Vector<CSSParserToken> tokens;
     CSSTokenizer::tokenize(queryString, tokens);
-    return MediaQueryParser(MediaQuerySetParser).parseImpl(tokens.begin(), tokens.end());
+    return parseMediaQuerySet(tokens);
 }
 
-PassRefPtrWillBeRawPtr<MediaQuerySet> MediaQueryParser::parseMediaCondition(CSSParserTokenIterator token, CSSParserTokenIterator endToken)
+PassRefPtrWillBeRawPtr<MediaQuerySet> MediaQueryParser::parseMediaQuerySet(CSSParserTokenRange range)
 {
-    return MediaQueryParser(MediaConditionParser).parseImpl(token, endToken);
+    return MediaQueryParser(MediaQuerySetParser).parseImpl(range);
+}
+
+PassRefPtrWillBeRawPtr<MediaQuerySet> MediaQueryParser::parseMediaCondition(CSSParserTokenRange range)
+{
+    return MediaQueryParser(MediaConditionParser).parseImpl(range);
 }
 
 const MediaQueryParser::State MediaQueryParser::ReadRestrictor = &MediaQueryParser::readRestrictor;
@@ -140,8 +145,10 @@ void MediaQueryParser::readFeatureValue(CSSParserTokenType type, const CSSParser
     if (type == DimensionToken && token.unitType() == CSSPrimitiveValue::CSS_UNKNOWN) {
         m_state = SkipUntilComma;
     } else {
-        m_mediaQueryData.addParserValue(type, token);
-        m_state = ReadFeatureEnd;
+        if (m_mediaQueryData.tryAddParserValue(type, token))
+            m_state = ReadFeatureEnd;
+        else
+            m_state = SkipUntilBlockEnd;
     }
 }
 
@@ -153,7 +160,7 @@ void MediaQueryParser::readFeatureEnd(CSSParserTokenType type, const CSSParserTo
         else
             m_state = SkipUntilComma;
     } else if (type == DelimiterToken && token.delimiter() == '/') {
-        m_mediaQueryData.addParserValue(type, token);
+        m_mediaQueryData.tryAddParserValue(type, token);
         m_state = ReadFeatureValue;
     } else {
         m_state = SkipUntilBlockEnd;
@@ -197,10 +204,14 @@ void MediaQueryParser::processToken(const CSSParserToken& token)
 }
 
 // The state machine loop
-PassRefPtrWillBeRawPtr<MediaQuerySet> MediaQueryParser::parseImpl(CSSParserTokenIterator token, CSSParserTokenIterator endToken)
+PassRefPtrWillBeRawPtr<MediaQuerySet> MediaQueryParser::parseImpl(CSSParserTokenRange range)
 {
-    for (; token != endToken; ++token)
-        processToken(*token);
+    while (!range.atEnd())
+        processToken(range.consume());
+
+    // FIXME: Can we get rid of this special case?
+    if (m_parserType == MediaQuerySetParser)
+        processToken(CSSParserToken(EOFToken));
 
     if (m_state != ReadAnd && m_state != ReadRestrictor && m_state != Done && m_state != ReadMediaNot)
         m_querySet->addMediaQuery(MediaQuery::createNotAll());
@@ -244,7 +255,7 @@ bool MediaQueryData::addExpression()
     return isValid;
 }
 
-void MediaQueryData::addParserValue(CSSParserTokenType type, const CSSParserToken& token)
+bool MediaQueryData::tryAddParserValue(CSSParserTokenType type, const CSSParserToken& token)
 {
     CSSParserValue value;
     if (type == NumberToken || type == PercentageToken || type == DimensionToken) {
@@ -255,15 +266,18 @@ void MediaQueryData::addParserValue(CSSParserTokenType type, const CSSParserToke
         value.iValue = token.delimiter();
         value.id = CSSValueInvalid;
         value.isInt = false;
-    } else {
+    } else if (type == IdentToken) {
         CSSParserString tokenValue;
         tokenValue.init(token.value());
         value.unit = CSSPrimitiveValue::CSS_IDENT;
         value.string = tokenValue;
         value.id = cssValueKeywordID(tokenValue);
         value.isInt = false;
+    } else {
+        return false;
     }
     m_valueList.addValue(value);
+    return true;
 }
 
 void MediaQueryData::setMediaType(const String& mediaType)

@@ -341,8 +341,8 @@ const wchar_t * js_class_name::m_pClassName = JS_WIDESTRING(class_name);\
 	ASSERT(pObj != NULL);\
 	FX_BOOL bRet = FALSE;\
 	MEMLEAKCHECK_1();\
-	bRet = pObj->QueryProperty((FX_LPCWSTR)propname);\
-	MEMLEAKCHECK_2(class_name, (FX_LPCWSTR)prop_name);\
+	bRet = pObj->QueryProperty(propname.c_str());\
+	MEMLEAKCHECK_2(class_name, prop_name.c_str());\
 	if (bRet)\
 	{\
 		info.GetReturnValue().Set(0x004);\
@@ -376,7 +376,7 @@ const wchar_t * js_class_name::m_pClassName = JS_WIDESTRING(class_name);\
 	JS_ErrorString sError;\
 	FX_BOOL bRet = FALSE;\
 	MEMLEAKCHECK_1();\
-	bRet = pObj->DoProperty(cc, (FX_LPCWSTR)propname, value, sError);\
+	bRet = pObj->DoProperty(cc, propname.c_str(), value, sError);\
 	MEMLEAKCHECK_2(class_name, L"GetProperty");\
 	if (bRet)\
 	{\
@@ -414,7 +414,7 @@ const wchar_t * js_class_name::m_pClassName = JS_WIDESTRING(class_name);\
 	JS_ErrorString sError;\
 	FX_BOOL bRet = FALSE;\
 	MEMLEAKCHECK_1();\
-	bRet = pObj->DoProperty(cc, (FX_LPCWSTR)propname, PropValue, sError);\
+	bRet = pObj->DoProperty(cc, propname.c_str(), PropValue, sError);\
 	MEMLEAKCHECK_2(class_name,L"PutProperty");\
 	if (bRet)\
 	{\
@@ -449,7 +449,7 @@ const wchar_t * js_class_name::m_pClassName = JS_WIDESTRING(class_name);\
 	JS_ErrorString sError;\
 	FX_BOOL bRet = FALSE;\
 	MEMLEAKCHECK_1();\
-	bRet = pObj->DelProperty(cc, (FX_LPCWSTR)propname, sError);\
+	bRet = pObj->DelProperty(cc, propname.c_str(), sError);\
 	MEMLEAKCHECK_2(class_name,L"DelProperty");\
 	if (bRet)\
 	{\
@@ -623,10 +623,10 @@ if (JS_DefineGlobalConst(pRuntime,JS_WIDESTRING(const_name),JS_NewString(pRuntim
 /* ======================================== GLOBAL ARRAYS ============================================ */
 
 #define DEFINE_GLOBAL_ARRAY(pRuntime)\
-int size = sizeof(ArrayContent) / sizeof(FX_LPCWSTR);\
+int size = FX_ArraySize(ArrayContent);\
 \
 CJS_Array array(pRuntime);\
-for (int i=0; i<size; i++) array.SetElement(i,CJS_Value(pRuntime,(FX_LPCWSTR)ArrayContent[i]));\
+for (int i=0; i<size; i++) array.SetElement(i,CJS_Value(pRuntime,ArrayContent[i]));\
 \
 CJS_PropValue prop(pRuntime);\
 prop << array;\
@@ -648,14 +648,14 @@ if (JS_DefineGlobalConst(pRuntime, (const wchar_t*)ArrayName, prop.ToJSValue()) 
 #define CLASSNAME_DATE			L"Date"
 #define CLASSNAME_STRING		L"v8::String"
 
-const unsigned int JSCONST_nStringHash = JS_CalcHash(VALUE_NAME_STRING,wcslen(VALUE_NAME_STRING));
-const unsigned int JSCONST_nNumberHash = JS_CalcHash(VALUE_NAME_NUMBER,wcslen(VALUE_NAME_NUMBER));
-const unsigned int JSCONST_nBoolHash = JS_CalcHash(VALUE_NAME_BOOLEAN,wcslen(VALUE_NAME_BOOLEAN));
-const unsigned int JSCONST_nDateHash = JS_CalcHash(VALUE_NAME_DATE,wcslen(VALUE_NAME_DATE));
-const unsigned int JSCONST_nObjectHash = JS_CalcHash(VALUE_NAME_OBJECT,wcslen(VALUE_NAME_OBJECT));
-const unsigned int JSCONST_nFXobjHash = JS_CalcHash(VALUE_NAME_FXOBJ,wcslen(VALUE_NAME_FXOBJ));
-const unsigned int JSCONST_nNullHash = JS_CalcHash(VALUE_NAME_NULL,wcslen(VALUE_NAME_NULL));
-const unsigned int JSCONST_nUndefHash = JS_CalcHash(VALUE_NAME_UNDEFINED,wcslen(VALUE_NAME_UNDEFINED));
+extern const unsigned int JSCONST_nStringHash;
+extern const unsigned int JSCONST_nNumberHash;
+extern const unsigned int JSCONST_nBoolHash;
+extern const unsigned int JSCONST_nDateHash;
+extern const unsigned int JSCONST_nObjectHash;
+extern const unsigned int JSCONST_nFXobjHash;
+extern const unsigned int JSCONST_nNullHash;
+extern const unsigned int JSCONST_nUndefHash;
 
 static FXJSVALUETYPE GET_VALUE_TYPE(v8::Handle<v8::Value> p)
 {

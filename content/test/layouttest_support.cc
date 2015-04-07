@@ -9,6 +9,7 @@
 #include "cc/blink/web_layer_impl.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/child/bluetooth/web_bluetooth_impl.h"
+#include "content/child/geofencing/web_geofencing_provider_impl.h"
 #include "content/common/gpu/image_transport_surface.h"
 #include "content/public/common/page_state.h"
 #include "content/public/renderer/renderer_gamepad_provider.h"
@@ -48,8 +49,8 @@ namespace {
 base::LazyInstance<base::Callback<void(RenderView*, WebTestProxyBase*)> >::Leaky
     g_callback = LAZY_INSTANCE_INITIALIZER;
 
-RenderViewImpl* CreateWebTestProxy(RenderViewImplParams* params) {
-  typedef WebTestProxy<RenderViewImpl, RenderViewImplParams*> ProxyType;
+RenderViewImpl* CreateWebTestProxy(const ViewMsg_New_Params& params) {
+  typedef WebTestProxy<RenderViewImpl, const ViewMsg_New_Params&> ProxyType;
   ProxyType* render_view_proxy = new ProxyType(params);
   if (g_callback == 0)
     return render_view_proxy;
@@ -58,7 +59,7 @@ RenderViewImpl* CreateWebTestProxy(RenderViewImplParams* params) {
 }
 
 WebTestProxyBase* GetWebTestProxyBase(RenderViewImpl* render_view) {
-  typedef WebTestProxy<RenderViewImpl, RenderViewImplParams*> ViewProxy;
+  typedef WebTestProxy<RenderViewImpl, ViewMsg_New_Params*> ViewProxy;
 
   ViewProxy* render_view_proxy = static_cast<ViewProxy*>(render_view);
   return static_cast<WebTestProxyBase*>(render_view_proxy);
@@ -316,6 +317,24 @@ void SetBluetoothMockDataSetForTesting(const std::string& name) {
       ->blink_platform_impl()
       ->BluetoothImplForTesting()
       ->SetBluetoothMockDataSetForTesting(name);
+}
+
+void SetGeofencingMockProvider(bool service_available) {
+  static_cast<WebGeofencingProviderImpl*>(
+      RenderThreadImpl::current()->blink_platform_impl()->geofencingProvider())
+          ->SetMockProvider(service_available);
+}
+
+void ClearGeofencingMockProvider() {
+  static_cast<WebGeofencingProviderImpl*>(
+      RenderThreadImpl::current()->blink_platform_impl()->geofencingProvider())
+          ->ClearMockProvider();
+}
+
+void SetGeofencingMockPosition(double latitude, double longitude) {
+  static_cast<WebGeofencingProviderImpl*>(
+      RenderThreadImpl::current()->blink_platform_impl()->geofencingProvider())
+          ->SetMockPosition(latitude, longitude);
 }
 
 void UseSynchronousResizeMode(RenderView* render_view, bool enable) {

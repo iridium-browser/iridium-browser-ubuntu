@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_NET_SPDYPROXY_DATA_REDUCTION_PROXY_CHROME_SETTINGS_H_
 
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_auth_request_handler.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
 #include "components/keyed_service/core/keyed_service.h"
@@ -16,10 +17,13 @@ class PrefService;
 
 namespace data_reduction_proxy {
 class DataReductionProxyConfigurator;
+class DataReductionProxyEventStore;
 class DataReductionProxyParams;
+class DataReductionProxyStatisticsPrefs;
 }
 
 namespace net {
+class NetLog;
 class URLRequestContextGetter;
 }
 
@@ -40,12 +44,17 @@ class DataReductionProxyChromeSettings
   ~DataReductionProxyChromeSettings() override;
 
   // Initialize the settings object with the given configurator, prefs services,
-  // and request context.
+  // and request context. Settings takes ownership of statistics prefs from
+  // |io_data|.
   void InitDataReductionProxySettings(
       data_reduction_proxy::DataReductionProxyConfigurator* configurator,
       PrefService* profile_prefs,
       PrefService* local_state_prefs,
-      net::URLRequestContextGetter* request_context);
+      scoped_ptr<data_reduction_proxy::DataReductionProxyStatisticsPrefs>
+          statistics_prefs,
+      net::URLRequestContextGetter* request_context,
+      net::NetLog* net_log,
+      data_reduction_proxy::DataReductionProxyEventStore* event_store);
 
   // Gets the client type for the data reduction proxy.
   static data_reduction_proxy::Client GetClient();

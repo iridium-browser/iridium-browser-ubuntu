@@ -16,17 +16,20 @@ namespace v8 {
 namespace internal {
 namespace compiler {
 
+class CFGBuilder;
+class ControlEquivalence;
+class SpecialRPONumberer;
+
 // Computes a schedule from a graph, placing nodes into basic blocks and
 // ordering the basic blocks in the special RPO order.
 class Scheduler {
  public:
   // The complete scheduling algorithm. Creates a new schedule and places all
   // nodes from the graph into it.
-  static Schedule* ComputeSchedule(ZonePool* zone_pool, Graph* graph);
+  static Schedule* ComputeSchedule(Zone* zone, Graph* graph);
 
   // Compute the RPO of blocks in an existing schedule.
-  static BasicBlockVector* ComputeSpecialRPO(ZonePool* zone_pool,
-                                             Schedule* schedule);
+  static BasicBlockVector* ComputeSpecialRPO(Zone* zone, Schedule* schedule);
 
  private:
   // Placement of a node changes during scheduling. The placement state
@@ -46,9 +49,6 @@ class Scheduler {
   struct SchedulerData {
     BasicBlock* minimum_block_;  // Minimum legal RPO placement.
     int unscheduled_count_;      // Number of unscheduled uses of this node.
-    bool is_connected_control_;  // {true} if control-connected to the end node.
-    bool is_floating_control_;   // {true} if control, but not control-connected
-                                 // to the end node.
     Placement placement_;        // Whether the node is fixed, schedulable,
                                  // coupled to another node, or not yet known.
   };
@@ -60,6 +60,9 @@ class Scheduler {
   NodeVector schedule_root_nodes_;       // Fixed root nodes seed the worklist.
   ZoneQueue<Node*> schedule_queue_;      // Worklist of schedulable nodes.
   ZoneVector<SchedulerData> node_data_;  // Per-node data for all nodes.
+  CFGBuilder* control_flow_builder_;     // Builds basic blocks for controls.
+  SpecialRPONumberer* special_rpo_;      // Special RPO numbering of blocks.
+  ControlEquivalence* equivalence_;      // Control dependence equivalence.
 
   Scheduler(Zone* zone, Graph* graph, Schedule* schedule);
 
@@ -73,8 +76,8 @@ class Scheduler {
   void IncrementUnscheduledUseCount(Node* node, int index, Node* from);
   void DecrementUnscheduledUseCount(Node* node, int index, Node* from);
 
-  inline int GetRPONumber(BasicBlock* block);
   BasicBlock* GetCommonDominator(BasicBlock* b1, BasicBlock* b2);
+  void PropagateImmediateDominators(BasicBlock* block);
 
   // Phase 1: Build control-flow graph.
   friend class CFGBuilder;
@@ -96,6 +99,9 @@ class Scheduler {
   // Phase 5: Schedule nodes late.
   friend class ScheduleLateNodeVisitor;
   void ScheduleLate();
+
+  // Phase 6: Seal the final schedule.
+  void SealFinalSchedule();
 
   void FuseFloatingControl(BasicBlock* block, Node* node);
   void MovePlannedNodes(BasicBlock* from, BasicBlock* to);

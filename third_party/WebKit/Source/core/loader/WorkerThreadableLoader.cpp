@@ -189,15 +189,13 @@ void WorkerThreadableLoader::MainThreadBridge::mainThreadCancel(ExecutionContext
 
 void WorkerThreadableLoader::MainThreadBridge::cancel()
 {
-    m_loaderProxy.postTaskToLoader(
-        createCrossThreadTask(&MainThreadBridge::mainThreadCancel, AllowCrossThreadAccess(this)));
-    ThreadableLoaderClientWrapper* clientWrapper = m_workerClientWrapper.get();
-    if (!clientWrapper->done()) {
+    m_loaderProxy.postTaskToLoader(createCrossThreadTask(&MainThreadBridge::mainThreadCancel, AllowCrossThreadAccess(this)));
+    if (!m_workerClientWrapper->isDetached()) {
         // If the client hasn't reached a termination state, then transition it by sending a cancellation error.
         // Note: no more client callbacks will be done after this method -- the clearClientWrapper() call ensures that.
         ResourceError error(String(), 0, String(), String());
         error.setIsCancellation(true);
-        clientWrapper->didFail(error);
+        m_workerClientWrapper->didFail(error);
     }
     clearClientWrapper();
 }

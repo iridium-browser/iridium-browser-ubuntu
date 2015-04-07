@@ -22,6 +22,7 @@
 
 #include "core/svg/SVGPathConsumer.h"
 #include "platform/geometry/FloatPoint.h"
+#include "platform/heap/Handle.h"
 #include "wtf/OwnPtr.h"
 #include "wtf/text/WTFString.h"
 
@@ -34,21 +35,21 @@ class SVGPathSegList;
 
 // String/SVGPathByteStream -> Path
 bool buildPathFromString(const String&, Path&);
-bool buildPathFromByteStream(const SVGPathByteStream*, Path&);
+bool buildPathFromByteStream(const SVGPathByteStream&, Path&);
 
 // SVGPathSegList/String -> SVGPathByteStream
-bool appendSVGPathByteStreamFromSVGPathSeg(PassRefPtr<SVGPathSeg>, SVGPathByteStream*, PathParsingMode);
-bool buildSVGPathByteStreamFromString(const String&, SVGPathByteStream*, PathParsingMode);
+bool appendSVGPathByteStreamFromSVGPathSeg(PassRefPtrWillBeRawPtr<SVGPathSeg>, SVGPathByteStream&, PathParsingMode);
+bool buildSVGPathByteStreamFromString(const String&, SVGPathByteStream&, PathParsingMode);
 
 // SVGPathByteStream/SVGPathSegList -> String
-bool buildStringFromByteStream(const SVGPathByteStream*, String&, PathParsingMode);
-bool buildStringFromSVGPathSegList(PassRefPtr<SVGPathSegList>, String&, PathParsingMode);
+bool buildStringFromByteStream(const SVGPathByteStream&, String&, PathParsingMode);
+bool buildStringFromSVGPathSegList(PassRefPtrWillBeRawPtr<SVGPathSegList>, String&, PathParsingMode);
 
-bool addToSVGPathByteStream(SVGPathByteStream*, const SVGPathByteStream*, unsigned repeatCount = 1);
+bool addToSVGPathByteStream(SVGPathByteStream&, const SVGPathByteStream&, unsigned repeatCount = 1);
 
-bool getSVGPathSegAtLengthFromSVGPathByteStream(const SVGPathByteStream*, float length, unsigned& pathSeg);
-bool getTotalLengthOfSVGPathByteStream(const SVGPathByteStream*, float& totalLength);
-bool getPointAtLengthOfSVGPathByteStream(const SVGPathByteStream*, float length, FloatPoint&);
+unsigned getSVGPathSegAtLengthFromSVGPathByteStream(const SVGPathByteStream&, float length);
+float getTotalLengthOfSVGPathByteStream(const SVGPathByteStream&);
+FloatPoint getPointAtLengthOfSVGPathByteStream(const SVGPathByteStream&, float length);
 
 } // namespace blink
 

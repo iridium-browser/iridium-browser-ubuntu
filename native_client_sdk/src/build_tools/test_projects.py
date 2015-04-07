@@ -25,6 +25,10 @@ sys.path.append(os.path.join(SRC_DIR, 'chrome', 'test', 'nacl_test_injection'))
 import find_chrome
 browser_path = find_chrome.FindChrome(SRC_DIR, ['Debug', 'Release'])
 
+# Fall back to using CHROME_PATH (same as in common.mk)
+if not browser_path:
+  browser_path = os.environ['CHROME_PATH']
+
 
 pepper_ver = str(int(build_version.ChromeMajorVersion()))
 pepperdir = os.path.join(OUT_DIR, 'pepper_' + pepper_ver)
@@ -327,7 +331,7 @@ def main(args):
       help='Number of types to retry on failure (Default: %default)',
           type='int', default=1)
 
-  options, args = parser.parse_args(args[1:])
+  options, args = parser.parse_args(args)
 
   if not options.toolchain:
     options.toolchain = ['newlib', 'glibc', 'pnacl', 'host']
@@ -365,7 +369,7 @@ def main(args):
 if __name__ == '__main__':
   script_name = os.path.basename(sys.argv[0])
   try:
-    sys.exit(main(sys.argv))
+    sys.exit(main(sys.argv[1:]))
   except parse_dsc.ValidationError as e:
     buildbot_common.ErrorExit('%s: %s' % (script_name, e))
   except KeyboardInterrupt:

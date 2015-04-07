@@ -20,7 +20,6 @@
 #include "chrome/browser/bookmarks/chrome_bookmark_client_factory.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
-#include "chrome/browser/history/history_db_task.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -35,6 +34,7 @@
 #include "components/bookmarks/browser/bookmark_model_observer.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
 #include "components/favicon_base/favicon_util.h"
+#include "components/history/core/browser/history_db_task.h"
 #include "components/history/core/browser/history_types.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -67,7 +67,7 @@ class HistoryEmptyTask : public history::HistoryDBTask {
 
 // Helper class used to wait for changes to take effect on the favicon of a
 // particular bookmark node in a particular bookmark model.
-class FaviconChangeObserver : public BookmarkModelObserver {
+class FaviconChangeObserver : public bookmarks::BookmarkModelObserver {
  public:
   FaviconChangeObserver(BookmarkModel* model, const BookmarkNode* node)
       : model_(model),
@@ -86,6 +86,8 @@ class FaviconChangeObserver : public BookmarkModelObserver {
     wait_for_load_ = false;
     content::RunMessageLoop();
   }
+
+  // bookmarks::BookmarkModelObserver:
   void BookmarkModelLoaded(BookmarkModel* model, bool ids_reassigned) override {
   }
   void BookmarkNodeMoved(BookmarkModel* model,

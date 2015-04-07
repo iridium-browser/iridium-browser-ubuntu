@@ -26,8 +26,8 @@ infobars::InfoBar* ProtectedMediaIdentifierInfoBarDelegate::Create(
     const std::string& display_languages) {
   const content::NavigationEntry* committed_entry =
       infobar_service->web_contents()->GetController().GetLastCommittedEntry();
-  return infobar_service->AddInfoBar(ConfirmInfoBarDelegate::CreateInfoBar(
-      scoped_ptr<ConfirmInfoBarDelegate>(
+  return infobar_service->AddInfoBar(
+      infobar_service->CreateConfirmInfoBar(scoped_ptr<ConfirmInfoBarDelegate>(
           new ProtectedMediaIdentifierInfoBarDelegate(
               controller, id, requesting_frame,
               committed_entry ? committed_entry->GetUniqueID() : 0,
@@ -65,7 +65,7 @@ void ProtectedMediaIdentifierInfoBarDelegate::SetPermission(
   content::WebContents* web_contents =
       InfoBarService::WebContentsFromInfoBar(infobar());
   controller_->OnPermissionSet(id_, requesting_frame_,
-                               web_contents->GetLastCommittedURL(),
+                               web_contents->GetLastCommittedURL().GetOrigin(),
                                update_content_setting, allowed);
 }
 

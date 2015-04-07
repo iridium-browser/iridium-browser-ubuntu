@@ -11,8 +11,6 @@
 
 #include "ash/ash_switches.h"
 #include "ash/desktop_background/desktop_background_controller.h"
-#include "ash/ime/input_method_menu_item.h"
-#include "ash/ime/input_method_menu_manager.h"
 #include "ash/metrics/user_metrics_recorder.h"
 #include "ash/session/session_state_delegate.h"
 #include "ash/session/session_state_observer.h"
@@ -46,10 +44,9 @@
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
 #include "chrome/browser/chromeos/bluetooth/bluetooth_pairing_dialog.h"
-#include "chrome/browser/chromeos/charger_replace/charger_replacement_dialog.h"
 #include "chrome/browser/chromeos/events/system_key_event_listener.h"
+#include "chrome/browser/chromeos/input_method/input_method_switch_recorder.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
-#include "chrome/browser/chromeos/kiosk_mode/kiosk_mode_settings.h"
 #include "chrome/browser/chromeos/login/help_app_launcher.h"
 #include "chrome/browser/chromeos/login/login_wizard.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
@@ -82,7 +79,6 @@
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/webui/chromeos/charger_replacement_handler.h"
 #include "chrome/browser/upgrade_detector.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -91,9 +87,6 @@
 #include "chrome/grit/locale_settings.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/session_manager_client.h"
-#include "chromeos/ime/extension_ime_util.h"
-#include "chromeos/ime/ime_keyboard.h"
-#include "chromeos/ime/input_method_manager.h"
 #include "chromeos/login/login_state.h"
 #include "chromeos/network/portal_detector/network_portal_detector.h"
 #include "components/google/core/browser/google_util.h"
@@ -110,8 +103,18 @@
 #include "device/bluetooth/bluetooth_device.h"
 #include "net/base/escape.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
+#include "ui/base/ime/chromeos/extension_ime_util.h"
+#include "ui/base/ime/chromeos/ime_keyboard.h"
+#include "ui/base/ime/chromeos/input_method_manager.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/time_format.h"
+#include "ui/chromeos/ime/input_method_menu_item.h"
+#include "ui/chromeos/ime/input_method_menu_manager.h"
+
+#if defined(ENABLE_SUPERVISED_USERS)
+#include "chrome/browser/supervised_user/supervised_user_service.h"
+#include "chrome/browser/supervised_user/supervised_user_service_factory.h"
+#endif
 
 namespace chromeos {
 
@@ -219,6 +222,8 @@ SystemTrayDelegateChromeOS::SystemTrayDelegateChromeOS()
   registrar_->Add(this,
                   chrome::NOTIFICATION_PROFILE_DESTROYED,
                   content::NotificationService::AllSources());
+  registrar_->Add(this, chrome::NOTIFICATION_LOGIN_USER_PROFILE_PREPARED,
+                  content::NotificationService::AllSources());
 
   AccessibilityManager* accessibility_manager = AccessibilityManager::Get();
   CHECK(accessibility_manager);
@@ -233,7 +238,7 @@ void SystemTrayDelegateChromeOS::Initialize() {
   DBusThreadManager::Get()->GetSessionManagerClient()->AddObserver(this);
 
   input_method::InputMethodManager::Get()->AddObserver(this);
-  ash::ime::InputMethodMenuManager::GetInstance()->AddObserver(this);
+  ui::ime::InputMethodMenuManager::GetInstance()->AddObserver(this);
   UpdateClockType();
 
   device::BluetoothAdapterFactory::GetAdapter(
@@ -299,7 +304,7 @@ SystemTrayDelegateChromeOS::~SystemTrayDelegateChromeOS() {
 
   DBusThreadManager::Get()->GetSessionManagerClient()->RemoveObserver(this);
   input_method::InputMethodManager::Get()->RemoveObserver(this);
-  ash::ime::InputMethodMenuManager::GetInstance()->RemoveObserver(this);
+  ui::ime::InputMethodMenuManager::GetInstance()->RemoveObserver(this);
   bluetooth_adapter_->RemoveObserver(this);
   ash::Shell::GetInstance()
       ->session_state_delegate()
@@ -349,8 +354,6 @@ ash::user::LoginStatus SystemTrayDelegateChromeOS::GetUserLoginStatus() const {
       return ash::user::LOGGED_IN_OWNER;
     case LoginState::LOGGED_IN_USER_GUEST:
       return ash::user::LOGGED_IN_GUEST;
-    case LoginState::LOGGED_IN_USER_RETAIL_MODE:
-      return ash::user::LOGGED_IN_RETAIL_MODE;
     case LoginState::LOGGED_IN_USER_PUBLIC_ACCOUNT:
       return ash::user::LOGGED_IN_PUBLIC;
     case LoginState::LOGGED_IN_USER_SUPERVISED:
@@ -398,17 +401,18 @@ const base::string16 SystemTrayDelegateChromeOS::GetSupervisedUserMessage()
     const {
   if (!IsUserSupervised())
     return base::string16();
-  std::string user_manager_name = GetSupervisedUserManager();
-  LOG_IF(WARNING, user_manager_name.empty()) <<
-      "Returning incomplete supervised user message as manager not known yet.";
-  return l10n_util::GetStringFUTF16(
-      IDS_USER_IS_SUPERVISED_BY_NOTICE,
-      base::UTF8ToUTF16(user_manager_name));
+  if (IsUserChild())
+    return GetChildUserMessage();
+  return GetLegacySupervisedUserMessage();
 }
 
 bool SystemTrayDelegateChromeOS::IsUserSupervised() const {
   user_manager::User* user = user_manager::UserManager::Get()->GetActiveUser();
   return user && user->IsSupervised();
+}
+
+bool SystemTrayDelegateChromeOS::IsUserChild() const {
+  return user_manager::UserManager::Get()->IsLoggedInAsChildUser();
 }
 
 void SystemTrayDelegateChromeOS::GetSystemUpdateInfo(
@@ -553,7 +557,7 @@ void SystemTrayDelegateChromeOS::ShowUserLogin() {
   if (!shell->delegate()->IsMultiProfilesEnabled())
     return;
 
-  // Only regular users could add other users to current session.
+  // Only regular non-supervised users could add other users to current session.
   if (user_manager::UserManager::Get()->GetActiveUser()->GetType() !=
       user_manager::USER_TYPE_REGULAR) {
     return;
@@ -591,29 +595,6 @@ void SystemTrayDelegateChromeOS::ShowUserLogin() {
       UserAddingScreen::Get()->Start();
     }
   }
-}
-
-bool SystemTrayDelegateChromeOS::ShowSpringChargerReplacementDialog() {
-  if (!ChargerReplacementDialog::ShouldShowDialog())
-    return false;
-
-  ChargerReplacementDialog* dialog =
-      new ChargerReplacementDialog(GetNativeWindow());
-  dialog->Show();
-  return true;
-}
-
-bool SystemTrayDelegateChromeOS::IsSpringChargerReplacementDialogVisible() {
-  return ChargerReplacementDialog::IsDialogVisible();
-}
-
-bool SystemTrayDelegateChromeOS::HasUserConfirmedSafeSpringCharger() {
-  return ChargerReplacementHandler::GetChargerStatusPref() ==
-         ChargerReplacementHandler::CONFIRM_SAFE_CHARGER;
-}
-
-void SystemTrayDelegateChromeOS::ShutDown() {
-  ash::Shell::GetInstance()->lock_state_controller()->RequestShutdown();
 }
 
 void SystemTrayDelegateChromeOS::SignOut() {
@@ -729,8 +710,8 @@ void SystemTrayDelegateChromeOS::GetAvailableIMEList(ash::IMEInfoList* list) {
 
 void SystemTrayDelegateChromeOS::GetCurrentIMEProperties(
     ash::IMEPropertyInfoList* list) {
-  ash::ime::InputMethodMenuItemList menu_list =
-      ash::ime::InputMethodMenuManager::GetInstance()->
+  ui::ime::InputMethodMenuItemList menu_list =
+      ui::ime::InputMethodMenuManager::GetInstance()->
       GetCurrentInputMethodMenuItemList();
   for (size_t i = 0; i < menu_list.size(); ++i) {
     ash::IMEPropertyInfo property;
@@ -745,6 +726,8 @@ void SystemTrayDelegateChromeOS::SwitchIME(const std::string& ime_id) {
   input_method::InputMethodManager::Get()
       ->GetActiveIMEState()
       ->ChangeInputMethod(ime_id, false /* show_message */);
+  input_method::InputMethodSwitchRecorder::Get()->RecordSwitch(
+      true /* by_tray_menu */);
 }
 
 void SystemTrayDelegateChromeOS::ActivateIMEProperty(const std::string& key) {
@@ -820,6 +803,7 @@ int SystemTrayDelegateChromeOS::GetSystemTrayMenuWidth() {
 }
 
 void SystemTrayDelegateChromeOS::ActiveUserWasChanged() {
+  SetProfile(ProfileManager::GetActiveUserProfile());
   GetSystemTrayNotifier()->NotifyUserUpdate();
 }
 
@@ -857,12 +841,19 @@ void SystemTrayDelegateChromeOS::UserAddedToSession(
     const user_manager::User* active_user) {
 }
 
-void SystemTrayDelegateChromeOS::UserChangedSupervisedStatus(
+void SystemTrayDelegateChromeOS::ActiveUserChanged(
+    const user_manager::User* /* active_user */) {
+}
+
+void SystemTrayDelegateChromeOS::UserChangedChildStatus(
     user_manager::User* user) {
   Profile* user_profile = ProfileHelper::Get()->GetProfileByUser(user);
-  DCHECK(user_profile);
 
-  if (session_started_ && user_profile_ == user_profile) {
+  // Returned user_profile might be NULL on restoring Users on browser start.
+  // At some point profile is not yet fully initiated.
+  if (session_started_ &&
+      user_profile != NULL &&
+      user_profile_ == user_profile) {
     ash::Shell::GetInstance()->UpdateAfterLoginStatusChange(
         GetUserLoginStatus());
   }
@@ -930,7 +921,6 @@ void SystemTrayDelegateChromeOS::SetProfile(Profile* profile) {
       base::Bind(&SystemTrayDelegateChromeOS::UpdatePerformanceTracing,
                  base::Unretained(this)));
 
-  UpdateClockType();
   UpdateShowLogoutButtonInTray();
   UpdateLogoutDialogDuration();
   UpdatePerformanceTracing();
@@ -971,6 +961,16 @@ bool SystemTrayDelegateChromeOS::ShouldUse24HourClock() const {
     return (system_value_found
                 ? system_use_24_hour_clock
                 : (base::GetHourClockType() == base::k24HourClock));
+
+  user_manager::User* active_user =
+      user_manager::UserManager::Get()->GetActiveUser();
+  if (active_user) {
+    Profile* user_profile = ProfileHelper::Get()->GetProfileByUser(active_user);
+    if (user_profile) {
+      user_pref =
+          user_profile->GetPrefs()->FindPreference(prefs::kUse24HourClock);
+    }
+  }
 
   bool use_24_hour_clock = true;
   user_pref->GetValue()->GetAsBoolean(&use_24_hour_clock);
@@ -1114,6 +1114,10 @@ void SystemTrayDelegateChromeOS::Observe(
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
   switch (type) {
+    case chrome::NOTIFICATION_LOGIN_USER_PROFILE_PREPARED: {
+      UpdateClockType();
+      break;
+    }
     case chrome::NOTIFICATION_UPGRADE_RECOMMENDED: {
       ash::UpdateInfo info;
       GetUpdateInfo(content::Source<UpgradeDetector>(source).ptr(), &info);
@@ -1182,7 +1186,7 @@ void SystemTrayDelegateChromeOS::InputMethodChanged(
 
 // Overridden from InputMethodMenuManager::Observer.
 void SystemTrayDelegateChromeOS::InputMethodMenuItemChanged(
-    ash::ime::InputMethodMenuManager* manager) {
+    ui::ime::InputMethodMenuManager* manager) {
   GetSystemTrayNotifier()->NotifyRefreshIME();
 }
 
@@ -1287,6 +1291,11 @@ void SystemTrayDelegateChromeOS::UserAddedToSession(
   GetSystemTrayNotifier()->NotifyUserAddedToSession();
 }
 
+void SystemTrayDelegateChromeOS::ActiveUserChanged(
+    const std::string& /* user_id */) {
+  UpdateClockType();
+}
+
 // Overridden from chrome::BrowserListObserver.
 void SystemTrayDelegateChromeOS::OnBrowserRemoved(Browser* browser) {
   NotifyIfLastWindowClosed();
@@ -1311,6 +1320,41 @@ void SystemTrayDelegateChromeOS::OnAccessibilityStatusChanged(
     accessibility_subscription_.reset();
   else
     OnAccessibilityModeChanged(details.notify);
+}
+
+const base::string16
+SystemTrayDelegateChromeOS::GetLegacySupervisedUserMessage() const {
+  std::string user_manager_name = GetSupervisedUserManager();
+  return l10n_util::GetStringFUTF16(
+      IDS_USER_IS_SUPERVISED_BY_NOTICE,
+      base::UTF8ToUTF16(user_manager_name));
+}
+
+const base::string16
+SystemTrayDelegateChromeOS::GetChildUserMessage() const {
+#if defined(ENABLE_SUPERVISED_USERS)
+  SupervisedUserService* service =
+      SupervisedUserServiceFactory::GetForProfile(user_profile_);
+  base::string16 first_custodian =
+      base::UTF8ToUTF16(service->GetCustodianEmailAddress());
+  base::string16 second_custodian =
+      base::UTF8ToUTF16(service->GetSecondCustodianEmailAddress());
+  LOG_IF(WARNING, first_custodian.empty()) <<
+      "Returning incomplete child user message as manager not known yet.";
+  if (second_custodian.empty()) {
+    return l10n_util::GetStringFUTF16(
+        IDS_CHILD_USER_IS_MANAGED_BY_ONE_PARENT_NOTICE, first_custodian);
+  } else {
+    return l10n_util::GetStringFUTF16(
+        IDS_CHILD_USER_IS_MANAGED_BY_TWO_PARENTS_NOTICE,
+        first_custodian,
+        second_custodian);
+  }
+#endif
+
+  LOG(WARNING) << "SystemTrayDelegateChromeOS::GetChildUserMessage call while "
+               << "ENABLE_SUPERVISED_USERS undefined.";
+  return base::string16();
 }
 
 ash::SystemTrayDelegate* CreateSystemTrayDelegate() {

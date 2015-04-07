@@ -40,15 +40,22 @@
 
 namespace blink {
 
+class FloatRect;
+
 class PLATFORM_EXPORT GraphicsContextSnapshot : public RefCounted<GraphicsContextSnapshot> {
 WTF_MAKE_NONCOPYABLE(GraphicsContextSnapshot);
 public:
     typedef Vector<Vector<double> > Timings;
 
-    static PassRefPtr<GraphicsContextSnapshot> load(const char*, size_t);
+    struct TilePictureStream : RefCounted<TilePictureStream> {
+        FloatPoint layerOffset;
+        Vector<char> data;
+    };
+
+    static PassRefPtr<GraphicsContextSnapshot> load(const Vector<RefPtr<TilePictureStream> >&);
 
     PassOwnPtr<Vector<char> > replay(unsigned fromStep = 0, unsigned toStep = 0, double scale = 1.0) const;
-    PassOwnPtr<Timings> profile(unsigned minIterations, double minDuration) const;
+    PassOwnPtr<Timings> profile(unsigned minIterations, double minDuration, const FloatRect* clipRect) const;
     PassRefPtr<JSONArray> snapshotCommandLog() const;
 
 private:

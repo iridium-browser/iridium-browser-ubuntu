@@ -77,7 +77,7 @@ const char* kGLSwitchesCopiedFromGpuProcessHost[] = {
   kGpuNoContextLost,
   kDisableGLDrawingForTests,
   kOverrideUseGLWithOSMesaForTests,
-  kUseWarp
+  kUseWarp,
 };
 const int kGLSwitchesCopiedFromGpuProcessHostNumSwitches =
     arraysize(kGLSwitchesCopiedFromGpuProcessHost);

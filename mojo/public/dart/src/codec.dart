@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// TODO(zra): Rewrite MojoDecoder and MojoEncoder using Dart idioms, and make
+// corresponding changes to the bindings generation script.
+
 part of bindings;
 
 const int kAlignment = 8;
@@ -66,7 +69,7 @@ int getEncodedSize(Object typeOrInstance) {
 
 class MojoDecoder {
   ByteData buffer;
-  List<int> handles;
+  List<core.RawMojoHandle> handles;
   int base;
   int next;
 
@@ -151,8 +154,11 @@ class MojoDecoder {
     return new MojoDecoder(buffer, handles, offset);
   }
 
-  int decodeHandle() {
-    return handles[readUint32()];
+  core.RawMojoHandle decodeHandle() {
+    int handleIndex = readUint32();
+    return (handleIndex == kEncodedInvalidHandleValue) ?
+           new core.RawMojoHandle(core.RawMojoHandle.INVALID) :
+           handles[handleIndex];
   }
 
   String decodeString() {
@@ -234,7 +240,7 @@ class MojoDecoder {
 
 class MojoEncoder {
   ByteData buffer;
-  List<int> handles;
+  List<core.RawMojoHandle> handles;
   int base;
   int next;
   int extent;
@@ -320,7 +326,7 @@ class MojoEncoder {
 
   void grow(int new_size) {
     Uint8List new_buffer = new Uint8List(new_size);
-    new_buffer.setRange(0, next, buffer.buffer.asUint8List());
+    new_buffer.setRange(0, buffer.lengthInBytes, buffer.buffer.asUint8List());
     buffer = new_buffer.buffer.asByteData();
   }
 
@@ -341,9 +347,13 @@ class MojoEncoder {
     return new MojoEncoder(buffer, handles, pointer, extent);
   }
 
-  void encodeHandle(int handle) {
-    handles.add(handle);
-    writeUint32(handles.length - 1);
+  void encodeHandle(core.RawMojoHandle handle) {
+    if (handle.isValid) {
+      handles.add(handle);
+      writeUint32(handles.length - 1);
+    } else {
+      writeUint32(kEncodedInvalidHandleValue);
+    }
   }
 
   void encodeString(String val) {
@@ -456,7 +466,7 @@ const int kMessageIsResponse = 1 << 1;
 
 class Message {
   ByteData buffer;
-  List<int> handles;
+  List<core.RawMojoHandle> handles;
 
   Message(this.buffer, this.handles);
 
@@ -475,12 +485,14 @@ class Message {
 
 class MessageBuilder {
   MojoEncoder encoder;
-  List<int> handles;
+  List<core.RawMojoHandle> handles;
+
+  MessageBuilder._();
 
   MessageBuilder(int name, int payloadSize) {
     int numBytes = kMessageHeaderSize + payloadSize;
     var buffer = new ByteData(numBytes);
-    handles = [];
+    handles = <core.RawMojoHandle>[];
 
     encoder = new MojoEncoder(buffer, handles, 0, kMessageHeaderSize);
     encoder.writeUint32(kMessageHeaderSize);
@@ -517,20 +529,19 @@ class MessageBuilder {
 
 class MessageWithRequestIDBuilder extends MessageBuilder {
   MessageWithRequestIDBuilder(
-      int name, int payloadSize, int flags, int requestID) {
+      int name, int payloadSize, int requestID, [int flags = 0])
+      : super._() {
     int numBytes = kMessageWithRequestIDHeaderSize + payloadSize;
-    buffer = new ByteData(numBytes);
-    handles = [];
-    base = 0;
+    var buffer = new ByteData(numBytes);
+    handles = <core.RawMojoHandle>[];
 
-    encoder = createEncoder(0, kMessageWithRequestIDHeaderSize);
+    encoder = new MojoEncoder(
+        buffer, handles, 0, kMessageWithRequestIDHeaderSize);
     encoder.writeUint32(kMessageWithRequestIDHeaderSize);
     encoder.writeUint32(3);  // num_fields.
     encoder.writeUint32(name);
     encoder.writeUint32(flags);
     encoder.writeUint64(requestID);
-    base = encoder.next;
-    buffer = encoder.buffer;
   }
 }
 
@@ -562,17 +573,10 @@ class MessageReader {
 }
 
 
-abstract class MojoType<T> {
-  static const int encodedSize = 0;
-  static T decode(MojoDecoder decoder) { return null }
-  static void encode(MojoEncoder encoder, T val) {}
-}
-
-
 class PackedBool {}
 
 
-class Int8 implements MojoType<int> {
+class Int8 {
   static const int encodedSize = 1;
   static int decode(MojoDecoder decoder) => decoder.readInt8();
   static void encode(MojoEncoder encoder, int val) {
@@ -581,7 +585,7 @@ class Int8 implements MojoType<int> {
 }
 
 
-class Uint8 implements MojoType<int> {
+class Uint8 {
   static const int encodedSize = 1;
   static int decode(MojoDecoder decoder) => decoder.readUint8();
   static void encode(MojoEncoder encoder, int val) {
@@ -590,7 +594,7 @@ class Uint8 implements MojoType<int> {
 }
 
 
-class Int16 implements MojoType<int> {
+class Int16 {
   static const int encodedSize = 2;
   static int decode(MojoDecoder decoder) => decoder.readInt16();
   static void encode(MojoEncoder encoder, int val) {
@@ -599,7 +603,7 @@ class Int16 implements MojoType<int> {
 }
 
 
-class Uint16 implements MojoType<int> {
+class Uint16 {
   static const int encodedSize = 2;
   static int decode(MojoDecoder decoder) => decoder.readUint16();
   static void encode(MojoEncoder encoder, int val) {
@@ -608,7 +612,7 @@ class Uint16 implements MojoType<int> {
 }
 
 
-class Int32 implements MojoType<int> {
+class Int32 {
   static const int encodedSize = 4;
   static int decode(MojoDecoder decoder) => decoder.readInt32();
   static void encode(MojoEncoder encoder, int val) {
@@ -617,7 +621,7 @@ class Int32 implements MojoType<int> {
 }
 
 
-class Uint32 implements MojoType<int> {
+class Uint32 {
   static const int encodedSize = 4;
   static int decode(MojoDecoder decoder) => decoder.readUint32();
   static void encode(MojoEncoder encoder, int val) {
@@ -626,7 +630,7 @@ class Uint32 implements MojoType<int> {
 }
 
 
-class Int64 implements MojoType<int> {
+class Int64 {
   static const int encodedSize = 8;
   static int decode(MojoDecoder decoder) => decoder.readInt64();
   static void encode(MojoEncoder encoder, int val) {
@@ -635,7 +639,7 @@ class Int64 implements MojoType<int> {
 }
 
 
-class Uint64 implements MojoType<int> {
+class Uint64 {
   static const int encodedSize = 8;
   static int decode(MojoDecoder decoder) => decoder.readUint64();
   static void encode(MojoEncoder encoder, int val) {
@@ -644,7 +648,7 @@ class Uint64 implements MojoType<int> {
 }
 
 
-class MojoString implements MojoType<String> {
+class MojoString {
   static const int encodedSize = 8;
   static String decode(MojoDecoder decoder) => decoder.decodeStringPointer();
   static void encode(MojoEncoder encoder, String val) {
@@ -653,14 +657,14 @@ class MojoString implements MojoType<String> {
 }
 
 
-class NullableMojoString implements MojoType<String> {
+class NullableMojoString {
   static const int encodedSize = MojoString.encodedSize;
   static var decode = MojoString.decode;
   static var encode = MojoString.encode;
 }
 
 
-class Float implements MojoType<double> {
+class Float {
   static const int encodedSize = 4;
   static double decode(MojoDecoder decoder) => decoder.readFloat();
   static void encode(MojoEncoder encoder, double val) {
@@ -669,7 +673,7 @@ class Float implements MojoType<double> {
 }
 
 
-class Double implements MojoType<double> {
+class Double {
   static const int encodedSize = 8;
   static double decode(MojoDecoder decoder) => decoder.readDouble();
   static void encode(MojoEncoder encoder, double val) {
@@ -704,7 +708,7 @@ class PointerTo {
 
 
 class NullablePointerTo extends PointerTo {
-  static const int encodedSize = PointerTo.encodedSize;
+  NullablePointerTo(Object val) : super(val);
 }
 
 
@@ -725,21 +729,41 @@ class ArrayOf {
 
 
 class NullableArrayOf extends ArrayOf {
-  static const int encodedSize = ArrayOf.encodedSize;
+  NullableArrayOf(Object val, [int length = 0]) : super(val, length);
 }
 
 
-class Handle implements MojoType<int> {
+class Handle {
   static const int encodedSize = 4;
-  static int decode(MojoDecoder decoder) => decoder.decodeHandle();
-  static void encode(MojoEncoder encoder, int val) {
+  static core.RawMojoHandle decode(MojoDecoder decoder) =>
+      decoder.decodeHandle();
+  static void encode(MojoEncoder encoder, core.RawMojoHandle val) {
     encoder.encodeHandle(val);
   }
 }
 
 
-class NullableHandle implements MojoType<int> {
+class NullableHandle {
   static const int encodedSize = Handle.encodedSize;
   static const decode = Handle.decode;
   static const encode = Handle.encode;
+}
+
+
+class MapOf {
+  Object key;
+  Object val;
+
+  MapOf(this.key, this.val);
+
+  int encodedSize = 8;
+  Map decode(MojoDecoder decoder) => decoder.decodeMapPointer(key, val);
+  void encode(MojoEncoder encoder, Map map) {
+    encoder.encodeMapPointer(key, val, map);
+  }
+}
+
+
+class NullableMapOf extends MapOf {
+  NullableMapOf(Object key, Object val) : super(key, val);
 }

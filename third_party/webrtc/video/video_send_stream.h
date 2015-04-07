@@ -49,7 +49,7 @@ class VideoSendStream : public webrtc::VideoSendStream,
                   const VideoEncoderConfig& encoder_config,
                   const std::map<uint32_t, RtpState>& suspended_ssrcs,
                   int base_channel,
-                  int start_bitrate);
+                  Call::Config::BitrateConfig bitrate_config);
 
   virtual ~VideoSendStream();
 
@@ -59,7 +59,7 @@ class VideoSendStream : public webrtc::VideoSendStream,
   virtual bool ReconfigureVideoEncoder(
       const VideoEncoderConfig& config) OVERRIDE;
 
-  virtual Stats GetStats() const OVERRIDE;
+  virtual Stats GetStats() OVERRIDE;
 
   bool DeliverRtcp(const uint8_t* packet, size_t length);
 
@@ -72,16 +72,20 @@ class VideoSendStream : public webrtc::VideoSendStream,
   typedef std::map<uint32_t, RtpState> RtpStateMap;
   RtpStateMap GetRtpStates() const;
 
+  void SetBitrateConfig(const Call::Config::BitrateConfig& bitrate_config);
   void SignalNetworkState(Call::NetworkState state);
 
   int GetPacerQueuingDelayMs() const;
+
+  int GetRtt() const;
 
  private:
   void ConfigureSsrcs();
   TransportAdapter transport_adapter_;
   EncodedFrameCallbackAdapter encoded_frame_proxy_;
   const VideoSendStream::Config config_;
-  const int start_bitrate_bps_;
+  VideoEncoderConfig encoder_config_;
+  Call::Config::BitrateConfig bitrate_config_;
   std::map<uint32_t, RtpState> suspended_ssrcs_;
 
   ViEBase* video_engine_base_;
@@ -99,7 +103,7 @@ class VideoSendStream : public webrtc::VideoSendStream,
   // Used as a workaround to indicate that we should be using the configured
   // start bitrate initially, instead of the one reported by VideoEngine (which
   // defaults to too high).
-  bool use_default_bitrate_;
+  bool use_config_bitrate_;
 
   SendStatisticsProxy stats_proxy_;
 };

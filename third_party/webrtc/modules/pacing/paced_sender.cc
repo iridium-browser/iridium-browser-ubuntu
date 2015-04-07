@@ -26,11 +26,11 @@
 
 namespace {
 // Time limit in milliseconds between packet bursts.
-const int kMinPacketLimitMs = 5;
+const int64_t kMinPacketLimitMs = 5;
 
 // Upper cap on process interval, in case process has not been called in a long
 // time.
-const int kMaxIntervalTimeMs = 30;
+const int64_t kMaxIntervalTimeMs = 30;
 
 }  // namespace
 
@@ -42,7 +42,7 @@ struct Packet {
          uint16_t seq_number,
          int64_t capture_time_ms,
          int64_t enqueue_time_ms,
-         int length_in_bytes,
+         size_t length_in_bytes,
          bool retransmission,
          uint64_t enqueue_order)
       : priority(priority),
@@ -59,7 +59,7 @@ struct Packet {
   uint16_t sequence_number;
   int64_t capture_time_ms;
   int64_t enqueue_time_ms;
-  int bytes;
+  size_t bytes;
   bool retransmission;
   uint64_t enqueue_order;
   std::list<Packet>::iterator this_it;
@@ -122,7 +122,7 @@ class PacketQueue {
 
   size_t SizeInPackets() const { return prio_queue_.size(); }
 
-  uint32_t SizeInBytes() const { return bytes_; }
+  uint64_t SizeInBytes() const { return bytes_; }
 
   int64_t OldestEnqueueTime() const {
     std::list<Packet>::const_reverse_iterator it = packet_list_.rbegin();
@@ -178,8 +178,8 @@ class IntervalBudget {
     target_rate_kbps_ = target_rate_kbps;
   }
 
-  void IncreaseBudget(int delta_time_ms) {
-    int bytes = target_rate_kbps_ * delta_time_ms / 8;
+  void IncreaseBudget(int64_t delta_time_ms) {
+    int64_t bytes = target_rate_kbps_ * delta_time_ms / 8;
     if (bytes_remaining_ < 0) {
       // We overused last interval, compensate this interval.
       bytes_remaining_ = bytes_remaining_ + bytes;
@@ -189,8 +189,8 @@ class IntervalBudget {
     }
   }
 
-  void UseBudget(int bytes) {
-    bytes_remaining_ = std::max(bytes_remaining_ - bytes,
+  void UseBudget(size_t bytes) {
+    bytes_remaining_ = std::max(bytes_remaining_ - static_cast<int>(bytes),
                                 -500 * target_rate_kbps_ / 8);
   }
 
@@ -258,7 +258,7 @@ void PacedSender::UpdateBitrate(int bitrate_kbps,
 }
 
 bool PacedSender::SendPacket(Priority priority, uint32_t ssrc,
-    uint16_t sequence_number, int64_t capture_time_ms, int bytes,
+    uint16_t sequence_number, int64_t capture_time_ms, size_t bytes,
     bool retransmission) {
   CriticalSectionScoped cs(critsect_.get());
 
@@ -281,11 +281,11 @@ bool PacedSender::SendPacket(Priority priority, uint32_t ssrc,
   return false;
 }
 
-int PacedSender::ExpectedQueueTimeMs() const {
+int64_t PacedSender::ExpectedQueueTimeMs() const {
   CriticalSectionScoped cs(critsect_.get());
   int target_rate = media_budget_->target_rate_kbps();
   assert(target_rate > 0);
-  return packets_->SizeInBytes() * 8 / target_rate;
+  return static_cast<int64_t>(packets_->SizeInBytes() * 8 / target_rate);
 }
 
 size_t PacedSender::QueueSizePackets() const {
@@ -293,7 +293,7 @@ size_t PacedSender::QueueSizePackets() const {
   return packets_->SizeInPackets();
 }
 
-int PacedSender::QueueInMs() const {
+int64_t PacedSender::QueueInMs() const {
   CriticalSectionScoped cs(critsect_.get());
 
   int64_t oldest_packet = packets_->OldestEnqueueTime();
@@ -303,31 +303,27 @@ int PacedSender::QueueInMs() const {
   return clock_->TimeInMilliseconds() - oldest_packet;
 }
 
-int32_t PacedSender::TimeUntilNextProcess() {
+int64_t PacedSender::TimeUntilNextProcess() {
   CriticalSectionScoped cs(critsect_.get());
-  int64_t elapsed_time_us = clock_->TimeInMicroseconds() - time_last_update_us_;
-  int elapsed_time_ms = static_cast<int>((elapsed_time_us + 500) / 1000);
   if (prober_->IsProbing()) {
-    int next_probe = prober_->TimeUntilNextProbe(clock_->TimeInMilliseconds());
-    return next_probe;
+    return prober_->TimeUntilNextProbe(clock_->TimeInMilliseconds());
   }
-  if (elapsed_time_ms >= kMinPacketLimitMs) {
-    return 0;
-  }
-  return kMinPacketLimitMs - elapsed_time_ms;
+  int64_t elapsed_time_us = clock_->TimeInMicroseconds() - time_last_update_us_;
+  int64_t elapsed_time_ms = (elapsed_time_us + 500) / 1000;
+  return std::max<int64_t>(kMinPacketLimitMs - elapsed_time_ms, 0);
 }
 
 int32_t PacedSender::Process() {
   int64_t now_us = clock_->TimeInMicroseconds();
   CriticalSectionScoped cs(critsect_.get());
-  int elapsed_time_ms = (now_us - time_last_update_us_ + 500) / 1000;
+  int64_t elapsed_time_ms = (now_us - time_last_update_us_ + 500) / 1000;
   time_last_update_us_ = now_us;
   if (!enabled_) {
     return 0;
   }
   if (!paused_) {
     if (elapsed_time_ms > 0) {
-      uint32_t delta_time_ms = std::min(kMaxIntervalTimeMs, elapsed_time_ms);
+      int64_t delta_time_ms = std::min(kMaxIntervalTimeMs, elapsed_time_ms);
       UpdateBytesPerInterval(delta_time_ms);
     }
 
@@ -353,7 +349,7 @@ int32_t PacedSender::Process() {
 
     int padding_needed = padding_budget_->bytes_remaining();
     if (padding_needed > 0) {
-      SendPadding(padding_needed);
+      SendPadding(static_cast<size_t>(padding_needed));
     }
   }
   return 0;
@@ -377,9 +373,9 @@ bool PacedSender::SendPacket(const paced_sender::Packet& packet) {
   return success;
 }
 
-void PacedSender::SendPadding(int padding_needed) {
+void PacedSender::SendPadding(size_t padding_needed) {
   critsect_->Leave();
-  int bytes_sent = callback_->TimeToSendPadding(padding_needed);
+  size_t bytes_sent = callback_->TimeToSendPadding(padding_needed);
   critsect_->Enter();
 
   // Update padding bytes sent.
@@ -387,7 +383,7 @@ void PacedSender::SendPadding(int padding_needed) {
   padding_budget_->UseBudget(bytes_sent);
 }
 
-void PacedSender::UpdateBytesPerInterval(uint32_t delta_time_ms) {
+void PacedSender::UpdateBytesPerInterval(int64_t delta_time_ms) {
   media_budget_->IncreaseBudget(delta_time_ms);
   padding_budget_->IncreaseBudget(delta_time_ms);
 }

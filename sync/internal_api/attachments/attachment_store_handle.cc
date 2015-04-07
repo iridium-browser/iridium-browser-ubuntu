@@ -37,6 +37,13 @@ AttachmentStoreHandle::~AttachmentStoreHandle() {
       FROM_HERE, base::Bind(&NoOp, base::Passed(&backend_)));
 }
 
+void AttachmentStoreHandle::Init(const InitCallback& callback) {
+  DCHECK(CalledOnValidThread());
+  backend_task_runner_->PostTask(
+      FROM_HERE, base::Bind(&AttachmentStoreBase::Init,
+                            base::Unretained(backend_.get()), callback));
+}
+
 void AttachmentStoreHandle::Read(const AttachmentIdList& ids,
                                  const ReadCallback& callback) {
   DCHECK(CalledOnValidThread());
@@ -65,6 +72,22 @@ void AttachmentStoreHandle::Drop(const AttachmentIdList& ids,
                                             base::Unretained(backend_.get()),
                                             ids,
                                             callback));
+}
+
+void AttachmentStoreHandle::ReadMetadata(const AttachmentIdList& ids,
+                                         const ReadMetadataCallback& callback) {
+  DCHECK(CalledOnValidThread());
+  backend_task_runner_->PostTask(
+      FROM_HERE, base::Bind(&AttachmentStoreBase::ReadMetadata,
+                            base::Unretained(backend_.get()), ids, callback));
+}
+
+void AttachmentStoreHandle::ReadAllMetadata(
+    const ReadMetadataCallback& callback) {
+  DCHECK(CalledOnValidThread());
+  backend_task_runner_->PostTask(
+      FROM_HERE, base::Bind(&AttachmentStoreBase::ReadAllMetadata,
+                            base::Unretained(backend_.get()), callback));
 }
 
 }  // namespace syncer

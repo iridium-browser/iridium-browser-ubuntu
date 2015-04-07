@@ -10,6 +10,7 @@ import base64
 import collections
 import fnmatch
 import glob
+import json
 import logging
 import multiprocessing
 import os
@@ -28,14 +29,15 @@ from chromite.lib import gs
 from chromite.lib import locking
 from chromite.lib import osutils
 from chromite.lib import parallel
+from chromite.lib import portage_util
 from chromite.lib import retry_util
 from chromite.lib import timeout_util
 from chromite.scripts import pushimage
-from chromite.scripts import upload_symbols
 
 
 _PACKAGE_FILE = '%(buildroot)s/src/scripts/cbuildbot_package.list'
 CHROME_KEYWORDS_FILE = ('/build/%(board)s/etc/portage/package.keywords/chrome')
+CHROME_UNMASK_FILE = ('/build/%(board)s/etc/portage/package.unmask/chrome')
 _CROS_ARCHIVE_URL = 'CROS_ARCHIVE_URL'
 _FACTORY_SHIM = 'factory_shim'
 _AUTOTEST_RPC_CLIENT = ('/b/build_internal/scripts/slave-internal/autotest_rpc/'
@@ -49,22 +51,7 @@ _TEST_REPORT_FILENAME = 'test_report.log'
 _TEST_PASSED = 'PASSED'
 _TEST_FAILED = 'FAILED'
 
-
-class TestFailure(failures_lib.StepFailure):
-  """Raised if a test stage (e.g. VMTest) fails."""
-
-class TestWarning(failures_lib.StepFailure):
-  """Raised if a test stage (e.g. VMTest) returns a warning code."""
-
-class SuiteTimedOut(failures_lib.TestLabFailure):
-  """Raised if a test suite timed out with no test failures."""
-
-class BoardNotAvailable(failures_lib.TestLabFailure):
-  """Raised if the board is not available in the lab."""
-
-
 # =========================== Command Helpers =================================
-
 
 def RunBuildScript(buildroot, cmd, chromite_cmd=False, **kwargs):
   """Run a build script, wrapping exceptions as needed.
@@ -95,11 +82,9 @@ def RunBuildScript(buildroot, cmd, chromite_cmd=False, **kwargs):
 
   if chromite_cmd:
     cmd = cmd[:]
+    cmd[0] = os.path.join(buildroot, constants.CHROMITE_BIN_SUBDIR, cmd[0])
     if enter_chroot:
-      cmd[0] = git.ReinterpretPathForChroot(
-          os.path.join(buildroot, constants.CHROMITE_BIN_SUBDIR, cmd[0]))
-    else:
-      cmd[0] = os.path.join(buildroot, constants.CHROMITE_BIN_SUBDIR, cmd[0])
+      cmd[0] = git.ReinterpretPathForChroot(cmd[0])
 
   # If we are entering the chroot, create status file for tracking what
   # packages failed to build.
@@ -257,17 +242,23 @@ def MakeChroot(buildroot, replace, use_sdk, chrome_root=None, extra_env=None):
   if chrome_root:
     cmd.append('--chrome_root=%s' % chrome_root)
 
-  RunBuildScript(buildroot, cmd, extra_env=extra_env)
+  RunBuildScript(buildroot, cmd, chromite_cmd=True, extra_env=extra_env)
 
 
-def RunChrootUpgradeHooks(buildroot, chrome_root=None):
-  """Run the chroot upgrade hooks in the chroot."""
+def RunChrootUpgradeHooks(buildroot, chrome_root=None, extra_env=None):
+  """Run the chroot upgrade hooks in the chroot.
+
+  Args:
+    buildroot: Root directory where build occurs.
+    chrome_root: The directory where chrome is stored.
+    extra_env: A dictionary of environment variables to set.
+  """
   chroot_args = []
   if chrome_root:
     chroot_args.append('--chrome_root=%s' % chrome_root)
 
-  RunBuildScript(buildroot, ['./run_chroot_version_hooks'],
-                 enter_chroot=True, chroot_args=chroot_args)
+  RunBuildScript(buildroot, ['./run_chroot_version_hooks'], enter_chroot=True,
+                 chroot_args=chroot_args, extra_env=extra_env)
 
 
 def RefreshPackageStatus(buildroot, boards, debug):
@@ -303,8 +294,7 @@ def SyncPackageStatus(buildroot, debug):
     basecmd.extend(['--pretend', '--test-spreadsheet'])
 
   cmdargslist = [['--team=build'],
-                 ['--team=kernel', '--default-owner=arscott'],
-                 ]
+                 ['--team=kernel', '--default-owner=arscott']]
 
   for cmdargs in cmdargslist:
     cmd = basecmd + cmdargs
@@ -385,16 +375,24 @@ class MissingBinpkg(failures_lib.InfrastructureFailure):
   """Error class for when we are missing an essential binpkg."""
 
 
-def VerifyBinpkg(buildroot, board, pkg, extra_env=None):
+def VerifyBinpkg(buildroot, board, pkg, packages, extra_env=None):
   """Verify that an appropriate binary package exists for |pkg|.
+
+  Using the depgraph from |packages|, check to see if |pkg| would be pulled in
+  as a binary or from source.  If |pkg| isn't installed at all, then ignore it.
 
   Args:
     buildroot: The buildroot of the current build.
     board: The board to set up.
     pkg: The package to look for.
+    packages: The list of packages that get installed on |board|.
     extra_env: A dictionary of environmental variables to set.
+
+  Raises:
+    If the package is found and is built from source, raise MissingBinpkg.
+    If the package is not found, or it is installed from a binpkg, do nothing.
   """
-  cmd = ['emerge-%s' % board, '-pegNv', '--color=n', 'virtual/target-os']
+  cmd = ['emerge-%s' % board, '-pegNvq', '--color=n'] + list(packages)
   result = RunBuildScript(buildroot, cmd, capture_output=True,
                           enter_chroot=True, extra_env=extra_env)
   pattern = r'^\[(ebuild|binary).*%s' % re.escape(pkg)
@@ -616,12 +614,13 @@ def RunTestSuite(buildroot, board, image_dir, results_dir, test_type,
   if test_type == constants.FULL_AU_TEST_TYPE:
     cmd.append('--archive_dir=%s' % archive_dir)
   else:
-    cmd.append('--quick')
     if test_type == constants.SMOKE_SUITE_TEST_TYPE:
       cmd.append('--only_verify')
       cmd.append('--suite=smoke')
     elif test_type == constants.TELEMETRY_SUITE_TEST_TYPE:
       cmd.append('--suite=telemetry_unit')
+    else:
+      cmd.append('--quick_update')
 
   if whitelist_chrome_crashes:
     cmd.append('--whitelist_chrome_crashes')
@@ -633,7 +632,8 @@ def RunTestSuite(buildroot, board, image_dir, results_dir, test_type,
       with open(results_dir_in_chroot + '/failed_test_command', 'w') as failed:
         failed.write(error)
 
-    raise TestFailure('** VMTests failed with code %d **' % result.returncode)
+    raise failures_lib.TestFailure(
+        '** VMTests failed with code %d **' % result.returncode)
 
 
 def RunDevModeTest(buildroot, board, image_dir):
@@ -808,10 +808,11 @@ def ArchiveVMFiles(buildroot, test_results_dir, archive_path):
   return tar_files
 
 
-@failures_lib.SetFailureType(SuiteTimedOut, timeout_util.TimeoutError)
+@failures_lib.SetFailureType(failures_lib.SuiteTimedOut,
+                             timeout_util.TimeoutError)
 def RunHWTestSuite(build, suite, board, pool=None, num=None, file_bugs=None,
                    wait_for_results=None, priority=None, timeout_mins=None,
-                   retry=None, minimum_duts=0, debug=True):
+                   retry=None, minimum_duts=0, suite_min_duts=0, debug=True):
   """Run the test suite in the Autotest lab.
 
   Args:
@@ -831,6 +832,9 @@ def RunHWTestSuite(build, suite, board, pool=None, num=None, file_bugs=None,
     minimum_duts: The minimum number of DUTs should be available in lab for the
                   suite job to be created. If it's set to 0, the check will be
                   skipped.
+    suite_min_duts: Preferred minimum duts, lab will prioritize on getting
+                    such many duts even if the suite is competing with
+                    a suite that has higher priority.
     debug: Whether we are in debug mode.
   """
   # TODO(scottz): RPC client option names are misnomers crosbug.com/26445.
@@ -866,6 +870,9 @@ def RunHWTestSuite(build, suite, board, pool=None, num=None, file_bugs=None,
   if minimum_duts != 0:
     cmd += ['--minimum_duts', str(minimum_duts)]
 
+  if suite_min_duts != 0:
+    cmd += ['--suite_min_duts', str(suite_min_duts)]
+
   if debug:
     cros_build_lib.Info('RunHWTestSuite would run: %s',
                         cros_build_lib.CmdToStr(cmd))
@@ -893,17 +900,52 @@ def RunHWTestSuite(build, suite, board, pool=None, num=None, file_bugs=None,
     board_not_available_codes = (5,)
 
     if result.returncode in lab_warning_codes:
-      raise TestWarning('** Suite passed with a warning code **')
+      raise failures_lib.TestWarning('** Suite passed with a warning code **')
     elif result.returncode in infra_error_codes:
       raise failures_lib.TestLabFailure(
           '** HWTest did not complete due to infrastructure issues '
           '(code %d) **' % result.returncode)
     elif result.returncode in timeout_codes:
-      raise SuiteTimedOut('** Suite timed out before completion **')
+      raise failures_lib.SuiteTimedOut(
+          '** Suite timed out before completion **')
     elif result.returncode in board_not_available_codes:
-      raise BoardNotAvailable('** Board was not availble in the lab **')
+      raise failures_lib.BoardNotAvailable(
+          '** Board was not availble in the lab **')
     elif result.returncode != 0:
-      raise TestFailure('** HWTest failed (code %d) **' % result.returncode)
+      raise failures_lib.TestFailure(
+          '** HWTest failed (code %d) **' % result.returncode)
+
+
+def AbortHWTests(config_type_or_name, version, debug, suite=''):
+  """Abort the specified hardware tests for the given bot(s).
+
+  Args:
+    config_type_or_name: Either the name of the builder (e.g. link-paladin) or
+                         the config type if you want to abort all HWTests for
+                         that config (e.g. cbuildbot_config.CONFIG_TYPE_FULL).
+    version: The version of the current build. E.g. R18-1655.0.0-rc1
+    debug: Whether we are in debug mode.
+    suite: Name of the Autotest suite. If empty, abort all suites.
+  """
+  # Abort all jobs for the given config and version.
+  # Example for a specific config: link-paladin/R35-5542.0.0-rc1
+  # Example for a config type: paladin/R35-5542.0.0-rc1
+  substr = '%s/%s' % (config_type_or_name, version)
+
+  # Actually abort the build.
+  cmd = [_AUTOTEST_RPC_CLIENT,
+         _AUTOTEST_RPC_HOSTNAME,
+         'AbortSuiteByName',
+         '-i', substr,
+         '-s', suite]
+  if debug:
+    cros_build_lib.Info('AbortHWTests would run: %s',
+                        cros_build_lib.CmdToStr(cmd))
+  else:
+    try:
+      cros_build_lib.RunCommand(cmd)
+    except cros_build_lib.RunCommandError:
+      cros_build_lib.Warning('AbortHWTests failed', exc_info=True)
 
 
 def _GetAbortCQHWTestsURL(version, suite):
@@ -928,25 +970,8 @@ def AbortCQHWTests(version, debug, suite=''):
   # Mark the substr/suite as aborted in Google Storage.
   ctx = gs.GSContext(dry_run=debug)
   ctx.Copy('-', _GetAbortCQHWTestsURL(version, suite), input='')
-
-  # Abort all jobs for the given version, containing the '-paladin' suffix.
-  # Example job id: link-paladin/R35-5542.0.0-rc1
-  substr = '%s/%s' % (cbuildbot_config.CONFIG_TYPE_PALADIN, version)
-
-  # Actually abort the build.
-  cmd = [_AUTOTEST_RPC_CLIENT,
-         _AUTOTEST_RPC_HOSTNAME,
-         'AbortSuiteByName',
-         '-i', substr,
-         '-s', suite]
-  if debug:
-    cros_build_lib.Info('AbortCQHWTests would run: %s',
-                        cros_build_lib.CmdToStr(cmd))
-  else:
-    try:
-      cros_build_lib.RunCommand(cmd)
-    except cros_build_lib.RunCommandError:
-      cros_build_lib.Warning('AbortCQHWTests failed', exc_info=True)
+  # Abort all jobs for the given version, containing the 'paladin' suffix.
+  AbortHWTests(cbuildbot_config.CONFIG_TYPE_PALADIN, version, debug, suite)
 
 
 def HaveCQHWTestsBeenAborted(version, suite=''):
@@ -1093,25 +1118,25 @@ def MarkChromeAsStable(buildroot,
     # to unmask it manually.
     if chrome_rev != constants.CHROME_REV_LATEST:
       keywords_file = CHROME_KEYWORDS_FILE % {'board': board}
-      cros_build_lib.SudoRunCommand(
-          ['mkdir', '-p', os.path.dirname(keywords_file)],
-          enter_chroot=True, cwd=cwd)
-      cros_build_lib.SudoRunCommand(
-          ['tee', keywords_file], input='=%s\n' % chrome_atom,
-          enter_chroot=True, cwd=cwd)
+      for keywords_file in (CHROME_KEYWORDS_FILE % {'board': board},
+                            CHROME_UNMASK_FILE % {'board': board}):
+        cros_build_lib.SudoRunCommand(
+            ['mkdir', '-p', os.path.dirname(keywords_file)],
+            enter_chroot=True, cwd=cwd)
+        cros_build_lib.SudoRunCommand(
+            ['tee', keywords_file], input='=%s\n' % chrome_atom,
+            enter_chroot=True, cwd=cwd)
 
     # Sanity check: We should always be able to merge the version of
     # Chrome we just unmasked.
-    result = cros_build_lib.RunCommand(
-        ['emerge-%s' % board, '-p', '--quiet', '=%s' % chrome_atom],
-        enter_chroot=True, error_code_ok=True, combine_stdout_stderr=True,
-        capture_output=True)
-    if result.returncode:
-      cros_build_lib.PrintBuildbotStepWarnings()
-      cros_build_lib.Warning('\n%s' % result.output)
-      cros_build_lib.Warning('Cannot emerge-%s =%s\nIs Chrome pinned to an '
-                             'older version?' % (board, chrome_atom))
-      return None
+    try:
+      cros_build_lib.RunCommand(
+          ['emerge-%s' % board, '-p', '--quiet', '=%s' % chrome_atom],
+          enter_chroot=True, combine_stdout_stderr=True, capture_output=True)
+    except cros_build_lib.RunCommandError:
+      cros_build_lib.Error('Cannot emerge-%s =%s\nIs Chrome pinned to an '
+                           'older version?' % (board, chrome_atom))
+      raise
 
   return chrome_atom
 
@@ -1151,6 +1176,52 @@ def UprevPush(buildroot, overlays, dryrun):
   RunBuildScript(buildroot, cmd, chromite_cmd=True)
 
 
+def ExtractDependencies(buildroot, packages, board=None, useflags=None,
+                        cpe_format=False, raw_cmd_result=False):
+  """Extracts dependencies for |packages|.
+
+  Args:
+    buildroot: The root directory where the build occurs.
+    packages: A list of packages for which to extract dependencies.
+    board: Board type that was built on this machine.
+    useflags: A list of useflags for this build.
+    cpe_format: Set output format to CPE-only JSON; otherwise,
+      output traditional deps.
+    raw_cmd_result: If set True, returns the CommandResult object.
+      Otherwise, returns the dependencies as a dictionary.
+
+  Returns:
+    Returns the CommandResult object if |raw_cmd_result| is set; returns
+    the dependencies in a dictionary otherwise.
+  """
+  cmd = ['cros_extract_deps']
+  if board:
+    cmd += ['--board', board]
+  if cpe_format:
+    cmd += ['--format=cpe']
+  else:
+    cmd += ['--format=deps']
+  cmd += packages
+  env = {}
+  if useflags:
+    env['USE'] = ' '.join(useflags)
+
+  if raw_cmd_result:
+    return RunBuildScript(
+        buildroot, cmd, enter_chroot=True, chromite_cmd=True,
+        capture_output=True, extra_env=env)
+
+  # The stdout of cros_extract_deps may contain undesirable
+  # output. Avoid that by instructing the script to explicitly dump
+  # the deps into a file.
+  with tempfile.NamedTemporaryFile(
+      dir=os.path.join(buildroot, 'chroot', 'tmp')) as f:
+    cmd += ['--output-path', cros_build_lib.ToChrootPath(f.name)]
+    RunBuildScript(buildroot, cmd, enter_chroot=True,
+                   chromite_cmd=True, capture_output=True, extra_env=env)
+    return json.loads(f.read())
+
+
 def GenerateCPEExport(buildroot, board, useflags=None):
   """Generate CPE export.
 
@@ -1163,15 +1234,9 @@ def GenerateCPEExport(buildroot, board, useflags=None):
     A CommandResult object with the results of running the CPE
     export command.
   """
-  cmd = ['cros_extract_deps', '--format=cpe', '--board=%s' % board,
-         'virtual/target-os']
-  env = {}
-  if useflags:
-    env['USE'] = ' '.join(useflags)
-  result = RunBuildScript(buildroot, cmd, enter_chroot=True,
-                          chromite_cmd=True, capture_output=True,
-                          extra_env=env)
-  return result
+  return ExtractDependencies(
+      buildroot, ['virtual/target-os'], board=board,
+      useflags=useflags, cpe_format=True, raw_cmd_result=True)
 
 
 def GenerateBreakpadSymbols(buildroot, board, debug):
@@ -1284,89 +1349,68 @@ def GenerateHtmlIndex(index, files, url_base=None, head=None, tail=None):
   osutils.WriteFile(index, html)
 
 
-def AppendToFile(file_path, string):
-  """Append the string to the given file.
-
-  This method provides atomic appends if the string is smaller than
-  PIPE_BUF (> 512 bytes). It does not guarantee atomicity once the
-  string is greater than that.
-
-  Args:
-     file_path: File to be appended to.
-     string: String to append to the file.
-  """
-  osutils.WriteFile(file_path, string, mode='a')
-
-
-def UpdateUploadedList(last_uploaded, archive_path, upload_urls,
-                       debug):
-  """Updates the archive's UPLOADED file, and uploads it to Google Storage.
-
-  Args:
-     buildroot: The root directory where the build occurs.
-     last_uploaded: Filename of the last uploaded file.
-     archive_path: Path to archive_dir.
-     upload_urls: Iterable of GS locations where the UPLOADED file should be
-                  uploaded.
-     debug: Whether we are in debug mode.
-  """
-  # Append to the uploaded list.
-  filename = UPLOADED_LIST_FILENAME
-  AppendToFile(os.path.join(archive_path, filename), last_uploaded + '\n')
-
-  # Upload the updated list to Google Storage.
-  UploadArchivedFile(archive_path, upload_urls, filename, debug,
-                     update_list=False)
-
-
 @failures_lib.SetFailureType(failures_lib.GSUploadFailure)
-def UploadArchivedFile(archive_path, upload_urls, filename, debug,
-                       update_list=False, timeout=2 * 60 * 60, acl=None):
-  """Upload the specified file from the archive dir to Google Storage.
+def _UploadPathToGS(local_path, upload_urls, debug, timeout, acl=None):
+  """Upload |local_path| to Google Storage.
 
   Args:
-    archive_path: Path to archive dir.
-    upload_urls: Iterable of GS locations where the UPLOADED file should be
-                 uploaded.
+    local_path: Local path to upload.
+    upload_urls: Iterable of GS locations to upload to.
     debug: Whether we are in debug mode.
     filename: Filename of the file to upload.
-    update_list: Flag to update the list of uploaded files.
-    timeout: Raise an exception if the upload takes longer than this timeout.
-    acl: Canned gsutil acl to use (e.g. 'public-read'), otherwise the internal
-         (private) one is used.
+    timeout: Timeout in seconds.
+    acl: Canned gsutil acl to use.
   """
-  local_path = os.path.join(archive_path, filename)
   gs_context = gs.GSContext(acl=acl, dry_run=debug)
+  for upload_url in upload_urls:
+    with timeout_util.Timeout(timeout):
+      gs_context.CopyInto(local_path, upload_url, parallel=True,
+                          recursive=True)
 
-  try:
-    for upload_url in upload_urls:
-      with timeout_util.Timeout(timeout):
-        gs_context.CopyInto(local_path, upload_url, parallel=True,
-                            recursive=True)
-  except timeout_util.TimeoutError:
-    raise timeout_util.TimeoutError('Timed out uploading %s' % filename)
-  else:
-    # Update the list of uploaded files.
-    if update_list:
-      UpdateUploadedList(filename, archive_path, upload_urls, debug)
+
+@failures_lib.SetFailureType(failures_lib.InfrastructureFailure)
+def UploadArchivedFile(archive_dir, upload_urls, filename, debug,
+                       update_list=False, timeout=2 * 60 * 60, acl=None):
+  """Uploads |filename| in |archive_dir| to Google Storage.
+
+  Args:
+    archive_dir: Path to the archive directory.
+    upload_urls: Iterable of GS locations to upload to.
+    debug: Whether we are in debug mode.
+    filename: Name of the file to upload.
+    update_list: Flag to update the list of uploaded files.
+    timeout: Timeout in seconds.
+    acl: Canned gsutil acl to use.
+  """
+  # Upload the file.
+  file_path = os.path.join(archive_dir, filename)
+  _UploadPathToGS(file_path, upload_urls, debug, timeout, acl=acl)
+
+  if update_list:
+    # Append |filename| to the local list of uploaded files and archive
+    # the list to Google Storage. As long as the |filename| string is
+    # less than PIPE_BUF (> 512 bytes), the append is atomic.
+    uploaded_file_path = os.path.join(archive_dir, UPLOADED_LIST_FILENAME)
+    osutils.WriteFile(uploaded_file_path, filename + '\n', mode='a')
+    _UploadPathToGS(uploaded_file_path, upload_urls, debug, timeout)
 
 
 def UploadSymbols(buildroot, board, official, cnt, failed_list):
   """Upload debug symbols for this build."""
-  log_cmd = ['upload_symbols', '--board', board]
+  cmd = ['upload_symbols', '--yes', '--board', board,
+         '--root', os.path.join(buildroot, constants.DEFAULT_CHROOT_DIR)]
   if failed_list is not None:
-    log_cmd += ['--failed-list', str(failed_list)]
+    cmd += ['--failed-list', str(failed_list)]
   if official:
-    log_cmd.append('--official_build')
+    cmd.append('--official_build')
   if cnt is not None:
-    log_cmd += ['--upload-limit', str(cnt)]
-  cros_build_lib.Info('Running: %s' % cros_build_lib.CmdToStr(log_cmd))
+    cmd += ['--upload-limit', str(cnt)]
 
-  ret = upload_symbols.UploadSymbols(
-      board=board, official=official, upload_limit=cnt,
-      root=os.path.join(buildroot, constants.DEFAULT_CHROOT_DIR),
-      failed_list=failed_list)
-  if ret:
+  # We don't want to import upload_symbols directly because it uses the
+  # swarming module which itself imports a _lot_ of stuff.  It has also
+  # been known to hang.  We want to keep cbuildbot isolated & robust.
+  ret = RunBuildScript(buildroot, cmd, chromite_cmd=True, error_code_ok=True)
+  if ret.returncode:
     # TODO(davidjames): Convert this to a fatal error.
     # See http://crbug.com/212437
     cros_build_lib.PrintBuildbotStepWarnings()
@@ -1496,13 +1540,14 @@ def BuildTarball(buildroot, input_list, tarball_output, cwd=None,
       inputs=input_list, **kwargs)
 
 
-def FindFilesWithPattern(pattern, target='./', cwd=os.curdir):
+def FindFilesWithPattern(pattern, target='./', cwd=os.curdir, exclude_dirs=()):
   """Search the root directory recursively for matching filenames.
 
   Args:
     pattern: the pattern used to match the filenames.
     target: the target directory to search.
     cwd: current working directory.
+    exclude_dirs: Directories to not include when searching.
 
   Returns:
     A list of paths of the matched files.
@@ -1513,6 +1558,8 @@ def FindFilesWithPattern(pattern, target='./', cwd=os.curdir):
 
   matches = []
   for target, _, filenames in os.walk(target):
+    if target in exclude_dirs:
+      continue
     for filename in fnmatch.filter(filenames, pattern):
       matches.append(os.path.join(target, filename))
 
@@ -1540,7 +1587,7 @@ def BuildAUTestTarball(buildroot, board, work_dir, version, archive_url):
   os.makedirs(autotest_dir)
 
   # Get basic version without R*.
-  basic_version = re.search('R[0-9]+-([0-9][\w.]+)', version).group(1)
+  basic_version = re.search(r'R[0-9]+-([0-9][\w.]+)', version).group(1)
 
   # Pass in the python paths to the libs full release test needs.
   env_dict = dict(
@@ -1567,6 +1614,61 @@ def BuildAUTestTarball(buildroot, board, work_dir, version, archive_url):
   cros_build_lib.RunCommand(cmd, env=run_env, cwd=cwd)
   BuildTarball(buildroot, [control_files_subdir], au_test_tarball, cwd=work_dir)
   return au_test_tarball
+
+
+def BuildAutotestControlFilesTarball(buildroot, cwd, tarball_dir):
+  """Tar up the autotest control files.
+
+  Args:
+    buildroot: Root directory where build occurs.
+    cwd: Current working directory.
+    tarball_dir: Location for storing autotest tarball.
+
+  Returns:
+    Path of the partial autotest control files tarball.
+  """
+  # Find the control files in autotest/
+  control_files = FindFilesWithPattern('control*', target='autotest', cwd=cwd,
+                                       exclude_dirs=['autotest/test_suites'])
+  control_files_tarball = os.path.join(tarball_dir, 'control_files.tar')
+  BuildTarball(buildroot, control_files, control_files_tarball, cwd=cwd,
+               compressed=False)
+  return control_files_tarball
+
+
+def BuildAutotestPackagesTarball(buildroot, cwd, tarball_dir):
+  """Tar up the autotest packages.
+
+  Args:
+    buildroot: Root directory where build occurs.
+    cwd: Current working directory.
+    tarball_dir: Location for storing autotest tarball.
+
+  Returns:
+    Path of the partial autotest packages tarball.
+  """
+  input_list = ['autotest/packages']
+  packages_tarball = os.path.join(tarball_dir, 'autotest_packages.tar')
+  BuildTarball(buildroot, input_list, packages_tarball, cwd=cwd,
+               compressed=False)
+  return packages_tarball
+
+
+def BuildAutotestTestSuitesTarball(buildroot, cwd, tarball_dir):
+  """Tar up the autotest test suite control files.
+
+  Args:
+    buildroot: Root directory where build occurs.
+    cwd: Current working directory.
+    tarball_dir: Location for storing autotest tarball.
+
+  Returns:
+    Path of the autotest test suites tarball.
+  """
+  test_suites_tarball = os.path.join(tarball_dir, 'test_suites.tar.bz2')
+  BuildTarball(buildroot, ['autotest/test_suites'], test_suites_tarball,
+               cwd=cwd)
+  return test_suites_tarball
 
 
 def BuildFullAutotestTarball(buildroot, board, tarball_dir):
@@ -1677,7 +1779,7 @@ def BuildStandaloneArchive(archive_dir, image_dir, artifact_info):
     # Add the .compress extension if we don't have a fixed name.
     if 'output' not in artifact_info and compress:
       filename = "%s.%s" % (filename, compress)
-    extra_env = { 'XZ_OPT' : '-1' }
+    extra_env = {'XZ_OPT': '-1'}
     cros_build_lib.CreateTarball(
         os.path.join(archive_dir, filename), image_dir,
         inputs=inputs, compression=compress_type, extra_env=extra_env)
@@ -1740,10 +1842,11 @@ def BuildFactoryZip(buildroot, board, archive_dir, factory_shim_dir,
 
   # Rules for archive: { folder: pattern }
   rules = {
-    factory_shim_dir:
-      ['*factory_install*.bin', '*partition*', os.path.join('netboot', '*')],
-    factory_toolkit_dir:
-      ['*factory_image*.bin', '*partition*', 'install_factory_toolkit.run'],
+      factory_shim_dir:
+          ['*factory_install*.bin', '*partition*',
+           os.path.join('netboot', '*')],
+      factory_toolkit_dir:
+          ['*factory_image*.bin', '*partition*', 'install_factory_toolkit.run'],
   }
 
   for folder, patterns in rules.items():
@@ -1811,13 +1914,17 @@ def CreateTestRoot(build_root):
   return os.path.sep + os.path.relpath(test_root, start=chroot)
 
 
-def GeneratePayloads(build_root, target_image_path, archive_dir):
+def GeneratePayloads(build_root, target_image_path, archive_dir, full=False,
+                     delta=False, stateful=False):
   """Generates the payloads for hw testing.
 
   Args:
     build_root: The root of the chromium os checkout.
     target_image_path: The path to the image to generate payloads to.
     archive_dir: Where to store payloads we generated.
+    full: Generate full payloads.
+    delta: Generate delta payloads.
+    stateful: Generate stateful payload.
   """
   real_target = os.path.realpath(target_image_path)
   # The path to the target should look something like this:
@@ -1834,7 +1941,7 @@ def GeneratePayloads(build_root, target_image_path, archive_dir):
   chroot_target = git.ReinterpretPathForChroot(target_image_path)
 
   with osutils.TempDir(base_dir=chroot_tmp,
-      prefix='generate_payloads') as temp_dir:
+                       prefix='generate_payloads') as temp_dir:
     chroot_temp_dir = temp_dir.replace(chroot_dir, '', 1)
 
     cmd = [
@@ -1842,30 +1949,33 @@ def GeneratePayloads(build_root, target_image_path, archive_dir):
         '--image', chroot_target,
         '--output', os.path.join(chroot_temp_dir, 'update.gz')
     ]
-    cros_build_lib.RunCommand(cmd, enter_chroot=True, cwd=cwd)
-    name = '_'.join([prefix, os_version, board, 'full', suffix])
-    # Names for full payloads look something like this:
-    # chromeos_R37-5952.0.2014_06_12_2302-a1_link_full_dev.bin
-    shutil.move(os.path.join(temp_dir, 'update.gz'),
-                os.path.join(archive_dir, name))
+    if full:
+      cros_build_lib.RunCommand(cmd, enter_chroot=True, cwd=cwd)
+      name = '_'.join([prefix, os_version, board, 'full', suffix])
+      # Names for full payloads look something like this:
+      # chromeos_R37-5952.0.2014_06_12_2302-a1_link_full_dev.bin
+      shutil.move(os.path.join(temp_dir, 'update.gz'),
+                  os.path.join(archive_dir, name))
 
     cmd.extend(['--src_image', chroot_target])
-    cros_build_lib.RunCommand(cmd, enter_chroot=True, cwd=cwd)
-    # Names for delta payloads look something like this:
-    # chromeos_R37-5952.0.2014_06_12_2302-a1_R37-
-    # 5952.0.2014_06_12_2302-a1_link_delta_dev.bin
-    name = '_'.join([prefix, os_version, os_version, board, 'delta', suffix])
-    shutil.move(os.path.join(temp_dir, 'update.gz'),
-                os.path.join(archive_dir, name))
+    if delta:
+      cros_build_lib.RunCommand(cmd, enter_chroot=True, cwd=cwd)
+      # Names for delta payloads look something like this:
+      # chromeos_R37-5952.0.2014_06_12_2302-a1_R37-
+      # 5952.0.2014_06_12_2302-a1_link_delta_dev.bin
+      name = '_'.join([prefix, os_version, os_version, board, 'delta', suffix])
+      shutil.move(os.path.join(temp_dir, 'update.gz'),
+                  os.path.join(archive_dir, name))
 
-    cmd = [
-        os.path.join(path, 'cros_generate_stateful_update_payload'),
-        '--image', chroot_target,
-        '--output', chroot_temp_dir
-    ]
-    cros_build_lib.RunCommand(cmd, enter_chroot=True, cwd=cwd)
-    shutil.move(os.path.join(temp_dir, STATEFUL_FILE),
-                os.path.join(archive_dir, STATEFUL_FILE))
+    if stateful:
+      cmd = [
+          os.path.join(path, 'cros_generate_stateful_update_payload'),
+          '--image', chroot_target,
+          '--output', chroot_temp_dir
+      ]
+      cros_build_lib.RunCommand(cmd, enter_chroot=True, cwd=cwd)
+      shutil.move(os.path.join(temp_dir, STATEFUL_FILE),
+                  os.path.join(archive_dir, STATEFUL_FILE))
 
 
 def GetChromeLKGM(revision):
@@ -1915,7 +2025,6 @@ def PatchChrome(chrome_root, patch, subdir):
 class ChromeSDK(object):
   """Wrapper for the 'cros chrome-sdk' command."""
 
-  DEFAULT_TARGETS = ('chrome', 'chrome_sandbox', 'nacl_helper',)
   DEFAULT_JOBS = 24
   DEFAULT_JOBS_GOMA = 500
 
@@ -1948,6 +2057,17 @@ class ChromeSDK(object):
     self.target_tc = target_tc
     self.toolchain_url = toolchain_url
 
+  def _GetDefaultTargets(self):
+    """Get the default chrome targets to build."""
+    targets = ['chrome', 'chrome_sandbox']
+
+    use_flags = portage_util.GetInstalledPackageUseFlags(constants.CHROME_CP,
+                                                         self.board)
+    if 'nacl' in use_flags.get(constants.CHROME_CP, []):
+      targets += ['nacl_helper']
+
+    return targets
+
   def Run(self, cmd, extra_args=None):
     """Run a command inside the chrome-sdk context."""
     cros_cmd = ['cros']
@@ -1963,7 +2083,7 @@ class ChromeSDK(object):
     cros_cmd += (extra_args or []) + ['--'] + cmd
     cros_build_lib.RunCommand(cros_cmd, cwd=self.cwd)
 
-  def Ninja(self, jobs=None, debug=False, targets=DEFAULT_TARGETS):
+  def Ninja(self, jobs=None, debug=False, targets=None):
     """Run 'ninja' inside a chrome-sdk context.
 
     Args:
@@ -1973,6 +2093,8 @@ class ChromeSDK(object):
     """
     if jobs is None:
       jobs = self.DEFAULT_JOBS_GOMA if self.goma else self.DEFAULT_JOBS
+    if targets is None:
+      targets = self._GetDefaultTargets()
     flavor = 'Debug' if debug else 'Release'
-    cmd = ['ninja', '-C', 'out_%s/%s' % (self.board, flavor) , '-j', str(jobs)]
+    cmd = ['ninja', '-C', 'out_%s/%s' % (self.board, flavor), '-j', str(jobs)]
     self.Run(cmd + list(targets))

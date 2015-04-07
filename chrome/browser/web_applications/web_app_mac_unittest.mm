@@ -74,7 +74,7 @@ class WebAppShortcutCreatorTest : public testing::Test {
  protected:
   WebAppShortcutCreatorTest() {}
 
-  virtual void SetUp() {
+  void SetUp() override {
     base::mac::SetBaseBundleID(kFakeChromeBundleId);
 
     EXPECT_TRUE(temp_app_data_dir_.CreateUniqueTempDir());
@@ -299,7 +299,7 @@ TEST_F(WebAppShortcutCreatorTest, RevealAppShimInFinder) {
 }
 
 TEST_F(WebAppShortcutCreatorTest, FileHandlers) {
-  CommandLine::ForCurrentProcess()->AppendSwitch(
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kEnableAppsFileAssociations);
   extensions::FileHandlersInfo file_handlers_info;
   extensions::FileHandlerInfo handler_0;

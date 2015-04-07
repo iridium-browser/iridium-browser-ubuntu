@@ -31,13 +31,13 @@ class SyncHttpBridgeTest : public testing::Test {
         io_thread_("IO thread") {
   }
 
-  virtual void SetUp() {
+  void SetUp() override {
     base::Thread::Options options;
     options.message_loop_type = base::MessageLoop::TYPE_IO;
     io_thread_.StartWithOptions(options);
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     if (fake_default_request_context_getter_) {
       GetIOThreadLoop()->ReleaseSoon(FROM_HERE,
           fake_default_request_context_getter_);
@@ -143,8 +143,7 @@ class ShuntedHttpBridge : public HttpBridge {
     net::ResponseCookies cookies;
 
     std::string response_content = "success!";
-    net::TestURLFetcher fetcher(0, GURL(), NULL);
-    fetcher.set_url(GURL("www.google.com"));
+    net::TestURLFetcher fetcher(0, GURL("http://www.google.com"), NULL);
     fetcher.set_response_code(200);
     fetcher.set_cookies(cookies);
     fetcher.SetResponseString(response_content);
@@ -377,8 +376,7 @@ TEST_F(SyncHttpBridgeTest, AbortAndReleaseBeforeFetchComplete) {
       static_cast<net::URLFetcherDelegate*>(bridge_for_race_test());
   net::ResponseCookies cookies;
   std::string response_content = "success!";
-  net::TestURLFetcher fetcher(0, GURL(), NULL);
-  fetcher.set_url(GURL("www.google.com"));
+  net::TestURLFetcher fetcher(0, GURL("http://www.google.com"), NULL);
   fetcher.set_response_code(200);
   fetcher.set_cookies(cookies);
   fetcher.SetResponseString(response_content);

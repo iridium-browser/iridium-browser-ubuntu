@@ -66,6 +66,7 @@ public:
     static Length convertLengthMaxSizing(StyleResolverState&, CSSValue*);
     static LengthPoint convertLengthPoint(StyleResolverState&, CSSValue*);
     static LineBoxContain convertLineBoxContain(StyleResolverState&, CSSValue*);
+    static Length convertLineHeight(StyleResolverState&, CSSValue*);
     static float convertNumberOrPercentage(StyleResolverState&, CSSValue*);
     static float convertPerspective(StyleResolverState&, CSSValue*);
     static LengthPoint convertPerspectiveOrigin(StyleResolverState&, CSSValue*);
@@ -76,15 +77,16 @@ public:
     static PassRefPtr<ShapeValue> convertShapeValue(StyleResolverState&, CSSValue*);
     static float convertSpacing(StyleResolverState&, CSSValue*);
     template <CSSValueID IdForNone> static AtomicString convertString(StyleResolverState&, CSSValue*);
-    static PassRefPtr<SVGLengthList> convertStrokeDasharray(StyleResolverState&, CSSValue*);
+    static PassRefPtrWillBeRawPtr<SVGLengthList> convertStrokeDasharray(StyleResolverState&, CSSValue*);
     static StyleColor convertStyleColor(StyleResolverState&, CSSValue*, bool forVisitedLink = false);
     static Color convertSVGColor(StyleResolverState&, CSSValue*);
-    static PassRefPtr<SVGLength> convertSVGLength(StyleResolverState&, CSSValue*);
+    static PassRefPtrWillBeRawPtr<SVGLength> convertSVGLength(StyleResolverState&, CSSValue*);
     static float convertTextStrokeWidth(StyleResolverState&, CSSValue*);
     static TransformOrigin convertTransformOrigin(StyleResolverState&, CSSValue*);
 
     static bool convertGridTrackList(CSSValue*, Vector<GridTrackSize>&, NamedGridLinesMap&, OrderedNamedGridLines&, StyleResolverState&);
     static void createImplicitNamedGridLinesFromGridArea(const NamedGridAreaMap&, NamedGridLinesMap&, GridTrackSizingDirection);
+    static void convertOrderedNamedGridLinesMapToNamedGridLinesMap(const OrderedNamedGridLines&, NamedGridLinesMap&);
 };
 
 template <typename T>

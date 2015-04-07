@@ -151,6 +151,12 @@ ScopedVpxCodec CreateVP9Codec(const webrtc::DesktopSize& size,
   if (vpx_codec_control(codec.get(), VP9E_SET_NOISE_SENSITIVITY, 0))
     return ScopedVpxCodec();
 
+  // Configure the codec to tune it for screen media.
+  if (vpx_codec_control(
+          codec.get(), VP9E_SET_TUNE_CONTENT, VP9E_CONTENT_SCREEN)) {
+    return ScopedVpxCodec();
+  }
+
   return codec.Pass();
 }
 
@@ -328,7 +334,8 @@ VideoEncoderVpx::VideoEncoderVpx(bool use_vp9)
       active_map_height_(0) {
   if (use_vp9_) {
     // Use I444 colour space, by default, if specified on the command-line.
-    if (CommandLine::ForCurrentProcess()->HasSwitch(kEnableI444SwitchName)) {
+    if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+            kEnableI444SwitchName)) {
       SetLosslessColor(true);
     }
   }

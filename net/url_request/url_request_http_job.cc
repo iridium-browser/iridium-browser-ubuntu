@@ -9,6 +9,7 @@
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
+#include "base/debug/alias.h"
 #include "base/file_version_info.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
@@ -24,6 +25,7 @@
 #include "net/base/net_util.h"
 #include "net/base/network_delegate.h"
 #include "net/base/sdch_manager.h"
+#include "net/base/sdch_net_log_params.h"
 #include "net/cert/cert_status_flags.h"
 #include "net/cookies/cookie_store.h"
 #include "net/http/http_content_disposition.h"
@@ -65,18 +67,19 @@ class URLRequestHttpJob::HttpFilterContext : public FilterContext {
   base::Time GetRequestTime() const override;
   bool IsCachedContent() const override;
   bool IsDownload() const override;
-  bool SdchResponseExpected() const override;
+  SdchManager::DictionarySet* SdchDictionariesAdvertised() const override;
   int64 GetByteReadCount() const override;
   int GetResponseCode() const override;
   const URLRequestContext* GetURLRequestContext() const override;
   void RecordPacketStats(StatisticSelector statistic) const override;
-
-  // Method to allow us to reset filter context for a response that should have
-  // been SDCH encoded when there is an update due to an explicit HTTP header.
-  void ResetSdchResponseToFalse();
+  const BoundNetLog& GetNetLog() const override;
 
  private:
   URLRequestHttpJob* job_;
+
+  // URLRequestHttpJob may be detached from URLRequest, but we still need to
+  // return something.
+  BoundNetLog dummy_log_;
 
   DISALLOW_COPY_AND_ASSIGN(HttpFilterContext);
 };
@@ -120,13 +123,9 @@ bool URLRequestHttpJob::HttpFilterContext::IsDownload() const {
   return (job_->request_info_.load_flags & LOAD_IS_DOWNLOAD) != 0;
 }
 
-void URLRequestHttpJob::HttpFilterContext::ResetSdchResponseToFalse() {
-  DCHECK(job_->sdch_dictionary_advertised_);
-  job_->sdch_dictionary_advertised_ = false;
-}
-
-bool URLRequestHttpJob::HttpFilterContext::SdchResponseExpected() const {
-  return job_->sdch_dictionary_advertised_;
+SdchManager::DictionarySet*
+URLRequestHttpJob::HttpFilterContext::SdchDictionariesAdvertised() const {
+  return job_->dictionaries_advertised_.get();
 }
 
 int64 URLRequestHttpJob::HttpFilterContext::GetByteReadCount() const {
@@ -145,6 +144,10 @@ URLRequestHttpJob::HttpFilterContext::GetURLRequestContext() const {
 void URLRequestHttpJob::HttpFilterContext::RecordPacketStats(
     StatisticSelector statistic) const {
   job_->RecordPacketStats(statistic);
+}
+
+const BoundNetLog& URLRequestHttpJob::HttpFilterContext::GetNetLog() const {
+  return job_->request() ? job_->request()->net_log() : dummy_log_;
 }
 
 // TODO(darin): make sure the port blocking code is not lost
@@ -190,7 +193,6 @@ URLRequestHttpJob::URLRequestHttpJob(
                      base::Unretained(this))),
       read_in_progress_(false),
       throttling_entry_(NULL),
-      sdch_dictionary_advertised_(false),
       sdch_test_activated_(false),
       sdch_test_control_(false),
       is_cached_content_(false),
@@ -206,10 +208,17 @@ URLRequestHttpJob::URLRequestHttpJob(
                      base::Unretained(this))),
       awaiting_callback_(false),
       http_user_agent_settings_(http_user_agent_settings),
+      transaction_state_(TRANSACTION_WAS_NOT_INITIALIZED),
       weak_factory_(this) {
   URLRequestThrottlerManager* manager = request->context()->throttler_manager();
   if (manager)
     throttling_entry_ = manager->RegisterRequestUrl(request->url());
+
+  // TODO(battre) Remove this overriding once crbug.com/289715 has been
+  // resolved.
+  on_headers_received_callback_ =
+      base::Bind(&URLRequestHttpJob::OnHeadersReceivedCallbackForDebugging,
+                 weak_factory_.GetWeakPtr());
 
   ResetTimer();
 }
@@ -263,7 +272,7 @@ void URLRequestHttpJob::Start() {
   // plugin could set a referrer although sending the referrer is inhibited.
   request_info_.extra_headers.RemoveHeader(HttpRequestHeaders::kReferer);
 
-  // Our consumer should have made sure that this is a safe referrer.  See for
+  // Our consumer should have made sure that this is a safe referrer. See for
   // instance WebCore::FrameLoader::HideReferrer.
   if (referrer.is_valid()) {
     request_info_.extra_headers.SetHeader(HttpRequestHeaders::kReferer,
@@ -320,22 +329,62 @@ void URLRequestHttpJob::NotifyHeadersComplete() {
   ProcessStrictTransportSecurityHeader();
   ProcessPublicKeyPinsHeader();
 
+  // Handle the server notification of a new SDCH dictionary.
   SdchManager* sdch_manager(request()->context()->sdch_manager());
-  if (sdch_manager && sdch_manager->IsInSupportedDomain(request_->url())) {
-    const std::string name = "Get-Dictionary";
-    std::string url_text;
+  if (sdch_manager) {
+    SdchProblemCode rv = sdch_manager->IsInSupportedDomain(request()->url());
+    if (rv != SDCH_OK) {
+      // If SDCH is just disabled, it is not a real error.
+      if (rv != SDCH_DISABLED && rv != SDCH_SECURE_SCHEME_NOT_SUPPORTED) {
+        SdchManager::SdchErrorRecovery(rv);
+        request()->net_log().AddEvent(
+            NetLog::TYPE_SDCH_DECODING_ERROR,
+            base::Bind(&NetLogSdchResourceProblemCallback, rv));
+      }
+    } else {
+      const std::string name = "Get-Dictionary";
+      std::string url_text;
+      void* iter = NULL;
+      // TODO(jar): We need to not fetch dictionaries the first time they are
+      // seen, but rather wait until we can justify their usefulness.
+      // For now, we will only fetch the first dictionary, which will at least
+      // require multiple suggestions before we get additional ones for this
+      // site. Eventually we should wait until a dictionary is requested
+      // several times
+      // before we even download it (so that we don't waste memory or
+      // bandwidth).
+      if (GetResponseHeaders()->EnumerateHeader(&iter, name, &url_text)) {
+        // Resolve suggested URL relative to request url.
+        GURL sdch_dictionary_url = request_->url().Resolve(url_text);
+        if (sdch_dictionary_url.is_valid()) {
+          rv = sdch_manager->OnGetDictionary(request_->url(),
+                                             sdch_dictionary_url);
+          if (rv != SDCH_OK) {
+            SdchManager::SdchErrorRecovery(rv);
+            request_->net_log().AddEvent(
+                NetLog::TYPE_SDCH_DICTIONARY_ERROR,
+                base::Bind(&NetLogSdchDictionaryFetchProblemCallback, rv,
+                           sdch_dictionary_url, false));
+          }
+        }
+      }
+    }
+  }
+
+  // Handle the server signalling no SDCH encoding.
+  if (dictionaries_advertised_) {
+    // We are wary of proxies that discard or damage SDCH encoding. If a server
+    // explicitly states that this is not SDCH content, then we can correct our
+    // assumption that this is an SDCH response, and avoid the need to recover
+    // as though the content is corrupted (when we discover it is not SDCH
+    // encoded).
+    std::string sdch_response_status;
     void* iter = NULL;
-    // TODO(jar): We need to not fetch dictionaries the first time they are
-    // seen, but rather wait until we can justify their usefulness.
-    // For now, we will only fetch the first dictionary, which will at least
-    // require multiple suggestions before we get additional ones for this site.
-    // Eventually we should wait until a dictionary is requested several times
-    // before we even download it (so that we don't waste memory or bandwidth).
-    if (GetResponseHeaders()->EnumerateHeader(&iter, name, &url_text)) {
-      // Resolve suggested URL relative to request url.
-      GURL sdch_dictionary_url = request_->url().Resolve(url_text);
-      if (sdch_dictionary_url.is_valid()) {
-        sdch_manager->OnGetDictionary(request_->url(), sdch_dictionary_url);
+    while (GetResponseHeaders()->EnumerateHeader(&iter, "X-Sdch-Encode",
+                                                 &sdch_response_status)) {
+      if (sdch_response_status == "0") {
+        dictionaries_advertised_.reset();
+        break;
       }
     }
   }
@@ -366,6 +415,7 @@ void URLRequestHttpJob::DestroyTransaction() {
 
   DoneWithRequest(ABORTED);
   transaction_.reset();
+  transaction_state_ = TRANSACTION_WAS_DESTROYED;
   response_info_ = NULL;
   receive_headers_end_ = base::TimeTicks();
 }
@@ -427,6 +477,8 @@ void URLRequestHttpJob::StartTransactionInternal() {
 
     rv = request_->context()->http_transaction_factory()->CreateTransaction(
         priority_, &transaction_);
+    if (rv == OK)
+      transaction_state_ = TRANSACTION_WAS_INITIALIZED;
 
     if (rv == OK && request_info_.url.SchemeIsWSOrWSS()) {
       base::SupportsUserData::Data* data = request_->GetUserData(
@@ -483,41 +535,52 @@ void URLRequestHttpJob::AddExtraHeaders() {
   // simple_data_source.
   if (!request_info_.extra_headers.HasHeader(
       HttpRequestHeaders::kAcceptEncoding)) {
-    bool advertise_sdch = sdch_manager &&
-        // We don't support SDCH responses to POST as there is a possibility
-        // of having SDCH encoded responses returned (e.g. by the cache)
-        // which we cannot decode, and in those situations, we will need
-        // to retransmit the request without SDCH, which is illegal for a POST.
-        request()->method() != "POST" &&
-        sdch_manager->IsInSupportedDomain(request_->url());
-    std::string avail_dictionaries;
+    // We don't support SDCH responses to POST as there is a possibility
+    // of having SDCH encoded responses returned (e.g. by the cache)
+    // which we cannot decode, and in those situations, we will need
+    // to retransmit the request without SDCH, which is illegal for a POST.
+    bool advertise_sdch = sdch_manager != NULL && request()->method() != "POST";
     if (advertise_sdch) {
-      sdch_manager->GetAvailDictionaryList(request_->url(),
-                                           &avail_dictionaries);
-
-      // The AllowLatencyExperiment() is only true if we've successfully done a
-      // full SDCH compression recently in this browser session for this host.
-      // Note that for this path, there might be no applicable dictionaries,
-      // and hence we can't participate in the experiment.
-      if (!avail_dictionaries.empty() &&
-          sdch_manager->AllowLatencyExperiment(request_->url())) {
-        // We are participating in the test (or control), and hence we'll
-        // eventually record statistics via either SDCH_EXPERIMENT_DECODE or
-        // SDCH_EXPERIMENT_HOLDBACK, and we'll need some packet timing data.
-        packet_timing_enabled_ = true;
-        if (base::RandDouble() < .01) {
-          sdch_test_control_ = true;  // 1% probability.
-          advertise_sdch = false;
-        } else {
-          sdch_test_activated_ = true;
+      SdchProblemCode rv = sdch_manager->IsInSupportedDomain(request()->url());
+      if (rv != SDCH_OK) {
+        advertise_sdch = false;
+        // If SDCH is just disabled, it is not a real error.
+        if (rv != SDCH_DISABLED && rv != SDCH_SECURE_SCHEME_NOT_SUPPORTED) {
+          SdchManager::SdchErrorRecovery(rv);
+          request()->net_log().AddEvent(
+              NetLog::TYPE_SDCH_DECODING_ERROR,
+              base::Bind(&NetLogSdchResourceProblemCallback, rv));
         }
+      }
+    }
+    if (advertise_sdch) {
+      dictionaries_advertised_ =
+          sdch_manager->GetDictionarySet(request_->url());
+    }
+
+    // The AllowLatencyExperiment() is only true if we've successfully done a
+    // full SDCH compression recently in this browser session for this host.
+    // Note that for this path, there might be no applicable dictionaries,
+    // and hence we can't participate in the experiment.
+    if (dictionaries_advertised_ &&
+        sdch_manager->AllowLatencyExperiment(request_->url())) {
+      // We are participating in the test (or control), and hence we'll
+      // eventually record statistics via either SDCH_EXPERIMENT_DECODE or
+      // SDCH_EXPERIMENT_HOLDBACK, and we'll need some packet timing data.
+      packet_timing_enabled_ = true;
+      if (base::RandDouble() < .01) {
+        sdch_test_control_ = true;  // 1% probability.
+        dictionaries_advertised_.reset();
+        advertise_sdch = false;
+      } else {
+        sdch_test_activated_ = true;
       }
     }
 
     // Supply Accept-Encoding headers first so that it is more likely that they
-    // will be in the first transmitted packet.  This can sometimes make it
+    // will be in the first transmitted packet. This can sometimes make it
     // easier to filter and analyze the streams to assure that a proxy has not
-    // damaged these headers.  Some proxies deliberately corrupt Accept-Encoding
+    // damaged these headers. Some proxies deliberately corrupt Accept-Encoding
     // headers.
     if (!advertise_sdch) {
       // Tell the server what compression formats we support (other than SDCH).
@@ -527,15 +590,14 @@ void URLRequestHttpJob::AddExtraHeaders() {
       // Include SDCH in acceptable list.
       request_info_.extra_headers.SetHeader(
           HttpRequestHeaders::kAcceptEncoding, "gzip, deflate, sdch");
-      if (!avail_dictionaries.empty()) {
+      if (dictionaries_advertised_) {
         request_info_.extra_headers.SetHeader(
             kAvailDictionaryHeader,
-            avail_dictionaries);
-        sdch_dictionary_advertised_ = true;
+            dictionaries_advertised_->GetDictionaryClientHashList());
         // Since we're tagging this transaction as advertising a dictionary,
         // we'll definitely employ an SDCH filter (or tentative sdch filter)
-        // when we get a response.  When done, we'll record histograms via
-        // SDCH_DECODE or SDCH_PASSTHROUGH.  Hence we need to record packet
+        // when we get a response. When done, we'll record histograms via
+        // SDCH_DECODE or SDCH_PASSTHROUGH. Hence we need to record packet
         // arrival times.
         packet_timing_enabled_ = true;
       }
@@ -882,6 +944,19 @@ void URLRequestHttpJob::OnStartCompleted(int result) {
   }
 }
 
+// TODO(battre) Use URLRequestHttpJob::OnHeadersReceivedCallback again, once
+// crbug.com/289715 has been resolved.
+// static
+void URLRequestHttpJob::OnHeadersReceivedCallbackForDebugging(
+    base::WeakPtr<net::URLRequestHttpJob> job,
+    int result) {
+  CHECK(job.get());
+  net::URLRequestHttpJob::TransactionState state = job->transaction_state_;
+  base::debug::Alias(&state);
+  CHECK(job->transaction_.get());
+  job->OnHeadersReceivedCallback(result);
+}
+
 void URLRequestHttpJob::OnHeadersReceivedCallback(int result) {
   awaiting_callback_ = false;
 
@@ -987,7 +1062,7 @@ void URLRequestHttpJob::GetResponseInfo(HttpResponseInfo* info) {
 void URLRequestHttpJob::GetLoadTimingInfo(
     LoadTimingInfo* load_timing_info) const {
   // If haven't made it far enough to receive any headers, don't return
-  // anything.  This makes for more consistent behavior in the case of errors.
+  // anything. This makes for more consistent behavior in the case of errors.
   if (!transaction_ || receive_headers_end_.is_null())
     return;
   if (transaction_->GetLoadTimingInfo(load_timing_info))
@@ -1028,23 +1103,6 @@ Filter* URLRequestHttpJob::SetupFilter() const {
   void* iter = NULL;
   while (headers->EnumerateHeader(&iter, "Content-Encoding", &encoding_type)) {
     encoding_types.push_back(Filter::ConvertEncodingToType(encoding_type));
-  }
-
-  if (filter_context_->SdchResponseExpected()) {
-    // We are wary of proxies that discard or damage SDCH encoding.  If a server
-    // explicitly states that this is not SDCH content, then we can correct our
-    // assumption that this is an SDCH response, and avoid the need to recover
-    // as though the content is corrupted (when we discover it is not SDCH
-    // encoded).
-    std::string sdch_response_status;
-    iter = NULL;
-    while (headers->EnumerateHeader(&iter, "X-Sdch-Encode",
-                                    &sdch_response_status)) {
-      if (sdch_response_status == "0") {
-        filter_context_->ResetSdchResponseToFalse();
-        break;
-      }
-    }
   }
 
   // Even if encoding types are empty, there is a chance that we need to add
@@ -1090,7 +1148,7 @@ bool URLRequestHttpJob::NeedsAuth() {
   if (code == -1)
     return false;
 
-  // Check if we need either Proxy or WWW Authentication.  This could happen
+  // Check if we need either Proxy or WWW Authentication. This could happen
   // because we either provided no auth info, or provided incorrect info.
   switch (code) {
     case 407:
@@ -1224,7 +1282,7 @@ void URLRequestHttpJob::ResumeNetworkStart() {
 
 bool URLRequestHttpJob::ShouldFixMismatchedContentLength(int rv) const {
   // Some servers send the body compressed, but specify the content length as
-  // the uncompressed size.  Although this violates the HTTP spec we want to
+  // the uncompressed size. Although this violates the HTTP spec we want to
   // support it (as IE and FireFox do), but *only* for an exact match.
   // See http://crbug.com/79694.
   if (rv == net::ERR_CONTENT_LENGTH_MISMATCH ||
@@ -1247,6 +1305,11 @@ bool URLRequestHttpJob::ShouldFixMismatchedContentLength(int rv) const {
 
 bool URLRequestHttpJob::ReadRawData(IOBuffer* buf, int buf_size,
                                     int* bytes_read) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "423948 URLRequestHttpJob::ReadRawData1"));
+
   DCHECK_NE(buf_size, 0);
   DCHECK(bytes_read);
   DCHECK(!read_in_progress_);
@@ -1260,8 +1323,15 @@ bool URLRequestHttpJob::ReadRawData(IOBuffer* buf, int buf_size,
 
   if (rv >= 0) {
     *bytes_read = rv;
-    if (!rv)
+    if (!rv) {
+      // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is
+      // fixed.
+      tracked_objects::ScopedTracker tracking_profile2(
+          FROM_HERE_WITH_EXPLICIT_FUNCTION(
+              "423948 URLRequestHttpJob::ReadRawData2"));
+
       DoneWithRequest(FINISHED);
+    }
     return true;
   }
 
@@ -1419,7 +1489,7 @@ void URLRequestHttpJob::RecordCompressionHistograms() {
       !prefilter_bytes_read())       // Zero-byte responses aren't useful.
     return;
 
-  // Miniature requests aren't really compressible.  Don't count them.
+  // Miniature requests aren't really compressible. Don't count them.
   const int kMinSize = 16;
   if (prefilter_bytes_read() < kMinSize)
     return;
@@ -1436,14 +1506,14 @@ void URLRequestHttpJob::RecordCompressionHistograms() {
 
   // We want to record how often downloaded resources are compressed.
   // But, we recognize that different protocols may have different
-  // properties.  So, for each request, we'll put it into one of 3
+  // properties. So, for each request, we'll put it into one of 3
   // groups:
   //      a) SSL resources
   //         Proxies cannot tamper with compression headers with SSL.
   //      b) Non-SSL, loaded-via-proxy resources
   //         In this case, we know a proxy might have interfered.
   //      c) Non-SSL, loaded-without-proxy resources
-  //         In this case, we know there was no explicit proxy.  However,
+  //         In this case, we know there was no explicit proxy. However,
   //         it is possible that a transparent proxy was still interfering.
   //
   // For each group, we record the same 3 histograms.

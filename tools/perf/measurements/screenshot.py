@@ -3,31 +3,22 @@
 # found in the LICENSE file.
 import os
 
+from telemetry.image_processing import image_util
 from telemetry.page import page_test
 from telemetry.page import page_test
 from telemetry.value import scalar
 
 
 class Screenshot(page_test.PageTest):
-  def __init__(self):
+  def __init__(self, png_outdir):
     super(Screenshot, self).__init__(
         action_name_to_run = 'RunPageInteractions',
         is_action_name_to_run_optional=True)
-
-  @classmethod
-  def AddCommandLineArgs(cls, parser):
-    parser.add_option('--png-outdir',
-                      help='Output directory for the PNG files')
-
-  @classmethod
-  def ProcessCommandLineArgs(cls, parser, args):
-    if not args.png_outdir:
-      parser.error('Please specify --png-outdir')
-    cls._png_outdir = args.png_outdir
+    self._png_outdir = png_outdir
 
   def ValidateAndMeasurePage(self, page, tab, results):
     if not tab.screenshot_supported:
-      raise page_test.TestNotSupportedOnPlatformFailure(
+      raise page_test.TestNotSupportedOnPlatformError(
           'Browser does not support screenshotting')
 
     tab.WaitForDocumentReadyStateToBeComplete()
@@ -41,7 +32,7 @@ class Screenshot(page_test.PageTest):
     else:
       previous_mtime = -1
 
-    screenshot.WritePngFile(outpath)
+    image_util.WritePngFile(screenshot, outpath)
 
     saved_picture_count = 0
     if os.path.exists(outpath) and os.path.getmtime(outpath) > previous_mtime:

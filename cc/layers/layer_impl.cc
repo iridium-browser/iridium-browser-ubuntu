@@ -60,7 +60,6 @@ LayerImpl::LayerImpl(LayerTreeImpl* tree_impl, int id)
       draw_checkerboard_for_missing_tiles_(false),
       draws_content_(false),
       hide_layer_and_subtree_(false),
-      force_render_surface_(false),
       transform_is_invertible_(true),
       is_container_for_fixed_position_layers_(false),
       background_color_(0),
@@ -204,7 +203,7 @@ void LayerImpl::SetClipChildren(std::set<LayerImpl*>* children) {
 void LayerImpl::PassCopyRequests(ScopedPtrVector<CopyOutputRequest>* requests) {
   if (requests->empty())
     return;
-
+  DCHECK(render_surface());
   bool was_empty = copy_requests_.empty();
   copy_requests_.insert_and_take(copy_requests_.end(), requests);
   requests->clear();
@@ -218,6 +217,7 @@ void LayerImpl::TakeCopyRequestsAndTransformToTarget(
     ScopedPtrVector<CopyOutputRequest>* requests) {
   DCHECK(!copy_requests_.empty());
   DCHECK(layer_tree_impl()->IsActiveTree());
+  DCHECK_EQ(render_target(), this);
 
   size_t first_inserted_request = requests->size();
   requests->insert_and_take(requests->end(), &copy_requests_);
@@ -238,31 +238,17 @@ void LayerImpl::TakeCopyRequestsAndTransformToTarget(
   layer_tree_impl()->RemoveLayerWithCopyOutputRequest(this);
 }
 
-void LayerImpl::CreateRenderSurface() {
-  DCHECK(!draw_properties_.render_surface);
-  draw_properties_.render_surface =
-      make_scoped_ptr(new RenderSurfaceImpl(this));
-  draw_properties_.render_target = this;
-}
-
-void LayerImpl::ClearRenderSurface() {
-  draw_properties_.render_surface = nullptr;
-}
-
 void LayerImpl::ClearRenderSurfaceLayerList() {
-  if (draw_properties_.render_surface)
-    draw_properties_.render_surface->layer_list().clear();
+  if (render_surface_)
+    render_surface_->ClearLayerLists();
 }
 
 void LayerImpl::PopulateSharedQuadState(SharedQuadState* state) const {
-  state->SetAll(draw_properties_.target_space_transform,
-                draw_properties_.content_bounds,
-                draw_properties_.visible_content_rect,
-                draw_properties_.clip_rect,
-                draw_properties_.is_clipped,
-                draw_properties_.opacity,
-                blend_mode_,
-                sorting_context_id_);
+  state->SetAll(
+      draw_properties_.target_space_transform, draw_properties_.content_bounds,
+      draw_properties_.visible_content_rect, draw_properties_.clip_rect,
+      draw_properties_.is_clipped, draw_properties_.opacity,
+      draw_properties_.blend_mode, sorting_context_id_);
 }
 
 bool LayerImpl::WillDraw(DrawMode draw_mode,
@@ -347,6 +333,11 @@ RenderPassId LayerImpl::FirstContributingRenderPassId() const {
 
 RenderPassId LayerImpl::NextContributingRenderPassId(RenderPassId id) const {
   return RenderPassId(0, 0);
+}
+
+bool LayerImpl::UpdateTiles(const Occlusion& occlusion_in_layer_space,
+                            bool resourceless_software_draw) {
+  return false;
 }
 
 void LayerImpl::GetContentsResourceId(ResourceProvider::ResourceId* resource_id,
@@ -522,9 +513,9 @@ void LayerImpl::PushPropertiesTo(LayerImpl* layer) {
   layer->SetDoubleSided(double_sided_);
   layer->SetDrawCheckerboardForMissingTiles(
       draw_checkerboard_for_missing_tiles_);
-  layer->SetForceRenderSurface(force_render_surface_);
   layer->SetDrawsContent(DrawsContent());
   layer->SetHideLayerAndSubtree(hide_layer_and_subtree_);
+  layer->SetHasRenderSurface(!!render_surface());
   layer->SetFilters(filters());
   layer->SetBackgroundFilters(background_filters());
   layer->SetMasksToBounds(masks_to_bounds_);
@@ -624,9 +615,6 @@ gfx::Vector2dF LayerImpl::FixedContainerSizeDelta() const {
   if (!scroll_clip_layer_)
     return gfx::Vector2dF();
 
-  float scale_delta = layer_tree_impl()->page_scale_delta();
-  float scale = layer_tree_impl()->page_scale_factor();
-
   gfx::Vector2dF delta_from_scroll = scroll_clip_layer_->bounds_delta();
 
   // In virtual-viewport mode, we don't need to compensate for pinch zoom or
@@ -634,6 +622,10 @@ gfx::Vector2dF LayerImpl::FixedContainerSizeDelta() const {
   // the page scale.
   if (layer_tree_impl()->settings().use_pinch_virtual_viewport)
     return delta_from_scroll;
+
+  float scale_delta = layer_tree_impl()->page_scale_delta();
+  float scale = layer_tree_impl()->current_page_scale_factor() /
+                layer_tree_impl()->page_scale_delta();
 
   delta_from_scroll.Scale(1.f / scale);
 
@@ -742,8 +734,8 @@ void LayerImpl::ResetAllChangeTrackingForSubtree() {
   update_rect_ = gfx::Rect();
   damage_rect_ = gfx::RectF();
 
-  if (draw_properties_.render_surface)
-    draw_properties_.render_surface->ResetPropertyChangedFlag();
+  if (render_surface_)
+    render_surface_->ResetPropertyChangedFlag();
 
   if (mask_layer_)
     mask_layer_->ResetAllChangeTrackingForSubtree();
@@ -1216,7 +1208,7 @@ gfx::ScrollOffset LayerImpl::MaxScrollOffset() const {
     const gfx::Transform& layer_transform = current_layer->transform();
     if (current_layer == page_scale_layer) {
       DCHECK(layer_transform.IsIdentity());
-      current_layer_scale = layer_tree_impl()->total_page_scale_factor();
+      current_layer_scale = layer_tree_impl()->current_page_scale_factor();
     } else {
       // TODO(wjmaclean) Should we allow for translation too?
       DCHECK(layer_transform.IsScale2d());
@@ -1233,7 +1225,7 @@ gfx::ScrollOffset LayerImpl::MaxScrollOffset() const {
   // page scale layer may coincide with the clip layer, and so this is
   // necessary.
   if (page_scale_layer == scroll_clip_layer_)
-    scale_factor *= layer_tree_impl()->total_page_scale_factor();
+    scale_factor *= layer_tree_impl()->current_page_scale_factor();
 
   scaled_scroll_bounds.SetSize(scale_factor * scaled_scroll_bounds.width(),
                                scale_factor * scaled_scroll_bounds.height());
@@ -1270,8 +1262,6 @@ void LayerImpl::SetScrollbarPosition(ScrollbarLayerImplBase* scrollbar_layer,
 
   DCHECK(this != page_scale_layer);
   DCHECK(scrollbar_clip_layer);
-  DCHECK(this != layer_tree_impl()->InnerViewportScrollLayer() ||
-         IsContainerForFixedPositionLayers());
   gfx::RectF clip_rect(gfx::PointF(),
                        scrollbar_clip_layer->BoundsForScrolling());
 
@@ -1292,7 +1282,7 @@ void LayerImpl::SetScrollbarPosition(ScrollbarLayerImplBase* scrollbar_layer,
     const gfx::Transform& layer_transform = current_layer->transform();
     if (current_layer == page_scale_layer) {
       DCHECK(layer_transform.IsIdentity());
-      float scale_factor = layer_tree_impl()->total_page_scale_factor();
+      float scale_factor = layer_tree_impl()->current_page_scale_factor();
       current_offset.Scale(scale_factor);
       scroll_rect.Scale(scale_factor);
     } else {
@@ -1310,8 +1300,8 @@ void LayerImpl::SetScrollbarPosition(ScrollbarLayerImplBase* scrollbar_layer,
   // page scale layer may coincide with the clip layer, and so this is
   // necessary.
   if (page_scale_layer == scrollbar_clip_layer) {
-    scroll_rect.Scale(layer_tree_impl()->total_page_scale_factor());
-    current_offset.Scale(layer_tree_impl()->total_page_scale_factor());
+    scroll_rect.Scale(layer_tree_impl()->current_page_scale_factor());
+    current_offset.Scale(layer_tree_impl()->current_page_scale_factor());
   }
 
   bool scrollbar_needs_animation = false;
@@ -1341,15 +1331,8 @@ void LayerImpl::SetScrollbarPosition(ScrollbarLayerImplBase* scrollbar_layer,
     // scrolls that move the pinch virtual viewport (i.e. trigger from
     // either inner or outer viewport).
     if (scrollbar_animation_controller_) {
-      // When both non-overlay and overlay scrollbars are both present, don't
-      // animate the overlay scrollbars when page scale factor is at the min.
-      // Non-overlay scrollbars also shouldn't trigger animations.
-      bool is_animatable_scrollbar =
-          scrollbar_layer->is_overlay_scrollbar() &&
-          ((layer_tree_impl()->total_page_scale_factor() >
-            layer_tree_impl()->min_page_scale_factor()) ||
-           !layer_tree_impl()->settings().use_pinch_zoom_scrollbars);
-      if (is_animatable_scrollbar)
+      // Non-overlay scrollbars shouldn't trigger animations.
+      if (scrollbar_layer->is_overlay_scrollbar())
         scrollbar_animation_controller_->DidScrollUpdate(on_resize);
     }
   }
@@ -1596,6 +1579,19 @@ void LayerImpl::NotifyAnimationFinished(
     int group) {
   if (target_property == Animation::ScrollOffset)
     layer_tree_impl_->InputScrollAnimationFinished();
+}
+
+void LayerImpl::SetHasRenderSurface(bool should_have_render_surface) {
+  if (!!render_surface() == should_have_render_surface)
+    return;
+
+  SetNeedsPushProperties();
+  layer_tree_impl()->set_needs_update_draw_properties();
+  if (should_have_render_surface) {
+    render_surface_ = make_scoped_ptr(new RenderSurfaceImpl(this));
+    return;
+  }
+  render_surface_.reset();
 }
 
 }  // namespace cc

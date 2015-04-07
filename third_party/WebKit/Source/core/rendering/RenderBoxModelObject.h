@@ -39,7 +39,7 @@ enum BackgroundBleedAvoidance {
     BackgroundBleedNone,
     BackgroundBleedShrinkBackground,
     BackgroundBleedClipBackground,
-    BackgroundBleedBackgroundOverBorder
+    BackgroundBleedBackgroundOverBorder,
 };
 
 enum ContentChangeType {
@@ -48,8 +48,7 @@ enum ContentChangeType {
     CanvasContextChanged
 };
 
-class RenderTextFragment;
-class BackgroundImageGeometry;
+class InlineFlowBox;
 
 // This class is the base for all objects that adhere to the CSS box model as described
 // at http://www.w3.org/TR/CSS21/box.html
@@ -114,6 +113,9 @@ public:
     int borderWidth() const { return borderLeft() + borderRight(); }
     int borderHeight() const { return borderTop() + borderBottom(); }
 
+    // Insets from the border box to the inside of the border.
+    LayoutRectOutsets borderInsets() const { return LayoutRectOutsets(-borderTop(), -borderRight(), -borderBottom(), -borderLeft()); }
+
     LayoutUnit borderAndPaddingStart() const { return borderStart() + paddingStart(); }
     LayoutUnit borderAndPaddingBefore() const { return borderBefore() + paddingBefore(); }
     LayoutUnit borderAndPaddingAfter() const { return borderAfter() + paddingAfter(); }
@@ -124,12 +126,12 @@ public:
     LayoutUnit borderAndPaddingLogicalWidth() const { return borderStart() + borderEnd() + paddingStart() + paddingEnd(); }
     LayoutUnit borderAndPaddingLogicalLeft() const { return style()->isHorizontalWritingMode() ? borderLeft() + paddingLeft() : borderTop() + paddingTop(); }
 
-
     LayoutUnit borderLogicalLeft() const { return style()->isHorizontalWritingMode() ? borderLeft() : borderTop(); }
 
     LayoutUnit paddingLogicalWidth() const { return paddingStart() + paddingEnd(); }
     LayoutUnit paddingLogicalHeight() const { return paddingBefore() + paddingAfter(); }
 
+    virtual LayoutRectOutsets marginBoxOutsets() const = 0;
     virtual LayoutUnit marginTop() const = 0;
     virtual LayoutUnit marginBottom() const = 0;
     virtual LayoutUnit marginLeft() const = 0;
@@ -182,11 +184,6 @@ protected:
     RenderBlock* containingBlockForAutoHeightDetection(Length logicalHeight) const;
 
 public:
-
-    // For RenderBlocks and RenderInlines with m_style->styleType() == FIRST_LETTER, this tracks their remaining text fragments
-    RenderTextFragment* firstLetterRemainingText() const;
-    void setFirstLetterRemainingText(RenderTextFragment*);
-
     // These functions are only used internally to manipulate the render tree structure via remove/insert/appendChildNode.
     // Since they are typically called only to move objects around within anonymous blocks (which only have layers in
     // the case of column spans), the default for fullRemoveInsert is false rather than true.

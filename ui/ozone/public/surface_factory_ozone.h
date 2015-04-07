@@ -10,9 +10,9 @@
 #include "base/native_library.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/overlay_transform.h"
-#include "ui/gfx/rect.h"
 #include "ui/ozone/ozone_base_export.h"
 
 class SkBitmap;
@@ -68,6 +68,11 @@ class OZONE_BASE_EXPORT SurfaceFactoryOzone {
     RGB_888,
   };
 
+  enum BufferUsage {
+    MAP,
+    SCANOUT,
+  };
+
   typedef void* (*GLGetProcAddressProc)(const char* name);
   typedef base::Callback<void(base::NativeLibrary)> AddGLLibraryCallback;
   typedef base::Callback<void(GLGetProcAddressProc)>
@@ -82,6 +87,10 @@ class OZONE_BASE_EXPORT SurfaceFactoryOzone {
   // Returns native platform display handle. This is used to obtain the EGL
   // display connection for the native display.
   virtual intptr_t GetNativeDisplay();
+
+  // Returns Drm file descriptor. This is used to obtain access to the
+  // driver interface by other API than GL.
+  virtual int GetDrmFd();
 
   // Create SurfaceOzoneEGL for the specified gfx::AcceleratedWidget.
   //
@@ -121,10 +130,14 @@ class OZONE_BASE_EXPORT SurfaceFactoryOzone {
   virtual OverlayCandidatesOzone* GetOverlayCandidates(
       gfx::AcceleratedWidget w);
 
-  // Cleate a single native buffer to be used for overlay planes.
+  // Create a single native buffer to be used for overlay planes or zero copy
+  // for |widget| representing a particular display controller or default
+  // display controller for kNullAcceleratedWidget.
   virtual scoped_refptr<NativePixmap> CreateNativePixmap(
+      gfx::AcceleratedWidget widget,
       gfx::Size size,
-      BufferFormat format);
+      BufferFormat format,
+      BufferUsage usage);
 
   // Sets the overlay plane to switch to at the next page flip.
   // |w| specifies the screen to display this overlay plane on.
@@ -148,6 +161,10 @@ class OZONE_BASE_EXPORT SurfaceFactoryOzone {
   // surface. Combined with surfaceless extensions, it allows for an
   // overlay-only mode.
   virtual bool CanShowPrimaryPlaneAsOverlay();
+
+  // Returns true if the platform is able to create buffers for a specific usage
+  // such as MAP for zero copy or SCANOUT for display controller.
+  virtual bool CanCreateNativePixmap(BufferUsage usage);
 
  private:
   static SurfaceFactoryOzone* impl_;  // not owned

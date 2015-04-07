@@ -252,6 +252,11 @@ static const GLenum valid_index_type_table[] = {
     GL_UNSIGNED_SHORT,
 };
 
+static const GLenum valid_indexed_buffer_target_table[] = {
+    GL_TRANSFORM_FEEDBACK_BUFFER,
+    GL_UNIFORM_BUFFER,
+};
+
 static const GLenum valid_matrix_mode_table[] = {
     GL_PATH_PROJECTION_CHROMIUM,
     GL_PATH_MODELVIEW_CHROMIUM,
@@ -353,6 +358,18 @@ static const GLenum valid_reset_status_table[] = {
     GL_UNKNOWN_CONTEXT_RESET_ARB,
 };
 
+static const GLenum valid_sampler_parameter_table[] = {
+    GL_TEXTURE_MAG_FILTER,
+    GL_TEXTURE_MIN_FILTER,
+    GL_TEXTURE_MIN_LOD,
+    GL_TEXTURE_MAX_LOD,
+    GL_TEXTURE_WRAP_S,
+    GL_TEXTURE_WRAP_T,
+    GL_TEXTURE_WRAP_R,
+    GL_TEXTURE_COMPARE_MODE,
+    GL_TEXTURE_COMPARE_FUNC,
+};
+
 static const GLenum valid_shader_parameter_table[] = {
     GL_SHADER_TYPE,
     GL_DELETE_STATUS,
@@ -415,6 +432,11 @@ static const GLenum valid_string_type_table[] = {
 
 static const GLenum valid_subscription_target_table[] = {
     GL_MOUSE_POSITION_CHROMIUM,
+};
+
+static const GLenum valid_texture_3_d_target_table[] = {
+    GL_TEXTURE_3D,
+    GL_TEXTURE_2D_ARRAY,
 };
 
 static const GLenum valid_texture_bind_target_table[] = {
@@ -497,6 +519,16 @@ static const GLenum valid_texture_wrap_mode_table[] = {
     GL_REPEAT,
 };
 
+static const GLenum valid_transform_feedback_bind_target_table[] = {
+    GL_TRANSFORM_FEEDBACK,
+};
+
+static const GLenum valid_transform_feedback_primitive_mode_table[] = {
+    GL_POINTS,
+    GL_LINES,
+    GL_TRIANGLES,
+};
+
 static const GLenum valid_value_buffer_target_table[] = {
     GL_SUBSCRIBED_VALUES_BUFFER_CHROMIUM,
 };
@@ -566,6 +598,8 @@ Validators::Validators()
                             arraysize(valid_image_internal_format_table)),
       image_usage(valid_image_usage_table, arraysize(valid_image_usage_table)),
       index_type(valid_index_type_table, arraysize(valid_index_type_table)),
+      indexed_buffer_target(valid_indexed_buffer_target_table,
+                            arraysize(valid_indexed_buffer_target_table)),
       matrix_mode(valid_matrix_mode_table, arraysize(valid_matrix_mode_table)),
       pixel_store(valid_pixel_store_table, arraysize(valid_pixel_store_table)),
       pixel_store_alignment(valid_pixel_store_alignment_table,
@@ -591,6 +625,8 @@ Validators::Validators()
                            arraysize(valid_render_buffer_target_table)),
       reset_status(valid_reset_status_table,
                    arraysize(valid_reset_status_table)),
+      sampler_parameter(valid_sampler_parameter_table,
+                        arraysize(valid_sampler_parameter_table)),
       shader_binary_format(),
       shader_parameter(valid_shader_parameter_table,
                        arraysize(valid_shader_parameter_table)),
@@ -603,6 +639,8 @@ Validators::Validators()
       string_type(valid_string_type_table, arraysize(valid_string_type_table)),
       subscription_target(valid_subscription_target_table,
                           arraysize(valid_subscription_target_table)),
+      texture_3_d_target(valid_texture_3_d_target_table,
+                         arraysize(valid_texture_3_d_target_table)),
       texture_bind_target(valid_texture_bind_target_table,
                           arraysize(valid_texture_bind_target_table)),
       texture_format(valid_texture_format_table,
@@ -626,6 +664,12 @@ Validators::Validators()
                     arraysize(valid_texture_usage_table)),
       texture_wrap_mode(valid_texture_wrap_mode_table,
                         arraysize(valid_texture_wrap_mode_table)),
+      transform_feedback_bind_target(
+          valid_transform_feedback_bind_target_table,
+          arraysize(valid_transform_feedback_bind_target_table)),
+      transform_feedback_primitive_mode(
+          valid_transform_feedback_primitive_mode_table,
+          arraysize(valid_transform_feedback_primitive_mode_table)),
       value_buffer_target(valid_value_buffer_target_table,
                           arraysize(valid_value_buffer_target_table)),
       vertex_attrib_size(valid_vertex_attrib_size_table,

@@ -11,6 +11,7 @@
 #include "base/basictypes.h"
 #include "base/strings/string_util.h"
 #include "content/common/content_export.h"
+#include "content/public/common/referrer.h"
 #include "content/public/common/request_context_frame_type.h"
 #include "content/public/common/request_context_type.h"
 #include "third_party/WebKit/public/platform/WebServiceWorkerResponseType.h"
@@ -21,6 +22,10 @@
 // browser and child process.
 
 namespace content {
+
+// Indicates the document main thread ID in the child process. This is used for
+// messaging between the browser process and the child process.
+static const int kDocumentMainThreadId = 0;
 
 // Indicates invalid request ID (i.e. the sender does not expect it gets
 // response for the message) for messaging between browser process
@@ -81,7 +86,7 @@ struct CONTENT_EXPORT ServiceWorkerFetchRequest {
   ServiceWorkerFetchRequest(const GURL& url,
                             const std::string& method,
                             const ServiceWorkerHeaderMap& headers,
-                            const GURL& referrer,
+                            const Referrer& referrer,
                             bool is_reload);
   ~ServiceWorkerFetchRequest();
 
@@ -93,7 +98,7 @@ struct CONTENT_EXPORT ServiceWorkerFetchRequest {
   ServiceWorkerHeaderMap headers;
   std::string blob_uuid;
   uint64 blob_size;
-  GURL referrer;
+  Referrer referrer;
   FetchCredentialsMode credentials_mode;
   bool is_reload;
 };
@@ -107,7 +112,8 @@ struct CONTENT_EXPORT ServiceWorkerResponse {
                         blink::WebServiceWorkerResponseType response_type,
                         const ServiceWorkerHeaderMap& headers,
                         const std::string& blob_uuid,
-                        uint64 blob_size);
+                        uint64 blob_size,
+                        const GURL& stream_url);
   ~ServiceWorkerResponse();
 
   GURL url;
@@ -117,6 +123,7 @@ struct CONTENT_EXPORT ServiceWorkerResponse {
   ServiceWorkerHeaderMap headers;
   std::string blob_uuid;
   uint64 blob_size;
+  GURL stream_url;
 };
 
 // Controls how requests are matched in the Cache API.
@@ -127,6 +134,7 @@ struct CONTENT_EXPORT ServiceWorkerCacheQueryParams {
   bool ignore_method;
   bool ignore_vary;
   bool prefix_match;
+  base::string16 cache_name;
 };
 
 // The type of a single batch operation in the Cache API.
@@ -193,6 +201,14 @@ class ChangedVersionAttributesMask {
 
  private:
   int changed_;
+};
+
+struct ServiceWorkerClientInfo {
+  int client_id;
+  std::string visibility_state;
+  bool is_focused;
+  GURL url;
+  RequestContextFrameType frame_type;
 };
 
 }  // namespace content

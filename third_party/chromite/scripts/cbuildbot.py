@@ -59,6 +59,7 @@ from chromite.lib import gob_util
 from chromite.lib import osutils
 from chromite.lib import patch as cros_patch
 from chromite.lib import parallel
+from chromite.lib import retry_stats
 from chromite.lib import sudo
 from chromite.lib import timeout_util
 
@@ -456,10 +457,6 @@ class SimpleBuilder(Builder):
       builder_run: BuilderRun object for these background stages.
       board: Board name.
     """
-    # Upload HWTest artifacts first.
-    self._RunStage(artifact_stages.UploadTestArtifactsStage, board,
-                   builder_run=builder_run)
-
     parallel_stages = []
 
     # We can not run hw tests without archiving the payloads.
@@ -566,6 +563,7 @@ class SimpleBuilder(Builder):
         [artifact_stages.DevInstallerPrebuiltsStage, board],
         [artifact_stages.DebugSymbolsStage, board],
         [artifact_stages.CPEExportStage, board],
+        [artifact_stages.UploadTestArtifactsStage, board],
     ]
 
     stage_objs = [self._GetStageInstance(*x, builder_run=builder_run)
@@ -590,6 +588,7 @@ class SimpleBuilder(Builder):
     self._RunStage(build_stages.SetupBoardStage, constants.CHROOT_BUILDER_BOARD)
     self._RunStage(chrome_stages.SyncChromeStage)
     self._RunStage(chrome_stages.PatchChromeStage)
+    self._RunStage(sdk_stages.SDKBuildToolchainsStage)
     self._RunStage(sdk_stages.SDKPackageStage)
     self._RunStage(sdk_stages.SDKTestStage)
     self._RunStage(artifact_stages.UploadPrebuiltsStage,
@@ -1800,7 +1799,7 @@ def main(argv):
 
   if not options.buildroot:
     if options.buildbot:
-      parser.error('Please specify a buildroot with the --buildbot option.')
+      parser.error('Please specify a buildroot with the --buildroot option.')
 
     options.buildroot = _DetermineDefaultBuildRoot(options.sourceroot,
                                                    build_config['internal'])
@@ -1858,9 +1857,6 @@ def main(argv):
     # cgroups would kill gets killed, etc.
     stack.Add(critical_section.ForkWatchdog)
 
-    if options.timeout > 0:
-      stack.Add(timeout_util.FatalTimeout, options.timeout)
-
     if not options.buildbot:
       build_config = cbuildbot_config.OverrideConfigForTrybot(
           build_config, options)
@@ -1880,5 +1876,32 @@ def main(argv):
                 return_value=mock_statuses)
 
     _SetupCidb(options, build_config)
+    retry_stats.SetupStats()
+
+    # For master-slave builds: Update slave's timeout using master's published
+    # deadline.
+    if options.buildbot and options.master_build_id is not None:
+      slave_timeout = None
+      if cidb.CIDBConnectionFactory.IsCIDBSetup():
+        cidb_handle = cidb.CIDBConnectionFactory.GetCIDBConnectionForBuilder()
+        if cidb_handle:
+          slave_timeout = cidb_handle.GetTimeToDeadline(options.master_build_id)
+
+      if slave_timeout is not None:
+        # Cut me some slack. We artificially add a a small time here to the
+        # slave_timeout because '0' is handled specially, and because we don't
+        # want to timeout while trying to set things up.
+        slave_timeout = slave_timeout + 20
+        if options.timeout == 0 or slave_timeout < options.timeout:
+          logging.info('Updating slave build timeout to %d seconds enforced '
+                       'by the master',
+                       slave_timeout)
+          options.timeout = slave_timeout
+      else:
+        logging.warning('Could not get master deadline for master-slave build. '
+                        'Can not set slave timeout.')
+
+    if options.timeout > 0:
+      stack.Add(timeout_util.FatalTimeout, options.timeout)
 
     _RunBuildStagesWrapper(options, build_config)

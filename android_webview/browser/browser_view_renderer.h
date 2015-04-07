@@ -7,47 +7,20 @@
 
 #include "android_webview/browser/parent_compositor_draw_constraints.h"
 #include "android_webview/browser/shared_renderer_state.h"
-#include "base/android/scoped_java_ref.h"
 #include "base/callback.h"
 #include "base/cancelable_callback.h"
 #include "base/debug/trace_event.h"
 #include "content/public/browser/android/synchronous_compositor.h"
 #include "content/public/browser/android/synchronous_compositor_client.h"
-#include "skia/ext/refptr.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/vector2d_f.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/vector2d_f.h"
 
 class SkCanvas;
 class SkPicture;
 
-namespace content {
-class WebContents;
-}
-
 namespace android_webview {
 
 class BrowserViewRendererClient;
-
-// Delegate to perform rendering actions involving Java objects.
-class BrowserViewRendererJavaHelper {
- public:
-  static BrowserViewRendererJavaHelper* GetInstance();
-
-  typedef base::Callback<bool(SkCanvas*)> RenderMethod;
-
-  // Try obtaining the native SkCanvas from |java_canvas| and call
-  // |render_source| with it. If that fails, allocate an auxilary bitmap
-  // for |render_source| to render into, then copy the bitmap into
-  // |java_canvas|.
-  virtual bool RenderViaAuxilaryBitmapIfNeeded(
-      jobject java_canvas,
-      const gfx::Vector2d& scroll_correction,
-      const gfx::Size& auxiliary_bitmap_size,
-      RenderMethod render_source) = 0;
-
- protected:
-  virtual ~BrowserViewRendererJavaHelper() {}
-};
 
 // Interface for all the WebView-specific content rendering operations.
 // Provides software and hardware rendering and the Capture Picture API.
@@ -57,25 +30,24 @@ class BrowserViewRenderer : public content::SynchronousCompositorClient {
 
   BrowserViewRenderer(
       BrowserViewRendererClient* client,
-      content::WebContents* web_contents,
       const scoped_refptr<base::SingleThreadTaskRunner>& ui_task_runner);
 
   virtual ~BrowserViewRenderer();
 
-  intptr_t GetAwDrawGLViewContext();
+  SharedRendererState* GetAwDrawGLViewContext();
   bool RequestDrawGL(bool wait_for_completion);
 
-  // Main handler for view drawing: performs a SW draw immediately, or sets up
-  // a subsequent GL Draw (via BrowserViewRendererClient::RequestDrawGL) and
-  // returns true. A false return value indicates nothing was or will be drawn.
-  // |java_canvas| is the target of the draw. |is_hardware_canvas| indicates
-  // a GL Draw maybe possible on this canvas. |scroll| if the view's current
-  // scroll offset. |clip| is the canvas's clip bounds. |global_visible_rect|
-  // is the intersection of the view size and the window in window coordinates.
-  bool OnDraw(jobject java_canvas,
-              bool is_hardware_canvas,
-              const gfx::Vector2d& scroll,
-              const gfx::Rect& global_visible_rect);
+  // Called before either OnDrawHardware or OnDrawSoftware to set the view
+  // state of this frame. |scroll| is the view's current scroll offset.
+  // |global_visible_rect| is the intersection of the view size and the window
+  // in window coordinates.
+  void PrepareToDraw(const gfx::Vector2d& scroll,
+                     const gfx::Rect& global_visible_rect);
+
+  // Main handlers for view drawing. A false return value indicates no new
+  // frame is produced.
+  bool OnDrawHardware();
+  bool OnDrawSoftware(SkCanvas* canvas);
 
   // CapturePicture API methods.
   skia::RefPtr<SkPicture> CapturePicture(int width, int height);
@@ -102,6 +74,7 @@ class BrowserViewRenderer : public content::SynchronousCompositorClient {
   gfx::Rect GetScreenRect() const;
   bool attached_to_window() const { return attached_to_window_; }
   bool hardware_enabled() const { return hardware_enabled_; }
+  gfx::Size size() const { return size_; }
   void ReleaseHardware();
 
   void TrimMemory(const int level, const bool visible);
@@ -132,6 +105,7 @@ class BrowserViewRenderer : public content::SynchronousCompositorClient {
 
  private:
   void SetTotalRootLayerScrollOffset(gfx::Vector2dF new_value_dip);
+  bool CanOnDraw();
   // Checks the continuous invalidate and block invalidate state, and schedule
   // invalidates appropriately. If |force_invalidate| is true, then send a view
   // invalidate regardless of compositor expectation. If |skip_reschedule_tick|
@@ -139,7 +113,6 @@ class BrowserViewRenderer : public content::SynchronousCompositorClient {
   // them.
   void EnsureContinuousInvalidation(bool force_invalidate,
                                     bool skip_reschedule_tick);
-  bool OnDrawSoftware(jobject java_canvas);
   bool CompositeSW(SkCanvas* canvas);
   void DidComposite();
   void DidSkipCompositeInDraw();
@@ -147,7 +120,6 @@ class BrowserViewRenderer : public content::SynchronousCompositorClient {
       const gfx::Vector2dF& total_scroll_offset_dip,
       const gfx::SizeF& scrollable_size_dip);
 
-  bool OnDrawHardware();
   scoped_ptr<cc::CompositorFrame> CompositeHw();
   void ReturnUnusedResource(scoped_ptr<cc::CompositorFrame> frame);
   void ReturnResourceFromParent();
@@ -173,7 +145,6 @@ class BrowserViewRenderer : public content::SynchronousCompositorClient {
 
   BrowserViewRendererClient* client_;
   SharedRendererState shared_renderer_state_;
-  content::WebContents* web_contents_;
   scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner_;
 
   content::SynchronousCompositor* compositor_;
@@ -210,8 +181,7 @@ class BrowserViewRenderer : public content::SynchronousCompositorClient {
   base::CancelableClosure fallback_tick_fired_;
   bool fallback_tick_pending_;
 
-  int width_;
-  int height_;
+  gfx::Size size_;
 
   // Current scroll offset in CSS pixels.
   gfx::Vector2dF scroll_offset_dip_;

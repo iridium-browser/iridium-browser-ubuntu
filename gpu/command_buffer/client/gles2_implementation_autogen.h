@@ -23,11 +23,17 @@ void BindAttribLocation(GLuint program,
 
 void BindBuffer(GLenum target, GLuint buffer) override;
 
+void BindBufferBase(GLenum target, GLuint index, GLuint buffer) override;
+
 void BindFramebuffer(GLenum target, GLuint framebuffer) override;
 
 void BindRenderbuffer(GLenum target, GLuint renderbuffer) override;
 
+void BindSampler(GLuint unit, GLuint sampler) override;
+
 void BindTexture(GLenum target, GLuint texture) override;
+
+void BindTransformFeedback(GLenum target, GLuint transformfeedback) override;
 
 void BlendColor(GLclampf red,
                 GLclampf green,
@@ -94,6 +100,12 @@ void CompressedTexSubImage2D(GLenum target,
                              GLsizei imageSize,
                              const void* data) override;
 
+void CopyBufferSubData(GLenum readtarget,
+                       GLenum writetarget,
+                       GLintptr readoffset,
+                       GLintptr writeoffset,
+                       GLsizeiptr size) override;
+
 void CopyTexImage2D(GLenum target,
                     GLint level,
                     GLenum internalformat,
@@ -126,9 +138,13 @@ void DeleteProgram(GLuint program) override;
 
 void DeleteRenderbuffers(GLsizei n, const GLuint* renderbuffers) override;
 
+void DeleteSamplers(GLsizei n, const GLuint* samplers) override;
+
 void DeleteShader(GLuint shader) override;
 
 void DeleteTextures(GLsizei n, const GLuint* textures) override;
+
+void DeleteTransformFeedbacks(GLsizei n, const GLuint* ids) override;
 
 void DepthFunc(GLenum func) override;
 
@@ -164,6 +180,12 @@ void FramebufferTexture2D(GLenum target,
                           GLuint texture,
                           GLint level) override;
 
+void FramebufferTextureLayer(GLenum target,
+                             GLenum attachment,
+                             GLuint texture,
+                             GLint level,
+                             GLint layer) override;
+
 void FrontFace(GLenum mode) override;
 
 void GenBuffers(GLsizei n, GLuint* buffers) override;
@@ -174,7 +196,11 @@ void GenFramebuffers(GLsizei n, GLuint* framebuffers) override;
 
 void GenRenderbuffers(GLsizei n, GLuint* renderbuffers) override;
 
+void GenSamplers(GLsizei n, GLuint* samplers) override;
+
 void GenTextures(GLsizei n, GLuint* textures) override;
+
+void GenTransformFeedbacks(GLsizei n, GLuint* ids) override;
 
 void GetActiveAttrib(GLuint program,
                      GLuint index,
@@ -214,6 +240,12 @@ void GetFramebufferAttachmentParameteriv(GLenum target,
 
 void GetIntegerv(GLenum pname, GLint* params) override;
 
+void GetInternalformativ(GLenum target,
+                         GLenum format,
+                         GLenum pname,
+                         GLsizei bufSize,
+                         GLint* params) override;
+
 void GetProgramiv(GLuint program, GLenum pname, GLint* params) override;
 
 void GetProgramInfoLog(GLuint program,
@@ -224,6 +256,14 @@ void GetProgramInfoLog(GLuint program,
 void GetRenderbufferParameteriv(GLenum target,
                                 GLenum pname,
                                 GLint* params) override;
+
+void GetSamplerParameterfv(GLuint sampler,
+                           GLenum pname,
+                           GLfloat* params) override;
+
+void GetSamplerParameteriv(GLuint sampler,
+                           GLenum pname,
+                           GLint* params) override;
 
 void GetShaderiv(GLuint shader, GLenum pname, GLint* params) override;
 
@@ -260,6 +300,18 @@ void GetVertexAttribPointerv(GLuint index,
 
 void Hint(GLenum target, GLenum mode) override;
 
+void InvalidateFramebuffer(GLenum target,
+                           GLsizei count,
+                           const GLenum* attachments) override;
+
+void InvalidateSubFramebuffer(GLenum target,
+                              GLsizei count,
+                              const GLenum* attachments,
+                              GLint x,
+                              GLint y,
+                              GLsizei width,
+                              GLsizei height) override;
+
 GLboolean IsBuffer(GLuint buffer) override;
 
 GLboolean IsEnabled(GLenum cap) override;
@@ -270,17 +322,25 @@ GLboolean IsProgram(GLuint program) override;
 
 GLboolean IsRenderbuffer(GLuint renderbuffer) override;
 
+GLboolean IsSampler(GLuint sampler) override;
+
 GLboolean IsShader(GLuint shader) override;
 
 GLboolean IsTexture(GLuint texture) override;
+
+GLboolean IsTransformFeedback(GLuint transformfeedback) override;
 
 void LineWidth(GLfloat width) override;
 
 void LinkProgram(GLuint program) override;
 
+void PauseTransformFeedback() override;
+
 void PixelStorei(GLenum pname, GLint param) override;
 
 void PolygonOffset(GLfloat factor, GLfloat units) override;
+
+void ReadBuffer(GLenum src) override;
 
 void ReadPixels(GLint x,
                 GLint y,
@@ -297,7 +357,21 @@ void RenderbufferStorage(GLenum target,
                          GLsizei width,
                          GLsizei height) override;
 
+void ResumeTransformFeedback() override;
+
 void SampleCoverage(GLclampf value, GLboolean invert) override;
+
+void SamplerParameterf(GLuint sampler, GLenum pname, GLfloat param) override;
+
+void SamplerParameterfv(GLuint sampler,
+                        GLenum pname,
+                        const GLfloat* params) override;
+
+void SamplerParameteri(GLuint sampler, GLenum pname, GLint param) override;
+
+void SamplerParameteriv(GLuint sampler,
+                        GLenum pname,
+                        const GLint* params) override;
 
 void Scissor(GLint x, GLint y, GLsizei width, GLsizei height) override;
 
@@ -344,6 +418,17 @@ void TexImage2D(GLenum target,
                 GLenum type,
                 const void* pixels) override;
 
+void TexImage3D(GLenum target,
+                GLint level,
+                GLint internalformat,
+                GLsizei width,
+                GLsizei height,
+                GLsizei depth,
+                GLint border,
+                GLenum format,
+                GLenum type,
+                const void* pixels) override;
+
 void TexParameterf(GLenum target, GLenum pname, GLfloat param) override;
 
 void TexParameterfv(GLenum target,
@@ -354,12 +439,31 @@ void TexParameteri(GLenum target, GLenum pname, GLint param) override;
 
 void TexParameteriv(GLenum target, GLenum pname, const GLint* params) override;
 
+void TexStorage3D(GLenum target,
+                  GLsizei levels,
+                  GLenum internalFormat,
+                  GLsizei width,
+                  GLsizei height,
+                  GLsizei depth) override;
+
 void TexSubImage2D(GLenum target,
                    GLint level,
                    GLint xoffset,
                    GLint yoffset,
                    GLsizei width,
                    GLsizei height,
+                   GLenum format,
+                   GLenum type,
+                   const void* pixels) override;
+
+void TexSubImage3D(GLenum target,
+                   GLint level,
+                   GLint xoffset,
+                   GLint yoffset,
+                   GLint zoffset,
+                   GLsizei width,
+                   GLsizei height,
+                   GLsizei depth,
                    GLenum format,
                    GLenum type,
                    const void* pixels) override;
@@ -372,6 +476,10 @@ void Uniform1i(GLint location, GLint x) override;
 
 void Uniform1iv(GLint location, GLsizei count, const GLint* v) override;
 
+void Uniform1ui(GLint location, GLuint x) override;
+
+void Uniform1uiv(GLint location, GLsizei count, const GLuint* v) override;
+
 void Uniform2f(GLint location, GLfloat x, GLfloat y) override;
 
 void Uniform2fv(GLint location, GLsizei count, const GLfloat* v) override;
@@ -380,6 +488,10 @@ void Uniform2i(GLint location, GLint x, GLint y) override;
 
 void Uniform2iv(GLint location, GLsizei count, const GLint* v) override;
 
+void Uniform2ui(GLint location, GLuint x, GLuint y) override;
+
+void Uniform2uiv(GLint location, GLsizei count, const GLuint* v) override;
+
 void Uniform3f(GLint location, GLfloat x, GLfloat y, GLfloat z) override;
 
 void Uniform3fv(GLint location, GLsizei count, const GLfloat* v) override;
@@ -387,6 +499,10 @@ void Uniform3fv(GLint location, GLsizei count, const GLfloat* v) override;
 void Uniform3i(GLint location, GLint x, GLint y, GLint z) override;
 
 void Uniform3iv(GLint location, GLsizei count, const GLint* v) override;
+
+void Uniform3ui(GLint location, GLuint x, GLuint y, GLuint z) override;
+
+void Uniform3uiv(GLint location, GLsizei count, const GLuint* v) override;
 
 void Uniform4f(GLint location,
                GLfloat x,
@@ -400,20 +516,58 @@ void Uniform4i(GLint location, GLint x, GLint y, GLint z, GLint w) override;
 
 void Uniform4iv(GLint location, GLsizei count, const GLint* v) override;
 
+void Uniform4ui(GLint location,
+                GLuint x,
+                GLuint y,
+                GLuint z,
+                GLuint w) override;
+
+void Uniform4uiv(GLint location, GLsizei count, const GLuint* v) override;
+
 void UniformMatrix2fv(GLint location,
                       GLsizei count,
                       GLboolean transpose,
                       const GLfloat* value) override;
+
+void UniformMatrix2x3fv(GLint location,
+                        GLsizei count,
+                        GLboolean transpose,
+                        const GLfloat* value) override;
+
+void UniformMatrix2x4fv(GLint location,
+                        GLsizei count,
+                        GLboolean transpose,
+                        const GLfloat* value) override;
 
 void UniformMatrix3fv(GLint location,
                       GLsizei count,
                       GLboolean transpose,
                       const GLfloat* value) override;
 
+void UniformMatrix3x2fv(GLint location,
+                        GLsizei count,
+                        GLboolean transpose,
+                        const GLfloat* value) override;
+
+void UniformMatrix3x4fv(GLint location,
+                        GLsizei count,
+                        GLboolean transpose,
+                        const GLfloat* value) override;
+
 void UniformMatrix4fv(GLint location,
                       GLsizei count,
                       GLboolean transpose,
                       const GLfloat* value) override;
+
+void UniformMatrix4x2fv(GLint location,
+                        GLsizei count,
+                        GLboolean transpose,
+                        const GLfloat* value) override;
+
+void UniformMatrix4x3fv(GLint location,
+                        GLsizei count,
+                        GLboolean transpose,
+                        const GLfloat* value) override;
 
 void UseProgram(GLuint program) override;
 
@@ -438,6 +592,24 @@ void VertexAttrib4f(GLuint indx,
                     GLfloat w) override;
 
 void VertexAttrib4fv(GLuint indx, const GLfloat* values) override;
+
+void VertexAttribI4i(GLuint indx, GLint x, GLint y, GLint z, GLint w) override;
+
+void VertexAttribI4iv(GLuint indx, const GLint* values) override;
+
+void VertexAttribI4ui(GLuint indx,
+                      GLuint x,
+                      GLuint y,
+                      GLuint z,
+                      GLuint w) override;
+
+void VertexAttribI4uiv(GLuint indx, const GLuint* values) override;
+
+void VertexAttribIPointer(GLuint indx,
+                          GLint size,
+                          GLenum type,
+                          GLsizei stride,
+                          const void* ptr) override;
 
 void VertexAttribPointer(GLuint indx,
                          GLint size,
@@ -492,7 +664,11 @@ GLboolean IsQueryEXT(GLuint id) override;
 
 void BeginQueryEXT(GLenum target, GLuint id) override;
 
+void BeginTransformFeedback(GLenum primitivemode) override;
+
 void EndQueryEXT(GLenum target) override;
+
+void EndTransformFeedback() override;
 
 void GetQueryivEXT(GLenum target, GLenum pname, GLint* params) override;
 
@@ -551,11 +727,6 @@ const GLchar* GetRequestableExtensionsCHROMIUM() override;
 void RequestExtensionCHROMIUM(const char* extension) override;
 
 void RateLimitOffscreenContextCHROMIUM() override;
-
-void GetMultipleIntegervCHROMIUM(const GLenum* pnames,
-                                 GLuint count,
-                                 GLint* results,
-                                 GLsizeiptr size) override;
 
 void GetProgramInfoCHROMIUM(GLuint program,
                             GLsizei bufsize,
@@ -649,7 +820,8 @@ void BindTexImage2DCHROMIUM(GLenum target, GLint imageId) override;
 
 void ReleaseTexImage2DCHROMIUM(GLenum target, GLint imageId) override;
 
-void TraceBeginCHROMIUM(const char* name) override;
+void TraceBeginCHROMIUM(const char* category_name,
+                        const char* trace_name) override;
 
 void TraceEndCHROMIUM() override;
 
@@ -702,6 +874,8 @@ void ScheduleOverlayPlaneCHROMIUM(GLint plane_z_order,
                                   GLfloat uv_y,
                                   GLfloat uv_width,
                                   GLfloat uv_height) override;
+
+void SwapInterval(GLint interval) override;
 
 void MatrixLoadfCHROMIUM(GLenum matrixMode, const GLfloat* m) override;
 

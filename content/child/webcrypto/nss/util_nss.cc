@@ -30,7 +30,8 @@ SECItem MakeSECItemForBuffer(const CryptoData& buffer) {
   SECItem item = {
       siBuffer,
       // NSS requires non-const data even though it is just for input.
-      const_cast<unsigned char*>(buffer.bytes()), buffer.byte_length()};
+      const_cast<unsigned char*>(buffer.bytes()),
+      buffer.byte_length()};
   return item;
 }
 
@@ -87,6 +88,16 @@ AlgorithmImplementation* CreatePlatformAesCtrImplementation() {
 
 AlgorithmImplementation* CreatePlatformRsaPssImplementation() {
   // TODO(eroman): http://crbug.com/399090
+  return NULL;
+}
+
+AlgorithmImplementation* CreatePlatformEcdsaImplementation() {
+  // TODO(eroman): http://crbug.com/399094
+  return NULL;
+}
+
+AlgorithmImplementation* CreatePlatformEcdhImplementation() {
+  // TODO(eroman): http://crbug.com/399093
   return NULL;
 }
 

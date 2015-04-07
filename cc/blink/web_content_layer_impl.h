@@ -40,7 +40,9 @@ class WebContentLayerImpl : public blink::WebContentLayer,
                      const gfx::Rect& clip,
                      ContentLayerClient::GraphicsContextStatus
                          graphics_context_status) override;
-  void DidChangeLayerCanUseLCDText() override;
+  scoped_refptr<cc::DisplayItemList> PaintContentsToDisplayList(
+      const gfx::Rect& clip,
+      GraphicsContextStatus graphics_context_status) override;
   bool FillsBoundsCompletely() const override;
 
   scoped_ptr<WebLayerImpl> layer_;
@@ -48,9 +50,6 @@ class WebContentLayerImpl : public blink::WebContentLayer,
   bool draws_content_;
 
  private:
-  bool can_use_lcd_text_;
-  bool ignore_lcd_text_change_;
-
   DISALLOW_COPY_AND_ASSIGN(WebContentLayerImpl);
 };
 

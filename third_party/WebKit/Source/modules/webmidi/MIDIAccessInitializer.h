@@ -19,6 +19,9 @@ class MIDIOptions;
 class ScriptState;
 
 class MIDIAccessInitializer : public ScriptPromiseResolver, public MIDIAccessorClient {
+#if ENABLE(OILPAN)
+    USING_PRE_FINALIZER(MIDIAccessInitializer, dispose);
+#endif
 public:
     struct PortDescriptor {
         String id;
@@ -39,10 +42,10 @@ public:
 
     static ScriptPromise start(ScriptState* scriptState, const MIDIOptions& options)
     {
-        RefPtr<MIDIAccessInitializer> p = adoptRef(new MIDIAccessInitializer(scriptState, options));
-        p->keepAliveWhilePending();
-        p->suspendIfNeeded();
-        return p->start();
+        RefPtrWillBeRawPtr<MIDIAccessInitializer> resolver = adoptRefWillBeNoop(new MIDIAccessInitializer(scriptState, options));
+        resolver->keepAliveWhilePending();
+        resolver->suspendIfNeeded();
+        return resolver->start();
     }
 
     virtual ~MIDIAccessInitializer();
@@ -59,15 +62,15 @@ public:
     SecurityOrigin* securityOrigin() const;
 
 private:
-    ScriptPromise start();
-
     MIDIAccessInitializer(ScriptState*, const MIDIOptions&);
 
     ExecutionContext* executionContext() const;
+    ScriptPromise start();
+    void dispose();
 
     OwnPtr<MIDIAccessor> m_accessor;
-    bool m_requestSysex;
     Vector<PortDescriptor> m_portDescriptors;
+    bool m_requestSysex;
 };
 
 } // namespace blink

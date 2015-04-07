@@ -9,6 +9,7 @@
 
 #if ENABLE(CONDITION)
 #include "bindings/core/v8/ScriptWrappable.h"
+#include "bindings/core/v8/ToV8.h"
 #include "bindings/core/v8/V8Binding.h"
 #include "bindings/core/v8/V8DOMWrapper.h"
 #include "bindings/core/v8/V8TestInterfaceEmpty.h"
@@ -27,33 +28,29 @@ public:
         static bool stringAttributeAttributeSetter(LocalFrame* frame, TestInterfaceImplementation* holderImpl, String cppValue);
     };
 
-    static bool hasInstance(v8::Handle<v8::Value>, v8::Isolate*);
-    static v8::Handle<v8::Object> findInstanceInPrototypeChain(v8::Handle<v8::Value>, v8::Isolate*);
-    static v8::Handle<v8::FunctionTemplate> domTemplate(v8::Isolate*);
-    static TestInterfaceImplementation* toImpl(v8::Handle<v8::Object> object)
+    static bool hasInstance(v8::Local<v8::Value>, v8::Isolate*);
+    static v8::Local<v8::Object> findInstanceInPrototypeChain(v8::Local<v8::Value>, v8::Isolate*);
+    static v8::Local<v8::FunctionTemplate> domTemplate(v8::Isolate*);
+    static TestInterfaceImplementation* toImpl(v8::Local<v8::Object> object)
     {
-        return blink::toScriptWrappableBase(object)->toImpl<TestInterfaceImplementation>();
+        return blink::toScriptWrappable(object)->toImpl<TestInterfaceImplementation>();
     }
-    static TestInterfaceImplementation* toImplWithTypeCheck(v8::Isolate*, v8::Handle<v8::Value>);
+    static TestInterfaceImplementation* toImplWithTypeCheck(v8::Isolate*, v8::Local<v8::Value>);
     static WrapperTypeInfo wrapperTypeInfo;
-    static void refObject(ScriptWrappableBase*);
-    static void derefObject(ScriptWrappableBase*);
-    static void trace(Visitor* visitor, ScriptWrappableBase* scriptWrappableBase)
+    static void refObject(ScriptWrappable*);
+    static void derefObject(ScriptWrappable*);
+    static void trace(Visitor* visitor, ScriptWrappable* scriptWrappable)
     {
     }
-    static void visitDOMWrapper(v8::Isolate*, ScriptWrappableBase*, const v8::Persistent<v8::Object>&);
-    static ActiveDOMObject* toActiveDOMObject(v8::Handle<v8::Object>);
+    static void visitDOMWrapper(v8::Isolate*, ScriptWrappable*, const v8::Persistent<v8::Object>&);
+    static ActiveDOMObject* toActiveDOMObject(v8::Local<v8::Object>);
     static void implementsCustomVoidMethodMethodCustom(const v8::FunctionCallbackInfo<v8::Value>&);
     static void legacyCallCustom(const v8::FunctionCallbackInfo<v8::Value>&);
     static const int internalFieldCount = v8DefaultWrapperInternalFieldCount + 0;
-    static inline ScriptWrappableBase* toScriptWrappableBase(TestInterfaceImplementation* impl)
-    {
-        return impl->toScriptWrappableBase();
-    }
-    static void installConditionallyEnabledProperties(v8::Handle<v8::Object>, v8::Isolate*);
-    static void installConditionallyEnabledMethods(v8::Handle<v8::Object>, v8::Isolate*);
+    static void installConditionallyEnabledProperties(v8::Local<v8::Object>, v8::Isolate*);
+    static void installConditionallyEnabledMethods(v8::Local<v8::Object>, v8::Isolate*);
     static void updateWrapperTypeInfo(InstallTemplateFunction, InstallConditionallyEnabledMethodsFunction);
-    static void installV8TestInterfaceTemplate(v8::Handle<v8::FunctionTemplate>, v8::Isolate*);
+    static void installV8TestInterfaceTemplate(v8::Local<v8::FunctionTemplate>, v8::Isolate*);
     static void registerVoidMethodPartialOverloadMethodForPartialInterface(void (*)(const v8::FunctionCallbackInfo<v8::Value>&));
     static void registerStaticVoidMethodPartialOverloadMethodForPartialInterface(void (*)(const v8::FunctionCallbackInfo<v8::Value>&));
     static void registerPromiseMethodPartialOverloadMethodForPartialInterface(void (*)(const v8::FunctionCallbackInfo<v8::Value>&));
@@ -64,8 +61,6 @@ public:
 private:
     static InstallTemplateFunction installV8TestInterfaceTemplateFunction;
 };
-
-v8::Handle<v8::Value> toV8(TestInterfaceImplementation*, v8::Handle<v8::Object> creationContext, v8::Isolate*);
 
 template<typename CallbackInfo>
 inline void v8SetReturnValue(const CallbackInfo& callbackInfo, TestInterfaceImplementation* impl)

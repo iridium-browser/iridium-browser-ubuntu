@@ -39,7 +39,6 @@
 #include "bindings/core/v8/V8HiddenValue.h"
 #include "bindings/core/v8/V8PerContextData.h"
 #include "core/dom/ExecutionContext.h"
-#include "core/inspector/InspectorInstrumentation.h"
 #include "wtf/PassOwnPtr.h"
 
 namespace blink {
@@ -50,7 +49,7 @@ namespace blink {
     V(detached, DetachedCallback)           \
     V(attributeChanged, AttributeChangedCallback)
 
-PassRefPtr<V8CustomElementLifecycleCallbacks> V8CustomElementLifecycleCallbacks::create(ScriptState* scriptState, v8::Handle<v8::Object> prototype, v8::Handle<v8::Function> created, v8::Handle<v8::Function> attached, v8::Handle<v8::Function> detached, v8::Handle<v8::Function> attributeChanged)
+PassRefPtrWillBeRawPtr<V8CustomElementLifecycleCallbacks> V8CustomElementLifecycleCallbacks::create(ScriptState* scriptState, v8::Handle<v8::Object> prototype, v8::Handle<v8::Function> created, v8::Handle<v8::Function> attached, v8::Handle<v8::Function> detached, v8::Handle<v8::Function> attributeChanged)
 {
     v8::Isolate* isolate = scriptState->isolate();
     // A given object can only be used as a Custom Element prototype
@@ -63,7 +62,7 @@ PassRefPtr<V8CustomElementLifecycleCallbacks> V8CustomElementLifecycleCallbacks:
     CALLBACK_LIST(SET_HIDDEN_VALUE)
 #undef SET_HIDDEN_VALUE
 
-    return adoptRef(new V8CustomElementLifecycleCallbacks(scriptState, prototype, created, attached, detached, attributeChanged));
+    return adoptRefWillBeNoop(new V8CustomElementLifecycleCallbacks(scriptState, prototype, created, attached, detached, attributeChanged));
 }
 
 static CustomElementLifecycleCallbacks::CallbackType flagSet(v8::Handle<v8::Function> attached, v8::Handle<v8::Function> detached, v8::Handle<v8::Function> attributeChanged)
@@ -168,8 +167,6 @@ void V8CustomElementLifecycleCallbacks::created(Element* element)
     if (callback.IsEmpty())
         return;
 
-    InspectorInstrumentation::willExecuteCustomElementCallback(element);
-
     v8::TryCatch exceptionCatcher;
     exceptionCatcher.SetVerbose(true);
     ScriptController::callFunction(executionContext(), callback, receiver, 0, 0, isolate);
@@ -211,8 +208,6 @@ void V8CustomElementLifecycleCallbacks::attributeChanged(Element* element, const
         newValue.isNull() ? v8::Handle<v8::Value>(v8::Null(isolate)) : v8::Handle<v8::Value>(v8String(isolate, newValue))
     };
 
-    InspectorInstrumentation::willExecuteCustomElementCallback(element);
-
     v8::TryCatch exceptionCatcher;
     exceptionCatcher.SetVerbose(true);
     ScriptController::callFunction(executionContext(), callback, receiver, WTF_ARRAY_LENGTH(argv), argv, isolate);
@@ -238,11 +233,15 @@ void V8CustomElementLifecycleCallbacks::call(const ScopedPersistent<v8::Function
     v8::Handle<v8::Object> receiver = toV8(element, context->Global(), isolate).As<v8::Object>();
     ASSERT(!receiver.IsEmpty());
 
-    InspectorInstrumentation::willExecuteCustomElementCallback(element);
-
     v8::TryCatch exceptionCatcher;
     exceptionCatcher.SetVerbose(true);
     ScriptController::callFunction(executionContext(), callback, receiver, 0, 0, isolate);
+}
+
+void V8CustomElementLifecycleCallbacks::trace(Visitor* visitor)
+{
+    CustomElementLifecycleCallbacks::trace(visitor);
+    ContextLifecycleObserver::trace(visitor);
 }
 
 } // namespace blink

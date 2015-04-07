@@ -58,8 +58,8 @@ NewAvatarButton::NewAvatarButton(views::ButtonListener* listener,
 
   // The largest text height that fits in the button. If the font list height
   // is larger than this, it will be shrunk to match it.
-  // TODO(noms): Calculate this constant algorithmically.
-  const int kDisplayFontHeight = 15;
+  // TODO(noms): Calculate this constant algorithmically from the button's size.
+  const int kDisplayFontHeight = 16;
   SetFontList(GetFontList().DeriveWithHeightUpperBound(kDisplayFontHeight));
 
   ui::ResourceBundle* rb = &ui::ResourceBundle::GetSharedInstance();
@@ -146,12 +146,6 @@ void NewAvatarButton::OnProfileWasRemoved(
 void NewAvatarButton::OnProfileNameChanged(
       const base::FilePath& profile_path,
       const base::string16& old_profile_name) {
-  if (browser_->profile()->GetPath() == profile_path)
-    UpdateAvatarButtonAndRelayoutParent();
-}
-
-void NewAvatarButton::OnProfileAvatarChanged(
-      const base::FilePath& profile_path) {
   if (browser_->profile()->GetPath() == profile_path)
     UpdateAvatarButtonAndRelayoutParent();
 }

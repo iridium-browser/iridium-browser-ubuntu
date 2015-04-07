@@ -32,14 +32,14 @@ class TestTransport : public Transport {
 
   virtual int SendPacket(int /*channel*/,
                          const void* /*data*/,
-                         int /*len*/) OVERRIDE {
+                         size_t /*len*/) OVERRIDE {
     return -1;
   }
   virtual int SendRTCPPacket(int /*channel*/,
                              const void *packet,
-                             int packetLength) OVERRIDE {
+                             size_t packetLength) OVERRIDE {
     RTCPUtility::RTCPParserV2 rtcpParser((uint8_t*)packet,
-                                         (int32_t)packetLength,
+                                         packetLength,
                                          true); // Allow non-compound RTCP
 
     EXPECT_TRUE(rtcpParser.IsValid());
@@ -51,7 +51,7 @@ class TestTransport : public Transport {
               rtcpPacketInformation.rtcpPacketTypeFlags & kRtcpRemb);
     EXPECT_EQ((uint32_t)1234,
               rtcpPacketInformation.receiverEstimatedMaxBitrate);
-    return packetLength;
+    return static_cast<int>(packetLength);
   }
  private:
   RTCPReceiver* rtcp_receiver_;
@@ -109,20 +109,18 @@ void RtcpFormatRembTest::TearDown() {
   delete test_transport_;
 }
 
-TEST_F(RtcpFormatRembTest, TestBasicAPI) {
+TEST_F(RtcpFormatRembTest, TestRembStatus) {
   EXPECT_FALSE(rtcp_sender_->REMB());
-  EXPECT_EQ(0, rtcp_sender_->SetREMBStatus(true));
+  rtcp_sender_->SetREMBStatus(true);
   EXPECT_TRUE(rtcp_sender_->REMB());
-  EXPECT_EQ(0, rtcp_sender_->SetREMBStatus(false));
+  rtcp_sender_->SetREMBStatus(false);
   EXPECT_FALSE(rtcp_sender_->REMB());
-
-  EXPECT_EQ(0, rtcp_sender_->SetREMBData(1234, 0, NULL));
 }
 
 TEST_F(RtcpFormatRembTest, TestNonCompund) {
   uint32_t SSRC = 456789;
-  EXPECT_EQ(0, rtcp_sender_->SetRTCPStatus(kRtcpNonCompound));
-  EXPECT_EQ(0, rtcp_sender_->SetREMBData(1234, 1, &SSRC));
+  rtcp_sender_->SetRTCPStatus(kRtcpNonCompound);
+  rtcp_sender_->SetREMBData(1234, std::vector<uint32_t>(1, SSRC));
   RTCPSender::FeedbackState feedback_state =
       dummy_rtp_rtcp_impl_->GetFeedbackState();
   EXPECT_EQ(0, rtcp_sender_->SendRTCP(feedback_state, kRtcpRemb));
@@ -130,8 +128,8 @@ TEST_F(RtcpFormatRembTest, TestNonCompund) {
 
 TEST_F(RtcpFormatRembTest, TestCompund) {
   uint32_t SSRCs[2] = {456789, 98765};
-  EXPECT_EQ(0, rtcp_sender_->SetRTCPStatus(kRtcpCompound));
-  EXPECT_EQ(0, rtcp_sender_->SetREMBData(1234, 2, SSRCs));
+  rtcp_sender_->SetRTCPStatus(kRtcpCompound);
+  rtcp_sender_->SetREMBData(1234, std::vector<uint32_t>(SSRCs, SSRCs + 2));
   RTCPSender::FeedbackState feedback_state =
       dummy_rtp_rtcp_impl_->GetFeedbackState();
   EXPECT_EQ(0, rtcp_sender_->SendRTCP(feedback_state, kRtcpRemb));

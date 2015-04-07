@@ -257,7 +257,8 @@ class VIEWS_EXPORT Textfield : public View,
   // ui::TouchEditable overrides:
   void SelectRect(const gfx::Point& start, const gfx::Point& end) override;
   void MoveCaretTo(const gfx::Point& point) override;
-  void GetSelectionEndPoints(gfx::Rect* p1, gfx::Rect* p2) override;
+  void GetSelectionEndPoints(ui::SelectionBound* anchor,
+                             ui::SelectionBound* focus) override;
   gfx::Rect GetBounds() override;
   gfx::NativeView GetNativeView() const override;
   void ConvertPointToScreen(gfx::Point* point) override;
@@ -453,7 +454,7 @@ class VIEWS_EXPORT Textfield : public View,
   gfx::Point last_click_location_;
   gfx::Range double_click_word_;
 
-  scoped_ptr<ui::TouchSelectionController> touch_selection_controller_;
+  scoped_ptr<ui::TouchEditingControllerDeprecated> touch_selection_controller_;
 
   // Used to track touch drag starting location and offset to enable touch
   // scrolling.

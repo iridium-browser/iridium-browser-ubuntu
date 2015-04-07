@@ -18,6 +18,8 @@ class BluetoothGattDescriptorClient;
 class BluetoothGattManagerClient;
 class BluetoothGattServiceClient;
 class BluetoothInputClient;
+class BluetoothMediaClient;
+class BluetoothMediaTransportClient;
 class BluetoothProfileManagerClient;
 class CrasAudioClient;
 class CrosDisksClient;
@@ -30,6 +32,7 @@ class ShillIPConfigClient;
 class ShillManagerClient;
 class ShillServiceClient;
 class ShillProfileClient;
+class ShillThirdPartyVpnDriverClient;
 class GsmSMSClient;
 class ImageBurnerClient;
 class IntrospectableClient;
@@ -39,7 +42,9 @@ class NfcAdapterClient;
 class NfcDeviceClient;
 class NfcTagClient;
 class NfcRecordClient;
+class PeerDaemonManagerClient;
 class PermissionBrokerClient;
+class PrivetDaemonClient;
 class SystemClockClient;
 class PowerManagerClient;
 class SessionManagerClient;
@@ -72,10 +77,12 @@ class CHROMEOS_EXPORT DBusClientBundle {
     NFC =                  1 << 12,
     PERMISSION_BROKER =    1 << 13,
     POWER_MANAGER =        1 << 14,
-    SESSION_MANAGER =      1 << 15,
-    SMS =                  1 << 16,
-    SYSTEM_CLOCK =         1 << 17,
-    UPDATE_ENGINE =        1 << 18,
+    PRIVET_DAEMON =        1 << 15,
+    SESSION_MANAGER =      1 << 16,
+    SMS =                  1 << 17,
+    SYSTEM_CLOCK =         1 << 18,
+    UPDATE_ENGINE =        1 << 19,
+    PEER_DAEMON =          1 << 20,
   };
 
   explicit DBusClientBundle(DBusClientTypeMask unstub_client_mask);
@@ -126,6 +133,14 @@ class CHROMEOS_EXPORT DBusClientBundle {
     return bluetooth_input_client_.get();
   }
 
+  BluetoothMediaClient* bluetooth_media_client() {
+    return bluetooth_media_client_.get();
+  }
+
+  BluetoothMediaTransportClient* bluetooth_media_transport_client() {
+    return bluetooth_media_transport_client_.get();
+  }
+
   BluetoothProfileManagerClient* bluetooth_profile_manager_client() {
     return bluetooth_profile_manager_client_.get();
   }
@@ -174,6 +189,10 @@ class CHROMEOS_EXPORT DBusClientBundle {
     return shill_profile_client_.get();
   }
 
+  ShillThirdPartyVpnDriverClient* shill_third_party_vpn_driver_client() {
+    return shill_third_party_vpn_driver_client_.get();
+  }
+
   GsmSMSClient* gsm_sms_client() {
     return gsm_sms_client_.get();
   }
@@ -210,8 +229,16 @@ class CHROMEOS_EXPORT DBusClientBundle {
     return nfc_record_client_.get();
   }
 
+  PeerDaemonManagerClient* peer_daemon_manager_client() {
+    return peer_daemon_manager_client_.get();
+  }
+
   PermissionBrokerClient* permission_broker_client() {
     return permission_broker_client_.get();
+  }
+
+  PrivetDaemonClient* privet_daemon_client() {
+    return privet_daemon_client_.get();
   }
 
   SystemClockClient* system_clock_client() {
@@ -250,6 +277,8 @@ class CHROMEOS_EXPORT DBusClientBundle {
   scoped_ptr<BluetoothGattManagerClient> bluetooth_gatt_manager_client_;
   scoped_ptr<BluetoothGattServiceClient> bluetooth_gatt_service_client_;
   scoped_ptr<BluetoothInputClient> bluetooth_input_client_;
+  scoped_ptr<BluetoothMediaClient> bluetooth_media_client_;
+  scoped_ptr<BluetoothMediaTransportClient> bluetooth_media_transport_client_;
   scoped_ptr<BluetoothProfileManagerClient> bluetooth_profile_manager_client_;
   scoped_ptr<CrasAudioClient> cras_audio_client_;
   scoped_ptr<CrosDisksClient> cros_disks_client_;
@@ -257,11 +286,15 @@ class CHROMEOS_EXPORT DBusClientBundle {
   scoped_ptr<DebugDaemonClient> debug_daemon_client_;
   scoped_ptr<EasyUnlockClient> easy_unlock_client_;
   scoped_ptr<LorgnetteManagerClient> lorgnette_manager_client_;
+  scoped_ptr<PeerDaemonManagerClient> peer_daemon_manager_client_;
+  scoped_ptr<PrivetDaemonClient> privet_daemon_client_;
   scoped_ptr<ShillDeviceClient> shill_device_client_;
   scoped_ptr<ShillIPConfigClient> shill_ipconfig_client_;
   scoped_ptr<ShillManagerClient> shill_manager_client_;
   scoped_ptr<ShillServiceClient> shill_service_client_;
   scoped_ptr<ShillProfileClient> shill_profile_client_;
+  scoped_ptr<ShillThirdPartyVpnDriverClient>
+      shill_third_party_vpn_driver_client_;
   scoped_ptr<GsmSMSClient> gsm_sms_client_;
   scoped_ptr<ImageBurnerClient> image_burner_client_;
   scoped_ptr<IntrospectableClient> introspectable_client_;

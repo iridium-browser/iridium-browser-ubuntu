@@ -5,21 +5,18 @@
 #ifndef COMPONENTS_PASSWORD_MANAGER_CONTENT_BROWSER_CREDENTIAL_MANAGER_PASSWORD_FORM_MANAGER_H_
 #define COMPONENTS_PASSWORD_MANAGER_CONTENT_BROWSER_CREDENTIAL_MANAGER_PASSWORD_FORM_MANAGER_H_
 
+#include "base/memory/weak_ptr.h"
 #include "components/password_manager/core/browser/password_form_manager.h"
 
 namespace autofill {
 struct PasswordForm;
 }
 
-namespace content {
-class WebContents;
-}  // namespace content
-
 namespace password_manager {
 
 class ContentCredentialManagerDispatcher;
-class PasswordManager;
 class PasswordManagerClient;
+class PasswordManagerDriver;
 
 // A PasswordFormManager built to handle PassworForm objects synthesized
 // by the Credential Manager API.
@@ -33,6 +30,7 @@ class CredentialManagerPasswordFormManager : public PasswordFormManager {
   // This class does not take ownership of |dispatcher|.
   CredentialManagerPasswordFormManager(
       PasswordManagerClient* client,
+      base::WeakPtr<PasswordManagerDriver> driver,
       const autofill::PasswordForm& observed_form,
       ContentCredentialManagerDispatcher* dispatcher);
   ~CredentialManagerPasswordFormManager() override;

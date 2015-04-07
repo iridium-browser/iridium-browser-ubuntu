@@ -5,6 +5,7 @@
 #include "components/copresence/handlers/audio/audio_directive_handler_impl.h"
 
 #include <algorithm>
+#include <vector>
 
 #include "base/bind.h"
 #include "base/logging.h"
@@ -33,23 +34,31 @@ base::TimeTicks GetEarliestEventTime(AudioDirectiveList* list,
       std::min(list->GetActiveDirective()->end_time, event_time);
 }
 
+void ConvertDirectives(const std::vector<AudioDirective>& in_directives,
+                       std::vector<Directive>* out_directives) {
+  for (const AudioDirective& in_directive : in_directives)
+    out_directives->push_back(in_directive.server_directive);
+}
+
 }  // namespace
 
 
 // Public functions.
 
-AudioDirectiveHandlerImpl::AudioDirectiveHandlerImpl()
-    : audio_manager_(new AudioManagerImpl),
+AudioDirectiveHandlerImpl::AudioDirectiveHandlerImpl(
+    const DirectivesCallback& update_directives_callback)
+    : update_directives_callback_(update_directives_callback),
+      audio_manager_(new AudioManagerImpl),
       audio_event_timer_(new base::OneShotTimer<AudioDirectiveHandler>),
       clock_(new TickClockRefCounted(new base::DefaultTickClock)) {}
 
-// TODO(ckehoe): Merge these two constructors when
-//               delegating constructors are allowed.
 AudioDirectiveHandlerImpl::AudioDirectiveHandlerImpl(
+    const DirectivesCallback& update_directives_callback,
     scoped_ptr<AudioManager> audio_manager,
     scoped_ptr<base::Timer> timer,
     const scoped_refptr<TickClockRefCounted>& clock)
-    : audio_manager_(audio_manager.Pass()),
+    : update_directives_callback_(update_directives_callback),
+      audio_manager_(audio_manager.Pass()),
       audio_event_timer_(timer.Pass()),
       clock_(clock) {}
 
@@ -71,11 +80,15 @@ void AudioDirectiveHandlerImpl::Initialize(WhispernetClient* whispernet_client,
 }
 
 void AudioDirectiveHandlerImpl::AddInstruction(
-    const TokenInstruction& instruction,
-    const std::string& op_id,
-    base::TimeDelta ttl) {
+    const Directive& directive,
+    const std::string& op_id) {
   DCHECK(transmits_lists_.size() == 2u && receives_lists_.size() == 2u)
       << "Call Initialize() before other AudioDirectiveHandler methods";
+
+  const TokenInstruction& instruction = directive.token_instruction();
+  base::TimeDelta ttl =
+      base::TimeDelta::FromMilliseconds(directive.ttl_millis());
+  const size_t token_length = directive.configuration().token_params().length();
 
   switch (instruction.token_instruction_type()) {
     case TRANSMIT:
@@ -83,39 +96,48 @@ void AudioDirectiveHandlerImpl::AddInstruction(
                << instruction.token_id()
                << " with medium=" << instruction.medium()
                << " with TTL=" << ttl.InMilliseconds();
+      DCHECK_GT(token_length, 0u);
       switch (instruction.medium()) {
         case AUDIO_ULTRASOUND_PASSBAND:
-          transmits_lists_[INAUDIBLE]->AddDirective(op_id, ttl);
+          audio_manager_->SetTokenLength(INAUDIBLE, token_length);
+          transmits_lists_[INAUDIBLE]->AddDirective(op_id, directive);
           audio_manager_->SetToken(INAUDIBLE, instruction.token_id());
           break;
         case AUDIO_AUDIBLE_DTMF:
-          transmits_lists_[AUDIBLE]->AddDirective(op_id, ttl);
+          audio_manager_->SetTokenLength(AUDIBLE, token_length);
+          transmits_lists_[AUDIBLE]->AddDirective(op_id, directive);
           audio_manager_->SetToken(AUDIBLE, instruction.token_id());
           break;
         default:
           NOTREACHED();
       }
       break;
+
     case RECEIVE:
       DVLOG(2) << "Audio Receive Directive received."
                << " with medium=" << instruction.medium()
                << " with TTL=" << ttl.InMilliseconds();
+      DCHECK_GT(token_length, 0u);
       switch (instruction.medium()) {
         case AUDIO_ULTRASOUND_PASSBAND:
-          receives_lists_[INAUDIBLE]->AddDirective(op_id, ttl);
+          audio_manager_->SetTokenLength(INAUDIBLE, token_length);
+          receives_lists_[INAUDIBLE]->AddDirective(op_id, directive);
           break;
         case AUDIO_AUDIBLE_DTMF:
-          receives_lists_[AUDIBLE]->AddDirective(op_id, ttl);
+          audio_manager_->SetTokenLength(AUDIBLE, token_length);
+          receives_lists_[AUDIBLE]->AddDirective(op_id, directive);
           break;
         default:
           NOTREACHED();
       }
       break;
+
     case UNKNOWN_TOKEN_INSTRUCTION_TYPE:
     default:
       LOG(WARNING) << "Unknown Audio Transmit Directive received. type = "
                    << instruction.token_instruction_type();
   }
+
   ProcessNextInstruction();
 }
 
@@ -139,6 +161,7 @@ const std::string AudioDirectiveHandlerImpl::PlayingToken(
 bool AudioDirectiveHandlerImpl::IsPlayingTokenHeard(AudioType type) const {
   return audio_manager_->IsPlayingTokenHeard(type);
 }
+
 
 // Private functions.
 
@@ -178,6 +201,15 @@ void AudioDirectiveHandlerImpl::ProcessNextInstruction() {
         base::Bind(&AudioDirectiveHandlerImpl::ProcessNextInstruction,
                    base::Unretained(this)));
   }
+
+  // TODO(crbug.com/436584): Instead of this, store the directives
+  // in a single list, and prune them when expired.
+  std::vector<Directive> directives;
+  ConvertDirectives(transmits_lists_[AUDIBLE]->directives(), &directives);
+  ConvertDirectives(transmits_lists_[INAUDIBLE]->directives(), &directives);
+  ConvertDirectives(receives_lists_[AUDIBLE]->directives(), &directives);
+  ConvertDirectives(receives_lists_[INAUDIBLE]->directives(), &directives);
+  update_directives_callback_.Run(directives);
 }
 
 bool AudioDirectiveHandlerImpl::GetNextInstructionExpiry(

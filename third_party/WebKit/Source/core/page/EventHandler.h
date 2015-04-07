@@ -58,7 +58,6 @@ template <typename EventType>
 class EventWithHitTestResults;
 class FloatPoint;
 class FloatQuad;
-class Fullscreen;
 class HTMLFrameSetElement;
 class HitTestRequest;
 class HitTestResult;
@@ -81,7 +80,7 @@ class WheelEvent;
 class Widget;
 
 enum AppendTrailingWhitespace { ShouldAppendTrailingWhitespace, DontAppendTrailingWhitespace };
-enum CheckDragHysteresis { ShouldCheckDragHysteresis, DontCheckDragHysteresis };
+enum class DragInitiator;
 
 class EventHandler : public NoBaseWillBeGarbageCollectedFinalized<EventHandler> {
     WTF_MAKE_NONCOPYABLE(EventHandler);
@@ -152,7 +151,7 @@ public:
     // Note: This is similar to (the less clearly named) prepareMouseEvent.
     // FIXME: Remove readOnly param when there is only ever a single call to this.
     GestureEventWithHitTestResults targetGestureEvent(const PlatformGestureEvent&, bool readOnly = false);
-
+    GestureEventWithHitTestResults hitTestResultForGestureEvent(const PlatformGestureEvent&, HitTestRequest::HitTestRequestType);
     // Handle the provided non-scroll gesture event. Should be called only on the inner frame.
     bool handleGestureEventInFrame(const GestureEventWithHitTestResults&);
 
@@ -191,7 +190,6 @@ public:
     bool useHandCursor(Node*, bool isOverLink);
 
     void notifyElementActivated();
-    void notifySelectionChanged();
 
     PassRefPtr<UserGestureToken> takeLastMouseDownGestureToken() { return m_lastMouseDownUserGestureToken.release(); }
 
@@ -210,7 +208,7 @@ private:
     void selectClosestMisspellingFromMouseEvent(const MouseEventWithHitTestResults&);
     void selectClosestWordOrLinkFromMouseEvent(const MouseEventWithHitTestResults&);
 
-    bool handleMouseMoveOrLeaveEvent(const PlatformMouseEvent&, HitTestResult* hoveredNode = nullptr, bool onlyUpdateScrollbars = false);
+    bool handleMouseMoveOrLeaveEvent(const PlatformMouseEvent&, HitTestResult* hoveredNode = nullptr, bool onlyUpdateScrollbars = false, bool forceLeave = false);
     bool handleMousePressEvent(const MouseEventWithHitTestResults&);
     bool handleMousePressEventSingleClick(const MouseEventWithHitTestResults&);
     bool handleMousePressEventDoubleClick(const MouseEventWithHitTestResults&);
@@ -277,7 +275,7 @@ private:
 
     void clearDragDataTransfer();
 
-    bool handleDrag(const MouseEventWithHitTestResults&, CheckDragHysteresis);
+    bool handleDrag(const MouseEventWithHitTestResults&, DragInitiator);
     bool tryStartDrag(const MouseEventWithHitTestResults&);
     void clearDragState();
 
@@ -294,7 +292,7 @@ private:
 
     bool passWidgetMouseDownEventToWidget(const MouseEventWithHitTestResults&);
 
-    bool passWheelEventToWidget(const PlatformWheelEvent&, Widget*);
+    bool passWheelEventToWidget(const PlatformWheelEvent&, Widget&);
     void defaultSpaceEventHandler(KeyboardEvent*);
     void defaultBackspaceEventHandler(KeyboardEvent*);
     void defaultTabEventHandler(KeyboardEvent*);
@@ -309,18 +307,18 @@ private:
 
     bool capturesDragging() const { return m_capturesDragging; }
 
-    bool isKeyEventAllowedInFullScreen(Fullscreen*, const PlatformKeyboardEvent&) const;
-
     bool handleGestureShowPress();
 
     bool handleScrollGestureOnResizer(Node*, const PlatformGestureEvent&);
 
     bool passScrollGestureEventToWidget(const PlatformGestureEvent&, RenderObject*);
-    bool sendScrollEventToView(const PlatformGestureEvent&, const FloatSize&);
 
     AutoscrollController* autoscrollController() const;
     bool panScrollInProgress() const;
     void setLastKnownMousePosition(const PlatformMouseEvent&);
+
+    // NOTE: If adding a new field to this class please ensure that it is
+    // cleared in |EventHandler::clear()|.
 
     LocalFrame* const m_frame;
 
@@ -395,7 +393,6 @@ private:
     RefPtrWillBeMember<Scrollbar> m_scrollbarHandlingScrollGesture;
 
     double m_maxMouseMovedDuration;
-    bool m_didStartDrag;
 
     bool m_longTapShouldInvokeContextMenu;
 

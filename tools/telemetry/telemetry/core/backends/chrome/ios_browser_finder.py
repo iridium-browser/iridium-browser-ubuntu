@@ -12,7 +12,7 @@ from telemetry import decorators
 from telemetry.core import browser
 from telemetry.core import platform
 from telemetry.core import possible_browser
-from telemetry.core.backends.chrome import inspector_backend
+from telemetry.core.backends.chrome_inspector import inspector_backend
 from telemetry.core.backends.chrome import ios_browser_backend
 from telemetry.core.platform import ios_platform_backend
 
@@ -70,7 +70,7 @@ def FindAllBrowserTypes(_):
 def _IsIosDeviceAttached():
   devices = subprocess.check_output('system_profiler SPUSBDataType', shell=True)
   for line in devices.split('\n'):
-    if line and re.match('\s*(iPod|iPhone|iPad):', line):
+    if line and re.match(r'\s*(iPod|iPhone|iPad):', line):
       return True
   return False
 
@@ -86,8 +86,8 @@ def FindAllAvailableBrowsers(finder_options):
   options = finder_options.browser_options
 
   options.browser_type = 'ios-chrome'
-  backend = ios_browser_backend.IosBrowserBackend(options)
   host = platform.GetHostPlatform()
+  backend = ios_browser_backend.IosBrowserBackend(host, options)
   # TODO(baxley): Use idevice to wake up device or log debug statement.
   if not host.IsApplicationRunning(IOS_WEBKIT_DEBUG_PROXY):
     host.LaunchApplication(IOS_WEBKIT_DEBUG_PROXY)
@@ -103,12 +103,13 @@ def FindAllAvailableBrowsers(finder_options):
   debug_urls = backend.GetWebSocketDebuggerUrls(device_urls)
 
   # Get the userAgent for each UIWebView to find the browsers.
-  browser_pattern = ('\)\s(%s)\/(\d+[\.\d]*)\sMobile'
+  browser_pattern = (r'\)\s(%s)\/(\d+[\.\d]*)\sMobile'
                      % '|'.join(IOS_BROWSERS.keys()))
   browser_types = set()
   for url in debug_urls:
-    context = {'webSocketDebuggerUrl':url , 'id':1}
-    inspector = inspector_backend.InspectorBackend(backend, context)
+    context = {'webSocketDebuggerUrl': url, 'id': 1}
+    inspector = inspector_backend.InspectorBackend(
+        backend.app, backend.devtools_client, context)
     res = inspector.EvaluateJavaScript("navigator.userAgent")
     match_browsers = re.search(browser_pattern, res)
     if match_browsers:

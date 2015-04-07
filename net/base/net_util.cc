@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <iterator>
+#include <limits>
 #include <set>
 
 #include "build/build_config.h"
@@ -294,6 +295,10 @@ base::string16 StripWWWFromHost(const GURL& url) {
   return StripWWW(base::ASCIIToUTF16(url.host()));
 }
 
+bool IsPortValid(int port) {
+  return port >= 0 && port <= std::numeric_limits<uint16>::max();
+}
+
 bool IsPortAllowedByDefault(int port) {
   int array_size = arraysize(kRestrictedPorts);
   for (int i = 0; i < array_size; i++) {
@@ -301,7 +306,7 @@ bool IsPortAllowedByDefault(int port) {
       return false;
     }
   }
-  return true;
+  return IsPortValid(port);
 }
 
 bool IsPortAllowedByFtp(int port) {
@@ -568,7 +573,7 @@ bool GetIPAddressFromSockAddr(const struct sockaddr* sock_addr,
     *address = reinterpret_cast<const uint8*>(&addr->btAddr);
     *address_len = kBluetoothAddressSize;
     if (port)
-      *port = addr->port;
+      *port = static_cast<uint16>(addr->port);
     return true;
   }
 #endif
@@ -1010,8 +1015,7 @@ bool IsLocalhost(const std::string& host) {
 }
 
 NetworkInterface::NetworkInterface()
-    : type(NetworkChangeNotifier::CONNECTION_UNKNOWN),
-      network_prefix(0) {
+    : type(NetworkChangeNotifier::CONNECTION_UNKNOWN), prefix_length(0) {
 }
 
 NetworkInterface::NetworkInterface(const std::string& name,
@@ -1019,14 +1023,14 @@ NetworkInterface::NetworkInterface(const std::string& name,
                                    uint32 interface_index,
                                    NetworkChangeNotifier::ConnectionType type,
                                    const IPAddressNumber& address,
-                                   uint32 network_prefix,
+                                   uint32 prefix_length,
                                    int ip_address_attributes)
     : name(name),
       friendly_name(friendly_name),
       interface_index(interface_index),
       type(type),
       address(address),
-      network_prefix(network_prefix),
+      prefix_length(prefix_length),
       ip_address_attributes(ip_address_attributes) {
 }
 

@@ -289,7 +289,7 @@ static void writeStyle(TextStream& ts, const RenderObject& object)
             SVGLengthContext lengthContext(shape.element());
             double dashOffset = svgStyle.strokeDashOffset()->value(lengthContext);
             double strokeWidth = svgStyle.strokeWidth()->value(lengthContext);
-            RefPtr<SVGLengthList> dashes = svgStyle.strokeDashArray();
+            RefPtrWillBeRawPtr<SVGLengthList> dashes = svgStyle.strokeDashArray();
 
             DashArray dashArray;
             SVGLengthList::ConstIterator it = dashes->begin();
@@ -370,7 +370,7 @@ static TextStream& operator<<(TextStream& ts, const RenderSVGShape& shape)
     } else if (isSVGPathElement(*svgElement)) {
         String pathString;
         // FIXME: We should switch to UnalteredParsing here - this will affect the path dumping output of dozens of tests.
-        buildStringFromByteStream(toSVGPathElement(*svgElement).pathByteStream(), pathString, NormalizedParsing);
+        buildStringFromByteStream(*toSVGPathElement(*svgElement).pathByteStream(), pathString, NormalizedParsing);
         writeNameAndQuotedValue(ts, "data", pathString);
     } else
         ASSERT_NOT_REACHED();
@@ -388,12 +388,12 @@ static void writeRenderSVGTextBox(TextStream& ts, const RenderSVGText& text)
     if (!box)
         return;
 
-    ts << " " << enclosingIntRect(FloatRect(text.location(), FloatSize(box->logicalWidth(), box->logicalHeight())));
+    ts << " " << enclosingIntRect(FloatRect(FloatPoint(text.location()), FloatSize(box->logicalWidth(), box->logicalHeight())));
 
     // FIXME: Remove this hack, once the new text layout engine is completly landed. We want to preserve the old layout test results for now.
     ts << " contains 1 chunk(s)";
 
-    if (text.parent() && (text.parent()->style()->visitedDependentColor(CSSPropertyColor) != text.style()->visitedDependentColor(CSSPropertyColor)))
+    if (text.parent() && (text.parent()->resolveColor(CSSPropertyColor) != text.resolveColor(CSSPropertyColor)))
         writeNameValuePair(ts, "color", text.resolveColor(CSSPropertyColor).nameForRenderTreeAsText());
 }
 
@@ -513,8 +513,8 @@ void writeSVGResourceContainer(TextStream& ts, const RenderObject& object, int i
         // Creating a placeholder filter which is passed to the builder.
         FloatRect dummyRect;
         IntRect dummyIntRect;
-        RefPtr<SVGFilter> dummyFilter = SVGFilter::create(dummyIntRect, dummyRect, dummyRect, true);
-        if (RefPtr<SVGFilterBuilder> builder = filter->buildPrimitives(dummyFilter.get())) {
+        RefPtrWillBeRawPtr<SVGFilter> dummyFilter = SVGFilter::create(dummyIntRect, dummyRect, dummyRect, true);
+        if (RefPtrWillBeRawPtr<SVGFilterBuilder> builder = filter->buildPrimitives(dummyFilter.get())) {
             if (FilterEffect* lastEffect = builder->lastEffect())
                 lastEffect->externalRepresentation(ts, indent + 1);
         }

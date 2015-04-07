@@ -16,10 +16,12 @@
 #include "ui/aura/window_observer.h"
 #include "ui/aura/window_property.h"
 
+DECLARE_WINDOW_PROPERTY_TYPE(web_modal::ModalDialogHost*);
+
 namespace athena {
 namespace {
 
-// Provides the host envrionment for web modal dialogs. See
+// Provides the host environment for web modal dialogs. See
 // web_modal::WebContentsModalDialogHost, and ModalDialogHost for more
 // details.
 class ModalDialogHostImpl : public web_modal::WebContentsModalDialogHost,
@@ -100,7 +102,7 @@ web_modal::ModalDialogHost* ModalDialogHostImpl::Get(
 }
 
 class AthenaConstrainedWindowViewsClient
-    : public ConstrainedWindowViewsClient {
+    : public constrained_window::ConstrainedWindowViewsClient {
  public:
   AthenaConstrainedWindowViewsClient() {}
   ~AthenaConstrainedWindowViewsClient() override {}
@@ -121,6 +123,9 @@ class AthenaConstrainedWindowViewsClient
       return ModalDialogHostImpl::Get(parent);
     return nullptr;
   }
+  gfx::NativeView GetDialogHostView(gfx::NativeWindow parent) override {
+    return parent;
+  }
 
   DISALLOW_COPY_AND_ASSIGN(AthenaConstrainedWindowViewsClient);
 };
@@ -128,12 +133,12 @@ class AthenaConstrainedWindowViewsClient
 }  // namespace
 
 void InstallConstrainedWindowViewsClient() {
-  SetConstrainedWindowViewsClient(
+  constrained_window::SetConstrainedWindowViewsClient(
       make_scoped_ptr(new AthenaConstrainedWindowViewsClient));
 }
 
 void UninstallConstrainedWindowViewsClient() {
-  SetConstrainedWindowViewsClient(nullptr);
+  constrained_window::SetConstrainedWindowViewsClient(nullptr);
 }
 
 }  // namespace athena

@@ -16,9 +16,10 @@
 #include "cc/trees/layer_tree_host_single_thread_client.h"
 #include "cc/trees/layer_tree_settings.h"
 #include "content/common/content_export.h"
+#include "content/renderer/gpu/compositor_dependencies.h"
 #include "third_party/WebKit/public/platform/WebLayerTreeView.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 
 namespace ui {
 struct LatencyInfo;
@@ -41,8 +42,9 @@ class CONTENT_EXPORT RenderWidgetCompositor
  public:
   // Attempt to construct and initialize a compositor instance for the widget
   // with the given settings. Returns NULL if initialization fails.
-  static scoped_ptr<RenderWidgetCompositor> Create(RenderWidget* widget,
-                                                   bool threaded);
+  static scoped_ptr<RenderWidgetCompositor> Create(
+      RenderWidget* widget,
+      CompositorDependencies* compositor_deps);
 
   virtual ~RenderWidgetCompositor();
 
@@ -53,7 +55,8 @@ class CONTENT_EXPORT RenderWidgetCompositor
   void UpdateTopControlsState(cc::TopControlsState constraints,
                               cc::TopControlsState current,
                               bool animate);
-  void SetTopControlsLayoutHeight(float height);
+  void SetTopControlsShrinkBlinkSize(bool shrink);
+  void SetTopControlsHeight(float height);
   void SetNeedsRedrawRect(gfx::Rect damage_rect);
   // Like setNeedsRedraw but forces the frame to be drawn, without early-outs.
   // Redraw will be forced after the next commit
@@ -78,9 +81,9 @@ class CONTENT_EXPORT RenderWidgetCompositor
       scoped_ptr<base::Value> value,
       const base::Callback<void(scoped_ptr<base::Value>)>& callback);
   bool SendMessageToMicroBenchmark(int id, scoped_ptr<base::Value> value);
+  void StartCompositor();
 
   // WebLayerTreeView implementation.
-  virtual void setSurfaceReady();
   virtual void setRootLayer(const blink::WebLayer& layer);
   virtual void clearRootLayer();
   virtual void setViewportSize(
@@ -114,6 +117,7 @@ class CONTENT_EXPORT RenderWidgetCompositor
   virtual void setDeferCommits(bool defer_commits);
   virtual void registerForAnimations(blink::WebLayer* layer);
   virtual void registerViewportLayers(
+      const blink::WebLayer* overscrollElasticityLayer,
       const blink::WebLayer* pageScaleLayer,
       const blink::WebLayer* innerViewportScrollLayer,
       const blink::WebLayer* outerViewportScrollLayer) override;
@@ -135,13 +139,15 @@ class CONTENT_EXPORT RenderWidgetCompositor
   void Layout() override;
   void ApplyViewportDeltas(const gfx::Vector2d& inner_delta,
                            const gfx::Vector2d& outer_delta,
+                           const gfx::Vector2dF& elastic_overscroll_delta,
                            float page_scale,
                            float top_controls_delta) override;
   void ApplyViewportDeltas(const gfx::Vector2d& scroll_delta,
                            float page_scale,
                            float top_controls_delta) override;
-  void RequestNewOutputSurface(bool fallback) override;
+  void RequestNewOutputSurface() override;
   void DidInitializeOutputSurface() override;
+  void DidFailToInitializeOutputSurface() override;
   void WillCommit() override;
   void DidCommit() override;
   void DidCommitAndDrawFrame() override;
@@ -153,21 +159,27 @@ class CONTENT_EXPORT RenderWidgetCompositor
   void DidPostSwapBuffers() override;
   void DidAbortSwapBuffers() override;
 
+  enum {
+   OUTPUT_SURFACE_RETRIES_BEFORE_FALLBACK = 4,
+   MAX_OUTPUT_SURFACE_RETRIES = 5,
+  };
+
+ protected:
+  RenderWidgetCompositor(RenderWidget* widget,
+                         CompositorDependencies* compositor_deps);
+
+  void Initialize();
+  cc::LayerTreeHost* layer_tree_host() { return layer_tree_host_.get(); }
+
  private:
-  RenderWidgetCompositor(RenderWidget* widget, bool threaded);
-
-  void Initialize(cc::LayerTreeSettings settings);
-
-  bool threaded_;
+  int num_failed_recreate_attempts_;
   RenderWidget* widget_;
+  CompositorDependencies* compositor_deps_;
   scoped_ptr<cc::LayerTreeHost> layer_tree_host_;
 
   scoped_ptr<cc::CopyOutputRequest> temporary_copy_output_request_;
 
-  bool send_v8_idle_notification_after_commit_;
-  base::TimeTicks begin_main_frame_time_;
-  // The time interval between BeginMainFrame calls, provided by the scheduler.
-  base::TimeDelta begin_main_frame_interval_;
+  base::WeakPtrFactory<RenderWidgetCompositor> weak_factory_;
 };
 
 }  // namespace content

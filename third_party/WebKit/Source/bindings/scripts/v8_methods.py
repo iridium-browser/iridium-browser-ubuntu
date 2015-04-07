@@ -198,29 +198,23 @@ def argument_context(interface, method, argument, index):
          has_extended_attribute_value(method, 'TypeChecking', 'Interface')) and
         idl_type.is_wrapper_type)
 
-    type_checked = (type_checking_interface and
-                    # These allow null and undefined values, so a type-check is still required.
-                    not idl_type.is_nullable and
-                    not (argument.is_optional and
-                         'Default' in extended_attributes))
-
     if ('ImplementedInPrivateScript' in extended_attributes and
         not idl_type.is_wrapper_type and
         not idl_type.is_basic_type):
         raise Exception('Private scripts supports only primitive types and DOM wrappers.')
 
-    default_cpp_value = argument.default_cpp_value
+    set_default_value = argument.set_default_value
     return {
         'cpp_type': idl_type.cpp_type_args(extended_attributes=extended_attributes,
                                            raw_type=True,
                                            used_as_variadic_argument=argument.is_variadic),
         'cpp_value': this_cpp_value,
         # FIXME: check that the default value's type is compatible with the argument's
-        'default_value': default_cpp_value,
+        'set_default_value': set_default_value,
         'enum_validation_expression': idl_type.enum_validation_expression,
         'handle': '%sHandle' % argument.name,
         # FIXME: remove once [Default] removed and just use argument.default_value
-        'has_default': 'Default' in extended_attributes or default_cpp_value,
+        'has_default': 'Default' in extended_attributes or set_default_value,
         'has_type_checking_interface': type_checking_interface,
         'has_type_checking_unrestricted':
             (has_extended_attribute_value(interface, 'TypeChecking', 'Unrestricted') or
@@ -235,15 +229,17 @@ def argument_context(interface, method, argument, index):
         'is_dictionary': idl_type.is_dictionary or idl_type.base_type == 'Dictionary',
         'is_nullable': idl_type.is_nullable,
         'is_optional': argument.is_optional,
+        'is_variadic': argument.is_variadic,
         'is_variadic_wrapper_type': is_variadic_wrapper_type,
         'is_wrapper_type': idl_type.is_wrapper_type,
         'name': argument.name,
         'private_script_cpp_value_to_v8_value': idl_type.cpp_value_to_v8_value(
             argument.name, isolate='scriptState->isolate()',
             creation_context='scriptState->context()->Global()'),
+        'use_permissive_dictionary_conversion': 'PermissiveDictionaryConversion' in extended_attributes,
         'v8_set_return_value': v8_set_return_value(interface.name, method, this_cpp_value),
         'v8_set_return_value_for_main_world': v8_set_return_value(interface.name, method, this_cpp_value, for_main_world=True),
-        'v8_value_to_local_cpp_value': v8_value_to_local_cpp_value(argument, index, type_checked, return_promise=method.returns_promise),
+        'v8_value_to_local_cpp_value': v8_value_to_local_cpp_value(argument, index, return_promise=method.returns_promise),
         'vector_type': v8_types.cpp_ptr_type('Vector', 'HeapVector', idl_type.gc_type),
     }
 
@@ -370,14 +366,15 @@ def v8_value_to_local_cpp_variadic_value(argument, index, return_promise):
     return '%s%s(%s)' % (macro, suffix, ', '.join(macro_args))
 
 
-def v8_value_to_local_cpp_value(argument, index, type_checked, return_promise=False):
+def v8_value_to_local_cpp_value(argument, index, return_promise=False):
     extended_attributes = argument.extended_attributes
     idl_type = argument.idl_type
     name = argument.name
     if argument.is_variadic:
         return v8_value_to_local_cpp_variadic_value(argument, index, return_promise)
     return idl_type.v8_value_to_local_cpp_value(extended_attributes, 'info[%s]' % index,
-                                                name, needs_type_check=not type_checked, index=index, declare_variable=False, return_promise=return_promise)
+                                                name, index=index, declare_variable=False,
+                                                return_promise=return_promise)
 
 
 ################################################################################
@@ -397,14 +394,42 @@ def property_attributes(method):
     return property_attributes_list
 
 
-def argument_default_cpp_value(argument):
-    if argument.idl_type.is_dictionary:
+def argument_set_default_value(argument):
+    idl_type = argument.idl_type
+    default_value = argument.default_value
+    if not default_value:
         return None
-    if not argument.default_value:
+    if idl_type.is_dictionary:
+        if not argument.default_value.is_null:
+            raise Exception('invalid default value for dictionary type')
         return None
-    return argument.idl_type.literal_cpp_value(argument.default_value)
+    if idl_type.is_union_type:
+        if argument.default_value.is_null:
+            if not idl_type.includes_nullable_type:
+                raise Exception('invalid default value for union type: null for %s'
+                                % idl_type.name)
+            # Union container objects are "null" initially.
+            return '/* null default value */'
+        if isinstance(default_value.value, basestring):
+            member_type = idl_type.string_member_type
+        elif isinstance(default_value.value, (int, float)):
+            member_type = idl_type.numeric_member_type
+        elif isinstance(default_value.value, bool):
+            member_type = idl_type.boolean_member_type
+        else:
+            member_type = None
+        if member_type is None:
+            raise Exception('invalid default value for union type: %r for %s'
+                            % (default_value.value, idl_type.name))
+        member_type_name = (member_type.inner_type.name
+                            if member_type.is_nullable else
+                            member_type.name)
+        return '%s.set%s(%s)' % (argument.name, member_type_name,
+                                 member_type.literal_cpp_value(default_value))
+    return '%s = %s' % (argument.name,
+                        idl_type.literal_cpp_value(default_value))
 
-IdlArgument.default_cpp_value = property(argument_default_cpp_value)
+IdlArgument.set_default_value = property(argument_set_default_value)
 
 
 def method_returns_promise(method):

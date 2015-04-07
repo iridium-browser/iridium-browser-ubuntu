@@ -10,6 +10,7 @@
 #include "components/sync_driver/device_info_data_type_controller.h"
 #include "components/sync_driver/local_device_info_provider_mock.h"
 #include "components/sync_driver/sync_api_component_factory.h"
+#include "sync/internal_api/public/base/model_type.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace sync_driver {
@@ -21,8 +22,8 @@ class DeviceInfoDataTypeControllerTest : public testing::Test,
  public:
   DeviceInfoDataTypeControllerTest()
       : load_finished_(false),
-        weak_ptr_factory_(this),
-        last_type_(syncer::UNSPECIFIED) {}
+        last_type_(syncer::UNSPECIFIED),
+        weak_ptr_factory_(this) {}
   ~DeviceInfoDataTypeControllerTest() override {}
 
   void SetUp() override {
@@ -66,6 +67,8 @@ class DeviceInfoDataTypeControllerTest : public testing::Test,
   scoped_ptr<syncer::AttachmentService> CreateAttachmentService(
       const scoped_refptr<syncer::AttachmentStore>& attachment_store,
       const syncer::UserShare& user_share,
+      const std::string& store_birthday,
+      syncer::ModelType model_type,
       syncer::AttachmentService::Delegate* delegate) override {
     // Shouldn't be called for this test.
     NOTREACHED();
@@ -105,9 +108,9 @@ class DeviceInfoDataTypeControllerTest : public testing::Test,
 
  private:
   base::MessageLoopForUI message_loop_;
-  base::WeakPtrFactory<DeviceInfoDataTypeControllerTest> weak_ptr_factory_;
   syncer::ModelType last_type_;
   syncer::SyncError last_error_;
+  base::WeakPtrFactory<DeviceInfoDataTypeControllerTest> weak_ptr_factory_;
 };
 
 TEST_F(DeviceInfoDataTypeControllerTest, StartModels) {

@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #import <Cocoa/Cocoa.h>
+#import <Carbon/Carbon.h>  // kVK_Return.
 
 #import "chrome/browser/ui/cocoa/profiles/profile_chooser_controller.h"
 
@@ -24,7 +25,6 @@
 #include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/profiles/profile_window.h"
 #include "chrome/browser/profiles/profiles_state.h"
-#include "chrome/browser/signin/local_auth.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_header_helper.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
@@ -787,6 +787,16 @@ class ActiveProfileObserverBridge : public AvatarMenuObserver,
 
   NSColor* backgroundColor = isHighlighted ? hoverColor_ : backgroundColor_;
   [[self cell] setBackgroundColor:backgroundColor];
+}
+
+-(void)keyDown:(NSEvent*)event {
+  // Since there is no default button in the bubble, it is safe to activate
+  // all buttons on Enter as well, and be consistent with the Windows
+  // implementation.
+  if ([event keyCode] == kVK_Return)
+    [self performClick:self];
+  else
+    [super keyDown:event];
 }
 
 - (BOOL)canBecomeKeyView {
@@ -1623,9 +1633,11 @@ class ActiveProfileObserverBridge : public AvatarMenuObserver,
   if (browser_->profile()->IsSupervised()) {
     base::scoped_nsobject<NSImageView> supervisedIcon(
         [[NSImageView alloc] initWithFrame:NSZeroRect]);
+    int imageId = browser_->profile()->IsChild()
+        ? IDR_ICON_PROFILES_MENU_CHILD
+        : IDR_ICON_PROFILES_MENU_SUPERVISED;
     ui::ResourceBundle* rb = &ui::ResourceBundle::GetSharedInstance();
-    [supervisedIcon setImage:rb->GetNativeImageNamed(
-        IDR_ICON_PROFILES_MENU_SUPERVISED).ToNSImage()];
+    [supervisedIcon setImage:rb->GetNativeImageNamed(imageId).ToNSImage()];
     NSSize size = [[supervisedIcon image] size];
     [supervisedIcon setFrameSize:size];
     NSRect parentFrame = [iconView frame];
@@ -1928,15 +1940,16 @@ class ActiveProfileObserverBridge : public AvatarMenuObserver,
   SigninErrorController* errorController = NULL;
   switch (viewMode_) {
     case profiles::BUBBLE_VIEW_MODE_GAIA_SIGNIN:
-      url = signin::GetPromoURL(signin::SOURCE_AVATAR_BUBBLE_SIGN_IN,
+      url = signin::GetPromoURL(signin_metrics::SOURCE_AVATAR_BUBBLE_SIGN_IN,
                                 false /* auto_close */,
                                 true /* is_constrained */);
       messageId = IDS_PROFILES_GAIA_SIGNIN_TITLE;
       break;
     case profiles::BUBBLE_VIEW_MODE_GAIA_ADD_ACCOUNT:
-      url = signin::GetPromoURL(signin::SOURCE_AVATAR_BUBBLE_ADD_ACCOUNT,
-                                false /* auto_close */,
-                                true /* is_constrained */);
+      url = signin::GetPromoURL(
+          signin_metrics::SOURCE_AVATAR_BUBBLE_ADD_ACCOUNT,
+          false /* auto_close */,
+          true /* is_constrained */);
       messageId = IDS_PROFILES_GAIA_ADD_ACCOUNT_TITLE;
       break;
     case profiles::BUBBLE_VIEW_MODE_GAIA_REAUTH:

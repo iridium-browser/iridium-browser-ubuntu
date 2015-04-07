@@ -21,6 +21,7 @@
             '<(DEPTH)/base/base.gyp:base',
             '<(DEPTH)/cc/cc.gyp:cc',
             '<(DEPTH)/base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
+            '<(DEPTH)/gpu/blink/gpu_blink.gyp:gpu_blink',
             '<(DEPTH)/gpu/command_buffer/command_buffer.gyp:gles2_utils',
             '<(DEPTH)/gpu/gpu.gyp:command_buffer_service',
             '<(DEPTH)/gpu/gpu.gyp:gles2_c_lib',
@@ -41,10 +42,6 @@
             'context_provider_web_context.h',
             'grcontext_for_webgraphicscontext3d.cc',
             'grcontext_for_webgraphicscontext3d.h',
-            'webgraphicscontext3d_impl.cc',
-            'webgraphicscontext3d_impl.h',
-            'webgraphicscontext3d_in_process_command_buffer_impl.cc',
-            'webgraphicscontext3d_in_process_command_buffer_impl.h',
           ],
           'defines': [
             'WEBKIT_GPU_IMPLEMENTATION',

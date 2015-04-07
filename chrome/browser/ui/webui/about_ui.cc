@@ -76,7 +76,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/browser_process_platform_part_chromeos.h"
-#include "chrome/browser/chromeos/customization_document.h"
+#include "chrome/browser/chromeos/customization/customization_document.h"
 #include "chrome/browser/chromeos/memory/oom_priority_manager.h"
 #endif
 
@@ -88,16 +88,10 @@ using content::WebContents;
 namespace {
 
 const char kCreditsJsPath[] = "credits.js";
-const char kKeyboardUtilsPath[] = "keyboard_utils.js";
 const char kMemoryJsPath[] = "memory.js";
 const char kMemoryCssPath[] = "about_memory.css";
 const char kStatsJsPath[] = "stats.js";
 const char kStringsJsPath[] = "strings.js";
-
-#if defined(OS_CHROMEOS)
-// chrome://terms falls back to offline page after kOnlineTermsTimeoutSec.
-const int kOnlineTermsTimeoutSec = 7;
-#endif  // defined(OS_CHROMEOS)
 
 // When you type about:memory, it actually loads this intermediate URL that
 // redirects you to the final page. This avoids the problem where typing
@@ -140,6 +134,11 @@ class AboutMemoryHandler : public MemoryDetails {
 };
 
 #if defined(OS_CHROMEOS)
+
+const char kKeyboardUtilsPath[] = "keyboard_utils.js";
+
+// chrome://terms falls back to offline page after kOnlineTermsTimeoutSec.
+const int kOnlineTermsTimeoutSec = 7;
 
 // Helper class that fetches the online Chrome OS terms. Empty string is
 // returned once fetching failed or exceeded |kOnlineTermsTimeoutSec|.
@@ -836,7 +835,7 @@ std::string AboutLinuxProxyConfig() {
                l10n_util::GetStringUTF8(IDS_ABOUT_LINUX_PROXY_CONFIG_TITLE));
   data.append("<style>body { max-width: 70ex; padding: 2ex 5ex; }</style>");
   AppendBody(&data);
-  base::FilePath binary = CommandLine::ForCurrentProcess()->GetProgram();
+  base::FilePath binary = base::CommandLine::ForCurrentProcess()->GetProgram();
   data.append(l10n_util::GetStringFUTF8(
       IDS_ABOUT_LINUX_PROXY_CONFIG_BODY,
       l10n_util::GetStringUTF16(IDS_PRODUCT_NAME),
@@ -887,6 +886,10 @@ std::string AboutSandbox() {
                   std::string(),
                   IDS_ABOUT_SANDBOX_SECCOMP_BPF_SANDBOX,
                   status & content::kSandboxLinuxSeccompBPF);
+  AboutSandboxRow(&data,
+                  std::string(),
+                  IDS_ABOUT_SANDBOX_SECCOMP_BPF_SANDBOX_TSYNC,
+                  status & content::kSandboxLinuxSeccompTSYNC);
   AboutSandboxRow(&data,
                   std::string(),
                   IDS_ABOUT_SANDBOX_YAMA_LSM,
@@ -1129,7 +1132,9 @@ void AboutUIHTMLSource::FinishDataRequest(
 
 std::string AboutUIHTMLSource::GetMimeType(const std::string& path) const {
   if (path == kCreditsJsPath     ||
+#if defined(OS_CHROMEOS)
       path == kKeyboardUtilsPath ||
+#endif
       path == kStatsJsPath       ||
       path == kStringsJsPath     ||
       path == kMemoryJsPath) {

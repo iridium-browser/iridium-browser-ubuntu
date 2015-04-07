@@ -14,29 +14,20 @@ if (is_android) {
 } else if (is_chrome_branded) {
   if (is_chromeos) {
     widevine_cdm_version_h_file =
-      "chromeos/$widevine_arch/widevine_cdm_version.h"
-    widevine_cdm_binary_files = [
-      "chromeos/$widevine_arch/libwidevinecdm.so",
-    ]
+        "chromeos/$widevine_arch/widevine_cdm_version.h"
+    widevine_cdm_binary_files = [ "chromeos/$widevine_arch/libwidevinecdm.so" ]
   } else if (is_linux) {
-    widevine_cdm_version_h_file =
-      "linux/$widevine_arch/widevine_cdm_version.h"
-    widevine_cdm_binary_files = [
-      "linux/$widevine_arch/libwidevinecdm.so",
-    ]
+    widevine_cdm_version_h_file = "linux/$widevine_arch/widevine_cdm_version.h"
+    widevine_cdm_binary_files = [ "linux/$widevine_arch/libwidevinecdm.so" ]
   } else if (is_win) {
-    widevine_cdm_version_h_file =
-      "win/$widevine_arch/widevine_cdm_version.h"
+    widevine_cdm_version_h_file = "win/$widevine_arch/widevine_cdm_version.h"
     widevine_cdm_binary_files = [
       "win/$widevine_arch/widevinecdm.dll",
       "win/$widevine_arch/widevinecdm.dll.lib",
     ]
   } else if (is_mac) {
-    widevine_cdm_version_h_file =
-      "mac/$widevine_arch/widevine_cdm_version.h"
-    widevine_cdm_binary_files = [
-      "mac/$widevine_arch/libwidevinecdm.dylib",
-    ]
+    widevine_cdm_version_h_file = "mac/$widevine_arch/widevine_cdm_version.h"
+    widevine_cdm_binary_files = [ "mac/$widevine_arch/libwidevinecdm.dylib" ]
   } else {
     # Other platforms, use the default one.
     widevine_cdm_version_h_file = "widevine_cdm_version.h"
@@ -50,11 +41,16 @@ if (is_android) {
 
 # GYP version: third_party/widevine/cdm/widevine_cdm.gyp:widevine_cdm_version_h
 copy("version_h") {
-  sources = [ widevine_cdm_version_h_file ]
+  sources = [
+    widevine_cdm_version_h_file,
+  ]
+
   # TODO(brettw) this should go into target_out_dir and callers should include
   # it from there. This requires, however, renaming the default
   # widevine_cdm_version.h in this directory to avoid conflicts.
-  outputs = [ "$root_gen_dir/widevine_cdm_version.h" ]
+  outputs = [
+    "$root_gen_dir/widevine_cdm_version.h",
+  ]
 }
 
 # GYP version: third_party/widevine/cdm/widevine_cdm.gyp:widevine_cdm_binaries
@@ -65,7 +61,10 @@ if (widevine_cdm_binary_files == []) {
 } else {
   copy("binaries") {
     sources = widevine_cdm_binary_files
-    outputs = [ "$root_out_dir/{{source_file_part}}" ]
+    outputs = [
+      "$root_out_dir/{{source_file_part}}",
+    ]
+
     # TODO(GYP)
     # 'COPY_PHASE_STRIP': 'NO',
   }
@@ -77,16 +76,17 @@ source_set("adapter") {
       ":version_h",
       ":binaries",
       "//ppapi:ppapi_cpp",
+
       #'<(DEPTH)/media/media_cdm_adapter.gyp:cdmadapter',  TODO(GYP)
     ]
   }
 
   if (is_linux) {
-    libs = [ "$root_out_dir/libwidevinecdm.sp" ]
+    libs = [ rebase_path("$root_out_dir/libwidevinecdm.so", root_build_dir) ]
   } else if (is_win) {
-    libs = [ "$root_out_dir/widevinecdm.dll.lib" ]
+    libs = [ rebase_path("$root_out_dir/widevinecdm.dll.lib", root_build_dir) ]
   } else if (is_mac) {
-    libs = [ "$root_out_dir/libwidevinecdm.dylib" ]
+    libs = [ rebase_path("$root_out_dir/libwidevinecdm.dylib", root_build_dir) ]
   }
 }
 
@@ -96,6 +96,7 @@ source_set("widevine_test_license_server") {
   if (is_chrome_branded && is_linux) {
     deps = [
       # TODO(GYP)
+      # This target should be removed and targets should have datadeps on this target:
       #"//third_party/widevine/test/license_server/license_server.gyp:test_license_server"
     ]
   }

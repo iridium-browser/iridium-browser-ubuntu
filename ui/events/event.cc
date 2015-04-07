@@ -6,8 +6,8 @@
 
 #if defined(USE_X11)
 #include <X11/extensions/XInput2.h>
-#include <X11/Xlib.h>
 #include <X11/keysym.h>
+#include <X11/Xlib.h>
 #endif
 
 #include <cmath>
@@ -16,17 +16,21 @@
 #include "base/metrics/histogram.h"
 #include "base/strings/stringprintf.h"
 #include "ui/events/event_utils.h"
+#include "ui/events/keycodes/dom3/dom_code.h"
+#include "ui/events/keycodes/dom3/dom_key.h"
+#include "ui/events/keycodes/dom4/keycode_converter.h"
 #include "ui/events/keycodes/keyboard_code_conversion.h"
+#include "ui/gfx/geometry/point3_f.h"
+#include "ui/gfx/geometry/point_conversions.h"
 #include "ui/gfx/geometry/safe_integer_conversions.h"
-#include "ui/gfx/point3_f.h"
-#include "ui/gfx/point_conversions.h"
 #include "ui/gfx/transform.h"
 #include "ui/gfx/transform_util.h"
 
 #if defined(USE_X11)
 #include "ui/events/keycodes/keyboard_code_conversion_x.h"
 #elif defined(USE_OZONE)
-#include "ui/events/keycodes/keyboard_code_conversion.h"
+#include "ui/events/ozone/layout/keyboard_layout_engine.h"
+#include "ui/events/ozone/layout/keyboard_layout_engine_manager.h"
 #endif
 
 namespace {
@@ -104,6 +108,11 @@ bool X11EventHasNonStandardState(const base::NativeEvent& event) {
 #else
   return false;
 #endif
+}
+
+unsigned long long get_next_touch_event_id() {
+  static unsigned long long id = 0;
+  return id++;
 }
 
 }  // namespace
@@ -512,10 +521,12 @@ void MouseWheelEvent::UpdateForRootTransform(
 TouchEvent::TouchEvent(const base::NativeEvent& native_event)
     : LocatedEvent(native_event),
       touch_id_(GetTouchId(native_event)),
+      unique_event_id_(get_next_touch_event_id()),
       radius_x_(GetTouchRadiusX(native_event)),
       radius_y_(GetTouchRadiusY(native_event)),
       rotation_angle_(GetTouchAngle(native_event)),
-      force_(GetTouchForce(native_event)) {
+      force_(GetTouchForce(native_event)),
+      may_cause_scrolling_(false) {
   latency()->AddLatencyNumberWithTimestamp(
       INPUT_EVENT_LATENCY_ORIGINAL_COMPONENT,
       0,
@@ -535,10 +546,12 @@ TouchEvent::TouchEvent(EventType type,
                        base::TimeDelta time_stamp)
     : LocatedEvent(type, location, location, time_stamp, 0),
       touch_id_(touch_id),
+      unique_event_id_(get_next_touch_event_id()),
       radius_x_(0.0f),
       radius_y_(0.0f),
       rotation_angle_(0.0f),
-      force_(0.0f) {
+      force_(0.0f),
+      may_cause_scrolling_(false) {
   latency()->AddLatencyNumber(INPUT_EVENT_LATENCY_UI_COMPONENT, 0, 0);
 }
 
@@ -553,10 +566,12 @@ TouchEvent::TouchEvent(EventType type,
                        float force)
     : LocatedEvent(type, location, location, time_stamp, flags),
       touch_id_(touch_id),
+      unique_event_id_(get_next_touch_event_id()),
       radius_x_(radius_x),
       radius_y_(radius_y),
       rotation_angle_(angle),
-      force_(force) {
+      force_(force),
+      may_cause_scrolling_(false) {
   latency()->AddLatencyNumber(INPUT_EVENT_LATENCY_UI_COMPONENT, 0, 0);
 }
 
@@ -578,6 +593,12 @@ void TouchEvent::UpdateForRootTransform(
     radius_x_ *= decomp.scale[0];
   if (decomp.scale[1])
     radius_y_ *= decomp.scale[1];
+}
+
+void TouchEvent::DisableSynchronousHandling() {
+  DispatcherApi dispatcher_api(this);
+  dispatcher_api.set_result(
+      static_cast<EventResult>(result() | ER_DISABLE_SYNC_HANDLING));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -628,6 +649,7 @@ KeyEvent::KeyEvent(const base::NativeEvent& native_event)
       code_(CodeFromNative(native_event)),
       is_char_(IsCharFromNative(native_event)),
       platform_keycode_(PlatformKeycodeFromNative(native_event)),
+      key_(DomKey::NONE),
       character_(0) {
   if (IsRepeated(*this))
     set_flags(flags() | ui::EF_IS_REPEAT);
@@ -647,29 +669,48 @@ KeyEvent::KeyEvent(EventType type,
                    int flags)
     : Event(type, EventTimeForNow(), flags),
       key_code_(key_code),
+      code_(DomCode::NONE),
       is_char_(false),
       platform_keycode_(0),
+      key_(DomKey::NONE),
       character_() {
 }
 
 KeyEvent::KeyEvent(EventType type,
                    KeyboardCode key_code,
-                   const std::string& code,
+                   DomCode code,
                    int flags)
     : Event(type, EventTimeForNow(), flags),
       key_code_(key_code),
       code_(code),
       is_char_(false),
       platform_keycode_(0),
+      key_(DomKey::NONE),
       character_(0) {
+}
+
+KeyEvent::KeyEvent(EventType type,
+                   KeyboardCode key_code,
+                   DomCode code,
+                   int flags,
+                   DomKey key,
+                   base::char16 character)
+    : Event(type, EventTimeForNow(), flags),
+      key_code_(key_code),
+      code_(code),
+      is_char_(false),
+      platform_keycode_(0),
+      key_(key),
+      character_(character) {
 }
 
 KeyEvent::KeyEvent(base::char16 character, KeyboardCode key_code, int flags)
     : Event(ET_KEY_PRESSED, EventTimeForNow(), flags),
       key_code_(key_code),
-      code_(""),
+      code_(DomCode::NONE),
       is_char_(true),
       platform_keycode_(0),
+      key_(DomKey::CHARACTER),
       character_(character) {
 }
 
@@ -679,6 +720,7 @@ KeyEvent::KeyEvent(const KeyEvent& rhs)
       code_(rhs.code_),
       is_char_(rhs.is_char_),
       platform_keycode_(rhs.platform_keycode_),
+      key_(rhs.key_),
       character_(rhs.character_) {
   if (rhs.extended_key_event_data_)
     extended_key_event_data_.reset(rhs.extended_key_event_data_->Clone());
@@ -689,6 +731,7 @@ KeyEvent& KeyEvent::operator=(const KeyEvent& rhs) {
     Event::operator=(rhs);
     key_code_ = rhs.key_code_;
     code_ = rhs.code_;
+    key_ = rhs.key_;
     is_char_ = rhs.is_char_;
     platform_keycode_ = rhs.platform_keycode_;
     character_ = rhs.character_;
@@ -705,48 +748,62 @@ void KeyEvent::SetExtendedKeyEventData(scoped_ptr<ExtendedKeyEventData> data) {
   extended_key_event_data_ = data.Pass();
 }
 
-base::char16 KeyEvent::GetCharacter() const {
-  if (is_char_ || character_)
-    return character_;
-
-  // TODO(kpschoedel): streamline these cases after settling Ozone
-  // positional coding.
+void KeyEvent::ApplyLayout() const {
+  // If the client has set the character (e.g. faked key events from virtual
+  // keyboard), it's client's responsibility to set the dom key correctly.
+  // Otherwise, set the dom key as unidentified.
+  // Please refer to crbug.com/443889.
+  if (character_ != 0) {
+    key_ = DomKey::UNIDENTIFIED;
+    return;
+  }
 #if defined(OS_WIN)
   // Native Windows character events always have is_char_ == true,
   // so this is a synthetic or native keystroke event.
-  character_ = GetCharacterFromKeyCode(key_code_, flags());
-  return character_;
+  // Therefore, perform only the fallback action.
+  GetMeaningFromKeyCode(key_code_, flags(), &key_, &character_);
 #elif defined(USE_X11)
-  if (!native_event()) {
-    character_ = GetCharacterFromKeyCode(key_code_, flags());
-    return character_;
-  }
-
-  DCHECK(native_event()->type == KeyPress ||
-         native_event()->type == KeyRelease ||
-         (native_event()->type == GenericEvent &&
-          (native_event()->xgeneric.evtype == XI_KeyPress ||
-           native_event()->xgeneric.evtype == XI_KeyRelease)));
-
   // When a control key is held, prefer ASCII characters to non ASCII
   // characters in order to use it for shortcut keys.  GetCharacterFromKeyCode
   // returns 'a' for VKEY_A even if the key is actually bound to 'à' in X11.
   // GetCharacterFromXEvent returns 'à' in that case.
-  return IsControlDown() ?
+  character_ = (IsControlDown() || !native_event()) ?
       GetCharacterFromKeyCode(key_code_, flags()) :
       GetCharacterFromXEvent(native_event());
+  // TODO(kpschoedel): set key_ field for X11.
+#elif defined(USE_OZONE)
+  KeyboardCode key_code;
+  if (!KeyboardLayoutEngineManager::GetKeyboardLayoutEngine()->Lookup(
+      code_, flags(), &key_, &character_, &key_code, &platform_keycode_)) {
+    GetMeaningFromKeyCode(key_code_, flags(), &key_, &character_);
+  }
 #else
   if (native_event()) {
     DCHECK(EventTypeFromNative(native_event()) == ET_KEY_PRESSED ||
            EventTypeFromNative(native_event()) == ET_KEY_RELEASED);
   }
-
-  return GetCharacterFromKeyCode(key_code_, flags());
+  // TODO(kpschoedel): revise to use DOM code_ instead of Windows key_code_
+  GetMeaningFromKeyCode(key_code_, flags(), &key_, &character_);
 #endif
+}
+
+DomKey KeyEvent::GetDomKey() const {
+  // Determination of character_ and key_ may be done lazily.
+  if (key_ == DomKey::NONE)
+    ApplyLayout();
+  return key_;
+}
+
+base::char16 KeyEvent::GetCharacter() const {
+  // Determination of character_ and key_ may be done lazily.
+  if (key_ == DomKey::NONE)
+    ApplyLayout();
+  return character_;
 }
 
 base::char16 KeyEvent::GetText() const {
   if ((flags() & EF_CONTROL_DOWN) != 0) {
+    // TODO(kpschoedel): revise to use DOM code_ instead of Windows key_code_
     return GetControlCharacterForKeycode(key_code_,
                                          (flags() & EF_SHIFT_DOWN) != 0);
   }
@@ -857,8 +914,10 @@ bool KeyEvent::IsRightSideKey() const {
       // Under X11, this must be a synthetic event, so we can require that
       // code_ be set correctly.
 #endif
-      return ((code_.size() > 5) &&
-              (code_.compare(code_.size() - 5, 5, "Right", 5)) == 0);
+      return (code_ == DomCode::SHIFT_RIGHT) ||
+             (code_ == DomCode::CONTROL_RIGHT) ||
+             (code_ == DomCode::ALT_RIGHT) ||
+             (code_ == DomCode::OS_RIGHT);
     default:
       return false;
   }
@@ -907,6 +966,10 @@ uint16 KeyEvent::GetConflatedWindowsKeyCode() const {
   if (is_char_)
     return character_;
   return key_code_;
+}
+
+std::string KeyEvent::GetCodeString() const {
+  return KeycodeConverter::DomCodeToCodeString(code_);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

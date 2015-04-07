@@ -35,6 +35,7 @@ const char MediaAudioConstraints::kGoogNoiseSuppression[] =
     "googNoiseSuppression";
 const char MediaAudioConstraints::kGoogExperimentalNoiseSuppression[] =
     "googNoiseSuppression2";
+const char MediaAudioConstraints::kGoogBeamforming[] = "googBeamforming";
 const char MediaAudioConstraints::kGoogHighpassFilter[] = "googHighpassFilter";
 const char MediaAudioConstraints::kGoogTypingNoiseDetection[] =
     "googTypingNoiseDetection";
@@ -62,11 +63,13 @@ struct {
   { MediaAudioConstraints::kGoogHighpassFilter, true },
   { MediaAudioConstraints::kGoogTypingNoiseDetection, true },
   { MediaAudioConstraints::kGoogExperimentalNoiseSuppression, false },
+  { MediaAudioConstraints::kGoogBeamforming, false },
 #if defined(OS_WIN)
   { kMediaStreamAudioDucking, true },
 #else
   { kMediaStreamAudioDucking, false },
 #endif
+  { kMediaStreamAudioHotword, false },
 };
 
 bool IsAudioProcessingConstraint(const std::string& key) {
@@ -139,25 +142,6 @@ MediaAudioConstraints::MediaAudioConstraints(
 }
 
 MediaAudioConstraints::~MediaAudioConstraints() {}
-
-// TODO(xians): Remove this method after the APM in WebRtc is deprecated.
-bool MediaAudioConstraints::NeedsAudioProcessing() {
-  if (GetEchoCancellationProperty())
-    return true;
-
-  for (size_t i = 0; i < arraysize(kDefaultAudioConstraints); ++i) {
-    // |kEchoCancellation| and |kGoogEchoCancellation| have been convered by
-    // GetEchoCancellationProperty().
-    if (kDefaultAudioConstraints[i].key != kEchoCancellation &&
-        kDefaultAudioConstraints[i].key != kGoogEchoCancellation &&
-        IsAudioProcessingConstraint(kDefaultAudioConstraints[i].key) &&
-        GetProperty(kDefaultAudioConstraints[i].key)) {
-      return true;
-    }
-  }
-
-  return false;
-}
 
 bool MediaAudioConstraints::GetProperty(const std::string& key) {
   // Return the value if the constraint is specified in |constraints|,

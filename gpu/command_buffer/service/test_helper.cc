@@ -67,6 +67,7 @@ const GLint TestHelper::kMaxSamples;
 const GLint TestHelper::kMaxRenderbufferSize;
 const GLint TestHelper::kMaxTextureSize;
 const GLint TestHelper::kMaxCubeMapTextureSize;
+const GLint TestHelper::kMaxRectangleTextureSize;
 const GLint TestHelper::kNumVertexAttribs;
 const GLint TestHelper::kNumTextureUnits;
 const GLint TestHelper::kMaxTextureImageUnits;
@@ -297,6 +298,11 @@ void TestHelper::SetupContextGroupInitExpectations(
   EXPECT_CALL(*gl, GetIntegerv(GL_MAX_CUBE_MAP_TEXTURE_SIZE, _))
       .WillOnce(SetArgumentPointee<1>(kMaxCubeMapTextureSize))
       .RetiresOnSaturation();
+  if (strstr(extensions, "GL_ARB_texture_rectangle")) {
+    EXPECT_CALL(*gl, GetIntegerv(GL_MAX_RECTANGLE_TEXTURE_SIZE, _))
+        .WillOnce(SetArgumentPointee<1>(kMaxRectangleTextureSize))
+        .RetiresOnSaturation();
+  }
   EXPECT_CALL(*gl, GetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, _))
       .WillOnce(SetArgumentPointee<1>(kMaxTextureImageUnits))
       .RetiresOnSaturation();
@@ -344,21 +350,22 @@ void TestHelper::SetupFeatureInfoInitExpectationsWithGLVersion(
 
   if (strstr(extensions, "GL_ARB_texture_float") ||
       (is_es3 && strstr(extensions, "GL_EXT_color_buffer_float"))) {
-    static const GLuint gl_ids[] = {101, 102};
+    static const GLuint tx_ids[] = {101, 102};
+    static const GLuint fb_ids[] = {103, 104};
     const GLsizei width = 16;
     EXPECT_CALL(*gl, GetIntegerv(GL_FRAMEBUFFER_BINDING, _))
-        .WillOnce(SetArgumentPointee<1>(gl_ids[0]))
+        .WillOnce(SetArgumentPointee<1>(fb_ids[0]))
         .RetiresOnSaturation();
     EXPECT_CALL(*gl, GetIntegerv(GL_TEXTURE_BINDING_2D, _))
-        .WillOnce(SetArgumentPointee<1>(gl_ids[0]))
+        .WillOnce(SetArgumentPointee<1>(tx_ids[0]))
         .RetiresOnSaturation();
     EXPECT_CALL(*gl, GenTextures(1, _))
-        .WillOnce(SetArrayArgument<1>(gl_ids + 1, gl_ids + 2))
+        .WillOnce(SetArrayArgument<1>(tx_ids + 1, tx_ids + 2))
         .RetiresOnSaturation();
     EXPECT_CALL(*gl, GenFramebuffersEXT(1, _))
-        .WillOnce(SetArrayArgument<1>(gl_ids + 1, gl_ids + 2))
+        .WillOnce(SetArrayArgument<1>(fb_ids + 1, fb_ids + 2))
         .RetiresOnSaturation();
-    EXPECT_CALL(*gl, BindTexture(GL_TEXTURE_2D, gl_ids[1]))
+    EXPECT_CALL(*gl, BindTexture(GL_TEXTURE_2D, tx_ids[1]))
         .Times(1)
         .RetiresOnSaturation();
     EXPECT_CALL(*gl, TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
@@ -369,11 +376,11 @@ void TestHelper::SetupFeatureInfoInitExpectationsWithGLVersion(
         GL_RGBA, GL_FLOAT, _))
         .Times(1)
         .RetiresOnSaturation();
-    EXPECT_CALL(*gl, BindFramebufferEXT(GL_FRAMEBUFFER, gl_ids[1]))
+    EXPECT_CALL(*gl, BindFramebufferEXT(GL_FRAMEBUFFER, fb_ids[1]))
         .Times(1)
         .RetiresOnSaturation();
     EXPECT_CALL(*gl, FramebufferTexture2DEXT(GL_FRAMEBUFFER,
-        GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, gl_ids[1], 0))
+        GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tx_ids[1], 0))
         .Times(1)
         .RetiresOnSaturation();
     EXPECT_CALL(*gl, CheckFramebufferStatusEXT(GL_FRAMEBUFFER))
@@ -398,13 +405,13 @@ void TestHelper::SetupFeatureInfoInitExpectationsWithGLVersion(
     EXPECT_CALL(*gl, DeleteTextures(1, _))
         .Times(1)
         .RetiresOnSaturation();
-    EXPECT_CALL(*gl, BindFramebufferEXT(GL_FRAMEBUFFER, gl_ids[0]))
+    EXPECT_CALL(*gl, BindFramebufferEXT(GL_FRAMEBUFFER, fb_ids[0]))
         .Times(1)
         .RetiresOnSaturation();
-    EXPECT_CALL(*gl, BindTexture(GL_TEXTURE_2D, gl_ids[0]))
+    EXPECT_CALL(*gl, BindTexture(GL_TEXTURE_2D, tx_ids[0]))
         .Times(1)
         .RetiresOnSaturation();
-#if DCHECK_IS_ON
+#if DCHECK_IS_ON()
     EXPECT_CALL(*gl, GetError())
         .WillOnce(Return(GL_NO_ERROR))
         .RetiresOnSaturation();
@@ -420,6 +427,59 @@ void TestHelper::SetupFeatureInfoInitExpectationsWithGLVersion(
     EXPECT_CALL(*gl, GetIntegerv(GL_MAX_DRAW_BUFFERS_ARB, _))
         .WillOnce(SetArgumentPointee<1>(8))
         .RetiresOnSaturation();
+  }
+
+  if (is_es3 || strstr(extensions, "GL_EXT_texture_rg") ||
+      (strstr(extensions, "GL_ARB_texture_rg"))) {
+    static const GLuint tx_ids[] = {101, 102};
+    static const GLuint fb_ids[] = {103, 104};
+    const GLsizei width = 1;
+    EXPECT_CALL(*gl, GetIntegerv(GL_FRAMEBUFFER_BINDING, _))
+        .WillOnce(SetArgumentPointee<1>(fb_ids[0]))
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl, GetIntegerv(GL_TEXTURE_BINDING_2D, _))
+        .WillOnce(SetArgumentPointee<1>(tx_ids[0]))
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl, GenTextures(1, _))
+        .WillOnce(SetArrayArgument<1>(tx_ids + 1, tx_ids + 2))
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl, BindTexture(GL_TEXTURE_2D, tx_ids[1]))
+        .Times(1)
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl, TexImage2D(GL_TEXTURE_2D, 0, _, width, width, 0,
+        GL_RED_EXT, GL_UNSIGNED_BYTE, _))
+        .Times(1)
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl, GenFramebuffersEXT(1, _))
+        .WillOnce(SetArrayArgument<1>(fb_ids + 1, fb_ids + 2))
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl, BindFramebufferEXT(GL_FRAMEBUFFER, fb_ids[1]))
+        .Times(1)
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl, FramebufferTexture2DEXT(GL_FRAMEBUFFER,
+        GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tx_ids[1], 0))
+        .Times(1)
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl, CheckFramebufferStatusEXT(GL_FRAMEBUFFER))
+        .WillOnce(Return(GL_FRAMEBUFFER_COMPLETE))
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl, DeleteFramebuffersEXT(1, _))
+        .Times(1)
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl, DeleteTextures(1, _))
+        .Times(1)
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl, BindFramebufferEXT(GL_FRAMEBUFFER, fb_ids[0]))
+        .Times(1)
+        .RetiresOnSaturation();
+    EXPECT_CALL(*gl, BindTexture(GL_TEXTURE_2D, tx_ids[0]))
+        .Times(1)
+        .RetiresOnSaturation();
+#if DCHECK_IS_ON()
+    EXPECT_CALL(*gl, GetError())
+        .WillOnce(Return(GL_NO_ERROR))
+        .RetiresOnSaturation();
+#endif
   }
 }
 

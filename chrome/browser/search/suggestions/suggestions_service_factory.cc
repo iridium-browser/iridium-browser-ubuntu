@@ -28,7 +28,7 @@ namespace suggestions {
 
 // static
 SuggestionsService* SuggestionsServiceFactory::GetForProfile(Profile* profile) {
-  if (!SuggestionsService::IsEnabled() || profile->IsOffTheRecord())
+  if (!SuggestionsService::IsEnabled())
     return NULL;
 
   return static_cast<SuggestionsService*>(
@@ -48,11 +48,6 @@ SuggestionsServiceFactory::SuggestionsServiceFactory()
 }
 
 SuggestionsServiceFactory::~SuggestionsServiceFactory() {}
-
-content::BrowserContext* SuggestionsServiceFactory::GetBrowserContextToUse(
-    content::BrowserContext* context) const {
-  return chrome::GetBrowserContextRedirectedInIncognito(context);
-}
 
 KeyedService* SuggestionsServiceFactory::BuildServiceInstanceFor(
     content::BrowserContext* profile) const {

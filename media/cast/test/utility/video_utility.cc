@@ -9,7 +9,7 @@
 
 #include "base/rand_util.h"
 #include "third_party/libyuv/include/libyuv/compare.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace media {
 namespace cast {
@@ -21,6 +21,28 @@ double I420PSNR(const scoped_refptr<media::VideoFrame>& frame1,
     return -1;
 
   return libyuv::I420Psnr(frame1->data(VideoFrame::kYPlane),
+                          frame1->stride(VideoFrame::kYPlane),
+                          frame1->data(VideoFrame::kUPlane),
+                          frame1->stride(VideoFrame::kUPlane),
+                          frame1->data(VideoFrame::kVPlane),
+                          frame1->stride(VideoFrame::kVPlane),
+                          frame2->data(VideoFrame::kYPlane),
+                          frame2->stride(VideoFrame::kYPlane),
+                          frame2->data(VideoFrame::kUPlane),
+                          frame2->stride(VideoFrame::kUPlane),
+                          frame2->data(VideoFrame::kVPlane),
+                          frame2->stride(VideoFrame::kVPlane),
+                          frame1->coded_size().width(),
+                          frame1->coded_size().height());
+}
+
+double I420SSIM(const scoped_refptr<media::VideoFrame>& frame1,
+                const scoped_refptr<media::VideoFrame>& frame2) {
+  if (frame1->coded_size().width() != frame2->coded_size().width() ||
+      frame1->coded_size().height() != frame2->coded_size().height())
+    return -1;
+
+  return libyuv::I420Ssim(frame1->data(VideoFrame::kYPlane),
                           frame1->stride(VideoFrame::kYPlane),
                           frame1->data(VideoFrame::kUPlane),
                           frame1->stride(VideoFrame::kUPlane),

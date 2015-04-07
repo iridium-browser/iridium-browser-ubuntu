@@ -12,11 +12,9 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/task_runner_util.h"
 #include "chrome/browser/drive/drive_service_interface.h"
-#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/power_save_blocker.h"
 #include "google_apis/drive/drive_api_parser.h"
 
-using content::BrowserThread;
 using google_apis::CancelCallback;
 using google_apis::FileResource;
 using google_apis::GDATA_CANCELLED;
@@ -41,6 +39,9 @@ namespace {
 // Drive API v2. It is set to a smaller value than 2^31 for working around
 // server side error (crbug.com/264089).
 const int64 kUploadChunkSize = (1LL << 30);  // 1GB
+// Maximum file size to be uploaded by multipart requests. The file that is
+// larger than the size is processed by resumable upload.
+const int64 kMaxMultipartUploadSize = (1LL << 20);  // 1MB
 }  // namespace
 
 // Structure containing current upload information of file, passed between
@@ -142,7 +143,7 @@ CancelCallback DriveUploader::UploadNewFile(
     const UploadNewFileOptions& options,
     const UploadCompletionCallback& callback,
     const ProgressCallback& progress_callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!parent_resource_id.empty());
   DCHECK(!local_file_path.empty());
   DCHECK(!title.empty());
@@ -150,14 +151,10 @@ CancelCallback DriveUploader::UploadNewFile(
   DCHECK(!callback.is_null());
 
   return StartUploadFile(
-      scoped_ptr<UploadFileInfo>(new UploadFileInfo(local_file_path,
-                                                    content_type,
-                                                    callback,
-                                                    progress_callback)),
-      base::Bind(&DriveUploader::StartInitiateUploadNewFile,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 parent_resource_id,
-                 title,
+      scoped_ptr<UploadFileInfo>(new UploadFileInfo(
+          local_file_path, content_type, callback, progress_callback)),
+      base::Bind(&DriveUploader::CallUploadServiceAPINewFile,
+                 weak_ptr_factory_.GetWeakPtr(), parent_resource_id, title,
                  options));
 }
 
@@ -168,21 +165,17 @@ CancelCallback DriveUploader::UploadExistingFile(
     const UploadExistingFileOptions& options,
     const UploadCompletionCallback& callback,
     const ProgressCallback& progress_callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!resource_id.empty());
   DCHECK(!local_file_path.empty());
   DCHECK(!content_type.empty());
   DCHECK(!callback.is_null());
 
   return StartUploadFile(
-      scoped_ptr<UploadFileInfo>(new UploadFileInfo(local_file_path,
-                                                    content_type,
-                                                    callback,
-                                                    progress_callback)),
-      base::Bind(&DriveUploader::StartInitiateUploadExistingFile,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 resource_id,
-                 options));
+      scoped_ptr<UploadFileInfo>(new UploadFileInfo(
+          local_file_path, content_type, callback, progress_callback)),
+      base::Bind(&DriveUploader::CallUploadServiceAPIExistingFile,
+                 weak_ptr_factory_.GetWeakPtr(), resource_id, options));
 }
 
 CancelCallback DriveUploader::ResumeUploadFile(
@@ -191,7 +184,7 @@ CancelCallback DriveUploader::ResumeUploadFile(
     const std::string& content_type,
     const UploadCompletionCallback& callback,
     const ProgressCallback& progress_callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!local_file_path.empty());
   DCHECK(!content_type.empty());
   DCHECK(!callback.is_null());
@@ -210,7 +203,7 @@ CancelCallback DriveUploader::ResumeUploadFile(
 CancelCallback DriveUploader::StartUploadFile(
     scoped_ptr<UploadFileInfo> upload_file_info,
     const StartInitiateUploadCallback& start_initiate_upload_callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(thread_checker_.CalledOnValidThread());
   DVLOG(1) << "Uploading file: " << upload_file_info->DebugString();
 
   UploadFileInfo* info_ptr = upload_file_info.get();
@@ -231,7 +224,7 @@ void DriveUploader::StartUploadFileAfterGetFileSize(
     scoped_ptr<UploadFileInfo> upload_file_info,
     const StartInitiateUploadCallback& start_initiate_upload_callback,
     bool get_file_size_result) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(thread_checker_.CalledOnValidThread());
 
   if (!get_file_size_result) {
     UploadFailed(upload_file_info.Pass(), HTTP_NOT_FOUND);
@@ -246,47 +239,60 @@ void DriveUploader::StartUploadFileAfterGetFileSize(
   start_initiate_upload_callback.Run(upload_file_info.Pass());
 }
 
-void DriveUploader::StartInitiateUploadNewFile(
+void DriveUploader::CallUploadServiceAPINewFile(
     const std::string& parent_resource_id,
     const std::string& title,
     const UploadNewFileOptions& options,
     scoped_ptr<UploadFileInfo> upload_file_info) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(thread_checker_.CalledOnValidThread());
 
-  UploadFileInfo* info_ptr = upload_file_info.get();
-  info_ptr->cancel_callback = drive_service_->InitiateUploadNewFile(
-      info_ptr->content_type,
-      info_ptr->content_length,
-      parent_resource_id,
-      title,
-      options,
-      base::Bind(&DriveUploader::OnUploadLocationReceived,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 base::Passed(&upload_file_info)));
+  UploadFileInfo* const info_ptr = upload_file_info.get();
+  if (info_ptr->content_length <= kMaxMultipartUploadSize) {
+    info_ptr->cancel_callback = drive_service_->MultipartUploadNewFile(
+        info_ptr->content_type, info_ptr->content_length, parent_resource_id,
+        title, info_ptr->file_path, options,
+        base::Bind(&DriveUploader::OnMultipartUploadComplete,
+                   weak_ptr_factory_.GetWeakPtr(),
+                   base::Passed(&upload_file_info)),
+        info_ptr->progress_callback);
+  } else {
+    info_ptr->cancel_callback = drive_service_->InitiateUploadNewFile(
+        info_ptr->content_type, info_ptr->content_length, parent_resource_id,
+        title, options, base::Bind(&DriveUploader::OnUploadLocationReceived,
+                                   weak_ptr_factory_.GetWeakPtr(),
+                                   base::Passed(&upload_file_info)));
+  }
 }
 
-void DriveUploader::StartInitiateUploadExistingFile(
+void DriveUploader::CallUploadServiceAPIExistingFile(
     const std::string& resource_id,
     const UploadExistingFileOptions& options,
     scoped_ptr<UploadFileInfo> upload_file_info) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(thread_checker_.CalledOnValidThread());
 
-  UploadFileInfo* info_ptr = upload_file_info.get();
-  info_ptr->cancel_callback = drive_service_->InitiateUploadExistingFile(
-      info_ptr->content_type,
-      info_ptr->content_length,
-      resource_id,
-      options,
-      base::Bind(&DriveUploader::OnUploadLocationReceived,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 base::Passed(&upload_file_info)));
+  UploadFileInfo* const info_ptr = upload_file_info.get();
+  if (info_ptr->content_length <= kMaxMultipartUploadSize) {
+    info_ptr->cancel_callback = drive_service_->MultipartUploadExistingFile(
+        info_ptr->content_type, info_ptr->content_length, resource_id,
+        info_ptr->file_path, options,
+        base::Bind(&DriveUploader::OnMultipartUploadComplete,
+                   weak_ptr_factory_.GetWeakPtr(),
+                   base::Passed(&upload_file_info)),
+        info_ptr->progress_callback);
+  } else {
+    info_ptr->cancel_callback = drive_service_->InitiateUploadExistingFile(
+        info_ptr->content_type, info_ptr->content_length, resource_id, options,
+        base::Bind(&DriveUploader::OnUploadLocationReceived,
+                   weak_ptr_factory_.GetWeakPtr(),
+                   base::Passed(&upload_file_info)));
+  }
 }
 
 void DriveUploader::OnUploadLocationReceived(
     scoped_ptr<UploadFileInfo> upload_file_info,
     GDataErrorCode code,
     const GURL& upload_location) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(thread_checker_.CalledOnValidThread());
 
   DVLOG(1) << "Got upload location [" << upload_location.spec()
            << "] for [" << upload_file_info->file_path.value() << "]";
@@ -305,7 +311,7 @@ void DriveUploader::OnUploadLocationReceived(
 
 void DriveUploader::StartGetUploadStatus(
     scoped_ptr<UploadFileInfo> upload_file_info) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(upload_file_info);
 
   UploadFileInfo* info_ptr = upload_file_info.get();
@@ -319,7 +325,7 @@ void DriveUploader::StartGetUploadStatus(
 
 void DriveUploader::UploadNextChunk(
     scoped_ptr<UploadFileInfo> upload_file_info) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(upload_file_info);
   DCHECK_GE(upload_file_info->next_start_position, 0);
   DCHECK_LE(upload_file_info->next_start_position,
@@ -357,7 +363,7 @@ void DriveUploader::OnUploadRangeResponseReceived(
     scoped_ptr<UploadFileInfo> upload_file_info,
     const UploadRangeResponse& response,
     scoped_ptr<FileResource> entry) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(thread_checker_.CalledOnValidThread());
 
   if (response.code == HTTP_CREATED || response.code == HTTP_SUCCESS) {
     // When uploading a new file, we expect HTTP_CREATED, and when uploading
@@ -418,7 +424,7 @@ void DriveUploader::OnUploadProgress(const ProgressCallback& callback,
 
 void DriveUploader::UploadFailed(scoped_ptr<UploadFileInfo> upload_file_info,
                                  GDataErrorCode error) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK(thread_checker_.CalledOnValidThread());
 
   DVLOG(1) << "Upload failed " << upload_file_info->DebugString();
 
@@ -430,6 +436,27 @@ void DriveUploader::UploadFailed(scoped_ptr<UploadFileInfo> upload_file_info,
 
   upload_file_info->completion_callback.Run(
       error, upload_file_info->upload_location, scoped_ptr<FileResource>());
+}
+
+void DriveUploader::OnMultipartUploadComplete(
+    scoped_ptr<UploadFileInfo> upload_file_info,
+    google_apis::GDataErrorCode error,
+    scoped_ptr<FileResource> entry) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  if (error == HTTP_CREATED || error == HTTP_SUCCESS) {
+    DVLOG(1) << "Successfully created uploaded file=["
+             << upload_file_info->file_path.value() << "]";
+    // Done uploading.
+    upload_file_info->completion_callback.Run(
+        HTTP_SUCCESS, upload_file_info->upload_location, entry.Pass());
+  } else {
+    DVLOG(1) << "Upload failed " << upload_file_info->DebugString();
+    if (error == HTTP_PRECONDITION)
+      error = HTTP_CONFLICT;  // ETag mismatch.
+    upload_file_info->completion_callback.Run(
+        error, upload_file_info->upload_location, scoped_ptr<FileResource>());
+  }
 }
 
 }  // namespace drive

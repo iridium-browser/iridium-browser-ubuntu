@@ -87,9 +87,7 @@ public:
     void removeStyleSheetCandidateNode(Node*);
     void removeStyleSheetCandidateNode(Node*, TreeScope&);
     void modifiedStyleSheetCandidateNode(Node*);
-    void enableExitTransitionStylesheets();
-    void addXSLStyleSheet(ProcessingInstruction*, bool createdByParser);
-    void removeXSLStyleSheet(ProcessingInstruction*);
+    void setExitTransitionStylesheetsEnabled(bool);
 
     void invalidateInjectedStyleSheetCache();
     void updateInjectedStyleSheetCache() const;
@@ -121,8 +119,7 @@ public:
     bool ignoringPendingStylesheets() const { return m_ignorePendingStylesheets; }
 
     unsigned maxDirectAdjacentSelectors() const { return m_maxDirectAdjacentSelectors; }
-    bool usesSiblingRules() const { return m_usesSiblingRules || m_usesSiblingRulesOverride; }
-    void setUsesSiblingRulesOverride(bool b) { m_usesSiblingRulesOverride = b; }
+    bool usesSiblingRules() const { return m_usesSiblingRules; }
     bool usesFirstLineRules() const { return m_usesFirstLineRules; }
     bool usesFirstLetterRules() const { return m_usesFirstLetterRules; }
     void setUsesFirstLetterRules(bool b) { m_usesFirstLetterRules = b; }
@@ -133,6 +130,7 @@ public:
     void resetCSSFeatureFlags(const RuleFeatureSet&);
 
     void didRemoveShadowRoot(ShadowRoot*);
+    void shadowRootRemovedFromDocument(ShadowRoot*);
     void appendActiveAuthorStyleSheets();
 
     StyleResolver* resolver() const
@@ -173,6 +171,8 @@ public:
     bool onlyDocumentHasStyles() const { return m_activeTreeScopes.isEmpty(); }
     void collectScopedStyleFeaturesTo(RuleFeatureSet&) const;
 
+    void platformColorsChanged();
+
     virtual void trace(Visitor*) override;
 
 private:
@@ -186,7 +186,6 @@ private:
     TreeScopeStyleSheetCollection* styleSheetCollectionFor(TreeScope&);
     bool shouldUpdateDocumentStyleSheetCollection(StyleResolverUpdateMode) const;
     bool shouldUpdateShadowTreeStyleSheetCollection(StyleResolverUpdateMode) const;
-    bool shouldApplyXSLTransform() const;
 
     void markTreeScopeDirty(TreeScope&);
 
@@ -194,9 +193,51 @@ private:
     Document* master();
     Document& document() const { return *m_document; }
 
-    typedef ListHashSet<TreeScope*, 16> TreeScopeSet;
-    static void insertTreeScopeInDocumentOrder(TreeScopeSet&, TreeScope*);
-    void clearMediaQueryRuleSetOnTreeScopeStyleSheets(TreeScopeSet treeScopes);
+    typedef WillBeHeapHashSet<RawPtrWillBeMember<TreeScope>> UnorderedTreeScopeSet;
+
+    // A class which holds document-ordered treescopes which have stylesheets.
+    // ListHashSet allows only sequential access, not random access.
+    // So it gets slow when the size of treescopes gets larger when finding
+    // the best place to insert a treescope into the document-ordered
+    // treescopes (requires linear search).
+    // To solve this, use a vector for the document-ordered treescopes and
+    // use a hashset for quickly checking whether a given treescope is
+    // in the document-ordered treescopes or not.
+    class OrderedTreeScopeSet final {
+        DISALLOW_ALLOCATION();
+        WTF_MAKE_NONCOPYABLE(OrderedTreeScopeSet);
+    public:
+        OrderedTreeScopeSet() { }
+
+        void insert(TreeScope*);
+        void remove(TreeScope*);
+
+        // When we don't need to consider document-order, use this iterator.
+        // Otherwise, use [] operator.
+        UnorderedTreeScopeSet::iterator beginUnordered() { return m_hash.begin(); }
+        UnorderedTreeScopeSet::iterator endUnordered() { return m_hash.end(); }
+
+        bool isEmpty() const { return m_treeScopes.isEmpty(); }
+        void clear()
+        {
+            m_treeScopes.clear();
+            m_hash.clear();
+        }
+
+        size_t size() const { return m_treeScopes.size(); }
+
+        TreeScope* operator[](size_t i) { return m_treeScopes[i]; }
+        const TreeScope* operator[](size_t i) const { return m_treeScopes[i]; }
+
+        void trace(Visitor*);
+
+    private:
+        WillBeHeapVector<RawPtrWillBeMember<TreeScope>, 16> m_treeScopes;
+        UnorderedTreeScopeSet m_hash;
+    };
+
+    static void insertTreeScopeInDocumentOrder(OrderedTreeScopeSet&, TreeScope*);
+    void clearMediaQueryRuleSetOnTreeScopeStyleSheets(UnorderedTreeScopeSet::iterator begin, UnorderedTreeScopeSet::iterator end);
 
     void createResolver();
 
@@ -211,6 +252,8 @@ private:
     {
         return m_documentStyleSheetCollection.get();
     }
+
+    void updateActiveStyleSheetsInShadow(StyleResolverUpdateMode, TreeScope*, UnorderedTreeScopeSet& treeScopesRemoved);
 
     RawPtrWillBeMember<Document> m_document;
     bool m_isMaster;
@@ -232,14 +275,13 @@ private:
     StyleSheetCollectionMap m_styleSheetCollectionMap;
 
     bool m_documentScopeDirty;
-    TreeScopeSet m_dirtyTreeScopes;
-    TreeScopeSet m_activeTreeScopes;
+    UnorderedTreeScopeSet m_dirtyTreeScopes;
+    OrderedTreeScopeSet m_activeTreeScopes;
 
     String m_preferredStylesheetSetName;
     String m_selectedStylesheetSetName;
 
     bool m_usesSiblingRules;
-    bool m_usesSiblingRulesOverride;
     bool m_usesFirstLineRules;
     bool m_usesFirstLetterRules;
     bool m_usesRemUnits;
@@ -253,8 +295,6 @@ private:
 
     WillBeHeapHashMap<AtomicString, RawPtrWillBeMember<StyleSheetContents> > m_textToSheetCache;
     WillBeHeapHashMap<RawPtrWillBeMember<StyleSheetContents>, AtomicString> m_sheetToTextCache;
-
-    RefPtrWillBeMember<ProcessingInstruction> m_xslStyleSheet;
 };
 
 }

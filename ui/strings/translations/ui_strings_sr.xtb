@@ -18,6 +18,7 @@
 <translation id="7121570032414343252"><ph name="NUMBER_TWO"/> сек.</translation>
 <translation id="7511635910912978956">Преостало сати: <ph name="NUMBER_FEW"/></translation>
 <translation id="5948410903763073882">Alt+<ph name="KEY_COMBO_NAME"/></translation>
+<translation id="598033046487663418">Све апликације</translation>
 <translation id="7658239707568436148">Откажи</translation>
 <translation id="7222373446505536781">F11</translation>
 <translation id="1761785978543082658"><ph name="QUANTITY"/> B</translation>
@@ -46,7 +47,6 @@
 <translation id="4999762576397546063">Ctrl+<ph name="KEY_COMBO_NAME"/></translation>
 <translation id="7770995925463083016">Пре <ph name="NUMBER_TWO"/> минута</translation>
 <translation id="3234408098842461169">Стрелица надоле</translation>
-<translation id="5901398892005759450">Све апликације</translation>
 <translation id="3087734570205094154">Дно</translation>
 <translation id="8828991073132329143">Још <ph name="NUMBER_MANY"/> секунди</translation>
 <translation id="5935630983280450497">Преостао <ph name="NUMBER_ONE"/> мин.</translation>
@@ -123,6 +123,7 @@
 <translation id="8677655579646609597"><ph name="QUANTITY"/> KB/s</translation>
 <translation id="8394908167088220973">Пуштање/паузирање медија</translation>
 <translation id="2148716181193084225">Данас</translation>
+<translation id="5120799197269191491">Тастер за претрагу + <ph name="KEY_COMBO_NAME"/></translation>
 <translation id="7960078400008666149">Не узнемиравај у периоду од сат времена</translation>
 <translation id="4373894838514502496">Пре <ph name="NUMBER_FEW"/> минута</translation>
 <translation id="4115153316875436289"><ph name="NUMBER_TWO"/> дана</translation>
@@ -208,6 +209,7 @@
 <translation id="6907759265145635167"><ph name="QUANTITY"/> PB/s</translation>
 <translation id="2743387203779672305">Копирај у меморију</translation>
 <translation id="8371695176452482769">Почните да говорите</translation>
+<translation id="6129953537138746214">Размак</translation>
 <translation id="1167268268675672572">Помери на почетак реда и измени избор</translation>
 <translation id="6965382102122355670">Потврди</translation>
 <translation id="7850320739366109486">Не узнемиравај</translation>

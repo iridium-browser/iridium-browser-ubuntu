@@ -30,10 +30,10 @@
 #include "chrome/browser/ui/tab_contents/core_tab_helper_delegate.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
-#include "chrome/browser/ui/zoom/zoom_observer.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/sessions/session_id.h"
+#include "components/ui/zoom/zoom_observer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/page_navigator.h"
@@ -42,7 +42,7 @@
 #include "ui/base/page_transition_types.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/base/window_open_disposition.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
 
 #if defined(ENABLE_EXTENSIONS)
@@ -108,7 +108,7 @@ class Browser : public TabStripModelObserver,
                 public SearchTabHelperDelegate,
                 public ChromeWebModalDialogManagerDelegate,
                 public BookmarkTabHelperDelegate,
-                public ZoomObserver,
+                public ui_zoom::ZoomObserver,
                 public content::PageNavigator,
                 public content::NotificationObserver,
 #if defined(ENABLE_EXTENSIONS)
@@ -135,7 +135,8 @@ class Browser : public TabStripModelObserver,
     FEATURE_LOCATIONBAR = 8,
     FEATURE_BOOKMARKBAR = 16,
     FEATURE_INFOBAR = 32,
-    FEATURE_DOWNLOADSHELF = 64
+    FEATURE_DOWNLOADSHELF = 64,
+    FEATURE_WEBAPPFRAME = 128
   };
 
   // The context for a download blocked notification from
@@ -495,10 +496,10 @@ class Browser : public TabStripModelObserver,
   FRIEND_TEST_ALL_PREFIXES(BrowserTest, OpenAppWindowLikeNtp);
   FRIEND_TEST_ALL_PREFIXES(BrowserTest, AppIdSwitch);
   FRIEND_TEST_ALL_PREFIXES(BrowserTest, ShouldShowLocationBar);
+  FRIEND_TEST_ALL_PREFIXES(ExclusiveAccessBubbleWindowControllerTest,
+                           DenyExitsFullscreen);
   FRIEND_TEST_ALL_PREFIXES(FullscreenControllerTest,
                            TabEntersPresentationModeFromWindowed);
-  FRIEND_TEST_ALL_PREFIXES(FullscreenExitBubbleControllerTest,
-                           DenyExitsFullscreen);
   FRIEND_TEST_ALL_PREFIXES(StartupBrowserCreatorTest, OpenAppShortcutNoPref);
   FRIEND_TEST_ALL_PREFIXES(StartupBrowserCreatorTest,
                            OpenAppShortcutWindowPref);
@@ -541,7 +542,7 @@ class Browser : public TabStripModelObserver,
   content::WebContents* OpenURLFromTab(
       content::WebContents* source,
       const content::OpenURLParams& params) override;
-  void NavigationStateChanged(const content::WebContents* source,
+  void NavigationStateChanged(content::WebContents* source,
                               content::InvalidateTypes changed_flags) override;
   void VisibleSSLStateChanged(const content::WebContents* source) override;
   void AddNewContents(content::WebContents* source,
@@ -581,6 +582,7 @@ class Browser : public TabStripModelObserver,
   bool ShouldCreateWebContents(
       content::WebContents* web_contents,
       int route_id,
+      int main_frame_route_id,
       WindowContainerType window_container_type,
       const base::string16& frame_name,
       const GURL& target_url,
@@ -597,7 +599,8 @@ class Browser : public TabStripModelObserver,
   void DidNavigateMainFramePostCommit(
       content::WebContents* web_contents) override;
   void DidNavigateToPendingEntry(content::WebContents* web_contents) override;
-  content::JavaScriptDialogManager* GetJavaScriptDialogManager() override;
+  content::JavaScriptDialogManager* GetJavaScriptDialogManager(
+      content::WebContents* source) override;
   content::ColorChooser* OpenColorChooser(
       content::WebContents* web_contents,
       SkColor color,
@@ -682,7 +685,8 @@ class Browser : public TabStripModelObserver,
                          bool starred) override;
 
   // Overridden from ZoomObserver:
-  void OnZoomChanged(const ZoomController::ZoomChangedEventData& data) override;
+  void OnZoomChanged(
+      const ui_zoom::ZoomController::ZoomChangedEventData& data) override;
 
   // Overridden from SelectFileDialog::Listener:
   void FileSelected(const base::FilePath& path,
@@ -730,7 +734,7 @@ class Browser : public TabStripModelObserver,
   //   updates), then scheduled_updates_ is updated for the |source| and update
   //   pair and a task is scheduled (assuming it isn't running already)
   //   that invokes ProcessPendingUIUpdates.
-  void ScheduleUIUpdate(const content::WebContents* source,
+  void ScheduleUIUpdate(content::WebContents* source,
                         unsigned changed_flags);
 
   // Processes all pending updates to the UI that have been scheduled by
@@ -793,6 +797,9 @@ class Browser : public TabStripModelObserver,
   // Returns true if the Browser window should show the location bar.
   bool ShouldShowLocationBar() const;
 
+  // Returns true if the Browser window should use a web app style frame.
+  bool ShouldUseWebAppFrame() const;
+
   // Implementation of SupportsWindowFeature and CanSupportWindowFeature. If
   // |check_fullscreen| is true, the set of features reflect the actual state of
   // the browser, otherwise the set of features reflect the possible state of
@@ -810,6 +817,7 @@ class Browser : public TabStripModelObserver,
   // created.
   bool MaybeCreateBackgroundContents(
       int route_id,
+      int main_frame_route_id,
       content::WebContents* opener_web_contents,
       const base::string16& frame_name,
       const GURL& target_url,
@@ -954,12 +962,12 @@ class Browser : public TabStripModelObserver,
   // True if the browser window has been shown at least once.
   bool window_has_shown_;
 
-  // The following factory is used for chrome update coalescing.
-  base::WeakPtrFactory<Browser> chrome_updater_factory_;
-
   scoped_ptr<BrowserContentTranslateDriverObserver> translate_driver_observer_;
 
   scoped_ptr<chrome::ValidationMessageBubble> validation_message_bubble_;
+
+  // The following factory is used for chrome update coalescing.
+  base::WeakPtrFactory<Browser> chrome_updater_factory_;
 
   // The following factory is used to close the frame at a later time.
   base::WeakPtrFactory<Browser> weak_factory_;

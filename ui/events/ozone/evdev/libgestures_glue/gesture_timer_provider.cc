@@ -9,7 +9,7 @@
 #include "base/timer/timer.h"
 
 // libgestures requires that this be in the top level namespace.
-class GesturesTimer {
+struct GesturesTimer {
  public:
   GesturesTimer() : callback_(NULL), callback_data_(NULL) {}
   ~GesturesTimer() {}
@@ -29,7 +29,10 @@ class GesturesTimer {
  private:
   void OnTimerExpired() {
     struct timespec ts;
-    DCHECK(!clock_gettime(CLOCK_MONOTONIC, &ts));
+    int fail = clock_gettime(CLOCK_MONOTONIC, &ts);
+    DCHECK(!fail);
+
+    // Run the callback and reschedule the next run if requested.
     stime_t next_delay = callback_(StimeFromTimespec(&ts), callback_data_);
     if (next_delay >= 0) {
       timer_.Start(FROM_HERE,

@@ -23,7 +23,6 @@
 #include "ui/gfx/image/image.h"
 #include "url/gurl.h"
 
-class BookmarkModelObserver;
 class PrefService;
 
 namespace base {
@@ -36,6 +35,7 @@ class BookmarkCodecTest;
 class BookmarkExpandedStateTracker;
 class BookmarkIndex;
 class BookmarkLoadDetails;
+class BookmarkModelObserver;
 class BookmarkStorage;
 class ScopedGroupBookmarkActions;
 class TestBookmarkClient;
@@ -112,8 +112,8 @@ class BookmarkModel : public KeyedService {
   // (as long as the model is loaded).
   const BookmarkNode* GetParentForNewNodes();
 
-  void AddObserver(BookmarkModelObserver* observer);
-  void RemoveObserver(BookmarkModelObserver* observer);
+  void AddObserver(bookmarks::BookmarkModelObserver* observer);
+  void RemoveObserver(bookmarks::BookmarkModelObserver* observer);
 
   // Notifies the observers that an extensive set of changes is about to happen,
   // such as during import or sync, so they can delay any expensive UI updates
@@ -283,6 +283,16 @@ class BookmarkModel : public KeyedService {
   void DeleteNodeMetaInfo(const BookmarkNode* node,
                           const std::string& key);
 
+  // Adds |key| to the set of meta info keys that are not copied when a node is
+  // cloned.
+  void AddNonClonedKey(const std::string& key);
+
+  // Returns the set of meta info keys that should not be copied when a node is
+  // cloned.
+  const std::set<std::string>& non_cloned_keys() const {
+    return non_cloned_keys_;
+  }
+
   // Sets the sync transaction version of |node|.
   void SetNodeSyncTransactionVersion(const BookmarkNode* node,
                                      int64 sync_transaction_version);
@@ -407,7 +417,7 @@ class BookmarkModel : public KeyedService {
   int64 next_node_id_;
 
   // The observers.
-  ObserverList<BookmarkModelObserver> observers_;
+  ObserverList<bookmarks::BookmarkModelObserver> observers_;
 
   // Set of nodes ordered by URL. This is not a map to avoid copying the
   // urls.
@@ -431,6 +441,8 @@ class BookmarkModel : public KeyedService {
   int extensive_changes_;
 
   scoped_ptr<bookmarks::BookmarkExpandedStateTracker> expanded_state_tracker_;
+
+  std::set<std::string> non_cloned_keys_;
 
   DISALLOW_COPY_AND_ASSIGN(BookmarkModel);
 };

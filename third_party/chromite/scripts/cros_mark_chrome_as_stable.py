@@ -88,7 +88,7 @@ def _GetSpecificVersionUrl(git_url, revision, time_to_wait=600):
     fh = gob_util.FetchUrl(host, path, ignore_404=True)
     return fh.read() if fh else None
 
-  def _wait_msg(_remaining_minutes):
+  def _wait_msg(_remaining):
     cros_build_lib.Info(
         'Repository does not yet have revision %s.  Sleeping...',
         revision)
@@ -315,8 +315,8 @@ def GetChromeRevisionLinkFromVersions(old_chrome_version, chrome_version):
   Returns:
     The desired URL.
   """
-  return _CHROME_VERSION_URL % { 'old': old_chrome_version,
-                                 'new': chrome_version }
+  return _CHROME_VERSION_URL % {'old': old_chrome_version,
+                                'new': chrome_version}
 
 
 def GetChromeRevisionListLink(old_chrome, new_chrome, chrome_rev):

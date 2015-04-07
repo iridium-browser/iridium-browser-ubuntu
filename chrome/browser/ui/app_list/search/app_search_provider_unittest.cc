@@ -8,6 +8,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/simple_test_clock.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/ui/app_list/app_list_test_util.h"
 #include "chrome/browser/ui/app_list/search/app_search_provider.h"
@@ -37,11 +38,14 @@ class AppSearchProviderTest : public AppListTestBase {
   void SetUp() override {
     AppListTestBase::SetUp();
 
-    app_search_.reset(new AppSearchProvider(profile_.get(), NULL));
+    scoped_ptr<base::SimpleTestClock> clock(new base::SimpleTestClock());
+    clock->SetNow(kTestCurrentTime);
+    app_search_.reset(
+        new AppSearchProvider(profile_.get(), NULL, clock.Pass()));
   }
 
   std::string RunQuery(const std::string& query) {
-    app_search_->StartImpl(kTestCurrentTime, base::UTF8ToUTF16(query));
+    app_search_->Start(false, base::UTF8ToUTF16(query));
 
     // Sort results by relevance.
     std::vector<SearchResult*> sorted_results;
@@ -59,6 +63,8 @@ class AppSearchProviderTest : public AppListTestBase {
     }
     return result_str;
   }
+
+  const SearchProvider::Results& results() { return app_search_->results(); }
 
  private:
   scoped_ptr<AppSearchProvider> app_search_;
@@ -96,10 +102,20 @@ TEST_F(AppSearchProviderTest, DisableAndEnable) {
 
 TEST_F(AppSearchProviderTest, Uninstall) {
   EXPECT_EQ("Packaged App 1", RunQuery("pa1"));
+  EXPECT_FALSE(results().empty());
   service_->UninstallExtension(kPackagedApp1Id,
                                extensions::UNINSTALL_REASON_FOR_TESTING,
                                base::Bind(&base::DoNothing),
                                NULL);
+
+  // Allow async AppSearchProvider::UpdateResults to run.
+  base::RunLoop().RunUntilIdle();
+
+  // Uninstalling an app should update the result list without needing to start
+  // a new search.
+  EXPECT_TRUE(results().empty());
+
+  // Rerunning the query also should return no results.
   EXPECT_EQ("", RunQuery("pa1"));
 
   // Let uninstall code to clean up.
@@ -119,6 +135,13 @@ TEST_F(AppSearchProviderTest, FetchRecommendations) {
   prefs->SetLastLaunchTime(kPackagedApp1Id, base::Time::FromInternalValue(10));
   prefs->SetLastLaunchTime(kPackagedApp2Id, base::Time::FromInternalValue(20));
   EXPECT_EQ("Packaged App 2,Packaged App 1,Hosted App", RunQuery(""));
+
+  // Times in the future should just be handled as highest priority.
+  prefs->SetLastLaunchTime(kHostedAppId,
+                           kTestCurrentTime + base::TimeDelta::FromSeconds(5));
+  prefs->SetLastLaunchTime(kPackagedApp1Id, base::Time::FromInternalValue(10));
+  prefs->SetLastLaunchTime(kPackagedApp2Id, base::Time::FromInternalValue(0));
+  EXPECT_EQ("Hosted App,Packaged App 1,Packaged App 2", RunQuery(""));
 }
 
 }  // namespace test

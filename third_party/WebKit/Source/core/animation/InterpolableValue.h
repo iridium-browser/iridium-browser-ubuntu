@@ -6,6 +6,7 @@
 #define InterpolableValue_h
 
 #include "core/animation/animatable/AnimatableValue.h"
+#include "platform/heap/Handle.h"
 #include "wtf/OwnPtr.h"
 #include "wtf/PassOwnPtr.h"
 #include "wtf/Vector.h"
@@ -25,7 +26,9 @@ public:
     virtual void trace(Visitor*) { }
 
 private:
-    virtual PassOwnPtrWillBeRawPtr<InterpolableValue> interpolate(const InterpolableValue &to, const double progress) const = 0;
+    virtual void interpolate(const InterpolableValue& to, const double progress, InterpolableValue& result) const = 0;
+    virtual void add(const InterpolableValue& rhs, InterpolableValue& result) const = 0;
+    virtual void multiply(double scalar, InterpolableValue& result) const = 0;
 
     friend class Interpolation;
 
@@ -35,9 +38,11 @@ private:
     friend class InterpolableNumber;
     friend class InterpolableBool;
     friend class InterpolableList;
+
+    friend class AnimationInterpolableValueTest;
 };
 
-class InterpolableNumber : public InterpolableValue {
+class InterpolableNumber final : public InterpolableValue {
 public:
     static PassOwnPtrWillBeRawPtr<InterpolableNumber> create(double value)
     {
@@ -48,10 +53,10 @@ public:
     double value() const { return m_value; }
     virtual PassOwnPtrWillBeRawPtr<InterpolableValue> clone() const override final { return create(m_value); }
 
-    virtual void trace(Visitor* visitor) override { InterpolableValue::trace(visitor); }
-
 private:
-    virtual PassOwnPtrWillBeRawPtr<InterpolableValue> interpolate(const InterpolableValue &to, const double progress) const override final;
+    virtual void interpolate(const InterpolableValue& to, const double progress, InterpolableValue& result) const override final;
+    virtual void add(const InterpolableValue& rhs, InterpolableValue& result) const override final;
+    virtual void multiply(double scalar, InterpolableValue& result) const override final;
     double m_value;
 
     explicit InterpolableNumber(double value)
@@ -61,7 +66,7 @@ private:
 
 };
 
-class InterpolableBool : public InterpolableValue {
+class InterpolableBool final : public InterpolableValue {
 public:
     static PassOwnPtrWillBeRawPtr<InterpolableBool> create(bool value)
     {
@@ -72,10 +77,10 @@ public:
     bool value() const { return m_value; }
     virtual PassOwnPtrWillBeRawPtr<InterpolableValue> clone() const override final { return create(m_value); }
 
-    virtual void trace(Visitor* visitor) override { InterpolableValue::trace(visitor); }
-
 private:
-    virtual PassOwnPtrWillBeRawPtr<InterpolableValue> interpolate(const InterpolableValue &to, const double progress) const override final;
+    virtual void interpolate(const InterpolableValue& to, const double progress, InterpolableValue& result) const override final;
+    virtual void add(const InterpolableValue& rhs, InterpolableValue& result) const override final;
+    virtual void multiply(double scalar, InterpolableValue& result) const override final { ASSERT_NOT_REACHED(); }
     bool m_value;
 
     explicit InterpolableBool(bool value)
@@ -114,7 +119,9 @@ public:
     virtual void trace(Visitor*) override;
 
 private:
-    virtual PassOwnPtrWillBeRawPtr<InterpolableValue> interpolate(const InterpolableValue &other, const double progress) const override final;
+    virtual void interpolate(const InterpolableValue& to, const double progress, InterpolableValue& result) const override final;
+    virtual void add(const InterpolableValue& rhs, InterpolableValue& result) const override final;
+    virtual void multiply(double scalar, InterpolableValue& result) const override final;
     explicit InterpolableList(size_t size)
         : m_size(size)
         , m_values(m_size)
@@ -148,7 +155,9 @@ public:
     virtual void trace(Visitor*) override;
 
 private:
-    virtual PassOwnPtrWillBeRawPtr<InterpolableValue> interpolate(const InterpolableValue &other, const double progress) const override final;
+    virtual void interpolate(const InterpolableValue &to, const double progress, InterpolableValue& result) const override final;
+    virtual void add(const InterpolableValue& rhs, InterpolableValue& result) const override final { ASSERT_NOT_REACHED(); }
+    virtual void multiply(double scalar, InterpolableValue& result) const override final { ASSERT_NOT_REACHED(); }
     RefPtrWillBeMember<AnimatableValue> m_value;
 
     InterpolableAnimatableValue(PassRefPtrWillBeRawPtr<AnimatableValue> value)

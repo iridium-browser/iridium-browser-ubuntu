@@ -30,6 +30,7 @@
 
 #if defined(OS_WIN)
 #include "ui/base/win/scoped_ole_initializer.h"
+#include "ui/gfx/win/direct_write.h"
 #endif
 
 #if defined(USE_X11)
@@ -41,7 +42,7 @@ int main(int argc, char** argv) {
   ui::ScopedOleInitializer ole_initializer_;
 #endif
 
-  CommandLine::Init(argc, argv);
+  base::CommandLine::Init(argc, argv);
 
   base::AtExitManager at_exit;
 
@@ -56,6 +57,7 @@ int main(int argc, char** argv) {
   // The ContextFactory must exist before any Compositors are created.
   scoped_ptr<ui::InProcessContextFactory> context_factory(
       new ui::InProcessContextFactory());
+  context_factory->set_use_test_surface(false);
 
   base::MessageLoopForUI message_loop;
 
@@ -66,6 +68,10 @@ int main(int argc, char** argv) {
   base::FilePath ui_test_pak_path;
   DCHECK(PathService::Get(ui::UI_TEST_PAK, &ui_test_pak_path));
   ui::ResourceBundle::InitSharedInstanceWithPakPath(ui_test_pak_path);
+
+#if defined(OS_WIN)
+    gfx::win::MaybeInitializeDirectWrite();
+#endif
 
 #if defined(USE_AURA)
   aura::Env::CreateInstance(true);

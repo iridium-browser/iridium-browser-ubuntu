@@ -44,6 +44,7 @@ class NewWindowDelegateImpl : public ChromeNewWindowDelegate {
   // Overridden from ash::NewWindowDelegate:
   void OpenFileManager() override {}
   void OpenCrosh() override {}
+  void OpenGetHelp() override {}
   void ShowKeyboardOverlay() override {}
 
  private:
@@ -191,8 +192,8 @@ void ChromeShellDelegate::Observe(int type,
       // If we are launched to service a windows 8 search request then let the
       // IPC which carries the search string create the browser and initiate
       // the navigation.
-      if (CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kWindows8Search))
+      if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+              switches::kWindows8Search))
         break;
 #endif
       // If Chrome ASH is launched when no browser is open in the desktop,
@@ -206,7 +207,7 @@ void ChromeShellDelegate::Observe(int type,
         // silent-mode by the metro viewer process, which causes the
         // StartupBrowserCreatorImpl class to not create any browsers which is
         // not the behavior we want.
-        CommandLine dummy(CommandLine::NO_PROGRAM);
+        base::CommandLine dummy(base::CommandLine::NO_PROGRAM);
         StartupBrowserCreatorImpl startup_impl(
             base::FilePath(),
             dummy,

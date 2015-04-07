@@ -25,10 +25,9 @@
 #ifndef OpenTypeVerticalData_h
 #define OpenTypeVerticalData_h
 
-#if ENABLE(OPENTYPE_VERTICAL)
-
 #include "platform/PlatformExport.h"
 #include "platform/fonts/Glyph.h"
+#include "platform/fonts/GlyphPage.h"
 #include "wtf/HashMap.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/RefCounted.h"
@@ -37,7 +36,6 @@
 namespace blink {
 
 class FontPlatformData;
-class GlyphPage;
 class SimpleFontData;
 
 class PLATFORM_EXPORT OpenTypeVerticalData : public RefCounted<OpenTypeVerticalData> {
@@ -52,11 +50,11 @@ public:
     float advanceHeight(const SimpleFontData*, Glyph) const;
     void getVerticalTranslationsForGlyphs(const SimpleFontData*, const Glyph*, size_t, float* outXYArray) const;
     void substituteWithVerticalGlyphs(const SimpleFontData*, GlyphPage*, unsigned offset, unsigned length) const;
-
     bool inFontCache() const { return m_inFontCache; }
     void setInFontCache(bool inFontCache) { m_inFontCache = inFontCache; }
 
 private:
+
     explicit OpenTypeVerticalData(const FontPlatformData&);
 
     void loadMetrics(const FontPlatformData&);
@@ -74,7 +72,5 @@ private:
 };
 
 } // namespace blink
-
-#endif // ENABLE(OPENTYPE_VERTICAL)
 
 #endif // OpenTypeVerticalData_h

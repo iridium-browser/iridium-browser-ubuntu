@@ -5,7 +5,9 @@
 #include "content/browser/android/edge_effect_l.h"
 
 #include "cc/layers/ui_resource_layer.h"
-#include "ui/base/android/system_ui_resource_manager.h"
+#include "content/browser/android/animation_utils.h"
+#include "ui/android/resources/resource_manager.h"
+#include "ui/android/resources/system_ui_resource_type.h"
 
 namespace content {
 
@@ -40,33 +42,11 @@ const float kPullDistanceAlphaGlowFactor = 0.8f;
 
 const int kVelocityGlowFactor = 6;
 
-const ui::SystemUIResourceManager::ResourceType kResourceType =
-    ui::SystemUIResourceManager::OVERSCROLL_GLOW_L;
-
-template <typename T>
-T Lerp(T a, T b, T t) {
-  return a + (b - a) * t;
-}
-
-template <typename T>
-T Clamp(T value, T low, T high) {
-  return value < low ? low : (value > high ? high : value);
-}
-
-template <typename T>
-T Damp(T input, T factor) {
-  T result;
-  if (factor == 1) {
-    result = 1 - (1 - input) * (1 - input);
-  } else {
-    result = 1 - std::pow(1 - input, 2 * factor);
-  }
-  return result;
-}
+const ui::SystemUIResourceType kResourceId = ui::OVERSCROLL_GLOW_L;
 
 }  // namespace
 
-EdgeEffectL::EdgeEffectL(ui::SystemUIResourceManager* resource_manager)
+EdgeEffectL::EdgeEffectL(ui::ResourceManager* resource_manager)
     : resource_manager_(resource_manager),
       glow_(cc::UIResourceLayer::Create()),
       glow_alpha_(0),
@@ -255,7 +235,8 @@ void EdgeEffectL::ApplyToLayers(const gfx::SizeF& size,
       r, std::min(1.f, glow_scale_y_) * base_glow_scale * bounds_.height());
 
   glow_->SetIsDrawable(true);
-  glow_->SetUIResourceId(resource_manager_->GetUIResourceId(kResourceType));
+  glow_->SetUIResourceId(resource_manager_->GetUIResourceId(
+      ui::ANDROID_RESOURCE_TYPE_SYSTEM, kResourceId));
   glow_->SetTransformOrigin(gfx::Point3F(bounds_.width() * 0.5f, 0, 0));
   glow_->SetBounds(image_bounds);
   glow_->SetContentsOpaque(false);
@@ -273,14 +254,13 @@ void EdgeEffectL::ApplyToLayers(const gfx::SizeF& size,
 void EdgeEffectL::SetParent(cc::Layer* parent) {
   if (glow_->parent() != parent)
     parent->AddChild(glow_);
-  glow_->SetUIResourceId(resource_manager_->GetUIResourceId(kResourceType));
 }
 
 // static
-void EdgeEffectL::PreloadResources(
-    ui::SystemUIResourceManager* resource_manager) {
+void EdgeEffectL::PreloadResources(ui::ResourceManager* resource_manager) {
   DCHECK(resource_manager);
-  resource_manager->PreloadResource(kResourceType);
+  resource_manager->PreloadResource(ui::ANDROID_RESOURCE_TYPE_SYSTEM,
+                                    kResourceId);
 }
 
 }  // namespace content

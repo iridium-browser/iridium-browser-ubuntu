@@ -58,15 +58,16 @@ void VideoCaptureDeviceFactoryAndroid::GetDeviceNames(
 
   JNIEnv* env = AttachCurrentThread();
 
-  int num_cameras = Java_VideoCaptureFactory_getNumberOfCameras(
-      env, base::android::GetApplicationContext());
+  const jobject context = base::android::GetApplicationContext();
+  const int num_cameras = Java_VideoCaptureFactory_getNumberOfCameras(env,
+                                                                      context);
   DVLOG(1) << "VideoCaptureDevice::GetDeviceNames: num_cameras=" << num_cameras;
   if (num_cameras <= 0)
     return;
 
   for (int camera_id = num_cameras - 1; camera_id >= 0; --camera_id) {
     base::android::ScopedJavaLocalRef<jstring> device_name =
-        Java_VideoCaptureFactory_getDeviceName(env, camera_id);
+        Java_VideoCaptureFactory_getDeviceName(env, camera_id, context);
     if (device_name.obj() == NULL)
       continue;
 
@@ -89,7 +90,8 @@ void VideoCaptureDeviceFactoryAndroid::GetDeviceSupportedFormats(
     return;
   JNIEnv* env = AttachCurrentThread();
   base::android::ScopedJavaLocalRef<jobjectArray> collected_formats =
-      Java_VideoCaptureFactory_getDeviceSupportedFormats(env, id);
+      Java_VideoCaptureFactory_getDeviceSupportedFormats(env,
+          base::android::GetApplicationContext(), id);
   if (collected_formats.is_null())
     return;
 
@@ -121,6 +123,13 @@ void VideoCaptureDeviceFactoryAndroid::GetDeviceSupportedFormats(
     capture_formats->push_back(capture_format);
     DVLOG(1) << device.name() << " " << capture_format.ToString();
   }
+}
+
+// static
+VideoCaptureDeviceFactory*
+VideoCaptureDeviceFactory::CreateVideoCaptureDeviceFactory(
+    scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner) {
+  return new VideoCaptureDeviceFactoryAndroid();
 }
 
 }  // namespace media

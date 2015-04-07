@@ -36,17 +36,17 @@ namespace blink {
 class Document;
 class HTMLDocumentParser;
 
-class ActiveParserSession {
+class ActiveParserSession : public NestingLevelIncrementer {
     STACK_ALLOCATED();
 public:
-    explicit ActiveParserSession(Document*);
+    ActiveParserSession(unsigned& nestingLevel, Document*);
     ~ActiveParserSession();
 
 private:
     RefPtrWillBeMember<Document> m_document;
 };
 
-class PumpSession : public NestingLevelIncrementer, public ActiveParserSession {
+class PumpSession : public ActiveParserSession {
     STACK_ALLOCATED();
 public:
     PumpSession(unsigned& nestingLevel, Document*);
@@ -55,13 +55,16 @@ public:
 
 class SpeculationsPumpSession : public ActiveParserSession {
 public:
-    explicit SpeculationsPumpSession(Document*);
+    SpeculationsPumpSession(unsigned& nestingLevel, Document*);
     ~SpeculationsPumpSession();
 
     double elapsedTime() const;
+    void addedElementTokens(size_t count);
+    size_t processedElementTokens() const { return m_processedElementTokens; }
 
 private:
     double m_startTime;
+    size_t m_processedElementTokens;
 };
 
 class HTMLParserScheduler {
@@ -75,7 +78,17 @@ public:
 
     bool isScheduledForResume() const { return m_isSuspendedWithActiveTimer || m_continueNextChunkTimer.isActive(); }
 
-    bool yieldIfNeeded(const SpeculationsPumpSession&);
+    void scheduleForResume();
+    bool yieldIfNeeded(const SpeculationsPumpSession&, bool startingScript);
+
+    /**
+     * Can only be called if this scheduler is suspended. If this is called,
+     * then after the scheduler is resumed by calling resume(), this call
+     * ensures that HTMLDocumentParser::resumeAfterYield will be called. Used to
+     * signal this scheduler that the background html parser sent chunks to
+     * HTMLDocumentParser while it was suspended.
+     */
+    void forceResumeAfterYield();
 
     void suspend();
     void resume();
@@ -83,8 +96,7 @@ public:
 private:
     explicit HTMLParserScheduler(HTMLDocumentParser*);
 
-    bool shouldYield(const SpeculationsPumpSession&) const;
-    void scheduleForResume();
+    bool shouldYield(const SpeculationsPumpSession&, bool startingScript) const;
     void continueNextChunkTimerFired(Timer<HTMLParserScheduler>*);
 
     HTMLDocumentParser* m_parser;

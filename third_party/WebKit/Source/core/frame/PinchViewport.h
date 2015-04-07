@@ -147,6 +147,7 @@ private:
     explicit PinchViewport(FrameHost&);
 
     // ScrollableArea implementation
+    virtual bool shouldUseIntegerScrollOffset() const override;
     virtual bool isActive() const override { return false; }
     virtual int scrollSize(ScrollbarOrientation) const override;
     virtual bool isScrollCornerVisible() const override { return false; }
@@ -187,6 +188,7 @@ private:
     RawPtrWillBeMember<FrameHost> m_frameHost;
     OwnPtr<GraphicsLayer> m_rootTransformLayer;
     OwnPtr<GraphicsLayer> m_innerViewportContainerLayer;
+    OwnPtr<GraphicsLayer> m_overscrollElasticityLayer;
     OwnPtr<GraphicsLayer> m_pageScaleLayer;
     OwnPtr<GraphicsLayer> m_innerViewportScrollLayer;
     OwnPtr<GraphicsLayer> m_overlayScrollbarHorizontal;

@@ -34,6 +34,7 @@
 
 #include "SkBitmap.h"
 #include "SkCanvas.h"
+#include "bindings/core/v8/SerializedScriptValueFactory.h"
 #include "bindings/core/v8/V8Node.h"
 #include "core/UserAgentStyleSheets.h"
 #include "core/clipboard/DataTransfer.h"
@@ -373,7 +374,7 @@ public:
     CSSCallbackWebFrameClient() : m_updateCount(0) { }
     virtual void didMatchCSS(WebLocalFrame*, const WebVector<WebString>& newlyMatchingSelectors, const WebVector<WebString>& stoppedMatchingSelectors) override;
 
-    std::map<WebLocalFrame*, std::set<std::string> > m_matchedSelectors;
+    std::map<WebLocalFrame*, std::set<std::string>> m_matchedSelectors;
     int m_updateCount;
 };
 
@@ -397,7 +398,6 @@ class WebFrameCSSCallbackTest : public testing::Test {
 protected:
     WebFrameCSSCallbackTest()
     {
-
         m_frame = m_helper.initializeAndLoad("about:blank", true, &m_client)->mainFrame()->toWebLocalFrame();
     }
 
@@ -672,7 +672,7 @@ TEST_F(WebFrameTest, PostMessageThenDetach)
 
     RefPtrWillBeRawPtr<LocalFrame> frame = toLocalFrame(webViewHelper.webViewImpl()->page()->mainFrame());
     NonThrowableExceptionState exceptionState;
-    frame->domWindow()->postMessage(SerializedScriptValue::create("message"), 0, "*", frame->domWindow(), exceptionState);
+    frame->domWindow()->postMessage(SerializedScriptValueFactory::instance().create("message"), 0, "*", frame->localDOMWindow(), exceptionState);
     webViewHelper.reset();
     EXPECT_FALSE(exceptionState.hadException());
 
@@ -1505,6 +1505,30 @@ TEST_F(WebFrameTest, OverflowHiddenDisablesScrolling)
 
     FrameView* view = webViewHelper.webViewImpl()->mainFrameImpl()->frameView();
     EXPECT_FALSE(view->userInputScrollable(VerticalScrollbar));
+    EXPECT_FALSE(view->userInputScrollable(HorizontalScrollbar));
+}
+
+TEST_F(WebFrameTest, OverflowHiddenDisablesScrollingWithSetCanHaveScrollbars)
+{
+    registerMockedHttpURLLoad("body-overflow-hidden-short.html");
+
+    FixedLayoutTestWebViewClient client;
+    client.m_screenInfo.deviceScaleFactor = 1;
+    int viewportWidth = 640;
+    int viewportHeight = 480;
+
+    FrameTestHelpers::WebViewHelper webViewHelper;
+    webViewHelper.initialize(true, 0, &client);
+    FrameTestHelpers::loadFrame(webViewHelper.webView()->mainFrame(), m_baseURL + "body-overflow-hidden-short.html");
+    webViewHelper.webView()->resize(WebSize(viewportWidth, viewportHeight));
+
+    FrameView* view = webViewHelper.webViewImpl()->mainFrameImpl()->frameView();
+    EXPECT_FALSE(view->userInputScrollable(VerticalScrollbar));
+    EXPECT_FALSE(view->userInputScrollable(HorizontalScrollbar));
+
+    webViewHelper.webViewImpl()->mainFrameImpl()->setCanHaveScrollbars(true);
+    EXPECT_FALSE(view->userInputScrollable(VerticalScrollbar));
+    EXPECT_FALSE(view->userInputScrollable(HorizontalScrollbar));
 }
 
 TEST_F(WebFrameTest, IgnoreOverflowHiddenQuirk)
@@ -1938,7 +1962,7 @@ protected:
 
     static FloatSize computeRelativeOffset(const IntPoint& absoluteOffset, const LayoutRect& rect)
     {
-        FloatSize relativeOffset = FloatPoint(absoluteOffset) - rect.location();
+        FloatSize relativeOffset = FloatPoint(absoluteOffset) - FloatPoint(rect.location());
         relativeOffset.scale(1.f / rect.width(), 1.f / rect.height());
         return relativeOffset;
     }
@@ -2095,7 +2119,7 @@ TEST_F(WebFrameTest, pageScaleFactorScalesPaintClip)
     bitmap.eraseColor(0);
     SkCanvas canvas(bitmap);
 
-    GraphicsContext context(&canvas);
+    GraphicsContext context(&canvas, nullptr);
     context.setRegionTrackingMode(GraphicsContext::RegionTrackingOpaque);
 
     EXPECT_RECT_EQ(IntRect(0, 0, 0, 0), context.opaqueRegion().asRect());
@@ -2893,13 +2917,14 @@ TEST_F(WebFrameTest, DivScrollIntoEditableTest)
     int viewportHeight = 300;
     float leftBoxRatio = 0.3f;
     int caretPadding = 10;
-    float minReadableCaretHeight = 18.0f;
+    float minReadableCaretHeight = 16.0f;
     FrameTestHelpers::WebViewHelper webViewHelper;
     webViewHelper.initializeAndLoad(m_baseURL + "get_scale_for_zoom_into_editable_test.html");
+    webViewHelper.webViewImpl()->page()->settings().setTextAutosizingEnabled(false);
     webViewHelper.webView()->resize(WebSize(viewportWidth, viewportHeight));
-    webViewHelper.webView()->setPageScaleFactorLimits(1, 4);
-    webViewHelper.webView()->layout();
+    webViewHelper.webView()->setPageScaleFactorLimits(0.25f, 4);
     webViewHelper.webView()->setDeviceScaleFactor(1.5f);
+    webViewHelper.webView()->layout();
     webViewHelper.webView()->settings()->setAutoZoomFocusedNodeToLegibleScale(true);
 
     webViewHelper.webViewImpl()->enableFakePageScaleAnimationForTesting(true);
@@ -2916,6 +2941,10 @@ TEST_F(WebFrameTest, DivScrollIntoEditableTest)
     WebRect rect, caret;
     webViewHelper.webViewImpl()->selectionBounds(caret, rect);
 
+    // Set the page scale to be smaller than the minimal readable scale.
+    float initialScale = minReadableCaretHeight / caret.height * 0.5f;
+    setScaleAndScrollAndLayout(webViewHelper.webView(), WebPoint(0, 0), initialScale);
+
     float scale;
     IntPoint scroll;
     bool needAnimation;
@@ -2923,43 +2952,44 @@ TEST_F(WebFrameTest, DivScrollIntoEditableTest)
     EXPECT_TRUE(needAnimation);
     // The edit box should be left aligned with a margin for possible label.
     int hScroll = editBoxWithText.x - leftBoxRatio * viewportWidth / scale;
-    EXPECT_NEAR(hScroll, scroll.x(), 5);
+    EXPECT_NEAR(hScroll, scroll.x(), 2);
     int vScroll = editBoxWithText.y - (viewportHeight / scale - editBoxWithText.height) / 2;
-    EXPECT_NEAR(vScroll, scroll.y(), 1);
+    EXPECT_NEAR(vScroll, scroll.y(), 2);
     EXPECT_NEAR(minReadableCaretHeight / caret.height, scale, 0.1);
 
     // The edit box is wider than the viewport when legible.
     viewportWidth = 200;
     viewportHeight = 150;
     webViewHelper.webView()->resize(WebSize(viewportWidth, viewportHeight));
-    setScaleAndScrollAndLayout(webViewHelper.webView(), WebPoint(0, 0), 1);
-    webViewHelper.webViewImpl()->selectionBounds(caret, rect);
+    setScaleAndScrollAndLayout(webViewHelper.webView(), WebPoint(0, 0), initialScale);
     webViewHelper.webViewImpl()->computeScaleAndScrollForFocusedNode(webViewHelper.webViewImpl()->focusedElement(), scale, scroll, needAnimation);
     EXPECT_TRUE(needAnimation);
     // The caret should be right aligned since the caret would be offscreen when the edit box is left aligned.
     hScroll = caret.x + caret.width + caretPadding - viewportWidth / scale;
-    EXPECT_NEAR(hScroll, scroll.x(), 1);
+    EXPECT_NEAR(hScroll, scroll.x(), 2);
     EXPECT_NEAR(minReadableCaretHeight / caret.height, scale, 0.1);
 
-    setScaleAndScrollAndLayout(webViewHelper.webView(), WebPoint(0, 0), 1);
+    setScaleAndScrollAndLayout(webViewHelper.webView(), WebPoint(0, 0), initialScale);
     // Move focus to edit box with text.
     webViewHelper.webView()->advanceFocus(false);
-    webViewHelper.webViewImpl()->selectionBounds(caret, rect);
     webViewHelper.webViewImpl()->computeScaleAndScrollForFocusedNode(webViewHelper.webViewImpl()->focusedElement(), scale, scroll, needAnimation);
     EXPECT_TRUE(needAnimation);
     // The edit box should be left aligned.
     hScroll = editBoxWithNoText.x;
-    EXPECT_NEAR(hScroll, scroll.x(), 1);
+    EXPECT_NEAR(hScroll, scroll.x(), 2);
     vScroll = editBoxWithNoText.y - (viewportHeight / scale - editBoxWithNoText.height) / 2;
-    EXPECT_NEAR(vScroll, scroll.y(), 1);
+    EXPECT_NEAR(vScroll, scroll.y(), 2);
     EXPECT_NEAR(minReadableCaretHeight / caret.height, scale, 0.1);
-
-    setScaleAndScrollAndLayout(webViewHelper.webViewImpl(), scroll, scale);
 
     // Move focus back to the first edit box.
     webViewHelper.webView()->advanceFocus(true);
+    // Zoom out slightly.
+    const float withinToleranceScale = scale * 0.9f;
+    setScaleAndScrollAndLayout(webViewHelper.webViewImpl(), scroll, withinToleranceScale);
+    // Move focus back to the second edit box.
+    webViewHelper.webView()->advanceFocus(false);
     webViewHelper.webViewImpl()->computeScaleAndScrollForFocusedNode(webViewHelper.webViewImpl()->focusedElement(), scale, scroll, needAnimation);
-    // The position should have stayed the same since this box was already on screen with the right scale.
+    // The scale should not be adjusted as the zoomed out scale was sufficiently close to the previously focused scale.
     EXPECT_FALSE(needAnimation);
 }
 
@@ -2969,13 +2999,14 @@ TEST_F(WebFrameTest, DivScrollIntoEditablePreservePageScaleTest)
 
     const int viewportWidth = 450;
     const int viewportHeight = 300;
-    const float minReadableCaretHeight = 18.0f;
+    const float minReadableCaretHeight = 16.0f;
     FrameTestHelpers::WebViewHelper webViewHelper;
     webViewHelper.initializeAndLoad(m_baseURL + "get_scale_for_zoom_into_editable_test.html");
+    webViewHelper.webViewImpl()->page()->settings().setTextAutosizingEnabled(false);
     webViewHelper.webView()->resize(WebSize(viewportWidth, viewportHeight));
-    webViewHelper.webView()->setPageScaleFactorLimits(1, 4);
-    webViewHelper.webView()->layout();
+    webViewHelper.webView()->setPageScaleFactorLimits(1.f, 4);
     webViewHelper.webView()->setDeviceScaleFactor(1.5f);
+    webViewHelper.webView()->layout();
     webViewHelper.webView()->settings()->setAutoZoomFocusedNodeToLegibleScale(true);
     webViewHelper.webViewImpl()->enableFakePageScaleAnimationForTesting(true);
 
@@ -2988,7 +3019,7 @@ TEST_F(WebFrameTest, DivScrollIntoEditablePreservePageScaleTest)
     WebRect rect, caret;
     webViewHelper.webViewImpl()->selectionBounds(caret, rect);
 
-    // Set page scale twice larger then minimal readable scale
+    // Set the page scale to be twice as large as the minimal readable scale.
     float newScale = minReadableCaretHeight / caret.height * 2.0;
     setScaleAndScrollAndLayout(webViewHelper.webView(), WebPoint(0, 0), newScale);
 
@@ -4292,7 +4323,6 @@ public:
     CompositedSelectionBoundsTestLayerTreeView() : m_selectionCleared(false) { }
     virtual ~CompositedSelectionBoundsTestLayerTreeView() { }
 
-    virtual void setSurfaceReady()  override { }
     virtual void setRootLayer(const WebLayer&)  override { }
     virtual void clearRootLayer()  override { }
     virtual void setViewportSize(const WebSize& deviceViewportSize)  override { }
@@ -4423,6 +4453,8 @@ TEST_F(CompositedSelectionBoundsTest, Transformed) { runTest("composited_selecti
 TEST_F(CompositedSelectionBoundsTest, SplitLayer) { runTest("composited_selection_bounds_split_layer.html"); }
 TEST_F(CompositedSelectionBoundsTest, EmptyLayer) { runTest("composited_selection_bounds_empty_layer.html"); }
 TEST_F(CompositedSelectionBoundsTest, Iframe) { runTestWithMultipleFiles("composited_selection_bounds_iframe.html", "composited_selection_bounds_basic.html", nullptr); }
+TEST_F(CompositedSelectionBoundsTest, DetachedFrame) { runTest("composited_selection_bounds_detached_frame.html"); }
+
 
 TEST_F(WebFrameTest, CompositedSelectionBoundsCleared)
 {
@@ -4876,7 +4908,7 @@ TEST_F(WebFrameTest, NavigateToSandboxedMarkup)
     WebViewImpl* webViewImpl = webViewHelper.initializeAndLoad("about:blank", true, &webFrameClient);
     WebLocalFrameImpl* frame = toWebLocalFrameImpl(webViewHelper.webView()->mainFrame());
 
-    frame->document().setIsTransitionDocument();
+    frame->document().setIsTransitionDocument(true);
 
     std::string markup("<div id='foo'></div><script>document.getElementById('foo').setAttribute('dir', 'rtl')</script>");
     frame->navigateToSandboxedMarkup(WebData(markup.data(), markup.length()));
@@ -5520,7 +5552,7 @@ TEST_F(WebFrameTest, SimulateFragmentAnchorMiddleClick)
     destination.setFragmentIdentifier("test");
 
     RefPtrWillBeRawPtr<Event> event = MouseEvent::create(EventTypeNames::click, false, false,
-        document->domWindow(), 0, 0, 0, 0, 0, 0, 0, false, false, false, false, 1, nullptr, nullptr);
+        document->domWindow(), 0, 0, 0, 0, 0, 0, 0, false, false, false, false, 1, 0, nullptr, nullptr);
     FrameLoadRequest frameRequest(document, ResourceRequest(destination));
     frameRequest.setTriggeringEvent(event);
     toLocalFrame(webViewHelper.webViewImpl()->page()->mainFrame())->loader().load(frameRequest);
@@ -5569,7 +5601,7 @@ TEST_F(WebFrameTest, ModifiedClickNewWindow)
 
     // ctrl+click event
     RefPtrWillBeRawPtr<Event> event = MouseEvent::create(EventTypeNames::click, false, false,
-        document->domWindow(), 0, 0, 0, 0, 0, 0, 0, true, false, false, false, 0, nullptr, nullptr);
+        document->domWindow(), 0, 0, 0, 0, 0, 0, 0, true, false, false, false, 0, 0, nullptr, nullptr);
     FrameLoadRequest frameRequest(document, ResourceRequest(destination));
     frameRequest.setTriggeringEvent(event);
     UserGestureIndicator gesture(DefinitelyProcessingUserGesture);
@@ -5929,10 +5961,10 @@ public:
     TestHistoryWebFrameClient()
     {
         m_replacesCurrentHistoryItem = false;
-        m_frame = 0;
+        m_frame = nullptr;
     }
 
-    void didStartProvisionalLoad(WebLocalFrame* frame, bool isTransitionNavigation)
+    void didStartProvisionalLoad(WebLocalFrame* frame, bool isTransitionNavigation, double)
     {
         WebDataSource* ds = frame->provisionalDataSource();
         m_replacesCurrentHistoryItem = ds->replacesCurrentHistoryItem();
@@ -6348,6 +6380,7 @@ TEST_F(WebFrameTest, FullscreenMediaStreamVideo)
     RenderLayer* renderLayer =  videoFullscreen->renderer()->enclosingLayer();
     GraphicsLayer* graphicsLayer = renderLayer->graphicsLayerBacking();
     EXPECT_TRUE(graphicsLayer->contentsAreVisible());
+    context->notifyContextDestroyed();
 }
 
 TEST_F(WebFrameTest, RenderBlockPercentHeightDescendants)
@@ -6834,6 +6867,47 @@ TEST_F(WebFrameSwapTest, SwapParentShouldDetachChildren)
     remoteFrame->close();
 }
 
+class RemoteToLocalSwapWebFrameClient : public FrameTestHelpers::TestWebFrameClient {
+public:
+    explicit RemoteToLocalSwapWebFrameClient(WebRemoteFrame* remoteFrame)
+        : m_historyCommitType(WebHistoryInertCommit)
+        , m_remoteFrame(remoteFrame)
+    {
+    }
+
+    void didCommitProvisionalLoad(WebLocalFrame* frame, const WebHistoryItem&, WebHistoryCommitType historyCommitType) override
+    {
+        m_historyCommitType = historyCommitType;
+        m_remoteFrame->swap(frame);
+    }
+
+    WebHistoryCommitType historyCommitType() const { return m_historyCommitType; }
+
+    WebHistoryCommitType m_historyCommitType;
+    WebRemoteFrame* m_remoteFrame;
+};
+
+TEST_F(WebFrameSwapTest, HistoryCommitTypeAfterRemoteToLocalSwap)
+{
+    WebRemoteFrame* remoteFrame = WebRemoteFrame::create(nullptr);
+    WebFrame* targetFrame = mainFrame()->firstChild();
+    ASSERT_TRUE(targetFrame);
+    targetFrame->swap(remoteFrame);
+    ASSERT_TRUE(mainFrame()->firstChild());
+    ASSERT_EQ(mainFrame()->firstChild(), remoteFrame);
+
+    RemoteToLocalSwapWebFrameClient client(remoteFrame);
+    WebLocalFrame* localFrame = WebLocalFrame::create(&client);
+    localFrame->initializeToReplaceRemoteFrame(remoteFrame);
+    FrameTestHelpers::loadFrame(localFrame, m_baseURL + "subframe-hello.html");
+    EXPECT_EQ(WebStandardCommit, client.historyCommitType());
+
+    // Manually reset to break WebViewHelper's dependency on the stack allocated
+    // TestWebFrameClient.
+    reset();
+    remoteFrame->close();
+}
+
 class MockDocumentThreadableLoaderClient : public DocumentThreadableLoaderClient {
 public:
     MockDocumentThreadableLoaderClient() : m_failed(false) { }
@@ -6886,12 +6960,12 @@ public:
         , m_provisionalLoadCount(0)
         , m_wasLastProvisionalLoadATransition(false) { }
 
-    virtual void addNavigationTransitionData(const WebString& allowedDestinationOrigin, const WebString& selector, const WebString& markup) override
+    virtual void addNavigationTransitionData(const WebTransitionElementData& data) override
     {
         m_navigationalDataReceivedCount++;
     }
 
-    virtual void didStartProvisionalLoad(WebLocalFrame* localFrame, bool isTransitionNavigation) override
+    virtual void didStartProvisionalLoad(WebLocalFrame* localFrame, bool isTransitionNavigation, double) override
     {
         m_provisionalLoadCount++;
         m_wasLastProvisionalLoadATransition = isTransitionNavigation;

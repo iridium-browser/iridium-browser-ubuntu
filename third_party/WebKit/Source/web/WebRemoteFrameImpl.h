@@ -33,6 +33,8 @@ public:
     virtual bool isLocal() const override;
     virtual SandboxFlags sandboxFlags() const override;
     virtual void dispatchLoad() override;
+
+    virtual void trace(Visitor*) override;
 };
 
 class WebRemoteFrameImpl final : public RefCountedWillBeGarbageCollectedFinalized<WebRemoteFrameImpl>, public WebRemoteFrame {
@@ -85,7 +87,7 @@ public:
         const WebScriptSource&) override;
     virtual void executeScriptInIsolatedWorld(
         int worldID, const WebScriptSource* sourcesIn, unsigned numSources,
-        int extensionGroup, WebVector<v8::Local<v8::Value> >* results) override;
+        int extensionGroup, WebVector<v8::Local<v8::Value>>* results) override;
     virtual v8::Handle<v8::Value> callFunctionEvenIfScriptDisabled(
         v8::Handle<v8::Function>,
         v8::Handle<v8::Value>,
@@ -145,7 +147,6 @@ public:
     virtual float getPrintPageShrink(int page) override;
     virtual void printEnd() override;
     virtual bool isPrintScalingDisabledForPlugin(const WebNode&) override;
-    virtual int getPrintCopiesForPlugin(const WebNode&) override;
     virtual bool hasCustomPageSizeStyle(int pageIndex) override;
     virtual bool isPageBoxVisible(int pageIndex) override;
     virtual void pageSizeAndMarginsInPixels(
@@ -199,6 +200,10 @@ public:
 
     virtual void initializeFromFrame(WebLocalFrame*) const override;
 
+    virtual void setReplicatedOrigin(const WebSecurityOrigin&) const override;
+    void didStartLoading() override;
+    void didStopLoading() override;
+
 #if ENABLE(OILPAN)
     void trace(Visitor*);
 #endif
@@ -208,7 +213,7 @@ private:
     RefPtrWillBeMember<RemoteFrame> m_frame;
     WebRemoteFrameClient* m_client;
 
-    WillBeHeapHashMap<WebFrame*, OwnPtrWillBeMember<FrameOwner> > m_ownersForChildren;
+    WillBeHeapHashMap<WebFrame*, OwnPtrWillBeMember<FrameOwner>> m_ownersForChildren;
 
 #if ENABLE(OILPAN)
     // Oilpan: to provide the guarantee of having the frame live until

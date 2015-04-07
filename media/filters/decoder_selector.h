@@ -50,23 +50,25 @@ class MEDIA_EXPORT DecoderSelector {
       SelectDecoderCB;
 
   // |decoders| contains the Decoders to use when initializing.
-  //
-  // |set_decryptor_ready_cb| is optional. If |set_decryptor_ready_cb| is null,
-  // no decryptor will be available to perform decryption.
   DecoderSelector(
       const scoped_refptr<base::SingleThreadTaskRunner>& message_loop,
-      ScopedVector<Decoder> decoders,
-      const SetDecryptorReadyCB& set_decryptor_ready_cb);
+      ScopedVector<Decoder> decoders);
 
   // Aborts pending Decoder selection and fires |select_decoder_cb| with
   // NULL and NULL immediately if it's pending.
   ~DecoderSelector();
 
-  // Initializes and selects a Decoder that can decode the |stream|.
-  // Selected Decoder (and DecryptingDemuxerStream) is returned via
+  // Initializes and selects the first Decoder that can decode the |stream|.
+  // The selected Decoder (and DecryptingDemuxerStream) is returned via
   // the |select_decoder_cb|.
+  // Notes:
+  // 1. This must not be called again before |select_decoder_cb| is run.
+  // 2. Decoders that fail to initialize will be deleted. Future calls will
+  //    select from the decoders following the decoder that was last returned.
+  // 3. |set_decryptor_ready_cb| is optional. If |set_decryptor_ready_cb| is
+  //    null, no decryptor will be available to perform decryption.
   void SelectDecoder(DemuxerStream* stream,
-                     bool low_delay,
+                     const SetDecryptorReadyCB& set_decryptor_ready_cb,
                      const SelectDecoderCB& select_decoder_cb,
                      const typename Decoder::OutputCB& output_cb);
 
@@ -79,10 +81,9 @@ class MEDIA_EXPORT DecoderSelector {
 
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   ScopedVector<Decoder> decoders_;
-  SetDecryptorReadyCB set_decryptor_ready_cb_;
 
   DemuxerStream* input_stream_;
-  bool low_delay_;
+  SetDecryptorReadyCB set_decryptor_ready_cb_;
   SelectDecoderCB select_decoder_cb_;
   typename Decoder::OutputCB output_cb_;
 

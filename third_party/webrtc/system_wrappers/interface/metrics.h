@@ -78,6 +78,9 @@
 #define RTC_HISTOGRAM_COUNTS_10000(name, sample) RTC_HISTOGRAM_COUNTS( \
     name, sample, 1, 10000, 50)
 
+#define RTC_HISTOGRAM_COUNTS_100000(name, sample) RTC_HISTOGRAM_COUNTS( \
+    name, sample, 1, 100000, 50)
+
 #define RTC_HISTOGRAM_COUNTS(name, sample, min, max, bucket_count) \
     RTC_HISTOGRAM_COMMON_BLOCK(name, sample, \
         webrtc::metrics::HistogramFactoryGetCounts( \
@@ -103,6 +106,9 @@
 
 namespace webrtc {
 namespace metrics {
+
+// Time that should have elapsed for stats that are gathered once per call.
+enum { kMinRunTimeInSeconds = 10 };
 
 class Histogram;
 

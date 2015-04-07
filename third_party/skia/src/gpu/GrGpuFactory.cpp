@@ -12,7 +12,7 @@
 #include "gl/GrGLConfig.h"
 
 #include "GrGpu.h"
-#include "gl/GrGpuGL.h"
+#include "gl/GrGLGpu.h"
 
 GrGpu* GrGpu::Create(GrBackend backend, GrBackendContext backendContext, GrContext* context) {
 
@@ -36,7 +36,7 @@ GrGpu* GrGpu::Create(GrBackend backend, GrBackendContext backendContext, GrConte
         }
         GrGLContext ctx(glInterface);
         if (ctx.isInitialized()) {
-            return SkNEW_ARGS(GrGpuGL, (ctx, context));
+            return SkNEW_ARGS(GrGLGpu, (ctx, context));
         }
     }
     return NULL;

@@ -248,6 +248,7 @@ class TestWebGraphicsContext3D {
                           GLsizeiptr size,
                           const void* data,
                           GLenum usage);
+  virtual void pixelStorei(GLenum pname, GLint param);
   virtual void* mapBufferCHROMIUM(GLenum target,
                                   GLenum access);
   virtual GLboolean unmapBufferCHROMIUM(GLenum target);
@@ -330,6 +331,9 @@ class TestWebGraphicsContext3D {
   void set_support_image(bool support) {
     test_capabilities_.gpu.image = support;
   }
+  void set_support_texture_rectangle(bool support) {
+    test_capabilities_.gpu.texture_rectangle = support;
+  }
 
   // When this context is lost, all contexts in its share group are also lost.
   void add_share_group_context(TestWebGraphicsContext3D* context3d) {
@@ -347,6 +351,12 @@ class TestWebGraphicsContext3D {
 
   virtual GLuint NextImageId();
   virtual void RetireImageId(GLuint id);
+
+  virtual GLuint NextFramebufferId();
+  virtual void RetireFramebufferId(GLuint id);
+
+  virtual GLuint NextRenderbufferId();
+  virtual void RetireRenderbufferId(GLuint id);
 
   void SetMaxTransferBufferUsageBytes(size_t max_transfer_buffer_usage_bytes);
   size_t max_used_transfer_buffer_usage_bytes() const {
@@ -418,9 +428,11 @@ class TestWebGraphicsContext3D {
     unsigned next_buffer_id;
     unsigned next_image_id;
     unsigned next_texture_id;
+    unsigned next_renderbuffer_id;
     base::ScopedPtrHashMap<unsigned, Buffer> buffers;
     base::hash_set<unsigned> images;
     OrderedTextureMap textures;
+    base::hash_set<unsigned> renderbuffer_set;
 
    private:
     friend class base::RefCountedThreadSafe<Namespace>;
@@ -449,6 +461,9 @@ class TestWebGraphicsContext3D {
   base::hash_set<unsigned> program_set_;
   unsigned next_shader_id_;
   base::hash_set<unsigned> shader_set_;
+  unsigned next_framebuffer_id_;
+  base::hash_set<unsigned> framebuffer_set_;
+  unsigned current_framebuffer_;
   std::vector<TestWebGraphicsContext3D*> shared_contexts_;
   int max_texture_size_;
   bool reshape_called_;
@@ -460,6 +475,7 @@ class TestWebGraphicsContext3D {
   UpdateType last_update_type_;
   unsigned next_insert_sync_point_;
   unsigned last_waited_sync_point_;
+  int unpack_alignment_;
 
   unsigned bound_buffer_;
   TextureTargets texture_targets_;

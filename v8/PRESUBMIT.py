@@ -198,8 +198,8 @@ def _CommonChecks(input_api, output_api):
 
 def _SkipTreeCheck(input_api, output_api):
   """Check the env var whether we want to skip tree check.
-     Only skip if src/version.cc has been updated."""
-  src_version = 'src/version.cc'
+     Only skip if include/v8-version.h has been updated."""
+  src_version = 'include/v8-version.h'
   FilterFile = lambda file: file.LocalPath() == src_version
   if not input_api.AffectedSourceFiles(
       lambda file: file.LocalPath() == src_version):
@@ -244,11 +244,11 @@ def GetPreferredTryMasters(project, change):
       'v8_linux_rel': set(['defaulttests']),
       'v8_linux_dbg': set(['defaulttests']),
       'v8_linux_nosnap_rel': set(['defaulttests']),
-      'v8_linux_nosnap_dbg': set(['defaulttests']),
       'v8_linux64_rel': set(['defaulttests']),
       'v8_linux_arm_dbg': set(['defaulttests']),
       'v8_linux_arm64_rel': set(['defaulttests']),
       'v8_linux_layout_dbg': set(['defaulttests']),
+      'v8_linux_chromium_gn_rel': set(['defaulttests']),
       'v8_mac_rel': set(['defaulttests']),
       'v8_win_rel': set(['defaulttests']),
       'v8_win64_compile_rel': set(['defaulttests']),

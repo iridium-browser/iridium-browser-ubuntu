@@ -155,7 +155,10 @@ int64 MakeServerNodeForType(UserShare* share,
   entry.PutBaseVersion(1);
   entry.PutServerVersion(1);
   entry.PutIsUnappliedUpdate(false);
-  entry.PutServerParentId(syncable::GetNullId());
+  // TODO(stanisc): setting parent ID might be unnecessary once
+  // empty parent ID is supported.
+  entry.PutParentId(syncable::Id::GetRoot());
+  entry.PutServerParentId(syncable::Id::GetRoot());
   entry.PutServerIsDir(true);
   entry.PutIsDir(true);
   entry.PutServerSpecifics(specifics);
@@ -199,13 +202,9 @@ int64 MakeServerNode(UserShare* share, ModelType model_type,
 
 class SyncApiTest : public testing::Test {
  public:
-  virtual void SetUp() {
-    test_user_share_.SetUp();
-  }
+  void SetUp() override { test_user_share_.SetUp(); }
 
-  virtual void TearDown() {
-    test_user_share_.TearDown();
-  }
+  void TearDown() override { test_user_share_.TearDown(); }
 
  protected:
   // Create an entry with the given |model_type|, |client_tag| and

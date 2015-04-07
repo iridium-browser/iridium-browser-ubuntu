@@ -27,6 +27,7 @@
 #define WTF_Functional_h
 
 #include "wtf/Assertions.h"
+#include "wtf/PassOwnPtr.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/RefPtr.h"
 #include "wtf/ThreadSafeRefCounted.h"
@@ -98,14 +99,14 @@ template<typename T> struct ParamStorageTraits {
     static const T& unwrap(const StorageType& value) { return value; }
 };
 
-template<typename T> struct ParamStorageTraits<PassRefPtr<T> > {
+template<typename T> struct ParamStorageTraits<PassRefPtr<T>> {
     typedef RefPtr<T> StorageType;
 
     static StorageType wrap(PassRefPtr<T> value) { return value; }
     static T* unwrap(const StorageType& value) { return value.get(); }
 };
 
-template<typename T> struct ParamStorageTraits<RefPtr<T> > {
+template<typename T> struct ParamStorageTraits<RefPtr<T>> {
     typedef RefPtr<T> StorageType;
 
     static StorageType wrap(RefPtr<T> value) { return value.release(); }
@@ -114,7 +115,7 @@ template<typename T> struct ParamStorageTraits<RefPtr<T> > {
 
 template<typename> class RetainPtr;
 
-template<typename T> struct ParamStorageTraits<RetainPtr<T> > {
+template<typename T> struct ParamStorageTraits<RetainPtr<T>> {
     typedef RetainPtr<T> StorageType;
 
     static StorageType wrap(const RetainPtr<T>& value) { return value; }
@@ -269,6 +270,35 @@ private:
     typename ParamStorageTraits<P3>::StorageType m_p3;
     typename ParamStorageTraits<P4>::StorageType m_p4;
     typename ParamStorageTraits<P5>::StorageType m_p5;
+};
+
+template<typename FunctionWrapper, typename R, typename P1, typename P2, typename P3, typename P4, typename P5, typename P6, typename... P>
+class PartBoundFunctionImpl<6, FunctionWrapper, R(P1, P2, P3, P4, P5, P6, P...)> final : public FunctionImpl<typename FunctionWrapper::ResultType(P...)> {
+public:
+    PartBoundFunctionImpl(FunctionWrapper functionWrapper, const P1& p1, const P2& p2, const P3& p3, const P4& p4, const P5& p5, const P6& p6)
+        : m_functionWrapper(functionWrapper)
+        , m_p1(ParamStorageTraits<P1>::wrap(p1))
+        , m_p2(ParamStorageTraits<P2>::wrap(p2))
+        , m_p3(ParamStorageTraits<P3>::wrap(p3))
+        , m_p4(ParamStorageTraits<P4>::wrap(p4))
+        , m_p5(ParamStorageTraits<P5>::wrap(p5))
+        , m_p6(ParamStorageTraits<P6>::wrap(p6))
+    {
+    }
+
+    virtual typename FunctionWrapper::ResultType operator()(P... params) override
+    {
+        return m_functionWrapper(m_p1, m_p2, m_p3, m_p4, m_p5, m_p6, params...);
+    }
+
+private:
+    FunctionWrapper m_functionWrapper;
+    typename ParamStorageTraits<P1>::StorageType m_p1;
+    typename ParamStorageTraits<P2>::StorageType m_p2;
+    typename ParamStorageTraits<P3>::StorageType m_p3;
+    typename ParamStorageTraits<P4>::StorageType m_p4;
+    typename ParamStorageTraits<P5>::StorageType m_p5;
+    typename ParamStorageTraits<P6>::StorageType m_p6;
 };
 
 template<typename FunctionWrapper, typename FunctionType>
@@ -436,6 +466,7 @@ private:
 };
 
 class FunctionBase {
+    WTF_MAKE_NONCOPYABLE(FunctionBase);
 public:
     bool isNull() const
     {
@@ -484,53 +515,53 @@ public:
 };
 
 template<typename FunctionType, typename... A>
-Function<typename FunctionWrapper<FunctionType>::ResultType()> bind(FunctionType function, const A... args)
+PassOwnPtr<Function<typename FunctionWrapper<FunctionType>::ResultType()>> bind(FunctionType function, const A... args)
 {
-    return Function<typename FunctionWrapper<FunctionType>::ResultType()>(adoptRef(new BoundFunctionImpl<FunctionWrapper<FunctionType>, typename FunctionWrapper<FunctionType>::ResultType (A...)>(FunctionWrapper<FunctionType>(function), args...)));
+    return adoptPtr(new Function<typename FunctionWrapper<FunctionType>::ResultType()>(adoptRef(new BoundFunctionImpl<FunctionWrapper<FunctionType>, typename FunctionWrapper<FunctionType>::ResultType (A...)>(FunctionWrapper<FunctionType>(function), args...))));
 }
 
 // Partial parameter binding.
 
 template<typename A1, typename FunctionType, typename... A>
-Function<typename FunctionWrapper<FunctionType>::ResultType(A1)> bind(FunctionType function, const A&... args)
+PassOwnPtr<Function<typename FunctionWrapper<FunctionType>::ResultType(A1)>> bind(FunctionType function, const A&... args)
 {
     const int boundArgsCount = sizeof...(A);
-    return Function<typename FunctionWrapper<FunctionType>::ResultType(A1)>(adoptRef(new PartBoundFunctionImpl<boundArgsCount, FunctionWrapper<FunctionType>, typename FunctionWrapper<FunctionType>::ResultType (A..., A1)>(FunctionWrapper<FunctionType>(function), args...)));
+    return adoptPtr(new Function<typename FunctionWrapper<FunctionType>::ResultType(A1)>(adoptRef(new PartBoundFunctionImpl<boundArgsCount, FunctionWrapper<FunctionType>, typename FunctionWrapper<FunctionType>::ResultType (A..., A1)>(FunctionWrapper<FunctionType>(function), args...))));
 }
 
 template<typename A1, typename A2, typename FunctionType, typename... A>
-Function<typename FunctionWrapper<FunctionType>::ResultType(A1, A2)> bind(FunctionType function, const A&... args)
+PassOwnPtr<Function<typename FunctionWrapper<FunctionType>::ResultType(A1, A2)>> bind(FunctionType function, const A&... args)
 {
     const int boundArgsCount = sizeof...(A);
-    return Function<typename FunctionWrapper<FunctionType>::ResultType(A1, A2)>(adoptRef(new PartBoundFunctionImpl<boundArgsCount, FunctionWrapper<FunctionType>, typename FunctionWrapper<FunctionType>::ResultType (A..., A1, A2)>(FunctionWrapper<FunctionType>(function), args...)));
+    return adoptPtr(new Function<typename FunctionWrapper<FunctionType>::ResultType(A1, A2)>(adoptRef(new PartBoundFunctionImpl<boundArgsCount, FunctionWrapper<FunctionType>, typename FunctionWrapper<FunctionType>::ResultType (A..., A1, A2)>(FunctionWrapper<FunctionType>(function), args...))));
 }
 
 template<typename A1, typename A2, typename A3, typename FunctionType, typename... A>
-Function<typename FunctionWrapper<FunctionType>::ResultType(A1, A2, A3)> bind(FunctionType function, const A&... args)
+PassOwnPtr<Function<typename FunctionWrapper<FunctionType>::ResultType(A1, A2, A3)>> bind(FunctionType function, const A&... args)
 {
     const int boundArgsCount = sizeof...(A);
-    return Function<typename FunctionWrapper<FunctionType>::ResultType(A1, A2, A3)>(adoptRef(new PartBoundFunctionImpl<boundArgsCount, FunctionWrapper<FunctionType>, typename FunctionWrapper<FunctionType>::ResultType (A..., A1, A2, A3)>(FunctionWrapper<FunctionType>(function), args...)));
+    return adoptPtr(new Function<typename FunctionWrapper<FunctionType>::ResultType(A1, A2, A3)>(adoptRef(new PartBoundFunctionImpl<boundArgsCount, FunctionWrapper<FunctionType>, typename FunctionWrapper<FunctionType>::ResultType (A..., A1, A2, A3)>(FunctionWrapper<FunctionType>(function), args...))));
 }
 
 template<typename A1, typename A2, typename A3, typename A4, typename FunctionType, typename... A>
-Function<typename FunctionWrapper<FunctionType>::ResultType(A1, A2, A3, A4)> bind(FunctionType function, const A&... args)
+PassOwnPtr<Function<typename FunctionWrapper<FunctionType>::ResultType(A1, A2, A3, A4)>> bind(FunctionType function, const A&... args)
 {
     const int boundArgsCount = sizeof...(A);
-    return Function<typename FunctionWrapper<FunctionType>::ResultType(A1, A2, A3, A4)>(adoptRef(new PartBoundFunctionImpl<boundArgsCount, FunctionWrapper<FunctionType>, typename FunctionWrapper<FunctionType>::ResultType (A..., A1, A2, A3, A4)>(FunctionWrapper<FunctionType>(function), args...)));
+    return adoptPtr(new Function<typename FunctionWrapper<FunctionType>::ResultType(A1, A2, A3, A4)>(adoptRef(new PartBoundFunctionImpl<boundArgsCount, FunctionWrapper<FunctionType>, typename FunctionWrapper<FunctionType>::ResultType (A..., A1, A2, A3, A4)>(FunctionWrapper<FunctionType>(function), args...))));
 }
 
 template<typename A1, typename A2, typename A3, typename A4, typename A5, typename FunctionType, typename... A>
-Function<typename FunctionWrapper<FunctionType>::ResultType(A1, A2, A3, A4, A5)> bind(FunctionType function, const A&... args)
+PassOwnPtr<Function<typename FunctionWrapper<FunctionType>::ResultType(A1, A2, A3, A4, A5)>> bind(FunctionType function, const A&... args)
 {
     const int boundArgsCount = sizeof...(A);
-    return Function<typename FunctionWrapper<FunctionType>::ResultType(A1, A2, A3, A4, A5)>(adoptRef(new PartBoundFunctionImpl<boundArgsCount, FunctionWrapper<FunctionType>, typename FunctionWrapper<FunctionType>::ResultType (A..., A1, A2, A3, A4, A5)>(FunctionWrapper<FunctionType>(function), args...)));
+    return adoptPtr(new Function<typename FunctionWrapper<FunctionType>::ResultType(A1, A2, A3, A4, A5)>(adoptRef(new PartBoundFunctionImpl<boundArgsCount, FunctionWrapper<FunctionType>, typename FunctionWrapper<FunctionType>::ResultType (A..., A1, A2, A3, A4, A5)>(FunctionWrapper<FunctionType>(function), args...))));
 }
 
 template<typename A1, typename A2, typename A3, typename A4, typename A5, typename A6, typename FunctionType, typename... A>
-Function<typename FunctionWrapper<FunctionType>::ResultType(A1, A2, A3, A4, A5, A6)> bind(FunctionType function, const A&... args)
+PassOwnPtr<Function<typename FunctionWrapper<FunctionType>::ResultType(A1, A2, A3, A4, A5, A6)>> bind(FunctionType function, const A&... args)
 {
     const int boundArgsCount = sizeof...(A);
-    return Function<typename FunctionWrapper<FunctionType>::ResultType(A1, A2, A3, A4, A5, A6)>(adoptRef(new PartBoundFunctionImpl<boundArgsCount, FunctionWrapper<FunctionType>, typename FunctionWrapper<FunctionType>::ResultType (A..., A1, A2, A3, A4, A5, A6)>(FunctionWrapper<FunctionType>(function), args...)));
+    return adoptPtr(new Function<typename FunctionWrapper<FunctionType>::ResultType(A1, A2, A3, A4, A5, A6)>(adoptRef(new PartBoundFunctionImpl<boundArgsCount, FunctionWrapper<FunctionType>, typename FunctionWrapper<FunctionType>::ResultType (A..., A1, A2, A3, A4, A5, A6)>(FunctionWrapper<FunctionType>(function), args...))));
 }
 
 typedef Function<void()> Closure;

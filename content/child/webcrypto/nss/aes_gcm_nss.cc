@@ -5,7 +5,7 @@
 #include "base/numerics/safe_math.h"
 #include "base/stl_util.h"
 #include "content/child/webcrypto/crypto_data.h"
-#include "content/child/webcrypto/nss/aes_key_nss.h"
+#include "content/child/webcrypto/nss/aes_algorithm_nss.h"
 #include "content/child/webcrypto/nss/key_nss.h"
 #include "content/child/webcrypto/nss/util_nss.h"
 #include "content/child/webcrypto/status.h"
@@ -120,14 +120,9 @@ Status AesGcmEncryptDecrypt(EncryptOrDecrypt mode,
                         : NssRuntimeSupport::Get()->pk11_decrypt_func();
 
   unsigned int output_len = 0;
-  SECStatus result = encrypt_or_decrypt_func(sym_key,
-                                             CKM_AES_GCM,
-                                             &param,
-                                             buffer_data,
-                                             &output_len,
-                                             buffer->size(),
-                                             data.bytes(),
-                                             data.byte_length());
+  SECStatus result = encrypt_or_decrypt_func(
+      sym_key, CKM_AES_GCM, &param, buffer_data, &output_len, buffer->size(),
+      data.bytes(), data.byte_length());
 
   if (result != SECSuccess)
     return Status::OperationError();

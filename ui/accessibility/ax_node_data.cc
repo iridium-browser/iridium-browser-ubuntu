@@ -252,6 +252,9 @@ std::string AXNodeData::ToString() const {
       case AX_ATTR_ACTION:
         result += " action=" + value;
         break;
+      case AX_ATTR_AUTO_COMPLETE:
+        result += " autocomplete=" + value;
+        break;
       case AX_ATTR_DESCRIPTION:
         result += " description=" + value;
         break;
@@ -275,6 +278,9 @@ std::string AXNodeData::ToString() const {
         break;
       case AX_ATTR_CONTAINER_LIVE_STATUS:
         result += " container_live=" + value;
+        break;
+      case AX_ATTR_PLACEHOLDER:
+        result += "placeholder" + value;
         break;
       case AX_ATTR_ROLE:
         result += " role=" + value;

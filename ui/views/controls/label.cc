@@ -11,13 +11,14 @@
 
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "ui/accessibility/ax_view_state.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_utils.h"
-#include "ui/gfx/insets.h"
+#include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/text_elider.h"
 #include "ui/gfx/text_utils.h"
 #include "ui/gfx/utf16_indexing.h"
@@ -53,8 +54,9 @@ Label::~Label() {
 }
 
 void Label::SetFontList(const gfx::FontList& font_list) {
+  is_first_paint_text_ = true;
   font_list_ = font_list;
-  ResetCachedSize();
+  ResetLayoutCache();
   PreferredSizeChanged();
   SchedulePaint();
 }
@@ -65,6 +67,7 @@ void Label::SetText(const base::string16& text) {
 }
 
 void Label::SetTextInternal(const base::string16& text) {
+  is_first_paint_text_ = true;
   text_ = text;
 
   if (obscured_) {
@@ -75,44 +78,52 @@ void Label::SetTextInternal(const base::string16& text) {
     layout_text_ = text_;
   }
 
-  ResetCachedSize();
+  ResetLayoutCache();
   PreferredSizeChanged();
   SchedulePaint();
 }
 
 void Label::SetAutoColorReadabilityEnabled(bool enabled) {
+  is_first_paint_text_ = true;
   auto_color_readability_ = enabled;
   RecalculateColors();
 }
 
 void Label::SetEnabledColor(SkColor color) {
+  is_first_paint_text_ = true;
   requested_enabled_color_ = color;
   enabled_color_set_ = true;
   RecalculateColors();
 }
 
 void Label::SetDisabledColor(SkColor color) {
+  is_first_paint_text_ = true;
   requested_disabled_color_ = color;
   disabled_color_set_ = true;
   RecalculateColors();
 }
 
 void Label::SetBackgroundColor(SkColor color) {
+  is_first_paint_text_ = true;
   background_color_ = color;
   background_color_set_ = true;
   RecalculateColors();
+  cached_draw_params_.text.clear();
 }
 
 void Label::SetShadows(const gfx::ShadowValues& shadows) {
+  is_first_paint_text_ = true;
   shadows_ = shadows;
-  text_size_valid_ = false;
+  ResetLayoutCache();
 }
 
 void Label::SetSubpixelRenderingEnabled(bool subpixel_rendering_enabled) {
+  is_first_paint_text_ = true;
   subpixel_rendering_enabled_ = subpixel_rendering_enabled;
 }
 
 void Label::SetHorizontalAlignment(gfx::HorizontalAlignment alignment) {
+  is_first_paint_text_ = true;
   // If the UI layout is right-to-left, flip the alignment direction.
   if (base::i18n::IsRTL() &&
       (alignment == gfx::ALIGN_LEFT || alignment == gfx::ALIGN_RIGHT)) {
@@ -135,26 +146,29 @@ gfx::HorizontalAlignment Label::GetHorizontalAlignment() const {
 }
 
 void Label::SetLineHeight(int height) {
+  is_first_paint_text_ = true;
   if (height != line_height_) {
     line_height_ = height;
-    ResetCachedSize();
+    ResetLayoutCache();
     PreferredSizeChanged();
     SchedulePaint();
   }
 }
 
 void Label::SetMultiLine(bool multi_line) {
+  is_first_paint_text_ = true;
   DCHECK(!multi_line || (elide_behavior_ == gfx::ELIDE_TAIL ||
                          elide_behavior_ == gfx::NO_ELIDE));
   if (multi_line != multi_line_) {
     multi_line_ = multi_line;
-    ResetCachedSize();
+    ResetLayoutCache();
     PreferredSizeChanged();
     SchedulePaint();
   }
 }
 
 void Label::SetObscured(bool obscured) {
+  is_first_paint_text_ = true;
   if (obscured != obscured_) {
     obscured_ = obscured;
     SetTextInternal(text_);
@@ -162,20 +176,22 @@ void Label::SetObscured(bool obscured) {
 }
 
 void Label::SetAllowCharacterBreak(bool allow_character_break) {
+  is_first_paint_text_ = true;
   if (allow_character_break != allow_character_break_) {
     allow_character_break_ = allow_character_break;
-    ResetCachedSize();
+    ResetLayoutCache();
     PreferredSizeChanged();
     SchedulePaint();
   }
 }
 
 void Label::SetElideBehavior(gfx::ElideBehavior elide_behavior) {
+  is_first_paint_text_ = true;
   DCHECK(!multi_line_ || (elide_behavior_ == gfx::ELIDE_TAIL ||
                           elide_behavior_ == gfx::NO_ELIDE));
   if (elide_behavior != elide_behavior_) {
     elide_behavior_ = elide_behavior;
-    ResetCachedSize();
+    ResetLayoutCache();
     PreferredSizeChanged();
     SchedulePaint();
   }
@@ -229,6 +245,10 @@ int Label::GetBaseline() const {
 }
 
 gfx::Size Label::GetPreferredSize() const {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/431326 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("431326 Label::GetPreferredSize"));
+
   // Return a size of (0, 0) if the label is not visible and if the
   // collapse_when_hidden_ flag is set.
   // TODO(munjal): This logic probably belongs to the View class. But for now,
@@ -272,6 +292,8 @@ int Label::GetHeightForWidth(int w) const {
   int cache_width = w;
 
   int h = font_list_.GetHeight();
+  // Flags returned in the cached |DrawStringParams| has a different value
+  // from the result of |ComputeDrawStringFlags()|. The latter is needed here.
   const int flags = ComputeDrawStringFlags();
   gfx::Canvas::SizeStringInt(
       layout_text_, font_list_, &w, &h, line_height_, flags);
@@ -325,7 +347,8 @@ void Label::PaintText(gfx::Canvas* canvas,
                       const gfx::Rect& text_bounds,
                       int flags) {
   SkColor color = enabled() ? actual_enabled_color_ : actual_disabled_color_;
-  if (elide_behavior_ == gfx::FADE_TAIL) {
+  if (elide_behavior_ == gfx::FADE_TAIL &&
+      text_bounds.width() < GetTextSize().width()) {
     canvas->DrawFadedString(text, font_list_, color, text_bounds, flags);
   } else {
     canvas->DrawStringRectWithShadows(text, font_list_, color, text_bounds,
@@ -341,6 +364,10 @@ void Label::PaintText(gfx::Canvas* canvas,
 
 gfx::Size Label::GetTextSize() const {
   if (!text_size_valid_) {
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/431326 is fixed.
+    tracked_objects::ScopedTracker tracking_profile1(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION("431326 Label::GetTextSize1"));
+
     // For single-line strings, we supply the largest possible width, because
     // while adding NO_ELLIPSIS to the flags works on Windows for forcing
     // SizeStringInt() to calculate the desired width, it doesn't seem to work
@@ -350,11 +377,20 @@ gfx::Size Label::GetTextSize() const {
     int h = font_list_.GetHeight();
     // For single-line strings, ignore the available width and calculate how
     // wide the text wants to be.
+    // Call |ComputeDrawStringFlags()| instead of |CalculateDrawStringParams()|
+    // here since the latter calls this function and causes infinite recursion.
     int flags = ComputeDrawStringFlags();
     if (!multi_line_)
       flags |= gfx::Canvas::NO_ELLIPSIS;
-    gfx::Canvas::SizeStringInt(
-        layout_text_, font_list_, &w, &h, line_height_, flags);
+    {
+      // TODO(vadimt): Remove ScopedTracker below once crbug.com/431326 is
+      // fixed.
+      tracked_objects::ScopedTracker tracking_profile2(
+          FROM_HERE_WITH_EXPLICIT_FUNCTION("431326 Label::GetTextSize2"));
+
+      gfx::Canvas::SizeStringInt(layout_text_, font_list_, &w, &h, line_height_,
+                                 flags);
+    }
     text_size_.SetSize(w, h);
     const gfx::Insets shadow_margin = -gfx::ShadowValue::GetMargin(shadows_);
     text_size_.Enlarge(shadow_margin.width(), shadow_margin.height());
@@ -366,6 +402,7 @@ gfx::Size Label::GetTextSize() const {
 
 void Label::OnBoundsChanged(const gfx::Rect& previous_bounds) {
   text_size_valid_ &= !multi_line_;
+  cached_draw_params_.text.clear();
 }
 
 void Label::OnPaint(gfx::Canvas* canvas) {
@@ -374,12 +411,24 @@ void Label::OnPaint(gfx::Canvas* canvas) {
   // some subclasses of Label. We do not want View's focus border painting to
   // interfere with that.
   OnPaintBorder(canvas);
+  if (layout_text_.empty())
+    return;
 
-  base::string16 paint_text;
-  gfx::Rect text_bounds;
-  int flags = 0;
-  CalculateDrawStringParams(&paint_text, &text_bounds, &flags);
-  PaintText(canvas, paint_text, text_bounds, flags);
+  const DrawStringParams* params = CalculateDrawStringParams();
+  if (is_first_paint_text_) {
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/431326 is fixed.
+    tracked_objects::ScopedTracker tracking_profile(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION("431326 Label::PaintText first"));
+
+    is_first_paint_text_ = false;
+    PaintText(canvas, params->text, params->bounds, params->flags);
+  } else {
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/431326 is fixed.
+    tracked_objects::ScopedTracker tracking_profile(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION("431326 Label::PaintText not first"));
+
+    PaintText(canvas, params->text, params->bounds, params->flags);
+  }
 }
 
 void Label::OnNativeThemeChanged(const ui::NativeTheme* theme) {
@@ -401,7 +450,8 @@ void Label::Init(const base::string16& text, const gfx::FontList& font_list) {
   handles_tooltips_ = true;
   collapse_when_hidden_ = false;
   cached_heights_.resize(kCachedSizeLimit);
-  ResetCachedSize();
+  ResetLayoutCache();
+  is_first_paint_text_ = true;
 
   SetText(text);
 }
@@ -497,25 +547,25 @@ gfx::Rect Label::GetAvailableRect() const {
   return bounds;
 }
 
-void Label::CalculateDrawStringParams(base::string16* paint_text,
-                                      gfx::Rect* text_bounds,
-                                      int* flags) const {
-  DCHECK(paint_text && text_bounds && flags);
+const Label::DrawStringParams* Label::CalculateDrawStringParams() const {
+  if (cached_draw_params_.text.empty()) {
+    const bool forbid_ellipsis = elide_behavior_ == gfx::NO_ELIDE ||
+                                 elide_behavior_ == gfx::FADE_TAIL;
+    if (multi_line_ || forbid_ellipsis) {
+      cached_draw_params_.text = layout_text_;
+    } else {
+      cached_draw_params_.text = gfx::ElideText(layout_text_, font_list_,
+          GetAvailableRect().width(), elide_behavior_);
+    }
 
-  const bool forbid_ellipsis = elide_behavior_ == gfx::NO_ELIDE ||
-                               elide_behavior_ == gfx::FADE_TAIL;
-  if (multi_line_ || forbid_ellipsis) {
-    *paint_text = layout_text_;
-  } else {
-    *paint_text = gfx::ElideText(layout_text_, font_list_,
-                                 GetAvailableRect().width(), elide_behavior_);
+    cached_draw_params_.bounds = GetTextBounds();
+    cached_draw_params_.flags = ComputeDrawStringFlags();
+    // TODO(msw): Elide multi-line text with ElideRectangleText instead.
+    if (!multi_line_ || forbid_ellipsis)
+      cached_draw_params_.flags |= gfx::Canvas::NO_ELLIPSIS;
   }
 
-  *text_bounds = GetTextBounds();
-  *flags = ComputeDrawStringFlags();
-  // TODO(msw): Elide multi-line text with ElideRectangleText instead.
-  if (!multi_line_ || forbid_ellipsis)
-    *flags |= gfx::Canvas::NO_ELLIPSIS;
+  return &cached_draw_params_;
 }
 
 void Label::UpdateColorsFromTheme(const ui::NativeTheme* theme) {
@@ -534,7 +584,8 @@ void Label::UpdateColorsFromTheme(const ui::NativeTheme* theme) {
   RecalculateColors();
 }
 
-void Label::ResetCachedSize() {
+void Label::ResetLayoutCache() {
+  cached_draw_params_.text.clear();
   text_size_valid_ = false;
   cached_heights_cursor_ = 0;
   for (int i = 0; i < kCachedSizeLimit; ++i)

@@ -20,7 +20,7 @@
 namespace webrtc {
 
 const int64_t kStatisticsTimeoutMs = 8000;
-const int kStatisticsProcessIntervalMs = 1000;
+const int64_t kStatisticsProcessIntervalMs = 1000;
 
 StreamStatistician::~StreamStatistician() {}
 
@@ -63,34 +63,40 @@ void StreamStatisticianImpl::ResetStatistics() {
   received_seq_wraps_ = 0;
   received_seq_max_ = 0;
   received_seq_first_ = 0;
+  stored_sum_receive_counters_.Add(receive_counters_);
   receive_counters_ = StreamDataCounters();
 }
 
 void StreamStatisticianImpl::IncomingPacket(const RTPHeader& header,
-                                            size_t bytes,
+                                            size_t packet_length,
                                             bool retransmitted) {
-  UpdateCounters(header, bytes, retransmitted);
+  UpdateCounters(header, packet_length, retransmitted);
   NotifyRtpCallback();
 }
 
 void StreamStatisticianImpl::UpdateCounters(const RTPHeader& header,
-                                            size_t bytes,
+                                            size_t packet_length,
                                             bool retransmitted) {
   CriticalSectionScoped cs(stream_lock_.get());
   bool in_order = InOrderPacketInternal(header.sequenceNumber);
   ssrc_ = header.ssrc;
-  incoming_bitrate_.Update(bytes);
+  incoming_bitrate_.Update(packet_length);
   receive_counters_.bytes +=
-      bytes - (header.paddingLength + header.headerLength);
+      packet_length - (header.paddingLength + header.headerLength);
   receive_counters_.header_bytes += header.headerLength;
   receive_counters_.padding_bytes += header.paddingLength;
   ++receive_counters_.packets;
   if (!in_order && retransmitted) {
     ++receive_counters_.retransmitted_packets;
+    receive_counters_.retransmitted_bytes +=
+        packet_length - (header.paddingLength + header.headerLength);
+    receive_counters_.retransmitted_header_bytes += header.headerLength;
+    receive_counters_.retransmitted_padding_bytes += header.paddingLength;
   }
 
   if (receive_counters_.packets == 1) {
     received_seq_first_ = header.sequenceNumber;
+    receive_counters_.first_packet_time_ms = clock_->TimeInMilliseconds();
   }
 
   // Count only the new packets received. That is, if packets 1, 2, 3, 5, 4, 6
@@ -123,7 +129,7 @@ void StreamStatisticianImpl::UpdateCounters(const RTPHeader& header,
     last_receive_time_ms_ = clock_->TimeInMilliseconds();
   }
 
-  uint16_t packet_oh = header.headerLength + header.paddingLength;
+  size_t packet_oh = header.headerLength + header.paddingLength;
 
   // Our measured overhead. Filter from RFC 5104 4.2.1.2:
   // avg_OH (new) = 15/16*avg_OH (old) + 1/16*pckt_OH,
@@ -303,7 +309,7 @@ RtcpStatistics StreamStatisticianImpl::CalculateRtcpStatistics() {
 }
 
 void StreamStatisticianImpl::GetDataCounters(
-    uint32_t* bytes_received, uint32_t* packets_received) const {
+    size_t* bytes_received, uint32_t* packets_received) const {
   CriticalSectionScoped cs(stream_lock_.get());
   if (bytes_received) {
     *bytes_received = receive_counters_.bytes + receive_counters_.header_bytes +
@@ -312,6 +318,13 @@ void StreamStatisticianImpl::GetDataCounters(
   if (packets_received) {
     *packets_received = receive_counters_.packets;
   }
+}
+
+void StreamStatisticianImpl::GetReceiveStreamDataCounters(
+    StreamDataCounters* data_counters) const {
+  CriticalSectionScoped cs(stream_lock_.get());
+  *data_counters = receive_counters_;
+  data_counters->Add(stored_sum_receive_counters_);
 }
 
 uint32_t StreamStatisticianImpl::BitrateReceived() const {
@@ -406,7 +419,7 @@ ReceiveStatisticsImpl::~ReceiveStatisticsImpl() {
 }
 
 void ReceiveStatisticsImpl::IncomingPacket(const RTPHeader& header,
-                                           size_t bytes,
+                                           size_t packet_length,
                                            bool retransmitted) {
   StreamStatisticianImpl* impl;
   {
@@ -423,7 +436,7 @@ void ReceiveStatisticsImpl::IncomingPacket(const RTPHeader& header,
   // this whole ReceiveStatisticsImpl is destroyed. StreamStatisticianImpl has
   // it's own locking so don't hold receive_statistics_lock_ (potential
   // deadlock).
-  impl->IncomingPacket(header, bytes, retransmitted);
+  impl->IncomingPacket(header, packet_length, retransmitted);
 }
 
 void ReceiveStatisticsImpl::FecPacketReceived(uint32_t ssrc) {
@@ -479,11 +492,12 @@ int32_t ReceiveStatisticsImpl::Process() {
   return 0;
 }
 
-int32_t ReceiveStatisticsImpl::TimeUntilNextProcess() {
+int64_t ReceiveStatisticsImpl::TimeUntilNextProcess() {
   CriticalSectionScoped cs(receive_statistics_lock_.get());
-  int time_since_last_update = clock_->TimeInMilliseconds() -
+  int64_t time_since_last_update = clock_->TimeInMilliseconds() -
       last_rate_update_ms_;
-  return std::max(kStatisticsProcessIntervalMs - time_since_last_update, 0);
+  return std::max<int64_t>(
+      kStatisticsProcessIntervalMs - time_since_last_update, 0);
 }
 
 void ReceiveStatisticsImpl::RegisterRtcpStatisticsCallback(
@@ -497,9 +511,14 @@ void ReceiveStatisticsImpl::RegisterRtcpStatisticsCallback(
 void ReceiveStatisticsImpl::StatisticsUpdated(const RtcpStatistics& statistics,
                                               uint32_t ssrc) {
   CriticalSectionScoped cs(receive_statistics_lock_.get());
-  if (rtcp_stats_callback_) {
+  if (rtcp_stats_callback_)
     rtcp_stats_callback_->StatisticsUpdated(statistics, ssrc);
-  }
+}
+
+void ReceiveStatisticsImpl::CNameChanged(const char* cname, uint32_t ssrc) {
+  CriticalSectionScoped cs(receive_statistics_lock_.get());
+  if (rtcp_stats_callback_)
+    rtcp_stats_callback_->CNameChanged(cname, ssrc);
 }
 
 void ReceiveStatisticsImpl::RegisterRtpStatisticsCallback(
@@ -519,7 +538,7 @@ void ReceiveStatisticsImpl::DataCountersUpdated(const StreamDataCounters& stats,
 }
 
 void NullReceiveStatistics::IncomingPacket(const RTPHeader& rtp_header,
-                                           size_t bytes,
+                                           size_t packet_length,
                                            bool retransmitted) {}
 
 void NullReceiveStatistics::FecPacketReceived(uint32_t ssrc) {}
@@ -536,7 +555,7 @@ StreamStatistician* NullReceiveStatistics::GetStatistician(
 void NullReceiveStatistics::SetMaxReorderingThreshold(
     int max_reordering_threshold) {}
 
-int32_t NullReceiveStatistics::TimeUntilNextProcess() { return 0; }
+int64_t NullReceiveStatistics::TimeUntilNextProcess() { return 0; }
 
 int32_t NullReceiveStatistics::Process() { return 0; }
 

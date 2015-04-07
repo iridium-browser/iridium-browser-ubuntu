@@ -21,6 +21,7 @@ class Message;
 
 namespace extensions {
 
+class PermissionIDSet;
 class APIPermissionInfo;
 class ChromeAPIPermissions;
 
@@ -29,6 +30,13 @@ class ChromeAPIPermissions;
 // There is one instance per permission per loaded extension.
 class APIPermission {
  public:
+  // The IDs of all permissions available to apps. Add as many permissions here
+  // as needed to generate meaningful permission messages. Add the rules for the
+  // messages to ChromePermissionMessageProvider.
+  // Remove permissions from this list if they have no longer have a
+  // corresponding API permission and no permission message.
+  // TODO(sashab): Move this to a more central location, and rename it to
+  // PermissionID.
   enum ID {
     // Error codes.
     kInvalid = -2,
@@ -68,6 +76,8 @@ class APIPermission {
     kCookie,
     kCopresence,
     kCopresencePrivate,
+    kCryptotokenPrivate,
+    kDataReductionProxy,
     kDiagnostics,
     kDial,
     kDebugger,
@@ -118,8 +128,10 @@ class APIPermission {
     kIdle,
     kImeWindowEnabled,
     kInfobars,
+    kInlineInstallPrivate,
     kInput,
     kInputMethodPrivate,
+    kInterceptAllKeys,
     kLocation,
     kLogPrivate,
     kManagement,
@@ -157,7 +169,6 @@ class APIPermission {
     kStorage,
     kStreamsPrivate,
     kSyncFileSystem,
-    kSyncedNotificationsPrivate,
     kSystemPrivate,
     kSystemDisplay,
     kSystemStorage,
@@ -193,6 +204,32 @@ class APIPermission {
     kSystemNetwork,
     kSystemInfoCpu,
     kSystemInfoMemory,
+
+    // Permission message IDs that are not currently valid permissions on their
+    // own, but are needed by various manifest permissions to represent their
+    // permission message rule combinations.
+    // TODO(sashab): Move these in-line with the other permission IDs.
+    kBluetooth,
+    kBluetoothDevices,
+    kFavicon,
+    kFullAccess,
+    kHostReadOnly,
+    kHostReadWrite,
+    kHostsAll,
+    kHostsAllReadOnly,
+    kMediaGalleriesAllGalleriesCopyTo,
+    kMediaGalleriesAllGalleriesDelete,
+    kMediaGalleriesAllGalleriesRead,
+    kNetworkState,
+    kOverrideBookmarksUI,
+    kShouldWarnAllHosts,
+    kSocketAnyHost,
+    kSocketDomainHosts,
+    kSocketSpecificHosts,
+    kUsbDeviceList,
+    kUsbDeviceUnknownProduct,
+    kUsbDeviceUnknownVendor,
+
     kEnumBoundary
   };
 
@@ -214,10 +251,33 @@ class APIPermission {
     return info_;
   }
 
+  // The set of permissions an app/extension with this API permission has. These
+  // permissions are used by PermissionMessageProvider to generate meaningful
+  // permission messages for the app/extension.
+  //
+  // For simple API permissions, this will return a set containing only the ID
+  // of the permission. More complex permissions might have multiple IDs, one
+  // for each of the capabilities the API permission has (e.g. read, write and
+  // copy, in the case of the media gallery permission). Permissions that
+  // require parameters may also contain a parameter string (along with the
+  // permission's ID) which can be substituted into the permission message if a
+  // rule is defined to do so.
+  //
+  // Permissions with multiple values, such as host permissions, are represented
+  // by multiple entries in this set. Each permission in the subset has the same
+  // ID (e.g. kHostReadOnly) but a different parameter (e.g. google.com). These
+  // are grouped to form different kinds of permission messages (e.g. 'Access to
+  // 2 hosts') depending on the number that are in the set. The rules that
+  // define the grouping of related permissions with the same ID is defined in
+  // ChromePermissionMessageProvider.
+  virtual PermissionIDSet GetPermissions() const = 0;
+
   // Returns true if this permission has any PermissionMessages.
+  // TODO(sashab): Deprecate this in favor of GetPermissions() above.
   virtual bool HasMessages() const = 0;
 
   // Returns the localized permission messages of this permission.
+  // TODO(sashab): Deprecate this in favor of GetPermissions() above.
   virtual PermissionMessages GetMessages() const = 0;
 
   // Returns true if the given permission is allowed.
@@ -293,6 +353,10 @@ class APIPermissionInfo {
     // Indicates that the permission is internal to the extensions
     // system and cannot be specified in the "permissions" list.
     kFlagInternal = 1 << 4,
+
+    // Indicates that the permission may be granted to web contents by
+    // extensions using the content_capabilities manifest feature.
+    kFlagSupportsContentCapabilities = 1 << 5,
   };
 
   typedef APIPermission* (*APIPermissionConstructor)(const APIPermissionInfo*);
@@ -336,6 +400,12 @@ class APIPermissionInfo {
   // "permissions" list entry.
   bool is_internal() const {
     return (flags_ & kFlagInternal) != 0;
+  }
+
+  // Returns true if this permission can be granted to web contents by an
+  // extension through the content_capabilities manifest feature.
+  bool supports_content_capabilities() const {
+    return (flags_ & kFlagSupportsContentCapabilities) != 0;
   }
 
  private:

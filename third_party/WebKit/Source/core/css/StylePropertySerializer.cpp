@@ -85,20 +85,7 @@ StylePropertySerializer::PropertyValueForSerializer StylePropertySerializer::Sty
     }
 
     StylePropertySet::PropertyReference property = m_propertySet.propertyAt(m_allIndex);
-    const CSSValue* value = property.value();
-
-    // FIXME: Firefox shows properties with "unset" when some cssRule has
-    // expanded "all" with "unset". So we should use "unset" here.
-    // After implementing "unset" value correctly, (i.e. StyleBuilder should
-    // support "display: unset", "color: unset", ... and so on),
-    // we should fix the following code.
-    if (!value->isInitialValue() && !value->isInheritedValue()) {
-        if (CSSPropertyMetadata::isInheritedProperty(propertyID))
-            value = cssValuePool().createInheritedValue().get();
-        else
-            value = cssValuePool().createExplicitInitialValue().get();
-    }
-    return StylePropertySerializer::PropertyValueForSerializer(propertyID, value, property.isImportant());
+    return StylePropertySerializer::PropertyValueForSerializer(propertyID, property.value(), property.isImportant());
 }
 
 bool StylePropertySerializer::StylePropertySetForSerializer::shouldProcessPropertyAt(unsigned index) const
@@ -301,6 +288,11 @@ String StylePropertySerializer::asText() const
         case CSSPropertyMarginLeft:
             shorthandPropertyID = CSSPropertyMargin;
             break;
+        case CSSPropertyMotionPath:
+        case CSSPropertyMotionPosition:
+        case CSSPropertyMotionRotation:
+            shorthandPropertyID = CSSPropertyMotion;
+            break;
         case CSSPropertyOutlineWidth:
         case CSSPropertyOutlineStyle:
         case CSSPropertyOutlineColor:
@@ -446,6 +438,8 @@ String StylePropertySerializer::getPropertyValue(CSSPropertyID propertyID) const
         return fontValue();
     case CSSPropertyMargin:
         return get4Values(marginShorthand());
+    case CSSPropertyMotion:
+        return getShorthandValue(motionShorthand());
     case CSSPropertyWebkitMarginCollapse:
         return getShorthandValue(webkitMarginCollapseShorthand());
     case CSSPropertyOverflow:
@@ -886,26 +880,24 @@ String StylePropertySerializer::backgroundRepeatPropertyValue() const
         return String();
     if (m_propertySet.propertyIsImportant(CSSPropertyBackgroundRepeatX) != m_propertySet.propertyIsImportant(CSSPropertyBackgroundRepeatY))
         return String();
-    if (repeatX->cssValueType() == repeatY->cssValueType()
-        && (repeatX->cssValueType() == CSSValue::CSS_INITIAL || repeatX->cssValueType() == CSSValue::CSS_INHERIT)) {
+    if ((repeatX->isInitialValue() && repeatY->isInitialValue()) || (repeatX->isInheritedValue() && repeatY->isInheritedValue()))
         return repeatX->cssText();
-    }
 
     const CSSValueList* repeatXList = 0;
     int repeatXLength = 1;
-    if (repeatX->cssValueType() == CSSValue::CSS_VALUE_LIST) {
+    if (repeatX->isValueList()) {
         repeatXList = toCSSValueList(repeatX);
         repeatXLength = repeatXList->length();
-    } else if (repeatX->cssValueType() != CSSValue::CSS_PRIMITIVE_VALUE) {
+    } else if (!repeatX->isPrimitiveValue()) {
         return String();
     }
 
     const CSSValueList* repeatYList = 0;
     int repeatYLength = 1;
-    if (repeatY->cssValueType() == CSSValue::CSS_VALUE_LIST) {
+    if (repeatY->isValueList()) {
         repeatYList = toCSSValueList(repeatY);
         repeatYLength = repeatYList->length();
-    } else if (repeatY->cssValueType() != CSSValue::CSS_PRIMITIVE_VALUE) {
+    } else if (!repeatY->isPrimitiveValue()) {
         return String();
     }
 

@@ -53,6 +53,7 @@ ChromeExtensionsBrowserClient::ChromeExtensionsBrowserClient() {
   // Only set if it hasn't already been set (e.g. by a test).
   if (GetCurrentChannel() == GetDefaultChannel())
     SetCurrentChannel(chrome::VersionInfo::GetChannel());
+  resource_manager_.reset(new ChromeComponentExtensionResourceManager());
 }
 
 ChromeExtensionsBrowserClient::~ChromeExtensionsBrowserClient() {}
@@ -62,7 +63,7 @@ bool ChromeExtensionsBrowserClient::IsShuttingDown() {
 }
 
 bool ChromeExtensionsBrowserClient::AreExtensionsDisabled(
-    const CommandLine& command_line,
+    const base::CommandLine& command_line,
     content::BrowserContext* context) {
   Profile* profile = static_cast<Profile*>(context);
   return command_line.HasSwitch(switches::kDisableExtensions) ||
@@ -176,7 +177,7 @@ bool ChromeExtensionsBrowserClient::DidVersionUpdate(
     return false;
 
   // If we're inside a browser test, then assume prefs are all up-to-date.
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kTestType))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kTestType))
     return false;
 
   PrefService* pref_service = extension_prefs->pref_service();
@@ -251,10 +252,8 @@ ChromeExtensionsBrowserClient::CreateRuntimeAPIDelegate(
       new ChromeRuntimeAPIDelegate(context));
 }
 
-ComponentExtensionResourceManager*
+const ComponentExtensionResourceManager*
 ChromeExtensionsBrowserClient::GetComponentExtensionResourceManager() {
-  if (!resource_manager_)
-    resource_manager_.reset(new ChromeComponentExtensionResourceManager());
   return resource_manager_.get();
 }
 
@@ -281,7 +280,7 @@ ExtensionCache* ChromeExtensionsBrowserClient::GetExtensionCache() {
 }
 
 bool ChromeExtensionsBrowserClient::IsBackgroundUpdateAllowed() {
-  return !CommandLine::ForCurrentProcess()->HasSwitch(
+  return !base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kDisableBackgroundNetworking);
 }
 

@@ -1194,9 +1194,9 @@ void ClearCacheOnNavigation() {
   }
 }
 
-void NotifyWebRequestAPIUsed(
-    void* browser_context_id,
-    scoped_refptr<const extensions::Extension> extension) {
+void NotifyWebRequestAPIUsed(void* browser_context_id,
+                             const std::string& extension_id) {
+  DCHECK(!extension_id.empty());
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   content::BrowserContext* browser_context =
       reinterpret_cast<content::BrowserContext*>(browser_context_id);
@@ -1206,11 +1206,9 @@ void NotifyWebRequestAPIUsed(
 
   extensions::RuntimeData* runtime_data =
       extensions::ExtensionSystem::Get(browser_context)->runtime_data();
-  if (extension.get()) {
-    if (runtime_data->HasUsedWebRequest(extension.get()))
-      return;
-    runtime_data->SetHasUsedWebRequest(extension.get(), true);
-  }
+  if (runtime_data->HasUsedWebRequest(extension_id))
+    return;
+  runtime_data->SetHasUsedWebRequest(extension_id, true);
 
   for (content::RenderProcessHost::iterator it =
            content::RenderProcessHost::AllHostsIterator();
@@ -1234,7 +1232,7 @@ void SendExtensionWebRequestStatusToHost(content::RenderProcessHost* host) {
   for (extensions::ExtensionSet::const_iterator it = extensions.begin();
        !webrequest_used && it != extensions.end();
        ++it) {
-    webrequest_used |= runtime_data->HasUsedWebRequest(it->get());
+    webrequest_used |= runtime_data->HasUsedWebRequest((*it)->id());
   }
 
   host->Send(new ExtensionMsg_UsingWebRequestAPI(webrequest_used));

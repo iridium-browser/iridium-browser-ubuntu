@@ -15,6 +15,7 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/extensions/app_launch_params.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/browser/ui/settings_window_manager.h"
@@ -23,10 +24,13 @@
 #include "chrome/browser/ui/webui/options/content_settings_handler.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
+#include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/common/constants.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "net/base/url_util.h"
+#include "ui/base/window_open_disposition.h"
 
 #if defined(OS_WIN)
 #include "chrome/browser/enumerate_modules_model_win.h"
@@ -82,18 +86,22 @@ void ShowHelpImpl(Browser* browser,
       extensions::ExtensionRegistry::Get(profile)->GetExtensionById(
           genius_app::kGeniusAppId,
           extensions::ExtensionRegistry::EVERYTHING);
-  AppLaunchParams params(profile, extension, 0, host_desktop_type);
+  extensions::AppLaunchSource app_launch_source(extensions::SOURCE_UNTRACKED);
   switch (source) {
     case HELP_SOURCE_KEYBOARD:
-      params.source = extensions::SOURCE_KEYBOARD;
+      app_launch_source = extensions::SOURCE_KEYBOARD;
       break;
     case HELP_SOURCE_MENU:
-      params.source = extensions::SOURCE_SYSTEM_TRAY;
+      app_launch_source = extensions::SOURCE_SYSTEM_TRAY;
       break;
     case HELP_SOURCE_WEBUI:
-      params.source = extensions::SOURCE_ABOUT_PAGE;
+      app_launch_source = extensions::SOURCE_ABOUT_PAGE;
       break;
+    default:
+      NOTREACHED() << "Unhandled help source" << source;
   }
+  AppLaunchParams params(profile, extension, CURRENT_TAB, host_desktop_type,
+                         app_launch_source);
   OpenApplication(params);
 #else
   GURL url;
@@ -321,7 +329,7 @@ void ShowSearchEngineSettings(Browser* browser) {
 }
 
 #if !defined(OS_ANDROID) && !defined(OS_IOS)
-void ShowBrowserSignin(Browser* browser, signin::Source source) {
+void ShowBrowserSignin(Browser* browser, signin_metrics::Source source) {
   Profile* original_profile = browser->profile()->GetOriginalProfile();
   SigninManagerBase* manager =
       SigninManagerFactory::GetForProfile(original_profile);
@@ -340,8 +348,20 @@ void ShowBrowserSignin(Browser* browser, signin::Source source) {
       browser = displayer->browser();
     }
 
-    NavigateToSingletonTab(browser, GURL(signin::GetPromoURL(source, false)));
-    DCHECK_GT(browser->tab_strip_model()->count(), 0);
+    signin_metrics::LogSigninSource(source);
+
+    // Since the app launcher is a separate application, it might steal focus
+    // away from Chrome, and accidentally close the avatar bubble. In this case,
+    // fallback to the full-tab signin page.
+    if (switches::IsNewAvatarMenu() &&
+        source != signin_metrics::SOURCE_APP_LAUNCHER) {
+      browser->window()->ShowAvatarBubbleFromAvatarButton(
+          BrowserWindow::AVATAR_BUBBLE_MODE_SIGNIN,
+          signin::ManageAccountsParams());
+    } else {
+      NavigateToSingletonTab(browser, GURL(signin::GetPromoURL(source, false)));
+      DCHECK_GT(browser->tab_strip_model()->count(), 0);
+    }
   }
 }
 #endif

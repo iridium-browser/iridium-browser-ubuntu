@@ -31,7 +31,14 @@ class GuestViewManager : public content::BrowserPluginGuestManager,
   explicit GuestViewManager(content::BrowserContext* context);
   ~GuestViewManager() override;
 
+  // Returns the GuestViewManager associated with |context|. If one isn't
+  // available, then it is created and returned.
   static GuestViewManager* FromBrowserContext(content::BrowserContext* context);
+
+  // Returns the GuestViewManager associated with |context|. If one isn't
+  // available, then nullptr is returned.
+  static GuestViewManager* FromBrowserContextIfAvailable(
+      content::BrowserContext* context);
 
   // Overrides factory for testing. Default (NULL) value indicates regular
   // (non-test) environment.
@@ -56,23 +63,25 @@ class GuestViewManager : public content::BrowserPluginGuestManager,
                    int guest_instance_id,
                    const base::DictionaryValue& attach_params);
 
+  // Removes the association between |element_instance_id| and a guest instance
+  // ID if one exists.
+  void DetachGuest(GuestViewBase* guest, int element_instance_id);
+
   int GetNextInstanceID();
   int GetGuestInstanceIDForElementID(
-      content::WebContents* embedder_web_contents,
+      content::WebContents* owner_web_contents,
       int element_instance_id);
 
   typedef base::Callback<void(content::WebContents*)>
       WebContentsCreatedCallback;
   void CreateGuest(const std::string& view_type,
-                   const std::string& embedder_extension_id,
-                   content::WebContents* embedder_web_contents,
+                   content::WebContents* owner_web_contents,
                    const base::DictionaryValue& create_params,
                    const WebContentsCreatedCallback& callback);
 
   content::WebContents* CreateGuestWithWebContentsParams(
       const std::string& view_type,
-      const std::string& embedder_extension_id,
-      content::WebContents* embedder_web_contents,
+      content::WebContents* owner_web_contents,
       const content::WebContents::CreateParams& create_params);
 
   content::SiteInstance* GetGuestSiteInstance(
@@ -80,9 +89,9 @@ class GuestViewManager : public content::BrowserPluginGuestManager,
 
   // BrowserPluginGuestManager implementation.
   content::WebContents* GetGuestByInstanceID(
-      content::WebContents* embedder_web_contents,
+      content::WebContents* owner_web_contents,
       int element_instance_id) override;
-  bool ForEachGuest(content::WebContents* embedder_web_contents,
+  bool ForEachGuest(content::WebContents* owner_web_contents,
                     const GuestCallback& callback) override;
 
  protected:
@@ -119,16 +128,27 @@ class GuestViewManager : public content::BrowserPluginGuestManager,
   GuestInstanceMap guest_web_contents_by_instance_id_;
 
   struct ElementInstanceKey {
-    content::WebContents* embedder_web_contents;
+    content::WebContents* owner_web_contents;
     int element_instance_id;
-    ElementInstanceKey(content::WebContents* embedder_web_contents,
+
+    ElementInstanceKey()
+        : owner_web_contents(nullptr),
+          element_instance_id(0) {}
+
+    ElementInstanceKey(content::WebContents* owner_web_contents,
                        int element_instance_id)
-        : embedder_web_contents(embedder_web_contents),
+        : owner_web_contents(owner_web_contents),
           element_instance_id(element_instance_id) {}
+
     bool operator<(const ElementInstanceKey& other) const {
-      if (embedder_web_contents != other.embedder_web_contents)
-        return embedder_web_contents < other.embedder_web_contents;
+      if (owner_web_contents != other.owner_web_contents)
+        return owner_web_contents < other.owner_web_contents;
       return element_instance_id < other.element_instance_id;
+    }
+
+    bool operator==(const ElementInstanceKey& other) const {
+      return (owner_web_contents == other.owner_web_contents) &&
+          (element_instance_id == other.element_instance_id);
     }
   };
 

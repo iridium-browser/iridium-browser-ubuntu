@@ -8,6 +8,7 @@
 #include "cc/layers/layer.h"
 #include "cc/layers/layer_impl.h"
 #include "cc/layers/picture_layer.h"
+#include "cc/scheduler/begin_frame_source.h"
 #include "cc/test/fake_content_layer_client.h"
 #include "cc/test/fake_layer_tree_host_client.h"
 #include "cc/test/fake_picture_layer.h"
@@ -44,7 +45,8 @@ class LayerTreeHostScrollTestScrollSimple : public LayerTreeHostScrollTest {
     scroll_layer->SetIsContainerForFixedPositionLayers(true);
     scroll_layer->SetScrollClipLayerId(root_layer->id());
     scroll_layer->SetScrollOffset(initial_scroll_);
-    layer_tree_host()->RegisterViewportLayers(root_layer, scroll_layer, NULL);
+    layer_tree_host()->RegisterViewportLayers(NULL, root_layer, scroll_layer,
+                                              NULL);
     PostSetNeedsCommitToMainThread();
   }
 
@@ -121,7 +123,8 @@ class LayerTreeHostScrollTestScrollMultipleRedraw
     scroll_layer_->SetIsContainerForFixedPositionLayers(true);
     scroll_layer_->SetScrollClipLayerId(root_layer->id());
     scroll_layer_->SetScrollOffset(initial_scroll_);
-    layer_tree_host()->RegisterViewportLayers(root_layer, scroll_layer_, NULL);
+    layer_tree_host()->RegisterViewportLayers(NULL, root_layer, scroll_layer_,
+                                              NULL);
     PostSetNeedsCommitToMainThread();
   }
 
@@ -223,8 +226,8 @@ class LayerTreeHostScrollTestScrollAbortedCommit
     root_scroll_layer->SetIsContainerForFixedPositionLayers(true);
     root_layer->AddChild(root_scroll_layer);
 
-    layer_tree_host()->RegisterViewportLayers(
-        root_layer, root_scroll_layer, NULL);
+    layer_tree_host()->RegisterViewportLayers(NULL, root_layer,
+                                              root_scroll_layer, NULL);
     layer_tree_host()->SetPageScaleFactorAndLimits(1.f, 0.01f, 100.f);
   }
 
@@ -303,10 +306,10 @@ class LayerTreeHostScrollTestScrollAbortedCommit
       EXPECT_VECTOR_EQ(root_scroll_layer->scroll_offset(), initial_scroll_);
 
       EXPECT_EQ(1.f, impl->active_tree()->page_scale_delta());
-      EXPECT_EQ(1.f, impl->active_tree()->total_page_scale_factor());
-      impl->active_tree()->SetPageScaleDelta(impl_scale_);
+      EXPECT_EQ(1.f, impl->active_tree()->current_page_scale_factor());
+      impl->SetPageScaleOnActiveTree(impl_scale_);
       EXPECT_EQ(impl_scale_, impl->active_tree()->page_scale_delta());
-      EXPECT_EQ(impl_scale_, impl->active_tree()->total_page_scale_factor());
+      EXPECT_EQ(impl_scale_, impl->active_tree()->current_page_scale_factor());
 
       // To simplify the testing flow, don't redraw here, just commit.
       impl->SetNeedsCommit();
@@ -323,11 +326,11 @@ class LayerTreeHostScrollTestScrollAbortedCommit
           gfx::ScrollOffsetWithDelta(initial_scroll_, impl_scroll_));
 
       EXPECT_EQ(1.f, impl->active_tree()->page_scale_delta());
-      EXPECT_EQ(impl_scale_, impl->active_tree()->total_page_scale_factor());
-      impl->active_tree()->SetPageScaleDelta(impl_scale_);
+      EXPECT_EQ(impl_scale_, impl->active_tree()->current_page_scale_factor());
+      impl->SetPageScaleOnActiveTree(impl_scale_ * impl_scale_);
       EXPECT_EQ(impl_scale_, impl->active_tree()->page_scale_delta());
       EXPECT_EQ(impl_scale_ * impl_scale_,
-                impl->active_tree()->total_page_scale_factor());
+                impl->active_tree()->current_page_scale_factor());
 
       impl->SetNeedsCommit();
     } else if (impl->active_tree()->source_frame_number() == 1) {
@@ -406,8 +409,8 @@ class LayerTreeHostScrollTestFractionalScroll : public LayerTreeHostScrollTest {
     root_scroll_layer->SetIsContainerForFixedPositionLayers(true);
     root_layer->AddChild(root_scroll_layer);
 
-    layer_tree_host()->RegisterViewportLayers(
-        root_layer, root_scroll_layer, NULL);
+    layer_tree_host()->RegisterViewportLayers(NULL, root_layer,
+                                              root_scroll_layer, NULL);
     layer_tree_host()->SetPageScaleFactorAndLimits(1.f, 0.01f, 100.f);
   }
 
@@ -509,8 +512,8 @@ class LayerTreeHostScrollTestCaseWithChild : public LayerTreeHostScrollTest {
     expected_scroll_layer_->SetScrollOffset(initial_offset_);
 
     layer_tree_host()->SetRootLayer(root_layer);
-    layer_tree_host()->RegisterViewportLayers(
-        root_layer, root_scroll_layer_, NULL);
+    layer_tree_host()->RegisterViewportLayers(NULL, root_layer,
+                                              root_scroll_layer_, NULL);
     LayerTreeHostScrollTest::SetupTree();
   }
 
@@ -778,8 +781,8 @@ class ImplSidePaintingScrollTestSimple : public ImplSidePaintingScrollTest {
     root_scroll_layer->SetIsContainerForFixedPositionLayers(true);
     root_layer->AddChild(root_scroll_layer);
 
-    layer_tree_host()->RegisterViewportLayers(
-        root_layer, root_scroll_layer, NULL);
+    layer_tree_host()->RegisterViewportLayers(NULL, root_layer,
+                                              root_scroll_layer, NULL);
     layer_tree_host()->SetPageScaleFactorAndLimits(1.f, 0.01f, 100.f);
   }
 
@@ -894,7 +897,7 @@ class ImplSidePaintingScrollTestImplOnlyScroll
     : public ImplSidePaintingScrollTest {
  public:
   ImplSidePaintingScrollTestImplOnlyScroll()
-      : initial_scroll_(20, 10), impl_thread_scroll_(-2, 3) {}
+      : initial_scroll_(20, 10), impl_thread_scroll_(-2, 3), impl_scale_(2.f) {}
 
   void SetupTree() override {
     LayerTreeHostScrollTest::SetupTree();
@@ -909,8 +912,8 @@ class ImplSidePaintingScrollTestImplOnlyScroll
     root_scroll_layer->SetIsContainerForFixedPositionLayers(true);
     root_layer->AddChild(root_scroll_layer);
 
-    layer_tree_host()->RegisterViewportLayers(
-        root_layer, root_scroll_layer, NULL);
+    layer_tree_host()->RegisterViewportLayers(NULL, root_layer,
+                                              root_scroll_layer, NULL);
     layer_tree_host()->SetPageScaleFactorAndLimits(1.f, 0.01f, 100.f);
   }
 
@@ -940,6 +943,7 @@ class ImplSidePaintingScrollTestImplOnlyScroll
       ASSERT_TRUE(active_root);
       ASSERT_TRUE(active_scroll_layer);
       active_scroll_layer->ScrollBy(impl_thread_scroll_);
+      impl->SetPageScaleOnActiveTree(impl_scale_);
     }
   }
 
@@ -987,7 +991,6 @@ class ImplSidePaintingScrollTestImplOnlyScroll
         EXPECT_VECTOR_EQ(pending_scroll_layer->ScrollDelta(), gfx::Vector2d());
         EXPECT_VECTOR_EQ(pending_scroll_layer->sent_scroll_delta(),
                          gfx::Vector2d());
-        EndTest();
         break;
     }
   }
@@ -1003,13 +1006,24 @@ class ImplSidePaintingScrollTestImplOnlyScroll
         EXPECT_VECTOR_EQ(scroll_layer->scroll_offset(), initial_scroll_);
         EXPECT_VECTOR_EQ(scroll_layer->ScrollDelta(), gfx::Vector2d());
         EXPECT_VECTOR_EQ(scroll_layer->sent_scroll_delta(), gfx::Vector2d());
+        EXPECT_EQ(1.f, impl->active_tree()->page_scale_delta());
+        EXPECT_EQ(1.f, impl->active_tree()->current_page_scale_factor());
         PostSetNeedsCommitToMainThread();
         break;
       case 1:
         EXPECT_VECTOR_EQ(scroll_layer->scroll_offset(), initial_scroll_);
         EXPECT_VECTOR_EQ(scroll_layer->ScrollDelta(), impl_thread_scroll_);
         EXPECT_VECTOR_EQ(scroll_layer->sent_scroll_delta(), gfx::Vector2d());
+        EXPECT_EQ(impl_scale_, impl->active_tree()->page_scale_delta());
+        EXPECT_EQ(impl_scale_,
+                  impl->active_tree()->current_page_scale_factor());
         PostSetNeedsCommitToMainThread();
+        break;
+      case 2:
+        EXPECT_EQ(1.f, impl->active_tree()->page_scale_delta());
+        EXPECT_EQ(impl_scale_,
+                  impl->active_tree()->current_page_scale_factor());
+        EndTest();
         break;
     }
   }
@@ -1019,6 +1033,7 @@ class ImplSidePaintingScrollTestImplOnlyScroll
  private:
   gfx::ScrollOffset initial_scroll_;
   gfx::Vector2dF impl_thread_scroll_;
+  float impl_scale_;
 };
 
 MULTI_THREAD_TEST_F(ImplSidePaintingScrollTestImplOnlyScroll);
@@ -1091,6 +1106,13 @@ class ThreadCheckingInputHandlerClient : public InputHandlerClient {
     *received_stop_flinging_ = true;
   }
 
+  void ReconcileElasticOverscrollAndRootScroll() override {
+    if (!task_runner_->BelongsToCurrentThread()) {
+      ADD_FAILURE() << "ReconcileElasticOverscrollAndRootScroll called on "
+                    << "wrong thread";
+    }
+  }
+
  private:
   base::SingleThreadTaskRunner* task_runner_;
   bool* received_stop_flinging_;
@@ -1122,7 +1144,8 @@ TEST(LayerTreeHostFlingTest, DidStopFlingingThread) {
                                     NULL,
                                     settings,
                                     base::MessageLoopProxy::current(),
-                                    impl_thread.message_loop_proxy());
+                                    impl_thread.message_loop_proxy(),
+                                    nullptr);
 
   impl_thread.message_loop_proxy()
       ->PostTask(FROM_HERE,

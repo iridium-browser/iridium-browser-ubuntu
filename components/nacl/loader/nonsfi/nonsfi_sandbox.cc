@@ -132,7 +132,7 @@ ResultExpr RestrictMmap() {
 #if defined(__x86_64__) || defined(__arm__)
 ResultExpr RestrictSocketpair() {
   // Only allow AF_UNIX, PF_UNIX. Crash if anything else is seen.
-  COMPILE_ASSERT(AF_UNIX == PF_UNIX, af_unix_pf_unix_different);
+  static_assert(AF_UNIX == PF_UNIX, "AF_UNIX must equal PF_UNIX.");
   const Arg<int> domain(0);
   return If(domain == AF_UNIX, Allow()).Else(CrashSIGSYS());
 }
@@ -300,10 +300,11 @@ ResultExpr NaClNonSfiBPFSandboxPolicy::InvalidSyscall() const {
   return CrashSIGSYS();
 }
 
-bool InitializeBPFSandbox() {
-  bool sandbox_is_initialized =
-      content::InitializeSandbox(scoped_ptr<sandbox::bpf_dsl::Policy>(
-          new nacl::nonsfi::NaClNonSfiBPFSandboxPolicy()));
+bool InitializeBPFSandbox(base::ScopedFD proc_task_fd) {
+  bool sandbox_is_initialized = content::InitializeSandbox(
+      scoped_ptr<sandbox::bpf_dsl::Policy>(
+          new nacl::nonsfi::NaClNonSfiBPFSandboxPolicy()),
+      proc_task_fd.Pass());
   if (!sandbox_is_initialized)
     return false;
   RunSandboxSanityChecks();

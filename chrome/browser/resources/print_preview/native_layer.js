@@ -51,8 +51,6 @@ cr.define('print_preview', function() {
         this.onDidGetPreviewPageCount_.bind(this);
     global.onDidPreviewPage = this.onDidPreviewPage_.bind(this);
     global.updatePrintPreview = this.onUpdatePrintPreview_.bind(this);
-    global.printScalingDisabledForSourcePDF =
-        this.onPrintScalingDisabledForSourcePDF_.bind(this);
     global.onDidGetAccessToken = this.onDidGetAccessToken_.bind(this);
     global.autoCancelForTesting = this.autoCancelForTesting_.bind(this);
     global.onPrivetPrinterChanged = this.onPrivetPrinterChanged_.bind(this);
@@ -61,6 +59,8 @@ cr.define('print_preview', function() {
     global.onPrivetPrintFailed = this.onPrivetPrintFailed_.bind(this);
     global.onEnableManipulateSettingsForTest =
         this.onEnableManipulateSettingsForTest_.bind(this);
+    global.printPresetOptionsFromDocument =
+        this.onPrintPresetOptionsFromDocument_.bind(this);
   };
 
   /**
@@ -95,6 +95,7 @@ cr.define('print_preview', function() {
     PRIVET_CAPABILITIES_SET:
         'print_preview.NativeLayer.PRIVET_CAPABILITIES_SET',
     PRIVET_PRINT_FAILED: 'print_preview.NativeLayer.PRIVET_PRINT_FAILED',
+    PRINT_PRESET_OPTIONS: 'print_preview.NativeLayer.PRINT_PRESET_OPTIONS',
   };
 
   /**
@@ -397,9 +398,14 @@ cr.define('print_preview', function() {
       chrome.send('manageLocalPrinters');
     },
 
-    /** Navigates the user to the Google Cloud Print management page. */
-    startManageCloudDestinations: function() {
-      chrome.send('manageCloudPrinters');
+    /**
+     * Navigates the user to the Google Cloud Print management page.
+     * @param {?string} user Email address of the user to open the management
+     *     page for (user must be currently logged in, indeed) or {@code null}
+     *     to open this page for the primary user.
+     */
+    startManageCloudDestinations: function(user) {
+      chrome.send('manageCloudPrinters', [user || '']);
     },
 
     /** Forces browser to open a new tab with the given URL address. */
@@ -652,15 +658,17 @@ cr.define('print_preview', function() {
     },
 
     /**
-     * Updates the fit to page option state based on the print scaling option of
-     * source pdf. PDF's have an option to enable/disable print scaling. When we
-     * find out that the print scaling option is disabled for the source pdf, we
-     * uncheck the fitToPage_ to page checkbox. This function is called from C++
-     * code.
+     * Updates print preset options from source PDF document.
+     * Called from PrintPreviewUI::OnSetOptionsFromDocument().
+     * @param {{disableScaling: boolean, copies: number}} options Specifies
+     *     printing options according to source document presets.
      * @private
      */
-    onPrintScalingDisabledForSourcePDF_: function() {
-      cr.dispatchSimpleEvent(this, NativeLayer.EventType.DISABLE_SCALING);
+    onPrintPresetOptionsFromDocument_: function(options) {
+      var printPresetOptionsEvent = new Event(
+          NativeLayer.EventType.PRINT_PRESET_OPTIONS);
+      printPresetOptionsEvent.optionsFromDocument = options;
+      this.dispatchEvent(printPresetOptionsEvent);
     },
 
     /**

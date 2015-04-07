@@ -42,6 +42,13 @@ void BindBuffer(GLenum target, GLuint buffer) {
   }
 }
 
+void BindBufferBase(GLenum target, GLuint index, GLuint buffer) {
+  gles2::cmds::BindBufferBase* c = GetCmdSpace<gles2::cmds::BindBufferBase>();
+  if (c) {
+    c->Init(target, index, buffer);
+  }
+}
+
 void BindFramebuffer(GLenum target, GLuint framebuffer) {
   gles2::cmds::BindFramebuffer* c = GetCmdSpace<gles2::cmds::BindFramebuffer>();
   if (c) {
@@ -57,10 +64,25 @@ void BindRenderbuffer(GLenum target, GLuint renderbuffer) {
   }
 }
 
+void BindSampler(GLuint unit, GLuint sampler) {
+  gles2::cmds::BindSampler* c = GetCmdSpace<gles2::cmds::BindSampler>();
+  if (c) {
+    c->Init(unit, sampler);
+  }
+}
+
 void BindTexture(GLenum target, GLuint texture) {
   gles2::cmds::BindTexture* c = GetCmdSpace<gles2::cmds::BindTexture>();
   if (c) {
     c->Init(target, texture);
+  }
+}
+
+void BindTransformFeedback(GLenum target, GLuint transformfeedback) {
+  gles2::cmds::BindTransformFeedback* c =
+      GetCmdSpace<gles2::cmds::BindTransformFeedback>();
+  if (c) {
+    c->Init(target, transformfeedback);
   }
 }
 
@@ -243,6 +265,18 @@ void CompressedTexSubImage2D(GLenum target,
   }
 }
 
+void CopyBufferSubData(GLenum readtarget,
+                       GLenum writetarget,
+                       GLintptr readoffset,
+                       GLintptr writeoffset,
+                       GLsizeiptr size) {
+  gles2::cmds::CopyBufferSubData* c =
+      GetCmdSpace<gles2::cmds::CopyBufferSubData>();
+  if (c) {
+    c->Init(readtarget, writetarget, readoffset, writeoffset, size);
+  }
+}
+
 void CopyTexImage2D(GLenum target,
                     GLint level,
                     GLenum internalformat,
@@ -330,6 +364,15 @@ void DeleteRenderbuffersImmediate(GLsizei n, const GLuint* renderbuffers) {
   }
 }
 
+void DeleteSamplersImmediate(GLsizei n, const GLuint* samplers) {
+  const uint32_t size = gles2::cmds::DeleteSamplersImmediate::ComputeSize(n);
+  gles2::cmds::DeleteSamplersImmediate* c =
+      GetImmediateCmdSpaceTotalSize<gles2::cmds::DeleteSamplersImmediate>(size);
+  if (c) {
+    c->Init(n, samplers);
+  }
+}
+
 void DeleteShader(GLuint shader) {
   gles2::cmds::DeleteShader* c = GetCmdSpace<gles2::cmds::DeleteShader>();
   if (c) {
@@ -343,6 +386,17 @@ void DeleteTexturesImmediate(GLsizei n, const GLuint* textures) {
       GetImmediateCmdSpaceTotalSize<gles2::cmds::DeleteTexturesImmediate>(size);
   if (c) {
     c->Init(n, textures);
+  }
+}
+
+void DeleteTransformFeedbacksImmediate(GLsizei n, const GLuint* ids) {
+  const uint32_t size =
+      gles2::cmds::DeleteTransformFeedbacksImmediate::ComputeSize(n);
+  gles2::cmds::DeleteTransformFeedbacksImmediate* c =
+      GetImmediateCmdSpaceTotalSize<
+          gles2::cmds::DeleteTransformFeedbacksImmediate>(size);
+  if (c) {
+    c->Init(n, ids);
   }
 }
 
@@ -457,6 +511,18 @@ void FramebufferTexture2D(GLenum target,
   }
 }
 
+void FramebufferTextureLayer(GLenum target,
+                             GLenum attachment,
+                             GLuint texture,
+                             GLint level,
+                             GLint layer) {
+  gles2::cmds::FramebufferTextureLayer* c =
+      GetCmdSpace<gles2::cmds::FramebufferTextureLayer>();
+  if (c) {
+    c->Init(target, attachment, texture, level, layer);
+  }
+}
+
 void FrontFace(GLenum mode) {
   gles2::cmds::FrontFace* c = GetCmdSpace<gles2::cmds::FrontFace>();
   if (c) {
@@ -500,12 +566,32 @@ void GenRenderbuffersImmediate(GLsizei n, GLuint* renderbuffers) {
   }
 }
 
+void GenSamplersImmediate(GLsizei n, GLuint* samplers) {
+  const uint32_t size = gles2::cmds::GenSamplersImmediate::ComputeSize(n);
+  gles2::cmds::GenSamplersImmediate* c =
+      GetImmediateCmdSpaceTotalSize<gles2::cmds::GenSamplersImmediate>(size);
+  if (c) {
+    c->Init(n, samplers);
+  }
+}
+
 void GenTexturesImmediate(GLsizei n, GLuint* textures) {
   const uint32_t size = gles2::cmds::GenTexturesImmediate::ComputeSize(n);
   gles2::cmds::GenTexturesImmediate* c =
       GetImmediateCmdSpaceTotalSize<gles2::cmds::GenTexturesImmediate>(size);
   if (c) {
     c->Init(n, textures);
+  }
+}
+
+void GenTransformFeedbacksImmediate(GLsizei n, GLuint* ids) {
+  const uint32_t size =
+      gles2::cmds::GenTransformFeedbacksImmediate::ComputeSize(n);
+  gles2::cmds::GenTransformFeedbacksImmediate* c =
+      GetImmediateCmdSpaceTotalSize<
+          gles2::cmds::GenTransformFeedbacksImmediate>(size);
+  if (c) {
+    c->Init(n, ids);
   }
 }
 
@@ -611,6 +697,19 @@ void GetIntegerv(GLenum pname,
   }
 }
 
+void GetInternalformativ(GLenum target,
+                         GLenum format,
+                         GLenum pname,
+                         GLsizei bufSize,
+                         uint32_t params_shm_id,
+                         uint32_t params_shm_offset) {
+  gles2::cmds::GetInternalformativ* c =
+      GetCmdSpace<gles2::cmds::GetInternalformativ>();
+  if (c) {
+    c->Init(target, format, pname, bufSize, params_shm_id, params_shm_offset);
+  }
+}
+
 void GetProgramiv(GLuint program,
                   GLenum pname,
                   uint32_t params_shm_id,
@@ -637,6 +736,28 @@ void GetRenderbufferParameteriv(GLenum target,
       GetCmdSpace<gles2::cmds::GetRenderbufferParameteriv>();
   if (c) {
     c->Init(target, pname, params_shm_id, params_shm_offset);
+  }
+}
+
+void GetSamplerParameterfv(GLuint sampler,
+                           GLenum pname,
+                           uint32_t params_shm_id,
+                           uint32_t params_shm_offset) {
+  gles2::cmds::GetSamplerParameterfv* c =
+      GetCmdSpace<gles2::cmds::GetSamplerParameterfv>();
+  if (c) {
+    c->Init(sampler, pname, params_shm_id, params_shm_offset);
+  }
+}
+
+void GetSamplerParameteriv(GLuint sampler,
+                           GLenum pname,
+                           uint32_t params_shm_id,
+                           uint32_t params_shm_offset) {
+  gles2::cmds::GetSamplerParameteriv* c =
+      GetCmdSpace<gles2::cmds::GetSamplerParameteriv>();
+  if (c) {
+    c->Init(sampler, pname, params_shm_id, params_shm_offset);
   }
 }
 
@@ -776,6 +897,36 @@ void Hint(GLenum target, GLenum mode) {
   }
 }
 
+void InvalidateFramebufferImmediate(GLenum target,
+                                    GLsizei count,
+                                    const GLenum* attachments) {
+  const uint32_t size =
+      gles2::cmds::InvalidateFramebufferImmediate::ComputeSize(count);
+  gles2::cmds::InvalidateFramebufferImmediate* c =
+      GetImmediateCmdSpaceTotalSize<
+          gles2::cmds::InvalidateFramebufferImmediate>(size);
+  if (c) {
+    c->Init(target, count, attachments);
+  }
+}
+
+void InvalidateSubFramebufferImmediate(GLenum target,
+                                       GLsizei count,
+                                       const GLenum* attachments,
+                                       GLint x,
+                                       GLint y,
+                                       GLsizei width,
+                                       GLsizei height) {
+  const uint32_t size =
+      gles2::cmds::InvalidateSubFramebufferImmediate::ComputeSize(count);
+  gles2::cmds::InvalidateSubFramebufferImmediate* c =
+      GetImmediateCmdSpaceTotalSize<
+          gles2::cmds::InvalidateSubFramebufferImmediate>(size);
+  if (c) {
+    c->Init(target, count, attachments, x, y, width, height);
+  }
+}
+
 void IsBuffer(GLuint buffer,
               uint32_t result_shm_id,
               uint32_t result_shm_offset) {
@@ -819,6 +970,15 @@ void IsRenderbuffer(GLuint renderbuffer,
   }
 }
 
+void IsSampler(GLuint sampler,
+               uint32_t result_shm_id,
+               uint32_t result_shm_offset) {
+  gles2::cmds::IsSampler* c = GetCmdSpace<gles2::cmds::IsSampler>();
+  if (c) {
+    c->Init(sampler, result_shm_id, result_shm_offset);
+  }
+}
+
 void IsShader(GLuint shader,
               uint32_t result_shm_id,
               uint32_t result_shm_offset) {
@@ -837,6 +997,16 @@ void IsTexture(GLuint texture,
   }
 }
 
+void IsTransformFeedback(GLuint transformfeedback,
+                         uint32_t result_shm_id,
+                         uint32_t result_shm_offset) {
+  gles2::cmds::IsTransformFeedback* c =
+      GetCmdSpace<gles2::cmds::IsTransformFeedback>();
+  if (c) {
+    c->Init(transformfeedback, result_shm_id, result_shm_offset);
+  }
+}
+
 void LineWidth(GLfloat width) {
   gles2::cmds::LineWidth* c = GetCmdSpace<gles2::cmds::LineWidth>();
   if (c) {
@@ -851,6 +1021,14 @@ void LinkProgram(GLuint program) {
   }
 }
 
+void PauseTransformFeedback() {
+  gles2::cmds::PauseTransformFeedback* c =
+      GetCmdSpace<gles2::cmds::PauseTransformFeedback>();
+  if (c) {
+    c->Init();
+  }
+}
+
 void PixelStorei(GLenum pname, GLint param) {
   gles2::cmds::PixelStorei* c = GetCmdSpace<gles2::cmds::PixelStorei>();
   if (c) {
@@ -862,6 +1040,13 @@ void PolygonOffset(GLfloat factor, GLfloat units) {
   gles2::cmds::PolygonOffset* c = GetCmdSpace<gles2::cmds::PolygonOffset>();
   if (c) {
     c->Init(factor, units);
+  }
+}
+
+void ReadBuffer(GLenum src) {
+  gles2::cmds::ReadBuffer* c = GetCmdSpace<gles2::cmds::ReadBuffer>();
+  if (c) {
+    c->Init(src);
   }
 }
 
@@ -902,10 +1087,58 @@ void RenderbufferStorage(GLenum target,
   }
 }
 
+void ResumeTransformFeedback() {
+  gles2::cmds::ResumeTransformFeedback* c =
+      GetCmdSpace<gles2::cmds::ResumeTransformFeedback>();
+  if (c) {
+    c->Init();
+  }
+}
+
 void SampleCoverage(GLclampf value, GLboolean invert) {
   gles2::cmds::SampleCoverage* c = GetCmdSpace<gles2::cmds::SampleCoverage>();
   if (c) {
     c->Init(value, invert);
+  }
+}
+
+void SamplerParameterf(GLuint sampler, GLenum pname, GLfloat param) {
+  gles2::cmds::SamplerParameterf* c =
+      GetCmdSpace<gles2::cmds::SamplerParameterf>();
+  if (c) {
+    c->Init(sampler, pname, param);
+  }
+}
+
+void SamplerParameterfvImmediate(GLuint sampler,
+                                 GLenum pname,
+                                 const GLfloat* params) {
+  const uint32_t size = gles2::cmds::SamplerParameterfvImmediate::ComputeSize();
+  gles2::cmds::SamplerParameterfvImmediate* c =
+      GetImmediateCmdSpaceTotalSize<gles2::cmds::SamplerParameterfvImmediate>(
+          size);
+  if (c) {
+    c->Init(sampler, pname, params);
+  }
+}
+
+void SamplerParameteri(GLuint sampler, GLenum pname, GLint param) {
+  gles2::cmds::SamplerParameteri* c =
+      GetCmdSpace<gles2::cmds::SamplerParameteri>();
+  if (c) {
+    c->Init(sampler, pname, param);
+  }
+}
+
+void SamplerParameterivImmediate(GLuint sampler,
+                                 GLenum pname,
+                                 const GLint* params) {
+  const uint32_t size = gles2::cmds::SamplerParameterivImmediate::ComputeSize();
+  gles2::cmds::SamplerParameterivImmediate* c =
+      GetImmediateCmdSpaceTotalSize<gles2::cmds::SamplerParameterivImmediate>(
+          size);
+  if (c) {
+    c->Init(sampler, pname, params);
   }
 }
 
@@ -999,6 +1232,23 @@ void TexImage2D(GLenum target,
   }
 }
 
+void TexImage3D(GLenum target,
+                GLint level,
+                GLint internalformat,
+                GLsizei width,
+                GLsizei height,
+                GLsizei depth,
+                GLenum format,
+                GLenum type,
+                uint32_t pixels_shm_id,
+                uint32_t pixels_shm_offset) {
+  gles2::cmds::TexImage3D* c = GetCmdSpace<gles2::cmds::TexImage3D>();
+  if (c) {
+    c->Init(target, level, internalformat, width, height, depth, format, type,
+            pixels_shm_id, pixels_shm_offset);
+  }
+}
+
 void TexParameterf(GLenum target, GLenum pname, GLfloat param) {
   gles2::cmds::TexParameterf* c = GetCmdSpace<gles2::cmds::TexParameterf>();
   if (c) {
@@ -1033,6 +1283,18 @@ void TexParameterivImmediate(GLenum target, GLenum pname, const GLint* params) {
   }
 }
 
+void TexStorage3D(GLenum target,
+                  GLsizei levels,
+                  GLenum internalFormat,
+                  GLsizei width,
+                  GLsizei height,
+                  GLsizei depth) {
+  gles2::cmds::TexStorage3D* c = GetCmdSpace<gles2::cmds::TexStorage3D>();
+  if (c) {
+    c->Init(target, levels, internalFormat, width, height, depth);
+  }
+}
+
 void TexSubImage2D(GLenum target,
                    GLint level,
                    GLint xoffset,
@@ -1048,6 +1310,26 @@ void TexSubImage2D(GLenum target,
   if (c) {
     c->Init(target, level, xoffset, yoffset, width, height, format, type,
             pixels_shm_id, pixels_shm_offset, internal);
+  }
+}
+
+void TexSubImage3D(GLenum target,
+                   GLint level,
+                   GLint xoffset,
+                   GLint yoffset,
+                   GLint zoffset,
+                   GLsizei width,
+                   GLsizei height,
+                   GLsizei depth,
+                   GLenum format,
+                   GLenum type,
+                   uint32_t pixels_shm_id,
+                   uint32_t pixels_shm_offset,
+                   GLboolean internal) {
+  gles2::cmds::TexSubImage3D* c = GetCmdSpace<gles2::cmds::TexSubImage3D>();
+  if (c) {
+    c->Init(target, level, xoffset, yoffset, zoffset, width, height, depth,
+            format, type, pixels_shm_id, pixels_shm_offset, internal);
   }
 }
 
@@ -1078,6 +1360,22 @@ void Uniform1ivImmediate(GLint location, GLsizei count, const GLint* v) {
   const uint32_t size = gles2::cmds::Uniform1ivImmediate::ComputeSize(count);
   gles2::cmds::Uniform1ivImmediate* c =
       GetImmediateCmdSpaceTotalSize<gles2::cmds::Uniform1ivImmediate>(size);
+  if (c) {
+    c->Init(location, count, v);
+  }
+}
+
+void Uniform1ui(GLint location, GLuint x) {
+  gles2::cmds::Uniform1ui* c = GetCmdSpace<gles2::cmds::Uniform1ui>();
+  if (c) {
+    c->Init(location, x);
+  }
+}
+
+void Uniform1uivImmediate(GLint location, GLsizei count, const GLuint* v) {
+  const uint32_t size = gles2::cmds::Uniform1uivImmediate::ComputeSize(count);
+  gles2::cmds::Uniform1uivImmediate* c =
+      GetImmediateCmdSpaceTotalSize<gles2::cmds::Uniform1uivImmediate>(size);
   if (c) {
     c->Init(location, count, v);
   }
@@ -1115,6 +1413,22 @@ void Uniform2ivImmediate(GLint location, GLsizei count, const GLint* v) {
   }
 }
 
+void Uniform2ui(GLint location, GLuint x, GLuint y) {
+  gles2::cmds::Uniform2ui* c = GetCmdSpace<gles2::cmds::Uniform2ui>();
+  if (c) {
+    c->Init(location, x, y);
+  }
+}
+
+void Uniform2uivImmediate(GLint location, GLsizei count, const GLuint* v) {
+  const uint32_t size = gles2::cmds::Uniform2uivImmediate::ComputeSize(count);
+  gles2::cmds::Uniform2uivImmediate* c =
+      GetImmediateCmdSpaceTotalSize<gles2::cmds::Uniform2uivImmediate>(size);
+  if (c) {
+    c->Init(location, count, v);
+  }
+}
+
 void Uniform3f(GLint location, GLfloat x, GLfloat y, GLfloat z) {
   gles2::cmds::Uniform3f* c = GetCmdSpace<gles2::cmds::Uniform3f>();
   if (c) {
@@ -1142,6 +1456,22 @@ void Uniform3ivImmediate(GLint location, GLsizei count, const GLint* v) {
   const uint32_t size = gles2::cmds::Uniform3ivImmediate::ComputeSize(count);
   gles2::cmds::Uniform3ivImmediate* c =
       GetImmediateCmdSpaceTotalSize<gles2::cmds::Uniform3ivImmediate>(size);
+  if (c) {
+    c->Init(location, count, v);
+  }
+}
+
+void Uniform3ui(GLint location, GLuint x, GLuint y, GLuint z) {
+  gles2::cmds::Uniform3ui* c = GetCmdSpace<gles2::cmds::Uniform3ui>();
+  if (c) {
+    c->Init(location, x, y, z);
+  }
+}
+
+void Uniform3uivImmediate(GLint location, GLsizei count, const GLuint* v) {
+  const uint32_t size = gles2::cmds::Uniform3uivImmediate::ComputeSize(count);
+  gles2::cmds::Uniform3uivImmediate* c =
+      GetImmediateCmdSpaceTotalSize<gles2::cmds::Uniform3uivImmediate>(size);
   if (c) {
     c->Init(location, count, v);
   }
@@ -1179,6 +1509,22 @@ void Uniform4ivImmediate(GLint location, GLsizei count, const GLint* v) {
   }
 }
 
+void Uniform4ui(GLint location, GLuint x, GLuint y, GLuint z, GLuint w) {
+  gles2::cmds::Uniform4ui* c = GetCmdSpace<gles2::cmds::Uniform4ui>();
+  if (c) {
+    c->Init(location, x, y, z, w);
+  }
+}
+
+void Uniform4uivImmediate(GLint location, GLsizei count, const GLuint* v) {
+  const uint32_t size = gles2::cmds::Uniform4uivImmediate::ComputeSize(count);
+  gles2::cmds::Uniform4uivImmediate* c =
+      GetImmediateCmdSpaceTotalSize<gles2::cmds::Uniform4uivImmediate>(size);
+  if (c) {
+    c->Init(location, count, v);
+  }
+}
+
 void UniformMatrix2fvImmediate(GLint location,
                                GLsizei count,
                                const GLfloat* value) {
@@ -1186,6 +1532,32 @@ void UniformMatrix2fvImmediate(GLint location,
       gles2::cmds::UniformMatrix2fvImmediate::ComputeSize(count);
   gles2::cmds::UniformMatrix2fvImmediate* c =
       GetImmediateCmdSpaceTotalSize<gles2::cmds::UniformMatrix2fvImmediate>(
+          size);
+  if (c) {
+    c->Init(location, count, value);
+  }
+}
+
+void UniformMatrix2x3fvImmediate(GLint location,
+                                 GLsizei count,
+                                 const GLfloat* value) {
+  const uint32_t size =
+      gles2::cmds::UniformMatrix2x3fvImmediate::ComputeSize(count);
+  gles2::cmds::UniformMatrix2x3fvImmediate* c =
+      GetImmediateCmdSpaceTotalSize<gles2::cmds::UniformMatrix2x3fvImmediate>(
+          size);
+  if (c) {
+    c->Init(location, count, value);
+  }
+}
+
+void UniformMatrix2x4fvImmediate(GLint location,
+                                 GLsizei count,
+                                 const GLfloat* value) {
+  const uint32_t size =
+      gles2::cmds::UniformMatrix2x4fvImmediate::ComputeSize(count);
+  gles2::cmds::UniformMatrix2x4fvImmediate* c =
+      GetImmediateCmdSpaceTotalSize<gles2::cmds::UniformMatrix2x4fvImmediate>(
           size);
   if (c) {
     c->Init(location, count, value);
@@ -1205,6 +1577,32 @@ void UniformMatrix3fvImmediate(GLint location,
   }
 }
 
+void UniformMatrix3x2fvImmediate(GLint location,
+                                 GLsizei count,
+                                 const GLfloat* value) {
+  const uint32_t size =
+      gles2::cmds::UniformMatrix3x2fvImmediate::ComputeSize(count);
+  gles2::cmds::UniformMatrix3x2fvImmediate* c =
+      GetImmediateCmdSpaceTotalSize<gles2::cmds::UniformMatrix3x2fvImmediate>(
+          size);
+  if (c) {
+    c->Init(location, count, value);
+  }
+}
+
+void UniformMatrix3x4fvImmediate(GLint location,
+                                 GLsizei count,
+                                 const GLfloat* value) {
+  const uint32_t size =
+      gles2::cmds::UniformMatrix3x4fvImmediate::ComputeSize(count);
+  gles2::cmds::UniformMatrix3x4fvImmediate* c =
+      GetImmediateCmdSpaceTotalSize<gles2::cmds::UniformMatrix3x4fvImmediate>(
+          size);
+  if (c) {
+    c->Init(location, count, value);
+  }
+}
+
 void UniformMatrix4fvImmediate(GLint location,
                                GLsizei count,
                                const GLfloat* value) {
@@ -1212,6 +1610,32 @@ void UniformMatrix4fvImmediate(GLint location,
       gles2::cmds::UniformMatrix4fvImmediate::ComputeSize(count);
   gles2::cmds::UniformMatrix4fvImmediate* c =
       GetImmediateCmdSpaceTotalSize<gles2::cmds::UniformMatrix4fvImmediate>(
+          size);
+  if (c) {
+    c->Init(location, count, value);
+  }
+}
+
+void UniformMatrix4x2fvImmediate(GLint location,
+                                 GLsizei count,
+                                 const GLfloat* value) {
+  const uint32_t size =
+      gles2::cmds::UniformMatrix4x2fvImmediate::ComputeSize(count);
+  gles2::cmds::UniformMatrix4x2fvImmediate* c =
+      GetImmediateCmdSpaceTotalSize<gles2::cmds::UniformMatrix4x2fvImmediate>(
+          size);
+  if (c) {
+    c->Init(location, count, value);
+  }
+}
+
+void UniformMatrix4x3fvImmediate(GLint location,
+                                 GLsizei count,
+                                 const GLfloat* value) {
+  const uint32_t size =
+      gles2::cmds::UniformMatrix4x3fvImmediate::ComputeSize(count);
+  gles2::cmds::UniformMatrix4x3fvImmediate* c =
+      GetImmediateCmdSpaceTotalSize<gles2::cmds::UniformMatrix4x3fvImmediate>(
           size);
   if (c) {
     c->Init(location, count, value);
@@ -1297,6 +1721,53 @@ void VertexAttrib4fvImmediate(GLuint indx, const GLfloat* values) {
           size);
   if (c) {
     c->Init(indx, values);
+  }
+}
+
+void VertexAttribI4i(GLuint indx, GLint x, GLint y, GLint z, GLint w) {
+  gles2::cmds::VertexAttribI4i* c = GetCmdSpace<gles2::cmds::VertexAttribI4i>();
+  if (c) {
+    c->Init(indx, x, y, z, w);
+  }
+}
+
+void VertexAttribI4ivImmediate(GLuint indx, const GLint* values) {
+  const uint32_t size = gles2::cmds::VertexAttribI4ivImmediate::ComputeSize();
+  gles2::cmds::VertexAttribI4ivImmediate* c =
+      GetImmediateCmdSpaceTotalSize<gles2::cmds::VertexAttribI4ivImmediate>(
+          size);
+  if (c) {
+    c->Init(indx, values);
+  }
+}
+
+void VertexAttribI4ui(GLuint indx, GLuint x, GLuint y, GLuint z, GLuint w) {
+  gles2::cmds::VertexAttribI4ui* c =
+      GetCmdSpace<gles2::cmds::VertexAttribI4ui>();
+  if (c) {
+    c->Init(indx, x, y, z, w);
+  }
+}
+
+void VertexAttribI4uivImmediate(GLuint indx, const GLuint* values) {
+  const uint32_t size = gles2::cmds::VertexAttribI4uivImmediate::ComputeSize();
+  gles2::cmds::VertexAttribI4uivImmediate* c =
+      GetImmediateCmdSpaceTotalSize<gles2::cmds::VertexAttribI4uivImmediate>(
+          size);
+  if (c) {
+    c->Init(indx, values);
+  }
+}
+
+void VertexAttribIPointer(GLuint indx,
+                          GLint size,
+                          GLenum type,
+                          GLsizei stride,
+                          GLuint offset) {
+  gles2::cmds::VertexAttribIPointer* c =
+      GetCmdSpace<gles2::cmds::VertexAttribIPointer>();
+  if (c) {
+    c->Init(indx, size, type, stride, offset);
   }
 }
 
@@ -1414,10 +1885,26 @@ void BeginQueryEXT(GLenum target,
   }
 }
 
+void BeginTransformFeedback(GLenum primitivemode) {
+  gles2::cmds::BeginTransformFeedback* c =
+      GetCmdSpace<gles2::cmds::BeginTransformFeedback>();
+  if (c) {
+    c->Init(primitivemode);
+  }
+}
+
 void EndQueryEXT(GLenum target, GLuint submit_count) {
   gles2::cmds::EndQueryEXT* c = GetCmdSpace<gles2::cmds::EndQueryEXT>();
   if (c) {
     c->Init(target, submit_count);
+  }
+}
+
+void EndTransformFeedback() {
+  gles2::cmds::EndTransformFeedback* c =
+      GetCmdSpace<gles2::cmds::EndTransformFeedback>();
+  if (c) {
+    c->Init();
   }
 }
 
@@ -1535,20 +2022,6 @@ void RequestExtensionCHROMIUM(uint32_t bucket_id) {
       GetCmdSpace<gles2::cmds::RequestExtensionCHROMIUM>();
   if (c) {
     c->Init(bucket_id);
-  }
-}
-
-void GetMultipleIntegervCHROMIUM(uint32_t pnames_shm_id,
-                                 uint32_t pnames_shm_offset,
-                                 GLuint count,
-                                 uint32_t results_shm_id,
-                                 uint32_t results_shm_offset,
-                                 GLsizeiptr size) {
-  gles2::cmds::GetMultipleIntegervCHROMIUM* c =
-      GetCmdSpace<gles2::cmds::GetMultipleIntegervCHROMIUM>();
-  if (c) {
-    c->Init(pnames_shm_id, pnames_shm_offset, count, results_shm_id,
-            results_shm_offset, size);
   }
 }
 
@@ -1760,11 +2233,11 @@ void ReleaseTexImage2DCHROMIUM(GLenum target, GLint imageId) {
   }
 }
 
-void TraceBeginCHROMIUM(GLuint bucket_id) {
+void TraceBeginCHROMIUM(GLuint category_bucket_id, GLuint name_bucket_id) {
   gles2::cmds::TraceBeginCHROMIUM* c =
       GetCmdSpace<gles2::cmds::TraceBeginCHROMIUM>();
   if (c) {
-    c->Init(bucket_id);
+    c->Init(category_bucket_id, name_bucket_id);
   }
 }
 
@@ -1899,6 +2372,13 @@ void ScheduleOverlayPlaneCHROMIUM(GLint plane_z_order,
     c->Init(plane_z_order, plane_transform, overlay_texture_id, bounds_x,
             bounds_y, bounds_width, bounds_height, uv_x, uv_y, uv_width,
             uv_height);
+  }
+}
+
+void SwapInterval(GLint interval) {
+  gles2::cmds::SwapInterval* c = GetCmdSpace<gles2::cmds::SwapInterval>();
+  if (c) {
+    c->Init(interval);
   }
 }
 

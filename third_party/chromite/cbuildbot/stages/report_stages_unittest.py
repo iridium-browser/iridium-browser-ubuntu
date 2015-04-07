@@ -7,7 +7,6 @@
 
 from __future__ import print_function
 
-import mox
 import os
 import sys
 
@@ -15,6 +14,7 @@ sys.path.insert(0, os.path.abspath('%s/../../..' % os.path.dirname(__file__)))
 from chromite.cbuildbot import commands
 from chromite.cbuildbot import constants
 from chromite.cbuildbot import failures_lib
+from chromite.cbuildbot import results_lib
 from chromite.cbuildbot import validation_pool
 from chromite.cbuildbot.cbuildbot_unittest import BuilderRunMock
 from chromite.cbuildbot.stages import sync_stages
@@ -25,6 +25,7 @@ from chromite.lib import cidb
 from chromite.lib import cros_test_lib
 from chromite.lib import alerts
 from chromite.lib import osutils
+from chromite.lib import retry_stats
 
 
 # TODO(build): Finish test wrapper (http://crosbug.com/37517).
@@ -32,34 +33,37 @@ from chromite.lib import osutils
 import mock
 
 
-# pylint: disable=R0901,W0212
+# pylint: disable=protected-access
+
+
 class BuildStartStageTest(generic_stages_unittest.AbstractStageTest):
   """Tests that BuildStartStage behaves as expected."""
 
   def setUp(self):
-    self.mock_cidb = mox.MockObject(cidb.CIDBConnection)
+    self.mock_cidb = mock.MagicMock()
     cidb.CIDBConnectionFactory.SetupMockCidb(self.mock_cidb)
+    retry_stats.SetupStats()
     os.environ['BUILDBOT_MASTERNAME'] = 'chromiumos'
-    self._Prepare(build_id = None)
-
-  def tearDown(self):
-    mox.Verify(self.mock_cidb)
+    self._Prepare(build_id=None)
 
   def testUnknownWaterfall(self):
-    """Test that an assertion is thrown is master name is not valid."""
+    """Test that an assertion is thrown if master name is not valid."""
     os.environ['BUILDBOT_MASTERNAME'] = 'gibberish'
     self.assertRaises(failures_lib.StepFailure, self.RunStage)
 
   def testPerformStage(self):
     """Test that a normal run of the stage does a database insert."""
-    self.mock_cidb.InsertBuild(bot_hostname=mox.IgnoreArg(),
-                               build_config='x86-generic-paladin',
-                               build_number=1234321,
-                               builder_name=mox.IgnoreArg(),
-                               master_build_id=None,
-                               waterfall='chromiumos').AndReturn(31337)
-    mox.Replay(self.mock_cidb)
+    self.PatchObject(self.mock_cidb, 'InsertBuild', return_value=31337)
+
     self.RunStage()
+    self.mock_cidb.InsertBuild.assert_called_once_with(
+        bot_hostname=mock.ANY,
+        build_config='x86-generic-paladin',
+        build_number=1234321,
+        builder_name=mock.ANY,
+        master_build_id=None,
+        waterfall='chromiumos',
+        timeout_seconds=mock.ANY)
     self.assertEqual(self._run.attrs.metadata.GetValue('build_id'), 31337)
     self.assertEqual(self._run.attrs.metadata.GetValue('db_type'),
                      cidb.CIDBConnectionFactory._CONNECTION_TYPE_MOCK)
@@ -97,28 +101,23 @@ class BuildStartStageTest(generic_stages_unittest.AbstractStageTest):
     return report_stages.BuildStartStage(self._run)
 
 
-# pylint: disable=R0901,W0212
-class ReportStageTest(generic_stages_unittest.AbstractStageTest):
-  """Test the Report stage."""
-
-  RELEASE_TAG = ''
+class AbstractReportStageTest(generic_stages_unittest.AbstractStageTest):
+  """Base class for testing the Report stage."""
 
   def setUp(self):
     for cmd in ((osutils, 'WriteFile'),
                 (commands, 'UploadArchivedFile'),
                 (alerts, 'SendEmail')):
       self.StartPatcher(mock.patch.object(*cmd, autospec=True))
+    retry_stats.SetupStats()
 
     self.StartPatcher(BuilderRunMock())
-    self.cq = sync_stages_unittest.CLStatusMock()
-    self.StartPatcher(self.cq)
     self.sync_stage = None
 
     # Set up a general purpose cidb mock. Tests with more specific
     # mock requirements can replace this with a separate call to
     # SetupMockCidb
-    mock_cidb = mox.MockObject(cidb.CIDBConnection)
-    cidb.CIDBConnectionFactory.SetupMockCidb(mock_cidb)
+    cidb.CIDBConnectionFactory.SetupMockCidb(mock.MagicMock())
 
     self._Prepare()
 
@@ -128,7 +127,8 @@ class ReportStageTest(generic_stages_unittest.AbstractStageTest):
 
   def _SetupCommitQueueSyncPool(self):
     self.sync_stage = sync_stages.CommitQueueSyncStage(self._run)
-    pool = validation_pool.ValidationPool(constants.BOTH_OVERLAYS,
+    pool = validation_pool.ValidationPool(
+        constants.BOTH_OVERLAYS,
         self.build_root, build_number=3, builder_name=self._bot_id,
         is_master=True, dryrun=True)
     pool.changes = [sync_stages_unittest.MockPatch()]
@@ -136,6 +136,12 @@ class ReportStageTest(generic_stages_unittest.AbstractStageTest):
 
   def ConstructStage(self):
     return report_stages.ReportStage(self._run, self.sync_stage, None)
+
+
+class ReportStageTest(AbstractReportStageTest):
+  """Test the Report stage."""
+
+  RELEASE_TAG = ''
 
   def testCheckResults(self):
     """Basic sanity check for results stage functionality"""
@@ -151,7 +157,19 @@ class ReportStageTest(generic_stages_unittest.AbstractStageTest):
                        update_list=True, acl=mock.ANY)]
     calls += [mock.call(mock.ANY, mock.ANY, filename, False,
                         acl=mock.ANY) for filename in filenames]
-    # pylint: disable=E1101
+    self.assertEquals(calls, commands.UploadArchivedFile.call_args_list)
+
+  def testDoNotUpdateLATESTMarkersWhenBuildFailed(self):
+    """Check that we do not update the latest markers on failed build."""
+    self._SetupUpdateStreakCounter()
+    self.PatchObject(report_stages.ReportStage, '_UploadArchiveIndex',
+                     return_value={'any': 'dict'})
+    self.PatchObject(results_lib.Results, 'BuildSucceededSoFar',
+                     return_value=False)
+    stage = self.ConstructStage()
+    stage.Run()
+    calls = [mock.call(mock.ANY, mock.ANY, 'metadata.json', False,
+                       update_list=True, acl=mock.ANY)]
     self.assertEquals(calls, commands.UploadArchivedFile.call_args_list)
 
   def testCommitQueueResults(self):
@@ -167,7 +185,8 @@ class ReportStageTest(generic_stages_unittest.AbstractStageTest):
     self._SetupUpdateStreakCounter(counter_value=-3)
     self._SetupCommitQueueSyncPool()
     self.RunStage()
-    # pylint: disable=E1101
+    # The mocking logic gets confused with SendEmail.
+    # pylint: disable=no-member
     self.assertGreater(alerts.SendEmail.call_count, 0,
                        'CQ health alerts emails were not sent.')
 
@@ -178,7 +197,8 @@ class ReportStageTest(generic_stages_unittest.AbstractStageTest):
     self._SetupUpdateStreakCounter(counter_value=-5)
     self._SetupCommitQueueSyncPool()
     self.RunStage()
-    # pylint: disable=E1101
+    # The mocking logic gets confused with SendEmail.
+    # pylint: disable=no-member
     self.assertGreater(alerts.SendEmail.call_count, 0,
                        'CQ health alerts emails were not sent.')
 
@@ -190,6 +210,34 @@ class ReportStageTest(generic_stages_unittest.AbstractStageTest):
                      generic_stages_unittest.DEFAULT_BUILD_NUMBER)
     self.assertTrue(metadata_dict.has_key('builder-name'))
     self.assertTrue(metadata_dict.has_key('bot-hostname'))
+
+  def testGetChildConfigsMetadataList(self):
+    """Test that GetChildConfigListMetadata generates child config metadata."""
+    child_configs = [{'name': 'config1', 'boards': ['board1']},
+                     {'name': 'config2', 'boards': ['board2']}]
+    config_status_map = {'config1': True,
+                         'config2': False}
+    expected = [{'name': 'config1', 'boards': ['board1'],
+                 'status': constants.FINAL_STATUS_PASSED},
+                {'name': 'config2', 'boards': ['board2'],
+                 'status': constants.FINAL_STATUS_FAILED}]
+    child_config_list = report_stages.GetChildConfigListMetadata(
+        child_configs, config_status_map)
+    self.assertEqual(expected, child_config_list)
+
+
+class ReportStageNoSyncTest(AbstractReportStageTest):
+  """Test the Report stage if SyncStage didn't complete.
+
+  If SyncStage doesn't complete, we don't know the release tag, and can't
+  archive results.
+  """
+  RELEASE_TAG = None
+
+  def testCommitQueueResults(self):
+    """Check that we can run with a RELEASE_TAG of None."""
+    self._SetupUpdateStreakCounter()
+    self.RunStage()
 
 
 if __name__ == '__main__':

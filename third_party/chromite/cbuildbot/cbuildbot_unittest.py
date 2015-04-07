@@ -26,10 +26,13 @@ from chromite.lib import cros_test_lib
 from chromite.lib import osutils
 from chromite.lib import parallel_unittest
 from chromite.lib import partial_mock
-from chromite.lib import timeout_util
 from chromite.scripts import cbuildbot
 
+
 DEFAULT_CHROME_BRANCH = '27'
+
+
+# pylint: disable=protected-access
 
 
 class BuilderRunMock(partial_mock.PartialMock):
@@ -48,7 +51,6 @@ class BuilderRunMock(partial_mock.PartialMock):
     return self.CHROME_VERSION
 
 
-# pylint: disable=W0212,R0904
 class TestExitedException(Exception):
   """Exception used by sys.exit() mock to halt execution."""
 
@@ -267,7 +269,7 @@ class SimpleBuilderTest(cros_test_lib.MockTempDirTestCase):
     cbuildbot.SimpleBuilder(builder_run).RunStages()
 
 
-class LogTest(cros_test_lib.MoxTestCase):
+class LogTest(cros_test_lib.TempDirTestCase):
   """Test logging functionality."""
 
   def _generateLogs(self, num):
@@ -280,7 +282,6 @@ class LogTest(cros_test_lib.MoxTestCase):
                 'w') as f:
         f.write(str(i))
 
-  @osutils.TempDirDecorator
   def testZeroToOneLogs(self):
     """Test beginning corner case."""
     self._generateLogs(0)
@@ -289,7 +290,6 @@ class LogTest(cros_test_lib.MoxTestCase):
     with open(os.path.join(self.tempdir, 'cbuildbot.log.1')) as f:
       self.assertEquals(f.readline(), '1')
 
-  @osutils.TempDirDecorator
   def testNineToTenLogs(self):
     """Test handling *.log.9 to *.log.10 (correct sorting)."""
     self._generateLogs(9)
@@ -298,7 +298,6 @@ class LogTest(cros_test_lib.MoxTestCase):
     with open(os.path.join(self.tempdir, 'cbuildbot.log.10')) as f:
       self.assertEquals(f.readline(), '10')
 
-  @osutils.TempDirDecorator
   def testOverLimit(self):
     """Test going over the limit and having to purge old logs."""
     self._generateLogs(25)
@@ -323,9 +322,6 @@ class InterfaceTest(cros_test_lib.MoxTestCase, cros_test_lib.LoggingTestCase):
   def assertDieSysExit(self, *args, **kwargs):
     self.assertRaises(cros_build_lib.DieSystemExit, *args, **kwargs)
 
-  # Let this test run for a max of 300s; if it takes longer, then it's
-  # likely that there is an exec loop in the pathways.
-  @timeout_util.TimeoutDecorator(300)
   def testDepotTools(self):
     """Test that the entry point used by depot_tools works."""
     path = os.path.join(constants.SOURCE_ROOT, 'chromite', 'buildbot',
@@ -442,36 +438,44 @@ class InterfaceTest(cros_test_lib.MoxTestCase, cros_test_lib.LoggingTestCase):
 
   def testBuildBotWithBadChromeRevOption(self):
     """chrome_rev can't be passed an invalid option after chrome_root."""
-    args = ['--local',
+    args = [
+        '--local',
         '--buildroot=/tmp',
         '--chrome_root=.',
         '--chrome_rev=%s' % constants.CHROME_REV_TOT,
-        self._X86_PREFLIGHT]
+        self._X86_PREFLIGHT,
+    ]
     self.assertDieSysExit(cbuildbot._ParseCommandLine, self.parser, args)
 
   def testBuildBotWithBadChromeRootOption(self):
     """chrome_root can't get passed after non-local chrome_rev."""
-    args = ['--local',
+    args = [
+        '--local',
         '--buildroot=/tmp',
         '--chrome_rev=%s' % constants.CHROME_REV_TOT,
         '--chrome_root=.',
-        self._X86_PREFLIGHT]
+        self._X86_PREFLIGHT,
+    ]
     self.assertDieSysExit(cbuildbot._ParseCommandLine, self.parser, args)
 
   def testBuildBotWithBadChromeRevOptionLocal(self):
     """chrome_rev can't be local without chrome_root."""
-    args = ['--local',
+    args = [
+        '--local',
         '--buildroot=/tmp',
         '--chrome_rev=%s' % constants.CHROME_REV_LOCAL,
-        self._X86_PREFLIGHT]
+        self._X86_PREFLIGHT,
+    ]
     self.assertDieSysExit(cbuildbot._ParseCommandLine, self.parser, args)
 
   def testBuildBotWithGoodChromeRootOption(self):
     """chrome_root can be set without chrome_rev."""
-    args = ['--local',
+    args = [
+        '--local',
         '--buildroot=/tmp',
         '--chrome_root=.',
-        self._X86_PREFLIGHT]
+        self._X86_PREFLIGHT,
+    ]
     self.mox.ReplayAll()
     (options, args) = cbuildbot._ParseCommandLine(self.parser, args)
     self.mox.VerifyAll()
@@ -480,7 +484,8 @@ class InterfaceTest(cros_test_lib.MoxTestCase, cros_test_lib.LoggingTestCase):
 
   def testBuildBotWithGoodChromeRevAndRootOption(self):
     """chrome_rev can get reset around chrome_root."""
-    args = ['--local',
+    args = [
+        '--local',
         '--buildroot=/tmp',
         '--chrome_rev=%s' % constants.CHROME_REV_LATEST,
         '--chrome_rev=%s' % constants.CHROME_REV_STICKY,
@@ -492,7 +497,8 @@ class InterfaceTest(cros_test_lib.MoxTestCase, cros_test_lib.LoggingTestCase):
         '--chrome_root=.',
         '--chrome_rev=%s' % constants.CHROME_REV_TOT,
         '--chrome_rev=%s' % constants.CHROME_REV_LOCAL,
-        self._X86_PREFLIGHT]
+        self._X86_PREFLIGHT,
+    ]
     self.mox.ReplayAll()
     (options, args) = cbuildbot._ParseCommandLine(self.parser, args)
     self.mox.VerifyAll()
@@ -609,9 +615,9 @@ class FullInterfaceTest(cros_test_lib.MoxTempDirTestCase):
     self.mox.ReplayAll()
     self.assertRaises(cros_build_lib.DieSystemExit, self.assertMain,
                       ['--local',
-                      '-r', self.buildroot,
-                      'arm-generic-paladin',
-                      'x86-generic-paladin'])
+                       '-r', self.buildroot,
+                       'arm-generic-paladin',
+                       'x86-generic-paladin'])
 
   def testDontInferBuildrootForBuildBotRuns(self):
     """Test that we don't infer buildroot if run with --buildbot option."""
@@ -622,8 +628,8 @@ class FullInterfaceTest(cros_test_lib.MoxTempDirTestCase):
   def testInferExternalBuildRoot(self):
     """Test that we default to correct buildroot for external config."""
     self.mox.StubOutWithMock(cbuildbot, '_ConfirmBuildRoot')
-    (cbuildbot._ConfirmBuildRoot(mox.IgnoreArg()).InAnyOrder()
-        .AndRaise(TestHaltedException()))
+    cbuildbot._ConfirmBuildRoot(mox.IgnoreArg()).InAnyOrder().AndRaise(
+        TestHaltedException())
 
     self.mox.ReplayAll()
     self.assertRaises(TestHaltedException, self.assertMain,
@@ -632,8 +638,8 @@ class FullInterfaceTest(cros_test_lib.MoxTempDirTestCase):
   def testInferInternalBuildRoot(self):
     """Test that we default to correct buildroot for internal config."""
     self.mox.StubOutWithMock(cbuildbot, '_ConfirmBuildRoot')
-    (cbuildbot._ConfirmBuildRoot(mox.IgnoreArg()).InAnyOrder()
-        .AndRaise(TestHaltedException()))
+    cbuildbot._ConfirmBuildRoot(mox.IgnoreArg()).InAnyOrder().AndRaise(
+        TestHaltedException())
 
     self.mox.ReplayAll()
     self.assertRaises(TestHaltedException, self.assertMain,
@@ -652,8 +658,8 @@ class FullInterfaceTest(cros_test_lib.MoxTempDirTestCase):
     cros_build_lib.RunCommand(['touch', self.external_marker],
                               capture_output=True)
     os.utime(self.external_marker, None)
-    (cros_build_lib.GetInput(mox.IgnoreArg()).InAnyOrder()
-        .AndRaise(TestFailedException()))
+    cros_build_lib.GetInput(mox.IgnoreArg()).InAnyOrder().AndRaise(
+        TestFailedException())
 
     self.mox.ReplayAll()
     self.assertMain(['--local', 'x86-generic-paladin'])
@@ -662,7 +668,7 @@ class FullInterfaceTest(cros_test_lib.MoxTempDirTestCase):
     """Buildbot should quit if run inside a chroot."""
     # Need to do this since a cros_build_lib.IsInsideChroot() call is already
     # queued up in setup() and we can't Reset() an individual mock.
-    # pylint: disable=E1102
+    # pylint: disable=not-callable
     new_is_inside_chroot = self.mox.CreateMockAnything()
     new_is_inside_chroot().InAnyOrder().AndReturn(True)
     cros_build_lib.IsInsideChroot = new_is_inside_chroot

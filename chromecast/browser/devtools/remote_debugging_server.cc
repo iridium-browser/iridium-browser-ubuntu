@@ -9,8 +9,8 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/strings/stringprintf.h"
+#include "chromecast/browser/cast_browser_process.h"
 #include "chromecast/browser/devtools/cast_dev_tools_delegate.h"
-#include "chromecast/common/chromecast_config.h"
 #include "chromecast/common/pref_names.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
@@ -30,8 +30,8 @@ namespace shell {
 namespace {
 
 const char kFrontEndURL[] =
-    "https://chrome-devtools-frontend.appspot.com/serve_rev/%s/devtools.html";
-const int kDefaultRemoteDebuggingPort = 9222;
+    "https://chrome-devtools-frontend.appspot.com/serve_rev/%s/inspector.html";
+const uint16 kDefaultRemoteDebuggingPort = 9222;
 
 #if defined(OS_ANDROID)
 class UnixDomainServerSocketFactory
@@ -42,7 +42,7 @@ class UnixDomainServerSocketFactory
 
  private:
   // content::DevToolsHttpHandler::ServerSocketFactory.
-  virtual scoped_ptr<net::ServerSocket> Create() const override {
+  scoped_ptr<net::ServerSocket> Create() const override {
     return scoped_ptr<net::ServerSocket>(
         new net::UnixDomainServerSocket(
             base::Bind(&content::CanUserConnectToDevTools),
@@ -55,13 +55,13 @@ class UnixDomainServerSocketFactory
 class TCPServerSocketFactory
     : public content::DevToolsHttpHandler::ServerSocketFactory {
  public:
-  TCPServerSocketFactory(const std::string& address, int port, int backlog)
+  TCPServerSocketFactory(const std::string& address, uint16 port, int backlog)
       : content::DevToolsHttpHandler::ServerSocketFactory(
             address, port, backlog) {}
 
  private:
   // content::DevToolsHttpHandler::ServerSocketFactory.
-  virtual scoped_ptr<net::ServerSocket> Create() const override {
+  scoped_ptr<net::ServerSocket> Create() const override {
     return scoped_ptr<net::ServerSocket>(
         new net::TCPServerSocket(NULL, net::NetLog::Source()));
   }
@@ -71,7 +71,7 @@ class TCPServerSocketFactory
 #endif
 
 scoped_ptr<content::DevToolsHttpHandler::ServerSocketFactory>
-CreateSocketFactory(int port) {
+CreateSocketFactory(uint16 port) {
 #if defined(OS_ANDROID)
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   std::string socket_name = "cast_shell_devtools_remote";
@@ -93,12 +93,10 @@ std::string GetFrontendUrl() {
 
 }  // namespace
 
-RemoteDebuggingServer::RemoteDebuggingServer()
-    : devtools_http_handler_(NULL),
-      port_(0) {
+RemoteDebuggingServer::RemoteDebuggingServer() : port_(0) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   pref_port_.Init(prefs::kRemoteDebuggingPort,
-                  ChromecastConfig::GetInstance()->pref_service(),
+                  CastBrowserProcess::GetInstance()->pref_service(),
                   base::Bind(&RemoteDebuggingServer::OnPortChanged,
                              base::Unretained(this)));
 
@@ -115,10 +113,7 @@ RemoteDebuggingServer::~RemoteDebuggingServer() {
 }
 
 void RemoteDebuggingServer::OnPortChanged() {
-  int new_port = *pref_port_;
-  if (new_port < 0) {
-    new_port = 0;
-  }
+  uint16 new_port = static_cast<uint16>(std::max(*pref_port_, 0));
   VLOG(1) << "OnPortChanged called: old_port=" << port_
           << ", new_port=" << new_port;
 
@@ -129,18 +124,16 @@ void RemoteDebuggingServer::OnPortChanged() {
 
   if (devtools_http_handler_) {
     LOG(INFO) << "Stop old devtools: port=" << port_;
-    // Note: Stop destroys devtools_http_handler_.
-    devtools_http_handler_->Stop();
-    devtools_http_handler_ = NULL;
+    devtools_http_handler_.reset();
   }
 
   port_ = new_port;
   if (port_ > 0) {
-    devtools_http_handler_ = content::DevToolsHttpHandler::Start(
+    devtools_http_handler_.reset(content::DevToolsHttpHandler::Start(
         CreateSocketFactory(port_),
         GetFrontendUrl(),
         new CastDevToolsDelegate(),
-        base::FilePath());
+        base::FilePath()));
     LOG(INFO) << "Devtools started: port=" << port_;
   }
 }

@@ -1069,7 +1069,7 @@ class PrerenderBrowserTest : virtual public InProcessBrowserTest {
 #endif
   }
 
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitchASCII(switches::kPrerenderMode,
                                     switches::kPrerenderModeSwitchValueEnabled);
 #if defined(OS_MACOSX)
@@ -1287,14 +1287,6 @@ class PrerenderBrowserTest : virtual public InProcessBrowserTest {
     OpenURLWithJSImpl("MetaShiftClick", dest_url_, GURL(), true);
 #else
     OpenURLWithJSImpl("CtrlShiftClick", dest_url_, GURL(), true);
-#endif
-  }
-
-  void OpenDestURLViaClickNewBackgroundTab() const {
-#if defined(OS_MACOSX)
-    OpenURLWithJSImpl("MetaClick", dest_url_, GURL(), true);
-#else
-    OpenURLWithJSImpl("CtrlClick", dest_url_, GURL(), true);
 #endif
   }
 
@@ -2048,17 +2040,22 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderAlertAfterOnload) {
 #if defined(USE_AURA) && !defined(OS_WIN)
 // http://crbug.com/103496
 #define MAYBE_PrerenderDelayLoadPlugin DISABLED_PrerenderDelayLoadPlugin
+#define MAYBE_PrerenderPluginPowerSaver DISABLED_PrerenderPluginPowerSaver
 #elif defined(OS_MACOSX)
 // http://crbug.com/100514
 #define MAYBE_PrerenderDelayLoadPlugin DISABLED_PrerenderDelayLoadPlugin
+#define MAYBE_PrerenderPluginPowerSaver DISABLED_PrerenderPluginPowerSaver
 #elif defined(OS_WIN) && defined(ARCH_CPU_X86_64)
 // TODO(jschuh): Failing plugin tests. crbug.com/244653
 #define MAYBE_PrerenderDelayLoadPlugin DISABLED_PrerenderDelayLoadPlugin
+#define MAYBE_PrerenderPluginPowerSaver DISABLED_PrerenderPluginPowerSaver
 #elif defined(OS_LINUX)
 // http://crbug.com/306715
 #define MAYBE_PrerenderDelayLoadPlugin DISABLED_PrerenderDelayLoadPlugin
+#define MAYBE_PrerenderPluginPowerSaver DISABLED_PrerenderPluginPowerSaver
 #else
 #define MAYBE_PrerenderDelayLoadPlugin PrerenderDelayLoadPlugin
+#define MAYBE_PrerenderPluginPowerSaver PrerenderPluginPowerSaver
 #endif
 // http://crbug.com/306715
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, MAYBE_PrerenderDelayLoadPlugin) {
@@ -2068,18 +2065,31 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, MAYBE_PrerenderDelayLoadPlugin) {
   NavigateToDestURL();
 }
 
+// For enabled Plugin Power Saver, checks that plugins are not loaded while
+// a page is being preloaded, but are loaded when the page is displayed.
+IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, MAYBE_PrerenderPluginPowerSaver) {
+  // Enable click-to-play.
+  HostContentSettingsMap* content_settings_map =
+      current_browser()->profile()->GetHostContentSettingsMap();
+  content_settings_map->SetDefaultContentSetting(
+      CONTENT_SETTINGS_TYPE_PLUGINS, CONTENT_SETTING_DETECT_IMPORTANT_CONTENT);
+
+  PrerenderTestURL("files/prerender/prerender_plugin_power_saver.html",
+                   FINAL_STATUS_USED, 1);
+  NavigateToDestURL();
+}
+
 // Checks that plugins are not loaded on prerendering pages when click-to-play
 // is enabled.
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderClickToPlay) {
   // Enable click-to-play.
   HostContentSettingsMap* content_settings_map =
       current_browser()->profile()->GetHostContentSettingsMap();
-  content_settings_map->SetDefaultContentSetting(
-      CONTENT_SETTINGS_TYPE_PLUGINS, CONTENT_SETTING_ASK);
+  content_settings_map->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_PLUGINS,
+                                                 CONTENT_SETTING_ASK);
 
   PrerenderTestURL("files/prerender/prerender_plugin_click_to_play.html",
-                   FINAL_STATUS_USED,
-                   1);
+                   FINAL_STATUS_USED, 1);
   NavigateToDestURL();
 }
 
@@ -3379,18 +3389,6 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderClickNewForegroundTab) {
   OpenDestURLViaClickNewForegroundTab();
 }
 
-IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest, PrerenderClickNewBackgroundTab) {
-  // Prerender currently doesn't interpose on this navigation.
-  // http://crbug.com/345474.
-  scoped_ptr<TestPrerender> prerender =
-      PrerenderTestURL("files/prerender/prerender_page_with_link.html",
-                       FINAL_STATUS_USED,
-                       1);
-  ASSERT_TRUE(prerender->contents());
-  prerender->contents()->set_should_be_shown(false);
-  OpenDestURLViaClickNewBackgroundTab();
-}
-
 IN_PROC_BROWSER_TEST_F(PrerenderBrowserTest,
                        NavigateToPrerenderedPageWhenDevToolsAttached) {
   DisableJavascriptCalls();
@@ -3529,7 +3527,7 @@ class PrerenderBrowserTestWithNaCl : public PrerenderBrowserTest {
   PrerenderBrowserTestWithNaCl() {}
   ~PrerenderBrowserTestWithNaCl() override {}
 
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     PrerenderBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kEnableNaCl);
   }
@@ -3540,7 +3538,8 @@ IN_PROC_BROWSER_TEST_F(PrerenderBrowserTestWithNaCl,
                        PrerenderNaClPluginEnabled) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
 
@@ -3617,7 +3616,7 @@ class PrerenderBrowserTestWithExtensions : public PrerenderBrowserTest,
 
   void SetUp() override { PrerenderBrowserTest::SetUp(); }
 
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     PrerenderBrowserTest::SetUpCommandLine(command_line);
     ExtensionApiTest::SetUpCommandLine(command_line);
   }
@@ -4467,7 +4466,7 @@ class PrerenderOmniboxBrowserTest : public PrerenderBrowserTest {
     WebContents* web_contents = GetActiveWebContents();
     GetAutocompleteActionPredictor()->StartPrerendering(
         url,
-        web_contents->GetController().GetSessionStorageNamespaceMap(),
+        web_contents->GetController().GetDefaultSessionStorageNamespace(),
         gfx::Size(50, 50));
     prerender->WaitForStart();
     return prerender.Pass();

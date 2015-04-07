@@ -64,7 +64,7 @@ ShellBrowserContext::~ShellBrowserContext() {
 }
 
 void ShellBrowserContext::InitWhileIOAllowed() {
-  CommandLine* cmd_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
   if (cmd_line->HasSwitch(switches::kIgnoreCertificateErrors))
     ignore_certificate_errors_ = true;
   if (cmd_line->HasSwitch(switches::kContentShellDataPath)) {
@@ -93,6 +93,11 @@ void ShellBrowserContext::InitWhileIOAllowed() {
 
   if (!base::PathExists(path_))
     base::CreateDirectory(path_);
+}
+
+scoped_ptr<ZoomLevelDelegate> ShellBrowserContext::CreateZoomLevelDelegate(
+    const base::FilePath&) {
+  return scoped_ptr<ZoomLevelDelegate>();
 }
 
 base::FilePath ShellBrowserContext::GetPath() const {

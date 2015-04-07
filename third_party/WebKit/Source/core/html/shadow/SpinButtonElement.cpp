@@ -88,7 +88,7 @@ void SpinButtonElement::defaultEventHandler(Event* event)
     }
 
     MouseEvent* mouseEvent = toMouseEvent(event);
-    IntPoint local = roundedIntPoint(box->absoluteToLocal(mouseEvent->absoluteLocation(), UseTransforms));
+    IntPoint local = roundedIntPoint(box->absoluteToLocal(FloatPoint(mouseEvent->absoluteLocation()), UseTransforms));
     if (mouseEvent->type() == EventTypeNames::mousedown && mouseEvent->button() == LeftButton) {
         if (box->pixelSnappedBorderBoxRect().contains(local)) {
             // The following functions of HTMLInputElement may run JavaScript
@@ -123,7 +123,7 @@ void SpinButtonElement::defaultEventHandler(Event* event)
                 }
             }
             UpDownState oldUpDownState = m_upDownState;
-            m_upDownState = (local.y() < box->height() / 2) ? Up : Down;
+            m_upDownState = (local.y() < box->size().height() / 2) ? Up : Down;
             if (m_upDownState != oldUpDownState)
                 renderer()->setShouldDoFullPaintInvalidation();
         } else {

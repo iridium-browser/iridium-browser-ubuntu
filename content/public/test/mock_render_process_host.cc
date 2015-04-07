@@ -13,6 +13,7 @@
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/common/child_process_host_impl.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/global_request_id.h"
 #include "content/public/browser/render_widget_host_iterator.h"
 #include "content/public/browser/storage_partition.h"
@@ -100,10 +101,14 @@ bool MockRenderProcessHost::IsIsolatedGuest() const {
 }
 
 StoragePartition* MockRenderProcessHost::GetStoragePartition() const {
-  return NULL;
+  return BrowserContext::GetDefaultStoragePartition(browser_context_);
 }
 
 void MockRenderProcessHost::AddWord(const base::string16& word) {
+}
+
+bool MockRenderProcessHost::Shutdown(int exit_code, bool wait) {
+  return true;
 }
 
 bool MockRenderProcessHost::FastShutdownIfPossible() {
@@ -227,6 +232,20 @@ const base::TimeTicks& MockRenderProcessHost::GetInitTimeForNavigationMetrics()
     const {
   static base::TimeTicks dummy_time = base::TimeTicks::Now();
   return dummy_time;
+}
+
+bool MockRenderProcessHost::SubscribeUniformEnabled() const {
+  return false;
+}
+
+void MockRenderProcessHost::OnAddSubscription(unsigned int target) {
+}
+
+void MockRenderProcessHost::OnRemoveSubscription(unsigned int target) {
+}
+
+void MockRenderProcessHost::SendUpdateValueState(
+    unsigned int target, const gpu::ValueState& state) {
 }
 
 void MockRenderProcessHost::FilterURL(bool empty_allowed, GURL* url) {

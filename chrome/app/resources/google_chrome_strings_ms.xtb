@@ -45,6 +45,7 @@
 <translation id="568643307450491754">Cari penanda halaman anda dalam menu Chrome atau pada bar penanda halaman.</translation>
 <translation id="8556340503434111824">Terdapat versi baharu Google Chrome yang tersedia, dan ia lebih pantas daripada biasa.</translation>
 <translation id="8987477933582888019">Penyemak imbas web</translation>
+<translation id="3749644715096758981">Chrome tidak dapat mengemas kini kepada versi terkini, maka anda terlepas ciri baharu dan tampalan keselamatan. Anda perlu mengemas kini Chrome.</translation>
 <translation id="4728575227883772061">Pemasangan gagal disebabkan ralat tidak dinyatakan. Jika Google Chrome kini dijalankan, sila tutupnya dan cuba semula.</translation>
 <translation id="3080151273017101988">Terus menjalankan apl latar belakang apabila Google Chrome ditutup</translation>
 <translation id="4149882025268051530">Pemasang gagal untuk nyahmampat arkib. Sila muat turun Google Chrome semula.</translation>
@@ -83,6 +84,7 @@
 <translation id="225614027745146050">Selamat datang</translation>
 <translation id="7473891865547856676">Tidak, Terima Kasih</translation>
 <translation id="3149510190863420837">Chrome Apps</translation>
+<translation id="8851136666856101339">utama</translation>
 <translation id="7473136999113284234">Chrome dikemas kini secara automatik supaya anda sentiasa mempunyai versi yang terbaharu.</translation>
 <translation id="7084448929020576097"><ph name="FILE_NAME"/> bersifat hasad dan Chrome telah menyekatnya.</translation>
 <translation id="6368958679917195344">OS Chrome menjadi kenyataan dengan <ph name="BEGIN_LINK_CROS_OSS"/>perisian sumber terbuka<ph name="END_LINK_CROS_OSS"/> tambahan.</translation>
@@ -143,7 +145,6 @@ Teruskan juga log masuk akan menggabungkan maklumat Chrome seperti penanda halam
 <translation id="5855036575689098185">Perisian yang dijalankan pada komputer anda tidak serasi dengan Google Chrome.</translation>
 <translation id="7164397146364144019">Anda boleh membantu menjadikan Chrome lebih selamat dan lebih mudah untuk digunakan dengan melaporkan butiran kemungkinan insiden keselamatan secara automatik kepada Google.</translation>
 <translation id="8008534537613507642">Pasang Semula Chrome</translation>
-<translation id="2044287590254833138">Bar Alat Google Chrome</translation>
 <translation id="8862326446509486874">Anda tidak mempunyai hak wajar untuk pemasangan peringkat sistem. Cuba jalankan pemasang semula sebagai Pentadbir.</translation>
 <translation id="2874156562296220396">Google Chrome berjaya dilaksanakan melalui projek sumber terbuka <ph name="BEGIN_LINK_CHROMIUM"/>Chromium<ph name="END_LINK_CHROMIUM"/> dan <ph name="BEGIN_LINK_OSS"/>perisian sumber terbuka<ph name="END_LINK_OSS"/> yang lain.</translation>
 <translation id="7191567847629796517">Google Chrome OS tidak menyokong pelancaran aplikasi luaran untuk mengendalikan pautan <ph name="SCHEME"/>. Pautan yang diminta adalah <ph name="PROTOLINK"/>.</translation>
@@ -155,6 +156,7 @@ Teruskan juga log masuk akan menggabungkan maklumat Chrome seperti penanda halam
 <translation id="2290095356545025170">Adakah anda pasti anda mahu menyahpasang Google Chrome?</translation>
 <translation id="7062966102157262887">Muat turun sedang dijalankan. Adakah anda ingin keluar dari Google Chrome dan membatalkan muat turun?</translation>
 <translation id="4273752058983339720">Google Chrome dikonfigurasi untuk dilancarkan secara automatik apabila anda memulakan komputer anda.</translation>
+<translation id="2316129865977710310">Tidak, terima kasih</translation>
 <translation id="415994390253732730">Chrome Berkelakuan Aneh?</translation>
 <translation id="1104959162601287462">Mengenai &amp;Chrome OS</translation>
 <translation id="5328989068199000832">Perduaan Google Chrome</translation>
@@ -257,6 +259,7 @@ Teruskan juga log masuk akan menggabungkan maklumat Chrome seperti penanda halam
 <translation id="6626317981028933585">Malangnya, tetapan Mozilla Firefox anda tidak tersedia semasa penyemak imbas tersebut dijalankan. Untuk mengimport tetapan tersebut ke Google Chrome, simpan kerja anda dan tutup semua tetingkap Firefox. Kemudian klik Teruskan.</translation>
 <translation id="7242029209006116544">Anda log masuk menggunakan akaun terurus dan memberikan pentadbirnya kawalan terhadap profil Google Chrome anda. Data Chrome anda, seperti apl, penanda halaman, sejarah, kata laluan dan tetapan anda yang lain akan terikat kepada <ph name="USER_NAME"/> secara kekal. Anda akan dapat memadamkan data ini melalui Papan Pemuka Akaun Google, tetapi anda tidak akan dapat mengaitkan data ini dengan akaun lain. Anda boleh memilih membuat profil baharu untuk mengasingkan data Chrome anda yang sedia ada. <ph name="LEARN_MORE"/></translation>
 <translation id="5386244825306882791">Sambungan turut mengawal halaman yang ditunjukkan apabila anda memulakan Chrome atau membuat carian dari Kotak Omni.</translation>
+<translation id="1553358976309200471">Kemas Kini Chrome</translation>
 <translation id="8540666473246803645">Google Chrome</translation>
 <translation id="2334084861041072223">Hak Cipta <ph name="YEAR"/> Google Inc. Hak cipta terpelihara.</translation>
 <translation id="1698376642261615901">Google Chrome ialah penyemak imbas web yang menjalankan halaman web dan aplikasi dengan kelajuan kilat. Ia pantas, stabil dan mudah digunakan. Semak imbas web dengan lebih selamat dengan perlindungan daripada perisian berniat jahat dan pancingan data yang terbina dalam Google Chrome.</translation>

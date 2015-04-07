@@ -33,8 +33,12 @@
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptPromiseResolver.h"
 #include "bindings/core/v8/SerializedScriptValue.h"
+#include "bindings/core/v8/SerializedScriptValueFactory.h"
+#include "bindings/core/v8/V8IteratorResultValue.h"
 #include "bindings/core/v8/V8ThrowException.h"
+#include "core/HTMLNames.h"
 #include "core/InternalRuntimeFlags.h"
+#include "core/SVGNames.h"
 #include "core/animation/AnimationTimeline.h"
 #include "core/css/StyleSheetContents.h"
 #include "core/css/resolver/StyleResolver.h"
@@ -58,7 +62,7 @@
 #include "core/dom/StyleEngine.h"
 #include "core/dom/TreeScope.h"
 #include "core/dom/ViewportDescription.h"
-#include "core/dom/shadow/ComposedTreeWalker.h"
+#include "core/dom/shadow/ComposedTreeTraversal.h"
 #include "core/dom/shadow/ElementShadow.h"
 #include "core/dom/shadow/SelectRuleFeatureSet.h"
 #include "core/dom/shadow/ShadowRoot.h"
@@ -106,7 +110,6 @@
 #include "core/page/FocusController.h"
 #include "core/page/NetworkStateNotifier.h"
 #include "core/page/Page.h"
-#include "core/page/PagePopupController.h"
 #include "core/page/PrintContext.h"
 #include "core/plugins/testing/DictionaryPluginPlaceholder.h"
 #include "core/plugins/testing/DocumentFragmentPluginPlaceholder.h"
@@ -119,11 +122,10 @@
 #include "core/rendering/compositing/RenderLayerCompositor.h"
 #include "core/testing/DictionaryTest.h"
 #include "core/testing/GCObservation.h"
-#include "core/testing/InternalProfilers.h"
 #include "core/testing/InternalSettings.h"
 #include "core/testing/LayerRect.h"
 #include "core/testing/LayerRectList.h"
-#include "core/testing/MockPagePopupDriver.h"
+#include "core/testing/PluginPlaceholderOptions.h"
 #include "core/testing/PrivateScriptTest.h"
 #include "core/testing/TypeConversions.h"
 #include "core/testing/UnionTypesTest.h"
@@ -137,6 +139,7 @@
 #include "platform/graphics/GraphicsLayer.h"
 #include "platform/graphics/filters/FilterOperation.h"
 #include "platform/graphics/filters/FilterOperations.h"
+#include "platform/heap/Handle.h"
 #include "platform/weborigin/SchemeRegistry.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebConnectionType.h"
@@ -159,12 +162,11 @@ public:
 
     virtual ScriptValue next(ScriptState* scriptState, ExceptionState& exceptionState) override
     {
-        v8::Isolate* isolate = scriptState->isolate();
         int value = m_current * m_current;
         if (m_current >= 5)
-            return ScriptValue(scriptState, v8DoneIteratorResult(isolate));
+            return v8IteratorResultDone(scriptState);
         ++m_current;
-        return ScriptValue(scriptState, v8IteratorResult(scriptState, value));
+        return v8IteratorResult(scriptState, value);
     }
 
     virtual ScriptValue next(ScriptState* scriptState, ScriptValue value, ExceptionState& exceptionState) override
@@ -178,11 +180,6 @@ private:
 };
 
 } // namespace
-
-// FIXME: oilpan: These will be removed soon.
-static MockPagePopupDriver* s_pagePopupDriver = 0;
-
-using namespace HTMLNames;
 
 static bool markerTypesFrom(const String& markerType, DocumentMarker::MarkerTypes& result)
 {
@@ -226,9 +223,6 @@ void Internals::resetToConsistentState(Page* page)
     page->setIsCursorVisible(true);
     page->setPageScaleFactor(1, IntPoint(0, 0));
     blink::overrideUserPreferredLanguages(Vector<AtomicString>());
-    delete s_pagePopupDriver;
-    s_pagePopupDriver = 0;
-    page->chrome().client().resetPagePopupDriver();
     if (!page->deprecatedLocalMainFrame()->spellChecker().isContinuousSpellCheckingEnabled())
         page->deprecatedLocalMainFrame()->spellChecker().toggleContinuousSpellChecking();
     if (page->deprecatedLocalMainFrame()->editor().isOverwriteModeEnabled())
@@ -272,13 +266,6 @@ InternalSettings* Internals::settings() const
 InternalRuntimeFlags* Internals::runtimeFlags() const
 {
     return m_runtimeFlags.get();
-}
-
-InternalProfilers* Internals::profilers()
-{
-    if (!m_profilers)
-        m_profilers = InternalProfilers::create();
-    return m_profilers.get();
 }
 
 unsigned Internals::workerThreadCount() const
@@ -488,44 +475,54 @@ size_t Internals::countElementShadow(const Node* root, ExceptionState& exception
     return toShadowRoot(root)->childShadowRootCount();
 }
 
-Node* Internals::nextSiblingByWalker(Node* node)
+Node* Internals::nextSiblingInComposedTree(Node* node, ExceptionState& exceptionState)
 {
     ASSERT(node);
-    ComposedTreeWalker walker(node);
-    walker.nextSibling();
-    return walker.get();
+    if (!node->canParticipateInComposedTree()) {
+        exceptionState.throwDOMException(InvalidAccessError, "The node argument doesn't particite in the composed tree.");
+        return 0;
+    }
+    return ComposedTreeTraversal::nextSibling(*node);
 }
 
-Node* Internals::firstChildByWalker(Node* node)
+Node* Internals::firstChildInComposedTree(Node* node, ExceptionState& exceptionState)
 {
     ASSERT(node);
-    ComposedTreeWalker walker(node);
-    walker.firstChild();
-    return walker.get();
+    if (!node->canParticipateInComposedTree()) {
+        exceptionState.throwDOMException(InvalidAccessError, "The node argument doesn't particite in the composed tree");
+        return 0;
+    }
+    return ComposedTreeTraversal::firstChild(*node);
 }
 
-Node* Internals::lastChildByWalker(Node* node)
+Node* Internals::lastChildInComposedTree(Node* node, ExceptionState& exceptionState)
 {
     ASSERT(node);
-    ComposedTreeWalker walker(node);
-    walker.lastChild();
-    return walker.get();
+    if (!node->canParticipateInComposedTree()) {
+        exceptionState.throwDOMException(InvalidAccessError, "The node argument doesn't particite in the composed tree.");
+        return 0;
+    }
+    return ComposedTreeTraversal::lastChild(*node);
 }
 
-Node* Internals::nextNodeByWalker(Node* node)
+Node* Internals::nextInComposedTree(Node* node, ExceptionState& exceptionState)
 {
     ASSERT(node);
-    ComposedTreeWalker walker(node);
-    walker.next();
-    return walker.get();
+    if (!node->canParticipateInComposedTree()) {
+        exceptionState.throwDOMException(InvalidAccessError, "The node argument doesn't particite in the composed tree.");
+        return 0;
+    }
+    return ComposedTreeTraversal::next(*node);
 }
 
-Node* Internals::previousNodeByWalker(Node* node)
+Node* Internals::previousInComposedTree(Node* node, ExceptionState& exceptionState)
 {
     ASSERT(node);
-    ComposedTreeWalker walker(node);
-    walker.previous();
-    return walker.get();
+    if (!node->canParticipateInComposedTree()) {
+        exceptionState.throwDOMException(InvalidAccessError, "The node argument doesn't particite in the composed tree.");
+        return 0;
+    }
+    return ComposedTreeTraversal::previous(*node);
 }
 
 String Internals::elementRenderTreeAsText(Element* element, ExceptionState& exceptionState)
@@ -674,38 +671,14 @@ void Internals::setFormControlStateOfHistoryItem(const Vector<String>& state, Ex
     mainItem->setDocumentState(state);
 }
 
-void Internals::setEnableMockPagePopup(bool enabled, ExceptionState& exceptionState)
-{
-    Document* document = contextDocument();
-    if (!document || !document->page())
-        return;
-    Page* page = document->page();
-    if (!enabled) {
-        page->chrome().client().resetPagePopupDriver();
-        return;
-    }
-    if (!s_pagePopupDriver)
-        s_pagePopupDriver = MockPagePopupDriver::create(page->deprecatedLocalMainFrame()).leakPtr();
-    page->chrome().client().setPagePopupDriver(s_pagePopupDriver);
-}
-
-PassRefPtrWillBeRawPtr<PagePopupController> Internals::pagePopupController()
-{
-    return s_pagePopupDriver ? s_pagePopupDriver->pagePopupController() : 0;
-}
-
-LocalDOMWindow* Internals::pagePopupWindow() const
+DOMWindow* Internals::pagePopupWindow() const
 {
     Document* document = contextDocument();
     if (!document)
         return nullptr;
-    Page* page = document->page();
-    if (!page)
-        return nullptr;
-    PagePopupDriver* pagePopupDriver = page->chrome().client().pagePopupDriver();
-    if (!pagePopupDriver)
-        return nullptr;
-    return pagePopupDriver->pagePopupWindow();
+    if (Page* page = document->page())
+        return page->chrome().client().pagePopupWindowForTesting();
+    return nullptr;
 }
 
 PassRefPtrWillBeRawPtr<ClientRect> Internals::absoluteCaretBounds(ExceptionState& exceptionState)
@@ -962,8 +935,8 @@ void Internals::scrollElementToRect(Element* element, long x, long y, long w, lo
         exceptionState.throwDOMException(InvalidNodeTypeError, element ? "No view can be obtained from the provided element's document." : ExceptionMessages::argumentNullOrIncorrectType(1, "Element"));
         return;
     }
-    FrameView* frameView = element->document().view();
-    frameView->scrollElementToRect(element, IntRect(x, y, w, h));
+    FrameView* mainFrame = toLocalFrame(element->document().page()->mainFrame())->view();
+    mainFrame->scrollElementToRect(element, IntRect(x, y, w, h));
 }
 
 PassRefPtrWillBeRawPtr<Range> Internals::rangeFromLocationAndLength(Element* scope, int rangeLocation, int rangeLength)
@@ -1018,7 +991,7 @@ DOMPoint* Internals::touchPositionAdjustedToBestClickableNode(long x, long y, lo
 
     EventHandler& eventHandler = document->frame()->eventHandler();
     IntPoint hitTestPoint = document->frame()->view()->windowToContents(point);
-    HitTestResult result = eventHandler.hitTestResultAtPoint(hitTestPoint, HitTestRequest::ReadOnly | HitTestRequest::Active, radius);
+    HitTestResult result = eventHandler.hitTestResultAtPoint(hitTestPoint, HitTestRequest::ReadOnly | HitTestRequest::Active, LayoutSize(radius));
 
     Node* targetNode = 0;
     IntPoint adjustedPoint;
@@ -1045,7 +1018,7 @@ Node* Internals::touchNodeAdjustedToBestClickableNode(long x, long y, long width
 
     EventHandler& eventHandler = document->frame()->eventHandler();
     IntPoint hitTestPoint = document->frame()->view()->windowToContents(point);
-    HitTestResult result = eventHandler.hitTestResultAtPoint(hitTestPoint, HitTestRequest::ReadOnly | HitTestRequest::Active, radius);
+    HitTestResult result = eventHandler.hitTestResultAtPoint(hitTestPoint, HitTestRequest::ReadOnly | HitTestRequest::Active, LayoutSize(radius));
 
     Node* targetNode = 0;
     IntPoint adjustedPoint;
@@ -1068,7 +1041,7 @@ DOMPoint* Internals::touchPositionAdjustedToBestContextMenuNode(long x, long y, 
 
     EventHandler& eventHandler = document->frame()->eventHandler();
     IntPoint hitTestPoint = document->frame()->view()->windowToContents(point);
-    HitTestResult result = eventHandler.hitTestResultAtPoint(hitTestPoint, HitTestRequest::ReadOnly | HitTestRequest::Active, radius);
+    HitTestResult result = eventHandler.hitTestResultAtPoint(hitTestPoint, HitTestRequest::ReadOnly | HitTestRequest::Active, LayoutSize(radius));
 
     Node* targetNode = 0;
     IntPoint adjustedPoint;
@@ -1095,7 +1068,7 @@ Node* Internals::touchNodeAdjustedToBestContextMenuNode(long x, long y, long wid
 
     EventHandler& eventHandler = document->frame()->eventHandler();
     IntPoint hitTestPoint = document->frame()->view()->windowToContents(point);
-    HitTestResult result = eventHandler.hitTestResultAtPoint(hitTestPoint, HitTestRequest::ReadOnly | HitTestRequest::Active, radius);
+    HitTestResult result = eventHandler.hitTestResultAtPoint(hitTestPoint, HitTestRequest::ReadOnly | HitTestRequest::Active, LayoutSize(radius));
 
     Node* targetNode = 0;
     IntPoint adjustedPoint;
@@ -1350,6 +1323,34 @@ LayerRectList* Internals::touchEventTargetLayerRects(Document* document, Excepti
     }
 
     return nullptr;
+}
+
+AtomicString Internals::htmlNamespace()
+{
+    return HTMLNames::xhtmlNamespaceURI;
+}
+
+Vector<AtomicString> Internals::htmlTags()
+{
+    Vector<AtomicString> tags(HTMLNames::HTMLTagsCount);
+    OwnPtr<const HTMLQualifiedName*[]> qualifiedNames = HTMLNames::getHTMLTags();
+    for (size_t i = 0; i < HTMLNames::HTMLTagsCount; ++i)
+        tags[i] = qualifiedNames[i]->localName();
+    return tags;
+}
+
+AtomicString Internals::svgNamespace()
+{
+    return SVGNames::svgNamespaceURI;
+}
+
+Vector<AtomicString> Internals::svgTags()
+{
+    Vector<AtomicString> tags(SVGNames::SVGTagsCount);
+    OwnPtr<const SVGQualifiedName*[]> qualifiedNames = SVGNames::getSVGTags();
+    for (size_t i = 0; i < SVGNames::SVGTagsCount; ++i)
+        tags[i] = qualifiedNames[i]->localName();
+    return tags;
 }
 
 PassRefPtrWillBeRawPtr<StaticNodeList> Internals::nodesFromRect(Document* document, int centerX, int centerY, unsigned topPadding, unsigned rightPadding,
@@ -1775,6 +1776,19 @@ void Internals::registerURLSchemeAsBypassingContentSecurityPolicy(const String& 
     SchemeRegistry::registerURLSchemeAsBypassingContentSecurityPolicy(scheme);
 }
 
+void Internals::registerURLSchemeAsBypassingContentSecurityPolicy(const String& scheme, const Vector<String>& policyAreas)
+{
+    uint32_t policyAreasEnum = SchemeRegistry::PolicyAreaNone;
+    for (const auto& policyArea : policyAreas) {
+        if (policyArea == "img")
+            policyAreasEnum |= SchemeRegistry::PolicyAreaImage;
+        else if (policyArea == "style")
+            policyAreasEnum |= SchemeRegistry::PolicyAreaStyle;
+    }
+    SchemeRegistry::registerURLSchemeAsBypassingContentSecurityPolicy(
+        scheme, static_cast<SchemeRegistry::PolicyAreas>(policyAreasEnum));
+}
+
 void Internals::removeURLSchemeRegisteredAsBypassingContentSecurityPolicy(const String& scheme)
 {
     SchemeRegistry::removeURLSchemeRegisteredAsBypassingContentSecurityPolicy(scheme);
@@ -1983,20 +1997,20 @@ String Internals::getCurrentCursorInfo(Document* document, ExceptionState& excep
 PassRefPtr<DOMArrayBuffer> Internals::serializeObject(PassRefPtr<SerializedScriptValue> value) const
 {
     String stringValue = value->toWireString();
-    RefPtr<ArrayBuffer> buffer = ArrayBuffer::createUninitialized(stringValue.length(), sizeof(UChar));
+    RefPtr<DOMArrayBuffer> buffer = DOMArrayBuffer::createUninitialized(stringValue.length(), sizeof(UChar));
     stringValue.copyTo(static_cast<UChar*>(buffer->data()), 0, stringValue.length());
-    return DOMArrayBuffer::create(buffer.release());
+    return buffer.release();
 }
 
 PassRefPtr<SerializedScriptValue> Internals::deserializeBuffer(PassRefPtr<DOMArrayBuffer> buffer) const
 {
     String value(static_cast<const UChar*>(buffer->data()), buffer->byteLength() / sizeof(UChar));
-    return SerializedScriptValue::createFromWire(value);
+    return SerializedScriptValueFactory::instance().createFromWire(value);
 }
 
 void Internals::forceReload(bool endToEnd)
 {
-    frame()->loader().reload(endToEnd ? EndToEndReload : NormalReload);
+    frame()->reload(endToEnd ? EndToEndReload : NormalReload, NotClientRedirect);
 }
 
 PassRefPtrWillBeRawPtr<ClientRect> Internals::selectionBounds(ExceptionState& exceptionState)
@@ -2140,7 +2154,7 @@ private:
 
 ScriptPromise Internals::createResolvedPromise(ScriptState* scriptState, ScriptValue value)
 {
-    RefPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
+    RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
     ScriptPromise promise = resolver->promise();
     resolver->resolve(value);
     return promise;
@@ -2148,7 +2162,7 @@ ScriptPromise Internals::createResolvedPromise(ScriptState* scriptState, ScriptV
 
 ScriptPromise Internals::createRejectedPromise(ScriptState* scriptState, ScriptValue value)
 {
-    RefPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
+    RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
     ScriptPromise promise = resolver->promise();
     resolver->reject(value);
     return promise;
@@ -2195,7 +2209,7 @@ ScriptPromise Internals::promiseCheckOverload(ScriptState* scriptState, Location
 void Internals::trace(Visitor* visitor)
 {
     visitor->trace(m_runtimeFlags);
-    visitor->trace(m_profilers);
+    ContextLifecycleObserver::trace(visitor);
 }
 
 void Internals::setValueForUser(Element* element, const String& value)
@@ -2257,6 +2271,12 @@ unsigned Internals::countHitRegions(CanvasRenderingContext2D* context)
     return context->hitRegionsCount();
 }
 
+PassRefPtrWillBeRawPtr<ClientRect> Internals::boundsInRootViewSpace(Element* element)
+{
+    ASSERT(element);
+    return ClientRect::create(element->boundsInRootViewSpace());
+}
+
 String Internals::serializeNavigationMarkup()
 {
     Vector<Document::TransitionElementData> elementData;
@@ -2270,6 +2290,37 @@ String Internals::serializeNavigationMarkup()
     return markup.toString();
 }
 
+Vector<String> Internals::getTransitionElementIds()
+{
+    Vector<Document::TransitionElementData> elementData;
+    frame()->document()->getTransitionElementData(elementData);
+
+    Vector<String> ids;
+    for (size_t i = 0; i < elementData.size(); ++i) {
+        for (size_t j = 0; j < elementData[i].elements.size(); ++j)
+            ids.append(elementData[i].elements[j].id);
+    }
+
+    return ids;
+}
+
+PassRefPtrWillBeRawPtr<ClientRectList> Internals::getTransitionElementRects()
+{
+    Vector<Document::TransitionElementData> elementData;
+    frame()->document()->getTransitionElementData(elementData);
+
+    Vector<IntRect> rects;
+    for (size_t i = 0; i < elementData.size(); ++i) {
+        for (size_t j = 0; j < elementData[i].elements.size(); ++j)
+            rects.append(elementData[i].elements[j].rect);
+    }
+
+    Vector<FloatQuad> quads(rects.size());
+    for (size_t i = 0; i < rects.size(); ++i)
+        quads[i] = FloatRect(rects[i]);
+    return ClientRectList::create(quads);
+}
+
 void Internals::hideAllTransitionElements()
 {
     Vector<Document::TransitionElementData> elementData;
@@ -2278,6 +2329,21 @@ void Internals::hideAllTransitionElements()
     Vector<Document::TransitionElementData>::iterator iter = elementData.begin();
     for (; iter != elementData.end(); ++iter)
         frame()->document()->hideTransitionElements(AtomicString(iter->selector));
+}
+
+void Internals::showAllTransitionElements()
+{
+    Vector<Document::TransitionElementData> elementData;
+    frame()->document()->getTransitionElementData(elementData);
+
+    Vector<Document::TransitionElementData>::iterator iter = elementData.begin();
+    for (; iter != elementData.end(); ++iter)
+        frame()->document()->showTransitionElements(AtomicString(iter->selector));
+}
+
+void Internals::setExitTransitionStylesheetsEnabled(bool enabled)
+{
+    frame()->document()->styleEngine()->setExitTransitionStylesheetsEnabled(enabled);
 }
 
 void Internals::forcePluginPlaceholder(HTMLElement* element, PassRefPtrWillBeRawPtr<DocumentFragment> fragment, ExceptionState& exceptionState)
@@ -2289,7 +2355,7 @@ void Internals::forcePluginPlaceholder(HTMLElement* element, PassRefPtrWillBeRaw
     toHTMLPlugInElement(element)->setPlaceholder(DocumentFragmentPluginPlaceholder::create(fragment));
 }
 
-void Internals::forcePluginPlaceholder(HTMLElement* element, const Dictionary& options, ExceptionState& exceptionState)
+void Internals::forcePluginPlaceholder(HTMLElement* element, const PluginPlaceholderOptions& options, ExceptionState& exceptionState)
 {
     if (!element->isPluginElement()) {
         exceptionState.throwDOMException(InvalidNodeTypeError, "The element provided is not a plugin.");
@@ -2301,6 +2367,11 @@ void Internals::forcePluginPlaceholder(HTMLElement* element, const Dictionary& o
 Iterator* Internals::iterator(ScriptState* scriptState, ExceptionState& exceptionState)
 {
     return new InternalsIterator;
+}
+
+void Internals::forceBlinkGCWithoutV8GC()
+{
+    ThreadState::current()->scheduleGC();
 }
 
 } // namespace blink

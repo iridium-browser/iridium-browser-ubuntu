@@ -33,6 +33,10 @@ namespace embedder {
 
 // SimplePlatformSharedBuffer --------------------------------------------------
 
+// The implementation for android uses ashmem to generate the file descriptor
+// for the shared memory. See simple_platform_shared_buffer_android.cc
+#if !defined(OS_ANDROID)
+
 bool SimplePlatformSharedBuffer::Init() {
   DCHECK(!handle_.is_valid());
 
@@ -115,6 +119,8 @@ bool SimplePlatformSharedBuffer::InitFromPlatformHandle(
   return true;
 }
 
+#endif  // !defined(OS_ANDROID)
+
 scoped_ptr<PlatformSharedBufferMapping> SimplePlatformSharedBuffer::MapImpl(
     size_t offset,
     size_t length) {
@@ -127,12 +133,9 @@ scoped_ptr<PlatformSharedBufferMapping> SimplePlatformSharedBuffer::MapImpl(
   DCHECK_LE(static_cast<uint64_t>(real_offset),
             static_cast<uint64_t>(std::numeric_limits<off_t>::max()));
 
-  void* real_base = mmap(nullptr,
-                         real_length,
-                         PROT_READ | PROT_WRITE,
-                         MAP_SHARED,
-                         handle_.get().fd,
-                         static_cast<off_t>(real_offset));
+  void* real_base =
+      mmap(nullptr, real_length, PROT_READ | PROT_WRITE, MAP_SHARED,
+           handle_.get().fd, static_cast<off_t>(real_offset));
   // |mmap()| should return |MAP_FAILED| (a.k.a. -1) on error. But it shouldn't
   // return null either.
   if (real_base == MAP_FAILED || !real_base) {

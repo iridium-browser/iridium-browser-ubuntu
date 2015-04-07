@@ -11,84 +11,69 @@ var LaunchType = {
   FOCUS_ANY_OR_CREATE: 1,
   FOCUS_SAME_OR_CREATE: 2
 };
-Object.freeze(LaunchType);
 
 /**
  * Root class of the background page.
  * @constructor
  * @extends {BackgroundBase}
+ * @struct
  */
 function FileBrowserBackground() {
   BackgroundBase.call(this);
 
   /**
    * Map of all currently open file dialogs. The key is an app ID.
-   * @type {Object.<string, Window>}
+   * @type {!Object.<string, !Window>}
    */
   this.dialogs = {};
 
   /**
    * Synchronous queue for asynchronous calls.
-   * @type {AsyncUtil.Queue}
+   * @type {!AsyncUtil.Queue}
    */
   this.queue = new AsyncUtil.Queue();
 
   /**
    * Progress center of the background page.
-   * @type {ProgressCenter}
+   * @type {!ProgressCenter}
    */
   this.progressCenter = new ProgressCenter();
 
   /**
    * File operation manager.
-   * @type {FileOperationManager}
+   * @type {!FileOperationManager}
    */
   this.fileOperationManager = new FileOperationManager();
 
   /**
-   * Manages loading of import history necessary for decorating files
-   * in some views and integral to local dedupling files during the
-   * cloud import process.
+   * Promise for the class that manages loading of import history
+   * necessary for decorating files in some views and integral to
+   * local dedupling files during the cloud import process.
    *
-   * @type {HistoryLoader}
+   * @type {!importer.HistoryLoader}
    */
-  this.historyLoader = null;
-
-  chrome.commandLinePrivate.hasSwitch(
-      'enable-cloud-backup',
-      /**
-       * @param {boolean} enabled
-       * @this {!FileBrowserBackground}
-       */
-      function(enabled) {
-        if (enabled) {
-          this.historyLoader = new SynchronizedHistoryLoader(
-              new ChromeSyncFileEntryProvider());
-        }
-      }.bind(this));
+  this.historyLoader = new FileBrowserBackground.HistoryLoader();
 
   /**
    * Event handler for progress center.
-   * @type {FileOperationHandler}
-   * @private
+   * @private {!FileOperationHandler}
    */
   this.fileOperationHandler_ = new FileOperationHandler(this);
 
   /**
    * Event handler for C++ sides notifications.
-   * @type {DeviceHandler}
-   * @private
+   * @private {!DeviceHandler}
    */
   this.deviceHandler_ = new DeviceHandler();
   this.deviceHandler_.addEventListener(
       DeviceHandler.VOLUME_NAVIGATION_REQUESTED,
       function(event) {
-        this.navigateToVolume_(event.devicePath);
+        this.navigateToVolume_(event.devicePath, event.filePath);
       }.bind(this));
 
   /**
    * Drive sync handler.
-   * @type {DriveSyncHandler}
+   * @type {!DriveSyncHandler}
    */
   this.driveSyncHandler = new DriveSyncHandler(this.progressCenter);
   this.driveSyncHandler.addEventListener(
@@ -96,8 +81,24 @@ function FileBrowserBackground() {
       function() { this.tryClose(); }.bind(this));
 
   /**
+   * Provides support for scaning media devices as part of Cloud Import.
+   * @type {!importer.MediaScanner}
+   */
+  this.mediaScanner = new importer.DefaultMediaScanner(this.historyLoader);
+
+  /**
+   * Handles importing of user media (e.g. photos, videos) from removable
+   * devices.
+   * @type {!importer.MediaImportHandler}
+   */
+  this.mediaImportHandler =
+      new importer.MediaImportHandler(
+          this.progressCenter,
+          this.historyLoader);
+
+  /**
    * Promise of string data.
-   * @type {Promise}
+   * @type {!Promise}
    */
   this.stringDataPromise = new Promise(function(fulfill) {
     chrome.fileManagerPrivate.getStrings(fulfill);
@@ -105,7 +106,7 @@ function FileBrowserBackground() {
 
   /**
    * String assets.
-   * @type {Object.<string, string>}
+   * @type {Object<string, string>}
    */
   this.stringData = null;
 
@@ -113,21 +114,16 @@ function FileBrowserBackground() {
    * Callback list to be invoked after initialization.
    * It turns to null after initialization.
    *
-   * @type {Array.<function()>}
-   * @private
+   * @private {!Array<function()>}
    */
   this.initializeCallbacks_ = [];
 
   /**
    * Last time when the background page can close.
    *
-   * @type {?number}
-   * @private
+   * @private {?number}
    */
   this.lastTimeCanClose_ = null;
-
-  // Seal self.
-  Object.seal(this);
 
   // Initialize handlers.
   chrome.fileBrowserHandler.onExecute.addListener(this.onExecute_.bind(this));
@@ -156,15 +152,12 @@ function FileBrowserBackground() {
 /**
  * A number of delay milliseconds from the first call of tryClose to the actual
  * close action.
- * @type {number}
- * @const
+ * @const {number}
  * @private
  */
 FileBrowserBackground.CLOSE_DELAY_MS_ = 5000;
 
-FileBrowserBackground.prototype = {
-  __proto__: BackgroundBase.prototype
-};
+FileBrowserBackground.prototype.__proto__ = BackgroundBase.prototype;
 
 /**
  * Register callback to be invoked after initialization.
@@ -219,25 +212,59 @@ FileBrowserBackground.prototype.canClose = function() {
 /**
  * Opens the root directory of the volume in Files.app.
  * @param {string} devicePath Device path to a volume to be opened.
+ * @param {string=} opt_directoryPath Optional directory path to be opened.
  * @private
  */
-FileBrowserBackground.prototype.navigateToVolume_ = function(devicePath) {
-  VolumeManager.getInstance().then(function(volumeManager) {
-    var volumeInfoList = volumeManager.volumeInfoList;
-    for (var i = 0; i < volumeInfoList.length; i++) {
-      if (volumeInfoList.item(i).devicePath == devicePath)
-        return volumeInfoList.item(i).resolveDisplayRoot();
+FileBrowserBackground.prototype.navigateToVolume_ =
+    function(devicePath, opt_directoryPath) {
+  /**
+   * Retrieves the root file entry of the volume on the requested device.
+   * @param {!VolumeManager} volumeManager
+   * @return {!Promise<!DirectoryEntry>}
+   */
+  var getDeviceRoot = function(volumeManager) {
+    var volume = volumeManager.volumeInfoList.findByDevicePath(devicePath);
+    if (volume) {
+      // TODO(kenobi): Remove this cast once typing is fixed on
+      //     VolumeInfo#resolveDisplayRoot.
+      return /** @type {!Promise<!DirectoryEntry>} */ (
+          volume.resolveDisplayRoot());
+    } else {
+      return Promise.reject('Volume having the device path: ' +
+          devicePath + ' is not found.');
     }
-    return Promise.reject(
-        'Volume having the device path: ' + devicePath + ' is not found.');
-  }).then(function(entry) {
-    launchFileManager(
-        {currentDirectoryURL: entry.toURL()},
-        /* App ID */ undefined,
-        LaunchType.FOCUS_SAME_OR_CREATE);
-  }).catch(function(error) {
-    console.error(error.stack || error);
-  });
+  };
+
+  /**
+   * If a path was specified, retrieve that directory entry; otherwise just
+   * return the unmodified root entry.
+   * @param {!DirectoryEntry} entry
+   * @return {!Promise<!DirectoryEntry>}
+   */
+  var maybeNavigateToPath = function(entry) {
+    if (opt_directoryPath) {
+      return new Promise(
+          entry.getDirectory.bind(entry, opt_directoryPath, {create:false}));
+    } else {
+      return Promise.resolve(entry);
+    }
+  };
+
+  VolumeManager.getInstance()
+      .then(getDeviceRoot)
+      .then(maybeNavigateToPath)
+      .then(
+          /** @param {!DirectoryEntry} entry */
+          function(entry) {
+            launchFileManager(
+                {currentDirectoryURL: entry.toURL()},
+                /* App ID */ undefined,
+                LaunchType.FOCUS_SAME_OR_CREATE);
+          })
+      .catch(
+          function(error) {
+            console.error(error.stack || error);
+          });
 };
 
 /**
@@ -419,7 +446,7 @@ function launchFileManager(opt_appState, opt_id, opt_type, opt_callback) {
 /**
  * Registers dialog window to the background page.
  *
- * @param {Window} dialogWindow Window of the dialog.
+ * @param {!Window} dialogWindow Window of the dialog.
  */
 function registerDialog(dialogWindow) {
   var id = DIALOG_ID_PREFIX + (nextFileManagerDialogID++);
@@ -550,6 +577,42 @@ FileBrowserBackground.prototype.initContextMenu_ = function() {
     contexts: ['launcher'],
     title: str('NEW_WINDOW_BUTTON_LABEL')
   });
+};
+
+/**
+ * History loader that provides an ImportHistorty appropriate
+ * to user settings (if import history is enabled/disabled).
+ *
+ * TODO(smckay): Use SynchronizedHistoryLoader directly
+ *     once cloud-import feature is enabled by default.
+ *
+ * @constructor
+ * @implements {importer.HistoryLoader}
+ */
+FileBrowserBackground.HistoryLoader = function() {
+  /** @private {Promise.<!importer.ImportHistory>} */
+  this.historyPromise_ = null;
+};
+
+/** @override */
+FileBrowserBackground.HistoryLoader.prototype.getHistory = function() {
+  return this.historyPromise_ ?
+      this.historyPromise_ :
+      importer.importEnabled()
+          .then(this.initHistoryPromise_.bind(this))
+          .then(
+              function() {
+                return this.historyPromise_;
+              }.bind(this));
+};
+
+/** @param {boolean} featureEnabled */
+FileBrowserBackground.HistoryLoader.prototype.initHistoryPromise_ =
+    function(featureEnabled) {
+  this.historyPromise_ = featureEnabled ?
+      new importer.SynchronizedHistoryLoader(
+          new importer.ChromeSyncFileEntryProvider()).getHistory() :
+      new importer.DummyImportHistory(false).getHistory();
 };
 
 /**

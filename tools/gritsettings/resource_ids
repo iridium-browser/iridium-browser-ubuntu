@@ -107,7 +107,7 @@
     "messages": [12500],
   },
   "content/app/strings/content_strings.grd": {
-    "messages": [18500],
+    "messages": [19000],
   },
   "components/policy/resources/policy_templates.grd": {
     "structures": [20500],
@@ -132,6 +132,10 @@
   "chrome/browser/resources/options_resources.grd": {
     "includes": [23000],
     "structures": [23200],
+  },
+  "chrome/browser/resources/options_test_resources.grd": {
+    "includes": [23400],
+    "structures": [23450],
   },
   "cloud_print/virtual_driver/win/install/virtual_driver_setup_resources.grd": {
     "messages": [23500],
@@ -159,6 +163,11 @@
   # This file is generated during the build.
   "<(SHARED_INTERMEDIATE_DIR)/content/browser/tracing/tracing_resources.grd": {
     "includes": [25750],
+  },
+  # iOS resources overlap with ash, chromeos and extensions_api, as these are
+  # not used on iOS.
+  "ios/chrome/app/theme/ios_theme_resources.grd": {
+    "structures": [26000],
   },
   "ash/ash_strings.grd": {
     "messages": [26000],
@@ -229,6 +238,9 @@
   },
   "third_party/WebKit/public/blink_resources.grd": {
     "includes": [30500],
+  },
+  "chrome/browser/devtools/device/webrtc/resources.grd": {
+    "includes": [30800],
   },
 
   # These files don't need to reserve resource ids, but are listed here so that

@@ -49,7 +49,6 @@ class CSSFontFace;
 class CSSValueList;
 class DOMArrayBuffer;
 class DOMArrayBufferView;
-class Dictionary;
 class Document;
 class ExceptionState;
 class FontFaceDescriptors;
@@ -59,6 +58,7 @@ class StyleRuleFontFace;
 
 class FontFace : public RefCountedWillBeGarbageCollectedFinalized<FontFace>, public ScriptWrappable, public ActiveDOMObject {
     DEFINE_WRAPPERTYPEINFO();
+    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(FontFace);
 public:
     enum LoadStatus { Unloaded, Loading, Loaded, Error };
 
@@ -96,7 +96,7 @@ public:
     FontTraits traits() const;
     CSSFontFace* cssFontFace() { return m_cssFontFace.get(); }
 
-    void trace(Visitor*);
+    virtual void trace(Visitor*) override;
 
     bool hadBlankText() const;
 

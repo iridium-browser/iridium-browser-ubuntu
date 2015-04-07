@@ -19,6 +19,7 @@
 #include "content/browser/compositor/resize_lock.h"
 #include "content/browser/compositor/test/no_transport_image_transport_factory.h"
 #include "content/browser/frame_host/render_widget_host_view_guest.h"
+#include "content/browser/renderer_host/input/web_input_event_util.h"
 #include "content/browser/renderer_host/overscroll_controller.h"
 #include "content/browser/renderer_host/overscroll_controller_delegate.h"
 #include "content/browser/renderer_host/render_widget_host_delegate.h"
@@ -55,6 +56,8 @@
 #include "ui/events/event.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/gesture_detection/gesture_configuration.h"
+#include "ui/events/keycodes/dom3/dom_code.h"
+#include "ui/events/keycodes/dom4/keycode_converter.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/wm/core/default_activation_client.h"
 #include "ui/wm/core/default_screen_position_client.h"
@@ -132,6 +135,17 @@ class MockRenderWidgetHostDelegate : public RenderWidgetHostDelegate {
  public:
   MockRenderWidgetHostDelegate() {}
   ~MockRenderWidgetHostDelegate() override {}
+  const NativeWebKeyboardEvent* last_event() const { return last_event_.get(); }
+ protected:
+  // RenderWidgetHostDelegate:
+  bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
+                              bool* is_keyboard_shortcut) override {
+    last_event_.reset(new NativeWebKeyboardEvent(event));
+    return true;
+  }
+ private:
+  scoped_ptr<NativeWebKeyboardEvent> last_event_;
+  DISALLOW_COPY_AND_ASSIGN(MockRenderWidgetHostDelegate);
 };
 
 // Simple observer that keeps track of changes to a window for tests.
@@ -255,9 +269,23 @@ class FakeRenderWidgetHostViewAura : public RenderWidgetHostViewAura {
         : ResizeLock(new_size, defer_compositor_lock) {}
   };
 
+  void OnTouchEvent(ui::TouchEvent* event) override {
+    RenderWidgetHostViewAura::OnTouchEvent(event);
+    if (pointer_state().GetPointerCount() > 0) {
+      touch_event_.reset(
+          new blink::WebTouchEvent(CreateWebTouchEventFromMotionEvent(
+              pointer_state(), event->may_cause_scrolling())));
+    } else {
+      // Never create a WebTouchEvent with 0 touch points.
+      touch_event_.reset();
+    }
+  }
+
   bool has_resize_lock_;
   gfx::Size last_frame_size_;
   scoped_ptr<cc::CopyOutputRequest> last_copy_request_;
+  // null if there are 0 active touch points.
+  scoped_ptr<blink::WebTouchEvent> touch_event_;
 };
 
 // A layout manager that always resizes a child to the root window size.
@@ -361,6 +389,18 @@ class RenderWidgetHostViewAuraTest : public testing::Test {
 
   void set_widget_host_uses_shutdown_to_destroy(bool use) {
     widget_host_uses_shutdown_to_destroy_ = use;
+  }
+
+  void SimulateMemoryPressure(
+      base::MemoryPressureListener::MemoryPressureLevel level) {
+    // Here should be base::MemoryPressureListener::NotifyMemoryPressure, but
+    // since the RendererFrameManager is installing a MemoryPressureListener
+    // which uses ObserverListThreadSafe, which furthermore remembers the
+    // message loop for the thread it was created in. Between tests, the
+    // RendererFrameManager singleton survives and and the MessageLoop gets
+    // destroyed. The correct fix would be to have ObserverListThreadSafe look
+    // up the proper message loop every time (see crbug.com/443824.)
+    RendererFrameManager::GetInstance()->OnMemoryPressure(level);
   }
 
  protected:
@@ -531,8 +571,8 @@ class RenderWidgetHostViewAuraOverscrollTest
   }
 
   void SimulateGestureScrollUpdateEvent(float dX, float dY, int modifiers) {
-    SimulateGestureEventCore(
-        SyntheticWebGestureEventBuilder::BuildScrollUpdate(dX, dY, modifiers));
+    SimulateGestureEventCore(SyntheticWebGestureEventBuilder::BuildScrollUpdate(
+        dX, dY, modifiers, blink::WebGestureDeviceTouchscreen));
   }
 
   void SimulateGesturePinchUpdateEvent(float scale,
@@ -633,10 +673,10 @@ class RenderWidgetHostViewAuraOverscrollTest
       return;
     }
 
-    if (WebInputEventTraits::IgnoresAckDisposition(*params.a))
+    if (WebInputEventTraits::IgnoresAckDisposition(*get<0>(params)))
       return;
 
-    SendInputEventACK(params.a->type, ack_result);
+    SendInputEventACK(get<0>(params)->type, ack_result);
   }
 
   SyntheticWebTouchEvent touch_event_;
@@ -878,19 +918,20 @@ TEST_F(RenderWidgetHostViewAuraTest, SetCompositionText) {
     InputMsg_ImeSetComposition::Param params;
     InputMsg_ImeSetComposition::Read(msg, &params);
     // composition text
-    EXPECT_EQ(composition_text.text, params.a);
+    EXPECT_EQ(composition_text.text, get<0>(params));
     // underlines
-    ASSERT_EQ(underlines.size(), params.b.size());
+    ASSERT_EQ(underlines.size(), get<1>(params).size());
     for (size_t i = 0; i < underlines.size(); ++i) {
-      EXPECT_EQ(underlines[i].start_offset, params.b[i].startOffset);
-      EXPECT_EQ(underlines[i].end_offset, params.b[i].endOffset);
-      EXPECT_EQ(underlines[i].color, params.b[i].color);
-      EXPECT_EQ(underlines[i].thick, params.b[i].thick);
-      EXPECT_EQ(underlines[i].background_color, params.b[i].backgroundColor);
+      EXPECT_EQ(underlines[i].start_offset, get<1>(params)[i].startOffset);
+      EXPECT_EQ(underlines[i].end_offset, get<1>(params)[i].endOffset);
+      EXPECT_EQ(underlines[i].color, get<1>(params)[i].color);
+      EXPECT_EQ(underlines[i].thick, get<1>(params)[i].thick);
+      EXPECT_EQ(underlines[i].background_color,
+                get<1>(params)[i].backgroundColor);
     }
     // highlighted range
-    EXPECT_EQ(4, params.c) << "Should be the same to the caret pos";
-    EXPECT_EQ(4, params.d) << "Should be the same to the caret pos";
+    EXPECT_EQ(4, get<2>(params)) << "Should be the same to the caret pos";
+    EXPECT_EQ(4, get<3>(params)) << "Should be the same to the caret pos";
   }
 
   view_->ImeCancelComposition();
@@ -964,25 +1005,23 @@ TEST_F(RenderWidgetHostViewAuraTest, TouchEventState) {
 
   view_->OnTouchEvent(&press);
   EXPECT_FALSE(press.handled());
-  EXPECT_EQ(blink::WebInputEvent::TouchStart, view_->touch_event_.type);
-  EXPECT_TRUE(view_->touch_event_.cancelable);
-  EXPECT_EQ(1U, view_->touch_event_.touchesLength);
+  EXPECT_EQ(blink::WebInputEvent::TouchStart, view_->touch_event_->type);
+  EXPECT_TRUE(view_->touch_event_->cancelable);
+  EXPECT_EQ(1U, view_->touch_event_->touchesLength);
   EXPECT_EQ(blink::WebTouchPoint::StatePressed,
-            view_->touch_event_.touches[0].state);
+            view_->touch_event_->touches[0].state);
 
   view_->OnTouchEvent(&move);
   EXPECT_FALSE(move.handled());
-  EXPECT_EQ(blink::WebInputEvent::TouchMove, view_->touch_event_.type);
-  EXPECT_TRUE(view_->touch_event_.cancelable);
-  EXPECT_EQ(1U, view_->touch_event_.touchesLength);
+  EXPECT_EQ(blink::WebInputEvent::TouchMove, view_->touch_event_->type);
+  EXPECT_TRUE(view_->touch_event_->cancelable);
+  EXPECT_EQ(1U, view_->touch_event_->touchesLength);
   EXPECT_EQ(blink::WebTouchPoint::StateMoved,
-            view_->touch_event_.touches[0].state);
+            view_->touch_event_->touches[0].state);
 
   view_->OnTouchEvent(&release);
   EXPECT_FALSE(release.handled());
-  EXPECT_EQ(blink::WebInputEvent::TouchEnd, view_->touch_event_.type);
-  EXPECT_TRUE(view_->touch_event_.cancelable);
-  EXPECT_EQ(0U, view_->touch_event_.touchesLength);
+  EXPECT_EQ(nullptr, view_->touch_event_);
 
   // Now install some touch-event handlers and do the same steps. The touch
   // events should now be consumed. However, the touch-event state should be
@@ -991,34 +1030,31 @@ TEST_F(RenderWidgetHostViewAuraTest, TouchEventState) {
   EXPECT_TRUE(widget_host_->ShouldForwardTouchEvent());
 
   view_->OnTouchEvent(&press);
-  EXPECT_TRUE(press.stopped_propagation());
-  EXPECT_EQ(blink::WebInputEvent::TouchStart, view_->touch_event_.type);
-  EXPECT_TRUE(view_->touch_event_.cancelable);
-  EXPECT_EQ(1U, view_->touch_event_.touchesLength);
+  EXPECT_TRUE(press.synchronous_handling_disabled());
+  EXPECT_EQ(blink::WebInputEvent::TouchStart, view_->touch_event_->type);
+  EXPECT_TRUE(view_->touch_event_->cancelable);
+  EXPECT_EQ(1U, view_->touch_event_->touchesLength);
   EXPECT_EQ(blink::WebTouchPoint::StatePressed,
-            view_->touch_event_.touches[0].state);
+            view_->touch_event_->touches[0].state);
 
   view_->OnTouchEvent(&move);
-  EXPECT_TRUE(move.stopped_propagation());
-  EXPECT_EQ(blink::WebInputEvent::TouchMove, view_->touch_event_.type);
-  EXPECT_TRUE(view_->touch_event_.cancelable);
-  EXPECT_EQ(1U, view_->touch_event_.touchesLength);
+  EXPECT_TRUE(move.synchronous_handling_disabled());
+  EXPECT_EQ(blink::WebInputEvent::TouchMove, view_->touch_event_->type);
+  EXPECT_TRUE(view_->touch_event_->cancelable);
+  EXPECT_EQ(1U, view_->touch_event_->touchesLength);
   EXPECT_EQ(blink::WebTouchPoint::StateMoved,
-            view_->touch_event_.touches[0].state);
-
+            view_->touch_event_->touches[0].state);
   view_->OnTouchEvent(&release);
-  EXPECT_TRUE(release.stopped_propagation());
-  EXPECT_EQ(blink::WebInputEvent::TouchEnd, view_->touch_event_.type);
-  EXPECT_TRUE(view_->touch_event_.cancelable);
-  EXPECT_EQ(0U, view_->touch_event_.touchesLength);
+  EXPECT_TRUE(release.synchronous_handling_disabled());
+  EXPECT_EQ(nullptr, view_->touch_event_);
 
   // Now start a touch event, and remove the event-handlers before the release.
   view_->OnTouchEvent(&press);
-  EXPECT_TRUE(press.stopped_propagation());
-  EXPECT_EQ(blink::WebInputEvent::TouchStart, view_->touch_event_.type);
-  EXPECT_EQ(1U, view_->touch_event_.touchesLength);
+  EXPECT_TRUE(press.synchronous_handling_disabled());
+  EXPECT_EQ(blink::WebInputEvent::TouchStart, view_->touch_event_->type);
+  EXPECT_EQ(1U, view_->touch_event_->touchesLength);
   EXPECT_EQ(blink::WebTouchPoint::StatePressed,
-            view_->touch_event_.touches[0].state);
+            view_->touch_event_->touches[0].state);
 
   widget_host_->OnMessageReceived(ViewHostMsg_HasTouchEventHandlers(0, false));
   EXPECT_TRUE(widget_host_->ShouldForwardTouchEvent());
@@ -1034,17 +1070,16 @@ TEST_F(RenderWidgetHostViewAuraTest, TouchEventState) {
       base::Time::NowFromSystemTime() - base::Time());
   view_->OnTouchEvent(&move2);
   EXPECT_FALSE(move2.handled());
-  EXPECT_EQ(blink::WebInputEvent::TouchMove, view_->touch_event_.type);
-  EXPECT_EQ(1U, view_->touch_event_.touchesLength);
+  EXPECT_EQ(blink::WebInputEvent::TouchMove, view_->touch_event_->type);
+  EXPECT_EQ(1U, view_->touch_event_->touchesLength);
   EXPECT_EQ(blink::WebTouchPoint::StateMoved,
-            view_->touch_event_.touches[0].state);
+            view_->touch_event_->touches[0].state);
 
   ui::TouchEvent release2(ui::ET_TOUCH_RELEASED, gfx::Point(20, 20), 0,
       base::Time::NowFromSystemTime() - base::Time());
   view_->OnTouchEvent(&release2);
   EXPECT_FALSE(release2.handled());
-  EXPECT_EQ(blink::WebInputEvent::TouchEnd, view_->touch_event_.type);
-  EXPECT_EQ(0U, view_->touch_event_.touchesLength);
+  EXPECT_EQ(nullptr, view_->touch_event_);
 }
 
 // Checks that touch-events are queued properly when there is a touch-event
@@ -1070,32 +1105,31 @@ TEST_F(RenderWidgetHostViewAuraTest, TouchEventSyncAsync) {
                          ui::EventTimeForNow());
 
   view_->OnTouchEvent(&press);
-  EXPECT_TRUE(press.stopped_propagation());
-  EXPECT_EQ(blink::WebInputEvent::TouchStart, view_->touch_event_.type);
-  EXPECT_EQ(1U, view_->touch_event_.touchesLength);
+  EXPECT_TRUE(press.synchronous_handling_disabled());
+  EXPECT_EQ(blink::WebInputEvent::TouchStart, view_->touch_event_->type);
+  EXPECT_EQ(1U, view_->touch_event_->touchesLength);
   EXPECT_EQ(blink::WebTouchPoint::StatePressed,
-            view_->touch_event_.touches[0].state);
+            view_->touch_event_->touches[0].state);
 
   view_->OnTouchEvent(&move);
-  EXPECT_TRUE(move.stopped_propagation());
-  EXPECT_EQ(blink::WebInputEvent::TouchMove, view_->touch_event_.type);
-  EXPECT_EQ(1U, view_->touch_event_.touchesLength);
+  EXPECT_TRUE(move.synchronous_handling_disabled());
+  EXPECT_EQ(blink::WebInputEvent::TouchMove, view_->touch_event_->type);
+  EXPECT_EQ(1U, view_->touch_event_->touchesLength);
   EXPECT_EQ(blink::WebTouchPoint::StateMoved,
-            view_->touch_event_.touches[0].state);
+            view_->touch_event_->touches[0].state);
 
   // Send the same move event. Since the point hasn't moved, it won't affect the
   // queue. However, the view should consume the event.
   view_->OnTouchEvent(&move);
-  EXPECT_TRUE(move.stopped_propagation());
-  EXPECT_EQ(blink::WebInputEvent::TouchMove, view_->touch_event_.type);
-  EXPECT_EQ(1U, view_->touch_event_.touchesLength);
+  EXPECT_TRUE(move.synchronous_handling_disabled());
+  EXPECT_EQ(blink::WebInputEvent::TouchMove, view_->touch_event_->type);
+  EXPECT_EQ(1U, view_->touch_event_->touchesLength);
   EXPECT_EQ(blink::WebTouchPoint::StateMoved,
-            view_->touch_event_.touches[0].state);
+            view_->touch_event_->touches[0].state);
 
   view_->OnTouchEvent(&release);
-  EXPECT_TRUE(release.stopped_propagation());
-  EXPECT_EQ(blink::WebInputEvent::TouchEnd, view_->touch_event_.type);
-  EXPECT_EQ(0U, view_->touch_event_.touchesLength);
+  EXPECT_TRUE(release.synchronous_handling_disabled());
+  EXPECT_EQ(nullptr, view_->touch_event_);
 }
 
 TEST_F(RenderWidgetHostViewAuraTest, PhysicalBackingSizeWithScale) {
@@ -1114,9 +1148,9 @@ TEST_F(RenderWidgetHostViewAuraTest, PhysicalBackingSizeWithScale) {
     EXPECT_EQ(ViewMsg_Resize::ID, msg->type());
     ViewMsg_Resize::Param params;
     ViewMsg_Resize::Read(msg, &params);
-    EXPECT_EQ("100x100", params.a.new_size.ToString());  // dip size
+    EXPECT_EQ("100x100", get<0>(params).new_size.ToString());  // dip size
     EXPECT_EQ("100x100",
-        params.a.physical_backing_size.ToString());  // backing size
+        get<0>(params).physical_backing_size.ToString());  // backing size
   }
 
   widget_host_->ResetSizeAndRepaintPendingFlags();
@@ -1131,10 +1165,10 @@ TEST_F(RenderWidgetHostViewAuraTest, PhysicalBackingSizeWithScale) {
     EXPECT_EQ(ViewMsg_Resize::ID, msg->type());
     ViewMsg_Resize::Param params;
     ViewMsg_Resize::Read(msg, &params);
-    EXPECT_EQ(2.0f, params.a.screen_info.deviceScaleFactor);
-    EXPECT_EQ("100x100", params.a.new_size.ToString());  // dip size
+    EXPECT_EQ(2.0f, get<0>(params).screen_info.deviceScaleFactor);
+    EXPECT_EQ("100x100", get<0>(params).new_size.ToString());  // dip size
     EXPECT_EQ("200x200",
-        params.a.physical_backing_size.ToString());  // backing size
+        get<0>(params).physical_backing_size.ToString());  // backing size
   }
 
   widget_host_->ResetSizeAndRepaintPendingFlags();
@@ -1149,10 +1183,10 @@ TEST_F(RenderWidgetHostViewAuraTest, PhysicalBackingSizeWithScale) {
     EXPECT_EQ(ViewMsg_Resize::ID, msg->type());
     ViewMsg_Resize::Param params;
     ViewMsg_Resize::Read(msg, &params);
-    EXPECT_EQ(1.0f, params.a.screen_info.deviceScaleFactor);
-    EXPECT_EQ("100x100", params.a.new_size.ToString());  // dip size
+    EXPECT_EQ(1.0f, get<0>(params).screen_info.deviceScaleFactor);
+    EXPECT_EQ("100x100", get<0>(params).new_size.ToString());  // dip size
     EXPECT_EQ("100x100",
-        params.a.physical_backing_size.ToString());  // backing size
+        get<0>(params).physical_backing_size.ToString());  // backing size
   }
 }
 
@@ -1317,14 +1351,14 @@ TEST_F(RenderWidgetHostViewAuraTest, DISABLED_FullscreenResize) {
     ViewMsg_Resize::Param params;
     ViewMsg_Resize::Read(msg, &params);
     EXPECT_EQ("0,0 800x600",
-              gfx::Rect(params.a.screen_info.availableRect).ToString());
-    EXPECT_EQ("800x600", params.a.new_size.ToString());
+              gfx::Rect(get<0>(params).screen_info.availableRect).ToString());
+    EXPECT_EQ("800x600", get<0>(params).new_size.ToString());
     // Resizes are blocked until we swapped a frame of the correct size, and
     // we've committed it.
     view_->OnSwapCompositorFrame(
         0,
         MakeDelegatedFrame(
-            1.f, params.a.new_size, gfx::Rect(params.a.new_size)));
+            1.f, get<0>(params).new_size, gfx::Rect(get<0>(params).new_size)));
     ui::DrawWaiterForTest::WaitForCommit(
         root_window->GetHost()->compositor());
   }
@@ -1342,12 +1376,12 @@ TEST_F(RenderWidgetHostViewAuraTest, DISABLED_FullscreenResize) {
     ViewMsg_Resize::Param params;
     ViewMsg_Resize::Read(msg, &params);
     EXPECT_EQ("0,0 1600x1200",
-              gfx::Rect(params.a.screen_info.availableRect).ToString());
-    EXPECT_EQ("1600x1200", params.a.new_size.ToString());
+              gfx::Rect(get<0>(params).screen_info.availableRect).ToString());
+    EXPECT_EQ("1600x1200", get<0>(params).new_size.ToString());
     view_->OnSwapCompositorFrame(
         0,
         MakeDelegatedFrame(
-            1.f, params.a.new_size, gfx::Rect(params.a.new_size)));
+            1.f, get<0>(params).new_size, gfx::Rect(get<0>(params).new_size)));
     ui::DrawWaiterForTest::WaitForCommit(
         root_window->GetHost()->compositor());
   }
@@ -1446,7 +1480,7 @@ TEST_F(RenderWidgetHostViewAuraTest, Resize) {
     EXPECT_EQ(ViewMsg_Resize::ID, msg->type());
     ViewMsg_Resize::Param params;
     ViewMsg_Resize::Read(msg, &params);
-    EXPECT_EQ(size2.ToString(), params.a.new_size.ToString());
+    EXPECT_EQ(size2.ToString(), get<0>(params).new_size.ToString());
   }
   // Send resize ack to observe new Resize messages.
   update_params.view_size = size2;
@@ -1474,8 +1508,14 @@ TEST_F(RenderWidgetHostViewAuraTest, Resize) {
   // produce a Resize message after the commit.
   view_->OnSwapCompositorFrame(
       0, MakeDelegatedFrame(1.f, size2, gfx::Rect(size2)));
-  // No frame ack yet.
-  EXPECT_EQ(0u, sink_->message_count());
+  cc::SurfaceId surface_id = view_->surface_id();
+  if (surface_id.is_null()) {
+    // No frame ack yet.
+    EXPECT_EQ(0u, sink_->message_count());
+  } else {
+    // Frame isn't desired size, so early ack.
+    EXPECT_EQ(1u, sink_->message_count());
+  }
   EXPECT_EQ(size2.ToString(), view_->GetRequestedRendererSize().ToString());
 
   // Wait for commit, then we should unlock the compositor and send a Resize
@@ -1483,27 +1523,15 @@ TEST_F(RenderWidgetHostViewAuraTest, Resize) {
   ui::DrawWaiterForTest::WaitForCommit(
       root_window->GetHost()->compositor());
   EXPECT_EQ(size3.ToString(), view_->GetRequestedRendererSize().ToString());
-  cc::SurfaceId surface_id = view_->surface_id();
-  int swap_index = 0;
-  int resize_index = 1;
-  if (!surface_id.is_null()) {
-    // Frame ack is sent only due to a draw callback with surfaces.
-    ImageTransportFactory::GetInstance()
-        ->GetSurfaceManager()
-        ->GetSurfaceForId(surface_id)
-        ->RunDrawCallbacks();
-    swap_index = 1;
-    resize_index = 0;
-  }
   EXPECT_EQ(2u, sink_->message_count());
   EXPECT_EQ(ViewMsg_SwapCompositorFrameAck::ID,
-            sink_->GetMessageAt(swap_index)->type());
+            sink_->GetMessageAt(0)->type());
   {
-    const IPC::Message* msg = sink_->GetMessageAt(resize_index);
+    const IPC::Message* msg = sink_->GetMessageAt(1);
     EXPECT_EQ(ViewMsg_Resize::ID, msg->type());
     ViewMsg_Resize::Param params;
     ViewMsg_Resize::Read(msg, &params);
-    EXPECT_EQ(size3.ToString(), params.a.new_size.ToString());
+    EXPECT_EQ(size3.ToString(), get<0>(params).new_size.ToString());
   }
   update_params.view_size = size3;
   widget_host_->OnMessageReceived(
@@ -1645,7 +1673,7 @@ TEST_F(RenderWidgetHostViewAuraTest, OutputSurfaceIdChange) {
 
 TEST_F(RenderWidgetHostViewAuraTest, DiscardDelegatedFrames) {
   size_t max_renderer_frames =
-      RendererFrameManager::GetInstance()->max_number_of_saved_frames();
+      RendererFrameManager::GetInstance()->GetMaxNumberOfSavedFrames();
   ASSERT_LE(2u, max_renderer_frames);
   size_t renderer_count = max_renderer_frames + 1;
   gfx::Rect view_rect(100, 100);
@@ -1807,7 +1835,7 @@ TEST_F(RenderWidgetHostViewAuraTest, DiscardDelegatedFrames) {
 
 TEST_F(RenderWidgetHostViewAuraTest, DiscardDelegatedFramesWithLocking) {
   size_t max_renderer_frames =
-      RendererFrameManager::GetInstance()->max_number_of_saved_frames();
+      RendererFrameManager::GetInstance()->GetMaxNumberOfSavedFrames();
   ASSERT_LE(2u, max_renderer_frames);
   size_t renderer_count = max_renderer_frames + 1;
   gfx::Rect view_rect(100, 100);
@@ -1858,6 +1886,70 @@ TEST_F(RenderWidgetHostViewAuraTest, DiscardDelegatedFramesWithLocking) {
   // If we unlock [0] now, then [0] should be evicted.
   views[0]->GetDelegatedFrameHost()->UnlockResources();
   EXPECT_FALSE(views[0]->HasFrameData());
+
+  for (size_t i = 0; i < renderer_count; ++i) {
+    views[i]->Destroy();
+    delete hosts[i];
+  }
+}
+
+// Test that changing the memory pressure should delete saved frames. This test
+// only applies to ChromeOS.
+TEST_F(RenderWidgetHostViewAuraTest, DiscardDelegatedFramesWithMemoryPressure) {
+  size_t max_renderer_frames =
+      RendererFrameManager::GetInstance()->GetMaxNumberOfSavedFrames();
+  ASSERT_LE(2u, max_renderer_frames);
+  size_t renderer_count = max_renderer_frames;
+  gfx::Rect view_rect(100, 100);
+  gfx::Size frame_size = view_rect.size();
+  DCHECK_EQ(0u, HostSharedBitmapManager::current()->AllocatedBitmapCount());
+
+  scoped_ptr<RenderWidgetHostImpl * []> hosts(
+      new RenderWidgetHostImpl* [renderer_count]);
+  scoped_ptr<FakeRenderWidgetHostViewAura * []> views(
+      new FakeRenderWidgetHostViewAura* [renderer_count]);
+
+  // Create a bunch of renderers.
+  for (size_t i = 0; i < renderer_count; ++i) {
+    hosts[i] = new RenderWidgetHostImpl(
+        &delegate_, process_host_, MSG_ROUTING_NONE, false);
+    hosts[i]->Init();
+    views[i] = new FakeRenderWidgetHostViewAura(hosts[i], false);
+    views[i]->InitAsChild(NULL);
+    aura::client::ParentWindowWithContext(
+        views[i]->GetNativeView(),
+        parent_view_->GetNativeView()->GetRootWindow(),
+        gfx::Rect());
+    views[i]->SetSize(view_rect.size());
+  }
+
+  // Make each renderer visible and swap a frame on it. No eviction should
+  // occur because all frames are visible.
+  for (size_t i = 0; i < renderer_count; ++i) {
+    views[i]->WasShown();
+    views[i]->OnSwapCompositorFrame(
+        1, MakeDelegatedFrame(1.f, frame_size, view_rect));
+    EXPECT_TRUE(views[i]->HasFrameData());
+  }
+
+  // If we hide one, it should not get evicted.
+  views[0]->WasHidden();
+  message_loop_.RunUntilIdle();
+  EXPECT_TRUE(views[0]->HasFrameData());
+  // Using a lesser memory pressure event however, should evict.
+  SimulateMemoryPressure(
+      base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_MODERATE);
+  message_loop_.RunUntilIdle();
+  EXPECT_FALSE(views[0]->HasFrameData());
+
+  // Check the same for a higher pressure event.
+  views[1]->WasHidden();
+  message_loop_.RunUntilIdle();
+  EXPECT_TRUE(views[1]->HasFrameData());
+  SimulateMemoryPressure(
+      base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_CRITICAL);
+  message_loop_.RunUntilIdle();
+  EXPECT_FALSE(views[1]->HasFrameData());
 
   for (size_t i = 0; i < renderer_count; ++i) {
     views[i]->Destroy();
@@ -2013,7 +2105,7 @@ TEST_F(RenderWidgetHostViewAuraTest, VisibleViewportTest) {
 
   ViewMsg_Resize::Param params;
   ViewMsg_Resize::Read(message, &params);
-  EXPECT_EQ(60, params.a.visible_viewport_size.height());
+  EXPECT_EQ(60, get<0>(params).visible_viewport_size.height());
 }
 
 // Ensures that touch event positions are never truncated to integers.
@@ -2030,15 +2122,15 @@ TEST_F(RenderWidgetHostViewAuraTest, TouchEventPositionsArentRounded) {
                        ui::EventTimeForNow());
 
   view_->OnTouchEvent(&press);
-  EXPECT_EQ(blink::WebInputEvent::TouchStart, view_->touch_event_.type);
-  EXPECT_TRUE(view_->touch_event_.cancelable);
-  EXPECT_EQ(1U, view_->touch_event_.touchesLength);
+  EXPECT_EQ(blink::WebInputEvent::TouchStart, view_->touch_event_->type);
+  EXPECT_TRUE(view_->touch_event_->cancelable);
+  EXPECT_EQ(1U, view_->touch_event_->touchesLength);
   EXPECT_EQ(blink::WebTouchPoint::StatePressed,
-            view_->touch_event_.touches[0].state);
-  EXPECT_EQ(kX, view_->touch_event_.touches[0].screenPosition.x);
-  EXPECT_EQ(kX, view_->touch_event_.touches[0].position.x);
-  EXPECT_EQ(kY, view_->touch_event_.touches[0].screenPosition.y);
-  EXPECT_EQ(kY, view_->touch_event_.touches[0].position.y);
+            view_->touch_event_->touches[0].state);
+  EXPECT_EQ(kX, view_->touch_event_->touches[0].screenPosition.x);
+  EXPECT_EQ(kX, view_->touch_event_->touches[0].position.x);
+  EXPECT_EQ(kY, view_->touch_event_->touches[0].screenPosition.y);
+  EXPECT_EQ(kY, view_->touch_event_->touches[0].position.y);
 }
 
 // Tests that scroll ACKs are correctly handled by the overscroll-navigation
@@ -2941,6 +3033,50 @@ TEST_F(RenderWidgetHostViewAuraOverscrollTest, OverscrollResetsOnBlur) {
 TEST_F(RenderWidgetHostViewGuestAuraTest, GuestViewDoesNotLeak) {
   TearDownEnvironment();
   ASSERT_FALSE(guest_view_weak_.get());
+}
+
+// Tests that invalid touch events are consumed and handled
+// synchronously.
+TEST_F(RenderWidgetHostViewAuraTest,
+       InvalidEventsHaveSyncHandlingDisabled) {
+  view_->InitAsChild(NULL);
+  view_->Show();
+
+  widget_host_->OnMessageReceived(ViewHostMsg_HasTouchEventHandlers(0, true));
+  EXPECT_TRUE(widget_host_->ShouldForwardTouchEvent());
+
+  ui::TouchEvent press(ui::ET_TOUCH_PRESSED, gfx::Point(30, 30), 0,
+                       ui::EventTimeForNow());
+
+  // Construct a move with a touch id which doesn't exist.
+  ui::TouchEvent invalid_move(ui::ET_TOUCH_MOVED, gfx::Point(30, 30), 1,
+                              ui::EventTimeForNow());
+
+  view_->OnTouchEvent(&press);
+  view_->OnTouchEvent(&invalid_move);
+  // Valid press is handled asynchronously.
+  EXPECT_TRUE(press.synchronous_handling_disabled());
+  // Invalid move is handled synchronously, but is consumed.
+  EXPECT_FALSE(invalid_move.synchronous_handling_disabled());
+  EXPECT_TRUE(invalid_move.stopped_propagation());
+}
+
+// Checks key event codes.
+TEST_F(RenderWidgetHostViewAuraTest, KeyEvent) {
+  view_->InitAsChild(NULL);
+  view_->Show();
+
+  ui::KeyEvent key_event(ui::ET_KEY_PRESSED, ui::VKEY_A, ui::DomCode::KEY_A,
+                         ui::EF_NONE);
+  view_->OnKeyEvent(&key_event);
+
+  const NativeWebKeyboardEvent* event = delegate_.last_event();
+  EXPECT_NE(nullptr, event);
+  if (event) {
+    EXPECT_EQ(key_event.key_code(), event->windowsKeyCode);
+    EXPECT_EQ(ui::KeycodeConverter::DomCodeToNativeKeycode(key_event.code()),
+              event->nativeKeyCode);
+  }
 }
 
 }  // namespace content

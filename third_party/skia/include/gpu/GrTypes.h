@@ -6,16 +6,12 @@
  * found in the LICENSE file.
  */
 
-
-
 #ifndef GrTypes_DEFINED
 #define GrTypes_DEFINED
 
 #include "SkTypes.h"
 #include "GrConfig.h"
 #include "SkMath.h"
-
-//#define SK_SUPPORT_LEGACY_GRTYPES
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -51,43 +47,6 @@
     template <typename T> \
     friend X operator & (X a, T b); \
 ////////////////////////////////////////////////////////////////////////////////
-
-#ifdef SK_SUPPORT_LEGACY_GRTYPES
-
-/**
- *  Macro to round n up to the next multiple of 4, or return it unchanged if
- *  n is already a multiple of 4
- */
-#define GrALIGN4(n)     SkAlign4(n)
-#define GrIsALIGN4(n)   SkIsAlign4(n)
-
-template <typename T> const T& GrMin(const T& a, const T& b) {
-    return (a < b) ? a : b;
-}
-
-template <typename T> const T& GrMax(const T& a, const T& b) {
-    return (b < a) ? a : b;
-}
-
-/**
- *  16.16 fixed point type
- */
-typedef int32_t GrFixed;
-
-#ifdef SK_DEBUG
-
-static inline int16_t GrToS16(intptr_t x) {
-    SkASSERT((int16_t)x == x);
-    return (int16_t)x;
-}
-
-#else
-
-#define GrToS16(x)  x
-
-#endif
-
-#endif
 
 // compile time versions of min/max
 #define GR_CT_MAX(a, b) (((b) < (a)) ? (a) : (b))
@@ -228,8 +187,7 @@ static const int kPublicGrBlendCoeffCount = kLastPublicGrBlendCoeff + 1;
  */
 enum GrMaskFormat {
     kA8_GrMaskFormat,    //!< 1-byte per pixel
-    kA565_GrMaskFormat,  //!< 2-bytes per pixel
-    kA888_GrMaskFormat,  //!< 4-bytes per pixel
+    kA565_GrMaskFormat,  //!< 2-bytes per pixel, RGB represent 3-channel LCD coverage
     kARGB_GrMaskFormat,  //!< 4-bytes per pixel, color format
 
     kLast_GrMaskFormat = kARGB_GrMaskFormat
@@ -240,13 +198,15 @@ static const int kMaskFormatCount = kLast_GrMaskFormat + 1;
  *  Return the number of bytes-per-pixel for the specified mask format.
  */
 static inline int GrMaskFormatBytesPerPixel(GrMaskFormat format) {
-    SkASSERT((unsigned)format <= 3);
+    SkASSERT((unsigned)format < kMaskFormatCount);
     // kA8   (0) -> 1
     // kA565 (1) -> 2
-    // kA888 (2) -> 4
-    // kARGB (3) -> 4
-    static const int sBytesPerPixel[] = { 1, 2, 4, 4 };
+    // kARGB (2) -> 4
+    static const int sBytesPerPixel[] = { 1, 2, 4 };
     SK_COMPILE_ASSERT(SK_ARRAY_COUNT(sBytesPerPixel) == kMaskFormatCount, array_size_mismatch);
+    SK_COMPILE_ASSERT(kA8_GrMaskFormat == 0, enum_order_dependency);
+    SK_COMPILE_ASSERT(kA565_GrMaskFormat == 1, enum_order_dependency);
+    SK_COMPILE_ASSERT(kARGB_GrMaskFormat == 2, enum_order_dependency);
 
     return sBytesPerPixel[(int) format];
 }
@@ -271,6 +231,10 @@ enum GrPixelConfig {
      * Premultiplied. Byte order is b,g,r,a.
      */
     kBGRA_8888_GrPixelConfig,
+    /**
+     * Premultiplied and sRGB. Byte order is r,g,b,a.
+     */
+    kSRGBA_8888_GrPixelConfig,
     /**
      * ETC1 Compressed Data
      */
@@ -301,7 +265,13 @@ enum GrPixelConfig {
      * Byte order is r, g, b, a.  This color format is 32 bits per channel
      */
     kRGBA_float_GrPixelConfig,
-    kLast_GrPixelConfig = kRGBA_float_GrPixelConfig
+
+    /**
+     * This color format is a single 16 bit float channel
+     */
+    kAlpha_half_GrPixelConfig,
+
+    kLast_GrPixelConfig = kAlpha_half_GrPixelConfig
 };
 static const int kGrPixelConfigCnt = kLast_GrPixelConfig + 1;
 
@@ -337,6 +307,7 @@ static inline bool GrPixelConfigIs8888(GrPixelConfig config) {
     switch (config) {
         case kRGBA_8888_GrPixelConfig:
         case kBGRA_8888_GrPixelConfig:
+        case kSRGBA_8888_GrPixelConfig:
             return true;
         default:
             return false;
@@ -363,9 +334,11 @@ static inline size_t GrBytesPerPixel(GrPixelConfig config) {
             return 1;
         case kRGB_565_GrPixelConfig:
         case kRGBA_4444_GrPixelConfig:
+        case kAlpha_half_GrPixelConfig:
             return 2;
         case kRGBA_8888_GrPixelConfig:
         case kBGRA_8888_GrPixelConfig:
+        case kSRGBA_8888_GrPixelConfig:
             return 4;
         case kRGBA_float_GrPixelConfig:
             return 16;
@@ -381,9 +354,11 @@ static inline size_t GrUnpackAlignment(GrPixelConfig config) {
             return 1;
         case kRGB_565_GrPixelConfig:
         case kRGBA_4444_GrPixelConfig:
+        case kAlpha_half_GrPixelConfig:
             return 2;
         case kRGBA_8888_GrPixelConfig:
         case kBGRA_8888_GrPixelConfig:
+        case kSRGBA_8888_GrPixelConfig:
         case kRGBA_float_GrPixelConfig:
             return 4;
         default:
@@ -407,6 +382,7 @@ static inline bool GrPixelConfigIsAlphaOnly(GrPixelConfig config) {
         case kLATC_GrPixelConfig:
         case kASTC_12x12_GrPixelConfig:
         case kAlpha_8_GrPixelConfig:
+        case kAlpha_half_GrPixelConfig:
             return true;
         default:
             return false;

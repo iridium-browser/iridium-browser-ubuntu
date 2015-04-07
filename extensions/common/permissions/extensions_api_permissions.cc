@@ -19,6 +19,7 @@ namespace {
 const char kOldAlwaysOnTopWindowsPermission[] = "alwaysOnTopWindows";
 const char kOldFullscreenPermission[] = "fullscreen";
 const char kOldOverrideEscFullscreenPermission[] = "overrideEscFullscreen";
+const char kOldUnlimitedStoragePermission[] = "unlimited_storage";
 
 template <typename T>
 APIPermission* CreateAPIPermission(const APIPermissionInfo* permission) {
@@ -34,6 +35,7 @@ std::vector<APIPermissionInfo*> ExtensionsAPIPermissions::GetAllPermissions()
       {APIPermission::kAlwaysOnTopWindows, "app.window.alwaysOnTop"},
       {APIPermission::kAppView, "appview",
         APIPermissionInfo::kFlagCannotBeOptional},
+      {APIPermission::kAudio, "audio"},
       {APIPermission::kAudioCapture, "audioCapture",
        APIPermissionInfo::kFlagNone, IDS_EXTENSION_PROMPT_WARNING_AUDIO_CAPTURE,
        PermissionMessage::kAudioCapture},
@@ -41,6 +43,14 @@ std::vector<APIPermissionInfo*> ExtensionsAPIPermissions::GetAllPermissions()
        APIPermissionInfo::kFlagCannotBeOptional,
        IDS_EXTENSION_PROMPT_WARNING_BLUETOOTH_PRIVATE,
        PermissionMessage::kBluetoothPrivate},
+      {APIPermission::kClipboardRead,
+       "clipboardRead",
+       APIPermissionInfo::kFlagSupportsContentCapabilities,
+       IDS_EXTENSION_PROMPT_WARNING_CLIPBOARD,
+       PermissionMessage::kClipboard},
+      {APIPermission::kClipboardWrite,
+       "clipboardWrite",
+       APIPermissionInfo::kFlagSupportsContentCapabilities},
       {APIPermission::kDeclarativeWebRequest, "declarativeWebRequest",
        APIPermissionInfo::kFlagNone,
        IDS_EXTENSION_PROMPT_WARNING_DECLARATIVE_WEB_REQUEST,
@@ -49,8 +59,7 @@ std::vector<APIPermissionInfo*> ExtensionsAPIPermissions::GetAllPermissions()
       {APIPermission::kExternallyConnectableAllUrls,
        "externally_connectable.all_urls"},
       {APIPermission::kFullscreen, "app.window.fullscreen"},
-      {APIPermission::kHid, "hid", APIPermissionInfo::kFlagNone,
-       IDS_EXTENSION_PROMPT_WARNING_HID, PermissionMessage::kHid},
+      {APIPermission::kHid, "hid", APIPermissionInfo::kFlagNone},
       {APIPermission::kImeWindowEnabled, "app.window.ime"},
       {APIPermission::kOverrideEscFullscreen,
        "app.window.fullscreen.overrideEsc"},
@@ -73,8 +82,11 @@ std::vector<APIPermissionInfo*> ExtensionsAPIPermissions::GetAllPermissions()
       {APIPermission::kU2fDevices, "u2fDevices", APIPermissionInfo::kFlagNone,
        IDS_EXTENSION_PROMPT_WARNING_U2F_DEVICES,
        PermissionMessage::kU2fDevices},
-      {APIPermission::kUsb, "usb", APIPermissionInfo::kFlagNone,
-       IDS_EXTENSION_PROMPT_WARNING_USB, PermissionMessage::kUsb},
+      {APIPermission::kUnlimitedStorage,
+       "unlimitedStorage",
+       APIPermissionInfo::kFlagCannotBeOptional |
+          APIPermissionInfo::kFlagSupportsContentCapabilities},
+      {APIPermission::kUsb, "usb", APIPermissionInfo::kFlagNone},
       {APIPermission::kUsbDevice, "usbDevices", APIPermissionInfo::kFlagNone, 0,
        PermissionMessage::kNone, &CreateAPIPermission<UsbDevicePermission>},
       {APIPermission::kVideoCapture, "videoCapture",
@@ -114,6 +126,8 @@ ExtensionsAPIPermissions::GetAllAliases() const {
   aliases.push_back(
       PermissionsProvider::AliasInfo("app.window.fullscreen.overrideEsc",
                                      kOldOverrideEscFullscreenPermission));
+  aliases.push_back(PermissionsProvider::AliasInfo(
+      "unlimitedStorage", kOldUnlimitedStoragePermission));
   return aliases;
 }
 

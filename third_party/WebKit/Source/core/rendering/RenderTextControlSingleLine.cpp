@@ -66,7 +66,7 @@ inline HTMLElement* RenderTextControlSingleLine::innerSpinButtonElement() const
     return toHTMLElement(inputElement()->userAgentShadowRoot()->getElementById(ShadowElementNames::spinButton()));
 }
 
-void RenderTextControlSingleLine::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+void RenderTextControlSingleLine::paint(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
     RenderTextControl::paint(paintInfo, paintOffset);
 
@@ -75,9 +75,9 @@ void RenderTextControlSingleLine::paint(PaintInfo& paintInfo, const LayoutPoint&
 
         // Center in the block progression direction.
         if (isHorizontalWritingMode())
-            contentsRect.setY((height() - contentsRect.height()) / 2);
+            contentsRect.setY((size().height() - contentsRect.height()) / 2);
         else
-            contentsRect.setX((width() - contentsRect.width()) / 2);
+            contentsRect.setX((size().width() - contentsRect.width()) / 2);
 
         // Convert the rect into the coords used for painting the content
         contentsRect.moveBy(paintOffset + location());
@@ -161,7 +161,7 @@ void RenderTextControlSingleLine::layout()
         RenderBlockFlow::layoutBlock(true);
 
     // Center the child block in the block progression direction (vertical centering for horizontal text fields).
-    if (!container && innerEditorRenderer && innerEditorRenderer->height() != contentLogicalHeight()) {
+    if (!container && innerEditorRenderer && innerEditorRenderer->size().height() != contentLogicalHeight()) {
         LayoutUnit logicalHeightDiff = innerEditorRenderer->logicalHeight() - contentLogicalHeight();
         innerEditorRenderer->setLogicalTop(innerEditorRenderer->logicalTop() - (logicalHeightDiff / 2 + layoutMod(logicalHeightDiff, 2)));
     } else
@@ -375,15 +375,23 @@ void RenderTextControlSingleLine::autoscroll(const IntPoint& position)
 
 LayoutUnit RenderTextControlSingleLine::scrollWidth() const
 {
-    if (innerEditorElement())
-        return innerEditorElement()->scrollWidth();
+    if (RenderBox* inner = innerEditorElement() ? innerEditorElement()->renderBox() : 0) {
+        // Adjust scrollWidth to inculde input element horizontal paddings and
+        // decoration width
+        LayoutUnit adjustment = clientWidth() - inner->clientWidth();
+        return innerEditorElement()->scrollWidth() + adjustment;
+    }
     return RenderBlockFlow::scrollWidth();
 }
 
 LayoutUnit RenderTextControlSingleLine::scrollHeight() const
 {
-    if (innerEditorElement())
-        return innerEditorElement()->scrollHeight();
+    if (RenderBox* inner = innerEditorElement() ? innerEditorElement()->renderBox() : 0) {
+        // Adjust scrollHeight to include input element vertical paddings and
+        // decoration height
+        LayoutUnit adjustment = clientHeight() - inner->clientHeight();
+        return innerEditorElement()->scrollHeight() + adjustment;
+    }
     return RenderBlockFlow::scrollHeight();
 }
 

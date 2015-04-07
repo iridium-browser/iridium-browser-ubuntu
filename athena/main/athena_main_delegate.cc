@@ -15,6 +15,7 @@
 #include "components/pdf/renderer/ppb_pdf_impl.h"
 #include "content/public/app/content_main.h"
 #include "content/public/browser/browser_thread.h"
+#include "extensions/common/switches.h"
 #include "extensions/shell/browser/desktop_controller.h"
 #include "extensions/shell/browser/shell_browser_main_delegate.h"
 #include "extensions/shell/browser/shell_content_browser_client.h"
@@ -23,7 +24,10 @@
 #include "extensions/shell/common/switches.h"
 #include "extensions/shell/renderer/shell_content_renderer_client.h"
 #include "ppapi/c/private/ppb_pdf.h"
+#include "ui/aura/window.h"
+#include "ui/aura/window_tree_host.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace athena {
 namespace {
@@ -40,8 +44,8 @@ class AthenaDesktopController : public extensions::DesktopController {
 
  private:
   // extensions::DesktopController:
-  virtual aura::WindowTreeHost* GetHost() override {
-    return athena::AthenaEnv::Get()->GetHost();
+  virtual gfx::Size GetWindowSize() override {
+    return athena::AthenaEnv::Get()->GetHost()->window()->bounds().size();
   }
 
   // Creates a new app window and adds it to the desktop. The desktop maintains
@@ -75,9 +79,9 @@ class AthenaBrowserMainDelegate : public extensions::ShellBrowserMainDelegate {
     base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
 
     base::FilePath app_dir = base::FilePath::FromUTF8Unsafe(
-        command_line->HasSwitch(extensions::switches::kAppShellAppPath)
+        command_line->HasSwitch(extensions::switches::kLoadApps)
             ? command_line->GetSwitchValueNative(
-                  extensions::switches::kAppShellAppPath)
+                  extensions::switches::kLoadApps)
             : kDefaultAppPath);
 
     base::FilePath app_absolute_dir = base::MakeAbsoluteFilePath(app_dir);

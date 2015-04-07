@@ -57,13 +57,12 @@ namespace blink {
 class WebApplicationCacheHost;
 class WebApplicationCacheHostClient;
 class WebCachedURLRequest;
-class WebCallback;
 class WebColorChooser;
 class WebColorChooserClient;
 class WebContentDecryptionModule;
 class WebCookieJar;
 class WebDataSource;
-class WebDOMEvent;
+class WebEncryptedMediaClient;
 class WebExternalPopupMenu;
 class WebExternalPopupMenuClient;
 class WebFormElement;
@@ -72,20 +71,15 @@ class WebMediaPlayer;
 class WebMediaPlayerClient;
 class WebMIDIClient;
 class WebNotificationPermissionCallback;
-class WebNotificationPresenter;
 class WebServiceWorkerProvider;
-class WebServiceWorkerProviderClient;
 class WebSocketHandle;
-class WebNode;
 class WebPlugin;
 class WebPluginPlaceholder;
+class WebPushClient;
 class WebRTCPeerConnectionHandler;
 class WebScreenOrientationClient;
-class WebSharedWorker;
-class WebSharedWorkerClient;
 class WebString;
 class WebURL;
-class WebURLLoader;
 class WebURLResponse;
 class WebUserMediaClient;
 class WebWorkerPermissionClientProxy;
@@ -95,7 +89,7 @@ struct WebContextMenuData;
 struct WebPluginParams;
 struct WebPopupMenuInfo;
 struct WebRect;
-struct WebSize;
+struct WebTransitionElementData;
 struct WebURLError;
 
 class WebFrameClient {
@@ -113,6 +107,7 @@ public:
     virtual WebMediaPlayer* createMediaPlayer(WebLocalFrame*, const WebURL&, WebMediaPlayerClient*, WebContentDecryptionModule*) { return 0; }
 
     // May return null.
+    // FIXME: remove once encryptedMediaClient() is used.
     virtual WebContentDecryptionModule* createContentDecryptionModule(WebLocalFrame*, const WebSecurityOrigin&, const WebString& keySystem) { return 0; }
 
     // May return null.
@@ -200,13 +195,19 @@ public:
     struct NavigationPolicyInfo {
         WebLocalFrame* frame;
         WebDataSource::ExtraData* extraData;
-        const WebURLRequest& urlRequest;
+
+        // Note: if browser side navigations are enabled, the client may modify
+        // the urlRequest. However, should this happen, the client should change
+        // the WebNavigationPolicy to WebNavigationPolicyIgnore, and the load
+        // should stop in blink. In all other cases, the urlRequest should not
+        // be modified.
+        WebURLRequest& urlRequest;
         WebNavigationType navigationType;
         WebNavigationPolicy defaultPolicy;
         bool isRedirect;
         bool isTransitionNavigation;
 
-        NavigationPolicyInfo(const WebURLRequest& urlRequest)
+        NavigationPolicyInfo(WebURLRequest& urlRequest)
             : frame(0)
             , extraData(0)
             , urlRequest(urlRequest)
@@ -254,7 +255,8 @@ public:
     virtual void didCreateDataSource(WebLocalFrame*, WebDataSource*) { }
 
     // A new provisional load has been started.
-    virtual void didStartProvisionalLoad(WebLocalFrame* localFrame, bool isTransitionNavigation) { }
+    virtual void didStartProvisionalLoad(WebLocalFrame* localFrame, bool isTransitionNavigation,
+        double triggeringEventTime) { }
 
     // The provisional load was redirected via a HTTP 3xx response.
     virtual void didReceiveServerRedirectForProvisionalLoad(WebLocalFrame*) { }
@@ -266,6 +268,9 @@ public:
     // response body has been received, and the encoding of the response
     // body is known.
     virtual void didCommitProvisionalLoad(WebLocalFrame*, const WebHistoryItem&, WebHistoryCommitType) { }
+
+    // The frame's document has just been initialized.
+    virtual void didCreateNewDocument(WebLocalFrame* frame) { }
 
     // The window object for the frame has been cleared of any extra
     // properties that may have been set by script from the previously
@@ -313,23 +318,18 @@ public:
     // Transition navigations -----------------------------------------------
 
     // Provides serialized markup of transition elements for use in the following navigation.
-    virtual void addNavigationTransitionData(const WebString& allowedDestinationOrigin, const WebString& selector, const WebString& markup) { }
-
+    virtual void addNavigationTransitionData(const WebTransitionElementData&) { }
 
     // Web Notifications ---------------------------------------------------
 
     // Requests permission to display platform notifications on the origin of this frame.
     virtual void requestNotificationPermission(const WebSecurityOrigin&, WebNotificationPermissionCallback* callback) { }
 
-    // Called to retrieve the provider of desktop notifications.
-    // FIXME: Remove this method once the presenter is obtained through Platform.
-    virtual WebNotificationPresenter* notificationPresenter() { return 0; }
-
 
     // Push API ---------------------------------------------------
 
-    // Requests permission to use the Push API in the origin of this frame.
-    virtual void requestPushPermission(WebCallback* callback) { }
+    // Used to access the embedder for the Push API.
+    virtual WebPushClient* pushClient() { return 0; }
 
 
     // Editing -------------------------------------------------------------
@@ -514,6 +514,11 @@ public:
     virtual WebUserMediaClient* userMediaClient() { return 0; }
 
 
+    // Encrypted Media -------------------------------------------------
+
+    virtual WebEncryptedMediaClient* encryptedMediaClient() { return 0; }
+
+
     // Web MIDI -------------------------------------------------------------
 
     virtual WebMIDIClient* webMIDIClient() { return 0; }
@@ -562,6 +567,7 @@ public:
     // Access the embedder API for (client-based) screen orientation client .
     virtual WebScreenOrientationClient* webScreenOrientationClient() { return 0; }
 
+
     // Accessibility -------------------------------------------------------
 
     // Notifies embedder about an accessibility event.
@@ -576,6 +582,7 @@ public:
         const WebAXObject& endObject,
         int endOffset) { }
 
+
     // ServiceWorker -------------------------------------------------------
 
     // Whether the document associated with WebDataSource is controlled by the
@@ -585,6 +592,17 @@ public:
     // Returns an identifier of the service worker controlling the document
     // associated with the WebDataSource.
     virtual int64_t serviceWorkerID(WebDataSource&) { return -1; }
+
+
+    // Fullscreen ----------------------------------------------------------
+
+    // Called to enter/exit fullscreen mode. If enterFullScreen returns true,
+    // then WebWidget::{will,Did}EnterFullScreen should bound resizing the
+    // WebWidget into fullscreen mode. Similarly, when exitFullScreen is
+    // called, WebWidget::{will,Did}ExitFullScreen should bound resizing the
+    // WebWidget out of fullscreen mode.
+    virtual bool enterFullscreen() { return false; }
+    virtual bool exitFullscreen() { return false; }
 
 protected:
     virtual ~WebFrameClient() { }

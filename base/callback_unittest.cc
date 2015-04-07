@@ -36,6 +36,8 @@ struct BindState<void(void), void(void), void(FakeInvoker)>
     : public BindStateBase {
  public:
   typedef FakeInvoker InvokerType;
+ private:
+  ~BindState() override {}
 };
 
 template <>
@@ -44,6 +46,8 @@ struct BindState<void(void), void(void),
     : public BindStateBase {
  public:
   typedef FakeInvoker InvokerType;
+ private:
+  ~BindState() override {}
 };
 }  // namespace internal
 
@@ -62,8 +66,7 @@ class CallbackTest : public ::testing::Test {
         callback_b_(new FakeBindState2()) {
   }
 
-  virtual ~CallbackTest() {
-  }
+  ~CallbackTest() override {}
 
  protected:
   Callback<void(void)> callback_a_;

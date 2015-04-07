@@ -29,6 +29,7 @@ class ASH_EXPORT DefaultSystemTrayDelegate : public SystemTrayDelegate {
   const base::string16 GetSupervisedUserManagerName() const override;
   const base::string16 GetSupervisedUserMessage() const override;
   bool IsUserSupervised() const override;
+  bool IsUserChild() const override;
   void GetSystemUpdateInfo(UpdateInfo* info) const override;
   base::HourClockType GetHourClockType() const override;
   void ShowSettings() override;
@@ -48,10 +49,6 @@ class ASH_EXPORT DefaultSystemTrayDelegate : public SystemTrayDelegate {
   void ShowEnterpriseInfo() override;
   void ShowSupervisedUserInfo() override;
   void ShowUserLogin() override;
-  bool ShowSpringChargerReplacementDialog() override;
-  bool IsSpringChargerReplacementDialogVisible() override;
-  bool HasUserConfirmedSafeSpringCharger() override;
-  void ShutDown() override;
   void SignOut() override;
   void RequestLockScreen() override;
   void RequestRestartForUpdate() override;

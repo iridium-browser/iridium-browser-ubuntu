@@ -35,6 +35,7 @@
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
 #include "core/html/HTMLElement.h"
+#include "core/page/Chrome.h"
 #include "core/page/Page.h"
 #include "core/plugins/PluginView.h"
 #include "core/rendering/RenderGeometryMap.h"
@@ -311,16 +312,20 @@ void ScrollingCoordinator::scrollableAreaScrollbarLayerDidChange(ScrollableArea*
     static const bool platformSupportsCoordinatedScrollbar = true;
     static const bool platformSupportsMainFrameOnly = true;
 #endif
-    if (!platformSupportsCoordinatedScrollbar)
-        return;
 
     bool isMainFrame = isForMainFrame(scrollableArea);
-    if (!isMainFrame && platformSupportsMainFrameOnly)
-        return;
-
     GraphicsLayer* scrollbarGraphicsLayer = orientation == HorizontalScrollbar
         ? scrollableArea->layerForHorizontalScrollbar()
         : scrollableArea->layerForVerticalScrollbar();
+
+    bool shouldCreateCoordinatedScrollbar = platformSupportsCoordinatedScrollbar && !(platformSupportsMainFrameOnly && !isMainFrame);
+    if (!shouldCreateCoordinatedScrollbar) {
+        if (scrollbarGraphicsLayer) {
+            WebLayer* scrollbarLayer = toWebLayer(scrollbarGraphicsLayer);
+            scrollbarLayer->setShouldScrollOnMainThread(true);
+        }
+        return;
+    }
 
     if (scrollbarGraphicsLayer) {
         Scrollbar* scrollbar = orientation == HorizontalScrollbar ? scrollableArea->horizontalScrollbar() : scrollableArea->verticalScrollbar();
@@ -368,7 +373,16 @@ bool ScrollingCoordinator::scrollableAreaScrollLayerDidChange(ScrollableArea* sc
     WebLayer* containerLayer = toWebLayer(scrollableArea->layerForContainer());
     if (webLayer) {
         webLayer->setScrollClipLayer(containerLayer);
-        webLayer->setScrollPositionDouble(DoublePoint(scrollableArea->scrollPositionDouble() - scrollableArea->minimumScrollPosition()));
+        // Non-layered Viewport constrained objects, e.g. fixed position elements, are
+        // positioned in Blink using integer coordinates. In that case, we don't want
+        // to set the WebLayer's scroll position at fractional precision otherwise the
+        // WebLayer's position after snapping to device pixel can be off with regard to
+        // fixed position elements.
+        if (m_lastMainThreadScrollingReasons & ScrollingCoordinator::HasNonLayerViewportConstrainedObjects)
+            webLayer->setScrollPositionDouble(DoublePoint(scrollableArea->scrollPosition() - scrollableArea->minimumScrollPosition()));
+        else
+            webLayer->setScrollPositionDouble(DoublePoint(scrollableArea->scrollPositionDouble() - scrollableArea->minimumScrollPosition()));
+
         webLayer->setBounds(scrollableArea->contentsSize());
         bool canScrollX = scrollableArea->userInputScrollable(HorizontalScrollbar);
         bool canScrollY = scrollableArea->userInputScrollable(VerticalScrollbar);
@@ -384,6 +398,10 @@ bool ScrollingCoordinator::scrollableAreaScrollLayerDidChange(ScrollableArea* sc
         if (verticalScrollbarLayer)
             setupScrollbarLayer(verticalScrollbarLayer, scrollbarLayer, webLayer, containerLayer);
     }
+
+    // Update the viewport layer registration if the outer viewport may have changed.
+    if (m_page->settings().rootLayerScrolls() && isForRootLayer(scrollableArea))
+        m_page->chrome().registerViewportLayers();
 
     return !!webLayer;
 }
@@ -543,7 +561,6 @@ void ScrollingCoordinator::reset()
     m_layersWithTouchRects.clear();
     m_wasFrameScrollable = false;
 
-    // This is retained for testing.
     m_lastMainThreadScrollingReasons = 0;
     setShouldUpdateScrollLayerPositionOnMainThread(m_lastMainThreadScrollingReasons);
 }
@@ -853,18 +870,32 @@ void ScrollingCoordinator::frameViewFixedObjectsDidChange(FrameView* frameView)
     m_shouldScrollOnMainThreadDirty = true;
 }
 
+bool ScrollingCoordinator::isForRootLayer(ScrollableArea* scrollableArea) const
+{
+    if (!m_page->mainFrame()->isLocalFrame())
+        return false;
+
+    // FIXME(305811): Refactor for OOPI.
+    RenderView* renderView = m_page->deprecatedLocalMainFrame()->view()->renderView();
+    return renderView ? scrollableArea == renderView->layer()->scrollableArea() : false;
+}
+
 bool ScrollingCoordinator::isForMainFrame(ScrollableArea* scrollableArea) const
 {
     if (!m_page->mainFrame()->isLocalFrame())
         return false;
 
+    // FIXME(305811): Refactor for OOPI.
     return scrollableArea == m_page->deprecatedLocalMainFrame()->view();
 }
 
 bool ScrollingCoordinator::isForViewport(ScrollableArea* scrollableArea) const
 {
-    return isForMainFrame(scrollableArea)
-        || scrollableArea == &m_page->frameHost().pinchViewport();
+    bool isForOuterViewport = m_page->settings().rootLayerScrolls() ?
+        isForRootLayer(scrollableArea) :
+        isForMainFrame(scrollableArea);
+
+    return isForOuterViewport || scrollableArea == &m_page->frameHost().pinchViewport();
 }
 
 void ScrollingCoordinator::frameViewRootLayerDidChange(FrameView* frameView)
@@ -934,8 +965,7 @@ MainThreadScrollingReasons ScrollingCoordinator::mainThreadScrollingReasons() co
 {
     MainThreadScrollingReasons reasons = static_cast<MainThreadScrollingReasons>(0);
 
-    // FIXME: make threaded scrolling work correctly with rootLayerScrolls.
-    if (!m_page->settings().threadedScrollingEnabled() || m_page->settings().rootLayerScrolls())
+    if (!m_page->settings().threadedScrollingEnabled())
         reasons |= ThreadedScrollingDisabled;
 
     if (!m_page->mainFrame()->isLocalFrame())
@@ -968,8 +998,6 @@ String ScrollingCoordinator::mainThreadScrollingReasonsAsText(MainThreadScrollin
 
     if (reasons & ScrollingCoordinator::HasSlowRepaintObjects)
         stringBuilder.appendLiteral("Has slow repaint objects, ");
-    if (reasons & ScrollingCoordinator::HasViewportConstrainedObjectsWithoutSupportingFixedLayers)
-        stringBuilder.appendLiteral("Has viewport constrained objects without supporting fixed layers, ");
     if (reasons & ScrollingCoordinator::HasNonLayerViewportConstrainedObjects)
         stringBuilder.appendLiteral("Has non-layer viewport-constrained objects, ");
     if (reasons & ScrollingCoordinator::ThreadedScrollingDisabled)

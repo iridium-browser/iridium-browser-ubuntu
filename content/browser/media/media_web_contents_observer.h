@@ -14,7 +14,6 @@ namespace content {
 
 class BrowserCdmManager;
 class BrowserMediaPlayerManager;
-class RenderViewHost;
 
 // This class manages all RenderFrame based media related managers at the
 // browser side. It receives IPC messages from media RenderFrameObservers and
@@ -22,15 +21,15 @@ class RenderViewHost;
 // for sending IPCs back to the RenderFrameObservers at the render side.
 class CONTENT_EXPORT MediaWebContentsObserver : public WebContentsObserver {
  public:
-  explicit MediaWebContentsObserver(RenderViewHost* render_view_host);
-  virtual ~MediaWebContentsObserver();
+  explicit MediaWebContentsObserver(WebContents* web_contents);
+  ~MediaWebContentsObserver() override;
 
   // WebContentsObserver implementations.
-  virtual void RenderFrameDeleted(RenderFrameHost* render_frame_host) override;
+  void RenderFrameDeleted(RenderFrameHost* render_frame_host) override;
 
 #if defined(OS_ANDROID)
-  virtual bool OnMessageReceived(const IPC::Message& message,
-                                 RenderFrameHost* render_frame_host) override;
+  bool OnMessageReceived(const IPC::Message& message,
+                         RenderFrameHost* render_frame_host) override;
 
   // Helper functions to handle media player IPC messages. Returns whether the
   // |message| is handled in the function.

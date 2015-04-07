@@ -45,32 +45,32 @@ mstscax.dll!*
 # private symbols so may need to be updated when we switch to auto-loading PDBs
 
 UNADDRESSABLE ACCESS
-name=http://code.google.com/p/drmemory/issues/detail?id=12 UNADDR
+name=https://github.com/DynamoRIO/drmemory/issues/12 UNADDR
 ...
 SHELL32.dll!SHFileOperation*
 
 UNADDRESSABLE ACCESS
-name=http://code.google.com/p/drmemory/issues/detail?id=40 UNADDR
+name=https://github.com/DynamoRIO/drmemory/issues/40 UNADDR
 ...
 WINSPOOL.DRV!*
 
 INVALID HEAP ARGUMENT
-name=http://code.google.com/p/drmemory/issues/detail?id=40 INVALID HEAP
+name=https://github.com/DynamoRIO/drmemory/issues/40 INVALID HEAP
 ...
 WINSPOOL.DRV!*
 
 UNADDRESSABLE ACCESS
-name=http://code.google.com/p/drmemory/issues/detail?id=59
+name=https://github.com/DynamoRIO/drmemory/issues/59
 ...
 *!SetEnvironmentVariable*
 
 UNADDRESSABLE ACCESS
-name=http://code.google.com/p/drmemory/issues/detail?id=68 (UNADDR 1)
+name=https://github.com/DynamoRIO/drmemory/issues/68 (UNADDR 1)
 ...
 MSWSOCK.dll!WSPStartup
 
 UNADDRESSABLE ACCESS
-name=http://code.google.com/p/drmemory/issues/detail?id=68 (UNADDR 2)
+name=https://github.com/DynamoRIO/drmemory/issues/68 (UNADDR 2)
 ...
 ntdll.dll!RtlValidateUnicodeString
 
@@ -132,7 +132,7 @@ base_unittests.exe!operator new
 base_unittests.exe!operator new[]
 base_unittests.exe!base::ToolsSanityTest_MemoryLeak_Test::TestBody
 
-# "..." is needed due to http://code.google.com/p/drmemory/issues/detail?id=666
+# "..." is needed due to https://github.com/DynamoRIO/drmemory/issues/666
 UNADDRESSABLE ACCESS
 name=sanity test 02 (malloc/read left)
 base_unittests.exe!*ReadValueOutOfArrayBoundsLeft
@@ -157,7 +157,7 @@ base_unittests.exe!*WriteValueOutOfArrayBoundsRight
 base_unittests.exe!*MakeSomeErrors
 base_unittests.exe!base::ToolsSanityTest_AccessesToMallocMemory_Test::TestBody
 
-# "..." is needed due to http://code.google.com/p/drmemory/issues/detail?id=666
+# "..." is needed due to https://github.com/DynamoRIO/drmemory/issues/666
 UNADDRESSABLE ACCESS
 name=sanity test 06 (new/read left)
 base_unittests.exe!*ReadValueOutOfArrayBoundsLeft
@@ -252,7 +252,7 @@ instruction=prefetch*
 igdumd32.dll!*
 
 UNADDRESSABLE ACCESS
-name=http://code.google.com/p/drmemory/issues/detail?id=582 bizarre cl-generated read-beyond-TOS
+name=https://github.com/DynamoRIO/drmemory/issues/582 bizarre cl-generated read-beyond-TOS
 instruction=mov    0xfffffffc(%esp) -> %eax
 chrome.dll!blink::RenderStyle::resetBorder*
 
@@ -271,7 +271,7 @@ name=http://crbug.com/101717 (3)
 *!sandbox::GetPathFromHandle
 
 GDI USAGE ERROR
-name=http://code.google.com/p/drmemory/issues/detail?id=899 deleting bitmap which is probably safe
+name=https://github.com/DynamoRIO/drmemory/issues/899 deleting bitmap which is probably safe
 system call NtGdiDeleteObjectApp
 *!skia::`anonymous namespace'::Bitmap::~Bitmap
 *!skia::`anonymous namespace'::Bitmap::`scalar deleting destructor'
@@ -325,7 +325,7 @@ GDI USAGE ERROR
 name=http://crbug.com/119552 c
 # optional gdi32.dll frame followed by user32.dll
 # TODO(bruening): once have
-# http://code.google.com/p/drmemory/issues/detail?id=846
+# https://github.com/DynamoRIO/drmemory/issues/846
 # I would do "gdi32.dll!...\nuser32.dll!*"
 *32.dll!*
 ...
@@ -462,7 +462,7 @@ name=http://crbug.com/371348
 system call NtCreateSection
 KERNELBASE.dll!CreateFileMappingW
 base.dll!base::SharedMemory::Create
-base.dll!base::SharedMemory::CreateAndMapAnonymous
+base.dll!base::SharedMemory::CreateAnonymous
 content.dll!content::ChildThread::AllocateSharedMemory
 content.dll!content::ChildSharedBitmapManager::AllocateSharedBitmap
 cc.dll!cc::ResourceProvider::CreateBitmap
@@ -525,7 +525,7 @@ system call NtGdiCreateCompatibleDC
 *!blink::RenderBlock::layout
 
 HANDLE LEAK
-name=https://code.google.com/p/drmemory/issues/detail?id=1545
+name=https://github.com/DynamoRIO/drmemory/issues/1545
 system call NtGdiCreateCompatibleDC
 GDI32.dll!CreateCompatibleDC
 skia.dll!LogFontTypeface::onGetTableData
@@ -549,15 +549,6 @@ system call NtCreate*
 *!base::Thread::Run
 *!content::BrowserThreadImpl::CacheThreadRun
 *!content::BrowserThreadImpl::Run
-
-UNADDRESSABLE ACCESS
-name=http://crbug.com/379204
-...
-*!WTF::MessageQueue<>::waitForMessageWithTimeout
-*!blink::WorkerRunLoop::run
-*!blink::WorkerRunLoop::run
-*!blink::WorkerThread::workerThread
-*!WTF::threadEntryPoint
 
 GDI USAGE ERROR
 name=379774
@@ -612,9 +603,9 @@ name=http://crbug.com/313788
 
 # This suppression is deliberately general, as bugs reported in
 # v8 generated code are difficult to track down. Xref Dr. Memory issue
-# https://code.google.com/p/drmemory/issues/detail?id=1582
+# https://github.com/DynamoRIO/drmemory/issues/1582
 UNADDRESSABLE ACCESS
-name=https://code.google.com/p/drmemory/issues/detail?id=1582
+name=https://github.com/DynamoRIO/drmemory/issues/1582
 ...
 *!v8::internal::Invoke
 *!v8::internal::Execution::Call
@@ -632,7 +623,11 @@ KERNEL32.dll!CreateWaitableTimerW
 *!content::RenderViewHostImpl::CreateRenderView
 
 UNADDRESSABLE ACCESS
-name=http://code.google.com/p/dynamorio/issues/detail?id=1443
+name=https://github.com/DynamoRIO/dynamorio/issues/1443
+dynamorio.dll!*
+
+UNINITIALIZED READ
+name=https://github.com/DynamoRIO/dynamorio/issues/1443 (another instance)
 dynamorio.dll!*
 
 UNADDRESSABLE ACCESS
@@ -667,3 +662,50 @@ blink_web.dll!blink::FrameView::removeFromAXObjectCache
 blink_web.dll!blink::FrameView::prepareForDetach
 blink_web.dll!blink::LocalFrame::setView
 blink_web.dll!blink::FrameTree::~FrameTree
+
+UNADDRESSABLE ACCESS
+name=http://crbug.com/432070
+blink_web.dll!blink::Frame::detach
+content.dll!content::RenderFrameProxy::OnDeleteProxy
+content.dll!content::RenderFrameProxy::OnMessageReceived
+content.dll!content::MessageRouter::RouteMessage
+
+HANDLE LEAK
+name=http://crbug.com/441785
+system call NtCreateSection
+*!CreateFileMappingW
+*!base::SharedMemory::Create
+*!base::SharedMemory::CreateAnonymous
+*!content::ChildThread::AllocateSharedMemory
+*!content::ChildSharedBitmapManager::AllocateSharedMemoryBitmap
+*!content::ChildSharedBitmapManager::AllocateSharedBitmap
+*!cc::ResourceProvider::CreateBitmap
+*!cc::ResourceProvider::Create*Resource
+
+UNADDRESSABLE ACCESS
+name=http://crbug.com/445836_a
+...
+content.dll!content::RenderFrameImpl::~RenderFrameImpl
+content.dll!content::RenderFrameImpl::`vector deleting destructor'
+content.dll!content::RenderViewImpl::~RenderViewImpl
+content.dll!content::RenderViewImpl::`vector deleting destructor'
+content.dll!base::internal::BindState<>::`scalar deleting destructor'
+base.dll!scoped_refptr<>::Release
+base.dll!base::internal::CallbackBase::~CallbackBase
+
+INVALID HEAP ARGUMENT
+name=http://crbug.com/445836_b
+drmemorylib.dll!replace_operator_delete
+ipc.dll!IPC::Listener::`vector deleting destructor'
+content.dll!content::RenderFrameImpl::~RenderFrameImpl
+content.dll!content::RenderFrameImpl::`vector deleting destructor'
+content.dll!content::RenderViewImpl::~RenderViewImpl
+content.dll!content::RenderViewImpl::`vector deleting destructor'
+content.dll!base::internal::BindState<>::`scalar deleting destructor'
+base.dll!scoped_refptr<>::Release
+base.dll!base::internal::CallbackBase::~CallbackBase
+
+UNADDRESSABLE ACCESS
+name=https://crbug.com/447788
+...
+*!gpu::gles2::GLES2ImplementationTest_TexImage3DSingleCommand_Test::TestBody

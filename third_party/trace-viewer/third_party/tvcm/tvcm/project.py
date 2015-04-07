@@ -1,7 +1,9 @@
 # Copyright 2013 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+import collections
 import os
+import cStringIO
 
 from tvcm import resource as resource_module
 from tvcm import resource_loader
@@ -98,10 +100,7 @@ class Project(object):
   tvcm_path = os.path.abspath(os.path.join(
       os.path.dirname(__file__), '..'))
 
-  tvcm_src_path = os.path.abspath(os.path.join(
-      tvcm_path, 'src'))
-
-  def __init__(self, source_paths=None, include_tvcm_paths=True, non_module_html_files=None):
+  def __init__(self, source_paths=None, non_module_html_files=None):
     """
     source_paths: A list of top-level directories in which modules and raw scripts can be found.
         Module paths are relative to these directories.
@@ -110,9 +109,6 @@ class Project(object):
     self._frozen = False
     self.source_paths = AbsFilenameList(self._WillPartOfPathChange)
     self.non_module_html_files = AbsFilenameList(self._WillPartOfPathChange)
-
-    if include_tvcm_paths:
-      self.source_paths.append(self.tvcm_src_path)
 
     if source_paths != None:
       self.source_paths.extend(source_paths)
@@ -131,7 +127,6 @@ class Project(object):
   @staticmethod
   def FromDict(d):
     return Project(d['source_paths'],
-                   include_tvcm_paths=False,
                    non_module_html_files=d.get('non_module_html_files', None))
 
   def AsDict(self):
@@ -204,3 +199,93 @@ class Project(object):
     for m in modules:
       m.ComputeLoadSequenceRecursive(load_sequence, already_loaded_set)
     return load_sequence
+
+  def GetDepsGraphFromModuleNames(self, module_names):
+    modules = [self.loader.LoadModule(module_name=name) for
+               name in module_names]
+    return self.GetDepsGraphFromModules(modules)
+
+  def GetDepsGraphFromModules(self, modules):
+    load_sequence = self.CalcLoadSequenceForModules(modules)
+    g = _Graph()
+    for m in load_sequence:
+      g.AddModule(m)
+
+      for dep in m.dependent_modules:
+        g.AddEdge(m, dep.id)
+
+
+    return _GetGraph(load_sequence)
+
+  def GetDominatorGraphForModulesNamed(self, module_names, load_sequence=None):
+    modules = [self.loader.LoadModule(module_name=name) for
+           name in module_names]
+    return self.GetDominatorGraphForModules(modules, load_sequence)
+
+  def GetDominatorGraphForModules(self, start_modules, load_sequence=None):
+    # Load all modules
+    if load_sequence == None:
+      load_sequence = self.CalcLoadSequenceForAllModules()
+
+    modules_by_id = {}
+    for m in load_sequence:
+      modules_by_id[m.id] = m
+
+    # Module referrers goes module
+    module_referrers = collections.defaultdict(list)
+    for m in load_sequence:
+      for dep in m.dependent_modules:
+        module_referrers[dep].append(m)
+
+    # Now start at the top module and reverse
+    visited = set()
+    g = _Graph()
+
+    pending = collections.deque()
+    pending.extend(start_modules)
+    while len(pending):
+      cur = pending.pop()
+
+      g.AddModule(cur)
+      visited.add(cur)
+
+      for out_dep in module_referrers[cur]:
+        if out_dep in visited:
+          continue
+        g.AddEdge(out_dep, cur)
+        visited.add(out_dep)
+        pending.append(out_dep)
+
+    # Visited -> Dot
+    return g.GetDot()
+
+class _Graph(object):
+  def __init__(self):
+    self.nodes = []
+    self.edges = []
+
+  def AddModule(self, m):
+    f = cStringIO.StringIO()
+    m.AppendJSContentsToFile(f, False, None)
+
+    attrs = {
+      "label": "%s (%i)" % (m.name, f.tell())
+    };
+
+    f.close()
+
+    attr_items = ['%s="%s"' % (x,y) for x,y in attrs.iteritems()]
+    node = "M%i [%s];" % (m.id, ','.join(attr_items))
+    self.nodes.append(node)
+
+  def AddEdge(self, mFrom, mTo):
+    edge = "M%i -> M%i;" % (mFrom.id, mTo.id);
+    self.edges.append(edge)
+
+  def GetDot(self):
+    return """digraph deps {
+%s
+
+%s
+}
+""" % ('\n'.join(self.nodes), '\n'.join(self.edges))

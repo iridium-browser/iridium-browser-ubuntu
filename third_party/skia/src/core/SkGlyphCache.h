@@ -84,10 +84,6 @@ public:
         this will trigger that.
     */
     const SkPath* findPath(const SkGlyph&);
-    /** Return the distance field associated with the glyph. If it has not been generated
-     this will trigger that.
-     */
-    const void* findDistanceField(const SkGlyph&);
 
     /** Return the vertical metrics for this strike.
     */
@@ -248,9 +244,9 @@ protected:
     SkAutoGlyphCacheBase(SkTypeface* typeface, const SkDescriptor* desc) {
         fCache = SkGlyphCache::DetachCache(typeface, desc);
     }
-    SkAutoGlyphCacheBase(const SkPaint& paint,
-                         const SkDeviceProperties* deviceProperties,
-                         const SkMatrix* matrix) {
+    SkAutoGlyphCacheBase(const SkPaint& /*paint*/,
+                         const SkDeviceProperties* /*deviceProperties*/,
+                         const SkMatrix* /*matrix*/) {
         fCache = NULL;
     }
     SkAutoGlyphCacheBase() {

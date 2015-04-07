@@ -41,7 +41,7 @@ namespace views {
 
 class NativeWidget;
 class NonClientFrameView;
-class ViewsTouchSelectionControllerFactory;
+class ViewsTouchEditingControllerFactory;
 class View;
 class Widget;
 namespace internal {
@@ -95,6 +95,8 @@ class VIEWS_EXPORT ViewsDelegate {
 #if defined(OS_WIN)
   // Retrieves the default window icon to use for windows if none is specified.
   virtual HICON GetDefaultWindowIcon() const;
+  // Retrieves the small window icon to use for windows if none is specified.
+  virtual HICON GetSmallWindowIcon() const = 0;
   // Returns true if the window passed in is in the Windows 8 metro
   // environment.
   virtual bool IsWindowInMetro(gfx::NativeWindow window) const;
@@ -130,10 +132,8 @@ class VIEWS_EXPORT ViewsDelegate {
   // maximized windows; otherwise to restored windows.
   virtual bool WindowManagerProvidesTitleBar(bool maximized);
 
-#if defined(USE_AURA)
   // Returns the context factory for new windows.
   virtual ui::ContextFactory* GetContextFactory();
-#endif
 
 #if defined(OS_WIN)
   // Starts a query for the appbar autohide edges of the specified monitor and
@@ -150,7 +150,7 @@ class VIEWS_EXPORT ViewsDelegate {
   static ViewsDelegate* views_delegate;
 
  private:
-  scoped_ptr<ViewsTouchSelectionControllerFactory> views_tsc_factory_;
+  scoped_ptr<ViewsTouchEditingControllerFactory> views_tsc_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ViewsDelegate);
 };

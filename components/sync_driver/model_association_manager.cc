@@ -56,13 +56,15 @@ static const syncer::ModelType kStartOrder[] = {
   syncer::FAVICON_TRACKING,
   syncer::SUPERVISED_USER_SETTINGS,
   syncer::SUPERVISED_USER_SHARED_SETTINGS,
+  syncer::SUPERVISED_USER_WHITELISTS,
   syncer::ARTICLES,
   syncer::WIFI_CREDENTIALS,
 };
 
-COMPILE_ASSERT(arraysize(kStartOrder) ==
-               syncer::MODEL_TYPE_COUNT - syncer::FIRST_REAL_MODEL_TYPE,
-               kStartOrder_IncorrectSize);
+static_assert(arraysize(kStartOrder) ==
+              syncer::MODEL_TYPE_COUNT - syncer::FIRST_REAL_MODEL_TYPE,
+              "kStartOrder must have MODEL_TYPE_COUNT - "
+              "FIRST_REAL_MODEL_TYPE elements");
 
 // The amount of time we wait for association to finish. If some types haven't
 // finished association by the time, DataTypeManager is notified of the

@@ -24,6 +24,12 @@ public:
     void clear();
 
     const WillBeHeapVector<RefPtrWillBeMember<Interpolation> >& interpolations() const { return *m_interpolations; }
+#if ENABLE(OILPAN)
+    RawPtr<WillBeHeapVector<RefPtrWillBeMember<Interpolation>>> mutableInterpolations() { return m_interpolations.get(); }
+#else
+    PassOwnPtr<WillBeHeapVector<RefPtrWillBeMember<Interpolation>>> mutableInterpolations() { return m_interpolations.release(); }
+#endif
+
     void setInterpolations(PassOwnPtrWillBeRawPtr<WillBeHeapVector<RefPtrWillBeMember<Interpolation> > > interpolations) { m_interpolations = interpolations; }
 
     Animation* animation() const { return m_animation; }
@@ -41,11 +47,11 @@ private:
 #if !ENABLE(OILPAN)
     RefPtr<AnimationPlayer> m_player;
 #endif
-    OwnPtrWillBeMember<WillBeHeapVector<RefPtrWillBeMember<Interpolation> > > m_interpolations;
+    OwnPtrWillBeMember<WillBeHeapVector<RefPtrWillBeMember<Interpolation>>> m_interpolations;
     const unsigned m_sequenceNumber;
     Animation::Priority m_priority;
 };
 
 } // namespace blink
 
-#endif
+#endif // SampledEffect_h

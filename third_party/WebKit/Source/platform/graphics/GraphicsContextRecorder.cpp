@@ -56,7 +56,7 @@ GraphicsContext* GraphicsContextRecorder::record(const IntSize& size, bool isCer
     m_isCertainlyOpaque = isCertainlyOpaque;
     m_recorder = adoptPtr(new SkPictureRecorder);
     SkCanvas* canvas = m_recorder->beginRecording(size.width(), size.height(), 0, 0);
-    m_context = adoptPtr(new GraphicsContext(canvas));
+    m_context = adoptPtr(new GraphicsContext(canvas, nullptr));
     m_context->setRegionTrackingMode(isCertainlyOpaque ? GraphicsContext::RegionTrackingOpaque : GraphicsContext::RegionTrackingDisabled);
     m_context->setCertainlyOpaque(isCertainlyOpaque);
     return m_context.get();
@@ -89,27 +89,46 @@ static bool decodeBitmap(const void* data, size_t length, SkBitmap* result)
     return true;
 }
 
-PassRefPtr<GraphicsContextSnapshot> GraphicsContextSnapshot::load(const char* data, size_t size)
+PassRefPtr<GraphicsContextSnapshot> GraphicsContextSnapshot::load(const Vector<RefPtr<TilePictureStream> >& tiles)
 {
-    SkMemoryStream stream(data, size);
-    RefPtr<SkPicture> picture = adoptRef(SkPicture::CreateFromStream(&stream, decodeBitmap));
-    if (!picture)
-        return nullptr;
-    return adoptRef(new GraphicsContextSnapshot(picture));
+    ASSERT(!tiles.isEmpty());
+    Vector<RefPtr<SkPicture> > pictures;
+    pictures.reserveCapacity(tiles.size());
+    FloatRect unionRect;
+    for (const auto& tileStream : tiles) {
+        SkMemoryStream stream(tileStream->data.begin(), tileStream->data.size());
+        RefPtr<SkPicture> picture = adoptRef(SkPicture::CreateFromStream(&stream, decodeBitmap));
+        if (!picture)
+            return nullptr;
+        FloatRect cullRect(picture->cullRect());
+        cullRect.moveBy(tileStream->layerOffset);
+        unionRect.unite(cullRect);
+        pictures.append(picture);
+    }
+    if (tiles.size() == 1)
+        return adoptRef(new GraphicsContextSnapshot(pictures[0]));
+    SkPictureRecorder recorder;
+    SkCanvas* canvas = recorder.beginRecording(unionRect.width(), unionRect.height(), 0, 0);
+    for (size_t i = 0; i < pictures.size(); ++i) {
+        canvas->save();
+        canvas->translate(tiles[i]->layerOffset.x() - unionRect.x(), tiles[i]->layerOffset.y() - unionRect.y());
+        pictures[i]->playback(canvas, 0);
+        canvas->restore();
+    }
+    return adoptRef(new GraphicsContextSnapshot(adoptRef(recorder.endRecordingAsPicture())));
 }
 
 PassOwnPtr<Vector<char> > GraphicsContextSnapshot::replay(unsigned fromStep, unsigned toStep, double scale) const
 {
-    int width = ceil(scale * m_picture->width());
-    int height = ceil(scale * m_picture->height());
+    const SkIRect bounds = m_picture->cullRect().roundOut();
     SkBitmap bitmap;
-    bitmap.allocPixels(SkImageInfo::MakeN32Premul(width, height));
+    bitmap.allocPixels(SkImageInfo::MakeN32Premul(bounds.width(), bounds.height()));
     bitmap.eraseARGB(0, 0, 0, 0);
     {
         ReplayingCanvas canvas(bitmap, fromStep, toStep);
         canvas.scale(scale, scale);
         canvas.resetStepCount();
-        m_picture->draw(&canvas, &canvas);
+        m_picture->playback(&canvas, &canvas);
     }
     OwnPtr<Vector<char> > base64Data = adoptPtr(new Vector<char>());
     Vector<char> encodedImage;
@@ -119,13 +138,13 @@ PassOwnPtr<Vector<char> > GraphicsContextSnapshot::replay(unsigned fromStep, uns
     return base64Data.release();
 }
 
-PassOwnPtr<GraphicsContextSnapshot::Timings> GraphicsContextSnapshot::profile(unsigned minRepeatCount, double minDuration) const
+PassOwnPtr<GraphicsContextSnapshot::Timings> GraphicsContextSnapshot::profile(unsigned minRepeatCount, double minDuration, const FloatRect* clipRect) const
 {
     OwnPtr<GraphicsContextSnapshot::Timings> timings = adoptPtr(new GraphicsContextSnapshot::Timings());
     timings->reserveCapacity(minRepeatCount);
+    const SkIRect bounds = m_picture->cullRect().roundOut();
     SkBitmap bitmap;
-    bitmap.allocPixels(SkImageInfo::MakeN32Premul(m_picture->width(), m_picture->height()));
-    OwnPtr<ProfilingCanvas> canvas = adoptPtr(new ProfilingCanvas(bitmap));
+    bitmap.allocPixels(SkImageInfo::MakeN32Premul(bounds.width(), bounds.height()));
 
     double now = WTF::monotonicallyIncreasingTime();
     double stopTime = now + minDuration;
@@ -134,10 +153,11 @@ PassOwnPtr<GraphicsContextSnapshot::Timings> GraphicsContextSnapshot::profile(un
         Vector<double>* currentTimings = &timings->last();
         if (timings->size() > 1)
             currentTimings->reserveCapacity(timings->begin()->size());
-        if (step)
-            canvas = adoptPtr(new ProfilingCanvas(bitmap));
-        canvas->setTimings(currentTimings);
-        m_picture->draw(canvas.get());
+        ProfilingCanvas canvas(bitmap);
+        if (clipRect)
+            canvas.clipRect(SkRect::MakeXYWH(clipRect->x(), clipRect->y(), clipRect->width(), clipRect->height()));
+        canvas.setTimings(currentTimings);
+        m_picture->playback(&canvas);
         now = WTF::monotonicallyIncreasingTime();
     }
     return timings.release();
@@ -145,8 +165,9 @@ PassOwnPtr<GraphicsContextSnapshot::Timings> GraphicsContextSnapshot::profile(un
 
 PassRefPtr<JSONArray> GraphicsContextSnapshot::snapshotCommandLog() const
 {
-    LoggingCanvas canvas(m_picture->width(), m_picture->height());
-    m_picture->draw(&canvas);
+    const SkIRect bounds = m_picture->cullRect().roundOut();
+    LoggingCanvas canvas(bounds.width(), bounds.height());
+    m_picture->playback(&canvas);
     return canvas.log();
 }
 

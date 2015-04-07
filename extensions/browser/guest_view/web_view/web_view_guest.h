@@ -37,6 +37,7 @@ class WebViewGuest : public GuestView<WebViewGuest>,
                      public content::NotificationObserver {
  public:
   static GuestViewBase* Create(content::BrowserContext* browser_context,
+                               content::WebContents* owner_web_contents,
                                int guest_instance_id);
 
   // For WebViewGuest, we create special guest processes, which host the
@@ -56,6 +57,12 @@ class WebViewGuest : public GuestView<WebViewGuest>,
   static int GetViewInstanceId(content::WebContents* contents);
 
   static const char Type[];
+
+  // Return the stored rules registry ID of the given webview. Will generate
+  // an ID for the first query.
+  static int GetOrGenerateRulesRegistryID(
+      int embedder_process_id,
+      int web_view_instance_id);
 
   // Request navigating the guest to the provided |src| URL.
   void NavigateGuest(const std::string& src, bool force_navigation);
@@ -86,10 +93,7 @@ class WebViewGuest : public GuestView<WebViewGuest>,
   // GuestViewBase implementation.
   const char* GetAPINamespace() const override;
   int GetTaskPrefix() const override;
-  void CreateWebContents(const std::string& embedder_extension_id,
-                         int embedder_render_process_id,
-                         const GURL& embedder_site_url,
-                         const base::DictionaryValue& create_params,
+  void CreateWebContents(const base::DictionaryValue& create_params,
                          const WebContentsCreatedCallback& callback) override;
   void DidAttachToEmbedder() override;
   void DidInitialize() override;
@@ -136,7 +140,8 @@ class WebViewGuest : public GuestView<WebViewGuest>,
                    const GURL& url,
                    const std::string& request_method,
                    const base::Callback<void(bool)>& callback) override;
-  content::JavaScriptDialogManager* GetJavaScriptDialogManager() override;
+  content::JavaScriptDialogManager* GetJavaScriptDialogManager(
+      content::WebContents* source) override;
   content::ColorChooser* OpenColorChooser(
       content::WebContents* web_contents,
       SkColor color,
@@ -169,7 +174,7 @@ class WebViewGuest : public GuestView<WebViewGuest>,
                const content::NotificationDetails& details) override;
 
   // Returns the current zoom factor.
-  double GetZoom();
+  double zoom() const { return current_zoom_factor_; }
 
   // Begin or continue a find request.
   void StartFinding(const base::string16& search_text,
@@ -236,7 +241,9 @@ class WebViewGuest : public GuestView<WebViewGuest>,
 
  private:
   friend class WebViewPermissionHelper;
+
   WebViewGuest(content::BrowserContext* browser_context,
+               content::WebContents* owner_web_contents,
                int guest_instance_id);
 
   ~WebViewGuest() override;
@@ -313,7 +320,8 @@ class WebViewGuest : public GuestView<WebViewGuest>,
 
   bool HandleKeyboardShortcuts(const content::NativeWebKeyboardEvent& event);
 
-  void SetUpAutoSize();
+  // Identifies the set of rules registries belonging to this guest.
+  int rules_registry_id_;
 
   // Handles find requests and replies for the webview find API.
   WebViewFindHelper find_helper_;
@@ -357,6 +365,9 @@ class WebViewGuest : public GuestView<WebViewGuest>,
 
   typedef std::map<WebViewGuest*, NewWindowInfo> PendingWindowMap;
   PendingWindowMap pending_new_windows_;
+
+  // Stores the current zoom factor.
+  double current_zoom_factor_;
 
   // This is used to ensure pending tasks will not fire after this object is
   // destroyed.

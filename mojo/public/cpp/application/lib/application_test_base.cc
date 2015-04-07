@@ -7,7 +7,6 @@
 #include "mojo/public/cpp/application/application_delegate.h"
 #include "mojo/public/cpp/application/application_impl.h"
 #include "mojo/public/cpp/environment/environment.h"
-#include "mojo/public/cpp/environment/logging.h"
 #include "mojo/public/cpp/system/message_pipe.h"
 
 namespace mojo {
@@ -17,6 +16,8 @@ namespace {
 
 // This shell handle is shared by multiple test application instances.
 MessagePipeHandle g_shell_handle;
+// Share the application command-line arguments with multiple application tests.
+Array<String> g_args;
 
 }  // namespace
 
@@ -33,29 +34,55 @@ void SetShellHandle(ScopedMessagePipeHandle handle) {
   g_shell_handle = handle.release();
 }
 
-ApplicationTestBase::ApplicationTestBase(Array<String> args)
-    : args_(args.Pass()), application_impl_(nullptr) {
+const Array<String>& Args() {
+  return g_args;
+}
+
+void InitializeArgs(int argc, std::vector<const char*> argv) {
+  MOJO_CHECK(g_args.is_null());
+  for (const char* arg : argv) {
+    if (arg)
+      g_args.push_back(arg);
+  }
+}
+
+ApplicationTestBase::ApplicationTestBase() : application_impl_(nullptr) {
 }
 
 ApplicationTestBase::~ApplicationTestBase() {
 }
 
-void ApplicationTestBase::SetUp() {
-  // A run loop is needed for ApplicationImpl initialization and communication.
-  Environment::InstantiateDefaultRunLoop();
+ApplicationDelegate* ApplicationTestBase::GetApplicationDelegate() {
+  return &default_application_delegate_;
+}
+
+void ApplicationTestBase::SetUpWithArgs(const Array<String>& args) {
+  // A run loop is recommended for ApplicationImpl initialization and
+  // communication.
+  if (ShouldCreateDefaultRunLoop())
+    Environment::InstantiateDefaultRunLoop();
 
   // New applications are constructed for each test to avoid persisting state.
   application_impl_ = new ApplicationImpl(GetApplicationDelegate(),
                                           PassShellHandle());
 
   // Fake application initialization with the given command line arguments.
-  application_impl_->Initialize(args_.Clone());
+  application_impl_->Initialize(args.Clone());
+}
+
+void ApplicationTestBase::SetUp() {
+  SetUpWithArgs(Args());
 }
 
 void ApplicationTestBase::TearDown() {
   SetShellHandle(application_impl_->UnbindShell());
   delete application_impl_;
-  Environment::DestroyDefaultRunLoop();
+  if (ShouldCreateDefaultRunLoop())
+    Environment::DestroyDefaultRunLoop();
+}
+
+bool ApplicationTestBase::ShouldCreateDefaultRunLoop() {
+  return true;
 }
 
 }  // namespace test

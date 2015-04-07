@@ -35,10 +35,12 @@
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/google/core/browser/google_util.h"
+#include "components/signin/core/common/profile_management_switches.h"
 #include "components/user_prefs/user_prefs.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
@@ -281,134 +283,131 @@ void ContentSettingsHandler::GetLocalizedValues(
 
   // TODO(dhnishi): Standardize to lowerCamelCase.
   static OptionsStringResource resources[] = {
-    { "allowException", IDS_EXCEPTIONS_ALLOW_BUTTON },
-    { "blockException", IDS_EXCEPTIONS_BLOCK_BUTTON },
-    { "sessionException", IDS_EXCEPTIONS_SESSION_ONLY_BUTTON },
-    { "askException", IDS_EXCEPTIONS_ASK_BUTTON },
-    { "otr_exceptions_explanation", IDS_EXCEPTIONS_OTR_LABEL },
-    { "addNewExceptionInstructions", IDS_EXCEPTIONS_ADD_NEW_INSTRUCTIONS },
-    { "manageExceptions", IDS_EXCEPTIONS_MANAGE },
-    { "manage_handlers", IDS_HANDLERS_MANAGE },
-    { "exceptionPatternHeader", IDS_EXCEPTIONS_PATTERN_HEADER },
-    { "exceptionBehaviorHeader", IDS_EXCEPTIONS_ACTION_HEADER },
-    { "exceptionZoomHeader", IDS_EXCEPTIONS_ZOOM_HEADER },
-    { "embeddedOnHost", IDS_EXCEPTIONS_GEOLOCATION_EMBEDDED_ON_HOST },
+    {"allowException", IDS_EXCEPTIONS_ALLOW_BUTTON},
+    {"blockException", IDS_EXCEPTIONS_BLOCK_BUTTON},
+    {"sessionException", IDS_EXCEPTIONS_SESSION_ONLY_BUTTON},
+    {"detectException", IDS_EXCEPTIONS_DETECT_IMPORTANT_CONTENT_BUTTON},
+    {"askException", IDS_EXCEPTIONS_ASK_BUTTON},
+    {"otr_exceptions_explanation", IDS_EXCEPTIONS_OTR_LABEL},
+    {"addNewExceptionInstructions", IDS_EXCEPTIONS_ADD_NEW_INSTRUCTIONS},
+    {"manageExceptions", IDS_EXCEPTIONS_MANAGE},
+    {"manage_handlers", IDS_HANDLERS_MANAGE},
+    {"exceptionPatternHeader", IDS_EXCEPTIONS_PATTERN_HEADER},
+    {"exceptionBehaviorHeader", IDS_EXCEPTIONS_ACTION_HEADER},
+    {"exceptionZoomHeader", IDS_EXCEPTIONS_ZOOM_HEADER},
+    {"embeddedOnHost", IDS_EXCEPTIONS_GEOLOCATION_EMBEDDED_ON_HOST},
     // Cookies filter.
-    { "cookiesTabLabel", IDS_COOKIES_TAB_LABEL },
-    { "cookies_header", IDS_COOKIES_HEADER },
-    { "cookiesAllow", IDS_COOKIES_ALLOW_RADIO },
-    { "cookiesBlock", IDS_COOKIES_BLOCK_RADIO },
-    { "cookies_session_only", IDS_COOKIES_SESSION_ONLY_RADIO },
-    { "cookies_block_3rd_party", IDS_COOKIES_BLOCK_3RDPARTY_CHKBOX },
-    { "cookies_clear_when_close", IDS_COOKIES_CLEAR_WHEN_CLOSE_CHKBOX },
-    { "cookies_lso_clear_when_close", IDS_COOKIES_LSO_CLEAR_WHEN_CLOSE_CHKBOX },
-    { "cookies_show_cookies", IDS_COOKIES_SHOW_COOKIES_BUTTON },
-    { "flash_storage_settings", IDS_FLASH_STORAGE_SETTINGS },
-    { "flash_storage_url", IDS_FLASH_STORAGE_URL },
+    {"cookiesTabLabel", IDS_COOKIES_TAB_LABEL},
+    {"cookies_header", IDS_COOKIES_HEADER},
+    {"cookiesAllow", IDS_COOKIES_ALLOW_RADIO},
+    {"cookiesBlock", IDS_COOKIES_BLOCK_RADIO},
+    {"cookies_session_only", IDS_COOKIES_SESSION_ONLY_RADIO},
+    {"cookies_block_3rd_party", IDS_COOKIES_BLOCK_3RDPARTY_CHKBOX},
+    {"cookies_clear_when_close", IDS_COOKIES_CLEAR_WHEN_CLOSE_CHKBOX},
+    {"cookies_lso_clear_when_close", IDS_COOKIES_LSO_CLEAR_WHEN_CLOSE_CHKBOX},
+    {"cookies_show_cookies", IDS_COOKIES_SHOW_COOKIES_BUTTON},
+    {"flash_storage_settings", IDS_FLASH_STORAGE_SETTINGS},
+    {"flash_storage_url", IDS_FLASH_STORAGE_URL},
 #if defined(ENABLE_GOOGLE_NOW)
-    { "googleGeolocationAccessEnable",
-       IDS_GEOLOCATION_GOOGLE_ACCESS_ENABLE_CHKBOX },
+    {"googleGeolocationAccessEnable",
+     IDS_GEOLOCATION_GOOGLE_ACCESS_ENABLE_CHKBOX},
 #endif
     // Image filter.
-    { "imagesTabLabel", IDS_IMAGES_TAB_LABEL },
-    { "images_header", IDS_IMAGES_HEADER },
-    { "imagesAllow", IDS_IMAGES_LOAD_RADIO },
-    { "imagesBlock", IDS_IMAGES_NOLOAD_RADIO },
+    {"imagesTabLabel", IDS_IMAGES_TAB_LABEL},
+    {"images_header", IDS_IMAGES_HEADER},
+    {"imagesAllow", IDS_IMAGES_LOAD_RADIO},
+    {"imagesBlock", IDS_IMAGES_NOLOAD_RADIO},
     // JavaScript filter.
-    { "javascriptTabLabel", IDS_JAVASCRIPT_TAB_LABEL },
-    { "javascript_header", IDS_JAVASCRIPT_HEADER },
-    { "javascriptAllow", IDS_JS_ALLOW_RADIO },
-    { "javascriptBlock", IDS_JS_DONOTALLOW_RADIO },
+    {"javascriptTabLabel", IDS_JAVASCRIPT_TAB_LABEL},
+    {"javascript_header", IDS_JAVASCRIPT_HEADER},
+    {"javascriptAllow", IDS_JS_ALLOW_RADIO},
+    {"javascriptBlock", IDS_JS_DONOTALLOW_RADIO},
     // Plug-ins filter.
-    { "pluginsTabLabel", IDS_PLUGIN_TAB_LABEL },
-    { "plugins_header", IDS_PLUGIN_HEADER },
-    { "pluginsAsk", IDS_PLUGIN_ASK_RADIO },
-    { "pluginsAllow", IDS_PLUGIN_LOAD_RADIO },
-    { "pluginsBlock", IDS_PLUGIN_ASK_MENU_RADIO },
-    { "disableIndividualPlugins", IDS_PLUGIN_SELECTIVE_DISABLE },
+    {"pluginsTabLabel", IDS_PLUGIN_TAB_LABEL},
+    {"plugins_header", IDS_PLUGIN_HEADER},
+    {"pluginsAllow", IDS_PLUGIN_ALLOW_RADIO},
+    {"pluginsDetect", IDS_PLUGIN_DETECT_RADIO},
+    {"pluginsAsk", IDS_PLUGIN_ASK_RADIO},
+    {"pluginsBlock", IDS_PLUGIN_BLOCK_RADIO},
+    {"disableIndividualPlugins", IDS_PLUGIN_SELECTIVE_DISABLE},
     // Pop-ups filter.
-    { "popupsTabLabel", IDS_POPUP_TAB_LABEL },
-    { "popups_header", IDS_POPUP_HEADER },
-    { "popupsAllow", IDS_POPUP_ALLOW_RADIO },
-    { "popupsBlock", IDS_POPUP_BLOCK_RADIO },
+    {"popupsTabLabel", IDS_POPUP_TAB_LABEL},
+    {"popups_header", IDS_POPUP_HEADER},
+    {"popupsAllow", IDS_POPUP_ALLOW_RADIO},
+    {"popupsBlock", IDS_POPUP_BLOCK_RADIO},
     // Location filter.
-    { "locationTabLabel", IDS_GEOLOCATION_TAB_LABEL },
-    { "location_header", IDS_GEOLOCATION_HEADER },
-    { "locationAllow", IDS_GEOLOCATION_ALLOW_RADIO },
-    { "locationAsk", IDS_GEOLOCATION_ASK_RADIO },
-    { "locationBlock", IDS_GEOLOCATION_BLOCK_RADIO },
-    { "set_by", IDS_GEOLOCATION_SET_BY_HOVER },
+    {"locationTabLabel", IDS_GEOLOCATION_TAB_LABEL},
+    {"location_header", IDS_GEOLOCATION_HEADER},
+    {"locationAllow", IDS_GEOLOCATION_ALLOW_RADIO},
+    {"locationAsk", IDS_GEOLOCATION_ASK_RADIO},
+    {"locationBlock", IDS_GEOLOCATION_BLOCK_RADIO},
+    {"set_by", IDS_GEOLOCATION_SET_BY_HOVER},
     // Notifications filter.
-    { "notificationsTabLabel", IDS_NOTIFICATIONS_TAB_LABEL },
-    { "notifications_header", IDS_NOTIFICATIONS_HEADER },
-    { "notificationsAllow", IDS_NOTIFICATIONS_ALLOW_RADIO },
-    { "notificationsAsk", IDS_NOTIFICATIONS_ASK_RADIO },
-    { "notificationsBlock", IDS_NOTIFICATIONS_BLOCK_RADIO },
+    {"notificationsTabLabel", IDS_NOTIFICATIONS_TAB_LABEL},
+    {"notifications_header", IDS_NOTIFICATIONS_HEADER},
+    {"notificationsAllow", IDS_NOTIFICATIONS_ALLOW_RADIO},
+    {"notificationsAsk", IDS_NOTIFICATIONS_ASK_RADIO},
+    {"notificationsBlock", IDS_NOTIFICATIONS_BLOCK_RADIO},
     // Fullscreen filter.
-    { "fullscreenTabLabel", IDS_FULLSCREEN_TAB_LABEL },
-    { "fullscreen_header", IDS_FULLSCREEN_HEADER },
+    {"fullscreenTabLabel", IDS_FULLSCREEN_TAB_LABEL},
+    {"fullscreen_header", IDS_FULLSCREEN_HEADER},
     // Mouse Lock filter.
-    { "mouselockTabLabel", IDS_MOUSE_LOCK_TAB_LABEL },
-    { "mouselock_header", IDS_MOUSE_LOCK_HEADER },
-    { "mouselockAllow", IDS_MOUSE_LOCK_ALLOW_RADIO },
-    { "mouselockAsk", IDS_MOUSE_LOCK_ASK_RADIO },
-    { "mouselockBlock", IDS_MOUSE_LOCK_BLOCK_RADIO },
+    {"mouselockTabLabel", IDS_MOUSE_LOCK_TAB_LABEL},
+    {"mouselock_header", IDS_MOUSE_LOCK_HEADER},
+    {"mouselockAllow", IDS_MOUSE_LOCK_ALLOW_RADIO},
+    {"mouselockAsk", IDS_MOUSE_LOCK_ASK_RADIO},
+    {"mouselockBlock", IDS_MOUSE_LOCK_BLOCK_RADIO},
 #if defined(OS_CHROMEOS) || defined(OS_WIN)
     // Protected Content filter
-    { "protectedContentTabLabel", IDS_PROTECTED_CONTENT_TAB_LABEL },
-    { "protectedContentInfo", IDS_PROTECTED_CONTENT_INFO },
-    { "protectedContentEnable", IDS_PROTECTED_CONTENT_ENABLE },
-    { "protectedContent_header", IDS_PROTECTED_CONTENT_HEADER },
+    {"protectedContentTabLabel", IDS_PROTECTED_CONTENT_TAB_LABEL},
+    {"protectedContentInfo", IDS_PROTECTED_CONTENT_INFO},
+    {"protectedContentEnable", IDS_PROTECTED_CONTENT_ENABLE},
+    {"protectedContent_header", IDS_PROTECTED_CONTENT_HEADER},
 #endif  // defined(OS_CHROMEOS) || defined(OS_WIN)
     // Media stream capture device filter.
-    { "mediaStreamTabLabel", IDS_MEDIA_STREAM_TAB_LABEL },
-    { "media-stream_header", IDS_MEDIA_STREAM_HEADER },
-    { "mediaStreamAsk", IDS_MEDIA_STREAM_ASK_RADIO },
-    { "mediaStreamBlock", IDS_MEDIA_STREAM_BLOCK_RADIO },
-    { "mediaStreamAudioAsk", IDS_MEDIA_STREAM_ASK_AUDIO_ONLY_RADIO },
-    { "mediaStreamAudioBlock", IDS_MEDIA_STREAM_BLOCK_AUDIO_ONLY_RADIO },
-    { "mediaStreamVideoAsk", IDS_MEDIA_STREAM_ASK_VIDEO_ONLY_RADIO },
-    { "mediaStreamVideoBlock", IDS_MEDIA_STREAM_BLOCK_VIDEO_ONLY_RADIO },
-    { "mediaStreamBubbleAudio", IDS_MEDIA_STREAM_AUDIO_MANAGED },
-    { "mediaStreamBubbleVideo", IDS_MEDIA_STREAM_VIDEO_MANAGED },
-    { "mediaAudioExceptionHeader", IDS_MEDIA_AUDIO_EXCEPTION_HEADER },
-    { "mediaVideoExceptionHeader", IDS_MEDIA_VIDEO_EXCEPTION_HEADER },
-    { "mediaPepperFlashDefaultDivergedLabel",
-      IDS_MEDIA_PEPPER_FLASH_DEFAULT_DIVERGED_LABEL },
-    { "mediaPepperFlashExceptionsDivergedLabel",
-      IDS_MEDIA_PEPPER_FLASH_EXCEPTIONS_DIVERGED_LABEL },
-    { "mediaPepperFlashChangeLink", IDS_MEDIA_PEPPER_FLASH_CHANGE_LINK },
-    { "mediaPepperFlashGlobalPrivacyURL", IDS_FLASH_GLOBAL_PRIVACY_URL },
-    { "mediaPepperFlashWebsitePrivacyURL", IDS_FLASH_WEBSITE_PRIVACY_URL },
+    {"mediaStreamTabLabel", IDS_MEDIA_STREAM_TAB_LABEL},
+    {"media-stream_header", IDS_MEDIA_STREAM_HEADER},
+    {"mediaStreamAsk", IDS_MEDIA_STREAM_ASK_RADIO},
+    {"mediaStreamBlock", IDS_MEDIA_STREAM_BLOCK_RADIO},
+    {"mediaStreamAudioAsk", IDS_MEDIA_STREAM_ASK_AUDIO_ONLY_RADIO},
+    {"mediaStreamAudioBlock", IDS_MEDIA_STREAM_BLOCK_AUDIO_ONLY_RADIO},
+    {"mediaStreamVideoAsk", IDS_MEDIA_STREAM_ASK_VIDEO_ONLY_RADIO},
+    {"mediaStreamVideoBlock", IDS_MEDIA_STREAM_BLOCK_VIDEO_ONLY_RADIO},
+    {"mediaStreamBubbleAudio", IDS_MEDIA_STREAM_AUDIO_MANAGED},
+    {"mediaStreamBubbleVideo", IDS_MEDIA_STREAM_VIDEO_MANAGED},
+    {"mediaAudioExceptionHeader", IDS_MEDIA_AUDIO_EXCEPTION_HEADER},
+    {"mediaVideoExceptionHeader", IDS_MEDIA_VIDEO_EXCEPTION_HEADER},
+    {"mediaPepperFlashDefaultDivergedLabel",
+     IDS_MEDIA_PEPPER_FLASH_DEFAULT_DIVERGED_LABEL},
+    {"mediaPepperFlashExceptionsDivergedLabel",
+     IDS_MEDIA_PEPPER_FLASH_EXCEPTIONS_DIVERGED_LABEL},
+    {"mediaPepperFlashChangeLink", IDS_MEDIA_PEPPER_FLASH_CHANGE_LINK},
+    {"mediaPepperFlashGlobalPrivacyURL", IDS_FLASH_GLOBAL_PRIVACY_URL},
+    {"mediaPepperFlashWebsitePrivacyURL", IDS_FLASH_WEBSITE_PRIVACY_URL},
     // PPAPI broker filter.
-    { "ppapi-broker_header", IDS_PPAPI_BROKER_HEADER },
-    { "ppapiBrokerTabLabel", IDS_PPAPI_BROKER_TAB_LABEL },
-    { "ppapiBrokerAllow", IDS_PPAPI_BROKER_ALLOW_RADIO },
-    { "ppapiBrokerAsk", IDS_PPAPI_BROKER_ASK_RADIO },
-    { "ppapiBrokerBlock", IDS_PPAPI_BROKER_BLOCK_RADIO },
+    {"ppapi-broker_header", IDS_PPAPI_BROKER_HEADER},
+    {"ppapiBrokerTabLabel", IDS_PPAPI_BROKER_TAB_LABEL},
+    {"ppapiBrokerAllow", IDS_PPAPI_BROKER_ALLOW_RADIO},
+    {"ppapiBrokerAsk", IDS_PPAPI_BROKER_ASK_RADIO},
+    {"ppapiBrokerBlock", IDS_PPAPI_BROKER_BLOCK_RADIO},
     // Multiple automatic downloads
-    { "multipleAutomaticDownloadsTabLabel",
-      IDS_AUTOMATIC_DOWNLOADS_TAB_LABEL },
-    { "multiple-automatic-downloads_header",
-      IDS_AUTOMATIC_DOWNLOADS_TAB_LABEL },
-    { "multipleAutomaticDownloadsAllow",
-      IDS_AUTOMATIC_DOWNLOADS_ALLOW_RADIO },
-    { "multipleAutomaticDownloadsAsk",
-      IDS_AUTOMATIC_DOWNLOADS_ASK_RADIO },
-    { "multipleAutomaticDownloadsBlock",
-      IDS_AUTOMATIC_DOWNLOADS_BLOCK_RADIO },
+    {"multipleAutomaticDownloadsTabLabel", IDS_AUTOMATIC_DOWNLOADS_TAB_LABEL},
+    {"multiple-automatic-downloads_header", IDS_AUTOMATIC_DOWNLOADS_TAB_LABEL},
+    {"multipleAutomaticDownloadsAllow", IDS_AUTOMATIC_DOWNLOADS_ALLOW_RADIO},
+    {"multipleAutomaticDownloadsAsk", IDS_AUTOMATIC_DOWNLOADS_ASK_RADIO},
+    {"multipleAutomaticDownloadsBlock", IDS_AUTOMATIC_DOWNLOADS_BLOCK_RADIO},
     // MIDI system exclusive messages
-    { "midi-sysex_header", IDS_MIDI_SYSEX_TAB_LABEL },
-    { "midiSysExAllow", IDS_MIDI_SYSEX_ALLOW_RADIO },
-    { "midiSysExAsk", IDS_MIDI_SYSEX_ASK_RADIO },
-    { "midiSysExBlock", IDS_MIDI_SYSEX_BLOCK_RADIO },
+    {"midi-sysex_header", IDS_MIDI_SYSEX_TAB_LABEL},
+    {"midiSysExAllow", IDS_MIDI_SYSEX_ALLOW_RADIO},
+    {"midiSysExAsk", IDS_MIDI_SYSEX_ASK_RADIO},
+    {"midiSysExBlock", IDS_MIDI_SYSEX_BLOCK_RADIO},
     // Push messaging strings
-    { "push-messaging_header", IDS_PUSH_MESSAGES_TAB_LABEL },
-    { "pushMessagingAllow", IDS_PUSH_MESSSAGING_ALLOW_RADIO },
-    { "pushMessagingAsk", IDS_PUSH_MESSSAGING_ASK_RADIO },
-    { "pushMessagingBlock", IDS_PUSH_MESSSAGING_BLOCK_RADIO },
-    { "zoomlevels_header", IDS_ZOOMLEVELS_HEADER_AND_TAB_LABEL },
-    { "zoomLevelsManage", IDS_ZOOMLEVELS_MANAGE_BUTTON },
+    {"push-messaging_header", IDS_PUSH_MESSAGES_TAB_LABEL},
+    {"pushMessagingAllow", IDS_PUSH_MESSSAGING_ALLOW_RADIO},
+    {"pushMessagingAsk", IDS_PUSH_MESSSAGING_ASK_RADIO},
+    {"pushMessagingBlock", IDS_PUSH_MESSSAGING_BLOCK_RADIO},
+    {"zoomlevels_header", IDS_ZOOMLEVELS_HEADER_AND_TAB_LABEL},
+    {"zoomLevelsManage", IDS_ZOOMLEVELS_MANAGE_BUTTON},
   };
 
   RegisterStrings(localized_strings, resources, arraysize(resources));
@@ -490,12 +489,30 @@ void ContentSettingsHandler::InitializeHandler() {
           &ContentSettingsHandler::UpdateProtectedContentExceptionsButton,
           base::Unretained(this)));
 
-  content::HostZoomMap* host_zoom_map =
-      content::HostZoomMap::GetDefaultForBrowserContext(context);
+  // Here we only subscribe to the HostZoomMap for the default storage partition
+  // since we don't allow the user to manage the zoom levels for apps.
+  // We're only interested in zoom-levels that are persisted, since the user
+  // is given the opportunity to view/delete these in the content-settings page.
   host_zoom_map_subscription_ =
-      host_zoom_map->AddZoomLevelChangedCallback(
-          base::Bind(&ContentSettingsHandler::OnZoomLevelChanged,
-                     base::Unretained(this)));
+      content::HostZoomMap::GetDefaultForBrowserContext(context)
+          ->AddZoomLevelChangedCallback(
+              base::Bind(&ContentSettingsHandler::OnZoomLevelChanged,
+                         base::Unretained(this)));
+
+  if (!switches::IsEnableWebviewBasedSignin()) {
+    // The legacy signin page uses a different storage partition, so we need to
+    // add a subscription for its HostZoomMap separately.
+    GURL signin_url(chrome::kChromeUIChromeSigninURL);
+    content::StoragePartition* signin_partition =
+        content::BrowserContext::GetStoragePartitionForSite(
+            GetBrowserContext(web_ui()), signin_url);
+    content::HostZoomMap* signin_host_zoom_map =
+        signin_partition->GetHostZoomMap();
+    signin_host_zoom_map_subscription_ =
+        signin_host_zoom_map->AddZoomLevelChangedCallback(
+            base::Bind(&ContentSettingsHandler::OnZoomLevelChanged,
+                       base::Unretained(this)));
+  }
 
   flash_settings_manager_.reset(new PepperFlashSettingsManager(this, context));
 
@@ -589,10 +606,15 @@ void ContentSettingsHandler::OnGetPermissionSettingsCompleted(
 
 void ContentSettingsHandler::UpdateSettingDefaultFromModel(
     ContentSettingsType type) {
-  base::DictionaryValue filter_settings;
+  Profile* profile = Profile::FromWebUI(web_ui());
   std::string provider_id;
+  ContentSetting default_setting =
+      profile->GetHostContentSettingsMap()->GetDefaultContentSetting(
+          type, &provider_id);
+
+  base::DictionaryValue filter_settings;
   filter_settings.SetString(ContentSettingsTypeToGroupName(type) + ".value",
-                            GetSettingDefaultFromModel(type, &provider_id));
+                            ContentSettingToString(default_setting));
   filter_settings.SetString(
       ContentSettingsTypeToGroupName(type) + ".managedBy", provider_id);
 
@@ -664,17 +686,6 @@ void ContentSettingsHandler::UpdateMediaSettingsView() {
 
   web_ui()->CallJavascriptFunction("ContentSettings.updateMediaUI",
                                    media_ui_settings);
-}
-
-std::string ContentSettingsHandler::GetSettingDefaultFromModel(
-    ContentSettingsType type, std::string* provider_id) {
-  Profile* profile = Profile::FromWebUI(web_ui());
-  ContentSetting default_setting;
-  default_setting =
-      profile->GetHostContentSettingsMap()->GetDefaultContentSetting(
-          type, provider_id);
-
-  return ContentSettingToString(default_setting);
 }
 
 void ContentSettingsHandler::UpdateHandlersEnabledRadios() {
@@ -970,7 +981,8 @@ void ContentSettingsHandler::UpdateMediaExceptionsView() {
 }
 
 void ContentSettingsHandler::UpdateMIDISysExExceptionsView() {
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableWebMIDI)) {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableWebMIDI)) {
     web_ui()->CallJavascriptFunction(
         "ContentSettings.showExperimentalWebMIDISettings",
         base::FundamentalValue(true));
@@ -981,6 +993,42 @@ void ContentSettingsHandler::UpdateMIDISysExExceptionsView() {
       CONTENT_SETTINGS_TYPE_MIDI_SYSEX);
 }
 
+void ContentSettingsHandler::AdjustZoomLevelsListForSigninPageIfNecessary(
+    content::HostZoomMap::ZoomLevelVector* zoom_levels) {
+  if (switches::IsEnableWebviewBasedSignin())
+    return;
+
+  GURL signin_url(chrome::kChromeUIChromeSigninURL);
+  content::HostZoomMap* signin_host_zoom_map =
+      content::BrowserContext::GetStoragePartitionForSite(
+          GetBrowserContext(web_ui()), signin_url)->GetHostZoomMap();
+
+  // Since zoom levels set for scheme + host are not persisted, and since the
+  // signin page zoom levels need to be persisted, they are stored without
+  // a scheme. We use an empty scheme string to indicate this.
+  std::string scheme;
+  std::string host = signin_url.host();
+
+  // If there's a WebView signin zoom level, remove it.
+  content::HostZoomMap::ZoomLevelVector::iterator it =
+      std::find_if(zoom_levels->begin(), zoom_levels->end(),
+                   [&host](content::HostZoomMap::ZoomLevelChange change) {
+                     return change.host == host;
+                   });
+  if (it != zoom_levels->end())
+    zoom_levels->erase(it);
+
+  // If there's a non-WebView signin zoom level, add it.
+  if (signin_host_zoom_map->HasZoomLevel(scheme, host)) {
+    content::HostZoomMap::ZoomLevelChange change = {
+        content::HostZoomMap::ZOOM_CHANGED_FOR_HOST,
+        host,
+        scheme,
+        signin_host_zoom_map->GetZoomLevelForHostAndScheme(scheme, host)};
+    zoom_levels->push_back(change);
+  }
+}
+
 void ContentSettingsHandler::UpdateZoomLevelsExceptionsView() {
   base::ListValue zoom_levels_exceptions;
 
@@ -989,6 +1037,9 @@ void ContentSettingsHandler::UpdateZoomLevelsExceptionsView() {
           GetBrowserContext(web_ui()));
   content::HostZoomMap::ZoomLevelVector zoom_levels(
       host_zoom_map->GetAllZoomLevels());
+
+  AdjustZoomLevelsListForSigninPageIfNecessary(&zoom_levels);
+
   std::sort(zoom_levels.begin(), zoom_levels.end(), HostZoomSort);
 
   for (content::HostZoomMap::ZoomLevelVector::const_iterator i =
@@ -1231,9 +1282,18 @@ void ContentSettingsHandler::RemoveZoomLevelException(
     pattern = content::kUnreachableWebDataURL;
   }
 
-  content::HostZoomMap* host_zoom_map =
+  content::HostZoomMap* host_zoom_map;
+  if (switches::IsEnableWebviewBasedSignin() ||
+      pattern != chrome::kChromeUIChromeSigninHost) {
+    host_zoom_map =
       content::HostZoomMap::GetDefaultForBrowserContext(
           GetBrowserContext(web_ui()));
+  } else {
+    host_zoom_map =
+        content::BrowserContext::GetStoragePartitionForSite(
+            GetBrowserContext(web_ui()), GURL(chrome::kChromeUIChromeSigninURL))
+            ->GetHostZoomMap();
+  }
   double default_level = host_zoom_map->GetDefaultZoomLevel();
   host_zoom_map->SetZoomLevelForHost(pattern, default_level);
 }

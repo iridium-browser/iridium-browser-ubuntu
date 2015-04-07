@@ -41,7 +41,6 @@
 
 namespace blink {
 
-class Dictionary;
 class Document;
 class LocalFrame;
 class GeolocationError;
@@ -52,10 +51,11 @@ class Geolocation final
     , public ScriptWrappable
     , public ActiveDOMObject {
     DEFINE_WRAPPERTYPEINFO();
+    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(Geolocation);
 public:
     static Geolocation* create(ExecutionContext*);
     virtual ~Geolocation();
-    void trace(Visitor*);
+    virtual void trace(Visitor*) override;
 
     virtual void stop() override;
     Document* document() const;
@@ -63,11 +63,11 @@ public:
 
     // Creates a oneshot and attempts to obtain a position that meets the
     // constraints of the options.
-    void getCurrentPosition(PositionCallback*, PositionErrorCallback*, const Dictionary&);
+    void getCurrentPosition(PositionCallback*, PositionErrorCallback*, const PositionOptions&);
 
     // Creates a watcher that will be notified whenever a new position is
     // available that meets the constraints of the options.
-    int watchPosition(PositionCallback*, PositionErrorCallback*, const Dictionary&);
+    int watchPosition(PositionCallback*, PositionErrorCallback*, const PositionOptions&);
 
     // Removes all references to the watcher, it will not be updated again.
     void clearWatch(int watchID);
@@ -156,7 +156,7 @@ private:
     // fatal error if permission is denied or no position can be obtained.
     void startRequest(GeoNotifier*);
 
-    bool haveSuitableCachedPosition(PositionOptions*);
+    bool haveSuitableCachedPosition(const PositionOptions&);
 
     // Runs the success callbacks for the set of notifiers awaiting a cached
     // position, the set is then cleared. The oneshots are removed everywhere.

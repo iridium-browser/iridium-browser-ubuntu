@@ -28,14 +28,13 @@ std::string GetUserName(const std::string& email) {
 
 }  // namespace
 
-bool User::IsSupervised() const {
-  return false;
+// static
+bool User::TypeHasGaiaAccount(UserType user_type) {
+  return user_type == USER_TYPE_REGULAR ||
+         user_type == USER_TYPE_CHILD;
 }
 
-void User::SetIsSupervised(bool is_supervised) {
-  VLOG(1) << "Ignoring SetIsSupervised call with param " << is_supervised;
-}
-
+// Also used for regular supervised users.
 class RegularUser : public User {
  public:
   explicit RegularUser(const std::string& email);
@@ -44,16 +43,10 @@ class RegularUser : public User {
   // Overridden from User:
   virtual UserType GetType() const override;
   virtual bool CanSyncImage() const override;
-  virtual void SetIsSupervised(bool is_supervised) override {
-    VLOG(1) << "Setting user is supervised to " << is_supervised;
-    is_supervised_ = is_supervised;
-  }
-  virtual bool IsSupervised() const override {
-    return is_supervised_;
-  }
+  virtual void SetIsChild(bool is_child) override;
 
  private:
-  bool is_supervised_;
+  bool is_child_;
 
   DISALLOW_COPY_AND_ASSIGN(RegularUser);
 };
@@ -89,23 +82,10 @@ class SupervisedUser : public User {
 
   // Overridden from User:
   virtual UserType GetType() const override;
-  virtual bool IsSupervised() const override;
   virtual std::string display_email() const override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(SupervisedUser);
-};
-
-class RetailModeUser : public User {
- public:
-  RetailModeUser();
-  virtual ~RetailModeUser();
-
-  // Overridden from User:
-  virtual UserType GetType() const override;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(RetailModeUser);
 };
 
 class PublicAccountUser : public User {
@@ -140,6 +120,24 @@ const gfx::ImageSkia& User::GetImage() const {
 
 std::string User::GetUserID() const {
   return gaia::CanonicalizeEmail(gaia::SanitizeEmail(email()));
+}
+
+void User::SetIsChild(bool is_child) {
+  VLOG(1) << "Ignoring SetIsChild call with param " << is_child;
+  if (is_child) {
+    NOTREACHED() << "Calling SetIsChild(true) for base User class."
+                 << "Base class cannot be set as child";
+  }
+}
+
+bool User::HasGaiaAccount() const {
+  return TypeHasGaiaAccount(GetType());
+}
+
+bool User::IsSupervised() const {
+  UserType type = GetType();
+  return  type == USER_TYPE_SUPERVISED ||
+          type == USER_TYPE_CHILD;
 }
 
 std::string User::GetAccountName(bool use_display_email) const {
@@ -193,10 +191,6 @@ User* User::CreateSupervisedUser(const std::string& username) {
   return new SupervisedUser(username);
 }
 
-User* User::CreateRetailModeUser() {
-  return new RetailModeUser;
-}
-
 User* User::CreatePublicAccountUser(const std::string& email) {
   return new PublicAccountUser(email);
 }
@@ -243,7 +237,7 @@ void User::SetStubImage(const UserImage& stub_user_image,
 }
 
 RegularUser::RegularUser(const std::string& email)
-    : User(email), is_supervised_(false) {
+    : User(email), is_child_(false) {
   set_can_lock(true);
   set_display_email(email);
 }
@@ -252,11 +246,17 @@ RegularUser::~RegularUser() {
 }
 
 UserType RegularUser::GetType() const {
-  return user_manager::USER_TYPE_REGULAR;
+  return is_child_ ? user_manager::USER_TYPE_CHILD :
+                     user_manager::USER_TYPE_REGULAR;
 }
 
 bool RegularUser::CanSyncImage() const {
   return true;
+}
+
+void RegularUser::SetIsChild(bool is_child) {
+  VLOG(1) << "Setting user is child to " << is_child;
+  is_child_ = is_child;
 }
 
 GuestUser::GuestUser() : User(chromeos::login::kGuestUserName) {
@@ -297,21 +297,6 @@ std::string SupervisedUser::display_email() const {
   return base::UTF16ToUTF8(display_name());
 }
 
-bool SupervisedUser::IsSupervised() const {
-  return true;
-}
-
-RetailModeUser::RetailModeUser() : User(chromeos::login::kRetailModeUserName) {
-  set_display_email(std::string());
-}
-
-RetailModeUser::~RetailModeUser() {
-}
-
-UserType RetailModeUser::GetType() const {
-  return user_manager::USER_TYPE_RETAIL_MODE;
-}
-
 PublicAccountUser::PublicAccountUser(const std::string& email) : User(email) {
 }
 
@@ -323,12 +308,13 @@ UserType PublicAccountUser::GetType() const {
 }
 
 bool User::has_gaia_account() const {
-  COMPILE_ASSERT(user_manager::NUM_USER_TYPES == 6, num_user_types_unexpected);
+  static_assert(user_manager::NUM_USER_TYPES == 7,
+                "NUM_USER_TYPES should equal 7");
   switch (GetType()) {
     case user_manager::USER_TYPE_REGULAR:
+    case user_manager::USER_TYPE_CHILD:
       return true;
     case user_manager::USER_TYPE_GUEST:
-    case user_manager::USER_TYPE_RETAIL_MODE:
     case user_manager::USER_TYPE_PUBLIC_ACCOUNT:
     case user_manager::USER_TYPE_SUPERVISED:
     case user_manager::USER_TYPE_KIOSK_APP:

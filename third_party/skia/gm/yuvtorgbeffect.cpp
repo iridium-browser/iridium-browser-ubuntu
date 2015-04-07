@@ -19,6 +19,10 @@
 #include "SkGr.h"
 #include "SkGradientShader.h"
 
+#define YSIZE 8
+#define USIZE 4
+#define VSIZE 4
+
 namespace skiagm {
 /**
  * This GM directly exercises GrYUVtoRGBEffect.
@@ -35,7 +39,7 @@ protected:
     }
 
     virtual SkISize onISize() SK_OVERRIDE {
-        return SkISize::Make(334, 128);
+        return SkISize::Make(238, 84);
     }
 
     virtual uint32_t onGetFlags() const SK_OVERRIDE {
@@ -44,10 +48,12 @@ protected:
     }
 
     virtual void onOnceBeforeDraw() SK_OVERRIDE {
-        SkImageInfo info = SkImageInfo::MakeA8(24, 24);
-        fBmp[0].allocPixels(info);
-        fBmp[1].allocPixels(info);
-        fBmp[2].allocPixels(info);
+        SkImageInfo yinfo = SkImageInfo::MakeA8(YSIZE, YSIZE);
+        fBmp[0].allocPixels(yinfo);
+        SkImageInfo uinfo = SkImageInfo::MakeA8(USIZE, USIZE);
+        fBmp[1].allocPixels(uinfo);
+        SkImageInfo vinfo = SkImageInfo::MakeA8(VSIZE, VSIZE);
+        fBmp[2].allocPixels(vinfo);
         unsigned char* pixels[3];
         for (int i = 0; i < 3; ++i) {
             pixels[i] = (unsigned char*)fBmp[i].getPixels();
@@ -56,8 +62,9 @@ protected:
         const int limit[] = {255, 0, 255};
         const int invl[]  = {0, 255, 0};
         const int inc[]   = {1, -1, 1};
-        for (int j = 0; j < 576; ++j) {
-            for (int i = 0; i < 3; ++i) {
+        for (int i = 0; i < 3; ++i) {
+            const size_t nbBytes = fBmp[i].rowBytes() * fBmp[i].height();
+            for (size_t j = 0; j < nbBytes; ++j) {
                 pixels[i][j] = (unsigned char)color[i];
                 color[i] = (color[i] == limit[i]) ? invl[i] : color[i] + inc[i];
             }
@@ -81,8 +88,6 @@ protected:
             return;
         }
 
-        GrDrawState* drawState = tt.target()->drawState();
-
         SkAutoTUnref<GrTexture> texture[3];
         texture[0].reset(GrRefCachedBitmapTexture(context, fBmp[0], NULL));
         texture[1].reset(GrRefCachedBitmapTexture(context, fBmp[1], NULL));
@@ -94,7 +99,8 @@ protected:
 
         static const SkScalar kDrawPad = 10.f;
         static const SkScalar kTestPad = 10.f;
-        static const SkScalar kColorSpaceOffset = 64.f;
+        static const SkScalar kColorSpaceOffset = 36.f;
+        SkISize sizes[3] = {{YSIZE, YSIZE}, {USIZE, USIZE}, {VSIZE, VSIZE}};
 
         for (int space = kJPEG_SkYUVColorSpace; space <= kLastEnum_SkYUVColorSpace;
              ++space) {
@@ -111,17 +117,17 @@ protected:
             for (int i = 0; i < 6; ++i) {
                 SkAutoTUnref<GrFragmentProcessor> fp(
                             GrYUVtoRGBEffect::Create(texture[indices[i][0]],
-                                                    texture[indices[i][1]],
-                                                    texture[indices[i][2]],
-                                                    static_cast<SkYUVColorSpace>(space)));
+                                                     texture[indices[i][1]],
+                                                     texture[indices[i][2]],
+                                                     sizes,
+                                                     static_cast<SkYUVColorSpace>(space)));
                 if (fp) {
                     SkMatrix viewMatrix;
                     viewMatrix.setTranslate(x, y);
-                    drawState->reset(viewMatrix);
-                    drawState->setRenderTarget(rt);
-                    drawState->setColor(0xffffffff);
-                    drawState->addColorProcessor(fp);
-                    tt.target()->drawSimpleRect(renderRect);
+                    GrDrawState drawState;
+                    drawState.setRenderTarget(rt);
+                    drawState.addColorProcessor(fp);
+                    tt.target()->drawSimpleRect(&drawState, GrColor_WHITE, viewMatrix, renderRect);
                 }
                 x += renderRect.width() + kTestPad;
             }

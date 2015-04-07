@@ -12,12 +12,13 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/sys_info.h"
 #include "base/test/test_timeouts.h"
-#include "content/public/app/content_main.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/tracing/tracing_controller_impl.h"
+#include "content/public/app/content_main.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
+#include "content/public/test/content_browser_sanity_checker.h"
 #include "content/public/test/test_launcher.h"
 #include "content/public/test/test_utils.h"
 #include "net/base/net_errors.h"
@@ -32,7 +33,7 @@
 #endif
 
 #if defined(OS_MACOSX)
-#include "base/mac/mac_util.h"
+#include "base/mac/foundation_util.h"
 #endif
 
 #if defined(OS_ANDROID)
@@ -168,7 +169,7 @@ BrowserTestBase::~BrowserTestBase() {
 }
 
 void BrowserTestBase::SetUp() {
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
 
   // Override the child process connection timeout since tests can exceed that
   // when sharded.
@@ -248,6 +249,9 @@ void BrowserTestBase::SetUp() {
   rule_based_resolver_->AddSimulatedFailure("wpad");
   net::ScopedDefaultHostResolverProc scoped_local_host_resolver_proc(
       rule_based_resolver_.get());
+
+  ContentBrowserSanityChecker scoped_enable_sanity_checks;
+
   SetUpInProcessBrowserTestFixture();
 
   base::Closure* ui_task =
@@ -277,9 +281,10 @@ void BrowserTestBase::ProxyRunTestOnMainThreadLoop() {
   }
 #endif  // defined(OS_POSIX)
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableTracing)) {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableTracing)) {
     base::debug::CategoryFilter category_filter(
-        CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+        base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
             switches::kEnableTracing));
     TracingController::GetInstance()->EnableRecording(
         category_filter,
@@ -289,9 +294,10 @@ void BrowserTestBase::ProxyRunTestOnMainThreadLoop() {
 
   RunTestOnMainThreadLoop();
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableTracing)) {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableTracing)) {
     base::FilePath trace_file =
-        CommandLine::ForCurrentProcess()->GetSwitchValuePath(
+        base::CommandLine::ForCurrentProcess()->GetSwitchValuePath(
             switches::kEnableTracingOutput);
     // If there was no file specified, put a hardcoded one in the current
     // working directory.
@@ -320,7 +326,8 @@ void BrowserTestBase::CreateTestServer(const base::FilePath& test_server_base) {
 
 void BrowserTestBase::PostTaskToInProcessRendererAndWait(
     const base::Closure& task) {
-  CHECK(CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess));
+  CHECK(base::CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kSingleProcess));
 
   scoped_refptr<MessageLoopRunner> runner = new MessageLoopRunner;
 
@@ -341,7 +348,7 @@ void BrowserTestBase::UseSoftwareCompositing() {
 }
 
 bool BrowserTestBase::UsingOSMesa() const {
-  CommandLine* cmd = CommandLine::ForCurrentProcess();
+  base::CommandLine* cmd = base::CommandLine::ForCurrentProcess();
   return cmd->GetSwitchValueASCII(switches::kUseGL) ==
          gfx::kGLImplementationOSMesaName;
 }

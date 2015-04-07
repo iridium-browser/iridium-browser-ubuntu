@@ -55,7 +55,7 @@ struct SameSizeAsScrollableArea {
     IntPoint origin;
 };
 
-COMPILE_ASSERT(sizeof(ScrollableArea) == sizeof(SameSizeAsScrollableArea), ScrollableArea_should_stay_small);
+static_assert(sizeof(ScrollableArea) == sizeof(SameSizeAsScrollableArea), "ScrollableArea should stay small");
 
 int ScrollableArea::pixelsPerLineStep()
 {
@@ -430,10 +430,19 @@ bool ScrollableArea::scheduleAnimation()
 
 void ScrollableArea::serviceScrollAnimations(double monotonicTime)
 {
-    if (ScrollAnimator* scrollAnimator = existingScrollAnimator())
+    bool hasRunningAnimation = false;
+    if (ScrollAnimator* scrollAnimator = existingScrollAnimator()) {
         scrollAnimator->serviceScrollAnimations();
-    if (ProgrammaticScrollAnimator* programmaticScrollAnimator = existingProgrammaticScrollAnimator())
+        if (scrollAnimator->hasRunningAnimation())
+            hasRunningAnimation = true;
+    }
+    if (ProgrammaticScrollAnimator* programmaticScrollAnimator = existingProgrammaticScrollAnimator()) {
         programmaticScrollAnimator->tickAnimation(monotonicTime);
+        if (programmaticScrollAnimator->hasRunningAnimation())
+            hasRunningAnimation = true;
+    }
+    if (!hasRunningAnimation)
+        deregisterForAnimation();
 }
 
 void ScrollableArea::cancelProgrammaticScrollAnimation()

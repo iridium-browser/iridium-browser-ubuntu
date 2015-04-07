@@ -12,12 +12,13 @@
 #include "base/cancelable_callback.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/prefs/pref_change_registrar.h"
 #include "chrome/browser/devtools/device/android_device_manager.h"
 #include "components/keyed_service/content/browser_context_keyed_service_factory.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "content/public/browser/devtools_agent_host.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 
 template<typename T> struct DefaultSingletonTraits;
 
@@ -35,22 +36,12 @@ class BrowserContext;
 class DevToolsTargetImpl;
 class PortForwardingController;
 class Profile;
+class WebRTCDeviceProvider;
+class SigninManagerBase;
+class ProfileOAuth2TokenService;
 
-class DevToolsAndroidBridge
-    : public base::RefCountedThreadSafe<
-          DevToolsAndroidBridge,
-          content::BrowserThread::DeleteOnUIThread> {
+class DevToolsAndroidBridge : public KeyedService {
  public:
-  class Wrapper : public KeyedService {
-   public:
-    explicit Wrapper(content::BrowserContext* context);
-    ~Wrapper() override;
-
-    DevToolsAndroidBridge* Get();
-   private:
-    scoped_refptr<DevToolsAndroidBridge> bridge_;
-  };
-
   class Factory : public BrowserContextKeyedServiceFactory {
    public:
     // Returns singleton instance of DevToolsAndroidBridge.
@@ -170,7 +161,9 @@ class DevToolsAndroidBridge
     virtual ~DeviceListListener() {}
   };
 
-  explicit DevToolsAndroidBridge(Profile* profile);
+  DevToolsAndroidBridge(Profile* profile,
+                        SigninManagerBase* signin_manager,
+                        ProfileOAuth2TokenService* token_service);
   void AddDeviceListListener(DeviceListListener* listener);
   void RemoveDeviceListListener(DeviceListListener* listener);
 
@@ -226,6 +219,7 @@ class DevToolsAndroidBridge
 
   scoped_refptr<content::DevToolsAgentHost> GetBrowserAgentHost(
       scoped_refptr<RemoteBrowser> browser);
+
  private:
   friend struct content::BrowserThread::DeleteOnThread<
       content::BrowserThread::UI>;
@@ -237,7 +231,7 @@ class DevToolsAndroidBridge
   class DiscoveryRequest;
   class RemotePageTarget;
 
-  virtual ~DevToolsAndroidBridge();
+  ~DevToolsAndroidBridge() override;
 
   void StartDeviceListPolling();
   void StopDeviceListPolling();
@@ -267,7 +261,7 @@ class DevToolsAndroidBridge
   void SendProtocolCommand(const BrowserId& browser_id,
                            const std::string& debug_url,
                            const std::string& method,
-                           base::DictionaryValue* params,
+                           scoped_ptr<base::DictionaryValue> params,
                            const base::Closure callback);
 
   scoped_refptr<AndroidDeviceManager::Device> FindDevice(
@@ -290,8 +284,14 @@ class DevToolsAndroidBridge
                                int result,
                                const std::string& response);
 
-  Profile* profile_;
-  scoped_refptr<AndroidDeviceManager> device_manager_;
+  base::WeakPtr<DevToolsAndroidBridge> AsWeakPtr() {
+      return weak_factory_.GetWeakPtr();
+  }
+
+  Profile* const profile_;
+  SigninManagerBase* const signin_manager_;
+  ProfileOAuth2TokenService* const token_service_;
+  const scoped_ptr<AndroidDeviceManager> device_manager_;
 
   typedef std::map<std::string, scoped_refptr<AndroidDeviceManager::Device>>
       DeviceMap;
@@ -314,6 +314,9 @@ class DevToolsAndroidBridge
   scoped_ptr<PortForwardingController> port_forwarding_controller_;
 
   PrefChangeRegistrar pref_change_registrar_;
+
+  base::WeakPtrFactory<DevToolsAndroidBridge> weak_factory_;
+
   DISALLOW_COPY_AND_ASSIGN(DevToolsAndroidBridge);
 };
 

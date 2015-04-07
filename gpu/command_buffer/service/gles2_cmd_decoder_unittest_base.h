@@ -75,14 +75,16 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool> {
 
   template <typename T>
   error::Error ExecuteCmd(const T& cmd) {
-    COMPILE_ASSERT(T::kArgFlags == cmd::kFixed, Cmd_kArgFlags_not_kFixed);
+    static_assert(T::kArgFlags == cmd::kFixed,
+                  "T::kArgFlags should equal cmd::kFixed");
     return decoder_->DoCommands(
         1, (const void*)&cmd, ComputeNumEntries(sizeof(cmd)), 0);
   }
 
   template <typename T>
   error::Error ExecuteImmediateCmd(const T& cmd, size_t data_size) {
-    COMPILE_ASSERT(T::kArgFlags == cmd::kAtLeastN, Cmd_kArgFlags_not_kAtLeastN);
+    static_assert(T::kArgFlags == cmd::kAtLeastN,
+                  "T::kArgFlags should equal cmd::kAtLeastN");
     return decoder_->DoCommands(
         1, (const void*)&cmd, ComputeNumEntries(sizeof(cmd) + data_size), 0);
   }
@@ -131,6 +133,15 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool> {
     return decoder_->GetQueryManager()->GetQuery(client_id);
   }
 
+  bool GetSamplerServiceId(GLuint client_id, GLuint* service_id) const {
+    return group_->GetSamplerServiceId(client_id, service_id);
+  }
+
+  bool GetTransformFeedbackServiceId(
+      GLuint client_id, GLuint* service_id) const {
+    return group_->GetTransformFeedbackServiceId(client_id, service_id);
+  }
+
   // This name doesn't match the underlying function, but doing it this way
   // prevents the need to special-case the unit test generation
   VertexAttribManager* GetVertexArrayInfo(GLuint client_id) {
@@ -143,6 +154,10 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool> {
 
   ValuebufferManager* valuebuffer_manager() {
     return group_->valuebuffer_manager();
+  }
+
+  ValueStateMap* pending_valuebuffer_state() {
+    return group_->pending_valuebuffer_state();
   }
 
   ImageManager* GetImageManager() { return decoder_->GetImageManager(); }
@@ -423,10 +438,12 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool> {
   static const GLuint kServiceRenderbufferId = 303;
   static const GLuint kServiceTextureId = 304;
   static const GLuint kServiceProgramId = 305;
-  static const GLuint kServiceShaderId = 306;
+  static const GLuint kServiceSamplerId = 306;
+  static const GLuint kServiceShaderId = 307;
   static const GLuint kServiceElementBufferId = 308;
   static const GLuint kServiceQueryId = 309;
   static const GLuint kServiceVertexArrayId = 310;
+  static const GLuint kServiceTransformFeedbackId = 311;
 
   static const int32 kSharedMemoryId = 401;
   static const size_t kSharedBufferSize = 2048;
@@ -516,6 +533,7 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool> {
   GLuint client_framebuffer_id_;
   GLuint client_program_id_;
   GLuint client_renderbuffer_id_;
+  GLuint client_sampler_id_;
   GLuint client_shader_id_;
   GLuint client_texture_id_;
   GLuint client_element_buffer_id_;
@@ -524,6 +542,7 @@ class GLES2DecoderTestBase : public ::testing::TestWithParam<bool> {
   GLuint client_query_id_;
   GLuint client_vertexarray_id_;
   GLuint client_valuebuffer_id_;
+  GLuint client_transformfeedback_id_;
 
   uint32 shared_memory_id_;
   uint32 shared_memory_offset_;

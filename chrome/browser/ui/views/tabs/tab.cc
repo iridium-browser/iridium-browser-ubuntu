@@ -9,7 +9,6 @@
 #include "base/command_line.h"
 #include "base/debug/alias.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/defaults.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
@@ -26,7 +25,6 @@
 #include "grit/theme_resources.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
 #include "ui/accessibility/ax_view_state.h"
-#include "ui/aura/env.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/list_selection_model.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -37,9 +35,9 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_analysis.h"
 #include "ui/gfx/favicon_size.h"
+#include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/path.h"
-#include "ui/gfx/rect_conversions.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/resources/grit/ui_resources.h"
 #include "ui/views/border.h"
@@ -50,6 +48,10 @@
 #include "ui/views/widget/tooltip_manager.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/non_client_view.h"
+
+#if defined(USE_AURA)
+#include "ui/aura/env.h"
+#endif
 
 using base::UserMetricsAction;
 
@@ -75,12 +77,14 @@ static const int kFaviconTitleSpacing = 4;
 static const int kViewSpacing = 3;
 static const int kStandardTitleWidth = 175;
 
+// Width of mini-tabs.
+const int kMiniTabWidth = 64;
+
 // When a non-mini-tab becomes a mini-tab the width of the tab animates. If
 // the width of a mini-tab is >= kMiniTabRendererAsNormalTabWidth then the tab
 // is rendered as a normal tab. This is done to avoid having the title
 // immediately disappear when transitioning a tab from normal to mini-tab.
-static const int kMiniTabRendererAsNormalTabWidth =
-    browser_defaults::kMiniTabWidth + 30;
+static const int kMiniTabRendererAsNormalTabWidth = kMiniTabWidth + 30;
 
 // How opaque to make the hover state (out of 1).
 static const double kHoverOpacity = 0.33;
@@ -324,9 +328,11 @@ class Tab::TabCloseButton : public views::ImageButton,
     gfx::Rect contents_bounds = GetContentsBounds();
     contents_bounds.set_x(GetMirroredXForRect(contents_bounds));
 
+#if defined(USE_AURA)
     // Include the padding in hit-test for touch events.
     if (aura::Env::GetInstance()->is_touch_down())
       contents_bounds = GetLocalBounds();
+#endif
 
     return contents_bounds.Intersects(rect) ? this : parent();
   }
@@ -621,7 +627,7 @@ int Tab::GetTouchWidth() {
 
 // static
 int Tab::GetMiniWidth() {
-  return browser_defaults::kMiniTabWidth;
+  return kMiniTabWidth;
 }
 
 // static
@@ -704,11 +710,11 @@ bool Tab::GetHitTestMask(gfx::Path* mask) const {
   controller_->ShouldPaintTab(this, &clip);
   if (clip.size().GetArea()) {
     SkRect intersection(mask->getBounds());
-    intersection.intersect(RectToSkRect(clip));
     mask->reset();
+    if (!intersection.intersect(RectToSkRect(clip)))
+       return false;
     mask->addRect(intersection);
   }
-
   return true;
 }
 
@@ -833,7 +839,7 @@ bool Tab::GetTooltipText(const gfx::Point& p, base::string16* tooltip) const {
 
 bool Tab::GetTooltipTextOrigin(const gfx::Point& p, gfx::Point* origin) const {
   origin->set_x(title_->x() + 10);
-  origin->set_y(-views::TooltipManager::GetTooltipHeight() - 4);
+  origin->set_y(-4);
   return true;
 }
 

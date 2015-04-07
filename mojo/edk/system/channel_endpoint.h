@@ -9,7 +9,6 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
-#include "mojo/edk/embedder/platform_handle_vector.h"
 #include "mojo/edk/system/channel_endpoint_id.h"
 #include "mojo/edk/system/message_in_transit_queue.h"
 #include "mojo/edk/system/system_impl_export.h"
@@ -18,21 +17,21 @@ namespace mojo {
 namespace system {
 
 class Channel;
+class ChannelEndpointClient;
 class MessageInTransit;
-class MessagePipe;
 
 // TODO(vtl): The plan:
 //   - (Done.) Move |Channel::Endpoint| to |ChannelEndpoint|. Make it
 //     refcounted, and not copyable. Make |Channel| a friend. Make things work.
 //   - (Done.) Give |ChannelEndpoint| a lock. The lock order (in order of
 //     allowable acquisition) is: |MessagePipe|, |ChannelEndpoint|, |Channel|.
-//   - Stop having |Channel| as a friend.
-//   - Move logic from |ProxyMessagePipeEndpoint| into |ChannelEndpoint|. Right
-//     now, we have to go through lots of contortions to manipulate state owned
-//     by |ProxyMessagePipeEndpoint| (in particular, |Channel::Endpoint| doesn't
-//     know about the remote ID; the local ID is duplicated in two places).
-//     Hollow out |ProxyMessagePipeEndpoint|, and have it just own a reference
-//     to |ChannelEndpoint| (hence the refcounting).
+//   - (Done) Stop having |Channel| as a friend.
+//   - (Done) Move logic from |ProxyMessagePipeEndpoint| into |ChannelEndpoint|.
+//     Right now, we have to go through lots of contortions to manipulate state
+//     owned by |ProxyMessagePipeEndpoint| (in particular, |Channel::Endpoint|
+//     doesn't know about the remote ID; the local ID is duplicated in two
+//     places). Hollow out |ProxyMessagePipeEndpoint|, and have it just own a
+//     reference to |ChannelEndpoint| (hence the refcounting).
 //   - In essence, |ChannelEndpoint| becomes the thing that knows about
 //     channel-specific aspects of an endpoint (notably local and remote IDs,
 //     and knowledge about handshaking), and mediates between the |Channel| and
@@ -112,47 +111,51 @@ class MessagePipe;
 class MOJO_SYSTEM_IMPL_EXPORT ChannelEndpoint
     : public base::RefCountedThreadSafe<ChannelEndpoint> {
  public:
-  // Constructor for a |ChannelEndpoint| attached to the given message pipe
-  // endpoint (specified by |message_pipe| and |port|). Optionally takes
-  // messages from |*message_queue| if |message_queue| is non-null.
+  // Constructor for a |ChannelEndpoint| with the given client (specified by
+  // |client| and |client_port|). Optionally takes messages from
+  // |*message_queue| if |message_queue| is non-null.
   //
-  // |message_pipe| may be null if this endpoint will never need to receive
-  // messages, in which case |message_queue| should not be null. In that case,
-  // this endpoint will simply send queued messages upon being attached to a
+  // |client| may be null if this endpoint will never need to receive messages,
+  // in which case |message_queue| should not be null. In that case, this
+  // endpoint will simply send queued messages upon being attached to a
   // |Channel| and immediately detach itself.
-  ChannelEndpoint(MessagePipe* message_pipe,
-                  unsigned port,
+  ChannelEndpoint(ChannelEndpointClient* client,
+                  unsigned client_port,
                   MessageInTransitQueue* message_queue = nullptr);
 
-  // Methods called by |MessagePipe| (via |ProxyMessagePipeEndpoint|):
+  // Methods called by |ChannelEndpointClient|:
 
-  // TODO(vtl): This currently only works if we're "running". We'll move the
-  // "paused message queue" here (will this be needed when we have
-  // locally-allocated remote IDs?).
+  // Called to enqueue an outbound message. (If |AttachAndRun()| has not yet
+  // been called, the message will be enqueued and sent when |AttachAndRun()| is
+  // called.)
   bool EnqueueMessage(scoped_ptr<MessageInTransit> message);
 
-  void DetachFromMessagePipe();
+  // Called to *replace* current client with a new client (which must differ
+  // from the existing client). This must not be called after
+  // |DetachFromClient()| has been called.
+  //
+  // This returns true in the typical case, and false if this endpoint has been
+  // detached from the channel, in which case the caller should probably call
+  // its (new) client's |OnDetachFromChannel()|.
+  bool ReplaceClient(ChannelEndpointClient* client, unsigned client_port);
+
+  // Called before the |ChannelEndpointClient| gives up its reference to this
+  // object.
+  void DetachFromClient();
 
   // Methods called by |Channel|:
 
-  // Called by |Channel| when it takes a reference to this object. It will send
-  // all queue messages (in |paused_message_queue_|).
+  // Called when the |Channel| takes a reference to this object. This will send
+  // all queue messages (in |channel_message_queue_|).
   // TODO(vtl): Maybe rename this "OnAttach"?
   void AttachAndRun(Channel* channel,
                     ChannelEndpointId local_id,
                     ChannelEndpointId remote_id);
 
-  // Called by |Channel| when it receives a message for the message pipe.
-  bool OnReadMessage(const MessageInTransit::View& message_view,
-                     embedder::ScopedPlatformHandleVectorPtr platform_handles);
+  // Called when the |Channel| receives a message for the |ChannelEndpoint|.
+  void OnReadMessage(scoped_ptr<MessageInTransit> message);
 
-  // Called by |Channel| to notify that it'll no longer receive messages for the
-  // message pipe (i.e., |OnReadMessage()| will no longer be called).
-  // TODO(vtl): After more simplification, we might be able to get rid of this
-  // (and merge it with |DetachFromChannel()|).
-  void OnDisconnect();
-
-  // Called by |Channel| before it gives up its reference to this object.
+  // Called before the |Channel| gives up its reference to this object.
   void DetachFromChannel();
 
  private:
@@ -162,31 +165,41 @@ class MOJO_SYSTEM_IMPL_EXPORT ChannelEndpoint
   // Must be called with |lock_| held.
   bool WriteMessageNoLock(scoped_ptr<MessageInTransit> message);
 
+  // Resets |channel_| to null (and sets |is_detached_from_channel_|). This may
+  // only be called if |channel_| is non-null. Must be called with |lock_| held.
+  void ResetChannelNoLock();
+
   // Protects the members below.
   base::Lock lock_;
 
-  // |message_pipe_| must be valid whenever it is non-null. Before
-  // |*message_pipe_| gives up its reference to this object, it must call
-  // |DetachFromMessagePipe()|.
+  // |client_| must be valid whenever it is non-null. Before |*client_| gives up
+  // its reference to this object, it must call |DetachFromClient()|.
   // NOTE: This is a |scoped_refptr<>|, rather than a raw pointer, since the
   // |Channel| needs to keep the |MessagePipe| alive for the "proxy-proxy" case.
   // Possibly we'll be able to eliminate that case when we have full
   // multiprocess support.
-  // WARNING: |MessagePipe| methods must not be called under |lock_|. Thus to
-  // make such a call, a reference must first be taken under |lock_| and the
-  // lock released.
-  scoped_refptr<MessagePipe> message_pipe_;
-  unsigned port_;
+  // WARNING: |ChannelEndpointClient| methods must not be called under |lock_|.
+  // Thus to make such a call, a reference must first be taken under |lock_| and
+  // the lock released.
+  // WARNING: Beware of interactions with |ReplaceClient()|. By the time the
+  // call is made, the client may have changed. This must be detected and dealt
+  // with.
+  scoped_refptr<ChannelEndpointClient> client_;
+  unsigned client_port_;
 
   // |channel_| must be valid whenever it is non-null. Before |*channel_| gives
   // up its reference to this object, it must call |DetachFromChannel()|.
+  // |local_id_| and |remote_id_| are valid if and only |channel_| is non-null.
   Channel* channel_;
   ChannelEndpointId local_id_;
   ChannelEndpointId remote_id_;
+  // This distinguishes the two cases of |channel| being null: not yet attached
+  // versus detached.
+  bool is_detached_from_channel_;
 
   // This queue is used before we're running on a channel and ready to send
-  // messages.
-  MessageInTransitQueue paused_message_queue_;
+  // messages to the channel.
+  MessageInTransitQueue channel_message_queue_;
 
   DISALLOW_COPY_AND_ASSIGN(ChannelEndpoint);
 };

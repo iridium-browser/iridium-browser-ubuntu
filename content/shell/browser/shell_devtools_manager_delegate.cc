@@ -38,7 +38,7 @@ namespace {
 
 #if defined(OS_ANDROID)
 const char kFrontEndURL[] =
-    "http://chrome-devtools-frontend.appspot.com/serve_rev/%s/devtools.html";
+    "http://chrome-devtools-frontend.appspot.com/serve_rev/%s/inspector.html";
 #endif
 const char kTargetTypePage[] = "page";
 const char kTargetTypeServiceWorker[] = "service_worker";
@@ -66,7 +66,7 @@ class UnixDomainServerSocketFactory
 class TCPServerSocketFactory
     : public DevToolsHttpHandler::ServerSocketFactory {
  public:
-  TCPServerSocketFactory(const std::string& address, int port, int backlog)
+  TCPServerSocketFactory(const std::string& address, uint16 port, int backlog)
       : DevToolsHttpHandler::ServerSocketFactory(
             address, port, backlog) {}
 
@@ -83,7 +83,8 @@ class TCPServerSocketFactory
 
 scoped_ptr<DevToolsHttpHandler::ServerSocketFactory>
 CreateSocketFactory() {
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
 #if defined(OS_ANDROID)
   std::string socket_name = "content_shell_devtools_remote";
   if (command_line.HasSwitch(switches::kRemoteDebuggingSocketName)) {
@@ -95,14 +96,14 @@ CreateSocketFactory() {
 #else
   // See if the user specified a port on the command line (useful for
   // automation). If not, use an ephemeral port by specifying 0.
-  int port = 0;
+  uint16 port = 0;
   if (command_line.HasSwitch(switches::kRemoteDebuggingPort)) {
     int temp_port;
     std::string port_str =
         command_line.GetSwitchValueASCII(switches::kRemoteDebuggingPort);
     if (base::StringToInt(port_str, &temp_port) &&
         temp_port > 0 && temp_port < 65535) {
-      port = temp_port;
+      port = static_cast<uint16>(temp_port);
     } else {
       DLOG(WARNING) << "Invalid http debugger port number " << temp_port;
     }
@@ -179,8 +180,7 @@ class ShellDevToolsDelegate : public DevToolsHttpHandlerDelegate {
   std::string GetDiscoveryPageHTML() override;
   bool BundlesFrontendResources() override;
   base::FilePath GetDebugFrontendDir() override;
-  scoped_ptr<net::StreamListenSocket> CreateSocketForTethering(
-      net::StreamListenSocket::Delegate* delegate,
+  scoped_ptr<net::ServerSocket> CreateSocketForTethering(
       std::string* name) override;
 
  private:
@@ -217,11 +217,9 @@ base::FilePath ShellDevToolsDelegate::GetDebugFrontendDir() {
   return base::FilePath();
 }
 
-scoped_ptr<net::StreamListenSocket>
-ShellDevToolsDelegate::CreateSocketForTethering(
-    net::StreamListenSocket::Delegate* delegate,
-    std::string* name) {
-  return scoped_ptr<net::StreamListenSocket>();
+scoped_ptr<net::ServerSocket>
+ShellDevToolsDelegate::CreateSocketForTethering(std::string* name) {
+  return scoped_ptr<net::ServerSocket>();
 }
 
 }  // namespace
@@ -266,7 +264,6 @@ ShellDevToolsManagerDelegate::CreateNewTarget(const GURL& url) {
   Shell* shell = Shell::CreateNewWindow(browser_context_,
                                         url,
                                         NULL,
-                                        MSG_ROUTING_NONE,
                                         gfx::Size());
   return scoped_ptr<DevToolsTarget>(
       new Target(DevToolsAgentHost::GetOrCreateFor(shell->web_contents())));

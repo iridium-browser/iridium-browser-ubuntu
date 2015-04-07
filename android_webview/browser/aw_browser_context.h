@@ -14,6 +14,7 @@
 #include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "components/visitedlink/browser/visitedlink_delegate.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/content_browser_client.h"
@@ -30,6 +31,7 @@ class WebContents;
 
 namespace data_reduction_proxy {
 class DataReductionProxyConfigurator;
+class DataReductionProxyEventStore;
 class DataReductionProxySettings;
 class DataReductionProxyStatisticsPrefs;
 }
@@ -90,11 +92,19 @@ class AwBrowserContext : public content::BrowserContext,
   data_reduction_proxy::DataReductionProxySettings*
       GetDataReductionProxySettings();
 
+  data_reduction_proxy::DataReductionProxyEventStore*
+      GetDataReductionProxyEventStore();
+
+  data_reduction_proxy::DataReductionProxyConfigurator*
+      GetDataReductionProxyConfigurator();
+
   AwURLRequestContextGetter* GetAwURLRequestContext();
 
   void CreateUserPrefServiceIfNecessary();
 
   // content::BrowserContext implementation.
+  scoped_ptr<content::ZoomLevelDelegate> CreateZoomLevelDelegate(
+      const base::FilePath& partition_path) override;
   virtual base::FilePath GetPath() const override;
   virtual bool IsOffTheRecord() const override;
   virtual net::URLRequestContextGetter* GetRequestContext() override;
@@ -144,10 +154,12 @@ class AwBrowserContext : public content::BrowserContext,
 
   scoped_ptr<data_reduction_proxy::DataReductionProxyConfigurator>
       data_reduction_proxy_configurator_;
-  scoped_ptr<data_reduction_proxy::DataReductionProxyStatisticsPrefs>
+  base::WeakPtr<data_reduction_proxy::DataReductionProxyStatisticsPrefs>
       data_reduction_proxy_statistics_;
   scoped_ptr<data_reduction_proxy::DataReductionProxySettings>
       data_reduction_proxy_settings_;
+  scoped_ptr<data_reduction_proxy::DataReductionProxyEventStore>
+      data_reduction_proxy_event_store_;
   scoped_ptr<AwSSLHostStateDelegate> ssl_host_state_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(AwBrowserContext);

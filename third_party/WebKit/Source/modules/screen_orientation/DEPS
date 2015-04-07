@@ -1,0 +1,11 @@
+include_rules = [
+    "+bindings",
+    "+core",
+    "+heap",
+    "-modules",
+    "+modules/EventTargetModules.h",
+    "+modules/screen_orientation",
+    "+platform",
+    "+public/platform",
+    "-web",
+]

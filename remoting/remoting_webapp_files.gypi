@@ -33,9 +33,12 @@
     ],
     # Auth (Google account) JavaScript files.
     'remoting_webapp_js_auth_google_files': [
+      'webapp/base/js/auth_dialog.js',
+      'webapp/base/js/auth_init.js',
       'webapp/crd/js/identity.js',
       'webapp/crd/js/oauth2.js',
       'webapp/crd/js/oauth2_api.js',
+      'webapp/crd/js/oauth2_api_impl.js',
     ],
     # Client JavaScript files.
     'remoting_webapp_js_client_files': [
@@ -48,7 +51,6 @@
       'webapp/crd/js/client_session.js',
       'webapp/crd/js/clipboard.js',
       'webapp/crd/js/hangout_session.js',
-      'webapp/crd/js/media_source_renderer.js',
       'webapp/crd/js/session_connector.js',
       'webapp/crd/js/session_connector_impl.js',
       'webapp/crd/js/smart_reconnector.js',
@@ -56,8 +58,10 @@
     ],
     # Remoting core JavaScript files.
     'remoting_webapp_js_core_files': [
+      'webapp/base/js/application.js',
       'webapp/base/js/base.js',
       'webapp/base/js/platform.js',
+      'webapp/crd/js/apps_v2_migration.js',
       'webapp/crd/js/error.js',
       'webapp/crd/js/event_handlers.js',
       'webapp/crd/js/plugin_settings.js',
@@ -67,12 +71,29 @@
       'webapp/crd/js/xhr.js',
     ],
     # Host JavaScript files.
-    # Includes both it2me and me2me files.
     'remoting_webapp_js_host_files': [
+      'webapp/crd/js/host.js',
+      'webapp/crd/js/host_settings.js',
+    ],
+    # Files for controlling the local machine as a host.
+    # Includes both it2me and me2me files.
+    'remoting_webapp_js_host_control_files': [
       'webapp/crd/js/host_controller.js',
       'webapp/crd/js/host_daemon_facade.js',
-      'webapp/crd/js/it2me_host_facade.js',
+      'webapp/crd/js/host_screen.js',
       'webapp/crd/js/host_session.js',
+      'webapp/crd/js/host_setup_dialog.js',
+      'webapp/crd/js/host_install_dialog.js',
+      'webapp/crd/js/host_installer.js',
+      'webapp/crd/js/it2me_host_facade.js',
+      'webapp/crd/js/paired_client_manager.js',
+    ],
+    # Files for displaying (in the client) info about available hosts.
+    'remoting_webapp_js_host_display_files': [
+      'webapp/crd/js/host_list.js',
+      'webapp/crd/js/host_list_api.js',
+      'webapp/crd/js/host_list_api_impl.js',
+      'webapp/crd/js/host_table_entry.js',
     ],
     # Logging and stats JavaScript files.
     'remoting_webapp_js_logging_files': [
@@ -83,6 +104,7 @@
     ],
     # UI JavaScript files.
     'remoting_webapp_js_ui_files': [
+      'webapp/base/js/window_shape.js',
       'webapp/crd/js/butter_bar.js',
       'webapp/crd/js/connection_stats.js',
       'webapp/crd/js/feedback.js',
@@ -95,21 +117,6 @@
       'webapp/crd/js/ui_mode.js',
       'webapp/crd/js/toolbar.js',
       'webapp/crd/js/window_frame.js',
-    ],
-    # UI files for controlling the local machine as a host.
-    'remoting_webapp_js_ui_host_control_files': [
-      'webapp/crd/js/host_screen.js',
-      'webapp/crd/js/host_setup_dialog.js',
-      'webapp/crd/js/host_install_dialog.js',
-      'webapp/crd/js/host_installer.js',
-      'webapp/crd/js/paired_client_manager.js',
-    ],
-    # UI files for displaying (in the client) info about available hosts.
-    'remoting_webapp_js_ui_host_display_files': [
-      'webapp/crd/js/host.js',
-      'webapp/crd/js/host_list.js',
-      'webapp/crd/js/host_settings.js',
-      'webapp/crd/js/host_table_entry.js',
     ],
     # Remoting signaling files.
     'remoting_webapp_js_signaling_files': [
@@ -142,9 +149,14 @@
       'webapp/browser_test/cancel_pin_browser_test.js',
       'webapp/browser_test/invalid_pin_browser_test.js',
       'webapp/browser_test/mock_client_plugin.js',
+      'webapp/browser_test/mock_host_list_api.js',
+      'webapp/browser_test/mock_identity.js',
+      'webapp/browser_test/mock_oauth2_api.js',
       'webapp/browser_test/mock_session_connector.js',
       'webapp/browser_test/mock_signal_strategy.js',
       'webapp/browser_test/scrollbar_browser_test.js',
+      'webapp/browser_test/timeout_waiter.js',
+      'webapp/browser_test/unauthenticated_browser_test.js',
       'webapp/browser_test/update_pin_browser_test.js',
     ],
     # These product files are excluded from our JavaScript unittest
@@ -152,14 +164,12 @@
       # background.js is where the onLoad handler is defined, which
       # makes it the entry point of the background page.
       'webapp/crd/js/background.js',
-      # event_handlers.js is where the onLoad handler is defined, which
-      # makes it the entry point of the webapp.
-      'webapp/crd/js/event_handlers.js',
     ],
     # The unit test cases for the webapp
     'remoting_webapp_unittest_js_files': [
       'webapp/js_proto/chrome_proto.js',
       'webapp/unittests/chrome_mocks.js',
+      'webapp/unittests/apps_v2_migration_unittest.js',
       'webapp/unittests/base_unittest.js',
       'webapp/unittests/it2me_helpee_channel_unittest.js',
       'webapp/unittests/it2me_helper_channel_unittest.js',
@@ -176,8 +186,8 @@
     'remoting_webapp_unittest_template_main':
       'webapp/crd/html/template_unittest.html',
 
-    # The JavaScript files required by main.html.
-    'remoting_webapp_main_html_js_files': [
+    # The shared JavaScript files required by main.html.
+    'remoting_webapp_shared_main_html_js_files': [
       # Include the core files first as it is required by the other files.
       # Otherwise, Jscompile will complain.
       '<@(remoting_webapp_js_core_files)',
@@ -187,14 +197,22 @@
       '<@(remoting_webapp_js_gnubby_auth_files)',
       '<@(remoting_webapp_js_cast_extension_files)',
       '<@(remoting_webapp_js_host_files)',
+      '<@(remoting_webapp_js_host_control_files)',
+      '<@(remoting_webapp_js_host_display_files)',
       '<@(remoting_webapp_js_logging_files)',
       '<@(remoting_webapp_js_ui_files)',
-      '<@(remoting_webapp_js_ui_host_control_files)',
-      '<@(remoting_webapp_js_ui_host_display_files)',
       '<@(remoting_webapp_js_signaling_files)',
       # Uncomment this line to include browser test files in the web app
       # to expedite debugging or local development.
       # '<@(remoting_webapp_js_browser_test_files)'
+    ],
+
+    # The CRD-specific JavaScript files required by main.html.
+    'remoting_webapp_crd_main_html_js_files': [
+      'webapp/crd/js/crd_connect.js',
+      'webapp/crd/js/crd_event_handlers.js',
+      'webapp/crd/js/crd_main.js',
+      'webapp/crd/js/desktop_remoting.js',
     ],
 
     # The JavaScript files that are used in the background page.
@@ -227,10 +245,10 @@
       'webapp/crd/js/plugin_settings.js',
     ],
 
-    # All the JavaScript files required by the webapp.
-    'remoting_webapp_all_js_files': [
+    # All the JavaScript files that are shared by webapps.
+    'remoting_webapp_shared_js_files': [
       # JS files for main.html.
-      '<@(remoting_webapp_main_html_js_files)',
+      '<@(remoting_webapp_shared_main_html_js_files)',
       '<@(remoting_webapp_background_js_files)',
       # JS files for message_window.html
       'webapp/base/js/message_window.js',
@@ -240,6 +258,12 @@
       '<@(remoting_webapp_js_wcs_sandbox_files)',
       # JS files referenced in mainfest.json.
       '<@(remoting_webapp_js_auth_v1_files)',
+    ],
+
+    # All the JavaScript files required by CRD.
+    'remoting_webapp_crd_js_files': [
+      '<@(remoting_webapp_shared_js_files)',
+      '<@(remoting_webapp_crd_main_html_js_files)',
     ],
 
     'remoting_webapp_resource_files': [
@@ -270,15 +294,16 @@
       'webapp/base/resources/open_sans.css',
       'webapp/base/resources/open_sans.woff',
       'webapp/base/resources/spinner.gif',
+      'webapp/crd/html/butter_bar.css',
       'webapp/crd/html/toolbar.css',
       'webapp/crd/html/menu_button.css',
       'webapp/crd/html/window_frame.css',
       'webapp/crd/resources/scale-to-fit.webp',
     ],
 
-    'remoting_webapp_files': [
+    'remoting_webapp_crd_files': [
       '<@(remoting_webapp_info_files)',
-      '<@(remoting_webapp_all_js_files)',
+      '<@(remoting_webapp_crd_js_files)',
       '<@(remoting_webapp_resource_files)',
     ],
 
@@ -295,7 +320,7 @@
     'remoting_webapp_template_files': [
       'webapp/base/html/client_plugin.html',
       'webapp/base/html/dialog_auth.html',
-      'webapp/crd/html/butterbar.html',
+      'webapp/crd/html/butter_bar.html',
       'webapp/crd/html/dialog_client_connect_failed.html',
       'webapp/crd/html/dialog_client_connecting.html',
       'webapp/crd/html/dialog_client_host_needs_upgrade.html',

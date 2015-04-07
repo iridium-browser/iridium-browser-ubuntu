@@ -177,7 +177,6 @@ SSLConnectJob::SSLConnectJob(const std::string& group_name,
                              SOCKSClientSocketPool* socks_pool,
                              HttpProxyClientSocketPool* http_proxy_pool,
                              ClientSocketFactory* client_socket_factory,
-                             HostResolver* host_resolver,
                              const SSLClientSocketContext& context,
                              const GetMessengerCallback& get_messenger_callback,
                              Delegate* delegate,
@@ -192,11 +191,11 @@ SSLConnectJob::SSLConnectJob(const std::string& group_name,
       socks_pool_(socks_pool),
       http_proxy_pool_(http_proxy_pool),
       client_socket_factory_(client_socket_factory),
-      host_resolver_(host_resolver),
       context_(context.cert_verifier,
                context.channel_id_service,
                context.transport_security_state,
                context.cert_transparency_verifier,
+               context.cert_policy_enforcer,
                (params->privacy_mode() == PRIVACY_MODE_ENABLED
                     ? "pm/" + context.ssl_session_cache_shard
                     : context.ssl_session_cache_shard)),
@@ -372,8 +371,7 @@ int SSLConnectJob::DoTunnelConnectComplete(int result) {
   } else if (result == ERR_PROXY_AUTH_REQUESTED ||
              result == ERR_HTTPS_PROXY_TUNNEL_RESPONSE) {
     StreamSocket* socket = transport_socket_handle_->socket();
-    HttpProxyClientSocket* tunnel_socket =
-        static_cast<HttpProxyClientSocket*>(socket);
+    ProxyClientSocket* tunnel_socket = static_cast<ProxyClientSocket*>(socket);
     error_response_info_ = *tunnel_socket->GetConnectResponseInfo();
   }
   if (result < 0)
@@ -634,6 +632,7 @@ SSLClientSocketPool::SSLClientSocketPool(
     ChannelIDService* channel_id_service,
     TransportSecurityState* transport_security_state,
     CTVerifier* cert_transparency_verifier,
+    CertPolicyEnforcer* cert_policy_enforcer,
     const std::string& ssl_session_cache_shard,
     ClientSocketFactory* client_socket_factory,
     TransportClientSocketPool* transport_pool,
@@ -661,6 +660,7 @@ SSLClientSocketPool::SSLClientSocketPool(
                                        channel_id_service,
                                        transport_security_state,
                                        cert_transparency_verifier,
+                                       cert_policy_enforcer,
                                        ssl_session_cache_shard),
                 base::Bind(
                     &SSLClientSocketPool::GetOrCreateSSLConnectJobMessenger,
@@ -697,7 +697,6 @@ scoped_ptr<ConnectJob> SSLClientSocketPool::SSLConnectJobFactory::NewConnectJob(
                                                   socks_pool_,
                                                   http_proxy_pool_,
                                                   client_socket_factory_,
-                                                  host_resolver_,
                                                   context_,
                                                   get_messenger_callback_,
                                                   delegate,

@@ -4,17 +4,23 @@
 
 #include "net/base/net_log_util.h"
 
+#include <algorithm>
 #include <string>
+#include <vector>
 
+#include "base/bind.h"
+#include "base/logging.h"
 #include "base/metrics/field_trial.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "net/base/address_family.h"
 #include "net/base/load_states.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
+#include "net/base/sdch_manager.h"
 #include "net/disk_cache/disk_cache.h"
 #include "net/dns/host_cache.h"
 #include "net/dns/host_resolver.h"
@@ -27,6 +33,8 @@
 #include "net/proxy/proxy_service.h"
 #include "net/quic/quic_protocol.h"
 #include "net/quic/quic_utils.h"
+#include "net/socket/ssl_client_socket.h"
+#include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
 
 namespace net {
@@ -66,6 +74,14 @@ const short kNetErrors[] = {
 #undef NET_ERROR
 };
 
+const StringToConstant kSdchProblems[] = {
+#define SDCH_PROBLEM_CODE(label, value) \
+  { #label, value }                     \
+  ,
+#include "net/base/sdch_problem_code_list.h"
+#undef SDCH_PROBLEM_CODE
+};
+
 const char* NetInfoSourceToString(NetInfoSource source) {
   switch (source) {
     #define NET_INFO_SOURCE(label, string, value) \
@@ -90,6 +106,25 @@ disk_cache::Backend* GetDiskCacheBackend(net::URLRequestContext* context) {
     return NULL;
 
   return http_cache->GetCurrentBackend();
+}
+
+// Returns true if |request1| was created before |request2|.
+bool RequestCreatedBefore(const net::URLRequest* request1,
+                          const net::URLRequest* request2) {
+  if (request1->creation_time() < request2->creation_time())
+    return true;
+  if (request1->creation_time() > request2->creation_time())
+    return false;
+  // If requests were created at the same time, sort by ID.  Mostly matters for
+  // testing purposes.
+  return request1->identifier() < request2->identifier();
+}
+
+// Returns a Value representing the state of a pre-existing URLRequest when
+// net-internals was opened.
+base::Value* GetRequestStateAsValue(const net::URLRequest* request,
+                                    net::NetLog::LogLevel log_level) {
+  return request->GetStateAsValue();
 }
 
 }  // namespace
@@ -187,6 +222,17 @@ scoped_ptr<base::DictionaryValue> GetNetConstants() {
     constants_dict->Set("quicRstStreamError", dict);
   }
 
+  // Add information on the relationship between SDCH problem codes and their
+  // symbolic names.
+  {
+    base::DictionaryValue* dict = new base::DictionaryValue();
+
+    for (size_t i = 0; i < arraysize(kSdchProblems); i++)
+      dict->SetInteger(kSdchProblems[i].name, kSdchProblems[i].constant);
+
+    constants_dict->Set("sdchProblemCode", dict);
+  }
+
   // Information about the relationship between event phase enums and their
   // symbolic names.
   {
@@ -278,6 +324,9 @@ scoped_ptr<base::DictionaryValue> GetNetConstants() {
 
 NET_EXPORT scoped_ptr<base::DictionaryValue> GetNetInfo(
     URLRequestContext* context, int info_sources) {
+  // May only be called on the context's thread.
+  DCHECK(context->CalledOnValidThread());
+
   scoped_ptr<base::DictionaryValue> net_info_dict(new base::DictionaryValue());
 
   // TODO(mmenke):  The code for most of these sources should probably be moved
@@ -399,10 +448,17 @@ NET_EXPORT scoped_ptr<base::DictionaryValue> GetNetInfo(
         "force_spdy_always",
         http_network_session->params().force_spdy_always);
 
-    std::vector<std::string> next_protos;
+    NextProtoVector next_protos;
     http_network_session->GetNextProtos(&next_protos);
-    std::string next_protos_string = JoinString(next_protos, ',');
-    status_dict->SetString("next_protos", next_protos_string);
+    if (!next_protos.empty()) {
+      std::string next_protos_string;
+      for (const NextProto proto : next_protos) {
+        if (!next_protos_string.empty())
+          next_protos_string.append(",");
+        next_protos_string.append(SSLClientSocket::NextProtoToString(proto));
+      }
+      status_dict->SetString("next_protos", next_protos_string);
+    }
 
     net_info_dict->Set(NetInfoSourceToString(NET_INFO_SPDY_STATUS),
                         status_dict);
@@ -455,7 +511,55 @@ NET_EXPORT scoped_ptr<base::DictionaryValue> GetNetInfo(
                        info_dict);
   }
 
+  if (info_sources & NET_INFO_SDCH) {
+    base::Value* info_dict;
+    SdchManager* sdch_manager = context->sdch_manager();
+    if (sdch_manager) {
+      info_dict = sdch_manager->SdchInfoToValue();
+    } else {
+      info_dict = new base::DictionaryValue();
+    }
+    net_info_dict->Set(NetInfoSourceToString(NET_INFO_SDCH), info_dict);
+  }
+
   return net_info_dict.Pass();
+}
+
+NET_EXPORT void CreateNetLogEntriesForActiveObjects(
+    const std::set<URLRequestContext*>& contexts,
+    NetLog::ThreadSafeObserver* observer) {
+  // Not safe to call this when the observer is watching a NetLog.
+  DCHECK(!observer->net_log());
+
+  // Put together the list of all requests.
+  std::vector<const URLRequest*> requests;
+  for (const auto& context : contexts) {
+    // May only be called on the context's thread.
+    DCHECK(context->CalledOnValidThread());
+    // Contexts should all be using the same NetLog.
+    DCHECK_EQ((*contexts.begin())->net_log(), context->net_log());
+    for (const auto& request : *context->url_requests()) {
+      requests.push_back(request);
+    }
+  }
+
+  // Sort by creation time.
+  std::sort(requests.begin(), requests.end(), RequestCreatedBefore);
+
+  // Create fake events.
+  ScopedVector<NetLog::Entry> entries;
+  for (const auto& request : requests) {
+    net::NetLog::ParametersCallback callback =
+        base::Bind(&GetRequestStateAsValue, base::Unretained(request));
+
+    net::NetLog::EntryData entry_data(net::NetLog::TYPE_REQUEST_ALIVE,
+                                      request->net_log().source(),
+                                      net::NetLog::PHASE_BEGIN,
+                                      request->creation_time(),
+                                      &callback);
+    NetLog::Entry entry(&entry_data, request->net_log().GetLogLevel());
+    observer->OnAddEntry(entry);
+  }
 }
 
 }  // namespace net

@@ -81,6 +81,10 @@ bool SystemTrayDelegateCommon::IsUserSupervised() const {
   return false;
 }
 
+bool SystemTrayDelegateCommon::IsUserChild() const {
+  return false;
+}
+
 void SystemTrayDelegateCommon::GetSystemUpdateInfo(
     ash::UpdateInfo* info) const {
   GetUpdateInfo(UpgradeDetector::GetInstance(), info);
@@ -150,21 +154,6 @@ void SystemTrayDelegateCommon::ShowEnterpriseInfo() {
 }
 
 void SystemTrayDelegateCommon::ShowUserLogin() {
-}
-
-bool SystemTrayDelegateCommon::ShowSpringChargerReplacementDialog() {
-  return false;
-}
-
-bool SystemTrayDelegateCommon::IsSpringChargerReplacementDialogVisible() {
-  return false;
-}
-
-bool SystemTrayDelegateCommon::HasUserConfirmedSafeSpringCharger() {
-  return false;
-}
-
-void SystemTrayDelegateCommon::ShutDown() {
 }
 
 void SystemTrayDelegateCommon::SignOut() {

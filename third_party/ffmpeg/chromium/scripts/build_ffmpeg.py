@@ -31,7 +31,7 @@ BRANDINGS = [
 
 USAGE = """Usage: %prog TARGET_OS TARGET_ARCH [options] -- [configure_args]
 
-Valid combinations are linux       [ia32|x64|mipsel|arm|arm-neon]
+Valid combinations are linux       [ia32|x64|mipsel|arm|arm-neon|arm64]
                        linux-noasm [x64]
                        mac         [ia32|x64]
                        win         [ia32|x64]
@@ -41,10 +41,13 @@ Platform specific build notes:
     Script can run on a normal Ubuntu box.
 
   linux mipsel:
-    Script can run on a normal Ubuntu box with MIPS cross-toolchain in $PATH.
+    Script must be run inside of ChromeOS chroot with BOARD=mipsel-o32-generic.
 
   linux arm/arm-neon:
     Script must be run inside of ChromeOS chroot with BOARD=arm-generic.
+
+  linux arm64:
+    Script can run on a normal Ubuntu with AArch64 cross-toolchain in $PATH.
 
   mac:
     Script must be run on OSX.  Additionally, ensure the Chromium (not Apple)
@@ -83,7 +86,7 @@ def DetermineHostOsAndArch():
     host_os = 'linux'
   elif platform.system() == 'Darwin':
     host_os = 'mac'
-  elif platform.system() == 'Windows' or platform.system() == 'CYGWIN_NT-6.1':
+  elif platform.system() == 'Windows' or 'CYGWIN_NT' in platform.system():
     host_os = 'win'
   else:
     return None
@@ -92,6 +95,8 @@ def DetermineHostOsAndArch():
     host_arch = 'ia32'
   elif platform.machine() == 'x86_64' or platform.machine() == 'AMD64':
     host_arch = 'x64'
+  elif platform.machine() == 'aarch64':
+    host_arch = 'arm64'
   elif platform.machine().startswith('arm'):
     host_arch = 'arm'
   else:
@@ -320,10 +325,23 @@ def main(argv):
           # NOTE: softfp/hardfp selected at gyp time.
           '--extra-cflags=-mfloat-abi=hard',
       ])
+    elif target_arch == 'arm64':
+      if host_arch != 'arm64':
+        # This if-statement is for chroot arm64-generic.
+        configure_flags['Common'].extend([
+            '--enable-cross-compile',
+            '--cross-prefix=/usr/bin/aarch64-linux-gnu-',
+            '--target-os=linux',
+            '--arch=aarch64',
+        ])
+      configure_flags['Common'].extend([
+          '--enable-armv8',
+          '--extra-cflags=-march=armv8-a',
+      ])
     elif target_arch == 'mipsel':
       configure_flags['Common'].extend([
           '--enable-cross-compile',
-          '--cross-prefix=mips-linux-gnu-',
+          '--cross-prefix=/usr/bin/mipsel-cros-linux-gnu-',
           '--target-os=linux',
           '--arch=mips',
           '--extra-cflags=-mips32',
@@ -389,7 +407,7 @@ def main(argv):
         '--extra-cflags=-I' + os.path.join(FFMPEG_DIR, 'chromium/include/win'),
     ])
 
-    if platform.system() == 'CYGWIN_NT-6.1':
+    if 'CYGWIN_NT' in platform.system():
       configure_flags['Common'].extend([
           '--cc=cygwin-wrapper cl',
           '--ld=cygwin-wrapper link',

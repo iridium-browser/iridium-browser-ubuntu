@@ -9,11 +9,14 @@
 
 #include "base/memory/weak_ptr.h"
 #include "base/values.h"
+#include "components/ui/zoom/zoom_observer.h"
 #include "content/public/browser/browser_plugin_guest_delegate.h"
+#include "content/public/browser/guest_sizer.h"
 #include "content/public/browser/render_process_host_observer.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "extensions/common/guest_view/guest_view_constants.h"
 
 struct RendererContentSettingRules;
 
@@ -21,14 +24,14 @@ namespace extensions {
 
 // A GuestViewBase is the base class browser-side API implementation for a
 // <*view> tag. GuestViewBase maintains an association between a guest
-// WebContents and an embedder WebContents. It receives events issued from
-// the guest and relays them to the embedder. GuestViewBase tracks the lifetime
-// of its embedder render process until it is attached to a particular embedder
-// WebContents. At that point, its lifetime is restricted in scope to the
-// lifetime of its embedder WebContents.
+// WebContents and an owner WebContents. It receives events issued from
+// the guest and relays them to the owner. GuestViewBase tracks the lifetime
+// of its owner. A GuestViewBase's owner is referred to as an embedder if
+// it is attached to a container within the owner's WebContents.
 class GuestViewBase : public content::BrowserPluginGuestDelegate,
                       public content::WebContentsDelegate,
-                      public content::WebContentsObserver {
+                      public content::WebContentsObserver,
+                      public ui_zoom::ZoomObserver {
  public:
   class Event {
    public:
@@ -54,11 +57,14 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   }
 
   typedef base::Callback<GuestViewBase*(
-      content::BrowserContext*, int)> GuestCreationCallback;
+      content::BrowserContext*,
+      content::WebContents*,
+      int)> GuestCreationCallback;
   static void RegisterGuestViewType(const std::string& view_type,
                                     const GuestCreationCallback& callback);
 
   static GuestViewBase* Create(content::BrowserContext* browser_context,
+                               content::WebContents* owner_web_contents,
                                int guest_instance_id,
                                const std::string& view_type);
 
@@ -88,7 +94,7 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   virtual void DidStopLoading() {}
 
   // This method is called before the embedder is destroyed.
-  // |embedder_web_contents_| should still be valid during this call. This
+  // |owner_web_contents_| should still be valid during this call. This
   // allows the derived class to perform some cleanup related to the embedder
   // web contents.
   virtual void EmbedderWillBeDestroyed() {}
@@ -119,6 +125,15 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   // behavior to support autosize.
   virtual bool IsAutoSizeSupported() const;
 
+  // This method is invoked when the contents preferred size changes. This will
+  // only ever fire if IsPreferredSizeSupported returns true.
+  virtual void OnPreferredSizeChanged(const gfx::Size& pref_size) {}
+
+  // This method queries whether preferred size events are enabled for this
+  // view. By default, preferred size events are disabled, since they add a
+  // small amount of overhead.
+  virtual bool IsPreferredSizeModeEnabled() const;
+
   // This method queries whether drag-and-drop is enabled for this particular
   // view. By default, drag-and-drop is disabled. Derived classes can override
   // this behavior to enable drag-and-drop.
@@ -136,6 +151,10 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   // This gives the derived class an opportunity to perform some cleanup prior
   // to destruction.
   virtual void WillDestroy() {}
+
+  // This method is to be implemented by the derived class. This indicates
+  // whether zoom should propagate from the embedder to the guest content.
+  virtual bool ZoomPropagatesFromEmbedderToGuest() const;
 
   // This method is to be implemented by the derived class. Access to guest
   // views are determined by the availability of the internal extension API
@@ -156,22 +175,15 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   typedef base::Callback<void(content::WebContents*)>
       WebContentsCreatedCallback;
   virtual void CreateWebContents(
-      const std::string& embedder_extension_id,
-      int embedder_render_process_id,
-      const GURL& embedder_site_url,
       const base::DictionaryValue& create_params,
       const WebContentsCreatedCallback& callback) = 0;
 
   // This creates a WebContents and initializes |this| GuestViewBase to use the
   // newly created WebContents.
-  void Init(const std::string& embedder_extension_id,
-            content::WebContents* embedder_web_contents,
-            const base::DictionaryValue& create_params,
+  void Init(const base::DictionaryValue& create_params,
             const WebContentsCreatedCallback& callback);
 
-  void InitWithWebContents(const std::string& embedder_extension_id,
-                           content::WebContents* embedder_web_contents,
-                           content::WebContents* guest_web_contents);
+  void InitWithWebContents(content::WebContents* guest_web_contents);
 
   bool IsViewType(const char* const view_type) const {
     return !strcmp(GetViewType(), view_type);
@@ -185,7 +197,11 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   bool initialized() const { return initialized_; }
 
   content::WebContents* embedder_web_contents() const {
-    return embedder_web_contents_;
+    return attached() ? owner_web_contents_ : NULL;
+  }
+
+  content::WebContents* owner_web_contents() const {
+    return owner_web_contents_;
   }
 
   // Returns the parameters associated with the element hosting this GuestView
@@ -193,7 +209,9 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   base::DictionaryValue* attach_params() const { return attach_params_.get(); }
 
   // Returns whether this guest has an associated embedder.
-  bool attached() const { return !!embedder_web_contents_; }
+  bool attached() const {
+    return element_instance_id_ != guestview::kInstanceIDNone;
+  }
 
   // Returns the instance ID of the <*view> element.
   int view_instance_id() const { return view_instance_id_; }
@@ -201,23 +219,29 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   // Returns the instance ID of this GuestViewBase.
   int guest_instance_id() const { return guest_instance_id_; }
 
+  // Returns the instance ID of the GuestViewBase's element.
+  int element_instance_id() const { return element_instance_id_; }
+
   // Returns the extension ID of the embedder.
-  const std::string& embedder_extension_id() const {
-    return embedder_extension_id_;
+  const std::string& owner_extension_id() const {
+    return owner_extension_id_;
   }
 
   // Returns whether this GuestView is embedded in an extension/app.
-  bool in_extension() const { return !embedder_extension_id_.empty(); }
+  bool in_extension() const { return !owner_extension_id_.empty(); }
 
   // Returns the user browser context of the embedder.
   content::BrowserContext* browser_context() const { return browser_context_; }
 
-  // Returns the embedder's process ID.
-  int embedder_render_process_id() const { return embedder_render_process_id_; }
-
   GuestViewBase* GetOpener() const {
     return opener_.get();
   }
+
+  // Returns the URL of the owner WebContents.
+  const GURL& GetOwnerSiteURL() const;
+
+  // Whether the guest view is inside a plugin document.
+  bool is_full_page_plugin() { return is_full_page_plugin_; }
 
   // Destroy this guest.
   void Destroy();
@@ -228,34 +252,45 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
 
   // BrowserPluginGuestDelegate implementation.
   void DidAttach(int guest_proxy_routing_id) final;
-  void ElementSizeChanged(const gfx::Size& old_size,
-                          const gfx::Size& new_size) final;
+  void DidDetach() final;
+  void ElementSizeChanged(const gfx::Size& size) final;
+  content::WebContents* GetOwnerWebContents() const final;
   void GuestSizeChanged(const gfx::Size& old_size,
                         const gfx::Size& new_size) final;
   void RegisterDestructionCallback(const DestructionCallback& callback) final;
+  void SetGuestSizer(content::GuestSizer* guest_sizer) final;
   void WillAttach(content::WebContents* embedder_web_contents,
-                  int browser_plugin_instance_id) final;
+                  int browser_plugin_instance_id,
+                  bool is_full_page_plugin) final;
+
+  // ui_zoom::ZoomObserver implementation.
+  void OnZoomChanged(
+      const ui_zoom::ZoomController::ZoomChangedEventData& data) override;
 
   // Dispatches an event |event_name| to the embedder with the |event| fields.
   void DispatchEventToEmbedder(Event* event);
 
  protected:
   GuestViewBase(content::BrowserContext* browser_context,
+                content::WebContents* owner_web_contents,
                 int guest_instance_id);
 
   ~GuestViewBase() override;
 
  private:
-  class EmbedderLifetimeObserver;
+  class OwnerLifetimeObserver;
 
   class OpenerLifetimeObserver;
 
   void SendQueuedEvents();
 
-  void CompleteInit(const std::string& embedder_extension_id,
-                    content::WebContents* embedder_web_contents,
-                    const WebContentsCreatedCallback& callback,
+  void CompleteInit(const WebContentsCreatedCallback& callback,
                     content::WebContents* guest_web_contents);
+
+  void SetUpAutoSize();
+
+  void StartTrackingEmbedderZoomLevel();
+  void StopTrackingEmbedderZoomLevel();
 
   static void RegisterGuestViewTypes();
 
@@ -267,15 +302,26 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   // WebContentsDelegate implementation.
   void ActivateContents(content::WebContents* contents) final;
   void DeactivateContents(content::WebContents* contents) final;
+  void ContentsMouseEvent(content::WebContents* source,
+                          const gfx::Point& location,
+                          bool motion) override;
+  void ContentsZoomChange(bool zoom_in) override;
+  void LoadingStateChanged(content::WebContents* source,
+                           bool to_different_document) final;
   void RunFileChooser(content::WebContents* web_contents,
                       const content::FileChooserParams& params) override;
   bool ShouldFocusPageAfterCrash() final;
   bool PreHandleGestureEvent(content::WebContents* source,
                              const blink::WebGestureEvent& event) final;
+  void UpdatePreferredSize(content::WebContents* web_contents,
+                           const gfx::Size& pref_size) final;
+  void UpdateTargetURL(content::WebContents* source, const GURL& url) override;
 
-  content::WebContents* embedder_web_contents_;
-  std::string embedder_extension_id_;
-  int embedder_render_process_id_;
+  // This guest tracks the lifetime of the WebContents specified by
+  // |owner_web_contents_|. If |owner_web_contents_| is destroyed then this
+  // guest will also self-destruct.
+  content::WebContents* owner_web_contents_;
+  std::string owner_extension_id_;
   content::BrowserContext* browser_context_;
 
   // |guest_instance_id_| is a profile-wide unique identifier for a guest
@@ -286,10 +332,12 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   // embedder RenderViewHost for a particular <*view> instance.
   int view_instance_id_;
 
-  // |element_instance_id_| is an identififer that's unique to a particular
+  // |element_instance_id_| is an identifer that's unique to a particular
   // GuestViewContainer element.
   int element_instance_id_;
 
+  // |initialized_| indicates whether GuestViewBase::Init has been called for
+  // this object.
   bool initialized_;
 
   // Indicates that this guest is in the process of being destroyed.
@@ -312,7 +360,7 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
 
   // This observer ensures that this guest self-destructs if the embedder goes
   // away.
-  scoped_ptr<EmbedderLifetimeObserver> embedder_lifetime_observer_;
+  scoped_ptr<OwnerLifetimeObserver> owner_lifetime_observer_;
 
   // This observer ensures that if the guest is unattached and its opener goes
   // away then this guest also self-destructs.
@@ -325,6 +373,9 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   // element may not match the size of the guest.
   gfx::Size guest_size_;
 
+  // A pointer to the guest_sizer.
+  content::GuestSizer* guest_sizer_;
+
   // Indicates whether autosize mode is enabled or not.
   bool auto_size_enabled_;
 
@@ -333,6 +384,9 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
 
   // The minimum size constraints of the container element in autosize mode.
   gfx::Size min_auto_size_;
+
+  // Whether the guest view is inside a plugin document.
+  bool is_full_page_plugin_;
 
   // This is used to ensure pending tasks will not fire after this object is
   // destroyed.

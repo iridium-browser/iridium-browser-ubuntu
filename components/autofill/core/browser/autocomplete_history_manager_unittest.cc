@@ -19,10 +19,10 @@
 #include "components/autofill/core/browser/test_autofill_driver.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "components/autofill/core/common/form_data.h"
-#include "components/webdata/common/web_data_service_test_util.h"
+#include "components/webdata_services/web_data_service_test_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 
 using base::ASCIIToUTF16;
 using testing::_;
@@ -196,12 +196,9 @@ class MockAutofillExternalDelegate : public AutofillExternalDelegate {
       : AutofillExternalDelegate(autofill_manager, autofill_driver) {}
   virtual ~MockAutofillExternalDelegate() {}
 
-  MOCK_METHOD5(OnSuggestionsReturned,
+  MOCK_METHOD2(OnSuggestionsReturned,
                void(int query_id,
-                    const std::vector<base::string16>& autofill_values,
-                    const std::vector<base::string16>& autofill_labels,
-                    const std::vector<base::string16>& autofill_icons,
-                    const std::vector<int>& autofill_unique_ids));
+                    const std::vector<Suggestion>& suggestions));
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockAutofillExternalDelegate);
@@ -214,6 +211,11 @@ class TestAutocompleteHistoryManager : public AutocompleteHistoryManager {
 
   using AutocompleteHistoryManager::SendSuggestions;
 };
+
+// Predicate for GMock.
+bool IsEmptySuggestionVector(const std::vector<Suggestion>& suggestions) {
+  return suggestions.empty();
+}
 
 }  // namespace
 
@@ -233,7 +235,7 @@ TEST_F(AutocompleteHistoryManagerTest, ExternalDelegate) {
   autocomplete_history_manager.SetExternalDelegate(&external_delegate);
 
   // Should trigger a call to OnSuggestionsReturned, verified by the mock.
-  EXPECT_CALL(external_delegate, OnSuggestionsReturned(_, _, _, _, _));
+  EXPECT_CALL(external_delegate, OnSuggestionsReturned(_, _));
   autocomplete_history_manager.SendSuggestions(NULL);
 }
 
@@ -263,19 +265,13 @@ TEST_F(AutocompleteHistoryManagerTest, NoAutocompleteSuggestionsForTextarea) {
 
   EXPECT_CALL(external_delegate,
               OnSuggestionsReturned(0,
-                                    std::vector<base::string16>(),
-                                    std::vector<base::string16>(),
-                                    std::vector<base::string16>(),
-                                    std::vector<int>()));
+                                    testing::Truly(IsEmptySuggestionVector)));
   autocomplete_history_manager.OnGetAutocompleteSuggestions(
       0,
       field.name,
       field.value,
       field.form_control_type,
-      std::vector<base::string16>(),
-      std::vector<base::string16>(),
-      std::vector<base::string16>(),
-      std::vector<int>());
+      std::vector<Suggestion>());
 }
 
 }  // namespace autofill

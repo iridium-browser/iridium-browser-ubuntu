@@ -216,6 +216,11 @@
       <message desc="Label for 'clear' button in date picker dialog and time picker dialog, used to replace the contents of a field with the empty string [CHAR-LIMIT=12]" name="IDS_DATE_PICKER_DIALOG_CLEAR">
         Clear
       </message>
+
+      <message desc="Hint text for an input field containing the user's credit card CVC (card verification code)." name="IDS_CARD_UNMASK_INPUT_HINT">
+        CVC
+      </message>
+
     </messages>
   </release>
 </grit>

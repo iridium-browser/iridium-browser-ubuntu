@@ -33,6 +33,11 @@
 #include "talk/media/base/videocapturer.h"
 #include "talk/media/base/videocommon.h"
 #include "webrtc/base/logging.h"
+#include "webrtc/video_frame.h"
+
+#define UNIMPLEMENTED                                                 \
+  LOG(LS_ERROR) << "Call to unimplemented function " << __FUNCTION__; \
+  ASSERT(false)
 
 namespace cricket {
 
@@ -71,8 +76,8 @@ WebRtcVideoFrame::FrameBuffer::~FrameBuffer() {
   // Make sure that |video_frame_| doesn't delete the buffer, as |owned_data_|
   // will release the buffer if this FrameBuffer owns it.
   uint8_t* new_memory = NULL;
-  uint32_t new_length = 0;
-  uint32_t new_size = 0;
+  size_t new_length = 0;
+  size_t new_size = 0;
   video_frame_.Swap(new_memory, new_length, new_size);
 }
 
@@ -84,8 +89,8 @@ void WebRtcVideoFrame::FrameBuffer::Attach(uint8* data, size_t length) {
 void WebRtcVideoFrame::FrameBuffer::Alias(uint8* data, size_t length) {
   owned_data_.reset();
   uint8_t* new_memory = reinterpret_cast<uint8_t*>(data);
-  uint32_t new_length = static_cast<uint32_t>(length);
-  uint32_t new_size = static_cast<uint32_t>(length);
+  size_t new_length = length;
+  size_t new_size = length;
   video_frame_.Swap(new_memory, new_length, new_size);
 }
 
@@ -106,14 +111,14 @@ const webrtc::VideoFrame* WebRtcVideoFrame::FrameBuffer::frame() const {
 }
 
 WebRtcVideoFrame::WebRtcVideoFrame()
-    : video_buffer_(new RefCountedBuffer()), is_black_(false) {}
+    : video_buffer_(new RefCountedBuffer()) {}
 
 WebRtcVideoFrame::~WebRtcVideoFrame() {}
 
 bool WebRtcVideoFrame::Init(
     uint32 format, int w, int h, int dw, int dh, uint8* sample,
     size_t sample_size, size_t pixel_width, size_t pixel_height,
-    int64 elapsed_time, int64 time_stamp, int rotation) {
+    int64_t elapsed_time, int64_t time_stamp, int rotation) {
   return Reset(format, w, h, dw, dh, sample, sample_size, pixel_width,
                pixel_height, elapsed_time, time_stamp, rotation);
 }
@@ -145,18 +150,16 @@ bool WebRtcVideoFrame::Alias(const CapturedFrame* frame, int dw, int dh) {
 }
 
 bool WebRtcVideoFrame::InitToBlack(int w, int h, size_t pixel_width,
-                                   size_t pixel_height, int64 elapsed_time,
-                                   int64 time_stamp) {
+                                   size_t pixel_height, int64_t elapsed_time,
+                                   int64_t time_stamp) {
   InitToEmptyBuffer(w, h, pixel_width, pixel_height, elapsed_time, time_stamp);
-  if (!is_black_) {
-    return SetToBlack();
-  }
-  return true;
+  return SetToBlack();
 }
 
 void WebRtcVideoFrame::Alias(
     uint8* buffer, size_t buffer_size, int w, int h, size_t pixel_width,
-    size_t pixel_height, int64 elapsed_time, int64 time_stamp, int rotation) {
+    size_t pixel_height, int64_t elapsed_time, int64_t time_stamp,
+    int rotation) {
   rtc::scoped_refptr<RefCountedBuffer> video_buffer(
       new RefCountedBuffer());
   video_buffer->Alias(buffer, buffer_size);
@@ -246,40 +249,21 @@ size_t WebRtcVideoFrame::CopyToBuffer(uint8* buffer, size_t size) const {
   return needed;
 }
 
-// TODO(fbarchard): Refactor into base class and share with lmi
 size_t WebRtcVideoFrame::ConvertToRgbBuffer(uint32 to_fourcc, uint8* buffer,
                                             size_t size, int stride_rgb) const {
   if (!frame()->Buffer()) {
     return 0;
   }
-  size_t width = frame()->Width();
-  size_t height = frame()->Height();
-  size_t needed = (stride_rgb >= 0 ? stride_rgb : -stride_rgb) * height;
-  if (size < needed) {
-    LOG(LS_WARNING) << "RGB buffer is not large enough";
-    return needed;
-  }
-
-  if (libyuv::ConvertFromI420(GetYPlane(), GetYPitch(), GetUPlane(),
-                              GetUPitch(), GetVPlane(), GetVPitch(), buffer,
-                              stride_rgb,
-                              static_cast<int>(width),
-                              static_cast<int>(height),
-                              to_fourcc)) {
-    LOG(LS_WARNING) << "RGB type not supported: " << to_fourcc;
-    return 0;  // 0 indicates error
-  }
-  return needed;
+  return VideoFrame::ConvertToRgbBuffer(to_fourcc, buffer, size, stride_rgb);
 }
 
 void WebRtcVideoFrame::Attach(
     RefCountedBuffer* video_buffer, size_t buffer_size, int w, int h,
-    size_t pixel_width, size_t pixel_height, int64 elapsed_time,
-    int64 time_stamp, int rotation) {
+    size_t pixel_width, size_t pixel_height, int64_t elapsed_time,
+    int64_t time_stamp, int rotation) {
   if (video_buffer_.get() == video_buffer) {
     return;
   }
-  is_black_ = false;
   video_buffer_ = video_buffer;
   frame()->SetWidth(w);
   frame()->SetHeight(h);
@@ -301,7 +285,7 @@ const webrtc::VideoFrame* WebRtcVideoFrame::frame() const {
 bool WebRtcVideoFrame::Reset(
     uint32 format, int w, int h, int dw, int dh, uint8* sample,
     size_t sample_size, size_t pixel_width, size_t pixel_height,
-    int64 elapsed_time, int64 time_stamp, int rotation) {
+    int64_t elapsed_time, int64_t time_stamp, int rotation) {
   if (!Validate(format, w, h, sample, sample_size)) {
     return false;
   }
@@ -356,8 +340,8 @@ bool WebRtcVideoFrame::Reset(
 }
 
 VideoFrame* WebRtcVideoFrame::CreateEmptyFrame(
-    int w, int h, size_t pixel_width, size_t pixel_height, int64 elapsed_time,
-    int64 time_stamp) const {
+    int w, int h, size_t pixel_width, size_t pixel_height, int64_t elapsed_time,
+    int64_t time_stamp) const {
   WebRtcVideoFrame* frame = new WebRtcVideoFrame();
   frame->InitToEmptyBuffer(w, h, pixel_width, pixel_height, elapsed_time,
                            time_stamp);
@@ -366,12 +350,141 @@ VideoFrame* WebRtcVideoFrame::CreateEmptyFrame(
 
 void WebRtcVideoFrame::InitToEmptyBuffer(int w, int h, size_t pixel_width,
                                          size_t pixel_height,
-                                         int64 elapsed_time, int64 time_stamp) {
+                                         int64_t elapsed_time,
+                                         int64_t time_stamp) {
   size_t buffer_size = VideoFrame::SizeOf(w, h);
   rtc::scoped_refptr<RefCountedBuffer> video_buffer(
       new RefCountedBuffer(buffer_size));
   Attach(video_buffer.get(), buffer_size, w, h, pixel_width, pixel_height,
          elapsed_time, time_stamp, 0);
+}
+
+WebRtcVideoRenderFrame::WebRtcVideoRenderFrame(
+    const webrtc::I420VideoFrame* frame)
+    : frame_(frame) {
+}
+
+bool WebRtcVideoRenderFrame::InitToBlack(int w,
+                                         int h,
+                                         size_t pixel_width,
+                                         size_t pixel_height,
+                                         int64_t elapsed_time,
+                                         int64_t time_stamp) {
+  UNIMPLEMENTED;
+  return false;
+}
+
+bool WebRtcVideoRenderFrame::Reset(uint32 fourcc,
+                                   int w,
+                                   int h,
+                                   int dw,
+                                   int dh,
+                                   uint8* sample,
+                                   size_t sample_size,
+                                   size_t pixel_width,
+                                   size_t pixel_height,
+                                   int64_t elapsed_time,
+                                   int64_t time_stamp,
+                                   int rotation) {
+  UNIMPLEMENTED;
+  return false;
+}
+
+size_t WebRtcVideoRenderFrame::GetWidth() const {
+  return static_cast<size_t>(frame_->width());
+}
+size_t WebRtcVideoRenderFrame::GetHeight() const {
+  return static_cast<size_t>(frame_->height());
+}
+
+const uint8* WebRtcVideoRenderFrame::GetYPlane() const {
+  return frame_->buffer(webrtc::kYPlane);
+}
+const uint8* WebRtcVideoRenderFrame::GetUPlane() const {
+  return frame_->buffer(webrtc::kUPlane);
+}
+const uint8* WebRtcVideoRenderFrame::GetVPlane() const {
+  return frame_->buffer(webrtc::kVPlane);
+}
+
+uint8* WebRtcVideoRenderFrame::GetYPlane() {
+  UNIMPLEMENTED;
+  return NULL;
+}
+uint8* WebRtcVideoRenderFrame::GetUPlane() {
+  UNIMPLEMENTED;
+  return NULL;
+}
+uint8* WebRtcVideoRenderFrame::GetVPlane() {
+  UNIMPLEMENTED;
+  return NULL;
+}
+
+int32 WebRtcVideoRenderFrame::GetYPitch() const {
+  return frame_->stride(webrtc::kYPlane);
+}
+int32 WebRtcVideoRenderFrame::GetUPitch() const {
+  return frame_->stride(webrtc::kUPlane);
+}
+int32 WebRtcVideoRenderFrame::GetVPitch() const {
+  return frame_->stride(webrtc::kVPlane);
+}
+
+void* WebRtcVideoRenderFrame::GetNativeHandle() const {
+  return NULL;
+}
+
+size_t WebRtcVideoRenderFrame::GetPixelWidth() const {
+  return 1;
+}
+size_t WebRtcVideoRenderFrame::GetPixelHeight() const {
+  return 1;
+}
+
+int64_t WebRtcVideoRenderFrame::GetElapsedTime() const {
+  // Convert millisecond render time to ns timestamp.
+  return frame_->render_time_ms() * rtc::kNumNanosecsPerMillisec;
+}
+int64_t WebRtcVideoRenderFrame::GetTimeStamp() const {
+  // Convert 90K rtp timestamp to ns timestamp.
+  return (frame_->timestamp() / 90) * rtc::kNumNanosecsPerMillisec;
+}
+void WebRtcVideoRenderFrame::SetElapsedTime(int64_t elapsed_time) {
+  UNIMPLEMENTED;
+}
+void WebRtcVideoRenderFrame::SetTimeStamp(int64_t time_stamp) {
+  UNIMPLEMENTED;
+}
+
+int WebRtcVideoRenderFrame::GetRotation() const {
+  UNIMPLEMENTED;
+  return ROTATION_0;
+}
+
+VideoFrame* WebRtcVideoRenderFrame::Copy() const {
+  UNIMPLEMENTED;
+  return NULL;
+}
+
+bool WebRtcVideoRenderFrame::MakeExclusive() {
+  UNIMPLEMENTED;
+  return false;
+}
+
+size_t WebRtcVideoRenderFrame::CopyToBuffer(uint8* buffer, size_t size) const {
+  UNIMPLEMENTED;
+  return 0;
+}
+
+VideoFrame* WebRtcVideoRenderFrame::CreateEmptyFrame(int w,
+                                                     int h,
+                                                     size_t pixel_width,
+                                                     size_t pixel_height,
+                                                     int64_t elapsed_time,
+                                                     int64_t time_stamp) const {
+  WebRtcVideoFrame* frame = new WebRtcVideoFrame();
+  frame->InitToBlack(w, h, pixel_width, pixel_height, elapsed_time, time_stamp);
+  return frame;
 }
 
 }  // namespace cricket

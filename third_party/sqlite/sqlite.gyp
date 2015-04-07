@@ -110,6 +110,9 @@
               '-Wno-empty-body',
               # sqlite has some `unsigned < 0` checks.
               '-Wno-tautological-compare',
+              # Needed because we don't have this commit yet:
+              # https://github.com/mackyle/sqlite/commit/25df0fa050dcc9be7fb937b8e25be24049b3fef0
+              '-Wno-pointer-bool-conversion',
             ],
           },
           'conditions': [
@@ -134,7 +137,7 @@
                 'SQLITE_DEFAULT_AUTOVACUUM=1',
                 'SQLITE_TEMP_STORE=3',
                 'SQLITE_ENABLE_FTS3_BACKWARDS',
-                'DSQLITE_DEFAULT_FILE_FORMAT=4',
+                'SQLITE_DEFAULT_FILE_FORMAT=4',
               ],
             }],
             ['os_posix == 1 and OS != "mac" and OS != "android"', {

@@ -38,7 +38,8 @@ namespace blink {
 
 class ExecutionContext;
 
-class DOMTimer final : public SuspendableTimer {
+class DOMTimer final : public RefCountedWillBeGarbageCollectedFinalized<DOMTimer>, public SuspendableTimer {
+    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(DOMTimer);
 public:
     // Creates a new timer owned by the ExecutionContext, starts it and returns its ID.
     static int install(ExecutionContext*, PassOwnPtr<ScheduledAction>, int timeout, bool singleShot);
@@ -49,20 +50,23 @@ public:
     int timeoutID() const;
 
     // ActiveDOMObject
-    virtual void contextDestroyed() override;
     virtual void stop() override;
 
     // The following are essentially constants. All intervals are in seconds.
     static double hiddenPageAlignmentInterval();
     static double visiblePageAlignmentInterval();
 
+    virtual void trace(Visitor*) override;
+
+    void dispose();
+
 private:
     friend class ExecutionContext; // For create().
 
     // Should only be used by ExecutionContext.
-    static PassOwnPtr<DOMTimer> create(ExecutionContext* context, PassOwnPtr<ScheduledAction> action, int timeout, bool singleShot, int timeoutID)
+    static PassRefPtrWillBeRawPtr<DOMTimer> create(ExecutionContext* context, PassOwnPtr<ScheduledAction> action, int timeout, bool singleShot, int timeoutID)
     {
-        return adoptPtr(new DOMTimer(context, action, timeout, singleShot, timeoutID));
+        return adoptRefWillBeNoop(new DOMTimer(context, action, timeout, singleShot, timeoutID));
     }
 
     DOMTimer(ExecutionContext*, PassOwnPtr<ScheduledAction>, int interval, bool singleShot, int timeoutID);

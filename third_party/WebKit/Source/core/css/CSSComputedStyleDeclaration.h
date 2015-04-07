@@ -88,7 +88,6 @@ private:
     virtual unsigned length() const override;
     virtual String item(unsigned index) const override;
     PassRefPtr<RenderStyle> computeRenderStyle() const;
-    virtual PassRefPtrWillBeRawPtr<CSSValue> getPropertyCSSValue(const String& propertyName) override;
     virtual String getPropertyValue(const String& propertyName) override;
     virtual String getPropertyPriority(const String& propertyName) override;
     virtual String getPropertyShorthand(const String& propertyName) override;
@@ -102,17 +101,6 @@ private:
     virtual void setPropertyInternal(CSSPropertyID, const String& value, bool important, ExceptionState&) override;
 
     virtual bool cssPropertyMatches(CSSPropertyID, const CSSValue*) const override;
-
-    PassRefPtrWillBeRawPtr<CSSValue> valueForShadowData(const ShadowData&, const RenderStyle&, bool useSpread) const;
-    PassRefPtrWillBeRawPtr<CSSValue> valueForShadowList(const ShadowList*, const RenderStyle&, bool useSpread) const;
-    PassRefPtrWillBeRawPtr<CSSPrimitiveValue> currentColorOrValidColor(const RenderStyle&, const StyleColor&) const;
-
-    PassRefPtrWillBeRawPtr<CSSValue> valueForFilter(const RenderObject*, const RenderStyle&) const;
-
-    PassRefPtrWillBeRawPtr<CSSValueList> valuesForShorthandProperty(const StylePropertyShorthand&) const;
-    PassRefPtrWillBeRawPtr<CSSValueList> valuesForSidesShorthand(const StylePropertyShorthand&) const;
-    PassRefPtrWillBeRawPtr<CSSValueList> valuesForBackgroundShorthand() const;
-    PassRefPtrWillBeRawPtr<CSSValueList> valuesForGridShorthand(const StylePropertyShorthand&) const;
 
     RefPtrWillBeMember<Node> m_node;
     PseudoId m_pseudoElementSpecifier;

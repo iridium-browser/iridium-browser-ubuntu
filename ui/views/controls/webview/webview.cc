@@ -87,6 +87,10 @@ void WebView::SetFastResize(bool fast_resize) {
   holder_->set_fast_resize(fast_resize);
 }
 
+void WebView::SetResizeBackgroundColor(SkColor resize_background_color) {
+  holder_->set_resize_background_color(resize_background_color);
+}
+
 void WebView::OnWebContentsFocused(content::WebContents* web_contents) {
   FocusManager* focus_manager = GetFocusManager();
   if (focus_manager)
@@ -197,6 +201,21 @@ bool WebView::SkipDefaultKeyEventProcessing(const ui::KeyEvent& event) {
   // not process them, they'll be returned to us and we'll treat them as
   // accelerators then.
   return web_contents() && !web_contents()->IsCrashed();
+}
+
+bool WebView::OnMousePressed(const ui::MouseEvent& event) {
+  // A left-click within WebView is a request to focus.  The area within the
+  // native view child is excluded since it will be handling mouse pressed
+  // events itself (http://crbug.com/436192).
+  if (event.IsOnlyLeftMouseButton() && HitTestPoint(event.location())) {
+    gfx::Point location_in_holder = event.location();
+    ConvertPointToTarget(this, holder_, &location_in_holder);
+    if (!holder_->HitTestPoint(location_in_holder)) {
+      RequestFocus();
+      return true;
+    }
+  }
+  return View::OnMousePressed(event);
 }
 
 void WebView::OnFocus() {

@@ -41,7 +41,6 @@
 
 namespace blink {
 
-class ContainerNode;
 class Node;
 class StyleSheetContents;
 class StyleRuleFontFace;
@@ -57,7 +56,7 @@ public:
     DocumentOrderedList& styleSheetCandidateNodes() { return m_styleSheetCandidateNodes; }
 
     void clearMediaQueryRuleSetStyleSheets();
-    void enableExitTransitionStylesheets();
+    void setExitTransitionStyleshetsEnabled(bool);
 
     virtual void trace(Visitor*) override;
 

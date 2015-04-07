@@ -80,7 +80,6 @@ static const char* const kSwitchNames[] = {
   switches::kDisableSeccompFilterSandbox,
 #if defined(ENABLE_WEBRTC)
   switches::kDisableWebRtcHWEncoding,
-  switches::kEnableWebRtcHWVp8Encoding,
 #endif
   switches::kEnableLogging,
   switches::kEnableShareGroupAsyncTextureUpload,
@@ -93,8 +92,10 @@ static const char* const kSwitchNames[] = {
   switches::kGpuSandboxStartEarly,
   switches::kIgnoreResolutionLimitsForAcceleratedVideoDecode,
   switches::kLoggingLevel,
-  switches::kLowEndDeviceMode,
+  switches::kEnableLowEndDeviceMode,
+  switches::kDisableLowEndDeviceMode,
   switches::kNoSandbox,
+  switches::kProfilerTiming,
   switches::kTestGLLib,
   switches::kTraceStartup,
   switches::kTraceToConsole,
@@ -326,9 +327,10 @@ void GpuProcessHost::GetProcessHandles(
   }
   std::list<base::ProcessHandle> handles;
   for (size_t i = 0; i < arraysize(g_gpu_process_hosts); ++i) {
+    // TODO(rvargas) crbug/417532: don't store ProcessHandles!.
     GpuProcessHost* host = g_gpu_process_hosts[i];
     if (host && ValidateHost(host))
-      handles.push_back(host->process_->GetHandle());
+      handles.push_back(host->process_->GetProcess().Handle());
   }
   BrowserThread::PostTask(
       BrowserThread::UI,
@@ -502,13 +504,6 @@ bool GpuProcessHost::Init() {
 
   if (in_process_) {
     DCHECK(g_gpu_main_thread_factory);
-    base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-    command_line->AppendSwitch(switches::kDisableGpuWatchdog);
-
-    GpuDataManagerImpl* gpu_data_manager = GpuDataManagerImpl::GetInstance();
-    DCHECK(gpu_data_manager);
-    gpu_data_manager->AppendGpuCommandLine(command_line);
-
     in_process_gpu_thread_.reset(g_gpu_main_thread_factory(channel_id));
     base::Thread::Options options;
 #if defined(OS_WIN)
@@ -651,40 +646,46 @@ void GpuProcessHost::CreateViewCommandBuffer(
 }
 
 void GpuProcessHost::CreateGpuMemoryBuffer(
-    gfx::GpuMemoryBufferType type,
     gfx::GpuMemoryBufferId id,
     const gfx::Size& size,
     gfx::GpuMemoryBuffer::Format format,
     gfx::GpuMemoryBuffer::Usage usage,
     int client_id,
+    int32 surface_id,
     const CreateGpuMemoryBufferCallback& callback) {
   TRACE_EVENT0("gpu", "GpuProcessHost::CreateGpuMemoryBuffer");
 
   DCHECK(CalledOnValidThread());
 
   GpuMsg_CreateGpuMemoryBuffer_Params params;
-  params.type = type;
   params.id = id;
   params.size = size;
   params.format = format;
   params.usage = usage;
   params.client_id = client_id;
+  params.surface_handle =
+      GpuSurfaceTracker::GetInstance()->GetSurfaceHandle(surface_id).handle;
   if (Send(new GpuMsg_CreateGpuMemoryBuffer(params))) {
     create_gpu_memory_buffer_requests_.push(callback);
+    create_gpu_memory_buffer_surface_refs_.push(surface_id);
+    if (surface_id) {
+      surface_refs_.insert(std::make_pair(
+          surface_id, GpuSurfaceTracker::GetInstance()->GetSurfaceRefForSurface(
+                          surface_id)));
+    }
   } else {
     callback.Run(gfx::GpuMemoryBufferHandle());
   }
 }
 
-void GpuProcessHost::DestroyGpuMemoryBuffer(gfx::GpuMemoryBufferType type,
-                                            gfx::GpuMemoryBufferId id,
+void GpuProcessHost::DestroyGpuMemoryBuffer(gfx::GpuMemoryBufferId id,
                                             int client_id,
                                             int sync_point) {
   TRACE_EVENT0("gpu", "GpuProcessHost::DestroyGpuMemoryBuffer");
 
   DCHECK(CalledOnValidThread());
 
-  Send(new GpuMsg_DestroyGpuMemoryBuffer(type, id, client_id, sync_point));
+  Send(new GpuMsg_DestroyGpuMemoryBuffer(id, client_id, sync_point));
 }
 
 void GpuProcessHost::OnInitialized(bool result, const gpu::GPUInfo& gpu_info) {
@@ -760,6 +761,13 @@ void GpuProcessHost::OnGpuMemoryBufferCreated(
       create_gpu_memory_buffer_requests_.front();
   create_gpu_memory_buffer_requests_.pop();
   callback.Run(handle);
+
+  int32 surface_id = create_gpu_memory_buffer_surface_refs_.front();
+  create_gpu_memory_buffer_surface_refs_.pop();
+  SurfaceRefMap::iterator it = surface_refs_.find(surface_id);
+  if (it != surface_refs_.end()) {
+    surface_refs_.erase(it);
+  }
 }
 
 void GpuProcessHost::OnDidCreateOffscreenContext(const GURL& url) {
@@ -870,6 +878,13 @@ bool GpuProcessHost::LaunchGpuProcess(const std::string& channel_id) {
   base::CommandLine::StringType gpu_launcher =
       browser_command_line.GetSwitchValueNative(switches::kGpuLauncher);
 
+#if defined(OS_ANDROID)
+  // crbug.com/447735. readlink("self/proc/exe") sometimes fails on Android
+  // at startup with EACCES. As a workaround ignore this here, since the
+  // executable name is actually not used or useful anyways.
+  base::CommandLine* cmd_line =
+      new base::CommandLine(base::CommandLine::NO_PROGRAM);
+#else
 #if defined(OS_LINUX)
   int child_flags = gpu_launcher.empty() ? ChildProcessHost::CHILD_ALLOW_SELF :
                                            ChildProcessHost::CHILD_NORMAL;
@@ -882,6 +897,7 @@ bool GpuProcessHost::LaunchGpuProcess(const std::string& channel_id) {
     return false;
 
   base::CommandLine* cmd_line = new base::CommandLine(exe_path);
+#endif
   cmd_line->AppendSwitchASCII(switches::kProcessType, switches::kGpuProcess);
   cmd_line->AppendSwitchASCII(switches::kProcessChannelID, channel_id);
 

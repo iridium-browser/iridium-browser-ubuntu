@@ -42,6 +42,7 @@
 #include "ui/views/window/dialog_delegate.h"
 
 using chromeos::NetworkConfigurationHandler;
+using chromeos::NetworkConfigurationObserver;
 using chromeos::NetworkConnectionHandler;
 using chromeos::NetworkHandler;
 using chromeos::NetworkProfileHandler;
@@ -133,6 +134,7 @@ class PasswordView : public views::View, public views::ButtonListener {
     NetworkHandler::Get()->network_configuration_handler()->SetProperties(
         network_.service_path,
         properties,
+        NetworkConfigurationObserver::SOURCE_USER_ACTION,
         base::Bind(&PasswordView::OnSetPropertiesSucceed,
                    weak_ptr_.GetWeakPtr()),
         base::Bind(&PasswordView::OnKnownError, weak_ptr_.GetWeakPtr()));
@@ -169,6 +171,7 @@ class PasswordView : public views::View, public views::ButtonListener {
       NetworkHandler::Get()->network_configuration_handler()->SetNetworkProfile(
           network_.service_path,
           NetworkProfileHandler::GetSharedProfilePath(),
+          NetworkConfigurationObserver::SOURCE_USER_ACTION,
           base::Bind(&PasswordView::OnSetProfileSucceed,
                      weak_ptr_.GetWeakPtr(),
                      textfield_->text()),
@@ -240,7 +243,7 @@ class NetworkRow : public views::View {
 
     // If this is not a wifi network that needs a password, then ignore.
     if (network->type() != shill::kTypeWifi ||
-        network->security() == shill::kSecurityNone) {
+        network->security_class() == shill::kSecurityNone) {
       return;
     }
 

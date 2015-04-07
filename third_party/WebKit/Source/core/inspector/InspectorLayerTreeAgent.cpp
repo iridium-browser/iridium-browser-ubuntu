@@ -167,7 +167,7 @@ void InspectorLayerTreeAgent::setFrontend(InspectorFrontend* frontend)
 
 void InspectorLayerTreeAgent::clearFrontend()
 {
-    m_frontend = 0;
+    m_frontend = nullptr;
     disable(0);
 }
 
@@ -266,7 +266,7 @@ int InspectorLayerTreeAgent::idForNode(Node* node)
 RenderLayerCompositor* InspectorLayerTreeAgent::renderLayerCompositor()
 {
     RenderView* renderView = m_page->deprecatedLocalMainFrame()->contentRenderer();
-    RenderLayerCompositor* compositor = renderView ? renderView->compositor() : 0;
+    RenderLayerCompositor* compositor = renderView ? renderView->compositor() : nullptr;
     return compositor;
 }
 
@@ -290,7 +290,7 @@ static GraphicsLayer* findLayerById(GraphicsLayer* root, int layerId)
         if (GraphicsLayer* layer = findLayerById(root->children()[i], layerId))
             return layer;
     }
-    return 0;
+    return nullptr;
 }
 
 GraphicsLayer* InspectorLayerTreeAgent::layerById(ErrorString* errorString, const String& layerId)
@@ -299,12 +299,12 @@ GraphicsLayer* InspectorLayerTreeAgent::layerById(ErrorString* errorString, cons
     int id = layerId.toInt(&ok);
     if (!ok) {
         *errorString = "Invalid layer id";
-        return 0;
+        return nullptr;
     }
     RenderLayerCompositor* compositor = renderLayerCompositor();
     if (!compositor) {
         *errorString = "Not in compositing mode";
-        return 0;
+        return nullptr;
     }
 
     GraphicsLayer* result = findLayerById(rootGraphicsLayer(), id);
@@ -347,14 +347,35 @@ void InspectorLayerTreeAgent::makeSnapshot(ErrorString* errorString, const Strin
     ASSERT_UNUSED(newEntry, newEntry);
 }
 
-void InspectorLayerTreeAgent::loadSnapshot(ErrorString* errorString, const String& data, String* snapshotId)
+void InspectorLayerTreeAgent::loadSnapshot(ErrorString* errorString, const RefPtr<JSONArray>& tiles, String* snapshotId)
 {
-    Vector<char> snapshotData;
-    if (!base64Decode(data, snapshotData)) {
-        *errorString = "Invalid base64 encoding";
+    if (!tiles->length()) {
+        *errorString = "Invalid argument, no tiles provided";
         return;
     }
-    RefPtr<GraphicsContextSnapshot> snapshot = GraphicsContextSnapshot::load(snapshotData.data(), snapshotData.size());
+    Vector<RefPtr<GraphicsContextSnapshot::TilePictureStream> > decodedTiles;
+    decodedTiles.grow(tiles->length());
+    for (size_t i = 0; i < tiles->length(); ++i) {
+        RefPtr<JSONObject> item;
+        if (!tiles->get(i)->asObject(&item)) {
+            *errorString = "Invalid argument, array item is not an object";
+            return;
+        }
+        double x = 0, y = 0;
+        String picture;
+        if (!item->getNumber("x", &x) || !item->getNumber("y", &y)
+            || !item->getString("picture", &picture)) {
+            *errorString = "Invalid argument, missing required field";
+            return;
+        }
+        decodedTiles[i] = adoptRef(new GraphicsContextSnapshot::TilePictureStream());
+        decodedTiles[i]->layerOffset.set(x, y);
+        if (!base64Decode(picture, decodedTiles[i]->data)) {
+            *errorString = "Invalid base64 encoding";
+            return;
+        }
+    }
+    RefPtr<GraphicsContextSnapshot> snapshot = GraphicsContextSnapshot::load(decodedTiles);
     if (!snapshot) {
         *errorString = "Invalida snapshot format";
         return;
@@ -379,7 +400,7 @@ const GraphicsContextSnapshot* InspectorLayerTreeAgent::snapshotById(ErrorString
     SnapshotById::iterator it = m_snapshotById.find(snapshotId);
     if (it == m_snapshotById.end()) {
         *errorString = "Snapshot not found";
-        return 0;
+        return nullptr;
     }
     return it->value.get();
 }
@@ -401,12 +422,27 @@ void InspectorLayerTreeAgent::replaySnapshot(ErrorString* errorString, const Str
     *dataURL = url.toString();
 }
 
-void InspectorLayerTreeAgent::profileSnapshot(ErrorString* errorString, const String& snapshotId, const int* minRepeatCount, const double* minDuration, RefPtr<TypeBuilder::Array<TypeBuilder::Array<double> > >& outTimings)
+static bool parseRect(const JSONObject& object, FloatRect* rect)
+{
+    double x = 0, y = 0;
+    double width = 0, height = 0;
+    if (!object.getNumber("x", &x) || !object.getNumber("y", &y) || !object.getNumber("width", &width) || !object.getNumber("width", &height))
+        return false;
+    *rect = FloatRect(x, y, width, height);
+    return true;
+}
+
+void InspectorLayerTreeAgent::profileSnapshot(ErrorString* errorString, const String& snapshotId, const int* minRepeatCount, const double* minDuration, const RefPtr<JSONObject>* clipRect, RefPtr<TypeBuilder::Array<TypeBuilder::Array<double> > >& outTimings)
 {
     const GraphicsContextSnapshot* snapshot = snapshotById(errorString, snapshotId);
     if (!snapshot)
         return;
-    OwnPtr<GraphicsContextSnapshot::Timings> timings = snapshot->profile(minRepeatCount ? *minRepeatCount : 1, minDuration ? *minDuration : 0);
+    FloatRect rect;
+    if (clipRect && !parseRect(**clipRect, &rect)) {
+        *errorString = "Invalid argument, missing required field";
+        return;
+    }
+    OwnPtr<GraphicsContextSnapshot::Timings> timings = snapshot->profile(minRepeatCount ? *minRepeatCount : 1, minDuration ? *minDuration : 0, clipRect ? &rect : 0);
     outTimings = TypeBuilder::Array<TypeBuilder::Array<double> >::create();
     for (size_t i = 0; i < timings->size(); ++i) {
         const Vector<double>& row = (*timings)[i];

@@ -38,11 +38,8 @@ class SkBitmap;
 namespace blink {
 
 class WebCompositeAndReadbackAsyncCallback;
-class WebGraphicsContext3D;
 class WebLayer;
 struct WebPoint;
-struct WebRect;
-struct WebRenderingStats;
 struct WebSelectionBound;
 
 class WebLayerTreeView {
@@ -50,11 +47,6 @@ public:
     virtual ~WebLayerTreeView() { }
 
     // Initialization and lifecycle --------------------------------------
-
-    // Indicates that the compositing surface used by this WebLayerTreeView is ready to use.
-    // A WebLayerTreeView may request a context from its client before the surface is ready,
-    // but it won't attempt to use it.
-    virtual void setSurfaceReady() = 0;
 
     // Sets the root of the tree. The root is set by way of the constructor.
     virtual void setRootLayer(const WebLayer&) = 0;
@@ -125,7 +117,8 @@ public:
 
     // Identify key layers to the compositor when using the pinch virtual viewport.
     virtual void registerViewportLayers(
-        const WebLayer* pageScaleLayerLayer,
+        const WebLayer* overscrollElasticityLayer,
+        const WebLayer* pageScaleLayer,
         const WebLayer* innerViewportScrollLayer,
         const WebLayer* outerViewportScrollLayer) { }
     virtual void clearViewportLayers() { }

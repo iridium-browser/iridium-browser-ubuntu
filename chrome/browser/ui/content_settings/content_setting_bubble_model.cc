@@ -8,7 +8,9 @@
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/content_settings/chrome_content_settings_utils.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
+#include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
@@ -49,6 +51,14 @@ using content_settings::SETTING_SOURCE_NONE;
 namespace {
 
 const int kAllowButtonIndex = 0;
+
+// These states must match the order of appearance of the radio buttons
+// in the XIB file for the Mac port.
+enum RPHState {
+  RPH_ALLOW = 0,
+  RPH_BLOCK,
+  RPH_IGNORE,
+};
 
 struct ContentSettingsTypeIdEntry {
   ContentSettingsType type;
@@ -495,7 +505,10 @@ ContentSettingPluginBubbleModel::~ContentSettingPluginBubbleModel() {
 
 void ContentSettingPluginBubbleModel::OnCustomLinkClicked() {
   content::RecordAction(UserMetricsAction("ClickToPlay_LoadAll_Bubble"));
-  DCHECK(web_contents());
+  // Web contents can be NULL if the tab was closed while the plugins
+  // settings bubble is visible.
+  if (!web_contents())
+    return;
 #if defined(ENABLE_PLUGINS)
   // TODO(bauerb): We should send the identifiers of blocked plug-ins here.
   ChromePluginServiceFilter::GetInstance()->AuthorizeAllPlugins(
@@ -972,14 +985,14 @@ ContentSettingMixedScriptBubbleModel::ContentSettingMixedScriptBubbleModel(
     : ContentSettingTitleLinkAndCustomModel(
         delegate, web_contents, profile, content_type) {
   DCHECK_EQ(content_type, CONTENT_SETTINGS_TYPE_MIXEDSCRIPT);
-  TabSpecificContentSettings::RecordMixedScriptAction(
-      TabSpecificContentSettings::MIXED_SCRIPT_ACTION_DISPLAYED_BUBBLE);
+  content_settings::RecordMixedScriptAction(
+      content_settings::MIXED_SCRIPT_ACTION_DISPLAYED_BUBBLE);
   set_custom_link_enabled(true);
 }
 
 void ContentSettingMixedScriptBubbleModel::OnCustomLinkClicked() {
-  TabSpecificContentSettings::RecordMixedScriptAction(
-      TabSpecificContentSettings::MIXED_SCRIPT_ACTION_CLICKED_ALLOW);
+  content_settings::RecordMixedScriptAction(
+      content_settings::MIXED_SCRIPT_ACTION_CLICKED_ALLOW);
   DCHECK(web_contents());
   web_contents()->SendToAllFrames(
       new ChromeViewMsg_SetAllowRunningInsecureContent(MSG_ROUTING_NONE, true));

@@ -30,6 +30,7 @@
 #include "content/public/common/result_codes.h"
 #include "content/public/common/stop_find_action.h"
 #include "content/public/common/url_constants.h"
+#include "extensions/browser/api/declarative/rules_registry_service.h"
 #include "extensions/browser/api/extensions_api_client.h"
 #include "extensions/browser/api/web_request/web_request_api.h"
 #include "extensions/browser/api/web_view/web_view_internal_api.h"
@@ -150,8 +151,11 @@ void RemoveWebViewEventListenersOnIOThread(
 
 // static
 GuestViewBase* WebViewGuest::Create(content::BrowserContext* browser_context,
+                                    content::WebContents* owner_web_contents,
                                     int guest_instance_id) {
-  return new WebViewGuest(browser_context, guest_instance_id);
+  return new WebViewGuest(browser_context,
+                          owner_web_contents,
+                          guest_instance_id);
 }
 
 // static
@@ -180,6 +184,33 @@ bool WebViewGuest::GetGuestPartitionConfigForSite(
 // static
 const char WebViewGuest::Type[] = "webview";
 
+typedef std::pair<int, int> WebViewKey;
+typedef std::map<WebViewKey, int> WebViewKeyToIDMap;
+static base::LazyInstance<WebViewKeyToIDMap> web_view_key_to_id_map =
+    LAZY_INSTANCE_INITIALIZER;
+
+// static
+int WebViewGuest::GetOrGenerateRulesRegistryID(
+    int embedder_process_id,
+    int webview_instance_id) {
+  bool is_web_view = embedder_process_id && webview_instance_id;
+  if (!is_web_view)
+    return RulesRegistryService::kDefaultRulesRegistryID;
+
+  WebViewKey key = std::make_pair(embedder_process_id, webview_instance_id);
+  auto it = web_view_key_to_id_map.Get().find(key);
+  if (it != web_view_key_to_id_map.Get().end())
+    return it->second;
+
+  content::RenderProcessHost* rph =
+      content::RenderProcessHost::FromID(embedder_process_id);
+  int rules_registry_id =
+      RulesRegistryService::Get(rph->GetBrowserContext())->
+          GetNextRulesRegistryID();
+  web_view_key_to_id_map.Get()[key] = rules_registry_id;
+  return rules_registry_id;
+}
+
 // static
 int WebViewGuest::GetViewInstanceId(WebContents* contents) {
   WebViewGuest* guest = FromWebContents(contents);
@@ -198,13 +229,10 @@ int WebViewGuest::GetTaskPrefix() const {
 }
 
 void WebViewGuest::CreateWebContents(
-    const std::string& embedder_extension_id,
-    int embedder_render_process_id,
-    const GURL& embedder_site_url,
     const base::DictionaryValue& create_params,
     const WebContentsCreatedCallback& callback) {
-  content::RenderProcessHost* embedder_render_process_host =
-      content::RenderProcessHost::FromID(embedder_render_process_id);
+  content::RenderProcessHost* owner_render_process_host =
+      owner_web_contents()->GetRenderProcessHost();
   std::string storage_partition_id;
   bool persist_storage = false;
   std::string storage_partition_string;
@@ -216,26 +244,14 @@ void WebViewGuest::CreateWebContents(
   if (!base::IsStringUTF8(storage_partition_id)) {
     content::RecordAction(
         base::UserMetricsAction("BadMessageTerminate_BPGM"));
-    base::KillProcess(
-        embedder_render_process_host->GetHandle(),
-        content::RESULT_CODE_KILLED_BAD_MESSAGE, false);
+    owner_render_process_host->Shutdown(content::RESULT_CODE_KILLED_BAD_MESSAGE,
+                                        false);
     callback.Run(NULL);
     return;
   }
   std::string url_encoded_partition = net::EscapeQueryParamValue(
       storage_partition_id, false);
-  // The SiteInstance of a given webview tag is based on the fact that it's
-  // a guest process in addition to which platform application or which WebUI
-  // page the tag belongs to and what storage partition is in use, rather than
-  // the URL that the tag is being navigated to.
-  std::string partition_domain;
-  if (embedder_extension_id.empty()) {
-    DCHECK(content::ChildProcessSecurityPolicy::GetInstance()->HasWebUIBindings(
-        embedder_render_process_id));
-    partition_domain = embedder_site_url.host();
-  } else {
-    partition_domain = embedder_extension_id;
-  }
+  std::string partition_domain = GetOwnerSiteURL().host();
   GURL guest_site(base::StringPrintf("%s://%s/%s?%s",
                                      content::kGuestScheme,
                                      partition_domain.c_str(),
@@ -247,7 +263,7 @@ void WebViewGuest::CreateWebContents(
   // the new tag can script each other.
   GuestViewManager* guest_view_manager =
       GuestViewManager::FromBrowserContext(
-          embedder_render_process_host->GetBrowserContext());
+          owner_render_process_host->GetBrowserContext());
   content::SiteInstance* guest_site_instance =
       guest_view_manager->GetGuestSiteInstance(guest_site);
   if (!guest_site_instance) {
@@ -255,18 +271,16 @@ void WebViewGuest::CreateWebContents(
     // that webview tags are also not allowed to send messages across
     // different partitions.
     guest_site_instance = content::SiteInstance::CreateForURL(
-        embedder_render_process_host->GetBrowserContext(), guest_site);
+        owner_render_process_host->GetBrowserContext(), guest_site);
   }
   WebContents::CreateParams params(
-      embedder_render_process_host->GetBrowserContext(),
+      owner_render_process_host->GetBrowserContext(),
       guest_site_instance);
   params.guest_delegate = this;
   callback.Run(WebContents::Create(params));
 }
 
 void WebViewGuest::DidAttachToEmbedder() {
-  SetUpAutoSize();
-
   std::string name;
   if (attach_params()->GetString(webview::kAttributeName, &name)) {
     // If the guest window's name is empty, then the WebView tag's name is
@@ -321,9 +335,6 @@ void WebViewGuest::DidAttachToEmbedder() {
   // We need to set the background opaque flag after navigation to ensure that
   // there is a RenderWidgetHostView available.
   SetAllowTransparency(allow_transparency);
-
-  if (web_view_guest_delegate_)
-    web_view_guest_delegate_->OnDidAttachToEmbedder();
 }
 
 void WebViewGuest::DidInitialize() {
@@ -356,8 +367,12 @@ void WebViewGuest::DidStopLoading() {
 }
 
 void WebViewGuest::EmbedderWillBeDestroyed() {
-  if (web_view_guest_delegate_)
-    web_view_guest_delegate_->OnEmbedderWillBeDestroyed();
+  // Clean up rules registries for the webview.
+  RulesRegistryService::Get(browser_context())
+      ->RemoveRulesRegistriesByID(rules_registry_id_);
+  WebViewKey key(owner_web_contents()->GetRenderProcessHost()->GetID(),
+                 view_instance_id());
+  web_view_key_to_id_map.Get().erase(key);
 
   content::BrowserThread::PostTask(
       content::BrowserThread::IO,
@@ -365,8 +380,8 @@ void WebViewGuest::EmbedderWillBeDestroyed() {
       base::Bind(
           &RemoveWebViewEventListenersOnIOThread,
           browser_context(),
-          embedder_extension_id(),
-          embedder_render_process_id(),
+          owner_extension_id(),
+          owner_web_contents()->GetRenderProcessHost()->GetID(),
           view_instance_id()));
 }
 
@@ -527,7 +542,6 @@ void WebViewGuest::CreateNewGuestWebViewWindow(
   create_params.SetString(webview::kStoragePartitionId, storage_partition_id);
 
   guest_manager->CreateGuest(WebViewGuest::Type,
-                             embedder_extension_id(),
                              embedder_web_contents(),
                              create_params,
                              base::Bind(&WebViewGuest::NewGuestWebViewCallback,
@@ -597,12 +611,6 @@ void WebViewGuest::Observe(int type,
   }
 }
 
-double WebViewGuest::GetZoom() {
-  if (!web_view_guest_delegate_)
-    return 1.0;
-  return web_view_guest_delegate_->GetZoom();
-}
-
 void WebViewGuest::StartFinding(
     const base::string16& search_text,
     const blink::WebFindOptions& options,
@@ -651,7 +659,8 @@ void WebViewGuest::Terminate() {
   base::ProcessHandle process_handle =
       web_contents()->GetRenderProcessHost()->GetHandle();
   if (process_handle)
-    base::KillProcess(process_handle, content::RESULT_CODE_KILLED, false);
+    web_contents()->GetRenderProcessHost()->Shutdown(
+        content::RESULT_CODE_KILLED, false);
 }
 
 bool WebViewGuest::ClearData(const base::Time remove_since,
@@ -678,12 +687,17 @@ bool WebViewGuest::ClearData(const base::Time remove_since,
 }
 
 WebViewGuest::WebViewGuest(content::BrowserContext* browser_context,
+                           content::WebContents* owner_web_contents,
                            int guest_instance_id)
-    : GuestView<WebViewGuest>(browser_context, guest_instance_id),
+    : GuestView<WebViewGuest>(browser_context,
+                              owner_web_contents,
+                              guest_instance_id),
+      rules_registry_id_(RulesRegistryService::kInvalidRulesRegistryID),
       find_helper_(this),
       is_overriding_user_agent_(false),
       guest_opaque_(true),
       javascript_dialog_helper_(this),
+      current_zoom_factor_(1.0),
       weak_ptr_factory_(this) {
   web_view_guest_delegate_.reset(
       ExtensionsAPIClient::Get()->CreateWebViewGuestDelegate(this));
@@ -717,6 +731,14 @@ void WebViewGuest::DidCommitProvisionalLoadForFrame(
       new GuestViewBase::Event(webview::kEventLoadCommit, args.Pass()));
 
   find_helper_.CancelAllFindSessions();
+
+  // Update the current zoom factor for the new page.
+  ui_zoom::ZoomController* zoom_controller =
+      ui_zoom::ZoomController::FromWebContents(web_contents());
+  DCHECK(zoom_controller);
+  current_zoom_factor_ =
+      content::ZoomLevelToZoomFactor(zoom_controller->GetZoomLevel());
+
   if (web_view_guest_delegate_) {
     web_view_guest_delegate_->OnDidCommitProvisionalLoadForFrame(
         !render_frame_host->GetParent());
@@ -820,10 +842,12 @@ void WebViewGuest::PushWebViewStateToIOThread() {
   }
 
   WebViewRendererState::WebViewInfo web_view_info;
-  web_view_info.embedder_process_id = embedder_render_process_id();
+  web_view_info.embedder_process_id =
+      owner_web_contents()->GetRenderProcessHost()->GetID();
   web_view_info.instance_id = view_instance_id();
   web_view_info.partition_id = partition_id;
-  web_view_info.embedder_extension_id = embedder_extension_id();
+  web_view_info.owner_extension_id = owner_extension_id();
+  web_view_info.rules_registry_id = rules_registry_id_;
 
   content::BrowserThread::PostTask(
       content::BrowserThread::IO,
@@ -853,7 +877,6 @@ content::WebContents* WebViewGuest::CreateNewGuestWindow(
       GuestViewManager::FromBrowserContext(browser_context());
   return guest_manager->CreateGuestWithWebContentsParams(
       WebViewGuest::Type,
-      embedder_extension_id(),
       embedder_web_contents(),
       create_params);
 }
@@ -896,14 +919,18 @@ void WebViewGuest::RequestPointerLockPermission(
 }
 
 void WebViewGuest::WillAttachToEmbedder() {
+  rules_registry_id_ = GetOrGenerateRulesRegistryID(
+      owner_web_contents()->GetRenderProcessHost()->GetID(),
+      view_instance_id());
+
   // We must install the mapping from guests to WebViews prior to resuming
   // suspended resource loads so that the WebRequest API will catch resource
   // requests.
   PushWebViewStateToIOThread();
 }
 
-content::JavaScriptDialogManager*
-    WebViewGuest::GetJavaScriptDialogManager() {
+content::JavaScriptDialogManager* WebViewGuest::GetJavaScriptDialogManager(
+    WebContents* source) {
   return &javascript_dialog_helper_;
 }
 
@@ -995,28 +1022,6 @@ bool WebViewGuest::HandleKeyboardShortcuts(
   return false;
 }
 
-void WebViewGuest::SetUpAutoSize() {
-  // Read the autosize parameters passed in from the embedder.
-  bool auto_size_enabled = false;
-  attach_params()->GetBoolean(webview::kAttributeAutoSize, &auto_size_enabled);
-
-  int max_height = 0;
-  int max_width = 0;
-  attach_params()->GetInteger(webview::kAttributeMaxHeight, &max_height);
-  attach_params()->GetInteger(webview::kAttributeMaxWidth, &max_width);
-
-  int min_height = 0;
-  int min_width = 0;
-  attach_params()->GetInteger(webview::kAttributeMinHeight, &min_height);
-  attach_params()->GetInteger(webview::kAttributeMinWidth, &min_width);
-
-  // Call SetAutoSize to apply all the appropriate validation and clipping of
-  // values.
-  SetAutoSize(auto_size_enabled,
-              gfx::Size(min_width, min_height),
-              gfx::Size(max_width, max_height));
-}
-
 void WebViewGuest::ShowContextMenu(
     int request_id,
     const WebViewGuestDelegate::MenuItemVector* items) {
@@ -1033,8 +1038,18 @@ void WebViewGuest::SetName(const std::string& name) {
 }
 
 void WebViewGuest::SetZoom(double zoom_factor) {
-  if (web_view_guest_delegate_)
-    web_view_guest_delegate_->OnSetZoom(zoom_factor);
+  ui_zoom::ZoomController* zoom_controller =
+      ui_zoom::ZoomController::FromWebContents(web_contents());
+  DCHECK(zoom_controller);
+  double zoom_level = content::ZoomFactorToZoomLevel(zoom_factor);
+  zoom_controller->SetZoomLevel(zoom_level);
+
+  scoped_ptr<base::DictionaryValue> args(new base::DictionaryValue());
+  args->SetDouble(webview::kOldZoomFactor, current_zoom_factor_);
+  args->SetDouble(webview::kNewZoomFactor, zoom_factor);
+  DispatchEventToEmbedder(
+      new GuestViewBase::Event(webview::kEventZoomChange, args.Pass()));
+  current_zoom_factor_ = zoom_factor;
 }
 
 void WebViewGuest::SetAllowTransparency(bool allow) {
@@ -1220,7 +1235,7 @@ GURL WebViewGuest::ResolveURL(const std::string& src) {
 
   GURL default_url(base::StringPrintf("%s://%s/",
                                       kExtensionScheme,
-                                      embedder_extension_id().c_str()));
+                                      owner_extension_id().c_str()));
   return default_url.Resolve(src);
 }
 
@@ -1229,7 +1244,8 @@ void WebViewGuest::OnWebViewNewWindowResponse(
     bool allow,
     const std::string& user_input) {
   WebViewGuest* guest =
-      WebViewGuest::From(embedder_render_process_id(), new_window_instance_id);
+      WebViewGuest::From(owner_web_contents()->GetRenderProcessHost()->GetID(),
+                         new_window_instance_id);
   if (!guest)
     return;
 

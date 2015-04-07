@@ -7,6 +7,7 @@ import os
 
 from metrics import power
 from telemetry import benchmark
+from telemetry import page as page_module
 from telemetry.page import page_set
 from telemetry.page import page_test
 from telemetry.value import scalar
@@ -14,7 +15,8 @@ from telemetry.value import scalar
 
 class _DromaeoMeasurement(page_test.PageTest):
   def __init__(self):
-    super(_DromaeoMeasurement, self).__init__()
+    super(_DromaeoMeasurement, self).__init__(
+        action_name_to_run='RunPageInteractions')
     self._power_metric = None
 
   def CustomizeBrowserOptions(self, options):
@@ -104,101 +106,156 @@ class _DromaeoBenchmark(benchmark.Benchmark):
       raise NotImplementedError('query_param or tag not in Dromaeo benchmark.')
     archive_data_file = '../page_sets/data/dromaeo.%s.json' % self.tag
     ps = page_set.PageSet(
-        make_javascript_deterministic=False,
         archive_data_file=archive_data_file,
-        file_path=os.path.abspath(__file__))
+        file_path=os.path.abspath(__file__), bucket=page_set.PUBLIC_BUCKET)
     url = 'http://dromaeo.com?%s' % self.query_param
-    ps.AddPageWithDefaultRunNavigate(url)
+    ps.AddUserStory(page_module.Page(
+        url, ps, ps.base_dir, make_javascript_deterministic=False))
     return ps
 
 
 class DromaeoDomCoreAttr(_DromaeoBenchmark):
-  """Dromaeo DOMCore attr JavaScript benchmark."""
+  """Dromaeo DOMCore attr JavaScript benchmark.
+
+  Tests setting and getting DOM node attributes.
+  """
   tag = 'domcoreattr'
   query_param = 'dom-attr'
 
 
 class DromaeoDomCoreModify(_DromaeoBenchmark):
-  """Dromaeo DOMCore modify JavaScript benchmark."""
+  """Dromaeo DOMCore modify JavaScript benchmark.
+
+  Tests creating and injecting DOM nodes.
+  """
   tag = 'domcoremodify'
   query_param = 'dom-modify'
 
 
 class DromaeoDomCoreQuery(_DromaeoBenchmark):
-  """Dromaeo DOMCore query JavaScript benchmark."""
+  """Dromaeo DOMCore query JavaScript benchmark.
+
+  Tests querying DOM elements in a document.
+  """
   tag = 'domcorequery'
   query_param = 'dom-query'
 
 
 class DromaeoDomCoreTraverse(_DromaeoBenchmark):
-  """Dromaeo DOMCore traverse JavaScript benchmark."""
+  """Dromaeo DOMCore traverse JavaScript benchmark.
+
+  Tests traversing a DOM structure.
+  """
   tag = 'domcoretraverse'
   query_param = 'dom-traverse'
 
 
 class DromaeoJslibAttrJquery(_DromaeoBenchmark):
-  """Dromaeo JSLib attr jquery JavaScript benchmark"""
+  """Dromaeo JSLib attr jquery JavaScript benchmark.
+
+  Tests setting and getting DOM node attributes using the jQuery JavaScript
+  Library.
+  """
   tag = 'jslibattrjquery'
   query_param = 'jslib-attr-jquery'
 
 
 class DromaeoJslibAttrPrototype(_DromaeoBenchmark):
-  """Dromaeo JSLib attr prototype JavaScript benchmark"""
+  """Dromaeo JSLib attr prototype JavaScript benchmark.
+
+  Tests setting and getting DOM node attributes using the jQuery JavaScript
+  Library.
+  """
   tag = 'jslibattrprototype'
   query_param = 'jslib-attr-prototype'
 
 
 class DromaeoJslibEventJquery(_DromaeoBenchmark):
-  """Dromaeo JSLib event jquery JavaScript benchmark"""
+  """Dromaeo JSLib event jquery JavaScript benchmark.
+
+  Tests binding, removing, and triggering DOM events using the jQuery JavaScript
+  Library.
+  """
   tag = 'jslibeventjquery'
   query_param = 'jslib-event-jquery'
 
 
 class DromaeoJslibEventPrototype(_DromaeoBenchmark):
-  """Dromaeo JSLib event prototype JavaScript benchmark"""
+  """Dromaeo JSLib event prototype JavaScript benchmark.
+
+  Tests binding, removing, and triggering DOM events using the Prototype
+  JavaScript Library.
+  """
   tag = 'jslibeventprototype'
   query_param = 'jslib-event-prototype'
 
 
 @benchmark.Disabled('xp')  # crbug.com/389731
 class DromaeoJslibModifyJquery(_DromaeoBenchmark):
-  """Dromaeo JSLib modify jquery JavaScript benchmark"""
+  """Dromaeo JSLib modify jquery JavaScript benchmark.
+
+  Tests creating and injecting DOM nodes into a document using the jQuery
+  JavaScript Library.
+  """
   tag = 'jslibmodifyjquery'
   query_param = 'jslib-modify-jquery'
 
 
 class DromaeoJslibModifyPrototype(_DromaeoBenchmark):
-  """Dromaeo JSLib modify prototype JavaScript benchmark"""
+  """Dromaeo JSLib modify prototype JavaScript benchmark.
+
+  Tests creating and injecting DOM nodes into a document using the Prototype
+  JavaScript Library.
+  """
   tag = 'jslibmodifyprototype'
   query_param = 'jslib-modify-prototype'
 
 
 class DromaeoJslibStyleJquery(_DromaeoBenchmark):
-  """Dromaeo JSLib style jquery JavaScript benchmark"""
+  """Dromaeo JSLib style jquery JavaScript benchmark.
+
+  Tests getting and setting CSS information on DOM elements using the jQuery
+  JavaScript Library.
+  """
   tag = 'jslibstylejquery'
   query_param = 'jslib-style-jquery'
 
 
 class DromaeoJslibStylePrototype(_DromaeoBenchmark):
-  """Dromaeo JSLib style prototype JavaScript benchmark"""
+  """Dromaeo JSLib style prototype JavaScript benchmark.
+
+  Tests getting and setting CSS information on DOM elements using the jQuery
+  JavaScript Library.
+  """
   tag = 'jslibstyleprototype'
   query_param = 'jslib-style-prototype'
 
 
 class DromaeoJslibTraverseJquery(_DromaeoBenchmark):
-  """Dromaeo JSLib traverse jquery JavaScript benchmark"""
+  """Dromaeo JSLib traverse jquery JavaScript benchmark.
+
+
+  Tests getting and setting CSS information on DOM elements using the Prototype
+  JavaScript Library.
+  """
   tag = 'jslibtraversejquery'
   query_param = 'jslib-traverse-jquery'
 
 
 class DromaeoJslibTraversePrototype(_DromaeoBenchmark):
-  """Dromaeo JSLib traverse prototype JavaScript benchmark"""
+  """Dromaeo JSLib traverse prototype JavaScript benchmark.
+
+  Tests traversing a DOM structure using the jQuery JavaScript Library.
+  """
   tag = 'jslibtraverseprototype'
   query_param = 'jslib-traverse-prototype'
 
 
 class DromaeoCSSQueryJquery(_DromaeoBenchmark):
-  """Dromaeo CSS Query jquery JavaScript benchmark"""
+  """Dromaeo CSS Query jquery JavaScript benchmark.
+
+  Tests traversing a DOM structure using the Prototype JavaScript Library.
+  """
   tag = 'cssqueryjquery'
   query_param = 'cssquery-jquery'
 

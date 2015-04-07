@@ -18,8 +18,6 @@ import android.widget.LinearLayout;
 import android.widget.LinearLayout.LayoutParams;
 import android.widget.TextView;
 
-import org.chromium.components.devtools_bridge.apiary.ApiaryClientFactory;
-import org.chromium.components.devtools_bridge.apiary.TestApiaryClientFactory;
 import org.chromium.components.devtools_bridge.ui.GCDRegistrationFragment;
 import org.chromium.components.devtools_bridge.ui.RemoteInstanceListFragment;
 
@@ -48,9 +46,8 @@ public class DebugActivity extends Activity {
         textView.setMovementMethod(LinkMovementMethod.getInstance());
         mLayout.addView(textView);
 
-        addActionButton("Start LocalTunnelBridge", DebugService.START_TUNNEL_BRIDGE_ACTION);
         addActionButton("Start LocalSessionBridge", DebugService.START_SESSION_BRIDGE_ACTION);
-        addActionButton("Start hosted DevToolsBridgeServer", DebugService.START_SERVER_ACTION);
+        addActionButton("Start DevToolsBridgeServer", DebugService.START_SERVER_ACTION);
         addActionButton("Stop", DebugService.STOP_ACTION);
 
         LayoutParams layoutParam = new LayoutParams(LayoutParams.MATCH_PARENT,
@@ -109,11 +106,6 @@ public class DebugActivity extends Activity {
         @Override
         protected void onRegistrationStatusChange() {
             updateText();
-        }
-
-        @Override
-        protected ApiaryClientFactory newClientFactory() {
-            return new TestApiaryClientFactory();
         }
 
         @Override

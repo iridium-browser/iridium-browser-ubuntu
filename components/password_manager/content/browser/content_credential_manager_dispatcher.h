@@ -5,7 +5,10 @@
 #ifndef COMPONENTS_PASSWORD_MANAGER_CONTENT_BROWSER_CONTENT_CREDENTIAL_MANAGER_DISPATCHER_H_
 #define COMPONENTS_PASSWORD_MANAGER_CONTENT_BROWSER_CONTENT_CREDENTIAL_MANAGER_DISPATCHER_H_
 
+#include "base/callback.h"
 #include "base/macros.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "components/password_manager/core/browser/credential_manager_dispatcher.h"
 #include "components/password_manager/core/browser/password_store_consumer.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -24,6 +27,7 @@ namespace password_manager {
 
 class CredentialManagerPasswordFormManager;
 class PasswordManagerClient;
+class PasswordManagerDriver;
 class PasswordStore;
 struct CredentialInfo;
 
@@ -31,8 +35,6 @@ class ContentCredentialManagerDispatcher : public CredentialManagerDispatcher,
                                            public content::WebContentsObserver,
                                            public PasswordStoreConsumer {
  public:
-  // |client| isn't yet used by this class, but is necessary for the next step:
-  // wiring this up as a subclass of PasswordStoreConsumer.
   ContentCredentialManagerDispatcher(content::WebContents* web_contents,
                                      PasswordManagerClient* client);
   ~ContentCredentialManagerDispatcher() override;
@@ -56,16 +58,27 @@ class ContentCredentialManagerDispatcher : public CredentialManagerDispatcher,
   void OnGetPasswordStoreResults(
       const std::vector<autofill::PasswordForm*>& results) override;
 
+  using CredentialCallback =
+      base::Callback<void(const autofill::PasswordForm&)>;
+
  private:
+  struct PendingRequestParameters;
+
   PasswordStore* GetPasswordStore();
+
+  // Returns the driver for the current main frame.
+  // Virtual for testing.
+  virtual base::WeakPtr<PasswordManagerDriver> GetDriver();
+
+  void SendCredential(int request_id, const CredentialInfo& info);
 
   PasswordManagerClient* client_;
   scoped_ptr<CredentialManagerPasswordFormManager> form_manager_;
 
   // When 'OnRequestCredential' is called, it in turn calls out to the
-  // PasswordStore; we store the request ID here in order to properly respond
-  // to the request once the PasswordStore gives us data.
-  int pending_request_id_;
+  // PasswordStore; we store request details here in order to properly
+  // respond to the request once the PasswordStore gives us data.
+  scoped_ptr<PendingRequestParameters> pending_request_;
 
   DISALLOW_COPY_AND_ASSIGN(ContentCredentialManagerDispatcher);
 };

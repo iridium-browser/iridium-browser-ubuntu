@@ -38,8 +38,6 @@
 #include "sync/protocol/search_engine_specifics.pb.h"
 #include "sync/protocol/session_specifics.pb.h"
 #include "sync/protocol/sync.pb.h"
-#include "sync/protocol/synced_notification_app_info_specifics.pb.h"
-#include "sync/protocol/synced_notification_specifics.pb.h"
 #include "sync/protocol/theme_specifics.pb.h"
 #include "sync/protocol/typed_url_specifics.pb.h"
 #include "sync/protocol/unique_position.pb.h"
@@ -212,10 +210,11 @@ base::DictionaryValue* TabNavigationToValue(
   SET_ENUM(blocked_state, GetBlockedStateString);
   SET_STR_REP(content_pack_categories);
   SET_INT32(http_status_code);
-  SET_INT32(referrer_policy);
+  SET_INT32(obsolete_referrer_policy);
   SET_BOOL(is_restored);
   SET_REP(navigation_redirect, NavigationRedirectToValue);
   SET_STR(last_navigation_redirect_url);
+  SET_INT32(correct_referrer_policy);
   return value;
 }
 
@@ -263,127 +262,6 @@ base::DictionaryValue* TimeRangeDirectiveToValue(
   base::DictionaryValue* value = new base::DictionaryValue();
   SET_INT64(start_time_usec);
   SET_INT64(end_time_usec);
-  return value;
-}
-
-base::DictionaryValue* SyncedNotificationAppInfoToValue(
-    const sync_pb::SyncedNotificationAppInfo& proto) {
-  base::DictionaryValue* value = new base::DictionaryValue();
-  SET_STR_REP(app_id);
-  SET_STR(settings_display_name);
-  SET_STR(app_name);
-  SET_STR(settings_url);
-  SET_STR(info_url);
-  SET(icon, SyncedNotificationImageToValue);
-  // TODO(petewil): Add fields for the monochrome icon when it is available.
-  return value;
-}
-
-base::DictionaryValue* SyncedNotificationImageToValue(
-    const sync_pb::SyncedNotificationImage& proto) {
-  base::DictionaryValue* value = new base::DictionaryValue();
-  SET_STR(url);
-  SET_STR(alt_text);
-  SET_INT32(preferred_width);
-  SET_INT32(preferred_height);
-  return value;
-}
-
-base::DictionaryValue* SyncedNotificationProfileImageToValue(
-    const sync_pb::SyncedNotificationProfileImage& proto) {
-  base::DictionaryValue* value = new base::DictionaryValue();
-  SET_STR(image_url);
-  SET_STR(oid);
-  SET_STR(display_name);
-  return value;
-}
-
-base::DictionaryValue* MediaToValue(
-    const sync_pb::Media& proto) {
-  base::DictionaryValue* value = new base::DictionaryValue();
-  SET(image, SyncedNotificationImageToValue);
-  return value;
-}
-
-base::DictionaryValue* SyncedNotificationActionToValue(
-    const sync_pb::SyncedNotificationAction& proto) {
-  base::DictionaryValue* value = new base::DictionaryValue();
-  SET_STR(text);
-  SET(icon, SyncedNotificationImageToValue);
-  SET_STR(url);
-  SET_STR(request_data);
-  SET_STR(accessibility_label);
-  return value;
-}
-
-base::DictionaryValue* SyncedNotificationDestiationToValue(
-    const sync_pb::SyncedNotificationDestination& proto) {
-  base::DictionaryValue* value = new base::DictionaryValue();
-  SET_STR(text);
-  SET(icon, SyncedNotificationImageToValue);
-  SET_STR(url);
-  SET_STR(accessibility_label);
-  return value;
-}
-
-base::DictionaryValue* TargetToValue(
-    const sync_pb::Target& proto) {
-  base::DictionaryValue* value = new base::DictionaryValue();
-  SET(destination, SyncedNotificationDestiationToValue);
-  SET(action, SyncedNotificationActionToValue);
-  SET_STR(target_key);
-  return value;
-}
-
-base::DictionaryValue* SimpleCollapsedLayoutToValue(
-    const sync_pb::SimpleCollapsedLayout& proto) {
-  base::DictionaryValue* value = new base::DictionaryValue();
-  SET(app_icon, SyncedNotificationImageToValue);
-  SET_REP(profile_image, SyncedNotificationProfileImageToValue);
-  SET_STR(heading);
-  SET_STR(description);
-  SET_STR(annotation);
-  SET_REP(media, MediaToValue);
-  return value;
-}
-
-base::DictionaryValue* CollapsedInfoToValue(
-    const sync_pb::CollapsedInfo& proto) {
-  base::DictionaryValue* value = new base::DictionaryValue();
-  SET(simple_collapsed_layout, SimpleCollapsedLayoutToValue);
-  SET_INT64(creation_timestamp_usec);
-  SET(default_destination, SyncedNotificationDestiationToValue);
-  SET_REP(target, TargetToValue);
-  return value;
-}
-
-base::DictionaryValue* SyncedNotificationToValue(
-    const sync_pb::SyncedNotification& proto) {
-  base::DictionaryValue* value = new base::DictionaryValue();
-  SET_STR(type);
-  SET_STR(external_id);
-  // TODO(petewil) Add SyncedNotificationCreator here if we ever need it.
-  return value;
-}
-
-base::DictionaryValue* RenderInfoToValue(
-    const sync_pb::SyncedNotificationRenderInfo& proto) {
-  base::DictionaryValue* value = new base::DictionaryValue();
-  // TODO(petewil): Add the expanded info values once we start using them.
-  SET(collapsed_info, CollapsedInfoToValue);
-  return value;
-}
-
-base::DictionaryValue* CoalescedNotificationToValue(
-    const sync_pb::CoalescedSyncedNotification& proto) {
-  base::DictionaryValue* value = new base::DictionaryValue();
-  SET_STR(key);
-  SET_STR(app_id);
-  SET_REP(notification, SyncedNotificationToValue);
-  SET(render_info, RenderInfoToValue);
-  SET_INT32(read_state);
-  SET_INT64(creation_time_msec);
-  SET_INT32(priority);
   return value;
 }
 
@@ -638,6 +516,14 @@ base::DictionaryValue* ManagedUserSharedSettingSpecificsToValue(
   return value;
 }
 
+base::DictionaryValue* ManagedUserWhitelistSpecificsToValue(
+    const sync_pb::ManagedUserWhitelistSpecifics& proto) {
+  base::DictionaryValue* value = new base::DictionaryValue();
+  SET_STR(id);
+  SET_STR(name);
+  return value;
+}
+
 base::DictionaryValue* NigoriSpecificsToValue(
     const sync_pb::NigoriSpecifics& proto) {
   base::DictionaryValue* value = new base::DictionaryValue();
@@ -708,17 +594,12 @@ base::DictionaryValue* PriorityPreferenceSpecificsToValue(
 base::DictionaryValue* SyncedNotificationAppInfoSpecificsToValue(
     const sync_pb::SyncedNotificationAppInfoSpecifics& proto) {
   base::DictionaryValue* value = new base::DictionaryValue();
-  SET_REP(synced_notification_app_info, SyncedNotificationAppInfoToValue);
   return value;
 }
 
 base::DictionaryValue* SyncedNotificationSpecificsToValue(
     const sync_pb::SyncedNotificationSpecifics& proto) {
-  // There is a lot of data, for now just use heading, description, key, and
-  // the read state.
-  // TODO(petewil): Eventually add more data here.
   base::DictionaryValue* value = new base::DictionaryValue();
-  SET(coalesced_notification, CoalescedNotificationToValue);
   return value;
 }
 
@@ -815,6 +696,7 @@ base::DictionaryValue* EntitySpecificsToValue(
   SET_FIELD(managed_user_shared_setting,
             ManagedUserSharedSettingSpecificsToValue);
   SET_FIELD(managed_user, ManagedUserSpecificsToValue);
+  SET_FIELD(managed_user_whitelist, ManagedUserWhitelistSpecificsToValue);
   SET_FIELD(nigori, NigoriSpecificsToValue);
   SET_FIELD(password, PasswordSpecificsToValue);
   SET_FIELD(preference, PreferenceSpecificsToValue);

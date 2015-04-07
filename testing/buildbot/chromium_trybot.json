@@ -3,8 +3,22 @@
     "all"
   ],
   "gtest_tests": [
-    "accessibility_unittests",
-    "app_list_unittests",
+    {
+      "test": "accessibility_unittests",
+      "swarming": {
+        "can_use_on_swarming_builders": true
+      }
+    },
+    {
+      "test": "app_installer_unittests",
+      "platforms": ["win"]
+    },
+    {
+      "test": "app_list_unittests",
+      "swarming": {
+        "can_use_on_swarming_builders": true
+      }
+    },
     {
       "test": "ash_unittests",
       "chromium_configs": [
@@ -33,7 +47,7 @@
       "test": "browser_tests",
       "swarming": {
         "can_use_on_swarming_builders": true,
-        "shards": 5
+        "shards": 8
       }
     },
     "cacheinvalidation_unittests",
@@ -80,13 +94,23 @@
       "platforms": ["linux"]
     },
     "device_unittests",
-    "events_unittests",
+    {
+      "test": "events_unittests",
+      "swarming": {
+        "can_use_on_swarming_builders": true
+      }
+    },
     {
       "test": "extensions_unittests",
       "platforms": ["win", "mac", "linux"]
     },
     "gcm_unit_tests",
-    "gfx_unittests",
+    {
+      "test": "gfx_unittests",
+      "swarming": {
+        "can_use_on_swarming_builders": true
+      }
+    },
     "google_apis_unittests",
     "gpu_unittests",
     {
@@ -112,7 +136,12 @@
     },
     "media_perftests",
     "media_unittests",
-    "message_center_unittests",
+    {
+      "test": "message_center_unittests",
+      "swarming": {
+        "can_use_on_swarming_builders": true
+      }
+    },
     "mojo_common_unittests",
     "mojo_public_bindings_unittests",
     "mojo_public_environment_unittests",
@@ -153,7 +182,18 @@
       }
     },
     "sync_unit_tests",
-    "ui_unittests",
+    {
+      "test": "ui_base_unittests",
+      "swarming": {
+        "can_use_on_swarming_builders": true
+      }
+    },
+    {
+      "test": "ui_touch_selection_unittests",
+      "swarming": {
+        "can_use_on_swarming_builders": true
+      }
+    },
     {
       "test": "unit_tests",
       "swarming": {
@@ -161,7 +201,17 @@
         "shards": 2
       }
     },
+    {
+      "test": "ui_chromeos_unittests",
+      "platforms": ["linux"],
+      "chromium_configs": [
+        "chromium_chromeos",
+        "chromium_chromeos_clang",
+        "chromium_chromeos_ozone"
+      ]
+    },
     "url_unittests",
+    "skia_unittests",
     {
       "test": "wm_unittests",
       "platforms": ["linux", "win"]

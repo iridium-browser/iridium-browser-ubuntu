@@ -10,7 +10,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "mojo/edk/embedder/platform_support.h"
 #include "mojo/edk/system/channel.h"
-#include "mojo/edk/system/constants.h"
+#include "mojo/edk/system/configuration.h"
 #include "mojo/edk/system/memory.h"
 #include "mojo/edk/system/options_validation.h"
 #include "mojo/public/c/system/macros.h"
@@ -69,12 +69,12 @@ MojoResult SharedBufferDispatcher::Create(
     scoped_refptr<SharedBufferDispatcher>* result) {
   if (!num_bytes)
     return MOJO_RESULT_INVALID_ARGUMENT;
-  if (num_bytes > kMaxSharedMemoryNumBytes)
+  if (num_bytes > GetConfiguration().max_shared_memory_num_bytes)
     return MOJO_RESULT_RESOURCE_EXHAUSTED;
 
   scoped_refptr<embedder::PlatformSharedBuffer> shared_buffer(
       platform_support->CreateSharedBuffer(static_cast<size_t>(num_bytes)));
-  if (!shared_buffer.get())
+  if (!shared_buffer)
     return MOJO_RESULT_RESOURCE_EXHAUSTED;
 
   *result = new SharedBufferDispatcher(shared_buffer);
@@ -95,7 +95,7 @@ scoped_refptr<SharedBufferDispatcher> SharedBufferDispatcher::Deserialize(
 
   if (size != sizeof(SerializedSharedBufferDispatcher)) {
     LOG(ERROR) << "Invalid serialized shared buffer dispatcher (bad size)";
-    return scoped_refptr<SharedBufferDispatcher>();
+    return nullptr;
   }
 
   const SerializedSharedBufferDispatcher* serialization =
@@ -106,13 +106,13 @@ scoped_refptr<SharedBufferDispatcher> SharedBufferDispatcher::Deserialize(
   if (!num_bytes) {
     LOG(ERROR)
         << "Invalid serialized shared buffer dispatcher (invalid num_bytes)";
-    return scoped_refptr<SharedBufferDispatcher>();
+    return nullptr;
   }
 
   if (!platform_handles || platform_handle_index >= platform_handles->size()) {
     LOG(ERROR)
         << "Invalid serialized shared buffer dispatcher (missing handles)";
-    return scoped_refptr<SharedBufferDispatcher>();
+    return nullptr;
   }
 
   // Starts off invalid, which is what we want.
@@ -126,10 +126,10 @@ scoped_refptr<SharedBufferDispatcher> SharedBufferDispatcher::Deserialize(
   scoped_refptr<embedder::PlatformSharedBuffer> shared_buffer(
       channel->platform_support()->CreateSharedBufferFromHandle(
           num_bytes, embedder::ScopedPlatformHandle(platform_handle)));
-  if (!shared_buffer.get()) {
+  if (!shared_buffer) {
     LOG(ERROR)
         << "Invalid serialized shared buffer dispatcher (invalid num_bytes?)";
-    return scoped_refptr<SharedBufferDispatcher>();
+    return nullptr;
   }
 
   return scoped_refptr<SharedBufferDispatcher>(
@@ -139,7 +139,7 @@ scoped_refptr<SharedBufferDispatcher> SharedBufferDispatcher::Deserialize(
 SharedBufferDispatcher::SharedBufferDispatcher(
     scoped_refptr<embedder::PlatformSharedBuffer> shared_buffer)
     : shared_buffer_(shared_buffer) {
-  DCHECK(shared_buffer_.get());
+  DCHECK(shared_buffer_);
 }
 
 SharedBufferDispatcher::~SharedBufferDispatcher() {
@@ -163,8 +163,8 @@ MojoResult SharedBufferDispatcher::ValidateDuplicateOptions(
   if (!reader.is_valid())
     return MOJO_RESULT_INVALID_ARGUMENT;
 
-  if (!OPTIONS_STRUCT_HAS_MEMBER(
-          MojoDuplicateBufferHandleOptions, flags, reader))
+  if (!OPTIONS_STRUCT_HAS_MEMBER(MojoDuplicateBufferHandleOptions, flags,
+                                 reader))
     return MOJO_RESULT_OK;
   if ((reader.options().flags & ~kKnownFlags))
     return MOJO_RESULT_UNIMPLEMENTED;
@@ -179,14 +179,14 @@ MojoResult SharedBufferDispatcher::ValidateDuplicateOptions(
 
 void SharedBufferDispatcher::CloseImplNoLock() {
   lock().AssertAcquired();
-  DCHECK(shared_buffer_.get());
+  DCHECK(shared_buffer_);
   shared_buffer_ = nullptr;
 }
 
 scoped_refptr<Dispatcher>
 SharedBufferDispatcher::CreateEquivalentDispatcherAndCloseImplNoLock() {
   lock().AssertAcquired();
-  DCHECK(shared_buffer_.get());
+  DCHECK(shared_buffer_);
   scoped_refptr<embedder::PlatformSharedBuffer> shared_buffer;
   shared_buffer.swap(shared_buffer_);
   return scoped_refptr<Dispatcher>(new SharedBufferDispatcher(shared_buffer));
@@ -212,7 +212,7 @@ MojoResult SharedBufferDispatcher::MapBufferImplNoLock(
     MojoMapBufferFlags flags,
     scoped_ptr<embedder::PlatformSharedBufferMapping>* mapping) {
   lock().AssertAcquired();
-  DCHECK(shared_buffer_.get());
+  DCHECK(shared_buffer_);
 
   if (offset > static_cast<uint64_t>(std::numeric_limits<size_t>::max()))
     return MOJO_RESULT_INVALID_ARGUMENT;
@@ -247,7 +247,7 @@ bool SharedBufferDispatcher::EndSerializeAndCloseImplNoLock(
     size_t* actual_size,
     embedder::PlatformHandleVector* platform_handles) {
   DCHECK(HasOneRef());  // Only one ref => no need to take the lock.
-  DCHECK(shared_buffer_.get());
+  DCHECK(shared_buffer_);
 
   SerializedSharedBufferDispatcher* serialization =
       static_cast<SerializedSharedBufferDispatcher*>(destination);

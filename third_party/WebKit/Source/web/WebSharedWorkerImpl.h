@@ -72,9 +72,10 @@ public:
 
     // WorkerReportingProxy methods:
     virtual void reportException(
-        const WTF::String&, int, int, const WTF::String&) override;
+        const WTF::String&, int, int, const WTF::String&, int) override;
     virtual void reportConsoleMessage(PassRefPtrWillBeRawPtr<ConsoleMessage>) override;
     virtual void postMessageToPageInspector(const WTF::String&) override;
+    virtual void postWorkerConsoleAgentEnabled() override { }
     virtual void didEvaluateWorkerScript(bool success) override { };
     virtual void workerGlobalScopeStarted(WorkerGlobalScope*) override;
     virtual void workerGlobalScopeClosed() override;
@@ -144,7 +145,7 @@ private:
     RefPtr<WorkerThread> m_workerThread;
 
     // This one's initialized and bound to the main thread.
-    RefPtr<WeakReference<WebSharedWorkerClient> > m_client;
+    RefPtr<WeakReference<WebSharedWorkerClient>> m_client;
 
     // Usually WeakPtr is created by WeakPtrFactory exposed by Client
     // class itself, but here it's implemented by Chrome so we create

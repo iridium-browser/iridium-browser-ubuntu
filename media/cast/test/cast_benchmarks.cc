@@ -152,6 +152,27 @@ class CastTransportSenderWrapper : public CastTransportSender {
     return transport_->PacketReceiverForTesting();
   }
 
+  void AddValidSsrc(uint32 ssrc) override {
+    return transport_->AddValidSsrc(ssrc);
+  }
+
+  void SendRtcpFromRtpReceiver(
+      uint32 ssrc,
+      uint32 sender_ssrc,
+      const RtcpTimeData& time_data,
+      const RtcpCastMessage* cast_message,
+      base::TimeDelta target_delay,
+      const ReceiverRtcpEventSubscriber::RtcpEvents* rtcp_events,
+      const RtpReceiverStatistics* rtp_receiver_statistics) override {
+    return transport_->SendRtcpFromRtpReceiver(ssrc,
+                                               sender_ssrc,
+                                               time_data,
+                                               cast_message,
+                                               target_delay,
+                                               rtcp_events,
+                                               rtp_receiver_statistics);
+  }
+
  private:
   scoped_ptr<CastTransportSender> transport_;
   uint32 audio_ssrc_, video_ssrc_;
@@ -218,7 +239,7 @@ class RunOneBenchmark {
                  int audio_sampling_frequency,
                  int max_number_of_video_buffers_used) {
     audio_sender_config_.ssrc = 1;
-    audio_sender_config_.incoming_feedback_ssrc = 2;
+    audio_sender_config_.receiver_ssrc = 2;
     audio_sender_config_.max_playout_delay =
         base::TimeDelta::FromMilliseconds(kTargetPlayoutDelayMs);
     audio_sender_config_.rtp_payload_type = 96;
@@ -229,18 +250,18 @@ class RunOneBenchmark {
     audio_sender_config_.codec = audio_codec;
 
     audio_receiver_config_.feedback_ssrc =
-        audio_sender_config_.incoming_feedback_ssrc;
+        audio_sender_config_.receiver_ssrc;
     audio_receiver_config_.incoming_ssrc = audio_sender_config_.ssrc;
     audio_receiver_config_.rtp_payload_type =
         audio_sender_config_.rtp_payload_type;
     audio_receiver_config_.frequency = audio_sender_config_.frequency;
     audio_receiver_config_.channels = kAudioChannels;
-    audio_receiver_config_.max_frame_rate = 100;
+    audio_receiver_config_.target_frame_rate = 100;
     audio_receiver_config_.codec = audio_sender_config_.codec;
     audio_receiver_config_.rtp_max_delay_ms = kTargetPlayoutDelayMs;
 
     video_sender_config_.ssrc = 3;
-    video_sender_config_.incoming_feedback_ssrc = 4;
+    video_sender_config_.receiver_ssrc = 4;
     video_sender_config_.max_playout_delay =
         base::TimeDelta::FromMilliseconds(kTargetPlayoutDelayMs);
     video_sender_config_.rtp_payload_type = 97;
@@ -264,14 +285,14 @@ class RunOneBenchmark {
     video_sender_config_.codec = video_codec;
 
     video_receiver_config_.feedback_ssrc =
-        video_sender_config_.incoming_feedback_ssrc;
+        video_sender_config_.receiver_ssrc;
     video_receiver_config_.incoming_ssrc = video_sender_config_.ssrc;
     video_receiver_config_.rtp_payload_type =
         video_sender_config_.rtp_payload_type;
     video_receiver_config_.codec = video_sender_config_.codec;
     video_receiver_config_.frequency = kVideoFrequency;
     video_receiver_config_.channels = 1;
-    video_receiver_config_.max_frame_rate = 100;
+    video_receiver_config_.target_frame_rate = 100;
     video_receiver_config_.rtp_max_delay_ms = kTargetPlayoutDelayMs;
   }
 
@@ -286,24 +307,41 @@ class RunOneBenchmark {
   }
 
   void Create(const MeasuringPoint& p) {
-    cast_receiver_ = CastReceiver::Create(cast_environment_receiver_,
-                                          audio_receiver_config_,
-                                          video_receiver_config_,
-                                          &receiver_to_sender_);
     net::IPEndPoint dummy_endpoint;
     transport_sender_.Init(
         new CastTransportSenderImpl(
             NULL,
             testing_clock_sender_,
             dummy_endpoint,
+            dummy_endpoint,
             make_scoped_ptr(new base::DictionaryValue),
             base::Bind(&UpdateCastTransportStatus),
             base::Bind(&IgnoreRawEvents),
             base::TimeDelta::FromSeconds(1),
             task_runner_sender_,
+            PacketReceiverCallback(),
             &sender_to_receiver_),
         &video_bytes_encoded_,
         &audio_bytes_encoded_);
+
+    transport_receiver_.reset(
+        new CastTransportSenderImpl(
+            NULL,
+            testing_clock_receiver_,
+            dummy_endpoint,
+            dummy_endpoint,
+            make_scoped_ptr(new base::DictionaryValue),
+            base::Bind(&UpdateCastTransportStatus),
+            base::Bind(&IgnoreRawEvents),
+            base::TimeDelta::FromSeconds(1),
+            task_runner_receiver_,
+            base::Bind(&RunOneBenchmark::ReceivePacket, base::Unretained(this)),
+            &receiver_to_sender_));
+
+    cast_receiver_ = CastReceiver::Create(cast_environment_receiver_,
+                                          audio_receiver_config_,
+                                          video_receiver_config_,
+                                          transport_receiver_.get());
 
     cast_sender_ =
         CastSender::Create(cast_environment_sender_, &transport_sender_);
@@ -321,8 +359,13 @@ class RunOneBenchmark {
         transport_sender_.PacketReceiverForTesting(),
         task_runner_, &testing_clock_);
     sender_to_receiver_.Initialize(
-        CreateSimplePipe(p).Pass(), cast_receiver_->packet_receiver(),
+        CreateSimplePipe(p).Pass(),
+        transport_receiver_->PacketReceiverForTesting(),
         task_runner_, &testing_clock_);
+  }
+
+  void ReceivePacket(scoped_ptr<Packet> packet) {
+    cast_receiver_->ReceivePacket(packet.Pass());
   }
 
   virtual ~RunOneBenchmark() {
@@ -475,6 +518,7 @@ class RunOneBenchmark {
   LoopBackTransport receiver_to_sender_;
   LoopBackTransport sender_to_receiver_;
   CastTransportSenderWrapper transport_sender_;
+  scoped_ptr<CastTransportSender> transport_receiver_;
   uint64 video_bytes_encoded_;
   uint64 audio_bytes_encoded_;
 
@@ -654,7 +698,7 @@ class CastBenchmark {
       threads[i]->Start();
     }
 
-    if (CommandLine::ForCurrentProcess()->HasSwitch("single-run")) {
+    if (base::CommandLine::ForCurrentProcess()->HasSwitch("single-run")) {
       SearchVector a;
       a.bitrate.base = 100.0;
       a.bitrate.grade = 1.0;
@@ -699,7 +743,7 @@ class CastBenchmark {
 
 int main(int argc, char** argv) {
   base::AtExitManager at_exit;
-  CommandLine::Init(argc, argv);
+  base::CommandLine::Init(argc, argv);
   media::cast::CastBenchmark benchmark;
   if (getenv("PROFILE_FILE")) {
     std::string profile_file(getenv("PROFILE_FILE"));

@@ -17,9 +17,8 @@ DEFINE_RESOURCE_ID(0, 0)
 DEFINE_RESOURCE_ID(IDR_INFOBAR_AUTOFILL_CC, R.drawable.infobar_autofill_cc)
 DEFINE_RESOURCE_ID(IDR_INFOBAR_AUTOLOGIN,\
                    R.drawable.infobar_savepassword_autologin)
-// TODO(peter): Include the proper resources for the Notification infobar.
 DEFINE_RESOURCE_ID(IDR_INFOBAR_DESKTOP_NOTIFICATIONS,\
-                   R.drawable.infobar_geolocation)
+                   R.drawable.infobar_desktop_notifications)
 DEFINE_RESOURCE_ID(IDR_INFOBAR_GEOLOCATION, R.drawable.infobar_geolocation)
 DEFINE_RESOURCE_ID(IDR_INFOBAR_MEDIA_STREAM_CAMERA, R.drawable.infobar_camera)
 DEFINE_RESOURCE_ID(IDR_INFOBAR_MEDIA_STREAM_MIC, R.drawable.infobar_microphone)
@@ -47,11 +46,10 @@ DEFINE_RESOURCE_ID(IDR_PAGEINFO_WARNING_MINOR,\
 
 // Autofill popup images.
 DEFINE_RESOURCE_ID(IDR_AUTOFILL_CC_AMEX, R.drawable.amex_card)
-DEFINE_RESOURCE_ID(IDR_AUTOFILL_CC_DINERS, R.drawable.generic_card)
 DEFINE_RESOURCE_ID(IDR_AUTOFILL_CC_DISCOVER, R.drawable.discover_card)
 DEFINE_RESOURCE_ID(IDR_AUTOFILL_CC_GENERIC, R.drawable.generic_card)
-DEFINE_RESOURCE_ID(IDR_AUTOFILL_CC_JCB, R.drawable.generic_card)
 DEFINE_RESOURCE_ID(IDR_AUTOFILL_CC_MASTERCARD, R.drawable.mc_card)
 DEFINE_RESOURCE_ID(IDR_AUTOFILL_CC_VISA, R.drawable.visa_card)
+DEFINE_RESOURCE_ID(IDR_AUTOFILL_CC_SCAN_NEW, android.R.drawable.ic_menu_camera)
 
 #endif  // CHROME_BROWSER_ANDROID_RESOURCE_ID_H_

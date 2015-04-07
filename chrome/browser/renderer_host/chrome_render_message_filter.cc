@@ -17,14 +17,16 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/render_messages.h"
+#include "components/dns_prefetch/common/prefetch_common.h"
+#include "components/dns_prefetch/common/prefetch_messages.h"
 #include "components/web_cache/browser/web_cache_manager.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 
 #if defined(ENABLE_EXTENSIONS)
-#include "chrome/common/extensions/api/i18n/default_locale_handler.h"
 #include "extensions/browser/guest_view/web_view/web_view_permission_helper.h"
 #include "extensions/browser/guest_view/web_view/web_view_renderer_state.h"
+#include "extensions/common/manifest_handlers/default_locale_handler.h"
 #endif
 
 #if defined(ENABLE_TASK_MANAGER)
@@ -42,6 +44,7 @@ namespace {
 
 const uint32 kFilteredMessageClasses[] = {
   ChromeMsgStart,
+  DnsPrefetchMsgStart,
 };
 
 }  // namespace
@@ -63,7 +66,7 @@ ChromeRenderMessageFilter::~ChromeRenderMessageFilter() {
 bool ChromeRenderMessageFilter::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(ChromeRenderMessageFilter, message)
-    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_DnsPrefetch, OnDnsPrefetch)
+    IPC_MESSAGE_HANDLER(DnsPrefetchMsg_RequestPrefetch, OnDnsPrefetch)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_Preconnect, OnPreconnect)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_ResourceTypeStats,
                         OnResourceTypeStats)
@@ -101,9 +104,9 @@ void ChromeRenderMessageFilter::OverrideThreadForMessage(
 }
 
 void ChromeRenderMessageFilter::OnDnsPrefetch(
-    const std::vector<std::string>& hostnames) {
+    const dns_prefetch::LookupRequest& request) {
   if (predictor_)
-    predictor_->DnsPrefetchList(hostnames);
+    predictor_->DnsPrefetchList(request.hostname_list);
 }
 
 void ChromeRenderMessageFilter::OnPreconnect(const GURL& url) {

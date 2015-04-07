@@ -16,9 +16,11 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/values.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_auth_request_handler.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_configurator.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_usage_stats.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_event_store.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_switches.h"
@@ -77,7 +79,8 @@ int64 GetInt64PrefValue(const base::ListValue& list_value, size_t index) {
 }
 
 bool IsEnabledOnCommandLine() {
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
   return command_line.HasSwitch(
       data_reduction_proxy::switches::kEnableDataReductionProxy);
 }
@@ -94,6 +97,8 @@ DataReductionProxySettings::DataReductionProxySettings(
       unreachable_(false),
       prefs_(NULL),
       url_request_context_getter_(NULL),
+      net_log_(NULL),
+      event_store_(NULL),
       configurator_(NULL) {
   DCHECK(params);
   params_.reset(params);
@@ -122,12 +127,20 @@ void DataReductionProxySettings::InitPrefMembers() {
 
 void DataReductionProxySettings::InitDataReductionProxySettings(
     PrefService* prefs,
-    net::URLRequestContextGetter* url_request_context_getter) {
+    scoped_ptr<DataReductionProxyStatisticsPrefs> statistics_prefs,
+    net::URLRequestContextGetter* url_request_context_getter,
+    net::NetLog* net_log,
+    DataReductionProxyEventStore* event_store) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(prefs);
+  DCHECK(!statistics_prefs_);
   DCHECK(url_request_context_getter);
+  DCHECK(event_store);
   prefs_ = prefs;
+  statistics_prefs_ = statistics_prefs.Pass();
   url_request_context_getter_ = url_request_context_getter;
+  net_log_ = net_log;
+  event_store_ = event_store;
   InitPrefMembers();
   RecordDataReductionInit();
 
@@ -139,18 +152,26 @@ void DataReductionProxySettings::InitDataReductionProxySettings(
   net::NetworkChangeNotifier::AddIPAddressObserver(this);
 }
 
-void DataReductionProxySettings::InitDataReductionProxySettings(
-    PrefService* prefs,
-    net::URLRequestContextGetter* url_request_context_getter,
-    DataReductionProxyConfigurator* configurator) {
-  InitDataReductionProxySettings(prefs,
-                                 url_request_context_getter);
-  SetProxyConfigurator(configurator);
+void DataReductionProxySettings::SetDataReductionProxyStatisticsPrefs(
+    scoped_ptr<DataReductionProxyStatisticsPrefs> statistics_prefs) {
+  statistics_prefs_ = statistics_prefs.Pass();
 }
 
-void DataReductionProxySettings::SetDataReductionProxyStatisticsPrefs(
-    DataReductionProxyStatisticsPrefs* statistics_prefs) {
-  statistics_prefs_ = statistics_prefs;
+void DataReductionProxySettings::EnableCompressionStatisticsLogging(
+    PrefService* prefs,
+    scoped_refptr<base::SequencedTaskRunner> ui_task_runner,
+    const base::TimeDelta& commit_delay) {
+  DCHECK(!statistics_prefs_);
+  statistics_prefs_.reset(
+      new DataReductionProxyStatisticsPrefs(
+          prefs, ui_task_runner, commit_delay));
+}
+
+base::WeakPtr<DataReductionProxyStatisticsPrefs>
+DataReductionProxySettings::statistics_prefs() {
+  if (statistics_prefs_)
+    return statistics_prefs_->GetWeakPtr();
+  return base::WeakPtr<DataReductionProxyStatisticsPrefs>();
 }
 
 void DataReductionProxySettings::SetOnDataReductionEnabledCallback(
@@ -238,6 +259,11 @@ void DataReductionProxySettings::OnURLFetchComplete(
 
   DCHECK(source == fetcher_.get());
   net::URLRequestStatus status = source->GetStatus();
+
+  if (event_store_) {
+    event_store_->EndCanaryRequest(bound_net_log_, status.error());
+  }
+
   if (status.status() == net::URLRequestStatus::FAILED) {
     if (status.error() == net::ERR_INTERNET_DISCONNECTED) {
       RecordProbeURLFetchResult(INTERNET_DISCONNECTED);
@@ -300,10 +326,21 @@ void DataReductionProxySettings::AddDefaultProxyBypassRules() {
   // localhost
   DCHECK(configurator_);
   configurator_->AddHostPatternToBypass("<local>");
+  // RFC6890 loopback addresses.
+  // TODO(tbansal): Remove this once crbug/446705 is fixed.
+  configurator_->AddHostPatternToBypass("127.0.0.0/8");
+
+  // RFC6890 current network (only valid as source address).
+  configurator_->AddHostPatternToBypass("0.0.0.0/8");
+
   // RFC1918 private addresses.
   configurator_->AddHostPatternToBypass("10.0.0.0/8");
   configurator_->AddHostPatternToBypass("172.16.0.0/12");
   configurator_->AddHostPatternToBypass("192.168.0.0/16");
+
+  // RFC3513 unspecified address.
+  configurator_->AddHostPatternToBypass("::/128");
+
   // RFC4193 private addresses.
   configurator_->AddHostPatternToBypass("fc00::/7");
   // IPV6 probe addresses.
@@ -553,6 +590,14 @@ void DataReductionProxySettings::ProbeWhetherDataReductionProxyIsAvailable() {
   if (!fetcher)
     return;
   fetcher_.reset(fetcher);
+
+  bound_net_log_ = net::BoundNetLog::Make(
+      net_log_, net::NetLog::SOURCE_DATA_REDUCTION_PROXY);
+  if (event_store_) {
+    event_store_->BeginCanaryRequest(bound_net_log_,
+                                     fetcher_->GetOriginalURL());
+  }
+
   fetcher_->Start();
 }
 

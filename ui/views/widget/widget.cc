@@ -393,7 +393,7 @@ void Widget::RemoveObserver(WidgetObserver* observer) {
   observers_.RemoveObserver(observer);
 }
 
-bool Widget::HasObserver(WidgetObserver* observer) {
+bool Widget::HasObserver(const WidgetObserver* observer) const {
   return observers_.HasObserver(observer);
 }
 
@@ -405,7 +405,7 @@ void Widget::RemoveRemovalsObserver(WidgetRemovalsObserver* observer) {
   removals_observers_.RemoveObserver(observer);
 }
 
-bool Widget::HasRemovalsObserver(WidgetRemovalsObserver* observer) {
+bool Widget::HasRemovalsObserver(const WidgetRemovalsObserver* observer) const {
   return removals_observers_.HasObserver(observer);
 }
 
@@ -788,7 +788,14 @@ void Widget::RunShellDrag(View* view,
                           ui::DragDropTypes::DragEventSource source) {
   dragged_view_ = view;
   OnDragWillStart();
+
+  WidgetDeletionObserver widget_deletion_observer(this);
   native_widget_->RunShellDrag(view, data, location, operation, source);
+
+  // The widget may be destroyed during the drag operation.
+  if (!widget_deletion_observer.IsWidgetAlive())
+    return;
+
   // If the view is removed during the drag operation, dragged_view_ is set to
   // NULL.
   if (view && dragged_view_ == view) {

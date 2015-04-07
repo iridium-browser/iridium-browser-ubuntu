@@ -150,9 +150,13 @@ class NotificationsTest : public InProcessBrowserTest {
   bool CheckOriginInSetting(const ContentSettingsForOneType& settings,
                             const GURL& origin);
 
-  GURL GetTestPageURL() const {
+  GURL GetTestPageURLForFile(const std::string& file) const {
     return embedded_test_server()->GetURL(
-      "/notifications/notification_tester.html");
+      std::string("/notifications/") + file);
+  }
+
+  GURL GetTestPageURL() const {
+    return GetTestPageURLForFile("notification_tester.html");
   }
 
  private:
@@ -360,7 +364,14 @@ void NotificationsTest::DropOriginPreference(const GURL& origin) {
 }
 
 // If this flakes, use http://crbug.com/62311 and http://crbug.com/74428.
-IN_PROC_BROWSER_TEST_F(NotificationsTest, TestUserGestureInfobar) {
+// Flaky on Windows: http://crbug.com/437414.
+#if defined(OS_WIN)
+#define MAYBE_TestUserGestureInfobar DISABLED_TestUserGestureInfobar
+#else
+#define MAYBE_TestUserGestureInfobar TestUserGestureInfobar
+#endif
+
+IN_PROC_BROWSER_TEST_F(NotificationsTest, MAYBE_TestUserGestureInfobar) {
   ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
 
   ui_test_utils::NavigateToURL(
@@ -836,4 +847,84 @@ IN_PROC_BROWSER_TEST_F(NotificationsTest,
   EXPECT_NE("-1", result);
 
   ASSERT_EQ(1, GetNotificationPopupCount());
+}
+
+IN_PROC_BROWSER_TEST_F(NotificationsTest, TestNotificationValidIcon) {
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  AllowAllOrigins();
+
+  ui_test_utils::NavigateToURL(browser(), GetTestPageURL());
+  ASSERT_EQ(0, GetNotificationPopupCount());
+
+  std::string result = CreateNotification(
+      browser(), true, "icon.png", "Title1", "Body1", "chat");
+  EXPECT_NE("-1", result);
+
+  message_center::NotificationList::PopupNotifications notifications =
+      message_center::MessageCenter::Get()->GetPopupNotifications();
+  ASSERT_EQ(1u, notifications.size());
+
+  auto* notification = *notifications.rbegin();
+
+  EXPECT_EQ(100, notification->icon().Width());
+  EXPECT_EQ(100, notification->icon().Height());
+}
+
+IN_PROC_BROWSER_TEST_F(NotificationsTest, TestNotificationInvalidIcon) {
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  AllowAllOrigins();
+
+  ui_test_utils::NavigateToURL(browser(), GetTestPageURL());
+  ASSERT_EQ(0, GetNotificationPopupCount());
+
+  // Not supplying an icon URL.
+  std::string result = CreateNotification(
+      browser(), true, "", "Title1", "Body1", "chat");
+  EXPECT_NE("-1", result);
+
+  message_center::NotificationList::PopupNotifications notifications =
+      message_center::MessageCenter::Get()->GetPopupNotifications();
+  ASSERT_EQ(1u, notifications.size());
+
+  auto* notification = *notifications.rbegin();
+  EXPECT_TRUE(notification->icon().IsEmpty());
+
+  // Supplying an invalid icon URL.
+  result = CreateNotification(
+      browser(), true, "invalid.png", "Title1", "Body1", "chat");
+  EXPECT_NE("-1", result);
+
+  notifications = message_center::MessageCenter::Get()->GetPopupNotifications();
+  ASSERT_EQ(1u, notifications.size());
+
+  notification = *notifications.rbegin();
+  EXPECT_TRUE(notification->icon().IsEmpty());
+}
+
+IN_PROC_BROWSER_TEST_F(NotificationsTest, TestNotificationDoubleClose) {
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  AllowAllOrigins();
+
+  ui_test_utils::NavigateToURL(
+      browser(), GetTestPageURLForFile("notification-double-close.html"));
+  ASSERT_EQ(0, GetNotificationPopupCount());
+
+  std::string result = CreateNotification(
+      browser(), true, "", "Title1", "Body1", "chat");
+  EXPECT_NE("-1", result);
+
+  ASSERT_EQ(1, GetNotificationCount());
+  message_center::NotificationList::Notifications notifications =
+      message_center::MessageCenter::Get()->GetVisibleNotifications();
+  message_center::MessageCenter::Get()->RemoveNotification(
+      (*notifications.rbegin())->id(),
+      true);  // by_user
+
+  ASSERT_EQ(0, GetNotificationCount());
+
+  // Calling WebContents::IsCrashed() will return FALSE here, even if the WC did
+  // crash. Work around this timing issue by creating another notification,
+  // which requires interaction with the renderer process.
+  result = CreateNotification(browser(), true, "", "Title1", "Body1", "chat");
+  EXPECT_NE("-1", result);
 }

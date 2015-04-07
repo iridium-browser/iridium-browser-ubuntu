@@ -40,6 +40,7 @@ WebInspector.View = function(isWebComponent)
     } else {
         this.element = this.contentElement;
     }
+    this._isWebComponent = isWebComponent;
     this.element.__view = this;
     this._visible = true;
     this._isRoot = false;
@@ -50,24 +51,15 @@ WebInspector.View = function(isWebComponent)
     this._notificationDepth = 0;
 }
 
-WebInspector.View._buildSourceURL = function(cssFile)
-{
-    return "\n/*# sourceURL=" + WebInspector.ParsedURL.completeURL(window.location.href, cssFile) + " */";
-}
-
 /**
  * @param {string} cssFile
  * @return {!Element}
  */
 WebInspector.View.createStyleElement = function(cssFile)
 {
-    var content = Runtime.cachedResources[cssFile];
-    if (!content) {
-        if (Runtime.isReleaseMode())
-            console.error(cssFile + " not preloaded, loading from the remote. Check module.json");
-        content = loadResource(cssFile) + WebInspector.View._buildSourceURL(cssFile);
-        Runtime.cachedResources[cssFile] = content;
-    }
+    var content = Runtime.cachedResources[cssFile] || "";
+    if (!content)
+        console.error(cssFile + " not preloaded. Check module.json");
     var styleElement = createElement("style");
     styleElement.type = "text/css";
     styleElement.textContent = content;
@@ -96,6 +88,14 @@ WebInspector.View.prototype = {
     children: function()
     {
         return this._children;
+    },
+
+    /**
+     * @param {!WebInspector.View} view
+     * @protected
+     */
+    childWasDetached: function(view)
+    {
     },
 
     /**
@@ -309,6 +309,7 @@ WebInspector.View.prototype = {
             var childIndex = this._parentView._children.indexOf(this);
             WebInspector.View.__assert(childIndex >= 0, "Attempt to remove non-child view");
             this._parentView._children.splice(childIndex, 1);
+            this._parentView.childWasDetached(this);
             var parent = this._parentView;
             this._parentView = null;
             if (this._hasNonZeroConstraints())
@@ -371,9 +372,12 @@ WebInspector.View.prototype = {
         this.doResize();
     },
 
+    /**
+     * @param {string} cssFile
+     */
     registerRequiredCSS: function(cssFile)
     {
-        this.element.appendChild(WebInspector.View.createStyleElement(cssFile));
+        (this._isWebComponent ? this._shadowRoot : this.element).appendChild(WebInspector.View.createStyleElement(cssFile));
     },
 
     printViewHierarchy: function()
@@ -447,7 +451,7 @@ WebInspector.View.prototype = {
      */
     calculateConstraints: function()
     {
-        return new Constraints(new Size(0, 0));
+        return new Constraints();
     },
 
     /**
@@ -557,11 +561,12 @@ WebInspector.VBox = function(isWebComponent)
 
 WebInspector.VBox.prototype = {
     /**
+     * @override
      * @return {!Constraints}
      */
     calculateConstraints: function()
     {
-        var constraints = new Constraints(new Size(0, 0));
+        var constraints = new Constraints();
 
         /**
          * @this {!WebInspector.View}
@@ -594,11 +599,12 @@ WebInspector.HBox = function(isWebComponent)
 
 WebInspector.HBox.prototype = {
     /**
+     * @override
      * @return {!Constraints}
      */
     calculateConstraints: function()
     {
-        var constraints = new Constraints(new Size(0, 0));
+        var constraints = new Constraints();
 
         /**
          * @this {!WebInspector.View}
@@ -639,6 +645,7 @@ WebInspector.VBoxWithResizeCallback.prototype = {
 }
 
 /**
+ * @override
  * @param {?Node} child
  * @return {?Node}
  * @suppress {duplicate}
@@ -650,6 +657,7 @@ Element.prototype.appendChild = function(child)
 }
 
 /**
+ * @override
  * @param {?Node} child
  * @param {?Node} anchor
  * @return {!Node}
@@ -662,6 +670,7 @@ Element.prototype.insertBefore = function(child, anchor)
 }
 
 /**
+ * @override
  * @param {?Node} child
  * @return {!Node}
  * @suppress {duplicate}

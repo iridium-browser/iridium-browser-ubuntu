@@ -110,6 +110,19 @@ bool RenderSVGShape::strokeContains(const FloatPoint& point, bool requiresStroke
     return shapeDependentStrokeContains(point);
 }
 
+void RenderSVGShape::updateLocalTransform()
+{
+    SVGGraphicsElement* graphicsElement = toSVGGraphicsElement(element());
+    if (graphicsElement->hasAnimatedLocalTransform()) {
+        if (m_localTransform)
+            m_localTransform->setTransform(graphicsElement->calculateAnimatedLocalTransform());
+        else
+            m_localTransform = adoptPtr(new AffineTransform(graphicsElement->calculateAnimatedLocalTransform()));
+    } else {
+        m_localTransform = 0;
+    }
+}
+
 void RenderSVGShape::layout()
 {
     bool updateCachedBoundariesInParents = false;
@@ -123,7 +136,7 @@ void RenderSVGShape::layout()
     }
 
     if (m_needsTransformUpdate) {
-        m_localTransform =  toSVGGraphicsElement(element())->calculateAnimatedLocalTransform();
+        updateLocalTransform();
         m_needsTransformUpdate = false;
         updateCachedBoundariesInParents = true;
     }
@@ -154,14 +167,14 @@ AffineTransform RenderSVGShape::nonScalingStrokeTransform() const
     return toSVGGraphicsElement(element())->getScreenCTM(SVGGraphicsElement::DisallowStyleUpdate);
 }
 
-void RenderSVGShape::paint(PaintInfo& paintInfo, const LayoutPoint&)
+void RenderSVGShape::paint(const PaintInfo& paintInfo, const LayoutPoint&)
 {
     SVGShapePainter(*this).paint(paintInfo);
 }
 
 // This method is called from inside paintOutline() since we call paintOutline()
 // while transformed to our coord system, return local coords
-void RenderSVGShape::addFocusRingRects(Vector<LayoutRect>& rects, const LayoutPoint&, const RenderLayerModelObject*) const
+void RenderSVGShape::addFocusRingRects(Vector<LayoutRect>& rects, const LayoutPoint&) const
 {
     LayoutRect rect = LayoutRect(paintInvalidationRectInLocalCoordinates());
     if (!rect.isEmpty())
@@ -175,7 +188,7 @@ bool RenderSVGShape::nodeAtFloatPoint(const HitTestRequest& request, HitTestResu
         return false;
 
     FloatPoint localPoint;
-    if (!SVGRenderSupport::transformToUserSpaceAndCheckClipping(this, m_localTransform, pointInParent, localPoint))
+    if (!SVGRenderSupport::transformToUserSpaceAndCheckClipping(this, localToParentTransform(), pointInParent, localPoint))
         return false;
 
     PointerEventsHitRules hitRules(PointerEventsHitRules::SVG_GEOMETRY_HITTESTING, request, style()->pointerEvents());
@@ -244,15 +257,6 @@ float RenderSVGShape::strokeWidth() const
 {
     SVGLengthContext lengthContext(element());
     return style()->svgStyle().strokeWidth()->value(lengthContext);
-}
-
-bool RenderSVGShape::hasSmoothStroke() const
-{
-    const SVGRenderStyle& svgStyle = style()->svgStyle();
-    return svgStyle.strokeDashArray()->isEmpty()
-        && svgStyle.strokeMiterLimit() == SVGRenderStyle::initialStrokeMiterLimit()
-        && svgStyle.joinStyle() == SVGRenderStyle::initialJoinStyle()
-        && svgStyle.capStyle() == SVGRenderStyle::initialCapStyle();
 }
 
 }

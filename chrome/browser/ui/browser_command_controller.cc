@@ -66,7 +66,6 @@
 #include "ash/shell.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_context_menu.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_window_manager.h"
-#include "chrome/browser/ui/browser_commands_chromeos.h"
 #endif
 
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
@@ -341,6 +340,11 @@ void BrowserCommandController::LoadingStateChanged(bool is_loading,
   UpdateReloadStopState(is_loading, force);
 }
 
+void BrowserCommandController::ExtensionStateChanged() {
+  // Extensions may disable the bookmark editing commands.
+  UpdateCommandsForBookmarkEditing();
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // BrowserCommandController, CommandUpdaterDelegate implementation:
 
@@ -456,7 +460,7 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
       break;
     case IDC_FULLSCREEN:
 #if defined(OS_MACOSX)
-      chrome::ToggleFullscreenWithChromeOrFallback(browser_);
+      chrome::ToggleFullscreenWithToolbarOrFallback(browser_);
 #else
       chrome::ToggleFullscreenMode(browser_);
 #endif
@@ -529,7 +533,7 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
       SavePage(browser_);
       break;
     case IDC_BOOKMARK_PAGE:
-      BookmarkCurrentPage(browser_);
+      BookmarkCurrentPageAllowingExtensionOverrides(browser_);
       break;
     case IDC_BOOKMARK_ALL_TABS:
       BookmarkAllTabs(browser_);
@@ -691,11 +695,6 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
     case IDC_TASK_MANAGER:
       OpenTaskManager(browser_);
       break;
-#if defined(OS_CHROMEOS)
-    case IDC_TAKE_SCREENSHOT:
-      TakeScreenshot();
-      break;
-#endif
 #if defined(GOOGLE_CHROME_BUILD)
     case IDC_FEEDBACK:
       OpenFeedbackDialog(browser_);
@@ -761,7 +760,7 @@ void BrowserCommandController::ExecuteCommandWithDisposition(
       ShowHelp(browser_, HELP_SOURCE_MENU);
       break;
     case IDC_SHOW_SIGNIN:
-      ShowBrowserSignin(browser_, signin::SOURCE_MENU);
+      ShowBrowserSignin(browser_, signin_metrics::SOURCE_MENU);
       break;
     case IDC_TOGGLE_SPEECH_INPUT:
       ToggleSpeechInput(browser_);
@@ -967,7 +966,6 @@ void BrowserCommandController::InitCommandState() {
                                         !profile()->IsOffTheRecord());
   command_updater_.UpdateCommandEnabled(IDC_CLEAR_BROWSING_DATA, normal_window);
 #if defined(OS_CHROMEOS)
-  command_updater_.UpdateCommandEnabled(IDC_TAKE_SCREENSHOT, true);
   command_updater_.UpdateCommandEnabled(IDC_TOUCH_HUD_PROJECTION_TOGGLE, true);
 #else
   // Chrome OS uses the system tray menu to handle multi-profiles.
@@ -1017,9 +1015,8 @@ void BrowserCommandController::InitCommandState() {
 
   // Distill current page.
   command_updater_.UpdateCommandEnabled(
-      IDC_DISTILL_PAGE,
-      CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableDomDistiller));
+      IDC_DISTILL_PAGE, base::CommandLine::ForCurrentProcess()->HasSwitch(
+                            switches::kEnableDomDistiller));
 
   // Initialize other commands whose state changes based on various conditions.
   UpdateCommandsForFullscreenMode();
@@ -1118,9 +1115,9 @@ void BrowserCommandController::UpdateCommandsForTabState() {
   command_updater_.UpdateCommandEnabled(
       IDC_CREATE_SHORTCUTS,
       CanCreateApplicationShortcuts(browser_));
+#endif
   command_updater_.UpdateCommandEnabled(IDC_CREATE_HOSTED_APP,
                                         CanCreateBookmarkApp(browser_));
-#endif
 
   command_updater_.UpdateCommandEnabled(
       IDC_TOGGLE_REQUEST_TABLET_SITE,

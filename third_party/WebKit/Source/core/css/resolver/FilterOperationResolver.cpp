@@ -69,7 +69,7 @@ static FilterOperation::OperationType filterOperationForType(CSSFilterValue::Fil
     return FilterOperation::NONE;
 }
 
-bool FilterOperationResolver::createFilterOperations(CSSValue* inValue, const CSSToLengthConversionData& unadjustedConversionData, FilterOperations& outOperations, StyleResolverState& state)
+bool FilterOperationResolver::createFilterOperations(CSSValue* inValue, const CSSToLengthConversionData& conversionData, FilterOperations& outOperations, StyleResolverState& state)
 {
     ASSERT(outOperations.isEmpty());
 
@@ -85,8 +85,6 @@ bool FilterOperationResolver::createFilterOperations(CSSValue* inValue, const CS
     if (!inValue->isValueList())
         return false;
 
-    float zoomFactor = unadjustedConversionData.zoom();
-    const CSSToLengthConversionData& conversionData = unadjustedConversionData.copyWithAdjustedZoom(zoomFactor);
     FilterOperations operations;
     for (CSSValueListIterator i = inValue; i.hasMore(); i.advance()) {
         CSSValue* currValue = i.value();
@@ -107,7 +105,7 @@ bool FilterOperationResolver::createFilterOperations(CSSValue* inValue, const CS
             CSSSVGDocumentValue* svgDocumentValue = toCSSSVGDocumentValue(argument);
             KURL url = state.document().completeURL(svgDocumentValue->url());
 
-            RefPtr<ReferenceFilterOperation> operation = ReferenceFilterOperation::create(svgDocumentValue->url(), AtomicString(url.fragmentIdentifier()));
+            RefPtrWillBeRawPtr<ReferenceFilterOperation> operation = ReferenceFilterOperation::create(svgDocumentValue->url(), AtomicString(url.fragmentIdentifier()));
             if (SVGURIReference::isExternalURIReference(svgDocumentValue->url(), state.document())) {
                 if (!svgDocumentValue->loadRequested())
                     state.elementStyleResources().addPendingSVGDocument(operation.get(), svgDocumentValue);

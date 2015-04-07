@@ -187,6 +187,7 @@
         '<(DEPTH)/third_party/libxslt/libxslt.gyp:libxslt',
         '<(DEPTH)/third_party/npapi/npapi.gyp:npapi',
         '<(DEPTH)/third_party/qcms/qcms.gyp:qcms',
+        '<(DEPTH)/third_party/snappy/snappy.gyp:snappy',
         '<(DEPTH)/third_party/sqlite/sqlite.gyp:sqlite',
         '<(DEPTH)/url/url.gyp:url_lib',
         '<(DEPTH)/v8/tools/gyp/v8.gyp:v8',
@@ -749,7 +750,6 @@
         'INSIDE_BLINK',
       ],
       'include_dirs': [
-        '<(bindings_core_v8_dir)',  # FIXME: Remove once http://crbug.com/236119 is fixed.
         'testing',
         'testing/v8',
       ],
@@ -771,8 +771,6 @@
         '<(bindings_core_v8_output_dir)/V8UnionTypesTest.h',
         '<(bindings_core_v8_output_dir)/V8Internals.cpp',
         '<(bindings_core_v8_output_dir)/V8Internals.h',
-        '<(bindings_core_v8_output_dir)/V8InternalProfilers.cpp',
-        '<(bindings_core_v8_output_dir)/V8InternalProfilers.h',
         '<(bindings_core_v8_output_dir)/V8InternalSettings.cpp',
         '<(bindings_core_v8_output_dir)/V8InternalSettings.h',
         '<(bindings_core_v8_output_dir)/V8InternalSettingsGenerated.cpp',
@@ -787,6 +785,10 @@
         '<(bindings_core_v8_output_dir)/V8RefCountedScriptWrappable.h',
         '<(bindings_core_v8_output_dir)/V8InternalDictionary.cpp',
         '<(bindings_core_v8_output_dir)/V8InternalDictionary.h',
+        '<(bindings_core_v8_output_dir)/V8InternalDictionaryDerived.cpp',
+        '<(bindings_core_v8_output_dir)/V8InternalDictionaryDerived.h',
+        '<(bindings_core_v8_output_dir)/V8PluginPlaceholderOptions.cpp',
+        '<(bindings_core_v8_output_dir)/V8PluginPlaceholderOptions.h',
       ],
       'sources/': [
         ['exclude', 'testing/js'],

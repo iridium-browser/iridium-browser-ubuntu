@@ -16,6 +16,7 @@
 #include "cc/quads/texture_draw_quad.h"
 #include "cc/quads/tile_draw_quad.h"
 #include "cc/quads/yuv_video_draw_quad.h"
+#include "cc/surfaces/surface_id_allocator.h"
 #include "mojo/converters/geometry/geometry_type_converters.h"
 
 namespace mojo {
@@ -140,7 +141,8 @@ bool ConvertDrawQuad(const QuadPtr& input,
           texture_quad_state->uv_bottom_right.To<gfx::PointF>(),
           texture_quad_state->background_color.To<SkColor>(),
           &texture_quad_state->vertex_opacity.storage()[0],
-          texture_quad_state->flipped);
+          texture_quad_state->flipped,
+          texture_quad_state->nearest_neighbor);
       break;
     }
     case MATERIAL_TILED_CONTENT: {
@@ -157,7 +159,8 @@ bool ConvertDrawQuad(const QuadPtr& input,
                         tile_state->resource_id,
                         tile_state->tex_coord_rect.To<gfx::RectF>(),
                         tile_state->texture_size.To<gfx::Size>(),
-                        tile_state->swizzle_contents);
+                        tile_state->swizzle_contents,
+                        tile_state->nearest_neighbor);
       break;
     }
     case MATERIAL_YUV_VIDEO_CONTENT: {
@@ -193,14 +196,18 @@ bool ConvertDrawQuad(const QuadPtr& input,
 SurfaceIdPtr TypeConverter<SurfaceIdPtr, cc::SurfaceId>::Convert(
     const cc::SurfaceId& input) {
   SurfaceIdPtr id(SurfaceId::New());
-  id->id = input.id;
+  id->local = static_cast<uint32_t>(input.id);
+  id->id_namespace = cc::SurfaceIdAllocator::NamespaceForId(input);
   return id.Pass();
 }
 
 // static
 cc::SurfaceId TypeConverter<cc::SurfaceId, SurfaceIdPtr>::Convert(
     const SurfaceIdPtr& input) {
-  return cc::SurfaceId(input->id);
+  uint64_t packed_id = input->id_namespace;
+  packed_id <<= 32ull;
+  packed_id |= input->local;
+  return cc::SurfaceId(packed_id);
 }
 
 // static
@@ -308,6 +315,7 @@ QuadPtr TypeConverter<QuadPtr, cc::DrawQuad>::Convert(
       tile_state->tex_coord_rect = RectF::From(tile_quad->tex_coord_rect);
       tile_state->texture_size = Size::From(tile_quad->texture_size);
       tile_state->swizzle_contents = tile_quad->swizzle_contents;
+      tile_state->nearest_neighbor = tile_quad->nearest_neighbor;
       tile_state->resource_id = tile_quad->resource_id;
       quad->tile_quad_state = tile_state.Pass();
       break;

@@ -59,7 +59,7 @@ class WebContentsDelegateAndroid : public content::WebContentsDelegate {
       SkColor color,
       const std::vector<content::ColorSuggestion>& suggestions) override;
   virtual void NavigationStateChanged(
-      const content::WebContents* source,
+      content::WebContents* source,
       content::InvalidateTypes changed_flags) override;
   virtual void VisibleSSLStateChanged(
       const content::WebContents* source) override;
@@ -80,6 +80,7 @@ class WebContentsDelegateAndroid : public content::WebContentsDelegate {
   virtual bool ShouldCreateWebContents(
       content::WebContents* web_contents,
       int route_id,
+      int main_frame_route_id,
       WindowContainerType window_container_type,
       const base::string16& frame_name,
       const GURL& target_url,

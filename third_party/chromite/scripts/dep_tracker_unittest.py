@@ -21,12 +21,12 @@ from chromite.scripts import dep_tracker
 # pylint: disable=W0212
 
 
-class MainTest(cros_test_lib.MoxOutputTestCase):
+class MainTest(cros_test_lib.OutputTestCase):
   """Tests for the main() function."""
 
   def testHelp(self):
     """Test that --help is functioning."""
-    argv = [ '--help' ]
+    argv = ['--help']
 
     with self.OutputCapturer() as output:
       # Running with --help should exit with code==0.

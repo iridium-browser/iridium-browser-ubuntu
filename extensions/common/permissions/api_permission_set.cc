@@ -183,4 +183,91 @@ void APIPermissionSet::AddImpliedPermissions() {
   }
 }
 
+PermissionID::PermissionID(APIPermission::ID id)
+    : std::pair<APIPermission::ID, base::string16>(id, base::string16()) {
+}
+
+PermissionID::PermissionID(APIPermission::ID id,
+                           const base::string16& parameter)
+    : std::pair<APIPermission::ID, base::string16>(id, parameter) {
+}
+
+PermissionID::~PermissionID() {
+}
+
+PermissionIDSet::PermissionIDSet() : permissions_() {
+}
+
+PermissionIDSet::~PermissionIDSet() {
+}
+
+PermissionIDSet::PermissionIDSet(APIPermission::ID permission_one)
+    : permissions_() {
+  insert(permission_one);
+}
+
+PermissionIDSet::PermissionIDSet(APIPermission::ID permission_one,
+                                 APIPermission::ID permission_two)
+    : permissions_() {
+  insert(permission_one);
+  insert(permission_two);
+}
+
+PermissionIDSet::PermissionIDSet(APIPermission::ID permission_one,
+                                 APIPermission::ID permission_two,
+                                 APIPermission::ID permission_three)
+    : permissions_() {
+  insert(permission_one);
+  insert(permission_two);
+  insert(permission_three);
+}
+
+PermissionIDSet::PermissionIDSet(APIPermission::ID permission_one,
+                                 APIPermission::ID permission_two,
+                                 APIPermission::ID permission_three,
+                                 APIPermission::ID permission_four)
+    : permissions_() {
+  insert(permission_one);
+  insert(permission_two);
+  insert(permission_three);
+  insert(permission_four);
+}
+
+PermissionIDSet::PermissionIDSet(APIPermission::ID permission_one,
+                                 APIPermission::ID permission_two,
+                                 APIPermission::ID permission_three,
+                                 APIPermission::ID permission_four,
+                                 APIPermission::ID permission_five)
+    : permissions_() {
+  insert(permission_one);
+  insert(permission_two);
+  insert(permission_three);
+  insert(permission_four);
+  insert(permission_five);
+}
+
+PermissionIDSet::PermissionIDSet(APIPermission::ID permission_one,
+                                 APIPermission::ID permission_two,
+                                 APIPermission::ID permission_three,
+                                 APIPermission::ID permission_four,
+                                 APIPermission::ID permission_five,
+                                 APIPermission::ID permission_six)
+    : permissions_() {
+  insert(permission_one);
+  insert(permission_two);
+  insert(permission_three);
+  insert(permission_four);
+  insert(permission_five);
+  insert(permission_six);
+}
+
+void PermissionIDSet::insert(APIPermission::ID permission_id) {
+  permissions_.insert(PermissionID(permission_id, base::string16()));
+}
+
+void PermissionIDSet::insert(APIPermission::ID permission_id,
+                             base::string16 permission_parameter) {
+  permissions_.insert(PermissionID(permission_id, permission_parameter));
+}
+
 }  // namespace extensions

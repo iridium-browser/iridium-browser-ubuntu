@@ -36,11 +36,13 @@
 #include "chrome/browser/ui/webui/version_handler_chromeos.h"
 #endif
 
+using content::WebUIDataSource;
+
 namespace {
 
-content::WebUIDataSource* CreateVersionUIDataSource(Profile* profile) {
-  content::WebUIDataSource* html_source =
-      content::WebUIDataSource::Create(chrome::kChromeUIVersionHost);
+WebUIDataSource* CreateVersionUIDataSource() {
+  WebUIDataSource* html_source =
+      WebUIDataSource::Create(chrome::kChromeUIVersionHost);
 
   // Localized and data strings.
   html_source->AddLocalizedString("title", IDS_ABOUT_VERSION_TITLE);
@@ -88,12 +90,14 @@ content::WebUIDataSource* CreateVersionUIDataSource(Profile* profile) {
                                   IDS_ABOUT_VERSION_COMMAND_LINE);
 
 #if defined(OS_WIN)
-  html_source->AddString("command_line", base::WideToUTF16(
-      CommandLine::ForCurrentProcess()->GetCommandLineString()));
+  html_source->AddString(
+      "command_line",
+      base::WideToUTF16(
+          base::CommandLine::ForCurrentProcess()->GetCommandLineString()));
 #elif defined(OS_POSIX)
   std::string command_line;
   typedef std::vector<std::string> ArgvList;
-  const ArgvList& argv = CommandLine::ForCurrentProcess()->argv();
+  const ArgvList& argv = base::CommandLine::ForCurrentProcess()->argv();
   for (ArgvList::const_iterator iter = argv.begin(); iter != argv.end(); iter++)
     command_line += " " + *iter;
   // TODO(viettrungluu): |command_line| could really have any encoding, whereas
@@ -140,7 +144,7 @@ VersionUI::VersionUI(content::WebUI* web_ui)
   content::URLDataSource::Add(profile, theme);
 #endif
 
-  content::WebUIDataSource::Add(profile, CreateVersionUIDataSource(profile));
+  WebUIDataSource::Add(profile, CreateVersionUIDataSource());
 }
 
 VersionUI::~VersionUI() {

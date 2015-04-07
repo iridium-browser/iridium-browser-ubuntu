@@ -38,13 +38,18 @@
 namespace blink {
 
 class WebString;
-class WebURL;
 
 // WebSettings is owned by the WebView and allows code to modify the settings for
 // the WebView's page without any knowledge of WebCore itself.  For the most part,
 // these functions have a 1:1 mapping with the methods in WebCore/page/Settings.h.
 class WebSettings {
 public:
+    enum ImageAnimationPolicy {
+        ImageAnimationPolicyAllowed,
+        ImageAnimationPolicyAnimateOnce,
+        ImageAnimationPolicyNoAnimation
+    };
+
     enum EditingBehavior {
         EditingBehaviorMac,
         EditingBehaviorWin,
@@ -53,9 +58,14 @@ public:
     };
 
     enum V8CacheOptions {
-        V8CacheOptionsOff,
+        V8CacheOptionsDefault,
         V8CacheOptionsParse,
-        V8CacheOptionsCode
+        V8CacheOptionsCode,
+        V8CacheOptionsCodeCompressed,
+        V8CacheOptionsNone,
+        V8CacheOptionsParseMemory,
+        V8CacheOptionsHeuristics,
+        V8CacheOptionsHeuristicsMobile
     };
 
     enum V8ScriptStreamingMode {
@@ -64,22 +74,25 @@ public:
         V8ScriptStreamingModeAllPlusBlockParsingBlocking,
     };
 
-    // Bit field values to tell Blink what kind of pointer/hover types are
-    // available on the system. These must match the enums in
-    // core/css/PointerProperties.h and their equality is compile-time asserted
-    // in WebSettingsImpl.cpp.
+    // Bit field values indicating available pointer types. Identical to
+    // blink::PointerType enums, enforced by compile-time assertions in
+    // AssertMatchingEnums.cpp.
+    // TODO(mustaq): Move this into public/platform, like WebBlendMode.
     enum PointerType {
-        PointerTypeNone = 1,
-        PointerTypeCoarse = 2,
-        PointerTypeFine = 4
+        PointerTypeNone = 1 << 0,
+        PointerTypeCoarse = 1 << 1,
+        PointerTypeFine = 1 << 2
     };
 
+    // Bit field values indicating available hover types. Identical to
+    // blink::HoverType enums, enforced by compile-time assertions in
+    // AssertMatchingEnums.cpp.
     enum HoverType {
-        HoverTypeNone = 1,
+        HoverTypeNone = 1 << 0,
         // Indicates that the primary pointing system can hover, but it requires
         // a significant action on the user’s part. e.g. hover on “long press”.
-        HoverTypeOnDemand = 2,
-        HoverTypeHover = 4
+        HoverTypeOnDemand = 1 << 1,
+        HoverTypeHover = 1 << 2
     };
 
     virtual bool mainFrameResizesAreOrientationChanges() const = 0;
@@ -123,7 +136,6 @@ public:
     virtual void setAutoZoomFocusedNodeToLegibleScale(bool) = 0;
     virtual void setCaretBrowsingEnabled(bool) = 0;
     virtual void setClobberUserAgentInitialScaleQuirk(bool) = 0;
-    virtual void setContainerCullingEnabled(bool) = 0;
     virtual void setCookieEnabled(bool) = 0;
     virtual void setNavigateOnDragDrop(bool) = 0;
     virtual void setCursiveFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON) = 0;
@@ -151,13 +163,14 @@ public:
     virtual void setFullscreenSupported(bool) = 0;
     virtual void setHyperlinkAuditingEnabled(bool) = 0;
     virtual void setIgnoreMainFrameOverflowHiddenQuirk(bool) = 0;
+    virtual void setImageAnimationPolicy(ImageAnimationPolicy) = 0;
     virtual void setImagesEnabled(bool) = 0;
     virtual void setInlineTextBoxAccessibilityEnabled(bool) = 0;
     virtual void setJavaEnabled(bool) = 0;
     virtual void setJavaScriptCanAccessClipboard(bool) = 0;
     virtual void setJavaScriptCanOpenWindowsAutomatically(bool) = 0;
     virtual void setJavaScriptEnabled(bool) = 0;
-    virtual void setLayerSquashingEnabled(bool) = 0;
+    void setLayerSquashingEnabled(bool) { }
     virtual void setLoadsImagesAutomatically(bool) = 0;
     virtual void setLoadWithOverviewMode(bool) = 0;
     virtual void setLocalStorageEnabled(bool) = 0;
@@ -186,6 +199,7 @@ public:
     virtual void setRenderVSyncNotificationEnabled(bool) = 0;
     virtual void setReportScreenSizeInPhysicalPixelsQuirk(bool) = 0;
     virtual void setRootLayerScrolls(bool) = 0;
+    virtual void setRubberBandingOnCompositorThread(bool) = 0;
     virtual void setSansSerifFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON) = 0;
     virtual void setSelectTrailingWhitespaceEnabled(bool) = 0;
     virtual void setSelectionIncludesAltImageText(bool) = 0;
@@ -193,6 +207,7 @@ public:
     virtual void setShouldPrintBackgrounds(bool) = 0;
     virtual void setShouldClearDocumentBackground(bool) = 0;
     virtual void setShouldRespectImageOrientation(bool) = 0;
+    virtual void setShowContextMenuOnMouseUp(bool) = 0;
     virtual void setShowFPSCounter(bool) = 0;
     virtual void setShowPaintRects(bool) = 0;
     virtual void setShrinksStandaloneImagesToFit(bool) = 0;
@@ -207,6 +222,8 @@ public:
     // elements using SPACE or ENTER keys.
     virtual void setSpatialNavigationEnabled(bool) = 0;
     virtual void setStandardFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON) = 0;
+    virtual void setStrictMixedContentChecking(bool) = 0;
+    virtual void setStrictPowerfulFeatureRestrictions(bool) = 0;
     virtual void setSupportDeprecatedTargetDensityDPI(bool) = 0;
     virtual void setSupportsMultipleWindows(bool) = 0;
     virtual void setSyncXHRInDocumentsEnabled(bool) = 0;

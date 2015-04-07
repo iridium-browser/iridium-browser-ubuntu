@@ -24,13 +24,11 @@ class ExtensionOptionsGuest
   static const char Type[];
   static extensions::GuestViewBase* Create(
       content::BrowserContext* browser_context,
+      content::WebContents* owner_web_contents,
       int guest_instance_id);
 
   // GuestViewBase implementation.
-  void CreateWebContents(const std::string& embedder_extension_id,
-                         int embedder_render_process_id,
-                         const GURL& embedder_site_url,
-                         const base::DictionaryValue& create_params,
+  void CreateWebContents(const base::DictionaryValue& create_params,
                          const WebContentsCreatedCallback& callback) override;
   void DidAttachToEmbedder() override;
   void DidInitialize() override;
@@ -40,6 +38,8 @@ class ExtensionOptionsGuest
   void GuestSizeChangedDueToAutoSize(const gfx::Size& old_size,
                                      const gfx::Size& new_size) override;
   bool IsAutoSizeSupported() const override;
+  void OnPreferredSizeChanged(const gfx::Size& pref_size) override;
+  bool IsPreferredSizeModeEnabled() const override;
 
   // ExtensionFunctionDispatcher::Delegate implementation.
   content::WebContents* GetAssociatedWebContents() const override;
@@ -53,6 +53,7 @@ class ExtensionOptionsGuest
   bool ShouldCreateWebContents(
       content::WebContents* web_contents,
       int route_id,
+      int main_frame_route_id,
       WindowContainerType window_container_type,
       const base::string16& frame_name,
       const GURL& target_url,
@@ -60,14 +61,17 @@ class ExtensionOptionsGuest
       content::SessionStorageNamespace* session_storage_namespace) override;
 
   // content::WebContentsObserver implementation.
+  void DidNavigateMainFrame(
+      const content::LoadCommittedDetails& details,
+      const content::FrameNavigateParams& params) override;
   bool OnMessageReceived(const IPC::Message& message) override;
 
  private:
   ExtensionOptionsGuest(content::BrowserContext* browser_context,
+                        content::WebContents* owner_web_contents,
                         int guest_instance_id);
   ~ExtensionOptionsGuest() override;
   void OnRequest(const ExtensionHostMsg_Request_Params& params);
-  void SetUpAutoSize();
 
   scoped_ptr<extensions::ExtensionFunctionDispatcher>
       extension_function_dispatcher_;

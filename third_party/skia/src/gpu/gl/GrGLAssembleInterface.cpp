@@ -131,6 +131,7 @@ const GrGLInterface* GrGLAssembleGLInterface(void* ctx, GrGLGetProc get) {
     GET_PROC(GetShaderiv);
     GET_PROC(GetString);
     GET_PROC(GetStringi);
+    GET_PROC(GetShaderPrecisionFormat);
     GET_PROC(GetTexLevelParameteriv);
     GET_PROC(GenQueries);
     GET_PROC(GenTextures);
@@ -196,6 +197,10 @@ const GrGLInterface* GrGLAssembleGLInterface(void* ctx, GrGLGetProc get) {
         GET_PROC(BindVertexArray);
         GET_PROC(GenVertexArrays);
         GET_PROC(DeleteVertexArrays);
+    } else if (extensions.has("GL_APPLE_vertex_array_object")) {
+        GET_PROC_SUFFIX(BindVertexArray, APPLE);
+        GET_PROC_SUFFIX(GenVertexArrays, APPLE);
+        GET_PROC_SUFFIX(DeleteVertexArrays, APPLE);
     }
 
     if (glVer >= GR_GL_VER(3,0) || extensions.has("GL_ARB_map_buffer_range")) {
@@ -367,6 +372,7 @@ const GrGLInterface* GrGLAssembleGLESInterface(void* ctx, GrGLGetProc get) {
     GET_PROC(GetProgramInfoLog);
     GET_PROC(GetProgramiv);
     GET_PROC(GetShaderInfoLog);
+    GET_PROC(GetShaderPrecisionFormat);
     GET_PROC(GetShaderiv);
     GET_PROC(GetString);
     GET_PROC(GetStringi);

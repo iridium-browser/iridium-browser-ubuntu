@@ -10,6 +10,7 @@
 #include "base/json/json_reader.h"
 #include "base/values.h"
 #include "media/base/cdm_callback_promise.h"
+#include "media/base/cdm_key_information.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/decrypt_config.h"
 #include "media/base/mock_filters.h"
@@ -23,6 +24,7 @@ using ::testing::IsNull;
 using ::testing::NotNull;
 using ::testing::SaveArg;
 using ::testing::StrNe;
+using ::testing::Unused;
 
 MATCHER(IsEmpty, "") { return arg.empty(); }
 MATCHER(IsNotEmpty, "") { return !arg.empty(); }
@@ -55,6 +57,7 @@ const char kKeyAsJWK[] =
     "  \"keys\": ["
     "    {"
     "      \"kty\": \"oct\","
+    "      \"alg\": \"A128KW\","
     "      \"kid\": \"AAECAw\","
     "      \"k\": \"BAUGBwgJCgsMDQ4PEBESEw\""
     "    }"
@@ -68,6 +71,7 @@ const char kKeyAlternateAsJWK[] =
     "  \"keys\": ["
     "    {"
     "      \"kty\": \"oct\","
+    "      \"alg\": \"A128KW\","
     "      \"kid\": \"AAECAw\","
     "      \"k\": \"FBUWFxgZGhscHR4fICEiIw\""
     "    }"
@@ -79,6 +83,7 @@ const char kWrongKeyAsJWK[] =
     "  \"keys\": ["
     "    {"
     "      \"kty\": \"oct\","
+    "      \"alg\": \"A128KW\","
     "      \"kid\": \"AAECAw\","
     "      \"k\": \"7u7u7u7u7u7u7u7u7u7u7g\""
     "    }"
@@ -90,6 +95,7 @@ const char kWrongSizedKeyAsJWK[] =
     "  \"keys\": ["
     "    {"
     "      \"kty\": \"oct\","
+    "      \"alg\": \"A128KW\","
     "      \"kid\": \"AAECAw\","
     "      \"k\": \"AAECAw\""
     "    }"
@@ -136,6 +142,7 @@ const char kKey2AsJWK[] =
     "  \"keys\": ["
     "    {"
     "      \"kty\": \"oct\","
+    "      \"alg\": \"A128KW\","
     "      \"kid\": \"AAECAwQFBgcICQoLDA0ODxAREhM\","
     "      \"k\": \"FBUWFxgZGhscHR4fICEiIw\""
     "    }"
@@ -241,14 +248,6 @@ class AesDecryptorTest : public testing::Test {
     EXPECT_EQ(expected_result, RESOLVED) << "Unexpectedly resolved.";
   }
 
-  void OnResolveWithUsableKeyIds(PromiseResult expected_result,
-                                 uint32 expected_count,
-                                 const KeyIdsVector& useable_key_ids) {
-    EXPECT_EQ(expected_result, RESOLVED) << "Unexpectedly resolved.";
-    EXPECT_EQ(expected_count, useable_key_ids.size());
-    useable_key_ids_ = useable_key_ids;
-  }
-
   void OnReject(PromiseResult expected_result,
                 MediaKeys::Exception exception_code,
                 uint32 system_code,
@@ -280,31 +279,14 @@ class AesDecryptorTest : public testing::Test {
     return promise.Pass();
   }
 
-  scoped_ptr<KeyIdsPromise> CreateUsableKeyIdsPromise(
-      PromiseResult expected_result,
-      uint32 expected_count) {
-    scoped_ptr<KeyIdsPromise> promise(new CdmCallbackPromise<KeyIdsVector>(
-        base::Bind(&AesDecryptorTest::OnResolveWithUsableKeyIds,
-                   base::Unretained(this),
-                   expected_result,
-                   expected_count),
-        base::Bind(&AesDecryptorTest::OnReject,
-                   base::Unretained(this),
-                   expected_result)));
-    return promise.Pass();
-  }
-
   // Creates a new session using |key_id|. Returns the session ID.
   std::string CreateSession(const std::vector<uint8>& key_id) {
     DCHECK(!key_id.empty());
-    EXPECT_CALL(*this,
-                OnSessionMessage(
-                    IsNotEmpty(), IsJSONDictionary(), GURL::EmptyGURL()));
-    decryptor_.CreateSession(std::string(),
-                             &key_id[0],
-                             key_id.size(),
-                             MediaKeys::TEMPORARY_SESSION,
-                             CreateSessionPromise(RESOLVED));
+    EXPECT_CALL(*this, OnSessionMessage(IsNotEmpty(), _, IsJSONDictionary(),
+                                        GURL::EmptyGURL()));
+    decryptor_.CreateSessionAndGenerateRequest(
+        MediaKeys::TEMPORARY_SESSION, std::string(), &key_id[0], key_id.size(),
+        CreateSessionPromise(RESOLVED));
     // This expects the promise to be called synchronously, which is the case
     // for AesDecryptor.
     return web_session_id_;
@@ -325,6 +307,17 @@ class AesDecryptorTest : public testing::Test {
     decryptor_.RemoveSession(session_id, CreatePromise(RESOLVED));
   }
 
+  MOCK_METHOD2(OnSessionKeysChangeCalled,
+               void(const std::string& web_session_id,
+                    bool has_additional_usable_key));
+
+  void OnSessionKeysChange(const std::string& web_session_id,
+                           bool has_additional_usable_key,
+                           CdmKeysInfo keys_info) {
+    keys_info_.swap(keys_info);
+    OnSessionKeysChangeCalled(web_session_id, has_additional_usable_key);
+  }
+
   // Updates the session specified by |session_id| with |key|. |result|
   // tests that the update succeeds or generates an error.
   void UpdateSessionAndExpect(std::string session_id,
@@ -333,9 +326,9 @@ class AesDecryptorTest : public testing::Test {
     DCHECK(!key.empty());
 
     if (expected_result == RESOLVED) {
-      EXPECT_CALL(*this, OnSessionKeysChange(session_id, true));
+      EXPECT_CALL(*this, OnSessionKeysChangeCalled(session_id, true));
     } else {
-      EXPECT_CALL(*this, OnSessionKeysChange(_, _)).Times(0);
+      EXPECT_CALL(*this, OnSessionKeysChangeCalled(_, _)).Times(0);
     }
 
     decryptor_.UpdateSession(session_id,
@@ -344,18 +337,9 @@ class AesDecryptorTest : public testing::Test {
                              CreatePromise(expected_result));
   }
 
-  void GetUsableKeyIdsAndExpect(const std::string& session_id,
-                                PromiseResult expected_result,
-                                uint32 expected_count) {
-    decryptor_.GetUsableKeyIds(
-        session_id, CreateUsableKeyIdsPromise(expected_result, expected_count));
-  }
-
-  bool UsableKeyIdsContains(std::vector<uint8> expected) {
-    for (KeyIdsVector::iterator it = useable_key_ids_.begin();
-         it != useable_key_ids_.end();
-         ++it) {
-      if (*it == expected)
+  bool KeysInfoContains(std::vector<uint8> expected) {
+    for (const auto& key_id : keys_info_) {
+      if (key_id->key_id == expected)
         return true;
     }
     return false;
@@ -420,22 +404,17 @@ class AesDecryptorTest : public testing::Test {
     }
   }
 
-  MOCK_METHOD3(OnSessionMessage,
+  MOCK_METHOD4(OnSessionMessage,
                void(const std::string& web_session_id,
+                    MediaKeys::MessageType message_type,
                     const std::vector<uint8>& message,
-                    const GURL& destination_url));
-  MOCK_METHOD2(OnSessionKeysChange,
-               void(const std::string& web_session_id,
-                    bool has_additional_usable_key));
+                    const GURL& legacy_destination_url));
   MOCK_METHOD1(OnSessionClosed, void(const std::string& web_session_id));
 
   AesDecryptor decryptor_;
   AesDecryptor::DecryptCB decrypt_cb_;
   std::string web_session_id_;
-
-  // Copy of the vector from the last successful call to
-  // OnResolveWithUsableKeyIds().
-  KeyIdsVector useable_key_ids_;
+  CdmKeysInfo keys_info_;
 
   // Constants for testing.
   const std::vector<uint8> original_data_;
@@ -449,38 +428,30 @@ class AesDecryptorTest : public testing::Test {
 
 TEST_F(AesDecryptorTest, CreateSessionWithNullInitData) {
   EXPECT_CALL(*this,
-              OnSessionMessage(IsNotEmpty(), IsEmpty(), GURL::EmptyGURL()));
-  decryptor_.CreateSession(std::string(),
-                           NULL,
-                           0,
-                           MediaKeys::TEMPORARY_SESSION,
-                           CreateSessionPromise(RESOLVED));
+              OnSessionMessage(IsNotEmpty(), _, IsEmpty(), GURL::EmptyGURL()));
+  decryptor_.CreateSessionAndGenerateRequest(MediaKeys::TEMPORARY_SESSION,
+                                             std::string(), NULL, 0,
+                                             CreateSessionPromise(RESOLVED));
 }
 
 TEST_F(AesDecryptorTest, MultipleCreateSession) {
   EXPECT_CALL(*this,
-              OnSessionMessage(IsNotEmpty(), IsEmpty(), GURL::EmptyGURL()));
-  decryptor_.CreateSession(std::string(),
-                           NULL,
-                           0,
-                           MediaKeys::TEMPORARY_SESSION,
-                           CreateSessionPromise(RESOLVED));
+              OnSessionMessage(IsNotEmpty(), _, IsEmpty(), GURL::EmptyGURL()));
+  decryptor_.CreateSessionAndGenerateRequest(MediaKeys::TEMPORARY_SESSION,
+                                             std::string(), NULL, 0,
+                                             CreateSessionPromise(RESOLVED));
 
   EXPECT_CALL(*this,
-              OnSessionMessage(IsNotEmpty(), IsEmpty(), GURL::EmptyGURL()));
-  decryptor_.CreateSession(std::string(),
-                           NULL,
-                           0,
-                           MediaKeys::TEMPORARY_SESSION,
-                           CreateSessionPromise(RESOLVED));
+              OnSessionMessage(IsNotEmpty(), _, IsEmpty(), GURL::EmptyGURL()));
+  decryptor_.CreateSessionAndGenerateRequest(MediaKeys::TEMPORARY_SESSION,
+                                             std::string(), NULL, 0,
+                                             CreateSessionPromise(RESOLVED));
 
   EXPECT_CALL(*this,
-              OnSessionMessage(IsNotEmpty(), IsEmpty(), GURL::EmptyGURL()));
-  decryptor_.CreateSession(std::string(),
-                           NULL,
-                           0,
-                           MediaKeys::TEMPORARY_SESSION,
-                           CreateSessionPromise(RESOLVED));
+              OnSessionMessage(IsNotEmpty(), _, IsEmpty(), GURL::EmptyGURL()));
+  decryptor_.CreateSessionAndGenerateRequest(MediaKeys::TEMPORARY_SESSION,
+                                             std::string(), NULL, 0,
+                                             CreateSessionPromise(RESOLVED));
 }
 
 TEST_F(AesDecryptorTest, NormalDecryption) {
@@ -756,6 +727,7 @@ TEST_F(AesDecryptorTest, JWKKey) {
   const std::string kJwkSimple =
       "{"
       "  \"kty\": \"oct\","
+      "  \"alg\": \"A128KW\","
       "  \"kid\": \"AAECAwQFBgcICQoLDA0ODxAREhM\","
       "  \"k\": \"FBUWFxgZGhscHR4fICEiIw\""
       "}";
@@ -767,11 +739,13 @@ TEST_F(AesDecryptorTest, JWKKey) {
       "  \"keys\": ["
       "    {"
       "      \"kty\": \"oct\","
+      "      \"alg\": \"A128KW\","
       "      \"kid\": \"AAECAwQFBgcICQoLDA0ODxAREhM\","
       "      \"k\": \"FBUWFxgZGhscHR4fICEiIw\""
       "    },"
       "    {"
       "      \"kty\": \"oct\","
+      "      \"alg\": \"A128KW\","
       "      \"kid\": \"JCUmJygpKissLS4vMA\","
       "      \"k\":\"MTIzNDU2Nzg5Ojs8PT4/QA\""
       "    }"
@@ -816,6 +790,7 @@ TEST_F(AesDecryptorTest, JWKKey) {
       "  \"keys\": ["
       "    {"
       "      \"kty\": \"oct\","
+      "      \"alg\": \"A128KW\","
       "      \"kid\": \"AAECAw\","
       "      \"k\": \"BAUGBwgJCgsMDQ4PEBESEw==\""
       "    }"
@@ -829,6 +804,7 @@ TEST_F(AesDecryptorTest, JWKKey) {
       "  \"keys\": ["
       "    {"
       "      \"kty\": \"oct\","
+      "      \"alg\": \"A128KW\","
       "      \"kid\": \"AAECAw==\","
       "      \"k\": \"BAUGBwgJCgsMDQ4PEBESEw\""
       "    }"
@@ -842,6 +818,7 @@ TEST_F(AesDecryptorTest, JWKKey) {
       "  \"keys\": ["
       "    {"
       "      \"kty\": \"oct\","
+      "      \"alg\": \"A128KW\","
       "      \"kid\": \"!@#$%^&*()\","
       "      \"k\": \"BAUGBwgJCgsMDQ4PEBESEw\""
       "    }"
@@ -857,6 +834,7 @@ TEST_F(AesDecryptorTest, JWKKey) {
       "  \"keys\": ["
       "    {"
       "      \"kty\": \"oct\","
+      "      \"alg\": \"A128KW\","
       "      \"kid\": \"Kiss\","
       "      \"k\": \"BAUGBwgJCgsMDQ4PEBESEw\""
       "    }"
@@ -870,6 +848,7 @@ TEST_F(AesDecryptorTest, JWKKey) {
       "  \"keys\": ["
       "    {"
       "      \"kty\": \"oct\","
+      "      \"alg\": \"A128KW\","
       "      \"kid\": \"\","
       "      \"k\": \"BAUGBwgJCgsMDQ4PEBESEw\""
       "    }"
@@ -884,21 +863,18 @@ TEST_F(AesDecryptorTest, GetKeyIds) {
   std::vector<uint8> key_id2(kKeyId2, kKeyId2 + arraysize(kKeyId2));
 
   std::string session_id = CreateSession(key_id_);
-  GetUsableKeyIdsAndExpect(session_id, RESOLVED, 0);
-  EXPECT_FALSE(UsableKeyIdsContains(key_id1));
-  EXPECT_FALSE(UsableKeyIdsContains(key_id2));
+  EXPECT_FALSE(KeysInfoContains(key_id1));
+  EXPECT_FALSE(KeysInfoContains(key_id2));
 
-  // Add 1 key, verify ID is returned.
+  // Add 1 key, verify it is returned.
   UpdateSessionAndExpect(session_id, kKeyAsJWK, RESOLVED);
-  GetUsableKeyIdsAndExpect(session_id, RESOLVED, 1);
-  EXPECT_TRUE(UsableKeyIdsContains(key_id1));
-  EXPECT_FALSE(UsableKeyIdsContains(key_id2));
+  EXPECT_TRUE(KeysInfoContains(key_id1));
+  EXPECT_FALSE(KeysInfoContains(key_id2));
 
   // Add second key, verify both IDs returned.
   UpdateSessionAndExpect(session_id, kKey2AsJWK, RESOLVED);
-  GetUsableKeyIdsAndExpect(session_id, RESOLVED, 2);
-  EXPECT_TRUE(UsableKeyIdsContains(key_id1));
-  EXPECT_TRUE(UsableKeyIdsContains(key_id2));
+  EXPECT_TRUE(KeysInfoContains(key_id1));
+  EXPECT_TRUE(KeysInfoContains(key_id2));
 }
 
 }  // namespace media

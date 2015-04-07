@@ -5,6 +5,7 @@ import os
 import StringIO
 import unittest
 
+from telemetry import page as page_module
 from telemetry.page import page_set
 from telemetry.results import csv_pivot_table_output_formatter
 from telemetry.results import page_test_results
@@ -13,8 +14,8 @@ from telemetry.value import scalar
 
 def _MakePageSet():
   ps = page_set.PageSet(file_path=os.path.dirname(__file__))
-  ps.AddPageWithDefaultRunNavigate('http://www.foo.com/')
-  ps.AddPageWithDefaultRunNavigate('http://www.bar.com/')
+  ps.AddUserStory(page_module.Page('http://www.foo.com/', ps, ps.base_dir))
+  ps.AddUserStory(page_module.Page('http://www.bar.com/', ps, ps.base_dir))
   return ps
 
 
@@ -74,7 +75,7 @@ class CsvPivotTableOutputFormatterTest(unittest.TestCase):
     # Parse CSV output into list of lists.
     csv_string = self.Format()
     lines = csv_string.split(self._LINE_SEPARATOR)
-    values = map(lambda s : s.split(','), lines[1:-1])
+    values = [s.split(',') for s in lines[1:-1]]
 
     self.assertEquals(len(values), 4)  # We expect 4 value in total.
     self.assertEquals(len(set((v[1] for v in values))), 2)  # 2 pages.

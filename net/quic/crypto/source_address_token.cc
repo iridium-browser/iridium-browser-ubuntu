@@ -11,37 +11,6 @@ using std::string;
 
 namespace net {
 
-CachedNetworkParameters::CachedNetworkParameters()
-    : bandwidth_estimate_bytes_per_second_(0),
-      max_bandwidth_estimate_bytes_per_second_(0),
-      max_bandwidth_timestamp_seconds_(0),
-      min_rtt_ms_(0),
-      previous_connection_state_(0),
-      timestamp_(0) {
-}
-
-CachedNetworkParameters::~CachedNetworkParameters() {
-}
-
-bool CachedNetworkParameters::operator==(
-    const CachedNetworkParameters& other) const {
-  return serving_region_ == other.serving_region_ &&
-      bandwidth_estimate_bytes_per_second_ ==
-          other.bandwidth_estimate_bytes_per_second_ &&
-      max_bandwidth_estimate_bytes_per_second_ ==
-          other.max_bandwidth_estimate_bytes_per_second_ &&
-      max_bandwidth_timestamp_seconds_ ==
-          other.max_bandwidth_timestamp_seconds_ &&
-      min_rtt_ms_ == other.min_rtt_ms_ &&
-      previous_connection_state_ == other.previous_connection_state_ &&
-      timestamp_ == other.timestamp_;
-}
-
-bool CachedNetworkParameters::operator!=(
-    const CachedNetworkParameters& other) const {
-  return !(*this == other);
-}
-
 SourceAddressToken::SourceAddressToken()
     : has_cached_network_parameters_(false) {
 }
@@ -51,10 +20,10 @@ SourceAddressToken::~SourceAddressToken() {
 
 string SourceAddressToken::SerializeAsString() const {
   string out;
-  out.push_back(ip_.size());
+  out.push_back(static_cast<char>(ip_.size()));
   out.append(ip_);
   string time_str = base::Int64ToString(timestamp_);
-  out.push_back(time_str.size());
+  out.push_back(static_cast<char>(time_str.size()));
   out.append(time_str);
   // TODO(rtenneti): Implement serialization of optional CachedNetworkParameters
   // when they are used.
@@ -86,6 +55,30 @@ bool SourceAddressToken::ParseFromArray(const char* plaintext,
 
   // TODO(rtenneti): Implement parsing of optional CachedNetworkParameters when
   // they are used.
+  return true;
+}
+
+SourceAddressTokens::SourceAddressTokens() {
+}
+
+SourceAddressTokens::~SourceAddressTokens() {
+  STLDeleteElements(&tokens_);
+}
+
+string SourceAddressTokens::SerializeAsString() const {
+  string out;
+
+  for (size_t i = 0; i < tokens_size(); i++) {
+    const SourceAddressToken& source_address_token = tokens(i);
+    out.append(source_address_token.SerializeAsString());
+  }
+  return out;
+}
+
+bool SourceAddressTokens::ParseFromArray(const char* plaintext,
+                                         size_t plaintext_length) {
+  // TODO(rtenneti): Implement parsing of SourceAddressTokens when they are
+  // used.
   return true;
 }
 

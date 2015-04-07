@@ -18,7 +18,7 @@
 #include "base/memory/scoped_vector.h"
 #include "base/time/time.h"
 #include "ui/events/test/event_generator.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 
 #if defined(OS_CHROMEOS)
 #include "ui/display/chromeos/display_configurator.h"
@@ -818,7 +818,7 @@ TEST_F(LockStateControllerTest, ShutdownWithoutButton) {
 TEST_F(LockStateControllerTest, RequestShutdownFromLoginScreen) {
   Initialize(false, user::LOGGED_IN_NONE);
 
-  lock_state_controller_->RequestShutdown();
+  lock_state_controller_->RequestShutdown(LockStateController::POWER_OFF);
 
   ExpectShutdownAnimationStarted();
   Advance(SessionStateAnimator::ANIMATION_SPEED_SHUTDOWN);
@@ -840,7 +840,7 @@ TEST_F(LockStateControllerTest, RequestShutdownFromLockScreen) {
   Advance(SessionStateAnimator::ANIMATION_SPEED_SHUTDOWN);
   ExpectPostLockAnimationFinished();
 
-  lock_state_controller_->RequestShutdown();
+  lock_state_controller_->RequestShutdown(LockStateController::POWER_OFF);
 
   ExpectShutdownAnimationStarted();
   Advance(SessionStateAnimator::ANIMATION_SPEED_SHUTDOWN);

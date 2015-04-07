@@ -645,6 +645,7 @@ TEST(PermissionsTest, PermissionMessages) {
   skip.insert(APIPermission::kCastStreaming);
   skip.insert(APIPermission::kCommandsAccessibility);
   skip.insert(APIPermission::kContextMenus);
+  skip.insert(APIPermission::kCryptotokenPrivate);
   skip.insert(APIPermission::kCopresencePrivate);
   skip.insert(APIPermission::kDiagnostics);
   skip.insert(APIPermission::kDns);
@@ -655,6 +656,7 @@ TEST(PermissionsTest, PermissionMessages) {
   skip.insert(APIPermission::kGcm);
   skip.insert(APIPermission::kIdle);
   skip.insert(APIPermission::kImeWindowEnabled);
+  skip.insert(APIPermission::kInlineInstallPrivate);
   skip.insert(APIPermission::kIdltest);
   skip.insert(APIPermission::kLogPrivate);
   skip.insert(APIPermission::kNotifications);
@@ -691,6 +693,7 @@ TEST(PermissionsTest, PermissionMessages) {
   skip.insert(APIPermission::kCookie);
 
   // These are warned as part of host permission checks.
+  skip.insert(APIPermission::kDataReductionProxy);
   skip.insert(APIPermission::kDeclarativeContent);
   skip.insert(APIPermission::kPageCapture);
   skip.insert(APIPermission::kProxy);
@@ -748,7 +751,6 @@ TEST(PermissionsTest, PermissionMessages) {
   skip.insert(APIPermission::kReadingListPrivate);
   skip.insert(APIPermission::kRtcPrivate);
   skip.insert(APIPermission::kStreamsPrivate);
-  skip.insert(APIPermission::kSyncedNotificationsPrivate);
   skip.insert(APIPermission::kSystemPrivate);
   skip.insert(APIPermission::kTabCaptureForTab);
   skip.insert(APIPermission::kTerminalPrivate);
@@ -763,11 +765,13 @@ TEST(PermissionsTest, PermissionMessages) {
 
   // Platform apps.
   skip.insert(APIPermission::kBrowser);
+  skip.insert(APIPermission::kHid);
   skip.insert(APIPermission::kFileSystem);
   skip.insert(APIPermission::kFileSystemProvider);
   skip.insert(APIPermission::kFileSystemRetainEntries);
   skip.insert(APIPermission::kFileSystemWrite);
   skip.insert(APIPermission::kSocket);
+  skip.insert(APIPermission::kUsb);
   skip.insert(APIPermission::kUsbDevice);
 
   // We already have a generic message for declaring externally_connectable.
@@ -970,38 +974,6 @@ TEST(PermissionsTest, SuppressedPermissionMessages) {
 TEST(PermissionsTest, AccessToDevicesMessages) {
   {
     APIPermissionSet api_permissions;
-    api_permissions.insert(APIPermission::kUsb);
-    scoped_refptr<PermissionSet> permissions(
-        new PermissionSet(api_permissions,
-                          ManifestPermissionSet(),
-                          URLPatternSet(),
-                          URLPatternSet()));
-    std::vector<base::string16> messages =
-        PermissionMessageProvider::Get()->GetWarningMessages(
-            permissions.get(), Manifest::TYPE_EXTENSION);
-    EXPECT_EQ(1u, messages.size());
-    EXPECT_EQ(l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_WARNING_USB),
-              messages[0]);
-  }
-  {
-    // Testing that multiple permissions will show the one message.
-    APIPermissionSet api_permissions;
-    api_permissions.insert(APIPermission::kUsb);
-    api_permissions.insert(APIPermission::kUsb);
-    scoped_refptr<PermissionSet> permissions(
-        new PermissionSet(api_permissions,
-                          ManifestPermissionSet(),
-                          URLPatternSet(),
-                          URLPatternSet()));
-    std::vector<base::string16> messages =
-        PermissionMessageProvider::Get()->GetWarningMessages(
-            permissions.get(), Manifest::TYPE_EXTENSION);
-    EXPECT_EQ(1u, messages.size());
-    EXPECT_EQ(l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_WARNING_USB),
-              messages[0]);
-  }
-  {
-    APIPermissionSet api_permissions;
     api_permissions.insert(APIPermission::kSerial);
     scoped_refptr<PermissionSet> permissions(
         new PermissionSet(api_permissions,
@@ -1016,8 +988,9 @@ TEST(PermissionsTest, AccessToDevicesMessages) {
               messages[0]);
   }
   {
+    // Testing that multiple permissions will show the one message.
     APIPermissionSet api_permissions;
-    api_permissions.insert(APIPermission::kUsb);
+    api_permissions.insert(APIPermission::kSerial);
     api_permissions.insert(APIPermission::kSerial);
     scoped_refptr<PermissionSet> permissions(
         new PermissionSet(api_permissions,
@@ -1028,28 +1001,8 @@ TEST(PermissionsTest, AccessToDevicesMessages) {
         PermissionMessageProvider::Get()->GetWarningMessages(
             permissions.get(), Manifest::TYPE_EXTENSION);
     EXPECT_EQ(1u, messages.size());
-    EXPECT_EQ(
-        l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_WARNING_USB_SERIAL),
-        messages[0]);
-  }
-  {
-    // Testing that the same permission(s) will show one message.
-    APIPermissionSet api_permissions;
-    api_permissions.insert(APIPermission::kUsb);
-    api_permissions.insert(APIPermission::kSerial);
-    api_permissions.insert(APIPermission::kUsb);
-    scoped_refptr<PermissionSet> permissions(
-        new PermissionSet(api_permissions,
-                          ManifestPermissionSet(),
-                          URLPatternSet(),
-                          URLPatternSet()));
-    std::vector<base::string16> messages =
-        PermissionMessageProvider::Get()->GetWarningMessages(
-            permissions.get(), Manifest::TYPE_EXTENSION);
-    EXPECT_EQ(1u, messages.size());
-    EXPECT_EQ(
-        l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_WARNING_USB_SERIAL),
-        messages[0]);
+    EXPECT_EQ(l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_WARNING_SERIAL),
+              messages[0]);
   }
   {
     scoped_refptr<Extension> extension =
@@ -1072,22 +1025,6 @@ TEST(PermissionsTest, AccessToDevicesMessages) {
                   IDS_EXTENSION_PROMPT_WARNING_BLUETOOTH_SERIAL),
               warnings[0]);
     set->apis_.erase(APIPermission::kSerial);
-
-    // Test USB and Bluetooth
-    set->apis_.insert(APIPermission::kUsb);
-    warnings = provider->GetWarningMessages(set, extension->GetType());
-    EXPECT_EQ(1u, warnings.size());
-    EXPECT_EQ(
-        l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_WARNING_USB_BLUETOOTH),
-        warnings[0]);
-
-    // Test USB, Bluetooth and Serial
-    set->apis_.insert(APIPermission::kSerial);
-    warnings = provider->GetWarningMessages(set, extension->GetType());
-    EXPECT_EQ(1u, warnings.size());
-    EXPECT_EQ(
-        l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_WARNING_ALL_DEVICES),
-        warnings[0]);
   }
 }
 

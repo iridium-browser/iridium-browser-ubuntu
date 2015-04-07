@@ -141,8 +141,8 @@ void RecordCatSixtyFour() {
   // some headroom and then leave it alone. See UMA_HISTOGRAM_ENUMERATION in
   // base/metrics/histogram.h.
   const int kMaxCatsAndSixtyFours = 32;
-  COMPILE_ASSERT(kMaxCatsAndSixtyFours >= CAT_SIXTY_FOUR_MAX,
-                 CatSixtyFour_enum_grew_too_large);
+  static_assert(kMaxCatsAndSixtyFours >= CAT_SIXTY_FOUR_MAX,
+                "kMaxCatsAndSixtyFours is too large");
 
   UMA_HISTOGRAM_ENUMERATION("OSX.CatSixtyFour",
                             cat_sixty_four,
@@ -165,10 +165,12 @@ void ChromeBrowserMainPartsMac::PreEarlyInitialization() {
   ChromeBrowserMainPartsPosix::PreEarlyInitialization();
 
   if (base::mac::WasLaunchedAsLoginItemRestoreState()) {
-    CommandLine* singleton_command_line = CommandLine::ForCurrentProcess();
+    base::CommandLine* singleton_command_line =
+        base::CommandLine::ForCurrentProcess();
     singleton_command_line->AppendSwitch(switches::kRestoreLastSession);
   } else if (base::mac::WasLaunchedAsHiddenLoginItem()) {
-    CommandLine* singleton_command_line = CommandLine::ForCurrentProcess();
+    base::CommandLine* singleton_command_line =
+        base::CommandLine::ForCurrentProcess();
     singleton_command_line->AppendSwitch(switches::kNoStartupWindow);
   }
 

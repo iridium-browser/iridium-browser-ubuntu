@@ -43,15 +43,17 @@
 #include "base/pickle.h"
 #include "base/strings/string16.h"
 #include "base/supports_user_data.h"
-#include "components/autofill/content/browser/content_autofill_driver.h"
+#include "components/autofill/content/browser/content_autofill_driver_factory.h"
 #include "components/autofill/core/browser/autofill_manager.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
 #include "components/navigation_interception/intercept_navigation_delegate.h"
 #include "content/public/browser/android/content_view_core.h"
+#include "content/public/browser/android/synchronous_compositor.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/cert_store.h"
 #include "content/public/browser/favicon_status.h"
+#include "content/public/browser/message_port_provider.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
@@ -64,12 +66,13 @@
 #include "net/cert/x509_certificate.h"
 #include "third_party/skia/include/core/SkPicture.h"
 #include "ui/gfx/android/java_bitmap.h"
+#include "ui/gfx/geometry/rect_f.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/gfx/image/image.h"
-#include "ui/gfx/size.h"
 
 struct AwDrawSWFunctionTable;
 
-using autofill::ContentAutofillDriver;
+using autofill::ContentAutofillDriverFactory;
 using autofill::AutofillManager;
 using base::android::AttachCurrentThread;
 using base::android::ConvertJavaStringToUTF16;
@@ -130,6 +133,23 @@ void OnIoThreadClientReady(content::RenderFrameHost* rfh) {
       render_process_id, render_frame_id);
 }
 
+void OnMessageChannelCreated(ScopedJavaGlobalRef<jobject>* callback,
+                             int* port1,
+                             int* port2) {
+  JNIEnv* env = AttachCurrentThread();
+  Java_AwContents_onMessageChannelCreated(env, *port1, *port2,
+    callback->obj());
+}
+
+void PostMessageToFrameOnIOThread(WebContents* web_contents,
+                                  base::string16* source_origin,
+                                  base::string16* target_origin,
+                                  base::string16* data,
+                                  std::vector<int>* ports) {
+  content::MessagePortProvider::PostMessageToFrame(web_contents,
+      *source_origin, *target_origin, *data, *ports);
+}
+
 }  // namespace
 
 // static
@@ -161,7 +181,6 @@ AwContents::AwContents(scoped_ptr<WebContents> web_contents)
     : web_contents_(web_contents.Pass()),
       browser_view_renderer_(
           this,
-          web_contents_.get(),
           BrowserThread::GetMessageLoopProxyForThread(BrowserThread::UI)),
       renderer_manager_key_(GLViewRendererManager::GetInstance()->NullKey()) {
   base::subtle::NoBarrier_AtomicIncrement(&g_instance_count, 1);
@@ -180,6 +199,8 @@ AwContents::AwContents(scoped_ptr<WebContents> web_contents)
   InitDataReductionProxyIfNecessary();
   if (autofill_manager_delegate)
     InitAutofillIfNecessary(autofill_manager_delegate->GetSaveFormData());
+  content::SynchronousCompositor::SetClientForWebContents(
+      web_contents_.get(), &browser_view_renderer_);
 }
 
 void AwContents::SetJavaPeers(JNIEnv* env,
@@ -220,7 +241,7 @@ void AwContents::SetSaveFormData(bool enabled) {
   InitAutofillIfNecessary(enabled);
   // We need to check for the existence, since autofill_manager_delegate
   // may not be created when the setting is false.
-  if (ContentAutofillDriver::FromWebContents(web_contents_.get())) {
+  if (AwAutofillClient::FromWebContents(web_contents_.get())) {
     AwAutofillClient::FromWebContents(web_contents_.get())->
         SetSaveFormData(enabled);
   }
@@ -236,17 +257,16 @@ void AwContents::InitAutofillIfNecessary(bool enabled) {
   // Do not initialize if the feature is not enabled.
   if (!enabled)
     return;
-  // Check if the autofill driver already exists.
+  // Check if the autofill driver factory already exists.
   content::WebContents* web_contents = web_contents_.get();
-  if (ContentAutofillDriver::FromWebContents(web_contents))
+  if (ContentAutofillDriverFactory::FromWebContents(web_contents))
     return;
 
   AwBrowserContext::FromWebContents(web_contents)->
       CreateUserPrefServiceIfNecessary();
   AwAutofillClient::CreateForWebContents(web_contents);
-  ContentAutofillDriver::CreateForWebContentsAndDelegate(
-      web_contents,
-      AwAutofillClient::FromWebContents(web_contents),
+  ContentAutofillDriverFactory::CreateForWebContentsAndDelegate(
+      web_contents, AwAutofillClient::FromWebContents(web_contents),
       base::android::GetDefaultLocale(),
       AutofillManager::DISABLE_AUTOFILL_DOWNLOAD_MANAGER);
 }
@@ -262,6 +282,8 @@ void AwContents::SetAwAutofillClient(jobject client) {
 
 AwContents::~AwContents() {
   DCHECK_EQ(this, AwContents::FromWebContents(web_contents_.get()));
+  content::SynchronousCompositor::SetClientForWebContents(web_contents_.get(),
+                                                          NULL);
   web_contents_->RemoveUserData(kAwContentsUserDataKey);
   if (find_helper_.get())
     find_helper_->SetListener(NULL);
@@ -300,7 +322,7 @@ static jlong Init(JNIEnv* env, jclass, jobject browser_context) {
 
 static void SetAwDrawSWFunctionTable(JNIEnv* env, jclass,
                                      jlong function_table) {
-  JavaBrowserViewRendererHelper::SetAwDrawSWFunctionTable(
+  RasterHelperSetAwDrawSWFunctionTable(
       reinterpret_cast<AwDrawSWFunctionTable*>(function_table));
 }
 
@@ -319,7 +341,8 @@ jint GetNativeInstanceCount(JNIEnv* env, jclass) {
 
 jlong AwContents::GetAwDrawGLViewContext(JNIEnv* env, jobject obj) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  return browser_view_renderer_.GetAwDrawGLViewContext();
+  return reinterpret_cast<intptr_t>(
+      browser_view_renderer_.GetAwDrawGLViewContext());
 }
 
 namespace {
@@ -686,16 +709,6 @@ void AwContents::PostInvalidate() {
     Java_AwContents_postInvalidateOnAnimation(env, obj.obj());
 }
 
-void AwContents::UpdateParentDrawConstraints() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  browser_view_renderer_.UpdateParentDrawConstraints();
-}
-
-void AwContents::DidSkipCommitFrame() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  browser_view_renderer_.DidSkipCommitFrame();
-}
-
 void AwContents::OnNewPicture() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   JNIEnv* env = AttachCurrentThread();
@@ -729,10 +742,15 @@ base::android::ScopedJavaLocalRef<jbyteArray>
       reinterpret_cast<const uint8*>(der_string.data()), der_string.length());
 }
 
-void AwContents::RequestNewHitTestDataAt(JNIEnv* env, jobject obj,
-                                         jint x, jint y) {
+void AwContents::RequestNewHitTestDataAt(JNIEnv* env,
+                                         jobject obj,
+                                         jfloat x,
+                                         jfloat y,
+                                         jfloat touch_major) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  render_view_host_ext_->RequestNewHitTestDataAt(x, y);
+  gfx::PointF touch_center(x, y);
+  gfx::SizeF touch_area(touch_major, touch_major);
+  render_view_host_ext_->RequestNewHitTestDataAt(touch_center, touch_area);
 }
 
 void AwContents::UpdateLastHitTestData(JNIEnv* env, jobject obj) {
@@ -855,14 +873,34 @@ bool AwContents::OnDraw(JNIEnv* env,
                         jint visible_right,
                         jint visible_bottom) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  return browser_view_renderer_.OnDraw(
-      canvas,
-      is_hardware_accelerated,
-      gfx::Vector2d(scroll_x, scroll_y),
-      gfx::Rect(visible_left,
-                visible_top,
-                visible_right - visible_left,
-                visible_bottom - visible_top));
+  gfx::Vector2d scroll(scroll_x, scroll_y);
+  browser_view_renderer_.PrepareToDraw(
+      scroll, gfx::Rect(visible_left, visible_top, visible_right - visible_left,
+                        visible_bottom - visible_top));
+  if (is_hardware_accelerated && browser_view_renderer_.attached_to_window()) {
+    return browser_view_renderer_.OnDrawHardware();
+  }
+
+  gfx::Size view_size = browser_view_renderer_.size();
+  if (view_size.IsEmpty()) {
+    TRACE_EVENT_INSTANT0("android_webview", "EarlyOut_EmptySize",
+                         TRACE_EVENT_SCOPE_THREAD);
+    return false;
+  }
+
+  // TODO(hush): Right now webview size is passed in as the auxiliary bitmap
+  // size, which might hurt performace (only for software draws with auxiliary
+  // bitmap). For better performance, get global visible rect, transform it
+  // from screen space to view space, then intersect with the webview in
+  // viewspace.  Use the resulting rect as the auxiliary bitmap.
+  scoped_ptr<SoftwareCanvasHolder> canvas_holder =
+      SoftwareCanvasHolder::Create(canvas, scroll, view_size);
+  if (!canvas_holder || !canvas_holder->GetCanvas()) {
+    TRACE_EVENT_INSTANT0("android_webview", "EarlyOut_EmptySize",
+                         TRACE_EVENT_SCOPE_THREAD);
+    return false;
+  }
+  return browser_view_renderer_.OnDrawSoftware(canvas_holder->GetCanvas());
 }
 
 void AwContents::SetPendingWebContentsForPopup(
@@ -1039,6 +1077,55 @@ void AwContents::TrimMemory(JNIEnv* env,
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   browser_view_renderer_.TrimMemory(level, visible);
 }
+
+// TODO(sgurun) add support for posting a frame whose name is known (only
+//               main frame is supported at this time, see crbug.com/389721)
+void AwContents::PostMessageToFrame(JNIEnv* env, jobject obj,
+    jstring frame_name, jstring message, jstring source_origin,
+    jstring target_origin, jintArray msgPorts) {
+
+  base::string16* j_source_origin = new base::string16;
+  ConvertJavaStringToUTF16(env, source_origin, j_source_origin);
+  base::string16* j_target_origin = new base::string16;
+  ConvertJavaStringToUTF16(env, target_origin, j_target_origin);
+  base::string16* j_message = new base::string16;
+  ConvertJavaStringToUTF16(env, message, j_message);
+  std::vector<int>* j_ports  = new std::vector<int>;
+
+  if (msgPorts != nullptr)
+    base::android::JavaIntArrayToIntVector(env, msgPorts, j_ports);
+
+  BrowserThread::PostTask(
+      BrowserThread::IO,
+      FROM_HERE,
+      base::Bind(&PostMessageToFrameOnIOThread,
+                 web_contents_.get(),
+                 base::Owned(j_source_origin),
+                 base::Owned(j_target_origin),
+                 base::Owned(j_message),
+                 base::Owned(j_ports)));
+}
+
+void AwContents::CreateMessageChannel(JNIEnv* env, jobject obj,
+    jobject callback) {
+  ScopedJavaGlobalRef<jobject>* j_callback = new ScopedJavaGlobalRef<jobject>();
+  j_callback->Reset(env, callback);
+
+  int* port1 = new int;
+  int* port2 = new int;
+  BrowserThread::PostTaskAndReply(
+      BrowserThread::IO,
+      FROM_HERE,
+      base::Bind(&content::MessagePortProvider::CreateMessageChannel,
+                 web_contents_.get(),
+                 port1,
+                 port2),
+      base::Bind(&OnMessageChannelCreated,
+                 base::Owned(j_callback),
+                 base::Owned(port1),
+                 base::Owned(port2)));
+}
+
 
 void SetShouldDownloadFavicons(JNIEnv* env, jclass jclazz) {
   g_should_download_favicons = true;

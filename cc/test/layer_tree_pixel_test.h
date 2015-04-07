@@ -38,9 +38,9 @@ class LayerTreePixelTest : public LayerTreeTest {
 
  protected:
   LayerTreePixelTest();
-  virtual ~LayerTreePixelTest();
+  ~LayerTreePixelTest() override;
 
-  scoped_ptr<OutputSurface> CreateOutputSurface(bool fallback) override;
+  scoped_ptr<OutputSurface> CreateOutputSurface() override;
   void CommitCompleteOnThread(LayerTreeHostImpl* impl) override;
 
   virtual scoped_ptr<CopyOutputRequest> CreateCopyOutputRequest();

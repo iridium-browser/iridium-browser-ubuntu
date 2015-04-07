@@ -49,8 +49,10 @@ struct PasswordForm {
     SCHEME_LAST = SCHEME_OTHER
   } scheme;
 
-  // The "Realm" for the sign-on (scheme, host, port for SCHEME_HTML, and
-  // contains the HTTP realm for dialog-based forms).
+  // The "Realm" for the sign-on. This is scheme, host, port for SCHEME_HTML.
+  // Dialog based forms also contain the HTTP realm. Android based forms will
+  // contain a string of the form "android://<hash of cert>@<package name>"
+  //
   // The signon_realm is effectively the primary key used for retrieving
   // data from the database, so it must not be empty.
   std::string signon_realm;
@@ -73,20 +75,21 @@ struct PasswordForm {
   // http://www.example.com.
   std::string original_signon_realm;
 
-  // The URL (minus query parameters) containing the form. This is the primary
-  // data used by the PasswordManager to decide (in longest matching prefix
-  // fashion) whether or not a given PasswordForm result from the database is a
-  // good fit for a particular form on a page, so it must not be empty.
+  // An origin URL consists of the scheme, host, port and path; the rest is
+  // stripped. This is the primary data used by the PasswordManager to decide
+  // (in longest matching prefix fashion) whether or not a given PasswordForm
+  // result from the database is a good fit for a particular form on a page.
+  // This should not be empty except for Android based credentials.
   GURL origin;
 
-  // The action target of the form. This is the primary data used by the
-  // PasswordManager for form autofill; that is, the action of the saved
+  // The action target of the form; like |origin| URL consists of the scheme,
+  // host, port and path; the rest is stripped. This is the primary data used by
+  // the PasswordManager for form autofill; that is, the action of the saved
   // credentials must match the action of the form on the page to be autofilled.
-  // If this is empty / not available, it will result in a "restricted"
-  // IE-like autofill policy, where we wait for the user to type in his
-  // username before autofilling the password. In these cases, after successful
-  // login the action URL will automatically be assigned by the
-  // PasswordManager.
+  // If this is empty / not available, it will result in a "restricted" IE-like
+  // autofill policy, where we wait for the user to type in his username before
+  // autofilling the password. In these cases, after successful login the action
+  // URL will automatically be assigned by the PasswordManager.
   //
   // When parsing an HTML form, this must always be set.
   GURL action;
@@ -102,6 +105,10 @@ struct PasswordForm {
   //
   // When parsing an HTML form, this must always be set.
   base::string16 username_element;
+
+  // Whether the |username_element| has an autocomplete=username attribute. This
+  // is only used in parsed HTML forms.
+  bool username_marked_by_site;
 
   // The username. Optional.
   //

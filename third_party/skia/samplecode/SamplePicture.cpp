@@ -13,7 +13,7 @@
 #include "SkColorFilter.h"
 #include "SkColorPriv.h"
 #include "SkData.h"
-#include "SkDecodingImageGenerator.h"
+#include "SkImageGenerator.h"
 #include "SkDumpCanvas.h"
 #include "SkGradientShader.h"
 #include "SkGraphics.h"
@@ -40,8 +40,7 @@ static SkBitmap load_bitmap() {
     SkString pngFilename = GetResourcePath("mandrill_512.png");
     SkAutoDataUnref data(SkData::NewFromFileName(pngFilename.c_str()));
     if (data.get() != NULL) {
-        SkInstallDiscardablePixelRef(SkDecodingImageGenerator::Create(
-            data, SkDecodingImageGenerator::Options()), &bm);
+        SkInstallDiscardablePixelRef(data, &bm);
     }
     return bm;
 }
@@ -112,16 +111,11 @@ protected:
         canvas->drawBitmap(fBitmap, 0, 0, NULL);
         canvas->restore();
 
-        const char beforeStr[] = "before circle";
-        const char afterStr[] = "after circle";
-
         paint.setAntiAlias(true);
 
         paint.setColor(SK_ColorRED);
-        canvas->drawData(beforeStr, sizeof(beforeStr));
         canvas->drawCircle(SkIntToScalar(50), SkIntToScalar(50),
                            SkIntToScalar(40), paint);
-        canvas->drawData(afterStr, sizeof(afterStr));
         paint.setColor(SK_ColorBLACK);
         paint.setTextSize(SkIntToScalar(40));
         canvas->drawText("Picture", 7, SkIntToScalar(50), SkIntToScalar(62),

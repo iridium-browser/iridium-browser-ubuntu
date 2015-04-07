@@ -27,7 +27,7 @@ group("all_components") {
     "//components/component_updater",
     "//components/content_settings/core/browser",
     "//components/content_settings/core/common",
-    "//components/copresence_sockets",
+    "//components/copresence_endpoints",
     "//components/crash/app",
     "//components/crash/browser",
     "//components/crx_file",
@@ -45,7 +45,6 @@ group("all_components") {
     "//components/history/core/common",
     "//components/history/core/test",
     "//components/infobars/core",
-    "//components/infobars/test:test_support",
     "//components/invalidation",
     "//components/json_schema",
     "//components/keyed_service/content",
@@ -56,10 +55,10 @@ group("all_components") {
     "//components/navigation_interception",
     "//components/navigation_metrics",
     "//components/network_time",
-    "//components/omaha_query_params",
     "//components/omnibox",
     "//components/onc",
     "//components/os_crypt",
+    "//components/packed_ct_ev_whitelist",
     "//components/pairing",
     "//components/password_manager/content/browser",
     "//components/password_manager/core/browser",
@@ -93,6 +92,8 @@ group("all_components") {
     "//components/translate/content/renderer",
     "//components/translate/core/browser",
     "//components/translate/core/common",
+    "//components/ui/zoom:ui_zoom",
+    "//components/update_client",
     "//components/url_fixer",
     "//components/url_matcher",
     "//components/user_manager",
@@ -101,24 +102,30 @@ group("all_components") {
     "//components/visitedlink/browser",
     "//components/visitedlink/common",
     "//components/visitedlink/renderer",
+    "//components/wallpaper",
     "//components/web_cache/browser",
     "//components/web_cache/common",
     "//components/web_cache/renderer",
     "//components/web_modal",
     "//components/webdata/common",
+    "//components/web_resource",
     "//components/wifi",
+    "//components/wifi_sync",
   ]
 
   if (!is_win && !is_mac) {
     deps -= [ "//components/wifi" ]
   }
   if (!is_chromeos) {
-    deps -= [ "//components/pairing" ]
+    deps -= [
+      "//components/pairing",
+      "//components/wifi_sync",
+    ]
   }
   if (is_ios) {
     deps -= [
       "//components/keyed_service/content",
-      "//components/copresence_sockets",
+      "//components/copresence_endpoints",
     ]
   }
 
@@ -155,7 +162,6 @@ group("all_components") {
       "//components/history/core/common",  # Should work, needs checking.
       "//components/history/core/test",  # Should work, needs checking.
       "//components/infobars/core",  # Should work, needs checking.
-      "//components/infobars/test:test_support",  # Should work, needs checking.
       "//components/invalidation",  # Should work, needs checking.
       "//components/json_schema",  # Should work, needs checking.
       "//components/keyed_service/content",  # Blocked on content.
@@ -196,16 +202,13 @@ group("all_components") {
   }
 
   if (!is_ios) {
-    deps += [ "//components/app_modal_dialogs" ]
+    deps += [ "//components/app_modal" ]
   }
 
   if (toolkit_views) {
     deps += [ "//components/constrained_window" ]
   }
 }
-
-# TODO(GYP) enable when it links.
-if (false) {
 
 # To add a unit test to this target, make a "unit_test" source_set in your
 # component (it's important to use a source_set instead of a static library or
@@ -235,12 +238,22 @@ test("components_unittests") {
     "//components/data_reduction_proxy/core/common:unit_tests",
     "//components/dom_distiller/core:unit_tests",
     "//components/domain_reliability:unit_tests",
+    "//components/google/core/browser:unit_tests",
     "//components/login:unit_tests",
     "//components/metrics:unit_tests",
     "//components/omnibox:unit_tests",
     "//components/ownership:unit_tests",
+    "//components/packed_ct_ev_whitelist:unit_tests",
     "//components/proximity_auth:unit_tests",
     "//components/variations:unit_tests",
+    "//components/web_resource:unit_tests",
+    "//components/webdata/common:unit_tests",
+
+    # These are the deps required by the code in this target.
+    "//base",
+    "//base/test:test_support",
+    "//content/test:test_support",
+    "//ui/base",
   ]
 
   # TODO(GYP) need this target.
@@ -250,8 +263,7 @@ test("components_unittests") {
   #configs += [ "//components/precache/core:precache_config" ]
 
   if (toolkit_views) {
-    deps += [ "//components/constrained_window:unit_tests" ]
+    # TODO(GYP) enable this as above.
+    #deps += [ "//components/constrained_window:unit_tests" ]
   }
-}
-
 }

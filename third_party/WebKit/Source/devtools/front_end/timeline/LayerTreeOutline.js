@@ -117,7 +117,7 @@ WebInspector.LayerTreeOutline.prototype = {
         if (root)
             layerTree.forEachLayer(updateLayer.bind(this), root);
         // Cleanup layers that don't exist anymore from tree.
-        for (var node = /** @type {!TreeElement|!TreeOutline|null} */ (this._treeOutline.children[0]); node && !node.root;) {
+        for (var node = /** @type {?TreeContainerNode} */ (this._treeOutline.children[0]); node && !node.root;) {
             if (seenLayers.get(node.representedObject)) {
                 node = node.traverseNextTreeElement(false);
             } else {
@@ -140,7 +140,8 @@ WebInspector.LayerTreeOutline.prototype = {
         var node = this._treeOutline.treeElementFromEvent(event);
         if (node === this._lastHoveredNode)
             return;
-        this.dispatchEventToListeners(WebInspector.LayerTreeOutline.Events.LayerHovered, node && node.representedObject ? {layer: node.representedObject} : null);
+        var selection = node && node.representedObject ? new WebInspector.Layers3DView.LayerSelection(node.representedObject) : null;
+        this.dispatchEventToListeners(WebInspector.LayerTreeOutline.Events.LayerHovered, selection);
     },
 
     /**
@@ -149,7 +150,8 @@ WebInspector.LayerTreeOutline.prototype = {
     _selectedNodeChanged: function(node)
     {
         var layer = /** @type {!WebInspector.Layer} */ (node.representedObject);
-        this.dispatchEventToListeners(WebInspector.LayerTreeOutline.Events.LayerSelected, {layer: layer});
+        var selection = layer ? new WebInspector.Layers3DView.LayerSelection(layer) : null;
+        this.dispatchEventToListeners(WebInspector.LayerTreeOutline.Events.LayerSelected, selection);
     },
 
     /**

@@ -7,7 +7,7 @@ GEN('#include "chrome/browser/ui/webui/downloads_ui_browsertest.h"');
 
 // Test UI when removing entries is allowed.
 TEST_F('BaseDownloadsWebUITest', 'DeleteAllowed', function() {
-  this.testHelper(true, false);
+  this.expectDeleteControlsVisible(true);
   // TODO(pamg): Mock out the back-end calls, so we can also test removing a
   // single item.
   testDone();
@@ -17,6 +17,30 @@ TEST_F('BaseDownloadsWebUITest', 'NoResultsHiddenWhenDownloads', function() {
   assertNotEquals(0, downloads.size());
   expectFalse($('downloads-display').hidden);
   expectTrue($('no-downloads-or-results').hidden);
+});
+
+TEST_F('BaseDownloadsWebUITest', 'NoSearchResultsShown', function() {
+  expectFalse($('downloads-display').hidden);
+  var noResults = $('no-downloads-or-results');
+  expectTrue(noResults.hidden);
+
+  setSearch('just try to search for me!');
+  this.sendEmptyList();
+
+  expectTrue($('downloads-display').hidden);
+  this.checkShowing(noResults, loadTimeData.getString('no_search_results'));
+});
+
+TEST_F('BaseDownloadsWebUITest', 'NoDownloadsAfterClearAll', function() {
+  expectFalse($('downloads-display').hidden);
+  var noResults = $('no-downloads-or-results');
+  expectTrue(noResults.hidden);
+
+  clearAll();
+  this.sendEmptyList();
+
+  expectTrue($('downloads-display').hidden);
+  this.checkShowing(noResults, loadTimeData.getString('no_downloads'));
 });
 
 /**
@@ -37,7 +61,17 @@ EmptyDownloadsWebUITest.prototype = {
 
 TEST_F('EmptyDownloadsWebUITest', 'NoDownloadsMessageShowing', function() {
   expectTrue($('downloads-display').hidden);
-  expectFalse($('no-downloads-or-results').hidden);
+  var noResults = $('no-downloads-or-results');
+  this.checkShowing(noResults, loadTimeData.getString('no_downloads'));
+});
+
+TEST_F('EmptyDownloadsWebUITest', 'NoSearchResultsWithNoDownloads', function() {
+  setSearch('bananas');
+  this.sendEmptyList();
+
+  expectTrue($('downloads-display').hidden);
+  var noResults = $('no-downloads-or-results');
+  this.checkShowing(noResults, loadTimeData.getString('no_search_results'));
 });
 
 /**
@@ -58,7 +92,7 @@ DownloadsWebUIDeleteProhibitedTest.prototype = {
 
 // Test UI when removing entries is prohibited.
 TEST_F('DownloadsWebUIDeleteProhibitedTest', 'DeleteProhibited', function() {
-  this.testHelper(false, false);
+  this.expectDeleteControlsVisible(false);
   // TODO(pamg): Mock out the back-end calls, so we can also test removing a
   // single item.
   testDone();

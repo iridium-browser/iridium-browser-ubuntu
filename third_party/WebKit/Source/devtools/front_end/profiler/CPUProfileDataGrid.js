@@ -44,7 +44,7 @@ WebInspector.ProfileDataGridNode = function(profileNode, owningTree, hasChildren
     this.callUID = profileNode.callUID;
     this.selfTime = profileNode.selfTime;
     this.totalTime = profileNode.totalTime;
-    this.functionName = WebInspector.CPUProfileDataModel.beautifyFunctionName(profileNode.functionName);
+    this.functionName = WebInspector.beautifyFunctionName(profileNode.functionName);
     this._deoptReason = (!profileNode.deoptReason || profileNode.deoptReason === "no reason") ? "" : profileNode.deoptReason;
     this.url = profileNode.url;
 }
@@ -197,24 +197,26 @@ WebInspector.ProfileDataGridNode.prototype = {
     },
 
     /**
-     * @param {!WebInspector.ProfileDataGridNode} profileDataGridNode
+     * @override
+     * @param {!WebInspector.DataGridNode} profileDataGridNode
      * @param {number} index
      */
     insertChild: function(profileDataGridNode, index)
     {
         WebInspector.DataGridNode.prototype.insertChild.call(this, profileDataGridNode, index);
 
-        this.childrenByCallUID[profileDataGridNode.callUID] = profileDataGridNode;
+        this.childrenByCallUID[profileDataGridNode.callUID] = /** @type {!WebInspector.ProfileDataGridNode} */ (profileDataGridNode);
     },
 
     /**
-     * @param {!WebInspector.ProfileDataGridNode} profileDataGridNode
+     * @override
+     * @param {!WebInspector.DataGridNode} profileDataGridNode
      */
     removeChild: function(profileDataGridNode)
     {
         WebInspector.DataGridNode.prototype.removeChild.call(this, profileDataGridNode);
 
-        delete this.childrenByCallUID[profileDataGridNode.callUID];
+        delete this.childrenByCallUID[/** @type {!WebInspector.ProfileDataGridNode} */ (profileDataGridNode).callUID];
     },
 
     removeChildren: function()
@@ -363,6 +365,7 @@ WebInspector.ProfileDataGridNode.populate = function(container)
 
 /**
  * @constructor
+ * @implements {WebInspector.CPUProfileView.Searchable}
  * @param {!WebInspector.CPUProfileView} profileView
  * @param {!ProfilerAgent.CPUProfileNode} rootProfileNode
  */
@@ -436,6 +439,174 @@ WebInspector.ProfileDataGridTree.prototype = {
             children[index].restore();
 
         this._savedChildren = null;
+    },
+
+    /**
+     * @override
+     * @param {!WebInspector.SearchableView.SearchConfig} searchConfig
+     * @param {boolean} shouldJump
+     * @param {boolean=} jumpBackwards
+     * @return {number}
+     */
+    performSearch: function(searchConfig, shouldJump, jumpBackwards)
+    {
+        this.searchCanceled();
+        var query = searchConfig.query.trim();
+        if (!query.length)
+            return 0;
+
+        var greaterThan = (query.startsWith(">"));
+        var lessThan = (query.startsWith("<"));
+        var equalTo = (query.startsWith("=") || ((greaterThan || lessThan) && query.indexOf("=") === 1));
+        var percentUnits = (query.endsWith("%"));
+        var millisecondsUnits = (query.length > 2 && query.endsWith("ms"));
+        var secondsUnits = (!millisecondsUnits && query.endsWith("s"));
+
+        var queryNumber = parseFloat(query);
+        if (greaterThan || lessThan || equalTo) {
+            if (equalTo && (greaterThan || lessThan))
+                queryNumber = parseFloat(query.substring(2));
+            else
+                queryNumber = parseFloat(query.substring(1));
+        }
+
+        var queryNumberMilliseconds = (secondsUnits ? (queryNumber * 1000) : queryNumber);
+
+        // Make equalTo implicitly true if it wasn't specified there is no other operator.
+        if (!isNaN(queryNumber) && !(greaterThan || lessThan))
+            equalTo = true;
+
+        var matcher = createPlainTextSearchRegex(query, "i");
+
+        function matchesQuery(/*ProfileDataGridNode*/ profileDataGridNode)
+        {
+            delete profileDataGridNode._searchMatchedSelfColumn;
+            delete profileDataGridNode._searchMatchedTotalColumn;
+            delete profileDataGridNode._searchMatchedFunctionColumn;
+
+            if (percentUnits) {
+                if (lessThan) {
+                    if (profileDataGridNode.selfPercent < queryNumber)
+                        profileDataGridNode._searchMatchedSelfColumn = true;
+                    if (profileDataGridNode.totalPercent < queryNumber)
+                        profileDataGridNode._searchMatchedTotalColumn = true;
+                } else if (greaterThan) {
+                    if (profileDataGridNode.selfPercent > queryNumber)
+                        profileDataGridNode._searchMatchedSelfColumn = true;
+                    if (profileDataGridNode.totalPercent > queryNumber)
+                        profileDataGridNode._searchMatchedTotalColumn = true;
+                }
+
+                if (equalTo) {
+                    if (profileDataGridNode.selfPercent == queryNumber)
+                        profileDataGridNode._searchMatchedSelfColumn = true;
+                    if (profileDataGridNode.totalPercent == queryNumber)
+                        profileDataGridNode._searchMatchedTotalColumn = true;
+                }
+            } else if (millisecondsUnits || secondsUnits) {
+                if (lessThan) {
+                    if (profileDataGridNode.selfTime < queryNumberMilliseconds)
+                        profileDataGridNode._searchMatchedSelfColumn = true;
+                    if (profileDataGridNode.totalTime < queryNumberMilliseconds)
+                        profileDataGridNode._searchMatchedTotalColumn = true;
+                } else if (greaterThan) {
+                    if (profileDataGridNode.selfTime > queryNumberMilliseconds)
+                        profileDataGridNode._searchMatchedSelfColumn = true;
+                    if (profileDataGridNode.totalTime > queryNumberMilliseconds)
+                        profileDataGridNode._searchMatchedTotalColumn = true;
+                }
+
+                if (equalTo) {
+                    if (profileDataGridNode.selfTime == queryNumberMilliseconds)
+                        profileDataGridNode._searchMatchedSelfColumn = true;
+                    if (profileDataGridNode.totalTime == queryNumberMilliseconds)
+                        profileDataGridNode._searchMatchedTotalColumn = true;
+                }
+            }
+
+            if (profileDataGridNode.functionName.match(matcher) || (profileDataGridNode.url && profileDataGridNode.url.match(matcher)))
+                profileDataGridNode._searchMatchedFunctionColumn = true;
+
+            if (profileDataGridNode._searchMatchedSelfColumn ||
+                profileDataGridNode._searchMatchedTotalColumn ||
+                profileDataGridNode._searchMatchedFunctionColumn) {
+                profileDataGridNode.refresh();
+                return true;
+            }
+
+            return false;
+        }
+
+        var current = this.children[0];
+        this._searchResults = [];
+        while (current) {
+            if (matchesQuery(current))
+                this._searchResults.push({ profileNode: current });
+
+            current = current.traverseNextNode(false, null, false);
+        }
+        this._searchResultIndex = jumpBackwards ? 0 : this._searchResults.length - 1;
+        return this._searchResults.length;
+    },
+
+    /**
+     * @override
+     */
+    searchCanceled: function()
+    {
+        if (this._searchResults) {
+            for (var i = 0; i < this._searchResults.length; ++i) {
+                var profileNode = this._searchResults[i].profileNode;
+                delete profileNode._searchMatchedSelfColumn;
+                delete profileNode._searchMatchedTotalColumn;
+                delete profileNode._searchMatchedFunctionColumn;
+                profileNode.refresh();
+            }
+        }
+
+        this._searchResults = [];
+        this._searchResultIndex = -1;
+    },
+
+    /**
+     * @override
+     */
+    jumpToNextSearchResult: function()
+    {
+        if (!this._searchResults || !this._searchResults.length)
+            return;
+        this._searchResultIndex = (this._searchResultIndex + 1) % this._searchResults.length;
+        this._jumpToSearchResult(this._searchResultIndex);
+    },
+
+    /**
+     * @override
+     */
+    jumpToPreviousSearchResult: function()
+    {
+        if (!this._searchResults || !this._searchResults.length)
+            return;
+        this._searchResultIndex = (this._searchResultIndex - 1 + this._searchResults.length) % this._searchResults.length;
+        this._jumpToSearchResult(this._searchResultIndex);
+    },
+
+    /**
+     * @override
+     * @return {number}
+     */
+    currentSearchResultIndex: function()
+    {
+        return this._searchResultIndex;
+    },
+
+    _jumpToSearchResult: function(index)
+    {
+        var searchResult = this._searchResults[index];
+        if (!searchResult)
+            return;
+
+        var profileNode = searchResult.profileNode;
+        profileNode.revealAndSelect();
     }
 }
 
@@ -461,7 +632,7 @@ WebInspector.ProfileDataGridTree.propertyComparator = function(property, isAscen
                     return 1;
 
                 return 0;
-            }
+            };
         } else {
             comparator = function(lhs, rhs)
             {
@@ -472,7 +643,7 @@ WebInspector.ProfileDataGridTree.propertyComparator = function(property, isAscen
                     return 1;
 
                 return 0;
-            }
+            };
         }
 
         WebInspector.ProfileDataGridTree.propertyComparators[(isAscending ? 1 : 0)][property] = comparator;

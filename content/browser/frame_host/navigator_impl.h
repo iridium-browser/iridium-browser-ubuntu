@@ -9,7 +9,6 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
-#include "base/tuple.h"
 #include "content/browser/frame_host/navigation_controller_impl.h"
 #include "content/browser/frame_host/navigator.h"
 #include "content/common/content_export.h"
@@ -56,12 +55,14 @@ class CONTENT_EXPORT NavigatorImpl : public Navigator {
       NavigationController::ReloadType reload_type) override;
   void RequestOpenURL(RenderFrameHostImpl* render_frame_host,
                       const GURL& url,
+                      SiteInstance* source_site_instance,
                       const Referrer& referrer,
                       WindowOpenDisposition disposition,
                       bool should_replace_current_entry,
                       bool user_gesture) override;
   void RequestTransferURL(RenderFrameHostImpl* render_frame_host,
                           const GURL& url,
+                          SiteInstance* source_site_instance,
                           const std::vector<GURL>& redirect_chain,
                           const Referrer& referrer,
                           ui::PageTransition page_transition,
@@ -82,11 +83,16 @@ class CONTENT_EXPORT NavigatorImpl : public Navigator {
       const base::TimeTicks& renderer_before_unload_end_time) override;
   void CancelNavigation(FrameTreeNode* frame_tree_node) override;
 
+  // PlzNavigate
+  // Returns the navigation request for a given node. Used in tests.
+  NavigationRequest* GetNavigationRequestForNodeForTesting(
+      FrameTreeNode* frame_tree_node);
+
  private:
   // Holds data used to track browser side navigation metrics.
   struct NavigationMetricsData;
 
-  friend class NavigatorTest;
+  friend class NavigatorTestWithBrowserSideNavigation;
   ~NavigatorImpl() override;
 
   // Navigates to the given entry, which must be the pending entry.  Private

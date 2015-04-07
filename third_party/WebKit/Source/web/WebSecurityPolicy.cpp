@@ -55,6 +55,11 @@ void WebSecurityPolicy::registerURLSchemeAsDisplayIsolated(const WebString& sche
     SchemeRegistry::registerURLSchemeAsDisplayIsolated(scheme);
 }
 
+void WebSecurityPolicy::registerURLSchemeAsRestrictingMixedContent(const WebString& scheme)
+{
+    SchemeRegistry::registerURLSchemeAsRestrictingMixedContent(scheme);
+}
+
 void WebSecurityPolicy::registerURLSchemeAsSecure(const WebString& scheme)
 {
     SchemeRegistry::registerURLSchemeAsSecure(scheme);
@@ -68,6 +73,11 @@ void WebSecurityPolicy::registerURLSchemeAsCORSEnabled(const WebString& scheme)
 void WebSecurityPolicy::registerURLSchemeAsBypassingContentSecurityPolicy(const WebString& scheme)
 {
     SchemeRegistry::registerURLSchemeAsBypassingContentSecurityPolicy(scheme);
+}
+
+void WebSecurityPolicy::registerURLSchemeAsBypassingContentSecurityPolicy(const WebString& scheme, PolicyAreas policyAreas)
+{
+    SchemeRegistry::registerURLSchemeAsBypassingContentSecurityPolicy(scheme, static_cast<SchemeRegistry::PolicyAreas>(policyAreas));
 }
 
 void WebSecurityPolicy::registerURLSchemeAsEmptyDocument(const WebString& scheme)

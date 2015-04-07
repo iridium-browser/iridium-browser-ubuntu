@@ -56,13 +56,13 @@ class KURL;
 class SecurityOrigin;
 
 typedef int SandboxFlags;
-typedef Vector<OwnPtr<CSPDirectiveList> > CSPDirectiveListVector;
-typedef WillBePersistentHeapVector<RefPtrWillBeMember<ConsoleMessage> > ConsoleMessageVector;
+typedef Vector<OwnPtr<CSPDirectiveList>> CSPDirectiveListVector;
+typedef WillBePersistentHeapVector<RefPtrWillBeMember<ConsoleMessage>> ConsoleMessageVector;
 
 class ContentSecurityPolicy : public RefCounted<ContentSecurityPolicy> {
     WTF_MAKE_FAST_ALLOCATED;
 public:
-    // CSP 1.0 Directives
+    // CSP Level 1 Directives
     static const char ConnectSrc[];
     static const char DefaultSrc[];
     static const char FontSrc[];
@@ -87,6 +87,10 @@ public:
     // Manifest Directives (to be merged into CSP Level 2)
     // https://w3c.github.io/manifest/#content-security-policy
     static const char ManifestSrc[];
+
+    // Mixed Content Directive
+    // https://w3c.github.io/webappsec/specs/mixedcontent/#strict-mode
+    static const char StrictMixedContentChecking[];
 
     enum ReportingStatus {
         SendReport,
@@ -114,7 +118,7 @@ public:
     bool allowInlineEventHandlers(const String& contextURL, const WTF::OrdinalNumber& contextLine, ReportingStatus = SendReport) const;
     bool allowInlineScript(const String& contextURL, const WTF::OrdinalNumber& contextLine, ReportingStatus = SendReport) const;
     bool allowInlineStyle(const String& contextURL, const WTF::OrdinalNumber& contextLine, ReportingStatus = SendReport) const;
-    bool allowEval(ScriptState* = 0, ReportingStatus = SendReport) const;
+    bool allowEval(ScriptState* = nullptr, ReportingStatus = SendReport) const;
     bool allowPluginType(const String& type, const String& typeAttribute, const KURL&, ReportingStatus = SendReport) const;
 
     bool allowScriptFromSource(const KURL&, ReportingStatus = SendReport) const;
@@ -159,7 +163,7 @@ public:
 
     // If a frame is passed in, the message will be logged to its active document's console.
     // Otherwise, the message will be logged to this object's |m_executionContext|.
-    void logToConsole(PassRefPtrWillBeRawPtr<ConsoleMessage>, LocalFrame* = 0);
+    void logToConsole(PassRefPtrWillBeRawPtr<ConsoleMessage>, LocalFrame* = nullptr);
 
     void reportDirectiveAsSourceExpression(const String& directiveName, const String& sourceExpression);
     void reportDuplicateDirective(const String&);
@@ -175,16 +179,18 @@ public:
     void reportInvalidReferrer(const String&);
     void reportReportOnlyInMeta(const String&);
     void reportMetaOutsideHead(const String&);
+    void reportValueForEmptyDirective(const String& directiveName, const String& value);
 
     // If a frame is passed in, the report will be sent using it as a context. If no frame is
     // passed in, the report will be sent via this object's |m_executionContext| (or dropped
     // on the floor if no such context is available).
-    void reportViolation(const String& directiveText, const String& effectiveDirective, const String& consoleMessage, const KURL& blockedURL, const Vector<String>& reportEndpoints, const String& header, LocalFrame* = 0);
+    void reportViolation(const String& directiveText, const String& effectiveDirective, const String& consoleMessage, const KURL& blockedURL, const Vector<String>& reportEndpoints, const String& header, LocalFrame* = nullptr);
 
     void reportBlockedScriptExecutionToInspector(const String& directiveText) const;
 
     const KURL url() const;
     void enforceSandboxFlags(SandboxFlags);
+    void enforceStrictMixedContentChecking();
     String evalDisabledErrorMessage() const;
 
     bool urlMatchesSelf(const KURL&) const;
@@ -192,7 +198,7 @@ public:
 
     bool experimentalFeaturesEnabled() const;
 
-    static bool shouldBypassMainWorld(ExecutionContext*);
+    static bool shouldBypassMainWorld(const ExecutionContext*);
 
     static bool isDirectiveName(const String&);
 
@@ -226,6 +232,7 @@ private:
 
     // State flags used to configure the environment after parsing a policy.
     SandboxFlags m_sandboxMask;
+    bool m_enforceStrictMixedContentChecking;
     ReferrerPolicy m_referrerPolicy;
     String m_disableEvalErrorMessage;
 

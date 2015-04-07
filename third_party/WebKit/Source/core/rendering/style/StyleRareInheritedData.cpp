@@ -51,7 +51,7 @@ struct SameSizeAsStyleRareInheritedData : public RefCounted<SameSizeAsStyleRareI
     Color touchColors;
 };
 
-COMPILE_ASSERT(sizeof(StyleRareInheritedData) == sizeof(SameSizeAsStyleRareInheritedData), StyleRareInheritedData_should_bit_pack);
+static_assert(sizeof(StyleRareInheritedData) == sizeof(SameSizeAsStyleRareInheritedData), "StyleRareInheritedData should stay small");
 
 StyleRareInheritedData::StyleRareInheritedData()
     : listStyleImage(RenderStyle::initialListStyleImage())
@@ -60,7 +60,6 @@ StyleRareInheritedData::StyleRareInheritedData()
     , m_effectiveZoom(RenderStyle::initialZoom())
     , widows(RenderStyle::initialWidows())
     , orphans(RenderStyle::initialOrphans())
-    , m_hasAutoWidows(true)
     , m_hasAutoOrphans(true)
     , m_textStrokeColorIsCurrentColor(true)
     , m_textFillColorIsCurrentColor(true)
@@ -88,7 +87,6 @@ StyleRareInheritedData::StyleRareInheritedData()
     , m_imageRendering(RenderStyle::initialImageRendering())
     , m_textUnderlinePosition(RenderStyle::initialTextUnderlinePosition())
     , m_rubyPosition(RenderStyle::initialRubyPosition())
-    , m_touchActionDelay(RenderStyle::initialTouchActionDelay())
     , m_subtreeWillChangeContents(false)
     , hyphenationLimitBefore(-1)
     , hyphenationLimitAfter(-1)
@@ -115,7 +113,6 @@ StyleRareInheritedData::StyleRareInheritedData(const StyleRareInheritedData& o)
     , m_effectiveZoom(o.m_effectiveZoom)
     , widows(o.widows)
     , orphans(o.orphans)
-    , m_hasAutoWidows(o.m_hasAutoWidows)
     , m_hasAutoOrphans(o.m_hasAutoOrphans)
     , m_textStrokeColorIsCurrentColor(o.m_textStrokeColorIsCurrentColor)
     , m_textFillColorIsCurrentColor(o.m_textFillColorIsCurrentColor)
@@ -143,7 +140,6 @@ StyleRareInheritedData::StyleRareInheritedData(const StyleRareInheritedData& o)
     , m_imageRendering(o.m_imageRendering)
     , m_textUnderlinePosition(o.m_textUnderlinePosition)
     , m_rubyPosition(o.m_rubyPosition)
-    , m_touchActionDelay(o.m_touchActionDelay)
     , m_subtreeWillChangeContents(o.m_subtreeWillChangeContents)
     , hyphenationString(o.hyphenationString)
     , hyphenationLimitBefore(o.hyphenationLimitBefore)
@@ -178,7 +174,6 @@ bool StyleRareInheritedData::operator==(const StyleRareInheritedData& o) const
         && m_effectiveZoom == o.m_effectiveZoom
         && widows == o.widows
         && orphans == o.orphans
-        && m_hasAutoWidows == o.m_hasAutoWidows
         && m_hasAutoOrphans == o.m_hasAutoOrphans
         && m_textStrokeColorIsCurrentColor == o.m_textStrokeColorIsCurrentColor
         && m_textFillColorIsCurrentColor == o.m_textFillColorIsCurrentColor
@@ -200,7 +195,6 @@ bool StyleRareInheritedData::operator==(const StyleRareInheritedData& o) const
         && textEmphasisFill == o.textEmphasisFill
         && textEmphasisMark == o.textEmphasisMark
         && textEmphasisPosition == o.textEmphasisPosition
-        && m_touchActionDelay == o.m_touchActionDelay
         && m_textAlignLast == o.m_textAlignLast
         && m_textJustify == o.m_textJustify
         && m_textOrientation == o.m_textOrientation

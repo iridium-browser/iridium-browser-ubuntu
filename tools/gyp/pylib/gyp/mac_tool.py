@@ -146,7 +146,7 @@ class MacTool(object):
 
     # Go through all the environment variables and replace them as variables in
     # the file.
-    IDENT_RE = re.compile('[/\s]')
+    IDENT_RE = re.compile(r'[/\s]')
     for key in os.environ:
       if key.startswith('_'):
         continue
@@ -227,7 +227,7 @@ class MacTool(object):
     # Ref:
     # http://www.opensource.apple.com/source/cctools/cctools-809/misc/libtool.c
     # The problem with this flag is that it resets the file mtime on the file to
-    # epoch=0, e.g. 1970-1-1 or 1969-12-31 depending on daylight saving.
+    # epoch=0, e.g. 1970-1-1 or 1969-12-31 depending on timezone.
     env['ZERO_AR_DATE'] = '1'
     libtoolout = subprocess.Popen(cmd_list, stderr=subprocess.PIPE, env=env)
     _, err = libtoolout.communicate()

@@ -75,6 +75,9 @@ class USER_MANAGER_EXPORT User : public UserInfo {
     WALLPAPER_TYPE_COUNT = 6
   };
 
+  // Returns true if user type has gaia account.
+  static bool TypeHasGaiaAccount(UserType user_type);
+
   // Returns the user type.
   virtual UserType GetType() const = 0;
 
@@ -91,9 +94,15 @@ class USER_MANAGER_EXPORT User : public UserInfo {
   const gfx::ImageSkia& GetImage() const override;
   std::string GetUserID() const override;
 
-  // Is user supervised.
+  // Allows managing child status of the user. Used for RegularUser.
+  virtual void SetIsChild(bool is_child);
+
+  // Returns true if user has gaia account. True for users of types
+  // USER_TYPE_REGULAR and USER_TYPE_CHILD.
+  virtual bool HasGaiaAccount() const;
+
+  // Returns true if user is supervised.
   virtual bool IsSupervised() const;
-  virtual void SetIsSupervised(bool is_supervised);
 
   // Returns the account name part of the email. Use the display form of the
   // email if available and use_display_name == true. Otherwise use canonical.
@@ -170,7 +179,6 @@ class USER_MANAGER_EXPORT User : public UserInfo {
   static User* CreateGuestUser();
   static User* CreateKioskAppUser(const std::string& kiosk_app_username);
   static User* CreateSupervisedUser(const std::string& username);
-  static User* CreateRetailModeUser();
   static User* CreatePublicAccountUser(const std::string& email);
 
   explicit User(const std::string& email);

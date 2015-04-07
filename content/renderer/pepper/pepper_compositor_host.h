@@ -18,6 +18,7 @@ class SharedMemory;
 
 namespace cc {
 class Layer;
+class SharedBitmap;
 }  // namespace cc
 
 namespace content {
@@ -39,13 +40,13 @@ class PepperCompositorHost : public ppapi::host::ResourceHost {
   const scoped_refptr<cc::Layer> layer() { return layer_; };
 
   void ViewInitiatedPaint();
-  void ViewFlushedPaint();
 
  private:
   ~PepperCompositorHost() override;
 
   void ImageReleased(int32_t id,
-                     const scoped_ptr<base::SharedMemory>& shared_memory,
+                     scoped_ptr<base::SharedMemory> shared_memory,
+                     scoped_ptr<cc::SharedBitmap> bitmap,
                      uint32_t sync_point,
                      bool is_lost);
   void ResourceReleased(int32_t id,

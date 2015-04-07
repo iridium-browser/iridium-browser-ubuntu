@@ -49,7 +49,7 @@ MojoResult Waiter::Wait(MojoDeadline deadline, uint32_t* context) {
   if (awoken_) {
     DCHECK_NE(awake_result_, MOJO_RESULT_INTERNAL);
     if (context)
-      *context = awake_context_;
+      *context = static_cast<uint32_t>(awake_context_);
     return awake_result_;
   }
 
@@ -78,21 +78,22 @@ MojoResult Waiter::Wait(MojoDeadline deadline, uint32_t* context) {
 
   DCHECK_NE(awake_result_, MOJO_RESULT_INTERNAL);
   if (context)
-    *context = awake_context_;
+    *context = static_cast<uint32_t>(awake_context_);
   return awake_result_;
 }
 
-void Waiter::Awake(MojoResult result, uint32_t context) {
+bool Waiter::Awake(MojoResult result, uintptr_t context) {
   base::AutoLock locker(lock_);
 
   if (awoken_)
-    return;
+    return true;
 
   awoken_ = true;
   awake_result_ = result;
   awake_context_ = context;
   cv_.Signal();
   // |cv_.Wait()|/|cv_.TimedWait()| will return after |lock_| is released.
+  return true;
 }
 
 }  // namespace system

@@ -35,6 +35,7 @@
 #include "core/animation/animatable/AnimatableClipPathOperation.h"
 #include "core/animation/animatable/AnimatableColor.h"
 #include "core/animation/animatable/AnimatableDouble.h"
+#include "core/animation/animatable/AnimatableDoubleAndBool.h"
 #include "core/animation/animatable/AnimatableFilterOperations.h"
 #include "core/animation/animatable/AnimatableImage.h"
 #include "core/animation/animatable/AnimatableLength.h"
@@ -136,6 +137,11 @@ inline static PassRefPtrWillBeRawPtr<AnimatableValue> createFromLengthBoxAndBool
     return AnimatableLengthBoxAndBool::create(
         createFromLengthBox(lengthBox, style),
         flag);
+}
+
+inline static PassRefPtrWillBeRawPtr<AnimatableValue> createFromDoubleAndBool(double number, const bool flag, const RenderStyle& style)
+{
+    return AnimatableDoubleAndBool::create(number, flag);
 }
 
 inline static PassRefPtrWillBeRawPtr<AnimatableValue> createFromLengthPoint(const LengthPoint& lengthPoint, const RenderStyle& style)
@@ -275,6 +281,13 @@ static PassRefPtrWillBeRawPtr<AnimatableValue> createFromFontWeight(FontWeight f
     return createFromDouble(fontWeightToDouble(fontWeight));
 }
 
+static SVGPaintType normalizeSVGPaintType(SVGPaintType paintType)
+{
+    // If the <paint> is 'currentColor', then create an AnimatableSVGPaint with
+    // a <rgbcolor> type. This is similar in vein to the handling of colors.
+    return paintType == SVG_PAINTTYPE_CURRENTCOLOR ? SVG_PAINTTYPE_RGBCOLOR : paintType;
+}
+
 // FIXME: Generate this function.
 PassRefPtrWillBeRawPtr<AnimatableValue> CSSAnimatableValueFactory::create(CSSPropertyID property, const RenderStyle& style)
 {
@@ -340,7 +353,7 @@ PassRefPtrWillBeRawPtr<AnimatableValue> CSSAnimatableValueFactory::create(CSSPro
         return createFromDouble(style.fillOpacity());
     case CSSPropertyFill:
         return AnimatableSVGPaint::create(
-            style.svgStyle().fillPaintType(), style.svgStyle().visitedLinkFillPaintType(),
+            normalizeSVGPaintType(style.svgStyle().fillPaintType()), normalizeSVGPaintType(style.svgStyle().visitedLinkFillPaintType()),
             style.svgStyle().fillPaintColor(), style.svgStyle().visitedLinkFillPaintColor(),
             style.svgStyle().fillPaintUri(), style.svgStyle().visitedLinkFillPaintUri());
     case CSSPropertyFlexGrow:
@@ -429,11 +442,11 @@ PassRefPtrWillBeRawPtr<AnimatableValue> CSSAnimatableValueFactory::create(CSSPro
         return createFromDouble(style.strokeOpacity());
     case CSSPropertyStroke:
         return AnimatableSVGPaint::create(
-            style.svgStyle().strokePaintType(), style.svgStyle().visitedLinkStrokePaintType(),
+            normalizeSVGPaintType(style.svgStyle().strokePaintType()), normalizeSVGPaintType(style.svgStyle().visitedLinkStrokePaintType()),
             style.svgStyle().strokePaintColor(), style.svgStyle().visitedLinkStrokePaintColor(),
             style.svgStyle().strokePaintUri(), style.svgStyle().visitedLinkStrokePaintUri());
     case CSSPropertyTextDecorationColor:
-        return AnimatableColor::create(style.textDecorationColor().resolve(style.color()), style.visitedLinkTextDecorationColor().resolve(style.visitedLinkColor()));
+        return createFromColor(property, style);
     case CSSPropertyTextIndent:
         return createFromLength(style.textIndent(), style);
     case CSSPropertyTextShadow:
@@ -492,6 +505,10 @@ PassRefPtrWillBeRawPtr<AnimatableValue> CSSAnimatableValueFactory::create(CSSPro
         return AnimatableTransform::create(style.transform());
     case CSSPropertyTransformOrigin:
         return createFromTransformOrigin(style.transformOrigin(), style);
+    case CSSPropertyMotionPosition:
+        return createFromLength(style.motionPosition(), style);
+    case CSSPropertyMotionRotation:
+        return createFromDoubleAndBool(style.motionRotation(), style.motionRotationType() == MotionRotationAuto, style);
     case CSSPropertyWidows:
         return createFromDouble(style.widows());
     case CSSPropertyWidth:

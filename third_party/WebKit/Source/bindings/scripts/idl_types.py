@@ -84,6 +84,13 @@ STRING_TYPES = frozenset([
     'USVString',
 ])
 
+STANDARD_CALLBACK_FUNCTIONS = frozenset([
+    # http://heycam.github.io/webidl/#common-Function
+    'Function',
+    # http://heycam.github.io/webidl/#common-VoidFunction
+    'VoidFunction',
+])
+
 
 ################################################################################
 # Inheritance
@@ -126,7 +133,7 @@ class IdlType(IdlTypeBase):
     # FIXME: incorporate Nullable, etc.
     # to support types like short?[] vs. short[]?, instead of treating these
     # as orthogonal properties (via flags).
-    callback_functions = set()
+    callback_functions = set(STANDARD_CALLBACK_FUNCTIONS)
     callback_interfaces = set()
     dictionaries = set()
     enums = {}  # name -> values
@@ -206,10 +213,6 @@ class IdlType(IdlTypeBase):
         return self.name in STRING_TYPES
 
     @property
-    def is_union_type(self):
-        return isinstance(self, IdlUnionType)
-
-    @property
     def name(self):
         """Return type name
 
@@ -253,7 +256,7 @@ class IdlUnionType(IdlTypeBase):
         self.member_types = member_types
 
     def __str__(self):
-        return self.name
+        return '(' + ' or '.join(str(member_type) for member_type in self.member_types) + ')'
 
     def __hash__(self):
         return hash(self.name)
@@ -272,6 +275,33 @@ class IdlUnionType(IdlTypeBase):
     @property
     def is_union_type(self):
         return True
+
+    def single_matching_member_type(self, predicate):
+        matching_types = filter(predicate, self.member_types)
+        if len(matching_types) > 1:
+            raise "%s is ambigious." % self.name
+        return matching_types[0] if matching_types else None
+
+    @property
+    def string_member_type(self):
+        return self.single_matching_member_type(
+            lambda member_type: (member_type.is_string_type or
+                                 member_type.is_enum))
+
+    @property
+    def numeric_member_type(self):
+        return self.single_matching_member_type(
+            lambda member_type: member_type.is_numeric_type)
+
+    @property
+    def boolean_member_type(self):
+        return self.single_matching_member_type(
+            lambda member_type: member_type.base_type == 'boolean')
+
+    @property
+    def as_union_type(self):
+        # Note: Use this to "look through" a possible IdlNullableType wrapper.
+        return self
 
     @property
     def name(self):
@@ -310,6 +340,10 @@ class IdlArrayOrSequenceType(IdlTypeBase):
     def resolve_typedefs(self, typedefs):
         self.element_type = self.element_type.resolve_typedefs(typedefs)
         return self
+
+    @property
+    def is_array_or_sequence_type(self):
+        return True
 
 
 class IdlArrayType(IdlArrayOrSequenceType):

@@ -95,7 +95,7 @@ PassRefPtrWillBeRawPtr<Node> Text::mergeNextSiblingNodesIfPossible()
         nextText->updateTextRenderer(0, 0);
 
         document().incDOMTreeVersion();
-        didModifyData(oldTextData);
+        didModifyData(oldTextData, CharacterData::UpdateFromNonParser);
         nextText->remove(IGNORE_EXCEPTION);
     }
 
@@ -116,7 +116,7 @@ PassRefPtrWillBeRawPtr<Text> Text::splitText(unsigned offset, ExceptionState& ex
     RefPtrWillBeRawPtr<Text> newText = cloneWithData(oldStr.substring(offset));
     setDataWithoutUpdate(oldStr.substring(0, offset));
 
-    didModifyData(oldStr);
+    didModifyData(oldStr, CharacterData::UpdateFromNonParser);
 
     if (parentNode())
         parentNode()->insertBefore(newText.get(), nextSibling(), exceptionState);
@@ -237,8 +237,28 @@ PassRefPtrWillBeRawPtr<Node> Text::cloneNode(bool /*deep*/)
     return cloneWithData(data());
 }
 
+static inline bool canHaveWhitespaceChildren(const RenderObject& parent)
+{
+    // <button> should allow whitespace even though RenderFlexibleBox doesn't.
+    if (parent.isRenderButton())
+        return true;
+
+    if (parent.isTable() || parent.isTableRow() || parent.isTableSection()
+        || parent.isRenderTableCol() || parent.isFrameSet()
+        || parent.isFlexibleBox() || parent.isRenderGrid()
+        || parent.isSVGRoot()
+        || parent.isSVGContainer()
+        || parent.isSVGImage()
+        || parent.isSVGShape())
+        return false;
+    return true;
+}
+
 bool Text::textRendererIsNeeded(const RenderStyle& style, const RenderObject& parent)
 {
+    if (!parent.canHaveChildren())
+        return false;
+
     if (isEditingText())
         return true;
 
@@ -251,13 +271,13 @@ bool Text::textRendererIsNeeded(const RenderStyle& style, const RenderObject& pa
     if (!containsOnlyWhitespace())
         return true;
 
-    if (!parent.canHaveWhitespaceChildren())
+    if (!canHaveWhitespaceChildren(parent))
         return false;
 
     if (style.preserveNewline()) // pre/pre-wrap/pre-line always make renderers.
         return true;
 
-    const RenderObject* prev = NodeRenderingTraversal::previousSiblingRenderer(this);
+    const RenderObject* prev = NodeRenderingTraversal::previousSiblingRenderer(*this);
     if (prev && prev->isBR()) // <span><br/> <br/></span>
         return false;
 
@@ -276,7 +296,7 @@ bool Text::textRendererIsNeeded(const RenderStyle& style, const RenderObject& pa
         RenderObject* first = parent.slowFirstChild();
         while (first && first->isFloatingOrOutOfFlowPositioned() && maxSiblingsToVisit--)
             first = first->nextSibling();
-        if (!first || NodeRenderingTraversal::nextSiblingRenderer(this) == first)
+        if (!first || first == renderer() || NodeRenderingTraversal::nextSiblingRenderer(*this) == first)
             // Whitespace at the start of a block just goes away.  Don't even
             // make a render object for this text.
             return false;
@@ -304,8 +324,39 @@ RenderText* Text::createTextRenderer(RenderStyle* style)
 
 void Text::attach(const AttachContext& context)
 {
-    RenderTreeBuilder(this, context.resolvedStyle).createRendererForTextIfNeeded();
+    if (ContainerNode* renderingParent = NodeRenderingTraversal::parent(*this)) {
+        if (RenderObject* parentRenderer = renderingParent->renderer()) {
+            if (textRendererIsNeeded(*parentRenderer->style(), *parentRenderer))
+                RenderTreeBuilderForText(*this, parentRenderer).createRenderer();
+        }
+    }
     CharacterData::attach(context);
+}
+
+void Text::reattachIfNeeded(const AttachContext& context)
+{
+    bool rendererIsNeeded = false;
+    ContainerNode* renderingParent = NodeRenderingTraversal::parent(*this);
+    if (renderingParent) {
+        if (RenderObject* parentRenderer = renderingParent->renderer()) {
+            if (textRendererIsNeeded(*parentRenderer->style(), *parentRenderer))
+                rendererIsNeeded = true;
+        }
+    }
+
+    if (rendererIsNeeded == !!renderer())
+        return;
+
+    // The following is almost the same as Node::reattach() except that we create renderer only if needed.
+    // Not calling reattach() to avoid repeated calls to Text::textRendererIsNeeded().
+    AttachContext reattachContext(context);
+    reattachContext.performingReattach = true;
+
+    if (styleChangeType() < NeedsReattachStyleChange)
+        detach(reattachContext);
+    if (rendererIsNeeded)
+        RenderTreeBuilderForText(*this, renderingParent->renderer()).createRenderer();
+    CharacterData::attach(reattachContext);
 }
 
 void Text::recalcTextStyle(StyleRecalcChange change, Text* nextTextSibling)
@@ -319,7 +370,7 @@ void Text::recalcTextStyle(StyleRecalcChange change, Text* nextTextSibling)
     } else if (needsStyleRecalc() || needsWhitespaceRenderer()) {
         reattach();
         if (this->renderer())
-            reattachWhitespaceSiblings(nextTextSibling);
+            reattachWhitespaceSiblingsIfNeeded(nextTextSibling);
     }
 }
 

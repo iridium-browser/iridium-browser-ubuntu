@@ -71,6 +71,9 @@ const QuicTag kTCID = TAG('T', 'C', 'I', 'D');   // Connection ID truncation.
 // FEC options
 const QuicTag kFHDR = TAG('F', 'H', 'D', 'R');   // FEC protect headers
 
+// Enable bandwidth resumption experiment.
+const QuicTag kBWRE = TAG('B', 'W', 'R', 'E');  // Bandwidth resumption.
+
 // Proof types (i.e. certificate types)
 // NOTE: although it would be silly to do so, specifying both kX509 and kX59R
 // is allowed and is equivalent to specifying only kX509.
@@ -91,7 +94,7 @@ const QuicTag kCGST = TAG('C', 'G', 'S', 'T');   // Congestion control
 const QuicTag kCOPT = TAG('C', 'O', 'P', 'T');   // Connection options
 const QuicTag kICSL = TAG('I', 'C', 'S', 'L');   // Idle connection state
                                                  // lifetime
-const QuicTag kKATO = TAG('K', 'A', 'T', 'O');   // Keepalive timeout
+const QuicTag kSCLS = TAG('S', 'C', 'L', 'S');   // Silently close on timeout
 const QuicTag kMSPC = TAG('M', 'S', 'P', 'C');   // Max streams per connection.
 const QuicTag kIRTT = TAG('I', 'R', 'T', 'T');   // Estimated initial RTT in us.
 const QuicTag kSWND = TAG('S', 'W', 'N', 'D');   // Server's Initial congestion
@@ -106,9 +109,6 @@ const QuicTag kPROF = TAG('P', 'R', 'O', 'F');   // Proof (signature).
 const QuicTag kCCS  = TAG('C', 'C', 'S', 0);     // Common certificate set
 const QuicTag kCCRT = TAG('C', 'C', 'R', 'T');   // Cached certificate
 const QuicTag kEXPY = TAG('E', 'X', 'P', 'Y');   // Expiry
-// TODO(rjshade): Remove kIFCW when removing QUIC_VERSION_19.
-const QuicTag kIFCW = TAG('I', 'F', 'C', 'W');   // Initial flow control receive
-                                                 // window.
 const QuicTag kSFCW = TAG('S', 'F', 'C', 'W');   // Initial stream flow control
                                                  // receive window.
 const QuicTag kCFCW = TAG('C', 'F', 'C', 'W');   // Initial session/connection

@@ -28,7 +28,6 @@
 #include "core/rendering/InlineTextBox.h"
 #include "core/rendering/PaintInfo.h"
 #include "core/rendering/RenderBlockFlow.h"
-#include "core/rendering/RenderFlowThread.h"
 #include "core/rendering/RenderInline.h"
 #include "core/rendering/RenderView.h"
 #include "core/rendering/VerticalPositionCache.h"
@@ -39,11 +38,11 @@ namespace blink {
 
 struct SameSizeAsRootInlineBox : public InlineFlowBox {
     unsigned unsignedVariable;
-    void* pointers[4];
-    LayoutUnit layoutVariables[5];
+    void* pointers[3];
+    LayoutUnit layoutVariables[6];
 };
 
-COMPILE_ASSERT(sizeof(RootInlineBox) == sizeof(SameSizeAsRootInlineBox), RootInlineBox_should_stay_small);
+static_assert(sizeof(RootInlineBox) == sizeof(SameSizeAsRootInlineBox), "RootInlineBox should stay small");
 
 typedef WTF::HashMap<const RootInlineBox*, EllipsisBox*> EllipsisBoxMap;
 static EllipsisBoxMap* gEllipsisBoxMap = 0;
@@ -57,6 +56,7 @@ RootInlineBox::RootInlineBox(RenderBlockFlow& block)
     , m_lineTopWithLeading(0)
     , m_lineBottomWithLeading(0)
     , m_selectionBottom(0)
+    , m_paginationStrut(0)
 {
     setIsHorizontal(block.isHorizontalWritingMode());
 }
@@ -113,12 +113,12 @@ bool RootInlineBox::lineCanAccommodateEllipsis(bool ltr, int blockEdge, int line
     return InlineFlowBox::canAccommodateEllipsis(ltr, blockEdge, ellipsisWidth);
 }
 
-float RootInlineBox::placeEllipsis(const AtomicString& ellipsisStr,  bool ltr, float blockLeftEdge, float blockRightEdge, float ellipsisWidth,
+FloatWillBeLayoutUnit RootInlineBox::placeEllipsis(const AtomicString& ellipsisStr,  bool ltr, FloatWillBeLayoutUnit blockLeftEdge, FloatWillBeLayoutUnit blockRightEdge, FloatWillBeLayoutUnit ellipsisWidth,
                                   InlineBox* markupBox)
 {
     // Create an ellipsis box.
     EllipsisBox* ellipsisBox = new EllipsisBox(renderer(), ellipsisStr, this,
-        ellipsisWidth - (markupBox ? markupBox->logicalWidth() : 0), logicalHeight(),
+        ellipsisWidth - (markupBox ? markupBox->logicalWidth().toFloat() : 0), logicalHeight().toFloat(),
         x(), y(), !prevRootBox(), isHorizontal(), markupBox);
 
     if (!gEllipsisBoxMap)
@@ -136,15 +136,15 @@ float RootInlineBox::placeEllipsis(const AtomicString& ellipsisStr,  bool ltr, f
     // of that glyph.  Mark all of the objects that intersect the ellipsis box as not painting (as being
     // truncated).
     bool foundBox = false;
-    float truncatedWidth = 0;
-    float position = placeEllipsisBox(ltr, blockLeftEdge, blockRightEdge, ellipsisWidth, truncatedWidth, foundBox);
+    FloatWillBeLayoutUnit truncatedWidth = 0;
+    FloatWillBeLayoutUnit position = placeEllipsisBox(ltr, blockLeftEdge, blockRightEdge, ellipsisWidth, truncatedWidth, foundBox);
     ellipsisBox->setLogicalLeft(position);
     return truncatedWidth;
 }
 
-float RootInlineBox::placeEllipsisBox(bool ltr, float blockLeftEdge, float blockRightEdge, float ellipsisWidth, float &truncatedWidth, bool& foundBox)
+FloatWillBeLayoutUnit RootInlineBox::placeEllipsisBox(bool ltr, FloatWillBeLayoutUnit blockLeftEdge, FloatWillBeLayoutUnit blockRightEdge, FloatWillBeLayoutUnit ellipsisWidth, FloatWillBeLayoutUnit &truncatedWidth, bool& foundBox)
 {
-    float result = InlineFlowBox::placeEllipsisBox(ltr, blockLeftEdge, blockRightEdge, ellipsisWidth, truncatedWidth, foundBox);
+    FloatWillBeLayoutUnit result = InlineFlowBox::placeEllipsisBox(ltr, blockLeftEdge, blockRightEdge, ellipsisWidth, truncatedWidth, foundBox);
     if (result == -1) {
         result = ltr ? blockRightEdge - ellipsisWidth : blockLeftEdge;
         truncatedWidth = blockRightEdge - blockLeftEdge;
@@ -152,7 +152,7 @@ float RootInlineBox::placeEllipsisBox(bool ltr, float blockLeftEdge, float block
     return result;
 }
 
-void RootInlineBox::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset, LayoutUnit lineTop, LayoutUnit lineBottom)
+void RootInlineBox::paint(const PaintInfo& paintInfo, const LayoutPoint& paintOffset, LayoutUnit lineTop, LayoutUnit lineBottom)
 {
     RootInlineBoxPainter(*this).paint(paintInfo, paintOffset, lineTop, lineBottom);
 }
@@ -168,7 +168,7 @@ bool RootInlineBox::nodeAtPoint(const HitTestRequest& request, HitTestResult& re
     return InlineFlowBox::nodeAtPoint(request, result, locationInContainer, accumulatedOffset, lineTop, lineBottom);
 }
 
-void RootInlineBox::adjustPosition(float dx, float dy)
+void RootInlineBox::adjustPosition(FloatWillBeLayoutUnit dx, FloatWillBeLayoutUnit dy)
 {
     InlineFlowBox::adjustPosition(dx, dy);
     LayoutUnit blockDirectionDelta = isHorizontal() ? dy : dx; // The block direction delta is a LayoutUnit.
@@ -233,8 +233,6 @@ LayoutUnit RootInlineBox::alignBoxesInBlockDirection(LayoutUnit heightOfBlock, G
     maxHeight = std::max<LayoutUnit>(0, maxHeight); // FIXME: Is this really necessary?
 
     setLineTopBottomPositions(lineTop, lineBottom, heightOfBlock, heightOfBlock + maxHeight, selectionBottom);
-    if (block().view()->layoutState()->isPaginated())
-        setPaginatedLineWidth(block().availableLogicalWidthForContent());
 
     LayoutUnit annotationsAdjustment = beforeAnnotationsAdjustment();
     if (annotationsAdjustment) {
@@ -247,9 +245,9 @@ LayoutUnit RootInlineBox::alignBoxesInBlockDirection(LayoutUnit heightOfBlock, G
     return heightOfBlock + maxHeight;
 }
 
-float RootInlineBox::maxLogicalTop() const
+FloatWillBeLayoutUnit RootInlineBox::maxLogicalTop() const
 {
-    float maxLogicalTop = 0;
+    FloatWillBeLayoutUnit maxLogicalTop;
     computeMaxLogicalTop(maxLogicalTop);
     return maxLogicalTop;
 }
@@ -462,7 +460,7 @@ LayoutUnit RootInlineBox::selectionBottom() const
 
 int RootInlineBox::blockDirectionPointInLine() const
 {
-    return !block().style()->slowIsFlippedBlocksWritingMode() ? std::max(lineTop(), selectionTop()) : std::min(lineBottom(), selectionBottom());
+    return !block().style()->isFlippedBlocksWritingMode() ? std::max(lineTop(), selectionTop()) : std::min(lineBottom(), selectionBottom());
 }
 
 RenderBlockFlow& RootInlineBox::block() const
@@ -680,8 +678,6 @@ void RootInlineBox::ascentAndDescentForBox(InlineBox* box, GlyphOverflowAndFallb
         setAscentAndDescent(ascent, descent, glyphOverflow->top, glyphOverflow->bottom, ascentDescentSet);
         affectsAscent = glyphOverflow->top - box->logicalTop() > 0;
         affectsDescent = glyphOverflow->bottom + box->logicalTop() > 0;
-        glyphOverflow->top = std::min(glyphOverflow->top, std::max(0, glyphOverflow->top - box->renderer().style(isFirstLineStyle())->fontMetrics().ascent(baselineType())));
-        glyphOverflow->bottom = std::min(glyphOverflow->bottom, std::max(0, glyphOverflow->bottom - box->renderer().style(isFirstLineStyle())->fontMetrics().descent(baselineType())));
     }
 
     if (includeMarginForBox(box)) {

@@ -42,6 +42,7 @@ import org.chromium.android_webview.permission.AwPermissionRequest;
 import org.chromium.base.CalledByNative;
 import org.chromium.base.JNINamespace;
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.TraceEvent;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.components.navigation_interception.InterceptNavigationDelegate;
 import org.chromium.components.navigation_interception.NavigationParams;
@@ -1050,7 +1051,12 @@ public class AwContents implements SmartClipProvider {
     //--------------------------------------------------------------------------------------------
 
     public void onDraw(Canvas canvas) {
-        mAwViewMethods.onDraw(canvas);
+        try {
+            TraceEvent.begin("AwContents.onDraw");
+            mAwViewMethods.onDraw(canvas);
+        } finally {
+            TraceEvent.end("AwContents.onDraw");
+        }
     }
 
     public void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
@@ -1595,9 +1601,6 @@ public class AwContents implements SmartClipProvider {
         if (!isDestroyed()) mNavigationController.clearSslPreferences();
     }
 
-    // TODO(sgurun) remove after this rolls in. To keep internal tree happy.
-    public void clearClientCertPreferences() { }
-
     /**
      * Method to return all hit test values relevant to public WebView API.
      * Note that this expose more data than needed for WebView.getHitTestResult.
@@ -1772,6 +1775,35 @@ public class AwContents implements SmartClipProvider {
     public void evaluateJavaScriptEvenIfNotYetNavigated(String script) {
         if (!isDestroyed()) mWebContents.evaluateJavaScript(script, null);
     }
+
+    /**
+     * Post a message to a frame.
+     * TODO(sgurun) investigate if we should hardcode the source origin to some
+     * value instead.
+     *
+     * @param frameName The name of the frame. If the name is null the message is posted
+     *                  to the main frame.
+     * @param message   The message
+     * @param sourceOrigin  The source origin
+     * @param targetOrigin  The target origin
+     * @param msgPorts The sent message ports, if any. Pass null if there is no
+     *                 message ports to pass.
+     */
+    public void postMessageToFrame(String frameName, String message,
+            String sourceOrigin, String targetOrigin, int[] msgPorts) {
+        nativePostMessageToFrame(mNativeAwContents, frameName, message, sourceOrigin,
+                targetOrigin, msgPorts);
+    }
+
+    /**
+     * Creates a message channel.
+     *
+     * @param callback The message channel created.
+     */
+    public void createMessageChannel(ValueCallback<MessageChannel> callback) {
+        nativeCreateMessageChannel(mNativeAwContents, callback);
+    }
+
 
     //--------------------------------------------------------------------------------------------
     //  View and ViewGroup method implementations
@@ -2185,6 +2217,12 @@ public class AwContents implements SmartClipProvider {
         }
     }
 
+    @CalledByNative
+    private static void onMessageChannelCreated(int portId1, int portId2,
+            ValueCallback<MessageChannel> callback) {
+        callback.onReceiveValue(new MessageChannel(portId1, portId2));
+    }
+
     // -------------------------------------------------------------------------------------------
     // Helper methods
     // -------------------------------------------------------------------------------------------
@@ -2300,6 +2338,7 @@ public class AwContents implements SmartClipProvider {
         @Override
         public void onDraw(Canvas canvas) {
             if (isDestroyed()) {
+                TraceEvent.instant("EarlyOut_destroyed");
                 canvas.drawColor(getEffectiveBackgroundColor());
                 return;
             }
@@ -2307,6 +2346,7 @@ public class AwContents implements SmartClipProvider {
             // For hardware draws, the clip at onDraw time could be different
             // from the clip during DrawGL.
             if (!canvas.isHardwareAccelerated() && !canvas.getClipBounds(mClipBoundsTemporary)) {
+                TraceEvent.instant("EarlyOut_software_empty_clip");
                 return;
             }
 
@@ -2321,6 +2361,7 @@ public class AwContents implements SmartClipProvider {
                 did_draw = mNativeGLDelegate.requestDrawGL(canvas, false, mContainerView);
             }
             if (!did_draw) {
+                TraceEvent.instant("NativeDrawFailed");
                 canvas.drawColor(getEffectiveBackgroundColor());
             }
 
@@ -2402,13 +2443,12 @@ public class AwContents implements SmartClipProvider {
             mScrollOffsetManager.setProcessingTouchEvent(false);
 
             if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
-                int actionIndex = event.getActionIndex();
-
                 // Note this will trigger IPC back to browser even if nothing is
                 // hit.
                 nativeRequestNewHitTestDataAt(mNativeAwContents,
-                        (int) Math.round(event.getX(actionIndex) / mDIPScale),
-                        (int) Math.round(event.getY(actionIndex) / mDIPScale));
+                        event.getX() / (float) mDIPScale,
+                        event.getY() / (float) mDIPScale,
+                        event.getTouchMajor() / (float) mDIPScale);
             }
 
             if (mOverScrollGlow != null) {
@@ -2622,7 +2662,8 @@ public class AwContents implements SmartClipProvider {
     private native byte[] nativeGetCertificate(long nativeAwContents);
 
     // Coordinates in desity independent pixels.
-    private native void nativeRequestNewHitTestDataAt(long nativeAwContents, int x, int y);
+    private native void nativeRequestNewHitTestDataAt(long nativeAwContents, float x, float y,
+            float touchMajor);
     private native void nativeUpdateLastHitTestData(long nativeAwContents);
 
     private native void nativeOnSizeChanged(long nativeAwContents, int w, int h, int ow, int oh);
@@ -2662,4 +2703,10 @@ public class AwContents implements SmartClipProvider {
 
     private native void nativePreauthorizePermission(long nativeAwContents, String origin,
             long resources);
+
+    private native void nativePostMessageToFrame(long nativeAwContents, String frameId,
+            String message, String sourceOrigin, String targetOrigin, int[] msgPorts);
+
+    private native void nativeCreateMessageChannel(long nativeAwContents,
+            ValueCallback<MessageChannel> callback);
 }

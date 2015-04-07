@@ -244,6 +244,9 @@ class CONTENT_EXPORT BrowserAccessibility {
   // Returns true if this node is an editable text field of any kind.
   bool IsEditableText() const;
 
+  // True if this is a web area, and its grandparent is a presentational iframe.
+  bool IsWebAreaForPresentationalIframe() const;
+
   // Append the text from this node and its children.
   std::string GetTextRecursive() const;
 
@@ -261,8 +264,18 @@ class CONTENT_EXPORT BrowserAccessibility {
   // including this object if it's static text.
   int GetStaticTextLenRecursive() const;
 
+  // Similar to GetParent(), but includes nodes that are the host of a
+  // subtree rather than skipping over them - because they contain important
+  // bounds offsets.
+  BrowserAccessibility* GetParentForBoundsCalculation() const;
+
   std::string name_;
   std::string value_;
+
+  // Convert the bounding rectangle of an element (which is relative to
+  // its nearest scrollable ancestor) to local bounds (which are relative
+  // to the top of the web accessibility tree).
+  gfx::Rect ElementBoundsToLocalBounds(gfx::Rect bounds) const;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserAccessibility);
 };

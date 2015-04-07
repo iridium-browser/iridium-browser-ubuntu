@@ -17,6 +17,7 @@
 #include "base/observer_list.h"
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_discovery_manager_mac.h"
+#include "device/bluetooth/bluetooth_export.h"
 
 @class IOBluetoothDevice;
 @class NSArray;
@@ -32,8 +33,9 @@ namespace device {
 
 class BluetoothAdapterMacTest;
 
-class BluetoothAdapterMac : public BluetoothAdapter,
-                            public BluetoothDiscoveryManagerMac::Observer {
+class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterMac
+    : public BluetoothAdapter,
+      public BluetoothDiscoveryManagerMac::Observer {
  public:
   static base::WeakPtr<BluetoothAdapter> CreateAdapter();
 
@@ -80,12 +82,14 @@ class BluetoothAdapterMac : public BluetoothAdapter,
       device::BluetoothDevice::PairingDelegate* pairing_delegate) override;
 
  private:
+  friend class base::DeleteHelper<BluetoothAdapterMac>;
   friend class BluetoothAdapterMacTest;
 
   BluetoothAdapterMac();
   ~BluetoothAdapterMac() override;
 
   // BluetoothAdapter:
+  void DeleteOnCorrectThread() const override;
   void AddDiscoverySession(const base::Closure& callback,
                            const ErrorCallback& error_callback) override;
   void RemoveDiscoverySession(const base::Closure& callback,

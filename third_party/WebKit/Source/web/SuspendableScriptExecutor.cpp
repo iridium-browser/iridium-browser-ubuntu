@@ -16,8 +16,9 @@ namespace blink {
 
 void SuspendableScriptExecutor::createAndRun(LocalFrame* frame, int worldID, const Vector<ScriptSourceCode>& sources, int extensionGroup, bool userGesture, WebScriptExecutionCallback* callback)
 {
-    SuspendableScriptExecutor* executor = new SuspendableScriptExecutor(frame, worldID, sources, extensionGroup, userGesture, callback);
+    RefPtrWillBeRawPtr<SuspendableScriptExecutor> executor = adoptRefWillBeNoop(new SuspendableScriptExecutor(frame, worldID, sources, extensionGroup, userGesture, callback));
     executor->run();
+    executor->ref();
 }
 
 void SuspendableScriptExecutor::resume()
@@ -30,8 +31,8 @@ void SuspendableScriptExecutor::contextDestroyed()
     // this method can only be called if the script was not called in run()
     // and context remained suspend (method resume has never called)
     ActiveDOMObject::contextDestroyed();
-    m_callback->completed(Vector<v8::Local<v8::Value> >());
-    delete this;
+    m_callback->completed(Vector<v8::Local<v8::Value>>());
+    deref();
 }
 
 SuspendableScriptExecutor::SuspendableScriptExecutor(LocalFrame* frame, int worldID, const Vector<ScriptSourceCode>& sources, int extensionGroup, bool userGesture, WebScriptExecutionCallback* callback)
@@ -67,7 +68,7 @@ void SuspendableScriptExecutor::executeAndDestroySelf()
         indicator = adoptPtr(new UserGestureIndicator(DefinitelyProcessingNewUserGesture));
 
     v8::HandleScope scope(v8::Isolate::GetCurrent());
-    Vector<v8::Local<v8::Value> > results;
+    Vector<v8::Local<v8::Value>> results;
     if (m_worldID) {
         m_frame->script().executeScriptInIsolatedWorld(m_worldID, m_sources, m_extensionGroup, &results);
     } else {
@@ -75,8 +76,13 @@ void SuspendableScriptExecutor::executeAndDestroySelf()
         results.append(scriptValue);
     }
     m_callback->completed(results);
-    delete this;
+    deref();
 }
 
+void SuspendableScriptExecutor::trace(Visitor* visitor)
+{
+    visitor->trace(m_frame);
+    ActiveDOMObject::trace(visitor);
+}
 
 } // namespace blink

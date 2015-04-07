@@ -41,10 +41,14 @@ class SYNC_EXPORT AttachmentStoreHandle : public AttachmentStore,
       const scoped_refptr<base::SequencedTaskRunner>& backend_task_runner);
 
   // AttachmentStore implementation.
+  void Init(const InitCallback& callback) override;
   void Read(const AttachmentIdList& id, const ReadCallback& callback) override;
   void Write(const AttachmentList& attachments,
              const WriteCallback& callback) override;
   void Drop(const AttachmentIdList& id, const DropCallback& callback) override;
+  void ReadMetadata(const AttachmentIdList& ids,
+                    const ReadMetadataCallback& callback) override;
+  void ReadAllMetadata(const ReadMetadataCallback& callback) override;
 
  private:
   ~AttachmentStoreHandle() override;

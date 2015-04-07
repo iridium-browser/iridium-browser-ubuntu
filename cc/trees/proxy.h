@@ -46,7 +46,7 @@ class CC_EXPORT Proxy {
   bool IsMainThread() const;
   bool IsImplThread() const;
   bool IsMainThreadBlocked() const;
-#if DCHECK_IS_ON
+#if DCHECK_IS_ON()
   void SetMainThreadBlocked(bool is_main_thread_blocked);
   void SetCurrentThreadIsImplThread(bool is_impl_thread);
 #endif
@@ -66,6 +66,8 @@ class CC_EXPORT Proxy {
   virtual void SetLayerTreeHostClientReady() = 0;
 
   virtual void SetVisible(bool visible) = 0;
+
+  virtual void SetThrottleFrameProduction(bool throttle) = 0;
 
   virtual const RendererCapabilities& GetRendererCapabilities() const = 0;
 
@@ -104,6 +106,8 @@ class CC_EXPORT Proxy {
 
   virtual void SetDebugState(const LayerTreeDebugState& debug_state) = 0;
 
+  virtual void SetChildrenNeedBeginFrames(bool children_need_begin_frames) = 0;
+
   // Testing hooks
   virtual bool MainFrameWillHappenForTesting() = 0;
 
@@ -123,7 +127,7 @@ class CC_EXPORT Proxy {
   scoped_refptr<base::SingleThreadTaskRunner> impl_task_runner_;
   scoped_ptr<BlockingTaskRunner> blocking_main_thread_task_runner_;
 
-#if DCHECK_IS_ON
+#if DCHECK_IS_ON()
   const base::PlatformThreadId main_thread_id_;
   bool impl_thread_is_overridden_;
   bool is_main_thread_blocked_;
@@ -132,7 +136,7 @@ class CC_EXPORT Proxy {
   DISALLOW_COPY_AND_ASSIGN(Proxy);
 };
 
-#if DCHECK_IS_ON
+#if DCHECK_IS_ON()
 class DebugScopedSetMainThreadBlocked {
  public:
   explicit DebugScopedSetMainThreadBlocked(Proxy* proxy) : proxy_(proxy) {

@@ -34,7 +34,7 @@ TEST(SolidColorLayerImplTest, VerifyTilingCompleteAndNoOverlap) {
   layer->draw_properties().visible_content_rect = visible_content_rect;
   layer->SetBounds(layer_size);
   layer->SetContentBounds(layer_size);
-  layer->CreateRenderSurface();
+  layer->SetHasRenderSurface(true);
   layer->draw_properties().render_target = layer.get();
 
   AppendQuadsData data;
@@ -61,7 +61,7 @@ TEST(SolidColorLayerImplTest, VerifyCorrectBackgroundColorInQuad) {
   layer->SetBounds(layer_size);
   layer->SetContentBounds(layer_size);
   layer->SetBackgroundColor(test_color);
-  layer->CreateRenderSurface();
+  layer->SetHasRenderSurface(true);
   layer->draw_properties().render_target = layer.get();
 
   AppendQuadsData data;
@@ -90,7 +90,7 @@ TEST(SolidColorLayerImplTest, VerifyCorrectOpacityInQuad) {
   layer->SetBounds(layer_size);
   layer->SetContentBounds(layer_size);
   layer->draw_properties().opacity = opacity;
-  layer->CreateRenderSurface();
+  layer->SetHasRenderSurface(true);
   layer->draw_properties().render_target = layer.get();
 
   AppendQuadsData data;
@@ -100,6 +100,31 @@ TEST(SolidColorLayerImplTest, VerifyCorrectOpacityInQuad) {
   EXPECT_EQ(opacity,
             SolidColorDrawQuad::MaterialCast(render_pass->quad_list.front())
                 ->opacity());
+}
+
+TEST(SolidColorLayerImplTest, VerifyCorrectBlendModeInQuad) {
+  const SkXfermode::Mode blend_mode = SkXfermode::kMultiply_Mode;
+
+  scoped_ptr<RenderPass> render_pass = RenderPass::Create();
+
+  gfx::Size layer_size = gfx::Size(100, 100);
+  gfx::Rect visible_content_rect = gfx::Rect(layer_size);
+
+  FakeImplProxy proxy;
+  TestSharedBitmapManager shared_bitmap_manager;
+  FakeLayerTreeHostImpl host_impl(&proxy, &shared_bitmap_manager);
+  scoped_ptr<SolidColorLayerImpl> layer =
+      SolidColorLayerImpl::Create(host_impl.active_tree(), 1);
+  layer->SetBounds(layer_size);
+  layer->SetContentBounds(layer_size);
+  layer->draw_properties().blend_mode = blend_mode;
+
+  AppendQuadsData data;
+  layer->AppendQuads(render_pass.get(), Occlusion(), &data);
+
+  ASSERT_EQ(render_pass->quad_list.size(), 1U);
+  EXPECT_EQ(blend_mode,
+            render_pass->quad_list.front()->shared_quad_state->blend_mode);
 }
 
 TEST(SolidColorLayerImplTest, VerifyOpaqueRect) {

@@ -76,7 +76,7 @@ class FakeWebRtcVideoDecoder : public webrtc::VideoDecoder {
 
   virtual int32 Decode(
       const webrtc::EncodedImage&, bool, const webrtc::RTPFragmentationHeader*,
-      const webrtc::CodecSpecificInfo*, int64) {
+      const webrtc::CodecSpecificInfo*, int64_t) {
     num_frames_received_++;
     return WEBRTC_VIDEO_CODEC_OK;
   }
@@ -152,7 +152,7 @@ class FakeWebRtcVideoEncoder : public webrtc::VideoEncoder {
 
   virtual int32 InitEncode(const webrtc::VideoCodec* codecSettings,
                            int32 numberOfCores,
-                           uint32 maxPayloadSize) {
+                           size_t maxPayloadSize) {
     return WEBRTC_VIDEO_CODEC_OK;
   }
 
@@ -351,7 +351,7 @@ class FakeWebRtcVideoEngine
 
     // From ViEExternalCapture
     virtual int IncomingFrame(unsigned char* videoFrame,
-                              unsigned int videoFrameLength,
+                              size_t videoFrameLength,
                               unsigned short width,
                               unsigned short height,
                               webrtc::RawVideoType videoType,
@@ -689,11 +689,7 @@ class FakeWebRtcVideoEngine
     channels_[channel]->overuse_observer_ = observer;
     return 0;
   }
-#ifdef USE_WEBRTC_DEV_BRANCH
   WEBRTC_STUB(GetCpuOveruseMetrics, (int, webrtc::CpuOveruseMetrics*));
-#else
-  WEBRTC_STUB(CpuOveruseMeasures, (int, int*, int*, int*, int*));
-#endif
   WEBRTC_FUNC(SetCpuOveruseOptions,
       (int channel, const webrtc::CpuOveruseOptions& options)) {
     WEBRTC_CHECK_CHANNEL(channel);
@@ -724,6 +720,11 @@ class FakeWebRtcVideoEngine
   }
   WEBRTC_STUB(GetVersion, (char version[1024]));
   WEBRTC_STUB(LastError, ());
+  WEBRTC_VOID_STUB(RegisterSendStatisticsProxy,
+                   (int, webrtc::SendStatisticsProxy*));
+
+  WEBRTC_VOID_STUB(RegisterReceiveStatisticsProxy,
+                   (int, webrtc::ReceiveStatisticsProxy*));
 
   // webrtc::ViECodec
   WEBRTC_FUNC_CONST(NumberOfCodecs, ()) {
@@ -890,7 +891,7 @@ class FakeWebRtcVideoEngine
 
   WEBRTC_FUNC(ReceivedRTPPacket, (const int channel,
                                   const void* packet,
-                                  const int length,
+                                  const size_t length,
                                   const webrtc::PacketTime& packet_time)) {
     WEBRTC_ASSERT_CHANNEL(channel);
     ASSERT(length > 1);
@@ -899,11 +900,11 @@ class FakeWebRtcVideoEngine
     return 0;
   }
 
-  WEBRTC_STUB(ReceivedRTCPPacket, (const int, const void*, const int));
+  WEBRTC_STUB(ReceivedRTCPPacket, (const int, const void*, const size_t));
   // Not using WEBRTC_STUB due to bool return value
   virtual bool IsIPv6Enabled(int channel) { return true; }
   WEBRTC_STUB(SetMTU, (int, unsigned int));
-  WEBRTC_STUB(ReceivedBWEPacket, (const int, int64_t, int,
+  WEBRTC_STUB(ReceivedBWEPacket, (const int, int64_t, size_t,
       const webrtc::RTPHeader&));
   virtual bool SetBandwidthEstimationConfig(int, const webrtc::Config&) {
     return true;
@@ -1011,10 +1012,6 @@ class FakeWebRtcVideoEngine
     channels_[channel]->rtx_send_payload_type = payload_type;
     return 0;
   }
-
-#ifdef USE_WEBRTC_DEV_BRANCH
-  WEBRTC_STUB(SetPadWithRedundantPayloads, (int, bool));
-#endif
 
   WEBRTC_FUNC(SetRtxReceivePayloadType, (const int channel,
                                          const uint8 payload_type)) {
@@ -1140,8 +1137,8 @@ class FakeWebRtcVideoEngine
       unsigned int&, unsigned int&, unsigned int&, int&));
   WEBRTC_STUB_CONST(GetSentRTCPStatistics, (const int, unsigned short&,
       unsigned int&, unsigned int&, unsigned int&, int&));
-  WEBRTC_STUB_CONST(GetRTPStatistics, (const int, unsigned int&, unsigned int&,
-      unsigned int&, unsigned int&));
+  WEBRTC_STUB_CONST(GetRTPStatistics, (const int, size_t&, unsigned int&,
+      size_t&, unsigned int&));
   WEBRTC_STUB_CONST(GetReceiveChannelRtcpStatistics, (const int,
       webrtc::RtcpStatistics&, int&));
   WEBRTC_STUB_CONST(GetSendChannelRtcpStatistics, (const int,
@@ -1220,8 +1217,6 @@ class FakeWebRtcVideoEngine
   WEBRTC_STUB(StopRTPDump, (const int, webrtc::RTPDirections));
   WEBRTC_STUB(RegisterRTPObserver, (const int, webrtc::ViERTPObserver&));
   WEBRTC_STUB(DeregisterRTPObserver, (const int));
-  WEBRTC_STUB(RegisterRTCPObserver, (const int, webrtc::ViERTCPObserver&));
-  WEBRTC_STUB(DeregisterRTCPObserver, (const int));
 
   // webrtc::ViEImageProcess
   WEBRTC_STUB(RegisterCaptureEffectFilter, (const int,

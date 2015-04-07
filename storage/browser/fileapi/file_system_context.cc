@@ -150,7 +150,6 @@ FileSystemContext::FileSystemContext(
                                                special_storage_policy,
                                                options)),
       sandbox_backend_(new SandboxFileSystemBackend(sandbox_delegate_.get())),
-      isolated_backend_(new IsolatedFileSystemBackend()),
       plugin_private_backend_(
           new PluginPrivateFileSystemBackend(file_task_runner,
                                              partition_path,
@@ -163,7 +162,6 @@ FileSystemContext::FileSystemContext(
       is_incognito_(options.is_incognito()),
       operation_runner_(new FileSystemOperationRunner(this)) {
   RegisterBackend(sandbox_backend_.get());
-  RegisterBackend(isolated_backend_.get());
   RegisterBackend(plugin_private_backend_.get());
 
   for (ScopedVector<FileSystemBackend>::const_iterator iter =
@@ -171,6 +169,16 @@ FileSystemContext::FileSystemContext(
        iter != additional_backends_.end(); ++iter) {
     RegisterBackend(*iter);
   }
+
+  // If the embedder's additional backends already provide support for
+  // kFileSystemTypeNativeLocal and kFileSystemTypeNativeForPlatformApp then
+  // IsolatedFileSystemBackend does not need to handle them. For example, on
+  // Chrome OS the additional backend chromeos::FileSystemBackend handles these
+  // types.
+  isolated_backend_.reset(new IsolatedFileSystemBackend(
+      !ContainsKey(backend_map_, kFileSystemTypeNativeLocal),
+      !ContainsKey(backend_map_, kFileSystemTypeNativeForPlatformApp)));
+  RegisterBackend(isolated_backend_.get());
 
   if (quota_manager_proxy) {
     // Quota client assumes all backends have registered.
@@ -486,20 +494,6 @@ bool FileSystemContext::CanServeURLRequest(const FileSystemURL& url) const {
   }
 #endif
   return !is_incognito_ || !FileSystemContext::IsSandboxFileSystem(url.type());
-}
-
-bool FileSystemContext::ShouldFlushOnWriteCompletion(
-    FileSystemType type) const {
-  if (IsSandboxFileSystem(type)) {
-    // Disable Flush() for each write operation on SandboxFileSystems since it
-    // hurts the performance, assuming the FileSystems are stored in a local
-    // disk, we don't need to keep calling fsync() for it.
-    // On the other hand, other FileSystems that may stored on a removable media
-    // should be Flush()ed as soon as a write operation is completed, so that
-    // written data is saved over sudden media removal.
-    return false;
-  }
-  return true;
 }
 
 void FileSystemContext::OpenPluginPrivateFileSystem(

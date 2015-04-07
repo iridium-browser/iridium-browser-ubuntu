@@ -27,12 +27,14 @@ var FileTask;
  *   fileSize: (number|undefined),
  *   lastModifiedTime: (number|undefined),
  *   thumbnailUrl: (string|undefined),
+ *   externalFileUrl: (string|undefined),
  *   imageWidth: (number|undefined),
  *   imageHeight: (number|undefined),
  *   imageRotation: (number|undefined),
  *   isPinned: (boolean|undefined),
  *   isPresent: (boolean|undefined),
  *   isHosted: (boolean|undefined),
+ *   isDirty: (boolean|undefined),
  *   isAvailableOffline: (boolean|undefined),
  *   isAvailableWhenMetered: (boolean|undefined),
  *   customIconUrl: (string|undefined),
@@ -73,6 +75,7 @@ var ProfileInfo;
  *   devicePath: (string|undefined),
  *   isParentDevice: (boolean|undefined),
  *   isReadOnly: boolean,
+ *   hasMedia: boolean,
  *   mountCondition: (string|undefined)
  * }}
  */
@@ -570,5 +573,3 @@ chrome.fileManagerPrivate.onDeviceChanged;
 
 /** @type {!ChromeEvent} */
 chrome.fileManagerPrivate.onDriveSyncError;
-
-

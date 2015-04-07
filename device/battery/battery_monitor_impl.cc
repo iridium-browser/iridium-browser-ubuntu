@@ -11,24 +11,47 @@ namespace device {
 // static
 void BatteryMonitorImpl::Create(
     mojo::InterfaceRequest<BatteryMonitor> request) {
-  BindToRequest(new BatteryMonitorImpl(), &request);
+  new BatteryMonitorImpl(request.Pass());
 }
 
-BatteryMonitorImpl::BatteryMonitorImpl() {
+BatteryMonitorImpl::BatteryMonitorImpl(
+    mojo::InterfaceRequest<BatteryMonitor> request)
+    : binding_(this, request.Pass()),
+      status_to_report_(false) {
+  // NOTE: DidChange may be called before AddCallback returns. This is done to
+  // report current status.
+  subscription_ = BatteryStatusService::GetInstance()->AddCallback(
+      base::Bind(&BatteryMonitorImpl::DidChange, base::Unretained(this)));
 }
 
 BatteryMonitorImpl::~BatteryMonitorImpl() {
 }
 
-void BatteryMonitorImpl::OnConnectionEstablished() {
-  subscription_ = BatteryStatusService::GetInstance()->AddCallback(
-        base::Bind(&BatteryMonitorImpl::DidChange, base::Unretained(this)));
+void BatteryMonitorImpl::QueryNextStatus(
+    const BatteryStatusCallback& callback) {
+  callbacks_.push_back(callback);
+
+  if (status_to_report_)
+    ReportStatus();
+}
+
+void BatteryMonitorImpl::RegisterSubscription() {
 }
 
 void BatteryMonitorImpl::DidChange(const BatteryStatus& battery_status) {
-  BatteryStatusPtr status(BatteryStatus::New());
-  *status = battery_status;
-  client()->DidChange(status.Pass());
+  status_ = battery_status;
+  status_to_report_ = true;
+
+  if (!callbacks_.empty())
+    ReportStatus();
+}
+
+void BatteryMonitorImpl::ReportStatus() {
+  for (const auto& callback : callbacks_)
+    callback.Run(status_.Clone());
+  callbacks_.clear();
+
+  status_to_report_ = false;
 }
 
 }  // namespace device

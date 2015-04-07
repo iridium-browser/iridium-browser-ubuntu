@@ -12,6 +12,7 @@
 #include "base/memory/singleton.h"
 #include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_service.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -90,6 +91,10 @@ class SocketTunnel : public base::NonThreadSafe {
   }
 
   void OnResolved(int result) {
+    // TODO(vadimt): Remove ScopedTracker below once crbug.com/436634 is fixed.
+    tracked_objects::ScopedTracker tracking_profile(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION("436634 SocketTunnel::OnResolved"));
+
     if (result < 0) {
       SelfDestruct();
       return;
@@ -367,17 +372,17 @@ void PortForwardingController::Connection::SerializeChanges(
 void PortForwardingController::Connection::SendCommand(
     const std::string& method, int port) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  base::DictionaryValue params;
+  scoped_ptr<base::DictionaryValue> params(new base::DictionaryValue);
   if (method == tethering::bind::kName) {
-    params.SetInteger(tethering::bind::kParamPort, port);
+    params->SetInteger(tethering::bind::kParamPort, port);
   } else {
     DCHECK_EQ(tethering::unbind::kName, method);
-    params.SetInteger(tethering::unbind::kParamPort, port);
+    params->SetInteger(tethering::unbind::kParamPort, port);
   }
-  DevToolsProtocol::Command command(++command_id_, method, &params);
+  int id = ++command_id_;
 
   if (method == tethering::bind::kName) {
-    pending_responses_[command.id()] =
+    pending_responses_[id] =
         base::Bind(&Connection::ProcessBindResponse,
                    base::Unretained(this), port);
 #if defined(DEBUG_DEVTOOLS)
@@ -391,7 +396,7 @@ void PortForwardingController::Connection::SendCommand(
       return;
     }
 
-    pending_responses_[command.id()] =
+    pending_responses_[id] =
         base::Bind(&Connection::ProcessUnbindResponse,
                    base::Unretained(this), port);
 #if defined(DEBUG_DEVTOOLS)
@@ -399,21 +404,22 @@ void PortForwardingController::Connection::SendCommand(
 #endif  // defined(DEBUG_DEVTOOLS)
   }
 
-  web_socket_->SendFrame(command.Serialize());
+  web_socket_->SendFrame(
+      DevToolsProtocol::SerializeCommand(id, method, params.Pass()));
 }
 
 bool PortForwardingController::Connection::ProcessResponse(
     const std::string& message) {
-  scoped_ptr<DevToolsProtocol::Response> response(
-      DevToolsProtocol::ParseResponse(message));
-  if (!response)
+  int id = 0;
+  int error_code = 0;
+  if (!DevToolsProtocol::ParseResponse(message, &id, &error_code))
     return false;
 
-  CommandCallbackMap::iterator it = pending_responses_.find(response->id());
+  CommandCallbackMap::iterator it = pending_responses_.find(id);
   if (it == pending_responses_.end())
     return false;
 
-  it->second.Run(response->error_code() ? kStatusError : kStatusOK);
+  it->second.Run(error_code ? kStatusError : kStatusOK);
   pending_responses_.erase(it);
   return true;
 }
@@ -477,16 +483,12 @@ void PortForwardingController::Connection::OnFrameRead(
   if (ProcessResponse(message))
     return;
 
-  scoped_ptr<DevToolsProtocol::Notification> notification(
-      DevToolsProtocol::ParseNotification(message));
-  if (!notification)
+  std::string method;
+  scoped_ptr<base::DictionaryValue> params;
+  if (!DevToolsProtocol::ParseNotification(message, &method, &params))
     return;
 
-  if (notification->method() != tethering::accepted::kName)
-    return;
-
-  base::DictionaryValue* params = notification->params();
-  if (!params)
+  if (method != tethering::accepted::kName || !params)
     return;
 
   int port;

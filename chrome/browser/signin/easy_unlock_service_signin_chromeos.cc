@@ -16,6 +16,7 @@
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_metrics.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chromeos/login/auth/user_context.h"
+#include "chromeos/tpm/tpm_token_loader.h"
 
 namespace {
 
@@ -137,10 +138,6 @@ void EasyUnlockServiceSignin::SetRemoteDevices(
   NOTREACHED();
 }
 
-void EasyUnlockServiceSignin::ClearRemoteDevices() {
-  NOTREACHED();
-}
-
 void EasyUnlockServiceSignin::RunTurnOffFlow() {
   NOTREACHED();
 }
@@ -194,14 +191,28 @@ void EasyUnlockServiceSignin::RecordPasswordLoginEvent(
   if (!GetRemoteDevices() ||
       GetHardlockState() == EasyUnlockScreenlockStateHandler::NO_PAIRING) {
     event = chromeos::PASSWORD_SIGN_IN_NO_PAIRING;
-  } else if (GetHardlockState() ==
-             EasyUnlockScreenlockStateHandler::PAIRING_CHANGED) {
-    event = chromeos::PASSWORD_SIGN_IN_PAIRING_CHANGED;
-  } else if (GetHardlockState() ==
-             EasyUnlockScreenlockStateHandler::USER_HARDLOCK) {
-    event = chromeos::PASSWORD_SIGN_IN_USER_HARDLOCK;
+  } else if (GetHardlockState() !=
+             EasyUnlockScreenlockStateHandler::NO_HARDLOCK) {
+    switch (GetHardlockState()) {
+      case EasyUnlockScreenlockStateHandler::NO_HARDLOCK:
+      case EasyUnlockScreenlockStateHandler::NO_PAIRING:
+        NOTREACHED();
+        break;
+      case EasyUnlockScreenlockStateHandler::USER_HARDLOCK:
+        event = chromeos::PASSWORD_SIGN_IN_USER_HARDLOCK;
+        break;
+      case EasyUnlockScreenlockStateHandler::PAIRING_CHANGED:
+        event = chromeos::PASSWORD_SIGN_IN_PAIRING_CHANGED;
+        break;
+      case EasyUnlockScreenlockStateHandler::LOGIN_FAILED:
+        event = chromeos::PASSWORD_SIGN_IN_LOGIN_FAILED;
+        break;
+      case EasyUnlockScreenlockStateHandler::PAIRING_ADDED:
+        event = chromeos::PASSWORD_SIGN_IN_PAIRING_ADDED;
+        break;
+    }
   } else if (!screenlock_state_handler()) {
-    event = chromeos::PASSWORD_SIGN_IN_SERVICE_NOT_ACTIVE;
+    event = chromeos::PASSWORD_SIGN_IN_NO_SCREENLOCK_STATE_HANDLER;
   } else {
     switch (screenlock_state_handler()->state()) {
       case EasyUnlockScreenlockStateHandler::STATE_INACTIVE:
@@ -304,6 +315,15 @@ void EasyUnlockServiceSignin::OnFocusedUserChanged(const std::string& user_id) {
   }
 
   LoadCurrentUserDataIfNeeded();
+
+  // Start loading TPM system token.
+  // The system token will be needed to sign a nonce using TPM private key
+  // during the sign-in protocol.
+  EasyUnlockScreenlockStateHandler::HardlockState hardlock_state;
+  if (GetPersistedHardlockState(&hardlock_state) &&
+      hardlock_state != EasyUnlockScreenlockStateHandler::NO_PAIRING) {
+    chromeos::TPMTokenLoader::Get()->EnsureStarted();
+  }
 }
 
 void EasyUnlockServiceSignin::LoggedInStateChanged() {

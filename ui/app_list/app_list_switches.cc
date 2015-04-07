@@ -30,18 +30,20 @@ const char kDisableSyncAppList[] = "disable-sync-app-list";
 // If set, the app list will be centered and wide instead of tall.
 const char kEnableCenteredAppList[] = "enable-centered-app-list";
 
-// If set, the experimental app list will be used. Implies
+// Enable/disable the experimental app list. If enabled, implies
 // --enable-centered-app-list.
 const char kEnableExperimentalAppList[] = "enable-experimental-app-list";
+const char kDisableExperimentalAppList[] = "disable-experimental-app-list";
 
 // Enables syncing of the app list independent of extensions.
 const char kEnableSyncAppList[] = "enable-sync-app-list";
 
 bool IsAppListSyncEnabled() {
 #if defined(TOOLKIT_VIEWS)
-  return !CommandLine::ForCurrentProcess()->HasSwitch(kDisableSyncAppList);
+  return !base::CommandLine::ForCurrentProcess()->HasSwitch(
+      kDisableSyncAppList);
 #else
-  return CommandLine::ForCurrentProcess()->HasSwitch(kEnableSyncAppList);
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(kEnableSyncAppList);
 #endif
 }
 
@@ -65,30 +67,38 @@ bool IsVoiceSearchEnabled() {
 
 bool IsAppInfoEnabled() {
 #if defined(TOOLKIT_VIEWS)
-  return !CommandLine::ForCurrentProcess()->HasSwitch(kDisableAppInfo);
+  return !base::CommandLine::ForCurrentProcess()->HasSwitch(kDisableAppInfo);
 #else
   return false;
 #endif
 }
 
 bool IsExperimentalAppListEnabled() {
-  return CommandLine::ForCurrentProcess()->HasSwitch(
-      kEnableExperimentalAppList);
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          kEnableExperimentalAppList))
+    return true;
+
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          kDisableExperimentalAppList))
+    return false;
+
+  return false;
 }
 
 bool IsCenteredAppListEnabled() {
-  return CommandLine::ForCurrentProcess()->HasSwitch(kEnableCenteredAppList) ||
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+             kEnableCenteredAppList) ||
          IsExperimentalAppListEnabled();
 }
 
 bool ShouldNotDismissOnBlur() {
-  return CommandLine::ForCurrentProcess()->HasSwitch(
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
       kDisableAppListDismissOnBlur);
 }
 
 bool IsDriveAppsInAppListEnabled() {
 #if defined(OS_CHROMEOS)
-  return !CommandLine::ForCurrentProcess()->HasSwitch(
+  return !base::CommandLine::ForCurrentProcess()->HasSwitch(
       kDisableDriveAppsInAppList);
 #else
   return false;

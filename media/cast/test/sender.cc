@@ -71,7 +71,7 @@ media::cast::AudioSenderConfig GetAudioSenderConfig() {
   audio_config.bitrate = 0;  // Use Opus auto-VBR mode.
   audio_config.codec = media::cast::CODEC_AUDIO_OPUS;
   audio_config.ssrc = 1;
-  audio_config.incoming_feedback_ssrc = 2;
+  audio_config.receiver_ssrc = 2;
   audio_config.rtp_payload_type = 127;
   // TODO(miu): The default in cast_defines.h is 100.  Should this be 100, and
   // should receiver.cc's config also be 100?
@@ -105,7 +105,7 @@ media::cast::VideoSenderConfig GetVideoSenderConfig() {
 
   // SSRCs and payload type. Don't change them.
   video_config.ssrc = 11;
-  video_config.incoming_feedback_ssrc = 12;
+  video_config.receiver_ssrc = 12;
   video_config.rtp_payload_type = 96;
   // TODO(miu): The default in cast_defines.h is 100.  Should this be 100, and
   // should receiver.cc's config also be 100?
@@ -155,7 +155,7 @@ void InitializationResult(media::cast::CastInitializationStatus result) {
   CHECK(end_result) << "Cast sender uninitialized";
 }
 
-net::IPEndPoint CreateUDPAddress(std::string ip_str, int port) {
+net::IPEndPoint CreateUDPAddress(std::string ip_str, uint16 port) {
   net::IPAddressNumber ip_number;
   CHECK(net::ParseIPLiteralToNumber(ip_str, &ip_number));
   return net::IPEndPoint(ip_number, port);
@@ -249,7 +249,7 @@ void WriteStatsAndDestroySubscribers(
 
 int main(int argc, char** argv) {
   base::AtExitManager at_exit;
-  CommandLine::Init(argc, argv);
+  base::CommandLine::Init(argc, argv);
   InitLogging(logging::LoggingSettings());
 
   // Load the media module for FFmpeg decoding.
@@ -270,13 +270,13 @@ int main(int argc, char** argv) {
   base::MessageLoopForIO io_message_loop;
 
   // Default parameters.
-  CommandLine* cmd = CommandLine::ForCurrentProcess();
+  base::CommandLine* cmd = base::CommandLine::ForCurrentProcess();
   std::string remote_ip_address = cmd->GetSwitchValueASCII(kSwitchAddress);
   if (remote_ip_address.empty())
     remote_ip_address = "127.0.0.1";
   int remote_port = 0;
-  if (!base::StringToInt(cmd->GetSwitchValueASCII(kSwitchPort),
-                         &remote_port)) {
+  if (!base::StringToInt(cmd->GetSwitchValueASCII(kSwitchPort), &remote_port) ||
+      remote_port < 0 || remote_port > 65535) {
     remote_port = 2344;
   }
   LOG(INFO) << "Sending to " << remote_ip_address << ":" << remote_port
@@ -288,7 +288,7 @@ int main(int argc, char** argv) {
   // Running transport on the main thread.
   // Setting up transport config.
   net::IPEndPoint remote_endpoint =
-      CreateUDPAddress(remote_ip_address, remote_port);
+      CreateUDPAddress(remote_ip_address, static_cast<uint16>(remote_port));
 
   // Enable raw event and stats logging.
   // Running transport on the main thread.
@@ -303,7 +303,7 @@ int main(int argc, char** argv) {
   scoped_ptr<media::cast::FakeMediaSource> fake_media_source(
       new media::cast::FakeMediaSource(test_thread.message_loop_proxy(),
                                        cast_environment->Clock(),
-                                       video_config));
+                                       video_config, false));
 
   int override_fps = 0;
   if (!base::StringToInt(cmd->GetSwitchValueASCII(kSwitchFps),
@@ -321,11 +321,13 @@ int main(int argc, char** argv) {
       media::cast::CastTransportSender::Create(
           NULL,  // net log.
           cast_environment->Clock(),
+          net::IPEndPoint(),
           remote_endpoint,
           make_scoped_ptr(new base::DictionaryValue),  // options
           base::Bind(&UpdateCastTransportStatus),
           base::Bind(&LogRawEvents, cast_environment),
           base::TimeDelta::FromSeconds(1),
+          media::cast::PacketReceiverCallback(),
           io_message_loop.message_loop_proxy());
 
   // CastSender initialization.

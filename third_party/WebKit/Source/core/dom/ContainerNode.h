@@ -36,7 +36,6 @@ class ClassCollection;
 class ExceptionState;
 class FloatPoint;
 class HTMLCollection;
-template <typename NodeType> class StaticNodeTypeList;
 using StaticElementList = StaticNodeTypeList<Element>;
 class TagCollection;
 
@@ -51,8 +50,15 @@ enum DynamicRestyleFlags {
     ChildrenAffectedByIndirectAdjacentRules = 1 << 7,
     ChildrenAffectedByForwardPositionalRules = 1 << 8,
     ChildrenAffectedByBackwardPositionalRules = 1 << 9,
+    AffectedByFirstChildRules = 1 << 10,
+    AffectedByLastChildRules = 1 << 11,
 
-    NumberOfDynamicRestyleFlags = 10,
+    NumberOfDynamicRestyleFlags = 12,
+};
+
+enum SubtreeModificationAction {
+    DispatchSubtreeModifiedEvent,
+    OmitSubtreeModifiedEvent
 };
 
 // This constant controls how much buffer is initially allocated
@@ -99,7 +105,7 @@ public:
     void parserInsertBefore(PassRefPtrWillBeRawPtr<Node> newChild, Node& refChild);
     void parserTakeAllChildrenFrom(ContainerNode&);
 
-    void removeChildren();
+    void removeChildren(SubtreeModificationAction = DispatchSubtreeModifiedEvent);
 
     void cloneChildNodes(ContainerNode* clone);
 
@@ -142,6 +148,14 @@ public:
 
     bool childrenAffectedByBackwardPositionalRules() const { return hasRestyleFlag(ChildrenAffectedByBackwardPositionalRules); }
     void setChildrenAffectedByBackwardPositionalRules() { setRestyleFlag(ChildrenAffectedByBackwardPositionalRules); }
+
+    bool affectedByFirstChildRules() const { return hasRestyleFlag(AffectedByFirstChildRules); }
+    void setAffectedByFirstChildRules() { setRestyleFlag(AffectedByFirstChildRules); }
+
+    bool affectedByLastChildRules() const { return hasRestyleFlag(AffectedByLastChildRules); }
+    void setAffectedByLastChildRules() { setRestyleFlag(AffectedByLastChildRules); }
+
+    bool needsAdjacentStyleRecalc() const;
 
     // FIXME: These methods should all be renamed to something better than "check",
     // since it's not clear that they alter the style bits of siblings and children.
@@ -219,8 +233,8 @@ protected:
     template <typename Collection> Collection* cachedCollection(CollectionType);
 
 private:
-    bool isContainerNode() const WTF_DELETED_FUNCTION; // This will catch anyone doing an unnecessary check.
-    bool isTextNode() const WTF_DELETED_FUNCTION; // This will catch anyone doing an unnecessary check.
+    bool isContainerNode() const = delete; // This will catch anyone doing an unnecessary check.
+    bool isTextNode() const = delete; // This will catch anyone doing an unnecessary check.
 
     NodeListsNodeData& ensureNodeLists();
     void removeBetween(Node* previousChild, Node* nextChild, Node& oldChild);
@@ -261,6 +275,8 @@ private:
 bool childAttachedAllowedWhenAttachingChildren(ContainerNode*);
 #endif
 
+WILL_NOT_BE_EAGERLY_TRACED_CLASS(ContainerNode);
+
 DEFINE_NODE_TYPE_CASTS(ContainerNode, isContainerNode());
 
 inline bool ContainerNode::hasChildCount(unsigned count) const
@@ -299,6 +315,13 @@ inline void ContainerNode::detachChildren(const AttachContext& context)
 
     for (Node* child = firstChild(); child; child = child->nextSibling())
         child->detach(childrenContext);
+}
+
+inline bool ContainerNode::needsAdjacentStyleRecalc() const
+{
+    if (!childrenAffectedByDirectAdjacentRules() && !childrenAffectedByIndirectAdjacentRules())
+        return false;
+    return childNeedsStyleRecalc() || childNeedsStyleInvalidation();
 }
 
 inline unsigned Node::countChildren() const

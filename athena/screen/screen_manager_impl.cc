@@ -8,7 +8,6 @@
 #include "athena/screen/modal_window_controller.h"
 #include "athena/screen/screen_accelerator_handler.h"
 #include "athena/util/container_priorities.h"
-#include "athena/util/fill_layout_manager.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "ui/aura/client/aura_constants.h"
@@ -26,8 +25,7 @@
 #include "ui/wm/core/focus_controller.h"
 #include "ui/wm/core/window_util.h"
 
-// This is to avoid creating type definitoin for kAlwaysOnTopKey.
-DECLARE_EXPORTED_WINDOW_PROPERTY_TYPE(ATHENA_EXPORT, bool);
+DECLARE_WINDOW_PROPERTY_TYPE(athena::ScreenManager::ContainerParams*);
 
 namespace athena {
 namespace {
@@ -260,7 +258,6 @@ void ScreenManagerImpl::Init() {
   aura::client::SetActivationClient(root_window_, focus_controller);
   focus_client_.reset(focus_controller);
 
-  root_window_->SetLayoutManager(new FillLayoutManager(root_window_));
   capture_client_.reset(new ::wm::ScopedCaptureClient(root_window_));
   accelerator_handler_.reset(new ScreenAcceleratorHandler());
 

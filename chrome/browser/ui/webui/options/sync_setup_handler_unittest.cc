@@ -13,7 +13,7 @@
 #include "base/stl_util.h"
 #include "base/values.h"
 #include "chrome/browser/signin/fake_signin_manager.h"
-#include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
+#include "chrome/browser/signin/signin_error_controller_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/profile_sync_service_mock.h"
@@ -25,7 +25,6 @@
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/signin/core/browser/fake_auth_status_provider.h"
-#include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/sync_driver/sync_prefs.h"
 #include "content/public/browser/web_ui.h"
@@ -276,11 +275,8 @@ class SyncSetupHandlerTest : public testing::Test {
     mock_signin_ = static_cast<SigninManagerBase*>(
         SigninManagerFactory::GetForProfile(profile_.get()));
     std::string username = GetTestUser();
-    if (!username.empty()) {
+    if (!username.empty())
       mock_signin_->SetAuthenticatedUsername(username);
-      profile_->GetPrefs()->SetString(prefs::kGoogleServicesUsername,
-                                      username);
-    }
 
     mock_pss_ = static_cast<ProfileSyncServiceMock*>(
         ProfileSyncServiceFactory::GetInstance()->SetTestingFactoryAndUse(
@@ -517,7 +513,6 @@ TEST_F(SyncSetupHandlerTest,
   base::DictionaryValue* dictionary;
   ASSERT_TRUE(data1.arg2->GetAsDictionary(&dictionary));
   CheckBool(dictionary, "passphraseFailed", false);
-  CheckBool(dictionary, "showSyncEverythingPage", false);
   CheckBool(dictionary, "syncAllDataTypes", true);
   CheckBool(dictionary, "encryptAllDataAllowed", true);
   CheckBool(dictionary, "encryptAllData", false);
@@ -872,8 +867,7 @@ TEST_F(SyncSetupHandlerTest, ShowSigninOnAuthError) {
   SetupInitializedProfileSyncService();
   mock_signin_->SetAuthenticatedUsername(kTestUser);
   FakeAuthStatusProvider provider(
-      ProfileOAuth2TokenServiceFactory::GetForProfile(profile_.get())->
-          signin_error_controller());
+      SigninErrorControllerFactory::GetForProfile(profile_.get()));
   provider.SetAuthError(kTestUser, kTestUser, error_);
   EXPECT_CALL(*mock_pss_, IsSyncEnabledAndLoggedIn())
       .WillRepeatedly(Return(true));
@@ -922,7 +916,6 @@ TEST_F(SyncSetupHandlerTest, ShowSetupSyncEverything) {
   const TestWebUI::CallData& data = web_ui_.call_data()[0];
   base::DictionaryValue* dictionary;
   ASSERT_TRUE(data.arg2->GetAsDictionary(&dictionary));
-  CheckBool(dictionary, "showSyncEverythingPage", false);
   CheckBool(dictionary, "syncAllDataTypes", true);
   CheckBool(dictionary, "appsRegistered", true);
   CheckBool(dictionary, "autofillRegistered", true);

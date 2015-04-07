@@ -218,28 +218,6 @@ Status PerformanceLogger::HandleTraceEvents(
   return Status(kOk);
 }
 
-bool PerformanceLogger::ShouldReportTracingError() {
-  // Chromium builds 1967-2000, which correspond to Blink revisions 172887-
-  // 174227, contain a regression where Tracing.start and Tracing.end commands
-  // erroneously return error -32601 "no such method". The commands still work.
-  if (session_->chrome) {
-    const BrowserInfo* browser_info = session_->chrome->GetBrowserInfo();
-
-    bool should_report_error = true;
-    if (browser_info->browser_name == "chrome") {
-      should_report_error = !(browser_info->build_no >= 1967 &&
-          browser_info->build_no <= 2000);
-    } else {
-      should_report_error = !(browser_info->blink_revision >= 172887 &&
-          browser_info->blink_revision <= 174227);
-    }
-    return should_report_error;
-  }
-
-  // We're not yet able to tell the Chrome version, so don't report this error.
-  return false;
-}
-
 Status PerformanceLogger::StartTrace() {
   if (!browser_client_) {
     return Status(kUnknownError, "tried to start tracing, but connection to "
@@ -255,7 +233,7 @@ Status PerformanceLogger::StartTrace() {
   params.SetInteger("bufferUsageReportingInterval",
                     prefs_.buffer_usage_reporting_interval);
   Status status = browser_client_->SendCommand("Tracing.start", params);
-  if (status.IsError() && ShouldReportTracingError()) {
+  if (status.IsError()) {
     LOG(ERROR) << "error when starting trace: " << status.message();
     return status;
   }
@@ -273,9 +251,23 @@ Status PerformanceLogger::CollectTraceEvents() {
                   "was not started");
   }
 
-  Status status = browser_client_->SendCommand("Tracing.end",
-                                               base::DictionaryValue());
-  if (status.IsError() && ShouldReportTracingError()) {
+  // As of r307466, DevTools no longer returns a response to Tracing.end
+  // commands, so we need to ignore it here to avoid a timeout. See
+  // https://code.google.com/p/chromedriver/issues/detail?id=997 for details.
+  // TODO(samuong): find other commands where we don't need the response.
+  bool wait_for_response = false;
+  if (session_->chrome) {
+    const BrowserInfo* browser_info = session_->chrome->GetBrowserInfo();
+    if (browser_info->browser_name == "chrome" && browser_info->build_no < 2245)
+      wait_for_response = true;
+  }
+  base::DictionaryValue params;
+  Status status(kOk);
+  if (wait_for_response)
+    status = browser_client_->SendCommand("Tracing.end", params);
+  else
+    status = browser_client_->SendAsyncCommand("Tracing.end", params);
+  if (status.IsError()) {
     LOG(ERROR) << "error when stopping trace: " << status.message();
     return status;
   }

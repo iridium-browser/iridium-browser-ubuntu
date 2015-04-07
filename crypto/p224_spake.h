@@ -5,6 +5,7 @@
 #ifndef CRYPTO_P224_SPAKE_H_
 #define CRYPTO_P224_SPAKE_H_
 
+#include <base/gtest_prod_util.h>
 #include <base/strings/string_piece.h>
 #include <crypto/p224.h>
 #include <crypto/sha2.h>
@@ -14,7 +15,7 @@ namespace crypto {
 // P224EncryptedKeyExchange implements SPAKE2, a variant of Encrypted
 // Key Exchange. It allows two parties that have a secret common
 // password to establish a common secure key by exchanging messages
-// over unsecure channel without disclosing the password.
+// over an insecure channel without disclosing the password.
 //
 // The password can be low entropy as authenticating with an attacker only
 // gives the attacker a one-shot password oracle. No other information about
@@ -68,7 +69,11 @@ class CRYPTO_EXPORT P224EncryptedKeyExchange {
 
   // The key established as result of the key exchange. Must be called
   // at then end after ProcessMessage() returns kResultSuccess.
-  const std::string& GetKey();
+  const std::string& GetKey() const;
+
+  // The key established as result of the key exchange. Can be called after
+  // the first ProcessMessage()
+  const std::string& GetUnverifiedKey() const;
 
  private:
   // The authentication state machine is very simple and each party proceeds
@@ -80,6 +85,13 @@ class CRYPTO_EXPORT P224EncryptedKeyExchange {
     kStateRecvHash,
     kStateDone,
   };
+
+  FRIEND_TEST_ALL_PREFIXES(MutualAuth, ExpectedValues);
+
+  void Init();
+
+  // Sets internal random scalar. Should be used by tests only.
+  void SetXForTesting(const std::string& x);
 
   State state_;
   const bool is_server_;
@@ -100,7 +112,7 @@ class CRYPTO_EXPORT P224EncryptedKeyExchange {
   // file).
   uint8 x_[p224::kScalarBytes];
   // pw_ is SHA256(P(password), P(session))[:28] where P() prepends a uint32,
-  // big-endian length prefix (see paper refereneced in .cc file).
+  // big-endian length prefix (see paper referenced in .cc file).
   uint8 pw_[p224::kScalarBytes];
   // expected_authenticator_ is used to store the hash value expected from the
   // other party.

@@ -40,6 +40,11 @@
           'dependencies': [
             '../base/allocator/allocator.gyp:allocator', ],
         }],
+        [ 'cld_version==0 or cld_version==2', {
+          'dependencies': [
+            # Chrome shell should always use the statically-linked CLD data.
+            '<(DEPTH)/third_party/cld_2/cld_2.gyp:cld2_static', ],
+        }],
         ['OS=="android"', {
           'direct_dependent_settings': {
             'ldflags': [
@@ -65,6 +70,11 @@
       'dependencies': [
         'libchromeshell_base',
       ],
+      'includes': [
+        # File 'protection' is based on non-trivial linker magic. TODO(pasko):
+        # remove it when crbug.com/424562 is fixed.
+        '../base/files/protect_file_posix.gypi',
+      ],
     },
     {
       # GN: //chrome/android:chrome_sync_shell
@@ -87,7 +97,7 @@
       'target_name': 'chrome_shell_manifest',
       'type': 'none',
       'variables': {
-        'jinja_inputs': ['android/shell/java/AndroidManifest.xml'],
+        'jinja_inputs': ['android/shell/java/AndroidManifest.xml.jinja2'],
         'jinja_output': '<(SHARED_INTERMEDIATE_DIR)/chrome_shell_manifest/AndroidManifest.xml',
       },
       'includes': [ '../build/android/jinja_template.gypi' ],
@@ -148,6 +158,16 @@
       ],
     },
     {
+      # GN: //chrome/android:chrome_sync_shell_manifest
+      'target_name': 'chrome_sync_shell_manifest',
+      'type': 'none',
+      'variables': {
+        'jinja_inputs': ['android/sync_shell/java/AndroidManifest.xml.jinja2'],
+        'jinja_output': '<(SHARED_INTERMEDIATE_DIR)/chrome_sync_shell_manifest/AndroidManifest.xml',
+      },
+      'includes': [ '../build/android/jinja_template.gypi' ],
+    },
+    {
       # GN: //chrome/android:chrome_sync_shell_apk
       'target_name': 'chrome_sync_shell_apk',
       'type': 'none',
@@ -160,7 +180,7 @@
       ],
       'variables': {
         'apk_name': 'ChromeSyncShell',
-        'android_manifest_path': 'android/sync_shell/java/AndroidManifest.xml',
+        'android_manifest_path': '<(SHARED_INTERMEDIATE_DIR)/chrome_sync_shell_manifest/AndroidManifest.xml',
         'R_package': 'org.chromium.chrome.shell',
         'native_lib_version_name': '<(version_full)',
         'java_in_dir': 'android/shell/java',

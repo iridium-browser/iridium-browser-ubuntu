@@ -14,6 +14,7 @@
 #include "base/time/time.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_prefs.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_statistics_prefs.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_event_store.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_headers_test_utils.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_switches.h"
@@ -43,10 +44,18 @@ ProbeURLFetchResult FetchResult(bool enabled, bool success) {
   return FAILED_PROXY_ALREADY_DISABLED;
 }
 
-TestDataReductionProxyConfig::TestDataReductionProxyConfig()
-    : enabled_(false),
+TestDataReductionProxyConfig::TestDataReductionProxyConfig(
+    scoped_refptr<base::SequencedTaskRunner> network_task_runner,
+    net::NetLog* net_log,
+    data_reduction_proxy::DataReductionProxyEventStore* event_store)
+    : DataReductionProxyConfigurator(network_task_runner, net_log, event_store),
+      enabled_(false),
       restricted_(false),
-      fallback_restricted_(false) {}
+      fallback_restricted_(false) {
+}
+
+TestDataReductionProxyConfig::~TestDataReductionProxyConfig() {
+}
 
 void TestDataReductionProxyConfig::Enable(
     bool restricted,
@@ -72,7 +81,8 @@ void TestDataReductionProxyConfig::Disable() {
 }
 
 DataReductionProxySettingsTestBase::DataReductionProxySettingsTestBase()
-    : testing::Test() {}
+    : testing::Test() {
+}
 
 DataReductionProxySettingsTestBase::~DataReductionProxySettingsTestBase() {}
 
@@ -89,11 +99,9 @@ void DataReductionProxySettingsTestBase::SetUp() {
   registry->RegisterBooleanPref(prefs::kDataReductionProxyWasEnabledBefore,
                                 false);
 
-  statistics_prefs_.reset(new DataReductionProxyStatisticsPrefs(
-      &pref_service_,
+  event_store_.reset(new DataReductionProxyEventStore(
       scoped_refptr<base::TestSimpleTaskRunner>(
-          new base::TestSimpleTaskRunner()),
-          base::TimeDelta()));
+          new base::TestSimpleTaskRunner())));
 
   //AddProxyToCommandLine();
   ResetSettings(true, true, false, true, false);
@@ -108,9 +116,17 @@ void DataReductionProxySettingsTestBase::SetUp() {
     received_update->Insert(0, new base::StringValue(base::Int64ToString(i)));
   }
   last_update_time_ = base::Time::Now().LocalMidnight();
-  statistics_prefs_->SetInt64(
+  scoped_ptr<DataReductionProxyStatisticsPrefs> statistics_prefs(
+      new DataReductionProxyStatisticsPrefs(
+          &pref_service_,
+          scoped_refptr<base::TestSimpleTaskRunner>(
+              new base::TestSimpleTaskRunner()),
+              base::TimeDelta()));
+  statistics_prefs->SetInt64(
       prefs::kDailyHttpContentLengthLastUpdateDate,
       last_update_time_.ToInternalValue());
+  settings_->SetDataReductionProxyStatisticsPrefs(
+        statistics_prefs.Pass());
   expected_params_.reset(new TestDataReductionProxyParams(
       DataReductionProxyParams::kAllowed |
       DataReductionProxyParams::kFallbackAllowed |
@@ -148,9 +164,10 @@ void DataReductionProxySettingsTestBase::ResetSettings(bool allowed,
   EXPECT_CALL(*settings, GetURLFetcherForAvailabilityCheck()).Times(0);
   EXPECT_CALL(*settings, LogProxyState(_, _, _)).Times(0);
   settings_.reset(settings);
-  configurator_.reset(new TestDataReductionProxyConfig());
+  configurator_.reset(new TestDataReductionProxyConfig(
+      scoped_refptr<base::TestSimpleTaskRunner>(
+          new base::TestSimpleTaskRunner()), &net_log_, event_store_.get()));
   settings_->configurator_ = configurator_.get();
-  settings_->SetDataReductionProxyStatisticsPrefs(statistics_prefs_.get());
 }
 
 // Explicitly generate required instantiations.
@@ -276,14 +293,24 @@ void DataReductionProxySettingsTestBase::CheckInitDataReductionProxy(
     bool enabled_at_startup) {
   base::MessageLoopForUI loop;
   scoped_ptr<DataReductionProxyConfigurator> configurator(
-      new TestDataReductionProxyConfig());
+      new TestDataReductionProxyConfig(
+          scoped_refptr<base::TestSimpleTaskRunner>(
+              new base::TestSimpleTaskRunner()), &net_log_,
+              event_store_.get()));
   settings_->SetProxyConfigurator(configurator.get());
   scoped_refptr<net::TestURLRequestContextGetter> request_context =
       new net::TestURLRequestContextGetter(base::MessageLoopProxy::current());
 
+  // Delete statistics prefs, otherwise the DCHECK in
+  // InitDataReductionProxySettings fails.
+  settings_->SetDataReductionProxyStatisticsPrefs(
+      scoped_ptr<data_reduction_proxy::DataReductionProxyStatisticsPrefs>());
   settings_->InitDataReductionProxySettings(
       &pref_service_,
-      request_context.get());
+      scoped_ptr<data_reduction_proxy::DataReductionProxyStatisticsPrefs>(),
+      request_context.get(),
+      &net_log_,
+      event_store_.get());
   settings_->SetOnDataReductionEnabledCallback(
       base::Bind(&DataReductionProxySettingsTestBase::
                  RegisterSyntheticFieldTrialCallback,

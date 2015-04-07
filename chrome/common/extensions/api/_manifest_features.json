@@ -20,6 +20,10 @@
     "channel": "stable",
     "extension_types": ["shared_module"]
   },
+  "app.icon_color": {
+    "channel": "stable",
+    "extension_types": ["hosted_app"]
+  },
   "app.isolation": {
     "channel": "stable",
     // Platform apps always have isolated storage, thus they cannot specify it
@@ -34,10 +38,14 @@
     "channel": "stable",
     "extension_types": "all"
   },
-  "automation": {
+  "automation": [{
     "channel": "dev",
     "extension_types": ["extension", "legacy_packaged_app"]
-  },
+  }, {
+    "channel": "stable",
+    "extension_types": ["extension", "legacy_packaged_app"],
+    "whitelist": [ "2FCBCE08B34CCA1728A85F1EFBD9A34DD2558B2E" ]
+  }],
   "browser_action": {
     "channel": "stable",
     "extension_types": ["extension"]
@@ -83,14 +91,6 @@
       "extension", "legacy_packaged_app", "hosted_app"
     ],
     "no_doc": true
-  },
-  "current_locale": {
-    "channel": "stable",
-    "extension_types": "all"
-  },
-  "default_locale": {
-    "channel": "stable",
-    "extension_types": "all"
   },
   "devtools_page": {
     "channel": "stable",
@@ -236,10 +236,6 @@
     "extension_types": [
       "extension", "legacy_packaged_app", "hosted_app", "platform_app"
     ]
-  },
-  "script_badge": {
-    "channel": "trunk",
-    "extension_types": ["extension"]
   },
   "short_name": {
     "channel": "stable",

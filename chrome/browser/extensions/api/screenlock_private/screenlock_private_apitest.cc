@@ -3,8 +3,12 @@
 // found in the LICENSE file.
 
 #include "base/strings/string16.h"
+#include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/api/screenlock_private/screenlock_private_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
+#include "chrome/browser/profiles/profile_info_cache.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/easy_unlock_service.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "components/signin/core/browser/signin_manager.h"
@@ -32,7 +36,7 @@ class ScreenlockPrivateApiTest : public ExtensionApiTest,
   ~ScreenlockPrivateApiTest() override {}
 
   // ExtensionApiTest
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     ExtensionApiTest::SetUpCommandLine(command_line);
     command_line->AppendSwitchASCII(
         extensions::switches::kWhitelistedExtensionID, kTestExtensionId);
@@ -46,6 +50,11 @@ class ScreenlockPrivateApiTest : public ExtensionApiTest,
   void SetUpOnMainThread() override {
     SigninManagerFactory::GetForProfile(profile())
         ->SetAuthenticatedUsername(kTestUser);
+    ProfileInfoCache& info_cache =
+        g_browser_process->profile_manager()->GetProfileInfoCache();
+    size_t index = info_cache.GetIndexOfProfileWithPath(profile()->GetPath());
+    ASSERT_NE(std::string::npos, index);
+    info_cache.SetUserNameOfProfileAtIndex(index, base::UTF8ToUTF16(kTestUser));
     ExtensionApiTest::SetUpOnMainThread();
   }
 
@@ -73,14 +82,9 @@ class ScreenlockPrivateApiTest : public ExtensionApiTest,
     }
   }
 
-  // Loads |extension_name| as appropriate for the platform and waits for a
-  // pass / fail notification.
+  // Loads |extension_name| and waits for a pass / fail notification.
   void RunTest(const std::string& extension_name) {
-#if defined(OS_CHROMEOS)
     ASSERT_TRUE(RunComponentExtensionTest(extension_name)) << message_;
-#else
-    ASSERT_TRUE(RunExtensionTest(extension_name)) << message_;
-#endif
   }
 
  private:

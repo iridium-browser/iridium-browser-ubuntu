@@ -5,6 +5,8 @@
 
 """Unit tests for chromite.lib.git and helpers for testing that module."""
 
+# pylint: disable=bad-continuation
+
 from __future__ import print_function
 
 import functools
@@ -109,6 +111,74 @@ class NormalizeRefTest(cros_test_lib.TestCase):
     self._TestNormalize(functor, tests)
 
 
+class GitWrappersTest(cros_build_lib_unittest.RunCommandTestCase):
+  """Tests for small git wrappers"""
+
+  CHANGE_ID = 'I0da12ef6d2c670305f0281641bc53db22faf5c1a'
+  COMMIT_LOG = '''
+  foo: Change to foo.
+
+  Change-Id: %s
+  ''' % CHANGE_ID
+
+  PUSH_REMOTE = 'fake_remote'
+  PUSH_BRANCH = 'fake_branch'
+  PUSH_LOCAL = 'fake_local_branch'
+
+  def setUp(self):
+    self.fake_git_dir = '/foo/bar'
+    self.fake_file = 'baz'
+    self.fake_path = os.path.join(self.fake_git_dir, self.fake_file)
+
+  def testAddPath(self):
+    git.AddPath(self.fake_path)
+    self.assertCommandContains(['add'])
+    self.assertCommandContains([self.fake_file])
+
+  def testRmPath(self):
+    git.RmPath(self.fake_path)
+    self.assertCommandContains(['rm'])
+    self.assertCommandContains([self.fake_file])
+
+  def testGetObjectAtRev(self):
+    git.GetObjectAtRev(self.fake_git_dir, '.', '1234')
+    self.assertCommandContains(['show'])
+
+  def testRevertPath(self):
+    git.RevertPath(self.fake_git_dir, self.fake_file, '1234')
+    self.assertCommandContains(['checkout'])
+    self.assertCommandContains([self.fake_file])
+
+  def testCommit(self):
+    self.rc.AddCmdResult(partial_mock.In('log'), output=self.COMMIT_LOG)
+    git.Commit(self.fake_git_dir, 'bar')
+    self.assertCommandContains(['--amend'], expected=False)
+    cid = git.Commit(self.fake_git_dir, 'bar', amend=True)
+    self.assertCommandContains(['--amend'])
+    self.assertEqual(cid, self.CHANGE_ID)
+
+  def testUploadCLNormal(self):
+    git.UploadCL(self.fake_git_dir, self.PUSH_REMOTE, self.PUSH_BRANCH,
+                 local_branch=self.PUSH_LOCAL)
+    self.assertCommandContains(['%s:refs/for/%s' % (self.PUSH_LOCAL,
+                                                    self.PUSH_BRANCH)],
+                               capture_output=False)
+
+  def testUploadCLDraft(self):
+    git.UploadCL(self.fake_git_dir, self.PUSH_REMOTE, self.PUSH_BRANCH,
+                 local_branch=self.PUSH_LOCAL, draft=True)
+    self.assertCommandContains(['%s:refs/drafts/%s' % (self.PUSH_LOCAL,
+                                                       self.PUSH_BRANCH)],
+                               capture_output=False)
+
+  def testUploadCLCaptured(self):
+    git.UploadCL(self.fake_git_dir, self.PUSH_REMOTE, self.PUSH_BRANCH,
+                 local_branch=self.PUSH_LOCAL, draft=True, capture_output=True)
+    self.assertCommandContains(['%s:refs/drafts/%s' % (self.PUSH_LOCAL,
+                                                       self.PUSH_BRANCH)],
+                               capture_output=True)
+
+
 class ProjectCheckoutTest(cros_test_lib.TestCase):
   """Tests for git.ProjectCheckout"""
 
@@ -140,6 +210,39 @@ class ProjectCheckoutTest(cros_test_lib.TestCase):
     self.assertFalse(self.fake_versioned_unpatchable.IsPatchable())
 
 
+class RawDiffTest(cros_test_lib.MockTestCase):
+  """Tests for git.RawDiff function."""
+
+  def testRawDiff(self):
+    """Test the parsing of the git.RawDiff function."""
+
+    diff_output = '''
+:100644 100644 ac234b2... 077d1f8... M\tchromeos-base/chromeos-chrome/Manifest
+:100644 100644 9e5d11b... 806bf9b... R099\tchromeos-base/chromeos-chrome/chromeos-chrome-40.0.2197.0_rc-r1.ebuild\tchromeos-base/chromeos-chrome/chromeos-chrome-40.0.2197.2_rc-r1.ebuild
+:100644 100644 70d6e94... 821c642... M\tchromeos-base/chromeos-chrome/chromeos-chrome-9999.ebuild
+:100644 100644 be445f9... be445f9... R100\tchromeos-base/chromium-source/chromium-source-40.0.2197.0_rc-r1.ebuild\tchromeos-base/chromium-source/chromium-source-40.0.2197.2_rc-r1.ebuild
+'''
+    result = cros_build_lib.CommandResult(output=diff_output)
+    self.PatchObject(git, 'RunGit', return_value=result)
+
+    entries = git.RawDiff('foo', 'bar')
+    self.assertEqual(entries,
+      [('100644', '100644', 'ac234b2', '077d1f8', 'M', None,
+        'chromeos-base/chromeos-chrome/Manifest', None),
+       ('100644', '100644', '9e5d11b', '806bf9b', 'R', '099',
+        'chromeos-base/chromeos-chrome/'
+        'chromeos-chrome-40.0.2197.0_rc-r1.ebuild',
+        'chromeos-base/chromeos-chrome/'
+        'chromeos-chrome-40.0.2197.2_rc-r1.ebuild'),
+       ('100644', '100644', '70d6e94', '821c642', 'M', None,
+        'chromeos-base/chromeos-chrome/chromeos-chrome-9999.ebuild', None),
+       ('100644', '100644', 'be445f9', 'be445f9', 'R', '100',
+        'chromeos-base/chromium-source/'
+        'chromium-source-40.0.2197.0_rc-r1.ebuild',
+        'chromeos-base/chromium-source/'
+        'chromium-source-40.0.2197.2_rc-r1.ebuild')])
+
+
 class GitPushTest(cros_test_lib.MockTestCase):
   """Tests for git.GitPush function."""
 
@@ -163,7 +266,7 @@ class GitPushTest(cros_test_lib.MockTestCase):
        'error: failed to push some refs to \'https://localhost/repo.git\'\n'),
 
       # Hook error when pushing branch.
-      ('remote: Processing changes: (\)To https://localhost/repo.git\n'
+      ('remote: Processing changes: (\\)To https://localhost/repo.git\n'
        '! [remote rejected] temp_auto_checkin_branch -> '
        'master (error in hook)\n'
        'error: failed to push some refs to \'https://localhost/repo.git\'\n'),
@@ -221,6 +324,7 @@ class GitPushTest(cros_test_lib.MockTestCase):
             rc_mock.CmdResult(128, '', error),
             rc_mock.CmdResult(0, 'success', ''),
         ]
+        # pylint: disable=cell-var-from-loop
         side_effect = lambda *_args, **_kwargs: results.pop(0)
         rc_mock.AddCmdResult(partial_mock.In('push'), side_effect=side_effect)
         self._RunGitPush()

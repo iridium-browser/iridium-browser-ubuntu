@@ -75,14 +75,9 @@ IPC_MESSAGE_CONTROL2(OzoneGpuMsg_WindowBoundsChanged,
                      gfx::AcceleratedWidget /* widget */,
                      gfx::Rect /* bounds */)
 
-// Force the DPMS state of the display to on.
-IPC_MESSAGE_CONTROL0(OzoneGpuMsg_ForceDPMSOn)
-
 // Trigger a display reconfiguration. OzoneHostMsg_UpdateNativeDisplays will be
 // sent as a response.
-// The |displays| parameter will hold a list of last known displays.
-IPC_MESSAGE_CONTROL1(OzoneGpuMsg_RefreshNativeDisplays,
-                     std::vector<ui::DisplaySnapshot_Params> /* displays */)
+IPC_MESSAGE_CONTROL0(OzoneGpuMsg_RefreshNativeDisplays)
 
 // Configure a display with the specified mode at the specified location.
 IPC_MESSAGE_CONTROL3(OzoneGpuMsg_ConfigureNativeDisplay,
@@ -92,6 +87,12 @@ IPC_MESSAGE_CONTROL3(OzoneGpuMsg_ConfigureNativeDisplay,
 
 IPC_MESSAGE_CONTROL1(OzoneGpuMsg_DisableNativeDisplay,
                      int64_t)  // display ID
+
+IPC_MESSAGE_CONTROL1(OzoneGpuMsg_AddGraphicsDevice,
+                     base::FilePath /* device_path */)
+
+IPC_MESSAGE_CONTROL1(OzoneGpuMsg_RemoveGraphicsDevice,
+                     base::FilePath /* device_path */)
 
 // Take control of the display
 IPC_MESSAGE_CONTROL0(OzoneGpuMsg_TakeDisplayControl)
@@ -106,3 +107,7 @@ IPC_MESSAGE_CONTROL0(OzoneGpuMsg_RelinquishDisplayControl)
 // Updates the list of active displays.
 IPC_MESSAGE_CONTROL1(OzoneHostMsg_UpdateNativeDisplays,
                      std::vector<ui::DisplaySnapshot_Params>)
+
+IPC_MESSAGE_CONTROL2(OzoneHostMsg_DisplayConfigured,
+                     int64_t /* display_id */,
+                     bool /* status */)

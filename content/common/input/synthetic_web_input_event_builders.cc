@@ -110,9 +110,10 @@ WebGestureEvent SyntheticWebGestureEventBuilder::BuildScrollBegin(
 WebGestureEvent SyntheticWebGestureEventBuilder::BuildScrollUpdate(
     float dx,
     float dy,
-    int modifiers) {
-  WebGestureEvent result = Build(WebInputEvent::GestureScrollUpdate,
-                                 blink::WebGestureDeviceTouchscreen);
+    int modifiers,
+    blink::WebGestureDevice source_device) {
+  WebGestureEvent result =
+      Build(WebInputEvent::GestureScrollUpdate, source_device);
   result.data.scrollUpdate.deltaX = dx;
   result.data.scrollUpdate.deltaY = dy;
   result.modifiers = modifiers;
@@ -163,6 +164,7 @@ void SyntheticWebTouchEvent::ResetPoints() {
   }
   touchesLength = point;
   type = WebInputEvent::Undefined;
+  causesScrollingIfUncanceled = false;
 }
 
 int SyntheticWebTouchEvent::PressPoint(float x, float y) {
@@ -181,7 +183,11 @@ int SyntheticWebTouchEvent::PressPoint(float x, float y) {
 }
 
 void SyntheticWebTouchEvent::MovePoint(int index, float x, float y) {
-  CHECK(index >= 0 && index < touchesLengthCap);
+  CHECK_GE(index, 0);
+  CHECK_LT(index, touchesLengthCap);
+  // Always set this bit to avoid otherwise unexpected touchmove suppression.
+  // The caller can opt-out explicitly, if necessary.
+  causesScrollingIfUncanceled = true;
   WebTouchPoint& point = touches[index];
   point.position.x = point.screenPosition.x = x;
   point.position.y = point.screenPosition.y = y;
@@ -191,14 +197,16 @@ void SyntheticWebTouchEvent::MovePoint(int index, float x, float y) {
 }
 
 void SyntheticWebTouchEvent::ReleasePoint(int index) {
-  CHECK(index >= 0 && index < touchesLengthCap);
+  CHECK_GE(index, 0);
+  CHECK_LT(index, touchesLengthCap);
   touches[index].state = WebTouchPoint::StateReleased;
   WebTouchEventTraits::ResetType(
       WebInputEvent::TouchEnd, timeStampSeconds, this);
 }
 
 void SyntheticWebTouchEvent::CancelPoint(int index) {
-  CHECK(index >= 0 && index < touchesLengthCap);
+  CHECK_GE(index, 0);
+  CHECK_LT(index, touchesLengthCap);
   touches[index].state = WebTouchPoint::StateCancelled;
   WebTouchEventTraits::ResetType(
       WebInputEvent::TouchCancel, timeStampSeconds, this);

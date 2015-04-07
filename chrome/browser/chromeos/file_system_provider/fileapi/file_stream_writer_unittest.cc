@@ -80,9 +80,9 @@ class FileSystemProviderFileStreamWriter : public testing::Test {
     service->SetFileSystemFactoryForTesting(
         base::Bind(&FakeProvidedFileSystem::Create));
 
-    const bool result = service->MountFileSystem(
+    const base::File::Error result = service->MountFileSystem(
         kExtensionId, MountOptions(kFileSystemId, "Testing File System"));
-    ASSERT_TRUE(result);
+    ASSERT_EQ(base::File::FILE_OK, result);
     provided_file_system_ = static_cast<FakeProvidedFileSystem*>(
         service->GetProvidedFileSystem(kExtensionId, kFileSystemId));
     ASSERT_TRUE(provided_file_system_);
@@ -91,11 +91,11 @@ class FileSystemProviderFileStreamWriter : public testing::Test {
     const std::string mount_point_name =
         file_system_info.mount_path().BaseName().AsUTF8Unsafe();
 
-    file_url_ = CreateFileSystemURL(
-        mount_point_name, base::FilePath::FromUTF8Unsafe(kFakeFilePath + 1));
+    file_url_ = CreateFileSystemURL(mount_point_name,
+                                    base::FilePath(kFakeFilePath + 1));
     ASSERT_TRUE(file_url_.is_valid());
     wrong_file_url_ = CreateFileSystemURL(
-        mount_point_name, base::FilePath::FromUTF8Unsafe("im-not-here.txt"));
+        mount_point_name, base::FilePath(FILE_PATH_LITERAL("im-not-here.txt")));
     ASSERT_TRUE(wrong_file_url_.is_valid());
   }
 
@@ -132,8 +132,8 @@ TEST_F(FileSystemProviderFileStreamWriter, Write) {
     EXPECT_LT(0, write_log[0]);
     EXPECT_EQ(sizeof(kTextToWrite) - 1, static_cast<size_t>(write_log[0]));
 
-    const FakeEntry* const entry = provided_file_system_->GetEntry(
-        base::FilePath::FromUTF8Unsafe(kFakeFilePath));
+    const FakeEntry* const entry =
+        provided_file_system_->GetEntry(base::FilePath(kFakeFilePath));
     ASSERT_TRUE(entry);
 
     EXPECT_EQ(kTextToWrite,
@@ -153,8 +153,8 @@ TEST_F(FileSystemProviderFileStreamWriter, Write) {
     EXPECT_LT(0, write_log[0]);
     EXPECT_EQ(sizeof(kTextToWrite) - 1, static_cast<size_t>(write_log[0]));
 
-    const FakeEntry* const entry = provided_file_system_->GetEntry(
-        base::FilePath::FromUTF8Unsafe(kFakeFilePath));
+    const FakeEntry* const entry =
+        provided_file_system_->GetEntry(base::FilePath(kFakeFilePath));
     ASSERT_TRUE(entry);
 
     // The testing text is written twice.
@@ -207,8 +207,8 @@ TEST_F(FileSystemProviderFileStreamWriter, Write_WrongFile) {
 TEST_F(FileSystemProviderFileStreamWriter, Write_Append) {
   std::vector<int> write_log;
 
-  const FakeEntry* const entry = provided_file_system_->GetEntry(
-      base::FilePath::FromUTF8Unsafe(kFakeFilePath));
+  const FakeEntry* const entry =
+      provided_file_system_->GetEntry(base::FilePath(kFakeFilePath));
   ASSERT_TRUE(entry);
 
   const std::string original_contents = entry->contents;

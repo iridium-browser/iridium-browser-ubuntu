@@ -207,13 +207,13 @@ class DevToolsWindow : public DevToolsUIBindings::Delegate,
                                 const GURL& frontend_url,
                                 content::WebContents* inspected_web_contents,
                                 bool shared_worker_frontend,
-                                bool external_frontend,
+                                const std::string& remote_frontend,
                                 bool can_dock,
                                 const std::string& settings);
   static GURL GetDevToolsURL(Profile* profile,
                              const GURL& base_url,
                              bool shared_worker_frontend,
-                             bool external_frontend,
+                             const std::string& remote_frontend,
                              bool can_dock,
                              const std::string& settings);
   static DevToolsWindow* FindDevToolsWindow(content::DevToolsAgentHost*);
@@ -252,7 +252,8 @@ class DevToolsWindow : public DevToolsUIBindings::Delegate,
   void HandleKeyboardEvent(
       content::WebContents* source,
       const content::NativeWebKeyboardEvent& event) override;
-  content::JavaScriptDialogManager* GetJavaScriptDialogManager() override;
+  content::JavaScriptDialogManager* GetJavaScriptDialogManager(
+      content::WebContents* source) override;
   content::ColorChooser* OpenColorChooser(
       content::WebContents* web_contents,
       SkColor color,
@@ -268,7 +269,6 @@ class DevToolsWindow : public DevToolsUIBindings::Delegate,
   void CloseWindow() override;
   void SetInspectedPageBounds(const gfx::Rect& rect) override;
   void InspectElementCompleted() override;
-  void MoveWindow(int x, int y) override;
   void SetIsDocked(bool is_docked) override;
   void OpenInNewTab(const std::string& url) override;
   void SetWhitelistedShortcuts(const std::string& message) override;

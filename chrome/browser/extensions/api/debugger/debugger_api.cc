@@ -195,8 +195,8 @@ infobars::InfoBar* ExtensionDevToolsInfoBarDelegate::Create(
   if (!infobar_service)
     return NULL;
 
-  return infobar_service->AddInfoBar(ConfirmInfoBarDelegate::CreateInfoBar(
-      scoped_ptr<ConfirmInfoBarDelegate>(
+  return infobar_service->AddInfoBar(
+      infobar_service->CreateConfirmInfoBar(scoped_ptr<ConfirmInfoBarDelegate>(
           new ExtensionDevToolsInfoBarDelegate(client_name))));
 }
 
@@ -529,6 +529,15 @@ bool DebuggerFunction::InitAgentHost() {
     }
   } else if (debuggee_.target_id) {
     agent_host_ = DevToolsAgentHost::GetForId(*debuggee_.target_id);
+    if (agent_host_.get()) {
+      if (PermissionsData::IsRestrictedUrl(agent_host_->GetURL(),
+                                           agent_host_->GetURL(),
+                                           extension(),
+                                           &error_)) {
+        agent_host_ = nullptr;
+        return false;
+      }
+    }
   } else {
     error_ = keys::kInvalidTargetError;
     return false;
@@ -586,8 +595,8 @@ bool DebuggerAttachFunction::RunAsync() {
   }
 
   infobars::InfoBar* infobar = NULL;
-  if (!CommandLine::ForCurrentProcess()->
-       HasSwitch(::switches::kSilentDebuggerExtensionAPI)) {
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          ::switches::kSilentDebuggerExtensionAPI)) {
     // Do not attach to the target if for any reason the infobar cannot be shown
     // for this WebContents instance.
     infobar = ExtensionDevToolsInfoBarDelegate::Create(

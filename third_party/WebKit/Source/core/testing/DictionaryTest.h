@@ -8,6 +8,7 @@
 #include "bindings/core/v8/Nullable.h"
 #include "bindings/core/v8/ScriptValue.h"
 #include "bindings/core/v8/ScriptWrappable.h"
+#include "bindings/core/v8/UnionTypesCore.h"
 #include "core/dom/Element.h"
 #include "platform/heap/Handle.h"
 #include "wtf/text/WTFString.h"
@@ -15,6 +16,7 @@
 namespace blink {
 
 class InternalDictionary;
+class InternalDictionaryDerived;
 
 class DictionaryTest : public GarbageCollectedFinalized<DictionaryTest>, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
@@ -30,6 +32,9 @@ public:
     // Sets each member of the given TestDictionary from fields
     void get(InternalDictionary&);
 
+    void setDerived(const InternalDictionaryDerived&);
+    void getDerived(InternalDictionaryDerived&);
+
     void trace(Visitor*);
 
 private:
@@ -43,6 +48,8 @@ private:
     //  - |longMemberWithDefault| has a non-null default value
     //  - String and PtrTypes can express whether they are null
     Nullable<int> m_longMember;
+    Nullable<int> m_longMemberWithClamp;
+    Nullable<int> m_longMemberWithEnforceRange;
     int m_longMemberWithDefault;
     Nullable<int> m_longOrNullMember;
     Nullable<int> m_longOrNullMemberWithDefault;
@@ -50,6 +57,8 @@ private:
     Nullable<double> m_doubleMember;
     String m_stringMember;
     String m_stringMemberWithDefault;
+    String m_byteStringMember;
+    String m_usvStringMember;
     Nullable<Vector<String> > m_stringSequenceMember;
     Nullable<Vector<String> > m_stringSequenceOrNullMember;
     String m_enumMember;
@@ -59,6 +68,10 @@ private:
     RefPtrWillBeMember<Element> m_elementOrNullMember;
     ScriptValue m_objectMember;
     ScriptValue m_objectOrNullMemberWithDefault;
+    DoubleOrString m_doubleOrStringMember;
+    RefPtrWillBeMember<EventTarget> m_eventTargetOrNullMember;
+    String m_derivedStringMember;
+    String m_derivedStringMemberWithDefault;
 };
 
 } // namespace blink

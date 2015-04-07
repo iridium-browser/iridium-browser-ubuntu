@@ -32,9 +32,10 @@
 
 #include "platform/geometry/FloatRect.h"
 #include "platform/geometry/FloatSize.h"
-#include "platform/geometry/RoundedRect.h"
 
 namespace blink {
+
+class FloatQuad;
 
 class PLATFORM_EXPORT FloatRoundedRect {
 public:
@@ -49,7 +50,7 @@ public:
         {
         }
 
-        Radii(const RoundedRect::Radii& intRadii)
+        Radii(const FloatRoundedRect::Radii& intRadii)
             : m_topLeft(intRadii.topLeft())
             , m_topRight(intRadii.topRight())
             , m_bottomLeft(intRadii.bottomLeft())
@@ -69,10 +70,16 @@ public:
         bool isZero() const;
 
         void scale(float factor);
+        // Multiply all radii by |factor| and floor the result to the nearest integer.
+        void scaleAndFloor(float factor);
+
         void expand(float topWidth, float bottomWidth, float leftWidth, float rightWidth);
         void expand(float size) { expand(size, size, size, size); }
-        void shrink(float topWidth, float bottomWidth, float leftWidth, float rightWidth) { expand(-topWidth, -bottomWidth, -leftWidth, -rightWidth); }
+
+        void shrink(float topWidth, float bottomWidth, float leftWidth, float rightWidth);
         void shrink(float size) { shrink(size, size, size, size); }
+
+        void includeLogicalEdges(const Radii& edges, bool isHorizontal, bool includeLogicalLeftEdge, bool includeLogicalRightEdge);
 
     private:
         FloatSize m_topLeft;
@@ -94,9 +101,17 @@ public:
     void setRadii(const Radii& radii) { m_radii = radii; }
 
     void move(const FloatSize& size) { m_rect.move(size); }
-    void inflate(float size) { m_rect.inflate(size);  }
+    void inflateWithRadii(int size);
+    void inflate(float size) { m_rect.inflate(size); }
+
+    // expandRadii() does not have any effect on corner radii which have zero width or height. This is because the process of expanding
+    // the radius of a corner is not allowed to make sharp corners non-sharp. This applies when "spreading" a shadow or
+    // a box shape.
     void expandRadii(float size) { m_radii.expand(size); }
     void shrinkRadii(float size) { m_radii.shrink(size); }
+
+    // Returns a quickly computed rect enclosed by the rounded rect.
+    FloatRect radiusCenterRect() const;
 
     FloatRect topLeftCorner() const
     {
@@ -117,6 +132,22 @@ public:
 
     bool xInterceptsAtY(float y, float& minXIntercept, float& maxXIntercept) const;
 
+    void includeLogicalEdges(const Radii& edges, bool isHorizontal, bool includeLogicalLeftEdge, bool includeLogicalRightEdge);
+
+    // Tests whether the quad intersects any part of this rounded rectangle.
+    // This only works for convex quads.
+    bool intersectsQuad(const FloatQuad&) const;
+
+    void adjustRadii();
+    bool isRenderable() const;
+
+    // Constrains the radii to be no more than the size of rect(); radii outside of this range are not
+    // defined.
+    // In addition, the radii of the corners are floored to the nearest integer.
+    // FIXME: the flooring should not be necessary. At the moment it causes background bleed in some cases.
+    // FIXME: this code is almost the same as adjustRadii()/isRenderable(). Get rid of one of them.
+    void constrainRadii();
+
 private:
     FloatRect m_rect;
     Radii m_radii;
@@ -126,6 +157,13 @@ inline bool operator==(const FloatRoundedRect::Radii& a, const FloatRoundedRect:
 {
     return a.topLeft() == b.topLeft() && a.topRight() == b.topRight() && a.bottomLeft() == b.bottomLeft() && a.bottomRight() == b.bottomRight();
 }
+
+
+inline bool operator!=(const FloatRoundedRect::Radii& a, const FloatRoundedRect::Radii& b)
+{
+    return !(a == b);
+}
+
 
 inline bool operator==(const FloatRoundedRect& a, const FloatRoundedRect& b)
 {

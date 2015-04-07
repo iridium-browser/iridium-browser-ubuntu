@@ -41,6 +41,15 @@ class GLES2DecoderTest1 : public GLES2DecoderTestBase {
 INSTANTIATE_TEST_CASE_P(Service, GLES2DecoderTest1, ::testing::Bool());
 
 template <>
+void GLES2DecoderTestBase::SpecializedSetup<cmds::BindBufferBase, 0>(
+    bool valid) {
+  if (valid) {
+    // TODO(zmo): This might affect the states of later tests.
+    group_->AddBufferId(client_buffer_id_, kServiceBufferId);
+  }
+};
+
+template <>
 void GLES2DecoderTestBase::SpecializedSetup<cmds::GenerateMipmap, 0>(
     bool valid) {
   DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
@@ -277,26 +286,6 @@ void GLES2DecoderTestBase::SpecializedSetup<cmds::GetVertexAttribiv, 0>(
         .RetiresOnSaturation();
   }
 };
-
-template <>
-void GLES2DecoderTestBase::SpecializedSetup<cmds::RenderbufferStorage, 0>(
-    bool valid) {
-  DoBindRenderbuffer(GL_RENDERBUFFER, client_renderbuffer_id_,
-                    kServiceRenderbufferId);
-  if (valid) {
-    EnsureRenderbufferBound(false);
-    EXPECT_CALL(*gl_, GetError())
-        .WillOnce(Return(GL_NO_ERROR))
-        .RetiresOnSaturation();
-    EXPECT_CALL(*gl_,
-                RenderbufferStorageEXT(GL_RENDERBUFFER, _, 3, 4))
-        .Times(1)
-        .RetiresOnSaturation();
-    EXPECT_CALL(*gl_, GetError())
-        .WillOnce(Return(GL_NO_ERROR))
-        .RetiresOnSaturation();
-  }
-}
 
 
 #include "gpu/command_buffer/service/gles2_cmd_decoder_unittest_1_autogen.h"

@@ -139,16 +139,6 @@ void WebSettingsImpl::setMinimumLogicalFontSize(int size)
 void WebSettingsImpl::setDeviceSupportsTouch(bool deviceSupportsTouch)
 {
     m_settings->setDeviceSupportsTouch(deviceSupportsTouch);
-
-    // FIXME: Until the embedder is converted to using the new APIs, set them
-    // here to keep the media queries working unchanged.
-    if (deviceSupportsTouch) {
-        m_settings->setPrimaryPointerType(blink::PointerTypeCoarse);
-        m_settings->setPrimaryHoverType(blink::HoverTypeOnDemand);
-    } else {
-        m_settings->setPrimaryPointerType(blink::PointerTypeNone);
-        m_settings->setPrimaryHoverType(blink::HoverTypeNone);
-    }
 }
 
 void WebSettingsImpl::setDeviceSupportsMouse(bool deviceSupportsMouse)
@@ -251,6 +241,11 @@ void WebSettingsImpl::setRootLayerScrolls(bool rootLayerScrolls)
     m_settings->setRootLayerScrolls(rootLayerScrolls);
 }
 
+void WebSettingsImpl::setRubberBandingOnCompositorThread(bool rubberBandingOnCompositorThread)
+{
+    m_settings->setRubberBandingOnCompositorThread(rubberBandingOnCompositorThread);
+}
+
 void WebSettingsImpl::setClobberUserAgentInitialScaleQuirk(bool clobberUserAgentInitialScaleQuirk)
 {
     m_clobberUserAgentInitialScaleQuirk = clobberUserAgentInitialScaleQuirk;
@@ -264,6 +259,11 @@ void WebSettingsImpl::setSupportsMultipleWindows(bool supportsMultipleWindows)
 void WebSettingsImpl::setLoadsImagesAutomatically(bool loadsImagesAutomatically)
 {
     m_settings->setLoadsImagesAutomatically(loadsImagesAutomatically);
+}
+
+void WebSettingsImpl::setImageAnimationPolicy(ImageAnimationPolicy policy)
+{
+    m_settings->setImageAnimationPolicy(static_cast<blink::ImageAnimationPolicy>(policy));
 }
 
 void WebSettingsImpl::setImagesEnabled(bool enabled)
@@ -461,6 +461,11 @@ void WebSettingsImpl::setWebGLErrorsToConsoleEnabled(bool enabled)
     m_settings->setWebGLErrorsToConsoleEnabled(enabled);
 }
 
+void WebSettingsImpl::setShowContextMenuOnMouseUp(bool enabled)
+{
+    m_settings->setShowContextMenuOnMouseUp(enabled);
+}
+
 void WebSettingsImpl::setShowFPSCounter(bool show)
 {
     m_showFPSCounter = show;
@@ -511,11 +516,6 @@ void WebSettingsImpl::setAntialiasedClips2dCanvasEnabled(bool enabled)
     m_settings->setAntialiasedClips2dCanvasEnabled(enabled);
 }
 
-void WebSettingsImpl::setContainerCullingEnabled(bool enabled)
-{
-    m_settings->setContainerCullingEnabled(enabled);
-}
-
 void WebSettingsImpl::setDeferredImageDecodingEnabled(bool enabled)
 {
     DeferredImageDecoder::setEnabled(enabled);
@@ -535,11 +535,6 @@ void WebSettingsImpl::setMinimumAccelerated2dCanvasSize(int numPixels)
 void WebSettingsImpl::setHyperlinkAuditingEnabled(bool enabled)
 {
     m_settings->setHyperlinkAuditingEnabled(enabled);
-}
-
-void WebSettingsImpl::setLayerSquashingEnabled(bool enabled)
-{
-    m_settings->setLayerSquashingEnabled(enabled);
 }
 
 void WebSettingsImpl::setAsynchronousSpellCheckingEnabled(bool enabled)
@@ -570,6 +565,16 @@ void WebSettingsImpl::setAllowDisplayOfInsecureContent(bool enabled)
 void WebSettingsImpl::setAllowRunningOfInsecureContent(bool enabled)
 {
     m_settings->setAllowRunningOfInsecureContent(enabled);
+}
+
+void WebSettingsImpl::setStrictMixedContentChecking(bool enabled)
+{
+    m_settings->setStrictMixedContentChecking(enabled);
+}
+
+void WebSettingsImpl::setStrictPowerfulFeatureRestrictions(bool enabled)
+{
+    m_settings->setStrictPowerfulFeatureRestrictions(enabled);
 }
 
 void WebSettingsImpl::setAllowConnectingInsecureWebSocket(bool enabled)

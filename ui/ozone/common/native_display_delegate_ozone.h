@@ -6,6 +6,7 @@
 #define UI_OZONE_COMMON_NATIVE_DISPLAY_DELEGATE_OZONE_H_
 
 #include "base/macros.h"
+#include "base/memory/scoped_vector.h"
 #include "ui/display/types/native_display_delegate.h"
 
 namespace ui {
@@ -24,12 +25,13 @@ class NativeDisplayDelegateOzone : public NativeDisplayDelegate {
   void SyncWithServer() override;
   void SetBackgroundColor(uint32_t color_argb) override;
   void ForceDPMSOn() override;
-  std::vector<ui::DisplaySnapshot*> GetDisplays() override;
+  void GetDisplays(const GetDisplaysCallback& callback) override;
   void AddMode(const ui::DisplaySnapshot& output,
                const ui::DisplayMode* mode) override;
-  bool Configure(const ui::DisplaySnapshot& output,
+  void Configure(const ui::DisplaySnapshot& output,
                  const ui::DisplayMode* mode,
-                 const gfx::Point& origin) override;
+                 const gfx::Point& origin,
+                 const ConfigureCallback& callback) override;
   void CreateFrameBuffer(const gfx::Size& size) override;
   bool GetHDCPState(const ui::DisplaySnapshot& output,
                     ui::HDCPState* state) override;
@@ -44,6 +46,8 @@ class NativeDisplayDelegateOzone : public NativeDisplayDelegate {
   void RemoveObserver(NativeDisplayObserver* observer) override;
 
  private:
+  ScopedVector<DisplaySnapshot> displays_;
+
   DISALLOW_COPY_AND_ASSIGN(NativeDisplayDelegateOzone);
 };
 

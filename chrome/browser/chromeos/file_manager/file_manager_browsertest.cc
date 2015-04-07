@@ -17,6 +17,7 @@
 #include "base/json/json_reader.h"
 #include "base/json/json_value_converter.h"
 #include "base/json/json_writer.h"
+#include "base/path_service.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/utf_string_conversions.h"
@@ -36,11 +37,13 @@
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_window_manager.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/chromeos_switches.h"
+#include "components/signin/core/browser/signin_manager.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
@@ -536,7 +539,7 @@ class FileManagerBrowserTestBase : public ExtensionApiTest {
   virtual void SetUpOnMainThread() override;
 
   // Adds an incognito and guest-mode flags for tests in the guest mode.
-  virtual void SetUpCommandLine(CommandLine* command_line) override;
+  virtual void SetUpCommandLine(base::CommandLine* command_line) override;
 
   // Loads our testing extension and sends it a string identifying the current
   // test.
@@ -600,7 +603,8 @@ void FileManagerBrowserTestBase::SetUpOnMainThread() {
   net::NetworkChangeNotifier::SetTestNotificationsOnly(true);
 }
 
-void FileManagerBrowserTestBase::SetUpCommandLine(CommandLine* command_line) {
+void FileManagerBrowserTestBase::SetUpCommandLine(
+    base::CommandLine* command_line) {
   if (GetGuestModeParam() == IN_GUEST_MODE) {
     command_line->AppendSwitch(chromeos::switches::kGuestSession);
     command_line->AppendSwitchNative(chromeos::switches::kLoginUser, "");
@@ -613,9 +617,12 @@ void FileManagerBrowserTestBase::SetUpCommandLine(CommandLine* command_line) {
 }
 
 void FileManagerBrowserTestBase::StartTest() {
+  base::FilePath root_path;
+  ASSERT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &root_path));
+
   // Launch the extension.
   const base::FilePath path =
-      test_data_dir_.AppendASCII("file_manager_browsertest");
+      root_path.Append(FILE_PATH_LITERAL("ui/file_manager/integration_tests"));
   const extensions::Extension* const extension =
       LoadExtensionAsComponentWithManifest(path, GetTestManifestName());
   ASSERT_TRUE(extension);
@@ -826,14 +833,6 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
                       TestParameter(NOT_IN_GUEST_MODE, "fileDisplayDrive"),
                       TestParameter(NOT_IN_GUEST_MODE, "fileDisplayMtp")));
 
-// http://crbug.com/327719
-WRAPPED_INSTANTIATE_TEST_CASE_P(
-    DISABLED_OpenZipFiles,
-    FileManagerBrowserTest,
-    ::testing::Values(TestParameter(IN_GUEST_MODE, "zipOpenDownloads"),
-                      TestParameter(NOT_IN_GUEST_MODE, "zipOpenDownloads"),
-                      TestParameter(NOT_IN_GUEST_MODE, "zipOpenDrive")));
-
 // Slow tests are disabled on debug build. http://crbug.com/327719
 // Fails on official build. http://crbug.com/429294
 #if !defined(NDEBUG) || defined(OFFICIAL_BUILD)
@@ -868,9 +867,14 @@ WRAPPED_INSTANTIATE_TEST_CASE_P(
         TestParameter(NOT_IN_GUEST_MODE, "audioRepeatMultipleFileDrive"),
         TestParameter(NOT_IN_GUEST_MODE, "audioNoRepeatMultipleFileDrive")));
 
-// Flaky http://crbug.com/327719
+// Slow tests are disabled on debug build. http://crbug.com/327719
+#if !defined(NDEBUG) || defined(OFFICIAL_BUILD)
+#define MAYBE_CreateNewFolder DISABLED_CreateNewFolder
+#else
+#define MAYBE_CreateNewFolder CreateNewFolder
+#endif
 WRAPPED_INSTANTIATE_TEST_CASE_P(
-    DISABLED_CreateNewFolder,
+    MAYBE_CreateNewFolder,
     FileManagerBrowserTest,
     ::testing::Values(TestParameter(NOT_IN_GUEST_MODE,
                                     "createNewFolderAfterSelectFile"),
@@ -1167,7 +1171,7 @@ static const TestAccountInfo kTestAccounts[] = {
 class MultiProfileFileManagerBrowserTest : public FileManagerBrowserTestBase {
  protected:
   // Enables multi-profiles.
-  virtual void SetUpCommandLine(CommandLine* command_line) override {
+  virtual void SetUpCommandLine(base::CommandLine* command_line) override {
     FileManagerBrowserTestBase::SetUpCommandLine(command_line);
     // Logs in to a dummy profile (For making MultiProfileWindowManager happy;
     // browser test creates a default window and the manager tries to assign a
@@ -1212,8 +1216,9 @@ class MultiProfileFileManagerBrowserTest : public FileManagerBrowserTestBase {
       user_manager->UserLoggedIn(info.email, info.hash, false);
     user_manager->SaveUserDisplayName(info.email,
                                       base::UTF8ToUTF16(info.display_name));
-    chromeos::ProfileHelper::GetProfileByUserIdHash(info.hash)->GetPrefs()->
-        SetString(prefs::kGoogleServicesUsername, info.email);
+    SigninManagerFactory::GetForProfile(
+        chromeos::ProfileHelper::GetProfileByUserIdHash(info.hash))->
+            SetAuthenticatedUsername(info.email);
   }
 
  private:
@@ -1364,20 +1369,30 @@ IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, OpenMultipleImagesOnDrive) {
   StartTest();
 }
 
-IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, TraverseSlideImagesOnDownloads) {
+// Disabled due to flakiness: crbug.com/437293
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTest,
+                       DISABLED_TraverseSlideImagesOnDownloads) {
   AddScript("gallery/slide_mode.js");
   set_test_case_name("traverseSlideImagesOnDownloads");
   StartTest();
 }
 
+// Disabled due to flakiness: crbug.com/437293
 IN_PROC_BROWSER_TEST_F(GalleryBrowserTestInGuestMode,
-                       TraverseSlideImagesOnDownloads) {
+                       DISABLED_TraverseSlideImagesOnDownloads) {
   AddScript("gallery/slide_mode.js");
   set_test_case_name("traverseSlideImagesOnDownloads");
   StartTest();
 }
 
-IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, TraverseSlideImagesOnDrive) {
+// Uninitialized memory access under ChromeOS MSAN (http://crbug.com/445908)
+#if defined(OS_CHROMEOS) && defined(MEMORY_SANITIZER)
+#define MAYBE_TraverseSlideImagesOnDrive DISABLED_TraverseSlideImagesOnDrive
+#else
+#define MAYBE_TraverseSlideImagesOnDrive TraverseSlideImagesOnDrive
+#endif
+
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, MAYBE_TraverseSlideImagesOnDrive) {
   AddScript("gallery/slide_mode.js");
   set_test_case_name("traverseSlideImagesOnDrive");
   StartTest();
@@ -1421,7 +1436,14 @@ IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, DeleteImageOnDrive) {
   StartTest();
 }
 
-IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, RotateImageOnDownloads) {
+// Uninitialized memory access under ChromeOS MSAN (http://crbug.com/445908)
+#if defined(OS_CHROMEOS) && defined(MEMORY_SANITIZER)
+#define MAYBE_RotateImageOnDownloads DISABLED_RotateImageOnDownloads
+#else
+#define MAYBE_RotateImageOnDownloads RotateImageOnDownloads
+#endif
+
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, MAYBE_RotateImageOnDownloads) {
   AddScript("gallery/photo_editor.js");
   set_test_case_name("rotateImageOnDownloads");
   StartTest();
@@ -1434,45 +1456,94 @@ IN_PROC_BROWSER_TEST_F(GalleryBrowserTestInGuestMode,
   StartTest();
 }
 
-IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, RotateImageOnDrive) {
+// Uninitialized memory access under ChromeOS MSAN (http://crbug.com/445908)
+#if defined(OS_CHROMEOS) && defined(MEMORY_SANITIZER)
+#define MAYBE_RotateImageOnDrive DISABLED_RotateImageOnDrive
+#else
+#define MAYBE_RotateImageOnDrive RotateImageOnDrive
+#endif
+
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, MAYBE_RotateImageOnDrive) {
   AddScript("gallery/photo_editor.js");
   set_test_case_name("rotateImageOnDrive");
   StartTest();
 }
 
-IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, CropImageOnDownloads) {
+// Uninitialized memory access under ChromeOS MSAN (http://crbug.com/445908)
+#if defined(OS_CHROMEOS) && defined(MEMORY_SANITIZER)
+#define MAYBE_CropImageOnDownloads DISABLED_CropImageOnDownloads
+#else
+#define MAYBE_CropImageOnDownloads CropImageOnDownloads
+#endif
+
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, MAYBE_CropImageOnDownloads) {
   AddScript("gallery/photo_editor.js");
   set_test_case_name("cropImageOnDownloads");
   StartTest();
 }
+
+// Uninitialized memory access under ChromeOS MSAN (http://crbug.com/445908)
+#if defined(OS_CHROMEOS) && defined(MEMORY_SANITIZER)
+#define MAYBE_CropImageOnDownloads DISABLED_CropImageOnDownloads
+#else
+#define MAYBE_CropImageOnDownloads CropImageOnDownloads
+#endif
 
 IN_PROC_BROWSER_TEST_F(GalleryBrowserTestInGuestMode,
-                       CropImageOnDownloads) {
+                       MAYBE_CropImageOnDownloads) {
   AddScript("gallery/photo_editor.js");
   set_test_case_name("cropImageOnDownloads");
   StartTest();
 }
 
-IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, CropImageOnDrive) {
+// Uninitialized memory access under ChromeOS MSAN (http://crbug.com/445908)
+#if defined(OS_CHROMEOS) && defined(MEMORY_SANITIZER)
+#define MAYBE_CropImageOnDrive DISABLED_CropImageOnDrive
+#else
+#define MAYBE_CropImageOnDrive CropImageOnDrive
+#endif
+
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, MAYBE_CropImageOnDrive) {
   AddScript("gallery/photo_editor.js");
   set_test_case_name("cropImageOnDrive");
   StartTest();
 }
 
-IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, ExposureImageOnDownloads) {
+// Uninitialized memory access under ChromeOS MSAN (http://crbug.com/445908)
+#if defined(OS_CHROMEOS) && defined(MEMORY_SANITIZER)
+#define MAYBE_ExposureImageOnDownloads DISABLED_ExposureImageOnDownloads
+#else
+#define MAYBE_ExposureImageOnDownloads ExposureImageOnDownloads
+#endif
+
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, MAYBE_ExposureImageOnDownloads) {
   AddScript("gallery/photo_editor.js");
   set_test_case_name("exposureImageOnDownloads");
   StartTest();
 }
+
+// Uninitialized memory access under ChromeOS MSAN (http://crbug.com/445908)
+#if defined(OS_CHROMEOS) && defined(MEMORY_SANITIZER)
+#define MAYBE_ExposureImageOnDownloads DISABLED_ExposureImageOnDownloads
+#else
+#define MAYBE_ExposureImageOnDownloads ExposureImageOnDownloads
+#endif
 
 IN_PROC_BROWSER_TEST_F(GalleryBrowserTestInGuestMode,
-                       ExposureImageOnDownloads) {
+                       MAYBE_ExposureImageOnDownloads) {
   AddScript("gallery/photo_editor.js");
   set_test_case_name("exposureImageOnDownloads");
   StartTest();
 }
 
-IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, ExposureImageOnDrive) {
+// Uninitialized memory access under ChromeOS MSAN (http://crbug.com/445908)
+#if defined(OS_CHROMEOS) && defined(MEMORY_SANITIZER)
+#define MAYBE_ExposureImageOnDrive DISABLED_ExposureImageOnDrive
+#else
+#define MAYBE_ExposureImageOnDrive ExposureImageOnDrive
+#endif
+
+IN_PROC_BROWSER_TEST_F(GalleryBrowserTest, MAYBE_ExposureImageOnDrive) {
   AddScript("gallery/photo_editor.js");
   set_test_case_name("exposureImageOnDrive");
   StartTest();
@@ -1493,7 +1564,7 @@ class VideoPlayerBrowserTestBase : public FileManagerBrowserTestBase {
     FileManagerBrowserTestBase::SetUp();
   }
 
-  virtual void SetUpCommandLine(CommandLine* command_line) override {
+  virtual void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(
         chromeos::switches::kEnableVideoPlayerChromecastSupport);
     FileManagerBrowserTestBase::SetUpCommandLine(command_line);

@@ -27,7 +27,7 @@ DeviceMode TranslateProtobufDeviceMode(
     case em::DeviceRegisterResponse::ENTERPRISE:
       return DEVICE_MODE_ENTERPRISE;
     case em::DeviceRegisterResponse::RETAIL:
-      return DEVICE_MODE_RETAIL_KIOSK;
+      return DEVICE_MODE_LEGACY_RETAIL_MODE;
   }
   LOG(ERROR) << "Unknown enrollment mode in registration response: " << mode;
   return DEVICE_MODE_NOT_SET;
@@ -52,7 +52,6 @@ CloudPolicyClient::CloudPolicyClient(
     const std::string& machine_model,
     const std::string& verification_key_hash,
     UserAffiliation user_affiliation,
-    StatusProvider* status_provider,
     DeviceManagementService* service,
     scoped_refptr<net::URLRequestContextGetter> request_context)
     : machine_id_(machine_id),
@@ -65,8 +64,7 @@ CloudPolicyClient::CloudPolicyClient(
       public_key_version_valid_(false),
       invalidation_version_(0),
       fetched_invalidation_version_(0),
-      service_(service),                  // Can be NULL for unit tests.
-      status_provider_(status_provider),  // Can be NULL for unit tests.
+      service_(service),                  // Can be null for unit tests.
       status_(DM_STATUS_SUCCESS),
       request_context_(request_context) {
 }
@@ -90,9 +88,9 @@ void CloudPolicyClient::SetupRegistration(const std::string& dm_token,
 }
 
 void CloudPolicyClient::Register(em::DeviceRegisterRequest::Type type,
+                                 em::DeviceRegisterRequest::Flavor flavor,
                                  const std::string& auth_token,
                                  const std::string& client_id,
-                                 bool is_auto_enrollement,
                                  const std::string& requisition,
                                  const std::string& current_state_key) {
   DCHECK(service_);
@@ -123,12 +121,11 @@ void CloudPolicyClient::Register(em::DeviceRegisterRequest::Type type,
     request->set_machine_id(machine_id_);
   if (!machine_model_.empty())
     request->set_machine_model(machine_model_);
-  if (is_auto_enrollement)
-    request->set_auto_enrolled(true);
   if (!requisition.empty())
     request->set_requisition(requisition);
   if (!current_state_key.empty())
     request->set_server_backed_state_key(current_state_key);
+  request->set_flavor(flavor);
 
   request_job_->SetRetryCallback(
       base::Bind(&CloudPolicyClient::OnRetryRegister, base::Unretained(this)));
@@ -146,7 +143,7 @@ void CloudPolicyClient::SetInvalidationInfo(
 
 void CloudPolicyClient::FetchPolicy() {
   CHECK(is_registered());
-  CHECK(!namespaces_to_fetch_.empty());
+  CHECK(!types_to_fetch_.empty());
 
   request_job_.reset(
       service_->CreateJob(DeviceManagementRequestJob::TYPE_POLICY_FETCH,
@@ -159,12 +156,11 @@ void CloudPolicyClient::FetchPolicy() {
 
   // Build policy fetch requests.
   em::DevicePolicyRequest* policy_request = request->mutable_policy_request();
-  for (NamespaceSet::iterator it = namespaces_to_fetch_.begin();
-       it != namespaces_to_fetch_.end(); ++it) {
+  for (const auto& type_to_fetch : types_to_fetch_) {
     em::PolicyFetchRequest* fetch_request = policy_request->add_request();
-    fetch_request->set_policy_type(it->first);
-    if (!it->second.empty())
-      fetch_request->set_settings_entity_id(it->second);
+    fetch_request->set_policy_type(type_to_fetch.first);
+    if (!type_to_fetch.second.empty())
+      fetch_request->set_settings_entity_id(type_to_fetch.second);
 
     // Request signed policy blobs to help prevent tampering on the client.
     fetch_request->set_signature_type(em::PolicyFetchRequest::SHA1_RSA);
@@ -175,7 +171,7 @@ void CloudPolicyClient::FetchPolicy() {
       fetch_request->set_verification_key_hash(verification_key_hash_);
 
     // These fields are included only in requests for chrome policy.
-    if (IsChromePolicy(it->first)) {
+    if (IsChromePolicy(type_to_fetch.first)) {
       if (submit_machine_id_ && !machine_id_.empty())
         fetch_request->set_machine_id(machine_id_);
       if (!last_policy_timestamp_.is_null()) {
@@ -288,12 +284,24 @@ void CloudPolicyClient::RemoveObserver(Observer* observer) {
   observers_.RemoveObserver(observer);
 }
 
-void CloudPolicyClient::AddNamespaceToFetch(const PolicyNamespaceKey& key) {
-  namespaces_to_fetch_.insert(key);
+void CloudPolicyClient::SetStatusProvider(scoped_ptr<StatusProvider> provider) {
+  status_provider_ = provider.Pass();
 }
 
-void CloudPolicyClient::RemoveNamespaceToFetch(const PolicyNamespaceKey& key) {
-  namespaces_to_fetch_.erase(key);
+bool CloudPolicyClient::HasStatusProviderForTest() {
+  return status_provider_;
+}
+
+void CloudPolicyClient::AddPolicyTypeToFetch(
+    const std::string& policy_type,
+    const std::string& settings_entity_id) {
+  types_to_fetch_.insert(std::make_pair(policy_type, settings_entity_id));
+}
+
+void CloudPolicyClient::RemovePolicyTypeToFetch(
+    const std::string& policy_type,
+    const std::string& settings_entity_id) {
+  types_to_fetch_.erase(std::make_pair(policy_type, settings_entity_id));
 }
 
 void CloudPolicyClient::SetStateKeysToUpload(
@@ -302,9 +310,11 @@ void CloudPolicyClient::SetStateKeysToUpload(
 }
 
 const em::PolicyFetchResponse* CloudPolicyClient::GetPolicyFor(
-    const PolicyNamespaceKey& key) const {
-  ResponseMap::const_iterator it = responses_.find(key);
-  return it == responses_.end() ? NULL : it->second;
+    const std::string& policy_type,
+    const std::string& settings_entity_id) const {
+  ResponseMap::const_iterator it =
+      responses_.find(std::make_pair(policy_type, settings_entity_id));
+  return it == responses_.end() ? nullptr : it->second;
 }
 
 scoped_refptr<net::URLRequestContextGetter>
@@ -405,7 +415,7 @@ void CloudPolicyClient::OnPolicyFetchCompleted(
       std::string entity_id;
       if (policy_data.has_settings_entity_id())
         entity_id = policy_data.settings_entity_id();
-      PolicyNamespaceKey key(type, entity_id);
+      std::pair<std::string, std::string> key(type, entity_id);
       if (ContainsKey(responses_, key)) {
         LOG(WARNING) << "Duplicate PolicyFetchResponse for type: "
             << type << ", entity: " << entity_id << ", ignoring";

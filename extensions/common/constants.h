@@ -121,10 +121,16 @@ enum AppLaunchSource {
   SOURCE_COMMAND_LINE,
   SOURCE_FILE_HANDLER,
   SOURCE_URL_HANDLER,
-
   SOURCE_SYSTEM_TRAY,
   SOURCE_ABOUT_PAGE,
   SOURCE_KEYBOARD,
+  SOURCE_EXTENSIONS_PAGE,
+  SOURCE_MANAGEMENT_API,
+  SOURCE_EPHEMERAL_APP,
+  SOURCE_BACKGROUND,
+  SOURCE_KIOSK,
+  SOURCE_CHROME_INTERNAL,
+  SOURCE_TEST,
 
   NUM_APP_LAUNCH_SOURCES
 };
@@ -156,7 +162,8 @@ enum LaunchContainer {
   LAUNCH_CONTAINER_TAB,
   // For platform apps, which don't actually have a container (they just get a
   // "onLaunched" event).
-  LAUNCH_CONTAINER_NONE
+  LAUNCH_CONTAINER_NONE,
+  NUM_LAUNCH_CONTAINERS
 };
 
 }  // namespace extensions

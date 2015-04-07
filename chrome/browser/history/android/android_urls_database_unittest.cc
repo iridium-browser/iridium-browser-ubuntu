@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/history/android/android_urls_database.h"
+#include "components/history/core/android/android_urls_database.h"
 
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
@@ -12,6 +12,7 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/history/core/browser/history_constants.h"
 
 namespace history {
 
@@ -29,7 +30,7 @@ class AndroidURLsMigrationTest : public HistoryUnitTestBase {
     ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &data_path));
     data_path = data_path.AppendASCII("History");
 
-    history_db_name_ = profile_->GetPath().Append(chrome::kHistoryFilename);
+    history_db_name_ = profile_->GetPath().Append(kHistoryFilename);
     // Set up history as they would be before migration.
     ASSERT_NO_FATAL_FAILURE(
         ExecuteSQLScript(data_path.AppendASCII("history.21.sql"),

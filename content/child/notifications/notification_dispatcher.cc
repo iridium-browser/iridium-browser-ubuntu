@@ -15,7 +15,8 @@ namespace content {
 NotificationDispatcher::NotificationDispatcher(
     ThreadSafeSender* thread_safe_sender)
     : main_thread_loop_proxy_(base::MessageLoopProxy::current()),
-      thread_safe_sender_(thread_safe_sender) {
+      thread_safe_sender_(thread_safe_sender),
+      next_notification_id_(0) {
 }
 
 NotificationDispatcher::~NotificationDispatcher() {}
@@ -54,17 +55,15 @@ bool NotificationDispatcher::OnMessageReceived(const IPC::Message& msg) {
   if (!ShouldHandleMessage(msg))
     return false;
 
-  NotificationManager::ThreadSpecificInstance(thread_safe_sender_.get(), this)
-      ->OnMessageReceived(msg);
+  NotificationManager::ThreadSpecificInstance(
+      thread_safe_sender_.get(),
+      main_thread_loop_proxy_.get(),
+      this)->OnMessageReceived(msg);
   return true;
 }
 
 bool NotificationDispatcher::ShouldHandleMessage(const IPC::Message& msg) {
-  // The thread-safe message filter is responsible for handling all the messages
-  // except for the routed permission-request-completed message, which will be
-  // picked up by the RenderFrameImpl instead.
-  return IPC_MESSAGE_CLASS(msg) == PlatformNotificationMsgStart &&
-         msg.type() != PlatformNotificationMsg_PermissionRequestComplete::ID;
+  return IPC_MESSAGE_CLASS(msg) == PlatformNotificationMsgStart;
 }
 
 }  // namespace content

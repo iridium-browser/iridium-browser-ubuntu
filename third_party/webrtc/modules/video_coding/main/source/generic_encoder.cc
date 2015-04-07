@@ -82,7 +82,7 @@ int32_t VCMGenericEncoder::Release()
 int32_t
 VCMGenericEncoder::InitEncode(const VideoCodec* settings,
                               int32_t numberOfCores,
-                              uint32_t maxPayloadSize)
+                              size_t maxPayloadSize)
 {
     _bitRate = settings->startBitrate * 1000;
     _frameRate = settings->maxFramerate;
@@ -210,19 +210,14 @@ VCMEncodedFrameCallback::SetTransportCallback(VCMPacketizationCallback* transpor
 
 int32_t
 VCMEncodedFrameCallback::Encoded(
-    EncodedImage &encodedImage,
+    const EncodedImage &encodedImage,
     const CodecSpecificInfo* codecSpecificInfo,
     const RTPFragmentationHeader* fragmentationHeader)
 {
     post_encode_callback_->Encoded(encodedImage);
 
-    FrameType frameType = VCMEncodedFrame::ConvertFrameType(encodedImage._frameType);
-
-    uint32_t encodedBytes = 0;
     if (_sendCallback != NULL)
     {
-        encodedBytes = encodedImage._length;
-
 #ifdef DEBUG_ENCODER_BIT_STREAM
         if (_bitStreamAfterEncoder != NULL)
         {
@@ -235,12 +230,8 @@ VCMEncodedFrameCallback::Encoded(
         CopyCodecSpecific(codecSpecificInfo, &rtpVideoHeaderPtr);
 
         int32_t callbackReturn = _sendCallback->SendData(
-            frameType,
             _payloadType,
-            encodedImage._timeStamp,
-            encodedImage.capture_time_ms_,
-            encodedImage._buffer,
-            encodedBytes,
+            encodedImage,
             *fragmentationHeader,
             rtpVideoHeaderPtr);
        if (callbackReturn < 0)
@@ -253,12 +244,9 @@ VCMEncodedFrameCallback::Encoded(
         return VCM_UNINITIALIZED;
     }
     if (_mediaOpt != NULL) {
-      _mediaOpt->UpdateWithEncodedData(encodedBytes, encodedImage._timeStamp,
-                                       frameType);
+      _mediaOpt->UpdateWithEncodedData(encodedImage);
       if (_internalSource)
-      {
-          return _mediaOpt->DropFrame(); // Signal to encoder to drop next frame
-      }
+        return _mediaOpt->DropFrame(); // Signal to encoder to drop next frame.
     }
     return VCM_OK;
 }

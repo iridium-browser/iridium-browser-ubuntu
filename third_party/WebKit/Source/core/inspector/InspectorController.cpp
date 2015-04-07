@@ -34,6 +34,7 @@
 #include "bindings/core/v8/DOMWrapperWorld.h"
 #include "core/InspectorBackendDispatcher.h"
 #include "core/InspectorFrontend.h"
+#include "core/inspector/AsyncCallTracker.h"
 #include "core/inspector/IdentifiersFactory.h"
 #include "core/inspector/InjectedScriptHost.h"
 #include "core/inspector/InjectedScriptManager.h"
@@ -105,14 +106,6 @@ InspectorController::InspectorController(Page* page, InspectorClient* inspectorC
     m_layerTreeAgent = layerTreeAgentPtr.get();
     m_agents.append(layerTreeAgentPtr.release());
 
-    OwnPtrWillBeRawPtr<InspectorWorkerAgent> workerAgentPtr = InspectorWorkerAgent::create();
-
-    OwnPtrWillBeRawPtr<InspectorTracingAgent> tracingAgentPtr = InspectorTracingAgent::create(inspectorClient, workerAgentPtr.get());
-    m_tracingAgent = tracingAgentPtr.get();
-    m_agents.append(tracingAgentPtr.release());
-
-    m_agents.append(workerAgentPtr.release());
-
     OwnPtrWillBeRawPtr<InspectorTimelineAgent> timelineAgentPtr(InspectorTimelineAgent::create(m_pageAgent, m_layerTreeAgent,
         overlay, InspectorTimelineAgent::PageInspector, inspectorClient));
     m_timelineAgent = timelineAgentPtr.get();
@@ -122,7 +115,15 @@ InspectorController::InspectorController(Page* page, InspectorClient* inspectorC
 
     m_agents.append(PageRuntimeAgent::create(injectedScriptManager, inspectorClient, pageScriptDebugServer, m_page, m_pageAgent));
 
-    m_agents.append(PageConsoleAgent::create(injectedScriptManager, m_domAgent, m_timelineAgent, m_page));
+    OwnPtrWillBeRawPtr<PageConsoleAgent> pageConsoleAgentPtr = PageConsoleAgent::create(injectedScriptManager, m_domAgent, m_page);
+    OwnPtrWillBeRawPtr<InspectorWorkerAgent> workerAgentPtr = InspectorWorkerAgent::create(pageConsoleAgentPtr.get());
+
+    OwnPtrWillBeRawPtr<InspectorTracingAgent> tracingAgentPtr = InspectorTracingAgent::create(inspectorClient, workerAgentPtr.get(), page);
+    m_tracingAgent = tracingAgentPtr.get();
+    m_agents.append(tracingAgentPtr.release());
+
+    m_agents.append(workerAgentPtr.release());
+    m_agents.append(pageConsoleAgentPtr.release());
 
     ASSERT_ARG(inspectorClient, inspectorClient);
     m_injectedScriptManager->injectedScriptHost()->init(m_instrumentingAgents.get(), pageScriptDebugServer);
@@ -137,6 +138,8 @@ void InspectorController::trace(Visitor* visitor)
     visitor->trace(m_instrumentingAgents);
     visitor->trace(m_injectedScriptManager);
     visitor->trace(m_state);
+    visitor->trace(m_overlay);
+    visitor->trace(m_asyncCallTracker);
     visitor->trace(m_domAgent);
     visitor->trace(m_animationAgent);
     visitor->trace(m_pageAgent);
@@ -202,6 +205,7 @@ void InspectorController::initializeDeferredAgents()
     OwnPtrWillBeRawPtr<InspectorDebuggerAgent> debuggerAgentPtr(PageDebuggerAgent::create(pageScriptDebugServer, m_pageAgent, injectedScriptManager, overlay));
     InspectorDebuggerAgent* debuggerAgent = debuggerAgentPtr.get();
     m_agents.append(debuggerAgentPtr.release());
+    m_asyncCallTracker = adoptPtrWillBeNoop(new AsyncCallTracker(debuggerAgent, m_instrumentingAgents.get()));
 
     m_agents.append(InspectorDOMDebuggerAgent::create(m_domAgent, debuggerAgent));
 
@@ -288,7 +292,7 @@ void InspectorController::disconnectFrontend()
 
     m_inspectorFrontend.clear();
 
-    // relese overlay page resources
+    // Release overlay page resources
     m_overlay->freePage();
     InspectorInstrumentation::frontendDeleted();
     InspectorInstrumentation::unregisterInstrumentingAgents(m_instrumentingAgents.get());
@@ -470,8 +474,6 @@ void InspectorController::didProcessTask()
         timelineAgent->didProcessTask();
     if (InspectorProfilerAgent* profilerAgent = m_instrumentingAgents->inspectorProfilerAgent())
         profilerAgent->didProcessTask();
-    if (InspectorDOMDebuggerAgent* domDebuggerAgent = m_instrumentingAgents->inspectorDOMDebuggerAgent())
-        domDebuggerAgent->didProcessTask();
 }
 
 void InspectorController::flushPendingFrontendMessages()

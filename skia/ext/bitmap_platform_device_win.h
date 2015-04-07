@@ -35,16 +35,12 @@ class SK_API BitmapPlatformDevice : public SkBitmapDevice, public PlatformDevice
   // for details. If |shared_section| is null, the bitmap backing store is not
   // initialized.
   static BitmapPlatformDevice* Create(int width, int height,
-                                      bool is_opaque, HANDLE shared_section);
+                                      bool is_opaque, HANDLE shared_section,
+                                      bool do_clear = false);
 
   // Create a BitmapPlatformDevice with no shared section. The bitmap is not
   // initialized to 0.
   static BitmapPlatformDevice* Create(int width, int height, bool is_opaque);
-
-  // Creates a BitmapPlatformDevice instance respecting the parameters as above.
-  // If |is_opaque| is false, then the bitmap is initialzed to 0.
-  static BitmapPlatformDevice* CreateAndClear(int width, int height,
-                                              bool is_opaque);
 
   virtual ~BitmapPlatformDevice();
 
@@ -54,13 +50,12 @@ class SK_API BitmapPlatformDevice : public SkBitmapDevice, public PlatformDevice
   virtual PlatformSurface BeginPlatformPaint() override;
   virtual void EndPlatformPaint() override;
 
-  virtual void DrawToNativeContext(HDC dc, int x, int y,
-                                   const RECT* src_rect) override;
-
   // Loads the given transform and clipping region into the HDC. This is
   // overridden from SkBaseDevice.
   virtual void setMatrixClip(const SkMatrix& transform, const SkRegion& region,
                              const SkClipStack&) override;
+
+  void DrawToHDC(HDC dc, int x, int y, const RECT* src_rect) override;
 
  protected:
   // Flushes the Windows device context so that the pixel data can be accessed
@@ -68,8 +63,8 @@ class SK_API BitmapPlatformDevice : public SkBitmapDevice, public PlatformDevice
   // starts accessing pixel data.
   virtual const SkBitmap& onAccessBitmap() override;
 
-  virtual SkBaseDevice* onCreateDevice(const SkImageInfo& info,
-                                       Usage usage) override;
+  virtual SkBaseDevice* onCreateCompatibleDevice(const CreateInfo& info)
+    override;
 
  private:
   // Private constructor.

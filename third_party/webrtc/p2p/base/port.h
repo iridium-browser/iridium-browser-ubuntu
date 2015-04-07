@@ -453,6 +453,10 @@ class Connection : public rtc::MessageHandler,
 
   size_t sent_total_bytes();
   size_t sent_bytes_second();
+  // Used to track how many packets are discarded in the application socket due
+  // to errors.
+  size_t sent_discarded_packets();
+  size_t sent_total_packets();
   size_t recv_total_bytes();
   size_t recv_bytes_second();
   sigslot::signal1<Connection*> SignalStateChange;
@@ -513,6 +517,7 @@ class Connection : public rtc::MessageHandler,
   void ReceivedPing();
 
   // Debugging description of this connection
+  std::string ToDebugId() const;
   std::string ToString() const;
   std::string ToSensitiveString() const;
 
@@ -579,6 +584,8 @@ class Connection : public rtc::MessageHandler,
 
   rtc::RateTracker recv_rate_tracker_;
   rtc::RateTracker send_rate_tracker_;
+  uint32 sent_packets_discarded_;
+  uint32 sent_packets_total_;
 
  private:
   void MaybeAddPrflxCandidate(ConnectionRequest* request,

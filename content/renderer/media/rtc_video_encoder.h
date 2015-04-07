@@ -15,7 +15,7 @@
 #include "content/common/content_export.h"
 #include "media/base/video_decoder_config.h"
 #include "third_party/webrtc/modules/video_coding/codecs/interface/video_codec_interface.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace base {
 
@@ -54,7 +54,7 @@ class CONTENT_EXPORT RTCVideoEncoder
   // appropriate VEA methods.
   int32_t InitEncode(const webrtc::VideoCodec* codec_settings,
                      int32_t number_of_cores,
-                     uint32_t max_payload_size) override;
+                     size_t max_payload_size) override;
   int32_t Encode(
       const webrtc::I420VideoFrame& input_image,
       const webrtc::CodecSpecificInfo* codec_specific_info,

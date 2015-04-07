@@ -26,8 +26,6 @@ class QuicConfigTest : public ::testing::Test {
 };
 
 TEST_F(QuicConfigTest, ToHandshakeMessage) {
-  config_.SetInitialFlowControlWindowToSend(
-      kInitialSessionFlowControlWindowForTest);
   config_.SetInitialStreamFlowControlWindowToSend(
       kInitialStreamFlowControlWindowForTest);
   config_.SetInitialSessionFlowControlWindowToSend(
@@ -47,10 +45,6 @@ TEST_F(QuicConfigTest, ToHandshakeMessage) {
   error = msg.GetUint32(kMSPC, &value);
   EXPECT_EQ(QUIC_NO_ERROR, error);
   EXPECT_EQ(4u, value);
-
-  error = msg.GetUint32(kIFCW, &value);
-  EXPECT_EQ(QUIC_NO_ERROR, error);
-  EXPECT_EQ(kInitialSessionFlowControlWindowForTest, value);
 
   error = msg.GetUint32(kSFCW, &value);
   EXPECT_EQ(QUIC_NO_ERROR, error);
@@ -81,10 +75,7 @@ TEST_F(QuicConfigTest, ProcessClientHello) {
       QuicTime::Delta::FromSeconds(kMaximumIdleTimeoutSecs));
   client_config.SetMaxStreamsPerConnection(
       2 * kDefaultMaxStreamsPerConnection, kDefaultMaxStreamsPerConnection);
-  client_config.SetInitialRoundTripTimeUsToSend(
-      10 * base::Time::kMicrosecondsPerMillisecond);
-  client_config.SetInitialFlowControlWindowToSend(
-      2 * kInitialSessionFlowControlWindowForTest);
+  client_config.SetInitialRoundTripTimeUsToSend(10 * kNumMicrosPerMilli);
   client_config.SetInitialStreamFlowControlWindowToSend(
       2 * kInitialStreamFlowControlWindowForTest);
   client_config.SetInitialSessionFlowControlWindowToSend(
@@ -96,6 +87,7 @@ TEST_F(QuicConfigTest, ProcessClientHello) {
   client_config.SetConnectionOptionsToSend(copt);
   CryptoHandshakeMessage msg;
   client_config.ToHandshakeMessage(&msg);
+
   string error_details;
   const QuicErrorCode error =
       config_.ProcessPeerHello(msg, CLIENT, &error_details);
@@ -106,15 +98,11 @@ TEST_F(QuicConfigTest, ProcessClientHello) {
             config_.IdleConnectionStateLifetime());
   EXPECT_EQ(kDefaultMaxStreamsPerConnection,
             config_.MaxStreamsPerConnection());
-  EXPECT_EQ(QuicTime::Delta::FromSeconds(0), config_.KeepaliveTimeout());
-  EXPECT_EQ(10 * base::Time::kMicrosecondsPerMillisecond,
-            config_.ReceivedInitialRoundTripTimeUs());
+  EXPECT_EQ(10 * kNumMicrosPerMilli, config_.ReceivedInitialRoundTripTimeUs());
   EXPECT_TRUE(config_.HasReceivedConnectionOptions());
   EXPECT_EQ(2u, config_.ReceivedConnectionOptions().size());
   EXPECT_EQ(config_.ReceivedConnectionOptions()[0], kTBBR);
   EXPECT_EQ(config_.ReceivedConnectionOptions()[1], kFHDR);
-  EXPECT_EQ(config_.ReceivedInitialFlowControlWindowBytes(),
-            2 * kInitialSessionFlowControlWindowForTest);
   EXPECT_EQ(config_.ReceivedInitialStreamFlowControlWindowBytes(),
             2 * kInitialStreamFlowControlWindowForTest);
   EXPECT_EQ(config_.ReceivedInitialSessionFlowControlWindowBytes(),
@@ -134,11 +122,7 @@ TEST_F(QuicConfigTest, ProcessServerHello) {
   server_config.SetMaxStreamsPerConnection(
       kDefaultMaxStreamsPerConnection / 2,
       kDefaultMaxStreamsPerConnection / 2);
-  server_config.SetInitialCongestionWindowToSend(kDefaultInitialWindow / 2);
-  server_config.SetInitialRoundTripTimeUsToSend(
-      10 * base::Time::kMicrosecondsPerMillisecond);
-  server_config.SetInitialFlowControlWindowToSend(
-      2 * kInitialSessionFlowControlWindowForTest);
+  server_config.SetInitialRoundTripTimeUsToSend(10 * kNumMicrosPerMilli);
   server_config.SetInitialStreamFlowControlWindowToSend(
       2 * kInitialStreamFlowControlWindowForTest);
   server_config.SetInitialSessionFlowControlWindowToSend(
@@ -156,13 +140,7 @@ TEST_F(QuicConfigTest, ProcessServerHello) {
             config_.IdleConnectionStateLifetime());
   EXPECT_EQ(kDefaultMaxStreamsPerConnection / 2,
             config_.MaxStreamsPerConnection());
-  EXPECT_EQ(kDefaultInitialWindow / 2,
-            config_.ReceivedInitialCongestionWindow());
-  EXPECT_EQ(QuicTime::Delta::FromSeconds(0), config_.KeepaliveTimeout());
-  EXPECT_EQ(10 * base::Time::kMicrosecondsPerMillisecond,
-            config_.ReceivedInitialRoundTripTimeUs());
-  EXPECT_EQ(config_.ReceivedInitialFlowControlWindowBytes(),
-            2 * kInitialSessionFlowControlWindowForTest);
+  EXPECT_EQ(10 * kNumMicrosPerMilli, config_.ReceivedInitialRoundTripTimeUs());
   EXPECT_EQ(config_.ReceivedInitialStreamFlowControlWindowBytes(),
             2 * kInitialStreamFlowControlWindowForTest);
   EXPECT_EQ(config_.ReceivedInitialSessionFlowControlWindowBytes(),
@@ -186,8 +164,7 @@ TEST_F(QuicConfigTest, MissingOptionalValuesInCHLO) {
   const QuicErrorCode error =
       config_.ProcessPeerHello(msg, CLIENT, &error_details);
   EXPECT_EQ(QUIC_NO_ERROR, error);
-
-  EXPECT_FALSE(config_.HasReceivedInitialFlowControlWindowBytes());
+  EXPECT_TRUE(config_.negotiated());
 }
 
 TEST_F(QuicConfigTest, MissingOptionalValuesInSHLO) {
@@ -203,8 +180,7 @@ TEST_F(QuicConfigTest, MissingOptionalValuesInSHLO) {
   const QuicErrorCode error =
       config_.ProcessPeerHello(msg, SERVER, &error_details);
   EXPECT_EQ(QUIC_NO_ERROR, error);
-
-  EXPECT_FALSE(config_.HasReceivedInitialFlowControlWindowBytes());
+  EXPECT_TRUE(config_.negotiated());
 }
 
 TEST_F(QuicConfigTest, MissingValueInCHLO) {
@@ -277,12 +253,12 @@ TEST_F(QuicConfigTest, InvalidFlowControlWindow) {
   // QuicConfig should not accept an invalid flow control window to send to the
   // peer: the receive window must be at least the default of 16 Kb.
   QuicConfig config;
-  const uint64 kInvalidWindow = kDefaultFlowControlSendWindow - 1;
-  EXPECT_DFATAL(config.SetInitialFlowControlWindowToSend(kInvalidWindow),
-                "Initial flow control receive window");
+  const uint64 kInvalidWindow = kMinimumFlowControlSendWindow - 1;
+  EXPECT_DFATAL(config.SetInitialStreamFlowControlWindowToSend(kInvalidWindow),
+                "Initial stream flow control receive window");
 
-  EXPECT_EQ(kDefaultFlowControlSendWindow,
-            config.GetInitialFlowControlWindowToSend());
+  EXPECT_EQ(kMinimumFlowControlSendWindow,
+            config.GetInitialStreamFlowControlWindowToSend());
 }
 
 }  // namespace

@@ -14,14 +14,19 @@
 #include "base/mac/scoped_nsobject.h"
 #include "base/prefs/pref_service.h"
 #include "base/run_loop.h"
+#include "base/strings/sys_string_conversions.h"
+#include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "components/bookmarks/browser/bookmark_model.h"
 #import "chrome/browser/app_controller_mac.h"
 #include "chrome/browser/apps/app_browsertest_util.h"
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/cocoa/bookmarks/bookmark_menu_bridge.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/user_manager.h"
@@ -30,8 +35,11 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/ui_test_utils.h"
+#include "components/bookmarks/test/bookmark_test_helpers.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "extensions/browser/app_window/app_window_registry.h"
 #include "extensions/common/extension.h"
@@ -98,7 +106,7 @@ class AppControllerPlatformAppBrowserTest
                                 chrome::GetActiveDesktop())) {
   }
 
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     PlatformAppBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitchASCII(switches::kAppId,
                                     "1234");
@@ -154,7 +162,7 @@ class AppControllerWebAppBrowserTest : public InProcessBrowserTest {
                                 chrome::GetActiveDesktop())) {
   }
 
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitchASCII(switches::kApp, GetAppURL());
   }
 
@@ -215,7 +223,7 @@ class AppControllerNewProfileManagementBrowserTest
                                 chrome::GetActiveDesktop())) {
   }
 
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     switches::EnableNewProfileManagementForTesting(command_line);
   }
 
@@ -354,7 +362,7 @@ class AppControllerOpenShortcutBrowserTest : public InProcessBrowserTest {
     g_open_shortcut_url = embedded_test_server()->GetURL("/simple.html");
   }
 
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     // If the arg is empty, PrepareTestCommandLine() after this function will
     // append about:blank as default url.
     command_line->AppendArg(chrome::kChromeUINewTabURL);
@@ -377,7 +385,7 @@ class AppControllerReplaceNTPBrowserTest : public InProcessBrowserTest {
     ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
   }
 
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     // If the arg is empty, PrepareTestCommandLine() after this function will
     // append about:blank as default url.
     command_line->AppendArg(chrome::kChromeUINewTabURL);
@@ -410,6 +418,207 @@ IN_PROC_BROWSER_TEST_F(AppControllerReplaceNTPBrowserTest,
                 ->tab_strip_model()
                 ->GetActiveWebContents()
                 ->GetLastCommittedURL());
+}
+
+class AppControllerMainMenuBrowserTest : public InProcessBrowserTest {
+ protected:
+  AppControllerMainMenuBrowserTest() {
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(AppControllerMainMenuBrowserTest,
+    BookmarksMenuIsRestoredAfterProfileSwitch) {
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+  base::scoped_nsobject<AppController> ac([[AppController alloc] init]);
+  [ac awakeFromNib];
+
+  // Constants for bookmarks that we will create later.
+  const base::string16 title1(base::ASCIIToUTF16("Dinosaur Comics"));
+  const GURL url1("http://qwantz.com//");
+
+  const base::string16 title2(base::ASCIIToUTF16("XKCD"));
+  const GURL url2("https://www.xkcd.com/");
+
+  // Use the existing profile as profile 1.
+  Profile* profile1 = browser()->profile();
+  bookmarks::test::WaitForBookmarkModelToLoad(
+      BookmarkModelFactory::GetForProfile(profile1));
+
+  // Create profile 2.
+  base::FilePath path2 = profile_manager->GenerateNextProfileDirectoryPath();
+  Profile* profile2 =
+      Profile::CreateProfile(path2, NULL, Profile::CREATE_MODE_SYNCHRONOUS);
+  profile_manager->RegisterTestingProfile(profile2, false, true);
+  bookmarks::test::WaitForBookmarkModelToLoad(
+      BookmarkModelFactory::GetForProfile(profile2));
+
+  // Switch to profile 1, create bookmark 1 and force the menu to build.
+  [ac windowChangedToProfile:profile1];
+  [ac bookmarkMenuBridge]->GetBookmarkModel()->AddURL(
+      [ac bookmarkMenuBridge]->GetBookmarkModel()->bookmark_bar_node(),
+      0, title1, url1);
+  [ac bookmarkMenuBridge]->BuildMenu();
+
+  // Switch to profile 2, create bookmark 2 and force the menu to build.
+  [ac windowChangedToProfile:profile2];
+  [ac bookmarkMenuBridge]->GetBookmarkModel()->AddURL(
+      [ac bookmarkMenuBridge]->GetBookmarkModel()->bookmark_bar_node(),
+      0, title2, url2);
+  [ac bookmarkMenuBridge]->BuildMenu();
+
+  // Test that only bookmark 2 is shown.
+  EXPECT_FALSE([[ac bookmarkMenuBridge]->BookmarkMenu() itemWithTitle:
+      SysUTF16ToNSString(title1)]);
+  EXPECT_TRUE([[ac bookmarkMenuBridge]->BookmarkMenu() itemWithTitle:
+      SysUTF16ToNSString(title2)]);
+
+  // Switch *back* to profile 1 and *don't* force the menu to build.
+  [ac windowChangedToProfile:profile1];
+
+  // Test that only bookmark 1 is shown in the restored menu.
+  EXPECT_TRUE([[ac bookmarkMenuBridge]->BookmarkMenu() itemWithTitle:
+      SysUTF16ToNSString(title1)]);
+  EXPECT_FALSE([[ac bookmarkMenuBridge]->BookmarkMenu() itemWithTitle:
+      SysUTF16ToNSString(title2)]);
+}
+
+}  // namespace
+
+//--------------------------AppControllerHandoffBrowserTest---------------------
+
+static GURL g_handoff_url;
+
+@interface AppController (BrowserTest)
+- (BOOL)new_shouldUseHandoff;
+- (void)new_passURLToHandoffManager:(const GURL&)handoffURL;
+@end
+
+@implementation AppController (BrowserTest)
+- (BOOL)new_shouldUseHandoff {
+  return YES;
+}
+
+- (void)new_passURLToHandoffManager:(const GURL&)handoffURL {
+  g_handoff_url = handoffURL;
+}
+@end
+
+namespace {
+
+class AppControllerHandoffBrowserTest : public InProcessBrowserTest {
+ protected:
+  AppControllerHandoffBrowserTest() {}
+
+  // Exchanges the implementations of the two selectors on the class
+  // AppController.
+  void ExchangeSelectors(SEL originalMethod, SEL newMethod) {
+    Class appControllerClass = NSClassFromString(@"AppController");
+
+    ASSERT_TRUE(appControllerClass != nil);
+
+    Method original =
+        class_getInstanceMethod(appControllerClass, originalMethod);
+    Method destination = class_getInstanceMethod(appControllerClass, newMethod);
+
+    ASSERT_TRUE(original != NULL);
+    ASSERT_TRUE(destination != NULL);
+
+    method_exchangeImplementations(original, destination);
+  }
+
+  // Swizzle Handoff related implementations.
+  void SetUpInProcessBrowserTestFixture() override {
+    // Handoff is only available on OSX 10.10+. This swizzle makes the logic
+    // run on all OSX versions.
+    SEL originalMethod = @selector(shouldUseHandoff);
+    SEL newMethod = @selector(new_shouldUseHandoff);
+    ExchangeSelectors(originalMethod, newMethod);
+
+    // This swizzle intercepts the URL that would be sent to the Handoff
+    // Manager, and instead puts it into a variable accessible to this test.
+    originalMethod = @selector(passURLToHandoffManager:);
+    newMethod = @selector(new_passURLToHandoffManager:);
+    ExchangeSelectors(originalMethod, newMethod);
+  }
+
+  // Closes the tab, and waits for the close to finish.
+  void CloseTab(Browser* browser, int index) {
+    content::WebContentsDestroyedWatcher destroyed_watcher(
+        browser->tab_strip_model()->GetWebContentsAt(index));
+    browser->tab_strip_model()->CloseWebContentsAt(
+        index, TabStripModel::CLOSE_CREATE_HISTORICAL_TAB);
+    destroyed_watcher.Wait();
+  }
+};
+
+// Tests that as a user switches between tabs, navigates within a tab, and
+// switches between browser windows, the correct URL is being passed to the
+// Handoff.
+IN_PROC_BROWSER_TEST_F(AppControllerHandoffBrowserTest, TestHandoffURLs) {
+  ASSERT_TRUE(embedded_test_server()->InitializeAndWaitUntilReady());
+  EXPECT_EQ(g_handoff_url, GURL(url::kAboutBlankURL));
+
+  // Test that navigating to a URL updates the handoff URL.
+  GURL test_url1 = embedded_test_server()->GetURL("/title1.html");
+  ui_test_utils::NavigateToURL(browser(), test_url1);
+  EXPECT_EQ(g_handoff_url, test_url1);
+
+  // Test that opening a new tab updates the handoff URL.
+  GURL test_url2 = embedded_test_server()->GetURL("/title2.html");
+  chrome::NavigateParams params(browser(), test_url2, ui::PAGE_TRANSITION_LINK);
+  params.disposition = NEW_FOREGROUND_TAB;
+  ui_test_utils::NavigateToURL(&params);
+  EXPECT_EQ(g_handoff_url, test_url2);
+
+  // Test that switching tabs updates the handoff URL.
+  browser()->tab_strip_model()->ActivateTabAt(0, true);
+  EXPECT_EQ(g_handoff_url, test_url1);
+
+  // Test that closing the current tab updates the handoff URL.
+  CloseTab(browser(), 0);
+  EXPECT_EQ(g_handoff_url, test_url2);
+
+  // Test that opening a new browser window updates the handoff URL.
+  GURL test_url3 = embedded_test_server()->GetURL("/title3.html");
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), GURL(test_url3), NEW_WINDOW,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_BROWSER);
+  EXPECT_EQ(g_handoff_url, test_url3);
+
+  // Check that there are exactly 2 browsers.
+  BrowserList* active_browser_list =
+      BrowserList::GetInstance(chrome::GetActiveDesktop());
+  EXPECT_EQ(2u, active_browser_list->size());
+
+  // Close the one and only tab for the second browser window.
+  Browser* browser2 = active_browser_list->get(1);
+  CloseTab(browser2, 0);
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(g_handoff_url, test_url2);
+
+  // The URLs of incognito windows should not be passed to Handoff.
+  GURL test_url4 = embedded_test_server()->GetURL("/simple.html");
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), GURL(test_url4), OFF_THE_RECORD,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_BROWSER);
+  EXPECT_EQ(g_handoff_url, GURL());
+
+  // Open a new tab in the incognito window.
+  EXPECT_EQ(2u, active_browser_list->size());
+  Browser* browser3 = active_browser_list->get(1);
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser3, test_url4, NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_TAB);
+  EXPECT_EQ(g_handoff_url, GURL());
+
+  // Navigate the current tab in the incognito window.
+  ui_test_utils::NavigateToURL(browser3, test_url1);
+  EXPECT_EQ(g_handoff_url, GURL());
+
+  // Activate the original browser window.
+  Browser* browser1 = active_browser_list->get(0);
+  browser1->window()->Show();
+  EXPECT_EQ(g_handoff_url, test_url2);
 }
 
 }  // namespace

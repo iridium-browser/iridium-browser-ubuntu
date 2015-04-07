@@ -33,7 +33,7 @@ namespace gfx {
 
 namespace {
 
-const wchar_t kD3DCompiler[] = L"D3DCompiler_46.dll";
+const wchar_t kD3DCompiler[] = L"D3DCompiler_47.dll";
 
 void GL_BINDING_CALL MarshalClearDepthToClearDepthf(GLclampd depth) {
   glClearDepthf(static_cast<GLclampf>(depth));
@@ -162,7 +162,8 @@ bool InitializeStaticGLBindings(GLImplementation implementation) {
       LoadD3DXLibrary(module_path, kD3DCompiler);
 
       base::FilePath gles_path;
-      const CommandLine* command_line = CommandLine::ForCurrentProcess();
+      const base::CommandLine* command_line =
+          base::CommandLine::ForCurrentProcess();
       bool using_swift_shader =
           command_line->GetSwitchValueASCII(switches::kUseGL) == "swiftshader";
       if (using_swift_shader) {

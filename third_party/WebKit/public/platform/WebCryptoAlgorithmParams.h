@@ -33,6 +33,7 @@
 
 #include "WebCommon.h"
 #include "WebCryptoAlgorithm.h"
+#include "WebCryptoKey.h"
 #include "WebVector.h"
 
 namespace blink {
@@ -121,12 +122,31 @@ private:
 
 class WebCryptoHmacImportParams : public WebCryptoAlgorithmParamsWithHash {
 public:
+    // FIXME: Remove this constructor once it is no longer used by Chromium. http://crbug.com/431085
     explicit WebCryptoHmacImportParams(const WebCryptoAlgorithm& hash)
         : WebCryptoAlgorithmParamsWithHash(hash)
+        , m_hasLengthBits(false)
+        , m_optionalLengthBits(0)
     {
     }
 
+    WebCryptoHmacImportParams(const WebCryptoAlgorithm& hash, bool hasLengthBits, unsigned lengthBits)
+        : WebCryptoAlgorithmParamsWithHash(hash)
+        , m_hasLengthBits(hasLengthBits)
+        , m_optionalLengthBits(lengthBits)
+    {
+        BLINK_ASSERT(hasLengthBits || !lengthBits);
+    }
+
     virtual WebCryptoAlgorithmParamsType type() const { return WebCryptoAlgorithmParamsTypeHmacImportParams; }
+
+    bool hasLengthBits() const { return m_hasLengthBits; }
+
+    unsigned optionalLengthBits() const { return m_optionalLengthBits; }
+
+private:
+    const bool m_hasLengthBits;
+    const unsigned m_optionalLengthBits;
 };
 
 class WebCryptoHmacKeyGenParams : public WebCryptoAlgorithmParamsWithHash {
@@ -245,6 +265,76 @@ public:
 
 private:
     const unsigned m_saltLengthBytes;
+};
+
+class WebCryptoEcdsaParams : public WebCryptoAlgorithmParamsWithHash {
+public:
+    explicit WebCryptoEcdsaParams(const WebCryptoAlgorithm& hash)
+        : WebCryptoAlgorithmParamsWithHash(hash)
+    {
+    }
+
+    virtual WebCryptoAlgorithmParamsType type() const { return WebCryptoAlgorithmParamsTypeEcdsaParams; }
+};
+
+class WebCryptoEcKeyGenParams : public WebCryptoAlgorithmParams {
+public:
+    explicit WebCryptoEcKeyGenParams(WebCryptoNamedCurve namedCurve)
+        : m_namedCurve(namedCurve)
+    {
+    }
+
+    virtual WebCryptoAlgorithmParamsType type() const { return WebCryptoAlgorithmParamsTypeEcKeyGenParams; }
+
+    WebCryptoNamedCurve namedCurve() const { return m_namedCurve; }
+
+private:
+    const WebCryptoNamedCurve m_namedCurve;
+};
+
+class WebCryptoEcKeyImportParams : public WebCryptoAlgorithmParams {
+public:
+    explicit WebCryptoEcKeyImportParams(WebCryptoNamedCurve namedCurve)
+        : m_namedCurve(namedCurve)
+    {
+    }
+
+    virtual WebCryptoAlgorithmParamsType type() const { return WebCryptoAlgorithmParamsTypeEcKeyImportParams; }
+
+    WebCryptoNamedCurve namedCurve() const { return m_namedCurve; }
+
+private:
+    const WebCryptoNamedCurve m_namedCurve;
+};
+
+class WebCryptoEcdhKeyDeriveParams : public WebCryptoAlgorithmParams {
+public:
+    explicit WebCryptoEcdhKeyDeriveParams(const WebCryptoKey& publicKey)
+        : m_publicKey(publicKey)
+    {
+    }
+
+    virtual WebCryptoAlgorithmParamsType type() const { return WebCryptoAlgorithmParamsTypeEcdhKeyDeriveParams; }
+
+    const WebCryptoKey publicKey() const { return m_publicKey; }
+
+private:
+    const WebCryptoKey m_publicKey;
+};
+
+class WebCryptoAesDerivedKeyParams : public WebCryptoAlgorithmParams {
+public:
+    explicit WebCryptoAesDerivedKeyParams(unsigned short lengthBits)
+        : m_lengthBits(lengthBits)
+    {
+    }
+
+    virtual WebCryptoAlgorithmParamsType type() const override { return WebCryptoAlgorithmParamsTypeAesDerivedKeyParams; }
+
+    unsigned short lengthBits() const { return m_lengthBits; }
+
+private:
+    const unsigned short m_lengthBits;
 };
 
 } // namespace blink

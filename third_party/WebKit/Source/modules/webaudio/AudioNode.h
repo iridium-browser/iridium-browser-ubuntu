@@ -49,22 +49,11 @@ class ExceptionState;
 // An AudioDestinationNode has one input and no outputs and represents the final destination to the audio hardware.
 // Most processing nodes such as filters will have one input and one output, although multiple inputs and outputs are possible.
 
-class AudioNode : public RefCountedGarbageCollectedWillBeGarbageCollectedFinalized<AudioNode>, public EventTargetWithInlineData {
+class AudioNode : public RefCountedGarbageCollectedEventTargetWithInlineData<AudioNode> {
     DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollected<AudioNode>);
     DEFINE_WRAPPERTYPEINFO();
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(AudioNode);
 public:
     enum { ProcessingSizeInFrames = 128 };
-
-    AudioNode(AudioContext*, float sampleRate);
-    virtual ~AudioNode();
-    // dispose() is called just before the destructor. This must be called in
-    // the main thread, and while the graph lock is held.
-    virtual void dispose();
-    static unsigned instanceCount() { return s_instanceCount; }
-
-    AudioContext* context() { return m_context.get(); }
-    const AudioContext* context() const { return m_context.get(); }
 
     enum NodeType {
         NodeTypeUnknown,
@@ -77,6 +66,7 @@ public:
         NodeTypeJavaScript,
         NodeTypeBiquadFilter,
         NodeTypePanner,
+        NodeTypeStereoPanner,
         NodeTypeConvolver,
         NodeTypeDelay,
         NodeTypeGain,
@@ -88,6 +78,16 @@ public:
         NodeTypeEnd
     };
 
+    AudioNode(NodeType, AudioContext*, float sampleRate);
+    virtual ~AudioNode();
+    // dispose() is called just before the destructor. This must be called in
+    // the main thread, and while the graph lock is held.
+    virtual void dispose();
+    static unsigned instanceCount() { return s_instanceCount; }
+
+    AudioContext* context() { return m_context.get(); }
+    const AudioContext* context() const { return m_context.get(); }
+
     enum ChannelCountMode {
         Max,
         ClampedMax,
@@ -96,7 +96,6 @@ public:
 
     NodeType nodeType() const { return m_nodeType; }
     String nodeTypeName() const;
-    void setNodeType(NodeType);
 
     // This object has been connected to another object. This might have
     // existing connections from others.
@@ -209,6 +208,8 @@ protected:
     void updateChannelsForInputs();
 
 private:
+    void setNodeType(NodeType);
+
     volatile bool m_isInitialized;
     NodeType m_nodeType;
     Member<AudioContext> m_context;

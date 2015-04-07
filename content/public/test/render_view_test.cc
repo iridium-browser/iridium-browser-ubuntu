@@ -22,6 +22,7 @@
 #include "content/renderer/renderer_blink_platform_impl.h"
 #include "content/renderer/renderer_main_platform_delegate.h"
 #include "content/renderer/scheduler/renderer_scheduler.h"
+#include "content/test/fake_compositor_dependencies.h"
 #include "content/test/mock_render_process.h"
 #include "content/test/test_content_client.h"
 #include "third_party/WebKit/public/platform/WebScreenInfo.h"
@@ -162,7 +163,7 @@ void RenderViewTest::SetUp() {
 #if defined(OS_MACOSX)
   autorelease_pool_.reset(new base::mac::ScopedNSAutoreleasePool());
 #endif
-  command_line_.reset(new CommandLine(CommandLine::NO_PROGRAM));
+  command_line_.reset(new base::CommandLine(base::CommandLine::NO_PROGRAM));
   params_.reset(new MainFunctionParams(*command_line_));
   platform_.reset(new RendererMainPlatformDelegate(*params_));
   platform_->PlatformInitialize();
@@ -185,30 +186,33 @@ void RenderViewTest::SetUp() {
     ui::ResourceBundle::InitSharedInstanceWithLocale(
         "en-US", NULL, ui::ResourceBundle::LOAD_COMMON_RESOURCES);
 
+  compositor_deps_.reset(new FakeCompositorDependencies);
   mock_process_.reset(new MockRenderProcess);
+
+  ViewMsg_New_Params view_params;
+  view_params.opener_route_id = kOpenerId;
+  view_params.window_was_created_with_opener = false;
+  view_params.renderer_preferences = RendererPreferences();
+  view_params.web_preferences = WebPreferences();
+  view_params.view_id = kRouteId;
+  view_params.main_frame_routing_id = kMainFrameRouteId;
+  view_params.surface_id = kSurfaceId;
+  view_params.session_storage_namespace_id = kInvalidSessionStorageNamespaceId;
+  view_params.frame_name = base::string16();
+  view_params.swapped_out = false;
+  view_params.replicated_frame_state = FrameReplicationState();
+  view_params.proxy_routing_id = MSG_ROUTING_NONE;
+  view_params.hidden = false;
+  view_params.never_visible = false;
+  view_params.next_page_id = 1;
+  view_params.initial_size = *InitialSizeParams();
+  view_params.enable_auto_resize = false;
+  view_params.min_size = gfx::Size();
+  view_params.max_size = gfx::Size();
 
   // This needs to pass the mock render thread to the view.
   RenderViewImpl* view =
-      RenderViewImpl::Create(kOpenerId,
-                             false,  // window_was_created_with_opener
-                             RendererPreferences(),
-                             WebPreferences(),
-                             kRouteId,
-                             kMainFrameRouteId,
-                             kSurfaceId,
-                             kInvalidSessionStorageNamespaceId,
-                             base::string16(),
-                             false,  // is_renderer_created
-                             false,  // swapped_out
-                             MSG_ROUTING_NONE, // proxy_routing_id
-                             false,  // hidden
-                             false,  // never_visible
-                             1,      // next_page_id
-                             *InitialSizeParams(),
-                             false, // enable_auto_resize
-                             gfx::Size(), // min_size
-                             gfx::Size() // max_size
-                            );
+      RenderViewImpl::Create(view_params, compositor_deps_.get(), false);
   view->AddRef();
   view_ = view;
 }
@@ -336,14 +340,6 @@ void RenderViewTest::SetFocused(const blink::WebNode& node) {
   impl->focusedNodeChanged(node);
 }
 
-void RenderViewTest::ClearHistory() {
-  RenderViewImpl* impl = static_cast<RenderViewImpl*>(view_);
-  impl->page_id_ = -1;
-  impl->history_list_offset_ = -1;
-  impl->history_list_length_ = 0;
-  impl->history_page_ids_.clear();
-}
-
 void RenderViewTest::Reload(const GURL& url) {
   FrameMsg_Navigate_Params params;
   params.common_params.url = url;
@@ -364,7 +360,8 @@ void RenderViewTest::Resize(gfx::Size new_size,
   params.screen_info = blink::WebScreenInfo();
   params.new_size = new_size;
   params.physical_backing_size = new_size;
-  params.top_controls_layout_height = 0.f;
+  params.top_controls_height = 0.f;
+  params.top_controls_shrink_blink_size = false;
   params.resizer_rect = resizer_rect;
   params.is_fullscreen = is_fullscreen;
   scoped_ptr<IPC::Message> resize_message(new ViewMsg_Resize(0, params));
@@ -420,14 +417,14 @@ void RenderViewTest::GoToOffset(int offset, const PageState& state) {
 
   int history_list_length = impl->historyBackListCount() +
                             impl->historyForwardListCount() + 1;
-  int pending_offset = offset + impl->history_list_offset();
+  int pending_offset = offset + impl->history_list_offset_;
 
   FrameMsg_Navigate_Params navigate_params;
   navigate_params.common_params.navigation_type =
       FrameMsg_Navigate_Type::NORMAL;
   navigate_params.common_params.transition = ui::PAGE_TRANSITION_FORWARD_BACK;
   navigate_params.current_history_list_length = history_list_length;
-  navigate_params.current_history_list_offset = impl->history_list_offset();
+  navigate_params.current_history_list_offset = impl->history_list_offset_;
   navigate_params.pending_history_list_offset = pending_offset;
   navigate_params.page_id = impl->page_id_ + offset;
   navigate_params.commit_params.page_state = state;

@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/values.h"
+#include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_view.h"
 #include "content/public/renderer/v8_value_converter.h"
 #include "extensions/common/extension.h"
@@ -46,10 +47,10 @@ RuntimeCustomBindings::~RuntimeCustomBindings() {
 
 void RuntimeCustomBindings::OpenChannelToExtension(
     const v8::FunctionCallbackInfo<v8::Value>& args) {
-  // Get the current RenderView so that we can send a routed IPC message from
+  // Get the current RenderFrame so that we can send a routed IPC message from
   // the correct source.
-  content::RenderView* renderview = context()->GetRenderView();
-  if (!renderview)
+  content::RenderFrame* renderframe = context()->GetRenderFrame();
+  if (!renderframe)
     return;
 
   // The Javascript code should validate/fill the arguments.
@@ -64,18 +65,15 @@ void RuntimeCustomBindings::OpenChannelToExtension(
   if (extension && !extension->is_hosted_app())
     info.source_id = extension->id();
 
-  info.target_id = *v8::String::Utf8Value(args[0]->ToString());
+  info.target_id = *v8::String::Utf8Value(args[0]);
   info.source_url = context()->GetURL();
-  std::string channel_name = *v8::String::Utf8Value(args[1]->ToString());
+  std::string channel_name = *v8::String::Utf8Value(args[1]);
   bool include_tls_channel_id =
       args.Length() > 2 ? args[2]->BooleanValue() : false;
   int port_id = -1;
-  renderview->Send(
-      new ExtensionHostMsg_OpenChannelToExtension(renderview->GetRoutingID(),
-                                                  info,
-                                                  channel_name,
-                                                  include_tls_channel_id,
-                                                  &port_id));
+  renderframe->Send(new ExtensionHostMsg_OpenChannelToExtension(
+      renderframe->GetRoutingID(), info, channel_name, include_tls_channel_id,
+      &port_id));
   args.GetReturnValue().Set(static_cast<int32_t>(port_id));
 }
 
@@ -100,8 +98,8 @@ void RuntimeCustomBindings::OpenChannelToNativeApp(
   // The Javascript code should validate/fill the arguments.
   CHECK(args.Length() >= 2 && args[0]->IsString() && args[1]->IsString());
 
-  std::string extension_id = *v8::String::Utf8Value(args[0]->ToString());
-  std::string native_app_name = *v8::String::Utf8Value(args[1]->ToString());
+  std::string extension_id = *v8::String::Utf8Value(args[0]);
+  std::string native_app_name = *v8::String::Utf8Value(args[1]);
 
   int port_id = -1;
   renderview->Send(new ExtensionHostMsg_OpenChannelToNativeApp(
@@ -130,7 +128,7 @@ void RuntimeCustomBindings::GetExtensionViews(
   // all views for the current extension.
   int browser_window_id = args[0]->Int32Value();
 
-  std::string view_type_string = *v8::String::Utf8Value(args[1]->ToString());
+  std::string view_type_string = *v8::String::Utf8Value(args[1]);
   StringToUpperASCII(&view_type_string);
   // |view_type| == VIEW_TYPE_INVALID means getting any type of
   // views.

@@ -29,26 +29,33 @@ public:
 
     static PassRefPtr<ThisType> create(PassRefPtr<WTFTypedArray> bufferView)
     {
-        if (!bufferView.get())
-            return nullptr;
         return adoptRef(new ThisType(bufferView));
     }
     static PassRefPtr<ThisType> create(unsigned length)
     {
-        return adoptRef(new ThisType(WTFTypedArray::create(length)));
+        return create(WTFTypedArray::create(length));
     }
     static PassRefPtr<ThisType> create(const ValueType* array, unsigned length)
     {
-        return adoptRef(new ThisType(WTFTypedArray::create(array, length)));
+        return create(WTFTypedArray::create(array, length));
     }
     static PassRefPtr<ThisType> create(PassRefPtr<WTF::ArrayBuffer> buffer, unsigned byteOffset, unsigned length)
     {
-        return adoptRef(new ThisType(WTFTypedArray::create(buffer, byteOffset, length)));
+        return create(WTFTypedArray::create(buffer, byteOffset, length));
     }
     static PassRefPtr<ThisType> create(PassRefPtr<DOMArrayBuffer> prpBuffer, unsigned byteOffset, unsigned length)
     {
         RefPtr<DOMArrayBuffer> buffer = prpBuffer;
-        return adoptRef(new ThisType(WTFTypedArray::create(buffer->buffer(), byteOffset, length), buffer));
+        RefPtr<WTFTypedArray> bufferView = WTFTypedArray::create(buffer->buffer(), byteOffset, length);
+        return adoptRef(new ThisType(bufferView.release(), buffer.release()));
+    }
+
+    static PassRefPtr<ThisType> createOrNull(unsigned length)
+    {
+        RefPtr<WTFTypedArray> bufferView = WTFTypedArray::createOrNull(length);
+        if (!bufferView)
+            return nullptr;
+        return create(bufferView.release());
     }
 
     const WTFTypedArray* view() const { return static_cast<const WTFTypedArray*>(DOMArrayBufferView::view()); }
@@ -56,9 +63,17 @@ public:
 
     ValueType* data() const { return view()->data(); }
     unsigned length() const { return view()->length(); }
+    bool setRange(const ValueType* data, size_t dataLength, unsigned offset)
+    {
+        return view()->setRange(data, dataLength, offset);
+    }
+    bool zeroRange(unsigned offset, size_t length)
+    {
+        return view()->zeroRange(offset, length);
+    }
 
     virtual v8::Handle<v8::Object> wrap(v8::Handle<v8::Object> creationContext, v8::Isolate*) override;
-    virtual v8::Handle<v8::Object> associateWithWrapper(const WrapperTypeInfo*, v8::Handle<v8::Object> wrapper, v8::Isolate*) override;
+    virtual v8::Handle<v8::Object> associateWithWrapper(v8::Isolate*, const WrapperTypeInfo*, v8::Handle<v8::Object> wrapper) override;
 
 private:
     explicit DOMTypedArray(PassRefPtr<WTFTypedArray> bufferView)

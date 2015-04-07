@@ -27,7 +27,8 @@ class InstrumentationTestRunnerTest(unittest.TestCase):
     options = mock.Mock()
     options.tool = ''
     package = mock.Mock()
-    self.instance = test_runner.TestRunner(options, None, 0, package)
+    self.instance = test_runner.TestRunner(
+        options, '123456789abcdef0', 0, package)
 
   def testParseAmInstrumentRawOutput_nothing(self):
     code, result, statuses = (
@@ -144,7 +145,7 @@ class InstrumentationTestRunnerTest(unittest.TestCase):
     self.assertEqual('test.package.TestClass#testMethod', result.GetName())
     self.assertEqual(base_test_result.ResultType.UNKNOWN, result.GetType())
     self.assertEqual('', result.GetLog())
-    self.assertEqual(1000, result.GetDur())
+    self.assertEqual(1000, result.GetDuration())
 
   def testGenerateTestResult_testPassed(self):
     statuses = [
@@ -226,6 +227,8 @@ class InstrumentationTestRunnerTest(unittest.TestCase):
         'test': ['testMethod'],
       }),
     ]
+    self.instance.device.old_interface.DismissCrashDialogIfNeeded = mock.Mock(
+        return_value=None)
     result = self.instance._GenerateTestResult(
         'test.package.TestClass#testMethod', statuses, 0, 1000)
     self.assertEqual(base_test_result.ResultType.FAIL, result.GetType())
@@ -253,17 +256,18 @@ class InstrumentationTestRunnerTest(unittest.TestCase):
 
   def test_RunTest_verifyAdbShellCommand(self):
     self.instance.options.test_runner = 'MyTestRunner'
-    self.instance.device.RunShellCommand = mock.Mock()
+    self.instance.device.StartInstrumentation = mock.Mock()
     self.instance.test_pkg.GetPackageName = mock.Mock(
         return_value='test.package')
     self.instance._GetInstrumentationArgs = mock.Mock(
         return_value={'test_arg_key': 'test_arg_value'})
     self.instance._RunTest('test.package.TestClass#testMethod', 100)
-    self.instance.device.RunShellCommand.assert_called_with(
-        ['am', 'instrument', '-r',
-         '-e', 'test_arg_key', 'test_arg_value',
-         '-e', 'class', 'test.package.TestClass#testMethod',
-         '-w', 'test.package/MyTestRunner'],
+    self.instance.device.StartInstrumentation.assert_called_with(
+        'test.package/MyTestRunner', raw=True,
+        extras={
+            'test_arg_key': 'test_arg_value',
+            'class': 'test.package.TestClass#testMethod'
+        },
         timeout=100, retries=0)
 
 if __name__ == '__main__':

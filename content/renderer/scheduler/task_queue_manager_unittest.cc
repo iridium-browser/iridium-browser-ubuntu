@@ -7,7 +7,9 @@
 #include "base/test/test_simple_task_runner.h"
 #include "base/threading/thread.h"
 #include "content/renderer/scheduler/task_queue_selector.h"
-#include "testing/gtest/include/gtest/gtest.h"
+#include "testing/gmock/include/gmock/gmock.h"
+
+using testing::ElementsAre;
 
 namespace content {
 namespace {
@@ -37,6 +39,9 @@ class SelectorForTest : public TaskQueueSelector {
     return work_queues_;
   }
 
+  void AsValueInto(base::debug::TracedValue* state) const override {
+  }
+
  private:
   std::deque<size_t> queues_to_service_;
   std::vector<const base::TaskQueue*> work_queues_;
@@ -53,10 +58,32 @@ class TaskQueueManagerTest : public testing::Test {
         new TaskQueueManager(num_queues, test_task_runner_, selector_.get()));
   }
 
+  void InitializeWithRealMessageLoop(size_t num_queues) {
+    message_loop_.reset(new base::MessageLoop());
+    selector_ = make_scoped_ptr(new SelectorForTest);
+    manager_ = make_scoped_ptr(new TaskQueueManager(
+        num_queues, message_loop_->task_runner(), selector_.get()));
+  }
+
   scoped_refptr<base::TestSimpleTaskRunner> test_task_runner_;
   scoped_ptr<SelectorForTest> selector_;
   scoped_ptr<TaskQueueManager> manager_;
+  scoped_ptr<base::MessageLoop> message_loop_;
 };
+
+void PostFromNestedRunloop(base::MessageLoop* message_loop,
+                           base::SingleThreadTaskRunner* runner,
+                           std::vector<std::pair<base::Closure, bool>>* tasks) {
+  base::MessageLoop::ScopedNestableTaskAllower allow(message_loop);
+  for (std::pair<base::Closure, bool>& pair : *tasks) {
+    if (pair.second) {
+      runner->PostTask(FROM_HERE, pair.first);
+    } else {
+      runner->PostNonNestableTask(FROM_HERE, pair.first);
+    }
+  }
+  message_loop->RunUntilIdle();
+}
 
 void TestTask(int value, std::vector<int>* out_result) {
   out_result->push_back(value);
@@ -79,9 +106,7 @@ TEST_F(TaskQueueManagerTest, SingleQueuePosting) {
   selector_->AppendQueueToService(0);
 
   test_task_runner_->RunUntilIdle();
-  EXPECT_EQ(1, run_order[0]);
-  EXPECT_EQ(2, run_order[1]);
-  EXPECT_EQ(3, run_order[2]);
+  EXPECT_THAT(run_order, ElementsAre(1, 2, 3));
 }
 
 TEST_F(TaskQueueManagerTest, MultiQueuePosting) {
@@ -109,27 +134,83 @@ TEST_F(TaskQueueManagerTest, MultiQueuePosting) {
   runners[2]->PostTask(FROM_HERE, base::Bind(&TestTask, 6, &run_order));
 
   test_task_runner_->RunUntilIdle();
-  EXPECT_EQ(1, run_order[0]);
-  EXPECT_EQ(3, run_order[1]);
-  EXPECT_EQ(5, run_order[2]);
-  EXPECT_EQ(2, run_order[3]);
-  EXPECT_EQ(4, run_order[4]);
-  EXPECT_EQ(6, run_order[5]);
+  EXPECT_THAT(run_order, ElementsAre(1, 3, 5, 2, 4, 6));
 }
 
 TEST_F(TaskQueueManagerTest, NonNestableTaskPosting) {
-  Initialize(1u);
+  InitializeWithRealMessageLoop(1u);
   EXPECT_EQ(1u, selector_->work_queues().size());
 
   std::vector<int> run_order;
   scoped_refptr<base::SingleThreadTaskRunner> runner =
       manager_->TaskRunnerForQueue(0);
 
+  selector_->AppendQueueToService(0);
+
   runner->PostNonNestableTask(FROM_HERE, base::Bind(&TestTask, 1, &run_order));
 
-  // Non-nestable tasks never make it to the selector.
-  test_task_runner_->RunUntilIdle();
-  EXPECT_EQ(1, run_order[0]);
+  message_loop_->RunUntilIdle();
+  EXPECT_THAT(run_order, ElementsAre(1));
+}
+
+TEST_F(TaskQueueManagerTest, NonNestableTaskExecutesInExpectedOrder) {
+  InitializeWithRealMessageLoop(1u);
+  EXPECT_EQ(1u, selector_->work_queues().size());
+
+  std::vector<int> run_order;
+  scoped_refptr<base::SingleThreadTaskRunner> runner =
+      manager_->TaskRunnerForQueue(0);
+
+  selector_->AppendQueueToService(0);
+  selector_->AppendQueueToService(0);
+  selector_->AppendQueueToService(0);
+  selector_->AppendQueueToService(0);
+  selector_->AppendQueueToService(0);
+
+  runner->PostTask(FROM_HERE, base::Bind(&TestTask, 1, &run_order));
+  runner->PostTask(FROM_HERE, base::Bind(&TestTask, 2, &run_order));
+  runner->PostTask(FROM_HERE, base::Bind(&TestTask, 3, &run_order));
+  runner->PostTask(FROM_HERE, base::Bind(&TestTask, 4, &run_order));
+  runner->PostNonNestableTask(FROM_HERE, base::Bind(&TestTask, 5, &run_order));
+
+  message_loop_->RunUntilIdle();
+  EXPECT_THAT(run_order, ElementsAre(1, 2, 3, 4, 5));
+}
+
+TEST_F(TaskQueueManagerTest, NonNestableTaskDoesntExecuteInNestedLoop) {
+  InitializeWithRealMessageLoop(1u);
+  EXPECT_EQ(1u, selector_->work_queues().size());
+
+  std::vector<int> run_order;
+  scoped_refptr<base::SingleThreadTaskRunner> runner =
+      manager_->TaskRunnerForQueue(0);
+
+  selector_->AppendQueueToService(0);
+  selector_->AppendQueueToService(0);
+  selector_->AppendQueueToService(0);
+  selector_->AppendQueueToService(0);
+  selector_->AppendQueueToService(0);
+  selector_->AppendQueueToService(0);
+
+  runner->PostTask(FROM_HERE, base::Bind(&TestTask, 1, &run_order));
+  runner->PostTask(FROM_HERE, base::Bind(&TestTask, 2, &run_order));
+
+  std::vector<std::pair<base::Closure, bool>> tasks_to_post_from_nested_loop;
+  tasks_to_post_from_nested_loop.push_back(
+      std::make_pair(base::Bind(&TestTask, 3, &run_order), false));
+  tasks_to_post_from_nested_loop.push_back(
+      std::make_pair(base::Bind(&TestTask, 4, &run_order), true));
+  tasks_to_post_from_nested_loop.push_back(
+      std::make_pair(base::Bind(&TestTask, 5, &run_order), true));
+
+  runner->PostTask(
+      FROM_HERE,
+      base::Bind(&PostFromNestedRunloop, message_loop_.get(), runner,
+                 base::Unretained(&tasks_to_post_from_nested_loop)));
+
+  message_loop_->RunUntilIdle();
+  // Note we expect task 3 to run last because it's non-nestable.
+  EXPECT_THAT(run_order, ElementsAre(1, 2, 4, 5, 3));
 }
 
 TEST_F(TaskQueueManagerTest, QueuePolling) {
@@ -172,7 +253,7 @@ TEST_F(TaskQueueManagerTest, DelayedTaskPosting) {
   // After the delay the task runs normally.
   selector_->AppendQueueToService(0);
   test_task_runner_->RunUntilIdle();
-  EXPECT_EQ(1, run_order[0]);
+  EXPECT_THAT(run_order, ElementsAre(1));
 }
 
 TEST_F(TaskQueueManagerTest, ManualPumping) {
@@ -196,7 +277,7 @@ TEST_F(TaskQueueManagerTest, ManualPumping) {
   EXPECT_TRUE(test_task_runner_->HasPendingTask());
   selector_->AppendQueueToService(0);
   test_task_runner_->RunUntilIdle();
-  EXPECT_EQ(1, run_order[0]);
+  EXPECT_THAT(run_order, ElementsAre(1));
 }
 
 TEST_F(TaskQueueManagerTest, ManualPumpingToggle) {
@@ -217,7 +298,7 @@ TEST_F(TaskQueueManagerTest, ManualPumpingToggle) {
   EXPECT_TRUE(test_task_runner_->HasPendingTask());
   selector_->AppendQueueToService(0);
   test_task_runner_->RunUntilIdle();
-  EXPECT_EQ(1, run_order[0]);
+  EXPECT_THAT(run_order, ElementsAre(1));
 }
 
 TEST_F(TaskQueueManagerTest, DenyRunning) {
@@ -237,7 +318,7 @@ TEST_F(TaskQueueManagerTest, DenyRunning) {
   manager_->PumpQueue(0);
   selector_->AppendQueueToService(0);
   test_task_runner_->RunUntilIdle();
-  EXPECT_EQ(1, run_order[0]);
+  EXPECT_THAT(run_order, ElementsAre(1));
 }
 
 TEST_F(TaskQueueManagerTest, ManualPumpingWithDelayedTask) {
@@ -261,7 +342,7 @@ TEST_F(TaskQueueManagerTest, ManualPumpingWithDelayedTask) {
   EXPECT_TRUE(test_task_runner_->HasPendingTask());
   selector_->AppendQueueToService(0);
   test_task_runner_->RunUntilIdle();
-  EXPECT_EQ(1, run_order[0]);
+  EXPECT_THAT(run_order, ElementsAre(1));
 }
 
 TEST_F(TaskQueueManagerTest, ManualPumpingWithNonEmptyWorkQueue) {
@@ -307,9 +388,7 @@ TEST_F(TaskQueueManagerTest, ReentrantPosting) {
   selector_->AppendQueueToService(0);
 
   test_task_runner_->RunUntilIdle();
-  EXPECT_EQ(3, run_order[0]);
-  EXPECT_EQ(2, run_order[1]);
-  EXPECT_EQ(1, run_order[2]);
+  EXPECT_THAT(run_order, ElementsAre(3, 2, 1));
 }
 
 TEST_F(TaskQueueManagerTest, NoTasksAfterShutdown) {
@@ -334,10 +413,7 @@ void PostTaskToRunner(scoped_refptr<base::SingleThreadTaskRunner> runner,
 }
 
 TEST_F(TaskQueueManagerTest, PostFromThread) {
-  base::MessageLoop message_loop;
-  selector_ = make_scoped_ptr(new SelectorForTest);
-  manager_ = make_scoped_ptr(
-      new TaskQueueManager(1u, message_loop.task_runner(), selector_.get()));
+  InitializeWithRealMessageLoop(1u);
 
   std::vector<int> run_order;
   scoped_refptr<base::SingleThreadTaskRunner> runner =
@@ -350,8 +426,58 @@ TEST_F(TaskQueueManagerTest, PostFromThread) {
   thread.Stop();
 
   selector_->AppendQueueToService(0);
-  message_loop.RunUntilIdle();
-  EXPECT_EQ(1, run_order[0]);
+  message_loop_->RunUntilIdle();
+  EXPECT_THAT(run_order, ElementsAre(1));
+}
+
+void RePostingTestTask(scoped_refptr<base::SingleThreadTaskRunner> runner) {
+  runner->PostTask(
+      FROM_HERE, Bind(&RePostingTestTask, base::Unretained(runner.get())));
+}
+
+TEST_F(TaskQueueManagerTest, DoWorkCantPostItselfMultipleTimes) {
+  Initialize(1u);
+
+  scoped_refptr<base::SingleThreadTaskRunner> runner =
+      manager_->TaskRunnerForQueue(0);
+
+  runner->PostTask(FROM_HERE, base::Bind(&RePostingTestTask, runner));
+
+  selector_->AppendQueueToService(0);
+  selector_->AppendQueueToService(0);
+  selector_->AppendQueueToService(0);
+
+  test_task_runner_->RunPendingTasks();
+  // NOTE without the executing_task_ check in MaybePostDoWorkOnMainRunner there
+  // will be two tasks here.
+  EXPECT_EQ(1u, test_task_runner_->GetPendingTasks().size());
+}
+
+TEST_F(TaskQueueManagerTest, PostFromNestedRunloop) {
+  InitializeWithRealMessageLoop(1u);
+
+  selector_->AppendQueueToService(0);
+  selector_->AppendQueueToService(0);
+  selector_->AppendQueueToService(0);
+  selector_->AppendQueueToService(0);
+
+  std::vector<int> run_order;
+  scoped_refptr<base::SingleThreadTaskRunner> runner =
+      manager_->TaskRunnerForQueue(0);
+
+  std::vector<std::pair<base::Closure, bool>> tasks_to_post_from_nested_loop;
+  tasks_to_post_from_nested_loop.push_back(
+      std::make_pair(base::Bind(&TestTask, 1, &run_order), true));
+
+  runner->PostTask(FROM_HERE, base::Bind(&TestTask, 0, &run_order));
+  runner->PostTask(
+      FROM_HERE, base::Bind(&PostFromNestedRunloop, message_loop_.get(), runner,
+                            base::Unretained(&tasks_to_post_from_nested_loop)));
+  runner->PostTask(FROM_HERE, base::Bind(&TestTask, 2, &run_order));
+
+  message_loop_->RunUntilIdle();
+
+  EXPECT_THAT(run_order, ElementsAre(0, 2, 1));
 }
 
 }  // namespace

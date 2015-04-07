@@ -387,12 +387,19 @@ CapturePreconnectsSocketPool<ParentPool>::CapturePreconnectsSocketPool(
     : ParentPool(0, 0, nullptr, host_resolver, nullptr, nullptr),
       last_num_streams_(-1) {}
 
-template<>
+template <>
 CapturePreconnectsHttpProxySocketPool::CapturePreconnectsSocketPool(
-    HostResolver* host_resolver, CertVerifier* /* cert_verifier */)
-    : HttpProxyClientSocketPool(
-          0, 0, nullptr, host_resolver, nullptr, nullptr, nullptr, nullptr),
-      last_num_streams_(-1) {}
+    HostResolver* host_resolver,
+    CertVerifier* /* cert_verifier */)
+    : HttpProxyClientSocketPool(0,
+                                0,
+                                nullptr,
+                                host_resolver,
+                                nullptr,
+                                nullptr,
+                                nullptr),
+      last_num_streams_(-1) {
+}
 
 template <>
 CapturePreconnectsSSLSocketPool::CapturePreconnectsSocketPool(
@@ -403,16 +410,17 @@ CapturePreconnectsSSLSocketPool::CapturePreconnectsSocketPool(
                           nullptr,  // ssl_histograms
                           host_resolver,
                           cert_verifier,
-                          nullptr,           // channel_id_store
-                          nullptr,           // transport_security_state
-                          nullptr,           // cert_transparency_verifier
+                          nullptr,        // channel_id_store
+                          nullptr,        // transport_security_state
+                          nullptr,        // cert_transparency_verifier
+                          nullptr,        // cert_policy_enforcer
                           std::string(),  // ssl_session_cache_shard
-                          nullptr,           // deterministic_socket_factory
-                          nullptr,           // transport_socket_pool
+                          nullptr,        // deterministic_socket_factory
+                          nullptr,        // transport_socket_pool
                           nullptr,
                           nullptr,
                           nullptr,   // ssl_config_service
-                          false,  // enable_ssl_connect_job_waiting
+                          false,     // enable_ssl_connect_job_waiting
                           nullptr),  // net_log
       last_num_streams_(-1) {
 }
@@ -424,8 +432,7 @@ class HttpStreamFactoryTest : public ::testing::Test,
 INSTANTIATE_TEST_CASE_P(
     NextProto,
     HttpStreamFactoryTest,
-    testing::Values(kProtoDeprecatedSPDY2,
-                    kProtoSPDY3, kProtoSPDY31, kProtoSPDY4));
+    testing::Values(kProtoSPDY31, kProtoSPDY4_14, kProtoSPDY4_15));
 
 TEST_P(HttpStreamFactoryTest, PreconnectDirect) {
   for (size_t i = 0; i < arraysize(kTests); ++i) {

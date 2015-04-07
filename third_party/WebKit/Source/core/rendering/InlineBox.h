@@ -44,7 +44,7 @@ public:
         , m_prev(0)
         , m_parent(0)
         , m_renderer(obj)
-        , m_logicalWidth(ZERO_LAYOUT_UNIT)
+        , m_logicalWidth()
 #if ENABLE(ASSERT)
         , m_hasBadParent(false)
 #endif
@@ -99,7 +99,7 @@ public:
             adjustPosition(delta, 0);
     }
 
-    virtual void paint(PaintInfo&, const LayoutPoint&, LayoutUnit lineTop, LayoutUnit lineBottom);
+    virtual void paint(const PaintInfo&, const LayoutPoint&, LayoutUnit lineTop, LayoutUnit lineBottom);
     virtual bool nodeAtPoint(const HitTestRequest&, HitTestResult&, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, LayoutUnit lineTop, LayoutUnit lineBottom);
 
     // InlineBoxes are allocated out of the rendering partition.
@@ -131,7 +131,7 @@ public:
     virtual FloatWillBeLayoutUnit virtualLogicalHeight() const
     {
         ASSERT_NOT_REACHED();
-        return ZERO_LAYOUT_UNIT;
+        return FloatWillBeLayoutUnit();
     }
 
     bool isHorizontal() const { return m_bitfields.isHorizontal(); }
@@ -219,9 +219,9 @@ public:
             setY(left);
     }
     int pixelSnappedLogicalLeft() const { return logicalLeft(); }
-    int pixelSnappedLogicalRight() const { return LAYOUT_UNIT_CEIL(logicalRight()); }
+    int pixelSnappedLogicalRight() const { return ceilf(logicalRight()); }
     int pixelSnappedLogicalTop() const { return logicalTop(); }
-    int pixelSnappedLogicalBottom() const { return LAYOUT_UNIT_CEIL(logicalBottom()); }
+    int pixelSnappedLogicalBottom() const { return ceilf(logicalBottom()); }
 
     // The logicalTop[ position is the top edge of the line box in a horizontal line and the left edge in a vertical line.
     FloatWillBeLayoutUnit logicalTop() const { return isHorizontal() ? m_topLeft.y() : m_topLeft.x(); }

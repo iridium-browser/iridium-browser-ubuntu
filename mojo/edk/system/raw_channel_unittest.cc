@@ -38,11 +38,9 @@ scoped_ptr<MessageInTransit> MakeTestMessage(uint32_t num_bytes) {
   std::vector<unsigned char> bytes(num_bytes, 0);
   for (size_t i = 0; i < num_bytes; i++)
     bytes[i] = static_cast<unsigned char>(i + num_bytes);
-  return make_scoped_ptr(
-      new MessageInTransit(MessageInTransit::kTypeMessagePipeEndpoint,
-                           MessageInTransit::kSubtypeMessagePipeEndpointData,
-                           num_bytes,
-                           bytes.empty() ? nullptr : &bytes[0]));
+  return make_scoped_ptr(new MessageInTransit(
+      MessageInTransit::kTypeEndpoint, MessageInTransit::kSubtypeEndpointData,
+      num_bytes, bytes.empty() ? nullptr : &bytes[0]));
 }
 
 bool CheckMessageData(const void* bytes, uint32_t num_bytes) {
@@ -63,8 +61,8 @@ bool WriteTestMessageToHandle(const embedder::PlatformHandle& handle,
   scoped_ptr<MessageInTransit> message(MakeTestMessage(num_bytes));
 
   size_t write_size = 0;
-  mojo::test::BlockingWrite(
-      handle, message->main_buffer(), message->main_buffer_size(), &write_size);
+  mojo::test::BlockingWrite(handle, message->main_buffer(),
+                            message->main_buffer_size(), &write_size);
   return write_size == message->main_buffer_size();
 }
 
@@ -135,8 +133,8 @@ class TestMessageReaderAndChecker {
 
     for (size_t i = 0; i < kMessageReaderMaxPollIterations;) {
       size_t read_size = 0;
-      CHECK(mojo::test::NonBlockingRead(
-          handle_, buffer, sizeof(buffer), &read_size));
+      CHECK(mojo::test::NonBlockingRead(handle_, buffer, sizeof(buffer),
+                                        &read_size));
 
       // Append newly-read data to |bytes_|.
       bytes_.insert(bytes_.end(), buffer, buffer + read_size);
@@ -144,8 +142,7 @@ class TestMessageReaderAndChecker {
       // If we have the header....
       size_t message_size;
       if (MessageInTransit::GetNextMessageSize(
-              bytes_.empty() ? nullptr : &bytes_[0],
-              bytes_.size(),
+              bytes_.empty() ? nullptr : &bytes_[0], bytes_.size(),
               &message_size)) {
         // If we've read the whole message....
         if (bytes_.size() >= message_size) {
@@ -378,16 +375,14 @@ TEST_F(RawChannelTest, WriteMessageAndOnReadMessage) {
   WriteOnlyRawChannelDelegate writer_delegate;
   scoped_ptr<RawChannel> writer_rc(RawChannel::Create(handles[0].Pass()));
   io_thread()->PostTaskAndWait(FROM_HERE,
-                               base::Bind(&InitOnIOThread,
-                                          writer_rc.get(),
+                               base::Bind(&InitOnIOThread, writer_rc.get(),
                                           base::Unretained(&writer_delegate)));
 
   ReadCountdownRawChannelDelegate reader_delegate(kNumWriterThreads *
                                                   kNumWriteMessagesPerThread);
   scoped_ptr<RawChannel> reader_rc(RawChannel::Create(handles[1].Pass()));
   io_thread()->PostTaskAndWait(FROM_HERE,
-                               base::Bind(&InitOnIOThread,
-                                          reader_rc.get(),
+                               base::Bind(&InitOnIOThread, reader_rc.get(),
                                           base::Unretained(&reader_delegate)));
 
   {

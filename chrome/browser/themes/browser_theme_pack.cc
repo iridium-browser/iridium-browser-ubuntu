@@ -26,12 +26,12 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/codec/png_codec.h"
+#include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/image/canvas_image_source.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/screen.h"
-#include "ui/gfx/size_conversions.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/resources/grit/ui_resources.h"
 
@@ -91,7 +91,7 @@ struct PersistingImagesTable {
 
   // String to check for when parsing theme manifests or NULL if this isn't
   // supposed to be changeable by the user.
-  const char* key;
+  const char* const key;
 };
 
 // IDR_* resource names change whenever new resources are added; use persistent
@@ -204,8 +204,7 @@ int GetPersistentIDByNameHelper(const std::string& key,
                                 const PersistingImagesTable* image_table,
                                 size_t image_table_size) {
   for (size_t i = 0; i < image_table_size; ++i) {
-    if (image_table[i].key != NULL &&
-        base::strcasecmp(key.c_str(), image_table[i].key) == 0) {
+    if (image_table[i].key && LowerCaseEqualsASCII(key, image_table[i].key)) {
       return image_table[i].persistent_id;
     }
   }
@@ -286,7 +285,7 @@ std::string GetScaleFactorsAsString(
 }
 
 struct StringToIntTable {
-  const char* key;
+  const char* const key;
   ThemeProperties::OverwritableByUserThemeProperty id;
 };
 
@@ -340,7 +339,7 @@ int GetIntForString(const std::string& key,
                     StringToIntTable* table,
                     size_t table_length) {
   for (size_t i = 0; i < table_length; ++i) {
-    if (base::strcasecmp(key.c_str(), table[i].key) == 0) {
+    if (LowerCaseEqualsASCII(key, table[i].key)) {
       return table[i].id;
     }
   }
@@ -779,18 +778,18 @@ scoped_refptr<BrowserThemePack> BrowserThemePack::BuildFromDataPack(
 }
 
 // static
-void BrowserThemePack::GetThemeableImageIDRs(std::set<int>* result) {
-  if (!result)
-    return;
-
-  result->clear();
+bool BrowserThemePack::IsPersistentImageID(int id) {
   for (size_t i = 0; i < kPersistingImagesLength; ++i)
-    result->insert(kPersistingImages[i].idr_id);
+    if (kPersistingImages[i].idr_id == id)
+      return true;
 
 #if defined(USE_ASH) && !defined(OS_CHROMEOS)
   for (size_t i = 0; i < kPersistingImagesDesktopAuraLength; ++i)
-    result->insert(kPersistingImagesDesktopAura[i].idr_id);
+    if (kPersistingImagesDesktopAura[i].idr_id == id)
+      return true;
 #endif
+
+  return false;
 }
 
 bool BrowserThemePack::WriteToDisk(const base::FilePath& path) const {
@@ -959,8 +958,8 @@ void BrowserThemePack::BuildHeader(const Extension* extension) {
   // is that ui::DataPack removes this same check.
 #if defined(__BYTE_ORDER)
   // Linux check
-  COMPILE_ASSERT(__BYTE_ORDER == __LITTLE_ENDIAN,
-                 datapack_assumes_little_endian);
+  static_assert(__BYTE_ORDER == __LITTLE_ENDIAN,
+                "datapack assumes little endian");
 #elif defined(__BIG_ENDIAN__)
   // Mac check
   #error DataPack assumes little endian

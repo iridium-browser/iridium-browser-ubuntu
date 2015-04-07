@@ -38,7 +38,6 @@
 namespace blink {
 
 class ResourceRequest;
-class WebCString;
 class WebHTTPBody;
 class WebHTTPHeaderVisitor;
 class WebString;
@@ -121,6 +120,15 @@ public:
         FetchCredentialsModeOmit,
         FetchCredentialsModeSameOrigin,
         FetchCredentialsModeInclude
+    };
+
+    // Used to report performance metrics timed from the UI action that
+    // triggered them (as opposed to navigation start time used in the
+    // Navigation Timing API).
+    enum InputToLoadPerfMetricReportPolicy {
+        NoReport, // Don't report metrics for this WebURLRequest.
+        ReportLink, // Report metrics with UI action link clicked.
+        ReportIntent, // Report metrics with UI action displayed intent.
     };
 
     class ExtraData {
@@ -224,9 +232,17 @@ public:
     BLINK_PLATFORM_EXPORT bool downloadToFile() const;
     BLINK_PLATFORM_EXPORT void setDownloadToFile(bool);
 
+    // True if the requestor wants to receive the response body as a stream.
+    BLINK_PLATFORM_EXPORT bool useStreamOnResponse() const;
+    BLINK_PLATFORM_EXPORT void setUseStreamOnResponse(bool);
+
     // True if the request should not be handled by the ServiceWorker.
     BLINK_PLATFORM_EXPORT bool skipServiceWorker() const;
     BLINK_PLATFORM_EXPORT void setSkipServiceWorker(bool);
+
+    // True if corresponding AppCache group should be resetted.
+    BLINK_PLATFORM_EXPORT bool shouldResetAppCache() const;
+    BLINK_PLATFORM_EXPORT void setShouldResetAppCache(bool);
 
     // The request mode which will be passed to the ServiceWorker.
     BLINK_PLATFORM_EXPORT FetchRequestMode fetchRequestMode() const;
@@ -247,6 +263,21 @@ public:
 
     BLINK_PLATFORM_EXPORT Priority priority() const;
     BLINK_PLATFORM_EXPORT void setPriority(Priority);
+
+    // PlzNavigate: whether the FrameLoader should try to send the request to
+    // the browser (if browser-side navigations are enabled).
+    // Note: WebURLRequests created by RenderFrameImpl::OnCommitNavigation must
+    // not be sent to the browser.
+    BLINK_PLATFORM_EXPORT bool checkForBrowserSideNavigation() const;
+    BLINK_PLATFORM_EXPORT void setCheckForBrowserSideNavigation(bool);
+
+    // This is used to report navigation metrics starting from the UI action
+    // that triggered the navigation (which can be different from the navigation
+    // start time used in the Navigation Timing API).
+    BLINK_PLATFORM_EXPORT double uiStartTime() const;
+    BLINK_PLATFORM_EXPORT void setUiStartTime(double);
+    BLINK_PLATFORM_EXPORT WebURLRequest::InputToLoadPerfMetricReportPolicy inputPerfMetricReportPolicy() const;
+    BLINK_PLATFORM_EXPORT void setInputPerfMetricReportPolicy(WebURLRequest::InputToLoadPerfMetricReportPolicy);
 
 #if INSIDE_BLINK
     BLINK_PLATFORM_EXPORT ResourceRequest& toMutableResourceRequest();

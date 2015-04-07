@@ -27,9 +27,6 @@
 #include "chrome/browser/safe_browsing/client_side_detection_service.h"
 #include "chrome/browser/safe_browsing/database_manager.h"
 #include "chrome/browser/safe_browsing/download_protection_service.h"
-#include "chrome/browser/safe_browsing/incident_reporting/binary_integrity_analyzer.h"
-#include "chrome/browser/safe_browsing/incident_reporting/blacklist_load_analyzer.h"
-#include "chrome/browser/safe_browsing/incident_reporting/incident_reporting_service.h"
 #include "chrome/browser/safe_browsing/malware_details.h"
 #include "chrome/browser/safe_browsing/ping_manager.h"
 #include "chrome/browser/safe_browsing/protocol_manager.h"
@@ -54,9 +51,12 @@
 #include "chrome/installer/util/browser_distribution.h"
 #endif
 
-#if defined(OS_ANDROID)
-#include <string>
-#include "base/metrics/field_trial.h"
+#if defined(FULL_SAFE_BROWSING)
+#include "chrome/browser/safe_browsing/incident_reporting/binary_integrity_analyzer.h"
+#include "chrome/browser/safe_browsing/incident_reporting/blacklist_load_analyzer.h"
+#include "chrome/browser/safe_browsing/incident_reporting/incident_reporting_service.h"
+#include "chrome/browser/safe_browsing/incident_reporting/off_domain_inclusion_detector.h"
+#include "chrome/browser/safe_browsing/incident_reporting/variations_seed_signature_analyzer.h"
 #endif
 
 using content::BrowserThread;
@@ -187,14 +187,6 @@ SafeBrowsingService* SafeBrowsingService::CreateSafeBrowsingService() {
   return factory_->CreateSafeBrowsingService();
 }
 
-#if defined(OS_ANDROID) && defined(FULL_SAFE_BROWSING)
-// static
-bool SafeBrowsingService::IsEnabledByFieldTrial() {
-  const std::string experiment_name =
-      base::FieldTrialList::FindFullName("SafeBrowsingAndroid");
-  return experiment_name == "Enabled";
-}
-#endif
 
 SafeBrowsingService::SafeBrowsingService()
     : protocol_manager_(NULL),
@@ -227,7 +219,7 @@ void SafeBrowsingService::Initialize() {
 
 #if defined(FULL_SAFE_BROWSING)
 #if !defined(OS_ANDROID)
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisableClientSidePhishingDetection)) {
     csd_service_.reset(safe_browsing::ClientSideDetectionService::Create(
         url_request_context_getter_.get()));
@@ -240,6 +232,9 @@ void SafeBrowsingService::Initialize() {
     incident_service_.reset(new safe_browsing::IncidentReportingService(
         this, url_request_context_getter_));
   }
+
+  off_domain_inclusion_detector_.reset(
+      new safe_browsing::OffDomainInclusionDetector);
 #endif
 
   // Track the safe browsing preference of existing profiles.
@@ -280,7 +275,12 @@ void SafeBrowsingService::ShutDown() {
   // dtor executes now since it may call the dtor of URLFetcher which relies
   // on it.
   csd_service_.reset();
+
+#if defined(FULL_SAFE_BROWSING)
+  off_domain_inclusion_detector_.reset();
   incident_service_.reset();
+#endif
+
   download_service_.reset();
 
   url_request_context_getter_ = NULL;
@@ -339,19 +339,26 @@ SafeBrowsingService::CreatePreferenceValidationDelegate(
   return scoped_ptr<TrackedPreferenceValidationDelegate>();
 }
 
+#if defined(FULL_SAFE_BROWSING)
 void SafeBrowsingService::RegisterDelayedAnalysisCallback(
     const safe_browsing::DelayedAnalysisCallback& callback) {
-#if defined(FULL_SAFE_BROWSING)
   if (incident_service_)
     incident_service_->RegisterDelayedAnalysisCallback(callback);
-#endif
 }
+#endif
 
 void SafeBrowsingService::AddDownloadManager(
     content::DownloadManager* download_manager) {
 #if defined(FULL_SAFE_BROWSING)
   if (incident_service_)
     incident_service_->AddDownloadManager(download_manager);
+#endif
+}
+
+void SafeBrowsingService::OnResourceRequest(const net::URLRequest* request) {
+#if defined(FULL_SAFE_BROWSING)
+  if (off_domain_inclusion_detector_)
+    off_domain_inclusion_detector_->OnResourceRequest(request);
 #endif
 }
 
@@ -371,6 +378,7 @@ void SafeBrowsingService::RegisterAllDelayedAnalysis() {
 #if defined(FULL_SAFE_BROWSING)
   safe_browsing::RegisterBinaryIntegrityAnalysis();
   safe_browsing::RegisterBlacklistLoadAnalysis();
+  safe_browsing::RegisterVariationsSeedSignatureAnalysis();
 #else
   NOTREACHED();
 #endif
@@ -435,7 +443,7 @@ SafeBrowsingProtocolConfig SafeBrowsingService::GetProtocolConfig() const {
 #endif
 
 #endif  // defined(OS_WIN)
-  CommandLine* cmdline = CommandLine::ForCurrentProcess();
+  base::CommandLine* cmdline = base::CommandLine::ForCurrentProcess();
   config.disable_auto_update =
       cmdline->HasSwitch(switches::kSbDisableAutoUpdate) ||
       cmdline->HasSwitch(switches::kDisableBackgroundNetworking);

@@ -13,6 +13,7 @@
 #include "crypto/encryptor.h"
 #include "crypto/symmetric_key.h"
 #include "media/base/audio_decoder_config.h"
+#include "media/base/cdm_key_information.h"
 #include "media/base/cdm_promise.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/decrypt_config.h"
@@ -245,11 +246,12 @@ void AesDecryptor::SetServerCertificate(const uint8* certificate_data,
       NOT_SUPPORTED_ERROR, 0, "SetServerCertificate() is not supported.");
 }
 
-void AesDecryptor::CreateSession(const std::string& init_data_type,
-                                 const uint8* init_data,
-                                 int init_data_length,
-                                 SessionType session_type,
-                                 scoped_ptr<NewSessionCdmPromise> promise) {
+void AesDecryptor::CreateSessionAndGenerateRequest(
+    SessionType session_type,
+    const std::string& init_data_type,
+    const uint8* init_data,
+    int init_data_length,
+    scoped_ptr<NewSessionCdmPromise> promise) {
   std::string web_session_id(base::UintToString(next_web_session_id_++));
   valid_sessions_.insert(web_session_id);
 
@@ -263,10 +265,13 @@ void AesDecryptor::CreateSession(const std::string& init_data_type,
 
   promise->resolve(web_session_id);
 
-  session_message_cb_.Run(web_session_id, message, GURL());
+  // No URL needed for license requests.
+  session_message_cb_.Run(web_session_id, LICENSE_REQUEST, message,
+                          GURL::EmptyGURL());
 }
 
-void AesDecryptor::LoadSession(const std::string& web_session_id,
+void AesDecryptor::LoadSession(SessionType session_type,
+                               const std::string& web_session_id,
                                scoped_ptr<NewSessionCdmPromise> promise) {
   // TODO(xhwang): Change this to NOTREACHED() when blink checks for key systems
   // that do not support loadSession. See http://crbug.com/342481
@@ -293,21 +298,21 @@ void AesDecryptor::UpdateSession(const std::string& web_session_id,
   SessionType session_type = MediaKeys::TEMPORARY_SESSION;
   if (!ExtractKeysFromJWKSet(key_string, &keys, &session_type)) {
     promise->reject(
-        INVALID_ACCESS_ERROR, 0, "response is not a valid JSON Web Key Set.");
+        INVALID_ACCESS_ERROR, 0, "Response is not a valid JSON Web Key Set.");
     return;
   }
 
   // Make sure that at least one key was extracted.
   if (keys.empty()) {
     promise->reject(
-        INVALID_ACCESS_ERROR, 0, "response does not contain any keys.");
+        INVALID_ACCESS_ERROR, 0, "Response does not contain any keys.");
     return;
   }
 
   for (KeyIdAndKeyPairs::iterator it = keys.begin(); it != keys.end(); ++it) {
     if (it->second.length() !=
         static_cast<size_t>(DecryptConfig::kDecryptionKeySize)) {
-      DVLOG(1) << "Invalid key length: " << key_string.length();
+      DVLOG(1) << "Invalid key length: " << it->second.length();
       promise->reject(INVALID_ACCESS_ERROR, 0, "Invalid key length.");
       return;
     }
@@ -329,9 +334,22 @@ void AesDecryptor::UpdateSession(const std::string& web_session_id,
 
   promise->resolve();
 
+  // Create the list of all available keys for this session.
+  CdmKeysInfo keys_info;
+  base::AutoLock auto_lock(key_map_lock_);
+  for (const auto& item : key_map_) {
+    if (item.second->Contains(web_session_id)) {
+      scoped_ptr<CdmKeyInformation> key_info(new CdmKeyInformation);
+      key_info->key_id.assign(item.first.begin(), item.first.end());
+      key_info->status = CdmKeyInformation::USABLE;
+      key_info->system_code = 0;
+      keys_info.push_back(key_info.release());
+    }
+  }
+
   // Assume that at least 1 new key has been successfully added and thus
-  // sending true.
-  session_keys_change_cb_.Run(web_session_id, true);
+  // sending true for |has_additional_usable_key|.
+  session_keys_change_cb_.Run(web_session_id, true, keys_info.Pass());
 }
 
 void AesDecryptor::CloseSession(const std::string& web_session_id,
@@ -367,21 +385,8 @@ void AesDecryptor::RemoveSession(const std::string& web_session_id,
   promise->reject(INVALID_ACCESS_ERROR, 0, "Session does not exist.");
 }
 
-void AesDecryptor::GetUsableKeyIds(const std::string& web_session_id,
-                                   scoped_ptr<KeyIdsPromise> promise) {
-  // Since |web_session_id| is not provided by the user, this should never
-  // happen.
-  DCHECK(valid_sessions_.find(web_session_id) != valid_sessions_.end());
-
-  KeyIdsVector keyids;
-  base::AutoLock auto_lock(key_map_lock_);
-  for (KeyIdToSessionKeysMap::iterator it = key_map_.begin();
-       it != key_map_.end();
-       ++it) {
-    if (it->second->Contains(web_session_id))
-      keyids.push_back(std::vector<uint8>(it->first.begin(), it->first.end()));
-  }
-  promise->resolve(keyids);
+CdmContext* AesDecryptor::GetCdmContext() {
+  return this;
 }
 
 Decryptor* AesDecryptor::GetDecryptor() {

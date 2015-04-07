@@ -82,8 +82,6 @@ public:
     bool isLastInArray() const { return m_isLastInArray; }
     void setLastInArray(bool flag) { m_isLastInArray = flag; }
 
-    bool hasMultipartSelector() const { return m_hasMultipartSelector; }
-    bool hasRightmostSelectorMatchingHTMLBasedOnRuleHash() const { return m_hasRightmostSelectorMatchingHTMLBasedOnRuleHash; }
     bool containsUncommonAttributeSelector() const { return m_containsUncommonAttributeSelector; }
     unsigned specificity() const { return m_specificity; }
     unsigned linkMatchType() const { return m_linkMatchType; }
@@ -103,8 +101,6 @@ private:
     // Some simple testing showed <100,000 RuleData's on large sites.
     unsigned m_position : 18;
     unsigned m_specificity : 24;
-    unsigned m_hasMultipartSelector : 1;
-    unsigned m_hasRightmostSelectorMatchingHTMLBasedOnRuleHash : 1;
     unsigned m_containsUncommonAttributeSelector : 1;
     unsigned m_linkMatchType : 2; //  SelectorChecker::LinkMatchMask
     unsigned m_hasDocumentSecurityOrigin : 1;
@@ -120,7 +116,7 @@ struct SameSizeAsRuleData {
     unsigned d[4];
 };
 
-COMPILE_ASSERT(sizeof(RuleData) == sizeof(SameSizeAsRuleData), RuleData_should_stay_small);
+static_assert(sizeof(RuleData) == sizeof(SameSizeAsRuleData), "RuleData should stay small");
 
 class RuleSet : public NoBaseWillBeGarbageCollectedFinalized<RuleSet> {
     WTF_MAKE_NONCOPYABLE(RuleSet);
@@ -142,6 +138,7 @@ public:
     const WillBeHeapVector<RuleData>* cuePseudoRules() const { ASSERT(!m_pendingRules); return &m_cuePseudoRules; }
     const WillBeHeapVector<RuleData>* focusPseudoClassRules() const { ASSERT(!m_pendingRules); return &m_focusPseudoClassRules; }
     const WillBeHeapVector<RuleData>* universalRules() const { ASSERT(!m_pendingRules); return &m_universalRules; }
+    const WillBeHeapVector<RuleData>* shadowHostRules() const { ASSERT(!m_pendingRules); return &m_shadowHostRules; }
     const WillBeHeapVector<RawPtrWillBeMember<StyleRulePage> >& pageRules() const { ASSERT(!m_pendingRules); return m_pageRules; }
     const WillBeHeapVector<RawPtrWillBeMember<StyleRuleViewport> >& viewportRules() const { ASSERT(!m_pendingRules); return m_viewportRules; }
     const WillBeHeapVector<RawPtrWillBeMember<StyleRuleFontFace> >& fontFaceRules() const { return m_fontFaceRules; }
@@ -216,6 +213,7 @@ private:
     WillBeHeapVector<RuleData> m_cuePseudoRules;
     WillBeHeapVector<RuleData> m_focusPseudoClassRules;
     WillBeHeapVector<RuleData> m_universalRules;
+    WillBeHeapVector<RuleData> m_shadowHostRules;
     RuleFeatureSet m_features;
     WillBeHeapVector<RawPtrWillBeMember<StyleRulePage> > m_pageRules;
     WillBeHeapVector<RawPtrWillBeMember<StyleRuleViewport> > m_viewportRules;

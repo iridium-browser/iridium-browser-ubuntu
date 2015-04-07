@@ -67,11 +67,8 @@ bool ImageQualityController::has(RenderObject* renderer)
 
 InterpolationQuality ImageQualityController::chooseInterpolationQuality(GraphicsContext* context, RenderObject* object, Image* image, const void* layer, const LayoutSize& layoutSize)
 {
-    if (object->style()->imageRendering() == ImageRenderingPixelated
-        && image
-        && (layoutSize.width() > image->width() || layoutSize.height() > image->height() || layoutSize == image->size())) {
+    if (object->style()->imageRendering() == ImageRenderingPixelated)
         return InterpolationNone;
-    }
 
     if (InterpolationDefault == InterpolationLow)
         return InterpolationLow;
@@ -163,6 +160,9 @@ bool ImageQualityController::shouldPaintAtLowQuality(GraphicsContext* context, R
     if (object->style()->imageRendering() == ImageRenderingOptimizeContrast)
         return true;
 
+    if (RuntimeEnabledFeatures::slimmingPaintEnabled())
+        return false;
+
     // Look ourselves up in the hashtables.
     ObjectLayerSizeMap::iterator i = m_objectLayerSizeMap.find(object);
     LayerSizeMap* innerMap = i != m_objectLayerSizeMap.end() ? &i->value : 0;
@@ -181,8 +181,8 @@ bool ImageQualityController::shouldPaintAtLowQuality(GraphicsContext* context, R
 
     // Make sure to use the unzoomed image size, since if a full page zoom is in effect, the image
     // is actually being scaled.
-    LayoutSize scaledImageSize = currentTransform.mapSize(image->size());
-    LayoutSize scaledLayoutSize = currentTransform.mapSize(roundedIntSize(layoutSize));
+    LayoutSize scaledImageSize = LayoutSize(currentTransform.mapSize(image->size()));
+    LayoutSize scaledLayoutSize = LayoutSize(currentTransform.mapSize(roundedIntSize(layoutSize)));
 
     // If the containing FrameView is being resized, paint at low quality until resizing is finished.
     if (LocalFrame* frame = object->document().frame()) {

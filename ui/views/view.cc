@@ -25,10 +25,10 @@
 #include "ui/compositor/layer_animator.h"
 #include "ui/events/event_target_iterator.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/geometry/point3_f.h"
+#include "ui/gfx/geometry/point_conversions.h"
 #include "ui/gfx/interpolated_transform.h"
 #include "ui/gfx/path.h"
-#include "ui/gfx/point3_f.h"
-#include "ui/gfx/point_conversions.h"
 #include "ui/gfx/scoped_canvas.h"
 #include "ui/gfx/screen.h"
 #include "ui/gfx/skia_util.h"
@@ -51,6 +51,8 @@
 #include "base/win/scoped_gdi_object.h"
 #endif
 
+namespace views {
+
 namespace {
 
 #if defined(OS_WIN)
@@ -68,20 +70,14 @@ const int kDefaultHorizontalDragThreshold = 8;
 const int kDefaultVerticalDragThreshold = 8;
 
 // Returns the top view in |view|'s hierarchy.
-const views::View* GetHierarchyRoot(const views::View* view) {
-  const views::View* root = view;
+const View* GetHierarchyRoot(const View* view) {
+  const View* root = view;
   while (root && root->parent())
     root = root->parent();
   return root;
 }
 
 }  // namespace
-
-namespace views {
-
-namespace internal {
-
-}  // namespace internal
 
 // static
 ViewsDelegate* ViewsDelegate::views_delegate = NULL;
@@ -1056,8 +1052,7 @@ ui::EventTarget* View::GetParentTarget() {
 }
 
 scoped_ptr<ui::EventTargetIterator> View::GetChildIterator() const {
-  return scoped_ptr<ui::EventTargetIterator>(
-      new ui::EventTargetIteratorImpl<View>(children_));
+  return make_scoped_ptr(new ui::EventTargetIteratorImpl<View>(children_));
 }
 
 ui::EventTargeter* View::GetEventTargeter() {

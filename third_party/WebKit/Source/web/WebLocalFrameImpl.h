@@ -36,7 +36,6 @@
 #include "public/platform/WebFileSystemType.h"
 #include "public/web/WebLocalFrame.h"
 #include "web/FrameLoaderClientImpl.h"
-#include "web/NotificationPresenterImpl.h"
 #include "web/UserMediaClientImpl.h"
 #include "wtf/Compiler.h"
 #include "wtf/OwnPtr.h"
@@ -50,11 +49,12 @@ class GeolocationClientProxy;
 class IntSize;
 class KURL;
 class Range;
-class ScriptSourceCode;
 class SharedWorkerRepositoryClientImpl;
 class TextFinder;
+class WebAutofillClient;
 class WebDataSourceImpl;
 class WebFrameClient;
+class WebFrameWidgetImpl;
 class WebPerformance;
 class WebPlugin;
 class WebPluginContainerImpl;
@@ -116,7 +116,7 @@ public:
         const WebScriptSource&, bool userGesture, WebScriptExecutionCallback*) override;
     virtual void executeScriptInIsolatedWorld(
         int worldID, const WebScriptSource* sourcesIn, unsigned numSources,
-        int extensionGroup, WebVector<v8::Local<v8::Value> >* results) override;
+        int extensionGroup, WebVector<v8::Local<v8::Value>>* results) override;
     virtual void requestExecuteScriptInIsolatedWorld(
         int worldID, const WebScriptSource* sourceIn, unsigned numSources,
         int extensionGroup, bool userGesture, WebScriptExecutionCallback*) override;
@@ -180,7 +180,7 @@ public:
     virtual float getPrintPageShrink(int page) override;
     virtual void printEnd() override;
     virtual bool isPrintScalingDisabledForPlugin(const WebNode&) override;
-    virtual int getPrintCopiesForPlugin(const WebNode&) override;
+    virtual bool getPrintPresetOptionsForPlugin(const WebNode&, WebPrintPresetOptions*) override;
     virtual bool hasCustomPageSizeStyle(int pageIndex) override;
     virtual bool isPageBoxVisible(int pageIndex) override;
     virtual void pageSizeAndMarginsInPixels(
@@ -223,6 +223,8 @@ public:
 
     // WebLocalFrame methods:
     virtual void initializeToReplaceRemoteFrame(WebRemoteFrame*) override;
+    virtual void setAutofillClient(WebAutofillClient*) override;
+    virtual WebAutofillClient* autofillClient() override;
     virtual void sendPings(const WebNode& linkNode, const WebURL& destinationURL) override;
     virtual bool isLoading() const override;
     virtual bool isResourceLoadInProgress() const override;
@@ -315,6 +317,9 @@ public:
     // Returns a hit-tested VisiblePosition for the given point
     VisiblePosition visiblePositionForWindowPoint(const WebPoint&);
 
+    void setFrameWidget(WebFrameWidgetImpl*);
+    WebFrameWidgetImpl* frameWidget() const;
+
 #if ENABLE(OILPAN)
     void trace(Visitor*);
 #endif
@@ -338,7 +343,11 @@ private:
     // FIXME: These will need to change to WebFrame when we introduce WebFrameProxy.
     RefPtrWillBeMember<LocalFrame> m_frame;
 
+    // This is set if the frame is the root of a local frame tree, and requires a widget for rendering.
+    WebFrameWidgetImpl* m_frameWidget;
+
     WebFrameClient* m_client;
+    WebAutofillClient* m_autofillClient;
     WebPermissionClient* m_permissionClient;
     OwnPtr<SharedWorkerRepositoryClientImpl> m_sharedWorkerRepositoryClient;
 

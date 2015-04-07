@@ -9,6 +9,7 @@
 #include "content/common/content_param_traits.h"
 #include "content/common/frame_message_enums.h"
 #include "content/common/frame_param.h"
+#include "content/common/frame_replication_state.h"
 #include "content/common/navigation_gesture.h"
 #include "content/common/navigation_params.h"
 #include "content/common/resource_request_body.h"
@@ -23,6 +24,7 @@
 #include "ipc/ipc_message_macros.h"
 #include "ui/gfx/ipc/gfx_param_traits.h"
 #include "url/gurl.h"
+#include "url/origin.h"
 
 #undef IPC_MESSAGE_EXPORT
 #define IPC_MESSAGE_EXPORT CONTENT_EXPORT
@@ -37,6 +39,8 @@ IPC_ENUM_TRAITS_MIN_MAX_VALUE(content::JavaScriptMessageType,
                               content::JAVASCRIPT_MESSAGE_TYPE_PROMPT)
 IPC_ENUM_TRAITS_MAX_VALUE(FrameMsg_Navigate_Type::Value,
                           FrameMsg_Navigate_Type::NAVIGATE_TYPE_LAST)
+IPC_ENUM_TRAITS_MAX_VALUE(FrameMsg_UILoadMetricsReportType::Value,
+                          FrameMsg_UILoadMetricsReportType::REPORT_TYPE_LAST)
 IPC_ENUM_TRAITS_MAX_VALUE(blink::WebContextMenuData::MediaType,
                           blink::WebContextMenuData::MediaTypeLast)
 IPC_ENUM_TRAITS_MAX_VALUE(ui::MenuSourceType, ui::MENU_SOURCE_TYPE_LAST)
@@ -91,7 +95,7 @@ IPC_STRUCT_TRAITS_BEGIN(content::CustomContextMenuContext)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(content::TransitionElement)
-  IPC_STRUCT_TRAITS_MEMBER(name)
+  IPC_STRUCT_TRAITS_MEMBER(id)
   IPC_STRUCT_TRAITS_MEMBER(rect)
 IPC_STRUCT_TRAITS_END()
 
@@ -187,6 +191,17 @@ IPC_STRUCT_BEGIN_WITH_PARENT(FrameHostMsg_DidCommitProvisionalLoad_Params,
   // are unwound or moved to RenderFrameHost (crbug.com/304341) we can move the
   // client to be based on the routing_id of the RenderFrameHost.
   IPC_STRUCT_MEMBER(int, render_view_routing_id)
+
+  // Origin of the frame.  This will be replicated to any associated
+  // RenderFrameProxies.
+  IPC_STRUCT_MEMBER(url::Origin, origin)
+
+  // How navigation metrics starting on UI action for this load should be
+  // reported.
+  IPC_STRUCT_MEMBER(FrameMsg_UILoadMetricsReportType::Value, report_type)
+
+  // Timestamp at which the UI action that triggered the navigation originated.
+  IPC_STRUCT_MEMBER(base::TimeTicks, ui_timestamp)
 IPC_STRUCT_END()
 
 IPC_STRUCT_TRAITS_BEGIN(content::CommonNavigationParams)
@@ -195,6 +210,8 @@ IPC_STRUCT_TRAITS_BEGIN(content::CommonNavigationParams)
   IPC_STRUCT_TRAITS_MEMBER(transition)
   IPC_STRUCT_TRAITS_MEMBER(navigation_type)
   IPC_STRUCT_TRAITS_MEMBER(allow_download)
+  IPC_STRUCT_TRAITS_MEMBER(ui_timestamp)
+  IPC_STRUCT_TRAITS_MEMBER(report_type)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(content::RequestNavigationParams)
@@ -207,6 +224,10 @@ IPC_STRUCT_TRAITS_BEGIN(content::CommitNavigationParams)
   IPC_STRUCT_TRAITS_MEMBER(page_state)
   IPC_STRUCT_TRAITS_MEMBER(is_overriding_user_agent)
   IPC_STRUCT_TRAITS_MEMBER(browser_navigation_start)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(content::FrameReplicationState)
+  IPC_STRUCT_TRAITS_MEMBER(origin)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_BEGIN(FrameMsg_Navigate_Params)
@@ -224,9 +245,8 @@ IPC_STRUCT_BEGIN(FrameMsg_Navigate_Params)
   // FrameHostMsg_DidCommitProvisionalLoad message.
   IPC_STRUCT_MEMBER(int32, page_id)
 
-  // If page_id is -1, then pending_history_list_offset will also be -1.
-  // Otherwise, it contains the offset into the history list corresponding to
-  // the current navigation.
+  // For history navigations, this is the offset in the history list of the
+  // pending load. For non-history navigations, this will be ignored.
   IPC_STRUCT_MEMBER(int, pending_history_list_offset)
 
   // Informs the RenderView of where its current page contents reside in
@@ -376,10 +396,11 @@ IPC_MESSAGE_CONTROL3(FrameMsg_NewFrame,
 // |routing_id|. The new proxy should be created as a child of the object
 // identified by |parent_routing_id| or as top level if that is
 // MSG_ROUTING_NONE.
-IPC_MESSAGE_CONTROL3(FrameMsg_NewFrameProxy,
+IPC_MESSAGE_CONTROL4(FrameMsg_NewFrameProxy,
                      int /* routing_id */,
                      int /* parent_routing_id */,
-                     int /* render_view_routing_id */)
+                     int /* render_view_routing_id */,
+                     content::FrameReplicationState /* replication_state */)
 
 // Tells the renderer to perform the specified navigation, interrupting any
 // existing navigation.
@@ -392,11 +413,21 @@ IPC_MESSAGE_ROUTED0(FrameMsg_BeforeUnload)
 // Instructs the frame to swap out for a cross-site transition, including
 // running the unload event handler and creating a RenderFrameProxy with the
 // given |proxy_routing_id|. Expects a SwapOut_ACK message when finished.
-IPC_MESSAGE_ROUTED1(FrameMsg_SwapOut,
-                    int /* proxy_routing_id */)
+IPC_MESSAGE_ROUTED3(FrameMsg_SwapOut,
+                    int /* proxy_routing_id */,
+                    bool /* is_loading */,
+                    content::FrameReplicationState /* replication_state */)
 
 // Instructs the frame to stop the load in progress, if any.
 IPC_MESSAGE_ROUTED0(FrameMsg_Stop)
+
+// A message sent to RenderFrameProxy to indicate that its corresponding
+// RenderFrame has started loading a document.
+IPC_MESSAGE_ROUTED0(FrameMsg_DidStartLoading)
+
+// A message sent to RenderFrameProxy to indicate that its corresponding
+// RenderFrame has completed loading.
+IPC_MESSAGE_ROUTED0(FrameMsg_DidStopLoading)
 
 // Request for the renderer to insert CSS into the frame.
 IPC_MESSAGE_ROUTED1(FrameMsg_CSSInsertRequest,
@@ -436,7 +467,19 @@ IPC_MESSAGE_ROUTED1(FrameMsg_SetupTransitionView,
 
 // Tells the renderer to hide the elements specified by the supplied CSS
 // selector, and activates any exiting-transition stylesheets.
-IPC_MESSAGE_ROUTED1(FrameMsg_BeginExitTransition,
+IPC_MESSAGE_ROUTED2(FrameMsg_BeginExitTransition,
+                    std::string /* css_selector */,
+                    bool /* exit_to_native_app */)
+
+// Tell the renderer to revert the exit transition done before
+IPC_MESSAGE_ROUTED0(FrameMsg_RevertExitTransition)
+
+// Tell the renderer to hide transition elements.
+IPC_MESSAGE_ROUTED1(FrameMsg_HideTransitionElements,
+                    std::string /* css_selector */)
+
+// Tell the renderer to hide transition elements.
+IPC_MESSAGE_ROUTED1(FrameMsg_ShowTransitionElements,
                     std::string /* css_selector */)
 
 // Tells the renderer to reload the frame, optionally ignoring the cache while
@@ -557,6 +600,9 @@ IPC_MESSAGE_ROUTED3(FrameHostMsg_DidFailLoadWithError,
                     int /* error_code */,
                     base::string16 /* error_description */)
 
+// Sent when the renderer decides to ignore a navigation.
+IPC_MESSAGE_ROUTED0(FrameHostMsg_DidDropNavigation)
+
 // Sent when the renderer starts loading the page. |to_different_document| will
 // be true unless the load is a fragment navigation, or triggered by
 // history.pushState/replaceState.
@@ -578,8 +624,12 @@ IPC_MESSAGE_ROUTED1(FrameHostMsg_DidFinishLoad,
                     GURL /* validated_url */)
 
 // Sent when after the onload handler has been invoked for the document
-// in this frame. Sent for top-level frames.
-IPC_MESSAGE_ROUTED0(FrameHostMsg_DocumentOnLoadCompleted)
+// in this frame. Sent for top-level frames. |report_type| and |ui_timestamp|
+// are used to report navigation metrics starting on the ui input event that
+// triggered the navigation timestamp.
+IPC_MESSAGE_ROUTED2(FrameHostMsg_DocumentOnLoadCompleted,
+                    FrameMsg_UILoadMetricsReportType::Value /* report_type */,
+                    base::TimeTicks /* ui_timestamp */)
 
 // Notifies that the initial empty document of a view has been accessed.
 // After this, it is no longer safe to show a pending navigation's URL without

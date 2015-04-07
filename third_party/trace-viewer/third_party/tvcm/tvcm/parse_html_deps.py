@@ -24,6 +24,8 @@ import polymer_soup
 
 class InlineScript(object):
   def __init__(self, soup):
+    if not soup:
+      raise module.DepsException('InlineScript created without soup')
     self._soup = soup
     self._stripped_contents = None
     self._open_tags = None
@@ -103,10 +105,10 @@ class HTMLModuleParserResults(object):
     tags = self._soup.findAll('style')
     return [str(t.string) for t in tags]
 
-  def YieldHTMLInPieces(self, controller):
-    yield self.GenerateHTML(controller)
+  def YieldHTMLInPieces(self, controller, minify=False):
+    yield self.GenerateHTML(controller, minify)
 
-  def GenerateHTML(self, controller):
+  def GenerateHTML(self, controller, minify=False):
     soup = polymer_soup.PolymerSoup(str(self._soup))
 
     # Remove decl
@@ -151,6 +153,13 @@ class HTMLModuleParserResults(object):
         stylesheet_link.replaceWith(tmp[0])
       else:
         stylesheet_link.extract()
+
+    # Remove comments if minifying.
+    if minify:
+      comments = soup.findAll(
+          text=lambda text:isinstance(text, BeautifulSoup.Comment))
+      for comment in comments:
+        comment.extract()
 
     # We is done.
     return str(soup)

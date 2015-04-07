@@ -14,11 +14,8 @@ namespace base {
 class SingleThreadTaskRunner;
 }
 
-namespace mojo {
-class ServiceProvider;
-}
-
 namespace media {
+
 class DemuxerStreamProvider;
 
 // A media::Renderer that proxies to a mojo::MediaRenderer. That
@@ -27,25 +24,24 @@ class DemuxerStreamProvider;
 //
 // MojoRendererImpl implements media::Renderer for use as either an audio
 // or video renderer.
-//
-// TODO(tim): Only audio is currently supported. http://crbug.com/410451.
 class MojoRendererImpl : public Renderer, public mojo::MediaRendererClient {
  public:
   // |task_runner| is the TaskRunner on which all methods are invoked.
-  // |audio_renderer_provider| is a ServiceProvider from a connected
-  //     Application that is hosting a mojo::MediaRenderer.
   MojoRendererImpl(
       const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
-      mojo::ServiceProvider* audio_renderer_provider);
+      mojo::MediaRendererPtr remote_media_renderer);
   ~MojoRendererImpl() override;
 
   // Renderer implementation.
   void Initialize(DemuxerStreamProvider* demuxer_stream_provider,
                   const base::Closure& init_cb,
                   const StatisticsCB& statistics_cb,
+                  const BufferingStateCB& buffering_state_cb,
+                  const PaintCB& paint_cb,
                   const base::Closure& ended_cb,
-                  const PipelineStatusCB& error_cb,
-                  const BufferingStateCB& buffering_state_cb) override;
+                  const PipelineStatusCB& error_cb) override;
+  void SetCdm(CdmContext* cdm_context,
+              const CdmAttachedCB& cdm_attached_cb) override;
   void Flush(const base::Closure& flush_cb) override;
   void StartPlayingFrom(base::TimeDelta time) override;
   void SetPlaybackRate(float playback_rate) override;
@@ -53,7 +49,6 @@ class MojoRendererImpl : public Renderer, public mojo::MediaRendererClient {
   base::TimeDelta GetMediaTime() override;
   bool HasAudio() override;
   bool HasVideo() override;
-  void SetCdm(MediaKeys* cdm) override;
 
   // mojo::MediaRendererClient implementation.
   void OnTimeUpdate(int64_t time_usec, int64_t max_time_usec) override;
@@ -62,17 +57,23 @@ class MojoRendererImpl : public Renderer, public mojo::MediaRendererClient {
   void OnError() override;
 
  private:
-  // Called when |remote_audio_renderer_| has finished initializing.
+  // Called when |remote_media_renderer_| has finished initializing.
   void OnInitialized();
 
   // Task runner used to execute pipeline tasks.
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 
   DemuxerStreamProvider* demuxer_stream_provider_;
-  mojo::MediaRendererPtr remote_audio_renderer_;
+  mojo::MediaRendererPtr remote_media_renderer_;
+
+  // Store a handle to the mojo message pipe. This object
+  // temporary and is used as a springboard so that the
+  // |remote_media_renderer_| can be constructed on the
+  // correct thread.
+  mojo::ScopedMessagePipeHandle remote_media_renderer_pipe_;
 
   // Callbacks passed to Initialize() that we forward messages from
-  // |remote_audio_renderer_| through.
+  // |remote_media_renderer_| through.
   base::Closure init_cb_;
   base::Closure ended_cb_;
   PipelineStatusCB error_cb_;

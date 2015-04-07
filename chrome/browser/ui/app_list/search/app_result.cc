@@ -12,7 +12,7 @@
 #include "chrome/browser/ui/app_list/app_list_controller_delegate.h"
 #include "chrome/browser/ui/app_list/search/search_util.h"
 #include "chrome/browser/ui/extensions/extension_enable_flow.h"
-#include "chrome/browser/ui/webui/ntp/core_app_launcher_handler.h"
+#include "chrome/common/extensions/extension_metrics.h"
 #include "content/public/browser/user_metrics.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
@@ -32,14 +32,15 @@ namespace app_list {
 
 AppResult::AppResult(Profile* profile,
                      const std::string& app_id,
-                     AppListControllerDelegate* controller)
+                     AppListControllerDelegate* controller,
+                     bool is_recommendation)
     : profile_(profile),
       app_id_(app_id),
       controller_(controller),
       extension_registry_(NULL) {
   set_id(extensions::Extension::GetBaseURLFromExtensionId(app_id_).spec());
   if (app_list::switches::IsExperimentalAppListEnabled())
-    set_display_type(DISPLAY_TILE);
+    set_display_type(is_recommendation ? DISPLAY_RECOMMENDATION : DISPLAY_TILE);
 
   const extensions::Extension* extension =
       extensions::ExtensionSystem::Get(profile_)->extension_service()
@@ -81,7 +82,13 @@ void AppResult::UpdateFromMatch(const TokenizedString& title,
 void AppResult::UpdateFromLastLaunched(const base::Time& current_time,
                                        const base::Time& last_launched) {
   base::TimeDelta delta = current_time - last_launched;
-  DCHECK_LE(0, delta.InSeconds());
+  // |current_time| can be before |last_launched| in weird cases such as users
+  // playing with their clocks. Handle this gracefully.
+  if (current_time < last_launched) {
+    set_relevance(1.0);
+    return;
+  }
+
   const int kSecondsInWeek = 60 * 60 * 24 * 7;
 
   // Set the relevance to a value between 0 and 1. This function decays as the
@@ -105,7 +112,7 @@ void AppResult::Open(int event_flags) {
   if (RunExtensionEnableFlow())
     return;
 
-  CoreAppLauncherHandler::RecordAppListSearchLaunch(extension);
+  extensions::RecordAppListSearchLaunch(extension);
   content::RecordAction(
       base::UserMetricsAction("AppList_ClickOnAppFromSearch"));
 
@@ -117,7 +124,9 @@ void AppResult::Open(int event_flags) {
 }
 
 scoped_ptr<SearchResult> AppResult::Duplicate() {
-  scoped_ptr<SearchResult> copy(new AppResult(profile_, app_id_, controller_));
+  scoped_ptr<SearchResult> copy(
+      new AppResult(profile_, app_id_, controller_,
+                    display_type() == DISPLAY_RECOMMENDATION));
   copy->set_title(title());
   copy->set_title_tags(title_tags());
 
@@ -199,15 +208,6 @@ void AppResult::ExtensionEnableFlowAborted(bool user_initiated) {
 void AppResult::OnExtensionLoaded(content::BrowserContext* browser_context,
                                   const extensions::Extension* extension) {
   UpdateIcon();
-}
-
-void AppResult::OnExtensionUninstalled(content::BrowserContext* browser_context,
-                                       const extensions::Extension* extension,
-                                       extensions::UninstallReason reason) {
-  if (extension->id() != app_id_)
-    return;
-
-  NotifyItemUninstalled();
 }
 
 void AppResult::OnShutdown(extensions::ExtensionRegistry* registry) {

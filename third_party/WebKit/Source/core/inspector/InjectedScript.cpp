@@ -42,6 +42,7 @@ using blink::TypeBuilder::Array;
 using blink::TypeBuilder::Debugger::CallFrame;
 using blink::TypeBuilder::Debugger::CollectionEntry;
 using blink::TypeBuilder::Debugger::FunctionDetails;
+using blink::TypeBuilder::Debugger::GeneratorObjectDetails;
 using blink::TypeBuilder::Runtime::PropertyDescriptor;
 using blink::TypeBuilder::Runtime::InternalPropertyDescriptor;
 using blink::TypeBuilder::Runtime::RemoteObject;
@@ -178,6 +179,20 @@ void InjectedScript::getFunctionDetails(ErrorString* errorString, const String& 
     *result = FunctionDetails::runtimeCast(resultValue);
 }
 
+void InjectedScript::getGeneratorObjectDetails(ErrorString* errorString, const String& objectId, RefPtr<GeneratorObjectDetails>* result)
+{
+    ScriptFunctionCall function(injectedScriptObject(), "getGeneratorObjectDetails");
+    function.appendArgument(objectId);
+    RefPtr<JSONValue> resultValue;
+    makeCall(function, &resultValue);
+    if (!resultValue || resultValue->type() != JSONValue::TypeObject) {
+        if (!resultValue->asString(errorString))
+            *errorString = "Internal error";
+        return;
+    }
+    *result = GeneratorObjectDetails::runtimeCast(resultValue);
+}
+
 void InjectedScript::getCollectionEntries(ErrorString* errorString, const String& objectId, RefPtr<Array<CollectionEntry> >* result)
 {
     ScriptFunctionCall function(injectedScriptObject(), "getCollectionEntries");
@@ -227,7 +242,7 @@ void InjectedScript::getInternalProperties(ErrorString* errorString, const Strin
 Node* InjectedScript::nodeForObjectId(const String& objectId)
 {
     if (isEmpty() || !canAccessInspectedWindow())
-        return 0;
+        return nullptr;
 
     ScriptFunctionCall function(injectedScriptObject(), "nodeForObjectId");
     function.appendArgument(objectId);
@@ -344,6 +359,15 @@ void InjectedScript::setLastEvaluationResult(const String& objectId)
     setLastResultFunction.appendArgument(objectId);
     RefPtr<JSONValue> result;
     makeCall(setLastResultFunction, &result);
+}
+
+void InjectedScript::setCustomObjectFormatterEnabled(bool enabled)
+{
+    ASSERT(!isEmpty());
+    ScriptFunctionCall function(injectedScriptObject(), "setCustomObjectFormatterEnabled");
+    function.appendArgument(enabled);
+    RefPtr<JSONValue> result;
+    makeCall(function, &result);
 }
 
 } // namespace blink

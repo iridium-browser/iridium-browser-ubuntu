@@ -24,6 +24,8 @@
         '../base/ui_base.gyp:ui_base',
         '../events/events.gyp:events',
         '../events/ozone/events_ozone.gyp:events_ozone',
+        '../events/ozone/events_ozone.gyp:events_ozone_evdev',
+        '../events/ozone/events_ozone.gyp:events_ozone_layout',
         '../gfx/gfx.gyp:gfx',
       ],
       'defines': [
@@ -40,8 +42,6 @@
         'gbm_surfaceless.h',
         'gbm_surface_factory.cc',
         'gbm_surface_factory.h',
-        'native_display_delegate_proxy.cc',
-        'native_display_delegate_proxy.h',
         'ozone_platform_gbm.cc',
         'ozone_platform_gbm.h',
       ],

@@ -607,7 +607,7 @@ InstallStatus IsChromeActiveOrUserCancelled(
     const InstallerState& installer_state,
     const Product& product) {
   int32 exit_code = content::RESULT_CODE_NORMAL_EXIT;
-  CommandLine options(CommandLine::NO_PROGRAM);
+  base::CommandLine options(base::CommandLine::NO_PROGRAM);
   options.AppendSwitch(installer::switches::kUninstall);
 
   // Here we want to save user from frustration (in case of Chrome crashes)
@@ -638,7 +638,8 @@ InstallStatus IsChromeActiveOrUserCancelled(
 }
 
 bool ShouldDeleteProfile(const InstallerState& installer_state,
-                         const CommandLine& cmd_line, InstallStatus status,
+                         const base::CommandLine& cmd_line,
+                         InstallStatus status,
                          const Product& product) {
   bool should_delete = false;
 
@@ -1046,7 +1047,7 @@ bool DeleteChromeRegistrationKeys(const InstallerState& installer_state,
 }
 
 void RemoveChromeLegacyRegistryKeys(BrowserDistribution* dist,
-                                    const base::string16& chrome_exe) {
+                                    const base::FilePath& chrome_exe) {
   // We used to register Chrome to handle crx files, but this turned out
   // to be not worth the hassle. Remove these old registry entries if
   // they exist. See: http://codereview.chromium.org/210007
@@ -1094,11 +1095,11 @@ InstallStatus UninstallProduct(const InstallationState& original_state,
                                const Product& product,
                                bool remove_all,
                                bool force_uninstall,
-                               const CommandLine& cmd_line) {
+                               const base::CommandLine& cmd_line) {
   InstallStatus status = installer::UNINSTALL_CONFIRMED;
   BrowserDistribution* browser_dist = product.distribution();
-  const base::string16 chrome_exe(
-      installer_state.target_path().Append(installer::kChromeExe).value());
+  const base::FilePath chrome_exe(
+      installer_state.target_path().Append(installer::kChromeExe));
 
   bool is_chrome = product.is_chrome();
 
@@ -1132,7 +1133,7 @@ InstallStatus UninstallProduct(const InstallationState& original_state,
         !::IsUserAnAdmin() &&
         base::win::GetVersion() >= base::win::VERSION_VISTA &&
         !cmd_line.HasSwitch(installer::switches::kRunAsAdmin)) {
-      CommandLine new_cmd(CommandLine::NO_PROGRAM);
+      base::CommandLine new_cmd(base::CommandLine::NO_PROGRAM);
       new_cmd.AppendArguments(cmd_line, true);
       // Append --run-as-admin flag to let the new instance of setup.exe know
       // that we already tried to launch ourselves as admin.
@@ -1173,15 +1174,14 @@ InstallStatus UninstallProduct(const InstallationState& original_state,
               Append(installer::kChromeExe));
       VLOG(1) << "Retargeting user-generated Chrome shortcuts.";
       if (base::PathExists(system_chrome_path)) {
-        RetargetUserShortcutsWithArgs(installer_state, product,
-                                      base::FilePath(chrome_exe),
+        RetargetUserShortcutsWithArgs(installer_state, product, chrome_exe,
                                       system_chrome_path);
       } else {
         LOG(ERROR) << "Retarget failed: system-level Chrome not found.";
       }
     }
 
-    DeleteShortcuts(installer_state, product, base::FilePath(chrome_exe));
+    DeleteShortcuts(installer_state, product, chrome_exe);
   }
 
   // Delete the registry keys (Uninstall key and Version key).
@@ -1270,7 +1270,7 @@ InstallStatus UninstallProduct(const InstallationState& original_state,
 
     UninstallActiveSetupEntries(installer_state, product);
 
-    UninstallFirewallRules(browser_dist, base::FilePath(chrome_exe));
+    UninstallFirewallRules(browser_dist, chrome_exe);
 
     RemoveBlacklistState();
 

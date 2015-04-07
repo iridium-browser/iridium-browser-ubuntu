@@ -46,6 +46,8 @@ RenderSVGRoot::RenderSVGRoot(SVGElement* node)
     , m_isLayoutSizeChanged(false)
     , m_needsBoundariesOrTransformUpdate(true)
     , m_hasBoxDecorationBackground(false)
+    , m_hasNonIsolatedBlendingDescendants(false)
+    , m_hasNonIsolatedBlendingDescendantsDirty(false)
 {
 }
 
@@ -212,7 +214,7 @@ bool RenderSVGRoot::shouldApplyViewportClip() const
         || this->isDocumentElement();
 }
 
-void RenderSVGRoot::paintReplaced(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+void RenderSVGRoot::paintReplaced(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
     SVGRootPainter(*this).paint(paintInfo, paintOffset);
 }
@@ -247,12 +249,42 @@ void RenderSVGRoot::addChild(RenderObject* child, RenderObject* beforeChild)
 {
     RenderReplaced::addChild(child, beforeChild);
     SVGResourcesCache::clientWasAddedToTree(child, child->style());
+
+    bool shouldIsolateDescendants = (child->isBlendingAllowed() && child->style()->hasBlendMode()) || child->hasNonIsolatedBlendingDescendants();
+    if (shouldIsolateDescendants)
+        descendantIsolationRequirementsChanged(DescendantIsolationRequired);
 }
 
 void RenderSVGRoot::removeChild(RenderObject* child)
 {
     SVGResourcesCache::clientWillBeRemovedFromTree(child);
     RenderReplaced::removeChild(child);
+
+    bool hadNonIsolatedDescendants = (child->isBlendingAllowed() && child->style()->hasBlendMode()) || child->hasNonIsolatedBlendingDescendants();
+    if (hadNonIsolatedDescendants)
+        descendantIsolationRequirementsChanged(DescendantIsolationNeedsUpdate);
+}
+
+bool RenderSVGRoot::hasNonIsolatedBlendingDescendants() const
+{
+    if (m_hasNonIsolatedBlendingDescendantsDirty) {
+        m_hasNonIsolatedBlendingDescendants = SVGRenderSupport::computeHasNonIsolatedBlendingDescendants(this);
+        m_hasNonIsolatedBlendingDescendantsDirty = false;
+    }
+    return m_hasNonIsolatedBlendingDescendants;
+}
+
+void RenderSVGRoot::descendantIsolationRequirementsChanged(DescendantIsolationState state)
+{
+    switch (state) {
+    case DescendantIsolationRequired:
+        m_hasNonIsolatedBlendingDescendants = true;
+        m_hasNonIsolatedBlendingDescendantsDirty = false;
+        break;
+    case DescendantIsolationNeedsUpdate:
+        m_hasNonIsolatedBlendingDescendantsDirty = true;
+        break;
+    }
 }
 
 void RenderSVGRoot::insertedIntoTree()
@@ -287,17 +319,17 @@ const AffineTransform& RenderSVGRoot::localToParentTransform() const
 {
     // Slightly optimized version of m_localToParentTransform = AffineTransform::translation(x(), y()) * m_localToBorderBoxTransform;
     m_localToParentTransform = m_localToBorderBoxTransform;
-    if (x())
-        m_localToParentTransform.setE(m_localToParentTransform.e() + roundToInt(x()));
-    if (y())
-        m_localToParentTransform.setF(m_localToParentTransform.f() + roundToInt(y()));
+    if (location().x())
+        m_localToParentTransform.setE(m_localToParentTransform.e() + roundToInt(location().x()));
+    if (location().y())
+        m_localToParentTransform.setF(m_localToParentTransform.f() + roundToInt(location().y()));
     return m_localToParentTransform;
 }
 
 LayoutRect RenderSVGRoot::clippedOverflowRectForPaintInvalidation(const RenderLayerModelObject* paintInvalidationContainer, const PaintInvalidationState* paintInvalidationState) const
 {
     // This is an open-coded aggregate of SVGRenderSupport::clippedOverflowRectForPaintInvalidation,
-    // RenderSVGRoot::computeFloatRectForPaintInvalidation and RenderReplaced::clippedOverflowRectForPaintInvalidation.
+    // RenderSVGRoot::mapRectToPaintInvalidationBacking and RenderReplaced::clippedOverflowRectForPaintInvalidation.
     // The reason for this is to optimize/minimize the paint invalidation rect when the box is not "decorated"
     // (does not have background/border/etc.)
 
@@ -328,19 +360,16 @@ LayoutRect RenderSVGRoot::clippedOverflowRectForPaintInvalidation(const RenderLa
     return rect;
 }
 
-void RenderSVGRoot::computeFloatRectForPaintInvalidation(const RenderLayerModelObject* paintInvalidationContainer, FloatRect& paintInvalidationRect, const PaintInvalidationState* paintInvalidationState) const
+void RenderSVGRoot::mapRectToPaintInvalidationBacking(const RenderLayerModelObject* paintInvalidationContainer, LayoutRect& rect, const PaintInvalidationState* paintInvalidationState) const
 {
-    // Apply our local transforms (except for x/y translation), then our shadow,
-    // and then call RenderBox's method to handle all the normal CSS Box model bits
-    paintInvalidationRect = m_localToBorderBoxTransform.mapRect(paintInvalidationRect);
+    // Note that we don't apply the border-box transform here - it's assumed
+    // that whoever called us has done that already.
 
     // Apply initial viewport clip
     if (shouldApplyViewportClip())
-        paintInvalidationRect.intersect(pixelSnappedBorderBoxRect());
+        rect.intersect(pixelSnappedBorderBoxRect());
 
-    LayoutRect rect = enclosingIntRect(paintInvalidationRect);
     RenderReplaced::mapRectToPaintInvalidationBacking(paintInvalidationContainer, rect, paintInvalidationState);
-    paintInvalidationRect = rect;
 }
 
 // This method expects local CSS box coordinates.

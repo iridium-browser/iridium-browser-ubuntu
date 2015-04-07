@@ -85,7 +85,7 @@ Position::Position(PassRefPtrWillBeRawPtr<Node> anchorNode, LegacyEditingOffset 
     , m_anchorType(anchorTypeForLegacyEditingPosition(m_anchorNode.get(), m_offset))
     , m_isLegacyEditingPosition(true)
 {
-    ASSERT(!m_anchorNode || !m_anchorNode->isPseudoElement());
+    ASSERT(!m_anchorNode || !m_anchorNode->isPseudoElement() || m_anchorNode->isFirstLetterPseudoElement());
 }
 
 Position::Position(PassRefPtrWillBeRawPtr<Node> anchorNode, AnchorType anchorType)
@@ -94,7 +94,7 @@ Position::Position(PassRefPtrWillBeRawPtr<Node> anchorNode, AnchorType anchorTyp
     , m_anchorType(anchorType)
     , m_isLegacyEditingPosition(false)
 {
-    ASSERT(!m_anchorNode || !m_anchorNode->isPseudoElement());
+    ASSERT(!m_anchorNode || !m_anchorNode->isPseudoElement() || m_anchorNode->isFirstLetterPseudoElement());
 
     ASSERT(anchorType != PositionIsOffsetInAnchor);
     ASSERT(!((anchorType == PositionIsBeforeChildren || anchorType == PositionIsAfterChildren)
@@ -107,7 +107,7 @@ Position::Position(PassRefPtrWillBeRawPtr<Node> anchorNode, int offset, AnchorTy
     , m_anchorType(anchorType)
     , m_isLegacyEditingPosition(false)
 {
-    ASSERT(!m_anchorNode || !m_anchorNode->isPseudoElement());
+    ASSERT(!m_anchorNode || !m_anchorNode->isPseudoElement() || m_anchorNode->isFirstLetterPseudoElement());
 
     ASSERT(anchorType == PositionIsOffsetInAnchor);
 }
@@ -429,7 +429,7 @@ Node* Position::parentEditingBoundary() const
     if (!documentElement)
         return 0;
 
-    Node* boundary = m_anchorNode.get();
+    Node* boundary = containerNode();
     while (boundary != documentElement && boundary->nonShadowBoundaryParentNode() && m_anchorNode->hasEditableStyle() == boundary->parentNode()->hasEditableStyle())
         boundary = boundary->nonShadowBoundaryParentNode();
 
@@ -497,7 +497,7 @@ static bool endsOfNodeAreVisuallyDistinctPositions(Node* node)
         return true;
 
     // There is a VisiblePosition inside an empty inline-block container.
-    return node->renderer()->isReplaced() && canHaveChildrenForEditing(node) && toRenderBox(node->renderer())->height() != 0 && !node->hasChildren();
+    return node->renderer()->isReplaced() && canHaveChildrenForEditing(node) && toRenderBox(node->renderer())->size().height() != 0 && !node->hasChildren();
 }
 
 static Node* enclosingVisualBoundary(Node* node)

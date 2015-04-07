@@ -25,13 +25,6 @@ namespace autofill {
 struct PasswordForm;
 }
 
-namespace browser_sync {
-class PasswordChangeProcessor;
-class PasswordDataTypeController;
-class PasswordModelAssociator;
-class PasswordModelWorker;
-}
-
 namespace password_manager {
 class PasswordStore;
 }  // namespace password_manager
@@ -213,11 +206,11 @@ class PasswordStore : protected PasswordStoreSync,
   // Bring PasswordStoreSync methods to the scope of PasswordStore. Otherwise,
   // base::Bind can't be used with them because it fails to cast PasswordStore
   // to PasswordStoreSync.
-  virtual PasswordStoreChangeList AddLoginImpl(
+  PasswordStoreChangeList AddLoginImpl(
       const autofill::PasswordForm& form) override = 0;
-  virtual PasswordStoreChangeList UpdateLoginImpl(
+  PasswordStoreChangeList UpdateLoginImpl(
       const autofill::PasswordForm& form) override = 0;
-  virtual PasswordStoreChangeList RemoveLoginImpl(
+  PasswordStoreChangeList RemoveLoginImpl(
       const autofill::PasswordForm& form) override = 0;
 
   // Synchronous implementation to remove the given logins.
@@ -253,6 +246,10 @@ class PasswordStore : protected PasswordStoreSync,
 
   // Log UMA stats for number of bulk deletions.
   void LogStatsForBulkDeletion(int num_deletions);
+
+  // Log UMA stats for password deletions happening on clear browsing data
+  // since first sync during rollback.
+  void LogStatsForBulkDeletionDuringRollback(int num_deletions);
 
   // PasswordStoreSync:
   // Called by WrapModificationTask() once the underlying data-modifying

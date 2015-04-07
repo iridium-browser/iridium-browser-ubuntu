@@ -87,6 +87,7 @@ DevicePermissionsDialogView::DevicePermissionsDialogView(
 
   views::Label* label = new views::Label(prompt_->GetPromptMessage());
   label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+  label->SetMultiLine(true);
   AddChildView(label);
 
   std::vector<ui::TableColumn> table_columns;
@@ -158,6 +159,6 @@ gfx::Size DevicePermissionsDialogView::GetPreferredSize() const {
 
 void ChromeDevicePermissionsPrompt::ShowDialog() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  ShowWebModalDialogViews(new DevicePermissionsDialogView(delegate(), prompt()),
-                          web_contents());
+  constrained_window::ShowWebModalDialogViews(
+      new DevicePermissionsDialogView(delegate(), prompt()), web_contents());
 }

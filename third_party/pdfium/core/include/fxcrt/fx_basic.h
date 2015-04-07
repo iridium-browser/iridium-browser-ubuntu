@@ -18,6 +18,22 @@
 #ifndef _FX_STREAM_H_
 #include "fx_stream.h"
 #endif
+
+// The FX_ArraySize(arr) macro returns the # of elements in an array arr.
+// The expression is a compile-time constant, and therefore can be
+// used in defining new arrays, for example.  If you use FX_ArraySize on
+// a pointer by mistake, you will get a compile-time error.
+//
+// One caveat is that FX_ArraySize() doesn't accept any array of an
+// anonymous type or a type defined inside a function.
+#define FX_ArraySize(array) (sizeof(ArraySizeHelper(array)))
+
+// This template function declaration is used in defining FX_ArraySize.
+// Note that the function doesn't need an implementation, as we only
+// use its type.
+template <typename T, size_t N>
+char (&ArraySizeHelper(T (&array)[N]))[N];
+
 class CFX_BinaryBuf : public CFX_Object
 {
 public:
@@ -224,7 +240,7 @@ class IFX_BufferArchive
 {
 public:
     IFX_BufferArchive(FX_STRSIZE size);
-
+    virtual ~IFX_BufferArchive() { }
 
     virtual void			Clear();
 
@@ -255,7 +271,7 @@ class CFX_FileBufferArchive : public IFX_BufferArchive, public CFX_Object
 {
 public:
     CFX_FileBufferArchive(FX_STRSIZE size = 32768);
-    ~CFX_FileBufferArchive();
+    ~CFX_FileBufferArchive() override;
     virtual void			Clear();
 
     FX_BOOL					AttachFile(IFX_StreamWrite *pFile, FX_BOOL bTakeover = FALSE);
@@ -1361,7 +1377,7 @@ protected:
 class IFX_Pause
 {
 public:
-
+    virtual ~IFX_Pause() { }
     virtual FX_BOOL	NeedToPauseNow() = 0;
 };
 class CFX_DataFilter : public CFX_Object

@@ -164,7 +164,9 @@ _BANNED_CPP_FUNCTIONS = (
       True,
       (
         r"^base[\\\/]process[\\\/]process_metrics_linux\.cc$",
-        r"^chrome[\\\/]browser[\\\/]chromeos[\\\/]boot_times_loader\.cc$",
+        r"^chrome[\\\/]browser[\\\/]chromeos[\\\/]boot_times_recorder\.cc$",
+        r"^chrome[\\\/]browser[\\\/]chromeos[\\\/]"
+            "customization_document_browsertest\.cc$",
         r"^components[\\\/]crash[\\\/]app[\\\/]breakpad_mac\.mm$",
         r"^content[\\\/]shell[\\\/]browser[\\\/]shell_browser_main\.cc$",
         r"^content[\\\/]shell[\\\/]browser[\\\/]shell_message_filter\.cc$",
@@ -813,12 +815,17 @@ def _CheckHardcodedGoogleHostsInLowerLayers(input_api, output_api):
 
 def _CheckNoAbbreviationInPngFileName(input_api, output_api):
   """Makes sure there are no abbreviations in the name of PNG files.
+  The native_client_sdk directory is excluded because it has auto-generated PNG
+  files for documentation.
   """
-  pattern = input_api.re.compile(r'.*_[a-z]_.*\.png$|.*_[a-z]\.png$')
   errors = []
-  for f in input_api.AffectedFiles(include_deletes=False):
-    if pattern.match(f.LocalPath()):
-      errors.append('    %s' % f.LocalPath())
+  white_list = (r'.*_[a-z]_.*\.png$|.*_[a-z]\.png$',)
+  black_list = (r'^native_client_sdk[\\\/]',)
+  file_filter = lambda f: input_api.FilterSourceFile(
+      f, white_list=white_list, black_list=black_list)
+  for f in input_api.AffectedFiles(include_deletes=False,
+                                   file_filter=file_filter):
+    errors.append('    %s' % f.LocalPath())
 
   results = []
   if errors:
@@ -953,6 +960,7 @@ def _CheckSpamLogging(input_api, output_api):
                      r"gl_helper_benchmark\.cc$",
                  r"^courgette[\\\/]courgette_tool\.cc$",
                  r"^extensions[\\\/]renderer[\\\/]logging_native_handler\.cc$",
+                 r"^ipc[\\\/]ipc_logging\.cc$",
                  r"^native_client_sdk[\\\/]",
                  r"^remoting[\\\/]base[\\\/]logging\.h$",
                  r"^remoting[\\\/]host[\\\/].*",
@@ -1212,6 +1220,26 @@ def _CheckJavaStyle(input_api, output_api):
       input_api, output_api, 'tools/android/checkstyle/chromium-style-5.0.xml')
 
 
+def _CheckForCopyrightedCode(input_api, output_api):
+  """Verifies that newly added code doesn't contain copyrighted material
+  and is properly licensed under the standard Chromium license.
+
+  As there can be false positives, we maintain a whitelist file. This check
+  also verifies that the whitelist file is up to date.
+  """
+  import sys
+  original_sys_path = sys.path
+  try:
+    sys.path = sys.path + [input_api.os_path.join(
+        input_api.PresubmitLocalPath(), 'android_webview', 'tools')]
+    import copyright_scanner
+  finally:
+    # Restore sys.path to what it was before.
+    sys.path = original_sys_path
+
+  return copyright_scanner.ScanAtPresubmit(input_api, output_api)
+
+
 _DEPRECATED_CSS = [
   # Values
   ( "-webkit-box", "flex" ),
@@ -1327,6 +1355,8 @@ def _CommonChecks(input_api, output_api):
   results.extend(_CheckNoDeprecatedJS(input_api, output_api))
   results.extend(_CheckParseErrors(input_api, output_api))
   results.extend(_CheckForIPCRules(input_api, output_api))
+  results.extend(_CheckForCopyrightedCode(input_api, output_api))
+  results.extend(_CheckForWindowsLineEndings(input_api, output_api))
 
   if any('PRESUBMIT.py' == f.LocalPath() for f in input_api.AffectedFiles()):
     results.extend(input_api.canned_checks.RunUnitTestsInDirectory(
@@ -1512,11 +1542,47 @@ def _CheckForIPCRules(input_api, output_api):
     return []
 
 
+def _CheckForWindowsLineEndings(input_api, output_api):
+  """Check source code and known ascii text files for Windows style line
+  endings.
+  """
+  known_text_files = r'.*\.(txt|html|htm|mhtml|py)$'
+
+  file_inclusion_pattern = (
+    known_text_files,
+    r'.+%s' % _IMPLEMENTATION_EXTENSIONS
+  )
+
+  filter = lambda f: input_api.FilterSourceFile(
+    f, white_list=file_inclusion_pattern, black_list=None)
+  files = [f.LocalPath() for f in
+           input_api.AffectedSourceFiles(filter)]
+
+  problems = []
+
+  for file in files:
+    fp = open(file, 'r')
+    for line in fp:
+      if line.endswith('\r\n'):
+        problems.append(file)
+        break
+    fp.close()
+
+  if problems:
+    return [output_api.PresubmitPromptWarning('Are you sure that you want '
+        'these files to contain Windows style line endings?\n' +
+        '\n'.join(problems))]
+
+  return []
+
+
 def CheckChangeOnUpload(input_api, output_api):
   results = []
   results.extend(_CommonChecks(input_api, output_api))
   results.extend(_CheckValidHostsInDEPS(input_api, output_api))
   results.extend(_CheckJavaStyle(input_api, output_api))
+  results.extend(
+      input_api.canned_checks.CheckGNFormatted(input_api, output_api))
   return results
 
 
@@ -1529,7 +1595,6 @@ def GetTryServerMasterForBot(bot):
   # Potentially ambiguous bot names are listed explicitly.
   master_map = {
       'linux_gpu': 'tryserver.chromium.gpu',
-      'mac_gpu': 'tryserver.chromium.gpu',
       'win_gpu': 'tryserver.chromium.gpu',
       'chromium_presubmit': 'tryserver.chromium.linux',
       'blink_presubmit': 'tryserver.chromium.linux',
@@ -1548,111 +1613,15 @@ def GetTryServerMasterForBot(bot):
   return master
 
 
-def GetDefaultTryConfigs(bots=None):
-  """Returns a list of ('bot', set(['tests']), optionally filtered by [bots].
-
-  To add tests to this list, they MUST be in the the corresponding master's
-  gatekeeper config. For example, anything on master.chromium would be closed by
-  tools/build/masters/master.chromium/master_gatekeeper_cfg.py.
-
-  If 'bots' is specified, will only return configurations for bots in that list.
+def GetDefaultTryConfigs(bots):
+  """Returns a list of ('bot', set(['tests']), filtered by [bots].
   """
 
-  standard_tests = [
-      'base_unittests',
-      'browser_tests',
-      'cacheinvalidation_unittests',
-      'check_deps',
-      'check_deps2git',
-      'content_browsertests',
-      'content_unittests',
-      'crypto_unittests',
-      'gpu_unittests',
-      'interactive_ui_tests',
-      'ipc_tests',
-      'jingle_unittests',
-      'media_unittests',
-      'net_unittests',
-      'ppapi_unittests',
-      'printing_unittests',
-      'sql_unittests',
-      'sync_unit_tests',
-      'unit_tests',
-      # Broken in release.
-      #'url_unittests',
-      #'webkit_unit_tests',
-  ]
-
-  builders_and_tests = {
-      # TODO(maruel): Figure out a way to run 'sizes' where people can
-      # effectively update the perf expectation correctly.  This requires a
-      # clobber=True build running 'sizes'. 'sizes' is not accurate with
-      # incremental build. Reference:
-      # http://chromium.org/developers/tree-sheriffs/perf-sheriffs.
-      # TODO(maruel): An option would be to run 'sizes' but not count a failure
-      # of this step as a try job failure.
-      'android_aosp': ['compile'],
-      'android_arm64_dbg_recipe': ['slave_steps'],
-      'android_chromium_gn_compile_dbg': ['compile'],
-      'android_chromium_gn_compile_rel': ['compile'],
-      'android_clang_dbg': ['slave_steps'],
-      'android_clang_dbg_recipe': ['slave_steps'],
-      'android_dbg_tests_recipe': ['slave_steps'],
-      'cros_x86': ['defaulttests'],
-      'ios_dbg_simulator': [
-          'compile',
-          'base_unittests',
-          'content_unittests',
-          'crypto_unittests',
-          'url_unittests',
-          'net_unittests',
-          'sql_unittests',
-          'ui_base_unittests',
-          'ui_unittests',
-      ],
-      'ios_rel_device': ['compile'],
-      'ios_rel_device_ninja': ['compile'],
-      'mac_asan': ['compile'],
-      #TODO(stip): Change the name of this builder to reflect that it's release.
-      'linux_gtk': standard_tests,
-      'linux_chromeos_asan': ['compile'],
-      'linux_chromium_chromeos_clang_dbg': ['defaulttests'],
-      'linux_chromium_chromeos_rel': ['defaulttests'],
-      'linux_chromium_compile_dbg': ['defaulttests'],
-      'linux_chromium_gn_dbg': ['compile'],
-      'linux_chromium_gn_rel': ['defaulttests'],
-      'linux_chromium_rel': ['defaulttests'],
-      'linux_chromium_rel_ng': ['defaulttests'],
-      'linux_chromium_clang_dbg': ['defaulttests'],
-      'linux_gpu': ['defaulttests'],
-      'linux_nacl_sdk_build': ['compile'],
-      'mac_chromium_compile_dbg': ['defaulttests'],
-      'mac_chromium_rel': ['defaulttests'],
-      'mac_chromium_rel_ng': ['defaulttests'],
-      'mac_gpu': ['defaulttests'],
-      'mac_nacl_sdk_build': ['compile'],
-      'win_chromium_compile_dbg': ['defaulttests'],
-      'win_chromium_dbg': ['defaulttests'],
-      'win_chromium_rel': ['defaulttests'],
-      'win_chromium_rel_ng': ['defaulttests'],
-      'win_chromium_x64_rel': ['defaulttests'],
-      'win_chromium_x64_rel_ng': ['defaulttests'],
-      'win_gpu': ['defaulttests'],
-      'win_nacl_sdk_build': ['compile'],
-      'win8_chromium_rel': ['defaulttests'],
-  }
-
-  if bots:
-    filtered_builders_and_tests = dict((bot, set(builders_and_tests[bot]))
-                                       for bot in bots)
-  else:
-    filtered_builders_and_tests = dict(
-        (bot, set(tests))
-        for bot, tests in builders_and_tests.iteritems())
+  builders_and_tests = dict((bot, set(['defaulttests'])) for bot in bots)
 
   # Build up the mapping from tryserver master to bot/test.
   out = dict()
-  for bot, tests in filtered_builders_and_tests.iteritems():
+  for bot, tests in builders_and_tests.iteritems():
     out.setdefault(GetTryServerMasterForBot(bot), {})[bot] = tests
   return out
 
@@ -1685,69 +1654,39 @@ def GetPreferredTryMasters(project, change):
 
   if all(re.search(r'\.(m|mm)$|(^|[\\\/_])mac[\\\/_.]', f) for f in files):
     return GetDefaultTryConfigs([
-        'mac_chromium_compile_dbg',
+        'mac_chromium_compile_dbg_ng',
         'mac_chromium_rel_ng',
     ])
   if all(re.search('(^|[/_])win[/_.]', f) for f in files):
     return GetDefaultTryConfigs([
-        'win_chromium_dbg',
-        'win_chromium_rel_ng',
         'win8_chromium_rel',
+        'win_chromium_rel_ng',
+        'win_chromium_x64_rel_ng',
     ])
-  if all(re.search(r'(^|[\\\/_])android[\\\/_.]', f) for f in files):
+  if all(re.search(r'(^|[\\\/_])android[\\\/_.]', f) and
+         not re.search(r'(^|[\\\/_])devtools[\\\/_.]', f) for f in files):
     return GetDefaultTryConfigs([
         'android_aosp',
-        'android_clang_dbg',
         'android_dbg_tests_recipe',
     ])
   if all(re.search(r'[\\\/_]ios[\\\/_.]', f) for f in files):
     return GetDefaultTryConfigs(['ios_rel_device', 'ios_dbg_simulator'])
 
-  builders = [
-      'android_arm64_dbg_recipe',
-      'android_chromium_gn_compile_rel',
-      'android_chromium_gn_compile_dbg',
-      'android_clang_dbg',
-      'android_clang_dbg_recipe',
-      'android_dbg_tests_recipe',
-      'ios_dbg_simulator',
-      'ios_rel_device',
-      'ios_rel_device_ninja',
-      'linux_chromium_chromeos_rel',
-      'linux_chromium_gn_dbg',
-      'linux_chromium_gn_rel',
-      'linux_chromium_rel_ng',
-      'linux_gpu',
-      'mac_chromium_compile_dbg',
-      'mac_chromium_rel_ng',
-      'mac_gpu',
-      'win_chromium_compile_dbg',
-      'win_chromium_rel_ng',
-      'win_chromium_x64_rel_ng',
-      'win_gpu',
-      'win8_chromium_rel',
-  ]
+  import os
+  import json
+  with open(os.path.join(
+      change.RepositoryRoot(), 'testing', 'commit_queue', 'config.json')) as f:
+    cq_config = json.load(f)
+    cq_trybots = cq_config.get('trybots', {})
+    builders = cq_trybots.get('launched', {})
+    for master, master_config in cq_trybots.get('triggered', {}).iteritems():
+      for triggered_bot in master_config:
+        builders.get(master, {}).pop(triggered_bot, None)
 
   # Match things like path/aura/file.cc and path/file_aura.cc.
   # Same for chromeos.
   if any(re.search(r'[\\\/_](aura|chromeos)', f) for f in files):
-    builders.extend([
-        'linux_chromeos_asan',
-    ])
+    tryserver_linux = builders.setdefault('tryserver.chromium.linux', {})
+    tryserver_linux['linux_chromium_chromeos_asan_rel_ng'] = ['defaulttests']
 
-  # If there are gyp changes to base, build, or chromeos, run a full cros build
-  # in addition to the shorter linux_chromeos build. Changes to high level gyp
-  # files have a much higher chance of breaking the cros build, which is
-  # differnt from the linux_chromeos build that most chrome developers test
-  # with.
-  if any(re.search('^(base|build|chromeos).*\.gypi?$', f) for f in files):
-    builders.extend(['cros_x86'])
-
-  # The AOSP bot doesn't build the chrome/ layer, so ignore any changes to it
-  # unless they're .gyp(i) files as changes to those files can break the gyp
-  # step on that bot.
-  if (not all(re.search('^chrome', f) for f in files) or
-      any(re.search('\.gypi?$', f) for f in files)):
-    builders.extend(['android_aosp'])
-
-  return GetDefaultTryConfigs(builders)
+  return builders

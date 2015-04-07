@@ -34,14 +34,15 @@ class SurfaceResourceHolder;
 
 class CC_SURFACES_EXPORT Surface {
  public:
-  Surface(SurfaceId id, const gfx::Size& size, SurfaceFactory* factory);
+  using DrawCallback = base::Callback<void(bool)>;
+
+  Surface(SurfaceId id, SurfaceFactory* factory);
   ~Surface();
 
-  const gfx::Size& size() const { return size_; }
   SurfaceId surface_id() const { return surface_id_; }
 
   void QueueFrame(scoped_ptr<CompositorFrame> frame,
-                  const base::Closure& draw_callback);
+                  const DrawCallback& draw_callback);
   void RequestCopyOfOutput(scoped_ptr<CopyOutputRequest> copy_request);
   // Adds each CopyOutputRequest in the current frame to copy_requests. The
   // caller takes ownership of them.
@@ -74,14 +75,13 @@ class CC_SURFACES_EXPORT Surface {
   void ClearCopyRequests();
 
   SurfaceId surface_id_;
-  gfx::Size size_;
   base::WeakPtr<SurfaceFactory> factory_;
   // TODO(jamesr): Support multiple frames in flight.
   scoped_ptr<CompositorFrame> current_frame_;
   int frame_index_;
   std::vector<SurfaceSequence> destruction_dependencies_;
 
-  base::Closure draw_callback_;
+  DrawCallback draw_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(Surface);
 };

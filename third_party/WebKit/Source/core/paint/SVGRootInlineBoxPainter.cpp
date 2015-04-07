@@ -5,6 +5,7 @@
 #include "config.h"
 #include "core/paint/SVGRootInlineBoxPainter.h"
 
+#include "core/paint/RenderDrawingRecorder.h"
 #include "core/paint/SVGInlineFlowBoxPainter.h"
 #include "core/paint/SVGInlineTextBoxPainter.h"
 #include "core/rendering/PaintInfo.h"
@@ -16,7 +17,7 @@
 
 namespace blink {
 
-void SVGRootInlineBoxPainter::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+void SVGRootInlineBoxPainter::paint(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
     ASSERT(paintInfo.phase == PaintPhaseForeground || paintInfo.phase == PaintPhaseSelection);
 
@@ -25,19 +26,22 @@ void SVGRootInlineBoxPainter::paint(PaintInfo& paintInfo, const LayoutPoint& pai
 
     PaintInfo childPaintInfo(paintInfo);
     if (hasSelection) {
-        for (InlineBox* child = m_svgRootInlineBox.firstChild(); child; child = child->nextOnLine()) {
-            if (child->isSVGInlineTextBox())
-                SVGInlineTextBoxPainter(*toSVGInlineTextBox(child)).paintSelectionBackground(childPaintInfo);
-            else if (child->isSVGInlineFlowBox())
-                SVGInlineFlowBoxPainter(*toSVGInlineFlowBox(child)).paintSelectionBackground(childPaintInfo);
+        RenderDrawingRecorder recorder(childPaintInfo.context, m_svgRootInlineBox.renderer(), childPaintInfo.phase, childPaintInfo.rect);
+        if (!recorder.canUseCachedDrawing()) {
+            for (InlineBox* child = m_svgRootInlineBox.firstChild(); child; child = child->nextOnLine()) {
+                if (child->isSVGInlineTextBox())
+                    SVGInlineTextBoxPainter(*toSVGInlineTextBox(child)).paintSelectionBackground(childPaintInfo);
+                else if (child->isSVGInlineFlowBox())
+                    SVGInlineFlowBoxPainter(*toSVGInlineFlowBox(child)).paintSelectionBackground(childPaintInfo);
+            }
         }
     }
 
-    GraphicsContextStateSaver stateSaver(*paintInfo.context);
-    SVGRenderingContext renderingContext(&m_svgRootInlineBox.renderer(), paintInfo);
+    GraphicsContextStateSaver stateSaver(*childPaintInfo.context);
+    SVGRenderingContext renderingContext(&m_svgRootInlineBox.renderer(), childPaintInfo);
     if (renderingContext.isRenderingPrepared()) {
         for (InlineBox* child = m_svgRootInlineBox.firstChild(); child; child = child->nextOnLine())
-            child->paint(paintInfo, paintOffset, 0, 0);
+            child->paint(childPaintInfo, paintOffset, 0, 0);
     }
 }
 

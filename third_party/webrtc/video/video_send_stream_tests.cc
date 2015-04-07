@@ -32,6 +32,7 @@
 #include "webrtc/test/configurable_frame_size_encoder.h"
 #include "webrtc/test/null_transport.h"
 #include "webrtc/test/testsupport/perf_test.h"
+#include "webrtc/video/send_statistics_proxy.h"
 #include "webrtc/video/transport_adapter.h"
 #include "webrtc/video_send_stream.h"
 
@@ -168,10 +169,12 @@ TEST_F(VideoSendStreamTest, SupportsAbsoluteSendTime) {
 
 TEST_F(VideoSendStreamTest, SupportsTransmissionTimeOffset) {
   static const uint8_t kTOffsetExtensionId = 13;
+  static const int kEncodeDelayMs = 5;
   class TransmissionTimeOffsetObserver : public test::SendTest {
    public:
     TransmissionTimeOffsetObserver()
-        : SendTest(kDefaultTimeoutMs), encoder_(Clock::GetRealTimeClock()) {
+        : SendTest(kDefaultTimeoutMs),
+          encoder_(Clock::GetRealTimeClock(), kEncodeDelayMs) {
       EXPECT_TRUE(parser_->RegisterRtpHeaderExtension(
           kRtpExtensionTransmissionTimeOffset, kTOffsetExtensionId));
     }
@@ -204,22 +207,7 @@ TEST_F(VideoSendStreamTest, SupportsTransmissionTimeOffset) {
           << "Timed out while waiting for a single RTP packet.";
     }
 
-    class DelayedEncoder : public test::FakeEncoder {
-     public:
-      explicit DelayedEncoder(Clock* clock) : test::FakeEncoder(clock) {}
-      virtual int32_t Encode(
-          const I420VideoFrame& input_image,
-          const CodecSpecificInfo* codec_specific_info,
-          const std::vector<VideoFrameType>* frame_types) OVERRIDE {
-        // A delay needs to be introduced to assure that we get a timestamp
-        // offset.
-        SleepMs(5);
-        return FakeEncoder::Encode(
-            input_image, codec_specific_info, frame_types);
-      }
-    };
-
-    DelayedEncoder encoder_;
+    test::DelayedEncoder encoder_;
   } test;
 
   RunBaseTest(&test);
@@ -260,11 +248,13 @@ class FakeReceiveStatistics : public NullReceiveStatistics {
       *statistics = stats_;
       return true;
     }
-    virtual void GetDataCounters(uint32_t* bytes_received,
+    virtual void GetDataCounters(size_t* bytes_received,
                                  uint32_t* packets_received) const OVERRIDE {
       *bytes_received = 0;
       *packets_received = 0;
     }
+    virtual void GetReceiveStreamDataCounters(
+        StreamDataCounters* data_counters) const OVERRIDE {}
     virtual uint32_t BitrateReceived() const OVERRIDE { return 0; }
     virtual void ResetStatistics() OVERRIDE {}
     virtual bool IsRetransmitOfOldPacket(const RTPHeader& header,
@@ -296,9 +286,14 @@ TEST_F(VideoSendStreamTest, SwapsI420VideoFrames) {
   send_stream_->Start();
 
   I420VideoFrame frame;
-  frame.CreateEmptyFrame(
-      kWidth, kHeight, kWidth, (kWidth + 1) / 2, (kWidth + 1) / 2);
+  const int stride_uv = (kWidth + 1) / 2;
+  frame.CreateEmptyFrame(kWidth, kHeight, kWidth, stride_uv, stride_uv);
   uint8_t* old_y_buffer = frame.buffer(kYPlane);
+  // Initialize memory to avoid DrMemory errors.
+  const int half_height = (kHeight + 1) / 2;
+  memset(frame.buffer(kYPlane), 0, kWidth * kHeight);
+  memset(frame.buffer(kUPlane), 0, stride_uv * half_height);
+  memset(frame.buffer(kVPlane), 0, stride_uv * half_height);
 
   send_stream_->Input()->SwapFrame(&frame);
 
@@ -477,18 +472,18 @@ void VideoSendStreamTest::TestPacketFragmentationSize(VideoFormat format,
   // Use a fake encoder to output a frame of every size in the range [90, 290],
   // for each size making sure that the exact number of payload bytes received
   // is correct and that packets are fragmented to respect max packet size.
-  static const uint32_t kMaxPacketSize = 128;
-  static const uint32_t start = 90;
-  static const uint32_t stop = 290;
+  static const size_t kMaxPacketSize = 128;
+  static const size_t start = 90;
+  static const size_t stop = 290;
 
   // Observer that verifies that the expected number of packets and bytes
   // arrive for each frame size, from start_size to stop_size.
   class FrameFragmentationTest : public test::SendTest,
                                  public EncodedFrameObserver {
    public:
-    FrameFragmentationTest(uint32_t max_packet_size,
-                           uint32_t start_size,
-                           uint32_t stop_size,
+    FrameFragmentationTest(size_t max_packet_size,
+                           size_t start_size,
+                           size_t stop_size,
                            bool test_generic_packetization,
                            bool use_fec)
         : SendTest(kLongTimeoutMs),
@@ -503,16 +498,16 @@ void VideoSendStreamTest::TestPacketFragmentationSize(VideoFormat format,
           accumulated_payload_(0),
           fec_packet_received_(false),
           current_size_rtp_(start_size),
-          current_size_frame_(start_size) {
+          current_size_frame_(static_cast<int32_t>(start_size)) {
       // Fragmentation required, this test doesn't make sense without it.
-      encoder_.SetFrameSize(start);
+      encoder_.SetFrameSize(start_size);
       assert(stop_size > max_packet_size);
       transport_adapter_.Enable();
     }
 
    private:
     virtual Action OnSendRtp(const uint8_t* packet, size_t size) OVERRIDE {
-      uint32_t length = static_cast<int>(size);
+      size_t length = size;
       RTPHeader header;
       EXPECT_TRUE(parser_->Parse(packet, length, &header));
 
@@ -534,7 +529,7 @@ void VideoSendStreamTest::TestPacketFragmentationSize(VideoFormat format,
         TriggerLossReport(header);
 
       if (test_generic_packetization_) {
-        uint32_t overhead = header.headerLength + header.paddingLength +
+        size_t overhead = header.headerLength + header.paddingLength +
                           (1 /* Generic header */);
         if (use_fec_)
           overhead += 1;  // RED for FEC header.
@@ -607,7 +602,7 @@ void VideoSendStreamTest::TestPacketFragmentationSize(VideoFormat format,
           current_size_frame_.Value() < static_cast<int32_t>(stop_size_)) {
         ++current_size_frame_;
       }
-      encoder_.SetFrameSize(current_size_frame_.Value());
+      encoder_.SetFrameSize(static_cast<size_t>(current_size_frame_.Value()));
     }
 
     virtual void ModifyConfigs(
@@ -641,17 +636,17 @@ void VideoSendStreamTest::TestPacketFragmentationSize(VideoFormat format,
     internal::TransportAdapter transport_adapter_;
     test::ConfigurableFrameSizeEncoder encoder_;
 
-    const uint32_t max_packet_size_;
-    const uint32_t stop_size_;
+    const size_t max_packet_size_;
+    const size_t stop_size_;
     const bool test_generic_packetization_;
     const bool use_fec_;
 
     uint32_t packet_count_;
-    uint32_t accumulated_size_;
-    uint32_t accumulated_payload_;
+    size_t accumulated_size_;
+    size_t accumulated_payload_;
     bool fec_packet_received_;
 
-    uint32_t current_size_rtp_;
+    size_t current_size_rtp_;
     Atomic32 current_size_frame_;
   };
 
@@ -824,7 +819,7 @@ TEST_F(VideoSendStreamTest, SuspendBelowMinBitrate) {
       rtcp_sender.SetRemoteSSRC(kSendSsrcs[0]);
       if (remb_value > 0) {
         rtcp_sender.SetREMBStatus(true);
-        rtcp_sender.SetREMBData(remb_value, 0, NULL);
+        rtcp_sender.SetREMBData(remb_value, std::vector<uint32_t>());
       }
       RTCPSender::FeedbackState feedback_state;
       EXPECT_EQ(0, rtcp_sender.SendRTCP(feedback_state, kRtcpRr));
@@ -963,9 +958,10 @@ TEST_F(VideoSendStreamTest, ProducesStats) {
         // Check for data populated by various sources. RTCP excluded as this
         // data is received from remote side. Tested in call tests instead.
         const SsrcStats& entry = stats.substreams[ssrc];
-        if (entry.key_frames > 0u && entry.total_bitrate_bps > 0 &&
-            entry.rtp_stats.packets > 0u && entry.avg_delay_ms > 0 &&
-            entry.max_delay_ms > 0) {
+        if (entry.frame_counts.key_frames > 0 &&
+            entry.frame_counts.delta_frames > 0 &&
+            entry.total_bitrate_bps > 0 && entry.rtp_stats.packets > 0u &&
+            entry.avg_delay_ms > 0 && entry.max_delay_ms > 0) {
           return true;
         }
       }
@@ -1054,7 +1050,8 @@ TEST_F(VideoSendStreamTest, MinTransmitBitrateRespectsRemb) {
                           "bps",
                           false);
         if (total_bitrate_bps > kHighBitrateBps) {
-          rtp_rtcp_->SetREMBData(kRembBitrateBps, 1, &header.ssrc);
+          rtp_rtcp_->SetREMBData(kRembBitrateBps,
+                                 std::vector<uint32_t>(1, header.ssrc));
           rtp_rtcp_->Process();
           bitrate_capped_ = true;
         } else if (bitrate_capped_ &&
@@ -1267,7 +1264,7 @@ TEST_F(VideoSendStreamTest, EncoderIsProperlyInitializedAndDestroyed) {
    private:
     virtual int32_t InitEncode(const VideoCodec* codecSettings,
                                int32_t numberOfCores,
-                               uint32_t maxPayloadSize) OVERRIDE {
+                               size_t maxPayloadSize) OVERRIDE {
       CriticalSectionScoped lock(crit_.get());
       EXPECT_FALSE(initialized_);
       initialized_ = true;
@@ -1389,7 +1386,7 @@ TEST_F(VideoSendStreamTest, EncoderSetupPropagatesCommonEncoderConfigValues) {
 
     virtual int32_t InitEncode(const VideoCodec* config,
                                int32_t number_of_cores,
-                               uint32_t max_payload_size) OVERRIDE {
+                               size_t max_payload_size) OVERRIDE {
       if (num_initializations_ == 0) {
         // Verify default values.
         EXPECT_EQ(kRealtimeVideo, config->mode);
@@ -1456,7 +1453,7 @@ TEST_F(VideoSendStreamTest, EncoderSetupPropagatesVp8Config) {
 
     virtual int32_t InitEncode(const VideoCodec* config,
                                int32_t number_of_cores,
-                               uint32_t max_payload_size) OVERRIDE {
+                               size_t max_payload_size) OVERRIDE {
       EXPECT_EQ(kVideoCodecVP8, config->codecType);
 
       // Check that the number of temporal layers has propagated properly to
@@ -1562,7 +1559,7 @@ TEST_F(VideoSendStreamTest, TranslatesTwoLayerScreencastToTargetBitrate) {
    private:
     virtual int32_t InitEncode(const VideoCodec* config,
                                int32_t number_of_cores,
-                               uint32_t max_payload_size) {
+                               size_t max_payload_size) OVERRIDE {
       EXPECT_EQ(static_cast<unsigned int>(kScreencastTargetBitrateKbps),
                 config->targetBitrate);
       observation_complete_->Set();
@@ -1586,6 +1583,184 @@ TEST_F(VideoSendStreamTest, TranslatesTwoLayerScreencastToTargetBitrate) {
       EXPECT_EQ(kEventSignaled, Wait())
           << "Timed out while waiting for the encoder to be initialized.";
     }
+  } test;
+
+  RunBaseTest(&test);
+}
+
+TEST_F(VideoSendStreamTest, UsesCallStreamBitratesAndCanReconfigureBitrates) {
+  // These are chosen to be "kind of odd" to not be accidentally checked against
+  // default values.
+  static const int kMinBitrateKbps = 137;
+  static const int kStartBitrateKbps = 345;
+  static const int kLowerMaxBitrateKbps = 312;
+  static const int kMaxBitrateKbps = 413;
+  static const int kIncreasedStartBitrateKbps = 451;
+  static const int kIncreasedMaxBitrateKbps = 597;
+  class EncoderBitrateThresholdObserver : public test::SendTest,
+                                          public test::FakeEncoder {
+   public:
+    EncoderBitrateThresholdObserver()
+        : SendTest(kDefaultTimeoutMs),
+          FakeEncoder(Clock::GetRealTimeClock()),
+          num_initializations_(0) {}
+
+   private:
+    virtual int32_t InitEncode(const VideoCodec* codecSettings,
+                               int32_t numberOfCores,
+                               size_t maxPayloadSize) OVERRIDE {
+      if (num_initializations_ == 0) {
+        EXPECT_EQ(static_cast<unsigned int>(kMinBitrateKbps),
+                  codecSettings->minBitrate);
+        EXPECT_EQ(static_cast<unsigned int>(kStartBitrateKbps),
+                  codecSettings->startBitrate);
+        EXPECT_EQ(static_cast<unsigned int>(kMaxBitrateKbps),
+                  codecSettings->maxBitrate);
+        observation_complete_->Set();
+      } else if (num_initializations_ == 1) {
+        EXPECT_EQ(static_cast<unsigned int>(kLowerMaxBitrateKbps),
+                  codecSettings->maxBitrate);
+        // The start bitrate should be kept (-1) and capped to the max bitrate.
+        // Since this is not an end-to-end call no receiver should have been
+        // returning a REMB that could lower this estimate.
+        EXPECT_EQ(codecSettings->startBitrate, codecSettings->maxBitrate);
+      } else if (num_initializations_ == 2) {
+        EXPECT_EQ(static_cast<unsigned int>(kIncreasedMaxBitrateKbps),
+                  codecSettings->maxBitrate);
+        EXPECT_EQ(static_cast<unsigned int>(kIncreasedStartBitrateKbps),
+                  codecSettings->startBitrate);
+      }
+      ++num_initializations_;
+      return FakeEncoder::InitEncode(codecSettings, numberOfCores,
+                                     maxPayloadSize);
+    }
+
+    virtual Call::Config GetSenderCallConfig() OVERRIDE {
+      Call::Config config(SendTransport());
+      config.stream_bitrates.min_bitrate_bps = kMinBitrateKbps * 1000;
+      config.stream_bitrates.start_bitrate_bps = kStartBitrateKbps * 1000;
+      config.stream_bitrates.max_bitrate_bps = kMaxBitrateKbps * 1000;
+      return config;
+    }
+
+    virtual void ModifyConfigs(
+        VideoSendStream::Config* send_config,
+        std::vector<VideoReceiveStream::Config>* receive_configs,
+        VideoEncoderConfig* encoder_config) OVERRIDE {
+      send_config->encoder_settings.encoder = this;
+      // Set bitrates lower/higher than min/max to make sure they are properly
+      // capped.
+      encoder_config->streams.front().min_bitrate_bps =
+          (kMinBitrateKbps - 10) * 1000;
+      encoder_config->streams.front().max_bitrate_bps =
+          (kIncreasedMaxBitrateKbps + 10) * 1000;
+    }
+
+    virtual void OnCallsCreated(Call* sender_call,
+                                Call* receiver_call) OVERRIDE {
+      call_ = sender_call;
+    }
+
+
+    virtual void PerformTest() OVERRIDE {
+      EXPECT_EQ(kEventSignaled, Wait())
+          << "Timed out while waiting encoder to be configured.";
+      Call::Config::BitrateConfig bitrate_config;
+      bitrate_config.min_bitrate_bps = 0;
+      bitrate_config.start_bitrate_bps = -1;
+      bitrate_config.max_bitrate_bps = kLowerMaxBitrateKbps * 1000;
+      call_->SetBitrateConfig(bitrate_config);
+      EXPECT_EQ(2, num_initializations_)
+          << "Encoder should have been reconfigured with the new value.";
+      bitrate_config.start_bitrate_bps = kIncreasedStartBitrateKbps * 1000;
+      bitrate_config.max_bitrate_bps = kIncreasedMaxBitrateKbps * 1000;
+      call_->SetBitrateConfig(bitrate_config);
+      EXPECT_EQ(3, num_initializations_)
+          << "Encoder should have been reconfigured with the new value.";
+    }
+
+    int num_initializations_;
+    webrtc::Call* call_;
+  } test;
+
+  RunBaseTest(&test);
+}
+
+TEST_F(VideoSendStreamTest, ReportsSentResolution) {
+  static const size_t kNumStreams = 3;
+  // Unusual resolutions to make sure that they are the ones being reported.
+  static const struct {
+    int width;
+    int height;
+  } kEncodedResolution[kNumStreams] = {
+      {241, 181}, {300, 121}, {121, 221}};
+  class ScreencastTargetBitrateTest : public test::SendTest,
+                                      public test::FakeEncoder {
+   public:
+    ScreencastTargetBitrateTest()
+        : SendTest(kDefaultTimeoutMs),
+          test::FakeEncoder(Clock::GetRealTimeClock()) {}
+
+   private:
+    virtual int32_t Encode(
+        const I420VideoFrame& input_image,
+        const CodecSpecificInfo* codecSpecificInfo,
+        const std::vector<VideoFrameType>* frame_types) OVERRIDE {
+      CodecSpecificInfo specifics;
+      memset(&specifics, 0, sizeof(specifics));
+      specifics.codecType = kVideoCodecGeneric;
+
+      uint8_t buffer[16] = {0};
+      EncodedImage encoded(buffer, sizeof(buffer), sizeof(buffer));
+      encoded._timeStamp = input_image.timestamp();
+      encoded.capture_time_ms_ = input_image.render_time_ms();
+
+      for (size_t i = 0; i < kNumStreams; ++i) {
+        specifics.codecSpecific.generic.simulcast_idx = static_cast<uint8_t>(i);
+        encoded._frameType = (*frame_types)[i];
+        encoded._encodedWidth = kEncodedResolution[i].width;
+        encoded._encodedHeight = kEncodedResolution[i].height;
+        assert(callback_ != NULL);
+        if (callback_->Encoded(encoded, &specifics, NULL) != 0)
+          return -1;
+      }
+
+      observation_complete_->Set();
+      return 0;
+    }
+    virtual void ModifyConfigs(
+        VideoSendStream::Config* send_config,
+        std::vector<VideoReceiveStream::Config>* receive_configs,
+        VideoEncoderConfig* encoder_config) OVERRIDE {
+      send_config->encoder_settings.encoder = this;
+      EXPECT_EQ(kNumStreams, encoder_config->streams.size());
+    }
+
+    virtual size_t GetNumStreams() const OVERRIDE { return kNumStreams; }
+
+    virtual void PerformTest() OVERRIDE {
+      EXPECT_EQ(kEventSignaled, Wait())
+          << "Timed out while waiting for the encoder to send one frame.";
+      VideoSendStream::Stats stats = send_stream_->GetStats();
+
+      for (size_t i = 0; i < kNumStreams; ++i) {
+        ASSERT_TRUE(stats.substreams.find(kSendSsrcs[i]) !=
+                    stats.substreams.end())
+            << "No stats for SSRC: " << kSendSsrcs[i]
+            << ", stats should exist as soon as frames have been encoded.";
+        SsrcStats ssrc_stats = stats.substreams[kSendSsrcs[i]];
+        EXPECT_EQ(kEncodedResolution[i].width, ssrc_stats.sent_width);
+        EXPECT_EQ(kEncodedResolution[i].height, ssrc_stats.sent_height);
+      }
+    }
+
+    virtual void OnStreamsCreated(
+        VideoSendStream* send_stream,
+        const std::vector<VideoReceiveStream*>& receive_streams) OVERRIDE {
+      send_stream_ = send_stream;
+    }
+
+    VideoSendStream* send_stream_;
   } test;
 
   RunBaseTest(&test);

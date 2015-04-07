@@ -29,6 +29,7 @@ using base::ListValue;
 using base::FundamentalValue;
 using content::NavigationController;
 using content::WebContents;
+using ui_zoom::ZoomController;
 
 namespace extensions {
 
@@ -36,7 +37,7 @@ namespace {
 
 namespace tabs = api::tabs;
 
-void WillDispatchTabUpdatedEvent(
+bool WillDispatchTabUpdatedEvent(
     WebContents* contents,
     const base::DictionaryValue* changed_properties,
     content::BrowserContext* context,
@@ -52,6 +53,7 @@ void WillDispatchTabUpdatedEvent(
 
   // Overwrite the third arg with our tab value as seen by this extension.
   event_args->Set(2, ExtensionTabUtil::CreateTabValue(contents, extension));
+  return true;
 }
 
 }  // namespace
@@ -179,7 +181,7 @@ void TabsEventRouter::OnBrowserSetLastActive(Browser* browser) {
   }
 }
 
-static void WillDispatchTabCreatedEvent(WebContents* contents,
+static bool WillDispatchTabCreatedEvent(WebContents* contents,
                                         bool active,
                                         content::BrowserContext* context,
                                         const Extension* extension,
@@ -189,6 +191,7 @@ static void WillDispatchTabCreatedEvent(WebContents* contents,
   event_args->Clear();
   event_args->Append(tab_value);
   tab_value->SetBoolean(tabs_constants::kSelectedKey, active);
+  return true;
 }
 
 void TabsEventRouter::TabCreatedAt(WebContents* contents,

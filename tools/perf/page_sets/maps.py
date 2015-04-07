@@ -27,7 +27,7 @@ class MapsPage(page_module.Page):
     action_runner.NavigateToPage(self)
     action_runner.Wait(3)
 
-  def RunSmoothness(self, action_runner):
+  def RunPageInteractions(self, action_runner):
     action_runner.WaitForJavaScriptCondition('window.testDone', 120)
 
 
@@ -40,4 +40,4 @@ class MapsPageSet(page_set_module.PageSet):
         archive_data_file='data/maps.json',
         bucket=page_set_module.PUBLIC_BUCKET)
 
-    self.AddPage(MapsPage(self))
+    self.AddUserStory(MapsPage(self))

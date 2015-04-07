@@ -148,7 +148,8 @@ void LayerAnimationController::AccumulatePropertyUpdates(
     if (!animation->InEffect(monotonic_time))
       continue;
 
-    double trimmed = animation->TrimTimeToCurrentIteration(monotonic_time);
+    base::TimeDelta trimmed =
+        animation->TrimTimeToCurrentIteration(monotonic_time);
     switch (animation->target_property()) {
       case Animation::Opacity: {
         AnimationEvent event(AnimationEvent::PropertyUpdate,
@@ -212,7 +213,11 @@ void LayerAnimationController::UpdateState(bool start_ready_animations,
   if (!HasActiveValueObserver())
     return;
 
-  DCHECK(last_tick_time_ != base::TimeTicks());
+  // Animate hasn't been called, this happens if an observer has been added
+  // between the Commit and Draw phases.
+  if (last_tick_time_ == base::TimeTicks())
+    return;
+
   if (start_ready_animations)
     PromoteStartedAnimations(last_tick_time_, events);
 
@@ -490,6 +495,21 @@ bool LayerAnimationController::HasOnlyTranslationTransforms() const {
     const TransformAnimationCurve* transform_animation_curve =
         animations_[i]->curve()->ToTransformAnimationCurve();
     if (!transform_animation_curve->IsTranslation())
+      return false;
+  }
+
+  return true;
+}
+
+bool LayerAnimationController::AnimationsPreserveAxisAlignment() const {
+  for (size_t i = 0; i < animations_.size(); ++i) {
+    if (animations_[i]->is_finished() ||
+        animations_[i]->target_property() != Animation::Transform)
+      continue;
+
+    const TransformAnimationCurve* transform_animation_curve =
+        animations_[i]->curve()->ToTransformAnimationCurve();
+    if (!transform_animation_curve->PreservesAxisAlignment())
       return false;
   }
 
@@ -856,7 +876,7 @@ void LayerAnimationController::TickAnimations(base::TimeTicks monotonic_time) {
       if (!animations_[i]->InEffect(monotonic_time))
         continue;
 
-      double trimmed =
+      base::TimeDelta trimmed =
           animations_[i]->TrimTimeToCurrentIteration(monotonic_time);
 
       switch (animations_[i]->target_property()) {

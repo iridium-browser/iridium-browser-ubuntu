@@ -6,6 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "content/browser/frame_host/cross_process_frame_connector.h"
 #include "content/browser/frame_host/frame_tree.h"
 #include "content/browser/frame_host/navigator.h"
@@ -20,6 +21,7 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test_utils.h"
+#include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
 #include "content/shell/browser/shell.h"
 #include "content/test/content_browser_test_utils_internal.h"
@@ -151,6 +153,55 @@ void RedirectNotificationObserver::Observe(
   running_ = false;
 }
 
+// This observer keeps track of the number of created RenderFrameHosts.  Tests
+// can use this to ensure that a certain number of child frames has been
+// created after navigating.
+class RenderFrameHostCreatedObserver : public WebContentsObserver {
+ public:
+  RenderFrameHostCreatedObserver(WebContents* web_contents,
+                                 int expected_frame_count)
+      : WebContentsObserver(web_contents),
+        expected_frame_count_(expected_frame_count),
+        frames_created_(0),
+        message_loop_runner_(new MessageLoopRunner) {}
+
+  ~RenderFrameHostCreatedObserver() override;
+
+  // Runs a nested message loop and blocks until the expected number of
+  // RenderFrameHosts is created.
+  void Wait();
+
+ private:
+  // WebContentsObserver
+  void RenderFrameCreated(RenderFrameHost* render_frame_host) override;
+
+  // The number of RenderFrameHosts to wait for.
+  int expected_frame_count_;
+
+  // The number of RenderFrameHosts that have been created.
+  int frames_created_;
+
+  // The MessageLoopRunner used to spin the message loop.
+  scoped_refptr<MessageLoopRunner> message_loop_runner_;
+
+  DISALLOW_COPY_AND_ASSIGN(RenderFrameHostCreatedObserver);
+};
+
+RenderFrameHostCreatedObserver::~RenderFrameHostCreatedObserver() {
+}
+
+void RenderFrameHostCreatedObserver::Wait() {
+  message_loop_runner_->Run();
+}
+
+void RenderFrameHostCreatedObserver::RenderFrameCreated(
+    RenderFrameHost* render_frame_host) {
+  frames_created_++;
+  if (frames_created_ == expected_frame_count_) {
+    message_loop_runner_->Quit();
+  }
+}
+
 //
 // SitePerProcessBrowserTest
 //
@@ -165,29 +216,8 @@ void SitePerProcessBrowserTest::StartFrameAtDataURL() {
   ASSERT_TRUE(ExecuteScript(shell()->web_contents(), data_url_script));
 }
 
-bool SitePerProcessBrowserTest::NavigateIframeToURL(Shell* window,
-                                                    const GURL& url,
-                                                    std::string iframe_id) {
-  // TODO(creis): This should wait for LOAD_STOP, but cross-site subframe
-  // navigations generate extra DidStartLoading and DidStopLoading messages.
-  // Until we replace swappedout:// with frame proxies, we need to listen for
-  // something else.  For now, we trigger NEW_SUBFRAME navigations and listen
-  // for commit.
-  std::string script = base::StringPrintf(
-      "setTimeout(\""
-      "var iframes = document.getElementById('%s');iframes.src='%s';"
-      "\",0)",
-      iframe_id.c_str(), url.spec().c_str());
-  WindowedNotificationObserver load_observer(
-      NOTIFICATION_NAV_ENTRY_COMMITTED,
-      Source<NavigationController>(
-          &window->web_contents()->GetController()));
-  bool result = ExecuteScript(window->web_contents(), script);
-  load_observer.Wait();
-  return result;
-}
-
-void SitePerProcessBrowserTest::SetUpCommandLine(CommandLine* command_line) {
+void SitePerProcessBrowserTest::SetUpCommandLine(
+    base::CommandLine* command_line) {
   command_line->AppendSwitch(switches::kSitePerProcess);
 };
 
@@ -292,7 +322,9 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, CrossSiteIframe) {
       proxy_to_parent->cross_process_frame_connector()->get_view_for_testing());
 }
 
-IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, NavigateRemoteFrame) {
+// Disabled for flaky crashing: crbug.com/446575
+IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
+                       DISABLED_NavigateRemoteFrame) {
   GURL main_url(embedded_test_server()->GetURL("/site_per_process_main.html"));
   NavigateToURL(shell(), main_url);
 
@@ -324,7 +356,7 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, NavigateRemoteFrame) {
   // Emulate the main frame changing the src of the iframe such that it
   // navigates cross-site.
   url = embedded_test_server()->GetURL("bar.com", "/title3.html");
-  NavigateIframeToURL(shell(), url, "test");
+  NavigateIframeToURL(shell()->web_contents(), "test", url);
   EXPECT_TRUE(observer.navigation_succeeded());
   EXPECT_EQ(url, observer.navigation_url());
 
@@ -346,11 +378,110 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, NavigateRemoteFrame) {
             child->current_frame_host()->GetSiteInstance());
 }
 
+// In A-embed-B-embed-C scenario, verify that killing process B clears proxies
+// of C from the tree.
+//
+//     1          A                  A
+//    / \        / \                / \    .
+//   2   3 ->   B   A -> Kill B -> B*  A
+//  /          /
+// 4          C
+//
+// node1 is the root.
+// Initially, both node1.proxy_hosts_ and node3.proxy_hosts_ contain C.
+// After we kill B, make sure proxies for C are cleared.
+//
+// TODO(lazyboy): Once http://crbug.com/432107 is fixed, we should also make
+// sure that proxies for B are not cleared when we kill B.
+IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
+                       KillingRendererClearsDescendantProxies) {
+  GURL main_url(
+      embedded_test_server()->GetURL("/frame_tree/page_with_two_frames.html"));
+  NavigateToURL(shell(), main_url);
+
+  // It is safe to obtain the root frame tree node here, as it doesn't change.
+  FrameTreeNode* root =
+      static_cast<WebContentsImpl*>(shell()->web_contents())->
+          GetFrameTree()->root();
+  SitePerProcessWebContentsObserver observer(shell()->web_contents());
+
+  ASSERT_EQ(2U, root->child_count());
+
+  // Navigate the second subframe (node3) to a local frame.
+  GURL site_a_url(embedded_test_server()->GetURL("/title1.html"));
+  NavigateFrameToURL(root->child_at(1), site_a_url);
+
+  // Navigate the first subframe (node2) to a cross-site page with two
+  // subframes.
+  // NavigateFrameToURL can't be used here because it doesn't guarantee that
+  // FrameTreeNodes will have been created for child frames when it returns.
+  RenderFrameHostCreatedObserver frame_observer(shell()->web_contents(), 3);
+  GURL site_b_url(
+      embedded_test_server()->GetURL(
+          "bar.com", "/frame_tree/page_with_one_frame.html"));
+  NavigationController::LoadURLParams params_b(site_b_url);
+  params_b.transition_type = ui::PAGE_TRANSITION_LINK;
+  params_b.frame_tree_node_id = root->child_at(0)->frame_tree_node_id();
+  root->child_at(0)->navigator()->GetController()->LoadURLWithParams(params_b);
+  frame_observer.Wait();
+
+  // We can't use a SitePerProcessWebContentsObserver to verify the URL here,
+  // since the frame has children that may have clobbered it in the observer.
+  EXPECT_EQ(site_b_url, root->child_at(0)->current_url());
+
+  // Ensure that a new process is created for node2.
+  EXPECT_NE(shell()->web_contents()->GetSiteInstance(),
+            root->child_at(0)->current_frame_host()->GetSiteInstance());
+  // Ensure that a new process is *not* created for node3.
+  EXPECT_EQ(shell()->web_contents()->GetSiteInstance(),
+            root->child_at(1)->current_frame_host()->GetSiteInstance());
+
+  ASSERT_EQ(1U, root->child_at(0)->child_count());
+
+  // Navigate node4 to cross-site-page.
+  FrameTreeNode* node4 = root->child_at(0)->child_at(0);
+  GURL site_c_url(embedded_test_server()->GetURL("baz.com", "/title2.html"));
+  NavigateFrameToURL(node4, site_c_url);
+  EXPECT_TRUE(observer.navigation_succeeded());
+  EXPECT_EQ(site_c_url, observer.navigation_url());
+
+  // |site_instance_c| is expected to go away once we kill |child_process_b|
+  // below, so create a local scope so we can extend the lifetime of
+  // |site_instance_c| with a refptr.
+  {
+    SiteInstance* site_instance_b =
+        root->child_at(0)->current_frame_host()->GetSiteInstance();
+    scoped_refptr<SiteInstanceImpl> site_instance_c =
+        node4->current_frame_host()->GetSiteInstance();
+
+    // Initially proxies for both B and C will be present in the root.
+    EXPECT_TRUE(root->render_manager()->GetRenderFrameProxyHost(
+                    site_instance_b));
+    EXPECT_TRUE(root->render_manager()->GetRenderFrameProxyHost(
+                    site_instance_c.get()));
+
+    // Kill process B.
+    RenderProcessHost* child_process_b =
+        root->child_at(0)->current_frame_host()->GetProcess();
+    RenderProcessHostWatcher crash_observer(
+        child_process_b, RenderProcessHostWatcher::WATCH_FOR_PROCESS_EXIT);
+    child_process_b->Shutdown(0, false);
+    crash_observer.Wait();
+
+    // Make sure proxy C has gone from root.
+    EXPECT_FALSE(root->render_manager()->GetRenderFrameProxyHost(
+                     site_instance_c.get()));
+    // Make sure proxy C has gone from node3 as well.
+    EXPECT_FALSE(root->child_at(1)->render_manager()->GetRenderFrameProxyHost(
+                     site_instance_c.get()));
+    // TODO(lazyboy): Once http://crbug.com/432107 is fixed, we should also
+    // check that proxy B exists in both root and node3.
+  }
+}
+
 // Crash a subframe and ensures its children are cleared from the FrameTree.
 // See http://crbug.com/338508.
-// TODO(creis): Disabled for flakiness; see http://crbug.com/405582.
-// TODO(creis): Enable this on Android when we can kill the process there.
-IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, DISABLED_CrashSubframe) {
+IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, CrashSubframe) {
   GURL main_url(embedded_test_server()->GetURL("/site_per_process_main.html"));
   NavigateToURL(shell(), main_url);
 
@@ -362,15 +493,14 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, DISABLED_CrashSubframe) {
 
   // Load cross-site page into iframe.
   EXPECT_TRUE(NavigateIframeToURL(
-      shell(),
-      embedded_test_server()->GetURL("/cross-site/foo.com/title2.html"),
-      "test"));
+      shell()->web_contents(), "test",
+      embedded_test_server()->GetURL("/cross-site/foo.com/title2.html")));
 
   // Check the subframe process.
   FrameTreeNode* root =
       static_cast<WebContentsImpl*>(shell()->web_contents())->
           GetFrameTree()->root();
-  ASSERT_EQ(1U, root->child_count());
+  ASSERT_EQ(2U, root->child_count());
   FrameTreeNode* child = root->child_at(0);
   EXPECT_EQ(main_url, root->current_url());
   EXPECT_EQ("foo.com", child->current_url().host());
@@ -387,12 +517,12 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, DISABLED_CrashSubframe) {
     RenderProcessHostWatcher crash_observer(
         child_process,
         RenderProcessHostWatcher::WATCH_FOR_PROCESS_EXIT);
-    base::KillProcess(child_process->GetHandle(), 0, false);
+    child_process->Shutdown(0, false);
     crash_observer.Wait();
   }
 
   // Ensure that the child frame still exists but has been cleared.
-  EXPECT_EQ(1U, root->child_count());
+  EXPECT_EQ(2U, root->child_count());
   EXPECT_EQ(main_url, root->current_url());
   EXPECT_EQ(GURL(), child->current_url());
 
@@ -406,7 +536,7 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, DISABLED_CrashSubframe) {
     RenderProcessHostWatcher crash_observer(
         root_process,
         RenderProcessHostWatcher::WATCH_FOR_PROCESS_EXIT);
-    base::KillProcess(root_process->GetHandle(), 0, false);
+    root_process->Shutdown(0, false);
     crash_observer.Wait();
   }
   EXPECT_EQ(0U, root->child_count());
@@ -438,8 +568,8 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
     // Should be blocked.
     GURL client_redirect_https_url(https_server.GetURL(
         "client-redirect?files/title1.html"));
-    EXPECT_TRUE(NavigateIframeToURL(shell(),
-                                    client_redirect_https_url, "test"));
+    EXPECT_TRUE(NavigateIframeToURL(shell()->web_contents(), "test",
+                                    client_redirect_https_url));
     // DidFailProvisionalLoad when navigating to client_redirect_https_url.
     EXPECT_EQ(observer.navigation_url(), client_redirect_https_url);
     EXPECT_FALSE(observer.navigation_succeeded());
@@ -450,8 +580,8 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
     // which redirects to same-site page.
     GURL server_redirect_http_url(https_server.GetURL(
         "server-redirect?" + http_url.spec()));
-    EXPECT_TRUE(NavigateIframeToURL(shell(),
-                                    server_redirect_http_url, "test"));
+    EXPECT_TRUE(NavigateIframeToURL(shell()->web_contents(), "test",
+                                    server_redirect_http_url));
     EXPECT_EQ(observer.navigation_url(), http_url);
     EXPECT_TRUE(observer.navigation_succeeded());
   }
@@ -461,8 +591,8 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
     // which redirects to cross-site page.
     GURL server_redirect_http_url(https_server.GetURL(
         "server-redirect?files/title1.html"));
-    EXPECT_TRUE(NavigateIframeToURL(shell(),
-                                    server_redirect_http_url, "test"));
+    EXPECT_TRUE(NavigateIframeToURL(shell()->web_contents(), "test",
+                                    server_redirect_http_url));
     // DidFailProvisionalLoad when navigating to https_url.
     EXPECT_EQ(observer.navigation_url(), https_url);
     EXPECT_FALSE(observer.navigation_succeeded());
@@ -473,8 +603,8 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
     // which redirects to cross-site page.
     GURL server_redirect_http_url(test_server()->GetURL(
         "server-redirect?" + https_url.spec()));
-    EXPECT_TRUE(NavigateIframeToURL(shell(),
-                                    server_redirect_http_url, "test"));
+    EXPECT_TRUE(NavigateIframeToURL(shell()->web_contents(), "test",
+                                    server_redirect_http_url));
 
     EXPECT_EQ(observer.navigation_url(), https_url);
     EXPECT_FALSE(observer.navigation_succeeded());
@@ -491,8 +621,8 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
         Source<NavigationController>(
             &shell()->web_contents()->GetController()));
 
-    EXPECT_TRUE(NavigateIframeToURL(shell(),
-                                    client_redirect_http_url, "test"));
+    EXPECT_TRUE(NavigateIframeToURL(shell()->web_contents(), "test",
+                                    client_redirect_http_url));
 
     // Same-site Client-Redirect Page should be loaded successfully.
     EXPECT_EQ(observer.navigation_url(), client_redirect_http_url);
@@ -509,8 +639,8 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
     // which redirects to same-site page.
     GURL server_redirect_http_url(test_server()->GetURL(
         "server-redirect?files/title1.html"));
-    EXPECT_TRUE(NavigateIframeToURL(shell(),
-                                    server_redirect_http_url, "test"));
+    EXPECT_TRUE(NavigateIframeToURL(shell()->web_contents(), "test",
+                                    server_redirect_http_url));
     EXPECT_EQ(observer.navigation_url(), http_url);
     EXPECT_TRUE(observer.navigation_succeeded());
    }
@@ -525,8 +655,8 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
         Source<NavigationController>(
             &shell()->web_contents()->GetController()));
 
-    EXPECT_TRUE(NavigateIframeToURL(shell(),
-                                    client_redirect_http_url, "test"));
+    EXPECT_TRUE(NavigateIframeToURL(shell()->web_contents(), "test",
+                                    client_redirect_http_url));
 
     // Same-site Client-Redirect Page should be loaded successfully.
     EXPECT_EQ(observer.navigation_url(), client_redirect_http_url);
@@ -573,7 +703,8 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
         Source<NavigationController>(
             &shell()->web_contents()->GetController()));
 
-    EXPECT_TRUE(NavigateIframeToURL(shell(), client_redirect_http_url, "test"));
+    EXPECT_TRUE(NavigateIframeToURL(shell()->web_contents(), "test",
+                                    client_redirect_http_url));
 
     // DidFailProvisionalLoad when navigating to client_redirect_https_url.
     load_observer2.Wait();
@@ -588,8 +719,8 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
         "server-redirect?" + http_url.spec()));
     GURL server_redirect_http_url(test_server()->GetURL(
         "server-redirect?" + server_redirect_https_url.spec()));
-    EXPECT_TRUE(NavigateIframeToURL(shell(),
-                                    server_redirect_http_url, "test"));
+    EXPECT_TRUE(NavigateIframeToURL(shell()->web_contents(), "test",
+                                    server_redirect_http_url));
     EXPECT_EQ(observer.navigation_url(), http_url);
     EXPECT_TRUE(observer.navigation_succeeded());
   }
@@ -601,7 +732,8 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
         "server-redirect?" + https_url.spec()));
     GURL server_redirect_http_url(test_server()->GetURL(
         "server-redirect?" + server_redirect_https_url.spec()));
-    EXPECT_TRUE(NavigateIframeToURL(shell(), server_redirect_http_url, "test"));
+    EXPECT_TRUE(NavigateIframeToURL(shell()->web_contents(), "test",
+                                    server_redirect_http_url));
 
     // DidFailProvisionalLoad when navigating to https_url.
     EXPECT_EQ(observer.navigation_url(), https_url);
@@ -615,7 +747,8 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
         "client-redirect?" + http_url.spec()));
     GURL server_redirect_http_url(test_server()->GetURL(
         "server-redirect?" + client_redirect_http_url.spec()));
-    EXPECT_TRUE(NavigateIframeToURL(shell(), server_redirect_http_url, "test"));
+    EXPECT_TRUE(NavigateIframeToURL(shell()->web_contents(), "test",
+                                    server_redirect_http_url));
 
     // DidFailProvisionalLoad when navigating to client_redirect_http_url.
     EXPECT_EQ(observer.navigation_url(), client_redirect_http_url);
@@ -627,7 +760,8 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
 // created in the FrameTree skipping the subtree of the navigating frame.
 //
 // Disabled on Mac due to flakiness on ASAN. http://crbug.com/425248
-#if defined(OS_MACOSX)
+// Disabled on Windows due to flakiness on Win 7 bot. http://crbug.com/444563
+#if defined(OS_MACOSX) || defined(OS_WIN)
 #define MAYBE_ProxyCreationSkipsSubtree DISABLED_ProxyCreationSkipsSubtree
 #else
 #define MAYBE_ProxyCreationSkipsSubtree ProxyCreationSkipsSubtree
@@ -733,6 +867,225 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
     EXPECT_EQ(cross_site_url, observer.navigation_url());
     EXPECT_EQ(0U, child->child_count());
   }
+}
+
+// Verify that origin replication works for an A-embed-B-embed-C hierarchy.
+IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, OriginReplication) {
+  GURL main_url(embedded_test_server()->GetURL("/site_per_process_main.html"));
+  EXPECT_TRUE(NavigateToURL(shell(), main_url));
+
+  // It is safe to obtain the root frame tree node here, as it doesn't change.
+  FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
+                            ->GetFrameTree()
+                            ->root();
+
+  SitePerProcessWebContentsObserver observer(shell()->web_contents());
+
+  // Navigate the first subframe to a cross-site page with two subframes.
+  // NavigateFrameToURL can't be used here because it doesn't guarantee that
+  // FrameTreeNodes will have been created for child frames when it returns.
+  RenderFrameHostCreatedObserver frame_observer(shell()->web_contents(), 4);
+  GURL foo_url(
+      embedded_test_server()->GetURL("foo.com", "/frame_tree/1-1.html"));
+  NavigationController::LoadURLParams params(foo_url);
+  params.transition_type = ui::PAGE_TRANSITION_LINK;
+  params.frame_tree_node_id = root->child_at(0)->frame_tree_node_id();
+  root->child_at(0)->navigator()->GetController()->LoadURLWithParams(params);
+  frame_observer.Wait();
+
+  // We can't use a SitePerProcessWebContentsObserver to verify the URL here,
+  // since the frame has children that may have clobbered it in the observer.
+  EXPECT_EQ(foo_url, root->child_at(0)->current_url());
+
+  // Ensure that a new process is created for the subframe.
+  EXPECT_NE(shell()->web_contents()->GetSiteInstance(),
+            root->child_at(0)->current_frame_host()->GetSiteInstance());
+
+  // Load cross-site page into subframe's subframe.
+  ASSERT_EQ(2U, root->child_at(0)->child_count());
+  GURL bar_url(embedded_test_server()->GetURL("bar.com", "/title1.html"));
+  NavigateFrameToURL(root->child_at(0)->child_at(0), bar_url);
+  EXPECT_TRUE(observer.navigation_succeeded());
+  EXPECT_EQ(bar_url, observer.navigation_url());
+
+  // Check that a new process is created and is different from the top one and
+  // the middle one.
+  FrameTreeNode* bottom_child = root->child_at(0)->child_at(0);
+  EXPECT_NE(shell()->web_contents()->GetSiteInstance(),
+            bottom_child->current_frame_host()->GetSiteInstance());
+  EXPECT_NE(root->child_at(0)->current_frame_host()->GetSiteInstance(),
+            bottom_child->current_frame_host()->GetSiteInstance());
+
+  // Check that foo.com frame's location.ancestorOrigins contains the correct
+  // origin for the parent.  The origin should have been replicated as part of
+  // the ViewMsg_New message that created the parent's RenderFrameProxy in
+  // foo.com's process.
+  int ancestor_origins_length = 0;
+  EXPECT_TRUE(ExecuteScriptAndExtractInt(
+      root->child_at(0)->current_frame_host(),
+      "window.domAutomationController.send(location.ancestorOrigins.length);",
+      &ancestor_origins_length));
+  EXPECT_EQ(1, ancestor_origins_length);
+  std::string result;
+  EXPECT_TRUE(ExecuteScriptAndExtractString(
+      root->child_at(0)->current_frame_host(),
+      "window.domAutomationController.send(location.ancestorOrigins[0]);",
+      &result));
+  EXPECT_EQ(result + "/", main_url.GetOrigin().spec());
+
+  // Check that bar.com frame's location.ancestorOrigins contains the correct
+  // origin for its two ancestors. The topmost parent origin should be
+  // replicated as part of ViewMsg_New, and the middle frame (foo.com's) origin
+  // should be replicated as part of FrameMsg_NewFrameProxy sent for foo.com's
+  // frame in bar.com's process.
+  EXPECT_TRUE(ExecuteScriptAndExtractInt(
+      bottom_child->current_frame_host(),
+      "window.domAutomationController.send(location.ancestorOrigins.length);",
+      &ancestor_origins_length));
+  EXPECT_EQ(2, ancestor_origins_length);
+  EXPECT_TRUE(ExecuteScriptAndExtractString(
+      bottom_child->current_frame_host(),
+      "window.domAutomationController.send(location.ancestorOrigins[0]);",
+      &result));
+  EXPECT_EQ(result + "/", foo_url.GetOrigin().spec());
+  EXPECT_TRUE(ExecuteScriptAndExtractString(
+      bottom_child->current_frame_host(),
+      "window.domAutomationController.send(location.ancestorOrigins[1]);",
+      &result));
+  EXPECT_EQ(result + "/", main_url.GetOrigin().spec());
+}
+
+// TODO(lfg): Merge the test below with NavigateRemoteFrame test.
+// TODO(lfg): Disabled because this triggers http://crbug.com/433012, and since
+// the renderer process crashes, it causes the title watcher to never return.
+// Alternatively, this could also be fixed if we could use NavigateIframeToURL
+// and classified the navigation as MANUAL_SUBFRAME (http://crbug.com/441863) or
+// if we waited for DidStopLoading (currently broken -- see comment in
+// NavigateIframeToURL).
+IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
+                       DISABLED_NavigateRemoteToDataURL) {
+  GURL main_url(embedded_test_server()->GetURL("/site_per_process_main.html"));
+  NavigateToURL(shell(), main_url);
+
+  // It is safe to obtain the root frame tree node here, as it doesn't change.
+  FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
+                            ->GetFrameTree()
+                            ->root();
+
+  SitePerProcessWebContentsObserver observer(shell()->web_contents());
+
+  // Load cross-site page into iframe.
+  GURL url = embedded_test_server()->GetURL("foo.com", "/title1.html");
+  NavigateFrameToURL(root->child_at(0), url);
+  EXPECT_TRUE(observer.navigation_succeeded());
+  EXPECT_EQ(url, observer.navigation_url());
+
+  // Ensure that we have created a new process for the subframe.
+  EXPECT_NE(shell()->web_contents()->GetSiteInstance(),
+            root->child_at(0)->current_frame_host()->GetSiteInstance());
+
+  // Navigate iframe to a data URL. The navigation happens from a script in the
+  // parent frame, so the data URL should be committed in the same SiteInstance
+  // as the parent frame.
+  GURL data_url("data:text/html,dataurl");
+  std::string script = base::StringPrintf(
+      "setTimeout(function() {"
+      "var iframe = document.getElementById('test');"
+      "iframe.onload = function() { document.title = 'LOADED'; };"
+      "iframe.src=\"%s\";"
+      "},0);",
+      data_url.spec().c_str());
+  base::string16 passed_string(base::UTF8ToUTF16("LOADED"));
+  TitleWatcher title_watcher(shell()->web_contents(), passed_string);
+  EXPECT_TRUE(ExecuteScript(shell()->web_contents(), script));
+  EXPECT_EQ(title_watcher.WaitAndGetTitle(), passed_string);
+  EXPECT_TRUE(observer.navigation_succeeded());
+  EXPECT_EQ(data_url, observer.navigation_url());
+
+  // Ensure that we have navigated using the top level process.
+  EXPECT_EQ(shell()->web_contents()->GetSiteInstance(),
+            root->child_at(0)->current_frame_host()->GetSiteInstance());
+}
+
+// TODO(lfg): Merge the test below with NavigateRemoteFrame test.
+// Disabled due to the same reason as NavigateRemoteToDataURL.
+IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest,
+                       DISABLED_NavigateRemoteToBlankURL) {
+  GURL main_url(embedded_test_server()->GetURL("/site_per_process_main.html"));
+  NavigateToURL(shell(), main_url);
+
+  // It is safe to obtain the root frame tree node here, as it doesn't change.
+  FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
+                            ->GetFrameTree()
+                            ->root();
+
+  SitePerProcessWebContentsObserver observer(shell()->web_contents());
+
+  // Load cross-site page into iframe.
+  GURL url = embedded_test_server()->GetURL("foo.com", "/title1.html");
+  NavigateFrameToURL(root->child_at(0), url);
+  EXPECT_TRUE(observer.navigation_succeeded());
+  EXPECT_EQ(url, observer.navigation_url());
+
+  // Ensure that we have created a new process for the subframe.
+  EXPECT_NE(shell()->web_contents()->GetSiteInstance(),
+            root->child_at(0)->current_frame_host()->GetSiteInstance());
+
+  // Navigate iframe to about:blank. The navigation happens from a script in the
+  // parent frame, so it should be committed in the same SiteInstance as the
+  // parent frame.
+  GURL about_blank_url("about:blank");
+  std::string script = base::StringPrintf(
+      "setTimeout(function() {"
+      "var iframe = document.getElementById('test');"
+      "iframe.onload = function() { document.title = 'LOADED'; };"
+      "iframe.src=\"%s\";"
+      "},0);",
+      about_blank_url.spec().c_str());
+  base::string16 passed_string(base::UTF8ToUTF16("LOADED"));
+  TitleWatcher title_watcher(shell()->web_contents(), passed_string);
+  EXPECT_TRUE(ExecuteScript(shell()->web_contents(), script));
+  EXPECT_EQ(title_watcher.WaitAndGetTitle(), passed_string);
+  EXPECT_TRUE(observer.navigation_succeeded());
+  EXPECT_EQ(about_blank_url, observer.navigation_url());
+
+  // Ensure that we have navigated using the top level process.
+  EXPECT_EQ(shell()->web_contents()->GetSiteInstance(),
+            root->child_at(0)->current_frame_host()->GetSiteInstance());
+}
+
+// Ensure that navigating subframes in --site-per-process mode properly fires
+// the DidStopLoading event on WebContentsObserver.
+IN_PROC_BROWSER_TEST_F(SitePerProcessBrowserTest, CrossSiteDidStopLoading) {
+  GURL main_url(embedded_test_server()->GetURL("/site_per_process_main.html"));
+  NavigateToURL(shell(), main_url);
+
+  // It is safe to obtain the root frame tree node here, as it doesn't change.
+  FrameTreeNode* root =
+      static_cast<WebContentsImpl*>(shell()->web_contents())->
+          GetFrameTree()->root();
+
+  SitePerProcessWebContentsObserver observer(shell()->web_contents());
+
+  // Load same-site page into iframe.
+  FrameTreeNode* child = root->child_at(0);
+  GURL http_url(embedded_test_server()->GetURL("/title1.html"));
+  NavigateFrameToURL(child, http_url);
+  EXPECT_EQ(http_url, observer.navigation_url());
+  EXPECT_TRUE(observer.navigation_succeeded());
+
+  // Load cross-site page into iframe.
+  TestNavigationObserver nav_observer(shell()->web_contents(), 1);
+  GURL url = embedded_test_server()->GetURL("foo.com", "/title2.html");
+  NavigationController::LoadURLParams params(url);
+  params.transition_type = ui::PAGE_TRANSITION_LINK;
+  params.frame_tree_node_id = child->frame_tree_node_id();
+  child->navigator()->GetController()->LoadURLWithParams(params);
+  nav_observer.Wait();
+
+  // Verify that the navigation succeeded and the expected URL was loaded.
+  EXPECT_TRUE(observer.navigation_succeeded());
+  EXPECT_EQ(url, observer.navigation_url());
 }
 
 }  // namespace content

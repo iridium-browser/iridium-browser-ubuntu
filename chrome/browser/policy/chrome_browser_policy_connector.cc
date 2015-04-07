@@ -139,10 +139,14 @@ void ChromeBrowserPolicyConnector::AppendExtraFlagPerPolicy() {
   const base::Value* policy_value =
       chrome_policy.GetValue(key::kEnableWebBasedSignin);
   bool enabled = false;
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
-  if (policy_value && policy_value->GetAsBoolean(&enabled) && enabled &&
-      !command_line->HasSwitch(switches::kEnableWebBasedSignin)) {
-    command_line->AppendSwitch(switches::kEnableWebBasedSignin);
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  if (policy_value && policy_value->GetAsBoolean(&enabled) && enabled) {
+    if (!command_line->HasSwitch(switches::kEnableWebBasedSignin))
+      command_line->AppendSwitch(switches::kEnableWebBasedSignin);
+    // In M41, to fully enable web-based sign in, the kEnableIframeBasedSignin
+    // must also be specified.
+    if (!command_line->HasSwitch(switches::kEnableIframeBasedSignin))
+      command_line->AppendSwitch(switches::kEnableIframeBasedSignin);
   }
 }
 

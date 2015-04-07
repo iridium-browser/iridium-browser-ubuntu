@@ -6,6 +6,7 @@
 
 #include "content/browser/message_port_service.h"
 #include "content/common/message_port_messages.h"
+#include "content/common/view_messages.h"
 
 namespace content {
 
@@ -19,7 +20,7 @@ MessagePortMessageFilter::~MessagePortMessageFilter() {
 }
 
 void MessagePortMessageFilter::OnChannelClosing() {
-  MessagePortService::GetInstance()->OnMessagePortMessageFilterClosing(this);
+  MessagePortService::GetInstance()->OnMessagePortDelegateClosing(this);
 }
 
 bool MessagePortMessageFilter::OnMessageReceived(const IPC::Message& message) {
@@ -42,6 +43,9 @@ bool MessagePortMessageFilter::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_FORWARD(MessagePortHostMsg_SendQueuedMessages,
                         MessagePortService::GetInstance(),
                         MessagePortService::SendQueuedMessages)
+    IPC_MESSAGE_FORWARD(MessagePortHostMsg_ReleaseMessages,
+                        MessagePortService::GetInstance(),
+                        MessagePortService::ReleaseMessages)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -54,6 +58,23 @@ void MessagePortMessageFilter::OnDestruct() const {
 
 int MessagePortMessageFilter::GetNextRoutingID() {
   return next_routing_id_.Run();
+}
+
+void MessagePortMessageFilter::SendMessage(
+    int route_id,
+    const base::string16& message,
+    const std::vector<int>& sent_message_port_ids) {
+  // Generate new routing ids for all ports that were sent around. This avoids
+  // waiting for the created ports to send a sync message back to get routing
+  // ids.
+  std::vector<int> new_routing_ids;
+  UpdateMessagePortsWithNewRoutes(sent_message_port_ids, &new_routing_ids);
+  Send(new MessagePortMsg_Message(route_id, message, sent_message_port_ids,
+                                  new_routing_ids));
+}
+
+void MessagePortMessageFilter::SendMessagesAreQueued(int route_id) {
+  Send(new MessagePortMsg_MessagesQueued(route_id));
 }
 
 void MessagePortMessageFilter::UpdateMessagePortsWithNewRoutes(
@@ -71,6 +92,16 @@ void MessagePortMessageFilter::UpdateMessagePortsWithNewRoutes(
         (*new_routing_ids)[i]);
   }
 }
+
+void MessagePortMessageFilter::RouteMessageEventWithMessagePorts(
+    int routing_id,
+    const ViewMsg_PostMessage_Params& params) {
+  ViewMsg_PostMessage_Params new_params(params);
+  UpdateMessagePortsWithNewRoutes(params.message_port_ids,
+                                  &new_params.new_routing_ids);
+  Send(new ViewMsg_PostMessageEvent(routing_id, new_params));
+}
+
 
 void MessagePortMessageFilter::OnCreateMessagePort(int *route_id,
                                                    int* message_port_id) {

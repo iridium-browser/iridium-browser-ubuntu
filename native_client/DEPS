@@ -2,19 +2,22 @@
 
 vars = {
   "chrome_rev": "275800",
-  # NOTE!  These four should match their counterparts in chromium/src/DEPS.
+  # NOTE!  These five should match their counterparts in chromium/src/DEPS.
   # Be sure to update them when updating chrome_rev, above.
   # (This is not essential for Breakpad, because we do not use its code
   # in the build that goes into Chromium.  But might as well update it too.)
+  # The last one is needed to ensure that the (currently untested on the bots)
+  # build of native client in chrome on Android continues to work.
   "gtest_rev": "643",
   "gyp_rev": "1927",
   "lss_rev": "26",
   "breakpad_rev": "1338",
+  "android_tools_rev": "ea50cccc11657404ce22cf928062ed1a3927eb39",
 
   "lcov_rev": "149720",
   "tools_rev": "13800",
 
-  "validator_snapshots_rev": "14018",
+  "validator_snapshots_rev": "14199",
 
   # These are URL prefixes rather than revision numbers, so keep them separate.
   "chromium_trunk": "http://src.chromium.org/svn/trunk",
@@ -25,7 +28,7 @@ vars = {
   # Three lines of non-changing comments so that
   # the commit queue can handle CLs rolling build tools
   # and whatever else without interference from each other.
-  "buildtools_revision": "59b93247766e1cdac6e482637ad493df38f7aeb7"
+  "buildtools_revision": "c27f95bd1d9baaef70c879dea375090dd1496147"
 }
 
 deps = {
@@ -79,8 +82,7 @@ deps_os = {
   },
   "android": {
     "third_party/android_tools":
-      Var("chromium_git") + "/android_tools.git" +
-      "@aabf2a28449fe47dedeee51d3570ff8687ff015f",
+      (Var("chromium_git") + "/android_tools.git@" + Var("android_tools_rev"))
   },
 }
 
@@ -91,6 +93,14 @@ hooks = [
     "action": ["python",
                "native_client/build/package_version/package_version.py",
                "sync", "--extract",
+    ],
+  },
+  # Cleanup any stale package_version files.
+  {
+    "pattern": ".",
+    "action": ["python",
+               "native_client/build/package_version/package_version.py",
+               "cleanup",
     ],
   },
   {

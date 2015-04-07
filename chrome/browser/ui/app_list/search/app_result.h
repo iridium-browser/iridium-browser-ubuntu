@@ -40,7 +40,8 @@ class AppResult : public SearchResult,
  public:
   AppResult(Profile* profile,
             const std::string& app_id,
-            AppListControllerDelegate* controller);
+            AppListControllerDelegate* controller,
+            bool is_recommendation);
   ~AppResult() override;
 
   void UpdateFromMatch(const TokenizedString& title,
@@ -79,9 +80,6 @@ class AppResult : public SearchResult,
   // extensions::ExtensionRegistryObserver override:
   void OnExtensionLoaded(content::BrowserContext* browser_context,
                          const extensions::Extension* extension) override;
-  void OnExtensionUninstalled(content::BrowserContext* browser_context,
-                              const extensions::Extension* extension,
-                              extensions::UninstallReason reason) override;
   void OnShutdown(extensions::ExtensionRegistry* registry) override;
 
   Profile* profile_;

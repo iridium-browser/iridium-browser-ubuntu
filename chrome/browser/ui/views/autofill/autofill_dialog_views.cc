@@ -35,8 +35,8 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/gfx/font_list.h"
+#include "ui/gfx/geometry/point.h"
 #include "ui/gfx/path.h"
-#include "ui/gfx/point.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/views/background.h"
 #include "ui/views/border.h"
@@ -1238,7 +1238,8 @@ void AutofillDialogViews::Show() {
   UpdateNotificationArea();
   UpdateButtonStripExtraView();
 
-  window_ = ShowWebModalDialogViews(this, delegate_->GetWebContents());
+  window_ = constrained_window::ShowWebModalDialogViews(
+      this, delegate_->GetWebContents());
   focus_manager_ = window_->GetFocusManager();
   focus_manager_->AddFocusChangeListener(this);
 
@@ -1662,8 +1663,7 @@ void AutofillDialogViews::ContentsChanged(views::Textfield* sender,
 
 bool AutofillDialogViews::HandleKeyEvent(views::Textfield* sender,
                                          const ui::KeyEvent& key_event) {
-  ui::KeyEvent copy(key_event);
-  content::NativeWebKeyboardEvent event(&copy);
+  content::NativeWebKeyboardEvent event(key_event);
   return delegate_->HandleKeyPressEventInInput(event);
 }
 
@@ -1739,13 +1739,11 @@ void AutofillDialogViews::OnMenuButtonClicked(views::View* source,
       new views::MenuRunner(delegate_->MenuModelForSection(group->section), 0));
 
   group->container->SetActive(true);
-  views::Button::ButtonState state = group->suggested_button->state();
-  group->suggested_button->SetState(views::Button::STATE_PRESSED);
 
   gfx::Rect screen_bounds = source->GetBoundsInScreen();
   screen_bounds.Inset(source->GetInsets());
   if (menu_runner_->RunMenuAt(source->GetWidget(),
-                              NULL,
+                              group->suggested_button,
                               screen_bounds,
                               views::MENU_ANCHOR_TOPRIGHT,
                               ui::MENU_SOURCE_NONE) ==
@@ -1754,7 +1752,6 @@ void AutofillDialogViews::OnMenuButtonClicked(views::View* source,
   }
 
   group->container->SetActive(false);
-  group->suggested_button->SetState(state);
 }
 
 gfx::Size AutofillDialogViews::CalculatePreferredSize(
@@ -2319,7 +2316,7 @@ void AutofillDialogViews::ContentsPreferredSizeChanged() {
   preferred_size_ = gfx::Size();
 
   if (GetWidget() && delegate_ && delegate_->GetWebContents()) {
-    UpdateWebContentsModalDialogPosition(
+    constrained_window::UpdateWebContentsModalDialogPosition(
         GetWidget(),
         web_modal::WebContentsModalDialogManager::FromWebContents(
             delegate_->GetWebContents())->delegate()->
@@ -2483,7 +2480,7 @@ void AutofillDialogViews::SetEditabilityForSection(DialogSection section) {
 
     TextfieldMap::iterator text_mapping = group->textfields.find(input.type);
     if (text_mapping != group->textfields.end()) {
-      ExpandingTextfield* textfield= text_mapping->second;
+      ExpandingTextfield* textfield = text_mapping->second;
       textfield->SetEditable(editable);
       continue;
     }

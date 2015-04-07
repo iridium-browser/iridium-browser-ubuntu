@@ -48,7 +48,7 @@ TYPE_NAME_FIX_MAP = {
 
 
 TYPES_WITH_RUNTIME_CAST_SET = frozenset(["Runtime.RemoteObject", "Runtime.PropertyDescriptor", "Runtime.InternalPropertyDescriptor",
-                                         "Debugger.FunctionDetails", "Debugger.CollectionEntry", "Debugger.CallFrame", "Debugger.Location",
+                                         "Debugger.FunctionDetails", "Debugger.GeneratorObjectDetails", "Debugger.CollectionEntry", "Debugger.CallFrame", "Debugger.Location",
                                          "Canvas.TraceLog", "Canvas.ResourceState"])
 
 TYPES_WITH_OPEN_FIELD_LIST_SET = frozenset([
@@ -1006,7 +1006,7 @@ class TypeBindings:
                                     pos += 1
 
                                 writer.newline_multiline(CodeGeneratorInspectorStrings.class_binding_builder_part_3
-                                                         % (class_name, class_name, class_name, class_name, class_name))
+                                                         % (class_name, class_name, class_name, class_name, class_name, class_name))
 
                                 writer.newline("    /*\n")
                                 writer.newline("     * Synthetic constructor:\n")
@@ -1055,7 +1055,7 @@ class TypeBindings:
                                     writer.append("#if %s\n" % VALIDATOR_IFDEF_NAME)
                                     writer.newline("        assertCorrectValue(object.get());\n")
                                     writer.append("#endif  // %s\n" % VALIDATOR_IFDEF_NAME)
-                                    writer.newline("        COMPILE_ASSERT(sizeof(%s) == sizeof(JSONObjectBase), type_cast_problem);\n" % class_name)
+                                    writer.newline("        static_assert(sizeof(%s) == sizeof(JSONObjectBase), \"%s should be the same size as JSONObjectBase\");\n" % (class_name, class_name))
                                     writer.newline("        return static_cast<%s*>(static_cast<JSONObjectBase*>(object.get()));\n" % class_name)
                                     writer.newline("    }\n")
                                     writer.append("\n")

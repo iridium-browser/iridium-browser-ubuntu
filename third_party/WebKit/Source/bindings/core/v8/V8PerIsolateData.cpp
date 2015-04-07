@@ -133,7 +133,7 @@ void V8PerIsolateData::willBeDestroyed(v8::Isolate* isolate)
 
     // Clear any data that may have handles into the heap,
     // prior to calling ThreadState::detach().
-    data->m_idbPendingTransactionMonitor.clear();
+    data->clearEndOfScopeTasks();
 }
 
 void V8PerIsolateData::destroy(v8::Isolate* isolate)
@@ -185,7 +185,7 @@ v8::Local<v8::Context> V8PerIsolateData::ensureScriptRegexpContext()
 {
     if (!m_scriptRegexpScriptState) {
         v8::Local<v8::Context> context(v8::Context::New(isolate()));
-        m_scriptRegexpScriptState = ScriptState::create(context, DOMWrapperWorld::create());
+        m_scriptRegexpScriptState = ScriptState::create(context, DOMWrapperWorld::create(isolate()));
     }
     return m_scriptRegexpScriptState->context();
 }
@@ -205,23 +205,23 @@ bool V8PerIsolateData::hasInstance(const WrapperTypeInfo* info, v8::Handle<v8::V
     return templ->HasInstance(value);
 }
 
-v8::Handle<v8::Object> V8PerIsolateData::findInstanceInPrototypeChain(const WrapperTypeInfo* info, v8::Handle<v8::Value> value)
+v8::Local<v8::Object> V8PerIsolateData::findInstanceInPrototypeChain(const WrapperTypeInfo* info, v8::Local<v8::Value> value)
 {
-    v8::Handle<v8::Object> wrapper = findInstanceInPrototypeChain(info, value, m_domTemplateMapForMainWorld);
+    v8::Local<v8::Object> wrapper = findInstanceInPrototypeChain(info, value, m_domTemplateMapForMainWorld);
     if (!wrapper.IsEmpty())
         return wrapper;
     return findInstanceInPrototypeChain(info, value, m_domTemplateMapForNonMainWorld);
 }
 
-v8::Handle<v8::Object> V8PerIsolateData::findInstanceInPrototypeChain(const WrapperTypeInfo* info, v8::Handle<v8::Value> value, DOMTemplateMap& domTemplateMap)
+v8::Local<v8::Object> V8PerIsolateData::findInstanceInPrototypeChain(const WrapperTypeInfo* info, v8::Local<v8::Value> value, DOMTemplateMap& domTemplateMap)
 {
     if (value.IsEmpty() || !value->IsObject())
-        return v8::Handle<v8::Object>();
+        return v8::Local<v8::Object>();
     DOMTemplateMap::iterator result = domTemplateMap.find(info);
     if (result == domTemplateMap.end())
-        return v8::Handle<v8::Object>();
-    v8::Handle<v8::FunctionTemplate> templ = result->value.Get(isolate());
-    return v8::Handle<v8::Object>::Cast(value)->FindInstanceInPrototypeChain(templ);
+        return v8::Local<v8::Object>();
+    v8::Local<v8::FunctionTemplate> templ = result->value.Get(isolate());
+    return v8::Local<v8::Object>::Cast(value)->FindInstanceInPrototypeChain(templ);
 }
 
 static void constructorOfToString(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -249,11 +249,23 @@ v8::Handle<v8::FunctionTemplate> V8PerIsolateData::toStringTemplate()
     return m_toStringTemplate.newLocal(isolate());
 }
 
-IDBPendingTransactionMonitor* V8PerIsolateData::ensureIDBPendingTransactionMonitor()
+void V8PerIsolateData::addEndOfScopeTask(PassOwnPtr<EndOfScopeTask> task)
 {
-    if (!m_idbPendingTransactionMonitor)
-        m_idbPendingTransactionMonitor = adoptPtr(new IDBPendingTransactionMonitor());
-    return m_idbPendingTransactionMonitor.get();
+    m_endOfScopeTasks.append(task);
+}
+
+void V8PerIsolateData::runEndOfScopeTasks()
+{
+    Vector<OwnPtr<EndOfScopeTask>> tasks;
+    tasks.swap(m_endOfScopeTasks);
+    for (const auto& task : tasks)
+        task->run();
+    ASSERT(m_endOfScopeTasks.isEmpty());
+}
+
+void V8PerIsolateData::clearEndOfScopeTasks()
+{
+    m_endOfScopeTasks.clear();
 }
 
 } // namespace blink

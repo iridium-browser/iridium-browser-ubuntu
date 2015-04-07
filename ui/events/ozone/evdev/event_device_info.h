@@ -19,6 +19,17 @@
 
 namespace ui {
 
+// Input device types.
+enum EVENTS_OZONE_EVDEV_EXPORT EventDeviceType {
+  DT_KEYBOARD,
+  DT_MOUSE,
+  DT_TOUCHPAD,
+  DT_TOUCHSCREEN,
+  DT_MULTITOUCH,
+  DT_MULTITOUCH_MOUSE,
+  DT_ALL,
+};
+
 // Device information for Linux input devices
 //
 // This stores and queries information about input devices; in
@@ -48,15 +59,27 @@ class EVENTS_OZONE_EVDEV_EXPORT EventDeviceInfo {
   // Check input device properties.
   bool HasProp(unsigned int code) const;
 
-  // Has absolute X & Y axes.
+  // Has absolute X & Y axes (excludes MT)
   bool HasAbsXY() const;
 
-  // Has relativeX & Y axes.
+  // Has MT absolute events
+  bool HasMTAbsXY() const;
+
+  // Has relative X & Y axes.
   bool HasRelXY() const;
 
   // Determine whether absolute device X/Y coordinates are mapped onto the
   // screen. This is the case for touchscreens and tablets but not touchpads.
   bool IsMappedToScreen() const;
+
+  // Determine whether there's a keyboard on this device.
+  bool HasKeyboard() const;
+
+  // Determine whether there's a mouse on this device.
+  bool HasMouse() const;
+
+  // Determine whether there's a touchpad on this device.
+  bool HasTouchpad() const;
 
  private:
   // Return the slot vector in |slot_values_| for |code|.

@@ -87,7 +87,7 @@ class TestPasswordStoreMac : public PasswordStoreMac {
 
 class PasswordStoreMacInternalsTest : public testing::Test {
  public:
-  virtual void SetUp() {
+  void SetUp() override {
     MockAppleKeychain::KeychainTestData test_data[] = {
       // Basic HTML form.
       { kSecAuthenticationTypeHTMLForm, "some.domain.com",
@@ -135,7 +135,7 @@ class PasswordStoreMacInternalsTest : public testing::Test {
     }
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     ExpectCreatesAndFreesBalanced();
     ExpectCreatorCodesSet();
     delete keychain_;
@@ -1051,7 +1051,7 @@ class PasswordStoreMacTest : public testing::Test {
  public:
   PasswordStoreMacTest() : ui_thread_(BrowserThread::UI, &message_loop_) {}
 
-  virtual void SetUp() {
+  void SetUp() override {
     login_db_ = new LoginDatabase();
     ASSERT_TRUE(db_dir_.CreateUniqueTempDir());
     base::FilePath db_file = db_dir_.path().AppendASCII("login.db");
@@ -1067,7 +1067,7 @@ class PasswordStoreMacTest : public testing::Test {
     ASSERT_TRUE(store_->Init(syncer::SyncableService::StartSyncFlare()));
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     store_->Shutdown();
     EXPECT_FALSE(store_->GetBackgroundTaskRunner().get());
   }
@@ -1441,4 +1441,41 @@ TEST_F(PasswordStoreMacTest, TestRemoveLoginsMultiProfile) {
   matching_items.get() = owned_keychain_adapter.PasswordsFillingForm(
       "http://some.domain.com/insecure.html", PasswordForm::SCHEME_HTML);
   ASSERT_EQ(1u, matching_items.size());
+}
+
+// Verify that Android app passwords are retrievable.
+// Regression test for http://crbug.com/455551
+TEST_F(PasswordStoreMacTest, AndroidCredentialsMatchAfterInsertion) {
+  PasswordForm form;
+  form.signon_realm = "android://7x7IDboo8u9YKraUsbmVkuf1@net.rateflix.app/";
+  form.username_value = base::UTF8ToUTF16("randomusername");
+  form.password_value = base::UTF8ToUTF16("password");
+  store()->AddLogin(form);
+  WaitForStoreUpdate();
+
+  PasswordForm returned_form;
+  MockPasswordStoreConsumer consumer;
+  EXPECT_CALL(consumer, OnGetPasswordStoreResults(_)).WillOnce(DoAll(
+      WithArg<0>(Invoke(&consumer, &MockPasswordStoreConsumer::CopyElements)),
+      WithArg<0>(STLDeleteElements0()),
+      QuitUIMessageLoop()));
+
+  store()->GetAutofillableLogins(&consumer);
+  base::MessageLoop::current()->Run();
+  ::testing::Mock::VerifyAndClearExpectations(&consumer);
+  EXPECT_EQ(1u, consumer.last_result.size());
+  EXPECT_EQ(form, consumer.last_result[0]);
+
+  PasswordForm query_form = form;
+  query_form.password_value.clear();
+  query_form.username_value.clear();
+  EXPECT_CALL(consumer, OnGetPasswordStoreResults(_)).WillOnce(DoAll(
+      WithArg<0>(Invoke(&consumer, &MockPasswordStoreConsumer::CopyElements)),
+      WithArg<0>(STLDeleteElements0()),
+      QuitUIMessageLoop()));
+  store()->GetLogins(query_form, PasswordStore::ALLOW_PROMPT, &consumer);
+  base::MessageLoop::current()->Run();
+  ::testing::Mock::VerifyAndClearExpectations(&consumer);
+  EXPECT_EQ(1u, consumer.last_result.size());
+  EXPECT_EQ(form, consumer.last_result[0]);
 }

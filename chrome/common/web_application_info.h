@@ -10,7 +10,8 @@
 
 #include "base/strings/string16.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "ui/gfx/size.h"
+#include "third_party/skia/include/core/SkColor.h"
+#include "ui/gfx/geometry/size.h"
 #include "url/gurl.h"
 
 // Structure used when installing a web page as an app.
@@ -49,6 +50,9 @@ struct WebApplicationInfo {
   // Whether the page is marked as mobile-capable, including apple specific meta
   // tag.
   MobileCapable mobile_capable;
+
+  // The color to use if an icon needs to be generated for the web app.
+  SkColor generated_icon_color;
 };
 
 #endif  // CHROME_COMMON_WEB_APPLICATION_INFO_H_

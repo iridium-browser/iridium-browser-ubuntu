@@ -28,6 +28,7 @@
 #include "components/translate/core/common/translate_constants.h"
 #include "components/translate/core/common/translate_pref_names.h"
 #include "components/translate/core/common/translate_switches.h"
+#include "components/translate/core/common/translate_util.h"
 #include "net/base/url_util.h"
 #include "net/http/http_status_code.h"
 
@@ -106,7 +107,7 @@ void TranslateManager::InitiateTranslation(const std::string& page_lang) {
 
   // Allow disabling of translate from the command line to assist with
   // automated browser testing.
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           translate::switches::kDisableTranslate)) {
     TranslateBrowserMetrics::ReportInitiationStatus(
         TranslateBrowserMetrics::INITIATION_STATUS_DISABLED_BY_SWITCH);
@@ -350,9 +351,9 @@ void TranslateManager::OnTranslateScriptFetchComplete(
 // static
 std::string TranslateManager::GetTargetLanguage(
     const std::vector<std::string>& accept_languages_list) {
-  std::string ui_lang = TranslatePrefs::ConvertLangCodeForTranslation(
-      TranslateDownloadManager::GetLanguageCode(
-          TranslateDownloadManager::GetInstance()->application_locale()));
+  std::string ui_lang = TranslateDownloadManager::GetLanguageCode(
+      TranslateDownloadManager::GetInstance()->application_locale());
+  translate::ToTranslateLanguageSynonym(&ui_lang);
 
   if (TranslateDownloadManager::IsSupportedLanguage(ui_lang))
     return ui_lang;

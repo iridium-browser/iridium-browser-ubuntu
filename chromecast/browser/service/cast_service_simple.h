@@ -18,14 +18,16 @@ class CastContentWindow;
 class CastServiceSimple : public CastService {
  public:
   CastServiceSimple(content::BrowserContext* browser_context,
-                    const OptInStatsChangedCallback& opt_in_stats_callback);
-  virtual ~CastServiceSimple();
+                    PrefService* pref_service,
+                    metrics::CastMetricsServiceClient* metrics_service_client);
+  ~CastServiceSimple() override;
 
  protected:
   // CastService implementation:
-  virtual void Initialize() override;
-  virtual void StartInternal() override;
-  virtual void StopInternal() override;
+  void InitializeInternal() override;
+  void FinalizeInternal() override;
+  void StartInternal() override;
+  void StopInternal() override;
 
  private:
   scoped_ptr<CastContentWindow> window_;

@@ -473,11 +473,29 @@ bool LaunchProcess(const std::vector<std::string>& argv,
   return true;
 }
 
+Process LaunchProcess(const std::vector<std::string>& argv,
+                      const LaunchOptions& options) {
+  ProcessHandle process_handle;
+  if (LaunchProcess(argv, options, &process_handle))
+    return Process(process_handle);
+
+  return Process();
+}
+
 
 bool LaunchProcess(const CommandLine& cmdline,
                    const LaunchOptions& options,
                    ProcessHandle* process_handle) {
   return LaunchProcess(cmdline.argv(), options, process_handle);
+}
+
+Process LaunchProcess(const CommandLine& cmdline,
+                      const LaunchOptions& options) {
+  ProcessHandle process_handle;
+  if (LaunchProcess(cmdline, options, &process_handle))
+    return Process(process_handle);
+
+  return Process();
 }
 
 void RaiseProcessToHighPriority() {

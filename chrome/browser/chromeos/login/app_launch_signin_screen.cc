@@ -120,6 +120,10 @@ void AppLaunchSigninScreen::ShowEnterpriseEnrollmentScreen() {
   NOTREACHED();
 }
 
+void AppLaunchSigninScreen::ShowEnableDebuggingScreen() {
+  NOTREACHED();
+}
+
 void AppLaunchSigninScreen::ShowKioskEnableScreen() {
   NOTREACHED();
 }
@@ -212,17 +216,6 @@ void AppLaunchSigninScreen::HandleGetUsers() {
   }
 
   webui_handler_->LoadUsers(users_list, false);
-}
-
-void AppLaunchSigninScreen::SetAuthType(
-    const std::string& username,
-    ScreenlockBridge::LockHandler::AuthType auth_type) {
-  return;
-}
-
-ScreenlockBridge::LockHandler::AuthType AppLaunchSigninScreen::GetAuthType(
-    const std::string& username) const {
-  return ScreenlockBridge::LockHandler::OFFLINE_PASSWORD;
 }
 
 }  // namespace chromeos

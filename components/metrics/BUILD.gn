@@ -15,6 +15,10 @@ source_set("metrics") {
     "compression_utils.h",
     "daily_event.cc",
     "daily_event.h",
+    "histogram_encoder.cc",
+    "histogram_encoder.h",
+    "histogram_manager.cc",
+    "histogram_manager.h",
     "machine_id_provider.h",
     "machine_id_provider_stub.cc",
     "machine_id_provider_win.cc",
@@ -34,6 +38,8 @@ source_set("metrics") {
     "metrics_reporting_scheduler.h",
     "metrics_service.cc",
     "metrics_service.h",
+    "metrics_service_accessor.cc",
+    "metrics_service_accessor.h",
     "metrics_service_client.cc",
     "metrics_service_client.h",
     "metrics_state_manager.cc",
@@ -49,6 +55,8 @@ source_set("metrics") {
   ]
   deps = [
     "//base",
+    "//base:i18n",
+    "//base:prefs",
     "//components/variations",
     "//third_party/zlib",
   ]
@@ -69,7 +77,10 @@ source_set("gpu") {
     ":metrics",
   ]
   deps = [
+    "//base",
+    "//content/public/browser",
     "//gpu/config",
+    "//ui/gfx",
   ]
 }
 
@@ -90,7 +101,9 @@ static_library("net") {
     ":metrics",
   ]
   deps = [
+    "//base",
     "//net",
+    "//url",
   ]
 }
 
@@ -109,12 +122,14 @@ source_set("profiler") {
   ]
   deps = [
     "//base",
+    "//components/variations",
     "//content/public/browser",
+    "//content/public/common",
   ]
 }
 
 # GYP version: components/metrics.gypi:metrics_test_support
-static_library("test_support") {
+source_set("test_support") {
   sources = [
     "test_metrics_service_client.cc",
     "test_metrics_service_client.h",
@@ -122,6 +137,9 @@ static_library("test_support") {
 
   public_deps = [
     ":metrics",
+  ]
+  deps = [
+    "//base",
   ]
 }
 
@@ -134,7 +152,9 @@ if (is_linux) {
       "serialization/metric_sample.cc",
       "serialization/metric_sample.h",
     ]
-    deps = [ "//base" ]
+    deps = [
+      "//base",
+    ]
   }
 }
 
@@ -143,6 +163,8 @@ source_set("unit_tests") {
   sources = [
     "compression_utils_unittest.cc",
     "daily_event_unittest.cc",
+    "histogram_encoder_unittest.cc",
+    "histogram_manager_unittest.cc",
     "machine_id_provider_win_unittest.cc",
     "metrics_hashes_unittest.cc",
     "metrics_log_manager_unittest.cc",
@@ -156,9 +178,13 @@ source_set("unit_tests") {
 
   deps = [
     ":metrics",
+    ":profiler",
+    ":test_support",
+    "//base:prefs_test_support",
     "//base/test:test_support",
+    "//components/variations",
+    "//content/public/common",
     "//testing/gtest",
   ]
 }
-
 # TODO(GYP): metrics_chromeos

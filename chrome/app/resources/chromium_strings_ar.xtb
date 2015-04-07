@@ -39,7 +39,6 @@
 <translation id="3883381313049582448">‏استخدام كلمة المرور التي تم إنشاؤها بواسطة Chromium</translation>
 <translation id="3549345495227188780">‏البدء في استخدام نظام التشغيل Chromium</translation>
 <translation id="1668054258064581266">‏بعد إزالة حسابك من Chromium، قد تحتاج إلى إعادة تحميل علامات التبويب المفتوحة لتفعيلها.</translation>
-<translation id="6953661834318318668">‏شريط أدوات Chromium</translation>
 <translation id="4285930937574705105">‏أخفقت عملية التثبيت بسبب خطأ غير محدد. إذا كان Chromium في حالة التشغيل حاليًا، فالرجاء إغلاقه وإعادة المحاولة.</translation>
 <translation id="1396446129537741364">‏يحاول Chromium إظهار كلمات المرور.</translation>
 <translation id="8987477933582888019">متصفح الويب</translation>
@@ -94,6 +93,7 @@
 <translation id="7473891865547856676">لا، شكرًا</translation>
 <translation id="9191268552238695869">‏ثبّت أحد المشرفين Chromium على هذا النظام، وهو متاح لجميع المستخدمين. سيحل تثبيت Chromium على مستوى النظام محل التثبيت على مستوى المستخدم الآن.</translation>
 <translation id="3509308970982693815">‏الرجاء إغلاق جميع نوافذ Chromium وإعادة المحاولة.</translation>
+<translation id="8851136666856101339">main</translation>
 <translation id="4077262827416206768">‏الرجاء إغلاق جميع نوافذ Chromium وإعادة تشغيل Chromium حتى يسري هذا التغيير.</translation>
 <translation id="6475912303565314141">‏كما أنها تتحكم في الصفحة التي تظهر عند تشغيل Chromium.</translation>
 <translation id="1725059042853530269">‏قد يضر <ph name="FILE_NAME"/> بتجربة متصفحك، لذلك فقد حظره Chromium.</translation>
@@ -156,6 +156,7 @@
 <translation id="275588974610408078">‏تقارير الأعطال غير متاحة في Chromium.</translation>
 <translation id="5909170354645388250">‏لا يتم استخدامها في Chromium. عنصر نائب للاحتفاظ بخرائط الموارد في المزامنة. إنها تتوقع وسيطة واحدة: $1.</translation>
 <translation id="1144202035120576837">‏يستخدم <ph name="SITE"/> التشفير عادةً لحماية معلوماتك. عندما حاول Chromium الاتصال بموقع <ph name="SITE"/> فإن الموقع في هذه المرة، أرسل اعتمادات استثنائية وغير صحيحة. فإما أن يكون مهاجمًا يحاول ادعاء أنه موقع <ph name="SITE"/>، أو أن شاشة تسجيل دخول Wi-Fi قد قطعت الاتصال. .لكن لا تزال معلوماتك آمنة لأن Chromium أوقف الاتصال قبل تبادل أي بيانات.</translation>
+<translation id="2316129865977710310">لا، شكرًا</translation>
 <translation id="7937630085815544518">‏تم تسجيل دخولك إلى Chromium باعتبارك <ph name="USER_EMAIL_ADDRESS"/>. الرجاء استخدام الحساب نفسه لتسجيل الدخول مرة أخرى.</translation>
 <translation id="2685838254101182273">‏توقف تحديث Chromium ولم يعد متوافقًا مع هذا الإصدار من نظام التشغيل.</translation>
 <translation id="8684913864886094367">‏لم يغلق Chromium بشكل صحيح.</translation>
@@ -169,6 +170,7 @@
 <translation id="2648074677641340862">‏حدث خطأ في نظام التشغيل أثناء عملية التثبيت. الرجاء إعادة تنزيل Chromium.</translation>
 <translation id="5942520288919337908">‏تمت إضافة <ph name="EXTENSION_NAME"/> إلى Chromium.</translation>
 <translation id="549669000822060376">‏الرجاء الانتظار أثناء تثبيت Chromium لآخر تحديثات النظام.</translation>
+<translation id="1240763998429950591">‏تعذر على Chromium التحديث إلى أحدث إصدار، لذلك فقد تفوتك الميزات الجديدة وعمليات إصلاح الأمان. تحتاج إلى تحديث Chromium.</translation>
 <translation id="6930860321615955692">https://support.google.com/chrome/?p=ib_chromeframe</translation>
 <translation id="3281987435599047980">‏لإرسال الكلمة والنص المحيط بها إلى بحث Google وعرض التعريفات والصور ونتائج البحث والتفاصيل الأخرى.</translation>
 <translation id="4559775032954821361">‏انتقل إلى
@@ -206,6 +208,7 @@
 <translation id="2966088006374919794">‏يحتاج Chromium إلى تشغيل تطبيق خارجي للتعامل مع روابط <ph name="SCHEME"/>. والرابط المطلوب هو <ph name="PROTOLINK"/>.</translation>
 <translation id="2558235863893655150">‏هل تريد من Chromium حفظ كلمة المرور؟</translation>
 <translation id="6485906693002546646">‏أنت تستخدم <ph name="PROFILE_EMAIL"/> لمزامنة عناصرك في Chromium. لتحديث تفضيل المزامنة أو استخدام Chromium بدون حساب Google، يُرجى الانتقال إلى <ph name="SETTINGS_LINK"/>.</translation>
+<translation id="705851970750939768">‏تحديث Chromium</translation>
 <translation id="5772805321386874569">‏(<ph name="BEGIN_BUTTON"/>إعادة تشغيل<ph name="END_BUTTON"/> Chromium مطلوبة)</translation>
 <translation id="1688750314291223739">‏يمكنك إعداد المزامنة لحفظ ميزات المتصفح المخصصة على الويب والدخول إليها من Chromium على أي كمبيوتر.</translation>
 <translation id="8610831143142469229">‏اسمح للمتصفح Chromium بالدخول إلى الشبكة من خلال إعدادات الجدار الناري أو

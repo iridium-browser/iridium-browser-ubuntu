@@ -10,6 +10,9 @@
 #include "core/css/StyleRule.h"
 #include "core/css/StyleSheetContents.h"
 #include "core/css/parser/CSSParserFastPaths.h"
+#include "core/css/parser/CSSParserImpl.h"
+#include "core/css/parser/CSSSelectorParser.h"
+#include "core/css/parser/CSSTokenizer.h"
 
 namespace blink {
 
@@ -20,26 +23,42 @@ CSSParser::CSSParser(const CSSParserContext& context)
 
 bool CSSParser::parseDeclaration(MutableStylePropertySet* propertySet, const String& declaration, CSSParserObserver* observer, StyleSheetContents* styleSheet)
 {
+    // FIXME: Add inspector observer support in the new CSS parser
+    if (!observer && RuntimeEnabledFeatures::newCSSParserEnabled())
+        return CSSParserImpl::parseDeclaration(propertySet, declaration, m_bisonParser.m_context);
     return m_bisonParser.parseDeclaration(propertySet, declaration, observer, styleSheet);
 }
 
 void CSSParser::parseSelector(const String& selector, CSSSelectorList& selectorList)
 {
+    if (RuntimeEnabledFeatures::newCSSParserEnabled()) {
+        Vector<CSSParserToken> tokens;
+        CSSTokenizer::tokenize(selector, tokens);
+        CSSSelectorParser::parseSelector(tokens, m_bisonParser.m_context, starAtom, nullptr, selectorList);
+        return;
+    }
     m_bisonParser.parseSelector(selector, selectorList);
 }
 
 PassRefPtrWillBeRawPtr<StyleRuleBase> CSSParser::parseRule(const CSSParserContext& context, StyleSheetContents* styleSheet, const String& rule)
 {
+    if (RuntimeEnabledFeatures::newCSSParserEnabled())
+        return CSSParserImpl::parseRule(rule, context, CSSParserImpl::RegularRules);
     return BisonCSSParser(context).parseRule(styleSheet, rule);
 }
 
 void CSSParser::parseSheet(const CSSParserContext& context, StyleSheetContents* styleSheet, const String& text, const TextPosition& startPosition, CSSParserObserver* observer, bool logErrors)
 {
+    // FIXME: Add inspector observer support in the new CSS parser
+    if (!observer && RuntimeEnabledFeatures::newCSSParserEnabled())
+        return CSSParserImpl::parseStyleSheet(text, context, styleSheet);
     BisonCSSParser(context).parseSheet(styleSheet, text, startPosition, observer, logErrors);
 }
 
 bool CSSParser::parseValue(MutableStylePropertySet* declaration, CSSPropertyID propertyID, const String& string, bool important, CSSParserMode parserMode, StyleSheetContents* styleSheet)
 {
+    if (string.isEmpty())
+        return false;
     if (parseFastPath(declaration, propertyID, string, important, parserMode))
         return true;
     CSSParserContext context(parserMode, 0);
@@ -52,6 +71,8 @@ bool CSSParser::parseValue(MutableStylePropertySet* declaration, CSSPropertyID p
 
 bool CSSParser::parseValue(MutableStylePropertySet* declaration, CSSPropertyID propertyID, const String& string, bool important, const CSSParserContext& context)
 {
+    if (RuntimeEnabledFeatures::newCSSParserEnabled())
+        return CSSParserImpl::parseValue(declaration, propertyID, string, important, context);
     return BisonCSSParser::parseValue(declaration, propertyID, string, important, context);
 }
 
@@ -77,16 +98,24 @@ PassRefPtrWillBeRawPtr<CSSValue> CSSParser::parseSingleValue(CSSPropertyID prope
 
 PassRefPtrWillBeRawPtr<ImmutableStylePropertySet> CSSParser::parseInlineStyleDeclaration(const String& styleString, Element* element)
 {
+    if (RuntimeEnabledFeatures::newCSSParserEnabled())
+        return CSSParserImpl::parseInlineStyleDeclaration(styleString, element);
     return BisonCSSParser::parseInlineStyleDeclaration(styleString, element);
 }
 
 PassOwnPtr<Vector<double> > CSSParser::parseKeyframeKeyList(const String& keyList)
 {
+    if (RuntimeEnabledFeatures::newCSSParserEnabled())
+        return CSSParserImpl::parseKeyframeKeyList(keyList);
     return BisonCSSParser(strictCSSParserContext()).parseKeyframeKeyList(keyList);
 }
 
-PassRefPtrWillBeRawPtr<StyleKeyframe> CSSParser::parseKeyframeRule(const CSSParserContext& context, StyleSheetContents* styleSheet, const String& rule)
+PassRefPtrWillBeRawPtr<StyleRuleKeyframe> CSSParser::parseKeyframeRule(const CSSParserContext& context, StyleSheetContents* styleSheet, const String& rule)
 {
+    if (RuntimeEnabledFeatures::newCSSParserEnabled()) {
+        RefPtrWillBeRawPtr<StyleRuleBase> keyframe = CSSParserImpl::parseRule(rule, context, CSSParserImpl::KeyframeRules);
+        return toStyleRuleKeyframe(keyframe.get());
+    }
     return BisonCSSParser(context).parseKeyframeRule(styleSheet, rule);
 }
 

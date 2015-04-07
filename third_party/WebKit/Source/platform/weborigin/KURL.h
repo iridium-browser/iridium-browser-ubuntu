@@ -77,6 +77,8 @@ public:
     // done with the same input.
     KURL(const AtomicString& canonicalString, const url::Parsed&, bool isValid);
 
+    ~KURL();
+
     String strippedForUseAsReferrer() const;
 
     // FIXME: The above functions should be harmonized so that passing a
@@ -171,10 +173,6 @@ public:
     const url::Parsed& parsed() const { return m_parsed; }
 
     const KURL* innerURL() const { return m_innerURL.get(); }
-
-#ifndef NDEBUG
-    void print() const;
-#endif
 
     bool isSafeToSendToAnotherThread() const;
 

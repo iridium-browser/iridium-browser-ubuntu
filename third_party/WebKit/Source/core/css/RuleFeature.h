@@ -30,7 +30,6 @@
 
 namespace blink {
 
-class CSSSelectorList;
 class DescendantInvalidationSet;
 class QualifiedName;
 class RuleData;
@@ -92,11 +91,6 @@ public:
         return m_idInvalidationSets.size() > 0;
     }
 
-    // Marks the given attribute name as "appearing in a selector". Used for
-    // CSS properties such as content: ... attr(...) ...
-    // FIXME: record these internally to this class instead calls from StyleResolver to here.
-    void addContentAttr(const AtomicString& attributeName);
-
     StyleInvalidator& styleInvalidator();
 
     void trace(Visitor*);
@@ -125,43 +119,45 @@ private:
         unsigned maxDirectAdjacentSelectors;
     };
 
-    enum InvalidationSetMode {
-        AddFeatures,
-        UseLocalStyleChange,
-        UseSubtreeStyleChange
-    };
-
-    static InvalidationSetMode invalidationSetModeForSelector(const CSSSelector&);
-
-    void collectFeaturesFromSelector(const CSSSelector&, FeatureMetadata&, InvalidationSetMode);
-    void collectFeaturesFromSelectorList(const CSSSelectorList*, FeatureMetadata&, InvalidationSetMode);
+    void collectFeaturesFromSelector(const CSSSelector&, FeatureMetadata&);
 
     DescendantInvalidationSet& ensureClassInvalidationSet(const AtomicString& className);
     DescendantInvalidationSet& ensureAttributeInvalidationSet(const AtomicString& attributeName);
     DescendantInvalidationSet& ensureIdInvalidationSet(const AtomicString& attributeName);
     DescendantInvalidationSet& ensurePseudoInvalidationSet(CSSSelector::PseudoType);
 
-    InvalidationSetMode updateInvalidationSets(const CSSSelector&);
+    void updateInvalidationSets(const RuleData&);
+    void updateInvalidationSetsForContentAttribute(const RuleData&);
 
     struct InvalidationSetFeatures {
         InvalidationSetFeatures()
             : customPseudoElement(false)
+            , hasBeforeOrAfter(false)
             , treeBoundaryCrossing(false)
             , adjacent(false)
             , insertionPointCrossing(false)
+            , forceSubtree(false)
         { }
+
+        bool useSubtreeInvalidation() const { return forceSubtree || adjacent; }
+
         Vector<AtomicString> classes;
         Vector<AtomicString> attributes;
         AtomicString id;
         AtomicString tagName;
         bool customPseudoElement;
+        bool hasBeforeOrAfter;
         bool treeBoundaryCrossing;
         bool adjacent;
         bool insertionPointCrossing;
+        bool forceSubtree;
     };
 
-    static void extractInvalidationSetFeature(const CSSSelector&, InvalidationSetFeatures&);
-    const CSSSelector* extractInvalidationSetFeatures(const CSSSelector&, InvalidationSetFeatures&, bool negated);
+    static bool extractInvalidationSetFeature(const CSSSelector&, InvalidationSetFeatures&);
+
+    enum UseFeaturesType { UseFeatures, ForceSubtree };
+
+    std::pair<const CSSSelector*, UseFeaturesType> extractInvalidationSetFeatures(const CSSSelector&, InvalidationSetFeatures&, bool negated);
 
     void addFeaturesToInvalidationSet(DescendantInvalidationSet&, const InvalidationSetFeatures&);
     void addFeaturesToInvalidationSets(const CSSSelector&, InvalidationSetFeatures&);

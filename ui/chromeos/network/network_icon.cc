@@ -19,10 +19,10 @@
 #include "ui/chromeos/network/network_icon_animation.h"
 #include "ui/chromeos/network/network_icon_animation_observer.h"
 #include "ui/gfx/canvas.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/image/image_skia_source.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/size_conversions.h"
 
 using chromeos::DeviceState;
 using chromeos::NetworkConnectionHandler;
@@ -674,7 +674,7 @@ void NetworkIconImpl::GetBadges(const NetworkState* network, Badges* badges) {
 
   const std::string& type = network->type();
   if (type == shill::kTypeWifi) {
-    if (network->security() != shill::kSecurityNone &&
+    if (network->security_class() != shill::kSecurityNone &&
         IconTypeIsDark(icon_type_)) {
       badges->bottom_right = rb.GetImageSkiaNamed(
           IDR_AURA_UBER_TRAY_NETWORK_SECURE_DARK);

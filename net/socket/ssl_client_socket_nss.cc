@@ -91,6 +91,7 @@
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
 #include "net/cert/asn1_util.h"
+#include "net/cert/cert_policy_enforcer.h"
 #include "net/cert/cert_status_flags.h"
 #include "net/cert/cert_verifier.h"
 #include "net/cert/ct_ev_whitelist.h"
@@ -146,6 +147,14 @@ namespace net {
       VLOG(1) << (void *)this << " " << __FUNCTION__ << " jump to state " << s;\
       next_handshake_state_ = s;\
     } while (0)
+#endif
+
+#if !defined(CKM_AES_GCM)
+#define CKM_AES_GCM 0x00001087
+#endif
+
+#if !defined(CKM_NSS_CHACHA20_POLY1305)
+#define CKM_NSS_CHACHA20_POLY1305 (CKM_NSS + 26)
 #endif
 
 namespace {
@@ -218,8 +227,6 @@ bool IsOCSPStaplingSupported() {
   return GetCacheOCSPResponseFromSideChannelFunction() != NULL;
 }
 #else
-// TODO(agl): Figure out if we can plumb the OCSP response into Mac's system
-// certificate validation functions.
 bool IsOCSPStaplingSupported() {
   return false;
 }
@@ -974,8 +981,16 @@ bool SSLClientSocketNSS::Core::Init(PRFileDesc* socket,
   SECStatus rv = SECSuccess;
 
   if (!ssl_config_.next_protos.empty()) {
+    // TODO(bnc): Check ssl_config_.disabled_cipher_suites.
+    const bool adequate_encryption =
+        PK11_TokenExists(CKM_AES_GCM) ||
+        PK11_TokenExists(CKM_NSS_CHACHA20_POLY1305);
+    const bool adequate_key_agreement = PK11_TokenExists(CKM_DH_PKCS_DERIVE) ||
+                                        PK11_TokenExists(CKM_ECDH1_DERIVE);
     std::vector<uint8_t> wire_protos =
-        SerializeNextProtos(ssl_config_.next_protos);
+        SerializeNextProtos(ssl_config_.next_protos,
+                            adequate_encryption && adequate_key_agreement &&
+                                IsTLSVersionAdequateForHTTP2(ssl_config_));
     rv = SSL_SetNextProtoNego(
         nss_fd_, wire_protos.empty() ? NULL : &wire_protos[0],
         wire_protos.size());
@@ -1292,7 +1307,7 @@ SECStatus SSLClientSocketNSS::Core::PlatformClientAuthHandler(
   core->client_auth_cert_needed_ = !core->ssl_config_.send_client_cert;
 #if defined(OS_WIN)
   if (core->ssl_config_.send_client_cert) {
-    if (core->ssl_config_.client_cert) {
+    if (core->ssl_config_.client_cert.get()) {
       PCCERT_CONTEXT cert_context =
           core->ssl_config_.client_cert->os_cert_handle();
 
@@ -1687,7 +1702,7 @@ int SSLClientSocketNSS::Core::HandleNSSError(PRErrorCode nss_error) {
   // re-insert the smart card if not.
   if ((net_error == ERR_SSL_CLIENT_AUTH_CERT_NO_PRIVATE_KEY ||
        net_error == ERR_SSL_CLIENT_AUTH_SIGNATURE_FAILED) &&
-      ssl_config_.send_client_cert && ssl_config_.client_cert) {
+      ssl_config_.send_client_cert && ssl_config_.client_cert.get()) {
     CertSetCertificateContextProperty(
         ssl_config_.client_cert->os_cert_handle(),
         CERT_KEY_PROV_HANDLE_PROP_ID, 0, NULL);
@@ -2436,11 +2451,9 @@ void SSLClientSocketNSS::Core::UpdateStapledOCSPResponse() {
       reinterpret_cast<char*>(ocsp_responses->items[0].data),
       ocsp_responses->items[0].len);
 
-  // TODO(agl): figure out how to plumb an OCSP response into the Mac
-  // system library and update IsOCSPStaplingSupported for Mac.
   if (IsOCSPStaplingSupported()) {
   #if defined(OS_WIN)
-    if (nss_handshake_state_.server_cert) {
+    if (nss_handshake_state_.server_cert.get()) {
       CRYPT_DATA_BLOB ocsp_response_blob;
       ocsp_response_blob.cbData = ocsp_responses->items[0].len;
       ocsp_response_blob.pbData = ocsp_responses->items[0].data;
@@ -2477,10 +2490,7 @@ void SSLClientSocketNSS::Core::UpdateConnectionStatus() {
   if (ok == SECSuccess &&
       channel_info.length == sizeof(channel_info) &&
       channel_info.cipherSuite) {
-    nss_handshake_state_.ssl_connection_status |=
-        (static_cast<int>(channel_info.cipherSuite) &
-         SSL_CONNECTION_CIPHERSUITE_MASK) <<
-        SSL_CONNECTION_CIPHERSUITE_SHIFT;
+    nss_handshake_state_.ssl_connection_status |= channel_info.cipherSuite;
 
     nss_handshake_state_.ssl_connection_status |=
         (static_cast<int>(channel_info.compressionMethod) &
@@ -2838,6 +2848,7 @@ SSLClientSocketNSS::SSLClientSocketNSS(
       nss_fd_(NULL),
       net_log_(transport_->socket()->NetLog()),
       transport_security_state_(context.transport_security_state),
+      policy_enforcer_(context.cert_policy_enforcer),
       valid_thread_id_(base::kInvalidThreadId) {
   EnterFunction("");
   InitCore();
@@ -2858,6 +2869,19 @@ void SSLClientSocket::ClearSessionCache() {
     return;
 
   SSL_ClearSessionCache();
+}
+
+#if !defined(CKM_NSS_TLS_MASTER_KEY_DERIVE_DH_SHA256)
+#define CKM_NSS_TLS_MASTER_KEY_DERIVE_DH_SHA256 (CKM_NSS + 24)
+#endif
+
+// static
+uint16 SSLClientSocket::GetMaxSupportedSSLVersion() {
+  if (PK11_TokenExists(CKM_NSS_TLS_MASTER_KEY_DERIVE_DH_SHA256)) {
+    return SSL_PROTOCOL_VERSION_TLS1_2;
+  } else {
+    return SSL_PROTOCOL_VERSION_TLS1_1;
+  }
 }
 
 bool SSLClientSocketNSS::GetSSLInfo(SSLInfo* ssl_info) {
@@ -3522,21 +3546,6 @@ int SSLClientSocketNSS::DoVerifyCertComplete(int result) {
     result = ERR_SSL_PINNED_KEY_NOT_IN_CERT_CHAIN;
   }
 
-  scoped_refptr<ct::EVCertsWhitelist> ev_whitelist =
-      SSLConfigService::GetEVCertsWhitelist();
-  if (server_cert_verify_result_.cert_status & CERT_STATUS_IS_EV) {
-    if (ev_whitelist.get() && ev_whitelist->IsValid()) {
-      const SHA256HashValue fingerprint(
-          X509Certificate::CalculateFingerprint256(
-              server_cert_verify_result_.verified_cert->os_cert_handle()));
-
-      UMA_HISTOGRAM_BOOLEAN(
-          "Net.SSL_EVCertificateInWhitelist",
-          ev_whitelist->ContainsCertificateHash(
-              std::string(reinterpret_cast<const char*>(fingerprint.data), 8)));
-    }
-  }
-
   if (result == OK) {
     // Only check Certificate Transparency if there were no other errors with
     // the connection.
@@ -3560,20 +3569,31 @@ void SSLClientSocketNSS::VerifyCT() {
   // Note that this is a completely synchronous operation: The CT Log Verifier
   // gets all the data it needs for SCT verification and does not do any
   // external communication.
-  int result = cert_transparency_verifier_->Verify(
+  cert_transparency_verifier_->Verify(
       server_cert_verify_result_.verified_cert.get(),
       core_->state().stapled_ocsp_response,
-      core_->state().sct_list_from_tls_extension,
-      &ct_verify_result_,
-      net_log_);
+      core_->state().sct_list_from_tls_extension, &ct_verify_result_, net_log_);
   // TODO(ekasper): wipe stapled_ocsp_response and sct_list_from_tls_extension
   // from the state after verification is complete, to conserve memory.
 
-  VLOG(1) << "CT Verification complete: result " << result
-          << " Invalid scts: " << ct_verify_result_.invalid_scts.size()
-          << " Verified scts: " << ct_verify_result_.verified_scts.size()
-          << " scts from unknown logs: "
-          << ct_verify_result_.unknown_logs_scts.size();
+  if (!policy_enforcer_) {
+    server_cert_verify_result_.cert_status &= ~CERT_STATUS_IS_EV;
+  } else {
+    if (server_cert_verify_result_.cert_status & CERT_STATUS_IS_EV) {
+      scoped_refptr<ct::EVCertsWhitelist> ev_whitelist =
+          SSLConfigService::GetEVCertsWhitelist();
+      if (!policy_enforcer_->DoesConformToCTEVPolicy(
+              server_cert_verify_result_.verified_cert.get(),
+              ev_whitelist.get(), ct_verify_result_, net_log_)) {
+        // TODO(eranm): Log via the BoundNetLog, see crbug.com/437766
+        VLOG(1) << "EV certificate for "
+                << server_cert_verify_result_.verified_cert->subject()
+                       .GetDisplayName()
+                << " does not conform to CT policy, removing EV status.";
+        server_cert_verify_result_.cert_status &= ~CERT_STATUS_IS_EV;
+      }
+    }
+  }
 }
 
 void SSLClientSocketNSS::EnsureThreadIdAssigned() const {

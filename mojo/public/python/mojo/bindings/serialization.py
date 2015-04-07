@@ -8,7 +8,7 @@ import struct
 
 
 # Format of a header for a struct or an array.
-HEADER_STRUCT = struct.Struct("=II")
+HEADER_STRUCT = struct.Struct("<II")
 
 
 class SerializationException(Exception):
@@ -19,6 +19,68 @@ class SerializationException(Exception):
 class DeserializationException(Exception):
   """Error when strying to deserialize a struct."""
   pass
+
+
+class DeserializationContext(object):
+
+  def ClaimHandle(self, handle):
+    raise NotImplementedError()
+
+  def ClaimMemory(self, start, size):
+    raise NotImplementedError()
+
+  def GetSubContext(self, offset):
+    raise NotImplementedError()
+
+  def IsInitialContext(self):
+    raise NotImplementedError()
+
+
+class RootDeserializationContext(DeserializationContext):
+  def __init__(self, data, handles):
+    if isinstance(data, buffer):
+      self.data = data
+    else:
+      self.data = buffer(data)
+    self._handles = handles
+    self._next_handle = 0;
+    self._next_memory = 0;
+
+  def ClaimHandle(self, handle):
+    if handle < self._next_handle:
+      raise DeserializationException('Accessing handles out of order.')
+    self._next_handle = handle + 1
+    return self._handles[handle]
+
+  def ClaimMemory(self, start, size):
+    if start < self._next_memory:
+      raise DeserializationException('Accessing buffer out of order.')
+    self._next_memory = start + size
+
+  def GetSubContext(self, offset):
+    return _ChildDeserializationContext(self, offset)
+
+  def IsInitialContext(self):
+    return True
+
+
+class _ChildDeserializationContext(DeserializationContext):
+  def __init__(self, parent, offset):
+    self._parent = parent
+    self._offset = offset
+    self.data = buffer(parent.data, offset)
+
+  def ClaimHandle(self, handle):
+    return self._parent.ClaimHandle(handle)
+
+  def ClaimMemory(self, start, size):
+    return self._parent.ClaimMemory(self._offset + start, size)
+
+  def GetSubContext(self, offset):
+    return self._parent.GetSubContext(self._offset + offset)
+
+  def IsInitialContext(self):
+    return False
 
 
 class Serialization(object):
@@ -78,18 +140,23 @@ class Serialization(object):
     self._GetMainStruct().pack_into(data, HEADER_STRUCT.size, *to_pack)
     return (data, handles)
 
-  def Deserialize(self, fields, data, handles):
-    if not isinstance(data, buffer):
-      data = buffer(data)
-    (_, version) = HEADER_STRUCT.unpack_from(data)
+  def Deserialize(self, fields, context):
+    if len(context.data) < HEADER_STRUCT.size:
+      raise DeserializationException(
+          'Available data too short to contain header.')
+    (size, version) = HEADER_STRUCT.unpack_from(context.data)
+    if len(context.data) < size or size < HEADER_STRUCT.size:
+      raise DeserializationException('Header size is incorrect.')
+    if context.IsInitialContext():
+      context.ClaimMemory(0, size)
     version_struct = self._GetStruct(version)
-    entitities = version_struct.unpack_from(data, HEADER_STRUCT.size)
+    entitities = version_struct.unpack_from(context.data, HEADER_STRUCT.size)
     filtered_groups = self._GetGroups(version)
     position = HEADER_STRUCT.size
     for (group, value) in zip(filtered_groups, entitities):
       position = position + NeededPaddingForAlignment(position,
                                                       group.GetByteSize())
-      fields.update(group.Deserialize(value, buffer(data, position), handles))
+      fields.update(group.Deserialize(value, context.GetSubContext(position)))
       position += group.GetByteSize()
 
 
@@ -110,7 +177,7 @@ def _FilterGroups(groups, version):
 
 def _GetStruct(groups):
   index = 0
-  codes = [ '=' ]
+  codes = [ '<' ]
   for group in groups:
     code = group.GetTypeCode()
     size = group.GetByteSize()

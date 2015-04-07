@@ -25,13 +25,11 @@
             'webrtc_root%': '<(DEPTH)/third_party/webrtc',
             'apk_tests_path%': '<(DEPTH)/third_party/webrtc/build/apk_tests_noop.gyp',
             'modules_java_gyp_path%': '<(DEPTH)/third_party/webrtc/modules/modules_java_chromium.gyp',
-            'gen_core_neon_offsets_gyp%': '<(DEPTH)/third_party/webrtc/modules/audio_processing/gen_core_neon_offsets_chromium.gyp',
           }, {
             'build_with_libjingle%': 0,
             'webrtc_root%': '<(DEPTH)/webrtc',
             'apk_tests_path%': '<(DEPTH)/webrtc/build/apk_tests.gyp',
             'modules_java_gyp_path%': '<(DEPTH)/webrtc/modules/modules_java.gyp',
-            'gen_core_neon_offsets_gyp%':'<(DEPTH)/webrtc/modules/audio_processing/gen_core_neon_offsets.gyp',
           }],
         ],
       },
@@ -40,10 +38,8 @@
       'webrtc_root%': '<(webrtc_root)',
       'apk_tests_path%': '<(apk_tests_path)',
       'modules_java_gyp_path%': '<(modules_java_gyp_path)',
-      'gen_core_neon_offsets_gyp%': '<(gen_core_neon_offsets_gyp)',
       'webrtc_vp8_dir%': '<(webrtc_root)/modules/video_coding/codecs/vp8',
       'webrtc_vp9_dir%': '<(webrtc_root)/modules/video_coding/codecs/vp9',
-      'rbe_components_path%': '<(webrtc_root)/modules/remote_bitrate_estimator',
       'include_opus%': 1,
     },
     'build_with_chromium%': '<(build_with_chromium)',
@@ -51,12 +47,10 @@
     'webrtc_root%': '<(webrtc_root)',
     'apk_tests_path%': '<(apk_tests_path)',
     'modules_java_gyp_path%': '<(modules_java_gyp_path)',
-    'gen_core_neon_offsets_gyp%': '<(gen_core_neon_offsets_gyp)',
     'webrtc_vp8_dir%': '<(webrtc_vp8_dir)',
     'webrtc_vp9_dir%': '<(webrtc_vp9_dir)',
     'include_opus%': '<(include_opus)',
     'rtc_relative_path%': 1,
-    'rbe_components_path%': '<(rbe_components_path)',
     'external_libraries%': '0',
     'json_root%': '<(DEPTH)/third_party/jsoncpp/source/include/',
     # openssl needs to be defined or gyp will complain. Is is only used when
@@ -153,10 +147,10 @@
         'build_libjpeg%': 0,
         'enable_protobuf%': 0,
       }],
-      ['target_arch=="arm" or target_arch=="armv7"', {
+      ['target_arch=="arm" or target_arch=="arm64"', {
         'prefer_fixed_point%': 1,
       }],
-      ['OS!="ios" and (target_arch!="arm" or arm_version>=7)', {
+      ['OS!="ios" and (target_arch!="arm" or arm_version>=7) and target_arch!="mips64el"', {
         'rtc_use_openmax_dl%': 1,
       }, {
         'rtc_use_openmax_dl%': 0,
@@ -210,7 +204,7 @@
       }, {
         'conditions': [
           ['os_posix==1', {
-	    'configurations': {
+            'configurations': {
               'Debug_Base': {
                 'defines': [
                   # Chromium's build/common.gypi defines this for all posix
@@ -254,19 +248,26 @@
       ['target_arch=="arm64"', {
         'defines': [
           'WEBRTC_ARCH_ARM',
+          # TODO(zhongwei) Defining an unique WEBRTC_NEON and
+          # distinguishing ARMv7 NEON and ARM64 NEON by
+          # WEBRTC_ARCH_ARM_V7 and WEBRTC_ARCH_ARM64 should be better.
+
+          # This macro is used to distinguish ARMv7 NEON and ARM64 NEON
+          'WEBRTC_ARCH_ARM64_NEON',
         ],
       }],
-      ['target_arch=="arm" or target_arch=="armv7"', {
+      ['target_arch=="arm"', {
         'defines': [
           'WEBRTC_ARCH_ARM',
         ],
         'conditions': [
-          ['arm_version==7', {
+          ['arm_version>=7', {
             'defines': ['WEBRTC_ARCH_ARM_V7',],
             'conditions': [
               ['arm_neon==1', {
                 'defines': ['WEBRTC_ARCH_ARM_NEON',],
-              }, {
+              }],
+              ['arm_neon==0 and OS=="android"', {
                 'defines': ['WEBRTC_DETECT_ARM_NEON',],
               }],
             ],

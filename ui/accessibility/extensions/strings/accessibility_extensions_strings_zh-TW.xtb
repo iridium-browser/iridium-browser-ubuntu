@@ -15,23 +15,27 @@
 <translation id="3622586652998721735">設為預設配置</translation>
 <translation id="2179565792157161713">在新分頁中開啟詳細說明</translation>
 <translation id="2471847333270902538"><ph name="SITE"/> 的色彩配置：</translation>
+<translation id="381767806621926835">對任何含有「longdesc」或「aria-describedat」屬性的元素按一下滑鼠右鍵，即可查看其完整說明。</translation>
+<translation id="786423340267544509">為含有 aria-describedat 或 longdesc 屬性的元素加上框線。</translation>
 <translation id="690628312087070417">當插入點跳躍距離極大時：</translation>
 <translation id="5331422999063554397">反轉色彩</translation>
 <translation id="2648340354586434750">按住 &lt;span class='key'&gt;Option&lt;/span&gt; 鍵可逐字移動。</translation>
+<translation id="4769065380738716500">圖片已被 alt 文字取代。</translation>
 <translation id="5287723860611749454">&lt;p&gt;使用方向鍵可在整份文件中來回移動。&lt;/p&gt;&lt;p&gt;按一下任何位置，游標即會移至點選的位置。&lt;/p&gt; &lt;p&gt;   按下 &lt;span class='key'&gt;Shift&lt;/span&gt; 鍵 + 方向鍵可選取文字。&lt;/p&gt;</translation>
 <translation id="5558600050691192317">鍵盤指令</translation>
 <translation id="633394792577263429">按住 &lt;span class='key'&gt;Control&lt;/span&gt; 鍵可逐字移動。</translation>
+<translation id="2079545284768500474">復原</translation>
 <translation id="8254860724243898966">按下 &lt;span class='key'&gt;Alt&lt;/span&gt; 鍵 + &lt;img src='increase_brightness.png'&gt; (調高亮度鍵或 F7 鍵) 可開啟鍵盤瀏覽功能，再按一下則可關閉。</translation>
 <translation id="3812541808639806898">圖片 Alt 文字檢視器</translation>
 <translation id="1287053896835709737">黑底黃字</translation>
 <translation id="4896660567607030658">無回饋，僅顯示游標。</translation>
 <translation id="5631241868147802353">預設色彩配置：</translation>
-<translation id="625377550964694810">凡是具備「longdesc」或「aria-describedat」屬性的 HTML 元素都有鮮明的粗框，如果您在這些元素上按一下滑鼠右鍵，內容選單中就會新增選項，供您查看詳細說明。</translation>
 <translation id="5173942593318174089">使用動畫標明游標位置。</translation>
 <translation id="894241283505723656">內容選單中的詳細說明</translation>
 <translation id="5555153510860501336">高對比功能已停用</translation>
 <translation id="1703735871906654364">鍵盤瀏覽</translation>
 <translation id="7384431257964758081">高對比功能已啟用</translation>
+<translation id="6550675742724504774">選項</translation>
 <translation id="5650358096585648000">視覺回饋</translation>
 <translation id="4388820049312272371">使用快閃指示標明游標位置。</translation>
 <translation id="4023902424053835668">使用方向鍵瀏覽網頁文字。</translation>

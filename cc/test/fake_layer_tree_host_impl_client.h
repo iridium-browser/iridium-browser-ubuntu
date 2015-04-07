@@ -23,12 +23,12 @@ class FakeLayerTreeHostImplClient : public LayerTreeHostImplClient {
   void DidSwapBuffersCompleteOnImplThread() override {}
   void OnCanDrawStateChanged(bool can_draw) override {}
   void NotifyReadyToActivate() override {}
+  void NotifyReadyToDraw() override {}
   void SetNeedsRedrawOnImplThread() override {}
   void SetNeedsRedrawRectOnImplThread(const gfx::Rect& damage_rect) override {}
   void SetNeedsAnimateOnImplThread() override {}
-  void DidInitializeVisibleTileOnImplThread() override {}
   void SetNeedsCommitOnImplThread() override {}
-  void SetNeedsManageTilesOnImplThread() override {}
+  void SetNeedsPrepareTilesOnImplThread() override {}
   void PostAnimationEventsToMainThreadOnImplThread(
       scoped_ptr<AnimationEventsVector> events) override {}
   bool ReduceContentsTextureMemoryOnImplThread(size_t limit_bytes,
@@ -38,7 +38,7 @@ class FakeLayerTreeHostImplClient : public LayerTreeHostImplClient {
   void PostDelayedScrollbarFadeOnImplThread(const base::Closure& start_fade,
                                             base::TimeDelta delay) override {}
   void DidActivateSyncTree() override {}
-  void DidManageTiles() override {}
+  void DidPrepareTiles() override {}
 };
 
 }  // namespace cc

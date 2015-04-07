@@ -19,7 +19,6 @@
 #include "base/time/time.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/history/history_backend.h"
-#include "chrome/browser/history/history_db_task.h"
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
@@ -44,6 +43,8 @@
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
+#include "components/history/core/browser/history_backend_notifier.h"
+#include "components/history/core/browser/history_db_task.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/invalidation/invalidation_service.h"
 #include "components/invalidation/profile_invalidation_provider.h"
@@ -66,6 +67,7 @@ using browser_sync::TypedUrlChangeProcessor;
 using browser_sync::TypedUrlDataTypeController;
 using browser_sync::TypedUrlModelAssociator;
 using history::HistoryBackend;
+using history::HistoryBackendNotifier;
 using history::URLID;
 using history::URLRow;
 using syncer::syncable::WriteTransaction;
@@ -341,12 +343,18 @@ class ProfileSyncServiceTypedUrlTest : public AbstractProfileSyncServiceTest {
     base::Time visit_time;
     history::RedirectList redirects;
     SendNotification(
-        base::Bind(&HistoryBackendMock::NotifyURLVisited,
+        base::Bind(&HistoryBackendNotifier::NotifyURLVisited,
                    base::Unretained(history_backend_.get()),
                    transition,
                    row,
                    redirects,
                    visit_time));
+  }
+
+  void SendNotificationURLsModified(const history::URLRows& rows) {
+    SendNotification(base::Bind(&HistoryBackendNotifier::NotifyURLsModified,
+                                base::Unretained(history_backend_.get()),
+                                rows));
   }
 
   static bool URLsEqual(history::URLRow& lhs, history::URLRow& rhs) {
@@ -629,13 +637,9 @@ TEST_F(ProfileSyncServiceTypedUrlTest, ProcessUserChangeAdd) {
   CreateRootHelper create_root(this, syncer::TYPED_URLS);
   StartSyncService(create_root.callback());
 
-  history::URLsModifiedDetails details;
-  details.changed_urls.push_back(added_entry);
-  scoped_refptr<ThreadNotifier> notifier(
-      new ThreadNotifier(history_thread_.get()));
-  notifier->Notify(chrome::NOTIFICATION_HISTORY_URLS_MODIFIED,
-                   content::Source<Profile>(profile_),
-                   content::Details<history::URLsModifiedDetails>(&details));
+  history::URLRows changed_urls;
+  changed_urls.push_back(added_entry);
+  SendNotificationURLsModified(changed_urls);
 
   history::URLRows new_sync_entries;
   GetTypedUrlsFromSyncDB(&new_sync_entries);
@@ -659,14 +663,10 @@ TEST_F(ProfileSyncServiceTypedUrlTest, ProcessUserChangeAddWithBlank) {
   CreateRootHelper create_root(this, syncer::TYPED_URLS);
   StartSyncService(create_root.callback());
 
-  history::URLsModifiedDetails details;
-  details.changed_urls.push_back(empty_entry);
-  details.changed_urls.push_back(added_entry);
-  scoped_refptr<ThreadNotifier> notifier(
-      new ThreadNotifier(history_thread_.get()));
-  notifier->Notify(chrome::NOTIFICATION_HISTORY_URLS_MODIFIED,
-                   content::Source<Profile>(profile_),
-                   content::Details<history::URLsModifiedDetails>(&details));
+  history::URLRows changed_urls;
+  changed_urls.push_back(empty_entry);
+  changed_urls.push_back(added_entry);
+  SendNotificationURLsModified(changed_urls);
 
   std::vector<history::URLRow> new_sync_entries;
   GetTypedUrlsFromSyncDB(&new_sync_entries);
@@ -698,13 +698,9 @@ TEST_F(ProfileSyncServiceTypedUrlTest, ProcessUserChangeUpdate) {
       WillOnce(DoAll(SetArgumentPointee<2>(updated_visits),
                      Return(true)));
 
-  history::URLsModifiedDetails details;
-  details.changed_urls.push_back(updated_entry);
-  scoped_refptr<ThreadNotifier> notifier(
-      new ThreadNotifier(history_thread_.get()));
-  notifier->Notify(chrome::NOTIFICATION_HISTORY_URLS_MODIFIED,
-                   content::Source<Profile>(profile_),
-                   content::Details<history::URLsModifiedDetails>(&details));
+  history::URLRows changed_urls;
+  changed_urls.push_back(updated_entry);
+  SendNotificationURLsModified(changed_urls);
 
   history::URLRows new_sync_entries;
   GetTypedUrlsFromSyncDB(&new_sync_entries);
@@ -1042,15 +1038,12 @@ TEST_F(ProfileSyncServiceTypedUrlTest, IgnoreLocalFileURL) {
   history::URLRow new_file_entry(MakeTypedUrlEntry("file:///dog.jpg",
                                                    "dog", 20, 15, false,
                                                    &updated_visits));
-  history::URLsModifiedDetails details;
-  details.changed_urls.push_back(updated_url_entry);
-  details.changed_urls.push_back(updated_file_entry);
-  details.changed_urls.push_back(new_file_entry);
-  scoped_refptr<ThreadNotifier> notifier(
-      new ThreadNotifier(history_thread_.get()));
-  notifier->Notify(chrome::NOTIFICATION_HISTORY_URLS_MODIFIED,
-                   content::Source<Profile>(profile_),
-                   content::Details<history::URLsModifiedDetails>(&details));
+
+  history::URLRows changed_urls;
+  changed_urls.push_back(updated_url_entry);
+  changed_urls.push_back(updated_file_entry);
+  changed_urls.push_back(new_file_entry);
+  SendNotificationURLsModified(changed_urls);
 
   history::URLRows new_sync_entries;
   GetTypedUrlsFromSyncDB(&new_sync_entries);
@@ -1096,15 +1089,12 @@ TEST_F(ProfileSyncServiceTypedUrlTest, IgnoreLocalhostURL) {
   history::URLRow localhost_ip_entry(MakeTypedUrlEntry("http://127.0.0.1",
                                                   "localhost", 12, 15, false,
                                                   &original_visits));
-  history::URLsModifiedDetails details;
-  details.changed_urls.push_back(updated_url_entry);
-  details.changed_urls.push_back(updated_localhost_entry);
-  details.changed_urls.push_back(localhost_ip_entry);
-  scoped_refptr<ThreadNotifier> notifier(
-      new ThreadNotifier(history_thread_.get()));
-  notifier->Notify(chrome::NOTIFICATION_HISTORY_URLS_MODIFIED,
-                   content::Source<Profile>(profile_),
-                   content::Details<history::URLsModifiedDetails>(&details));
+
+  history::URLRows changed_urls;
+  changed_urls.push_back(updated_url_entry);
+  changed_urls.push_back(updated_localhost_entry);
+  changed_urls.push_back(localhost_ip_entry);
+  SendNotificationURLsModified(changed_urls);
 
   history::URLRows new_sync_entries;
   GetTypedUrlsFromSyncDB(&new_sync_entries);
@@ -1127,13 +1117,10 @@ TEST_F(ProfileSyncServiceTypedUrlTest, IgnoreModificationWithoutValidVisit) {
   history::URLRow updated_url_entry(MakeTypedUrlEntry("http://yey.com",
                                                   "yey", 20, 0, false,
                                                   &updated_visits));
-  history::URLsModifiedDetails details;
-  details.changed_urls.push_back(updated_url_entry);
-  scoped_refptr<ThreadNotifier> notifier(
-      new ThreadNotifier(history_thread_.get()));
-  notifier->Notify(chrome::NOTIFICATION_HISTORY_URLS_MODIFIED,
-                   content::Source<Profile>(profile_),
-                   content::Details<history::URLsModifiedDetails>(&details));
+
+  history::URLRows changed_urls;
+  changed_urls.push_back(updated_url_entry);
+  SendNotificationURLsModified(changed_urls);
 
   history::URLRows new_sync_entries;
   GetTypedUrlsFromSyncDB(&new_sync_entries);

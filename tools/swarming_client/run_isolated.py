@@ -14,12 +14,11 @@ file. All content written to this directory will be uploaded upon termination
 and the .isolated file describing this directory will be printed to stdout.
 """
 
-__version__ = '0.3.2'
+__version__ = '0.4'
 
 import logging
 import optparse
 import os
-import subprocess
 import sys
 import tempfile
 
@@ -27,6 +26,7 @@ from third_party.depot_tools import fix_encoding
 
 from utils import file_path
 from utils import on_error
+from utils import subprocess42
 from utils import tools
 from utils import zip_package
 
@@ -103,9 +103,7 @@ def change_tree_read_only(rootdir, read_only):
     # modifying files but creating or deleting files is still possible.
     file_path.make_tree_files_read_only(rootdir)
   elif read_only in (0, None):
-    # Anything can be modified. This is the default in the .isolated file
-    # format.
-    #
+    # Anything can be modified.
     # TODO(maruel): This is currently dangerous as long as DiskCache.touch()
     # is not yet changed to verify the hash of the content of the files it is
     # looking at, so that if a test modifies an input file, the file must be
@@ -136,7 +134,7 @@ def run_tha_test(isolated_hash, storage, cache, leak_temp_dir, extra_args):
   file.
 
   Arguments:
-    isolated_hash: the sha-1 of the .isolated file that must be retrieved to
+    isolated_hash: the SHA-1 of the .isolated file that must be retrieved to
                    recreate the tree of files to run the target executable.
     storage: an isolateserver.Storage object to retrieve remote objects. This
              object has a reference to an isolateserver.StorageApi, which does
@@ -179,17 +177,18 @@ def run_tha_test(isolated_hash, storage, cache, leak_temp_dir, extra_args):
     if MAIN_DIR:
       env.setdefault('RUN_TEST_CASES_LOG_FILE',
           os.path.join(MAIN_DIR, RUN_TEST_CASES_LOG))
-    try:
-      sys.stdout.flush()
-      with tools.Profiler('RunTest'):
-        result = subprocess.call(command, cwd=cwd, env=env)
-        logging.info(
-            'Command finished with exit code %d (%s)',
-            result, hex(0xffffffff & result))
-    except OSError:
-      on_error.report('Failed to run %s; cwd=%s' % (command, cwd))
-      result = 1
-
+    sys.stdout.flush()
+    with tools.Profiler('RunTest'):
+      try:
+        with subprocess42.Popen_with_handler(command, cwd=cwd, env=env) as p:
+          p.communicate()
+          result = p.returncode
+      except OSError:
+        on_error.report('Failed to run %s; cwd=%s' % (command, cwd))
+        result = 1
+    logging.info(
+        'Command finished with exit code %d (%s)',
+        result, hex(0xffffffff & result))
   finally:
     try:
       if leak_temp_dir:
@@ -252,13 +251,9 @@ def main(args):
 
   data_group = optparse.OptionGroup(parser, 'Data source')
   data_group.add_option(
-      '-s', '--isolated',
-      metavar='FILE',
-      help='File/url describing what to map or run')
-  data_group.add_option(
       '-H', '--hash',
       help='Hash of the .isolated to grab from the hash table')
-  isolateserver.add_isolate_server_options(data_group, True)
+  isolateserver.add_isolate_server_options(data_group)
   parser.add_option_group(data_group)
 
   isolateserver.add_cache_options(parser)
@@ -274,25 +269,18 @@ def main(args):
 
   auth.add_auth_options(parser)
   options, args = parser.parse_args(args)
+  if not options.hash:
+    parser.error('--hash is required.')
   auth.process_auth_options(parser, options)
-  isolateserver.process_isolate_server_options(parser, options)
-
-  if bool(options.isolated) == bool(options.hash):
-    logging.debug('One and only one of --isolated or --hash is required.')
-    parser.error('One and only one of --isolated or --hash is required.')
+  isolateserver.process_isolate_server_options(parser, options, True)
 
   cache = isolateserver.process_cache_options(options)
-
-  remote = options.isolate_server or options.indir
-  if file_path.is_url(remote):
-    auth.ensure_logged_in(remote)
-
-  with isolateserver.get_storage(remote, options.namespace) as storage:
+  with isolateserver.get_storage(
+      options.isolate_server, options.namespace) as storage:
     # Hashing schemes used by |storage| and |cache| MUST match.
     assert storage.hash_algo == cache.hash_algo
     return run_tha_test(
-        options.isolated or options.hash, storage, cache,
-        options.leak_temp_dir, args)
+        options.hash, storage, cache, options.leak_temp_dir, args)
 
 
 if __name__ == '__main__':

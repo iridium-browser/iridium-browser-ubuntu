@@ -11,6 +11,9 @@
 #include "base/strings/string_util.h"
 #include "content/public/common/url_constants.h"
 #include "extensions/common/constants.h"
+#include "extensions/common/error_utils.h"
+#include "extensions/common/install_warning.h"
+#include "extensions/common/manifest_constants.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 
 namespace extensions {
@@ -22,21 +25,30 @@ namespace {
 const char kDefaultSrc[] = "default-src";
 const char kScriptSrc[] = "script-src";
 const char kObjectSrc[] = "object-src";
+const char kPluginTypes[] = "plugin-types";
+
+const char kObjectSrcDefaultDirective[] = "object-src 'self';";
+const char kScriptSrcDefaultDirective[] =
+    "script-src 'self' chrome-extension-resource:;";
 
 const char kSandboxDirectiveName[] = "sandbox";
 const char kAllowSameOriginToken[] = "allow-same-origin";
 const char kAllowTopNavigation[] = "allow-top-navigation";
 
+// This is the list of plugin types which are fully sandboxed and are safe to
+// load up in an extension, regardless of the URL they are navigated to.
+const char* const kSandboxedPluginTypes[] = {
+  "application/pdf",
+  "application/x-google-chrome-pdf",
+  "application/x-pnacl"
+};
+
 struct DirectiveStatus {
   explicit DirectiveStatus(const char* name)
-    : directive_name(name)
-    , seen_in_policy(false)
-    , is_secure(false) {
-  }
+      : directive_name(name), seen_in_policy(false) {}
 
   const char* directive_name;
   bool seen_in_policy;
-  bool is_secure;
 };
 
 // Returns whether |url| starts with |scheme_and_separator| and does not have a
@@ -53,12 +65,6 @@ bool isNonWildcardTLD(const std::string& url,
   size_t end_of_host = url.find("/", start_of_host);
   if (end_of_host == std::string::npos)
     end_of_host = url.size();
-
-  // A missing host such as "chrome-extension://" is invalid, but for backwards-
-  // compatibility, accept such CSP parts. They will be ignored by Blink anyway.
-  // TODO(robwu): Remove this special case once crbug.com/434773 is fixed.
-  if (start_of_host == end_of_host)
-    return true;
 
   // Note: It is sufficient to only compare the first character against '*'
   // because the CSP only allows wildcards at the start of a directive, see
@@ -106,11 +112,20 @@ bool isNonWildcardTLD(const std::string& url,
   return registry_length != 0;
 }
 
-bool HasOnlySecureTokens(base::StringTokenizer& tokenizer,
-                         Manifest::Type type) {
-  while (tokenizer.GetNext()) {
-    std::string source = tokenizer.token();
+InstallWarning CSPInstallWarning(const std::string& csp_warning) {
+  return InstallWarning(csp_warning, manifest_keys::kContentSecurityPolicy);
+}
+
+void GetSecureDirectiveValues(const std::string& directive_name,
+                              base::StringTokenizer* tokenizer,
+                              int options,
+                              std::vector<std::string>* sane_csp_parts,
+                              std::vector<InstallWarning>* warnings) {
+  sane_csp_parts->push_back(directive_name);
+  while (tokenizer->GetNext()) {
+    std::string source = tokenizer->token();
     base::StringToLowerASCII(&source);
+    bool is_secure_csp_token = false;
 
     // We might need to relax this whitelist over time.
     if (source == "'self'" ||
@@ -128,34 +143,83 @@ bool HasOnlySecureTokens(base::StringTokenizer& tokenizer,
                          url::kStandardSchemeSeparator,
                          false) ||
         StartsWithASCII(source, "chrome-extension-resource:", true)) {
-      continue;
+      is_secure_csp_token = true;
+    } else if ((options & OPTIONS_ALLOW_UNSAFE_EVAL) &&
+               source == "'unsafe-eval'") {
+      is_secure_csp_token = true;
     }
 
-    // crbug.com/146487
-    if (type == Manifest::TYPE_EXTENSION ||
-        type == Manifest::TYPE_LEGACY_PACKAGED_APP) {
-      if (source == "'unsafe-eval'")
-        continue;
+    if (is_secure_csp_token) {
+      sane_csp_parts->push_back(source);
+    } else if (warnings) {
+      warnings->push_back(CSPInstallWarning(ErrorUtils::FormatErrorMessage(
+          manifest_errors::kInvalidCSPInsecureValue, source, directive_name)));
     }
-
-    return false;
   }
-
-  return true;  // Empty values default to 'none', which is secure.
+  // End of CSP directive that was started at the beginning of this method. If
+  // none of the values are secure, the policy will be empty and default to
+  // 'none', which is secure.
+  sane_csp_parts->back().push_back(';');
 }
 
 // Returns true if |directive_name| matches |status.directive_name|.
 bool UpdateStatus(const std::string& directive_name,
-                  base::StringTokenizer& tokenizer,
+                  base::StringTokenizer* tokenizer,
                   DirectiveStatus* status,
-                  Manifest::Type type) {
-  if (status->seen_in_policy)
-    return false;
+                  int options,
+                  std::vector<std::string>* sane_csp_parts,
+                  std::vector<InstallWarning>* warnings) {
   if (directive_name != status->directive_name)
     return false;
-  status->seen_in_policy = true;
-  status->is_secure = HasOnlySecureTokens(tokenizer, type);
+
+  if (!status->seen_in_policy) {
+    status->seen_in_policy = true;
+    GetSecureDirectiveValues(directive_name, tokenizer, options, sane_csp_parts,
+                             warnings);
+  } else {
+    // Don't show any errors for duplicate CSP directives, because it will be
+    // ignored by the CSP parser (http://www.w3.org/TR/CSP2/#policy-parsing).
+    GetSecureDirectiveValues(directive_name, tokenizer, options, sane_csp_parts,
+                             NULL);
+  }
   return true;
+}
+
+// Returns true if the |plugin_type| is one of the fully sandboxed plugin types.
+bool PluginTypeAllowed(const std::string& plugin_type) {
+  for (size_t i = 0; i < arraysize(kSandboxedPluginTypes); ++i) {
+    if (plugin_type == kSandboxedPluginTypes[i])
+      return true;
+  }
+  return false;
+}
+
+// Returns true if the policy is allowed to contain an insecure object-src
+// directive. This requires OPTIONS_ALLOW_INSECURE_OBJECT_SRC to be specified
+// as an option and the plugin-types that can be loaded must be restricted to
+// the set specified in kSandboxedPluginTypes.
+bool AllowedToHaveInsecureObjectSrc(
+    int options,
+    const std::vector<std::string>& directives) {
+  if (!(options & OPTIONS_ALLOW_INSECURE_OBJECT_SRC))
+    return false;
+
+  for (size_t i = 0; i < directives.size(); ++i) {
+    const std::string& input = directives[i];
+    base::StringTokenizer tokenizer(input, " \t\r\n");
+    if (!tokenizer.GetNext())
+      continue;
+    if (!LowerCaseEqualsASCII(tokenizer.token(), kPluginTypes))
+      continue;
+    while (tokenizer.GetNext()) {
+      if (!PluginTypeAllowed(tokenizer.token()))
+        return false;
+    }
+    // All listed plugin types are whitelisted.
+    return true;
+  }
+  // plugin-types not specified.
+  return false;
 }
 
 }  //  namespace
@@ -169,8 +233,10 @@ bool ContentSecurityPolicyIsLegal(const std::string& policy) {
       std::string::npos;
 }
 
-bool ContentSecurityPolicyIsSecure(const std::string& policy,
-                                   Manifest::Type type) {
+std::string SanitizeContentSecurityPolicy(
+    const std::string& policy,
+    int options,
+    std::vector<InstallWarning>* warnings) {
   // See http://www.w3.org/TR/CSP/#parse-a-csp-policy for parsing algorithm.
   std::vector<std::string> directives;
   base::SplitString(policy, ';', &directives);
@@ -179,6 +245,11 @@ bool ContentSecurityPolicyIsSecure(const std::string& policy,
   DirectiveStatus script_src_status(kScriptSrc);
   DirectiveStatus object_src_status(kObjectSrc);
 
+  bool allow_insecure_object_src =
+      AllowedToHaveInsecureObjectSrc(options, directives);
+
+  std::vector<std::string> sane_csp_parts;
+  std::vector<InstallWarning> default_src_csp_warnings;
   for (size_t i = 0; i < directives.size(); ++i) {
     std::string& input = directives[i];
     base::StringTokenizer tokenizer(input, " \t\r\n");
@@ -188,27 +259,47 @@ bool ContentSecurityPolicyIsSecure(const std::string& policy,
     std::string directive_name = tokenizer.token();
     base::StringToLowerASCII(&directive_name);
 
-    if (UpdateStatus(directive_name, tokenizer, &default_src_status, type))
+    if (UpdateStatus(directive_name, &tokenizer, &default_src_status, options,
+                     &sane_csp_parts, &default_src_csp_warnings))
       continue;
-    if (UpdateStatus(directive_name, tokenizer, &script_src_status, type))
+    if (UpdateStatus(directive_name, &tokenizer, &script_src_status, options,
+                     &sane_csp_parts, warnings))
       continue;
-    if (UpdateStatus(directive_name, tokenizer, &object_src_status, type))
+    if (!allow_insecure_object_src &&
+        UpdateStatus(directive_name, &tokenizer, &object_src_status, options,
+                     &sane_csp_parts, warnings))
       continue;
+
+    // Pass the other CSP directives as-is without further validation.
+    sane_csp_parts.push_back(input + ";");
   }
 
-  if (script_src_status.seen_in_policy && !script_src_status.is_secure)
-    return false;
-
-  if (object_src_status.seen_in_policy && !object_src_status.is_secure)
-    return false;
-
-  if (default_src_status.seen_in_policy && !default_src_status.is_secure) {
-    return script_src_status.seen_in_policy &&
-           object_src_status.seen_in_policy;
+  if (default_src_status.seen_in_policy) {
+    if (!script_src_status.seen_in_policy ||
+        !object_src_status.seen_in_policy) {
+      // Insecure values in default-src are only relevant if either script-src
+      // or object-src is omitted.
+      if (warnings)
+        warnings->insert(warnings->end(),
+                         default_src_csp_warnings.begin(),
+                         default_src_csp_warnings.end());
+    }
+  } else {
+    if (!script_src_status.seen_in_policy) {
+      sane_csp_parts.push_back(kScriptSrcDefaultDirective);
+      if (warnings)
+        warnings->push_back(CSPInstallWarning(ErrorUtils::FormatErrorMessage(
+            manifest_errors::kInvalidCSPMissingSecureSrc, kScriptSrc)));
+    }
+    if (!object_src_status.seen_in_policy && !allow_insecure_object_src) {
+      sane_csp_parts.push_back(kObjectSrcDefaultDirective);
+      if (warnings)
+        warnings->push_back(CSPInstallWarning(ErrorUtils::FormatErrorMessage(
+            manifest_errors::kInvalidCSPMissingSecureSrc, kObjectSrc)));
+    }
   }
 
-  return default_src_status.seen_in_policy ||
-      (script_src_status.seen_in_policy && object_src_status.seen_in_policy);
+  return JoinString(sane_csp_parts, ' ');
 }
 
 bool ContentSecurityPolicyIsSandboxed(

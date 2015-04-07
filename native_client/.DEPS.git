@@ -8,6 +8,8 @@ vars = {
          '1338',
     'chromium_trunk':
          'http://src.chromium.org/svn/trunk',
+    'android_tools_rev':
+         'ea50cccc11657404ce22cf928062ed1a3927eb39',
     'gyp_rev':
          '1927',
     'tools_rev':
@@ -27,9 +29,9 @@ vars = {
     'webkit_url':
          'https://chromium.googlesource.com/chromium/blink.git',
     'buildtools_revision':
-         '59b93247766e1cdac6e482637ad493df38f7aeb7',
+         'c27f95bd1d9baaef70c879dea375090dd1496147',
     'validator_snapshots_rev':
-         '14018',
+         '14172',
     'chrome_rev':
          '275800',
     'git_url':
@@ -40,7 +42,7 @@ deps = {
     'breakpad':
         Var('git_url') + '/external/google-breakpad.git@fe34e3f9fef1eb425b25a79f0da84e2f277d433b',
     'buildtools':
-        Var('git_url') + '/chromium/buildtools.git@59b93247766e1cdac6e482637ad493df38f7aeb7',
+        Var('git_url') + '/chromium/buildtools.git@c27f95bd1d9baaef70c879dea375090dd1496147',
     'testing/gtest':
         Var('git_url') + '/external/googletest.git@74de57c951aedebc5dfe26a27604353432392b98',
     'third_party':
@@ -58,14 +60,14 @@ deps = {
     'tools/valgrind':
         Var('git_url') + '/chromium/src/tools/valgrind.git@4989a1b19c3a33c828e385d3a07e83e202e1e651',
     'validator_snapshots':
-        Var('git_url') + '/native_client/src/validator_snapshots.git@9eeb3dcf847c7c55cc8b47081b791d08e6f5c51b',
+        Var('git_url') + '/native_client/src/validator_snapshots.git@391d19cb8c8714e998651e1aa583d8b6f479c5c3',
 }
 
 deps_os = {
     'android':
     {
         'third_party/android_tools':
-            Var('git_url') + '/android_tools.git@aabf2a28449fe47dedeee51d3570ff8687ff015f',
+            Var('git_url') + '/android_tools.git@ea50cccc11657404ce22cf928062ed1a3927eb39',
     },
     'unix':
     {
@@ -100,6 +102,16 @@ hooks = [
     'native_client/build/package_version/package_version.py',
     'sync',
     '--extract'
+],
+    'pattern':
+         '.'
+},
+    {
+    'action':
+         [
+    'python',
+    'native_client/build/package_version/package_version.py',
+    'cleanup'
 ],
     'pattern':
          '.'

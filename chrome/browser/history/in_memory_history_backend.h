@@ -25,6 +25,7 @@
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/scoped_observer.h"
 #include "components/history/core/browser/history_service_observer.h"
 #include "components/history/core/browser/keyword_id.h"
 #include "content/public/browser/notification_observer.h"
@@ -79,6 +80,8 @@ class InMemoryHistoryBackend : public HistoryServiceObserver,
                     const URLRow& row,
                     const RedirectList& redirects,
                     base::Time visit_time) override;
+  void OnURLsModified(HistoryService* history_service,
+                      const URLRows& changed_urls) override;
 
   // Notification callback.
   void Observe(int type,
@@ -107,6 +110,8 @@ class InMemoryHistoryBackend : public HistoryServiceObserver,
   // The profile that this object is attached. May be NULL before
   // initialization.
   Profile* profile_;
+  ScopedObserver<HistoryService, HistoryServiceObserver>
+      history_service_observer_;
   HistoryService* history_service_;
 
   DISALLOW_COPY_AND_ASSIGN(InMemoryHistoryBackend);

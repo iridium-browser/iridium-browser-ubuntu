@@ -56,21 +56,23 @@ func (c *Conn) clientHandshake() error {
 	}
 
 	hello := &clientHelloMsg{
-		isDTLS:               c.isDTLS,
-		vers:                 c.config.maxVersion(),
-		compressionMethods:   []uint8{compressionNone},
-		random:               make([]byte, 32),
-		ocspStapling:         true,
-		serverName:           c.config.ServerName,
-		supportedCurves:      c.config.curvePreferences(),
-		supportedPoints:      []uint8{pointFormatUncompressed},
-		nextProtoNeg:         len(c.config.NextProtos) > 0,
-		secureRenegotiation:  []byte{},
-		alpnProtocols:        c.config.NextProtos,
-		duplicateExtension:   c.config.Bugs.DuplicateExtension,
-		channelIDSupported:   c.config.ChannelID != nil,
-		npnLast:              c.config.Bugs.SwapNPNAndALPN,
-		extendedMasterSecret: c.config.maxVersion() >= VersionTLS10,
+		isDTLS:                  c.isDTLS,
+		vers:                    c.config.maxVersion(),
+		compressionMethods:      []uint8{compressionNone},
+		random:                  make([]byte, 32),
+		ocspStapling:            true,
+		serverName:              c.config.ServerName,
+		supportedCurves:         c.config.curvePreferences(),
+		supportedPoints:         []uint8{pointFormatUncompressed},
+		nextProtoNeg:            len(c.config.NextProtos) > 0,
+		secureRenegotiation:     []byte{},
+		alpnProtocols:           c.config.NextProtos,
+		duplicateExtension:      c.config.Bugs.DuplicateExtension,
+		channelIDSupported:      c.config.ChannelID != nil,
+		npnLast:                 c.config.Bugs.SwapNPNAndALPN,
+		extendedMasterSecret:    c.config.maxVersion() >= VersionTLS10,
+		srtpProtectionProfiles:  c.config.SRTPProtectionProfiles,
+		srtpMasterKeyIdentifier: c.config.Bugs.SRTPMasterKeyIdentifer,
 	}
 
 	if c.config.Bugs.SendClientVersion != 0 {
@@ -88,6 +90,10 @@ func (c *Conn) clientHandshake() error {
 		} else {
 			hello.secureRenegotiation = c.clientVerify
 		}
+	}
+
+	if c.config.Bugs.NoRenegotiationInfo {
+		hello.secureRenegotiation = nil
 	}
 
 	possibleCipherSuites := c.config.cipherSuites()
@@ -123,25 +129,24 @@ NextCipherSuite:
 		return errors.New("tls: short read from Rand: " + err.Error())
 	}
 
-	if hello.vers >= VersionTLS12 {
-		hello.signatureAndHashes = supportedSKXSignatureAlgorithms
+	if hello.vers >= VersionTLS12 && !c.config.Bugs.NoSignatureAndHashes {
+		hello.signatureAndHashes = c.config.signatureAndHashesForClient()
 	}
 
 	var session *ClientSessionState
 	var cacheKey string
 	sessionCache := c.config.ClientSessionCache
-	if c.config.SessionTicketsDisabled {
-		sessionCache = nil
-	}
 
 	if sessionCache != nil {
-		hello.ticketSupported = true
+		hello.ticketSupported = !c.config.SessionTicketsDisabled
 
 		// Try to resume a previously negotiated TLS session, if
 		// available.
 		cacheKey = clientSessionCacheKey(c.conn.RemoteAddr(), c.config)
 		candidateSession, ok := sessionCache.Get(cacheKey)
 		if ok {
+			ticketOk := !c.config.SessionTicketsDisabled || candidateSession.sessionTicket == nil
+
 			// Check that the ciphersuite/version used for the
 			// previous session are still valid.
 			cipherSuiteOk := false
@@ -154,47 +159,53 @@ NextCipherSuite:
 
 			versOk := candidateSession.vers >= c.config.minVersion() &&
 				candidateSession.vers <= c.config.maxVersion()
-			if versOk && cipherSuiteOk {
+			if ticketOk && versOk && cipherSuiteOk {
 				session = candidateSession
 			}
 		}
 	}
 
 	if session != nil {
-		hello.sessionTicket = session.sessionTicket
-		if c.config.Bugs.CorruptTicket {
-			hello.sessionTicket = make([]byte, len(session.sessionTicket))
-			copy(hello.sessionTicket, session.sessionTicket)
-			if len(hello.sessionTicket) > 0 {
-				offset := 40
-				if offset > len(hello.sessionTicket) {
-					offset = len(hello.sessionTicket) - 1
+		if session.sessionTicket != nil {
+			hello.sessionTicket = session.sessionTicket
+			if c.config.Bugs.CorruptTicket {
+				hello.sessionTicket = make([]byte, len(session.sessionTicket))
+				copy(hello.sessionTicket, session.sessionTicket)
+				if len(hello.sessionTicket) > 0 {
+					offset := 40
+					if offset > len(hello.sessionTicket) {
+						offset = len(hello.sessionTicket) - 1
+					}
+					hello.sessionTicket[offset] ^= 0x40
 				}
-				hello.sessionTicket[offset] ^= 0x40
 			}
-		}
-		// A random session ID is used to detect when the
-		// server accepted the ticket and is resuming a session
-		// (see RFC 5077).
-		sessionIdLen := 16
-		if c.config.Bugs.OversizedSessionId {
-			sessionIdLen = 33
-		}
-		hello.sessionId = make([]byte, sessionIdLen)
-		if _, err := io.ReadFull(c.config.rand(), hello.sessionId); err != nil {
-			c.sendAlert(alertInternalError)
-			return errors.New("tls: short read from Rand: " + err.Error())
+			// A random session ID is used to detect when the
+			// server accepted the ticket and is resuming a session
+			// (see RFC 5077).
+			sessionIdLen := 16
+			if c.config.Bugs.OversizedSessionId {
+				sessionIdLen = 33
+			}
+			hello.sessionId = make([]byte, sessionIdLen)
+			if _, err := io.ReadFull(c.config.rand(), hello.sessionId); err != nil {
+				c.sendAlert(alertInternalError)
+				return errors.New("tls: short read from Rand: " + err.Error())
+			}
+		} else {
+			hello.sessionId = session.sessionId
 		}
 	}
 
 	var helloBytes []byte
 	if c.config.Bugs.SendV2ClientHello {
+		// Test that the peer left-pads random.
+		hello.random[0] = 0
 		v2Hello := &v2ClientHelloMsg{
 			vers:         hello.vers,
 			cipherSuites: hello.cipherSuites,
 			// No session resumption for V2ClientHello.
 			sessionId: nil,
-			challenge: hello.random,
+			challenge: hello.random[1:],
 		}
 		helloBytes = v2Hello.marshal()
 		c.writeV2Record(helloBytes)
@@ -249,7 +260,7 @@ NextCipherSuite:
 		return fmt.Errorf("tls: server selected an unsupported cipher suite")
 	}
 
-	if len(c.clientVerify) > 0 {
+	if len(c.clientVerify) > 0 && !c.config.Bugs.NoRenegotiationInfo {
 		var expectedRenegInfo []byte
 		expectedRenegInfo = append(expectedRenegInfo, c.clientVerify...)
 		expectedRenegInfo = append(expectedRenegInfo, c.serverVerify...)
@@ -662,6 +673,25 @@ func (hs *clientHandshakeState) processServerHello() (bool, error) {
 		return false, errors.New("server advertised unrequested Channel ID extension")
 	}
 
+	if hs.serverHello.srtpProtectionProfile != 0 {
+		if hs.serverHello.srtpMasterKeyIdentifier != "" {
+			return false, errors.New("tls: server selected SRTP MKI value")
+		}
+
+		found := false
+		for _, p := range c.config.SRTPProtectionProfiles {
+			if p == hs.serverHello.srtpProtectionProfile {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false, errors.New("tls: server advertised unsupported SRTP profile")
+		}
+
+		c.srtpProtectionProfile = hs.serverHello.srtpProtectionProfile
+	}
+
 	if hs.serverResumedSession() {
 		// Restore masterSecret and peerCerts from previous state
 		hs.masterSecret = hs.session.masterSecret
@@ -705,11 +735,26 @@ func (hs *clientHandshakeState) readFinished() error {
 }
 
 func (hs *clientHandshakeState) readSessionTicket() error {
+	c := hs.c
+
+	// Create a session with no server identifier. Either a
+	// session ID or session ticket will be attached.
+	session := &ClientSessionState{
+		vers:               c.vers,
+		cipherSuite:        hs.suite.id,
+		masterSecret:       hs.masterSecret,
+		handshakeHash:      hs.finishedHash.server.Sum(nil),
+		serverCertificates: c.peerCertificates,
+	}
+
 	if !hs.serverHello.ticketSupported {
+		if hs.session == nil && len(hs.serverHello.sessionId) > 0 {
+			session.sessionId = hs.serverHello.sessionId
+			hs.session = session
+		}
 		return nil
 	}
 
-	c := hs.c
 	msg, err := c.readHandshake()
 	if err != nil {
 		return err
@@ -720,14 +765,8 @@ func (hs *clientHandshakeState) readSessionTicket() error {
 		return unexpectedMessageError(sessionTicketMsg, msg)
 	}
 
-	hs.session = &ClientSessionState{
-		sessionTicket:      sessionTicketMsg.ticket,
-		vers:               c.vers,
-		cipherSuite:        hs.suite.id,
-		masterSecret:       hs.masterSecret,
-		handshakeHash:      hs.finishedHash.server.Sum(nil),
-		serverCertificates: c.peerCertificates,
-	}
+	session.sessionTicket = sessionTicketMsg.ticket
+	hs.session = session
 
 	hs.writeServerHash(sessionTicketMsg.marshal())
 

@@ -33,6 +33,10 @@ namespace gfx {
 class Size;
 }
 
+namespace gpu {
+class ValueStateMap;
+}
+
 namespace IPC {
 class ChannelMojoHost;
 }
@@ -48,6 +52,7 @@ class NotificationMessageFilter;
 #if defined(ENABLE_WEBRTC)
 class P2PSocketDispatcherHost;
 #endif
+class PermissionServiceContext;
 class PeerConnectionTrackerHost;
 class RendererMainThread;
 class RenderWidgetHelper;
@@ -103,6 +108,7 @@ class CONTENT_EXPORT RenderProcessHostImpl
   int VisibleWidgetCount() const override;
   bool IsIsolatedGuest() const override;
   StoragePartition* GetStoragePartition() const override;
+  bool Shutdown(int exit_code, bool wait) override;
   bool FastShutdownIfPossible() override;
   void DumpHandles() override;
   base::ProcessHandle GetHandle() const override;
@@ -138,6 +144,11 @@ class CONTENT_EXPORT RenderProcessHostImpl
   void NotifyTimezoneChange() override;
   ServiceRegistry* GetServiceRegistry() override;
   const base::TimeTicks& GetInitTimeForNavigationMetrics() const override;
+  bool SubscribeUniformEnabled() const override;
+  void OnAddSubscription(unsigned int target) override;
+  void OnRemoveSubscription(unsigned int target) override;
+  void SendUpdateValueState(
+      unsigned int target, const gpu::ValueState& state) override;
 
   // IPC::Sender via RenderProcessHost.
   bool Send(IPC::Message* msg) override;
@@ -464,6 +475,23 @@ class CONTENT_EXPORT RenderProcessHostImpl
 
   // Records the time when the process starts surviving for workers for UMA.
   base::TimeTicks survive_for_worker_start_time_;
+
+  // Context shared for each PermissionService instance created for this RPH.
+  scoped_ptr<PermissionServiceContext> permission_service_context_;
+
+  // This is a set of all subscription targets valuebuffers in the GPU process
+  // are currently subscribed too. Used to prevent sending unnecessary
+  // ValueState updates.
+  typedef base::hash_set<unsigned int> SubscriptionSet;
+  SubscriptionSet subscription_set_;
+
+  // Maintains ValueStates which are not currently subscribed too so we can
+  // pass them to the GpuService if a Valuebuffer ever subscribes to the
+  // respective subscription target
+  scoped_refptr<gpu::ValueStateMap> pending_valuebuffer_state_;
+
+  // Whether or not the CHROMIUM_subscribe_uniform WebGL extension is enabled
+  bool subscribe_uniform_enabled_;
 
   base::WeakPtrFactory<RenderProcessHostImpl> weak_factory_;
 

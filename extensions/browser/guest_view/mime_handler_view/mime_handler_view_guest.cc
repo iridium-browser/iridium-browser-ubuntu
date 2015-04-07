@@ -14,7 +14,6 @@
 #include "extensions/browser/guest_view/mime_handler_view/mime_handler_view_guest_delegate.h"
 #include "extensions/browser/process_manager.h"
 #include "extensions/common/extension_messages.h"
-#include "extensions/common/feature_switch.h"
 #include "extensions/common/guest_view/guest_view_constants.h"
 #include "extensions/strings/grit/extensions_strings.h"
 #include "ipc/ipc_message_macros.h"
@@ -30,17 +29,20 @@ const char MimeHandlerViewGuest::Type[] = "mimehandler";
 // static
 GuestViewBase* MimeHandlerViewGuest::Create(
     content::BrowserContext* browser_context,
+    content::WebContents* owner_web_contents,
     int guest_instance_id) {
-  if (!extensions::FeatureSwitch::mime_handler_view()->IsEnabled())
-    return NULL;
-
-  return new MimeHandlerViewGuest(browser_context, guest_instance_id);
+  return new MimeHandlerViewGuest(browser_context,
+                                  owner_web_contents,
+                                  guest_instance_id);
 }
 
 MimeHandlerViewGuest::MimeHandlerViewGuest(
     content::BrowserContext* browser_context,
+    content::WebContents* owner_web_contents,
     int guest_instance_id)
-    : GuestView<MimeHandlerViewGuest>(browser_context, guest_instance_id),
+    : GuestView<MimeHandlerViewGuest>(browser_context,
+                                      owner_web_contents,
+                                      guest_instance_id),
       delegate_(ExtensionsAPIClient::Get()->CreateMimeHandlerViewGuestDelegate(
           this)) {
 }
@@ -64,11 +66,7 @@ int MimeHandlerViewGuest::GetTaskPrefix() const {
   return IDS_EXTENSION_TASK_MANAGER_MIMEHANDLERVIEW_TAG_PREFIX;
 }
 
-// |embedder_extension_id| is empty for mime handler view.
 void MimeHandlerViewGuest::CreateWebContents(
-    const std::string& embedder_extension_id,
-    int embedder_render_process_id,
-    const GURL& embedder_site_url,
     const base::DictionaryValue& create_params,
     const WebContentsCreatedCallback& callback) {
   std::string orig_mime_type;
@@ -78,6 +76,14 @@ void MimeHandlerViewGuest::CreateWebContents(
   std::string extension_src;
   create_params.GetString(mime_handler_view::kSrc, &extension_src);
   DCHECK(!extension_src.empty());
+  std::string content_url_str;
+  create_params.GetString(mime_handler_view::kContentUrl, &content_url_str);
+  content_url_ = GURL(content_url_str);
+  if (!content_url_.is_valid()) {
+    content_url_ = GURL();
+    callback.Run(nullptr);
+    return;
+  }
 
   GURL mime_handler_extension_url(extension_src);
   if (!mime_handler_extension_url.is_valid()) {
@@ -102,7 +108,7 @@ void MimeHandlerViewGuest::CreateWebContents(
   ProcessManager* process_manager = ProcessManager::Get(browser_context());
   content::SiteInstance* guest_site_instance =
       process_manager->GetSiteInstanceForURL(
-          Extension::GetBaseURLFromExtensionId(embedder_extension_id));
+          Extension::GetBaseURLFromExtensionId(GetOwnerSiteURL().host()));
 
   WebContents::CreateParams params(browser_context(), guest_site_instance);
   params.guest_delegate = this;
@@ -127,20 +133,25 @@ void MimeHandlerViewGuest::DidInitialize() {
     delegate_->AttachHelpers();
 }
 
+bool MimeHandlerViewGuest::ZoomPropagatesFromEmbedderToGuest() const {
+  return false;
+}
+
 bool MimeHandlerViewGuest::Find(int request_id,
                                 const base::string16& search_text,
-                                const blink::WebFindOptions& options,
-                                bool is_full_page_plugin) {
-  if (is_full_page_plugin) {
+                                const blink::WebFindOptions& options) {
+  if (is_full_page_plugin()) {
     web_contents()->Find(request_id, search_text, options);
     return true;
   }
   return false;
 }
 
-void MimeHandlerViewGuest::ContentsZoomChange(bool zoom_in) {
-  if (delegate_)
-    delegate_->ChangeZoom(zoom_in);
+content::WebContents* MimeHandlerViewGuest::OpenURLFromTab(
+    content::WebContents* source,
+    const content::OpenURLParams& params) {
+  return embedder_web_contents()->GetDelegate()->OpenURLFromTab(
+      embedder_web_contents(), params);
 }
 
 bool MimeHandlerViewGuest::HandleContextMenu(
@@ -182,6 +193,21 @@ void MimeHandlerViewGuest::FindReply(content::WebContents* web_contents,
                                                     selection_rect,
                                                     active_match_ordinal,
                                                     final_update);
+}
+
+bool MimeHandlerViewGuest::SaveFrame(const GURL& url,
+                                     const content::Referrer& referrer) {
+  if (!attached())
+    return false;
+
+  embedder_web_contents()->SaveFrame(content_url_, referrer);
+  return true;
+}
+
+void MimeHandlerViewGuest::DocumentOnLoadCompletedInMainFrame() {
+  embedder_web_contents()->Send(
+      new ExtensionMsg_MimeHandlerViewGuestOnLoadCompleted(
+          element_instance_id()));
 }
 
 bool MimeHandlerViewGuest::OnMessageReceived(const IPC::Message& message) {

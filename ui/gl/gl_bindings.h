@@ -100,9 +100,13 @@
 #define GL_LUMINANCE_ALPHA32F_EXT                        0x8819
 #define GL_RGBA16F_EXT                                   0x881A
 #define GL_RGB16F_EXT                                    0x881B
+#define GL_RG16F_EXT 0x822F
+#define GL_R16F_EXT 0x822D
 #define GL_ALPHA16F_EXT                                  0x881C
 #define GL_LUMINANCE16F_EXT                              0x881E
 #define GL_LUMINANCE_ALPHA16F_EXT                        0x881F
+#define GL_R32F_EXT 0x822E
+#define GL_RG32F_EXT 0x8230
 #define GL_BGRA8_EXT                                     0x93A1
 
 // GL_ANGLE_instanced_arrays
@@ -116,17 +120,17 @@
 #define GL_QUERY_RESULT_AVAILABLE_EXT                    0x8867
 
 // GL_CHROMIUM_command_buffer_query
-#define GL_COMMANDS_ISSUED_CHROMIUM                      0x84F2
+#define GL_COMMANDS_ISSUED_CHROMIUM                      0x6004
 
 /* GL_CHROMIUM_get_error_query */
-#define GL_GET_ERROR_QUERY_CHROMIUM                      0x84F3
+#define GL_GET_ERROR_QUERY_CHROMIUM                      0x6003
 
 /* GL_CHROMIUM_command_buffer_latency_query */
-#define GL_LATENCY_QUERY_CHROMIUM                        0x84F4
+#define GL_LATENCY_QUERY_CHROMIUM                        0x6007
 
 /* GL_CHROMIUM_async_pixel_transfers */
-#define GL_ASYNC_PIXEL_UNPACK_COMPLETED_CHROMIUM         0x84F5
-#define GL_ASYNC_PIXEL_PACK_COMPLETED_CHROMIUM           0x84F6
+#define GL_ASYNC_PIXEL_UNPACK_COMPLETED_CHROMIUM         0x6005
+#define GL_ASYNC_PIXEL_PACK_COMPLETED_CHROMIUM           0x6006
 
 // GL_CHROMIUM_sync_query
 #define GL_COMMANDS_COMPLETED_CHROMIUM                   0x84F7
@@ -272,6 +276,14 @@
 #define GL_CONTEXT_LOST_KHR               0x0507
 #endif /* GL_KHR_robustness */
 
+#ifndef GL_EXT_texture_rg
+#define GL_EXT_texture_rg 1
+#define GL_RED_EXT 0x1903
+#define GL_RG_EXT 0x8227
+#define GL_R8_EXT 0x8229
+#define GL_RG8_EXT 0x822B
+#endif /* GL_EXT_texture_rg */
+
 #define GL_GLEXT_PROTOTYPES 1
 
 #if defined(OS_WIN)
@@ -294,7 +306,11 @@ typedef void (*OSMESAproc)();
 // Forward declare EGL types.
 typedef uint64 EGLuint64CHROMIUM;
 
+#if defined(OS_ANDROID)
+#include "gl_bindings_autogen_gl_android.h"
+#else
 #include "gl_bindings_autogen_gl.h"
+#endif
 #include "gl_bindings_autogen_osmesa.h"
 
 #if defined(OS_WIN)
@@ -306,7 +322,7 @@ typedef uint64 EGLuint64CHROMIUM;
 #elif defined(USE_OZONE)
 #include "gl_bindings_autogen_egl.h"
 #elif defined(OS_ANDROID)
-#include "gl_bindings_autogen_egl.h"
+#include "gl_bindings_autogen_egl_android.h"
 #endif
 
 namespace gfx {

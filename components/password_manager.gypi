@@ -12,17 +12,25 @@
         '../base/base.gyp:base',
         '../net/net.gyp:net',
         '../sql/sql.gyp:sql',
+        '../third_party/protobuf/protobuf.gyp:protobuf_lite',
         '../url/url.gyp:url_lib',
         'autofill_core_common',
+        'components_strings.gyp:components_strings',
         'keyed_service_core',
         'os_crypt',
         'password_manager_core_common',
+        'password_manager_core_browser_proto',
       ],
       'include_dirs': [
         '..',
       ],
       'sources': [
         # Note: sources list duplicated in GN build.
+        'password_manager/core/browser/affiliation_fetcher_delegate.h',
+        'password_manager/core/browser/affiliation_fetcher.cc',
+        'password_manager/core/browser/affiliation_fetcher.h',
+        'password_manager/core/browser/affiliation_utils.cc',
+        'password_manager/core/browser/affiliation_utils.h',
         'password_manager/core/browser/browser_save_password_progress_logger.cc',
         'password_manager/core/browser/browser_save_password_progress_logger.h',
         'password_manager/core/browser/credential_manager_dispatcher.h',
@@ -50,6 +58,8 @@
         'password_manager/core/browser/password_manager_internals_service.h',
         'password_manager/core/browser/password_manager_metrics_util.cc',
         'password_manager/core/browser/password_manager_metrics_util.h',
+        'password_manager/core/browser/password_manager_url_collection_experiment.cc',
+	'password_manager/core/browser/password_manager_url_collection_experiment.h',
         'password_manager/core/browser/password_store.cc',
         'password_manager/core/browser/password_store.h',
         'password_manager/core/browser/password_store_change.h',
@@ -106,6 +116,19 @@
       ],
       # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
       'msvs_disabled_warnings': [ 4267, ],
+    },
+    {
+      # GN version: //components/password_manager/core/browser:proto
+      'target_name': 'password_manager_core_browser_proto',
+      'type': 'static_library',
+      'sources': [
+        'password_manager/core/browser/affiliation_api.proto'
+      ],
+      'variables': {
+        'proto_in_dir': 'password_manager/core/browser',
+        'proto_out_dir': 'components/password_manager/core/browser',
+      },
+      'includes': ['../build/protoc.gypi'],
     },
     {
       # GN version: //components/password_manager/core/browser:test_support
@@ -228,6 +251,8 @@
             'password_manager/content/browser/content_credential_manager_dispatcher.h',
             'password_manager/content/browser/content_password_manager_driver.cc',
             'password_manager/content/browser/content_password_manager_driver.h',
+            'password_manager/content/browser/content_password_manager_driver_factory.cc',
+            'password_manager/content/browser/content_password_manager_driver_factory.h',
             'password_manager/content/browser/credential_manager_password_form_manager.cc',
             'password_manager/content/browser/credential_manager_password_form_manager.h',
             'password_manager/content/browser/password_manager_internals_service_factory.cc',

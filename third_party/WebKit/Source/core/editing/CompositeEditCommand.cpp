@@ -360,7 +360,12 @@ void CompositeEditCommand::insertNodeAt(PassRefPtrWillBeRawPtr<Node> insertChild
 
 void CompositeEditCommand::appendNode(PassRefPtrWillBeRawPtr<Node> node, PassRefPtrWillBeRawPtr<ContainerNode> parent)
 {
-    ASSERT(canHaveChildrenForEditing(parent.get()));
+    // When cloneParagraphUnderNewElement() clones the fallback content
+    // of an OBJECT element, the ASSERT below may fire since the return
+    // value of canHaveChildrenForEditing is not reliable until the render
+    // object of the OBJECT is created. Hence we ignore this check for OBJECTs.
+    ASSERT(canHaveChildrenForEditing(parent.get())
+        || (parent->isElementNode() && toElement(parent.get())->tagQName() == objectTag));
     applyCommandToComposite(AppendNodeCommand::create(parent, node));
 }
 
@@ -873,7 +878,7 @@ PassRefPtrWillBeRawPtr<HTMLBRElement> CompositeEditCommand::addBlockPlaceholderI
     // append the placeholder to make sure it follows
     // any unrendered blocks
     RenderBlockFlow* block = toRenderBlockFlow(renderer);
-    if (block->height() == 0 || (block->isListItem() && toRenderListItem(block)->isEmpty()))
+    if (block->size().height() == 0 || (block->isListItem() && toRenderListItem(block)->isEmpty()))
         return appendBlockPlaceholder(container);
 
     return nullptr;
@@ -1211,7 +1216,7 @@ void CompositeEditCommand::moveParagraphs(const VisiblePosition& startOfParagrap
     // FIXME: This is an inefficient way to preserve style on nodes in the paragraph to move. It
     // shouldn't matter though, since moved paragraphs will usually be quite small.
     RefPtrWillBeRawPtr<DocumentFragment> fragment = startOfParagraphToMove != endOfParagraphToMove ?
-        createFragmentFromMarkup(document(), createMarkup(range.get(), 0, DoNotAnnotateForInterchange, true, DoNotResolveURLs, constrainingAncestor), "") : nullptr;
+        createFragmentFromMarkup(document(), createMarkup(range.get(), DoNotAnnotateForInterchange, true, DoNotResolveURLs, constrainingAncestor), "") : nullptr;
 
     // A non-empty paragraph's style is moved when we copy and move it.  We don't move
     // anything if we're given an empty paragraph, but an empty paragraph can have style

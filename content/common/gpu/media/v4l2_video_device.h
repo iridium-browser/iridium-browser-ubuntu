@@ -9,23 +9,24 @@
 #ifndef CONTENT_COMMON_GPU_MEDIA_V4L2_VIDEO_DEVICE_H_
 #define CONTENT_COMMON_GPU_MEDIA_V4L2_VIDEO_DEVICE_H_
 
+#include "base/memory/ref_counted.h"
 #include "media/base/video_decoder_config.h"
 #include "media/base/video_frame.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/gl/gl_bindings.h"
 
 namespace content {
 
-class V4L2Device {
+class V4L2Device : public base::RefCountedThreadSafe<V4L2Device> {
  public:
   // Utility format conversion functions
   static media::VideoFrame::Format V4L2PixFmtToVideoFrameFormat(uint32 format);
   static uint32 VideoFrameFormatToV4L2PixFmt(media::VideoFrame::Format format);
-  static uint32 VideoCodecProfileToV4L2PixFmt(media::VideoCodecProfile profile);
+  static uint32 VideoCodecProfileToV4L2PixFmt(media::VideoCodecProfile profile,
+                                              bool slice_based);
+  static uint32_t V4L2PixFmtToDrmFormat(uint32_t format);
   // Convert format requirements requested by a V4L2 device to gfx::Size.
   static gfx::Size CodedSizeFromV4L2Format(struct v4l2_format format);
-
-  virtual ~V4L2Device();
 
   enum Type {
     kDecoder,
@@ -35,7 +36,7 @@ class V4L2Device {
 
   // Creates and initializes an appropriate V4L2Device of |type| for the
   // current platform and returns a scoped_ptr<V4L2Device> on success, or NULL.
-  static scoped_ptr<V4L2Device> Create(Type type);
+  static scoped_refptr<V4L2Device> Create(Type type);
 
   // Parameters and return value are the same as for the standard ioctl() system
   // call.
@@ -71,6 +72,10 @@ class V4L2Device {
   // Returns true on success.
   virtual bool Initialize() = 0;
 
+  // Return true if the given V4L2 pixfmt can be used in CreateEGLImage()
+  // for the current platform.
+  virtual bool CanCreateEGLImageFrom(uint32_t v4l2_pixfmt) = 0;
+
   // Creates an EGLImageKHR since each V4L2Device may use a different method of
   // acquiring one and associating it to the given texture. The texture_id is
   // used to bind the texture to the returned EGLImageKHR. buffer_index can be
@@ -81,7 +86,8 @@ class V4L2Device {
                                      GLuint texture_id,
                                      gfx::Size frame_buffer_size,
                                      unsigned int buffer_index,
-                                     size_t planes_count) = 0;
+                                     uint32_t v4l2_pixfmt,
+                                     size_t num_v4l2_planes) = 0;
 
   // Destroys the EGLImageKHR.
   virtual EGLBoolean DestroyEGLImage(EGLDisplay egl_display,
@@ -93,8 +99,9 @@ class V4L2Device {
   // Returns the preferred V4L2 input format or 0 if don't care.
   virtual uint32 PreferredInputFormat() = 0;
 
-  // Returns the preferred V4L2 output format or 0 if don't care.
-  virtual uint32 PreferredOutputFormat() = 0;
+ protected:
+  friend class base::RefCountedThreadSafe<V4L2Device>;
+  virtual ~V4L2Device();
 };
 
 }  //  namespace content

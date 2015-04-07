@@ -16,6 +16,8 @@ component("base") {
   sources = [
     "accelerators/accelerator.cc",
     "accelerators/accelerator.h",
+    "accelerators/accelerator_history.cc",
+    "accelerators/accelerator_history.h",
     "accelerators/accelerator_manager.cc",
     "accelerators/accelerator_manager.h",
     "accelerators/menu_label_accelerator_util_linux.cc",
@@ -23,7 +25,7 @@ component("base") {
     "accelerators/platform_accelerator.h",
     "accelerators/platform_accelerator_cocoa.h",
     "accelerators/platform_accelerator_cocoa.mm",
-    "android/system_ui_resource_manager.h",
+    "android/system_ui_resource_type.h",
     "android/ui_base_jni_registrar.cc",
     "android/ui_base_jni_registrar.h",
     "android/view_android.cc",
@@ -143,6 +145,8 @@ component("base") {
     "dragdrop/os_exchange_data_provider_mac.mm",
     "dragdrop/os_exchange_data_provider_win.cc",
     "dragdrop/os_exchange_data_provider_win.h",
+    "font_helper_chromeos.cc",
+    "font_helper_chromeos.h",
     "hit_test.h",
     "l10n/formatter.cc",
     "l10n/formatter.h",
@@ -195,7 +199,6 @@ component("base") {
     "nine_image_painter_factory.h",
     "page_transition_types.cc",
     "page_transition_types.h",
-    "page_transition_types_list.h",
     "resource/data_pack.cc",
     "resource/data_pack.h",
     "resource/resource_bundle.cc",
@@ -213,6 +216,8 @@ component("base") {
     "text/bytes_formatting.h",
     "theme_provider.cc",
     "theme_provider.h",
+    "touch/selection_bound.cc",
+    "touch/selection_bound.h",
     "touch/touch_device.h",
     "touch/touch_editing_controller.cc",
     "touch/touch_editing_controller.h",
@@ -228,6 +233,9 @@ component("base") {
     "ui_base_switches_util.h",
     "ui_base_types.cc",
     "ui_base_types.h",
+    "user_activity/user_activity_detector.cc",
+    "user_activity/user_activity_detector.h",
+    "user_activity/user_activity_observer.h",
     "view_prop.cc",
     "view_prop.h",
     "webui/jstemplate_builder.cc",
@@ -273,7 +281,7 @@ component("base") {
     sources += [ "touch/touch_device_android.cc" ]
   } else if (use_ozone) {
     sources += [ "touch/touch_device_ozone.cc" ]
-  } else if (use_aura && use_x11) { 
+  } else if (use_aura && use_x11) {
     sources += [ "touch/touch_device_aurax11.cc" ]
   } else {
     # Empty implementation for all other cases.
@@ -296,6 +304,7 @@ component("base") {
     "//base:i18n",
     "//net",
     "//third_party/icu",
+    "//ui/events/devices",
     "//ui/resources",
     "//ui/strings",
     "//url",
@@ -303,9 +312,7 @@ component("base") {
 
   if (build_ime) {
     if (!is_android) {
-      deps += [
-        "//ui/events",
-      ]
+      deps += [ "//ui/events" ]
     }
 
     sources += [
@@ -313,10 +320,33 @@ component("base") {
       "ime/candidate_window.h",
       "ime/chromeos/character_composer.cc",
       "ime/chromeos/character_composer.h",
+      "ime/chromeos/component_extension_ime_manager.cc",
+      "ime/chromeos/component_extension_ime_manager.h",
+      "ime/chromeos/composition_text.cc",
+      "ime/chromeos/composition_text.h",
+      "ime/chromeos/extension_ime_util.cc",
+      "ime/chromeos/extension_ime_util.h",
+      "ime/chromeos/fake_ime_keyboard.cc",
+      "ime/chromeos/fake_ime_keyboard.h",
+      "ime/chromeos/fake_input_method_delegate.cc",
+      "ime/chromeos/fake_input_method_delegate.h",
       "ime/chromeos/ime_bridge.cc",
       "ime/chromeos/ime_bridge.h",
+      "ime/chromeos/ime_keyboard.cc",
+      "ime/chromeos/ime_keyboard.h",
+      "ime/chromeos/ime_keyboard_ozone.cc",
+      "ime/chromeos/ime_keyboard_ozone.h",
+      "ime/chromeos/ime_keyboard_x11.cc",
+      "ime/chromeos/ime_keyboard_x11.h",
       "ime/chromeos/ime_keymap.cc",
       "ime/chromeos/ime_keymap.h",
+      "ime/chromeos/input_method_delegate.h",
+      "ime/chromeos/input_method_descriptor.cc",
+      "ime/chromeos/input_method_descriptor.h",
+      "ime/chromeos/input_method_manager.cc",
+      "ime/chromeos/input_method_manager.h",
+      "ime/chromeos/input_method_whitelist.cc",
+      "ime/chromeos/input_method_whitelist.h",
       "ime/chromeos/mock_ime_candidate_window_handler.cc",
       "ime/chromeos/mock_ime_candidate_window_handler.h",
       "ime/chromeos/mock_ime_engine_handler.cc",
@@ -391,9 +421,19 @@ component("base") {
     }
 
     if (is_chromeos) {
-      deps += [
-        "//chromeos",
-      ]
+      deps += [ "//chromeos" ]
+      if (!use_ozone) {
+        sources -= [
+          "ime/chromeos/ime_keyboard_ozone.cc",
+          "ime/chromeos/ime_keyboard_ozone.h",
+        ]
+      }
+      if (!use_x11) {
+        sources -= [
+          "ime/chromeos/ime_keyboard_x11.cc",
+          "ime/chromeos/ime_keyboard_x11.h",
+        ]
+      }
     }
 
     if (use_pango) {
@@ -414,9 +454,7 @@ component("base") {
   }
 
   if (toolkit_views) {
-    deps += [
-      "//ui/events",
-    ]
+    deps += [ "//ui/events" ]
   }
 
   if (use_x11 && use_aura) {
@@ -431,9 +469,7 @@ component("base") {
   }
 
   if (use_aura) {
-    deps += [
-      "//ui/events",
-    ]
+    deps += [ "//ui/events" ]
   } else {
     sources -= [
       "cursor/cursor.cc",
@@ -455,15 +491,11 @@ component("base") {
   }
 
   if (!use_aura || !is_linux) {
-    sources -= [
-      "resource/resource_bundle_auralinux.cc",
-    ]
+    sources -= [ "resource/resource_bundle_auralinux.cc" ]
   }
 
   if (use_aura && is_win) {
-    sources -= [
-      "dragdrop/drag_utils_aura.cc",
-    ]
+    sources -= [ "dragdrop/drag_utils_aura.cc" ]
   }
 
   if (is_linux) {
@@ -495,9 +527,7 @@ component("base") {
       "cursor/cursor_loader_win.cc",
       "cursor/cursor_loader_win.h",
     ]
-    deps += [
-      "//third_party/wtl",
-    ]
+    deps += [ "//third_party/wtl" ]
     cflags = [
       "/wd4267",  # TODO(jschuh): C4267: http://crbug.com/167187 size_t -> int.
       "/wd4324",  # Structure was padded due to __declspec(align()), which is
@@ -527,9 +557,7 @@ component("base") {
   }
 
   if (is_mac) {
-    deps += [
-      "//third_party/mozilla",
-    ]
+    deps += [ "//third_party/mozilla" ]
 
     sources -= [
       "cursor/image_cursors.cc",
@@ -547,13 +575,11 @@ component("base") {
 
   if (use_x11) {
     #'all_dependent_settings': {
-      #'ldflags': [
-        #'-L<(PRODUCT_DIR)',
-      #],
+    #'ldflags': [
+    #'-L<(PRODUCT_DIR)',
+    #],
     #},
-    configs += [
-      "//build/config/linux:x11"
-    ]
+    configs += [ "//build/config/linux:x11" ]
   }
 
   if (use_aura) {
@@ -582,6 +608,7 @@ component("base") {
     ]
 
     deps += [
+      "//ui/events/ozone:events_ozone_layout",
       "//ui/ozone:ozone_base",
     ]
   }
@@ -591,6 +618,11 @@ component("base") {
       "dragdrop/drag_drop_types.h",
       "dragdrop/drop_target_event.cc",
       "dragdrop/drop_target_event.h",
+    ]
+  }
+
+  if (!toolkit_views && !use_aura) {
+    sources -= [
       "dragdrop/os_exchange_data.cc",
       "dragdrop/os_exchange_data.h",
       "nine_image_painter_factory.cc",
@@ -613,26 +645,17 @@ component("base") {
       "ui_base_types.cc",
     ]
 
-    deps += [
-      ":ui_base_jni_headers",
-    ]
+    deps += [ ":ui_base_jni_headers" ]
 
-    libs += [
-      "jnigraphics",
-    ]
+    libs += [ "jnigraphics" ]
   }
 
   if (is_android && is_android_webview_build) {
-    deps += [
-      #TODO(GYP): port this component to GN.
-      #"//ui/android:ui_java",
-    ]
+    deps += [ "//ui/android:ui_java" ]
   }
 
   if (is_android && !use_aura) {
-    sources -= [
-      "cursor/cursor_android.cc",
-    ]
+    sources -= [ "cursor/cursor_android.cc" ]
   }
 
   # Aura clipboard.
@@ -646,15 +669,15 @@ component("base") {
   }
 
   if (is_android || is_ios) {
-    sources -= [
-      "device_form_factor_desktop.cc",
-    ]
+    sources -= [ "device_form_factor_desktop.cc" ]
   }
 }
 
 source_set("test_support") {
   testonly = true
   sources = [
+    "test/test_clipboard.cc",
+    "test/test_clipboard.h",
     "test/ui_controls.h",
     "test/ui_controls_aura.cc",
     "test/ui_controls_internal_win.cc",
@@ -683,6 +706,12 @@ source_set("test_support") {
       "ime/dummy_text_input_client.h",
     ]
   }
+
+  if (!use_aura) {
+    sources -= [ "test/ui_controls_aura.cc" ]
+  } else if (is_win) {
+    sources -= [ "test/ui_controls_win.cc" ]
+  }
 }
 
 if (is_android) {
@@ -701,16 +730,8 @@ if (is_android) {
   }
 }
 
-# TODO(GYP): Make this work on Android and reenable it.
-if (!is_android) {
-# TODO(tfarina): Rename this target to ui_base_unittests.
-# In order to do this we will need to keep this target, add a dummy
-# ui_base_unittests target that just points to ui_unittests, change
-# buildbot code to reference the new 'ui_base_unittests' target.
-# After buildbot is updated, we can make the changes in Chromium and
-# remove 'ui_unittests' target. crbug.com/331829
-# GYP version: ui/base/ui_base_tests.gyp:ui_unittests
-test("ui_unittests") {
+# GYP version: ui/base/ui_base_tests.gyp:ui_base_unittests
+test("ui_base_unittests") {
   sources = [
     "l10n/l10n_util_mac_unittest.mm",
     "l10n/l10n_util_unittest.cc",
@@ -721,8 +742,14 @@ test("ui_unittests") {
     "resource/data_pack_literal.cc",
     "resource/data_pack_unittest.cc",
     "resource/resource_bundle_unittest.cc",
+    "test/test_clipboard_unittest.cc",
     "test/run_all_unittests.cc",
+    "user_activity/user_activity_detector_unittest.cc",
   ]
+
+  if (is_android) {
+    sources -= [ "user_activity/user_activity_detector_unittest.cc" ]
+  }
 
   if (is_ios) {
     # Compile this Mac file on iOS as well.
@@ -747,15 +774,14 @@ test("ui_unittests") {
       "cocoa/nsgraphics_context_additions_unittest.mm",
       "cocoa/nsview_additions_unittest.mm",
       "cocoa/tracking_area_unittest.mm",
-      "dragdrop/os_exchange_data_provider_aurax11_unittest.cc",
       "models/list_model_unittest.cc",
       "models/list_selection_model_unittest.cc",
       "models/tree_node_model_unittest.cc",
       "test/data/resource.h",
       "text/bytes_formatting_unittest.cc",
+      "touch/selection_bound_unittest.cc",
       "view_prop_unittest.cc",
       "webui/web_ui_util_unittest.cc",
-      "x/selection_requestor_unittest.cc",
     ]
   }
 
@@ -802,7 +828,7 @@ test("ui_unittests") {
   ]
 
   if (is_ios) {
-    # TODO(GYP) lots of iOS-only steps for ui_unittests
+    # TODO(GYP) lots of iOS-only steps for ui_base_unittests
   }
 
   if (is_win) {
@@ -827,6 +853,10 @@ test("ui_unittests") {
     cflags = [ "/wd4267" ]
   }
 
+  if (!is_win || !use_aura) {
+    sources -= [ "view_prop_unittest.cc" ]
+  }
+
   if (is_android) {
     deps += [
       #"testing/android/native_test.gyp:native_test_native_code"  TODO(GYP)
@@ -834,19 +864,13 @@ test("ui_unittests") {
   }
 
   if (use_pango) {
-    configs += [
-      "//build/config/linux:pangocairo"
-    ]
+    configs += [ "//build/config/linux:pangocairo" ]
   }
 
   if (use_x11) {
-    sources += [
-      "cursor/cursor_loader_x11_unittest.cc"
-    ]
+    sources += [ "cursor/cursor_loader_x11_unittest.cc" ]
 
-    configs += [
-      "//build/config/linux:x11"
-    ]
+    configs += [ "//build/config/linux:x11" ]
 
     deps += [
       "//ui/events/platform/x11",
@@ -854,27 +878,19 @@ test("ui_unittests") {
     ]
 
     datadeps = [
-      "//tools/xdisplaycheck"
-    ]
-  }
-
-  if (!is_win || !use_aura) {
-    sources -= [
-      "view_prop_unittest.cc"
+      "//tools/xdisplaycheck",
     ]
   }
 
   if (is_mac) {
     deps += [
       "//third_party/mozilla",
-      #'ui_unittests_bundle',  TODO(GYP)
+      #'ui_base_tests_bundle',  TODO(GYP)
     ]
   }
 
   if (use_aura || toolkit_views) {
-    sources += [
-      "dragdrop/os_exchange_data_unittest.cc"
-    ]
+    sources += [ "dragdrop/os_exchange_data_unittest.cc" ]
 
     deps += [
       "//ui/events",
@@ -882,25 +898,25 @@ test("ui_unittests") {
     ]
   }
 
-  if (is_chromeos) {
+  if (use_x11 && !is_chromeos) {
     sources += [
-      "../chromeos/network/network_state_notifier_unittest.cc",
-      "../chromeos/touch_exploration_controller_unittest.cc",
-    ]
-    sources -= [
       "dragdrop/os_exchange_data_provider_aurax11_unittest.cc",
       "x/selection_requestor_unittest.cc",
     ]
-    deps += [
-      "//chromeos",
-      "//ui/aura:test_support",
-      "//ui/chromeos/resources",
-      "//ui/chromeos/strings",
-      "//ui/chromeos:ui_chromeos",
-      "//ui/events:gesture_detection",
-      "//ui/message_center:message_center",
+  }
+
+  if (is_chromeos) {
+    deps += [ "//chromeos" ]
+  }
+}
+
+# TODO(GYP) Mac (ui_base_tests_bundle)
+if (is_android) {
+  unittest_apk("ui_base_unittests_apk") {
+    unittests_dep = ":ui_base_unittests"
+    deps = [
+      ":ui_base_unittests",
+      "//chrome:resources",
     ]
   }
 }
-}
-# TODO(GYP) Mac (ui_unittest_bundle) and Android (ui_unittests_apk).

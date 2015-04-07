@@ -13,6 +13,7 @@
 #include "base/callback.h"
 #include "base/containers/scoped_ptr_hash_map.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "content/common/content_export.h"
 #include "content/common/media/cdm_messages_enums.h"
 #include "content/public/browser/browser_message_filter.h"
@@ -44,10 +45,10 @@ class CONTENT_EXPORT BrowserCdmManager : public BrowserMessageFilter {
                     const scoped_refptr<base::TaskRunner>& task_runner);
 
   // BrowserMessageFilter implementations.
-  virtual void OnDestruct() const override;
-  virtual base::TaskRunner* OverrideTaskRunnerForMessage(
+  void OnDestruct() const override;
+  base::TaskRunner* OverrideTaskRunnerForMessage(
       const IPC::Message& message) override;
-  virtual bool OnMessageReceived(const IPC::Message& message) override;
+  bool OnMessageReceived(const IPC::Message& message) override;
 
   media::BrowserCdm* GetCdm(int render_frame_id, int cdm_id);
 
@@ -60,7 +61,7 @@ class CONTENT_EXPORT BrowserCdmManager : public BrowserMessageFilter {
  protected:
   friend class base::RefCountedThreadSafe<BrowserCdmManager>;
   friend class base::DeleteHelper<BrowserCdmManager>;
-  virtual ~BrowserCdmManager();
+  ~BrowserCdmManager() override;
 
  private:
   // CDM callbacks.
@@ -108,8 +109,19 @@ class CONTENT_EXPORT BrowserCdmManager : public BrowserMessageFilter {
               const std::string& key_system,
               const GURL& security_origin);
 
+  // Removes all CDMs associated with |render_frame_id|.
+  void RemoveAllCdmForFrame(int render_frame_id);
+
   // Removes the CDM with the specified id.
   void RemoveCdm(uint64 id);
+
+  // Requests permission for the given protected-media session (infobar).
+  void RequestSessionPermission(int render_frame_id,
+                                const GURL& security_origin,
+                                int cdm_id,
+                                uint32 session_id,
+                                const std::string& content_type,
+                                const std::vector<uint8>& init_data);
 
   // If |permitted| is false, it does nothing but send
   // |CdmMsg_SessionError| IPC message.
@@ -141,6 +153,8 @@ class CONTENT_EXPORT BrowserCdmManager : public BrowserMessageFilter {
 
   // Map of callbacks to cancel the permission request.
   std::map<uint64, base::Closure> cdm_cancel_permission_map_;
+
+  base::WeakPtrFactory<BrowserCdmManager> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserCdmManager);
 };

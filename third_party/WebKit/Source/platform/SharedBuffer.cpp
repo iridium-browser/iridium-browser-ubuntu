@@ -312,7 +312,6 @@ void SharedBuffer::mergeSegmentsIntoBuffer() const
 {
     unsigned bufferSize = m_buffer.size();
     if (m_size > bufferSize) {
-        m_buffer.reserveCapacity(m_size);
         unsigned bytesLeft = m_size - bufferSize;
         for (unsigned i = 0; i < m_segments.size(); ++i) {
             unsigned bytesToCopy = std::min(bytesLeft, segmentSize);
@@ -356,27 +355,25 @@ unsigned SharedBuffer::getSomeData(const char*& someData, unsigned position) con
     return 0;
 }
 
-PassRefPtr<ArrayBuffer> SharedBuffer::getAsArrayBuffer() const
+bool SharedBuffer::getAsBytes(void* dest, unsigned byteLength) const
 {
-    RefPtr<ArrayBuffer> arrayBuffer = ArrayBuffer::createUninitialized(static_cast<unsigned>(size()), 1);
-
-    if (!arrayBuffer)
-        return nullptr;
+    if (!dest || byteLength != size())
+        return false;
 
     const char* segment = 0;
     unsigned position = 0;
     while (unsigned segmentSize = getSomeData(segment, position)) {
-        memcpy(static_cast<char*>(arrayBuffer->data()) + position, segment, segmentSize);
+        memcpy(static_cast<char*>(dest) + position, segment, segmentSize);
         position += segmentSize;
     }
 
-    if (position != arrayBuffer->byteLength()) {
+    if (position != byteLength) {
         ASSERT_NOT_REACHED();
-        // Don't return the incomplete ArrayBuffer.
-        return nullptr;
+        // Don't return the incomplete data.
+        return false;
     }
 
-    return arrayBuffer;
+    return true;
 }
 
 PassRefPtr<SkData> SharedBuffer::getAsSkData() const

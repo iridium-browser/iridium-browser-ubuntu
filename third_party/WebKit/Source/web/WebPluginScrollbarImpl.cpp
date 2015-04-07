@@ -229,7 +229,7 @@ void WebPluginScrollbarImpl::scroll(ScrollDirection direction, ScrollGranularity
 
 void WebPluginScrollbarImpl::paint(WebCanvas* canvas, const WebRect& rect)
 {
-    GraphicsContext context(canvas);
+    GraphicsContext context(canvas, nullptr);
     m_scrollbar->paint(&context, rect);
 }
 
@@ -361,6 +361,16 @@ bool WebPluginScrollbarImpl::onKeyDown(const WebInputEvent& event)
         return m_group->scroll(scrollDirection, scrollGranularity);
     }
     return false;
+}
+
+float WebPluginScrollbarImpl::elasticOverscroll() const
+{
+    return m_scrollbar->elasticOverscroll();
+}
+
+void WebPluginScrollbarImpl::setElasticOverscroll(float elasticOverscroll)
+{
+    m_scrollbar->setElasticOverscroll(elasticOverscroll);
 }
 
 } // namespace blink

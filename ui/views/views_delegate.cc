@@ -9,12 +9,12 @@
 namespace views {
 
 ViewsDelegate::ViewsDelegate()
-    : views_tsc_factory_(new ViewsTouchSelectionControllerFactory) {
-  ui::TouchSelectionControllerFactory::SetInstance(views_tsc_factory_.get());
+    : views_tsc_factory_(new ViewsTouchEditingControllerFactory) {
+  ui::TouchEditingControllerFactory::SetInstance(views_tsc_factory_.get());
 }
 
 ViewsDelegate::~ViewsDelegate() {
-  ui::TouchSelectionControllerFactory::SetInstance(NULL);
+  ui::TouchEditingControllerFactory::SetInstance(NULL);
 }
 
 void ViewsDelegate::SaveWindowPlacement(const Widget* widget,
@@ -81,11 +81,9 @@ bool ViewsDelegate::WindowManagerProvidesTitleBar(bool maximized) {
   return false;
 }
 
-#if defined(USE_AURA)
 ui::ContextFactory* ViewsDelegate::GetContextFactory() {
   return NULL;
 }
-#endif
 
 #if defined(OS_WIN)
 int ViewsDelegate::GetAppbarAutohideEdges(HMONITOR monitor,

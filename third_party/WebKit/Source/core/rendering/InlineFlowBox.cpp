@@ -36,6 +36,7 @@
 #include "core/rendering/RenderRubyText.h"
 #include "core/rendering/RenderView.h"
 #include "core/rendering/RootInlineBox.h"
+#include "core/rendering/style/ShadowList.h"
 #include "platform/fonts/Font.h"
 #include "platform/graphics/GraphicsContextStateSaver.h"
 
@@ -48,7 +49,7 @@ struct SameSizeAsInlineFlowBox : public InlineBox {
     uint32_t bitfields : 23;
 };
 
-COMPILE_ASSERT(sizeof(InlineFlowBox) == sizeof(SameSizeAsInlineFlowBox), InlineFlowBox_should_stay_small);
+static_assert(sizeof(InlineFlowBox) == sizeof(SameSizeAsInlineFlowBox), "InlineFlowBox should stay small");
 
 #if ENABLE(ASSERT)
 
@@ -254,7 +255,7 @@ void InlineFlowBox::attachLineBoxToRenderObject()
     rendererLineBoxes()->attachLineBox(this);
 }
 
-void InlineFlowBox::adjustPosition(float dx, float dy)
+void InlineFlowBox::adjustPosition(FloatWillBeLayoutUnit dx, FloatWillBeLayoutUnit dy)
 {
     InlineBox::adjustPosition(dx, dy);
     for (InlineBox* child = firstChild(); child; child = child->nextOnLine())
@@ -359,16 +360,16 @@ void InlineFlowBox::determineSpacingForFlowBoxes(bool lastLine, bool isLogically
     }
 }
 
-float InlineFlowBox::placeBoxesInInlineDirection(float logicalLeft, bool& needsWordSpacing)
+FloatWillBeLayoutUnit InlineFlowBox::placeBoxesInInlineDirection(FloatWillBeLayoutUnit logicalLeft, bool& needsWordSpacing)
 {
     // Set our x position.
     beginPlacingBoxRangesInInlineDirection(logicalLeft);
 
-    float startLogicalLeft = logicalLeft;
+    FloatWillBeLayoutUnit startLogicalLeft = logicalLeft;
     logicalLeft += borderLogicalLeft() + paddingLogicalLeft();
 
-    float minLogicalLeft = startLogicalLeft;
-    float maxLogicalRight = logicalLeft;
+    FloatWillBeLayoutUnit minLogicalLeft = startLogicalLeft;
+    FloatWillBeLayoutUnit maxLogicalRight = logicalLeft;
 
     placeBoxRangeInInlineDirection(firstChild(), 0, logicalLeft, minLogicalLeft, maxLogicalRight, needsWordSpacing);
 
@@ -377,14 +378,14 @@ float InlineFlowBox::placeBoxesInInlineDirection(float logicalLeft, bool& needsW
     return logicalLeft;
 }
 
-float InlineFlowBox::placeBoxRangeInInlineDirection(InlineBox* firstChild, InlineBox* lastChild,
-    float& logicalLeft, float& minLogicalLeft, float& maxLogicalRight, bool& needsWordSpacing)
+FloatWillBeLayoutUnit InlineFlowBox::placeBoxRangeInInlineDirection(InlineBox* firstChild, InlineBox* lastChild,
+    FloatWillBeLayoutUnit& logicalLeft, FloatWillBeLayoutUnit& minLogicalLeft, FloatWillBeLayoutUnit& maxLogicalRight, bool& needsWordSpacing)
 {
     for (InlineBox* curr = firstChild; curr && curr != lastChild; curr = curr->nextOnLine()) {
         if (curr->renderer().isText()) {
             InlineTextBox* text = toInlineTextBox(curr);
             RenderText& rt = text->renderer();
-            float space = 0;
+            FloatWillBeLayoutUnit space;
             if (rt.textLength()) {
                 if (needsWordSpacing && isSpaceOrNewline(rt.characterAt(text->start())))
                     space = rt.style(isFirstLineStyle())->font().fontDescription().wordSpacing();
@@ -743,7 +744,7 @@ void InlineFlowBox::placeBoxesInBlockDirection(LayoutUnit top, LayoutUnit maxHei
     }
 }
 
-void InlineFlowBox::computeMaxLogicalTop(float& maxLogicalTop) const
+void InlineFlowBox::computeMaxLogicalTop(FloatWillBeLayoutUnit& maxLogicalTop) const
 {
     for (InlineBox* curr = firstChild(); curr; curr = curr->nextOnLine()) {
         if (curr->renderer().isOutOfFlowPositioned())
@@ -752,11 +753,11 @@ void InlineFlowBox::computeMaxLogicalTop(float& maxLogicalTop) const
         if (descendantsHaveSameLineHeightAndBaseline())
             continue;
 
-        maxLogicalTop = std::max<float>(maxLogicalTop, curr->y());
-        float localMaxLogicalTop = 0;
+        maxLogicalTop = std::max<FloatWillBeLayoutUnit>(maxLogicalTop, curr->y());
+        FloatWillBeLayoutUnit localMaxLogicalTop;
         if (curr->isInlineFlowBox())
             toInlineFlowBox(curr)->computeMaxLogicalTop(localMaxLogicalTop);
-        maxLogicalTop = std::max<float>(maxLogicalTop, localMaxLogicalTop);
+        maxLogicalTop = std::max<FloatWillBeLayoutUnit>(maxLogicalTop, localMaxLogicalTop);
     }
 }
 
@@ -783,30 +784,19 @@ inline void InlineFlowBox::addBoxShadowVisualOverflow(LayoutRect& logicalVisualO
         return;
 
     RenderStyle* style = renderer().style(isFirstLineStyle());
-    if (!style->boxShadow())
+    WritingMode writingMode = style->writingMode();
+    ShadowList* boxShadow = style->boxShadow();
+    if (!boxShadow)
         return;
 
-    LayoutUnit boxShadowLogicalTop;
-    LayoutUnit boxShadowLogicalBottom;
-    style->getBoxShadowBlockDirectionExtent(boxShadowLogicalTop, boxShadowLogicalBottom);
-
+    LayoutRectOutsets outsets(boxShadow->rectOutsetsIncludingOriginal());
     // Similar to how glyph overflow works, if our lines are flipped, then it's actually the opposite shadow that applies, since
     // the line is "upside down" in terms of block coordinates.
-    LayoutUnit shadowLogicalTop = style->isFlippedLinesWritingMode() ? -boxShadowLogicalBottom : boxShadowLogicalTop;
-    LayoutUnit shadowLogicalBottom = style->isFlippedLinesWritingMode() ? -boxShadowLogicalTop : boxShadowLogicalBottom;
+    LayoutRectOutsets logicalOutsets(outsets.logicalOutsetsWithFlippedLines(writingMode));
 
-    LayoutUnit logicalTopVisualOverflow = std::min(pixelSnappedLogicalTop() + shadowLogicalTop, logicalVisualOverflow.y());
-    LayoutUnit logicalBottomVisualOverflow = std::max(pixelSnappedLogicalBottom() + shadowLogicalBottom, logicalVisualOverflow.maxY());
-
-    LayoutUnit boxShadowLogicalLeft;
-    LayoutUnit boxShadowLogicalRight;
-    style->getBoxShadowInlineDirectionExtent(boxShadowLogicalLeft, boxShadowLogicalRight);
-
-    LayoutUnit logicalLeftVisualOverflow = std::min(pixelSnappedLogicalLeft() + boxShadowLogicalLeft, logicalVisualOverflow.x());
-    LayoutUnit logicalRightVisualOverflow = std::max(pixelSnappedLogicalRight() + boxShadowLogicalRight, logicalVisualOverflow.maxX());
-
-    logicalVisualOverflow = LayoutRect(logicalLeftVisualOverflow, logicalTopVisualOverflow,
-                                       logicalRightVisualOverflow - logicalLeftVisualOverflow, logicalBottomVisualOverflow - logicalTopVisualOverflow);
+    LayoutRect shadowBounds(logicalFrameRect().toLayoutRect());
+    shadowBounds.expand(logicalOutsets);
+    logicalVisualOverflow.unite(shadowBounds);
 }
 
 inline void InlineFlowBox::addBorderOutsetVisualOverflow(LayoutRect& logicalVisualOverflow)
@@ -819,29 +809,18 @@ inline void InlineFlowBox::addBorderOutsetVisualOverflow(LayoutRect& logicalVisu
     if (!style->hasBorderImageOutsets())
         return;
 
-    LayoutBoxExtent borderOutsets = style->borderImageOutsets();
-
-    LayoutUnit borderOutsetLogicalTop = borderOutsets.logicalTop(style->writingMode());
-    LayoutUnit borderOutsetLogicalBottom = borderOutsets.logicalBottom(style->writingMode());
-    LayoutUnit borderOutsetLogicalLeft = borderOutsets.logicalLeft(style->writingMode());
-    LayoutUnit borderOutsetLogicalRight = borderOutsets.logicalRight(style->writingMode());
-
     // Similar to how glyph overflow works, if our lines are flipped, then it's actually the opposite border that applies, since
     // the line is "upside down" in terms of block coordinates. vertical-rl and horizontal-bt are the flipped line modes.
-    LayoutUnit outsetLogicalTop = style->isFlippedLinesWritingMode() ? borderOutsetLogicalBottom : borderOutsetLogicalTop;
-    LayoutUnit outsetLogicalBottom = style->isFlippedLinesWritingMode() ? borderOutsetLogicalTop : borderOutsetLogicalBottom;
+    LayoutRectOutsets logicalOutsets = style->borderImageOutsets().logicalOutsetsWithFlippedLines(style->writingMode());
 
-    LayoutUnit logicalTopVisualOverflow = std::min(pixelSnappedLogicalTop() - outsetLogicalTop, logicalVisualOverflow.y());
-    LayoutUnit logicalBottomVisualOverflow = std::max(pixelSnappedLogicalBottom() + outsetLogicalBottom, logicalVisualOverflow.maxY());
+    if (!includeLogicalLeftEdge())
+        logicalOutsets.setLeft(LayoutUnit());
+    if (!includeLogicalRightEdge())
+        logicalOutsets.setRight(LayoutUnit());
 
-    LayoutUnit outsetLogicalLeft = includeLogicalLeftEdge() ? borderOutsetLogicalLeft : LayoutUnit();
-    LayoutUnit outsetLogicalRight = includeLogicalRightEdge() ? borderOutsetLogicalRight : LayoutUnit();
-
-    LayoutUnit logicalLeftVisualOverflow = std::min(pixelSnappedLogicalLeft() - outsetLogicalLeft, logicalVisualOverflow.x());
-    LayoutUnit logicalRightVisualOverflow = std::max(pixelSnappedLogicalRight() + outsetLogicalRight, logicalVisualOverflow.maxX());
-
-    logicalVisualOverflow = LayoutRect(logicalLeftVisualOverflow, logicalTopVisualOverflow,
-                                       logicalRightVisualOverflow - logicalLeftVisualOverflow, logicalBottomVisualOverflow - logicalTopVisualOverflow);
+    LayoutRect borderOutsetBounds(logicalFrameRect().toLayoutRect());
+    borderOutsetBounds.expand(logicalOutsets);
+    logicalVisualOverflow.unite(borderOutsetBounds);
 }
 
 inline void InlineFlowBox::addOutlineVisualOverflow(LayoutRect& logicalVisualOverflow)
@@ -892,17 +871,19 @@ inline void InlineFlowBox::addTextBoxVisualOverflow(InlineTextBox* textBox, Glyp
     // applied to the right, so this is not an issue with left overflow.
     rightGlyphOverflow -= std::min(0, (int)style->font().fontDescription().letterSpacing());
 
-    LayoutUnit textShadowLogicalTop;
-    LayoutUnit textShadowLogicalBottom;
-    style->getTextShadowBlockDirectionExtent(textShadowLogicalTop, textShadowLogicalBottom);
+    LayoutRectOutsets textShadowLogicalOutsets;
+    if (ShadowList* textShadow = style->textShadow())
+        textShadowLogicalOutsets = LayoutRectOutsets(textShadow->rectOutsetsIncludingOriginal()).logicalOutsets(style->writingMode());
+
+    // FIXME: This code currently uses negative values for expansion of the top
+    // and left edges. This should be cleaned up.
+    LayoutUnit textShadowLogicalTop = -textShadowLogicalOutsets.top();
+    LayoutUnit textShadowLogicalBottom = textShadowLogicalOutsets.bottom();
+    LayoutUnit textShadowLogicalLeft = -textShadowLogicalOutsets.left();
+    LayoutUnit textShadowLogicalRight = textShadowLogicalOutsets.right();
 
     LayoutUnit childOverflowLogicalTop = std::min<LayoutUnit>(textShadowLogicalTop + topGlyphOverflow, topGlyphOverflow);
     LayoutUnit childOverflowLogicalBottom = std::max<LayoutUnit>(textShadowLogicalBottom + bottomGlyphOverflow, bottomGlyphOverflow);
-
-    LayoutUnit textShadowLogicalLeft;
-    LayoutUnit textShadowLogicalRight;
-    style->getTextShadowInlineDirectionExtent(textShadowLogicalLeft, textShadowLogicalRight);
-
     LayoutUnit childOverflowLogicalLeft = std::min<LayoutUnit>(textShadowLogicalLeft + leftGlyphOverflow, leftGlyphOverflow);
     LayoutUnit childOverflowLogicalRight = std::max<LayoutUnit>(textShadowLogicalRight + rightGlyphOverflow, rightGlyphOverflow);
 
@@ -1097,7 +1078,7 @@ bool InlineFlowBox::nodeAtPoint(const HitTestRequest& request, HitTestResult& re
     return false;
 }
 
-void InlineFlowBox::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset, LayoutUnit lineTop, LayoutUnit lineBottom)
+void InlineFlowBox::paint(const PaintInfo& paintInfo, const LayoutPoint& paintOffset, LayoutUnit lineTop, LayoutUnit lineBottom)
 {
     InlineFlowBoxPainter(*this).paint(paintInfo, paintOffset, lineTop, lineBottom);
 }
@@ -1141,9 +1122,9 @@ bool InlineFlowBox::canAccommodateEllipsis(bool ltr, int blockEdge, int ellipsis
     return true;
 }
 
-float InlineFlowBox::placeEllipsisBox(bool ltr, float blockLeftEdge, float blockRightEdge, float ellipsisWidth, float &truncatedWidth, bool& foundBox)
+FloatWillBeLayoutUnit InlineFlowBox::placeEllipsisBox(bool ltr, FloatWillBeLayoutUnit blockLeftEdge, FloatWillBeLayoutUnit blockRightEdge, FloatWillBeLayoutUnit ellipsisWidth, FloatWillBeLayoutUnit &truncatedWidth, bool& foundBox)
 {
-    float result = -1;
+    FloatWillBeLayoutUnit result = -1;
     // We iterate over all children, the foundBox variable tells us when we've found the
     // box containing the ellipsis.  All boxes after that one in the flow are hidden.
     // If our flow is ltr then iterate over the boxes from left to right, otherwise iterate

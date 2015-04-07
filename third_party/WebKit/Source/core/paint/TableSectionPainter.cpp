@@ -5,10 +5,13 @@
 #include "config.h"
 #include "core/paint/TableSectionPainter.h"
 
+#include "core/paint/BoxClipper.h"
+#include "core/paint/GraphicsContextAnnotator.h"
+#include "core/paint/ObjectPainter.h"
+#include "core/paint/RenderDrawingRecorder.h"
+#include "core/paint/TableCellPainter.h"
 #include "core/paint/TableRowPainter.h"
-#include "core/rendering/GraphicsContextAnnotator.h"
 #include "core/rendering/PaintInfo.h"
-#include "core/rendering/RenderBoxClipper.h"
 #include "core/rendering/RenderTable.h"
 #include "core/rendering/RenderTableCell.h"
 #include "core/rendering/RenderTableCol.h"
@@ -16,7 +19,7 @@
 
 namespace blink {
 
-void TableSectionPainter::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+void TableSectionPainter::paint(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
     ANNOTATE_GRAPHICS_CONTEXT(paintInfo, &m_renderTableSection);
 
@@ -32,14 +35,13 @@ void TableSectionPainter::paint(PaintInfo& paintInfo, const LayoutPoint& paintOf
         return;
 
     LayoutPoint adjustedPaintOffset = paintOffset + m_renderTableSection.location();
-
     {
-        RenderBoxClipper boxClipper(m_renderTableSection, paintInfo, adjustedPaintOffset, ForceContentsClip);
+        BoxClipper boxClipper(m_renderTableSection, paintInfo, adjustedPaintOffset, ForceContentsClip);
         paintObject(paintInfo, adjustedPaintOffset);
     }
 
     if ((paintInfo.phase == PaintPhaseOutline || paintInfo.phase == PaintPhaseSelfOutline) && m_renderTableSection.style()->visibility() == VISIBLE)
-        m_renderTableSection.paintOutline(paintInfo, LayoutRect(adjustedPaintOffset, m_renderTableSection.size()));
+        ObjectPainter(m_renderTableSection).paintOutline(paintInfo, LayoutRect(adjustedPaintOffset, m_renderTableSection.size()));
 }
 
 static inline bool compareCellPositions(RenderTableCell* elem1, RenderTableCell* elem2)
@@ -57,7 +59,7 @@ static inline bool compareCellPositionsWithOverflowingCells(RenderTableCell* ele
     return elem1->col() < elem2->col();
 }
 
-void TableSectionPainter::paintObject(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+void TableSectionPainter::paintObject(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
     LayoutRect localPaintInvalidationRect = paintInfo.rect;
     localPaintInvalidationRect.moveBy(-paintOffset);
@@ -82,7 +84,7 @@ void TableSectionPainter::paintObject(PaintInfo& paintInfo, const LayoutPoint& p
                         if (!cell || (row > dirtiedRows.start() && m_renderTableSection.primaryCellAt(row - 1, col) == cell) || (col > dirtiedColumns.start() && m_renderTableSection.primaryCellAt(row, col - 1) == cell))
                             continue;
                         LayoutPoint cellPoint = m_renderTableSection.flipForWritingModeForChild(cell, paintOffset);
-                        cell->paintCollapsedBorders(paintInfo, cellPoint);
+                        TableCellPainter(*cell).paintCollapsedBorders(paintInfo, cellPoint);
                     }
                 }
             } else {
@@ -145,7 +147,7 @@ void TableSectionPainter::paintObject(PaintInfo& paintInfo, const LayoutPoint& p
             if (paintInfo.phase == PaintPhaseCollapsedTableBorders) {
                 for (unsigned i = cells.size(); i > 0; --i) {
                     LayoutPoint cellPoint = m_renderTableSection.flipForWritingModeForChild(cells[i - 1], paintOffset);
-                    cells[i - 1]->paintCollapsedBorders(paintInfo, cellPoint);
+                    TableCellPainter(*cells[i - 1]).paintCollapsedBorders(paintInfo, cellPoint);
                 }
             } else {
                 for (unsigned i = 0; i < cells.size(); ++i)
@@ -155,7 +157,7 @@ void TableSectionPainter::paintObject(PaintInfo& paintInfo, const LayoutPoint& p
     }
 }
 
-void TableSectionPainter::paintCell(RenderTableCell* cell, PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+void TableSectionPainter::paintCell(RenderTableCell* cell, const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
     LayoutPoint cellPoint = m_renderTableSection.flipForWritingModeForChild(cell, paintOffset);
     PaintPhase paintPhase = paintInfo.phase;
@@ -167,21 +169,26 @@ void TableSectionPainter::paintCell(RenderTableCell* cell, PaintInfo& paintInfo,
         RenderTableCol* column = m_renderTableSection.table()->colElement(cell->col());
         RenderTableCol* columnGroup = column ? column->enclosingColumnGroup() : 0;
 
-        // Column groups and columns first.
-        // FIXME: Columns and column groups do not currently support opacity, and they are being painted "too late" in
-        // the stack, since we have already opened a transparency layer (potentially) for the table row group.
-        // Note that we deliberately ignore whether or not the cell has a layer, since these backgrounds paint "behind" the
-        // cell.
-        cell->paintBackgroundsBehindCell(paintInfo, cellPoint, columnGroup);
-        cell->paintBackgroundsBehindCell(paintInfo, cellPoint, column);
+        TableCellPainter tableCellPainter(*cell);
 
-        // Paint the row group next.
-        cell->paintBackgroundsBehindCell(paintInfo, cellPoint, &m_renderTableSection);
+        RenderDrawingRecorder recorder(paintInfo.context, m_renderTableSection, paintPhase, tableCellPainter.paintBounds(paintOffset, TableCellPainter::AddOffsetFromParent));
+        if (!recorder.canUseCachedDrawing()) {
+            // Column groups and columns first.
+            // FIXME: Columns and column groups do not currently support opacity, and they are being painted "too late" in
+            // the stack, since we have already opened a transparency layer (potentially) for the table row group.
+            // Note that we deliberately ignore whether or not the cell has a layer, since these backgrounds paint "behind" the
+            // cell.
+            tableCellPainter.paintBackgroundsBehindCell(paintInfo, cellPoint, columnGroup);
+            tableCellPainter.paintBackgroundsBehindCell(paintInfo, cellPoint, column);
 
-        // Paint the row next, but only if it doesn't have a layer. If a row has a layer, it will be responsible for
-        // painting the row background for the cell.
-        if (!row->hasSelfPaintingLayer())
-            cell->paintBackgroundsBehindCell(paintInfo, cellPoint, row);
+            // Paint the row group next.
+            tableCellPainter.paintBackgroundsBehindCell(paintInfo, cellPoint, &m_renderTableSection);
+
+            // Paint the row next, but only if it doesn't have a layer. If a row has a layer, it will be responsible for
+            // painting the row background for the cell.
+            if (!row->hasSelfPaintingLayer())
+                tableCellPainter.paintBackgroundsBehindCell(paintInfo, cellPoint, row);
+        }
     }
     if ((!cell->hasSelfPaintingLayer() && !row->hasSelfPaintingLayer()))
         cell->paint(paintInfo, cellPoint);

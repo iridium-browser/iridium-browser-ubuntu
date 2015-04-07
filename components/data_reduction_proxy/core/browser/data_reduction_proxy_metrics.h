@@ -8,6 +8,7 @@
 #include "base/time/time.h"
 
 namespace net {
+class ProxyConfig;
 class URLRequest;
 }
 
@@ -15,6 +16,7 @@ class PrefService;
 
 namespace data_reduction_proxy {
 
+class DataReductionProxyParams;
 class DataReductionProxyStatisticsPrefs;
 
 enum DataReductionProxyRequestType {
@@ -31,7 +33,9 @@ enum DataReductionProxyRequestType {
 
 // Returns DataReductionProxyRequestType for |request|.
 DataReductionProxyRequestType GetDataReductionProxyRequestType(
-    const net::URLRequest* request);
+    const net::URLRequest& request,
+    const net::ProxyConfig& data_reduction_proxy_config,
+    const DataReductionProxyParams& params);
 
 // Returns |received_content_length| as adjusted original content length if
 // |original_content_length| has the invalid value (-1) or |request_type|
@@ -49,14 +53,6 @@ void UpdateContentLengthPrefsForDataReductionProxy(
     bool with_data_reduction_proxy_enabled,
     DataReductionProxyRequestType request_type,
     base::Time now,
-    DataReductionProxyStatisticsPrefs* prefs);
-
-// Records daily data savings statistics to prefs and reports data savings UMA.
-void UpdateContentLengthPrefs(
-    int received_content_length,
-    int original_content_length,
-    PrefService* profile_prefs,
-    DataReductionProxyRequestType request_type,
     DataReductionProxyStatisticsPrefs* prefs);
 
 }  // namespace data_reduction_proxy

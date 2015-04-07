@@ -8,8 +8,10 @@
 #include "chrome/browser/ui/global_error/global_error.h"
 #include "chrome/browser/ui/global_error/global_error_service.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
+#include "chrome/browser/ui/views/elevation_icon_setter.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
+#include "chrome/browser/ui/views/toolbar/wrench_toolbar_button.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
 #include "ui/views/controls/button/label_button.h"
@@ -97,6 +99,8 @@ GlobalErrorBubbleView::GlobalErrorBubbleView(
   accept_button->SetStyle(views::Button::STYLE_BUTTON);
   accept_button->SetIsDefault(true);
   accept_button->set_tag(TAG_ACCEPT_BUTTON);
+  if (error_->ShouldAddElevationIconToAcceptButton())
+    elevation_icon_setter_.reset(new ElevationIconSetter(accept_button.get()));
 
   base::string16 cancel_string(error_->GetBubbleViewCancelButtonLabel());
   scoped_ptr<views::LabelButton> cancel_button;
@@ -164,6 +168,9 @@ GlobalErrorBubbleView::GlobalErrorBubbleView(
 }
 
 GlobalErrorBubbleView::~GlobalErrorBubbleView() {
+  // |elevation_icon_setter_| references |accept_button_|, so make sure it is
+  // destroyed before |accept_button_|.
+  elevation_icon_setter_.reset();
 }
 
 void GlobalErrorBubbleView::ButtonPressed(views::Button* sender,

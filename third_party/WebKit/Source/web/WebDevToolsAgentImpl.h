@@ -69,7 +69,7 @@ public:
     // WebDevToolsAgentPrivate implementation.
     virtual void didCreateScriptContext(WebLocalFrameImpl*, int worldId) override;
     virtual bool handleInputEvent(Page*, const WebInputEvent&) override;
-    virtual void didLayout() override;
+    virtual void willLayout() override;
 
     // WebDevToolsAgent implementation.
     virtual void attach(const WebString& hostId) override;
@@ -148,7 +148,7 @@ private:
     OwnPtr<IntPoint> m_lastPinchAnchorCss;
     OwnPtr<IntPoint> m_lastPinchAnchorDip;
 
-    typedef Vector<RefPtr<JSONObject> > FrontendMessageQueue;
+    typedef Vector<RefPtr<JSONObject>> FrontendMessageQueue;
     FrontendMessageQueue m_frontendMessageQueue;
 };
 

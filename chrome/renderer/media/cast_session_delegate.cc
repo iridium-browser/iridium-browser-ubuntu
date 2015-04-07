@@ -100,8 +100,10 @@ void CastSessionDelegate::StartUDP(const net::IPEndPoint& remote_endpoint,
   // Rationale for using unretained: The callback cannot be called after the
   // destruction of CastTransportSenderIPC, and they both share the same thread.
   cast_transport_.reset(new CastTransportSenderIPC(
+      net::IPEndPoint(),
       remote_endpoint,
       options.Pass(),
+      media::cast::PacketReceiverCallback(),
       base::Bind(&CastSessionDelegate::StatusNotificationCB,
                  base::Unretained(this)),
       base::Bind(&CastSessionDelegate::LogRawEvents, base::Unretained(this))));
@@ -164,7 +166,7 @@ void CastSessionDelegate::GetEventLogsAndReset(
                                               &output_bytes);
 
   if (!success) {
-    VLOG(2) << "Failed to serialize event log.";
+    DVLOG(2) << "Failed to serialize event log.";
     callback.Run(make_scoped_ptr(new base::BinaryValue).Pass());
     return;
   }

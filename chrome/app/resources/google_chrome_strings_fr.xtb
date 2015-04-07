@@ -48,6 +48,7 @@ Certaines fonctionnalités ne seront peut-être pas disponibles, et les modifica
 <translation id="568643307450491754">Retrouvez vos favoris dans le menu Chrome ou dans la barre de favoris.</translation>
 <translation id="8556340503434111824">Une nouvelle version de Google Chrome encore plus rapide est disponible.</translation>
 <translation id="8987477933582888019">Navigateur Web</translation>
+<translation id="3749644715096758981">Chrome n'a pas pu être mis à jour. Vous ne disposez donc pas des nouvelles fonctionnalités et des correctifs de sécurité. Vous devez mettre à jour Chrome.</translation>
 <translation id="4728575227883772061">Échec de l'installation suite à une erreur non spécifiée. Si Google Chrome est en cours d'exécution, fermez-le puis réessayez.</translation>
 <translation id="3080151273017101988">Poursuivre l'exécution d'applications en arrière-plan après la fermeture de Google Chrome</translation>
 <translation id="4149882025268051530">Échec de la décompression de l'archive par le programme d'installation. Veuillez télécharger de nouveau Google Chrome.</translation>
@@ -88,6 +89,7 @@ Certaines fonctionnalités ne seront peut-être pas disponibles, et les modifica
 <translation id="225614027745146050">Bienvenue</translation>
 <translation id="7473891865547856676">Non, merci</translation>
 <translation id="3149510190863420837">Applications Chrome</translation>
+<translation id="8851136666856101339">principal</translation>
 <translation id="7473136999113284234">Chrome est automatiquement mis à jour pour vous permettre de toujours disposer de la dernière version.</translation>
 <translation id="7084448929020576097">Le fichier &quot;<ph name="FILE_NAME"/>&quot; a été bloqué dans Chrome, car son contenu est malveillant.</translation>
 <translation id="6368958679917195344">Google Chrome OS fonctionne grâce à d'autres <ph name="BEGIN_LINK_CROS_OSS"/>logiciels Open Source<ph name="END_LINK_CROS_OSS"/>.</translation>
@@ -134,7 +136,7 @@ Si vous vous connectez quand même, toutes les informations Chrome, comme les fa
 <translation id="9107728822479888688"><ph name="BEGIN_BOLD"/>Avertissement<ph name="END_BOLD"/> : Google Chrome ne peut pas empêcher les extensions d'enregistrer votre historique de navigation. Pour désactiver cette extension en mode navigation privée, désélectionnez-la.</translation>
 <translation id="7808348361785373670">Supprimer de Chrome</translation>
 <translation id="1759842336958782510">Chrome</translation>
-<translation id="5563479599352954471">Rechercher en appuyant une seul fois</translation>
+<translation id="5563479599352954471">Rechercher en un clic</translation>
 <translation id="2664962310688259219">Licences Chrome OS Open Source</translation>
 <translation id="6341737370356890233">Accédez au
         menu Chrome &gt;
@@ -151,7 +153,6 @@ Si vous vous connectez quand même, toutes les informations Chrome, comme les fa
 <translation id="5855036575689098185">Le logiciel exécuté sur votre ordinateur n'est pas compatible avec Google Chrome.</translation>
 <translation id="7164397146364144019">Vous pouvez nous aider à rendre Chrome plus sûr et plus facile à utiliser en nous signalant automatiquement les incidents de sécurité potentiels.</translation>
 <translation id="8008534537613507642">Réinstaller Chrome</translation>
-<translation id="2044287590254833138">Barre d'outils de Google Chrome</translation>
 <translation id="8862326446509486874">Vous ne disposez pas des droits requis pour installer la version système. Relancez l'installation en vous connectant comme administrateur.</translation>
 <translation id="2874156562296220396">Google Chrome fonctionne grâce au projet Open Source <ph name="BEGIN_LINK_CHROMIUM"/>Chromium<ph name="END_LINK_CHROMIUM"/> et à d'autres <ph name="BEGIN_LINK_OSS"/>logiciels libres<ph name="END_LINK_OSS"/>.</translation>
 <translation id="7191567847629796517">Google Chrome OS ne permet pas le lancement d'une application externe pour gérer les liens <ph name="SCHEME"/>. Le lien demandé est <ph name="PROTOLINK"/>.</translation>
@@ -163,6 +164,7 @@ Si vous vous connectez quand même, toutes les informations Chrome, comme les fa
 <translation id="2290095356545025170">Voulez-vous vraiment désinstaller Google Chrome ?</translation>
 <translation id="7062966102157262887">Un téléchargement est actuellement en cours. Voulez-vous quitter Google Chrome et annuler le téléchargement ?</translation>
 <translation id="4273752058983339720">Google Chrome est configuré de façon à être lancé automatiquement lorsque vous démarrez votre ordinateur.</translation>
+<translation id="2316129865977710310">Non merci</translation>
 <translation id="415994390253732730">Le fonctionnement de Chrome vous semble étrange ?</translation>
 <translation id="1104959162601287462">À propos de &amp;Chrome OS</translation>
 <translation id="5328989068199000832">Google Chrome Binaries</translation>
@@ -265,6 +267,7 @@ Si vous vous connectez quand même, toutes les informations Chrome, comme les fa
 <translation id="6626317981028933585">Vos paramètres Mozilla Firefox ne sont pas disponibles pendant l'utilisation de ce navigateur. Pour importer ces paramètres vers Google Chrome, enregistrez votre travail et fermez toutes les fenêtres Firefox. Ensuite, cliquez pour continuer.</translation>
 <translation id="7242029209006116544">Vous vous connectez avec un compte géré et donnez le contrôle de votre profil Google Chrome à son administrateur. Vos données Chrome, telles que les applications, les favoris, l'historique, les mots de passe et les autres paramètres, vont être définitivement associées à <ph name="USER_NAME"/>. Vous pouvez supprimer ces données via le tableau de bord des comptes Google, mais vous ne pouvez pas les associer à un autre compte. Vous pouvez éventuellement créer un nouveau profil pour maintenir vos données Chrome séparées. <ph name="LEARN_MORE"/></translation>
 <translation id="5386244825306882791">Elle contrôle également la page qui s'affiche au démarrage de Chrome ou lorsque vous effectuez une recherche dans l'omnibox.</translation>
+<translation id="1553358976309200471">Mettre à jour Chrome</translation>
 <translation id="8540666473246803645">Google Chrome</translation>
 <translation id="2334084861041072223">Copyright Google Inc. <ph name="YEAR"/>. Tous droits réservés.</translation>
 <translation id="1698376642261615901">Google Chrome est un navigateur Web qui exécute des applications et des pages Web en un temps record. Il est rapide, stable et simple à utiliser. Naviguez sur Internet en toute sécurité grâce à la protection intégrée de Google Chrome contre le phishing et les logiciels malveillants.</translation>

@@ -10,9 +10,6 @@
 *.pyc
 *.pyo
 
-# Ignore all hidden files
-.*
-
 # Ignore all directories than contain these names
 toolchain/
 

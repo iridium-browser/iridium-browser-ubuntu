@@ -58,9 +58,9 @@ static bool stream_equals(const SkDynamicMemoryWStream& stream, size_t offset,
 static bool stream_contains(const SkDynamicMemoryWStream& stream,
                             const char* buffer) {
     SkAutoDataUnref data(stream.copyToData());
-    int len = strlen(buffer);  // our buffer does not have EOSs.
+    size_t len = strlen(buffer);  // our buffer does not have EOSs.
 
-    for (int offset = 0 ; offset < (int)data->size() - len; offset++) {
+    for (size_t offset = 0 ; offset < data->size() - len; offset++) {
         if (memcmp(data->bytes() + offset, buffer, len) == 0) {
             return true;
         }
@@ -443,12 +443,8 @@ public:
         *result = src;
         return true;
     }
+    SK_TO_STRING_OVERRIDE()
     SK_DECLARE_PUBLIC_FLATTENABLE_DESERIALIZATION_PROCS(DummyImageFilter)
-#ifdef SK_SUPPORT_LEGACY_DEEPFLATTENING
-    explicit DummyImageFilter(SkReadBuffer& buffer) : SkImageFilter(0, NULL) {
-        fVisited = buffer.readBool();
-    }
-#endif
     bool visited() const { return fVisited; }
 
 private:
@@ -460,6 +456,13 @@ SkFlattenable* DummyImageFilter::CreateProc(SkReadBuffer& buffer) {
     bool visited = buffer.readBool();
     return SkNEW_ARGS(DummyImageFilter, (visited));
 }
+
+#ifndef SK_IGNORE_TO_STRING
+void DummyImageFilter::toString(SkString* str) const {
+    str->appendf("DummyImageFilter: (");
+    str->append(")");
+}
+#endif
 
 };
 

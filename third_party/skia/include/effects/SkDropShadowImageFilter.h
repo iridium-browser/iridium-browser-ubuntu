@@ -13,8 +13,12 @@ class SK_API SkDropShadowImageFilter : public SkImageFilter {
 public:
     enum ShadowMode {
         kDrawShadowAndForeground_ShadowMode,
-        kDrawShadowOnly_ShadowMode
+        kDrawShadowOnly_ShadowMode,
+
+        kLast_ShadowMode = kDrawShadowOnly_ShadowMode
     };
+
+    static const int kShadowModeCount = kLast_ShadowMode+1;
 
     /** @deprecated use another Create function below instead */
     static SkDropShadowImageFilter* Create(SkScalar dx, SkScalar dy,
@@ -45,15 +49,13 @@ public:
     }
 
     virtual void computeFastBounds(const SkRect&, SkRect*) const SK_OVERRIDE;
+    SK_TO_STRING_OVERRIDE()
     SK_DECLARE_PUBLIC_FLATTENABLE_DESERIALIZATION_PROCS(SkDropShadowImageFilter)
 
 protected:
     SkDropShadowImageFilter(SkScalar dx, SkScalar dy, SkScalar sigmaX, SkScalar sigmaY, SkColor,
                             ShadowMode shadowMode, SkImageFilter* input, const CropRect* cropRect,
                             uint32_t uniqueID);
-#ifdef SK_SUPPORT_LEGACY_DEEPFLATTENING
-    explicit SkDropShadowImageFilter(SkReadBuffer&);
-#endif
     virtual void flatten(SkWriteBuffer&) const SK_OVERRIDE;
     virtual bool onFilterImage(Proxy*, const SkBitmap& source, const Context&, SkBitmap* result, SkIPoint* loc) const SK_OVERRIDE;
     virtual bool onFilterBounds(const SkIRect& src, const SkMatrix&,

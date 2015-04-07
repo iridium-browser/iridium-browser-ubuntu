@@ -45,6 +45,7 @@
 <translation id="568643307450491754">Намерете отметките си в менюто на Chrome или в лентата на отметките.</translation>
 <translation id="8556340503434111824">Налице е нова версия на Google Chrome, която е по-бърза от всякога.</translation>
 <translation id="8987477933582888019">Уеб браузър</translation>
+<translation id="3749644715096758981">Chrome не можа да се актуализира до най-новата версия, поради което ви липсват нови функции и поправки за сигурност. Трябва да актуализирате Chrome.</translation>
 <translation id="4728575227883772061">Инсталирането не бе успешно поради неизвестна грешка. Ако Google Chrome понастоящем работи, моля, затворете го и опитайте отново.</translation>
 <translation id="3080151273017101988">Изпълняване на приложения на заден план при затворен браузър Google Chrome</translation>
 <translation id="4149882025268051530">Инсталационната програма не успя да декомпресира архива. Моля, изтеглете Google Chrome отново.</translation>
@@ -57,7 +58,7 @@
 <translation id="127345590676626841">Chrome се актуализира автоматично, така че винаги да имате най-новата версия. Когато това изтегляне завърши, браузърът ще се рестартира и ще можете да започнете работа.</translation>
 <translation id="3738139272394829648">Търсене чрез докосване</translation>
 <translation id="8227755444512189073">Google Chrome трябва да стартира външно приложение, за да обработва връзки от тип <ph name="SCHEME"/>. Поисканата връзка е <ph name="PROTOLINK"/>.</translation>
-<translation id="8290100596633877290">Опа! Google Chrome претърпя срив. Да се стартира ли отново сега?</translation>
+<translation id="8290100596633877290">О, не! Google Chrome претърпя срив. Да се стартира ли отново сега?</translation>
 <translation id="1480489203462860648">Изпробвайте браузъра – вече е инсталиран</translation>
 <translation id="5204098752394657250"><ph name="TERMS_OF_SERVICE_LINK"/>Общи условия<ph name="END_TERMS_OF_SERVICE_LINK"/> на Google Chrome</translation>
 <translation id="4743926867934016338">Приемане и търсене</translation>
@@ -85,6 +86,7 @@
 <translation id="225614027745146050">Добре дошли</translation>
 <translation id="7473891865547856676">Не, благодаря</translation>
 <translation id="3149510190863420837">Приложения в Chrome</translation>
+<translation id="8851136666856101339">основен елемент</translation>
 <translation id="7473136999113284234">Chrome се актуализира автоматично, така че винаги да имате най-новата версия.</translation>
 <translation id="7084448929020576097">Файлът „<ph name="FILE_NAME"/>“ е злонамерен и е блокиран от Chrome.</translation>
 <translation id="6368958679917195344">Chrome OS е възможна благодарение на допълнителен <ph name="BEGIN_LINK_CROS_OSS"/>софтуер с отворен код<ph name="END_LINK_CROS_OSS"/>.</translation>
@@ -145,7 +147,6 @@
 <translation id="5855036575689098185">Софтуерът, изпълняван на компютъра ви, е несъвместим с Google Chrome.</translation>
 <translation id="7164397146364144019">Можете да ни помогнете да направим Chrome по-надежден и по-лесен за използване, като автоматично ни съобщавате подробности за инциденти, свързани със сигурността.</translation>
 <translation id="8008534537613507642">Повторно инсталиране на Chrome</translation>
-<translation id="2044287590254833138">Лента с инструменти на Google Chrome</translation>
 <translation id="8862326446509486874">Нямате подходящи права за инсталация на ниво система. Опитайте да стартирате отново инсталационната програма като администратор.</translation>
 <translation id="2874156562296220396">Google Chrome съществува благодарение на проекта с отворен код <ph name="BEGIN_LINK_CHROMIUM"/>Chromium<ph name="END_LINK_CHROMIUM"/> и други <ph name="BEGIN_LINK_OSS"/>софтуерни продукти с отворен код<ph name="END_LINK_OSS"/>.</translation>
 <translation id="7191567847629796517">Google Chrome OS не поддържа стартирането на външно приложение за обработване на връзки от тип „<ph name="SCHEME"/>“. Заявената връзка е „<ph name="PROTOLINK"/>“.</translation>
@@ -157,6 +158,7 @@
 <translation id="2290095356545025170">Наистина ли искате да деинсталирате Google Chrome?</translation>
 <translation id="7062966102157262887">Понастоящем се извършва изтегляне. Искате ли да излезете от Google Chrome и да го анулирате?</translation>
 <translation id="4273752058983339720">Google Chrome е конфигуриран да стартира автоматично, когато включите компютъра си.</translation>
+<translation id="2316129865977710310">Не, благодаря</translation>
 <translation id="415994390253732730">Chrome се държи странно?</translation>
 <translation id="1104959162601287462">Всичко за &amp;Chrome OS</translation>
 <translation id="5328989068199000832">Google Chrome Binaries</translation>
@@ -259,6 +261,7 @@
 <translation id="6626317981028933585">За съжаление настройките на Mozilla Firefox са недостъпни, докато този браузър работи. За да импортирате тези настройки в Google Chrome, запазете работата си и затворете всички прозорци на Firefox. След това кликнете върху „Напред”.</translation>
 <translation id="7242029209006116544">Влизате с управляван профил и давате на администратора му контрол над потребителския си профил в Google Chrome. Данните ви в браузъра, като например приложения, отметки, история, пароли и други настройки, ще се свържат за постоянно с/ъс <ph name="USER_NAME"/>. Ще можете да ги изтриете чрез таблото за управление на Google Профили, но не и да ги свържете с друг профил. По избор можете да създадете нов потребителски профил, за да отделите съществуващите си данни в Chrome. <ph name="LEARN_MORE"/></translation>
 <translation id="5386244825306882791">То също контролира коя страница се показва при стартиране на Chrome или при търсене от полето за всичко.</translation>
+<translation id="1553358976309200471">Актуализиране на Chrome</translation>
 <translation id="8540666473246803645">Google Chrome</translation>
 <translation id="2334084861041072223">Авторски права <ph name="YEAR"/> Google Inc. Всички права запазени.</translation>
 <translation id="1698376642261615901">Google Chrome е уеб браузър, който зарежда уеб страници и изпълнява приложения със светкавична скорост. Той е бърз, стабилен и лесен за употреба. Сърфирайте в мрежата по-безопасно с вградената защита на Google Chrome срещу злонамерен софтуер и фишинг.</translation>

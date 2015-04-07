@@ -54,7 +54,10 @@ connecting
 contextlost
 contextmenu
 contextrestored
+controllerchange
 copy
+crossoriginconnect
+crossoriginmessage
 cuechange
 cut
 datachannel
@@ -133,6 +136,8 @@ mousewheel
 mute
 negotiationneeded
 nomatch
+notificationclick
+notificationerror
 noupdate
 obsolete
 offline
@@ -152,7 +157,6 @@ popstate
 progress
 push
 ratechange
-ready
 readystatechange
 removesourcebuffer
 removestream

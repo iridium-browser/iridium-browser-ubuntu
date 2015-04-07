@@ -22,6 +22,7 @@
 #ifndef StyleResolver_h
 #define StyleResolver_h
 
+#include "core/css/ElementRuleCollector.h"
 #include "core/css/PseudoStyleRequest.h"
 #include "core/css/RuleFeature.h"
 #include "core/css/RuleSet.h"
@@ -30,7 +31,6 @@
 #include "core/css/SiblingTraversalStrategies.h"
 #include "core/css/TreeBoundaryCrossingRules.h"
 #include "core/css/resolver/MatchedPropertiesCache.h"
-#include "core/css/resolver/ScopedStyleResolver.h"
 #include "core/css/resolver/StyleBuilder.h"
 #include "core/css/resolver/StyleResourceLoader.h"
 #include "platform/heap/Handle.h"
@@ -50,15 +50,14 @@ class CSSValue;
 class ContainerNode;
 class Document;
 class Element;
-class ElementRuleCollector;
 class Interpolation;
 class MediaQueryEvaluator;
 class RuleData;
-class StyleKeyframe;
+class ScopedStyleResolver;
 class StylePropertySet;
 class StyleResolverStats;
 class StyleRule;
-class StyleRuleKeyframes;
+class StyleRuleKeyframe;
 class StyleRulePage;
 class ViewportStyleResolver;
 
@@ -106,7 +105,7 @@ public:
     PassRefPtr<RenderStyle> styleForElement(Element*, RenderStyle* parentStyle = 0, StyleSharingBehavior = AllowStyleSharing,
         RuleMatchingBehavior = MatchAllRules);
 
-    PassRefPtr<RenderStyle> styleForKeyframe(Element&, const RenderStyle&, RenderStyle* parentStyle, const StyleKeyframe*, const AtomicString& animationName);
+    PassRefPtr<RenderStyle> styleForKeyframe(Element&, const RenderStyle&, RenderStyle* parentStyle, const StyleRuleKeyframe*, const AtomicString& animationName);
     static PassRefPtrWillBeRawPtr<AnimatableValue> createAnimatableValueSnapshot(Element&, CSSPropertyID, CSSValue&);
     static PassRefPtrWillBeRawPtr<AnimatableValue> createAnimatableValueSnapshot(StyleResolverState&, CSSPropertyID, CSSValue&);
 
@@ -124,8 +123,6 @@ public:
     void resetAuthorStyle(TreeScope&);
     void finishAppendAuthorStyleSheets();
 
-    void processScopedRules(const RuleSet& authorRules, CSSStyleSheet*, unsigned sheetIndex, ContainerNode& scope);
-
     void lazyAppendAuthorStyleSheets(unsigned firstNew, const WillBeHeapVector<RefPtrWillBeMember<CSSStyleSheet> >&);
     void removePendingAuthorStyleSheets(const WillBeHeapVector<RefPtrWillBeMember<CSSStyleSheet> >&);
     void appendPendingAuthorStyleSheets();
@@ -133,7 +130,7 @@ public:
 
     SelectorFilter& selectorFilter() { return m_selectorFilter; }
 
-    void styleTreeResolveScopedKeyframesRules(const Element*, WillBeHeapVector<RawPtrWillBeMember<ScopedStyleResolver>, 8>&);
+    const StyleRuleKeyframes* findKeyframesRule(const Element*, const AtomicString& animationName);
 
     // These methods will give back the set of rules that matched for a given element (or a pseudo-element).
     enum CSSRuleFilter {
@@ -211,8 +208,9 @@ private:
     void loadPendingResources(StyleResolverState&);
     void adjustRenderStyle(StyleResolverState&, Element*);
 
-    void appendCSSStyleSheet(CSSStyleSheet*);
-    void addRulesFromSheet(CSSStyleSheet*, TreeScope*, unsigned);
+    void appendCSSStyleSheet(CSSStyleSheet&);
+    void addRulesFromSheet(CSSStyleSheet&, TreeScope*, unsigned);
+    void processScopedRules(const RuleSet& authorRules, CSSStyleSheet*, unsigned sheetIndex, ContainerNode& scope);
 
     void collectPseudoRulesForElement(Element*, ElementRuleCollector&, PseudoId, unsigned rulesToInclude);
     void matchRuleSet(ElementRuleCollector&, RuleSet*);
@@ -230,7 +228,6 @@ private:
     void applyCallbackSelectors(StyleResolverState&);
 
     void resolveScopedStyles(const Element*, WillBeHeapVector<RawPtrWillBeMember<ScopedStyleResolver>, 8>&);
-    void collectScopedResolversForHostedShadowTrees(const Element*, WillBeHeapVector<RawPtrWillBeMember<ScopedStyleResolver>, 8>&);
 
     enum StyleApplicationPass {
         HighPriorityProperties,
@@ -249,7 +246,7 @@ private:
     template <StyleApplicationPass pass>
     void applyAnimatedProperties(StyleResolverState&, const WillBeHeapHashMap<CSSPropertyID, RefPtrWillBeMember<Interpolation> >&);
     template <StyleResolver::StyleApplicationPass pass>
-    void applyAllProperty(StyleResolverState&, CSSValue*);
+    void applyAllProperty(StyleResolverState&, CSSValue*, bool inheritedOnly);
 
     void matchPageRules(MatchResult&, RuleSet*, bool isLeftPage, bool isFirstPage, const String& pageName);
     void matchPageRulesForList(WillBeHeapVector<RawPtrWillBeMember<StyleRulePage> >& matchedRules, const WillBeHeapVector<RawPtrWillBeMember<StyleRulePage> >&, bool isLeftPage, bool isFirstPage, const String& pageName);
@@ -262,11 +259,9 @@ private:
 
     bool pseudoStyleForElementInternal(Element&, const PseudoStyleRequest&, RenderStyle* parentStyle, StyleResolverState&);
 
-    Document& document() { return *m_document; }
+    PassRefPtrWillBeRawPtr<PseudoElement> createPseudoElement(Element* parent, PseudoId);
 
-    // FIXME: This likely belongs on RuleSet.
-    typedef WillBeHeapHashMap<StringImpl*, RefPtrWillBeMember<StyleRuleKeyframes> > KeyframesRuleMap;
-    KeyframesRuleMap m_keyframesRuleMap;
+    Document& document() { return *m_document; }
 
     static RenderStyle* s_styleNotYetAvailable;
 

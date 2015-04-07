@@ -10,9 +10,12 @@
     '../base/base.gyp:base',
     '../base/base.gyp:base_i18n',
     '../crypto/crypto.gyp:crypto',
+    '../mojo/mojo_base.gyp:mojo_environment_chromium',
+    '../mojo/mojo_edk.gyp:mojo_system_impl',
     '../ui/base/ui_base.gyp:ui_base',
     '../ui/gfx/gfx.gyp:gfx',
     '../ui/gfx/gfx.gyp:gfx_geometry',
+    'content_common_mojo_bindings.gyp:content_common_mojo_bindings',
   ],
   'sources': [
     'app/android/app_jni_registrar.cc',
@@ -46,6 +49,7 @@
       'dependencies': [
         'content.gyp:content_jni_headers',
         '../skia/skia.gyp:skia',
+        '../ui/android/ui_android.gyp:ui_android',
       ],
       'includes': [
         '../build/android/cpufeatures.gypi',
@@ -62,12 +66,6 @@
         'app/mojo/mojo_init.cc',
         'app/mojo/mojo_init.h',
       ],
-    }, {  # OS!="ios"
-      'dependencies': [
-        '../mojo/edk/mojo_edk.gyp:mojo_system_impl',
-        '../mojo/mojo_base.gyp:mojo_environment_chromium',
-        '../mojo/public/mojo_public.gyp:mojo_application_bindings',
-     ],
     }],
   ],
 }

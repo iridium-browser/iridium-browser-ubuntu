@@ -27,13 +27,16 @@ int16_t NumSamplesPerFrame(int num_channels,
 }
 }  // namespace
 
-AudioEncoderPcm::AudioEncoderPcm(const Config& config)
-    : num_channels_(config.num_channels),
+AudioEncoderPcm::AudioEncoderPcm(const Config& config, int sample_rate_hz)
+    : sample_rate_hz_(sample_rate_hz),
+      num_channels_(config.num_channels),
+      payload_type_(config.payload_type),
       num_10ms_frames_per_packet_(config.frame_size_ms / 10),
-      full_frame_samples_(NumSamplesPerFrame(num_channels_,
+      full_frame_samples_(NumSamplesPerFrame(config.num_channels,
                                              config.frame_size_ms,
-                                             kSampleRateHz)),
+                                             sample_rate_hz_)),
       first_timestamp_in_buffer_(0) {
+  CHECK_GT(sample_rate_hz, 0) << "Sample rate must be larger than 0 Hz";
   CHECK_EQ(config.frame_size_ms % 10, 0)
       << "Frame size must be an integer multiple of 10 ms.";
   speech_buffer_.reserve(full_frame_samples_);
@@ -43,7 +46,7 @@ AudioEncoderPcm::~AudioEncoderPcm() {
 }
 
 int AudioEncoderPcm::sample_rate_hz() const {
-  return kSampleRateHz;
+  return sample_rate_hz_;
 }
 int AudioEncoderPcm::num_channels() const {
   return num_channels_;
@@ -52,12 +55,15 @@ int AudioEncoderPcm::Num10MsFramesInNextPacket() const {
   return num_10ms_frames_per_packet_;
 }
 
-bool AudioEncoderPcm::Encode(uint32_t timestamp,
-                             const int16_t* audio,
-                             size_t max_encoded_bytes,
-                             uint8_t* encoded,
-                             size_t* encoded_bytes,
-                             uint32_t* encoded_timestamp) {
+int AudioEncoderPcm::Max10MsFramesInAPacket() const {
+  return num_10ms_frames_per_packet_;
+}
+
+bool AudioEncoderPcm::EncodeInternal(uint32_t timestamp,
+                                     const int16_t* audio,
+                                     size_t max_encoded_bytes,
+                                     uint8_t* encoded,
+                                     EncodedInfo* info) {
   const int num_samples = sample_rate_hz() / 100 * num_channels();
   if (speech_buffer_.empty()) {
     first_timestamp_in_buffer_ = timestamp;
@@ -66,16 +72,17 @@ bool AudioEncoderPcm::Encode(uint32_t timestamp,
     speech_buffer_.push_back(audio[i]);
   }
   if (speech_buffer_.size() < static_cast<size_t>(full_frame_samples_)) {
-    *encoded_bytes = 0;
+    info->encoded_bytes = 0;
     return true;
   }
   CHECK_EQ(speech_buffer_.size(), static_cast<size_t>(full_frame_samples_));
   int16_t ret = EncodeCall(&speech_buffer_[0], full_frame_samples_, encoded);
   speech_buffer_.clear();
-  *encoded_timestamp = first_timestamp_in_buffer_;
+  info->encoded_timestamp = first_timestamp_in_buffer_;
+  info->payload_type = payload_type_;
   if (ret < 0)
     return false;
-  *encoded_bytes = static_cast<size_t>(ret);
+  info->encoded_bytes = static_cast<size_t>(ret);
   return true;
 }
 

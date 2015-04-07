@@ -33,6 +33,7 @@
 
 #include "../platform/WebCanvas.h"
 #include "../platform/WebCommon.h"
+#include "../platform/WebFloatSize.h"
 #include "../platform/WebPoint.h"
 #include "../platform/WebRect.h"
 #include "../platform/WebSize.h"
@@ -45,13 +46,9 @@ namespace blink {
 
 class WebCompositeAndReadbackAsyncCallback;
 class WebInputEvent;
-class WebLayerTreeView;
-class WebMouseEvent;
 class WebPagePopup;
 class WebString;
-class WebWidgetClient;
 struct WebPoint;
-struct WebRenderingStats;
 template <typename T> class WebVector;
 
 class WebWidget {
@@ -95,14 +92,9 @@ public:
     // FIXME: Remove this function once Chrome side patch lands.
     void animate(double monotonicFrameBeginTime)
     {
-        beginFrame(WebBeginFrameArgs(monotonicFrameBeginTime));
+        beginFrame(WebBeginFrameArgs(monotonicFrameBeginTime, 0, 0));
     }
     virtual void beginFrame(const WebBeginFrameArgs& frameTime) { }
-
-    // Called to notify that a previously begun frame was finished and
-    // committed to the compositor. This is used to schedule lower priority
-    // work after tasks such as input processing and painting.
-    virtual void didCommitFrameToCompositor() { }
 
     // Called to layout the WebWidget. This MUST be called before Paint,
     // and it may result in calls to WebWidgetClient::didInvalidateRect.
@@ -158,6 +150,7 @@ public:
     virtual void applyViewportDeltas(
         const WebSize& pinchViewportDelta,
         const WebSize& mainFrameDelta,
+        const WebFloatSize& elasticOverscrollDelta,
         float scaleFactor,
         float topControlsDelta) { }
 
@@ -237,6 +230,8 @@ public:
     // to render its contents.
     virtual bool isAcceleratedCompositingActive() const { return false; }
 
+    // Returns true if the WebWidget created is of type WebView.
+    virtual bool isWebView() const { return false; }
     // Returns true if the WebWidget created is of type WebPagePopup.
     virtual bool isPagePopup() const { return false; }
     // Returns true if the WebWidget created is of type WebPopupMenu.

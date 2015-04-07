@@ -6,12 +6,15 @@
 
 #include <openssl/evp.h>
 #include <openssl/pkcs12.h>
+#include <openssl/rand.h>
 
 #include "base/stl_util.h"
 #include "content/child/webcrypto/crypto_data.h"
+#include "content/child/webcrypto/generate_key_result.h"
 #include "content/child/webcrypto/openssl/key_openssl.h"
 #include "content/child/webcrypto/platform_crypto.h"
 #include "content/child/webcrypto/status.h"
+#include "content/child/webcrypto/webcrypto_util.h"
 #include "crypto/openssl_util.h"
 
 namespace content {
@@ -93,12 +96,8 @@ Status AeadEncryptDecrypt(EncryptOrDecrypt mode,
   if (!aead_alg)
     return Status::ErrorUnexpected();
 
-  if (!EVP_AEAD_CTX_init(&ctx,
-                         aead_alg,
-                         vector_as_array(&raw_key),
-                         raw_key.size(),
-                         tag_length_bytes,
-                         NULL)) {
+  if (!EVP_AEAD_CTX_init(&ctx, aead_alg, vector_as_array(&raw_key),
+                         raw_key.size(), tag_length_bytes, NULL)) {
     return Status::OperationError();
   }
 
@@ -114,36 +113,58 @@ Status AeadEncryptDecrypt(EncryptOrDecrypt mode,
 
     buffer->resize(data.byte_length() - tag_length_bytes);
 
-    ok = EVP_AEAD_CTX_open(&ctx,
-                           vector_as_array(buffer),
-                           &len,
-                           buffer->size(),
-                           iv.bytes(),
-                           iv.byte_length(),
-                           data.bytes(),
-                           data.byte_length(),
-                           additional_data.bytes(),
+    ok = EVP_AEAD_CTX_open(&ctx, vector_as_array(buffer), &len, buffer->size(),
+                           iv.bytes(), iv.byte_length(), data.bytes(),
+                           data.byte_length(), additional_data.bytes(),
                            additional_data.byte_length());
   } else {
     // No need to check for unsigned integer overflow here (seal fails if
     // the output buffer is too small).
     buffer->resize(data.byte_length() + EVP_AEAD_max_overhead(aead_alg));
 
-    ok = EVP_AEAD_CTX_seal(&ctx,
-                           vector_as_array(buffer),
-                           &len,
-                           buffer->size(),
-                           iv.bytes(),
-                           iv.byte_length(),
-                           data.bytes(),
-                           data.byte_length(),
-                           additional_data.bytes(),
+    ok = EVP_AEAD_CTX_seal(&ctx, vector_as_array(buffer), &len, buffer->size(),
+                           iv.bytes(), iv.byte_length(), data.bytes(),
+                           data.byte_length(), additional_data.bytes(),
                            additional_data.byte_length());
   }
 
   if (!ok)
     return Status::OperationError();
   buffer->resize(len);
+  return Status::Success();
+}
+
+Status GenerateWebCryptoSecretKey(const blink::WebCryptoKeyAlgorithm& algorithm,
+                                  bool extractable,
+                                  blink::WebCryptoKeyUsageMask usages,
+                                  unsigned int keylen_bits,
+                                  GenerateKeyResult* result) {
+  crypto::OpenSSLErrStackTracer err_tracer(FROM_HERE);
+
+  unsigned int keylen_bytes = NumBitsToBytes(keylen_bits);
+  std::vector<unsigned char> random_bytes(keylen_bytes, 0);
+
+  if (keylen_bytes > 0) {
+    if (!(RAND_bytes(&random_bytes[0], keylen_bytes)))
+      return Status::OperationError();
+    TruncateToBitLength(keylen_bits, &random_bytes);
+  }
+
+  result->AssignSecretKey(blink::WebCryptoKey::create(
+      new SymKeyOpenSsl(CryptoData(random_bytes)),
+      blink::WebCryptoKeyTypeSecret, extractable, algorithm, usages));
+
+  return Status::Success();
+}
+
+Status CreateWebCryptoSecretKey(const CryptoData& key_data,
+                                const blink::WebCryptoKeyAlgorithm& algorithm,
+                                bool extractable,
+                                blink::WebCryptoKeyUsageMask usages,
+                                blink::WebCryptoKey* key) {
+  *key = blink::WebCryptoKey::create(new SymKeyOpenSsl(key_data),
+                                     blink::WebCryptoKeyTypeSecret, extractable,
+                                     algorithm, usages);
   return Status::Success();
 }
 
@@ -186,18 +207,11 @@ Status CreateWebCryptoPrivateKey(crypto::ScopedEVP_PKEY private_key,
 Status ImportUnverifiedPkeyFromSpki(const CryptoData& key_data,
                                     int expected_pkey_id,
                                     crypto::ScopedEVP_PKEY* pkey) {
-  if (!key_data.byte_length())
-    return Status::ErrorImportEmptyKeyData();
-
   crypto::OpenSSLErrStackTracer err_tracer(FROM_HERE);
 
-  crypto::ScopedBIO bio(BIO_new_mem_buf(const_cast<uint8_t*>(key_data.bytes()),
-                                        key_data.byte_length()));
-  if (!bio.get())
-    return Status::ErrorUnexpected();
-
-  pkey->reset(d2i_PUBKEY_bio(bio.get(), NULL));
-  if (!pkey->get())
+  const uint8_t* ptr = key_data.bytes();
+  pkey->reset(d2i_PUBKEY(nullptr, &ptr, key_data.byte_length()));
+  if (!pkey->get() || ptr != key_data.bytes() + key_data.byte_length())
     return Status::DataError();
 
   if (EVP_PKEY_id(pkey->get()) != expected_pkey_id)
@@ -209,19 +223,12 @@ Status ImportUnverifiedPkeyFromSpki(const CryptoData& key_data,
 Status ImportUnverifiedPkeyFromPkcs8(const CryptoData& key_data,
                                      int expected_pkey_id,
                                      crypto::ScopedEVP_PKEY* pkey) {
-  if (!key_data.byte_length())
-    return Status::ErrorImportEmptyKeyData();
-
   crypto::OpenSSLErrStackTracer err_tracer(FROM_HERE);
 
-  crypto::ScopedBIO bio(BIO_new_mem_buf(const_cast<uint8_t*>(key_data.bytes()),
-                                        key_data.byte_length()));
-  if (!bio.get())
-    return Status::ErrorUnexpected();
-
+  const uint8_t* ptr = key_data.bytes();
   crypto::ScopedOpenSSL<PKCS8_PRIV_KEY_INFO, PKCS8_PRIV_KEY_INFO_free>::Type
-      p8inf(d2i_PKCS8_PRIV_KEY_INFO_bio(bio.get(), NULL));
-  if (!p8inf.get())
+      p8inf(d2i_PKCS8_PRIV_KEY_INFO(nullptr, &ptr, key_data.byte_length()));
+  if (!p8inf.get() || ptr != key_data.bytes() + key_data.byte_length())
     return Status::DataError();
 
   pkey->reset(EVP_PKCS82PKEY(p8inf.get()));

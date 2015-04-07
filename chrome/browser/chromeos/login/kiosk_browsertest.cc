@@ -9,13 +9,16 @@
 #include "base/bind_helpers.h"
 #include "base/files/file_util.h"
 #include "base/location.h"
+#include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
+#include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/synchronization/lock.h"
-#include "chrome/browser/browser_process.h"
+#include "base/thread_task_runner_handle.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/app_mode/fake_cws.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_launch_error.h"
@@ -26,6 +29,8 @@
 #include "chrome/browser/chromeos/login/test/app_window_waiter.h"
 #include "chrome/browser/chromeos/login/test/oobe_base_test.h"
 #include "chrome/browser/chromeos/login/test/oobe_screen_waiter.h"
+#include "chrome/browser/chromeos/login/ui/login_display_host.h"
+#include "chrome/browser/chromeos/login/ui/login_display_host_impl.h"
 #include "chrome/browser/chromeos/login/users/fake_user_manager.h"
 #include "chrome/browser/chromeos/login/users/mock_user_manager.h"
 #include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
@@ -33,6 +38,7 @@
 #include "chrome/browser/chromeos/policy/device_policy_cros_browser_test.h"
 #include "chrome/browser/chromeos/policy/proto/chrome_device_policy.pb.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
+#include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_oauth2_token_service.h"
 #include "chrome/browser/chromeos/settings/device_oauth2_token_service_factory.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
@@ -40,6 +46,7 @@
 #include "chrome/browser/profiles/profile_impl.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profiles_state.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/webui/chromeos/login/kiosk_app_menu_handler.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
@@ -47,8 +54,8 @@
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/disks/disk_mount_manager.h"
-#include "chromeos/system/fake_statistics_provider.h"
-#include "chromeos/system/statistics_provider.h"
+#include "chromeos/settings/cros_settings_provider.h"
+#include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/common/signin_pref_names.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_observer.h"
@@ -289,6 +296,68 @@ class KioskFakeDiskMountManager : public file_manager::FakeDiskMountManager {
   DISALLOW_COPY_AND_ASSIGN(KioskFakeDiskMountManager);
 };
 
+class CrosSettingsPermanentlyUntrustedMaker :
+    public DeviceSettingsService::Observer {
+ public:
+  CrosSettingsPermanentlyUntrustedMaker();
+
+  // DeviceSettingsService::Observer:
+  void OwnershipStatusChanged() override;
+  void DeviceSettingsUpdated() override;
+  void OnDeviceSettingsServiceShutdown() override;
+
+ private:
+  bool untrusted_check_running_;
+  base::RunLoop run_loop_;
+
+  void CheckIfUntrusted();
+
+  DISALLOW_COPY_AND_ASSIGN(CrosSettingsPermanentlyUntrustedMaker);
+};
+
+CrosSettingsPermanentlyUntrustedMaker::CrosSettingsPermanentlyUntrustedMaker()
+    : untrusted_check_running_(false) {
+  DeviceSettingsService::Get()->AddObserver(this);
+
+  policy::DevicePolicyCrosTestHelper().InstallOwnerKey();
+  DeviceSettingsService::Get()->OwnerKeySet(true);
+
+  run_loop_.Run();
+}
+
+void CrosSettingsPermanentlyUntrustedMaker::OwnershipStatusChanged() {
+  if (untrusted_check_running_)
+    return;
+
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE,
+      base::Bind(&CrosSettingsPermanentlyUntrustedMaker::CheckIfUntrusted,
+                 base::Unretained(this)));
+}
+
+void CrosSettingsPermanentlyUntrustedMaker::DeviceSettingsUpdated() {
+}
+
+void CrosSettingsPermanentlyUntrustedMaker::OnDeviceSettingsServiceShutdown() {
+}
+
+void CrosSettingsPermanentlyUntrustedMaker::CheckIfUntrusted() {
+  untrusted_check_running_ = true;
+  const CrosSettingsProvider::TrustedStatus trusted_status =
+      CrosSettings::Get()->PrepareTrustedValues(
+          base::Bind(&CrosSettingsPermanentlyUntrustedMaker::CheckIfUntrusted,
+                     base::Unretained(this)));
+  if (trusted_status == CrosSettingsProvider::TEMPORARILY_UNTRUSTED)
+    return;
+  untrusted_check_running_ = false;
+
+  if (trusted_status == CrosSettingsProvider::TRUSTED)
+    return;
+
+  DeviceSettingsService::Get()->RemoveObserver(this);
+  run_loop_.Quit();
+}
+
 }  // namespace
 
 class KioskTest : public OobeBaseTest {
@@ -337,7 +406,7 @@ class KioskTest : public OobeBaseTest {
     KioskAppManager::Get()->CleanUp();
   }
 
-  virtual void SetUpCommandLine(CommandLine* command_line) override {
+  virtual void SetUpCommandLine(base::CommandLine* command_line) override {
     OobeBaseTest::SetUpCommandLine(command_line);
     fake_cws_->Init(embedded_test_server());
   }
@@ -597,11 +666,6 @@ class KioskTest : public OobeBaseTest {
     return auto_lock.Pass();
   }
 
-  void MakeCrosSettingsPermanentlyUntrusted() {
-    policy::DevicePolicyCrosTestHelper().InstallOwnerKey();
-    DeviceSettingsService::Get()->OwnerKeySet(true);
-  }
-
   MockUserManager* mock_user_manager() { return mock_user_manager_.get(); }
 
   void set_test_app_id(const std::string& test_app_id) {
@@ -713,8 +777,8 @@ IN_PROC_BROWSER_TEST_F(KioskTest, NotSignedInWithGAIAAccount) {
 
   Profile* app_profile = ProfileManager::GetPrimaryUserProfile();
   ASSERT_TRUE(app_profile);
-  EXPECT_FALSE(app_profile->GetPrefs()->HasPrefPath(
-      prefs::kGoogleServicesUsername));
+  EXPECT_FALSE(
+      SigninManagerFactory::GetForProfile(app_profile)->IsAuthenticated());
 }
 
 IN_PROC_BROWSER_TEST_F(KioskTest, PRE_LaunchAppNetworkDown) {
@@ -980,43 +1044,6 @@ IN_PROC_BROWSER_TEST_F(KioskTest, KioskEnableConfirmed) {
             GetConsumerKioskModeStatus());
 }
 
-IN_PROC_BROWSER_TEST_F(KioskTest, KioskEnableAbortedWithAutoEnrollment) {
-  // Fake an auto enrollment is going to be enforced.
-  system::ScopedFakeStatisticsProvider fake_statistics_provider_;
-  fake_statistics_provider_.SetMachineStatistic(system::kActivateDateKey,
-                                                "2000-01");
-  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
-      switches::kEnterpriseEnrollmentInitialModulus, "1");
-  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
-      switches::kEnterpriseEnrollmentModulusLimit, "2");
-  g_browser_process->local_state()->SetBoolean(prefs::kShouldAutoEnroll, true);
-  g_browser_process->local_state()->SetInteger(
-      prefs::kAutoEnrollmentPowerLimit, 3);
-
-  // Start UI, find menu entry for this app and launch it.
-  chromeos::WizardController::SkipPostLoginScreensForTesting();
-  chromeos::WizardController* wizard_controller =
-      chromeos::WizardController::default_controller();
-  CHECK(wizard_controller);
-
-  // Check Kiosk mode status.
-  EXPECT_EQ(KioskAppManager::CONSUMER_KIOSK_AUTO_LAUNCH_CONFIGURABLE,
-            GetConsumerKioskModeStatus());
-
-  // Wait for the login UI to come up and switch to the kiosk_enable screen.
-  wizard_controller->SkipToLoginForTesting(LoginScreenContext());
-  OobeScreenWaiter(OobeDisplay::SCREEN_GAIA_SIGNIN).Wait();
-  GetLoginUI()->CallJavascriptFunction("cr.ui.Oobe.handleAccelerator",
-                                       base::StringValue("kiosk_enable"));
-
-  // The flow should be aborted due to auto enrollment enforcement.
-  scoped_refptr<content::MessageLoopRunner> runner =
-      new content::MessageLoopRunner;
-  GetSigninScreenHandler()->set_kiosk_enable_flow_aborted_callback_for_test(
-      runner->QuitClosure());
-  runner->Run();
-}
-
 IN_PROC_BROWSER_TEST_F(KioskTest, KioskEnableAfter2ndSigninScreen) {
   chromeos::WizardController::SkipPostLoginScreensForTesting();
   chromeos::WizardController* wizard_controller =
@@ -1066,7 +1093,7 @@ IN_PROC_BROWSER_TEST_F(KioskTest, DoNotLaunchWhenUntrusted) {
   SimulateNetworkOnline();
 
   // Make cros settings untrusted.
-  MakeCrosSettingsPermanentlyUntrusted();
+  CrosSettingsPermanentlyUntrustedMaker();
 
   // Check that the attempt to start a kiosk app fails with an error.
   LaunchApp(test_app_id(), false);
@@ -1084,7 +1111,9 @@ IN_PROC_BROWSER_TEST_F(KioskTest, DoNotLaunchWhenUntrusted) {
       &ignored));
 }
 
-IN_PROC_BROWSER_TEST_F(KioskTest, NoAutoLaunchWhenUntrusted) {
+// Verifies that a consumer device does not auto-launch kiosk mode when cros
+// settings are untrusted.
+IN_PROC_BROWSER_TEST_F(KioskTest, NoConsumerAutoLaunchWhenUntrusted) {
   EnableConsumerKioskMode();
 
   // Wait for and confirm the auto-launch warning.
@@ -1103,10 +1132,30 @@ IN_PROC_BROWSER_TEST_F(KioskTest, NoAutoLaunchWhenUntrusted) {
       base::FundamentalValue(true));
 
   // Make cros settings untrusted.
-  MakeCrosSettingsPermanentlyUntrusted();
+  CrosSettingsPermanentlyUntrustedMaker();
 
   // Check that the attempt to auto-launch a kiosk app fails with an error.
   OobeScreenWaiter(OobeDisplay::SCREEN_ERROR_MESSAGE).Wait();
+}
+
+// Verifies that an enterprise device does not auto-launch kiosk mode when cros
+// settings are untrusted.
+IN_PROC_BROWSER_TEST_F(KioskTest, NoEnterpriseAutoLaunchWhenUntrusted) {
+  PrepareAppLaunch();
+  SimulateNetworkOnline();
+
+  // Make cros settings untrusted.
+  CrosSettingsPermanentlyUntrustedMaker();
+
+  // Trigger the code that handles auto-launch on enterprise devices. This would
+  // normally be called from ShowLoginWizard(), which runs so early that it is
+  // not to inject an auto-launch policy before it runs.
+  LoginDisplayHost* login_display_host = LoginDisplayHostImpl::default_host();
+  ASSERT_TRUE(login_display_host);
+  login_display_host->StartAppLaunch(test_app_id(), false);
+
+  // Check that no launch has started.
+  EXPECT_FALSE(login_display_host->GetAppLaunchController());
 }
 
 class KioskUpdateTest : public KioskTest {
@@ -1763,8 +1812,8 @@ IN_PROC_BROWSER_TEST_F(KioskEnterpriseTest, EnterpriseKioskApp) {
   // account.
   Profile* app_profile = ProfileManager::GetPrimaryUserProfile();
   ASSERT_TRUE(app_profile);
-  EXPECT_FALSE(app_profile->GetPrefs()->HasPrefPath(
-      prefs::kGoogleServicesUsername));
+  EXPECT_FALSE(
+      SigninManagerFactory::GetForProfile(app_profile)->IsAuthenticated());
 
   // Terminate the app.
   window->GetBaseWindow()->Close();
@@ -1812,7 +1861,7 @@ class KioskHiddenWebUITest : public KioskTest,
   KioskHiddenWebUITest() : wallpaper_loaded_(false) {}
 
   // KioskTest overrides:
-  virtual void SetUpCommandLine(CommandLine* command_line) override {
+  virtual void SetUpCommandLine(base::CommandLine* command_line) override {
     KioskTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kDisableBootAnimation);
   }

@@ -5,6 +5,8 @@
 #ifndef UI_EVENTS_OZONE_EVDEV_EVENT_FACTORY_EVDEV_H_
 #define UI_EVENTS_OZONE_EVDEV_EVENT_FACTORY_EVDEV_H_
 
+#include <vector>
+
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
@@ -12,11 +14,15 @@
 #include "base/task_runner.h"
 #include "ui/events/ozone/device/device_event_observer.h"
 #include "ui/events/ozone/evdev/event_converter_evdev.h"
+#include "ui/events/ozone/evdev/event_device_info.h"
 #include "ui/events/ozone/evdev/event_modifiers_evdev.h"
 #include "ui/events/ozone/evdev/events_ozone_evdev_export.h"
+#include "ui/events/ozone/evdev/input_controller_evdev.h"
 #include "ui/events/ozone/evdev/keyboard_evdev.h"
+#include "ui/events/ozone/evdev/mouse_button_map_evdev.h"
 #include "ui/events/platform/platform_event_source.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/ozone/public/system_input_injector.h"
 
 namespace gfx {
 class PointF;
@@ -26,6 +32,11 @@ namespace ui {
 
 class CursorDelegateEvdev;
 class DeviceManager;
+class SystemInputInjector;
+
+#if !defined(USE_EVDEV)
+#error Missing dependency on ui/events/ozone:events_ozone_evdev
+#endif
 
 #if defined(USE_EVDEV_GESTURES)
 class GesturePropertyProvider;
@@ -36,11 +47,21 @@ class EVENTS_OZONE_EVDEV_EXPORT EventFactoryEvdev : public DeviceEventObserver,
                                                     public PlatformEventSource {
  public:
   EventFactoryEvdev(CursorDelegateEvdev* cursor,
-                    DeviceManager* device_manager);
+                    DeviceManager* device_manager,
+                    KeyboardLayoutEngine* keyboard_layout_engine);
   ~EventFactoryEvdev() override;
+
+  // Get a list of device ids that matches a device type. Return true if the
+  // list is not empty. |device_ids| can be NULL.
+  bool GetDeviceIdsByType(const EventDeviceType type,
+                          std::vector<int>* device_ids);
 
   void WarpCursorTo(gfx::AcceleratedWidget widget,
                     const gfx::PointF& location);
+
+  scoped_ptr<SystemInputInjector> CreateSystemInputInjector();
+
+  InputController* input_controller() { return &input_controller_; }
 
  protected:
   // DeviceEventObserver overrides:
@@ -64,7 +85,12 @@ class EVENTS_OZONE_EVDEV_EXPORT EventFactoryEvdev : public DeviceEventObserver,
   // Close device at path (on UI thread).
   void DetachInputDevice(const base::FilePath& file_path);
 
-  void NotifyHotplugEventObserver(const EventConverterEvdev& converter);
+  // Update observers on device changes.
+  void NotifyDeviceChange(const EventConverterEvdev& converter);
+  void NotifyKeyboardsUpdated();
+  void NotifyTouchscreensUpdated();
+  void NotifyTouchpadsUpdated();
+  void NotifyMiceUpdated();
 
   int NextDeviceId();
 
@@ -86,6 +112,9 @@ class EVENTS_OZONE_EVDEV_EXPORT EventFactoryEvdev : public DeviceEventObserver,
   // Modifier key state (shift, ctrl, etc).
   EventModifiersEvdev modifiers_;
 
+  // Mouse button map.
+  MouseButtonMapEvdev button_map_;
+
   // Keyboard state.
   KeyboardEvdev keyboard_;
 
@@ -96,6 +125,9 @@ class EVENTS_OZONE_EVDEV_EXPORT EventFactoryEvdev : public DeviceEventObserver,
   // Gesture library property provider (used by touchpads/mice).
   scoped_ptr<GesturePropertyProvider> gesture_property_provider_;
 #endif
+
+  // Object for controlling input devices.
+  InputControllerEvdev input_controller_;
 
   // Support weak pointers for attach & detach callbacks.
   base::WeakPtrFactory<EventFactoryEvdev> weak_ptr_factory_;

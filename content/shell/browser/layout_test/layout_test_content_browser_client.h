@@ -10,6 +10,7 @@
 
 namespace content {
 
+class LayoutTestBrowserContext;
 class LayoutTestNotificationManager;
 
 class LayoutTestContentBrowserClient : public ShellContentBrowserClient {
@@ -20,7 +21,9 @@ class LayoutTestContentBrowserClient : public ShellContentBrowserClient {
   LayoutTestContentBrowserClient();
   ~LayoutTestContentBrowserClient() override;
 
-  // Will be lazily created when running layout tests.
+  LayoutTestBrowserContext* GetLayoutTestBrowserContext();
+
+  // Implements the PlatformNotificationService interface.
   LayoutTestNotificationManager* GetLayoutTestNotificationManager();
 
   // ContentBrowserClient overrides.
@@ -32,16 +35,7 @@ class LayoutTestContentBrowserClient : public ShellContentBrowserClient {
       const GURL& requesting_frame,
       bool user_gesture,
       const base::Callback<void(bool)>& result_callback) override;
-  blink::WebNotificationPermission CheckDesktopNotificationPermission(
-      const GURL& source_url,
-      ResourceContext* context,
-      int render_process_id) override;
-  void ShowDesktopNotification(
-      const ShowDesktopNotificationHostMsgParams& params,
-      BrowserContext* browser_context,
-      int render_process_id,
-      scoped_ptr<DesktopNotificationDelegate> delegate,
-      base::Closure* cancel_callback) override;
+  PlatformNotificationService* GetPlatformNotificationService() override;
 
  private:
   scoped_ptr<LayoutTestNotificationManager> layout_test_notification_manager_;

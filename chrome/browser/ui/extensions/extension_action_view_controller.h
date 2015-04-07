@@ -49,12 +49,14 @@ class ExtensionActionViewController
       override;
   base::string16 GetTooltip(content::WebContents* web_contents) const override;
   bool IsEnabled(content::WebContents* web_contents) const override;
+  bool WantsToRun(content::WebContents* web_contents) const override;
   bool HasPopup(content::WebContents* web_contents) const override;
   void HidePopup() override;
   gfx::NativeView GetPopupNativeView() override;
   bool IsMenuRunning() const override;
   bool CanDrag() const override;
   bool ExecuteAction(bool by_user) override;
+  void UpdateState() override;
   void PaintExtra(gfx::Canvas* canvas,
                   const gfx::Rect& bounds,
                   content::WebContents* web_contents) const override;

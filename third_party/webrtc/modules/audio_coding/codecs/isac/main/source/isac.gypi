@@ -13,6 +13,8 @@
       'type': 'static_library',
       'dependencies': [
         '<(webrtc_root)/common_audio/common_audio.gyp:common_audio',
+        'audio_decoder_interface',
+        'audio_encoder_interface',
       ],
       'include_dirs': [
         '../interface',
@@ -25,10 +27,14 @@
         ],
       },
       'sources': [
+        '../../audio_encoder_isac_t.h',
+        '../../audio_encoder_isac_t_impl.h',
+        '../interface/audio_encoder_isac.h',
         '../interface/isac.h',
         'arith_routines.c',
         'arith_routines_hist.c',
         'arith_routines_logist.c',
+        'audio_encoder_isac.cc',
         'bandwidth_estimator.c',
         'crc.c',
         'decode.c',

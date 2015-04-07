@@ -31,11 +31,7 @@ class Renderer;
 // decode and render audio to a sink obtained from the ApplicationConnection.
 class MojoRendererService : public mojo::InterfaceImpl<mojo::MediaRenderer> {
  public:
-  // |connection| is a pointer to the connection back to our embedder. The
-  // embedder should have configured it (via ConfigureOutgoingConnection) to
-  // allow |this| to connect to a sink that will receive decoded data ready
-  // for playback.
-  explicit MojoRendererService(mojo::ApplicationConnection* connection);
+  MojoRendererService();
   ~MojoRendererService() override;
 
   // mojo::MediaRenderer implementation.
@@ -70,6 +66,7 @@ class MojoRendererService : public mojo::InterfaceImpl<mojo::MediaRenderer> {
   // if the media time has changed since the last update.  If |force| is true,
   // the client is notified even if the time is unchanged.
   void UpdateMediaTime(bool force);
+  void CancelPeriodicMediaTimeUpdates();
   void SchedulePeriodicMediaTimeUpdates();
 
   // Callback executed by audio renderer when buffering state changes.
@@ -82,6 +79,9 @@ class MojoRendererService : public mojo::InterfaceImpl<mojo::MediaRenderer> {
   // Callback executed when a runtime error happens.
   void OnError(PipelineStatus error);
 
+  // Callback executed once Flush() completes.
+  void OnFlushCompleted(const mojo::Closure& callback);
+
   State state_;
 
   scoped_refptr<AudioRendererSink> audio_renderer_sink_;
@@ -91,8 +91,8 @@ class MojoRendererService : public mojo::InterfaceImpl<mojo::MediaRenderer> {
   base::RepeatingTimer<MojoRendererService> time_update_timer_;
   uint64_t last_media_time_usec_;
 
-  base::WeakPtrFactory<MojoRendererService> weak_factory_;
   base::WeakPtr<MojoRendererService> weak_this_;
+  base::WeakPtrFactory<MojoRendererService> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(MojoRendererService);
 };

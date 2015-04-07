@@ -189,10 +189,9 @@ class PpFrameWriterProxy : public FrameWriterInterface {
     DCHECK(writer_ != NULL);
   }
 
-  virtual ~PpFrameWriterProxy() {}
+  ~PpFrameWriterProxy() override {}
 
-  virtual void PutFrame(PPB_ImageData_Impl* image_data,
-                        int64 time_stamp_ns) override {
+  void PutFrame(PPB_ImageData_Impl* image_data, int64 time_stamp_ns) override {
     writer_->PutFrame(image_data, time_stamp_ns);
   }
 
@@ -235,7 +234,8 @@ bool VideoDestinationHandler::Open(
   blink::WebMediaStreamSource::Type type =
       blink::WebMediaStreamSource::TypeVideo;
   blink::WebString webkit_track_id = base::UTF8ToUTF16(track_id);
-  webkit_source.initialize(webkit_track_id, type, webkit_track_id);
+  webkit_source.initialize(webkit_track_id, type, webkit_track_id,
+                           false /* remote */, true /* readonly */);
   webkit_source.setExtraData(writer);
 
   blink::WebMediaConstraints constraints;

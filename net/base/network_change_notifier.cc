@@ -305,7 +305,8 @@ class HistogramWatcher
     if (bytes_read > 10000 &&
         request_duration > base::TimeDelta::FromMilliseconds(1) &&
         request.creation_time() > last_connection_change_) {
-      int32 kbps = bytes_read * 8 / request_duration.InMilliseconds();
+      int32 kbps = static_cast<int32>(
+          bytes_read * 8 / request_duration.InMilliseconds());
       if (kbps > peak_kbps_since_last_connection_change_)
         peak_kbps_since_last_connection_change_ = kbps;
     }
@@ -687,6 +688,14 @@ void NetworkChangeNotifier::AddNetworkChangeObserver(
   }
 }
 
+void NetworkChangeNotifier::AddMaxBandwidthObserver(
+    MaxBandwidthObserver* observer) {
+  if (g_network_change_notifier) {
+    g_network_change_notifier->max_bandwidth_observer_list_->AddObserver(
+        observer);
+  }
+}
+
 void NetworkChangeNotifier::RemoveIPAddressObserver(
     IPAddressObserver* observer) {
   if (g_network_change_notifier) {
@@ -714,6 +723,14 @@ void NetworkChangeNotifier::RemoveNetworkChangeObserver(
     NetworkChangeObserver* observer) {
   if (g_network_change_notifier) {
     g_network_change_notifier->network_change_observer_list_->RemoveObserver(
+        observer);
+  }
+}
+
+void NetworkChangeNotifier::RemoveMaxBandwidthObserver(
+    MaxBandwidthObserver* observer) {
+  if (g_network_change_notifier) {
+    g_network_change_notifier->max_bandwidth_observer_list_->RemoveObserver(
         observer);
   }
 }
@@ -746,19 +763,20 @@ void NetworkChangeNotifier::SetTestNotificationsOnly(bool test_only) {
 
 NetworkChangeNotifier::NetworkChangeNotifier(
     const NetworkChangeCalculatorParams& params
-        /*= NetworkChangeCalculatorParams()*/)
-    : ip_address_observer_list_(
-        new ObserverListThreadSafe<IPAddressObserver>(
-            ObserverListBase<IPAddressObserver>::NOTIFY_EXISTING_ONLY)),
+    /*= NetworkChangeCalculatorParams()*/)
+    : ip_address_observer_list_(new ObserverListThreadSafe<IPAddressObserver>(
+          ObserverListBase<IPAddressObserver>::NOTIFY_EXISTING_ONLY)),
       connection_type_observer_list_(
-        new ObserverListThreadSafe<ConnectionTypeObserver>(
-            ObserverListBase<ConnectionTypeObserver>::NOTIFY_EXISTING_ONLY)),
-      resolver_state_observer_list_(
-        new ObserverListThreadSafe<DNSObserver>(
-            ObserverListBase<DNSObserver>::NOTIFY_EXISTING_ONLY)),
+          new ObserverListThreadSafe<ConnectionTypeObserver>(
+              ObserverListBase<ConnectionTypeObserver>::NOTIFY_EXISTING_ONLY)),
+      resolver_state_observer_list_(new ObserverListThreadSafe<DNSObserver>(
+          ObserverListBase<DNSObserver>::NOTIFY_EXISTING_ONLY)),
       network_change_observer_list_(
-        new ObserverListThreadSafe<NetworkChangeObserver>(
-            ObserverListBase<NetworkChangeObserver>::NOTIFY_EXISTING_ONLY)),
+          new ObserverListThreadSafe<NetworkChangeObserver>(
+              ObserverListBase<NetworkChangeObserver>::NOTIFY_EXISTING_ONLY)),
+      max_bandwidth_observer_list_(
+          new ObserverListThreadSafe<MaxBandwidthObserver>(
+              ObserverListBase<MaxBandwidthObserver>::NOTIFY_EXISTING_ONLY)),
       network_state_(new NetworkState()),
       network_change_calculator_(new NetworkChangeCalculator(params)),
       test_notifications_only_(false) {
@@ -780,6 +798,81 @@ double NetworkChangeNotifier::GetCurrentMaxBandwidth() const {
   // platform.
   if (GetCurrentConnectionType() == CONNECTION_NONE)
     return 0.0;
+  return std::numeric_limits<double>::infinity();
+}
+
+// static
+double NetworkChangeNotifier::GetMaxBandwidthForConnectionSubtype(
+    ConnectionSubtype subtype) {
+  switch (subtype) {
+    case SUBTYPE_GSM:
+      return 0.01;
+    case SUBTYPE_IDEN:
+      return 0.064;
+    case SUBTYPE_CDMA:
+      return 0.115;
+    case SUBTYPE_1XRTT:
+      return 0.153;
+    case SUBTYPE_GPRS:
+      return 0.237;
+    case SUBTYPE_EDGE:
+      return 0.384;
+    case SUBTYPE_UMTS:
+      return 2.0;
+    case SUBTYPE_EVDO_REV_0:
+      return 2.46;
+    case SUBTYPE_EVDO_REV_A:
+      return 3.1;
+    case SUBTYPE_HSPA:
+      return 3.6;
+    case SUBTYPE_EVDO_REV_B:
+      return 14.7;
+    case SUBTYPE_HSDPA:
+      return 14.3;
+    case SUBTYPE_HSUPA:
+      return 14.4;
+    case SUBTYPE_EHRPD:
+      return 21.0;
+    case SUBTYPE_HSPAP:
+      return 42.0;
+    case SUBTYPE_LTE:
+      return 100.0;
+    case SUBTYPE_LTE_ADVANCED:
+      return 100.0;
+    case SUBTYPE_BLUETOOTH_1_2:
+      return 1.0;
+    case SUBTYPE_BLUETOOTH_2_1:
+      return 3.0;
+    case SUBTYPE_BLUETOOTH_3_0:
+      return 24.0;
+    case SUBTYPE_BLUETOOTH_4_0:
+      return 1.0;
+    case SUBTYPE_ETHERNET:
+      return 10.0;
+    case SUBTYPE_FAST_ETHERNET:
+      return 100.0;
+    case SUBTYPE_GIGABIT_ETHERNET:
+      return 1000.0;
+    case SUBTYPE_10_GIGABIT_ETHERNET:
+      return 10000.0;
+    case SUBTYPE_WIFI_B:
+      return 11.0;
+    case SUBTYPE_WIFI_G:
+      return 54.0;
+    case SUBTYPE_WIFI_N:
+      return 600.0;
+    case SUBTYPE_WIFI_AC:
+      return 1300.0;
+    case SUBTYPE_WIFI_AD:
+      return 7000.0;
+    case SUBTYPE_UNKNOWN:
+      return std::numeric_limits<double>::infinity();
+    case SUBTYPE_NONE:
+      return 0.0;
+    case SUBTYPE_OTHER:
+      return std::numeric_limits<double>::infinity();
+  }
+  NOTREACHED();
   return std::numeric_limits<double>::infinity();
 }
 
@@ -806,6 +899,16 @@ void NetworkChangeNotifier::NotifyObserversOfNetworkChange(
   if (g_network_change_notifier &&
       !g_network_change_notifier->test_notifications_only_) {
     g_network_change_notifier->NotifyObserversOfNetworkChangeImpl(type);
+  }
+}
+
+// static
+void NetworkChangeNotifier::NotifyObserversOfMaxBandwidthChange(
+    double max_bandwidth_mbps) {
+  if (g_network_change_notifier &&
+      !g_network_change_notifier->test_notifications_only_) {
+    g_network_change_notifier->NotifyObserversOfMaxBandwidthChangeImpl(
+        max_bandwidth_mbps);
   }
 }
 
@@ -843,6 +946,12 @@ void NetworkChangeNotifier::NotifyObserversOfNetworkChangeImpl(
 
 void NetworkChangeNotifier::NotifyObserversOfDNSChangeImpl() {
   resolver_state_observer_list_->Notify(&DNSObserver::OnDNSChanged);
+}
+
+void NetworkChangeNotifier::NotifyObserversOfMaxBandwidthChangeImpl(
+    double max_bandwidth_mbps) {
+  max_bandwidth_observer_list_->Notify(
+      &MaxBandwidthObserver::OnMaxBandwidthChanged, max_bandwidth_mbps);
 }
 
 NetworkChangeNotifier::DisableForTest::DisableForTest()

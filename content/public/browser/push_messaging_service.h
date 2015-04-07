@@ -16,31 +16,52 @@
 namespace content {
 
 // A push service-agnostic interface that the Push API uses for talking to
-// push messaging services like GCM.
+// push messaging services like GCM. Must only be used on the UI thread.
 class CONTENT_EXPORT PushMessagingService {
  public:
-  typedef base::Callback<void(const GURL& /* endpoint */,
-                              const std::string& /* registration_id */,
-                              PushRegistrationStatus /* status */)>
-      RegisterCallback;
+  using RegisterCallback =
+      base::Callback<void(const std::string& /* registration_id */,
+                          PushRegistrationStatus /* status */)>;
+  using UnregisterCallback = base::Callback<void(PushUnregistrationStatus)>;
 
   virtual ~PushMessagingService() {}
 
-  // Register the given |sender_id| with GCM.
-  virtual void Register(const GURL& origin,
-                        int64 service_worker_registration_id,
-                        const std::string& sender_id,
-                        int renderer_id,
-                        int render_frame_id,
-                        bool user_gesture,
-                        const RegisterCallback& callback) = 0;
+  // Returns the absolute URL exposed by the push server where the webapp server
+  // can send push messages. This is currently assumed to be the same for all
+  // origins and push registrations.
+  virtual GURL GetPushEndpoint() = 0;
 
-  // Check whether the requester has permission to register for Push
-  // Messages
+  // Register the given |sender_id| with the push messaging service in a
+  // document context. The frame is known and a permission UI may be displayed
+  // to the user.
+  virtual void RegisterFromDocument(const GURL& requesting_origin,
+                                    int64 service_worker_registration_id,
+                                    const std::string& sender_id,
+                                    int renderer_id,
+                                    int render_frame_id,
+                                    bool user_visible_only,
+                                    const RegisterCallback& callback) = 0;
+
+  // Register the given |sender_id| with the push messaging service. The frame
+  // is not known so if permission was not previously granted by the user this
+  // request should fail.
+  virtual void RegisterFromWorker(const GURL& requesting_origin,
+                                  int64 service_worker_registration_id,
+                                  const std::string& sender_id,
+                                  const RegisterCallback& callback) = 0;
+
+  // Unregister an origin and its associated service worker registration id from
+  // the push service.
+  virtual void Unregister(const GURL& requesting_origin,
+                          int64 service_worker_registration_id,
+                          const UnregisterCallback& callback) = 0;
+
+  // Checks the permission status for the requesting origin. Permission is only
+  // ever granted when the requesting origin matches the top level embedding
+  // origin.
   virtual blink::WebPushPermissionStatus GetPermissionStatus(
       const GURL& requesting_origin,
-      int renderer_id,
-      int render_frame_id) = 0;
+      const GURL& embedding_origin) = 0;
 };
 
 }  // namespace content

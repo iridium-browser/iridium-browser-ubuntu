@@ -102,7 +102,7 @@ class DaemonCommandLineInstallerWin
 
  private:
   // Handle of the launched process.
-  base::win::ScopedHandle process_;
+  base::Process process_;
 
   // Used to determine when the launched process terminates.
   base::win::ObjectWatcher process_watcher_;
@@ -135,7 +135,7 @@ void DaemonComInstallerWin::Install() {
   }
 
   hr = dispatch::Invoke(V_DISPATCH(&bundle_), L"initialize", DISPATCH_METHOD,
-                        NULL);
+                        nullptr);
   if (FAILED(hr)) {
     Done(hr);
     return;
@@ -146,14 +146,14 @@ void DaemonComInstallerWin::Install() {
   ScopedVariant empty(kOmahaEmpty);
   ScopedVariant language(kOmahaLanguage);
   hr = dispatch::Invoke(V_DISPATCH(&bundle_), L"createApp", DISPATCH_METHOD,
-                        appid, empty, language, empty, NULL);
+                        appid, empty, language, empty, nullptr);
   if (FAILED(hr)) {
     Done(hr);
     return;
   }
 
   hr = dispatch::Invoke(V_DISPATCH(&bundle_), L"checkForUpdate",
-                        DISPATCH_METHOD, NULL);
+                        DISPATCH_METHOD, nullptr);
   if (FAILED(hr)) {
     Done(hr);
     return;
@@ -214,7 +214,7 @@ void DaemonComInstallerWin::PollInstallationStatus() {
 
     case STATE_UPDATE_AVAILABLE:
       hr = dispatch::Invoke(V_DISPATCH(&bundle_), L"download",
-                            DISPATCH_METHOD, NULL);
+                            DISPATCH_METHOD, nullptr);
       if (FAILED(hr)) {
         Done(hr);
         return;
@@ -226,7 +226,7 @@ void DaemonComInstallerWin::PollInstallationStatus() {
     case STATE_APPLYING_DIFFERENTIAL_PATCH:
     case STATE_READY_TO_INSTALL:
       hr = dispatch::Invoke(V_DISPATCH(&bundle_), L"install",
-                            DISPATCH_METHOD, NULL);
+                            DISPATCH_METHOD, nullptr);
       if (FAILED(hr)) {
         Done(hr);
         return;
@@ -300,13 +300,14 @@ void DaemonCommandLineInstallerWin::Install() {
                          kOmahaLanguage));
 
   base::LaunchOptions options;
-  if (!base::LaunchProcess(command_line, options, &process_)) {
+  process_ = base::LaunchProcess(command_line, options);
+  if (!process_.IsValid()) {
     result = GetLastError();
     Done(HRESULT_FROM_WIN32(result));
     return;
   }
 
-  if (!process_watcher_.StartWatching(process_.Get(), this)) {
+  if (!process_watcher_.StartWatching(process_.Handle(), this)) {
     result = GetLastError();
     Done(HRESULT_FROM_WIN32(result));
     return;
@@ -316,7 +317,7 @@ void DaemonCommandLineInstallerWin::Install() {
 void DaemonCommandLineInstallerWin::OnObjectSignaled(HANDLE object) {
   // Check if the updater process returned success.
   DWORD exit_code;
-  if (GetExitCodeProcess(process_.Get(), &exit_code) && exit_code == 0) {
+  if (GetExitCodeProcess(process_.Handle(), &exit_code) && exit_code == 0) {
     Done(S_OK);
   } else {
     Done(E_FAIL);
@@ -351,7 +352,7 @@ scoped_ptr<DaemonInstallerWin> DaemonInstallerWin::Create(
     result = CLSIDFromProgID(kGoogleUpdate, &class_id);
     if (SUCCEEDED(result)) {
       result = CoCreateInstance(class_id,
-                                NULL,
+                                nullptr,
                                 CLSCTX_LOCAL_SERVER,
                                 IID_IDispatch,
                                 update3.ReceiveVoid());
@@ -388,8 +389,8 @@ scoped_ptr<DaemonInstallerWin> DaemonInstallerWin::Create(
 }
 
 HWND GetTopLevelWindow(HWND window) {
-  if (window == NULL) {
-    return NULL;
+  if (window == nullptr) {
+    return nullptr;
   }
 
   for (;;) {
@@ -400,7 +401,7 @@ HWND GetTopLevelWindow(HWND window) {
     }
 
     HWND parent = GetAncestor(window, GA_PARENT);
-    if (parent == NULL) {
+    if (parent == nullptr) {
       return window;
     }
 

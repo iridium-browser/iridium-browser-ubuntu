@@ -120,6 +120,7 @@ LIGHTTPD_RANDOM_PORT_FIRST = 8001
 LIGHTTPD_RANDOM_PORT_LAST = 8999
 TEST_SYNC_SERVER_PORT = 9031
 TEST_SEARCH_BY_IMAGE_SERVER_PORT = 9041
+TEST_POLICY_SERVER_PORT = 9051
 
 # The net test server is started from port 10201.
 # TODO(pliard): http://crbug.com/239014. Remove this dirty workaround once
@@ -186,7 +187,10 @@ PYTHON_UNIT_TEST_SUITES = {
   'pylib_py_unittests': {
     'path': os.path.join(DIR_SOURCE_ROOT, 'build', 'android'),
     'test_modules': [
+      'pylib.cmd_helper_test',
       'pylib.device.device_utils_test',
+      'pylib.results.json_results_test',
+      'pylib.utils.md5sum_test',
     ]
   },
   'gyp_py_unittests': {
@@ -198,7 +202,9 @@ PYTHON_UNIT_TEST_SUITES = {
 }
 
 LOCAL_MACHINE_TESTS = ['junit', 'python']
-VALID_ENVIRONMENTS = ['local']
+VALID_ENVIRONMENTS = ['local', 'remote_device']
+VALID_TEST_TYPES = ['gtest', 'instrumentation', 'junit', 'linker', 'monkey',
+                    'perf', 'python', 'uiautomator', 'uirobot']
 
 
 def GetBuildType():
@@ -216,6 +222,10 @@ def SetBuildDirectory(build_directory):
   os.environ['CHROMIUM_OUT_DIR'] = build_directory
 
 
+def SetOutputDirectort(output_directory):
+  os.environ['CHROMIUM_OUTPUT_DIR'] = output_directory
+
+
 def GetOutDirectory(build_type=None):
   """Returns the out directory where the output binaries are built.
 
@@ -223,6 +233,10 @@ def GetOutDirectory(build_type=None):
     build_type: Build type, generally 'Debug' or 'Release'. Defaults to the
       globally set build type environment variable BUILDTYPE.
   """
+  if 'CHROMIUM_OUTPUT_DIR' in os.environ:
+    return os.path.abspath(os.path.join(
+        DIR_SOURCE_ROOT, os.environ.get('CHROMIUM_OUTPUT_DIR')))
+
   return os.path.abspath(os.path.join(
       DIR_SOURCE_ROOT, os.environ.get('CHROMIUM_OUT_DIR', 'out'),
       GetBuildType() if build_type is None else build_type))
@@ -238,8 +252,21 @@ def _Memoize(func):
   return Wrapper
 
 
-@_Memoize
+def SetAdbPath(adb_path):
+  os.environ['ADB_PATH'] = adb_path
+
+
 def GetAdbPath():
+  # Check if a custom adb path as been set. If not, try to find adb
+  # on the system.
+  if os.environ.get('ADB_PATH'):
+    return os.environ.get('ADB_PATH')
+  else:
+    return _FindAdbPath()
+
+
+@_Memoize
+def _FindAdbPath():
   if os.environ.get('ANDROID_SDK_ROOT'):
     return 'adb'
   # If envsetup.sh hasn't been sourced and there's no adb in the path,
@@ -251,7 +278,6 @@ def GetAdbPath():
   except OSError:
     logging.debug('No adb found in $PATH, fallback to checked in binary.')
     return os.path.join(ANDROID_SDK_ROOT, 'platform-tools', 'adb')
-
 
 # Exit codes
 ERROR_EXIT_CODE = 1

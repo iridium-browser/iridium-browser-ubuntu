@@ -25,7 +25,7 @@ END_COMP_NAME = 'INPUT_EVENT_LATENCY_TERMINATED_FRAME_SWAP_COMPONENT'
 # Name for a main thread scroll update latency event.
 SCROLL_UPDATE_EVENT_NAME = 'InputLatency:ScrollUpdate'
 # Name for a gesture scroll update latency event.
-GESTURE_SCROLL_UPDATE_EVENT_NAME  = 'InputLatency:GestureScrollUpdate'
+GESTURE_SCROLL_UPDATE_EVENT_NAME = 'InputLatency:GestureScrollUpdate'
 
 
 def GetInputLatencyEvents(process, timeline_range):
@@ -82,7 +82,7 @@ def ComputeInputEventLatencies(input_events):
       elif BEGIN_SCROLL_UPDATE_COMP_NAME in data:
         start_time = data[BEGIN_SCROLL_UPDATE_COMP_NAME]['time']
       else:
-        raise ValueError, 'LatencyInfo has no begin component'
+        raise ValueError('LatencyInfo has no begin component')
       latency = (end_time - start_time) / 1000.0
       input_event_latencies.append((start_time, event.name, latency))
 
@@ -108,14 +108,19 @@ def HasRenderingStats(process):
 
 def GetTimestampEventName(process):
   """ Returns the name of the events used to count frame timestamps. """
+  if process.name == 'SurfaceFlinger':
+    return 'vsync_before'
+
   event_name = 'BenchmarkInstrumentation::DisplayRenderingStats'
   for event in process.IterAllSlicesOfName(event_name):
     if 'data' in event.args and event.args['data']['frame_count'] == 1:
       return event_name
+
   return 'BenchmarkInstrumentation::ImplThreadRenderingStats'
 
 class RenderingStats(object):
-  def __init__(self, renderer_process, browser_process, timeline_ranges):
+  def __init__(self, renderer_process, browser_process, surface_flinger_process,
+               timeline_ranges):
     """
     Utility class for extracting rendering statistics from the timeline (or
     other loggin facilities), and providing them in a common format to classes
@@ -126,9 +131,14 @@ class RenderingStats(object):
 
     All *_time values are measured in milliseconds.
     """
-    assert(len(timeline_ranges) > 0)
+    assert len(timeline_ranges) > 0
+    self.refresh_period = None
+
     # Find the top level process with rendering stats (browser or renderer).
-    if HasRenderingStats(browser_process):
+    if surface_flinger_process:
+      timestamp_process = surface_flinger_process
+      self._GetRefreshPeriodFromSurfaceFlingerProcess(surface_flinger_process)
+    elif HasRenderingStats(browser_process):
       timestamp_process = browser_process
     else:
       timestamp_process = renderer_process
@@ -141,10 +151,6 @@ class RenderingStats(object):
 
     self.frame_timestamps = []
     self.frame_times = []
-    self.paint_times = []
-    self.painted_pixel_counts = []
-    self.record_times = []
-    self.recorded_pixel_counts = []
     self.approximated_pixel_percentages = []
     # End-to-end latency for input event - from when input event is
     # generated to when the its resulted page is swap buffered.
@@ -159,10 +165,6 @@ class RenderingStats(object):
     for timeline_range in timeline_ranges:
       self.frame_timestamps.append([])
       self.frame_times.append([])
-      self.paint_times.append([])
-      self.painted_pixel_counts.append([])
-      self.record_times.append([])
-      self.recorded_pixel_counts.append([])
       self.approximated_pixel_percentages.append([])
       self.input_event_latency.append([])
       self.scroll_update_latency.append([])
@@ -172,14 +174,17 @@ class RenderingStats(object):
         continue
       self._InitFrameTimestampsFromTimeline(
           timestamp_process, timestamp_event_name, timeline_range)
-      self._InitMainThreadRenderingStatsFromTimeline(
-          renderer_process, timeline_range)
       self._InitImplThreadRenderingStatsFromTimeline(
           renderer_process, timeline_range)
       self._InitInputLatencyStatsFromTimeline(
           browser_process, renderer_process, timeline_range)
       self._InitFrameQueueingDurationsFromTimeline(
           renderer_process, timeline_range)
+
+  def _GetRefreshPeriodFromSurfaceFlingerProcess(self, surface_flinger_process):
+    for event in surface_flinger_process.IterAllEventsOfName('vsync_before'):
+      self.refresh_period = event.args['data']['refresh_period']
+      return
 
   def _InitInputLatencyStatsFromTimeline(
       self, browser_process, renderer_process, timeline_range):
@@ -227,15 +232,6 @@ class RenderingStats(object):
     for event in self._GatherEvents(
         timestamp_event_name, process, timeline_range):
       self._AddFrameTimestamp(event)
-
-  def _InitMainThreadRenderingStatsFromTimeline(self, process, timeline_range):
-    event_name = 'BenchmarkInstrumentation::MainThreadRenderingStats'
-    for event in self._GatherEvents(event_name, process, timeline_range):
-      data = event.args['data']
-      self.paint_times[-1].append(1000.0 * data['paint_time'])
-      self.painted_pixel_counts[-1].append(data['painted_pixel_count'])
-      self.record_times[-1].append(1000.0 * data['record_time'])
-      self.recorded_pixel_counts[-1].append(data['recorded_pixel_count'])
 
   def _InitImplThreadRenderingStatsFromTimeline(self, process, timeline_range):
     event_name = 'BenchmarkInstrumentation::ImplThreadRenderingStats'

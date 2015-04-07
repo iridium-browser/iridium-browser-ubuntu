@@ -25,7 +25,7 @@
 #include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebPluginContainer.h"
 #include "third_party/khronos/GLES2/gl2.h"
-#include "ui/gfx/size_conversions.h"
+#include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/skia_util.h"
 
 namespace content {
@@ -67,7 +67,7 @@ BrowserPluginManager* ChildFrameCompositingHelper::GetBrowserPluginManager() {
   if (!browser_plugin_)
     return NULL;
 
-  return browser_plugin_->browser_plugin_manager();
+  return BrowserPluginManager::Get();
 }
 
 blink::WebPluginContainer* ChildFrameCompositingHelper::GetContainer() {
@@ -164,6 +164,10 @@ void ChildFrameCompositingHelper::CheckSizeAndAdjustLayerProperties(
 }
 
 void ChildFrameCompositingHelper::OnContainerDestroy() {
+  // If we have a pending ACK, then ACK now so we don't lose frames in the
+  // future.
+  DidCommitCompositorFrame();
+
   if (GetContainer())
     GetContainer()->setWebLayer(NULL);
 

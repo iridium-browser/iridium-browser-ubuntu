@@ -37,6 +37,8 @@ RenderSVGContainer::RenderSVGContainer(SVGElement* node)
     : RenderSVGModelObject(node)
     , m_objectBoundingBoxValid(false)
     , m_needsBoundariesUpdate(true)
+    , m_hasNonIsolatedBlendingDescendants(false)
+    , m_hasNonIsolatedBlendingDescendantsDirty(false)
 {
 }
 
@@ -84,12 +86,20 @@ void RenderSVGContainer::addChild(RenderObject* child, RenderObject* beforeChild
 {
     RenderSVGModelObject::addChild(child, beforeChild);
     SVGResourcesCache::clientWasAddedToTree(child, child->style());
+
+    bool shouldIsolateDescendants = (child->isBlendingAllowed() && child->style()->hasBlendMode()) || child->hasNonIsolatedBlendingDescendants();
+    if (shouldIsolateDescendants)
+        descendantIsolationRequirementsChanged(DescendantIsolationRequired);
 }
 
 void RenderSVGContainer::removeChild(RenderObject* child)
 {
     SVGResourcesCache::clientWillBeRemovedFromTree(child);
     RenderSVGModelObject::removeChild(child);
+
+    bool hadNonIsolatedDescendants = (child->isBlendingAllowed() && child->style()->hasBlendMode()) || child->hasNonIsolatedBlendingDescendants();
+    if (hadNonIsolatedDescendants)
+        descendantIsolationRequirementsChanged(DescendantIsolationNeedsUpdate);
 }
 
 bool RenderSVGContainer::selfWillPaint()
@@ -98,13 +108,55 @@ bool RenderSVGContainer::selfWillPaint()
     return resources && resources->filter();
 }
 
-void RenderSVGContainer::paint(PaintInfo& paintInfo, const LayoutPoint&)
+void RenderSVGContainer::styleDidChange(StyleDifference diff, const RenderStyle* oldStyle)
+{
+    RenderSVGModelObject::styleDidChange(diff, oldStyle);
+
+    bool hadIsolation = oldStyle && !isSVGHiddenContainer() && SVGRenderSupport::willIsolateBlendingDescendantsForStyle(oldStyle);
+    bool isolationChanged = hadIsolation == !SVGRenderSupport::willIsolateBlendingDescendantsForObject(this);
+
+    if (!parent() || !isolationChanged)
+        return;
+
+    if (hasNonIsolatedBlendingDescendants())
+        parent()->descendantIsolationRequirementsChanged(SVGRenderSupport::willIsolateBlendingDescendantsForObject(this) ? DescendantIsolationNeedsUpdate : DescendantIsolationRequired);
+}
+
+bool RenderSVGContainer::hasNonIsolatedBlendingDescendants() const
+{
+    if (m_hasNonIsolatedBlendingDescendantsDirty) {
+        m_hasNonIsolatedBlendingDescendants = SVGRenderSupport::computeHasNonIsolatedBlendingDescendants(this);
+        m_hasNonIsolatedBlendingDescendantsDirty = false;
+    }
+    return m_hasNonIsolatedBlendingDescendants;
+}
+
+void RenderSVGContainer::descendantIsolationRequirementsChanged(DescendantIsolationState state)
+{
+    switch (state) {
+    case DescendantIsolationRequired:
+        m_hasNonIsolatedBlendingDescendants = true;
+        m_hasNonIsolatedBlendingDescendantsDirty = false;
+        break;
+    case DescendantIsolationNeedsUpdate:
+        if (m_hasNonIsolatedBlendingDescendantsDirty)
+            return;
+        m_hasNonIsolatedBlendingDescendantsDirty = true;
+        break;
+    }
+    if (SVGRenderSupport::willIsolateBlendingDescendantsForObject(this))
+        return;
+    if (parent())
+        parent()->descendantIsolationRequirementsChanged(state);
+}
+
+void RenderSVGContainer::paint(const PaintInfo& paintInfo, const LayoutPoint&)
 {
     SVGContainerPainter(*this).paint(paintInfo);
 }
 
 // addFocusRingRects is called from paintOutline and needs to be in the same coordinates as the paintOuline call
-void RenderSVGContainer::addFocusRingRects(Vector<LayoutRect>& rects, const LayoutPoint&, const RenderLayerModelObject*) const
+void RenderSVGContainer::addFocusRingRects(Vector<LayoutRect>& rects, const LayoutPoint&) const
 {
     LayoutRect paintRectInParent = LayoutRect(localToParentTransform().mapRect(paintInvalidationRectInLocalCoordinates()));
     if (!paintRectInParent.isEmpty())

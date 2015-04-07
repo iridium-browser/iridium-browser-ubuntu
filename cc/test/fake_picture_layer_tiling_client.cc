@@ -14,12 +14,10 @@ namespace cc {
 FakePictureLayerTilingClient::FakePictureLayerTilingClient()
     : tile_manager_(new FakeTileManager(&tile_manager_client_)),
       pile_(FakePicturePileImpl::CreateInfiniteFilledPile()),
-      twin_tiling_(NULL),
-      recycled_twin_tiling_(NULL),
-      allow_create_tile_(true),
-      max_tiles_for_interest_area_(10000),
-      skewport_target_time_in_seconds_(1.0f),
-      skewport_extrapolation_limit_in_content_pixels_(2000) {
+      twin_set_(nullptr),
+      twin_tiling_(nullptr),
+      recycled_twin_tiling_(nullptr),
+      max_tile_priority_bin_(TilePriority::NOW) {
 }
 
 FakePictureLayerTilingClient::FakePictureLayerTilingClient(
@@ -29,26 +27,19 @@ FakePictureLayerTilingClient::FakePictureLayerTilingClient(
       tile_manager_(
           new FakeTileManager(&tile_manager_client_, resource_pool_.get())),
       pile_(FakePicturePileImpl::CreateInfiniteFilledPile()),
-      twin_tiling_(NULL),
-      recycled_twin_tiling_(NULL),
-      allow_create_tile_(true),
-      max_tiles_for_interest_area_(10000),
-      skewport_target_time_in_seconds_(1.0f) {
+      twin_set_(nullptr),
+      twin_tiling_(nullptr),
+      recycled_twin_tiling_(nullptr),
+      max_tile_priority_bin_(TilePriority::NOW) {
 }
 
 FakePictureLayerTilingClient::~FakePictureLayerTilingClient() {
 }
 
 scoped_refptr<Tile> FakePictureLayerTilingClient::CreateTile(
-    PictureLayerTiling*,
+    float content_scale,
     const gfx::Rect& rect) {
-  if (!allow_create_tile_)
-    return scoped_refptr<Tile>();
   return tile_manager_->CreateTile(pile_.get(), tile_size_, rect, 1, 0, 0, 0);
-}
-
-RasterSource* FakePictureLayerTilingClient::GetRasterSource() {
-  return pile_.get();
 }
 
 void FakePictureLayerTilingClient::SetTileSize(const gfx::Size& tile_size) {
@@ -60,17 +51,9 @@ gfx::Size FakePictureLayerTilingClient::CalculateTileSize(
   return tile_size_;
 }
 
-size_t FakePictureLayerTilingClient::GetMaxTilesForInterestArea() const {
-  return max_tiles_for_interest_area_;
-}
-
-float FakePictureLayerTilingClient::GetSkewportTargetTimeInSeconds() const {
-  return skewport_target_time_in_seconds_;
-}
-
-int FakePictureLayerTilingClient::GetSkewportExtrapolationLimitInContentPixels()
+TilePriority::PriorityBin FakePictureLayerTilingClient::GetMaxTilePriorityBin()
     const {
-  return skewport_extrapolation_limit_in_content_pixels_;
+  return max_tile_priority_bin_;
 }
 
 const Region* FakePictureLayerTilingClient::GetPendingInvalidation() {
@@ -80,7 +63,13 @@ const Region* FakePictureLayerTilingClient::GetPendingInvalidation() {
 const PictureLayerTiling*
 FakePictureLayerTilingClient::GetPendingOrActiveTwinTiling(
     const PictureLayerTiling* tiling) const {
-  return twin_tiling_;
+  if (!twin_set_)
+    return twin_tiling_;
+  for (size_t i = 0; i < twin_set_->num_tilings(); ++i) {
+    if (twin_set_->tiling_at(i)->contents_scale() == tiling->contents_scale())
+      return twin_set_->tiling_at(i);
+  }
+  return nullptr;
 }
 
 PictureLayerTiling* FakePictureLayerTilingClient::GetRecycledTwinTiling(

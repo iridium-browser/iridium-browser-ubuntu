@@ -21,6 +21,7 @@
 
 using base::StringPiece;
 using std::min;
+using std::string;
 using testing::CreateFunctor;
 using testing::InSequence;
 using testing::Invoke;
@@ -115,8 +116,6 @@ class ReliableQuicStreamTest : public ::testing::TestWithParam<bool> {
 
     // New streams rely on having the peer's flow control receive window
     // negotiated in the config.
-    QuicConfigPeer::SetReceivedInitialFlowControlWindow(
-        session_->config(), initial_flow_control_window_bytes_);
     QuicConfigPeer::SetReceivedInitialStreamFlowControlWindow(
         session_->config(), initial_flow_control_window_bytes_);
 

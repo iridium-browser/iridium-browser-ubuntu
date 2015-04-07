@@ -38,6 +38,8 @@ class HotwordPrivateEventService : public BrowserContextKeyedAPI {
 
   void OnFinalizeSpeakerModel();
 
+  void OnSpeakerModelSaved();
+
  private:
   friend class BrowserContextKeyedAPIFactory<HotwordPrivateEventService>;
 
@@ -163,6 +165,19 @@ class HotwordPrivateFinalizeSpeakerModelFunction :
   bool RunSync() override;
 };
 
+class HotwordPrivateNotifySpeakerModelSavedFunction :
+    public ChromeSyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("hotwordPrivate.notifySpeakerModelSaved",
+                             HOTWORDPRIVATE_NOTIFYSPEAKERMODELSAVED)
+
+ protected:
+  ~HotwordPrivateNotifySpeakerModelSavedFunction() override {}
+
+  // ExtensionFunction:
+  bool RunSync() override;
+};
+
 class HotwordPrivateStopTrainingFunction :
     public ChromeSyncExtensionFunction {
  public:
@@ -174,6 +189,49 @@ class HotwordPrivateStopTrainingFunction :
 
   // ExtensionFunction:
   bool RunSync() override;
+};
+
+class HotwordPrivateGetLocalizedStringsFunction
+    : public ChromeSyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("hotwordPrivate.getLocalizedStrings",
+                             HOTWORDPRIVATE_GETLOCALIZEDSTRINGS)
+
+ protected:
+  ~HotwordPrivateGetLocalizedStringsFunction() override {}
+
+  // ExtensionFunction:
+  bool RunSync() override;
+};
+
+class HotwordPrivateSetAudioHistoryEnabledFunction
+    : public ChromeAsyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("hotwordPrivate.setAudioHistoryEnabled",
+                             HOTWORDPRIVATE_SETAUDIOHISTORYENABLED)
+
+ protected:
+  ~HotwordPrivateSetAudioHistoryEnabledFunction() override {}
+
+  // ExtensionFunction:
+  bool RunAsync() override;
+
+  void SetResultAndSendResponse(bool success, bool new_enabled_value);
+};
+
+class HotwordPrivateGetAudioHistoryEnabledFunction
+    : public ChromeAsyncExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("hotwordPrivate.getAudioHistoryEnabled",
+                             HOTWORDPRIVATE_GETAUDIOHISTORYENABLED)
+
+ protected:
+  ~HotwordPrivateGetAudioHistoryEnabledFunction() override {}
+
+  // ExtensionFunction:
+  bool RunAsync() override;
+
+  void SetResultAndSendResponse(bool success, bool new_enabled_value);
 };
 
 }  // namespace extensions

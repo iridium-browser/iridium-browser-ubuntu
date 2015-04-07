@@ -26,6 +26,7 @@
 
 #include "core/svg/SVGPathConsumer.h"
 #include "core/svg/SVGPathSeg.h"
+#include "platform/heap/Handle.h"
 #include "wtf/PassOwnPtr.h"
 #include "wtf/text/WTFString.h"
 
@@ -33,15 +34,20 @@ namespace blink {
 
 class SVGPathSource;
 
-class SVGPathParser {
-    WTF_MAKE_NONCOPYABLE(SVGPathParser); WTF_MAKE_FAST_ALLOCATED;
+class SVGPathParser final : public NoBaseWillBeGarbageCollected<SVGPathParser> {
+    WTF_MAKE_NONCOPYABLE(SVGPathParser); WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
 public:
-    SVGPathParser();
+    SVGPathParser(SVGPathSource* source, SVGPathConsumer* consumer)
+        : m_source(source)
+        , m_consumer(consumer)
+    {
+        ASSERT(m_source);
+        ASSERT(m_consumer);
+    }
 
     bool parsePathDataFromSource(PathParsingMode, bool checkForInitialMoveTo = true);
-    void setCurrentConsumer(SVGPathConsumer* consumer) { m_consumer = consumer; }
-    void setCurrentSource(SVGPathSource* source) { m_source = source; }
-    void cleanup();
+
+    void trace(Visitor*);
 
 private:
     bool decomposeArcToCubic(float, float, float, FloatPoint&, FloatPoint&, bool largeArcFlag, bool sweepFlag);
@@ -56,8 +62,8 @@ private:
     bool parseCurveToQuadraticSmoothSegment();
     bool parseArcToSegment();
 
-    SVGPathSource* m_source;
-    SVGPathConsumer* m_consumer;
+    RawPtrWillBeMember<SVGPathSource> m_source;
+    RawPtrWillBeMember<SVGPathConsumer> m_consumer;
     PathCoordinateMode m_mode;
     PathParsingMode m_pathParsingMode;
     SVGPathSegType m_lastCommand;

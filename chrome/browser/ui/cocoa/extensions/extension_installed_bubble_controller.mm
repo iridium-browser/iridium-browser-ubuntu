@@ -6,7 +6,6 @@
 
 #include "base/i18n/rtl.h"
 #include "base/mac/bundle_locations.h"
-#include "base/mac/mac_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -19,6 +18,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/chrome_style.h"
 #include "chrome/browser/ui/cocoa/browser_window_cocoa.h"
 #include "chrome/browser/ui/cocoa/browser_window_controller.h"
@@ -178,7 +178,7 @@ class ExtensionLoadedNotificationObserver
   [self removePageActionPreviewIfNecessary];
   extension_ = NULL;
   browser_ = NULL;
-
+  [closeButton_ setTrackingEnabled:NO];
   [super windowWillClose:notification];
 }
 
@@ -201,11 +201,8 @@ class ExtensionLoadedNotificationObserver
    clickedOnLink:(id)link
          atIndex:(NSUInteger)charIndex {
   DCHECK_EQ(promo_.get(), aTextView);
-  GURL promo_url =
-      signin::GetPromoURL(signin::SOURCE_EXTENSION_INSTALL_BUBBLE, false);
-  chrome::NavigateParams params(
-      chrome::GetSingletonTabNavigateParams(browser_, promo_url));
-  chrome::Navigate(&params);
+  chrome::ShowBrowserSignin(browser_,
+                            signin_metrics::SOURCE_EXTENSION_INSTALL_BUBBLE);
   return YES;
 }
 
@@ -356,7 +353,7 @@ class ExtensionLoadedNotificationObserver
     if (extensions::CommandsInfo::GetPageActionCommand(extension_) &&
         command_service->GetPageActionCommand(
             extension_->id(),
-            extensions::CommandService::ACTIVE_ONLY,
+            extensions::CommandService::ACTIVE,
             command,
             NULL)) {
       return true;
@@ -373,7 +370,7 @@ class ExtensionLoadedNotificationObserver
     if (extensions::CommandsInfo::GetBrowserActionCommand(extension_) &&
         command_service->GetBrowserActionCommand(
             extension_->id(),
-            extensions::CommandService::ACTIVE_ONLY,
+            extensions::CommandService::ACTIVE,
             command,
             NULL)) {
       return true;

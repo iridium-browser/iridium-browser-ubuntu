@@ -42,15 +42,16 @@ class ToolsQuicClientSessionTest
   ToolsQuicClientSessionTest()
       : connection_(
             new PacketSavingConnection(false, SupportedVersions(GetParam()))) {
-    session_.reset(new QuicClientSession(DefaultQuicConfig(), connection_,
-                                         /*is_secure=*/false));
+    session_.reset(new QuicClientSession(DefaultQuicConfig(), connection_));
     session_->InitializeSession(
         QuicServerId(kServerHostname, kPort, false, PRIVACY_MODE_DISABLED),
         &crypto_config_);
+    // Advance the time, because timers do not like uninitialized times.
+    connection_->AdvanceTime(QuicTime::Delta::FromSeconds(1));
   }
 
   void CompleteCryptoHandshake() {
-    ASSERT_TRUE(session_->CryptoConnect());
+    session_->CryptoConnect();
     CryptoTestUtils::HandshakeWithFakeServer(
         connection_, session_->GetCryptoStream());
   }

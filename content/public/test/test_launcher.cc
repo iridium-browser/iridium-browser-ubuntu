@@ -119,8 +119,8 @@ class WrapperTestLauncherDelegate : public base::TestLauncherDelegate {
   }
 
   // base::TestLauncherDelegate:
-  bool ShouldRunTest(const testing::TestCase* test_case,
-                     const testing::TestInfo* test_info) override;
+  bool ShouldRunTest(const std::string& test_case_name,
+                     const std::string& test_name) override;
   size_t RunTests(base::TestLauncher* test_launcher,
                   const std::vector<std::string>& test_names) override;
   size_t RetryTests(base::TestLauncher* test_launcher,
@@ -171,17 +171,16 @@ class WrapperTestLauncherDelegate : public base::TestLauncherDelegate {
 };
 
 bool WrapperTestLauncherDelegate::ShouldRunTest(
-    const testing::TestCase* test_case,
-    const testing::TestInfo* test_info) {
-  all_test_names_.insert(
-      std::string(test_case->name()) + "." + test_info->name());
+    const std::string& test_case_name,
+    const std::string& test_name) {
+  all_test_names_.insert(test_case_name + "." + test_name);
 
-  if (StartsWithASCII(test_info->name(), kManualTestPrefix, true) &&
-      !CommandLine::ForCurrentProcess()->HasSwitch(kRunManualTestsFlag)) {
+  if (StartsWithASCII(test_name, kManualTestPrefix, true) &&
+      !base::CommandLine::ForCurrentProcess()->HasSwitch(kRunManualTestsFlag)) {
     return false;
   }
 
-  if (StartsWithASCII(test_info->name(), kPreTestPrefix, true)) {
+  if (StartsWithASCII(test_name, kPreTestPrefix, true)) {
     // We will actually run PRE_ tests, but to ensure they run on the same shard
     // as dependent tests, handle all these details internally.
     return false;
@@ -316,18 +315,18 @@ void WrapperTestLauncherDelegate::DoRunTest(base::TestLauncher* test_launcher,
                                             const std::string& test_name) {
   std::string test_name_no_pre(RemoveAnyPrePrefixes(test_name));
 
-  CommandLine cmd_line(*CommandLine::ForCurrentProcess());
+  base::CommandLine cmd_line(*base::CommandLine::ForCurrentProcess());
   CHECK(launcher_delegate_->AdjustChildProcessCommandLine(
             &cmd_line, user_data_dir_map_[test_name_no_pre]));
 
-  CommandLine new_cmd_line(cmd_line.GetProgram());
-  CommandLine::SwitchMap switches = cmd_line.GetSwitches();
+  base::CommandLine new_cmd_line(cmd_line.GetProgram());
+  base::CommandLine::SwitchMap switches = cmd_line.GetSwitches();
 
   // Strip out gtest_output flag because otherwise we would overwrite results
   // of the other tests.
   switches.erase(base::kGTestOutputFlag);
 
-  for (CommandLine::SwitchMap::const_iterator iter = switches.begin();
+  for (base::CommandLine::SwitchMap::const_iterator iter = switches.begin();
        iter != switches.end(); ++iter) {
     new_cmd_line.AppendSwitchNative(iter->first, iter->second);
   }
@@ -436,8 +435,9 @@ int LaunchTests(TestLauncherDelegate* launcher_delegate,
   DCHECK(!g_launcher_delegate);
   g_launcher_delegate = launcher_delegate;
 
-  CommandLine::Init(argc, argv);
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine::Init(argc, argv);
+  const base::CommandLine* command_line =
+      base::CommandLine::ForCurrentProcess();
 
   if (command_line->HasSwitch(kHelpFlag)) {
     PrintUsage();

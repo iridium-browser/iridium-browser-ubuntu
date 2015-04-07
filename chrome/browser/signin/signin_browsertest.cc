@@ -18,6 +18,7 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
@@ -36,7 +37,7 @@ const char kNonSigninURL[] = "http://www.google.com";
 
 class SigninBrowserTest : public InProcessBrowserTest {
  public:
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     https_server_.reset(new net::SpawnedTestServer(
         net::SpawnedTestServer::TYPE_HTTPS,
         net::SpawnedTestServer::kLocalhost,
@@ -107,12 +108,16 @@ const bool kOneClickSigninEnabled = false;
 #define MAYBE_ProcessIsolation ProcessIsolation
 #endif
 IN_PROC_BROWSER_TEST_F(SigninBrowserTest, MAYBE_ProcessIsolation) {
+  // This test is not needed for the webview based sign-in code.
+  if (switches::IsEnableWebviewBasedSignin())
+    return;
+
   SigninClient* signin =
       ChromeSigninClientFactory::GetForProfile(browser()->profile());
   EXPECT_FALSE(signin->HasSigninProcess());
 
   ui_test_utils::NavigateToURL(browser(), signin::GetPromoURL(
-      signin::SOURCE_NTP_LINK, true));
+      signin_metrics::SOURCE_NTP_LINK, true));
   EXPECT_EQ(kOneClickSigninEnabled, signin->HasSigninProcess());
 
   // Navigating away should change the process.
@@ -120,7 +125,7 @@ IN_PROC_BROWSER_TEST_F(SigninBrowserTest, MAYBE_ProcessIsolation) {
   EXPECT_FALSE(signin->HasSigninProcess());
 
   ui_test_utils::NavigateToURL(browser(), signin::GetPromoURL(
-      signin::SOURCE_NTP_LINK, true));
+      signin_metrics::SOURCE_NTP_LINK, true));
   EXPECT_EQ(kOneClickSigninEnabled, signin->HasSigninProcess());
 
   content::WebContents* active_tab =
@@ -135,7 +140,7 @@ IN_PROC_BROWSER_TEST_F(SigninBrowserTest, MAYBE_ProcessIsolation) {
   // shouldn't change anything.
   chrome::NavigateParams params(chrome::GetSingletonTabNavigateParams(
       browser(),
-      GURL(signin::GetPromoURL(signin::SOURCE_NTP_LINK, false))));
+      GURL(signin::GetPromoURL(signin_metrics::SOURCE_NTP_LINK, false))));
   params.path_behavior = chrome::NavigateParams::IGNORE_AND_NAVIGATE;
   ShowSingletonTabOverwritingNTP(browser(), params);
   EXPECT_EQ(active_tab, browser()->tab_strip_model()->GetActiveWebContents());
@@ -156,11 +161,15 @@ IN_PROC_BROWSER_TEST_F(SigninBrowserTest, MAYBE_ProcessIsolation) {
 #endif
 
 IN_PROC_BROWSER_TEST_F(SigninBrowserTest, MAYBE_NotTrustedAfterRedirect) {
+  // This test is not needed for the webview based sign-in code.
+  if (switches::IsEnableWebviewBasedSignin())
+    return;
+
   SigninClient* signin =
       ChromeSigninClientFactory::GetForProfile(browser()->profile());
   EXPECT_FALSE(signin->HasSigninProcess());
 
-  GURL url = signin::GetPromoURL(signin::SOURCE_NTP_LINK, true);
+  GURL url = signin::GetPromoURL(signin_metrics::SOURCE_NTP_LINK, true);
   ui_test_utils::NavigateToURL(browser(), url);
   EXPECT_EQ(kOneClickSigninEnabled, signin->HasSigninProcess());
 
@@ -206,8 +215,14 @@ class BackOnNTPCommitObserver : public content::WebContentsObserver {
 // and initiates a back navigation between the point of Commit and
 // DidStopLoading of the NTP.
 IN_PROC_BROWSER_TEST_F(SigninBrowserTest, SigninSkipForNowAndGoBack) {
+  // This test is not needed for the webview based sign-in code.
+  // OneClickSigninHelper is not used.
+  if (switches::IsEnableWebviewBasedSignin())
+    return;
+
   GURL ntp_url(chrome::kChromeUINewTabURL);
-  GURL start_url = signin::GetPromoURL(signin::SOURCE_START_PAGE, false);
+  GURL start_url = signin::GetPromoURL(
+      signin_metrics::SOURCE_START_PAGE, false);
   GURL skip_url = signin::GetLandingURL("ntp", 1);
 
   SigninClient* signin =

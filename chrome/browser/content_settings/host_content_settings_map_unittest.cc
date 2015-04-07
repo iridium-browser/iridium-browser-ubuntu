@@ -56,13 +56,28 @@ TEST_F(HostContentSettingsMapTest, DefaultValues) {
                 GURL(chrome::kChromeUINewTabURL),
                 CONTENT_SETTINGS_TYPE_IMAGES,
                 std::string()));
-  {
-    host_content_settings_map->SetDefaultContentSetting(
-        CONTENT_SETTINGS_TYPE_PLUGINS, CONTENT_SETTING_ASK);
-    EXPECT_EQ(CONTENT_SETTING_ASK,
-              host_content_settings_map->GetDefaultContentSetting(
-                  CONTENT_SETTINGS_TYPE_PLUGINS, NULL));
-  }
+
+  host_content_settings_map->SetDefaultContentSetting(
+      CONTENT_SETTINGS_TYPE_PLUGINS, CONTENT_SETTING_ALLOW);
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            host_content_settings_map->GetDefaultContentSetting(
+                CONTENT_SETTINGS_TYPE_PLUGINS, NULL));
+  host_content_settings_map->SetDefaultContentSetting(
+      CONTENT_SETTINGS_TYPE_PLUGINS, CONTENT_SETTING_BLOCK);
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            host_content_settings_map->GetDefaultContentSetting(
+                CONTENT_SETTINGS_TYPE_PLUGINS, NULL));
+  host_content_settings_map->SetDefaultContentSetting(
+      CONTENT_SETTINGS_TYPE_PLUGINS, CONTENT_SETTING_ASK);
+  EXPECT_EQ(CONTENT_SETTING_ASK,
+            host_content_settings_map->GetDefaultContentSetting(
+                CONTENT_SETTINGS_TYPE_PLUGINS, NULL));
+  host_content_settings_map->SetDefaultContentSetting(
+      CONTENT_SETTINGS_TYPE_PLUGINS, CONTENT_SETTING_DETECT_IMPORTANT_CONTENT);
+  EXPECT_EQ(CONTENT_SETTING_DETECT_IMPORTANT_CONTENT,
+            host_content_settings_map->GetDefaultContentSetting(
+                CONTENT_SETTINGS_TYPE_PLUGINS, NULL));
+
   host_content_settings_map->SetDefaultContentSetting(
       CONTENT_SETTINGS_TYPE_POPUPS, CONTENT_SETTING_ALLOW);
   EXPECT_EQ(CONTENT_SETTING_ALLOW,
@@ -914,36 +929,32 @@ TEST_F(HostContentSettingsMapTest, GetContentSetting) {
 }
 
 TEST_F(HostContentSettingsMapTest, ShouldAllowAllContent) {
-  TestingProfile profile;
-  HostContentSettingsMap* host_content_settings_map =
-      profile.GetHostContentSettingsMap();
-
   GURL http_host("http://example.com/");
   GURL https_host("https://example.com/");
   GURL embedder("chrome://foo");
   GURL extension("chrome-extension://foo");
-  EXPECT_FALSE(host_content_settings_map->ShouldAllowAllContent(
+  EXPECT_FALSE(HostContentSettingsMap::ShouldAllowAllContent(
                    http_host, embedder, CONTENT_SETTINGS_TYPE_NOTIFICATIONS));
-  EXPECT_FALSE(host_content_settings_map->ShouldAllowAllContent(
+  EXPECT_FALSE(HostContentSettingsMap::ShouldAllowAllContent(
                    http_host, embedder, CONTENT_SETTINGS_TYPE_GEOLOCATION));
-  EXPECT_FALSE(host_content_settings_map->ShouldAllowAllContent(
+  EXPECT_FALSE(HostContentSettingsMap::ShouldAllowAllContent(
                    http_host, embedder, CONTENT_SETTINGS_TYPE_COOKIES));
-  EXPECT_TRUE(host_content_settings_map->ShouldAllowAllContent(
+  EXPECT_TRUE(HostContentSettingsMap::ShouldAllowAllContent(
                   https_host, embedder, CONTENT_SETTINGS_TYPE_COOKIES));
-  EXPECT_TRUE(host_content_settings_map->ShouldAllowAllContent(
+  EXPECT_TRUE(HostContentSettingsMap::ShouldAllowAllContent(
                   https_host, embedder, CONTENT_SETTINGS_TYPE_COOKIES));
-  EXPECT_TRUE(host_content_settings_map->ShouldAllowAllContent(
+  EXPECT_TRUE(HostContentSettingsMap::ShouldAllowAllContent(
                   embedder, http_host, CONTENT_SETTINGS_TYPE_COOKIES));
 #if defined(ENABLE_EXTENSIONS)
-  EXPECT_TRUE(host_content_settings_map->ShouldAllowAllContent(
+  EXPECT_TRUE(HostContentSettingsMap::ShouldAllowAllContent(
                   extension, extension, CONTENT_SETTINGS_TYPE_COOKIES));
 #else
-  EXPECT_FALSE(host_content_settings_map->ShouldAllowAllContent(
+  EXPECT_FALSE(HostContentSettingsMap::ShouldAllowAllContent(
                    extension, extension, CONTENT_SETTINGS_TYPE_COOKIES));
 #endif
-  EXPECT_FALSE(host_content_settings_map->ShouldAllowAllContent(
+  EXPECT_FALSE(HostContentSettingsMap::ShouldAllowAllContent(
                    extension, extension, CONTENT_SETTINGS_TYPE_PLUGINS));
-  EXPECT_FALSE(host_content_settings_map->ShouldAllowAllContent(
+  EXPECT_FALSE(HostContentSettingsMap::ShouldAllowAllContent(
                    extension, http_host, CONTENT_SETTINGS_TYPE_COOKIES));
 }
 

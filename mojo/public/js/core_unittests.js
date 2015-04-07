@@ -7,6 +7,13 @@ define([
     "mojo/public/js/core",
     "gc",
   ], function(expect, core, gc) {
+
+  var HANDLE_SIGNAL_READWRITABLE = core.HANDLE_SIGNAL_WRITABLE |
+                      core.HANDLE_SIGNAL_READABLE;
+  var HANDLE_SIGNAL_ALL = core.HANDLE_SIGNAL_WRITABLE |
+                      core.HANDLE_SIGNAL_READABLE |
+                      core.HANDLE_SIGNAL_PEER_CLOSED;
+
   runWithMessagePipe(testNop);
   runWithMessagePipe(testReadAndWriteMessage);
   runWithMessagePipeWithOptions(testNop);
@@ -15,7 +22,8 @@ define([
   runWithDataPipe(testReadAndWriteDataPipe);
   runWithDataPipeWithOptions(testNop);
   runWithDataPipeWithOptions(testReadAndWriteDataPipe);
-  testHandleToString();
+  runWithMessagePipe(testIsHandleMessagePipe);
+  runWithDataPipe(testIsHandleDataPipe);
   gc.collectGarbage();  // should not crash
   this.result = "PASS";
 
@@ -69,6 +77,36 @@ define([
   }
 
   function testReadAndWriteMessage(pipe) {
+    var wait = core.waitMany([], [], 0);
+    expect(wait.result).toBe(core.RESULT_INVALID_ARGUMENT);
+    expect(wait.index).toBe(null);
+    expect(wait.signalsState).toBe(null);
+
+    wait = core.wait(pipe.handle0, core.HANDLE_SIGNAL_READABLE, 0);
+    expect(wait.result).toBe(core.RESULT_DEADLINE_EXCEEDED);
+    expect(wait.signalsState.satisfiedSignals).toBe(
+           core.HANDLE_SIGNAL_WRITABLE);
+    expect(wait.signalsState.satisfiableSignals).toBe(HANDLE_SIGNAL_ALL);
+
+    wait = core.waitMany(
+                  [pipe.handle0, pipe.handle1],
+                  [core.HANDLE_SIGNAL_READABLE,core.HANDLE_SIGNAL_READABLE],
+                  0);
+    expect(wait.result).toBe(core.RESULT_DEADLINE_EXCEEDED);
+    expect(wait.index).toBe(null);
+    expect(wait.signalsState[0].satisfiedSignals).toBe(
+           core.HANDLE_SIGNAL_WRITABLE);
+    expect(wait.signalsState[0].satisfiableSignals).toBe(HANDLE_SIGNAL_ALL);
+    expect(wait.signalsState[1].satisfiedSignals).toBe(
+           core.HANDLE_SIGNAL_WRITABLE);
+    expect(wait.signalsState[1].satisfiableSignals).toBe(HANDLE_SIGNAL_ALL);
+
+    wait = core.wait(pipe.handle0, core.HANDLE_SIGNAL_WRITABLE, 0);
+    expect(wait.result).toBe(core.RESULT_OK);
+    expect(wait.signalsState.satisfiedSignals).toBe(
+           core.HANDLE_SIGNAL_WRITABLE);
+    expect(wait.signalsState.satisfiableSignals).toBe(HANDLE_SIGNAL_ALL);
+
     var senderData = new Uint8Array(42);
     for (var i = 0; i < senderData.length; ++i) {
       senderData[i] = i * i;
@@ -79,6 +117,19 @@ define([
       core.WRITE_MESSAGE_FLAG_NONE);
 
     expect(result).toBe(core.RESULT_OK);
+
+    wait = core.waitMany(
+                  [pipe.handle0, pipe.handle1],
+                  [core.HANDLE_SIGNAL_WRITABLE,core.HANDLE_SIGNAL_WRITABLE],
+                  0);
+    expect(wait.result).toBe(core.RESULT_OK);
+    expect(wait.index).toBe(0);
+    expect(wait.signalsState[0].satisfiedSignals).toBe(
+           core.HANDLE_SIGNAL_WRITABLE);
+    expect(wait.signalsState[0].satisfiableSignals).toBe(HANDLE_SIGNAL_ALL);
+    expect(wait.signalsState[1].satisfiedSignals).toBe(
+           HANDLE_SIGNAL_READWRITABLE);
+    expect(wait.signalsState[1].satisfiableSignals).toBe(HANDLE_SIGNAL_ALL);
 
     var read = core.readMessage(
       pipe.handle1, core.READ_MESSAGE_FLAG_NONE);
@@ -105,6 +156,16 @@ define([
     expect(write.result).toBe(core.RESULT_OK);
     expect(write.numBytes).toBe(42);
 
+    var peeked = core.readData(
+         pipe.consumerHandle,
+         core.READ_DATA_FLAG_PEEK | core.READ_DATA_FLAG_ALL_OR_NONE);
+    expect(peeked.result).toBe(core.RESULT_OK);
+    expect(peeked.buffer.byteLength).toBe(42);
+
+    var peeked_memory = new Uint8Array(peeked.buffer);
+    for (var i = 0; i < peeked_memory.length; ++i)
+      expect(peeked_memory[i]).toBe((i * i) & 0xFF);
+
     var read = core.readData(
       pipe.consumerHandle, core.READ_DATA_FLAG_ALL_OR_NONE);
 
@@ -116,18 +177,21 @@ define([
       expect(memory[i]).toBe((i * i) & 0xFF);
   }
 
-  function testHandleToString() {
-    var pipe = core.createDataPipe();
-    expect(pipe.consumerHandle.toString).toBeDefined();
+  function testIsHandleMessagePipe(pipe) {
+    expect(core.isHandle(123).toBeFalsy);
+    expect(core.isHandle("123").toBeFalsy);
+    expect(core.isHandle({}).toBeFalsy);
+    expect(core.isHandle([]).toBeFalsy);
+    expect(core.isHandle(undefined).toBeFalsy);
+    expect(core.isHandle(pipe).toBeFalsy);
+    expect(core.isHandle(pipe.handle0)).toBeTruthy();
+    expect(core.isHandle(pipe.handle1)).toBeTruthy();
+    expect(core.isHandle(null)).toBeTruthy();
+  }
 
-    var openHandleRE = /^\[mojo\:\:Handle \d+\]$/ // e.g. "[mojo::Handle 123]"
-    var openHandleString = pipe.consumerHandle.toString();
-    expect(openHandleString.match(openHandleRE)[0]).toEqual(openHandleString);
-
-    expect(core.close(pipe.producerHandle)).toBe(core.RESULT_OK);
-    expect(core.close(pipe.consumerHandle)).toBe(core.RESULT_OK);
-
-    expect(pipe.consumerHandle.toString()).toEqual("[mojo::Handle null]");
+  function testIsHandleDataPipe(pipe) {
+    expect(core.isHandle(pipe.consumerHandle)).toBeTruthy();
+    expect(core.isHandle(pipe.producerHandle)).toBeTruthy();
   }
 
 });

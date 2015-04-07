@@ -11,6 +11,8 @@
 #include "bindings/core/v8/V8Binding.h"
 #include "bindings/modules/v8/V8Response.h"
 #include "core/dom/ExecutionContext.h"
+#include "core/streams/Stream.h"
+#include "modules/fetch/BodyStreamBuffer.h"
 #include "modules/serviceworkers/ServiceWorkerGlobalScopeClient.h"
 #include "platform/RuntimeEnabledFeatures.h"
 #include "public/platform/WebServiceWorkerResponse.h"
@@ -19,6 +21,67 @@
 #include <v8.h>
 
 namespace blink {
+namespace {
+
+class StreamUploader : public BodyStreamBuffer::Observer {
+public:
+    StreamUploader(BodyStreamBuffer* buffer, PassRefPtrWillBeRawPtr<Stream> outStream)
+        : m_buffer(buffer), m_outStream(outStream)
+    {
+    }
+    ~StreamUploader() override { }
+    void onWrite() override
+    {
+        bool needToFlush = false;
+        while (RefPtr<DOMArrayBuffer> buf = m_buffer->read()) {
+            needToFlush = true;
+            m_outStream->addData(static_cast<const char*>(buf->data()), buf->byteLength());
+        }
+        if (needToFlush)
+            m_outStream->flush();
+    }
+    void onClose() override
+    {
+        m_outStream->finalize();
+        cleanup();
+    }
+    void onError() override
+    {
+        // If the stream is aborted soon after the stream is registered to the
+        // StreamRegistry, ServiceWorkerURLRequestJob may not notice the error
+        // and continue waiting forever.
+        // FIXME: Add new message to report the error to the browser process.
+        m_outStream->abort();
+        cleanup();
+    }
+    void trace(Visitor* visitor)
+    {
+        BodyStreamBuffer::Observer::trace(visitor);
+        visitor->trace(m_buffer);
+        visitor->trace(m_outStream);
+    }
+    void start()
+    {
+        m_buffer->registerObserver(this);
+        onWrite();
+        if (m_buffer->hasError())
+            return onError();
+        if (m_buffer->isClosed())
+            return onClose();
+    }
+
+private:
+    void cleanup()
+    {
+        m_buffer->unregisterObserver();
+        m_buffer.clear();
+        m_outStream.clear();
+    }
+    Member<BodyStreamBuffer> m_buffer;
+    RefPtrWillBeMember<Stream> m_outStream;
+};
+
+} // namespace
 
 class RespondWithObserver::ThenFunction final : public ScriptFunction {
 public:
@@ -74,11 +137,17 @@ void RespondWithObserver::contextDestroyed()
     m_state = Done;
 }
 
-void RespondWithObserver::didDispatchEvent()
+void RespondWithObserver::didDispatchEvent(bool defaultPrevented)
 {
     ASSERT(executionContext());
     if (m_state != Initial)
         return;
+
+    if (defaultPrevented) {
+        responseWasRejected();
+        return;
+    }
+
     ServiceWorkerGlobalScopeClient::from(executionContext())->didHandleFetchEvent(m_eventID);
     m_state = Done;
 }
@@ -87,7 +156,7 @@ void RespondWithObserver::respondWith(ScriptState* scriptState, const ScriptValu
 {
     ASSERT(RuntimeEnabledFeatures::serviceWorkerOnFetchEnabled());
     if (m_state != Initial) {
-        exceptionState.throwDOMException(InvalidStateError, "respondWith is already called.");
+        exceptionState.throwDOMException(InvalidStateError, "The fetch event has already been responded to.");
         return;
     }
 
@@ -127,6 +196,29 @@ void RespondWithObserver::responseWasFulfilled(const ScriptValue& value)
         responseWasRejected();
         return;
     }
+    if (response->bodyUsed()) {
+        responseWasRejected();
+        return;
+    }
+    response->setBodyUsed();
+    if (response->streamAccessed()) {
+        // FIXME: We don't support returning the stream accessed Response to the
+        // page.
+        executionContext()->addConsoleMessage(ConsoleMessage::create(JSMessageSource, ErrorMessageLevel, "Returning the stream accessed Response to the page is not supported."));
+        responseWasRejected();
+        return;
+    }
+    if (response->internalBuffer()) {
+        WebServiceWorkerResponse webResponse;
+        response->populateWebServiceWorkerResponse(webResponse);
+        RefPtrWillBeMember<Stream> outStream(Stream::create(executionContext(), ""));
+        webResponse.setStreamURL(outStream->url());
+        ServiceWorkerGlobalScopeClient::from(executionContext())->didHandleFetchEvent(m_eventID, webResponse);
+        StreamUploader* uploader = new StreamUploader(response->internalBuffer(), outStream);
+        uploader->start();
+        m_state = Done;
+        return;
+    }
     WebServiceWorkerResponse webResponse;
     response->populateWebServiceWorkerResponse(webResponse);
     ServiceWorkerGlobalScopeClient::from(executionContext())->didHandleFetchEvent(m_eventID, webResponse);
@@ -140,6 +232,11 @@ RespondWithObserver::RespondWithObserver(ExecutionContext* context, int eventID,
     , m_frameType(frameType)
     , m_state(Initial)
 {
+}
+
+void RespondWithObserver::trace(Visitor* visitor)
+{
+    ContextLifecycleObserver::trace(visitor);
 }
 
 } // namespace blink

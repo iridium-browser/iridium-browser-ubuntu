@@ -55,11 +55,13 @@
 #include "skia/ext/platform_canvas.h"
 #include "third_party/WebKit/public/platform/WebCursorInfo.h"
 #include "third_party/WebKit/public/platform/WebGraphicsContext3D.h"
+#include "third_party/WebKit/public/platform/WebPoint.h"
 #include "third_party/WebKit/public/platform/WebRect.h"
 #include "third_party/WebKit/public/platform/WebScreenInfo.h"
 #include "third_party/WebKit/public/platform/WebSize.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/web/WebDeviceEmulationParams.h"
+#include "third_party/WebKit/public/web/WebNode.h"
 #include "third_party/WebKit/public/web/WebPagePopup.h"
 #include "third_party/WebKit/public/web/WebPopupMenu.h"
 #include "third_party/WebKit/public/web/WebPopupMenuInfo.h"
@@ -68,16 +70,15 @@
 #include "third_party/skia/include/core/SkShader.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/gfx/frame_time.h"
-#include "ui/gfx/point_conversions.h"
-#include "ui/gfx/rect_conversions.h"
-#include "ui/gfx/size_conversions.h"
+#include "ui/gfx/geometry/point_conversions.h"
+#include "ui/gfx/geometry/rect_conversions.h"
+#include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/gl/gl_switches.h"
 #include "ui/surface/transport_dib.h"
 
 #if defined(OS_ANDROID)
 #include <android/keycodes.h>
-#include "base/android/build_info.h"
 #include "content/renderer/android/synchronous_compositor_factory.h"
 #endif
 
@@ -98,7 +99,9 @@ using blink::WebKeyboardEvent;
 using blink::WebMouseEvent;
 using blink::WebMouseWheelEvent;
 using blink::WebNavigationPolicy;
+using blink::WebNode;
 using blink::WebPagePopup;
+using blink::WebPoint;
 using blink::WebPopupMenu;
 using blink::WebPopupMenuInfo;
 using blink::WebPopupType;
@@ -153,16 +156,78 @@ ui::TextInputMode ConvertInputMode(const blink::WebString& input_mode) {
   return it->second;
 }
 
-bool IsThreadedCompositingEnabled() {
-  content::RenderThreadImpl* impl = content::RenderThreadImpl::current();
-  return impl && !!impl->compositor_message_loop_proxy().get();
-}
-
 // TODO(brianderson): Replace the hard-coded threshold with a fraction of
 // the BeginMainFrame interval.
 // 4166us will allow 1/4 of a 60Hz interval or 1/2 of a 120Hz interval to
 // be spent in input hanlders before input starts getting throttled.
 const int kInputHandlingTimeThrottlingThresholdMicroseconds = 4166;
+
+int64 GetEventLatencyMicros(const WebInputEvent& event, base::TimeTicks now) {
+  return (now - base::TimeDelta::FromSecondsD(event.timeStampSeconds))
+      .ToInternalValue();
+}
+
+void LogInputEventLatencyUma(const WebInputEvent& event, base::TimeTicks now) {
+  UMA_HISTOGRAM_CUSTOM_COUNTS(
+      "Event.AggregatedLatency.Renderer2",
+      GetEventLatencyMicros(event, now),
+      1,
+      10000000,
+      100);
+
+#define CASE_TYPE(t) \
+    case WebInputEvent::t: \
+      UMA_HISTOGRAM_CUSTOM_COUNTS( \
+          "Event.Latency.Renderer2." #t, \
+          GetEventLatencyMicros(event, now), \
+          1, \
+          10000000, \
+          100); \
+      break;
+
+  switch(event.type) {
+    CASE_TYPE(Undefined);
+    CASE_TYPE(MouseDown);
+    CASE_TYPE(MouseUp);
+    CASE_TYPE(MouseMove);
+    CASE_TYPE(MouseEnter);
+    CASE_TYPE(MouseLeave);
+    CASE_TYPE(ContextMenu);
+    CASE_TYPE(MouseWheel);
+    CASE_TYPE(RawKeyDown);
+    CASE_TYPE(KeyDown);
+    CASE_TYPE(KeyUp);
+    CASE_TYPE(Char);
+    CASE_TYPE(GestureScrollBegin);
+    CASE_TYPE(GestureScrollEnd);
+    CASE_TYPE(GestureScrollUpdate);
+    CASE_TYPE(GestureFlingStart);
+    CASE_TYPE(GestureFlingCancel);
+    CASE_TYPE(GestureShowPress);
+    CASE_TYPE(GestureTap);
+    CASE_TYPE(GestureTapUnconfirmed);
+    CASE_TYPE(GestureTapDown);
+    CASE_TYPE(GestureTapCancel);
+    CASE_TYPE(GestureDoubleTap);
+    CASE_TYPE(GestureTwoFingerTap);
+    CASE_TYPE(GestureLongPress);
+    CASE_TYPE(GestureLongTap);
+    CASE_TYPE(GesturePinchBegin);
+    CASE_TYPE(GesturePinchEnd);
+    CASE_TYPE(GesturePinchUpdate);
+    CASE_TYPE(TouchStart);
+    CASE_TYPE(TouchMove);
+    CASE_TYPE(TouchEnd);
+    CASE_TYPE(TouchCancel);
+    default:
+      // Must include default to let blink::WebInputEvent add new event types
+      // before they're added here.
+      DLOG(WARNING) << "Unhandled WebInputEvent type: " << event.type;
+      break;
+  }
+
+#undef CASE_TYPE
+}
 
 }  // namespace
 
@@ -198,7 +263,8 @@ class RenderWidget::ScreenMetricsEmulator {
 
  private:
   void Reapply();
-  void Apply(float top_controls_layout_height,
+  void Apply(bool top_controls_shrink_blink_size,
+             float top_controls_height,
              gfx::Rect resizer_rect,
              bool is_fullscreen);
 
@@ -235,8 +301,10 @@ RenderWidget::ScreenMetricsEmulator::ScreenMetricsEmulator(
   original_screen_info_ = widget_->screen_info_;
   original_view_screen_rect_ = widget_->view_screen_rect_;
   original_window_screen_rect_ = widget_->window_screen_rect_;
-  Apply(widget_->top_controls_layout_height_, widget_->resizer_rect_,
-      widget_->is_fullscreen_);
+  Apply(widget_->top_controls_shrink_blink_size_,
+        widget_->top_controls_height_,
+        widget_->resizer_rect_,
+        widget_->is_fullscreen_);
 }
 
 RenderWidget::ScreenMetricsEmulator::~ScreenMetricsEmulator() {
@@ -248,7 +316,8 @@ RenderWidget::ScreenMetricsEmulator::~ScreenMetricsEmulator() {
   widget_->window_screen_rect_ = original_window_screen_rect_;
   widget_->Resize(original_size_,
                   original_physical_backing_size_,
-                  widget_->top_controls_layout_height_,
+                  widget_->top_controls_shrink_blink_size_,
+                  widget_->top_controls_height_,
                   original_visible_viewport_size_,
                   widget_->resizer_rect_,
                   widget_->is_fullscreen_,
@@ -262,12 +331,15 @@ void RenderWidget::ScreenMetricsEmulator::ChangeEmulationParams(
 }
 
 void RenderWidget::ScreenMetricsEmulator::Reapply() {
-  Apply(widget_->top_controls_layout_height_, widget_->resizer_rect_,
-      widget_->is_fullscreen_);
+  Apply(widget_->top_controls_shrink_blink_size_,
+        widget_->top_controls_height_,
+        widget_->resizer_rect_,
+        widget_->is_fullscreen_);
 }
 
 void RenderWidget::ScreenMetricsEmulator::Apply(
-    float top_controls_layout_height,
+    bool top_controls_shrink_blink_size,
+    float top_controls_height,
     gfx::Rect resizer_rect,
     bool is_fullscreen) {
   applied_widget_rect_.set_size(gfx::Size(params_.viewSize));
@@ -325,9 +397,14 @@ void RenderWidget::ScreenMetricsEmulator::Apply(
 
   gfx::Size physical_backing_size = gfx::ToCeiledSize(gfx::ScaleSize(
       original_size_, original_screen_info_.deviceScaleFactor));
-  widget_->Resize(applied_widget_rect_.size(), physical_backing_size,
-      top_controls_layout_height, applied_widget_rect_.size(), resizer_rect,
-      is_fullscreen, NO_RESIZE_ACK);
+  widget_->Resize(applied_widget_rect_.size(),
+                  physical_backing_size,
+                  top_controls_shrink_blink_size,
+                  top_controls_height,
+                  applied_widget_rect_.size(),
+                  resizer_rect,
+                  is_fullscreen,
+                  NO_RESIZE_ACK);
 }
 
 void RenderWidget::ScreenMetricsEmulator::OnResizeMessage(
@@ -338,8 +415,10 @@ void RenderWidget::ScreenMetricsEmulator::OnResizeMessage(
   original_physical_backing_size_ = params.physical_backing_size;
   original_screen_info_ = params.screen_info;
   original_visible_viewport_size_ = params.visible_viewport_size;
-  Apply(params.top_controls_layout_height, params.resizer_rect,
-      params.is_fullscreen);
+  Apply(params.top_controls_shrink_blink_size,
+        params.top_controls_height,
+        params.resizer_rect,
+        params.is_fullscreen);
 
   if (need_ack) {
     widget_->set_next_paint_is_resize_ack();
@@ -382,10 +461,12 @@ RenderWidget::RenderWidget(blink::WebPopupType popup_type,
                            bool never_visible)
     : routing_id_(MSG_ROUTING_NONE),
       surface_id_(0),
-      webwidget_(NULL),
+      compositor_deps_(nullptr),
+      webwidget_(nullptr),
       opener_id_(MSG_ROUTING_NONE),
       init_complete_(false),
-      top_controls_layout_height_(0.f),
+      top_controls_shrink_blink_size_(false),
+      top_controls_height_(0.f),
       next_paint_flags_(0),
       auto_resize_mode_(false),
       need_update_rect_for_auto_resize_(false),
@@ -439,12 +520,13 @@ RenderWidget::~RenderWidget() {
 
 // static
 RenderWidget* RenderWidget::Create(int32 opener_id,
+                                   CompositorDependencies* compositor_deps,
                                    blink::WebPopupType popup_type,
                                    const blink::WebScreenInfo& screen_info) {
   DCHECK(opener_id != MSG_ROUTING_NONE);
   scoped_refptr<RenderWidget> widget(
       new RenderWidget(popup_type, screen_info, false, false, false));
-  if (widget->Init(opener_id)) {  // adds reference on success.
+  if (widget->Init(opener_id, compositor_deps)) {  // adds reference on success.
     return widget.get();
   }
   return NULL;
@@ -466,14 +548,15 @@ WebWidget* RenderWidget::CreateWebWidget(RenderWidget* render_widget) {
   return NULL;
 }
 
-bool RenderWidget::Init(int32 opener_id) {
-  return DoInit(opener_id,
-                RenderWidget::CreateWebWidget(this),
+bool RenderWidget::Init(int32 opener_id,
+                        CompositorDependencies* compositor_deps) {
+  return DoInit(opener_id, compositor_deps, RenderWidget::CreateWebWidget(this),
                 new ViewHostMsg_CreateWidget(opener_id, popup_type_,
                                              &routing_id_, &surface_id_));
 }
 
 bool RenderWidget::DoInit(int32 opener_id,
+                          CompositorDependencies* compositor_deps,
                           WebWidget* web_widget,
                           IPC::SyncMessage* create_widget_message) {
   DCHECK(!webwidget_);
@@ -481,6 +564,7 @@ bool RenderWidget::DoInit(int32 opener_id,
   if (opener_id != MSG_ROUTING_NONE)
     opener_id_ = opener_id;
 
+  compositor_deps_ = compositor_deps;
   webwidget_ = web_widget;
 
   bool result = RenderThread::Get()->Send(create_widget_message);
@@ -651,7 +735,8 @@ bool RenderWidget::Send(IPC::Message* message) {
 
 void RenderWidget::Resize(const gfx::Size& new_size,
                           const gfx::Size& physical_backing_size,
-                          float top_controls_layout_height,
+                          bool top_controls_shrink_blink_size,
+                          float top_controls_height,
                           const gfx::Size& visible_viewport_size,
                           const gfx::Rect& resizer_rect,
                           bool is_fullscreen,
@@ -669,11 +754,13 @@ void RenderWidget::Resize(const gfx::Size& new_size,
 
   if (compositor_) {
     compositor_->setViewportSize(new_size, physical_backing_size);
-    compositor_->SetTopControlsLayoutHeight(top_controls_layout_height);
+    compositor_->SetTopControlsShrinkBlinkSize(top_controls_shrink_blink_size);
+    compositor_->SetTopControlsHeight(top_controls_height);
   }
 
   physical_backing_size_ = physical_backing_size;
-  top_controls_layout_height_ = top_controls_layout_height;
+  top_controls_shrink_blink_size_ = top_controls_shrink_blink_size;
+  top_controls_height_ = top_controls_height;
   visible_viewport_size_ = visible_viewport_size;
   resizer_rect_ = resizer_rect;
 
@@ -683,7 +770,8 @@ void RenderWidget::Resize(const gfx::Size& new_size,
     WillToggleFullscreen();
   is_fullscreen_ = is_fullscreen;
 
-  webwidget_->setTopControlsLayoutHeight(top_controls_layout_height);
+  webwidget_->setTopControlsLayoutHeight(top_controls_shrink_blink_size_
+      ? top_controls_height : 0.f);
 
   if (size_ != new_size) {
     size_ = new_size;
@@ -723,7 +811,8 @@ void RenderWidget::ResizeSynchronously(
     const gfx::Size& visible_viewport_size) {
   Resize(new_position.size(),
          new_position.size(),
-         top_controls_layout_height_,
+         top_controls_shrink_blink_size_,
+         top_controls_height_,
          visible_viewport_size,
          gfx::Rect(),
          is_fullscreen_,
@@ -750,7 +839,7 @@ void RenderWidget::OnClose() {
   // If there is a Send call on the stack, then it could be dangerous to close
   // now.  Post a task that only gets invoked when there are no nested message
   // loops.
-  base::MessageLoop::current()->PostNonNestableTask(
+  RenderThread::Get()->GetTaskRunner()->PostNonNestableTask(
       FROM_HERE, base::Bind(&RenderWidget::Close, this));
 
   // Balances the AddRef taken when we called AddRoute.
@@ -779,10 +868,14 @@ void RenderWidget::OnResize(const ViewMsg_Resize_Params& params) {
 
   screen_info_ = params.screen_info;
   SetDeviceScaleFactor(screen_info_.deviceScaleFactor);
-  Resize(params.new_size, params.physical_backing_size,
-         params.top_controls_layout_height,
-         params.visible_viewport_size, params.resizer_rect,
-         params.is_fullscreen, SEND_RESIZE_ACK);
+  Resize(params.new_size,
+         params.physical_backing_size,
+         params.top_controls_shrink_blink_size,
+         params.top_controls_height,
+         params.visible_viewport_size,
+         params.resizer_rect,
+         params.is_fullscreen,
+         SEND_RESIZE_ACK);
 
   if (orientation_changed)
     OnOrientationChange();
@@ -855,7 +948,8 @@ scoped_ptr<cc::OutputSurface> RenderWidget::CreateOutputSurface(bool fallback) {
   }
 #endif
 
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
   bool use_software = fallback;
   if (command_line.HasSwitch(switches::kDisableGpuCompositing))
     use_software = true;
@@ -872,7 +966,7 @@ scoped_ptr<cc::OutputSurface> RenderWidget::CreateOutputSurface(bool fallback) {
 
   uint32 output_surface_id = next_output_surface_id_++;
   if (command_line.HasSwitch(switches::kEnableDelegatedRenderer)) {
-    DCHECK(IsThreadedCompositingEnabled());
+    DCHECK(compositor_deps_->GetCompositorImplThreadTaskRunner());
     return scoped_ptr<cc::OutputSurface>(
         new DelegatedCompositorOutputSurface(routing_id(),
                                              output_surface_id,
@@ -896,8 +990,7 @@ scoped_ptr<cc::OutputSurface> RenderWidget::CreateOutputSurface(bool fallback) {
     // Composite-to-mailbox is currently used for layout tests in order to cause
     // them to draw inside in the renderer to do the readback there. This should
     // no longer be the case when crbug.com/311404 is fixed.
-    DCHECK(IsThreadedCompositingEnabled() ||
-           RenderThreadImpl::current()->layout_test_mode());
+    DCHECK(RenderThreadImpl::current()->layout_test_mode());
     cc::ResourceFormat format = cc::RGBA_8888;
     if (base::SysInfo::IsLowEndDevice())
       format = cc::RGB_565;
@@ -958,7 +1051,11 @@ void RenderWidget::OnHandleInputEvent(const blink::WebInputEvent* input_event,
         *static_cast<const WebKeyboardEvent*>(input_event);
     // Some keys are special and it's essential that no events get blocked.
     if (key_event.nativeKeyCode != AKEYCODE_TAB &&
-        key_event.nativeKeyCode != AKEYCODE_DPAD_CENTER)
+        key_event.nativeKeyCode != AKEYCODE_DPAD_CENTER &&
+        key_event.nativeKeyCode != AKEYCODE_DPAD_LEFT &&
+        key_event.nativeKeyCode != AKEYCODE_DPAD_RIGHT &&
+        key_event.nativeKeyCode != AKEYCODE_DPAD_UP &&
+        key_event.nativeKeyCode != AKEYCODE_DPAD_DOWN)
       ime_event_guard_maybe.reset(new ImeEventGuard(this));
   }
 #endif
@@ -970,10 +1067,8 @@ void RenderWidget::OnHandleInputEvent(const blink::WebInputEvent* input_event,
   if (base::TimeTicks::IsHighResNowFastAndReliable())
     start_time = base::TimeTicks::HighResNow();
 
-  const char* const event_name =
-      WebInputEventTraits::GetName(input_event->type);
   TRACE_EVENT1("renderer", "RenderWidget::OnHandleInputEvent",
-               "event", event_name);
+               "event", WebInputEventTraits::GetName(input_event->type));
   TRACE_EVENT_SYNTHETIC_DELAY_BEGIN("blink.HandleInputEvent");
   TRACE_EVENT_FLOW_STEP0(
       "input",
@@ -981,34 +1076,17 @@ void RenderWidget::OnHandleInputEvent(const blink::WebInputEvent* input_event,
       TRACE_ID_DONT_MANGLE(latency_info.trace_id),
       "HanldeInputEventMain");
 
+  // If we don't have a high res timer, these metrics won't be accurate enough
+  // to be worth collecting. Note that this does introduce some sampling bias.
+  if (!start_time.is_null())
+    LogInputEventLatencyUma(*input_event, start_time);
+
   scoped_ptr<cc::SwapPromiseMonitor> latency_info_swap_promise_monitor;
   ui::LatencyInfo swap_latency_info(latency_info);
   if (compositor_) {
     latency_info_swap_promise_monitor =
         compositor_->CreateLatencyInfoSwapPromiseMonitor(&swap_latency_info)
             .Pass();
-  }
-
-  if (base::TimeTicks::IsHighResNowFastAndReliable()) {
-    // If we don't have a high res timer, these metrics won't be accurate enough
-    // to be worth collecting. Note that this does introduce some sampling bias.
-
-    base::TimeDelta now = base::TimeDelta::FromInternalValue(
-        base::TimeTicks::HighResNow().ToInternalValue());
-
-    int64 delta =
-        static_cast<int64>((now.InSecondsF() - input_event->timeStampSeconds) *
-                           base::Time::kMicrosecondsPerSecond);
-
-    UMA_HISTOGRAM_CUSTOM_COUNTS(
-        "Event.AggregatedLatency.Renderer2", delta, 1, 10000000, 100);
-    base::HistogramBase* counter_for_type = base::Histogram::FactoryGet(
-        base::StringPrintf("Event.Latency.Renderer2.%s", event_name),
-        1,
-        10000000,
-        100,
-        base::HistogramBase::kUmaTargetedHistogramFlag);
-    counter_for_type->Add(delta);
   }
 
   bool prevent_default = false;
@@ -1082,16 +1160,21 @@ void RenderWidget::OnHandleInputEvent(const blink::WebInputEvent* input_event,
     }
   }
 
-  bool event_type_can_be_rate_limited =
-      input_event->type == WebInputEvent::MouseMove ||
-      input_event->type == WebInputEvent::MouseWheel;
+  // Send mouse wheel events and their disposition to the compositor thread, so
+  // that they can be used to produce the elastic overscroll effect on Mac.
+  if (input_event->type == WebInputEvent::MouseWheel) {
+    ObserveWheelEventAndResult(
+        static_cast<const WebMouseWheelEvent&>(*input_event), processed);
+  }
 
   bool frame_pending = compositor_ && compositor_->BeginMainFrameRequested();
 
   // If we don't have a fast and accurate HighResNow, we assume the input
   // handlers are heavy and rate limit them.
-  bool rate_limiting_wanted = true;
-  if (base::TimeTicks::IsHighResNowFastAndReliable()) {
+  bool rate_limiting_wanted =
+      input_event->type == WebInputEvent::MouseMove ||
+      input_event->type == WebInputEvent::MouseWheel;
+  if (rate_limiting_wanted && !start_time.is_null()) {
       base::TimeTicks end_time = base::TimeTicks::HighResNow();
       total_input_handling_time_this_frame_ += (end_time - start_time);
       rate_limiting_wanted =
@@ -1112,20 +1195,23 @@ void RenderWidget::OnHandleInputEvent(const blink::WebInputEvent* input_event,
     ack.latency = swap_latency_info;
     scoped_ptr<IPC::Message> response(
         new InputHostMsg_HandleInputEvent_ACK(routing_id_, ack));
-    if (rate_limiting_wanted && event_type_can_be_rate_limited &&
-        frame_pending && !is_hidden_) {
+    if (rate_limiting_wanted && frame_pending && !is_hidden_) {
       // We want to rate limit the input events in this case, so we'll wait for
       // painting to finish before ACKing this message.
       TRACE_EVENT_INSTANT0("renderer",
         "RenderWidget::OnHandleInputEvent ack throttled",
         TRACE_EVENT_SCOPE_THREAD);
       if (pending_input_event_ack_) {
+        TRACE_EVENT_ASYNC_END0("input", "RenderWidget::ThrottledInputEventAck",
+                               pending_input_event_ack_.get());
         // As two different kinds of events could cause us to postpone an ack
         // we send it now, if we have one pending. The Browser should never
         // send us the same kind of event we are delaying the ack for.
         Send(pending_input_event_ack_.release());
       }
       pending_input_event_ack_ = response.Pass();
+      TRACE_EVENT_ASYNC_BEGIN0("input", "RenderWidget::ThrottledInputEventAck",
+                               pending_input_event_ack_.get());
       if (compositor_)
         compositor_->NotifyInputThrottledUntilCommit();
     } else {
@@ -1182,8 +1268,11 @@ void RenderWidget::ClearFocus() {
 }
 
 void RenderWidget::FlushPendingInputEventAck() {
-  if (pending_input_event_ack_)
+  if (pending_input_event_ack_) {
+    TRACE_EVENT_ASYNC_END0("input", "RenderWidget::ThrottledInputEventAck",
+                           pending_input_event_ack_.get());
     Send(pending_input_event_ack_.release());
+  }
   total_input_handling_time_this_frame_ = base::TimeDelta();
 }
 
@@ -1220,8 +1309,7 @@ void RenderWidget::AutoResizeCompositor()  {
 void RenderWidget::initializeLayerTreeView() {
   DCHECK(!host_closing_);
 
-  compositor_ =
-      RenderWidgetCompositor::Create(this, IsThreadedCompositingEnabled());
+  compositor_ = RenderWidgetCompositor::Create(this, compositor_deps_);
   compositor_->setViewportSize(size_, physical_backing_size_);
   if (init_complete_)
     StartCompositor();
@@ -1355,10 +1443,8 @@ void RenderWidget::didCompleteSwapBuffers() {
 }
 
 void RenderWidget::scheduleComposite() {
-  RenderThreadImpl* render_thread = RenderThreadImpl::current();
-  // render_thread may be NULL in tests.
-  if (render_thread && render_thread->compositor_message_loop_proxy().get() &&
-      compositor_) {
+  if (compositor_ &&
+      compositor_deps_->GetCompositorImplThreadTaskRunner().get()) {
     compositor_->setNeedsAnimate();
   }
 }
@@ -1425,7 +1511,7 @@ void RenderWidget::closeWidgetSoon() {
   // could be closed before the JS finishes executing.  So instead, post a
   // message back to the message loop, which won't run until the JS is
   // complete, and then the Close message can be sent.
-  base::MessageLoop::current()->PostTask(
+  RenderThread::Get()->GetTaskRunner()->PostTask(
       FROM_HERE, base::Bind(&RenderWidget::DoDeferredClose, this));
 }
 
@@ -1542,9 +1628,7 @@ void RenderWidget::OnImeSetComposition(
     // sure we are in a consistent state.
     Send(new InputHostMsg_ImeCancelComposition(routing_id()));
   }
-#if defined(OS_MACOSX) || defined(USE_AURA) || defined(OS_ANDROID)
   UpdateCompositionInfo(true);
-#endif
 }
 
 void RenderWidget::OnImeConfirmComposition(const base::string16& text,
@@ -1561,9 +1645,7 @@ void RenderWidget::OnImeConfirmComposition(const base::string16& text,
   else
     webwidget_->confirmComposition(WebWidget::DoNotKeepSelection);
   handling_input_event_ = false;
-#if defined(OS_MACOSX) || defined(USE_AURA) || defined(OS_ANDROID)
   UpdateCompositionInfo(true);
-#endif
 }
 
 void RenderWidget::OnRepaint(gfx::Size size_to_paint) {
@@ -1896,9 +1978,7 @@ void RenderWidget::UpdateSelectionBounds() {
     }
   }
 
-#if defined(OS_MACOSX) || defined(USE_AURA) || defined(OS_ANDROID)
   UpdateCompositionInfo(false);
-#endif
 }
 
 // Check blink::WebTextInputType and ui::TextInputType is kept in sync.
@@ -1951,15 +2031,11 @@ ui::TextInputType RenderWidget::GetTextInputType() {
   return ui::TEXT_INPUT_TYPE_NONE;
 }
 
-#if defined(OS_MACOSX) || defined(USE_AURA) || defined(OS_ANDROID)
 void RenderWidget::UpdateCompositionInfo(bool should_update_range) {
 #if defined(OS_ANDROID)
-  // Sending composition info makes sense only in Lollipop (API level 21)
-  // and above due to the API availability.
-  if (base::android::BuildInfo::GetInstance()->sdk_int() < 21)
-    return;
-#endif
-
+  // TODO(yukawa): Start sending character bounds when the browser side
+  // implementation becomes ready (crbug.com/424866).
+#else
   gfx::Range range = gfx::Range();
   if (should_update_range) {
     GetCompositionRange(&range);
@@ -1975,6 +2051,7 @@ void RenderWidget::UpdateCompositionInfo(bool should_update_range) {
   composition_range_ = range;
   Send(new InputHostMsg_ImeCompositionRangeChanged(
       routing_id(), composition_range_, composition_character_bounds_));
+#endif
 }
 
 void RenderWidget::GetCompositionCharacterBounds(
@@ -2009,7 +2086,6 @@ bool RenderWidget::ShouldUpdateCompositionInfo(
   }
   return false;
 }
-#endif
 
 #if defined(OS_ANDROID)
 void RenderWidget::DidChangeBodyBackgroundColor(SkColor bg_color) {
@@ -2022,6 +2098,19 @@ void RenderWidget::DidChangeBodyBackgroundColor(SkColor bg_color) {
     body_background_color_ = bg_color;
     Send(new ViewHostMsg_DidChangeBodyBackgroundColor(routing_id(), bg_color));
   }
+}
+
+bool RenderWidget::DoesRecordFullLayer() const {
+  SynchronousCompositorFactory* synchronous_compositor_factory =
+      SynchronousCompositorFactory::GetInstance();
+
+  // We assume that the absence of synchronous_compositor_factory
+  // means we are in Chrome. In chrome, we want to clip, i.e.
+  // *not* to record the full layer.
+  if (!synchronous_compositor_factory)
+    return false;
+
+  return synchronous_compositor_factory->RecordFullLayer();
 }
 #endif
 
@@ -2051,10 +2140,23 @@ void RenderWidget::resetInputMethod() {
       Send(new InputHostMsg_ImeCancelComposition(routing_id()));
   }
 
-#if defined(OS_MACOSX) || defined(USE_AURA) || defined(OS_ANDROID)
   UpdateCompositionInfo(true);
-#endif
 }
+
+#if defined(OS_ANDROID)
+void RenderWidget::showUnhandledTapUIIfNeeded(
+    const WebPoint& tapped_position,
+    const WebNode& tapped_node,
+    bool page_changed) {
+  DCHECK(handling_input_event_);
+  bool should_trigger = !page_changed && tapped_node.isTextNode() &&
+                        !tapped_node.isContentEditable();
+  if (should_trigger) {
+    Send(new ViewHostMsg_ShowUnhandledTapUIIfNeeded(routing_id_,
+        tapped_position.x, tapped_position.y));
+  }
+}
+#endif
 
 void RenderWidget::didHandleGestureEvent(
     const WebGestureEvent& event,
@@ -2079,7 +2181,11 @@ void RenderWidget::StartCompositor() {
   // at all.
   if (never_visible_)
     return;
-  compositor_->setSurfaceReady();
+  // In tests without a RenderThreadImpl, don't set ready as this kicks
+  // off creating output surfaces that the test can't create.
+  if (!RenderThreadImpl::current())
+    return;
+  compositor_->StartCompositor();
 }
 
 void RenderWidget::SchedulePluginMove(const WebPluginGeometry& move) {
@@ -2121,6 +2227,35 @@ bool RenderWidget::WillHandleMouseEvent(const blink::WebMouseEvent& event) {
 bool RenderWidget::WillHandleGestureEvent(
     const blink::WebGestureEvent& event) {
   return false;
+}
+
+void RenderWidget::ObserveWheelEventAndResult(
+    const blink::WebMouseWheelEvent& wheel_event,
+    bool event_processed) {
+  if (!compositor_deps_->IsElasticOverscrollEnabled())
+    return;
+
+  // Blink does not accurately compute scroll bubbling or overscroll. For now,
+  // assume that an unprocessed event was entirely an overscroll, and that a
+  // processed event was entirely scroll.
+  // TODO(ccameron): Retrieve an accurate scroll result from Blink.
+  // http://crbug.com/442859
+  cc::InputHandlerScrollResult scroll_result;
+  if (event_processed) {
+    scroll_result.did_scroll = true;
+  } else {
+    scroll_result.did_overscroll_root = true;
+    scroll_result.unused_scroll_delta =
+        gfx::Vector2dF(-wheel_event.deltaX, -wheel_event.deltaY);
+  }
+
+  RenderThreadImpl* render_thread = RenderThreadImpl::current();
+  InputHandlerManager* input_handler_manager =
+      render_thread ? render_thread->input_handler_manager() : NULL;
+  if (input_handler_manager) {
+    input_handler_manager->ObserveWheelEventAndResultOnMainThread(
+        routing_id_, wheel_event, scroll_result);
+  }
 }
 
 void RenderWidget::hasTouchEventHandlers(bool has_handlers) {
@@ -2172,7 +2307,7 @@ scoped_ptr<WebGraphicsContext3DCommandBufferImpl>
 RenderWidget::CreateGraphicsContext3D() {
   if (!webwidget_)
     return scoped_ptr<WebGraphicsContext3DCommandBufferImpl>();
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisableGpuCompositing))
     return scoped_ptr<WebGraphicsContext3DCommandBufferImpl>();
   if (!RenderThreadImpl::current())

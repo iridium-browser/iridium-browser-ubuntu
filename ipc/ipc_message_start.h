@@ -45,7 +45,6 @@ enum IPCMessageStart {
   DeviceLightMsgStart,
   DeviceMotionMsgStart,
   DeviceOrientationMsgStart,
-  DesktopNotificationMsgStart,
   GeolocationMsgStart,
   AudioMsgStart,
   MidiMsgStart,
@@ -113,6 +112,10 @@ enum IPCMessageStart {
   ExtensionUtilityMsgStart,
   GeofencingMsgStart,
   LayoutTestMsgStart,
+  DnsPrefetchMsgStart,
+  BluetoothMsgStart,
+  NavigatorConnectMsgStart,
+  CastMediaMsgStart,
   LastIPCMsgStart  // Must come last.
 };
 

@@ -80,12 +80,12 @@ UserCloudPolicyManagerChromeOS::UserCloudPolicyManagerChromeOS(
     const scoped_refptr<base::SequencedTaskRunner>& task_runner,
     const scoped_refptr<base::SequencedTaskRunner>& file_task_runner,
     const scoped_refptr<base::SequencedTaskRunner>& io_task_runner)
-    : CloudPolicyManager(
-          PolicyNamespaceKey(dm_protocol::kChromeUserPolicyType, std::string()),
-          store.get(),
-          task_runner,
-          file_task_runner,
-          io_task_runner),
+    : CloudPolicyManager(dm_protocol::kChromeUserPolicyType,
+                         std::string(),
+                         store.get(),
+                         task_runner,
+                         file_task_runner,
+                         io_task_runner),
       store_(store.Pass()),
       external_data_manager_(external_data_manager.Pass()),
       component_policy_cache_path_(component_policy_cache_path),
@@ -125,15 +125,13 @@ void UserCloudPolicyManagerChromeOS::Connect(
   scoped_ptr<CloudPolicyClient> cloud_policy_client(
       new CloudPolicyClient(std::string(), std::string(),
                             kPolicyVerificationKeyHash, user_affiliation,
-                            NULL, device_management_service,
-                            request_context));
+                            device_management_service, request_context));
+  CreateComponentCloudPolicyService(component_policy_cache_path_,
+                                    request_context, cloud_policy_client.get());
   core()->Connect(cloud_policy_client.Pass());
   client()->AddObserver(this);
 
   external_data_manager_->Connect(request_context);
-
-  CreateComponentCloudPolicyService(component_policy_cache_path_,
-                                    request_context);
 
   // Determine the next step after the CloudPolicyService initializes.
   if (service()->IsInitializationComplete()) {
@@ -321,8 +319,10 @@ void UserCloudPolicyManagerChromeOS::OnOAuth2PolicyTokenFetched(
   if (error.state() == GoogleServiceAuthError::NONE) {
     // Start client registration. Either OnRegistrationStateChanged() or
     // OnClientError() will be called back.
-    client()->Register(em::DeviceRegisterRequest::USER, policy_token,
-                       std::string(), false, std::string(), std::string());
+    client()->Register(em::DeviceRegisterRequest::USER,
+                       em::DeviceRegisterRequest::FLAVOR_USER_REGISTRATION,
+                       policy_token, std::string(), std::string(),
+                       std::string());
   } else {
     // Failed to get a token, stop waiting and use an empty policy.
     CancelWaitForPolicyFetch();

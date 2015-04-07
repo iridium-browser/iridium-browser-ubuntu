@@ -5,7 +5,8 @@
 # distutils language = c++
 
 cimport c_core
-cimport c_environment
+cimport c_export  # needed so the init function gets exported
+cimport c_thunks
 
 
 from cpython.buffer cimport PyBUF_CONTIG
@@ -21,14 +22,16 @@ from libc.stdint cimport int32_t, int64_t, uint32_t, uint64_t, uintptr_t
 import ctypes
 import threading
 
+import mojo.system_impl
+
 def SetSystemThunks(system_thunks_as_object):
   """Bind the basic Mojo Core functions.
 
   This should only be used by the embedder.
   """
-  cdef const c_core.MojoSystemThunks* system_thunks = (
-      <const c_core.MojoSystemThunks*><uintptr_t>system_thunks_as_object)
-  c_core.MojoSetSystemThunks(system_thunks)
+  cdef const c_thunks.MojoSystemThunks* system_thunks = (
+      <const c_thunks.MojoSystemThunks*><uintptr_t>system_thunks_as_object)
+  c_thunks.MojoSetSystemThunks(system_thunks)
 
 HANDLE_INVALID = c_core.MOJO_HANDLE_INVALID
 RESULT_OK = c_core.MOJO_RESULT_OK
@@ -53,6 +56,7 @@ DEADLINE_INDEFINITE = c_core.MOJO_DEADLINE_INDEFINITE
 HANDLE_SIGNAL_NONE = c_core.MOJO_HANDLE_SIGNAL_NONE
 HANDLE_SIGNAL_READABLE = c_core.MOJO_HANDLE_SIGNAL_READABLE
 HANDLE_SIGNAL_WRITABLE = c_core.MOJO_HANDLE_SIGNAL_WRITABLE
+HANDLE_SIGNAL_PEER_CLOSED = c_core.MOJO_HANDLE_SIGNAL_PEER_CLOSED
 WRITE_MESSAGE_FLAG_NONE = c_core.MOJO_WRITE_MESSAGE_FLAG_NONE
 READ_MESSAGE_FLAG_NONE = c_core.MOJO_READ_MESSAGE_FLAG_NONE
 READ_MESSAGE_FLAG_MAY_DISCARD = c_core.MOJO_READ_MESSAGE_FLAG_MAY_DISCARD
@@ -62,7 +66,11 @@ READ_DATA_FLAG_NONE = c_core.MOJO_READ_DATA_FLAG_NONE
 READ_DATA_FLAG_ALL_OR_NONE = c_core.MOJO_READ_DATA_FLAG_ALL_OR_NONE
 READ_DATA_FLAG_DISCARD = c_core.MOJO_READ_DATA_FLAG_DISCARD
 READ_DATA_FLAG_QUERY = c_core.MOJO_READ_DATA_FLAG_QUERY
+READ_DATA_FLAG_PEEK = c_core.MOJO_READ_DATA_FLAG_PEEK
 MAP_BUFFER_FLAG_NONE = c_core.MOJO_MAP_BUFFER_FLAG_NONE
+
+_WAITMANY_NO_SIGNAL_STATE_ERRORS = [RESULT_INVALID_ARGUMENT,
+                                    RESULT_RESOURCE_EXHAUSTED]
 
 def GetTimeTicksNow():
   """Monotonically increasing tick count representing "right now."
@@ -198,13 +206,19 @@ def WaitMany(handles_and_signals, deadline):
   See mojo/public/c/system/functions.h
   """
   cdef uint32_t length = len(handles_and_signals)
+  cdef uint32_t result_index = <uint32_t>(-1)
+
   cdef _ScopedMemory handles_alloc = _ScopedMemory(
       sizeof(c_core.MojoHandle) * length)
   cdef _ScopedMemory signals_alloc = _ScopedMemory(
       sizeof(c_core.MojoHandleSignals) * length)
+  cdef _ScopedMemory states_alloc = _ScopedMemory(
+      sizeof(c_core.MojoHandleSignalsState) * length)
   cdef c_core.MojoHandle* handles = <c_core.MojoHandle*>handles_alloc.memory
   cdef c_core.MojoHandleSignals* signals = (
       <c_core.MojoHandleSignals*>signals_alloc.memory)
+  cdef c_core.MojoHandleSignalsState* states = (
+      <c_core.MojoHandleSignalsState*>states_alloc.memory)
   cdef int index = 0
   for (h, s) in handles_and_signals:
     handles[index] = (<Handle?>h)._mojo_handle
@@ -213,8 +227,20 @@ def WaitMany(handles_and_signals, deadline):
   cdef c_core.MojoResult result = c_core.MOJO_RESULT_OK
   cdef c_core.MojoDeadline cdeadline = deadline
   with nogil:
-    result = c_core.MojoWaitMany(handles, signals, length, cdeadline)
-  return result
+    result = c_core.MojoWaitMany(handles, signals, length, cdeadline,
+                                 &result_index, states)
+
+  returned_result_index = None
+  if result_index != <uint32_t>(-1):
+    returned_result_index = result_index
+
+  returned_states = None
+  if result not in _WAITMANY_NO_SIGNAL_STATE_ERRORS:
+    returned_states = [(states[i].satisfied_signals,
+                        states[i].satisfiable_signals) for i in xrange(length)]
+
+  return (result, returned_result_index, returned_states)
+
 
 cdef class DataPipeTwoPhaseBuffer(object):
   """Return value for two phases read and write.
@@ -336,16 +362,23 @@ cdef class Handle(object):
     cdef c_core.MojoHandle handle = self._mojo_handle
     cdef c_core.MojoHandleSignals csignals = signals
     cdef c_core.MojoDeadline cdeadline = deadline
+    cdef c_core.MojoHandleSignalsState signal_states
     cdef c_core.MojoResult result
     with nogil:
-      result = c_core.MojoWait(handle, csignals, cdeadline)
-    return result
+      result = c_core.MojoWait(handle, csignals, cdeadline, &signal_states)
+
+    returned_states = None
+    if result not in _WAITMANY_NO_SIGNAL_STATE_ERRORS:
+      returned_states = (signal_states.satisfied_signals,
+            signal_states.satisfiable_signals)
+
+    return (result, returned_states)
 
   def AsyncWait(self, signals, deadline, callback):
     cdef c_core.MojoHandle handle = self._mojo_handle
     cdef c_core.MojoHandleSignals csignals = signals
     cdef c_core.MojoDeadline cdeadline = deadline
-    cdef c_environment.MojoAsyncWaitID wait_id = _ASYNC_WAITER.AsyncWait(
+    wait_id = _ASYNC_WAITER.AsyncWait(
         handle,
         csignals,
         cdeadline,
@@ -732,19 +765,34 @@ class DuplicateSharedBufferOptions(object):
 _RUN_LOOPS = threading.local()
 
 
-cdef class RunLoop(object):
+class RunLoop(object):
   """RunLoop to use when using asynchronous operations on handles."""
 
-  cdef c_environment.CRunLoop* c_run_loop
-
   def __init__(self):
-    assert not <uintptr_t>(c_environment.CRunLoopCurrent())
-    self.c_run_loop = new c_environment.CRunLoop()
+    self.__run_loop = mojo.system_impl.RunLoop()
     _RUN_LOOPS.loop = id(self)
 
-  def __dealloc__(self):
+  def __del__(self):
     del _RUN_LOOPS.loop
-    del self.c_run_loop
+
+  def Run(self):
+    """Run the runloop until Quit is called."""
+    return self.__run_loop.Run()
+
+  def RunUntilIdle(self):
+    """Run the runloop until Quit is called or no operation is waiting."""
+    return self.__run_loop.RunUntilIdle()
+
+  def Quit(self):
+    """Quit the runloop."""
+    return self.__run_loop.Quit()
+
+  def PostDelayedTask(self, runnable, delay=0):
+    """
+    Post a task on the runloop. This must be called from the thread owning the
+    runloop.
+    """
+    return self.__run_loop.PostDelayedTask(runnable, delay)
 
   @staticmethod
   def Current():
@@ -752,26 +800,5 @@ cdef class RunLoop(object):
       return ctypes.cast(_RUN_LOOPS.loop, ctypes.py_object).value
     return None
 
-  def Run(self):
-    """Run the runloop until Quit is called."""
-    self.c_run_loop.Run()
 
-  def RunUntilIdle(self):
-    """Run the runloop until Quit is called or no operation is waiting."""
-    self.c_run_loop.RunUntilIdle()
-
-  def Quit(self):
-    """Quit the runloop."""
-    self.c_run_loop.Quit()
-
-  def PostDelayedTask(self, runnable, delay=0):
-    """
-    Post a task on the runloop. This must be called from the thread owning the
-    runloop.
-    """
-    cdef c_environment.CClosure closure = c_environment.BuildClosure(runnable)
-    self.c_run_loop.PostDelayedTask(closure, delay)
-
-
-cdef c_environment.CEnvironment* _ENVIRONMENT = new c_environment.CEnvironment()
-cdef c_environment.PythonAsyncWaiter* _ASYNC_WAITER = new c_environment.PythonAsyncWaiter()
+_ASYNC_WAITER = mojo.system_impl.AsyncWaiter()

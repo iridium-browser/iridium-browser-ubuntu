@@ -15,11 +15,13 @@
 #include "base/test/test_timeouts.h"
 #include "base/values.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
+#include "content/browser/web_contents/web_contents_impl.h"
 #include "content/browser/web_contents/web_contents_view.h"
 #include "content/common/input/synthetic_web_input_event_builders.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/dom_operation_notification_details.h"
 #include "content/public/browser/histogram_fetcher.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_frame_host.h"
@@ -257,6 +259,26 @@ scoped_ptr<net::test_server::HttpResponse> CrossSiteRedirectResponseHandler(
 
 }  // namespace
 
+bool NavigateIframeToURL(WebContents* web_contents,
+                         std::string iframe_id,
+                         const GURL& url) {
+  // TODO(creis): This should wait for LOAD_STOP, but cross-site subframe
+  // navigations generate extra DidStartLoading and DidStopLoading messages.
+  // Until we replace swappedout:// with frame proxies, we need to listen for
+  // something else.  For now, we trigger NEW_SUBFRAME navigations and listen
+  // for commit.  See https://crbug.com/436250.
+  std::string script = base::StringPrintf(
+      "setTimeout(\""
+      "var iframes = document.getElementById('%s');iframes.src='%s';"
+      "\",0)",
+      iframe_id.c_str(), url.spec().c_str());
+  WindowedNotificationObserver load_observer(
+      NOTIFICATION_NAV_ENTRY_COMMITTED,
+      Source<NavigationController>(&web_contents->GetController()));
+  bool result = ExecuteScript(web_contents, script);
+  load_observer.Wait();
+  return result;
+}
 
 GURL GetFileUrlWithQuery(const base::FilePath& path,
                          const std::string& query_string) {
@@ -269,7 +291,7 @@ GURL GetFileUrlWithQuery(const base::FilePath& path,
   return url;
 }
 
-void WaitForLoadStop(WebContents* web_contents) {
+void WaitForLoadStopWithoutSuccessCheck(WebContents* web_contents) {
   // In many cases, the load may have finished before we get here.  Only wait if
   // the tab still has a pending navigation.
   if (web_contents->IsLoading()) {
@@ -280,11 +302,25 @@ void WaitForLoadStop(WebContents* web_contents) {
   }
 }
 
+bool WaitForLoadStop(WebContents* web_contents) {
+  WaitForLoadStopWithoutSuccessCheck(web_contents);
+  return IsLastCommittedEntryOfPageType(web_contents, PAGE_TYPE_NORMAL);
+}
+
+bool IsLastCommittedEntryOfPageType(WebContents* web_contents,
+                                    content::PageType page_type) {
+  NavigationEntry* last_entry =
+      web_contents->GetController().GetLastCommittedEntry();
+  if (!last_entry)
+    return false;
+  return last_entry->GetPageType() == page_type;
+}
+
 void CrashTab(WebContents* web_contents) {
   RenderProcessHost* rph = web_contents->GetRenderProcessHost();
   RenderProcessHostWatcher watcher(
       rph, RenderProcessHostWatcher::WATCH_FOR_PROCESS_EXIT);
-  base::KillProcess(rph->GetHandle(), 0, false);
+  rph->Shutdown(0, false);
   watcher.Wait();
 }
 
@@ -823,6 +859,68 @@ bool DOMMessageQueue::WaitForMessage(std::string* message) {
   *message = message_queue_.front();
   message_queue_.pop();
   return true;
+}
+
+class WebContentsAddedObserver::RenderViewCreatedObserver
+    : public WebContentsObserver {
+ public:
+  explicit RenderViewCreatedObserver(WebContents* web_contents)
+      : WebContentsObserver(web_contents),
+        render_view_created_called_(false),
+        main_frame_created_called_(false) {}
+
+  // WebContentsObserver:
+  void RenderViewCreated(RenderViewHost* rvh) override {
+    render_view_created_called_ = true;
+  }
+
+  void RenderFrameCreated(RenderFrameHost* rfh) override {
+    if (rfh == web_contents()->GetMainFrame())
+      main_frame_created_called_ = true;
+  }
+
+  bool render_view_created_called_;
+  bool main_frame_created_called_;
+};
+
+WebContentsAddedObserver::WebContentsAddedObserver()
+    : web_contents_created_callback_(
+          base::Bind(&WebContentsAddedObserver::WebContentsCreated,
+                     base::Unretained(this))),
+      web_contents_(NULL) {
+  WebContentsImpl::FriendZone::AddCreatedCallbackForTesting(
+      web_contents_created_callback_);
+}
+
+WebContentsAddedObserver::~WebContentsAddedObserver() {
+  WebContentsImpl::FriendZone::RemoveCreatedCallbackForTesting(
+      web_contents_created_callback_);
+}
+
+void WebContentsAddedObserver::WebContentsCreated(WebContents* web_contents) {
+  DCHECK(!web_contents_);
+  web_contents_ = web_contents;
+  child_observer_.reset(new RenderViewCreatedObserver(web_contents));
+
+  if (runner_.get())
+    runner_->QuitClosure().Run();
+}
+
+WebContents* WebContentsAddedObserver::GetWebContents() {
+  if (web_contents_)
+    return web_contents_;
+
+  runner_ = new MessageLoopRunner();
+  runner_->Run();
+  return web_contents_;
+}
+
+bool WebContentsAddedObserver::RenderViewCreatedCalled() {
+  if (child_observer_) {
+    return child_observer_->render_view_created_called_ &&
+           child_observer_->main_frame_created_called_;
+  }
+  return false;
 }
 
 }  // namespace content

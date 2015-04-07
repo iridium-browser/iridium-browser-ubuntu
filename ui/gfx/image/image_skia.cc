@@ -12,11 +12,11 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/threading/non_thread_safe.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/image/image_skia_source.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/size.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/gfx/switches.h"
 
@@ -320,7 +320,7 @@ ImageSkia ImageSkia::CreateFrom1xBitmap(const SkBitmap& bitmap) {
 scoped_ptr<ImageSkia> ImageSkia::DeepCopy() const {
   ImageSkia* copy = new ImageSkia;
   if (isNull())
-    return scoped_ptr<ImageSkia>(copy);
+    return make_scoped_ptr(copy);
 
   CHECK(CanRead());
 
@@ -333,7 +333,7 @@ scoped_ptr<ImageSkia> ImageSkia::DeepCopy() const {
   // thread so that other thread can use this.
   if (!copy->isNull())
     copy->storage_->DetachFromThread();
-  return scoped_ptr<ImageSkia>(copy);
+  return make_scoped_ptr(copy);
 }
 
 bool ImageSkia::BackedBySameObjectAs(const gfx::ImageSkia& other) const {

@@ -22,6 +22,7 @@ using base::StringPiece;
 using std::map;
 using std::min;
 using std::pair;
+using std::string;
 using std::vector;
 using testing::_;
 using testing::AnyNumber;
@@ -44,7 +45,7 @@ class MockStream : public ReliableQuicStream {
                                                 const string& details));
   MOCK_METHOD1(Reset, void(QuicRstStreamErrorCode error));
   MOCK_METHOD0(OnCanWrite, void());
-  virtual QuicPriority EffectivePriority() const override {
+  QuicPriority EffectivePriority() const override {
     return QuicUtils::HighestPriority();
   }
   virtual bool IsFlowControlEnabled() const {

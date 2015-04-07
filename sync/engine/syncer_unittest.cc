@@ -277,7 +277,7 @@ class SyncerTest : public testing::Test,
             session_.get()));
   }
 
-  virtual void SetUp() {
+  void SetUp() override {
     dir_maker_.SetUp();
     mock_server_.reset(new MockConnectionManager(directory(),
                                                  &cancelation_signal_));
@@ -324,7 +324,7 @@ class SyncerTest : public testing::Test,
     mock_server_->SetKeystoreKey("encryption_key");
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     model_type_registry_->UnregisterDirectoryTypeDebugInfoObserver(
         &debug_info_cache_);
     mock_server_.reset();
@@ -4679,7 +4679,7 @@ TEST_F(SyncerBookmarksTest, LocalDeleteRemoteChangeConflict) {
 
   // Trigger a getupdates that modifies the bookmark. The update should  be
   // clobbered by the local delete.
-  mock_server_->AddUpdateBookmark(GetServerId(), Id(), "dummy", 10, 10,
+  mock_server_->AddUpdateBookmark(GetServerId(), Id::GetRoot(), "dummy", 10, 10,
                                   local_cache_guid(), local_id_.GetServerId());
 
   SyncShareNudge();

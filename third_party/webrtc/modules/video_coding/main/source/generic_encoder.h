@@ -37,7 +37,7 @@ public:
     * Callback implementation - codec encode complete
     */
     int32_t Encoded(
-        EncodedImage& encodedImage,
+        const EncodedImage& encodedImage,
         const CodecSpecificInfo* codecSpecificInfo = NULL,
         const RTPFragmentationHeader* fragmentationHeader = NULL);
     /*
@@ -84,7 +84,7 @@ public:
     */
     int32_t InitEncode(const VideoCodec* settings,
                        int32_t numberOfCores,
-                       uint32_t maxPayloadSize);
+                       size_t maxPayloadSize);
     /**
     * Encode raw image
     * inputFrame        : Frame containing raw image

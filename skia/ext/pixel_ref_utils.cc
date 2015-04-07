@@ -51,7 +51,6 @@ class GatherPixelRefDevice : public SkBitmapDevice {
                        DiscardablePixelRefSet* pixel_ref_set)
       : SkBitmapDevice(bm), pixel_ref_set_(pixel_ref_set) {}
 
-  void clear(SkColor color) override {}
   void drawPaint(const SkDraw& draw, const SkPaint& paint) override {
     SkBitmap bitmap;
     if (GetBitmapFromPaint(paint, &bitmap)) {
@@ -94,8 +93,8 @@ class GatherPixelRefDevice : public SkBitmapDevice {
     if (GetBitmapFromPaint(paint, &bitmap)) {
       SkRect mapped_rect;
       draw.fMatrix->mapRect(&mapped_rect, rect);
-      mapped_rect.intersect(SkRect::Make(draw.fRC->getBounds()));
-      AddBitmap(bitmap, mapped_rect);
+      if (mapped_rect.intersect(SkRect::Make(draw.fRC->getBounds())))
+        AddBitmap(bitmap, mapped_rect);
     }
   }
   void drawOval(const SkDraw& draw,
@@ -328,8 +327,8 @@ class GatherPixelRefDevice : public SkBitmapDevice {
   void AddBitmap(const SkBitmap& bm, const SkRect& rect) {
     SkRect canvas_rect = SkRect::MakeWH(width(), height());
     SkRect paint_rect = SkRect::MakeEmpty();
-    paint_rect.intersect(rect, canvas_rect);
-    pixel_ref_set_->Add(bm.pixelRef(), paint_rect);
+    if (paint_rect.intersect(rect, canvas_rect))
+      pixel_ref_set_->Add(bm.pixelRef(), paint_rect);
   }
 
   bool GetBitmapFromPaint(const SkPaint& paint, SkBitmap* bm) {
@@ -352,15 +351,17 @@ void PixelRefUtils::GatherDiscardablePixelRefs(
   pixel_refs->clear();
   DiscardablePixelRefSet pixel_ref_set(pixel_refs);
 
+  SkRect picture_bounds = picture->cullRect();
+  SkIRect picture_ibounds = picture_bounds.roundOut();
   SkBitmap empty_bitmap;
-  empty_bitmap.setInfo(SkImageInfo::MakeUnknown(picture->width(), picture->height()));
+  empty_bitmap.setInfo(SkImageInfo::MakeUnknown(picture_ibounds.width(),
+                                                picture_ibounds.height()));
 
   GatherPixelRefDevice device(empty_bitmap, &pixel_ref_set);
   SkNoSaveLayerCanvas canvas(&device);
 
-  canvas.clipRect(SkRect::MakeWH(picture->width(), picture->height()),
-                  SkRegion::kIntersect_Op,
-                  false);
+  // Draw the picture pinned against our top/left corner.
+  canvas.translate(-picture_bounds.left(), -picture_bounds.top());
   canvas.drawPicture(picture);
 }
 

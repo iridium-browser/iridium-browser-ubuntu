@@ -135,7 +135,6 @@ class EventSender : public base::SupportsWeakPtr<EventSender> {
   void GestureScrollBegin(gin::Arguments* args);
   void GestureScrollEnd(gin::Arguments* args);
   void GestureScrollUpdate(gin::Arguments* args);
-  void GestureScrollUpdateWithoutPropagation(gin::Arguments* args);
   void GestureTap(gin::Arguments* args);
   void GestureTapDown(gin::Arguments* args);
   void GestureShowPress(gin::Arguments* args);
@@ -165,7 +164,8 @@ class EventSender : public base::SupportsWeakPtr<EventSender> {
 
   void SendCurrentTouchEvent(blink::WebInputEvent::Type);
 
-  void GestureEvent(blink::WebInputEvent::Type, gin::Arguments*);
+  void GestureEvent(blink::WebInputEvent::Type,
+                    gin::Arguments*);
 
   void UpdateClickCountForButton(blink::WebMouseEvent::Button);
 
@@ -178,6 +178,7 @@ class EventSender : public base::SupportsWeakPtr<EventSender> {
   void DoMouseUp(const blink::WebMouseEvent&);
   void DoMouseMove(const blink::WebMouseEvent&);
   void ReplaySavedEvents();
+  bool HandleInputEventOnViewOrPopup(const blink::WebInputEvent&);
 
   bool force_layout_on_events() const { return force_layout_on_events_; }
   void set_force_layout_on_events(bool force) {

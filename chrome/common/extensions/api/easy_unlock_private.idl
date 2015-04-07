@@ -4,7 +4,7 @@
 
 // <code>chrome.easyUnlockPrivate</code> API that provides hooks to Chrome to
 // be used by Easy Unlock component app.
-[nodoc] namespace easyUnlockPrivate {
+namespace easyUnlockPrivate {
   // Signature algorithms supported by the crypto library methods used by
   // Easy Unlock.
   enum SignatureType {
@@ -173,6 +173,25 @@
   // most one user.
   callback GetUserInfoCallback = void(UserInfo[] users);
 
+  // Callback for |getSignInChallenge()| method.
+  // In case challenge could not be created both |challenge| and |signedNonce|
+  // will be empty.
+  // If the requested nonce could not be signed, |signedNonce| will be empty.
+  // |challenge|: The sign in challenge to be used when signing in the user
+  //     currently associated with the Easy Unlock service.
+  // |signedNonce|: Nonce signed by Chrome OS TPM, provided as an argument to
+  //     the |getSignInChallenge()| function and signed by the TPM key
+  //     associated with the user.
+  callback SignInChallengeCallback = void(optional ArrayBuffer challenge,
+                                          optional ArrayBuffer signedNonce);
+
+  // Callback for the |getConnectionInfo()| method.
+  // |rssi|: The received signal strength from the remote device in dB.
+  // |transmit_power| The local transmission power to the remote device in dB.
+  // |max_transmit_power| The maximum transmission power that can be achieved.
+  callback ConnectionInfoCallback = void(
+      long rssi, long transmit_power, long max_transmit_power);
+
   interface Functions {
     // Gets localized strings required to render the API.
     //
@@ -286,7 +305,10 @@
     static void getRemoteDevices(GetRemoteDevicesCallback callback);
 
     // Gets the sign-in challenge for the current user.
-    static void getSignInChallenge(DataCallback callback);
+    // |nonce|: Nonce that should be signed by the Chrome OS TPM. The signed
+    //     nonce is returned with the sign-in challenge.
+    static void getSignInChallenge(ArrayBuffer nonce,
+                                   SignInChallengeCallback callback);
 
     // Tries to sign-in the current user with a secret obtained by decrypting
     // the sign-in challenge. Check chrome.runtime.lastError for failures. Upon
@@ -300,6 +322,11 @@
 
     // Gets the user's profile image as a bitmap.
     static void getUserImage(DataCallback callback);
+
+    // Gets the connection info for the Bluetooth device identified by
+    // deviceAddress.
+    static void getConnectionInfo(DOMString deviceAddress,
+                                  ConnectionInfoCallback callback);
   };
 
   interface Events {

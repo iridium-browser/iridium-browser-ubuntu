@@ -29,27 +29,15 @@
 
 namespace blink {
 
-// VC++ 2013 doesn't support EBCO (Empty Base Class Optimization), and having
-// multiple empty base classes makes the size of CSSRule bloat (Note that both
-// of GarbageCollectedFinalized and ScriptWrappableBase are empty classes).
-// See the following article for details.
-// http://social.msdn.microsoft.com/forums/vstudio/en-US/504c6598-6076-4acf-96b6-e6acb475d302/vc-multiple-inheritance-empty-base-classes-bloats-object-size
-//
-// FIXME: Remove ScriptWrappableBase from the base class list once VC++'s issue
-// gets fixed.
-// Note that we're going to split CSSRule class into two classes; CSSOMRule
-// (assumed name) which derives ScriptWrappable and CSSRule (new one) which
-// doesn't derive ScriptWrappable or ScriptWrappableBase. Then, we can safely
-// remove ScriptWrappableBase from the base class list.
-struct SameSizeAsCSSRule : public RefCountedWillBeGarbageCollectedFinalized<SameSizeAsCSSRule>, public ScriptWrappableBase {
+struct SameSizeAsCSSRule : public RefCountedWillBeGarbageCollectedFinalized<SameSizeAsCSSRule>, public ScriptWrappable {
     virtual ~SameSizeAsCSSRule();
     unsigned char bitfields;
     void* pointerUnion;
 };
 
-COMPILE_ASSERT(sizeof(CSSRule) == sizeof(SameSizeAsCSSRule), CSSRule_should_stay_small);
+static_assert(sizeof(CSSRule) == sizeof(SameSizeAsCSSRule), "CSSRule should stay small");
 
-COMPILE_ASSERT(StyleRuleBase::Viewport == static_cast<StyleRuleBase::Type>(CSSRule::VIEWPORT_RULE), enums_should_match);
+static_assert(StyleRuleBase::Viewport == static_cast<StyleRuleBase::Type>(CSSRule::VIEWPORT_RULE), "enums should match");
 
 void CSSRule::setCSSText(const String&)
 {

@@ -12,9 +12,10 @@
 #include "cc/debug/lap_timer.h"
 #include "cc/layers/layer_impl.h"
 #include "cc/layers/picture_layer_impl.h"
-#include "cc/resources/raster_worker_pool.h"
+#include "cc/resources/tile_task_worker_pool.h"
 #include "cc/trees/layer_tree_host_common.h"
 #include "cc/trees/layer_tree_host_impl.h"
+#include "cc/trees/layer_tree_impl.h"
 #include "ui/gfx/geometry/rect.h"
 
 namespace cc {
@@ -94,13 +95,9 @@ class FixedInvalidationPictureLayerTilingClient
       const Region invalidation)
       : base_client_(base_client), invalidation_(invalidation) {}
 
-  scoped_refptr<Tile> CreateTile(PictureLayerTiling* tiling,
+  scoped_refptr<Tile> CreateTile(float contents_scale,
                                  const gfx::Rect& content_rect) override {
-    return base_client_->CreateTile(tiling, content_rect);
-  }
-
-  RasterSource* GetRasterSource() override {
-    return base_client_->GetRasterSource();
+    return base_client_->CreateTile(contents_scale, content_rect);
   }
 
   gfx::Size CalculateTileSize(const gfx::Size& content_bounds) const override {
@@ -121,16 +118,8 @@ class FixedInvalidationPictureLayerTilingClient
     return base_client_->GetRecycledTwinTiling(tiling);
   }
 
-  size_t GetMaxTilesForInterestArea() const override {
-    return base_client_->GetMaxTilesForInterestArea();
-  }
-
-  float GetSkewportTargetTimeInSeconds() const override {
-    return base_client_->GetSkewportTargetTimeInSeconds();
-  }
-
-  int GetSkewportExtrapolationLimitInContentPixels() const override {
-    return base_client_->GetSkewportExtrapolationLimitInContentPixels();
+  TilePriority::PriorityBin GetMaxTilePriorityBin() const override {
+    return base_client_->GetMaxTilePriorityBin();
   }
 
   WhichTree GetTree() const override { return base_client_->GetTree(); }
@@ -173,6 +162,8 @@ void RasterizeAndRecordBenchmarkImpl::DidCompleteCommit(
   scoped_ptr<base::DictionaryValue> result(new base::DictionaryValue());
   result->SetDouble("rasterize_time_ms",
                     rasterize_results_.total_best_time.InMillisecondsF());
+  result->SetDouble("total_pictures_in_pile_size",
+                    rasterize_results_.total_memory_usage);
   result->SetInteger("pixels_rasterized", rasterize_results_.pixels_rasterized);
   result->SetInteger("pixels_rasterized_with_non_solid_color",
                      rasterize_results_.pixels_rasterized_with_non_solid_color);
@@ -196,7 +187,7 @@ void RasterizeAndRecordBenchmarkImpl::Run(LayerImpl* layer) {
 
 void RasterizeAndRecordBenchmarkImpl::RunOnLayer(PictureLayerImpl* layer) {
   rasterize_results_.total_picture_layers++;
-  if (!layer->DrawsContent()) {
+  if (!layer->CanHaveTilings()) {
     rasterize_results_.total_picture_layers_with_no_content++;
     return;
   }
@@ -205,7 +196,7 @@ void RasterizeAndRecordBenchmarkImpl::RunOnLayer(PictureLayerImpl* layer) {
     return;
   }
 
-  TaskGraphRunner* task_graph_runner = RasterWorkerPool::GetTaskGraphRunner();
+  TaskGraphRunner* task_graph_runner = TileTaskWorkerPool::GetTaskGraphRunner();
   DCHECK(task_graph_runner);
 
   if (!task_namespace_.IsValid())
@@ -213,10 +204,18 @@ void RasterizeAndRecordBenchmarkImpl::RunOnLayer(PictureLayerImpl* layer) {
 
   FixedInvalidationPictureLayerTilingClient client(
       layer, gfx::Rect(layer->content_bounds()));
-  PictureLayerTilingSet tiling_set(&client);
 
-  PictureLayerTiling* tiling =
-      tiling_set.AddTiling(layer->contents_scale_x(), layer->bounds());
+  // In this benchmark, we will create a local tiling set and measure how long
+  // it takes to rasterize content. As such, the actual settings used here don't
+  // really matter.
+  const LayerTreeSettings& settings = layer->layer_tree_impl()->settings();
+  scoped_ptr<PictureLayerTilingSet> tiling_set = PictureLayerTilingSet::Create(
+      &client, settings.max_tiles_for_interest_area,
+      settings.skewport_target_time_in_seconds,
+      settings.skewport_extrapolation_limit_in_content_pixels);
+
+  PictureLayerTiling* tiling = tiling_set->AddTiling(layer->contents_scale_x(),
+                                                     layer->GetRasterSource());
   tiling->CreateAllTilesForTesting();
   for (PictureLayerTiling::CoverageIterator it(
            tiling, layer->contents_scale_x(), layer->visible_content_rect());
@@ -238,8 +237,7 @@ void RasterizeAndRecordBenchmarkImpl::RunOnLayer(PictureLayerImpl* layer) {
 
     graph.nodes.push_back(
         TaskGraph::Node(benchmark_raster_task.get(),
-                        RasterWorkerPool::kBenchmarkRasterTaskPriority,
-                        0u));
+                        TileTaskWorkerPool::kBenchmarkTaskPriority, 0u));
 
     task_graph_runner->ScheduleTasks(task_namespace_, &graph);
     task_graph_runner->WaitForTasksToFinishRunning(task_namespace_);
@@ -263,16 +261,22 @@ void RasterizeAndRecordBenchmarkImpl::RunOnLayer(PictureLayerImpl* layer) {
     rasterize_results_.pixels_rasterized += tile_size;
     rasterize_results_.total_best_time += min_time;
   }
+
+  const RasterSource* layer_raster_source = layer->GetRasterSource();
+  rasterize_results_.total_memory_usage +=
+      layer_raster_source->GetPictureMemoryUsage();
 }
 
 RasterizeAndRecordBenchmarkImpl::RasterizeResults::RasterizeResults()
     : pixels_rasterized(0),
       pixels_rasterized_with_non_solid_color(0),
       pixels_rasterized_as_opaque(0),
+      total_memory_usage(0),
       total_layers(0),
       total_picture_layers(0),
       total_picture_layers_with_no_content(0),
-      total_picture_layers_off_screen(0) {}
+      total_picture_layers_off_screen(0) {
+}
 
 RasterizeAndRecordBenchmarkImpl::RasterizeResults::~RasterizeResults() {}
 

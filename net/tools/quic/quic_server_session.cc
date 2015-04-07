@@ -5,7 +5,7 @@
 #include "net/tools/quic/quic_server_session.h"
 
 #include "base/logging.h"
-#include "net/quic/crypto/source_address_token.h"
+#include "net/quic/crypto/cached_network_parameters.h"
 #include "net/quic/quic_connection.h"
 #include "net/quic/quic_flags.h"
 #include "net/quic/reliable_quic_stream.h"
@@ -16,9 +16,8 @@ namespace tools {
 
 QuicServerSession::QuicServerSession(const QuicConfig& config,
                                      QuicConnection* connection,
-                                     QuicServerSessionVisitor* visitor,
-                                     bool is_secure)
-    : QuicSession(connection, config, is_secure),
+                                     QuicServerSessionVisitor* visitor)
+    : QuicSession(connection, config),
       visitor_(visitor),
       bandwidth_estimate_sent_to_client_(QuicBandwidth::Zero()),
       last_scup_time_(QuicTime::Zero()),
@@ -39,14 +38,29 @@ QuicCryptoServerStream* QuicServerSession::CreateQuicCryptoServerStream(
 
 void QuicServerSession::OnConfigNegotiated() {
   QuicSession::OnConfigNegotiated();
-  if (!FLAGS_enable_quic_fec ||
-      !config()->HasReceivedConnectionOptions() ||
-      !net::ContainsQuicTag(config()->ReceivedConnectionOptions(), kFHDR)) {
+
+  if (!config()->HasReceivedConnectionOptions()) {
     return;
   }
-  // kFHDR config maps to FEC protection always for headers stream.
-  // TODO(jri): Add crypto stream in addition to headers for kHDR.
-  headers_stream_->set_fec_policy(FEC_PROTECT_ALWAYS);
+
+  // If the client has provided a bandwidth estimate from the same serving
+  // region, then pass it to the sent packet manager in preparation for possible
+  // bandwidth resumption.
+  const CachedNetworkParameters* cached_network_params =
+      crypto_stream_->previous_cached_network_params();
+  if (FLAGS_quic_enable_bandwidth_resumption_experiment &&
+      cached_network_params != nullptr &&
+      ContainsQuicTag(config()->ReceivedConnectionOptions(), kBWRE) &&
+      cached_network_params->serving_region() == serving_region_) {
+    connection()->ResumeConnectionState(*cached_network_params);
+  }
+
+  if (FLAGS_enable_quic_fec &&
+      ContainsQuicTag(config()->ReceivedConnectionOptions(), kFHDR)) {
+    // kFHDR config maps to FEC protection always for headers stream.
+    // TODO(jri): Add crypto stream in addition to headers for kHDR.
+    headers_stream_->set_fec_policy(FEC_PROTECT_ALWAYS);
+  }
 }
 
 void QuicServerSession::OnConnectionClosed(QuicErrorCode error,
@@ -67,6 +81,11 @@ void QuicServerSession::OnWriteBlocked() {
 
 void QuicServerSession::OnCongestionWindowChange(QuicTime now) {
   if (connection()->version() <= QUIC_VERSION_21) {
+    return;
+  }
+
+  // Only send updates when the application has no data to write.
+  if (HasDataToWrite()) {
     return;
   }
 

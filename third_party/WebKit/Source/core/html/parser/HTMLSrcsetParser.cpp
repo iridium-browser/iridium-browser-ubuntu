@@ -41,7 +41,6 @@
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "platform/ParsingUtilities.h"
-#include "platform/RuntimeEnabledFeatures.h"
 
 namespace blink {
 
@@ -201,7 +200,7 @@ static bool parseDescriptors(const CharType* attribute, Vector<DescriptorToken>&
             continue;
         CharType c = attribute[descriptor.lastIndex()];
         bool isValid = false;
-        if (RuntimeEnabledFeatures::pictureSizesEnabled() && c == 'w') {
+        if (c == 'w') {
             if (result.hasDensity() || result.hasWidth()) {
                 srcsetError(document, "it has multiple 'w' descriptors or a mix of 'x' and 'w' descriptors.");
                 return false;
@@ -212,7 +211,7 @@ static bool parseDescriptors(const CharType* attribute, Vector<DescriptorToken>&
                 return false;
             }
             result.setResourceWidth(resourceWidth);
-        } else if (RuntimeEnabledFeatures::pictureSizesEnabled() && c == 'h') {
+        } else if (c == 'h') {
             // This is here only for future compat purposes.
             // The value of the 'h' descriptor is not used.
             if (result.hasDensity() || result.hasHeight()) {
@@ -323,7 +322,7 @@ static void parseImageCandidatesFromSrcsetAttribute(const String& attribute, Vec
         parseImageCandidatesFromSrcsetAttribute<UChar>(attribute, attribute.characters16(), attribute.length(), imageCandidates, document);
 }
 
-static int selectionLogic(Vector<ImageCandidate>& imageCandidates, float deviceScaleFactor, bool ignoreSrc)
+static unsigned selectionLogic(Vector<ImageCandidate>& imageCandidates, float deviceScaleFactor, bool ignoreSrc)
 {
     unsigned i = 0;
 
@@ -356,11 +355,13 @@ static int selectionLogic(Vector<ImageCandidate>& imageCandidates, float deviceS
     return i;
 }
 
-static unsigned avoidDownloadIfHigherDensityResourceIsInCache(Vector<ImageCandidate>& imageCandidates, unsigned winner, Document* document)
+static unsigned avoidDownloadIfHigherDensityResourceIsInCache(Vector<ImageCandidate>& imageCandidates, unsigned winner, Document* document, bool ignoreSrc)
 {
     if (!document)
         return winner;
     for (unsigned i = imageCandidates.size() - 1; i > winner; --i) {
+        if (ignoreSrc && imageCandidates[i].srcOrigin())
+            continue;
         KURL url = document->completeURL(stripLeadingAndTrailingHTMLSpaces(imageCandidates[i].url()));
         if (memoryCache()->resourceForURL(url, document->fetcher()->getCacheIdentifier()))
             return i;
@@ -389,7 +390,7 @@ static ImageCandidate pickBestImageCandidate(float deviceScaleFactor, float sour
 
     unsigned winner = selectionLogic(imageCandidates, deviceScaleFactor, ignoreSrc);
     ASSERT(winner < imageCandidates.size());
-    winner = avoidDownloadIfHigherDensityResourceIsInCache(imageCandidates, winner, document);
+    winner = avoidDownloadIfHigherDensityResourceIsInCache(imageCandidates, winner, document, ignoreSrc);
 
     float winningDensity = imageCandidates[winner].density();
     // 16. If an entry b in candidates has the same associated ... pixel density as an earlier entry a in candidates,

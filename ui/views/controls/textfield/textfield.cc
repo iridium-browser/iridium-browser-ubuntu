@@ -12,13 +12,14 @@
 #include "ui/base/cursor/cursor.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/dragdrop/drag_utils.h"
+#include "ui/base/touch/selection_bound.h"
 #include "ui/base/ui_base_switches_util.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/events/event.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/display.h"
-#include "ui/gfx/insets.h"
+#include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/screen.h"
 #include "ui/native_theme/native_theme.h"
 #include "ui/strings/grit/ui_strings.h"
@@ -711,7 +712,11 @@ void Textfield::OnGestureEvent(ui::GestureEvent* event) {
       break;
     case ui::ET_GESTURE_TAP:
       if (event->details().tap_count() == 1) {
-        if (!GetRenderText()->IsPointInSelection(event->location())) {
+        // If tap is on the selection and touch handles are not present, handles
+        // should be shown without changing selection. Otherwise, cursor should
+        // be moved to the tap location.
+        if (touch_selection_controller_ ||
+            !GetRenderText()->IsPointInSelection(event->location())) {
           OnBeforeUserAction();
           MoveCursorTo(event->location(), false);
           OnAfterUserAction();
@@ -1101,13 +1106,36 @@ void Textfield::MoveCaretTo(const gfx::Point& point) {
   SelectRect(point, point);
 }
 
-void Textfield::GetSelectionEndPoints(gfx::Rect* p1, gfx::Rect* p2) {
+void Textfield::GetSelectionEndPoints(ui::SelectionBound* anchor,
+                                      ui::SelectionBound* focus) {
   gfx::RenderText* render_text = GetRenderText();
   const gfx::SelectionModel& sel = render_text->selection_model();
   gfx::SelectionModel start_sel =
       render_text->GetSelectionModelForSelectionStart();
-  *p1 = render_text->GetCursorBounds(start_sel, true);
-  *p2 = render_text->GetCursorBounds(sel, true);
+  gfx::Rect r1 = render_text->GetCursorBounds(start_sel, true);
+  gfx::Rect r2 = render_text->GetCursorBounds(sel, true);
+
+  anchor->SetEdge(r1.origin(), r1.bottom_left());
+  focus->SetEdge(r2.origin(), r2.bottom_left());
+
+  // Determine the SelectionBound's type for focus and anchor.
+  // TODO(mfomitchev): Ideally we should have different logical directions for
+  // start and end to support proper handle direction for mixed LTR/RTL text.
+  const bool ltr = GetTextDirection() != base::i18n::RIGHT_TO_LEFT;
+  size_t anchor_position_index = sel.selection().start();
+  size_t focus_position_index = sel.selection().end();
+
+  if (anchor_position_index == focus_position_index) {
+    anchor->set_type(ui::SelectionBound::CENTER);
+    focus->set_type(ui::SelectionBound::CENTER);
+  } else if ((ltr && anchor_position_index < focus_position_index) ||
+             (!ltr && anchor_position_index > focus_position_index)) {
+    anchor->set_type(ui::SelectionBound::LEFT);
+    focus->set_type(ui::SelectionBound::RIGHT);
+  } else {
+    anchor->set_type(ui::SelectionBound::RIGHT);
+    focus->set_type(ui::SelectionBound::LEFT);
+  }
 }
 
 gfx::Rect Textfield::GetBounds() {
@@ -1194,7 +1222,30 @@ bool Textfield::IsCommandIdEnabled(int command_id) const {
 
 bool Textfield::GetAcceleratorForCommandId(int command_id,
                                            ui::Accelerator* accelerator) {
-  return false;
+  switch (command_id) {
+    case IDS_APP_UNDO:
+      *accelerator = ui::Accelerator(ui::VKEY_Z, ui::EF_CONTROL_DOWN);
+      return true;
+
+    case IDS_APP_CUT:
+      *accelerator = ui::Accelerator(ui::VKEY_X, ui::EF_CONTROL_DOWN);
+      return true;
+
+    case IDS_APP_COPY:
+      *accelerator = ui::Accelerator(ui::VKEY_C, ui::EF_CONTROL_DOWN);
+      return true;
+
+    case IDS_APP_PASTE:
+      *accelerator = ui::Accelerator(ui::VKEY_V, ui::EF_CONTROL_DOWN);
+      return true;
+
+    case IDS_APP_SELECT_ALL:
+      *accelerator = ui::Accelerator(ui::VKEY_A, ui::EF_CONTROL_DOWN);
+      return true;
+
+    default:
+      return false;
+  }
 }
 
 void Textfield::ExecuteCommand(int command_id, int event_flags) {
@@ -1784,7 +1835,7 @@ void Textfield::CreateTouchSelectionControllerAndNotifyIt() {
 
   if (!touch_selection_controller_) {
     touch_selection_controller_.reset(
-        ui::TouchSelectionController::create(this));
+        ui::TouchEditingControllerDeprecated::Create(this));
   }
   if (touch_selection_controller_)
     touch_selection_controller_->SelectionChanged();

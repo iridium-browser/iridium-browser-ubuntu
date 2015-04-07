@@ -30,6 +30,7 @@ except ImportError:
   # pylint: disable=F0401
   import queue as Queue
 import signal
+import subprocess
 import sys
 import tempfile
 import threading
@@ -37,7 +38,7 @@ import time
 import traceback
 
 from chromite.lib import cros_build_lib
-from chromite.lib import osutils
+from chromite.lib import process_util
 from chromite.lib import proctitle
 
 # If PORTAGE_USERNAME isn't specified, scrape it from the $HOME variable. On
@@ -56,6 +57,18 @@ if "PORTAGE_USERNAME" not in os.environ:
   if homedir:
     os.environ["PORTAGE_USERNAME"] = os.path.basename(homedir)
 
+# Wrap Popen with a lock to ensure no two Popen are executed simultaneously in
+# the same process.
+# Two Popen call at the same time might be the cause for crbug.com/433482.
+_popen_lock = threading.Lock()
+_old_popen = subprocess.Popen
+
+def _LockedPopen(*args, **kwargs):
+  with _popen_lock:
+    return _old_popen(*args, **kwargs)
+
+subprocess.Popen = _LockedPopen
+
 # Portage doesn't expose dependency trees in its public API, so we have to
 # make use of some private APIs here. These modules are found under
 # /usr/lib/portage/pym/.
@@ -66,16 +79,10 @@ from _emerge.actions import adjust_configs
 from _emerge.actions import load_emerge_config
 from _emerge.create_depgraph_params import create_depgraph_params
 from _emerge.depgraph import backtrack_depgraph
-try:
-  from _emerge.main import clean_logs
-except ImportError:
-  # Older portage versions did not provide clean_logs, so stub it.
-  # We need this if running in an older chroot that hasn't yet upgraded
-  # the portage version.
-  clean_logs = lambda x: None
 from _emerge.main import emerge_main
 from _emerge.main import parse_opts
 from _emerge.Package import Package
+from _emerge.post_emerge import clean_logs
 from _emerge.Scheduler import Scheduler
 from _emerge.stdout_spinner import stdout_spinner
 from portage._global_updates import _global_updates
@@ -280,7 +287,7 @@ class DepGraphGenerator(object):
     # point our tools at /build/BOARD and to setup cross compiles to the
     # appropriate board as configured in toolchain.conf.
     if self.board:
-      sysroot = cros_build_lib.GetSysroot(board=self.board)
+      sysroot = os.environ.get('SYSROOT', cros_build_lib.GetSysroot(self.board))
       os.environ["PORTAGE_CONFIGROOT"] = sysroot
       os.environ["PORTAGE_SYSROOT"] = sysroot
       os.environ["SYSROOT"] = sysroot
@@ -454,7 +461,7 @@ class DepGraphGenerator(object):
     # pylint: disable=W0212
     digraph = depgraph._dynamic_config.digraph
     root = emerge.settings["ROOT"]
-    final_db = get_db(depgraph._dynamic_config, root)
+    final_db = depgraph._dynamic_config._filtered_trees[root]['graph_db']
     for node, node_deps in digraph.nodes.items():
       # Calculate dependency packages that need to be installed first. Each
       # child on the digraph is a dependency. The "operation" field specifies
@@ -1022,7 +1029,7 @@ def EmergeWorker(task_queue, job_queue, emerge, package_db, fetch_only=False,
   # Disable flushing of caches to save on I/O.
   root = emerge.settings["ROOT"]
   vardb = emerge.trees[root]["vartree"].dbapi
-  vardb._flush_cache_enabled = False
+  vardb._flush_cache_enabled = False  # pylint: disable=protected-access
   bindb = emerge.trees[root]["bintree"].dbapi
   # Might be a set, might be a list, might be None; no clue, just use shallow
   # copy to ensure we can roll it back.
@@ -1405,7 +1412,7 @@ class EmergeQueue(object):
         try:
           # Wait for the process to exit. When it does, exit with the return
           # value of the subprocess.
-          os._exit(osutils.GetExitStatus(os.waitpid(pid, 0)[1]))
+          os._exit(process_util.GetExitStatus(os.waitpid(pid, 0)[1]))
         except OSError as ex:
           if ex.errno == errno.EINTR:
             continue
@@ -1542,8 +1549,8 @@ class EmergeQueue(object):
         line += "Building %s/%s, " % (bjobs, bready + bjobs)
         if retries:
           line += "Retrying %s, " % (retries,)
-      load =  " ".join(str(x) for x in os.getloadavg())
-      line += ("[Time %dm%.1fs Load %s]" % (seconds/60, seconds %60, load))
+      load = " ".join(str(x) for x in os.getloadavg())
+      line += ("[Time %dm%.1fs Load %s]" % (seconds / 60, seconds % 60, load))
       self._Print(line)
 
   def _Finish(self, target):
@@ -1811,19 +1818,6 @@ def main(argv):
         x.join(1)
 
 
-def get_db(config, root):
-  """Return the dbapi.
-  Handles both portage 2.1.11 and 2.2.10 (where mydbapi has been removed).
-
-  TODO(bsimonnet): Remove this once portage has been uprevd.
-  """
-  try:
-    return config.mydbapi[root]
-  except AttributeError:
-    # pylint: disable=W0212
-    return config._filtered_trees[root]['graph_db']
-
-
 def real_main(argv):
   parallel_emerge_args = argv[:]
   deps = DepGraphGenerator()
@@ -1873,7 +1867,7 @@ def real_main(argv):
   portage_upgrade = False
   root = emerge.settings["ROOT"]
   # pylint: disable=W0212
-  final_db = get_db(emerge.depgraph._dynamic_config, root)
+  final_db = emerge.depgraph._dynamic_config._filtered_trees[root]['graph_db']
   if root == "/":
     for db_pkg in final_db.match_pkgs("sys-apps/portage"):
       portage_pkg = deps_graph.get(db_pkg.cpv)
@@ -1901,6 +1895,12 @@ def real_main(argv):
 
     # Now upgrade the rest.
     os.execvp(args[0], args)
+
+  # Attempt to solve crbug.com/433482
+  # The file descriptor error appears only when getting userpriv_groups
+  # (lazily generated). Loading userpriv_groups here will reduce the number of
+  # calls from few hundreds to one.
+  portage.data._get_global('userpriv_groups')
 
   # Run the queued emerges.
   scheduler = EmergeQueue(deps_graph, emerge, deps.package_db, deps.show_output,

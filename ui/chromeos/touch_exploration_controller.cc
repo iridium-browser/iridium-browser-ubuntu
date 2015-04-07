@@ -149,8 +149,11 @@ ui::EventRewriteStatus TouchExplorationController::RewriteEvent(
   // leaves one of these states, SET_STATE will set the gesture provider to
   // NULL.
   if (gesture_provider_.get()) {
-    gesture_provider_->OnTouchEvent(touch_event);
-    gesture_provider_->OnTouchEventAck(false);
+    ui::TouchEvent mutable_touch_event = touch_event;
+    if (gesture_provider_->OnTouchEvent(&mutable_touch_event)) {
+      gesture_provider_->OnSyncTouchEventAck(
+          mutable_touch_event.unique_event_id(), false);
+    }
     ProcessGestureEvents();
   }
 

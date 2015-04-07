@@ -8,15 +8,17 @@
 #include "base/android/jni_weak_ref.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/memory/scoped_ptr.h"
-#include "components/app_modal_dialogs/native_app_modal_dialog.h"
+#include "components/app_modal/native_app_modal_dialog.h"
 
 class JavaScriptAppModalDialog;
 
-class JavascriptAppModalDialogAndroid : public NativeAppModalDialog {
+class JavascriptAppModalDialogAndroid
+    : public app_modal::NativeAppModalDialog {
  public:
-  JavascriptAppModalDialogAndroid(JNIEnv* env,
-                                  JavaScriptAppModalDialog* dialog,
-                                  gfx::NativeWindow parent);
+  JavascriptAppModalDialogAndroid(
+      JNIEnv* env,
+      app_modal::JavaScriptAppModalDialog* dialog,
+      gfx::NativeWindow parent);
 
   // NativeAppModalDialog:
   virtual int GetAppModalDialogButtons() const override;
@@ -25,6 +27,7 @@ class JavascriptAppModalDialogAndroid : public NativeAppModalDialog {
   virtual void CloseAppModalDialog() override;
   virtual void AcceptAppModalDialog() override;
   virtual void CancelAppModalDialog() override;
+  virtual bool IsShowing() const override;
 
   // Called when java confirms or cancels the dialog.
   void DidAcceptAppModalDialog(JNIEnv* env,
@@ -41,7 +44,7 @@ class JavascriptAppModalDialogAndroid : public NativeAppModalDialog {
   // The object deletes itself.
   virtual ~JavascriptAppModalDialogAndroid();
 
-  scoped_ptr<JavaScriptAppModalDialog> dialog_;
+  scoped_ptr<app_modal::JavaScriptAppModalDialog> dialog_;
   base::android::ScopedJavaGlobalRef<jobject> dialog_jobject_;
   JavaObjectWeakGlobalRef parent_jobject_weak_ref_;
 

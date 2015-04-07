@@ -57,18 +57,15 @@ namespace internal {
 // Types:
 //  RunnableAdapter<> -- Wraps the various "function" pointer types into an
 //                       object that adheres to the Runnable interface.
-//                       There are |3*ARITY| RunnableAdapter types.
 //  FunctionTraits<> -- Type traits that unwrap a function signature into a
 //                      a set of easier to use typedefs.  Used mainly for
 //                      compile time asserts.
 //                      There are |ARITY| FunctionTraits types.
 //  ForceVoidReturn<> -- Helper class for translating function signatures to
 //                       equivalent forms with a "void" return type.
-//                    There are |ARITY| ForceVoidReturn types.
 //  FunctorTraits<> -- Type traits used determine the correct RunType and
 //                     RunnableType for a Functor.  This is where function
 //                     signature adapters are applied.
-//                    There are |ARITY| ForceVoidReturn types.
 //  MakeRunnable<> -- Takes a Functor and returns an object in the Runnable
 //                    type class that represents the underlying Functor.
 //                    There are |O(1)| MakeRunnable types.
@@ -77,12 +74,66 @@ namespace internal {
 //                    and for ignoring return values.  This is separate from
 //                    Invoker to avoid creating multiple version of Invoker<>
 //                    which grows at O(n^2) with the arity.
-//                    There are |k*ARITY| InvokeHelper types.
 //  Invoker<> -- Unwraps the curried parameters and executes the Runnable.
 //               There are |(ARITY^2 + ARITY)/2| Invoketypes.
 //  BindState<> -- Stores the curried parameters, and is the main entry point
 //                 into the Bind() system, doing most of the type resolution.
 //                 There are ARITY BindState types.
+
+// HasNonConstReferenceParam selects true_type when any of the parameters in
+// |Sig| is a non-const reference.
+// Implementation note: This non-specialized case handles zero-arity case only.
+// Non-zero-arity cases should be handled by the specialization below.
+template <typename Sig>
+struct HasNonConstReferenceParam : false_type {};
+
+// Implementation note: Select true_type if the first parameter is a non-const
+// reference.  Otherwise, skip the first parameter and check rest of parameters
+// recursively.
+template <typename R, typename T, typename... Args>
+struct HasNonConstReferenceParam<R(T, Args...)>
+    : SelectType<is_non_const_reference<T>::value,
+                 true_type,
+                 HasNonConstReferenceParam<R(Args...)>>::Type {};
+
+// HasRefCountedTypeAsRawPtr selects true_type when any of the |Args| is a raw
+// pointer to a RefCounted type.
+// Implementation note: This non-specialized case handles zero-arity case only.
+// Non-zero-arity cases should be handled by the specialization below.
+template <typename... Args>
+struct HasRefCountedTypeAsRawPtr : false_type {};
+
+// Implementation note: Select true_type if the first parameter is a raw pointer
+// to a RefCounted type. Otherwise, skip the first parameter and check rest of
+// parameters recursively.
+template <typename T, typename... Args>
+struct HasRefCountedTypeAsRawPtr<T, Args...>
+    : SelectType<NeedsScopedRefptrButGetsRawPtr<T>::value,
+                 true_type,
+                 HasRefCountedTypeAsRawPtr<Args...>>::Type {};
+
+// BindsArrayToFirstArg selects true_type when |is_method| is true and the first
+// item of |Args| is an array type.
+// Implementation note: This non-specialized case handles !is_method case and
+// zero-arity case only.  Other cases should be handled by the specialization
+// below.
+template <bool is_method, typename... Args>
+struct BindsArrayToFirstArg : false_type {};
+
+template <typename T, typename... Args>
+struct BindsArrayToFirstArg<true, T, Args...> : is_array<T> {};
+
+// HasRefCountedParamAsRawPtr is the same to HasRefCountedTypeAsRawPtr except
+// when |is_method| is true HasRefCountedParamAsRawPtr skips the first argument.
+// Implementation note: This non-specialized case handles !is_method case and
+// zero-arity case only.  Other cases should be handled by the specialization
+// below.
+template <bool is_method, typename... Args>
+struct HasRefCountedParamAsRawPtr : HasRefCountedTypeAsRawPtr<Args...> {};
+
+template <typename T, typename... Args>
+struct HasRefCountedParamAsRawPtr<true, T, Args...>
+    : HasRefCountedTypeAsRawPtr<Args...> {};
 
 // RunnableAdapter<>
 //
@@ -107,75 +158,64 @@ namespace internal {
 template <typename Functor>
 class RunnableAdapter;
 
-$for ARITY [[
-$range ARG 1..ARITY
-
-// Function: Arity $(ARITY).
-template <typename R[[]]
-$if ARITY > 0[[, ]] $for ARG , [[typename A$(ARG)]]>
-class RunnableAdapter<R(*)($for ARG , [[A$(ARG)]])> {
+// Function.
+template <typename R, typename... Args>
+class RunnableAdapter<R(*)(Args...)> {
  public:
-  typedef R (RunType)($for ARG , [[A$(ARG)]]);
+  typedef R (RunType)(Args...);
 
-  explicit RunnableAdapter(R(*function)($for ARG , [[A$(ARG)]]))
+  explicit RunnableAdapter(R(*function)(Args...))
       : function_(function) {
   }
 
-  R Run($for ARG , [[typename CallbackParamTraits<A$(ARG)>::ForwardType a$(ARG)]]) {
-    return function_($for ARG , [[CallbackForward(a$(ARG))]]);
+  R Run(typename CallbackParamTraits<Args>::ForwardType... args) {
+    return function_(CallbackForward(args)...);
   }
 
  private:
-  R (*function_)($for ARG , [[A$(ARG)]]);
+  R (*function_)(Args...);
 };
 
-// Method: Arity $(ARITY).
-template <typename R, typename T[[]]
-$if ARITY > 0[[, ]] $for ARG , [[typename A$(ARG)]]>
-class RunnableAdapter<R(T::*)($for ARG , [[A$(ARG)]])> {
+// Method.
+template <typename R, typename T, typename... Args>
+class RunnableAdapter<R(T::*)(Args...)> {
  public:
-  typedef R (RunType)(T*[[]]
-$if ARITY > 0[[, ]] $for ARG , [[A$(ARG)]]);
+  typedef R (RunType)(T*, Args...);
   typedef true_type IsMethod;
 
-  explicit RunnableAdapter(R(T::*method)($for ARG , [[A$(ARG)]]))
+  explicit RunnableAdapter(R(T::*method)(Args...))
       : method_(method) {
   }
 
-  R Run(T* object[[]]
-$if ARITY > 0[[, ]]  $for ARG, [[typename CallbackParamTraits<A$(ARG)>::ForwardType a$(ARG)]]) {
-    return (object->*method_)($for ARG , [[CallbackForward(a$(ARG))]]);
+  R Run(T* object, typename CallbackParamTraits<Args>::ForwardType... args) {
+    return (object->*method_)(CallbackForward(args)...);
   }
 
  private:
-  R (T::*method_)($for ARG , [[A$(ARG)]]);
+  R (T::*method_)(Args...);
 };
 
-// Const Method: Arity $(ARITY).
-template <typename R, typename T[[]]
-$if ARITY > 0[[, ]] $for ARG , [[typename A$(ARG)]]>
-class RunnableAdapter<R(T::*)($for ARG , [[A$(ARG)]]) const> {
+// Const Method.
+template <typename R, typename T, typename... Args>
+class RunnableAdapter<R(T::*)(Args...) const> {
  public:
-  typedef R (RunType)(const T*[[]]
-$if ARITY > 0[[, ]] $for ARG , [[A$(ARG)]]);
+  typedef R (RunType)(const T*, Args...);
   typedef true_type IsMethod;
 
-  explicit RunnableAdapter(R(T::*method)($for ARG , [[A$(ARG)]]) const)
+  explicit RunnableAdapter(R(T::*method)(Args...) const)
       : method_(method) {
   }
 
-  R Run(const T* object[[]]
-$if ARITY > 0[[, ]]  $for ARG, [[typename CallbackParamTraits<A$(ARG)>::ForwardType a$(ARG)]]) {
-    return (object->*method_)($for ARG , [[CallbackForward(a$(ARG))]]);
+  R Run(const T* object,
+        typename CallbackParamTraits<Args>::ForwardType... args) {
+    return (object->*method_)(CallbackForward(args)...);
   }
 
  private:
-  R (T::*method_)($for ARG , [[A$(ARG)]]) const;
+  R (T::*method_)(Args...) const;
 };
 
-]]  $$ for ARITY
-
-
+// TODO(tzik): Remove FunctionTraits after we finish removing bind.pump.
 // FunctionTraits<>
 //
 // Breaks a function signature apart into typedefs for easier introspection.
@@ -205,16 +245,10 @@ $for ARG [[
 template <typename Sig>
 struct ForceVoidReturn;
 
-$for ARITY [[
-$range ARG 1..ARITY
-
-template <typename R[[]]
-$if ARITY > 0[[, ]] $for ARG , [[typename A$(ARG)]]>
-struct ForceVoidReturn<R($for ARG , [[A$(ARG)]])> {
-  typedef void(RunType)($for ARG , [[A$(ARG)]]);
+template <typename R, typename... Args>
+struct ForceVoidReturn<R(Args...)> {
+  typedef void(RunType)(Args...);
 };
-
-]]  $$ for ARITY
 
 
 // FunctorTraits<>
@@ -284,50 +318,30 @@ template <bool IsWeakCall, typename ReturnType, typename Runnable,
           typename ArgsType>
 struct InvokeHelper;
 
-$for ARITY [[
-$range ARG 1..ARITY
-$range WEAKCALL_ARG 2..ARITY
-
-template <typename ReturnType, typename Runnable[[]]
-$if ARITY > 0 [[,]] $for ARG , [[typename A$(ARG)]]>
+template <typename ReturnType, typename Runnable, typename... Args>
 struct InvokeHelper<false, ReturnType, Runnable,
-    void($for ARG , [[A$(ARG)]])>  {
-  static ReturnType MakeItSo(Runnable runnable[[]]
-$if ARITY > 0[[, ]] $for ARG , [[A$(ARG) a$(ARG)]]) {
-    return runnable.Run($for ARG , [[CallbackForward(a$(ARG))]]);
+    void(Args...)>  {
+  static ReturnType MakeItSo(Runnable runnable, Args... args) {
+    return runnable.Run(CallbackForward(args)...);
   }
 };
 
-template <typename Runnable[[]]
-$if ARITY > 0 [[,]] $for ARG , [[typename A$(ARG)]]>
-struct InvokeHelper<false, void, Runnable,
-    void($for ARG , [[A$(ARG)]])>  {
-  static void MakeItSo(Runnable runnable[[]]
-$if ARITY > 0[[, ]] $for ARG , [[A$(ARG) a$(ARG)]]) {
-    runnable.Run($for ARG , [[CallbackForward(a$(ARG))]]);
+template <typename Runnable, typename... Args>
+struct InvokeHelper<false, void, Runnable, void(Args...)>  {
+  static void MakeItSo(Runnable runnable, Args... args) {
+    runnable.Run(CallbackForward(args)...);
   }
 };
 
-$if ARITY > 0 [[
-
-template <typename Runnable[[]], typename BoundWeakPtr
-$if ARITY > 1[[, ]] $for WEAKCALL_ARG , [[typename A$(WEAKCALL_ARG)]]>
-struct InvokeHelper<true, void, Runnable,
-    void(BoundWeakPtr
-$if ARITY > 1[[, ]] $for WEAKCALL_ARG , [[A$(WEAKCALL_ARG)]])>  {
-  static void MakeItSo(Runnable runnable, BoundWeakPtr weak_ptr
-$if ARITY > 1[[, ]] $for WEAKCALL_ARG , [[A$(WEAKCALL_ARG) a$(WEAKCALL_ARG)]]) {
+template <typename Runnable, typename BoundWeakPtr, typename... Args>
+struct InvokeHelper<true, void, Runnable, void(BoundWeakPtr, Args...)>  {
+  static void MakeItSo(Runnable runnable, BoundWeakPtr weak_ptr, Args... args) {
     if (!weak_ptr.get()) {
       return;
     }
-    runnable.Run(weak_ptr.get()
-$if ARITY > 1[[, ]] $for WEAKCALL_ARG , [[CallbackForward(a$(WEAKCALL_ARG))]]);
+    runnable.Run(weak_ptr.get(), CallbackForward(args)...);
   }
 };
-
-]]
-
-]] $$ for ARITY
 
 #if !defined(_MSC_VER)
 
@@ -478,18 +492,20 @@ $if ARITY == 0 [[
 ]]
   }
 
-  virtual ~BindState() {
-$if ARITY > 0 [[
-    MaybeRefcount<HasIsMethodTag<Runnable>::value, P1>::Release(p1_);
-]]
-  }
-
   RunnableType runnable_;
 
 $for ARG [[
   P$(ARG) p$(ARG)_;
 
 ]]
+
+ private:
+  ~BindState() override {
+$if ARITY > 0 [[
+    MaybeRefcount<HasIsMethodTag<Runnable>::value, P1>::Release(p1_);
+]]
+  }
+
 };
 
 ]] $$ for ARITY

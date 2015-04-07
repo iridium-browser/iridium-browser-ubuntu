@@ -128,6 +128,7 @@ public:
     PassRefPtrWillBeRawPtr<CSSRuleList> matchedCSSRuleList();
 
     void collectMatchingRules(const MatchRequest&, RuleRange&, CascadeScope = ignoreCascadeScope, CascadeOrder = ignoreCascadeOrder, bool matchingTreeBoundaryRules = false);
+    void collectMatchingShadowHostRules(const MatchRequest&, RuleRange&, CascadeScope = ignoreCascadeScope, CascadeOrder = ignoreCascadeOrder, bool matchingTreeBoundaryRules = false);
     void sortAndTransferMatchedRules();
     void clearMatchedRules();
     void addElementStyleProperties(const StylePropertySet*, bool isCacheable = true);
@@ -170,7 +171,7 @@ private:
     bool m_matchingUARules;
     bool m_scopeContainsLastMatchedElement;
 
-    OwnPtrWillBeMember<WillBeHeapVector<MatchedRule, 32> > m_matchedRules;
+    WillBeHeapVector<MatchedRule, 32> m_matchedRules;
 
     // Output.
     RefPtrWillBeMember<StaticCSSRuleList> m_cssRuleList;

@@ -5,14 +5,12 @@
 #ifndef NavigatorRequestMediaKeySystemAccess_h
 #define NavigatorRequestMediaKeySystemAccess_h
 
-#include "bindings/core/v8/Dictionary.h"
 #include "bindings/core/v8/ScriptPromise.h"
-#include "bindings/core/v8/V8Binding.h"
-#include "bindings/modules/v8/V8MediaKeySystemOptions.h"
+#include "bindings/modules/v8/V8MediaKeySystemConfiguration.h"
 #include "core/frame/Navigator.h"
-#include "modules/encryptedmedia/MediaKeySystemOptions.h"
+#include "modules/encryptedmedia/MediaKeySystemConfiguration.h"
 #include "platform/Supplementable.h"
-#include "platform/heap/Handle.h"
+#include "wtf/Vector.h"
 
 namespace blink {
 
@@ -31,30 +29,18 @@ public:
         ScriptState*,
         Navigator&,
         const String& keySystem,
-        const Vector<MediaKeySystemOptions>& supportedConfigurations);
+        const Vector<MediaKeySystemConfiguration>& supportedConfigurations);
 
     ScriptPromise requestMediaKeySystemAccess(
         ScriptState*,
         const String& keySystem,
-        const Vector<MediaKeySystemOptions>& supportedConfigurations);
+        const Vector<MediaKeySystemConfiguration>& supportedConfigurations);
 
     virtual void trace(Visitor*) override;
 
 private:
     NavigatorRequestMediaKeySystemAccess();
     static const char* supplementName();
-};
-
-// This is needed by the generated code for Navigator to convert a JavaScript
-// object into a MediaKeySystemOptions object.
-template <>
-struct NativeValueTraits<MediaKeySystemOptions> {
-    static inline MediaKeySystemOptions nativeValue(const v8::Handle<v8::Value>& value, v8::Isolate* isolate, ExceptionState& exceptionState)
-    {
-        MediaKeySystemOptions impl;
-        V8MediaKeySystemOptions::toImpl(isolate, value, impl, exceptionState);
-        return impl;
-    }
 };
 
 } // namespace blink

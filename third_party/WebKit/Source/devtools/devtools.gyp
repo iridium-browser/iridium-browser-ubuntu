@@ -45,6 +45,7 @@
                 ['debug_devtools==0', {
                     'dependencies': [
                         'concatenated_devtools_css',
+                        'concatenated_inspector_css',
                         'concatenated_toolbox_css',
                     ],
                 }],
@@ -96,13 +97,15 @@
                             '<(PRODUCT_DIR)/resources/inspector/devtools.css',
                             '<(PRODUCT_DIR)/resources/inspector/devtools.html',
                             '<(PRODUCT_DIR)/resources/inspector/devtools.js',
+                            '<(PRODUCT_DIR)/resources/inspector/inspector.css',
+                            '<(PRODUCT_DIR)/resources/inspector/inspector.html',
+                            '<(PRODUCT_DIR)/resources/inspector/inspector.js',
                             '<(PRODUCT_DIR)/resources/inspector/toolbox.css',
                             '<(PRODUCT_DIR)/resources/inspector/toolbox.html',
                             '<(PRODUCT_DIR)/resources/inspector/toolbox.js',
                             '<(PRODUCT_DIR)/resources/inspector/audits_module.js',
                             '<(PRODUCT_DIR)/resources/inspector/console_module.js',
                             '<(PRODUCT_DIR)/resources/inspector/devices_module.js',
-                            '<(PRODUCT_DIR)/resources/inspector/documentation_module.js',
                             '<(PRODUCT_DIR)/resources/inspector/elements_module.js',
                             '<(PRODUCT_DIR)/resources/inspector/heap_snapshot_worker_module.js',
                             '<(PRODUCT_DIR)/resources/inspector/layers_module.js',
@@ -153,6 +156,7 @@
                             '<(PRODUCT_DIR)/resources/inspector/InspectorBackendCommands.js',
                             '<(PRODUCT_DIR)/resources/inspector/SupportedCSSProperties.js',
                             '<(PRODUCT_DIR)/resources/inspector/devtools.html',
+                            '<(PRODUCT_DIR)/resources/inspector/inspector.html',
                             '<(PRODUCT_DIR)/resources/inspector/toolbox.html',
                         ],
                         'inputs': [
@@ -243,22 +247,24 @@
                     '<@(_helper_scripts)',
                     '<@(all_devtools_files)',
                     'front_end/devtools.html',
+                    'front_end/inspector.html',
                     'front_end/toolbox.html',
                     '<(_output_path)/InspectorBackendCommands.js',
                     '<(_output_path)/SupportedCSSProperties.js',
                 ],
-                'action': ['python', '<@(_script_name)', 'devtools', 'toolbox', '--input_path', 'front_end', '--output_path', '<@(_output_path)', '--debug', '<@(debug_devtools)'],
+                'action': ['python', '<@(_script_name)', 'devtools', 'inspector', 'toolbox', '--input_path', 'front_end', '--output_path', '<@(_output_path)', '--debug', '<@(debug_devtools)'],
                 'conditions': [
                     ['debug_devtools==0', { # Release
                         'outputs': [
                             '<(_output_path)/devtools.html',
                             '<(_output_path)/devtools.js',
+                            '<(_output_path)/inspector.html',
+                            '<(_output_path)/inspector.js',
                             '<(_output_path)/toolbox.html',
                             '<(_output_path)/toolbox.js',
                             '<(_output_path)/audits_module.js',
                             '<(_output_path)/console_module.js',
                             '<(_output_path)/devices_module.js',
-                            '<(_output_path)/documentation_module.js',
                             '<(_output_path)/elements_module.js',
                             '<(_output_path)/heap_snapshot_worker_module.js',
                             '<(_output_path)/layers_module.js',
@@ -277,6 +283,7 @@
                     { # Debug
                         'outputs': [
                             '<(_output_path)/devtools.html',
+                            '<(_output_path)/inspector.html',
                             '<(_output_path)/toolbox.html',
                         ]
                     }]
@@ -326,10 +333,27 @@
                         'inputs': [
                             '<@(_script_name)',
                             '<@(_input_stylesheet)',
-                            '<@(devtools_core_base_files)',
+                            '<@(devtools_core_css_files)',
                         ],
                         'search_path': [ 'front_end' ],
                         'outputs': ['<(PRODUCT_DIR)/resources/inspector/devtools.css'],
+                        'action': ['python', '<@(_script_name)', '<@(_input_stylesheet)', '<@(_outputs)'],
+                    }],
+                },
+                {
+                    'target_name': 'concatenated_inspector_css',
+                    'type': 'none',
+                    'actions': [{
+                        'action_name': 'concatenate_inspector_css',
+                        'script_name': 'scripts/concatenate_css_files.py',
+                        'input_stylesheet': 'front_end/inspector.css',
+                        'inputs': [
+                            '<@(_script_name)',
+                            '<@(_input_stylesheet)',
+                            '<@(devtools_core_css_files)',
+                        ],
+                        'search_path': [ 'front_end' ],
+                        'outputs': ['<(PRODUCT_DIR)/resources/inspector/inspector.css'],
                         'action': ['python', '<@(_script_name)', '<@(_input_stylesheet)', '<@(_outputs)'],
                     }],
                 },
@@ -343,7 +367,7 @@
                         'inputs': [
                             '<@(_script_name)',
                             '<@(_input_stylesheet)',
-                            '<@(devtools_core_base_files)',
+                            '<@(devtools_core_css_files)',
                         ],
                         'search_path': [ 'front_end' ],
                         'outputs': ['<(PRODUCT_DIR)/resources/inspector/toolbox.css'],

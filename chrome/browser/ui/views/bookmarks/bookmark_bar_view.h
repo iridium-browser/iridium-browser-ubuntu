@@ -18,10 +18,10 @@
 #include "chrome/browser/ui/bookmarks/bookmark_bar_instructions_delegate.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_bubble_view_observer.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_menu_controller_observer.h"
-#include "chrome/browser/ui/views/detachable_toolbar_view.h"
 #include "components/bookmarks/browser/bookmark_model_observer.h"
 #include "components/bookmarks/browser/bookmark_node_data.h"
 #include "ui/gfx/animation/animation_delegate.h"
+#include "ui/views/accessible_pane_view.h"
 #include "ui/views/context_menu_controller.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/button/menu_button_listener.h"
@@ -59,8 +59,8 @@ class LabelButton;
 // BookmarkBarView shows the bookmarks from a specific Profile. BookmarkBarView
 // waits until the HistoryService for the profile has been loaded before
 // creating the BookmarkModel.
-class BookmarkBarView : public DetachableToolbarView,
-                        public BookmarkModelObserver,
+class BookmarkBarView : public views::AccessiblePaneView,
+                        public bookmarks::BookmarkModelObserver,
                         public views::MenuButtonListener,
                         public views::ButtonListener,
                         public views::ContextMenuController,
@@ -72,16 +72,6 @@ class BookmarkBarView : public DetachableToolbarView,
  public:
   // The internal view class name.
   static const char kViewClassName[];
-
-  // Constant used in Browser View, as well as here.
-  // How inset the bookmarks bar is when displayed on the new tab page.
-  static const int kNewtabHorizontalPadding;
-
-  // Maximum size of buttons on the bookmark bar.
-  static const int kMaxButtonWidth;
-
-  // Number of pixels the attached bookmark bar overlaps with the toolbar.
-  static const int kToolbarAttachedBookmarkBarOverlap;
 
   // |browser_view| can be NULL during tests.
   BookmarkBarView(Browser* browser, BrowserView* browser_view);
@@ -130,10 +120,10 @@ class BookmarkBarView : public DetachableToolbarView,
   void GetAnchorPositionForButton(views::MenuButton* button,
                                   views::MenuAnchorPosition* anchor);
 
-  // Returns the button responsible for showing bookmarks in the other bookmark
-  // folder.
-  views::MenuButton* other_bookmarked_button() const {
-    return other_bookmarked_button_;
+  // Returns the button responsible for showing bookmarks in the
+  // "Other Bookmarks" folder.
+  views::MenuButton* other_bookmarks_button() const {
+    return other_bookmarks_button_;
   }
 
   // Returns the button used when not all the items on the bookmark bar fit.
@@ -165,12 +155,16 @@ class BookmarkBarView : public DetachableToolbarView,
                                               const base::string16& title,
                                               Profile* profile);
 
-  // DetachableToolbarView methods:
-  bool IsDetached() const override;
-  double GetAnimationValue() const override;
-  int GetToolbarOverlap() const override;
+  // Returns true if Bookmarks Bar is currently detached from the Toolbar.
+  bool IsDetached() const;
 
-  // View methods:
+  // Returns the current state of the resize animation (show/hide).
+  double GetAnimationValue() const;
+
+  // Returns the current amount of overlap atop the browser toolbar.
+  int GetToolbarOverlap() const;
+
+  // views::View:
   gfx::Size GetPreferredSize() const override;
   gfx::Size GetMinimumSize() const override;
   bool CanProcessEventsWithinSubtree() const override;
@@ -204,13 +198,13 @@ class BookmarkBarView : public DetachableToolbarView,
       BookmarkMenuController* controller) override;
 
   // BookmarkBarInstructionsDelegate:
-  void ShowImportDialog() override;
+  void OnImportBookmarks() override;
 
   // BookmarkBubbleViewObserver:
   void OnBookmarkBubbleShown(const GURL& url) override;
   void OnBookmarkBubbleHidden() override;
 
-  // BookmarkModelObserver:
+  // bookmarks::BookmarkModelObserver:
   void BookmarkModelLoaded(BookmarkModel* model, bool ids_reassigned) override;
   void BookmarkModelBeingDeleted(BookmarkModel* model) override;
   void BookmarkNodeMoved(BookmarkModel* model,
@@ -300,10 +294,10 @@ class BookmarkBarView : public DetachableToolbarView,
   // visible, this returns GetBookmarkButtonCount().
   int GetFirstHiddenNodeIndex();
 
-  // Creates the button showing the other bookmarked items.
-  views::MenuButton* CreateOtherBookmarkedButton();
+  // Creates the button showing the "Other Bookmarks" folder.
+  views::MenuButton* CreateOtherBookmarksButton();
 
-  // Creates the button showing the managed bookmarks items.
+  // Creates the button showing the "Managed Bookmarks" folder.
   views::MenuButton* CreateManagedBookmarksButton();
 
   // Creates the button used when not all bookmark buttons fit.
@@ -369,7 +363,7 @@ class BookmarkBarView : public DetachableToolbarView,
   // Updates the colors for all the child objects in the bookmarks bar.
   void UpdateColors();
 
-  // Updates the visibility of |other_bookmarked_button_| and
+  // Updates the visibility of |other_bookmarks_button_| and
   // |managed_bookmarks_button_|. Also shows or hides the separator if required.
   // Returns true if something changed and a LayoutAndPaint() is needed.
   bool UpdateOtherAndManagedButtonsVisibility();
@@ -413,8 +407,8 @@ class BookmarkBarView : public DetachableToolbarView,
   // bookmark bar.
   scoped_ptr<BookmarkContextMenu> context_menu_;
 
-  // Shows the other bookmark entries.
-  views::MenuButton* other_bookmarked_button_;
+  // Shows the "Other Bookmarks" folder button.
+  views::MenuButton* other_bookmarks_button_;
 
   // Shows the managed bookmarks entries.
   views::MenuButton* managed_bookmarks_button_;
@@ -444,8 +438,8 @@ class BookmarkBarView : public DetachableToolbarView,
   scoped_ptr<gfx::SlideAnimation> size_animation_;
 
   // If the bookmark bubble is showing, this is the visible ancestor of the URL.
-  // The visible ancestor is either the other_bookmarked_button_,
-  // overflow_button_ or a button on the bar.
+  // The visible ancestor is either the |other_bookmarks_button_|,
+  // |overflow_button_| or a button on the bar.
   views::CustomButton* throbbing_view_;
 
   BookmarkBar::State bookmark_bar_state_;

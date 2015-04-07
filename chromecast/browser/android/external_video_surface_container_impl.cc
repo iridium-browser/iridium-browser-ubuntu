@@ -7,7 +7,7 @@
 #include "base/android/jni_android.h"
 #include "content/public/browser/android/content_view_core.h"
 #include "jni/ExternalVideoSurfaceContainer_jni.h"
-#include "ui/gfx/rect_f.h"
+#include "ui/gfx/geometry/rect_f.h"
 
 namespace chromecast {
 namespace shell {
@@ -40,6 +40,19 @@ void ExternalVideoSurfaceContainerImpl::RequestExternalVideoSurface(
   JNIEnv* env = base::android::AttachCurrentThread();
   Java_ExternalVideoSurfaceContainer_requestExternalVideoSurface(
       env, jobject_.obj(), static_cast<jint>(player_id));
+}
+
+int ExternalVideoSurfaceContainerImpl::GetCurrentPlayerId() {
+  JNIEnv* env = base::android::AttachCurrentThread();
+
+  int current_player = static_cast<int>(
+      Java_ExternalVideoSurfaceContainer_getCurrentPlayerId(
+          env, jobject_.obj()));
+
+  if (current_player < 0)
+    return kInvalidPlayerId;
+  else
+    return current_player;
 }
 
 void ExternalVideoSurfaceContainerImpl::ReleaseExternalVideoSurface(

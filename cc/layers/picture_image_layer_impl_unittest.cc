@@ -22,11 +22,9 @@ namespace {
 class TestablePictureImageLayerImpl : public PictureImageLayerImpl {
  public:
   TestablePictureImageLayerImpl(LayerTreeImpl* tree_impl, int id)
-      : PictureImageLayerImpl(tree_impl, id) {
-  }
+      : PictureImageLayerImpl(tree_impl, id, false) {}
   using PictureLayerImpl::UpdateIdealScales;
   using PictureLayerImpl::MaximumTilingContentsScale;
-  using PictureLayerImpl::DoPostCommitInitializationIfNeeded;
 
   PictureLayerTilingSet* tilings() { return tilings_.get(); }
 
@@ -60,9 +58,9 @@ class PictureImageLayerImplTest : public testing::Test {
     }
     TestablePictureImageLayerImpl* layer =
         new TestablePictureImageLayerImpl(tree, id);
-    layer->pile_ = FakePicturePileImpl::CreateInfiniteFilledPile();
-    layer->SetBounds(layer->pile_->tiling_size());
-    layer->SetContentBounds(layer->pile_->tiling_size());
+    layer->raster_source_ = FakePicturePileImpl::CreateInfiniteFilledPile();
+    layer->SetBounds(layer->raster_source_->GetSize());
+    layer->SetContentBounds(layer->raster_source_->GetSize());
     return make_scoped_ptr(layer);
   }
 
@@ -94,7 +92,6 @@ class PictureImageLayerImplTest : public testing::Test {
 TEST_F(PictureImageLayerImplTest, CalculateContentsScale) {
   scoped_ptr<TestablePictureImageLayerImpl> layer(CreateLayer(1, PENDING_TREE));
   layer->SetDrawsContent(true);
-  layer->DoPostCommitInitializationIfNeeded();
 
   gfx::Rect viewport(100, 200);
   SetupDrawPropertiesAndUpdateTiles(

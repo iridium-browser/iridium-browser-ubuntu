@@ -34,7 +34,9 @@ class MessageLoop;
 namespace content {
 class FlingCurveConfiguration;
 class NotificationDispatcher;
+class PushDispatcher;
 class ThreadSafeSender;
+class WebBluetoothImpl;
 class WebCryptoImpl;
 class WebGeofencingProviderImpl;
 
@@ -42,6 +44,8 @@ class CONTENT_EXPORT BlinkPlatformImpl
     : NON_EXPORTED_BASE(public blink::Platform) {
  public:
   BlinkPlatformImpl();
+  explicit BlinkPlatformImpl(
+      scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner);
   virtual ~BlinkPlatformImpl();
 
   // Platform methods (partial implementation):
@@ -64,11 +68,6 @@ class CONTENT_EXPORT BlinkPlatformImpl
   virtual size_t physicalMemoryMB();
   virtual size_t virtualMemoryLimitMB();
   virtual size_t numberOfProcessors();
-
-  virtual void startHeapProfiling(const blink::WebString& prefix);
-  virtual void stopHeapProfiling();
-  virtual void dumpHeapProfiling(const blink::WebString& reason);
-  virtual blink::WebString getHeapProfile();
 
   virtual bool processMemorySizesInBytes(size_t* private_bytes,
                                          size_t* shared_bytes);
@@ -156,11 +155,16 @@ class CONTENT_EXPORT BlinkPlatformImpl
       const blink::WebWorkerRunLoop& runLoop);
   virtual blink::WebCrypto* crypto();
   virtual blink::WebGeofencingProvider* geofencingProvider();
+  virtual blink::WebBluetooth* bluetooth();
   virtual blink::WebNotificationManager* notificationManager();
+  virtual blink::WebPushProvider* pushProvider();
+  virtual blink::WebNavigatorConnectProvider* navigatorConnectProvider();
 
   void SuspendSharedTimer();
   void ResumeSharedTimer();
   virtual void OnStartSharedTimer(base::TimeDelta delay) {}
+
+  WebBluetoothImpl* BluetoothImplForTesting() { return bluetooth_.get(); }
 
  private:
   static void DestroyCurrentThread(void*);
@@ -170,9 +174,13 @@ class CONTENT_EXPORT BlinkPlatformImpl
       shared_timer_func_();
   }
 
+  void InternalInit();
+
+  scoped_refptr<base::SingleThreadTaskRunner> MainTaskRunnerForCurrentThread();
+
+  scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner_;
   WebThemeEngineImpl native_theme_engine_;
   WebFallbackThemeEngineImpl fallback_theme_engine_;
-  base::MessageLoop* main_loop_;
   base::OneShotTimer<BlinkPlatformImpl> shared_timer_;
   void (*shared_timer_func_)();
   double shared_timer_fire_time_;
@@ -181,9 +189,11 @@ class CONTENT_EXPORT BlinkPlatformImpl
   base::ThreadLocalStorage::Slot current_thread_slot_;
   WebCryptoImpl web_crypto_;
   scoped_ptr<WebGeofencingProviderImpl> geofencing_provider_;
+  scoped_ptr<WebBluetoothImpl> bluetooth_;
 
   scoped_refptr<ThreadSafeSender> thread_safe_sender_;
   scoped_refptr<NotificationDispatcher> notification_dispatcher_;
+  scoped_refptr<PushDispatcher> push_dispatcher_;
 };
 
 }  // namespace content

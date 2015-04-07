@@ -129,7 +129,7 @@ public class PersonalDataManagerTest extends ChromeShellTestBase {
 
         card.setGUID(cardOneGUID);
         card.setMonth("10");
-        card.setNumber("5678567856785678");
+        card.setNumber("4012888888881881");
         mHelper.setCreditCard(card);
         assertEquals("Should still have only two cards", 2, mHelper.getNumberOfCreditCards());
 
@@ -138,8 +138,8 @@ public class PersonalDataManagerTest extends ChromeShellTestBase {
         assertEquals("https://www.example.com", storedCard.getOrigin());
         assertEquals("Visa", storedCard.getName());
         assertEquals("10", storedCard.getMonth());
-        assertEquals("5678567856785678", storedCard.getNumber());
-        assertEquals("************5678", storedCard.getObfuscatedNumber());
+        assertEquals("4012888888881881", storedCard.getNumber());
+        assertEquals("Visa - 1881", storedCard.getObfuscatedNumber());
         assertNotNull(mHelper.getCreditCard(cardTwoGUID));
     }
 
@@ -201,7 +201,7 @@ public class PersonalDataManagerTest extends ChromeShellTestBase {
                 streetAddress1,
                 "Tahiti", "Mahina", "Orofara",
                 "98709", "CEDEX 98703",
-                "French Polynesia", "50.71.53", "john@acme.inc", "");
+                "French Polynesia", "44.71.53", "john@acme.inc", "");
         String profileGuid1 = mHelper.setProfile(profile);
         assertEquals(1, mHelper.getNumberOfProfiles());
         AutofillProfile storedProfile1 = mHelper.getProfile(profileGuid1);
@@ -213,7 +213,7 @@ public class PersonalDataManagerTest extends ChromeShellTestBase {
         assertEquals("Orofara", storedProfile1.getDependentLocality());
         assertEquals("98709", storedProfile1.getPostalCode());
         assertEquals("CEDEX 98703", storedProfile1.getSortingCode());
-        assertEquals("50.71.53", storedProfile1.getPhoneNumber());
+        assertEquals("44.71.53", storedProfile1.getPhoneNumber());
         assertEquals("john@acme.inc", storedProfile1.getEmailAddress());
 
         profile.setStreetAddress(streetAddress2);

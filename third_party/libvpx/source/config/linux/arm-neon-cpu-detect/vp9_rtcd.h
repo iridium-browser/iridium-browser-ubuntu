@@ -29,6 +29,9 @@ struct yv12_buffer_config;
 extern "C" {
 #endif
 
+unsigned int vp9_avg_4x4_c(const uint8_t *, int p);
+#define vp9_avg_4x4 vp9_avg_4x4_c
+
 unsigned int vp9_avg_8x8_c(const uint8_t *, int p);
 #define vp9_avg_8x8 vp9_avg_8x8_c
 
@@ -219,6 +222,9 @@ void vp9_fdct8x8_1_c(const int16_t *input, tran_low_t *output, int stride);
 void vp9_fdct8x8_1_neon(const int16_t *input, tran_low_t *output, int stride);
 RTCD_EXTERN void (*vp9_fdct8x8_1)(const int16_t *input, tran_low_t *output, int stride);
 
+void vp9_fdct8x8_quant_c(const int16_t *input, int stride, tran_low_t *coeff_ptr, intptr_t n_coeffs, int skip_block, const int16_t *zbin_ptr, const int16_t *round_ptr, const int16_t *quant_ptr, const int16_t *quant_shift_ptr, tran_low_t *qcoeff_ptr, tran_low_t *dqcoeff_ptr, const int16_t *dequant_ptr, int zbin_oq_value, uint16_t *eob_ptr, const int16_t *scan, const int16_t *iscan);
+#define vp9_fdct8x8_quant vp9_fdct8x8_quant_c
+
 void vp9_fht16x16_c(const int16_t *input, tran_low_t *output, int stride, int tx_type);
 #define vp9_fht16x16 vp9_fht16x16_c
 
@@ -393,9 +399,6 @@ RTCD_EXTERN void (*vp9_quantize_fp)(const tran_low_t *coeff_ptr, intptr_t n_coef
 
 void vp9_quantize_fp_32x32_c(const tran_low_t *coeff_ptr, intptr_t n_coeffs, int skip_block, const int16_t *zbin_ptr, const int16_t *round_ptr, const int16_t *quant_ptr, const int16_t *quant_shift_ptr, tran_low_t *qcoeff_ptr, tran_low_t *dqcoeff_ptr, const int16_t *dequant_ptr, int zbin_oq_value, uint16_t *eob_ptr, const int16_t *scan, const int16_t *iscan);
 #define vp9_quantize_fp_32x32 vp9_quantize_fp_32x32_c
-
-int vp9_refining_search_sad_c(const struct macroblock *x, struct mv *ref_mv, int sad_per_bit, int distance, const struct vp9_variance_vtable *fn_ptr, const struct mv *center_mv);
-#define vp9_refining_search_sad vp9_refining_search_sad_c
 
 unsigned int vp9_sad16x16_c(const uint8_t *src_ptr, int source_stride, const uint8_t *ref_ptr, int  ref_stride);
 unsigned int vp9_sad16x16_neon(const uint8_t *src_ptr, int source_stride, const uint8_t *ref_ptr, int  ref_stride);

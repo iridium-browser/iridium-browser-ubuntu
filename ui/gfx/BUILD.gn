@@ -248,6 +248,7 @@ component("gfx") {
       "render_text_harfbuzz.h",
       "text_utils_skia.cc",
     ]
+
     # These are the "native" rendering routines, only one should apply.
     if (is_win) {
       sources += [ "render_text_win.cc" ]
@@ -326,9 +327,7 @@ component("gfx") {
 
   # Ozone stuff.
   if (use_ozone) {
-    sources += [
-      "platform_font_ozone.cc",
-    ]
+    sources += [ "platform_font_ozone.cc" ]
   }
 
   if (!use_aura) {
@@ -341,16 +340,10 @@ component("gfx") {
   }
 
   if (use_x11) {
-    deps += [
-      "//ui/gfx/x",
-    ]
-    configs += [
-      "//build/config/linux:x11",
-    ]
+    deps += [ "//ui/gfx/x" ]
+    configs += [ "//build/config/linux:x11" ]
   } else {
-    sources -= [
-      "path_x11.cc",
-    ]
+    sources -= [ "path_x11.cc" ]
   }
 
   if (use_pango) {
@@ -363,9 +356,7 @@ component("gfx") {
     configs += [ "//build/config/linux:pangocairo" ]
   }
   if (use_pango && use_ozone) {
-    sources -= [
-      "platform_font_ozone.cc",
-    ]
+    sources -= [ "platform_font_ozone.cc" ]
   }
 }
 
@@ -413,6 +404,8 @@ source_set("test_support") {
 test("gfx_unittests") {
   sources = [
     "font_unittest.cc",
+    "image/image_family_unittest.cc",
+    "image/image_ios_unittest.mm",
     "image/image_skia_unittest.cc",
     "image/image_unittest.cc",
     "screen_unittest.cc",
@@ -454,6 +447,8 @@ test("gfx_unittests") {
       "geometry/size_unittest.cc",
       "geometry/vector2d_unittest.cc",
       "geometry/vector3d_unittest.cc",
+      "image/image_mac_unittest.mm",
+      "image/image_util_unittest.cc",
       "mac/coordinate_conversion_unittest.mm",
       "platform_font_mac_unittest.mm",
       "range/range_mac_unittest.mm",
@@ -525,15 +520,11 @@ test("gfx_unittests") {
   }
 
   if (is_android || is_ios) {
-    sources -= [
-      "render_text_unittest.cc",
-    ]
+    sources -= [ "render_text_unittest.cc" ]
   }
 
   if (use_aura) {
-    sources -= [
-      "screen_unittest.cc",
-    ]
+    sources -= [ "screen_unittest.cc" ]
   }
 
   if (is_win) {
@@ -542,6 +533,7 @@ test("gfx_unittests") {
       "font_fallback_win_unittest.cc",
       "icon_util_unittest.cc",
       "icon_util_unittests.rc",
+      "path_win_unittest.cc",
       "platform_font_win_unittest.cc",
     ]
 

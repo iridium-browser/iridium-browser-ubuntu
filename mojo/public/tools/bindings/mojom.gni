@@ -2,6 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("../../mojo_sdk.gni")
+
 # Generate C++ and JavaScript source files from mojom files. The output files
 # will go under the generated file directory tree with the same path as each
 # input file.
@@ -24,7 +26,7 @@ template("mojom") {
   assert(defined(invoker.sources),
          "\"sources\" must be defined for the $target_name template.")
 
-  generator_root = "//mojo/public/tools/bindings"
+  generator_root = rebase_path("mojo/public/tools/bindings", ".", mojo_root)
   generator_script = "$generator_root/mojom_bindings_generator.py"
   generator_sources = [
     generator_script,
@@ -47,6 +49,11 @@ template("mojom") {
     "$generator_root/generators/cpp_templates/struct_macros.tmpl",
     "$generator_root/generators/cpp_templates/wrapper_class_declaration.tmpl",
     "$generator_root/generators/cpp_templates/wrapper_class_definition.tmpl",
+    "$generator_root/generators/dart_templates/enum_definition.tmpl",
+    "$generator_root/generators/dart_templates/interface_definition.tmpl",
+    "$generator_root/generators/dart_templates/module.lib.tmpl",
+    "$generator_root/generators/dart_templates/module_definition.tmpl",
+    "$generator_root/generators/dart_templates/struct_definition.tmpl",
     "$generator_root/generators/java_templates/constant_definition.tmpl",
     "$generator_root/generators/java_templates/constants.java.tmpl",
     "$generator_root/generators/java_templates/enum.java.tmpl",
@@ -66,6 +73,7 @@ template("mojom") {
     "$generator_root/generators/python_templates/module_macros.tmpl",
     "$generator_root/generators/python_templates/module.py.tmpl",
     "$generator_root/generators/mojom_cpp_generator.py",
+    "$generator_root/generators/mojom_dart_generator.py",
     "$generator_root/generators/mojom_js_generator.py",
     "$generator_root/generators/mojom_java_generator.py",
     "$generator_root/generators/mojom_python_generator.py",
@@ -88,15 +96,13 @@ template("mojom") {
     "{{source_gen_dir}}/{{source_name_part}}.mojom.h",
     "{{source_gen_dir}}/{{source_name_part}}.mojom-internal.h",
   ]
-  generator_java_outputs = [
-    "{{source_gen_dir}}/{{source_name_part}}.mojom.srcjar",
-  ]
-  generator_js_outputs = [
-    "{{source_gen_dir}}/{{source_name_part}}.mojom.js",
-  ]
-  generator_python_outputs = [
-    "{{source_gen_dir}}/{{source_name_part}}_mojom.py",
-  ]
+  generator_dart_outputs =
+      [ "{{source_gen_dir}}/{{source_name_part}}.mojom.dart" ]
+  generator_java_outputs =
+      [ "{{source_gen_dir}}/{{source_name_part}}.mojom.srcjar" ]
+  generator_js_outputs = [ "{{source_gen_dir}}/{{source_name_part}}.mojom.js" ]
+  generator_python_outputs =
+      [ "{{source_gen_dir}}/{{source_name_part}}_mojom.py" ]
 
   if (defined(invoker.visibility)) {
     # Need to save this because the the target_name is overwritten inside the
@@ -113,16 +119,20 @@ template("mojom") {
     script = generator_script
     inputs = generator_sources
     sources = invoker.sources
-    outputs = generator_cpp_outputs +
-              generator_java_outputs +
-              generator_js_outputs +
-              generator_python_outputs
+    outputs =
+        generator_cpp_outputs + generator_dart_outputs +
+        generator_java_outputs + generator_js_outputs + generator_python_outputs
     args = [
       "{{source}}",
-      "--use_chromium_bundled_pylibs",
-      "-d", rebase_path("//", root_build_dir),
-      "-I", rebase_path("//", root_build_dir),
-      "-o", rebase_path(root_gen_dir),
+      "--use_bundled_pylibs",
+      "-d",
+      rebase_path("//", root_build_dir),
+      "-I",
+      rebase_path("//", root_build_dir),
+      "-I",
+      rebase_path(mojo_root, root_build_dir),
+      "-o",
+      rebase_path(root_gen_dir),
     ]
   }
 
@@ -135,15 +145,20 @@ template("mojom") {
     }
     sources = process_file_template(invoker.sources, generator_cpp_outputs)
     data = process_file_template(invoker.sources, generator_js_outputs)
+
+    public_configs =
+        rebase_path([ "mojo/public/build/config:mojo_sdk" ], ".", mojo_root)
+
+    public_deps = rebase_path([ "mojo/public/cpp/bindings" ], ".", mojo_root)
+    if (defined(invoker.public_deps)) {
+      public_deps += invoker.public_deps
+    }
+
     deps = [
       ":$generator_target_name",
-      "//mojo/public/cpp/bindings",
     ]
     if (defined(invoker.deps)) {
       deps += invoker.deps
-    }
-    if (defined(invoker.public_deps)) {
-      public_deps = invoker.public_deps
     }
   }
 
@@ -174,10 +189,12 @@ template("mojom") {
 
     java_target_name = target_name + "_java"
     android_library(java_target_name) {
-      deps = [
-        "//mojo/public/java:bindings",
-        "//mojo/public/java:system",
-      ]
+      deps = rebase_path([
+                           "mojo/public/java:bindings",
+                           "mojo/public/java:system",
+                         ],
+                         ".",
+                         mojo_root)
 
       foreach(d, all_deps) {
         # Resolve the name, so that a target //mojo/something becomes

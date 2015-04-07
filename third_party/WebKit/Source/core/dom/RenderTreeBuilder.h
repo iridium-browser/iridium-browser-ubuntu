@@ -27,50 +27,80 @@
 #define RenderTreeBuilder_h
 
 #include "core/dom/Document.h"
+#include "core/dom/FirstLetterPseudoElement.h"
 #include "core/dom/Node.h"
 #include "core/dom/NodeRenderingTraversal.h"
+#include "core/dom/Text.h"
+#include "core/rendering/RenderObject.h"
 #include "wtf/RefPtr.h"
 
 namespace blink {
 
-class ContainerNode;
 class RenderObject;
 class RenderStyle;
 
+template <typename NodeType>
 class RenderTreeBuilder {
     STACK_ALLOCATED();
-public:
-    RenderTreeBuilder(Node* node, RenderStyle* style)
+protected:
+    RenderTreeBuilder(NodeType& node, RenderObject* renderingParent)
         : m_node(node)
-        , m_renderingParent(nullptr)
-        , m_style(style)
+        , m_renderingParent(renderingParent)
     {
-        ASSERT(!node->renderer());
-        ASSERT(node->needsAttach());
-        ASSERT(node->document().inStyleRecalc());
+        ASSERT(!node.renderer());
+        ASSERT(node.needsAttach());
+        ASSERT(node.document().inStyleRecalc());
 
         // FIXME: We should be able to ASSERT(node->inActiveDocument()) but childrenChanged is called
         // before ChildNodeInsertionNotifier in ContainerNode's methods and some implementations
         // will trigger a layout inside childrenChanged.
         // Mainly HTMLTextAreaElement::childrenChanged calls HTMLTextFormControlElement::setSelectionRange
         // which does an updateLayoutIgnorePendingStylesheets.
-
-        m_renderingParent = NodeRenderingTraversal::parent(node, &m_parentDetails);
     }
 
-    void createRendererForTextIfNeeded();
-    void createRendererForElementIfNeeded();
+    RenderObject* parentRenderer() const { return m_renderingParent; }
+
+    RenderObject* nextRenderer() const
+    {
+        ASSERT(m_renderingParent);
+
+        // Avoid an O(N^2) walk over the children when reattaching all children of a node.
+        if (m_renderingParent->node() && m_renderingParent->node()->needsAttach())
+            return 0;
+
+        return NodeRenderingTraversal::nextSiblingRenderer(*m_node);
+    }
+
+    RawPtrWillBeMember<NodeType> m_node;
+    RawPtrWillBeMember<RenderObject> m_renderingParent;
+};
+
+class RenderTreeBuilderForElement : public RenderTreeBuilder<Element> {
+public:
+    RenderTreeBuilderForElement(Element&, RenderStyle*);
+
+    void createRendererIfNeeded()
+    {
+        if (shouldCreateRenderer())
+            createRenderer();
+    }
 
 private:
     RenderObject* parentRenderer() const;
     RenderObject* nextRenderer() const;
     bool shouldCreateRenderer() const;
     RenderStyle& style() const;
+    void createRenderer();
 
-    RawPtrWillBeMember<Node> m_node;
-    RawPtrWillBeMember<ContainerNode> m_renderingParent;
-    NodeRenderingTraversal::ParentDetails m_parentDetails;
     mutable RefPtr<RenderStyle> m_style;
+};
+
+class RenderTreeBuilderForText : public RenderTreeBuilder<Text> {
+public:
+    RenderTreeBuilderForText(Text& text, RenderObject* renderingParent)
+        : RenderTreeBuilder(text, renderingParent) { }
+
+    void createRenderer();
 };
 
 } // namespace blink

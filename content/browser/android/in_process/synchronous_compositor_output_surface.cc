@@ -6,19 +6,20 @@
 
 #include "base/auto_reset.h"
 #include "base/logging.h"
-#include "cc/output/begin_frame_args.h"
 #include "cc/output/compositor_frame.h"
 #include "cc/output/context_provider.h"
 #include "cc/output/output_surface_client.h"
 #include "cc/output/software_output_device.h"
+#include "content/browser/android/in_process/synchronous_compositor_external_begin_frame_source.h"
 #include "content/browser/android/in_process/synchronous_compositor_impl.h"
+#include "content/browser/android/in_process/synchronous_compositor_registry.h"
 #include "content/browser/gpu/compositor_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/renderer/gpu/frame_swap_message_queue.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "gpu/command_buffer/common/gpu_memory_allocation.h"
 #include "third_party/skia/include/core/SkCanvas.h"
-#include "ui/gfx/rect_conversions.h"
+#include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/gfx/transform.h"
 
@@ -28,13 +29,6 @@ namespace {
 
 // Do not limit number of resources, so use an unrealistically high value.
 const size_t kNumResourcesLimit = 10 * 1000 * 1000;
-
-void DidActivatePendingTree(int routing_id) {
-  SynchronousCompositorOutputSurfaceDelegate* delegate =
-      SynchronousCompositorImpl::FromRoutingID(routing_id);
-  if (delegate)
-    delegate->DidActivatePendingTree();
-}
 
 } // namespace
 
@@ -76,29 +70,28 @@ SynchronousCompositorOutputSurface::SynchronousCompositorOutputSurface(
     : cc::OutputSurface(
           scoped_ptr<cc::SoftwareOutputDevice>(new SoftwareDevice(this))),
       routing_id_(routing_id),
-      needs_begin_frame_(false),
-      invoking_composite_(false),
-      current_sw_canvas_(NULL),
+      registered_(false),
+      current_sw_canvas_(nullptr),
       memory_policy_(0),
-      output_surface_client_(NULL),
-      frame_swap_message_queue_(frame_swap_message_queue) {
+      output_surface_client_(nullptr),
+      frame_swap_message_queue_(frame_swap_message_queue),
+      begin_frame_source_(nullptr) {
   capabilities_.deferred_gl_initialization = true;
   capabilities_.draw_and_swap_full_viewport_every_frame = true;
   capabilities_.adjust_deadline_for_parent = false;
   capabilities_.delegated_rendering = true;
   capabilities_.max_frames_pending = 1;
-  // Cannot call out to GetDelegate() here as the output surface is not
-  // constructed on the correct thread.
-
   memory_policy_.priority_cutoff_when_visible =
       gpu::MemoryAllocation::CUTOFF_ALLOW_NICE_TO_HAVE;
 }
 
 SynchronousCompositorOutputSurface::~SynchronousCompositorOutputSurface() {
   DCHECK(CalledOnValidThread());
-  SynchronousCompositorOutputSurfaceDelegate* delegate = GetDelegate();
-  if (delegate)
-    delegate->DidDestroySynchronousOutputSurface(this);
+  if (registered_) {
+    SynchronousCompositorRegistry::GetInstance()->UnregisterOutputSurface(
+        routing_id_, this);
+  }
+  DCHECK(!begin_frame_source_);
 }
 
 bool SynchronousCompositorOutputSurface::BindToClient(
@@ -108,13 +101,11 @@ bool SynchronousCompositorOutputSurface::BindToClient(
     return false;
 
   output_surface_client_ = surface_client;
-  output_surface_client_->SetTreeActivationCallback(
-      base::Bind(&DidActivatePendingTree, routing_id_));
   output_surface_client_->SetMemoryPolicy(memory_policy_);
 
-  SynchronousCompositorOutputSurfaceDelegate* delegate = GetDelegate();
-  if (delegate)
-    delegate->DidBindOutputSurface(this);
+  SynchronousCompositorRegistry::GetInstance()->RegisterOutputSurface(
+      routing_id_, this);
+  registered_ = true;
 
   return true;
 }
@@ -122,14 +113,6 @@ bool SynchronousCompositorOutputSurface::BindToClient(
 void SynchronousCompositorOutputSurface::Reshape(
     const gfx::Size& size, float scale_factor) {
   // Intentional no-op: surface size is controlled by the embedder.
-}
-
-void SynchronousCompositorOutputSurface::SetNeedsBeginFrame(bool enable) {
-  DCHECK(CalledOnValidThread());
-  needs_begin_frame_ = enable;
-  SynchronousCompositorOutputSurfaceDelegate* delegate = GetDelegate();
-  if (delegate && !invoking_composite_)
-    delegate->SetContinuousInvalidate(needs_begin_frame_);
 }
 
 void SynchronousCompositorOutputSurface::SwapBuffers(
@@ -140,6 +123,11 @@ void SynchronousCompositorOutputSurface::SwapBuffers(
   frame->AssignTo(frame_holder_.get());
 
   client_->DidSwapBuffers();
+}
+
+void SynchronousCompositorOutputSurface::SetBeginFrameSource(
+    SynchronousCompositorExternalBeginFrameSource* begin_frame_source) {
+  begin_frame_source_ = begin_frame_source;
 }
 
 namespace {
@@ -223,9 +211,8 @@ void SynchronousCompositorOutputSurface::InvokeComposite(
     gfx::Rect viewport_rect_for_tile_priority,
     gfx::Transform transform_for_tile_priority,
     bool hardware_draw) {
-  DCHECK(!invoking_composite_);
   DCHECK(!frame_holder_.get());
-  base::AutoReset<bool> invoking_composite_resetter(&invoking_composite_, true);
+  DCHECK(begin_frame_source_);
 
   gfx::Transform adjusted_transform = transform;
   AdjustTransform(&adjusted_transform, viewport);
@@ -236,7 +223,8 @@ void SynchronousCompositorOutputSurface::InvokeComposite(
                              transform_for_tile_priority,
                              !hardware_draw);
   SetNeedsRedrawRect(gfx::Rect(viewport.size()));
-  client_->BeginFrame(cc::BeginFrameArgs::CreateForSynchronousCompositor());
+
+  begin_frame_source_->BeginFrame();
 
   // After software draws (which might move the viewport arbitrarily), restore
   // the previous hardware viewport to allow CC's tile manager to prioritize
@@ -260,10 +248,6 @@ void SynchronousCompositorOutputSurface::InvokeComposite(
 
   if (frame_holder_.get())
     client_->DidSwapBuffersComplete();
-
-  SynchronousCompositorOutputSurfaceDelegate* delegate = GetDelegate();
-  if (delegate)
-    delegate->SetContinuousInvalidate(needs_begin_frame_);
 }
 
 void SynchronousCompositorOutputSurface::ReturnResources(
@@ -280,6 +264,12 @@ void SynchronousCompositorOutputSurface::SetMemoryPolicy(size_t bytes_limit) {
     output_surface_client_->SetMemoryPolicy(memory_policy_);
 }
 
+void SynchronousCompositorOutputSurface::SetTreeActivationCallback(
+    const base::Closure& callback) {
+  DCHECK(client_);
+  client_->SetTreeActivationCallback(callback);
+}
+
 void SynchronousCompositorOutputSurface::GetMessagesToDeliver(
     ScopedVector<IPC::Message>* messages) {
   DCHECK(CalledOnValidThread());
@@ -293,11 +283,6 @@ void SynchronousCompositorOutputSurface::GetMessagesToDeliver(
 // thread.
 bool SynchronousCompositorOutputSurface::CalledOnValidThread() const {
   return BrowserThread::CurrentlyOn(BrowserThread::UI);
-}
-
-SynchronousCompositorOutputSurfaceDelegate*
-SynchronousCompositorOutputSurface::GetDelegate() {
-  return SynchronousCompositorImpl::FromRoutingID(routing_id_);
 }
 
 }  // namespace content

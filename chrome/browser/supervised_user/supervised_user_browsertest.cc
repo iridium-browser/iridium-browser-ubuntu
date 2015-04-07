@@ -108,13 +108,13 @@ class SupervisedUserBlockModeTest : public InProcessBrowserTest {
         SupervisedUserServiceFactory::GetForProfile(profile);
     SupervisedUserSettingsService* supervised_user_settings_service =
         SupervisedUserSettingsServiceFactory::GetForProfile(profile);
-    supervised_user_settings_service->SetLocalSettingForTesting(
+    supervised_user_settings_service->SetLocalSetting(
         supervised_users::kContentPackDefaultFilteringBehavior,
         scoped_ptr<base::Value>(
             new base::FundamentalValue(SupervisedUserURLFilter::BLOCK)));
   }
 
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     // Enable the test server and remap all URLs to it.
     ASSERT_TRUE(test_server()->Start());
     std::string host_port = test_server()->host_port_pair().ToString();
@@ -236,7 +236,7 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserBlockModeTest,
   SupervisedUserSettingsService* supervised_user_settings_service =
       SupervisedUserSettingsServiceFactory::GetForProfile(
           browser()->profile());
-  supervised_user_settings_service->SetLocalSettingForTesting(
+  supervised_user_settings_service->SetLocalSetting(
       supervised_users::kContentPackManualBehaviorHosts, dict.Pass());
   EXPECT_EQ(SupervisedUserURLFilter::ALLOW,
             filter->GetFilteringBehaviorForURL(allowed_url));
@@ -300,7 +300,7 @@ IN_PROC_BROWSER_TEST_F(SupervisedUserBlockModeTest, Unblock) {
   SupervisedUserSettingsService* supervised_user_settings_service =
       SupervisedUserSettingsServiceFactory::GetForProfile(
           browser()->profile());
-  supervised_user_settings_service->SetLocalSettingForTesting(
+  supervised_user_settings_service->SetLocalSetting(
       supervised_users::kContentPackManualBehaviorHosts, dict.Pass());
 
   scoped_refptr<SupervisedUserURLFilter> filter =

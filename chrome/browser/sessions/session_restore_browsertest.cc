@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/files/file_path.h"
+#include "base/memory/memory_pressure_listener.h"
 #include "base/process/launch.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
@@ -19,7 +20,6 @@
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/sessions/session_service_test_helper.h"
-#include "chrome/browser/sessions/session_types.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/ui/browser.h"
@@ -35,6 +35,7 @@
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/sessions/serialized_navigation_entry_test_helper.h"
+#include "components/sessions/session_types.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
@@ -65,7 +66,7 @@ class SessionRestoreTest : public InProcessBrowserTest {
 
  protected:
 #if defined(OS_CHROMEOS)
-  virtual void SetUpCommandLine(CommandLine* command_line) override {
+  virtual void SetUpCommandLine(base::CommandLine* command_line) override {
     // TODO(nkostylev): Investigate if we can remove this switch.
     command_line->AppendSwitch(switches::kCreateBrowserOnStartupForTests);
     InProcessBrowserTest::SetUpCommandLine(command_line);
@@ -122,12 +123,14 @@ class SessionRestoreTest : public InProcessBrowserTest {
   }
 
   Browser* QuitBrowserAndRestore(Browser* browser, int expected_tab_count) {
-    return QuitBrowserAndRestoreWithURL(browser, expected_tab_count, GURL());
+    return QuitBrowserAndRestoreWithURL(
+        browser, expected_tab_count, GURL(), true);
   }
 
   Browser* QuitBrowserAndRestoreWithURL(Browser* browser,
                                         int expected_tab_count,
-                                        const GURL& url) {
+                                        const GURL& url,
+                                        bool no_memory_pressure) {
     Profile* profile = browser->profile();
 
     // Close the browser.
@@ -148,6 +151,11 @@ class SessionRestoreTest : public InProcessBrowserTest {
       chrome::Navigate(&params);
     }
     Browser* new_browser = window_observer.WaitForSingleNewBrowser();
+    // Stop loading anything more if we are running out of space.
+    if (!no_memory_pressure) {
+      base::MemoryPressureListener::NotifyMemoryPressure(
+          base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_CRITICAL);
+    }
     restore_observer.Wait();
     g_browser_process->ReleaseModule();
 
@@ -192,11 +200,10 @@ class SessionRestoreTest : public InProcessBrowserTest {
   const BrowserList* active_browser_list_;
 };
 
-#if defined(USE_AURA)
 // Verifies that restored tabs have a root window. This is important
 // otherwise the wrong information is communicated to the renderer.
 // (http://crbug.com/342672).
-IN_PROC_BROWSER_TEST_F(SessionRestoreTest, RestoredTabsShouldHaveRootWindow) {
+IN_PROC_BROWSER_TEST_F(SessionRestoreTest, RestoredTabsShouldHaveWindow) {
   // Create tabs.
   ui_test_utils::NavigateToURLWithDisposition(
       browser(),
@@ -215,15 +222,16 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, RestoredTabsShouldHaveRootWindow) {
   const int tabs = tab_strip_model->count();
   ASSERT_EQ(3, tabs);
 
-  // Check the restored tabs have a root window.
+  // Check the restored tabs have a window to get screen info from.
+  // On Aura it should also have a root window.
   for (int i = 0; i < tabs; ++i) {
     content::WebContents* contents = tab_strip_model->GetWebContentsAt(i);
-    gfx::NativeView window = contents->GetNativeView();
-    bool tab_has_root_window = !!window->GetRootWindow();
-    EXPECT_TRUE(tab_has_root_window);
+    EXPECT_TRUE(contents->GetTopLevelNativeWindow());
+#if defined(USE_AURA)
+    EXPECT_TRUE(contents->GetNativeView()->GetRootWindow());
+#endif
   }
 }
-#endif  // USE_AURA
 
 // Verify that restored tabs have correct disposition. Only one tab should
 // have "visible" visibility state, the rest should not.
@@ -571,7 +579,7 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, RestoreForeignTab) {
   sync_data.add_navigation()->CopyFrom(nav1.ToSyncData());
   sync_data.add_navigation()->CopyFrom(nav2.ToSyncData());
 
-  SessionTab tab;
+  sessions::SessionTab tab;
   tab.SetFromSyncData(sync_data, base::Time::Now());
   EXPECT_EQ(2U, tab.navigations.size());
   for (size_t i = 0; i < tab.navigations.size(); ++i)
@@ -650,9 +658,9 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, RestoreForeignSession) {
   SerializedNavigationEntryTestHelper::SetIsOverridingUserAgent(true, &nav2);
 
   // Set up the restore data -- one window with two tabs.
-  std::vector<const SessionWindow*> session;
-  SessionWindow window;
-  SessionTab tab1;
+  std::vector<const sessions::SessionWindow*> session;
+  sessions::SessionWindow window;
+  sessions::SessionTab tab1;
   {
     sync_pb::SessionTab sync_data;
     sync_data.set_tab_visual_index(0);
@@ -663,7 +671,7 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, RestoreForeignSession) {
   }
   window.tabs.push_back(&tab1);
 
-  SessionTab tab2;
+  sessions::SessionTab tab2;
   {
     sync_pb::SessionTab sync_data;
     sync_data.set_tab_visual_index(1);
@@ -676,10 +684,10 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, RestoreForeignSession) {
 
   // Leave tab3 empty. Should have no effect on restored session, but simulates
   // partially complete foreign session data.
-  SessionTab tab3;
+  sessions::SessionTab tab3;
   window.tabs.push_back(&tab3);
 
-  session.push_back(static_cast<const SessionWindow*>(&window));
+  session.push_back(static_cast<const sessions::SessionWindow*>(&window));
   ui_test_utils::BrowserAddedObserver window_observer;
   std::vector<Browser*> browsers =
       SessionRestore::RestoreForeignSessionWindows(
@@ -730,6 +738,63 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, Basic) {
   GoBack(new_browser);
   ASSERT_EQ(url1_,
             new_browser->tab_strip_model()->GetActiveWebContents()->GetURL());
+}
+
+IN_PROC_BROWSER_TEST_F(SessionRestoreTest, NoMemoryPressureLoadsAllTabs) {
+  // Add several tabs to the browser. Restart the browser and check that all
+  // tabs got loaded properly.
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(),
+      GURL(url::kAboutBlankURL),
+      NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(),
+      GURL(url::kAboutBlankURL),
+      NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+  Browser* restored =
+      QuitBrowserAndRestoreWithURL(browser(), 1, GURL(), true);
+  TabStripModel* tab_strip_model = restored->tab_strip_model();
+
+  ASSERT_EQ(1u, active_browser_list_->size());
+
+  ASSERT_EQ(3, tab_strip_model->count());
+  // All render widgets should be initialized by now.
+  ASSERT_TRUE(
+      tab_strip_model->GetWebContentsAt(0)->GetRenderWidgetHostView() &&
+      tab_strip_model->GetWebContentsAt(1)->GetRenderWidgetHostView() &&
+      tab_strip_model->GetWebContentsAt(2)->GetRenderWidgetHostView());
+}
+
+IN_PROC_BROWSER_TEST_F(SessionRestoreTest, MemoryPressureLoadsNotAllTabs) {
+  // Add several tabs to the browser. Restart the browser and check that all
+  // tabs got loaded properly.
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(),
+      GURL(url::kAboutBlankURL),
+      NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(),
+      GURL(url::kAboutBlankURL),
+      NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+  // Restore the brwoser, but instead of directly waiting, we issue a critical
+  // memory pressure event and finish then the loading.
+  Browser* restored =
+      QuitBrowserAndRestoreWithURL(browser(), 1, GURL(), false);
+
+  TabStripModel* tab_strip_model = restored->tab_strip_model();
+
+  ASSERT_EQ(1u, active_browser_list_->size());
+
+  ASSERT_EQ(3, tab_strip_model->count());
+  // At least one of the render widgets should not be initialized yet.
+  ASSERT_FALSE(
+      tab_strip_model->GetWebContentsAt(0)->GetRenderWidgetHostView() &&
+      tab_strip_model->GetWebContentsAt(1)->GetRenderWidgetHostView() &&
+      tab_strip_model->GetWebContentsAt(2)->GetRenderWidgetHostView());
 }
 
 IN_PROC_BROWSER_TEST_F(SessionRestoreTest, RestoreWebUI) {
@@ -917,19 +982,20 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest,
                        RestoreAfterClosingTabbedBrowserWithAppAndLaunching) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
 
   ui_test_utils::NavigateToURL(browser(), url1_);
 
   // Launch an app.
-  CommandLine app_launch_arguments = GetCommandLineForRelaunch();
+  base::CommandLine app_launch_arguments = GetCommandLineForRelaunch();
   app_launch_arguments.AppendSwitchASCII(switches::kApp, url2_.spec());
 
   ui_test_utils::BrowserAddedObserver window_observer;
 
-  base::LaunchProcess(app_launch_arguments, base::LaunchOptionsForTest(), NULL);
+  base::LaunchProcess(app_launch_arguments, base::LaunchOptionsForTest());
 
   Browser* app_window = window_observer.WaitForSingleNewBrowser();
   ASSERT_EQ(2u, active_browser_list_->size());
@@ -1096,7 +1162,8 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, RestoreWithNavigateSelectedTab) {
       ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
 
   // Restore the session by calling chrome::Navigate().
-  Browser* new_browser = QuitBrowserAndRestoreWithURL(browser(), 3, url3_);
+  Browser* new_browser =
+      QuitBrowserAndRestoreWithURL(browser(), 3, url3_, true);
   ASSERT_EQ(1u, active_browser_list_->size());
   ASSERT_EQ(3, new_browser->tab_strip_model()->count());
   // Navigated url should be the active tab.

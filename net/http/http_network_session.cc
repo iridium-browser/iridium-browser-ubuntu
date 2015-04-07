@@ -26,6 +26,7 @@
 #include "net/socket/client_socket_factory.h"
 #include "net/socket/client_socket_pool_manager_impl.h"
 #include "net/socket/next_proto.h"
+#include "net/socket/ssl_client_socket.h"
 #include "net/spdy/hpack_huffman_aggregator.h"
 #include "net/spdy/spdy_session_pool.h"
 
@@ -37,20 +38,13 @@ net::ClientSocketPoolManager* CreateSocketPoolManager(
   // TODO(yutak): Differentiate WebSocket pool manager and allow more
   // simultaneous connections for WebSockets.
   return new net::ClientSocketPoolManagerImpl(
-      params.net_log,
-      params.client_socket_factory
-          ? params.client_socket_factory
-          : net::ClientSocketFactory::GetDefaultFactory(),
-      params.host_resolver,
-      params.cert_verifier,
-      params.channel_id_service,
-      params.transport_security_state,
-      params.cert_transparency_verifier,
-      params.ssl_session_cache_shard,
-      params.proxy_service,
-      params.ssl_config_service,
-      params.enable_ssl_connect_job_waiting,
-      params.proxy_delegate,
+      params.net_log, params.client_socket_factory
+                          ? params.client_socket_factory
+                          : net::ClientSocketFactory::GetDefaultFactory(),
+      params.host_resolver, params.cert_verifier, params.channel_id_service,
+      params.transport_security_state, params.cert_transparency_verifier,
+      params.cert_policy_enforcer, params.ssl_session_cache_shard,
+      params.ssl_config_service, params.enable_ssl_connect_job_waiting,
       pool_type);
 }
 
@@ -62,6 +56,7 @@ HttpNetworkSession::Params::Params()
     : client_socket_factory(NULL),
       host_resolver(NULL),
       cert_verifier(NULL),
+      cert_policy_enforcer(NULL),
       channel_id_service(NULL),
       transport_security_state(NULL),
       cert_transparency_verifier(NULL),
@@ -89,12 +84,14 @@ HttpNetworkSession::Params::Params()
       force_spdy_always(false),
       use_alternate_protocols(false),
       alternate_protocol_probability_threshold(1),
-      enable_websocket_over_spdy(false),
       enable_quic(false),
       enable_quic_port_selection(true),
       quic_always_require_handshake_confirmation(false),
       quic_disable_connection_pooling(false),
       quic_load_server_info_timeout_ms(0),
+      quic_disable_loading_server_info_for_new_servers(false),
+      quic_load_server_info_timeout_srtt_multiplier(0.0f),
+      quic_enable_truncated_connection_ids(false),
       quic_clock(NULL),
       quic_random(NULL),
       quic_max_packet_length(kDefaultMaxPacketSize),
@@ -138,6 +135,9 @@ HttpNetworkSession::HttpNetworkSession(const Params& params)
           params.quic_always_require_handshake_confirmation,
           params.quic_disable_connection_pooling,
           params.quic_load_server_info_timeout_ms,
+          params.quic_disable_loading_server_info_for_new_servers,
+          params.quic_load_server_info_timeout_srtt_multiplier,
+          params.quic_enable_truncated_connection_ids,
           params.quic_connection_options),
       spdy_session_pool_(params.host_resolver,
                          params.ssl_config_service,
@@ -173,7 +173,7 @@ HttpNetworkSession::HttpNetworkSession(const Params& params)
     // Add the protocol to the TLS next protocol list, except for QUIC
     // since it uses UDP.
     if (proto != kProtoQUIC1SPDY3) {
-      next_protos_.push_back(SSLClientSocket::NextProtoToString(proto));
+      next_protos_.push_back(proto);
     }
 
     // Enable the corresponding alternate protocol, except for HTTP
@@ -291,8 +291,7 @@ bool HttpNetworkSession::IsProtocolEnabled(AlternateProtocol protocol) const {
       protocol - ALTERNATE_PROTOCOL_MINIMUM_VALID_VERSION];
 }
 
-void HttpNetworkSession::GetNextProtos(
-    std::vector<std::string>* next_protos) const {
+void HttpNetworkSession::GetNextProtos(NextProtoVector* next_protos) const {
   if (HttpStreamFactory::spdy_enabled()) {
     *next_protos = next_protos_;
   } else {

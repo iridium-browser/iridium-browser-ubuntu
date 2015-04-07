@@ -36,8 +36,6 @@ class XmlElement;
 
 namespace autofill {
 
-class AutofillMetrics;
-
 struct FormData;
 struct FormDataPredictions;
 
@@ -45,12 +43,12 @@ struct FormDataPredictions;
 // in the fields along with additional information needed by Autofill.
 class FormStructure {
  public:
-  FormStructure(const FormData& form);
+  explicit FormStructure(const FormData& form);
   virtual ~FormStructure();
 
   // Runs several heuristics against the form fields to determine their possible
   // types.
-  void DetermineHeuristicTypes(const AutofillMetrics& metric_logger);
+  void DetermineHeuristicTypes();
 
   // Encodes the XML upload request from this FormStructure.
   bool EncodeUploadRequest(const ServerFieldTypeSet& available_field_types,
@@ -75,10 +73,8 @@ class FormStructure {
 
   // Parses the field types from the server query response. |forms| must be the
   // same as the one passed to EncodeQueryRequest when constructing the query.
-  static void ParseQueryResponse(
-      const std::string& response_xml,
-      const std::vector<FormStructure*>& forms,
-      const AutofillMetrics& metric_logger);
+  static void ParseQueryResponse(const std::string& response_xml,
+                                 const std::vector<FormStructure*>& forms);
 
   // Fills |forms| with the details from the given |form_structures| and their
   // fields' predicted types.
@@ -120,8 +116,7 @@ class FormStructure {
   // set for each field.  |interaction_time| should be a timestamp corresponding
   // to the user's first interaction with the form.  |submission_time| should be
   // a timestamp corresponding to the form's submission.
-  void LogQualityMetrics(const AutofillMetrics& metric_logger,
-                         const base::TimeTicks& load_time,
+  void LogQualityMetrics(const base::TimeTicks& load_time,
                          const base::TimeTicks& interaction_time,
                          const base::TimeTicks& submission_time) const;
 
@@ -258,6 +253,9 @@ class FormStructure {
 
   // True if the form contains at least one password field.
   bool has_password_field_;
+
+  // True if the form is a <form>.
+  bool is_form_tag_;
 
   DISALLOW_COPY_AND_ASSIGN(FormStructure);
 };

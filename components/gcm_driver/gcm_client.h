@@ -20,6 +20,7 @@ class GURL;
 namespace base {
 class FilePath;
 class SequencedTaskRunner;
+class Timer;
 }
 
 namespace net {
@@ -43,8 +44,6 @@ class GCMClient {
     INVALID_PARAMETER,
     // GCM is disabled.
     GCM_DISABLED,
-    // Profile not signed in.
-    NOT_SIGNED_IN,
     // Previous asynchronous operation is still pending to finish. Certain
     // operation, like register, is only allowed one at a time.
     ASYNC_OPERATION_PENDING,
@@ -299,6 +298,9 @@ class GCMClient {
 
   // Sets last token fetch time in persistent store.
   virtual void SetLastTokenFetchTime(const base::Time& time) = 0;
+
+  // Updates the timer used by the HeartbeatManager for sending heartbeats.
+  virtual void UpdateHeartbeatTimer(scoped_ptr<base::Timer> timer) = 0;
 };
 
 }  // namespace gcm

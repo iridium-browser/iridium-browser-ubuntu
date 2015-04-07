@@ -74,8 +74,7 @@ class TestMCSClient : public MCSClient {
                 ConnectionFactory* connection_factory,
                 GCMStore* gcm_store,
                 gcm::GCMStatsRecorder* recorder)
-    : MCSClient("", clock, connection_factory, gcm_store, recorder,
-                make_scoped_ptr(new base::Timer(true, false))),
+    : MCSClient("", clock, connection_factory, gcm_store, recorder),
       next_id_(0) {
   }
 
@@ -90,9 +89,9 @@ class TestMCSClient : public MCSClient {
 class MCSClientTest : public testing::Test {
  public:
   MCSClientTest();
-  virtual ~MCSClientTest();
+  ~MCSClientTest() override;
 
-  virtual void SetUp() override;
+  void SetUp() override;
 
   void BuildMCSClient();
   void InitializeClient();

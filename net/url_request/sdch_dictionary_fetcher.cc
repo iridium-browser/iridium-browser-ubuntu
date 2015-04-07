@@ -9,8 +9,11 @@
 #include "base/auto_reset.h"
 #include "base/bind.h"
 #include "base/compiler_specific.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/thread_task_runner_handle.h"
+#include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
+#include "net/base/sdch_net_log_params.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_status.h"
 #include "net/url_request/url_request_throttler_manager.h"
@@ -45,16 +48,15 @@ void SdchDictionaryFetcher::Schedule(const GURL& dictionary_url) {
   // Avoid pushing duplicate copy onto queue. We may fetch this url again later
   // and get a different dictionary, but there is no reason to have it in the
   // queue twice at one time.
-  if (!fetch_queue_.empty() && fetch_queue_.back() == dictionary_url) {
+  if ((!fetch_queue_.empty() && fetch_queue_.back() == dictionary_url) ||
+      attempted_load_.find(dictionary_url) != attempted_load_.end()) {
+    // TODO(rdsmith): log this error to the net log of the URLRequest
+    // initiating this fetch, once URLRequest will be passed here.
     SdchManager::SdchErrorRecovery(
-        SdchManager::DICTIONARY_ALREADY_SCHEDULED_TO_DOWNLOAD);
+        SDCH_DICTIONARY_PREVIOUSLY_SCHEDULED_TO_DOWNLOAD);
     return;
   }
-  if (attempted_load_.find(dictionary_url) != attempted_load_.end()) {
-    SdchManager::SdchErrorRecovery(
-        SdchManager::DICTIONARY_ALREADY_TRIED_TO_DOWNLOAD);
-    return;
-  }
+
   attempted_load_.insert(dictionary_url);
   fetch_queue_.push(dictionary_url);
 
@@ -81,6 +83,11 @@ void SdchDictionaryFetcher::Cancel() {
 }
 
 void SdchDictionaryFetcher::OnResponseStarted(URLRequest* request) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "423948 SdchDictionaryFetcher::OnResponseStarted"));
+
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(request, current_request_.get());
   DCHECK_EQ(next_state_, STATE_REQUEST_STARTED);
@@ -99,6 +106,11 @@ void SdchDictionaryFetcher::OnResponseStarted(URLRequest* request) {
 
 void SdchDictionaryFetcher::OnReadCompleted(URLRequest* request,
                                             int bytes_read) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "423948 SdchDictionaryFetcher::OnReadCompleted"));
+
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(request, current_request_.get());
   DCHECK_EQ(next_state_, STATE_REQUEST_READING);
@@ -166,6 +178,7 @@ int SdchDictionaryFetcher::DoDispatchRequest(int rv) {
 
   next_state_ = STATE_REQUEST_STARTED;
   current_request_->Start();
+  current_request_->net_log().AddEvent(NetLog::TYPE_SDCH_DICTIONARY_FETCH);
 
   return OK;
 }
@@ -198,28 +211,29 @@ int SdchDictionaryFetcher::DoRead(int rv) {
 
   next_state_ = STATE_REQUEST_READING;
   int bytes_read = 0;
-  if (!current_request_->Read(buffer_.get(), kBufferSize, &bytes_read)) {
-    if (current_request_->status().is_io_pending())
-      return ERR_IO_PENDING;
+  current_request_->Read(buffer_.get(), kBufferSize, &bytes_read);
+  if (current_request_->status().is_io_pending())
+    return ERR_IO_PENDING;
 
-    if (current_request_->status().error() == OK) {
-      // This "should never happen", but if it does the result will be
-      // an infinite loop.  It's not clear how to handle a read failure
-      // without a promise to invoke the callback at some point in the future,
-      // so the request is failed.
-      SdchManager::SdchErrorRecovery(SdchManager::DICTIONARY_FETCH_READ_FAILED);
-      DLOG(FATAL)
-          << "URLRequest::Read() returned false without IO pending or error!";
-      return ERR_FAILED;
-    }
+  if (bytes_read < 0 || !current_request_->status().is_success()) {
+    if (current_request_->status().error() != OK)
+      return current_request_->status().error();
 
-    return current_request_->status().error();
+    // An error with request status of OK should not happen,
+    // but there's enough machinery underneath URLRequest::Read()
+    // that this routine checks for that case.
+    net::Error error =
+        current_request_->status().status() == URLRequestStatus::CANCELED ?
+        ERR_ABORTED : ERR_FAILED;
+    current_request_->net_log().AddEventWithNetErrorCode(
+        NetLog::TYPE_SDCH_DICTIONARY_FETCH_IMPLIED_ERROR, error);
+    return error;
   }
 
-  if (bytes_read != 0)
-    dictionary_.append(buffer_->data(), bytes_read);
-  else
+  if (bytes_read == 0)
     next_state_ = STATE_REQUEST_COMPLETE;
+  else
+    dictionary_.append(buffer_->data(), bytes_read);
 
   return OK;
 }
@@ -228,8 +242,10 @@ int SdchDictionaryFetcher::DoCompleteRequest(int rv) {
   DCHECK(CalledOnValidThread());
 
   // If the dictionary was successfully fetched, add it to the manager.
-  if (rv == OK)
-    dictionary_fetched_callback_.Run(dictionary_, current_request_->url());
+  if (rv == OK) {
+    dictionary_fetched_callback_.Run(dictionary_, current_request_->url(),
+                                     current_request_->net_log());
+  }
 
   current_request_.reset();
   buffer_ = NULL;

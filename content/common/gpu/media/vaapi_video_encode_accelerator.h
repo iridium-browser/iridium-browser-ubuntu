@@ -11,8 +11,8 @@
 #include "base/memory/linked_ptr.h"
 #include "base/threading/thread.h"
 #include "content/common/content_export.h"
-#include "content/common/gpu/media/h264_dpb.h"
 #include "content/common/gpu/media/va_surface.h"
+#include "content/common/gpu/media/vaapi_h264_dpb.h"
 #include "content/common/gpu/media/vaapi_wrapper.h"
 #include "media/filters/h264_bitstream_buffer.h"
 #include "media/video/video_encode_accelerator.h"
@@ -25,7 +25,7 @@ namespace content {
 class CONTENT_EXPORT VaapiVideoEncodeAccelerator
     : public media::VideoEncodeAccelerator {
  public:
-  explicit VaapiVideoEncodeAccelerator(Display* x_display);
+  VaapiVideoEncodeAccelerator();
   virtual ~VaapiVideoEncodeAccelerator();
 
   // media::VideoEncodeAccelerator implementation.
@@ -178,8 +178,6 @@ class CONTENT_EXPORT VaapiVideoEncodeAccelerator
   // Size in bytes required for input bitstream buffers.
   size_t output_buffer_byte_size_;
 
-  Display* x_display_;
-
   // All of the members below must be accessed on the encoder_thread_,
   // while it is running.
 
@@ -188,8 +186,8 @@ class CONTENT_EXPORT VaapiVideoEncodeAccelerator
 
   // frame_num to be used for the next frame.
   unsigned int frame_num_;
-  // frame_num of the previous IDR.
-  unsigned int last_idr_frame_num_;
+  // idr_pic_id to be used for the next frame.
+  unsigned int idr_pic_id_;
 
   // Current bitrate in bps.
   unsigned int bitrate_;
@@ -213,7 +211,7 @@ class CONTENT_EXPORT VaapiVideoEncodeAccelerator
   media::H264BitstreamBuffer packed_pps_;
 
   // Picture currently being prepared for encode.
-  H264Picture current_pic_;
+  VaapiH264Picture current_pic_;
 
   // VA surfaces available for reuse.
   std::vector<VASurfaceID> available_va_surface_ids_;

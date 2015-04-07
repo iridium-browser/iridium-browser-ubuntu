@@ -11,7 +11,6 @@
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/platform/WebVector.h"
-#include "third_party/WebKit/public/web/WebNotificationPresenter.h"
 
 #define WEBTESTRUNNER_NEW_HISTORY_CAPTURE
 
@@ -135,13 +134,15 @@ class WebTestDelegate {
   virtual void ClearAllDatabases() = 0;
   virtual void SetDatabaseQuota(int quota) = 0;
 
-  // Controls Web Notification permissions.
-  virtual blink::WebNotificationPresenter::Permission
-      CheckWebNotificationPermission(const GURL& origin) = 0;
+  // Controls Web Notifications.
   virtual void GrantWebNotificationPermission(const GURL& origin,
                                               bool permission_granted) = 0;
   virtual void ClearWebNotificationPermissions() = 0;
   virtual void SimulateWebNotificationClick(const std::string& title) = 0;
+
+  // Controls the Push API.
+  virtual void SetPushMessagingPermission(const GURL& origin, bool allowed) = 0;
+  virtual void ClearPushMessagingPermissions() = 0;
 
   // Controls the device scale factor of the main WebView for hidpi tests.
   virtual void SetDeviceScaleFactor(float factor) = 0;
@@ -151,6 +152,17 @@ class WebTestDelegate {
 
   // Change the bluetooth test data while running a layout test.
   virtual void SetBluetoothMockDataSet(const std::string& data_set) = 0;
+
+  // Enables mock geofencing service while running a layout test.
+  // |service_available| indicates if the mock service should mock geofencing
+  // being available or not.
+  virtual void SetGeofencingMockProvider(bool service_available) = 0;
+
+  // Disables mock geofencing service while running a layout test.
+  virtual void ClearGeofencingMockProvider() = 0;
+
+  // Set the mock geofencing position while running a layout test.
+  virtual void SetGeofencingMockPosition(double latitude, double longitude) = 0;
 
   // Controls which WebView should be focused.
   virtual void SetFocus(WebTestProxyBase* proxy, bool focus) = 0;

@@ -73,15 +73,15 @@ RulesRegistry::RulesRegistry(content::BrowserContext* browser_context,
                              const std::string& event_name,
                              content::BrowserThread::ID owner_thread,
                              RulesCacheDelegate* cache_delegate,
-                             const WebViewKey& webview_key)
+                             int id)
     : browser_context_(browser_context),
       owner_thread_(owner_thread),
       event_name_(event_name),
-      webview_key_(webview_key),
+      id_(id),
       ready_(/*signaled=*/!cache_delegate),  // Immediately ready if no cache
                                              // delegate to wait for.
-      weak_ptr_factory_(browser_context_ ? this : NULL),
-      last_generated_rule_identifier_id_(0) {
+      last_generated_rule_identifier_id_(0),
+      weak_ptr_factory_(browser_context_ ? this : NULL) {
   if (cache_delegate) {
     cache_delegate_ = cache_delegate->GetWeakPtr();
     cache_delegate->Init(this);
@@ -200,7 +200,6 @@ void RulesRegistry::GetRules(const std::string& extension_id,
 void RulesRegistry::GetAllRules(const std::string& extension_id,
                                 std::vector<linked_ptr<Rule> >* out) {
   DCHECK_CURRENTLY_ON(owner_thread());
-
   for (RulesDictionary::const_iterator i = rules_.begin();
       i != rules_.end(); ++i) {
     const RulesDictionaryKey& key = i->first;

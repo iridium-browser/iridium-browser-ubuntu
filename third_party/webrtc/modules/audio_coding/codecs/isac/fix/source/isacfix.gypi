@@ -26,10 +26,14 @@
         ],
       },
       'sources': [
+        '../../audio_encoder_isac_t.h',
+        '../../audio_encoder_isac_t_impl.h',
+        '../interface/audio_encoder_isacfix.h',
         '../interface/isacfix.h',
         'arith_routines.c',
         'arith_routines_hist.c',
         'arith_routines_logist.c',
+        'audio_encoder_isacfix.cc',
         'bandwidth_estimator.c',
         'decode.c',
         'decode_bwe.c',
@@ -76,7 +80,7 @@
             'WEBRTC_LINUX',
           ],
         }],
-        ['(target_arch=="arm" and arm_version==7) or target_arch=="armv7"', {
+        ['target_arch=="arm" and arm_version>=7', {
           'dependencies': [ 'isac_neon', ],
           'sources': [
             'lattice_armv7.S',
@@ -120,7 +124,7 @@
     },
   ],
   'conditions': [
-    ['(target_arch=="arm" and arm_version==7) or target_arch=="armv7"', {
+    ['target_arch=="arm" and arm_version>=7', {
       'targets': [
         {
           'target_name': 'isac_neon',

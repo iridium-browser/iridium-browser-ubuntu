@@ -260,12 +260,8 @@ OperationID FileSystemOperationRunner::Write(
     return handle.id;
   }
 
-  FileWriterDelegate::FlushPolicy flush_policy =
-      file_system_context_->ShouldFlushOnWriteCompletion(url.type())
-          ? FileWriterDelegate::FLUSH_ON_COMPLETION
-          : FileWriterDelegate::NO_FLUSH_ON_COMPLETION;
   scoped_ptr<FileWriterDelegate> writer_delegate(
-      new FileWriterDelegate(writer.Pass(), flush_policy));
+      new FileWriterDelegate(writer.Pass(), url.mount_option().flush_policy()));
 
   scoped_ptr<net::URLRequest> blob_request(
       storage::BlobProtocolHandler::CreateBlobRequest(

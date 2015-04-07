@@ -14,9 +14,9 @@
 #include "ui/events/event.h"
 #include "ui/events/gestures/gesture_recognizer.h"
 #include "ui/events/gestures/gesture_types.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/vector2d_f.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/vector2d_f.h"
 
 namespace content {
 class BrowserPluginGuest;
@@ -154,7 +154,7 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
   // Process all of the given gestures (passes them on to renderer)
   void ProcessGestures(ui::GestureRecognizer::Gestures* gestures);
 
-  RenderWidgetHostViewBase* GetGuestRenderWidgetHostView() const;
+  RenderWidgetHostViewBase* GetOwnerRenderWidgetHostView() const;
 
   void OnHandleInputEvent(RenderWidgetHostImpl* embedder,
                           int browser_plugin_instance_id,

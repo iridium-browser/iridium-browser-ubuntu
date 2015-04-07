@@ -488,16 +488,15 @@ base::string16 GenerateRandomCardNumber() {
 gfx::Image CreditCardIconForType(const std::string& credit_card_type) {
   const int input_card_idr = CreditCard::IconResourceId(credit_card_type);
   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  gfx::Image result = rb.GetImageNamed(input_card_idr);
   if (input_card_idr == IDR_AUTOFILL_CC_GENERIC) {
     // When the credit card type is unknown, no image should be shown. However,
     // to simplify the view code on Mac, save space for the credit card image by
-    // returning a transparent image of the appropriate size. Not all credit
-    // card images are the same size, but none is larger than the Visa icon.
-    result = gfx::Image(gfx::ImageSkiaOperations::CreateTransparentImage(
-        rb.GetImageNamed(IDR_AUTOFILL_CC_VISA).AsImageSkia(), 0));
+    // returning a transparent image of the appropriate size. All credit card
+    // icons are the same size.
+    return gfx::Image(gfx::ImageSkiaOperations::CreateTransparentImage(
+        rb.GetImageNamed(IDR_AUTOFILL_CC_GENERIC).AsImageSkia(), 0));
   }
-  return result;
+  return rb.GetImageNamed(input_card_idr);
 }
 
 gfx::Image CvcIconForCreditCardType(const base::string16& credit_card_type) {
@@ -650,7 +649,7 @@ AutofillDialogControllerImpl::~AutofillDialogControllerImpl() {
   if (popup_controller_)
     popup_controller_->Hide();
 
-  GetMetricLogger().LogDialogInitialUserState(initial_user_state_);
+  AutofillMetrics::LogDialogInitialUserState(initial_user_state_);
 }
 
 // Checks the country code against the values the form structure enumerates.
@@ -799,9 +798,9 @@ void AutofillDialogControllerImpl::Show() {
   }
 
   // Log any relevant UI metrics and security exceptions.
-  GetMetricLogger().LogDialogUiEvent(AutofillMetrics::DIALOG_UI_SHOWN);
+  AutofillMetrics::LogDialogUiEvent(AutofillMetrics::DIALOG_UI_SHOWN);
 
-  GetMetricLogger().LogDialogSecurityMetric(
+  AutofillMetrics::LogDialogSecurityMetric(
       AutofillMetrics::SECURITY_METRIC_DIALOG_SHOWN);
 
   // The Autofill dialog is shown in response to a message from the renderer and
@@ -814,7 +813,7 @@ void AutofillDialogControllerImpl::Show() {
       current_url.GetOrigin() == source_url_.GetOrigin();
 
   if (!invoked_from_same_origin_) {
-    GetMetricLogger().LogDialogSecurityMetric(
+    AutofillMetrics::LogDialogSecurityMetric(
         AutofillMetrics::SECURITY_METRIC_CROSS_ORIGIN_FRAME);
   }
 
@@ -847,10 +846,7 @@ void AutofillDialogControllerImpl::Show() {
       HTML_TYPE_TRANSACTION_CURRENCY);
 
   account_chooser_model_.reset(
-      new AccountChooserModel(this,
-                              profile_,
-                              !ShouldShowAccountChooser(),
-                              metric_logger_));
+      new AccountChooserModel(this, profile_, !ShouldShowAccountChooser()));
 
   acceptable_cc_types_ = form_structure_.PossibleValues(CREDIT_CARD_TYPE);
   // Wallet generates MC virtual cards, so we have to disable it if MC is not
@@ -2128,32 +2124,39 @@ void AutofillDialogControllerImpl::UserEditedOrActivatedInput(
     return;
   }
 
-  std::vector<base::string16> popup_values, popup_labels, popup_icons;
+  std::vector<autofill::Suggestion> popup_suggestions;
+  popup_suggestion_ids_.clear();
   if (common::IsCreditCardType(type)) {
-    GetManager()->GetCreditCardSuggestions(AutofillType(type),
-                                           field_contents,
-                                           &popup_values,
-                                           &popup_labels,
-                                           &popup_icons,
-                                           &popup_guids_);
+    popup_suggestions = GetManager()->GetCreditCardSuggestions(
+        AutofillType(type), field_contents);
+    for (const auto& suggestion : popup_suggestions)
+      popup_suggestion_ids_.push_back(suggestion.backend_id);
   } else {
-    GetManager()->GetProfileSuggestions(
+    popup_suggestions = GetManager()->GetProfileSuggestions(
         AutofillType(type),
         field_contents,
         false,
-        RequestedTypesForSection(section),
-        base::Bind(&AutofillDialogControllerImpl::ShouldSuggestProfile,
-                   base::Unretained(this), section),
-        &popup_values,
-        &popup_labels,
-        &popup_icons,
-        &popup_guids_);
+        RequestedTypesForSection(section));
+    // Filter out ones we don't want.
+    for (int i = 0; i < static_cast<int>(popup_suggestions.size()); i++) {
+      const autofill::AutofillProfile* profile =
+          GetManager()->GetProfileByGUID(popup_suggestions[i].backend_id.guid);
+      if (!profile || !ShouldSuggestProfile(section, *profile)) {
+        popup_suggestions.erase(popup_suggestions.begin() + i);
+        i--;
+      }
+    }
 
-    GetI18nValidatorSuggestions(section, type, &popup_values, &popup_labels,
-                                &popup_icons);
+    // Save the IDs.
+    for (const auto& suggestion : popup_suggestions)
+      popup_suggestion_ids_.push_back(suggestion.backend_id);
+
+    // This will append to the popup_suggestions but not the IDs since there
+    // are no backend IDs for the I18N validator suggestions.
+    GetI18nValidatorSuggestions(section, type, &popup_suggestions);
   }
 
-  if (popup_values.empty()) {
+  if (popup_suggestions.empty()) {
     HidePopup();
     return;
   }
@@ -2162,11 +2165,11 @@ void AutofillDialogControllerImpl::UserEditedOrActivatedInput(
   popup_input_type_ = type;
   popup_section_ = section;
 
+  // Use our own 0-based IDs for the items.
   // TODO(estade): do we need separators and control rows like 'Clear
   // Form'?
-  std::vector<int> popup_ids;
-  for (size_t i = 0; i < popup_values.size(); ++i) {
-    popup_ids.push_back(i);
+  for (size_t i = 0; i < popup_suggestions.size(); ++i) {
+    popup_suggestions[i].frontend_id = i;
   }
 
   popup_controller_ = AutofillPopupControllerImpl::GetOrCreate(
@@ -2177,10 +2180,7 @@ void AutofillDialogControllerImpl::UserEditedOrActivatedInput(
       content_bounds,
       base::i18n::IsRTL() ?
           base::i18n::RIGHT_TO_LEFT : base::i18n::LEFT_TO_RIGHT);
-  popup_controller_->Show(popup_values,
-                          popup_labels,
-                          popup_icons,
-                          popup_ids);
+  popup_controller_->Show(popup_suggestions);
 }
 
 void AutofillDialogControllerImpl::FocusMoved() {
@@ -2283,8 +2283,7 @@ void AutofillDialogControllerImpl::ShowSignIn(const GURL& url) {
     signin_registrar_.Add(
         this, content::NOTIFICATION_NAV_ENTRY_COMMITTED, source);
 
-    GetMetricLogger().LogDialogUiEvent(
-        AutofillMetrics::DIALOG_UI_SIGNIN_SHOWN);
+    AutofillMetrics::LogDialogUiEvent(AutofillMetrics::DIALOG_UI_SIGNIN_SHOWN);
   } else {
     waiting_for_explicit_sign_in_response_ = false;
     HideSignIn();
@@ -2392,7 +2391,7 @@ void AutofillDialogControllerImpl::OnPopupShown() {
   ScopedViewUpdates update(view_.get());
   view_->UpdateErrorBubble();
 
-  GetMetricLogger().LogDialogPopupEvent(AutofillMetrics::DIALOG_POPUP_SHOWN);
+  AutofillMetrics::LogDialogPopupEvent(AutofillMetrics::DIALOG_POPUP_SHOWN);
 }
 
 void AutofillDialogControllerImpl::OnPopupHidden() {}
@@ -2414,20 +2413,21 @@ void AutofillDialogControllerImpl::DidAcceptSuggestion(
   ScopedViewUpdates updates(view_.get());
   scoped_ptr<DataModelWrapper> wrapper;
 
-  if (static_cast<size_t>(identifier) < popup_guids_.size()) {
-    const PersonalDataManager::GUIDPair& pair = popup_guids_[identifier];
+  if (static_cast<size_t>(identifier) < popup_suggestion_ids_.size()) {
+    const SuggestionBackendID& sid = popup_suggestion_ids_[identifier];
     if (common::IsCreditCardType(popup_input_type)) {
       wrapper.reset(new AutofillCreditCardWrapper(
-          GetManager()->GetCreditCardByGUID(pair.first)));
+          GetManager()->GetCreditCardByGUID(sid.guid)));
     } else {
       wrapper.reset(new AutofillProfileWrapper(
-          GetManager()->GetProfileByGUID(pair.first),
+          GetManager()->GetProfileByGUID(sid.guid),
           AutofillType(popup_input_type),
-          pair.second));
+          sid.variant));
     }
   } else {
     wrapper.reset(new I18nAddressDataWrapper(
-        &i18n_validator_suggestions_[identifier - popup_guids_.size()]));
+        &i18n_validator_suggestions_[
+            identifier - popup_suggestion_ids_.size()]));
   }
 
   // If the user hasn't switched away from the default country and |wrapper|'s
@@ -2465,7 +2465,7 @@ void AutofillDialogControllerImpl::DidAcceptSuggestion(
   wrapper->FillInputs(MutableRequestedFieldsForSection(popup_section_));
   view_->FillSection(popup_section_, popup_input_type);
 
-  GetMetricLogger().LogDialogPopupEvent(
+  AutofillMetrics::LogDialogPopupEvent(
       AutofillMetrics::DIALOG_POPUP_FORM_FILLED);
 
   // TODO(estade): not sure why it's necessary to do this explicitly.
@@ -2548,10 +2548,6 @@ void AutofillDialogControllerImpl::SuggestionItemSelected(
 
 ////////////////////////////////////////////////////////////////////////////////
 // wallet::WalletClientDelegate implementation.
-
-const AutofillMetrics& AutofillDialogControllerImpl::GetMetricLogger() const {
-  return metric_logger_;
-}
 
 std::string AutofillDialogControllerImpl::GetRiskData() const {
   DCHECK(!risk_data_.empty());
@@ -3393,9 +3389,7 @@ CountryComboboxModel* AutofillDialogControllerImpl::
 void AutofillDialogControllerImpl::GetI18nValidatorSuggestions(
     DialogSection section,
     ServerFieldType type,
-    std::vector<base::string16>* popup_values,
-    std::vector<base::string16>* popup_labels,
-    std::vector<base::string16>* popup_icons) {
+    std::vector<autofill::Suggestion>* popup_suggestions) {
   AddressField focused_field;
   if (!i18n::FieldForType(type, &focused_field))
     return;
@@ -3420,24 +3414,23 @@ void AutofillDialogControllerImpl::GetI18nValidatorSuggestions(
     return;
 
   for (size_t i = 0; i < i18n_validator_suggestions_.size(); ++i) {
-    popup_values->push_back(base::UTF8ToUTF16(
-        i18n_validator_suggestions_[i].GetFieldValue(focused_field)));
+    popup_suggestions->push_back(autofill::Suggestion(
+        base::UTF8ToUTF16(
+            i18n_validator_suggestions_[i].GetFieldValue(focused_field))));
 
     // Disambiguate the suggestion by showing the smallest administrative
     // region of the suggested address:
     //    ADMIN_AREA > LOCALITY > DEPENDENT_LOCALITY
-    popup_labels->push_back(base::string16());
     for (int field = DEPENDENT_LOCALITY; field >= ADMIN_AREA; --field) {
       const std::string& field_value =
           i18n_validator_suggestions_[i].GetFieldValue(
               static_cast<AddressField>(field));
       if (focused_field != field && !field_value.empty()) {
-        popup_labels->back().assign(base::UTF8ToUTF16(field_value));
+        popup_suggestions->back().label = base::UTF8ToUTF16(field_value);
         break;
       }
     }
   }
-  popup_icons->resize(popup_values->size());
 }
 
 DetailInputs* AutofillDialogControllerImpl::MutableRequestedFieldsForSection(
@@ -4012,11 +4005,11 @@ bool AutofillDialogControllerImpl::GetAutofillChoice(DialogSection section,
 }
 
 void AutofillDialogControllerImpl::LogOnFinishSubmitMetrics() {
-  GetMetricLogger().LogDialogUiDuration(
+  AutofillMetrics::LogDialogUiDuration(
       base::Time::Now() - dialog_shown_timestamp_,
       AutofillMetrics::DIALOG_ACCEPTED);
 
-  GetMetricLogger().LogDialogUiEvent(AutofillMetrics::DIALOG_UI_ACCEPTED);
+  AutofillMetrics::LogDialogUiEvent(AutofillMetrics::DIALOG_UI_ACCEPTED);
 
   AutofillMetrics::DialogDismissalState dismissal_state;
   if (!IsManuallyEditingAnySection()) {
@@ -4031,11 +4024,11 @@ void AutofillDialogControllerImpl::LogOnFinishSubmitMetrics() {
     dismissal_state = AutofillMetrics::DIALOG_ACCEPTED_NO_SAVE;
   }
 
-  GetMetricLogger().LogDialogDismissalState(dismissal_state);
+  AutofillMetrics::LogDialogDismissalState(dismissal_state);
 }
 
 void AutofillDialogControllerImpl::LogOnCancelMetrics() {
-  GetMetricLogger().LogDialogUiEvent(AutofillMetrics::DIALOG_UI_CANCELED);
+  AutofillMetrics::LogDialogUiEvent(AutofillMetrics::DIALOG_UI_CANCELED);
 
   AutofillMetrics::DialogDismissalState dismissal_state;
   if (ShouldShowSignInWebView())
@@ -4047,9 +4040,9 @@ void AutofillDialogControllerImpl::LogOnCancelMetrics() {
   else
     dismissal_state = AutofillMetrics::DIALOG_CANCELED_WITH_INVALID_FIELDS;
 
-  GetMetricLogger().LogDialogDismissalState(dismissal_state);
+  AutofillMetrics::LogDialogDismissalState(dismissal_state);
 
-  GetMetricLogger().LogDialogUiDuration(
+  AutofillMetrics::LogDialogUiDuration(
       base::Time::Now() - dialog_shown_timestamp_,
       AutofillMetrics::DIALOG_CANCELED);
 }
@@ -4071,15 +4064,15 @@ void AutofillDialogControllerImpl::LogSuggestionItemSelectedMetric(
     return;
   }
 
-  GetMetricLogger().LogDialogUiEvent(dialog_ui_event);
+  AutofillMetrics::LogDialogUiEvent(dialog_ui_event);
 }
 
 void AutofillDialogControllerImpl::LogDialogLatencyToShow() {
   if (was_ui_latency_logged_)
     return;
 
-  GetMetricLogger().LogDialogLatencyToShow(
-      base::Time::Now() - dialog_shown_timestamp_);
+  AutofillMetrics::LogDialogLatencyToShow(base::Time::Now() -
+                                          dialog_shown_timestamp_);
   was_ui_latency_logged_ = true;
 }
 

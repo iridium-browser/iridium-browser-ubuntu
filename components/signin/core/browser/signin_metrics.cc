@@ -64,6 +64,10 @@ void LogSigninProfile(bool is_first_run, base::Time install_date) {
                        elapsed_time.InMinutes());
 }
 
+void LogSigninSource(Source source) {
+  UMA_HISTOGRAM_ENUMERATION("Signin.SigninSource", source, HISTOGRAM_MAX);
+}
+
 void LogSigninAddAccount() {
   // Account signin may fail for a wide variety of reasons. There is no
   // explicit false, but one can compare this value with the various UI
@@ -91,6 +95,11 @@ void LogExternalCcResultFetches(
         "Signin.Reconciler.ExternalCcResultTime.NotCompleted",
         time_to_check_connections);
   }
+}
+
+void LogAuthError(GoogleServiceAuthError::State auth_error) {
+  UMA_HISTOGRAM_ENUMERATION("Signin.AuthError", auth_error,
+      GoogleServiceAuthError::State::NUM_STATES);
 }
 
 }  // namespace signin_metrics

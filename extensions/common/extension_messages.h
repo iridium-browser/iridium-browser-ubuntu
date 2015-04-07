@@ -147,6 +147,27 @@ IPC_STRUCT_BEGIN(ExtensionMsg_ExecuteCode_Params)
   IPC_STRUCT_MEMBER(bool, user_gesture)
 IPC_STRUCT_END()
 
+// Struct containing information about the sender of connect() calls that
+// originate from a tab.
+IPC_STRUCT_BEGIN(ExtensionMsg_TabConnectionInfo)
+  // The tab from where the connection was created.
+  IPC_STRUCT_MEMBER(base::DictionaryValue, tab)
+
+  // The ID of the frame that initiated the connection.
+  // 0 if main frame, positive otherwise. -1 if not initiated from a frame.
+  IPC_STRUCT_MEMBER(int, frame_id)
+IPC_STRUCT_END()
+
+// Struct containing information about the destination of tab.connect().
+IPC_STRUCT_BEGIN(ExtensionMsg_TabTargetConnectionInfo)
+  // The destination tab's ID.
+  IPC_STRUCT_MEMBER(int, tab_id)
+
+  // Frame ID of the destination. -1 for all frames, 0 for main frame and
+  // positive if the destination is a specific child frame.
+  IPC_STRUCT_MEMBER(int, frame_id)
+IPC_STRUCT_END()
+
 // Struct containing the data for external connections to extensions. Used to
 // handle the IPCs initiated by both connect() and onConnect().
 IPC_STRUCT_BEGIN(ExtensionMsg_ExternalConnectionInfo)
@@ -159,6 +180,12 @@ IPC_STRUCT_BEGIN(ExtensionMsg_ExternalConnectionInfo)
 
   // The URL of the frame that initiated the request.
   IPC_STRUCT_MEMBER(GURL, source_url)
+
+  // The ID of the frame that is the target of the request.
+  IPC_STRUCT_MEMBER(int, target_frame_id)
+
+  // The process ID of the webview that initiated the request.
+  IPC_STRUCT_MEMBER(int, guest_process_id)
 IPC_STRUCT_END()
 
 IPC_STRUCT_TRAITS_BEGIN(extensions::DraggableRegion)
@@ -441,17 +468,15 @@ IPC_MESSAGE_ROUTED1(ExtensionMsg_SetTabId,
 IPC_MESSAGE_CONTROL1(ExtensionMsg_UpdatePermissions,
                      ExtensionMsg_UpdatePermissions_Params)
 
-// Tell the renderer about new tab-specific permissions for an extension.
-IPC_MESSAGE_CONTROL4(ExtensionMsg_UpdateTabSpecificPermissions,
-                     GURL /* url */,
-                     int /* tab_id */,
-                     std::string /* extension_id */,
-                     extensions::URLPatternSet /* hosts */)
+// Tell the render view about new tab-specific permissions for an extension.
+IPC_MESSAGE_ROUTED3(ExtensionMsg_UpdateTabSpecificPermissions,
+                    GURL /* url */,
+                    std::string /* extension_id */,
+                    extensions::URLPatternSet /* hosts */)
 
-// Tell the renderer to clear tab-specific permissions for some extensions.
-IPC_MESSAGE_CONTROL2(ExtensionMsg_ClearTabSpecificPermissions,
-                     int /* tab_id */,
-                     std::vector<std::string> /* extension_ids */)
+// Tell the render view to clear tab-specific permissions for some extensions.
+IPC_MESSAGE_ROUTED1(ExtensionMsg_ClearTabSpecificPermissions,
+                    std::vector<std::string> /* extension_ids */)
 
 // Tell the renderer which type this view is.
 IPC_MESSAGE_ROUTED1(ExtensionMsg_NotifyRenderViewType,
@@ -487,7 +512,7 @@ IPC_MESSAGE_ROUTED2(ExtensionMsg_GetAppInstallStateResponse,
 IPC_MESSAGE_ROUTED5(ExtensionMsg_DispatchOnConnect,
                     int /* target_port_id */,
                     std::string /* channel_name */,
-                    base::DictionaryValue /* source_tab */,
+                    ExtensionMsg_TabConnectionInfo /* source */,
                     ExtensionMsg_ExternalConnectionInfo,
                     std::string /* tls_channel_id */)
 
@@ -532,11 +557,23 @@ IPC_MESSAGE_CONTROL1(ExtensionMsg_TransferBlobs,
 IPC_MESSAGE_CONTROL1(ExtensionMsg_CreateMimeHandlerViewGuestACK,
                      int /* element_instance_id */)
 
+// Once a MimeHandlerView guest's JavaScript onload function has been called,
+// this IPC is sent to the container to notify it.
+IPC_MESSAGE_CONTROL1(ExtensionMsg_MimeHandlerViewGuestOnLoadCompleted,
+                     int /* element_instance_id */)
+
 // Once a RenderView proxy has been created for the guest in the embedder render
 // process, this IPC informs the embedder of the proxy's routing ID.
-IPC_MESSAGE_ROUTED2(ExtensionMsg_GuestAttached,
-                    int /* element_instance_id */,
-                    int /* source_routing_id */)
+IPC_MESSAGE_CONTROL2(ExtensionMsg_GuestAttached,
+                     int /* element_instance_id */,
+                     int /* source_routing_id */)
+
+// This IPC tells the browser process to detach the provided
+// |element_instance_id| from a GuestViewBase if it is attached to one.
+// In other words, routing of input and graphics will no longer flow through
+// the container associated with the provided ID.
+IPC_MESSAGE_CONTROL1(ExtensionMsg_GuestDetached,
+                     int /* element_instance_id*/)
 
 // Messages sent from the renderer to the browser.
 
@@ -616,7 +653,7 @@ IPC_SYNC_MESSAGE_CONTROL3_1(ExtensionHostMsg_OpenChannelToNativeApp,
 // messages to the extension.
 IPC_SYNC_MESSAGE_CONTROL4_1(ExtensionHostMsg_OpenChannelToTab,
                             int /* routing_id */,
-                            int /* tab_id */,
+                            ExtensionMsg_TabTargetConnectionInfo,
                             std::string /* extension_id */,
                             std::string /* channel_name */,
                             int /* port_id */)
@@ -761,9 +798,10 @@ IPC_MESSAGE_CONTROL4(ExtensionHostMsg_AttachGuest,
                      base::DictionaryValue /* attach_params */)
 
 // Tells the browser to create a mime handler guest view for a plugin.
-IPC_MESSAGE_CONTROL4(ExtensionHostMsg_CreateMimeHandlerViewGuest,
+IPC_MESSAGE_CONTROL5(ExtensionHostMsg_CreateMimeHandlerViewGuest,
                      int /* render_frame_id */,
                      std::string /* embedder_url */,
+                     std::string /* content_url */,
                      std::string /* mime_type */,
                      int /* element_instance_id */)
 

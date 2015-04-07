@@ -35,15 +35,6 @@ bool ComputeBuildLocationFromDep(const Value& input_value,
     return true;
   }
 
-  // Don't allow directories to start with a single slash. All labels must be
-  // in the source root.
-  if (input[0] == '/' && (input.size() == 1 || input[1] != '/')) {
-    *err = Err(input_value, "Label can't start with a single slash",
-        "Labels must be either relative (no slash at the beginning) or be "
-        "absolute\ninside the source root (two slashes at the beginning).");
-    return false;
-  }
-
   *result = current_dir.ResolveRelativeDir(input);
   return true;
 }
@@ -177,9 +168,9 @@ bool Resolve(const SourceDir& current_dir,
       *out_toolchain_name = current_toolchain.name();
       return true;
     } else {
-      return Resolve(current_dir, current_toolchain,
-                     original_value, toolchain_piece,
-                     out_toolchain_dir, out_toolchain_name, NULL, NULL, err);
+      return Resolve(current_dir, current_toolchain, original_value,
+                     toolchain_piece, out_toolchain_dir, out_toolchain_name,
+                     nullptr, nullptr, err);
     }
   }
   return true;

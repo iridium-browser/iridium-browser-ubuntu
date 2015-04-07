@@ -827,7 +827,7 @@ class Licensing(object):
           raise PackageLicenseError('License for %s is missing' % package_name)
 
         logging.error('>>> License for %s is missing, creating now <<<',
-                        package_name)
+                      package_name)
         build_info_path = os.path.join(
             cros_build_lib.GetSysroot(pkg.board),
             PER_PKG_LICENSE_DIR, pkg.fullnamerev)
@@ -841,7 +841,7 @@ class Licensing(object):
         logging.debug('loading dump for %s', pkg.fullnamerev)
         self._LoadLicenseDump(pkg)
 
-  def AddExtraPkg(self, fullnamerev, homepages, license_names):
+  def AddExtraPkg(self, fullnamerev, homepages, license_names, license_texts):
     """Allow adding pre-created virtual packages.
 
     GetLicenses will not work on them, so add them after having run
@@ -851,10 +851,12 @@ class Licensing(object):
       fullnamerev: package name of the form x11-base/X.Org-1.9.3-r23
       homepages: list of url strings.
       license_names: list of license name strings.
+      license_texts: custom license text to use, mostly for attribution.
     """
     pkg = PackageInfo(self.board, fullnamerev)
-    pkg.homepages = homepages          # this is a list
-    pkg.license_names = license_names  # this is also a list
+    pkg.homepages = homepages
+    pkg.license_names = license_names
+    pkg.license_text_scanned = license_texts
     self.packages[fullnamerev] = pkg
 
   # Called directly by src/repohooks/pre-upload.py

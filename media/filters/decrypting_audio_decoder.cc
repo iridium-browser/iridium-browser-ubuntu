@@ -23,8 +23,6 @@
 
 namespace media {
 
-const int DecryptingAudioDecoder::kSupportedBitsPerChannel = 16;
-
 static inline bool IsOutOfSync(const base::TimeDelta& timestamp_1,
                                const base::TimeDelta& timestamp_2) {
   // Out of sync of 100ms would be pretty noticeable and we should keep any
@@ -248,7 +246,7 @@ void DecryptingAudioDecoder::DecodePendingBuffer() {
 void DecryptingAudioDecoder::DeliverFrame(
     int buffer_size,
     Decryptor::Status status,
-    const Decryptor::AudioBuffers& frames) {
+    const Decryptor::AudioFrames& frames) {
   DVLOG(3) << "DeliverFrame() - status: " << status;
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK_EQ(state_, kPendingDecode) << state_;
@@ -340,8 +338,8 @@ void DecryptingAudioDecoder::DoReset() {
 }
 
 void DecryptingAudioDecoder::ProcessDecodedFrames(
-    const Decryptor::AudioBuffers& frames) {
-  for (Decryptor::AudioBuffers::const_iterator iter = frames.begin();
+    const Decryptor::AudioFrames& frames) {
+  for (Decryptor::AudioFrames::const_iterator iter = frames.begin();
        iter != frames.end();
        ++iter) {
     scoped_refptr<AudioBuffer> frame = *iter;

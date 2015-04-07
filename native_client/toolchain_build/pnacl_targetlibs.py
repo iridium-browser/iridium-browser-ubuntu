@@ -16,11 +16,12 @@ import pynacl.platform
 import command
 import pnacl_commands
 
+from toolchain_build import NewlibLibcScript
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 NACL_DIR = os.path.dirname(SCRIPT_DIR)
 
-CLANG_VER = '3.4'
+CLANG_VER = '3.5.0'
 
 # Return the path to a tool to build target libraries
 # msys should be false if the path will be called directly rather than passed to
@@ -126,7 +127,7 @@ def LibCxxCflags(bias_arch):
   # HAS_THREAD_LOCAL is used by libc++abi's exception storage, the fallback is
   # pthread otherwise.
   return ' '.join([TargetLibCflags(bias_arch), NewlibIsystemCflags(bias_arch),
-                   '-DHAS_THREAD_LOCAL=1'])
+                   '-DHAS_THREAD_LOCAL=1', '-D__ARM_DWARF_EH__'])
 
 
 def LibStdcxxCflags(bias_arch):
@@ -190,7 +191,7 @@ def BuildLibgccEhCmd(sourcefile, output, arch):
     os_name = pynacl.platform.GetOS()
     arch_name = pynacl.platform.GetArch()
     platform_dir = '%s_%s' % (os_name, arch_name)
-    newlib_dir = 'nacl_x86_newlib'
+    newlib_dir = 'nacl_x86_newlib_raw'
 
     nnacl_dir = os.path.join(NACL_DIR, 'toolchain', platform_dir,
                              newlib_dir, 'bin')
@@ -258,15 +259,22 @@ def TargetLibsSrc(GitSyncCmds):
   return source
 
 
-def NewlibDirectoryCmds(bias_arch):
+def NewlibDirectoryCmds(bias_arch, newlib_triple):
   commands = []
+  def NewlibLib(name):
+    return os.path.join('%(output)s', newlib_triple, 'lib', name)
+  if not IsBCArch(bias_arch):
+    commands.extend([
+      command.Rename(NewlibLib('libc.a'), NewlibLib('libcrt_common.a')),
+      command.WriteData(NewlibLibcScript(bias_arch, 'elf64'),
+                        NewlibLib('libc.a'))])
   target_triple = TripleFromArch(bias_arch)
   if bias_arch != 'i686':
     commands.extend([
-        # We configured newlib with target=le32-nacl to get its pure C
-        # implementation, so rename its output dir (which matches the
-        # target to the output dir for the package we are building)
-        command.Rename(os.path.join('%(output)s', 'le32-nacl'),
+        # For biased bitcode builds, we configured newlib with target=le32-nacl
+        # to get its pure C implementation, so rename its output dir (which
+        # matches the target to the output dir for the package we are building)
+        command.Rename(os.path.join('%(output)s', newlib_triple),
                        os.path.join('%(output)s', target_triple)),
         # Copy nacl_random.h, used by libc++. It uses the IRT, so should
         # be safe to include in the toolchain.
@@ -281,7 +289,7 @@ def NewlibDirectoryCmds(bias_arch):
     # Use multilib-style directories for i686
     multilib_triple = TripleFromArch(MultilibArch(bias_arch))
     commands.extend([
-        command.Rename(os.path.join('%(output)s', 'le32-nacl'),
+        command.Rename(os.path.join('%(output)s', newlib_triple),
                        os.path.join('%(output)s', multilib_triple)),
         command.RemoveDirectory(
             os.path.join('%(output)s', multilib_triple, 'include')),
@@ -314,6 +322,7 @@ def TargetLibs(bias_arch, is_canonical):
   def T(component_name):
     return GSDJoin(component_name, bias_arch)
   target_triple = TripleFromArch(bias_arch)
+  newlib_triple = target_triple if not IsBCArch(bias_arch) else 'le32-nacl'
   clang_libdir = os.path.join(
       '%(output)s', 'lib', 'clang', CLANG_VER, 'lib', target_triple)
   libc_libdir = os.path.join('%(output)s', MultilibLibDir(bias_arch))
@@ -326,7 +335,6 @@ def TargetLibs(bias_arch, is_canonical):
                   ['sh', '%(newlib_src)s/configure'] +
                   TargetTools(bias_arch) +
                   ['CFLAGS_FOR_TARGET=' + TargetLibCflags(bias_arch),
-                  '--disable-multilib',
                   '--prefix=',
                   '--disable-newlib-supplied-syscalls',
                   '--disable-texinfo',
@@ -340,11 +348,11 @@ def TargetLibs(bias_arch, is_canonical):
                   '--enable-newlib-io-long-double',
                   '--enable-newlib-io-c99-formats',
                   '--enable-newlib-mb',
-                  '--target=le32-nacl'
+                  '--target=' + newlib_triple
               ]),
               command.Command(MakeCommand()),
               command.Command(['make', 'DESTDIR=%(abs_output)s', 'install']),
-          ] + NewlibDirectoryCmds(bias_arch)
+          ] + NewlibDirectoryCmds(bias_arch, newlib_triple)
       },
       T('libcxx'): {
           'type': 'build' if is_canonical else 'work',
@@ -377,8 +385,9 @@ def TargetLibs(bias_arch, is_canonical):
                    '-DLLVM_LIT_ARGS=--verbose  --param shell_prefix="' +
                     os.path.join(NACL_DIR,'run.py') +' -arch env --retries=1" '+
                     '--param exe_suffix=".pexe" --param use_system_lib=true ' +
-                    '--param cxx_under_test="' +  os.path.join(NACL_DIR,
-                        'toolchain/linux_x86/pnacl_newlib/bin/pnacl-clang++') +
+                    '--param cxx_under_test="' + os.path.join(NACL_DIR,
+                        'toolchain/linux_x86/pnacl_newlib',
+                        'bin/pnacl-clang++') +
                     '" '+
                     '--param link_flags="-std=gnu++11 --pnacl-exceptions=sjlj"',
                    '-DLIBCXX_ENABLE_CXX0X=0',
@@ -503,7 +512,6 @@ def TargetLibs(bias_arch, is_canonical):
       return GSDJoin(lib, pynacl.platform.GetArch3264(bias_arch))
     def TranslatorFile(lib, filename):
       return os.path.join('%(' + TL(lib) + ')s', filename)
-    setjmp_arch = pynacl.platform.GetArch3264(bias_arch).replace('-', '_')
     libs.update({
       T('libs_support'): {
           'type': 'build' if is_canonical else 'work',
@@ -523,14 +531,6 @@ def TargetLibs(bias_arch, is_canonical):
                                    bias_arch, output_dir=clang_libdir),
               BuildTargetObjectCmd('crtend.c', 'crtend.o',
                                    bias_arch, output_dir=clang_libdir),
-              # Put setjmp.o in libgcc.a for now.
-              # TODO(dschuff): it should probably go back into newlib.
-              BuildTargetObjectCmd('setjmp_%s.S' % setjmp_arch, 'setjmp.o',
-                                   bias_arch),
-              command.Command([PnaclTool('ar', bias_arch), 'rs',
-                               command.path.join('%(output)s', clang_libdir,
-                                                 'libgcc.a'),
-                               'setjmp.o']),
           ],
       }
     })
@@ -694,9 +694,72 @@ def UnsandboxedIRT(arch):
               command.Command([
                   'gcc', '-m32', '-O2', '-Wall', '-Werror',
                   '-I%(top_srcdir)s/..',
+                  '-c', command.path.join('%(support)s', 'irt_random.c'),
+                  '-o', command.path.join('%(output)s', 'irt_random.o')]),
+              command.Command([
+                  'gcc', '-m32', '-O2', '-Wall', '-Werror',
+                  '-I%(top_srcdir)s/..',
                   '-c', command.path.join('%(untrusted)s', 'irt_query_list.c'),
                   '-o', command.path.join('%(output)s', 'irt_query_list.o')]),
           ],
       },
+  }
+  return libs
+
+
+def SDKCompiler(arches):
+  arch_packages = ([GSDJoin('newlib', arch) for arch in arches] +
+                   [GSDJoin('libcxx', arch) for arch in arches])
+  compiler = {
+      # TODO(dschuff): When we get a sandboxed translator build, move this
+      # target out to somewhere shareable. It's necessary for now because
+      # there's no way to inject the right -i and -L flags into SCons to find
+      # newlib.
+      'sdk_compiler': {
+          'type': 'work',
+          'output_subdir': 'sdk_compiler',
+          'dependencies': ['target_lib_compiler'] + arch_packages,
+          'commands': [
+              command.CopyRecursive('%(' + t + ')s', '%(output)s')
+              for t in ['target_lib_compiler'] + arch_packages],
+      },
+  }
+  return compiler
+
+
+def SDKLibs(arch, is_canonical):
+  scons_flags = ['--verbose', 'MODE=nacl', '-j%(cores)s', 'naclsdk_validate=0',
+                 'pnacl_newlib_dir=%(abs_sdk_compiler)s',
+                 'DESTINATION_ROOT=%(work_dir)s']
+  if arch == 'le32':
+    scons_flags.extend(['bitcode=1', 'platform=x86-32'])
+  elif not IsBCArch(arch):
+    scons_flags.extend(['nacl_clang=1',
+                        'platform=' + pynacl.platform.GetArch3264(arch)])
+  else:
+    raise ValueError('Should not be building SDK libs for', arch)
+  libs = {
+      GSDJoin('core_sdk_libs', arch): {
+          'type': 'build' if is_canonical else 'work',
+          'dependencies': ['sdk_compiler', 'target_lib_compiler'],
+          'inputs': {
+              'src_untrusted': os.path.join(NACL_DIR, 'src', 'untrusted'),
+              'src_include': os.path.join(NACL_DIR, 'src', 'include'),
+              'scons.py': os.path.join(NACL_DIR, 'scons.py'),
+              'site_scons': os.path.join(NACL_DIR, 'site_scons'),
+              'prep_nacl_sdk':
+                  os.path.join(NACL_DIR, 'build', 'prep_nacl_sdk.py'),
+          },
+          'commands': [
+            command.Command(
+                [sys.executable, '%(scons.py)s',
+                 'includedir=' +os.path.join('%(output)s',
+                                             TripleFromArch(MultilibArch(arch)),
+                                             'include'),
+                 'libdir=' + os.path.join('%(output)s', MultilibLibDir(arch)),
+                 'install'] + scons_flags,
+                cwd=NACL_DIR),
+          ],
+      }
   }
   return libs

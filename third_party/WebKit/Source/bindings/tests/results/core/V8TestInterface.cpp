@@ -39,7 +39,7 @@
 
 namespace blink {
 
-WrapperTypeInfo V8TestInterface::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterface::domTemplate, V8TestInterface::refObject, V8TestInterface::derefObject, V8TestInterface::trace, V8TestInterface::toActiveDOMObject, 0, V8TestInterface::visitDOMWrapper, V8TestInterface::installConditionallyEnabledMethods, V8TestInterface::installConditionallyEnabledProperties, &V8TestInterfaceEmpty::wrapperTypeInfo, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::Dependent, WrapperTypeInfo::RefCountedObject };
+WrapperTypeInfo V8TestInterface::wrapperTypeInfo = { gin::kEmbedderBlink, V8TestInterface::domTemplate, V8TestInterface::refObject, V8TestInterface::derefObject, V8TestInterface::trace, V8TestInterface::toActiveDOMObject, V8TestInterface::visitDOMWrapper, V8TestInterface::installConditionallyEnabledMethods, V8TestInterface::installConditionallyEnabledProperties, &V8TestInterfaceEmpty::wrapperTypeInfo, WrapperTypeInfo::WrapperTypeObjectPrototype, WrapperTypeInfo::ObjectClassId, WrapperTypeInfo::NotInheritFromEventTarget, WrapperTypeInfo::Dependent, WrapperTypeInfo::RefCountedObject };
 
 // This static member must be declared by DEFINE_WRAPPERTYPEINFO in TestInterfaceImplementation.h.
 // For details, see the comment of DEFINE_WRAPPERTYPEINFO in
@@ -56,7 +56,7 @@ static void (*partial2StaticVoidMethodMethodForPartialInterface)(const v8::Funct
 
 static void testInterfaceAttributeAttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     v8SetReturnValueFast(info, WTF::getPtr(impl->testInterfaceAttribute()), impl);
 }
@@ -70,15 +70,15 @@ static void testInterfaceAttributeAttributeGetterCallback(v8::Local<v8::String>,
 
 static void testInterfaceAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     ExceptionState exceptionState(ExceptionState::SetterContext, "testInterfaceAttribute", "TestInterface", holder, info.GetIsolate());
-    if (!V8TestInterface::hasInstance(v8Value, info.GetIsolate())) {
+    TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
+    TestInterfaceImplementation* cppValue = V8TestInterface::toImplWithTypeCheck(info.GetIsolate(), v8Value);
+    if (!cppValue) {
         exceptionState.throwTypeError("The provided value is not of type 'TestInterface'.");
         exceptionState.throwIfNeeded();
         return;
     }
-    TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
-    TestInterfaceImplementation* cppValue = V8TestInterface::toImpl(v8::Handle<v8::Object>::Cast(v8Value));
     impl->setTestInterfaceAttribute(WTF::getPtr(cppValue));
 }
 
@@ -91,7 +91,7 @@ static void testInterfaceAttributeAttributeSetterCallback(v8::Local<v8::String>,
 
 static void doubleAttributeAttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     v8SetReturnValue(info, impl->doubleAttribute());
 }
@@ -105,7 +105,7 @@ static void doubleAttributeAttributeGetterCallback(v8::Local<v8::String>, const 
 
 static void doubleAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     ExceptionState exceptionState(ExceptionState::SetterContext, "doubleAttribute", "TestInterface", holder, info.GetIsolate());
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     TONATIVE_VOID_EXCEPTIONSTATE(double, cppValue, toDouble(v8Value, exceptionState), exceptionState);
@@ -126,7 +126,7 @@ static void doubleAttributeAttributeSetterCallback(v8::Local<v8::String>, v8::Lo
 
 static void floatAttributeAttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     v8SetReturnValue(info, impl->floatAttribute());
 }
@@ -140,7 +140,7 @@ static void floatAttributeAttributeGetterCallback(v8::Local<v8::String>, const v
 
 static void floatAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     ExceptionState exceptionState(ExceptionState::SetterContext, "floatAttribute", "TestInterface", holder, info.GetIsolate());
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     TONATIVE_VOID_EXCEPTIONSTATE(float, cppValue, toFloat(v8Value, exceptionState), exceptionState);
@@ -161,7 +161,7 @@ static void floatAttributeAttributeSetterCallback(v8::Local<v8::String>, v8::Loc
 
 static void unrestrictedDoubleAttributeAttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     v8SetReturnValue(info, impl->unrestrictedDoubleAttribute());
 }
@@ -175,7 +175,7 @@ static void unrestrictedDoubleAttributeAttributeGetterCallback(v8::Local<v8::Str
 
 static void unrestrictedDoubleAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     ExceptionState exceptionState(ExceptionState::SetterContext, "unrestrictedDoubleAttribute", "TestInterface", holder, info.GetIsolate());
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     TONATIVE_VOID_EXCEPTIONSTATE(double, cppValue, toDouble(v8Value, exceptionState), exceptionState);
@@ -191,7 +191,7 @@ static void unrestrictedDoubleAttributeAttributeSetterCallback(v8::Local<v8::Str
 
 static void unrestrictedFloatAttributeAttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     v8SetReturnValue(info, impl->unrestrictedFloatAttribute());
 }
@@ -205,7 +205,7 @@ static void unrestrictedFloatAttributeAttributeGetterCallback(v8::Local<v8::Stri
 
 static void unrestrictedFloatAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     ExceptionState exceptionState(ExceptionState::SetterContext, "unrestrictedFloatAttribute", "TestInterface", holder, info.GetIsolate());
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     TONATIVE_VOID_EXCEPTIONSTATE(float, cppValue, toFloat(v8Value, exceptionState), exceptionState);
@@ -246,7 +246,7 @@ static void staticStringAttributeAttributeSetterCallback(v8::Local<v8::String>, 
 
 static void alwaysExposedAttributeAttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     v8SetReturnValueInt(info, impl->alwaysExposedAttribute());
 }
@@ -260,7 +260,7 @@ static void alwaysExposedAttributeAttributeGetterCallback(v8::Local<v8::String>,
 
 static void alwaysExposedAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     ExceptionState exceptionState(ExceptionState::SetterContext, "alwaysExposedAttribute", "TestInterface", holder, info.GetIsolate());
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     TONATIVE_VOID_EXCEPTIONSTATE(int, cppValue, toInt32(v8Value, exceptionState), exceptionState);
@@ -276,7 +276,7 @@ static void alwaysExposedAttributeAttributeSetterCallback(v8::Local<v8::String>,
 
 static void workerExposedAttributeAttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     v8SetReturnValueInt(info, impl->workerExposedAttribute());
 }
@@ -290,7 +290,7 @@ static void workerExposedAttributeAttributeGetterCallback(v8::Local<v8::String>,
 
 static void workerExposedAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     ExceptionState exceptionState(ExceptionState::SetterContext, "workerExposedAttribute", "TestInterface", holder, info.GetIsolate());
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     TONATIVE_VOID_EXCEPTIONSTATE(int, cppValue, toInt32(v8Value, exceptionState), exceptionState);
@@ -306,7 +306,7 @@ static void workerExposedAttributeAttributeSetterCallback(v8::Local<v8::String>,
 
 static void windowExposedAttributeAttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     v8SetReturnValueInt(info, impl->windowExposedAttribute());
 }
@@ -320,7 +320,7 @@ static void windowExposedAttributeAttributeGetterCallback(v8::Local<v8::String>,
 
 static void windowExposedAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     ExceptionState exceptionState(ExceptionState::SetterContext, "windowExposedAttribute", "TestInterface", holder, info.GetIsolate());
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     TONATIVE_VOID_EXCEPTIONSTATE(int, cppValue, toInt32(v8Value, exceptionState), exceptionState);
@@ -373,7 +373,7 @@ static void implementsStaticStringAttributeAttributeSetterCallback(v8::Local<v8:
 
 static void implementsReadonlyStringAttributeAttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     v8SetReturnValueString(info, impl->implementsReadonlyStringAttribute(), info.GetIsolate());
 }
@@ -387,7 +387,7 @@ static void implementsReadonlyStringAttributeAttributeGetterCallback(v8::Local<v
 
 static void implementsStringAttributeAttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     v8SetReturnValueString(info, impl->implementsStringAttribute(), info.GetIsolate());
 }
@@ -401,7 +401,7 @@ static void implementsStringAttributeAttributeGetterCallback(v8::Local<v8::Strin
 
 static void implementsStringAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     TOSTRING_VOID(V8StringResource<>, cppValue, v8Value);
     impl->setImplementsStringAttribute(cppValue);
@@ -416,7 +416,7 @@ static void implementsStringAttributeAttributeSetterCallback(v8::Local<v8::Strin
 
 static void implementsNodeAttributeAttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     v8SetReturnValueFast(info, WTF::getPtr(impl->implementsNodeAttribute()), impl);
 }
@@ -430,15 +430,15 @@ static void implementsNodeAttributeAttributeGetterCallback(v8::Local<v8::String>
 
 static void implementsNodeAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     ExceptionState exceptionState(ExceptionState::SetterContext, "implementsNodeAttribute", "TestInterface", holder, info.GetIsolate());
-    if (!V8Node::hasInstance(v8Value, info.GetIsolate())) {
+    TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
+    Node* cppValue = V8Node::toImplWithTypeCheck(info.GetIsolate(), v8Value);
+    if (!cppValue) {
         exceptionState.throwTypeError("The provided value is not of type 'Node'.");
         exceptionState.throwIfNeeded();
         return;
     }
-    TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
-    Node* cppValue = V8Node::toImpl(v8::Handle<v8::Object>::Cast(v8Value));
     impl->setImplementsNodeAttribute(WTF::getPtr(cppValue));
 }
 
@@ -451,10 +451,10 @@ static void implementsNodeAttributeAttributeSetterCallback(v8::Local<v8::String>
 
 static void implementsEventHandlerAttributeAttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     EventListener* cppValue(impl->implementsEventHandlerAttribute());
-    v8SetReturnValue(info, cppValue ? v8::Handle<v8::Value>(V8AbstractEventListener::cast(cppValue)->getListenerObject(impl->executionContext())) : v8::Handle<v8::Value>(v8::Null(info.GetIsolate())));
+    v8SetReturnValue(info, cppValue ? v8::Local<v8::Value>(V8AbstractEventListener::cast(cppValue)->getListenerObject(impl->executionContext())) : v8::Local<v8::Value>(v8::Null(info.GetIsolate())));
 }
 
 static void implementsEventHandlerAttributeAttributeGetterCallback(v8::Local<v8::String>, const v8::PropertyCallbackInfo<v8::Value>& info)
@@ -466,7 +466,7 @@ static void implementsEventHandlerAttributeAttributeGetterCallback(v8::Local<v8:
 
 static void implementsEventHandlerAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     moveEventListenerToNewWrapper(info.GetIsolate(), holder, impl->implementsEventHandlerAttribute(), v8Value, V8TestInterface::eventListenerCacheIndex);
     impl->setImplementsEventHandlerAttribute(V8EventListenerList::getEventListener(ScriptState::current(info.GetIsolate()), v8Value, true, ListenerFindOrCreate));
@@ -481,7 +481,7 @@ static void implementsEventHandlerAttributeAttributeSetterCallback(v8::Local<v8:
 
 static void implementsRuntimeEnabledNodeAttributeAttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     v8SetReturnValueFast(info, WTF::getPtr(impl->implementsRuntimeEnabledNodeAttribute()), impl);
 }
@@ -495,15 +495,15 @@ static void implementsRuntimeEnabledNodeAttributeAttributeGetterCallback(v8::Loc
 
 static void implementsRuntimeEnabledNodeAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     ExceptionState exceptionState(ExceptionState::SetterContext, "implementsRuntimeEnabledNodeAttribute", "TestInterface", holder, info.GetIsolate());
-    if (!V8Node::hasInstance(v8Value, info.GetIsolate())) {
+    TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
+    Node* cppValue = V8Node::toImplWithTypeCheck(info.GetIsolate(), v8Value);
+    if (!cppValue) {
         exceptionState.throwTypeError("The provided value is not of type 'Node'.");
         exceptionState.throwIfNeeded();
         return;
     }
-    TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
-    Node* cppValue = V8Node::toImpl(v8::Handle<v8::Object>::Cast(v8Value));
     impl->setImplementsRuntimeEnabledNodeAttribute(WTF::getPtr(cppValue));
 }
 
@@ -516,7 +516,7 @@ static void implementsRuntimeEnabledNodeAttributeAttributeSetterCallback(v8::Loc
 
 static void implementsPerContextEnabledNodeAttributeAttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     v8SetReturnValueFast(info, WTF::getPtr(impl->implementsPerContextEnabledNodeAttribute()), impl);
 }
@@ -530,15 +530,15 @@ static void implementsPerContextEnabledNodeAttributeAttributeGetterCallback(v8::
 
 static void implementsPerContextEnabledNodeAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     ExceptionState exceptionState(ExceptionState::SetterContext, "implementsPerContextEnabledNodeAttribute", "TestInterface", holder, info.GetIsolate());
-    if (!V8Node::hasInstance(v8Value, info.GetIsolate())) {
+    TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
+    Node* cppValue = V8Node::toImplWithTypeCheck(info.GetIsolate(), v8Value);
+    if (!cppValue) {
         exceptionState.throwTypeError("The provided value is not of type 'Node'.");
         exceptionState.throwIfNeeded();
         return;
     }
-    TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
-    Node* cppValue = V8Node::toImpl(v8::Handle<v8::Object>::Cast(v8Value));
     impl->setImplementsPerContextEnabledNodeAttribute(WTF::getPtr(cppValue));
 }
 
@@ -576,7 +576,7 @@ static void implements2StaticStringAttributeAttributeSetterCallback(v8::Local<v8
 
 static void implements2StringAttributeAttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     v8SetReturnValueString(info, TestImplements2::implements2StringAttribute(*impl), info.GetIsolate());
 }
@@ -590,7 +590,7 @@ static void implements2StringAttributeAttributeGetterCallback(v8::Local<v8::Stri
 
 static void implements2StringAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     TOSTRING_VOID(V8StringResource<>, cppValue, v8Value);
     TestImplements2::setImplements2StringAttribute(*impl, cppValue);
@@ -605,7 +605,7 @@ static void implements2StringAttributeAttributeSetterCallback(v8::Local<v8::Stri
 
 static void implements3StringAttributeAttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     v8SetReturnValueString(info, TestImplements3Implementation::implements3StringAttribute(*impl), info.GetIsolate());
 }
@@ -619,7 +619,7 @@ static void implements3StringAttributeAttributeGetterCallback(v8::Local<v8::Stri
 
 static void implements3StringAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     TOSTRING_VOID(V8StringResource<>, cppValue, v8Value);
     TestImplements3Implementation::setImplements3StringAttribute(*impl, cppValue);
@@ -660,7 +660,7 @@ static void implements3StaticStringAttributeAttributeSetterCallback(v8::Local<v8
 #if ENABLE(PARTIAL_CONDITION)
 static void partialLongAttributeAttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     v8SetReturnValueInt(info, TestPartialInterface::partialLongAttribute(*impl));
 }
@@ -678,7 +678,7 @@ static void partialLongAttributeAttributeGetterCallback(v8::Local<v8::String>, c
 #if ENABLE(PARTIAL_CONDITION)
 static void partialLongAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     ExceptionState exceptionState(ExceptionState::SetterContext, "partialLongAttribute", "TestInterface", holder, info.GetIsolate());
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     TONATIVE_VOID_EXCEPTIONSTATE(int, cppValue, toInt32(v8Value, exceptionState), exceptionState);
@@ -732,7 +732,7 @@ static void partialStaticLongAttributeAttributeSetterCallback(v8::Local<v8::Stri
 #if ENABLE(PARTIAL_CONDITION)
 static void partialCallWithExecutionContextLongAttributeAttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     ExecutionContext* executionContext = currentExecutionContext(info.GetIsolate());
     v8SetReturnValueInt(info, TestPartialInterface::partialCallWithExecutionContextLongAttribute(executionContext, *impl));
@@ -751,7 +751,7 @@ static void partialCallWithExecutionContextLongAttributeAttributeGetterCallback(
 #if ENABLE(PARTIAL_CONDITION)
 static void partialCallWithExecutionContextLongAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     ExceptionState exceptionState(ExceptionState::SetterContext, "partialCallWithExecutionContextLongAttribute", "TestInterface", holder, info.GetIsolate());
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     TONATIVE_VOID_EXCEPTIONSTATE(int, cppValue, toInt32(v8Value, exceptionState), exceptionState);
@@ -772,7 +772,7 @@ static void partialCallWithExecutionContextLongAttributeAttributeSetterCallback(
 #if ENABLE(PARTIAL_CONDITION)
 static void partialPartialEnumTypeAttributeAttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     v8SetReturnValueString(info, TestPartialInterface::partialPartialEnumTypeAttribute(*impl), info.GetIsolate());
 }
@@ -790,7 +790,7 @@ static void partialPartialEnumTypeAttributeAttributeGetterCallback(v8::Local<v8:
 #if ENABLE(PARTIAL_CONDITION)
 static void partialPartialEnumTypeAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     TOSTRING_VOID(V8StringResource<>, cppValue, v8Value);
     String string = cppValue;
@@ -812,7 +812,7 @@ static void partialPartialEnumTypeAttributeAttributeSetterCallback(v8::Local<v8:
 #if ENABLE(PARTIAL_CONDITION)
 static void stringAttributeAttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     String result;
     if (!V8TestInterface::PrivateScript::stringAttributeAttributeGetter(toFrameIfNotDetached(info.GetIsolate()->GetCurrentContext()), impl, &result))
@@ -833,7 +833,7 @@ static void stringAttributeAttributeGetterCallback(v8::Local<v8::String>, const 
 #if ENABLE(PARTIAL_CONDITION)
 static void stringAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     TOSTRING_VOID(V8StringResource<>, cppValue, v8Value);
     V8TestInterface::PrivateScript::stringAttributeAttributeSetter(toFrameIfNotDetached(info.GetIsolate()->GetCurrentContext()), impl, cppValue);
@@ -851,7 +851,7 @@ static void stringAttributeAttributeSetterCallback(v8::Local<v8::String>, v8::Lo
 
 static void partial2LongAttributeAttributeGetter(const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     v8SetReturnValueInt(info, TestPartialInterfaceImplementation::partial2LongAttribute(*impl));
 }
@@ -865,7 +865,7 @@ static void partial2LongAttributeAttributeGetterCallback(v8::Local<v8::String>, 
 
 static void partial2LongAttributeAttributeSetter(v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
 {
-    v8::Handle<v8::Object> holder = info.Holder();
+    v8::Local<v8::Object> holder = info.Holder();
     ExceptionState exceptionState(ExceptionState::SetterContext, "partial2LongAttribute", "TestInterface", holder, info.GetIsolate());
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(holder);
     TONATIVE_VOID_EXCEPTIONSTATE(int, cppValue, toInt32(v8Value, exceptionState), exceptionState);
@@ -907,7 +907,7 @@ static void partial2StaticLongAttributeAttributeSetterCallback(v8::Local<v8::Str
 
 static void TestInterfaceImplementationConstructorGetter(v8::Local<v8::String>, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    v8::Handle<v8::Value> data = info.Data();
+    v8::Local<v8::Value> data = info.Data();
     ASSERT(data->IsExternal());
     V8PerContextData* perContextData = V8PerContextData::from(info.Holder()->CreationContext());
     if (!perContextData)
@@ -918,7 +918,7 @@ static void TestInterfaceImplementationConstructorGetter(v8::Local<v8::String>, 
 static void TestInterfaceImplementationForceSetAttributeOnThis(v8::Local<v8::String> name, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
 {
     if (info.This()->IsObject())
-        v8::Handle<v8::Object>::Cast(info.This())->ForceSet(name, v8Value);
+        v8::Local<v8::Object>::Cast(info.This())->ForceSet(name, v8Value);
 }
 
 static void TestInterfaceImplementationForceSetAttributeOnThisCallback(v8::Local<v8::String> name, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<void>& info)
@@ -935,11 +935,11 @@ static void voidMethodTestInterfaceEmptyArgMethod(const v8::FunctionCallbackInfo
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(info.Holder());
     TestInterfaceEmpty* testInterfaceEmptyArg;
     {
-        if (info.Length() > 0 && !V8TestInterfaceEmpty::hasInstance(info[0], info.GetIsolate())) {
+        testInterfaceEmptyArg = V8TestInterfaceEmpty::toImplWithTypeCheck(info.GetIsolate(), info[0]);
+        if (!testInterfaceEmptyArg) {
             V8ThrowException::throwTypeError(info.GetIsolate(), ExceptionMessages::failedToExecute("voidMethodTestInterfaceEmptyArg", "TestInterface", "parameter 1 is not of type 'TestInterfaceEmpty'."));
             return;
         }
-        testInterfaceEmptyArg = V8TestInterfaceEmpty::toImpl(v8::Handle<v8::Object>::Cast(info[0]));
     }
     impl->voidMethodTestInterfaceEmptyArg(testInterfaceEmptyArg);
 }
@@ -1112,6 +1112,112 @@ static void windowExposedStaticMethodMethodCallback(const v8::FunctionCallbackIn
     TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
+static void methodWithExposedAndRuntimeEnabledFlagMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
+{
+    TestInterfaceImplementation* impl = V8TestInterface::toImpl(info.Holder());
+    impl->methodWithExposedAndRuntimeEnabledFlag();
+}
+
+static void methodWithExposedAndRuntimeEnabledFlagMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
+{
+    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMMethod");
+    TestInterfaceImplementationV8Internal::methodWithExposedAndRuntimeEnabledFlagMethod(info);
+    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
+}
+
+static void overloadMethodWithExposedAndRuntimeEnabledFlag1Method(const v8::FunctionCallbackInfo<v8::Value>& info)
+{
+    ExceptionState exceptionState(ExceptionState::ExecutionContext, "overloadMethodWithExposedAndRuntimeEnabledFlag", "TestInterface", info.Holder(), info.GetIsolate());
+    TestInterfaceImplementation* impl = V8TestInterface::toImpl(info.Holder());
+    int longArg;
+    {
+        TONATIVE_VOID_EXCEPTIONSTATE_INTERNAL(longArg, toInt32(info[0], exceptionState), exceptionState);
+    }
+    impl->overloadMethodWithExposedAndRuntimeEnabledFlag(longArg);
+}
+
+static void overloadMethodWithExposedAndRuntimeEnabledFlag2Method(const v8::FunctionCallbackInfo<v8::Value>& info)
+{
+    TestInterfaceImplementation* impl = V8TestInterface::toImpl(info.Holder());
+    V8StringResource<> string;
+    {
+        TOSTRING_VOID_INTERNAL(string, info[0]);
+    }
+    impl->overloadMethodWithExposedAndRuntimeEnabledFlag(string);
+}
+
+static void overloadMethodWithExposedAndRuntimeEnabledFlag3Method(const v8::FunctionCallbackInfo<v8::Value>& info)
+{
+    TestInterfaceImplementation* impl = V8TestInterface::toImpl(info.Holder());
+    DOMWindow* window;
+    {
+        window = toDOMWindow(info.GetIsolate(), info[0]);
+        if (!window) {
+            V8ThrowException::throwTypeError(info.GetIsolate(), ExceptionMessages::failedToExecute("overloadMethodWithExposedAndRuntimeEnabledFlag", "TestInterface", "parameter 1 is not of type 'Window'."));
+            return;
+        }
+    }
+    impl->overloadMethodWithExposedAndRuntimeEnabledFlag(window);
+}
+
+static void overloadMethodWithExposedAndRuntimeEnabledFlagMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
+{
+    ExceptionState exceptionState(ExceptionState::ExecutionContext, "overloadMethodWithExposedAndRuntimeEnabledFlag", "TestInterface", info.Holder(), info.GetIsolate());
+    switch (std::min(1, info.Length())) {
+    case 1:
+        if (RuntimeEnabledFeatures::featureName2Enabled()) {
+            if (V8Window::hasInstance(info[0], info.GetIsolate())) {
+                overloadMethodWithExposedAndRuntimeEnabledFlag3Method(info);
+                return;
+            }
+        }
+        if (info[0]->IsNumber()) {
+            overloadMethodWithExposedAndRuntimeEnabledFlag1Method(info);
+            return;
+        }
+        if (RuntimeEnabledFeatures::featureNameEnabled()) {
+            if (true) {
+                overloadMethodWithExposedAndRuntimeEnabledFlag2Method(info);
+                return;
+            }
+        }
+        if (true) {
+            overloadMethodWithExposedAndRuntimeEnabledFlag1Method(info);
+            return;
+        }
+        break;
+    default:
+        break;
+    }
+    if (info.Length() < 1) {
+        exceptionState.throwTypeError(ExceptionMessages::notEnoughArguments(1, info.Length()));
+        exceptionState.throwIfNeeded();
+        return;
+    }
+    exceptionState.throwTypeError("No function was found that matched the signature provided.");
+    exceptionState.throwIfNeeded();
+}
+
+static void overloadMethodWithExposedAndRuntimeEnabledFlagMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
+{
+    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMMethod");
+    TestInterfaceImplementationV8Internal::overloadMethodWithExposedAndRuntimeEnabledFlagMethod(info);
+    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
+}
+
+static void methodWithExposedHavingRuntimeEnabldFlagMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
+{
+    TestInterfaceImplementation* impl = V8TestInterface::toImpl(info.Holder());
+    impl->methodWithExposedHavingRuntimeEnabldFlag();
+}
+
+static void methodWithExposedHavingRuntimeEnabldFlagMethodCallback(const v8::FunctionCallbackInfo<v8::Value>& info)
+{
+    TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMMethod");
+    TestInterfaceImplementationV8Internal::methodWithExposedHavingRuntimeEnabldFlagMethod(info);
+    TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
+}
+
 static void windowAndServiceWorkerExposedMethodMethod(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(info.Holder());
@@ -1161,13 +1267,13 @@ static void promiseMethodPartialOverload1Method(const v8::FunctionCallbackInfo<v
 static void promiseMethodPartialOverload2Method(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(info.Holder());
-    LocalDOMWindow* window;
+    DOMWindow* window;
     {
-        if (info.Length() > 0 && !V8Window::hasInstance(info[0], info.GetIsolate())) {
+        window = toDOMWindow(info.GetIsolate(), info[0]);
+        if (!window) {
             v8SetReturnValue(info, ScriptPromise::rejectRaw(info.GetIsolate(), V8ThrowException::createTypeError(info.GetIsolate(), ExceptionMessages::failedToExecute("promiseMethodPartialOverload", "TestInterface", "parameter 1 is not of type 'Window'."))));
             return;
         }
-        window = toDOMWindow(info[0], info.GetIsolate());
     }
     v8SetReturnValue(info, impl->promiseMethodPartialOverload(window).v8Value());
 }
@@ -1203,12 +1309,12 @@ static void implementsComplexMethodMethod(const v8::FunctionCallbackInfo<v8::Val
     TestInterfaceEmpty* testInterfaceEmptyArg;
     {
         TOSTRING_VOID_INTERNAL(strArg, info[0]);
-        if (info.Length() > 1 && !V8TestInterfaceEmpty::hasInstance(info[1], info.GetIsolate())) {
+        testInterfaceEmptyArg = V8TestInterfaceEmpty::toImplWithTypeCheck(info.GetIsolate(), info[1]);
+        if (!testInterfaceEmptyArg) {
             exceptionState.throwTypeError("parameter 2 is not of type 'TestInterfaceEmpty'.");
             exceptionState.throwIfNeeded();
             return;
         }
-        testInterfaceEmptyArg = V8TestInterfaceEmpty::toImpl(v8::Handle<v8::Object>::Cast(info[1]));
     }
     ExecutionContext* executionContext = currentExecutionContext(info.GetIsolate());
     RefPtr<TestInterfaceEmpty> result = impl->implementsComplexMethod(executionContext, strArg, testInterfaceEmptyArg, exceptionState);
@@ -1669,37 +1775,43 @@ static void indexedPropertyDeleterCallback(uint32_t index, const v8::PropertyCal
     TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
-static void namedPropertyGetter(v8::Local<v8::String> name, const v8::PropertyCallbackInfo<v8::Value>& info)
+static void namedPropertyGetter(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    if (info.Holder()->HasRealNamedProperty(name))
+    if (!name->IsString())
         return;
-    if (!info.Holder()->GetRealNamedPropertyInPrototypeChain(name).IsEmpty())
+    auto nameString = name.As<v8::String>();
+    if (info.Holder()->HasRealNamedProperty(nameString))
+        return;
+    if (!info.Holder()->GetRealNamedPropertyInPrototypeChain(nameString).IsEmpty())
         return;
 
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(info.Holder());
-    AtomicString propertyName = toCoreAtomicString(name);
+    AtomicString propertyName = toCoreAtomicString(nameString);
     String result = impl->anonymousNamedGetter(propertyName);
     if (result.isNull())
         return;
     v8SetReturnValueString(info, result, info.GetIsolate());
 }
 
-static void namedPropertyGetterCallback(v8::Local<v8::String> name, const v8::PropertyCallbackInfo<v8::Value>& info)
+static void namedPropertyGetterCallback(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
     TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMNamedProperty");
     TestInterfaceImplementationV8Internal::namedPropertyGetter(name, info);
     TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
-static void namedPropertySetter(v8::Local<v8::String> name, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<v8::Value>& info)
+static void namedPropertySetter(v8::Local<v8::Name> name, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
-    if (info.Holder()->HasRealNamedProperty(name))
+    if (!name->IsString())
         return;
-    if (!info.Holder()->GetRealNamedPropertyInPrototypeChain(name).IsEmpty())
+    auto nameString = name.As<v8::String>();
+    if (info.Holder()->HasRealNamedProperty(nameString))
+        return;
+    if (!info.Holder()->GetRealNamedPropertyInPrototypeChain(nameString).IsEmpty())
         return;
 
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(info.Holder());
-    TOSTRING_VOID(V8StringResource<>, propertyName, name);
+    TOSTRING_VOID(V8StringResource<>, propertyName, nameString);
     TOSTRING_VOID(V8StringResource<>, propertyValue, v8Value);
     bool result = impl->anonymousNamedSetter(propertyName, propertyValue);
     if (!result)
@@ -1707,17 +1819,19 @@ static void namedPropertySetter(v8::Local<v8::String> name, v8::Local<v8::Value>
     v8SetReturnValue(info, v8Value);
 }
 
-static void namedPropertySetterCallback(v8::Local<v8::String> name, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<v8::Value>& info)
+static void namedPropertySetterCallback(v8::Local<v8::Name> name, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInfo<v8::Value>& info)
 {
     TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMNamedProperty");
     TestInterfaceImplementationV8Internal::namedPropertySetter(name, v8Value, info);
     TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
-static void namedPropertyQuery(v8::Local<v8::String> name, const v8::PropertyCallbackInfo<v8::Integer>& info)
+static void namedPropertyQuery(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Integer>& info)
 {
+    if (!name->IsString())
+        return;
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(info.Holder());
-    AtomicString propertyName = toCoreAtomicString(name);
+    AtomicString propertyName = toCoreAtomicString(name.As<v8::String>());
     v8::String::Utf8Value namedProperty(name);
     ExceptionState exceptionState(ExceptionState::GetterContext, *namedProperty, "TestInterface", info.Holder(), info.GetIsolate());
     bool result = impl->namedPropertyQuery(propertyName, exceptionState);
@@ -1728,23 +1842,25 @@ static void namedPropertyQuery(v8::Local<v8::String> name, const v8::PropertyCal
     v8SetReturnValueInt(info, v8::None);
 }
 
-static void namedPropertyQueryCallback(v8::Local<v8::String> name, const v8::PropertyCallbackInfo<v8::Integer>& info)
+static void namedPropertyQueryCallback(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Integer>& info)
 {
     TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMNamedProperty");
     TestInterfaceImplementationV8Internal::namedPropertyQuery(name, info);
     TRACE_EVENT_SET_SAMPLING_STATE("v8", "V8Execution");
 }
 
-static void namedPropertyDeleter(v8::Local<v8::String> name, const v8::PropertyCallbackInfo<v8::Boolean>& info)
+static void namedPropertyDeleter(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Boolean>& info)
 {
+    if (!name->IsString())
+        return;
     TestInterfaceImplementation* impl = V8TestInterface::toImpl(info.Holder());
-    AtomicString propertyName = toCoreAtomicString(name);
+    AtomicString propertyName = toCoreAtomicString(name.As<v8::String>());
     DeleteResult result = impl->anonymousNamedDeleter(propertyName);
     if (result != DeleteUnknownProperty)
         return v8SetReturnValueBool(info, result == DeleteSuccess);
 }
 
-static void namedPropertyDeleterCallback(v8::Local<v8::String> name, const v8::PropertyCallbackInfo<v8::Boolean>& info)
+static void namedPropertyDeleterCallback(v8::Local<v8::Name> name, const v8::PropertyCallbackInfo<v8::Boolean>& info)
 {
     TRACE_EVENT_SET_SAMPLING_STATE("blink", "DOMNamedProperty");
     TestInterfaceImplementationV8Internal::namedPropertyDeleter(name, info);
@@ -1759,7 +1875,7 @@ static void namedPropertyEnumerator(const v8::PropertyCallbackInfo<v8::Array>& i
     impl->namedPropertyEnumerator(names, exceptionState);
     if (exceptionState.throwIfNeeded())
         return;
-    v8::Handle<v8::Array> v8names = v8::Array::New(info.GetIsolate(), names.size());
+    v8::Local<v8::Array> v8names = v8::Array::New(info.GetIsolate(), names.size());
     for (size_t i = 0; i < names.size(); ++i)
         v8names->Set(v8::Integer::New(info.GetIsolate(), i), v8String(info.GetIsolate(), names[i]));
     v8SetReturnValue(info, v8names);
@@ -1774,9 +1890,9 @@ static void namedPropertyEnumeratorCallback(const v8::PropertyCallbackInfo<v8::A
 
 } // namespace TestInterfaceImplementationV8Internal
 
-void V8TestInterface::visitDOMWrapper(v8::Isolate* isolate, ScriptWrappableBase* scriptWrappableBase, const v8::Persistent<v8::Object>& wrapper)
+void V8TestInterface::visitDOMWrapper(v8::Isolate* isolate, ScriptWrappable* scriptWrappable, const v8::Persistent<v8::Object>& wrapper)
 {
-    TestInterfaceImplementation* impl = scriptWrappableBase->toImpl<TestInterfaceImplementation>();
+    TestInterfaceImplementation* impl = scriptWrappable->toImpl<TestInterfaceImplementation>();
     v8::Local<v8::Object> creationContext = v8::Local<v8::Object>::New(isolate, wrapper);
     V8WrapperInstantiationScope scope(creationContext, isolate);
     TestInterfaceImplementation* referencedName = impl->referencedName();
@@ -1785,7 +1901,7 @@ void V8TestInterface::visitDOMWrapper(v8::Isolate* isolate, ScriptWrappableBase*
             referencedName->wrap(creationContext, isolate);
         DOMDataStore::setWrapperReference(wrapper, referencedName, isolate);
     }
-    setObjectGroup(isolate, scriptWrappableBase, wrapper);
+    setObjectGroup(isolate, scriptWrappable, wrapper);
 }
 
 static const V8DOMConfiguration::AttributeConfiguration V8TestInterfaceAttributes[] = {
@@ -1818,19 +1934,18 @@ static const V8DOMConfiguration::MethodConfiguration V8TestInterfaceMethods[] = 
     {"partial2VoidMethod", TestInterfaceImplementationV8Internal::partial2VoidMethodMethodCallback, 0, 0, V8DOMConfiguration::ExposedToAllScripts},
 };
 
-void V8TestInterface::installV8TestInterfaceTemplate(v8::Handle<v8::FunctionTemplate> functionTemplate, v8::Isolate* isolate)
+void V8TestInterface::installV8TestInterfaceTemplate(v8::Local<v8::FunctionTemplate> functionTemplate, v8::Isolate* isolate)
 {
     functionTemplate->ReadOnlyPrototype();
 
     v8::Local<v8::Signature> defaultSignature;
     if (!RuntimeEnabledFeatures::featureNameEnabled())
-        defaultSignature = V8DOMConfiguration::installDOMClassTemplate(functionTemplate, "", V8TestInterfaceEmpty::domTemplate(isolate), V8TestInterface::internalFieldCount, 0, 0, 0, 0, 0, 0, isolate);
+        defaultSignature = V8DOMConfiguration::installDOMClassTemplate(isolate, functionTemplate, "", V8TestInterfaceEmpty::domTemplate(isolate), V8TestInterface::internalFieldCount, 0, 0, 0, 0, 0, 0);
     else
-        defaultSignature = V8DOMConfiguration::installDOMClassTemplate(functionTemplate, "TestInterface", V8TestInterfaceEmpty::domTemplate(isolate), V8TestInterface::internalFieldCount,
+        defaultSignature = V8DOMConfiguration::installDOMClassTemplate(isolate, functionTemplate, "TestInterface", V8TestInterfaceEmpty::domTemplate(isolate), V8TestInterface::internalFieldCount,
             V8TestInterfaceAttributes, WTF_ARRAY_LENGTH(V8TestInterfaceAttributes),
             0, 0,
-            V8TestInterfaceMethods, WTF_ARRAY_LENGTH(V8TestInterfaceMethods),
-            isolate);
+            V8TestInterfaceMethods, WTF_ARRAY_LENGTH(V8TestInterfaceMethods));
     v8::Local<v8::ObjectTemplate> instanceTemplate = functionTemplate->InstanceTemplate();
     ALLOW_UNUSED_LOCAL(instanceTemplate);
     v8::Local<v8::ObjectTemplate> prototypeTemplate = functionTemplate->PrototypeTemplate();
@@ -1880,37 +1995,57 @@ void V8TestInterface::installV8TestInterfaceTemplate(v8::Handle<v8::FunctionTemp
         {"IMPLEMENTS_CONSTANT_2", 2, 0, 0, V8DOMConfiguration::ConstantTypeUnsignedShort},
         {"PARTIAL2_UNSIGNED_SHORT", 0, 0, 0, V8DOMConfiguration::ConstantTypeUnsignedShort},
     };
-    V8DOMConfiguration::installConstants(functionTemplate, prototypeTemplate, V8TestInterfaceConstants, WTF_ARRAY_LENGTH(V8TestInterfaceConstants), isolate);
+    V8DOMConfiguration::installConstants(isolate, functionTemplate, prototypeTemplate, V8TestInterfaceConstants, WTF_ARRAY_LENGTH(V8TestInterfaceConstants));
     if (RuntimeEnabledFeatures::partialFeatureNameEnabled()) {
         static const V8DOMConfiguration::ConstantConfiguration constantConfiguration = {"PARTIAL_UNSIGNED_SHORT", 0, 0, 0, V8DOMConfiguration::ConstantTypeUnsignedShort};
-        V8DOMConfiguration::installConstants(functionTemplate, prototypeTemplate, &constantConfiguration, 1, isolate);
+        V8DOMConfiguration::installConstants(isolate, functionTemplate, prototypeTemplate, &constantConfiguration, 1);
     }
-    functionTemplate->InstanceTemplate()->SetIndexedPropertyHandler(TestInterfaceImplementationV8Internal::indexedPropertyGetterCallback, TestInterfaceImplementationV8Internal::indexedPropertySetterCallback, 0, TestInterfaceImplementationV8Internal::indexedPropertyDeleterCallback, indexedPropertyEnumerator<TestInterfaceImplementation>);
-    functionTemplate->InstanceTemplate()->SetNamedPropertyHandler(TestInterfaceImplementationV8Internal::namedPropertyGetterCallback, TestInterfaceImplementationV8Internal::namedPropertySetterCallback, TestInterfaceImplementationV8Internal::namedPropertyQueryCallback, TestInterfaceImplementationV8Internal::namedPropertyDeleterCallback, TestInterfaceImplementationV8Internal::namedPropertyEnumeratorCallback);
+    {
+        v8::IndexedPropertyHandlerConfiguration config(TestInterfaceImplementationV8Internal::indexedPropertyGetterCallback, TestInterfaceImplementationV8Internal::indexedPropertySetterCallback, 0, TestInterfaceImplementationV8Internal::indexedPropertyDeleterCallback, indexedPropertyEnumerator<TestInterfaceImplementation>);
+        config.flags = v8::PropertyHandlerFlags::kAllCanRead;
+        functionTemplate->InstanceTemplate()->SetHandler(config);
+    }
+    {
+        v8::NamedPropertyHandlerConfiguration config(TestInterfaceImplementationV8Internal::namedPropertyGetterCallback, TestInterfaceImplementationV8Internal::namedPropertySetterCallback, TestInterfaceImplementationV8Internal::namedPropertyQueryCallback, TestInterfaceImplementationV8Internal::namedPropertyDeleterCallback, TestInterfaceImplementationV8Internal::namedPropertyEnumeratorCallback);
+        config.flags = v8::PropertyHandlerFlags::kAllCanRead;
+        functionTemplate->InstanceTemplate()->SetHandler(config);
+    }
     static const V8DOMConfiguration::SymbolKeyedMethodConfiguration symbolKeyedIteratorConfiguration = { v8::Symbol::GetIterator, TestInterfaceImplementationV8Internal::iteratorMethodCallback, 0, V8DOMConfiguration::ExposedToAllScripts };
     V8DOMConfiguration::installMethod(prototypeTemplate, defaultSignature, v8::DontDelete, symbolKeyedIteratorConfiguration, isolate);
     functionTemplate->InstanceTemplate()->SetCallAsFunctionHandler(V8TestInterface::legacyCallCustom);
-    static const V8DOMConfiguration::MethodConfiguration alwaysExposedStaticMethodMethodConfiguration = {
+    const V8DOMConfiguration::MethodConfiguration alwaysExposedStaticMethodMethodConfiguration = {
         "alwaysExposedStaticMethod", TestInterfaceImplementationV8Internal::alwaysExposedStaticMethodMethodCallback, 0, 0, V8DOMConfiguration::ExposedToAllScripts,
     };
     V8DOMConfiguration::installMethod(functionTemplate, v8::Local<v8::Signature>(), v8::None, alwaysExposedStaticMethodMethodConfiguration, isolate);
-    static const V8DOMConfiguration::MethodConfiguration implementsStaticVoidMethodMethodConfiguration = {
+    if (context && (context->isWorkerGlobalScope())) {
+        const V8DOMConfiguration::MethodConfiguration workerExposedStaticMethodMethodConfiguration = {
+            "workerExposedStaticMethod", TestInterfaceImplementationV8Internal::workerExposedStaticMethodMethodCallback, 0, 0, V8DOMConfiguration::ExposedToAllScripts,
+        };
+        V8DOMConfiguration::installMethod(functionTemplate, v8::Local<v8::Signature>(), v8::None, workerExposedStaticMethodMethodConfiguration, isolate);
+    }
+    if (context && (context->isDocument())) {
+        const V8DOMConfiguration::MethodConfiguration windowExposedStaticMethodMethodConfiguration = {
+            "windowExposedStaticMethod", TestInterfaceImplementationV8Internal::windowExposedStaticMethodMethodCallback, 0, 0, V8DOMConfiguration::ExposedToAllScripts,
+        };
+        V8DOMConfiguration::installMethod(functionTemplate, v8::Local<v8::Signature>(), v8::None, windowExposedStaticMethodMethodConfiguration, isolate);
+    }
+    const V8DOMConfiguration::MethodConfiguration implementsStaticVoidMethodMethodConfiguration = {
         "implementsStaticVoidMethod", TestInterfaceImplementationV8Internal::implementsStaticVoidMethodMethodCallback, 0, 0, V8DOMConfiguration::ExposedToAllScripts,
     };
     V8DOMConfiguration::installMethod(functionTemplate, v8::Local<v8::Signature>(), v8::None, implementsStaticVoidMethodMethodConfiguration, isolate);
     if (RuntimeEnabledFeatures::implements2FeatureNameEnabled()) {
-        static const V8DOMConfiguration::MethodConfiguration implements2VoidMethodMethodConfiguration = {
+        const V8DOMConfiguration::MethodConfiguration implements2VoidMethodMethodConfiguration = {
             "implements2VoidMethod", TestInterfaceImplementationV8Internal::implements2VoidMethodMethodCallback, 0, 0, V8DOMConfiguration::ExposedToAllScripts,
         };
         V8DOMConfiguration::installMethod(prototypeTemplate, defaultSignature, v8::None, implements2VoidMethodMethodConfiguration, isolate);
     }
-    static const V8DOMConfiguration::MethodConfiguration implements3StaticVoidMethodMethodConfiguration = {
+    const V8DOMConfiguration::MethodConfiguration implements3StaticVoidMethodMethodConfiguration = {
         "implements3StaticVoidMethod", TestInterfaceImplementationV8Internal::implements3StaticVoidMethodMethodCallback, 0, 0, V8DOMConfiguration::ExposedToAllScripts,
     };
     V8DOMConfiguration::installMethod(functionTemplate, v8::Local<v8::Signature>(), v8::None, implements3StaticVoidMethodMethodConfiguration, isolate);
 #if ENABLE(PARTIAL_CONDITION)
     if (RuntimeEnabledFeatures::partialFeatureNameEnabled()) {
-        static const V8DOMConfiguration::MethodConfiguration partialVoidMethodMethodConfiguration = {
+        const V8DOMConfiguration::MethodConfiguration partialVoidMethodMethodConfiguration = {
             "partialVoidMethod", TestInterfaceImplementationV8Internal::partialVoidMethodMethodCallback, 0, 0, V8DOMConfiguration::ExposedToAllScripts,
         };
         V8DOMConfiguration::installMethod(prototypeTemplate, defaultSignature, v8::None, partialVoidMethodMethodConfiguration, isolate);
@@ -1918,7 +2053,7 @@ void V8TestInterface::installV8TestInterfaceTemplate(v8::Handle<v8::FunctionTemp
 #endif // ENABLE(PARTIAL_CONDITION)
 #if ENABLE(PARTIAL_CONDITION)
     if (RuntimeEnabledFeatures::partialFeatureNameEnabled()) {
-        static const V8DOMConfiguration::MethodConfiguration partialStaticVoidMethodMethodConfiguration = {
+        const V8DOMConfiguration::MethodConfiguration partialStaticVoidMethodMethodConfiguration = {
             "partialStaticVoidMethod", TestInterfaceImplementationV8Internal::partialStaticVoidMethodMethodCallback, 0, 0, V8DOMConfiguration::ExposedToAllScripts,
         };
         V8DOMConfiguration::installMethod(functionTemplate, v8::Local<v8::Signature>(), v8::None, partialStaticVoidMethodMethodConfiguration, isolate);
@@ -1926,7 +2061,7 @@ void V8TestInterface::installV8TestInterfaceTemplate(v8::Handle<v8::FunctionTemp
 #endif // ENABLE(PARTIAL_CONDITION)
 #if ENABLE(PARTIAL_CONDITION)
     if (RuntimeEnabledFeatures::partialFeatureNameEnabled()) {
-        static const V8DOMConfiguration::MethodConfiguration partialVoidMethodLongArgMethodConfiguration = {
+        const V8DOMConfiguration::MethodConfiguration partialVoidMethodLongArgMethodConfiguration = {
             "partialVoidMethodLongArg", TestInterfaceImplementationV8Internal::partialVoidMethodLongArgMethodCallback, 0, 1, V8DOMConfiguration::ExposedToAllScripts,
         };
         V8DOMConfiguration::installMethod(prototypeTemplate, defaultSignature, v8::None, partialVoidMethodLongArgMethodConfiguration, isolate);
@@ -1934,7 +2069,7 @@ void V8TestInterface::installV8TestInterfaceTemplate(v8::Handle<v8::FunctionTemp
 #endif // ENABLE(PARTIAL_CONDITION)
 #if ENABLE(PARTIAL_CONDITION)
     if (RuntimeEnabledFeatures::partialFeatureNameEnabled()) {
-        static const V8DOMConfiguration::MethodConfiguration partialCallWithExecutionContextRaisesExceptionVoidMethodMethodConfiguration = {
+        const V8DOMConfiguration::MethodConfiguration partialCallWithExecutionContextRaisesExceptionVoidMethodMethodConfiguration = {
             "partialCallWithExecutionContextRaisesExceptionVoidMethod", TestInterfaceImplementationV8Internal::partialCallWithExecutionContextRaisesExceptionVoidMethodMethodCallback, 0, 0, V8DOMConfiguration::ExposedToAllScripts,
         };
         V8DOMConfiguration::installMethod(prototypeTemplate, defaultSignature, v8::None, partialCallWithExecutionContextRaisesExceptionVoidMethodMethodConfiguration, isolate);
@@ -1942,7 +2077,7 @@ void V8TestInterface::installV8TestInterfaceTemplate(v8::Handle<v8::FunctionTemp
 #endif // ENABLE(PARTIAL_CONDITION)
 #if ENABLE(PARTIAL_CONDITION)
     if (RuntimeEnabledFeatures::partialFeatureNameEnabled()) {
-        static const V8DOMConfiguration::MethodConfiguration partialVoidMethodPartialCallbackTypeArgMethodConfiguration = {
+        const V8DOMConfiguration::MethodConfiguration partialVoidMethodPartialCallbackTypeArgMethodConfiguration = {
             "partialVoidMethodPartialCallbackTypeArg", TestInterfaceImplementationV8Internal::partialVoidMethodPartialCallbackTypeArgMethodCallback, 0, 1, V8DOMConfiguration::ExposedToAllScripts,
         };
         V8DOMConfiguration::installMethod(prototypeTemplate, defaultSignature, v8::None, partialVoidMethodPartialCallbackTypeArgMethodConfiguration, isolate);
@@ -1950,64 +2085,64 @@ void V8TestInterface::installV8TestInterfaceTemplate(v8::Handle<v8::FunctionTemp
 #endif // ENABLE(PARTIAL_CONDITION)
 #if ENABLE(PARTIAL_CONDITION)
     if (RuntimeEnabledFeatures::partialFeatureNameEnabled()) {
-        static const V8DOMConfiguration::MethodConfiguration shortMethodWithShortArgumentImplementedInPrivateScriptMethodConfiguration = {
+        const V8DOMConfiguration::MethodConfiguration shortMethodWithShortArgumentImplementedInPrivateScriptMethodConfiguration = {
             "shortMethodWithShortArgumentImplementedInPrivateScript", TestInterfaceImplementationV8Internal::shortMethodWithShortArgumentImplementedInPrivateScriptMethodCallback, 0, 1, V8DOMConfiguration::ExposedToAllScripts,
         };
         V8DOMConfiguration::installMethod(prototypeTemplate, defaultSignature, v8::None, shortMethodWithShortArgumentImplementedInPrivateScriptMethodConfiguration, isolate);
     }
 #endif // ENABLE(PARTIAL_CONDITION)
-    static const V8DOMConfiguration::MethodConfiguration staticVoidMethodPartialOverloadMethodConfiguration = {
+    const V8DOMConfiguration::MethodConfiguration staticVoidMethodPartialOverloadMethodConfiguration = {
         "staticVoidMethodPartialOverload", TestInterfaceImplementationV8Internal::staticVoidMethodPartialOverloadMethodCallback, 0, 0, V8DOMConfiguration::ExposedToAllScripts,
     };
     V8DOMConfiguration::installMethod(functionTemplate, v8::Local<v8::Signature>(), v8::None, staticVoidMethodPartialOverloadMethodConfiguration, isolate);
-    static const V8DOMConfiguration::MethodConfiguration staticPromiseMethodPartialOverloadMethodConfiguration = {
+    const V8DOMConfiguration::MethodConfiguration staticPromiseMethodPartialOverloadMethodConfiguration = {
         "staticPromiseMethodPartialOverload", TestInterfaceImplementationV8Internal::staticPromiseMethodPartialOverloadMethodCallback, 0, 0, V8DOMConfiguration::ExposedToAllScripts,
     };
     V8DOMConfiguration::installMethod(functionTemplate, v8::Local<v8::Signature>(), v8::None, staticPromiseMethodPartialOverloadMethodConfiguration, isolate);
-    static const V8DOMConfiguration::MethodConfiguration partial2StaticVoidMethodMethodConfiguration = {
+    const V8DOMConfiguration::MethodConfiguration partial2StaticVoidMethodMethodConfiguration = {
         "partial2StaticVoidMethod", TestInterfaceImplementationV8Internal::partial2StaticVoidMethodMethodCallback, 0, 0, V8DOMConfiguration::ExposedToAllScripts,
     };
     V8DOMConfiguration::installMethod(functionTemplate, v8::Local<v8::Signature>(), v8::None, partial2StaticVoidMethodMethodConfiguration, isolate);
-    static const V8DOMConfiguration::MethodConfiguration toStringMethodConfiguration = {
+    const V8DOMConfiguration::MethodConfiguration toStringMethodConfiguration = {
         "toString", TestInterfaceImplementationV8Internal::toStringMethodCallback, 0, 0, V8DOMConfiguration::ExposedToAllScripts,
     };
     V8DOMConfiguration::installMethod(prototypeTemplate, defaultSignature, static_cast<v8::PropertyAttribute>(v8::DontDelete | v8::DontEnum), toStringMethodConfiguration, isolate);
-    functionTemplate->SetNativeDataProperty(v8AtomicString(isolate, "staticStringAttribute"), TestInterfaceImplementationV8Internal::staticStringAttributeAttributeGetterCallback, TestInterfaceImplementationV8Internal::staticStringAttributeAttributeSetterCallback, v8::External::New(isolate, 0), static_cast<v8::PropertyAttribute>(v8::None), v8::Handle<v8::AccessorSignature>(), static_cast<v8::AccessControl>(v8::DEFAULT));
-    functionTemplate->SetNativeDataProperty(v8AtomicString(isolate, "implementsStaticReadOnlyLongAttribute"), TestInterfaceImplementationV8Internal::implementsStaticReadOnlyLongAttributeAttributeGetterCallback, 0, v8::External::New(isolate, 0), static_cast<v8::PropertyAttribute>(v8::None), v8::Handle<v8::AccessorSignature>(), static_cast<v8::AccessControl>(v8::DEFAULT));
-    functionTemplate->SetNativeDataProperty(v8AtomicString(isolate, "implementsStaticStringAttribute"), TestInterfaceImplementationV8Internal::implementsStaticStringAttributeAttributeGetterCallback, TestInterfaceImplementationV8Internal::implementsStaticStringAttributeAttributeSetterCallback, v8::External::New(isolate, 0), static_cast<v8::PropertyAttribute>(v8::None), v8::Handle<v8::AccessorSignature>(), static_cast<v8::AccessControl>(v8::DEFAULT));
-    functionTemplate->SetNativeDataProperty(v8AtomicString(isolate, "implements2StaticStringAttribute"), TestInterfaceImplementationV8Internal::implements2StaticStringAttributeAttributeGetterCallback, TestInterfaceImplementationV8Internal::implements2StaticStringAttributeAttributeSetterCallback, v8::External::New(isolate, 0), static_cast<v8::PropertyAttribute>(v8::None), v8::Handle<v8::AccessorSignature>(), static_cast<v8::AccessControl>(v8::DEFAULT));
-    functionTemplate->SetNativeDataProperty(v8AtomicString(isolate, "implements3StaticStringAttribute"), TestInterfaceImplementationV8Internal::implements3StaticStringAttributeAttributeGetterCallback, TestInterfaceImplementationV8Internal::implements3StaticStringAttributeAttributeSetterCallback, v8::External::New(isolate, 0), static_cast<v8::PropertyAttribute>(v8::None), v8::Handle<v8::AccessorSignature>(), static_cast<v8::AccessControl>(v8::DEFAULT));
+    functionTemplate->SetNativeDataProperty(v8AtomicString(isolate, "staticStringAttribute"), TestInterfaceImplementationV8Internal::staticStringAttributeAttributeGetterCallback, TestInterfaceImplementationV8Internal::staticStringAttributeAttributeSetterCallback, v8::External::New(isolate, 0), static_cast<v8::PropertyAttribute>(v8::None), v8::Local<v8::AccessorSignature>(), static_cast<v8::AccessControl>(v8::DEFAULT));
+    functionTemplate->SetNativeDataProperty(v8AtomicString(isolate, "implementsStaticReadOnlyLongAttribute"), TestInterfaceImplementationV8Internal::implementsStaticReadOnlyLongAttributeAttributeGetterCallback, 0, v8::External::New(isolate, 0), static_cast<v8::PropertyAttribute>(v8::None), v8::Local<v8::AccessorSignature>(), static_cast<v8::AccessControl>(v8::DEFAULT));
+    functionTemplate->SetNativeDataProperty(v8AtomicString(isolate, "implementsStaticStringAttribute"), TestInterfaceImplementationV8Internal::implementsStaticStringAttributeAttributeGetterCallback, TestInterfaceImplementationV8Internal::implementsStaticStringAttributeAttributeSetterCallback, v8::External::New(isolate, 0), static_cast<v8::PropertyAttribute>(v8::None), v8::Local<v8::AccessorSignature>(), static_cast<v8::AccessControl>(v8::DEFAULT));
+    functionTemplate->SetNativeDataProperty(v8AtomicString(isolate, "implements2StaticStringAttribute"), TestInterfaceImplementationV8Internal::implements2StaticStringAttributeAttributeGetterCallback, TestInterfaceImplementationV8Internal::implements2StaticStringAttributeAttributeSetterCallback, v8::External::New(isolate, 0), static_cast<v8::PropertyAttribute>(v8::None), v8::Local<v8::AccessorSignature>(), static_cast<v8::AccessControl>(v8::DEFAULT));
+    functionTemplate->SetNativeDataProperty(v8AtomicString(isolate, "implements3StaticStringAttribute"), TestInterfaceImplementationV8Internal::implements3StaticStringAttributeAttributeGetterCallback, TestInterfaceImplementationV8Internal::implements3StaticStringAttributeAttributeSetterCallback, v8::External::New(isolate, 0), static_cast<v8::PropertyAttribute>(v8::None), v8::Local<v8::AccessorSignature>(), static_cast<v8::AccessControl>(v8::DEFAULT));
 #if ENABLE(PARTIAL_CONDITION)
-    functionTemplate->SetNativeDataProperty(v8AtomicString(isolate, "partialStaticLongAttribute"), TestInterfaceImplementationV8Internal::partialStaticLongAttributeAttributeGetterCallback, TestInterfaceImplementationV8Internal::partialStaticLongAttributeAttributeSetterCallback, v8::External::New(isolate, 0), static_cast<v8::PropertyAttribute>(v8::None), v8::Handle<v8::AccessorSignature>(), static_cast<v8::AccessControl>(v8::DEFAULT));
+    functionTemplate->SetNativeDataProperty(v8AtomicString(isolate, "partialStaticLongAttribute"), TestInterfaceImplementationV8Internal::partialStaticLongAttributeAttributeGetterCallback, TestInterfaceImplementationV8Internal::partialStaticLongAttributeAttributeSetterCallback, v8::External::New(isolate, 0), static_cast<v8::PropertyAttribute>(v8::None), v8::Local<v8::AccessorSignature>(), static_cast<v8::AccessControl>(v8::DEFAULT));
 #endif // ENABLE(PARTIAL_CONDITION)
-    functionTemplate->SetNativeDataProperty(v8AtomicString(isolate, "partial2StaticLongAttribute"), TestInterfaceImplementationV8Internal::partial2StaticLongAttributeAttributeGetterCallback, TestInterfaceImplementationV8Internal::partial2StaticLongAttributeAttributeSetterCallback, v8::External::New(isolate, 0), static_cast<v8::PropertyAttribute>(v8::None), v8::Handle<v8::AccessorSignature>(), static_cast<v8::AccessControl>(v8::DEFAULT));
+    functionTemplate->SetNativeDataProperty(v8AtomicString(isolate, "partial2StaticLongAttribute"), TestInterfaceImplementationV8Internal::partial2StaticLongAttributeAttributeGetterCallback, TestInterfaceImplementationV8Internal::partial2StaticLongAttributeAttributeSetterCallback, v8::External::New(isolate, 0), static_cast<v8::PropertyAttribute>(v8::None), v8::Local<v8::AccessorSignature>(), static_cast<v8::AccessControl>(v8::DEFAULT));
 
     // Custom toString template
     functionTemplate->Set(v8AtomicString(isolate, "toString"), V8PerIsolateData::from(isolate)->toStringTemplate());
 }
 
-v8::Handle<v8::FunctionTemplate> V8TestInterface::domTemplate(v8::Isolate* isolate)
+v8::Local<v8::FunctionTemplate> V8TestInterface::domTemplate(v8::Isolate* isolate)
 {
     ASSERT(V8TestInterface::installV8TestInterfaceTemplateFunction != V8TestInterface::installV8TestInterfaceTemplate);
     return V8DOMConfiguration::domClassTemplate(isolate, const_cast<WrapperTypeInfo*>(&wrapperTypeInfo), V8TestInterface::installV8TestInterfaceTemplateFunction);
 }
 
-bool V8TestInterface::hasInstance(v8::Handle<v8::Value> v8Value, v8::Isolate* isolate)
+bool V8TestInterface::hasInstance(v8::Local<v8::Value> v8Value, v8::Isolate* isolate)
 {
     return V8PerIsolateData::from(isolate)->hasInstance(&wrapperTypeInfo, v8Value);
 }
 
-v8::Handle<v8::Object> V8TestInterface::findInstanceInPrototypeChain(v8::Handle<v8::Value> v8Value, v8::Isolate* isolate)
+v8::Local<v8::Object> V8TestInterface::findInstanceInPrototypeChain(v8::Local<v8::Value> v8Value, v8::Isolate* isolate)
 {
     return V8PerIsolateData::from(isolate)->findInstanceInPrototypeChain(&wrapperTypeInfo, v8Value);
 }
 
-TestInterfaceImplementation* V8TestInterface::toImplWithTypeCheck(v8::Isolate* isolate, v8::Handle<v8::Value> value)
+TestInterfaceImplementation* V8TestInterface::toImplWithTypeCheck(v8::Isolate* isolate, v8::Local<v8::Value> value)
 {
-    return hasInstance(value, isolate) ? blink::toScriptWrappableBase(v8::Handle<v8::Object>::Cast(value))->toImpl<TestInterfaceImplementation>() : 0;
+    return hasInstance(value, isolate) ? toImpl(v8::Local<v8::Object>::Cast(value)) : 0;
 }
 
-void V8TestInterface::installConditionallyEnabledProperties(v8::Handle<v8::Object> instanceObject, v8::Isolate* isolate)
+void V8TestInterface::installConditionallyEnabledProperties(v8::Local<v8::Object> instanceObject, v8::Isolate* isolate)
 {
     v8::Local<v8::Object> prototypeObject = v8::Local<v8::Object>::Cast(instanceObject->GetPrototype());
     ExecutionContext* context = toExecutionContext(prototypeObject->CreationContext());
@@ -2039,7 +2174,7 @@ void V8TestInterface::installConditionallyEnabledProperties(v8::Handle<v8::Objec
     }
 }
 
-void V8TestInterface::installConditionallyEnabledMethods(v8::Handle<v8::Object> prototypeObject, v8::Isolate* isolate)
+void V8TestInterface::installConditionallyEnabledMethods(v8::Local<v8::Object> prototypeObject, v8::Isolate* isolate)
 {
     v8::Local<v8::Signature> defaultSignature = v8::Signature::New(isolate, domTemplate(isolate));
     ExecutionContext* context = toExecutionContext(prototypeObject->CreationContext());
@@ -2051,36 +2186,35 @@ void V8TestInterface::installConditionallyEnabledMethods(v8::Handle<v8::Object> 
     if (context && (context->isDocument())) {
         prototypeObject->Set(v8AtomicString(isolate, "windowExposedMethod"), v8::FunctionTemplate::New(isolate, TestInterfaceImplementationV8Internal::windowExposedMethodMethodCallback, v8Undefined(), defaultSignature, 0)->GetFunction());
     }
-    if (context && (context->isWorkerGlobalScope())) {
-        prototypeObject->Set(v8AtomicString(isolate, "workerExposedStaticMethod"), v8::FunctionTemplate::New(isolate, TestInterfaceImplementationV8Internal::workerExposedStaticMethodMethodCallback, v8Undefined(), defaultSignature, 0)->GetFunction());
+    if (context && (context->isDocument())) {
+        if (RuntimeEnabledFeatures::featureNameEnabled()) {
+            prototypeObject->Set(v8AtomicString(isolate, "methodWithExposedAndRuntimeEnabledFlag"), v8::FunctionTemplate::New(isolate, TestInterfaceImplementationV8Internal::methodWithExposedAndRuntimeEnabledFlagMethodCallback, v8Undefined(), defaultSignature, 0)->GetFunction());
+        }
     }
     if (context && (context->isDocument())) {
-        prototypeObject->Set(v8AtomicString(isolate, "windowExposedStaticMethod"), v8::FunctionTemplate::New(isolate, TestInterfaceImplementationV8Internal::windowExposedStaticMethodMethodCallback, v8Undefined(), defaultSignature, 0)->GetFunction());
+        prototypeObject->Set(v8AtomicString(isolate, "overloadMethodWithExposedAndRuntimeEnabledFlag"), v8::FunctionTemplate::New(isolate, TestInterfaceImplementationV8Internal::overloadMethodWithExposedAndRuntimeEnabledFlagMethodCallback, v8Undefined(), defaultSignature, 1)->GetFunction());
+    }
+    if (context && ((context->isDocument() && RuntimeEnabledFeatures::featureNameEnabled()) || (context->isWorkerGlobalScope() && RuntimeEnabledFeatures::featureName2Enabled()))) {
+        prototypeObject->Set(v8AtomicString(isolate, "methodWithExposedHavingRuntimeEnabldFlag"), v8::FunctionTemplate::New(isolate, TestInterfaceImplementationV8Internal::methodWithExposedHavingRuntimeEnabldFlagMethodCallback, v8Undefined(), defaultSignature, 0)->GetFunction());
     }
     if (context && (context->isDocument() || context->isServiceWorkerGlobalScope())) {
         prototypeObject->Set(v8AtomicString(isolate, "windowAndServiceWorkerExposedMethod"), v8::FunctionTemplate::New(isolate, TestInterfaceImplementationV8Internal::windowAndServiceWorkerExposedMethodMethodCallback, v8Undefined(), defaultSignature, 0)->GetFunction());
     }
 }
 
-ActiveDOMObject* V8TestInterface::toActiveDOMObject(v8::Handle<v8::Object> wrapper)
+ActiveDOMObject* V8TestInterface::toActiveDOMObject(v8::Local<v8::Object> wrapper)
 {
     return toImpl(wrapper);
 }
 
-void V8TestInterface::refObject(ScriptWrappableBase* scriptWrappableBase)
+void V8TestInterface::refObject(ScriptWrappable* scriptWrappable)
 {
-    scriptWrappableBase->toImpl<TestInterfaceImplementation>()->ref();
+    scriptWrappable->toImpl<TestInterfaceImplementation>()->ref();
 }
 
-void V8TestInterface::derefObject(ScriptWrappableBase* scriptWrappableBase)
+void V8TestInterface::derefObject(ScriptWrappable* scriptWrappable)
 {
-    scriptWrappableBase->toImpl<TestInterfaceImplementation>()->deref();
-}
-
-template<>
-v8::Handle<v8::Value> toV8NoInline(TestInterfaceImplementation* impl, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
-{
-    return toV8(impl, creationContext, isolate);
+    scriptWrappable->toImpl<TestInterfaceImplementation>()->deref();
 }
 
 bool V8TestInterface::PrivateScript::shortMethodWithShortArgumentImplementedInPrivateScriptMethod(LocalFrame* frame, TestInterface* holderImpl, int value, int* result)
@@ -2089,7 +2223,7 @@ bool V8TestInterface::PrivateScript::shortMethodWithShortArgumentImplementedInPr
         return false;
     v8::HandleScope handleScope(toIsolate(frame));
     ScriptForbiddenScope::AllowUserAgentScript script;
-    v8::Handle<v8::Context> contextInPrivateScript = toV8Context(frame, DOMWrapperWorld::privateScriptIsolatedWorld());
+    v8::Local<v8::Context> contextInPrivateScript = toV8Context(frame, DOMWrapperWorld::privateScriptIsolatedWorld());
     if (contextInPrivateScript.IsEmpty())
         return false;
     ScriptState* scriptState = ScriptState::from(contextInPrivateScript);
@@ -2098,12 +2232,12 @@ bool V8TestInterface::PrivateScript::shortMethodWithShortArgumentImplementedInPr
         return false;
 
     ScriptState::Scope scope(scriptState);
-    v8::Handle<v8::Value> holder = toV8(holderImpl, scriptState->context()->Global(), scriptState->isolate());
+    v8::Local<v8::Value> holder = toV8(holderImpl, scriptState->context()->Global(), scriptState->isolate());
 
-    v8::Handle<v8::Value> valueHandle = v8::Integer::New(scriptState->isolate(), value);
-    v8::Handle<v8::Value> argv[] = { valueHandle };
+    v8::Local<v8::Value> valueHandle = v8::Integer::New(scriptState->isolate(), value);
+    v8::Local<v8::Value> argv[] = { valueHandle };
     ExceptionState exceptionState(ExceptionState::ExecutionContext, "shortMethodWithShortArgumentImplementedInPrivateScript", "TestInterfaceImplementation", scriptState->context()->Global(), scriptState->isolate());
-    v8::Handle<v8::Value> v8Value = PrivateScriptRunner::runDOMMethod(scriptState, scriptStateInUserScript, "TestInterfaceImplementation", "shortMethodWithShortArgumentImplementedInPrivateScript", holder, 1, argv);
+    v8::Local<v8::Value> v8Value = PrivateScriptRunner::runDOMMethod(scriptState, scriptStateInUserScript, "TestInterfaceImplementation", "shortMethodWithShortArgumentImplementedInPrivateScript", holder, 1, argv);
     if (v8Value.IsEmpty())
         return false;
     TONATIVE_DEFAULT_EXCEPTIONSTATE(int, cppValue, toInt16(v8Value, exceptionState), exceptionState, false);
@@ -2118,7 +2252,7 @@ bool V8TestInterface::PrivateScript::stringAttributeAttributeGetter(LocalFrame* 
         return false;
     v8::HandleScope handleScope(toIsolate(frame));
     ScriptForbiddenScope::AllowUserAgentScript script;
-    v8::Handle<v8::Context> contextInPrivateScript = toV8Context(frame, DOMWrapperWorld::privateScriptIsolatedWorld());
+    v8::Local<v8::Context> contextInPrivateScript = toV8Context(frame, DOMWrapperWorld::privateScriptIsolatedWorld());
     if (contextInPrivateScript.IsEmpty())
         return false;
     ScriptState* scriptState = ScriptState::from(contextInPrivateScript);
@@ -2127,10 +2261,10 @@ bool V8TestInterface::PrivateScript::stringAttributeAttributeGetter(LocalFrame* 
         return false;
 
     ScriptState::Scope scope(scriptState);
-    v8::Handle<v8::Value> holder = toV8(holderImpl, scriptState->context()->Global(), scriptState->isolate());
+    v8::Local<v8::Value> holder = toV8(holderImpl, scriptState->context()->Global(), scriptState->isolate());
 
     ExceptionState exceptionState(ExceptionState::GetterContext, "stringAttribute", "TestInterfaceImplementation", scriptState->context()->Global(), scriptState->isolate());
-    v8::Handle<v8::Value> v8Value = PrivateScriptRunner::runDOMAttributeGetter(scriptState, scriptStateInUserScript, "TestInterfaceImplementation", "stringAttribute", holder);
+    v8::Local<v8::Value> v8Value = PrivateScriptRunner::runDOMAttributeGetter(scriptState, scriptStateInUserScript, "TestInterfaceImplementation", "stringAttribute", holder);
     if (v8Value.IsEmpty())
         return false;
     TOSTRING_DEFAULT(V8StringResource<>, cppValue, v8Value, false);
@@ -2145,7 +2279,7 @@ bool V8TestInterface::PrivateScript::stringAttributeAttributeSetter(LocalFrame* 
         return false;
     v8::HandleScope handleScope(toIsolate(frame));
     ScriptForbiddenScope::AllowUserAgentScript script;
-    v8::Handle<v8::Context> contextInPrivateScript = toV8Context(frame, DOMWrapperWorld::privateScriptIsolatedWorld());
+    v8::Local<v8::Context> contextInPrivateScript = toV8Context(frame, DOMWrapperWorld::privateScriptIsolatedWorld());
     if (contextInPrivateScript.IsEmpty())
         return false;
     ScriptState* scriptState = ScriptState::from(contextInPrivateScript);
@@ -2154,7 +2288,7 @@ bool V8TestInterface::PrivateScript::stringAttributeAttributeSetter(LocalFrame* 
         return false;
 
     ScriptState::Scope scope(scriptState);
-    v8::Handle<v8::Value> holder = toV8(holderImpl, scriptState->context()->Global(), scriptState->isolate());
+    v8::Local<v8::Value> holder = toV8(holderImpl, scriptState->context()->Global(), scriptState->isolate());
 
     ExceptionState exceptionState(ExceptionState::SetterContext, "stringAttribute", "TestInterfaceImplementation", scriptState->context()->Global(), scriptState->isolate());
     return PrivateScriptRunner::runDOMAttributeSetter(scriptState, scriptStateInUserScript, "TestInterfaceImplementation", "stringAttribute", holder, v8String(scriptState->isolate(), cppValue));

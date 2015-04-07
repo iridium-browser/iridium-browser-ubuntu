@@ -5,6 +5,7 @@
 #include "src/compiler/diamond.h"
 #include "src/compiler/graph-inl.h"
 #include "src/compiler/js-builtin-reducer.h"
+#include "src/compiler/js-graph.h"
 #include "src/compiler/node-matchers.h"
 #include "src/compiler/node-properties-inl.h"
 #include "src/types.h"
@@ -96,6 +97,10 @@ class JSCallReduction {
 };
 
 
+JSBuiltinReducer::JSBuiltinReducer(JSGraph* jsgraph)
+    : jsgraph_(jsgraph), simplified_(jsgraph->zone()) {}
+
+
 // ECMA-262, section 15.8.2.1.
 Reduction JSBuiltinReducer::ReduceMathAbs(Node* node) {
   JSCallReduction r(node);
@@ -105,12 +110,12 @@ Reduction JSBuiltinReducer::ReduceMathAbs(Node* node) {
   }
   if (r.InputsMatchOne(Type::Number())) {
     // Math.abs(a:number) -> (a > 0 ? a : 0 - a)
-    Node* value = r.left();
-    Node* zero = jsgraph()->ZeroConstant();
-    Node* cmp = graph()->NewNode(simplified()->NumberLessThan(), zero, value);
-    Diamond d(graph(), common(), cmp);
-    Node* neg = graph()->NewNode(simplified()->NumberSubtract(), zero, value);
-    return Replace(d.Phi(kMachNone, value, neg));
+    Node* const value = r.left();
+    Node* const zero = jsgraph()->ZeroConstant();
+    return Replace(graph()->NewNode(
+        common()->Select(kMachNone),
+        graph()->NewNode(simplified()->NumberLessThan(), zero, value), value,
+        graph()->NewNode(simplified()->NumberSubtract(), zero, value)));
   }
   return NoChange();
 }
@@ -143,10 +148,11 @@ Reduction JSBuiltinReducer::ReduceMathMax(Node* node) {
     // Math.max(a:int32, b:int32, ...)
     Node* value = r.GetJSCallInput(0);
     for (int i = 1; i < r.GetJSCallArity(); i++) {
-      Node* p = r.GetJSCallInput(i);
-      Node* cmp = graph()->NewNode(simplified()->NumberLessThan(), value, p);
-      Diamond d(graph(), common(), cmp);
-      value = d.Phi(kMachNone, p, value);
+      Node* const input = r.GetJSCallInput(i);
+      value = graph()->NewNode(
+          common()->Select(kMachNone),
+          graph()->NewNode(simplified()->NumberLessThan(), input, value), value,
+          input);
     }
     return Replace(value);
   }
@@ -229,6 +235,19 @@ Reduction JSBuiltinReducer::Reduce(Node* node) {
       break;
   }
   return NoChange();
+}
+
+
+Graph* JSBuiltinReducer::graph() const { return jsgraph()->graph(); }
+
+
+CommonOperatorBuilder* JSBuiltinReducer::common() const {
+  return jsgraph()->common();
+}
+
+
+MachineOperatorBuilder* JSBuiltinReducer::machine() const {
+  return jsgraph()->machine();
 }
 
 }  // namespace compiler

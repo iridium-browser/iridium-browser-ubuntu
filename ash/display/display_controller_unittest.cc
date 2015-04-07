@@ -69,6 +69,7 @@ class TestObserver : public DisplayController::Observer,
         bounds_changed_count_(0),
         rotation_changed_count_(0),
         workarea_changed_count_(0),
+        primary_changed_count_(0),
         changed_display_id_(0),
         focus_changed_count_(0),
         activation_changed_count_(0) {
@@ -103,6 +104,8 @@ class TestObserver : public DisplayController::Observer,
       ++rotation_changed_count_;
     if (metrics & DISPLAY_METRIC_WORK_AREA)
       ++workarea_changed_count_;
+    if (metrics & DISPLAY_METRIC_PRIMARY)
+      ++primary_changed_count_;
   }
   void OnDisplayAdded(const gfx::Display& new_display) override {}
   void OnDisplayRemoved(const gfx::Display& old_display) override {}
@@ -139,6 +142,10 @@ class TestObserver : public DisplayController::Observer,
     return Resetter<int>(&workarea_changed_count_).value();
   }
 
+  int64 GetPrimaryChangedCountAndReset() {
+    return Resetter<int>(&primary_changed_count_).value();
+  }
+
   int64 GetChangedDisplayIdAndReset() {
     return Resetter<int64>(&changed_display_id_).value();
   }
@@ -158,6 +165,7 @@ class TestObserver : public DisplayController::Observer,
   int bounds_changed_count_;
   int rotation_changed_count_;
   int workarea_changed_count_;
+  int primary_changed_count_;
   int64 changed_display_id_;
 
   int focus_changed_count_;
@@ -588,9 +596,11 @@ TEST_F(DisplayControllerTest, MirrorToDockedWithFullscreen) {
   display_manager->OnNativeDisplaysChanged(display_info_list);
   EXPECT_EQ(1U, display_manager->GetNumDisplays());
   EXPECT_EQ(1U, display_manager->num_connected_displays());
-  EXPECT_EQ(0, observer.GetChangedDisplayIdAndReset());
-  EXPECT_EQ(0, observer.GetBoundsChangedCountAndReset());
-  EXPECT_EQ(0, observer.GetWorkareaChangedCountAndReset());
+  // Observers are called due to primary change.
+  EXPECT_EQ(2, observer.GetChangedDisplayIdAndReset());
+  EXPECT_EQ(1, observer.GetBoundsChangedCountAndReset());
+  EXPECT_EQ(1, observer.GetWorkareaChangedCountAndReset());
+  EXPECT_EQ(1, observer.GetPrimaryChangedCountAndReset());
   EXPECT_EQ(1, observer.CountAndReset());
   EXPECT_EQ(0, observer.GetFocusChangedCountAndReset());
   EXPECT_EQ(0, observer.GetActivationChangedCountAndReset());
@@ -675,7 +685,9 @@ TEST_F(DisplayControllerTest, BoundsUpdated) {
 
   // UI scale is eanbled only on internal display.
   int64 secondary_id = GetSecondaryDisplay().id();
-  gfx::Display::SetInternalDisplayId(secondary_id);
+  test::DisplayManagerTestApi(display_manager)
+      .SetInternalDisplayId(secondary_id);
+
   display_manager->SetDisplayUIScale(secondary_id, 1.125f);
   EXPECT_EQ(1, observer.CountAndReset());
   EXPECT_EQ(0, observer.GetFocusChangedCountAndReset());
@@ -1138,8 +1150,10 @@ TEST_F(DisplayControllerTest, ScaleRootWindow) {
 
   UpdateDisplay("600x400*2@1.5,500x300");
 
+  DisplayManager* display_manager = Shell::GetInstance()->display_manager();
   gfx::Display display1 = Shell::GetScreen()->GetPrimaryDisplay();
-  gfx::Display::SetInternalDisplayId(display1.id());
+  test::DisplayManagerTestApi(display_manager)
+      .SetInternalDisplayId(display1.id());
 
   gfx::Display display2 = ScreenUtil::GetSecondaryDisplay();
   aura::Window::Windows root_windows = Shell::GetAllRootWindows();
@@ -1153,7 +1167,6 @@ TEST_F(DisplayControllerTest, ScaleRootWindow) {
   generator.MoveMouseToInHost(599, 200);
   EXPECT_EQ("449,150", event_handler.GetLocationAndReset());
 
-  DisplayManager* display_manager = Shell::GetInstance()->display_manager();
   display_manager->SetDisplayUIScale(display1.id(), 1.25f);
   display1 = Shell::GetScreen()->GetPrimaryDisplay();
   display2 = ScreenUtil::GetSecondaryDisplay();

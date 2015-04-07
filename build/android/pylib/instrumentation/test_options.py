@@ -22,4 +22,6 @@ InstrumentationOptions = collections.namedtuple('InstrumentationOptions', [
     'test_apk_jar_path',
     'test_runner',
     'test_support_apk_path',
-    'device_flags'])
+    'device_flags',
+    'isolate_file_path',
+    'set_asserts'])

@@ -80,8 +80,6 @@ usesEncodingDetector initial=false
 allowScriptsToCloseWindows initial=false
 regionBasedColumnsEnabled initial=false
 
-containerCullingEnabled initial=false
-
 # FIXME: This should really be disabled by default as it makes platforms that
 # don't support the feature download files they can't use by.
 # Leaving enabled for now to not change existing behavior.
@@ -110,6 +108,7 @@ asynchronousSpellCheckingEnabled initial=false
 hyperlinkAuditingEnabled initial=false
 allowDisplayOfInsecureContent initial=true
 allowRunningOfInsecureContent initial=true
+
 # FIXME: Remove this temporary flag. See crbug.com/366483 for the target
 # milestone.
 allowConnectingInsecureWebSocket initial=false
@@ -224,6 +223,11 @@ pinchVirtualViewportEnabled initial=false
 useSolidColorScrollbars initial=false
 pinchOverlayScrollbarThickness type=int, initial=0
 
+# The rubber-band overscroll effect is implemented in Blink and is being moved
+# to the compositor thread. This will be set to true and eventually removed.
+# crbug.com/133097
+rubberBandingOnCompositorThread initial=false
+
 mainFrameClipsContent initial=true
 
 
@@ -243,6 +247,7 @@ mediaTypeOverride type=String, initial="screen", invalidate=MediaType
 # the image URL. A cached image will still be rendered if requested.
 loadsImagesAutomatically initial=false, invalidate=ImageLoading
 imagesEnabled initial=true, invalidate=ImageLoading
+imageAnimationPolicy type=ImageAnimationPolicy, initial=ImageAnimationPolicyAllowed
 
 javaEnabled initial=false
 pluginsEnabled initial=false
@@ -282,7 +287,7 @@ maxBeaconTransmission type=int, initial=65536
 fullscreenSupported initial=true
 
 # V8 supports different types of caching. Used by V8 bindings.
-v8CacheOptions type=V8CacheOptions, initial=V8CacheOptionsOff
+v8CacheOptions type=V8CacheOptions, initial=V8CacheOptionsDefault
 
 v8ScriptStreamingEnabled initial=false
 v8ScriptStreamingMode type=ScriptStreamingMode, initial=ScriptStreamingModeAll
@@ -305,3 +310,10 @@ accessibilityPasswordValuesEnabled initial=false
 
 # If true, static text nodes expose inline text box children.
 inlineTextBoxAccessibilityEnabled initial=false
+
+# If true, context menu will be shown on mouse up instead of mouse down.
+# Typically enabled on Windows to match platform convention.
+showContextMenuOnMouseUp initial=false
+
+strictMixedContentChecking initial=false
+strictPowerfulFeatureRestrictions initial=false

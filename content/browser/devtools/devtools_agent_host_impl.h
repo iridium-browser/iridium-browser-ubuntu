@@ -32,7 +32,7 @@ class CONTENT_EXPORT DevToolsAgentHostImpl : public DevToolsAgentHost {
   virtual void Detach() = 0;
 
   // Sends a message to the agent.
-  virtual void DispatchProtocolMessage(const std::string& message) = 0;
+  void DispatchProtocolMessage(const std::string& message) override = 0;
 
   // Opens the inspector for this host.
   void Inspect(BrowserContext* browser_context);
@@ -43,6 +43,7 @@ class CONTENT_EXPORT DevToolsAgentHostImpl : public DevToolsAgentHost {
   bool IsAttached() override;
   void InspectElement(int x, int y) override;
   std::string GetId() override;
+  BrowserContext* GetBrowserContext() override;
   WebContents* GetWebContents() override;
   void DisconnectWebContents() override;
   void ConnectWebContents(WebContents* wc) override;

@@ -591,7 +591,7 @@ class RenderWidgetHostTest : public testing::Test {
     PickleIterator iter(message);
     const char* data;
     int data_length;
-    if (!message.ReadData(&iter, &data, &data_length))
+    if (!iter.ReadData(&data, &data_length))
       return NULL;
     return reinterpret_cast<const WebInputEvent*>(data);
   }
@@ -780,9 +780,9 @@ TEST_F(RenderWidgetHostTest, Background) {
       process_->sink().GetUniqueMessageMatching(
           ViewMsg_SetBackgroundOpaque::ID);
   ASSERT_TRUE(set_background);
-  Tuple1<bool> sent_background;
+  Tuple<bool> sent_background;
   ViewMsg_SetBackgroundOpaque::Read(set_background, &sent_background);
-  EXPECT_FALSE(sent_background.a);
+  EXPECT_FALSE(get<0>(sent_background));
 
 #if defined(USE_AURA)
   // See the comment above |InitAsChild(NULL)|.
@@ -817,9 +817,9 @@ TEST_F(RenderWidgetHostTest, HiddenPaint) {
   const IPC::Message* restored = process_->sink().GetUniqueMessageMatching(
       ViewMsg_WasShown::ID);
   ASSERT_TRUE(restored);
-  Tuple2<bool, ui::LatencyInfo> needs_repaint;
+  Tuple<bool, ui::LatencyInfo> needs_repaint;
   ViewMsg_WasShown::Read(restored, &needs_repaint);
-  EXPECT_TRUE(needs_repaint.a);
+  EXPECT_TRUE(get<0>(needs_repaint));
 }
 
 TEST_F(RenderWidgetHostTest, IgnoreKeyEventsHandledByRenderer) {
@@ -1021,7 +1021,7 @@ std::string GetInputMessageTypes(RenderWidgetHostProcess* process) {
     EXPECT_EQ(InputMsg_HandleInputEvent::ID, message->type());
     InputMsg_HandleInputEvent::Param params;
     EXPECT_TRUE(InputMsg_HandleInputEvent::Read(message, &params));
-    const WebInputEvent* event = params.a;
+    const WebInputEvent* event = get<0>(params);
     if (i != 0)
       result += " ";
     result += WebInputEventTraits::GetName(event->type);
@@ -1343,7 +1343,7 @@ ui::LatencyInfo GetLatencyInfoFromInputEvent(RenderWidgetHostProcess* process) {
   InputMsg_HandleInputEvent::Param params;
   EXPECT_TRUE(InputMsg_HandleInputEvent::Read(message, &params));
   process->sink().ClearMessages();
-  return params.b;
+  return get<1>(params);
 }
 
 void CheckLatencyInfoComponentInMessage(RenderWidgetHostProcess* process,
@@ -1412,79 +1412,6 @@ TEST_F(RenderWidgetHostTest, InputEventRWHLatencyComponent) {
   SendInputEventACK(WebInputEvent::TouchStart, INPUT_EVENT_ACK_STATE_CONSUMED);
 }
 
-// Tests that after input event passes through RWHI through
-// ForwardXXXEventWithLatencyInfo(), input event coordinates will be present in
-// the latency info.
-TEST_F(RenderWidgetHostTest, InputEventRWHLatencyInfoCoordinates) {
-  host_->OnMessageReceived(ViewHostMsg_HasTouchEventHandlers(0, true));
-  process_->sink().ClearMessages();
-
-  {
-    WebMouseWheelEvent event =
-        SyntheticWebMouseWheelEventBuilder::Build(-5, 0, 0, true);
-    event.x = 100;
-    event.y = 200;
-    host_->ForwardWheelEvent(event);
-    ui::LatencyInfo latency_info = GetLatencyInfoFromInputEvent(process_);
-    EXPECT_EQ(1u, latency_info.input_coordinates_size);
-    EXPECT_EQ(100, latency_info.input_coordinates[0].x);
-    EXPECT_EQ(200, latency_info.input_coordinates[0].y);
-    SendInputEventACK(WebInputEvent::MouseWheel,
-                      INPUT_EVENT_ACK_STATE_CONSUMED);
-  }
-
-  {
-    WebMouseEvent event =
-        SyntheticWebMouseEventBuilder::Build(WebInputEvent::MouseMove);
-    event.x = 300;
-    event.y = 400;
-    host_->ForwardMouseEvent(event);
-    ui::LatencyInfo latency_info = GetLatencyInfoFromInputEvent(process_);
-    EXPECT_EQ(1u, latency_info.input_coordinates_size);
-    EXPECT_EQ(300, latency_info.input_coordinates[0].x);
-    EXPECT_EQ(400, latency_info.input_coordinates[0].y);
-    SendInputEventACK(WebInputEvent::MouseMove, INPUT_EVENT_ACK_STATE_CONSUMED);
-  }
-
-  {
-    WebGestureEvent event = SyntheticWebGestureEventBuilder::Build(
-        WebInputEvent::GestureScrollBegin, blink::WebGestureDeviceTouchscreen);
-    event.x = 500;
-    event.y = 600;
-    host_->ForwardGestureEvent(event);
-    ui::LatencyInfo latency_info = GetLatencyInfoFromInputEvent(process_);
-    EXPECT_EQ(1u, latency_info.input_coordinates_size);
-    EXPECT_EQ(500, latency_info.input_coordinates[0].x);
-    EXPECT_EQ(600, latency_info.input_coordinates[0].y);
-    SendInputEventACK(WebInputEvent::GestureScrollBegin,
-                      INPUT_EVENT_ACK_STATE_CONSUMED);
-  }
-
-  {
-    PressTouchPoint(700, 800);
-    PressTouchPoint(900, 1000);
-    PressTouchPoint(1100, 1200);  // LatencyInfo only holds two coordinates.
-    SendTouchEvent();
-    ui::LatencyInfo latency_info = GetLatencyInfoFromInputEvent(process_);
-    EXPECT_EQ(2u, latency_info.input_coordinates_size);
-    EXPECT_EQ(700, latency_info.input_coordinates[0].x);
-    EXPECT_EQ(800, latency_info.input_coordinates[0].y);
-    EXPECT_EQ(900, latency_info.input_coordinates[1].x);
-    EXPECT_EQ(1000, latency_info.input_coordinates[1].y);
-    SendInputEventACK(WebInputEvent::TouchStart,
-                      INPUT_EVENT_ACK_STATE_CONSUMED);
-  }
-
-  {
-    NativeWebKeyboardEvent event;
-    event.type = WebKeyboardEvent::KeyDown;
-    host_->ForwardKeyboardEvent(event);
-    ui::LatencyInfo latency_info = GetLatencyInfoFromInputEvent(process_);
-    EXPECT_EQ(0u, latency_info.input_coordinates_size);
-    SendInputEventACK(WebInputEvent::KeyDown, INPUT_EVENT_ACK_STATE_CONSUMED);
-  }
-}
-
 TEST_F(RenderWidgetHostTest, RendererExitedResetsInputRouter) {
   // RendererExited will delete the view.
   host_->SetView(new TestView(host_.get()));
@@ -1525,7 +1452,7 @@ class RenderWidgetHostInitialSizeTest : public RenderWidgetHostTest {
   RenderWidgetHostInitialSizeTest()
       : RenderWidgetHostTest(), initial_size_(200, 100) {}
 
-  virtual void ConfigureView(TestView* view) override {
+  void ConfigureView(TestView* view) override {
     view->set_bounds(gfx::Rect(initial_size_));
   }
 

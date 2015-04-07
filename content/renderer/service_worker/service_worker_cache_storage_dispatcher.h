@@ -11,6 +11,7 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
+#include "base/time/time.h"
 #include "content/public/renderer/render_process_observer.h"
 #include "third_party/WebKit/public/platform/WebServiceWorkerCache.h"
 #include "third_party/WebKit/public/platform/WebServiceWorkerCacheError.h"
@@ -43,6 +44,8 @@ class ServiceWorkerCacheStorageDispatcher
   void OnCacheStorageDeleteSuccess(int request_id);
   void OnCacheStorageKeysSuccess(int request_id,
                                  const std::vector<base::string16>& keys);
+  void OnCacheStorageMatchSuccess(int request_id,
+                                  const ServiceWorkerResponse& response);
 
   void OnCacheStorageHasError(int request_id,
                               blink::WebServiceWorkerCacheError reason);
@@ -52,6 +55,8 @@ class ServiceWorkerCacheStorageDispatcher
                                  blink::WebServiceWorkerCacheError reason);
   void OnCacheStorageKeysError(int request_id,
                                blink::WebServiceWorkerCacheError reason);
+  void OnCacheStorageMatchError(int request_id,
+                                blink::WebServiceWorkerCacheError reason);
 
   // Message handlers for Cache messages from the browser process.
   void OnCacheMatchSuccess(int request_id,
@@ -82,6 +87,10 @@ class ServiceWorkerCacheStorageDispatcher
   virtual void dispatchDelete(CacheStorageCallbacks* callbacks,
                               const blink::WebString& cacheName);
   virtual void dispatchKeys(CacheStorageKeysCallbacks* callbacks);
+  virtual void dispatchMatch(
+      CacheStorageMatchCallbacks* callbacks,
+      const blink::WebServiceWorkerRequest& request,
+      const blink::WebServiceWorkerCache::QueryParams& query_params);
 
   // These methods are used by WebCache to forward events to the browser
   // process.
@@ -116,6 +125,10 @@ class ServiceWorkerCacheStorageDispatcher
       WithCacheCallbacksMap;
   typedef IDMap<CacheStorageKeysCallbacks, IDMapOwnPointer>
       KeysCallbacksMap;
+  typedef IDMap<CacheStorageMatchCallbacks, IDMapOwnPointer>
+      StorageMatchCallbacksMap;
+
+  typedef base::hash_map<int32, base::TimeTicks> TimeMap;
 
   typedef IDMap<blink::WebServiceWorkerCache::CacheMatchCallbacks,
                 IDMapOwnPointer> MatchCallbacksMap;
@@ -138,6 +151,13 @@ class ServiceWorkerCacheStorageDispatcher
   WithCacheCallbacksMap open_callbacks_;
   CallbacksMap delete_callbacks_;
   KeysCallbacksMap keys_callbacks_;
+  StorageMatchCallbacksMap match_callbacks_;
+
+  TimeMap has_times_;
+  TimeMap open_times_;
+  TimeMap delete_times_;
+  TimeMap keys_times_;
+  TimeMap match_times_;
 
   // The individual caches created under this CacheStorage object.
   IDMap<WebCache, IDMapExternalPointer> web_caches_;
@@ -148,6 +168,11 @@ class ServiceWorkerCacheStorageDispatcher
   WithResponsesCallbacksMap cache_match_all_callbacks_;
   WithRequestsCallbacksMap cache_keys_callbacks_;
   WithResponsesCallbacksMap cache_batch_callbacks_;
+
+  TimeMap cache_match_times_;
+  TimeMap cache_match_all_times_;
+  TimeMap cache_keys_times_;
+  TimeMap cache_batch_times_;
 
   base::WeakPtrFactory<ServiceWorkerCacheStorageDispatcher> weak_factory_;
 

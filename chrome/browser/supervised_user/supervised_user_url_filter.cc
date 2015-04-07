@@ -18,6 +18,7 @@
 #include "base/threading/sequenced_worker_pool.h"
 #include "chrome/browser/supervised_user/experimental/supervised_user_async_url_checker.h"
 #include "chrome/browser/supervised_user/experimental/supervised_user_blacklist.h"
+#include "chrome/grit/generated_resources.h"
 #include "components/policy/core/browser/url_blacklist_manager.h"
 #include "components/url_fixer/url_fixer.h"
 #include "components/url_matcher/url_matcher.h"
@@ -68,7 +69,7 @@ class FilterBuilder {
   void AddHostnameHash(const std::string& hash, int site_id);
 
   // Adds all the sites in |site_list|, with URL patterns and hostname hashes.
-  void AddSiteList(SupervisedUserSiteList* site_list);
+  void AddSiteList(const scoped_refptr<SupervisedUserSiteList>& site_list);
 
   // Finalizes construction of the SupervisedUserURLFilter::Contents and returns
   // them. This method should be called before this object is destroyed.
@@ -119,11 +120,10 @@ void FilterBuilder::AddHostnameHash(const std::string& hash, int site_id) {
                                                  site_id));
 }
 
-void FilterBuilder::AddSiteList(SupervisedUserSiteList* site_list) {
-  std::vector<SupervisedUserSiteList::Site> sites;
-  site_list->GetSites(&sites);
+void FilterBuilder::AddSiteList(
+    const scoped_refptr<SupervisedUserSiteList>& site_list) {
   int site_id = contents_->sites.size();
-  for (const SupervisedUserSiteList::Site& site : sites) {
+  for (const SupervisedUserSiteList::Site& site : site_list->sites()) {
     contents_->sites.push_back(site);
 
     for (const std::string& pattern : site.patterns)
@@ -157,11 +157,11 @@ scoped_ptr<SupervisedUserURLFilter::Contents> CreateWhitelistFromPatterns(
 
 scoped_ptr<SupervisedUserURLFilter::Contents>
 LoadWhitelistsOnBlockingPoolThread(
-    ScopedVector<SupervisedUserSiteList> site_lists) {
+    const std::vector<scoped_refptr<SupervisedUserSiteList> >& site_lists) {
   DCHECK(BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
 
   FilterBuilder builder;
-  for (SupervisedUserSiteList* site_list : site_lists)
+  for (const scoped_refptr<SupervisedUserSiteList>& site_list : site_lists)
     builder.AddSiteList(site_list);
 
   return builder.Build();
@@ -188,6 +188,28 @@ SupervisedUserURLFilter::BehaviorFromInt(int behavior_value) {
   DCHECK_GE(behavior_value, ALLOW);
   DCHECK_LE(behavior_value, BLOCK);
   return static_cast<FilteringBehavior>(behavior_value);
+}
+
+// static
+int SupervisedUserURLFilter::GetBlockMessageID(FilteringBehaviorReason reason) {
+  switch (reason) {
+    case DEFAULT:
+      return IDS_SUPERVISED_USER_BLOCK_MESSAGE_DEFAULT;
+    case ASYNC_CHECKER:
+      return IDS_SUPERVISED_USER_BLOCK_MESSAGE_ASYNC_CHECKER;
+    case BLACKLIST:
+      return IDS_SUPERVISED_USER_BLOCK_MESSAGE_BLACKLIST;
+    case MANUAL:
+      return IDS_SUPERVISED_USER_BLOCK_MESSAGE_MANUAL;
+  }
+  NOTREACHED();
+  return 0;
+}
+
+// static
+bool SupervisedUserURLFilter::ReasonIsAutomatic(
+    FilteringBehaviorReason reason) {
+  return reason == ASYNC_CHECKER || reason == BLACKLIST;
 }
 
 // static
@@ -256,25 +278,25 @@ bool SupervisedUserURLFilter::HostMatchesPattern(const std::string& host,
 
 SupervisedUserURLFilter::FilteringBehavior
 SupervisedUserURLFilter::GetFilteringBehaviorForURL(const GURL& url) const {
-  FilteringBehaviorSource source;
-  return GetFilteringBehaviorForURL(url, false, &source);
+  FilteringBehaviorReason reason;
+  return GetFilteringBehaviorForURL(url, false, &reason);
 }
 
 bool SupervisedUserURLFilter::GetManualFilteringBehaviorForURL(
     const GURL& url, FilteringBehavior* behavior) const {
-  FilteringBehaviorSource source;
-  *behavior = GetFilteringBehaviorForURL(url, true, &source);
-  return source == MANUAL;
+  FilteringBehaviorReason reason;
+  *behavior = GetFilteringBehaviorForURL(url, true, &reason);
+  return reason == MANUAL;
 }
 
 SupervisedUserURLFilter::FilteringBehavior
 SupervisedUserURLFilter::GetFilteringBehaviorForURL(
     const GURL& url,
     bool manual_only,
-    FilteringBehaviorSource* source) const {
+    FilteringBehaviorReason* reason) const {
   DCHECK(CalledOnValidThread());
 
-  *source = MANUAL;
+  *reason = MANUAL;
 
   // URLs with a non-standard scheme (e.g. chrome://) are always allowed.
   if (!HasFilteredScheme(url))
@@ -312,23 +334,22 @@ SupervisedUserURLFilter::GetFilteringBehaviorForURL(
 
   // Check the static blacklist.
   if (!manual_only && blacklist_ && blacklist_->HasURL(url)) {
-    *source = BLACKLIST;
+    *reason = BLACKLIST;
     return BLOCK;
   }
 
   // Fall back to the default behavior.
-  *source = DEFAULT;
+  *reason = DEFAULT;
   return default_behavior_;
 }
 
 bool SupervisedUserURLFilter::GetFilteringBehaviorForURLWithAsyncChecks(
     const GURL& url,
     const FilteringBehaviorCallback& callback) const {
-  FilteringBehaviorSource source = DEFAULT;
-  FilteringBehavior behavior =
-      GetFilteringBehaviorForURL(url, false, &source);
-  if (source != DEFAULT || !async_url_checker_) {
-    callback.Run(behavior, source, false);
+  FilteringBehaviorReason reason = DEFAULT;
+  FilteringBehavior behavior = GetFilteringBehaviorForURL(url, false, &reason);
+  if (reason != DEFAULT || !async_url_checker_) {
+    callback.Run(behavior, reason, false);
     return true;
   }
 
@@ -371,14 +392,13 @@ void SupervisedUserURLFilter::SetDefaultFilteringBehavior(
 }
 
 void SupervisedUserURLFilter::LoadWhitelists(
-    ScopedVector<SupervisedUserSiteList> site_lists) {
+    const std::vector<scoped_refptr<SupervisedUserSiteList> >& site_lists) {
   DCHECK(CalledOnValidThread());
 
   base::PostTaskAndReplyWithResult(
       BrowserThread::GetBlockingPool(),
       FROM_HERE,
-      base::Bind(&LoadWhitelistsOnBlockingPoolThread,
-                 base::Passed(&site_lists)),
+      base::Bind(&LoadWhitelistsOnBlockingPoolThread, site_lists),
       base::Bind(&SupervisedUserURLFilter::SetContents, this));
 }
 
@@ -419,10 +439,8 @@ void SupervisedUserURLFilter::SetManualURLs(
 
 void SupervisedUserURLFilter::InitAsyncURLChecker(
     net::URLRequestContextGetter* context,
-    const std::string& cx,
-    const std::string& api_key) {
-  async_url_checker_.reset(new SupervisedUserAsyncURLChecker(
-      context, cx, api_key));
+    const std::string& cx) {
+  async_url_checker_.reset(new SupervisedUserAsyncURLChecker(context, cx));
 }
 
 bool SupervisedUserURLFilter::HasAsyncURLChecker() const {

@@ -48,7 +48,8 @@ class MEDIA_EXPORT DecryptingDemuxerStream : public DemuxerStream {
   void Read(const ReadCB& read_cb) override;
   AudioDecoderConfig audio_decoder_config() override;
   VideoDecoderConfig video_decoder_config() override;
-  Type type() override;
+  Type type() const override;
+  Liveness liveness() const override;
   void EnableBitstreamConverter() override;
   bool SupportsConfigChanges() override;
   VideoRotation video_rotation() override;
@@ -124,9 +125,8 @@ class MEDIA_EXPORT DecryptingDemuxerStream : public DemuxerStream {
   // decrypting again in case the newly added key is the correct decryption key.
   bool key_added_while_decrypt_pending_;
 
-  // NOTE: Weak pointers must be invalidated before all other member variables.
-  base::WeakPtrFactory<DecryptingDemuxerStream> weak_factory_;
   base::WeakPtr<DecryptingDemuxerStream> weak_this_;
+  base::WeakPtrFactory<DecryptingDemuxerStream> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(DecryptingDemuxerStream);
 };

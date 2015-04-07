@@ -10,7 +10,7 @@
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "mojo/edk/embedder/simple_platform_support.h"
-#include "mojo/edk/system/constants.h"
+#include "mojo/edk/system/configuration.h"
 #include "mojo/edk/system/core.h"
 #include "mojo/edk/system/dispatcher.h"
 #include "mojo/edk/system/memory.h"
@@ -50,7 +50,7 @@ class MockDispatcher : public Dispatcher {
     info_->IncrementWriteMessageCallCount();
     lock().AssertAcquired();
 
-    if (num_bytes > kMaxMessageNumBytes)
+    if (num_bytes > GetConfiguration().max_message_num_bytes)
       return MOJO_RESULT_RESOURCE_EXHAUSTED;
 
     if (transports)
@@ -123,27 +123,32 @@ class MockDispatcher : public Dispatcher {
     return MOJO_RESULT_UNIMPLEMENTED;
   }
 
-  MojoResult AddWaiterImplNoLock(Waiter* /*waiter*/,
-                                 MojoHandleSignals /*signals*/,
-                                 uint32_t /*context*/,
-                                 HandleSignalsState* signals_state) override {
-    info_->IncrementAddWaiterCallCount();
+  MojoResult AddAwakableImplNoLock(Awakable* awakable,
+                                   MojoHandleSignals /*signals*/,
+                                   uint32_t /*context*/,
+                                   HandleSignalsState* signals_state) override {
+    info_->IncrementAddAwakableCallCount();
     lock().AssertAcquired();
     if (signals_state)
       *signals_state = HandleSignalsState();
+    if (info_->IsAddAwakableAllowed()) {
+      info_->AwakableWasAdded(awakable);
+      return MOJO_RESULT_OK;
+    }
+
     return MOJO_RESULT_FAILED_PRECONDITION;
   }
 
-  void RemoveWaiterImplNoLock(Waiter* /*waiter*/,
-                              HandleSignalsState* signals_state) override {
-    info_->IncrementRemoveWaiterCallCount();
+  void RemoveAwakableImplNoLock(Awakable* /*awakable*/,
+                                HandleSignalsState* signals_state) override {
+    info_->IncrementRemoveAwakableCallCount();
     lock().AssertAcquired();
     if (signals_state)
       *signals_state = HandleSignalsState();
   }
 
-  void CancelAllWaitersNoLock() override {
-    info_->IncrementCancelAllWaitersCallCount();
+  void CancelAllAwakablesNoLock() override {
+    info_->IncrementCancelAllAwakablesCallCount();
     lock().AssertAcquired();
   }
 
@@ -196,9 +201,10 @@ CoreTestBase_MockHandleInfo::CoreTestBase_MockHandleInfo()
       read_data_call_count_(0),
       begin_read_data_call_count_(0),
       end_read_data_call_count_(0),
-      add_waiter_call_count_(0),
-      remove_waiter_call_count_(0),
-      cancel_all_waiters_call_count_(0) {
+      add_awakable_call_count_(0),
+      remove_awakable_call_count_(0),
+      cancel_all_awakables_call_count_(0),
+      add_awakable_allowed_(false) {
 }
 
 CoreTestBase_MockHandleInfo::~CoreTestBase_MockHandleInfo() {
@@ -259,19 +265,29 @@ unsigned CoreTestBase_MockHandleInfo::GetEndReadDataCallCount() const {
   return end_read_data_call_count_;
 }
 
-unsigned CoreTestBase_MockHandleInfo::GetAddWaiterCallCount() const {
+unsigned CoreTestBase_MockHandleInfo::GetAddAwakableCallCount() const {
   base::AutoLock locker(lock_);
-  return add_waiter_call_count_;
+  return add_awakable_call_count_;
 }
 
-unsigned CoreTestBase_MockHandleInfo::GetRemoveWaiterCallCount() const {
+unsigned CoreTestBase_MockHandleInfo::GetRemoveAwakableCallCount() const {
   base::AutoLock locker(lock_);
-  return remove_waiter_call_count_;
+  return remove_awakable_call_count_;
 }
 
-unsigned CoreTestBase_MockHandleInfo::GetCancelAllWaitersCallCount() const {
+unsigned CoreTestBase_MockHandleInfo::GetCancelAllAwakablesCallCount() const {
   base::AutoLock locker(lock_);
-  return cancel_all_waiters_call_count_;
+  return cancel_all_awakables_call_count_;
+}
+
+size_t CoreTestBase_MockHandleInfo::GetAddedAwakableSize() const {
+  base::AutoLock locker(lock_);
+  return added_awakables_.size();
+}
+
+Awakable* CoreTestBase_MockHandleInfo::GetAddedAwakableAt(unsigned i) const {
+  base::AutoLock locker(lock_);
+  return added_awakables_[i];
 }
 
 void CoreTestBase_MockHandleInfo::IncrementCtorCallCount() {
@@ -329,19 +345,34 @@ void CoreTestBase_MockHandleInfo::IncrementEndReadDataCallCount() {
   end_read_data_call_count_++;
 }
 
-void CoreTestBase_MockHandleInfo::IncrementAddWaiterCallCount() {
+void CoreTestBase_MockHandleInfo::IncrementAddAwakableCallCount() {
   base::AutoLock locker(lock_);
-  add_waiter_call_count_++;
+  add_awakable_call_count_++;
 }
 
-void CoreTestBase_MockHandleInfo::IncrementRemoveWaiterCallCount() {
+void CoreTestBase_MockHandleInfo::IncrementRemoveAwakableCallCount() {
   base::AutoLock locker(lock_);
-  remove_waiter_call_count_++;
+  remove_awakable_call_count_++;
 }
 
-void CoreTestBase_MockHandleInfo::IncrementCancelAllWaitersCallCount() {
+void CoreTestBase_MockHandleInfo::IncrementCancelAllAwakablesCallCount() {
   base::AutoLock locker(lock_);
-  cancel_all_waiters_call_count_++;
+  cancel_all_awakables_call_count_++;
+}
+
+void CoreTestBase_MockHandleInfo::AllowAddAwakable(bool alllow) {
+  base::AutoLock locker(lock_);
+  add_awakable_allowed_ = alllow;
+}
+
+bool CoreTestBase_MockHandleInfo::IsAddAwakableAllowed() const {
+  base::AutoLock locker(lock_);
+  return add_awakable_allowed_;
+}
+
+void CoreTestBase_MockHandleInfo::AwakableWasAdded(Awakable* awakable) {
+  base::AutoLock locker(lock_);
+  added_awakables_.push_back(awakable);
 }
 
 }  // namespace test

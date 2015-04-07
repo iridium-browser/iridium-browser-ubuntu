@@ -4,6 +4,8 @@
 
 """Library to make common google storage operations more reliable."""
 
+# pylint: disable=bad-continuation
+
 from __future__ import print_function
 
 import collections
@@ -22,6 +24,7 @@ from chromite.cbuildbot import constants
 from chromite.lib import cache
 from chromite.lib import cros_build_lib
 from chromite.lib import osutils
+from chromite.lib import retry_stats
 from chromite.lib import retry_util
 from chromite.lib import timeout_util
 
@@ -53,6 +56,11 @@ LS_RE = re.compile(r'^\s*(?P<content_length>)(?P<creation_time>)(?P<url>.*)'
                    r'(?P<generation>)(?P<metageneration>)\s*$')
 
 
+def PathIsGs(path):
+  """Determine if a path is a Google Storage URI."""
+  return path.startswith(BASE_GS_URL)
+
+
 def CanonicalizeURL(url, strict=False):
   """Convert provided URL to gs:// URL, if it follows a known format.
 
@@ -64,7 +72,7 @@ def CanonicalizeURL(url, strict=False):
     if url.startswith(prefix):
       return url.replace(prefix, BASE_GS_URL, 1)
 
-  if not url.startswith(BASE_GS_URL) and strict:
+  if not PathIsGs(url) and strict:
     raise ValueError('Url %r cannot be canonicalized.' % url)
 
   return url
@@ -245,9 +253,9 @@ class GSContext(object):
   # (1*sleep) the first time, then (2*sleep), continuing via attempt * sleep.
   DEFAULT_SLEEP_TIME = 60
 
-  GSUTIL_VERSION = '4.7pre_retrydns'
+  GSUTIL_VERSION = '4.7'
   GSUTIL_TAR = 'gsutil_%s.tar.gz' % GSUTIL_VERSION
-  GSUTIL_URL = PUBLIC_BASE_HTTPS_URL + 'prerelease/%s' % GSUTIL_TAR
+  GSUTIL_URL = PUBLIC_BASE_HTTPS_URL + 'pub/%s' % GSUTIL_TAR
   GSUTIL_API_SELECTOR = 'JSON'
 
   RESUMABLE_UPLOAD_ERROR = ('Too many resumable upload attempts failed without '
@@ -337,8 +345,10 @@ class GSContext(object):
     # Prefer boto_file if specified, else prefer the env then the default.
     if boto_file is None:
       boto_file = os.environ.get('BOTO_CONFIG')
-      if boto_file is None:
-        boto_file = self.DEFAULT_BOTO_FILE
+    if boto_file is None and os.path.isfile(self.DEFAULT_BOTO_FILE):
+      # Only set boto file to DEFAULT_BOTO_FILE if it exists.
+      boto_file = self.DEFAULT_BOTO_FILE
+
     self.boto_file = boto_file
 
     self.acl = acl
@@ -396,6 +406,8 @@ class GSContext(object):
     """Make sure we can access protected bits in GS."""
     print('Configuring gsutil. **Please use your @google.com account.**')
     try:
+      if not self.boto_file:
+        self.boto_file = self.DEFAULT_BOTO_FILE
       self.DoCommand(['config'], retries=0, debug_level=logging.CRITICAL,
                      print_cmd=False)
     finally:
@@ -411,7 +423,7 @@ class GSContext(object):
   def Cat(self, path, **kwargs):
     """Returns the contents of a GS object."""
     kwargs.setdefault('redirect_stdout', True)
-    if not path.startswith(BASE_GS_URL):
+    if not PathIsGs(path):
       # gsutil doesn't support cat-ting a local path, so read it ourselves.
       try:
         return osutils.ReadFile(path)
@@ -564,6 +576,8 @@ class GSContext(object):
           'Failure: No JSON object could be decoded',
           'Oauth 2.0 User Account',
           'InvalidAccessKeyId',
+          'socket.error: [Errno 104] Connection reset by peer',
+          'Received bad request from server',
       )
       if any(x in error for x in TRANSIENT_ERROR_MESSAGE):
         return True
@@ -616,17 +630,19 @@ class GSContext(object):
       retries = self.retries
 
     extra_env = kwargs.pop('extra_env', {})
-    extra_env.setdefault('BOTO_CONFIG', self.boto_file)
+    if self.boto_file:
+      extra_env.setdefault('BOTO_CONFIG', self.boto_file)
 
     if self.dry_run:
       logging.debug("%s: would've run: %s", self.__class__.__name__,
                     cros_build_lib.CmdToStr(cmd))
     else:
       try:
-        return retry_util.GenericRetry(self._RetryFilter,
-                                       retries, cros_build_lib.RunCommand,
-                                       cmd, sleep=self._sleep_time,
-                                       extra_env=extra_env, **kwargs)
+        return retry_stats.RetryWithStats(retry_stats.GSUTIL,
+                                          self._RetryFilter,
+                                          retries, cros_build_lib.RunCommand,
+                                          cmd, sleep=self._sleep_time,
+                                          extra_env=extra_env, **kwargs)
       except cros_build_lib.RunCommandError as e:
         raise GSCommandError(e.msg, e.result, e.exception)
 
@@ -691,8 +707,7 @@ class GSContext(object):
 
       cmd += ['--', src_path, dest_path]
 
-      if not (src_path.startswith(BASE_GS_URL) or
-              dest_path.startswith(BASE_GS_URL)):
+      if not (PathIsGs(src_path) or PathIsGs(dest_path)):
         # Don't retry on local copies.
         kwargs.setdefault('retries', 0)
 
@@ -709,14 +724,26 @@ class GSContext(object):
           return int(m.group(1))
         else:
           return None
-      except GSNoSuchKey as e:
+      except GSNoSuchKey:
         # If the source was a local file, the error is a quirk of gsutil 4.5
         # and should be ignored. If the source was remote, there might
         # legitimately be no such file. See crbug.com/393419.
         if os.path.isfile(src_path):
-          # pylint: disable=E1101
-          return e.args[0].result
+          return None
         raise
+
+  def CreateWithContents(self, gs_uri, contents, **kwargs):
+    """Creates the specified file with specified contents.
+
+    Args:
+      gs_uri: The URI of a file on Google Storage.
+      contents: String with contents to write to the file.
+      kwargs: See additional options that Copy takes.
+
+    Raises:
+      See Copy.
+    """
+    self.Copy('-', gs_uri, input=contents, **kwargs)
 
   # TODO: Merge LS() and List()?
   def LS(self, path, **kwargs):
@@ -733,7 +760,7 @@ class GSContext(object):
     if self.dry_run:
       return []
 
-    if not path.startswith(BASE_GS_URL):
+    if not PathIsGs(path):
       # gsutil doesn't support listing a local path, so just run 'ls'.
       kwargs.pop('retries', None)
       kwargs.pop('headers', None)
@@ -800,7 +827,7 @@ class GSContext(object):
 
   def GetSize(self, path, **kwargs):
     """Returns size of a single object (local or GS)."""
-    if not path.startswith(BASE_GS_URL):
+    if not PathIsGs(path):
       return os.path.getsize(path)
     else:
       return self.Stat(path, **kwargs).content_length
@@ -868,7 +895,7 @@ class GSContext(object):
     Returns:
       True if the path exists; otherwise returns False.
     """
-    if not path.startswith(BASE_GS_URL):
+    if not PathIsGs(path):
       return os.path.exists(path)
 
     try:
@@ -878,18 +905,19 @@ class GSContext(object):
 
     return True
 
-  def Remove(self, path, recurse=False, ignore_missing=False, **kwargs):
+  def Remove(self, path, recursive=False, ignore_missing=False, **kwargs):
     """Remove the specified file.
 
     Args:
       path: Full gs:// url of the file to delete.
-      recurse: Remove recursively starting at path. Same as rm -R. Defaults
-        to False.
+      recursive: Remove recursively starting at path.
       ignore_missing: Whether to suppress errors about missing files.
       kwargs: Flags to pass to DoCommand.
     """
     cmd = ['rm']
-    if recurse:
+    if 'recurse' in kwargs:
+      raise TypeError('"recurse" has been renamed to "recursive"')
+    if recursive:
       cmd.append('-R')
     cmd.append(path)
     try:
@@ -1026,13 +1054,12 @@ def TemporaryURL(prefix):
 
   At the end, the URL will be deleted.
   """
-  md5 = hashlib.md5(os.urandom(20))
-  md5.update(cros_build_lib.UserDateTimeFormat())
   url = '%s/chromite-temp/%s/%s/%s' % (constants.TRASH_BUCKET, prefix,
-                                       getpass.getuser(), md5.hexdigest())
+                                       getpass.getuser(),
+                                       cros_build_lib.GetRandomString())
   ctx = GSContext()
-  ctx.Remove(url, ignore_missing=True, recurse=True)
+  ctx.Remove(url, ignore_missing=True, recursive=True)
   try:
     yield url
   finally:
-    ctx.Remove(url, ignore_missing=True, recurse=True)
+    ctx.Remove(url, ignore_missing=True, recursive=True)

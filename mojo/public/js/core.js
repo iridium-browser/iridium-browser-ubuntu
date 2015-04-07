@@ -55,6 +55,7 @@ var DEADLINE_INDEFINITE;
 var HANDLE_SIGNAL_NONE;
 var HANDLE_SIGNAL_READABLE;
 var HANDLE_SIGNAL_WRITABLE;
+var HANDLE_SIGNAL_PEER_CLOSED;
 
 /**
  * MojoCreateDataMessageOptions: Used to specify creation parameters for a data
@@ -111,6 +112,7 @@ var READ_DATA_FLAG_NONE;
 var READ_DATA_FLAG_ALL_OR_NONE;
 var READ_DATA_FLAG_DISCARD;
 var READ_DATA_FLAG_QUERY;
+var READ_DATA_FLAG_PEEK;
 
 /**
  * Closes the given |handle|. See MojoClose for more info.
@@ -227,3 +229,11 @@ function writeData(handle, buffer, flags) { [native code] }
  *   }
  */
 function readData(handle, flags) { [native code] }
+
+/**
+ * True if the argument is a message or data pipe handle.
+ *
+ * @param {value} an arbitrary JS value.
+ * @return true or false
+ */
+function isHandle(value) { [native code] }

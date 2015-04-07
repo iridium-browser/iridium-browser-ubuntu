@@ -20,11 +20,13 @@ class RectF;
 namespace password_manager {
 
 class PasswordManagerClient;
+class PasswordManagerDriver;
 
 // This class is responsible for filling password forms.
 class PasswordAutofillManager : public autofill::AutofillPopupDelegate {
  public:
   PasswordAutofillManager(PasswordManagerClient* password_manager_client,
+                          PasswordManagerDriver* password_manager_driver,
                           autofill::AutofillClient* autofill_client);
   virtual ~PasswordAutofillManager();
 
@@ -44,15 +46,16 @@ class PasswordAutofillManager : public autofill::AutofillPopupDelegate {
       const autofill::PasswordFormFillData& fill_data);
 
   // Handles a request from the renderer to show a popup with the given
-  // |suggestions| from the password manager.
+  // |suggestions| from the password manager. |options| should be a bitwise mask
+  // of autofill::ShowPasswordSuggestionsOptions values.
   void OnShowPasswordSuggestions(int key,
                                  base::i18n::TextDirection text_direction,
                                  const base::string16& typed_username,
-                                 bool show_all,
+                                 int options,
                                  const gfx::RectF& bounds);
 
-  // Invoked to clear any page specific cached values.
-  void Reset();
+  // Called when main frame navigates. Not called for in-page navigations.
+  void DidNavigateMainFrame();
 
   // A public version of FillSuggestion(), only for use in tests.
   bool FillSuggestionForTest(int key, const base::string16& username);
@@ -91,6 +94,9 @@ class PasswordAutofillManager : public autofill::AutofillPopupDelegate {
 
   // Provides embedder-level operations on passwords. Must outlive |this|.
   PasswordManagerClient* const password_manager_client_;  // weak
+
+  // The driver that owns |this|.
+  PasswordManagerDriver* password_manager_driver_;
 
   autofill::AutofillClient* const autofill_client_;  // weak
 

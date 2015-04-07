@@ -86,7 +86,7 @@ class BenchmarkingWrapper : public v8::Extension {
       size_t capacity) {
     name[0] = 'c';
     name[1] = ':';
-    args[0]->ToString()->WriteUtf8(&name[2], capacity - 3);
+    args[0]->ToString(args.GetIsolate())->WriteUtf8(&name[2], capacity - 3);
   }
 
   static void GetCounter(const v8::FunctionCallbackInfo<v8::Value>& args) {
@@ -113,8 +113,8 @@ class BenchmarkingWrapper : public v8::Extension {
   }
 
   static void IsSingleProcess(const v8::FunctionCallbackInfo<v8::Value>& args) {
-    args.GetReturnValue().Set(
-       CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess));
+    args.GetReturnValue().Set(base::CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kSingleProcess));
   }
 
   static void HiResTime(const v8::FunctionCallbackInfo<v8::Value>& args) {

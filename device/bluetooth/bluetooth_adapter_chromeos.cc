@@ -7,6 +7,7 @@
 #include <string>
 
 #include "base/bind.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/sequenced_task_runner.h"
@@ -110,6 +111,12 @@ BluetoothAdapterChromeOS::~BluetoothAdapterChromeOS() {
           base::Bind(&OnUnregisterAgentError));
 }
 
+void BluetoothAdapterChromeOS::DeleteOnCorrectThread() const {
+  if (ui_task_runner_->RunsTasksOnCurrentThread() ||
+      !ui_task_runner_->DeleteSoon(FROM_HERE, this))
+    delete this;
+}
+
 void BluetoothAdapterChromeOS::AddObserver(
     BluetoothAdapter::Observer* observer) {
   DCHECK(observer);
@@ -149,8 +156,10 @@ std::string BluetoothAdapterChromeOS::GetName() const {
 void BluetoothAdapterChromeOS::SetName(const std::string& name,
                                        const base::Closure& callback,
                                        const ErrorCallback& error_callback) {
-  if (!IsPresent())
+  if (!IsPresent()) {
     error_callback.Run();
+    return;
+  }
 
   DBusThreadManager::Get()->GetBluetoothAdapterClient()->
       GetProperties(object_path_)->alias.Set(
@@ -184,8 +193,10 @@ void BluetoothAdapterChromeOS::SetPowered(
     bool powered,
     const base::Closure& callback,
     const ErrorCallback& error_callback) {
-  if (!IsPresent())
+  if (!IsPresent()) {
     error_callback.Run();
+    return;
+  }
 
   DBusThreadManager::Get()->GetBluetoothAdapterClient()->
       GetProperties(object_path_)->powered.Set(
@@ -211,8 +222,10 @@ void BluetoothAdapterChromeOS::SetDiscoverable(
     bool discoverable,
     const base::Closure& callback,
     const ErrorCallback& error_callback) {
-  if (!IsPresent())
+  if (!IsPresent()) {
     error_callback.Run();
+    return;
+  }
 
   DBusThreadManager::Get()->GetBluetoothAdapterClient()->
       GetProperties(object_path_)->discoverable.Set(
@@ -373,9 +386,7 @@ void BluetoothAdapterChromeOS::DevicePropertyChanged(
       property_name == properties->trusted.name() ||
       property_name == properties->connected.name() ||
       property_name == properties->uuids.name() ||
-      property_name == properties->rssi.name() ||
-      property_name == properties->connection_rssi.name() ||
-      property_name == properties->connection_tx_power.name())
+      property_name == properties->rssi.name())
     NotifyDeviceChanged(device_chromeos);
 
   // When a device becomes paired, mark it as trusted so that the user does

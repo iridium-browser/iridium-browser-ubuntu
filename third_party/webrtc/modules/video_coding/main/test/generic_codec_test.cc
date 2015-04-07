@@ -279,8 +279,9 @@ GenericCodecTest::Perform(CmdArgs& args)
     const float nBitrates = sizeof(bitRate)/sizeof(*bitRate);
     float _bitRate = 0;
     int _frameCnt = 0;
-    float totalBytesOneSec = 0;//, totalBytesTenSec;
-    float totalBytes, actualBitrate;
+    size_t totalBytesOneSec = 0;//, totalBytesTenSec;
+    size_t totalBytes;
+    float actualBitrate;
     VCMFrameCount frameCount; // testing frame type counters
     // start test
     NumberOfCodecs = _vcm->NumberOfCodecs();
@@ -478,7 +479,7 @@ GenericCodecTest::Print()
     }
 }
 
-float
+size_t
 GenericCodecTest::WaitForEncodedFrame() const
 {
     int64_t startTime = _clock->TimeInMilliseconds();
@@ -499,17 +500,17 @@ GenericCodecTest::IncrementDebugClock(float frameRate)
 }
 
 int
-RTPSendCallback_SizeTest::SendPacket(int channel, const void *data, int len)
+RTPSendCallback_SizeTest::SendPacket(int channel, const void *data, size_t len)
 {
     _nPackets++;
     _payloadSizeSum += len;
     // Make sure no payloads (len - header size) are larger than maxPayloadSize
-    TEST(len > 0 && static_cast<uint32_t>(len - 12) <= _maxPayloadSize);
+    TEST(len > 0 && len - 12 <= _maxPayloadSize);
     return 0;
 }
 
 void
-RTPSendCallback_SizeTest::SetMaxPayloadSize(uint32_t maxPayloadSize)
+RTPSendCallback_SizeTest::SetMaxPayloadSize(size_t maxPayloadSize)
 {
     _maxPayloadSize = maxPayloadSize;
 }
@@ -531,17 +532,11 @@ RTPSendCallback_SizeTest::AveragePayloadSize() const
     return 0;
 }
 
-int32_t
-VCMEncComplete_KeyReqTest::SendData(
-        const FrameType frameType,
-        const uint8_t payloadType,
-        const uint32_t timeStamp,
-        int64_t capture_time_ms,
-        const uint8_t* payloadData,
-        const uint32_t payloadSize,
-        const RTPFragmentationHeader& /*fragmentationHeader*/,
-        const webrtc::RTPVideoHeader* /*videoHdr*/)
-{
+int32_t VCMEncComplete_KeyReqTest::SendData(
+    uint8_t payloadType,
+    const webrtc::EncodedImage& encoded_image,
+    const RTPFragmentationHeader& /*fragmentationHeader*/,
+    const webrtc::RTPVideoHeader* /*videoHdr*/) {
     WebRtcRTPHeader rtpInfo;
     rtpInfo.header.markerBit = true; // end of frame
     rtpInfo.type.Video.codecHeader.VP8.InitRTPVideoHeaderVP8();
@@ -554,5 +549,6 @@ VCMEncComplete_KeyReqTest::SendData(
     _timeStamp += 3000;
     rtpInfo.type.Video.isFirstPacket = false;
     rtpInfo.frameType = kVideoFrameKey;
-    return _vcm.IncomingPacket(payloadData, payloadSize, rtpInfo);
+    return _vcm.IncomingPacket(encoded_image._buffer, encoded_image._length,
+                               rtpInfo);
 }

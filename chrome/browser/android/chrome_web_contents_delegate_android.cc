@@ -21,7 +21,7 @@
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
 #include "chrome/browser/ui/tab_helpers.h"
 #include "chrome/common/chrome_switches.h"
-#include "components/app_modal_dialogs/javascript_dialog_manager.h"
+#include "components/app_modal/javascript_dialog_manager.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
@@ -31,8 +31,8 @@
 #include "content/public/common/file_chooser_params.h"
 #include "jni/ChromeWebContentsDelegateAndroid_jni.h"
 #include "third_party/WebKit/public/web/WebWindowFeatures.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/rect_f.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/rect_f.h"
 
 #if defined(ENABLE_PLUGINS)
 #include "chrome/browser/pepper_broker_infobar_delegate.h"
@@ -214,8 +214,9 @@ void ChromeWebContentsDelegateAndroid::FindMatchRectsReply(
 }
 
 content::JavaScriptDialogManager*
-ChromeWebContentsDelegateAndroid::GetJavaScriptDialogManager() {
-  return GetJavaScriptDialogManagerInstance();
+ChromeWebContentsDelegateAndroid::GetJavaScriptDialogManager(
+    WebContents* source) {
+  return app_modal::JavaScriptDialogManager::GetInstance();
 }
 
 void ChromeWebContentsDelegateAndroid::RequestMediaAccessPermission(
@@ -280,7 +281,7 @@ WebContents* ChromeWebContentsDelegateAndroid::OpenURLFromTab(
        params.disposition == NEW_BACKGROUND_TAB ||
        params.disposition == NEW_WINDOW) &&
       !params.user_gesture &&
-      !CommandLine::ForCurrentProcess()->HasSwitch(
+      !base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisablePopupBlocking)) {
     if (popup_blocker_helper->MaybeBlockPopup(nav_params,
                                               blink::WebWindowFeatures())) {

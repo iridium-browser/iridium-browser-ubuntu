@@ -22,6 +22,7 @@ static inline bool isSimpleLengthPropertyID(CSSPropertyID propertyId, bool& acce
     case CSSPropertyWidth:
     case CSSPropertyMinHeight:
     case CSSPropertyMinWidth:
+    case CSSPropertyMotionPosition:
     case CSSPropertyPaddingBottom:
     case CSSPropertyPaddingLeft:
     case CSSPropertyPaddingRight:
@@ -245,9 +246,9 @@ bool CSSParserFastPaths::isValidKeywordPropertyAndValue(CSSPropertyID propertyId
         return valueID == CSSValueStatic || valueID == CSSValueRelative || valueID == CSSValueAbsolute || valueID == CSSValueFixed;
     case CSSPropertyResize: // none | both | horizontal | vertical | auto
         return valueID == CSSValueNone || valueID == CSSValueBoth || valueID == CSSValueHorizontal || valueID == CSSValueVertical || valueID == CSSValueAuto;
-    case CSSPropertyScrollBehavior: // instant | smooth
+    case CSSPropertyScrollBehavior: // auto | smooth
         ASSERT(RuntimeEnabledFeatures::cssomSmoothScrollEnabled());
-        return valueID == CSSValueInstant || valueID == CSSValueSmooth;
+        return valueID == CSSValueAuto || valueID == CSSValueSmooth;
     case CSSPropertySpeak: // none | normal | spell-out | digits | literal-punctuation | no-punctuation
         return valueID == CSSValueNone || valueID == CSSValueNormal || valueID == CSSValueSpellOut || valueID == CSSValueDigits || valueID == CSSValueLiteralPunctuation || valueID == CSSValueNoPunctuation;
     case CSSPropertyTableLayout: // auto | fixed
@@ -274,9 +275,6 @@ bool CSSParserFastPaths::isValidKeywordPropertyAndValue(CSSPropertyID propertyId
         return valueID == CSSValueNormal || valueID == CSSValueEmbed
             || valueID == CSSValueBidiOverride || valueID == CSSValueWebkitIsolate
             || valueID == CSSValueWebkitIsolateOverride || valueID == CSSValueWebkitPlaintext;
-    case CSSPropertyTouchActionDelay: // none | script
-        ASSERT(RuntimeEnabledFeatures::cssTouchActionDelayEnabled());
-        return valueID == CSSValueScript || valueID == CSSValueNone;
     case CSSPropertyVisibility: // visible | hidden | collapse
         return valueID == CSSValueVisible || valueID == CSSValueHidden || valueID == CSSValueCollapse;
     case CSSPropertyWebkitAppearance:
@@ -407,7 +405,6 @@ bool CSSParserFastPaths::isKeywordPropertyID(CSSPropertyID propertyId)
     case CSSPropertyTextOverflow:
     case CSSPropertyTextRendering:
     case CSSPropertyTextTransform:
-    case CSSPropertyTouchActionDelay:
     case CSSPropertyUnicodeBidi:
     case CSSPropertyVisibility:
     case CSSPropertyWebkitAppearance:

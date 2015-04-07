@@ -43,16 +43,16 @@ class WebRTCPeerConnectionHandler;
 struct WebRTCDataChannelInit;
 
 class RTCDataChannel final
-    : public RefCountedGarbageCollectedWillBeGarbageCollectedFinalized<RTCDataChannel>
-    , public EventTargetWithInlineData
+    : public RefCountedGarbageCollectedEventTargetWithInlineData<RTCDataChannel>
     , public WebRTCDataChannelHandlerClient {
     DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollectedWillBeGarbageCollectedFinalized<RTCDataChannel>);
     DEFINE_WRAPPERTYPEINFO();
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(RTCDataChannel);
 public:
     static RTCDataChannel* create(ExecutionContext*, RTCPeerConnection*, PassOwnPtr<WebRTCDataChannelHandler>);
     static RTCDataChannel* create(ExecutionContext*, RTCPeerConnection*, WebRTCPeerConnectionHandler*, const String& label, const WebRTCDataChannelInit&, ExceptionState&);
     virtual ~RTCDataChannel();
+
+    ReadyState getHandlerState() const;
 
     String label() const;
 
@@ -66,7 +66,7 @@ public:
     bool negotiated() const;
     unsigned short id() const;
     String readyState() const;
-    unsigned long bufferedAmount() const;
+    unsigned bufferedAmount() const;
 
     String binaryType() const;
     void setBinaryType(const String&, ExceptionState&);
@@ -92,6 +92,12 @@ public:
     void clearWeakMembers(Visitor*);
     virtual void trace(Visitor*) override;
 
+    // WebRTCDataChannelHandlerClient
+    virtual void didChangeReadyState(WebRTCDataChannelHandlerClient::ReadyState) override;
+    virtual void didReceiveStringData(const WebString&) override;
+    virtual void didReceiveRawData(const char*, size_t) override;
+    virtual void didDetectError() override;
+
 private:
     RTCDataChannel(ExecutionContext*, RTCPeerConnection*, PassOwnPtr<WebRTCDataChannelHandler>);
 
@@ -99,12 +105,6 @@ private:
     void scheduledEventTimerFired(Timer<RTCDataChannel>*);
 
     ExecutionContext* m_executionContext;
-
-    // WebRTCDataChannelHandlerClient
-    virtual void didChangeReadyState(WebRTCDataChannelHandlerClient::ReadyState) override;
-    virtual void didReceiveStringData(const WebString&) override;
-    virtual void didReceiveRawData(const char*, size_t) override;
-    virtual void didDetectError() override;
 
     OwnPtr<WebRTCDataChannelHandler> m_handler;
 

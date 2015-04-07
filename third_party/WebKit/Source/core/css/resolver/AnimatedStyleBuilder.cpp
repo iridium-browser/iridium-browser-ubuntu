@@ -34,6 +34,7 @@
 #include "core/animation/animatable/AnimatableClipPathOperation.h"
 #include "core/animation/animatable/AnimatableColor.h"
 #include "core/animation/animatable/AnimatableDouble.h"
+#include "core/animation/animatable/AnimatableDoubleAndBool.h"
 #include "core/animation/animatable/AnimatableFilterOperations.h"
 #include "core/animation/animatable/AnimatableImage.h"
 #include "core/animation/animatable/AnimatableLength.h"
@@ -86,7 +87,7 @@ BorderImageLength animatableValueToBorderImageLength(const AnimatableValue* valu
 
 template<typename T> T animatableValueRoundClampTo(const AnimatableValue* value, T min = defaultMinimumForClamp<T>(), T max = defaultMaximumForClamp<T>())
 {
-    COMPILE_ASSERT(WTF::IsInteger<T>::value, ShouldUseIntegralTypeTWhenRoundingValues);
+    static_assert(WTF::IsInteger<T>::value, "should use integral type T when rounding values");
     return clampTo<T>(round(toAnimatableDouble(value)->toDouble()), min, max);
 }
 
@@ -136,17 +137,17 @@ LengthSize animatableValueToLengthSize(const AnimatableValue* value, const Style
         animatableValueToLength(animatableLengthSize->height(), state, range));
 }
 
-void setFillSize(FillLayer* fillLayer, const AnimatableValue* value, const StyleResolverState& state)
+void setFillSize(FillLayer* fillLayer, const AnimatableValue* value, StyleResolverState& state)
 {
     if (value->isLengthSize())
         fillLayer->setSize(FillSize(SizeLength, animatableValueToLengthSize(value, state, ValueRangeNonNegative)));
     else
-        state.styleMap().mapFillSize(fillLayer, toAnimatableUnknown(value)->toCSSValue().get());
+        CSSToStyleMap::mapFillSize(state, fillLayer, toAnimatableUnknown(value)->toCSSValue().get());
 }
 
-PassRefPtr<SVGLength> animatableValueToNonNegativeSVGLength(const AnimatableValue* value)
+PassRefPtrWillBeRawPtr<SVGLength> animatableValueToNonNegativeSVGLength(const AnimatableValue* value)
 {
-    RefPtr<SVGLength> length = toAnimatableSVGLength(value)->toSVGLength();
+    RefPtrWillBeRawPtr<SVGLength> length = toAnimatableSVGLength(value)->toSVGLength();
     if (length->valueInSpecifiedUnits() < 0)
         length->setValueInSpecifiedUnits(0);
     return length.release();
@@ -257,6 +258,12 @@ FontWeight animatableValueToFontWeight(const AnimatableValue* value)
     index = clampTo<int>(index, 0, WTF_ARRAY_LENGTH(weights) - 1);
 
     return weights[index];
+}
+
+FontDescription::Size animatableValueToFontSize(const AnimatableValue* value)
+{
+    float size = clampTo<float>(toAnimatableDouble(value)->toDouble(), 0);
+    return FontDescription::Size(0, size, true);
 }
 
 } // namespace
@@ -382,13 +389,13 @@ void AnimatedStyleBuilder::applyProperty(CSSPropertyID property, StyleResolverSt
         style->setFloodOpacity(clampTo<float>(toAnimatableDouble(value)->toDouble(), 0, 1));
         return;
     case CSSPropertyFontSize:
-        style->setFontSize(clampTo<float>(toAnimatableDouble(value)->toDouble(), 0));
+        state.fontBuilder().setSize(animatableValueToFontSize(value));
         return;
     case CSSPropertyFontStretch:
-        style->setFontStretch(animatableValueToFontStretch(value));
+        state.fontBuilder().setStretch(animatableValueToFontStretch(value));
         return;
     case CSSPropertyFontWeight:
-        style->setFontWeight(animatableValueToFontWeight(value));
+        state.fontBuilder().setWeight(animatableValueToFontWeight(value));
         return;
     case CSSPropertyHeight:
         style->setHeight(animatableValueToLength(value, state, ValueRangeNonNegative));
@@ -594,6 +601,13 @@ void AnimatedStyleBuilder::applyProperty(CSSPropertyID property, StyleResolverSt
     }
     case CSSPropertyTransformOrigin:
         style->setTransformOrigin(animatableValueToTransformOrigin(value, state));
+        return;
+    case CSSPropertyMotionPosition:
+        style->setMotionPosition(animatableValueToLength(value, state, ValueRangeNonNegative));
+        return;
+    case CSSPropertyMotionRotation:
+        style->setMotionRotation(toAnimatableDoubleAndBool(value)->toDouble());
+        style->setMotionRotationType(toAnimatableDoubleAndBool(value)->flag() ? MotionRotationAuto : MotionRotationFixed);
         return;
     case CSSPropertyWidows:
         style->setWidows(animatableValueRoundClampTo<unsigned short>(value, 1));

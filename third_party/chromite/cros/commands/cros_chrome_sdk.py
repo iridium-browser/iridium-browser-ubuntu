@@ -263,18 +263,22 @@ class SDKFetcher(object):
     return target, target != current
 
   def GetFullVersion(self, version):
-    """Add the release branch to a ChromeOS platform version.
+    """Add the release branch and build number to a ChromeOS platform version.
+
+    This will specify where you can get the latest build for the given version
+    for the current board.
 
     Args:
       version: A ChromeOS platform number of the form XXXX.XX.XX, i.e.,
         3918.0.0.
 
     Returns:
-      The version with release branch prepended.  I.e., R28-3918.0.0.
+      The version with release branch and build number added, as needed. E.g.
+      R28-3918.0.0-b1234.
     """
     assert not version.startswith('R')
 
-    with self.misc_cache.Lookup(('full-version', version)) as ref:
+    with self.misc_cache.Lookup(('full-version', self.board, version)) as ref:
       if ref.Exists(lock=True):
         return osutils.ReadFile(ref.path).strip()
       else:
@@ -400,12 +404,21 @@ class ChromeSDKCommand(cros.CrosCommand):
   _CLANG_DIR = 'third_party/llvm-build/Release+Asserts/bin'
 
   EBUILD_ENV = (
+      # Compiler tools.
       'CXX',
       'CC',
       'AR',
       'AS',
       'LD',
       'RANLIB',
+
+      # Compiler flags.
+      'CFLAGS',
+      'CXXFLAGS',
+      'CPPFLAGS',
+      'LDFLAGS',
+
+      # Misc settings.
       'GOLD_SET',
       'GYP_DEFINES',
   )
@@ -413,8 +426,8 @@ class ChromeSDKCommand(cros.CrosCommand):
   SDK_GOMA_PORT_ENV = 'SDK_GOMA_PORT'
   SDK_GOMA_DIR_ENV = 'SDK_GOMA_DIR'
 
-  GOMACC_PORT_CMD  = ['./gomacc', 'port']
-  FETCH_GOMA_CMD  = ['wget', _GOMA_URL]
+  GOMACC_PORT_CMD = ['./gomacc', 'port']
+  FETCH_GOMA_CMD = ['wget', _GOMA_URL]
 
   # Override base class property to enable stats upload.
   upload_stats = True
@@ -489,14 +502,15 @@ class ChromeSDKCommand(cros.CrosCommand):
     parser.add_argument(
         'cmd', nargs='*', default=None,
         help='The command to execute in the SDK environment.  Defaults to '
-              'starting a bash shell.')
+             'starting a bash shell.')
 
     parser.add_option_to_group(
         parser.caching_group, '--clear-sdk-cache', action='store_true',
         default=False,
         help='Removes everything in the SDK cache before starting.')
 
-    group = parser.add_option_group('Metadata Overrides (Advanced)',
+    group = parser.add_option_group(
+        'Metadata Overrides (Advanced)',
         description='Provide all of these overrides in order to remove '
                     'dependencies on metadata.json existence.')
     parser.add_option_to_group(
@@ -581,6 +595,10 @@ class ChromeSDKCommand(cros.CrosCommand):
     # without a special rpath.
     env['CC_host'] = os.path.join(clang_path, 'clang')
     env['CXX_host'] = os.path.join(clang_path, 'clang++')
+
+    # Enable debug fission.
+    env['CFLAGS'] = env.get('CFLAGS', '') +  ' -gsplit-dwarf'
+    env['CXXFLAGS'] = env.get('CXXFLAGS', '') + ' -gsplit-dwarf'
 
   def _SetupEnvironment(self, board, sdk_ctx, options, goma_dir=None,
                         goma_port=None):
@@ -785,15 +803,11 @@ class ChromeSDKCommand(cros.CrosCommand):
     if os.environ.get(SDKFetcher.SDK_VERSION_ENV) is not None:
       cros_build_lib.Die('Already in an SDK shell.')
 
-    if not self.options.chrome_src:
-      checkout = commandline.DetermineCheckout(os.getcwd())
-      self.options.chrome_src = checkout.chrome_src_dir
-    else:
-      checkout = commandline.DetermineCheckout(self.options.chrome_src)
-      if not checkout.chrome_src_dir:
-        cros_build_lib.Die('Chrome checkout not found at %s',
-                           self.options.chrome_src)
-      self.options.chrome_src = checkout.chrome_src_dir
+    src_path = self.options.chrome_src or os.getcwd()
+    checkout = commandline.DetermineCheckout(src_path)
+    if not checkout.chrome_src_dir:
+      cros_build_lib.Die('Chrome checkout not found at %s', src_path)
+    self.options.chrome_src = checkout.chrome_src_dir
 
     if self.options.clang and not self.options.chrome_src:
       cros_build_lib.Die('--clang requires --chrome-src to be set.')

@@ -15,6 +15,8 @@ namespace web_modal {
 class ModalDialogHost;
 }
 
+namespace constrained_window {
+
 class ConstrainedWindowViewsClient {
  public:
   virtual ~ConstrainedWindowViewsClient() {}
@@ -24,9 +26,14 @@ class ConstrainedWindowViewsClient {
   virtual content::WebContents* GetEmbedderWebContents(
       content::WebContents* initiator_web_contents) = 0;
 
-  // Returns the modal window host for the |parent| native view.
+  // Returns the modal window host for the |parent| native window.
   virtual web_modal::ModalDialogHost* GetModalDialogHost(
-      gfx::NativeView parent) = 0;
+      gfx::NativeWindow parent) = 0;
+
+  // Returns the native view in |window| appropriate for positioning dialogs.
+  virtual gfx::NativeView GetDialogHostView(gfx::NativeWindow window) = 0;
 };
+
+}  // namespace constrained window
 
 #endif  // COMPONENTS_CONSTRAINED_WINDOW_CONSTRAINED_WINDOW_VIEWS_CLIENT_H_

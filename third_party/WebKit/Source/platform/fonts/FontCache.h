@@ -110,12 +110,20 @@ public:
     static void setDeviceScaleFactor(float deviceScaleFactor) { s_deviceScaleFactor = deviceScaleFactor; }
     static void setUseSubpixelPositioning(bool useSubpixelPositioning) { s_useSubpixelPositioning = useSubpixelPositioning; }
     static void addSideloadedFontForTesting(SkTypeface*);
+    // Functions to cache and retrieve the system font metrics.
+    static void setMenuFontMetrics(const wchar_t* familyName, int32_t fontHeight);
+    static void setSmallCaptionFontMetrics(const wchar_t* familyName, int32_t fontHeight);
+    static void setStatusFontMetrics(const wchar_t* familyName, int32_t fontHeight);
+    static int32_t menuFontHeight() { return s_menuFontHeight; }
+    static const AtomicString& menuFontFamily() { return *s_smallCaptionFontFamilyName; }
+    static int32_t smallCaptionFontHeight() { return s_smallCaptionFontHeight; }
+    static const AtomicString& smallCaptionFontFamily() { return *s_smallCaptionFontFamilyName; }
+    static int32_t statusFontHeight() { return s_statusFontHeight; }
+    static const AtomicString& statusFontFamily() { return *s_statusFontFamilyName; }
 #endif
 
-#if ENABLE(OPENTYPE_VERTICAL)
     typedef uint32_t FontFileKey;
     PassRefPtr<OpenTypeVerticalData> getVerticalData(const FontFileKey&, const FontPlatformData&);
-#endif
 
 #if OS(ANDROID)
     static AtomicString getGenericFamilyNameForScript(const AtomicString& familyName, const FontDescription&);
@@ -130,6 +138,7 @@ public:
     };
     static void getFontForCharacter(UChar32, const char* preferredLocale, PlatformFallbackFont*);
 #endif
+    PassRefPtr<SimpleFontData> fontDataFromFontPlatformData(const FontPlatformData*, ShouldRetain = Retain);
 
 private:
     FontCache();
@@ -154,7 +163,6 @@ private:
     // Implemented on skia platforms.
     PassRefPtr<SkTypeface> createTypeface(const FontDescription&, const FontFaceCreationParams&, CString& name);
 
-    PassRefPtr<SimpleFontData> fontDataFromFontPlatformData(const FontPlatformData*, ShouldRetain = Retain);
     PassRefPtr<SimpleFontData> fallbackOnStandardFontStyle(const FontDescription&, UChar32);
 
     // Don't purge if this count is > 0;
@@ -167,6 +175,13 @@ private:
     static float s_deviceScaleFactor;
     static bool s_useSubpixelPositioning;
     static HashMap<String, RefPtr<SkTypeface> >* s_sideloadedFonts;
+    // The system font metrics cache.
+    static AtomicString* s_menuFontFamilyName;
+    static int32_t s_menuFontHeight;
+    static AtomicString* s_smallCaptionFontFamilyName;
+    static int32_t s_smallCaptionFontHeight;
+    static AtomicString* s_statusFontFamilyName;
+    static int32_t s_statusFontHeight;
 #endif
 
 #if OS(MACOSX) || OS(ANDROID)

@@ -119,14 +119,14 @@ private:
         return NoLayer;
     }
 
-    virtual void paint(PaintInfo&, const LayoutPoint&) override;
+    virtual void paint(const PaintInfo&, const LayoutPoint&) override;
 
     virtual void imageChanged(WrappedImagePtr, const IntRect* = 0) override;
 
     virtual void styleDidChange(StyleDifference, const RenderStyle* oldStyle) override;
 
-    void nextSibling() const WTF_DELETED_FUNCTION;
-    void previousSibling() const WTF_DELETED_FUNCTION;
+    void nextSibling() const = delete;
+    void previousSibling() const = delete;
 
     RenderObjectChildList m_children;
     unsigned m_rowIndex : 31;

@@ -42,7 +42,7 @@ public:
     virtual ~HTMLFrameOwnerElement();
 
     Frame* contentFrame() const { return m_contentFrame; }
-    LocalDOMWindow* contentWindow() const;
+    DOMWindow* contentWindow() const;
     Document* contentDocument() const;
 
     void setContentFrame(Frame&);
@@ -83,7 +83,7 @@ protected:
     HTMLFrameOwnerElement(const QualifiedName& tagName, Document&);
     void setSandboxFlags(SandboxFlags);
 
-    bool loadOrRedirectSubframe(const KURL&, const AtomicString& frameName, bool lockBackForwardList);
+    bool loadOrRedirectSubframe(const KURL&, const AtomicString& frameName, bool lockBackForwardList, ContentSecurityPolicyDisposition shouldCheckContentSecurityPolicy);
 
 private:
     virtual bool isKeyboardFocusable() const override;
@@ -91,7 +91,7 @@ private:
 
     // FrameOwner overrides:
     virtual bool isLocal() const { return true; }
-    virtual SandboxFlags sandboxFlags() const override { return m_sandboxFlags; }
+    virtual SandboxFlags sandboxFlags() const override;
     virtual void dispatchLoad() override;
 
     RawPtrWillBeMember<Frame> m_contentFrame;

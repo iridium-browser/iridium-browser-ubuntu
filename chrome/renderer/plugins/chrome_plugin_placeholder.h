@@ -23,7 +23,8 @@ class ChromePluginPlaceholder : public plugins::PluginPlaceholder,
       const std::string& identifier,
       const base::string16& name,
       int resource_id,
-      const base::string16& message);
+      const base::string16& message,
+      const GURL& poster_url);
 
   // Creates a new WebViewPlugin with a MissingPlugin as a delegate.
   static ChromePluginPlaceholder* CreateMissingPlugin(

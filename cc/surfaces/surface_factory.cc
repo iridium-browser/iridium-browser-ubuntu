@@ -30,8 +30,8 @@ void SurfaceFactory::DestroyAll() {
   surface_map_.clear();
 }
 
-void SurfaceFactory::Create(SurfaceId surface_id, const gfx::Size& size) {
-  scoped_ptr<Surface> surface(new Surface(surface_id, size, this));
+void SurfaceFactory::Create(SurfaceId surface_id) {
+  scoped_ptr<Surface> surface(new Surface(surface_id, this));
   manager_->RegisterSurface(surface.get());
   DCHECK(!surface_map_.count(surface_id));
   surface_map_.add(surface_id, surface.Pass());
@@ -46,7 +46,7 @@ void SurfaceFactory::Destroy(SurfaceId surface_id) {
 
 void SurfaceFactory::SubmitFrame(SurfaceId surface_id,
                                  scoped_ptr<CompositorFrame> frame,
-                                 const base::Closure& callback) {
+                                 const DrawCallback& callback) {
   OwningSurfaceMap::iterator it = surface_map_.find(surface_id);
   DCHECK(it != surface_map_.end());
   DCHECK(it->second->factory().get() == this);

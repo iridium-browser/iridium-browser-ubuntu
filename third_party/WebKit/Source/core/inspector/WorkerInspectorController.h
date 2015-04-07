@@ -40,6 +40,7 @@
 
 namespace blink {
 
+class AsyncCallTracker;
 class InjectedScriptManager;
 class InspectorBackendDispatcher;
 class InspectorFrontend;
@@ -58,6 +59,7 @@ public:
     ~WorkerInspectorController();
     void trace(Visitor*);
 
+    void registerModuleAgent(PassOwnPtrWillBeRawPtr<InspectorAgent>);
     void connectFrontend();
     void disconnectFrontend();
     void restoreInspectorStateFromCookie(const String& inspectorCookie);
@@ -80,8 +82,9 @@ private:
     OwnPtr<InspectorFrontend> m_frontend;
     RefPtrWillBeMember<InspectorBackendDispatcher> m_backendDispatcher;
     RawPtrWillBeMember<WorkerDebuggerAgent> m_workerDebuggerAgent;
+    OwnPtrWillBeMember<AsyncCallTracker> m_asyncCallTracker;
 };
 
 }
 
-#endif // !defined(WorkerInspectorController_h)
+#endif // WorkerInspectorController_h

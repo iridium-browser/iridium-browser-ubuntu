@@ -30,12 +30,7 @@
 #include "config.h"
 #include "core/rendering/RenderRegion.h"
 
-#include "core/css/resolver/StyleResolver.h"
-#include "core/rendering/FlowThreadController.h"
-#include "core/rendering/HitTestLocation.h"
-#include "core/rendering/PaintInfo.h"
 #include "core/rendering/RenderFlowThread.h"
-#include "core/rendering/RenderView.h"
 
 namespace blink {
 
@@ -117,30 +112,6 @@ void RenderRegion::layoutBlock(bool relayoutChildren)
     // The big problem though is that overflow needs to be region-specific. We can't simply use the RenderFlowThread's global
     // overflow values, since then we'd always think any narrow region had huge overflow (all the way to the width of the
     // RenderFlowThread itself).
-}
-
-void RenderRegion::paintInvalidationOfFlowThreadContentRectangle(const LayoutRect& paintInvalidationRect, const LayoutRect& flowThreadPortionRect, const LayoutRect& flowThreadPortionOverflowRect, const LayoutPoint& regionLocation) const
-{
-    ASSERT(isValid());
-
-    // We only have to issue a paint invalidation in this region if the region rect intersects the paint invalidation rect.
-    LayoutRect flippedFlowThreadPortionRect(flowThreadPortionRect);
-    LayoutRect flippedFlowThreadPortionOverflowRect(flowThreadPortionOverflowRect);
-    flowThread()->flipForWritingMode(flippedFlowThreadPortionRect); // Put the region rects into physical coordinates.
-    flowThread()->flipForWritingMode(flippedFlowThreadPortionOverflowRect);
-
-    LayoutRect clippedRect(paintInvalidationRect);
-    clippedRect.intersect(flippedFlowThreadPortionOverflowRect);
-    if (clippedRect.isEmpty())
-        return;
-
-    // Put the region rect into the region's physical coordinate space.
-    clippedRect.setLocation(regionLocation + (clippedRect.location() - flippedFlowThreadPortionRect.location()));
-
-    // Now switch to the region's writing mode coordinate space and let it issue paint invalidations itself.
-    flipForWritingMode(clippedRect);
-
-    invalidatePaintRectangle(clippedRect);
 }
 
 void RenderRegion::computeIntrinsicLogicalWidths(LayoutUnit& minLogicalWidth, LayoutUnit& maxLogicalWidth) const

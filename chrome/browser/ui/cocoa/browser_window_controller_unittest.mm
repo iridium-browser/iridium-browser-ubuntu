@@ -12,7 +12,7 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/signin/fake_signin_manager.h"
-#include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
+#include "chrome/browser/signin/signin_error_controller_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
@@ -30,7 +30,6 @@
 #include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/signin/core/browser/fake_auth_status_provider.h"
-#include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_error_controller.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "content/public/browser/notification_service.h"
@@ -79,7 +78,7 @@ using ::testing::Return;
 
 class BrowserWindowControllerTest : public CocoaProfileTest {
  public:
-  virtual void SetUp() {
+  void SetUp() override {
     CocoaProfileTest::SetUp();
     ASSERT_TRUE(browser());
 
@@ -87,7 +86,7 @@ class BrowserWindowControllerTest : public CocoaProfileTest {
                                                      takeOwnership:NO];
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     [controller_ close];
     CocoaProfileTest::TearDown();
   }
@@ -738,8 +737,7 @@ TEST_F(BrowserWindowControllerTest, TestSigninMenuItemAuthError) {
   sync->SetSyncSetupCompleted();
   // Force an auth error.
   FakeAuthStatusProvider provider(
-      ProfileOAuth2TokenServiceFactory::GetForProfile(profile())->
-          signin_error_controller());
+      SigninErrorControllerFactory::GetForProfile(profile()));;
   GoogleServiceAuthError error(
       GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS);
   provider.SetAuthError("user@gmail.com", "user@gmail.com", error);
@@ -843,7 +841,7 @@ TEST_F(BrowserWindowControllerTest, BookmarkBarHitTest) {
 
 class BrowserWindowFullScreenControllerTest : public CocoaProfileTest {
  public:
-  virtual void SetUp() {
+  void SetUp() override {
     CocoaProfileTest::SetUp();
     ASSERT_TRUE(browser());
 
@@ -852,7 +850,7 @@ class BrowserWindowFullScreenControllerTest : public CocoaProfileTest {
                                                          takeOwnership:NO];
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     [controller_ close];
     CocoaProfileTest::TearDown();
   }
@@ -881,7 +879,7 @@ TEST_F(BrowserWindowFullScreenControllerTest, DISABLED_TestFullscreen) {
   [controller_ showWindow:nil];
   EXPECT_FALSE([controller_ isInAnyFullscreenMode]);
 
-  [controller_ enterFullscreenWithChrome];
+  [controller_ enterBrowserFullscreenWithToolbar:YES];
   WaitForFullScreenTransition();
   EXPECT_TRUE([controller_ isInAnyFullscreenMode]);
 
@@ -903,7 +901,7 @@ TEST_F(BrowserWindowFullScreenControllerTest, DISABLED_TestActivate) {
   [controller_ activate];
   EXPECT_TRUE(IsFrontWindow([controller_ window]));
 
-  [controller_ enterFullscreenWithChrome];
+  [controller_ enterBrowserFullscreenWithToolbar:YES];
   WaitForFullScreenTransition();
   [controller_ activate];
 

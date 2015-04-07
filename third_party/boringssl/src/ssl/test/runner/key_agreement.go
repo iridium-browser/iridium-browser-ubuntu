@@ -12,7 +12,6 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha1"
-	"crypto/sha256"
 	"crypto/x509"
 	"encoding/asn1"
 	"errors"
@@ -25,13 +24,23 @@ var errServerKeyExchange = errors.New("tls: invalid ServerKeyExchange message")
 
 // rsaKeyAgreement implements the standard TLS key agreement where the client
 // encrypts the pre-master secret to the server's public key.
-type rsaKeyAgreement struct{}
+type rsaKeyAgreement struct {
+	clientVersion uint16
+}
 
-func (ka rsaKeyAgreement) generateServerKeyExchange(config *Config, cert *Certificate, clientHello *clientHelloMsg, hello *serverHelloMsg) (*serverKeyExchangeMsg, error) {
+func (ka *rsaKeyAgreement) generateServerKeyExchange(config *Config, cert *Certificate, clientHello *clientHelloMsg, hello *serverHelloMsg) (*serverKeyExchangeMsg, error) {
+	// Save the client version for comparison later.
+	ka.clientVersion = versionToWire(clientHello.vers, clientHello.isDTLS)
+
+	if config.Bugs.RSAServerKeyExchange {
+		// Send an empty ServerKeyExchange message.
+		return &serverKeyExchangeMsg{}, nil
+	}
+
 	return nil, nil
 }
 
-func (ka rsaKeyAgreement) processClientKeyExchange(config *Config, cert *Certificate, ckx *clientKeyExchangeMsg, version uint16) ([]byte, error) {
+func (ka *rsaKeyAgreement) processClientKeyExchange(config *Config, cert *Certificate, ckx *clientKeyExchangeMsg, version uint16) ([]byte, error) {
 	preMasterSecret := make([]byte, 48)
 	_, err := io.ReadFull(config.rand(), preMasterSecret[2:])
 	if err != nil {
@@ -55,20 +64,21 @@ func (ka rsaKeyAgreement) processClientKeyExchange(config *Config, cert *Certifi
 	if err != nil {
 		return nil, err
 	}
-	// We don't check the version number in the premaster secret.  For one,
-	// by checking it, we would leak information about the validity of the
-	// encrypted pre-master secret. Secondly, it provides only a small
-	// benefit against a downgrade attack and some implementations send the
-	// wrong version anyway. See the discussion at the end of section
-	// 7.4.7.1 of RFC 4346.
+	// This check should be done in constant-time, but this is a testing
+	// implementation. See the discussion at the end of section 7.4.7.1 of
+	// RFC 4346.
+	vers := uint16(preMasterSecret[0])<<8 | uint16(preMasterSecret[1])
+	if ka.clientVersion != vers {
+		return nil, errors.New("tls: invalid version in RSA premaster")
+	}
 	return preMasterSecret, nil
 }
 
-func (ka rsaKeyAgreement) processServerKeyExchange(config *Config, clientHello *clientHelloMsg, serverHello *serverHelloMsg, cert *x509.Certificate, skx *serverKeyExchangeMsg) error {
+func (ka *rsaKeyAgreement) processServerKeyExchange(config *Config, clientHello *clientHelloMsg, serverHello *serverHelloMsg, cert *x509.Certificate, skx *serverKeyExchangeMsg) error {
 	return errors.New("tls: unexpected ServerKeyExchange")
 }
 
-func (ka rsaKeyAgreement) generateClientKeyExchange(config *Config, clientHello *clientHelloMsg, cert *x509.Certificate) ([]byte, *clientKeyExchangeMsg, error) {
+func (ka *rsaKeyAgreement) generateClientKeyExchange(config *Config, clientHello *clientHelloMsg, cert *x509.Certificate) ([]byte, *clientKeyExchangeMsg, error) {
 	preMasterSecret := make([]byte, 48)
 	vers := clientHello.vers
 	if config.Bugs.RsaClientKeyExchangeVersion != 0 {
@@ -120,28 +130,20 @@ func md5SHA1Hash(slices [][]byte) []byte {
 	return md5sha1
 }
 
-// sha256Hash implements TLS 1.2's hash function.
-func sha256Hash(slices [][]byte) []byte {
-	h := sha256.New()
-	for _, slice := range slices {
-		h.Write(slice)
-	}
-	return h.Sum(nil)
-}
-
 // hashForServerKeyExchange hashes the given slices and returns their digest
 // and the identifier of the hash function used. The hashFunc argument is only
 // used for >= TLS 1.2 and precisely identifies the hash function to use.
 func hashForServerKeyExchange(sigType, hashFunc uint8, version uint16, slices ...[]byte) ([]byte, crypto.Hash, error) {
 	if version >= VersionTLS12 {
-		switch hashFunc {
-		case hashSHA256:
-			return sha256Hash(slices), crypto.SHA256, nil
-		case hashSHA1:
-			return sha1Hash(slices), crypto.SHA1, nil
-		default:
-			return nil, crypto.Hash(0), errors.New("tls: unknown hash function used by peer")
+		hash, err := lookupTLSHash(hashFunc)
+		if err != nil {
+			return nil, 0, err
 		}
+		h := hash.New()
+		for _, slice := range slices {
+			h.Write(slice)
+		}
+		return h.Sum(nil), hash, nil
 	}
 	if sigType == signatureECDSA {
 		return sha1Hash(slices), crypto.SHA1, nil
@@ -301,6 +303,10 @@ func (ka *signedKeyAgreement) verifyParameters(config *Config, clientHello *clie
 		tls12HashId = sigAndHash[0]
 		if len(sig) < 2 {
 			return errServerKeyExchange
+		}
+
+		if !isSupportedSignatureAndHash(signatureAndHash{ka.sigType, tls12HashId}, config.signatureAndHashesForClient()) {
+			return errors.New("tls: unsupported hash function for ServerKeyExchange")
 		}
 	}
 	sigLen := int(sig[0])<<8 | int(sig[1])

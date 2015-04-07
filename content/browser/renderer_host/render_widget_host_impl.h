@@ -29,9 +29,11 @@
 #include "content/browser/renderer_host/input/input_router_client.h"
 #include "content/browser/renderer_host/input/synthetic_gesture.h"
 #include "content/browser/renderer_host/input/touch_emulator_client.h"
+#include "content/browser/renderer_host/render_widget_host_latency_tracker.h"
 #include "content/common/input/input_event_ack_state.h"
 #include "content/common/input/synthetic_gesture_packet.h"
 #include "content/common/view_message_enums.h"
+#include "content/public/browser/readback_types.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/common/page_zoom.h"
 #include "ipc/ipc_listener.h"
@@ -131,11 +133,10 @@ class CONTENT_EXPORT RenderWidgetHostImpl
   void Focus() override;
   void Blur() override;
   void SetActive(bool active) override;
-  void CopyFromBackingStore(
-      const gfx::Rect& src_rect,
-      const gfx::Size& accelerated_dst_size,
-      const base::Callback<void(bool, const SkBitmap&)>& callback,
-      const SkColorType color_type) override;
+  void CopyFromBackingStore(const gfx::Rect& src_rect,
+                            const gfx::Size& accelerated_dst_size,
+                            ReadbackRequestCallback& callback,
+                            const SkColorType color_type) override;
   bool CanCopyFromBackingStore() override;
 #if defined(OS_ANDROID)
   virtual void LockBackingStore() override;
@@ -454,6 +455,8 @@ class CONTENT_EXPORT RenderWidgetHostImpl
   // subsystem.
   int64 GetLatencyComponentId() const;
 
+  base::TimeDelta GetEstimatedBrowserCompositeTime() const;
+
   static void CompositorFrameDrawn(
       const std::vector<ui::LatencyInfo>& latency_info);
 
@@ -465,11 +468,6 @@ class CONTENT_EXPORT RenderWidgetHostImpl
       int snapshot_id,
       gfx::Size snapshot_size,
       scoped_refptr<base::RefCountedBytes> png_data);
-
-  // LatencyComponents generated in the renderer must have component IDs
-  // provided to them by the browser process. This function adds the correct
-  // component ID where necessary.
-  void AddLatencyInfoComponentIds(ui::LatencyInfo* latency_info);
 
   InputRouter* input_router() { return input_router_.get(); }
 
@@ -486,20 +484,6 @@ class CONTENT_EXPORT RenderWidgetHostImpl
 
  protected:
   RenderWidgetHostImpl* AsRenderWidgetHostImpl() override;
-
-  // Create a LatencyInfo struct with INPUT_EVENT_LATENCY_RWH_COMPONENT
-  // component if it is not already in |original|. And if |original| is
-  // not NULL, it is also merged into the resulting LatencyInfo.
-  ui::LatencyInfo CreateInputEventLatencyInfoIfNotExist(
-      const ui::LatencyInfo* original,
-      blink::WebInputEvent::Type type,
-      const ui::LatencyInfo::InputCoordinate* logical_coordinates,
-      size_t logical_coordinates_size);
-  // Add UMA histograms for the latency to the renderer and roundtrip latency
-  // for a given event type.
-  void ComputeInputLatencyHistograms(
-      blink::WebInputEvent::Type type,
-      const ui::LatencyInfo& latency_info) const;
 
   // Called when we receive a notification indicating that the renderer
   // process has gone. This will reset our state so that our state will be
@@ -565,7 +549,10 @@ class CONTENT_EXPORT RenderWidgetHostImpl
   // Expose increment/decrement of the in-flight event count, so
   // RenderViewHostImpl can account for in-flight beforeunload/unload events.
   int increment_in_flight_event_count() { return ++in_flight_event_count_; }
-  int decrement_in_flight_event_count() { return --in_flight_event_count_; }
+  int decrement_in_flight_event_count() {
+    DCHECK_GT(in_flight_event_count_, 0);
+    return --in_flight_event_count_;
+  }
 
   // The View associated with the RenderViewHost. The lifetime of this object
   // is associated with the lifetime of the Render process. If the Renderer
@@ -594,7 +581,7 @@ class CONTENT_EXPORT RenderWidgetHostImpl
   // Tell this object to destroy itself.
   void Destroy();
 
-  // Called by |hang_timeout_monitor_| on delayed response from the renderer.
+  // Called by |hang_monitor_timeout_| on delayed response from the renderer.
   void RendererIsUnresponsive();
 
   // Called if we know the renderer is responsive. When we currently think the
@@ -622,11 +609,9 @@ class CONTENT_EXPORT RenderWidgetHostImpl
                               bool can_compose_inline,
                               int flags);
 
-#if defined(OS_MACOSX) || defined(USE_AURA) || defined(OS_ANDROID)
   void OnImeCompositionRangeChanged(
       const gfx::Range& range,
       const std::vector<gfx::Rect>& character_bounds);
-#endif
   void OnImeCancelComposition();
   void OnLockMouse(bool user_gesture,
                    bool last_unlocked_by_target,
@@ -771,16 +756,9 @@ class CONTENT_EXPORT RenderWidgetHostImpl
   // This is true if the renderer is currently unresponsive.
   bool is_unresponsive_;
 
-  // The following value indicates a time in the future when we would consider
-  // the renderer hung if it does not generate an appropriate response message.
-  base::Time time_when_considered_hung_;
-
   // This value denotes the number of input events yet to be acknowledged
   // by the renderer.
   int in_flight_event_count_;
-
-  // This timer runs to check if time_when_considered_hung_ has past.
-  base::OneShotTimer<RenderWidgetHostImpl> hung_renderer_timer_;
 
   // Flag to detect recursive calls to GetBackingStore().
   bool in_get_backing_store_;
@@ -840,7 +818,7 @@ class CONTENT_EXPORT RenderWidgetHostImpl
   std::list<HWND> dummy_windows_for_activation_;
 #endif
 
-  int64 last_input_number_;
+  RenderWidgetHostLatencyTracker latency_tracker_;
 
   int next_browser_snapshot_id_;
   typedef std::map<int,

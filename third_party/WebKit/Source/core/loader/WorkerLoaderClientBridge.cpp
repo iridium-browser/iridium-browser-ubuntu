@@ -58,6 +58,9 @@ static void workerGlobalScopeDidSendData(ExecutionContext* context, PassRefPtr<T
 
 void WorkerLoaderClientBridge::didSendData(unsigned long long bytesSent, unsigned long long totalBytesToBeSent)
 {
+    if (m_workerClientWrapper->isDetached())
+        return;
+
     m_loaderProxy.postTaskToWorkerGlobalScope(createCrossThreadTask(&workerGlobalScopeDidSendData, m_workerClientWrapper, bytesSent, totalBytesToBeSent));
 }
 
@@ -70,6 +73,9 @@ static void workerGlobalScopeDidReceiveResponse(ExecutionContext* context, PassR
 
 void WorkerLoaderClientBridge::didReceiveResponse(unsigned long identifier, const ResourceResponse& response, PassOwnPtr<WebDataConsumerHandle> handle)
 {
+    if (m_workerClientWrapper->isDetached())
+        return;
+
     m_loaderProxy.postTaskToWorkerGlobalScope(createCrossThreadTask(&workerGlobalScopeDidReceiveResponse, m_workerClientWrapper, identifier, response, handle));
 }
 
@@ -82,6 +88,9 @@ static void workerGlobalScopeDidReceiveData(ExecutionContext* context, PassRefPt
 
 void WorkerLoaderClientBridge::didReceiveData(const char* data, unsigned dataLength)
 {
+    if (m_workerClientWrapper->isDetached())
+        return;
+
     OwnPtr<Vector<char> > vector = adoptPtr(new Vector<char>(dataLength)); // needs to be an OwnPtr for usage with createCrossThreadTask.
     memcpy(vector->data(), data, dataLength);
     m_loaderProxy.postTaskToWorkerGlobalScope(createCrossThreadTask(&workerGlobalScopeDidReceiveData, m_workerClientWrapper, vector.release()));
@@ -95,6 +104,9 @@ static void workerGlobalScopeDidDownloadData(ExecutionContext* context, PassRefP
 
 void WorkerLoaderClientBridge::didDownloadData(int dataLength)
 {
+    if (m_workerClientWrapper->isDetached())
+        return;
+
     m_loaderProxy.postTaskToWorkerGlobalScope(createCrossThreadTask(&workerGlobalScopeDidDownloadData, m_workerClientWrapper, dataLength));
 }
 
@@ -106,6 +118,9 @@ static void workerGlobalScopeDidReceiveCachedMetadata(ExecutionContext* context,
 
 void WorkerLoaderClientBridge::didReceiveCachedMetadata(const char* data, int dataLength)
 {
+    if (m_workerClientWrapper->isDetached())
+        return;
+
     OwnPtr<Vector<char> > vector = adoptPtr(new Vector<char>(dataLength)); // needs to be an OwnPtr for usage with createCrossThreadTask.
     memcpy(vector->data(), data, dataLength);
     m_loaderProxy.postTaskToWorkerGlobalScope(createCrossThreadTask(&workerGlobalScopeDidReceiveCachedMetadata, m_workerClientWrapper, vector.release()));
@@ -119,6 +134,9 @@ static void workerGlobalScopeDidFinishLoading(ExecutionContext* context, PassRef
 
 void WorkerLoaderClientBridge::didFinishLoading(unsigned long identifier, double finishTime)
 {
+    if (m_workerClientWrapper->isDetached())
+        return;
+
     m_loaderProxy.postTaskToWorkerGlobalScope(createCrossThreadTask(&workerGlobalScopeDidFinishLoading, m_workerClientWrapper, identifier, finishTime));
 }
 
@@ -130,6 +148,9 @@ static void workerGlobalScopeDidFail(ExecutionContext* context, PassRefPtr<Threa
 
 void WorkerLoaderClientBridge::didFail(const ResourceError& error)
 {
+    if (m_workerClientWrapper->isDetached())
+        return;
+
     m_loaderProxy.postTaskToWorkerGlobalScope(createCrossThreadTask(&workerGlobalScopeDidFail, m_workerClientWrapper, error));
 }
 
@@ -141,6 +162,9 @@ static void workerGlobalScopeDidFailAccessControlCheck(ExecutionContext* context
 
 void WorkerLoaderClientBridge::didFailAccessControlCheck(const ResourceError& error)
 {
+    if (m_workerClientWrapper->isDetached())
+        return;
+
     m_loaderProxy.postTaskToWorkerGlobalScope(createCrossThreadTask(&workerGlobalScopeDidFailAccessControlCheck, m_workerClientWrapper, error));
 }
 
@@ -152,6 +176,9 @@ static void workerGlobalScopeDidFailRedirectCheck(ExecutionContext* context, Pas
 
 void WorkerLoaderClientBridge::didFailRedirectCheck()
 {
+    if (m_workerClientWrapper->isDetached())
+        return;
+
     m_loaderProxy.postTaskToWorkerGlobalScope(createCrossThreadTask(&workerGlobalScopeDidFailRedirectCheck, m_workerClientWrapper));
 }
 

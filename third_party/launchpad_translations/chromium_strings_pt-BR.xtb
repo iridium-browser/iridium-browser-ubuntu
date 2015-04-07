@@ -39,7 +39,6 @@
 <translation id="3883381313049582448">Usar a senha gerada pelo Chromium</translation>
 <translation id="3549345495227188780">Primeiros passos com o Chromium OS</translation>
 <translation id="1668054258064581266">Depois de remover sua conta do Chromium, pode ser necessário recarregar as guias abertas para que a alteração entre em vigor.</translation>
-<translation id="6953661834318318668">Barra de ferramentas do Chromium</translation>
 <translation id="4285930937574705105">Ocorreu uma falha na instalação devido a um erro não especificado. Se o Chromium estiver sendo executado, feche-o e tente novamente.</translation>
 <translation id="1396446129537741364">O Chromium está tentando mostrar senhas.</translation>
 <translation id="8987477933582888019">Navegador da Web</translation>
@@ -94,6 +93,7 @@
 <translation id="7473891865547856676">Não, obrigado</translation>
 <translation id="9191268552238695869">Um administrador instalou o Chromium neste sistema, e ele está disponível para todos os usuários. O Chromium do sistema substituirá a instalação do usuário agora.</translation>
 <translation id="3509308970982693815">Feche todas as janelas do Chromium e tente novamente.</translation>
+<translation id="8851136666856101339">main</translation>
 <translation id="4077262827416206768">Feche todas as janelas do Chromium e reinicie o Chromium para que a alteração entre em vigor.</translation>
 <translation id="6475912303565314141">Controla também qual página deve ser exibida quando você inicia o Chromium.</translation>
 <translation id="1725059042853530269">O Chromium bloqueou o arquivo <ph name="FILE_NAME"/>, porque ele pode prejudicar sua experiência de navegação.</translation>
@@ -155,6 +155,7 @@
 <translation id="5909170354645388250">Não usado no Chromium. Espaço reservado para manter sincronizados os mapas de recursos. Ele espera um argumento: $1.</translation>
 <translation id="1144202035120576837"><ph name="SITE"/> normalmente usa criptografia para proteger suas informações. Quando o Chromium tentou se conectar a <ph name="SITE"/>, o website enviou de volta credenciais
 incomuns e incorretas. Um invasor está tentando fingir ser <ph name="SITE"/>, ou uma tela de login do Wi-Fi interrompeu a ligação. Suas informações ainda estão protegidas porque o Chromium parou a conexão antes que algum dado fosse trocado.</translation>
+<translation id="2316129865977710310">Não.</translation>
 <translation id="7937630085815544518">Você estava conectado ao Chromium como <ph name="USER_EMAIL_ADDRESS"/>. Use a mesma conta para fazer login novamente.</translation>
 <translation id="2685838254101182273">O Chromium parou de ser atualizado e não oferece mais suporte para esta versão do seu sistema operacional.</translation>
 <translation id="8684913864886094367">O Chromium não foi encerrado corretamente.</translation>
@@ -168,6 +169,7 @@ incomuns e incorretas. Um invasor está tentando fingir ser <ph name="SITE"/>, o
 <translation id="2648074677641340862">Ocorreu um erro no sistema operacional durante a instalação. Faça o download do Chromium novamente.</translation>
 <translation id="5942520288919337908">A extensão <ph name="EXTENSION_NAME"/> foi adicionada ao Chromium.</translation>
 <translation id="549669000822060376">Aguarde enquanto o Chromium instala as últimas atualizações do sistema.</translation>
+<translation id="1240763998429950591">Não foi possível atualizar o Chromium para a versão mais recente, por isso você está perdendo novos recursos e correções de segurança. Você precisa atualizar o Chromium.</translation>
 <translation id="6930860321615955692">https://support.google.com/chrome/?p=ib_chromeframe</translation>
 <translation id="3281987435599047980">envia uma palavra e o contexto relacionado para a Pesquisa Google, retornando definições, imagens, resultados de pesquisa e outros detalhes.</translation>
 <translation id="4559775032954821361">Vá para
@@ -205,6 +207,7 @@ incomuns e incorretas. Um invasor está tentando fingir ser <ph name="SITE"/>, o
 <translation id="2966088006374919794">O Chromium precisa iniciar um aplicativo externo para lidar com os links <ph name="SCHEME"/>. O link solicitado é <ph name="PROTOLINK"/>.</translation>
 <translation id="2558235863893655150">Você deseja que o Chromium salve sua senha?</translation>
 <translation id="6485906693002546646">Você está usando <ph name="PROFILE_EMAIL"/> para sincronizar suas informações do Chromium. Para atualizar suas preferências de sincronização ou usar o Chromium sem uma Conta do Google, vá para <ph name="SETTINGS_LINK"/>.</translation>
+<translation id="705851970750939768">Atualizar o Chromium</translation>
 <translation id="5772805321386874569">(requer a <ph name="BEGIN_BUTTON"/>reinicialização<ph name="END_BUTTON"/> do Chromium)</translation>
 <translation id="1688750314291223739">Configure a sincronização para salvar suas características de navegador personalizadas na web e acessá-las do Chromium em qualquer computador.</translation>
 <translation id="8610831143142469229">Permitir que o Chromium acesse a rede em suas configurações de
@@ -218,7 +221,7 @@ incomuns e incorretas. Um invasor está tentando fingir ser <ph name="SITE"/>, o
 <translation id="7196020411877309443">Por que estou vendo este aviso?</translation>
 <translation id="457845228957001925">Informação importante sobre seus dados do Chromium</translation>
 <translation id="4567424176335768812">Você está conectado como <ph name="USER_EMAIL_ADDRESS"/>. Agora você pode acessar seus favoritos, histórico e outras configurações em todos os seus dispositivos conectados.</translation>
-<translation id="6429869149766938">O Chromium detectou que as configurações do navegador podem ter sido alteradas por um programa no seu computador sem seu conhecimento. Use a Software Removal Tool do Google para remover o programa.</translation>
+<translation id="6429869149766938">O Chromium detectou que as configurações do navegador podem ter sido alteradas por um programa no seu computador sem seu conhecimento. Use a Ferramenta de Remoção de Software do Google para remover o programa.</translation>
 <translation id="7483335560992089831">Não é possível instalar a mesma versão do Chromium que está sendo executada. Feche o Chromium e tente novamente.</translation>
 <translation id="1150979032973867961">Este servidor não conseguiu provar que é <ph name="DOMAIN"/>. O certificado de segurança não é confiável para o sistema operacional do seu computador. Isso pode ser causado por uma configuração incorreta ou pela interceptação da sua conexão por um invasor.</translation>
 <translation id="7641113255207688324">O Chromium não é seu navegador padrão.</translation>

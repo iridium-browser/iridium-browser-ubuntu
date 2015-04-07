@@ -214,6 +214,8 @@ int CryptoTestUtils::HandshakeWithFakeClient(
     QuicCryptoServerStream* server,
     const FakeClientOptions& options) {
   PacketSavingConnection* client_conn = new PacketSavingConnection(false);
+  // Advance the time, because timers do not like uninitialized times.
+  client_conn->AdvanceTime(QuicTime::Delta::FromSeconds(1));
   TestClientSession client_session(client_conn, DefaultQuicConfig());
   QuicCryptoClientConfig crypto_config;
 
@@ -241,7 +243,7 @@ int CryptoTestUtils::HandshakeWithFakeClient(
                                 &crypto_config);
   client_session.SetCryptoStream(&client);
 
-  CHECK(client.CryptoConnect());
+  client.CryptoConnect();
   CHECK_EQ(1u, client_conn->packets_.size());
 
   CommunicateHandshakeMessagesAndRunCallbacks(

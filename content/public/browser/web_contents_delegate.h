@@ -19,8 +19,8 @@
 #include "third_party/WebKit/public/web/WebDragOperation.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/window_open_disposition.h"
+#include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/gfx/rect_f.h"
 
 class GURL;
 
@@ -85,7 +85,7 @@ class CONTENT_EXPORT WebContentsDelegate {
   // Called to inform the delegate that the WebContents's navigation state
   // changed. The |changed_flags| indicates the parts of the navigation state
   // that have been updated.
-  virtual void NavigationStateChanged(const WebContents* source,
+  virtual void NavigationStateChanged(WebContents* source,
                                       InvalidateTypes changed_flags) {}
 
   // Called to inform the delegate that the WebContent's visible SSL state (as
@@ -176,7 +176,7 @@ class CONTENT_EXPORT WebContentsDelegate {
 
   // Returns true if javascript dialogs and unload alerts are suppressed.
   // Default is false.
-  virtual bool ShouldSuppressDialogs();
+  virtual bool ShouldSuppressDialogs(WebContents* source);
 
   // Returns whether pending NavigationEntries for aborted browser-initiated
   // navigations should be preserved (and thus returned from GetVisibleURL).
@@ -309,6 +309,7 @@ class CONTENT_EXPORT WebContentsDelegate {
   virtual bool ShouldCreateWebContents(
       WebContents* web_contents,
       int route_id,
+      int main_frame_route_id,
       WindowContainerType window_container_type,
       const base::string16& frame_name,
       const GURL& target_url,
@@ -342,7 +343,8 @@ class CONTENT_EXPORT WebContentsDelegate {
 
   // Returns a pointer to a service to manage JavaScript dialogs. May return
   // NULL in which case dialogs aren't shown.
-  virtual JavaScriptDialogManager* GetJavaScriptDialogManager();
+  virtual JavaScriptDialogManager* GetJavaScriptDialogManager(
+      WebContents* source);
 
   // Called when color chooser should open. Returns the opened color chooser.
   // Returns NULL if we failed to open the color chooser (e.g. when there is a
@@ -486,6 +488,10 @@ class CONTENT_EXPORT WebContentsDelegate {
 
   // Returns true if the WebContents is never visible.
   virtual bool IsNeverVisible(WebContents* web_contents);
+
+  // Called in response to a request to save a frame. If this returns true, the
+  // default behavior is suppressed.
+  virtual bool SaveFrame(const GURL& url, const Referrer& referrer);
 
  protected:
   virtual ~WebContentsDelegate();

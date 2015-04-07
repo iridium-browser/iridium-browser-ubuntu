@@ -923,6 +923,24 @@ void MemoryChunk::IncrementLiveBytesFromMutator(Address address, int by) {
 // -----------------------------------------------------------------------------
 // PagedSpace implementation
 
+STATIC_ASSERT(static_cast<ObjectSpace>(1 << AllocationSpace::NEW_SPACE) ==
+              ObjectSpace::kObjectSpaceNewSpace);
+STATIC_ASSERT(static_cast<ObjectSpace>(1
+                                       << AllocationSpace::OLD_POINTER_SPACE) ==
+              ObjectSpace::kObjectSpaceOldPointerSpace);
+STATIC_ASSERT(static_cast<ObjectSpace>(1 << AllocationSpace::OLD_DATA_SPACE) ==
+              ObjectSpace::kObjectSpaceOldDataSpace);
+STATIC_ASSERT(static_cast<ObjectSpace>(1 << AllocationSpace::CODE_SPACE) ==
+              ObjectSpace::kObjectSpaceCodeSpace);
+STATIC_ASSERT(static_cast<ObjectSpace>(1 << AllocationSpace::CELL_SPACE) ==
+              ObjectSpace::kObjectSpaceCellSpace);
+STATIC_ASSERT(
+    static_cast<ObjectSpace>(1 << AllocationSpace::PROPERTY_CELL_SPACE) ==
+    ObjectSpace::kObjectSpacePropertyCellSpace);
+STATIC_ASSERT(static_cast<ObjectSpace>(1 << AllocationSpace::MAP_SPACE) ==
+              ObjectSpace::kObjectSpaceMapSpace);
+
+
 PagedSpace::PagedSpace(Heap* heap, intptr_t max_capacity, AllocationSpace space,
                        Executability executable)
     : Space(heap, space, executable),
@@ -1124,7 +1142,12 @@ void PagedSpace::ReleasePage(Page* page) {
     allocation_info_.set_limit(NULL);
   }
 
-  page->Unlink();
+  // If page is still in a list, unlink it from that list.
+  if (page->next_chunk() != NULL) {
+    DCHECK(page->prev_chunk() != NULL);
+    page->Unlink();
+  }
+
   if (page->IsFlagSet(MemoryChunk::CONTAINS_ONLY_DATA)) {
     heap()->isolate()->memory_allocator()->Free(page);
   } else {
@@ -1314,7 +1337,8 @@ void NewSpace::Grow() {
   // Double the semispace size but only up to maximum capacity.
   DCHECK(TotalCapacity() < MaximumCapacity());
   int new_capacity =
-      Min(MaximumCapacity(), 2 * static_cast<int>(TotalCapacity()));
+      Min(MaximumCapacity(),
+          FLAG_semi_space_growth_factor * static_cast<int>(TotalCapacity()));
   if (to_space_.GrowTo(new_capacity)) {
     // Only grow from space if we managed to grow to-space.
     if (!from_space_.GrowTo(new_capacity)) {
@@ -2608,7 +2632,7 @@ void PagedSpace::PrepareForMarkCompact() {
 
 
 intptr_t PagedSpace::SizeOfObjects() {
-  DCHECK(FLAG_predictable ||
+  DCHECK(!FLAG_concurrent_sweeping ||
          heap()->mark_compact_collector()->sweeping_in_progress() ||
          (unswept_free_bytes_ == 0));
   return Size() - unswept_free_bytes_ - (limit() - top());

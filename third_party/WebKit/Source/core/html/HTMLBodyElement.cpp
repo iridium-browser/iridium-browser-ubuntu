@@ -33,6 +33,7 @@
 #include "core/dom/Attribute.h"
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
+#include "core/frame/ScrollToOptions.h"
 #include "core/frame/UseCounter.h"
 #include "core/html/HTMLFrameElementBase.h"
 #include "core/html/parser/HTMLParserIdioms.h"
@@ -55,7 +56,7 @@ HTMLBodyElement::~HTMLBodyElement()
 
 bool HTMLBodyElement::isPresentationAttribute(const QualifiedName& name) const
 {
-    if (name == backgroundAttr || name == marginwidthAttr || name == leftmarginAttr || name == marginheightAttr || name == topmarginAttr || name == bgcolorAttr || name == textAttr || name == bgpropertiesAttr)
+    if (name == backgroundAttr || name == marginwidthAttr || name == leftmarginAttr || name == marginheightAttr || name == topmarginAttr || name == bgcolorAttr || name == textAttr)
         return true;
     return HTMLElement::isPresentationAttribute(name);
 }
@@ -80,13 +81,9 @@ void HTMLBodyElement::collectStyleForPresentationAttribute(const QualifiedName& 
         addHTMLColorToStyle(style, CSSPropertyBackgroundColor, value);
     } else if (name == textAttr) {
         addHTMLColorToStyle(style, CSSPropertyColor, value);
-    } else if (name == bgpropertiesAttr) {
-        if (equalIgnoringCase(value, "fixed")) {
-            UseCounter::count(document(), UseCounter::BgPropertiesFixed);
-            addPropertyToPresentationAttributeStyle(style, CSSPropertyBackgroundAttachment, CSSValueFixed);
-        }
-    } else
+    } else {
         HTMLElement::collectStyleForPresentationAttribute(name, value, style);
+    }
 }
 
 void HTMLBodyElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
@@ -237,8 +234,8 @@ double HTMLBodyElement::scrollLeft()
             return 0;
     }
 
-    if (FrameView* view = document.view())
-        return adjustScrollForAbsoluteZoom(view->scrollX(), document.frame()->pageZoomFactor());
+    if (LocalDOMWindow* window = document.domWindow())
+        return window->scrollX();
     return 0;
 }
 
@@ -263,13 +260,8 @@ void HTMLBodyElement::setScrollLeft(double scrollLeft)
             return;
     }
 
-    LocalFrame* frame = document.frame();
-    if (!frame)
-        return;
-    FrameView* view = frame->view();
-    if (!view)
-        return;
-    view->setScrollPosition(DoublePoint(scrollLeft * frame->pageZoomFactor(), view->scrollY()));
+    if (LocalDOMWindow* window = document.domWindow())
+        window->scrollTo(scrollLeft, window->scrollY());
 }
 
 double HTMLBodyElement::scrollTop()
@@ -287,8 +279,8 @@ double HTMLBodyElement::scrollTop()
             return 0;
     }
 
-    if (FrameView* view = document.view())
-        return adjustScrollForAbsoluteZoom(view->scrollY(), document.frame()->pageZoomFactor());
+    if (LocalDOMWindow* window = document.domWindow())
+        return window->scrollY();
     return 0;
 }
 
@@ -313,13 +305,8 @@ void HTMLBodyElement::setScrollTop(double scrollTop)
             return;
     }
 
-    LocalFrame* frame = document.frame();
-    if (!frame)
-        return;
-    FrameView* view = frame->view();
-    if (!view)
-        return;
-    view->setScrollPosition(DoublePoint(view->scrollX(), scrollTop * frame->pageZoomFactor()));
+    if (LocalDOMWindow* window = document.domWindow())
+        window->scrollTo(window->scrollX(), scrollTop);
 }
 
 int HTMLBodyElement::scrollHeight()
@@ -338,6 +325,52 @@ int HTMLBodyElement::scrollWidth()
     document.updateLayoutIgnorePendingStylesheets();
     FrameView* view = document.view();
     return view ? adjustForZoom(view->contentsWidth(), &document) : 0;
+}
+
+void HTMLBodyElement::scrollBy(const ScrollToOptions& scrollToOptions)
+{
+    Document& document = this->document();
+
+    // FIXME: This should be removed once scroll updates are processed only after
+    // the compositing update. See http://crbug.com/420741.
+    document.updateLayoutIgnorePendingStylesheets();
+
+    if (RuntimeEnabledFeatures::scrollTopLeftInteropEnabled()) {
+        RenderBox* render = renderBox();
+        if (!render)
+            return;
+        if (render->hasOverflowClip()) {
+            scrollRenderBoxBy(scrollToOptions);
+            return;
+        }
+        if (!document.inQuirksMode())
+            return;
+    }
+
+    scrollFrameBy(scrollToOptions);
+}
+
+void HTMLBodyElement::scrollTo(const ScrollToOptions& scrollToOptions)
+{
+    Document& document = this->document();
+
+    // FIXME: This should be removed once scroll updates are processed only after
+    // the compositing update. See http://crbug.com/420741.
+    document.updateLayoutIgnorePendingStylesheets();
+
+    if (RuntimeEnabledFeatures::scrollTopLeftInteropEnabled()) {
+        RenderBox* render = renderBox();
+        if (!render)
+            return;
+        if (render->hasOverflowClip()) {
+            scrollRenderBoxTo(scrollToOptions);
+            return;
+        }
+        if (!document.inQuirksMode())
+            return;
+    }
+
+    scrollFrameTo(scrollToOptions);
 }
 
 } // namespace blink

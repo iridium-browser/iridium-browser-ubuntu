@@ -19,7 +19,7 @@ const char kGpuDriverBugListJson[] = LONG_STRING_CONST(
 {
   "name": "gpu driver bug list",
   // Please update the version number whenever you change this file.
-  "version": "7.12",
+  "version": "7.16",
   "entries": [
     {
       "id": 1,
@@ -923,17 +923,6 @@ LONG_STRING_CONST(
       ]
     },
     {
-      "id": 79,
-      "cr_bugs": [371530],
-      "description": "Testing ARB sync fences is broken on MacOSX",
-      "os": {
-        "type": "macosx"
-      },
-      "features": [
-        "disable_arb_sync"
-      ]
-    },
-    {
       "id": 82,
       "description": "PBO mappings segfault on certain older Qualcomm drivers",
       "cr_bugs": [394510],
@@ -1063,7 +1052,7 @@ LONG_STRING_CONST(
         "type": "android",
         "version": {
           "op": "<=",
-          "value": "5.0.1"
+          "value": "5.0.2"
         }
       },
       "gl_vendor": "NVIDIA.*",
@@ -1077,6 +1066,23 @@ LONG_STRING_CONST(
       ]
     },
     {
+      "id": 95,
+      "cr_bugs": [421271],
+      "description": "glClear does not always work on these drivers",
+      "os": {
+        "type": "android"
+      },
+      "gl_type": "gles",
+      "gl_version": {
+        "op": "<",
+        "value": "3.0"
+      },
+      "gl_vendor": "Imagination.*",
+      "features": [
+        "gl_clear_broken"
+      ]
+    },
+    {
       "id": 96,
       "description": "glBindFramebuffer sometimes requires a glBegin/End to take effect",
       "cr_bugs": [435786],
@@ -1085,6 +1091,31 @@ LONG_STRING_CONST(
       },
       "features": [
         "gl_begin_gl_end_on_fbo_change_to_backbuffer"
+      ]
+    },
+    {
+      "id": 97,
+      "description": "Multisampling has poor performance in Intel BayTrail",
+      "cr_bugs": [443517],
+      "os": {
+        "type": "android"
+      },
+      "gl_vendor": "Intel",
+      "gl_renderer": "Intel.*BayTrail",
+      "features": [
+        "disable_multisampling"
+      ]
+    },
+    {
+      "id": 100,
+      "description": "Disable Direct3D11 on systems with AMD switchable graphics",
+      "cr_bugs": [451420],
+      "os": {
+        "type": "win"
+      },
+      "multi_gpu_style": "amd_switchable",
+      "features": [
+        "disable_d3d11"
       ]
     }
   ]

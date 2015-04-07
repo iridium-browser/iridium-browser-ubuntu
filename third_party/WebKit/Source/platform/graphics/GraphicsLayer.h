@@ -45,12 +45,14 @@
 #include "public/platform/WebLayerClient.h"
 #include "public/platform/WebLayerScrollClient.h"
 #include "public/platform/WebNinePatchLayer.h"
+#include "third_party/skia/include/core/SkPaint.h"
 #include "wtf/OwnPtr.h"
 #include "wtf/PassOwnPtr.h"
 #include "wtf/Vector.h"
 
 namespace blink {
 
+class DisplayItemList;
 class FloatRect;
 class GraphicsContext;
 class GraphicsLayer;
@@ -129,8 +131,13 @@ public:
     };
 
     // Offset is origin of the renderer minus origin of the graphics layer (so either zero or negative).
-    IntSize offsetFromRenderer() const { return m_offsetFromRenderer; }
+    IntSize offsetFromRenderer() const { return flooredIntSize(m_offsetFromRenderer); }
     void setOffsetFromRenderer(const IntSize&, ShouldSetNeedsDisplay = SetNeedsDisplay);
+
+    // The double version is only used in |updateScrollingLayerGeometry()| for detecting
+    // scroll offset change at floating point precision.
+    DoubleSize offsetDoubleFromRenderer() const { return m_offsetFromRenderer; }
+    void setOffsetDoubleFromRenderer(const DoubleSize&, ShouldSetNeedsDisplay = SetNeedsDisplay);
 
     // The position of the layer (the location of its top-left corner in its parent)
     const FloatPoint& position() const { return m_position; }
@@ -177,6 +184,8 @@ public:
     void setIsRootForIsolatedGroup(bool);
 
     void setFilters(const FilterOperations&);
+
+    void setFilterLevel(SkPaint::FilterLevel);
 
     // Some GraphicsLayers paint only the foreground or the background content
     void setPaintingPhase(GraphicsLayerPaintingPhase);
@@ -242,12 +251,16 @@ public:
     // WebLayerScrollClient implementation.
     virtual void didScroll() override;
 
+    virtual DisplayItemList* displayItemList() override;
+
 protected:
     String debugName(WebLayer*) const;
 
     explicit GraphicsLayer(GraphicsLayerClient*);
     // GraphicsLayerFactoryChromium that wants to create a GraphicsLayer need to be friends.
     friend class GraphicsLayerFactoryChromium;
+    // for testing
+    friend class FakeGraphicsLayerFactory;
 
     // Exposed for tests.
     virtual WebLayer* contentsLayer() const { return m_contentsLayer; }
@@ -281,7 +294,7 @@ private:
     GraphicsLayerClient* m_client;
 
     // Offset from the owning renderer
-    IntSize m_offsetFromRenderer;
+    DoubleSize m_offsetFromRenderer;
 
     // Position is relative to the parent GraphicsLayer
     FloatPoint m_position;
@@ -341,6 +354,8 @@ private:
     ScrollableArea* m_scrollableArea;
     GraphicsLayerDebugInfo m_debugInfo;
     int m_3dRenderingContext;
+
+    OwnPtr<DisplayItemList> m_displayItemList;
 };
 
 } // namespace blink

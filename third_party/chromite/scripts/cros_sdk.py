@@ -6,13 +6,10 @@
 
 from __future__ import print_function
 
-import errno
 import glob
 import os
 import pwd
-import signal
 import sys
-import time
 import urlparse
 
 from chromite.cbuildbot import constants
@@ -22,6 +19,7 @@ from chromite.lib import cros_build_lib
 from chromite.lib import locking
 from chromite.lib import namespaces
 from chromite.lib import osutils
+from chromite.lib import process_util
 from chromite.lib import retry_util
 from chromite.lib import toolchain
 
@@ -97,16 +95,16 @@ def FetchRemoteTarballs(storage_dir, urls):
     content_length = 0
     print('Attempting download: %s' % url)
     result = retry_util.RunCurl(
-          ['-I', url], redirect_stdout=True, redirect_stderr=True,
-          print_cmd=False)
+        ['-I', url], redirect_stdout=True, redirect_stderr=True,
+        print_cmd=False)
     successful = False
     for header in result.output.splitlines():
       # We must walk the output to find the string '200 OK' for use cases where
       # a proxy is involved and may have pushed down the actual header.
       if header.find('200 OK') != -1:
         successful = True
-      elif header.lower().startswith("content-length:"):
-        content_length = int(header.split(":", 1)[-1].strip())
+      elif header.lower().startswith('content-length:'):
+        content_length = int(header.split(':', 1)[-1].strip())
         if successful:
           break
     if successful:
@@ -271,7 +269,7 @@ def _ProxySimSetup(options):
     apache_module_path = None
     raise SystemExit(
         'Could not find apache module path containing all required modules: %s'
-            % ', '.join(so for mod, so in apache_modules))
+        % ', '.join(so for mod, so in apache_modules))
 
   def check_add_module(name):
     so = 'mod_%s.so' % name
@@ -316,10 +314,11 @@ def _ProxySimSetup(options):
 
     # Set up child side of the network.
     commands = (
-      ('ip', 'address', 'add',
-       '%s/%u' % (PROXY_GUEST_IP, PROXY_NETMASK),
-       'dev', veth_guest),
-      ('ip', 'link', 'set', veth_guest, 'up'),
+        ('ip', 'link', 'set', 'up', 'lo'),
+        ('ip', 'address', 'add',
+         '%s/%u' % (PROXY_GUEST_IP, PROXY_NETMASK),
+         'dev', veth_guest),
+        ('ip', 'link', 'set', veth_guest, 'up'),
     )
     try:
       for cmd in commands:
@@ -361,28 +360,28 @@ def _ProxySimSetup(options):
   log_file = os.path.join(chroot_parent, '.%s-apache-proxy.log' % chroot_base)
 
   apache_directives = [
-    'User #%u' % uid,
-    'Group #%u' % gid,
-    'PidFile %s' % pid_file,
-    'ErrorLog %s' % log_file,
-    'Listen %s:%u' % (PROXY_HOST_IP, PROXY_PORT),
-    'ServerName %s' % PROXY_HOST_IP,
-    'ProxyRequests On',
-    'AllowCONNECT %s' % ' '.join(map(str, PROXY_CONNECT_PORTS)),
+      'User #%u' % uid,
+      'Group #%u' % gid,
+      'PidFile %s' % pid_file,
+      'ErrorLog %s' % log_file,
+      'Listen %s:%u' % (PROXY_HOST_IP, PROXY_PORT),
+      'ServerName %s' % PROXY_HOST_IP,
+      'ProxyRequests On',
+      'AllowCONNECT %s' % ' '.join(map(str, PROXY_CONNECT_PORTS)),
   ] + [
-    'LoadModule %s %s' % (mod, os.path.join(apache_module_path, so))
-    for (mod, so) in apache_modules
+      'LoadModule %s %s' % (mod, os.path.join(apache_module_path, so))
+      for (mod, so) in apache_modules
   ]
   commands = (
-    ('ip', 'link', 'add', 'name', veth_host,
-     'type', 'veth', 'peer', 'name', veth_guest),
-    ('ip', 'address', 'add',
-     '%s/%u' % (PROXY_HOST_IP, PROXY_NETMASK),
-     'dev', veth_host),
-    ('ip', 'link', 'set', veth_host, 'up'),
-    [apache_bin, '-f', '/dev/null']
-        + [arg for d in apache_directives for arg in ('-C', d)],
-    ('ip', 'link', 'set', veth_guest, 'netns', str(pid)),
+      ('ip', 'link', 'add', 'name', veth_host,
+       'type', 'veth', 'peer', 'name', veth_guest),
+      ('ip', 'address', 'add',
+       '%s/%u' % (PROXY_HOST_IP, PROXY_NETMASK),
+       'dev', veth_host),
+      ('ip', 'link', 'set', veth_host, 'up'),
+      ([apache_bin, '-f', '/dev/null'] +
+       [arg for d in apache_directives for arg in ('-C', d)]),
+      ('ip', 'link', 'set', veth_guest, 'netns', str(pid)),
   )
   cmd = None # Make cros lint happy.
   try:
@@ -399,113 +398,7 @@ def _ProxySimSetup(options):
   os.write(parent_writefd, SUCCESS_FLAG)
   os.close(parent_writefd)
 
-  _ExitAsStatus(os.waitpid(pid, 0)[1])
-
-
-def _ExitAsStatus(status):
-  """Exit the same way as |status|.
-
-  If the status field says it was killed by a signal, then we'll do that to
-  ourselves.  Otherwise we'll exit with the exit code.
-
-  See http://www.cons.org/cracauer/sigint.html for more details.
-
-  Args:
-    status: A status as returned by os.wait type funcs.
-  """
-  sig_status = status & 0xff
-  exit_status = (status >> 8) & 0xff
-
-  if sig_status:
-    # Kill ourselves with the same signal.
-    pid = os.getpid()
-    os.kill(pid, sig_status)
-    time.sleep(0.1)
-
-    # Still here?  Maybe the signal was masked.
-    signal.signal(sig_status, signal.SIG_DFL)
-    os.kill(pid, sig_status)
-    time.sleep(0.1)
-
-    # Still here?  Just exit.
-    exit_status = 127
-
-  # Exit with the code we want.
-  sys.exit(exit_status)
-
-
-def _ReapChildren(pid):
-  """Reap all children that get reparented to us until we see |pid| exit.
-
-  Args:
-    pid: The main child to watch for.
-
-  Returns:
-    The wait status of the |pid| child.
-  """
-  pid_status = 0
-
-  while True:
-    try:
-      (wpid, status) = os.wait()
-      if pid == wpid:
-        # Save the status of our main child so we can exit with it below.
-        pid_status = status
-    except OSError as e:
-      if e.errno == errno.ECHILD:
-        break
-      else:
-        raise
-
-  return pid_status
-
-
-def _CreatePidNamespace():
-  """Start a new pid namespace
-
-  This will launch all the right manager processes.  The child that returns
-  will be isolated in a new pid namespace.
-
-  If functionality is not available, then it will return w/out doing anything.
-
-  Returns:
-    The last pid outside of the namespace.
-  """
-  first_pid = os.getpid()
-
-  try:
-    # First create the namespace.
-    namespaces.Unshare(namespaces.CLONE_NEWPID)
-  except OSError as e:
-    if e.errno == errno.EINVAL:
-      # For older kernels, or the functionality is disabled in the config,
-      # return silently.  We don't want to hard require this stuff.
-      return first_pid
-    else:
-      # For all other errors, abort.  They shouldn't happen.
-      raise
-
-  # Now that we're in the new pid namespace, fork.  The parent is the master
-  # of it in the original namespace, so it only monitors the child inside it.
-  # It is only allowed to fork once too.
-  pid = os.fork()
-  if pid:
-    # Reap the children as the parent of the new namespace.
-    _ExitAsStatus(_ReapChildren(pid))
-  else:
-    # The child needs its own proc mount as it'll be different.
-    osutils.Mount('proc', '/proc', 'proc',
-                  osutils.MS_NOSUID | osutils.MS_NODEV | osutils.MS_NOEXEC |
-                  osutils.MS_RELATIME)
-
-    pid = os.fork()
-    if pid:
-      # Watch all of the children.  We need to act as the master inside the
-      # namespace and reap old processes.
-      _ExitAsStatus(_ReapChildren(pid))
-
-  # The grandchild will return and take over the rest of the sdk steps.
-  return first_pid
+  process_util.ExitAsStatus(os.waitpid(pid, 0)[1])
 
 
 def _ReExecuteIfNeeded(argv):
@@ -521,7 +414,7 @@ def _ReExecuteIfNeeded(argv):
     # We must set up the cgroups mounts before we enter our own namespace.
     # This way it is a shared resource in the root mount namespace.
     cgroups.Cgroup.InitSystem()
-    namespaces.Unshare(namespaces.CLONE_NEWNS | namespaces.CLONE_NEWUTS)
+    namespaces.SimpleUnshare()
 
 
 def _CreateParser(sdk_latest_version, bootstrap_latest_version):
@@ -554,9 +447,9 @@ If given args those are passed to the chroot environment, and executed."""
                     help=('''Use sdk tarball located at this url.
                              Use file:// for local files.'''))
   parser.add_option('--sdk-version', default=None,
-                    help='Use this sdk version.  For prebuilt, current is %r'
-                         ', for bootstrapping it is %r.'
-                          % (sdk_latest_version, bootstrap_latest_version))
+                    help=('Use this sdk version.  For prebuilt, current is %r'
+                          ', for bootstrapping it is %r.'
+                          % (sdk_latest_version, bootstrap_latest_version)))
 
   # Commands.
   group = parser.add_option_group('Commands')
@@ -564,7 +457,7 @@ If given args those are passed to the chroot environment, and executed."""
       '--enter', action='store_true', default=False,
       help='Enter the SDK chroot.  Implies --create.')
   group.add_option(
-      '--create', action='store_true',default=False,
+      '--create', action='store_true', default=False,
       help='Create the chroot only if it does not already exist.  '
       'Implies --download.')
   group.add_option(
@@ -592,10 +485,8 @@ If given args those are passed to the chroot environment, and executed."""
   group.add_option('--proxy-sim', action='store_true', default=False,
                    help='Simulate a restrictive network requiring an outbound'
                         ' proxy.')
-  # TODO(vapier): Turn off pid ns until ccache issues can be fixed.
-  # http://crbug.com/411984
   group.add_option('--no-ns-pid', dest='ns_pid',
-                   default=False, action='store_false',
+                   default=True, action='store_false',
                    help='Do not create a new PID namespace.')
 
   # Internal options.
@@ -632,7 +523,7 @@ def main(argv):
 
   _ReExecuteIfNeeded([sys.argv[0]] + argv)
   if options.ns_pid:
-    first_pid = _CreatePidNamespace()
+    first_pid = namespaces.CreatePidNs()
   else:
     first_pid = None
 

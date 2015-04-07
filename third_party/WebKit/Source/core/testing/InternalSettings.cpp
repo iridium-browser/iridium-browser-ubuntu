@@ -60,7 +60,6 @@ namespace blink {
 InternalSettings::Backup::Backup(Settings* settings)
     : m_originalAuthorShadowDOMForAnyElementEnabled(RuntimeEnabledFeatures::authorShadowDOMForAnyElementEnabled())
     , m_originalCSP(RuntimeEnabledFeatures::experimentalContentSecurityPolicyFeaturesEnabled())
-    , m_originalLaxMixedContentCheckingEnabled(RuntimeEnabledFeatures::laxMixedContentCheckingEnabled())
     , m_originalOverlayScrollbarsEnabled(RuntimeEnabledFeatures::overlayScrollbarsEnabled())
     , m_originalEditingBehavior(settings->editingBehaviorType())
     , m_originalTextAutosizingEnabled(settings->textAutosizingEnabled())
@@ -75,6 +74,7 @@ InternalSettings::Backup::Backup(Settings* settings)
     , m_originalLayerSquashingEnabled(settings->layerSquashingEnabled())
     , m_originalPseudoClassesInMatchingCriteriaInAuthorShadowTreesEnabled(RuntimeEnabledFeatures::pseudoClassesInMatchingCriteriaInAuthorShadowTreesEnabled())
     , m_originalImageColorProfilesEnabled(RuntimeEnabledFeatures::imageColorProfilesEnabled())
+    , m_originalImageAnimationPolicy(settings->imageAnimationPolicy())
 {
 }
 
@@ -82,7 +82,6 @@ void InternalSettings::Backup::restoreTo(Settings* settings)
 {
     RuntimeEnabledFeatures::setAuthorShadowDOMForAnyElementEnabled(m_originalAuthorShadowDOMForAnyElementEnabled);
     RuntimeEnabledFeatures::setExperimentalContentSecurityPolicyFeaturesEnabled(m_originalCSP);
-    RuntimeEnabledFeatures::setLaxMixedContentCheckingEnabled(m_originalLaxMixedContentCheckingEnabled);
     RuntimeEnabledFeatures::setOverlayScrollbarsEnabled(m_originalOverlayScrollbarsEnabled);
     settings->setEditingBehaviorType(m_originalEditingBehavior);
     settings->setTextAutosizingEnabled(m_originalTextAutosizingEnabled);
@@ -94,10 +93,10 @@ void InternalSettings::Backup::restoreTo(Settings* settings)
     RuntimeEnabledFeatures::setLangAttributeAwareFormControlUIEnabled(m_langAttributeAwareFormControlUIEnabled);
     settings->setImagesEnabled(m_imagesEnabled);
     settings->setDefaultVideoPosterURL(m_defaultVideoPosterURL);
-    settings->setLayerSquashingEnabled(m_originalLayerSquashingEnabled);
     settings->genericFontFamilySettings().reset();
     RuntimeEnabledFeatures::setPseudoClassesInMatchingCriteriaInAuthorShadowTreesEnabled(m_originalPseudoClassesInMatchingCriteriaInAuthorShadowTreesEnabled);
     RuntimeEnabledFeatures::setImageColorProfilesEnabled(m_originalImageColorProfilesEnabled);
+    settings->setImageAnimationPolicy(m_originalImageAnimationPolicy);
 }
 
 #if ENABLE(OILPAN)
@@ -189,11 +188,6 @@ void InternalSettings::setExperimentalContentSecurityPolicyFeaturesEnabled(bool 
     RuntimeEnabledFeatures::setExperimentalContentSecurityPolicyFeaturesEnabled(enabled);
 }
 
-void InternalSettings::setLaxMixedContentCheckingEnabled(bool enabled)
-{
-    RuntimeEnabledFeatures::setLaxMixedContentCheckingEnabled(enabled);
-}
-
 void InternalSettings::setPseudoClassesInMatchingCriteriaInAuthorShadowTreesEnabled(bool enabled)
 {
     RuntimeEnabledFeatures::setPseudoClassesInMatchingCriteriaInAuthorShadowTreesEnabled(enabled);
@@ -213,14 +207,6 @@ void InternalSettings::setViewportEnabled(bool enabled, ExceptionState& exceptio
 {
     InternalSettingsGuardForSettings();
     settings()->setViewportEnabled(enabled);
-}
-
-// FIXME: This is a temporary flag and should be removed once squashing is
-// ready (crbug.com/261605).
-void InternalSettings::setLayerSquashingEnabled(bool enabled, ExceptionState& exceptionState)
-{
-    InternalSettingsGuardForSettings();
-    settings()->setLayerSquashingEnabled(enabled);
 }
 
 void InternalSettings::setStandardFontFamily(const AtomicString& family, const String& script, ExceptionState& exceptionState)
@@ -447,4 +433,16 @@ void InternalSettings::setPrimaryHoverType(const String& type, ExceptionState& e
     settings()->setPrimaryHoverType(hoverType);
 }
 
+void InternalSettings::setImageAnimationPolicy(const String& policy, ExceptionState& exceptionState)
+{
+    InternalSettingsGuardForSettings();
+    if (equalIgnoringCase(policy, "allowed"))
+        settings()->setImageAnimationPolicy(ImageAnimationPolicyAllowed);
+    else if (equalIgnoringCase(policy, "once"))
+        settings()->setImageAnimationPolicy(ImageAnimationPolicyAnimateOnce);
+    else if (equalIgnoringCase(policy, "none"))
+        settings()->setImageAnimationPolicy(ImageAnimationPolicyNoAnimation);
+    else
+        exceptionState.throwDOMException(SyntaxError, "The image animation policy provided ('" + policy + "') is invalid.");
+}
 }

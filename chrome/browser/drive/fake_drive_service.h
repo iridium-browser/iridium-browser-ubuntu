@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_DRIVE_FAKE_DRIVE_SERVICE_H_
 
 #include "base/files/file_path.h"
+#include "base/threading/thread_checker.h"
 #include "chrome/browser/drive/drive_service_interface.h"
 
 namespace base {
@@ -217,13 +218,13 @@ class FakeDriveService : public DriveServiceInterface {
       int64 content_length,
       const std::string& parent_resource_id,
       const std::string& title,
-      const InitiateUploadNewFileOptions& options,
+      const UploadNewFileOptions& options,
       const google_apis::InitiateUploadCallback& callback) override;
   google_apis::CancelCallback InitiateUploadExistingFile(
       const std::string& content_type,
       int64 content_length,
       const std::string& resource_id,
-      const InitiateUploadExistingFileOptions& options,
+      const UploadExistingFileOptions& options,
       const google_apis::InitiateUploadCallback& callback) override;
   google_apis::CancelCallback ResumeUpload(
       const GURL& upload_url,
@@ -238,6 +239,23 @@ class FakeDriveService : public DriveServiceInterface {
       const GURL& upload_url,
       int64 content_length,
       const google_apis::drive::UploadRangeCallback& callback) override;
+  google_apis::CancelCallback MultipartUploadNewFile(
+      const std::string& content_type,
+      int64 content_length,
+      const std::string& parent_resource_id,
+      const std::string& title,
+      const base::FilePath& local_file_path,
+      const UploadNewFileOptions& options,
+      const google_apis::FileResourceCallback& callback,
+      const google_apis::ProgressCallback& progress_callback) override;
+  google_apis::CancelCallback MultipartUploadExistingFile(
+      const std::string& content_type,
+      int64 content_length,
+      const std::string& resource_id,
+      const base::FilePath& local_file_path,
+      const UploadExistingFileOptions& options,
+      const google_apis::FileResourceCallback& callback,
+      const google_apis::ProgressCallback& progress_callback) override;
   google_apis::CancelCallback AuthorizeApp(
       const std::string& resource_id,
       const std::string& app_id,
@@ -346,6 +364,9 @@ class FakeDriveService : public DriveServiceInterface {
   GURL GetNewUploadSessionUrl();
 
   void NotifyObservers();
+
+  // The class is expected to run on UI thread.
+  base::ThreadChecker thread_checker_;
 
   typedef std::map<std::string, EntryInfo*> EntryInfoMap;
   EntryInfoMap entries_;

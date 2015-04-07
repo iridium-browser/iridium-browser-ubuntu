@@ -55,9 +55,9 @@ def DecodeEscaping(data):
   escape = False
   for byte in data:
     if escape:
-      ret += chr(ord(byte) ^ 0x20)
+      last = chr(ord(byte) ^ 0x20)
+      ret += last
       escape = False
-      last = byte
     elif repeat:
       count = ord(byte) - 29
       assert count >= 3 and count <= 97
@@ -291,7 +291,7 @@ def GetSymbols():
   proc = subprocess.Popen([NM_TOOL, '--format=posix', nexe_filename],
                           stdout=subprocess.PIPE)
   for line in proc.stdout:
-    match = re.match('(\S+) [TtWwBD] ([0-9a-fA-F]+)', line)
+    match = re.match('(\S+) [TtWwBbDd] ([0-9a-fA-F]+)', line)
     if match is not None:
       name = match.group(1)
       addr = int(match.group(2), 16)

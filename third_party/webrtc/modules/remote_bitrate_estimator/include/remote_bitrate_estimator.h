@@ -73,7 +73,7 @@ class RemoteBitrateEstimator : public CallStatsObserver, public Module {
   // packet size excluding headers.
   // Note that |arrival_time_ms| can be of an arbitrary time base.
   virtual void IncomingPacket(int64_t arrival_time_ms,
-                              int payload_size,
+                              size_t payload_size,
                               const RTPHeader& header) = 0;
 
   // Removes all data for |ssrc|.
@@ -89,8 +89,8 @@ class RemoteBitrateEstimator : public CallStatsObserver, public Module {
   virtual bool GetStats(ReceiveBandwidthEstimatorStats* output) const = 0;
 
  protected:
-  static const int kProcessIntervalMs = 1000;
-  static const int kStreamTimeOutMs = 2000;
+  static const int64_t kProcessIntervalMs = 1000;
+  static const int64_t kStreamTimeOutMs = 2000;
 };
 
 struct RemoteBitrateEstimatorFactory {

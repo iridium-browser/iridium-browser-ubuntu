@@ -7,7 +7,6 @@
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_sync_service.h"
-#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -46,23 +45,9 @@ LaunchType GetLaunchType(const ExtensionPrefs* prefs,
                          const Extension* extension) {
   LaunchType result = LAUNCH_TYPE_DEFAULT;
 
-  // Launch hosted apps as windows by default for streamlined hosted apps.
-  if (util::IsStreamlinedHostedAppsEnabled() &&
-      extension->id() != extension_misc::kChromeAppId) {
-    result = LAUNCH_TYPE_WINDOW;
-  }
-
   int value = GetLaunchTypePrefValue(prefs, extension->id());
   if (value >= LAUNCH_TYPE_FIRST && value < NUM_LAUNCH_TYPES)
     result = static_cast<LaunchType>(value);
-
-#if defined(OS_MACOSX)
-    // App windows are not yet supported on mac.  Pref sync could make
-    // the launch type LAUNCH_TYPE_WINDOW, even if there is no UI to set it
-    // on mac.
-    if (!extension->is_platform_app() && result == LAUNCH_TYPE_WINDOW)
-      result = LAUNCH_TYPE_REGULAR;
-#endif
 
   return result;
 }

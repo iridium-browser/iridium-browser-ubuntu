@@ -48,11 +48,6 @@ class GCMProfileService : public KeyedService {
   // KeyedService:
   void Shutdown() override;
 
-  // Returns the user name if the profile is signed in or an empty string
-  // otherwise.
-  // TODO(jianli): To be removed when sign-in enforcement is dropped.
-  std::string SignedInUserName() const;
-
   // For testing purpose.
   void SetDriverForTesting(GCMDriver* driver);
 
@@ -75,13 +70,10 @@ class GCMProfileService : public KeyedService {
   // Implementation of content::PushMessagingService using GCMProfileService.
   PushMessagingServiceImpl push_messaging_service_;
 
-  // TODO(jianli): To be removed when sign-in enforcement is dropped.
+  // Used for both account tracker and GCM.UserSignedIn UMA.
 #if !defined(OS_ANDROID)
   class IdentityObserver;
   scoped_ptr<IdentityObserver> identity_observer_;
-#endif
-#if defined(OS_CHROMEOS)
-  scoped_ptr<GCMConnectionObserver> chromeos_connection_observer_;
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(GCMProfileService);

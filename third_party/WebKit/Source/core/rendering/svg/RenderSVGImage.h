@@ -26,9 +26,10 @@
 
 #include "core/rendering/svg/RenderSVGModelObject.h"
 
+class SkPicture;
+
 namespace blink {
 
-class DisplayList;
 class RenderImageResource;
 class SVGImageElement;
 
@@ -45,9 +46,8 @@ public:
     RenderImageResource* imageResource() { return m_imageResource.get(); }
 
     virtual const AffineTransform& localToParentTransform() const override { return m_localTransform; }
-    RefPtr<DisplayList>& bufferedForeground() { return m_bufferedForeground; }
+    RefPtr<const SkPicture>& bufferedForeground() { return m_bufferedForeground; }
 
-    virtual FloatRect paintInvalidationRectInLocalCoordinates() const override { return m_paintInvalidationBoundingBox; }
     virtual FloatRect objectBoundingBox() const override { return m_objectBoundingBox; }
     virtual bool isOfType(RenderObjectType type) const override { return type == RenderObjectSVGImage || RenderSVGModelObject::isOfType(type); }
 
@@ -56,12 +56,12 @@ private:
 
     virtual FloatRect strokeBoundingBox() const override { return m_objectBoundingBox; }
 
-    virtual void addFocusRingRects(Vector<LayoutRect>&, const LayoutPoint& additionalOffset, const RenderLayerModelObject* paintContainer) const override;
+    virtual void addFocusRingRects(Vector<LayoutRect>&, const LayoutPoint& additionalOffset) const override;
 
     virtual void imageChanged(WrappedImagePtr, const IntRect* = 0) override;
 
     virtual void layout() override;
-    virtual void paint(PaintInfo&, const LayoutPoint&) override;
+    virtual void paint(const PaintInfo&, const LayoutPoint&) override;
 
     FloatSize computeImageViewportSize(ImageResource&) const;
 
@@ -73,10 +73,9 @@ private:
     bool m_needsTransformUpdate : 1;
     AffineTransform m_localTransform;
     FloatRect m_objectBoundingBox;
-    FloatRect m_paintInvalidationBoundingBox;
     OwnPtr<RenderImageResource> m_imageResource;
 
-    RefPtr<DisplayList> m_bufferedForeground;
+    RefPtr<const SkPicture> m_bufferedForeground;
 };
 
 DEFINE_RENDER_OBJECT_TYPE_CASTS(RenderSVGImage, isSVGImage());

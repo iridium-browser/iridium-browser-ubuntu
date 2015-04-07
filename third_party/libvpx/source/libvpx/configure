@@ -26,6 +26,7 @@ Advanced options:
   ${toggle_unit_tests}            unit tests
   ${toggle_decode_perf_tests}     build decoder perf tests with unit tests
   ${toggle_encode_perf_tests}     build encoder perf tests with unit tests
+  --cpu=CPU                       tune for the specified CPU (ARM: cortex-a8, X86: sse3)
   --libc=PATH                     path to alternate libc
   --size-limit=WxH                max size to allow in the decoder
   --as={yasm|nasm|auto}           use specified assembler [auto, yasm preferred]
@@ -56,6 +57,8 @@ Advanced options:
   ${toggle_postproc_visualizer}   macro block / block level visualizers
   ${toggle_multi_res_encoding}    enable multiple-resolution encoding
   ${toggle_temporal_denoising}    enable temporal denoising and disable the spatial denoiser
+  ${toggle_vp9_temporal_denoising}
+                                  enable vp9 temporal denoising
   ${toggle_webm_io}               enable input from and output to WebM container
   ${toggle_libyuv}                enable libyuv
 
@@ -93,10 +96,6 @@ EOF
 
 # all_platforms is a list of all supported target platforms. Maintain
 # alphabetically by architecture, generic-gnu last.
-all_platforms="${all_platforms} armv5te-android-gcc"
-all_platforms="${all_platforms} armv5te-linux-rvct"
-all_platforms="${all_platforms} armv5te-linux-gcc"
-all_platforms="${all_platforms} armv5te-none-rvct"
 all_platforms="${all_platforms} armv6-darwin-gcc"
 all_platforms="${all_platforms} armv6-linux-rvct"
 all_platforms="${all_platforms} armv6-linux-gcc"
@@ -279,7 +278,6 @@ HAVE_LIST="
 "
 EXPERIMENT_LIST="
     spatial_svc
-    vp9_temporal_denoising
     fp_mb_stats
     emulate_hardware
 "
@@ -334,6 +332,7 @@ CONFIG_LIST="
     encode_perf_tests
     multi_res_encoding
     temporal_denoising
+    vp9_temporal_denoising
     coefficient_range_checking
     vp9_highbitdepth
     experimental
@@ -393,6 +392,7 @@ CMDLINE_SELECT="
     encode_perf_tests
     multi_res_encoding
     temporal_denoising
+    vp9_temporal_denoising
     coefficient_range_checking
     vp9_highbitdepth
     experimental
@@ -450,8 +450,6 @@ post_process_cmdline() {
 process_targets() {
     enabled child || write_common_config_banner
     enabled universal || write_common_target_config_h  ${BUILD_PFX}vpx_config.h
-
-    # TODO: add host tools target (obj_int_extract, etc)
 
     # For fat binaries, call configure recursively to configure for each
     # binary architecture to be included.

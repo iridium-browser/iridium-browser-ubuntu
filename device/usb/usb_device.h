@@ -8,7 +8,6 @@
 #include "base/basictypes.h"
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
-#include "base/observer_list.h"
 #include "base/strings/string16.h"
 
 namespace device {
@@ -21,11 +20,6 @@ struct UsbConfigDescriptor;
 // UsbDeviceHandle must be created from Open() method.
 class UsbDevice : public base::RefCountedThreadSafe<UsbDevice> {
  public:
-  class Observer {
-   public:
-    virtual void OnDisconnect(scoped_refptr<UsbDevice> device) = 0;
-  };
-
   // Accessors to basic information.
   uint16 vendor_id() const { return vendor_id_; }
   uint16 product_id() const { return product_id_; }
@@ -51,33 +45,30 @@ class UsbDevice : public base::RefCountedThreadSafe<UsbDevice> {
   // Blocking method. Must be called on FILE thread.
   virtual bool Close(scoped_refptr<UsbDeviceHandle> handle) = 0;
 
-  // Gets the UsbConfigDescriptor for the active device configuration.
+  // Gets the UsbConfigDescriptor for the active device configuration or nullptr
+  // if the device is unconfigured.
   // Blocking method. Must be called on FILE thread.
-  virtual const UsbConfigDescriptor& GetConfiguration() = 0;
+  virtual const UsbConfigDescriptor* GetConfiguration() = 0;
 
-  // Gets the manufacturer string of the device, or returns false.
-  // Blocking method. Must be called on FILE thread.
+  // Gets the manufacturer string of the device, or false and an empty
+  // string. This is a blocking method and must be called on FILE thread.
   // TODO(reillyg): Make this available from the UI thread. crbug.com/427985
   virtual bool GetManufacturer(base::string16* manufacturer) = 0;
 
-  // Gets the product string of the device, or returns false.
-  // Blocking method. Must be called on FILE thread.
+  // Gets the product string of the device, or returns false and an empty
+  // string. This is a blocking method and must be called on FILE thread.
   // TODO(reillyg): Make this available from the UI thread. crbug.com/427985
   virtual bool GetProduct(base::string16* product) = 0;
 
-  // Gets the serial number string of the device, or returns false.
-  // Blocking method. Must be called on FILE thread.
+  // Gets the serial number string of the device, or returns false and an empty
+  // string. This is a blocking method and must be called on FILE thread.
   // TODO(reillyg): Make this available from the UI thread. crbug.com/427985
   virtual bool GetSerialNumber(base::string16* serial) = 0;
 
-  void AddObserver(Observer* obs) { observer_list_.AddObserver(obs); }
-  void RemoveObserver(Observer* obs) { observer_list_.RemoveObserver(obs); }
-
  protected:
-  UsbDevice(uint16 vendor_id, uint16 product_id, uint32 unique_id);
-  virtual ~UsbDevice();
-
-  void NotifyDisconnect();
+  UsbDevice(uint16 vendor_id, uint16 product_id, uint32 unique_id)
+      : vendor_id_(vendor_id), product_id_(product_id), unique_id_(unique_id) {}
+  virtual ~UsbDevice() {}
 
  private:
   friend class base::RefCountedThreadSafe<UsbDevice>;
@@ -85,8 +76,6 @@ class UsbDevice : public base::RefCountedThreadSafe<UsbDevice> {
   const uint16 vendor_id_;
   const uint16 product_id_;
   const uint32 unique_id_;
-
-  ObserverList<Observer> observer_list_;
 
   DISALLOW_COPY_AND_ASSIGN(UsbDevice);
 };

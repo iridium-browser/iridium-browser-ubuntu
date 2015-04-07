@@ -18,11 +18,10 @@
 #include "content/public/common/content_switches.h"
 #include "media/base/bitstream_buffer.h"
 
-#define NOTIFY_ERROR(x)                            \
-  do {                                             \
-    SetEncoderState(kError);                       \
-    LOG(ERROR) << "calling NotifyError(): " << x;  \
-    NotifyError(x);                                \
+#define NOTIFY_ERROR(x)                        \
+  do {                                         \
+    LOG(ERROR) << "Setting error state:" << x; \
+    SetErrorState(x);                          \
   } while (0)
 
 #define IOCTL_OR_ERROR_RETURN_VALUE(type, arg, value)              \
@@ -59,12 +58,18 @@ struct V4L2VideoEncodeAccelerator::BitstreamBufferRef {
 V4L2VideoEncodeAccelerator::InputRecord::InputRecord() : at_device(false) {
 }
 
+V4L2VideoEncodeAccelerator::InputRecord::~InputRecord() {
+}
+
 V4L2VideoEncodeAccelerator::OutputRecord::OutputRecord()
     : at_device(false), address(NULL), length(0) {
 }
 
+V4L2VideoEncodeAccelerator::OutputRecord::~OutputRecord() {
+}
+
 V4L2VideoEncodeAccelerator::V4L2VideoEncodeAccelerator(
-    scoped_ptr<V4L2Device> device)
+    const scoped_refptr<V4L2Device>& device)
     : child_message_loop_proxy_(base::MessageLoopProxy::current()),
       output_buffer_byte_size_(0),
       device_input_format_(media::VideoFrame::UNKNOWN),
@@ -72,7 +77,7 @@ V4L2VideoEncodeAccelerator::V4L2VideoEncodeAccelerator(
       output_format_fourcc_(0),
       encoder_state_(kUninitialized),
       stream_header_size_(0),
-      device_(device.Pass()),
+      device_(device),
       input_streamon_(false),
       input_buffer_queued_count_(0),
       input_memory_type_(V4L2_MEMORY_USERPTR),
@@ -133,9 +138,9 @@ bool V4L2VideoEncodeAccelerator::Initialize(
     DVLOG(1) << "Input format not supported by the HW, will convert to "
              << media::VideoFrame::FormatToString(device_input_format_);
 
-    scoped_ptr<V4L2Device> device =
+    scoped_refptr<V4L2Device> device =
         V4L2Device::Create(V4L2Device::kImageProcessor);
-    image_processor_.reset(new V4L2ImageProcessor(device.Pass()));
+    image_processor_.reset(new V4L2ImageProcessor(device));
 
     // Convert from input_format to device_input_format_, keeping the size
     // at visible_size_ and requiring the output buffers to be of at least
@@ -166,7 +171,7 @@ bool V4L2VideoEncodeAccelerator::Initialize(
 
   RequestEncodingParametersChange(initial_bitrate, kInitialFramerate);
 
-  SetEncoderState(kInitialized);
+  encoder_state_ = kInitialized;
 
   child_message_loop_proxy_->PostTask(
       FROM_HERE,
@@ -275,7 +280,7 @@ void V4L2VideoEncodeAccelerator::Destroy() {
   }
 
   // Set to kError state just in case.
-  SetEncoderState(kError);
+  encoder_state_ = kError;
 
   delete this;
 }
@@ -284,21 +289,25 @@ std::vector<media::VideoEncodeAccelerator::SupportedProfile>
 V4L2VideoEncodeAccelerator::GetSupportedProfiles() {
   std::vector<SupportedProfile> profiles;
   SupportedProfile profile;
-
-  const base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
-  if (cmd_line->HasSwitch(switches::kEnableWebRtcHWVp8Encoding)) {
-    profile.profile = media::VP8PROFILE_ANY;
-    profile.max_resolution.SetSize(1920, 1088);
-    profile.max_framerate_numerator = 30;
-    profile.max_framerate_denominator = 1;
-    profiles.push_back(profile);
-  }
-
-  profile.profile = media::H264PROFILE_MAIN;
   profile.max_resolution.SetSize(1920, 1088);
   profile.max_framerate_numerator = 30;
   profile.max_framerate_denominator = 1;
-  profiles.push_back(profile);
+
+  v4l2_fmtdesc fmtdesc;
+  memset(&fmtdesc, 0, sizeof(fmtdesc));
+  fmtdesc.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+  for (; device_->Ioctl(VIDIOC_ENUM_FMT, &fmtdesc) == 0; ++fmtdesc.index) {
+    switch (fmtdesc.pixelformat) {
+      case V4L2_PIX_FMT_H264:
+        profile.profile = media::H264PROFILE_MAIN;
+        profiles.push_back(profile);
+        break;
+      case V4L2_PIX_FMT_VP8:
+        profile.profile = media::VP8PROFILE_ANY;
+        profiles.push_back(profile);
+        break;
+    }
+  }
 
   return profiles;
 }
@@ -338,16 +347,17 @@ void V4L2VideoEncodeAccelerator::EncodeTask(
     // incoming input frame, we should queue the parameters together with the
     // frame onto encoder_input_queue_ and apply them when the input is about
     // to be queued to the codec.
-    struct v4l2_ext_control ctrls[1];
-    struct v4l2_ext_controls control;
-    memset(&ctrls, 0, sizeof(ctrls));
-    memset(&control, 0, sizeof(control));
-    ctrls[0].id = V4L2_CID_MPEG_MFC51_VIDEO_FORCE_FRAME_TYPE;
-    ctrls[0].value = V4L2_MPEG_MFC51_VIDEO_FORCE_FRAME_TYPE_I_FRAME;
-    control.ctrl_class = V4L2_CTRL_CLASS_MPEG;
-    control.count = 1;
-    control.controls = ctrls;
-    IOCTL_OR_ERROR_RETURN(VIDIOC_S_EXT_CTRLS, &control);
+    std::vector<struct v4l2_ext_control> ctrls;
+    struct v4l2_ext_control ctrl;
+    memset(&ctrl, 0, sizeof(ctrl));
+    ctrl.id = V4L2_CID_MPEG_MFC51_VIDEO_FORCE_FRAME_TYPE;
+    ctrl.value = V4L2_MPEG_MFC51_VIDEO_FORCE_FRAME_TYPE_I_FRAME;
+    ctrls.push_back(ctrl);
+    if (!SetExtCtrls(ctrls)) {
+      LOG(ERROR) << "Failed requesting keyframe";
+      NOTIFY_ERROR(kPlatformFailureError);
+      return;
+    }
   }
 }
 
@@ -491,7 +501,7 @@ void V4L2VideoEncodeAccelerator::Dequeue() {
     memset(&dqbuf, 0, sizeof(dqbuf));
     memset(&planes, 0, sizeof(planes));
     dqbuf.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
-    dqbuf.memory = V4L2_MEMORY_MMAP;
+    dqbuf.memory = input_memory_type_;
     dqbuf.m.planes = planes;
     dqbuf.length = input_planes_count_;
     if (device_->Ioctl(VIDIOC_DQBUF, &dqbuf) != 0) {
@@ -772,21 +782,23 @@ void V4L2VideoEncodeAccelerator::NotifyError(Error error) {
   }
 }
 
-void V4L2VideoEncodeAccelerator::SetEncoderState(State state) {
-  DVLOG(3) << "SetEncoderState(): state=" << state;
-
+void V4L2VideoEncodeAccelerator::SetErrorState(Error error) {
   // We can touch encoder_state_ only if this is the encoder thread or the
   // encoder thread isn't running.
   if (encoder_thread_.message_loop() != NULL &&
       encoder_thread_.message_loop() != base::MessageLoop::current()) {
     encoder_thread_.message_loop()->PostTask(
-        FROM_HERE,
-        base::Bind(&V4L2VideoEncodeAccelerator::SetEncoderState,
-                   base::Unretained(this),
-                   state));
-  } else {
-    encoder_state_ = state;
+        FROM_HERE, base::Bind(&V4L2VideoEncodeAccelerator::SetErrorState,
+                              base::Unretained(this), error));
+    return;
   }
+
+  // Post NotifyError only if we are already initialized, as the API does
+  // not allow doing so before that.
+  if (encoder_state_ != kError && encoder_state_ != kUninitialized)
+    NotifyError(error);
+
+  encoder_state_ = kError;
 }
 
 void V4L2VideoEncodeAccelerator::RequestEncodingParametersChangeTask(
@@ -801,16 +813,17 @@ void V4L2VideoEncodeAccelerator::RequestEncodingParametersChangeTask(
   if (framerate < 1)
     framerate = 1;
 
-  struct v4l2_ext_control ctrls[1];
-  struct v4l2_ext_controls control;
-  memset(&ctrls, 0, sizeof(ctrls));
-  memset(&control, 0, sizeof(control));
-  ctrls[0].id = V4L2_CID_MPEG_VIDEO_BITRATE;
-  ctrls[0].value = bitrate;
-  control.ctrl_class = V4L2_CTRL_CLASS_MPEG;
-  control.count = arraysize(ctrls);
-  control.controls = ctrls;
-  IOCTL_OR_ERROR_RETURN(VIDIOC_S_EXT_CTRLS, &control);
+  std::vector<struct v4l2_ext_control> ctrls;
+  struct v4l2_ext_control ctrl;
+  memset(&ctrl, 0, sizeof(ctrl));
+  ctrl.id = V4L2_CID_MPEG_VIDEO_BITRATE;
+  ctrl.value = bitrate;
+  ctrls.push_back(ctrl);
+  if (!SetExtCtrls(ctrls)) {
+    LOG(ERROR) << "Failed changing bitrate";
+    NOTIFY_ERROR(kPlatformFailureError);
+    return;
+  }
 
   struct v4l2_streamparm parms;
   memset(&parms, 0, sizeof(parms));
@@ -829,7 +842,7 @@ bool V4L2VideoEncodeAccelerator::SetOutputFormat(
   DCHECK(!output_streamon_);
 
   output_format_fourcc_ =
-      V4L2Device::VideoCodecProfileToV4L2PixFmt(output_profile);
+      V4L2Device::VideoCodecProfileToV4L2PixFmt(output_profile, false);
   if (!output_format_fourcc_) {
     LOG(ERROR) << "Initialize(): invalid output_profile=" << output_profile;
     return false;
@@ -932,7 +945,7 @@ bool V4L2VideoEncodeAccelerator::SetFormats(
 
   struct v4l2_crop crop;
   memset(&crop, 0, sizeof(crop));
-  crop.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+  crop.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
   crop.c.left = 0;
   crop.c.top = 0;
   crop.c.width = visible_size_.width();
@@ -942,44 +955,87 @@ bool V4L2VideoEncodeAccelerator::SetFormats(
   return true;
 }
 
+bool V4L2VideoEncodeAccelerator::SetExtCtrls(
+    std::vector<struct v4l2_ext_control> ctrls) {
+  struct v4l2_ext_controls ext_ctrls;
+  memset(&ext_ctrls, 0, sizeof(ext_ctrls));
+  ext_ctrls.ctrl_class = V4L2_CTRL_CLASS_MPEG;
+  ext_ctrls.count = ctrls.size();
+  ext_ctrls.controls = &ctrls[0];
+  return device_->Ioctl(VIDIOC_S_EXT_CTRLS, &ext_ctrls) == 0;
+}
+
 bool V4L2VideoEncodeAccelerator::InitControls() {
-  struct v4l2_ext_control ctrls[9];
-  struct v4l2_ext_controls control;
-  memset(&ctrls, 0, sizeof(ctrls));
-  memset(&control, 0, sizeof(control));
-  // No B-frames, for lowest decoding latency.
-  ctrls[0].id = V4L2_CID_MPEG_VIDEO_B_FRAMES;
-  ctrls[0].value = 0;
-  // Enable frame-level bitrate control.
-  ctrls[1].id = V4L2_CID_MPEG_VIDEO_FRAME_RC_ENABLE;
-  ctrls[1].value = 1;
+  std::vector<struct v4l2_ext_control> ctrls;
+  struct v4l2_ext_control ctrl;
+
+  // Enable frame-level bitrate control. This is the only mandatory control.
+  memset(&ctrl, 0, sizeof(ctrl));
+  ctrl.id = V4L2_CID_MPEG_VIDEO_FRAME_RC_ENABLE;
+  ctrl.value = 1;
+  ctrls.push_back(ctrl);
+  if (!SetExtCtrls(ctrls)) {
+    LOG(ERROR) << "Failed enabling bitrate control";
+    NOTIFY_ERROR(kPlatformFailureError);
+    return false;
+  }
+
+  // Optional controls.
+  ctrls.clear();
+  if (output_format_fourcc_ == V4L2_PIX_FMT_H264) {
+    // No B-frames, for lowest decoding latency.
+    memset(&ctrl, 0, sizeof(ctrl));
+    ctrl.id = V4L2_CID_MPEG_VIDEO_B_FRAMES;
+    ctrl.value = 0;
+    ctrls.push_back(ctrl);
+
+    // Quantization parameter maximum value (for variable bitrate control).
+    memset(&ctrl, 0, sizeof(ctrl));
+    ctrl.id = V4L2_CID_MPEG_VIDEO_H264_MAX_QP;
+    ctrl.value = 51;
+    ctrls.push_back(ctrl);
+
+    // Use H.264 level 4.0 to match the supported max resolution.
+    memset(&ctrl, 0, sizeof(ctrl));
+    ctrl.id = V4L2_CID_MPEG_VIDEO_H264_LEVEL;
+    ctrl.value = V4L2_MPEG_VIDEO_H264_LEVEL_4_0;
+    ctrls.push_back(ctrl);
+
+    // Separate stream header so we can cache it and insert into the stream.
+    memset(&ctrl, 0, sizeof(ctrl));
+    ctrl.id = V4L2_CID_MPEG_VIDEO_HEADER_MODE;
+    ctrl.value = V4L2_MPEG_VIDEO_HEADER_MODE_SEPARATE;
+    ctrls.push_back(ctrl);
+  }
+
   // Enable "tight" bitrate mode. For this to work properly, frame- and mb-level
   // bitrate controls have to be enabled as well.
-  ctrls[2].id = V4L2_CID_MPEG_MFC51_VIDEO_RC_REACTION_COEFF;
-  ctrls[2].value = 1;
+  memset(&ctrl, 0, sizeof(ctrl));
+  ctrl.id = V4L2_CID_MPEG_MFC51_VIDEO_RC_REACTION_COEFF;
+  ctrl.value = 1;
+  ctrls.push_back(ctrl);
+
   // Force bitrate control to average over a GOP (for tight bitrate
   // tolerance).
-  ctrls[3].id = V4L2_CID_MPEG_MFC51_VIDEO_RC_FIXED_TARGET_BIT;
-  ctrls[3].value = 1;
-  // Quantization parameter maximum value (for variable bitrate control).
-  ctrls[4].id = V4L2_CID_MPEG_VIDEO_H264_MAX_QP;
-  ctrls[4].value = 51;
-  // Separate stream header so we can cache it and insert into the stream.
-  ctrls[5].id = V4L2_CID_MPEG_VIDEO_HEADER_MODE;
-  ctrls[5].value = V4L2_MPEG_VIDEO_HEADER_MODE_SEPARATE;
+  memset(&ctrl, 0, sizeof(ctrl));
+  ctrl.id = V4L2_CID_MPEG_MFC51_VIDEO_RC_FIXED_TARGET_BIT;
+  ctrl.value = 1;
+  ctrls.push_back(ctrl);
+
   // Enable macroblock-level bitrate control.
-  ctrls[6].id = V4L2_CID_MPEG_VIDEO_MB_RC_ENABLE;
-  ctrls[6].value = 1;
-  // Use H.264 level 4.0 to match the supported max resolution.
-  ctrls[7].id = V4L2_CID_MPEG_VIDEO_H264_LEVEL;
-  ctrls[7].value = V4L2_MPEG_VIDEO_H264_LEVEL_4_0;
+  memset(&ctrl, 0, sizeof(ctrl));
+  ctrl.id = V4L2_CID_MPEG_VIDEO_MB_RC_ENABLE;
+  ctrl.value = 1;
+  ctrls.push_back(ctrl);
+
   // Disable periodic key frames.
-  ctrls[8].id = V4L2_CID_MPEG_VIDEO_GOP_SIZE;
-  ctrls[8].value = 0;
-  control.ctrl_class = V4L2_CTRL_CLASS_MPEG;
-  control.count = arraysize(ctrls);
-  control.controls = ctrls;
-  IOCTL_OR_ERROR_RETURN_FALSE(VIDIOC_S_EXT_CTRLS, &control);
+  memset(&ctrl, 0, sizeof(ctrl));
+  ctrl.id = V4L2_CID_MPEG_VIDEO_GOP_SIZE;
+  ctrl.value = 0;
+  ctrls.push_back(ctrl);
+
+  // Ignore return value as these controls are optional.
+  SetExtCtrls(ctrls);
 
   return true;
 }

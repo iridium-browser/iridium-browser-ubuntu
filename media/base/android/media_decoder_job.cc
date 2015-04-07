@@ -88,7 +88,7 @@ void MediaDecoderJob::OnDataReceived(const DemuxerData& data) {
 
   if (stop_decode_pending_) {
     DCHECK(is_decoding());
-    OnDecodeCompleted(MEDIA_CODEC_STOPPED, kNoTimestamp(), kNoTimestamp());
+    OnDecodeCompleted(MEDIA_CODEC_ABORT, kNoTimestamp(), kNoTimestamp());
     return;
   }
 
@@ -381,8 +381,7 @@ void MediaDecoderJob::DecodeInternal(
 
   // For aborted access unit, just skip it and inform the player.
   if (unit.status == DemuxerStream::kAborted) {
-    // TODO(qinmin): use a new enum instead of MEDIA_CODEC_STOPPED.
-    callback.Run(MEDIA_CODEC_STOPPED, kNoTimestamp(), kNoTimestamp());
+    callback.Run(MEDIA_CODEC_ABORT, kNoTimestamp(), kNoTimestamp());
     return;
   }
 
@@ -430,10 +429,7 @@ void MediaDecoderJob::DecodeInternal(
         &presentation_timestamp,
         &output_eos_encountered_,
         NULL);
-    if (status == MEDIA_CODEC_OUTPUT_BUFFERS_CHANGED &&
-        !media_codec_bridge_->GetOutputBuffers()) {
-      status = MEDIA_CODEC_ERROR;
-    } else if (status == MEDIA_CODEC_OUTPUT_FORMAT_CHANGED) {
+    if (status == MEDIA_CODEC_OUTPUT_FORMAT_CHANGED) {
       // TODO(qinmin): instead of waiting for the next output buffer to be
       // dequeued, post a task on the UI thread to signal the format change.
       has_format_change = true;
@@ -531,7 +527,7 @@ void MediaDecoderJob::OnDecodeCompleted(
     case MEDIA_CODEC_DEQUEUE_INPUT_AGAIN_LATER:
     case MEDIA_CODEC_INPUT_END_OF_STREAM:
     case MEDIA_CODEC_NO_KEY:
-    case MEDIA_CODEC_STOPPED:
+    case MEDIA_CODEC_ABORT:
     case MEDIA_CODEC_ERROR:
       // Do nothing.
       break;

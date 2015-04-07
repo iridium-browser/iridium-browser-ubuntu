@@ -454,7 +454,7 @@ class DownloadTest : public InProcessBrowserTest {
     file_activity_observer_.reset();
   }
 
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kDisablePluginsDiscovery);
   }
 
@@ -686,9 +686,7 @@ class DownloadTest : public InProcessBrowserTest {
     if (manager->InProgressCount() != 0)
       return NULL;
 
-    ui_test_utils::NavigateToURLWithDisposition(
-        browser(), slow_download_url, CURRENT_TAB,
-        ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+    ui_test_utils::NavigateToURL(browser(), slow_download_url);
 
     observer->WaitForFinished();
     EXPECT_EQ(1u, observer->NumDownloadsSeenInState(DownloadItem::IN_PROGRESS));
@@ -903,9 +901,7 @@ class DownloadTest : public InProcessBrowserTest {
       }
     } else {
       // Navigate to URL normally, wait until done.
-      ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(browser(),
-                                                                url,
-                                                                1);
+      ui_test_utils::NavigateToURL(browser(), url);
     }
 
     if (download_info.show_download_item) {
@@ -1169,9 +1165,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadMimeTypeSelect) {
           DownloadManagerForBrowser(browser()),
           1,
           content::DownloadTestObserver::ON_DANGEROUS_DOWNLOAD_FAIL));
-  ui_test_utils::NavigateToURLWithDisposition(
-      browser(), url, CURRENT_TAB,
-      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+  ui_test_utils::NavigateToURL(browser(), url);
   observer->WaitForFinished();
   EXPECT_EQ(1u, observer->NumDownloadsSeenInState(DownloadItem::COMPLETE));
   CheckDownloadStates(1, DownloadItem::COMPLETE);
@@ -1830,7 +1824,8 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadHistoryCheck) {
 IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadHistoryDangerCheck) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
 
@@ -2884,7 +2879,8 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, HiddenDownload) {
 IN_PROC_BROWSER_TEST_F(DownloadTest, TestMultipleDownloadsInfobar) {
 #if defined(OS_WIN) && defined(USE_ASH)
   // Disable this test in Metro+Ash for now (http://crbug.com/262796).
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kAshBrowserTests))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
     return;
 #endif
 
@@ -2961,7 +2957,13 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadTest_Renaming) {
 }
 
 // Test that the entire download pipeline handles unicode correctly.
-IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadTest_CrazyFilenames) {
+// Disabled on Windows due to flaky timeouts: crbug.com/446695
+#if defined(OS_WIN)
+#define MAYBE_DownloadTest_CrazyFilenames DISABLED_DownloadTest_CrazyFilenames
+#else
+#define MAYBE_DownloadTest_CrazyFilenames DownloadTest_CrazyFilenames
+#endif
+IN_PROC_BROWSER_TEST_F(DownloadTest, MAYBE_DownloadTest_CrazyFilenames) {
   const wchar_t* kCrazyFilenames[] = {
     L"a_file_name.zip",
     L"\u89c6\u9891\u76f4\u64ad\u56fe\u7247.zip",  // chinese chars
@@ -3049,7 +3051,6 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadTest_Remove) {
   ASSERT_TRUE(CheckDownloadFullPaths(
       browser(), downloaded, OriginFile(base::FilePath(
           FILE_PATH_LITERAL("downloads/a_zip_file.zip")))));
-
 }
 
 IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadTest_PauseResumeCancel) {
@@ -3176,7 +3177,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadPrefs_SaveFilePath) {
 // A download that is interrupted due to a file error should be able to be
 // resumed.
 IN_PROC_BROWSER_TEST_F(DownloadTest, Resumption_NoPrompt) {
-  CommandLine::ForCurrentProcess()->AppendSwitch(
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kEnableDownloadResumption);
   scoped_refptr<content::TestFileErrorInjector> error_injector(
       content::TestFileErrorInjector::Create(
@@ -3201,7 +3202,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, Resumption_NoPrompt) {
 // path is invalid or unusable should cause a prompt to be displayed on
 // resumption.
 IN_PROC_BROWSER_TEST_F(DownloadTest, Resumption_WithPrompt) {
-  CommandLine::ForCurrentProcess()->AppendSwitch(
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kEnableDownloadResumption);
   scoped_refptr<content::TestFileErrorInjector> error_injector(
       content::TestFileErrorInjector::Create(
@@ -3225,7 +3226,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, Resumption_WithPrompt) {
 // The user shouldn't be prompted on a resumed download unless a prompt is
 // necessary due to the interrupt reason.
 IN_PROC_BROWSER_TEST_F(DownloadTest, Resumption_WithPromptAlways) {
-  CommandLine::ForCurrentProcess()->AppendSwitch(
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kEnableDownloadResumption);
   browser()->profile()->GetPrefs()->SetBoolean(
       prefs::kPromptForDownload, true);
@@ -3255,7 +3256,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, Resumption_WithPromptAlways) {
 // A download that is interrupted due to a transient error should be resumed
 // automatically.
 IN_PROC_BROWSER_TEST_F(DownloadTest, Resumption_Automatic) {
-  CommandLine::ForCurrentProcess()->AppendSwitch(
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kEnableDownloadResumption);
   scoped_refptr<content::TestFileErrorInjector> error_injector(
       content::TestFileErrorInjector::Create(
@@ -3275,7 +3276,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, Resumption_Automatic) {
 
 // An interrupting download should be resumable multiple times.
 IN_PROC_BROWSER_TEST_F(DownloadTest, Resumption_MultipleAttempts) {
-  CommandLine::ForCurrentProcess()->AppendSwitch(
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kEnableDownloadResumption);
   scoped_refptr<content::TestFileErrorInjector> error_injector(
       content::TestFileErrorInjector::Create(
@@ -3472,7 +3473,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, SafeSupportedFile) {
   download->Cancel(true);
 }
 
-#endif // OS_WIN
+#endif  // OS_WIN
 
 IN_PROC_BROWSER_TEST_F(DownloadTest, FeedbackService) {
   // Make a dangerous file.

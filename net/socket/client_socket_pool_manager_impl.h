@@ -28,8 +28,6 @@ class CTVerifier;
 class HttpProxyClientSocketPool;
 class HostResolver;
 class NetLog;
-class ProxyDelegate;
-class ProxyService;
 class SOCKSClientSocketPool;
 class SSLClientSocketPool;
 class SSLConfigService;
@@ -65,11 +63,10 @@ class ClientSocketPoolManagerImpl : public base::NonThreadSafe,
                               ChannelIDService* channel_id_service,
                               TransportSecurityState* transport_security_state,
                               CTVerifier* cert_transparency_verifier,
+                              CertPolicyEnforcer* cert_policy_enforcer,
                               const std::string& ssl_session_cache_shard,
-                              ProxyService* proxy_service,
                               SSLConfigService* ssl_config_service,
                               bool enable_ssl_connect_job_waiting,
-                              ProxyDelegate* proxy_delegate,
                               HttpNetworkSession::SocketPoolType pool_type);
   ~ClientSocketPoolManagerImpl() override;
 
@@ -114,8 +111,8 @@ class ClientSocketPoolManagerImpl : public base::NonThreadSafe,
   ChannelIDService* const channel_id_service_;
   TransportSecurityState* const transport_security_state_;
   CTVerifier* const cert_transparency_verifier_;
+  CertPolicyEnforcer* const cert_policy_enforcer_;
   const std::string ssl_session_cache_shard_;
-  ProxyService* const proxy_service_;
   const scoped_refptr<SSLConfigService> ssl_config_service_;
   bool enable_ssl_connect_job_waiting_;
   const HttpNetworkSession::SocketPoolType pool_type_;
@@ -148,8 +145,6 @@ class ClientSocketPoolManagerImpl : public base::NonThreadSafe,
 
   ClientSocketPoolHistograms ssl_socket_pool_for_proxies_histograms_;
   SSLSocketPoolMap ssl_socket_pools_for_proxies_;
-
-  const ProxyDelegate* proxy_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(ClientSocketPoolManagerImpl);
 };

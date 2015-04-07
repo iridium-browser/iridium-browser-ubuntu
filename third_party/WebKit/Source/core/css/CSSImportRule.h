@@ -31,6 +31,7 @@ class MediaList;
 class StyleRuleImport;
 
 class CSSImportRule final : public CSSRule {
+    DEFINE_WRAPPERTYPEINFO();
 public:
     static PassRefPtrWillBeRawPtr<CSSImportRule> create(StyleRuleImport* rule, CSSStyleSheet* sheet)
     {
@@ -39,7 +40,6 @@ public:
 
     virtual ~CSSImportRule();
 
-    virtual CSSRule::Type type() const override { return IMPORT_RULE; }
     virtual String cssText() const override;
     virtual void reattach(StyleRuleBase*) override;
 
@@ -51,6 +51,8 @@ public:
 
 private:
     CSSImportRule(StyleRuleImport*, CSSStyleSheet*);
+
+    virtual CSSRule::Type type() const override { return IMPORT_RULE; }
 
     RefPtrWillBeMember<StyleRuleImport> m_importRule;
     mutable RefPtrWillBeMember<MediaList> m_mediaCSSOMWrapper;

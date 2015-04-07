@@ -54,8 +54,8 @@ _NEGATIVE_FILTER = [
 
 _VERSION_SPECIFIC_FILTER = {}
 _VERSION_SPECIFIC_FILTER['HEAD'] = [
-    # https://code.google.com/p/chromedriver/issues/detail?id=913
-    'ChromeDriverTest.testChromeDriverReceiveAndSendLargeData',
+    # https://code.google.com/p/chromedriver/issues/detail?id=992
+    'ChromeDownloadDirTest.testDownloadDirectoryOverridesExistingPreferences',
 ]
 _VERSION_SPECIFIC_FILTER['37'] = [
     # https://code.google.com/p/chromedriver/issues/detail?id=954
@@ -85,8 +85,6 @@ _OS_SPECIFIC_FILTER['linux'] = [
     'ChromeDriverTest.testWindowSize',
 ]
 _OS_SPECIFIC_FILTER['mac'] = [
-    # https://code.google.com/p/chromedriver/issues/detail?id=304
-    'ChromeDriverTest.testGoBackAndGoForward',
 ]
 
 _DESKTOP_NEGATIVE_FILTER = [
@@ -134,8 +132,8 @@ _ANDROID_NEGATIVE_FILTER['chrome'] = (
         'PerfTest.testColdExecuteScript',
         # https://code.google.com/p/chromedriver/issues/detail?id=459
         'ChromeDriverTest.testShouldHandleNewWindowLoadingProperly',
-        # https://code.google.com/p/chromedriver/issues/detail?id=913
-        'ChromeDriverTest.testChromeDriverReceiveAndSendLargeData',
+        # Android doesn't support multiple sessions on one device.
+        'SessionHandlingTest.testGetSessions',
     ]
 )
 _ANDROID_NEGATIVE_FILTER['chrome_stable'] = (
@@ -543,6 +541,13 @@ class ChromeDriverTest(ChromeDriverBaseTest):
     self._driver.GoBack()
     self._driver.GoForward()
 
+  def testDontGoBackOrGoForward(self):
+    self.assertEquals('data:,', self._driver.GetCurrentUrl())
+    self._driver.GoBack()
+    self.assertEquals('data:,', self._driver.GetCurrentUrl())
+    self._driver.GoForward()
+    self.assertEquals('data:,', self._driver.GetCurrentUrl())
+
   def testRefresh(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/empty.html'))
     self._driver.Refresh()
@@ -742,11 +747,96 @@ class ChromeDriverTest(ChromeDriverBaseTest):
     lots_of_data = self._driver.ExecuteScript(script)
     self.assertEquals('0'.zfill(int(10e6)), lots_of_data)
 
-  def testChromeDriverReceiveAndSendLargeData(self):
-    lots_of_data = '1'.zfill(int(10e6))
-    result = self._driver.ExecuteScript('return "%s"' % lots_of_data)
-    self.assertEquals(lots_of_data, result)
+  def testShadowDomFindElementWithSlashDeep(self):
+    """Checks that chromedriver can find elements in a shadow DOM using /deep/
+    css selectors."""
+    self._driver.Load(self.GetHttpUrlForFile(
+        '/chromedriver/shadow_dom_test.html'))
+    self.assertTrue(self._driver.FindElement("css", "* /deep/ #olderTextBox"))
 
+  def testShadowDomFindChildElement(self):
+    """Checks that chromedriver can find child elements from a shadow DOM
+    element."""
+    self._driver.Load(self.GetHttpUrlForFile(
+        '/chromedriver/shadow_dom_test.html'))
+    elem = self._driver.FindElement("css", "* /deep/ #olderChildDiv")
+    self.assertTrue(elem.FindElement("id", "olderTextBox"))
+
+  def testShadowDomFindElementFailsFromRootWithoutSlashDeep(self):
+    """Checks that chromedriver can't find elements in a shadow DOM without
+    /deep/."""
+    self._driver.Load(self.GetHttpUrlForFile(
+        '/chromedriver/shadow_dom_test.html'))
+    # can't find element from the root without /deep/
+    with self.assertRaises(chromedriver.NoSuchElement):
+      self._driver.FindElement("id", "#olderTextBox")
+
+  def testShadowDomFindElementFailsBetweenShadowRoots(self):
+    """Checks that chromedriver can't find elements in other shadow DOM
+    trees."""
+    self._driver.Load(self.GetHttpUrlForFile(
+        '/chromedriver/shadow_dom_test.html'))
+    elem = self._driver.FindElement("css", "* /deep/ #youngerChildDiv")
+    with self.assertRaises(chromedriver.NoSuchElement):
+      elem.FindElement("id", "#olderTextBox")
+
+  def testShadowDomText(self):
+    """Checks that chromedriver can find extract the text from a shadow DOM
+    element."""
+    self._driver.Load(self.GetHttpUrlForFile(
+        '/chromedriver/shadow_dom_test.html'))
+    elem = self._driver.FindElement("css", "* /deep/ #olderHeading")
+    self.assertEqual("Older Child", elem.GetText())
+
+  def testShadowDomSendKeys(self):
+    """Checks that chromedriver can call SendKeys on a shadow DOM element."""
+    self._driver.Load(self.GetHttpUrlForFile(
+        '/chromedriver/shadow_dom_test.html'))
+    elem = self._driver.FindElement("css", "* /deep/ #olderTextBox")
+    elem.SendKeys("bar")
+    self.assertEqual("foobar", self._driver.ExecuteScript(
+        'return document.querySelector("* /deep/ #olderTextBox").value;'))
+
+  def testShadowDomClear(self):
+    """Checks that chromedriver can call Clear on a shadow DOM element."""
+    self._driver.Load(self.GetHttpUrlForFile(
+        '/chromedriver/shadow_dom_test.html'))
+    elem = self._driver.FindElement("css", "* /deep/ #olderTextBox")
+    elem.Clear()
+    self.assertEqual("", self._driver.ExecuteScript(
+        'return document.querySelector("* /deep/ #olderTextBox").value;'))
+
+  def testShadowDomClick(self):
+    """Checks that chromedriver can call Click on an element in a shadow DOM."""
+    self._driver.Load(self.GetHttpUrlForFile(
+        '/chromedriver/shadow_dom_test.html'))
+    elem = self._driver.FindElement("css", "* /deep/ #olderButton")
+    elem.Click()
+    # the butotn's onClicked handler changes the text box's value
+    self.assertEqual("Button Was Clicked", self._driver.ExecuteScript(
+        'return document.querySelector("* /deep/ #olderTextBox").value;'))
+
+  def testShadowDomStaleReference(self):
+    """Checks that trying to manipulate shadow DOM elements that are detached
+    from the document raises a StaleElementReference exception"""
+    self._driver.Load(self.GetHttpUrlForFile(
+        '/chromedriver/shadow_dom_test.html'))
+    elem = self._driver.FindElement("css", "* /deep/ #olderButton")
+    self._driver.ExecuteScript(
+        'document.querySelector("#outerDiv").innerHTML="<div/>";')
+    with self.assertRaises(chromedriver.StaleElementReference):
+      elem.Click()
+
+  def testShadowDomDisplayed(self):
+    """Checks that trying to manipulate shadow DOM elements that are detached
+    from the document raises a StaleElementReference exception"""
+    self._driver.Load(self.GetHttpUrlForFile(
+        '/chromedriver/shadow_dom_test.html'))
+    elem = self._driver.FindElement("css", "* /deep/ #olderButton")
+    self.assertTrue(elem.IsDisplayed())
+    self._driver.ExecuteScript(
+        'document.querySelector("#outerDiv").style.display="None";')
+    self.assertFalse(elem.IsDisplayed())
 
 class ChromeDriverAndroidTest(ChromeDriverBaseTest):
   """End to end tests for Android-specific tests."""
@@ -1138,6 +1228,14 @@ class SessionHandlingTest(ChromeDriverBaseTest):
     driver.Quit()
     driver.Quit()
 
+  def testGetSessions(self):
+    driver = self.CreateDriver()
+    response = driver.GetSessions()
+    self.assertEqual(1, len(response))
+
+    driver2 = self.CreateDriver()
+    response = driver2.GetSessions()
+    self.assertEqual(2, len(response))
 
 class RemoteBrowserTest(ChromeDriverBaseTest):
   """Tests for ChromeDriver remote browser capability."""

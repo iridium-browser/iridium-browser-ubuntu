@@ -31,6 +31,7 @@
 #include "core/frame/FrameView.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
+#include "core/xml/DocumentXSLT.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "wtf/Assertions.h"
 
@@ -75,7 +76,7 @@ PassRefPtrWillBeRawPtr<Document> XSLTProcessor::createDocumentFromSource(const S
 
     if (frame) {
         RefPtrWillBeRawPtr<Document> oldDocument = frame->document();
-        result = frame->domWindow()->installNewDocument(sourceMIMEType, init, forceXHTML);
+        result = frame->localDOMWindow()->installNewDocument(sourceMIMEType, init, forceXHTML);
 
         // Before parsing, we need to save & detach the old document and get the new document
         // in place. We have to do this only if we're rendering the result document.
@@ -83,10 +84,13 @@ PassRefPtrWillBeRawPtr<Document> XSLTProcessor::createDocumentFromSource(const S
             view->clear();
 
         if (oldDocument) {
-            result->setTransformSourceDocument(oldDocument.get());
+            DocumentXSLT::from(*result).setTransformSourceDocument(oldDocument.get());
             result->updateSecurityOrigin(oldDocument->securityOrigin());
             result->setCookieURL(oldDocument->cookieURL());
-            result->initContentSecurityPolicy();
+
+            RefPtr<ContentSecurityPolicy> csp = ContentSecurityPolicy::create();
+            csp->copyStateFrom(oldDocument->contentSecurityPolicy());
+            result->initContentSecurityPolicy(csp);
         }
     } else {
         result = LocalDOMWindow::createDocument(sourceMIMEType, init, forceXHTML);

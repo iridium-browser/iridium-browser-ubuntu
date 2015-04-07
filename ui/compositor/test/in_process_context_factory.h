@@ -26,6 +26,12 @@ class InProcessContextFactory : public ContextFactory {
   InProcessContextFactory();
   ~InProcessContextFactory() override;
 
+  // If true (the default) an OutputSurface is created that does not display
+  // anything. Set to false if you want to see results on the screen.
+  void set_use_test_surface(bool use_test_surface) {
+    use_test_surface_ = use_test_surface;
+  }
+
   // ContextFactory implementation
   void CreateOutputSurface(base::WeakPtr<Compositor> compositor,
                            bool software_fallback) override;
@@ -41,6 +47,8 @@ class InProcessContextFactory : public ContextFactory {
   gpu::GpuMemoryBufferManager* GetGpuMemoryBufferManager() override;
   base::MessageLoopProxy* GetCompositorMessageLoop() override;
   scoped_ptr<cc::SurfaceIdAllocator> CreateSurfaceIdAllocator() override;
+  void ResizeDisplay(ui::Compositor* compositor,
+                     const gfx::Size& size) override;
 
  private:
   scoped_ptr<base::Thread> compositor_thread_;
@@ -49,6 +57,7 @@ class InProcessContextFactory : public ContextFactory {
   cc::TestSharedBitmapManager shared_bitmap_manager_;
   cc::TestGpuMemoryBufferManager gpu_memory_buffer_manager_;
   uint32_t next_surface_id_namespace_;
+  bool use_test_surface_;
 
   DISALLOW_COPY_AND_ASSIGN(InProcessContextFactory);
 };

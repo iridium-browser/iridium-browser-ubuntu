@@ -8,17 +8,12 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "chrome/browser/extensions/api/networking_private/networking_private_delegate.h"
+#include "chrome/browser/extensions/api/networking_private/networking_private_delegate_factory.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/onc/onc_constants.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/common/switches.h"
-
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/extensions/api/networking_private/networking_private_factory_chromeos.h"
-#else
-#include "chrome/browser/extensions/api/networking_private/networking_private_service_client_factory.h"
-#endif
 
 namespace extensions {
 
@@ -31,11 +26,12 @@ const char kFailure[] = "Failure";
 const char kSuccess[] = "Success";
 const char kGuid[] = "SOME_GUID";
 
-class TestDelegate : public KeyedService,
-                     public NetworkingPrivateDelegate {
+class TestDelegate : public NetworkingPrivateDelegate {
  public:
-  TestDelegate() : fail_(false) {
-  }
+  explicit TestDelegate(scoped_ptr<VerifyDelegate> verify_delegate)
+      : NetworkingPrivateDelegate(verify_delegate.Pass()), fail_(false) {}
+
+  ~TestDelegate() override {}
 
   // Asynchronous methods
   void GetProperties(const std::string& guid,
@@ -101,28 +97,6 @@ class TestDelegate : public KeyedService,
     VoidResult(success_callback, failure_callback);
   }
 
-  void VerifyDestination(const VerificationProperties& verification_properties,
-                         const BoolCallback& success_callback,
-                         const FailureCallback& failure_callback) override {
-    BoolResult(success_callback, failure_callback);
-  }
-
-  void VerifyAndEncryptCredentials(
-      const std::string& guid,
-      const VerificationProperties& verification_properties,
-      const StringCallback& success_callback,
-      const FailureCallback& failure_callback) override {
-    StringResult(success_callback, failure_callback);
-  }
-
-  void VerifyAndEncryptData(
-      const VerificationProperties& verification_properties,
-      const std::string& data,
-      const StringCallback& success_callback,
-      const FailureCallback& failure_callback) override {
-    StringResult(success_callback, failure_callback);
-  }
-
   void SetWifiTDLSEnabledState(
       const std::string& ip_or_mac_address,
       bool enabled,
@@ -174,7 +148,6 @@ class TestDelegate : public KeyedService,
   bool GetDisabled(const std::string& type) { return disabled_[type]; }
   size_t GetScanRequested() { return scan_requested_.size(); }
 
- private:
   void DictionaryResult(const std::string& guid,
                         const DictionaryCallback& success_callback,
                         const FailureCallback& failure_callback) {
@@ -214,6 +187,7 @@ class TestDelegate : public KeyedService,
     }
   }
 
+ private:
   bool fail_;
   std::map<std::string, bool> enabled_;
   std::map<std::string, bool> disabled_;
@@ -222,11 +196,51 @@ class TestDelegate : public KeyedService,
   DISALLOW_COPY_AND_ASSIGN(TestDelegate);
 };
 
+class TestVerifyDelegate : public NetworkingPrivateDelegate::VerifyDelegate {
+ public:
+  TestVerifyDelegate() : owner_(NULL) {}
+
+  ~TestVerifyDelegate() override {}
+
+  void VerifyDestination(
+      const VerificationProperties& verification_properties,
+      const BoolCallback& success_callback,
+      const FailureCallback& failure_callback) override {
+    owner_->BoolResult(success_callback, failure_callback);
+  }
+  void VerifyAndEncryptCredentials(
+      const std::string& guid,
+      const VerificationProperties& verification_properties,
+      const StringCallback& success_callback,
+      const FailureCallback& failure_callback) override {
+    owner_->StringResult(success_callback, failure_callback);
+  }
+  void VerifyAndEncryptData(
+      const VerificationProperties& verification_properties,
+      const std::string& data,
+      const StringCallback& success_callback,
+      const FailureCallback& failure_callback) override {
+    owner_->StringResult(success_callback, failure_callback);
+  }
+
+  void set_owner(TestDelegate* owner) { owner_ = owner; }
+
+ private:
+  TestDelegate* owner_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestVerifyDelegate);
+};
+
 class NetworkingPrivateApiTest : public ExtensionApiTest {
  public:
   NetworkingPrivateApiTest() {
-    if (!s_test_delegate_)
-      s_test_delegate_ = new TestDelegate;
+    if (!s_test_delegate_) {
+      TestVerifyDelegate* verify_delegate = new TestVerifyDelegate;
+      scoped_ptr<NetworkingPrivateDelegate::VerifyDelegate> verify_delegate_ptr(
+          verify_delegate);
+      s_test_delegate_ = new TestDelegate(verify_delegate_ptr.Pass());
+      verify_delegate->set_owner(s_test_delegate_);
+    }
   }
 
   static KeyedService* GetNetworkingPrivateDelegate(
@@ -235,7 +249,7 @@ class NetworkingPrivateApiTest : public ExtensionApiTest {
     return s_test_delegate_;
   }
 
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     ExtensionApiTest::SetUpCommandLine(command_line);
     // Whitelist the extension ID of the test extension.
     command_line->AppendSwitchASCII(
@@ -245,15 +259,8 @@ class NetworkingPrivateApiTest : public ExtensionApiTest {
 
   void SetUpOnMainThread() override {
     ExtensionApiTest::SetUpOnMainThread();
-#if defined(OS_CHROMEOS)
-    NetworkingPrivateChromeOSFactory::GetInstance()->SetTestingFactory(
-        profile(),
-        &NetworkingPrivateApiTest::GetNetworkingPrivateDelegate);
-#else
-    NetworkingPrivateServiceClientFactory::GetInstance()->SetTestingFactory(
-        profile(),
-        &NetworkingPrivateApiTest::GetNetworkingPrivateDelegate);
-#endif
+    NetworkingPrivateDelegateFactory::GetInstance()->SetTestingFactory(
+        profile(), &NetworkingPrivateApiTest::GetNetworkingPrivateDelegate);
     content::RunAllPendingInMessageLoop();
   }
 
@@ -271,9 +278,9 @@ class NetworkingPrivateApiTest : public ExtensionApiTest {
 
  protected:
   bool RunNetworkingSubtest(const std::string& subtest) {
-    return RunExtensionSubtest(
-        "networking_private", "main.html?" + subtest,
-        kFlagEnableFileAccess | kFlagLoadAsComponent);
+    return RunExtensionSubtest("networking_private",
+                               "main.html?" + subtest,
+                               kFlagEnableFileAccess | kFlagLoadAsComponent);
   }
 
   // Static pointer to the TestDelegate so that it can be accessed in
@@ -283,7 +290,7 @@ class NetworkingPrivateApiTest : public ExtensionApiTest {
   DISALLOW_COPY_AND_ASSIGN(NetworkingPrivateApiTest);
 };
 
-//static
+// static
 TestDelegate* NetworkingPrivateApiTest::s_test_delegate_ = NULL;
 
 }  // namespace
@@ -382,9 +389,7 @@ IN_PROC_BROWSER_TEST_F(NetworkingPrivateApiTest, GetCaptivePortalStatus) {
 
 class NetworkingPrivateApiTestFail : public NetworkingPrivateApiTest {
  public:
-  NetworkingPrivateApiTestFail() {
-    s_test_delegate_->set_fail(true);
-  }
+  NetworkingPrivateApiTestFail() { s_test_delegate_->set_fail(true); }
 
  protected:
   DISALLOW_COPY_AND_ASSIGN(NetworkingPrivateApiTestFail);

@@ -5,15 +5,36 @@
 #ifndef WebServiceWorkerClientsInfo_h
 #define WebServiceWorkerClientsInfo_h
 
-#include "WebCallbacks.h"
-#include "WebVector.h"
+#include "public/platform/WebCallbacks.h"
+#include "public/platform/WebPageVisibilityState.h"
+#include "public/platform/WebURL.h"
+#include "public/platform/WebURLRequest.h"
+#include "public/platform/WebVector.h"
 
 namespace blink {
 
 struct WebServiceWorkerError;
 
+struct WebServiceWorkerClientInfo {
+    WebServiceWorkerClientInfo()
+        : clientID(0)
+        , pageVisibilityState(WebPageVisibilityStateLast)
+        , isFocused(false)
+        , frameType(WebURLRequest::FrameTypeNone)
+    {
+    }
+
+    int clientID;
+    // FIXME: remove when the Chromium code will be updated.
+    WebString visibilityState;
+    WebPageVisibilityState pageVisibilityState;
+    bool isFocused;
+    WebURL url;
+    WebURLRequest::FrameType frameType;
+};
+
 struct WebServiceWorkerClientsInfo {
-    WebVector<int> clientIDs;
+    WebVector<WebServiceWorkerClientInfo> clients;
 };
 
 typedef WebCallbacks<WebServiceWorkerClientsInfo, WebServiceWorkerError> WebServiceWorkerClientsCallbacks;

@@ -38,6 +38,7 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/browser/ui/extensions/app_launch_params.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/settings_window_manager.h"
@@ -56,10 +57,14 @@
 #include "extensions/common/switches.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/app_list/app_list_switches.h"
 #include "ui/app_list/views/app_list_item_view.h"
 #include "ui/app_list/views/apps_grid_view.h"
+#include "ui/app_list/views/start_page_view.h"
+#include "ui/app_list/views/tile_item_view.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
+#include "ui/base/window_open_disposition.h"
 #include "ui/events/event.h"
 #include "ui/events/test/event_generator.h"
 
@@ -106,6 +111,33 @@ class TestAppWindowRegistryObserver
 
   DISALLOW_COPY_AND_ASSIGN(TestAppWindowRegistryObserver);
 };
+
+// Click the "All Apps" button from the app launcher start page. Assumes that
+// the app launcher is open to the start page. On the non-experimental launcher,
+// does nothing.
+// |display_origin| is the top-left corner of the active display, in screen
+// coordinates.
+void ClickAllAppsButtonFromStartPage(ui::test::EventGenerator* generator,
+                                     const gfx::Point& display_origin) {
+  if (!app_list::switches::IsExperimentalAppListEnabled())
+    return;
+
+  ash::test::AppListControllerTestApi controller_test(
+      ash::Shell::GetInstance());
+
+  app_list::StartPageView* start_page_view = controller_test.GetStartPageView();
+  DCHECK(start_page_view);
+
+  app_list::TileItemView* all_apps_button = start_page_view->all_apps_button();
+  gfx::Rect all_apps_rect = all_apps_button->GetBoundsInScreen();
+  all_apps_rect.Offset(-display_origin.x(), -display_origin.y());
+  generator->MoveMouseTo(all_apps_rect.CenterPoint().x(),
+                         all_apps_rect.CenterPoint().y());
+  generator->ClickLeftButton();
+  base::MessageLoop::current()->RunUntilIdle();
+  // Run Layout() to effectively complete the animation to the apps page.
+  controller_test.LayoutContentsView();
+}
 
 }  // namespace
 
@@ -220,10 +252,8 @@ class ShelfAppBrowserTest : public ExtensionBrowserTest {
         service->GetExtensionById(last_loaded_extension_id(), false);
     EXPECT_TRUE(extension);
 
-    OpenApplication(AppLaunchParams(profile(),
-                                    extension,
-                                    container,
-                                    disposition));
+    OpenApplication(AppLaunchParams(profile(), extension, container,
+                                    disposition, extensions::SOURCE_TEST));
     return extension;
   }
 
@@ -312,7 +342,7 @@ class ShelfAppBrowserTestNoDefaultBrowser : public ShelfAppBrowserTest {
   ShelfAppBrowserTestNoDefaultBrowser() {}
   virtual ~ShelfAppBrowserTestNoDefaultBrowser() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) override {
+  virtual void SetUpCommandLine(base::CommandLine* command_line) override {
     ShelfAppBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kNoStartupWindow);
   }
@@ -329,7 +359,7 @@ class ShelfAppBrowserNoMinimizeOnClick : public LauncherPlatformAppBrowserTest {
   ShelfAppBrowserNoMinimizeOnClick() {}
   virtual ~ShelfAppBrowserNoMinimizeOnClick() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) override {
+  virtual void SetUpCommandLine(base::CommandLine* command_line) override {
     LauncherPlatformAppBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(
         switches::kDisableMinimizeOnSecondLauncherItemClick);
@@ -774,7 +804,7 @@ IN_PROC_BROWSER_TEST_F(ShelfAppBrowserMinimizeOnClick,
 // Confirm that click behavior for app panels is correct.
 IN_PROC_BROWSER_TEST_F(LauncherPlatformAppBrowserTest, AppPanelClickBehavior) {
   // Enable experimental APIs to allow panel creation.
-  CommandLine::ForCurrentProcess()->AppendSwitch(
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
       extensions::switches::kEnableExperimentalExtensionApis);
   // Launch a platform app and create a panel window for it.
   const Extension* extension1 = LoadAndLaunchPlatformApp("launch", "Launched");
@@ -829,7 +859,7 @@ IN_PROC_BROWSER_TEST_F(LauncherPlatformAppBrowserTest, SetIcon) {
   TestAppWindowRegistryObserver test_observer(browser()->profile());
 
   // Enable experimental APIs to allow panel creation.
-  CommandLine::ForCurrentProcess()->AppendSwitch(
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
       extensions::switches::kEnableExperimentalExtensionApis);
 
   int base_shelf_item_count = shelf_model()->item_count();
@@ -1735,10 +1765,10 @@ class ShelfAppBrowserTestWithMultiMonitor
   ShelfAppBrowserTestWithMultiMonitor() {}
   virtual ~ShelfAppBrowserTestWithMultiMonitor() {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) override {
+  virtual void SetUpCommandLine(base::CommandLine* command_line) override {
     ShelfAppBrowserTestNoDefaultBrowser::SetUpCommandLine(command_line);
     command_line->AppendSwitchASCII("ash-host-window-bounds",
-                                    "800x600,801+0-800x600");
+                                    "800x800,801+0-800x800");
   }
 
  private:
@@ -1774,10 +1804,14 @@ IN_PROC_BROWSER_TEST_F(ShelfAppBrowserTestWithMultiMonitor,
 
   generator.MoveMouseTo(app_list_bounds.CenterPoint().x(),
                         app_list_bounds.CenterPoint().y());
-  base::MessageLoop::current()->RunUntilIdle();
   generator.ClickLeftButton();
-
+  base::MessageLoop::current()->RunUntilIdle();
   EXPECT_TRUE(service->IsAppListVisible());
+
+  // Click the "all apps" button on the start page.
+  ClickAllAppsButtonFromStartPage(&generator, origin);
+  EXPECT_TRUE(service->IsAppListVisible());
+
   app_list::AppsGridView* grid_view =
       ash::test::AppListControllerTestApi(ash::Shell::GetInstance()).
           GetRootGridView();
@@ -1819,7 +1853,7 @@ IN_PROC_BROWSER_TEST_F(ShelfAppBrowserTestWithMultiMonitor,
 
   // Move it to an empty slot on grid_view.
   gfx::Rect empty_slot_rect = bounds_grid_1;
-  empty_slot_rect.Offset(0, bounds_grid_1.height());
+  empty_slot_rect.Offset(0, grid_view->GetTotalTileSize().height());
   generator.MoveMouseTo(empty_slot_rect.CenterPoint().x(),
                         empty_slot_rect.CenterPoint().y());
   base::MessageLoop::current()->RunUntilIdle();
@@ -1954,8 +1988,13 @@ IN_PROC_BROWSER_TEST_F(ShelfAppBrowserTest, ClickItem) {
                         app_list_bounds.CenterPoint().y());
   generator.ClickLeftButton();
   base::MessageLoop::current()->RunUntilIdle();
-
   EXPECT_TRUE(service->IsAppListVisible());
+
+  // Click the "all apps" button on the start page.
+  ClickAllAppsButtonFromStartPage(&generator, gfx::Point());
+  EXPECT_TRUE(service->IsAppListVisible());
+
+  // Click an app icon in the app grid view.
   app_list::AppsGridView* grid_view =
       ash::test::AppListControllerTestApi(ash::Shell::GetInstance()).
           GetRootGridView();
@@ -2078,10 +2117,8 @@ IN_PROC_BROWSER_TEST_F(ShelfAppBrowserTest, V1AppNavigation) {
 
   // Create a windowed application.
   AppLaunchParams params(
-      profile(),
-      controller_->GetExtensionForAppID(extensions::kWebStoreAppId),
-      0,
-      chrome::HOST_DESKTOP_TYPE_ASH);
+      profile(), controller_->GetExtensionForAppID(extensions::kWebStoreAppId),
+      CURRENT_TAB, chrome::HOST_DESKTOP_TYPE_ASH, extensions::SOURCE_TEST);
   params.container = extensions::LAUNCH_CONTAINER_WINDOW;
   OpenApplication(params);
   EXPECT_EQ(ash::STATUS_ACTIVE, model_->ItemByID(id)->status);

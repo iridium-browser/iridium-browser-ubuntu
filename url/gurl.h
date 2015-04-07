@@ -112,20 +112,12 @@ class URL_EXPORT GURL {
   }
 
   // Defiant equality operator!
-  bool operator==(const GURL& other) const {
-    return spec_ == other.spec_;
-  }
-  bool operator!=(const GURL& other) const {
-    return spec_ != other.spec_;
-  }
+  bool operator==(const GURL& other) const;
+  bool operator!=(const GURL& other) const;
 
   // Allows GURL to used as a key in STL (for example, a std::set or std::map).
-  bool operator<(const GURL& other) const {
-    return spec_ < other.spec_;
-  }
-  bool operator>(const GURL& other) const {
-    return spec_ > other.spec_;
-  }
+  bool operator<(const GURL& other) const;
+  bool operator>(const GURL& other) const;
 
   // Resolves a URL that's possibly relative to this object's URL, and returns
   // it. Absolute URLs are also handled according to the rules of URLs on web
@@ -198,7 +190,8 @@ class URL_EXPORT GURL {
 
   // A helper function to return a GURL stripped from the elements that are not
   // supposed to be sent as HTTP referrer: username, password and ref fragment.
-  // For invalid URLs the original URL will be returned.
+  // For invalid URLs or URLs that no valid referrers, an empty URL will be
+  // returned.
   GURL GetAsReferrer() const;
 
   // Returns true if the scheme for the current URL is a known "standard"

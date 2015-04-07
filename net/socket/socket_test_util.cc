@@ -24,6 +24,7 @@
 #include "net/http/http_response_headers.h"
 #include "net/socket/client_socket_pool_histograms.h"
 #include "net/socket/socket.h"
+#include "net/socket/websocket_endpoint_lock_manager.h"
 #include "net/ssl/ssl_cert_request_info.h"
 #include "net/ssl/ssl_connection_status_flags.h"
 #include "net/ssl/ssl_info.h"
@@ -682,7 +683,7 @@ MockClientSocketFactory::CreateDatagramClientSocket(
       new MockUDPClientSocket(data_provider, net_log));
   data_provider->set_socket(socket.get());
   if (bind_type == DatagramSocket::RANDOM_BIND)
-    socket->set_source_port(rand_int_cb.Run(1025, 65535));
+    socket->set_source_port(static_cast<uint16>(rand_int_cb.Run(1025, 65535)));
   return socket.Pass();
 }
 
@@ -702,11 +703,17 @@ scoped_ptr<SSLClientSocket> MockClientSocketFactory::CreateSSLClientSocket(
     const HostPortPair& host_and_port,
     const SSLConfig& ssl_config,
     const SSLClientSocketContext& context) {
-  scoped_ptr<MockSSLClientSocket> socket(
-      new MockSSLClientSocket(transport_socket.Pass(),
-                              host_and_port,
-                              ssl_config,
-                              mock_ssl_data_.GetNext()));
+  SSLSocketDataProvider* next_ssl_data = mock_ssl_data_.GetNext();
+  if (!next_ssl_data->next_protos_expected_in_ssl_config.empty()) {
+    EXPECT_EQ(next_ssl_data->next_protos_expected_in_ssl_config.size(),
+              ssl_config.next_protos.size());
+    EXPECT_TRUE(
+        std::equal(next_ssl_data->next_protos_expected_in_ssl_config.begin(),
+                   next_ssl_data->next_protos_expected_in_ssl_config.end(),
+                   ssl_config.next_protos.begin()));
+  }
+  scoped_ptr<MockSSLClientSocket> socket(new MockSSLClientSocket(
+      transport_socket.Pass(), host_and_port, ssl_config, next_ssl_data));
   ssl_client_sockets_.push_back(socket.get());
   return socket.Pass();
 }
@@ -1917,7 +1924,7 @@ DeterministicMockClientSocketFactory::CreateDatagramClientSocket(
   data_provider->set_delegate(socket->AsWeakPtr());
   udp_client_sockets().push_back(socket.get());
   if (bind_type == DatagramSocket::RANDOM_BIND)
-    socket->set_source_port(rand_int_cb.Run(1025, 65535));
+    socket->set_source_port(static_cast<uint16>(rand_int_cb.Run(1025, 65535)));
   return socket.Pass();
 }
 
@@ -1981,6 +1988,21 @@ void MockSOCKSClientSocketPool::ReleaseSocket(const std::string& group_name,
                                               scoped_ptr<StreamSocket> socket,
                                               int id) {
   return transport_pool_->ReleaseSocket(group_name, socket.Pass(), id);
+}
+
+ScopedWebSocketEndpointZeroUnlockDelay::
+    ScopedWebSocketEndpointZeroUnlockDelay() {
+  old_delay_ =
+      WebSocketEndpointLockManager::GetInstance()->SetUnlockDelayForTesting(
+          base::TimeDelta());
+}
+
+ScopedWebSocketEndpointZeroUnlockDelay::
+    ~ScopedWebSocketEndpointZeroUnlockDelay() {
+  base::TimeDelta active_delay =
+      WebSocketEndpointLockManager::GetInstance()->SetUnlockDelayForTesting(
+          old_delay_);
+  EXPECT_EQ(active_delay, base::TimeDelta());
 }
 
 const char kSOCKS5GreetRequest[] = { 0x05, 0x01, 0x00 };

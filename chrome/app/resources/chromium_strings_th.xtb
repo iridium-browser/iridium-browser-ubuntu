@@ -39,7 +39,6 @@
 <translation id="3883381313049582448">ใช้รหัสผ่านที่ Chromium สร้างขึ้น</translation>
 <translation id="3549345495227188780">เริ่มต้นใช้งาน Chromium OS</translation>
 <translation id="1668054258064581266">เมื่อลบบัญชีของคุณออกจาก Chromium แล้ว คุณต้องโหลดแท็บที่เปิดอยู่ซ้ำเพื่อให้มีผล</translation>
-<translation id="6953661834318318668">Chromium Toolbar</translation>
 <translation id="4285930937574705105">การติดตั้งล้มเหลวเนื่องจากมีข้อผิดพลาดที่ไม่ได้ระบุ หาก Chromium ทำงานอยู่ในขณะนี้ โปรดปิดและลองอีกครั้ง</translation>
 <translation id="1396446129537741364">Chromium กำลังพยายามแสดงรหัสผ่าน</translation>
 <translation id="8987477933582888019">เว็บเบราว์เซอร์</translation>
@@ -94,6 +93,7 @@
 <translation id="7473891865547856676">ไม่ ขอบคุณ</translation>
 <translation id="9191268552238695869">ผู้ดูแลระบบได้ติดตั้ง Chromium ในระบบนี้แล้วและผู้ใช้ทุกคนสามารถใช้ได้ ตอนนี้ Chromium ระดับระบบจะถูกนำไปแทนที่ระดับผู้ใช้ที่ติดตั้งไว้</translation>
 <translation id="3509308970982693815">โปรดปิดหน้าต่าง Chromium ทั้งหมดแล้วลองอีกครั้ง</translation>
+<translation id="8851136666856101339">หลัก</translation>
 <translation id="4077262827416206768">โปรดปิดหน้าต่าง Chromium ทั้งหมดและเปิด Chromium อีกครั้งเพื่อให้การเปลี่ยนแปลงนี้มีผล</translation>
 <translation id="6475912303565314141">อีกทั้งยังควบคุมหน้าที่จะแสดงเมื่อคุณเปิด Chromium ด้วย</translation>
 <translation id="1725059042853530269"><ph name="FILE_NAME"/> อาจเป็นอันตรายต่อการท่องเว็บของคุณ Chromium จึงบล็อกไว้</translation>
@@ -157,6 +157,7 @@
 <translation id="5909170354645388250">ไม่ได้ใช้ใน Chromium ตัวยึดตำแหน่งที่ใช้เพื่อให้แผนที่แหล่งข้อมูลซิงค์กัน ต้องใช้อาร์กิวเมนต์หนึ่งรายการ: $1</translation>
 <translation id="1144202035120576837">โดยทั่วไป <ph name="SITE"/> จะใช้การเข้ารหัสเพื่อปกป้องข้อมูลของคุณ เมื่อ Chromium พยายามเชื่อมต่อกับ <ph name="SITE"/> ในครั้งนี้ เว็บไซต์ดังกล่าวส่งข้อมูลรับรองที่ผิดปกติ
 และไม่ถูกต้องกลับมา ผู้บุกรุกอาจพยายามปลอมเป็น <ph name="SITE"/> หรือหน้าจอการลงชื่อเข้าใช้ Wi-Fi ขัดขวางการเชื่อมต่อ ข้อมูลของคุณยังปลอดภัยอยู่เนื่องจาก Chromium หยุดการเชื่อมต่อก่อนมีการแลกเปลี่ยนข้อมูล</translation>
+<translation id="2316129865977710310">ไม่ ขอบคุณ</translation>
 <translation id="7937630085815544518">คุณเคยลงชื่อเข้าใช้ Chromium ในชื่อ <ph name="USER_EMAIL_ADDRESS"/> โปรดใช้บัญชีเดิมเพื่อลงชื่อเข้าใช้อีกครั้ง</translation>
 <translation id="2685838254101182273">Chromium ได้หยุดการอัปเดต และไม่สนับสนุนระบบปฏิบัติการเวอร์ชันนี้อีกต่อไป</translation>
 <translation id="8684913864886094367">Chromium ไม่ได้ปิดอย่างถูกต้อง</translation>
@@ -170,6 +171,7 @@
 <translation id="2648074677641340862">เกิดข้อผิดพลาดของระบบปฏิบัติในระหว่างการติดตั้ง โปรดดาวน์โหลด Chromium อีกครั้ง</translation>
 <translation id="5942520288919337908">เพิ่ม <ph name="EXTENSION_NAME"/> ลงใน Chromium แล้ว</translation>
 <translation id="549669000822060376">โปรดรอขณะที่ Chromium ติดตั้งการอัปเดตระบบล่าสุด</translation>
+<translation id="1240763998429950591">Chromium ไม่สามารถอัปเดตเป็นเวอร์ชันล่าสุดได้ คุณจึงไม่ได้รับคุณลักษณะใหม่และการแก้ไขด้านความปลอดภัย คุณจำเป็นต้องอัปเดต Chromium</translation>
 <translation id="6930860321615955692">https://support.google.com/chrome/?p=ib_chromeframe</translation>
 <translation id="3281987435599047980">ส่งคำและบริบทโดยรอบไปยัง Google Search เพื่อแสดงคำจำกัดความ รูปภาพ ผลการค้นหา และรายละเอียดอื่นๆ</translation>
 <translation id="4559775032954821361">ไปที่
@@ -209,6 +211,7 @@
 <translation id="2966088006374919794">Chromium จำเป็นต้องเปิดแอปพลิเคชันภายนอกเพื่อจัดการกับลิงก์ <ph name="SCHEME"/> ลิงก์ที่ร้องขอคือ <ph name="PROTOLINK"/></translation>
 <translation id="2558235863893655150">คุณต้องการให้ Chromium บันทึกรหัสผ่านของคุณหรือไม่</translation>
 <translation id="6485906693002546646">คุณกำลังใช้ <ph name="PROFILE_EMAIL"/> ในการซิงค์ข้อมูลใน Chromium หากต้องการอัปเดตค่ากำหนดการซิงค์หรือใช้ Chromium โดยไม่มีบัญชี Google โปรดไปที่ <ph name="SETTINGS_LINK"/></translation>
+<translation id="705851970750939768">อัปเดต Chromium</translation>
 <translation id="5772805321386874569">(จำเป็นต้อง <ph name="BEGIN_BUTTON"/>รีสตาร์ท<ph name="END_BUTTON"/> Chromium)</translation>
 <translation id="1688750314291223739">ตั้งค่าการซิงค์เพื่อบัน​​ทึกคุณลักษณะเบราว์เซอร์ในแบบของคุณไปยังเว็บและเข้าถึงได้จาก Chromium บนคอมพิวเตอร์เครื่องใดก็ได้</translation>
 <translation id="8610831143142469229">อนุญาตให้ Chromium เข้าถึงเครือข่ายในการตั้งค่าไฟร์วอลล์หรือโปรแกรม

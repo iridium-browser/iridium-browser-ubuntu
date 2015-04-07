@@ -26,6 +26,7 @@
 #include "base/threading/thread_local.h"
 #include "base/tracked_objects.h"
 #include "components/tracing/child_trace_message_filter.h"
+#include "content/child/bluetooth/bluetooth_message_filter.h"
 #include "content/child/child_discardable_shared_memory_manager.h"
 #include "content/child/child_gpu_memory_buffer_manager.h"
 #include "content/child/child_histogram_message_filter.h"
@@ -36,8 +37,10 @@
 #include "content/child/fileapi/webfilesystem_impl.h"
 #include "content/child/geofencing/geofencing_message_filter.h"
 #include "content/child/mojo/mojo_application.h"
+#include "content/child/navigator_connect/navigator_connect_dispatcher.h"
 #include "content/child/notifications/notification_dispatcher.h"
 #include "content/child/power_monitor_broadcast_source.h"
+#include "content/child/push_messaging/push_dispatcher.h"
 #include "content/child/quota_dispatcher.h"
 #include "content/child/quota_message_filter.h"
 #include "content/child/resource_dispatcher.h"
@@ -85,9 +88,8 @@ class WaitAndExitDelegate : public base::PlatformThread::Delegate {
  public:
   explicit WaitAndExitDelegate(base::TimeDelta duration)
       : duration_(duration) {}
-  virtual ~WaitAndExitDelegate() override {}
 
-  virtual void ThreadMain() override {
+  void ThreadMain() override {
     base::PlatformThread::Sleep(duration_);
     _exit(0);
   }
@@ -159,18 +161,19 @@ class SuicideOnChannelErrorFilter : public IPC::MessageFilter {
 
 #if defined(OS_ANDROID)
 ChildThread* g_child_thread = NULL;
+bool g_child_thread_initialized = false;
 
 // A lock protects g_child_thread.
-base::LazyInstance<base::Lock> g_lazy_child_thread_lock =
+base::LazyInstance<base::Lock>::Leaky g_lazy_child_thread_lock =
     LAZY_INSTANCE_INITIALIZER;
 
 // base::ConditionVariable has an explicit constructor that takes
 // a base::Lock pointer as parameter. The base::DefaultLazyInstanceTraits
 // doesn't handle the case. Thus, we need our own class here.
 struct CondVarLazyInstanceTraits {
-  static const bool kRegisterOnExit = true;
+  static const bool kRegisterOnExit = false;
 #ifndef NDEBUG
-  static const bool kAllowedToAccessOnNonjoinableThread = false;
+  static const bool kAllowedToAccessOnNonjoinableThread = true;
 #endif
 
   static base::ConditionVariable* New(void* instance) {
@@ -274,7 +277,8 @@ void ChildThread::Init(const Options& options) {
   thread_safe_sender_ = new ThreadSafeSender(
       base::MessageLoopProxy::current().get(), sync_message_filter_.get());
 
-  resource_dispatcher_.reset(new ResourceDispatcher(this));
+  resource_dispatcher_.reset(new ResourceDispatcher(
+      this, message_loop()->task_runner()));
   websocket_dispatcher_.reset(new WebSocketDispatcher);
   file_system_dispatcher_.reset(new FileSystemDispatcher());
 
@@ -291,15 +295,24 @@ void ChildThread::Init(const Options& options) {
                                               quota_message_filter_.get()));
   geofencing_message_filter_ =
       new GeofencingMessageFilter(thread_safe_sender_.get());
+  bluetooth_message_filter_ =
+      new BluetoothMessageFilter(thread_safe_sender_.get());
   notification_dispatcher_ =
       new NotificationDispatcher(thread_safe_sender_.get());
+  push_dispatcher_ = new PushDispatcher(thread_safe_sender_.get());
+  navigator_connect_dispatcher_ =
+      new NavigatorConnectDispatcher(thread_safe_sender_.get());
+
   channel_->AddFilter(histogram_message_filter_.get());
   channel_->AddFilter(sync_message_filter_.get());
   channel_->AddFilter(resource_message_filter_.get());
   channel_->AddFilter(quota_message_filter_->GetFilter());
   channel_->AddFilter(notification_dispatcher_->GetFilter());
+  channel_->AddFilter(push_dispatcher_->GetFilter());
   channel_->AddFilter(service_worker_message_filter_->GetFilter());
   channel_->AddFilter(geofencing_message_filter_->GetFilter());
+  channel_->AddFilter(bluetooth_message_filter_->GetFilter());
+  channel_->AddFilter(navigator_connect_dispatcher_->GetFilter());
 
   if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kSingleProcess)) {
@@ -346,6 +359,7 @@ void ChildThread::Init(const Options& options) {
   {
     base::AutoLock lock(g_lazy_child_thread_lock.Get());
     g_child_thread = this;
+    g_child_thread_initialized = true;
   }
   // Signalling without locking is fine here because only
   // one thread can wait on the condition variable.
@@ -371,6 +385,13 @@ void ChildThread::Init(const Options& options) {
 }
 
 ChildThread::~ChildThread() {
+#if defined(OS_ANDROID)
+  {
+    base::AutoLock lock(g_lazy_child_thread_lock.Get());
+    g_child_thread = nullptr;
+  }
+#endif
+
 #ifdef IPC_MESSAGE_LOG_ENABLED
   IPC::Logging::GetInstance()->SetIPCSender(NULL);
 #endif
@@ -422,18 +443,20 @@ MessageRouter* ChildThread::GetRouter() {
   return &router_;
 }
 
-base::SharedMemory* ChildThread::AllocateSharedMemory(size_t buf_size) {
+scoped_ptr<base::SharedMemory> ChildThread::AllocateSharedMemory(
+    size_t buf_size) {
+  DCHECK(base::MessageLoop::current() == message_loop());
   return AllocateSharedMemory(buf_size, this);
 }
 
 // static
-base::SharedMemory* ChildThread::AllocateSharedMemory(
+scoped_ptr<base::SharedMemory> ChildThread::AllocateSharedMemory(
     size_t buf_size,
     IPC::Sender* sender) {
   scoped_ptr<base::SharedMemory> shared_buf;
 #if defined(OS_WIN)
   shared_buf.reset(new base::SharedMemory);
-  if (!shared_buf->CreateAndMapAnonymous(buf_size)) {
+  if (!shared_buf->CreateAnonymous(buf_size)) {
     NOTREACHED();
     return NULL;
   }
@@ -445,10 +468,6 @@ base::SharedMemory* ChildThread::AllocateSharedMemory(
                            buf_size, &shared_mem_handle))) {
     if (base::SharedMemory::IsHandleValid(shared_mem_handle)) {
       shared_buf.reset(new base::SharedMemory(shared_mem_handle, false));
-      if (!shared_buf->Map(buf_size)) {
-        NOTREACHED() << "Map failed";
-        return NULL;
-      }
     } else {
       NOTREACHED() << "Browser failed to allocate shared memory";
       return NULL;
@@ -458,7 +477,7 @@ base::SharedMemory* ChildThread::AllocateSharedMemory(
     return NULL;
   }
 #endif
-  return shared_buf.release();
+  return shared_buf;
 }
 
 bool ChildThread::OnMessageReceived(const IPC::Message& msg) {
@@ -566,12 +585,18 @@ void ChildThread::ShutdownThread() {
       "this method should NOT be called from child thread itself";
   {
     base::AutoLock lock(g_lazy_child_thread_lock.Get());
-    while (!g_child_thread)
+    while (!g_child_thread_initialized)
       g_lazy_child_thread_cv.Get().Wait();
+
+    // g_child_thread may already have been destructed while we didn't hold the
+    // lock.
+    if (!g_child_thread)
+      return;
+
+    DCHECK_NE(base::MessageLoop::current(), g_child_thread->message_loop());
+    g_child_thread->message_loop()->PostTask(
+        FROM_HERE, base::Bind(&QuitMainThreadMessageLoop));
   }
-  DCHECK_NE(base::MessageLoop::current(), g_child_thread->message_loop());
-  g_child_thread->message_loop()->PostTask(
-      FROM_HERE, base::Bind(&QuitMainThreadMessageLoop));
 }
 #endif
 

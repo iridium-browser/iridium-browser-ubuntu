@@ -10,15 +10,9 @@ found in the LICENSE file.
 <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
 
 <script src="/components/platform/platform.js"></script>
-
 <link rel="import" href="/components/polymer/polymer.html">
-<link rel="import" href="/tracing/timeline_view.html">
-<link rel="import" href="/tracing/importer.html">
-<link rel="import" href="/cc.html">
-<link rel="import" href="/net.html">
-<link rel="import" href="/tcmalloc.html">
-<link rel="import" href="/system_stats.html">
-<link rel="import" href="/gpu.html">
+<link rel="import" href="/trace_viewer.html">
+<link rel="import" href="/extras/full_config.html">
 <style>
   body {
     margin: 0;
@@ -33,7 +27,7 @@ found in the LICENSE file.
     -webkit-flex: 1 1 auto;
     overflow: hidden;
     position: absolute;
-    top: 40px;
+    top: 0px;
     bottom: 0;
     left: 0;
     right: 0;
@@ -42,10 +36,6 @@ found in the LICENSE file.
 </style>
 </head>
 <body>
-  <div class="header">
-  <select id="trace_file">
-  </select>
-  </div>
   <x-timeline-view>
   </x-timeline-view>
 
@@ -93,7 +83,7 @@ found in the LICENSE file.
   }
 
   function createViewFromTraces(filenames, traces) {
-    var m = new tracing.TraceModel();
+    var m = new tv.c.TraceModel();
     var p = m.importTracesWithProgressDialog(traces, true);
     p.then(
       function() {
@@ -101,7 +91,7 @@ found in the LICENSE file.
         timelineViewEl.tabIndex = 1;
         if (timelineViewEl.timeline)
           timelineViewEl.timeline.focusElement = timelineViewEl;
-        timelineViewEl.viewTitle = filenames;
+        timelineViewEl.viewTitle = '';
       },
       function(err) {
         var overlay = new tv.ui.Overlay();
@@ -112,13 +102,13 @@ found in the LICENSE file.
   }
 
   function onSelectionChange() {
-    var select = document.querySelector('#trace_file');
+    var select = document.querySelector('#trace-file');
     window.location.hash = '#' + select[select.selectedIndex].value;
   }
 
   function onHashChange() {
     var file = window.location.hash.substr(1);
-    var select = document.querySelector('#trace_file');
+    var select = document.querySelector('#trace-file');
     if (select[select.selectedIndex].value != file) {
       for (var i = 0; i < select.children.length; i++) {
         if (select.children[i].value == file) {
@@ -151,10 +141,14 @@ found in the LICENSE file.
 
   function onLoad() {
     timelineViewEl = document.querySelector('x-timeline-view');
-    tv.ui.decorate(timelineViewEl, tracing.TimelineView);
+    tv.b.ui.decorate(timelineViewEl, tv.TraceViewer);
+
+    var selectEl = document.createElement('select');
+    selectEl.id = 'trace-file';
+    timelineViewEl.leftControls.appendChild(selectEl);
 
     getAsync('/json/examples', function(data) {
-      var select = document.querySelector('#trace_file');
+      var select = document.querySelector('#trace-file');
       var files = JSON.parse(data);
 
       for (var i = 0; i < files.length; ++i) {

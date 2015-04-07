@@ -21,7 +21,7 @@ PictureImageLayer::~PictureImageLayer() {
 
 scoped_ptr<LayerImpl> PictureImageLayer::CreateLayerImpl(
     LayerTreeImpl* tree_impl) {
-  return PictureImageLayerImpl::Create(tree_impl, id());
+  return PictureImageLayerImpl::Create(tree_impl, id(), is_mask());
 }
 
 bool PictureImageLayer::HasDrawableContent() const {
@@ -58,6 +58,13 @@ void PictureImageLayer::PaintContents(
   // to the root canvas, this draw must use the kSrcOver_Mode so that
   // transparent images blend correctly.
   canvas->drawBitmap(bitmap_, 0, 0);
+}
+
+scoped_refptr<DisplayItemList> PictureImageLayer::PaintContentsToDisplayList(
+    const gfx::Rect& clip,
+    GraphicsContextStatus gc_status) {
+  NOTIMPLEMENTED();
+  return DisplayItemList::Create();
 }
 
 bool PictureImageLayer::FillsBoundsCompletely() const {

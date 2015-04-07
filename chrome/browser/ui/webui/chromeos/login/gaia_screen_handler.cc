@@ -16,6 +16,7 @@
 #include "chrome/browser/chromeos/language_preferences.h"
 #include "chrome/browser/chromeos/login/ui/user_adding_screen.h"
 #include "chrome/browser/chromeos/policy/consumer_management_service.h"
+#include "chrome/browser/chromeos/policy/consumer_management_stage.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/io_thread.h"
@@ -25,7 +26,6 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/chromeos_switches.h"
-#include "chromeos/ime/input_method_manager.h"
 #include "chromeos/settings/cros_settings_names.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/browser_thread.h"
@@ -33,6 +33,7 @@
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/gaia_switches.h"
 #include "google_apis/gaia/gaia_urls.h"
+#include "ui/base/ime/chromeos/input_method_manager.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using content::BrowserThread;
@@ -74,6 +75,13 @@ void UpdateAuthParams(base::DictionaryValue* params,
   if (!allow_new_user || !supervised_users_allowed) {
     supervised_users_can_create = false;
     message_id = IDS_CREATE_SUPERVISED_USER_CREATION_RESTRICTED_TEXT;
+  }
+  if (supervised_users_can_create &&
+      user_manager::UserManager::Get()
+          ->GetUsersAllowedForSupervisedUsersCreation()
+          .empty()) {
+    supervised_users_can_create = false;
+    message_id = IDS_CREATE_SUPERVISED_USER_NO_MANAGER_EXCEPT_KIDS_TEXT;
   }
 
   params->SetBoolean("supervisedUsersEnabled", supervised_users_allowed);
@@ -142,6 +150,7 @@ GaiaScreenHandler::GaiaScreenHandler(
       dns_cleared_(false),
       dns_clear_task_running_(false),
       cookies_cleared_(false),
+      show_when_dns_and_cookies_cleared_(false),
       focus_stolen_(false),
       gaia_silent_load_(false),
       using_saml_api_(false),
@@ -157,6 +166,11 @@ GaiaScreenHandler::~GaiaScreenHandler() {
 }
 
 void GaiaScreenHandler::LoadGaia(const GaiaContext& context) {
+  if (!auth_extension_) {
+    Profile* signin_profile = ProfileHelper::GetSigninProfile();
+    auth_extension_.reset(new ScopedGaiaAuthExtension(signin_profile));
+  }
+
   base::DictionaryValue params;
   const bool is_enrolling_consumer_management =
       context.is_enrolling_consumer_management;
@@ -198,7 +212,7 @@ void GaiaScreenHandler::LoadGaia(const GaiaContext& context) {
     params.Set("localizedStrings", localized_strings);
   }
 
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
 
   const GURL gaia_url =
       command_line->HasSwitch(::switches::kGaiaUrl)
@@ -206,8 +220,12 @@ void GaiaScreenHandler::LoadGaia(const GaiaContext& context) {
           : GaiaUrls::GetInstance()->gaia_url();
   params.SetString("gaiaUrl", gaia_url.spec());
 
-  if (context.embedded_signin_enabled)
+  if (context.embedded_signin_enabled) {
     params.SetBoolean("useEmbedded", true);
+    // We set 'constrained' here to switch troubleshooting page on embedded
+    // signin to full tab.
+    params.SetInteger("constrained", 1);
+  }
 
   frame_state_ = FRAME_STATE_LOADING;
   CallJS("loadAuthExtension", params);
@@ -294,6 +312,7 @@ void GaiaScreenHandler::RegisterMessages() {
   AddCallback("scrapedPasswordVerificationFailed",
               &GaiaScreenHandler::HandleScrapedPasswordVerificationFailed);
   AddCallback("loginWebuiReady", &GaiaScreenHandler::HandleGaiaUIReady);
+  AddCallback("switchToFullTab", &GaiaScreenHandler::HandleSwitchToFullTab);
 }
 
 void GaiaScreenHandler::HandleFrameLoadingCompleted(int status) {
@@ -353,7 +372,7 @@ void GaiaScreenHandler::HandleCompleteLogin(const std::string& gaia_id,
     // Show Gaia sign-in screen again, since we only allow the owner to sign
     // in.
     populated_email_ = owner_email;
-    ShowGaia(is_enrolling_consumer_management_);
+    ShowGaiaAsync(is_enrolling_consumer_management_);
     return;
   }
 
@@ -383,6 +402,10 @@ void GaiaScreenHandler::HandleScrapedPasswordCount(int password_count) {
 
 void GaiaScreenHandler::HandleScrapedPasswordVerificationFailed() {
   RecordSAMLScrapingVerificationResultInHistogram(false);
+}
+
+void GaiaScreenHandler::HandleSwitchToFullTab() {
+  CallJS("switchToFullTab");
 }
 
 void GaiaScreenHandler::HandleGaiaUIReady() {
@@ -432,13 +455,12 @@ void GaiaScreenHandler::OnSetOwnerDone(const std::string& gaia_id,
                                        bool success) {
   CHECK(consumer_management_);
   if (success) {
-    consumer_management_->SetEnrollmentStage(
-        policy::ConsumerManagementService::ENROLLMENT_STAGE_OWNER_STORED);
+    consumer_management_->SetStage(
+        policy::ConsumerManagementStage::EnrollmentOwnerStored());
   } else {
     LOG(ERROR) << "Failed to write owner e-mail to boot lockbox.";
-    consumer_management_->SetEnrollmentStage(
-        policy::ConsumerManagementService::
-            ENROLLMENT_STAGE_BOOT_LOCKBOX_FAILED);
+    consumer_management_->SetStage(
+        policy::ConsumerManagementStage::EnrollmentBootLockboxFailed());
     // We should continue logging in the user, as there's not much we can do
     // here.
   }
@@ -568,8 +590,9 @@ void GaiaScreenHandler::SetSAMLPrincipalsAPIUsed(bool api_used) {
   UMA_HISTOGRAM_BOOLEAN("ChromeOS.SAML.APIUsed", api_used);
 }
 
-void GaiaScreenHandler::ShowGaia(bool is_enrolling_consumer_management) {
+void GaiaScreenHandler::ShowGaiaAsync(bool is_enrolling_consumer_management) {
   is_enrolling_consumer_management_ = is_enrolling_consumer_management;
+  show_when_dns_and_cookies_cleared_ = true;
   if (gaia_silent_load_ && populated_email_.empty()) {
     dns_cleared_ = true;
     cookies_cleared_ = true;
@@ -581,9 +604,17 @@ void GaiaScreenHandler::ShowGaia(bool is_enrolling_consumer_management) {
   }
 }
 
+void GaiaScreenHandler::CancelShowGaiaAsync() {
+  show_when_dns_and_cookies_cleared_ = false;
+}
+
 void GaiaScreenHandler::ShowGaiaScreenIfReady() {
-  if (!dns_cleared_ || !cookies_cleared_ || !Delegate())
+  if (!dns_cleared_ ||
+      !cookies_cleared_ ||
+      !show_when_dns_and_cookies_cleared_ ||
+      !Delegate()) {
     return;
+  }
 
   std::string active_network_path = network_state_informer_->network_path();
   if (gaia_silent_load_ &&
@@ -610,12 +641,12 @@ void GaiaScreenHandler::ShowGaiaScreenIfReady() {
 
   // Set Least Recently Used input method for the user.
   if (!populated_email_.empty()) {
-    signin_screen_handler_->SetUserInputMethod(populated_email_,
-                                               gaia_ime_state.get());
+    SigninScreenHandler::SetUserInputMethod(populated_email_,
+                                            gaia_ime_state.get());
   } else {
     std::vector<std::string> input_methods =
         imm->GetInputMethodUtil()->GetHardwareLoginInputMethodIds();
-    const std::string owner_im = signin_screen_handler_->GetUserLRUInputMethod(
+    const std::string owner_im = SigninScreenHandler::GetUserLRUInputMethod(
         user_manager::UserManager::Get()->GetOwnerEmail());
     const std::string system_im = g_browser_process->local_state()->GetString(
         language_prefs::kPreferredKeyboardLayout);
@@ -646,10 +677,13 @@ void GaiaScreenHandler::ShowGaiaScreenIfReady() {
   }
   signin_screen_handler_->UpdateState(ErrorScreenActor::ERROR_REASON_UPDATE);
 
-  PrefService* prefs = g_browser_process->local_state();
-  if (prefs->GetBoolean(prefs::kFactoryResetRequested)) {
-    if (core_oobe_actor_)
+  if (core_oobe_actor_) {
+    PrefService* prefs = g_browser_process->local_state();
+    if (prefs->GetBoolean(prefs::kFactoryResetRequested)) {
       core_oobe_actor_->ShowDeviceResetScreen();
+    } else if (prefs->GetBoolean(prefs::kDebuggingFeaturesRequested)) {
+      core_oobe_actor_->ShowEnableDebuggingScreen();
+    }
   }
 }
 
@@ -686,7 +720,7 @@ void GaiaScreenHandler::LoadAuthExtension(bool force,
   }
 
   context.embedded_signin_enabled =
-      CommandLine::ForCurrentProcess()->HasSwitch(
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
           chromeos::switches::kEnableEmbeddedSignin) ||
       embedded_signin_enabled_by_shortcut_;
 

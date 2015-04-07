@@ -14,6 +14,7 @@ bisect scrip there.
 import optparse
 import os
 import platform
+import re
 import subprocess
 import sys
 import traceback
@@ -21,6 +22,7 @@ import traceback
 from auto_bisect import bisect_perf_regression
 from auto_bisect import bisect_utils
 from auto_bisect import math_utils
+from auto_bisect import source_control
 
 CROS_BOARD_ENV = 'BISECT_CROS_BOARD'
 CROS_IP_ENV = 'BISECT_CROS_IP'
@@ -236,81 +238,36 @@ def _CreateBisectOptionsFromConfig(config):
   return bisect_perf_regression.BisectOptions.FromDict(opts_dict)
 
 
-def _RunPerformanceTest(config):
-  """Runs a performance test with and without the current patch.
+def _ParseCloudLinksFromOutput(output):
+  html_results_pattern = re.compile(
+      r'\s(?P<VALUES>http://storage.googleapis.com/' +
+          'chromium-telemetry/html-results/results-[a-z0-9-_]+)\s',
+      re.MULTILINE)
+  profiler_pattern = re.compile(
+      r'\s(?P<VALUES>https://console.developers.google.com/' +
+          'm/cloudstorage/b/[a-z-]+/o/profiler-[a-z0-9-_.]+)\s',
+      re.MULTILINE)
 
-  Args:
-    config: Contents of the config file, a dictionary.
+  results = {
+      'html-results': html_results_pattern.findall(output),
+      'profiler': profiler_pattern.findall(output),
+  }
 
-  Attempts to build and run the current revision with and without the
-  current patch, with the parameters passed in.
-  """
-  # Bisect script expects to be run from the src directory
-  os.chdir(SRC_DIR)
+  return results
 
-  bisect_utils.OutputAnnotationStepStart('Building With Patch')
 
-  opts = _CreateBisectOptionsFromConfig(config)
-  b = bisect_perf_regression.BisectPerformanceMetrics(opts, os.getcwd())
+def _ParseAndOutputCloudLinks(
+    results_without_patch, results_with_patch, annotations_dict):
+  cloud_links_without_patch = _ParseCloudLinksFromOutput(
+      results_without_patch[2])
+  cloud_links_with_patch = _ParseCloudLinksFromOutput(
+      results_with_patch[2])
 
-  if bisect_utils.RunGClient(['runhooks']):
-    raise RuntimeError('Failed to run gclient runhooks')
+  cloud_file_link = (cloud_links_without_patch['html-results'][0]
+      if cloud_links_without_patch['html-results'] else '')
 
-  if not b.ObtainBuild('chromium'):
-    raise RuntimeError('Patched version failed to build.')
-
-  bisect_utils.OutputAnnotationStepClosed()
-  bisect_utils.OutputAnnotationStepStart('Running With Patch')
-
-  results_with_patch = b.RunPerformanceTestAndParseResults(
-      opts.command, opts.metric, reset_on_first_run=True, results_label='Patch')
-
-  if results_with_patch[1]:
-    raise RuntimeError('Patched version failed to run performance test.')
-
-  bisect_utils.OutputAnnotationStepClosed()
-
-  bisect_utils.OutputAnnotationStepStart('Reverting Patch')
-  # TODO: When this is re-written to recipes, this should use bot_update's
-  # revert mechanism to fully revert the client. But for now, since we know that
-  # the perf try bot currently only supports src/ and src/third_party/WebKit, we
-  # simply reset those two directories.
-  bisect_utils.CheckRunGit(['reset', '--hard'])
-  bisect_utils.CheckRunGit(['reset', '--hard'],
-                           os.path.join('third_party', 'WebKit'))
-  bisect_utils.OutputAnnotationStepClosed()
-
-  bisect_utils.OutputAnnotationStepStart('Building Without Patch')
-
-  if bisect_utils.RunGClient(['runhooks']):
-    raise RuntimeError('Failed to run gclient runhooks')
-
-  if not b.ObtainBuild('chromium'):
-    raise RuntimeError('Unpatched version failed to build.')
-
-  bisect_utils.OutputAnnotationStepClosed()
-  bisect_utils.OutputAnnotationStepStart('Running Without Patch')
-
-  results_without_patch = b.RunPerformanceTestAndParseResults(
-      opts.command, opts.metric, upload_on_last_run=True, results_label='ToT')
-
-  if results_without_patch[1]:
-    raise RuntimeError('Unpatched version failed to run performance test.')
-
-  # Find the link to the cloud stored results file.
-  output = results_without_patch[2]
-  cloud_file_link = [t for t in output.splitlines()
-      if 'storage.googleapis.com/chromium-telemetry/html-results/' in t]
-  if cloud_file_link:
-    # What we're getting here is basically "View online at http://..." so parse
-    # out just the URL portion.
-    cloud_file_link = cloud_file_link[0]
-    cloud_file_link = [t for t in cloud_file_link.split(' ')
-        if 'storage.googleapis.com/chromium-telemetry/html-results/' in t]
-    assert cloud_file_link, 'Couldn\'t parse URL from output.'
-    cloud_file_link = cloud_file_link[0]
-  else:
-    cloud_file_link = ''
+  profiler_file_links_with_patch = cloud_links_with_patch['profiler']
+  profiler_file_links_without_patch = cloud_links_without_patch['profiler']
 
   # Calculate the % difference in the means of the 2 runs.
   percent_diff_in_means = None
@@ -322,7 +279,6 @@ def _RunPerformanceTest(config):
     std_err = math_utils.PooledStandardError(
         [results_with_patch[0]['values'], results_without_patch[0]['values']])
 
-  bisect_utils.OutputAnnotationStepClosed()
   if percent_diff_in_means is not None and std_err is not None:
     bisect_utils.OutputAnnotationStepStart('Results - %.02f +- %0.02f delta' %
         (percent_diff_in_means, std_err))
@@ -339,6 +295,155 @@ def _RunPerformanceTest(config):
     bisect_utils.OutputAnnotationStepClosed()
   elif cloud_file_link:
     bisect_utils.OutputAnnotationStepLink('HTML Results', cloud_file_link)
+
+  if profiler_file_links_with_patch and profiler_file_links_without_patch:
+    for i in xrange(len(profiler_file_links_with_patch)):
+      bisect_utils.OutputAnnotationStepLink(
+          '%s[%d]' % (annotations_dict.get('profiler_link1'), i),
+          profiler_file_links_with_patch[i])
+    for i in xrange(len(profiler_file_links_without_patch)):
+      bisect_utils.OutputAnnotationStepLink(
+          '%s[%d]' % (annotations_dict.get('profiler_link2'), i),
+          profiler_file_links_without_patch[i])
+
+
+def _ResolveRevisionsFromConfig(config):
+  if not 'good_revision' in config and not 'bad_revision' in config:
+    return (None, None)
+
+  bad_revision = source_control.ResolveToRevision(
+      config['bad_revision'], 'chromium', bisect_utils.DEPOT_DEPS_NAME, 100)
+  if not bad_revision:
+    raise RuntimeError('Failed to resolve [%s] to git hash.',
+        config['bad_revision'])
+  good_revision = source_control.ResolveToRevision(
+      config['good_revision'], 'chromium', bisect_utils.DEPOT_DEPS_NAME, -100)
+  if not good_revision:
+    raise RuntimeError('Failed to resolve [%s] to git hash.',
+        config['good_revision'])
+
+  return (good_revision, bad_revision)
+
+
+def _GetStepAnnotationStringsDict(config):
+  if 'good_revision' in config and 'bad_revision' in config:
+    return {
+        'build1': 'Building [%s]' % config['good_revision'],
+        'build2': 'Building [%s]' % config['bad_revision'],
+        'run1': 'Running [%s]' % config['good_revision'],
+        'run2': 'Running [%s]' % config['bad_revision'],
+        'sync1': 'Syncing [%s]' % config['good_revision'],
+        'sync2': 'Syncing [%s]' % config['bad_revision'],
+        'results_label1': config['good_revision'],
+        'results_label2': config['bad_revision'],
+        'profiler_link1': 'Profiler Data - %s' % config['good_revision'],
+        'profiler_link2': 'Profiler Data - %s' % config['bad_revision'],
+    }
+  else:
+    return {
+        'build1': 'Building With Patch',
+        'build2': 'Building Without Patch',
+        'run1': 'Running With Patch',
+        'run2': 'Running Without Patch',
+        'results_label1': 'Patch',
+        'results_label2': 'ToT',
+        'profiler_link1': 'With Patch - Profiler Data',
+        'profiler_link2': 'Without Patch - Profiler Data',
+    }
+
+
+def _RunBuildStepForPerformanceTest(bisect_instance,
+                                    build_string,
+                                    sync_string,
+                                    revision):
+  if revision:
+    bisect_utils.OutputAnnotationStepStart(sync_string)
+    if not source_control.SyncToRevision(revision, 'gclient'):
+      raise RuntimeError('Failed [%s].' % sync_string)
+    bisect_utils.OutputAnnotationStepClosed()
+
+  bisect_utils.OutputAnnotationStepStart(build_string)
+
+  if bisect_utils.RunGClient(['runhooks']):
+    raise RuntimeError('Failed to run gclient runhooks')
+
+  if not bisect_instance.ObtainBuild('chromium'):
+    raise RuntimeError('Patched version failed to build.')
+
+  bisect_utils.OutputAnnotationStepClosed()
+
+
+def _RunCommandStepForPerformanceTest(bisect_instance,
+                                      opts,
+                                      reset_on_first_run,
+                                      upload_on_last_run,
+                                      results_label,
+                                      run_string):
+  bisect_utils.OutputAnnotationStepStart(run_string)
+
+  results = bisect_instance.RunPerformanceTestAndParseResults(
+      opts.command,
+      opts.metric,
+      reset_on_first_run=reset_on_first_run,
+      upload_on_last_run=upload_on_last_run,
+      results_label=results_label)
+
+  if results[1]:
+    raise RuntimeError('Patched version failed to run performance test.')
+
+  bisect_utils.OutputAnnotationStepClosed()
+
+  return results
+
+
+def _RunPerformanceTest(config):
+  """Runs a performance test with and without the current patch.
+
+  Args:
+    config: Contents of the config file, a dictionary.
+
+  Attempts to build and run the current revision with and without the
+  current patch, with the parameters passed in.
+  """
+  # Bisect script expects to be run from the src directory
+  os.chdir(SRC_DIR)
+
+  opts = _CreateBisectOptionsFromConfig(config)
+  revisions = _ResolveRevisionsFromConfig(config)
+  annotations_dict = _GetStepAnnotationStringsDict(config)
+  b = bisect_perf_regression.BisectPerformanceMetrics(opts, os.getcwd())
+
+  _RunBuildStepForPerformanceTest(b,
+                                  annotations_dict.get('build1'),
+                                  annotations_dict.get('sync1'),
+                                  revisions[0])
+
+  results_with_patch = _RunCommandStepForPerformanceTest(
+      b, opts, True, True, annotations_dict['results_label1'],
+      annotations_dict['run1'])
+
+  bisect_utils.OutputAnnotationStepStart('Reverting Patch')
+  # TODO: When this is re-written to recipes, this should use bot_update's
+  # revert mechanism to fully revert the client. But for now, since we know that
+  # the perf try bot currently only supports src/ and src/third_party/WebKit, we
+  # simply reset those two directories.
+  bisect_utils.CheckRunGit(['reset', '--hard'])
+  bisect_utils.CheckRunGit(['reset', '--hard'],
+                           os.path.join('third_party', 'WebKit'))
+  bisect_utils.OutputAnnotationStepClosed()
+
+  _RunBuildStepForPerformanceTest(b,
+                                  annotations_dict.get('build2'),
+                                  annotations_dict.get('sync2'),
+                                  revisions[1])
+
+  results_without_patch = _RunCommandStepForPerformanceTest(
+      b, opts, False, True, annotations_dict['results_label2'],
+      annotations_dict['run2'])
+
+  # Find the link to the cloud stored results file.
+  _ParseAndOutputCloudLinks(
+      results_without_patch, results_with_patch, annotations_dict)
 
 
 def _SetupAndRunPerformanceTest(config, path_to_goma):
@@ -386,87 +491,67 @@ def _RunBisectionScript(
   """
   _PrintConfigStep(config)
 
-  cmd = ['python', os.path.join(BISECT_SCRIPT_DIR, 'bisect_perf_regression.py'),
-         '-c', config['command'],
-         '-g', config['good_revision'],
-         '-b', config['bad_revision'],
-         '-m', config['metric'],
-         '--working_directory', working_directory,
-         '--output_buildbot_annotations']
+  # Construct the basic command with all necessary arguments.
+  cmd = [
+      'python',
+      os.path.join(BISECT_SCRIPT_DIR, 'bisect_perf_regression.py'),
+      '--command', config['command'],
+      '--good_revision', config['good_revision'],
+      '--bad_revision', config['bad_revision'],
+      '--metric', config['metric'],
+      '--working_directory', working_directory,
+      '--output_buildbot_annotations'
+  ]
 
-  if config.get('metric'):
-    cmd.extend(['-m', config['metric']])
-
-  if config['repeat_count']:
-    cmd.extend(['-r', config['repeat_count']])
-
-  if config['truncate_percent']:
-    cmd.extend(['-t', config['truncate_percent']])
-
-  if config['max_time_minutes']:
-    cmd.extend(['--max_time_minutes', config['max_time_minutes']])
-
-  if config.has_key('bisect_mode'):
-    cmd.extend(['--bisect_mode', config['bisect_mode']])
-
-  if config.has_key('improvement_direction'):
-    cmd.extend(['-d', config['improvement_direction']])
-
-  if config.has_key('bug_id'):
-    cmd.extend(['--bug_id', config['bug_id']])
+  # Add flags for any optional config parameters if given in the config.
+  options = [
+      ('repeat_count', '--repeat_test_count'),
+      ('truncate_percent', '--truncate_percent'),
+      ('max_time_minutes', '--max_time_minutes'),
+      ('bisect_mode', '--bisect_mode'),
+      ('improvement_direction', '--improvement_direction'),
+      ('bug_id', '--bug_id'),
+      ('builder_host', '--builder_host'),
+      ('builder_port', '--builder_port'),
+  ]
+  for config_key, flag in options:
+    if config.has_key(config_key):
+      cmd.extend([flag, config[config_key]])
 
   cmd.extend(['--build_preference', 'ninja'])
 
-  if '--browser=cros' in config['command']:
-    cmd.extend(['--target_platform', 'cros'])
-
-    if os.environ[CROS_BOARD_ENV] and os.environ[CROS_IP_ENV]:
-      cmd.extend(['--cros_board', os.environ[CROS_BOARD_ENV]])
-      cmd.extend(['--cros_remote_ip', os.environ[CROS_IP_ENV]])
-    else:
-      print ('Error: Cros build selected, but BISECT_CROS_IP or'
-             'BISECT_CROS_BOARD undefined.\n')
-      return 1
-
-  if 'android' in config['command']:
-    if 'android-chrome-shell' in config['command']:
-      cmd.extend(['--target_platform', 'android'])
-    elif 'android-chrome' in config['command']:
-      cmd.extend(['--target_platform', 'android-chrome'])
-    else:
-      cmd.extend(['--target_platform', 'android'])
+  # Possibly set the target platform name based on the browser name in a
+  # Telemetry command.
+  if 'android-chrome-shell' in config['command']:
+    cmd.extend(['--target_platform', 'android'])
+  elif 'android-chrome' in config['command']:
+    cmd.extend(['--target_platform', 'android-chrome'])
+  elif 'android' in config['command']:
+    cmd.extend(['--target_platform', 'android'])
 
   if path_to_goma:
     # For Windows XP platforms, goma service is not supported.
     # Moreover we don't compile chrome when gs_bucket flag is set instead
     # use builds archives, therefore ignore goma service for Windows XP.
     # See http://crbug.com/330900.
-    if config.get('gs_bucket') and platform.release() == 'XP':
+    if platform.release() == 'XP':
       print ('Goma doesn\'t have a win32 binary, therefore it is not supported '
              'on Windows XP platform. Please refer to crbug.com/330900.')
       path_to_goma = None
     cmd.append('--use_goma')
+    cmd.append('--goma_dir')
+    cmd.append(os.path.abspath(path_to_goma))
 
   if path_to_extra_src:
     cmd.extend(['--extra_src', path_to_extra_src])
 
-  # These flags are used to download build archives from cloud storage if
-  # available, otherwise will post a try_job_http request to build it on the
-  # try server.
-  if config.get('gs_bucket'):
-    if config.get('builder_host') and config.get('builder_port'):
-      cmd.extend(['--gs_bucket', config['gs_bucket'],
-                  '--builder_host', config['builder_host'],
-                  '--builder_port', config['builder_port']
-                 ])
-    else:
-      print ('Error: Specified gs_bucket, but missing builder_host or '
-             'builder_port information in config.')
-      return 1
-
   if dry_run:
-    cmd.extend(['--debug_ignore_build', '--debug_ignore_sync',
-        '--debug_ignore_perf_test'])
+    cmd.extend([
+        '--debug_ignore_build',
+        '--debug_ignore_sync',
+        '--debug_ignore_perf_test'
+    ])
+
   cmd = [str(c) for c in cmd]
 
   with Goma(path_to_goma) as _:

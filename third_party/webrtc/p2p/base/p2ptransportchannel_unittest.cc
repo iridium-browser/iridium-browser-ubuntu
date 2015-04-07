@@ -1225,6 +1225,8 @@ TEST_F(P2PTransportChannelTest, GetStats) {
   EXPECT_TRUE(infos[0].readable);
   EXPECT_TRUE(infos[0].writable);
   EXPECT_FALSE(infos[0].timeout);
+  EXPECT_EQ(10U, infos[0].sent_total_packets);
+  EXPECT_EQ(0U, infos[0].sent_discarded_packets);
   EXPECT_EQ(10 * 36U, infos[0].sent_total_bytes);
   EXPECT_EQ(10 * 36U, infos[0].recv_total_bytes);
   EXPECT_GT(infos[0].rtt, 0U);
@@ -1512,8 +1514,7 @@ TEST_F(P2PTransportChannelTest, TestDefaultDscpValue) {
 }
 
 // Verify IPv6 connection is preferred over IPv4.
-// Flaky: https://code.google.com/p/webrtc/issues/detail?id=3317
-TEST_F(P2PTransportChannelTest, DISABLED_TestIPv6Connections) {
+TEST_F(P2PTransportChannelTest, TestIPv6Connections) {
   AddAddress(0, kIPv6PublicAddrs[0]);
   AddAddress(0, kPublicAddrs[0]);
   AddAddress(1, kIPv6PublicAddrs[1]);

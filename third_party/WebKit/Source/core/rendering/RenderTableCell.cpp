@@ -28,8 +28,7 @@
 #include "core/HTMLNames.h"
 #include "core/css/StylePropertySet.h"
 #include "core/html/HTMLTableCellElement.h"
-#include "core/paint/BoxPainter.h"
-#include "core/paint/DrawingRecorder.h"
+#include "core/paint/TableCellPainter.h"
 #include "core/rendering/PaintInfo.h"
 #include "core/rendering/RenderTableCol.h"
 #include "core/rendering/RenderView.h"
@@ -48,8 +47,8 @@ struct SameSizeAsRenderTableCell : public RenderBlockFlow {
     int paddings[2];
 };
 
-COMPILE_ASSERT(sizeof(RenderTableCell) == sizeof(SameSizeAsRenderTableCell), RenderTableCell_should_stay_small);
-COMPILE_ASSERT(sizeof(CollapsedBorderValue) == 8, CollapsedBorderValue_should_stay_small);
+static_assert(sizeof(RenderTableCell) == sizeof(SameSizeAsRenderTableCell), "RenderTableCell should stay small");
+static_assert(sizeof(CollapsedBorderValue) == 8, "CollapsedBorderValue should stay small");
 
 RenderTableCell::RenderTableCell(Element* element)
     : RenderBlockFlow(element)
@@ -101,8 +100,6 @@ void RenderTableCell::colSpanOrRowSpanChanged()
     ASSERT(isHTMLTableCellElement(*node()));
 
     updateColAndRowSpanFlags();
-
-    // FIXME: I suspect that we could return early here if !m_hasColSpan && !m_hasRowSpan.
 
     setNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation();
     if (parent() && section())
@@ -234,8 +231,6 @@ void RenderTableCell::layout()
 {
     ASSERT(needsLayout());
 
-    updateFirstLetter();
-
     int oldCellBaseline = cellBaselinePosition();
     layoutBlock(cellWidthChanged());
 
@@ -253,7 +248,7 @@ void RenderTableCell::layout()
 
     // FIXME: This value isn't the intrinsic content logical height, but we need
     // to update the value as its used by flexbox layout. crbug.com/367324
-    updateIntrinsicContentLogicalHeight(contentLogicalHeight());
+    setIntrinsicContentLogicalHeight(contentLogicalHeight());
 
     setCellWidthChanged(false);
 }
@@ -357,7 +352,7 @@ LayoutRect RenderTableCell::clippedOverflowRectForPaintInvalidation(const Render
         }
     }
     LayoutPoint location(std::max<LayoutUnit>(left, -visualOverflowRect().x()), std::max<LayoutUnit>(top, -visualOverflowRect().y()));
-    LayoutRect r(-location.x(), -location.y(), location.x() + std::max(width() + right, visualOverflowRect().maxX()), location.y() + std::max(height() + bottom, visualOverflowRect().maxY()));
+    LayoutRect r(-location.x(), -location.y(), location.x() + std::max(size().width() + right, visualOverflowRect().maxX()), location.y() + std::max(size().height() + bottom, visualOverflowRect().maxY()));
 
     mapRectToPaintInvalidationBacking(paintInvalidationContainer, r, paintInvalidationState);
     return r;
@@ -856,34 +851,6 @@ CollapsedBorderValue RenderTableCell::computeCollapsedAfterBorder(IncludeBorderC
     return result;
 }
 
-inline CollapsedBorderValue RenderTableCell::cachedCollapsedLeftBorder(const RenderStyle* styleForCellFlow) const
-{
-    if (styleForCellFlow->isHorizontalWritingMode())
-        return styleForCellFlow->isLeftToRightDirection() ? section()->cachedCollapsedBorder(this, CBSStart) : section()->cachedCollapsedBorder(this, CBSEnd);
-    return styleForCellFlow->slowIsFlippedBlocksWritingMode() ? section()->cachedCollapsedBorder(this, CBSAfter) : section()->cachedCollapsedBorder(this, CBSBefore);
-}
-
-inline CollapsedBorderValue RenderTableCell::cachedCollapsedRightBorder(const RenderStyle* styleForCellFlow) const
-{
-    if (styleForCellFlow->isHorizontalWritingMode())
-        return styleForCellFlow->isLeftToRightDirection() ? section()->cachedCollapsedBorder(this, CBSEnd) : section()->cachedCollapsedBorder(this, CBSStart);
-    return styleForCellFlow->slowIsFlippedBlocksWritingMode() ? section()->cachedCollapsedBorder(this, CBSBefore) : section()->cachedCollapsedBorder(this, CBSAfter);
-}
-
-inline CollapsedBorderValue RenderTableCell::cachedCollapsedTopBorder(const RenderStyle* styleForCellFlow) const
-{
-    if (styleForCellFlow->isHorizontalWritingMode())
-        return styleForCellFlow->slowIsFlippedBlocksWritingMode() ? section()->cachedCollapsedBorder(this, CBSAfter) : section()->cachedCollapsedBorder(this, CBSBefore);
-    return styleForCellFlow->isLeftToRightDirection() ? section()->cachedCollapsedBorder(this, CBSStart) : section()->cachedCollapsedBorder(this, CBSEnd);
-}
-
-inline CollapsedBorderValue RenderTableCell::cachedCollapsedBottomBorder(const RenderStyle* styleForCellFlow) const
-{
-    if (styleForCellFlow->isHorizontalWritingMode())
-        return styleForCellFlow->slowIsFlippedBlocksWritingMode() ? section()->cachedCollapsedBorder(this, CBSBefore) : section()->cachedCollapsedBorder(this, CBSAfter);
-    return styleForCellFlow->isLeftToRightDirection() ? section()->cachedCollapsedBorder(this, CBSEnd) : section()->cachedCollapsedBorder(this, CBSStart);
-}
-
 int RenderTableCell::borderLeft() const
 {
     return table()->collapseBorders() ? borderHalfLeft(false) : RenderBlockFlow::borderLeft();
@@ -931,7 +898,7 @@ int RenderTableCell::borderHalfLeft(bool outer) const
     const RenderStyle* styleForCellFlow = this->styleForCellFlow();
     if (styleForCellFlow->isHorizontalWritingMode())
         return styleForCellFlow->isLeftToRightDirection() ? borderHalfStart(outer) : borderHalfEnd(outer);
-    return styleForCellFlow->slowIsFlippedBlocksWritingMode() ? borderHalfAfter(outer) : borderHalfBefore(outer);
+    return styleForCellFlow->isFlippedBlocksWritingMode() ? borderHalfAfter(outer) : borderHalfBefore(outer);
 }
 
 int RenderTableCell::borderHalfRight(bool outer) const
@@ -939,14 +906,14 @@ int RenderTableCell::borderHalfRight(bool outer) const
     const RenderStyle* styleForCellFlow = this->styleForCellFlow();
     if (styleForCellFlow->isHorizontalWritingMode())
         return styleForCellFlow->isLeftToRightDirection() ? borderHalfEnd(outer) : borderHalfStart(outer);
-    return styleForCellFlow->slowIsFlippedBlocksWritingMode() ? borderHalfBefore(outer) : borderHalfAfter(outer);
+    return styleForCellFlow->isFlippedBlocksWritingMode() ? borderHalfBefore(outer) : borderHalfAfter(outer);
 }
 
 int RenderTableCell::borderHalfTop(bool outer) const
 {
     const RenderStyle* styleForCellFlow = this->styleForCellFlow();
     if (styleForCellFlow->isHorizontalWritingMode())
-        return styleForCellFlow->slowIsFlippedBlocksWritingMode() ? borderHalfAfter(outer) : borderHalfBefore(outer);
+        return styleForCellFlow->isFlippedBlocksWritingMode() ? borderHalfAfter(outer) : borderHalfBefore(outer);
     return styleForCellFlow->isLeftToRightDirection() ? borderHalfStart(outer) : borderHalfEnd(outer);
 }
 
@@ -954,7 +921,7 @@ int RenderTableCell::borderHalfBottom(bool outer) const
 {
     const RenderStyle* styleForCellFlow = this->styleForCellFlow();
     if (styleForCellFlow->isHorizontalWritingMode())
-        return styleForCellFlow->slowIsFlippedBlocksWritingMode() ? borderHalfBefore(outer) : borderHalfAfter(outer);
+        return styleForCellFlow->isFlippedBlocksWritingMode() ? borderHalfBefore(outer) : borderHalfAfter(outer);
     return styleForCellFlow->isLeftToRightDirection() ? borderHalfEnd(outer) : borderHalfStart(outer);
 }
 
@@ -978,7 +945,7 @@ int RenderTableCell::borderHalfBefore(bool outer) const
 {
     CollapsedBorderValue border = collapsedBeforeBorder(DoNotIncludeBorderColor);
     if (border.exists())
-        return (border.width() + ((styleForCellFlow()->slowIsFlippedBlocksWritingMode() ^ outer) ? 0 : 1)) / 2; // Give the extra pixel to top and left.
+        return (border.width() + ((styleForCellFlow()->isFlippedBlocksWritingMode() ^ outer) ? 0 : 1)) / 2; // Give the extra pixel to top and left.
     return 0;
 }
 
@@ -986,74 +953,14 @@ int RenderTableCell::borderHalfAfter(bool outer) const
 {
     CollapsedBorderValue border = collapsedAfterBorder(DoNotIncludeBorderColor);
     if (border.exists())
-        return (border.width() + ((styleForCellFlow()->slowIsFlippedBlocksWritingMode() ^ outer) ? 1 : 0)) / 2;
+        return (border.width() + ((styleForCellFlow()->isFlippedBlocksWritingMode() ^ outer) ? 1 : 0)) / 2;
     return 0;
 }
 
-void RenderTableCell::paint(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+void RenderTableCell::paint(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
-    ASSERT(paintInfo.phase != PaintPhaseCollapsedTableBorders);
-    RenderBlock::paint(paintInfo, paintOffset);
+    TableCellPainter(*this).paint(paintInfo, paintOffset);
 }
-
-static EBorderStyle collapsedBorderStyle(EBorderStyle style)
-{
-    if (style == OUTSET)
-        return GROOVE;
-    if (style == INSET)
-        return RIDGE;
-    return style;
-}
-
-struct CollapsedBorder {
-    CollapsedBorderValue borderValue;
-    BoxSide side;
-    bool shouldPaint;
-    int x1;
-    int y1;
-    int x2;
-    int y2;
-    EBorderStyle style;
-};
-
-class CollapsedBorders {
-public:
-    CollapsedBorders()
-        : m_count(0)
-    {
-    }
-
-    void addBorder(const CollapsedBorderValue& borderValue, BoxSide borderSide, bool shouldPaint,
-                   int x1, int y1, int x2, int y2, EBorderStyle borderStyle)
-    {
-        if (borderValue.exists() && shouldPaint) {
-            m_borders[m_count].borderValue = borderValue;
-            m_borders[m_count].side = borderSide;
-            m_borders[m_count].shouldPaint = shouldPaint;
-            m_borders[m_count].x1 = x1;
-            m_borders[m_count].x2 = x2;
-            m_borders[m_count].y1 = y1;
-            m_borders[m_count].y2 = y2;
-            m_borders[m_count].style = borderStyle;
-            m_count++;
-        }
-    }
-
-    CollapsedBorder* nextBorder()
-    {
-        for (unsigned i = 0; i < m_count; i++) {
-            if (m_borders[i].borderValue.exists() && m_borders[i].shouldPaint) {
-                m_borders[i].shouldPaint = false;
-                return &m_borders[i];
-            }
-        }
-
-        return 0;
-    }
-
-    CollapsedBorder m_borders[4];
-    unsigned m_count;
-};
 
 static void addBorderStyle(RenderTable::CollapsedBorderValues& borderValues,
                            CollapsedBorderValue borderValue)
@@ -1090,139 +997,14 @@ void RenderTableCell::sortBorderValues(RenderTable::CollapsedBorderValues& borde
         compareBorderValuesForQSort);
 }
 
-void RenderTableCell::paintCollapsedBorders(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
+void RenderTableCell::paintBoxDecorationBackground(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
-    ASSERT(paintInfo.phase == PaintPhaseCollapsedTableBorders);
-
-    if (!paintInfo.shouldPaintWithinRoot(this) || style()->visibility() != VISIBLE)
-        return;
-
-    LayoutRect paintRect = LayoutRect(paintOffset + location(), pixelSnappedSize());
-    if (paintRect.y() - table()->outerBorderTop() >= paintInfo.rect.maxY())
-        return;
-
-    if (paintRect.maxY() + table()->outerBorderBottom() <= paintInfo.rect.y())
-        return;
-
-    if (!table()->currentBorderValue())
-        return;
-
-    const RenderStyle* styleForCellFlow = this->styleForCellFlow();
-    CollapsedBorderValue leftVal = cachedCollapsedLeftBorder(styleForCellFlow);
-    CollapsedBorderValue rightVal = cachedCollapsedRightBorder(styleForCellFlow);
-    CollapsedBorderValue topVal = cachedCollapsedTopBorder(styleForCellFlow);
-    CollapsedBorderValue bottomVal = cachedCollapsedBottomBorder(styleForCellFlow);
-
-    // Adjust our x/y/width/height so that we paint the collapsed borders at the correct location.
-    int topWidth = topVal.width();
-    int bottomWidth = bottomVal.width();
-    int leftWidth = leftVal.width();
-    int rightWidth = rightVal.width();
-
-    IntRect borderRect = pixelSnappedIntRect(paintRect.x() - leftWidth / 2,
-            paintRect.y() - topWidth / 2,
-            paintRect.width() + leftWidth / 2 + (rightWidth + 1) / 2,
-            paintRect.height() + topWidth / 2 + (bottomWidth + 1) / 2);
-
-    EBorderStyle topStyle = collapsedBorderStyle(topVal.style());
-    EBorderStyle bottomStyle = collapsedBorderStyle(bottomVal.style());
-    EBorderStyle leftStyle = collapsedBorderStyle(leftVal.style());
-    EBorderStyle rightStyle = collapsedBorderStyle(rightVal.style());
-
-    bool renderTop = topStyle > BHIDDEN && !topVal.isTransparent();
-    bool renderBottom = bottomStyle > BHIDDEN && !bottomVal.isTransparent();
-    bool renderLeft = leftStyle > BHIDDEN && !leftVal.isTransparent();
-    bool renderRight = rightStyle > BHIDDEN && !rightVal.isTransparent();
-
-    // We never paint diagonals at the joins.  We simply let the border with the highest
-    // precedence paint on top of borders with lower precedence.
-    CollapsedBorders borders;
-    borders.addBorder(topVal, BSTop, renderTop, borderRect.x(), borderRect.y(), borderRect.maxX(), borderRect.y() + topWidth, topStyle);
-    borders.addBorder(bottomVal, BSBottom, renderBottom, borderRect.x(), borderRect.maxY() - bottomWidth, borderRect.maxX(), borderRect.maxY(), bottomStyle);
-    borders.addBorder(leftVal, BSLeft, renderLeft, borderRect.x(), borderRect.y(), borderRect.x() + leftWidth, borderRect.maxY(), leftStyle);
-    borders.addBorder(rightVal, BSRight, renderRight, borderRect.maxX() - rightWidth, borderRect.y(), borderRect.maxX(), borderRect.maxY(), rightStyle);
-
-    GraphicsContext* graphicsContext = paintInfo.context;
-    bool antialias = BoxPainter::shouldAntialiasLines(graphicsContext);
-
-    for (CollapsedBorder* border = borders.nextBorder(); border; border = borders.nextBorder()) {
-        if (border->borderValue.isSameIgnoringColor(*table()->currentBorderValue())) {
-            ObjectPainter::drawLineForBoxSide(graphicsContext, border->x1, border->y1, border->x2, border->y2, border->side,
-                border->borderValue.color().resolve(style()->visitedDependentColor(CSSPropertyColor)), border->style, 0, 0, antialias);
-        }
-    }
+    TableCellPainter(*this).paintBoxDecorationBackground(paintInfo, paintOffset);
 }
 
-void RenderTableCell::paintBackgroundsBehindCell(PaintInfo& paintInfo, const LayoutPoint& paintOffset, RenderObject* backgroundObject)
+void RenderTableCell::paintMask(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
-    if (!paintInfo.shouldPaintWithinRoot(this))
-        return;
-
-    if (!backgroundObject)
-        return;
-
-    if (style()->visibility() != VISIBLE)
-        return;
-
-    RenderTable* tableElt = table();
-    if (!tableElt->collapseBorders() && style()->emptyCells() == HIDE && !firstChild())
-        return;
-
-    LayoutPoint adjustedPaintOffset = paintOffset;
-    if (backgroundObject != this)
-        adjustedPaintOffset.moveBy(location());
-
-    Color c = backgroundObject->resolveColor(CSSPropertyBackgroundColor);
-    const FillLayer& bgLayer = backgroundObject->style()->backgroundLayers();
-
-    if (bgLayer.hasImage() || c.alpha()) {
-        // We have to clip here because the background would paint
-        // on top of the borders otherwise.  This only matters for cells and rows.
-        bool shouldClip = backgroundObject->hasLayer() && (backgroundObject == this || backgroundObject == parent()) && tableElt->collapseBorders();
-        GraphicsContextStateSaver stateSaver(*paintInfo.context, shouldClip);
-        if (shouldClip) {
-            LayoutRect clipRect(adjustedPaintOffset.x() + borderLeft(), adjustedPaintOffset.y() + borderTop(),
-                width() - borderLeft() - borderRight(), height() - borderTop() - borderBottom());
-            paintInfo.context->clip(clipRect);
-        }
-        BoxPainter(*this).paintFillLayers(paintInfo, c, bgLayer, LayoutRect(adjustedPaintOffset, pixelSnappedSize()), BackgroundBleedNone, CompositeSourceOver, backgroundObject);
-    }
-}
-
-void RenderTableCell::paintBoxDecorationBackground(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
-{
-    if (!paintInfo.shouldPaintWithinRoot(this))
-        return;
-
-    RenderTable* tableElt = table();
-    if (!tableElt->collapseBorders() && style()->emptyCells() == HIDE && !firstChild())
-        return;
-
-    LayoutRect paintRect = LayoutRect(paintOffset, pixelSnappedSize());
-    DrawingRecorder recorder(paintInfo.context, this, paintInfo.phase, pixelSnappedIntRect(paintRect));
-    BoxPainter::paintBoxShadow(paintInfo, paintRect, style(), Normal);
-
-    // Paint our cell background.
-    paintBackgroundsBehindCell(paintInfo, paintOffset, this);
-
-    BoxPainter::paintBoxShadow(paintInfo, paintRect, style(), Inset);
-
-    if (!style()->hasBorder() || tableElt->collapseBorders())
-        return;
-
-    BoxPainter::paintBorder(*this, paintInfo, paintRect, style());
-}
-
-void RenderTableCell::paintMask(PaintInfo& paintInfo, const LayoutPoint& paintOffset)
-{
-    if (style()->visibility() != VISIBLE || paintInfo.phase != PaintPhaseMask)
-        return;
-
-    RenderTable* tableElt = table();
-    if (!tableElt->collapseBorders() && style()->emptyCells() == HIDE && !firstChild())
-        return;
-
-    BoxPainter(*this).paintMaskImages(paintInfo, LayoutRect(paintOffset, pixelSnappedSize()));
+    TableCellPainter(*this).paintMask(paintInfo, paintOffset);
 }
 
 bool RenderTableCell::boxShadowShouldBeAppliedToBackground(BackgroundBleedAvoidance, InlineFlowBox*) const

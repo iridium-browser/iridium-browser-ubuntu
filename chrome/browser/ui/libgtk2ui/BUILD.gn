@@ -10,7 +10,11 @@ import("//build/config/linux/pkg_config.gni")
 pkg_config("gtk") {
   # Gtk requires gmodule, but it does not list it as a dependency in some
   # misconfigured systems.
-  packages = [ "gmodule-2.0", "gtk+-2.0", "gthread-2.0" ]
+  packages = [
+    "gmodule-2.0",
+    "gtk+-2.0",
+    "gthread-2.0",
+  ]
 }
 
 pkg_config("gtkprint") {
@@ -72,12 +76,6 @@ component("libgtk2ui") {
       "gconf_listener.h",
     ]
   }
-  if (is_clang) {
-    # G_DEFINE_TYPE automatically generates a *get_instance_private inline
-    # function after glib 2.37. That's unused. Prevent to complain about it.
-    cflags = [ "-Wno-unused-function" ]
-  }
-
   defines = [ "LIBGTK2UI_IMPLEMENTATION" ]
 
   configs += [
@@ -86,6 +84,23 @@ component("libgtk2ui") {
     "//build/config/linux:gconf",
     "//printing:cups",
   ]
+
+  # gn orders flags on a target before flags from configs. The default config
+  # adds -Wall, and these flags have to be after -Wall -- so they need to come
+  # from a config and can't be on the target directly.
+  config("libgtk2ui_warnings") {
+    if (is_clang) {
+      cflags = [
+        # G_DEFINE_TYPE automatically generates a *get_instance_private inline
+        # function after glib 2.37. That's unused. Prevent to complain about it.
+        "-Wno-unused-function",
+
+        # G_STATIC_ASSERT uses a typedef as a static_assert.
+        "-Wno-unused-local-typedef",
+      ]
+    }
+  }
+  configs += [ ":libgtk2ui_warnings" ]
 
   deps = [
     "//base",

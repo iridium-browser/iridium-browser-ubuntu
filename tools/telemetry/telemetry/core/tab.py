@@ -19,13 +19,15 @@ class Tab(web_contents.WebContents):
       # Evaluates 1+1 in the tab's JavaScript context.
       tab.Evaluate('1+1')
   """
-  def __init__(self, inspector_backend, backend_list):
-    super(Tab, self).__init__(inspector_backend, backend_list)
+  def __init__(self, inspector_backend, tab_list_backend, browser):
+    super(Tab, self).__init__(inspector_backend)
+    self._tab_list_backend = tab_list_backend
+    self._browser = browser
 
   @property
   def browser(self):
     """The browser in which this tab resides."""
-    return self._inspector_backend.browser
+    return self._browser
 
   @property
   def url(self):
@@ -59,14 +61,14 @@ class Tab(web_contents.WebContents):
     and the page's documentVisibilityState becoming 'visible', and yet more
     delay until the actual tab is visible to the user. None of these delays
     are included in this call."""
-    self._backend_list.ActivateTab(self._inspector_backend.debugger_url)
+    self._tab_list_backend.ActivateTab(self._inspector_backend.debugger_url)
 
   def Close(self):
     """Closes this tab.
 
     Not all browsers or browser versions support this method.
     Be sure to check browser.supports_tab_control."""
-    self._backend_list.CloseTab(self._inspector_backend.debugger_url)
+    self._tab_list_backend.CloseTab(self._inspector_backend.debugger_url)
 
   @property
   def screenshot_supported(self):
@@ -161,25 +163,6 @@ class Tab(web_contents.WebContents):
       video: A video object which is a telemetry.core.Video
     """
     return self.browser.platform.StopVideoCapture()
-
-  def WaitForNavigate(self, timeout=DEFAULT_TAB_TIMEOUT):
-    """Waits for the navigation to complete.
-
-    The current page is expect to be in a navigation.
-    This function returns when the navigation is complete or when
-    the timeout has been exceeded.
-    """
-    self._inspector_backend.WaitForNavigate(timeout)
-
-  def Navigate(self, url, script_to_evaluate_on_commit=None,
-               timeout=DEFAULT_TAB_TIMEOUT):
-    """Navigates to url.
-
-    If |script_to_evaluate_on_commit| is given, the script source string will be
-    evaluated when the navigation is committed. This is after the context of
-    the page exists, but before any script on the page itself has executed.
-    """
-    self._inspector_backend.Navigate(url, script_to_evaluate_on_commit, timeout)
 
   def GetCookieByName(self, name, timeout=DEFAULT_TAB_TIMEOUT):
     """Returns the value of the cookie by the given |name|."""

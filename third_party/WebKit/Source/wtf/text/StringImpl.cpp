@@ -56,7 +56,7 @@ namespace WTF {
 
 using namespace Unicode;
 
-COMPILE_ASSERT(sizeof(StringImpl) == 3 * sizeof(int), StringImpl_should_stay_small);
+static_assert(sizeof(StringImpl) == 3 * sizeof(int), "StringImpl should stay small");
 
 #ifdef STRING_STATS
 
@@ -189,17 +189,17 @@ static void printLiveStringStats(void*)
     MutexLocker locker(statsMutex());
     HashSet<void*>& strings = liveStrings();
 
-    HashMap<StringImpl*, RefPtr<PerStringStats> > stats;
+    HashMap<StringImpl*, RefPtr<PerStringStats>> stats;
     for (HashSet<void*>::iterator iter = strings.begin(); iter != strings.end(); ++iter) {
         StringImpl* string = static_cast<StringImpl*>(*iter);
-        HashMap<StringImpl*, RefPtr<PerStringStats> >::iterator entry = stats.find(string);
+        HashMap<StringImpl*, RefPtr<PerStringStats>>::iterator entry = stats.find(string);
         RefPtr<PerStringStats> value = entry == stats.end() ? RefPtr<PerStringStats>(PerStringStats::create()) : entry->value;
         value->add(string);
         stats.set(string, value.release());
     }
 
-    Vector<RefPtr<PerStringStats> > all;
-    for (HashMap<StringImpl*, RefPtr<PerStringStats> >::iterator iter = stats.begin(); iter != stats.end(); ++iter)
+    Vector<RefPtr<PerStringStats>> all;
+    for (HashMap<StringImpl*, RefPtr<PerStringStats>>::iterator iter = stats.begin(); iter != stats.end(); ++iter)
         all.append(iter->value);
 
     std::sort(all.begin(), all.end());
@@ -689,13 +689,14 @@ typedef int32_t (*icuCaseConverter)(UChar*, int32_t, const UChar*, int32_t, cons
 static PassRefPtr<StringImpl> caseConvert(const UChar* source16, size_t length, icuCaseConverter converter, const char* locale, StringImpl* originalString)
 {
     UChar* data16;
-    int32_t targetLength = length;
+    size_t targetLength = length;
     RefPtr<StringImpl> output = StringImpl::createUninitialized(length, data16);
     do {
         UErrorCode status = U_ZERO_ERROR;
         targetLength = converter(data16, targetLength, source16, length, locale, &status);
         if (U_SUCCESS(status)) {
-            output->truncateAssumingIsolated(targetLength);
+            if (length > 0)
+                output->truncateAssumingIsolated(targetLength);
             return output.release();
         }
         if (status != U_BUFFER_OVERFLOW_ERROR)

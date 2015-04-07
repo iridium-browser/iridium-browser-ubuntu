@@ -10,6 +10,7 @@
 #include "base/message_loop/message_loop.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/histogram_tester.h"
 #include "base/time/time.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -68,7 +69,6 @@
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
 #elif defined(OS_MACOSX)
-#include "base/mac/mac_util.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
 #include "chrome/browser/ui/cocoa/run_loop_testing.h"
 #endif
@@ -87,45 +87,16 @@ void MockCallback(AutofillClient::RequestAutocompleteResult,
                   const FormStructure*) {
 }
 
-class MockAutofillMetrics : public AutofillMetrics {
- public:
-  MockAutofillMetrics()
-      : dialog_dismissal_action_(static_cast<DialogDismissalAction>(-1)) {}
-  virtual ~MockAutofillMetrics() {}
-
-  virtual void LogDialogUiDuration(
-      const base::TimeDelta& duration,
-      DialogDismissalAction dismissal_action) const override {
-    // Ignore constness for testing.
-    MockAutofillMetrics* mutable_this = const_cast<MockAutofillMetrics*>(this);
-    mutable_this->dialog_dismissal_action_ = dismissal_action;
-  }
-
-  AutofillMetrics::DialogDismissalAction dialog_dismissal_action() const {
-    return dialog_dismissal_action_;
-  }
-
-  MOCK_CONST_METHOD1(LogDialogDismissalState,
-                     void(DialogDismissalState state));
-
- private:
-  DialogDismissalAction dialog_dismissal_action_;
-
-  DISALLOW_COPY_AND_ASSIGN(MockAutofillMetrics);
-};
-
 class TestAutofillDialogController : public AutofillDialogControllerImpl {
  public:
   TestAutofillDialogController(
       content::WebContents* contents,
       const FormData& form_data,
-      const AutofillMetrics& metric_logger,
       scoped_refptr<content::MessageLoopRunner> runner)
       : AutofillDialogControllerImpl(contents,
                                      form_data,
                                      form_data.origin,
                                      base::Bind(&MockCallback)),
-        metric_logger_(metric_logger),
         mock_wallet_client_(
             Profile::FromBrowserContext(contents->GetBrowserContext())->
                 GetRequestContext(), this, form_data.origin),
@@ -249,12 +220,6 @@ class TestAutofillDialogController : public AutofillDialogControllerImpl {
   }
 
  private:
-  // To specify our own metric logger.
-  virtual const AutofillMetrics& GetMetricLogger() const override {
-    return metric_logger_;
-  }
-
-  const AutofillMetrics& metric_logger_;
   TestPersonalDataManager test_manager_;
   testing::NiceMock<MockAddressValidator> mock_validator_;
   testing::NiceMock<wallet::MockWalletClient> mock_wallet_client_;
@@ -313,13 +278,13 @@ class NavEntryCommittedObserver : public content::WindowedNotificationObserver {
 class AutofillDialogControllerTest : public InProcessBrowserTest {
  public:
   AutofillDialogControllerTest() : controller_(NULL) {}
-  virtual ~AutofillDialogControllerTest() {}
+  ~AutofillDialogControllerTest() override {}
 
-  virtual void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(::switches::kReduceSecurityForTesting);
   }
 
-  virtual void SetUpOnMainThread() override {
+  void SetUpOnMainThread() override {
     autofill::test::DisableSystemServices(browser()->profile()->GetPrefs());
     InitializeController();
   }
@@ -370,7 +335,6 @@ class AutofillDialogControllerTest : public InProcessBrowserTest {
     controller_ = new TestAutofillDialogController(
         GetActiveWebContents(),
         form,
-        metric_logger_,
         message_loop_runner_);
   }
 
@@ -392,7 +356,6 @@ class AutofillDialogControllerTest : public InProcessBrowserTest {
     return AutofillDialogViewTester::For(controller()->view()).Pass();
   }
 
-  const MockAutofillMetrics& metric_logger() { return metric_logger_; }
   TestAutofillDialogController* controller() { return controller_; }
 
   void RunMessageLoop() {
@@ -499,6 +462,45 @@ class AutofillDialogControllerTest : public InProcessBrowserTest {
     return !!controller;
   }
 
+  void RunTestPageInIframe(const net::SpawnedTestServer& server) {
+    InitializeDOMMessageQueue();
+    GURL iframe_url = server.GetURL(
+        "files/request_autocomplete/test_page.html");
+
+    ui_test_utils::NavigateToURL(
+        browser(), GURL(std::string("data:text/html,") +
+        "<!doctype html>"
+        "<html>"
+          "<body>"
+            "<iframe style='position: fixed;"
+                           "height: 100%;"
+                           "width: 100%;'"
+                "id='racFrame'></iframe>"
+            "<script>"
+              "function send(msg) {"
+                "domAutomationController.setAutomationId(0);"
+                "domAutomationController.send(msg);"
+              "}"
+              "var racFrame = document.getElementById('racFrame');"
+              "racFrame.onload = function() {"
+                "send('iframe loaded');"
+              "};"
+              "racFrame.src = \"" + iframe_url.spec() + "\";"
+              "function navigateFrame() {"
+                "racFrame.src = 'about:blank';"
+              "}"
+            "</script>"
+          "</body>"
+        "</html>"));
+
+    ChromeAutofillClient* client =
+        ChromeAutofillClient::FromWebContents(GetActiveWebContents());
+    ExpectDomMessage("iframe loaded");
+    EXPECT_FALSE(client->GetDialogControllerForTesting());
+    InitiateDialog();
+    EXPECT_TRUE(client->GetDialogControllerForTesting());
+  }
+
   // Wait for a message from the DOM automation controller (from JS in the
   // page). Requires |SetUpHtmlAndInvoke()| be called first.
   void ExpectDomMessage(const std::string& expected) {
@@ -509,12 +511,15 @@ class AutofillDialogControllerTest : public InProcessBrowserTest {
   }
 
   void InitiateDialog() {
-    dom_message_queue_.reset(new content::DOMMessageQueue);
-
+    InitializeDOMMessageQueue();
     // Triggers the onclick handler which invokes requestAutocomplete().
     content::WebContents* contents = GetActiveWebContents();
     content::SimulateMouseClick(contents, 0, blink::WebMouseEvent::ButtonLeft);
     ExpectDomMessage("clicked");
+  }
+
+  void InitializeDOMMessageQueue() {
+    dom_message_queue_.reset(new content::DOMMessageQueue);
   }
 
   // Returns the value filled into the first field with autocomplete attribute
@@ -549,7 +554,6 @@ class AutofillDialogControllerTest : public InProcessBrowserTest {
     content::RunAllPendingInMessageLoop(content::BrowserThread::DB);
   }
 
-  testing::NiceMock<MockAutofillMetrics> metric_logger_;
   TestAutofillDialogController* controller_;  // Weak reference.
   scoped_refptr<content::MessageLoopRunner> message_loop_runner_;
   scoped_ptr<content::DOMMessageQueue> dom_message_queue_;
@@ -562,43 +566,43 @@ class AutofillDialogControllerTest : public InProcessBrowserTest {
 
 // Submit the form data.
 IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, Submit) {
+  base::HistogramTester histogram;
   GetViewTester()->SubmitForTesting();
   RunMessageLoop();
 
-  EXPECT_EQ(AutofillMetrics::DIALOG_ACCEPTED,
-            metric_logger().dialog_dismissal_action());
+  histogram.ExpectTotalCount("RequestAutocomplete.UiDuration.Submit", 1);
+  histogram.ExpectTotalCount("RequestAutocomplete.UiDuration.Cancel", 0);
 }
 
 // Cancel out of the dialog.
 IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, Cancel) {
-  EXPECT_CALL(metric_logger(),
-              LogDialogDismissalState(
-                  AutofillMetrics::DIALOG_CANCELED_NO_INVALID_FIELDS));
-
+  base::HistogramTester histogram;
   GetViewTester()->CancelForTesting();
   RunMessageLoop();
 
-  EXPECT_EQ(AutofillMetrics::DIALOG_CANCELED,
-            metric_logger().dialog_dismissal_action());
+  histogram.ExpectTotalCount("RequestAutocomplete.UiDuration.Submit", 0);
+  histogram.ExpectTotalCount("RequestAutocomplete.UiDuration.Cancel", 1);
+  histogram.ExpectUniqueSample(
+      "RequestAutocomplete.DismissalState",
+      AutofillMetrics::DIALOG_CANCELED_NO_INVALID_FIELDS, 1);
 }
 
 // Take some other action that dismisses the dialog.
 IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, Hide) {
-  EXPECT_CALL(metric_logger(),
-              LogDialogDismissalState(
-                  AutofillMetrics::DIALOG_CANCELED_NO_INVALID_FIELDS));
+  base::HistogramTester histogram;
   controller()->Hide();
 
   RunMessageLoop();
 
-  EXPECT_EQ(AutofillMetrics::DIALOG_CANCELED,
-            metric_logger().dialog_dismissal_action());
+  histogram.ExpectTotalCount("RequestAutocomplete.UiDuration.Submit", 0);
+  histogram.ExpectTotalCount("RequestAutocomplete.UiDuration.Cancel", 1);
+  histogram.ExpectUniqueSample(
+      "RequestAutocomplete.DismissalState",
+      AutofillMetrics::DIALOG_CANCELED_NO_INVALID_FIELDS, 1);
 }
 
 IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, CancelWithSuggestions) {
-  EXPECT_CALL(metric_logger(),
-              LogDialogDismissalState(
-                  AutofillMetrics::DIALOG_CANCELED_NO_EDITS));
+  base::HistogramTester histogram;
 
   CreditCard card(test::GetVerifiedCreditCard());
   controller()->GetTestingManager()->AddTestingCreditCard(&card);
@@ -612,15 +616,14 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, CancelWithSuggestions) {
   GetViewTester()->CancelForTesting();
   RunMessageLoop();
 
-  EXPECT_EQ(AutofillMetrics::DIALOG_CANCELED,
-            metric_logger().dialog_dismissal_action());
+  histogram.ExpectTotalCount("RequestAutocomplete.UiDuration.Submit", 0);
+  histogram.ExpectTotalCount("RequestAutocomplete.UiDuration.Cancel", 1);
+  histogram.ExpectUniqueSample("RequestAutocomplete.DismissalState",
+                               AutofillMetrics::DIALOG_CANCELED_NO_EDITS, 1);
 }
 
 IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, AcceptWithSuggestions) {
-  EXPECT_CALL(metric_logger(),
-              LogDialogDismissalState(
-                  AutofillMetrics::DIALOG_ACCEPTED_EXISTING_AUTOFILL_DATA));
-
+  base::HistogramTester histogram;
   CreditCard card(test::GetVerifiedCreditCard());
   controller()->GetTestingManager()->AddTestingCreditCard(&card);
   AutofillProfile profile(test::GetVerifiedProfile());
@@ -633,8 +636,11 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, AcceptWithSuggestions) {
   GetViewTester()->SubmitForTesting();
   RunMessageLoop();
 
-  EXPECT_EQ(AutofillMetrics::DIALOG_ACCEPTED,
-            metric_logger().dialog_dismissal_action());
+  histogram.ExpectTotalCount("RequestAutocomplete.UiDuration.Submit", 1);
+  histogram.ExpectTotalCount("RequestAutocomplete.UiDuration.Cancel", 0);
+  histogram.ExpectUniqueSample(
+      "RequestAutocomplete.DismissalState",
+      AutofillMetrics::DIALOG_ACCEPTED_EXISTING_AUTOFILL_DATA, 1);
 }
 
 // Ensure that Hide() will only destroy the controller object after the
@@ -655,17 +661,18 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, DeferredDestruction) {
 // Ensure that the expected metric is logged when the dialog is closed during
 // signin.
 IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, CloseDuringSignin) {
+  base::HistogramTester histogram;
   controller()->SignInLinkClicked();
 
-  EXPECT_CALL(metric_logger(),
-              LogDialogDismissalState(
-                  AutofillMetrics::DIALOG_CANCELED_DURING_SIGNIN));
   GetViewTester()->CancelForTesting();
 
   RunMessageLoop();
 
-  EXPECT_EQ(AutofillMetrics::DIALOG_CANCELED,
-            metric_logger().dialog_dismissal_action());
+  histogram.ExpectTotalCount("RequestAutocomplete.UiDuration.Submit", 0);
+  histogram.ExpectTotalCount("RequestAutocomplete.UiDuration.Cancel", 1);
+  histogram.ExpectUniqueSample("RequestAutocomplete.DismissalState",
+                               AutofillMetrics::DIALOG_CANCELED_DURING_SIGNIN,
+                               1);
 }
 
 IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, FillInputFromAutofill) {
@@ -751,10 +758,11 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, FillInputFromAutofill) {
     EXPECT_EQ(expectations[i], view->GetTextContentsOfInput(inputs[i].type));
   }
 
-  EXPECT_CALL(metric_logger(),
-              LogDialogDismissalState(
-                  AutofillMetrics::DIALOG_ACCEPTED_SAVE_TO_AUTOFILL));
+  base::HistogramTester histogram;
   view->SubmitForTesting();
+  histogram.ExpectUniqueSample(
+      "RequestAutocomplete.DismissalState",
+      AutofillMetrics::DIALOG_ACCEPTED_SAVE_TO_AUTOFILL, 1);
 }
 
 // This test makes sure that picking a profile variant in the Autofill
@@ -912,10 +920,11 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, ShouldShowErrorBubble) {
   controller()->FocusMoved();
   EXPECT_TRUE(controller()->ShouldShowErrorBubble());
 
-  EXPECT_CALL(metric_logger(),
-              LogDialogDismissalState(
-                  AutofillMetrics::DIALOG_CANCELED_WITH_INVALID_FIELDS));
+  base::HistogramTester histogram;
   controller()->Hide();
+  histogram.ExpectUniqueSample(
+      "RequestAutocomplete.DismissalState",
+      AutofillMetrics::DIALOG_CANCELED_WITH_INVALID_FIELDS, 1);
 }
 
 // Ensure that expired cards trigger invalid suggestions.
@@ -1145,14 +1154,15 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest,
   controller()->OnAccept();
   EXPECT_TRUE(test_view->IsShowingOverlay());
 
-  EXPECT_CALL(metric_logger(),
-              LogDialogDismissalState(
-                  AutofillMetrics::DIALOG_ACCEPTED_EXISTING_WALLET_DATA));
-
+  base::HistogramTester histogram;
   EXPECT_CALL(*controller()->GetTestingWalletClient(), GetFullWallet(_));
   controller()->OnDidAuthenticateInstrument(true);
   controller()->OnDidGetFullWallet(wallet::GetTestFullWallet());
   controller()->ForceFinishSubmit();
+
+  histogram.ExpectUniqueSample(
+      "RequestAutocomplete.DismissalState",
+      AutofillMetrics::DIALOG_ACCEPTED_EXISTING_WALLET_DATA, 1);
 
   RunMessageLoop();
 
@@ -1226,12 +1236,13 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, SimulateSuccessfulSignIn) {
   EXPECT_FALSE(controller()->IsManuallyEditingSection(SECTION_CC_BILLING));
   EXPECT_FALSE(controller()->IsManuallyEditingSection(SECTION_SHIPPING));
 
-  EXPECT_CALL(metric_logger(),
-              LogDialogDismissalState(
-                  AutofillMetrics::DIALOG_ACCEPTED_EXISTING_WALLET_DATA));
+  base::HistogramTester histogram;
   view->SubmitForTesting();
   controller()->OnDidGetFullWallet(wallet::GetTestFullWallet());
   controller()->ForceFinishSubmit();
+  histogram.ExpectUniqueSample(
+      "RequestAutocomplete.DismissalState",
+      AutofillMetrics::DIALOG_ACCEPTED_EXISTING_WALLET_DATA, 1);
 }
 
 IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, AddAccount) {
@@ -1359,7 +1370,14 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, AddNewClearsComboboxes) {
             view->GetTextContentsOfInput(CREDIT_CARD_EXP_MONTH));
 }
 
-IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, TabOpensToJustRight) {
+// Flaky on Win7 (http://crbug.com/446432)
+#if defined(OS_WIN)
+#define MAYBE_TabOpensToJustRight DISABLED_TabOpensToJustRight
+#else
+#define MAYBE_TabOpensToJustRight TabOpensToJustRight
+#endif
+IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest,
+                       MAYBE_TabOpensToJustRight) {
   ASSERT_TRUE(browser()->is_type_tabbed());
 
   // Tabs should currently be: / rAc() \.
@@ -1404,8 +1422,14 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, TabOpensToJustRight) {
   EXPECT_EQ(3, tab_strip->GetIndexOfWebContents(blank_tab));
 }
 
+// Flaky on Win7 (http://crbug.com/446432)
+#if defined(OS_WIN)
+#define MAYBE_SignInWebViewOpensLinksInNewTab DISABLED_SignInWebViewOpensLinksInNewTab
+#else
+#define MAYBE_SignInWebViewOpensLinksInNewTab SignInWebViewOpensLinksInNewTab
+#endif
 IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest,
-                       SignInWebViewOpensLinksInNewTab) {
+                       MAYBE_SignInWebViewOpensLinksInNewTab) {
   controller()->OnDidFetchWalletCookieValue(std::string());
   controller()->OnDidGetWalletItems(
       wallet::GetTestWalletItemsWithRequiredAction(wallet::GAIA_AUTH));
@@ -1505,7 +1529,7 @@ class AutofillDialogControllerSecurityTest :
   AutofillDialogControllerSecurityTest() {}
   ~AutofillDialogControllerSecurityTest() override {}
 
-  void SetUpCommandLine(CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     CHECK(!command_line->HasSwitch(::switches::kReduceSecurityForTesting));
   }
 
@@ -1789,6 +1813,50 @@ IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest,
 
   EXPECT_EQ(ASCIIToUTF16("24"), controller->transaction_amount_);
   EXPECT_EQ(ASCIIToUTF16("USD"), controller->transaction_currency_);
+}
+
+IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, HideOnNavigate) {
+  base::WeakPtr<TestAutofillDialogController> weak_ptr =
+      controller()->AsWeakPtr();
+  EXPECT_TRUE(weak_ptr.get());
+
+  ui_test_utils::NavigateToURL(browser(), GURL("about:blank"));
+  EXPECT_FALSE(weak_ptr.get());
+}
+
+// Tests that the rAc dialog hides when the main frame is navigated, even if
+// it was invoked from a child frame.
+IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, HideOnNavigateMainFrame) {
+  net::SpawnedTestServer http_server(
+      net::SpawnedTestServer::TYPE_HTTP,
+      net::SpawnedTestServer::kLocalhost,
+      base::FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+  ASSERT_TRUE(http_server.Start());
+  RunTestPageInIframe(http_server);
+
+  ui_test_utils::NavigateToURL(browser(), GURL("about:blank"));
+  ChromeAutofillClient* client =
+      ChromeAutofillClient::FromWebContents(GetActiveWebContents());
+  EXPECT_FALSE(client->GetDialogControllerForTesting());
+}
+
+// Tests that the rAc dialog hides when the iframe it's in is navigated.
+IN_PROC_BROWSER_TEST_F(AutofillDialogControllerTest, HideOnNavigateIframe) {
+  net::SpawnedTestServer http_server(
+      net::SpawnedTestServer::TYPE_HTTP,
+      net::SpawnedTestServer::kLocalhost,
+      base::FilePath(FILE_PATH_LITERAL("chrome/test/data")));
+  ASSERT_TRUE(http_server.Start());
+  RunTestPageInIframe(http_server);
+
+  std::string unused;
+  ASSERT_TRUE(content::ExecuteScriptAndExtractString(GetRenderViewHost(),
+                                                     "navigateFrame();",
+                                                     &unused));
+  ExpectDomMessage("iframe loaded");
+  ChromeAutofillClient* client =
+      ChromeAutofillClient::FromWebContents(GetActiveWebContents());
+  EXPECT_FALSE(client->GetDialogControllerForTesting());
 }
 
 }  // namespace autofill

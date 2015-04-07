@@ -18,6 +18,9 @@ WebInspector.TimelinePowerGraph = function(delegate, model)
 }
 
 WebInspector.TimelinePowerGraph.prototype = {
+    /**
+     * @override
+     */
     dispose: function()
     {
         WebInspector.CountersGraph.prototype.dispose.call(this);
@@ -37,13 +40,6 @@ WebInspector.TimelinePowerGraph.prototype = {
         this._counter.appendSample(this._previousRecord.timestamp, record.value);
         this._previousRecord = record;
         this.scheduleRefresh();
-    },
-
-    /**
-     * @param {!WebInspector.TimelineModel.Record} record
-     */
-    addRecord: function(record)
-    {
     },
 
     __proto__: WebInspector.CountersGraph.prototype

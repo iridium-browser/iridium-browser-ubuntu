@@ -5,6 +5,7 @@
 #include "chromecast/browser/cast_content_window.h"
 
 #include "base/threading/thread_restrictions.h"
+#include "chromecast/base/metrics/cast_metrics_helper.h"
 #include "content/public/browser/web_contents.h"
 #include "ipc/ipc_message.h"
 
@@ -22,24 +23,24 @@ namespace chromecast {
 class CastFillLayout : public aura::LayoutManager {
  public:
   explicit CastFillLayout(aura::Window* root) : root_(root) {}
-  virtual ~CastFillLayout() {}
+  ~CastFillLayout() override {}
 
  private:
-  virtual void OnWindowResized() override {}
+  void OnWindowResized() override {}
 
-  virtual void OnWindowAddedToLayout(aura::Window* child) override {
+  void OnWindowAddedToLayout(aura::Window* child) override {
     child->SetBounds(root_->bounds());
   }
 
-  virtual void OnWillRemoveWindowFromLayout(aura::Window* child) override {}
+  void OnWillRemoveWindowFromLayout(aura::Window* child) override {}
 
-  virtual void OnWindowRemovedFromLayout(aura::Window* child) override {}
+  void OnWindowRemovedFromLayout(aura::Window* child) override {}
 
-  virtual void OnChildWindowVisibilityChanged(aura::Window* child,
-                                              bool visible) override {}
+  void OnChildWindowVisibilityChanged(aura::Window* child,
+                                      bool visible) override {}
 
-  virtual void SetChildBounds(aura::Window* child,
-                              const gfx::Rect& requested_bounds) override {
+  void SetChildBounds(aura::Window* child,
+                      const gfx::Rect& requested_bounds) override {
     SetChildBoundsDirect(child, requested_bounds);
   }
 
@@ -59,9 +60,9 @@ CastContentWindow::~CastContentWindow() {
 #endif
 }
 
-scoped_ptr<content::WebContents> CastContentWindow::Create(
+void CastContentWindow::CreateWindowTree(
     const gfx::Size& initial_size,
-    content::BrowserContext* browser_context) {
+    content::WebContents* web_contents) {
 #if defined(USE_AURA)
   // Aura initialization
   // TODO(lcwu): We only need a minimal implementation of gfx::Screen
@@ -84,15 +85,7 @@ scoped_ptr<content::WebContents> CastContentWindow::Create(
   window_tree_host_->window()->SetLayoutManager(
       new CastFillLayout(window_tree_host_->window()));
   window_tree_host_->Show();
-#endif
 
-  content::WebContents::CreateParams create_params(browser_context, NULL);
-  create_params.routing_id = MSG_ROUTING_NONE;
-  create_params.initial_size = initial_size;
-  content::WebContents* web_contents = content::WebContents::Create(
-      create_params);
-
-#if defined(USE_AURA)
   // Add and show content's view/window
   aura::Window* content_window = web_contents->GetNativeView();
   aura::Window* parent = window_tree_host_->window();
@@ -101,8 +94,22 @@ scoped_ptr<content::WebContents> CastContentWindow::Create(
   }
   content_window->Show();
 #endif
+}
 
+scoped_ptr<content::WebContents> CastContentWindow::CreateWebContents(
+    const gfx::Size& initial_size,
+    content::BrowserContext* browser_context) {
+  content::WebContents::CreateParams create_params(browser_context, NULL);
+  create_params.routing_id = MSG_ROUTING_NONE;
+  create_params.initial_size = initial_size;
+  content::WebContents* web_contents = content::WebContents::Create(
+      create_params);
+  content::WebContentsObserver::Observe(web_contents);
   return make_scoped_ptr(web_contents);
+}
+
+void CastContentWindow::DidFirstVisuallyNonEmptyPaint() {
+  metrics::CastMetricsHelper::GetInstance()->LogTimeToFirstPaint();
 }
 
 }  // namespace chromecast

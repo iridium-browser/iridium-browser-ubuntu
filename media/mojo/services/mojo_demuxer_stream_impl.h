@@ -28,8 +28,7 @@ class MojoDemuxerStreamImpl : public mojo::InterfaceImpl<mojo::DemuxerStream> {
                                       mojo::MediaDecoderBufferPtr)>& callback)
       override;
 
-  // mojo::InterfaceImpl overrides.
-  void OnConnectionEstablished() override;
+  void DidConnect();
 
  private:
   // |callback| is the callback that was passed to the initiating Read()
@@ -43,6 +42,9 @@ class MojoDemuxerStreamImpl : public mojo::InterfaceImpl<mojo::DemuxerStream> {
 
   // See constructor.  We do not own |stream_|.
   media::DemuxerStream* stream_;
+
+  // DataPipe for serializing the data section of DecoderBuffer into.
+  mojo::ScopedDataPipeProducerHandle stream_pipe_;
 
   base::WeakPtrFactory<MojoDemuxerStreamImpl> weak_factory_;
   DISALLOW_COPY_AND_ASSIGN(MojoDemuxerStreamImpl);

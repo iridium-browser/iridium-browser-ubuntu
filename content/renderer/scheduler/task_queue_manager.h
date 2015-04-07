@@ -15,6 +15,13 @@
 #include "base/threading/thread_checker.h"
 #include "content/common/content_export.h"
 
+namespace base {
+namespace debug {
+class ConvertableToTraceFormat;
+class TracedValue;
+}
+}
+
 namespace content {
 namespace internal {
 class TaskQueue;
@@ -69,6 +76,10 @@ class CONTENT_EXPORT TaskQueueManager {
   // lock, so calling it has some overhead.
   bool IsQueueEmpty(size_t queue_index) const;
 
+  // Set the name |queue_index| for tracing purposes. |name| must be a pointer
+  // to a static string.
+  void SetQueueName(size_t queue_index, const char* name);
+
  private:
   friend class internal::TaskQueue;
 
@@ -76,19 +87,27 @@ class CONTENT_EXPORT TaskQueueManager {
   // sequence number for it.
   void DidQueueTask(base::PendingTask* pending_task);
 
-  // Post a task to call DoWork() on the main task runner.
-  void PostDoWorkOnMainRunner();
+  // Post a task to call DoWork() on the main task runner.  Only one pending
+  // DoWork is allowed from the main thread, to prevent an explosion of pending
+  // DoWorks.
+  void MaybePostDoWorkOnMainRunner();
 
   // Use the selector to choose a pending task and run it.
-  void DoWork();
+  void DoWork(bool posted_from_main_thread);
 
   // Reloads any empty work queues which have automatic pumping enabled.
   // Returns true if any work queue has tasks after doing this.
   bool UpdateWorkQueues();
 
-  // Runs a single task from the work queue designated by |queue_index|. The
-  // queue must not be empty.
-  void RunTaskFromWorkQueue(size_t queue_index);
+  // Chooses the next work queue to service. Returns true if |out_queue_index|
+  // indicates the queue from which the next task should be run, false to
+  // avoid running any tasks.
+  bool SelectWorkQueueToService(size_t* out_queue_index);
+
+  // Runs a single nestable task from the work queue designated by
+  // |queue_index|. Non-nestable task are reposted on the run loop.
+  // The queue must not be empty.
+  void ProcessTaskFromWorkQueue(size_t queue_index);
 
   bool RunsTasksOnCurrentThread() const;
   bool PostDelayedTask(const tracked_objects::Location& from_here,
@@ -99,6 +118,9 @@ class CONTENT_EXPORT TaskQueueManager {
                                   base::TimeDelta delay);
   internal::TaskQueue* Queue(size_t queue_index) const;
 
+  scoped_refptr<base::debug::ConvertableToTraceFormat>
+  AsValueWithSelectorResult(bool should_run, size_t selected_queue) const;
+
   std::vector<scoped_refptr<internal::TaskQueue>> queues_;
   base::AtomicSequenceNumber task_sequence_num_;
   base::debug::TaskAnnotator task_annotator_;
@@ -108,6 +130,11 @@ class CONTENT_EXPORT TaskQueueManager {
   TaskQueueSelector* selector_;
 
   base::WeakPtr<TaskQueueManager> task_queue_manager_weak_ptr_;
+
+  // The pending_dowork_count_ is only tracked on the main thread since that's
+  // where re-entrant problems happen.
+  int pending_dowork_count_;
+
   base::WeakPtrFactory<TaskQueueManager> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(TaskQueueManager);

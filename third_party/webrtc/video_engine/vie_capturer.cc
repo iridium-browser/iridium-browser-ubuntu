@@ -279,7 +279,7 @@ int32_t ViECapturer::SetRotateCapturedFrames(
 }
 
 int ViECapturer::IncomingFrame(unsigned char* video_frame,
-                               unsigned int video_frame_length,
+                               size_t video_frame_length,
                                uint16_t width,
                                uint16_t height,
                                RawVideoType video_type,
@@ -487,7 +487,7 @@ bool ViECapturer::ViECaptureProcess() {
 
 void ViECapturer::DeliverI420Frame(I420VideoFrame* video_frame) {
   if (video_frame->native_handle() != NULL) {
-    ViEFrameProviderBase::DeliverFrame(video_frame);
+    ViEFrameProviderBase::DeliverFrame(video_frame, std::vector<uint32_t>());
     return;
   }
 
@@ -522,9 +522,8 @@ void ViECapturer::DeliverI420Frame(I420VideoFrame* video_frame) {
     }
   }
   if (effect_filter_) {
-    unsigned int length = CalcBufferSize(kI420,
-                                         video_frame->width(),
-                                         video_frame->height());
+    size_t length =
+        CalcBufferSize(kI420, video_frame->width(), video_frame->height());
     scoped_ptr<uint8_t[]> video_buffer(new uint8_t[length]);
     ExtractBuffer(*video_frame, length, video_buffer.get());
     effect_filter_->Transform(length,
@@ -535,7 +534,7 @@ void ViECapturer::DeliverI420Frame(I420VideoFrame* video_frame) {
                               video_frame->height());
   }
   // Deliver the captured frame to all observers (channels, renderer or file).
-  ViEFrameProviderBase::DeliverFrame(video_frame);
+  ViEFrameProviderBase::DeliverFrame(video_frame, std::vector<uint32_t>());
 }
 
 int ViECapturer::DeregisterFrameCallback(

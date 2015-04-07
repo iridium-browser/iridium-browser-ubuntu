@@ -14,6 +14,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/time/time.h"
+#include "media/base/demuxer_stream.h"
 #include "media/base/media_export.h"
 #include "media/base/media_log.h"
 
@@ -62,7 +63,7 @@ class MEDIA_EXPORT StreamParser {
     bool auto_update_timestamp_offset;
 
     // Indicates live stream.
-    Demuxer::Liveness liveness;
+    DemuxerStream::Liveness liveness;
   };
 
   // Indicates completion of parser initialization.
@@ -106,8 +107,8 @@ class MEDIA_EXPORT StreamParser {
   // First parameter - The type of the initialization data associated with the
   //                   stream.
   // Second parameter - The initialization data associated with the stream.
-  typedef base::Callback<void(const std::string&,
-                              const std::vector<uint8>&)> NeedKeyCB;
+  typedef base::Callback<void(const std::string&, const std::vector<uint8>&)>
+      EncryptedMediaInitDataCB;
 
   StreamParser();
   virtual ~StreamParser();
@@ -117,14 +118,15 @@ class MEDIA_EXPORT StreamParser {
   // been parsed to determine the initial stream configurations, presentation
   // start time, and duration. If |ignore_text_track| is true, then no text
   // buffers should be passed later by the parser to |new_buffers_cb|.
-  virtual void Init(const InitCB& init_cb,
-                    const NewConfigCB& config_cb,
-                    const NewBuffersCB& new_buffers_cb,
-                    bool ignore_text_track,
-                    const NeedKeyCB& need_key_cb,
-                    const NewMediaSegmentCB& new_segment_cb,
-                    const base::Closure& end_of_segment_cb,
-                    const LogCB& log_cb) = 0;
+  virtual void Init(
+      const InitCB& init_cb,
+      const NewConfigCB& config_cb,
+      const NewBuffersCB& new_buffers_cb,
+      bool ignore_text_track,
+      const EncryptedMediaInitDataCB& encrypted_media_init_data_cb,
+      const NewMediaSegmentCB& new_segment_cb,
+      const base::Closure& end_of_segment_cb,
+      const LogCB& log_cb) = 0;
 
   // Called when a seek occurs. This flushes the current parser state
   // and puts the parser in a state where it can receive data for the new seek

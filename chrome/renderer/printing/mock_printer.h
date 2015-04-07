@@ -14,8 +14,8 @@
 #include "base/strings/string16.h"
 #include "printing/image.h"
 #include "third_party/WebKit/public/web/WebPrintScalingOption.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size.h"
 
 struct PrintMsg_Print_Params;
 struct PrintMsg_PrintPages_Params;

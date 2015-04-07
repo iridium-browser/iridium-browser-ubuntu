@@ -76,7 +76,6 @@
 #include "wtf/CurrentTime.h"
 #include "wtf/MathExtras.h"
 #include "wtf/NonCopyingSort.h"
-#include "wtf/Uint8Array.h"
 #include "wtf/text/CString.h"
 #include <limits>
 
@@ -358,7 +357,6 @@ HTMLMediaElement::HTMLMediaElement(const QualifiedName& tagName, Document& docum
     , m_playing(false)
     , m_shouldDelayLoadEvent(false)
     , m_haveFiredLoadedData(false)
-    , m_active(true)
     , m_autoplaying(true)
     , m_muted(false)
     , m_paused(true)
@@ -604,8 +602,6 @@ Node::InsertionNotificationRequest HTMLMediaElement::insertedInto(ContainerNode*
 
     HTMLElement::insertedInto(insertionPoint);
     if (insertionPoint->inDocument()) {
-        m_active = true;
-
         if (!getAttribute(srcAttr).isEmpty() && m_networkState == NETWORK_EMPTY)
             scheduleDelayedAction(LoadMediaResource);
     }
@@ -622,8 +618,7 @@ void HTMLMediaElement::removedFrom(ContainerNode* insertionPoint)
 {
     WTF_LOG(Media, "HTMLMediaElement::removedFrom(%p, %p)", this, insertionPoint);
 
-    m_active = false;
-    if (insertionPoint->inDocument() && insertionPoint->document().isActive()) {
+    if (insertionPoint->inActiveDocument()) {
         configureMediaControls();
         if (m_networkState > NETWORK_EMPTY)
             pause();
@@ -1484,7 +1479,7 @@ void HTMLMediaElement::endIgnoringTrackDisplayUpdateRequests()
 {
     ASSERT(m_ignoreTrackDisplayUpdate);
     --m_ignoreTrackDisplayUpdate;
-    if (!m_ignoreTrackDisplayUpdate && m_active)
+    if (!m_ignoreTrackDisplayUpdate && inActiveDocument())
         updateActiveTextTrackCues(currentTime());
 }
 
@@ -3363,6 +3358,9 @@ PassRefPtrWillBeRawPtr<TimeRanges> HTMLMediaElement::seekable() const
     if (!webMediaPlayer())
         return TimeRanges::create();
 
+    if (m_mediaSource)
+        return m_mediaSource->seekable();
+
     return TimeRanges::create(webMediaPlayer()->seekable());
 }
 
@@ -3565,7 +3563,6 @@ void HTMLMediaElement::stop()
     if (m_playing && m_initialPlayWithoutUserGestures)
         gesturelessInitialPlayHalted();
 
-    m_active = false;
     userCancelledLoad();
 
     // Stop the playback without generating events
@@ -4073,6 +4070,7 @@ void HTMLMediaElement::trace(Visitor* visitor)
     HeapSupplementable<HTMLMediaElement>::trace(visitor);
 #endif
     HTMLElement::trace(visitor);
+    ActiveDOMObject::trace(visitor);
 }
 
 void HTMLMediaElement::createPlaceholderTracksIfNecessary()

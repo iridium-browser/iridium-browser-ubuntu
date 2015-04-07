@@ -40,6 +40,12 @@
       }, {
         'pkg-config': 'pkg-config'
       }],
+      # low memory buffer is used in non-Android based chromecast build due to hardware limitation.
+      ['chromecast==1 and OS!="android"', {
+        'use_low_memory_buffer%': 1,
+      }, {
+        'use_low_memory_buffer%': 0,
+      }],
     ],
   },
   'includes': [
@@ -251,10 +257,16 @@
         'base/byte_queue.h',
         'base/cdm_callback_promise.cc',
         'base/cdm_callback_promise.h',
+        'base/cdm_context.cc',
+        'base/cdm_context.h',
         'base/cdm_factory.cc',
         'base/cdm_factory.h',
+        'base/cdm_key_information.cc',
+        'base/cdm_key_information.h',
         'base/cdm_promise.cc',
         'base/cdm_promise.h',
+        'base/cdm_promise_adapter.cc',
+        'base/cdm_promise_adapter.h',
         'base/channel_mixer.cc',
         'base/channel_mixer.h',
         'base/channel_mixing_matrix.cc',
@@ -284,6 +296,10 @@
         'base/eme_constants.h',
         'base/key_system_info.cc',
         'base/key_system_info.h',
+        'base/key_systems_support_uma.cc',
+        'base/key_systems_support_uma.h',
+        'base/key_systems.cc',
+        'base/key_systems.h',
         'base/keyboard_event_counter.cc',
         'base/keyboard_event_counter.h',
         'base/mac/avfoundation_glue.h',
@@ -293,8 +309,12 @@
         'base/mac/corevideo_glue.h',
         'base/mac/videotoolbox_glue.h',
         'base/mac/videotoolbox_glue.mm',
+        'base/mac/video_frame_mac.h',
+        'base/mac/video_frame_mac.cc',
         'base/media.cc',
         'base/media.h',
+        'base/media_client.cc',
+        'base/media_client.h',
         'base/media_file_checker.cc',
         'base/media_file_checker.h',
         'base/media_keys.cc',
@@ -317,6 +337,8 @@
         'base/ranges.h',
         'base/renderer.cc',
         'base/renderer.h',
+        'base/renderer_factory.cc',
+        'base/renderer_factory.h',
         'base/sample_format.cc',
         'base/sample_format.h',
         'base/scoped_histogram_timer.h',
@@ -374,12 +396,16 @@
         'base/wall_clock_time_source.h',
         'cdm/aes_decryptor.cc',
         'cdm/aes_decryptor.h',
+        'cdm/default_cdm_factory.cc',
+        'cdm/default_cdm_factory.h',
         'cdm/json_web_key.cc',
         'cdm/json_web_key.h',
         'cdm/key_system_names.cc',
         'cdm/key_system_names.h',
         'cdm/player_tracker_impl.cc',
         'cdm/player_tracker_impl.h',
+        'cdm/proxy_decryptor.cc',
+        'cdm/proxy_decryptor.h',
         'ffmpeg/ffmpeg_common.cc',
         'ffmpeg/ffmpeg_common.h',
         'ffmpeg/ffmpeg_deleters.h',
@@ -395,6 +421,7 @@
         'filters/blocking_url_protocol.h',
         'filters/chunk_demuxer.cc',
         'filters/chunk_demuxer.h',
+        'filters/context_3d.h',
         'filters/decoder_selector.cc',
         'filters/decoder_selector.h',
         'filters/decoder_stream.cc',
@@ -407,6 +434,8 @@
         'filters/decrypting_demuxer_stream.h',
         'filters/decrypting_video_decoder.cc',
         'filters/decrypting_video_decoder.h',
+        'filters/default_renderer_factory.cc',
+        'filters/default_renderer_factory.h',
         'filters/ffmpeg_audio_decoder.cc',
         'filters/ffmpeg_audio_decoder.h',
         'filters/ffmpeg_bitstream_converter.h',
@@ -436,8 +465,6 @@
         'filters/renderer_impl.h',
         'filters/skcanvas_video_renderer.cc',
         'filters/skcanvas_video_renderer.h',
-        'filters/source_buffer_platform.cc',
-        'filters/source_buffer_platform.h',
         'filters/source_buffer_range.cc',
         'filters/source_buffer_range.h',
         'filters/source_buffer_stream.cc',
@@ -451,6 +478,10 @@
         'filters/video_frame_scheduler_proxy.h',
         'filters/video_renderer_impl.cc',
         'filters/video_renderer_impl.h',
+        'filters/vp8_bool_decoder.cc',
+        'filters/vp8_bool_decoder.h',
+        'filters/vp8_parser.cc',
+        'filters/vp8_parser.h',
         'filters/vpx_video_decoder.cc',
         'filters/vpx_video_decoder.h',
         'filters/webvtt_util.h',
@@ -541,6 +572,8 @@
         'video/capture/win/video_capture_device_mf_win.h',
         'video/capture/win/video_capture_device_win.cc',
         'video/capture/win/video_capture_device_win.h',
+        'video/h264_poc.cc',
+        'video/h264_poc.h',
         'video/picture.cc',
         'video/picture.h',
         'video/video_decode_accelerator.cc',
@@ -621,12 +654,23 @@
             'filters/in_memory_url_protocol.cc',
             'filters/in_memory_url_protocol.h',
           ],
+          'defines': [
+            'MEDIA_DISABLE_FFMPEG',
+          ],
+          'direct_dependent_settings': {
+            'defines': [
+              'MEDIA_DISABLE_FFMPEG',
+            ],
+          },
         }],
         ['media_use_libvpx==1', {
           'dependencies': [
             '<(DEPTH)/third_party/libvpx/libvpx.gyp:libvpx',
           ],
         }, {  # media_use_libvpx==0
+          'defines': [
+            'MEDIA_DISABLE_LIBVPX',
+          ],
           'direct_dependent_settings': {
             'defines': [
               'MEDIA_DISABLE_LIBVPX',
@@ -642,6 +686,7 @@
           'sources': [
             'base/browser_cdm.cc',
             'base/browser_cdm.h',
+            'base/browser_cdm_factory.cc',
             'base/browser_cdm_factory.h',
           ],
         }],
@@ -657,6 +702,8 @@
             'base/media_stub.cc',
           ],
           'sources!': [
+            'filters/default_renderer_factory.cc',
+            'filters/default_renderer_factory.h',
             'filters/opus_audio_decoder.cc',
             'filters/opus_audio_decoder.h',
           ],
@@ -672,7 +719,7 @@
           ],
         }],
         # For VaapiVideoEncodeAccelerator.
-        ['target_arch != "arm" and chromeos == 1 and use_x11 == 1', {
+        ['target_arch != "arm" and chromeos == 1', {
           'sources': [
             'filters/h264_bitstream_buffer.cc',
             'filters/h264_bitstream_buffer.h',
@@ -1015,6 +1062,17 @@
             'base/keyboard_event_counter.h',
           ],
         }],
+        ['use_low_memory_buffer==1', {
+          'sources': [
+            'filters/source_buffer_platform_lowmem.cc',
+            'filters/source_buffer_platform.h',
+          ]
+        }, {  # 'use_low_memory_buffer==0'
+          'sources': [
+            'filters/source_buffer_platform.cc',
+            'filters/source_buffer_platform.h',
+          ]
+        }],
       ],  # conditions
       'target_conditions': [
         ['OS == "ios" and _toolset != "host"', {
@@ -1026,134 +1084,11 @@
             ['include', '^base/mac/corevideo_glue\\.h$'],
             ['include', '^base/mac/videotoolbox_glue\\.h$'],
             ['include', '^base/mac/videotoolbox_glue\\.mm$'],
+            ['include', '^base/mac/video_frame_mac\\.h$'],
+            ['include', '^base/mac/video_frame_mac\\.cc$'],
           ],
         }],
       ],  # target_conditions
-    },
-    {
-      # GN version: //media/mojo/interfaces
-      'target_name': 'media_mojo_bindings',
-      'type': 'static_library',
-      'sources': [
-        'mojo/interfaces/media_types.mojom',
-        'mojo/interfaces/media_renderer.mojom',
-        'mojo/interfaces/demuxer_stream.mojom',
-      ],
-      'includes': [
-        '../mojo/public/tools/bindings/mojom_bindings_generator.gypi'
-       ],
-      'export_dependent_settings': [
-        '../mojo/public/mojo_public.gyp:mojo_cpp_bindings',
-        '../mojo/services/public/mojo_services_public.gyp:mojo_geometry_bindings',
-      ],
-      'dependencies': [
-        '../mojo/public/mojo_public.gyp:mojo_cpp_bindings',
-        '../mojo/services/public/mojo_services_public.gyp:mojo_geometry_bindings',
-      ],
-    },
-    {
-      'target_name': 'media_mojo_lib',
-      'type': 'static_library',
-      'includes': [
-        '../mojo/mojo_variables.gypi',
-      ],
-      'dependencies': [
-        'media',
-        'media_mojo_bindings',
-        '../base/base.gyp:base',
-        '../mojo/mojo_geometry_converters.gyp:mojo_geometry_lib',
-        '../mojo/mojo_base.gyp:mojo_environment_chromium',
-        '../mojo/public/mojo_public.gyp:mojo_application_base',
-        '../mojo/public/mojo_public.gyp:mojo_application_bindings',
-        '../skia/skia.gyp:skia',
-        '../ui/gfx/gfx.gyp:gfx_geometry',
-        '<(mojo_system_for_component)',
-      ],
-      'export_dependent_settings': [
-        'media_mojo_bindings',
-      ],
-      'sources': [
-        'mojo/services/media_type_converters.cc',
-        'mojo/services/media_type_converters.h',
-        'mojo/services/mojo_demuxer_stream_impl.cc',
-        'mojo/services/mojo_demuxer_stream_impl.h',
-        'mojo/services/mojo_renderer_impl.cc',
-        'mojo/services/mojo_renderer_impl.h',
-      ],
-    },
-    {
-      'target_name': 'mojo_media_renderer_app',
-      'type': 'loadable_module',
-      'includes': [
-        '../mojo/mojo_variables.gypi',
-      ],
-      'dependencies': [
-        '../base/base.gyp:base',
-        '../mojo/mojo_base.gyp:mojo_application_chromium',
-        '<(mojo_system_for_loadable_module)',
-        'media_mojo_lib',
-        'shared_memory_support',
-      ],
-      'sources': [
-        'mojo/services/demuxer_stream_provider_shim.cc',
-        'mojo/services/demuxer_stream_provider_shim.h',
-        'mojo/services/mojo_demuxer_stream_adapter.cc',
-        'mojo/services/mojo_demuxer_stream_adapter.h',
-        'mojo/services/mojo_renderer_service.cc',
-        'mojo/services/mojo_renderer_service.h',
-        'mojo/services/renderer_config.cc',
-        'mojo/services/renderer_config.h',
-        'mojo/services/renderer_config_default.cc',
-      ],
-    },
-    {
-      'target_name': 'media_mojo_lib_unittests',
-      'type': '<(gtest_target_type)',
-      'dependencies': [
-        'media',
-        'media_mojo_bindings',
-        'media_mojo_lib',
-        '../base/base.gyp:base',
-        '../base/base.gyp:test_support_base',
-        '../testing/gtest.gyp:gtest',
-        '../mojo/edk/mojo_edk.gyp:mojo_run_all_unittests',
-        '../mojo/mojo_base.gyp:mojo_environment_chromium',
-      ],
-      'sources': [
-        'mojo/services/media_type_converters_unittest.cc',
-      ],
-    },
-    {
-      'target_name': 'mojo_media_renderer_apptest',
-      'type': 'loadable_module',
-      'includes': [
-        '../mojo/mojo_variables.gypi',
-      ],
-      'dependencies': [
-        'media',
-        'media_mojo_bindings',
-        'media_mojo_lib',
-        'media_test_support',
-        'mojo_media_renderer_app',
-        '../base/base.gyp:base',
-        '../base/base.gyp:test_support_base',
-        '../testing/gtest.gyp:gtest',
-        '../mojo/mojo_base.gyp:mojo_application_chromium',
-        '<(mojo_system_for_loadable_module)',
-      ],
-      'sources': [
-        'mojo/services/renderer_unittest.cc',
-      ],
-    },
-    {
-      'target_name': 'media_mojo',
-      'type': 'none',
-      'dependencies': [
-        'media_mojo_lib',
-        'media_mojo_lib_unittests',
-        'mojo_media_renderer_apptest',
-        'mojo_media_renderer_app',
-      ]
     },
     {
       # GN version: //media:media_unittests
@@ -1237,6 +1172,8 @@
         'base/decoder_buffer_unittest.cc',
         'base/djb2_unittest.cc',
         'base/gmock_callback_support_unittest.cc',
+        'base/key_systems_unittest.cc',
+        'base/mac/video_frame_mac_unittests.cc',
         'base/media_file_checker_unittest.cc',
         'base/multi_channel_resampler_unittest.cc',
         'base/pipeline_unittest.cc',
@@ -1286,8 +1223,6 @@
         'filters/h264_bit_reader_unittest.cc',
         'filters/h264_parser_unittest.cc',
         'filters/in_memory_url_protocol_unittest.cc',
-        'filters/pipeline_integration_test.cc',
-        'filters/pipeline_integration_test_base.cc',
         'filters/renderer_impl_unittest.cc',
         'filters/skcanvas_video_renderer_unittest.cc',
         'filters/source_buffer_stream_unittest.cc',
@@ -1296,6 +1231,8 @@
         'filters/video_frame_scheduler_unittest.cc',
         'filters/video_frame_stream_unittest.cc',
         'filters/video_renderer_impl_unittest.cc',
+        'filters/vp8_bool_decoder_unittest.cc',
+        'filters/vp8_parser_unittest.cc',
         'midi/midi_manager_unittest.cc',
         'midi/midi_manager_usb_unittest.cc',
         'midi/midi_message_queue_unittest.cc',
@@ -1305,6 +1242,7 @@
         'midi/usb_midi_output_stream_unittest.cc',
         'video/capture/fake_video_capture_device_unittest.cc',
         'video/capture/video_capture_device_unittest.cc',
+        'video/h264_poc_unittest.cc',
         'formats/common/offset_byte_queue_unittest.cc',
         'formats/webm/cluster_builder.cc',
         'formats/webm/cluster_builder.h',
@@ -1315,6 +1253,8 @@
         'formats/webm/webm_parser_unittest.cc',
         'formats/webm/webm_tracks_parser_unittest.cc',
         'formats/webm/webm_webvtt_parser_unittest.cc',
+        'test/pipeline_integration_test.cc',
+        'test/pipeline_integration_test_base.cc',
       ],
       'include_dirs': [
         # Needed by media_drm_bridge.cc.
@@ -1345,8 +1285,8 @@
             'filters/ffmpeg_h264_to_annex_b_bitstream_converter_unittest.cc',
             'filters/ffmpeg_video_decoder_unittest.cc',
             'filters/in_memory_url_protocol_unittest.cc',
-            'filters/pipeline_integration_test.cc',
-            'filters/pipeline_integration_test_base.cc',
+            'test/pipeline_integration_test.cc',
+            'test/pipeline_integration_test_base.cc',
           ],
         }],
         ['use_alsa==1', {
@@ -1468,8 +1408,8 @@
         'base/sinc_resampler_perftest.cc',
         'base/vector_math_perftest.cc',
         'base/yuv_convert_perftest.cc',
-        'filters/pipeline_integration_perftest.cc',
-        'filters/pipeline_integration_test_base.cc',
+        'test/pipeline_integration_perftest.cc',
+        'test/pipeline_integration_test_base.cc',
       ],
       'conditions': [
         ['arm_neon==1', {
@@ -1490,14 +1430,15 @@
         }, {  # media_use_ffmpeg==0
           'sources!': [
             'base/demuxer_perftest.cc',
-            'filters/pipeline_integration_perftest.cc',
-            'filters/pipeline_integration_test_base.cc',
+            'test/pipeline_integration_perftest.cc',
+            'test/pipeline_integration_test_base.cc',
           ],
         }],
       ],
     },
     {
-      # GN version: //media:test_support
+      # GN versions (it is split apart): //media:test_support,
+      # //media/base:test_support, and //media/audio:test_support
       'target_name': 'media_test_support',
       'type': 'static_library',
       'dependencies': [
@@ -1788,6 +1729,7 @@
             'base/android/audio_decoder_job.cc',
             'base/android/audio_decoder_job.h',
             'base/android/browser_cdm_factory_android.cc',
+            'base/android/browser_cdm_factory_android.h',
             'base/android/demuxer_android.h',
             'base/android/demuxer_stream_player_params.cc',
             'base/android/demuxer_stream_player_params.h',
@@ -1863,23 +1805,6 @@
     ['media_use_ffmpeg==1', {
       'targets': [
         {
-          # GN version: //media:ffmpeg_unittests
-          'target_name': 'ffmpeg_unittests',
-          'type': 'executable',
-          'dependencies': [
-            '../base/base.gyp:base',
-            '../base/base.gyp:base_i18n',
-            '../base/base.gyp:test_support_base',
-            '../testing/gtest.gyp:gtest',
-            '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
-            'media',
-            'media_test_support',
-          ],
-          'sources': [
-            'ffmpeg/ffmpeg_unittest.cc',
-          ],
-        },
-        {
           # GN version: //media:ffmpeg_regression_tests
           'target_name': 'ffmpeg_regression_tests',
           'type': 'executable',
@@ -1895,7 +1820,7 @@
           'sources': [
             'base/run_all_unittests.cc',
             'ffmpeg/ffmpeg_regression_tests.cc',
-            'filters/pipeline_integration_test_base.cc',
+            'test/pipeline_integration_test_base.cc',
           ],
           'conditions': [
             ['os_posix==1 and OS!="mac"', {
@@ -1941,6 +1866,8 @@
             'base/mac/corevideo_glue.h',
             'base/mac/videotoolbox_glue.h',
             'base/mac/videotoolbox_glue.mm',
+            'base/mac/video_frame_mac.h',
+            'base/mac/video_frame_mac.cc',
             'base/video_frame.cc',
             'base/video_frame.h',
           ],
@@ -1966,6 +1893,8 @@
                 ['include', '^base/mac/corevideo_glue\\.h$'],
                 ['include', '^base/mac/videotoolbox_glue\\.h$'],
                 ['include', '^base/mac/videotoolbox_glue\\.mm$'],
+                ['include', '^base/mac/video_frame_mac\\.h$'],
+                ['include', '^base/mac/video_frame_mac\\.cc$'],
               ],
             }],
           ],  # target_conditions

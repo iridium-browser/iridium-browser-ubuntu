@@ -67,7 +67,6 @@ bool Plugin::LoadHelperNaClModuleInternal(NaClSubprocess* subprocess,
                          false,  // No main_service_runtime.
                          false,  // No non-SFI mode (i.e. in SFI-mode).
                          pp::BlockUntilComplete());
-  subprocess->set_service_runtime(service_runtime);
 
   // Now start the SelLdr instance.  This must be created on the main thread.
   bool service_runtime_started = false;
@@ -83,12 +82,17 @@ bool Plugin::LoadHelperNaClModuleInternal(NaClSubprocess* subprocess,
   if (!service_runtime->WaitForSelLdrStart()) {
     PLUGIN_PRINTF(("Plugin::LoadHelperNaClModule "
                    "WaitForSelLdrStart timed out!\n"));
+    service_runtime->Shutdown();
+    delete service_runtime;
     return false;
   }
   PLUGIN_PRINTF(("Plugin::LoadHelperNaClModule (service_runtime_started=%d)\n",
                  service_runtime_started));
-  if (!service_runtime_started)
+  if (!service_runtime_started) {
+    service_runtime->Shutdown();
+    delete service_runtime;
     return false;
+  }
 
   // Now actually start the nexe.
   //
@@ -98,7 +102,13 @@ bool Plugin::LoadHelperNaClModuleInternal(NaClSubprocess* subprocess,
   pp::Module::Get()->core()->CallOnMainThread(
       0,
       callback_factory_.NewCallback(&Plugin::StartNexe, service_runtime));
-  return service_runtime->WaitForNexeStart();
+  if (!service_runtime->WaitForNexeStart()) {
+    service_runtime->Shutdown();
+    delete service_runtime;
+    return false;
+  }
+  subprocess->set_service_runtime(service_runtime);
+  return true;
 }
 
 void Plugin::StartSelLdrOnMainThread(int32_t pp_error,
@@ -161,22 +171,6 @@ void Plugin::StartNexe(int32_t pp_error, ServiceRuntime* service_runtime) {
 }
 
 bool Plugin::LoadNaClModuleContinuationIntern() {
-  ErrorInfo error_info;
-  if (!uses_nonsfi_mode_) {
-    if (!main_subprocess_.StartSrpcServices()) {
-      // The NaCl process probably crashed. On Linux, a crash causes this
-      // error, while on other platforms, the error is detected below, when we
-      // attempt to start the proxy. Report a module initialization error here,
-      // to make it less confusing for developers.
-      NaClLog(LOG_ERROR, "LoadNaClModuleContinuationIntern: "
-              "StartSrpcServices failed\n");
-      error_info.SetReport(PP_NACL_ERROR_START_PROXY_MODULE,
-                           "could not initialize module.");
-      ReportLoadError(error_info);
-      return false;
-    }
-  }
-
   return PP_ToBool(nacl_interface_->StartPpapiProxy(pp_instance()));
 }
 

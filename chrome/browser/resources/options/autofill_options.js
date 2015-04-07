@@ -83,6 +83,19 @@ cr.define('options', function() {
       };
 </if>
 
+      $('autofill-help').onclick = function(event) {
+        chrome.send('coreOptionsUserMetricsAction',
+                    ['Options_AutofillShowAbout']);
+        return true;  // Always follow the href
+      };
+
+      $('autofill-wallet-card-area').hidden =
+          !loadTimeData.getBoolean('enableAutofillWalletIntegration');
+      // TODO(estade): there should probably be some indication of success.
+      $('remask-server-cards-link').onclick = function(event) {
+        chrome.send('remaskServerCards');
+      };
+
       // TODO(jhawkins): What happens when Autofill is disabled whilst on the
       // Autofill options page?
     },
@@ -156,10 +169,13 @@ cr.define('options', function() {
     /**
      * Removes the Autofill address or credit card represented by |guid|.
      * @param {string} guid The GUID of the address to remove.
+     * @param {string=} metricsAction The name of the action to log for metrics.
      * @private
      */
-    removeData_: function(guid) {
+    removeData_: function(guid, metricsAction) {
       chrome.send('removeData', [guid]);
+      if (metricsAction)
+        chrome.send('coreOptionsUserMetricsAction', [metricsAction]);
     },
 
     /**
@@ -220,8 +236,8 @@ cr.define('options', function() {
     AutofillOptions.getInstance().setCreditCardList_(entries);
   };
 
-  AutofillOptions.removeData = function(guid) {
-    AutofillOptions.getInstance().removeData_(guid);
+  AutofillOptions.removeData = function(guid, metricsAction) {
+    AutofillOptions.getInstance().removeData_(guid, metricsAction);
   };
 
   AutofillOptions.loadAddressEditor = function(guid) {

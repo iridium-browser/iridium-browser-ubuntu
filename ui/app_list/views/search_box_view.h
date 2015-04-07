@@ -48,6 +48,7 @@ class APP_LIST_EXPORT SearchBoxView : public views::View,
   void ClearSearch();
   void InvalidateMenu();
 
+  views::ImageButton* back_button() { return back_button_; }
   views::Textfield* search_box() { return search_box_; }
 
   void set_contents_view(views::View* contents_view) {
@@ -57,6 +58,7 @@ class APP_LIST_EXPORT SearchBoxView : public views::View,
   // Overridden from views::View:
   gfx::Size GetPreferredSize() const override;
   bool OnMouseWheel(const ui::MouseWheelEvent& event) override;
+  void OnEnabledChanged() override;
 
  private:
   // Updates model text and selection model with current Textfield info.
@@ -95,6 +97,7 @@ class APP_LIST_EXPORT SearchBoxView : public views::View,
   scoped_ptr<AppListMenuViews> menu_;
 
   views::ImageView* icon_view_;  // Owned by views hierarchy.
+  views::ImageButton* back_button_;    // Owned by views hierarchy.
   views::ImageButton* speech_button_;  // Owned by views hierarchy.
   views::MenuButton* menu_button_;  // Owned by views hierarchy.
   views::Textfield* search_box_;  // Owned by views hierarchy.

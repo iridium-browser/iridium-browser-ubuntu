@@ -28,6 +28,9 @@ const char kAppTitle[] = "Test title";
 const char kAppShortName[] = "Test short name";
 const char kAlternativeAppTitle[] = "Different test title";
 const char kAppDescription[] = "Test description";
+const char kAppIcon1[] = "fav1.png";
+const char kAppIcon2[] = "fav2.png";
+const char kAppIcon3[] = "fav3.png";
 
 const int kIconSizeTiny = extension_misc::EXTENSION_ICON_BITTY;
 const int kIconSizeSmall = extension_misc::EXTENSION_ICON_SMALL;
@@ -53,7 +56,7 @@ class BookmarkAppHelperExtensionServiceTest
     extensions::ExtensionServiceTestBase::SetUp();
     InitializeEmptyExtensionService();
     service_->Init();
-    EXPECT_EQ(0u, service_->extensions()->size());
+    EXPECT_EQ(0u, registry()->enabled_extensions().size());
   }
 
   void TearDown() override {
@@ -78,14 +81,6 @@ SkBitmap CreateSquareBitmapWithColor(int size, SkColor color) {
   bitmap.allocN32Pixels(size, size);
   bitmap.eraseColor(color);
   return bitmap;
-}
-
-void ValidateBitmapSizeAndColor(SkBitmap bitmap, int size, SkColor color) {
-  // Obtain pixel lock to access pixels.
-  SkAutoLockPixels lock(bitmap);
-  EXPECT_EQ(color, bitmap.getColor(0, 0));
-  EXPECT_EQ(size, bitmap.width());
-  EXPECT_EQ(size, bitmap.height());
 }
 
 WebApplicationInfo::IconInfo CreateIconInfoWithBitmap(int size, SkColor color) {
@@ -171,7 +166,7 @@ TEST_F(BookmarkAppHelperExtensionServiceTest, CreateBookmarkApp) {
   const Extension* extension =
       service_->GetInstalledExtension(helper.extension()->id());
   EXPECT_TRUE(extension);
-  EXPECT_EQ(1u, service_->extensions()->size());
+  EXPECT_EQ(1u, registry()->enabled_extensions().size());
   EXPECT_TRUE(extension->from_bookmark());
   EXPECT_EQ(kAppTitle, extension->name());
   EXPECT_EQ(kAppDescription, extension->description());
@@ -203,7 +198,7 @@ TEST_F(BookmarkAppHelperExtensionServiceTest, CreateBookmarkAppWithManifest) {
   const Extension* extension =
       service_->GetInstalledExtension(helper.extension()->id());
   EXPECT_TRUE(extension);
-  EXPECT_EQ(1u, service_->extensions()->size());
+  EXPECT_EQ(1u, registry()->enabled_extensions().size());
   EXPECT_TRUE(extension->from_bookmark());
   EXPECT_EQ(kAppTitle, extension->name());
   EXPECT_EQ(GURL(kAppUrl), AppLaunchInfo::GetLaunchWebURL(extension));
@@ -226,14 +221,15 @@ TEST_F(BookmarkAppHelperExtensionServiceTest, CreateBookmarkAppNoContents) {
   const Extension* extension =
       service_->GetInstalledExtension(helper.extension()->id());
   EXPECT_TRUE(extension);
-  EXPECT_EQ(1u, service_->extensions()->size());
+  EXPECT_EQ(1u, registry()->enabled_extensions().size());
   EXPECT_TRUE(extension->from_bookmark());
   EXPECT_EQ(kAppTitle, extension->name());
   EXPECT_EQ(kAppDescription, extension->description());
   EXPECT_EQ(GURL(kAppUrl), AppLaunchInfo::GetLaunchWebURL(extension));
-  EXPECT_FALSE(
-      IconsInfo::GetIconResource(
-          extension, kIconSizeTiny, ExtensionIconSet::MATCH_EXACTLY).empty());
+  // The tiny icon should have been removed and only the generated ones used.
+  EXPECT_TRUE(
+      IconsInfo::GetIconResource(extension, kIconSizeTiny,
+                                 ExtensionIconSet::MATCH_EXACTLY).empty());
   EXPECT_FALSE(
       IconsInfo::GetIconResource(
           extension, kIconSizeSmall, ExtensionIconSet::MATCH_EXACTLY).empty());
@@ -259,12 +255,13 @@ TEST_F(BookmarkAppHelperExtensionServiceTest, CreateAndUpdateBookmarkApp) {
   web_app_info.icons.push_back(
       CreateIconInfoWithBitmap(kIconSizeSmall, SK_ColorRED));
 
-  extensions::CreateOrUpdateBookmarkApp(service_, web_app_info);
+  extensions::CreateOrUpdateBookmarkApp(service_, &web_app_info);
   base::RunLoop().RunUntilIdle();
 
   {
     EXPECT_EQ(1u, registry()->enabled_extensions().size());
-    const Extension* extension = service_->extensions()->begin()->get();
+    const Extension* extension =
+        registry()->enabled_extensions().begin()->get();
     EXPECT_TRUE(extension->from_bookmark());
     EXPECT_EQ(kAppTitle, extension->name());
     EXPECT_EQ(kAppDescription, extension->description());
@@ -277,12 +274,13 @@ TEST_F(BookmarkAppHelperExtensionServiceTest, CreateAndUpdateBookmarkApp) {
   web_app_info.title = base::UTF8ToUTF16(kAlternativeAppTitle);
   web_app_info.icons[0] = CreateIconInfoWithBitmap(kIconSizeLarge, SK_ColorRED);
 
-  extensions::CreateOrUpdateBookmarkApp(service_, web_app_info);
+  extensions::CreateOrUpdateBookmarkApp(service_, &web_app_info);
   base::RunLoop().RunUntilIdle();
 
   {
     EXPECT_EQ(1u, registry()->enabled_extensions().size());
-    const Extension* extension = service_->extensions()->begin()->get();
+    const Extension* extension =
+        registry()->enabled_extensions().begin()->get();
     EXPECT_TRUE(extension->from_bookmark());
     EXPECT_EQ(kAlternativeAppTitle, extension->name());
     EXPECT_EQ(kAppDescription, extension->description());
@@ -307,16 +305,15 @@ TEST_F(BookmarkAppHelperExtensionServiceTest, GetWebApplicationInfo) {
   web_app_info.icons.push_back(
       CreateIconInfoWithBitmap(kIconSizeLarge, SK_ColorRED));
 
-  extensions::CreateOrUpdateBookmarkApp(service_, web_app_info);
+  extensions::CreateOrUpdateBookmarkApp(service_, &web_app_info);
   base::RunLoop().RunUntilIdle();
 
   EXPECT_EQ(1u, registry()->enabled_extensions().size());
   base::RunLoop run_loop;
   extensions::GetWebApplicationInfoFromApp(
-      profile_.get(),
-      service_->extensions()->begin()->get(),
-      base::Bind(
-          &ValidateWebApplicationInfo, run_loop.QuitClosure(), web_app_info));
+      profile_.get(), registry()->enabled_extensions().begin()->get(),
+      base::Bind(&ValidateWebApplicationInfo, run_loop.QuitClosure(),
+                 web_app_info));
   run_loop.Run();
 }
 
@@ -324,6 +321,9 @@ TEST_F(BookmarkAppHelperTest, UpdateWebAppInfoFromManifest) {
   WebApplicationInfo web_app_info;
   web_app_info.title = base::UTF8ToUTF16(kAlternativeAppTitle);
   web_app_info.app_url = GURL(kAlternativeAppUrl);
+  WebApplicationInfo::IconInfo info;
+  info.url = GURL(kAppIcon1);
+  web_app_info.icons.push_back(info);
 
   content::Manifest manifest;
   manifest.start_url = GURL(kAppUrl);
@@ -334,49 +334,27 @@ TEST_F(BookmarkAppHelperTest, UpdateWebAppInfoFromManifest) {
   EXPECT_EQ(base::UTF8ToUTF16(kAppShortName), web_app_info.title);
   EXPECT_EQ(GURL(kAppUrl), web_app_info.app_url);
 
-  // Test that |manifest.name| takes priority over |manifest.short_name|
+  // The icon info from |web_app_info| should be left as is, since the manifest
+  // doesn't have any icon information.
+  EXPECT_EQ(1u, web_app_info.icons.size());
+  EXPECT_EQ(GURL(kAppIcon1), web_app_info.icons[0].url);
+
+  // Test that |manifest.name| takes priority over |manifest.short_name|, and
+  // that icons provided by the manifest replace icons in |web_app_info|.
   manifest.name = base::NullableString16(base::UTF8ToUTF16(kAppTitle), false);
+
+  content::Manifest::Icon icon;
+  icon.src = GURL(kAppIcon2);
+  manifest.icons.push_back(icon);
+  icon.src = GURL(kAppIcon3);
+  manifest.icons.push_back(icon);
+
   BookmarkAppHelper::UpdateWebAppInfoFromManifest(manifest, &web_app_info);
   EXPECT_EQ(base::UTF8ToUTF16(kAppTitle), web_app_info.title);
-}
 
-TEST_F(BookmarkAppHelperTest, ConstrainBitmapsToSizes) {
-  std::set<int> desired_sizes;
-  desired_sizes.insert(16);
-  desired_sizes.insert(32);
-  desired_sizes.insert(128);
-  desired_sizes.insert(256);
-
-  {
-    std::vector<SkBitmap> bitmaps;
-    bitmaps.push_back(CreateSquareBitmapWithColor(16, SK_ColorRED));
-    bitmaps.push_back(CreateSquareBitmapWithColor(32, SK_ColorGREEN));
-    bitmaps.push_back(CreateSquareBitmapWithColor(48, SK_ColorBLUE));
-    bitmaps.push_back(CreateSquareBitmapWithColor(144, SK_ColorYELLOW));
-
-    std::map<int, SkBitmap> results(
-        BookmarkAppHelper::ConstrainBitmapsToSizes(bitmaps, desired_sizes));
-
-    EXPECT_EQ(3u, results.size());
-    ValidateBitmapSizeAndColor(results[16], 16, SK_ColorRED);
-    ValidateBitmapSizeAndColor(results[32], 32, SK_ColorGREEN);
-    ValidateBitmapSizeAndColor(results[128], 128, SK_ColorYELLOW);
-  }
-  {
-    std::vector<SkBitmap> bitmaps;
-    bitmaps.push_back(CreateSquareBitmapWithColor(512, SK_ColorRED));
-    bitmaps.push_back(CreateSquareBitmapWithColor(18, SK_ColorGREEN));
-    bitmaps.push_back(CreateSquareBitmapWithColor(33, SK_ColorBLUE));
-    bitmaps.push_back(CreateSquareBitmapWithColor(17, SK_ColorYELLOW));
-
-    std::map<int, SkBitmap> results(
-        BookmarkAppHelper::ConstrainBitmapsToSizes(bitmaps, desired_sizes));
-
-    EXPECT_EQ(3u, results.size());
-    ValidateBitmapSizeAndColor(results[16], 16, SK_ColorYELLOW);
-    ValidateBitmapSizeAndColor(results[32], 32, SK_ColorBLUE);
-    ValidateBitmapSizeAndColor(results[256], 256, SK_ColorRED);
-  }
+  EXPECT_EQ(2u, web_app_info.icons.size());
+  EXPECT_EQ(GURL(kAppIcon2), web_app_info.icons[0].url);
+  EXPECT_EQ(GURL(kAppIcon3), web_app_info.icons[1].url);
 }
 
 TEST_F(BookmarkAppHelperTest, IsValidBookmarkAppUrl) {

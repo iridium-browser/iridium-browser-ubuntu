@@ -91,9 +91,7 @@ int InitSocketPoolHelper(const GURL& request_url,
   bool using_ssl = request_url.SchemeIs("https") ||
       request_url.SchemeIs("wss") || force_spdy_over_ssl;
 
-  HostPortPair origin_host_port =
-      HostPortPair(request_url.HostNoBrackets(),
-                   request_url.EffectiveIntPort());
+  HostPortPair origin_host_port = HostPortPair::FromURL(request_url);
 
   if (!using_ssl && session->params().testing_fixed_http_port != 0) {
     origin_host_port.set_port(session->params().testing_fixed_http_port);
@@ -131,7 +129,8 @@ int InitSocketPoolHelper(const GURL& request_url,
     // should be the same for all connections, whereas version_max may
     // change for version fallbacks.
     std::string prefix = "ssl/";
-    if (ssl_config_for_origin.version_max != kDefaultSSLVersionMax) {
+    if (ssl_config_for_origin.version_max !=
+        SSLClientSocket::GetMaxSupportedSSLVersion()) {
       switch (ssl_config_for_origin.version_max) {
         case SSL_PROTOCOL_VERSION_TLS1_2:
           prefix = "ssl(max:3.3)/";

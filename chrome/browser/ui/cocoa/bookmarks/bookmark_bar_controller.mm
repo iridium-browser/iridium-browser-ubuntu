@@ -5,7 +5,6 @@
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_controller.h"
 
 #include "base/mac/bundle_locations.h"
-#include "base/mac/mac_util.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/sys_string_conversions.h"
@@ -44,8 +43,8 @@
 #import "chrome/browser/ui/cocoa/view_id_util.h"
 #import "chrome/browser/ui/cocoa/view_resizer.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/ui/webui/ntp/core_app_launcher_handler.h"
 #include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/extensions/extension_metrics.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
@@ -143,9 +142,8 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   if (!extension)
     return;
 
-  CoreAppLauncherHandler::RecordAppLaunchType(
-      extension_misc::APP_LAUNCH_BOOKMARK_BAR,
-      extension->GetType());
+  extensions::RecordAppLaunchType(extension_misc::APP_LAUNCH_BOOKMARK_BAR,
+                                  extension->GetType());
 }
 
 }  // namespace

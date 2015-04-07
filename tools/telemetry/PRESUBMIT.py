@@ -20,12 +20,6 @@ def _CommonChecks(input_api, output_api):
       'Docs are stale. Please run:\n' +
       '$ %s' % os.path.abspath(update_docs_path)))
 
-  # Importing telemetry.web_components actually brings tvcm into the path.
-  import telemetry.web_components # pylint: disable=W0612
-  from tvcm import presubmit_checker
-  checker = presubmit_checker.PresubmitChecker(input_api, output_api)
-  results += checker.RunChecks()
-
   results.extend(input_api.canned_checks.RunPylint(
         input_api, output_api,
         black_list=PYLINT_BLACKLIST,
@@ -33,7 +27,9 @@ def _CommonChecks(input_api, output_api):
   return results
 
 def GetPathsToPrepend(input_api):
-  return [input_api.PresubmitLocalPath()]
+  return [input_api.PresubmitLocalPath(),
+          os.path.join(input_api.PresubmitLocalPath(), os.path.pardir,
+                       os.path.pardir, 'third_party', 'typ')]
 
 def RunWithPrependedPath(prepended_path, fn, *args):
   old_path = sys.path

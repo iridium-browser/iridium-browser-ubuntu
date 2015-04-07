@@ -38,6 +38,36 @@ PasswordStoreChangeList UpdateChangeForForm(const PasswordForm& form) {
       PasswordStoreChange::UPDATE, form));
 }
 
+void FormsAreEqual(const PasswordForm& expected, const PasswordForm& actual) {
+  PasswordForm expected_copy(expected);
+#if defined(OS_MACOSX) && !defined(OS_IOS)
+  // On the Mac we should never be storing passwords in the database.
+  expected_copy.password_value = ASCIIToUTF16("");
+#endif
+  EXPECT_EQ(expected_copy, actual);
+}
+
+void GenerateExamplePasswordForm(PasswordForm* form) {
+  form->origin = GURL("http://accounts.google.com/LoginAuth");
+  form->action = GURL("http://accounts.google.com/Login");
+  form->username_element = ASCIIToUTF16("Email");
+  form->username_value = ASCIIToUTF16("test@gmail.com");
+  form->password_element = ASCIIToUTF16("Passwd");
+  form->password_value = ASCIIToUTF16("test");
+  form->submit_element = ASCIIToUTF16("signIn");
+  form->signon_realm = "http://www.google.com/";
+  form->ssl_valid = false;
+  form->preferred = false;
+  form->scheme = PasswordForm::SCHEME_HTML;
+  form->times_used = 1;
+  form->form_data.name = ASCIIToUTF16("form_name");
+  form->date_synced = base::Time::Now();
+  form->display_name = ASCIIToUTF16("Mr. Smith");
+  form->avatar_url = GURL("https://accounts.google.com/Avatar");
+  form->federation_url = GURL("https://accounts.google.com/federation");
+  form->is_zero_click = true;
+}
+
 }  // namespace
 
 // Serialization routines for vectors implemented in login_database.cc.
@@ -51,15 +81,6 @@ class LoginDatabaseTest : public testing::Test {
     file_ = temp_dir_.path().AppendASCII("TestMetadataStoreMacDatabase");
 
     ASSERT_TRUE(db_.Init(file_));
-  }
-
-  void FormsAreEqual(const PasswordForm& expected, const PasswordForm& actual) {
-    PasswordForm expected_copy(expected);
-#if defined(OS_MACOSX) && !defined(OS_IOS)
-    // On the Mac we should never be storing passwords in the database.
-    expected_copy.password_value = ASCIIToUTF16("");
-#endif
-    EXPECT_EQ(expected_copy, actual);
   }
 
   void TestNonHTMLFormPSLMatching(const PasswordForm::Scheme& scheme) {
@@ -151,24 +172,7 @@ TEST_F(LoginDatabaseTest, Logins) {
 
   // Example password form.
   PasswordForm form;
-  form.origin = GURL("http://accounts.google.com/LoginAuth");
-  form.action = GURL("http://accounts.google.com/Login");
-  form.username_element = ASCIIToUTF16("Email");
-  form.username_value = ASCIIToUTF16("test@gmail.com");
-  form.password_element = ASCIIToUTF16("Passwd");
-  form.password_value = ASCIIToUTF16("test");
-  form.submit_element = ASCIIToUTF16("signIn");
-  form.signon_realm = "http://www.google.com/";
-  form.ssl_valid = false;
-  form.preferred = false;
-  form.scheme = PasswordForm::SCHEME_HTML;
-  form.times_used = 1;
-  form.form_data.name = ASCIIToUTF16("form_name");
-  form.date_synced = base::Time::Now();
-  form.display_name = ASCIIToUTF16("Mr. Smith");
-  form.avatar_url = GURL("https://accounts.google.com/Avatar");
-  form.federation_url = GURL("https://accounts.google.com/federation");
-  form.is_zero_click = true;
+  GenerateExamplePasswordForm(&form);
 
   // Add it and make sure it is there and that all the fields were retrieved
   // correctly.
@@ -331,6 +335,14 @@ TEST_F(LoginDatabaseTest, TestPublicSuffixDomainMatching) {
   EXPECT_EQ(1U, result.size());
   EXPECT_EQ("https://mobile.foo.com/", result[0]->signon_realm);
   EXPECT_EQ("https://foo.com/", result[0]->original_signon_realm);
+
+  // Try to remove PSL matched form
+  EXPECT_FALSE(db_.RemoveLogin(*result[0]));
+  delete result[0];
+  result.clear();
+  // Ensure that the original form is still there
+  EXPECT_TRUE(db_.GetLogins(form, &result));
+  EXPECT_EQ(1U, result.size());
   delete result[0];
   result.clear();
 }
@@ -663,11 +675,15 @@ TEST_F(LoginDatabaseTest, ClearPrivateData_SavedPasswords) {
   base::TimeDelta one_day = base::TimeDelta::FromDays(1);
 
   // Create one with a 0 time.
-  EXPECT_TRUE(AddTimestampedLogin(&db_, "1", "foo1", base::Time(), true));
+  EXPECT_TRUE(AddTimestampedLogin(&db_, "http://1.com", "foo1",
+                                  base::Time(), true));
   // Create one for now and +/- 1 day.
-  EXPECT_TRUE(AddTimestampedLogin(&db_, "2", "foo2", now - one_day, true));
-  EXPECT_TRUE(AddTimestampedLogin(&db_, "3", "foo3", now, true));
-  EXPECT_TRUE(AddTimestampedLogin(&db_, "4", "foo4", now + one_day, true));
+  EXPECT_TRUE(AddTimestampedLogin(&db_, "http://2.com", "foo2",
+                                  now - one_day, true));
+  EXPECT_TRUE(AddTimestampedLogin(&db_, "http://3.com", "foo3",
+                                  now, true));
+  EXPECT_TRUE(AddTimestampedLogin(&db_, "http://4.com", "foo4",
+                                  now + one_day, true));
 
   // Verify inserts worked.
   EXPECT_TRUE(db_.GetAutofillableLogins(&result));
@@ -702,11 +718,15 @@ TEST_F(LoginDatabaseTest, RemoveLoginsSyncedBetween) {
   base::TimeDelta one_day = base::TimeDelta::FromDays(1);
 
   // Create one with a 0 time.
-  EXPECT_TRUE(AddTimestampedLogin(&db_, "1", "foo1", base::Time(), false));
+  EXPECT_TRUE(AddTimestampedLogin(&db_, "http://1.com", "foo1",
+                                  base::Time(), false));
   // Create one for now and +/- 1 day.
-  EXPECT_TRUE(AddTimestampedLogin(&db_, "2", "foo2", now - one_day, false));
-  EXPECT_TRUE(AddTimestampedLogin(&db_, "3", "foo3", now, false));
-  EXPECT_TRUE(AddTimestampedLogin(&db_, "4", "foo4", now + one_day, false));
+  EXPECT_TRUE(AddTimestampedLogin(&db_, "http://2.com", "foo2",
+                                  now - one_day, false));
+  EXPECT_TRUE(AddTimestampedLogin(&db_, "http://3.com", "foo3",
+                                  now, false));
+  EXPECT_TRUE(AddTimestampedLogin(&db_, "http://4.com", "foo4",
+                                  now + one_day, false));
 
   // Verify inserts worked.
   EXPECT_TRUE(db_.GetAutofillableLogins(&result.get()));
@@ -716,8 +736,8 @@ TEST_F(LoginDatabaseTest, RemoveLoginsSyncedBetween) {
   // Get everything from today's date and on.
   EXPECT_TRUE(db_.GetLoginsSyncedBetween(now, base::Time(), &result.get()));
   ASSERT_EQ(2U, result.size());
-  EXPECT_EQ("3", result[0]->signon_realm);
-  EXPECT_EQ("4", result[1]->signon_realm);
+  EXPECT_EQ("http://3.com", result[0]->signon_realm);
+  EXPECT_EQ("http://4.com", result[1]->signon_realm);
   result.clear();
 
   // Delete everything from today's date and on.
@@ -726,8 +746,8 @@ TEST_F(LoginDatabaseTest, RemoveLoginsSyncedBetween) {
   // Should have deleted half of what we inserted.
   EXPECT_TRUE(db_.GetAutofillableLogins(&result.get()));
   ASSERT_EQ(2U, result.size());
-  EXPECT_EQ("1", result[0]->signon_realm);
-  EXPECT_EQ("2", result[1]->signon_realm);
+  EXPECT_EQ("http://1.com", result[0]->signon_realm);
+  EXPECT_EQ("http://2.com", result[1]->signon_realm);
   result.clear();
 
   // Delete with 0 date (should delete all).
@@ -953,6 +973,25 @@ TEST_F(LoginDatabaseTest, DoubleAdd) {
   EXPECT_EQ(list, db_.AddLogin(form));
 }
 
+TEST_F(LoginDatabaseTest, AddWrongForm) {
+  PasswordForm form;
+  // |origin| shouldn't be empty.
+  form.origin = GURL();
+  form.signon_realm = "http://accounts.google.com/";
+  form.username_value = ASCIIToUTF16("my_username");
+  form.password_value = ASCIIToUTF16("my_password");
+  form.ssl_valid = false;
+  form.preferred = true;
+  form.blacklisted_by_user = false;
+  form.scheme = PasswordForm::SCHEME_HTML;
+  EXPECT_EQ(PasswordStoreChangeList(), db_.AddLogin(form));
+
+  // |signon_realm| shouldn't be empty.
+  form.origin = GURL("http://accounts.google.com/LoginAuth");
+  form.signon_realm.clear();
+  EXPECT_EQ(PasswordStoreChangeList(), db_.AddLogin(form));
+}
+
 TEST_F(LoginDatabaseTest, UpdateLogin) {
   PasswordForm form;
   form.origin = GURL("http://accounts.google.com/LoginAuth");
@@ -1082,21 +1121,28 @@ TEST_F(LoginDatabaseTest, FilePermissions) {
 
 class LoginDatabaseMigrationTest : public testing::Test {
  protected:
-  void SetUp() override {
-    PathService::Get(base::DIR_SOURCE_ROOT, &database_dump_);
-    database_dump_ = database_dump_.AppendASCII("components")
-                         .AppendASCII("test")
-                         .AppendASCII("data")
-                         .AppendASCII("password_manager")
-                         .AppendASCII("login_db_v8.sql");
 
+  void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
+    database_dump_location_ = database_dump_location_.AppendASCII("components")
+                                  .AppendASCII("test")
+                                  .AppendASCII("data")
+                                  .AppendASCII("password_manager");
     database_path_ = temp_dir_.path().AppendASCII("test.db");
-    ASSERT_TRUE(
-        sql::test::CreateDatabaseFromSQL(database_path_, database_dump_));
   }
 
-  void TearDown() override {
+  // Creates database of specific |version|.
+  void CreateDatabase(int version) {
+    base::FilePath database_dump;
+    PathService::Get(base::DIR_SOURCE_ROOT, &database_dump);
+    database_dump =
+        database_dump.Append(database_dump_location_)
+            .AppendASCII("login_db_v" + base::IntToString(version) + ".sql");
+    ASSERT_TRUE(
+        sql::test::CreateDatabaseFromSQL(database_path_, database_dump));
+  }
+
+  void DestroyDatabase() {
     if (!database_path_.empty())
       base::DeleteFile(database_path_, false);
   }
@@ -1104,10 +1150,10 @@ class LoginDatabaseMigrationTest : public testing::Test {
   // Returns an empty vector on failure. Otherwise returns the values of the
   // date_created field from the logins table. The order of the returned rows
   // is well-defined.
-  std::vector<int64_t> GetDateCreated(const base::FilePath& db_path) {
+  std::vector<int64_t> GetDateCreated() {
     sql::Connection db;
     std::vector<int64_t> results;
-    if (!db.Open(db_path))
+    if (!db.Open(database_path_))
       return results;
 
     sql::Statement s(db.GetCachedStatement(
@@ -1129,32 +1175,49 @@ class LoginDatabaseMigrationTest : public testing::Test {
   base::FilePath database_path_;
 
  private:
-  base::FilePath database_dump_;
+  base::FilePath database_dump_location_;
   base::ScopedTempDir temp_dir_;
 };
 
-// Tests the migration of the login database from version 8 to version 9.
-TEST_F(LoginDatabaseMigrationTest, MigrationV8ToV9) {
-  // Original date, in seconds since UTC epoch.
-  std::vector<int64_t> date_created(GetDateCreated(database_path_));
-  ASSERT_EQ(1402955745, date_created[0]);
-  ASSERT_EQ(1402950000, date_created[1]);
+// Tests the migration of the login database from version 1 to version
+// kCurrentVersionNumber. This test will fail when kCurrentVersionNumber
+// will be changed to 10, because file login_db_v10.sql doesn't exist.
+// It has to be added in order to fix test.
+TEST_F(LoginDatabaseMigrationTest, MigrationV1ToVCurrent) {
+  for (int version = 1; version < kCurrentVersionNumber; ++version) {
+    CreateDatabase(version);
+    // Original date, in seconds since UTC epoch.
+    std::vector<int64_t> date_created(GetDateCreated());
+    ASSERT_EQ(1402955745, date_created[0]);
+    ASSERT_EQ(1402950000, date_created[1]);
 
-  // Assert that the database was successfully opened and migrated.
-  {
-    LoginDatabase db;
-    ASSERT_TRUE(db.Init(database_path_));
-  }
-
-  // New date, in microseconds since platform independent epoch.
-  std::vector<int64_t> new_date_created(GetDateCreated(database_path_));
-  ASSERT_EQ(13047429345000000, new_date_created[0]);
-  ASSERT_EQ(13047423600000000, new_date_created[1]);
-
-  // Check that the two dates match up.
-  for (size_t i = 0; i < date_created.size(); ++i) {
-    EXPECT_EQ(base::Time::FromInternalValue(new_date_created[i]),
-              base::Time::FromTimeT(date_created[i]));
+    {
+      // Assert that the database was successfully opened and updated
+      // to current version.
+      LoginDatabase db;
+      ASSERT_TRUE(db.Init(database_path_));
+      // Verifies that the final version can save all the appropriate fields.
+      std::vector<PasswordForm*> result;
+      PasswordForm form;
+      GenerateExamplePasswordForm(&form);
+      db.AddLogin(form);
+      EXPECT_TRUE(db.GetLogins(form, &result));
+      ASSERT_EQ(1U, result.size());
+      FormsAreEqual(form, *result[0]);
+      EXPECT_TRUE(db.RemoveLogin(form));
+      delete result[0];
+      result.clear();
+    }
+    // New date, in microseconds since platform independent epoch.
+    std::vector<int64_t> new_date_created(GetDateCreated());
+    ASSERT_EQ(13047429345000000, new_date_created[0]);
+    ASSERT_EQ(13047423600000000, new_date_created[1]);
+    // Check that the two dates match up.
+    for (size_t i = 0; i < date_created.size(); ++i) {
+      EXPECT_EQ(base::Time::FromInternalValue(new_date_created[i]),
+                base::Time::FromTimeT(date_created[i]));
+    }
+    DestroyDatabase();
   }
 }
 

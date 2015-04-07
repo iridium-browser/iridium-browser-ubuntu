@@ -66,8 +66,7 @@ static ImageLoader::BypassMainWorldBehavior shouldBypassMainWorldCSP(ImageLoader
 {
     ASSERT(loader);
     ASSERT(loader->element());
-    ASSERT(loader->element()->document().frame());
-    if (loader->element()->document().frame()->script().shouldBypassMainWorldCSP())
+    if (loader->element()->document().frame() && loader->element()->document().frame()->script().shouldBypassMainWorldCSP())
         return ImageLoader::BypassMainWorldCSP;
     return ImageLoader::DoNotBypassMainWorldCSP;
 }
@@ -207,11 +206,15 @@ ResourcePtr<ImageResource> ImageLoader::createImageResourceForImageDocument(Docu
     return newImage;
 }
 
-inline void ImageLoader::crossSiteOrCSPViolationOccured(AtomicString imageSourceURL)
+inline void ImageLoader::dispatchErrorEvent()
 {
-    m_failedLoadURL = imageSourceURL;
     m_hasPendingErrorEvent = true;
     errorEventSender().dispatchEventSoon(this);
+}
+
+inline void ImageLoader::crossSiteOrCSPViolationOccurred(AtomicString imageSourceURL)
+{
+    m_failedLoadURL = imageSourceURL;
 }
 
 inline void ImageLoader::clearFailedLoadURL()
@@ -249,6 +252,7 @@ void ImageLoader::doUpdateFromElement(BypassMainWorldBehavior bypassBehavior, Up
     AtomicString imageSourceURL = m_element->imageSourceURL();
     KURL url = imageSourceToKURL(imageSourceURL);
     ResourcePtr<ImageResource> newImage = 0;
+    RefPtrWillBeRawPtr<Element> protectElement(m_element.get());
     if (!url.isNull()) {
         // Unlike raw <img>, we block mixed content inside of <picture> or <img srcset>.
         ResourceLoaderOptions resourceLoaderOptions = ResourceFetcher::defaultResourceOptions();
@@ -266,14 +270,18 @@ void ImageLoader::doUpdateFromElement(BypassMainWorldBehavior bypassBehavior, Up
         else
             newImage = document.fetcher()->fetchImage(request);
 
-        if (!newImage && !pageIsBeingDismissed(&document))
-            crossSiteOrCSPViolationOccured(imageSourceURL);
-        else
+        if (!newImage && !pageIsBeingDismissed(&document)) {
+            crossSiteOrCSPViolationOccurred(imageSourceURL);
+            dispatchErrorEvent();
+        } else {
             clearFailedLoadURL();
-    } else if (!imageSourceURL.isNull()) {
-        // Fire an error event if the url string is not empty, but the KURL is.
-        m_hasPendingErrorEvent = true;
-        errorEventSender().dispatchEventSoon(this);
+        }
+    } else {
+        if (!imageSourceURL.isNull()) {
+            // Fire an error event if the url string is not empty, but the KURL is.
+            dispatchErrorEvent();
+        }
+        noImageResourceToLoad();
     }
 
     ImageResource* oldImage = m_image.get();
@@ -318,7 +326,7 @@ void ImageLoader::doUpdateFromElement(BypassMainWorldBehavior bypassBehavior, Up
     updatedHasPendingEvent();
 }
 
-void ImageLoader::updateFromElement(UpdateFromElementBehavior updateBehavior, LoadType loadType)
+void ImageLoader::updateFromElement(UpdateFromElementBehavior updateBehavior)
 {
     AtomicString imageSourceURL = m_element->imageSourceURL();
     m_suppressErrorEvents = (updateBehavior == UpdateSizeChanged);
@@ -337,7 +345,7 @@ void ImageLoader::updateFromElement(UpdateFromElementBehavior updateBehavior, Lo
     }
 
     KURL url = imageSourceToKURL(imageSourceURL);
-    if (imageSourceURL.isNull() || url.isNull() || shouldLoadImmediately(url, loadType)) {
+    if (shouldLoadImmediately(url)) {
         doUpdateFromElement(DoNotBypassMainWorldCSP, updateBehavior);
         return;
     }
@@ -361,14 +369,16 @@ KURL ImageLoader::imageSourceToKURL(AtomicString imageSourceURL) const
     return url;
 }
 
-bool ImageLoader::shouldLoadImmediately(const KURL& url, LoadType loadType) const
+bool ImageLoader::shouldLoadImmediately(const KURL& url) const
 {
-    return (m_loadingImageDocument
-        || isHTMLObjectElement(m_element)
-        || isHTMLEmbedElement(m_element)
-        || url.protocolIsData()
-        || memoryCache()->resourceForURL(url, m_element->document().fetcher()->getCacheIdentifier())
-        || loadType == ForceLoadImmediately);
+    // We force any image loads which might require alt content through the asynchronous path so that we can add the shadow DOM
+    // for the alt-text content when style recalc is over and DOM mutation is allowed again.
+    if (!url.isNull()) {
+        Resource* resource = memoryCache()->resourceForURL(url, m_element->document().fetcher()->getCacheIdentifier());
+        if (resource && !resource->errorOccurred())
+            return true;
+    }
+    return (m_loadingImageDocument || isHTMLObjectElement(m_element) || isHTMLEmbedElement(m_element) || url.protocolIsData());
 }
 
 void ImageLoader::notifyFinished(Resource* resource)
@@ -380,6 +390,11 @@ void ImageLoader::notifyFinished(Resource* resource)
     ASSERT(resource == m_image.get());
 
     m_imageComplete = true;
+
+    // Update ImageAnimationPolicy for m_image.
+    if (m_image)
+        m_image->updateImageAnimationPolicy();
+
     updateRenderer();
 
     if (!m_hasPendingLoadEvent)
@@ -389,12 +404,13 @@ void ImageLoader::notifyFinished(Resource* resource)
         loadEventSender().cancelEvent(this);
         m_hasPendingLoadEvent = false;
 
+        if (resource->resourceError().isAccessCheck())
+            crossSiteOrCSPViolationOccurred(AtomicString(resource->resourceError().failingURL()));
+
         // The error event should not fire if the image data update is a result of environment change.
         // https://html.spec.whatwg.org/multipage/embedded-content.html#the-img-element:the-img-element-55
-        if (!m_suppressErrorEvents) {
-            m_hasPendingErrorEvent = true;
-            errorEventSender().dispatchEventSoon(this);
-        }
+        if (!m_suppressErrorEvents)
+            dispatchErrorEvent();
 
         // Only consider updating the protection ref-count of the Element immediately before returning
         // from this function as doing so might result in the destruction of this ImageLoader.
@@ -564,14 +580,11 @@ void ImageLoader::elementDidMoveToNewDocument()
 void ImageLoader::sourceImageChanged()
 {
 #if ENABLE(OILPAN)
-    PersistentHeapHashMap<WeakMember<ImageLoaderClient>, OwnPtr<ImageLoaderClientRemover> >::iterator end = m_clients.end();
-    for (PersistentHeapHashMap<WeakMember<ImageLoaderClient>, OwnPtr<ImageLoaderClientRemover> >::iterator it = m_clients.begin(); it != end; ++it) {
-        it->key->notifyImageSourceChanged();
-    }
+    for (auto& client : m_clients)
+        client.key->notifyImageSourceChanged();
 #else
-    HashSet<ImageLoaderClient*>::iterator end = m_clients.end();
-    for (HashSet<ImageLoaderClient*>::iterator it = m_clients.begin(); it != end; ++it) {
-        ImageLoaderClient* handle = *it;
+    for (auto& client : m_clients) {
+        ImageLoaderClient* handle = client;
         handle->notifyImageSourceChanged();
     }
 #endif
@@ -583,5 +596,4 @@ ImageLoader::ImageLoaderClientRemover::~ImageLoaderClientRemover()
     m_loader.willRemoveClient(m_client);
 }
 #endif
-
 }

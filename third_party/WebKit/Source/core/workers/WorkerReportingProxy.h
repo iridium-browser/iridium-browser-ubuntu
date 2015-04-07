@@ -45,9 +45,10 @@ class WorkerReportingProxy {
 public:
     virtual ~WorkerReportingProxy() { }
 
-    virtual void reportException(const String& errorMessage, int lineNumber, int columnNumber, const String& sourceURL) = 0;
+    virtual void reportException(const String& errorMessage, int lineNumber, int columnNumber, const String& sourceURL, int exceptionId) = 0;
     virtual void reportConsoleMessage(PassRefPtrWillBeRawPtr<ConsoleMessage>) = 0;
     virtual void postMessageToPageInspector(const String&) = 0;
+    virtual void postWorkerConsoleAgentEnabled() = 0;
 
     // Invoked when the worker script is evaluated. |success| is true if the
     // evaluation completed with no uncaught exception.

@@ -6,7 +6,7 @@
 
 #include "content/child/webcrypto/crypto_data.h"
 #include "content/child/webcrypto/nss/key_nss.h"
-#include "content/child/webcrypto/nss/rsa_key_nss.h"
+#include "content/child/webcrypto/nss/rsa_hashed_algorithm_nss.h"
 #include "content/child/webcrypto/nss/util_nss.h"
 #include "content/child/webcrypto/status.h"
 #include "crypto/scoped_nss_types.h"
@@ -74,11 +74,8 @@ class RsaSsaImplementation : public RsaHashedAlgorithm {
     }
 
     crypto::ScopedSECItem signature_item(SECITEM_AllocItem(NULL, NULL, 0));
-    if (SEC_SignData(signature_item.get(),
-                     data.bytes(),
-                     data.byte_length(),
-                     private_key,
-                     sign_alg_tag) != SECSuccess) {
+    if (SEC_SignData(signature_item.get(), data.bytes(), data.byte_length(),
+                     private_key, sign_alg_tag) != SECSuccess) {
       return Status::OperationError();
     }
 
@@ -121,14 +118,10 @@ class RsaSsaImplementation : public RsaHashedAlgorithm {
     }
 
     *signature_match =
-        SECSuccess == VFY_VerifyDataDirect(data.bytes(),
-                                           data.byte_length(),
-                                           public_key,
-                                           &signature_item,
+        SECSuccess == VFY_VerifyDataDirect(data.bytes(), data.byte_length(),
+                                           public_key, &signature_item,
                                            SEC_OID_PKCS1_RSA_ENCRYPTION,
-                                           hash_alg_tag,
-                                           NULL,
-                                           NULL);
+                                           hash_alg_tag, NULL, NULL);
     return Status::Success();
   }
 };

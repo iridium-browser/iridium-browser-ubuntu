@@ -24,6 +24,7 @@ class BlockingTaskRunner;
 class DirectRenderer;
 class DisplayClient;
 class OutputSurface;
+class RendererSettings;
 class ResourceProvider;
 class SharedBitmapManager;
 class Surface;
@@ -42,16 +43,16 @@ class CC_SURFACES_EXPORT Display : public OutputSurfaceClient,
   Display(DisplayClient* client,
           SurfaceManager* manager,
           SharedBitmapManager* bitmap_manager,
-          gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager);
+          gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
+          const RendererSettings& settings);
   ~Display() override;
 
   bool Initialize(scoped_ptr<OutputSurface> output_surface);
 
   // device_scale_factor is used to communicate to the external window system
   // what scale this was rendered at.
-  void Resize(SurfaceId id,
-              const gfx::Size& new_size,
-              float device_scale_factor);
+  void SetSurfaceId(SurfaceId id, float device_scale_factor);
+  void Resize(const gfx::Size& new_size);
   bool Draw();
 
   SurfaceId CurrentSurfaceId();
@@ -63,7 +64,6 @@ class CC_SURFACES_EXPORT Display : public OutputSurfaceClient,
   void CommitVSyncParameters(base::TimeTicks timebase,
                              base::TimeDelta interval) override;
   void SetNeedsRedrawRect(const gfx::Rect& damage_rect) override {}
-  void BeginFrame(const BeginFrameArgs& args) override {}
   void DidSwapBuffers() override;
   void DidSwapBuffersComplete() override;
   void ReclaimResources(const CompositorFrameAck* ack) override {}
@@ -91,10 +91,10 @@ class CC_SURFACES_EXPORT Display : public OutputSurfaceClient,
   SurfaceManager* manager_;
   SharedBitmapManager* bitmap_manager_;
   gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager_;
+  RendererSettings settings_;
   SurfaceId current_surface_id_;
   gfx::Size current_surface_size_;
   float device_scale_factor_;
-  LayerTreeSettings settings_;
   scoped_ptr<OutputSurface> output_surface_;
   scoped_ptr<ResourceProvider> resource_provider_;
   scoped_ptr<SurfaceAggregator> aggregator_;

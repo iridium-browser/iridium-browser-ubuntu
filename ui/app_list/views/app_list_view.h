@@ -64,6 +64,11 @@ class APP_LIST_EXPORT AppListView : public views::BubbleDelegateView,
                                    views::BubbleBorder::Arrow arrow,
                                    bool border_accepts_events);
 
+  // Initializes the widget as a frameless window, not a bubble.
+  void InitAsFramelessWindow(gfx::NativeView parent,
+                             int initial_apps_page,
+                             gfx::Rect bounds);
+
   void SetBubbleArrow(views::BubbleBorder::Arrow arrow);
 
   void SetAnchorPoint(const gfx::Point& anchor_point);
@@ -89,6 +94,8 @@ class APP_LIST_EXPORT AppListView : public views::BubbleDelegateView,
 
   // Returns true if the app list should be centered and in landscape mode.
   bool ShouldCenterWindow() const;
+
+  views::Widget* search_box_widget() const { return search_box_widget_; }
 
   // Overridden from views::View:
   gfx::Size GetPreferredSize() const override;
@@ -121,8 +128,17 @@ class APP_LIST_EXPORT AppListView : public views::BubbleDelegateView,
   // Gets the PaginationModel owned by this view's apps grid.
   PaginationModel* GetAppsPaginationModel();
 
+  // Overridden from views::View:
+  bool AcceleratorPressed(const ui::Accelerator& accelerator) override;
+  void Layout() override;
+  void SchedulePaintInRect(const gfx::Rect& rect) override;
+
  private:
   friend class ::test::AppListViewTestApi;
+
+  void InitContents(gfx::NativeView parent, int initial_apps_page);
+
+  void InitChildWidgets();
 
   void InitAsBubbleInternal(gfx::NativeView parent,
                             int initial_apps_page,
@@ -140,11 +156,6 @@ class APP_LIST_EXPORT AppListView : public views::BubbleDelegateView,
   bool WidgetHasHitTestMask() const override;
   void GetWidgetHitTestMask(gfx::Path* mask) const override;
 
-  // Overridden from views::View:
-  bool AcceleratorPressed(const ui::Accelerator& accelerator) override;
-  void Layout() override;
-  void SchedulePaintInRect(const gfx::Rect& rect) override;
-
   // Overridden from views::WidgetObserver:
   void OnWidgetDestroying(views::Widget* widget) override;
   void OnWidgetVisibilityChanged(views::Widget* widget, bool visible) override;
@@ -157,11 +168,10 @@ class APP_LIST_EXPORT AppListView : public views::BubbleDelegateView,
   AppListViewDelegate* delegate_;  // Weak. Owned by AppListService.
 
   AppListMainView* app_list_main_view_;
-  SearchBoxView* search_box_view_;
   SpeechView* speech_view_;
 
-  // The red "experimental" banner for the experimental app list.
-  views::ImageView* experimental_banner_view_;
+  views::Widget* search_box_widget_;  // Owned by the app list's widget.
+  SearchBoxView* search_box_view_;    // Owned by |search_box_widget_|.
 
   // A semi-transparent white overlay that covers the app list while dialogs are
   // open.

@@ -9,10 +9,10 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/certificate_viewer.h"
 #include "chrome/browser/infobars/infobar_service.h"
-#include "chrome/browser/infobars/simple_alert_infobar_delegate.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/infobars/core/confirm_infobar_delegate.h"
 #include "components/infobars/core/infobar.h"
+#include "components/infobars/core/simple_alert_infobar_delegate.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
@@ -35,7 +35,7 @@ class SSLAddCertificateInfoBarDelegate : public ConfirmInfoBarDelegate {
   // Creates an SSL certificate enrollment result infobar and delegate.
   static void Create(InfoBarService* infobar_service,
                      net::X509Certificate* cert) {
-    infobar_service->AddInfoBar(ConfirmInfoBarDelegate::CreateInfoBar(
+    infobar_service->AddInfoBar(infobar_service->CreateConfirmInfoBar(
         scoped_ptr<ConfirmInfoBarDelegate>(
             new SSLAddCertificateInfoBarDelegate(cert))));
   }

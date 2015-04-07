@@ -23,7 +23,6 @@
  */
 
 #include "config.h"
-#if ENABLE(OPENTYPE_VERTICAL)
 #include "platform/fonts/opentype/OpenTypeVerticalData.h"
 
 #include "platform/SharedBuffer.h"
@@ -568,4 +567,3 @@ void OpenTypeVerticalData::substituteWithVerticalGlyphs(const SimpleFontData* fo
 }
 
 } // namespace blink
-#endif // ENABLE(OPENTYPE_VERTICAL)

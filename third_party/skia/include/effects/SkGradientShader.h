@@ -10,8 +10,6 @@
 
 #include "SkShader.h"
 
-#define SK_SUPPORT_LEGACY_GRADIENT_FACTORIES
-
 /** \class SkGradientShader
 
     SkGradientShader hosts factories for creating subclasses of SkShader that
@@ -58,7 +56,7 @@ public:
 #ifdef SK_SUPPORT_LEGACY_GRADIENT_FACTORIES
     static SkShader* CreateLinear(const SkPoint pts[2],
                                   const SkColor colors[], const SkScalar pos[], int count,
-                                  SkShader::TileMode mode, void* ignored,
+                                  SkShader::TileMode mode, void* /*ignored*/,
                                   uint32_t flags, const SkMatrix* localMatrix) {
         return CreateLinear(pts, colors, pos, count, mode, flags, localMatrix);
     }
@@ -94,7 +92,7 @@ public:
 #ifdef SK_SUPPORT_LEGACY_GRADIENT_FACTORIES
     static SkShader* CreateRadial(const SkPoint& center, SkScalar radius,
                                   const SkColor colors[], const SkScalar pos[], int count,
-                                  SkShader::TileMode mode, void* ignored,
+                                  SkShader::TileMode mode, void* /*ignored*/,
                                   uint32_t flags, const SkMatrix* localMatrix) {
         return CreateRadial(center, radius, colors, pos, count, mode, flags, localMatrix);
     }
@@ -137,7 +135,7 @@ public:
     static SkShader* CreateTwoPointRadial(const SkPoint& start, SkScalar startRadius,
                                           const SkPoint& end, SkScalar endRadius,
                                           const SkColor colors[], const SkScalar pos[], int count,
-                                          SkShader::TileMode mode, void* ignored,
+                                          SkShader::TileMode mode, void* /*ignored*/,
                                           uint32_t flags, const SkMatrix* localMatrix) {
         return CreateTwoPointRadial(start, startRadius, end, endRadius, colors, pos, count, mode,
                                     flags, localMatrix);
@@ -168,7 +166,7 @@ public:
     static SkShader* CreateTwoPointConical(const SkPoint& start, SkScalar startRadius,
                                            const SkPoint& end, SkScalar endRadius,
                                            const SkColor colors[], const SkScalar pos[], int count,
-                                           SkShader::TileMode mode, void* ignored,
+                                           SkShader::TileMode mode, void* /*ignored*/,
                                            uint32_t flags, const SkMatrix* localMatrix) {
         return CreateTwoPointConical(start, startRadius, end, endRadius, colors, pos, count, mode,
                                     flags, localMatrix);
@@ -202,7 +200,7 @@ public:
 #ifdef SK_SUPPORT_LEGACY_GRADIENT_FACTORIES
     static SkShader* CreateSweep(SkScalar cx, SkScalar cy,
                                  const SkColor colors[], const SkScalar pos[], int count,
-                                 void* ignored,
+                                 void* /*ignored*/,
                                  uint32_t flags, const SkMatrix* localMatrix) {
         return CreateSweep(cx, cy, colors, pos, count, flags, localMatrix);
     }

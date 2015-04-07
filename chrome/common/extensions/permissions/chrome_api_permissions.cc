@@ -16,7 +16,6 @@ namespace extensions {
 
 namespace {
 
-const char kOldUnlimitedStoragePermission[] = "unlimited_storage";
 const char kWindowsPermission[] = "windows";
 
 template <typename T>
@@ -31,12 +30,6 @@ std::vector<APIPermissionInfo*> ChromeAPIPermissions::GetAllPermissions()
   APIPermissionInfo::InitInfo permissions_to_register[] = {
       // Register permissions for all extension types.
       {APIPermission::kBackground, "background"},
-      {APIPermission::kClipboardRead,
-       "clipboardRead",
-       APIPermissionInfo::kFlagNone,
-       IDS_EXTENSION_PROMPT_WARNING_CLIPBOARD,
-       PermissionMessage::kClipboard},
-      {APIPermission::kClipboardWrite, "clipboardWrite"},
       {APIPermission::kDeclarativeContent, "declarativeContent"},
       {APIPermission::kDesktopCapture,
        "desktopCapture",
@@ -73,9 +66,6 @@ std::vector<APIPermissionInfo*> ChromeAPIPermissions::GetAllPermissions()
        IDS_EXTENSION_PROMPT_WARNING_GEOLOCATION,
        PermissionMessage::kGeolocation},
       {APIPermission::kNotifications, "notifications"},
-      {APIPermission::kUnlimitedStorage,
-       "unlimitedStorage",
-       APIPermissionInfo::kFlagCannotBeOptional},
       {APIPermission::kGcdPrivate, "gcdPrivate"},
       {APIPermission::kGcm, "gcm"},
       {APIPermission::kNotificationProvider, "notificationProvider"},
@@ -118,8 +108,14 @@ std::vector<APIPermissionInfo*> ChromeAPIPermissions::GetAllPermissions()
        IDS_EXTENSION_PROMPT_WARNING_COPRESENCE,
        PermissionMessage::kCopresence},
       {APIPermission::kCopresencePrivate, "copresencePrivate"},
-      {APIPermission::kDocumentScan, "documentScan",
-       APIPermissionInfo::kFlagNone, IDS_EXTENSION_PROMPT_WARNING_DOCUMENT_SCAN,
+      {APIPermission::kCryptotokenPrivate, "cryptotokenPrivate"},
+      {APIPermission::kDataReductionProxy, "dataReductionProxy",
+       APIPermissionInfo::kFlagImpliesFullURLAccess |
+           APIPermissionInfo::kFlagCannotBeOptional},
+      {APIPermission::kDocumentScan,
+       "documentScan",
+       APIPermissionInfo::kFlagNone,
+       IDS_EXTENSION_PROMPT_WARNING_DOCUMENT_SCAN,
        PermissionMessage::kDocumentScan},
       {APIPermission::kEnterprisePlatformKeys, "enterprise.platformKeys"},
       {APIPermission::kFileBrowserHandler,
@@ -304,8 +300,6 @@ std::vector<APIPermissionInfo*> ChromeAPIPermissions::GetAllPermissions()
       {APIPermission::kRtcPrivate,
        "rtcPrivate",
        APIPermissionInfo::kFlagCannotBeOptional},
-      {APIPermission::kSyncedNotificationsPrivate,
-       "syncedNotificationsPrivate"},
       {APIPermission::kTerminalPrivate,
        "terminalPrivate",
        APIPermissionInfo::kFlagCannotBeOptional},
@@ -339,6 +333,7 @@ std::vector<APIPermissionInfo*> ChromeAPIPermissions::GetAllPermissions()
       {APIPermission::kFirstRunPrivate,
        "firstRunPrivate",
        APIPermissionInfo::kFlagCannotBeOptional},
+      {APIPermission::kInlineInstallPrivate, "inlineInstallPrivate"},
 
       // Full url access permissions.
       {APIPermission::kDebugger,
@@ -411,9 +406,13 @@ std::vector<APIPermissionInfo*> ChromeAPIPermissions::GetAllPermissions()
        APIPermissionInfo::kFlagCannotBeOptional},
       {APIPermission::kPointerLock, "pointerLock"},
       {APIPermission::kPrinterProvider, "printerProvider"},
-      {APIPermission::kAudio, "audio"},
       {APIPermission::kCastStreaming, "cast.streaming"},
       {APIPermission::kBrowser, "browser"},
+      {APIPermission::kInterceptAllKeys,
+       "app.window.interceptAllKeys",
+       APIPermissionInfo::kFlagNone,
+       IDS_EXTENSION_PROMPT_WARNING_INTERCEPT_ALL_KEYS,
+       PermissionMessage::kInterceptAllKeys},
 
       // Settings override permissions.
       {APIPermission::kHomepage,
@@ -447,8 +446,6 @@ std::vector<PermissionsProvider::AliasInfo>
 ChromeAPIPermissions::GetAllAliases() const {
   // Register aliases.
   std::vector<PermissionsProvider::AliasInfo> aliases;
-  aliases.push_back(PermissionsProvider::AliasInfo(
-      "unlimitedStorage", kOldUnlimitedStoragePermission));
   aliases.push_back(PermissionsProvider::AliasInfo("tabs", kWindowsPermission));
   return aliases;
 }

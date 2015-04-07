@@ -31,9 +31,9 @@ class MessageHeader(object):
   """The header of a mojo message."""
 
   _SIMPLE_MESSAGE_NUM_FIELDS = 2
-  _SIMPLE_MESSAGE_STRUCT = struct.Struct("=IIII")
+  _SIMPLE_MESSAGE_STRUCT = struct.Struct("<IIII")
 
-  _REQUEST_ID_STRUCT = struct.Struct("=Q")
+  _REQUEST_ID_STRUCT = struct.Struct("<Q")
   _REQUEST_ID_OFFSET = _SIMPLE_MESSAGE_STRUCT.size
 
   _MESSAGE_WITH_REQUEST_ID_NUM_FIELDS = 3
@@ -398,7 +398,7 @@ def _ReadAndDispatchMessage(handle, message_receiver):
     message_receiver.Accept(Message(bytearray(), []))
   if result != system.RESULT_RESOURCE_EXHAUSTED:
     return result
-  (result, data, _) = handle.ReadMessage(bytearray(sizes[0]))
+  (result, data, _) = handle.ReadMessage(bytearray(sizes[0]), sizes[1])
   if result == system.RESULT_OK and message_receiver:
     message_receiver.Accept(Message(data[0], data[1]))
   return result

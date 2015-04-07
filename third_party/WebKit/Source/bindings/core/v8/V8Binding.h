@@ -43,18 +43,19 @@
 #include "bindings/core/v8/V8StringResource.h"
 #include "bindings/core/v8/V8ThrowException.h"
 #include "bindings/core/v8/V8ValueCache.h"
-#include "platform/heap/Heap.h"
-#include "wtf/GetPtr.h"
+#include "platform/heap/Handle.h"
 #include "wtf/text/AtomicString.h"
 #include <v8.h>
 
 namespace blink {
 
-class LocalDOMWindow;
-class Document;
+class DOMWindow;
 class EventListener;
+class EventTarget;
 class ExecutionContext;
 class ExceptionState;
+class Frame;
+class LocalDOMWindow;
 class LocalFrame;
 class NodeFilter;
 class XPathNSResolver;
@@ -62,8 +63,6 @@ class XPathNSResolver;
 namespace TraceEvent {
 class ConvertableToTraceFormat;
 }
-
-const int kMaxRecursionDepth = 22;
 
 // Helpers for throwing JavaScript TypeErrors for arity mismatches.
 void setArityTypeError(ExceptionState&, const char* valid, unsigned provided);
@@ -173,19 +172,6 @@ inline void v8SetReturnValueStringOrUndefined(const CallbackInfo& info, const St
         return;
     }
     V8PerIsolateData::from(isolate)->stringCache()->setReturnValueFromString(info.GetReturnValue(), string.impl());
-}
-
-template<typename CallbackInfo>
-inline void v8SetReturnValue(const CallbackInfo& callbackInfo, ScriptWrappableBase* impl, const WrapperTypeInfo* wrapperTypeInfo)
-{
-    if (UNLIKELY(!impl)) {
-        v8SetReturnValueNull(callbackInfo);
-        return;
-    }
-    if (DOMDataStore::setReturnValue(callbackInfo.GetReturnValue(), impl))
-        return;
-    v8::Handle<v8::Object> wrapper = impl->wrap(callbackInfo.Holder(), callbackInfo.GetIsolate(), wrapperTypeInfo);
-    v8SetReturnValue(callbackInfo, wrapper);
 }
 
 template<typename CallbackInfo>
@@ -301,13 +287,6 @@ inline void v8SetReturnValueFast(const CallbackInfo& callbackInfo, Node* impl, c
     v8SetReturnValue(callbackInfo, wrapper);
 }
 
-template<typename CallbackInfo>
-inline void v8SetReturnValueFast(const CallbackInfo& callbackInfo, ScriptWrappable* impl, const ScriptWrappableBase*)
-{
-    // If the third arg is not ScriptWrappable, there is no fast path.
-    v8SetReturnValue(callbackInfo, impl);
-}
-
 template<typename CallbackInfo, typename T, typename Wrappable>
 inline void v8SetReturnValueFast(const CallbackInfo& callbackInfo, PassRefPtr<T> impl, const Wrappable* wrappable)
 {
@@ -384,282 +363,6 @@ inline v8::Handle<v8::Value> v8Undefined()
 {
     return v8::Handle<v8::Value>();
 }
-
-inline v8::Handle<v8::Value> toV8(ScriptWrappableBase* impl, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate, const WrapperTypeInfo* wrapperTypeInfo)
-{
-    if (UNLIKELY(!impl))
-        return v8::Null(isolate);
-    v8::Handle<v8::Value> wrapper = DOMDataStore::getWrapper(impl, isolate);
-    if (!wrapper.IsEmpty())
-        return wrapper;
-
-    return impl->wrap(creationContext, isolate, wrapperTypeInfo);
-}
-
-inline v8::Handle<v8::Value> toV8(ScriptWrappable* impl, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
-{
-    if (UNLIKELY(!impl))
-        return v8::Null(isolate);
-    v8::Handle<v8::Value> wrapper = DOMDataStore::getWrapper(impl, isolate);
-    if (!wrapper.IsEmpty())
-        return wrapper;
-
-    return impl->wrap(creationContext, isolate);
-}
-
-inline v8::Handle<v8::Value> toV8(Node* impl, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
-{
-    if (UNLIKELY(!impl))
-        return v8::Null(isolate);
-    v8::Handle<v8::Value> wrapper = DOMDataStore::getWrapper(impl, isolate);
-    if (!wrapper.IsEmpty())
-        return wrapper;
-
-    return ScriptWrappable::fromNode(impl)->wrap(creationContext, isolate);
-}
-
-template<typename T>
-inline v8::Handle<v8::Value> toV8(RefPtr<T>& impl, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
-{
-    return toV8(impl.get(), creationContext, isolate);
-}
-
-template<typename T>
-inline v8::Handle<v8::Value> toV8(PassRefPtr<T> impl, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
-{
-    return toV8(impl.get(), creationContext, isolate);
-}
-
-template<typename T>
-inline v8::Handle<v8::Value> toV8(RawPtr<T> impl, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
-{
-    return toV8(impl.get(), creationContext, isolate);
-}
-
-// Converts a DOM object to a v8 value. This function is intended to be used
-// internally. If you want to convert a DOM object to a V8 value,
-//  - Use toV8 if you can include V8X.h.
-//  - Use V8ValueTraits<T>::toV8Value if you cannot include V8X.h.
-// Note: Including bindings/{core, modules}/v8/V8*.h from core and modules
-// is fine. In such a case, perhaps toV8 is what you want.
-// Note: toV8NoInline is a non-inline toV8 and V8ValueTraits::toV8Value offers
-// more: You can handle value conversion generally with it.
-template<typename T>
-v8::Handle<v8::Value> toV8NoInline(T* impl, v8::Handle<v8::Object> creationContext, v8::Isolate*);
-
-template <typename T>
-struct V8ValueTraits {
-    static v8::Handle<v8::Value> toV8Value(const T& value, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
-    {
-        if (!WTF::getPtr(value))
-            return v8::Null(isolate);
-        return toV8NoInline(WTF::getPtr(value), creationContext, isolate);
-    }
-};
-
-template<>
-struct V8ValueTraits<String> {
-    static inline v8::Handle<v8::Value> toV8Value(const String& value, v8::Handle<v8::Object>, v8::Isolate* isolate)
-    {
-        return v8String(isolate, value);
-    }
-};
-
-template<>
-struct V8ValueTraits<AtomicString> {
-    static inline v8::Handle<v8::Value> toV8Value(const AtomicString& value, v8::Handle<v8::Object>, v8::Isolate* isolate)
-    {
-        return v8String(isolate, value);
-    }
-};
-
-template<size_t n>
-struct V8ValueTraits<char[n]> {
-    static inline v8::Handle<v8::Value> toV8Value(char const (&value)[n], v8::Handle<v8::Object>, v8::Isolate* isolate)
-    {
-        return v8String(isolate, value);
-    }
-};
-
-template<size_t n>
-struct V8ValueTraits<char const[n]> {
-    static inline v8::Handle<v8::Value> toV8Value(char const (&value)[n], v8::Handle<v8::Object>, v8::Isolate* isolate)
-    {
-        return v8String(isolate, value);
-    }
-};
-
-template<>
-struct V8ValueTraits<const char*> {
-    static inline v8::Handle<v8::Value> toV8Value(const char* const& value, v8::Handle<v8::Object>, v8::Isolate* isolate)
-    {
-        if (!value) {
-            // We return an empty string, not null, in order to align
-            // with v8String(isolate, String()).
-            return v8::String::Empty(isolate);
-        }
-        return v8String(isolate, value);
-    }
-};
-
-template<>
-struct V8ValueTraits<char*> {
-    static inline v8::Handle<v8::Value> toV8Value(char* const& value, v8::Handle<v8::Object> object, v8::Isolate* isolate)
-    {
-        return V8ValueTraits<const char*>::toV8Value(value, object, isolate);
-    }
-};
-
-template<>
-struct V8ValueTraits<std::nullptr_t> {
-    static inline v8::Handle<v8::Value> toV8Value(std::nullptr_t null, v8::Handle<v8::Object> object, v8::Isolate* isolate)
-    {
-        // Note: toV8Value(nullptr) returns null and
-        // toV8Value(static_cast<const char*>(nullptr)) returns an empty string.
-        // See V8ValueTraits<const char*>.
-        return v8::Null(isolate);
-    }
-};
-
-template<>
-struct V8ValueTraits<int> {
-    static inline v8::Handle<v8::Value> toV8Value(const int& value, v8::Handle<v8::Object>, v8::Isolate* isolate)
-    {
-        return v8::Integer::New(isolate, value);
-    }
-};
-
-template<>
-struct V8ValueTraits<long> {
-    static inline v8::Handle<v8::Value> toV8Value(const long& value, v8::Handle<v8::Object>, v8::Isolate* isolate)
-    {
-        return v8::Integer::New(isolate, value);
-    }
-};
-
-template<>
-struct V8ValueTraits<unsigned> {
-    static inline v8::Handle<v8::Value> toV8Value(const unsigned& value, v8::Handle<v8::Object>, v8::Isolate* isolate)
-    {
-        return v8::Integer::NewFromUnsigned(isolate, value);
-    }
-};
-
-template<>
-struct V8ValueTraits<unsigned long> {
-    static inline v8::Handle<v8::Value> toV8Value(const unsigned long& value, v8::Handle<v8::Object>, v8::Isolate* isolate)
-    {
-        return v8::Integer::NewFromUnsigned(isolate, value);
-    }
-};
-
-template<>
-struct V8ValueTraits<float> {
-    static inline v8::Handle<v8::Value> toV8Value(const float& value, v8::Handle<v8::Object>, v8::Isolate* isolate)
-    {
-        return v8::Number::New(isolate, value);
-    }
-};
-
-template<>
-struct V8ValueTraits<double> {
-    static inline v8::Handle<v8::Value> toV8Value(const double& value, v8::Handle<v8::Object>, v8::Isolate* isolate)
-    {
-        return v8::Number::New(isolate, value);
-    }
-};
-
-template<>
-struct V8ValueTraits<bool> {
-    static inline v8::Handle<v8::Value> toV8Value(const bool& value, v8::Handle<v8::Object>, v8::Isolate* isolate)
-    {
-        return v8::Boolean::New(isolate, value);
-    }
-};
-
-// V8NullType and V8UndefinedType are used only for the value conversion.
-class V8NullType { };
-class V8UndefinedType { };
-
-template<>
-struct V8ValueTraits<V8NullType> {
-    static inline v8::Handle<v8::Value> toV8Value(const V8NullType&, v8::Handle<v8::Object>, v8::Isolate* isolate)
-    {
-        return v8::Null(isolate);
-    }
-};
-
-template<>
-struct V8ValueTraits<V8UndefinedType> {
-    static inline v8::Handle<v8::Value> toV8Value(const V8UndefinedType&, v8::Handle<v8::Object>, v8::Isolate* isolate)
-    {
-        return v8::Undefined(isolate);
-    }
-};
-
-template<>
-struct V8ValueTraits<ScriptValue> {
-    static inline v8::Handle<v8::Value> toV8Value(const ScriptValue& value, v8::Handle<v8::Object>, v8::Isolate*)
-    {
-        return value.v8Value();
-    }
-};
-
-template<>
-struct V8ValueTraits<v8::Handle<v8::Value> > {
-    static inline v8::Handle<v8::Value> toV8Value(const v8::Handle<v8::Value>& value, v8::Handle<v8::Object>, v8::Isolate*)
-    {
-        return value;
-    }
-};
-
-template<>
-struct V8ValueTraits<v8::Local<v8::Value> > {
-    static inline v8::Handle<v8::Value> toV8Value(const v8::Local<v8::Value>& value, v8::Handle<v8::Object>, v8::Isolate*)
-    {
-        return value;
-    }
-};
-
-template<typename T, size_t inlineCapacity>
-v8::Handle<v8::Value> v8Array(const Vector<T, inlineCapacity>& iterator, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
-{
-    v8::Local<v8::Array> result = v8::Array::New(isolate, iterator.size());
-    int index = 0;
-    typename Vector<T, inlineCapacity>::const_iterator end = iterator.end();
-    typedef V8ValueTraits<T> TraitsType;
-    for (typename Vector<T, inlineCapacity>::const_iterator iter = iterator.begin(); iter != end; ++iter)
-        result->Set(v8::Integer::New(isolate, index++), TraitsType::toV8Value(*iter, creationContext, isolate));
-    return result;
-}
-
-template <typename T, size_t inlineCapacity, typename Allocator>
-struct V8ValueTraits<WTF::Vector<T, inlineCapacity, Allocator> > {
-    static v8::Handle<v8::Value> toV8Value(const Vector<T, inlineCapacity, Allocator>& value, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
-    {
-        return v8Array(value, creationContext, isolate);
-    }
-};
-
-template<typename T, size_t inlineCapacity>
-v8::Handle<v8::Value> v8Array(const HeapVector<T, inlineCapacity>& iterator, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
-{
-    v8::Local<v8::Array> result = v8::Array::New(isolate, iterator.size());
-    int index = 0;
-    typename HeapVector<T, inlineCapacity>::const_iterator end = iterator.end();
-    typedef V8ValueTraits<T> TraitsType;
-    for (typename HeapVector<T, inlineCapacity>::const_iterator iter = iterator.begin(); iter != end; ++iter)
-        result->Set(v8::Integer::New(isolate, index++), TraitsType::toV8Value(*iter, creationContext, isolate));
-    return result;
-}
-
-template <typename T, size_t inlineCapacity>
-struct V8ValueTraits<HeapVector<T, inlineCapacity> > {
-    static v8::Handle<v8::Value> toV8Value(const HeapVector<T, inlineCapacity>& value, v8::Handle<v8::Object> creationContext, v8::Isolate* isolate)
-    {
-        return v8Array(value, creationContext, isolate);
-    }
-};
 
 // Conversion flags, used in toIntXX/toUIntXX.
 enum IntegerConversionConfiguration {
@@ -983,6 +686,11 @@ Vector<T> toImplArray(v8::Handle<v8::Value> value, int argumentIndex, v8::Isolat
         return Vector<T>();
     }
 
+    if (length > WTF::DefaultAllocatorQuantizer::kMaxUnquantizedAllocation / sizeof(T)) {
+        exceptionState.throwTypeError("Array length exceeds supported limit.");
+        return Vector<T>();
+    }
+
     Vector<T> result;
     result.reserveInitialCapacity(length);
     typedef NativeValueTraits<T> TraitsType;
@@ -1004,15 +712,16 @@ Vector<T> toImplArray(v8::Handle<v8::Value> value, int argumentIndex, v8::Isolat
 template <class T>
 Vector<T> toImplArguments(const v8::FunctionCallbackInfo<v8::Value>& info, int startIndex, ExceptionState& exceptionState)
 {
-    ASSERT(startIndex <= info.Length());
     Vector<T> result;
     typedef NativeValueTraits<T> TraitsType;
     int length = info.Length();
-    result.reserveInitialCapacity(length);
-    for (int i = startIndex; i < length; ++i) {
-        result.uncheckedAppend(TraitsType::nativeValue(info[i], info.GetIsolate(), exceptionState));
-        if (exceptionState.hadException())
-            return Vector<T>();
+    if (startIndex < length) {
+        result.reserveInitialCapacity(length - startIndex);
+        for (int i = startIndex; i < length; ++i) {
+            result.uncheckedAppend(TraitsType::nativeValue(info[i], info.GetIsolate(), exceptionState));
+            if (exceptionState.hadException())
+                return Vector<T>();
+        }
     }
     return result;
 }
@@ -1062,7 +771,7 @@ inline bool toV8Sequence(v8::Handle<v8::Value> value, uint32_t& length, v8::Isol
 
 template<>
 struct NativeValueTraits<String> {
-    static inline String nativeValue(const v8::Handle<v8::Value>& value, v8::Isolate* isolate, ExceptionState& exceptionState)
+    static inline String nativeValue(const v8::Local<v8::Value>& value, v8::Isolate* isolate, ExceptionState& exceptionState)
     {
         V8StringResource<> stringValue(value);
         if (!stringValue.prepare(exceptionState))
@@ -1073,7 +782,7 @@ struct NativeValueTraits<String> {
 
 template<>
 struct NativeValueTraits<int> {
-    static inline int nativeValue(const v8::Handle<v8::Value>& value, v8::Isolate* isolate, ExceptionState& exceptionState)
+    static inline int nativeValue(const v8::Local<v8::Value>& value, v8::Isolate* isolate, ExceptionState& exceptionState)
     {
         return toInt32(value, exceptionState);
     }
@@ -1081,7 +790,7 @@ struct NativeValueTraits<int> {
 
 template<>
 struct NativeValueTraits<unsigned> {
-    static inline unsigned nativeValue(const v8::Handle<v8::Value>& value, v8::Isolate* isolate, ExceptionState& exceptionState)
+    static inline unsigned nativeValue(const v8::Local<v8::Value>& value, v8::Isolate* isolate, ExceptionState& exceptionState)
     {
         return toUInt32(value, exceptionState);
     }
@@ -1089,7 +798,7 @@ struct NativeValueTraits<unsigned> {
 
 template<>
 struct NativeValueTraits<float> {
-    static inline float nativeValue(const v8::Handle<v8::Value>& value, v8::Isolate* isolate, ExceptionState& exceptionState)
+    static inline float nativeValue(const v8::Local<v8::Value>& value, v8::Isolate* isolate, ExceptionState& exceptionState)
     {
         return toFloat(value, exceptionState);
     }
@@ -1097,15 +806,15 @@ struct NativeValueTraits<float> {
 
 template<>
 struct NativeValueTraits<double> {
-    static inline double nativeValue(const v8::Handle<v8::Value>& value, v8::Isolate* isolate, ExceptionState& exceptionState)
+    static inline double nativeValue(const v8::Local<v8::Value>& value, v8::Isolate* isolate, ExceptionState& exceptionState)
     {
         return toDouble(value, exceptionState);
     }
 };
 
 template<>
-struct NativeValueTraits<v8::Handle<v8::Value> > {
-    static inline v8::Handle<v8::Value> nativeValue(const v8::Handle<v8::Value>& value, v8::Isolate* isolate, ExceptionState&)
+struct NativeValueTraits<v8::Local<v8::Value> > {
+    static inline v8::Local<v8::Value> nativeValue(const v8::Local<v8::Value>& value, v8::Isolate* isolate, ExceptionState&)
     {
         return value;
     }
@@ -1113,7 +822,7 @@ struct NativeValueTraits<v8::Handle<v8::Value> > {
 
 template<>
 struct NativeValueTraits<ScriptValue> {
-    static inline ScriptValue nativeValue(const v8::Handle<v8::Value>& value, v8::Isolate* isolate, ExceptionState&)
+    static inline ScriptValue nativeValue(const v8::Local<v8::Value>& value, v8::Isolate* isolate, ExceptionState&)
     {
         return ScriptValue(ScriptState::current(isolate), value);
     }
@@ -1121,7 +830,7 @@ struct NativeValueTraits<ScriptValue> {
 
 template <typename T>
 struct NativeValueTraits<Vector<T> > {
-    static inline Vector<T> nativeValue(const v8::Handle<v8::Value>& value, v8::Isolate* isolate, ExceptionState& exceptionState)
+    static inline Vector<T> nativeValue(const v8::Local<v8::Value>& value, v8::Isolate* isolate, ExceptionState& exceptionState)
     {
         return toImplArray<T>(value, 0, isolate, exceptionState);
     }
@@ -1130,8 +839,8 @@ struct NativeValueTraits<Vector<T> > {
 v8::Isolate* toIsolate(ExecutionContext*);
 v8::Isolate* toIsolate(LocalFrame*);
 
-LocalDOMWindow* toDOMWindow(v8::Handle<v8::Value>, v8::Isolate*);
-LocalDOMWindow* toDOMWindow(v8::Handle<v8::Context>);
+DOMWindow* toDOMWindow(v8::Isolate*, v8::Handle<v8::Value>);
+DOMWindow* toDOMWindow(v8::Handle<v8::Context>);
 LocalDOMWindow* enteredDOMWindow(v8::Isolate*);
 LocalDOMWindow* currentDOMWindow(v8::Isolate*);
 LocalDOMWindow* callingDOMWindow(v8::Isolate*);
@@ -1142,13 +851,15 @@ ExecutionContext* callingExecutionContext(v8::Isolate*);
 // Returns a V8 context associated with a ExecutionContext and a DOMWrapperWorld.
 // This method returns an empty context if there is no frame or the frame is already detached.
 v8::Local<v8::Context> toV8Context(ExecutionContext*, DOMWrapperWorld&);
-// Returns a V8 context associated with a LocalFrame and a DOMWrapperWorld.
+// Returns a V8 context associated with a Frame and a DOMWrapperWorld.
 // This method returns an empty context if the frame is already detached.
-v8::Local<v8::Context> toV8Context(LocalFrame*, DOMWrapperWorld&);
+v8::Local<v8::Context> toV8Context(Frame*, DOMWrapperWorld&);
 
 // Returns the frame object of the window object associated with
 // a context, if the window is currently being displayed in the LocalFrame.
 LocalFrame* toFrameIfNotDetached(v8::Handle<v8::Context>);
+
+EventTarget* toEventTarget(v8::Isolate*, v8::Handle<v8::Value>);
 
 // If the current context causes out of memory, JavaScript setting
 // is disabled and it returns true.
@@ -1170,7 +881,7 @@ inline v8::Local<v8::Function> createClosure(v8::FunctionCallback function, v8::
 // FIXME: This will be soon embedded in the generated code.
 template<class Collection> static void indexedPropertyEnumerator(const v8::PropertyCallbackInfo<v8::Array>& info)
 {
-    Collection* collection = toScriptWrappableBase(info.Holder())->toImpl<Collection>();
+    Collection* collection = toScriptWrappable(info.Holder())->toImpl<Collection>();
     int length = collection->length();
     v8::Handle<v8::Array> properties = v8::Array::New(info.GetIsolate(), length);
     for (int i = 0; i < length; ++i) {
@@ -1198,25 +909,42 @@ enum DeleteResult {
 
 class V8IsolateInterruptor : public ThreadState::Interruptor {
 public:
-    explicit V8IsolateInterruptor(v8::Isolate* isolate) : m_isolate(isolate) { }
+    explicit V8IsolateInterruptor(v8::Isolate* isolate)
+        : m_isolate(isolate)
+        , m_canceled(false)
+    {
+    }
 
     static void onInterruptCallback(v8::Isolate* isolate, void* data)
     {
-        reinterpret_cast<V8IsolateInterruptor*>(data)->onInterrupted();
+        V8IsolateInterruptor* interruptor = reinterpret_cast<V8IsolateInterruptor*>(data);
+        if (!interruptor->canceled())
+            interruptor->onInterrupted();
     }
 
     virtual void requestInterrupt() override
     {
+        MutexLocker locker(m_mutex);
+        m_canceled = false;
         m_isolate->RequestInterrupt(&onInterruptCallback, this);
     }
 
     virtual void clearInterrupt() override
     {
-        m_isolate->ClearInterrupt();
+        MutexLocker locker(m_mutex);
+        m_canceled = true;
+    }
+
+    bool canceled()
+    {
+        MutexLocker locker(m_mutex);
+        return m_canceled;
     }
 
 private:
     v8::Isolate* m_isolate;
+    Mutex m_mutex;
+    bool m_canceled;
 };
 
 class V8TestingScope {
@@ -1248,18 +976,7 @@ private:
     v8::TryCatch& m_block;
 };
 
-// Returns an object representing {done: true, value: undefined}.
-v8::Local<v8::Value> v8DoneIteratorResult(v8::Isolate*);
-
-// Returns an object representing {done: false, value: |value|}.
-v8::Local<v8::Value> v8IteratorResult(v8::Isolate*, v8::Handle<v8::Value>);
-template <typename T>
-v8::Local<v8::Value> v8IteratorResult(ScriptState* scriptState, const T& value)
-{
-    return v8IteratorResult(scriptState->isolate(), V8ValueTraits<T>::toV8Value(value, scriptState->context()->Global(), scriptState->isolate()));
-}
-
-typedef void (*InstallTemplateFunction)(v8::Handle<v8::FunctionTemplate>, v8::Isolate*);
+typedef void (*InstallTemplateFunction)(v8::Local<v8::FunctionTemplate>, v8::Isolate*);
 
 } // namespace blink
 

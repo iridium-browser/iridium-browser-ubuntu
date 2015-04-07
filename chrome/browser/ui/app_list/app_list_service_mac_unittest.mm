@@ -6,9 +6,9 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/display.h"
-#include "ui/gfx/point.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/point.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace {
 
@@ -65,7 +65,7 @@ NSPoint OffsetPoint(const NSPoint& point, CGFloat x_offset, CGFloat y_offset) {
 
 class AppListServiceMacUnitTest : public testing::Test {
  public:
-  virtual void SetUp() override {
+  void SetUp() override {
     display_.set_bounds(gfx::Rect(0, 0, kScreenWidth, kScreenHeight));
     display_.set_work_area(
         gfx::Rect(0, kMenuBarSize, kScreenWidth, kScreenHeight - kMenuBarSize));

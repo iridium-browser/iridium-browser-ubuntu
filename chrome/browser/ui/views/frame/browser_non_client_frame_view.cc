@@ -24,7 +24,7 @@
 #include "ui/gfx/image/image.h"
 #include "ui/views/background.h"
 
-#if defined(ENABLE_MANAGED_USERS)
+#if defined(ENABLE_SUPERVISED_USERS)
 #include "chrome/browser/ui/views/profiles/supervised_user_avatar_label.h"
 #endif
 
@@ -32,12 +32,12 @@ BrowserNonClientFrameView::BrowserNonClientFrameView(BrowserFrame* frame,
                                                      BrowserView* browser_view)
     : frame_(frame),
       browser_view_(browser_view),
-      avatar_button_(NULL),
-#if defined(ENABLE_MANAGED_USERS)
-      supervised_user_avatar_label_(NULL),
+      avatar_button_(nullptr),
+#if defined(ENABLE_SUPERVISED_USERS)
+      supervised_user_avatar_label_(nullptr),
 #endif
-      new_avatar_button_(NULL) {
-  // The profile manager may by NULL in tests.
+      new_avatar_button_(nullptr) {
+  // The profile manager may by null in tests.
   if (g_browser_process->profile_manager()) {
     ProfileInfoCache& cache =
         g_browser_process->profile_manager()->GetProfileInfoCache();
@@ -46,12 +46,19 @@ BrowserNonClientFrameView::BrowserNonClientFrameView(BrowserFrame* frame,
 }
 
 BrowserNonClientFrameView::~BrowserNonClientFrameView() {
-  // The profile manager may by NULL in tests.
+  // The profile manager may by null in tests.
   if (g_browser_process->profile_manager()) {
     ProfileInfoCache& cache =
         g_browser_process->profile_manager()->GetProfileInfoCache();
     cache.RemoveObserver(this);
   }
+}
+
+void BrowserNonClientFrameView::UpdateToolbar() {
+}
+
+views::View* BrowserNonClientFrameView::GetLocationIconView() const {
+  return nullptr;
 }
 
 void BrowserNonClientFrameView::VisibilityChanged(views::View* starting_from,
@@ -73,7 +80,7 @@ void BrowserNonClientFrameView::VisibilityChanged(views::View* starting_from,
     OnProfileAvatarChanged(base::FilePath());
 }
 
-#if defined(ENABLE_MANAGED_USERS)
+#if defined(ENABLE_SUPERVISED_USERS)
 void BrowserNonClientFrameView::OnThemeChanged() {
   if (supervised_user_avatar_label_)
     supervised_user_avatar_label_->UpdateLabelStyle();
@@ -83,7 +90,7 @@ void BrowserNonClientFrameView::OnThemeChanged() {
 void BrowserNonClientFrameView::UpdateAvatarInfo() {
   if (browser_view_->ShouldShowAvatar()) {
     if (!avatar_button_) {
-#if defined(ENABLE_MANAGED_USERS)
+#if defined(ENABLE_SUPERVISED_USERS)
       Profile* profile = browser_view_->browser()->profile();
       if (profile->IsSupervised() && !supervised_user_avatar_label_) {
         supervised_user_avatar_label_ =
@@ -102,17 +109,17 @@ void BrowserNonClientFrameView::UpdateAvatarInfo() {
       frame_->GetRootView()->Layout();
     }
   } else if (avatar_button_) {
-#if defined(ENABLE_MANAGED_USERS)
+#if defined(ENABLE_SUPERVISED_USERS)
     // The avatar label can just be there if there is also an avatar button.
     if (supervised_user_avatar_label_) {
       RemoveChildView(supervised_user_avatar_label_);
       delete supervised_user_avatar_label_;
-      supervised_user_avatar_label_ = NULL;
+      supervised_user_avatar_label_ = nullptr;
     }
 #endif
     RemoveChildView(avatar_button_);
     delete avatar_button_;
-    avatar_button_ = NULL;
+    avatar_button_ = nullptr;
     frame_->GetRootView()->Layout();
   }
 
@@ -154,7 +161,7 @@ void BrowserNonClientFrameView::UpdateNewStyleAvatarInfo(
     }
   } else if (new_avatar_button_) {
     delete new_avatar_button_;
-    new_avatar_button_ = NULL;
+    new_avatar_button_ = nullptr;
     frame_->GetRootView()->Layout();
   }
 }
@@ -182,7 +189,7 @@ void BrowserNonClientFrameView::DrawTaskbarDecoration(
   chrome::DrawTaskbarDecoration(frame_->GetNativeWindow(),
       show_decoration
           ? (taskbar_badge_avatar.IsEmpty() ? &avatar : &taskbar_badge_avatar)
-          : NULL);
+          : nullptr);
 }
 
 void BrowserNonClientFrameView::OnProfileAdded(
@@ -201,9 +208,14 @@ void BrowserNonClientFrameView::OnProfileAvatarChanged(
   gfx::Image avatar;
   gfx::Image taskbar_badge_avatar;
   bool is_rectangle;
-  // Only need to update the taskbar overlay here.
-  AvatarMenuButton::GetAvatarImages(browser_view_->browser()->profile(),
-                                    AvatarMenu::ShouldShowAvatarMenu(), &avatar,
-                                    &taskbar_badge_avatar, &is_rectangle);
-  DrawTaskbarDecoration(avatar, taskbar_badge_avatar);
+  // Only need to update the taskbar overlay here.  If GetAvatarImages()
+  // returns false, don't bother trying to update the taskbar decoration since
+  // the returned images are not initialized.  This can happen if the user
+  // deletes the current profile.
+  if (AvatarMenuButton::GetAvatarImages(browser_view_->browser()->profile(),
+                                        AvatarMenu::ShouldShowAvatarMenu(),
+                                        &avatar, &taskbar_badge_avatar,
+                                        &is_rectangle)) {
+    DrawTaskbarDecoration(avatar, taskbar_badge_avatar);
+  }
 }

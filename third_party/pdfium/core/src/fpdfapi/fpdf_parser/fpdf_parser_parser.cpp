@@ -28,10 +28,6 @@ FX_BOOL IsSignatureDict(const CPDF_Dictionary* pDict)
     }
     return FALSE;
 }
-static FX_INT32 _CompareDWord(const void* p1, const void* p2)
-{
-    return (*(FX_DWORD*)p1) - (*(FX_DWORD*)p2);
-}
 static int _CompareFileSize(const void* p1, const void* p2)
 {
     FX_FILESIZE ret = (*(FX_FILESIZE*)p1) - (*(FX_FILESIZE*)p2);
@@ -1689,11 +1685,7 @@ CPDF_SyntaxParser::CPDF_SyntaxParser()
     m_pFileBuf = NULL;
     m_MetadataObjnum = 0;
     m_dwWordPos = 0;
-#if defined(_FPDFAPI_MINI_)
-    m_bFileStream = TRUE;
-#else
     m_bFileStream = FALSE;
-#endif
 }
 CPDF_SyntaxParser::~CPDF_SyntaxParser()
 {
@@ -2200,13 +2192,11 @@ CPDF_Object* CPDF_SyntaxParser::GetObject(CPDF_IndirectObjects* pObjList, FX_DWO
             if (pObj == NULL) {
                 continue;
             }
-            if (key.GetLength() == 1) {
-                pDict->SetAt(CFX_ByteStringC(((FX_LPCSTR)key) + 1, key.GetLength() - 1), pObj);
-            } else {
+            if (key.GetLength() >= 1) {
                 if (nKeys < 32) {
-                    pDict->SetAt(CFX_ByteStringC(((FX_LPCSTR)key) + 1, key.GetLength() - 1), pObj);
+                    pDict->SetAt(CFX_ByteStringC(key.c_str() + 1, key.GetLength() - 1), pObj);
                 } else {
-                    pDict->AddValue(CFX_ByteStringC(((FX_LPCSTR)key) + 1, key.GetLength() - 1), pObj);
+                    pDict->AddValue(CFX_ByteStringC(key.c_str() + 1, key.GetLength() - 1), pObj);
                 }
             }
         }
@@ -2390,9 +2380,9 @@ CPDF_Object* CPDF_SyntaxParser::GetObjectByStrict(CPDF_IndirectObjects* pObjList
                 return NULL;
             }
             if (key.GetLength() == 1) {
-                pDict->SetAt(CFX_ByteStringC(((FX_LPCSTR)key) + 1, key.GetLength() - 1), pObj);
+                pDict->SetAt(CFX_ByteStringC(key.c_str() + 1, key.GetLength() - 1), pObj);
             } else {
-                pDict->AddValue(CFX_ByteStringC(((FX_LPCSTR)key) + 1, key.GetLength() - 1), pObj);
+                pDict->AddValue(CFX_ByteStringC(key.c_str() + 1, key.GetLength() - 1), pObj);
             }
         }
         if (pContext) {
@@ -2483,10 +2473,6 @@ CPDF_Stream* CPDF_SyntaxParser::ReadStream(CPDF_Dictionary* pDict, PARSE_CONTEXT
         m_Pos = StreamStartPos;
     }
     CPDF_Stream* pStream;
-#if defined(_FPDFAPI_MINI_) && !defined(_FXCORE_FEATURE_ALL_)
-    pStream = FX_NEW CPDF_Stream(m_pFileAccess, pCryptoHandler, m_HeaderOffset + m_Pos, len, pDict, gennum);
-    m_Pos += len;
-#else
     FX_LPBYTE pData = FX_Alloc(FX_BYTE, len);
     if (!pData) {
         return NULL;
@@ -2504,7 +2490,6 @@ CPDF_Stream* CPDF_SyntaxParser::ReadStream(CPDF_Dictionary* pDict, PARSE_CONTEXT
         dest_buf.DetachBuffer();
     }
     pStream = FX_NEW CPDF_Stream(pData, len, pDict);
-#endif
     if (pContext) {
         pContext->m_DataEnd = pContext->m_DataStart + len;
     }
@@ -2543,7 +2528,7 @@ FX_BOOL CPDF_SyntaxParser::IsWholeWord(FX_FILESIZE startpos, FX_FILESIZE limit, 
     FX_BYTE type = _PDF_CharType[tag[0]];
     FX_BOOL bCheckLeft = type != 'D' && type != 'W';
     type = _PDF_CharType[tag[taglen - 1]];
-    FX_BOOL bCheckRight = type != 'D' || type != 'W';
+    FX_BOOL bCheckRight = type != 'D' && type != 'W';
     FX_BYTE ch;
     if (bCheckRight && startpos + (FX_INT32)taglen <= limit && GetCharAt(startpos + (FX_INT32)taglen, ch)) {
         FX_BYTE type = _PDF_CharType[ch];
@@ -3843,6 +3828,9 @@ FX_BOOL CPDF_DataAvail::CheckTrailer(IFX_DownloadHints* pHints)
         CFX_SmartPointer<IFX_FileStream> file(FX_CreateMemoryStream(pBuf, (size_t)iSize, FALSE));
         m_syntaxParser.InitParser((IFX_FileStream*)file, 0);
         CPDF_Object *pTrailer = m_syntaxParser.GetObject(NULL, 0, 0, 0);
+        if (pTrailer->GetType() != PDFOBJ_DICTIONARY) {
+            return FALSE;
+        }
         if (!pTrailer) {
             m_Pos += m_syntaxParser.SavePos();
             pHints->AddSegment(m_Pos, iTrailerSize);

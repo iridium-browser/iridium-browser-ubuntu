@@ -30,22 +30,19 @@
 #include "content/browser/accessibility/browser_accessibility_manager_mac.h"
 #import "content/browser/cocoa/system_hotkey_helper_mac.h"
 #import "content/browser/cocoa/system_hotkey_map.h"
-#include "content/browser/compositor/io_surface_layer_mac.h"
 #include "content/browser/compositor/resize_lock.h"
-#include "content/browser/compositor/software_layer_mac.h"
 #include "content/browser/frame_host/frame_tree.h"
 #include "content/browser/frame_host/frame_tree_node.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/browser/gpu/compositor_util.h"
-#include "content/browser/renderer_host/render_widget_helper.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
+#include "content/browser/renderer_host/render_widget_helper.h"
 #import "content/browser/renderer_host/render_widget_host_view_mac_dictionary_helper.h"
 #import "content/browser/renderer_host/render_widget_host_view_mac_editcommand_helper.h"
 #import "content/browser/renderer_host/text_input_client_mac.h"
 #include "content/common/accessibility_messages.h"
 #include "content/common/edit_command.h"
 #include "content/common/gpu/gpu_messages.h"
-#include "content/common/gpu/surface_handle_types_mac.h"
 #include "content/common/input_messages.h"
 #include "content/common/view_messages.h"
 #include "content/common/webplugin_geometry.h"
@@ -63,20 +60,23 @@
 #include "third_party/WebKit/public/web/WebInputEvent.h"
 #include "third_party/WebKit/public/web/mac/WebInputEventFactory.h"
 #import "third_party/mozilla/ComplexTextInputPanel.h"
+#include "ui/accelerated_widget_mac/io_surface_layer.h"
+#include "ui/accelerated_widget_mac/surface_handle_types.h"
 #include "ui/base/cocoa/animation_utils.h"
 #import "ui/base/cocoa/fullscreen_window_manager.h"
 #import "ui/base/cocoa/underlay_opengl_hosting_window.h"
-#include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/base/layout.h"
 #include "ui/compositor/compositor.h"
 #include "ui/compositor/layer.h"
+#include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/display.h"
 #include "ui/gfx/frame_time.h"
-#include "ui/gfx/point.h"
-#include "ui/gfx/rect_conversions.h"
+#include "ui/gfx/geometry/dip_util.h"
+#include "ui/gfx/geometry/point.h"
+#include "ui/gfx/geometry/rect_conversions.h"
+#include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
 #include "ui/gfx/screen.h"
-#include "ui/gfx/size_conversions.h"
 #include "ui/gl/gl_switches.h"
 
 using content::BrowserAccessibility;
@@ -395,10 +395,10 @@ namespace content {
 // DelegatedFrameHost, public:
 
 ui::Compositor* RenderWidgetHostViewMac::GetCompositor() const {
-  // When |browser_compositor_view_| is suspended or destroyed, the connection
+  // When |browser_compositor_| is suspended or destroyed, the connection
   // between its ui::Compositor and |delegated_frame_host_| has been severed.
   if (browser_compositor_state_ == BrowserCompositorActive)
-    return browser_compositor_view_->GetCompositor();
+    return browser_compositor_->compositor();
   return NULL;
 }
 
@@ -440,9 +440,13 @@ DelegatedFrameHost* RenderWidgetHostViewMac::GetDelegatedFrameHost() const {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// BrowserCompositorViewMacClient, public:
+// AcceleratedWidgetMacNSView, public:
 
-bool RenderWidgetHostViewMac::BrowserCompositorViewShouldAckImmediately()
+NSView* RenderWidgetHostViewMac::AcceleratedWidgetGetNSView() const {
+  return cocoa_view_;
+}
+
+bool RenderWidgetHostViewMac::AcceleratedWidgetShouldIgnoreBackpressure()
     const {
   // If vsync is disabled, then always draw and ack frames immediately.
   static bool is_vsync_disabled =
@@ -484,7 +488,7 @@ bool RenderWidgetHostViewMac::BrowserCompositorViewShouldAckImmediately()
   return false;
 }
 
-void RenderWidgetHostViewMac::BrowserCompositorViewFrameSwapped(
+void RenderWidgetHostViewMac::AcceleratedWidgetSwapCompleted(
     const std::vector<ui::LatencyInfo>& all_latency_info) {
   if (!render_widget_host_)
     return;
@@ -493,6 +497,11 @@ void RenderWidgetHostViewMac::BrowserCompositorViewFrameSwapped(
         ui::INPUT_EVENT_LATENCY_TERMINATED_FRAME_SWAP_COMPONENT, 0, 0);
     render_widget_host_->FrameSwapped(latency_info);
   }
+}
+
+void RenderWidgetHostViewMac::AcceleratedWidgetHitError() {
+  // Request a new frame be drawn.
+  browser_compositor_->compositor()->ScheduleFullRedraw();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -513,13 +522,12 @@ RenderWidgetHostViewMac::RenderWidgetHostViewMac(RenderWidgetHost* widget,
       text_input_type_(ui::TEXT_INPUT_TYPE_NONE),
       can_compose_inline_(true),
       browser_compositor_state_(BrowserCompositorDestroyed),
-      browser_compositor_view_placeholder_(
-          new BrowserCompositorViewPlaceholderMac),
+      browser_compositor_placeholder_(new BrowserCompositorMacPlaceholder),
       is_loading_(false),
       allow_pause_for_resize_or_repaint_(true),
       is_guest_view_hack_(is_guest_view_hack),
-      weak_factory_(this),
-      fullscreen_parent_host_view_(NULL) {
+      fullscreen_parent_host_view_(NULL),
+      weak_factory_(this) {
   // |cocoa_view_| owns us and we will be deleted when |cocoa_view_|
   // goes away.  Since we autorelease it, our caller must put
   // |GetNativeView()| into the view hierarchy right after calling us.
@@ -529,8 +537,9 @@ RenderWidgetHostViewMac::RenderWidgetHostViewMac(RenderWidgetHost* widget,
   // Paint this view host with |background_color_| when there is no content
   // ready to draw.
   background_layer_.reset([[CALayer alloc] init]);
-  [background_layer_
-      setBackgroundColor:gfx::CGColorCreateFromSkColor(background_color_)];
+  base::ScopedCFTypeRef<CGColorRef> background(
+      gfx::CGColorCreateFromSkColor(background_color_));
+  [background_layer_ setBackgroundColor:background];
   [cocoa_view_ setLayer:background_layer_];
   [cocoa_view_ setWantsLayer:YES];
 
@@ -587,8 +596,10 @@ void RenderWidgetHostViewMac::EnsureBrowserCompositorView() {
 
   // Create the view, to transition from Destroyed -> Suspended.
   if (browser_compositor_state_ == BrowserCompositorDestroyed) {
-    browser_compositor_view_.reset(
-        new BrowserCompositorViewMac(this, cocoa_view_, root_layer_.get()));
+    browser_compositor_ = BrowserCompositorMac::Create();
+    browser_compositor_->compositor()->SetRootLayer(
+        root_layer_.get());
+    browser_compositor_->accelerated_widget_mac()->SetNSView(this);
     browser_compositor_state_ = BrowserCompositorSuspended;
   }
 
@@ -623,7 +634,10 @@ void RenderWidgetHostViewMac::DestroyBrowserCompositorView() {
 
   // Destroy the BrowserCompositorView to transition Suspended -> Destroyed.
   if (browser_compositor_state_ == BrowserCompositorSuspended) {
-    browser_compositor_view_.reset();
+    browser_compositor_->accelerated_widget_mac()->ResetNSView();
+    browser_compositor_->compositor()->SetScaleAndSize(1.0, gfx::Size(0, 0));
+    browser_compositor_->compositor()->SetRootLayer(NULL);
+    BrowserCompositorMac::Recycle(browser_compositor_.Pass());
     browser_compositor_state_ = BrowserCompositorDestroyed;
   }
 }
@@ -1183,7 +1197,7 @@ bool RenderWidgetHostViewMac::IsPopup() const {
 void RenderWidgetHostViewMac::CopyFromCompositingSurface(
     const gfx::Rect& src_subrect,
     const gfx::Size& dst_size,
-    const base::Callback<void(bool, const SkBitmap&)>& callback,
+    ReadbackRequestCallback& callback,
     const SkColorType color_type) {
   if (delegated_frame_host_) {
     delegated_frame_host_->CopyFromCompositingSurface(
@@ -1399,8 +1413,10 @@ bool RenderWidgetHostViewMac::GetCachedFirstRectForCharacterRange(
 
 bool RenderWidgetHostViewMac::HasAcceleratedSurface(
       const gfx::Size& desired_size) {
-  if (browser_compositor_view_)
-    return browser_compositor_view_->HasFrameOfSize(desired_size);
+  if (browser_compositor_) {
+    return browser_compositor_->accelerated_widget_mac()->HasFrameOfSize(
+        desired_size);
+  }
   return false;
 }
 
@@ -1416,13 +1432,12 @@ void RenderWidgetHostViewMac::OnSwapCompositorFrame(
     cc::RenderPass* root_pass =
         frame->delegated_frame_data->render_pass_list.back();
     gfx::Size pixel_size = root_pass->output_rect.size();
-    gfx::Size dip_size =
-        ConvertSizeToDIP(scale_factor, pixel_size);
+    gfx::Size dip_size = gfx::ConvertSizeToDIP(scale_factor, pixel_size);
 
     root_layer_->SetBounds(gfx::Rect(dip_size));
     if (!render_widget_host_->is_hidden()) {
       EnsureBrowserCompositorView();
-      browser_compositor_view_->GetCompositor()->SetScaleAndSize(
+      browser_compositor_->compositor()->SetScaleAndSize(
           scale_factor, pixel_size);
     }
 
@@ -1519,7 +1534,7 @@ void RenderWidgetHostViewMac::ShutdownBrowserCompositor() {
   DestroyBrowserCompositorView();
   delegated_frame_host_.reset();
   root_layer_.reset();
-  browser_compositor_view_placeholder_.reset();
+  browser_compositor_placeholder_.reset();
 }
 
 void RenderWidgetHostViewMac::SetActive(bool active) {
@@ -1645,11 +1660,11 @@ void RenderWidgetHostViewMac::PauseForPendingResizeOrRepaintsAndDraw() {
     return;
 
   // Wait for a frame of the right size to come in.
-  if (browser_compositor_view_)
-    browser_compositor_view_->BeginPumpingFrames();
+  if (browser_compositor_)
+    browser_compositor_->accelerated_widget_mac()->BeginPumpingFrames();
   render_widget_host_->PauseForPendingResizeOrRepaints();
-  if (browser_compositor_view_)
-    browser_compositor_view_->EndPumpingFrames();
+  if (browser_compositor_)
+    browser_compositor_->accelerated_widget_mac()->EndPumpingFrames();
 }
 
 SkColorType RenderWidgetHostViewMac::PreferredReadbackFormat() {
@@ -1995,6 +2010,15 @@ void RenderWidgetHostViewMac::OnDisplayMetricsChanged(
     return;
   }
 
+  // Do not forward key up events unless preceded by a matching key down,
+  // otherwise we might get an event from releasing the return key in the
+  // omnibox (http://crbug.com/338736).
+  if ([theEvent type] == NSKeyUp) {
+    auto numErased = keyDownCodes_.erase([theEvent keyCode]);
+    if (numErased < 1)
+      return;
+  }
+
   // We only handle key down events and just simply forward other events.
   if ([theEvent type] != NSKeyDown) {
     widgetHost->ForwardKeyboardEvent(event);
@@ -2005,6 +2029,8 @@ void RenderWidgetHostViewMac::OnDisplayMetricsChanged(
 
     return;
   }
+
+  keyDownCodes_.insert([theEvent keyCode]);
 
   base::scoped_nsobject<RenderWidgetHostViewCocoa> keepSelfAlive([self retain]);
 

@@ -36,11 +36,11 @@
 #include "ui/base/ime/text_input_mode.h"
 #include "ui/base/ime/text_input_type.h"
 #include "ui/base/ui_base_types.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/vector2d.h"
+#include "ui/gfx/geometry/vector2d_f.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/range/range.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/vector2d.h"
-#include "ui/gfx/vector2d_f.h"
 #include "ui/surface/transport_dib.h"
 
 struct ViewHostMsg_UpdateRect_Params;
@@ -57,10 +57,13 @@ struct WebDeviceEmulationParams;
 class WebGestureEvent;
 class WebKeyboardEvent;
 class WebMouseEvent;
+class WebNode;
+struct WebPoint;
 class WebTouchEvent;
 }
 
 namespace cc {
+struct InputHandlerScrollResult;
 class OutputSurface;
 class SwapPromise;
 }
@@ -70,6 +73,7 @@ class Range;
 }
 
 namespace content {
+class CompositorDependencies;
 class ExternalPopupMenu;
 class FrameSwapMessageQueue;
 class PepperPluginInstanceImpl;
@@ -92,6 +96,7 @@ class CONTENT_EXPORT RenderWidget
   // Creates a new RenderWidget.  The opener_id is the routing ID of the
   // RenderView that this widget lives inside.
   static RenderWidget* Create(int32 opener_id,
+                              CompositorDependencies* compositor_deps,
                               blink::WebPopupType popup_type,
                               const blink::WebScreenInfo& screen_info);
 
@@ -100,6 +105,7 @@ class CONTENT_EXPORT RenderWidget
 
   int32 routing_id() const { return routing_id_; }
   int32 surface_id() const { return surface_id_; }
+  CompositorDependencies* compositor_deps() const { return compositor_deps_; }
   blink::WebWidget* webwidget() const { return webwidget_; }
   gfx::Size size() const { return size_; }
   bool has_focus() const { return has_focus_; }
@@ -166,6 +172,15 @@ class CONTENT_EXPORT RenderWidget
   virtual void didHandleGestureEvent(const blink::WebGestureEvent& event,
                                      bool event_cancelled);
   virtual void showImeIfNeeded();
+
+#if defined(OS_ANDROID)
+  // Notifies that a tap was not consumed, so showing a UI for the unhandled
+  // tap may be needed.
+  virtual void showUnhandledTapUIIfNeeded(
+      const blink::WebPoint& tapped_position,
+      const blink::WebNode& tapped_node,
+      bool page_changed) override;
+#endif
 
   // Begins the compositor's scheduler to start producing frames.
   void StartCompositor();
@@ -291,16 +306,15 @@ class CONTENT_EXPORT RenderWidget
   void UpdateTextInputState(ShowIme show_ime, ChangeSource change_source);
 #endif
 
-#if defined(OS_MACOSX) || defined(USE_AURA) || defined(OS_ANDROID)
   // Checks if the composition range or composition character bounds have been
   // changed. If they are changed, the new value will be sent to the browser
   // process. This method does nothing when the browser process is not able to
   // handle composition range and composition character bounds.
   void UpdateCompositionInfo(bool should_update_range);
-#endif
 
 #if defined(OS_ANDROID)
   void DidChangeBodyBackgroundColor(SkColor bg_color);
+  bool DoesRecordFullLayer() const;
 #endif
 
   bool host_closing() const { return host_closing_; }
@@ -327,10 +341,11 @@ class CONTENT_EXPORT RenderWidget
 
   // Initializes this view with the given opener.  CompleteInit must be called
   // later.
-  bool Init(int32 opener_id);
+  bool Init(int32 opener_id, CompositorDependencies* compositor_deps);
 
   // Called by Init and subclasses to perform initialization.
   bool DoInit(int32 opener_id,
+              CompositorDependencies* compositor_deps,
               blink::WebWidget* web_widget,
               IPC::SyncMessage* create_widget_message);
 
@@ -354,7 +369,8 @@ class CONTENT_EXPORT RenderWidget
   // Resizes the render widget.
   void Resize(const gfx::Size& new_size,
               const gfx::Size& physical_backing_size,
-              float top_controls_layout_height,
+              bool top_controls_shrink_blink_size,
+              float top_controls_height,
               const gfx::Size& visible_viewport_size,
               const gfx::Rect& resizer_rect,
               bool is_fullscreen,
@@ -475,7 +491,6 @@ class CONTENT_EXPORT RenderWidget
   virtual ui::TextInputType WebKitToUiTextInputType(
       blink::WebTextInputType type);
 
-#if defined(OS_MACOSX) || defined(USE_AURA) || defined(OS_ANDROID)
   // Override point to obtain that the current composition character bounds.
   // In the case of surrogate pairs, the character is treated as two characters:
   // the bounds for first character is actual one, and the bounds for second
@@ -492,7 +507,6 @@ class CONTENT_EXPORT RenderWidget
   bool ShouldUpdateCompositionInfo(
       const gfx::Range& range,
       const std::vector<gfx::Rect>& bounds);
-#endif
 
   // Override point to obtain that the current input method state about
   // composition text.
@@ -534,6 +548,11 @@ class CONTENT_EXPORT RenderWidget
   // just handled.
   virtual void DidHandleTouchEvent(const blink::WebTouchEvent& event) {}
 
+  // Called by OnHandleInputEvent() to forward a mouse wheel event to the
+  // compositor thread, to effect the elastic overscroll effect.
+  void ObserveWheelEventAndResult(const blink::WebMouseWheelEvent& wheel_event,
+                                  bool event_processed);
+
   // Check whether the WebWidget has any touch event handlers registered
   // at the given point.
   virtual bool HasTouchEventHandlersAt(const gfx::Point& point) const;
@@ -556,6 +575,10 @@ class CONTENT_EXPORT RenderWidget
   int32 routing_id_;
 
   int32 surface_id_;
+
+  // Dependencies for initializing a compositor, including flags for optional
+  // features.
+  CompositorDependencies* compositor_deps_;
 
   // We are responsible for destroying this object via its Close method.
   // May be NULL when the window is closing.
@@ -588,9 +611,13 @@ class CONTENT_EXPORT RenderWidget
   // The size of the view's backing surface in non-DPI-adjusted pixels.
   gfx::Size physical_backing_size_;
 
-  // The amount that the viewport size given to Blink was shrunk by the URL-bar
-  // (always 0 on platforms where URL-bar hiding isn't supported).
-  float top_controls_layout_height_;
+  // Whether or not Blink's viewport size should be shrunk by the height of the
+  // URL-bar (always false on platforms where URL-bar hiding isn't supported).
+  bool top_controls_shrink_blink_size_;
+
+  // The height of the top controls (always 0 on platforms where URL-bar hiding
+  // isn't supported).
+  float top_controls_height_;
 
   // The size of the visible viewport in DPI-adjusted pixels.
   gfx::Size visible_viewport_size_;

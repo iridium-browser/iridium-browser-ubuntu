@@ -9,6 +9,7 @@
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/task_runner.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
@@ -62,20 +63,23 @@ FileStream::Context::~Context() {
 int FileStream::Context::Read(IOBuffer* buf,
                               int buf_len,
                               const CompletionCallback& callback) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/423948 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION("423948 FileStream::Context::Read"));
+
   DCHECK(!async_in_progress_);
 
   DWORD bytes_read;
   if (!ReadFile(file_.GetPlatformFile(), buf->data(), buf_len,
                 &bytes_read, &io_context_.overlapped)) {
     IOResult error = IOResult::FromOSError(GetLastError());
-    if (error.os_error == ERROR_IO_PENDING) {
-      IOCompletionIsPending(callback, buf);
-    } else if (error.os_error == ERROR_HANDLE_EOF) {
+    if (error.os_error == ERROR_HANDLE_EOF)
       return 0;  // Report EOF by returning 0 bytes read.
-    } else {
+    if (error.os_error == ERROR_IO_PENDING)
+      IOCompletionIsPending(callback, buf);
+    else
       LOG(WARNING) << "ReadFile failed: " << error.os_error;
-    }
-    return error.result;
+    return static_cast<int>(error.result);
   }
 
   IOCompletionIsPending(callback, buf);
@@ -89,12 +93,11 @@ int FileStream::Context::Write(IOBuffer* buf,
   if (!WriteFile(file_.GetPlatformFile(), buf->data(), buf_len,
                  &bytes_written, &io_context_.overlapped)) {
     IOResult error = IOResult::FromOSError(GetLastError());
-    if (error.os_error == ERROR_IO_PENDING) {
+    if (error.os_error == ERROR_IO_PENDING)
       IOCompletionIsPending(callback, buf);
-    } else {
+    else
       LOG(WARNING) << "WriteFile failed: " << error.os_error;
-    }
-    return error.result;
+    return static_cast<int>(error.result);
   }
 
   IOCompletionIsPending(callback, buf);
@@ -149,7 +152,7 @@ void FileStream::Context::OnIOCompleted(
     result = 0;
   } else if (error) {
     IOResult error_result = IOResult::FromOSError(error);
-    result = error_result.result;
+    result = static_cast<int>(error_result.result);
   } else {
     result = bytes_read;
     IncrementOffset(&io_context_.overlapped, bytes_read);

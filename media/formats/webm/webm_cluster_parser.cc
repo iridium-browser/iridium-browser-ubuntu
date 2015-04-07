@@ -37,7 +37,7 @@ WebMClusterParser::WebMClusterParser(
       block_data_size_(-1),
       block_duration_(-1),
       block_add_id_(-1),
-      block_additional_data_size_(-1),
+      block_additional_data_size_(0),
       discard_padding_(-1),
       cluster_timecode_(-1),
       cluster_start_time_(kNoTimestamp()),
@@ -153,7 +153,7 @@ WebMParserClient* WebMClusterParser::OnListStart(int id) {
   } else if (id == kWebMIdBlockAdditions) {
     block_add_id_ = -1;
     block_additional_data_.reset();
-    block_additional_data_size_ = -1;
+    block_additional_data_size_ = 0;
   }
 
   return this;
@@ -178,7 +178,7 @@ bool WebMClusterParser::OnListEnd(int id) {
   block_duration_ = -1;
   block_add_id_ = -1;
   block_additional_data_.reset();
-  block_additional_data_size_ = -1;
+  block_additional_data_size_ = 0;
   discard_padding_ = -1;
   discard_padding_set_ = false;
   return result;
@@ -243,7 +243,7 @@ bool WebMClusterParser::ParseBlock(bool is_simple_block, const uint8* buf,
 bool WebMClusterParser::OnBinary(int id, const uint8* data, int size) {
   switch (id) {
     case kWebMIdSimpleBlock:
-      return ParseBlock(true, data, size, NULL, -1, -1, 0);
+      return ParseBlock(true, data, size, NULL, 0, -1, 0);
 
     case kWebMIdBlock:
       if (block_data_) {
@@ -486,7 +486,7 @@ bool WebMClusterParser::Track::AddBuffer(
   DVLOG(2) << "AddBuffer() : " << track_num_
            << " ts " << buffer->timestamp().InSecondsF()
            << " dur " << buffer->duration().InSecondsF()
-           << " kf " << buffer->IsKeyframe()
+           << " kf " << buffer->is_key_frame()
            << " size " << buffer->data_size();
 
   if (last_added_buffer_missing_duration_.get()) {
@@ -499,7 +499,7 @@ bool WebMClusterParser::Track::AddBuffer(
              << last_added_buffer_missing_duration_->timestamp().InSecondsF()
              << " dur "
              << last_added_buffer_missing_duration_->duration().InSecondsF()
-             << " kf " << last_added_buffer_missing_duration_->IsKeyframe()
+             << " kf " << last_added_buffer_missing_duration_->is_key_frame()
              << " size " << last_added_buffer_missing_duration_->data_size();
     scoped_refptr<StreamParserBuffer> updated_buffer =
         last_added_buffer_missing_duration_;
@@ -528,7 +528,7 @@ void WebMClusterParser::Track::ApplyDurationEstimateIfNeeded() {
            << last_added_buffer_missing_duration_->timestamp().InSecondsF()
            << " dur "
            << last_added_buffer_missing_duration_->duration().InSecondsF()
-           << " kf " << last_added_buffer_missing_duration_->IsKeyframe()
+           << " kf " << last_added_buffer_missing_duration_->is_key_frame()
            << " size " << last_added_buffer_missing_duration_->data_size();
 
   // Don't use the applied duration as a future estimation (don't use

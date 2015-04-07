@@ -22,8 +22,6 @@ source_set("audio_coding") {
     "main/acm2/acm_amr.h",
     "main/acm2/acm_amrwb.cc",
     "main/acm2/acm_amrwb.h",
-    "main/acm2/acm_celt.cc",
-    "main/acm2/acm_celt.h",
     "main/acm2/acm_cng.cc",
     "main/acm2/acm_cng.h",
     "main/acm2/acm_codec_database.cc",
@@ -94,6 +92,13 @@ source_set("audio_coding") {
     configs -= [ "//build/config/clang:find_bad_constructs" ]
   }
 
+  if (is_win) {
+    cflags = [
+      # TODO(kjellander): Bug 261: fix this warning.
+      "/wd4373",  # virtual function override.
+    ]
+  }
+
   deps = [
     ":cng",
     ":g711",
@@ -103,6 +108,7 @@ source_set("audio_coding") {
     ":isacfix",
     ":neteq",
     ":pcm16b",
+    ":red",
     "../../common_audio",
     "../../system_wrappers",
   ]
@@ -111,6 +117,24 @@ source_set("audio_coding") {
     defines += [ "WEBRTC_CODEC_OPUS" ]
     deps += [ ":webrtc_opus" ]
   }
+}
+
+source_set("audio_decoder_interface") {
+  sources = [
+    "codecs/audio_decoder.cc",
+    "codecs/audio_decoder.h",
+  ]
+  configs += [ "../..:common_config" ]
+  public_configs = [ "../..:common_inherited_config" ]
+}
+
+source_set("audio_encoder_interface") {
+  sources = [
+    "codecs/audio_encoder.cc",
+    "codecs/audio_encoder.h",
+  ]
+  configs += [ "../..:common_config" ]
+  public_configs = [ "../..:common_inherited_config" ]
 }
 
 config("cng_config") {
@@ -122,8 +146,10 @@ config("cng_config") {
 
 source_set("cng") {
   sources = [
+    "codecs/cng/audio_encoder_cng.cc",
     "codecs/cng/cng_helpfuns.c",
     "codecs/cng/cng_helpfuns.h",
+    "codecs/cng/include/audio_encoder_cng.h",
     "codecs/cng/include/webrtc_cng.h",
     "codecs/cng/webrtc_cng.c",
   ]
@@ -135,7 +161,35 @@ source_set("cng") {
     ":cng_config",
   ]
 
-  deps = [ "../../common_audio" ]
+  deps = [
+    "../../common_audio",
+    ":audio_encoder_interface",
+  ]
+}
+
+config("red_config") {
+  include_dirs = [
+    "codecs/red",
+  ]
+}
+
+source_set("red") {
+  sources = [
+    "codecs/red/audio_encoder_copy_red.cc",
+    "codecs/red/audio_encoder_copy_red.h",
+  ]
+
+  configs += [ "../..:common_config" ]
+
+  public_configs = [
+    "../..:common_inherited_config",
+    ":red_config",
+  ]
+
+  deps = [
+    "../../common_audio",
+    ":audio_encoder_interface",
+  ]
 }
 
 config("g711_config") {
@@ -161,6 +215,8 @@ source_set("g711") {
     "../..:common_inherited_config",
     ":g711_config",
   ]
+
+  deps = [ ":audio_encoder_interface" ]
 }
 
 config("g722_config") {
@@ -172,6 +228,8 @@ config("g722_config") {
 
 source_set("g722") {
   sources = [
+    "codecs/g722/audio_encoder_g722.cc",
+    "codecs/g722/include/audio_encoder_g722.h",
     "codecs/g722/include/g722_interface.h",
     "codecs/g722/g722_interface.c",
     "codecs/g722/g722_encode.c",
@@ -185,6 +243,8 @@ source_set("g722") {
     "../..:common_inherited_config",
     ":g722_config",
   ]
+
+  deps = [ ":audio_encoder_interface" ]
 }
 
 config("ilbc_config") {
@@ -196,6 +256,8 @@ config("ilbc_config") {
 
 source_set("ilbc") {
   sources = [
+    "codecs/ilbc/audio_encoder_ilbc.cc",
+    "codecs/ilbc/include/audio_encoder_ilbc.h",
     "codecs/ilbc/abs_quant.c",
     "codecs/ilbc/abs_quant.h",
     "codecs/ilbc/abs_quant_loop.c",
@@ -344,7 +406,10 @@ source_set("ilbc") {
     ":ilbc_config",
   ]
 
-  deps = [ "../../common_audio" ]
+  deps = [
+    "../../common_audio",
+    ":audio_encoder_interface",
+  ]
 }
 
 config("isac_config") {
@@ -356,11 +421,15 @@ config("isac_config") {
 
 source_set("isac") {
   sources = [
+    "codecs/isac/audio_encoder_isac_t.h",
+    "codecs/isac/audio_encoder_isac_t_impl.h",
+    "codecs/isac/main/interface/audio_encoder_isac.h",
     "codecs/isac/main/interface/isac.h",
     "codecs/isac/main/source/arith_routines.c",
     "codecs/isac/main/source/arith_routines.h",
     "codecs/isac/main/source/arith_routines_hist.c",
     "codecs/isac/main/source/arith_routines_logist.c",
+    "codecs/isac/main/source/audio_encoder_isac.cc",
     "codecs/isac/main/source/bandwidth_estimator.c",
     "codecs/isac/main/source/bandwidth_estimator.h",
     "codecs/isac/main/source/codec.h",
@@ -407,6 +476,12 @@ source_set("isac") {
     "codecs/isac/main/source/transform.c",
   ]
 
+  if (is_clang) {
+    # Suppress warnings from Chrome's Clang plugins.
+    # See http://code.google.com/p/webrtc/issues/detail?id=163 for details.
+    configs -= [ "//build/config/clang:find_bad_constructs" ]
+  }
+
   if (is_linux) {
     libs = [ "m" ]
   }
@@ -418,7 +493,11 @@ source_set("isac") {
     ":isac_config",
   ]
 
-  deps = [ "../../common_audio" ]
+  deps = [
+    ":audio_decoder_interface",
+    ":audio_encoder_interface",
+    "../../common_audio",
+  ]
 }
 
 config("isac_fix_config") {
@@ -430,11 +509,15 @@ config("isac_fix_config") {
 
 source_set("isacfix") {
   sources = [
+    "codecs/isac/audio_encoder_isac_t.h",
+    "codecs/isac/audio_encoder_isac_t_impl.h",
+    "codecs/isac/fix/interface/audio_encoder_isacfix.h",
     "codecs/isac/fix/interface/isacfix.h",
     "codecs/isac/fix/source/arith_routines.c",
     "codecs/isac/fix/source/arith_routines_hist.c",
     "codecs/isac/fix/source/arith_routines_logist.c",
     "codecs/isac/fix/source/arith_routins.h",
+    "codecs/isac/fix/source/audio_encoder_isacfix.cc",
     "codecs/isac/fix/source/bandwidth_estimator.c",
     "codecs/isac/fix/source/bandwidth_estimator.h",
     "codecs/isac/fix/source/codec.h",
@@ -472,6 +555,12 @@ source_set("isacfix") {
     "codecs/isac/fix/source/transform_tables.c",
   ]
 
+  if (is_clang) {
+    # Suppress warnings from Chrome's Clang plugins.
+    # See http://code.google.com/p/webrtc/issues/detail?id=163 for details.
+    configs -= [ "//build/config/clang:find_bad_constructs" ]
+  }
+
   if (!is_win) {
     defines = [ "WEBRTC_LINUX" ]
   }
@@ -484,6 +573,7 @@ source_set("isacfix") {
   ]
 
   deps = [
+    ":audio_encoder_interface",
     "../../common_audio",
     "../../system_wrappers",
   ]
@@ -499,7 +589,6 @@ source_set("isacfix") {
     # Remove the -mfpu=vfpv3-d16 cflag.
     configs -= [ "//build/config/compiler:compiler_arm_fpu" ]
     cflags = [
-      "-flax-vector-conversions",
       "-mfpu=neon",
     ]
 
@@ -570,7 +659,6 @@ if (rtc_build_armv7_neon) {
     # Remove the -mfpu=vfpv3-d16 cflag.
     configs -= [ "//build/config/compiler:compiler_arm_fpu" ]
     cflags = [
-      "-flax-vector-conversions",
       "-mfpu=neon",
     ]
 
@@ -590,8 +678,15 @@ config("pcm16b_config") {
 
 source_set("pcm16b") {
   sources = [
+    "codecs/pcm16b/include/audio_encoder_pcm16b.h",
     "codecs/pcm16b/include/pcm16b.h",
+    "codecs/pcm16b/audio_encoder_pcm16b.cc",
     "codecs/pcm16b/pcm16b.c",
+  ]
+
+  deps = [
+    ":audio_encoder_interface",
+    ":g711",
   ]
 
   configs += [ "../..:common_config" ]
@@ -614,13 +709,16 @@ source_set("webrtc_opus") {
     "codecs/opus/opus_inst.h",
     "codecs/opus/opus_interface.c",
   ]
+
+  deps = [ ":audio_encoder_interface" ]
+
   if (build_with_mozilla) {
     include_dirs = [ getenv("DIST") + "/include/opus" ]
   } else {
     configs += [ "../..:common_config" ]
     public_configs = [ "../..:common_inherited_config" ]
 
-    deps = [ "//third_party/opus" ]
+    deps += [ "//third_party/opus" ]
   }
 }
 
@@ -634,7 +732,6 @@ config("neteq_config") {
 
 source_set("neteq") {
   sources = [
-    "neteq/interface/audio_decoder.h",
     "neteq/interface/neteq.h",
     "neteq/accelerate.cc",
     "neteq/accelerate.h",
@@ -642,7 +739,6 @@ source_set("neteq") {
     "neteq/audio_classifier.h",
     "neteq/audio_decoder_impl.cc",
     "neteq/audio_decoder_impl.h",
-    "neteq/audio_decoder.cc",
     "neteq/audio_multi_vector.cc",
     "neteq/audio_multi_vector.h",
     "neteq/audio_vector.cc",
@@ -719,6 +815,7 @@ source_set("neteq") {
   }
 
   deps = [
+    ":audio_decoder_interface",
     ":cng",
     ":g711",
     ":g722",

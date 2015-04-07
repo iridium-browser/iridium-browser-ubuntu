@@ -71,7 +71,7 @@ class DataReductionProxyUsageStats
   // Records all the data reduction proxy bytes-related histograms for the
   // completed URLRequest |request|.
   void RecordBytesHistograms(
-      net::URLRequest* request,
+      const net::URLRequest& request,
       const BooleanPrefMember& data_reduction_proxy_enabled,
       const net::ProxyConfig& data_reduction_proxy_config);
 
@@ -94,7 +94,7 @@ class DataReductionProxyUsageStats
     NOT_BYPASSED = 0,         /* Not bypassed. */
     SSL,                      /* Bypass due to SSL. */
     LOCAL_BYPASS_RULES,       /* Bypass due to client-side bypass rules. */
-    MANAGED_PROXY_CONFIG,     /* Bypass due to managed config. */
+    PROXY_OVERRIDDEN,         /* Bypass due to a proxy taking precedence. */
     AUDIO_VIDEO,              /* Audio/Video bypass. */
     TRIGGERING_REQUEST,       /* Triggering request bypass. */
     NETWORK_ERROR,            /* Network error. */
@@ -106,14 +106,14 @@ class DataReductionProxyUsageStats
   // |request| into UMAs based on bypass type. |data_reduction_proxy_enabled|
   // tells us the state of the kDataReductionProxyEnabled preference.
   void RecordBypassedBytesHistograms(
-      net::URLRequest* request,
+      const net::URLRequest& request,
       const BooleanPrefMember& data_reduction_proxy_enabled,
       const net::ProxyConfig& data_reduction_proxy_config);
 
   // Records UMA of the number of response bytes of responses that are expected
   // to have the data reduction proxy via header, but where the data reduction
   // proxy via header is not present.
-  void RecordMissingViaHeaderBytes(net::URLRequest* request);
+  void RecordMissingViaHeaderBytes(const net::URLRequest& request);
 
   // NetworkChangeNotifier::NetworkChangeObserver:
   void OnNetworkChanged(

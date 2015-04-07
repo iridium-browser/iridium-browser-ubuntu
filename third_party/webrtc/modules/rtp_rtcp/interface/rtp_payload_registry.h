@@ -77,13 +77,15 @@ class RTPPayloadRegistry {
 
   void SetRtxSsrc(uint32_t ssrc);
 
+  bool GetRtxSsrc(uint32_t* ssrc) const;
+
   void SetRtxPayloadType(int payload_type);
 
   bool IsRtx(const RTPHeader& header) const;
 
   bool RestoreOriginalPacket(uint8_t** restored_packet,
                              const uint8_t* packet,
-                             int* packet_length,
+                             size_t* packet_length,
                              uint32_t original_ssrc,
                              const RTPHeader& header) const;
 

@@ -19,7 +19,7 @@
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/common/pref_names.h"
-#include "components/omaha_query_params/omaha_query_params.h"
+#include "components/update_client/update_query_params.h"
 #include "content/public/browser/web_ui.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
@@ -191,18 +191,17 @@ void StartPageHandler::HandleInitialize(const base::ListValue* args) {
           base::Version(kOldHotwordExtensionVersionString)) <= 0) {
     web_ui()->CallJavascriptFunction(
         "appList.startPage.setNaclArch",
-        base::StringValue(omaha_query_params::OmahaQueryParams::GetNaclArch()));
+        base::StringValue(update_client::UpdateQueryParams::GetNaclArch()));
   }
 #endif
 
-  if (!app_list::switches::IsExperimentalAppListEnabled()) {
-    // If experimental hotwording is enabled, don't enable hotwording in the
-    // start page, since the hotword extension is taking care of this.
-    bool hotword_enabled = service->HotwordEnabled() &&
-        !HotwordService::IsExperimentalHotwordingEnabled();
+  // If v2 hotwording is enabled, don't tell the start page that the app list is
+  // being shown. V2 hotwording doesn't use the start page for anything.
+  if (!app_list::switches::IsExperimentalAppListEnabled() &&
+      !HotwordService::IsExperimentalHotwordingEnabled()) {
     web_ui()->CallJavascriptFunction(
         "appList.startPage.onAppListShown",
-        base::FundamentalValue(hotword_enabled));
+        base::FundamentalValue(service->HotwordEnabled()));
   }
 }
 

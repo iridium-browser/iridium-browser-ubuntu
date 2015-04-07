@@ -29,10 +29,6 @@
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_surface.h"
 
-#if defined(OS_MACOSX)
-#include "base/mac/mac_util.h"
-#endif
-
 using blink::WebBindings;
 
 // Declarations for stub implementations of deprecated functions, which are no
@@ -58,8 +54,8 @@ static PluginInstance* FindInstance(NPP id) {
 // OS supports shared accelerated surfaces via IOSurface. This is true on Snow
 // Leopard and higher.
 static bool SupportsCoreAnimationPlugins() {
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kDisableCoreAnimationPlugins))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableCoreAnimationPlugins))
     return false;
   // We also need to be running with desktop GL and not the software
   // OSMesa renderer in order to share accelerated surfaces between

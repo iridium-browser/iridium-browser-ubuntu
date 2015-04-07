@@ -4,7 +4,8 @@
 
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_drag_controller.h"
 
-#import "base/mac/mac_util.h"
+#include <Carbon/Carbon.h>
+
 #include "base/mac/scoped_cftyperef.h"
 #import "base/mac/sdk_forward_declarations.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_controller.h"
@@ -38,6 +39,8 @@ static BOOL PointIsInsideView(NSPoint screenPoint, NSView* view) {
 ////////////////////////////////////////////////////////////////////////////////
 
 @implementation TabStripDragController
+
+@synthesize draggedTab = draggedTab_;
 
 - (id)initWithTabStripController:(TabStripController*)controller {
   if ((self = [super init])) {

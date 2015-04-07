@@ -10,6 +10,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "sync/api/attachments/attachment.h"
 #include "sync/api/attachments/attachment_id.h"
+#include "sync/api/attachments/attachment_metadata.h"
 #include "sync/base/sync_export.h"
 
 namespace base {
@@ -32,19 +33,36 @@ class SYNC_EXPORT AttachmentStoreBase {
   // TODO(maniscalco): Consider udpating Read and Write methods to support
   // resumable transfers (bug 353292).
 
+  // The result status of an attachment store operation.
+  // Do not re-order or delete these entries; they are used in a UMA histogram.
   enum Result {
-    SUCCESS,            // No error, all completed successfully.
-    UNSPECIFIED_ERROR,  // An unspecified error occurred for one or more items.
+    SUCCESS = 0,            // No error, all completed successfully.
+    UNSPECIFIED_ERROR = 1,  // An unspecified error occurred for >= 1 item.
+    STORE_INITIALIZATION_FAILED = 2,  // AttachmentStore initialization failed.
+    // When adding a value here, you must increment RESULT_SIZE below.
   };
+  const int RESULT_SIZE = 10; // Size of the Result enum; used for histograms.
 
+  typedef base::Callback<void(const Result&)> InitCallback;
   typedef base::Callback<void(const Result&,
                               scoped_ptr<AttachmentMap>,
                               scoped_ptr<AttachmentIdList>)> ReadCallback;
   typedef base::Callback<void(const Result&)> WriteCallback;
   typedef base::Callback<void(const Result&)> DropCallback;
+  typedef base::Callback<void(const Result&,
+                              scoped_ptr<AttachmentMetadataList>)>
+      ReadMetadataCallback;
 
   AttachmentStoreBase();
   virtual ~AttachmentStoreBase();
+
+  // Asynchronously initializes attachment store.
+  //
+  // This method should not be called by consumer of this interface. It is
+  // called by factory methods in AttachmentStore class. When initialization is
+  // complete |callback| is invoked with result, in case of failure result is
+  // UNSPECIFIED_ERROR.
+  virtual void Init(const InitCallback& callback) = 0;
 
   // Asynchronously reads the attachments identified by |ids|.
   //
@@ -84,6 +102,21 @@ class SYNC_EXPORT AttachmentStoreBase {
   // successfully.
   virtual void Drop(const AttachmentIdList& ids,
                     const DropCallback& callback) = 0;
+
+  // Asynchronously reads metadata for the attachments identified by |ids|.
+  //
+  // |callback| will be invoked when finished. AttachmentStore will attempt to
+  // read metadata for all attachments specified in ids. If any of the
+  // metadata entries do not exist or could not be read, |callback|'s Result
+  // will be UNSPECIFIED_ERROR.
+  virtual void ReadMetadata(const AttachmentIdList& ids,
+                            const ReadMetadataCallback& callback) = 0;
+
+  // Asynchronously reads metadata for all attachments in the store.
+  //
+  // |callback| will be invoked when finished. If any of the metadata entries
+  // could not be read, |callback|'s Result will be UNSPECIFIED_ERROR.
+  virtual void ReadAllMetadata(const ReadMetadataCallback& callback) = 0;
 };
 
 // AttachmentStore is an interface exposed to data type and AttachmentService
@@ -92,10 +125,6 @@ class SYNC_EXPORT AttachmentStore
     : public AttachmentStoreBase,
       public base::RefCountedThreadSafe<AttachmentStore> {
  public:
-  typedef base::Callback<void(const Result&,
-                              const scoped_refptr<AttachmentStore>&)>
-      CreateCallback;
-
   AttachmentStore();
 
   // Creates an AttachmentStoreHandle backed by in-memory implementation of
@@ -106,28 +135,17 @@ class SYNC_EXPORT AttachmentStore
   // attachment store. Opens corresponding leveldb database located at |path|.
   // All backend operations are scheduled to |backend_task_runner|. Opening
   // attachment store is asynchronous, once it finishes |callback| will be
-  // called on the thread that called CreateOnDiskStore. |store| parameter of
-  // callback is only valid when |result| is SUCCESS.
-  static void CreateOnDiskStore(
+  // called on the thread that called CreateOnDiskStore. Calling Read/Write/Drop
+  // before initialization completed is allowed.  Later if initialization fails
+  // these operations will fail with STORE_INITIALIZATION_FAILED error.
+  static scoped_refptr<AttachmentStore> CreateOnDiskStore(
       const base::FilePath& path,
       const scoped_refptr<base::SequencedTaskRunner>& backend_task_runner,
-      const CreateCallback& callback);
+      const InitCallback& callback);
 
  protected:
   friend class base::RefCountedThreadSafe<AttachmentStore>;
   ~AttachmentStore() override;
-
- private:
-  static void CreateOnDiskStoreOnBackendThread(
-      const base::FilePath& path,
-      const scoped_refptr<base::SequencedTaskRunner>& frontend_task_runner,
-      const CreateCallback& callback);
-
-  static void CreateBackendDone(
-      const Result& result,
-      scoped_ptr<AttachmentStoreBase> backend,
-      const scoped_refptr<base::SequencedTaskRunner>& backend_task_runner,
-      const CreateCallback& callback);
 };
 
 }  // namespace syncer

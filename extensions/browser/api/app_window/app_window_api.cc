@@ -21,15 +21,15 @@
 #include "extensions/browser/app_window/app_window_registry.h"
 #include "extensions/browser/app_window/native_app_window.h"
 #include "extensions/browser/extensions_browser_client.h"
-#include "extensions/browser/image_util.h"
 #include "extensions/common/api/app_window.h"
 #include "extensions/common/features/simple_feature.h"
+#include "extensions/common/image_util.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "extensions/common/switches.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/ui_base_types.h"
-#include "ui/gfx/rect.h"
+#include "ui/gfx/geometry/rect.h"
 #include "url/gurl.h"
 
 namespace app_window = extensions::core_api::app_window;
@@ -252,6 +252,7 @@ bool AppWindowCreateFunction::RunAsync() {
         "B58B99751225318C7EB8CF4688B5434661083E07",  // http://crbug.com/410550
         "06BE211D5F014BAB34BC22D9DDA09C63A81D828E",  // http://crbug.com/425539
         "F94EE6AB36D6C6588670B2B01EB65212D9C64E33",
+        "B9EF10DDFEA11EF77873CC5009809E5037FC4C7A",  // http://crbug.com/435380
 #endif
         "0F42756099D914A026DADFA182871C015735DD95",  // http://crbug.com/323773
         "2D22CDB6583FD0A13758AEBE8B15E45208B4E9A7",
@@ -490,7 +491,7 @@ AppWindow::Frame AppWindowCreateFunction::GetFrameFromString(
   if (frame_string == kHtmlFrameOption &&
       (extension()->permissions_data()->HasAPIPermission(
            APIPermission::kExperimental) ||
-       CommandLine::ForCurrentProcess()->HasSwitch(
+       base::CommandLine::ForCurrentProcess()->HasSwitch(
            switches::kEnableExperimentalExtensionApis))) {
      inject_html_titlebar_ = true;
      return AppWindow::FRAME_NONE;

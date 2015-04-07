@@ -243,6 +243,8 @@
       <structure type="chrome_scaled_image" name="IDR_DOWNLOAD_PROGRESS_FOREGROUND_16" file="common/download_progress_foreground16.png" />
       <structure type="chrome_scaled_image" name="IDR_DOWNLOAD_PROGRESS_FOREGROUND_32" file="common/download_progress_foreground32.png" />
       <if expr="chromeos">
+        <structure type="chrome_scaled_image" name="IDR_ENABLE_DEBUGGING_FAILURE" file="cros/enable_debugging_failure.png" />
+        <structure type="chrome_scaled_image" name="IDR_ENABLE_DEBUGGING_SUCCESS" file="cros/enable_debugging_success.png" />
         <structure type="chrome_scaled_image" name="IDR_ENROLL_FAILURE" file="cros/enroll_failure.png" />
         <structure type="chrome_scaled_image" name="IDR_ENROLL_SUCCESS" file="cros/enroll_success.png" />
       </if>
@@ -351,26 +353,28 @@
         <structure type="chrome_scaled_image" name="IDR_HOME_H" file="common/browser_home_hover.png" />
         <structure type="chrome_scaled_image" name="IDR_HOME_P" file="common/browser_home_pressed.png" />
       </if>
+      <structure type="chrome_scaled_image" name="IDR_HOTWORD_NOTIFICATION_ICON" file="common/notification_hotword_icon.png" />
       <if expr="not is_android and not is_ios">
+        <structure type="chrome_scaled_image" name="IDR_ICON_PROFILES_ACCOUNT_BUTTON_ERROR" file="common/avatar_menu_auth_error.png" />
         <structure type="chrome_scaled_image" name="IDR_ICON_PROFILES_ADD_USER" file="common/icon_add_user.png" />
+        <structure type="chrome_scaled_image" name="IDR_ICON_PROFILES_AVATAR_BUTTON_ERROR" file="common/avatar_button_auth_error.png" />
         <structure type="chrome_scaled_image" name="IDR_ICON_PROFILES_BROWSE_GUEST" file="common/icon_browse_as_guest.png" />
-        <structure type="chrome_scaled_image" name="IDR_ICON_PROFILES_LOCKED" file="common/icon_locked.png" />
-        <structure type="chrome_scaled_image" name="IDR_ICON_PROFILES_SUPERVISED" file="common/icon_supervised.png" />
-        <structure type="chrome_scaled_image" name="IDR_ICON_PROFILES_MENU_LOCK" file="common/avatar_menu_lock.png" />
-        <structure type="chrome_scaled_image" name="IDR_ICON_PROFILES_MENU_AVATAR" file="common/avatar_menu_profile.png" />
-        <structure type="chrome_scaled_image" name="IDR_ICON_PROFILES_MENU_SUPERVISED" file="common/avatar_menu_supervised.png" />
-        <structure type="chrome_scaled_image" name="IDR_ICON_PROFILES_MENU_INCOGNITO" file="common/incognito.png" />
-        <structure type="chrome_scaled_image" name="IDR_ICON_PROFILES_MENU_DISCONNECT" file="common/avatar_menu_disconnect.png" />
-        <structure type="chrome_scaled_image"
-        name="IDR_ICON_PROFILES_EDIT_HOVER" file="common/edit_button_hover.png" />
-        <structure type="chrome_scaled_image" name="IDR_ICON_PROFILES_EDIT_PRESSED" file="common/edit_button_pressed.png" />
-        <structure type="chrome_scaled_image" name="IDR_ICON_PROFILES_MENU_CARET" file="common/carrot_blue.png" />
+        <structure type="chrome_scaled_image" name="IDR_ICON_PROFILES_CHILD" file="common/icon_child.png" />
         <structure type="chrome_scaled_image" name="IDR_ICON_PROFILES_EDIT_CAMERA" file="common/edit_camera.png" />
+        <structure type="chrome_scaled_image" name="IDR_ICON_PROFILES_EDIT_HOVER" file="common/edit_button_hover.png" />
+        <structure type="chrome_scaled_image" name="IDR_ICON_PROFILES_EDIT_PRESSED" file="common/edit_button_pressed.png" />
+        <structure type="chrome_scaled_image" name="IDR_ICON_PROFILES_LOCKED" file="common/icon_locked.png" />
+        <structure type="chrome_scaled_image" name="IDR_ICON_PROFILES_MENU_AVATAR" file="common/avatar_menu_profile.png" />
+        <structure type="chrome_scaled_image" name="IDR_ICON_PROFILES_MENU_CARET" file="common/carrot_blue.png" />
+        <structure type="chrome_scaled_image" name="IDR_ICON_PROFILES_MENU_CHILD" file="common/avatar_menu_child.png" />
+        <structure type="chrome_scaled_image" name="IDR_ICON_PROFILES_MENU_DISCONNECT" file="common/avatar_menu_disconnect.png" />
+        <structure type="chrome_scaled_image" name="IDR_ICON_PROFILES_MENU_INCOGNITO" file="common/incognito.png" />
+        <structure type="chrome_scaled_image" name="IDR_ICON_PROFILES_MENU_LOCK" file="common/avatar_menu_lock.png" />
         <structure type="chrome_scaled_image" name="IDR_ICON_PROFILES_MENU_QUESTION_STABLE" file="common/profile_menu_question_stable.png" />
         <structure type="chrome_scaled_image" name="IDR_ICON_PROFILES_MENU_QUESTION_HOVER" file="common/profile_menu_question_hover.png" />
         <structure type="chrome_scaled_image" name="IDR_ICON_PROFILES_MENU_QUESTION_SELECT" file="common/profile_menu_question_select.png" />
-        <structure type="chrome_scaled_image" name="IDR_ICON_PROFILES_AVATAR_BUTTON_ERROR" file="common/avatar_button_auth_error.png" />
-        <structure type="chrome_scaled_image" name="IDR_ICON_PROFILES_ACCOUNT_BUTTON_ERROR" file="common/avatar_menu_auth_error.png" />
+        <structure type="chrome_scaled_image" name="IDR_ICON_PROFILES_MENU_SUPERVISED" file="common/avatar_menu_supervised.png" />
+        <structure type="chrome_scaled_image" name="IDR_ICON_PROFILES_SUPERVISED" file="common/icon_supervised.png" />
       </if>
       <if expr="not is_android and not is_ios and not chromeos">
         <!-- User Manager tutorial -->
@@ -420,6 +424,9 @@
       <structure type="chrome_scaled_image" name="IDR_INFOBAR_AUTOFILL_CC" file="common/infobar_autofill_cc.png" />
       <structure type="chrome_scaled_image" name="IDR_INFOBAR_AUTOLOGIN" file="common/infobar_autologin.png" />
       <structure type="chrome_scaled_image" name="IDR_INFOBAR_COOKIE" file="common/infobar_cookie.png" />
+      <if expr="not is_android">
+        <structure type="chrome_scaled_image" name="IDR_INFOBAR_CRYPTOTOKEN" file="common/infobar_cryptotoken.png" />
+      </if>
       <structure type="chrome_scaled_image" name="IDR_INFOBAR_DESKTOP_NOTIFICATIONS" file="common/infobar_desktop_notifications.png" />
       <structure type="chrome_scaled_image" name="IDR_INFOBAR_GEOLOCATION" file="common/infobar_geolocation.png" />
       <structure type="chrome_scaled_image" name="IDR_INFOBAR_MEDIA_STREAM_CAMERA" file="common/infobar_media_stream_camera.png" />
@@ -1206,7 +1213,6 @@
       <structure type="chrome_scaled_image" name="IDR_PEOPLE_SEARCH_ACTION_CHAT" file="common/chat.png" />
       <structure type="chrome_scaled_image" name="IDR_PEOPLE_SEARCH_ACTION_CHAT_HOVER" file="common/chat_hover.png" />
       <structure type="chrome_scaled_image" name="IDR_PEOPLE_SEARCH_ACTION_CHAT_PRESSED" file="common/chat_pressed.png" />
-
     </structures>
   </release>
 </grit>

@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
 
 namespace autofill {
@@ -25,7 +26,8 @@ class PasswordManager;
 
 // Interface that allows PasswordManager core code to interact with its driver
 // (i.e., obtain information from it and give information to it).
-class PasswordManagerDriver {
+class PasswordManagerDriver
+    : public base::SupportsWeakPtr<PasswordManagerDriver> {
  public:
   PasswordManagerDriver() {}
   virtual ~PasswordManagerDriver() {}
@@ -34,13 +36,6 @@ class PasswordManagerDriver {
   virtual void FillPasswordForm(
       const autofill::PasswordFormFillData& form_data) = 0;
 
-  // Returns whether any SSL certificate errors were encountered as a result of
-  // the last page load.
-  virtual bool DidLastPageLoadEncounterSSLErrors() = 0;
-
-  // If this browsing session should not be persisted.
-  virtual bool IsOffTheRecord() = 0;
-
   // Informs the driver that |form| can be used for password generation.
   virtual void AllowPasswordGenerationForForm(
       const autofill::PasswordForm& form) = 0;
@@ -48,6 +43,9 @@ class PasswordManagerDriver {
   // Notifies the driver that account creation |forms| were found.
   virtual void AccountCreationFormsFound(
       const std::vector<autofill::FormData>& forms) = 0;
+
+  // Notifies the driver that the user has accepted a generated password.
+  virtual void GeneratedPasswordAccepted(const base::string16& password) = 0;
 
   // Tells the driver to fill the form with the |username| and |password|.
   virtual void FillSuggestion(const base::string16& username,
@@ -69,9 +67,6 @@ class PasswordManagerDriver {
 
   // Returns the PasswordAutofillManager associated with this instance.
   virtual PasswordAutofillManager* GetPasswordAutofillManager() = 0;
-
-  // Returns the AutofillManager associated with this instance.
-  virtual autofill::AutofillManager* GetAutofillManager() = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(PasswordManagerDriver);

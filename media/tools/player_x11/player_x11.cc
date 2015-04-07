@@ -95,8 +95,8 @@ static void OnAddTextTrack(const media::TextTrackConfig& config,
                            const media::AddTextTrackDoneCB& done_cb) {
 }
 
-static void NeedKey(const std::string& type,
-                    const std::vector<uint8>& init_data) {
+static void OnEncryptedMediaInitData(const std::string& init_data_type,
+                                     const std::vector<uint8>& init_data) {
   std::cout << "File is encrypted." << std::endl;
 }
 
@@ -116,13 +116,8 @@ void InitPipeline(
     bool /* enable_audio */) {
   ScopedVector<media::VideoDecoder> video_decoders;
   video_decoders.push_back(new media::FFmpegVideoDecoder(task_runner));
-  scoped_ptr<media::VideoRenderer> video_renderer(
-      new media::VideoRendererImpl(task_runner,
-                                   video_decoders.Pass(),
-                                   media::SetDecryptorReadyCB(),
-                                   paint_cb,
-                                   true,
-                                   new media::MediaLog()));
+  scoped_ptr<media::VideoRenderer> video_renderer(new media::VideoRendererImpl(
+      task_runner, video_decoders.Pass(), true, new media::MediaLog()));
 
   ScopedVector<media::AudioDecoder> audio_decoders;
   audio_decoders.push_back(new media::FFmpegAudioDecoder(task_runner,
@@ -135,13 +130,9 @@ void InitPipeline(
       512);
   media::AudioHardwareConfig hardware_config(out_params, out_params);
 
-  scoped_ptr<media::AudioRenderer> audio_renderer(
-      new media::AudioRendererImpl(task_runner,
-                                   new media::NullAudioSink(task_runner),
-                                   audio_decoders.Pass(),
-                                   media::SetDecryptorReadyCB(),
-                                   hardware_config,
-                                   new media::MediaLog()));
+  scoped_ptr<media::AudioRenderer> audio_renderer(new media::AudioRendererImpl(
+      task_runner, new media::NullAudioSink(task_runner), audio_decoders.Pass(),
+      hardware_config, new media::MediaLog()));
 
   scoped_ptr<media::Renderer> renderer(new media::RendererImpl(
       task_runner, audio_renderer.Pass(), video_renderer.Pass()));
@@ -156,6 +147,7 @@ void InitPipeline(
                   base::Bind(&SaveStatusAndSignal, &event, &status),
                   base::Bind(&OnMetadata),
                   base::Bind(&OnBufferingStateChanged),
+                  paint_cb,
                   base::Bind(&DoNothing),
                   base::Bind(&OnAddTextTrack));
 
@@ -237,8 +229,8 @@ int main(int argc, char** argv) {
   base::AtExitManager at_exit;
   media::InitializeMediaLibraryForTesting();
 
-  CommandLine::Init(argc, argv);
-  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  base::CommandLine::Init(argc, argv);
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   std::string filename = command_line->GetSwitchValueASCII("file");
 
   if (filename.empty()) {
@@ -289,7 +281,7 @@ int main(int argc, char** argv) {
       CreateDataSource(filename), command_line->HasSwitch("streaming")));
   scoped_ptr<media::Demuxer> demuxer(new media::FFmpegDemuxer(
       media_thread.message_loop_proxy(), data_source.get(),
-      base::Bind(&NeedKey), new media::MediaLog()));
+      base::Bind(&OnEncryptedMediaInitData), new media::MediaLog()));
 
   media::Pipeline pipeline(media_thread.message_loop_proxy(),
                            new media::MediaLog());

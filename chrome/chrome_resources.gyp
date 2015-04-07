@@ -81,6 +81,7 @@
             '../components/components_resources.gyp:components_resources',
             '../content/browser/devtools/devtools_resources.gyp:devtools_resources',
             '../content/browser/tracing/tracing_resources.gyp:tracing_resources',
+            'browser/devtools/webrtc_device_provider_resources.gyp:webrtc_device_provider_resources',
           ],
           'actions': [
             {
@@ -558,6 +559,41 @@
       'includes': [ '../build/grit_target.gypi' ],
     },
     {
+      # GN version: //chrome/browser/resources:options_test_resources
+      'target_name': 'options_test_resources',
+      'type': 'none',
+      'actions': [
+        {
+          'action_name': 'generate_options_test_resources',
+          'variables': {
+            'grit_grd_file': 'browser/resources/options_test_resources.grd',
+          },
+          'includes': [ '../build/grit_action.gypi' ],
+        },
+      ],
+      'includes': [ '../build/grit_target.gypi' ],
+    },
+    {
+      # GN version: //chrome:browser_tests_pak
+      'target_name': 'browser_tests_pak',
+      'type': 'none',
+      'dependencies': [
+        'options_test_resources',
+      ],
+      'actions': [
+        {
+          'action_name': 'repack_browser_tests_pak',
+          'variables': {
+            'pak_inputs': [
+              '<(SHARED_INTERMEDIATE_DIR)/chrome/options_test_resources.pak',
+            ],
+            'pak_output': '<(PRODUCT_DIR)/browser_tests.pak',
+          },
+          'includes': [ '../build/repack_action.gypi' ],
+        },
+      ],
+    },
+    {
       # GN version: //chrome/browser:about_credits
       'target_name': 'about_credits',
       'type': 'none',
@@ -568,8 +604,11 @@
           },
           'action_name': 'generate_about_credits',
           'inputs': [
-            # TODO(phajdan.jr): make licenses.py print inputs too.
+            # TODO(phajdan.jr): make licenses.py print license input files so
+            # about:credits gets rebuilt when one changes.
             '<(generator_path)',
+            'browser/resources/about_credits.tmpl',
+            'browser/resources/about_credits_entry.tmpl',
           ],
           'outputs': [
             '<(about_credits_file)',

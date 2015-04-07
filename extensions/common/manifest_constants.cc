@@ -12,6 +12,7 @@ const char kAboutPage[] = "about_page";
 const char kAllFrames[] = "all_frames";
 const char kAltKey[] = "altKey";
 const char kApp[] = "app";
+const char kAppIconColor[] = "app.icon_color";
 const char kAutomation[] = "automation";
 const char kBackgroundAllowJsAccess[] = "background.allow_js_access";
 const char kBackgroundPage[] = "background.page";
@@ -23,11 +24,13 @@ const char kBookmarkUI[] = "bookmarks_ui";
 const char kBrowserAction[] = "browser_action";
 const char kChromeURLOverrides[] = "chrome_url_overrides";
 const char kCommands[] = "commands";
+const char kContentCapabilities[] = "content_capabilities";
 const char kContentPack[] = "content_pack";
 const char kContentPackSites[] = "sites";
 const char kContentScripts[] = "content_scripts";
 const char kContentSecurityPolicy[] = "content_security_policy";
 const char kConvertedFromUserScript[] = "converted_from_user_script";
+const char kCopresence[] = "copresence";
 const char kCss[] = "css";
 const char kCtrlKey[] = "ctrlKey";
 const char kCurrentLocale[] = "current_locale";
@@ -125,7 +128,6 @@ const char kRequirements[] = "requirements";
 const char kRunAt[] = "run_at";
 const char kSandboxedPages[] = "sandbox.pages";
 const char kSandboxedPagesCSP[] = "sandbox.content_security_policy";
-const char kScriptBadge[] = "script_badge";
 const char kSettingsOverride[] = "chrome_settings_overrides";
 const char kSettingsOverrideAlternateUrls[] =
     "chrome_settings_overrides.search_provider.alternate_urls";
@@ -170,6 +172,7 @@ const char kUpdateURL[] = "update_url";
 const char kUrlHandlers[] = "url_handlers";
 const char kUrlHandlerTitle[] = "title";
 const char kVersion[] = "version";
+const char kVersionName[] = "version_name";
 const char kWebAccessibleResources[] = "web_accessible_resources";
 const char kWebURLs[] = "app.urls";
 const char kWebview[] = "webview";
@@ -185,8 +188,6 @@ namespace manifest_values {
 const char kBrowserActionCommandEvent[] = "_execute_browser_action";
 const char kIncognitoSplit[] = "split";
 const char kIncognitoSpanning[] = "spanning";
-const char kIntentDispositionWindow[] = "window";
-const char kIntentDispositionInline[] = "inline";
 const char kIsolatedStorage[] = "storage";
 const char kKeybindingPlatformChromeOs[] = "chromeos";
 const char kKeybindingPlatformDefault[] = "default";
@@ -215,6 +216,7 @@ const char kKeyRight[] = "Right";
 const char kKeySearch[] = "Search";
 const char kKeySeparator[] = "+";
 const char kKeyShift[] = "Shift";
+const char kKeySpace[] = "Space";
 const char kKeyTab[] = "Tab";
 const char kKeyUp[] = "Up";
 const char kRunAtDocumentStart[] = "document_start";
@@ -223,7 +225,7 @@ const char kRunAtDocumentIdle[] = "document_idle";
 const char kPageActionCommandEvent[] = "_execute_page_action";
 const char kPageActionTypeTab[] = "tab";
 const char kPageActionTypePermanent[] = "permanent";
-const char kScriptBadgeCommandEvent[] = "_execute_script_badge";
+const char kProjectId[] = "project_id";
 const char kLaunchContainerPanel[] = "panel";
 const char kLaunchContainerTab[] = "tab";
 const char kLaunchContainerWindow[] = "window";
@@ -269,15 +271,12 @@ const char kChromeVersionTooLow[] =
 const char kDisabledByPolicy[] =
     "This extension has been disabled by your administrator.";
 const char kExpectString[] = "Expect string value.";
-const char kExperimentalFlagRequired[] =
-    "Loading extensions with 'experimental' permission is turned off by "
-    "default. You can enable 'Experimental Extension APIs' "
-    "by visiting chrome://flags.";
 const char kInvalidAboutPage[] = "Invalid value for 'about_page'.";
 const char kInvalidAboutPageExpectRelativePath[] =
     "Invalid value for 'about_page'. Value must be a relative path.";
 const char kInvalidAllFrames[] =
     "Invalid value for 'content_scripts[*].all_frames'.";
+const char kInvalidAppIconColor[] = "Invalid value for app.icon_color.";
 const char kInvalidBackground[] =
     "Invalid value for 'background_page'.";
 const char kInvalidBackgroundAllowJsAccess[] =
@@ -303,16 +302,32 @@ const char kInvalidChromeURLOverrides[] =
     "Invalid value for 'chrome_url_overrides'.";
 const char kInvalidCommandsKey[] =
     "Invalid value for 'commands'.";
+const char kInvalidContentCapabilities[] =
+    "Invalid value for 'content_capabilities'.";
+const char kInvalidContentCapabilitiesMatch[] =
+    "Invalid content_capabilities URL pattern: *";
+const char kInvalidContentCapabilitiesMatchOrigin[] =
+    "Domain wildcards are not allowed for content_capabilities URL patterns.";
+const char kInvalidContentCapabilitiesPermission[] =
+    "Invalid content_capabilities permission: *.";
 const char kInvalidContentPack[] =
     "Invalid value for 'content_pack'.";
 const char kInvalidContentPackSites[] =
     "Invalid value for Content Pack sites - files must be strings.";
 const char kInvalidContentScript[] =
     "Invalid value for 'content_scripts[*]'.";
-const char kInvalidContentSecurityPolicy[] =
-    "Invalid value for 'content_security_policy'.";
 const char kInvalidContentScriptsList[] =
     "Invalid value for 'content_scripts'.";
+const char kInvalidContentSecurityPolicy[] =
+    "Invalid value for 'content_security_policy'.";
+const char kInvalidCopresenceConfig[] = "Invalid value for 'copresence'.";
+const char kInvalidCopresenceProjectId[] =
+    "copresence.project_id must not be empty.";
+const char kInvalidCSPInsecureValue[] =
+    "Ignored insecure CSP value \"*\" in directive '*'.";
+const char kInvalidCSPMissingSecureSrc[] =
+    "CSP directive '*' must be specified (either explicitly, or implicitly via"
+    " 'default-src') and must whitelist only secure resources.";
 const char kInvalidCss[] =
     "Invalid value for 'content_scripts[*].css[*]'.";
 const char kInvalidCssList[] =
@@ -402,34 +417,6 @@ const char kInvalidInputComponentType[] =
     "Invalid value for 'input_components[*].type";
 const char kInvalidInputView[] =
     "Invalid value for 'input_view'.";
-const char kInvalidIntent[] =
-    "Invalid value for intents[*]";
-const char kInvalidIntentDisposition[] =
-    "Invalid value for intents[*].disposition";
-const char kInvalidIntentDispositionInPlatformApp[] =
-    "Invalid value for intents[*].disposition. Packaged apps cannot specify "
-    "a disposition";
-const char kInvalidIntentHref[] =
-    "Invalid value for intents[*].href";
-const char kInvalidIntentHrefEmpty[] =
-    "Missing value for intents[*].href";
-const char kInvalidIntentHrefInPlatformApp[] =
-    "Invalid value for intents[*].href. Packaged apps cannot specify a "
-    "URL for intents";
-const char kInvalidIntentHrefOldAndNewKey[] =
-    "intents[*]: Key \"*\" is deprecated.  Key \"*\" has the same meaning. "
-    "You can not use both.";
-const char kInvalidIntentPageInHostedApp[] =
-    "Invalid value for intents[*].href. Hosted apps must specify an "
-    "absolute URL within app.urls[].";
-const char kInvalidIntents[] =
-    "Invalid value for intents";
-const char kInvalidIntentType[] =
-    "Invalid value for intents[*].type";
-const char kInvalidIntentTypeElement[] =
-    "Invalid value for intents[*].type[*]";
-const char kInvalidIntentTitle[] =
-    "Invalid value for intents[*].title";
 const char kInvalidIsolation[] =
     "Invalid value for 'app.isolation'.";
 const char kInvalidIsolationValue[] =
@@ -565,8 +552,6 @@ const char kInvalidSandboxedPage[] =
     "Invalid value for 'sandbox.pages[*]'.";
 const char kInvalidSandboxedPagesCSP[] =
     "Invalid value for 'sandbox.content_security_policy'.";
-const char kInvalidScriptBadge[] =
-    "Invalid value for 'script_badge'.";
 const char kInvalidSearchEngineMissingKeys[] =
     "Missing mandatory parameters for "
     "'chrome_settings_overrides.search_provider'.";
@@ -629,6 +614,7 @@ const char kInvalidURLPatternError[] =
 const char kInvalidVersion[] =
     "Required value 'version' is missing or invalid. It must be between 1-4 "
     "dot-separated integers each between 0 and 65536.";
+const char kInvalidVersionName[] = "Invalid value for 'version_name'.";
 const char kInvalidWebAccessibleResourcesList[] =
     "Invalid value for 'web_accessible_resources'.";
 const char kInvalidWebAccessibleResource[] =
@@ -651,14 +637,6 @@ const char kInvalidWebURLs[] =
     "Invalid value for 'app.urls'.";
 const char kInvalidZipHash[] =
     "Required key 'zip_hash' is missing or invalid.";
-const char kInsecureContentSecurityPolicy[] =
-    "Invalid value for 'content_security_policy': Both 'script-src' and"
-    " 'object-src' directives must be specified (either explicitly, or"
-    " implicitly via 'default-src'), and both must whitelist only secure"
-    " resources. You may include any of the following sources: \"'self'\","
-    " \"'unsafe-eval'\", \"http://127.0.0.1\", \"http://localhost\", or any"
-    " \"https://\" or \"chrome-extension://\" origin. For more information,"
-    " see http://developer.chrome.com/extensions/contentSecurityPolicy.html";
 const char kKeyIsDeprecatedWithReplacement[] =
     "Key \"*\" is deprecated.  Key \"*\" should be used instead.";
 const char kLauncherPagePageRequired[] =
@@ -706,14 +684,6 @@ const char kPermissionUnknownOrMalformed[] =
     "Permission '*' is unknown or URL pattern is malformed.";
 const char kReservedMessageFound[] =
     "Reserved key * found in message catalog.";
-const char kScriptBadgeRequiresFlag[] =
-    "The script_badge manifest key is turned off by default. "
-    "You can enable it with the --enable-script-badges command-line flag.";
-const char kScriptBadgeIconIgnored[] =
-    "default_icon specified in script_badge manifest section will not be used.";
-const char kScriptBadgeTitleIgnored[] =
-    "default_title specified in script_badge manifest section will not be "
-    "used.";
 const char kUnrecognizedManifestKey[] = "Unrecognized manifest key '*'.";
 const char kUnrecognizedManifestProperty[] =
     "Unrecognized property '*' of manifest key '*'.";

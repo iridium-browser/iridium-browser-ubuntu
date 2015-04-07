@@ -28,6 +28,7 @@
 #include "components/search_engines/template_url_service_client.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/test_browser_thread.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest_constants.h"
 #include "net/http/http_response_headers.h"
@@ -616,16 +617,16 @@ TEST_F(ProfileResetterTest, ResetExtensionsByDisabling) {
       extensions::Manifest::TYPE_EXTENSION,
       false);
   service_->AddExtension(ext6.get());
-  EXPECT_EQ(6u, service_->extensions()->size());
+  EXPECT_EQ(6u, registry()->enabled_extensions().size());
 
   ResetAndWait(ProfileResetter::EXTENSIONS);
-  EXPECT_EQ(4u, service_->extensions()->size());
-  EXPECT_FALSE(service_->extensions()->Contains(theme->id()));
-  EXPECT_FALSE(service_->extensions()->Contains(ext2->id()));
-  EXPECT_TRUE(service_->extensions()->Contains(ext3->id()));
-  EXPECT_TRUE(service_->extensions()->Contains(ext4->id()));
-  EXPECT_TRUE(service_->extensions()->Contains(ext5->id()));
-  EXPECT_TRUE(service_->extensions()->Contains(ext6->id()));
+  EXPECT_EQ(4u, registry()->enabled_extensions().size());
+  EXPECT_FALSE(registry()->enabled_extensions().Contains(theme->id()));
+  EXPECT_FALSE(registry()->enabled_extensions().Contains(ext2->id()));
+  EXPECT_TRUE(registry()->enabled_extensions().Contains(ext3->id()));
+  EXPECT_TRUE(registry()->enabled_extensions().Contains(ext4->id()));
+  EXPECT_TRUE(registry()->enabled_extensions().Contains(ext5->id()));
+  EXPECT_TRUE(registry()->enabled_extensions().Contains(ext6->id()));
   EXPECT_TRUE(theme_service->UsingDefaultTheme());
 }
 
@@ -645,15 +646,15 @@ TEST_F(ProfileResetterTest, ResetExtensionsByDisablingNonOrganic) {
       extensions::Manifest::TYPE_EXTENSION,
       false);
   service_->AddExtension(ext3.get());
-  EXPECT_EQ(2u, service_->extensions()->size());
+  EXPECT_EQ(2u, registry()->enabled_extensions().size());
 
   std::string master_prefs(kDistributionConfig);
   ReplaceString(&master_prefs, "placeholder_for_id", ext3->id());
 
   ResetAndWait(ProfileResetter::EXTENSIONS, master_prefs);
 
-  EXPECT_EQ(1u, service_->extensions()->size());
-  EXPECT_TRUE(service_->extensions()->Contains(ext3->id()));
+  EXPECT_EQ(1u, registry()->enabled_extensions().size());
+  EXPECT_TRUE(registry()->enabled_extensions().Contains(ext3->id()));
 }
 
 TEST_F(ProfileResetterTest, ResetExtensionsAndDefaultApps) {
@@ -691,14 +692,14 @@ TEST_F(ProfileResetterTest, ResetExtensionsAndDefaultApps) {
                       extensions::Manifest::TYPE_HOSTED_APP,
                       true);
   service_->AddExtension(ext3.get());
-  EXPECT_EQ(3u, service_->extensions()->size());
+  EXPECT_EQ(3u, registry()->enabled_extensions().size());
 
   ResetAndWait(ProfileResetter::EXTENSIONS);
 
-  EXPECT_EQ(1u, service_->extensions()->size());
-  EXPECT_FALSE(service_->extensions()->Contains(ext1->id()));
-  EXPECT_FALSE(service_->extensions()->Contains(ext2->id()));
-  EXPECT_TRUE(service_->extensions()->Contains(ext3->id()));
+  EXPECT_EQ(1u, registry()->enabled_extensions().size());
+  EXPECT_FALSE(registry()->enabled_extensions().Contains(ext1->id()));
+  EXPECT_FALSE(registry()->enabled_extensions().Contains(ext2->id()));
+  EXPECT_TRUE(registry()->enabled_extensions().Contains(ext3->id()));
   EXPECT_TRUE(theme_service->UsingDefaultTheme());
 }
 
@@ -954,8 +955,8 @@ TEST_F(ProfileResetterTest, FeedbackSerializationTest) {
   // Let it enumerate shortcuts on the FILE thread.
   base::MessageLoop::current()->RunUntilIdle();
 
-  COMPILE_ASSERT(ResettableSettingsSnapshot::ALL_FIELDS == 31,
-                 expand_this_test);
+  static_assert(ResettableSettingsSnapshot::ALL_FIELDS == 31,
+                "this test needs to be expanded");
   for (int field_mask = 0; field_mask <= ResettableSettingsSnapshot::ALL_FIELDS;
        ++field_mask) {
     std::string report = SerializeSettingsReport(nonorganic_snap, field_mask);

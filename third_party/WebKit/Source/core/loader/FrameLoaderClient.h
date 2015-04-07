@@ -30,7 +30,9 @@
 #ifndef FrameLoaderClient_h
 #define FrameLoaderClient_h
 
+#include "core/dom/Document.h"
 #include "core/dom/IconURL.h"
+#include "core/fetch/ResourceLoaderOptions.h"
 #include "core/frame/FrameClient.h"
 #include "core/loader/FrameLoaderTypes.h"
 #include "core/loader/NavigationPolicy.h"
@@ -86,7 +88,7 @@ namespace blink {
         virtual void dispatchDidReceiveServerRedirectForProvisionalLoad() = 0;
         virtual void dispatchDidNavigateWithinPage(HistoryItem*, HistoryCommitType) { }
         virtual void dispatchWillClose() = 0;
-        virtual void dispatchDidStartProvisionalLoad(bool isTransitionNavigation) = 0;
+        virtual void dispatchDidStartProvisionalLoad(bool isTransitionNavigation, double triggeringEventTime) = 0;
         virtual void dispatchDidReceiveTitle(const String&) = 0;
         virtual void dispatchDidChangeIcons(IconType) = 0;
         virtual void dispatchDidCommitLoad(LocalFrame*, HistoryItem*, HistoryCommitType) = 0;
@@ -99,7 +101,7 @@ namespace blink {
 
         virtual NavigationPolicy decidePolicyForNavigation(const ResourceRequest&, DocumentLoader*, NavigationPolicy, bool isTransitionNavigation) = 0;
 
-        virtual void dispatchAddNavigationTransitionData(const String& origin, const String& selector, const String& markup) { }
+        virtual void dispatchAddNavigationTransitionData(const Document::TransitionElementData&) { }
         virtual void dispatchWillRequestResource(FetchRequest*) { }
 
         virtual void dispatchWillSendSubmitEvent(HTMLFormElement*) = 0;
@@ -141,7 +143,7 @@ namespace blink {
 
         virtual void transitionToCommittedForNewPage() = 0;
 
-        virtual PassRefPtrWillBeRawPtr<LocalFrame> createFrame(const KURL&, const AtomicString& name, HTMLFrameOwnerElement*) = 0;
+        virtual PassRefPtrWillBeRawPtr<LocalFrame> createFrame(const KURL&, const AtomicString& name, HTMLFrameOwnerElement*, ContentSecurityPolicyDisposition shouldCheckContentSecurityPolicy) = 0;
         // Whether or not plugin creation should fail if the HTMLPlugInElement isn't in the DOM after plugin initialization.
         enum DetachedPluginPolicy {
             FailOnDetachedPlugin,
@@ -159,6 +161,7 @@ namespace blink {
 
         virtual ObjectContentType objectContentType(const KURL&, const String& mimeType, bool shouldPreferPlugInsForImages) = 0;
 
+        virtual void didCreateNewDocument() = 0;
         virtual void dispatchDidClearWindowObjectInMainWorld() = 0;
         virtual void documentElementAvailable() = 0;
 

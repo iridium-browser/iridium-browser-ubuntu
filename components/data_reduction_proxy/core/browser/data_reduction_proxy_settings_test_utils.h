@@ -11,6 +11,7 @@
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_configurator.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params_test_utils.h"
+#include "net/base/capturing_net_log.h"
 #include "net/base/net_util.h"
 #include "net/url_request/test_url_fetcher_factory.h"
 #include "net/url_request/url_request_test_util.h"
@@ -26,8 +27,11 @@ class DataReductionProxyStatisticsPrefs;
 
 class TestDataReductionProxyConfig : public DataReductionProxyConfigurator {
  public:
-  TestDataReductionProxyConfig();
-  ~TestDataReductionProxyConfig() override {}
+  TestDataReductionProxyConfig(
+      scoped_refptr<base::SequencedTaskRunner> network_task_runner,
+      net::NetLog* net_log,
+      data_reduction_proxy::DataReductionProxyEventStore* event_store);
+  ~TestDataReductionProxyConfig() override;
   void Enable(bool restricted,
               bool fallback_restricted,
               const std::string& primary_origin,
@@ -155,6 +159,7 @@ class DataReductionProxySettingsTestBase : public testing::Test {
                             bool expected_enabled,
                             bool expected_fallback_restricted);
   void CheckOnPrefChange(bool enabled, bool expected_enabled, bool managed);
+  void InitWithStatisticsPrefs();
   void CheckInitDataReductionProxy(bool enabled_at_startup);
   void RegisterSyntheticFieldTrialCallback(bool proxy_enabled) {
     proxy_enabled_ = proxy_enabled;
@@ -166,7 +171,8 @@ class DataReductionProxySettingsTestBase : public testing::Test {
   scoped_ptr<TestDataReductionProxyParams> expected_params_;
   base::Time last_update_time_;
   bool proxy_enabled_;
-  scoped_ptr<DataReductionProxyStatisticsPrefs> statistics_prefs_;
+  net::CapturingNetLog net_log_;
+  scoped_ptr<DataReductionProxyEventStore> event_store_;
 };
 
 // Test implementations should be subclasses of an instantiation of this

@@ -124,9 +124,7 @@ WebViewImpl::WebViewImpl(const std::string& id,
       navigation_tracker_(new NavigationTracker(client.get(), browser_info)),
       dialog_manager_(new JavaScriptDialogManager(client.get())),
       mobile_emulation_override_manager_(
-          new MobileEmulationOverrideManager(client.get(),
-                                             device_metrics,
-                                             browser_info)),
+          new MobileEmulationOverrideManager(client.get(), device_metrics)),
       geolocation_override_manager_(
           new GeolocationOverrideManager(client.get())),
       heap_snapshot_taker_(new HeapSnapshotTaker(client.get())),
@@ -165,6 +163,58 @@ Status WebViewImpl::Reload() {
   base::DictionaryValue params;
   params.SetBoolean("ignoreCache", false);
   return client_->SendCommand("Page.reload", params);
+}
+
+Status WebViewImpl::TraverseHistory(int delta) {
+  base::DictionaryValue params;
+  scoped_ptr<base::DictionaryValue> result;
+  Status status = client_->SendCommandAndGetResult(
+      "Page.getNavigationHistory", params, &result);
+  if (status.IsError()) {
+    // TODO(samuong): remove this once we stop supporting WebView on KitKat.
+    // Older versions of WebView on Android (on KitKat and earlier) do not have
+    // the Page.getNavigationHistory DevTools command handler, so fall back to
+    // using JavaScript to navigate back and forward. WebView reports its build
+    // number as 0, so use the error status to detect if we can't use the
+    // DevTools command.
+    if (browser_info_->browser_name == "webview")
+      return TraverseHistoryWithJavaScript(delta);
+    else
+      return status;
+  }
+
+  int current_index;
+  if (!result->GetInteger("currentIndex", &current_index))
+    return Status(kUnknownError, "DevTools didn't return currentIndex");
+
+  base::ListValue* entries;
+  if (!result->GetList("entries", &entries))
+    return Status(kUnknownError, "DevTools didn't return entries");
+
+  base::DictionaryValue* entry;
+  if (!entries->GetDictionary(current_index + delta, &entry)) {
+    // The WebDriver spec says that if there are no pages left in the browser's
+    // history (i.e. |current_index + delta| is out of range), then we must not
+    // navigate anywhere.
+    return Status(kOk);
+  }
+
+  int entry_id;
+  if (!entry->GetInteger("id", &entry_id))
+    return Status(kUnknownError, "history entry does not have an id");
+  params.SetInteger("entryId", entry_id);
+
+  return client_->SendCommand("Page.navigateToHistoryEntry", params);
+}
+
+Status WebViewImpl::TraverseHistoryWithJavaScript(int delta) {
+  scoped_ptr<base::Value> value;
+  if (delta == -1)
+    return EvaluateScript(std::string(), "window.history.back();", &value);
+  else if (delta == 1)
+    return EvaluateScript(std::string(), "window.history.forward();", &value);
+  else
+    return Status(kUnknownError, "expected delta to be 1 or -1");
 }
 
 Status WebViewImpl::EvaluateScript(const std::string& frame,
@@ -251,18 +301,6 @@ Status WebViewImpl::DispatchMouseEvents(const std::list<MouseEvent>& events,
     Status status = client_->SendCommand("Input.dispatchMouseEvent", params);
     if (status.IsError())
       return status;
-    if (browser_info_->build_no < 1569 && it->button == kRightMouseButton &&
-        it->type == kReleasedMouseEventType) {
-      base::ListValue args;
-      args.AppendInteger(it->x);
-      args.AppendInteger(it->y);
-      args.AppendInteger(it->modifiers);
-      scoped_ptr<base::Value> result;
-      status = CallFunction(
-          frame, kDispatchContextMenuEventScript, args, &result);
-      if (status.IsError())
-        return status;
-    }
   }
   return Status(kOk);
 }

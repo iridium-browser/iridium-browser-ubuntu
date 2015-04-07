@@ -14,6 +14,7 @@
 #include "base/base_export.h"
 #include "base/basictypes.h"
 #include "base/environment.h"
+#include "base/process/process.h"
 #include "base/process/process_handle.h"
 #include "base/strings/string_piece.h"
 
@@ -21,7 +22,6 @@
 #include "base/posix/file_descriptor_shuffle.h"
 #elif defined(OS_WIN)
 #include <windows.h>
-#include "base/win/scoped_handle.h"
 #endif
 
 namespace base {
@@ -143,12 +143,7 @@ struct BASE_EXPORT LaunchOptions {
 // Launch a process via the command line |cmdline|.
 // See the documentation of LaunchOptions for details on |options|.
 //
-// Returns true upon success.
-//
-// Upon success, if |process_handle| is non-null, it will be filled in with the
-// handle of the launched process.  NOTE: In this case, the caller is
-// responsible for closing the handle so that it doesn't leak!
-// Otherwise, the process handle will be implicitly closed.
+// Returns a valid Process upon success.
 //
 // Unix-specific notes:
 // - All file descriptors open in the parent process will be closed in the
@@ -158,6 +153,11 @@ struct BASE_EXPORT LaunchOptions {
 //   parent's stdout and stderr.
 // - If the first argument on the command line does not contain a slash,
 //   PATH will be searched.  (See man execvp.)
+BASE_EXPORT Process LaunchProcess(const CommandLine& cmdline,
+                                  const LaunchOptions& options);
+
+// Deprecated version.
+// TODO(rvargas) crbug.com/417532: Remove this after migrating all consumers.
 BASE_EXPORT bool LaunchProcess(const CommandLine& cmdline,
                                const LaunchOptions& options,
                                ProcessHandle* process_handle);
@@ -173,25 +173,27 @@ BASE_EXPORT bool LaunchProcess(const CommandLine& cmdline,
 //
 // Example (including literal quotes)
 //  cmdline = "c:\windows\explorer.exe" -foo "c:\bar\"
-BASE_EXPORT bool LaunchProcess(const string16& cmdline,
-                               const LaunchOptions& options,
-                               win::ScopedHandle* process_handle);
+BASE_EXPORT Process LaunchProcess(const string16& cmdline,
+                                  const LaunchOptions& options);
 
 // Launches a process with elevated privileges.  This does not behave exactly
 // like LaunchProcess as it uses ShellExecuteEx instead of CreateProcess to
 // create the process.  This means the process will have elevated privileges
-// and thus some common operations like OpenProcess will fail. The process will
-// be available through the |process_handle| argument.  Currently the only
-// supported LaunchOptions are |start_hidden| and |wait|.
-BASE_EXPORT bool LaunchElevatedProcess(const CommandLine& cmdline,
-                                       const LaunchOptions& options,
-                                       ProcessHandle* process_handle);
+// and thus some common operations like OpenProcess will fail. Currently the
+// only supported LaunchOptions are |start_hidden| and |wait|.
+BASE_EXPORT Process LaunchElevatedProcess(const CommandLine& cmdline,
+                                          const LaunchOptions& options);
 
 #elif defined(OS_POSIX)
 // A POSIX-specific version of LaunchProcess that takes an argv array
 // instead of a CommandLine.  Useful for situations where you need to
 // control the command line arguments directly, but prefer the
 // CommandLine version if launching Chrome itself.
+BASE_EXPORT Process LaunchProcess(const std::vector<std::string>& argv,
+                                  const LaunchOptions& options);
+
+// Deprecated version.
+// TODO(rvargas) crbug.com/417532: Remove this after migrating all consumers.
 BASE_EXPORT bool LaunchProcess(const std::vector<std::string>& argv,
                                const LaunchOptions& options,
                                ProcessHandle* process_handle);

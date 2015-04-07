@@ -28,7 +28,6 @@
 
 namespace blink {
 
-class ExceptionState;
 class Node;
 
 class XMLSerializer final : public RefCountedWillBeGarbageCollected<XMLSerializer>, public ScriptWrappable {
@@ -39,7 +38,7 @@ public:
         return adoptRefWillBeNoop(new XMLSerializer);
     }
 
-    String serializeToString(Node*, ExceptionState&);
+    String serializeToString(Node*);
 
     void trace(Visitor*) { }
 

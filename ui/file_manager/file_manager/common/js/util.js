@@ -200,26 +200,6 @@ util.bytesToString = function(bytes) {
 };
 
 /**
- * Utility function to read specified range of bytes from file
- * @param {File} file The file to read.
- * @param {number} begin Starting byte(included).
- * @param {number} end Last byte(excluded).
- * @param {function(File, ByteReader)} callback Callback to invoke.
- * @param {function(string)} onError Error handler.
- */
-util.readFileBytes = function(file, begin, end, callback, onError) {
-  var fileReader = new FileReader();
-  fileReader.onerror = function(event) {
-    onError(event.type);
-  };
-  fileReader.onloadend = function() {
-    callback(file, new ByteReader(
-        /** @type {ArrayBuffer} */ (fileReader.result)));
-  };
-  fileReader.readAsArrayBuffer(file.slice(begin, end));
-};
-
-/**
  * Returns a string '[Ctrl-][Alt-][Shift-][Meta-]' depending on the event
  * modifiers. Convenient for writing out conditions in keyboard handlers.
  *
@@ -272,25 +252,40 @@ util.extractFilePath = function(url) {
 /**
  * A shortcut function to create a child element with given tag and class.
  *
- * @param {Element} parent Parent element.
+ * @param {!HTMLElement} parent Parent element.
  * @param {string=} opt_className Class name.
  * @param {string=} opt_tag Element tag, DIV is omitted.
- * @return {Element} Newly created element.
+ * @return {!HTMLElement} Newly created element.
  */
 util.createChild = function(parent, opt_className, opt_tag) {
   var child = parent.ownerDocument.createElement(opt_tag || 'div');
   if (opt_className)
     child.className = opt_className;
   parent.appendChild(child);
-  return child;
+  return /** @type {!HTMLElement} */ (child);
+};
+
+/**
+ * Obtains the element that should exist, decorates it with given type, and
+ * returns it.
+ * @param {string} query Query for the element.
+ * @param {function(new: T, ...)} type Type used to decorate.
+ * @private
+ * @template T
+ * @return {!T} Decorated element.
+ */
+util.queryDecoratedElement = function(query, type) {
+  var element = queryRequiredElement(document, query);
+  cr.ui.decorate(element, type);
+  return element;
 };
 
 /**
  * Updates the app state.
  *
- * @param {string} currentDirectoryURL Currently opened directory as an URL.
+ * @param {?string} currentDirectoryURL Currently opened directory as an URL.
  *     If null the value is left unchanged.
- * @param {string} selectionURL Currently selected entry as an URL. If null the
+ * @param {?string} selectionURL Currently selected entry as an URL. If null the
  *     value is left unchanged.
  * @param {string|Object=} opt_param Additional parameters, to be stored. If
  *     null, then left unchanged.
@@ -402,10 +397,10 @@ util.AppCache.getValue = function(key, callback) {
 };
 
 /**
- * Update the cache.
+ * Updates the cache.
  *
  * @param {string} key Key.
- * @param {string} value Value. Remove the key if value is null.
+ * @param {?(string|number)} value Value. Remove the key if value is null.
  * @param {number=} opt_lifetime Maximum time to keep an item (in milliseconds).
  */
 util.AppCache.update = function(key, value, opt_lifetime) {
@@ -483,37 +478,6 @@ util.AppCache.cleanup_ = function(map) {
   for (var i = 0; i != itemsToDelete; i++) {
     delete map[keys[i]];
   }
-};
-
-/**
- * Load an image.
- *
- * @param {HTMLImageElement} image Image element.
- * @param {string} url Source url.
- * @param {Object=} opt_options Hash array of options, eg. width, height,
- *     maxWidth, maxHeight, scale, cache.
- * @param {function()=} opt_isValid Function returning false iff the task
- *     is not valid and should be aborted.
- * @return {?number} Task identifier or null if fetched immediately from
- *     cache.
- */
-util.loadImage = function(image, url, opt_options, opt_isValid) {
-  return ImageLoaderClient.loadToImage(url,
-                                       image,
-                                       opt_options || {},
-                                       function() {},
-                                       function() {
-                                         image.onerror(new Event('load-error'));
-                                       },
-                                       opt_isValid);
-};
-
-/**
- * Cancels loading an image.
- * @param {number} taskId Task identifier returned by util.loadImage().
- */
-util.cancelLoadImage = function(taskId) {
-  ImageLoaderClient.getInstance().cancel(taskId);
 };
 
 /**
@@ -725,6 +689,29 @@ util.comparePath = function(entry1, entry2) {
 };
 
 /**
+ * Checks if {@code entry} is an immediate child of {@code directory}.
+ *
+ * @param {Entry} entry The presumptive child.
+ * @param {DirectoryEntry} directory The presumptive parent.
+ * @return {!Promise.<boolean>} Resolves with true if {@code directory} is
+ *     parent of {@code entry}.
+ */
+util.isChildEntry = function(entry, directory) {
+  return new Promise(
+      function(resolve, reject) {
+        if (!entry || !directory) {
+          resolve(false);
+        }
+
+        entry.getParent(
+            function(parent) {
+              resolve(util.isSameEntry(parent, directory));
+            },
+            reject);
+    });
+};
+
+/**
  * Checks if the child entry is a descendant of another entry. If the entries
  * point to the same file or directory, then returns false.
  *
@@ -836,6 +823,19 @@ util.URLsToEntries = function(urls, opt_callback) {
 };
 
 /**
+ * Converts a url into an {!Entry}, if possible.
+ *
+ * @param {string} url
+ *
+ * @return {!Promise.<!Entry>} Promise Resolves with the corresponding
+ *     {!Entry} if possible, else rejects.
+ */
+util.urlToEntry = function(url) {
+  return new Promise(
+      window.webkitResolveLocalFileSystemURL.bind(null, url));
+};
+
+/**
  * Returns whether the window is teleported or not.
  * @param {Window} window Window.
  * @return {Promise.<boolean>} Whether the window is teleported or not.
@@ -926,14 +926,11 @@ util.splitExtension = function(path) {
 /**
  * Returns the localized name of the entry.
  *
- * @param {{getLocationInfo: (function(!Entry): EntryLocation)}}
- *     volumeManager The volume manager.
+ * @param {EntryLocation} locationInfo
  * @param {!Entry} entry The entry to be retrieve the name of.
  * @return {?string} The localized name.
  */
-util.getEntryLabel = function(volumeManager, entry) {
-  var locationInfo = volumeManager.getLocationInfo(entry);
-
+util.getEntryLabel = function(locationInfo, entry) {
   if (locationInfo && locationInfo.isRootEntry) {
     switch (locationInfo.rootType) {
       case VolumeManagerCommon.RootType.DOWNLOADS:
@@ -1016,5 +1013,19 @@ util.validateFileName = function(parentEntry, name, filterHiddenOn) {
           else
             reject(str('ERROR_LONG_NAME'));
         });
+  });
+};
+
+/**
+ * Adds a foregorund listener to the background page components.
+ * The lisner will be removed when the foreground window is closed.
+ * @param {!cr.EventTarget} target
+ * @param {string} type
+ * @param {Function} handler
+ */
+util.addEventListenerToBackgroundComponent = function(target, type, handler) {
+  target.addEventListener(type, handler);
+  window.addEventListener('pagehide', function() {
+    target.removeEventListener(type, handler);
   });
 };

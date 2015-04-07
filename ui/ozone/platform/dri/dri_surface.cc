@@ -4,6 +4,7 @@
 
 #include "ui/ozone/platform/dri/dri_surface.h"
 
+#include "base/bind_helpers.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
 #include "third_party/skia/include/core/SkCanvas.h"
@@ -43,8 +44,8 @@ DriSurface::DriSurface(DriWindowDelegate* window_delegate, DriWrapper* dri)
 DriSurface::~DriSurface() {
 }
 
-skia::RefPtr<SkCanvas> DriSurface::GetCanvas() {
-  return skia::SharePtr(surface_->getCanvas());
+skia::RefPtr<SkSurface> DriSurface::GetSurface() {
+  return surface_;
 }
 
 void DriSurface::ResizeCanvas(const gfx::Size& viewport_size) {
@@ -73,8 +74,7 @@ void DriSurface::PresentCanvas(const gfx::Rect& damage) {
   controller->QueueOverlayPlane(OverlayPlane(buffers_[front_buffer_ ^ 1]));
 
   UpdateNativeSurface(damage);
-  controller->SchedulePageFlip();
-  controller->WaitForPageFlipEvent();
+  controller->SchedulePageFlip(base::Bind(&base::DoNothing));
 
   // Update our front buffer pointer.
   front_buffer_ ^= 1;

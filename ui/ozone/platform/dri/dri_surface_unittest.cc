@@ -22,6 +22,7 @@ const drmModeModeInfo kDefaultMode =
 
 const uint32_t kDefaultCrtc = 1;
 const uint32_t kDefaultConnector = 2;
+const size_t kPlanesPerCrtc = 1;
 
 class MockDriWindowDelegate : public ui::DriWindowDelegate {
  public:
@@ -44,6 +45,12 @@ class MockDriWindowDelegate : public ui::DriWindowDelegate {
     return controller_.get();
   }
   void OnBoundsChanged(const gfx::Rect& bounds) override {}
+  void SetCursor(const std::vector<SkBitmap>& bitmaps,
+                 const gfx::Point& location,
+                 int frame_delay_ms) override {}
+  void SetCursorWithoutAnimations(const std::vector<SkBitmap>& bitmaps,
+                                  const gfx::Point& location) override {}
+  void MoveCursor(const gfx::Point& location) override {}
 
  private:
   scoped_ptr<ui::HardwareDisplayController> controller_;
@@ -72,7 +79,9 @@ class DriSurfaceTest : public testing::Test {
 
 void DriSurfaceTest::SetUp() {
   message_loop_.reset(new base::MessageLoopForUI);
-  drm_.reset(new ui::MockDriWrapper(3));
+  std::vector<uint32_t> crtcs;
+  crtcs.push_back(kDefaultCrtc);
+  drm_.reset(new ui::MockDriWrapper(3, true, crtcs, kPlanesPerCrtc));
   window_delegate_.reset(new MockDriWindowDelegate(drm_.get()));
   surface_.reset(new ui::DriSurface(window_delegate_.get(), drm_.get()));
   surface_->ResizeCanvas(gfx::Size(kDefaultMode.hdisplay,
@@ -99,7 +108,7 @@ TEST_F(DriSurfaceTest, CheckSurfaceContents) {
   paint.setColor(SK_ColorWHITE);
   SkRect rect = SkRect::MakeWH(kDefaultMode.hdisplay / 2,
                                kDefaultMode.vdisplay / 2);
-  surface_->GetCanvas()->drawRect(rect, paint);
+  surface_->GetSurface()->getCanvas()->drawRect(rect, paint);
   surface_->PresentCanvas(
       gfx::Rect(0, 0, kDefaultMode.hdisplay / 2, kDefaultMode.vdisplay / 2));
 

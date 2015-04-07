@@ -432,11 +432,14 @@ class MsvsSettings(object):
     cl('OmitFramePointers', map={'false': '-', 'true': ''}, prefix='/Oy')
     cl('EnableIntrinsicFunctions', map={'false': '-', 'true': ''}, prefix='/Oi')
     cl('FavorSizeOrSpeed', map={'1': 't', '2': 's'}, prefix='/O')
+    cl('FloatingPointModel',
+        map={'0': 'precise', '1': 'strict', '2': 'fast'}, prefix='/fp:',
+        default='0')
     cl('WholeProgramOptimization', map={'true': '/GL'})
     cl('WarningLevel', prefix='/W')
     cl('WarnAsError', map={'true': '/WX'})
     cl('CallingConvention',
-        map={'0': 'd', '1': 'r', '2': 'z'}, prefix='/G')
+        map={'0': 'd', '1': 'r', '2': 'z', '3': 'v'}, prefix='/G')
     cl('DebugInformationFormat',
         map={'1': '7', '3': 'i', '4': 'I'}, prefix='/Z')
     cl('RuntimeTypeInfo', map={'true': '/GR', 'false': '/GR-'})
@@ -456,7 +459,7 @@ class MsvsSettings(object):
        map={'1': 'SSE', '2': 'SSE2', '3': 'AVX', '4': 'IA32'}, prefix='/arch:')
     cflags.extend(['/FI' + f for f in self._Setting(
         ('VCCLCompilerTool', 'ForcedIncludeFiles'), config, default=[])])
-    if self.vs_version.short_name in ('2013', '2013e'):
+    if self.vs_version.short_name in ('2013', '2013e', '2015'):
       # New flag required in 2013 to maintain previous PDB behavior.
       cflags.append('/FS')
     # ninja handles parallelism by itself, don't have the compiler do it too.
@@ -901,7 +904,8 @@ def GetVSVersion(generator_flags):
   global vs_version
   if not vs_version:
     vs_version = gyp.MSVSVersion.SelectVisualStudioVersion(
-        generator_flags.get('msvs_version', 'auto'))
+        generator_flags.get('msvs_version', 'auto'),
+        allow_fallback=False)
   return vs_version
 
 def _GetVsvarsSetupArgs(generator_flags, arch):

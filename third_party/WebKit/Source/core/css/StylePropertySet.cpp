@@ -95,8 +95,11 @@ ImmutableStylePropertySet::~ImmutableStylePropertySet()
 {
 #if !ENABLE(OILPAN)
     RawPtrWillBeMember<CSSValue>* valueArray = const_cast<RawPtrWillBeMember<CSSValue>*>(this->valueArray());
-    for (unsigned i = 0; i < m_arraySize; ++i)
-        valueArray[i]->deref();
+    for (unsigned i = 0; i < m_arraySize; ++i) {
+        // Checking for nullptr here is a workaround to prevent crashing.  http://crbug.com/449032
+        if (valueArray[i])
+            valueArray[i]->deref();
+    }
 #endif
 }
 
@@ -573,7 +576,7 @@ unsigned StylePropertySet::averageSizeInBytes()
 struct SameSizeAsStylePropertySet : public RefCountedWillBeGarbageCollectedFinalized<SameSizeAsStylePropertySet> {
     unsigned bitfield;
 };
-COMPILE_ASSERT(sizeof(StylePropertySet) == sizeof(SameSizeAsStylePropertySet), style_property_set_should_stay_small);
+static_assert(sizeof(StylePropertySet) == sizeof(SameSizeAsStylePropertySet), "StylePropertySet should stay small");
 
 #ifndef NDEBUG
 void StylePropertySet::showStyle()

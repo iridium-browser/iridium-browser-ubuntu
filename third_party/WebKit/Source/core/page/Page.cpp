@@ -53,6 +53,7 @@
 #include "core/page/StorageClient.h"
 #include "core/page/ValidationMessageClient.h"
 #include "core/page/scrolling/ScrollingCoordinator.h"
+#include "core/rendering/RenderLayer.h"
 #include "core/rendering/RenderView.h"
 #include "core/rendering/TextAutosizer.h"
 #include "core/storage/StorageNamespace.h"
@@ -187,8 +188,11 @@ PassRefPtrWillBeRawPtr<ClientRectList> Page::nonFastScrollableRects(const LocalF
         deprecatedLocalMainFrame()->document()->updateLayout();
 
     Vector<IntRect> rects;
-    if (ScrollingCoordinator* scrollingCoordinator = this->scrollingCoordinator())
+    if (ScrollingCoordinator* scrollingCoordinator = this->scrollingCoordinator()) {
+        // Hits in compositing/iframes/iframe-composited-scrolling.html
+        DisableCompositingQueryAsserts disabler;
         rects = scrollingCoordinator->computeShouldHandleScrollGestureOnMainThreadRegion(frame, IntPoint()).rects();
+    }
 
     Vector<FloatQuad> quads(rects.size());
     for (size_t i = 0; i < rects.size(); ++i)
@@ -225,12 +229,12 @@ void Page::setOpenedByDOM()
     m_openedByDOM = true;
 }
 
-void Page::scheduleForcedStyleRecalcForAllPages()
+void Page::platformColorsChanged()
 {
     for (const Page* page : allPages())
         for (Frame* frame = page->mainFrame(); frame; frame = frame->tree().traverseNext()) {
             if (frame->isLocalFrame())
-                toLocalFrame(frame)->document()->setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::create(StyleChangeReason::PlatformColorChange));
+                toLocalFrame(frame)->document()->platformColorsChanged();
         }
 }
 
@@ -254,31 +258,18 @@ void Page::setNeedsLayoutInAllFrames()
     }
 }
 
-void Page::refreshPlugins(bool reload)
+void Page::refreshPlugins()
 {
     if (allPages().isEmpty())
         return;
 
     PluginData::refresh();
 
-    WillBeHeapVector<RefPtrWillBeMember<LocalFrame>> framesNeedingReload;
-
     for (const Page* page : allPages()) {
         // Clear out the page's plug-in data.
         if (page->m_pluginData)
             page->m_pluginData = nullptr;
-
-        if (!reload)
-            continue;
-
-        for (Frame* frame = page->mainFrame(); frame; frame = frame->tree().traverseNext()) {
-            if (frame->isLocalFrame() && toLocalFrame(frame)->document()->containsPlugins())
-                framesNeedingReload.append(toLocalFrame(frame));
-        }
     }
-
-    for (size_t i = 0; i < framesNeedingReload.size(); ++i)
-        framesNeedingReload[i]->loader().reload(NormalReload);
 }
 
 PluginData* Page::pluginData() const
@@ -569,7 +560,7 @@ void Page::acceptLanguagesChanged()
     }
 
     for (unsigned i = 0; i < frames.size(); ++i)
-        frames[i]->domWindow()->acceptLanguagesChanged();
+        frames[i]->localDOMWindow()->acceptLanguagesChanged();
 }
 
 PageLifecycleNotifier& Page::lifecycleNotifier()
@@ -633,6 +624,8 @@ void Page::willBeDestroyed()
     if (m_validationMessageClient)
         m_validationMessageClient->willBeDestroyed();
     m_mainFrame = nullptr;
+
+    Page::notifyContextDestroyed();
 }
 
 Page::PageClients::PageClients()

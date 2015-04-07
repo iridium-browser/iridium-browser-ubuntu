@@ -77,11 +77,6 @@ enum ReasonForCallingAllowPlugins {
     NotAboutToInstantiatePlugin
 };
 
-enum ReloadPolicy {
-    NormalReload,
-    EndToEndReload
-};
-
 enum LoadStartType {
     NavigationToDifferentDocument,
     NavigationWithinSameDocument
@@ -90,11 +85,6 @@ enum LoadStartType {
 enum SameDocumentNavigationSource {
     SameDocumentNavigationDefault,
     SameDocumentNavigationHistoryApi,
-};
-
-enum ClientRedirectPolicy {
-    NotClientRedirect,
-    ClientRedirect
 };
 
 enum HistoryLoadType {

@@ -8,6 +8,7 @@
 #include "cc/animation/layer_animation_controller.h"
 #include "cc/animation/scroll_offset_animation_curve.h"
 #include "cc/animation/timing_function.h"
+#include "cc/base/time_util.h"
 #include "cc/layers/layer.h"
 #include "cc/layers/layer_impl.h"
 #include "cc/test/animation_test_common.h"
@@ -105,13 +106,12 @@ MULTI_THREAD_TEST_F(
     LayerTreeHostAnimationTestSetNeedsAnimateInsideAnimationCallback);
 
 // Add a layer animation and confirm that
-// LayerTreeHostImpl::updateAnimationState does get called and continues to
-// get called.
+// LayerTreeHostImpl::UpdateAnimationState does get called.
 class LayerTreeHostAnimationTestAddAnimation
     : public LayerTreeHostAnimationTest {
  public:
   LayerTreeHostAnimationTestAddAnimation()
-      : num_begin_frames_(0), received_animation_started_notification_(false) {}
+      : update_animation_state_was_called_(false) {}
 
   void BeginTest() override {
     PostAddInstantAnimationToMainThread(layer_tree_host()->root_layer());
@@ -119,53 +119,28 @@ class LayerTreeHostAnimationTestAddAnimation
 
   void UpdateAnimationState(LayerTreeHostImpl* host_impl,
                             bool has_unfinished_animation) override {
-    if (!num_begin_frames_) {
-      // The animation had zero duration so LayerTreeHostImpl should no
-      // longer need to animate its layers.
-      EXPECT_FALSE(has_unfinished_animation);
-      num_begin_frames_++;
-      return;
-    }
-
-    if (received_animation_started_notification_) {
-      EXPECT_LT(base::TimeTicks(), start_time_);
-
-      LayerAnimationController* controller_impl =
-          host_impl->active_tree()->root_layer()->layer_animation_controller();
-      Animation* animation_impl =
-          controller_impl->GetAnimation(Animation::Opacity);
-      if (animation_impl)
-        controller_impl->RemoveAnimation(animation_impl->id());
-
-      EndTest();
-    }
+    EXPECT_FALSE(has_unfinished_animation);
+    update_animation_state_was_called_ = true;
   }
 
   void NotifyAnimationStarted(base::TimeTicks monotonic_time,
                               Animation::TargetProperty target_property,
                               int group) override {
-    received_animation_started_notification_ = true;
-    start_time_ = monotonic_time;
-    if (num_begin_frames_) {
-      EXPECT_LT(base::TimeTicks(), start_time_);
+    EXPECT_LT(base::TimeTicks(), monotonic_time);
 
-      LayerAnimationController* controller =
-          layer_tree_host()->root_layer()->layer_animation_controller();
-      Animation* animation =
-          controller->GetAnimation(Animation::Opacity);
-      if (animation)
-        controller->RemoveAnimation(animation->id());
+    LayerAnimationController* controller =
+        layer_tree_host()->root_layer()->layer_animation_controller();
+    Animation* animation = controller->GetAnimation(Animation::Opacity);
+    if (animation)
+      controller->RemoveAnimation(animation->id());
 
-      EndTest();
-    }
+    EndTest();
   }
 
-  void AfterTest() override {}
+  void AfterTest() override { EXPECT_TRUE(update_animation_state_was_called_); }
 
  private:
-  int num_begin_frames_;
-  bool received_animation_started_notification_;
-  base::TimeTicks start_time_;
+  bool update_animation_state_was_called_;
 };
 
 SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostAnimationTestAddAnimation);
@@ -348,8 +323,9 @@ class LayerTreeHostAnimationTestNoBackgroundTickingWithoutActiveTree
   LayerTreeHostAnimationTestNoBackgroundTickingWithoutActiveTree()
       : active_tree_was_animated_(false) {}
 
-  base::TimeDelta LowFrequencyAnimationInterval() const override {
-    return base::TimeDelta::FromMilliseconds(4);
+  base::TimeDelta BackgroundAnimationInterval(LayerTreeHostImpl* host_impl) {
+    return base::TimeDelta::FromSecondsD(
+        1.0 / host_impl->settings().background_animation_rate);
   }
 
   void BeginTest() override {
@@ -409,10 +385,9 @@ class LayerTreeHostAnimationTestNoBackgroundTickingWithoutActiveTree
           FROM_HERE,
           base::Bind(
               &LayerTreeHostAnimationTestNoBackgroundTickingWithoutActiveTree::
-                   UnblockActivations,
-              base::Unretained(this),
-              host_impl),
-          4 * LowFrequencyAnimationInterval());
+                  UnblockActivations,
+              base::Unretained(this), host_impl),
+          4 * BackgroundAnimationInterval(host_impl));
     }
   }
 
@@ -447,10 +422,9 @@ class LayerTreeHostAnimationTestNoBackgroundTickingWithoutActiveTree
           FROM_HERE,
           base::Bind(
               &LayerTreeHostAnimationTestNoBackgroundTickingWithoutActiveTree::
-                   InitiateNextCommit,
-              base::Unretained(this),
-              host_impl),
-          4 * LowFrequencyAnimationInterval());
+                  InitiateNextCommit,
+              base::Unretained(this), host_impl),
+          4 * BackgroundAnimationInterval(host_impl));
     }
   }
 
@@ -504,11 +478,11 @@ class LayerTreeHostAnimationTestAddAnimationWithTimingFunction
 
     const FloatAnimationCurve* curve =
         animation->curve()->ToFloatAnimationCurve();
-    float start_opacity = curve->GetValue(0.0);
+    float start_opacity = curve->GetValue(base::TimeDelta());
     float end_opacity = curve->GetValue(curve->Duration());
     float linearly_interpolated_opacity =
         0.25f * end_opacity + 0.75f * start_opacity;
-    double time = curve->Duration() * 0.25;
+    base::TimeDelta time = TimeUtil::Scale(curve->Duration(), 0.25f);
     // If the linear timing function associated with this animation was not
     // picked up, then the linearly interpolated opacity would be different
     // because of the default ease timing function.
@@ -531,9 +505,7 @@ SINGLE_AND_MULTI_THREAD_TEST_F(
 class LayerTreeHostAnimationTestSynchronizeAnimationStartTimes
     : public LayerTreeHostAnimationTest {
  public:
-  LayerTreeHostAnimationTestSynchronizeAnimationStartTimes()
-      : main_start_time_(-1.0),
-        impl_start_time_(-1.0) {}
+  LayerTreeHostAnimationTestSynchronizeAnimationStartTimes() {}
 
   void SetupTree() override {
     LayerTreeHostAnimationTest::SetupTree();
@@ -553,12 +525,9 @@ class LayerTreeHostAnimationTestSynchronizeAnimationStartTimes
         layer_animation_controller();
     Animation* animation =
         controller->GetAnimation(Animation::Opacity);
-    main_start_time_ =
-        (animation->start_time() - base::TimeTicks()).InSecondsF();
+    main_start_time_ = animation->start_time();
     controller->RemoveAnimation(animation->id());
-
-    if (impl_start_time_ > 0.0)
-      EndTest();
+    EndTest();
   }
 
   void UpdateAnimationState(LayerTreeHostImpl* impl_host,
@@ -571,21 +540,17 @@ class LayerTreeHostAnimationTestSynchronizeAnimationStartTimes
     if (!animation)
       return;
 
-    impl_start_time_ =
-        (animation->start_time() - base::TimeTicks()).InSecondsF();
-    controller->RemoveAnimation(animation->id());
-
-    if (main_start_time_ > 0.0)
-      EndTest();
+    impl_start_time_ = animation->start_time();
   }
 
   void AfterTest() override {
-    EXPECT_FLOAT_EQ(impl_start_time_, main_start_time_);
+    EXPECT_EQ(impl_start_time_, main_start_time_);
+    EXPECT_LT(base::TimeTicks(), impl_start_time_);
   }
 
  private:
-  double main_start_time_;
-  double impl_start_time_;
+  base::TimeTicks main_start_time_;
+  base::TimeTicks impl_start_time_;
   FakeContentLayerClient client_;
   scoped_refptr<FakeContentLayer> content_;
 };

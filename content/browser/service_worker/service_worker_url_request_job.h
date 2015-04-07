@@ -8,8 +8,11 @@
 #include <map>
 #include <string>
 
+#include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
+#include "content/browser/streams/stream_read_observer.h"
+#include "content/browser/streams/stream_register_observer.h"
 #include "content/common/content_export.h"
 #include "content/common/service_worker/service_worker_status_code.h"
 #include "content/common/service_worker/service_worker_types.h"
@@ -20,6 +23,11 @@
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_job.h"
 #include "third_party/WebKit/public/platform/WebServiceWorkerResponseType.h"
+#include "url/gurl.h"
+
+namespace net {
+class IOBuffer;
+}
 
 namespace storage {
 class BlobDataHandle;
@@ -28,20 +36,26 @@ class BlobStorageContext;
 
 namespace content {
 
+class ResourceContext;
 class ResourceRequestBody;
 class ServiceWorkerContextCore;
 class ServiceWorkerFetchDispatcher;
 class ServiceWorkerProviderHost;
+class ServiceWorkerVersion;
+class Stream;
 
 class CONTENT_EXPORT ServiceWorkerURLRequestJob
     : public net::URLRequestJob,
-      public net::URLRequest::Delegate {
+      public net::URLRequest::Delegate,
+      public StreamReadObserver,
+      public StreamRegisterObserver {
  public:
   ServiceWorkerURLRequestJob(
       net::URLRequest* request,
       net::NetworkDelegate* network_delegate,
       base::WeakPtr<ServiceWorkerProviderHost> provider_host,
       base::WeakPtr<storage::BlobStorageContext> blob_storage_context,
+      const ResourceContext* resource_context,
       FetchRequestMode request_mode,
       FetchCredentialsMode credentials_mode,
       RequestContextType request_context_type,
@@ -87,6 +101,12 @@ class CONTENT_EXPORT ServiceWorkerURLRequestJob
   void OnBeforeNetworkStart(net::URLRequest* request, bool* defer) override;
   void OnResponseStarted(net::URLRequest* request) override;
   void OnReadCompleted(net::URLRequest* request, int bytes_read) override;
+
+  // StreamObserver override:
+  void OnDataAvailable(Stream* stream) override;
+
+  // StreamRegisterObserver override:
+  void OnStreamRegistered(Stream* stream) override;
 
   const net::HttpResponseInfo* http_info() const;
 
@@ -140,6 +160,9 @@ class CONTENT_EXPORT ServiceWorkerURLRequestJob
   // Creates and commits a response header indicating error.
   void DeliverErrorResponse();
 
+  // Releases the resources for streaming.
+  void ClearStream();
+
   base::WeakPtr<ServiceWorkerProviderHost> provider_host_;
 
   // Timing info to show on the popup in Devtools' Network tab.
@@ -163,7 +186,13 @@ class CONTENT_EXPORT ServiceWorkerURLRequestJob
   // Used when response type is FORWARD_TO_SERVICE_WORKER.
   scoped_ptr<ServiceWorkerFetchDispatcher> fetch_dispatcher_;
   base::WeakPtr<storage::BlobStorageContext> blob_storage_context_;
+  const ResourceContext* resource_context_;
   scoped_ptr<net::URLRequest> blob_request_;
+  scoped_refptr<Stream> stream_;
+  GURL waiting_stream_url_;
+  scoped_refptr<net::IOBuffer> stream_pending_buffer_;
+  int stream_pending_buffer_size_;
+
   FetchRequestMode request_mode_;
   FetchCredentialsMode credentials_mode_;
   RequestContextType request_context_type_;
@@ -173,6 +202,7 @@ class CONTENT_EXPORT ServiceWorkerURLRequestJob
   // using the userdata mechanism. So we have to keep it not to free the blobs.
   scoped_refptr<ResourceRequestBody> body_;
   scoped_ptr<storage::BlobDataHandle> request_body_blob_data_handle_;
+  scoped_refptr<ServiceWorkerVersion> streaming_version_;
 
   base::WeakPtrFactory<ServiceWorkerURLRequestJob> weak_factory_;
 

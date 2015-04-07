@@ -29,6 +29,7 @@ var selectionAnchor = -1;
 var activeVisit = null;
 
 /** @const */ var Command = cr.ui.Command;
+/** @const */ var FocusOutlineManager = cr.ui.FocusOutlineManager;
 /** @const */ var Menu = cr.ui.Menu;
 /** @const */ var MenuButton = cr.ui.MenuButton;
 
@@ -930,7 +931,21 @@ HistoryFocusGrid.prototype = {
 
   /** @override */
   onMousedown: function(row, e) {
-    return !!findAncestorByClass(e.target, 'menu-button');
+    // TODO(dbeam): Can cr.ui.FocusGrid know about cr.ui.MenuButton? If so, bake
+    // this logic into the base class directly.
+    var menuButton = findAncestorByClass(e.target, 'menu-button');
+    if (menuButton) {
+      // Deactivate any other active row.
+      this.rows.some(function(r) {
+        if (r.activeIndex >= 0 && r != row) {
+          r.activeIndex = -1;
+          return true;
+        }
+      });
+      // Activate only the row with a pressed menu button.
+      row.activeIndex = row.items.indexOf(menuButton);
+    }
+    return !!menuButton;
   },
 };
 
@@ -1311,7 +1326,11 @@ HistoryView.prototype.clear_ = function() {
   if (alertOverlay && alertOverlay.classList.contains('showing'))
     hideConfirmationOverlay();
 
-  this.resultDiv_.textContent = '';
+  // Remove everything but <h3 id="results-header"> (the first child).
+  while (this.resultDiv_.children.length > 1) {
+    this.resultDiv_.removeChild(this.resultDiv_.lastElementChild);
+  }
+  $('results-header').textContent = '';
 
   this.currentVisits_.forEach(function(visit) {
     visit.isRendered = false;
@@ -1573,13 +1592,19 @@ HistoryView.prototype.displayResults_ = function(doneLoading) {
   var groupByDomain = this.model_.getGroupByDomain();
 
   if (searchText) {
-    // Add a header for the search results, if there isn't already one.
-    if (!this.resultDiv_.querySelector('h3')) {
-      var header = document.createElement('h3');
-      header.textContent = loadTimeData.getStringF('searchResultsFor',
-                                                   searchText);
-      this.resultDiv_.appendChild(header);
+    var headerText;
+    if (!doneLoading) {
+      headerText = loadTimeData.getStringF('searchResultsFor', searchText);
+    } else if (results.length == 0) {
+      headerText = loadTimeData.getString('noSearchResults');
+    } else {
+      var resultId = results.length == 1 ? 'searchResult' : 'searchResults';
+      headerText = loadTimeData.getStringF('foundSearchResults',
+                                           results.length,
+                                           loadTimeData.getString(resultId),
+                                           searchText);
     }
+    $('results-header').textContent = headerText;
 
     this.addTimeframeInterval_(this.resultDiv_);
 
@@ -1589,11 +1614,7 @@ HistoryView.prototype.displayResults_ = function(doneLoading) {
     if (!this.model_.editingEntriesAllowed)
       searchResults.classList.add('no-checkboxes');
 
-    if (results.length == 0 && doneLoading) {
-      var noSearchResults = searchResults.appendChild(
-          createElementWithClassName('div', 'no-results-message'));
-      noSearchResults.textContent = loadTimeData.getString('noSearchResults');
-    } else {
+    if (doneLoading) {
       for (var i = 0, visit; visit = results[i]; i++) {
         if (!visit.isRendered) {
           searchResults.appendChild(visit.getResultDOM({
@@ -1610,13 +1631,12 @@ HistoryView.prototype.displayResults_ = function(doneLoading) {
 
     this.addTimeframeInterval_(resultsFragment);
 
-    if (results.length == 0 && doneLoading) {
-      var noResults = resultsFragment.appendChild(
-          createElementWithClassName('div', 'no-results-message'));
-      noResults.textContent = loadTimeData.getString('noResults');
-      this.resultDiv_.appendChild(resultsFragment);
+    var noResults = results.length == 0 && doneLoading;
+    $('results-header').textContent = noResults ?
+        loadTimeData.getString('noResults') : '';
+
+    if (noResults)
       return;
-    }
 
     if (this.getRangeInDays() == HistoryModel.Range.MONTH &&
         groupByDomain) {
@@ -1682,9 +1702,9 @@ HistoryView.prototype.updateFocusGrid_ = function() {
 HistoryView.prototype.updateNavBar_ = function() {
   this.updateRangeButtons_();
 
-  // Supervised users have the control bar on top, don't show it on the bottom
-  // as well.
-  if (!loadTimeData.getBoolean('isSupervisedProfile')) {
+  // If grouping by domain is enabled, there's a control bar on top, don't show
+  // the one on the bottom as well.
+  if (!loadTimeData.getBoolean('groupByDomain')) {
     $('newest-button').hidden = this.pageIndex_ == 0;
     $('newer-button').hidden = this.pageIndex_ == 0;
     $('older-button').hidden =
@@ -1885,6 +1905,7 @@ PageState.getHashString = function(term, page, range, offset) {
  */
 function load() {
   uber.onContentFrameLoaded();
+  FocusOutlineManager.forDocument(document);
 
   var searchField = $('search-field');
 
@@ -1924,7 +1945,7 @@ function load() {
     });
   }
 
-  if (!loadTimeData.getBoolean('showDeleteVisitUI'))
+  if (loadTimeData.getBoolean('hideDeleteVisitUI'))
     $('remove-visit').hidden = true;
 
   searchField.addEventListener('search', doSearch);
@@ -1935,15 +1956,16 @@ function load() {
     activeVisit = null;
   });
 
-  // Only show the controls if the command line switch is activated.
-  if (loadTimeData.getBoolean('groupByDomain') ||
-      loadTimeData.getBoolean('isSupervisedProfile')) {
-    // Hide the top container which has the "Clear browsing data" and "Remove
-    // selected entries" buttons since they're unavailable for supervised users.
-    $('top-container').hidden = true;
+  // Only show the controls if the command line switch is activated or the user
+  // is supervised.
+  if (loadTimeData.getBoolean('groupByDomain')) {
     $('history-page').classList.add('big-topbar-page');
     $('filter-controls').hidden = false;
   }
+  // Hide the top container which has the "Clear browsing data" and "Remove
+  // selected entries" buttons if deleting history is not allowed.
+  if (!loadTimeData.getBoolean('allowDeletingHistory'))
+    $('top-container').hidden = true;
 
   uber.setTitle(loadTimeData.getString('title'));
 
@@ -2032,10 +2054,23 @@ function showConfirmationOverlay() {
   $('history-page').setAttribute('aria-hidden', 'true');
   uber.invokeMethodOnParent('beginInterceptingEvents');
 
-  // If an element is focused behind the confirm overlay, blur it so focus
-  // doesn't accidentally get stuck behind it.
+  // Change focus to the overlay if any other control was focused by keyboard
+  // before. Otherwise, no one should have focus.
+  var focusOverlay = FocusOutlineManager.forDocument(document).visible &&
+                     document.activeElement != document.body;
   if ($('history-page').contains(document.activeElement))
     document.activeElement.blur();
+
+  if (focusOverlay) {
+    // Wait until the browser knows the button has had a chance to become
+    // visible.
+    window.requestAnimationFrame(function() {
+      var button = cr.ui.overlay.getDefaultButton($('overlay'));
+      if (button)
+        button.focus();
+    });
+  }
+  $('alertOverlay').classList.toggle('focus-on-hide', focusOverlay);
 }
 
 /**
@@ -2112,6 +2147,10 @@ function removeItems() {
         historyView.reload.bind(historyView));
     $('overlay').removeEventListener('cancelOverlay', onCancelRemove);
     hideConfirmationOverlay();
+    if ($('alertOverlay').classList.contains('focus-on-hide') &&
+        FocusOutlineManager.forDocument(document).visible) {
+      $('search-field').focus();
+    }
   }
 
   function onCancelRemove() {
@@ -2126,6 +2165,10 @@ function removeItems() {
     }
     $('overlay').removeEventListener('cancelOverlay', onCancelRemove);
     hideConfirmationOverlay();
+    if ($('alertOverlay').classList.contains('focus-on-hide') &&
+        FocusOutlineManager.forDocument(document).visible) {
+      $('remove-selected').focus();
+    }
   }
 
   if (checked.length) {

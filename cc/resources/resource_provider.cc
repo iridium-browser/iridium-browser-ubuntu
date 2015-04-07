@@ -9,6 +9,7 @@
 
 #include "base/containers/hash_tables.h"
 #include "base/debug/trace_event.h"
+#include "base/metrics/histogram.h"
 #include "base/stl_util.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -75,6 +76,7 @@ GLenum TextureToStorageFormat(ResourceFormat format) {
     case LUMINANCE_8:
     case RGB_565:
     case ETC1:
+    case RED_8:
       NOTREACHED();
       break;
   }
@@ -93,6 +95,7 @@ bool IsFormatSupportedForStorage(ResourceFormat format, bool use_bgra) {
     case LUMINANCE_8:
     case RGB_565:
     case ETC1:
+    case RED_8:
       return false;
   }
   return false;
@@ -124,6 +127,7 @@ gfx::GpuMemoryBuffer::Format ToGpuMemoryBufferFormat(ResourceFormat format) {
     case LUMINANCE_8:
     case RGB_565:
     case ETC1:
+    case RED_8:
       break;
   }
   NOTREACHED();
@@ -198,11 +202,11 @@ class BufferIdAllocator : public IdAllocator {
   DISALLOW_COPY_AND_ASSIGN(BufferIdAllocator);
 };
 
-// Generic fence implementation for query objects. Fence has passed when query
-// result is available.
-class QueryFence : public ResourceProvider::Fence {
+// Query object based fence implementation used to detect completion of copy
+// texture operations. Fence has passed when query result is available.
+class CopyTextureFence : public ResourceProvider::Fence {
  public:
-  QueryFence(gpu::gles2::GLES2Interface* gl, unsigned query_id)
+  CopyTextureFence(gpu::gles2::GLES2Interface* gl, unsigned query_id)
       : gl_(gl), query_id_(query_id) {}
 
   // Overridden from ResourceProvider::Fence:
@@ -211,20 +215,31 @@ class QueryFence : public ResourceProvider::Fence {
     unsigned available = 1;
     gl_->GetQueryObjectuivEXT(
         query_id_, GL_QUERY_RESULT_AVAILABLE_EXT, &available);
-    return !!available;
+    if (!available)
+      return false;
+
+    ProcessResult();
+    return true;
   }
   void Wait() override {
-    unsigned result = 0;
-    gl_->GetQueryObjectuivEXT(query_id_, GL_QUERY_RESULT_EXT, &result);
+    // ProcessResult() will wait for result to become available.
+    ProcessResult();
   }
 
  private:
-  ~QueryFence() override {}
+  ~CopyTextureFence() override {}
+
+  void ProcessResult() {
+    unsigned time_elapsed_us = 0;
+    gl_->GetQueryObjectuivEXT(query_id_, GL_QUERY_RESULT_EXT, &time_elapsed_us);
+    UMA_HISTOGRAM_CUSTOM_COUNTS("Renderer4.CopyTextureLatency", time_elapsed_us,
+                                0, 256000, 50);
+  }
 
   gpu::gles2::GLES2Interface* gl_;
   unsigned query_id_;
 
-  DISALLOW_COPY_AND_ASSIGN(QueryFence);
+  DISALLOW_COPY_AND_ASSIGN(CopyTextureFence);
 };
 
 }  // namespace
@@ -540,17 +555,9 @@ ResourceProvider::ResourceId ResourceProvider::CreateBitmap(
     const gfx::Size& size, GLint wrap_mode) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
-  scoped_ptr<SharedBitmap> bitmap;
-  if (shared_bitmap_manager_)
-    bitmap = shared_bitmap_manager_->AllocateSharedBitmap(size);
-
-  uint8_t* pixels;
-  if (bitmap) {
-    pixels = bitmap->pixels();
-  } else {
-    size_t bytes = SharedBitmap::CheckedSizeInBytes(size);
-    pixels = new uint8_t[bytes];
-  }
+  scoped_ptr<SharedBitmap> bitmap =
+      shared_bitmap_manager_->AllocateSharedBitmap(size);
+  uint8_t* pixels = bitmap->pixels();
   DCHECK(pixels);
 
   ResourceId id = next_id_++;
@@ -600,28 +607,18 @@ ResourceProvider::ResourceId ResourceProvider::CreateResourceFromTextureMailbox(
                         gfx::Size(),
                         Resource::External,
                         mailbox.target(),
-                        GL_LINEAR,
+                        mailbox.nearest_neighbor() ? GL_NEAREST : GL_LINEAR,
                         0,
                         GL_CLAMP_TO_EDGE,
                         TextureHintImmutable,
                         RGBA_8888);
   } else {
     DCHECK(mailbox.IsSharedMemory());
-    base::SharedMemory* shared_memory = mailbox.shared_memory();
-    DCHECK(shared_memory->memory());
-    uint8_t* pixels = reinterpret_cast<uint8_t*>(shared_memory->memory());
+    SharedBitmap* shared_bitmap = mailbox.shared_bitmap();
+    uint8_t* pixels = shared_bitmap->pixels();
     DCHECK(pixels);
-    scoped_ptr<SharedBitmap> shared_bitmap;
-    if (shared_bitmap_manager_) {
-      shared_bitmap =
-          shared_bitmap_manager_->GetBitmapForSharedMemory(shared_memory);
-    }
-    resource = Resource(pixels,
-                        shared_bitmap.release(),
-                        mailbox.shared_memory_size(),
-                        Resource::External,
-                        GL_LINEAR,
-                        GL_CLAMP_TO_EDGE);
+    resource = Resource(pixels, shared_bitmap, mailbox.shared_memory_size(),
+                        Resource::External, GL_LINEAR, GL_CLAMP_TO_EDGE);
   }
   resource.allocated = true;
   resource.mailbox = mailbox;
@@ -699,13 +696,8 @@ void ResourceProvider::DeleteResourceInternal(ResourceMap::iterator it,
       }
     } else {
       DCHECK(resource->mailbox.IsSharedMemory());
-      base::SharedMemory* shared_memory = resource->mailbox.shared_memory();
-      if (resource->pixels && shared_memory) {
-        DCHECK(shared_memory->memory() == resource->pixels);
-        resource->pixels = NULL;
-        delete resource->shared_bitmap;
-        resource->shared_bitmap = NULL;
-      }
+      resource->shared_bitmap = nullptr;
+      resource->pixels = nullptr;
     }
     resource->release_callback_impl.Run(
         sync_point, lost_resource, blocking_main_thread_task_runner_);
@@ -782,9 +774,9 @@ void ResourceProvider::SetPixels(ResourceId id,
     image += source_offset.y() * image_row_bytes + source_offset.x() * 4;
 
     ScopedWriteLockSoftware lock(this, id);
-    SkCanvas* dest = lock.sk_canvas();
-    dest->writePixels(
-        source_info, image, image_row_bytes, dest_offset.x(), dest_offset.y());
+    SkCanvas dest(lock.sk_bitmap());
+    dest.writePixels(source_info, image, image_row_bytes, dest_offset.x(),
+                     dest_offset.y());
   }
 }
 
@@ -1026,7 +1018,6 @@ ResourceProvider::ScopedWriteLockSoftware::ScopedWriteLockSoftware(
       resource_(resource_provider->LockForWrite(resource_id)) {
   ResourceProvider::PopulateSkBitmapWithResource(&sk_bitmap_, resource_);
   DCHECK(valid());
-  sk_canvas_.reset(new SkCanvas(sk_bitmap_));
 }
 
 ResourceProvider::ScopedWriteLockSoftware::~ScopedWriteLockSoftware() {
@@ -1057,13 +1048,6 @@ ResourceProvider::ScopedWriteLockGpuMemoryBuffer::
   if (!resource_->image_id) {
     GLES2Interface* gl = resource_provider_->ContextGL();
     DCHECK(gl);
-
-#if defined(OS_CHROMEOS)
-    // TODO(reveman): GL_COMMANDS_ISSUED_CHROMIUM is used for synchronization
-    // on ChromeOS to avoid some performance issues. This only works with
-    // shared memory backed buffers. crbug.com/436314
-    DCHECK_EQ(gpu_memory_buffer_->GetHandle().type, gfx::SHARED_MEMORY_BUFFER);
-#endif
 
     resource_->image_id =
         gl->CreateImageCHROMIUM(gpu_memory_buffer_->AsClientBuffer(),
@@ -1107,20 +1091,15 @@ ResourceProvider::ScopedWriteLockGr::~ScopedWriteLockGr() {
 }
 
 SkSurface* ResourceProvider::ScopedWriteLockGr::GetSkSurface(
-    bool use_distance_field_text) {
+    bool use_distance_field_text,
+    bool can_use_lcd_text) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(resource_->locked_for_write);
 
-  // If the surface doesn't exist, or doesn't have the correct dff setting,
-  // recreate the surface within the resource.
-  if (!resource_->sk_surface ||
-      use_distance_field_text !=
-          resource_->sk_surface->props().isUseDistanceFieldFonts()) {
-    class GrContext* gr_context = resource_provider_->GrContext();
-    // TODO(alokp): Implement TestContextProvider::GrContext().
-    if (!gr_context)
-      return nullptr;
-
+  bool create_surface =
+      !resource_->sk_surface.get() ||
+      !SurfaceHasMatchingProperties(use_distance_field_text, can_use_lcd_text);
+  if (create_surface) {
     resource_provider_->LazyAllocate(resource_);
 
     GrBackendTextureDesc desc;
@@ -1130,17 +1109,38 @@ SkSurface* ResourceProvider::ScopedWriteLockGr::GetSkSurface(
     desc.fConfig = ToGrPixelConfig(resource_->format);
     desc.fOrigin = kTopLeft_GrSurfaceOrigin;
     desc.fTextureHandle = resource_->gl_id;
+
+    class GrContext* gr_context = resource_provider_->GrContext();
     skia::RefPtr<GrTexture> gr_texture =
         skia::AdoptRef(gr_context->wrapBackendTexture(desc));
     if (!gr_texture)
       return nullptr;
-    SkSurface::TextRenderMode text_render_mode =
-        use_distance_field_text ? SkSurface::kDistanceField_TextRenderMode
-                                : SkSurface::kStandard_TextRenderMode;
+    uint32_t flags = use_distance_field_text
+                         ? SkSurfaceProps::kUseDistanceFieldFonts_Flag
+                         : 0;
+    // Use unknown pixel geometry to disable LCD text.
+    SkSurfaceProps surface_props(flags, kUnknown_SkPixelGeometry);
+    if (can_use_lcd_text) {
+      // LegacyFontHost will get LCD text and skia figures out what type to use.
+      surface_props =
+          SkSurfaceProps(flags, SkSurfaceProps::kLegacyFontHost_InitType);
+    }
     resource_->sk_surface = skia::AdoptRef(SkSurface::NewRenderTargetDirect(
-        gr_texture->asRenderTarget(), text_render_mode));
+        gr_texture->asRenderTarget(), &surface_props));
   }
   return resource_->sk_surface.get();
+}
+
+bool ResourceProvider::ScopedWriteLockGr::SurfaceHasMatchingProperties(
+    bool use_distance_field_text,
+    bool can_use_lcd_text) const {
+  const SkSurface* surface = resource_->sk_surface.get();
+  bool surface_uses_distance_field_text =
+      surface->props().isUseDistanceFieldFonts();
+  bool surface_can_use_lcd_text =
+      surface->props().pixelGeometry() != kUnknown_SkPixelGeometry;
+  return use_distance_field_text == surface_uses_distance_field_text &&
+         can_use_lcd_text == surface_can_use_lcd_text;
 }
 
 ResourceProvider::SynchronousFence::SynchronousFence(
@@ -1193,6 +1193,7 @@ ResourceProvider::ResourceProvider(
       use_texture_format_bgra_(false),
       use_texture_usage_hint_(false),
       use_compressed_texture_etc1_(false),
+      yuv_resource_format_(LUMINANCE_8),
       max_texture_size_(0),
       best_texture_format_(RGBA_8888),
       use_rgba_4444_texture_format_(use_rgba_4444_texture_format),
@@ -1231,6 +1232,7 @@ void ResourceProvider::InitializeGL() {
   use_texture_format_bgra_ = caps.gpu.texture_format_bgra8888;
   use_texture_usage_hint_ = caps.gpu.texture_usage;
   use_compressed_texture_etc1_ = caps.gpu.texture_format_etc1;
+  yuv_resource_format_ = caps.gpu.texture_rg ? RED_8 : LUMINANCE_8;
   use_sync_query_ = caps.gpu.sync_query;
 
   GLES2Interface* gl = ContextGL();
@@ -1257,14 +1259,14 @@ void ResourceProvider::CleanUpGLIfNeeded() {
   }
 
   DCHECK(gl);
-#if DCHECK_IS_ON
+#if DCHECK_IS_ON()
   // Check that all GL resources has been deleted.
   for (ResourceMap::const_iterator itr = resources_.begin();
        itr != resources_.end();
        ++itr) {
     DCHECK_NE(GLTexture, itr->second.type);
   }
-#endif  // DCHECK_IS_ON
+#endif  // DCHECK_IS_ON()
 
   texture_uploader_ = nullptr;
   texture_id_allocator_ = nullptr;
@@ -2053,7 +2055,7 @@ void ResourceProvider::CopyResource(ResourceId source_id, ResourceId dest_id) {
   DCHECK(dest_resource->origin == Resource::Internal);
   DCHECK_EQ(dest_resource->exported_count, 0);
   DCHECK_EQ(GLTexture, dest_resource->type);
-  LazyCreate(dest_resource);
+  LazyAllocate(dest_resource);
 
   DCHECK_EQ(source_resource->type, dest_resource->type);
   DCHECK_EQ(source_resource->format, dest_resource->format);
@@ -2068,16 +2070,8 @@ void ResourceProvider::CopyResource(ResourceId source_id, ResourceId dest_id) {
   if (use_sync_query_) {
     if (!source_resource->gl_read_lock_query_id)
       gl->GenQueriesEXT(1, &source_resource->gl_read_lock_query_id);
-#if defined(OS_CHROMEOS)
-    // TODO(reveman): This avoids a performance problem on some ChromeOS
-    // devices. This needs to be removed to support native GpuMemoryBuffer
-    // implementations. crbug.com/436314
-    gl->BeginQueryEXT(GL_COMMANDS_ISSUED_CHROMIUM,
-                      source_resource->gl_read_lock_query_id);
-#else
     gl->BeginQueryEXT(GL_COMMANDS_COMPLETED_CHROMIUM,
                       source_resource->gl_read_lock_query_id);
-#endif
   }
   DCHECK(!dest_resource->image_id);
   dest_resource->allocated = true;
@@ -2090,13 +2084,9 @@ void ResourceProvider::CopyResource(ResourceId source_id, ResourceId dest_id) {
   if (source_resource->gl_read_lock_query_id) {
     // End query and create a read lock fence that will prevent access to
     // source resource until CopyTextureCHROMIUM command has completed.
-#if defined(OS_CHROMEOS)
-    gl->EndQueryEXT(GL_COMMANDS_ISSUED_CHROMIUM);
-#else
     gl->EndQueryEXT(GL_COMMANDS_COMPLETED_CHROMIUM);
-#endif
     source_resource->read_lock_fence = make_scoped_refptr(
-        new QueryFence(gl, source_resource->gl_read_lock_query_id));
+        new CopyTextureFence(gl, source_resource->gl_read_lock_query_id));
   } else {
     // Create a SynchronousFence when CHROMIUM_sync_query extension is missing.
     // Try to use one synchronous fence for as many CopyResource operations as

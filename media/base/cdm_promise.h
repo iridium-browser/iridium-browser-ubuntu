@@ -72,12 +72,6 @@ struct CdmPromiseTraits<std::string> {
   static const CdmPromise::ResolveParameterType kType = CdmPromise::STRING_TYPE;
 };
 
-template <>
-struct CdmPromiseTraits<KeyIdsVector> {
-  static const CdmPromise::ResolveParameterType kType =
-      CdmPromise::KEY_IDS_VECTOR_TYPE;
-};
-
 }  // namespace
 
 // This class adds the resolve(T) method. This class is still an interface, and
@@ -96,7 +90,7 @@ class MEDIA_EXPORT CdmPromiseTemplate : public CdmPromise {
                       uint32 system_code,
                       const std::string& error_message) = 0;
 
-  virtual ResolveParameterType GetResolveParameterType() const override {
+  ResolveParameterType GetResolveParameterType() const override {
     return CdmPromiseTraits<T...>::kType;
   }
 

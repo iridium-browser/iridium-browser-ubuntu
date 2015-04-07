@@ -5,7 +5,7 @@ import unittest
 
 from telemetry.core import browser_options
 from telemetry.core.backends.chrome import desktop_browser_finder
-from telemetry.unittest import system_stub
+from telemetry.unittest_util import system_stub
 
 
 # This file verifies the logic for finding a browser instance on all platforms
@@ -175,6 +175,13 @@ class LinuxFindTest(FindTestBase):
     self._finder_options.browser_executable = '/foo/chrome'
     self.assertIn('exact', self.DoFindAllTypes())
 
+  def testFindWithProvidedApk(self):
+    if not self.CanFindAvailableBrowsers():
+      return
+
+    self._finder_options.browser_executable = '/foo/chrome.apk'
+    self.assertNotIn('exact', self.DoFindAllTypes())
+
   def testFindUsingDefaults(self):
     if not self.CanFindAvailableBrowsers():
       return
@@ -235,5 +242,17 @@ class WinFindTest(FindTestBase):
         set(types),
         set(['exact',
              'debug', 'release',
+             'content-shell-debug', 'content-shell-release',
+             'system', 'canary']))
+
+  def testFindAllWithExactApk(self):
+    if not self.CanFindAvailableBrowsers():
+      return
+
+    self._finder_options.browser_executable = 'c:\\tmp\\chrome_shell.apk'
+    types = self.DoFindAllTypes()
+    self.assertEquals(
+        set(types),
+        set(['debug', 'release',
              'content-shell-debug', 'content-shell-release',
              'system', 'canary']))

@@ -45,7 +45,7 @@
       'targets': [
         {
           'target_name': 'libjingle_peerconnection_so',
-          'type': 'loadable_module',
+          'type': 'shared_library',
           'dependencies': [
             'libjingle_peerconnection',
             '<(DEPTH)/third_party/icu/icu.gyp:icuuc',
@@ -159,6 +159,34 @@
         },
       ],
     }],
+    ['OS=="android"', {
+      'targets': [
+        {
+          # |libjingle_peerconnection_java| builds a jar file with name
+          # libjingle_peerconnection_java.jar using Chromes build system.
+          # It includes all Java files needed to setup a PeeerConnection call
+          # from Android.
+          # TODO(perkj): Consider replacing the use of
+          # libjingle_peerconnection_jar with this target everywhere.
+          'target_name': 'libjingle_peerconnection_java',
+          'type': 'none',
+          'dependencies': [
+            'libjingle_peerconnection_so',
+          ],
+          'variables': {
+            'java_in_dir': 'app/webrtc/java',
+            'webrtc_modules_dir': '<(webrtc_root)/modules',
+            'additional_src_dirs' : [
+              'app/webrtc/java/android',
+              '<(webrtc_modules_dir)/audio_device/android/java/src',
+              '<(webrtc_modules_dir)/video_capture/android/java/src',
+              '<(webrtc_modules_dir)/video_render/android/java/src',
+            ],
+          },
+          'includes': ['../build/java.gypi'],
+        }, # libjingle_peerconnection_java
+      ]
+    }],
     ['OS=="ios" or (OS=="mac" and target_arch!="ia32" and mac_sdk>="10.7")', {
       # The >= 10.7 above is required for ARC.
       'targets': [
@@ -249,6 +277,11 @@
             'libraries': [
               '-lstdc++',
             ],
+          },
+          'all_dependent_settings': {
+            'xcode_settings': {
+              'CLANG_ENABLE_OBJC_ARC': 'YES',
+            },
           },
           'xcode_settings': {
             'CLANG_ENABLE_OBJC_ARC': 'YES',
@@ -377,6 +410,7 @@
         'media/base/videocommon.h',
         'media/base/videoframe.cc',
         'media/base/videoframe.h',
+        'media/base/videoframefactory.cc',
         'media/base/videoframefactory.h',
         'media/base/videoprocessor.h',
         'media/base/videorenderer.h',
@@ -395,6 +429,8 @@
         'media/other/linphonemediaengine.h',
         'media/sctp/sctpdataengine.cc',
         'media/sctp/sctpdataengine.h',
+        'media/webrtc/simulcast.cc',
+        'media/webrtc/simulcast.h',
         'media/webrtc/webrtccommon.h',
         'media/webrtc/webrtcexport.h',
         'media/webrtc/webrtcmediaengine.cc',
@@ -554,34 +590,22 @@
         ],
       },
       'sources': [
-        'session/tunnel/pseudotcpchannel.cc',
-        'session/tunnel/pseudotcpchannel.h',
-        'session/tunnel/tunnelsessionclient.cc',
-        'session/tunnel/tunnelsessionclient.h',
-        'session/tunnel/securetunnelsessionclient.cc',
-        'session/tunnel/securetunnelsessionclient.h',
         'session/media/audiomonitor.cc',
         'session/media/audiomonitor.h',
         'session/media/bundlefilter.cc',
         'session/media/bundlefilter.h',
-        'session/media/call.cc',
-        'session/media/call.h',
         'session/media/channel.cc',
         'session/media/channel.h',
         'session/media/channelmanager.cc',
         'session/media/channelmanager.h',
         'session/media/currentspeakermonitor.cc',
         'session/media/currentspeakermonitor.h',
-        'session/media/mediamessages.cc',
-        'session/media/mediamessages.h',
         'session/media/mediamonitor.cc',
         'session/media/mediamonitor.h',
         'session/media/mediarecorder.cc',
         'session/media/mediarecorder.h',
         'session/media/mediasession.cc',
         'session/media/mediasession.h',
-        'session/media/mediasessionclient.cc',
-        'session/media/mediasessionclient.h',
         'session/media/mediasink.h',
         'session/media/rtcpmuxfilter.cc',
         'session/media/rtcpmuxfilter.h',
@@ -652,6 +676,7 @@
         'app/webrtc/sctputils.h',
         'app/webrtc/statscollector.cc',
         'app/webrtc/statscollector.h',
+        'app/webrtc/statstypes.cc',
         'app/webrtc/statstypes.h',
         'app/webrtc/streamcollection.h',
         'app/webrtc/videosource.cc',

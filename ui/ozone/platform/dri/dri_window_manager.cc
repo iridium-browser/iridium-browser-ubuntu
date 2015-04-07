@@ -12,15 +12,16 @@ namespace ui {
 
 namespace {
 
-gfx::PointF GetDefaultCursorLocation(DriWindow* window) {
-  return gfx::PointF(window->GetBounds().width() / 2,
-                     window->GetBounds().height() / 2);
+gfx::Point GetDefaultCursorLocation(DriWindow* window) {
+  return window->GetCursorConfinedBounds().CenterPoint();
 }
 
 }  // namespace
 
-DriWindowManager::DriWindowManager(HardwareCursorDelegate* cursor_delegate)
-    : last_allocated_widget_(0), cursor_(new DriCursor(cursor_delegate, this)) {
+DriWindowManager::DriWindowManager(DriGpuPlatformSupportHost* sender)
+    : last_allocated_widget_(0),
+      cursor_(new DriCursor(this, sender)),
+      event_grabber_(gfx::kNullAcceleratedWidget) {
 }
 
 DriWindowManager::~DriWindowManager() {
@@ -51,6 +52,8 @@ void DriWindowManager::RemoveWindow(gfx::AcceleratedWidget widget) {
 
   if (cursor_->GetCursorWindow() == widget)
     ResetCursorLocation();
+  if (event_grabber_ == widget)
+    event_grabber_ = gfx::kNullAcceleratedWidget;
 }
 
 DriWindow* DriWindowManager::GetWindow(gfx::AcceleratedWidget widget) {
@@ -62,16 +65,38 @@ DriWindow* DriWindowManager::GetWindow(gfx::AcceleratedWidget widget) {
   return NULL;
 }
 
+DriWindow* DriWindowManager::GetWindowAt(const gfx::Point& location) {
+  for (auto it = window_map_.begin(); it != window_map_.end(); ++it)
+    if (it->second->GetBounds().Contains(location))
+      return it->second;
+
+  return NULL;
+}
+
 void DriWindowManager::ResetCursorLocation() {
-  gfx::AcceleratedWidget cursor_widget = gfx::kNullAcceleratedWidget;
-  gfx::PointF location;
-  if (!window_map_.empty()) {
-    WidgetToWindowMap::iterator it = window_map_.begin();
-    cursor_widget = it->first;
-    location = GetDefaultCursorLocation(it->second);
+  if (window_map_.empty()) {
+    // When there is no more window left, reset the cursor to avoid
+    // sending incorrect messages to the gpu process.
+    cursor_->Reset();
+    return;
   }
 
-  cursor_->MoveCursorTo(cursor_widget, location);
+  WidgetToWindowMap::iterator it = window_map_.begin();
+  DriWindow* cursor_window = it->second;
+  gfx::Point location = GetDefaultCursorLocation(cursor_window);
+  cursor_window->MoveCursorTo(location);
+}
+
+void DriWindowManager::GrabEvents(gfx::AcceleratedWidget widget) {
+  if (event_grabber_ != gfx::kNullAcceleratedWidget)
+    return;
+  event_grabber_ = widget;
+}
+
+void DriWindowManager::UngrabEvents(gfx::AcceleratedWidget widget) {
+  if (event_grabber_ != widget)
+    return;
+  event_grabber_ = gfx::kNullAcceleratedWidget;
 }
 
 }  // namespace ui

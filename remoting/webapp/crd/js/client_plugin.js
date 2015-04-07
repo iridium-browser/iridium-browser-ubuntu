@@ -112,14 +112,6 @@ remoting.ClientPlugin.prototype.isSupportedVersion = function() {};
 remoting.ClientPlugin.prototype.hasFeature = function(feature) {};
 
 /**
- * Enable MediaSource rendering via the specified renderer.
- *
- * @param {remoting.MediaSourceRenderer} mediaSourceRenderer
- */
-remoting.ClientPlugin.prototype.enableMediaSourceRendering =
-    function(mediaSourceRenderer) {};
-
-/**
  * Sends a clipboard item to the host.
  *
  * @param {string} mimeType The MIME type of the clipboard item.
@@ -149,6 +141,11 @@ remoting.ClientPlugin.prototype.requestPairing =
  * @param {string} pin The PIN.
  */
 remoting.ClientPlugin.prototype.onPinFetched = function(pin) {};
+
+/**
+ * Allows automatic mouse-lock.
+ */
+remoting.ClientPlugin.prototype.allowMouseLock = function() {};
 
 /**
  * Sets the third party authentication token and shared secret.
@@ -226,6 +223,13 @@ remoting.ClientPlugin.prototype.setDesktopSizeUpdateHandler =
     function(handler) {};
 
 /**
+ * @param {function():void} handler Callback for desktop shape change
+ *     notifications.
+ */
+remoting.ClientPlugin.prototype.setDesktopShapeUpdateHandler =
+    function(handler) {};
+
+/**
  * @param {function(!Array.<string>):void} handler Callback to inform of
  *     capabilities negotiated between host and client.
  */
@@ -289,8 +293,8 @@ remoting.ClientPlugin.Feature = {
   THIRD_PARTY_AUTH: 'thirdPartyAuth',
   TRAP_KEY: 'trapKey',
   PINLESS_AUTH: 'pinlessAuth',
+  ALLOW_MOUSE_LOCK: 'allowMouseLock',
   EXTENSION_MESSAGE: 'extensionMessage',
-  MEDIA_SOURCE_RENDERING: 'mediaSourceRendering',
   VIDEO_CONTROL: 'videoControl'
 };
 
@@ -305,10 +309,11 @@ remoting.ClientPluginFactory = function() {};
  * @param {function(string, string):boolean} onExtensionMessage The handler for
  *     protocol extension messages. Returns true if a message is recognized;
  *     false otherwise.
+ * @param {Array.<string>} requiredCapabilities
  * @return {remoting.ClientPlugin} A new client plugin instance.
  */
 remoting.ClientPluginFactory.prototype.createPlugin =
-    function(container, onExtensionMessage) {};
+    function(container, onExtensionMessage, requiredCapabilities) {};
 
 /**
  * Preload the plugin to make instantiation faster when the user tries

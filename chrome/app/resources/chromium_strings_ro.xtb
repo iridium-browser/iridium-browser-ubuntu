@@ -39,11 +39,10 @@
 <translation id="3883381313049582448">Folosește parola generată de Chromium</translation>
 <translation id="3549345495227188780">Noțiuni introductive despre sistemul de operare Chromium</translation>
 <translation id="1668054258064581266">După ce eliminați contul din Chromium, poate fi necesar să reîncărcați filele deschise pentru ca schimbarea să se aplice.</translation>
-<translation id="6953661834318318668">Bara de instrumente Chromium</translation>
 <translation id="4285930937574705105">Instalarea a eșuat din cauza unei erori necunoscute. Dacă Chromium rulează în acest moment, închideți-l și încercați din nou.</translation>
 <translation id="1396446129537741364">Chromium încearcă să afișeze parolele.</translation>
 <translation id="8987477933582888019">Browser web</translation>
-<translation id="2886012850691518054">Opțional: contribuiți la îmbunătățirea Chromium prin trimiterea automată de statistici privind utilizarea și rapoarte de blocare la Google.</translation>
+<translation id="2886012850691518054">Opțional: contribuie la îmbunătățirea Chromium prin trimiterea automată de statistici privind utilizarea și rapoarte de blocare la Google.</translation>
 <translation id="580822234363523061">Accesați
           meniul Chromium &gt;
           <ph name="SETTINGS_TITLE"/>
@@ -76,7 +75,7 @@
 <translation id="4330585738697551178">Despre acest modul se cunoaște că intră în conflict cu Chromium.</translation>
 <translation id="3190315855212034486">Hopa! Chromium s-a închis cu eroare. Reporniți acum?</translation>
 <translation id="8843170958047978824">Elimină din Chromium</translation>
-<translation id="3068515742935458733">Contribuiți la îmbunătățirea proiectului Chromium trimițând rapoarte de eroare și <ph name="UMA_LINK"/> la Google</translation>
+<translation id="3068515742935458733">Contribuie la îmbunătățirea proiectului Chromium trimițând rapoarte de eroare și <ph name="UMA_LINK"/> la Google</translation>
 <translation id="1609700857210121286">Accesează meniul Chromium &gt; Setări &gt; (Avansate) Confidențialitate
           și dezactivează „Predicțiile privind acțiunile în rețea”.
           Dacă această acțiune nu rezolvă problema. îți recomandăm să reactivezi această opțiune
@@ -94,6 +93,7 @@
 <translation id="7473891865547856676">Nu, mulțumesc</translation>
 <translation id="9191268552238695869">Un administrator a instalat Chromium pe acest sistem, iar acesta este disponibil pentru toți utilizatorii. Chromium instalat la nivel de sistem va înlocui acum instalarea la nivel de utilizator.</translation>
 <translation id="3509308970982693815">Închideți toate ferestrele Chromium și încercați din nou.</translation>
+<translation id="8851136666856101339">principal</translation>
 <translation id="4077262827416206768">Închideți toate ferestrele Chromium și reporniți sistemul de operare pentru ca această modificare să aibă efect.</translation>
 <translation id="6475912303565314141">Stabilește și ce pagină se afișează când porniți Chromium.</translation>
 <translation id="1725059042853530269">Fișierul <ph name="FILE_NAME"/> poate afecta experiența de navigare. De aceea, Chromium l-a blocat.</translation>
@@ -156,6 +156,7 @@
 <translation id="275588974610408078">Raportarea blocărilor nu este disponibilă în Chromium.</translation>
 <translation id="5909170354645388250">Nu se utilizează în Chromium. Substituent pentru a păstra hărțile cu resurse sincronizate. Este necesar un singur argument: $1.</translation>
 <translation id="1144202035120576837"><ph name="SITE"/> folosește în mod normal criptarea pentru a proteja informațiile tale. Când Chromium a încercat să se conecteze la <ph name="SITE"/> de această dată, site-ul a trimis înapoi date de conectare neobișnuite și incorecte. Fie un atacator pretinde să fie <ph name="SITE"/>, fie un ecran de conectare Wi-Fi a întrerupt conexiunea. Informațiile tale sunt încă în siguranță, deoarece Chromium a oprit conectarea înainte de transferul datelor.</translation>
+<translation id="2316129865977710310">Nu, mulțumesc</translation>
 <translation id="7937630085815544518">Ați fost conectat(ă) la Chromium ca <ph name="USER_EMAIL_ADDRESS"/>. Utilizați același cont pentru a vă conecta din nou.</translation>
 <translation id="2685838254101182273">Chromium nu se mai actualizează și nu mai acceptă această versiune a sistemului dvs. de operare.</translation>
 <translation id="8684913864886094367">Chromium nu s-a închis corect.</translation>
@@ -169,6 +170,7 @@
 <translation id="2648074677641340862">S-a produs o eroare de sistem de operare în timpul instalării. Descărcați din nou Chromium.</translation>
 <translation id="5942520288919337908">Extensia <ph name="EXTENSION_NAME"/> a fost adăugată la Chromium.</translation>
 <translation id="549669000822060376">Așteaptă până când Chromium instalează cele mai recente actualizări de sistem.</translation>
+<translation id="1240763998429950591">Chromium nu s-a putut actualiza la cea mai recentă versiune, astfel încât pierzi noi funcții și remedieri de securitate. Trebuie să actualizezi Chromium.</translation>
 <translation id="6930860321615955692">https://support.google.com/chrome/?p=ib_chromeframe</translation>
 <translation id="3281987435599047980">trimite un cuvânt și contextul aferent către Căutarea Google, returnând definiții, imagini, rezultate ale căutării și alte detalii.</translation>
 <translation id="4559775032954821361">Accesați
@@ -208,6 +210,7 @@ Este posibil ca unele funcții să nu fie disponibile. Specificați un director 
 <translation id="2966088006374919794">Chromium necesită lansarea unei aplicații externe pentru a gestiona linkuri <ph name="SCHEME"/>. Linkul solicitat este <ph name="PROTOLINK"/>.</translation>
 <translation id="2558235863893655150">Doriți salvarea parolei în Chromium?</translation>
 <translation id="6485906693002546646">În prezent, folosiți <ph name="PROFILE_EMAIL"/> pentru a sincroniza datele Chromium. Pentru a actualiza preferințele de sincronizare sau pentru a folosi Chromium fără un Cont Google, accesați <ph name="SETTINGS_LINK"/>.</translation>
+<translation id="705851970750939768">Actualizează Chromium</translation>
 <translation id="5772805321386874569">(necesită <ph name="BEGIN_BUTTON"/>repornirea<ph name="END_BUTTON"/> Chromium)</translation>
 <translation id="1688750314291223739">Configurați sincronizarea pentru a salva funcțiile personalizate ale browserului pe web și accesați-le din Chromium de pe orice computer.</translation>
 <translation id="8610831143142469229">Permiteți Chromium să acceseze rețeaua din setările pentru firewall sau

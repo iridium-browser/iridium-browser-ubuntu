@@ -60,20 +60,16 @@ SimpleFontData::SimpleFontData(const FontPlatformData& platformData, PassRefPtr<
     , m_treatAsFixedPitch(false)
     , m_isTextOrientationFallback(isTextOrientationFallback)
     , m_isBrokenIdeographFallback(false)
-#if ENABLE(OPENTYPE_VERTICAL)
     , m_verticalData(nullptr)
-#endif
     , m_hasVerticalGlyphs(false)
     , m_customFontData(customData)
 {
     platformInit();
     platformGlyphInit();
-#if ENABLE(OPENTYPE_VERTICAL)
     if (platformData.orientation() == Vertical && !isTextOrientationFallback) {
         m_verticalData = platformData.verticalData();
         m_hasVerticalGlyphs = m_verticalData.get() && m_verticalData->hasVerticalMetrics();
     }
-#endif
 }
 
 SimpleFontData::SimpleFontData(PassRefPtr<CustomFontData> customData, float fontSize, bool syntheticBold, bool syntheticItalic)
@@ -81,9 +77,7 @@ SimpleFontData::SimpleFontData(PassRefPtr<CustomFontData> customData, float font
     , m_treatAsFixedPitch(false)
     , m_isTextOrientationFallback(false)
     , m_isBrokenIdeographFallback(false)
-#if ENABLE(OPENTYPE_VERTICAL)
     , m_verticalData(nullptr)
-#endif
     , m_hasVerticalGlyphs(false)
     , m_customFontData(customData)
 {
@@ -201,10 +195,10 @@ void SimpleFontData::platformInit()
     // https://crbug.com/420901
     m_maxCharWidth = std::max(m_avgCharWidth, m_fontMetrics.floatAscent());
 #else
-    // FIXME: This seems incorrect and should probably use fMaxCharWidth as
-    // the code path above.
-    SkScalar xRange = metrics.fXMax - metrics.fXMin;
-    m_maxCharWidth = SkScalarRoundToInt(xRange * SkScalarRoundToInt(m_platformData.size()));
+    // Better would be to rely on either fMaxCharWidth or fAveCharWidth.
+    // skbug.com/3087
+    m_maxCharWidth = SkScalarRoundToInt(metrics.fXMax - metrics.fXMin);
+
 #endif
 
 #if !OS(MACOSX)
@@ -293,7 +287,7 @@ const SimpleFontData* SimpleFontData::fontDataForCharacter(UChar32) const
 Glyph SimpleFontData::glyphForCharacter(UChar32 character) const
 {
     // As GlyphPage::size is power of 2 so shifting is valid
-    GlyphPageTreeNode* node = GlyphPageTreeNode::getRootChild(this, character >> GlyphPage::sizeBits);
+    GlyphPageTreeNode* node = GlyphPageTreeNode::getNormalRootChild(this, character >> GlyphPage::sizeBits);
     return node->page() ? node->page()->glyphAt(character & 0xFF) : 0;
 }
 
@@ -473,10 +467,14 @@ bool SimpleFontData::fillGlyphPage(GlyphPage* pageToFill, unsigned offset, unsig
         return false;
     }
 
-    SkAutoSTMalloc<GlyphPage::size, uint16_t> glyphStorage(length);
-
-    uint16_t* glyphs = glyphStorage.get();
     SkTypeface* typeface = platformData().typeface();
+    if (!typeface) {
+        WTF_LOG_ERROR("fillGlyphPage called on an empty Skia typeface.");
+        return false;
+    }
+
+    SkAutoSTMalloc<GlyphPage::size, uint16_t> glyphStorage(length);
+    uint16_t* glyphs = glyphStorage.get();
     typeface->charsToGlyphs(buffer, SkTypeface::kUTF16_Encoding, glyphs, length);
 
     bool haveGlyphs = false;

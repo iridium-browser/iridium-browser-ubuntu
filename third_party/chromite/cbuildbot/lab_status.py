@@ -46,7 +46,7 @@ def GetLabStatus(max_attempts=5):
       response = urllib.urlopen(status_url)
     except IOError as e:
       logger.log(logging.WARNING,
-               'Error occurred when grabbing the lab status: %s.', e)
+                 'Error occurred when grabbing the lab status: %s.', e)
       time.sleep(retry_waittime)
       continue
     # Check for successful response code.
@@ -84,17 +84,16 @@ def CheckLabStatus(board=None):
   lab_status = GetLabStatus()
   if not lab_status['lab_is_up']:
     raise LabIsDownException('Chromium OS Lab is currently not up: '
-                                   '%s.' % lab_status['message'])
+                             '%s.' % lab_status['message'])
 
   # Check if the board we wish to use is disabled.
   # Lab messages should be in the format of:
   # Lab is 'status' [boards not to be ran] (comment). Example:
   # Lab is Open [stumpy, kiev, x86-alex] (power_resume rtc causing duts to go
   # down)
-  boards_are_disabled = re.search('\[(.*)\]', lab_status['message'])
+  boards_are_disabled = re.search(r'\[(.*)\]', lab_status['message'])
   if board and boards_are_disabled:
     if board in boards_are_disabled.group(1):
-      raise BoardIsDisabledException('Chromium OS Lab is '
-          'currently not allowing suites to be scheduled on board '
-          '%s: %s' % (board, lab_status['message']))
-  return
+      raise BoardIsDisabledException(
+          'Chromium OS Lab is currently not allowing suites to be scheduled '
+          'on board %s: %s' % (board, lab_status['message']))

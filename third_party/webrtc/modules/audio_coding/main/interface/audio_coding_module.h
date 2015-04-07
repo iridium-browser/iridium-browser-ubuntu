@@ -36,13 +36,12 @@ class AudioPacketizationCallback {
  public:
   virtual ~AudioPacketizationCallback() {}
 
-  virtual int32_t SendData(
-      FrameType frame_type,
-      uint8_t payload_type,
-      uint32_t timestamp,
-      const uint8_t* payload_data,
-      uint16_t payload_len_bytes,
-      const RTPFragmentationHeader* fragmentation) = 0;
+  virtual int32_t SendData(FrameType frame_type,
+                           uint8_t payload_type,
+                           uint32_t timestamp,
+                           const uint8_t* payload_data,
+                           size_t payload_len_bytes,
+                           const RTPFragmentationHeader* fragmentation) = 0;
 };
 
 // Callback class used for inband Dtmf detection
@@ -508,8 +507,7 @@ class AudioCodingModule: public Module {
 
   ///////////////////////////////////////////////////////////////////////////
   // int32_t ReplaceInternalDTXWithWebRtc()
-  // Used to replace codec internal DTX scheme with WebRtc. This is only
-  // supported for G729, where this call replaces AnnexB with WebRtc DTX.
+  // Used to replace codec internal DTX scheme with WebRtc.
   //
   // Input:
   //   -use_webrtc_dtx     : if false (default) the codec built-in DTX/VAD
@@ -525,8 +523,8 @@ class AudioCodingModule: public Module {
 
   ///////////////////////////////////////////////////////////////////////////
   // int32_t IsInternalDTXReplacedWithWebRtc()
-  // Get status if the codec internal DTX (when such exists) is replaced with
-  // WebRtc DTX. This is only supported for G729.
+  // Get status if the codec internal DTX is replaced with WebRtc DTX.
+  // This should always be true if codec does not have an internal DTX.
   //
   // Output:
   //   -uses_webrtc_dtx    : is set to true if the codec internal DTX is
@@ -668,8 +666,8 @@ class AudioCodingModule: public Module {
   //    0 if payload is successfully pushed in.
   //
   virtual int32_t IncomingPacket(const uint8_t* incoming_payload,
-                                       const int32_t payload_len_bytes,
-                                       const WebRtcRTPHeader& rtp_info) = 0;
+                                 const size_t payload_len_bytes,
+                                 const WebRtcRTPHeader& rtp_info) = 0;
 
   ///////////////////////////////////////////////////////////////////////////
   // int32_t IncomingPayload()
@@ -696,9 +694,9 @@ class AudioCodingModule: public Module {
   //    0 if payload is successfully pushed in.
   //
   virtual int32_t IncomingPayload(const uint8_t* incoming_payload,
-                                        const int32_t payload_len_byte,
-                                        const uint8_t payload_type,
-                                        const uint32_t timestamp = 0) = 0;
+                                  const size_t payload_len_byte,
+                                  const uint8_t payload_type,
+                                  const uint32_t timestamp = 0) = 0;
 
   ///////////////////////////////////////////////////////////////////////////
   // int SetMinimumPlayoutDelay()
@@ -1090,12 +1088,12 @@ class AudioCoding {
   // |incoming_payload| contains the RTP payload after the RTP header. Return
   // true if successful, false if not.
   virtual bool InsertPacket(const uint8_t* incoming_payload,
-                            int32_t payload_len_bytes,
+                            size_t payload_len_bytes,
                             const WebRtcRTPHeader& rtp_info) = 0;
 
   // TODO(henrik.lundin): Remove this method?
   virtual bool InsertPayload(const uint8_t* incoming_payload,
-                             int32_t payload_len_byte,
+                             size_t payload_len_byte,
                              uint8_t payload_type,
                              uint32_t timestamp) = 0;
 

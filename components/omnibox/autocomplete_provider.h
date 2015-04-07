@@ -156,7 +156,14 @@ class AutocompleteProvider
   // |minimal_changes| is an optimization that lets the provider do less work
   // when the |input|'s text hasn't changed.  See the body of
   // OmniboxPopupModel::StartAutocomplete().
-  virtual void Start(const AutocompleteInput& input, bool minimal_changes) = 0;
+  //
+  // |called_due_to_focus| is true when Start() is being called in response to
+  // the omnibox being focused, instead of due to e.g. user input changes.  Most
+  // providers should not provide matches in this case.  Providers which want to
+  // display matches on focus can use this flag to know when they can do so.
+  virtual void Start(const AutocompleteInput& input,
+                     bool minimal_changes,
+                     bool called_due_to_focus) = 0;
 
   // Called when a provider must not make any more callbacks for the current
   // query. This will be called regardless of whether the provider is already

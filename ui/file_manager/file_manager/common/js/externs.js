@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// TODO(yawano): Move all externs under ui/file_manager/externs.
+
 /**
  * @constructor
  * @extends {Window}
@@ -34,10 +36,10 @@ BackgroundWindow.prototype.launchFileManager =
  */
 var FileOperationProgressEvent = function() {};
 
-/** @type {string} */
+/** @type {fileOperationUtil.EventRouter.EventType} */
 FileOperationProgressEvent.prototype.reason;
 
-/** @type {(FileOperationManager.Error|undefined)} */
+/** @type {(fileOperationUtil.Error|undefined)} */
 FileOperationProgressEvent.prototype.error;
 
 
@@ -53,19 +55,22 @@ EntriesChangedEvent.prototype.kind;
 /** @type {Array.<!Entry>} */
 EntriesChangedEvent.prototype.entries;
 
-
 /**
- * @param {string} url
- * @param {function(!Entry)} successCallback
- * @param {function(!FileError)=} opt_errorCallback
+ * @constructor
+ * @extends {Event}
+ * @struct
+ * @suppress {checkStructDictInheritance}
  */
-Window.prototype.webkitResolveLocalFileSystemURL =
-    function(url, successCallback, opt_errorCallback) {};
+var DirectoryChangeEvent = function() {};
 
-/**
- * @type {string}
- */
-Window.prototype.appID;
+/** @type {DirectoryEntry} */
+DirectoryChangeEvent.prototype.previousDirEntry;
+
+/** @type {DirectoryEntry|Object} */
+DirectoryChangeEvent.prototype.newDirEntry;
+
+/** @type {boolean} */
+DirectoryChangeEvent.prototype.volumeChanged;
 
 /**
  * @type {boolean}

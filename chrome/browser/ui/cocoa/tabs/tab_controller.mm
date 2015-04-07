@@ -9,11 +9,10 @@
 
 #include "base/i18n/rtl.h"
 #include "base/mac/bundle_locations.h"
-#include "base/mac/mac_util.h"
 #import "chrome/browser/themes/theme_properties.h"
 #import "chrome/browser/themes/theme_service.h"
 #import "chrome/browser/ui/cocoa/sprite_view.h"
-#import "chrome/browser/ui/cocoa/tabs/media_indicator_button.h"
+#import "chrome/browser/ui/cocoa/tabs/media_indicator_button_cocoa.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_controller_target.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_view.h"
 #import "chrome/browser/ui/cocoa/themed_window.h"
@@ -66,6 +65,8 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
 
 }  // TabControllerInternal namespace
 
++ (CGFloat)defaultTabHeight { return 26; }
+
 // The min widths is the smallest number at which the right edge of the right
 // tab border image is not visibly clipped.  It is a bit smaller than the sum
 // of the two tab edge bitmaps because these bitmaps have a few transparent
@@ -105,10 +106,10 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
     [closeButton_ setTarget:self];
     [closeButton_ setAction:@selector(closeTab:)];
 
-    base::scoped_nsobject<TabView> view(
-        [[TabView alloc] initWithFrame:NSMakeRect(0, 0, 160, 25)
-                            controller:self
-                           closeButton:closeButton_]);
+    base::scoped_nsobject<TabView> view([[TabView alloc]
+        initWithFrame:NSMakeRect(0, 0, 160, [TabController defaultTabHeight])
+           controller:self
+          closeButton:closeButton_]);
     [view setAutoresizingMask:NSViewMaxXMargin | NSViewMinYMargin];
     [view addSubview:iconView_];
     [view addSubview:closeButton_];

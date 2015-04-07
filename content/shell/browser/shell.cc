@@ -39,6 +39,26 @@ base::Callback<void(Shell*)> Shell::shell_created_callback_;
 
 bool Shell::quit_message_loop_ = true;
 
+namespace {
+gfx::Size ShellDefaultSize() {
+  static gfx::Size default_shell_size;
+  if (!default_shell_size.IsEmpty())
+    return default_shell_size;
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kContentShellHostWindowSize)) {
+    const std::string size_str = command_line->GetSwitchValueASCII(
+                  switches::kContentShellHostWindowSize);
+    int width, height;
+    CHECK_EQ(2, sscanf(size_str.c_str(), "%dx%d", &width, &height));
+    default_shell_size = gfx::Size(width, height);
+  } else {
+    default_shell_size = gfx::Size(
+      Shell::kDefaultTestWindowWidthDip, Shell::kDefaultTestWindowHeightDip);
+  }
+  return default_shell_size;
+}
+}  // namespace
+
 class Shell::DevToolsWebContentsObserver : public WebContentsObserver {
  public:
   DevToolsWebContentsObserver(Shell* shell, WebContents* web_contents)
@@ -64,7 +84,8 @@ Shell::Shell(WebContents* web_contents)
       window_(NULL),
       url_edit_view_(NULL),
       headless_(false) {
-  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  const base::CommandLine& command_line =
+      *base::CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch(switches::kDumpRenderTree))
     headless_ = true;
   windows_.push_back(this);
@@ -105,7 +126,8 @@ Shell* Shell::CreateShell(WebContents* web_contents,
 
   shell->PlatformResizeSubViews();
 
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree)) {
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDumpRenderTree)) {
     web_contents->GetMutableRendererPrefs()->use_custom_colors = false;
     web_contents->GetRenderViewHost()->SyncRendererPrefs();
   }
@@ -141,23 +163,20 @@ Shell* Shell::FromRenderViewHost(RenderViewHost* rvh) {
 
 // static
 void Shell::Initialize() {
-  PlatformInitialize(
-      gfx::Size(kDefaultTestWindowWidthDip, kDefaultTestWindowHeightDip));
+  PlatformInitialize(ShellDefaultSize());
 }
 
 gfx::Size Shell::AdjustWindowSize(const gfx::Size& initial_size) {
   if (!initial_size.IsEmpty())
     return initial_size;
-  return gfx::Size(kDefaultTestWindowWidthDip, kDefaultTestWindowHeightDip);
+  return ShellDefaultSize();
 }
 
 Shell* Shell::CreateNewWindow(BrowserContext* browser_context,
                               const GURL& url,
                               SiteInstance* site_instance,
-                              int routing_id,
                               const gfx::Size& initial_size) {
   WebContents::CreateParams create_params(browser_context, site_instance);
-  create_params.routing_id = routing_id;
   create_params.initial_size = AdjustWindowSize(initial_size);
   WebContents* web_contents = WebContents::Create(create_params);
   Shell* shell = CreateShell(web_contents, create_params.initial_size);
@@ -198,7 +217,8 @@ void Shell::AddNewContents(WebContents* source,
                            bool user_gesture,
                            bool* was_blocked) {
   CreateShell(new_contents, AdjustWindowSize(initial_pos.size()));
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDumpRenderTree))
     NotifyDoneForwarder::CreateForWebContents(new_contents);
 }
 
@@ -261,6 +281,7 @@ WebContents* Shell::OpenURLFromTab(WebContents* source,
   if (params.disposition != CURRENT_TAB)
       return NULL;
   NavigationController::LoadURLParams load_url_params(params.url);
+  load_url_params.source_site_instance = params.source_site_instance;
   load_url_params.referrer = params.referrer;
   load_url_params.frame_tree_node_id = params.frame_tree_node_id;
   load_url_params.transition_type = params.transition;
@@ -291,7 +312,8 @@ void Shell::ToggleFullscreenModeForTab(WebContents* web_contents,
 #if defined(OS_ANDROID)
   PlatformToggleFullscreenModeForTab(web_contents, enter_fullscreen);
 #endif
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree))
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDumpRenderTree))
     return;
   if (is_fullscreen_ != enter_fullscreen) {
     is_fullscreen_ = enter_fullscreen;
@@ -329,9 +351,11 @@ void Shell::DidNavigateMainFramePostCommit(WebContents* web_contents) {
   PlatformSetAddressBarURL(web_contents->GetLastCommittedURL());
 }
 
-JavaScriptDialogManager* Shell::GetJavaScriptDialogManager() {
+JavaScriptDialogManager* Shell::GetJavaScriptDialogManager(
+    WebContents* source) {
   if (!dialog_manager_) {
-    const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+    const base::CommandLine& command_line =
+        *base::CommandLine::ForCurrentProcess();
     dialog_manager_.reset(command_line.HasSwitch(switches::kDumpRenderTree)
         ? new LayoutTestJavaScriptDialogManager
         : new ShellJavaScriptDialogManager);
@@ -344,11 +368,13 @@ bool Shell::AddMessageToConsole(WebContents* source,
                                 const base::string16& message,
                                 int32 line_no,
                                 const base::string16& source_id) {
-  return CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree);
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kDumpRenderTree);
 }
 
 void Shell::RendererUnresponsive(WebContents* source) {
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree))
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDumpRenderTree))
     return;
   WebKitTestController::Get()->RendererUnresponsive();
 }
@@ -362,7 +388,8 @@ void Shell::DeactivateContents(WebContents* contents) {
 }
 
 void Shell::WorkerCrashed(WebContents* source) {
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kDumpRenderTree))
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDumpRenderTree))
     return;
   WebKitTestController::Get()->WorkerCrashed();
 }
@@ -385,7 +412,7 @@ void Shell::TitleWasSet(NavigationEntry* entry, bool explicit_set) {
 void Shell::InnerShowDevTools(const std::string& settings,
                               const std::string& frontend_url) {
   if (!devtools_frontend_) {
-    if (CommandLine::ForCurrentProcess()->HasSwitch(
+    if (base::CommandLine::ForCurrentProcess()->HasSwitch(
             switches::kDumpRenderTree)) {
       devtools_frontend_ = LayoutTestDevToolsFrontend::Show(
           web_contents(), settings, frontend_url);

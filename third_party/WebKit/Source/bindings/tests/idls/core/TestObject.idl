@@ -157,6 +157,9 @@ interface TestObject {
     attribute EventHandler eventHandlerAttribute;
     // Union types
     attribute (double or DOMString) doubleOrStringAttribute;
+    attribute (double or DOMString)? doubleOrStringOrNullAttribute;
+    attribute (double? or DOMString) doubleOrNullStringAttribute;
+    attribute (DOMString or sequence<DOMString>) stringOrStringSequenceAttribute;
 
     // Extended attributes
     [LogActivity, LogAllWorlds] attribute long activityLoggingAccessForAllWorldsLongAttribute;
@@ -356,8 +359,11 @@ interface TestObject {
     (TestInterfaceWillBeGarbageCollected or TestDictionary) testInterfaceWillBeGarbageCollectedOrTestDictionaryMethod();
     (boolean or DOMString or unrestricted double) booleanOrDOMStringOrUnrestrictedDoubleMethod();
     (TestInterface or long) testInterfaceOrLongMethod();
-    void voidMethodDOMStringOrDouble((DOMString or double) arg);
-    void voidMethodDOMStringOrArrayBufferOrArrayBufferView((DOMString or ArrayBuffer or ArrayBufferView) arg);
+    void voidMethodDoubleOrDOMStringArg((double or DOMString) arg);
+    void voidMethodDoubleOrDOMStringOrNullArg((double or DOMString)? arg);
+    void voidMethodDoubleOrNullOrDOMStringArg((double? or DOMString) arg);
+    void voidMethodDOMStringOrArrayBufferOrArrayBufferViewArg((DOMString or ArrayBuffer or ArrayBufferView) arg);
+    void voidMethodArrayBufferOrArrayBufferViewOrDictionaryArg((ArrayBuffer or ArrayBufferView or Dictionary) arg);
     // Currently only used on interface type arguments
     void voidMethodTestInterfaceEmptyOrNullArg(TestInterfaceEmpty? nullableTestInterfaceEmptyArg);
     // Callback interface types
@@ -370,6 +376,8 @@ interface TestObject {
     // Exceptional types
     Dictionary dictionaryMethod();
     TestDictionary testDictionaryMethod();
+    TestDictionary? nullableTestDictionaryMethod();
+    void passPermissiveDictionaryMethod([PermissiveDictionaryConversion] optional TestDictionary arg);
     NodeFilter nodeFilterMethod();
     Promise<void> promiseMethod(long arg1, Dictionary arg2, DOMString arg3, DOMString... variadic);
     Promise promiseMethodWithoutExceptionState(Dictionary arg1);
@@ -410,6 +418,9 @@ interface TestObject {
     void voidMethodDefaultNullableByteStringArg(optional ByteString? defaultStringArg = null);
     void voidMethodDefaultNullableStringArg(optional DOMString? defaultStringArg = null);
     void voidMethodDefaultNullableTestInterfaceArg(optional TestInterface? defaultTestInterfaceArg = null);
+    void voidMethodDefaultDoubleOrStringArgs(optional (double or DOMString) defaultLongArg = 10.0,
+                                             optional (double or DOMString?) defaultStringArg = "foo",
+                                             optional (double or DOMString)? defaultNullArg = null);
 
     // Variadic operations
     void voidMethodVariadicStringArg(DOMString... variadicStringArgs);
@@ -440,6 +451,10 @@ interface TestObject {
     void overloadedMethodI(double doubleArg);
     void overloadedMethodJ(DOMString stringArg);
     void overloadedMethodJ(TestDictionary testDictionaryArg);
+    void overloadedMethodK(Function functionArg);
+    void overloadedMethodK(DOMString stringArg);
+    void overloadedMethodL(long longArg, any... restArgs);
+    void overloadedMethodL(DOMString stringArg, any... restArgs);
 
     Promise promiseOverloadMethod();
     Promise promiseOverloadMethod(Window arg1, double arg2);
@@ -519,7 +534,7 @@ interface TestObject {
     [RuntimeEnabled=FeatureName] void runtimeEnabledOverloadedVoidMethod(long longArg);
     [RuntimeEnabled=FeatureName1] void partiallyRuntimeEnabledOverloadedVoidMethod(DOMString stringArg);
     [RuntimeEnabled=FeatureName2] void partiallyRuntimeEnabledOverloadedVoidMethod(TestInterface testInterface);
-    void partiallyRuntimeEnabledOverloadedVoidMethod(long longArg);
+    void partiallyRuntimeEnabledOverloadedVoidMethod(long longArg, DOMString stringArg);
     [TreatReturnedNullStringAs=Null] DOMString treatReturnedNullStringAsNullStringMethod();
     [TreatReturnedNullStringAs=Undefined] DOMString treatReturnedNullStringAsUndefinedStringMethod();
     [TreatReturnedNullStringAs=Null] ByteString treatReturnedNullStringAsNullByteStringMethod();
@@ -563,4 +578,6 @@ interface TestObject {
     [ImplementedInPrivateScript, OnlyExposedToPrivateScript] short methodForPrivateScriptOnly(short value1, short value2);
     [ImplementedInPrivateScript, OnlyExposedToPrivateScript] attribute DOMString attributeForPrivateScriptOnly;
     [ImplementedInPrivateScript] attribute TestEnum enumForPrivateScript;
+
+    maplike<long, DOMString>;
 };

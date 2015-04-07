@@ -40,7 +40,6 @@
 #include "public/platform/WebRect.h"
 #include "public/web/WebFontDescription.h"
 #include "public/web/WebTextRun.h"
-#include <skia/ext/platform_canvas.h>
 
 namespace blink {
 
@@ -96,7 +95,7 @@ void WebFontImpl::drawText(WebCanvas* canvas, const WebTextRun& run, const WebFl
     runInfo.from = from;
     runInfo.to = to == -1 ? textRun.length() : to;
     runInfo.bounds = textClipRect;
-    GraphicsContext gc(canvas);
+    GraphicsContext gc(canvas, nullptr);
 
     gc.save();
     gc.setCertainlyOpaque(canvasIsOpaque);
@@ -108,19 +107,16 @@ void WebFontImpl::drawText(WebCanvas* canvas, const WebTextRun& run, const WebFl
 
 int WebFontImpl::calculateWidth(const WebTextRun& run) const
 {
-    FontCachePurgePreventer fontCachePurgePreventer;
     return m_font.width(run, 0);
 }
 
 int WebFontImpl::offsetForPosition(const WebTextRun& run, float position) const
 {
-    FontCachePurgePreventer fontCachePurgePreventer;
     return m_font.offsetForPosition(run, position, true);
 }
 
 WebFloatRect WebFontImpl::selectionRectForText(const WebTextRun& run, const WebFloatPoint& leftBaseline, int height, int from, int to) const
 {
-    FontCachePurgePreventer fontCachePurgePreventer;
     return m_font.selectionRectForText(run, leftBaseline, height, from, to);
 }
 

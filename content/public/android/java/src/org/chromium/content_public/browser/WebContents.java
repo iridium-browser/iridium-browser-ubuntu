@@ -163,12 +163,32 @@ public interface WebContents {
      * Hides transition elements specified by the selector, and activates any
      * exiting-transition stylesheets.
      */
-    public void beginExitTransition(String cssSelector);
+    public void beginExitTransition(String cssSelector, boolean exitToNativeApp);
+
+    /**
+     * Revert the effect of exit transition after it transitions to activity.
+     */
+    public void revertExitTransition();
+
+    /**
+     * Hide transition elements.
+     */
+    public void hideTransitionElements(String cssSelector);
+
+    /**
+     * Show transition elements.
+     */
+    public void showTransitionElements(String cssSelector);
 
     /**
      * Clear the navigation transition data.
      */
     public void clearNavigationTransitionData();
+
+    /**
+     * Fetch transition elements.
+     */
+    public void fetchTransitionElements(String url);
 
     /**
      * Injects the passed Javascript code in the current page and evaluates it.
@@ -182,16 +202,4 @@ public interface WebContents {
      */
     public void evaluateJavaScript(String script, JavaScriptCallback callback);
 
-    /**
-     * Post a message to a frame.
-     * TODO(sgurun) also add support for transferring a message channel port.
-     *
-     * @param frameName The name of the frame. If the name is null the message is posted
-     *                  to the main frame.
-     * @param message   The message
-     * @param sourceOrigin  The source origin
-     * @param targetOrigin  The target origin
-     */
-    public void postMessageToFrame(String frameName, String message,
-            String sourceOrigin, String targetOrigin);
 }

@@ -219,6 +219,7 @@ class WebRtcVideoEngine : public sigslot::has_slots<>,
   rtc::scoped_ptr<ViETraceWrapper> tracing_;
   WebRtcVoiceEngine* voice_engine_;
   rtc::scoped_ptr<webrtc::VideoRender> render_module_;
+  rtc::scoped_ptr<WebRtcVideoEncoderFactory> simulcast_encoder_factory_;
   WebRtcVideoEncoderFactory* encoder_factory_;
   WebRtcVideoDecoderFactory* decoder_factory_;
   std::vector<VideoCodec> video_codecs_;
@@ -331,8 +332,10 @@ class WebRtcVideoMediaChannel : public rtc::MessageHandler,
   int GetLastEngineError() { return engine()->GetLastEngineError(); }
 
   // webrtc::Transport:
-  virtual int SendPacket(int channel, const void* data, int len) OVERRIDE;
-  virtual int SendRTCPPacket(int channel, const void* data, int len) OVERRIDE;
+  virtual int SendPacket(int channel, const void* data, size_t len) OVERRIDE;
+  virtual int SendRTCPPacket(int channel,
+                             const void* data,
+                             size_t len) OVERRIDE;
 
   bool ConferenceModeIsEnabled() const {
     return options_.conference_mode.GetWithDefaultIfUnset(false);

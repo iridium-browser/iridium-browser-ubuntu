@@ -113,8 +113,6 @@ public:
     void attachRegion();
     void detachRegion();
 
-    void paintInvalidationForFlowThreadContent(const LayoutRect& paintInvalidationRect) const;
-
     // The top of the nearest page inside the region. For RenderRegions, this is just the logical top of the
     // flow thread portion we contain. For sets, we have to figure out the top of the nearest column or
     // page.
@@ -136,7 +134,7 @@ private:
 
     virtual void computeLogicalHeight(LayoutUnit logicalHeight, LayoutUnit logicalTop, LogicalExtentComputedValues&) const override;
 
-    virtual void paintObject(PaintInfo&, const LayoutPoint& paintOffset) override;
+    virtual void paintObject(const PaintInfo&, const LayoutPoint& paintOffset) override;
 
     virtual void addOverflowFromChildren() override;
 

@@ -20,11 +20,11 @@
  */
 
 #include "config.h"
-
 #include "core/rendering/svg/RenderSVGBlock.h"
 
 #include "core/rendering/RenderView.h"
 #include "core/rendering/style/ShadowList.h"
+#include "core/rendering/svg/RenderSVGRoot.h"
 #include "core/rendering/svg/SVGRenderSupport.h"
 #include "core/rendering/svg/SVGResourcesCache.h"
 #include "core/svg/SVGElement.h"
@@ -82,6 +82,12 @@ void RenderSVGBlock::styleDidChange(StyleDifference diff, const RenderStyle* old
     if (diff.needsFullLayout())
         setNeedsBoundariesUpdate();
 
+    if (isBlendingAllowed()) {
+        bool hasBlendModeChanged = (oldStyle && oldStyle->hasBlendMode()) == !style()->hasBlendMode();
+        if (parent() && hasBlendModeChanged)
+            parent()->descendantIsolationRequirementsChanged(style()->hasBlendMode() ? DescendantIsolationRequired : DescendantIsolationNeedsUpdate);
+    }
+
     RenderBlock::styleDidChange(diff, oldStyle);
     SVGResourcesCache::clientStyleChanged(this, diff, style());
 }
@@ -101,9 +107,12 @@ LayoutRect RenderSVGBlock::clippedOverflowRectForPaintInvalidation(const RenderL
     return SVGRenderSupport::clippedOverflowRectForPaintInvalidation(this, paintInvalidationContainer, paintInvalidationState);
 }
 
-void RenderSVGBlock::computeFloatRectForPaintInvalidation(const RenderLayerModelObject* paintInvalidationContainer, FloatRect& paintInvalidationRect, const PaintInvalidationState* paintInvalidationState) const
+void RenderSVGBlock::mapRectToPaintInvalidationBacking(const RenderLayerModelObject* paintInvalidationContainer, LayoutRect& rect, const PaintInvalidationState* paintInvalidationState) const
 {
-    SVGRenderSupport::computeFloatRectForPaintInvalidation(this, paintInvalidationContainer, paintInvalidationRect, paintInvalidationState);
+    FloatRect paintInvalidationRect = rect;
+    paintInvalidationRect.inflate(style()->outlineWidth());
+    const RenderSVGRoot& svgRoot = SVGRenderSupport::mapRectToSVGRootForPaintInvalidation(this, paintInvalidationRect, rect);
+    svgRoot.mapRectToPaintInvalidationBacking(paintInvalidationContainer, rect, paintInvalidationState);
 }
 
 bool RenderSVGBlock::nodeAtPoint(const HitTestRequest&, HitTestResult&, const HitTestLocation&, const LayoutPoint&, HitTestAction)
@@ -117,8 +126,29 @@ void RenderSVGBlock::invalidateTreeIfNeeded(const PaintInvalidationState& paintI
     if (!shouldCheckForPaintInvalidation(paintInvalidationState))
         return;
 
+    if (paintInvalidationState.cachedOffsetsEnabled()) {
+        m_cachedPaintInvalidationTransform = paintInvalidationState.svgTransform();
+    } else {
+        m_cachedPaintInvalidationTransform.makeIdentity();
+        RenderObject* next = parent();
+        while (!next->isSVGRoot()) {
+            m_cachedPaintInvalidationTransform = next->localToParentTransform() * m_cachedPaintInvalidationTransform;
+            next = next->parent();
+            ASSERT(next);
+        }
+        m_cachedPaintInvalidationTransform = toRenderSVGRoot(next)->localToBorderBoxTransform() * m_cachedPaintInvalidationTransform;
+    }
+
     ForceHorriblySlowRectMapping slowRectMapping(&paintInvalidationState);
     RenderBlockFlow::invalidateTreeIfNeeded(paintInvalidationState);
+}
+
+void RenderSVGBlock::updatePaintInfoRect(IntRect& rect)
+{
+    if (rect != LayoutRect::infiniteIntRect()) {
+        AffineTransform transformToRoot = m_cachedPaintInvalidationTransform * localTransform();
+        rect = enclosingIntRect(transformToRoot.inverse().mapRect(FloatRect(rect)));
+    }
 }
 
 }

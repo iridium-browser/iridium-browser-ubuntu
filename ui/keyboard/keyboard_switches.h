@@ -38,7 +38,7 @@ KEYBOARD_EXPORT extern const char kEnableVirtualKeyboardOverscroll[];
 
 // Enable automatic showing/hiding of the keyboard based on the devices plugged
 // in.
-KEYBOARD_EXPORT extern const char kAutoVirtualKeyboard[];
+KEYBOARD_EXPORT extern const char kEnableAutoVirtualKeyboard[];
 
 }  // namespace switches
 }  // namespace keyboard

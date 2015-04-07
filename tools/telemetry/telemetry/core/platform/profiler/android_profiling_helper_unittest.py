@@ -9,11 +9,11 @@ import shutil
 import tempfile
 import unittest
 
-from telemetry import benchmark
+from telemetry import decorators
 from telemetry.core import util
 from telemetry.core.platform.profiler import android_profiling_helper
-from telemetry.unittest import simple_mock
-from telemetry.unittest import tab_test_case
+from telemetry.unittest_util import simple_mock
+from telemetry.unittest_util import tab_test_case
 
 
 def _GetLibrariesMappedIntoProcesses(device, pids):
@@ -56,7 +56,7 @@ class TestAndroidProfilingHelper(unittest.TestCase):
     finally:
       android_profiling_helper.subprocess = real_subprocess
 
-  @benchmark.Enabled('android')
+  @decorators.Enabled('android')
   def testGetRequiredLibrariesForVTuneProfile(self):
     vtune_db_output = os.path.join(
         util.GetUnittestDataDir(), 'sample_vtune_db_output')
@@ -96,7 +96,9 @@ class TestAndroidProfilingHelperTabTestCase(tab_test_case.TabTestCase):
     browser_backend = self._browser._browser_backend
     self._device = browser_backend._adb.device()
 
-  @benchmark.Enabled('android')
+  # Test fails: crbug.com/437081
+  # @decorators.Enabled('android')
+  @decorators.Disabled
   def testCreateSymFs(self):
     # pylint: disable=W0212
     browser_pid = self._browser._browser_backend.pid
@@ -113,7 +115,7 @@ class TestAndroidProfilingHelperTabTestCase(tab_test_case.TabTestCase):
       # Check that we have kernel symbols.
       assert os.path.exists(kallsyms)
 
-      is_unstripped = re.compile('^/data/app/.*\.so$')
+      is_unstripped = re.compile(r'^/data/app/.*\.so$')
       has_unstripped = False
 
       # Check that all requested libraries are present.
@@ -127,7 +129,9 @@ class TestAndroidProfilingHelperTabTestCase(tab_test_case.TabTestCase):
     finally:
       shutil.rmtree(symfs_dir)
 
-  @benchmark.Enabled('android')
+  # Test fails: crbug.com/437081
+  # @decorators.Enabled('android')
+  @decorators.Disabled
   def testGetToolchainBinaryPath(self):
     with tempfile.NamedTemporaryFile() as libc:
       self._device.PullFile('/system/lib/libc.so', libc.name)

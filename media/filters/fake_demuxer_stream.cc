@@ -13,8 +13,8 @@
 #include "media/base/decoder_buffer.h"
 #include "media/base/test_helpers.h"
 #include "media/base/video_frame.h"
-#include "ui/gfx/rect.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace media {
 
@@ -84,7 +84,7 @@ VideoDecoderConfig FakeDemuxerStream::video_decoder_config() {
 }
 
 // TODO(xhwang): Support audio if needed.
-DemuxerStream::Type FakeDemuxerStream::type() {
+DemuxerStream::Type FakeDemuxerStream::type() const {
   DCHECK(task_runner_->BelongsToCurrentThread());
   return VIDEO;
 }

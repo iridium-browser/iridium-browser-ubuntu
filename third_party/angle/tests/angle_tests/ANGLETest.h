@@ -53,11 +53,14 @@ class OSWindow;
 class ANGLETest : public testing::Test
 {
   protected:
-    ANGLETest(EGLint requestedRenderer, EGLint glesMajorVersion);
+    ANGLETest(EGLint glesMajorVersion, const EGLPlatformParameters &platform);
+    ~ANGLETest();
 
   public:
-    bool resizeWindow(int width, int height);
-    void setWindowVisible(bool isVisible);
+    static bool InitTestWindow();
+    static bool DestroyTestWindow();
+    static bool ResizeWindow(int width, int height);
+    static void SetWindowVisible(bool isVisible);
 
   protected:
     virtual void SetUp();
@@ -65,7 +68,7 @@ class ANGLETest : public testing::Test
 
     virtual void swapBuffers();
 
-    static void drawQuad(GLuint program, const std::string& positionAttribName, GLfloat quadDepth);
+    static void drawQuad(GLuint program, const std::string& positionAttribName, GLfloat quadDepth, GLfloat quadScale = 1.0f);
     static GLuint compileShader(GLenum type, const std::string &source);
     static bool extensionEnabled(const std::string &extName);
 
@@ -85,13 +88,19 @@ class ANGLETest : public testing::Test
     bool isMultisampleEnabled() const;
 
   private:
-    bool initTestWindow();
-    bool destroyTestWindow();
     bool createEGLContext();
     bool destroyEGLContext();
 
     EGLWindow *mEGLWindow;
-    OSWindow *mOSWindow;
+
+    static OSWindow *mOSWindow;
+};
+
+class ANGLETestEnvironment : public testing::Environment
+{
+  public:
+    virtual void SetUp();
+    virtual void TearDown();
 };
 
 #endif  // ANGLE_TESTS_ANGLE_TEST_H_

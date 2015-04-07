@@ -17,7 +17,7 @@
 #include "ipc/ipc_listener.h"
 #include "ipc/ipc_sender.h"
 #include "media/video/video_decode_accelerator.h"
-#include "ui/gfx/size.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace base {
 class MessageLoopProxy;
@@ -59,13 +59,29 @@ class GpuVideoDecodeAccelerator
   // Function to delegate sending to actual sender.
   bool Send(IPC::Message* message) override;
 
-  // Initialize the accelerator with the given profile and send the
-  // |init_done_msg| when done.
+  // Initialize VDAs from the set of VDAs supported for current platform until
+  // one of them succeeds for given |profile|. Send the |init_done_msg| when
+  // done. filter_ is passed to GpuCommandBufferStub channel only if the chosen
+  // VDA can decode on IO thread.
   void Initialize(const media::VideoCodecProfile profile,
                   IPC::Message* init_done_msg);
 
  private:
+  typedef scoped_ptr<media::VideoDecodeAccelerator>(
+      GpuVideoDecodeAccelerator::*CreateVDAFp)();
+
   class MessageFilter;
+
+  // Return a set of VDA Create function pointers applicable to the current
+  // platform.
+  std::vector<CreateVDAFp> CreateVDAFps();
+  scoped_ptr<media::VideoDecodeAccelerator> CreateDXVAVDA();
+  scoped_ptr<media::VideoDecodeAccelerator> CreateV4L2VDA();
+  scoped_ptr<media::VideoDecodeAccelerator> CreateV4L2SliceVDA();
+  scoped_ptr<media::VideoDecodeAccelerator> CreateVaapiVDA();
+  scoped_ptr<media::VideoDecodeAccelerator> CreateVTVDA();
+  scoped_ptr<media::VideoDecodeAccelerator> CreateOzoneVDA();
+  scoped_ptr<media::VideoDecodeAccelerator> CreateAndroidVDA();
 
   // We only allow self-delete, from OnWillDestroyStub(), after cleanup there.
   ~GpuVideoDecodeAccelerator() override;

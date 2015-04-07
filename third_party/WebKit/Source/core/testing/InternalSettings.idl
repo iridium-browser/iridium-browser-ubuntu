@@ -49,10 +49,7 @@
     [RaisesException] void setPrimaryPointerType(DOMString pointer);
     [RaisesException] void setAvailableHoverTypes(DOMString types);
     [RaisesException] void setPrimaryHoverType(DOMString type);
-
-    // FIXME: This is a temporary flag and should be removed once squashing is
-    // ready (crbug.com/261605).
-    [RaisesException] void setLayerSquashingEnabled(boolean enabled);
+    [RaisesException] void setImageAnimationPolicy(DOMString policy);
 
     // FIXME: The following are RuntimeEnabledFeatures and likely
     // cannot be changed after process start.  These setters should
@@ -61,7 +58,6 @@
     void setLangAttributeAwareFormControlUIEnabled(boolean enabled);
     void setOverlayScrollbarsEnabled(boolean enabled);
     void setExperimentalContentSecurityPolicyFeaturesEnabled(boolean enabled);
-    void setLaxMixedContentCheckingEnabled(boolean enabled);
     void setPseudoClassesInMatchingCriteriaInAuthorShadowTreesEnabled(boolean enabled);
     void setImageColorProfilesEnabled(boolean enabled);
 };

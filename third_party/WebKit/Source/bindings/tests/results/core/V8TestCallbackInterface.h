@@ -15,13 +15,16 @@
 namespace blink {
 
 class V8TestCallbackInterface final : public TestCallbackInterface, public ActiveDOMCallback {
+    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(V8TestCallbackInterface);
 public:
-    static V8TestCallbackInterface* create(v8::Handle<v8::Function> callback, ScriptState* scriptState)
+    static V8TestCallbackInterface* create(v8::Local<v8::Function> callback, ScriptState* scriptState)
     {
         return new V8TestCallbackInterface(callback, scriptState);
     }
 
     virtual ~V8TestCallbackInterface();
+
+    virtual void trace(Visitor*) override;
 
     virtual void voidMethod() override;
     virtual bool booleanMethod() override;
@@ -35,7 +38,7 @@ public:
     virtual void voidMethodWillBeGarbageCollectedSequenceArg(const WillBeHeapVector<RefPtrWillBeMember<TestInterfaceWillBeGarbageCollected> >& sequenceArg) override;
     virtual void voidMethodWillBeGarbageCollectedArrayArg(const WillBeHeapVector<RefPtrWillBeMember<TestInterfaceWillBeGarbageCollected> >& arrayArg) override;
 private:
-    V8TestCallbackInterface(v8::Handle<v8::Function>, ScriptState*);
+    V8TestCallbackInterface(v8::Local<v8::Function>, ScriptState*);
 
     ScopedPersistent<v8::Function> m_callback;
     RefPtr<ScriptState> m_scriptState;
