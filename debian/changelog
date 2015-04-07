@@ -1,3 +1,15 @@
+iridium-browser (41.0.2272.118-0iridium41.1+1) precise; urgency=low
+
+  * Imported Upstream version 41.0.2272.118
+  * Updated patches from "41.0.2272.76-0ubuntu0.14.04.1.1076".
+  * Updated iridium-browser patch to 41.1
+  * Removed unnecessary build dependency.
+  * Ignore quilt temporary folder.
+  * Fix compiler error due to empty list of EV certificates.
+  * Updated rules to match "41.0.2272.76-0ubuntu0.14.04.1.1076".
+
+ -- Joachim Bauch <bauch@struktur.de>  Tue, 07 Apr 2015 15:38:01 +0200
+
 iridium-browser (40.0.2214.111-0iridium40.2+2) precise; urgency=low
 
   * Backport HiDPI support from Chromium 41.0.2272.76-0ubuntu0.14.04.1.1076.
