@@ -1,29 +1,25 @@
 --- a/chrome/browser/ui/views/frame/browser_frame.cc
 +++ b/chrome/browser/ui/views/frame/browser_frame.cc
-@@ -35,6 +35,7 @@
+@@ -28,6 +28,7 @@
  #include "ui/gfx/screen.h"
  #include "ui/views/controls/menu/menu_runner.h"
  #include "ui/views/widget/native_widget.h"
 +#include "ui/views/widget/native_widget_aura.h"
  
- #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
- #include "chrome/browser/shell_integration_linux.h"
-@@ -183,6 +184,12 @@ views::View* BrowserFrame::GetFrameView(
+ #if defined(OS_CHROMEOS)
+ #include "ash/session/session_state_delegate.h"
+@@ -133,6 +134,8 @@ views::View* BrowserFrame::GetFrameView(
    return browser_frame_view_;
  }
  
-+void BrowserFrame::SendSessionIdToWindow() {
-+  const Browser& browser = *browser_view_->browser();
-+  views::NativeWidget* a = native_browser_frame_->AsNativeWidget();
-+  a->SetSessionID(browser.session_id().id());
-+}
++void BrowserFrame::SendSessionIdToWindow() { }
 +
  bool BrowserFrame::UseCustomFrame() const {
    return use_custom_frame_pref_.GetValue() &&
        browser_view_->IsBrowserTypeNormal();
 --- a/chrome/browser/ui/views/frame/browser_frame.h
 +++ b/chrome/browser/ui/views/frame/browser_frame.h
-@@ -86,6 +86,8 @@ class BrowserFrame
+@@ -95,6 +95,8 @@ class BrowserFrame
    void GetWindowPlacement(gfx::Rect* bounds,
                            ui::WindowShowState* show_state) const;
  
@@ -34,7 +30,7 @@
    views::NonClientFrameView* CreateNonClientFrameView() override;
 --- a/chrome/browser/ui/views/frame/browser_view.cc
 +++ b/chrome/browser/ui/views/frame/browser_view.cc
-@@ -630,6 +630,7 @@ void BrowserView::Show() {
+@@ -692,6 +692,7 @@ void BrowserView::Show() {
    force_location_bar_focus_ = false;
  
    browser()->OnWindowDidShow();
@@ -45,14 +41,14 @@
 --- a/ui/aura/client/aura_constants.cc
 +++ b/ui/aura/client/aura_constants.cc
 @@ -8,6 +8,7 @@
- #include "ui/gfx/rect.h"
+ #include "ui/gfx/geometry/rect.h"
  
  DECLARE_EXPORTED_WINDOW_PROPERTY_TYPE(AURA_EXPORT, bool)
 +DECLARE_EXPORTED_WINDOW_PROPERTY_TYPE(AURA_EXPORT, uint32)
  DECLARE_EXPORTED_WINDOW_PROPERTY_TYPE(AURA_EXPORT, ui::ModalType)
  DECLARE_EXPORTED_WINDOW_PROPERTY_TYPE(AURA_EXPORT, gfx::Rect*)
  DECLARE_EXPORTED_WINDOW_PROPERTY_TYPE(AURA_EXPORT, ui::InputMethod*)
-@@ -35,6 +36,7 @@ DEFINE_WINDOW_PROPERTY_KEY(
+@@ -37,6 +38,7 @@ DEFINE_WINDOW_PROPERTY_KEY(
  DEFINE_WINDOW_PROPERTY_KEY(ui::InputMethod*, kRootWindowInputMethodKey, NULL);
  DEFINE_WINDOW_PROPERTY_KEY(
      ui::WindowShowState, kShowStateKey, ui::SHOW_STATE_DEFAULT);
@@ -74,7 +70,7 @@
  }  // namespace client
 --- a/ui/aura/window_tree_host_x11.cc
 +++ b/ui/aura/window_tree_host_x11.cc
-@@ -485,6 +485,26 @@ gfx::AcceleratedWidget WindowTreeHostX11
+@@ -478,6 +478,26 @@ gfx::AcceleratedWidget WindowTreeHostX11
    return xwindow_;
  }
  
@@ -159,7 +155,7 @@
  #include "base/basictypes.h"
  #include "base/command_line.h"
  #include "base/debug/trace_event.h"
-@@ -102,6 +104,7 @@ const char* kAtomsToCache[] = {
+@@ -104,6 +106,7 @@ const char* kAtomsToCache[] = {
    "_NET_WM_WINDOW_TYPE_NORMAL",
    "_NET_WM_WINDOW_TYPE_NOTIFICATION",
    "_NET_WM_WINDOW_TYPE_TOOLTIP",
@@ -167,7 +163,7 @@
    "XdndActionAsk",
    "XdndActionCopy"
    "XdndActionLink",
-@@ -1337,6 +1340,22 @@ void DesktopWindowTreeHostX11::UpdateMin
+@@ -1339,6 +1342,22 @@ void DesktopWindowTreeHostX11::UpdateMin
    XSetWMNormalHints(xdisplay_, xwindow_, &hints);
  }
  

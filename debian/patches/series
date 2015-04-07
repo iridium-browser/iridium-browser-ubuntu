@@ -1,4 +1,3 @@
-gyp-make-generator-reenabled
 title-bar-default-system.patch-v35
 #third-party-cookies-off-by-default.patch
 format-flag.patch
@@ -27,8 +26,10 @@ lp-translations-paths
 #mir-support
 #mir-ozone-module
 #wayland-ozone
-dri3-within-sandbox
+#dri3-within-sandbox
+#coordinate-space-types
 coordinate-space-map
+gpu-hangs
 ### start: iridium-browser specific changes
 iridium-browser.diff
 include-glib-extern-c.diff

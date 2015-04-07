@@ -1,6 +1,6 @@
 --- a/chrome/app/generated_resources.grd
 +++ b/chrome/app/generated_resources.grd
-@@ -5165,6 +5165,35 @@ Keep your key file in a safe place. You
+@@ -5177,6 +5177,35 @@ Keep your key file in a safe place. You
          Hide Details
        </message>
  
@@ -36,7 +36,7 @@
        <!-- Strings for the extensions permission dialog experiment -->
        <!-- TODO(meacer): Remove these once the experiments are completed. -->
        <message name="IDS_EXTENSION_PROMPT_EXPERIMENT_EXPLANATION1">
-@@ -12065,6 +12094,9 @@ Some features may be unavailable.  Pleas
+@@ -12193,6 +12222,9 @@ Some features may be unavailable.  Pleas
        <message name="IDS_OPTIONS_ADVANCED_SECTION_TITLE_CONTENT">
          Web content
        </message>
@@ -48,7 +48,7 @@
        </message>
 --- a/chrome/browser/resources/options/browser_options.html
 +++ b/chrome/browser/resources/options/browser_options.html
-@@ -502,6 +502,20 @@
+@@ -528,6 +528,20 @@
      </div>
    </section>
  </if>  <!-- chromeos -->
@@ -71,7 +71,7 @@
      <div class="checkbox controlled-setting-with-label">
 --- a/chrome/browser/resources/options/browser_options.js
 +++ b/chrome/browser/resources/options/browser_options.js
-@@ -577,6 +577,23 @@ cr.define('options', function() {
+@@ -589,6 +589,23 @@ cr.define('options', function() {
              [String(event.target.options[event.target.selectedIndex].value)]);
        };
  
@@ -95,7 +95,7 @@
        // Languages section.
        var showLanguageOptions = function(event) {
          PageManager.showPageByName('languages');
-@@ -1623,6 +1640,24 @@ cr.define('options', function() {
+@@ -1648,6 +1665,24 @@ cr.define('options', function() {
      },
  
      /**
@@ -120,7 +120,7 @@
       * Set the checked state of the metrics reporting checkbox.
       * @private
       */
-@@ -2078,6 +2113,7 @@ cr.define('options', function() {
+@@ -2103,6 +2138,7 @@ cr.define('options', function() {
    cr.makePublic(BrowserOptions, [
      'addBluetoothDevice',
      'deleteCurrentProfile',
@@ -128,14 +128,14 @@
      'enableCertificateButton',
      'enableDisplayButton',
      'enableFactoryResetSection',
-@@ -2099,6 +2135,7 @@ cr.define('options', function() {
-     'setNativeThemeButtonEnabled',
-     'setNetworkPredictionValue',
-     'setHighContrastCheckboxState',
+@@ -2119,6 +2155,7 @@ cr.define('options', function() {
+     'setBatteryStatusText',
+     'setBluetoothState',
+     'setCanSetTime',
 +    'setDesktopIntegrationIsAllowed',
-     'setMetricsReportingCheckboxState',
-     'setMetricsReportingSettingVisibility',
-     'setProfilesInfo',
+     'setFontSize',
+     'setHotwordRetrainLinkVisible',
+     'setNativeThemeButtonEnabled',
 --- /dev/null
 +++ b/chrome/browser/resources/options/desktop_integration_add_website_overlay.html
 @@ -0,0 +1,15 @@
@@ -525,14 +525,14 @@
 --- a/chrome/browser/resources/options/options.html
 +++ b/chrome/browser/resources/options/options.html
 @@ -24,6 +24,7 @@
+ <link rel="stylesheet" href="clear_browser_data_overlay.css">
  <link rel="stylesheet" href="content_settings.css">
- <link rel="stylesheet" href="controlled_setting.css">
  <link rel="stylesheet" href="cookies_view.css">
 +<link rel="stylesheet" href="desktop_integration_overlay.css">
  <link rel="stylesheet" href="do_not_track_confirm_overlay.css">
  <link rel="stylesheet" href="easy_unlock_turn_off_overlay.css">
  <link rel="stylesheet" href="font_settings.css">
-@@ -119,6 +120,7 @@
+@@ -120,6 +121,7 @@
    <include src="home_page_overlay.html">
    <include src="hotword_confirm_overlay.html">
    <include src="import_data_overlay.html">
@@ -540,7 +540,7 @@
    <include src="language_options.html">
    <include src="manage_profile_overlay.html">
    <include src="password_manager.html">
-@@ -151,6 +153,7 @@
+@@ -152,6 +154,7 @@
    <include src="autofill_edit_creditcard_overlay.html">
    <include src="content_settings_exceptions_area.html">
    <include src="cookies_view.html">
@@ -590,7 +590,7 @@
  <include src="font_settings.js">
 --- a/chrome/browser/ui/webui/options/browser_options_handler.cc
 +++ b/chrome/browser/ui/webui/options/browser_options_handler.cc
-@@ -218,6 +218,8 @@ void BrowserOptionsHandler::GetLocalized
+@@ -224,6 +224,8 @@ void BrowserOptionsHandler::GetLocalized
        IDS_OPTIONS_ADVANCED_SECTION_TITLE_CERTIFICATES },
      { "advancedSectionTitleContent",
        IDS_OPTIONS_ADVANCED_SECTION_TITLE_CONTENT },
@@ -599,7 +599,7 @@
      { "advancedSectionTitleLanguages",
        IDS_OPTIONS_ADVANCED_SECTION_TITLE_LANGUAGES },
      { "advancedSectionTitleNetwork",
-@@ -235,6 +237,10 @@ void BrowserOptionsHandler::GetLocalized
+@@ -242,6 +244,10 @@ void BrowserOptionsHandler::GetLocalized
      { "defaultFontSizeLabel", IDS_OPTIONS_DEFAULT_FONT_SIZE_LABEL },
      { "defaultSearchManageEngines", IDS_OPTIONS_DEFAULTSEARCH_MANAGE_ENGINES },
      { "defaultZoomFactorLabel", IDS_OPTIONS_DEFAULT_ZOOM_LEVEL_LABEL },
@@ -610,7 +610,7 @@
  #if defined(OS_CHROMEOS)
      { "disableGData", IDS_OPTIONS_DISABLE_GDATA },
  #endif
-@@ -316,6 +322,8 @@ void BrowserOptionsHandler::GetLocalized
+@@ -325,6 +331,8 @@ void BrowserOptionsHandler::GetLocalized
      { "profilesManage", IDS_PROFILES_MANAGE_BUTTON_LABEL },
      { "profilesSupervisedDashboardTip",
        IDS_PROFILES_SUPERVISED_USER_DASHBOARD_TIP },
@@ -998,7 +998,7 @@
    AddOptionsPageUIHandler(localized_strings, new GeolocationOptionsHandler());
 --- a/chrome/chrome_browser_ui.gypi
 +++ b/chrome/chrome_browser_ui.gypi
-@@ -1694,6 +1694,8 @@
+@@ -1729,6 +1729,8 @@
        'browser/ui/webui/options/core_options_handler.h',
        'browser/ui/webui/options/create_profile_handler.cc',
        'browser/ui/webui/options/create_profile_handler.h',
@@ -1007,7 +1007,7 @@
        'browser/ui/webui/options/easy_unlock_handler.cc',
        'browser/ui/webui/options/easy_unlock_handler.h',
        'browser/ui/webui/options/font_settings_handler.cc',
-@@ -2809,6 +2811,7 @@
+@@ -2892,6 +2894,7 @@
            ],
          }],
          ['use_aura==1 and chromeos==0 and use_ozone==0 and OS=="linux"', {

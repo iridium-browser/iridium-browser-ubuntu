@@ -87,7 +87,7 @@
  }
  
  PluginFinder::~PluginFinder() {
-@@ -238,16 +261,21 @@ void PluginFinder::ReinitializePlugins(
+@@ -238,15 +261,19 @@ void PluginFinder::ReinitializePlugins(
    if (version <= version_)
      return;
  
@@ -98,7 +98,6 @@
    version_ = version;
  
    STLDeleteValues(&identifier_plugin_);
-   identifier_plugin_.clear();
  
 -  for (base::DictionaryValue::Iterator plugin_it(*plugin_list);
 +  for (base::DictionaryValue::Iterator plugin_it(*final_plugin_list);
@@ -106,8 +105,7 @@
      const base::DictionaryValue* plugin = NULL;
      const std::string& identifier = plugin_it.key();
 -    if (plugin_list->GetDictionaryWithoutPathExpansion(identifier, &plugin)) {
-+    if (final_plugin_list->GetDictionaryWithoutPathExpansion(
-+            identifier, &plugin)) {
++    if (final_plugin_list->GetDictionaryWithoutPathExpansion(identifier, &plugin)) {
        DCHECK(!identifier_plugin_[identifier]);
        identifier_plugin_[identifier] = CreatePluginMetadata(identifier, plugin);
  

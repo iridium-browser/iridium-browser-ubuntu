@@ -1,8 +1,6 @@
-Index: iridium-browser/chrome/browser/ui/libgtk2ui/gtk2_ui.cc
-===================================================================
---- iridium-browser.orig/chrome/browser/ui/libgtk2ui/gtk2_ui.cc	2015-02-02 13:07:54.000000000 +0100
-+++ iridium-browser/chrome/browser/ui/libgtk2ui/gtk2_ui.cc	2015-03-30 14:32:14.000000000 +0200
-@@ -678,6 +678,8 @@
+--- a/chrome/browser/ui/libgtk2ui/gtk2_ui.cc
++++ b/chrome/browser/ui/libgtk2ui/gtk2_ui.cc
+@@ -678,6 +678,8 @@ Gtk2UI::GetDefaultPangoFontDescription()
  }
  
  double Gtk2UI::GetFontDPI() const {
@@ -11,11 +9,9 @@ Index: iridium-browser/chrome/browser/ui/libgtk2ui/gtk2_ui.cc
    GtkSettings* gtk_settings = gtk_settings_get_default();
    CHECK(gtk_settings);
    gint dpi = -1;
-Index: iridium-browser/ui/gfx/display.cc
-===================================================================
---- iridium-browser.orig/ui/gfx/display.cc	2015-02-02 13:09:41.000000000 +0100
-+++ iridium-browser/ui/gfx/display.cc	2015-03-30 14:32:14.000000000 +0200
-@@ -139,7 +139,7 @@
+--- a/ui/gfx/display.cc
++++ b/ui/gfx/display.cc
+@@ -140,7 +140,7 @@ void Display::SetScaleAndBounds(
  #endif
      device_scale_factor_ = device_scale_factor;
    }
@@ -24,11 +20,9 @@ Index: iridium-browser/ui/gfx/display.cc
    bounds_ = gfx::Rect(
        gfx::ToFlooredPoint(gfx::ScalePoint(bounds_in_pixel.origin(),
                                            1.0f / device_scale_factor_)),
-Index: iridium-browser/ui/views/widget/desktop_aura/desktop_screen_x11.cc
-===================================================================
---- iridium-browser.orig/ui/views/widget/desktop_aura/desktop_screen_x11.cc	2015-03-30 14:30:01.000000000 +0200
-+++ iridium-browser/ui/views/widget/desktop_aura/desktop_screen_x11.cc	2015-03-30 14:32:14.000000000 +0200
-@@ -135,7 +135,7 @@
+--- a/ui/views/widget/desktop_aura/desktop_screen_x11.cc
++++ b/ui/views/widget/desktop_aura/desktop_screen_x11.cc
+@@ -135,7 +135,7 @@ gfx::Point DesktopScreenX11::GetCursorSc
                  &win_y,
                  &mask);
  
@@ -37,7 +31,7 @@ Index: iridium-browser/ui/views/widget/desktop_aura/desktop_screen_x11.cc
  }
  
  gfx::NativeWindow DesktopScreenX11::GetWindowUnderCursor() {
-@@ -182,7 +182,8 @@
+@@ -182,7 +182,8 @@ gfx::Display DesktopScreenX11::GetDispla
  }
  
  gfx::Display DesktopScreenX11::GetDisplayNearestPoint(
@@ -47,19 +41,17 @@ Index: iridium-browser/ui/views/widget/desktop_aura/desktop_screen_x11.cc
    for (std::vector<gfx::Display>::const_iterator it = displays_.begin();
         it != displays_.end(); ++it) {
      if (it->bounds().Contains(point))
-Index: iridium-browser/ui/views/widget/desktop_aura/desktop_window_tree_host_x11.cc
-===================================================================
---- iridium-browser.orig/ui/views/widget/desktop_aura/desktop_window_tree_host_x11.cc	2015-03-30 14:29:56.000000000 +0200
-+++ iridium-browser/ui/views/widget/desktop_aura/desktop_window_tree_host_x11.cc	2015-03-30 14:33:09.000000000 +0200
-@@ -36,6 +36,7 @@
+--- a/ui/views/widget/desktop_aura/desktop_window_tree_host_x11.cc
++++ b/ui/views/widget/desktop_aura/desktop_window_tree_host_x11.cc
+@@ -34,6 +34,7 @@
+ #include "ui/events/platform/x11/x11_event_source.h"
+ #include "ui/gfx/display.h"
+ #include "ui/gfx/geometry/insets.h"
++#include "ui/gfx/geometry/size_conversions.h"
  #include "ui/gfx/image/image_skia.h"
  #include "ui/gfx/image/image_skia_rep.h"
- #include "ui/gfx/insets.h"
-+#include "ui/gfx/size_conversions.h"
  #include "ui/gfx/path.h"
- #include "ui/gfx/path_x11.h"
- #include "ui/gfx/screen.h"
-@@ -129,6 +130,46 @@
+@@ -131,6 +132,46 @@ const char kX11WindowRoleBubble[] = "bub
  
  }  // namespace
  
@@ -106,7 +98,7 @@ Index: iridium-browser/ui/views/widget/desktop_aura/desktop_window_tree_host_x11
  ////////////////////////////////////////////////////////////////////////////////
  // DesktopWindowTreeHostX11, public:
  
-@@ -383,7 +424,7 @@
+@@ -384,7 +425,7 @@ void DesktopWindowTreeHostX11::ShowMaxim
      const gfx::Rect& restored_bounds) {
    ShowWindowWithState(ui::SHOW_STATE_MAXIMIZED);
    // Enforce |restored_bounds_| since calling Maximize() could have reset it.
@@ -115,7 +107,7 @@ Index: iridium-browser/ui/views/widget/desktop_aura/desktop_window_tree_host_x11
  }
  
  bool DesktopWindowTreeHostX11::IsVisible() const {
-@@ -391,7 +432,7 @@
+@@ -392,7 +433,7 @@ bool DesktopWindowTreeHostX11::IsVisible
  }
  
  void DesktopWindowTreeHostX11::SetSize(const gfx::Size& requested_size) {
@@ -124,7 +116,7 @@ Index: iridium-browser/ui/views/widget/desktop_aura/desktop_window_tree_host_x11
    bool size_changed = bounds_.size() != size;
    XResizeWindow(xdisplay_, xwindow_, size.width(), size.height());
    bounds_.set_size(size);
-@@ -405,7 +446,8 @@
+@@ -406,7 +447,8 @@ void DesktopWindowTreeHostX11::StackAtTo
    XRaiseWindow(xdisplay_, xwindow_);
  }
  
@@ -134,7 +126,7 @@ Index: iridium-browser/ui/views/widget/desktop_aura/desktop_window_tree_host_x11
    gfx::Rect parent_bounds = GetWorkAreaBoundsInScreen();
  
    // If |window_|'s transient parent bounds are big enough to contain |size|,
-@@ -450,7 +492,7 @@
+@@ -451,7 +493,7 @@ void DesktopWindowTreeHostX11::GetWindow
  }
  
  gfx::Rect DesktopWindowTreeHostX11::GetWindowBoundsInScreen() const {
@@ -143,7 +135,7 @@ Index: iridium-browser/ui/views/widget/desktop_aura/desktop_window_tree_host_x11
  }
  
  gfx::Rect DesktopWindowTreeHostX11::GetClientAreaBoundsInScreen() const {
-@@ -462,7 +504,7 @@
+@@ -463,7 +505,7 @@ gfx::Rect DesktopWindowTreeHostX11::GetC
    // Attempts to calculate the rect by asking the NonClientFrameView what it
    // thought its GetBoundsForClientView() were broke combobox drop down
    // placement.
@@ -152,7 +144,7 @@ Index: iridium-browser/ui/views/widget/desktop_aura/desktop_window_tree_host_x11
  }
  
  gfx::Rect DesktopWindowTreeHostX11::GetRestoredBounds() const {
-@@ -471,7 +513,7 @@
+@@ -472,7 +514,7 @@ gfx::Rect DesktopWindowTreeHostX11::GetR
    // or restoring bounds, we can record the current bounds before we request
    // maximization, and clear it when we detect a state change.
    if (!restored_bounds_.IsEmpty())
@@ -161,7 +153,7 @@ Index: iridium-browser/ui/views/widget/desktop_aura/desktop_window_tree_host_x11
  
    return GetWindowBoundsInScreen();
  }
-@@ -480,7 +522,7 @@
+@@ -481,7 +523,7 @@ gfx::Rect DesktopWindowTreeHostX11::GetW
    std::vector<int> value;
    if (ui::GetIntArrayProperty(x_root_window_, "_NET_WORKAREA", &value) &&
        value.size() >= 4) {
@@ -170,7 +162,7 @@ Index: iridium-browser/ui/views/widget/desktop_aura/desktop_window_tree_host_x11
    }
  
    // Fetch the geometry of the root window.
-@@ -491,10 +533,10 @@
+@@ -492,10 +534,10 @@ gfx::Rect DesktopWindowTreeHostX11::GetW
    if (!XGetGeometry(xdisplay_, x_root_window_, &root, &x, &y,
                      &width, &height, &border_width, &depth)) {
      NOTIMPLEMENTED();
@@ -183,7 +175,7 @@ Index: iridium-browser/ui/views/widget/desktop_aura/desktop_window_tree_host_x11
  }
  
  void DesktopWindowTreeHostX11::SetShape(gfx::NativeRegion native_region) {
-@@ -1059,8 +1101,8 @@
+@@ -1060,8 +1102,8 @@ void DesktopWindowTreeHostX11::InitX11Wi
      }
    }
  
@@ -194,7 +186,7 @@ Index: iridium-browser/ui/views/widget/desktop_aura/desktop_window_tree_host_x11
    xwindow_ = XCreateWindow(
        xdisplay_, x_root_window_,
        bounds_.x(), bounds_.y(),
-@@ -1447,7 +1489,7 @@
+@@ -1449,7 +1491,7 @@ void DesktopWindowTreeHostX11::DispatchM
    } else {
      // Another DesktopWindowTreeHostX11 has installed itself as
      // capture. Translate the event's location and dispatch to the other.
@@ -203,7 +195,7 @@ Index: iridium-browser/ui/views/widget/desktop_aura/desktop_window_tree_host_x11
      g_current_capture->SendEventToProcessor(event);
    }
  }
-@@ -1455,13 +1497,29 @@
+@@ -1457,13 +1499,29 @@ void DesktopWindowTreeHostX11::DispatchM
  void DesktopWindowTreeHostX11::DispatchTouchEvent(ui::TouchEvent* event) {
    if (g_current_capture && g_current_capture != this &&
        event->type() == ui::ET_TOUCH_PRESSED) {
@@ -234,11 +226,9 @@ Index: iridium-browser/ui/views/widget/desktop_aura/desktop_window_tree_host_x11
  void DesktopWindowTreeHostX11::ResetWindowRegion() {
    // If a custom window shape was supplied then apply it.
    if (custom_window_shape_) {
-Index: iridium-browser/ui/views/widget/desktop_aura/desktop_window_tree_host_x11.h
-===================================================================
---- iridium-browser.orig/ui/views/widget/desktop_aura/desktop_window_tree_host_x11.h	2015-03-30 14:29:56.000000000 +0200
-+++ iridium-browser/ui/views/widget/desktop_aura/desktop_window_tree_host_x11.h	2015-03-30 14:32:14.000000000 +0200
-@@ -166,6 +166,7 @@
+--- a/ui/views/widget/desktop_aura/desktop_window_tree_host_x11.h
++++ b/ui/views/widget/desktop_aura/desktop_window_tree_host_x11.h
+@@ -166,6 +166,7 @@ class VIEWS_EXPORT DesktopWindowTreeHost
    ui::EventProcessor* GetEventProcessor() override;
  
   private:
@@ -246,7 +236,7 @@ Index: iridium-browser/ui/views/widget/desktop_aura/desktop_window_tree_host_x11
    // Initializes our X11 surface to draw on. This method performs all
    // initialization related to talking to the X11 server.
    void InitX11Window(const Widget::InitParams& params);
-@@ -211,6 +212,11 @@
+@@ -211,6 +212,11 @@ class VIEWS_EXPORT DesktopWindowTreeHost
    // and dispatched to that host instead.
    void DispatchTouchEvent(ui::TouchEvent* event);
  
@@ -258,7 +248,7 @@ Index: iridium-browser/ui/views/widget/desktop_aura/desktop_window_tree_host_x11
    // Resets the window region for the current widget bounds if necessary.
    void ResetWindowRegion();
  
-@@ -342,6 +348,13 @@
+@@ -342,6 +348,13 @@ class VIEWS_EXPORT DesktopWindowTreeHost
    DISALLOW_COPY_AND_ASSIGN(DesktopWindowTreeHostX11);
  };
  
@@ -272,11 +262,9 @@ Index: iridium-browser/ui/views/widget/desktop_aura/desktop_window_tree_host_x11
  }  // namespace views
  
  #endif  // UI_VIEWS_WIDGET_DESKTOP_AURA_DESKTOP_WINDOW_TREE_HOST_X11_H_
-Index: iridium-browser/ui/views/widget/desktop_aura/desktop_window_tree_host_x11_unittest.cc
-===================================================================
---- iridium-browser.orig/ui/views/widget/desktop_aura/desktop_window_tree_host_x11_unittest.cc	2015-02-02 13:09:43.000000000 +0100
-+++ iridium-browser/ui/views/widget/desktop_aura/desktop_window_tree_host_x11_unittest.cc	2015-03-30 14:32:14.000000000 +0200
-@@ -32,6 +32,8 @@
+--- a/ui/views/widget/desktop_aura/desktop_window_tree_host_x11_unittest.cc
++++ b/ui/views/widget/desktop_aura/desktop_window_tree_host_x11_unittest.cc
+@@ -32,6 +32,8 @@ namespace views {
  
  namespace {
  
@@ -285,7 +273,7 @@ Index: iridium-browser/ui/views/widget/desktop_aura/desktop_window_tree_host_x11
  // Blocks till the window state hint, |hint|, is set or unset.
  class WMStateWaiter : public X11PropertyChangeWaiter {
   public:
-@@ -454,4 +456,137 @@
+@@ -454,4 +456,137 @@ TEST_F(DesktopWindowTreeHostX11Test, Tog
    EXPECT_TRUE(widget.GetNativeWindow()->IsVisible());
  }
  
@@ -423,11 +411,9 @@ Index: iridium-browser/ui/views/widget/desktop_aura/desktop_window_tree_host_x11
 +}
 +
  }  // namespace views
-Index: iridium-browser/ui/views/widget/desktop_aura/x11_topmost_window_finder.cc
-===================================================================
---- iridium-browser.orig/ui/views/widget/desktop_aura/x11_topmost_window_finder.cc	2014-11-20 14:39:41.000000000 +0100
-+++ iridium-browser/ui/views/widget/desktop_aura/x11_topmost_window_finder.cc	2015-03-30 14:32:14.000000000 +0200
-@@ -21,7 +21,7 @@
+--- a/ui/views/widget/desktop_aura/x11_topmost_window_finder.cc
++++ b/ui/views/widget/desktop_aura/x11_topmost_window_finder.cc
+@@ -21,7 +21,7 @@ X11TopmostWindowFinder::~X11TopmostWindo
  aura::Window* X11TopmostWindowFinder::FindLocalProcessWindowAt(
      const gfx::Point& screen_loc,
      const std::set<aura::Window*>& ignore) {
@@ -436,7 +422,7 @@ Index: iridium-browser/ui/views/widget/desktop_aura/x11_topmost_window_finder.cc
    ignore_ = ignore;
  
    std::vector<aura::Window*> local_process_windows =
-@@ -41,7 +41,7 @@
+@@ -41,7 +41,7 @@ aura::Window* X11TopmostWindowFinder::Fi
  }
  
  XID X11TopmostWindowFinder::FindWindowAt(const gfx::Point& screen_loc) {

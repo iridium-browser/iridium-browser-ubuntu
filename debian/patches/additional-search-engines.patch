@@ -17,7 +17,7 @@
  
      // Increment this if you change the data in ways that mean users with
      // existing data should get a new version.
-@@ -524,6 +525,16 @@
+@@ -105,6 +106,16 @@
        "id": 68
      },
  
@@ -59,8 +59,8 @@
  
  // Germany
  const PrepopulatedEngine* engines_DE[] =
--    { &google, &bing_de_DE, &yahoo_de };
-+    { &google, &bing_de_DE, &yahoo_de, &duckduckgo, };
+-    { &google, &bing, &yahoo_de };
++    { &google, &bing, &yahoo_de, &duckduckgo, };
  
  // Denmark
  const PrepopulatedEngine* engines_DK[] =
@@ -68,13 +68,13 @@
  
  // France
  const PrepopulatedEngine* engines_FR[] =
--    { &google, &bing_fr_FR, &yahoo_fr, };
-+    { &google, &bing_fr_FR, &yahoo_fr, &duckduckgo, };
+-    { &google, &bing, &yahoo_fr, };
++    { &google, &bing, &yahoo_fr, &duckduckgo, };
  
  // United Kingdom
  const PrepopulatedEngine* engines_GB[] =
--    { &google, &bing_en_GB, &yahoo_uk, &ask_uk, };
-+    { &google, &bing_en_GB, &yahoo_uk, &ask_uk, &duckduckgo, };
+-    { &google, &bing, &yahoo_uk, &ask_uk, };
++    { &google, &bing, &yahoo_uk, &ask_uk, &duckduckgo, };
  
  // Greece
  const PrepopulatedEngine* engines_GR[] =
@@ -82,16 +82,16 @@
  
  // United States
  const PrepopulatedEngine* engines_US[] =
--    { &google, &bing_en_US, &yahoo, &aol, &ask, };
-+    { &google, &bing_en_US, &yahoo, &aol, &ask, &duckduckgo, };
+-    { &google, &bing, &yahoo, &aol, &ask, };
++    { &google, &bing, &yahoo, &aol, &ask, &duckduckgo, };
  
  // Uruguay
  const PrepopulatedEngine* engines_UY[] =
-@@ -491,6 +491,7 @@ const PrepopulatedEngine* kAllEngines[]
-   &bing_fr_FR,   &bing_it_IT,   &bing_ja_JP,   &bing_lv_LV,   &bing_nb_NO,
-   &bing_nl_BE,   &bing_pl_PL,   &bing_pt_BR,   &bing_pt_PT,   &bing_ru_RU,
-   &bing_sv_SE,   &bing_tr_TR,   &bing_zh_HK,   &bing_zh_TW,   &daum,
+@@ -481,6 +481,7 @@ const PrepopulatedEngine* engines_ZW[] =
+ 
+ // A list of all the engines that we know about.
+ const PrepopulatedEngine* kAllEngines[] = {
 +  &duckduckgo,
-   &google,       &kvasir,       &mail_ru,      &najdi,        &naver,
-   &onet,         &seznam,       &sogou,        &vinden,       &virgilio,
-   &yahoo,        &yahoo_ar,     &yahoo_at,     &yahoo_au,     &yahoo_br,
+   // Prepopulated engines:
+   &aol,          &ask,          &ask_br,       &ask_uk,       &baidu,
+   &bing,         &daum,         &google,       &kvasir,       &mail_ru,
